@@ -1,5 +1,5 @@
 """Tests of proof/gate_fpexact.py on synthetic objects (assembled / compiled here with aarch64-linux-gnu-as and -g++; nothing derived from
-game data): the certificate check, the reciprocal-estimate rule, the float -> integer rule (the GCC plugin tools/fnvnx_f2i_check.cc is
+game data): the certificate check, the reciprocal-estimate rule, the float -> integer rule (the GCC plugin toolchain/f2i_check/fnvnx_f2i_check.cc is
 built here with the host g++ against gcc-13-plugin-dev-aarch64-linux-gnu), the farm program tools/rcpcert.c's refusal on a non-reference CPU."""
 import hashlib
 import itertools
@@ -9,11 +9,14 @@ import shutil
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROOF = os.path.join(HERE, '..')
 LIFT = os.path.join(PROOF, '..')
+sys.path.insert(0, HERE)
 sys.path.insert(0, LIFT)
+import fakeext
 from proof import gate_fpexact as G
 
 WORK = os.environ.get('FNVNX_TEST_WORK', '/home/user/l3work/proof/test_work')     # declared input: the directory the fixtures are written below
@@ -33,6 +36,10 @@ class workdir:
 
     def __exit__(self, *exc):
         shutil.rmtree(self.path)
+
+
+def skip_cache(d, names):
+    return [n for n in names if n in ('__pycache__', 'tests')]
 
 
 def put(path, text):
@@ -55,7 +62,7 @@ def asm_object(d, name, text):
 
 def build_plugin(d):
     so = os.path.join(d, 'fnvnx_f2i_check.so')
-    subprocess.check_call(['g++', '-shared', '-fPIC', '-fno-rtti', '-O1', '-std=gnu++17', '-I' + PLUGIN_INC, os.path.join(LIFT, 'tools', 'fnvnx_f2i_check.cc'), '-o', so])
+    subprocess.check_call(['g++', '-shared', '-fPIC', '-fno-rtti', '-O1', '-std=gnu++17', '-I' + PLUGIN_INC, os.path.join(LIFT, '..', 'toolchain', 'f2i_check', 'fnvnx_f2i_check.cc'), '-o', so])
     return so
 
 
@@ -66,11 +73,6 @@ def cxx_object(d, name, src, so):
     o = os.path.join(d, name + '.o')
     subprocess.check_call(CXX + ['-fplugin=' + so, '-fplugin-arg-fnvnx_f2i_check-out=' + o + '.f2i.json', c, '-o', o])
     return o
-
-
-def gate(d, objs_dir, lift=None):
-    """run the gate on objs_dir -> (items, why)"""
-    return G.run(objs_dir, lift or LIFT)
 
 
 class Cert(unittest.TestCase):
@@ -211,10 +213,9 @@ class Recip(unittest.TestCase):
             asm_object(d + '/objs/sub', 'bad', 'frsqrte s0, s1')
             for n in ('ok', 'sub/bad'):
                 put(d + '/objs/%s.o.f2i.json' % n, NOSITES)
-            items, why = gate(d, d + '/objs')
-            self.assertEqual(why, '')
-            self.assertEqual(sorted(k for k, v in items.items() if v and k != 'rcpcert'), ['rcp:sub/bad.o'])
-            self.assertEqual(sorted(items), ['f2i:ok.o', 'f2i:sub/bad.o', 'rcp:ok.o', 'rcp:sub/bad.o', 'rcpcert'])
+            items = G.judge_objects('R', [('ok.o', d + '/objs/ok.o'), ('sub/bad.o', d + '/objs/sub/bad.o')], LIFT, None)
+            self.assertEqual(sorted(k for k, v in items.items() if v and k != 'R:rcpcert'), ['rcp:R/sub/bad.o'])
+            self.assertEqual(sorted(items), ['R:forms', 'R:rcpcert', 'f2i:R/ok.o', 'f2i:R/sub/bad.o', 'rcp:R/ok.o', 'rcp:R/sub/bad.o'])
 
 
 class F2I(unittest.TestCase):
@@ -336,56 +337,120 @@ class F2I(unittest.TestCase):
             self.assertEqual(len(r['rcp:u.o']), 1)
 
 
-class Main(unittest.TestCase):
-    def run_main(self, d, objs):
-        out = os.path.join(d, 'out')
+class Assembler(unittest.TestCase):
+    def test_asm_unit_needs_no_result_file_but_a_conversion_is_a_finding(self):
+        with workdir() as d:
+            o = asm_object(d, 'a', 'fadd s0, s1, s2')
+            self.assertEqual(G.judge_object('R/a.S', o, asm=True)['f2i:R/a.S'], [])
+            self.assertEqual(len(G.judge_object('R/a.c', o)['f2i:R/a.c']), 1)           # a C unit without the file is a finding
+            c = asm_object(d, 'c', 'fcvtzs w0, s0')
+            self.assertEqual(len(G.judge_object('R/c.S', c, asm=True)['f2i:R/c.S']), 1)  # 3b: an instruction without a source site
+            self.assertEqual([k for k, v in G.judge_objects('R', [('a.S', o), ('a.c', o)], LIFT, None).items() if v and k != 'R:rcpcert'], ['f2i:R/a.c'])
+
+
+class Dependency(unittest.TestCase):
+    def test_forms_not_green_makes_the_item_red(self):
+        with workdir() as d:
+            o = asm_object(d, 'ok', 'fadd s0, s1, s2')
+            put(o + '.f2i.json', NOSITES)
+            self.assertEqual(G.judge_objects('R', [('ok.o', o)], LIFT, None)['R:forms'], [])
+            self.assertEqual(G.judge_objects('R', [('ok.o', o)], LIFT, 'forms: not green: x')['R:forms'], ['forms: not green: x'])
+
+    def test_forms_reason_follows_the_gate_forms(self):
+        with mock.patch.object(G.formgate, 'judge', return_value=(3, 3, [], 'fine')):
+            self.assertIsNone(G.forms_reason('c'))
+        with mock.patch.object(G.formgate, 'judge', return_value=(3, 2, ['k'], 'one shape')):
+            self.assertEqual(G.forms_reason('c'), 'forms: not green: one shape')
+
+    def test_committed_state_forms_is_red(self):
+        with workdir() as d:
+            self.assertEqual(G.forms_reason(d), 'forms: not green: inputs: external liftpack not declared')
+
+
+class Roots(unittest.TestCase):
+    """judge_root with the recipe's build replaced by a given objects.json result (the build needs the sandbox and the compiler mirror)"""
+    def judge(self, d, res, forms=None):
+        with mock.patch.object(G.recipe, 'load_recipe', return_value={}), mock.patch.object(G.recipe, 'load_admit', return_value={}), \
+                mock.patch.object(G.gate_build, 'ensure', return_value=(res, d)):
+            return G.judge_root('X', '.', d, LIFT, lambda: forms)
+
+    def test_green(self):
+        with workdir() as d:
+            o = asm_object(d, 'a', 'fadd s0, s1, s2')
+            put(o + '.f2i.json', NOSITES)
+            self.assertEqual(self.judge(d, {'status': 'green', 'objects': [{'unit': 'a.o', 'object': o}]}), (4, 4, [], ''))
+
+    def test_red_items_sorted_and_named(self):
+        with workdir() as d:
+            os.makedirs(d + '/z')
+            objs = []
+            for n in ('z/b', 'a'):
+                o = asm_object(d, n.replace('/', '_'), 'frecpe s0, s1')
+                objs.append({'unit': n + '.o', 'object': o})
+            r = self.judge(d, {'status': 'green', 'objects': objs}, forms='forms: not green: y')
+            self.assertEqual(r[:3], (6, 1, ['X:forms', 'f2i:X/a.o', 'f2i:X/z/b.o', 'rcp:X/a.o', 'rcp:X/z/b.o']))
+
+    def test_build_red_is_one_input_item(self):
+        with workdir() as d:
+            r = self.judge(d, {'status': 'red', 'objects': [], 'failure': {'stage': 'cc:a.c'}})
+            self.assertEqual(r, (1, 0, ['X:inputs'], 'root does not build (stage cc:a.c)'))
+
+    def test_not_an_elf_is_one_input_item(self):
+        with workdir() as d:
+            put(d + '/x.o', 'hello')
+            r = self.judge(d, {'status': 'green', 'objects': [{'unit': 'x.o', 'object': d + '/x.o'}]})
+            self.assertEqual(r[:3], (1, 0, ['X:inputs']))
+            self.assertIn('input error', r[3])
+
+    def test_read_inputs_is_sorted_by_unit(self):
+        res = {'objects': [{'unit': u, 'object': '/p/' + u} for u in ('z/b.o', 'a.o', 'z/a.o', 'm/q.o')]}
+        self.assertEqual([u for u, _ in G.read_inputs(res)], ['a.o', 'm/q.o', 'z/a.o', 'z/b.o'])
+
+
+class Cli(unittest.TestCase):
+    """the gate as the verdict runs it: python -I, cwd = a git checkout holding a copy of lift/ and of the overlay of verify/ with its own admit.json"""
+    def checkout(self, td, roots):
+        co = os.path.join(td, 'co')
+        nx = os.path.join(co, 'ports', 'fnv-nx')
+        os.makedirs(nx)
+        shutil.copytree(LIFT, os.path.join(nx, 'lift'), ignore=skip_cache, copy_function=shutil.copyfile)
+        shutil.copytree(fakeext.VERIFY, os.path.join(nx, 'verify'), ignore=skip_cache, copy_function=shutil.copyfile)
+        shutil.copytree(os.path.join(fakeext.VERIFY, '..', 'contract'), os.path.join(nx, 'contract'), ignore=skip_cache, copy_function=shutil.copyfile)
+        put(os.path.join(nx, 'verify', 'admit.json'), json.dumps({'format': 'fnvnx-admit/1', 'roots': roots}))
+        for a in (['init', '-q'], ['add', '-A'], ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'x']):
+            subprocess.run(['git', '-C', co] + a, check=True, capture_output=True)
+        return co
+
+    def run_gate(self, td, co):
+        out = os.path.join(td, 'out')
         os.makedirs(out)
-        os.environ['GATE_OUT'] = out
-        try:
-            rc = G.main(['--objects', objs])
-        finally:
-            del os.environ['GATE_OUT']
-        return rc, json.loads(get(out + '/fpexact.json'))
+        env = {'PATH': os.environ['PATH'], 'GATE_OUT': out, 'HOME': td}
+        r = subprocess.run([sys.executable, '-I', 'ports/fnv-nx/lift/proof/gate_fpexact.py'], cwd=co, env=env, capture_output=True, text=True)
+        return r, out
 
-    def test_green_format(self):
+    def test_no_product_root_is_universe_0_green(self):
         with workdir() as d:
-            os.makedirs(d + '/objs')
-            rc, r = self.run_main(d, d + '/objs')
-            self.assertEqual(rc, 0, r)
-            self.assertEqual(sorted(r), ['certified', 'detail', 'format', 'name', 'status', 'uncertified', 'universe'])
-            self.assertEqual((r['format'], r['name'], r['status'], r['universe'], r['certified'], r['uncertified']), ('fnvnx-gate/1', 'fpexact', 'green', 1, 1, []))
+            r, out = self.run_gate(d, self.checkout(d, [{'path': 'ports/fnv-nx/verify', 'class': 'tool', 'gates': []}]))
+            self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
+            self.assertEqual(fakeext.accepted('fpexact', out, 0)[:3], ('green', 0, 0))
+            self.assertEqual(sorted(json.loads(get(out + '/fpexact.json'))), ['certified', 'detail', 'format', 'name', 'status', 'uncertified', 'universe'])
 
-    def test_red_lists_uncertified_sorted(self):
+    def test_product_root_with_an_invalid_recipe_is_red_with_the_reason(self):
         with workdir() as d:
-            os.makedirs(d + '/objs')
-            for n in ('b', 'a'):
-                asm_object(d + '/objs', n, 'frecpe s0, s1')
-            rc, r = self.run_main(d, d + '/objs')
-            self.assertEqual(rc, 2)
-            self.assertEqual(r['status'], 'red')
-            self.assertEqual(r['uncertified'], ['f2i:a.o', 'f2i:b.o', 'rcp:a.o', 'rcp:b.o'])
-            self.assertEqual((r['universe'], r['certified']), (5, 1))
+            co = self.checkout(d, [{'path': 'ports/fnv-nx/xroot', 'class': 'product', 'recipe': 'ports/fnv-nx/xroot/build.json', 'gates': []}])
+            os.makedirs(co + '/ports/fnv-nx/xroot')
+            put(co + '/ports/fnv-nx/xroot/build.json', '{}')
+            subprocess.run(['git', '-C', co, 'add', '-A'], check=True)
+            subprocess.run(['git', '-C', co, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'y'], check=True)
+            r, out = self.run_gate(d, co)
+            self.assertEqual(r.returncode, 2, r.stderr + r.stdout)
+            res = json.loads(get(out + '/fpexact.json'))
+            self.assertEqual((res['status'], res['uncertified'], res['universe']), ('red', ['ports/fnv-nx/xroot:inputs'], 1))
+            self.assertIn('invalid recipe', res['detail'])
 
-    def test_missing_objects_dir_is_red(self):
-        with workdir() as d:
-            rc, r = self.run_main(d, d + '/nope')
-            self.assertEqual((rc, r['status']), (2, 'red'))
-            self.assertIn('does not exist', r['detail'])
-
-    def test_not_an_elf_is_red(self):
-        with workdir() as d:
-            os.makedirs(d + '/objs')
-            put(d + '/objs/x.o', 'hello')
-            rc, r = self.run_main(d, d + '/objs')
-            self.assertEqual((rc, r['status']), (2, 'red'))
-            self.assertIn('input error', r['detail'])
-
-    def test_sorted_walk(self):
-        with workdir() as d:
-            for p in ('z/b.o', 'a.o', 'z/a.o', 'm/q.o'):
-                os.makedirs(os.path.dirname(os.path.join(d, 'o', p)), exist_ok=True)
-                put(os.path.join(d, 'o', p), '')
-            self.assertEqual([i for i, _ in G.read_inputs(d + '/o', LIFT)[1]], ['a.o', 'm/q.o', 'z/a.o', 'z/b.o'])
+    def test_arguments_are_refused(self):
+        r = subprocess.run([sys.executable, '-I', os.path.join(PROOF, 'gate_fpexact.py'), '--objects', 'x'], capture_output=True, text=True, env={'GATE_OUT': '/'})
+        self.assertEqual(r.returncode, 1)
 
 
 if __name__ == '__main__':

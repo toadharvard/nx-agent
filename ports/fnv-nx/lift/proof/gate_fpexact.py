@@ -1,23 +1,31 @@
 #!/usr/bin/env python3
 """Gate "fpexact" (fnvnx-gate/1): the floating-point results that must stay exact by rule (owner decisions of 2026-11-10) are produced
-only by code we wrote and certified. Three checks, each total over its universe.
-    python3 -I proof/gate_fpexact.py --objects DIR [--lift DIR]      env GATE_OUT; writes GATE_OUT/fpexact.json
-DIR: every *.o below it (sorted walk) is one AArch64 relocatable object (ELF32 ILP32 or ELF64). --lift: the lift directory (default: the
-one this script lies in). All input handling is in `read_inputs` (the verdict owner replaces the object input there).
+only by code we wrote and certified. Four checks, each total over its universe.
+    python3 -I ports/fnv-nx/lift/proof/gate_fpexact.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE; writes GATE_OUT/fpexact.json
+No argument is read. Universe convention of the object-level gates (gate_build.quantify, as gate_objstub / gate_linkstrict): the admitted product
+roots of verify/admit.json; each root is built or taken from the cache by gate_build.ensure (GATE_CACHE, else GATE_OUT/fpexact-cache) and its
+objects (objects.json "objects") are judged; no product root: universe 0, green. The loader modules (gate_build, recipe) are imported from
+ports/fnv-nx/verify, sibling of lift/, the way verify/gate_contract.py imports its own; a checkout without verify/ cannot run the gate (no result file: red).
+All object input handling is in `read_inputs` (objects.json -> [(unit, object path)]) and `read_f2i` (the plugin's file of one object).
+The lift directory is the one this script lies in (rt/rcpref.h, rt/rcptab.c, rt/rcptab.cert.json).
 
-Check 1, certificate (item `rcpcert`): rt/rcptab.c is the table of RCPSS / RSQRTSS of the one reference CPU. The pinned certificate
+Check 0, dependency (item `<root>:forms`): the correctness of the helpers sse_f2i / fv_i, whose conversions this gate lets through, is
+established by the form certificates, not here. The item is certified iff the gate `forms` (formgate.py, the one copy) is green on its own
+declared inputs; fpexact evaluates it by calling formgate.judge (verdict.py gives every gate its own GATE_OUT, so one gate cannot read another's
+result file; the same code on the same declared inputs gives the same verdict). Red reason `forms: not green` plus forms' own reason.
+
+Check 1, certificate (item `<root>:rcpcert`): rt/rcptab.c is the table of RCPSS / RSQRTSS of the one reference CPU. The pinned certificate
 rt/rcptab.cert.json (made on that CPU by farm/rcpcert.sh: CPUID identity read with the instruction, all 2^32 inputs of both functions
 executed on the hardware and compared bit for bit with the functions of rt/rcptab.c, SHA-256 of both result streams) is accepted iff
   sha256(rt/rcptab.c) == source_sha256, sha256(rt/rcpref.h) == header_sha256, mismatches == 0 (the integer 0), and the CPU identity of the
   certificate equals the four FNVL_RCP_REF_* constants of rt/rcpref.h (the same header rt/rcptab.c includes and the certifying program uses).
 A missing, unreadable or malformed certificate is a finding. Argument: the table functions are pure functions of 32 bits; the certificate
 states equality with the hardware on the whole domain for the exact source bytes whose hash it carries, on the reference identity; so the
-source named by the hash computes RCPSS / RSQRTSS of the reference CPU for every input. Assumptions: the certifying run was made by
-farm/rcpcert.sh on a host whose CPUID is the reference identity (the file is not signed; the identity is what the program read from the
-CPU) and the hardware's two instructions are pure functions of the input bits (MXCSR RC/FTZ/DAZ/masks do not influence them; checked in
-rt/rcptab.c's header on 20e6 inputs x 8 MXCSR values).
+source named by the hash computes RCPSS / RSQRTSS of the reference CPU for every input. Registered assumptions (ports/fnv-nx/lift/ASSUMPTIONS.l3b.json): A-RCPHOST (the certifying run was made by farm/rcpcert.sh on a CPU
+with the reference identity; the certificate's hash is kept in the store) and A-RCPPURE (RCPSS / RSQRTSS are pure functions of the input
+bits, independent of MXCSR).
 
-Check 2, every use goes through the table (item `rcp:<object>`): an object contains no AArch64 reciprocal / reciprocal-square-root
+Check 2, every use goes through the table (item `rcp:<root>/<unit>`): an object contains no AArch64 reciprocal / reciprocal-square-root
 ESTIMATE or STEP instruction: FRECPE, FRSQRTE, URECPE, URSQRTE, FRECPS, FRSQRTS, FRECPX, scalar or vector, decided by the instruction id
 of capstone (CS_ARCH_ARM64) over every executable section (SHF_EXECINSTR) found with pyelftools, never by text. Rationale: these are the
 only A64 instructions whose results are implementation-defined approximations (the estimate tables and the step refinements of the
@@ -25,10 +33,10 @@ architecture leave the low bits to the implementation); every other FP instructi
 definition), so an object without them cannot compute an rcp / rsqrt value except through code written in the source, which is the
 table of rt/rcptab.c (or an exact division / square root). Soundness needs every instruction of the section to be decoded: the bytes of
 a section are code except the ranges the object marks as data with the AArch64 ELF mapping symbols ($d ... $x); bytes the decoder
-cannot decode in a code range are the finding `undecodable` (and make the item of check 3b uncertified as well). Assumption: capstone
-decodes an instruction to its architectural id; sections the object does not mark are decoded as code from their start.
+cannot decode in a code range are the finding `undecodable` (and make the item of check 3b uncertified as well). Registered
+assumption: A-CAPSTONE-A64 (capstone decodes an instruction to its architectural id; sections the object does not mark are code from their start).
 
-Check 3, float -> integer exactness (item `f2i:<object>`). The x86 rule (cvt*2si, cvtt*, fist, fistp, fisttp): rounding by MXCSR.RC /
+Check 3, float -> integer exactness (item `f2i:<root>/<unit>`). The x86 rule (cvt*2si, cvtt*, fist, fistp, fisttp): rounding by MXCSR.RC /
 FCW.RC (truncation for the cvtt* and fisttp forms); NaN and out-of-range give the integer indefinite (0x80000000, 0x8000,
 0x8000000000000000). The A64 FCVT{Z,N,M,P,A}{S,U} and FJCVTZS saturate instead (NaN gives 0), so a bare conversion is wrong. Measured
 (compile probes with the flags of lift/test/instest.py): the helpers (sse_f2i, fv_i) are inlined, and GCC hoists, duplicates and
@@ -36,13 +44,16 @@ if-converts the conversion around their range guard (the FCVTZS may sit above a 
 by two guards), so a per-instruction object-level property ("this FCVT is guarded") is only a path-sensitive interval analysis of
 compiler-chosen code, not decidable per instruction from operands. The rule is therefore at source level, before inlining, plus an
 object-level necessary condition:
-  3a (source) the GCC plugin tools/fnvnx_f2i_check.cc, run in the compile of every unit (-fplugin-arg-fnvnx_f2i_check-out=OBJECT.f2i.json),
+  3a (source) the GCC plugin toolchain/f2i_check/fnvnx_f2i_check.cc, a declared plugin of every guest product root's recipe (RECIPE.md "Plugins":
+      {"name": "fnvnx_f2i_check", "source": "ports/fnv-nx/toolchain/f2i_check/fnvnx_f2i_check.cc", "args": {"out": "/out/unit.f2i.json"}}, built by the
+      recipe's plugin stage against the plugin headers of the game's compiler, loaded in the CC stage of every C and C++ unit; the recipe keeps the
+      stage's unit.f2i.json as obj/<unit>.o.f2i.json), run in the compile of every unit,
       reports every float -> integer conversion (GIMPLE FIX_TRUNC_EXPR, scalar or vector; the lround / lrint / iround / irint /
       {i,l,ll}{ceil,floor} builtin families; IFN_VEC_CONVERT; target builtins with a float argument and an integer result; inline asm
       with a float / vector operand or an FP register clobber) that lies in a function without the attribute fnvnx_f2i (FNVL_F2I in
       rt/fnvl_x87.h, on the helpers sse_f2i and fv_i). It runs right after the CFG is built, before early inlining and every
       optimisation, so inlining a helper into its callers cannot hide a site and no transformation adds one. Every object needs the
-      result file `<object>.f2i.json` next to it (format fnvnx-f2i/1); a missing or malformed file is a finding; every entry of its
+      result file `<object>.f2i.json` next to it (obj/<unit>.o.f2i.json beside obj/<unit>.o; format fnvnx-f2i/1); a missing or malformed file is a finding; every entry of its
       `findings` is a finding of the object.
   3b (object) an object with at least one FCVT{Z,N,M,P,A}{S,U} / FJCVTZS instruction (capstone ids, all sections, scalar and vector)
       needs `sites` > 0 in its result file (the unit has a conversion site in some function, helper or not). It catches a conversion
@@ -52,17 +63,15 @@ object-level necessary condition:
   builtin or IFN_VEC_CONVERT) present in the function bodies the plugin saw, or from an asm; the plugin sees every body before the first
   transformation; outside the attributed helpers none exists, so the conversion instructions of the object are copies of the helpers'
   bodies. The helpers' own correctness (range guard, rounding mode, indefinite value) is not decided here: it is by review, and it is
-  listed per object in the output (`helpers` of each result file are the analysed helper functions). Assumptions, stated: (i) the
-  helpers are correct; (ii) the object is compiled by the compile that wrote its result file (the verdict owner's cache key binds both;
-  a stale file is not detected here); (iii) an inline asm without a float / vector operand and without an FP register clobber does not
-  read FP state it was not given (3b backs this up only for units with no site at all); (iv) a conversion of a constant is folded by the
-  compiler (a constant out of range folds to the saturated value, not the x86 indefinite); lifted code gets its operands from guest
-  registers and memory, not from literals of the C source; (v) native bodies compiled with the fnvnx_ftoi plugin are not judged here:
-  that plugin rewrites every conversion of its units, and this gate takes the lift directory's units.
+  listed per object in the output (`helpers` of each result file are the analysed helper functions). Registered assumptions (ASSUMPTIONS.l3b.json), none new:
+  A-F2IHELPERS (the helpers are correct: removed by the dependency on the gate forms, item `<root>:forms`), A-F2IKEY (an object and its result file
+  come from the same compile: the recipe's stage key binds both), A-F2IASM (an inline asm without a float / vector operand and without an FP register
+  clobber does no conversion; 3b backs it up for units with no site), A-F2ICONST (no conversion of a C literal occurs in lifted code), A-F2INATIVE
+  (native bodies compiled with the fnvnx_ftoi plugin are judged by the L2 rules, not here).
 
-Universe: `rcpcert` + for every object `rcp:<path>` and `f2i:<path>` (path relative to DIR). Certified: items with no finding.
-uncertified: the first 50 ids sorted. Exit 0 iff green; unreadable input (no DIR, an unreadable ELF) is red with the reason in detail."""
-import argparse
+Universe: per product root: `<root>:rcpcert`, `<root>:forms`, and for every object `rcp:<root>/<unit>` and `f2i:<root>/<unit>`; a root that does not
+build or whose recipe is invalid is the one item `<root>:inputs` (uncertified, reason in detail: never skipped). Certified: items with no finding.
+uncertified: the first 50 ids sorted. Exit 0 iff green."""
 import hashlib
 import json
 import os
@@ -73,6 +82,17 @@ from elftools.common.exceptions import ELFError
 from elftools.elf.elffile import ELFFile
 from capstone import CS_ARCH_ARM64, CS_MODE_ARM, Cs
 import capstone.arm64_const as A
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+LIFT = os.path.dirname(HERE)
+VERIFY = os.path.normpath(os.path.join(LIFT, "..", "verify"))
+sys.path.insert(0, LIFT)
+sys.path.insert(0, os.path.join(VERIFY, "..", "contract"))
+sys.path.insert(0, VERIFY)
+from proof import formgate  # noqa: E402
+import gate_build  # noqa: E402
+import gatefile  # noqa: E402     (ports/fnv-nx/contract)
+import recipe  # noqa: E402
 
 NAME = "fpexact"
 FORMAT = "fnvnx-gate/1"
@@ -91,18 +111,10 @@ def sha256_file(path):
         return hashlib.sha256(fh.read()).hexdigest()
 
 
-def read_inputs(objects_dir, lift_dir):
-    """-> (lift_dir, [(id, absolute path)] sorted by id). The one place the object input is read; ids are paths below objects_dir."""
-    if not os.path.isdir(objects_dir):
-        raise ValueError("objects directory %s does not exist" % objects_dir)
-    found = []
-    for root, dirs, files in os.walk(objects_dir):
-        dirs.sort()
-        for f in sorted(files):
-            if f.endswith(".o"):
-                p = os.path.join(root, f)
-                found.append((os.path.relpath(p, objects_dir), p))
-    return lift_dir, sorted(found)
+def read_inputs(res):
+    """-> [(unit, absolute object path)] sorted by unit, from the objects.json dict RES of one root (the recipe's result). The one place the object
+    input is read. The plugin's file of an object is found by read_f2i next to it."""
+    return sorted((o["unit"], o["object"]) for o in res["objects"])
 
 
 def read_ref(lift_dir):
@@ -238,15 +250,17 @@ def read_f2i(obj_path):
         return None, "result file %s unreadable or malformed: %s" % (os.path.basename(p), str(e)[:150] or type(e).__name__)
 
 
-def judge_object(oid, path):
-    """-> {item id: [finding strings]} for `rcp:<oid>` and `f2i:<oid>`"""
+def judge_object(oid, path, asm=False):
+    """-> {item id: [finding strings]} for `rcp:<oid>` and `f2i:<oid>`. ASM: the unit is an assembler unit (.s / .S, the recipe's own kind): the compiler
+    never builds GIMPLE for it, so the plugin has no file to write and no conversion site exists in its source: the result is the empty one (sites 0),
+    and check 3b still makes any FCVT / FJCVTZS instruction of the object a finding."""
     scan = scan_object(path)
     rcp = ["%s: %s in %s" % (oid, m, w) for w, m in scan["recip"]]
     f2i = []
     und = ["undecodable bytes at %s" % w for w in scan["undecodable"]]
     rcp += und
     f2i += und
-    d, why = read_f2i(path)
+    d, why = ({"format": "fnvnx-f2i/1", "findings": [], "sites": 0, "helpers": []}, None) if asm else read_f2i(path)
     if d is None:
         f2i.append(why)
     else:
@@ -256,40 +270,58 @@ def judge_object(oid, path):
     return {"rcp:" + oid: rcp, "f2i:" + oid: f2i}
 
 
-def run(objects_dir, lift_dir):
-    """-> (items {id: [findings]}, why or "")"""
-    items, why = {}, ""
+def judge_objects(root, objs, lift_dir, forms_ok):
+    """-> {item id: [findings]} of one root: OBJS [(unit, path)], FORMS_OK (reason string or None: the dependency on the gate forms)."""
+    items = {root + ":rcpcert": check_cert(lift_dir), root + ":forms": [forms_ok] if forms_ok else []}
+    for unit, path in objs:
+        r = judge_object(root + "/" + unit, path, unit.endswith(recipe.ASM_EXT))
+        items.update(r)
+    return items
+
+
+def forms_reason(cache):
+    """None iff the gate forms is green on its declared inputs, else `forms: not green: <its reason>`"""
+    u, c, ids, detail = formgate.judge(cache)
+    return None if u == c else "forms: not green: %s" % detail[:300]
+
+
+def judge_root(root, repo, cache, lift_dir, forms):
+    """One admitted product ROOT -> (universe, certified, ids, detail); an input problem is one red item, never a skip"""
     try:
-        lift_dir, objs = read_inputs(objects_dir, lift_dir)
-        items["rcpcert"] = check_cert(lift_dir)
-        for oid, path in objs:
-            items.update(judge_object(oid, path))
+        rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
+        res, _ = gate_build.ensure(root, cache, repo)
+    except recipe.RecipeError as e:
+        return 1, 0, [root + ":inputs"], "invalid recipe: %s" % "; ".join(e.errors)[:300]
+    except (OSError, KeyError, ValueError) as e:
+        return 1, 0, [root + ":inputs"], "input error: %s" % (str(e)[:300] or type(e).__name__)
+    if res["status"] == "red":
+        return 1, 0, [root + ":inputs"], "root does not build (stage %s)" % res["failure"]["stage"]
+    try:
+        items = judge_objects(root, read_inputs(res), lift_dir, forms())
     except (OSError, ValueError, ELFError) as e:
-        why = "input error: %s" % (str(e)[:300] or type(e).__name__)
-    return items, why
+        return 1, 0, [root + ":inputs"], "input error: %s" % (str(e)[:300] or type(e).__name__)
+    bad = sorted(k for k, v in items.items() if v)
+    n = sum(len(items[k]) for k in bad)
+    return len(items), len(items) - len(bad), bad, ("%d findings in %d items; first: %s" % (n, len(bad), items[bad[0]][0][:200])) if bad else ""
 
 
 def main(argv):
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--objects", required=True)
-    ap.add_argument("--lift", default=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    a = ap.parse_args(argv)
-    items, why = run(a.objects, a.lift)
-    bad = sorted(k for k, v in items.items() if v)
-    if why:
-        status, detail = "red", why
-    elif bad:
-        n = sum(len(items[k]) for k in bad)
-        detail = "%d findings in %d items; first: %s" % (n, len(bad), items[bad[0]][0][:200])
-        status = "red"
-    else:
-        status, detail = "green", "rcp table certified, no rcp/rsqrt estimate instruction and no uncertified float->int conversion in %d items" % len(items)
-    res = {"format": FORMAT, "name": NAME, "status": status, "universe": len(items), "certified": len(items) - len(bad),
-           "uncertified": bad[:50], "detail": detail}
-    with open(os.path.join(os.environ["GATE_OUT"], NAME + ".json"), "w") as fh:
-        json.dump(res, fh, sort_keys=True)
-    print("%s: %s %d/%d %s" % (NAME, status, res["certified"], res["universe"], detail[:200]))
-    return 0 if status == "green" else 2
+    if argv or "GATE_OUT" not in os.environ:
+        sys.stderr.write("usage: gate_fpexact.py   (no arguments; env GATE_OUT, optional GATE_CACHE; cwd = checkout root)\n")
+        return 1
+    cache = os.environ.get("GATE_CACHE") or os.path.join(os.environ["GATE_OUT"], "fpexact-cache")
+    os.makedirs(cache, exist_ok=True)
+    memo = []
+
+    def forms():
+        if not memo:
+            memo.append(forms_reason(os.path.join(cache, "forms")))
+        return memo[0]
+    u, c, ids, detail = gate_build.quantify(".", lambda root: judge_root(root, ".", cache, LIFT, forms))
+    gatefile.write(NAME, u, c, ids, detail if u != c else ("rcp table certified, no rcp/rsqrt estimate instruction and no uncertified float->int conversion in %d items" % u if u else detail))
+    st = "green" if u == c else "red"
+    sys.stdout.write("%s: %s %d/%d %s\n" % (NAME, st, c, u, detail[:200]))
+    return 0 if st == "green" else 2
 
 
 if __name__ == "__main__":
