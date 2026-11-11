@@ -5,6 +5,7 @@
  c  the callback of Begin is never called   d  IUnknown lattice: AddRef 2 / Release 1, QueryInterface E_NOINTERFACE (id 21) for every iid, layer-private IID_NxObj
  e  no allocation: the object file references no allocator (nm)   f  guest build: defined nxb 514/514, undefined set unchanged   g  mutations"""
 import json, os, re, shutil, subprocess, sys, tempfile, concurrent.futures as cf
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 D9 = os.path.join(ROOT, "render", "d3d9"); DEV = os.path.join(D9, "dev"); GEN = os.path.join(D9, "gen"); SPEC = os.path.join(D9, "spec", "d3d9_spec.json"); INC = os.path.join(ROOT, "shim", "include")

@@ -7,6 +7,7 @@ of one render target, plus the API results of the player in part p):
  d fog (ps_2_0 + vs_1_1 without oFog; table / vertex modes; ps_3_0 none)   e alpha test (all 8 functions)   f MRT, vertex buffer, indexed draws   g fixed-function VS + user PS, user VS + fixed-function PS   m mutations
 Tolerance: <= 1/255 per channel unless a case says so (bilinear filtering: 3/255, fixed-function modulate: 2/255)."""
 import concurrent.futures as cf, os, re, shutil, subprocess, sys, tempfile
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "tests", "l6", "ffpdev")); sys.path.insert(0, os.path.join(ROOT, "tests", "l6", "gl4")); sys.path.insert(0, HERE)
