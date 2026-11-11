@@ -42,7 +42,6 @@
    "-fno-exceptions",
    "-fno-asynchronous-unwind-tables",
    "-fno-math-errno",
-   "-w",
    "-ffixed-x19",
    "-ffixed-x20",
    "-ffixed-x21",

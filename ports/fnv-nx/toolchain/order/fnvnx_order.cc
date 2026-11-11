@@ -230,7 +230,8 @@ static void order_builtin_call(gimple_stmt_iterator *gsi, gcall *call) {
     if (!known || spec.arg_maybe_written_p(i)) wr = true;
   }
   if (wr) { gsi_insert_before(gsi, fence(MEMMODEL_RELEASE), GSI_SAME_STMT); cur->fence_st++; }
-  if (rd) fence_after(gsi, MEMMODEL_ACQUIRE);
+  // a call that does not return (__builtin_longjmp, __builtin_trap, ...) reads nothing afterwards: no statement follows it, so no acquire fence
+  if (rd && !(gimple_call_flags(call) & ECF_NORETURN)) fence_after(gsi, MEMMODEL_ACQUIRE);
 }
 
 // one statement. Every memory operand is classified (local or read-only: plain; else ordered or fenced); a statement

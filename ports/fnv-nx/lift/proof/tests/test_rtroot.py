@@ -1,6 +1,6 @@
 """lift/rt/build.json is the build of the lift runtime, and its flags are the flags the lifted packs are compiled with.
 The one definition of the lifted-code flags is test/instest.py FLAGS through tools/liftgen.py pack_flags (what `liftgen.py --recipe` writes into
-lift/pack/build.json). Checked, as lists: flags.asm equal; flags.cxx = the pack's list followed by the semantics flags that verify/recipe.py requires of
+lift/pack/build.json). Checked, as lists: flags.asm equal; flags.cxx = the pack's list without -w (fnvnx_names refuses it) followed by the semantics flags that verify/recipe.py requires of
 native C++ (SEMANTICS_FLAGS) and the pack's list does not hold; flags.c = the pack's c list followed by the freestanding rt C flags (the build lines of rt.c,
 rt/rcptab.c, rt/x87.c in the header comments and in test/instest.py). Also: the plugins are exactly recipe.py's PLUGIN_SOURCES in load order with PLUGIN_ARGS,
 the compiler is the pin of verify/guest_compiler.json, and no tracked .c under lift/rt is C++ (a unit's language is its extension)."""
@@ -20,6 +20,7 @@ import liftgen  # noqa: E402
 import recipe as R  # noqa: E402
 
 RT_C_EXTRA = ['-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-builtin']
+NATIVE_DROP = ('-w',)     # plugin fnvnx_names (NAMES1) refuses -w: it hides the class-key reports the names are computed from
 bad = []
 
 
@@ -39,7 +40,7 @@ pack = liftgen.pack_flags(instest_flags())
 rec = json.load(open(os.path.join(LIFT, 'rt', 'build.json')))
 fl = rec['flags']
 check('flags.asm == pack asm', fl['asm'] == pack['asm'], (fl['asm'], pack['asm']))
-want_cxx = pack['cxx'] + [f for f in R.SEMANTICS_FLAGS if f not in pack['cxx']]
+want_cxx = [f for f in pack['cxx'] if f not in NATIVE_DROP] + [f for f in R.SEMANTICS_FLAGS if f not in pack['cxx']]
 check('flags.cxx == pack cxx + SEMANTICS_FLAGS missing from it', fl['cxx'] == want_cxx, (fl['cxx'], want_cxx))
 check('flags.c == pack c + rt C flags', fl['c'] == pack['c'] + RT_C_EXTRA, (fl['c'], pack['c'] + RT_C_EXTRA))
 pin = json.load(open(os.path.join(VERIFY, 'guest_compiler.json')))
