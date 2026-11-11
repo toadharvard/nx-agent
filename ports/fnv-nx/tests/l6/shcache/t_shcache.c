@@ -6,6 +6,7 @@
  *   truncs MAIN LOG BID           for every prefix length k of LOG: "k log_entries log_valid_len"
  *   logflips MAIN LOG BID         for every byte i of LOG xored: "i log_entries log_valid_len"
  *   linkset                       exhaustive + random check of shcache_link_set against fnvnx_dk_assign
+ *   verify MAIN BID DIR           every entry of DIR/entries.tsv (a shxlate output) is in MAIN with payload = pack(<id>.dksh, <id>.json): "CHECKS n FAIL f"
  *   keymake hash len stage flags lhex|-    "n_l lhex" or ERR       hash HEXBYTES  "fnv l_hash"
  *   refl JSON SECTION             pairs of a reflection json: hex list or ERR     payload   pack/unpack round trip */
 #include <stdio.h>
@@ -92,6 +93,22 @@ static int mode_logscan(char **a, int flip)
     return 0;
 }
 
+static int mode_verify(char **a)
+{
+    size_t mn, n; uint8_t *m = slurp(a[0], &mn), bid[16]; shcache *c; char path[1100], *tsv, *line, *save; bid_of(a[1], bid); c = shcache_open(m, mn, NULL, 0, bid);
+    snprintf(path, sizeof path, "%s/entries.tsv", a[2]); tsv = (char *)slurp(path, &n); tsv = (char *)realloc(tsv, n + 1); tsv[n] = 0;
+    line = strtok_r(tsv, "\n", &save);                                                         /* header */
+    for (line = strtok_r(NULL, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
+        char id[96], h[24], st[4], fl[8], lx[100]; unsigned len; shcache_key k; size_t dn, jn; uint8_t *d, *j, *pk; const void *p = NULL; size_t pn = 0; int hit;
+        if (sscanf(line, "%95s %23s %u %3s %7s %99s", id, h, &len, st, fl, lx) != 6) { CHECK(0); continue; }
+        { char len_s[24]; sprintf(len_s, "%u", len); CHECK(mkkey(&k, h, len_s, st[0] == 'p' ? "1" : "0", fl, lx) == 0); }
+        snprintf(path, sizeof path, "%s/%s.dksh", a[2], id); d = slurp(path, &dn); snprintf(path, sizeof path, "%s/%s.json", a[2], id); j = slurp(path, &jn);
+        pk = (uint8_t *)malloc(8 + dn + jn); pn = shcache_payload_pack(d, (uint32_t)dn, (const char *)j, (uint32_t)jn, pk, 8 + dn + jn);
+        hit = shcache_lookup(c, &k, &p, &n); CHECK(hit && n == pn && !memcmp(p, pk, pn)); free(d); free(j); free(pk);
+    }
+    printf("CHECKS %d FAIL %d\n", checks, fails); shcache_close(c); return fails != 0;
+}
+
 static unsigned rng_s = 12345u;
 static unsigned rnd(void) { rng_s ^= rng_s << 13; rng_s ^= rng_s >> 17; rng_s ^= rng_s << 5; return rng_s; }
 static int is_builtin(uint8_t p) { return p == FNVNX_DK_PAIR(FNVNX_USAGE_POSITION, 0) || p == FNVNX_DK_PAIR(FNVNX_USAGE_PSIZE, 0); }
@@ -161,6 +178,7 @@ int main(int argc, char **argv)
     if (!strcmp(m, "truncs") && argc == 5) return mode_logscan(argv + 2, 0);
     if (!strcmp(m, "logflips") && argc == 5) return mode_logscan(argv + 2, 1);
     if (!strcmp(m, "linkset")) return mode_linkset();
+    if (!strcmp(m, "verify") && argc == 5) return mode_verify(argv + 2);
     if (!strcmp(m, "payload")) return mode_payload();
     if (!strcmp(m, "keymake") && argc == 7) { shcache_key k; char o[80] = ""; int i; if (mkkey(&k, argv[2], argv[3], argv[4], argv[5], argv[6])) { puts("ERR"); return 0; } for (i = 0; i < k.n_l; i++) sprintf(o + 2 * i, "%02x", k.l[i]); printf("%u %s %u\n", k.n_l, o, k.flags); return 0; }
     if (!strcmp(m, "hash") && argc == 3) { uint8_t b[4096]; size_t n = unhex(argv[2], b); printf("%016llx %016llx\n", (unsigned long long)shcache_hash64(b, n), (unsigned long long)shcache_l_hash(b, (uint32_t)n)); return 0; }

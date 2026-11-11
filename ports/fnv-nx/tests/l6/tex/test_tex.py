@@ -217,7 +217,9 @@ def build(dev, tmp, jobs=8, with_res=True):
 
 
 def run(exe, data):
-    r = sh([exe, data]); return r, {m.group(1): (int(m.group(2)), int(m.group(3))) for m in re.finditer(r"PART (\w): (\d+) checks, (\d+) failed", r.stdout)}
+    r = sh([exe, data]); ps = {m.group(1): (int(m.group(2)), int(m.group(3))) for m in re.finditer(r"PART (\w): (\d+) checks, (\d+) failed", r.stdout)}
+    for m in re.finditer(r"^FAIL (\w):", r.stdout, re.M): ps.setdefault(m.group(1), (1, 0)); ps[m.group(1)] = (ps[m.group(1)][0], max(ps[m.group(1)][1], 1)) if m.group(1) not in ps or ps[m.group(1)][1] == 0 else ps[m.group(1)]   # a crash after FAIL lines still names the part
+    return r, ps
 
 
 def main():
@@ -246,7 +248,7 @@ def main():
                 ("c", "res_surf.cpp", "(b->Left & wm) ||", ""), ("c", "res_surf.cpp", "return container && container->ci->rtype == D3DRTYPE_TEXTURE ? D3D_OK : D3DERR_INVALIDCALL;", "return D3D_OK;"),
                 ("c", "res_fmt.cpp", "{FC('D', 'X', 'T', '1'), 1, 4, 4, 8, BL", "{FC('D', 'X', 'T', '1'), 1, 4, 4, 16, BL"), ("c", "res_surf.cpp", "else if (!(flags & D3DLOCK_NO_DIRTY_UPDATE))", "else"),
                 ("b", "res_tex.cpp", "if (!managed()) return 0; DWORD o", "DWORD o"), ("b", "res_tex.cpp", "k->addref(); return D3D_OK;", "return D3D_OK;"),
-                ("d", "res_tex.cpp", "img->autogen && img->mip_dirty) img->sync(true)", "img->autogen) img->sync(true)"), ("d", "res_tex.cpp", "filter == D3DTEXF_POINT ? 0 : 1", "1"),
+                ("d", "res_tex.cpp", "1); mip_dirty = false; }", "1); }"), ("d", "res_tex.cpp", "filter == D3DTEXF_POINT ? 0 : 1", "1"),
                 ("e", "res_tex.cpp", "if (u > o.k)", "if (u > o.k)") if False else ("e", "res_tex.cpp", "if (n.k > o.k) o.k = n.k;", ""), ("c", "res_surf.cpp", "if (s->gpu_newer) { if (!discard", "if (s->gpu_newer) { if (false")]
         def one(i):
             part, f, old, new = muts[i]; root = os.path.join(tmp, f"m{i}_root", "d3d9"); mdev = os.path.join(root, "dev"); os.makedirs(root)

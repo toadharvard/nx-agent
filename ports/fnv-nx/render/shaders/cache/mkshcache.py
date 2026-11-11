@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """mkshcache.py: builds the shader cache file (format: shcache.h) from a directory of translations, deterministically
 (same entries -> byte-identical file, whatever the order they are listed in).
-  python3 -I mkshcache.py [--build-id HEX32] TRANSLATED_DIR OUT.shc
+  python3 -I mkshcache.py [--build-id HEX32 | --extra-input FILE...] TRANSLATED_DIR OUT.shc
 TRANSLATED_DIR/entries.tsv (written by shxlate): id code_hash code_len stage(v|p) flags l_hex(- = none); each id has <id>.dksh and <id>.json
 (reflection).  The payload of an entry is shcache_payload_pack(dksh, json).  Default build id: build_id() = SHA-256 over the translator sources
-(render/shaders/src, include, the two patches, build.sh) cut to 16 bytes: a different translator makes the file EMPTY at load, never stale."""
+(render/shaders/src, include, the two patches, build.sh, plus every --extra-input file, e.g. a local patch of the pinned uam) cut to 16 bytes: a different
+translator makes the file EMPTY at load, never stale."""
 import hashlib, os, struct, sys
 
 MAGIC, VERSION, FLAGS_MASK = b"FNSC", 1, (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5)
@@ -28,9 +29,10 @@ def check_l(l):
 def pack_payload(dksh, json): return struct.pack("<II", len(dksh), len(json)) + dksh + json
 
 
-def build_id(root=None):
+def build_id(root=None, extra=()):
     root = root or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
     h = hashlib.sha256()
+    for f in extra: h.update(b"extra\0" + hashlib.sha256(open(f, "rb").read()).digest())
     for sub in ("src", "include", "mojoshader.patch", "uam.patch", "build.sh"):
         p = os.path.join(root, sub)
         files = sorted(os.path.join(d, f) for d, _, fs in os.walk(p) for f in fs) if os.path.isdir(p) else [p]
@@ -81,10 +83,11 @@ def load_dir(d):
 
 
 def main(argv):
-    bid = None
+    bid, extra = None, []
+    while argv[:1] == ["--extra-input"]: extra.append(argv[1]); argv = argv[2:]
     if argv[:1] == ["--build-id"]: bid, argv = bytes.fromhex(argv[1]), argv[2:]
     if len(argv) != 2 or (bid is not None and len(bid) != 16): print(__doc__); return 2
-    data = build(load_dir(argv[0]), bid if bid is not None else build_id())
+    data = build(load_dir(argv[0]), bid if bid is not None else build_id(extra=extra))
     open(argv[1], "wb").write(data); print(f"{argv[1]}: {len(data)} bytes, {struct.unpack_from('<I', data, 24)[0]} entries")
     return 0
 

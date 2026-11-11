@@ -1,7 +1,9 @@
 /* glcheck.c - compiles every translated GLSL and links every recorded (VS, PS) pair on Mesa llvmpipe (desktop GL 4.5 core, EGL surfaceless).
  * Uses render/native/gl/nxgl.c for the context (nxgl_create) and for the GLSL shim (nxgl_shim_glsl): the path the GL reference backend takes for a
  * glsldk shader, so "compiles" here means what nxgl's api_shader_create accepts.
- *   LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe EGL_PLATFORM=surfaceless glcheck SHXLATE_OUTDIR [failures.tsv]
+ *   LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe EGL_PLATFORM=surfaceless glcheck [--diag-pad-fog] SHXLATE_OUTDIR [failures.tsv]
+ * --diag-pad-fog is a DIAGNOSTIC, not a result: it adds an unwritten "out vec4" at location 18 to a vertex shader that has none, to show that the
+ * unmatched PS input dk_fog_in (ps < 3.0 reads the fog factor at location 18) is the only reason a pair does not link in GL.
  * Reads OUTDIR/entries.tsv (id ... stage) + <id>.glsl, OUTDIR/links.tsv (vs ps l|-); prints "compile ok/total", "link ok/total"; exit 0 iff all ok.
  * Pair (vs, ps) with L '-' uses the stage-alone entries <h>-<v|p>-0-n, else both L variants <h>-<v|p>-0-<l hex>. */
 #include <stdio.h>
@@ -19,7 +21,7 @@ FN(void, glGetProgramiv, (GLuint, GLenum, GLint *)); FN(void, glGetProgramInfoLo
 #define LOAD(n) do { n = (void *)eglGetProcAddress(#n); if (!n) { fprintf(stderr, "glcheck: no %s\n", #n); return 2; } } while (0)
 
 typedef struct { char id[96]; GLuint sh; int ok, tried; } Ent;
-static Ent *ents; static int nents; static FILE *ffail; static const char *dir;
+static Ent *ents; static int nents; static FILE *ffail; static const char *dir; static int pad_fog;
 
 static char *slurp(const char *path, size_t *n)
 {
@@ -37,6 +39,10 @@ static int compile(Ent *e, int stage)
     snprintf(path, sizeof path, "%s/%s.glsl", dir, e->id);
     if (!(src = slurp(path, &n))) { fprintf(ffail, "%s\tno glsl file\n", e->id); return 0; }
     out = (char *)malloc(n * 2 + 512);
+    if (pad_fog && !stage && !strstr(src, "location = 18) out")) {            /* diagnostic only */
+        char *m = strstr(src, "void main"), *t = (char *)malloc(n + 128); size_t k = (size_t)(m - src);
+        memcpy(t, src, k); k += (size_t)sprintf(t + k, "layout(location = 18) out highp vec4 dk_pad_fog;\n"); memcpy(t + k, m, n - (size_t)(m - src) + 1); free(src); src = t; n = strlen(t);
+    }
     if (!nxgl_shim_glsl(src, n, (uint32_t)stage, out, n * 2 + 512)) { fprintf(ffail, "%s\tshim failed\n", e->id); free(src); free(out); return 0; }
     e->sh = glCreateShader(stage ? GL_FRAGMENT_SHADER : GL_VERTEX_SHADER); s[0] = out;
     glShaderSource(e->sh, 1, s, NULL); glCompileShader(e->sh); glGetShaderiv(e->sh, GL_COMPILE_STATUS, &ok);
@@ -47,7 +53,8 @@ static int compile(Ent *e, int stage)
 int main(int argc, char **argv)
 {
     char path[1100], line[4096], err[512]; FILE *f; int total = 0, okc = 0, lt = 0, lok = 0, i;
-    if (argc < 2) { fprintf(stderr, "usage: glcheck OUTDIR [failures.tsv]\n"); return 2; }
+    if (argc > 1 && !strcmp(argv[1], "--diag-pad-fog")) { pad_fog = 1; argc--; argv++; }
+    if (argc < 2) { fprintf(stderr, "usage: glcheck [--diag-pad-fog] OUTDIR [failures.tsv]\n"); return 2; }
     dir = argv[1]; ffail = argc > 2 ? fopen(argv[2], "w") : stderr;
     if (!nxgl_create(0, 0, err, sizeof err)) { fprintf(stderr, "glcheck: no GL context: %s\n", err); return 2; }
     LOAD(glCreateShader); LOAD(glShaderSource); LOAD(glCompileShader); LOAD(glGetShaderiv); LOAD(glGetShaderInfoLog); LOAD(glDeleteShader); LOAD(glCreateProgram);

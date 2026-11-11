@@ -26,7 +26,7 @@ void t_c() {
         O(t)->release();
     }
     IDirect3DSurface9* s; d->CreateOffscreenPlainSurface(16, 16, (D3DFORMAT)MAKEFOURCC('D', 'X', 'T', '1'), D3DPOOL_SCRATCH, &s, nullptr); D3DLOCKED_RECT b0, lr; s->LockRect(&b0, nullptr, 0); s->UnlockRect(); CHECK_EQ(b0.Pitch, 32);
-    static const struct { RECT r; bool ok; int off; } bc[] = {{{0, 0, 4, 4}, true, 0}, {{4, 8, 12, 16}, true, 2 * 32 + 8}, {{1, 0, 5, 4}, false, 0}, {{0, 1, 4, 5}, false, 0}, {{0, 0, 6, 4}, false, 0}, {{0, 0, 4, 6}, false, 0}, {{0, 0, 16, 16}, true, 0}, {{12, 12, 16, 16}, true, 3 * 32 + 24}};
+    static const struct { RECT r; bool ok; int off; } bc[] = {{{0, 0, 4, 4}, true, 0}, {{4, 8, 12, 16}, true, 2 * 32 + 8}, {{1, 0, 5, 4}, false, 0}, {{1, 0, 4, 4}, false, 0}, {{0, 2, 4, 4}, false, 0}, {{0, 0, 4, 3}, false, 0}, {{0, 1, 4, 5}, false, 0}, {{0, 0, 6, 4}, false, 0}, {{0, 0, 4, 6}, false, 0}, {{0, 0, 16, 16}, true, 0}, {{12, 12, 16, 16}, true, 3 * 32 + 24}};
     for (auto& c : bc) { HRESULT hr = s->LockRect(&lr, &c.r, 0); CHECK_HR(hr, c.ok ? D3D_OK : D3DERR_INVALIDCALL); if (c.ok) { CHECK_EQ((uint8_t*)lr.pBits - (uint8_t*)b0.pBits, c.off); s->UnlockRect(); } }
     D3DSURFACE_DESC sd; s->GetDesc(&sd); CHECK(sd.Pool == D3DPOOL_SCRATCH && sd.Usage == 0); O(s)->release();
     // ---- double lock / unlock rules

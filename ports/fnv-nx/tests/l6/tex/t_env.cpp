@@ -30,7 +30,7 @@ void nxd3d_preload(NxObj* o) { nx_tex_preload(o); }
 bool nx_env_decltype_supported(uint32_t t) { return t != D3DDECLTYPE_FLOAT16_4; }
 bool nx_env_query_supported(uint32_t t) { return t != D3DQUERYTYPE_VCACHE; }
 int main(int argc, char** argv) {
-    if (argc > 1) g_data = argv[1];
+    setvbuf(stdout, nullptr, _IOLBF, 0); if (argc > 1) g_data = argv[1];
     t_a(); t_b(); t_c(); t_d(); t_e(); t_h();
     int bad = 0;
     for (int i = 0; i < 8; i++) if (g_checks[i] || g_fails[i]) { printf("PART %c: %d checks, %d failed\n", 'a' + i, g_checks[i], g_fails[i]); bad += g_fails[i] != 0 || g_checks[i] == 0; }

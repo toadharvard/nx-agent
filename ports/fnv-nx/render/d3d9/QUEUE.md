@@ -159,3 +159,11 @@ ABI points the lead must close in nxgpu4.h (no rule yet; the backend refuses, it
 3. 3D BC4/BC5 and 8x MSAA are not creatable on llvmpipe GL 4.5: the env table must not promise them (check env_*.tsv against this).
 4. X channels (BGRX8, RGBX8 read back 0xFF); 3D linear GenMips uses the GL-defined filter.
 5. 3D box addressing in ImageUpdate / image_read (z/d = slices, layer 0; slice pitch = rows * rowPitch) and native depth byte layouts are now written in gl4_fmt.c: copy into nxgpu4.h.
+
+## D4 delivered 2026-11-11 (textures, surfaces, volumes): NOT green, one real gap
+
+`dev/res_{fmt,tex,surf,create}.cpp`, `res_tex.h`, `res_texcore.h` (473 lines), `tests/l6/tex`. Lead's run: G-METHOD missing 200 -> 141 of 497 (dev + res + tex); parts a-e 0 failed (a: 1 209 676 checks); part h RED 46 of 572.
+- Part h (format table completeness against the env table): no backend format for R8G8B8 (render-target surface), L6V5U5, X8L8V8U8, INDEX16, INDEX32, NULL (render target). Task D4b after N1 (the table moves to `render/d3d9/front`): rule per role - index formats are not images; NULL = a pass with no colour storage; the three texel formats need a stated storage format + exact conversion at lock / upload, or a backend format.
+- Left out, no rule: Surface9::GetDC / ReleaseDC (needs L5's GDI DIB), CreateOffscreenPlainSurfaceEx (no source for the Windows result).
+- Decided with doubt (worker): invalid lock rect = INVALIDCALL (Windows 7 column of Wine's test); lockable MSAA target = INVALIDCALL (MS doc, Wine accepts); Levels > 32 = INVALIDCALL (NO source: recheck); standalone surface GetContainer returns INVALIDCALL where Wine returns E_NOINTERFACE (recheck in obj.cpp).
+- Wiring owed to D5: product `nxd3d_preload` -> nx_tex_preload; backend hooks nxd3d_image_* have test definitions only; draw path calls nx_img_gpu_wrote / NxImg::sync.
