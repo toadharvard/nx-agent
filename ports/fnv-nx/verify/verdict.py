@@ -37,7 +37,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
 import sandbox  # noqa: E402
 
-TRAILER = "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 HEX = re.compile(r"^([0-9a-f]{40}|[0-9a-f]{64})$")
 
 class Err(Exception):
@@ -209,8 +208,7 @@ def cmd_merge(a):
         gone = sorted({g["name"] for g in prev["gates"]} - {g["name"] for g in v["gates"]})
         if gone:
             raise Err("blocked: ratchet, gate(s) removed since previous green verdict: " + ",".join(gone), 2)
-    msg = "%smerge %s\n\nverdict: green, tree %s, gates %d\n\n%s\n" % (o.get("--message-prefix", ""), o["--from"], tree,
-                                                                        len(v["gates"]), TRAILER)
+    msg = "%smerge %s\n\nverdict: green, tree %s, gates %d\n" % (o.get("--message-prefix", ""), o["--from"], tree, len(v["gates"]))
     new = _git_ok(repo, "commit-tree", tree, "-p", old, "-p", src, inp=msg)
     rc, _, err = (0, "", "") if "--base" in o else _git(repo, "update-ref", ref, new, old)
     if rc:
