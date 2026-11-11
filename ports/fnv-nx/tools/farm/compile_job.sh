@@ -80,7 +80,7 @@ if [ ! -f "$($CXX -print-file-name=plugin)/include/gcc-plugin.h" ] || ! command 
   fi
 fi
 rsync -rc --delete --out-format='%n' "$WORK/tree/" "$PT/" > "$WORK/changed.txt"
-FLAGS_HASH=$( (cat "$P/tools/link/compile.sh"; for d in ftoi order sdd pi dispatch addr names; do cat "$P"/toolchain/$d/*.cc; done
+FLAGS_HASH=$( (cat "$P/tools/link/compile.sh"; for d in ftoi order sdd pi dispatch addr names layout; do cat "$P"/toolchain/$d/*.cc; done
   find "$P/shim/include" -type f -print0 | LC_ALL=C sort -z | xargs -0 cat; \
   git -C "$EXT/sse2neon" rev-parse HEAD; $CXX --version | head -1; echo "RACE=$RACE") | sha256sum | cut -c1-16)
 grep -v '/$' "$WORK/changed.txt" | grep -vxF -f "$WORK/shard.list" | grep -v '^src/.*\.\(cpp\|c\)$' > "$WORK/changed_other.txt" || true

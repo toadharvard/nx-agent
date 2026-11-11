@@ -33,7 +33,7 @@ flags=$(bash "$CS" --print-flags "$W/empty" "$W/out-flags" 2> "$W/flags.err"); c
 for bad in fnvnx_order-mode fnvnx_order-keys fnvnx_order-refcount fnvnx_order-uninit fnvnx_order-discover; do
   grep -q -- "$bad" <<<"$flags" && { echo "FAIL: --print-flags has $bad"; fail=1; }
 done
-for want in fnvnx_ftoi fnvnx_order fnvnx_sdd fnvnx_pi fnvnx_dispatch fnvnx_addr fnvnx_names; do
+for want in fnvnx_ftoi fnvnx_order fnvnx_sdd fnvnx_pi fnvnx_dispatch fnvnx_addr fnvnx_names fnvnx_layout; do
   grep -q -- "-fplugin=.*$want.so" <<<"$flags" || { echo "FAIL: --print-flags lacks plugin $want"; fail=1; }
 done
 grep -qx -- '-DFNVNX_SDD=1' <<<"$flags" || { echo "FAIL: no -DFNVNX_SDD=1"; fail=1; }

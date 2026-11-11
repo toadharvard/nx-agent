@@ -123,6 +123,11 @@ FLAGS+=(-fplugin="$ADDR_SO")
 NAMES_SO=$(CXX=$CXX bash "$HERE/toolchain/names/build.sh" "$OUT/.names") \
   || { echo "compile.sh: the fnvnx_names plugin does not build" >&2; exit 2; }
 FLAGS+=(-fplugin="$NAMES_SO")
+# R7 (toolchain/layout, tools/equiv/r7.py): the layout GCC gives every record type of the unit, keyed by MSVC's decorated
+# type name, in section .fnvnx.layout. It changes no code.
+LAYOUT_SO=$(CXX=$CXX bash "$HERE/toolchain/layout/build.sh" "$OUT/.layout") \
+  || { echo "compile.sh: the fnvnx_layout plugin does not build" >&2; exit 2; }
+FLAGS+=(-fplugin="$LAYOUT_SO")
 # AB_FLAGS: extra flags appended after all of the above, so they win (e.g. -fstrict-aliasing against the parity set).
 # For A/B measurements only (tools/perf/unit_ab.sh, docs/PERF.md 11.8), never for a build that runs; unset = no
 # change.
@@ -153,7 +158,7 @@ jq -r --arg fpfast "$FPFAST_ARG" '.units[] | [.source, (([.flags[]? | select(sta
   "$TREE/build/units.json" | awk -F'\t' '$2 != ""' > "$OUT/defines.tsv"
 # Objects are kept only while the flags (the order options included), the plugins and the shim headers stay the
 # same: a change of any of them rebuilds every object of <obj dir> (V1's C4: an ORDER_OBJECT change kept old objects).
-objstamp=$( (echo "$FLAGS_STR"; cat "$FTOI_SO" "$ORDER_SO" "$SDD_SO" "$PI_SO" "$DISPATCH_SO" "$ADDR_SO" "$NAMES_SO"; find "$HERE/shim/include" -type f -print0 | LC_ALL=C sort -z |
+objstamp=$( (echo "$FLAGS_STR"; cat "$FTOI_SO" "$ORDER_SO" "$SDD_SO" "$PI_SO" "$DISPATCH_SO" "$ADDR_SO" "$NAMES_SO" "$LAYOUT_SO"; find "$HERE/shim/include" -type f -print0 | LC_ALL=C sort -z |
             xargs -0 cat) | sha256sum | cut -c1-16)
 # One compile.sh at a time per object directory: a second run with other flags would delete the first one's objects
 # here (the stamp above) while it works (try1of1, D26: 2,499 units "failed (no error line)", 1,716 logs of 0 bytes,
