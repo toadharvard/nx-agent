@@ -64,6 +64,16 @@ def body_of(t, start):
         i += 1
 
 
+def split_top(t):
+    """Comma split outside parentheses (MAKEFOURCC('A', 'B', 'C', 'D') is one item)."""
+    out, d, cur = [], 0, []
+    for ch in t:
+        d += (ch == "(") - (ch == ")")
+        if ch == "," and d == 0: out.append("".join(cur)); cur = []
+        else: cur.append(ch)
+    return out + ["".join(cur)]
+
+
 def load():
     t = {f: text(f) for f in HDRS + ("fnvnx_win32.h",)}
     allt = "\n".join(t[h] for h in HDRS)
@@ -76,7 +86,7 @@ def load():
         body, end = body_of(allt, m.end() - 1)
         name = re.match(r"\s*(\w+)", allt[end:]).group(1)
         names, v = [], -1
-        for item in re.sub(r"#\w+[^\n]*", " ", body).split(","):
+        for item in split_top(re.sub(r"#\w+[^\n]*", " ", body)):
             item = item.strip()
             if not item: continue
             if "=" in item:
