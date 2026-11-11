@@ -113,7 +113,7 @@ def select(a, meta, ent):
 def compile_all(a, funcs):
     """funcs: sorted addresses -> (elf, bad {addr: reason})"""
     import chrun; T = chrun.T
-    flags = [f for f in T.FLAGS if f not in ('-DFNVL_FLAGS_IO', '-DFNVL_STUBX')] + ['-DFNVL_TRACE', '-I', a.lifter + '/rt']; od = a.work + '/obj'; os.makedirs(od, exist_ok=True)
+    flags = [f for f in T.FLAGS if f != '-DFNVL_FLAGS_IO'] + ['-DFNVL_TRACE', '-I', a.lifter + '/rt']; od = a.work + '/obj'; os.makedirs(od, exist_ok=True)
     texts = {}
     for f in funcs: texts[f] = G['L'].lift(G['img'], **lift_args(f))[0]
     chunks = [funcs[i:i + 40] for i in range(0, len(funcs), 40)]

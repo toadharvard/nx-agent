@@ -23,7 +23,7 @@ G = {}
 
 def flags():
     import instest
-    return [f for f in instest.FLAGS if f not in ('-DFNVL_FLAGS_IO', '-DFNVL_STUBX')] + ['-I', LIFT + '/rt']
+    return [f for f in instest.FLAGS if f != '-DFNVL_FLAGS_IO'] + ['-I', LIFT + '/rt']
 
 
 def run(cmd, **k):

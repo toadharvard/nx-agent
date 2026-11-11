@@ -201,7 +201,7 @@ def main():
     code, ents = build(); nltest.BASE = BASE; img = nltest.Fake(code); img.entries = set(v[2] for v in ents.values()) | {SVC_UNW, SVC_RAISE}; T.G['img'] = img; T.G['L'] = L
     texts = {}
     for n, (ad, sz, start, owns) in ents.items(): texts[start] = L.lift(img, ad, sz, start=start, owns=owns)[0]
-    flags = [f for f in T.FLAGS if f not in ('-DFNVL_FLAGS_IO', '-DFNVL_STUBX')] + ['-I', LIFT + '/rt']
+    flags = [f for f in T.FLAGS if f != '-DFNVL_FLAGS_IO'] + ['-I', LIFT + '/rt']
     o, err = chain.comp_chunk((L.PRELUDE + '\n'.join(texts.values()), flags + ['-DFNVL_TRACE'], a.work))
     if not o: sys.exit('compile: ' + err)
     so = a.work + '/seh.o'; r = subprocess.run(['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++', '-I', LIFT + '/rt', LIFT + '/rt/seh.c', '-o', so], capture_output=True, text=True)

@@ -139,7 +139,7 @@ def lift_mode(img, mode, addr, size, **kw):
     finally: core.MEMCLASS = None
 def compile_obj(texts, out, prelude=None):
     """out = <dir>/<name>.o; the source is always <dir>/x.cpp compiled from <dir> (the object records the source file name)"""
-    d = os.path.dirname(out); os.makedirs(d, exist_ok=True); open(d + '/x.cpp', 'w').write((prelude or L.PRELUDE) + '\n'.join(texts))
+    d = os.path.dirname(out); os.makedirs(d, exist_ok=True); open(d + '/x.cpp', 'w').write((prelude or T.test_prelude(L)) + '\n'.join(texts))
     r = subprocess.run(['aarch64-linux-gnu-g++'] + T.FLAGS + ['x.cpp', '-o', os.path.basename(out)], capture_output=True, text=True, env=dict(os.environ, LC_ALL='C'), cwd=d)
     if r.returncode: print(r.stderr[:1500], file=sys.stderr)
     return r.returncode == 0

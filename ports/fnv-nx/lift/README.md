@@ -13,7 +13,6 @@ What lives where:
 | `test/` | `golden.py` (output digest of a lifter over all functions), `instest.py` (every instruction form against Unicorn), unit tests of the runtime |
 | `bench/` | function-level equivalence bench (x86 under Unicorn against lifted AArch64 under Unicorn, same memory world) |
 | `tools/` | `universe.py` (every entry the exe needs a body for), `census.py`, `cache.py`, `bridges.py`, `report.py` |
-| `poc/` | the PoC lifter the package was cut from; reference for the golden digest only |
 
 The tools are ours. Their **output is exe-derived** (lifted C, entry lists, per-function tables, objects) and is
 written only outside this repository: `fnv-nx-build` branches `l3-lift/...` and the containers (`FNVNX_FACTS`,

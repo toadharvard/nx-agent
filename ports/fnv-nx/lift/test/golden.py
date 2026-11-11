@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Golden gate for lifter refactors: lift every function of funcs.tsv and print one digest of all outputs.
 
-    golden.py <module dir> [--jobs N]     module dir holds either lifter.py (PoC) or the fnvlift package
+    golden.py <module dir> [--jobs N]     module dir holds the fnvlift package
 
 Prints: functions, lifted, the failure-reason census, and sha256 over (address, C text | failure reason) in address
 order. Two lifters are output-identical exactly when the digests are equal. Inputs: FNVNX_EXE (the player's exe),
@@ -13,10 +13,7 @@ UNIVERSE = os.environ.get('FNVNX_UNIVERSE', '/home/user/l3facts/universe.tsv')  
 
 def load(moddir):
     sys.path.insert(0, moddir)
-    try:
-        import lifter as L
-    except ImportError:
-        import fnvlift as L
+    import fnvlift as L
     return L
 
 def work(arg):

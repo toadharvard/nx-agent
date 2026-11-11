@@ -157,7 +157,7 @@ def finish(a):
 def recipe(ref, commit, tree):
     """lift/pack/build.json: the flags are the lifted-code flags of test/instest.py (one source), the units are the fixed names."""
     import instest
-    drop = ('-c', '-DFNVL_FLAGS_IO', '-DFNVL_STUBX')
+    drop = ('-c', '-DFNVL_FLAGS_IO')
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'cc': 'aarch64-linux-gnu-gcc-13', 'cxx': 'aarch64-linux-gnu-g++-13'},
            'flags': {'c': ['-mabi=ilp32'], 'cxx': [f for f in instest.FLAGS if f not in drop], 'asm': ['-mabi=ilp32', '-fPIC']},
            'include': ['/ext/liftpack/inc'], 'units': 'all',

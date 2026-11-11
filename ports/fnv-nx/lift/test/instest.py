@@ -23,7 +23,7 @@ FLAGS = ('-mabi=ilp32 -std=gnu++17 -c -O2 -fms-extensions -fshort-wchar -froundi
          '-fwrapv -fno-delete-null-pointer-checks -fcheck-new -fno-sized-deallocation -fno-lifetime-dse -ffp-contract=off '
          '-fPIC -fpermissive -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack-protector -fno-stack-clash-protection '
          '-mno-outline-atomics -U_FORTIFY_SOURCE -ffreestanding -fno-exceptions -fno-asynchronous-unwind-tables -fno-math-errno -w '
-         '-DFNVL_FLAGS_IO -DFNVL_STUBX -ffixed-x19 -ffixed-x20 -ffixed-x21 -ffixed-x22 -ffixed-x23 -ffixed-x24 -ffixed-x25 -ffixed-x26 -ffixed-x27').split()
+         '-DFNVL_FLAGS_IO -ffixed-x19 -ffixed-x20 -ffixed-x21 -ffixed-x22 -ffixed-x23 -ffixed-x24 -ffixed-x25 -ffixed-x26 -ffixed-x27').split()
 HARN, HARN_END, CPU, ASTACK, RETPAD = 0xE0000000, 0xE2000000, 0xE1000000, 0xE1F00000, 0xE1FF0000
 HX = 0xE1E00000                  # x86 oracle harness page (inside the guarded range: a test access to it counts as a collision)
 FSB = 0x7FFDF000                 # fs base on both sides
@@ -38,6 +38,12 @@ GREG = [UC_ARM64_REG_X19 + i for i in range(8)]
 X86R = [UC_X86_REG_EAX, UC_X86_REG_ECX, UC_X86_REG_EDX, UC_X86_REG_EBX, UC_X86_REG_ESP, UC_X86_REG_EBP, UC_X86_REG_ESI, UC_X86_REG_EDI]
 PFX = {0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65}
 STRING = {a + b for a in ('movs', 'stos', 'lods', 'scas', 'cmps', 'ins', 'outs') for b in 'bwd'}
+def test_prelude(L):
+    """the lifter's prelude for the instruction tests: a direct call / tail to another entry is the test's observable event fnvl_call(c, target) (the
+    Unicorn hook in Arm.stub reads the target and stops), because the other entry is not part of the test image. The product header has one CALLX only."""
+    return L.PRELUDE + '\nextern "C" void fnvl_call(struct cpu*, u32 target);\n#undef CALLX\n#define CALLX(h) fnvl_call(c,0x##h)\n'
+
+
 def form_key(ins, X):
     raw = bytes(ins.bytes); i = 0
     while i < len(raw) and raw[i] in PFX: i += 1
@@ -485,7 +491,7 @@ def build(batch_id, items, work):
     env = dict(os.environ, LC_ALL='C'); bad = {}; objs = []; d = '%s/b%d' % (work, batch_id); os.makedirs(d, exist_ok=True)
     def comp(its):
         if not its: return
-        cpp = '%s/%d.cpp' % (d, len(objs)); o = cpp[:-4] + '.o'; open(cpp, 'w').write(G['L'].PRELUDE + '\n'.join(t for a, t in its))
+        cpp = '%s/%d.cpp' % (d, len(objs)); o = cpp[:-4] + '.o'; open(cpp, 'w').write(test_prelude(G['L']) + '\n'.join(t for a, t in its))
         r = subprocess.run(['aarch64-linux-gnu-g++'] + FLAGS + [cpp, '-o', o], capture_output=True, text=True, env=env)
         if r.returncode == 0: objs.append(o); return
         why = {int(m.group(2), 16): re.findall(r'error: ([^\n]*)', r.stderr[m.start():])[:1] for m in re.finditer(r'In function [^\n]*?(L_([0-9a-f]{8}))', r.stderr)}
