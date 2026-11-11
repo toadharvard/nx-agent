@@ -15,6 +15,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 static int n_ok, n_bad;
 #define CHECK(c, ...) do { if (c) n_ok++; else { n_bad++; printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
@@ -206,7 +207,7 @@ static int main_run(const char *tag, const uint8_t *file, uint32_t len, const ui
     nbad = 0;
     for (pg = 0; pg < e.size >> 12; pg++) {
         uint32_t va = e.base + pg * 4096u;
-        unsigned want = e.prot[pg], hostr = (want & (FNVNX_PROT_R | FNVNX_PROT_W)) != 0;
+        unsigned want = e.prot[pg]; int hostr = (want & (FNVNX_PROT_R | FNVNX_PROT_W)) != 0;
         if (!g_pt[va >> 12].mapped || g_pt[va >> 12].prot != want) { nbad++; continue; }
         if (probe_read(g_res + va) != hostr) { nbad++; continue; }
         if (hostr && memcmp(g_res + va, e.img + pg * 4096u, 4096)) nbad++;
