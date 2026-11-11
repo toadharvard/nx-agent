@@ -374,16 +374,16 @@ def build(exe, units, jobs=4, log=print):
     for a in dec:
         known[a] = dec[a][0]
     fn = {}
-    pending = set(dec)
+    todo = set(dec)
     for _, v in ptrs:
-        pending.add(v)
+        todo.add(v)
     rnd = 0
     with multiprocessing.Pool(jobs, _init, (exe, units)) as pool:
-        while pending:
+        while todo:
             rnd += 1
-            starts = sorted(set(known) | pending | set(fn))
+            starts = sorted(set(known) | todo | set(fn))
             jobs_ = []
-            for a in sorted(pending):
+            for a in sorted(todo):
                 k = bisect.bisect_right(starts, a)
                 bound = starts[k] if k < len(starts) else img.text[0] + img.text[1]
                 jobs_.append((a, known.get(a, 0), bound))
@@ -393,7 +393,7 @@ def build(exe, units, jobs=4, log=print):
                 for F in res:
                     fn[F['a']] = F
                     for _, t in F['calls'] + F['tails'] + F['codeptrs']:
-                        if img.intext(t) and t not in fn and t not in pending:
+                        if img.intext(t) and t not in fn and t not in todo:
                             new.add(t)
             log('round %d: analyzed %d, new targets %d' % (rnd, len(jobs_), len(new)))
             # a target inside an already analyzed decomp function is a mid-function entry, not a function
@@ -404,7 +404,7 @@ def build(exe, units, jobs=4, log=print):
                 if k >= 0 and t < ds[k] + dec[ds[k]][0]:
                     continue
                 keep.add(t)
-            pending = keep
+            todo = keep
     for a, F in fn.items():
         F['decomp'] = a in dec
         F['sym'] = dec[a][1] if a in dec else ''

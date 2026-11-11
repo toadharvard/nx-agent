@@ -2,7 +2,7 @@
  * inside the ILP32 guest module and runs the start sequence (src/start.c, S1..S8). The guest runtime calls main().
  *
  * Nothing here decides anything: every hook is a total mapping onto one host call, and every failure is reported to
- * start.c, which stops the start with a logged message. No hook invents a value or a provider.
+ * start.c, which stops the start with a logged message. There is no fallback value and no default provider.
  *   read        fs_open once, fs_pread of the exe (path FNVNX_EXE_PATH = the SD layout's exe, sdlayout.h)
  *   map_fixed   host map_fixed from a zeroed, page-aligned heap block (the host makes the block inaccessible)
  *   protect     FNVNX_PLAT_VM_PROTECT (host.c gains it, see below); R/W only, a request for X is refused

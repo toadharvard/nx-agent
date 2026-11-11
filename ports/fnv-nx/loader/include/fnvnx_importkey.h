@@ -31,7 +31,7 @@ extern const uint16_t fnvnx_import_by_key_idx[]; /* key index (key - BASE) / STE
 extern const size_t fnvnx_import_key_count;
 
 /* Value for an import: by name when name != NULL, else by ordinal. 0 when the platform does not provide it (the
- * caller refuses to start). Data rows give the object's address (truncated to 32 bits). */
+ * caller refuses to start; there is no fallback). Data rows give the object's address (truncated to 32 bits). */
 uint32_t fnvnx_import_key(const char *dll, const char *name, uint32_t ordinal);
 
 /* The row of a key, NULL when key is no key of the table. O(1). */
