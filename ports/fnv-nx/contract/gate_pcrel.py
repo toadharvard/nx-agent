@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """gate_pcrel - the guest is position independent everywhere (S7 of the loader rules; part of the L1 verdict).
 
-    gate_pcrel.py --elf <linked guest elf> --objects <dir of the objects that were linked> --work <dir>
+    gate_pcrel.py --elf <linked guest elf> [--inputs inputs.rsp ...] [--objects <dir>] [--object FILE ...] --work <dir>
                   --readelf <aarch64 readelf> --nm <aarch64 nm>
+
+Universe: every relocation of every file consumed by the link, no sampling: the files of each `--inputs` response file (ld.py's inputs.rsp:
+objects and archives, one quoted path per line; every member of an archive is read, readelf prints them as `archive(member)`), every `*.o`
+and `*.a` directly in `--objects`, and every `--object` (startfiles).
 
 A PC-relative relocation (adrp/adr/literal load/branch) whose symbol is absolute in the linked ELF is right
 only at the link base: a relocated guest moves the PC and not the target.  An image address must be reached
@@ -11,12 +15,15 @@ Gate: 0 sites.  A "pinned" guest (one that may only run at its link base) is not
 Exit status 1 otherwise.  Counts only on stdout.
 --work: a directory for the response file and the site list (nothing is read from TMPDIR or the process id).
 Gate file `pcrel` ($GATE_OUT/pcrel.json, gatefile.py): universe = the PC-relative relocations examined (second summary line
-of the tool), certified = examined - offending sites, uncertified = `object:section+offset:symbol` of the first 50 (sorted).
+of the tool), certified = examined - offending sites, uncertified = `object:section+offset:symbol` of the first 50 (sorted); all of them in $GATE_OUT/pcrel.ids (an archive member is `archive(member)`).
 """
 import argparse, glob, os, re, subprocess, sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'link'))
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gatefile
+import gateids
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL = os.path.join(HERE, '..', 'toolchain', 'game', 'pcrel_abs.py')
@@ -25,12 +32,21 @@ TOOL = os.path.join(HERE, '..', 'toolchain', 'game', 'pcrel_abs.py')
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--elf', required=True)
-    ap.add_argument('--objects', required=True)
+    ap.add_argument('--inputs', action='append', default=[], help='response file of ld.py (one quoted path per line)')
+    ap.add_argument('--objects', help='directory whose *.o and *.a files were linked')
+    ap.add_argument('--object', action='append', default=[], help='one more linked object or archive')
     ap.add_argument('--work', required=True, help='directory for the response file and the site list (created)')
     ap.add_argument('--readelf', required=True, help='path of the aarch64 readelf (no PATH lookup)')
     ap.add_argument('--nm', required=True, help='path of the aarch64 nm (no PATH lookup)')
     a = ap.parse_args()
-    objs = sorted(glob.glob(os.path.join(a.objects, '*.o')))
+    objs = list(a.object)
+    for rsp in a.inputs:
+        with open(rsp) as fh:
+            objs += [ln.strip().strip('"') for ln in fh if ln.strip()]
+    if a.objects:
+        objs += sorted(glob.glob(os.path.join(a.objects, '*.o')) + glob.glob(os.path.join(a.objects, '*.a')))
+    if not objs:
+        sys.exit('gate_pcrel: no input files (--inputs, --objects or --object)')
     os.makedirs(a.work, exist_ok=True)
     rsp = os.path.join(a.work, 'pcrel.rsp')
     sites = os.path.join(a.work, 'pcrel_sites.tsv')
@@ -50,7 +66,8 @@ def main():
             p = ln.rstrip('\n').split('\t')
             if p[0][:1] != '#' and len(p) >= 5:
                 ids.append('%s:%s+%s:%s' % (os.path.basename(p[0]), p[1], p[2], p[4]))
-    gatefile.write('pcrel', examined, examined - n, ids, '%s; examined %d' % (first, examined))
+    gatefile.write('pcrel', examined, examined - n, ids, '%s; examined %d in %d files' % (first, examined, len(objs)))
+    gateids.write_ids('pcrel', ids)
     sys.exit(1 if n else 0)
 
 

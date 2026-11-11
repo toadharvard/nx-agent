@@ -10,6 +10,7 @@ Universe (no sampling): every relocation of every object and of every member of 
 path per line, as ld.py writes them) or --object; every symbol DEFINED by those inputs; every --ld-arg.
 Red items:
   - a relocation whose symbol is SHN_ABS in its own object                         id `member:section+offset:symbol`
+  - a relocation without a symbol (symbol index 0: the assembler folded an absolute value into the addend), symbol `*ABS*`
   - a relocation whose symbol is undefined in its object and SHN_ABS in --elf (the symbol of a script or a --defsym), same id
   - a symbol an input defines as SHN_ABS (an assembler `.set` constant, not a file or section symbol)   id `member:def:symbol`
   - an --ld-arg that defines a symbol (`--defsym`, `-defsym`)                       id `ld-arg:<argument>`
@@ -72,7 +73,9 @@ def scan(label, d, absnames):
                 off, info = struct.unpack_from('<II', d, o)
                 nrel += 1
                 name, typ, shndx = tab[info >> 8] if info >> 8 < len(tab) else ('', 0, 0)
-                if info >> 8 and (shndx == SHN_ABS or (shndx == SHN_UNDEF and name in absnames)) and typ != STT_FILE:
+                if not info >> 8 and info & 0xff:
+                    red.append('%s:%s+%x:*ABS*' % (label, names[s[7]], off))
+                elif info >> 8 and (shndx == SHN_ABS or (shndx == SHN_UNDEF and name in absnames)) and typ != STT_FILE:
                     red.append('%s:%s+%x:%s' % (label, names[s[7]], off, name))
     return nrel, ndef, red
 
@@ -109,7 +112,7 @@ def defsym_arg(a):
 
 def check(paths, ldargs, absnames):
     """(universe, [red ids]) over the files `paths` (objects and archives) and the linker arguments."""
-    uni, red = 0, []
+    uni, red, absnames = 0, [], frozenset(absnames)
     for p in paths:
         for label, d in labels(p):
             r, df, bad = scan(label, d, absnames)
