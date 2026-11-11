@@ -1,7 +1,7 @@
 # L4 VERIFY 009: bootsock answers every case (no NotDetermined), rule R-SOCK (decision, 2026-11-11 23:15Z)
 
 Class: the socket model of the boot machine (verify/bootsock.py, module 11 fn 16..26, 30, 31) ends a run as
-"ext-module-missing" from 19 raise sites of `NotDetermined` (measured at 1979832). That is a stop-with-a-report path
+"ext-module-missing" from 18 raise sites of `NotDetermined` (measured at 1979832). That is a stop-with-a-report path
 (forbidden, CLAUDE.md 2026-11-10). It is on the boot path: the exe imports 21 wsock32 functions (l5-platform-001), which
 the platform maps onto these services.
 
