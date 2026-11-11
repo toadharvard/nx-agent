@@ -1,4 +1,4 @@
-/* fmath: correctly rounded x87 transcendentals and exact fprem/fprem1/fscale/fxtract (README "One reference CPU model", R8).
+/* fmath: correctly rounded x87 transcendentals and exact fprem/fprem1/fscale/fxtract (README "One reference CPU model", R8), and the msvcrt math library (acos asin atan cosh sinh tanh exp log pow, exact fmod sqrt).
    Freestanding C (no libc, libm, malloc, errno, FPU instruction): doubles are only moved as bit patterns, every computation is integer arithmetic, so the
    host rounding mode and FPSR are irrelevant. Builds natively (x86-64, for test/fmathtest.py) and as aarch64 ILP32.
 
@@ -30,6 +30,30 @@
        2^k expm1(f ln 2) + (2^k - 1), k = nearest integer, f = x - k exact.
      y log2(x), y log2(x+1): the table of FYL2X / FYL2XP1 for zero / infinite / NaN / out-of-domain operands and x = 1 (or x = +-0); u = x or 1 + x is formed EXACTLY in cw
        (every bit between 2^-1074 and 2^1025 fits in 72 limbs), u = 2^k w, z = w - 1 exact; u a power of two (z = 0) gives y k exactly; else ln w = 2 atanh(z/(2+z)).
+   MSVCRT LIBRARY FUNCTIONS (the 15 _CI* intrinsics, rt/msvcrt_ci.c): acos asin atan cosh sinh tanh exp log pow by the same engine (start limb count n >= 2), fmod and sqrt exact. Same rule, same steps 1-3.
+     Irrationality (step 2): for a non-zero algebraic x, e^x (Hermite-Lindemann) and so exp, sinh, cosh, tanh (sinh x = s algebraic gives e^x a root of E^2 - 2 s E - 1, cosh and tanh likewise) are transcendental;
+       ln x for algebraic x > 0, x != 1 is transcendental (e^(ln x) = x algebraic); asin, acos, atan: sin / cos / tan of a non-zero algebraic number is transcendental, and tan(atan x) = x, sin(asin x) = x, cos(acos x) = x
+       are algebraic, so the angle is not algebraic: never a double or half-way point (the lattice of step 3 contains only dyadic rationals). Exact cases decided before the loop: exp 0 -> 1, log 1 -> +0, acos 1 -> +0,
+       asin / atan / sinh / tanh 0 -> x, cosh 0 -> 1 (the only arguments with an algebraic value; everything else is transcendental, hence off the lattice).
+     Out-of-range and tiny arguments are decided by proved bounds, never by sampling: sin-like |x| < 2^-27: atan x, tanh x in (x (1 - x^2/3), x) and asin x, sinh x in (x, x (1 + x^2/3)) round to x (x^2/3 < 2^-55 is below
+       the half-spacing 2^-54 |x| of the nearer neighbour); cosh |x| < 2^-26: 1 < cosh x < 1 + 2^-53, rounds to 1 (below the half-way point); exp: 0 < x < 2^-54: 1 < e^x < 1 + 2^-53 -> 1; -2^-55 < x < 0: 1 - 2^-55 < e^x < 1 -> 1
+       (above the half-way point 1 - 2^-54); x >= 710: e^x > 2^1024 -> inf; x <= -746: e^x < 2^-1076 -> +0; sinh / cosh |x| >= 711 > asinh(2^1024) = 710.4758: inf; tanh |x| >= 20: 1 - |tanh x| < 2 e^-40 < 2^-54: rounds to 1.
+     atan: atan x = atan2(x, 1) of the existing evaluator. asin / acos (ev_asin, ev_acos): asin |x| = atan(|x| / sqrt((1 - |x|)(1 + |x|))), acos x = 2 atan(sqrt((1 - x)/(1 + x))), asin(+-1) = +-pi/2, acos(-1) = pi; the
+       bf_sqrt (Newton from a 32-bit integer square root, fixed iteration count, relative error <= 2^(4-32n)) and atan_core (pi/2 - atan(1/z) for z >= 1, atan(j/8) + atan(w), j = round(8 z), |w| <= 1/16 + d otherwise) carry
+       the error budget derived at each function: B = 32 n - GUARD(n) - 12, worst measured error / budget ~ 2e-10.
+     exp sinh cosh tanh (ev_hyp): X = |x| (tanh: 2|x|), k = round(X / ln 2) and R = X - k ln 2 in a context with n + 4 limbs (abs error <= 2^(-32n-51), then 2^(1-32n) from the truncation to n limbs), e^R by the series expm1;
+       exp = 2^(+-k)(1 + expm1(+-R)); for k = 0 the hyperbolics use E = expm1(X) in positive-term forms (sinh = E(E+2)/(2(E+1)), cosh = 1 + E^2/(2(E+1)), tanh = E/(E+2)), for k >= 1 Y = e^X >= 1.41 and
+       sinh = (Y - 1/Y)/2, cosh = (Y + 1/Y)/2, tanh = (Y - 1)/(Y + 1) (cancellation <= 2 bits). Overflow / underflow / subnormal results: the lattice of step 3.
+     log (ln_core): |x| = 2^k w, w in [3/4, 3/2), z = w - 1 = N 2^-s formed EXACTLY from the 53-bit mantissa (no wide context), ln w = 2 atanh(z/(2+z)), ln|x| = k ln 2 + ln w (cancellation <= 2.5 bits).
+     pow (ev_pow, pow_exact): C99 Annex F table for zero / infinite / NaN operands, |x| = 1, y = 0 and a negative base (sign by the parity of the integer y, non-integer y: invalid); then
+       EXACT CASES. x = m 2^e (m odd), |y| = a 2^f (a odd), j = max(-f, 0). x^y is a rational number iff 2^j | e and m = r^(2^j) (x^y = (x^a')^(1/2^j) with a' = a or |y|; a q-th root of an integer power is rational iff every
+       prime exponent of the radicand is divisible by q: the exponent of 2 is e a', of an odd prime p it is a' v_p(m), and gcd(a', 2^j) = 1); then x^y = r^(+-a') 2^(+-e a'/2^j). It is a dyadic rational iff y > 0 or r = 1
+       (r > 1 and y < 0 gives an odd denominator > 1). Points of the rounding lattice (doubles, half-way points, the overflow / underflow boundaries) are dyadic rationals whose odd part has <= 54 bits (r^a' < 2^64 is tested
+       with an overflow-checked product; j <= 5 since r >= 3 and m < 2^53; a' <= 64), so every other value (irrational, non-dyadic rational, r^a' >= 2^64) is off the lattice and the loop terminates for it. The enumerated cases
+       are therefore exactly: r = 1 (x = 2^e, 2^j | e: v = 2^N, N = (e/2^j) y exact, saturated to +-2^30 where the result is inf / 0 anyway) and r >= 3, y > 0 (v = r^a' 2^(e a'/2^j) < 2^64 2^S); each is rounded once by
+       exact_double (ties, subnormals, overflow, flags). Others: y ln|x| = T with relative error <= 2^-(B_L - 1) (ev_pow comment), |T| >= 2^11 decided by the region (inf / 0), |T| < 2^-59 -> 1 (round down / up), else
+       exp(T) as above with B = 32 n - GUARD(n) - 15 - max(T.e, 0).
+     fmod: exact long division (the remainder is a double: |r| < |y| and r a multiple of the ulp of y or x). sqrt: integer square root of m 2^56 (55 bits) with a sticky bit, rounded once (comment at fnvl_m_sqrt).
    EXACT FORMS (no engine): fscale = integer exponent shift with one rounding (exact_double); fxtract = bit fields; fprem / fprem1 = long division of 53-bit
      mantissas, C0 = Q2, C3 = Q1, C1 = Q0, C2 = 0 for D = exponent difference < 64; D >= 64: C2 = 1 and the reduction by exactly 32 floor(D/32) - 32 bits (the reference CPU, below).
    FLAGS: IE, ZE, OE, UE (tiny before rounding and inexact), PE and C1 (= rounded up in magnitude) are derived from the same cell the rounding uses.

@@ -9,7 +9,6 @@
    transcribed: _setfp(cw, mask, NULL, 0) and _setfp(NULL, 0, &sw, _MCW_EM), the same for the SSE variant. */
 #include "fnvl.h"
 #include "imp.h"
-#include "msvcrt.h"
 
 extern "C" {
 void fnvl_msvcrt_controlfp(void);

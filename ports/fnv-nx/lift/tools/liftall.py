@@ -163,7 +163,7 @@ def finish(a):
     imp = []
     # runtime: plain AAPCS files without -ffixed, guest-register files with the lifted-code flags
     rd = out + '/rt'; os.makedirs(rd, exist_ok=True)
-    jobs = [([CC] + CF, 'rt.c'), ([CC] + CF + ['-I', LIFT + '/rt'], 'x87.c'), ([CC] + CF, 'cpumodel.c'), ([CXX] + flags() + ['-x', 'c++'], 'seh.c'), ([CXX] + flags() + ['-x', 'c++'], 'enter.c'), ([CXX] + flags() + ['-x', 'c++'], 'unhandled.c')]
+    jobs = [([CC] + CF, 'rt.c'), ([CC] + CF + ['-I', LIFT + '/rt'], 'x87.c'), ([CC] + CF, 'cpumodel.c'), ([CXX] + flags() + ['-x', 'c++'], 'seh.c'), ([CXX] + flags() + ['-x', 'c++'], 'enter.c'), ([CXX] + flags() + ['-x', 'c++'], 'unhandled.c'), ([CXX] + flags() + ['-x', 'c++'], 'msvcrt_eh.c'), ([CXX] + flags() + ['-x', 'c++'], 'msvcrt_fp.c')]
     jobs += [([CC] + CF + ['-fno-builtin'], f) for f in ('fmath.c', 'rcptab.c') if os.path.exists('%s/rt/%s' % (LIFT, f))]
     for cmd, f in jobs: subprocess.check_call(cmd + ['%s/rt/%s' % (LIFT, f), '-o', '%s/%s.o' % (rd, f[:-2])])
     rtdef = set(l.split()[-1] for _, f in jobs for l in run([NM, '-g', '--defined-only', '%s/%s.o' % (rd, f[:-2])]).stdout.splitlines() if l.split())
@@ -173,6 +173,8 @@ def finish(a):
         if hit or absent: sys.exit('finish: an import row a loaded image needs has no entry (imp_blocked.tsv)')
         assert not set(k for k, *_ in imp) & set(syms)
         syms.update({k: s for k, s, *_ in imp})
+    for k, s in ((0x000fffd0, 'fnvl_msvcrt_eh_nested_catch'), (0x000fffe0, 'fnvl_msvcrt_eh_nested_collide')):     # the two handlers the msvcrt EH runtime registers on fs:[0] (rt/msvcrt.h FNVL_EH_KEY_*): guest entries with keys of their own
+        if s in rtdef: syms[k] = s
     h = phf.build(list(syms)); open(out + '/disp.S', 'w').write(phf.table_asm(syms, h))
     w('entries', [('%08x' % x, s, 'code' if x in code else 'import') for x, s in sorted(syms.items())])
     if imp: open(out + '/entries.tsv', 'a').write(open(out + '/imp_entries.tsv').readline())      # `# table_id <sha256 of bridge.tsv>` (last line)

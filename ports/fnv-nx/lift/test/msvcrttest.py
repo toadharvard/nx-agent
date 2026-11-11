@@ -266,8 +266,8 @@ def program():
        + 'fldcw word ptr [@O15]; push 0; push 0; call dword ptr [@S._controlfp]; add esp, 8;' + ST(16)    # guest sets x87 RC = chop (cw 0x0c7f): x87 flags 0x8001f|0x300|_PC_24 0x20000 = 0xa031f; MXCSR 0x8001f -> RC differs: _EM_AMBIGUOUS
        + 'ret')                                                               # eax: 0x80000000 | 0xa031f | 0x8001f = 0x800a031f
     # fp2: _clearfp: the guest sets MXCSR sticky IE|PE (0x1f80|0x21), divides 1/0 on the x87 (ZE): returns 0x10|1 (SSE) | 8 (x87) = 0x19; the second call returns 0; MXCSR is 0x1f80, FSW sticky = 0
-    dat('MXV', [0x1fa1])
-    fn('fp2', 'ldmxcsr dword ptr [@MXV]; fld1; fldz; fdivp st(1), st; fstp st(0); call dword ptr [@S._clearfp];' + ST(0) + 'call dword ptr [@S._clearfp];' + ST(1) +
+    dat('MXV', [0x1fa1]); dat('FDV', [0, 0x3ff00000, 0, 0]); dat('FDR', [0, 0])      # 1.0 and 0.0 from memory, the quotient stored (the host compiler cannot fold or drop the division)
+    fn('fp2', 'ldmxcsr dword ptr [@MXV]; fld qword ptr [@FDV]; fld qword ptr [@FDV+8]; fdivp st(1), st; fstp qword ptr [@FDR]; fnstsw ax;' + ST(4) + 'call dword ptr [@S._clearfp];' + ST(0) + 'call dword ptr [@S._clearfp];' + ST(1) +
        'stmxcsr dword ptr [@O2]; fnstsw ax; and eax, 0x3f;' + ST(3) + 'ret')
     # fp3: _fpclass of the 10 classes, in the order of the _FPCLASS_ bits: SNAN 1, QNAN 2, NINF 4, NN 8, ND 0x10, NZ 0x20, PZ 0x40, PD 0x80, PN 0x100, PINF 0x200
     vals = [0x7FF0000000000001, 0x7FF8000000000000, 0xFFF0000000000000, 0xBFF0000000000000, 0x8000000000000001, 0x8000000000000000, 0, 1, 0x3FF0000000000000, 0x7FF0000000000000]
@@ -309,7 +309,7 @@ def cases(P):
         ('fp1', '_controlfp round trips, rounding mode on fistp, precision, ambiguity', 0x800a031f, 'ret',
          {'O0': [0x9001f], 'O1': [0x9021f], 'O2': [3], 'O3': [0x0a7f], 'O4': [0x5f80], 'O5': [0x9011f], 'O6': [(-3) & M], 'O7': [0x9031f], 'O8': [2], 'O9': [0x9001f], 'O10': [(-2) & M],
           'O11': [0xa001f], 'O12': [0x007f], 'O13': [0x9001f], 'O14': [0x9001f], 'O16': [0x800a031f]}),
-        ('fp2', '_clearfp returns and clears the sticky flags of x87 and MXCSR', 0, 'ret', {'O0': [0x19], 'O1': [0], 'O2': [0x1f80], 'O3': [0]}),
+        ('fp2', '_clearfp returns and clears the sticky flags of x87 and MXCSR', 0, 'ret', {'O0': [0x19], 'O1': [0], 'O2': [0x1f80], 'O3': [0], 'O4': [0x4]}),
         ('fp3', '_fpclass: all 10 classes', None, 'ret', {'FPO': [1, 2, 4, 8, 0x10, 0x20, 0x40, 0x80, 0x100, 0x200]}),
         ('fp4', '_finite / _isnan', None, 'ret', {'FQO': [1, 0, 0, 0, 1, 1], 'FNO': [0, 0, 1, 1, 0, 0]}),
     ]
@@ -324,8 +324,11 @@ def main():
     h = open(rt + '/fnvl.h').read()
     if 'msvcrt' not in h:
         assert 'u32 fip, fdp; };' in h; open(rt + '/fnvl.h', 'w').write(h.replace('u32 fip, fdp; };', 'u32 fip, fdp; u32 msvcrt[6]; };', 1))
-    img = Fake(P.code); starts = {P.addr[n] for n in P.order}; img.entries = set(starts)
-    texts = [L.lift(img, P.addr[n], SLOT, owns=P.owns[n])[0] for n in P.order]
+    # every label a non-local transfer can land on is also an entry of the universe (the exe's EH tables make them `eh-cont` / `seh-handler` entries): the dispatcher serves it
+    # from an activation that is not the function's own (an __except block is entered with a deep esp: the block restores esp itself)
+    labels = [(P.addr[n], l) for n in P.order for l in P.owns[n]]
+    img = Fake(P.code); starts = {P.addr[n] for n in P.order} | {l for _, l in labels}; img.entries = set(starts)
+    texts = [L.lift(img, P.addr[n], SLOT, owns=P.owns[n])[0] for n in P.order] + [L.lift(img, a, SLOT, start=l, owns=[l])[0] for a, l in labels]
     flags = [f for f in instest.FLAGS if f not in ('-DFNVL_FLAGS_IO', '-DFNVL_STUBX')] + ['-I', rt]
     CF = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-w', '-c']
     CXXF = ['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++']; CCF = ['aarch64-linux-gnu-gcc'] + CF
@@ -346,7 +349,7 @@ def main():
     bad = 0
     ok = len(ent) == len(BRIDGE) and not blocked and not hit and not absent and all(s in rtdef for s in EH_KEYS.values())
     print('rows  %s: %d l3 rows have a body in the runtime objects (blocked %d), the 2 registration entries are defined' % ('equal' if ok else 'DIFF', len(ent), len(blocked))); bad += not ok
-    syms = {P.addr[n]: 'L_%08x' % P.addr[n] for n in P.order}; syms.update({k: s for k, s, *_ in ent}); syms.update(EH_KEYS)
+    syms = {x: 'L_%08x' % x for x in starts}; syms.update({k: s for k, s, *_ in ent}); syms.update(EH_KEYS)
     assert {n: k for k, s, d, n, b in ent} == {r[1]: KEY[r[1]] for r in BRIDGE}
     open(w + '/guest.cpp', 'w').write(L.PRELUDE + '\n'.join(texts)); open(w + '/native.c', 'w').write(NATIVE)
     hh = phf.build(list(syms)); open(w + '/tab.S', 'w').write(phf.table_asm(syms, hh))
