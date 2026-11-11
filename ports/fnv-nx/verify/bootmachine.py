@@ -25,11 +25,17 @@ Rules:
    (fn, args) found at construction; an unregistered module, or a handler raising ExtMissing, ends the run with reason
    "ext-module-missing": a configuration error, never answered with a value.
 5a. TOTAL against the header (hostapi.h TOTALITY TABLE, checked mechanically by tests/test_bootmachine.py against the parsed table): ext_call returns
-   NO_MODULE (module >= 64 or not registered), NO_SERVICE (fn > UINT32_MAX, or a module-11 fn without a row: 0, 35 and up), BAD_NARGS
+   NO_MODULE (module >= 64 or not registered), NO_SERVICE (fn > UINT32_MAX, or a module-11 fn without a row: 0, 36 and up), BAD_NARGS
    (fewer arguments than the row, or nargs > 0 with a null array); nargs above UINT32_MAX counts as UINT32_MAX; only a handler raising
-   ExtMissing ends the run. Module 11 serves fn 1..15 here. NOT SERVED because the header's table does not determine their result in this
-   environment (no network, no time-zone source): the sockets 16..33 (their wrong-nargs result -EINVAL is the header's and is returned; with the
-   exact nargs the run ends as "ext-module-missing") and TZ_AT 34 (its BAD_NARGS rule is the header's, else "ext-module-missing").
+   ExtMissing ends the run. Module 11 serves fn 1..35 here. The stage has no network interface and a fixed UTC zone (VC1). Sockets 16..33: the nargs rule (exactly
+   the count, else -EINVAL) and every result the header or host_sock.inc fixes from the arguments alone are served; the machine never opens a
+   socket (what a host's socket() returns on a real OS is not in the header), so no handle is open: every service that takes a handle first
+   answers -EBADF (host_sock_call checks the handle before anything else), POLL answers POLLNVAL per fd >= 0 (else waits its timeout in
+   virtual time; forever = deadlock), GAI_FETCH has no ticket (-EINVAL). A call whose result is the host network's (SOCKET with a known domain and
+   type, GAI_OPEN with a node or service) ends the run as "ext-module-missing" naming the service. TZ_AT 34: UTC, offset 0, no DST, abbr "UTC",
+   for every instant 0..INT64_MAX (the range of the virtual time service is not given by the header; above it ends the run as
+   "ext-module-missing"); tz_offset_minutes is the same zone's off_s / 60. THREAD_SELF 35: a record of the calling thread under a new id
+   (never a second thread): started, so thread_start and thread_join answer BadInput; thread_free ends the record only.
    ACCESS_FAULT_HANDLER (10) stays implemented in the machine (rule 5c) although the console host answers NO_SERVICE for it: a recorded difference.
    DISPLAY_DOCKED (9) answers 1 for the constructor argument profile="docked", 0 for "handheld" (default). Thread and directory ids are table
    handles (IdTable: (generation << 16) | slot, at most 1024 live together); the stack count (n_stacks) is a limit of this machine, not of the header.
@@ -47,7 +53,7 @@ Rules:
    wholly inside the range is unmapped (an access ends the run with "fault"), a partly covered extent has the covered part zeroed and
    stays accessible RW. A reserved page never committed is unmapped (a reservation is address space only): an access faults. release(base): unmaps the reservation's committed pages and frees it (not a base: BadInput 0x1759). decommit has no size or reservation check (host_vm.inc): view page -> 0xD401 first, else the extents inside the range are handled, a range holding none is 0. Pages committed here are
    owned: VM_PROTECT works on them. map_fixed over a reservation is refused (0xD401). thread_activity(tid, paused): tid 0 (the calling thread) BadInput 0x1759; a paused thread is
-   never picked (a pause of the running thread takes effect at once); unknown tid 0xE401, not started or ended 0xFA01.
+   never picked (a pause of the running thread takes effect at once); unknown tid NotFound 0x1359, not started or ended BadInput 0x1759 (no kernel call); the id of a THREAD_SELF record acts on its thread.
 5e. UNMAP_FIXED (fn 15, addr, size, src): the undo of exactly one earlier map_fixed. addr or src unaligned 0xCC01; size 0 / unaligned 0xCA01; (addr, size,
    src) not exactly a live map_fixed mapping 0xD401 (so a second unmap refuses). Success: the range is unmapped (an access faults), the src heap block
    is accessible RW again with the content the mapping had, and addr may be mapped again. A page of the range that is not RW is the header's
@@ -112,24 +118,27 @@ SLOTS = ["output_debug_string", "sleep_ns", "exit", "console_write", "console_fl
 API_SIZE = 0x30 + 8 * len(SLOTS)
 FNVNX_EXT_PLATFORM = 11
 EXT_NO_MODULE, EXT_NO_SERVICE, EXT_BAD_NARGS = U64 - 254, U64 - 253, U64 - 252   # FNVNX_EXT_*: -255, -254, -253 as int64 (hostapi.h)
-FNVNX_EXT_MODULES, UINT32_MAX = 64, 0xFFFFFFFF
+FNVNX_EXT_MODULES, UINT32_MAX, INT64_MAX = 64, 0xFFFFFFFF, (1 << 63) - 1
 FAULT_FRAME = 816
-# hostapi.h TOTALITY TABLE, module 11 services 1..15 and 34: fn -> (name, least nargs). 10 is served here although the console host
+# hostapi.h TOTALITY TABLE, module 11 services 1..15, 34 and 35: fn -> (name, least nargs). 10 is served here although the console host
 # answers NO_SERVICE for it (recorded difference). The sockets 16..33 are SOCK_SERVICES; both tables are checked against the header's
 # parsed table by tests/test_bootmachine.py.
 PLATFORM_FNS = {1: ("cpu_boost", 1), 2: ("thread_activity", 2), 3: ("message", 2), 4: ("vm_reserve", 2), 5: ("vm_commit", 2),
                 6: ("vm_decommit", 2), 7: ("vm_release", 1), 8: ("vm_protect", 3), 9: ("display_docked", 0),
                 10: ("access_fault_handler", 2), 11: ("section_create", 1), 12: ("section_map", 4), 13: ("section_unmap", 2),
-                14: ("section_free", 1), 15: ("unmap_fixed", 3), 34: ("tz_at", 2)}
-# the services whose result the header does not determine for this environment (no network, no time-zone source): their argument
-# checks are the header's, then the run ends with reason "ext-module-missing"
-UNSERVED = {34}
+                14: ("section_free", 1), 15: ("unmap_fixed", 3), 34: ("tz_at", 2), 35: ("thread_self", 0)}
 SOCK_SERVICES = {16: ("sock_socket", 3), 17: ("sock_close", 1), 18: ("sock_bind", 2), 19: ("sock_listen", 2), 20: ("sock_accept", 2),
                  21: ("sock_connect", 2), 22: ("sock_sendto", 5), 23: ("sock_recvfrom", 5), 24: ("sock_setsockopt", 5),
                  25: ("sock_getsockopt", 5), 26: ("sock_poll", 3), 27: ("sock_shutdown", 2), 28: ("sock_getsockname", 2),
                  29: ("sock_getpeername", 2), 30: ("sock_getfl", 1), 31: ("sock_setfl", 2), 32: ("sock_gai_open", 4),
                  33: ("sock_gai_fetch", 3)}
-WE_INVAL = 22   # FNVNX_WE_INVAL (sockwire.h)
+# wire numbers and lists of sockwire.h (tests/test_bootmachine.py compares them with the fixture copy)
+WE_BADF, WE_FAULT, WE_INVAL, WE_OVERFLOW, WE_AFNOSUPPORT = 9, 14, 22, 75, 97
+WIRE_AF, WIRE_SOCKTYPE = (0, 2, 10), (1, 2, 3)   # FNVNX_WIRE_AF_LIST, FNVNX_WIRE_SOCKTYPE_LIST
+WIRE_AI_MASK = 0x1 | 0x2 | 0x4 | 0x8 | 0x10 | 0x20 | 0x400   # FNVNX_WIRE_AI_LIST
+WEAI_BADFLAGS, WEAI_NONAME, WEAI_FAMILY, WEAI_SOCKTYPE = 2001, 2002, 2005, 2006
+WPOLLNVAL, GAI_HINTS_SIZE, POLL_MAX = 0x20, 52, 0x1000000   # sizeof(FnvnxWireAddrinfo) = 5 * 4 + sizeof(FnvnxWireSockaddr) 28
+TZ_VC1 = (0, 0, b"UTC")   # VC1's zone: off_s, dst, abbr
 WINDOW = (0x00400000, 0x02100000)   # the image range 0x00400000..0x00FDF000 and the data window up to 0x02100000: claimed by the host at start
 MAP_FIXED_MAX = 512
 FNVNX_HE_NOMEM, FNVNX_HE_NOTFOUND = 0x0559, 0x1359
@@ -178,6 +187,12 @@ class VirtualClock:
 
     def jump_to_ns(self, when):
         self.tick = max(self.tick, when * self.FREQ // 1_000_000_000 + 1)
+
+
+class SelfRecord:
+    """THREAD_SELF's record (hostapi.h 35): an id for the thread that called it; the record is started, the thread is not the host's"""
+    def __init__(self, t):
+        self.t = t
 
 
 class Thread:
@@ -314,8 +329,6 @@ class Machine:
     def _resolve_platform(self, services):
         h = {}
         for fn, (name, _n) in sorted(PLATFORM_FNS.items()):
-            if fn in UNSERVED:
-                continue
             f = getattr(services, "plat_" + name, None) or getattr(self, "_plat_" + name, None)
             if not callable(f):
                 raise MachineError("module 11 fn %d (%s) is defined by the header but neither the machine nor services has "
@@ -575,15 +588,80 @@ class Machine:
         if fn in SOCK_SERVICES:
             if nargs != SOCK_SERVICES[fn][1]:
                 return -WE_INVAL & U64
-            raise ExtMissing(FNVNX_EXT_PLATFORM, fn)   # the header does not determine a socket's result without a network
+            if not args:
+                raise MachineError("sock service %d with a null argument array: the header defines no result" % fn)
+            return self._sock(fn, self._words(args, nargs))
         if fn not in PLATFORM_FNS:
             return EXT_NO_SERVICE
         _name, need = PLATFORM_FNS[fn]
         if nargs < need or (nargs and not args):
             return EXT_BAD_NARGS
-        if fn in UNSERVED:
-            raise ExtMissing(FNVNX_EXT_PLATFORM, fn)
         return self.plat[fn](self._words(args, need))
+
+    # -- sockets, module 11 services 16..33 (rule 5a): no socket is ever open
+    def _sock(self, fn, a):
+        neg = lambda e: -e & U64
+        s32 = lambda v: (v & 0xFFFFFFFF) - (1 << 32) if v & 0x80000000 else v & 0xFFFFFFFF
+        s64 = lambda v: v - (1 << 64) if v >> 63 else v
+        if fn == 32:   # GAI_OPEN (node, service, hints, errno_out): hints are checked first (host_sock.inc sk_gai_open)
+            if a[2]:
+                if not self.accessible(a[2], a[2] + GAI_HINTS_SIZE, UC_PROT_READ):
+                    raise MachineError("sock_gai_open: hints %#x not readable guest memory" % a[2])
+                flags, fam, typ = struct.unpack("<IiI", self.uc.mem_read(a[2], 12))
+                if flags & ~WIRE_AI_MASK:
+                    return neg(WEAI_BADFLAGS)
+                if fam not in WIRE_AF:
+                    return neg(WEAI_FAMILY)
+                if typ and typ not in WIRE_SOCKTYPE:
+                    return neg(WEAI_SOCKTYPE)
+            if not a[0] and not a[1]:
+                return neg(WEAI_NONAME)
+            raise ExtMissing(FNVNX_EXT_PLATFORM, fn)   # the resolution of a name is the host network's
+        if fn == 33:   # GAI_FETCH: no GAI_OPEN ever gave a ticket
+            return neg(WE_INVAL)
+        if fn == 26:   # POLL (fds, nfds, timeout_ms)
+            fds, nfds, tmo = a[0], a[1], s32(a[2])
+            if nfds > POLL_MAX:
+                return neg(WE_INVAL)
+            if nfds and not fds:
+                return neg(WE_FAULT)
+            if nfds and not (self.accessible(fds, fds + 8 * nfds, UC_PROT_READ) and self.accessible(fds, fds + 8 * nfds, UC_PROT_WRITE)):
+                raise MachineError("sock_poll: fds %#x not readable and writable guest memory" % fds)
+            nval = 0
+            for i in range(nfds):   # a handle that is not open (all of them): POLLNVAL; a negative fd is ignored
+                at = fds + 8 * i
+                fd = struct.unpack("<i", self.uc.mem_read(at, 4))[0]
+                self.uc.mem_write(at + 6, struct.pack("<H", WPOLLNVAL if fd >= 0 else 0))
+                nval += fd >= 0
+            if nval or tmo == 0:   # an entry that is ready already ends the wait
+                return nval
+            return (("sleep", None if tmo < 0 else self.clock.now_ns() + tmo * 1_000_000), 0)
+        if fn == 16:   # SOCKET (domain, type, protocol)
+            if s64(a[0]) not in WIRE_AF:
+                return neg(WE_AFNOSUPPORT)
+            if s64(a[1]) not in WIRE_SOCKTYPE:
+                return neg(WE_INVAL)
+            raise ExtMissing(FNVNX_EXT_PLATFORM, fn)   # what the host's socket() answers for a known domain and type is not in the header
+        return neg(WE_BADF)   # every other service takes a handle first, and none is open
+
+    def tz_at(self, utc_s):
+        """VC1's time zone at an instant: (off_s, dst, abbr), None above INT64_MAX (the stage's time service has no stated range)"""
+        return TZ_VC1 if utc_s <= INT64_MAX else None
+
+    def _plat_tz_at(self, a):
+        utc_s, out = a
+        if not out:
+            return -WE_FAULT & U64
+        z = self.tz_at(utc_s)
+        if z is None:
+            raise ExtMissing(FNVNX_EXT_PLATFORM, 34)
+        if not self._writable(out, out + 16):
+            raise MachineError("tz_at: out %#x not writable guest memory" % out)
+        self.uc.mem_write(out, struct.pack("<iI8s", z[0], z[1], z[2][:7]))
+        return 0
+
+    def _plat_thread_self(self, a):
+        return self.ids.alloc("thread", SelfRecord(self.cur))
 
     # -- platform service, module 11 (rule 5b)
     def _vm_blocked(self):
@@ -878,8 +956,13 @@ class Machine:
         t = self.ids.get("thread", tid)
         if t is None:
             return self._refuse("thread_activity", tid, paused, "id names no live thread", FNVNX_HE_NOTFOUND)
-        if t.state in ("new", "done"):
-            return self._refuse("thread_activity", tid, paused, "thread is %s" % t.state, ERR_INVALID_STATE)
+        if isinstance(t, SelfRecord):   # started for ever; the kernel answers for the real thread
+            t = t.t
+            if t.state == "done" or (paused and t is self.cur):
+                raise MachineError("thread_activity: the kernel's result for %s is not defined by the header"
+                                   % ("a thread that has ended" if t.state == "done" else "pausing the calling thread"))
+        elif t.state in ("new", "done"):   # nothing to pause or resume: BadInput without a kernel call
+            return self._refuse("thread_activity", tid, paused, "thread is %s" % t.state, LIBNX_BAD_INPUT)
         t.paused = bool(paused)
         return (("yield",), 0) if t is self.cur and t.paused else 0
 
@@ -901,8 +984,8 @@ class Machine:
         t, uc = self.ids.get("thread", h), self.uc
         if t is None:
             return FNVNX_HE_NOTFOUND
-        if t.state != "new":
-            raise MachineError("thread_start of a thread that is already started: the contract defines no result")
+        if isinstance(t, SelfRecord) or t.state != "new":   # already started (also a THREAD_SELF record): nothing changed
+            return LIBNX_BAD_INPUT
         tid = t.tid
         arg = t.arg
         regs = uc.context_save()

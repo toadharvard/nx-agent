@@ -8,7 +8,7 @@ stated in bootpath.py). BootPath(root) creates <root>/switch/fnv, as the device 
 Host slots whose effect is not modelled (the observable contract is kept; see HOST SLOTS in the stage report):
  output_debug_string (kept in .debug, no sink), console_flush, main_loop (always 1), buttons_down (always 0),
  thread_free, thread_set_priority / thread_set_cpu (recorded in .placement only, no placement effect),
- wall_time_us (fixed epoch + virtual ns), tz_offset_minutes (0), random64 (deterministic splitmix64, seed 0),
+ wall_time_us (fixed epoch + virtual ns), tz_offset_minutes (VC1's zone: UTC, 0), random64 (deterministic splitmix64, seed 0),
  memory_info (4 GiB / 3 GiB), cpu_count (3), audio_open / audio_submit / audio_close (frames counted, samples
  dropped, submit sleeps the period in virtual time), pad_read (never connected, zeros), pad_vibrate, input_poll
  (no events), module 11 CPU_BOOST (recorded in .boosts, returns 0: no platform config), MESSAGE (caption and text recorded in
@@ -104,7 +104,7 @@ class Services:
         t = self.m.ids.get("thread", h)
         if t is None:
             return HE_NOTFOUND
-        if t.state == "new":   # never started: it would never end
+        if isinstance(t, bootmachine.SelfRecord) or t.state == "new":   # a THREAD_SELF record, or never started: it would never end
             return HE_BADINPUT
         return 0 if t.state == "done" else (("join", t.tid), 0)
 
@@ -121,6 +121,8 @@ class Services:
     def _placed(self, h):
         """the placement record of thread id h (0 = the calling thread), None for an id that names no live thread"""
         t = self.m.cur if h == 0 else self.m.ids.get("thread", h)
+        if isinstance(t, bootmachine.SelfRecord):
+            t = t.t
         return None if t is None else self.placement.setdefault(t.tid, {})
 
     def h_thread_set_priority(self, h, prio, *_):
@@ -163,7 +165,9 @@ class Services:
         return WALL_EPOCH_US + self.m.clock.now_ns() // 1000
 
     def h_tz_offset_minutes(self, *_):
-        return 0
+        """hostapi.h: off_s / 60 (C division) of TZ_AT at this call's instant; 0 when TZ_AT does not answer"""
+        z = self.m.tz_at(self.h_wall_time_us() // 1_000_000)
+        return 0 if z is None else int(z[0] / 60) & U64
 
     def h_random64(self, *_):
         """splitmix64 from seed 0 (the old driver used os.urandom, which no deterministic run can use)"""

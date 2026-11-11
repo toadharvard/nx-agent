@@ -1,4 +1,3 @@
-/* Test fixture of the boot stage: the guest side of host API v3 as the stage implements it. The product's own copy lives with the guest runtime's owner. */
 /* fnv-nx host <-> guest ABI (stream S5, docs/TOOLCHAIN.md "The libnx boundary").
  *
  * One process, two modules, one 32-bit address space:
@@ -19,7 +18,7 @@
 #define FNVNX_HOSTAPI_H
 
 #include <stdint.h>
-/* (the product header includes fnvnx/sockwire.h here: the wire types of the socket services, which nothing below this line uses) */
+#include "fnvnx/sockwire.h"
 
 #define FNVNX_HOSTAPI_MAGIC   0x48584e46u /* "FNXH" */
 #define FNVNX_GUEST_MAGIC     0x47584e46u /* "FNXG", at guest text + 8 */
@@ -56,10 +55,11 @@ typedef struct FnvnxHostApi {
                                       (toolchain/host/placement.h). Not started. The id is a table handle
                                       ((generation << 16) | slot, host_ids.inc), never an address; at most 1024
                                       live thread and directory ids together: 0 when the table is full. */
-    uint64_t thread_start;         /* (id) -> 0 or Result; an id that names no live thread -> FNVNX_HE_NOTFOUND */
+    uint64_t thread_start;         /* (id) -> 0 or Result; an id that names no live thread -> FNVNX_HE_NOTFOUND; a thread that is already
+                                      started (also a THREAD_SELF record) -> FNVNX_HE_BADINPUT, nothing changed */
     uint64_t thread_join;          /* (id) -> 0 when the thread has ended; unknown id -> FNVNX_HE_NOTFOUND; a thread
-                                      that was never started -> FNVNX_HE_BADINPUT (it would never end) */
-    uint64_t thread_free;          /* (id) -> 0; after join, or detaches a running thread. The id dies at once: a second
+                                      that was never started, or a THREAD_SELF record -> FNVNX_HE_BADINPUT (it would never end) */
+    uint64_t thread_free;          /* (id) -> 0; after join, or detaches a running thread (a THREAD_SELF record: the record goes, the thread is not touched). The id dies at once: a second
                                       free, or any later use of it -> FNVNX_HE_NOTFOUND */
     uint64_t thread_exit;          /* () -> does not return; ends the calling host-created thread (a thread that thread_create did not
                                       make, the main thread included, must not call it: not detected) */
@@ -76,8 +76,8 @@ typedef struct FnvnxHostApi {
     uint64_t wake_address;         /* (addr, count; count > 0x7FFFFFFF: all) -> 0 or the kernel's result of
                                       svcSignalToAddress (0xCC01 addr not 4-aligned, 0xD401 not guest memory) */
     uint64_t wall_time_us;         /* () -> microseconds since 1970 UTC */
-    uint64_t tz_offset_minutes;    /* () -> local = UTC + offset (int64 as u64). The console host answers 0 (UTC) always: it has no
-                                      time-zone source yet (OPEN, reported to the orchestrator) */
+    uint64_t tz_offset_minutes;    /* () -> off_s / 60 (C division) of TZ_AT at the moment of the call (int64 as u64); 0 when TZ_AT
+                                      does not answer 0 for that instant. The platform no longer uses this slot (it calls TZ_AT). */
     uint64_t random64;             /* () -> random u64 */
     uint64_t memory_info;          /* (FnvnxMemInfo *) -> 0 (avail_phys = 0 when used > total) */
     uint64_t cpu_count;            /* () -> cores the game may use: 3 (application cores 0-2), 4 with the platform config core3=1 */
@@ -152,12 +152,17 @@ typedef struct FnvnxHostApi {
 #define FNVNX_HE_PERM     0xD801u   /* kernel InvalidNewMemoryPermission */
 /* ext_call module of the host's platform services (toolchain/host/host.c; render/nine is 9, render/native 10) */
 #define FNVNX_EXT_PLATFORM 11u
+#define FNVNX_EXT_NINE 9u    /* module of the D3D9 proxy (render/nine); its services belong to the render lead */
+#define FNVNX_EXT_GPU 10u    /* module of the native renderer (render/native); its services belong to the render lead */
 #define FNVNX_PLAT_CPU_BOOST 1u   /* (mode: 0 normal, 1 fast load; any non-zero = fast) -> 0 set (or already in that mode), 1 off by the
                                      platform config (boost_loading=0), else the Horizon result of appletSetCpuBoostMode (the
                                      mode stays as it was) */
 #define FNVNX_PLAT_THREAD_ACTIVITY 2u   /* (host thread id, paused: 0 resume, non-zero pause) -> 0, or the Horizon result of
                                      svcSetThreadActivity; id 0 (the calling thread cannot pause itself) -> FNVNX_HE_BADINPUT;
-                                     an id that names no live thread_create thread -> FNVNX_HE_NOTFOUND */
+                                     an id that names no live thread_create thread or THREAD_SELF record -> FNVNX_HE_NOTFOUND;
+                                     a thread not started yet or already finished -> FNVNX_HE_BADINPUT, nothing done. A pause
+                                     returns only when the thread is actually stopped (svcGetThreadContext3 succeeds); a resume
+                                     returns at once. */
 #define FNVNX_PLAT_MESSAGE 3u           /* (caption, text: guest C strings, 0 reads as "") -> 0 after the player closed the dialog,
                                      or the applet's Horizon result */
 /* VirtualAlloc's address space (toolchain/host/host_vm.inc). The pages the guest owns there (committed extents) and the
@@ -201,7 +206,7 @@ typedef struct FnvnxHostApi {
 #define FNVNX_VM_PROT_R 1u
 #define FNVNX_VM_PROT_W 2u
 /* 9 DISPLAY_DOCKED () -> 1 docked (1080p output), 0 handheld (720p): appletGetOperationMode() == AppletOperationMode_Console.
- * Takes no argument; any nargs is accepted and the arguments are ignored. */
+ * Takes no argument: nargs 0 is the call; nargs > 0 with a null argument array -> FNVNX_EXT_BAD_NARGS; otherwise the arguments are ignored. */
 #define FNVNX_PLAT_DISPLAY_DOCKED 9u
 /* ACCESS_FAULT_HANDLER {handler, stack_top} -> 0. Registers, for the CALLING thread, the guest function
  * `uint64_t handler(FnvnxFaultFrame *frame)` and the top of a separate stack it runs on (16-byte aligned, guest memory).
@@ -300,11 +305,12 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
  *
  * ext_call (slot): module >= 64 or not registered -> NO_MODULE (-255); fn > UINT32_MAX -> NO_SERVICE (-254); nargs > UINT32_MAX counts as
  *   UINT32_MAX; host_ext.inc:h_ext_call, fnvnx_host_register_ext (a null handler or a taken module: -1)      test:total_ext test:test_ext_and_map
- * module 11, platform_ext (host_platform.inc, one row per service); fn 0, fn 10 (not served) and fn >= 35 -> NO_SERVICE (-254):
+ * module 11, platform_ext (host_platform.inc, one row per service); fn 0, fn 10 (not served) and fn >= 36 -> NO_SERVICE (-254):
  *   test:total_unknown test:total_nargs test:total_declared
  *  1 CPU_BOOST          n=1  0 set / already that mode | 1 boost_loading=0 | the Horizon result of appletSetCpuBoostMode, mode unchanged
  *                            host_platform.inc:pf_cpu_boost,set_cpu_boost                                    test:cpu_boost
- *  2 THREAD_ACTIVITY    n=2  0 | the kernel's result | 0x1759 id 0 | 0x1359 id names no live thread        test:thread_activity test:thread_ids
+ *  2 THREAD_ACTIVITY    n=2  0 | the kernel's result | 0x1759 id 0, thread not started or finished | 0x1359 id names no live thread
+ *                                                                                                              test:thread_activity test:thread_ids
  *                            host_platform.inc:pf_thread_activity, host_thread_activity.inc:host_thread_activity
  *  3 MESSAGE            n=2  0 after the dialog | the applet's Horizon result (null string = "")
  *                            host_message.inc:host_show_message                                              test:message
@@ -335,8 +341,10 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
  *                            SETSOCKOPT 5, GETSOCKOPT 5, POLL 3, SHUTDOWN 2, GETSOCKNAME 2, GETPEERNAME 2, GETFL 1, SETFL 2, GAI_OPEN 4, GAI_FETCH 3)
  *                            value >= 0 | -(wire errno, sockwire.h); a wrong nargs -> -FNVNX_WE_INVAL (host_sock_call's own check, not BAD_NARGS)
  *                            host_sock.inc:host_sock_call (the platform lead's, verbatim)                      test:via_dispatch_sock test:total_declared
- * 34 TZ_AT              n=2  0 | 1 (the time service has no zone data for that instant)
- *                            host_platform.inc:pf_tz_at (the platform lead's code)                           test:tz_at
+ * 34 TZ_AT              n=2  0 | -14 (out null) | -75 (instant outside the time service's range)
+ *                            host_platform.inc:pf_tz_at, host_v2.inc:host_tz_at (the platform lead's service)  test:tz_at
+ * 35 THREAD_SELF        n=0  thread id | 0 (no memory, id table full)
+ *                            host_platform.inc:pf_thread_self                                                 test:thread_self
  * VM services and the sections through the dispatch (argument mapping): test:via_dispatch_vm.
  *
  * FnvnxHostApi slots: the results are stated at each slot above. Host function (file) and tests; "-" = a direct libnx / newlib call
@@ -346,7 +354,7 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
  *   thread_create, thread_start, thread_join, thread_free, thread_set_priority, thread_set_cpu (host_v2.inc, ids host_ids.inc)  test:thread_slots test:thread_ids;
  *   thread_exit, thread_yield (host_v2.inc) -;
  *   wait_on_address, wake_address (host_v2.inc)  test:wait_wake;
- *   wall_time_us, tz_offset_minutes, random64, memory_info (host_v2.inc) -; cpu_count (host_v2.inc)  test:thread_slots;
+ *   wall_time_us, random64, memory_info (host_v2.inc) -; tz_offset_minutes (host_v2.inc)  test:tz_at; cpu_count (host_v2.inc)  test:thread_slots;
  *   fs_open, fs_read, fs_write, fs_pread, fs_pwrite, fs_seek, fs_truncate, fs_sync, fs_fstat, fs_close, fs_stat, fs_mkdir, fs_rmdir, fs_remove,
  *   fs_rename (host_v2.inc)  test:fs_errors; fs_dir_open, fs_dir_next, fs_dir_close (host_v2.inc)  test:dir_slots;
  *   audio_open, audio_submit, audio_close, pad_read, pad_vibrate, input_poll (host_v3.inc)  test:test_audio test:test_pads test:test_events;
@@ -368,8 +376,9 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
  *    GAI_OPEN) blocks only the calling guest thread: ext_call runs on the caller's own thread, as audio_submit and
  *    the file services do. A new socket is blocking until FNVNX_PLAT_SOCK_SETFL says otherwise. There are no signals:
  *    EINTR does not occur and sends never raise SIGPIPE (the host passes MSG_NOSIGNAL where the OS has it). */
-#define FNVNX_PLAT_SOCK_SOCKET 16u      /* (domain WAF_*, type WSOCK_*, protocol IANA) -> h */
-#define FNVNX_PLAT_SOCK_CLOSE 17u       /* (h) -> 0; the handle is gone whatever the result */
+#define FNVNX_PLAT_SOCK_SOCKET 16u      /* (domain WAF_*, type WSOCK_*, protocol IANA) -> h; unknown domain -> -EAFNOSUPPORT, unknown
+                                           type -> -EINVAL, unsupported protocol -> -EPROTONOSUPPORT */
+#define FNVNX_PLAT_SOCK_CLOSE 17u       /* (h) -> 0; the handle is gone whatever the result; a handle that is not open -> -EBADF */
 #define FNVNX_PLAT_SOCK_BIND 18u        /* (h, const FnvnxWireSockaddr *) -> 0 */
 #define FNVNX_PLAT_SOCK_LISTEN 19u      /* (h, backlog) -> 0 */
 #define FNVNX_PLAT_SOCK_ACCEPT 20u      /* (h, FnvnxWireSockaddr *peer or 0) -> new h (blocking mode); blocks until a
@@ -383,20 +392,28 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
 #define FNVNX_PLAT_SOCK_SETSOCKOPT 24u  /* (h, level, option, const void *val, vallen) -> 0; level FNVNX_WLVL_SOCKET or
                                            an IANA protocol number; option and value shape: the FNVNX_WIRE_*_OPT_LISTs */
 #define FNVNX_PLAT_SOCK_GETSOCKOPT 25u  /* (h, level, option, void *val, uint32_t *vallen; in: capacity, out: size of
-                                           the option's value) -> 0; at most the capacity is written */
+                                           the option's value) -> 0; at most the capacity is written. null vallen -> -EFAULT;
+                                           unknown level or option -> -ENOPROTOOPT; *vallen smaller than the option: the value is
+                                           truncated to *vallen bytes, *vallen is unchanged, result 0; larger: the option's size is
+                                           written and *vallen = the actual size; null val with *vallen > 0 -> -EFAULT */
 #define FNVNX_PLAT_SOCK_POLL 26u        /* (FnvnxWirePollfd *fds, nfds, timeout_ms int32, -1 = forever) -> number of
                                            entries with revents != 0; fd < 0 entries are ignored, an fd that is not an
-                                           open socket gets FNVNX_WPOLLNVAL */
-#define FNVNX_PLAT_SOCK_SHUTDOWN 27u    /* (h, how 0 read / 1 write / 2 both) -> 0 */
+                                           open socket gets FNVNX_WPOLLNVAL. nfds 0 is allowed: it waits the timeout and returns 0,
+                                           the array is not read; nfds > 0 with a null array -> -EFAULT; nfds > 0x1000000 -> -EINVAL;
+                                           an element with a negative fd is ignored (revents 0), one with a handle that is not
+                                           open gets revents POLLNVAL */
+#define FNVNX_PLAT_SOCK_SHUTDOWN 27u    /* (h, how 0 read / 1 write / 2 both) -> 0; how > 2 -> -EINVAL */
 #define FNVNX_PLAT_SOCK_GETSOCKNAME 28u /* (h, FnvnxWireSockaddr *out) -> 0 */
 #define FNVNX_PLAT_SOCK_GETPEERNAME 29u /* (h, FnvnxWireSockaddr *out) -> 0 */
-#define FNVNX_PLAT_SOCK_GETFL 30u       /* (h) -> FNVNX_WO_RDWR | (non-blocking ? FNVNX_WO_NONBLOCK : 0) */
-#define FNVNX_PLAT_SOCK_SETFL 31u       /* (h, flags) -> 0; only FNVNX_WO_NONBLOCK of flags is applied (POSIX F_SETFL) */
+#define FNVNX_PLAT_SOCK_GETFL 30u       /* (h) -> FNVNX_WO_RDWR | (non-blocking ? FNVNX_WO_NONBLOCK : 0); of the flags only NONBLOCK is returned */
+#define FNVNX_PLAT_SOCK_SETFL 31u       /* (h, flags) -> 0; only FNVNX_WO_NONBLOCK of flags is applied (POSIX F_SETFL); any other bit of
+                                           flags -> -EINVAL */
 /* getaddrinfo is two services: its result list lives in host memory, which a 32-bit guest cannot address. GAI_OPEN
  * resolves once and keeps the result under a ticket; GAI_FETCH copies it into a guest buffer. */
 #define FNVNX_PLAT_SOCK_GAI_OPEN 32u    /* (node or 0, service or 0: guest C strings, const FnvnxWireAddrinfo *hints or 0,
                                            int32_t *sys_errno or 0) -> ticket > 0, or -FNVNX_WEAI_x (sockwire.h; for
-                                           FNVNX_WEAI_SYSTEM the wire errno is stored to *sys_errno) */
+                                           FNVNX_WEAI_SYSTEM the wire errno is stored to *sys_errno); node and service both null ->
+                                           -EAI_NONAME; a null errno_out (sys_errno) is allowed */
 #define FNVNX_PLAT_SOCK_GAI_FETCH 33u   /* (ticket, buf or 0, cap) -> total bytes of the result: a sequence of
                                            FnvnxWireAddrinfo records each followed by its canonical name bytes, padded
                                            to 8. cap < total: nothing is written, the ticket stays. cap >= total: the
@@ -404,9 +421,17 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
                                            is written and the ticket is freed: how a result that cannot be taken
                                            is released). -FNVNX_WE_INVAL for a ticket
                                            that is not open. */
-/* TZ_AT (utc_seconds, FnvnxTzAt *) -> 0, or non-zero when the host has no time zone data. The zone of the console's time service
- * (timeToCalendarTimeWithMyRule) at one instant; platform/os/os_tzrule.inc derives the zone's rule (os_tz_rule) from it. */
+/* TZ_AT (utc_seconds, FnvnxTzAt *) -> 0 | -errno (wire number, int64 as u64). The zone of the console's time service
+ * (timeToCalendarTimeWithMyRule) at one instant; platform/os/os_tzrule.inc derives the zone's rule (os_tz_rule) from it.
+ * Out null -> -EFAULT; utc_seconds outside the host time service's range -> -EOVERFLOW (the host answers it for any refusal of the
+ * time service: range is its only input-dependent one); else 0 and *out is written. abbr = the first 7 bytes of the zone's abbreviation
+ * and a NUL (an empty abbreviation is the empty string). */
 #define FNVNX_PLAT_TZ_AT 34u
+/* THREAD_SELF () -> a host thread id (!= 0) for the CALLING thread, which the host did not create (the main thread), or 0 (no memory or
+ * the id table full). The id is only for FNVNX_PLAT_THREAD_ACTIVITY (the world registry, platform/os/os_world.c; also thread_set_priority
+ * and thread_set_cpu). Call once per such thread. thread_start of it -> FNVNX_HE_BADINPUT (it is started), thread_join -> FNVNX_HE_BADINPUT;
+ * thread_free ends the id and the record, never the thread. */
+#define FNVNX_PLAT_THREAD_SELF 35u
 typedef struct FnvnxTzAt {
     int32_t off_s;      /* local = UTC + off_s */
     uint32_t dst;       /* 1: daylight time at that instant */
