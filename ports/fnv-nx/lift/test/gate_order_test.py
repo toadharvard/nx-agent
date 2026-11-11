@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Self-test of tools/gate_order.py on hand-written AArch64 ILP32 assembly (no game data).   python3 test/gate_order_test.py
 Each case is one function body; the gate must give the stated colour to each of its three results."""
-import json, os, subprocess, sys, tempfile, unittest
+import importlib.util, json, os, subprocess, sys, tempfile, unittest
 HERE = os.path.dirname(os.path.abspath(__file__)); GATE = os.path.join(os.path.dirname(HERE), 'tools', 'gate_order.py')
 AS = ['aarch64-linux-gnu-gcc', '-march=armv8.1-a', '-mabi=ilp32', '-c', '-x', 'assembler']
 RT = '.data\n.globl fnvnx_lift_cpu_bytes\n.type fnvnx_lift_cpu_bytes,%object\n.size fnvnx_lift_cpu_bytes,4\nfnvnx_lift_cpu_bytes: .word 536\n'
@@ -87,6 +87,18 @@ class T(unittest.TestCase):
         res = self.gate([self.asm('c1', FN.format(CASES['ordered_aligned'][0])), self.asm('c2', FN.format(CASES['plain_store'][0]))])
         self.assertEqual((res['order']['universe'], res['order']['certified'], len(res['order']['uncertified'])), (2, 1, 1))
         self.assertEqual((res['align']['universe'], res['align']['certified']), (1, 1))
+    def test_rows(self):
+        spec = importlib.util.spec_from_file_location('gate_order', GATE); go = importlib.util.module_from_spec(spec); sys.modules['gate_order'] = go; spec.loader.exec_module(go)
+        o = self.asm('rw', FN.format('ldarb w0,[x19]\n str w0,[x20]\n ret'))
+        os.environ['JOBS'] = '1'; rw = go.rows(self.rt, [o])
+        self.assertEqual(sorted(rw), ['addrwrap', 'align', 'order'])
+        self.assertEqual([(r[0], r[1]) for r in rw['order']], [('rw', 'f+0x0'), ('rw', 'f+0x4')])
+        self.assertEqual([bool(r[2]) for r in rw['order']], [False, True])         # the plain store has no dmb ishst
+        self.assertEqual([r[2] for r in rw['addrwrap']], ['', ''])
+        self.assertEqual(rw['align'], [])
+        self.assertEqual(rw['order'], sorted(rw['order']))
+        self.assertEqual(go.verdict('order', rw['order'], {'instructions': 3})[0], False)
+        self.assertEqual(go.verdict('align', rw['align'], {'instructions': 3})[0], True)
     def test_no_object_red(self):
         self.assertEqual([j['status'] for j in self.gate([]).values()], [R, R, R])
     def test_data_in_text_skipped_and_garbage_red(self):

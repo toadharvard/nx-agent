@@ -67,6 +67,7 @@ import capstone
 from capstone import arm64 as A
 
 GUEST, CPU, FRAME, IMAGE = 0, 1, 2, 3
+GATES = ('order', 'addrwrap', 'align')
 CLS = ('guest', 'cpu', 'frame', 'image')
 SP = 31
 NEG = -1 << 60
@@ -79,7 +80,7 @@ COND_Z = {'eq': True, 'ne': False}
 
 
 def elf(path):
-    """-> [(section name, bytes, {offset: reloc type}, [function offsets], [data ranges])] for the executable sections."""
+    """-> [(section name, bytes, {offset: reloc type}, [function offsets], [data ranges], [(offset, name) of the STT_FUNC symbols])] for the executable sections."""
     b = open(path, 'rb').read()
     if b[:4] != b'\x7fELF' or b[4] != 1 or struct.unpack_from('<H', b, 18)[0] != 183:
         raise ValueError('%s: not an ELF32 AArch64 object' % path)
@@ -87,7 +88,7 @@ def elf(path):
     sh = [struct.unpack_from('<IIIIIIIIII', b, shoff + i * shentsize) for i in range(shnum)]
     cstr = lambda tab, o: b[tab + o:b.index(b'\0', tab + o)].decode()
     names = [cstr(sh[shstr][4], s[0]) for s in sh]
-    out = {i: [names[i], b[s[4]:s[4] + s[5]], {}, [], []] for i, s in enumerate(sh) if s[1] == 1 and s[2] & 4}
+    out = {i: [names[i], b[s[4]:s[4] + s[5]], {}, [], [], []] for i, s in enumerate(sh) if s[1] == 1 and s[2] & 4}
     syms = {}
     for s in sorted(sh, key=lambda s: s[1] != 2):
         if s[1] == 2:                                                   # SHT_SYMTAB
@@ -96,8 +97,8 @@ def elf(path):
                 nm, val, _sz, info, _o, shndx = struct.unpack_from('<IIIBBH', b, s[4] + 16 * k)
                 if 0 < shndx < shnum and sh[shndx][1] == 1 and not sh[shndx][2] & 4: syms[k] = (shndx, val, sh[shndx][5])   # defined in a PROGBITS data section
                 if shndx not in out: continue
-                if info & 15 == 2: out[shndx][3].append(val)
                 n = cstr(sh[s[6]][4], nm)
+                if info & 15 == 2: out[shndx][3].append(val); out[shndx][5].append((val, n))
                 if n[:2] in ('$x', '$d'): marks.setdefault(shndx, []).append((val, n[1]))
             for i, m in marks.items():
                 m.sort(); end = len(out[i][1])
@@ -230,22 +231,32 @@ def init(n):
 
 
 def analyse(path):
-    """-> {'order': [universe, certified, [bad]], 'addrwrap': .., 'align': .., 'n': {counter: n}}"""
+    """-> {'rows': {gate: [(object stem, 'FUNC+0xOFF', reason)]}, 'n': {counter: n}}: one row per universe item of each gate."""
     md = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM); md.detail = True
-    res = {'order': [0, 0, []], 'addrwrap': [0, 0, []], 'align': [0, 0, []], 'n': {}}
-    cnt = res['n']; name = os.path.basename(path)
+    tab = {g: {} for g in GATES}; res = {'n': {}}
+    cnt = res['n']; stem = os.path.splitext(os.path.basename(path))[0]; cur = ['', []]
 
     def tick(k, n=1): cnt[k] = cnt.get(k, 0) + n
 
-    def red(g, ins, why):
-        if len(res[g][2]) < 50: res[g][2].append('%s+%#x %s: %s' % (name, ins.a if ins else 0, ins.txt if ins else '', why))
+    def label(a):           # the containing STT_FUNC symbol of the section: a name for the report, no input of any decision
+        best = None
+        for v, nm in cur[1]:
+            if v <= a and (best is None or v > best[0]): best = (v, nm)
+        return '%s+%#x' % (best[1], a - best[0]) if best else '%s+%#x' % (cur[0], a)
 
-    def glob(why, ins=None): tick('rule_violations'); red('order', ins, why)
+    def item(g, ins, tag='acc'): return tab[g].setdefault((cur[0], ins.a, tag), [label(ins.a), ''])
 
-    for sname, code, relocs, funcs, data in elf(path):
+    def red(g, ins, why, tag='acc'):
+        r = item(g, ins, tag)
+        if why not in r[1]: r[1] = r[1] + '; ' + why if r[1] else why
+
+    def glob(why, ins): tick('rule_violations'); red('order', ins, why, 'rule')
+
+    for sname, code, relocs, funcs, data, fsyms in elf(path):
+        cur[0] = sname; cur[1] = fsyms
         L, badoff = decode(md, code, relocs, data)
         if L is None:
-            res['order'][0] += 1; i = Ins(); i.a = badoff; i.txt = '(undecodable)'; glob('undecodable word in ' + sname, i); continue
+            i = Ins(); i.a = badoff; i.txt = '(undecodable)'; glob('undecodable word in ' + sname, i); continue
         tick('instructions', len(L))
         at = {ins.a: k for k, ins in enumerate(L)}
         lead = set(f for f in funcs if f in at)
@@ -411,27 +422,25 @@ def analyse(path):
                 tick('host_' + CLS[c])
                 if c == CPU and not idx and not (wb or ins.asz is None or s[7][base][0] + disp < 0 or s[7][base][1] + disp + ins.asz > CPUSIZE): return
                 if c == CPU and not idx:
-                    res['order'][0] += 1; res['addrwrap'][0] += 1
+                    item('order', ins); item('addrwrap', ins)
                     red('order', ins, 'an access through the cpu pointer not proven inside struct cpu'); red('addrwrap', ins, 'an access through the cpu pointer not proven inside struct cpu'); return
                 if c == IMAGE and idx and not store and ins.ix and ins.asz and s[7][base] and s[7][base][0] == 'at':
                     rm, eb, sgn, sh = ins.ix; v = s[6][rm]; v = (1 << eb) - 1 if v is None else min(v, (1 << eb) - 1)
                     if not (sgn and v >= 1 << (eb - 1)) and (v << sh) + ins.asz <= s[7][base][1]: tick('host_image_table'); return
                 if idx or (c == IMAGE and store and not sz):
-                    res['order'][0] += 1; res['addrwrap'][0] += 1
+                    item('order', ins); item('addrwrap', ins)
                     red('order', ins, 'a %s base with %s' % (CLS[c], 'an index register' if idx else 'a plain store'))
                     red('addrwrap', ins, 'a %s base with an index register' % CLS[c] if idx else 'a plain store through an image base')
                 return
             tick('guest_store' if store else 'guest_load')
-            res['order'][0] += 1; res['addrwrap'][0] += 1
-            if sz: tick('guest_ordered'); res['order'][1] += 1
+            item('order', ins); item('addrwrap', ins)
+            if sz: tick('guest_ordered')
             gacc[id(ins)] = not sz
             if idx or disp or wb: red('addrwrap', ins, 'the operand is not the base register alone')
             elif not s[1][base]: red('addrwrap', ins, 'the base is not proven a 32-bit value')
-            else: res['addrwrap'][1] += 1
             if sz > 1:
-                res['align'][0] += 1
-                if s[2][base] >= sz and not (idx or disp or wb): res['align'][1] += 1
-                else: red('align', ins, 'no alignment test of %d bytes dominates the access' % sz)
+                item('align', ins)
+                if not (s[2][base] >= sz and not (idx or disp or wb)): red('align', ins, 'no alignment test of %d bytes dominates the access' % sz)
 
         def edges(n, s):
             """successor states of block n whose exit state is s"""
@@ -486,36 +495,55 @@ def analyse(path):
                 if ins.bar:
                     if ins.bar in ('ishst', 'ish', 'sy'): sb = True
                     if ins.bar in ('ishld', 'ish', 'sy'):
-                        res['order'][1] += len(wait); tick('guest_plain_load_dmb', len(wait)); wait = []
+                        tick('guest_plain_load_dmb', len(wait)); wait = []
                     continue
                 if not ins.call and id(ins) not in gacc: continue
                 for w in wait: red('order', w, 'a plain guest load without dmb ishld before the next guest access or call')
                 wait = []
                 if gacc.get(id(ins)):
                     if not ins.mem[4]: wait.append(ins)
-                    elif sb: res['order'][1] += 1; tick('guest_plain_store_dmb')
+                    elif sb: tick('guest_plain_store_dmb')
                     else: red('order', ins, 'a plain guest store without dmb ishst after the last guest access or call')
                 sb = False
             for w in wait: red('order', w, 'a plain guest load without dmb ishld before the block end')
+    res['rows'] = {g: sorted((stem, lab, why) for lab, why in tab[g].values()) for g in GATES}
     return res
 
 
-def main(argv):
-    files = []; init(cpusize(argv[0]))
-    for a in argv[1:]:
+def run(rtobj, objs):
+    """-> ({gate: [(object stem, 'FUNC+0xOFF', reason)]}, {counter: n}, number of objects). Every row is one universe item, sorted;
+    a certified row has reason ''. The verdict is computed from these rows only (verdict)."""
+    files = []; init(cpusize(rtobj))
+    for a in objs:
         files += sorted(os.path.join(a, f) for f in os.listdir(a) if f.endswith('.o')) if os.path.isdir(a) else [a]
-    tot = {g: [0, 0, []] for g in ('order', 'addrwrap', 'align')}; n = {}
+    rows = {g: [] for g in GATES}; n = {}
     with multiprocessing.Pool(int(os.environ.get('JOBS', '0')) or os.cpu_count(), init, (CPUSIZE,)) as pool:
         for r in pool.imap(analyse, files, chunksize=4):
-            for g in tot:
-                tot[g][0] += r[g][0]; tot[g][1] += r[g][1]; tot[g][2] += r[g][2]
+            for g in GATES: rows[g] += r['rows'][g]
             for k, v in r['n'].items(): n[k] = n.get(k, 0) + v
-    rc = 0
-    for g, (u, c, bad) in sorted(tot.items()):
-        green = bool(n.get('instructions')) and u == c and not bad and (g != 'order' or not n.get('rule_violations'))
+    return {g: sorted(v) for g, v in rows.items()}, n, len(files)
+
+
+def rows(rtobj, objs):
+    """-> {'order': [...], 'addrwrap': [...], 'align': [...]}: for each gate, the sorted (object stem, 'FUNC+0xOFF', reason) of every
+    universe item; reason '' is a certified item. FUNC is the containing STT_FUNC symbol, a label of the report and no input of a decision."""
+    return run(rtobj, objs)[0]
+
+
+def verdict(g, rws, n):
+    """the gate's result from its rows: green iff something was decoded and every row is certified"""
+    bad = [r for r in rws if r[2]]
+    return bool(n.get('instructions')) and not bad, len(rws), len(rws) - len(bad), bad
+
+
+def main(argv):
+    rws, n, nfiles = run(argv[0], argv[1:]); rc = 0
+    for g in GATES:
+        green, u, c, bad = verdict(g, rws[g], n)
         counts = ', '.join('%s %d' % kv for kv in sorted(n.items()))
-        res = {'format': 'fnvnx-gate/1', 'name': g, 'status': 'green' if green else 'red', 'universe': u, 'certified': c, 'uncertified': sorted(bad)[:50],
-               'detail': '%d objects; struct cpu %d bytes; %d of %d certified; %s' % (len(files), CPUSIZE, c, u, counts) if files else 'no object given'}
+        res = {'format': 'fnvnx-gate/1', 'name': g, 'status': 'green' if green else 'red', 'universe': u, 'certified': c,
+               'uncertified': ['%s %s: %s' % r for r in bad[:50]],
+               'detail': '%d objects; struct cpu %d bytes; %d of %d certified; %s' % (nfiles, CPUSIZE, c, u, counts) if nfiles else 'no object given'}
         with open(os.path.join(os.environ['GATE_OUT'], g + '.json'), 'w') as fh: json.dump(res, fh, sort_keys=True)
         print('%s %s %d/%d' % (g, res['status'], c, u), file=sys.stderr)
         rc |= 0 if green else 2
