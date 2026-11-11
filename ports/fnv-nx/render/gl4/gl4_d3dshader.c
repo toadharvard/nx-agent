@@ -55,7 +55,7 @@ uint64_t gl4_api_shader_create_d3d(uint64_t a) {
     o.flags = FNVNX_SHADER_NO_DKSH | FNVNX_SHADER_KEEP_GLSL | (d.stage == 0 && d.variant ? FNVNX_SHADER_VS_COMPLETE : 0);
     o.link_pairs = key.nl ? key.l : NULL; o.n_link_pairs = key.nl;
     fnvnx_shader_result r; memset(&r, 0, sizeof r);
-    if (!fnvnx_shader_translate(code, d.size, &o, &r)) {
+    if (!fnvnx_shader_translate_glsl(code, d.size, &o, &r)) {
         gl4_err("shader_create_d3d: translation failed: %s", r.error);
         fnvnx_shader_result_free(&r); free(code); return 0;
     }
