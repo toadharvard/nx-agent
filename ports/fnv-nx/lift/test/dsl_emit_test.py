@@ -31,6 +31,7 @@ def mkctx(ins, a):
     if m.startswith(('rep ', 'repe ', 'repne ')): pfx, m = m.split(' ', 1)
     if m.startswith('lock '): m = m.split(' ', 1)[1]
     cx.start, cx.a, cx.nxt, cx.m, cx.pfx, cx.ops, cx.term, cx.xm, cx.xdp = a, a, a + ins.size, m, pfx, ins.operands, False, None, 0
+    cx.uent = {ins.operands[0].imm & 0xffffffff} if ins.operands and ins.operands[0].type == X.X86_OP_IMM else set()      # a branch target is an entry of the universe (jump_out), else it goes to the dispatcher
     cx.b0, cx.modrm, cx.s = ins.opcode[0], ins.modrm, ins.operands[0].size * 8 if ins.operands else 32
     return cx
 
@@ -53,6 +54,7 @@ def collect(pk):
         for vi, (ins, raw) in enumerate(vars_):
             a = BASE + STEP * n; n += 1
             ins = next(md.disasm(raw, a), None); cx = mkctx(ins, a)
+            if vi: cx.uent = set()                                # the outside-target copy: not an entry, so the transfer goes to the dispatcher
             try:
                 if f_dsl.emit_form(cx, ins) is core.SKIP: raise core.Unsupported('SKIP')
             except Exception as e:
