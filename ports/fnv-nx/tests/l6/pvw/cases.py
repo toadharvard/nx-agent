@@ -78,6 +78,16 @@ def gen_a(seed):
         c = src_case(r, XYZ | N | D, r.randint(1, 4), r.randint(0, 2)); sc = r.choice([0.5, 1.5, 3.0])
         c.update(world=rnd(r, sc), view=rnd(r, sc), proj=rnd(r, sc), vp=r.choice(VPS), dstfvf=r.choice([XYZ | D, RHW | D, XYZ | N | D]), ex=rep & 1)
         c["rs"] = rand_rs(r, lit=1 if rep % 3 else 0); c["material"] = rand_material(r); c["lights"] = pick_lights(r); out.append(finalize(c, r))
+    # 9. modelview whose column 0 is zero in rows 0..2 and non-zero in row 3 (invertible, the 4th column is not affine): the normal-matrix inverse must pivot row 3 to the top
+    #    (without the swap the zero test sees a singular matrix and the modelview itself becomes the normal matrix: a visibly different colour)
+    for rep in range(24):
+        m = [[r.uniform(-2, 2) for _ in range(4)] for _ in range(4)]
+        for i in range(3): m[i][0] = 0.0
+        m[3][0] = r.choice([-1, 1]) * r.uniform(0.5, 2)
+        c = src_case(r, XYZ | N | D, r.randint(1, 4), r.randint(0, 2))
+        c.update(world=fm(m), view=ident(), proj=persp(1.0, 1.3, 1.0, 100.0), vp=r.choice(VPS), dstfvf=r.choice([XYZ | D, RHW | D]), ex=rep & 1)
+        c["rs"] = rand_rs(r, lit=1); c["material"] = rand_material(r)
+        c["lights"] = {i: rand_light(r, r.choice([1, 2, 3])) for i in range(r.randint(1, 3))}; out.append(finalize(c, r))
     return out
 
 def simple(r, sfvf=XYZ | D, dfvf=RHW | D, count=3, **kw):
