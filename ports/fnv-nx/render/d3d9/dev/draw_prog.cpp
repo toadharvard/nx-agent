@@ -9,6 +9,7 @@
 //     A 0 from the backend = D3DERR_DRIVERINTERNALERROR (a backend defect, never a skipped draw); no backend memory for the bytecode copy = D3DERR_OUTOFVIDEOMEMORY (glue_stream.h exhaustion rules: the result of the call, nothing recorded).
 #include "draw_core.h"
 #include "d9impl.gen.h"
+#include "ffp_dev.h"
 #include <string.h>
 
 bool nx_vs_sig(const NxSmIface& i, NxVsSig* out) {
@@ -78,7 +79,10 @@ HRESULT nx_prog_resolve(NxDeviceCore* d, NxProg* p) {
     }
     if (nx_link_set(vout, nvo, pin, npi, l, &nl)) return D3DERR_DRIVERINTERNALERROR;
     HRESULT hr = D3D_OK;
-    if (vsc) { p->vs = shader_prog(vsc, 0, fnvnx_dk_vs_needs_complete(vw, (int)nvw, pr, (int)npr), l, nl, &hr); if (!p->vs) return hr; }
-    if (psc) { p->ps = shader_prog(psc, 1, 0, l, nl, &hr); if (!p->ps) return hr; }
+    // D3DRS_SHADEMODE FLAT (Wine 9.0 state_shademode): both translated stages take the same variant bit 1 (the COLOR varyings are `flat`), from the one latch rule of the FFP
+    // programs (nx_ffp_flat), so the two stages of a pair, and a translated stage against an FFP one, always agree on the qualifier.
+    uint32_t flat = 0; if ((vsc || psc) && !nx_ffp_flat(d, &flat)) return D3DERR_OUTOFVIDEOMEMORY;
+    if (vsc) { p->vs = shader_prog(vsc, 0, fnvnx_dk_vs_needs_complete(vw, (int)nvw, pr, (int)npr) | flat << 1, l, nl, &hr); if (!p->vs) return hr; }
+    if (psc) { p->ps = shader_prog(psc, 1, flat << 1, l, nl, &hr); if (!p->ps) return hr; }
     return D3D_OK;
 }

@@ -32,7 +32,7 @@ uint64_t gl4_api_shader_create_d3d(uint64_t a) {
     if (!dp) return refuse("descriptor unreadable");
     const NxShaderD3D d = *dp;
     if (d.stage > 1) return refuse("stage is neither vertex (0) nor pixel (1)");
-    if (d.variant > 1 || (d.stage == 1 && d.variant)) return refuse("variant: bit 0 is the vertex stage's, all other bits are 0");
+    if (d.variant > 3 || (d.stage == 1 && (d.variant & 1))) return refuse("variant: bit 0 is the vertex stage's, bit 1 either stage's, all other bits are 0");
     if (d.pad[0] || d.pad[1] || d.pad2) return refuse("reserved fields are not 0");
     if (!d.size || (d.size & 3) || d.size > MAX_CODE) return refuse("bytecode size is 0, not a multiple of 4 or above 1 MiB");
     if (d.n_link_pairs > MAX_L) return refuse("more than 31 link pairs");
@@ -52,7 +52,7 @@ uint64_t gl4_api_shader_create_d3d(uint64_t a) {
     uint32_t id = memo_find(&key, code);
     if (id) { free(code); g4.sh[id].d3d->refs++; return id; }
     fnvnx_shader_opts o; memset(&o, 0, sizeof o);
-    o.flags = FNVNX_SHADER_NO_DKSH | FNVNX_SHADER_KEEP_GLSL | (d.stage == 0 && d.variant ? FNVNX_SHADER_VS_COMPLETE : 0);
+    o.flags = FNVNX_SHADER_NO_DKSH | FNVNX_SHADER_KEEP_GLSL | (d.stage == 0 && (d.variant & 1) ? FNVNX_SHADER_VS_COMPLETE : 0) | ((d.variant & 2) ? FNVNX_SHADER_FLAT_COLOR : 0);
     o.link_pairs = key.nl ? key.l : NULL; o.n_link_pairs = key.nl;
     fnvnx_shader_result r; memset(&r, 0, sizeof r);
     if (!fnvnx_shader_translate(code, d.size, &o, &r)) {
