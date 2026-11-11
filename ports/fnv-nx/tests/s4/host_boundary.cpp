@@ -84,5 +84,18 @@ uint32_t fnvnx_bnd_module_load(const char *name, uint32_t *base)
     return 126;   /* ERROR_MOD_NOT_FOUND: the host process has no translated modules */
 }
 
+/* the host implementation records the flag per module base (what the loader keeps in its module row) */
+uint32_t g_bnd_disabled[16];
+int g_bnd_disabled_n;
+uint32_t fnvnx_bnd_disable_thread_calls(uint32_t base)
+{
+    for (int i = 0; i < g_bnd_disabled_n; i++)
+        if (g_bnd_disabled[i] == base)
+            return 0;
+    if (g_bnd_disabled_n < 16)
+        g_bnd_disabled[g_bnd_disabled_n++] = base;
+    return 0;
+}
+
 void fnvnx_bnd_process_detach(void) { __atomic_fetch_add(&g_bnd_process_detaches, 1, __ATOMIC_RELAXED); }
 }

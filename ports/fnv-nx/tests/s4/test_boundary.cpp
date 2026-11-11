@@ -11,6 +11,7 @@
 #include <string.h>
 
 extern "C" {
+BOOL DisableThreadLibraryCalls(HMODULE);
 void *FindResourceExA(HMODULE, LPCSTR, LPCSTR, WORD);
 void *LoadResource(HMODULE, void *);
 DWORD SizeofResource(HMODULE, void *);
@@ -161,6 +162,31 @@ TEST(bnd_registered_image_resources)
     CHECK(p != NULL && !memcmp(p, "HELLO", 5));
     CHECK(FindResourceExA(h, ID(10), ID(2), 0x409) == NULL && GetLastError() == 1814 /* ERROR_RESOURCE_NAME_NOT_FOUND */);
     CHECK(FindResourceExA(h, ID(11), ID(1), 0x409) == NULL && GetLastError() == 1813 /* ERROR_RESOURCE_TYPE_NOT_FOUND */);
+}
+
+TEST(bnd_disable_thread_calls)
+{
+    uint32_t base = 0;
+    uint8_t *b = make_image("synthdtc.dll", &base);
+    CHECK(b != NULL);
+    if (!b)
+        return;
+    fnvnx_win32_register_image("synthdtc.dll", base, IMG_SIZE);
+    HMODULE h = GetModuleHandleA("synthdtc.dll");
+    int n0 = g_bnd_disabled_n;
+    /* the exe and the platform's own modules: validated only, the loader is not told */
+    CHECK(DisableThreadLibraryCalls(GetModuleHandleA(NULL)));
+    CHECK(DisableThreadLibraryCalls(GetModuleHandleA("kernel32.dll")));
+    CHECK_EQ(g_bnd_disabled_n, n0);
+    /* a translated module: its base reaches the boundary, once however often it is asked */
+    CHECK(DisableThreadLibraryCalls(h));
+    CHECK(DisableThreadLibraryCalls(h));
+    CHECK_EQ(g_bnd_disabled_n, n0 + 1);
+    CHECK(g_bnd_disabled[n0] == base);
+    /* a handle that is none of these: ERROR_MOD_NOT_FOUND, nothing recorded */
+    SetLastError(0);
+    CHECK(!DisableThreadLibraryCalls((HMODULE)(uintptr_t)0x12345678) && GetLastError() == ERROR_MOD_NOT_FOUND);
+    CHECK_EQ(g_bnd_disabled_n, n0 + 1);
 }
 
 TEST(bnd_registered_image_page_map)

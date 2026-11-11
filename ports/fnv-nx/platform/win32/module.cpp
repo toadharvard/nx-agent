@@ -239,15 +239,27 @@ extern "C" BOOL FreeLibrary(HMODULE h)
     return m != NULL;
 }
 
-/* Without per-thread attach notifications to suppress this only validates the handle (ERROR_MOD_NOT_FOUND). */
+/* The exe and the platform's own modules have no per-thread notifications to suppress: the handle is only validated. A
+ * translated module (a registered image) is told to the loader (fnvnx_bnd_disable_thread_calls). */
 extern "C" BOOL DisableThreadLibraryCalls(HMODULE h)
 {
     os_lock(&g_mod_lock);
-    int ok = h == EXE_MODULE || module_of(h);
+    struct module *m = h == EXE_MODULE ? NULL : module_of(h);
+    int ok = h == EXE_MODULE || m != NULL;
+    uint32_t base = m && m->image ? m->base : 0;
     os_unlock(&g_mod_lock);
-    if (!ok)
+    if (!ok) {
         SetLastError(ERROR_MOD_NOT_FOUND);
-    return ok;
+        return FALSE;
+    }
+    if (base) {
+        DWORD err = fnvnx_bnd_disable_thread_calls(base);
+        if (err) {
+            SetLastError(err);
+            return FALSE;
+        }
+    }
+    return TRUE;
 }
 
 /* ---- the PE export directory of a registered image, read from memory (every offset bounds-checked against the

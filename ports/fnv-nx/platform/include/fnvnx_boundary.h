@@ -76,6 +76,11 @@ void fnvnx_bnd_thread_release(fnvnx_bnd_thread *t, int notify);
  * returned FALSE). `name` is the module name as the caller gave it. */
 uint32_t fnvnx_bnd_module_load(const char *name, uint32_t *base);
 
+/* DisableThreadLibraryCalls of a translated module (the HMODULE is its base): from now on its DllMain and TLS callbacks are not
+ * told of thread attach / detach. Returns 0, or the Win32 error (ERROR_MOD_NOT_FOUND: `base` is not the base of a
+ * translated module). Idempotent. */
+uint32_t fnvnx_bnd_disable_thread_calls(uint32_t base);
+
 /* Process detach of every module (ExitProcess): the DllMain(DLL_PROCESS_DETACH) calls, in the order the loader defines. */
 void fnvnx_bnd_process_detach(void);
 

@@ -1,18 +1,33 @@
 /* boundary_guest.cpp - the product's implementation of platform/include/fnvnx_boundary.h (AArch64 ILP32): the game is
- * the lifted x86 code of lead L3a's runtime, the images and threads come from the loader of lead L1. The hooks are
- * declared in hooks_decl.h with their source headers. Host builds use tests/s4/host_boundary.cpp instead; this file is
+ * the lifted x86 code of lead L3a's runtime, the images and threads come from the loader of lead L1 (its headers,
+ * loader/include, are included as they are). Host builds use tests/s4/host_boundary.cpp instead; this file is
  * compiled by platform/build_guest.sh only.
  *
  * Preconditions of the loader contract this file relies on (fnvnx_start.h): the process record fnvnx_start_proc()
  * returns is the one fnvnx_start_prepare filled; the thread blocks are made and freed on it; guest memory is at its
  * guest address (host bias 0 on the target). */
 #include "../include/fnvnx_boundary.h"
-#include "hooks_decl.h"
+extern "C" {
+#include "fnvnx_importkey.h"
+#include "fnvnx_start.h"
+}   /* the loader's headers declare C functions without guards */
 
 #include <stdlib.h>
 
-/* the process record, for the loader calls that take it mutable (fnvnx_start.h declares fnvnx_start_proc() const) */
-static struct fnvnx_proc *proc(void) { return const_cast<struct fnvnx_proc *>(fnvnx_start_proc()); }
+extern "C" {
+
+/* The lifter runtime (lead L3a, ports/fnv-nx/lift/rt/enter.c; its header is not in this branch): the layout of
+ * struct fnvnx_guest_ret is that of struct fnvnx_bnd_ret. fnvnx_guest_current is the contract requested from L3a:
+ * the loader's module calls need the calling guest thread's esp and TEB (the frames of DllMain go below that esp), and
+ * only the runtime knows them: esp = the guest esp of the import call in progress, teb = the thread's TEB (fs base). */
+struct fnvnx_guest_ret { uint32_t eax, edx; double st0; };
+void fnvnx_guest_invoke(uint32_t addr, uint32_t ecx, uint32_t nargs, const uint32_t *args, uint32_t kind,
+                        struct fnvnx_guest_ret *out);
+void fnvnx_guest_current(uint32_t *esp, uint32_t *teb);
+
+}
+
+static fnvnx_proc *proc(void) { return fnvnx_start_proc(); }
 
 extern "C" {
 
@@ -97,6 +112,17 @@ uint32_t fnvnx_bnd_module_load(const char *name, uint32_t *base)
 }
 
 /* ExitProcess: DllMain(DLL_PROCESS_DETACH) with a non-NULL lpvReserved (the process is terminating) */
-void fnvnx_bnd_process_detach(void) { fnvnx_modules_process_detach(1); }
+void fnvnx_bnd_process_detach(void)
+{
+    uint32_t esp = 0, teb = 0;
+    fnvnx_guest_current(&esp, &teb);
+    fnvnx_modules_process_detach(proc(), teb, esp, 1);
+}
+
+/* DisableThreadLibraryCalls: the loader's only refusal is a base that is no table module */
+uint32_t fnvnx_bnd_disable_thread_calls(uint32_t base)
+{
+    return fnvnx_modules_disable_thread_calls(base) == FNVNX_OK ? 0 : 126;   /* ERROR_MOD_NOT_FOUND */
+}
 
 } // extern "C"

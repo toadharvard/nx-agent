@@ -8,6 +8,9 @@ extern "C" {
 #endif
 extern int g_bnd_exports, g_bnd_invokes, g_bnd_threads_created, g_bnd_threads_run, g_bnd_threads_freed,
     g_bnd_threads_freed_unrun, g_bnd_process_detaches;
+/* the modules (bases) DisableThreadLibraryCalls told the boundary about */
+extern uint32_t g_bnd_disabled[16];
+extern int g_bnd_disabled_n;
 /* the stand-in for the loader's LoadLibrary: maps a module (the test builds its image and registers it with
  * fnvnx_win32_register_image) and returns 0 + base, or a Win32 error; NULL: no translated module is loadable */
 extern uint32_t (*g_bnd_loader)(const char *name, uint32_t *base);

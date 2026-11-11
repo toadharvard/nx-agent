@@ -8,8 +8,8 @@
 #   fnvnx_import_by_key                    loader (L1)
 #   nx_d3d9_export                         render (L6)
 
-# Referenced by platform/boundary/boundary_guest.cpp (declarations: platform/boundary/hooks_decl.h, each copied from
-# the header named here).
+# Referenced by platform/boundary/boundary_guest.cpp (declarations: the loader's own headers, loader/include, included as they are;
+# the lifter runtime's two are declared in boundary_guest.cpp).
 # Loader (L1), branch claude/fnv-l1-contract, ports/fnv-nx/loader/include:
 fnvnx_import_key               # loader L1: fnvnx_importkey.h
 fnvnx_start_proc               # loader L1: fnvnx_start.h
@@ -19,6 +19,7 @@ fnvnx_module_load              # loader L1: fnvnx_start.h
 fnvnx_modules_thread_attach    # loader L1: fnvnx_start.h
 fnvnx_modules_thread_detach    # loader L1: fnvnx_start.h
 fnvnx_modules_process_detach   # loader L1: fnvnx_start.h
+fnvnx_modules_disable_thread_calls  # loader L1: fnvnx_start.h
 # Lifter runtime (L3a), branch claude/fnv-l3a-lift, ports/fnv-nx/lift/rt/enter.c:
 fnvnx_lift_enter               # lifter runtime L3a (also declared by the loader's fnvnx_start.h)
 fnvnx_guest_invoke             # lifter runtime L3a

@@ -60,7 +60,7 @@ if [ -z "${LIBNX_INC:-}" ]; then
     done
 fi
 LIBNX_INC=${LIBNX_INC:-}
-PINC=("-I$HERE/include" -iquote "$ROOT/shim/include" "-I$ROOT/shim/include" "-I$HERE/crt" "-I$TCDIR/include"
+PINC=("-I$HERE/include" -iquote "$ROOT/shim/include" "-I$ROOT/shim/include" "-I$HERE/crt" "-I$TCDIR/include" "-I$ROOT/loader/include"
       "-I$EXT/minimp3" "-I$EXT/freetype/include" -D__LINUX_ERRNO_EXTENSIONS__)
 [ -z "$LIBNX_INC" ] || PINC+=(-idirafter "$LIBNX_INC")
 # platform files of the host side (LP64 / libnx), not part of the guest (guest_link.py HOST_SIDE)
