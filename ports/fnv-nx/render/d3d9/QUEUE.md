@@ -231,3 +231,10 @@ STATE NOT CARRIED TO THE BACKEND (each is a correctness gap of drawn pixels, non
 5. Flat-shading variants of translated programs: only the raster bit is set.
 6. PreLoad of a managed buffer bypasses the draw path's buffer hazard table.
 Decisions to recheck: posfix = (0, 0, 1, 0) because the backend viewport already carries the half pixel (contradicts the shaders README wording: reconcile the two texts); missing VS input = (0,0,0,0) (Wine; Nine uses w = 1); NULL index buffer = D3D_OK (Windows row of Wine's test, Wine itself differs); shadow-sampler flag by format class; null-format colour target below a real one = scratch attachment.
+
+## B2c accepted 2026-11-11 (GL backend translates D3D9 shaders: NXGPU_FN_SHADER_CREATE_D3D)
+
+Lead's run: drawgl ALL OK (60 cases through the real device and draw path against libnxgl4 on llvmpipe: constants, 2D / cube / volume sampling, vertex colour, unwritten inputs, fog, alpha test, MRT, sRGB, FFP + user stage pairs), gl4 ALL OK, copy, present ALL OK. Worker's numbers: gl4 part q 138 checks, 50/50 mutations; drawgl 63 685 checks, 24/24 mutations; recorded data: 765/765 bytecodes get ids (+325/325 complete VS), 33/33 recorded pairs link; 0.86 ms mean per call.
+- libnxgl4.so now needs the translator build as a declared input: `FNVNX_SHADERS_BUILD=<render/shaders/build.sh dir>` (missing = exit 2). Tests copy, present, ffpdev, gl4, drawgl need it too.
+- OPEN: the shader cache (render/shaders/cache) cannot serve the GL backend - its payload is DKSH + reflection without GLSL and its key flags cannot carry the complete-VS variant: extend the cache format (GLSL payload kind, VS_COMPLETE in the key), then add the lookup. Until then every shader is translated at first use (measured 0.86 ms mean, 10 ms max on this host).
+- OPEN (from L4, parked until the first frame): variants keyed by a non-canonical link set are translated at the first draw of the pair.
