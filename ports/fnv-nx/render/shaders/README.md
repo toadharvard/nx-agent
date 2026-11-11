@@ -80,11 +80,10 @@ Consequences for consumers: pairs that had a location keep it, so `d3d9_exec.cpp
 reflection JSON `inputs[].location` (needed for TEXCOORD8..15, POSITION1.., PSIZE, FOG, DEPTH, SAMPLE, TESSFACTOR, POSITIONT inputs) and make the
 device compute L per VS/PS pair when either stage has a non-canonical varying.
 
-## Varying completion: the unwritten pixel input rule (vertex shader epilogue; `tests/l6/sm_link/test_sm_link.py`)
+## Varying completion: the unwritten pixel input rule (vertex shader epilogue)
 
 A pixel input (usage, index) that the paired vertex shader does not write is undefined in D3D9 (the MS register pages for oD#/oT#/oFog and
-ps_3_0 v# list "Defaults: None") and **unlinked in GL** (`dk_fog_in` at location 18 made all 33 recorded pairs fail to link on llvmpipe; deko3d
-links it and reads garbage). The project's reference profile, WineD3D 9.0, defines every case, so the rule is Wine's, per component:
+ps_3_0 v# list "Defaults: None") and unlinked on deko3d (it links the pair and the pixel stage reads garbage). The project's reference profile, WineD3D 9.0, defines every case, so the rule is Wine's, per component:
 
 | input | value when the VS does not write it | WineD3D 9.0 `glsl_shader.c` |
 |---|---|---|
@@ -163,7 +162,7 @@ All in the `glsldk` profile (other MojoShader profiles unchanged); unit + execut
 * **Numerics** (P3, P4), as Nine gives them on a driver without `TGSI_MUL_ZERO_WINS` (softpipe):
   `log`/`logp` = max(-FLT_MAX, log2|x|), `rcp` clamped to +-FLT_MAX/2 (rcp(+-0) = +-FLT_MAX/2), `rsq` =
   min(FLT_MAX, 1/sqrt|x|), `nrm` = v * min(FLT_MAX, rsq(dot3(v))) (3-component length also for a .w write mask;
-  nrm(0) = 0). Zero is tested explicitly (llvmpipe's inversesqrt(0) is NaN). `min`/`max` are written as TGSI's
+  nrm(0) = 0). Zero is tested explicitly. `min`/`max` are written as TGSI's
   and D3D9's `a < b ? a : b` / `a > b ? a : b` (a NaN operand yields the second), not GLSL min()/max().
 * Also: `def` literals printed exactly (`%.9g`; upstream printed 9 fixed decimals, so 1e-30 became 0 and
   1.2345678e-5 kept 5 digits), `loop aL, i#` runs i#.x times with any step (upstream's bound `aL < x + y` broke
@@ -217,10 +216,10 @@ Requested by S6n for the lit and image-space families. Findings on the pinned ua
   bound at all. If they are, the TGSI route above is the plan, starting with an HFMA2 encoder test against
   bit patterns confirmed on hardware.
 
-## SM1-3 totality classes (the gate `tests/l6/test_sm_total.py`; behavioural tests `tests/l6/sm_fix/test_ps1x.py`, `test_sm_ops.py`)
+## SM1-3 totality classes (the gate `tests/l6/test_sm_total.py`)
 
-Rules, each from the MS D3D9 asm reference page named in the code comment, each with a test that runs the GLSL on llvmpipe and compares
-with values computed by hand:
+Rules, each from the MS D3D9 asm reference page named in the code comment, each checked by the L4 boot machine's deko3d model against
+values computed by hand:
 
 * **ps_1_x sampler dimensionality is data.** ps_1_x has no dcl: the type is that of the texture bound at draw time (and a CTAB is D3DX
   metadata, never trusted). Every ps_1_x stage that samples declares `sampler2D` at binding n, `samplerCube` at 8 + n, `sampler3D` at

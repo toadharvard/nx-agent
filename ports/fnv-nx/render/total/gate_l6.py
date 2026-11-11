@@ -4,7 +4,7 @@
     env GATE_OUT; writes GATE_OUT/l6.json. Exit 0 iff green.
 Universe = ITEMS below (name -> argv, cwd = ports/fnv-nx). Certified = exit status 0. No skip logic, as in
 verify/gate_tests.py: an item that cannot run here is uncertified, so only tests that need nothing but gcc/g++,
-python3 and EGL surfaceless (llvmpipe) are listed. Tests that need uam, a translator build directory, Wine or another
+python3 are listed. Tests that need uam, a translator build directory, Wine or another
 lead's live files enter ITEMS when their environment is a pinned input."""
 import json, os, subprocess, sys
 

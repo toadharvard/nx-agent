@@ -11,7 +11,7 @@
 //  S7 the formats convert: nxenv_check_conversion (env table: blit-capable source, blit-capable destination, equal formats always). Both surfaces have GPU storage, or neither (then the formats are equal
 //     and the rect is copied in CPU memory; the table makes every pair with only one side CPU-only illegal - asserted by tests/l6/copy part a).
 //  S8 neither sub-resource is locked (MS; wined3d WINEDDERR_SURFACEBUSY is D3DERR_INVALIDCALL on Windows).
-//  S9 a multisampled destination is not supported by the backend (nxgpu4.h Blit: "a multisampled source is resolved first", a multisampled destination is BAD_CALL in gl4_blit.c): INVALIDCALL.
+//  S9 a multisampled destination is not supported by the backend (nxgpu4.h Blit: "a multisampled source is resolved first", a multisampled destination is BAD_CALL): INVALIDCALL.
 //     Windows accepts a single-sample -> multisampled StretchRect (Wine test_multisample_stretch_rect): REPORTED gap, needs a backend op (replicate to all samples).
 //  S10 a compressed source or destination only copies (nxgpu4.h NxOp_Blit): the native formats must be equal (DXT2 -> DXT3 is a BC2 copy); DXT1 -> A8R8G8B8 is INVALIDCALL although the env table
 //     converts it (Windows converts in the sampler): REPORTED gap, needs a backend decompress-on-blit.

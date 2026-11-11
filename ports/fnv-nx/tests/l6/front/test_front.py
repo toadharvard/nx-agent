@@ -322,7 +322,7 @@ def format_checks(L, K, ck):
         w = FT.get(v); want = (w[0], w[1], w[2], w[3], w[4]) if w and w[0] else (0, (K["NxSwz_R"], K["NxSwz_G"], K["NxSwz_B"], K["NxSwz_A"]), K["NXFMT_NULL"] if v == FCC("NULL") else 0, 0, 0)
         ck.ok("d", got == want, f"format {v:#x}: {got} != {want}")
         ck.ok("d", lib.nx_d3d9_bias_scale(v) == (w[5] if w else 2.0 ** 23), f"bias scale {v:#x}")
-    # the environment table, per ROLE (resource type x usage): every format the reference environment (Wine 9.0 + llvmpipe) lets an application create in an image role
+    # the environment table, per ROLE (resource type x usage): every format the reference environment (Wine 9.0) lets an application create in an image role
     # has a native format with the capability the role needs, or is NULL (a target without storage), or is a zero-size class (a capability probe, not creatable storage:
     # the layout oracle of tests/l6/tex). Buffers (index / vertex) are not image types and are not asked.
     cdf = {}

@@ -51,4 +51,4 @@ older than the crash by up to 1 MiB, so the end of the stream is NOT where the p
   in the spec, so the format has no export record for them). They are `jmp` thunks to the real function (any argument size).
 - The real d3d9 must export them: if it does not (Wine's `stub` entries), calling one prints a message and exits with 3.
 - Stream size is unbounded (textures/buffers are recorded at every lock); no frame range selection. Records are in call order per the lock.
-- Tests: `tests/l6/rec/test_rec.py` (needs wine32, Xvfb, mingw, the shader host tools); env dump of one run: `tests/l6/rec/wine_llvmpipe_env.tsv`.
+- Tests: `tests/l6/rec/test_rec.py` (needs wine32, Xvfb, mingw, the shader host tools); env dump of one run: `tests/l6/rec/wine_env.tsv`.

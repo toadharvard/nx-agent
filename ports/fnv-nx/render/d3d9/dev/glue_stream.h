@@ -2,7 +2,7 @@
 // the later draw path all write through it. Single-threaded like the D3D9 device (no D3DCREATE_MULTITHREADED); ONE stream per process, because the backend is one global instance.
 //
 // ---- platform (declared here, defined by the platform / the tests; the product objects leave them undefined)
-//   nxd3d_gpu_call(fn, args, n)  guest: ext_call(NXGPU_EXT_MODULE, fn, args, n); native tests: nxgl4_ext(fn, args, n). Result = the backend's uint64_t (NXGPU_BAD_CALL = 0xFFFFFFFFFFFFFF02).
+//   nxd3d_gpu_call(fn, args, n)  guest: ext_call(NXGPU_EXT_MODULE, fn, args, n). Result = the backend's uint64_t (NXGPU_BAD_CALL = 0xFFFFFFFFFFFFFF02).
 //                                Every address in args / in a struct a call points to is an address of memory from nxd3d_gpu_alloc (the glue never passes a stack address).
 //   nxd3d_gpu_alloc(bytes)       memory the backend may read and write: 4 KiB aligned, bytes a multiple of 4 KiB; NULL when the platform has none left (a result, like nxd3d_alloc: obj.h). nxd3d_gpu_free(p) releases it.
 // ---- exhaustion (README "Allocation failure"). Backend memory is allocated where an object is MADE and nowhere an operation runs, so every operation of an object that exists cannot fail for lack of memory:

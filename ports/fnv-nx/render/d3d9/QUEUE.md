@@ -40,7 +40,6 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
 | T4 | rec: Wine recorder DLL (all d3d9.dll exports), ENV adaptor, shadow lock memory; round trip under Wine on tools/compare synth captures | T2, E1 | |
 | E1 | env: ENV table (caps, adapter, modes, format x role), each line justified; request owner approval through the orchestrator | - | lead |
 | B1 | backend ABI v4 (lead designs): destroy, volume/cube/mip/face targets, MRT, image update, blit/resolve, readback of any level, queries, 16 streams + instancing, all decl types, clip planes, point size/sprites, flat variants, present interval + gamma | - | lead |
-| B2 | GL backend v4 (nxgl) | B1 | |
 | B3 | deko3d backend v4 (nxgpu) | B1 | |
 | D1 | dev: object model (refcounts, private data, device children, bind refs), IDirect3D9 over ENV | T1, E1 | |
 | D2 | dev: device state struct, Set/Get of every state, default table (take from origin/claude/port-nsw-render), state blocks (3 types, record mode) | D1 | |
@@ -49,7 +48,7 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
 | D5 | dev: draw path (program pair resolve, layout, state words, UP draws, instancing, flush policy RD3) | D2-D4, B2 | |
 | D6 | dev: Clear, StretchRect, ColorFill, UpdateSurface/Texture, GetRenderTargetData, GetFrontBufferData | D4, B2 | |
 | D7 | dev: swap chains, Present, Reset, device-lost contract, queries, cursor, gamma, palettes, clip status, patches per ENV | D2, B2 | |
-| F1 | ffp: pixel stage (one program + CPU reference) | - | done: 477352 cases 0 failed; GLSL on llvmpipe 2392 states 0 mismatches |
+| F1 | ffp: pixel stage (one program + CPU reference) | - | done: 477352 cases 0 failed |
 | F2 | ffp: vertex stage (transform, 4-matrix blending, lighting, material sources, texgen, texture transforms, fog, point size) | - | running |
 | S1 | shaders: RD4 legality table with sources + universe gate | census | done: universe 7538, ok 7077, fail 461 in 38 classes, unresolved 8, conflicts 4 |
 | S3 | shaders: fix the failing classes one root cause per task; remove the CTAB dependency | S1 | S3a running (aL, layout totality, scalar outputs, 1_0 tokens) |
@@ -83,13 +82,13 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
   loading, or gameplay frames), (b) cache misses on a standard install, (c) instructions per uam translation.
 - A direct bytecode -> Maxwell code backend without GLSL/NIR is an L7 lever, only by measurement, only hash-equal.
 | T1b | spec fixes from T2's list: signatures of the 5 undocumented exports (from Wine), ret_size, GetGammaRamp `when`, machine-readable sub-resource mapping, per-level copy taint, binding source for pix(rendertargets) | T2 | |
-| T4a | rec: observational recorder d3d9.dll under Wine; neutrality, decode, determinism modulo env/pix; dump of Wine/llvmpipe env answers | T2 | running |
+| T4a | rec: observational recorder d3d9.dll under Wine; neutrality, decode, determinism modulo env/pix; dump of Wine env answers | T2 | running |
 
 ## ENV profile (approved by the orchestrator 2026-11-10, rule "one reference environment")
 
-- The profile = the answers of the pinned recording environment: Wine 9.0 + Mesa llvmpipe + a fixed screen. The guest
+- The profile = the answers of the pinned recording environment: Wine 9.0 + a fixed screen. The guest
   answers every environment question from the same table; `env_diff` is a separate counter of d9cmp. Everything the
-  table promises is implemented totally. First dump: tests/l6/rec/wine_llvmpipe_env.tsv (6052 answers).
+  table promises is implemented totally. First dump: tests/l6/rec/wine_env.tsv (6052 answers).
 - Two recording profiles: 1280x720@60 (handheld) and 1920x1080@60 (docked), one adapter mode each; the stream check
   runs in both.
 - Direct3DCreate9Ex exists as in the reference environment; the Ex interfaces are implemented in full.
@@ -101,7 +100,7 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
 | id | task | depends | state |
 |---|---|---|---|
 | T3 | comparator d9cmp + generated replayer | T1 | done: 75 checks, 497/497 methods replayed |
-| F2 | ffp vertex stage | - | done: 24980 states 0 failed; llvmpipe 5980 states 0 mismatches |
+| F2 | ffp vertex stage | - | done: 24980 states 0 failed |
 | S3a | translator: aL, layout totality, scalar outputs, 1_0 tokens | S1 | done: 7077 -> 7398 of 7538 |
 | S3b | translator: the remaining 22 classes | S3a | running |
 | D1+D2 | dev: object model + declarative state model, state blocks, gate G-METHOD | T1 | running |
@@ -133,12 +132,10 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
 | id | task | state |
 |---|---|---|
 | A10 | d3d9.dll export surface: D3DPERF_* (7) + factory exports, resolver `nx_d3d9_export`; told L1, L5 | done c3c113ad: 9/9 spec exports, 37 checks |
-| B2a | GL 4.5 backend v4 in `render/d3d9/backend/gl4_*`: v3 port + images (create4, destroy, ImageUpdate, image_read, Blit, GenMips); guest addresses only through `nxgl4_guest_ptr` | running |
 | B2b | GL backend v4: BeginPass4, layout4, BindVtxN, queries, sampler_update, present + gamma, w[3] | after B2a |
 | D4 | dev: textures, surfaces, volumes, Create* (legality from the env table) | running |
 | R1c | shader cache from the recordings (`render/shaders/cache/`): extractor, format, loader, link-key rule; build on the 765 recorded bytecodes | running |
 | D5-D7 | draw path; copies and Clear; Present, Reset, CreateDevice, swap chains | after D4 + B2 |
-| L4-IF | off-console render interface for L4's boot stage: `nxgl4_ext(fn, args, n)` + `nxgl4_guest_ptr`, frames to NXGL4_FRAMES, `nxgl4_on_present` | proposed to L4, waiting |
 | B5 | virtual clocks in check mode (Wine side L4, guest side L5): menu run1 vs run2 equal 163 927 of 1 345 369, first mismatch seq 12198 SetPixelShaderConstantF | asked L4 |
 | X1 | the 5 exports without a spec signature (DebugSetLevel, DebugSetMute, Direct3DShaderValidatorCreate9, PSGPError, PSGPSampleTexture): the exe names none of them; not exported by us yet | open, does not block the first ELF |
 
@@ -148,17 +145,6 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
 - Calls into the guest: only AddRef / Release of application IUnknown private data, through `fnvnx_guest_invoke` (`dev/app_unk_guest.cpp`). L3a's conditions: guest thread only; no lock held across the call.
 - OPEN (no rule yet): the guest may leave `fnvnx_guest_invoke` by a non-local unwind, native frames are then dropped. In `NxObj::setPrivateData` the entry list stays consistent, but the entry allocated before the AddRef call leaks; in object destruction the remaining entries are not released.
 - Owner order relayed by the orchestrator: zero stubs in the tree, gate `nostub` (L4) at absolute 0 for merges into clean. First item when L4's table arrives: remove every stub / no-op / trap path in L6 directories so that absence is a build error; report before -> after. Known candidates: old null device and skip-draw paths, `abort()` on allocation failure in `nxd3d_alloc`.
-
-## B2a accepted 2026-11-11 (GL 4.5 backend v4, base + images)
-
-`render/d3d9/backend/gl4_*` 1580 lines, test `tests/l6/gl4/test_gl4.py` (lead's run): a 2062, b 35, c 380, d 53, e 50, f 18 checks, 0 failed; 7/7 mutations caught; NxFormat 34/34 in 2D. A stream is checked whole before anything executes; an opcode outside the build's set = NXGPU_BAD_CALL. Without `-DNXGL4_B2B_PENDING` the build fails a static assert until B2b lands.
-
-ABI points the lead must close in nxgpu4.h (no rule yet; the backend refuses, it does not guess):
-1. point filter on an exact 2:1 downscale (GenMips point, Blit point): which source texel; llvmpipe is inconsistent. Needs a stated rule + texelFetch path.
-2. depth-stencil Blit between different formats; scaled depth Blit exactness (float path, Z24 +-1 LSB); BCn Blit with scaling / conversion; multisampled Blit destination.
-3. 3D BC4/BC5 and 8x MSAA are not creatable on llvmpipe GL 4.5: the env table must not promise them (check env_*.tsv against this).
-4. X channels (BGRX8, RGBX8 read back 0xFF); 3D linear GenMips uses the GL-defined filter.
-5. 3D box addressing in ImageUpdate / image_read (z/d = slices, layer 0; slice pitch = rows * rowPitch) and native depth byte layouts are now written in gl4_fmt.c: copy into nxgpu4.h.
 
 ## D4 delivered 2026-11-11 (textures, surfaces, volumes): NOT green, one real gap
 
@@ -190,7 +176,7 @@ Gate `GATE_OUT=<dir> python3 -I ports/fnv-nx/render/total/gate_d3d9total.py` (1.
   2. ZFUNC, CULLMODE, FILLMODE, SHADEMODE out of range: wined3d makes no GL call, the result is the previous GL state. Modelled as a latch whose START value is invented. No rule.
   3. the test pins the env-creatable formats without a backend layout as an expected set (hand list): L6V5U5, X8L8V8U8, INDEX16, INDEX32, ATOC, NULL, INST, RESZ; not marked renderable: A8, A2R10G10B10, L8, V8U8, Q8W8V8U8, V16U16, Q16W16V16U16. Same gap as D4 part h: task D4b closes both, then the pinned set is deleted.
   4. the 16 vendor FOURCC formats are a hand list in gen_enums.py (from Wine's table): derive it from the env table instead.
-- Owed: tests/l6/tex/test_tex.py still names render/native/front/d3d9_state.c (now render/d3d9/front/front_fmt.c) and reads the table from C text: rewrite on the generated data in D4b. render/native/gl (v3 nxgl) goes when B2b lands.
+- Owed: tests/l6/tex/test_tex.py still names render/native/front/d3d9_state.c (now render/d3d9/front/front_fmt.c) and reads the table from C text: rewrite on the generated data in D4b.
 - The old directories toolchain/game, toolchain/host, tools/pipeline, tests/v1, tests/v6n, tests/s5 still name deleted render paths (other owners).
 
 ## D6 + GLUE accepted 2026-11-11 (copies, Clear, device -> backend glue, format roles)
@@ -209,7 +195,6 @@ Lead's run: copy ALL OK (a 189 533, b 3 767, c 72, d 75 checks by the worker's c
 `dev/dev_*.cpp|h` (584 lines), `tests/l6/devlife`. Worker's run: a 179 125, b 64, c 73, d 221, e 487, f 61 checks, 0 failed; 21/21 mutations. Lead's rerun failed to BUILD only because the test compiles dev/*.cpp by listing and the draw worker's files are mid-edit (draw_prim.cpp without draw_core.h): rerun when D5a lands.
 - Left without body (no contract): Device9Ex::SetConvolutionMonoKernel, ComposeRects (Wine does not implement them, MS gives no result rules), SwapChain9Ex::GetPresentStats (needs vblank / sync timestamps the backend ABI does not report).
 - TO RECHECK against the reference (worker deviated from Wine or invented): Reset changes the back buffer count (Wine keeps it); GetLastPresentCount = present counter (Wine 0); Present on a chain with a NULL-format back buffer succeeds without a backend call (own rule); GetFrontBufferData accepts X8R8G8B8 too; GPU thread priority range; fullscreen rules. Nothing was checked against Windows.
-- ABI question: nxd3d_frontbuffer_read assumes NxImageRead with image 0 = the swapchain image: write it into nxgpu4.h and implement in gl4, or add a function.
 - Hooks owed: backend nxd3d_present, nxd3d_present_cursor, nxd3d_wait_idle, nxd3d_frontbuffer_read, nxd3d_wait_vblank (product definitions = glue task); platform nxd3d_window_client, nxd3d_perf_counter, nxd3d_os_cursor_pos (ask L5).
 - contract_consts.tsv: + SetDialogBoxMode (both classes) = D3D_OK.
 
@@ -222,7 +207,7 @@ Lead's run: present a 128, b 103, c 170, d 25 checks, 0 failed; devlife ALL OK (
 
 ## D5a accepted 2026-11-11 (draw path, programmable pipeline core)
 
-`dev/draw_*.cpp|h` (717 lines), `backend/nxgpu4_shader.h` (NXGPU_FN_SHADER_CREATE_D3D, not yet in gl4), `tests/l6/draw`. Lead's run: ALL OK, 21/21 mutations (worker's counts: a 14 606, b 6 024, c 1 209, d 2 528, e 2 633, f 64 checks, 0 failed). Methods defined 357 -> 365 (the 8 Draw*).
+`dev/draw_*.cpp|h` (717 lines), `backend/nxgpu4_shader.h` (NXGPU_FN_SHADER_CREATE_D3D), `tests/l6/draw`. Lead's run: ALL OK, 21/21 mutations (worker's counts: a 14 606, b 6 024, c 1 209, d 2 528, e 2 633, f 64 checks, 0 failed). Methods defined 357 -> 365 (the 8 Draw*).
 STATE NOT CARRIED TO THE BACKEND (each is a correctness gap of drawn pixels, none blocks the link; no rule / no field yet):
 1. D3DRS_LASTPIXEL = TRUE (the D3D9 DEFAULT) on line draws: GL 4.5 cannot express it, the backend makes the submit BAD_CALL. Every line draw with default state fails. Needs a rule (extra last-pixel point per segment, as the semantics say) in the backend or the front.
 2. User clip plane equations and point size / point scale of programmable vertex shaders: no field in the VS driver block (translator task S2).
@@ -231,9 +216,4 @@ STATE NOT CARRIED TO THE BACKEND (each is a correctness gap of drawn pixels, non
 5. PreLoad of a managed buffer bypasses the draw path's buffer hazard table.
 Decisions to recheck: posfix = (0, 0, 1, 0) because the backend viewport already carries the half pixel (contradicts the shaders README wording: reconcile the two texts); missing VS input = (0,0,0,0) (Wine; Nine uses w = 1); NULL index buffer = D3D_OK (Windows row of Wine's test, Wine itself differs); shadow-sampler flag by format class; null-format colour target below a real one = scratch attachment.
 
-## B2c accepted 2026-11-11 (GL backend translates D3D9 shaders: NXGPU_FN_SHADER_CREATE_D3D)
-
-Lead's run: drawgl ALL OK (60 cases through the real device and draw path against libnxgl4 on llvmpipe: constants, 2D / cube / volume sampling, vertex colour, unwritten inputs, fog, alpha test, MRT, sRGB, FFP + user stage pairs), gl4 ALL OK, copy, present ALL OK. Worker's numbers: gl4 part q 138 checks, 50/50 mutations; drawgl 63 685 checks, 24/24 mutations; recorded data: 765/765 bytecodes get ids (+325/325 complete VS), 33/33 recorded pairs link; 0.86 ms mean per call.
-- libnxgl4.so now needs the translator build as a declared input: `FNVNX_SHADERS_BUILD=<render/shaders/build.sh dir>` (missing = exit 2). Tests copy, present, ffpdev, gl4, drawgl need it too.
-- OPEN: the shader cache (render/shaders/cache) cannot serve the GL backend - its payload is DKSH + reflection without GLSL and its key flags cannot carry the complete-VS variant: extend the cache format (GLSL payload kind, VS_COMPLETE in the key), then add the lookup. Until then every shader is translated at first use (measured 0.86 ms mean, 10 ms max on this host).
 - OPEN (from L4, parked until the first frame): variants keyed by a non-canonical link set are translated at the first draw of the pair.

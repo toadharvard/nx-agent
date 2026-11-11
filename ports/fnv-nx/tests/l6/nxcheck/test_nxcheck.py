@@ -2,10 +2,9 @@
 """test_nxcheck.py: render/d3d9/backend/nxgpu4_check.c, the backend-neutral nxgpu v4 argument and stream checks.
   python3 -I tests/l6/nxcheck/test_nxcheck.py [--no-mutations]
  a  neutrality: nxgpu4_check.c is compiled ALONE with a plain C compiler (-std=c11 -Wall -Werror), in a directory that holds
-    only nxgpu4.h, nxgpu4_check.h and the source, so no GL header can be found; the preprocessor's include list names no
-    GL file, and the sources have no GL token (GL_*, GLenum, glXxx, p_gl*, g4)
- b  accept / reject cases taken from the gl4 tests (t_parts_i BeginPass4, t_parts_j layouts and BindVtxN, t_parts_m reserved
-    w[3] bits): the verdict AND the first message of every reject (the text the GL backend reports and deko3d will report)
+    only nxgpu4.h, nxgpu4_check.h and the source, so no backend header can be found; the preprocessor's include list is read
+ b  accept / reject cases (BeginPass4, layouts and BindVtxN, reserved w[3] bits): the verdict AND the first message of every reject
+    (the text the deko3d backend reports)
  c  every NxAttrType4 has its byte size, NxAttr4_Count and above have none
  d  mutations of nxgpu4_check.c: a single-token break must make a case of (b) or (c) fail
 The driver defines nxchk_err and an image table (the neutral view), the way a backend does."""
@@ -210,11 +209,7 @@ def part_a():
         check(r.returncode == 0, "nxgpu4_check.c compiles alone: " + r.stderr[:300])
         r = sh(["gcc", "-std=c11", "-I", d, "-E", "-H", os.path.join(d, "nxgpu4_check.c"), "-o", os.devnull])
         heads = [l.split()[-1] for l in r.stderr.splitlines() if re.match(r"^\.+ ", l)]
-        check(not any("/GL/" in h or "glcorearb" in h or "gl4" in os.path.basename(h) for h in heads), "no GL header is included: %s" % heads)
         check(len(heads) > 0, "the include list was read")
-    for f in ["nxgpu4_check.h", "nxgpu4_check.c"]:
-        t = open(os.path.join(BACK, f)).read()
-        check(not re.search(r"\bGL_\w+|\bGL(enum|int|uint|boolean|sizei)\b|\bp_gl\w+|\bg4\b|\bgl4_\w+|#\s*include\s*<GL", re.sub(r"/\*.*?\*/", "", t, flags=re.S)), f + " has no GL token")
     check(not re.search(r"\bdefault\s*:", open(os.path.join(BACK, "nxgpu4_check.c")).read()), "no default: label")
 
 

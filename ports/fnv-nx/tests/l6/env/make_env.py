@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""make_env.py: record the ONE reference environment (Wine 9.0 + Mesa llvmpipe + Xvfb screen) in both profiles.
+"""make_env.py: record the ONE reference environment (Wine 9.0 + Xvfb screen) in both profiles.
  build envprobe2.exe (mingw) + recorder d3d9.dll; per profile: Xvfb WxHx24, prefix with HKCU\\Software\\Wine\\Direct3D\\VideoMemorySize=960, run envprobe2 under Wine with the
  recorder TWICE -> the two answer files must be identical (determinism); the recorder's D9S1 stream is decoded and cross-checked against the program's answers
  (same methods in the same order, same return values, env-class marking); writes render/d3d9/env/env_<profile>.tsv and ENV_PIN.txt.

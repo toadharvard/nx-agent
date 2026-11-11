@@ -4,7 +4,7 @@
 
 Optional:  NX_SAN_LOG=<dir>      every sanitizer report goes to <dir>/{asan,ubsan}.<pid> (the tests capture stderr; the files survive)
            NX_SAN_RECOVER=1      discovery mode: reports do not stop the process (-fsanitize-recover=all, halt_on_error=0), so one run lists all findings
-           NX_SAN_LSAN_SUPP=<f>  LeakSanitizer suppression file (only for frames wholly inside the Mesa/EGL driver .so files; see SANITIZERS.md)
+           NX_SAN_LSAN_SUPP=<f>  LeakSanitizer suppression file (see SANITIZERS.md)
 
 A test calls san.install() once, before its first subprocess: every gcc/g++ command it then runs gets flags(), every child process gets env().
 A test that loads a sanitized shared object into its own python process (ctypes) calls san.install(preload=True): the python process re-executes itself once with the ASan runtime preloaded.

@@ -5,7 +5,7 @@
  b  dk_fmt.c compiles against the real deko3d.h (-Werror=switch-enum; static_asserts of every enumerator value inside)
  c  per row, against the TSV (pinned format_traits.inc) and an independent layout oracle written from the NxFormat contract (state.h):
     the channel (bit offset, width, numeric kind) every sampled channel reads, after the row swizzle, equals the oracle; bytes per block,
-    block size, depth / stencil bits, sRGB view (layout identical to the base, flag set) equal the Dk traits AND the GL backend (gl4_fmt.c)
+    block size, depth / stencil bits, sRGB view (layout identical to the base, flag set) equal the Dk traits
  d  flags: ROT8 iff the depth words differ, XFILL iff the NxFormat has an x channel, RENDER iff deko3d renders the format and the swizzle is
     the identity; the front's render-target formats (front_fmt.c) without RENDER are listed as NOT CLOSED
  e  the composition with the front's NxFormatInfo swizzle equals an independent evaluation, for every row the front can name
@@ -92,13 +92,6 @@ int main(void) {
     printf("V %u %u %u %u %u\n", d, o[0], o[1], o[2], o[3]); }
   return 0; }
 '''
-GLH = r'''
-#include <stdio.h>
-#include "gl4.h"
-int main(void) { for (uint32_t n = 1; n < NxFmt_Count; n++) { Gl4Fmt f = gl4_fmt(n);
-  printf("G %u %u %u %u %u %u\n", n, f.bpp, f.compressed, f.depth, f.stencil, f.srgb != 0); } return 0; }
-'''
-
 def build_run(d, name, srcs, incs, code, extra=()):
     c = os.path.join(d, name + ".c"); exe = os.path.join(d, name)
     open(c, "w").write(code)
@@ -107,12 +100,7 @@ def build_run(d, name, srcs, incs, code, extra=()):
     r = sh([exe])
     return (r.stdout if r.returncode == 0 else None), r.stderr[-300:]
 
-def gl_rows(d):
-    out, err = build_run(d, "glh", [os.path.join(BACK, "gl4_fmt.c")], [BACK], GLH)
-    if out is None: sys.exit("gl4_fmt harness failed: " + err)
-    return {int(l.split()[1]): [int(x) for x in l.split()[2:]] for l in out.splitlines()}
-
-def check(d, dkc, gl, facts, quiet=True):
+def check(d, dkc, facts, quiet=True):
     """-> (failures, report) for one dk_fmt.c"""
     fails, rep = [], {}
     out, err = build_run(d, "dkh", [dkc, os.path.join(FRONT, "front_fmt.c")], [INC, NXD, FRONT, BACK], HARNESS)
@@ -132,15 +120,13 @@ def check(d, dkc, gl, facts, quiet=True):
         row_fails = len(fails)
         La = L(fmt)
         if not La: fails.append("%s: format %d is no DkImageFormat with a traits row" % (nm, fmt)); continue
-        gb, gc, gd, gs, gsrgb = gl[n][0:5]
-        if bpb != int(La["bytes_per_block"]) or bpb != gb: fails.append("%s: bytes per block row %d, traits %s, GL %d" % (nm, bpb, La["bytes_per_block"], gb))
+        if bpb != int(La["bytes_per_block"]): fails.append("%s: bytes per block row %d, traits %s" % (nm, bpb, La["bytes_per_block"]))
         comp = La["block"] != "1x1"
-        if comp != bool(fl & 1) or comp != bool(gc): fails.append("%s: compressed flag/block mismatch" % nm)
+        if comp != bool(fl & 1): fails.append("%s: compressed flag/block mismatch" % nm)
         depth, stencil = La["depth_kind"] != "-", int(La["bits_rgbazs"].split(",")[5]) > 0
-        if depth != bool(fl & 2) or depth != bool(gd): fails.append("%s: depth flag" % nm)
-        if stencil != bool(fl & 4) or stencil != bool(gs): fails.append("%s: stencil flag" % nm)
-        # sRGB view: layout identical to the base format, the sRGB flag set, present iff the GL backend has one
-        if (srgb != 0) != bool(gsrgb): fails.append("%s: sRGB view presence row %d GL %d" % (nm, srgb != 0, gsrgb))
+        if depth != bool(fl & 2): fails.append("%s: depth flag" % nm)
+        if stencil != bool(fl & 4): fails.append("%s: stencil flag" % nm)
+        # sRGB view: layout identical to the base format, the sRGB flag set
         if srgb:
             Ls = L(srgb)
             if not Ls or Ls["srgb"] != "1" or La["srgb"] != "0": fails.append("%s: sRGB view traits" % nm)
@@ -218,8 +204,7 @@ def main():
     if r.returncode: sys.exit(1)
     for k, v in sorted(facts["enum"].items()): pass
     with tempfile.TemporaryDirectory() as d:
-        gl = gl_rows(d)
-        fails, rep = check(d, os.path.join(NXD, "dk_fmt.c"), gl, facts)
+        fails, rep = check(d, os.path.join(NXD, "dk_fmt.c"), facts)
         for f in fails: print("FAIL", f)
         print("c/d/e  rows mapped %d/35; not closed (front render-target format without a deko3d render equivalent): %s" % (rep.get("mapped", 0), ", ".join(rep.get("notclosed", [])) or "none"))
         if fails: sys.exit(1)
@@ -227,7 +212,7 @@ def main():
             src = open(os.path.join(NXD, "dk_fmt.c")).read(); caught = 0; ms = mutations(src)
             for desc, text in ms:
                 c = os.path.join(d, "mut"); os.makedirs(c, exist_ok=True); p = os.path.join(c, "dk_fmt.c"); open(p, "w").write(text)
-                mf, _ = check(d, p, gl, facts)
+                mf, _ = check(d, p, facts)
                 print("  mutation %-42s %s" % (desc, "caught (" + mf[0][:60] + ")" if mf else "NOT CAUGHT"))
                 caught += bool(mf)
             print("f  mutations caught %d/%d" % (caught, len(ms)))

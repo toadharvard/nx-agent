@@ -5,12 +5,11 @@
 # Needs: FNVNX_SHADERS_DEPS=WORK/build/deps FNVNX_SHADERS_BUILD=WORK/build/host render/shaders/build.sh done, and the uam determinism patch applied to deps/uam
 # (part of render/shaders/uam.patch since 2026-11-11) and libuam.a rebuilt. Never writes into the repository.
 set -euo pipefail
-W="${1:-/home/user/work/l6/shcache}"; R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"; C="$R/render/shaders/cache"; N="$R/render/native"
+W="${1:-/home/user/work/l6/shcache}"; R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"; C="$R/render/shaders/cache"
 B="$W/build"; O="$W/out"; D="$B/deps"; mkdir -p "$O"
 LIBS="$B/host/libfnvnx_shaders.a $D/mojoshader/build/libmojoshader.a $D/uam/build/libuam.a -lm -lpthread"
 gcc -O2 -std=gnu11 -I "$R/render/shaders/include" -I "$C" -c "$C/shxlate.c" -o "$B/shxlate.o"; gcc -O2 -std=gnu11 -c "$C/shcache_key.c" -o "$B/shcache_key.o"
 g++ "$B/shxlate.o" "$B/shcache_key.o" $LIBS -o "$B/shxlate"
-gcc -std=gnu11 -O1 -w -I "$R/render/d3d9/backend" -I "$N" -I "$N/gl" "$R/tests/l6/shcache/glcheck.c" "$N/gl/nxgl.c" -lEGL -ldl -lm -o "$B/glcheck"
 for m in 64 32; do gcc -m$m -std=gnu11 -w -O1 -I "$C" "$R/tests/l6/shcache/t_shcache.c" "$C/shcache.c" "$C/shcache_key.c" -o "$B/t_shcache$m"; done
 spec_for() {   # the d3d9_spec.json a stream was recorded with (its sha256 is in the stream header): the current one or the one from git history
   local sha f c; sha="$(python3 -I -c "print(open('$1','rb').read(40)[8:].hex())")"; f="$W/spec/$sha.json"; mkdir -p "$W/spec"
@@ -30,6 +29,3 @@ BID="$(python3 -I -c "import importlib.util as u;s=u.spec_from_file_location('m'
 python3 -I "$C/mkshcache.py" --build-id "$BID" "$O/xl_fwd" "$O/shaders.shc"; python3 -I "$C/mkshcache.py" --build-id "$BID" "$O/xl_rev" "$O/shaders_rev.shc"
 cmp "$O/shaders.shc" "$O/shaders_rev.shc" && echo "cache file byte-identical from both runs" | tee -a "$O/determinism.txt"
 for m in 64 32; do "$B/t_shcache$m" verify "$O/shaders.shc" "$BID" "$O/xl_fwd"; done | tee "$O/verify.txt"
-export LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe EGL_PLATFORM=surfaceless
-"$B/glcheck" "$O/xl_fwd" "$O/glfail.tsv" | tee "$O/glcheck.txt" || true
-"$B/glcheck" --diag-pad-fog "$O/xl_fwd" "$O/glfail_pad.tsv" | tee "$O/glcheck_pad.txt" || true

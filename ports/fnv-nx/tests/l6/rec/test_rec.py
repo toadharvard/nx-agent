@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """test_rec.py: the Windows-side recorder (render/d3d9/rec) under Wine. (a) build + export list; (b) nxd9play on synthetic captures with and
 without the proxy: exit codes, PNG neutrality, stream decodes fully, call histogram vs the NXD9 capture, two-run determinism after masking
-env/pix items (differences listed in $W/nondet.tsv); (d) caps dump -> wine_llvmpipe_env.tsv.
+env/pix items (differences listed in $W/nondet.tsv); (d) caps dump -> wine_env.tsv.
 env: D9REC_WORK (work dir, default /home/user/work/l6/rec), D9REC_HOST (render/shaders host tools, default /home/user/work/l6/sm/host),
      D9REC_N (captures to run, default all).  Exit 0 iff every check passed."""
 import collections, hashlib, io, json, os, shutil, subprocess, sys
@@ -121,11 +121,11 @@ print("    nondeterministic items: " + "; ".join(f"{m}.{l}[{c}] x{k}" for (m, l,
 check(all(c in ("env", "pix") for (_, _, c) in nondet), "(b) every differing item is tagged env/pix")
 
 # ---- (d) caps dump: the probe's stream (all env questions) and one nxd9play run
-for name, data in (("wine_llvmpipe_env.tsv", probe), ("wine_llvmpipe_env_nxd9play.tsv", first_stream)):
+for name, data in (("wine_env.tsv", probe), ("wine_env_nxd9play.tsv", first_stream)):
     if not data: check(False, f"(d) no stream for {name}"); continue
     try: R.read_stream(data, spec)
     except Exception as ex: check(False, f"(d) {name}: stream does not decode {ex!r}"); continue
     buf = io.StringIO(); n = dump_env.dump(data, spec, buf); open(f"{HERE}/{name}", "w").write(buf.getvalue()); ms = {l.split("\t")[1].split("::")[1] for l in buf.getvalue().splitlines()[1:]}
-    if name == "wine_llvmpipe_env.tsv": need = {"GetDeviceCaps", "GetAdapterIdentifier", "CheckDeviceFormat", "CheckDeviceType", "CheckDepthStencilMatch", "CheckDeviceMultiSampleType", "CheckDeviceFormatConversion", "GetAvailableTextureMem", "EnumAdapterModes", "Reset", "CreateDevice"}; check(need <= ms, f"(d) probe dump lacks {sorted(need - ms)}")
+    if name == "wine_env.tsv": need = {"GetDeviceCaps", "GetAdapterIdentifier", "CheckDeviceFormat", "CheckDeviceType", "CheckDepthStencilMatch", "CheckDeviceMultiSampleType", "CheckDeviceFormatConversion", "GetAvailableTextureMem", "EnumAdapterModes", "Reset", "CreateDevice"}; check(need <= ms, f"(d) probe dump lacks {sorted(need - ms)}")
     print(f"(d) {name}: {n} rows; methods {sorted(ms)}")
 print(f"test_rec: {npass} checks passed, {len(fails)} failed"); sys.exit(1 if fails else 0)

@@ -1,5 +1,5 @@
 # render/d3d9/env: the ENV table (task E1)
-**Rule (QUEUE.md "ENV profile")**: ONE reference environment = Wine 9.0 + Mesa llvmpipe + a fixed screen (ENV_PIN.txt). Every environment question of IDirect3D9/9Ex is answered from the table
+**Rule (QUEUE.md "ENV profile")**: ONE reference environment = Wine 9.0 + a fixed screen (ENV_PIN.txt). Every environment question of IDirect3D9/9Ex is answered from the table
 `env_<profile>.tsv` (our measurement: `tests/l6/env/make_env.py` runs `envprobe2.exe` under Wine with the recorder, twice, rows must be identical). Profiles: `handheld` screen 1280x720, `docked` 1920x1080,
 ONE adapter with ONE mode each, VideoMemorySize 960 MiB. `gen_env.py` derives `env_table.gen.cpp/.h` (not checked in) and asserts every closing rule below on all rows; `dev/d3d9_adapter.cpp` maps D3D types onto it.
 Query list = `tests/l6/env/envq.py` (one source for the Wine probe and for our replay). Wine source = wine-9.0, `dlls/d3d9/directx.c` (d3d9_*) and `dlls/wined3d/directx.c` (wined3d_*).
