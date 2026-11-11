@@ -52,7 +52,7 @@ for s in audio/dshow audio/dshow_filters audio/dsound audio/waveout input/dinput
 done
 SRCS=()
 for f in "$P"/win32/*.cpp "$P"/crt/*.c "$P"/crt/*.cpp "$P"/audio/*.cpp "$P"/input/*.cpp; do
-	case "$f" in */input_horizon.cpp) continue ;; esac   # its libnx part is on the host (host_v3.inc)
+	case "$f" in */input_horizon.cpp) continue ;; */filemap_shared.cpp) continue ;; esac   # input_horizon: its libnx part is on the host (host_v3.inc); filemap_shared: host tests only (the product links filemap_private.cpp)
 	SRCS+=("$f")
 done
 SRCS+=("$TC/guest/os_guest.c" "$TC/guest/platform_glue.cpp" "$TC/game/boot.cpp")

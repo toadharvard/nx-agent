@@ -1,0 +1,2 @@
+fact	scope	value	evidence
+CreateFileMappingA.flProtect ∈ {PAGE_READONLY} and hFile ≠ INVALID_HANDLE_VALUE at every reachable site; MapViewOfFile.dwDesiredAccess ∈ {FILE_MAP_READ}	the game's modules (reachable call sites)	file-backed read-only sections over files opened GENERIC_READ / FILE_SHARE_READ; read views (the product backend win32/filemap_private.cpp covers exactly this)	fnv-nx-build l5-platform/manifest filemap_sites.tsv

@@ -8,9 +8,11 @@
 #             Default: $DEVKITPRO/devkitA64.
 # GUEST_RT    directory holding libfnvnx-guest.a (toolchain/guest/build.sh output). Default: built here with
 #             toolchain/guest/build.sh into <out>/rt (the runtime is three small C files).
-# NLS_DIR     Wine 9.0 nls directory for platform/win32/nls_tables.inc (default /home/user/gd/nls).
+# NLS_DIR     Wine 9.0 nls directory for platform/win32/nls_tables.inc (default /home/user/gd/nls; mirror: fnv-nx-build tools/nls).
 # LIBNX_INC   libnx's include directory (headers only; sockets declarations of winsock.cpp).
-# EXT         directory with freetype/ and minimp3/ (default <fnv-nx>/ext).
+# EXT         directory with freetype/ (win32/tools/fetch_freetype.sh; mirror tools/freetype) and minimp3/ (mirror tools/minimp3;
+#             pinned ea99364f..., checked by content) (default <fnv-nx>/ext).
+# Offline: nothing is fetched. A missing input stops the script with a message that names it.
 #
 # Output:  <out>/libfnvnx-platform.a   every source of platform/{win32,crt,audio,input,boundary,com,os} + toolchain/guest/{os_guest.c,
 #                                      platform_glue.cpp} (minus the host-side files) + FreeType
@@ -62,10 +64,22 @@ PINC=("-I$HERE/include" -iquote "$ROOT/shim/include" "-I$ROOT/shim/include" "-I$
       "-I$EXT/minimp3" "-I$EXT/freetype/include" -D__LINUX_ERRNO_EXTENSIONS__)
 [ -z "$LIBNX_INC" ] || PINC+=(-idirafter "$LIBNX_INC")
 # platform files of the host side (LP64 / libnx), not part of the guest (guest_link.py HOST_SIDE)
-HOST_SIDE=(platform/input/input_horizon.cpp platform/audio/backend_audren.c platform/os/os_horizon.c platform/os/os_posix.c)
+HOST_SIDE=(platform/input/input_horizon.cpp platform/audio/backend_audren.c platform/os/os_horizon.c platform/os/os_posix.c platform/win32/filemap_shared.cpp)
 
 # ---- FreeType: module list and defines of tests/s4/Makefile (read from it, not copied)
 S4MK=$ROOT/tests/s4/Makefile
+# ---- offline: every input comes from an explicit variable with a local default, nothing is fetched (no network access)
+# minimp3 is the pinned revision ea99364f61c14656440e8d77e9c233ccf3124633 (lieff/minimp3, CC0), mirror: fnv-nx-build
+# branch tools/minimp3; its two headers are checked by content
+MP3_SUMS="57e437c5c1f0e8b243885d3929c8973b5e6c778451e0100ab4251d19915cb3ad  $EXT/minimp3/minimp3.h
+8437f3fc1d4d8ab2269a1624f5380a08df1967a048f8887789bae6e25db7db79  $EXT/minimp3/minimp3_ex.h"
+for f in minimp3.h minimp3_ex.h; do
+    [ -f "$EXT/minimp3/$f" ] || { echo "build_guest: minimp3 missing: $EXT/minimp3/$f (set EXT; mirror: fnv-nx-build branch tools/minimp3)"; exit 2; }
+done
+echo "$MP3_SUMS" | sha256sum -c --quiet - >/dev/null 2>&1 \
+    || { echo "build_guest: $EXT/minimp3 is not the pinned revision ea99364f61c14656440e8d77e9c233ccf3124633 (mirror: fnv-nx-build branch tools/minimp3)"; exit 2; }
+[ -n "$LIBNX_INC" ] && [ -f "$LIBNX_INC/sys/socket.h" ] \
+    || { echo "build_guest: libnx headers missing: set LIBNX_INC to libnx's include directory (got '${LIBNX_INC}')"; exit 2; }
 [ -f "$EXT/freetype/include/ft2build.h" ] || { echo "build_guest: FreeType missing: $EXT/freetype (platform/win32/tools/fetch_freetype.sh)"; exit 2; }
 mkvar() { make -s -f "$S4MK" --eval "pv_$1: ; @echo \$($1)" "pv_$1"; }
 read -r -a FT_SRCS <<<"$(mkvar FT_SRCS)"

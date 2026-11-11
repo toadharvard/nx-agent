@@ -2,6 +2,7 @@
  * os_horizon.c. Builds for x86-64 LP64 and for aarch64 ILP32 (syntax only, no ILP32 libc exists on hosts). */
 #define _GNU_SOURCE
 #include "os.h"
+#include "os_shm.h"
 
 /* os_tick_freq, os_fs_case_insensitive: manifest/env_const.tsv */
 #include "env_const_posix.gen.inc"
