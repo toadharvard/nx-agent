@@ -85,6 +85,7 @@ def prepass(cx, img, force, entry):
     """sets cx.xm ('s' static / 'd' dynamic / None: no x87), cx.xd (depth before each instruction), cx.xa (after), cx.xmax, cx.xe (entry depth)"""
     cx.xm, cx.xd, cx.xa, cx.xmax, cx.xe, cx.xwhy = None, {}, {}, 0, entry or 0, ''
     cx.mmx_ok = set()
+    fown_prepass(cx)
     has_x87 = any(0xd8 <= i.opcode[0] <= 0xdf for i in cx.insns.values())
     if any(is_mmx(i) for i in cx.insns.values()):
         mmx_prepass(cx)
@@ -140,6 +141,82 @@ def mmx_prepass(cx):
                 before[a], after[a] = b, r
                 changed = True
     cx.mmx_ok = {a for a in I if before[a]}      # an instruction after a call: its predecessor's `after` is False (a call kills), so the AND is False
+
+
+FLAGLESS_MEM = {(0xd9, 0), (0xdd, 0), (0xdb, 5), (0xdb, 0), (0xdf, 0), (0xdf, 4), (0xdb, 7), (0xdd, 2), (0xdd, 3)}      # exact moves: loads, m80 / m64-of-double stores, fbld
+
+
+def x87_flaggy(ins):
+    """an x87 instruction whose lifted body can raise a host FPSR flag (rt/fnvl_x87.h: FOWN_X87 first): everything except the control instructions (they read/replace the sets themselves)
+    and the exact data movers (flagless: no host floating-point operation in their body)"""
+    b0 = ins.opcode[0]
+    if not 0xd8 <= b0 <= 0xdf:
+        return False
+    mr = ins.modrm; g = (mr >> 3) & 7
+    if mr < 0xc0:
+        return not (b0 == 0xd9 and g in (4, 5, 6, 7) or b0 == 0xdd and g in (4, 6, 7) or (b0, g) in FLAGLESS_MEM)
+    if b0 == 0xd9:
+        return not (mr < 0xe0 or mr in (0xe0, 0xe1, 0xe5, 0xf6, 0xf7) or 0xe8 <= mr <= 0xee)       # fld sti, fxch, fnop, fstpnce, fchs, fabs, fxam, constants, fdecstp, fincstp
+    if b0 in (0xda, 0xdb):
+        return not (mr < 0xe0 and g < 4 or b0 == 0xdb and mr in (0xe2, 0xe3))             # fcmovcc, fnclex, fninit
+    if b0 == 0xdd:
+        return not (mr < 0xc8 or 0xd0 <= mr <= 0xdf)                                       # ffree, fst / fstp st(i)
+    if b0 == 0xdf:
+        return 0xe8 <= mr <= 0xf7                                                           # fucomip / fcomip (ffreep and fnstsw ax move no flag)
+    return True
+
+
+SSE_FLAG_PREFIX = ('add', 'sub', 'mul', 'div', 'sqrt', 'min', 'max', 'cmp', 'comis', 'ucomis', 'cvt', 'rcp', 'rsqrt')
+
+
+def sse_flaggy(ins):
+    """an SSE floating-point instruction (xmm / mm operand, arithmetic, compare, convert, reciprocal): integer SIMD (`p...`), moves, logic, shuffles raise no flag"""
+    m = ins.mnemonic.split()[-1]
+    return m.startswith(SSE_FLAG_PREFIX) and any(o.type == X.X86_OP_REG and ins.reg_name(o.reg)[:2] in ('xm', 'mm') for o in ins.operands)
+
+
+def fown_prepass(cx):
+    """cx.fown_in = {address: 1 | 2} where the FPSR owner (rt/fnvl_x87.h) is provably that family on EVERY path to the instruction; elsewhere the lifter emits the dynamic check.
+    Forward must-dataflow, optimistic start (TOP), meet = equal-or-unknown. An x87 / SSE flag-raising instruction sets its family; a call (the callee may change the owner), an entry from
+    outside the straight flow (function start, address-taken labels, jump-table targets, other universe entries) and an instruction no predecessor reaches give unknown."""
+    I = cx.insns
+    cx.fown_in = {}
+    fam = {a: (1 if x87_flaggy(i) else 2 if sse_flaggy(i) else 0) for a, i in I.items()}
+    if not any(fam.values()):
+        return
+    from . import universe
+    uent = universe.load()[0]
+    roots = {cx.start} | {t for ts in cx.tables.values() for t in ts} | set(cx.taken) | {a for a in I if a in uent}
+    preds = {a: [] for a in I}
+    for a in I:
+        ins = I[a]; m = ins.mnemonic.split()[-1]
+        for t in succs(cx, a, ins, m):
+            if t in preds:
+                preds[t].append(a)
+    TOP = -1
+    before = {a: TOP for a in I}
+    after = {a: TOP for a in I}
+    changed = True
+    while changed:
+        changed = False
+        for a in sorted(I):
+            ins = I[a]; m = ins.mnemonic.split()[-1]
+            if a in roots or not preds[a]:
+                b = 0
+            else:
+                vs = {after[p] for p in preds[a]} - {TOP}
+                b = TOP if not vs else vs.pop() if len(vs) == 1 else 0
+            r = 0 if m == 'call' else fam[a] if fam[a] else b
+            if b != before[a] or r != after[a]:
+                before[a], after[a] = b, r
+                changed = True
+    cx.fown_in = {a: b for a, b in before.items() if b in (1, 2)}
+
+
+def fown_emit(cx, f):
+    """emit the owner check of family f (1 x87, 2 SSE) before the current instruction unless fown_prepass proved it"""
+    if cx.fown_in.get(cx.a) != f:
+        cx.em('FOWN_X87();' if f == 1 else 'FOWN_SSE();')
 
 
 def no(cx, why):
@@ -229,8 +306,8 @@ def env(cx, ins, b0, g):
     STORES (fnstenv, fnsave): FCW, FSW (FSWV: TOP, C0..C3, C1, sticky bits), FTW from the register contents, FIP, FCS | FOP << 16, FDP, FDS from the last-instruction state (c->fip, c->fdp:
     rt/fnvl_x87.h, SDM 8.1.8, assumptions A-FDP A-FDS A-FOP A-RES there); fnsave then writes ST(0..7) and performs FNINIT; fnstenv then masks all exceptions (FCW |= 3F via FLDCW).
     Assumptions: A-EMPTY a register that the image marks non-empty but whose carrier is empty holds the real indefinite (the value the tree gives every read of an empty register:
-    dyn_rd; the carrier of an empty register keeps no value; fnsave writes it for an empty register too); A-ES the FSW bits ES (7) and B (15) are not kept, no x87 exception is ever pending
-    in the model (R8: all masked, FSWV never reports them)."""
+    dyn_rd; an empty register keeps the 80-bit image it last held, fv_free, which an MMX read sees, but every x87 read of it gives the indefinite; fnsave writes the indefinite for an empty register too); A-ES the FSW bits ES (7) and B (15) are not kept, no x87 exception is ever pending
+    in the model (invariant I-FPMASK, fnvlift/fpfacts.py: all exceptions masked, FSWV never reports them)."""
     if cx.xm == 's':
         raise X87Dyn()
     d32 = 0 if ins.prefix[2] == 0x66 else 1

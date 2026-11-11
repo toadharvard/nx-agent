@@ -6,6 +6,7 @@ aliasing operands are safe; an mm operand is an xmm_t whose low half is the sign
 import re
 from capstone import x86 as X
 from .core import op, fallback, Unsupported, SKIP
+from .f_x87_ctl import sse_flaggy, fown_emit
 
 SSE = {}
 REG, MEM, IMM = X.X86_OP_REG, X.X86_OP_MEM, X.X86_OP_IMM
@@ -77,6 +78,8 @@ def h_sse(cx, ins):
         cx.kinds.add('mmx')
         if cx.a not in cx.mmx_ok:               # f_x87_ctl.mmx_prepass: not proven canonical on every path to here
             cx.em('MMX_ENTER();')
+    if sse_flaggy(ins):
+        fown_emit(cx, 2)                                          # sticky flags: the FPSR belongs to the SSE family from here (rt/fnvl_x87.h)
     h = SSE.get(cx.m)
     if h is None:
         raise Unsupported('sse ' + cx.m)
@@ -155,12 +158,12 @@ def h_prefetch(cx, ins):
 
 @op('ldmxcsr')
 def h_ldmxcsr(cx, ins):
-    cx.em('{ u32 v_=M32(%s); c->mxcsr=v_; sse_fpcr(v_); }' % cx.ea(ins, cx.ops[0]))
+    cx.em('{ u32 v_=M32(%s); c->mxcsr=v_; sse_fpcr(v_); if(fown()==2u) fnvl_fp_x87_clear(); }' % cx.ea(ins, cx.ops[0]))      # the flags of the operand REPLACE the SSE set (SDM LDMXCSR)
 
 
 @op('stmxcsr')
 def h_stmxcsr(cx, ins):
-    cx.em('M32(%s)=c->mxcsr;' % cx.ea(ins, cx.ops[0]))
+    cx.em('M32(%s)=c->mxcsr|sse_live();' % cx.ea(ins, cx.ops[0]))      # the SSE set: the shadow bits plus the live FPSR while SSE owns it
 
 
 # ---- arithmetic, logic, min/max, sqrt, reciprocal ----

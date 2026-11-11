@@ -50,22 +50,26 @@ def cases():
     return out
 
 
-def main():
-    os.makedirs(WORK, exist_ok=True)
+def run(cases, work=WORK, tag=1000):
+    """lift every sequence as one function, run it on the lifted AArch64 code from a deterministic state (esi, edi, ebx = SRC, DST, TMP; an optional 5th tuple element edits the state) and compare the
+    bytes it stores with the SDM expectation; -> number of failures"""
+    os.makedirs(work, exist_ok=True)
     img = XE.FImage('/home/user/game/FalloutNV.exe')
     from fnvlift import fpfacts
     fpfacts.ASSUME.update(('I-FPMASK', 'I-FPSTICKY'))
-    T.G.update(L=fnvlift, img=img, work=WORK)
-    T.runtime_objects(WORK, os.path.dirname(HERE))
+    T.G.update(L=fnvlift, img=img, work=work)
+    T.runtime_objects(work, os.path.dirname(HERE))
     bad = 0
-    for k, (name, raw, top, expect) in enumerate(cases()):
+    for k, case in enumerate(cases):
+        name, raw, top, expect = case[:4]
         a = 0x7d000000 + k * 0x100; XE.fake[a] = raw
         ins = next(fnvlift.core.md.disasm(raw, a))
         E = dict(addr=a, raw=raw, ins=ins, base='seq', rep=False, x87=True, mmx=False, sse=False)
         txt = fnvlift.lift(img, a, len(raw), strict=False)[0]
-        elf, _ = T.build(1000 + k, [(a, txt)], WORK); arm = T.Arm(elf)
-        st = T.gen_state(E, 0, 0); st['wk'] = (1234 + k, 0); st['ftop'] = top; st['valid'] = 0; st['fx'] = [(0, 0, 0)] * 8; st['fcw'] = 0x27f
+        elf, _ = T.build(tag + k, [(a, txt)], work); arm = T.Arm(elf)
+        st = T.gen_state(E, 0, 0); st['wk'] = (1234 + k, 0); st['ftop'] = top; st['valid'] = 0; st['fx'] = [(0, 0, 0)] * 8; st['fcw'] = 0x27f; st['fc'] = 0
         r = st['regs']; r[6], r[7], r[3] = SRC, DST, TMP
+        if len(case) > 4: case[4](st)
         T.imgpage = XE.imgpage
         c = arm.run(E, st)
         if 'fault' in c: print('%-60s FAIL %s' % (name, c['fault'])); bad += 1; continue
@@ -74,7 +78,11 @@ def main():
             got = bytes(c['mem'].get(ad + i, T.origbyte(st, ad + i)) for i in range(len(want)))
             if got != want: ok = False; print('   %s: at %x got %s want %s' % (name, ad, got.hex(), want.hex()))
         print('%-60s %s' % (name, 'ok' if ok else 'FAIL')); bad += not ok
-    sys.exit(1 if bad else 0)
+    return bad
+
+
+def main():
+    sys.exit(1 if run(cases()) else 0)
 
 
 if __name__ == '__main__':
