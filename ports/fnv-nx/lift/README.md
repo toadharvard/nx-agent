@@ -125,6 +125,10 @@ of the image is ever rewritten (vtable slots, EH tables and jump tables included
   `ldar`/`stlr`, with an alignment test and a complete second path (`ldr` + `dmb ishld`, `dmb ishst` + `str`) for
   unaligned addresses; `xchg` with memory and the Interlocked imports are `ldaxr`/`stlxr` loops. Extensions L-STACK
   (slot promoted to a host register), L-RO (constant address in a read-only section), L-TLS.
+  Implemented (rt/fnvl.h, fnvlift/core.py lock mode): class (b) for every guest access, the stack included (class (a)
+  and the extensions only remove ordering, so leaving them out is safe); every LOCK-prefixed instruction and `xchg`
+  with memory is one compare-and-swap commit of the instruction body run on a private copy, followed by `dmb ish`;
+  a misaligned locked operand runs under the one global spin lock `fnvnx_split_lock`.
 - **Modules.** The lifter is applied to every non-system PE of the game (the exe, binkw32 and the rest).
 
 ### One reference CPU model (owner decision 2026-11-10)
