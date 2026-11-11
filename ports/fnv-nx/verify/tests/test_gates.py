@@ -255,6 +255,26 @@ check("l1 verdict: the reason of an uncertified test (exit status, errno text) i
       rc == 2 and "test_x.py" in gt["reason"] and "exit 1" in gt["reason"] and "[Errno 28] No space left on device" in gt["reason"]
       and "[Errno 28]" in out, (rc, gt, out))
 
+# gate TMPDIR rule: private empty TMPDIR per gate, removed on any outcome; leftovers in it or in the worktree make the gate red
+LEAKY = ("import json, os, sys\nk = sys.argv[1]\n"
+         "if k == 'tmp': open(os.path.join(os.environ['TMPDIR'], 'junk'), 'w').write('x')\n"
+         "if k == 'wt': open('stray.txt', 'w').write('x')\n"
+         "json.dump({'format': 'fnvnx-gate/1', 'name': 'leaky', 'status': 'green', 'universe': 1, 'certified': 1, 'uncertified': [],\n"
+         "           'detail': os.environ['TMPDIR']}, open(os.path.join(os.environ['GATE_OUT'], 'leaky.json'), 'w'))\n")
+def leaky_run(kind):
+    r = small_repo(gates={"format": "fnvnx-gates/1", "gates": [
+        {"name": "leaky", "argv": ["python3", "-I", "ports/fnv-nx/verify/leaky.py", kind], "result": "leaky.json"}]},
+        link={"ports/fnv-nx/verify/leaky.py": LEAKY})
+    vd = tmp("verdicts")
+    rc, line, out, err = l1("verdict", "--repo", r, "--commit", "main", "--verdicts", vd)
+    return rc, out, err
+rc, out, err = leaky_run("clean")
+check("gate tmpdir: a gate that leaves nothing is green", rc == 0, (rc, out, err))
+rc, out, err = leaky_run("tmp")
+check("gate tmpdir: a gate that leaves a file in its TMPDIR is red and the file is named", rc == 2 and "in its TMPDIR: junk" in out, (rc, out, err))
+rc, out, err = leaky_run("wt")
+check("gate tmpdir: a gate that leaves a file in the worktree is red and the file is named", rc == 2 and "in the worktree: stray.txt" in out, (rc, out, err))
+
 # merge: bootstrap
 r = small_repo()
 vd = tmp("verdicts")
