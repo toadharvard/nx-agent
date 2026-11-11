@@ -38,10 +38,12 @@ import os
 import struct
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'contract'))
 import gatefile
+import gateids
 
-EMPTY, SHT_SYMTAB, PT_LOAD, SHN_UNDEF = 0xffffffff, 2, 1, 0
+SHT_SYMTAB, PT_LOAD, SHN_UNDEF = 2, 1, 0
 M32 = 0xffffffff
 
 
@@ -84,49 +86,74 @@ def read_at(loads, d, addr, n):
 
 
 def table_slots(syms, sizes, loads, d):
-    """(table address, [(key, offset)]) or a string naming why the table cannot be read."""
-    if len(syms.get('fnvl_disp_table', ())) != 1:
-        return 'fnvl_disp_table is not defined exactly once'
-    t = next(iter(syms['fnvl_disp_table']))
-    size = sizes['fnvl_disp_table']
-    if size == 0:
-        if len(syms.get('fnvl_g', ())) != 1:
-            return 'fnvl_disp_table has no size and fnvl_g is not defined exactly once'
-        size = next(iter(syms['fnvl_g'])) - t
-    if size <= 0 or size % 8:
-        return 'the table size %d is not a positive multiple of the 8-byte slot' % size
-    raw = read_at(loads, d, t, size)
-    if raw is None:
-        return 'the table is not inside one PT_LOAD segment of the file image'
-    return t, [struct.unpack_from('<Ii', raw, o) for o in range(0, size, 8)]
+    """(table address, [(key, offset)], g [u16], (K1, K2, NBITS, TBITS)) or a string naming why the table cannot be read."""
+    for n in ('fnvl_disp_table', 'fnvl_g', 'fnvl_phf_params'):
+        if len(syms.get(n, ())) != 1:
+            return '%s is not defined exactly once' % n
+    if sizes['fnvl_phf_params'] != 16:
+        return 'fnvl_phf_params has size %d, not 4 u32 words' % sizes['fnvl_phf_params']
+    pp = read_at(loads, d, next(iter(syms['fnvl_phf_params'])), 16)
+    if pp is None:
+        return 'fnvl_phf_params is not inside one PT_LOAD segment of the file image'
+    k1, k2, nb, tb = struct.unpack('<IIII', pp)
+    if not (1 <= nb <= 31 and 1 <= tb <= 31):
+        return 'the hash parameters NBITS %d, TBITS %d are outside 1..31' % (nb, tb)
+    t, g = next(iter(syms['fnvl_disp_table'])), next(iter(syms['fnvl_g']))
+    if sizes['fnvl_disp_table'] != 8 << tb:
+        return 'the size of fnvl_disp_table is %d, not 8 << TBITS = %d' % (sizes['fnvl_disp_table'], 8 << tb)
+    if sizes['fnvl_g'] != 2 << nb:
+        return 'the size of fnvl_g is %d, not 2 << NBITS = %d' % (sizes['fnvl_g'], 2 << nb)
+    raw, graw = read_at(loads, d, t, 8 << tb), read_at(loads, d, g, 2 << nb)
+    if raw is None or graw is None:
+        return 'the table or fnvl_g is not inside one PT_LOAD segment of the file image'
+    return (t, [struct.unpack_from('<Ii', raw, o) for o in range(0, len(raw), 8)], struct.unpack('<%dH' % (1 << nb), graw), (k1, k2, nb, tb))
+
+
+def slot_of(a, g, par):
+    """The slot rt.c fnvl_dispatch computes for address a."""
+    k1, k2, nb, tb = par
+    return ((((a ^ g[((a * k1) & M32) >> (32 - nb)]) & M32) * k2) & M32) >> (32 - tb)
 
 
 def tsv(path):
-    """[(first column, second column or None)] of a tab-separated file, `#` and empty lines skipped."""
+    """[(address, symbol or None, kind)] of a tab-separated file (kind: third column, `code` when absent), `#` and empty lines skipped."""
     out = []
     with open(path) as fh:
         for ln in fh:
             ln = ln.rstrip('\n')
             if ln and ln[0] != '#':
                 p = ln.split('\t')
-                out.append((int(p[0], 16), p[1] if len(p) > 1 else None))
+                kind = p[2] if len(p) > 2 else 'code'
+                if kind not in ('code', 'import'):
+                    sys.exit('gate_disp: %s: unknown kind %r (address %s)' % (path, kind, p[0]))
+                out.append((int(p[0], 16), p[1] if len(p) > 1 else None, kind))
+    return out
+
+
+def table_id(path):
+    """The id of a `# table_id <hex>` line of a file (the last one), or None."""
+    out = None
+    with open(path) as fh:
+        for ln in fh:
+            w = ln.split()
+            if len(w) == 3 and w[0] == '#' and w[1] == 'table_id':
+                out = w[2].lower()
     return out
 
 
 def check(syms, table, universe, named):
-    """{key: reason or None} over universe keys, named keys and the table keys.
-    syms {name: set of addresses}; table (address, [(key, offset)]); universe set of keys; named {key: set of symbols}."""
-    taddr, slots = table
+    """{key: reason or None} over universe keys, named keys and the occupied table keys.
+    syms {name: set of addresses}; table (address, [(key, offset)], g, params); universe set of keys (code and import);
+    named {key: set of symbols}."""
+    taddr, slots, g, par = table
     where = {}
-    for k, off in slots:
-        if k != EMPTY:
-            where.setdefault(k, []).append(off)
+    for i, (k, off) in enumerate(slots):
+        if off:
+            where.setdefault(k, []).append(i)
     res = {}
     for k in sorted(set(universe) | set(named) | set(where)):
         names = named.get(k, set())
-        if k == EMPTY:
-            res[k] = 'reserved-key'
-        elif k not in universe and k not in named:
+        if k not in universe and k not in named:
             res[k] = 'extra-key'
         elif not names:
             res[k] = 'no-entry'
@@ -135,13 +162,16 @@ def check(syms, table, universe, named):
         else:
             n = next(iter(names))
             a = syms.get(n, ())
+            hit = slot_of(k, g, par)
             if len(a) != 1:
                 res[k] = 'symbol-undefined' if not a else 'symbol-ambiguous'
             elif k not in where:
                 res[k] = 'no-slot'
             elif len(where[k]) > 1:
                 res[k] = 'duplicate-key'
-            elif (taddr + where[k][0]) & M32 != next(iter(a)) & M32:
+            elif where[k][0] != hit:
+                res[k] = 'hash-miss'
+            elif (taddr + slots[hit][1]) & M32 != next(iter(a)) & M32:
                 res[k] = 'wrong-target'
             else:
                 res[k] = None
@@ -154,36 +184,51 @@ def main():
     ap.add_argument('--universe', required=True)
     ap.add_argument('--entries', required=True)
     ap.add_argument('--keys')
+    ap.add_argument('--missing')
     a = ap.parse_args()
-    universe = {k for k, _ in tsv(a.universe)}
+    universe = {k for k, _, _ in tsv(a.universe)}
     named, extra = {}, set()
     for path in [a.entries] + ([a.keys] if a.keys else []):
-        for k, sym in tsv(path):
+        for k, sym, kind in tsv(path):
             if sym is None:
                 sys.exit('gate_disp: %s: a row without a symbol (address %08x)' % (path, k))
             named.setdefault(k, set()).add(sym)
-            if path == a.keys:
+            if path == a.keys or kind == 'import':
                 extra.add(k)
+    ids = [table_id(p) for p in [a.entries] + ([a.keys] if a.keys else [])]
+    ids = [i for i in ids if i]
+    id_bad = len(ids) == 2 and ids[0] != ids[1]
     keys = universe | extra
     syms, sizes, loads, d = read_elf(a.elf)
     table = table_slots(syms, sizes, loads, d)
     if isinstance(table, str):
         n = len(keys)
-        gatefile.write('disp', n, 0, ['%08x:no-table' % k for k in sorted(keys)], table)
+        unc = ['%08x:no-table' % k for k in sorted(keys)]
+        gatefile.write('disp', n, 0, unc, table)
+        gateids.write_ids('disp', unc)
         print('dispatcher: %s' % table)
         sys.exit(1)
-    # an entries.tsv row for an address that is neither in the universe nor in --keys is not a key (it is an extra key only if the table holds it)
+    # an entries.tsv row for an address that is neither in the universe nor an import key is not a key (it is an extra key only if the table holds it)
     named = {k: v for k, v in named.items() if k in keys}
     res = check(syms, table, keys, named)
     bad = sorted((k, r) for k, r in res.items() if r)
     counts = {}
     for _, r in bad:
         counts[r] = counts.get(r, 0) + 1
-    detail = 'dispatcher: %d keys, %d certified, %d slots%s' % (len(res), len(res) - len(bad), len(table[1]),
-                                                                 ''.join(', %s %d' % (r, counts[r]) for r in sorted(counts)))
-    gatefile.write('disp', len(res), len(res) - len(bad), ['%08x:%s' % (k, r) for k, r in bad], detail)
+    unc = ['%08x:%s' % (k, r) for k, r in bad] + (['table_id'] if id_bad else [])
+    detail = 'dispatcher: %d keys, %d certified, %d slots, %d occupied%s' % (
+        len(res), len(res) - len(bad), len(table[1]), sum(1 for _, o in table[1] if o), ''.join(', %s %d' % (r, counts[r]) for r in sorted(counts)))
+    if id_bad:
+        detail += ', table_id differs (%s vs %s)' % (ids[0][:12], ids[1][:12])
+    if a.missing:
+        miss = {k for k, _, _ in tsv(a.missing)}
+        noentry = {k for k in universe if k not in named}
+        detail += '; missing list %d: %d without entry, %d with an entry; without entry and not listed %d' % (
+            len(miss), len(miss & noentry), len(miss - noentry), len(noentry - miss))
+    gatefile.write('disp', len(res) + len(ids) // 2, len(res) - len(bad) + len(ids) // 2 - (1 if id_bad else 0), unc, detail)
+    gateids.write_ids('disp', unc)
     print(detail)
-    sys.exit(1 if bad else 0)
+    sys.exit(1 if unc else 0)
 
 
 if __name__ == '__main__':
