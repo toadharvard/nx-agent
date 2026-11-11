@@ -13,7 +13,7 @@ Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-plat
 | 3a | Doubles census as a re-runnable check (`platform/manifest/check_doubles.py`, measurement; the gate stays L1's) + per-file replacement plan | w14 session_01KmtZKRTZQHQpngLDfUUZTy | -w14 | doing |
 | 3b | Doubles to 0: 582 tests (s4 498, s7 84), 6 files / 87 symbols + 7 boundary double files; 7 product units not linked — tests become guest ELFs on the root's objects in the L4 boot machine | — | — | blocked by w10 (root unit set) and L4 (`boot.py test --elf --root`, L4) |
 | 4a | DirectShow stubs out (old w1, reissued) | w11 session_01KmtZKRToHhAash6PcSd6rA | -w11 | done (4cbf9a97, merged): FNVNX_UNIMPL/E_NOTIMPL_ deleted; 3 IMediaControl bodies = Wine 9.0 quartz FIXME+S_OK (wine_fixme 200-202, citations checked against wine-9.0 source); async reader/allocator/samples real; s4 498/0, s7 89/0. Open: CLSID_MemoryAllocator not registered |
-| 4b | crt how=inferred; retire L5 loader copy; delete native-vorbis build path (old w2 + new C) | w9 session_01KmtZKUMZLSvzv7uGGqu6Qw | -w9 | B, C accepted (a41f9a42); A rejected: dropping `how` keeps 75 name-inferred bindings (fnvnx_ws2_*, fnvnx_nvapi_not_initialized, platform/crt bodies); rework: delete the 75 rows and their bindings |
+| 4b | crt how=inferred; retire L5 loader copy; delete native-vorbis build path (old w2 + new C) | w9 session_01KmtZKUMZLSvzv7uGGqu6Qw | -w9 | B, C accepted (a41f9a42); A rejected: dropping `how` keeps 75 name-inferred bindings (fnvnx_ws2_*, fnvnx_nvapi_not_initialized, platform/crt bodies); rework: delete the 75 rows and their bindings (accepted by orchestrator); plus Legal decision: crt_symbols.tsv and every exe-address/identification table move to fnv-nx-build l5-platform/manifest tables/, consumed as externals |
 | 4c | vorbis real decoder (old w3) | — | — | closed: libvorbis*.dll are lifted PE modules (ENV_TRUTH M1, R10в); the leftover native path goes in 4b |
 | 2b | Dynamic-key Reg* sites (4 of 20, wrappers 0xc5d670/0xc5d780/0xc5d920): parameter rule over all entries + RTTI receiver/field-writer rule; keeps `machine` a measurement build until done | w12 session_01KmtZKTLfyNCVz9mSxafRwL | -w12 (draft a2fe53fb picked) | doing |
 | 2c | World stop under ASan (draft 50956c3e on -w8) | — | -w8 | deferred: it patches os_posix.c, a test double that item 3 removes |
@@ -36,3 +36,8 @@ Old workers w1, w2, w3 (session_01KmtZKSjF1rc6JAiuz1rvJg, _01KmtZKU6xzxGuGdkrtzw
 - tests/s4 477 tests / 404 725 checks / 0 failed; tests/s7 84 / 3 237 / 0 (host Makefiles, not yet the recipe).
 - bridge.tsv (private 634e4af): 1 552 rows.
 - Platform root through recipe.py: not measured yet (w7).
+
+
+## Queued (off the first-frame path)
+- toolchain/gcc/build.sh reproducibility (L4 TC-REPRO eb6c2c96: 314/2069 files differ; embedded prefix/build paths, non-deterministic ar). Rule accepted; queued after the platform root and ELF. The mirror 3f25152c stays the pin.
+- TEXT_ENTRY 36 host server (swkbd).
