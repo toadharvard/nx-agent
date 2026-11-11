@@ -204,13 +204,35 @@ check("repeated entry is not a declaration", G.load(p) is None)
 open(p, "w").write("{")
 check("malformed json is not a declaration", G.load(p) is None)
 
-# the gate on this checkout: every test of the tree is certified
-root = subprocess.run(["git", "-C", HERE, "rev-parse", "--show-toplevel"], capture_output=True, text=True).stdout.strip()
+# the gate program on a synthetic checkout: one tool, one test, one spec reference
+root = os.path.join(tmp, "repo")
+T = "ports/fnv-nx"
+tree = {T + "/verify/gates.json": json.dumps({"gates": [{"name": "selftests", "argv": ["python3", "-I", T + "/verify/gate_tests.py",
+                                                                                      T + "/x"]}]}),
+        T + "/verify/admit.json": json.dumps({"roots": [{"path": T + "/x", "class": "tool", "gates": []}]}),
+        T + "/verify/oracle_pins.json": "{}",
+        T + "/x/a.py": "def f():\n    return 1\n",
+        T + "/x/RULE.md": "# rule\nf returns 1\n",
+        T + "/x/tests/test_a.py": "",
+        T + "/x/tests/oracle.json": json.dumps({"format": "fnvnx-oracle/1", "tests": {"test_a.py": {
+            "subject": [T + "/x/a.py"], "references": [{"kind": "spec", "path": T + "/x/RULE.md", "anchor": "# rule"}]}}})}
+for f, text in tree.items():
+    os.makedirs(os.path.dirname(os.path.join(root, f)), exist_ok=True)
+    open(os.path.join(root, f), "w").write(text)
+subprocess.run(["git", "init", "-q", root], check=True)
+subprocess.run(["git", "-C", root, "add", "-A"], check=True)
 out = os.path.join(tmp, "out")
 os.makedirs(out)
 env = {k: v for k, v in os.environ.items() if not k.startswith("GATE_")}
-rc = subprocess.run([sys.executable, "-I", "ports/fnv-nx/verify/gate_oracle.py"], cwd=root, env=dict(env, GATE_OUT=out)).returncode
+GATE = os.path.join(os.path.dirname(HERE), "gate_oracle.py")
+rc = subprocess.run([sys.executable, "-I", GATE], cwd=root, env=dict(env, GATE_OUT=out)).returncode
 res = json.load(open(os.path.join(out, "oracle.json")))
-check("gate on this tree: green, result in the gate format", rc == 0 and res["status"] == "green" and res["name"] == "oracle"
-      and res["format"] == "fnvnx-gate/1" and res["universe"] == res["certified"] > 0 and res["uncertified"] == [], res)
+check("gate program: green, result in the gate format", rc == 0 and res["status"] == "green" and res["name"] == "oracle"
+      and res["format"] == "fnvnx-gate/1" and res["universe"] == res["certified"] == 1 and res["uncertified"] == []
+      and res["references"] == {"spec": 1}, res)
+os.remove(os.path.join(root, T + "/x/tests/oracle.json"))
+rc = subprocess.run([sys.executable, "-I", GATE], cwd=root, env=dict(env, GATE_OUT=out)).returncode
+res = json.load(open(os.path.join(out, "oracle.json")))
+check("gate program: test without a declaration -> red, exit 2", rc == 2 and res["status"] == "red"
+      and res["uncertified"] == [T + "/x/tests/test_a.py"], res)
 sys.exit(1 if fails else 0)

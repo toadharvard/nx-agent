@@ -225,7 +225,8 @@
    "subject": [
     "ports/fnv-nx/verify/envcheck.py",
     "ports/fnv-nx/farm/setup_verdict_env.sh",
-    "ports/fnv-nx/verify/env.json"
+    "ports/fnv-nx/verify/env.json",
+    "ports/fnv-nx/verify/a64access.cc"
    ]
   },
   "test_fpbound.py": {
@@ -262,7 +263,10 @@
     "ports/fnv-nx/verify/gate_pure.py",
     "ports/fnv-nx/verify/gate_tests.py",
     "ports/fnv-nx/verify/gates.json",
-    "ports/fnv-nx/verify/l1.py"
+    "ports/fnv-nx/verify/l1.py",
+    "ports/fnv-nx/verify/env.json",
+    "ports/fnv-nx/verify/puregate.py",
+    "ports/fnv-nx/verify/puregate_policy.py"
    ]
   },
   "test_graph.py": {
@@ -298,7 +302,11 @@
     }
    ],
    "subject": [
-    "ports/fnv-nx/verify/l1graph.py"
+    "ports/fnv-nx/verify/l1graph.py",
+    "ports/fnv-nx/verify/graph.py",
+    "ports/fnv-nx/verify/runtime.py",
+    "ports/fnv-nx/verify/toolflags.py",
+    "ports/fnv-nx/verify/toolflags_policy.py"
    ]
   },
   "test_linkstrict.py": {
@@ -340,7 +348,9 @@
    "subject": [
     "ports/fnv-nx/verify/objstub.py",
     "ports/fnv-nx/verify/objstub_plugin.cc",
-    "ports/fnv-nx/verify/gate_objstub.py"
+    "ports/fnv-nx/verify/gate_objstub.py",
+    "ports/fnv-nx/verify/a64access.cc",
+    "ports/fnv-nx/verify/verdict.py"
    ]
   },
   "test_opentrace.py": {
@@ -418,7 +428,9 @@
    "subject": [
     "ports/fnv-nx/verify/recipe.py",
     "ports/fnv-nx/verify/gate_build.py",
-    "ports/fnv-nx/verify/unitstage.py"
+    "ports/fnv-nx/verify/unitstage.py",
+    "ports/fnv-nx/verify/gate_determinism.py",
+    "ports/fnv-nx/verify/verdict.py"
    ]
   },
   "test_runtime.py": {
@@ -430,7 +442,9 @@
     }
    ],
    "subject": [
-    "ports/fnv-nx/verify/runtime.py"
+    "ports/fnv-nx/verify/runtime.py",
+    "ports/fnv-nx/verify/toolflags.py",
+    "ports/fnv-nx/verify/toolflags_policy.py"
    ]
   },
   "test_sandbox.py": {
@@ -472,7 +486,9 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/toolflags.py",
-    "ports/fnv-nx/verify/toolflags_policy.py"
+    "ports/fnv-nx/verify/toolflags_policy.py",
+    "ports/fnv-nx/verify/puregate.py",
+    "ports/fnv-nx/verify/puregate_policy.py"
    ]
   },
   "test_unitstage.py": {
@@ -484,7 +500,8 @@
     }
    ],
    "subject": [
-    "ports/fnv-nx/verify/unitstage.py"
+    "ports/fnv-nx/verify/unitstage.py",
+    "ports/fnv-nx/verify/runtime.py"
    ]
   },
   "test_verdict.py": {
