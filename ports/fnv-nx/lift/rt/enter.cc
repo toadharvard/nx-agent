@@ -37,7 +37,7 @@ void fnvl_invoke_main(u32 addr, u32 ecxv, u32 nargs, const u32 *args, u32 kind, 
 void fnvl_nobody(void);
 extern const u32 fnvnx_lift_cpu_bytes;
 }
-static_assert(__builtin_offsetof(struct cpu, ra) == 320, "rt.c FNVL_PHF_REL stores the missed address at c->ra (offset 320)");
+static_assert(__builtin_offsetof(struct cpu, ra) == 248, "rt.c FNVL_PHF_REL stores the missed address at c->ra (offset 248)");
 const u32 fnvnx_lift_cpu_bytes = sizeof(struct cpu);
 
 static void cpu_reset(struct cpu *p, u32 sp, u32 teb)

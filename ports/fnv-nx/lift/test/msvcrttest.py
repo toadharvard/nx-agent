@@ -384,7 +384,7 @@ def main():
         if uc.reg_read(UC_ARM64_REG_PC) != until and not err: why.append('did not reach %s (pc %x)' % (stop, uc.reg_read(UC_ARM64_REG_PC)))
         if err: why.append(err)
         if rdw(uc, sym['g_ue_n'])[0] and stop != 'exit': why.append('unhandled exception %x at %x' % (rdw(uc, sym['g_ue_code'])[0], rdw(uc, sym['g_ue_addr'])[0]))
-        if uc.reg_read(UC_ARM64_REG_PC) == sym.get('fnvl_nobody'): why.append('fnvl_nobody: missed address %x' % rdw(uc, uc.reg_read(UC_ARM64_REG_X27) + 320)[0])
+        if uc.reg_read(UC_ARM64_REG_PC) == sym.get('fnvl_nobody'): why.append('fnvl_nobody: missed address %x' % rdw(uc, uc.reg_read(UC_ARM64_REG_X27) + 248)[0])
         if want is not None and stop == 'ret' and got != want: why.append('eax %x want %x' % (got, want))
         if stop == 'exit' and got != 0xE06D7363: why.append('ExitProcess(%x)' % got)
         if stop == 'exit' and (rdw(uc, sym['g_ue_n'])[0] != 1 or rdw(uc, sym['g_ue_code'])[0] != 0xE06D7363): why.append('UnhandledExceptionFilter n %d code %x' % tuple(rdw(uc, sym['g_ue_n']) + rdw(uc, sym['g_ue_code'])))

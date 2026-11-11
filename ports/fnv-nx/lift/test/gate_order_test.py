@@ -4,7 +4,7 @@ Each case is one function body; the gate must give the stated colour to each of 
 import json, os, subprocess, sys, tempfile, unittest
 HERE = os.path.dirname(os.path.abspath(__file__)); GATE = os.path.join(os.path.dirname(HERE), 'tools', 'gate_order.py')
 AS = ['aarch64-linux-gnu-gcc', '-march=armv8.1-a', '-mabi=ilp32', '-c', '-x', 'assembler']
-RT = '.data\n.globl fnvnx_lift_cpu_bytes\n.type fnvnx_lift_cpu_bytes,%object\n.size fnvnx_lift_cpu_bytes,4\nfnvnx_lift_cpu_bytes: .word 536\n'
+RT = '.data\n.globl fnvnx_lift_cpu_bytes\n.type fnvnx_lift_cpu_bytes,%object\n.size fnvnx_lift_cpu_bytes,4\nfnvnx_lift_cpu_bytes: .word 488\n'
 FN = '.text\n.globl f\n.type f,%function\nf:\n{}\n.size f,.-f\n.section .rodata\ntab: .word 1,2,3,4\n'
 G, R = 'green', 'red'
 # name: (body, order, addrwrap, align)
@@ -35,9 +35,9 @@ CASES = {
     'after_call':           ('stp x29,x30,[sp,#-16]!\n mov w1,w19\n bl g\n ldarb w0,[x1]\n ldp x29,x30,[sp],#16\n ret', G, R, G),
     'guest_reg_x_write':    ('add x19,x19,x20\n ret', R, G, G),
     'guest_reg_x_bounded':  ('and x19,x0,#0xffff\n add x19,x19,#4\n ldarb w0,[x19]\n ret', G, G, G),
-    'cpu_field':            ('ldr w0,[x27,#16]\n str w0,[x27,#532]\n ret', G, G, G),
-    'cpu_past_end':         ('ldr w0,[x27,#536]\n ret', R, R, G),
-    'cpu_straddles_end':    ('add x1,x27,#532\n ldr x0,[x1]\n ret', R, R, G),
+    'cpu_field':            ('ldr w0,[x27,#16]\n str w0,[x27,#484]\n ret', G, G, G),
+    'cpu_past_end':         ('ldr w0,[x27,#488]\n ret', R, R, G),
+    'cpu_straddles_end':    ('add x1,x27,#484\n ldr x0,[x1]\n ret', R, R, G),
     'cpu_index':            ('ldr w0,[x27,x1]\n ret', R, R, G),
     'cpu_bounded_offset':   ('and w1,w0,#0xff\n add x1,x27,x1\n ldrb w0,[x1]\n ret', G, G, G),
     'cpu_unbounded_offset': ('add x1,x27,x0\n ldrb w0,[x1]\n dmb ishld\n ret', G, R, G),

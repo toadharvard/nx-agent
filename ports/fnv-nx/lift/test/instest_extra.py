@@ -277,7 +277,7 @@ def model_fields(seed, d32):
 orig_arm_run = T.Arm.run
 def arm_run(s, E, st):
     ip, dp, _ = fseed(E, st)
-    s.uc.mem_write(T.CPU + 472, struct.pack('<6I', 0x23, 0x1b, 0x23, 0x23, 0x3b, 0)); s.uc.mem_write(T.CPU + 500, struct.pack('<2I', ip, dp))
+    s.uc.mem_write(T.CPU + 400, struct.pack('<6I', 0x23, 0x1b, 0x23, 0x23, 0x3b, 0)); s.uc.mem_write(T.CPU + 428, struct.pack('<2I', ip, dp))
     return orig_arm_run(s, E, st)
 T.Arm.run = arm_run
 def mset(mem, st, a, v):
