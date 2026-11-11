@@ -71,6 +71,7 @@
 | P3 | Отладчика нет | `IsDebuggerPresent`, `OutputDebugStringA`, `DebugBreak` | `FALSE`; строка никому не доставляется (это и есть контракт без отладчика); `DebugBreak` → исключение `EXCEPTION_BREAKPOINT` через R4 | Р |
 | P4 | Версия Windows — 6.1.7601 SP1 (Windows 7), платформа NT | `GetVersionExA` (Bink, Vorbis) | по контракту | Р |
 | P5 | Системный каталог `C:\Windows\system32`, каталог Windows `C:\Windows` (существуют, пустые) | `GetSystemDirectoryA`, `GetWindowsDirectoryA` | по контракту | Р |
+| P6 | Начальное состояние FP нового гостевого потока: FCW = 0x027F (исключения замаскированы, точность 53 бита, округление к ближайшему), MXCSR = 0x1F80, стек x87 пуст (TW = 0xFFFF), FSW = 0. Источник: начальный CONTEXT потока 32-битного процесса; эталон Wine 9.0 `dlls/ntdll/unix/signal_i386.c:2496-2498` (`ControlWord = 0x27f`, `MxCsr = 0x1f80`). Внесено по указанию оркестратора (строка от L3b, 2026-11-11) | вход потока лифтера (`rt/enter.c`), `CreateThread` | по контракту | Р |
 
 ## 8. Мультимедиа
 
