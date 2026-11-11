@@ -109,8 +109,14 @@ class Probe:
         return [l.split("\t") for l in r.stdout.splitlines()]
 
 
+def hmod_modules(hmod):
+    """The module literals of a dynsites hmod cell (comma list, `L:` = LoadLibrary result); [] when not known (`dynamic`, `-`)."""
+    return [h[2:] if h.startswith("L:") else h for h in hmod.split(",") if h not in ("", "-", "dynamic", "hmod")]
+
+
 def classify(rows, probe, absent_mods, absent_funcs, reg, translated, bridge=None):
-    """rows: [(module, site, api, operand)]. Returns (counts, unresolved list, unbound-undefined list)."""
+    """rows: [(module, site, api, operand, hmod)]. Returns (counts, unresolved list, unbound-undefined list)."""
+    rows = [(tuple(r) + ("",))[:5] if len(r) < 5 else tuple(r) for r in rows]
     mods = [c[1] for c in probe.ask(["MODS"]) if c[0] == "MODS"]
     known = {norm(m) for m in mods} | set(reg) | absent_mods | translated
 
@@ -121,7 +127,7 @@ def classify(rows, probe, absent_mods, absent_funcs, reg, translated, bridge=Non
     unresolved, unbound_bad = [], []
     # --- pass 1: collect questions
     qs, plan = [], []
-    for module, site, api, operand in rows:
+    for module, site, api, operand, hmod in rows:
         cnt["rows"] += 1
         if api not in NAME_APIS:
             cnt["other_api"] += 1
@@ -132,6 +138,9 @@ def classify(rows, probe, absent_mods, absent_funcs, reg, translated, bridge=Non
             cnt["nonstatic"] += 1
             continue
         mt = list(dict.fromkeys(t for t in toks if is_mod(t)))
+        if api == "GetProcAddress":
+            # the hmod column: the modules the module argument can be (pemanifest data flow); "dynamic"/"-" = not known
+            mt = list(dict.fromkeys(mt + hmod_modules(hmod)))
         nt = list(dict.fromkeys(t for t in toks if not is_mod(t)))
         if api != "GetProcAddress":
             if not mt:
@@ -231,7 +240,7 @@ def read_bridge(path):
 def run(tsv, root, closure, probe_path, bridge_path=None):
     with open(tsv, encoding="utf-8") as f:
         lines = f.read().splitlines()
-    rows = [tuple((l.split("\t") + [""] * 4)[:4]) for l in lines[1:] if l.strip()]
+    rows = [tuple((l.split("\t") + [""] * 5)[:5]) for l in lines[1:] if l.strip()]
     absent_mods, absent_funcs = env_truth(root)
     cnt, bad, unbound_bad = classify(rows, Probe(probe_path), absent_mods, absent_funcs, registered_tables(root),
                                      translated_modules(closure), read_bridge(bridge_path))
@@ -290,6 +299,15 @@ def selftest():
         and ub == ["SystemFunction036"]
     if not ok:
         print("selftest FAILED:", c, bad, ub)
+        return 1
+    # the hmod column binds a name-only GetProcAddress: absent modules -> absent by ENV_TRUTH; present -> checked there
+    rows = [("x", "1", "GetProcAddress", "SymInitialize", "dbghelp.dll"),        # absent by ENV_TRUTH
+            ("x", "2", "GetProcAddress", "SymInitialize", "dynamic"),             # unbound, defined nowhere
+            ("x", "3", "GetProcAddress", "EncodePointer", "L:kernel32.dll"),      # resolved through the hmod
+            ("x", "4", "GetProcAddress", "NoSuchFn", "kernel32.dll,dbghelp.dll")]  # present member: unresolved
+    c, bad, ub = classify(rows, FakeProbe({"kernel32"}, {("kernel32", "EncodePointer")}), {"dbghelp"}, set(), {}, set())
+    if c["absent"] != 2 or c["resolved"] != 1 or c["unbound"] != 1 or bad != [("kernel32.dll", "NoSuchFn")] or ub != ["SymInitialize"]:
+        print("selftest FAILED (hmod):", c, bad, ub)
         return 1
     # with a bridge: the row decides - a body-less name with a row resolves, a host-answered name without one does not
     br = {("kernel32.dll", "EncodePointer"), ("d3d9.dll", "DebugSetMute")}

@@ -21,22 +21,24 @@ import check_dynsites as cd  # noqa: E402
 
 
 def derive(imports, dynsites, translated, absent_mods, reg, probe):
-    """imports: [(dll, name)]; dynsites: [(module, site, api, operand)]. Returns the sorted list of lines."""
+    """imports: [(dll, name)]; dynsites: [(module, site, api, operand[, hmod])]. Returns the sorted list of lines."""
     out = set()
     for dll, name in imports:
         if cd.norm(dll) not in translated:
             out.add((cd.norm(dll) + ".dll", name))
+    dynsites = [(tuple(r) + ("",))[:5] if len(r) < 5 else tuple(r) for r in dynsites]
     mods = [c[1] for c in probe.ask(["MODS"]) if c[0] == "MODS"]
     known = {cd.norm(m) for m in mods} | set(reg) | absent_mods | translated
     unbound = []
-    for _, _, api, operand in dynsites:
+    for _, _, api, operand, hmod in dynsites:
         if api != "GetProcAddress":
             continue
         toks = cd.tokens(operand)
         if toks is None:
             continue
         mt = list(dict.fromkeys(t for t in toks if t.lower().endswith(".dll") or cd.norm(t) in known))
-        nt = list(dict.fromkeys(t for t in toks if t not in mt))
+        mt = list(dict.fromkeys(mt + cd.hmod_modules(hmod)))
+        nt = list(dict.fromkeys(t for t in toks if not (t.lower().endswith(".dll") or cd.norm(t) in known)))
         if not nt:
             continue
         if mt:
@@ -62,9 +64,11 @@ def selftest():
     imps = [("KERNEL32.dll", "GetTickCount"), ("binkw32.dll", "_BinkOpen@8"), ("xinput1_3.dll", "#2")]
     dyn = [("x", "1", "GetProcAddress", "KERNEL32 EncodePointer"), ("x", "2", "GetProcAddress", "SystemFunction036"),
            ("x", "3", "GetProcAddress", "Both"), ("x", "4", "GetProcAddress", "Nowhere"),
-           ("x", "5", "GetProcAddress", "usp10.dll Foo"), ("x", "6", "GetProcAddress", "dynamic")]
+           ("x", "5", "GetProcAddress", "usp10.dll Foo"), ("x", "6", "GetProcAddress", "dynamic"),
+           ("x", "7", "GetProcAddress", "EncodePointer", "dynamic"), ("x", "8", "GetProcAddress", "OnlyViaHmod", "L:advapi32.dll"),
+           ("x", "9", "GetProcAddress", "Foo2", "usp10.dll")]
     got = derive(imps, dyn, {"binkw32"}, {"usp10"}, {}, fp)
-    want = ["advapi32.dll\tSystemFunction036", "kernel32.dll\tEncodePointer", "kernel32.dll\tGetTickCount", "xinput1_3.dll\t#2"]
+    want = ["advapi32.dll\tOnlyViaHmod", "advapi32.dll\tSystemFunction036", "kernel32.dll\tEncodePointer", "kernel32.dll\tGetTickCount", "xinput1_3.dll\t#2"]
     if got != want:
         print("selftest FAILED:", got)
         return 1
@@ -92,7 +96,7 @@ def main(argv):
     with open(os.path.join(m, "imports.tsv"), encoding="utf-8") as f:
         imports = [(c[1], c[2]) for c in (l.split("\t") for l in f.read().splitlines()[1:]) if len(c) >= 3]
     with open(os.path.join(m, "dynsites.tsv"), encoding="utf-8") as f:
-        dyn = [tuple((l.split("\t") + [""] * 4)[:4]) for l in f.read().splitlines()[1:] if l.strip()]
+        dyn = [tuple((l.split("\t") + [""] * 5)[:5]) for l in f.read().splitlines()[1:] if l.strip()]
     absent, _ = cd.env_truth(root)
     lines = derive(imports, dyn, cd.translated_modules(os.path.join(m, "closure.tsv")), absent, cd.registered_tables(root),
                    cd.Probe(probe))

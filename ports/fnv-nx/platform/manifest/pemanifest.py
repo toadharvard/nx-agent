@@ -20,6 +20,7 @@ slot value is the union over all writes in the function. Output column hmod = `d
 operand column then holds those literals + the name. Assumptions: the function starts at the nearest preceding `push ebp; mov ebp,esp`
 (hot-patch `mov edi,edi` before it allowed) or, when no prologue lies within the look-back, at the 16-aligned address after int3 linker padding, and ends at the next prologue; control flow is followed forward only (state saved at forward jumps, joined at their target, cleared after ret/jmp unless a jump targets the next address; back-edges assumed not to change a register used after the loop); no jump enters mid-instruction; an ebp slot is not written through
 another pointer (its address is never taken, checked). Without such a boundary every hmod is `dynamic`.
+Global cell: a data cell g is tracked like an ebp slot when every relocated reference to g in the image is a plain `[g]` operand (never lea, push imm or a stored pointer) and the references outside the function only read it, so every write to g is seen in the function. A cell failing this, and any object field (`[reg+disp]`), stays `dynamic`.
 
 Usage: pemanifest.py <dir-with-modules> <root.exe> <outdir> [contract-only.dll,...] [dynamic.dll,...]
 (dynamic: lifted modules that reachable code loads by constant name with LoadLibrary;
@@ -78,6 +79,9 @@ class Mod:
 
     def in_code(self, va):
         return any(a <= va < a + n for a, n in self.code)
+
+    def in_data(self, va):
+        return 0 <= va - self.base < len(self.img) and not self.in_code(va)
 
     def cstr(self, va):
         o = va - self.base
@@ -142,6 +146,14 @@ class Mod:
                                 ops.append(s)
                     yield site, nm, " ".join(ops) if ops else "dynamic", "-" if nm != "GetProcAddress" else "dynamic"
 
+    def targets(self):
+        """relocation target -> [relocation addresses]"""
+        if not hasattr(self, "_tg"):
+            self._tg = collections.defaultdict(list)
+            for r in self.relocs:
+                self._tg[self.u32(r)].append(r)
+        return self._tg
+
     def func_start(self, site):
         """Entry of the function holding `site`, or None. Entry = the nearest preceding `push ebp; mov ebp,esp` (framed), or the
         16-aligned address after the nearest preceding int3 (0xCC) padding when no prologue is in range (frameless: the linker aligns and pads
@@ -179,6 +191,37 @@ class Mod:
             m = lambda x, y: {k: (x[k] if x[k] == y[k] else (x[k] | y[k] if isinstance(x[k], set) and isinstance(y[k], set) else UNK))
                               for k in x.keys() & y.keys()}
             return (m(a[0], b[0]), {k: a[1][k] for k in a[1].keys() & b[1].keys() if a[1][k] == b[1][k]}, a[2] if a[2] == b[2] else [])
+        lo_a, hi_a = (ins[0].address, ins[-1].address + ins[-1].size) if ins else (0, 0)
+        memo = {}
+
+        def cell_ok(g):
+            """A global cell may hold a tracked module handle only if every reference to its address is a plain `[g]` memory operand
+            (never lea/push imm/data pointer) and every reference outside this function only READS it, so all writes are seen here."""
+            if g not in memo:
+                ok = True
+                for r in self.targets().get(g, []):
+                    if lo_a <= r < hi_a:
+                        cand, wr_ok = ins, True
+                    else:
+                        st = self.func_start(r) or r - 0x30
+                        cand, wr_ok = (list(md.disasm(self.img[st - self.base:r - self.base + 8], st)) if self.in_code(r) else []), False
+                    ii = next((i for i in cand if i.address <= r < i.address + i.size), None)
+                    m = [o for o in ii.operands if o.type == X.X86_OP_MEM and o.mem.base == 0 and o.mem.index == 0 and o.mem.disp == g] if ii else []
+                    if not m or ii.mnemonic == "lea" or len(m) != 1 or any(o.type == X.X86_OP_IMM and o.imm == g for o in ii.operands) \
+                            or (not wr_ok and m[0].access & 2):
+                        ok = False
+                        break
+                memo[g] = ok
+            return memo[g]
+
+        def kd(op):
+            if op.type != X.X86_OP_MEM or op.mem.index != 0 or op.mem.segment != 0:
+                return None
+            if op.mem.base == X.X86_REG_EBP:
+                return op.mem.disp
+            if op.mem.base == 0 and op.mem.disp not in api and self.in_data(op.mem.disp) and cell_ok(op.mem.disp):
+                return ("g", op.mem.disp)
+            return None
         slots, rows = collections.defaultdict(set), []
         for final in (0, 1):  # pass 0 collects the ebp-slot unions, pass 1 reads them
             reg, ptr, pushes, saved, dead = {}, {}, [], {}, False
@@ -196,9 +239,9 @@ class Mod:
                         saved[t] = join(saved.get(t), (reg, ptr, pushes))
                     dead = dead or i.mnemonic in ("jmp", "ret")
                     continue
-                mem = lambda op: op.type == X.X86_OP_MEM and op.mem.base == X.X86_REG_EBP and op.mem.index == 0 and op.mem.segment == 0
+                mem = lambda op: kd(op) is not None
                 val = lambda op: (op.type == X.X86_OP_REG and reg.get(P.get(i.reg_name(op.reg), ""), UNK)) or \
-                    (slots.get(op.mem.disp, UNK) if mem(op) and final else UNK)
+                    (slots.get(kd(op), UNK) if mem(op) and final else UNK)
                 if i.mnemonic == "call":
                     a = ops[0]
                     f = (a.type == X.X86_OP_MEM and a.mem.base == 0 and a.mem.index == 0 and api.get(a.mem.disp)) or \
@@ -260,10 +303,10 @@ class Mod:
                     v = val(ops[1]) if ops[1].type == X.X86_OP_REG else UNK
                     v = None if isinstance(v, tuple) else v
                     if not final:
-                        slots[ops[0].mem.disp] = (slots[ops[0].mem.disp] | v) if v and slots[ops[0].mem.disp] is not UNK else UNK
+                        slots[kd(ops[0])] = (slots[kd(ops[0])] | v) if v and slots[kd(ops[0])] is not UNK else UNK
                     continue
                 if i.mnemonic == "lea" and len(ops) == 2 and mem(ops[1]):
-                    slots[ops[1].mem.disp] = UNK
+                    slots[kd(ops[1])] = UNK
                 for r in wr:
                     if r in reg or r in P.values():
                         reg[r] = UNK
@@ -271,7 +314,7 @@ class Mod:
                 if any(mem(op) and (op.access & 2) for op in ops):  # any other write into an ebp slot
                     for op in ops:
                         if mem(op) and (op.access & 2):
-                            slots[op.mem.disp] = UNK
+                            slots[kd(op)] = UNK
         return rows
 
 
