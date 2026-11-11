@@ -12,7 +12,6 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
-import capstone  # noqa: E402
 import objstub  # noqa: E402
 
 CC = "aarch64-linux-gnu-gcc"
@@ -36,8 +35,11 @@ def build(src, abi, ext="c", extra=()):
     return o
 
 
-def kinds(objs, terms=(), rows=None, osl=()):
-    items, finds = objstub.run_check(objs if isinstance(objs, list) else [objs], set(terms), rows or {}, list(osl))
+def kinds(objs, terms=(), rows=None, osl=(), facts=None):
+    """Object ids are the paths; a row keyed by a bare symbol belongs to the first object (rows are keyed (unit, symbol))."""
+    objs = objs if isinstance(objs, list) else [objs]
+    rows = {(objs[0], k) if isinstance(k, str) else k: v for k, v in (rows or {}).items()}
+    items, finds = objstub.run_check([(p, p) for p in objs], set(terms), rows, set(osl), facts)
     return {(n, k) for _, n, k, _ in finds}, items, finds
 
 
@@ -58,7 +60,6 @@ cxx = objstub.derive_terminators("aarch64-linux-gnu-g++", [], ["cstdlib", "excep
 check("terminators: C++ set has mangled terminate", "_ZSt9terminatev" in cxx and "abort" in cxx, cxx)
 print("INFO libc set size %d, c++ set size %d" % (len(libc), len(cxx)))
 
-md = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
 for abi in ("ilp32", "lp64"):
     T = lambda n: "%s/%s" % (abi, n)
     o = build("void f(void){__builtin_trap();}", abi)
@@ -133,15 +134,16 @@ for abi in ("ilp32", "lp64"):
     o = build(".text\n.global g1\n.type g1,%function\ng1: ret\n.size g1,.-g1\n.word 0x12345678\n.global g2\n.type g2,%function\ng2: ret\n.size g2,.-g2\n", abi, "s")
     k, _, _ = kinds(o)
     check(T("stray bytes between functions -> uncovered"), any(kd == "uncovered" for _, kd in k), k)
-    # capstone vs objdump on a mixed object
+    # a64access (LLVM) vs objdump on a mixed object
     o = build(src, abi)
     dump = subprocess.run(["aarch64-linux-gnu-objdump", "-d", o], capture_output=True, text=True).stdout
     od = [int(m.group(1), 16) for m in re.finditer(r"^\s+([0-9a-f]+):\t[0-9a-f]{8} \t(?!\.word)", dump, re.M)]
     ob = objstub.Obj(o)
     si = next(i for i, s in enumerate(ob.secs) if s[0] == ".text")
     sec = ob.secs[si]
-    cs = [a for a, _ in objstub.decode_run(md, ob.data[sec[3]:sec[3] + sec[4]], 0, sec[4])]
-    check(T("capstone decodes the same words as objdump"), od == cs and len(od) > 10, (len(od), len(cs)))
+    cs = [a for a, i in sorted(objstub.decode(ob.data, [(sec[3], sec[3] + sec[4])]).items()) if i]
+    cs = [a - sec[3] for a in cs]
+    check(T("LLVM (a64access) decodes the same words as objdump"), od == cs and len(od) > 10, (len(od), len(cs)))
 
 # determinism, CLI, gate wrapper, verdict acceptance
 o1 = build("void f(void){__builtin_trap();}\nint r(int a){return a+1;}", "lp64")
@@ -152,33 +154,132 @@ check("CLI: findings printed sorted, exit 1, deterministic",
 clean = build("int g(int a){return a+1;}", "lp64")
 c = subprocess.run(cmd[:-1] + [clean], capture_output=True, text=True)
 check("CLI: clean object exit 0", c.returncode == 0 and not c.stdout, c.stdout)
-sys.path.insert(0, VERIFY)
+# --- reach assertion, exit rows, (unit, symbol) keys, cache, parallel
+REACH = objstub.REACH
+rsrc = ("void %s(unsigned) __attribute__((noreturn));\nvoid f(int a){ if(a) %s(7); }\nvoid g(unsigned a){ %s(a); }\n"
+        "void h(int a){ if(a>3) %s(0x10001); %s(9); }\nvoid (*ptr)(unsigned) = %s;\n" % ((REACH,) * 6))
+o = build(rsrc, "lp64")
+k, _, f = kinds(o, terms=[REACH, "abort"], facts=None)
+check("reach: constant argument without a facts file -> reach-uncertified; no T2, no T2-noreturn-tail for the reach call",
+      {("f", "reach-uncertified"), ("h", "reach-uncertified")} <= k and not any(kd in ("T2", "T2-noreturn-tail") for _, kd in k), (k, f))
+check("reach: non-constant argument -> reach-nonconstant (also as a tail call)", ("g", "reach-nonconstant") in k, k)
+check("reach: function pointer to the symbol -> reach-address-taken", any(kd == "reach-address-taken" for _, kd in k), k)
+k, _, f = kinds(o, terms=[REACH], facts={7, 0x10001, 9})
+check("reach: facts 7, 65537 (MOVZ+MOVK), 9 certify every call site", not {x for x in k if x[1] in ("reach-uncertified", "reach-stale")}, (k, f))
+k, _, f = kinds(o, terms=[REACH], facts={7, 9, 5})
+check("reach: unknown fact 65537 -> reach-uncertified, fact 5 without a call site -> reach-stale", ("h", "reach-uncertified") in k
+      and ("fact:5", "reach-stale") in k and ("f", "reach-uncertified") not in k, (k, f))
+o = build(".text\n.global c1\n.type c1,%function\nc1: mov w0,#3\ncbz w1,1f\nmov w0,#4\n1: bl " + REACH + "\n.size c1,.-c1\n"
+          ".global c2\n.type c2,%function\nc2: stp x29,x30,[sp,#-16]!\nmov w0,#5\nbl ext\nbl " + REACH + "\nldp x29,x30,[sp],#16\nret\n.size c2,.-c2\n"
+          ".global c3\n.type c3,%function\nc3: stp x29,x30,[sp,#-16]!\nmov w0,#5\nbl ext\nmov w0,#6\nbl " + REACH + "\nldp x29,x30,[sp],#16\nret\n.size c3,.-c3\n", "lp64", "s")
+k, _, f = kinds(o, facts={4, 3, 5, 6})
+nc = {(r[0], r[2]) for x in [objstub.analyse_all([(o, o)], set(), set())[o]] for r in x["reach"]}
+check("reach: constant propagation: two paths with different w0 -> not constant; a call clobbers w0 but a later move fixes it",
+      ("c1", None) in nc and ("c2", None) in nc and ("c3", 6) in nc, nc)
+# exit tails
+EX = (".text\n.global %s\n.type %s,%%function\n%s: adrp x1,slot\nldr x1,[x1,:lo12:slot]\nblr x1\n.size %s,.-%s\n" % ((REACH,) * 5)
+      + ".global ex\n.type ex,%function\nex: ldr x1,[x0]\ncbz x0,1f\nmov w0,#1\n1: blr x1\n.size ex,.-ex\n"
+      ".global ex2\n.type ex2,%function\nex2: cbz x0,1f\nret\n1: ldr x1,[x0]\nblr x1\n.size ex2,.-ex2\n"
+      ".global ex3\n.type ex3,%function\nex3: ldr x1,[x0]\nblr x1\nret\n.size ex3,.-ex3\n"
+      ".global ex4\n.type ex4,%function\nex4: ldr x1,[x0]\nblr x1\nnop\nb ex4\n.size ex4,.-ex4\n.data\nslot: .quad 0\n")
+o = build(EX, "lp64", "s")
+k, _, f = kinds(o, rows={"ex": ("exit", "", "ExitProcess")})
+check("exit: REACH definition ending in BLR is certified by itself; a row of kind exit certifies ex; no row -> indirect-noreturn-tail",
+      (REACH, "indirect-noreturn-tail") not in k and ("ex", "indirect-noreturn-tail") not in k and ("ex2", "indirect-noreturn-tail") in k
+      and ("ex4", "indirect-noreturn-tail") not in k, (k, f))
+k, _, f = kinds(o, rows={"ex": ("exit", "", "r"), "ex2": ("exit", "", "r"), "ex3": ("exit", "", "r"), "ghost": ("exit", "", "r")})
+check("exit: a row on a function with a RET path (ex2) or code after the BLR (ex3, ex4 is the reverse) -> exit-mismatch, finding stays; ghost row too",
+      {("ex2", "exit-mismatch"), ("ex2", "indirect-noreturn-tail"), ("ex3", "exit-mismatch"), ("ghost", "exit-mismatch")} <= k
+      and ("ex", "exit-mismatch") not in k, k)
+o2 = build(".text\n.global %s\n.type %s,%%function\n%s: mov w0,#0\nret\n.size %s,.-%s\n" % ((REACH,) * 5), "lp64", "s")
+k, _, _ = kinds(o2)
+check("exit: a definition of REACH that returns -> reach-not-exit", (REACH, "reach-not-exit") in k, k)
+# (unit, symbol) keys
+loc = lambda v: ".text\n.type h,%%function\nh: mov w0,#%d\nret\n.size h,.-h\n.global pub%d\n.type pub%d,%%function\npub%d: b h\n.size pub%d,.-pub%d\n" % (v, v, v, v, v, v)
+oa, ob = build(loc(1), "lp64", "s"), build(loc(2), "lp64", "s")
+rr = {(oa, "h"): ("u32", "1", "r"), (ob, "h"): ("u32", "2", "r")}
+items, finds = objstub.run_check([(oa, oa), (ob, ob)], set(), rr, set())
+check("rows are keyed (unit, symbol): two local `h` with different results are certified by their own rows", not [x for x in finds if x[1] == "h"], finds)
+items, finds = objstub.run_check([(oa, oa), (ob, ob)], set(), {(oa, "h"): ("u32", "2", "r"), (ob, "h"): ("u32", "2", "r")}, set())
+check("a row of one unit does not certify the other unit's function", [x[0] for x in finds if x[1] == "h" and x[2] == "constants-mismatch"] == [oa], finds)
+# cache and parallel run
+cdir = tempfile.mkdtemp(dir=ROOT)
+many = [(p, p) for p in [build("int f%d(int a){return a+%d;}\nvoid t%d(void){__builtin_trap();}" % (i, i, i), "lp64") for i in range(6)]]
+t0 = time.time()
+r1 = objstub.run_check(many, set(), {}, set(), None, cdir, 3)
+t1 = time.time() - t0
+t0 = time.time()
+r2 = objstub.run_check(many, set(), {}, set(), None, cdir, 3)
+t2 = time.time() - t0
+r3 = objstub.run_check(many, set(), {}, set(), None, None, 1)
+n = len([x for x in os.listdir(cdir + "/objstub") if x.endswith(".json")])
+check("cache: cold (3 processes) == cached == uncached serial; one json per object", r1 == r2 == r3 and n == 6, (n, r1[1][:2]))
+print("INFO 6 objects cold %.2f s, cached %.2f s" % (t1, t2))
+rk = objstub.run_check(many[:1], {"abort"}, {}, set(), None, cdir, 1)
+check("cache key holds only the terminators the object mentions: another terminator set, same objects -> cache hit",
+      len([x for x in os.listdir(cdir + "/objstub") if x.endswith(".json")]) == n and rk == objstub.run_check(many[:1], set(), {}, set(), None, None, 1), os.listdir(cdir + "/objstub"))
+check("cache key changes with the os-layer flag and with a terminator the object references",
+      objstub.object_key(many[0][1], {"abort"}, True)[0] != objstub.object_key(many[0][1], {"abort"}, False)[0])
+oc = build("void abort(void);\nvoid q(void){abort();}", "lp64")
+check("cache key: terminators & names", objstub.object_key(oc, {"abort"}, False)[0] != objstub.object_key(oc, set(), False)[0])
+# gate on the toy product root of test_recipe.py
+sys.path.insert(0, HERE)
+import test_recipe as TR  # noqa: E402
 import verdict  # noqa: E402
 
-
-def gate(objs, extra=()):
-    out = tempfile.mkdtemp(dir=ROOT)
-    lst = os.path.join(out, "list.txt")
-    open(lst, "w").write("".join(x + "\n" for x in objs))
-    p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_objstub.py"), "--objects-list", lst, "--terminators", tf]
-                       + list(extra), capture_output=True, text=True, env=dict(os.environ, GATE_OUT=out))
-    return p, out
+RV = ("#include \"toy.h\"\nvoid fnvnx_reach_violation(unsigned) __attribute__((noreturn));\n"
+      "int f_c(int x) { if (x > 3) fnvnx_reach_violation(42); return x + TOY; }\n")
+OS = TR.FILES["toy/os.S"] + (".globl fnvnx_reach_violation\n.type fnvnx_reach_violation,%function\nfnvnx_reach_violation:\n adrp x1, hostslot\n"
+                             " ldr x1, [x1, :lo12:hostslot]\n blr x1\n.size fnvnx_reach_violation,.-fnvnx_reach_violation\n.data\n.balign 8\n.globl hostslot\nhostslot: .quad 0\n")
+CONST = "b.c\tf_b\tu32\t14\tref b\n"
 
 
-p, out = gate([])
-res = json.load(open(os.path.join(out, "objstub.json")))
-check("gate: empty list green, universe 0",
-      p.returncode == 0 and res["status"] == "green" and res["universe"] == 0 and "empty" in res["detail"], (p.stderr, res))
-p, out = gate([clean])
-st = verdict._gate_result({"name": "objstub", "result": "objstub.json"}, out, p.returncode)
-check("gate: clean object accepted by verdict", st[0] == "green" and st[1] == 1 and st[2] == 1, (st, p.stderr))
-p, out = gate([clean, o1])
-st = verdict._gate_result({"name": "objstub", "result": "objstub.json"}, out, p.returncode)
-res = json.load(open(os.path.join(out, "objstub.json")))
-check("gate: trap object red, 1 of 3 uncertified listed", st[0] == "red" and res["universe"] == 3 and res["certified"] == 2
-      and len(res["uncertified"]) == 1, (st, res))
-p, out = gate([os.path.join(ROOT, "missing.o")])
-check("gate: unreadable object is red", p.returncode != 0 and json.load(open(os.path.join(out, "objstub.json")))["status"] == "red")
+def gate(repo, out, cache=None):
+    rc, g, secs, txt = TR.gate(repo, "objstub", out, cache)
+    return rc, g, secs, txt, verdict._gate_result({"name": "objstub", "result": "objstub.json"}, out, rc)
+
+
+def tree_of(repo):
+    return TR.git(repo, "rev-parse", "HEAD^{tree}").strip()
+
+
+for what in ("empty",):
+    empty = TR.make_repo("os-empty")
+    TR.w(empty, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": TR.T + "toy", "class": "doc", "gates": []}]}))
+    rc, g, _, txt, st = gate(empty, ROOT + "/g0")
+    check("gate with no product root: universe 0, green, accepted by verdict", rc == 0 and g["universe"] == 0 and st[0] == "green", (g, txt))
+GC = ROOT + "/gcache"
+repo = TR.make_repo("os-toy", files={"toy/constants.tsv": CONST})
+rc, g, secs, txt, st = gate(repo, ROOT + "/g1", GC)
+check("gate on the toy root (os_layer, constants row, terminators from its own units): green 4/4, accepted by verdict",
+      rc == 0 and g["universe"] == 4 == g["certified"] and st[0] == "green", (g, txt))
+print("INFO toy gate cold (with build) %.1f s" % secs)
+rc, g, secs, txt, st = gate(repo, ROOT + "/g2", GC)
+print("INFO toy gate warm %.1f s" % secs)
+check("gate again with the cache: same result", rc == 0 and g["universe"] == 4 == g["certified"], (g, txt))
+repo2 = TR.make_repo("os-toy2", files={"toy/constants.tsv": ""})
+rc, g, _, txt, st = gate(repo2, ROOT + "/g3", GC)
+check("toy root without the constants row of f_b: red, names the function by unit path", rc == 2 and g["uncertified"] == [TR.ROOT + "/b.c:f_b"]
+      and st[0] == "red", (g, txt))
+repo3 = TR.make_repo("os-reach", files={"toy/constants.tsv": CONST, "toy/c.c": RV, "toy/os.S": OS})
+rc, g, _, txt, st = gate(repo3, ROOT + "/g4", GC)
+check("reach call in the toy root with no reach facts file: red reach-uncertified, REACH's own definition and the terminator exemption accepted",
+      rc == 2 and g["uncertified"] == [TR.ROOT + "/c.c:f_c"] and "reach-uncertified 1" in g["detail"], (g, txt))
+facts = "%s/reach/%s/reach.facts.tsv" % (GC, tree_of(repo3))
+os.makedirs(os.path.dirname(facts))
+open(facts, "w").write("42\t" + "a" * 64 + "\n")
+rc, g, _, txt, st = gate(repo3, ROOT + "/g5", GC)
+check("with the fact 42 in the facts file of the same tree: green", rc == 0 and g["certified"] == g["universe"], (g, txt))
+open(facts, "w").write("42\t" + "a" * 64 + "\n43\t" + "b" * 64 + "\n")
+rc, g, _, txt, st = gate(repo3, ROOT + "/g6", GC)
+check("a fact without a call site: red reach-stale", rc == 2 and "reach-stale 1" in g["detail"], (g, txt))
+repo4 = TR.make_repo("os-abort", rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": '#include <stdlib.h>\nint f_c(int x) { if (x > 3) abort(); return x + 1; }\n'})
+rc, g, _, txt, st = gate(repo4, ROOT + "/g8", GC)
+check("terminators come from the headers the unit includes (stdlib.h via the unit's preprocessed text): abort -> T2 in f_c, nothing else red",
+      rc == 2 and g["uncertified"] == [TR.ROOT + "/c.c:f_c"] and "T2 1" in g["detail"], (g, txt))
+open(facts, "w").write("not a row\n")
+rc, g, _, txt, st = gate(repo3, ROOT + "/g7", GC)
+check("a malformed facts file: red, input error", rc == 2 and g["status"] == "red" and "input error" in g["detail"], (g, txt))
 
 print("%d failed, wall %.1f s" % (len(FAILED), time.time() - T0))
 sys.exit(1 if FAILED else 0)

@@ -38,7 +38,7 @@ def main():
     t0 = time.time()
     d = tb.TMP
     w = lambda n, t: (open(os.path.join(d, n), "w").write(t), os.path.join(d, n))[1]  # noqa: E731
-    reserved = w("res.tsv", "exe\t400000\t2100000\n")
+    reserved = w("res.tsv", "exe\t400000\t2100000\nmod2\t4000000\t4200000\n")
     table, manifest = w("t.txt", TABLE), w("m.tsv", MANIFEST)
     root = os.path.join(d, "sd")
     os.makedirs(root, exist_ok=True)
@@ -109,6 +109,18 @@ def main():
     b1, b2 = (open(os.path.join(d, n), "rb").read() for n in ("r1.json", "r2.json"))
     tb.case("two full runs: byte-identical OUT.json and console", rc == rc2 == 0 and b1 == b2
             and open(os.path.join(d, "r1.console.txt"), "rb").read() == open(os.path.join(d, "r2.console.txt"), "rb").read(), (rc, rc2))
+    # --profile: what FNVNX_PLAT_DISPLAY_DOCKED answers (MODE 48 exits with the answer)
+    elf48 = patched("h48.elf", 48)
+    for prof, want, extra in (("handheld", 0, ["--profile", "handheld"]), ("docked", 1, ["--profile", "docked"]), ("default", 0, [])):
+        rc, o, e = cli(args(elf48, "p_%s.json" % prof, table, manifest, *extra))
+        pd = json.load(open(os.path.join(d, "p_%s.json" % prof)))
+        tb.case("--profile %s: DISPLAY_DOCKED answers %d (exit code of the guest)" % (prof, want),
+                pd["run"]["reason"] == "exit" and pd["run"]["exit_code"] == want and rc == (0 if want == 0 else 2), (rc, pd["run"]))
+    try:
+        rc, o, e = cli(args(elf48, "p_bad.json", table, manifest, "--profile", "tv"))
+    except SystemExit as x:
+        rc = x.code
+    tb.case("--profile with another value is a usage error (exit 2)", rc == 2, rc)
     print("%d cases, %.1f s" % (tb.N[0], time.time() - t0))
     return 1 if tb.FAILED else 0
 

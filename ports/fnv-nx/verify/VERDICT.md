@@ -60,17 +60,34 @@ gates:
 
 ## State of the product gates
 
-- `objstub` is written and tested (`objstub.py`, `gate_objstub.py`), and is NOT in `gates.json` yet.
-  - Class 1 decides on instruction encodings and relocations. The set of terminating routines is derived by a GCC
-    plugin from the declarations the compiler itself sees (8 names from the C headers of the cross toolchain).
-  - Class 2 flags a function unless the analysis proves a call, an access outside its own frame, or an input
-    register live at entry. Its register read and write sets come from the capstone decoder, and three encodings
-    were found where those sets are wrong (`cmp`, `fmov` with an immediate, `ldadd`). A spurious read lets a
-    vacuous function pass, so the gate is not sound until the sets are derived from Arm's machine-readable
-    specification. Until then it is not accepted as a gate.
-  - Measured cost: about 3 s per MB of code, so about 6 minutes for a 120 MB text. This is over the 5 minute
-    budget and needs sharding by object with a content-keyed cache.
-- `build`, `determinism`, `oracle`, `linkstrict`, `memsafe`, `nodeadlock`: not written.
+Run now (in `gates.json`, after `admit`, in this order). With no product root in `admit.json` each is green with universe 0, which is what
+every merge pays today; with a product root each judges it (tested on a toy root, `tests/test_recipe.py` fixtures). Roots always come from
+`admit.json`, never from gate arguments. Shared state goes through `GATE_CACHE` (`gate_build.ensure`: stage store, `objects/<tree>/<root>`).
+
+- `build` (all roots build in the sandbox), `determinism` (two cold builds and the warm one equal bit for bit): class 9 and the precondition
+  of the others.
+- `objstub` (classes 1, 2 and the reach rule of 16): `gate_objstub.py`, rules in `objstub.py`.
+  - Terminator set derived from the recipe's compiler by a GCC plugin run over the preprocessed text of every unit (exactly the
+    declarations the compiler sees, headers included), cached per unit; assumption: a terminating routine is declared noreturn.
+  - Constants table keyed (unit, symbol), kinds void/u32/u64/addr and `exit` (the owner's process-exit imports). A call of
+    `fnvnx_reach_violation` is accepted only with a constant argument that is a fact of `GATE_CACHE/reach/<tree>/reach.facts.tsv`; until the
+    gate `reach` writes that file every such call is `reach-uncertified`. An indirect call ending a function is `indirect-noreturn-tail`
+    unless `fnvnx_reach_violation` or an `exit` row, and then on every path.
+  - Class 2 flags a function unless the analysis proves a call, an access outside its own frame, or an input register live at entry.
+    Its register sets come from the LLVM decoder (`a64access`); three encodings were found where the READ sets are wrong (`cmp`, `fmov` with
+    an immediate, `ldadd`), and a spurious read lets a vacuous function pass, so the V part is not sound until those sets are derived from
+    Arm's machine-readable specification. The gate runs, but that gap is open (the lead's decision whether it is accepted as a gate).
+  - Cost: per object cache by content; uncached objects in parallel processes (`--jobs`, default all cores). Measured numbers are in the
+    report of the change that introduced the gate (30 MB of code in 64 objects: see `gate_objstub.py` history); a warm verdict re-reads only
+    object hashes.
+- `linkstrict` (class 3): `gate_linkstrict.py`, on symbol tables only: no undefined or weak undefined symbol in a linked ELF; across all
+  product roots every undefined reference has exactly one strong definition (weak-only, duplicate strong, common and IFUNC are findings);
+  contract names (recipe key `contract_names`) are defined and no two with different body ids share an address. Not exact: a symbol defined
+  by the linker script and a COMDAT weak definition are findings of the rule as written.
+
+Required by `gate_admit.REQUIRED_PRODUCT` and not written yet, so no product root can be admitted: `oracle` (10), `memsafe` (14),
+`nodeadlock` (15). Required with their roots, not written: `reach` (16, writes the facts file), `imports` (4), `disp` (5), `forms` (6),
+`d3d9total` (7), `n1`, `n2_data`, `n2_call`, `n2_vcall`, `xc`, `xunit`, `rtti`, `pcrel`, `bodysel` (8).
 
 ## Where no closing rule is known
 

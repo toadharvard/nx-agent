@@ -99,11 +99,11 @@ def _seccomp():
     _c(libc.prctl(38, 1, 0, 0, 0), "no_new_privs")
     _c(libc.prctl(22, 2, ctypes.c_char_p(fprog)), "seccomp")
 
-def _setup_root(doc, root, run):
+def _setup_root(doc, root, run, srcs):
     _mount(None, "/", None, MS_REC | MS_PRIVATE)
     _mount("tmpfs", root, "tmpfs", 0, "mode=755")
     for n, i in enumerate(doc["inputs"]):
-        src, tgt = os.path.join(run, "in", str(n)), root + i["at"]
+        src, tgt = srcs[n], root + i["at"]
         os.makedirs(os.path.dirname(tgt), exist_ok=True)
         if os.path.isdir(src) and not os.path.islink(src):
             os.mkdir(tgt)
@@ -138,9 +138,9 @@ def _setup_root(doc, root, run):
     _c(libc.umount2(b"/oldroot", 2), "umount old root")
     os.rmdir("/oldroot")
 
-def _pid1(doc, root, run, logs, errfd):
+def _pid1(doc, root, run, logs, errfd, srcs):
     try:
-        _setup_root(doc, root, run)
+        _setup_root(doc, root, run, srcs)
         _c(libc.sethostname(b"fnvnx", 5), "sethostname")
         os.dup2(os.open("/dev/null", os.O_RDONLY), 0)
         os.dup2(logs[0], 1)
@@ -160,7 +160,7 @@ def _pid1(doc, root, run, logs, errfd):
         os.write(errfd, ("%s: %s" % (type(e).__name__, e)).encode()[:1000])
     os._exit(127)
 
-def launch(doc, run, root):
+def launch(doc, run, root, srcs):
     """Fork A (unshares the namespaces) -> fork B (pid 1 of the new pid namespace, becomes the command)."""
     efd = os.pipe()
     logs = [os.open(os.path.join(run, n), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644) for n in ("stdout", "stderr")]
@@ -172,7 +172,7 @@ def launch(doc, run, root):
             b = os.fork()
             if b == 0:
                 os.close(efd[0])
-                _pid1(doc, root, run, logs, efd[1])
+                _pid1(doc, root, run, logs, efd[1], srcs)
             _, st = os.waitpid(b, 0)
             os._exit(os.waitstatus_to_exitcode(st) % 256 if st & 0x7f == 0 else 128 + (st & 0x7f))
         except BaseException as e:
@@ -187,17 +187,30 @@ def launch(doc, run, root):
         raise SbxError("sandbox setup/exec failed: " + err)
     return os.waitstatus_to_exitcode(st)
 
+def placed(store, tree):
+    """Directory (or file) of the store that holds tree TREE placed as hardlinks of the objects: made once per store and tree (atomic
+    rename; a loser of the race drops its copy), then bind-mounted read-only into every stage that declares the tree. This is only where
+    the input lives on the host: what the stage sees is the tree, as before."""
+    d = os.path.join(store, "placed", tree)
+    if not os.path.lexists(d):
+        os.makedirs(os.path.dirname(d), exist_ok=True)
+        tmp = "%s.tmp-%d-%s" % (d, os.getpid(), os.urandom(4).hex())
+        cas.materialize(tree, store, tmp)
+        try:
+            os.rename(tmp, d)
+        except OSError:
+            shutil.rmtree(tmp, ignore_errors=True) if os.path.isdir(tmp) else os.unlink(tmp)
+    return d
+
 def execute(store, doc, key):
-    run = os.path.join(store, "run", "%s.%d" % (key, os.getpid()))
+    run = os.path.join(store, "run", "%s.%d.%s" % (key, os.getpid(), os.urandom(4).hex()))
     root = os.path.join(run, "root")
     try:
-        for n, i in enumerate(doc["inputs"]):
-            os.makedirs(os.path.join(run, "in"), exist_ok=True)
-            cas.materialize(i["tree"], store, os.path.join(run, "in", str(n)))
+        srcs = [placed(store, i["tree"]) for i in doc["inputs"]]
         for n in range(len(doc["outputs"])):
             os.makedirs(os.path.join(run, "out", str(n)))
         os.makedirs(root)
-        rc = launch(doc, run, root)
+        rc = launch(doc, run, root, srcs)
         return {"format": "fnvnx-stage-result/1", "key": key, "stage": doc["stage"], "rc": rc,
                 "outputs": {o: cas.ingest(os.path.join(run, "out", str(n)), store) for n, o in enumerate(doc["outputs"])},
                 "stdout": cas.ingest(os.path.join(run, "stdout"), store),
@@ -208,7 +221,7 @@ def execute(store, doc, key):
 def _store_result(store, key, res):
     d = os.path.join(store, "keys", key)
     os.makedirs(d, exist_ok=True)
-    tmp = os.path.join(d, ".tmp-%d" % os.getpid())
+    tmp = os.path.join(d, ".tmp-%d-%s" % (os.getpid(), os.urandom(4).hex()))
     with open(tmp, "wb") as f:
         f.write(cas.canon(res))
     cas._publish(tmp, os.path.join(d, "result.json"))

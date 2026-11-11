@@ -39,6 +39,42 @@
     "ports/fnv-nx/verify/gate_admit.py"
    ],
    "result": "admit.json"
+  },
+  {
+   "name": "build",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_build.py"
+   ],
+   "result": "build.json"
+  },
+  {
+   "name": "objstub",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_objstub.py"
+   ],
+   "result": "objstub.json"
+  },
+  {
+   "name": "linkstrict",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_linkstrict.py"
+   ],
+   "result": "linkstrict.json"
+  },
+  {
+   "name": "determinism",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_determinism.py"
+   ],
+   "result": "determinism.json"
   }
  ]
 }

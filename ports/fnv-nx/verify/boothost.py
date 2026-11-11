@@ -21,10 +21,13 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import bootmachine  # noqa: E402
 import bootpath  # noqa: E402
 
 U64 = (1 << 64) - 1
 WALL_EPOCH_US = 1_700_000_000_000_000
+INT64_MAX = (1 << 63) - 1
+HE_NOTFOUND, HE_BADINPUT, HE_ADDR, HE_RANGE = bootmachine.FNVNX_HE_NOTFOUND, bootmachine.LIBNX_BAD_INPUT, 0xCC01, 0xD401
 
 
 def neg(e):
@@ -35,7 +38,7 @@ class Services:
     def __init__(self, root, game=None):
         self.m = None
         self.dp = bootpath.BootPath(root, game)
-        self.debug, self.fds, self.dirs, self.next_dir = [], {}, {}, 1
+        self.debug, self.fds = [], {}
         self.audio_period, self.audio_frames, self.boosts, self.placement, self.messages = 0, 0, [], {}, []
         self.rng = 0
 
@@ -63,7 +66,7 @@ class Services:
         return 0
 
     def h_sleep_ns(self, ns, *_):
-        return (("sleep", self.m.clock.now_ns() + ns), 0)
+        return (("sleep", self.m.clock.now_ns() + min(ns, INT64_MAX)), 0)   # above INT64_MAX sleeps INT64_MAX ns
 
     def h_exit(self, code, *_):
         self.m.exit(code)
@@ -89,20 +92,25 @@ class Services:
 
     # -- v2 threads
     def h_thread_create(self, entry, arg, stack, prio, cpu, *_):
-        tid = self.m.thread_create(entry, arg)
-        if tid:
-            self.placement[tid] = {"prio": prio, "cpu": cpu}
-        return tid
+        h = self.m.thread_create(entry, arg)
+        if h:
+            self.placement[self.m.ids.get("thread", h).tid] = {"prio": prio, "cpu": cpu}
+        return h
 
-    def h_thread_start(self, tid, *_):
-        return self.m.thread_start(tid)
+    def h_thread_start(self, h, *_):
+        return self.m.thread_start(h)
 
-    def h_thread_join(self, tid, *_):
-        t = self.m.threads.get(tid)
-        return 0 if t is None or t.state == "done" else (("join", tid), 0)
+    def h_thread_join(self, h, *_):
+        t = self.m.ids.get("thread", h)
+        if t is None:
+            return HE_NOTFOUND
+        if t.state == "new":   # never started: it would never end
+            return HE_BADINPUT
+        return 0 if t.state == "done" else (("join", t.tid), 0)
 
-    def h_thread_free(self, tid, *_):
-        return 0
+    def h_thread_free(self, h, *_):
+        """the id dies at once (a running thread is detached); a second free, or any later use, is NotFound"""
+        return 0 if self.m.ids.free("thread", h) else HE_NOTFOUND
 
     def h_thread_exit(self, *_):
         return (("done",), 0)
@@ -110,34 +118,45 @@ class Services:
     def h_thread_yield(self, *_):
         return (("yield",), 0)
 
-    def _placed(self, tid):
-        tid = tid or self.m.cur.tid
-        return self.placement.setdefault(tid, {}) if tid in self.m.threads else None
+    def _placed(self, h):
+        """the placement record of thread id h (0 = the calling thread), None for an id that names no live thread"""
+        t = self.m.cur if h == 0 else self.m.ids.get("thread", h)
+        return None if t is None else self.placement.setdefault(t.tid, {})
 
-    def h_thread_set_priority(self, tid, prio, *_):
-        p = self._placed(tid)
+    def h_thread_set_priority(self, h, prio, *_):
+        p = self._placed(h)
         if p is None:
-            return 0xE401   # a Horizon "invalid handle" result
+            return HE_NOTFOUND
         p["prio"] = prio
         return 0
 
-    def h_thread_set_cpu(self, tid, spec, *_):
-        p = self._placed(tid)
+    def h_thread_set_cpu(self, h, spec, *_):
+        p = self._placed(h)
         if p is None:
-            return 0xE401
+            return HE_NOTFOUND
+        if spec >> 40 & 0x7FFFFF == 0x7FFFFF:   # a negative spec (bits 40..62 set): nothing changed
+            return 0
         p["cpu"] = spec
         return 0
 
     def h_wait_on_address(self, addr, expected, timeout, *_):
+        if addr % 4:
+            return HE_ADDR
+        if not self.m.accessible(addr, addr + 4, bootmachine.UC_PROT_READ):
+            return HE_RANGE
         (v,) = struct.unpack("<I", self.m.uc.mem_read(addr, 4))
         if v != (expected & 0xFFFFFFFF):
             return 2
         if timeout == 0:
             return 1
-        return (("addr", addr, None if timeout >= 1 << 63 else self.m.clock.now_ns() + timeout), 0)
+        return (("addr", addr, None if timeout > INT64_MAX else self.m.clock.now_ns() + timeout), 0)
 
     def h_wake_address(self, addr, count, *_):
-        self.m.wake(addr, count)
+        if addr % 4:
+            return HE_ADDR
+        if not self.m.accessible(addr, addr + 4, bootmachine.UC_PROT_READ):
+            return HE_RANGE
+        self.m.wake(addr, U64 if count > 0x7FFFFFFF else count)
         return 0
 
     def h_wall_time_us(self, *_):
@@ -253,40 +272,48 @@ class Services:
     def h_fs_dir_open(self, p, *_):
         path, sd = self.path(p), self.last_sd
         try:
-            names = sorted(os.listdir(path))
+            names = sorted(os.listdir(path))   # . and .. are not listed
         except OSError as e:
             self.dp.fault("dir_open", sd, e.errno or 5)
             return 0
-        d, self.next_dir = self.next_dir, self.next_dir + 1
-        self.dirs[d] = names
-        return d
+        return self.m.ids.alloc("dir", names)   # 0 when the id table is full
 
     def h_fs_dir_next(self, d, buf, cap, *_):
-        names = self.dirs.get(d)
-        if not names:
+        names = self.m.ids.get("dir", d)
+        if not names or cap == 0:   # an id that names no open directory, cap 0, or the end: 0, nothing consumed
             return 0
         n = names.pop(0).encode(errors="surrogateescape")[:cap - 1]
         self.m.uc.mem_write(buf, n + b"\0")
         return len(n)
 
     def h_fs_dir_close(self, d, *_):
-        self.dirs.pop(d, None)
+        self.m.ids.free("dir", d)   # an id that names no open directory: nothing done
         return 0
 
     # -- v3 audio / input / memory / extensions
     def h_audio_open(self, rate, period, *_):
+        """already open: 0, arguments ignored; -1 for a rate other than 48000 or a period outside 1..8192"""
+        if self.audio_period:
+            return 0
+        if rate != 48000 or not 1 <= period <= 8192:
+            return U64
         self.audio_period = period
-        return 0 if rate == 48000 else U64
+        return 0
 
     def h_audio_submit(self, pcm, frames, *_):
+        if not self.audio_period or frames != self.audio_period:   # -1, nothing read
+            return U64
         self.audio_frames += frames
         return (("sleep", self.m.clock.now_ns() + frames * 1_000_000_000 // 48000), 0)
 
     def h_audio_close(self, *_):
+        self.audio_period = 0
         return 0
 
     def h_pad_read(self, i, out, *_):
-        self.m.uc.mem_write(out, bytes(32))
+        """index 0..3: not connected (0, zeros written); index > 3: 0, nothing written"""
+        if i <= 3:
+            self.m.uc.mem_write(out, bytes(32))
         return 0
 
     def h_pad_vibrate(self, *_):
