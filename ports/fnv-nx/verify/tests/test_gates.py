@@ -314,6 +314,31 @@ def mk(d, **files):
 def tests_c(d, cache, extra=(), dirs=("verify",)):
     return gate("gate_tests.py", d, ["--cache", cache] + list(extra) + list(dirs))
 
+# TMPDIR rule: private TMPDIR per test file, removed whatever the outcome; leftovers are red; the reason is in the result
+def gate_tmp(d, extra=()):
+    """gate_tests.py over verify/ in D with the gate's TMPDIR in a fresh directory; -> (rc, result, entries left there afterwards)"""
+    gt = tempfile.mkdtemp(dir=ROOT, prefix="gt-")
+    out = tempfile.mkdtemp(dir=ROOT, prefix="out-")
+    p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_tests.py")] + list(extra) + ["verify"], cwd=d,
+                       env=dict(os.environ, GATE_OUT=out, TMPDIR=gt), capture_output=True, text=True)
+    return p.returncode, json.load(open(os.path.join(out, "selftests.json"))), sorted(os.listdir(gt)), p.stderr
+
+d = tmp("tests-tmpdir")
+mk(d, test_a="import tempfile\nd = tempfile.mkdtemp()\nopen(d + '/x', 'w').write('x' * 1000)\nimport shutil\nshutil.rmtree(d)\n",
+   test_b="import tempfile\ntempfile.mkdtemp(prefix='leak-')\n",
+   test_c="import os, sys, time\nopen(os.path.join(os.environ['TMPDIR'], 'big'), 'w').write('y')\ntime.sleep(60)\n",
+   test_d="import sys\nprint('boom: [Errno 28] No space left on device')\nsys.exit(1)\n")
+rc, r, left, e = gate_tmp(d, ("--timeout-s", "3"))
+rows = {f["name"].rsplit("/", 1)[-1]: f for f in r["files"]}
+check("tests tmpdir: a clean test passes; a test leaving an entry in its TMPDIR is uncertified and names it", rc != 0
+      and rows["test_a.py"]["status"] == "passed" and rows["test_b.py"]["status"] == "failed"
+      and "leaked in TMPDIR: leak-" in rows["test_b.py"]["reason"], (rc, r, e))
+check("tests tmpdir: a timeout kill is a failure with the reason, and its scratch is removed", rows["test_c.py"]["status"] == "failed"
+      and "timeout" in rows["test_c.py"]["reason"] and "leaked in TMPDIR: big" in rows["test_c.py"]["reason"], r)
+check("tests tmpdir: the exit status and the tail of the output (errno text) are the reason", rows["test_d.py"]["status"] == "failed"
+      and "exit 1" in rows["test_d.py"]["reason"] and "[Errno 28] No space left on device" in rows["test_d.py"]["reason"], r)
+check("tests tmpdir: after the run the gate's TMPDIR holds no new entry, whatever the outcomes", left == [], left)
+
 d = tmp("tests-jobs")
 # concurrency is proved by a rendezvous, not by the clock: each file leaves a marker and passes only once all three exist,
 # which can happen only while all three run at the same time (a sequential run would hit the 3600 s limit instead)

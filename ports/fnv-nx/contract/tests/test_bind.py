@@ -4,6 +4,9 @@ import json, os, subprocess, sys, tempfile
 
 C = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.insert(0, C)
+sys.path.insert(0, os.path.join(C, '..', 'verify'))
+import scratch
+scratch.install()
 import bind, store
 
 fails = []

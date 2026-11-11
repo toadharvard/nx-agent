@@ -16,6 +16,9 @@ import gate_linkstrict as L  # noqa: E402
 import test_recipe as TR  # noqa: E402
 import verdict  # noqa: E402
 
+import scratch  # noqa: E402
+
+scratch.install()
 ROOT = tempfile.mkdtemp(prefix="linkstrict-")
 FAILED, N, T0 = [], [0], time.time()
 

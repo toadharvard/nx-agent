@@ -494,6 +494,10 @@ def run(*args, cwd=None):
     return p.returncode, p.stdout, p.stderr
 
 
+sys.path.insert(0, os.path.dirname(HERE))
+import scratch  # noqa: E402
+
+scratch.install()
 tmp = tempfile.mkdtemp(prefix="puregate-")
 def W(rel, text, mode=0o644):
     p = os.path.join(tmp, rel)
