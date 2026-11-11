@@ -105,6 +105,11 @@ L3_KERNEL32 = ("RaiseException", "RtlUnwind", "DebugBreak")
 DATA_SYMS = {"_iob": "fnvnx_iob"}
 
 
+# msvcrt printf/scanf imports whose native body reads x86 stack words (platform/crt/msvcrt_format.cpp)
+VA_MSVCRT = {"sprintf": "fnvnx_msvcrt_va_sprintf", "_snprintf": "fnvnx_msvcrt_va_snprintf",
+             "sscanf": "fnvnx_msvcrt_va_sscanf", "_vsnprintf": "fnvnx_msvcrt_va_vsnprintf"}
+
+
 def native(dll, name):
     if dll == "msvcrt.dll" and (name in L3_MSVCRT or name.startswith("_CI")):
         return "fnvl_msvcrt_" + L3_NAMES.get(name, name.lstrip("_"))
@@ -154,6 +159,11 @@ def derive(names, spec_dir, syms, probe, extra):
             # a data slot holds the address of the ELF symbol named here (loader rule, L1): the object's own symbol
             dsym = DATA_SYMS.get(real, real)
             sym, bind = (dsym, "data") if dsym in syms else ("-", "none")
+        elif dll == "msvcrt.dll" and real in VA_MSVCRT:
+            # the caller is translated x86 code: the body takes the fixed slots and a pointer to the remaining
+            # stack words (sprintf, _snprintf, sscanf), or the game's va_list, which is such a pointer (_vsnprintf)
+            sym = VA_MSVCRT[real]
+            bind = "sym" if sym in syms else "none"
         elif dll == "msvcrt.dll":
             if (dll, name) not in probe:
                 errors.append("%s!%s: not in the probe result" % (dll, name))
