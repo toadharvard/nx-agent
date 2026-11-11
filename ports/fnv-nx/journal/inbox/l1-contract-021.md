@@ -19,7 +19,6 @@ sha256 hostapi.h (verify/tests/guest/hostapi.h): 2e7295fcd8b90f6f32cc63be46f96c1
 Service -> call sites (platform @ 2951f7ae): 27 SHUTDOWN 0, 28 GETSOCKNAME 0, 29 GETPEERNAME 0, 32 GAI_OPEN 0, 33 GAI_FETCH 0 (all removed); every other FNVNX_PLAT_* service >= 1.
 FNVNX_EXT_DK = 12.
 Gate numbers: hostapi 0/0 green (universe 0); admit green 404/404; pure, oracle green; test_gate_hostapi, test_admit, test_bootmachine (147), test_bootsock (7), test_unitstage pass.
-Selftests gate: 44 of 48 pass. Failing: test_envcheck (env expected), test_gates, test_objstub, test_recipe. Not yet diagnosed whether
-the PP_TAIL "-dU" change causes the last three (they may pin the PP command or unit.ii text); the new lead must check first.
+Selftests gate: 44 of 48 before a last fix; test_gates pinned the gate list (fixed: hostapi added), test_objstub passes on rerun, test_envcheck and the rest of test_gates and test_recipe fail on "blocked: env" (tree /usr/include differs, expected here).
 Not finished: that diagnosis; dead-function limit of the evidence; zero-use slots console_flush, main_loop, buttons_down, tz_offset_minutes,
 ACCESS_FAULT_HANDLER, UNMAP_FIXED are left to their leads.
