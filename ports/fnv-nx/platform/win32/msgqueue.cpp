@@ -264,7 +264,7 @@ extern "C" int fnmq_get_message(MSG *m, HWND f, UINT lo, UINT hi)
             return 0;
         }
         os_lock(&g_mql);
-        os_cond_wait(&g_mqc, &g_mql, 20000000ull);   /* 20 ms: a message that arrives meanwhile wakes it */
+        clk_rt_cond_timedwait(&g_mqc, &g_mql, 20000000ull);   /* 20 ms: a message that arrives meanwhile wakes it */
         os_unlock(&g_mql);
     }
 }

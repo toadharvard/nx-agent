@@ -10,6 +10,7 @@
 #include "fnvnx_boundary.h"
 #include "fnvnx_guestfn.h"
 #include "fnvnx_mmio.h"
+#include "../../platform/os/os_clock.h"
 #include "fnvnx_msvcrt.h"
 #include "fnvnx_win32_ext.h"
 #include "host_boundary.h"
@@ -80,7 +81,7 @@ TEST(nlk_detector_counts_platform_locks_and_not_the_games)
     /* a condition wait drops and takes the lock again: held before and after */
     os_cond_t c = OS_COND_INIT;
     os_lock(&l);
-    CHECK_EQ(os_cond_wait(&c, &l, 1000000ull), 1);
+    CHECK_EQ(os_cond_timedwait(&c, &l, 1000000ull), 1);
     CHECK_EQ(fnvnx_bnd_locks_held(), 1);
     os_unlock(&l);
     CHECK_EQ(fnvnx_bnd_locks_held(), 0);
