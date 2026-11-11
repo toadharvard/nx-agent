@@ -22,6 +22,20 @@ Rules:
    (image, host page, stacks, given-away blocks, unmapped: 0xD401). Other modules go to services.ext_<module>
    (fn, args) found at construction; an unregistered module, or a handler raising ExtMissing, ends the run with reason
    "ext-module-missing": a configuration error, never answered with a value.
+5b. Platform service (module 11, the header's FNVNX_PLAT_* list 1..8; always on). Totality at construction: every fn of PLATFORM_FNS
+   resolves to services.plat_<name>(args) or the machine's own _plat_<name>(args), else MachineError (the machine serves
+   thread_activity and vm_*; the services serve cpu_boost and message). A fn the header does not define is
+   "ext-module-missing". VM service: reserve(hint, size) -> address or 0; size rounds up to 64 KiB, size 0 and every failure
+   give 0. Without a hint the arena is the lowest 64 KiB multiple >= 0x02100000 clear of the plan's regions, every plan["free"]
+   range, map_fixed mappings and earlier reservations (one pass over the intervals sorted by lo: c only grows, and an
+   interval that overlapped c is cleared by the move, an earlier one cannot overlap the new c because it ends below
+   the old c + size or was cleared), end <= 4 GiB. A hint (rounded down to 64 KiB) is taken exactly or refused: it must not be 0, end
+   above 4 GiB, touch the no-go range [0x400000, 0x02100000), or overlap anything listed above. commit(addr, size): the page-rounded
+   range must lie inside one reservation (else 0xCC01); uncommitted pages become RW and zero, already committed pages keep their
+   content and become RW. decommit: committed pages of the range are unmapped (an access ends the run with "fault"), others are
+   unchanged. release(base): unmaps the reservation's committed pages and frees it (not a base: 0xCC01). Pages committed here are
+   owned: VM_PROTECT works on them. map_fixed over a reservation is refused (0xD401). thread_activity(tid, paused): a paused thread is
+   never picked (a pause of the running thread takes effect at once); unknown tid 0xE401, not started or ended 0xFA01.
 6. Bound and count: one UC_HOOK_BLOCK over the image region (installed only with limit_instructions or attach_icount)
    adds size/4 per block, feeds the Icount if attached, and stops at the first block boundary where the total >=
    limit_instructions: reason "limit", the same stop point on every run (the stopping block is counted).
@@ -52,8 +66,13 @@ SLOTS = ["output_debug_string", "sleep_ns", "exit", "console_write", "console_fl
          "audio_open", "audio_submit", "audio_close", "pad_read", "pad_vibrate", "input_poll", "map_fixed",
          "ext_call"]
 API_SIZE = 0x30 + 8 * len(SLOTS)
-FNVNX_EXT_PLATFORM, FNVNX_PLAT_VM_PROTECT = 11, 8
+FNVNX_EXT_PLATFORM = 11
+# hostapi.h FNVNX_PLAT_* of module 11 (the header defines 1..7; VM_PROTECT = 8 is the loader's addition): fn -> (name, min args)
+PLATFORM_FNS = {1: ("cpu_boost", 1), 2: ("thread_activity", 2), 3: ("message", 2), 4: ("vm_reserve", 2), 5: ("vm_commit", 2),
+                6: ("vm_decommit", 2), 7: ("vm_release", 1), 8: ("vm_protect", 3)}
+VM_ALIGN, VM_FLOOR, VM_NO_GO = 0x10000, 0x02100000, (0x00400000, 0x02100000)   # host_vm.inc FNVNX_VM_ALIGN / FNVNX_VM_NO_GO_*
 ERR_INVALID_SIZE, ERR_INVALID_ADDRESS, ERR_INVALID_CURRENT_MEMORY = 0xCA01, 0xCC01, 0xD401
+ERR_INVALID_NEW_MEMORY_PERMISSION, ERR_INVALID_HANDLE, ERR_INVALID_STATE = 0xD801, 0xE401, 0xFA01
 ACCESS_KINDS = {UCC.UC_MEM_READ_UNMAPPED: "read-unmapped", UCC.UC_MEM_WRITE_UNMAPPED: "write-unmapped",
                 UCC.UC_MEM_FETCH_UNMAPPED: "fetch-unmapped", UCC.UC_MEM_WRITE_PROT: "write-protected",
                 UCC.UC_MEM_READ_PROT: "read-protected", UCC.UC_MEM_FETCH_PROT: "fetch-protected"}
@@ -93,6 +112,7 @@ class VirtualClock:
 class Thread:
     def __init__(self, tid):
         self.tid, self.ctx, self.state, self.wait, self.result, self.resume_pc = tid, None, "new", None, 0, None
+        self.paused = False
         self.entry = self.arg = 0   # new: new, ready, running, blocked, done; wait: ("addr", a, dl) / ("join", t) / ("sleep", dl)
 
 
@@ -115,6 +135,9 @@ class Machine:
             raise MachineError("stacks region 0x%x..0x%x is not %d x 0x%x" % (slo, shi, n_stacks, stack_size))
         self.stacks_top, self.stack_size, self.max_threads = shi, stack_size, n_stacks
         self.handlers = self._resolve(services)
+        self.plat = self._resolve_platform(services)
+        self.regions = sorted(reg.values())
+        self.vm_resv, self.vm_pages = {}, set()   # base -> size; committed page addresses
         self.ext = {int(n[4:]): getattr(services, n) for n in dir(services) if n.startswith("ext_") and n[4:].isdigit()}
         uc = self.uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
         uc.reg_write(UC_ARM64_REG_CPACR_EL1, 3 << 20)   # FP/SIMD on
@@ -169,6 +192,16 @@ class Machine:
             h[n] = f
         if not callable(getattr(services, "bind", None)):
             raise MachineError("services has no bind(machine)")
+        return h
+
+    def _resolve_platform(self, services):
+        h = {}
+        for fn, (name, _n) in sorted(PLATFORM_FNS.items()):
+            f = getattr(services, "plat_" + name, None) or getattr(self, "_plat_" + name, None)
+            if not callable(f):
+                raise MachineError("module 11 fn %d (%s) is defined by the header but neither the machine nor services has "
+                                   "plat_%s" % (fn, name, name))
+            h[fn] = f
         return h
 
     # -- instruction bound and count
@@ -265,13 +298,18 @@ class Machine:
         """wholly guest-owned: inside the heap region and clear of given-away blocks, or inside map_fixed mappings"""
         if self.heap[0] <= lo and hi <= self.heap[1]:
             return not any(a < hi and lo < b for a, b in self.given)
-        return self._covered(lo, hi)
+        return self._covered(lo, hi) or self._vm_committed(lo, hi)
+
+    def _vm_committed(self, lo, hi):
+        return lo in self.vm_pages and all(p in self.vm_pages for p in range(lo, hi, PAGE))
 
     def map_fixed(self, addr, size, src):
         if size == 0 or size % PAGE:
             return self._refuse("map_fixed", addr, size, "size", ERR_INVALID_SIZE)
         if addr % PAGE or addr + size > 1 << 32:
             return self._refuse("map_fixed", addr, size, "address", ERR_INVALID_ADDRESS)
+        if any(addr < r + n and r < addr + size for r, n in self.vm_resv.items()):
+            return self._refuse("map_fixed", addr, size, "overlaps a VM reservation", ERR_INVALID_CURRENT_MEMORY)
         if not any(n != "keys" and lo <= addr and addr + size <= hi for n, lo, hi in self.free):
             return self._refuse("map_fixed", addr, size, "not wholly inside a mappable reserved range", ERR_INVALID_ADDRESS)
         if any(b > addr and addr + size > a for a, b, _p in self.uc.mem_regions()):
@@ -302,21 +340,125 @@ class Machine:
 
     def ext_call(self, module, fn, args, nargs):
         a = [struct.unpack("<Q", self.uc.mem_read(args + 8 * i, 8))[0] for i in range(nargs)] if nargs else []
-        if module == FNVNX_EXT_PLATFORM and fn == FNVNX_PLAT_VM_PROTECT:
-            if len(a) != 3:
-                raise MachineError("VM_PROTECT needs 3 arguments, the guest passed %d" % len(a))
-            addr, size, prot = a
-            if size == 0 or size % PAGE:
-                return self._refuse("vm_protect", addr, size, "size", ERR_INVALID_SIZE)
-            if addr % PAGE or addr + size > 1 << 32:
-                return self._refuse("vm_protect", addr, size, "address", ERR_INVALID_ADDRESS)
-            if not self._owned(addr, addr + size):
-                return self._refuse("vm_protect", addr, size, "pages the guest does not own", ERR_INVALID_CURRENT_MEMORY)
-            self.uc.mem_protect(addr, size, (UC_PROT_READ if prot & 1 else 0) | (UC_PROT_WRITE if prot & 2 else 0))
-            return 0
+        if module == FNVNX_EXT_PLATFORM and fn in PLATFORM_FNS:
+            name, need = PLATFORM_FNS[fn]
+            if len(a) < need:
+                raise MachineError("module 11 fn %d (%s) needs %d arguments, the guest passed %d" % (fn, name, need, len(a)))
+            return self.plat[fn](a)
         if module not in self.ext:
             raise ExtMissing(module, fn)
         return self.ext[module](fn, a)
+
+    # -- platform service, module 11 (rule 5b)
+    def _vm_blocked(self):
+        """sorted (lo, hi) of everything a reservation must not overlap"""
+        return sorted(self.regions + [(lo, hi) for _n, lo, hi in self.free] + self.mapped
+                      + [(b, b + n) for b, n in self.vm_resv.items()])
+
+    def _vm_resv_of(self, lo, hi):
+        return next((b for b, n in self.vm_resv.items() if b <= lo and hi <= b + n), None)
+
+    def _plat_vm_reserve(self, a):
+        hint, want = a[0], a[1]
+        if want == 0:
+            return self._refuse("vm_reserve", hint, want, "size 0", 0)
+        size = _up(want, VM_ALIGN)
+        blocked = self._vm_blocked()
+        if hint:
+            lo = hint & ~(VM_ALIGN - 1)
+            if lo == 0 or lo + size > 1 << 32:
+                return self._refuse("vm_reserve", hint, want, "address", 0)
+            if lo < VM_NO_GO[1] and lo + size > VM_NO_GO[0]:
+                return self._refuse("vm_reserve", hint, want, "no-go range", 0)
+            if any(b > lo and lo + size > x for x, b in blocked):
+                return self._refuse("vm_reserve", hint, want, "overlaps a mapping, a free range or a reservation", 0)
+        else:
+            lo = VM_FLOOR
+            for x, b in blocked:
+                if lo < b and x < lo + size:
+                    lo = _up(b, VM_ALIGN)
+            if lo + size > 1 << 32:
+                return self._refuse("vm_reserve", hint, want, "no address space", 0)
+        self.vm_resv[lo] = size
+        return lo
+
+    def _vm_range(self, what, a):
+        addr, size = a[0], a[1]
+        if size == 0 or addr + size >= 1 << 64:
+            return None, self._refuse(what, addr, size, "size", ERR_INVALID_SIZE)
+        lo, hi = addr // PAGE * PAGE, _up(addr + size)
+        if self._vm_resv_of(lo, hi) is None:
+            return None, self._refuse(what, addr, size, "not inside one reservation", ERR_INVALID_ADDRESS)
+        return (lo, hi), 0
+
+    def _vm_runs(self, lo, hi, committed):
+        """maximal runs [x, y) of pages of [lo, hi) that are (not) committed"""
+        runs, p = [], lo
+        while p < hi:
+            if (p in self.vm_pages) == committed:
+                q = p
+                while q < hi and (q in self.vm_pages) == committed:
+                    q += PAGE
+                runs.append((p, q))
+                p = q
+            else:
+                p += PAGE
+        return runs
+
+    def _plat_vm_commit(self, a):
+        rng, res = self._vm_range("vm_commit", a)
+        if rng is None:
+            return res
+        lo, hi = rng
+        for x, y in self._vm_runs(lo, hi, True):
+            self.uc.mem_protect(x, y - x, UC_PROT_READ | UC_PROT_WRITE)
+        for x, y in self._vm_runs(lo, hi, False):
+            self.uc.mem_map(x, y - x, UC_PROT_READ | UC_PROT_WRITE)
+            self.vm_pages.update(range(x, y, PAGE))
+        return 0
+
+    def _vm_unmap(self, lo, hi):
+        for x, y in self._vm_runs(lo, hi, True):
+            self.uc.mem_unmap(x, y - x)
+            self.vm_pages.difference_update(range(x, y, PAGE))
+
+    def _plat_vm_decommit(self, a):
+        rng, res = self._vm_range("vm_decommit", a)
+        if rng is None:
+            return res
+        self._vm_unmap(*rng)
+        return 0
+
+    def _plat_vm_release(self, a):
+        base = a[0]
+        if base not in self.vm_resv:
+            return self._refuse("vm_release", base, 0, "not the base of a reservation", ERR_INVALID_ADDRESS)
+        self._vm_unmap(base, base + self.vm_resv.pop(base))
+        return 0
+
+    def _plat_vm_protect(self, a):
+        addr, size, prot = a[:3]
+        if size == 0 or size % PAGE:
+            return self._refuse("vm_protect", addr, size, "size", ERR_INVALID_SIZE)
+        if addr % PAGE or addr + size > 1 << 32:
+            return self._refuse("vm_protect", addr, size, "address", ERR_INVALID_ADDRESS)
+        if prot & ~3:
+            return self._refuse("vm_protect", addr, size, "prot 0x%x has bits other than R and W" % prot,
+                                ERR_INVALID_NEW_MEMORY_PERMISSION)
+        if not self._owned(addr, addr + size):
+            return self._refuse("vm_protect", addr, size, "pages the guest does not own", ERR_INVALID_CURRENT_MEMORY)
+        self.uc.mem_protect(addr, size, (UC_PROT_READ if prot & 1 else 0) | (UC_PROT_WRITE if prot & 2 else 0))
+        return 0
+
+    def _plat_thread_activity(self, a):
+        tid, paused = a[0], a[1]
+        t = self.threads.get(tid)
+        if t is None:
+            return self._refuse("thread_activity", tid, paused, "no such thread", ERR_INVALID_HANDLE)
+        if t.state in ("new", "done"):
+            return self._refuse("thread_activity", tid, paused, "thread is %s" % t.state, ERR_INVALID_STATE)
+        t.paused = bool(paused)
+        return (("yield",), 0) if t is self.cur and t.paused else 0
 
     # -- threads and blocking
     def thread_create(self, entry, arg):
@@ -380,7 +522,7 @@ class Machine:
             start = (self.order.index(self.last) + 1) if self.last in self.order else 0
             for i in range(len(live)):
                 t = live[(start + i) % len(live)]
-                if t.state == "ready":
+                if t.state == "ready" and not t.paused:
                     return t
             dl = [(t.wait[-1], t) for t in live if t.state == "blocked" and t.wait[0] in ("sleep", "addr")
                   and t.wait[-1] is not None]
@@ -433,11 +575,11 @@ class Machine:
         uc.reg_write(UC_ARM64_REG_X0, res & U64)
         uc.reg_write(UC_ARM64_REG_PC, uc.reg_read(UC_ARM64_REG_LR))
         if self.exit_code is None and self.calls - self.slice_calls0 >= self.hc_slice \
-                and any(x is not self.cur and x.state == "ready" for x in self.threads.values()):
+                and any(x is not self.cur and x.state == "ready" and not x.paused for x in self.threads.values()):
             self._block(("yield",), res & U64)
 
     def _waits(self):
-        return [dict(tid=t.tid, state=t.state, wait=list(t.wait) if t.wait else None)
+        return [dict(tid=t.tid, state=t.state, wait=list(t.wait) if t.wait else None, **({"paused": True} if t.paused else {}))
                 for t in sorted(self.threads.values(), key=lambda x: x.tid) if t.state != "done"]
 
     def run(self):

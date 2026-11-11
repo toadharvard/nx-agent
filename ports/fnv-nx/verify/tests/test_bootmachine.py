@@ -82,6 +82,10 @@ static void num(const char *what, uint64_t v) {
     b[n++] = '\n'; b[n] = 0;
     say(b);
 }
+static uint64_t plat(uint32_t fn, uint64_t a, uint64_t b, uint64_t c, uint32_t n) {
+    uint64_t v[3] = {a, b, c};
+    return fnvnx_hcall4(H->ext_call, 11, fn, FNVNX_ADDR(v), n);
+}
 /* boot-stage CLI test (MODE 6): three functions called in order; results 0, 1, 0 */
 __attribute__((noinline, used)) uint32_t fnvboot_a(uint32_t x) { __asm__ volatile("" ::: "memory"); return x - x; }
 __attribute__((noinline, used)) uint32_t fnvboot_b(uint32_t x) { __asm__ volatile("" ::: "memory"); return (x | 1) & 1; }
@@ -101,6 +105,81 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     fnvnx_hcall4(H->ext_call, 9, 1, FNVNX_ADDR(a3), 3);
 #elif MODE == 2
     fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&flag), 0, ~0ull);   /* nobody wakes it, no deadline */
+#elif MODE >= 7 && MODE <= 11
+    uint64_t A = plat(4, 0, 0x8000000, 0, 2);
+    volatile uint32_t *pa = (volatile uint32_t *)(uintptr_t)A;
+    num("resA", A);
+#if MODE == 7
+    num("resB", plat(4, 0, 0x10000, 0, 2));
+    num("commit", plat(5, A, 0x2000, 0, 2));
+    pa[0] = 0x11; pa[0x400] = 0x22;
+    num("rb", pa[0] + pa[0x400]);
+    num("decommit", plat(6, A, 0x2000, 0, 2));
+    num("recommit", plat(5, A, 0x2000, 0, 2));
+    num("zero", pa[0] | pa[0x400]);
+    pa[0] = 0x33;
+    num("recommit-keeps", plat(5, A, 0x1000, 0, 2) + pa[0]);
+    num("commit-outside", plat(5, 0x30000000, 0x1000, 0, 2));
+    num("commit-past-end", plat(5, A + 0x8000000 - 0x1000, 0x2000, 0, 2));
+    num("commit-size0", plat(5, A, 0, 0, 2));
+    num("protect-uncommitted", plat(8, A + 0x10000, 0x1000, 1, 3));
+    num("protect-committed", plat(8, A, 0x1000, 1, 3));
+    num("ro-read", pa[0]);
+    num("protect-rw", plat(8, A, 0x1000, 3, 3));
+    pa[0] = 0x44;
+    num("rw-write", pa[0]);
+    num("protect-x", plat(8, A, 0x1000, 4, 3));
+    plat(8, A + 0x1000, 0x1000, 0, 3);
+    num("decommit-protected", plat(6, A, 0x2000, 0, 2));
+    num("recommit-protected", plat(5, A, 0x2000, 0, 2));
+    pa[0x400] = 0x55;
+    num("zero-rw-after-protect", pa[0] | (pa[0x400] - 0x55));
+    num("mapfixed-over-resv", fnvnx_hcall3(H->map_fixed, A, 0x1000, H->heap_base + 0x20000));
+    num("release", plat(7, A, 0, 0, 1));
+    num("release-again", plat(7, A, 0, 0, 1));
+    num("release-inner", plat(7, A + 0x10000, 0, 0, 1));
+    num("resA2", plat(4, 0, 0x8000000, 0, 2));
+    num("hint-overlap", plat(4, A + 0x10000, 0x10000, 0, 2));
+    num("hint-nogo", plat(4, 0x500000, 0x10000, 0, 2));
+    num("hint-above-4g", plat(4, 0xFFFF0000u, 0x20000, 0, 2));
+    num("hint-in-image", plat(4, H->guest_base, 0x10000, 0, 2));
+    num("hint-size0", plat(4, 0x20000000, 0, 0, 2));
+    num("hint-ok", plat(4, 0x20001234, 0x10001, 0, 2));
+    num("hint-ok-overlap", plat(4, 0x20010000, 0x10000, 0, 2));
+    num("tact-nothread", plat(2, 99, 1, 0, 2));
+    num("tact-tid0", plat(2, 0, 1, 0, 2));
+    uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 77, 0x10000, 0, ~0ull);
+    num("tact-new", plat(2, id, 1, 0, 2));
+    fnvnx_hcall1(H->thread_start, id);
+    num("tact-pause", plat(2, id, 1, 0, 2));
+    fnvnx_hcall1(H->sleep_ns, 2000000);
+    num("paused-flag", flag);
+    num("tact-resume", plat(2, id, 0, 0, 2));
+    while (flag == 0) fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&flag), 0, ~0ull);
+    num("resumed-flag", flag);
+    fnvnx_hcall1(H->thread_join, id);
+    num("boost", plat(1, 1, 0, 0, 1));
+    num("message", plat(3, FNVNX_ADDR("cap"), FNVNX_ADDR("body"), 0, 2));
+#elif MODE == 8
+    plat(5, A, 0x1000, 0, 2);
+    pa[0] = 1;
+    num("committed-ok", pa[0]);
+    num("touch-uncommitted", pa[0x400]);   /* reserved, not committed: the run must end here */
+    say("after the fault\n");
+#elif MODE == 9
+    plat(5, A, 0x1000, 0, 2);
+    plat(8, A, 0x1000, 1, 3);
+    pa[0] = 1;   /* write to a read-only committed page */
+    say("after the fault\n");
+#elif MODE == 10
+    plat(5, A, 0x1000, 0, 2);
+    pa[0] = 1;
+    plat(6, A, 0x1000, 0, 2);
+    num("touch-decommitted", pa[0]);
+    say("after the fault\n");
+#else
+    plat(9, 0, 0, 0, 0);   /* a fn of module 11 the header does not define */
+#endif
 #else
     num("marker", marker(41));
     volatile uint32_t *hp = (volatile uint32_t *)(uintptr_t)H->heap_base;
@@ -238,7 +317,7 @@ def main():
     root = os.path.join(TMP, "sd")
     os.makedirs(root)
     open(os.path.join(root, "data.bin"), "wb").write(b"01ABCDEFGH23")
-    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5)}   # MODE 6 (boot CLI guest) is built by test_boot.py
+    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11)}   # MODE 6 (boot CLI guest) is built by test_boot.py
     elf0, path0 = built[0]
     plan0 = make_plan(elf0)
     base = plan0["image"]["base"]
@@ -339,6 +418,73 @@ def main():
     except bootmachine.MachineError as e:
         ok, msg = "h_pad_read" in str(e), str(e)
     case("a services object missing one slot raises at construction", ok, msg)
+
+    # platform service (module 11): the VM service and thread activity
+    heap_lo, image_hi = plan0["regions"]["heap"]["lo"], plan0["regions"]["image"]["hi"]
+    rv, linesv, _, svcv = run(built[7][0], root)
+    vals = {l.split("=")[0]: int(l.split("=")[1], 16) for l in linesv if "=" in l and l.split("=")[1].isalnum()}
+    A, B, A2 = vals.get("resA", 0), vals.get("resB", 0), vals.get("resA2", 0)
+    textv = "\n".join(linesv)
+    case("vm: run exits 7", rv["reason"] == "exit" and rv["exit_code"] == 7, (rv, textv))
+    case("vm: hintless 128 MiB reserve: lowest 64 KiB multiple >= 0x02100000 clear of the image",
+         A >= 0x02100000 and A % 0x10000 == 0 and not (A < image_hi and plan0["regions"]["image"]["lo"] < A + 0x8000000)
+         and A == (image_hi + 0xFFFF) // 0x10000 * 0x10000, hex(A))
+    case("vm: the second reserve (64 KiB) does not overlap the first and takes the lowest gap, 0x02100000",
+         B == 0x02100000 and not (B < A + 0x8000000 and A < B + 0x10000), (hex(A), hex(B)))
+    case("vm: commit, write, decommit, recommit gives zeros", all(vals.get(k) == v for k, v in (
+        ("commit", 0), ("rb", 0x33), ("decommit", 0), ("recommit", 0), ("zero", 0))), textv)
+    case("vm: recommit of a committed page keeps its content", vals.get("recommit-keeps") == 0x33, textv)
+    case("vm: commit outside, past the end of, and of size 0 in a reservation fail",
+         vals["commit-outside"] == 0xCC01 and vals["commit-past-end"] == 0xCC01 and vals["commit-size0"] == 0xCA01, textv)
+    case("vm: VM_PROTECT on an uncommitted page: nonzero", vals.get("protect-uncommitted") == 0xD401, textv)
+    case("vm: VM_PROTECT on a committed page works, read-only reads, rw writes", vals.get("protect-committed") == 0
+         and vals.get("ro-read") == 0x33 and vals.get("protect-rw") == 0 and vals.get("rw-write") == 0x44, textv)
+    case("vm: VM_PROTECT with an X bit is refused", vals.get("protect-x") == 0xD801, textv)
+    case("vm: recommit after decommit is RW and zero whatever the protection was",
+         vals.get("recommit-protected") == 0 and vals.get("zero-rw-after-protect") == 0, textv)
+    case("vm: map_fixed over a reservation refused", vals.get("mapfixed-over-resv") == 0xD401, textv)
+    case("vm: release frees the whole reservation; a non-base address is refused",
+         vals.get("release") == 0 and vals.get("release-again") == 0xCC01 and vals.get("release-inner") == 0xCC01, textv)
+    case("vm: reserve after release gives the same address", A2 == A, (hex(A), hex(A2)))
+    case("vm: hints: overlap, no-go range, above 4 GiB, image, size 0 fail; a free hint is exact (64 KiB rounded)",
+         all(vals.get(k) == 0 for k in ("hint-overlap", "hint-nogo", "hint-above-4g", "hint-in-image", "hint-size0",
+                                        "hint-ok-overlap")) and vals.get("hint-ok") == 0x20000000, textv)
+    kinds = [e["kind"] for e in rv["events"]]
+    case("vm: every refusal is an event with its result", kinds == [
+        "vm_commit-refused"] * 3 + ["vm_protect-refused"] * 2 + ["map_fixed-refused"] + ["vm_release-refused"] * 2
+        + ["vm_reserve-refused"] * 6 + ["thread_activity-refused"] * 3, kinds)
+    case("platform: thread_activity: unknown / tid 0 -> 0xE401, new thread -> 0xFA01, pause holds the worker, resume runs it",
+         vals.get("tact-nothread") == 0xE401 and vals.get("tact-tid0") == 0xE401 and vals.get("tact-new") == 0xFA01
+         and vals.get("tact-pause") == 0 and vals.get("paused-flag") == 0 and vals.get("tact-resume") == 0
+         and vals.get("resumed-flag") == 0x4d, textv)
+    case("platform: cpu_boost and message are the services'", svcv.boosts == [1] and svcv.messages == [("cap", "body")]
+         and vals.get("boost") == 0 and vals.get("message") == 0, (svcv.boosts, svcv.messages))
+    rv2 = run(built[7][0], root)[0]
+    case("vm: two identical runs give identical run() dicts", rv == rv2, (rv, rv2))
+    rf8, lines8 = run(built[8][0], root)[:2]
+    case("vm: access to a reserved, uncommitted page: fault record", rf8["reason"] == "fault"
+         and rf8["fault"]["kind"] == "read-unmapped" and rf8["fault"]["addr"] == int(lines8[2].split("=")[1], 16) + 0x1000
+         and "committed-ok=1" in lines8 and "after the fault" not in lines8, (rf8, lines8))
+    rf9, lines9 = run(built[9][0], root)[:2]
+    case("vm: write to a VM_PROTECT read-only committed page: fault", rf9["reason"] == "fault"
+         and rf9["fault"]["kind"] == "write-protected" and "after the fault" not in lines9, (rf9, lines9))
+    rf10, lines10 = run(built[10][0], root)[:2]
+    case("vm: access to a decommitted page: fault", rf10["reason"] == "fault" and rf10["fault"]["kind"] == "read-unmapped"
+         and "after the fault" not in lines10, (rf10, lines10))
+    rf11 = run(built[11][0], root)[0]
+    case("platform: a fn of module 11 the header does not define ends the run as ext-module-missing",
+         rf11["reason"] == "ext-module-missing" and rf11["ext"] == {"module": 11, "fn": 9}, rf11)
+
+    class NoMsg(boothost.Services):
+        plat_message = None
+
+    try:
+        bootmachine.Machine(elf0, plan0, NoMsg(root))
+        ok, msg = False, "no error"
+    except bootmachine.MachineError as e:
+        ok, msg = "message" in str(e), str(e)
+    case("a header-defined platform fn nobody implements raises at construction", ok, msg)
+    case("every header fn 1..8 of module 11 resolves", sorted(bootmachine.Machine(elf0, plan0, boothost.Services(root)).plat) == list(range(1, 9)))
     print("%d cases, %.1f s" % (N[0], time.time() - t0))
     return 1 if FAILED else 0
 
