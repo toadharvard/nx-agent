@@ -20,7 +20,7 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."));
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 sys.path.insert(0, os.path.join(ROOT, "render", "shaders", "total"))
-import sm_hand
+import sm_hand, mutsrc
 
 GLENV = dict(os.environ, LIBGL_ALWAYS_SOFTWARE="1", GALLIUM_DRIVER="llvmpipe", EGL_PLATFORM="surfaceless")
 
@@ -349,15 +349,15 @@ def part_mutate(lab):
     P.check(verdict("vs_2_0", "bare", "ps_2_0", "v0", complete=True), "unmutated complete case passes")
     P.check(verdict("vs_1_1", "bare", "ps_2_0", "v0", fog=(1, 0.25)), "unmutated fog case passes")
     muts = [
-        ("fog default 0.0 -> 1.0",       dict(args=("vs_1_1", "bare", "ps_2_0", "v0"), fog=(1, 0.25)), lambda g: re.sub(r"(dk_pad_18 = vec4\()0\.0\)", r"\g<1>1.0)", g)),
-        ("COLOR0 default -> constant 0", dict(args=("vs_2_0", "c0xy", "ps_2_0", "v0")),               lambda g: g.replace("vs_drv_pad.x", "0.0")),
-        ("COLOR0 default -> 1.0 (d=0)",  dict(args=("vs_1_1", "c0xy", "ps_3_0", "color0"), d=0.0),     lambda g: g.replace("vs_drv_pad.x", "1.0")),
-        ("texcoord completion 0 -> 0.5", dict(args=("vs_2_0", "t3xy", "ps_2_0", "t3")),               lambda g: re.sub(r"(io_5_3\.zw = vec2\()0\.0\)", r"\g<1>0.5)", g)),
-        ("pad slot moved 18 -> 17",      dict(args=("vs_1_1", "bare", "ps_2_0", "v0"), fog=(1, 0.25)), lambda g: g.replace("layout(location = 18) out highp vec4 dk_pad_18", "layout(location = 17) out highp vec4 dk_pad_18")),
-        ("fog pad declaration removed",  dict(args=("vs_1_1", "bare", "ps_2_0", "v0"), fog=(1, 0.25)), lambda g: re.sub(r"layout\(location = 18\) out highp vec4 dk_pad_18;\n", "", g)),
-        ("complete: texcoord pad 0 -> 1", dict(args=("vs_2_0", "bare", "ps_2_0", "t3"), complete=True), lambda g: re.sub(r"(dk_pad_5 = vec4\()0\.0\)", r"\g<1>1.0)", g)),
-        ("complete: specular pad 0 -> 1", dict(args=("vs_3_0", "bare", "ps_3_0", "color1"), complete=True), lambda g: re.sub(r"(dk_pad_1 = vec4\()0\.0\)", r"\g<1>1.0)", g)),
-        ("oFog value overwritten by pad", dict(args=("vs_1_1", "fog", "ps_2_0", "v0"), fog=(1, 0.25)), lambda g: g.replace("\tgl_Position.xy +=", "\tio_11_0.x = 0.0;\n\tgl_Position.xy +=")),
+        ("fog default 0.0 -> 1.0",       dict(args=("vs_1_1", "bare", "ps_2_0", "v0"), fog=(1, 0.25)), lambda g: mutsrc.apply_re(g, r"(dk_pad_18 = vec4\()0\.0\)", r"\g<1>1.0)", 'sm_link')),
+        ("COLOR0 default -> constant 0", dict(args=("vs_2_0", "c0xy", "ps_2_0", "v0")),               lambda g: mutsrc.apply(g, "vs_drv_pad.x", "0.0", 'sm_link')),
+        ("COLOR0 default -> 1.0 (d=0)",  dict(args=("vs_1_1", "c0xy", "ps_3_0", "color0"), d=0.0),     lambda g: mutsrc.apply(g, "vs_drv_pad.x", "1.0", 'sm_link')),
+        ("texcoord completion 0 -> 0.5", dict(args=("vs_2_0", "t3xy", "ps_2_0", "t3")),               lambda g: mutsrc.apply_re(g, r"(io_5_3\.zw = vec2\()0\.0\)", r"\g<1>0.5)", 'sm_link')),
+        ("pad slot moved 18 -> 17",      dict(args=("vs_1_1", "bare", "ps_2_0", "v0"), fog=(1, 0.25)), lambda g: mutsrc.apply(g, "layout(location = 18) out highp vec4 dk_pad_18", "layout(location = 17) out highp vec4 dk_pad_18", 'sm_link')),
+        ("fog pad declaration removed",  dict(args=("vs_1_1", "bare", "ps_2_0", "v0"), fog=(1, 0.25)), lambda g: mutsrc.apply_re(g, r"layout\(location = 18\) out highp vec4 dk_pad_18;\n", "", g)),
+        ("complete: texcoord pad 0 -> 1", dict(args=("vs_2_0", "bare", "ps_2_0", "t3"), complete=True), lambda g: mutsrc.apply_re(g, r"(dk_pad_5 = vec4\()0\.0\)", r"\g<1>1.0)", 'sm_link')),
+        ("complete: specular pad 0 -> 1", dict(args=("vs_3_0", "bare", "ps_3_0", "color1"), complete=True), lambda g: mutsrc.apply_re(g, r"(dk_pad_1 = vec4\()0\.0\)", r"\g<1>1.0)", 'sm_link')),
+        ("oFog value overwritten by pad", dict(args=("vs_1_1", "fog", "ps_2_0", "v0"), fog=(1, 0.25)), lambda g: mutsrc.apply(g, "\tgl_Position.xy +=", "\tio_11_0.x = 0.0;\n\tgl_Position.xy +=", 'sm_link')),
     ]
     for name, kw, fn in muts:
         a = kw["args"]; ok = verdict(a[0], a[1], a[2], a[3], mutate=fn, complete=kw.get("complete", False), d=kw.get("d"), fog=kw.get("fog"))

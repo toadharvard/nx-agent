@@ -9,7 +9,7 @@ python3 -I tests/l6/ffpdev/test_ffpdev.py [--no-mutations] [--no-guest]      (FN
  d  program ids: creation, caching, destruction counts of the backend calls       e  the embedded programs (generated header == the GLSL sources, DKSH by uam) and the guest build before -> after
  f  mutations.   Architecture: the device layer is -m32; the GL backend is LP64 (libnxgl4 in an RPC process, tests/l6/copy/server.c)."""
 import concurrent.futures as cf, os, re, shutil, subprocess, sys, tempfile
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install(); import mutsrc
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, os.path.join(HERE, "..", "gl4")); import xl  # noqa: E402  (the translator build libnxgl4 links: FNVNX_SHADERS_BUILD, required)
@@ -175,8 +175,7 @@ MUTS = [
 
 def mut_build(base, tmp, rel, old, new, idx):
     mdir = os.path.join(tmp, "m%d" % idx); os.makedirs(mdir, exist_ok=True); path = os.path.join(D3D9, rel); txt = open(path).read()
-    if old not in txt: return None, "pattern not found"
-    mp = os.path.join(mdir, os.path.basename(rel)); open(mp, "w").write(txt.replace(old, new, 1)); objs = dict(base["objs"])
+    mp = os.path.join(mdir, os.path.basename(rel)); open(mp, "w").write(mutsrc.apply(txt, old, new, f"{rel} #{idx}")); objs = dict(base["objs"])
     if rel.startswith("dev/"):
         o = os.path.join(mdir, "x.o"); r = sh(flags(base["tmp"]) + ["-c", mp, "-o", o])
         if r.returncode: return None, "compile: " + r.stderr[-300:]

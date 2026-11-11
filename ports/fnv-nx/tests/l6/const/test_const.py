@@ -7,7 +7,7 @@
  d  mutations: each one breaks one body or one id; part b must fail
 Product objects = render/d3d9/dev/*.cpp minus app_unk_guest.cpp, glue_*.cpp, ffp_*.cpp + generated sources + render/d3d9/front/*.c (as tests/l6/m1), with the real fnvnx_wine_fixme of app_unk_native.cpp (one stderr line per call)."""
 import concurrent.futures as cf, importlib.util, os, re, shutil, subprocess, sys, tempfile
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install(); import mutsrc
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 DEV = os.path.join(ROOT, "render", "d3d9", "dev"); M1 = os.path.join(ROOT, "tests", "l6", "m1")
@@ -160,8 +160,7 @@ def main():
         def one(i):
             n, fn, old, new = muts[i]; d = os.path.join(tmp, f"m{i}"); shutil.copytree(DEV, os.path.join(d, "dev"), ignore=shutil.ignore_patterns("__pycache__")); mdev = os.path.join(d, "dev")
             f = os.path.join(mdev, fn); t = open(f).read()
-            if old not in t: return i, None
-            open(f, "w").write(t.replace(old, new, 1)); repl = {}; os.makedirs(os.path.join(d, "o"))
+            open(f, "w").write(mutsrc.apply(t, old, new, f"{fn} #{i}")); repl = {}; os.makedirs(os.path.join(d, "o"))
             for c in (EX if fn == H else [fn]):
                 o = os.path.join(d, "o", c[:-4] + ".o"); r = sh(tm.fl(tmp, mdev) + ["-c", os.path.join(mdev, c), "-o", o])
                 if r.returncode: return i, "build"

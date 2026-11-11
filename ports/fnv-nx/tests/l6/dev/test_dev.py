@@ -5,7 +5,7 @@
  f  mutation checks: one rule broken in a copy of dev/ -> the named part must fail
 TEST builds link with -Wl,--unresolved-symbols=ignore-all: the spec methods without a definition (the gate's missing count) stay unresolved; the tests never call them."""
 import concurrent.futures as cf, json, os, re, shutil, subprocess, sys, tempfile
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install(); import mutsrc
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 DEV = os.path.join(ROOT, "render", "d3d9", "dev"); GEN = os.path.join(ROOT, "render", "d3d9", "gen"); SPEC = os.path.join(ROOT, "render", "d3d9", "spec", "d3d9_spec.json")
@@ -97,8 +97,7 @@ def main():
         def one(i):
             part, f, old, new = muts[i]; mdev = os.path.join(tmp, f"m{i}_dev"); shutil.copytree(DEV, mdev, ignore=shutil.ignore_patterns("__pycache__"))
             txt = open(os.path.join(mdev, f)).read()
-            if old not in txt: return i, None, "pattern not found"
-            open(os.path.join(mdev, f), "w").write(txt.replace(old, new, 1))
+            open(os.path.join(mdev, f), "w").write(mutsrc.apply(txt, old, new, f"{f} #{i}"))
             x, pr = build(mdev, os.path.join(tmp, f"m{i}"), jobs=2)
             if not x: return i, None, pr
             rr, ps = run(x); return i, ps, rr.returncode

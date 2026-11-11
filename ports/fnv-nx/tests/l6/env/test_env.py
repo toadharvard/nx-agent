@@ -8,7 +8,7 @@
  d  mutation: one table cell / one rule constant broken in a copy of the generated tables -> (a) must fail.   e  ENV_PIN sha256 of the tsv files; the two profiles' tables.
 exit 0 iff all pass."""
 import concurrent.futures as cf, hashlib, os, re, shutil, subprocess, sys, tempfile
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install(); import mutsrc
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 ENV = os.path.join(ROOT, "render", "d3d9", "env"); DEV = os.path.join(ROOT, "render", "d3d9", "dev"); GEN = os.path.join(ROOT, "render", "d3d9", "gen"); INC = os.path.join(ROOT, "shim", "include")
@@ -122,9 +122,9 @@ def main():
     if "--no-mutations" not in sys.argv:
         def cdt(t): m = re.search(r"static const uint8_t T_CDT_A\[(\d+)\] = \{([^}]*)\}", t); v = m.group(2).split(","); i = v.index("0"); v[i] = "1"; return t[:m.start(2)] + ",".join(v) + t[m.end(2):]
         def cdf(t): m = re.search(r"T_CDF_A\[\d+\] = \{([^}]*)\}", t); v = m.group(1).split(","); j = next(i for i in range(len(v)) if int(v[i]) & 1); v[j] = str(int(v[j]) ^ 4); return t[:m.start(1)] + ",".join(v) + t[m.end(1):]
-        muts = [("one CheckDeviceType cell", cdt), ("one CheckDeviceFormat atom bit", cdf), ("usage mask 0x103ffff0 -> 0x103ffff8", lambda t: t.replace("0x103ffff0u", "0x103ffff8u", 1)),
-                ("format class rule: printable test", lambda t: t.replace("b > 0x7eu", "b > 0x7du", 1)), ("MSAA type bound 16 -> 17", lambda t: t.replace("t > 16u", "t > 17u", 1)),
-                ("WHQL flag bit 2 -> 4", lambda t: t.replace("flags & 2u", "flags & 4u", 1)), ("monitor of out-of-range adapter", lambda t: t.replace("in_range(p, ad) ? sc(p, SC_MON) : 0", "sc(p, SC_MON)", 1))]
+        muts = [("one CheckDeviceType cell", cdt), ("one CheckDeviceFormat atom bit", cdf), ("usage mask 0x103ffff0 -> 0x103ffff8", lambda t: mutsrc.apply(t, "0x103ffff0u", "0x103ffff8u", "env_rules tables")),
+                ("format class rule: printable test", lambda t: mutsrc.apply(t, "b > 0x7eu", "b > 0x7du", "env_rules tables")), ("MSAA type bound 16 -> 17", lambda t: mutsrc.apply(t, "t > 16u", "t > 17u", "env_rules tables")),
+                ("WHQL flag bit 2 -> 4", lambda t: mutsrc.apply(t, "flags & 2u", "flags & 4u", "env_rules tables")), ("monitor of out-of-range adapter", lambda t: mutsrc.apply(t, "in_range(p, ad) ? sc(p, SC_MON) : 0", "sc(p, SC_MON)", "env_rules tables"))]
         def one(i):
             d = os.path.join(tmp, f"m{i}"); os.makedirs(d); e = build(d, tables_edit=muts[i][1], tag="mut")
             if not e: return i, None

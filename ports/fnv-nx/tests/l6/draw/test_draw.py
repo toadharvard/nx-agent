@@ -5,7 +5,7 @@
  e program pairs: link set L and variant bit vs a python reimplementation, lazy creation / caching / destruction   f UP draws   g method gate and guest undefined count of the current tree vs the numbers it records (g_record.json; --record rewrites it)   h mutations.
 The device is the product code (obj, state, res_*, glue, draw_*) built -m32 over a RECORDING backend (t_rec.cpp: it decodes every submitted stream and logs every backend call)."""
 import concurrent.futures as cf, json, os, re, shutil, subprocess, sys, tempfile
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install(); import mutsrc
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(HERE, "..", "dev"))
@@ -127,8 +127,7 @@ def main():
         def one(i):
             part, f, old, new = MUTS[i]; mdev = os.path.join(tmp, f"m{i}_dev"); shutil.copytree(DEV, mdev, ignore=shutil.ignore_patterns("__pycache__"))
             txt = open(os.path.join(mdev, f)).read()
-            if old not in txt: return i, None, "pattern not found"
-            open(os.path.join(mdev, f), "w").write(txt.replace(old, new, 1))
+            open(os.path.join(mdev, f), "w").write(mutsrc.apply(txt, old, new, f"{f} #{i}"))
             x, pr = build(mdev, os.path.join(tmp, f"m{i}"), jobs=2, base=tmp, only={f})
             if not x: return i, None, pr
             rr, ps = run(x, data); return i, ps, rr.returncode

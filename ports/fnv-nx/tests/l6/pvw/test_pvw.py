@@ -7,7 +7,7 @@
  e  guest build: defined nxb rows, "L6 method without body", os_exit_process no longer referenced   f  the oom scan (tests/l6/oom --no-mutations)   g  mutation checks (one rule broken in a copy of dev/, the named part must fail)
 Product objects = render/d3d9/dev/*.cpp minus app_unk_guest.cpp and glue_*.cpp / ffp_*.cpp + generated sources + front/*.c; hooks recorded by t_env.cpp (as tests/l6/m1)."""
 import concurrent.futures as cf, os, re, shutil, subprocess, sys, tempfile
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install(); import mutsrc
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 D3 = os.path.join(ROOT, "render", "d3d9"); DEV = os.path.join(D3, "dev"); GEN = os.path.join(D3, "gen"); ENV = os.path.join(D3, "env"); SPEC = os.path.join(D3, "spec", "d3d9_spec.json")
@@ -121,8 +121,7 @@ def main():
                  ("b", *P("pvw_light.cpp", "if (log_fixme) fnvnx_wine_fixme(PVW_FIXME_LIGHT_TYPE);", "fnvnx_wine_fixme(PVW_FIXME_LIGHT_TYPE);"))]
         def one(i):
             part, f, old, new = muts[i]; mdev = os.path.join(tmp, f"m{i}_dev"); shutil.copytree(DEV, mdev, ignore=shutil.ignore_patterns("__pycache__")); txt = open(os.path.join(mdev, f)).read()
-            if old not in txt: return i, None, "pattern not found"
-            open(os.path.join(mdev, f), "w").write(txt.replace(old, new, 1)); mt = os.path.join(tmp, f"m{i}"); mo = os.path.join(mt, "objs"); os.makedirs(mo, exist_ok=True)
+            open(os.path.join(mdev, f), "w").write(mutsrc.apply(txt, old, new, f"{f} #{i}")); mt = os.path.join(tmp, f"m{i}"); mo = os.path.join(mt, "objs"); os.makedirs(mo, exist_ok=True)
             e2 = compile_all(tmp, mdev, {f: os.path.join(mdev, f)}, outdir=mo, jobs=1)
             if e2: return i, None, e2
             e3 = link(list(prod), od, od, os.path.join(mt, "t"), swap=(f, mo))

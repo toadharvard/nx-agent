@@ -5,7 +5,7 @@
  g gate G-METHOD before -> after (tests/l6/dev/test_dev.py gate())   h mutation checks (one rule broken in a copy of dev/, the named part must fail).
 Product objects = render/d3d9/dev/*.cpp minus app_unk_guest.cpp + the generated sources + render/d3d9/front/*.c; the platform / backend hooks of dev_hooks.h and res_tex.h are recorded by t_env.cpp."""
 import concurrent.futures as cf, importlib.util, os, random, re, shutil, subprocess, sys, tempfile
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install(); import mutsrc
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 D3 = os.path.join(ROOT, "render", "d3d9"); DEV = os.path.join(D3, "dev"); GEN = os.path.join(D3, "gen"); ENV = os.path.join(D3, "env"); SPEC = os.path.join(D3, "spec", "d3d9_spec.json")
@@ -252,7 +252,7 @@ def main():
         P = lambda f, old, new: (f, old, new)
         muts = [("a", *P("dev_params.cpp", "cnt > (ex ? 30u : 3u)", "cnt > (ex ? 31u : 3u)")), ("a", *P("dev_params.cpp", "(se == D3DSWAPEFFECT_COPY && cnt > 1)", "(false)")), ("a", *P("dev_params.cpp", "w = c ? c : 8;", "w = c ? c : 9;")),
                 ("a", *P("dev_params.cpp", "(bits != 32 && bits != 16) || (bits == 32", "(bits != 32) || (bits == 32")), ("a", *P("dev_params.cpp", "if (FAILED(hr = ms_ok(p, fmt, pp->MultiSampleType, pp->MultiSampleQuality, &sm))) return hr;", "")),
-                ("a", *P("dev_create.cpp", "L->cp.BehaviorFlags = flags;", "L->cp.BehaviorFlags = 0;")), ("a", *P("dev_create.cpp", "pp->Flags &= 0xfffu;", "")), ("d", *P("dev_chain.cpp", "im[i]->gpu = im[i + 1]->gpu;", "im[i]->gpu = im[i]->gpu;")),
+                ("a", *P("dev_create.cpp", "L->cp.BehaviorFlags = flags;", "L->cp.BehaviorFlags = 0;")), ("a", *P("dev_create.cpp", "pp->Flags &= 0xfffu;", "")), ("d", *P("dev_chain.cpp", "bbimg(c, i)->gpu = bbimg(c, i + 1)->gpu;", "bbimg(c, i)->gpu = bbimg(c, i)->gpu;")),
                 ("d", *P("dev_chain.cpp", "p.frame = ++L->frame;", "p.frame = L->frame;")), ("d", *P("dev_chain.cpp", "p.gamma = ramp_set ? (uint64_t)(uintptr_t)&ramp : 0;", "p.gamma = (uint64_t)(uintptr_t)&ramp;")),
                 ("d", *P("dev_chain.cpp", "dst.right > cw || dst.bottom > ch", "false")), ("d", *P("dev_misc.cpp", "for (uint32_t i = 0; i < L->nchains; i++) if (!L->chains[i]->pp.Windowed) return INV;", "")),
                 ("c", *P("dev_reset.cpp", "if (nx_dev_default_pool_blocks(dev)) { L->state = NX_DEV_NOTRESET;", "if (false) { L->state = NX_DEV_NOTRESET;")), ("c", *P("dev_reset.cpp", "d->init(d->cp);  ", ";  ")),
@@ -261,8 +261,7 @@ def main():
                 ("e", *P("dev_misc.cpp", "nxd3d_os_cursor_pos(&c.x, &c.y);", ";"))]
         def one(i):
             part, f, old, new = muts[i]; mdev = os.path.join(tmp, f"m{i}_dev"); shutil.copytree(DEV, mdev, ignore=shutil.ignore_patterns("__pycache__")); txt = open(os.path.join(mdev, f)).read()
-            if old not in txt: return i, None, "pattern not found"
-            open(os.path.join(mdev, f), "w").write(txt.replace(old, new, 1)); mt = os.path.join(tmp, f"m{i}"); os.makedirs(os.path.join(mt, "objs"), exist_ok=True)
+            open(os.path.join(mdev, f), "w").write(mutsrc.apply(txt, old, new, f"{f} #{i}")); mt = os.path.join(tmp, f"m{i}"); os.makedirs(os.path.join(mt, "objs"), exist_ok=True)
             e2 = compile_all(tmp, mdev, {f: os.path.join(mdev, f)}, outdir=os.path.join(mt, 'objs'))
             if e2: return i, None, e2
             names = list(prod); od = os.path.join(mt, "objs"); mexe = os.path.join(mt, "t")
