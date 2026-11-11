@@ -51,7 +51,7 @@ OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
 # a call goes through the boundary, a direct call does not compile); the tests are "the game" and keep plain pointers.
 $(filter $(OUT)/platform/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 
-.PHONY: regsites-check all test vclock probe private ilp32 m32 iat device qemu clean gfn-nocompile hostapi-check dynsites-check
+.PHONY: regsites-check all test vclock probe private ilp32 m32 iat device qemu clean gfn-nocompile hostapi-check worldstop-check dynsites-check
 all: test
 
 $(OUT)/%.c.o: $(ROOT)/%.c
@@ -163,6 +163,10 @@ private: $(OUT)/s4_tests_private
 # every ext_call of the guest sources is a service of toolchain/include/fnvnx/hostapi.h with its declared argument count
 hostapi-check:
 	python3 -I $(ROOT)/platform/manifest/check_hostapi.py --root $(ROOT)
+
+# assumption A1 of the world-stop window rules (platform/os/os_world.c): no signal-mask changes, pthread_create only under the world lock
+worldstop-check:
+	python3 -I $(ROOT)/platform/manifest/check_worldstop.py --root $(ROOT) --selftest
 
 # every dynamic module/name lookup of the exe-derived private manifest against the platform's own answers; skips (rc 0)
 # with a message when the private manifest is absent:  make -C tests/s4 dynsites-check [DYNSITES=<dynsites.tsv>]

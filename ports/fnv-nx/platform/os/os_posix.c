@@ -347,7 +347,13 @@ int os_thread_start(os_thread *t)
     }
     t->started = 1;                /* before the thread exists: it may be registered, and paused, at once */
     __atomic_add_fetch(&t->refs, 1, __ATOMIC_ACQ_REL);
+    /* Rule W2 (os_world.c): pthread_create blocks every signal, SIGUSR2 included, and under a sanitizer then waits for a
+     * runtime lock that the thread being created and the other threads' pthread_detach also take. A stop that met it
+     * would wait for an acknowledgement that cannot come until that lock is free, and the lock's next holder may already
+     * be parked. Under the world lock no stop is in progress, and none starts before pthread_create has returned. */
+    os_world_lock();
     int r = pthread_create(&t->th, &a, thread_entry, t);
+    os_world_unlock();
     pthread_attr_destroy(&a);
     if (r) {
         t->started = 0;

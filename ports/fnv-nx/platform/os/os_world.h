@@ -23,6 +23,13 @@ typedef struct os_wslot {
 void os_world_register(os_wslot *s, struct os_thread *t);
 void os_world_unregister(os_wslot *s);
 
+/* The world lock, for the backend. Rule W2 (os_world.c, "THE STOP WINDOW"): a backend runs under this lock every libc /
+ * runtime call that blocks the pause signal (os_posix.c: pthread_create, whose sanitizer and libc interceptors block all
+ * signals and then take a runtime-global lock). Such a call never overlaps a stop, so a stop never waits for a thread that
+ * cannot receive the pause. Nothing that waits for another thread's progress may run under it (no join, no wait). */
+void os_world_lock(void);
+void os_world_unlock(void);
+
 /* backend side */
 os_wslot *os_thread_wslot(os_thread *t);
 /* The pause primitive: a boolean per thread. os_raw_pause returns 0 only when the target is synchronously stopped (it

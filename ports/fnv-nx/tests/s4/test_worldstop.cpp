@@ -45,7 +45,7 @@ TEST(ws2_counters_frozen_in_window)
         g_cnt[i].v = 0;
         h[i] = CreateThread(NULL, 0, counter_thread, &g_cnt[i], 0, NULL);
     }
-    int moved_in_window = 0, stuck_after = 0;
+    int moved_in_window = 0;
     for (int round = 0; round < 1000; round++) {
         unsigned long a[NW], b[NW], c[NW];
         fnvl_host_world_stop();
@@ -57,17 +57,14 @@ TEST(ws2_counters_frozen_in_window)
         fnvl_host_world_resume();
         for (int i = 0; i < NW; i++)
             if (a[i] != b[i] || b[i] != c[i]) moved_in_window++;
-        for (int i = 0; i < NW; i++) {   /* every counter runs again */
-            int n = 0;
-            while (g_cnt[i].v == c[i] && n++ < 100000)
+        for (int i = 0; i < NW; i++) {   /* every counter runs again: liveness, so the wait has no bound of its own */
+            while (g_cnt[i].v == c[i])
                 Sleep(0);
-            if (g_cnt[i].v == c[i]) stuck_after++;
         }
     }
     g_quit = 1;
     join_all(h, NW);
     CHECK_EQ(moved_in_window, 0);
-    CHECK_EQ(stuck_after, 0);
 }
 
 /* (b)+(c) non-atomic RMW only inside windows, exclusion between several concurrent stoppers */

@@ -20,17 +20,41 @@
  *   "Stopped" is stated for registered threads. Before its registration and after its unregistration a thread executes
  *   only the backend's entry / exit code (no guest memory access, no game code).
  *
- * FAIRNESS. The world lock is granted in arrival order (world_lock below): a stopper repeating stop/resume cannot starve a
+ * FAIRNESS. The world lock is granted in arrival order (os_world_lock below): a stopper repeating stop/resume cannot starve a
  * thread that is starting, ending or suspending a thread.
  *
- * DEADLOCK-FREEDOM. The stopper takes the world lock first and only then pauses anyone, so no stopped thread holds it
- * (the lock has one holder: the registry lock and the world lock are the same lock). The pause primitive needs no
- * cooperation from its target (a signal handler on POSIX, the kernel on Horizon), so a target that holds or waits for any
- * other platform lock is stopped all the same, and the stopper, which makes no platform call before resume, never waits
- * for a lock a stopped thread holds. A second stopper blocks on the world lock (it may be stopped meanwhile, which is
- * harmless) and stops the world after the first resume. The world lock is held between stop and resume only, and the
- * window contains no call into the game (obligation above), so it is never held across a game call; it is an os_lock so
- * that the host test backend counts it and would see a violation (tests/s4 nlk_*).
+ * THE STOP WINDOW (what may run between stop and resume). Two rules, and the assumptions they stand on.
+ *   W1 (stopper). From the return of fnvl_host_world_stop to fnvl_host_world_resume the stopper runs only the caller's
+ *       window (plain loads, stores, atomics, barriers, spins: no allocation, no libc, no platform call, no thread
+ *       creation, no game code). Inside fnvl_host_world_stop / _resume it runs only: the arrival-order gate below (atomics
+ *       and os_yield), the world lock g_world (taken only by the ticket holder, so uncontended and never held by a parked
+ *       thread), and the backend's os_raw_pause / os_raw_resume (pthread_kill, atomics, futex wait on the target's own
+ *       state word). Nothing there waits for a thread's progress except that acknowledgement.
+ *   W2 (registered threads). A registered thread has the pause signal blocked only while it holds the world lock; every
+ *       libc or runtime call that blocks signals internally (pthread_create: glibc and the sanitizer runtimes block all
+ *       signals around thread creation) is made by the backend under os_world_lock. Everywhere else the pause signal is
+ *       unblocked, so the pause primitive reaches its target at once: its handler uses only atomics, a futex and errno
+ *       (async-signal-safe) and takes no lock. A thread that is inside such a call is therefore never a stop target,
+ *       because the stopper cannot hold the world lock at the same time.
+ *   Hence the acknowledgement of every target arrives without any other thread's cooperation: a thread is either
+ *   signal-unblocked with a lock-free handler (it acks at once), or it holds the world lock and is not a target. A thread
+ *   that waits for the world lock waits with the signal unblocked, so it is a target and acks. The calls made under the
+ *   world lock (pthread_create) wait only for runtime locks whose holders are never parked (A2). A second stopper blocks
+ *   on the ticket gate and runs after the first resume. The world lock is an os_lock so that the host test backend counts
+ *   it and sees a violation (tests/s4 nlk_*).
+ *   Why the rule is needed (observed, ASan + UBSan, tests/s4 ws2_*, hang 1 of ~4 runs): ASan's pthread_create takes a
+ *   runtime mutex with all signals blocked; the child's asan_thread_start and other threads' pthread_detach take the same
+ *   mutex. The mutex hands its wake token to one waiter; a waiter already parked in the pause handler held it, the
+ *   creator (signal blocked, registered, a stop target) could not acknowledge, and the stopper waited for it for good.
+ *   ASSUMPTIONS. A1: no registered thread blocks signals except under the world lock (no sigprocmask / pthread_sigmask,
+ *   no fork / system / popen / posix_spawn in the platform; pthread_create only in os_thread_start). Checked statically by
+ *   platform/manifest/check_worldstop.py (make -C tests/s4 worldstop-check) over platform/ and toolchain/guest/. A2: pthread_create under the world lock waits only for runtime locks (malloc,
+ *   the sanitizer thread registry) whose holders run with the signal unblocked or hold the world lock themselves, hence
+ *   are never parked while holding such a lock; a new thread runs nothing that needs the world lock before it is
+ *   registered, and registration waits on the ticket gate with the signal unblocked.
+ *   A3: libc and sanitizer calls made inside a signal handler are limited to the handler's own (atomics, futex, errno);
+ *   a thread interrupted inside any libc lock is parked there and no stopper-window code takes that lock (W1).
+ *   The Horizon and guest backends pause with svcSetThreadActivity (the kernel, no signal): W2 holds there vacuously.
  *
  * COMBINATION WITH SuspendThread. The backend primitive is boolean. os_thread_suspend / os_thread_resume (the user
  * reason) also run under the world lock, so a user operation never interleaves with a stop; stop pauses exactly the
@@ -48,14 +72,14 @@ static os_lock_t g_world;
  * ticket holder takes g_world, so the lock itself is never contended. */
 static volatile uint32_t g_tkt_next, g_tkt_serve;
 static os_wslot *g_head;
-static void world_lock(void)
+void os_world_lock(void)
 {
     uint32_t my = __atomic_fetch_add(&g_tkt_next, 1, __ATOMIC_RELAXED);
     while (__atomic_load_n(&g_tkt_serve, __ATOMIC_ACQUIRE) != my)
         os_yield();
     os_lock(&g_world);
 }
-static void world_unlock(void)
+void os_world_unlock(void)
 {
     os_unlock(&g_world);
     __atomic_store_n(&g_tkt_serve, __atomic_load_n(&g_tkt_serve, __ATOMIC_RELAXED) + 1, __ATOMIC_RELEASE);
@@ -64,7 +88,7 @@ static __thread os_wslot *g_self;
 
 void os_world_register(os_wslot *s, os_thread *t)
 {
-    world_lock();
+    os_world_lock();
     s->t = t;
     s->prev = NULL;
     s->next = g_head;
@@ -73,12 +97,12 @@ void os_world_register(os_wslot *s, os_thread *t)
     g_head = s;
     s->linked = 1;
     g_self = s;
-    world_unlock();
+    os_world_unlock();
 }
 
 void os_world_unregister(os_wslot *s)
 {
-    world_lock();
+    os_world_lock();
     if (s->linked) {
         if (s->prev)
             s->prev->next = s->next;
@@ -91,7 +115,7 @@ void os_world_unregister(os_wslot *s)
     s->dead = 1;
     if (g_self == s)
         g_self = NULL;
-    world_unlock();
+    os_world_unlock();
 }
 
 int os_thread_suspend(os_thread *t)
@@ -100,12 +124,12 @@ int os_thread_suspend(os_thread *t)
         return -1;
     os_wslot *s = os_thread_wslot(t);
     int r = -1;
-    world_lock();
+    os_world_lock();
     if (!s->user && !s->dead && os_raw_pause(t) == 0) {
         s->user = 1;
         r = 0;
     }
-    world_unlock();
+    os_world_unlock();
     return r;
 }
 
@@ -115,19 +139,19 @@ int os_thread_resume(os_thread *t)
         return -1;
     os_wslot *s = os_thread_wslot(t);
     int r = -1;
-    world_lock();
+    os_world_lock();
     if (s->user) {
         s->user = 0;
         os_raw_resume(t);
         r = 0;
     }
-    world_unlock();
+    os_world_unlock();
     return r;
 }
 
 void fnvl_host_world_stop(void)
 {
-    world_lock();
+    os_world_lock();
     for (os_wslot *s = g_head; s; s = s->next) {
         if (s == g_self || s->user)
             continue;
@@ -143,7 +167,7 @@ void fnvl_host_world_resume(void)
             continue;
         os_raw_resume(s->t);
     }
-    world_unlock();
+    os_world_unlock();
 }
 
 /* the process's first thread: before the clock (FNVNX_INIT_CLOCK 101) and every game static */

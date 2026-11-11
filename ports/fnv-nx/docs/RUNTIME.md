@@ -163,6 +163,16 @@ Not here: d3d9, d3dx9_38 and binkw32 (S6), dinput8, dsound, xinput1_3 and vorbis
   running thread works on Horizon (`svcSetThreadActivity`) and is a logged no-op on the host. Win32 priorities map
   to Horizon 0x2C - p (clamped 0x18..0x3B); ideal processor/affinity map to cores 0-2. Default stack 1 MiB, never
   below 256 KiB. `RaiseException(0x406D1388)` (SetThreadName) names the thread and returns; any other code is fatal.
+* **World stop** (`fnvl_host_world_stop` / `_resume`, platform/os/os_world.c): one registry of every thread, one
+  world lock granted in arrival order. Window rules (full text and assumptions at the top of os_world.c): **W1** between
+  stop and resume the stopper runs only the caller's window (loads, stores, atomics, spins: no allocation, libc,
+  platform call, thread creation or game code) plus the gate, the uncontended world lock and `os_raw_pause/resume`;
+  **W2** a registered thread has the POSIX pause signal (SIGUSR2) blocked only while it holds the world lock, so
+  `pthread_create` (which blocks all signals, and under ASan/UBSan waits for a runtime mutex that other threads take)
+  runs under `os_world_lock` and never overlaps a stop. Parked threads run only the signal handler (atomics, futex,
+  errno). Assumption A1, no `sigprocmask`/`pthread_sigmask`/`fork`/`system`/`popen`/`posix_spawn` in the platform and
+  `pthread_create` only in `os_thread_start`, is checked by `platform/manifest/check_worldstop.py` (`make -C tests/s4 worldstop-check`). Horizon and guest backends
+  pause with `svcSetThreadActivity` (kernel, no signal), so the blocked-signal class does not exist there.
 * **TLS**: 1088 `TlsAlloc` slots. The image's implicit TLS (`__declspec(thread)` data of FalloutNV.exe, reached as
   `((char**)__readfsdword(0x2c))[_tls_index] + off` in 15 places) gets a per-thread copy of the template the loader
   passes to `fnvnx_tls_set_template`. The loader stores 0 in the image's `_tls_index` (`fnvnx_image_tls_index_reset`, called by toolchain/game/boot.cpp: FalloutNV.exe holds 0xFFBF8C85 there on disk).
