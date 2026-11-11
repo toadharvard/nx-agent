@@ -76,11 +76,69 @@ def rcp_form(b):
     return b[i + 1], i == 1, (m >> 3) & 7, (m & 7) if m >> 6 == 3 else None
 
 
+_SSE = []
+SSE_OPS = {(b'', 0x58): ('addps', 0), (b'', 0x5c): ('subps', 1), (b'', 0x59): ('mulps', 2), (b'', 0x5e): ('divps', 3),
+           (b'\xf3', 0x58): ('addss', 4), (b'\xf3', 0x5c): ('subss', 5), (b'\xf3', 0x59): ('mulss', 6), (b'\xf3', 0x5e): ('divss', 7),
+           (b'\xf2', 0x7c): ('haddps', 8), (b'\xf2', 0x7d): ('hsubps', 9), (b'\xf2', 0xd0): ('addsubps', 10)}
+
+
+def sse_host():
+    """the REAL host CPU executing the single-precision SSE arithmetic instruction itself (xmm0 = first operand, xmm1 = second, result in xmm0).
+    The Unicorn oracle (QEMU softfloat) returns, when BOTH operands of a lane are NaN, the NaN picked by significand / sign instead of the first operand
+    quieted, which is what x86 SSE does (SDM vol. 1 table 4-7); evidence: a 15 x 15 operand matrix (SNaN / QNaN of both signs and payloads, numbers, inf) run on this host for add/sub/mul/div ss equals the
+    first-operand rule in all 900 cases, and Unicorn differs for ps/ss (not pd/sd, min/max, sqrt, cvt) whenever both operands are NaN. So the oracle's result lanes
+    that have a NaN operand are replaced by the host's; everything downstream is compared bit for bit."""
+    if not _SSE:
+        import ctypes, subprocess, tempfile
+        names = sorted(SSE_OPS.values(), key=lambda t: t[1])
+        src = '#include <stdint.h>\n' + ''.join(
+            'static void f%d(const uint32_t*a,const uint32_t*b,uint32_t*r){ __asm__ volatile("movups (%%1),%%%%xmm0\\n movups (%%2),%%%%xmm1\\n %s %%%%xmm1,%%%%xmm0\\n movups %%%%xmm0,(%%0)"::"r"(r),"r"(a),"r"(b):"memory","xmm0","xmm1"); }\n' % (i, n)
+            for n, i in names)
+        src += 'void fnvl_ssehost(int op,const uint32_t*a,const uint32_t*b,uint32_t*r){ switch(op){' + ''.join('case %d: f%d(a,b,r); break;' % (i, i) for n, i in names) + '} }\n'
+        so = os.path.join(tempfile.gettempdir(), 'fnvl_ssehost_%d.so' % os.getuid()); c = so + '.%d.c' % os.getpid()
+        open(c, 'w').write(src); subprocess.check_call(['gcc', '-O1', '-shared', '-fPIC', c, '-o', so + '.%d' % os.getpid()]); os.remove(c); os.replace(so + '.%d' % os.getpid(), so)
+        lib = ctypes.CDLL(so); _SSE.append(lib.fnvl_ssehost)
+    return _SSE[0]
+
+
+def pfx_split(b):
+    """-> (mandatory prefix bytes, rest) of an instruction byte string: segment / address-size prefixes dropped, 66 / f2 / f3 kept (last wins)"""
+    i, p = 0, b''
+    while b[i] in (0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65, 0x66, 0x67, 0xf2, 0xf3):
+        if b[i] in (0x66, 0xf2, 0xf3): p = bytes([b[i]])
+        i += 1
+    return p, b[i:]
+
+
+def sse_form(b):
+    """-> (op index, dest xmm, source xmm or None for memory) for addps/subps/mulps/divps, the ss forms, haddps/hsubps/addsubps (reg or mem source)"""
+    p, r = pfx_split(b)
+    if r[0] != 0x0f or (p, r[1]) not in SSE_OPS: return None
+    m = r[2]; return SSE_OPS[(p, r[1])][1], (m >> 3) & 7, (m & 7) if m >> 6 == 3 else None
+
+
+def fld_form(b):
+    """-> 4 / 8 for fld m32 (d9 /0) / fld m64 (dd /0) with a memory operand"""
+    _, r = pfx_split(b)
+    if r[0] in (0xd9, 0xdd) and r[1] < 0xc0 and (r[1] >> 3) & 7 == 0: return 4 if r[0] == 0xd9 else 8
+
+
+def isnan32(x): return (x & 0x7f800000) == 0x7f800000 and x & 0x7fffff != 0
+
+
+def sse_lanes(op, a, b):
+    """lanes (of 4 or 1) of the result whose operands include a NaN: ops 0-3 / 10 per lane, 4-7 lane 0 only, hadd / hsub lane k from a / b pairs"""
+    w = lambda x, i: (x >> (32 * i)) & 0xffffffff
+    if op in (4, 5, 6, 7): return [0] if isnan32(w(a, 0)) or isnan32(w(b, 0)) else []
+    if op in (8, 9): pr = [(w(a, 0), w(a, 1)), (w(a, 2), w(a, 3)), (w(b, 0), w(b, 1)), (w(b, 2), w(b, 3))]; return [k for k in range(4) if isnan32(pr[k][0]) or isnan32(pr[k][1])]
+    return [k for k in range(4) if isnan32(w(a, k)) or isnan32(w(b, k))]
+
+
 class X86(T.World):
     def run(s, root, ents, st, budget, sticky=None):
         """sticky: the sticky bits the lifted run delivered to its flag-reading instructions, in order; the oracle substitutes them (same ordinal) into the FSW it delivers"""
         s.sticky, s.pend, s.fsw = sticky, None, []
-        s.rp = None
+        s.rp = s.fx = None
         uc = Uc(UC_ARCH_X86, UC_MODE_32); s.init_world(uc, True); s.reset(st['wk']); s.ents, s.trace, s.n = ents, [], 0
         uc.hook_add(UC_HOOK_MEM_WRITE, lambda uc, ac, a, n, v, ud: s.writes.add((a & 0xffffffff, n)))
         uc.hook_add(UC_HOOK_CODE, s.code); uc.hook_add(UC_HOOK_MEM_WRITE, s.wr_fsw); uc.hook_add(UC_HOOK_MEM_READ, s.rd_rcp)
@@ -103,6 +161,7 @@ class X86(T.World):
 
     def rd_rcp(s, uc, ac, a, n, v, ud):
         if s.rp is not None and s.rp[4] is None: s.rp[4] = a          # the memory operand of the rcp/rsqrt instruction being executed
+        if s.fx is not None and s.fx[-1] is None: s.fx[-1] = a        # ... of the SSE arithmetic / fld instruction being executed (the first read it makes)
 
     def code(s, uc, a, size, ud):
         s.n += 1
@@ -112,6 +171,23 @@ class X86(T.World):
             r = uc.reg_read(UC_X86_REG_XMM0 + d)
             for k in range(1 if scalar else 4): r = (r & ~(0xffffffff << (32 * k))) | (f((x >> (32 * k)) & 0xffffffff) << (32 * k))
             uc.reg_write(UC_X86_REG_XMM0 + d, r)
+        if s.fx is not None:        # the previous instruction was an SSE single-precision arithmetic op or fld m32/m64: the real CPU's NaN results replace the oracle's
+            fx, s.fx = s.fx, None
+            if fx[0] == 'sse':
+                _, op, d, xa, xb, ma = fx
+                if xb is None: xb = int.from_bytes(bytes(uc.mem_read(ma, 4 if op in (4, 5, 6, 7) else 16)), 'little')
+                lanes = sse_lanes(op, xa, xb)
+                if lanes:
+                    import ctypes
+                    A, B, R = (ctypes.c_uint32 * 4)(*[(xa >> (32 * k)) & 0xffffffff for k in range(4)]), (ctypes.c_uint32 * 4)(*[(xb >> (32 * k)) & 0xffffffff for k in range(4)]), (ctypes.c_uint32 * 4)()
+                    sse_host()(op, A, B, R); r = uc.reg_read(UC_X86_REG_XMM0 + d)
+                    for k in lanes: r = (r & ~(0xffffffff << (32 * k))) | (R[k] << (32 * k))
+                    uc.reg_write(UC_X86_REG_XMM0 + d, r)
+            else:       # fld m32 / m64 of a signalling NaN: the real CPU's ST0 is the quiet NaN (Unicorn keeps the signalling one)
+                _, size, ma = fx; raw = int.from_bytes(bytes(uc.mem_read(ma, size)), 'little')
+                snan = (raw & 0x7f800000) == 0x7f800000 and raw & 0x7fffff and not raw & 0x400000 if size == 4 else (raw >> 52 & 0x7ff) == 0x7ff and raw & (1 << 52) - 1 and not raw & 1 << 51
+                if snan:
+                    reg = UC_X86_REG_FP0 + ((uc.reg_read(UC_X86_REG_FPSW) >> 11) & 7); mant, exp = uc.reg_read(reg); uc.reg_write(reg, (mant | 1 << 62, exp))
         if s.pend is not None:      # the previous instruction was a flag reader: its result is now in EAX / memory
             if s.pend == 'ax' or s.pend[0] == 'm' and s.pend != 'm':
                 if s.pend == 'ax': v = uc.reg_read(UC_X86_REG_EAX) & 0xffff
@@ -124,6 +200,9 @@ class X86(T.World):
             s.pend = None
         if a in s.ents: s.trace.append((a, uc.reg_read(UC_X86_REG_ESP)))
         s.pend = fsw_form(bytes(uc.mem_read(a, 8)))
+        raw = bytes(uc.mem_read(a, 8)); sf = sse_form(raw); ff = fld_form(raw)
+        if sf: s.fx = ['sse', sf[0], sf[1], uc.reg_read(UC_X86_REG_XMM0 + sf[1]), uc.reg_read(UC_X86_REG_XMM0 + sf[2]) if sf[2] is not None else None, None if sf[2] is None else 0]
+        elif ff: s.fx = ['fld', ff, None]
         rf = rcp_form(bytes(uc.mem_read(a, 8)))
         if rf: s.rp = [rf[0], rf[1], rf[2], uc.reg_read(UC_X86_REG_XMM0 + rf[3]) if rf[3] is not None else None, None if rf[3] is None else 0]
 

@@ -584,3 +584,17 @@ def nop_gap(b):
             n += 1
         n += 1 if mod == 1 else 4 if mod == 2 or (mod == 0 and (rm == 5 or (rm == 4 and (b[i + 3] & 7) == 5))) else 0
     return NopIns(b[:n], pfx, b[i + 1], m)
+
+
+# ---- LOCK validity (for core.lift2, which strips the `lock ` word) ---------------------------------------------------------------------------------------------------
+LOCKABLE = ('add', 'adc', 'and', 'btc', 'btr', 'bts', 'cmpxchg', 'cmpxchg8b', 'dec', 'inc', 'neg', 'not', 'or', 'sbb', 'sub', 'xor', 'xadd', 'xchg')
+
+
+def lock_ok(ins, m):
+    """SDM Vol 2 "LOCK": the prefix is valid only on the instructions of LOCKABLE whose destination operand is memory (XCHG: either operand; it locks implicitly); any other LOCK is #UD. m is the
+    mnemonic without the `lock ` word. A #UD Windows reports as STATUS_INVALID_LOCK_SEQUENCE 0xC000001E when F0 is among the first 4 bytes at Eip (KiTrap06Handler), else STATUS_ILLEGAL_INSTRUCTION."""
+    if m not in LOCKABLE:
+        return False
+    if m == 'xchg':
+        return any(o.type == X.X86_OP_MEM for o in ins.operands)
+    return bool(ins.operands) and ins.operands[0].type == X.X86_OP_MEM

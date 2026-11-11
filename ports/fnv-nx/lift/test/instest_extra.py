@@ -22,7 +22,7 @@ rcl|d0d0 d0d1 d1d0 d1d2 d2d0 d3d0 d3d2 66d1d0 66d3d0 c0d005 c0d009 c1d005 c1d01f
 rcr|d0d8 d0d9 d1d8 d1da d2d8 d3d8 d3da 66d1d8 66d3d8 c0d805 c0d809 c1d805 c1d81f 66c1d80f 66c1d811 d15804 d35804 d25804 d05804
 shld|660fa4c105 660fa4c110 660fa4c111 660fa5c1 660fa4410401 660fa54104
 shrd|660facc105 660fadc1 660facc110 660facc111 660fac410401 660fad4104
-push|6650 66ff30 666a01 66680112 06 0e 16 1e 0fa0 0fa8
+push|6650 66ff30 666a01 66680112 06 0e 16 1e 0fa0 0fa8 6606 660fa0 661e
 pop|6658 668f00 668f4004
 mov|8cd8 668cd8 8c00 8c4004 8c5004 8cc0 668cd0 8ce0 8ce8 8cc8
 bt|0fa301 0fa34104 660fa301 660fa34104 0fa30c24
@@ -38,8 +38,16 @@ clc|f8
 stc|f9
 salc|d6
 cwd|6699
-xlatb|d7
+xlatb|d7 67d7
 pushaw|6660
+leave|c9 66c9
+movsb|67a4 f367a4
+stosb|67aa f367aa
+stosd|67ab f367ab
+lodsb|67ac
+scasb|67ae f267ae
+cmpsb|67a6 f367a6
+movsd|67a5
 popaw|6661
 pushal|60
 popal|61
@@ -58,7 +66,7 @@ daa|27
 das|2f
 aam|d40a d405 d4ff
 aad|d50a d505 d500
-enter|c8100000 c8100001 c8100003 c8000002
+enter|c8100000 c8100001 c8100003 c8000002 66c8100000 66c8100001 66c8100003 66c8000002
 loop|e210 e2fa
 loope|e110 e1fa
 loopne|e010 e0fa
@@ -84,8 +92,6 @@ mfence|0faef0
 lfence|0faee8
 sfence|0faef8
 clflush|0fae38 0fae7804
-tzcnt|f30fbcc1 f30fbc01 66f30fbcc1 66f30fbc01
-lzcnt|f30fbdc1 f30fbd01 66f30fbdc1 66f30fbd01
 '''
 SPEC = []
 for line in ENC.strip().split('\n'):
@@ -162,8 +168,18 @@ def nopgap():
     for hx, n in NOPGAP:
         x = fnvlift.f_sys.nop_gap(bytes.fromhex(hx) + b'\0' * 8); got = x.size if x else None; ok = got == n; bad += not ok; print('nop_gap %-18s %s %s' % (hx, 'ok' if ok else 'FAIL', got))
     return bad
+LOCKS = [('f00104', 'add', True), ('f0ff08', 'dec', True), ('f0870a', 'xchg', True), ('f00fb10a', 'cmpxchg', True), ('f00fc70a', 'cmpxchg8b', True), ('f00fab08', 'bts', True), ('f00f1f00', 'nop', False),
+         ('f08b0d3cea1d01', 'mov', False), ('f0f7d0', 'not', False), ('f0ff4008', 'inc', True), ('f00108', 'add', True), ('f00fc108', 'xadd', True)]
+def lockcheck():
+    bad = 0
+    for hx, m, want in LOCKS:
+        g = list(fnvlift.core.md.disasm(bytes.fromhex(hx) + b'\0' * 8, A0, 1))
+        if not g: print('lock_ok %-16s undecodable (the lifter makes it #UD)' % hx); bad += want; continue
+        mm = g[0].mnemonic.split(' ', 1)[-1] if g[0].mnemonic.startswith('lock ') else g[0].mnemonic; got = fnvlift.f_sys.lock_ok(g[0], mm); ok = got == want and mm == m; bad += not ok
+        print('lock_ok %-16s %-10s %s' % (hx, mm, 'ok' if ok else 'FAIL got %s want %s' % (got, want)))
+    return bad
 def class_tables(img):
-    bad = nopgap()
+    bad = nopgap() + lockcheck()
     for hx, what, subs in CLASS_EXPECT:
         raw = bytes.fromhex(hx); a = A0; fake[a] = raw + b'\x90' * 8
         try: txt = fnvlift.lift(img, a, len(raw), strict=False)[0]
