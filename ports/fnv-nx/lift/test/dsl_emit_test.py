@@ -3,9 +3,9 @@
 decoded with zeroed immediate / displacement bytes (plus, for branches, a second copy with a non-zero relative target that lies outside the function),
 emitted as a one-instruction function and compiled (-fsyntax-only, the flags of test/instest.py).  Prints `shapes N emitted N compiled N`, and
 `undef-assigned P`: the number of (mnemonic, flag) pairs where a form declares the flag undefined (no assignment is emitted) and the hand handler
-assigns it.  Input: the shape census pickle (exe-derived: /home/user/l3work/census/exe_shapes.pkl, made by census/shapes.py).
-    dsl_emit_test.py [--pickle P] [--jobs 2] [--work DIR] [--pairs]"""
-import argparse, multiprocessing as mp, os, pickle, re, subprocess, sys, collections
+assigns it.  Input: the shape census table shapes.tsv of the exe (exe-derived, first column = shape key; '#' lines ignored: /home/user/l3work/publish-shapes/FalloutNV/shapes.tsv, made by proof/census.py).
+    dsl_emit_test.py [--shapes P] [--jobs 2] [--work DIR] [--pairs]"""
+import argparse, multiprocessing as mp, os, re, subprocess, sys, collections
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE)); sys.path.insert(0, HERE)
 import capstone
@@ -18,7 +18,7 @@ BASE, STEP = 0x400000, 0x100
 
 
 def shapes(pk):
-    cnt = pickle.load(open(pk, 'rb'))[0]
+    cnt = {l.split()[0] for l in open(pk) if l.strip() and not l.startswith('#')}
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
     for s in sorted(cnt):
         raw = bytes.fromhex(s.split('/')[0]); i = 0
@@ -57,7 +57,7 @@ def collect(pk):
             if vi: cx.uent = set()                                # the outside-target copy: not an entry, so the transfer goes to the dispatcher
             try:
                 if f_dsl.emit_form(cx, ins) is core.SKIP: raise core.Unsupported('SKIP')
-            except core.Unsupported as e:                         # the emitter's stated reason (a build error of the forms is not caught: it propagates)
+            except (core.Unsupported, AssertionError) as e:       # the emitter's stated reason, or the builder's precondition (shapeprove.py class `no-form`); any other build error propagates
                 bad.append((s, repr(e)[:100])); continue
             out.append((a, s + ('+' if vi else ''), func(cx, a)))
             F = f_dsl.forms.build(ins, a)
@@ -81,9 +81,9 @@ def compile_tu(arg):
 
 def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
-    A('--pickle', default='/home/user/l3work/census/exe_shapes.pkl'); A('--jobs', type=int, default=2); A('--work', default='/home/user/l3work/dsl_emit_test'); A('--pairs', action='store_true')
+    A('--shapes', default='/home/user/l3work/publish-shapes/FalloutNV/shapes.tsv'); A('--jobs', type=int, default=2); A('--work', default='/home/user/l3work/dsl_emit_test'); A('--pairs', action='store_true')
     a = ap.parse_args(); os.makedirs(a.work, exist_ok=True)
-    out, bad, undef = collect(a.pickle)
+    out, bad, undef = collect(a.shapes)
     chunks = [out[i:i + 300] for i in range(0, len(out), 300)]
     with mp.Pool(a.jobs) as p: res = p.map(compile_tu, [(k, fnvlift.PRELUDE, c, a.work) for k, c in enumerate(chunks)])
     ok = sum(r[0] for r in res); fails = [f for r in res for f in r[1]]
