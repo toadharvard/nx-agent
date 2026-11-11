@@ -1,0 +1,8 @@
+{
+ "format": "fnvnx-registry-in/1",
+ "external": "manifest",
+ "sites": "regsites.tsv",
+ "declared": "manifest/declared_registry.tsv",
+ "seed": "win32/registry_seed.gen.inc",
+ "seed_unit": "win32/registry_seed.cpp"
+}
