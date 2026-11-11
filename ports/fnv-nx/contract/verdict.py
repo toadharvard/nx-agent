@@ -2,10 +2,11 @@
 """verdict - the L1 verdict: every whole-binary gate on one link, one line each, green or red (owner rule:
 a merge into the clean branch needs a green verdict; budget 5 minutes, enforced by the L4 verdict).
 
-    verdict.py --exe FalloutNV.exe --units units.json --msvc <pristine objects> --link <link dir> --universe <L3 universe.tsv>
-                [--nm <aarch64 nm> --readelf <aarch64 readelf>: both required] --work <dir>
+    verdict.py --exe FalloutNV.exe --units units.json --msvc <pristine objects> --link <link dir> --ldout <ld.py output dir>
+                --universe <L3 universe.tsv> [--nm <aarch64 nm> --readelf <aarch64 readelf>: both required] --work <dir>
 
-<link dir> holds fixed/*.o (the game objects are src_*.o), out/addrmap.tsv, out/aliases.ld, guest/fnvnx.elf.
+<link dir> holds fixed/*.o (the game objects are src_*.o), out/addrmap.tsv, out/aliases.ld.
+<ld.py output dir> holds guest.elf and inputs.rsp of the link stage (link/ld.py); the pcrel stage is link/gate_pcrel.py on them.
 Stages run in order; each is a pure function of its listed inputs (no fuzz, boot or scenario output is read):
   exefacts  N1  objfacts  gates (data, call, vcall, xc)  xunit  rtti  pcrel  bodysel
 Each stage also writes its gate file to $GATE_OUT when that is set (gatefile.py): n1, n2_data, n2_call, n2_vcall, xc, xunit,
@@ -22,7 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 def main():
     ap = argparse.ArgumentParser()
-    for k in ('exe', 'units', 'msvc', 'link', 'universe', 'nm', 'readelf', 'work'):
+    for k in ('exe', 'units', 'msvc', 'link', 'ldout', 'universe', 'nm', 'readelf', 'work'):
         ap.add_argument('--' + k, required=True)
     a = ap.parse_args()
     w = a.work
@@ -40,8 +41,8 @@ def main():
                      '--link', a.link, '--out', w + '/gates'), False),
         ('xunit', py('gate_xunit.py', '--objects', w + '/game', '--nm', a.nm), True),
         ('rtti', py('gate_rtti.py', '--objects', w + '/game', '--readelf', a.readelf), True),
-        ('pcrel', py('gate_pcrel.py', '--elf', os.path.join(a.link, 'guest', 'fnvnx.elf'), '--objects', os.path.join(a.link, 'fixed'),
-                      '--work', w + '/pcrel', '--readelf', a.readelf, '--nm', a.nm), True),
+        ('pcrel', [sys.executable, os.path.join(HERE, '..', 'link', 'gate_pcrel.py'), '--elf', os.path.join(a.ldout, 'guest.elf'),
+                   '--inputs', os.path.join(a.ldout, 'inputs.rsp')], True),
         ('bodysel', py('bodysel.py', '--universe', a.universe, '--n1', w + '/n1.json', '--gates', w + '/gates',
                        '--out', w + '/bodysel.tsv'), False),
     ]

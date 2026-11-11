@@ -18,8 +18,6 @@
 
 static int64_t hs(uint64_t v) { return (int64_t)v; }
 
-void os_init(void) {}
-
 void os_debug_print(const char *s) {
     size_t n = strlen(s);
     fnvnx_hcall2(fnvnx_host->output_debug_string, FNVNX_ADDR(s), n);
@@ -31,7 +29,7 @@ void os_fatal(const char *msg) {
     os_debug_print("fnvnx fatal:");
     os_debug_print(msg);
     fnvnx_hcall1(fnvnx_host->exit, 0xFA);
-    __builtin_unreachable();
+    for (;;) {}   /* the host's exit does not return */
 }
 
 void os_exit_process(int code) {

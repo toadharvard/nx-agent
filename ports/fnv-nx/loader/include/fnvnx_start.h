@@ -82,6 +82,7 @@ typedef struct fnvnx_loaded {
     uint32_t tls_cb[FNVNX_START_MAX_TLS_CALLBACKS];
     unsigned ntls_cb;
     uint32_t imports_bound;
+    uint8_t no_thread_calls;       /* DisableThreadLibraryCalls was called: no thread attach/detach notification (TLS callbacks included) */
     uint32_t entry_va;             /* 0: a module without an entry point */
     uint32_t relocs_applied;
 } fnvnx_loaded;
@@ -140,11 +141,16 @@ int fnvnx_module_load(fnvnx_proc *p, uint32_t teb, uint32_t esp, const char *nam
  * Windows order: for each module its TLS callbacks (hModule, reason, NULL) and then DllMain(hModule, reason, 0) (an
  * image without an entry point has none; the exe has TLS callbacks only). Attach (reason 2): the ready modules in initialisation order,
  * then the exe. Detach (reason 3): the exe, then the modules in reverse initialisation order. The result of a DllMain for
- * these reasons is ignored (Windows ignores it); DisableThreadLibraryCalls is the platform's business and is not
- * modelled. Process detach (reason 0, on the main thread, lpvReserved = `reserved`): the same order as detach. */
+ * these reasons is ignored (Windows ignores it). A module for which fnvnx_modules_disable_thread_calls was called is
+ * skipped by thread attach and detach (its TLS callbacks too: the Windows loader skips both); the exe is never skipped.
+ * Process detach (reason 0, lpvReserved = `reserved`): the same order as detach, on the calling guest thread (`teb`, and `esp`
+ * its current guest stack pointer, like fnvnx_module_load). */
 void fnvnx_modules_thread_attach(const fnvnx_thread_block *b);
 void fnvnx_modules_thread_detach(const fnvnx_thread_block *b);
-void fnvnx_modules_process_detach(uint32_t reserved);
+void fnvnx_modules_process_detach(fnvnx_proc *p, uint32_t teb, uint32_t esp, uint32_t reserved);
+/* DisableThreadLibraryCalls(hModule = base): FNVNX_OK, or FNVNX_E_ARG when `base` is not the base of a mapped table module (the exe
+ * is not one). Acts on the process fnvnx_start_proc() returns. */
+int fnvnx_modules_disable_thread_calls(uint32_t base);
 
 /* The images of the process (exe = 0, then the ready modules in initialisation order) for GetModuleHandle / VirtualQuery. */
 typedef struct fnvnx_image_info {
@@ -161,7 +167,7 @@ int fnvnx_images_get(const fnvnx_proc *p, uint32_t i, fnvnx_image_info *out);   
 
 /* The process the boot glue (guest/boot.c) started: the section map the platform's VirtualQuery answers from, the
  * main thread's block. Defined by the glue; valid from the start of main, filled by a successful prepare. */
-const fnvnx_proc *fnvnx_start_proc(void);
+fnvnx_proc *fnvnx_start_proc(void);
 
 /* The reserved address set of the process: [FNVNX_START_RESERVED_LO, HI), the exe image and [base, base + size_of_image)
  * of EVERY row of the module table, mapped or not. 1 when [va, va+size) intersects it or leaves the 32-bit address

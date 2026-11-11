@@ -100,7 +100,9 @@ static uint32_t h_alloc_va(void *c, uint32_t size, unsigned prot) {
     g_next_va += size + 0x1000;
     return va;
 }
-static fnvnx_os g_os = {NULL, h_read, h_map, h_prot, h_alloc, h_free, h_log, h_alloc_va, h_free_va};
+static unsigned g_nreg; static uint32_t g_regbase[32], g_regsize[32]; static char g_regname[32][64];
+static void h_reg(void *c, const char *n, uint32_t b, uint32_t s) { (void)c; if (g_nreg < 32) { snprintf(g_regname[g_nreg], 64, "%s", n); g_regbase[g_nreg] = b; g_regsize[g_nreg] = s; } g_nreg++; }
+static fnvnx_os g_os = {NULL, h_read, h_map, h_prot, h_alloc, h_free, h_log, h_alloc_va, h_free_va, h_reg};
 
 static void plat_up(void) {
     g_res = (uint8_t *)mmap(NULL, WINDOW, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
@@ -140,7 +142,7 @@ static uint32_t resolve(void *c, const char *dll, const char *name, uint32_t ord
 /* ---- our lifter: records every call; a DllMain returns 1 unless its address is g_fail_eip ---- */
 typedef struct { uint32_t eip, esp, teb, w[4]; unsigned nlog; } call_rec;
 static call_rec g_calls[32]; static unsigned g_ncalls; static uint32_t g_fail_eip;
-const fnvnx_proc *fnvnx_start_proc(void) { return g_proc; }
+fnvnx_proc *fnvnx_start_proc(void) { return g_proc; }
 uint32_t fnvnx_lift_enter(uint32_t eip, uint32_t esp, uint32_t teb) {
     call_rec *r = &g_calls[g_ncalls % 32]; unsigned k;
     r->eip = eip; r->esp = esp; r->teb = teb; r->nlog = g_nlog;
@@ -324,6 +326,13 @@ static void good_world(void) {
               inf.map[1].prot == (FNVNX_PROT_R | FNVNX_PROT_X), "image info %u (%s base %08x nmap %u)", i, inf.name, (unsigned)inf.base, inf.nmap);
     }
     CHECK(fnvnx_images_get(p, 4, &inf) != 0, "image index out of range");
+    CHECK(g_nreg == 4, "register_image calls: %u", g_nreg);
+    for (i = 0; i < 4; i++) {   /* every image registered exactly once with its name, base and page rounded size */
+        unsigned j, hits = 0;
+        CHECK(fnvnx_images_get(p, i, &inf) == 0, "images_get %u", i);
+        for (j = 0; j < 4; j++) hits += !strcmp(g_regname[j], inf.name) && g_regbase[j] == inf.base && g_regsize[j] == inf.size_of_image;
+        CHECK(hits == 1, "register_image of image %u: %u hits", i, hits);
+    }
     /* thread attach / detach / process detach */
     CHECK(fnvnx_thread_block_create(p, 0x8000, &t2) == 0, "second thread block");
     check_tls_vector("second thread", p, &t2);
@@ -340,10 +349,31 @@ static void good_world(void) {
         check_calls("thread detach", p, first, w, 4, &t2, t2.stack_base);
     }
     first = g_ncalls;
-    fnvnx_modules_process_detach(0x77);
+    fnvnx_modules_process_detach(p, p->main.teb_va, p->main.stack_base, 0x77);
     {
         static const want_call w[] = {{1, "cb", 0, 0x77}, {4, "cb", 0, 0x77}, {4, "main", 0, 0x77}, {3, "main", 0, 0x77}};
         check_calls("process detach", p, first, w, 4, &p->main, p->main.stack_base);
+    }
+    /* DisableThreadLibraryCalls: module 4 drops out of thread attach/detach (its TLS callback too), not of process detach; the exe cannot be disabled */
+    CHECK(fnvnx_modules_disable_thread_calls(base_of(4)) == 0 && fnvnx_modules_disable_thread_calls(base_of(1)) != 0 &&
+          fnvnx_modules_disable_thread_calls(0x00010000u) != 0, "disable thread calls");
+    first = g_ncalls;
+    fnvnx_modules_thread_attach(&t2);
+    {
+        static const want_call w[] = {{3, "main", 2, 0}, {1, "cb", 2, 0}};
+        check_calls("thread attach, 4 disabled", p, first, w, 2, &t2, t2.stack_base);
+    }
+    first = g_ncalls;
+    fnvnx_modules_thread_detach(&t2);
+    {
+        static const want_call w[] = {{1, "cb", 3, 0}, {3, "main", 3, 0}};
+        check_calls("thread detach, 4 disabled", p, first, w, 2, &t2, t2.stack_base);
+    }
+    first = g_ncalls;
+    fnvnx_modules_process_detach(p, t2.teb_va, t2.stack_base, 0x78);
+    {
+        static const want_call w[] = {{1, "cb", 0, 0x78}, {4, "cb", 0, 0x78}, {4, "main", 0, 0x78}, {3, "main", 0, 0x78}};
+        check_calls("process detach, 4 disabled", p, first, w, 4, &t2, t2.stack_base);
     }
     CHECK(fnvnx_thread_block_free(p, &t2) == 0, "free second block");
 

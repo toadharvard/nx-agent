@@ -19,7 +19,7 @@ ROOT = os.path.join(HERE, '..', '..')
 FLAGS = ['-mabi=ilp32', '-march=armv8-a+crc+crypto', '-mtune=cortex-a57', '-fPIE', '-ftls-model=local-exec', '-O2']
 
 
-def run(dkp, out, tree):
+def run(dkp, out, tree, eh=False):
     env = dict(os.environ, DEVKITPRO=dkp, PATH=os.path.join(dkp, 'devkitA64', 'bin') + os.pathsep + os.environ['PATH'])
     shutil.rmtree(out, ignore_errors=True)
     os.makedirs(os.path.join(out, 'in'))
@@ -27,25 +27,26 @@ def run(dkp, out, tree):
     for f in ('crt0.o', 'libfnvnx-guest.a'):
         shutil.copy(os.path.join(out, 'rt', f), os.path.join(out, 'in', f))
     inc = ['-I', os.path.join(ROOT, 'toolchain', 'include')]
-    for src, o in (('reloc_edge_main.c', 'main.o'), ('host_fixture.c', 'host_fixture.o')):
-        subprocess.run(['aarch64-none-elf-gcc'] + FLAGS + inc + ['-c', os.path.join(HERE, src), '-o', os.path.join(out, 'in', o)], env=env, check=True)
+    for src, o in (('eh_main.cpp' if eh else 'reloc_edge_main.c', 'main.o'), ('host_fixture.c', 'host_fixture.o')):
+        cc = 'aarch64-none-elf-g++' if src.endswith('.cpp') else 'aarch64-none-elf-gcc'
+        subprocess.run([cc] + FLAGS + inc + ['-c', os.path.join(HERE, src), '-o', os.path.join(out, 'in', o)], env=env, check=True)
     where = lambda f: os.path.normpath(subprocess.run(['aarch64-none-elf-gcc', '-mabi=ilp32', '-fPIC', '-print-file-name=' + f], env=env, capture_output=True, text=True, check=True).stdout.strip())
     libdirs = []
-    for n in ('gcc', 'c', 'sysbase'):
+    for n in ('stdc++', 'm', 'gcc', 'c', 'sysbase'):
         d = os.path.dirname(where('lib%s.a' % n))
         if d not in libdirs:
             libdirs.append(d)
     cmd = [sys.executable, '-I', os.path.join(HERE, '..', 'ld.py'), '--ld', os.path.join(dkp, 'devkitA64', 'bin', 'aarch64-none-elf-ld'),
            '--ld-arg=-maarch64elf32', '--ld-arg=-EL', '--ld-arg=-X', '--script', os.path.join(HERE, '..', 'guest.ld'), '--in', os.path.join(out, 'in'),
-           '--out', os.path.join(out, 'ld')] + ['--lib-dir=' + d for d in libdirs] + ['--lib=' + n for n in ('gcc', 'c', 'sysbase')] + \
+           '--out', os.path.join(out, 'ld')] + ['--lib-dir=' + d for d in libdirs] + ['--lib=' + n for n in ('stdc++', 'm', 'gcc', 'c', 'sysbase')] + \
           ['--startfile=' + where(f) for f in ('crti.o', 'crtbegin.o')] + ['--endfile=' + where(f) for f in ('crtend.o', 'crtn.o')]
     r = subprocess.run(cmd, env=env, capture_output=True, text=True)
     if r.returncode:
         return 'ld.py failed: ' + (r.stdout + r.stderr).strip()[-600:]
     nso = os.path.join(out, 'guest.nso')
     subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'toolchain', 'tools', 'elf2nso.py'), '--no-compress', os.path.join(out, 'ld', 'guest.elf'), nso], check=True, capture_output=True)
-    r = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'tests', 's5', 'emu_guest.py'), nso, '--expect', 'reloc edge: past_end ok'], capture_output=True, text=True)
-    lines = [l.strip() for l in r.stdout.splitlines() if l.strip().startswith('reloc edge') or l.strip() in ('PASS', 'FAIL') or l.startswith('==')]
+    r = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'tests', 's5', 'emu_guest.py'), nso, '--expect', 'eh: ctor ok, throw ok, dtor order ok, std ok' if eh else 'reloc edge: past_end ok'], capture_output=True, text=True)
+    lines = [l.strip() for l in r.stdout.splitlines() if l.strip().startswith(('reloc edge', 'eh:')) or l.strip() in ('PASS', 'FAIL') or l.startswith('==')]
     return ' | '.join(lines) or r.stderr[-400:]
 
 
@@ -53,9 +54,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--dkp', required=True)
     ap.add_argument('--out', required=True)
+    ap.add_argument('--eh', action='store_true', help='also run the C++ exception / constructor test guest')
     ap.add_argument('--runtime-tree', help='a toolchain/ tree whose guest/runtime.c replaces the repository\'s')
     a = ap.parse_args()
     print('repository runtime: %s' % run(a.dkp, os.path.join(a.out, 'repo'), os.path.join(ROOT, 'toolchain')))
+    if a.eh:
+        print('exceptions:         %s' % run(a.dkp, os.path.join(a.out, 'eh'), os.path.join(ROOT, 'toolchain'), eh=True))
     if a.runtime_tree:
         print('patched runtime:    %s' % run(a.dkp, os.path.join(a.out, 'patched'), a.runtime_tree))
 

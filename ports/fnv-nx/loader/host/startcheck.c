@@ -92,7 +92,9 @@ static int h_free_va(void *c, uint32_t va, uint32_t size) {
     g_freed[g_nfreed].va = va; g_freed[g_nfreed++].size = size;
     return 0;
 }
-static fnvnx_os g_os = {NULL, h_read, h_map, h_prot, h_alloc, h_free, h_log, h_alloc_va, h_free_va};
+static unsigned g_nreg; static uint32_t g_regbase[32], g_regsize[32]; static char g_regname[32][64];
+static void h_reg(void *c, const char *n, uint32_t b, uint32_t s) { (void)c; if (g_nreg < 32) { snprintf(g_regname[g_nreg], 64, "%s", n); g_regbase[g_nreg] = b; g_regsize[g_nreg] = s; } g_nreg++; }
+static fnvnx_os g_os = {NULL, h_read, h_map, h_prot, h_alloc, h_free, h_log, h_alloc_va, h_free_va, h_reg};
 
 static void plat_up(const uint8_t *file, uint32_t len) {
     g_res = (uint8_t *)mmap(NULL, WINDOW, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
@@ -129,7 +131,7 @@ static uint32_t resolve(void *c, const char *dll, const char *name, uint32_t ord
 
 /* ---- our lifter ---- */
 typedef struct { uint32_t eip, esp, teb, w[4]; unsigned nlog; int in_stack; } call_rec;
-const fnvnx_proc *fnvnx_start_proc(void) { return g_proc; }
+fnvnx_proc *fnvnx_start_proc(void) { return g_proc; }
 static call_rec g_calls[8]; static unsigned g_ncalls;
 uint32_t fnvnx_lift_enter(uint32_t eip, uint32_t esp, uint32_t teb) {
     call_rec *r = &g_calls[g_ncalls++ % 8];

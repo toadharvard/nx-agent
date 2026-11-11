@@ -29,6 +29,14 @@ uint32_t __wrap_fnvnx_import_key(const char *dll, const char *name, uint32_t ord
 }
 #endif
 
+/* test fixtures of the two components this archive links against: the lifter's import table (here: no rows) and the platform's image record */
+static unsigned g_images;
+int fnvnx_lift_imports_init(void) { return 0; }
+void fnvnx_win32_register_image(const char *name, uint32_t base, uint32_t size) {
+    g_images++;
+    printf("e2e: image %s base %08x size %08x\n", name, (unsigned)base, (unsigned)size);
+}
+
 static uint32_t rd(uint32_t va) { return *(const uint32_t *)(uintptr_t)va; }
 
 uint32_t fnvnx_lift_enter(uint32_t eip, uint32_t esp, uint32_t teb) {

@@ -43,7 +43,7 @@ def main():
     where = lambda f: subprocess.run([gcc, '-mabi=ilp32', '-fPIC', '-print-file-name=' + f], env=env, capture_output=True, text=True, check=True).stdout.strip()
     start = [os.path.normpath(where(f)) for f in ('crti.o', 'crtbegin.o')]
     end = [os.path.normpath(where(f)) for f in ('crtend.o', 'crtn.o')]
-    libs = ['gcc', 'c', 'sysbase']
+    libs = ['stdc++', 'm', 'gcc', 'c', 'sysbase']
     libdirs = []
     for n in libs:
         d = os.path.dirname(os.path.normpath(where('lib%s.a' % n)))

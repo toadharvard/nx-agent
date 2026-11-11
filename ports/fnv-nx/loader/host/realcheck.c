@@ -13,7 +13,7 @@
 static uint8_t *g_res; static uint32_t g_next = 0x30000000u;
 static FILE *g_fp[1 + FNVNX_MAX_MODULES]; static const char *g_dir;
 static unsigned g_calls; static uint32_t g_order[64]; static fnvnx_proc *g_proc;
-const fnvnx_proc *fnvnx_start_proc(void) { return g_proc; }
+fnvnx_proc *fnvnx_start_proc(void) { return g_proc; }
 uint32_t fnvnx_lift_enter(uint32_t eip, uint32_t esp, uint32_t teb) {
     (void)esp; (void)teb;
     if (g_calls < 64) g_order[g_calls] = eip;
@@ -40,8 +40,10 @@ static uint32_t h_va(void *c, uint32_t s, unsigned p) { uint32_t v = g_next; (vo
 static int h_fva(void *c, uint32_t v, uint32_t s) { (void)c; (void)v; (void)s; return 0; }
 static uint32_t resolve(void *c, const char *d, const char *n, uint32_t o) { (void)c; (void)d; (void)n; return 0x100000u + 16u * (o & 0xff); }
 
+static unsigned g_nreg; static uint32_t g_regbase[32], g_regsize[32]; static char g_regname[32][64];
+static void h_reg(void *c, const char *n, uint32_t b, uint32_t s) { (void)c; if (g_nreg < 32) { snprintf(g_regname[g_nreg], 64, "%s", n); g_regbase[g_nreg] = b; g_regsize[g_nreg] = s; } g_nreg++; }
 int main(int argc, char **argv) {
-    static fnvnx_proc p; fnvnx_os os = {NULL, h_read, h_map, h_prot, h_alloc, h_free, h_log, h_va, h_fva}; fnvnx_start_cfg cfg; unsigned i; int r;
+    static fnvnx_proc p; fnvnx_os os = {NULL, h_read, h_map, h_prot, h_alloc, h_free, h_log, h_va, h_fva, h_reg}; fnvnx_start_cfg cfg; unsigned i; int r;
     FILE *f; uint8_t *buf; uint32_t len; unsigned nrel = 0;
     if (argc < 3) return 2;
     g_dir = argv[2];

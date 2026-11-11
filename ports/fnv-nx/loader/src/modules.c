@@ -341,14 +341,17 @@ int fnvnx_start_init_modules(fnvnx_proc *p) {
 
 static void attach_order(const fnvnx_proc *p, gthread t, uint32_t reason) {
     unsigned k;
-    for (k = 0; k < p->ninit; k++) (void)notify(p, t, &p->mod[p->init_order[k]], reason, 0u, 1, 0u);
+    for (k = 0; k < p->ninit; k++)
+        if (!p->mod[p->init_order[k]].no_thread_calls) (void)notify(p, t, &p->mod[p->init_order[k]], reason, 0u, 1, 0u);
     (void)notify(p, t, &p->exe, reason, 0u, 0, 0u);
 }
 
 static void detach_order(const fnvnx_proc *p, gthread t, uint32_t reason, uint32_t reserved) {
     unsigned k;
     (void)notify(p, t, &p->exe, reason, reserved, 0, 0u);
-    for (k = p->ninit; k--;) (void)notify(p, t, &p->mod[p->init_order[k]], reason, reserved, 1, reserved);
+    for (k = p->ninit; k--;)
+        if (reason == DLL_PROCESS_DETACH || !p->mod[p->init_order[k]].no_thread_calls)
+            (void)notify(p, t, &p->mod[p->init_order[k]], reason, reserved, 1, reserved);
 }
 
 void fnvnx_modules_thread_attach(const fnvnx_thread_block *b) {
@@ -361,11 +364,20 @@ void fnvnx_modules_thread_detach(const fnvnx_thread_block *b) {
     t.teb = b->teb_va; t.esp = b->stack_base;
     detach_order(fnvnx_start_proc(), t, DLL_THREAD_DETACH, 0u);
 }
-void fnvnx_modules_process_detach(uint32_t reserved) {
-    const fnvnx_proc *p = fnvnx_start_proc();
+void fnvnx_modules_process_detach(fnvnx_proc *p, uint32_t teb, uint32_t esp, uint32_t reserved) {
     gthread t;
-    t.teb = p->main.teb_va; t.esp = p->main.stack_base;
+    t.teb = teb; t.esp = esp;
     detach_order(p, t, DLL_PROCESS_DETACH, reserved);
+}
+int fnvnx_modules_disable_thread_calls(uint32_t base) {
+    fnvnx_proc *p = fnvnx_start_proc();
+    unsigned k;
+    for (k = 0; k < p->nmod; k++)
+        if ((p->mod[k].state == FNVNX_MOD_READY || p->mod[k].state == FNVNX_MOD_MAPPED) && p->mod[k].img.load_base == base) {
+            p->mod[k].no_thread_calls = 1;
+            return FNVNX_OK;
+        }
+    return FNVNX_E_ARG;
 }
 
 /* ---- on demand: LoadLibrary ---- */

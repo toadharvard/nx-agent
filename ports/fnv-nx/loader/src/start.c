@@ -144,6 +144,7 @@ int fnvnx_loaded_protect(fnvnx_proc *p, fnvnx_loaded *L) {
     if (r) return r;
     for (i = 0; i < L->ngap; i++)
         if (p->os->protect(p->os->ctx, (uintptr_t)L->gap[i].va + p->cfg.bias, L->gap[i].size, 0u)) return FNVNX_E_MAP;
+    p->os->register_image(p->os->ctx, L->name, L->img.load_base, (L->pe.size_of_image + (PAGE - 1)) & ~(uint32_t)(PAGE - 1));
     return FNVNX_OK;
 }
 
@@ -275,7 +276,7 @@ static int s4_bind(fnvnx_proc *p) {
 int fnvnx_start_prepare(fnvnx_proc *p, const fnvnx_os *os, const fnvnx_start_cfg *cfg) {
     int r;
     if (!p || !os || !cfg || !os->read || !os->map_fixed || !os->protect || !os->alloc || !os->free || !os->log ||
-        !os->alloc_va || !os->free_va || !cfg->resolve || !cfg->exe_name || (cfg->nmodules && !cfg->modules))
+        !os->alloc_va || !os->free_va || !os->register_image || !cfg->resolve || !cfg->exe_name || (cfg->nmodules && !cfg->modules))
         return FNVNX_E_ARG;
     if (cfg->nmodules > FNVNX_MAX_MODULES) {
         fnvnx_logf(os, "fnvnx-start: %u modules, at most %u are supported", (unsigned)cfg->nmodules, FNVNX_MAX_MODULES);

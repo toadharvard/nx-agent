@@ -42,7 +42,7 @@ PY
 "$G/build.sh" "$W/ldr" --keys-c "$W/import_keys.c" --identity-c "$W/identity.c" --modules-c "$W/mods/modules.c" >/dev/null
 $CC $ARCH -O2 -Wall -Wextra $DEFS -I"$L/include" -I"$R/toolchain/include" -c "$G/e2e_enter.c" -o "$W/e2e_enter.o"
 $CC $ARCH -O2 -c "$W/objs.c" -o "$W/objs.o"
-$CC -mabi=ilp32 -fPIC -specs="$R/toolchain/guest/guest_pie.specs" $WRAP "$W/rt/crt0.o" "$W/e2e_enter.o" "$W/objs.o" -L"$W/rt" -L"$W/ldr" \
+aarch64-none-elf-g++ -mabi=ilp32 -fPIC -specs="$R/toolchain/guest/guest_pie.specs" $WRAP "$W/rt/crt0.o" "$W/e2e_enter.o" "$W/objs.o" -L"$W/rt" -L"$W/ldr" \
     -Wl,--whole-archive -lfnvnx-guest -Wl,--no-whole-archive -lfnvnx-loader -Wl,-Map,"$W/guest.map" -o "$W/guest.elf"
 python3 -I "$R/toolchain/tools/elf2nso.py" "$W/guest.elf" "$W/guest.nso" >/dev/null
 

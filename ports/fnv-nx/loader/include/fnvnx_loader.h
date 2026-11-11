@@ -66,6 +66,10 @@ typedef struct fnvnx_os {
      * address space may be handed out again and a later alloc_va of it reads as zero, read-write, whatever protect
      * did to it before. 0 on success. */
     int (*free_va)(void *ctx, uint32_t va, uint32_t size);
+    /* An image (the exe or a table module) is ready: its imports are bound and its final protection is set, and nothing of it has
+     * run yet (its DllMain and TLS callbacks follow). `name` is the file name as in the table, `base` the load base, `size` the
+     * SizeOfImage rounded up to a page. The platform records it for GetModuleHandle / VirtualQuery. Called once per image. */
+    void (*register_image)(void *ctx, const char *name, uint32_t base, uint32_t size);
 } fnvnx_os;
 
 /* ---- PE32 headers ---------------------------------------------------------------------------------------- */
