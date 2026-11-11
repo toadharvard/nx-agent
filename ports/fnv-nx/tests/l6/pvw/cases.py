@@ -98,12 +98,12 @@ def gen_b(seed):
             c = simple(r, ex=ex, count=3); kind = k
             if kind == 0: c["count"] = 100
             elif kind == 1: c["start"] = 50
-            elif kind == 2: c["dstidx"] = 100
+            elif kind == 2: c["dstidx"] = 100; c["dlen"] = 64
             elif kind == 3: c["streams"][0]["offset"] += 4000
-            elif kind == 4: c["count"] = 0xFFFFFFFF; c["streams"][0]["stride"] = 0 if False else c["streams"][0]["stride"]
+            elif kind == 4: c["count"] = 0xFFFFFFFF; c["dlen"] = 64
             elif kind == 5: c["dlen"] = 40
-            elif kind == 6: c["start"] = 0x40000000; c["streams"][0]["stride"] = 16
-            elif kind == 7: c["dstidx"] = 0x10000000
+            elif kind == 6: c["start"] = 0x40000000; c["streams"][0]["stride"] = 16; c["dlen"] = 64
+            elif kind == 7: c["dstidx"] = 0x10000000; c["dlen"] = 64
             add(c)
         # exact fit and one byte short
         c = simple(r, ex=ex, dfvf=RHW | D, count=3); add(c, dlen=48 + 0); c = simple(r, ex=ex, dfvf=RHW | D, count=3); add(c, dlen=47)

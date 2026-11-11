@@ -24,7 +24,7 @@ static void run_f(bool ex) {
     const Ev* b1 = nullptr; const Ev* b2 = nullptr; for (auto& e : g_ev) if (e.op == NxOp_BindVtxN && e.a[0] == 0) (b1 ? b2 : b1) = &e;   // stream 0 (the constant stream of the unbound inputs is another stream) CHECK(b1 && b2 && b1->blob == a1 && b2->blob == a2 && t_count(NxOp_BeginPass4) == 1);
     // the reset is not recorded into a state block (Windows rows of test_draw_primitive)
     IDirect3DVertexBuffer9* vb = t_vb(d, 4096); IDirect3DIndexBuffer9* ib = t_ib(d, 4096); d.i9->SetStreamSource(0, vb, 0, 16); d.i9->SetIndices(ib); IDirect3DStateBlock9* sb = nullptr;
-    CHECK_HR(d.i9->BeginStateBlock(), D3D_OK); auto id = pat(6, 3), vv = pat(64, 4); CHECK_HR(d.i9->DrawIndexedPrimitiveUP(D3DPT_TRIANGLELIST, 0, 4, 2, id.data(), D3DFMT_INDEX16, vv.data(), 16), D3D_OK); CHECK_HR(d.i9->EndStateBlock(&sb), D3D_OK);
+    CHECK_HR(d.i9->BeginStateBlock(), D3D_OK); auto id = pat(12, 3), vv = pat(64, 4); CHECK_HR(d.i9->DrawIndexedPrimitiveUP(D3DPT_TRIANGLELIST, 0, 4, 2, id.data(), D3DFMT_INDEX16, vv.data(), 16), D3D_OK); CHECK_HR(d.i9->EndStateBlock(&sb), D3D_OK);
     d.i9->SetStreamSource(0, vb, 0, 16); d.i9->SetIndices(ib); CHECK_HR(sb->Apply(), D3D_OK);
     IDirect3DIndexBuffer9* oi = nullptr; d.i9->GetStreamSource(0, &ov, &off, &st); d.i9->GetIndices(&oi); CHECK(ov == vb && st == 16 && oi == ib);
     if (ov) ov->Release(); if (oi) oi->Release();
