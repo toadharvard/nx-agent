@@ -104,6 +104,8 @@ static Thread g_pump_thread;
 static AppletHookCookie g_hook;
 
 static void cleanup_for_exit(const char *why);
+static int g_sock_up;               /* host_sock_init() succeeded (host_sock.inc) */
+static void host_sock_exit(void);
 
 static void applet_hook(AppletHookType hook, void *param) {
     (void)param;
@@ -285,6 +287,10 @@ static void cleanup_for_exit(const char *why) {
     if (g_exiting++) return;
     logf_("fnvnx host: exiting: %s\n", why);
     appletSetCpuBoostMode(ApmCpuBoostMode_Normal);   /* never leave the console boosted */
+    if (g_sock_up) {
+        g_sock_up = 0;
+        host_sock_exit();
+    }
     remove_launcher_override();   /* normally gone already; after a relaunch-only run it is still there */
     if (g_log) fflush(g_log);
     if (g_exit_locked) {          /* libnx: appletUnlockExit before the process ends */

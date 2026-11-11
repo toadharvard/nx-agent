@@ -188,6 +188,7 @@ static void set_cpu_boost(int mode) {
 }
 #include "host_message.inc"
 #include "host_vm.inc"
+#include "host_sock.inc"   /* BSD sockets (FNVNX_PLAT_SOCK_*); host_sock_init/exit below */
 static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) {
     if (fn == FNVNX_PLAT_CPU_BOOST && nargs >= 1) {
         if (!g_cfg.boost_loading) return 1;
@@ -200,6 +201,7 @@ static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) 
     if (fn == FNVNX_PLAT_VM_COMMIT && nargs >= 2) return host_vm_commit(args[0], args[1]);
     if (fn == FNVNX_PLAT_VM_DECOMMIT && nargs >= 2) return host_vm_decommit(args[0], args[1]);
     if (fn == FNVNX_PLAT_VM_RELEASE && nargs >= 1) return host_vm_release(args[0]);
+    if (fn >= FNVNX_PLAT_SOCK_FIRST && fn <= FNVNX_PLAT_SOCK_LAST) return host_sock_call(fn, args, nargs);
     return FNVNX_EXT_NO_MODULE;
 }
 
@@ -447,6 +449,17 @@ int main(int argc, char **argv) {
     mount_shader_pack();
     report_layout();
     load_config();
+    {   /* the socket service (libnx bsd:u); released in cleanup_for_exit */
+        unsigned src = host_sock_init();
+        if (src) {
+            logf_("fnvnx host: STOP: socket service initialisation failed: %#x\n", src);
+            svcSleepThread(5000000000ll);
+            if (g_log) fclose(g_log);
+            consoleExit(NULL);
+            return 1;
+        }
+        g_sock_up = 1;
+    }
     fnvnx_host_register_ext(FNVNX_EXT_PLATFORM, platform_ext);
 
     u64 gbase = 0, gsize = 0, rc;

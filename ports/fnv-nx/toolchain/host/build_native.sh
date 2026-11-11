@@ -12,7 +12,7 @@ HERE=$(cd "$(dirname "$0")" && pwd); TC=$(cd "$HERE/.." && pwd); ROOT=$(cd "$TC/
 [ -f "$D3/lib/libdeko3d.a" ] || "$TC/deko3d/build.sh" "$D3" >/dev/null
 export PATH=$DEVKITPRO/tools/bin:$DEVKITPRO/devkitA64/bin:$PATH
 HA="-march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE"
-HF="-O2 -g -Wall -Wextra -ffunction-sections -fdata-sections -D__SWITCH__ -I$TC/include -I$ROOT/startup/host \
+HF="-O2 -g -Wall -Wextra -ffunction-sections -fdata-sections -D__SWITCH__ -D__LINUX_ERRNO_EXTENSIONS__ -I$TC/include -I$ROOT/startup/host \
 -I$D3/include -I$DEVKITPRO/libnx/include -I$N/include ${HOST_DEFS:-}"
 O=$OUT/obj; rm -rf "$O"; mkdir -p "$O"
 aarch64-none-elf-gcc $HA $HF -DFNVNX_HOST_NO_CONSOLE -c "$TC/host/host.c" -o "$O/host.o"
