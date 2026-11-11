@@ -3,7 +3,7 @@
 
   boot.py run --elf GUEST.elf --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
               --milestones TABLE --manifest entries.tsv [--icount-spec SPEC.json] [--limit-instructions N]
-              [--hc-slice N] --out OUT.json
+              [--hc-slice N] [--profile handheld|docked] --out OUT.json
 
 plan = bootlayout (same rules as its CLI), watch points = bootmiles.resolve(table, manifest, ELF symbols, bias = image
 base). OUT.json ("fnvnx-boot/1", sorted keys, indent 1, no wall time) holds the plan, the run record, the milestone state
@@ -78,7 +78,7 @@ def run(a):
     watch = bootmiles.resolve(table, manifest, bootmiles.read_symtab(a.elf), base)
     host = _host_lines(watch["host"])
     kw = {"hc_slice": a.hc_slice} if a.hc_slice else {}
-    m = bootmachine.Machine(raw, plan, boothost.Services(a.root, a.game), limit_instructions=a.limit_instructions, **kw)
+    m = bootmachine.Machine(raw, plan, boothost.Services(a.root, a.game), limit_instructions=a.limit_instructions, profile=a.profile, **kw)
     ic = m.attach_icount(a.icount_spec if a.icount_spec else {}, base)
     prog, log = bootmiles.Progress(table), []
 
@@ -134,6 +134,8 @@ def main(argv=None):
     sp.add_argument("--icount-spec")
     sp.add_argument("--limit-instructions", type=lambda s: int(s, 0))
     sp.add_argument("--hc-slice", type=lambda s: int(s, 0))
+    sp.add_argument("--profile", choices=("handheld", "docked"), default="handheld",
+                    help="what FNVNX_PLAT_DISPLAY_DOCKED answers: docked 1, handheld 0 (default handheld)")
     a = ap.parse_args(argv)
     try:
         return run(a)

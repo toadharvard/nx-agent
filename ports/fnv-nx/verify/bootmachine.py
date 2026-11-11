@@ -7,7 +7,7 @@ Rules:
 1. Layout only from bootlayout.plan(): PT_LOADs at plan base + vaddr with ELF protection (bss = fresh zero pages), stacks /
    host page / heap = the plan's regions. No relocation: the guest relocates itself. A segment outside the image region
    or sharing a page with another raises MachineError.
-2. Totality: all 50 slots resolve to services.h_<slot> at construction, else MachineError.
+2. Totality: all 50 slots resolve to services.h_<slot> at construction, else MachineError (the list is the header's struct, checked by the tests).
 3. One CPU. A thread switches only at a blocking host call and at a host call's return after `hc_slice` calls of its
    slice while another thread is ready: no wall clock, no instruction counts, so switch points repeat. Nothing ready:
    the virtual tick jumps to the earliest deadline; none: reason "deadlock" with a per-thread wait report.
@@ -24,7 +24,16 @@ Rules:
    (image, host page, stacks, given-away blocks, unmapped: 0xD401). Other modules go to services.ext_<module>
    (fn, args) found at construction; an unregistered module, or a handler raising ExtMissing, ends the run with reason
    "ext-module-missing": a configuration error, never answered with a value.
-5b. Platform service (module 11, the header's FNVNX_PLAT_* list 1..8, 10..15 (9 DISPLAY_DOCKED is defined but the host serves nothing for it); always on). Totality at construction: every fn of PLATFORM_FNS
+5a. TOTAL against the header (hostapi.h TOTALITY TABLE, checked mechanically by tests/test_bootmachine.py against the parsed table): ext_call returns
+   NO_MODULE (module >= 64 or not registered), NO_SERVICE (fn > UINT32_MAX, or a module-11 fn without a row: 0, 35 and up), BAD_NARGS
+   (fewer arguments than the row, or nargs > 0 with a null array); nargs above UINT32_MAX counts as UINT32_MAX; only a handler raising
+   ExtMissing ends the run. Module 11 serves fn 1..15 here. NOT SERVED because the header's table does not determine their result in this
+   environment (no network, no time-zone source): the sockets 16..33 (their wrong-nargs result -EINVAL is the header's and is returned; with the
+   exact nargs the run ends as "ext-module-missing") and TZ_AT 34 (its BAD_NARGS rule is the header's, else "ext-module-missing").
+   ACCESS_FAULT_HANDLER (10) stays implemented in the machine (rule 5c) although the console host answers NO_SERVICE for it: a recorded difference.
+   DISPLAY_DOCKED (9) answers 1 for the constructor argument profile="docked", 0 for "handheld" (default). Thread and directory ids are table
+   handles (IdTable: (generation << 16) | slot, at most 1024 live together); the stack count (n_stacks) is a limit of this machine, not of the header.
+5b. Platform service (module 11; always on). Totality at construction: every fn of PLATFORM_FNS
    resolves to services.plat_<name>(args) or the machine's own _plat_<name>(args), else MachineError (the machine serves
    thread_activity and vm_*; the services serve cpu_boost and message). A fn the header does not define is
    "ext-module-missing". VM service: reserve(hint, size) -> address or 0; size rounds up to 64 KiB, size 0 and every failure
@@ -102,18 +111,35 @@ SLOTS = ["output_debug_string", "sleep_ns", "exit", "console_write", "console_fl
          "ext_call"]
 API_SIZE = 0x30 + 8 * len(SLOTS)
 FNVNX_EXT_PLATFORM = 11
-# hostapi.h FNVNX_PLAT_* of module 11 (the header defines 1..7; VM_PROTECT = 8 is the loader's addition): fn -> (name, min args)
+EXT_NO_MODULE, EXT_NO_SERVICE, EXT_BAD_NARGS = U64 - 254, U64 - 253, U64 - 252   # FNVNX_EXT_*: -255, -254, -253 as int64 (hostapi.h)
+FNVNX_EXT_MODULES, UINT32_MAX = 64, 0xFFFFFFFF
 FAULT_FRAME = 816
+# hostapi.h TOTALITY TABLE, module 11 services 1..15 and 34: fn -> (name, least nargs). 10 is served here although the console host
+# answers NO_SERVICE for it (recorded difference). The sockets 16..33 are SOCK_SERVICES; both tables are checked against the header's
+# parsed table by tests/test_bootmachine.py.
 PLATFORM_FNS = {1: ("cpu_boost", 1), 2: ("thread_activity", 2), 3: ("message", 2), 4: ("vm_reserve", 2), 5: ("vm_commit", 2),
-                6: ("vm_decommit", 2), 7: ("vm_release", 1), 8: ("vm_protect", 3),
+                6: ("vm_decommit", 2), 7: ("vm_release", 1), 8: ("vm_protect", 3), 9: ("display_docked", 0),
                 10: ("access_fault_handler", 2), 11: ("section_create", 1), 12: ("section_map", 4), 13: ("section_unmap", 2),
-                14: ("section_free", 1), 15: ("unmap_fixed", 3)}
+                14: ("section_free", 1), 15: ("unmap_fixed", 3), 34: ("tz_at", 2)}
+# the services whose result the header does not determine for this environment (no network, no time-zone source): their argument
+# checks are the header's, then the run ends with reason "ext-module-missing"
+UNSERVED = {34}
+SOCK_SERVICES = {16: ("sock_socket", 3), 17: ("sock_close", 1), 18: ("sock_bind", 2), 19: ("sock_listen", 2), 20: ("sock_accept", 2),
+                 21: ("sock_connect", 2), 22: ("sock_sendto", 5), 23: ("sock_recvfrom", 5), 24: ("sock_setsockopt", 5),
+                 25: ("sock_getsockopt", 5), 26: ("sock_poll", 3), 27: ("sock_shutdown", 2), 28: ("sock_getsockname", 2),
+                 29: ("sock_getpeername", 2), 30: ("sock_getfl", 1), 31: ("sock_setfl", 2), 32: ("sock_gai_open", 4),
+                 33: ("sock_gai_fetch", 3)}
+WE_INVAL = 22   # FNVNX_WE_INVAL (sockwire.h)
+WINDOW = (0x00400000, 0x02100000)   # the image range 0x00400000..0x00FDF000 and the data window up to 0x02100000: claimed by the host at start
+MAP_FIXED_MAX = 512
+FNVNX_HE_NOMEM, FNVNX_HE_NOTFOUND = 0x0559, 0x1359
 SEC_E_SIZE, SEC_E_ALIGN, SEC_E_RANGE, SEC_E_REGION, SEC_E_ID, SEC_E_NOMEM, SEC_E_FULL = 0xCA01, 0xCC01, 0xD401, 0xDA01, 0xE401, 0xD001, 0xCE01
 SEC_MAX_SIZE, SEC_SECTIONS, SEC_VIEWS = 0x80000000, 128, 512   # host_section.inc
 VM_ALIGN, VM_FLOOR = 0x10000, 0x10000   # host_vm.inc FNVNX_VM_ALIGN; the guest's low 64 KiB stay unmapped. Forbidden ranges are plan data.
 # libnx result values (hostapi.h names them, the repo does not define them): MAKERESULT(Module_Libnx = 345, desc) = 345 | desc << 9,
 # desc from libnx's result.h enum LibnxError (BadInput = 11, AlreadyInitialized = 7)
 LIBNX_BAD_INPUT, LIBNX_ALREADY_INITIALIZED = 345 | 11 << 9, 345 | 7 << 9   # 0x1759, 0xF59
+assert (LIBNX_BAD_INPUT, LIBNX_ALREADY_INITIALIZED, 345 | 9 << 9, 345 | 2 << 9) == (0x1759, 0xF59, FNVNX_HE_NOTFOUND, FNVNX_HE_NOMEM)
 ERR_INVALID_SIZE, ERR_INVALID_ADDRESS, ERR_INVALID_CURRENT_MEMORY = 0xCA01, 0xCC01, 0xD401
 ERR_INVALID_NEW_MEMORY_PERMISSION, ERR_INVALID_HANDLE, ERR_INVALID_STATE = 0xD801, 0xE401, 0xFA01
 ACCESS_KINDS = {UCC.UC_MEM_READ_UNMAPPED: "read-unmapped", UCC.UC_MEM_WRITE_UNMAPPED: "write-unmapped",
@@ -156,6 +182,7 @@ class VirtualClock:
 
 class Thread:
     def __init__(self, tid):
+        self.handle = 0   # the table handle thread_create returned (0: the main thread, which has none)
         self.tid, self.ctx, self.state, self.wait, self.result, self.resume_pc = tid, None, "new", None, 0, None
         self.paused = False
         self.fh, self.in_handler, self.frame = None, False, 0   # fault handler (handler, stack_top); inside it; its frame address
@@ -166,9 +193,46 @@ def _up(v, a=PAGE):
     return (v + a - 1) // a * a
 
 
+class IdTable:
+    """thread and directory ids (host_ids.inc): a handle is (generation << 16) | slot, never an address; at most 1024 live ids of
+    both kinds together. A slot takes the next generation when its id is freed, so a freed id never names anything again. The
+    first id of a slot has generation 1 (an id is never 0); slots are taken lowest first."""
+    MAX = 1024
+
+    def __init__(self):
+        self.live, self.gen = {}, {}   # slot -> (kind, object); slot -> current generation
+
+    def alloc(self, kind, obj):
+        """the new handle, or 0 when the table is full"""
+        for s in range(self.MAX):
+            if s not in self.live:
+                self.live[s] = (kind, obj)
+                return self.gen.setdefault(s, 1) << 16 | s
+        return 0
+
+    def get(self, kind, h):
+        """the object of a live id of that kind, else None"""
+        s = h & 0xFFFF
+        e = self.live.get(s) if h >> 16 == self.gen.get(s) else None
+        return e[1] if e and e[0] == kind else None
+
+    def free(self, kind, h):
+        """True when h named a live id of that kind (now dead)"""
+        if self.get(kind, h) is None:
+            return False
+        s = h & 0xFFFF
+        del self.live[s]
+        self.gen[s] += 1
+        return True
+
+
 class Machine:
     def __init__(self, elf_bytes, plan, services, clock=None, *, hc_slice=2000, limit_host_calls=None, n_stacks=32,
-                 stack_size=0x40000, limit_instructions=None):
+                 stack_size=0x40000, limit_instructions=None, profile="handheld"):
+        if profile not in ("handheld", "docked"):
+            raise MachineError("profile must be 'handheld' or 'docked', got %r" % (profile,))
+        self.profile = profile   # FNVNX_PLAT_DISPLAY_DOCKED: docked 1, handheld 0
+        self.ids = IdTable()
         self.elf = elf = bootlayout.parse_elf(elf_bytes)
         self.services, self.clock, self.hc_slice, self.limit = services, clock or VirtualClock(), hc_slice, limit_host_calls
         reg = {n: (r["lo"], r["hi"]) for n, r in plan["regions"].items()}
@@ -183,6 +247,8 @@ class Machine:
         self.handlers = self._resolve(services)
         self.plat = self._resolve_platform(services)
         self.regions = sorted(reg.values())
+        if any(lo < WINDOW[1] and WINDOW[0] < hi for lo, hi in self.regions):
+            raise MachineError("a plan region overlaps the host window 0x%x..0x%x" % WINDOW)
         self.sections, self.views, self.sec_next = {}, {}, 1   # id -> Section dict; view addr -> view dict; next id (never reused)
         self.vm_resv, self.vm_pages, self.vm_ext = {}, set(), []   # base -> size; committed page addresses; extents [lo, hi): one per commit gap (host_vm.inc)
         self.ext = {int(n[4:]): getattr(services, n) for n in dir(services) if n.startswith("ext_") and n[4:].isdigit()}
@@ -203,6 +269,7 @@ class Machine:
             uc.mem_protect(lo, hi - lo, prot)
         for n in ("stacks", "heap"):
             uc.mem_map(reg[n][0], reg[n][1] - reg[n][0], UC_PROT_READ | UC_PROT_WRITE)
+        uc.mem_map(WINDOW[0], WINDOW[1] - WINDOW[0], UC_PROT_READ | UC_PROT_WRITE)   # the host's window: RW zero from the start
         self.host_page = hp = reg["host_page"][0]
         uc.mem_map(hp, PAGE, UC_PROT_ALL)
         self.stub_base, self.return_addr, self.thread_end = hp + 0x800, hp + 0xFF0, hp + 0xFF8
@@ -246,6 +313,8 @@ class Machine:
     def _resolve_platform(self, services):
         h = {}
         for fn, (name, _n) in sorted(PLATFORM_FNS.items()):
+            if fn in UNSERVED:
+                continue
             f = getattr(services, "plat_" + name, None) or getattr(self, "_plat_" + name, None)
             if not callable(f):
                 raise MachineError("module 11 fn %d (%s) is defined by the header but neither the machine nor services has "
@@ -340,34 +409,56 @@ class Machine:
     def _event(self, kind, **kw):
         self.events.append(dict(kind=kind, tid=self.tid(), **kw))
 
-    def _covered(self, lo, hi):
-        return any(a <= lo and hi <= b for a, b in self.mapped)
+    def _in_window(self, lo, hi):
+        return WINDOW[0] <= lo and hi <= WINDOW[1]
 
     def _owned(self, lo, hi):
-        """wholly guest-owned: inside the heap region and clear of given-away blocks, or inside map_fixed mappings"""
-        if self.heap[0] <= lo and hi <= self.heap[1]:
-            return not any(a < hi and lo < b for a, b in self.given)
-        return self._covered(lo, hi) or self._vm_committed(lo, hi)
+        """every page of [lo, hi) is guest-owned: ordinary heap (not given away), a map_fixed range, a committed VM extent or the
+        host's window; the range may span several of these"""
+        iv = [(max(self.heap[0], x), min(self.heap[1], y)) for x, y in self._heap_free()] + self.mapped \
+            + [tuple(e) for e in self.vm_ext] + [WINDOW]
+        p = lo
+        for a, b in sorted(iv):
+            if a <= p < b:
+                p = b
+        return p >= hi
+
+    def _heap_free(self):
+        """the heap region minus the blocks map_fixed gave away"""
+        out, p = [], self.heap[0]
+        for a, b in sorted(self.given):
+            if a > p:
+                out.append((p, a))
+            p = max(p, b)
+        if p < self.heap[1]:
+            out.append((p, self.heap[1]))
+        return out
 
     def _vm_committed(self, lo, hi):
         return lo in self.vm_pages and all(p in self.vm_pages for p in range(lo, hi, PAGE))
 
+    def _zero_window(self, addr, size):
+        self.uc.mem_protect(addr, size, UC_PROT_READ | UC_PROT_WRITE)
+        self.uc.mem_write(addr, bytes(size))
+
     def map_fixed(self, addr, size, src):
-        if size == 0 or size % PAGE:
-            return self._refuse("map_fixed", addr, size, "size", ERR_INVALID_SIZE)
-        if addr % PAGE or addr + size > 1 << 32:
-            return self._refuse("map_fixed", addr, size, "address", ERR_INVALID_ADDRESS)
+        """hostapi.h map_fixed, checks in the header's order"""
+        if size == 0 or addr + size >= 1 << 64 or addr % PAGE or size % PAGE:
+            return self._refuse("map_fixed", addr, size, "size 0, wraps or not 4 KiB aligned", LIBNX_BAD_INPUT)
+        if self._in_window(addr, addr + size):   # the host's window: read-write and zeroed, src is not looked at
+            self._zero_window(addr, size)
+            return 0
+        if src == 0 or src % PAGE:
+            return self._refuse("map_fixed", addr, size, "src 0 or not 4 KiB aligned", LIBNX_BAD_INPUT)
+        if len(self.mf_live) >= MAP_FIXED_MAX:
+            return self._refuse("map_fixed", addr, size, "%d map_fixed ranges live" % MAP_FIXED_MAX, FNVNX_HE_NOMEM)
         if any(b > addr and addr + size > a for a, b, _p in self.uc.mem_regions()):   # any occupied range, a section view included
             return self._refuse("map_fixed", addr, size, "range is occupied", LIBNX_ALREADY_INITIALIZED)
-        if any(addr < r + n and r < addr + size for r, n in self.vm_resv.items()):
-            return self._refuse("map_fixed", addr, size, "overlaps a VM reservation", ERR_INVALID_CURRENT_MEMORY)
         if not any(n != "keys" and lo <= addr and addr + size <= hi for n, lo, hi in self.free):
-            return self._refuse("map_fixed", addr, size, "not wholly inside a mappable reserved range", ERR_INVALID_ADDRESS)
-        if src % PAGE or not (self.heap[0] <= src and src + size <= self.heap[1]):
-            return self._refuse("map_fixed", addr, size, "src not a page-aligned block wholly inside the heap region 0x%x" % src,
-                                ERR_INVALID_ADDRESS)
-        if any(a < src + size and src < b for a, b in self.given) or (src < addr + size and addr < src + size):
-            return self._refuse("map_fixed", addr, size, "src block 0x%x already given away or overlaps addr" % src,
+            return self._refuse("map_fixed", addr, size, "not wholly inside the alias-code region (a mappable reserved range)",
+                                SEC_E_REGION)
+        if not any(a <= src and src + size <= b for a, b in self._heap_free()):
+            return self._refuse("map_fixed", addr, size, "src block 0x%x is not ordinary heap (outside it or given away)" % src,
                                 ERR_INVALID_CURRENT_MEMORY)
         content = bytes(self.uc.mem_read(src, size))
         self.uc.mem_unmap(src, size)
@@ -388,23 +479,21 @@ class Machine:
                 self.mapped.append((a, b))
 
     def _plat_unmap_fixed(self, a):
-        """FNVNX_PLAT_UNMAP_FIXED (addr, size, src): the undo of exactly one earlier map_fixed (hostapi.h 15)"""
+        """FNVNX_PLAT_UNMAP_FIXED (addr, size, src): the undo of exactly one earlier map_fixed (hostapi.h 15); pages of any protection"""
         addr, size, src = a[:3]
         if (addr | src) % PAGE:
             return self._refuse("unmap_fixed", addr, size, "addr or src not page aligned", ERR_INVALID_ADDRESS)
         if size == 0 or size % PAGE:
             return self._refuse("unmap_fixed", addr, size, "size", ERR_INVALID_SIZE)
+        if addr + size >= 1 << 64:
+            return self._refuse("unmap_fixed", addr, size, "addr + size wraps", ERR_INVALID_CURRENT_MEMORY)
+        if self._in_window(addr, addr + size):   # the host's window: read-write and zeroed again, src is not looked at
+            self._zero_window(addr, size)
+            return 0
         if self.mf_live.get(addr) != (size, src):
             return self._refuse("unmap_fixed", addr, size, "not the mapping of that src (kernel: InvalidCurrentMemory)",
                                 ERR_INVALID_CURRENT_MEMORY)
-        perms = {}
-        for lo, hi, p in self.uc.mem_regions():
-            for pg in range(max(lo, addr), min(hi + 1, addr + size), PAGE):
-                perms[pg] = p
-        if any(perms.get(pg) != (UC_PROT_READ | UC_PROT_WRITE) for pg in range(addr, addr + size, PAGE)):
-            # the header's precondition ("every page of the range is read-write") is violated: the contract defines no result
-            raise MachineError("unmap_fixed 0x%x+0x%x: precondition violated, a page is not read-write" % (addr, size))
-        content = bytes(self.uc.mem_read(addr, size))
+        content = bytes(self.uc.mem_read(addr, size))   # Unicorn's host-side read ignores the page protection
         self.uc.mem_unmap(addr, size)
         del self.mf_live[addr]
         self.given.remove((src, src + size))
@@ -417,21 +506,41 @@ class Machine:
         self._event(what + "-refused", addr=addr, size=size, why=why, result=code)
         return code
 
+    def _words(self, args, n):
+        return [struct.unpack("<Q", self.uc.mem_read(args + 8 * i, 8))[0] for i in range(n)]
+
     def ext_call(self, module, fn, args, nargs):
-        a = [struct.unpack("<Q", self.uc.mem_read(args + 8 * i, 8))[0] for i in range(nargs)] if nargs else []
-        if module == FNVNX_EXT_PLATFORM and fn in PLATFORM_FNS:
-            name, need = PLATFORM_FNS[fn]
-            if len(a) < need:
-                raise MachineError("module 11 fn %d (%s) needs %d arguments, the guest passed %d" % (fn, name, need, len(a)))
-            return self.plat[fn](a)
-        if module not in self.ext:
-            raise ExtMissing(module, fn)
-        return self.ext[module](fn, a)
+        """hostapi.h ext_call: module >= 64 or not registered -> NO_MODULE; fn > UINT32_MAX -> NO_SERVICE (handler not called);
+        nargs above UINT32_MAX counts as UINT32_MAX. A handler raising ExtMissing ends the run (a service this machine cannot answer)."""
+        if module >= FNVNX_EXT_MODULES or (module != FNVNX_EXT_PLATFORM and module not in self.ext):
+            return EXT_NO_MODULE
+        if fn > UINT32_MAX:
+            return EXT_NO_SERVICE
+        nargs = min(nargs, UINT32_MAX)
+        if module == FNVNX_EXT_PLATFORM:
+            return self._platform_ext(fn, args, nargs)
+        return self.ext[module](fn, self._words(args, nargs) if nargs else [])
+
+    def _platform_ext(self, fn, args, nargs):
+        """host_platform.inc: sockets 16..33 check nargs themselves (exactly the count, else -WE_INVAL); a fn without a row is
+        NO_SERVICE; fewer arguments than the row, or nargs > 0 with a null array, is BAD_NARGS; extra arguments are ignored"""
+        if fn in SOCK_SERVICES:
+            if nargs != SOCK_SERVICES[fn][1]:
+                return -WE_INVAL & U64
+            raise ExtMissing(FNVNX_EXT_PLATFORM, fn)   # the header does not determine a socket's result without a network
+        if fn not in PLATFORM_FNS:
+            return EXT_NO_SERVICE
+        _name, need = PLATFORM_FNS[fn]
+        if nargs < need or (nargs and not args):
+            return EXT_BAD_NARGS
+        if fn in UNSERVED:
+            raise ExtMissing(FNVNX_EXT_PLATFORM, fn)
+        return self.plat[fn](self._words(args, need))
 
     # -- platform service, module 11 (rule 5b)
     def _vm_blocked(self):
         """sorted (lo, hi) of everything a reservation must not overlap"""
-        return sorted(self.regions + [(lo, hi) for _n, lo, hi in self.free] + self.mapped
+        return sorted(self.regions + [WINDOW] + [(lo, hi) for _n, lo, hi in self.free] + self.mapped
                       + [(b, b + n) for b, n in self.vm_resv.items()] + [(a, a + v["size"]) for a, v in self.views.items()])
 
     def _find_free(self, size):
@@ -452,6 +561,8 @@ class Machine:
         hint, want = a[0], a[1]
         if want == 0:
             return self._refuse("vm_reserve", hint, want, "size 0", 0)
+        if want > 1 << 32:
+            return self._refuse("vm_reserve", hint, want, "size above 4 GiB", 0)
         size = _up(want, VM_ALIGN)
         blocked = self._vm_blocked()
         if hint:
@@ -526,7 +637,7 @@ class Machine:
         # host_vm_decommit has no reservation or size check: the view check is first, then the extents inside the range are handled
         addr, size = a[0], a[1]
         if addr + size >= 1 << 64:
-            raise MachineError("vm_decommit 0x%x+0x%x wraps the address space: the contract defines no result" % (addr, size))
+            return self._refuse("vm_decommit", addr, size, "addr + size wraps", ERR_INVALID_CURRENT_MEMORY)
         lo, hi = addr // PAGE * PAGE, _up(addr + size)
         if hi <= lo:
             return 0
@@ -545,20 +656,25 @@ class Machine:
         return 0
 
     def _plat_vm_protect(self, a):
+        """hostapi.h 8: checks in the header's order; prot 0, 1, 3 only (every one expressible on every guest-owned page)"""
         addr, size, prot = a[:3]
+        if addr % PAGE:
+            return self._refuse("vm_protect", addr, size, "address", ERR_INVALID_ADDRESS)
         if size == 0 or size % PAGE:
             return self._refuse("vm_protect", addr, size, "size", ERR_INVALID_SIZE)
-        if addr % PAGE or addr + size > 1 << 32:
-            return self._refuse("vm_protect", addr, size, "address", ERR_INVALID_ADDRESS)
-        if prot & ~3:
-            return self._refuse("vm_protect", addr, size, "prot 0x%x has bits other than R and W" % prot,
-                                ERR_INVALID_NEW_MEMORY_PERMISSION)
-        if self._view_overlap(addr, addr + size):
-            return self._refuse("vm_protect", addr, size, "pages of a section view (not guest-owned pages)", ERR_INVALID_CURRENT_MEMORY)
-        if not self._owned(addr, addr + size):
-            return self._refuse("vm_protect", addr, size, "pages the guest does not own", ERR_INVALID_CURRENT_MEMORY)
+        if addr + size >= 1 << 64:
+            return self._refuse("vm_protect", addr, size, "addr + size wraps", ERR_INVALID_CURRENT_MEMORY)
+        if prot not in (0, 1, 3):
+            return self._refuse("vm_protect", addr, size, "prot 0x%x is not 0, 1 or 3" % prot, ERR_INVALID_NEW_MEMORY_PERMISSION)
+        if self._view_overlap(addr, addr + size) or not self._owned(addr, addr + size):
+            return self._refuse("vm_protect", addr, size, "a page the guest does not own (a section view included)",
+                                ERR_INVALID_CURRENT_MEMORY)
         self.uc.mem_protect(addr, size, (UC_PROT_READ if prot & 1 else 0) | (UC_PROT_WRITE if prot & 2 else 0))
         return 0
+
+    def _plat_display_docked(self, a):
+        """FNVNX_PLAT_DISPLAY_DOCKED: 1 docked, 0 handheld, from the machine's profile"""
+        return 1 if self.profile == "docked" else 0
 
     # -- memory sections, module 11 fn 11..14 (rule 5d)
     def _sec_refuse(self, what, addr, size, why, code):
@@ -647,16 +763,18 @@ class Machine:
         t.fh = (handler, top)
         return 0
 
-    def _writable(self, lo, hi):
-        """[lo, hi) is wholly mapped writable guest memory, not the host page"""
-        if lo < self.host_page + PAGE and self.host_page < hi:
-            return False
+    def accessible(self, lo, hi, perm):
+        """[lo, hi) is wholly mapped with the permission `perm` (UC_PROT_READ / UC_PROT_WRITE)"""
         while lo < hi:
-            r = next(((b, e) for b, e, pr in self.uc.mem_regions() if b <= lo <= e and pr & UC_PROT_WRITE), None)
+            r = next(((b, e) for b, e, pr in self.uc.mem_regions() if b <= lo <= e and pr & perm), None)
             if r is None:
                 return False
             lo = r[1] + 1
         return True
+
+    def _writable(self, lo, hi):
+        """[lo, hi) is wholly mapped writable guest memory, not the host page"""
+        return not (lo < self.host_page + PAGE and self.host_page < hi) and self.accessible(lo, hi, UC_PROT_WRITE)
 
     def _deliver_fault(self, t):
         """rule 5c: build the frame from the thread's registers at the faulting instruction and enter its handler"""
@@ -709,9 +827,9 @@ class Machine:
         tid, paused = a[0], a[1]
         if tid == 0:   # the calling thread: the kernel cannot pause it (host_thread_activity.inc)
             return self._refuse("thread_activity", tid, paused, "the calling thread", LIBNX_BAD_INPUT)
-        t = self.threads.get(tid)
+        t = self.ids.get("thread", tid)
         if t is None:
-            return self._refuse("thread_activity", tid, paused, "no such thread", ERR_INVALID_HANDLE)
+            return self._refuse("thread_activity", tid, paused, "id names no live thread", FNVNX_HE_NOTFOUND)
         if t.state in ("new", "done"):
             return self._refuse("thread_activity", tid, paused, "thread is %s" % t.state, ERR_INVALID_STATE)
         t.paused = bool(paused)
@@ -722,15 +840,22 @@ class Machine:
         tid = max(self.threads) + 1
         if tid > self.max_threads:
             return 0
+        h = self.ids.alloc("thread", None)
+        if not h:
+            return 0
         t = self.threads[tid] = Thread(tid)
+        t.handle, self.ids.live[h & 0xFFFF] = h, ("thread", t)
         t.entry, t.arg = entry, arg
         self.order.append(tid)
-        return tid
+        return h
 
-    def thread_start(self, tid):
-        t, uc = self.threads.get(tid), self.uc
-        if not t or t.state != "new":
-            return 1
+    def thread_start(self, h):
+        t, uc = self.ids.get("thread", h), self.uc
+        if t is None:
+            return FNVNX_HE_NOTFOUND
+        if t.state != "new":
+            raise MachineError("thread_start of a thread that is already started: the contract defines no result")
+        tid = t.tid
         arg = t.arg
         regs = uc.context_save()
         uc.reg_write(UC_ARM64_REG_X0, arg)

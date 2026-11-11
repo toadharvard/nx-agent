@@ -6,6 +6,7 @@ freestanding entry (the real runtime.c needs devkitA64's newlib: sys/iosupport.h
 does. Scratch: tempfile.mkdtemp, removed at exit."""
 import atexit
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -73,6 +74,9 @@ static uint64_t worker(uint64_t arg) {
     H2(H->wake_address, FNVNX_ADDR(&flag), 1);
     return 0;
 }
+#define EC(m, f, p, n) fnvnx_hcall4(H->ext_call, m, f, p, n)
+static volatile uint32_t wf, wdone;
+static uint64_t waiter(uint64_t arg) { fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&wf), 0, ~0ull); wdone++; return arg; }
 static void num(const char *what, uint64_t v) {
     char b[64]; uint32_t n = 0, k = 0; char t[24];
     while (what[k]) b[n++] = what[k++];
@@ -144,7 +148,7 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     fnvnx_hcall1(H->exit, acc - 1);
 #elif MODE == 1
     uint64_t a3[3] = {0x500000, 0x1000, 1};   /* a 3-argument call to module 9: not registered */
-    fnvnx_hcall4(H->ext_call, 9, 1, FNVNX_ADDR(a3), 3);
+    fnvnx_hcall4(H->ext_call, 9, 99, FNVNX_ADDR(a3), 3);
 #elif MODE == 2
     fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&flag), 0, ~0ull);   /* nobody wakes it, no deadline */
 #elif MODE >= 7 && MODE <= 11
@@ -229,7 +233,7 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("touch-decommitted", pa[0]);
     say("after the fault\n");
 #else
-    plat(9, 0, 0, 0, 0);   /* a fn of module 11 the header does not define */
+    plat(16, 1, 2, 3, 3);   /* a socket service with its exact nargs: the header does not determine its result without a network */
 #endif
 #elif MODE == 30
     uint64_t R = plat(4, 0, 0x10000, 0, 2);
@@ -327,7 +331,7 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     /* UNMAP_FIXED (fn 15) */
     #define UF(a, s, z) plat(FNVNX_PLAT_UNMAP_FIXED, a, s, z, 3)
     #define MF(a, z, s) fnvnx_hcall3(H->map_fixed, a, z, s)
-    uint64_t src = H->heap_base + 0x30000, dst = 0x500000;
+    uint64_t src = H->heap_base + 0x30000, dst = 0x4000000;
     W32(src) = 0x1234;
     num("map", MF(dst, 0x2000, src));
     num("carried", W32(dst));
@@ -346,16 +350,212 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("twice", UF(dst, 0x2000, src));
     num("map-again", MF(dst, 0x2000, src));
     num("again-bytes", W32(dst) == 0xAAAA && W32(dst + 0x1004) == 0xBBBB && W32(dst + 8) == 0x77);
-    num("src-given-again", MF(0x600000, 0x1000, src));
+    num("src-given-again", MF(0x4020000, 0x1000, src));
     num("ok-again", UF(dst, 0x2000, src));
 #elif MODE == 38
     num("ok", UF(dst, 0x2000, src));
     num("touch-dst", W32(dst));   /* unmapped: the run must end here */
     say("after the fault\n");
 #else
-    plat(8, dst, 0x1000, 1, 3);   /* read-only: the header's precondition of UNMAP_FIXED is violated */
+    plat(8, dst, 0x1000, 1, 3);   /* read-only and no access: UNMAP_FIXED needs no restore */
+    plat(8, dst + 0x1000, 0x1000, 0, 3);
     num("ok", UF(dst, 0x2000, src));
+    num("src-bytes", W32(src) == 0xAAAA && W32(src + 0x1004) == 0xBBBB);
+    W32(src + 0x1004) = 5; num("src-rw", W32(src + 0x1004));
 #endif
+#elif MODE == 40
+    /* ext_call and module 11 totality */
+    uint64_t v[4] = {1, 2, 3, 4};
+    num("mod64", EC(64, 1, FNVNX_ADDR(v), 1));
+    num("mod-huge", EC(0xFFFFFFFFFFFFFFFFull, 1, 0, 0));
+    num("mod9-unreg", EC(9, 1, FNVNX_ADDR(v), 1));
+    num("mod12-fn-huge", EC(12, 0x100000001ull, 0, 0));
+    num("fn0", EC(11, 0, FNVNX_ADDR(v), 4));
+    num("fn35", EC(11, 35, FNVNX_ADDR(v), 4));
+    num("fn-u32max", EC(11, 0xFFFFFFFFull, FNVNX_ADDR(v), 4));
+    num("fn-above-u32", EC(11, 0x100000004ull, FNVNX_ADDR(v), 4));
+    num("fn10-nargs1", EC(11, 10, FNVNX_ADDR(v), 1));
+    num("vm-reserve-n1", EC(11, 4, FNVNX_ADDR(v), 1));
+    num("null-array", EC(11, 4, 0, 2));
+    num("docked-n0-null", EC(11, 9, 0, 0));
+    num("docked-n1-null", EC(11, 9, 0, 1));
+    num("docked-n3", EC(11, 9, FNVNX_ADDR(v), 3));
+    num("docked-ncap", EC(11, 9, FNVNX_ADDR(v), 0x100000005ull));
+    num("boost-extra-args", EC(11, 1, FNVNX_ADDR(v), 4));
+    num("sock-wrong-n", EC(11, 16, FNVNX_ADDR(v), 2));
+    num("sock-wrong-n0", EC(11, 17, 0, 0));
+    num("sock-too-many", EC(11, 33, FNVNX_ADDR(v), 4));
+    num("tz-n1", EC(11, 34, FNVNX_ADDR(v), 1));
+    num("tz-null", EC(11, 34, 0, 2));
+    num("reserve-above-4g", plat(4, 0, 0x100000001ull, 0, 2));
+    num("reserve-4g", plat(4, 0, 0x100000000ull, 0, 2));
+#elif MODE == 41
+    uint64_t v[4] = {1, 2, 3, 4};
+    num("m9-fn1", EC(9, 1, FNVNX_ADDR(v), 3));
+    num("m9-fn-huge", EC(9, 0x100000001ull, FNVNX_ADDR(v), 1));
+    num("m9-nargs0", EC(9, 2, 0, 0));
+    num("m9-missing", EC(9, 99, FNVNX_ADDR(v), 1));
+    say("after the missing service\n");
+#elif MODE == 44
+    /* VM_PROTECT: check order, spans, windows; UNMAP_FIXED of protected pages */
+#define MF(a, z, s) fnvnx_hcall3(H->map_fixed, a, z, s)
+#define UF(a, s, z) plat(FNVNX_PLAT_UNMAP_FIXED, a, s, z, 3)
+    uint64_t R = plat(4, 0, 0x10000, 0, 2);
+    plat(5, R, 0x1000, 0, 2); plat(5, R + 0x1000, 0x1000, 0, 2);   /* two extents */
+    volatile uint32_t *pa = (volatile uint32_t *)(uintptr_t)R;
+    pa[0] = 1; pa[0x400] = 2;
+    num("p-addr-unal", plat(8, R + 4, 0x1000, 3, 3));
+    num("p-addr-unal-size0", plat(8, R + 4, 0, 3, 3));
+    num("p-size0", plat(8, R, 0, 3, 3));
+    num("p-size-unal", plat(8, R, 0x800, 3, 3));
+    num("p-wrap", plat(8, 0xFFFFFFFFFFFFF000ull, 0x2000, 3, 3));
+    num("p-wrap-beats-perm", plat(8, 0xFFFFFFFFFFFFF000ull, 0x2000, 2, 3));
+    num("p-wo", plat(8, R, 0x1000, 2, 3));
+    num("p-x", plat(8, R, 0x1000, 4, 3));
+    num("p-7", plat(8, R, 0x1000, 7, 3));
+    num("p-big", plat(8, R, 0x1000, 0x100000003ull, 3));
+    num("p-perm-beats-owned", plat(8, 0x3000000, 0x1000, 2, 3));
+    num("p-unowned", plat(8, 0x3000000, 0x1000, 3, 3));
+    num("p-still-rw", pa[0] + pa[0x400]);
+    num("p-span", plat(8, R, 0x2000, 1, 3));
+    num("p-span-ro", pa[0] + pa[0x400]);
+    num("p-none", plat(8, R + 0x1000, 0x1000, 0, 3));
+    num("p-rw", plat(8, R, 0x2000, 3, 3));
+    pa[0] = 5; pa[0x400] = 6; num("p-rw-write", pa[0] + pa[0x400]);
+    plat(8, R, 0x1000, 1, 3);
+    num("decommit-ro-none", plat(6, R, 0x2000, 0, 2));
+    num("decommit-wrap", plat(6, 0xFFFFFFFFFFFFF000ull, 0x2000, 0, 2));
+    num("decommit-size0", plat(6, R, 0, 0, 2));
+    num("recommit", plat(5, R, 0x2000, 0, 2));
+    num("recommit-zero", pa[0] | pa[0x400]);
+    volatile uint32_t *w = (volatile uint32_t *)0x500000;
+    w[0] = 0x77;
+    num("w-ro", plat(8, 0x500000, 0x1000, 1, 3)); num("w-ro-read", w[0]);
+    num("w-none", plat(8, 0x500000, 0x1000, 0, 3));
+    num("w-rw", plat(8, 0x500000, 0x1000, 3, 3)); w[1] = 9; num("w-rw-keeps", w[0] + w[1]);
+    uint64_t src = H->heap_base + 0x310000, dst = 0x4000000;
+    W32(src) = 0x1234;
+    num("mf", MF(dst, 0x2000, src));
+    W32(dst) = 0xAAAA; W32(dst + 0x1004) = 0xBBBB;
+    plat(8, dst, 0x1000, 1, 3); plat(8, dst + 0x1000, 0x1000, 0, 3);
+    num("uf-protected", UF(dst, 0x2000, src));
+    num("uf-bytes", W32(src) == 0xAAAA && W32(src + 0x1004) == 0xBBBB);
+    W32(src + 8) = 7; num("uf-src-rw", W32(src + 8));
+#elif MODE == 45
+    /* map_fixed: check order, the window, the 512 limit; UNMAP_FIXED in the window */
+#define MF(a, z, s) fnvnx_hcall3(H->map_fixed, a, z, s)
+#define UF(a, s, z) plat(FNVNX_PLAT_UNMAP_FIXED, a, s, z, 3)
+    volatile uint32_t *w = (volatile uint32_t *)0x500000;
+    uint64_t src = H->heap_base + 0x310000;
+    num("size0", MF(0x4000000, 0, src));
+    num("wrap", MF(0xFFFFFFFFFFFFF000ull, 0x2000, src));
+    num("addr-unal", MF(0x4000004, 0x1000, src));
+    num("size-unal", MF(0x4000000, 0x800, src));
+    num("size0-in-window", MF(0x500000, 0, 0));
+    num("past-4g", MF(0xFFFFF000ull, 0x2000, src));
+    num("src0", MF(0x4000000, 0x1000, 0));
+    num("src-unal", MF(0x4000000, 0x1000, src + 4));
+    num("outside-region", MF(0x3000000, 0x1000, src));
+    num("keys", MF(0xf0000, 0x1000, src));
+    num("src-not-heap", MF(0x4000000, 0x1000, 0x500000));
+    w[0] = 0x55; w[0x3FF] = 0x66;
+    num("win", MF(0x500000, 0x1000, 0));
+    num("win-zeroed", w[0] | w[0x3FF]);
+    num("win-src-ignored", MF(0x500000, 0x2000, 0x10001));
+    w[0] = 0x55; plat(8, 0x500000, 0x1000, 0, 3);
+    num("win-none-to-rw", MF(0x500000, 0x1000, 0));
+    w[1] = 9; num("win-rw-again", w[0] + w[1]);
+    num("win-first", MF(0x400000, 0x1000, 0));
+    num("win-last", MF(0x20FF000, 0x1000, 0));
+    num("win-straddle-end", MF(0x20FF000, 0x2000, src));
+    num("win-straddle-start", MF(0x3FF000, 0x2000, src));
+    uint64_t n = 0;
+    for (; n < 512 && MF(0x4000000 + n * 0x1000, 0x1000, H->heap_base + 0x100000 + n * 0x1000) == 0; n++) ;
+    num("live", n);
+    num("limit", MF(0x4200000, 0x1000, src));
+    num("limit-occupied", MF(0x4000000, 0x1000, src));
+    num("unmap-one", UF(0x4000000, 0x1000, H->heap_base + 0x100000));
+    num("again", MF(0x4000000, 0x1000, H->heap_base + 0x100000));
+    w[2] = 3;
+    num("uf-win", UF(0x500000, 0x1000, 0)); num("uf-win-zeroed", w[2]);
+    num("uf-win-src-unal", UF(0x500000, 0x1000, 4));
+    num("uf-win-size-unal", UF(0x500000, 0x800, 0));
+    num("uf-wrap", UF(0x1000, 0xFFFFFFFFFFFFF000ull, 0));
+    num("uf-win-straddle", UF(0x20FF000, 0x2000, 0));
+#elif MODE == 46
+    /* thread and directory ids, wait/wake */
+#define THR(f, a) fnvnx_hcall1(H->f, a)
+    uint64_t h1 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 77, 0x10000, 0, ~0ull);
+    uint64_t h2 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 78, 0x10000, 0, ~0ull);
+    num("h1-id", h1 != 0 && (h1 >> 16) != 0); num("h-distinct", h1 != h2);
+    num("start-unknown", THR(thread_start, 0x12345)); num("start-zero", THR(thread_start, 0));
+    num("join-unknown", THR(thread_join, 0x12345)); num("join-never-started", THR(thread_join, h2));
+    num("prio-unknown", fnvnx_hcall2(H->thread_set_priority, 0x12345, 1)); num("prio-self", fnvnx_hcall2(H->thread_set_priority, 0, 3));
+    num("cpu-unknown", fnvnx_hcall2(H->thread_set_cpu, 0x12345, 1)); num("cpu-self", fnvnx_hcall2(H->thread_set_cpu, 0, 2));
+    num("cpu-negative", fnvnx_hcall2(H->thread_set_cpu, 0, ~0ull));
+    num("cpu-bits40-62", fnvnx_hcall2(H->thread_set_cpu, 0, 0x7FFFFF0000000000ull));
+    num("start", THR(thread_start, h1)); num("join", THR(thread_join, h1)); num("flag", flag);
+    num("free", THR(thread_free, h1)); num("free-twice", THR(thread_free, h1));
+    num("join-freed", THR(thread_join, h1)); num("start-freed", THR(thread_start, h1));
+    num("prio-freed", fnvnx_hcall2(H->thread_set_priority, h1, 1)); num("act-freed", plat(2, h1, 1, 0, 2));
+    num("free-unknown", THR(thread_free, 0x12345));
+    uint64_t h3 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 79, 0x10000, 0, ~0ull);
+    num("h3-new-generation", h3 != h1 && h3 != h2 && (h3 >> 16) != (h1 >> 16));
+    THR(thread_start, h3);
+    num("free-running", THR(thread_free, h3));
+    while (flag != 79) fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&flag), 77, ~0ull);
+    num("detached-ran", flag);
+    uint64_t d = fnvnx_hcall1(H->fs_dir_open, FNVNX_ADDR("sdmc:/"));
+    char buf[16];
+    num("dir-id", d != 0);
+    num("dir-next-cap0", fnvnx_hcall3(H->fs_dir_next, d, FNVNX_ADDR(buf), 0));
+    num("dir-next-cut", fnvnx_hcall3(H->fs_dir_next, d, FNVNX_ADDR(buf), 4)); num("dir-cut-bytes", buf[0] * 0x10000 + buf[2] * 0x100 + buf[3]);
+    num("dir-next-2", fnvnx_hcall3(H->fs_dir_next, d, FNVNX_ADDR(buf), 16));
+    num("dir-end", fnvnx_hcall3(H->fs_dir_next, d, FNVNX_ADDR(buf), 16));
+    num("dir-unknown", fnvnx_hcall3(H->fs_dir_next, 0x12345, FNVNX_ADDR(buf), 16));
+    num("dir-as-thread", THR(thread_join, d)); num("thread-as-dir", fnvnx_hcall3(H->fs_dir_next, h2, FNVNX_ADDR(buf), 16));
+    num("dir-close", THR(fs_dir_close, d)); num("dir-next-closed", fnvnx_hcall3(H->fs_dir_next, d, FNVNX_ADDR(buf), 16));
+    num("dir-close-again", THR(fs_dir_close, d)); num("dir-close-unknown", THR(fs_dir_close, 0x12345));
+    num("dir-notdir", THR(fs_dir_open, FNVNX_ADDR("sdmc:/data.bin"))); num("dir-missing", THR(fs_dir_open, FNVNX_ADDR("sdmc:/nope")));
+    num("wait-unal", fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&flag) + 1, 0, 0));
+    num("wait-unmapped", fnvnx_hcall3(H->wait_on_address, 0x30000000, 0, 0));
+    plat(8, H->heap_base + 0x320000, 0x1000, 0, 3);
+    num("wait-prot-none", fnvnx_hcall3(H->wait_on_address, H->heap_base + 0x320000, 0, 0));
+    num("wake-unal", fnvnx_hcall2(H->wake_address, FNVNX_ADDR(&flag) + 2, 1));
+    num("wake-unmapped", fnvnx_hcall2(H->wake_address, 0x30000000, 1));
+    num("wake-prot-none", fnvnx_hcall2(H->wake_address, H->heap_base + 0x320000, 1));
+    uint64_t w1 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(waiter), 1, 0x10000, 0, ~0ull);
+    uint64_t w2 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(waiter), 2, 0x10000, 0, ~0ull);
+    THR(thread_start, w1); THR(thread_start, w2);
+    fnvnx_hcall1(H->sleep_ns, 1000000);
+    num("wake-all", fnvnx_hcall2(H->wake_address, FNVNX_ADDR(&wf), 0x80000000ull));
+    THR(thread_join, w1); THR(thread_join, w2);
+    num("woken-all", wdone);
+    uint64_t cnt = 0, last = 0, x;
+    while ((x = THR(fs_dir_open, FNVNX_ADDR("sdmc:/"))) != 0) { cnt++; last = x; }
+    num("dirs-until-full", cnt);
+    num("thread-when-full", fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 1, 0x10000, 0, ~0ull));
+    num("close-one", THR(fs_dir_close, last));
+    num("thread-after-close", fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 1, 0x10000, 0, ~0ull) != 0);
+#elif MODE == 47
+    uint64_t b[8];
+    for (int i = 0; i < 8; i++) b[i] = 0xABABABABABABABABull;
+    num("a-submit-closed", fnvnx_hcall2(H->audio_submit, FNVNX_ADDR(b), 480));
+    num("a-rate", fnvnx_hcall2(H->audio_open, 44100, 480));
+    num("a-period0", fnvnx_hcall2(H->audio_open, 48000, 0)); num("a-period-big", fnvnx_hcall2(H->audio_open, 48000, 8193));
+    num("a-open", fnvnx_hcall2(H->audio_open, 48000, 480));
+    num("a-open-again", fnvnx_hcall2(H->audio_open, 44100, 1));
+    num("a-submit-wrong", fnvnx_hcall2(H->audio_submit, FNVNX_ADDR(b), 481)); num("a-submit", fnvnx_hcall2(H->audio_submit, FNVNX_ADDR(b), 480));
+    num("a-close", fnvnx_hcall0(H->audio_close)); num("a-close-again", fnvnx_hcall0(H->audio_close));
+    num("a-submit-after", fnvnx_hcall2(H->audio_submit, FNVNX_ADDR(b), 480));
+    num("a-reopen", fnvnx_hcall2(H->audio_open, 48000, 8192)); num("a-submit-8192", fnvnx_hcall2(H->audio_submit, FNVNX_ADDR(b), 8192));
+    num("pad4", fnvnx_hcall2(H->pad_read, 4, FNVNX_ADDR(b)));
+    num("pad-untouched", b[0] == 0xABABABABABABABABull && b[3] == 0xABABABABABABABABull);
+    num("pad0", fnvnx_hcall2(H->pad_read, 0, FNVNX_ADDR(b))); num("pad0-zeroed", b[0] | b[1] | b[2] | b[3]);
+    num("sleep-max", fnvnx_hcall1(H->sleep_ns, ~0ull));
+#elif MODE == 48
+    uint64_t v[1] = {0};
+    fnvnx_hcall1(H->exit, plat(9, 0, 0, 0, 0) + v[0]);   /* DISPLAY_DOCKED: the exit code is the answer */
 #elif MODE == 35
     fnvnx_hcall1(H->exit, 0x5200002A);   /* fnvnx_reach_violation(42) */
 #elif MODE == 36
@@ -430,8 +630,8 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("marker", marker(41));
     volatile uint32_t *hp = (volatile uint32_t *)(uintptr_t)H->heap_base;
     hp[0] = 0xabcd0001; hp[0x3FFF] = 0xabcd0002;
-    num("map", fnvnx_hcall3(H->map_fixed, 0x400000, 0x10000, H->heap_base));
-    volatile uint32_t *p = (volatile uint32_t *)0x400000;
+    num("map", fnvnx_hcall3(H->map_fixed, 0x4000000, 0x10000, H->heap_base));
+    volatile uint32_t *p = (volatile uint32_t *)0x4000000;
     num("carried", p[0] ^ p[0x3FFF]);
     num("zeroed-rest", p[1] | p[0x3FFE]);
 #if MODE == 4
@@ -440,15 +640,15 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
 #endif
     p[0] = 0x1234; p[0x3FFF] = 0x5678;
     num("readback", p[0] + p[0x3FFF]);
-    num("overlap", fnvnx_hcall3(H->map_fixed, 0x400000, 0x1000, H->heap_base + 0x20000));
+    num("overlap", fnvnx_hcall3(H->map_fixed, 0x4000000, 0x1000, H->heap_base + 0x20000));
     num("keys", fnvnx_hcall3(H->map_fixed, 0xf0000, 0x1000, H->heap_base + 0x20000));
-    num("src-unaligned", fnvnx_hcall3(H->map_fixed, 0x500000, 0x1000, H->heap_base + 0x20001));
-    num("src-given", fnvnx_hcall3(H->map_fixed, 0x500000, 0x1000, H->heap_base));
-    num("src-outside", fnvnx_hcall3(H->map_fixed, 0x500000, 0x1000, 0x10000));
-    num("src-past-end", fnvnx_hcall3(H->map_fixed, 0x500000, 0x2000, H->heap_base + H->heap_size - 0x1000));
-    uint64_t a[3] = {0x400000, 0x10000, 1};
+    num("src-unaligned", fnvnx_hcall3(H->map_fixed, 0x4010000, 0x1000, H->heap_base + 0x20001));
+    num("src-given", fnvnx_hcall3(H->map_fixed, 0x4010000, 0x1000, H->heap_base));
+    num("src-outside", fnvnx_hcall3(H->map_fixed, 0x4010000, 0x1000, 0x10000));
+    num("src-past-end", fnvnx_hcall3(H->map_fixed, 0x4010000, 0x2000, H->heap_base + H->heap_size - 0x1000));
+    uint64_t a[3] = {0x4000000, 0x10000, 1};
     num("protect", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(a), 3));
-    uint64_t u[3] = {0x500000, 0x1000, 1};
+    uint64_t u[3] = {0x3000000, 0x1000, 1};
     num("protect-unmapped", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(u), 3));
     uint64_t im[3] = {H->guest_base, 0x1000, 0};
     num("protect-image", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(im), 3));
@@ -471,7 +671,7 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     p[0] = 9;   /* a write to the read-only page: the run must end here */
     say("after the fault\n");
 #endif
-    uint64_t w[3] = {0x400000, 0x10000, 3};
+    uint64_t w[3] = {0x4000000, 0x10000, 3};
     num("unprotect", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(w), 3));
     p[0] = 9;
     uint64_t t1 = fnvnx_hcall0(H->system_tick), t2 = fnvnx_hcall0(H->system_tick);
@@ -494,6 +694,35 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     return 0;
 }
 '''
+
+
+def parse_totality(path):
+    """the header's TOTALITY TABLE block parsed: (services {fn: (NAME, n or None)}, slots [names]). Rows are `<fn> <NAME> n=<k>`, the
+    NOT SERVED row, and the combined sockets row (names, then `n = ... (SOCK_SOCKET 3, CLOSE 1, ...)`); the numbers are cross-checked
+    against the `#define FNVNX_PLAT_<NAME> <fn>u` lines; the slots are the uint64 fields of struct FnvnxHostApi."""
+    txt = open(path).read()
+    block = txt[txt.index("TOTALITY TABLE BEGIN"):txt.index("TOTALITY TABLE END")]
+    lines = [re.sub(r"^\s*\*\s?", "", l) for l in block.splitlines()]
+    rows = {}
+    for l in lines:
+        m = re.match(r"\s*(\d+) ([A-Z_0-9]+)\s+n=(\d+)\b", l)
+        if m:
+            rows[int(m.group(1))] = (m.group(2), int(m.group(3)))
+        m = re.match(r"\s*(\d+) ([A-Z_0-9]+)\s+NOT SERVED", l)
+        if m:
+            rows[int(m.group(1))] = (m.group(2), None)
+    body = "\n".join(lines)
+    m = re.search(r"16\.\.33 (.*?)\bn = the count[^(]*\((.*?)\)\s*\n", body, re.S)
+    names = re.findall(r"\bSOCK_[A-Z_]+", m.group(1))
+    counts = {("SOCK_" + a if not a.startswith("SOCK_") else a): int(b) for a, b in re.findall(r"([A-Z_]+) (\d+)", m.group(2))}
+    assert len(names) == 18 and set(counts) == set(names), (names, counts)
+    for i, n in enumerate(names):
+        rows[16 + i] = (n, counts[n])
+    defs = {int(v): n for n, v in re.findall(r"#define FNVNX_PLAT_([A-Z_0-9]+) (\d+)u", txt) if n not in ("SOCK_FIRST", "SOCK_LAST")}
+    assert {f: r[0] for f, r in rows.items()} == defs, "table rows and #define FNVNX_PLAT_* differ"
+    st = txt[txt.index("typedef struct FnvnxHostApi {"):txt.index("} FnvnxHostApi;")]
+    slots = re.findall(r"uint64_t (\w+);", st)[4:]   # after guest_base, guest_size, heap_base, heap_size
+    return rows, slots
 
 
 def case(name, cond, extra=""):
@@ -541,14 +770,15 @@ def symbol(elf, name):
 
 
 def make_plan(elf_bytes):
-    rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000), ("mod1", 0x1410000, 0x1500000)]
-    plan = bootlayout.plan(bootlayout.parse_elf(elf_bytes), rows, 1 << 20)
-    # the free range for map_fixed: the exe image window; keys stays never-mapped
+    # exe and mod1 lie inside the host's window (0x400000..0x2100000: map_fixed only zeroes there); mod2 is outside it (map_fixed
+    # moves a heap block there); keys stays never-mapped
+    rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000), ("mod1", 0x1410000, 0x1500000), ("mod2", 0x4000000, 0x4200000)]
+    plan = bootlayout.plan(bootlayout.parse_elf(elf_bytes), rows, 4 << 20)
     return plan
 
 
-def run(elf_bytes, root, watch=None, **kw):
-    svc = boothost.Services(root)
+def run(elf_bytes, root, watch=None, svc=None, **kw):
+    svc = svc or boothost.Services(root)
     m = bootmachine.Machine(elf_bytes, make_plan(elf_bytes), svc, **kw)
     lines, tids = [], []
     m.on_console(lines.append)
@@ -563,7 +793,7 @@ def main():
     root = os.path.join(TMP, "sd")
     os.makedirs(root)
     open(os.path.join(root, "data.bin"), "wb").write(b"01ABCDEFGH23")
-    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, *range(12, 22), *range(30, 40))}   # MODE 6 (boot CLI guest) is built by test_boot.py
+    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, *range(12, 22), *range(30, 42), 44, 45, 46, 47, 48)}   # MODE 6 (boot CLI guest) is built by test_boot.py
     elf0, path0 = built[0]
     plan0 = make_plan(elf0)
     base = plan0["image"]["base"]
@@ -580,13 +810,13 @@ def main():
     text = "\n".join(lines1)
     case("exit code 7, reason exit", r1["reason"] == "exit" and r1["exit_code"] == 7, r1)
     case("console: self-relocated string pointers", lines1[:2] == ["hello from the guest", "second line"], lines1[:3])
-    for k, v in (("marker", "2a"), ("map", "0"), ("readback", "68ac"), ("overlap", "f59"), ("keys", "cc01"),
-                 ("carried", str(hex(0xabcd0001 ^ 0xabcd0002))[2:]), ("zeroed-rest", "0"), ("src-unaligned", "cc01"),
-                 ("src-given", "d401"), ("src-outside", "cc01"), ("src-past-end", "cc01"),
+    for k, v in (("marker", "2a"), ("map", "0"), ("readback", "68ac"), ("overlap", "f59"), ("keys", "da01"),
+                 ("carried", str(hex(0xabcd0001 ^ 0xabcd0002))[2:]), ("zeroed-rest", "0"), ("src-unaligned", "1759"),
+                 ("src-given", "d401"), ("src-outside", "d401"), ("src-past-end", "d401"),
                  ("protect", "0"), ("protect-unmapped", "d401"), ("protect-image", "d401"),
                  ("protect-given-src", "d401"), ("protect-heap-none", "0"), ("protect-heap-rw", "0"),
                  ("heap-rw-works", "5"), ("protect-bad-size", "ca01"), ("protect-bad-addr", "cc01"), ("unprotect", "0"), ("tickdiff", "3e8"),
-                 ("thread", "2"), ("woken", "0"), ("flag", "4d"), ("pread", "8"), ("rand-calls-equal", "1")):
+                 ("thread", "10000"), ("woken", "0"), ("flag", "4d"), ("pread", "8"), ("rand-calls-equal", "1")):
         case("guest saw %s=%s" % (k, v), (k + "=" + v) in lines1, text)
     case("pread through fs_* (case-folded path)", "ABCDEFGH" in lines1, text)
     case("two threads, a context switch", r1["threads"] == 2 and r1["switches"] >= 2, r1)
@@ -603,7 +833,7 @@ def main():
     rf, linesf, _, _ = run(*[built[3][0], root])
     f = rf.get("fault", {})
     case("write to a read-only page ends the run: fault", rf["reason"] == "fault" and rf["exit_code"] is None, rf)
-    case("fault record", f.get("kind") == "write-protected" and f.get("addr") == 0x400000 and f.get("tid") == 1
+    case("fault record", f.get("kind") == "write-protected" and f.get("addr") == 0x4000000 and f.get("tid") == 1
         and f.get("size") == 4 and set(f) == {"kind", "addr", "size", "pc", "lr", "tid"}, f)
     case("nothing runs after the fault", "after the fault" not in linesf, linesf)
 
@@ -642,9 +872,19 @@ def main():
         ok = True
     case("limit_instructions <= 0 is a construction error", ok)
 
-    re_, _, _, _ = run(built[1][0], root)
-    case("unregistered ext module ends the run", re_["reason"] == "ext-module-missing"
-        and re_["ext"] == {"module": 9, "fn": 1}, re_)
+    class Ext9(boothost.Services):
+        """module 9 registered: fn 99 is a service it cannot answer; every call is recorded"""
+        calls = []
+
+        def ext_9(self, fn, a):
+            self.calls.append((fn, list(a)))
+            if fn == 99:
+                raise bootmachine.ExtMissing(9, fn)
+            return 1000 * fn + 10 * len(a) + (a[0] if a else 0)
+
+    re_, _, _, _ = run(built[1][0], root, svc=Ext9(root))
+    case("a registered ext module whose handler raises ExtMissing ends the run", re_["reason"] == "ext-module-missing"
+        and re_["ext"] == {"module": 9, "fn": 99}, re_)
     rd, _, _, _ = run(built[2][0], root)
     case("no ready thread, no deadline: deadlock with a wait report", rd["reason"] == "deadlock"
         and rd["waits"][0]["tid"] == 1 and rd["waits"][0]["wait"][0] == "addr", rd)
@@ -674,7 +914,8 @@ def main():
     case("vm: run exits 7", rv["reason"] == "exit" and rv["exit_code"] == 7, (rv, textv))
     def lowest(size, taken):
         """reference: the lowest 64 KiB multiple >= 0x10000 below 4 GiB clear of the plan's regions, free ranges and taken"""
-        blocked = [(r["lo"], r["hi"]) for r in plan0["regions"].values()] + [(f["lo"], f["hi"]) for f in plan0["free"]] + taken
+        blocked = [(r["lo"], r["hi"]) for r in plan0["regions"].values()] + [(f["lo"], f["hi"]) for f in plan0["free"]] + taken \
+            + [bootmachine.WINDOW]
         c = 0x10000
         while c + size <= 1 << 32:
             if not any(c < b and a < c + size for a, b in blocked):
@@ -699,8 +940,8 @@ def main():
          vals.get("recommit-protected") == 0 and vals.get("zero-rw-after-protect") == 0, textv)
     case("vm: decommit of part of an extent zeroes it and it stays accessible (host_vm.inc)",
          vals.get("partial-decommit") == 0 and vals.get("partial-zero-writable") == 0 and vals.get("partial-write") == 0x88, textv)
-    case("vm: map_fixed over a committed page is occupied (AlreadyInitialized), over an uncommitted reserved page refused 0xD401",
-         vals.get("mapfixed-over-resv") == 0xF59 and vals.get("mapfixed-over-resv-free") == 0xD401, textv)
+    case("vm: map_fixed over a committed page is occupied (AlreadyInitialized), over an uncommitted reserved page outside the alias-code region 0xDA01",
+         vals.get("mapfixed-over-resv") == 0xF59 and vals.get("mapfixed-over-resv-free") == 0xDA01, textv)
     case("vm: release frees the whole reservation; a non-base address is refused",
          vals.get("release") == 0 and vals.get("release-again") == 0x1759 and vals.get("release-inner") == 0x1759, textv)
     case("vm: reserve after release gives the same address", A2 == A, (hex(A), hex(A2)))
@@ -712,8 +953,8 @@ def main():
     case("vm: every refusal is an event with its result", kinds == [
         "vm_commit-refused"] * 3 + ["vm_protect-refused"] * 2 + ["map_fixed-refused"] * 2 + ["vm_release-refused"] * 2
         + ["vm_reserve-refused"] * 7 + ["thread_activity-refused"] * 3, kinds)
-    case("platform: thread_activity: unknown -> 0xE401, tid 0 -> BadInput 0x1759, new thread -> 0xFA01, pause holds the worker, resume runs it",
-         vals.get("tact-nothread") == 0xE401 and vals.get("tact-tid0") == 0x1759 and vals.get("tact-new") == 0xFA01
+    case("platform: thread_activity: unknown id -> NotFound 0x1359, tid 0 -> BadInput 0x1759, new thread -> 0xFA01, pause holds the worker, resume runs it",
+         vals.get("tact-nothread") == 0x1359 and vals.get("tact-tid0") == 0x1759 and vals.get("tact-new") == 0xFA01
          and vals.get("tact-pause") == 0 and vals.get("paused-flag") == 0 and vals.get("tact-resume") == 0
          and vals.get("resumed-flag") == 0x4d, textv)
     case("platform: cpu_boost and message are the services'", svcv.boosts == [1] and svcv.messages == [("cap", "body")]
@@ -731,8 +972,8 @@ def main():
     case("vm: access to a wholly decommitted extent: fault", rf10["reason"] == "fault" and rf10["fault"]["kind"] == "read-unmapped"
          and "after the fault" not in lines10, (rf10, lines10))
     rf11 = run(built[11][0], root)[0]
-    case("platform: a fn of module 11 the header does not define ends the run as ext-module-missing",
-         rf11["reason"] == "ext-module-missing" and rf11["ext"] == {"module": 11, "fn": 9}, rf11)
+    case("platform: a socket service with its exact nargs (no result in this environment) ends the run as ext-module-missing",
+         rf11["reason"] == "ext-module-missing" and rf11["ext"] == {"module": 11, "fn": 16}, rf11)
 
     class NoMsg(boothost.Services):
         plat_message = None
@@ -743,7 +984,7 @@ def main():
     except bootmachine.MachineError as e:
         ok, msg = "message" in str(e), str(e)
     case("a header-defined platform fn nobody implements raises at construction", ok, msg)
-    case("every header fn 1..8, 10 and 11..15 of module 11 resolves", sorted(bootmachine.Machine(elf0, plan0, boothost.Services(root)).plat) == [*range(1, 9), *range(10, 16)])
+    case("every served fn 1..15 of module 11 resolves", sorted(bootmachine.Machine(elf0, plan0, boothost.Services(root)).plat) == [*range(1, 16)])
 
     class NoSec(boothost.Services):
         plat_section_map = None
@@ -760,7 +1001,7 @@ def main():
         ok, msg = True, ""
     except bootmachine.MachineError as e:
         ok, msg = False, str(e)
-    case("construction check is over PLATFORM_FNS (fn 14 removed: still builds, 13 others resolve)", ok, msg)
+    case("construction check is over PLATFORM_FNS (fn 14 removed: still builds)", ok, msg)
     bootmachine.PLATFORM_FNS[14] = ("section_free", 1)
     saved = bootmachine.Machine._plat_section_free
     del bootmachine.Machine._plat_section_free
@@ -862,11 +1103,11 @@ def main():
         0xD401, 0xD401, 0xD401, 0xCC01, 0xCC01, 0xCA01, 0xCA01)] + [("unmap_fixed-refused", 0xD401), ("map_fixed-refused", 0xD401)], ev37)
     r38, l38 = run(built[38][0], root)[:2]
     case("unmap_fixed: the unmapped addr faults", r38["reason"] == "fault" and r38["fault"]["kind"] == "read-unmapped"
-         and r38["fault"]["addr"] == 0x500000 and "ok=0" in l38 and "after the fault" not in l38, (r38, l38))
+         and r38["fault"]["addr"] == 0x4000000 and "ok=0" in l38 and "after the fault" not in l38, (r38, l38))
     r39, l39 = run(built[39][0], root)[:2]
-    case("unmap_fixed: a page that is not read-write (the header's precondition) ends the run as a host-call fault, no result is invented",
-         r39["reason"] == "fault" and r39["fault"]["kind"].startswith("host-call:") and "precondition" in r39["fault"]["kind"]
-         and "ok=0" not in l39, (r39, l39))
+    k = kv(l39)
+    case("unmap_fixed: pages that are read-only / no access need no restore: succeeds, the bytes and RW come back",
+         r39["reason"] == "exit" and k.get("ok") == "0" and k.get("src-bytes") == "1" and k.get("src-rw") == "5", (r39, l39))
     case("unmap_fixed: two identical runs give identical run() dicts", r37 == run(built[37][0], root)[0])
     r31, l31 = run(built[31][0], root)[:2]
     k = kv(l31)
@@ -899,6 +1140,152 @@ def main():
          and r35["fact_id"] == 42 and r35["exit_code"] == 0x5200002A, r35)
     case("other non-zero exit codes stay ordinary exits (no fact_id)", r36["reason"] == "exit" and "fact_id" not in r36
          and r1["reason"] == "exit" and "fact_id" not in r1, r36)
+
+    # ---- the header's TOTALITY TABLE (parsed from the fixture) against the machine
+    rows, hslots = parse_totality(os.path.join(GUEST_DIR, "hostapi.h"))
+    mach0 = bootmachine.Machine(elf0, plan0, boothost.Services(root))
+    case("header: 34 services of module 11 and 50 slots parsed", len(rows) == 34 and sorted(rows) == list(range(1, 35))
+         and len(hslots) == 50, (len(rows), len(hslots)))
+    case("slots: the header's struct order is bootmachine.SLOTS, each has an h_<slot> and a handler", hslots == bootmachine.SLOTS
+         and all(callable(getattr(boothost.Services, "h_" + n, None)) and n in mach0.handlers for n in hslots), hslots)
+    served_decl = {f for f in rows if f in mach0.plat}
+    unserved_decl = {f for f in rows if f in bootmachine.UNSERVED or f in bootmachine.SOCK_SERVICES}
+    case("services: every declared service is served by the machine or listed as not determinable (no overlap, no extra)",
+         served_decl | unserved_decl == set(rows) and not served_decl & unserved_decl and set(mach0.plat) <= set(rows), (
+             sorted(set(rows) - served_decl - unserved_decl), sorted(served_decl & unserved_decl)))
+    case("services: served = 1..15 (15 of 34), not served = sockets 16..33 and TZ_AT 34 (19)", sorted(served_decl) == list(range(1, 16))
+         and sorted(unserved_decl) == list(range(16, 35)), (sorted(served_decl), sorted(unserved_decl)))
+    names_ok = all(rows[f][0].lower() == n and rows[f][1] in (None, need) for f, (n, need) in
+                   {**bootmachine.PLATFORM_FNS, **bootmachine.SOCK_SERVICES}.items())
+    case("services: machine names and least nargs equal the header's rows (fn 10 is the NOT SERVED row, kept: recorded difference)",
+         names_ok and rows[10][1] is None and "10" in bootmachine.__doc__ and "console host answers NO_SERVICE" in bootmachine.__doc__,
+         [(f, rows[f]) for f in rows if rows[f][0].lower() != {**bootmachine.PLATFORM_FNS, **bootmachine.SOCK_SERVICES}[f][0]])
+    # mechanical argument rules for every declared service, through Machine.ext_call on the host page
+    args_at = mach0.host_page + 0x100
+    bad = {}
+    for f, (nm, need) in sorted(rows.items()):
+        need = need if need is not None else bootmachine.PLATFORM_FNS[f][1]
+        if f in bootmachine.SOCK_SERVICES:
+            r = [mach0.ext_call(11, f, args_at, k) for k in sorted({0, need - 1, need + 1} - {need, -1})]
+            if r != [-22 & bootmachine.U64] * len(r):
+                bad[nm] = ("sock wrong nargs", r)
+            try:
+                mach0.ext_call(11, f, args_at, need)
+                bad[nm] = "sock exact nargs answered"
+            except bootmachine.ExtMissing as e:
+                if (e.module, e.fn) != (11, f):
+                    bad[nm] = "sock ExtMissing wrong"
+            continue
+        if need and mach0.ext_call(11, f, args_at, need - 1) != bootmachine.EXT_BAD_NARGS:
+            bad[nm] = "nargs below the row"
+        if mach0.ext_call(11, f, 0, need + 1) != bootmachine.EXT_BAD_NARGS:
+            bad[nm] = "null array with nargs > 0"
+        if f in bootmachine.UNSERVED:
+            try:
+                mach0.ext_call(11, f, args_at, need)
+                bad[nm] = "unserved fn answered"
+            except bootmachine.ExtMissing as e:
+                if (e.module, e.fn) != (11, f):
+                    bad[nm] = "ExtMissing wrong"
+    case("services: every declared service answers BAD_NARGS below its n and for a null array, sockets -EINVAL, unserved ones end the run",
+         not bad, bad)
+    case("services: fn 0 and 35.. are NO_SERVICE, unknown module NO_MODULE, fn > UINT32_MAX NO_SERVICE (before the platform table)",
+         all(mach0.ext_call(11, f, args_at, 4) == bootmachine.EXT_NO_SERVICE for f in (0, 35, 36, 0xFFFFFFFF, 1 << 32, (1 << 32) + 4))
+         and mach0.ext_call(63, 1, args_at, 1) == bootmachine.EXT_NO_MODULE and mach0.ext_call(64, 1 << 33, 0, 0) == bootmachine.EXT_NO_MODULE
+         and mach0.ext_call(11, 4, args_at, 1 << 40) == 0, "")
+    try:
+        bootmachine.Machine(elf0, plan0, boothost.Services(root), profile="tv")
+        ok = False
+    except bootmachine.MachineError:
+        ok = True
+    case("profile: anything but handheld / docked is a construction error", ok)
+
+    r40, l40 = run(built[40][0], root)[:2]
+    k = kv(l40)
+    NOMOD, NOSVC, BADN, EINVAL = "ffffffffffffff01", "ffffffffffffff02", "ffffffffffffff03", "ffffffffffffffea"
+    want40 = {"mod64": NOMOD, "mod-huge": NOMOD, "mod9-unreg": NOMOD, "mod12-fn-huge": NOMOD, "fn0": NOSVC, "fn35": NOSVC,
+              "fn-u32max": NOSVC, "fn-above-u32": NOSVC, "fn10-nargs1": BADN, "vm-reserve-n1": BADN, "null-array": BADN,
+              "docked-n0-null": "0", "docked-n1-null": BADN, "docked-n3": "0", "docked-ncap": "0", "boost-extra-args": "0",
+              "sock-wrong-n": EINVAL, "sock-wrong-n0": EINVAL, "sock-too-many": EINVAL, "tz-n1": BADN, "tz-null": BADN,
+              "reserve-above-4g": "0", "reserve-4g": "0"}
+    bad = {n: (k.get(n), v) for n, v in want40.items() if k.get(n) != v}
+    case("ext_call (guest): NO_MODULE / NO_SERVICE / BAD_NARGS are returned to the guest, nargs above UINT32_MAX counts as UINT32_MAX, "
+         "extra arguments ignored, sockets -EINVAL on wrong nargs (%d values)" % len(want40), r40["reason"] == "exit" and not bad, (bad, r40))
+    # DISPLAY_DOCKED: the profile
+    for prof, want in (("handheld", "0"), ("docked", "1")):
+        rp, lp = run(built[40][0], root, profile=prof)[:2]
+        k = kv(lp)
+        case("DISPLAY_DOCKED is %s for profile %s (any nargs, null array only with nargs 0)" % (want, prof),
+             k.get("docked-n0-null") == want and k.get("docked-n3") == want and k.get("docked-ncap") == want
+             and k.get("docked-n1-null") == BADN, (prof, k))
+        re48 = run(built[48][0], root, profile=prof)[0]
+        case("DISPLAY_DOCKED through the exit code, profile %s" % prof, re48["reason"] == "exit" and re48["exit_code"] == int(want), re48)
+    svc41 = Ext9(root)
+    Ext9.calls = []
+    r41, l41 = run(built[41][0], root, svc=svc41)[:2]
+    k = kv(l41)
+    case("ext_call (guest): a registered module is called with its args; fn > UINT32_MAX is NO_SERVICE without calling it; nargs 0 gives []; "
+         "a handler raising ExtMissing ends the run", k.get("m9-fn1") == "407" and k.get("m9-fn-huge") == NOSVC and k.get("m9-nargs0") == "7d0"
+         and r41["reason"] == "ext-module-missing" and r41["ext"] == {"module": 9, "fn": 99} and "after the missing service" not in l41
+         and Ext9.calls == [(1, [1, 2, 3]), (2, []), (99, [1])], (r41, l41, Ext9.calls))
+
+    # VM_PROTECT order and spans; windows; UNMAP_FIXED of protected pages
+    r44, l44 = run(built[44][0], root)[:2]
+    k = kv(l44)
+    want44 = {"p-addr-unal": "cc01", "p-addr-unal-size0": "cc01", "p-size0": "ca01", "p-size-unal": "ca01", "p-wrap": "d401",
+              "p-wrap-beats-perm": "d401", "p-wo": "d801", "p-x": "d801", "p-7": "d801", "p-big": "d801", "p-perm-beats-owned": "d801",
+              "p-unowned": "d401", "p-still-rw": "3", "p-span": "0", "p-span-ro": "3", "p-none": "0", "p-rw": "0", "p-rw-write": "b",
+              "decommit-ro-none": "0", "decommit-wrap": "d401", "decommit-size0": "0", "recommit": "0", "recommit-zero": "0",
+              "w-ro": "0", "w-ro-read": "77", "w-none": "0", "w-rw": "0", "w-rw-keeps": "80", "mf": "0",
+              "uf-protected": "0", "uf-bytes": "1", "uf-src-rw": "7"}
+    bad = {n: (k.get(n), v) for n, v in want44.items() if k.get(n) != v}
+    case("VM_PROTECT: header check order, write-only 2 -> 0xD801, a span of two extents, the host window; DECOMMIT of R / no-access "
+         "extents; UNMAP_FIXED of R / no-access pages (%d values)" % len(want44), r44["reason"] == "exit" and not bad, (bad, r44))
+
+    r45, l45 = run(built[45][0], root)[:2]
+    k = kv(l45)
+    want45 = {"size0": "1759", "wrap": "1759", "addr-unal": "1759", "size-unal": "1759", "size0-in-window": "1759", "past-4g": "da01",
+              "src0": "1759", "src-unal": "1759", "outside-region": "da01", "keys": "da01", "src-not-heap": "d401",
+              "win": "0", "win-zeroed": "0", "win-src-ignored": "0", "win-none-to-rw": "0", "win-rw-again": "9", "win-first": "0",
+              "win-last": "0", "win-straddle-end": "f59", "win-straddle-start": "f59", "live": "200", "limit": "559",
+              "limit-occupied": "559", "unmap-one": "0", "again": "0", "uf-win": "0", "uf-win-zeroed": "0", "uf-win-src-unal": "cc01",
+              "uf-win-size-unal": "ca01", "uf-wrap": "d401", "uf-win-straddle": "d401"}
+    bad = {n: (k.get(n), v) for n, v in want45.items() if k.get(n) != v}
+    case("map_fixed: size 0 / wrap / misalignment 0x1759, the window zeroes and ignores src, src 0 / misaligned 0x1759, 512 live -> 0x559, "
+         "alias region 0xDA01, src not heap 0xD401; UNMAP_FIXED: ADDR, SIZE, wrap, window (%d values)" % len(want45),
+         r45["reason"] == "exit" and not bad, (bad, r45))
+
+    r46, l46 = run(built[46][0], root)[:2]
+    k = kv(l46)
+    NF, BI, CC, RG = "1359", "1759", "cc01", "d401"
+    want46 = {"h1-id": "1", "h-distinct": "1", "start-unknown": NF, "start-zero": NF, "join-unknown": NF, "join-never-started": BI,
+              "prio-unknown": NF, "prio-self": "0", "cpu-unknown": NF, "cpu-self": "0", "cpu-negative": "0", "cpu-bits40-62": "0",
+              "start": "0", "join": "0", "flag": "4d", "free": "0", "free-twice": NF, "join-freed": NF, "start-freed": NF,
+              "prio-freed": NF, "act-freed": NF, "free-unknown": NF, "h3-new-generation": "1", "free-running": "0", "detached-ran": "4f",
+              "dir-id": "1", "dir-next-cap0": "0", "dir-next-cut": "3", "dir-cut-bytes": hex(ord("d") * 0x10000 + ord("t") * 0x100 + 0)[2:],
+              "dir-next-2": "6", "dir-end": "0", "dir-unknown": "0", "dir-as-thread": NF, "thread-as-dir": "0", "dir-close": "0",
+              "dir-next-closed": "0", "dir-close-again": "0", "dir-close-unknown": "0", "dir-notdir": "0", "dir-missing": "0",
+              "dirs-until-full": hex(1024 - 3)[2:], "thread-when-full": "0", "close-one": "0", "thread-after-close": "1",
+              "wait-unal": CC, "wait-unmapped": RG, "wait-prot-none": RG, "wake-unal": CC, "wake-unmapped": RG, "wake-prot-none": RG,
+              "wake-all": "0", "woken-all": "2"}
+    bad = {n: (k.get(n), v) for n, v in want46.items() if k.get(n) != v}
+    case("ids: thread and directory ids are table handles (unknown / freed -> NotFound, never started -> BadInput, 1024 live together, "
+         "a freed id never names anything again); dir_next cap 0 / cut; wait / wake alignment and readability; wake count above "
+         "0x7FFFFFFF wakes all (%d values)" % len(want46), r46["reason"] == "exit" and not bad, (bad, r46))
+    case("ids: thread_set_cpu with a negative spec changes nothing", run(built[46][0], root)[3].placement.get(1) == {"cpu": 2, "prio": 3},
+         "")
+
+    r47, l47 = run(built[47][0], root)[:2]
+    k = kv(l47)
+    M1 = "ffffffffffffffff"
+    want47 = {"a-submit-closed": M1, "a-rate": M1, "a-period0": M1, "a-period-big": M1, "a-open": "0", "a-open-again": "0",
+              "a-submit-wrong": M1, "a-submit": "0", "a-close": "0", "a-close-again": "0", "a-submit-after": M1, "a-reopen": "0",
+              "a-submit-8192": "0", "pad4": "0", "pad-untouched": "1", "pad0": "0", "pad0-zeroed": "0", "sleep-max": "0"}
+    bad = {n: (k.get(n), v) for n, v in want47.items() if k.get(n) != v}
+    case("audio_open / audio_submit / audio_close and pad_read index > 3 as the header states; sleep_ns above INT64_MAX sleeps INT64_MAX ns",
+         r47["reason"] == "exit" and not bad and (1 << 63) - 1 <= r47["virtual_ns"] <= (1 << 63) - 1 + 10**9, (bad, r47))
+    case("new modes: two identical runs give identical run() dicts", r44 == run(built[44][0], root)[0]
+         and r45 == run(built[45][0], root)[0] and r46 == run(built[46][0], root)[0] and r40 == run(built[40][0], root)[0], "")
     print("%d cases, %.1f s" % (N[0], time.time() - t0))
     return 1 if FAILED else 0
 
