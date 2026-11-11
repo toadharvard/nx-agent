@@ -5,13 +5,16 @@
 liftall.py --module NAME ...                  (any mode) a module of modules.tsv: its file, its assigned load base (FNVNX_BASE) and FNVNX_FACTS_OUT/<name>/universe.tsv
 Deterministic: sorted iteration, no clocks in the outputs. Inputs FNVNX_EXE, FNVNX_UNIVERSE (universe.tsv), FNVNX_PROOF (certificates); outputs only under --out (exe-derived, never in the repository).
 Prerequisites: python3 with capstone, numpy, pyelftools, unicorn (test/instest.py imports them); aarch64-linux-gnu-g++/gcc/binutils."""
-import argparse, collections, glob, hashlib, json, multiprocessing as mp, os, re, subprocess, sys, threading, time
+import argparse, collections, glob, hashlib, json, multiprocessing as mp, os, re, shutil, subprocess, sys, threading, time
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
 for p in ('bench', 'tools', 'test', ''):
     sys.path.insert(0, os.path.join(LIFT, p))
 CC, CXX, NM, AR = 'aarch64-linux-gnu-gcc', 'aarch64-linux-gnu-g++', 'aarch64-linux-gnu-nm', 'aarch64-linux-gnu-ar'
 BATCH = 60
-ENV = dict(os.environ, LC_ALL='C')
+os.environ['LC_ALL'] = 'C'      # part of objcache's key (ENV_KEYS): fixed here so every machine keys the same
+ENV = dict(os.environ)
+sys.path.insert(0, os.path.join(LIFT, '..', 'tools', 'link'))
+import objcache      # T1's exact compile cache (tools/link/objcache.py): every compiler run of this packer goes through it
 LIBC = {'memcpy', 'memset', 'memmove', 'memcmp', 'memchr', 'strlen', 'strcmp', 'strcpy', 'strncmp', 'strncpy', 'sqrt', 'sqrtf', 'floor', 'ceil', 'trunc', 'round', 'fabs', 'fmod', 'abort',
         '__aeabi_unwind_cpp_pr0', '__stack_chk_fail', 'ceilf', 'floorf', 'truncf', 'roundf', 'rint', 'rintf', 'sin', 'cos', 'atan2', 'exp', 'log', 'pow'}
 CF = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-w', '-c']   # plain AAPCS runtime files (as bench/chain.py)
@@ -25,6 +28,45 @@ def flags():
 
 def run(cmd, **k):
     return subprocess.run(cmd, capture_output=True, text=True, env=ENV, **k)
+
+
+# ---------------------------------------------------------------- every compiler run: through objcache (its key, unchanged)
+# objcache's key holds the working directory, the command line verbatim (the -o path too) and the source text; the object names
+# its source (.file).  So a compile here is always made in ONE fixed directory (CCDIR), from a source named by the sha256 of its
+# text (a generated text is staged there; a file of the repository is compiled from its own path) into an object named by the
+# sha256 of the command: no per-shard / per-entry / out-directory path is in the key or in the object.  The object is then
+# copied to where the caller wants it.  A per-name flock serialises identical compiles of concurrent processes.
+CCDIR = os.environ.get('FNVNX_LIFTALL_CCDIR', '/tmp/fnvnx-liftall-cc')
+
+
+def cc(cmd, src, dest, text=None):
+    """Compile `cmd + [src, '-o', dest]` (cmd: compiler and flags) through objcache -> (returncode, stderr).  text: the source's
+    bytes when src is a generated file (src is then only its suffix: staged under its content hash); else src is compiled in place."""
+    import fcntl
+    os.makedirs(CCDIR, exist_ok=True)
+    stage = None
+    if text is not None:
+        if isinstance(text, str): text = text.encode()
+        stage = '%s/%s%s' % (CCDIR, hashlib.sha256(text).hexdigest(), os.path.splitext(src)[1] or '.cpp')
+        src = stage
+    tmp = '%s/%s.o' % (CCDIR, hashlib.sha256(json.dumps([cmd, src]).encode()).hexdigest())
+    with open(tmp + '.lock', 'w') as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        if stage:
+            t = '%s.%d.tmp' % (stage, os.getpid()); open(t, 'wb').write(text); os.replace(t, stage)
+        try:
+            rc, err = objcache.compile(cmd[0], cmd[1:], src, tmp, CCDIR)
+            if rc == 0:
+                t = '%s.%d.cp' % (dest, os.getpid()); shutil.copyfile(tmp, t); os.replace(t, dest)
+        finally:
+            for f in (tmp, stage):
+                if f and os.path.exists(f): os.remove(f)
+    return rc, err
+
+
+def cc_check(cmd, src, dest, text=None):
+    rc, err = cc(cmd, src, dest, text)
+    if rc: sys.exit('compile failed (%d): %s %s\n%s' % (rc, ' '.join(cmd), src, err))
 
 
 def classify(s):
@@ -41,10 +83,8 @@ def entries(u):
 
 # ---------------------------------------------------------------- shard worker
 def compile_text(text, o):
-    open(o[:-2] + '.cpp', 'w').write(text)
-    r = run([CXX] + G['flags'] + ['-x', 'c++', o[:-2] + '.cpp', '-o', o])
-    os.remove(o[:-2] + '.cpp')
-    return None if r.returncode == 0 else (re.sub(r"['‘][^'’]*['’]", 'N', (r.stderr.split('error:', 1) + [''])[1].strip().split('\n')[0]) or r.stderr.strip()[:80])
+    rc, err = cc([CXX] + G['flags'] + ['-x', 'c++'], 'u.cpp', o, text)
+    return None if rc == 0 else (re.sub(r"['‘][^'’]*['’]", 'N', (err.split('error:', 1) + [''])[1].strip().split('\n')[0]) or err.strip()[:80])
 
 
 def lift_one(a):
@@ -72,6 +112,12 @@ def nm_parse(o):
 
 
 def work(job):
+    s0 = collections.Counter(objcache.STATS); w0 = collections.Counter(objcache.WHY)
+    r = work1(job)
+    return r, collections.Counter({k: v - s0[k] for k, v in objcache.STATS.items() if v != s0[k]}), collections.Counter({k: v - w0[k] for k, v in objcache.WHY.items() if v != w0[k]})
+
+
+def work1(job):
     bi, addrs, out = job
     o = '%s/obj/b_%08x.o' % (out, addrs[0]); rf = o[:-2] + '.json'
     if os.path.exists(rf) and os.path.exists(o): return json.load(open(rf))
@@ -119,8 +165,9 @@ def shard(a):
     core.explore = cap
     box = {}; threading.Thread(target=sampler, args=(box,), daemon=True).start()
     batches = [(i, mine[j:j + BATCH], out) for i, j in enumerate(range(0, len(mine), BATCH))]
-    with mp.get_context('fork').Pool(a.jobs) as p: res = list(p.imap(work, batches, 1))
+    with mp.get_context('fork').Pool(a.jobs) as p: got = list(p.imap(work, batches, 1))
     box['stop'] = 1
+    res = [g[0] for g in got]; objcache.STATS.update(sum((g[1] for g in got), collections.Counter())); objcache.WHY.update(sum((g[2] for g in got), collections.Counter()))
     man = sorted((int(k, 16), v, r['obj']) for r in res for k, v in r['syms'].items())
     miss = sorted(m for r in res for m in r['missing'])
     certs = formcert.Certs(); forms = collections.Counter()
@@ -140,6 +187,7 @@ def shard(a):
     print('shard %d/%d: entries %d lifted %d missing %d (top: %s) objects %d code bytes %d; forms %d (certified %d, uncertified %d; sites %d / %d); undefined non-lifted symbols %d; certificates dir %s' % (
         K, N, len(mine), len(man), len(miss), '; '.join('%d %s' % (n, r) for r, n in top), len(objs), sum(m[1] for m in man), len(forms), nc, len(forms) - nc, cert, sum(forms.values()) - cert,
         sum(1 for s in undef if classify(s) != 'lifted'), 'present' if certs.present else 'ABSENT (every form none)'))
+    print(objcache.summary('shard %d/%d' % (K, N)), file=sys.stderr)
     print('time %.0fs peak RSS (tree, sampled) %.0f MB' % (time.time() - t0, box.get('peak', 0) / 1024), file=sys.stderr)
 
 
@@ -173,7 +221,7 @@ def finish(a):
     rd = out + '/rt'; os.makedirs(rd, exist_ok=True)
     jobs = [([CC] + CF, 'rt.c'), ([CC] + CF + ['-I', LIFT + '/rt'], 'x87.c'), ([CC] + CF, 'cpumodel.c'), ([CXX] + flags() + ['-x', 'c++'], 'seh.c'), ([CXX] + flags() + ['-x', 'c++'], 'enter.c'), ([CXX] + flags() + ['-x', 'c++'], 'unhandled.c'), ([CXX] + flags() + ['-x', 'c++'], 'msvcrt_eh.c'), ([CXX] + flags() + ['-x', 'c++'], 'msvcrt_fp.c'), ([CXX] + flags() + ['-x', 'c++'], 'msvcrt_ci.c')]
     jobs += [([CC] + CF + ['-fno-builtin'], f) for f in ('fmath.c', 'rcptab.c') if os.path.exists('%s/rt/%s' % (LIFT, f))]
-    for cmd, f in jobs: subprocess.check_call(cmd + ['%s/rt/%s' % (LIFT, f), '-o', '%s/%s.o' % (rd, f[:-2])])
+    for cmd, f in jobs: cc_check(cmd, '%s/rt/%s' % (LIFT, f), '%s/%s.o' % (rd, f[:-2]))
     rtdef = set(l.split()[-1] for _, f in jobs for l in run([NM, '-g', '--defined-only', '%s/%s.o' % (rd, f[:-2])]).stdout.splitlines() if l.split())
     if a.bridge:           # import entries (tools/impgen.py): keys of the bridge table join the dispatcher's domain
         import impgen
@@ -186,9 +234,9 @@ def finish(a):
     h = phf.build(list(syms)); open(out + '/disp.S', 'w').write(phf.table_asm(syms, h))
     w('entries', [('%08x' % x, s, 'code' if x in code else 'import') for x, s in sorted(syms.items())])
     if imp: open(out + '/entries.tsv', 'a').write(open(out + '/imp_entries.tsv').readline())      # `# table_id <sha256 of bridge.tsv>` (last line)
-    subprocess.check_call([CC, '-mabi=ilp32', '-fPIC', '-c', out + '/disp.S', '-o', out + '/disp.o'])
+    cc_check([CC, '-mabi=ilp32', '-fPIC', '-c'], 'disp.S', out + '/disp.o', open(out + '/disp.S', 'rb').read())
     if imp:
-        subprocess.check_call([CXX] + flags() + ['-x', 'c++', out + '/imp.cpp', '-o', rd + '/imp.o']); jobs.append((None, 'imp.c'))
+        cc_check([CXX] + flags() + ['-x', 'c++'], 'imp.cpp', rd + '/imp.o', open(out + '/imp.cpp', 'rb').read()); jobs.append((None, 'imp.c'))
     if os.path.exists(out + '/rt.a'): os.remove(out + '/rt.a')
     sf = sorted(l.split()[-1] for l in run([NM, '-g', '--defined-only', rd + '/x87.o']).stdout.splitlines() if l.split())      # the 80-bit integer-only core: the SoftFloat class of the instruction counter (L4)
     open(out + '/softfloat.tsv', 'w').write(''.join(x + '\n' for x in sf))
@@ -204,6 +252,7 @@ def finish(a):
     print('finish: shards %s; universe %d, body %d, missing %d (top: %s), %d entries without a body; objects %d, code bytes %d; forms %d (certified %d, uncertified %d; sites %d / %d); undefined non-lifted symbols %d; dispatcher %d slots, %d hash attempts; %s' % (
         ks, len(ent), len(man), len(miss), '; '.join('%d %s' % (n, r) for r, n in reasons), nobody, len(set(r[2] for r in man)), bytes_, len(forms), nc, len(forms) - nc, cert, tot - cert,
         sum(1 for s, v in undef.items() if v[1] != 'lifted'), len(h['slots']), h['attempts'], res['status']))
+    print(objcache.summary('finish'), file=sys.stderr)
     if res['status'] != 'green': sys.exit('finish: %d universe entries have no body (missing.tsv): the pack is not complete' % (len(ent) - len(man)))
 
 
