@@ -43,7 +43,7 @@ import unitstage  # noqa: E402
 FORMAT, OBJ_FORMAT = "fnvnx-recipe/1", "fnvnx-objects/1"
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
-KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "constants", "link", "external"}
+KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "constants", "contract_names", "link", "external"}
 EXT_KEYS = {"name", "repo", "ref", "commit", "tree_sha256", "at"}
 SANDBOX_PATHS = ("/src", "/inc", "/in", "/out", "/tool", "/objs", "/ld", "/work", "/proc", "/dev", "/tmp", "/oldroot")
 STYPE = {0: "NOTYPE", 1: "OBJECT", 2: "FUNC", 5: "COMMON", 6: "TLS", 10: "IFUNC"}
@@ -213,9 +213,10 @@ def check(rec, root, files, roots):
     for u in ol if isinstance(ol, list) else err.append("os_layer must be a list") or []:
         if u not in units:
             err.append("os_layer entry %r is not a unit" % (u,))
-    c = rec.get("constants")
-    if c is not None and not (rel_ok(c) and (c in mine or c in seen)):
-        err.append("constants %r is neither a tracked file of the root nor a generated output" % (c,))
+    for key in ("constants", "contract_names"):
+        c = rec.get(key)
+        if c is not None and not (isinstance(c, str) and rel_ok(c) and (c in mine or c in seen)):
+            err.append("%s %r is neither a tracked file of the root nor a generated output" % (key, c))
     lk = rec.get("link")
     if lk is not None:
         if not (isinstance(lk, dict) and set(lk) == {"script", "output", "flags"} and isinstance(lk["flags"], list)
@@ -267,7 +268,7 @@ class Job:
         self.repo, self.root, self.store, self.jobs, self.extcache = repo, root, store, jobs, ext
         self.roots, self.files = load_admit(repo), tracked(repo)
         self.rec = load_recipe(repo, self.roots, root)
-        self.keys, self.run, self.hit, self.ext = set(), 0, 0, {}
+        self.keys, self.run, self.hit, self.ext, self.ppkeys = set(), 0, 0, {}, {}
         os.makedirs(os.path.join(store, "rt"), exist_ok=True)
 
     def stage(self, doc):
@@ -301,7 +302,7 @@ class Job:
             stage, bare, dest = "external:" + e["name"], os.path.join(self.extcache, e["commit"]), os.path.join(ws, "ext", e["name"])
             try:
                 if not os.path.isdir(bare):
-                    tmp = "%s.tmp%d" % (bare, os.getpid())
+                    tmp = "%s.tmp%d-%s" % (bare, os.getpid(), os.urandom(4).hex())
                     os.makedirs(tmp)
                     for cmd in (["init", "-q", "--bare"], ["fetch", "-q", "--depth", "1", url, e["commit"]]):
                         subprocess.run(["git", "-C", tmp] + cmd, env=env, check=True, capture_output=True)
@@ -437,6 +438,8 @@ class Job:
                 self.run += (e.get("pp_status") == "run") + (e.get("cc_status") == "run")
                 self.hit += (e.get("pp_status") == "hit") + (e.get("cc_status") == "hit")
                 res[u] = e["object"]
+                if e.get("pp_key"):
+                    self.ppkeys[u] = e["pp_key"]
         if failed:
             raise BuildRed(dict(failed[sorted(failed)[0]], units=sorted(failed), done=sorted(res)))
         return res
@@ -466,6 +469,30 @@ class Job:
         return self.stage(doc)[1]["outputs"]["/out"]
 
 
+def host_compilers(rec, cache):
+    """Host paths of the recipe's (cc, cxx): /usr/bin/NAME, or the paths inside the external compiler tree, checked out (by exact commit,
+    from the bare fetch the build made in CACHE/external) into CACHE/exttree/<commit>. For gates that run the compiler on the host
+    (objstub's terminator plugin); the build itself runs it in the sandbox."""
+    c = rec["compiler"]
+    if "external" not in c:
+        return "/usr/bin/" + c["cc"], "/usr/bin/" + c["cxx"]
+    e = next(x for x in rec["external"] if x["name"] == c["external"])
+    dest = os.path.join(cache, "exttree", e["commit"])
+    if not os.path.isdir(dest):
+        tmp = "%s.tmp%d-%s" % (dest, os.getpid(), os.urandom(4).hex())
+        os.makedirs(tmp)
+        env = dict(os.environ, GIT_INDEX_FILE=tmp + ".idx")
+        bare = os.path.join(cache, "external", e["commit"])
+        subprocess.run(["git", "--git-dir", bare, "read-tree", e["commit"]], env=env, check=True, capture_output=True)
+        subprocess.run(["git", "--git-dir", bare, "--work-tree", tmp, "checkout-index", "-a", "-f"], env=env, check=True, capture_output=True)
+        os.unlink(tmp + ".idx")
+        try:
+            os.rename(tmp, dest)
+        except OSError:
+            shutil.rmtree(tmp, ignore_errors=True)
+    return os.path.join(dest, c["cc"]), os.path.join(dest, c["cxx"])
+
+
 def build(repo, root, store, out, jobs=4, ext=None):
     """Build product ROOT of the checkout REPO into STORE; write OUT/objects.json and the files it names. EXT: bare cache dir of
     externals (default STORE/external). -> the objects dict; raises RecipeError for an invalid recipe."""
@@ -474,7 +501,7 @@ def build(repo, root, store, out, jobs=4, ext=None):
     if errs:
         raise RecipeError(errs)
     units = units_of(j.rec, root, j.files)
-    res = {"format": OBJ_FORMAT, "root": root, "objects": [], "elf": None, "constants": None, "defined": [], "undefined": [],
+    res = {"format": OBJ_FORMAT, "root": root, "objects": [], "elf": None, "constants": None, "contract_names": None, "defined": [], "undefined": [],
            "stage_keys": [], "status": "green"}
     ws = tempfile.mkdtemp(prefix="recipe-")
     os.makedirs(out, exist_ok=True)
@@ -498,14 +525,15 @@ def build(repo, root, store, out, jobs=4, ext=None):
             ent = cas.manifest(j.link(ws, objs), store)["entries"][name]
             shutil.copyfile(cas._obj(store, ent), os.path.join(out, name))
             res["elf"] = {"path": os.path.abspath(os.path.join(out, name)), "sha256": ent["h"]}
-        if j.rec.get("constants"):
-            shutil.copyfile(os.path.join(ws, "root", j.rec["constants"]), os.path.join(out, "constants.tsv"))
-            res["constants"] = os.path.abspath(os.path.join(out, "constants.tsv"))
+        for key in ("constants", "contract_names"):
+            if j.rec.get(key):
+                shutil.copyfile(os.path.join(ws, "root", j.rec[key]), os.path.join(out, key + ".tsv"))
+                res[key] = os.path.abspath(os.path.join(out, key + ".tsv"))
     except BuildRed as r:
         res.update(status="red", failure=r.args[0], failed_units=r.args[0].get("units", []))
     finally:
         shutil.rmtree(ws, ignore_errors=True)
-    res.update(stage_keys=sorted(j.keys), stages={"run": j.run, "hit": j.hit}, units=units)
+    res.update(stage_keys=sorted(j.keys), stages={"run": j.run, "hit": j.hit}, units=units, pp_keys=dict(sorted(j.ppkeys.items())))
     with open(os.path.join(out, "objects.json"), "w") as f:
         json.dump(res, f, indent=1, sort_keys=True)
         f.write("\n")

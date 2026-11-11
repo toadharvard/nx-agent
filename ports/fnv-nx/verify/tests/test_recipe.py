@@ -43,7 +43,7 @@ FILES = {
     "toy/a.c": '#include "toy.h"\n#include "gen.h"\nint f_b(void);\nint f_a(void) { return NCONST + f_b() + TOY + (int)(STAMP % 1000003L); }\n',
     "toy/b.c": '#include "toy.h"\nint f_b(void) { return TOY * 2; }\n',
     "toy/c.c": '#include "toy.h"\nint f_c(int x) { return x + TOY; }\n',
-    "toy/os.S": ".text\n.globl os_svc\nos_svc:\n svc #0\n ret\n",
+    "toy/os.S": ".text\n.globl os_svc\n.type os_svc,%function\nos_svc:\n svc #0\n ret\n.size os_svc,.-os_svc\n",
     "toy/inc/toy.h": "#define TOY 7\n",
     "toy/constants.tsv": "f_c\t1\nf_b\t2\n",
     "toy/link.ld": "SECTIONS { . = 0x10000; .text : { *(.text*) } .data : { *(.data*) *(.bss*) } /DISCARD/ : { *(.note*) *(.comment*) *(.eh_frame*) } }\n",
@@ -310,6 +310,8 @@ def main():
     m = mut()
     m["generated"][0]["outputs"] = ["a.c"]
     check("generated output colliding with a tracked file rejected", any("also a tracked file" in e for e in errs(m)))
+    check("contract_names that is no tracked file rejected, a tracked file accepted", any("contract_names" in e for e in errs(mut(contract_names="nofile.tsv")))
+          and not errs(mut(contract_names="constants.tsv")))
     check("os_layer entry that is no unit rejected", any("not a unit" in e for e in errs(mut(os_layer=["toy.h"]))))
     m = mut()
     m["flags"]["c"] = ["-Ifoo", "-o"]

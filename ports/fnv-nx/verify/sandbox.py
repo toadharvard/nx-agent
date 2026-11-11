@@ -203,7 +203,7 @@ def placed(store, tree):
     return d
 
 def execute(store, doc, key):
-    run = os.path.join(store, "run", "%s.%d" % (key, os.getpid()))
+    run = os.path.join(store, "run", "%s.%d.%s" % (key, os.getpid(), os.urandom(4).hex()))
     root = os.path.join(run, "root")
     try:
         srcs = [placed(store, i["tree"]) for i in doc["inputs"]]
@@ -221,7 +221,7 @@ def execute(store, doc, key):
 def _store_result(store, key, res):
     d = os.path.join(store, "keys", key)
     os.makedirs(d, exist_ok=True)
-    tmp = os.path.join(d, ".tmp-%d" % os.getpid())
+    tmp = os.path.join(d, ".tmp-%d-%s" % (os.getpid(), os.urandom(4).hex()))
     with open(tmp, "wb") as f:
         f.write(cas.canon(res))
     cas._publish(tmp, os.path.join(d, "result.json"))

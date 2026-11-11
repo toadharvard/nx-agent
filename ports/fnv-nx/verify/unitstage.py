@@ -72,7 +72,7 @@ def hint_path(store, rel):
 def write_hint(store, rel, paths):
     p = hint_path(store, rel)
     os.makedirs(os.path.dirname(p), exist_ok=True)
-    tmp = "%s.tmp-%d" % (p, os.getpid())
+    tmp = "%s.tmp-%d-%s" % (p, os.getpid(), os.urandom(4).hex())
     open(tmp, "w").write(json.dumps(sorted(paths)))
     os.replace(tmp, p)
 
