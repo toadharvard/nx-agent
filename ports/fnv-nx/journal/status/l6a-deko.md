@@ -12,6 +12,13 @@ The trunk is an unrelated history (shared paths: 20, all machinery). Trunk-bound
 branches (claude/fnv-l6a-deko-w<N> from claude/fnv-nx-clean); they carry only the root's files. This branch keeps status,
 inbox notes and the dk_* sources of the integration lineage. The two histories are never merged.
 
+## Acceptance of the deko3d frame (owner, CLAUDE.md "Two render backends": OpenGL is the reference)
+1. **First acceptance item.** The same nxgpu command stream (the same D3D9 front end, scenes and game frames) is rendered
+   by both backends; every deko3d frame is compared with the GL frame produced on the L4 boot machine with the GL
+   library. A difference is a deko3d defect until a rule explains it. The check verifies deko3d; it never selects code.
+2. The deko3d backend is written by reading the GL backend (render/gl4, nxgl, the renderer pair) as the reference
+   implementation of the same nxgpu ABI. Nothing of GL is deleted or disabled.
+
 ## Tasks
 | # | task | worker | status |
 |---|---|---|---|
