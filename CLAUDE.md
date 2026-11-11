@@ -115,6 +115,14 @@ The owner's words: "Транк никогда красный. Всегда зе�
   - Where Wine 9.0 implements an API in a simplified way (it does nothing, or returns success), we may do exactly what Wine 9.0 does, with one log line per call.
   - The source of the behaviour is Wine 9.0's code for that function, cited per function. The stub gate accepts such a body when the citation is present.
   - First cases: d3d9 `ProcessVertices`, `SetClipStatus` and `GetClipStatus`, both device classes.
+- **The declared machine (owner decision, 2026-11-11).** The game runs on a declared Windows machine, and every
+  environment query gets the full answer that a real Windows (or Wine 9.0) gives on that machine. This is not a stub.
+  - **No network.** The machine has no network connection. Every network call returns the documented Windows/Wine
+    error for that state (for example network down, host not found), with no fake success.
+  - **Fixed time zone.** UTC in the emulator; the system time zone of the console on the Switch.
+  - **Registry.** The hive holds exactly the keys that the exe and modules read, found statically from their call
+    sites. Values come from the declared machine (for example `Installed Path` = the game directory). A key with no
+    declared value is absent, the same as on a machine where nothing wrote it. No installer script is needed.
 - Merges stop while anything is red. That is intended. Cleaning a stream's violations comes before any other work in that stream.
 
 ## Owner decisions of 2026-11-10 (do not re-ask)
