@@ -60,6 +60,10 @@ typedef struct fnvnx_os {
      * returns a range that intersects [0x000f0000, 0x00200000) or the image; the host address is VA + bias.
      * Optional for the old pipeline, required by fnvnx_start_prepare. Placed last: older initialisers stay valid. */
     uint32_t (*alloc_va)(void *ctx, uint32_t size, unsigned prot);
+    /* Give back a range obtained from alloc_va (the same va and size, nothing else): its contents are gone, the
+     * address space may be handed out again and a later alloc_va of it reads as zero, read-write, whatever protect
+     * did to it before. 0 on success. Required by fnvnx_start_prepare together with alloc_va. */
+    int (*free_va)(void *ctx, uint32_t va, uint32_t size);
 } fnvnx_os;
 
 /* ---- PE32 headers ---------------------------------------------------------------------------------------- */

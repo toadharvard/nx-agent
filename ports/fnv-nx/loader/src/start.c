@@ -134,34 +134,53 @@ static uint32_t alloc_checked(fnvnx_proc *p, uint32_t size) {
     return va;
 }
 
+/* bytes of a thread's TLS area (vector, then the block at `off`), page-rounded; 0 when it does not fit */
+static uint32_t tls_area(const fnvnx_proc *p, uint32_t *off) {
+    uint32_t align = p->tls.present ? p->tls.align : 1u;
+    *off = (FNVNX_START_TLS_SLOTS * 4u + align - 1) / align * align;   /* the block follows the vector */
+    if (p->tls.present && (uint64_t)*off + p->tls.block_size > 0xffff0000u) return 0;
+    return page_up(*off + (p->tls.present ? p->tls.block_size : 0u));
+}
+
+static int release(fnvnx_proc *p, uint32_t va, uint32_t size) {
+    return va && p->os->free_va(p->os->ctx, va, size) ? FNVNX_E_MAP : FNVNX_OK;
+}
+
+int fnvnx_thread_block_free(fnvnx_proc *p, const fnvnx_thread_block *b) {
+    uint32_t off, total;
+    int r, r2;
+    if (!p || !b || !p->nmap || !p->os->free_va) return FNVNX_E_ARG;
+    total = tls_area(p, &off);
+    r = release(p, b->guard_va, b->stack_base - b->guard_va);
+    if ((r2 = release(p, b->teb_va, PAGE)) && !r) r = r2;
+    if ((r2 = release(p, b->tls_vec_va, total)) && !r) r = r2;
+    return r;
+}
+
 int fnvnx_thread_block_create(fnvnx_proc *p, uint32_t stack_size, fnvnx_thread_block *out) {
-    uint32_t stack, teb, tls, ssize, align, off, total;
+    uint32_t stack = 0, teb = 0, tls = 0, ssize, off, total;
     uint8_t *t;
-    if (!p || !out || !p->nmap || !p->os->alloc_va || !p->os->protect) return FNVNX_E_ARG;
+    int r = FNVNX_E_NOMEM;
+    if (!p || !out || !p->nmap || !p->os->alloc_va || !p->os->free_va || !p->os->protect) return FNVNX_E_ARG;
     if (!stack_size || stack_size > 0xffff0000u - PAGE) {
         fnvnx_logf(p->os, "fnvnx-start: stack size 0x%x not usable", (unsigned)stack_size);
         return FNVNX_START_E_STATE;
     }
     ssize = page_up(stack_size);
-    align = p->tls.present ? p->tls.align : 1u;
-    off = (FNVNX_START_TLS_SLOTS * 4u + align - 1) / align * align;   /* the block follows the vector */
-    if (p->tls.present && (uint64_t)off + p->tls.block_size > 0xffff0000u) return FNVNX_START_E_STATE;
-    total = page_up(off + (p->tls.present ? p->tls.block_size : 0u));
+    if (!(total = tls_area(p, &off))) return FNVNX_START_E_STATE;
     memset(out, 0, sizeof *out);
     if (!(stack = alloc_checked(p, ssize + PAGE)) || !(teb = alloc_checked(p, PAGE)) ||
         !(tls = alloc_checked(p, total)))
-        return FNVNX_E_NOMEM;
-    if (p->os->protect(p->os->ctx, (uintptr_t)stack + p->cfg.bias, PAGE, 0u)) return FNVNX_E_MAP;   /* guard */
+        goto fail;
+    r = FNVNX_E_MAP;
+    if (p->os->protect(p->os->ctx, (uintptr_t)stack + p->cfg.bias, PAGE, 0u)) goto fail;   /* guard */
     out->guard_va = stack;
     out->stack_limit = stack + PAGE;
     out->stack_base = stack + PAGE + ssize;
     out->teb_va = teb;
     out->tls_vec_va = tls;
     out->tls_block_va = p->tls.present ? tls + off : 0u;
-    if (p->tls.present) {
-        int r = fnvnx_tls_block_init(&p->img, &p->tls, host(p, out->tls_block_va));
-        if (r) return r;
-    }
+    if (p->tls.present && (r = fnvnx_tls_block_init(&p->img, &p->tls, host(p, out->tls_block_va)))) goto fail;
     fnvnx_wr32(host(p, tls), out->tls_block_va);   /* vector slot 0; the module's TLS index is 0 */
     t = host(p, teb);                              /* the page is zeroed by alloc_va */
     fnvnx_wr32(t + 0x00, 0xffffffffu);             /* end of the SEH chain */
@@ -170,13 +189,19 @@ int fnvnx_thread_block_create(fnvnx_proc *p, uint32_t stack_size, fnvnx_thread_b
     fnvnx_wr32(t + 0x18, teb);                     /* NT_TIB.Self */
     fnvnx_wr32(t + 0x2c, tls);                     /* ThreadLocalStoragePointer */
     return FNVNX_OK;
+fail:   /* nothing stays allocated when the block cannot be made */
+    (void)release(p, stack, ssize + PAGE);
+    (void)release(p, teb, PAGE);
+    (void)release(p, tls, total);
+    memset(out, 0, sizeof *out);
+    return r;
 }
 
 int fnvnx_start_prepare(fnvnx_proc *p, const fnvnx_os *os, const fnvnx_start_cfg *cfg) {
     uint32_t n = 0;
     int r;
     if (!p || !os || !cfg || !os->read || !os->map_fixed || !os->protect || !os->alloc || !os->free || !os->log ||
-        !os->alloc_va || !cfg->resolve)
+        !os->alloc_va || !os->free_va || !cfg->resolve)
         return FNVNX_E_ARG;
     memset(p, 0, sizeof *p);
     p->os = os;

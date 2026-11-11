@@ -22,6 +22,7 @@ stays under DIR (container only, never the repository).
 import argparse
 import collections
 import concurrent.futures
+import json
 import os
 import re
 import shutil
@@ -256,16 +257,26 @@ def run(universe, out, scale, shards, import_keys, l3a, rows=None, **defect):
     built = round(time.monotonic() - t, 1)
     res, meas = link_and_gate(ents, out, far, defect.get('absref'))
     meas['build s'] = built
+    meas['gate files'] = {}
+    for g in ('ld', 'disp', 'pcrel'):
+        p = os.path.join(out, 'gates', g + '.json')
+        if os.path.exists(p):
+            with open(p) as fh:
+                j = json.load(fh)
+            meas['gate files'][g] = 'universe %d certified %d uncertified %s' % (j['universe'], j['certified'], j['uncertified'][:3])
     return ents, res, meas
 
 
-def report(title, res, meas):
+def report(title, res, meas, gates=()):
     print('== %s' % title)
     for g in ('ld', 'disp', 'pcrel'):
         if g in res:
             print('%s gate: exit %d: %s' % (g, res[g][0], res[g][1]))
+            if g in gates:
+                print('  gate file: %s' % gates[g])
     for k in sorted(meas):
-        print('%s: %s' % (k, meas[k]))
+        if k != 'gate files':
+            print('%s: %s' % (k, meas[k]))
 
 
 def main():
@@ -280,7 +291,7 @@ def main():
     a = ap.parse_args()
     l3a_copy(a.l3a)
     ents, res, meas = run(a.universe, a.out, a.bytes_per_entry_scale, a.shards, a.import_keys, a.l3a)
-    report('full scale: %d entries, scale %d, %d shards' % (len(ents), a.bytes_per_entry_scale, a.shards), res, meas)
+    report('full scale: %d entries, scale %d, %d shards' % (len(ents), a.bytes_per_entry_scale, a.shards), res, meas, meas['gate files'])
     if a.red_cases:
         n = a.red_cases
         for name, defect in (('entry dropped from its archive', dict(drop=0)), ('table slot retargeted', dict(retarget=(0, 1))),
@@ -288,7 +299,7 @@ def main():
             small = load_universe(a.universe)[:n]
             d = {k: (small[v][0] if k in ('drop', 'absref') else (small[v[0]][0], small[v[1]][0])) for k, v in defect.items()}
             _, res, meas = run(a.universe, os.path.join(a.out, 'red_%s' % name.split()[0]), 4, 4, a.import_keys, a.l3a, rows=n, **d)
-            report('red case: %s (%s)' % (name, ', '.join('%s=%s' % kv for kv in sorted(d.items()))), res, meas)
+            report('red case: %s (%s)' % (name, ', '.join('%s=%s' % kv for kv in sorted(d.items()))), res, meas, meas['gate files'])
 
 
 if __name__ == '__main__':

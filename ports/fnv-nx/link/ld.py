@@ -12,7 +12,10 @@ The link is position independent (`-pie`, `-z text`): no code address is fixed (
 input: the loader maps the owner's exe at run time.
 
 Rule (gate `ld`): the output has no undefined symbol, weak ones included.  The linker runs with
-`--unresolved-symbols=ignore-all` so that the link completes and the whole set is computed, not the first error:
+`--unresolved-symbols=ignore-all --noinhibit-exec` so that the link completes and the whole set is computed, not the first error
+(a PC-relative data reference to an undefined symbol, as in the dispatcher table, is a relocation error of the linker in a PIE, and
+`--noinhibit-exec` keeps the output so that the names can still be computed; when the linker reports errors and no name is undefined,
+the stage fails with the linker's message):
 undefined = names some input references without defining (weak references included) minus the names the output
 defines (the linker's own resolution: other inputs and the symbols the linker script provides).  The output
 must carry the linker's PIE mark (DT_FLAGS_1 DF_1_PIE).  With one or more
@@ -127,7 +130,7 @@ def inputs(dirs):
 
 def command(ld, script, out, rsp):
     return list(ld) + ['-pie', '--no-dynamic-linker', '-z', 'text', '-z', 'max-page-size=0x1000',
-                       '-z', 'common-page-size=0x1000', '--unresolved-symbols=ignore-all', '--whole-archive', '-T', script, '-o', out, '@' + rsp]
+                       '-z', 'common-page-size=0x1000', '--unresolved-symbols=ignore-all', '--noinhibit-exec', '--whole-archive', '-T', script, '-o', out, '@' + rsp]
 
 
 def main():
@@ -146,24 +149,33 @@ def main():
         sys.exit('ld: %s' % e)
     with open(rsp, 'w', newline='\n') as fh:
         fh.write(''.join('"%s"\n' % p for p in ins))
+    for stale in (elf, und):
+        if os.path.exists(stale):
+            os.remove(stale)
     r = subprocess.run(command([a.ld] + a.ld_arg, a.script, elf, rsp), capture_output=True, text=True)
+    if not os.path.exists(elf):
+        sys.stderr.write(r.stderr[-4000:])
+        sys.exit('ld: the linker failed (exit %d), no output' % r.returncode)
+    refs = {n for p in ins for n, df in symbols(p) if not df}
+    names = {n for p in ins for n, _ in symbols(p)}
+    bad = undefined(refs, symbols(elf))
+    detail = '%d inputs, %d names, %d undefined' % (len(ins), len(names), len(bad))
+    if bad:
+        gatefile.write('ld', len(names), len(names) - len(bad), bad, detail)
+        print(detail)
+        with open(und, 'w', newline='\n') as fh:
+            fh.write(''.join(n + '\n' for n in bad))
+        os.remove(elf)
+        sys.exit(1)
     if r.returncode != 0:
+        os.remove(elf)
         sys.stderr.write(r.stderr[-4000:])
         sys.exit('ld: the linker failed (exit %d)' % r.returncode)
     if not is_pie(elf):
         os.remove(elf)
         sys.exit('ld: the output is not position independent (no DF_1_PIE)')
-    refs = {n for p in ins for n, df in symbols(p) if not df}
-    names = {n for p in ins for n, _ in symbols(p)}
-    bad = undefined(refs, symbols(elf))
-    detail = '%d inputs, %d names, %d undefined' % (len(ins), len(names), len(bad))
-    gatefile.write('ld', len(names), len(names) - len(bad), bad, detail)
+    gatefile.write('ld', len(names), len(names), [], detail)
     print(detail)
-    if bad:
-        with open(und, 'w', newline='\n') as fh:
-            fh.write(''.join(n + '\n' for n in bad))
-        os.remove(elf)
-        sys.exit(1)
 
 
 if __name__ == '__main__':

@@ -81,8 +81,8 @@ try:
 except ValueError:
     pass
 cmd = ld.command(['/t/ld', '-m', 'aarch64elf32'], '/s/guest.ld', '/o/guest.elf', '/o/inputs.rsp')
-check('command', cmd, ['/t/ld', '-m', 'aarch64elf32', '-pie', '--no-dynamic-linker', '-z', 'text', '--unresolved-symbols=ignore-all',
-                       '--whole-archive', '-T', '/s/guest.ld', '-o', '/o/guest.elf', '@/o/inputs.rsp'])
+check('command', cmd, ['/t/ld', '-m', 'aarch64elf32', '-pie', '--no-dynamic-linker', '-z', 'text', '-z', 'max-page-size=0x1000',
+                       '-z', 'common-page-size=0x1000', '--unresolved-symbols=ignore-all', '--noinhibit-exec', '--whole-archive', '-T', '/s/guest.ld', '-o', '/o/guest.elf', '@/o/inputs.rsp'])
 
 for f in fails:
     print('FAIL', f)

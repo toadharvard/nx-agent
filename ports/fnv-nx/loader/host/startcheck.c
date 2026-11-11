@@ -64,15 +64,34 @@ static int h_prot(void *c, uintptr_t addr, uint32_t size, unsigned prot) {
 static void *h_alloc(void *c, uint32_t s) { (void)c; return malloc(s ? s : 1); }
 static void h_free(void *c, void *p) { (void)c; free(p); }
 static void h_log(void *c, const char *m) { (void)c; if (g_nlog < 64) snprintf(g_log[g_nlog++], sizeof g_log[0], "%s", m); }
+/* freed ranges are handed out again (exact size match) so that create -> free -> create reuses addresses */
+static struct { uint32_t va, size; } g_freed[8]; static unsigned g_nfreed, g_free_calls;
 static uint32_t h_alloc_va(void *c, uint32_t size, unsigned prot) {
     uint32_t va = g_next_va;
+    unsigned k;
     (void)prot; g_alloc_calls++;
     if (g_fail_alloc && g_alloc_calls >= g_fail_alloc) return 0;
+    for (k = 0; k < g_nfreed; k++)
+        if (g_freed[k].size == size) {
+            va = g_freed[k].va; g_freed[k] = g_freed[--g_nfreed];
+            return h_map(c, (uintptr_t)va + g_bias, size, FNVNX_PROT_R | FNVNX_PROT_W) ? 0 : va;
+        }
     if (h_map(c, (uintptr_t)va + g_bias, size, FNVNX_PROT_R | FNVNX_PROT_W)) return 0;
     g_next_va += size + 0x1000;   /* a hole after every allocation */
     return va;
 }
-static fnvnx_os g_os = {NULL, h_read, h_map, h_prot, h_alloc, h_free, h_log, h_alloc_va};
+static int h_free_va(void *c, uint32_t va, uint32_t size) {
+    uint32_t i, p0 = (uint32_t)((((uintptr_t)va + g_bias) - (uintptr_t)g_res) >> 12);
+    (void)c; g_free_calls++;
+    if ((va & 0xfff) || (size & 0xfff) || g_nfreed == 8) return -1;
+    for (i = 0; i < size >> 12; i++) if (!g_pt[p0 + i].mapped) return -1;
+    /* the contents are gone: a fresh anonymous mapping, no access until the next alloc_va */
+    if (mmap((void *)((uintptr_t)va + g_bias), size, PROT_NONE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0) == MAP_FAILED) return -1;
+    for (i = 0; i < size >> 12; i++) g_pt[p0 + i].mapped = 0;
+    g_freed[g_nfreed].va = va; g_freed[g_nfreed++].size = size;
+    return 0;
+}
+static fnvnx_os g_os = {NULL, h_read, h_map, h_prot, h_alloc, h_free, h_log, h_alloc_va, h_free_va};
 
 static void plat_up(const uint8_t *file, uint32_t len) {
     g_res = (uint8_t *)mmap(NULL, WINDOW, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
@@ -80,7 +99,7 @@ static void plat_up(const uint8_t *file, uint32_t len) {
     g_bias = (uintptr_t)g_res;
     g_pt = (__typeof__(g_pt))calloc(NPAGES, sizeof *g_pt);
     g_file = (uint8_t *)file; g_file_len = len;
-    g_saw_x = 0; g_fail_alloc = 0; g_alloc_calls = 0; g_map_calls = 0; g_next_va = ALLOC_BASE; g_nlog = 0;
+    g_saw_x = 0; g_fail_alloc = 0; g_alloc_calls = 0; g_map_calls = 0; g_next_va = ALLOC_BASE; g_nlog = 0; g_nfreed = 0; g_free_calls = 0;
 }
 static void plat_down(void) { munmap(g_res, WINDOW); free(g_pt); g_pt = NULL; }
 static int logged(const char *s) { unsigned i; for (i = 0; i < g_nlog; i++) if (strstr(g_log[i], s)) return 1; return 0; }
@@ -272,6 +291,27 @@ static int main_run(const char *tag, const uint8_t *file, uint32_t len, const ui
         printf("exe: sections mapped %u (+headers), SizeOfImage 0x%x, import slots bound %u, entry eip 0x%08x, stack 0x%x, TLS template %u bytes (+%u zero), tls callbacks %u, gap ranges %u\n",
                (unsigned)e.nsec, (unsigned)e.size, (unsigned)p->imports_bound, (unsigned)(e.base + e.entry), (unsigned)(p->main.stack_base - p->main.stack_limit),
                (unsigned)p->tls.template_size, (unsigned)p->tls.zero_fill, p->ntls_cb, p->ngap);
+    }
+    {   /* create -> free -> create: every range comes back, nothing stays mapped, the recycled addresses read as fresh */
+        fnvnx_thread_block a, b, c2;
+        uint32_t before = mapped_pages_in(ALLOC_BASE, 0x20000000u), k;
+        r = fnvnx_thread_block_create(p, 0x8000, &a);
+        CHECK(r == 0 && mapped_pages_in(ALLOC_BASE, 0x20000000u) > before, "%s: second thread block", tag);
+        memset(g_res + a.stack_limit, 0xa5, 0x8000); memset(g_res + a.teb_va, 0xa5, 0x1000);
+        k = mapped_pages_in(ALLOC_BASE, 0x20000000u) - before;
+        CHECK(fnvnx_thread_block_free(p, &a) == 0 && mapped_pages_in(ALLOC_BASE, 0x20000000u) == before && g_free_calls == 3,
+              "%s: block freed (%u pages, %u free calls)", tag, k, g_free_calls);
+        r = fnvnx_thread_block_create(p, 0x8000, &b);
+        CHECK(r == 0 && b.guard_va == a.guard_va && (b.teb_va == a.teb_va || b.teb_va == a.tls_vec_va) && (b.tls_vec_va == a.teb_va || b.tls_vec_va == a.tls_vec_va) && mapped_pages_in(ALLOC_BASE, 0x20000000u) == before + k,
+              "%s: third thread block reuses the freed ranges", tag);
+        for (k = 0; k < 0x8000; k += 4) if (rd32(g_res + b.stack_limit + k)) break;
+        CHECK(k == 0x8000 && rd32(g_res + b.teb_va + 4) == b.stack_base && rd32(g_res + b.teb_va + 0x100) == 0 &&
+              g_pt[b.guard_va >> 12].prot == 0 && probe_read(g_res + b.guard_va) == 0, "%s: recycled block is fresh (zero stack, TEB, guard)", tag);
+        CHECK(fnvnx_thread_block_free(p, &b) == 0 && mapped_pages_in(ALLOC_BASE, 0x20000000u) == before, "%s: freed again", tag);
+        g_fail_alloc = g_alloc_calls + 3;   /* the TLS area cannot be had: stack and TEB go back */
+        CHECK(fnvnx_thread_block_create(p, 0x8000, &c2) != 0 && mapped_pages_in(ALLOC_BASE, 0x20000000u) == before &&
+              c2.teb_va == 0 && c2.guard_va == 0, "%s: failed create leaves nothing allocated", tag);
+        g_fail_alloc = 0;
     }
     free(e.img); free(e.prot);
 out:

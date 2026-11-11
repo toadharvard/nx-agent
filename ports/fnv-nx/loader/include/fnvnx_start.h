@@ -10,7 +10,7 @@
  * when its precondition does not hold; nothing has a fallback value. A failed start leaves the process in an
  * undefined state: the caller exits (nothing is unmapped).
  *
- * Hook contract: fnvnx_os.read/map_fixed/protect/alloc/free/log/alloc_va are all required. map_fixed returns
+ * Hook contract: fnvnx_os.read/map_fixed/protect/alloc/free/log/alloc_va/free_va are all required. map_fixed returns
  * zero-filled read-write memory at exactly addr (the `prot` argument is the final protection, applied later by
  * protect); it fails if any of it is in use. Host address = guest VA + cfg.bias (0 on the target).
  * Little-endian host, 32-bit guest VAs (uint32_t), C99. */
@@ -78,6 +78,11 @@ int fnvnx_start_prepare(fnvnx_proc *p, const fnvnx_os *os, const fnvnx_start_cfg
 /* S7: a thread's stack (+ guard page), TEB and TLS vector/block; reused by the platform's CreateThread. Needs a
  * successful fnvnx_start_prepare. stack_size is rounded up to whole pages. */
 int fnvnx_thread_block_create(fnvnx_proc *p, uint32_t stack_size, fnvnx_thread_block *out);
+
+/* Gives back the three ranges fnvnx_thread_block_create obtained (stack with guard page, TEB, TLS vector and block)
+ * through os->free_va, all of them even when one fails. 0, or the first failure's code. The block must come from
+ * fnvnx_thread_block_create on this p and must not be used afterwards. */
+int fnvnx_thread_block_free(fnvnx_proc *p, const fnvnx_thread_block *b);
 
 /* S8: TLS callbacks, then the entry point, on the main thread. Returns the guest's exit value. Precondition: a
  * successful fnvnx_start_prepare on p. The emulator hooks this exact symbol. */
