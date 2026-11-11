@@ -17,7 +17,7 @@ extern "C" int fnvnx_open(const char *path, int oflag, int pmode);   /* platform
 /* an unimplemented stand-in, as platform code marks one (FNVNX_UNIMPL: the plat lane's D25 #3 count) */
 extern "C" __attribute__((noinline)) void *plat_test_unimpl(void)
 {
-    FNVNX_UNIMPL();
+    fnvnx_plat_note(FNVNX_PLAT_UNIMPL, __func__, FNVNX_PLAT_RA, 0);
     return NULL;
 }
 

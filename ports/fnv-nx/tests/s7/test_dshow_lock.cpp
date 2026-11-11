@@ -106,7 +106,7 @@ void callout()
     }
 }
 
-const HR S_OK_ = 0, E_NOINTERFACE_ = (HR)0x80004002, E_NOTIMPL_ = (HR)0x80004001, E_FAIL_ = (HR)0x80004005, VFW_E_NOT_FOUND_ = (HR)0x80040216;
+const HR S_OK_ = 0, E_NOINTERFACE_ = (HR)0x80004002, kNotImpl = (HR)0x80004001, E_FAIL_ = (HR)0x80004005, VFW_E_NOT_FOUND_ = (HR)0x80040216;
 const uint16_t kName1[] = {'F', '1', 0}, kName2[] = {'F', '2', 0}, kNameX[] = {'X', 0};
 
 struct GFilt;
@@ -126,9 +126,9 @@ struct GClock : dsh::IReferenceClock_ {
     unsigned long AddRef() override { callout(); return (unsigned long)++refs; }
     unsigned long Release() override { callout(); return (unsigned long)--refs; }
     HR GetTime(dsh::LL *p) override { callout(); *p = t += 10; return 0; }
-    HR AdviseTime(dsh::LL, dsh::LL, uintptr_t, uintptr_t *) override { callout(); return E_NOTIMPL_; }
-    HR AdvisePeriodic(dsh::LL, dsh::LL, uintptr_t, uintptr_t *) override { callout(); return E_NOTIMPL_; }
-    HR Unadvise(uintptr_t) override { callout(); return E_NOTIMPL_; }
+    HR AdviseTime(dsh::LL, dsh::LL, uintptr_t, uintptr_t *) override { callout(); return kNotImpl; }
+    HR AdvisePeriodic(dsh::LL, dsh::LL, uintptr_t, uintptr_t *) override { callout(); return kNotImpl; }
+    HR Unadvise(uintptr_t) override { callout(); return kNotImpl; }
 };
 
 /* the game's enumerator (IEnumPins, IEnumMediaTypes): items are AddRef'd pins or CoTaskMem'd AM_MEDIA_TYPEs */
@@ -175,7 +175,7 @@ struct GEnum final : dsh::IEnum_ {
     }
     HR Skip(uint32_t n) override { callout(); at += n; return 0; }
     HR Reset() override { callout(); at = 0; return 0; }
-    HR Clone(void **) override { callout(); return E_NOTIMPL_; }
+    HR Clone(void **) override { callout(); return kNotImpl; }
 };
 
 /* the game's IAsyncReader over a WAVE file in memory */
@@ -186,10 +186,10 @@ struct GReader : dsh::AsyncReader {
     HR QueryInterface(const void *iid, void **out) override;
     unsigned long AddRef() override;
     unsigned long Release() override;
-    HR RequestAllocator(void *, void *, void **) override { callout(); return E_NOTIMPL_; }
-    HR Request(void *, uintptr_t) override { callout(); return E_NOTIMPL_; }
-    HR WaitForNext(uint32_t, void **, uintptr_t *) override { callout(); return E_NOTIMPL_; }
-    HR SyncReadAligned(void *) override { callout(); return E_NOTIMPL_; }
+    HR RequestAllocator(void *, void *, void **) override { callout(); return kNotImpl; }
+    HR Request(void *, uintptr_t) override { callout(); return kNotImpl; }
+    HR WaitForNext(uint32_t, void **, uintptr_t *) override { callout(); return kNotImpl; }
+    HR SyncReadAligned(void *) override { callout(); return kNotImpl; }
     HR SyncRead(dsh::LL pos, long len, uint8_t *buf) override
     {
         callout();
@@ -294,7 +294,7 @@ struct GPin final : dsh::IPin_ {
         *e = en;
         return 0;
     }
-    HR QueryInternalConnections(dsh::IPin_ **, uint32_t *) override { callout(); return E_NOTIMPL_; }
+    HR QueryInternalConnections(dsh::IPin_ **, uint32_t *) override { callout(); return kNotImpl; }
     HR EndOfStream() override { callout(); return 0; }
     HR BeginFlush() override { callout(); return 0; }
     HR EndFlush() override { callout(); return 0; }
@@ -334,7 +334,7 @@ struct GFilt : dsh::IBaseFilter_ {
     }
     unsigned long AddRef() override { callout(); return (unsigned long)++refs; }
     unsigned long Release() override { callout(); return (unsigned long)--refs; }
-    HR GetClassID(Guid *) override { callout(); return E_NOTIMPL_; }
+    HR GetClassID(Guid *) override { callout(); return kNotImpl; }
     HR Stop() override { callout(); state = dsh::State_Stopped; return 0; }
     HR Pause() override { callout(); state = dsh::State_Paused; return 0; }
     HR Run(dsh::LL) override { callout(); state = dsh::State_Running; return 0; }
@@ -367,7 +367,7 @@ struct GFilt : dsh::IBaseFilter_ {
         if (n) { size_t i = 0; for (; n[i] && i < 63; i++) name[i] = n[i]; name[i] = 0; }
         return 0;
     }
-    HR QueryVendorInfo(dsh::WCH **) override { callout(); return E_NOTIMPL_; }
+    HR QueryVendorInfo(dsh::WCH **) override { callout(); return kNotImpl; }
 };
 
 HR GPin::QueryPinInfo(dsh::PinInfo *pi)
