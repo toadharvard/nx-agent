@@ -1,18 +1,17 @@
 /* dk_present.c: the compose passes of PRESENT (rules P1 and P2 of nxgpu4.h; reference gl4_present.c + gl4_scale.c).
  * Pass 1 (GPU): the source rect of `src` is point-scaled (nxdk_scale_point: source texel floor((d + 0.5) * sw / dw), the ramp per channel) into the
  * destination rect of nxdk.front. EVERY multisampled source (2, 4 or 8 samples, any renderable format) is resolved first, by ONE rule, with
- * nxdk_ms_resolve(src, 0, tmp, NXDK_MSRES_AVG) into a temporary single-sample image of the same format and size (the average of the samples, as the
+ * nxdk_ms_resolve_on(sy.cmd, src, 0, tmp, NXDK_MSRES_AVG) into a temporary single-sample image of the same format and size (the average of the samples, as the
  * reference: gl4_present.c l.116 gl4_resolve_tex(src) then gl4_scale_point on the single-sample copy; gl4_blit.c l.57-67 gl4_resolve_tex is a nearest
- * blit of the multisampled image). dkCmdBufResolveImage (2D engine, 2x / 4x only) is not used. Primitive preconditions: it records into nxdk_s.cmd
- * (NULL outside a SUBMIT) and refuses an open pass. PRESENT runs outside a SUBMIT (dk_stream.c execute: nxdk_s.cmd = NULL again after its wait) on the
- * private buffer of nxdk_sync_begin, so pc_resolve publishes that buffer as nxdk_s.cmd for exactly the one call and restores the previous value; the
- * pass state is the one the SUBMIT left (execute clears it at its start), and the same state is a precondition of nxdk_scale_point (nxdk_target_bind
- * refuses an open pass), so the resolve adds no new one. Order of the two primitives (both reserve fragment UBO slot 15 and texture slot 31): the
+ * blit of the multisampled image). dkCmdBufResolveImage (2D engine, 2x / 4x only) is not used. nxdk_ms_resolve_on records into the command buffer it is given,
+ * here the private buffer of nxdk_sync_begin: PRESENT runs outside a SUBMIT, no query slice is open there, and the stream's nxdk_s.cmd is never read or
+ * written by this file. It refuses an open pass and the same is a precondition of nxdk_scale_point (nxdk_target_bind refuses an open pass),
+ * so the resolve adds no new one. Order of the two primitives (both reserve fragment UBO slot 15 and texture slot 31): the
  * resolve ends with its own descriptor sets restored, a full barrier (image) and the neutral state; the scale then binds, by itself, its target,
  * neutral state, viewport, scissor, programs, descriptor sets, texture 31 and UBO 15 before its draw, so no slot or state of the resolve is read by
  * the scale and the temporary (written by the resolve draw) is made visible to the scale's texture fetch by that barrier. Both record in order into the
  * one buffer. The temporary is created here (nxdk_img_storage, not nxdk_tmp_image: that one is freed only after the next SUBMIT's wait) and released
- * by nxdk_img_release after nxdk_sync_end, which waited for the fence that consumed it. Assumption (console): nxdk_s is used by one thread at a time.
+ * by nxdk_img_release after nxdk_sync_end, which waited for the fence that consumed it.
  * Pass 2 (cursor, rule P2): out = (v * a + d * (255 - a) + 127) / 255 per colour channel (v = the cursor channel, ramp[c][v] >> 8 when a ramp is
  * present; d = the front value; the alpha of the front unchanged), integer division. A deko3d blend state cannot give this: UNORM8 blend rounding is the
  * GPU's, not a rule of the API. So the equation is evaluated exactly on the CPU, as the reference does: copy the clipped cursor rect of nxdk.front to a
@@ -62,11 +61,7 @@ static uint32_t pc_resolve(DkCmdBuf cmd, const NxDkImage* src, NxDkImage* tmp) {
     *tmp = *src;
     tmp->blk = NULL; tmp->samples = 1; tmp->mips = 1; tmp->layers = 1;
     if (nxdk_img_storage(tmp)) return 1;
-    DkCmdBuf const prev = nxdk_s.cmd;
-    nxdk_s.cmd = cmd;
-    const uint32_t bad = nxdk_ms_resolve(src, 0, tmp, NXDK_MSRES_AVG);
-    nxdk_s.cmd = prev;
-    return bad;
+    return nxdk_ms_resolve_on(cmd, src, 0, tmp, NXDK_MSRES_AVG);
 }
 
 /* pass 2 after the wait: blend rd (the front's rect) with the cursor and upload the result into the front; consumes and destroys rd; 0 = ok, 1 = nxdk_err'd */

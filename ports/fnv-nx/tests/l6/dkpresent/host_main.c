@@ -15,7 +15,9 @@
 #include "dk.h"
 
 NxDk nxdk;
-NxDkStream nxdk_s;   /* nxdk_s.cmd: the buffer nxdk_ms_resolve records into (the product publishes its section's buffer for that one call) */
+NxDkStream nxdk_s;   /* nxdk_s.cmd is the stream's buffer: the product must never write it (the harness sets it to NULL or to a sentinel and checks it) */
+static int sentinel_cmd; static int scmd_set;   /* scmd_set: nxdk_s.cmd holds &sentinel_cmd, else NULL */
+#define SCMD_WANT (scmd_set ? (DkCmdBuf)&sentinel_cmd : (DkCmdBuf)NULL)
 void nxchk_err(const char* fmt, ...) { va_list ap; va_start(ap, fmt); vsnprintf(nxdk.lastErr, sizeof nxdk.lastErr, fmt, ap); va_end(ap); nxdk.errCount++; }
 #define EV(...) do { printf("EV "); printf(__VA_ARGS__); putchar('\n'); } while (0)
 
@@ -109,13 +111,17 @@ void nxdk_scale_point(DkCmdBuf c, const NxDkSub* s, const NxDkSub* d, const uint
        imid(d->im), d->id, d->level, d->layer, d->x, d->y, d->w, d->h, r);
     ops[nops++] = (Op){ 0, d->x, d->y, d->w, d->h, ramp != NULL, 0 };
 }
-/* recording double of dk_msres.c: the preconditions of its mr_check are asserted (a violation prints BADRESOLVE and ends the host); it stages like the real one */
-uint32_t nxdk_ms_resolve(const NxDkImage* s, uint32_t layer, const NxDkImage* d, uint32_t mode) {
+/* recording double of dk_msres.c nxdk_ms_resolve_on: the cmd it receives is recorded; the preconditions of its checks are asserted (a violation prints BADRESOLVE and
+ * ends the host); nxdk_s.cmd is checked to be exactly what the harness set (SCMDWRITE); it stages like the real one. The old entry point must not be used. */
+uint32_t nxdk_ms_resolve(const NxDkImage* s, uint32_t layer, const NxDkImage* d, uint32_t mode) { (void)s; (void)layer; (void)d; (void)mode; puts("OLDRESOLVE"); exit(3); }
+uint32_t nxdk_ms_resolve_on(DkCmdBuf cmd, const NxDkImage* s, uint32_t layer, const NxDkImage* d, uint32_t mode) {
+    if (nxdk_s.cmd != SCMD_WANT) { puts("SCMDWRITE"); exit(3); }
+    const int cid = (cmd >= (DkCmdBuf)&cmdobj[0] && cmd < (DkCmdBuf)&cmdobj[64]) ? (int)((int*)cmd - cmdobj) : -1;
     if (should_fail(F_MSRES)) { nxdk_err("msres: refused (double)"); return 1; }
-    if (!open_sec || nxdk_s.cmd != CMD(sec_id) || nxdk_s.inPass || !s->used || !d->used || s->type != NxImgType_2D || (s->samples != 2 && s->samples != 4 && s->samples != 8) ||
+    if (!open_sec || cmd != CMD(sec_id) || !s->used || !d->used || s->type != NxImgType_2D || (s->samples != 2 && s->samples != 4 && s->samples != 8) ||
         d->samples != 1 || d->fmt != s->fmt || d->w != s->w || d->h != s->h || layer != 0 || mode != NXDK_MSRES_AVG || !d->blk) { puts("BADRESOLVE"); exit(3); }
     if (!nxdk_stage_alloc(4096)) return 1;
-    EV("msres src=%u dst=%u layer=%u mode=%u samples=%u", imid(s), imid(d), layer, mode, s->samples);
+    EV("msres cmd=%d src=%u dst=%u layer=%u mode=%u samples=%u", cid, imid(s), imid(d), layer, mode, s->samples);
     return 0;
 }
 uint32_t nxdk_img_storage(NxDkImage* im) {
@@ -198,7 +204,8 @@ int main(void) {
             uint32_t x0 = (uint32_t)atoi(t[1]), y0 = (uint32_t)atoi(t[2]), w = (uint32_t)atoi(t[3]), h = (uint32_t)atoi(t[4]);
             printf("F "); for (uint32_t y = y0; y < y0 + h; y++) for (uint32_t x = x0; x < x0 + w; x++) for (uint32_t c = 0; c < 4; c++) printf("%02x", fr[(y * FW + x) * 4 + c]);
             putchar('\n');
-        } else if (!strcmp(t[0], "state")) printf("S live %d tmp %d open %d scmd %d\n", live_blk, tmp_live, open_sec, nxdk_s.cmd != NULL);
+        } else if (!strcmp(t[0], "scmd") && nt == 2) { scmd_set = !strcmp(t[1], "set"); nxdk_s.cmd = SCMD_WANT; puts("OK"); }
+        else if (!strcmp(t[0], "state")) printf("S live %d tmp %d open %d scmd %d\n", live_blk, tmp_live, open_sec, nxdk_s.cmd == SCMD_WANT ? scmd_set : 2);
         else { printf("BADCMD %s\n", t[0]); return 2; }
         fflush(stdout);
     }
