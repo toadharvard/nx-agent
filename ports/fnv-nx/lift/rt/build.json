@@ -14,8 +14,7 @@
    "-fno-stack-protector",
    "-fno-asynchronous-unwind-tables",
    "-fno-stack-clash-protection",
-   "-fno-builtin",
-   "-w"
+   "-fno-builtin"
   ],
   "cxx": [
    "-mabi=ilp32",
@@ -46,7 +45,6 @@
    "-fno-math-errno",
    "-fno-jump-tables",
    "-fno-ipa-ra",
-   "-w",
    "-ffixed-x19",
    "-ffixed-x20",
    "-ffixed-x21",
