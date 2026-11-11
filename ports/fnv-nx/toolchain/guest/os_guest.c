@@ -18,20 +18,11 @@
 
 static int64_t hs(uint64_t v) { return (int64_t)v; }
 
-void os_init(void) {}
-
 void os_debug_print(const char *s) {
     size_t n = strlen(s);
     fnvnx_hcall2(fnvnx_host->output_debug_string, FNVNX_ADDR(s), n);
     fnvnx_hcall2(fnvnx_host->console_write, FNVNX_ADDR(s), n);
     if (n == 0 || s[n - 1] != '\n') fnvnx_hcall2(fnvnx_host->console_write, FNVNX_ADDR("\n"), 1);
-}
-
-void os_fatal(const char *msg) {
-    os_debug_print("fnvnx fatal:");
-    os_debug_print(msg);
-    fnvnx_hcall1(fnvnx_host->exit, 0xFA);
-    __builtin_unreachable();
 }
 
 void os_exit_process(int code) {
@@ -145,22 +136,14 @@ void os_show_message(const char *caption, const char *text) {
     uint64_t arg[2] = {FNVNX_ADDR(caption ? caption : ""), FNVNX_ADDR(text ? text : "")};
     fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_MESSAGE, FNVNX_ADDR(arg), 2);
 }
-/* the console's operation mode: host service FNVNX_PLAT_DISPLAY_DOCKED, which the host does not implement yet
- * (hostapi.h + toolchain/host/host.c platform_ext: appletGetOperationMode() == AppletOperationMode_Console ->
- * 1 docked, 0 handheld). A host without it answers FNVNX_EXT_NO_MODULE, which reads as "not docked". */
-#ifndef FNVNX_PLAT_DISPLAY_DOCKED
-#define FNVNX_PLAT_DISPLAY_DOCKED 9u
-#endif
+/* the console's operation mode: host service FNVNX_PLAT_DISPLAY_DOCKED (hostapi.h), which every host implements
+ * (toolchain/host/host.c platform_ext: appletGetOperationMode() == AppletOperationMode_Console -> 1 docked, 0
+ * handheld) */
 int os_display_docked(void) {
-    if (!fnvnx_host->ext_call) return 0;
     return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_DISPLAY_DOCKED, 0, 0) == 1;
 }
 void os_yield(void) { fnvnx_yield(); }
 void os_sleep_ns(uint64_t ns) { fnvnx_hcall1(fnvnx_host->sleep_ns, ns); }
-
-static __thread void *t_os_tls;
-void *os_tls_get(void) { return t_os_tls; }
-void os_tls_set(void *p) { t_os_tls = p; }
 
 /* ---- time */
 uint64_t os_ticks(void) { return fnvnx_hcall0(fnvnx_host->system_tick); }
@@ -287,12 +270,8 @@ int os_vm_decommit(void *addr, size_t size) {
     memset(addr, 0, size);
     return 0;
 }
-/* needs a host service call that does not exist yet: FNVNX_PLAT_VM_PROTECT (hostapi.h + host.c / host_vm.inc: the
- * host applies the permission to the reservation); without the service the memalign fallback has no page
- * permissions to change, and the answer is an error */
-#ifndef FNVNX_PLAT_VM_PROTECT
-#define FNVNX_PLAT_VM_PROTECT 8u
-#endif
+/* FNVNX_PLAT_VM_PROTECT (hostapi.h): without the VM service the memalign fallback has no page permissions to
+ * change, and the answer is an error */
 int os_vm_protect(void *addr, size_t size, int os_prot) {
     if (!vm_host()) return -1;
     uint64_t arg[3] = {FNVNX_ADDR(addr), size, (uint64_t)os_prot};

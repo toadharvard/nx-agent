@@ -116,7 +116,13 @@ typedef struct FnvnxHostApi {
 #define FNVNX_PLAT_VM_COMMIT 5u
 #define FNVNX_PLAT_VM_DECOMMIT 6u
 #define FNVNX_PLAT_VM_RELEASE 7u
-/* 8 is FNVNX_PLAT_VM_PROTECT (another lead); 9..15 are left free for that family. */
+/* protect (address, size, OS_VM_* bits of platform/os/os.h) -> 0, or nonzero when the range is not inside one
+ * reservation or the permission cannot be applied */
+#define FNVNX_PLAT_VM_PROTECT 8u
+/* The console's operation mode: () -> 1 docked (AppletOperationMode_Console), 0 handheld. The host always
+ * implements it (toolchain/host/host.c platform_ext); a host without it is a contract defect, not a state. */
+#define FNVNX_PLAT_DISPLAY_DOCKED 9u
+/* 10..15 are left free for the VM family. */
 
 /* ---- BSD sockets (FNVNX_PLAT_SOCK_*, services 16..33; guest: toolchain/guest/sock_guest.c, host:
  * toolchain/host/host_sock.inc; the wire constants and structs: fnvnx/sockwire.h). The rule: EVERY BSD-socket

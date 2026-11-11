@@ -201,6 +201,10 @@ static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) 
     if (fn == FNVNX_PLAT_VM_COMMIT && nargs >= 2) return host_vm_commit(args[0], args[1]);
     if (fn == FNVNX_PLAT_VM_DECOMMIT && nargs >= 2) return host_vm_decommit(args[0], args[1]);
     if (fn == FNVNX_PLAT_VM_RELEASE && nargs >= 1) return host_vm_release(args[0]);
+    if (fn == FNVNX_PLAT_DISPLAY_DOCKED) {
+        AppletOperationMode m = appletGetOperationMode();
+        return m == AppletOperationMode_Console ? 1 : 0;
+    }
     if (fn >= FNVNX_PLAT_SOCK_FIRST && fn <= FNVNX_PLAT_SOCK_LAST) return host_sock_call(fn, args, nargs);
     return FNVNX_EXT_NO_MODULE;
 }

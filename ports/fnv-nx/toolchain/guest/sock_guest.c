@@ -13,8 +13,7 @@
  * numbers of the wire are Linux's, translated to newlib's. Addresses are BSD style (sa_len, sa_family at offset 1);
  * libnx's sockaddr_in6 names its family at offset 0, so a sockaddr of at least sizeof(sockaddr_in6) bytes whose
  * offset 0 holds AF_INET6 is read as IPv6 too (the rule of to_wire_sa). Written addresses carry both.
- * A host that does not know the services (ext_call missing or FNVNX_EXT_NO_MODULE) is answered as the OS answers a
- * missing service: ENOSYS. */
+ * Contract: every host implements services 16..33 (host_sock.inc); there is no fallback for a host without them. */
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -46,9 +45,7 @@ static const devoptab_t dotab_soc;
 extern const FnvnxHostApi *fnvnx_host;
 static int64_t sc(uint32_t fn, uint32_t n, uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3, uint64_t a4) {
     uint64_t args[5] = {a0, a1, a2, a3, a4};
-    if (!fnvnx_host->ext_call) return -38;   /* wire ENOSYS */
-    uint64_t r = fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, fn, FNVNX_ADDR(args), n);
-    return r == FNVNX_EXT_NO_MODULE ? -38 : (int64_t)r;
+    return (int64_t)fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, fn, FNVNX_ADDR(args), n);
 }
 #define A(p) FNVNX_ADDR(p)
 
