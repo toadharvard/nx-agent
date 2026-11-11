@@ -133,6 +133,18 @@ const void *fnvnx_image_const(const void *p, uint32_t n, void *buf);
  * FNVNX_BY_NAME) or by ordinal (name NULL). NULL: no export (the slot stays 0). */
 #define FNVNX_IMPORT_BY_NAME 0xffffffffu
 void *fnvnx_win32_lookup_import(const char *dll, const char *name, unsigned ordinal);
+/* Exceptions raised by platform code (a failed HEAP_GENERATE_EXCEPTIONS allocation, RaiseException, DebugBreak when
+ * the caller is the platform): the lifter runtime installs its SEH dispatcher over the guest's fs:[0] chain here at
+ * start. Returns when the exception was continued. Without a backend no handler exists: the top-level filter of
+ * SetUnhandledExceptionFilter decides, then the process ends with the exception code as its exit status. */
+typedef void (*fnvnx_raise_fn)(uint32_t code, uint32_t flags, uint32_t nargs, const uintptr_t *args);
+void fnvnx_win32_set_raise_backend(fnvnx_raise_fn fn);
+/* Test hooks. Module table: -1 for a system DLL (pinned), the reference count of a registered module, 0 for a
+ * handle that is no module. Steam: the number of (object, id) registrations of SteamAPI_RegisterCallback. */
+int fnvnx_module_load_count(HMODULE);
+int fnvnx_steam_callback_count(void);
+/* The i-th system module (the distinct DLL names of the export table, as the exe imports them), NULL past the last */
+const char *fnvnx_win32_system_module(unsigned i);
 /* window/input plumbing for S6/S7 */
 HWND fnvnx_main_window(void);
 void fnvnx_set_display_size(int w, int h);

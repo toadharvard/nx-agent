@@ -1,9 +1,7 @@
 /* services.cpp - shell32, ole32, ws2_32 and steam_api (the registry is in registry.cpp).
  *
  * Winsock is in winsock.cpp.
- * Steam / GOG Galaxy (orchestrator policy): no-op success. SteamAPI_Init and IsSteamRunning succeed, every interface
- * accessor returns NULL: the exe null-checks each one (0x006ff741.., 0x00af28f9.., 0x00af2979, 0x00af2dce), so
- * achievements, the overlay and the store queries are skipped and callbacks run as no-ops. */
+ * Steam / GOG Galaxy: the Steamworks API as it is without a running client (ENV_TRUTH M6), at the end. */
 #include "w32.h"
 
 #include <stdio.h>
@@ -86,15 +84,63 @@ extern "C" HRESULT CoCreateGuid(GUID *g)
  * (R2 recon2-002, R6 recon6-007). Any arguments, nothing written. */
 extern "C" int fnvnx_nvapi_not_initialized(void) { FNVNX_NOOP(); return -4; }
 
-/* ---- steam_api: no-op success (see the top) */
-extern "C" bool SteamAPI_Init(void) { FNVNX_NOOP(); return true; }   /* the platform lane: documented no-ops */
-extern "C" bool SteamAPI_IsSteamRunning(void) { return true; }
+/* ---- steam_api / galaxywrp.dll: the public Steamworks contract in the state "Steam client not running"
+ * (ENV_TRUTH M6). SteamAPI_Init fails every time (no client to connect to), SteamAPI_IsSteamRunning is false, every
+ * interface accessor is NULL (no ISteam* object exists without a client), no callback is ever delivered (callbacks
+ * come from the client), and the callback registration list is the real one: RegisterCallback adds an
+ * (object, id) pair, UnregisterCallback removes all pairs of the object. */
+static os_lock_t g_steam_lock;
+static struct steam_reg { void *cb; int id; } *g_steam_regs;
+static int g_steam_nregs, g_steam_cap;
+
+extern "C" bool SteamAPI_Init(void) { return false; }
+extern "C" bool SteamAPI_IsSteamRunning(void) { return false; }
+/* nothing was initialised, so there is nothing to release; the registrations belong to their objects */
 extern "C" void SteamAPI_Shutdown(void) {}
+/* with no client no callback exists to dispatch; the registered objects are not touched */
 extern "C" void SteamAPI_RunCallbacks(void) {}
-extern "C" void SteamAPI_RegisterCallback(void *cb, int id) { W32_UNUSED(cb); W32_UNUSED(id); }
-extern "C" void SteamAPI_UnregisterCallback(void *cb) { W32_UNUSED(cb); }
-extern "C" void *SteamUser(void) { FNVNX_NOOP(); return NULL; }
-extern "C" void *SteamFriends(void) { FNVNX_NOOP(); return NULL; }
-extern "C" void *SteamUtils(void) { FNVNX_NOOP(); return NULL; }
-extern "C" void *SteamApps(void) { FNVNX_NOOP(); return NULL; }
-extern "C" void *SteamUserStats(void) { FNVNX_NOOP(); return NULL; }
+
+extern "C" void SteamAPI_RegisterCallback(void *cb, int id)
+{
+    os_lock(&g_steam_lock);
+    if (g_steam_nregs == g_steam_cap) {
+        int cap = g_steam_cap ? g_steam_cap * 2 : 16;
+        struct steam_reg *n = (struct steam_reg *)realloc(g_steam_regs, (size_t)cap * sizeof *n);
+        if (!n) {
+            os_unlock(&g_steam_lock);
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            return;
+        }
+        g_steam_regs = n;
+        g_steam_cap = cap;
+    }
+    g_steam_regs[g_steam_nregs].cb = cb;
+    g_steam_regs[g_steam_nregs].id = id;
+    g_steam_nregs++;
+    os_unlock(&g_steam_lock);
+}
+
+extern "C" void SteamAPI_UnregisterCallback(void *cb)
+{
+    os_lock(&g_steam_lock);
+    int o = 0;
+    for (int i = 0; i < g_steam_nregs; i++)
+        if (g_steam_regs[i].cb != cb)
+            g_steam_regs[o++] = g_steam_regs[i];
+    g_steam_nregs = o;
+    os_unlock(&g_steam_lock);
+}
+
+extern "C" int fnvnx_steam_callback_count(void)
+{
+    os_lock(&g_steam_lock);
+    int n = g_steam_nregs;
+    os_unlock(&g_steam_lock);
+    return n;
+}
+
+extern "C" void *SteamUser(void) { return NULL; }
+extern "C" void *SteamFriends(void) { return NULL; }
+extern "C" void *SteamUtils(void) { return NULL; }
+extern "C" void *SteamApps(void) { return NULL; }
+extern "C" void *SteamUserStats(void) { return NULL; }

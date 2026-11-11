@@ -467,10 +467,32 @@ TEST(critical_section_spin_count)
     DeleteCriticalSection(&g_spin_cs);
 }
 
+/* RaiseException is w32_raise: with the lifter runtime's backend installed the SEH dispatch decides; the
+ * thread-name exception 0x406D1388 is continued by the game's own handler, so the call returns. */
+extern "C" void fnvnx_win32_set_raise_backend(void (*)(uint32_t, uint32_t, uint32_t, const uintptr_t *));
+static uint32_t g_raised_code, g_raised_flags, g_raised_nargs;
+static uintptr_t g_raised_args[15];
+static void record_raise(uint32_t code, uint32_t flags, uint32_t nargs, const uintptr_t *args)
+{
+    g_raised_code = code; g_raised_flags = flags; g_raised_nargs = nargs;
+    for (uint32_t i = 0; i < nargs; i++) g_raised_args[i] = args[i];
+}
 TEST(set_thread_name_exception)
 {
     struct { DWORD type; const char *name; DWORD tid; DWORD flags; } info = { 0x1000, "S4Worker", (DWORD)-1, 0 };
     ULONG_PTR args[4] = { info.type, (ULONG_PTR)info.name, info.tid, info.flags };
-    RaiseException(MS_VC_EXCEPTION, 0, 4, args); /* must return */
-    CHECK(1);
+    fnvnx_win32_set_raise_backend(record_raise);
+    RaiseException(MS_VC_EXCEPTION, 0, 4, args); /* returns: the backend continued it */
+    CHECK_EQ(g_raised_code, 0x406D1388u);
+    CHECK_EQ(g_raised_nargs, 4u);
+    CHECK_EQ(g_raised_args[1], (uintptr_t)info.name);
+    /* the documented normalisation: flags masked to NONCONTINUABLE, nargs clamped to 15, NULL args -> 0 */
+    ULONG_PTR big[20] = { 0 };
+    RaiseException(0xE0000001u, 0xFFFFFFFEu, 20, big);
+    CHECK_EQ(g_raised_flags, 0u);
+    CHECK_EQ(g_raised_nargs, 15u);
+    RaiseException(0xE0000002u, 1, 3, NULL);
+    CHECK_EQ(g_raised_flags, 1u);
+    CHECK_EQ(g_raised_nargs, 0u);
+    fnvnx_win32_set_raise_backend(NULL);
 }

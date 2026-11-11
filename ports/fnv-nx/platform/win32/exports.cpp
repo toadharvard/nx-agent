@@ -151,9 +151,11 @@ struct exp { const char *dll, *name; void *fn; };
 #define E(dll, f) { dll, #f, (void *)&f }
 #define K(f) E("kernel32", f)
 #define U(f) E("user32", f)
+/* a DLL whose exports another part of the platform serves (registered module, hook): it still is a module */
+#define D(dll) { dll, NULL, NULL }
 const exp g_exports[] = {
     /* kernel32 */
-    K(CloseHandle), K(CompareFileTime), K(CopyFileA), K(CreateDirectoryA), K(CreateEventA), K(CreateFileA),
+    K(CloseHandle), K(CompareFileTime), K(DisableThreadLibraryCalls), K(FatalAppExitA), K(CopyFileA), K(CreateDirectoryA), K(CreateEventA), K(CreateFileA),
     K(CreateMutexA), K(CreateSemaphoreA), K(CreateThread), K(DebugBreak), K(DeleteCriticalSection),
     K(DeleteFileA), K(EnterCriticalSection), K(ExitProcess), K(ExitThread), K(FileTimeToLocalFileTime),
     K(FileTimeToSystemTime), K(FindClose), K(FindFirstFileA), K(FindNextFileA), K(FlushFileBuffers),
@@ -170,7 +172,7 @@ const exp g_exports[] = {
     K(InterlockedIncrement), K(IsBadCodePtr), K(IsBadReadPtr), K(IsBadWritePtr), K(IsDebuggerPresent),
     K(LeaveCriticalSection), K(LoadLibraryA), K(LocalAlloc), K(LocalFree), K(MoveFileA), K(OutputDebugStringA),
     K(QueryPerformanceCounter), K(QueryPerformanceFrequency), K(RaiseException), K(ReadFile), K(ReleaseMutex),
-    K(ReleaseSemaphore), K(RemoveDirectoryA), K(ResetEvent), K(ResumeThread), K(RtlUnwind),
+    K(ReleaseSemaphore), K(RemoveDirectoryA), K(ResetEvent), K(ResumeThread),
     K(SetCurrentDirectoryA), K(SetEndOfFile), K(SetEvent), K(SetFilePointer), K(SetFilePointerEx),
     K(SetLastError), K(SetThreadAffinityMask), K(SetThreadIdealProcessor), K(SetThreadPriority),
     K(SetThreadPriorityBoost), K(Sleep), K(SleepEx), K(SuspendThread), K(SwitchToThread),
@@ -249,6 +251,7 @@ const exp g_exports[] = {
     E("steam_api", SteamAPI_RunCallbacks), E("steam_api", SteamAPI_RegisterCallback),
     E("steam_api", SteamAPI_UnregisterCallback), E("steam_api", SteamUser), E("steam_api", SteamFriends),
     E("steam_api", SteamUtils), E("steam_api", SteamApps), E("steam_api", SteamUserStats),
+    D("d3d9"), D("dinput8"), D("dsound"), D("xinput1_3"), D("msvcrt"),
 #define FNVNX_D3DX_ENTRY(f) E("d3dx9_38", f),
     FNVNX_D3DX_EXPORTS(FNVNX_D3DX_ENTRY)
 #undef FNVNX_D3DX_ENTRY
@@ -258,6 +261,7 @@ const exp g_exports[] = {
 #undef E
 #undef K
 #undef U
+#undef D
 
 /* "KERNEL32.dll" == "kernel32" */
 int dll_eq(const char *a, const char *b)
@@ -275,14 +279,40 @@ extern "C" void *fnvnx_registered_module_export(const char *dll, const char *pro
 extern "C" void *fnvnx_msvcrt_lookup(const char *name);                                // crt/msvcrt_exports.cpp
 
 /* DLLs the exe imports under another module's name: GalaxyWrp.dll (GOG's build) wraps the Steam API with the
- * same export names; WSOCK32 (Winsock 1.1) forwards to ws2_32 */
+ * same export names; WSOCK32 (Winsock 1.1) forwards to ws2_32. {module the exe names, rows' dll} */
+static const char *const g_alias[][2] = { { "galaxywrp", "steam_api" }, { "wsock32", "ws2_32" } };
+
 static const char *dll_alias(const char *dll)
 {
-    if (dll && dll_eq(dll, "GalaxyWrp"))
-        return "steam_api";
-    if (dll && dll_eq(dll, "wsock32"))
-        return "ws2_32";
+    if (dll)
+        for (const auto &a : g_alias)
+            if (dll_eq(dll, a[0]))
+                return a[1];
     return dll;
+}
+
+/* The system modules, derived from the rows above: the distinct DLL names of the export table, each under the
+ * name the exe imports it by (an alias target is only the implementation of its alias). The i-th one, NULL past
+ * the last. module.cpp turns each into a loaded, pinned module, so a DLL with exports cannot be missing there. */
+extern "C" const char *fnvnx_win32_system_module(unsigned i)
+{
+    const char *seen[64];
+    unsigned n = 0;
+    for (const exp &e : g_exports) {
+        const char *pub = e.dll;
+        for (const auto &a : g_alias)
+            if (!strcmp(pub, a[1]))
+                pub = a[0];
+        bool dup = false;
+        for (unsigned k = 0; k < n && !dup; k++)
+            dup = !strcmp(seen[k], pub);
+        if (dup)
+            continue;
+        if (n == i)
+            return pub;
+        seen[n++] = pub;
+    }
+    return NULL;
 }
 
 extern "C" void *fnvnx_win32_lookup_export(const char *dll, const char *name)
@@ -291,7 +321,7 @@ extern "C" void *fnvnx_win32_lookup_export(const char *dll, const char *name)
         return NULL;
     dll = dll_alias(dll);
     for (const exp &e : g_exports)
-        if (e.fn && !strcmp(e.name, name) && (!dll || dll_eq(dll, e.dll)))
+        if (e.fn && e.name && !strcmp(e.name, name) && (!dll || dll_eq(dll, e.dll)))
             return e.fn;
     if (dll && dll_eq(dll, "msvcrt"))
         return fnvnx_msvcrt_lookup(name);

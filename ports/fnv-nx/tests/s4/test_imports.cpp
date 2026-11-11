@@ -54,11 +54,11 @@ TEST(imports_offline_and_steam_policy)
     CHECK_EQ(((cs_fn)fnvnx_win32_lookup_import("WSOCK32.dll", NULL, 3))(5), -1);
     CHECK_EQ(((i_fn)fnvnx_win32_lookup_import("WSOCK32.dll", NULL, 111))(), 10038);   /* WSAENOTSOCK */
     CHECK_EQ(((i_fn)fnvnx_win32_lookup_import("WSOCK32.dll", NULL, 116))(), 0);
-    /* Steam / Galaxy: no-op success, every interface NULL (the exe null-checks each) */
+    /* Steam / Galaxy (ENV_TRUTH M6): the client is not running: Init and IsSteamRunning are false, every interface NULL */
     typedef bool (*b_fn)(void);
     typedef void *(*p_fn)(void);
-    CHECK(((b_fn)fnvnx_win32_lookup_export("GalaxyWrp.dll", "SteamAPI_Init"))());
-    CHECK(((b_fn)fnvnx_win32_lookup_export("GalaxyWrp.dll", "SteamAPI_IsSteamRunning"))());
+    CHECK(!((b_fn)fnvnx_win32_lookup_export("GalaxyWrp.dll", "SteamAPI_Init"))());
+    CHECK(!((b_fn)fnvnx_win32_lookup_export("GalaxyWrp.dll", "SteamAPI_IsSteamRunning"))());
     const char *ifaces[] = {"SteamUser", "SteamFriends", "SteamUtils", "SteamApps", "SteamUserStats"};
     for (const char *n : ifaces)
         CHECK(((p_fn)fnvnx_win32_lookup_export("GalaxyWrp.dll", n))() == NULL);

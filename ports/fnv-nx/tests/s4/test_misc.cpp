@@ -219,13 +219,13 @@ TEST(window_and_messages)
 TEST(modules_and_exports)
 {
     CHECK(GetModuleHandleA(NULL) == (HMODULE)(uintptr_t)0x00400000u);
-    CHECK(LoadLibraryA("xinput1_3.dll") == NULL);
-    CHECK_EQ(GetLastError(), ERROR_MOD_NOT_FOUND);
+    HMODULE x0 = LoadLibraryA("xinput1_3.dll");   /* ENV_TRUTH M5: a system DLL, loaded before anything registers */
+    CHECK(x0 != NULL);
     fnvnx_register_module("XINPUT1_3.dll", [](const char *p) -> FARPROC {
         return !strcmp(p, "XInputGetState") ? (FARPROC)(void *)&GetTickCount : NULL;
     });
     HMODULE x = LoadLibraryA("C:\\Windows\\System32\\xinput1_3");
-    CHECK(x != NULL);
+    CHECK(x == x0);   /* registering gives the module its exports, it does not make a second module */
     CHECK(GetProcAddress(x, "XInputGetState") == (FARPROC)(void *)&GetTickCount);
     CHECK(GetProcAddress(x, "XInputSetState") == NULL);
     CHECK(fnvnx_win32_lookup_export("KERNEL32.dll", "CreateFileA") == (void *)&CreateFileA);

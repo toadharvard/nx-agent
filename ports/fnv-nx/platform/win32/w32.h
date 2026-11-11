@@ -252,6 +252,10 @@ LONG UnhandledExceptionFilter(struct _EXCEPTION_POINTERS *);
 LPTOP_LEVEL_EXCEPTION_FILTER SetUnhandledExceptionFilter(LPTOP_LEVEL_EXCEPTION_FILTER);
 void GetStartupInfoA(LPSTARTUPINFOA);
 HMODULE GetModuleHandleW(LPCWSTR);
+BOOL DisableThreadLibraryCalls(HMODULE);
+void FatalAppExitA(UINT, LPCSTR);
+/* an exception raised by platform code itself (thread.cpp): the installed backend, else the unhandled sequence */
+void w32_raise(DWORD code, DWORD flags, DWORD nargs, const ULONG_PTR *args);
 int LCMapStringA(LCID, DWORD, LPCSTR, int, LPSTR, int);
 int LCMapStringW(LCID, DWORD, LPCWSTR, int, LPWSTR, int);
 BOOL GetCPInfo(UINT, LPCPINFO);

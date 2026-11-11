@@ -530,30 +530,68 @@ extern "C" BOOL SwitchToThread(void)
     return TRUE;
 }
 
-/* SetThreadName convention and other first-chance exceptions */
-extern "C" void RaiseException(DWORD code, DWORD flags, DWORD nargs, const ULONG_PTR *args)
+/* Exceptions raised by platform code. The lifter runtime installs the SEH dispatcher over the guest's fs:[0]
+ * chain as the backend. Without one no guest frame exists, so no handler does: the documented sequence of a
+ * process without a handler - the top-level filter of SetUnhandledExceptionFilter decides; CONTINUE_EXECUTION
+ * returns to the raiser if the exception is continuable (else STATUS_NONCONTINUABLE_EXCEPTION is raised, which is
+ * unhandled in turn); otherwise the process ends with the exception code as its exit status. */
+#define W32_EXCEPTION_NONCONTINUABLE 1u
+#define W32_EXCEPTION_MAXIMUM_PARAMETERS 15u
+#define W32_STATUS_NONCONTINUABLE_EXCEPTION 0xC0000025u
+
+static fnvnx_raise_fn g_raise_backend;
+
+extern "C" void fnvnx_win32_set_raise_backend(fnvnx_raise_fn fn) { __atomic_store_n(&g_raise_backend, fn, __ATOMIC_SEQ_CST); }
+
+struct w32_exception_record {
+    DWORD ExceptionCode, ExceptionFlags;
+    struct w32_exception_record *ExceptionRecord;
+    PVOID ExceptionAddress;
+    DWORD NumberParameters;
+    ULONG_PTR ExceptionInformation[W32_EXCEPTION_MAXIMUM_PARAMETERS];
+};
+struct w32_exception_pointers { struct w32_exception_record *rec; void *ctx; };
+
+extern "C" void w32_raise(DWORD code, DWORD flags, DWORD nargs, const ULONG_PTR *args)
 {
-    W32_UNUSED(flags);
-    if (W32_DW(code) == MS_VC_EXCEPTION && nargs >= 3 && args) {
-        /* THREADNAME_INFO { DWORD dwType = 0x1000; LPCSTR szName; DWORD dwThreadID; DWORD dwFlags; } */
-        const char *name = (const char *)(uintptr_t)args[1];
-        struct w32_thread *t = w32_self();
-        if (name && (W32_DW(args[2]) == 0xFFFFFFFFu || W32_DW(args[2]) == t->tid)) {
-            strncpy(t->name, name, sizeof t->name - 1);
-            t->name[sizeof t->name - 1] = 0;
-        }
+    flags = W32_DW(flags) & W32_EXCEPTION_NONCONTINUABLE;
+    nargs = W32_DW(nargs);
+    if (!args || nargs > W32_EXCEPTION_MAXIMUM_PARAMETERS)
+        nargs = args ? W32_EXCEPTION_MAXIMUM_PARAMETERS : 0;
+    fnvnx_raise_fn be = __atomic_load_n(&g_raise_backend, __ATOMIC_SEQ_CST);
+    if (be) {
+        uintptr_t a[W32_EXCEPTION_MAXIMUM_PARAMETERS];
+        for (DWORD i = 0; i < nargs; i++)
+            a[i] = (uintptr_t)args[i];
+        be((uint32_t)W32_DW(code), (uint32_t)flags, (uint32_t)nargs, a);
         return;
     }
-    char msg[96];
-    snprintf(msg, sizeof msg, "RaiseException(0x%08lx) - no SEH on this platform", (unsigned long)W32_DW(code));
-    os_fatal(msg);
+    struct w32_exception_record rec;
+    memset(&rec, 0, sizeof rec);
+    rec.ExceptionCode = W32_DW(code);
+    rec.ExceptionFlags = flags;
+    rec.ExceptionAddress = __builtin_return_address(0);
+    rec.NumberParameters = nargs;
+    for (DWORD i = 0; i < nargs; i++)
+        rec.ExceptionInformation[i] = args[i];
+    struct w32_exception_record outer;
+    for (int round = 0;; round++) {
+        unsigned char context[1024] = { 0 };   /* no guest registers exist here: an empty context */
+        struct w32_exception_pointers ep = { &rec, context };
+        LONG r = UnhandledExceptionFilter((struct _EXCEPTION_POINTERS *)&ep);
+        if (r != (LONG)-1) /* not EXCEPTION_CONTINUE_EXECUTION */
+            ExitProcess((UINT)W32_DW(rec.ExceptionCode));
+        if (!(rec.ExceptionFlags & W32_EXCEPTION_NONCONTINUABLE))
+            return;
+        if (round) /* the filter continued STATUS_NONCONTINUABLE_EXCEPTION itself: nothing is left to resume */
+            ExitProcess((UINT)W32_DW(rec.ExceptionCode));
+        outer = rec;
+        memset(&rec, 0, sizeof rec);
+        rec.ExceptionCode = W32_STATUS_NONCONTINUABLE_EXCEPTION;
+        rec.ExceptionFlags = W32_EXCEPTION_NONCONTINUABLE;
+        rec.ExceptionRecord = &outer;
+        rec.ExceptionAddress = outer.ExceptionAddress;
+    }
 }
 
-extern "C" void RtlUnwind(PVOID frame, PVOID ip, PVOID rec, PVOID ret)
-{
-    W32_UNUSED(frame);
-    W32_UNUSED(ip);
-    W32_UNUSED(rec);
-    W32_UNUSED(ret);
-    os_fatal("RtlUnwind: SEH unwinding is not supported");
-}
+extern "C" void RaiseException(DWORD code, DWORD flags, DWORD nargs, const ULONG_PTR *args) { w32_raise(code, flags, nargs, args); }
