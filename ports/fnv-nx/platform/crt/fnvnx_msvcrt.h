@@ -156,8 +156,12 @@ void *_recalloc(void *, size_t, size_t);
 int *_errno(void);
 void _invalid_parameter_noinfo(void);
 void _purecall(void);
-/* atexit / _onexit / doexit / exit / _cexit / _c_exit go to S10's game onexit table (fnvnx_xc_*,
- * startup/guest/onexit.c) when it is linked; weak references, else libc atexit/exit */
+/* atexit / _onexit / doexit / exit / _cexit / _c_exit go to S10's game onexit table: fnvnx_xc_atexit, fnvnx_xc_onexit,
+ * fnvnx_xc_doexit, provided by startup/guest/onexit.c in the guest and by tests/s4/host_hooks.cpp in the host tests */
+typedef void (*fnvnx_pvfv_)(void);
+int fnvnx_xc_atexit(fnvnx_pvfv_);
+fnvnx_pvfv_ fnvnx_xc_onexit(fnvnx_pvfv_);
+void fnvnx_xc_doexit(int code, int quick, int retcaller);
 int fnvnx_atexit(void (*)(void));
 typedef int (*_onexit_t)(void);
 _onexit_t _onexit(_onexit_t);
@@ -279,14 +283,16 @@ const char *fnvnx_eh_describe(const void *throw_info);
 #include <typeinfo>
 /* RTTI bridge: the MSVC TypeDescriptor address (data image) of a class -> its GCC type_info (S2 generates the
  * table from the class names: ??_R0?AVTESForm@@@8 <-> _ZTI7TESForm). _CxxThrowException uses it too. */
-extern "C++" void fnvnx_rtti_register(const void *msvc_type_descriptor, const std::type_info *ti);
+/* 0, or -1 when the table cannot grow (out of memory) */
+extern "C++" int fnvnx_rtti_register(const void *msvc_type_descriptor, const std::type_info *ti);
 extern "C++" const std::type_info *fnvnx_rtti_lookup(const void *msvc_type_descriptor);
 /* native-type path of _CxxThrowException: objects thrown with this ThrowInfo are GCC objects of type ti */
-extern "C" void fnvnx_eh_register_throw(const void *throw_info, const std::type_info *ti, size_t size,
+/* 0, or -1 when the registry cannot grow (out of memory) */
+extern "C" int fnvnx_eh_register_throw(const void *throw_info, const std::type_info *ti, size_t size,
                                         fnvnx_eh_copy_fn copy, fnvnx_eh_dtor_fn dtor);
-template <class T> inline void fnvnx_eh_register_type(const void *throw_info)
+template <class T> inline int fnvnx_eh_register_type(const void *throw_info)
 {
-    fnvnx_eh_register_throw(
+    return fnvnx_eh_register_throw(
         throw_info, &typeid(T), sizeof(T), [](void *d, const void *s) { new (d) T(*(const T *)s); },
         [](void *p) { ((T *)p)->~T(); });
 }

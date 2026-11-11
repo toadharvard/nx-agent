@@ -266,6 +266,62 @@ TEST(vm_guard)
     VirtualFree(r, 0, MEM_RELEASE);
 }
 
+/* ---- write watch: VirtualAlloc(MEM_WRITE_WATCH), GetWriteWatch, ResetWriteWatch. A watched page is read-only at the OS
+ * level until its first write; the fault path records it (called here as the host fault handler would). */
+TEST(vm_write_watch)
+{
+    unsigned char *r = (unsigned char *)VirtualAlloc(NULL, 0x5000, MEM_RESERVE | MEM_COMMIT | MEM_WRITE_WATCH, PAGE_READWRITE);
+    CHECK(r != NULL);
+    CHECK_EQ(Q(r).Protect, PAGE_READWRITE);                  /* the map still says read-write */
+    PVOID addr[8];
+    ULONG_PTR n = 8;
+    ULONG gran = 0;
+    CHECK_EQ(GetWriteWatch(0, r, 0x5000, addr, &n, &gran), 0u);
+    CHECK(n == 0 && gran == 0x1000);                          /* nothing written yet */
+    CHECK(faults(r + 0x1000, true));                          /* armed: the write faults in the OS */
+    CHECK(!faults(r + 0x1000, false));
+    uint32_t code = 0;
+    CHECK_EQ(fnvnx_win32_vm_fault(U(r + 0x1008), 1, &code), 2);   /* recorded; the write is retried */
+    CHECK(!faults(r + 0x1000, true));
+    CHECK_EQ(fnvnx_win32_vm_fault(U(r + 0x3000), 1, &code), 2);
+    CHECK_EQ(fnvnx_win32_vm_fault(U(r + 0x3000), 0, &code), 2);   /* a read is no write: the map permits it */
+    r[0x3000] = 1;
+    n = 8;
+    CHECK_EQ(GetWriteWatch(0, r, 0x5000, addr, &n, &gran), 0u);
+    CHECK(n == 2 && addr[0] == r + 0x1000 && addr[1] == r + 0x3000);
+    n = 1;                                                    /* a short array: the first one, reset only that page */
+    CHECK_EQ(GetWriteWatch(WRITE_WATCH_FLAG_RESET, r, 0x5000, addr, &n, &gran), 0u);
+    CHECK(n == 1 && addr[0] == r + 0x1000);
+    CHECK(faults(r + 0x1000, true));                          /* armed again */
+    CHECK(!faults(r + 0x3000, true));                         /* still written */
+    n = 8;
+    CHECK_EQ(GetWriteWatch(0, r + 0x2000, 0x2000, addr, &n, &gran), 0u);   /* a sub-range */
+    CHECK(n == 1 && addr[0] == r + 0x3000);
+    CHECK_EQ(ResetWriteWatch(r, 0x5000), 0u);
+    n = 8;
+    CHECK_EQ(GetWriteWatch(0, r, 0x5000, addr, &n, &gran), 0u);
+    CHECK_EQ(n, 0u);
+    CHECK(faults(r + 0x3000, true));
+    /* VirtualProtect keeps the tracking: read-only, then read-write again is still armed */
+    DWORD old;
+    CHECK(VirtualProtect(r, 0x1000, PAGE_READONLY, &old));
+    CHECK(VirtualProtect(r, 0x1000, PAGE_READWRITE, &old));
+    CHECK(faults(r, true));
+    /* the contract's errors */
+    unsigned char *plain = (unsigned char *)VirtualAlloc(NULL, 0x1000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    n = 8;
+    CHECK_EQ(GetWriteWatch(0, plain, 0x1000, addr, &n, &gran), ~0u);   /* not a MEM_WRITE_WATCH region */
+    CHECK_EQ(SYSERR, ERROR_INVALID_PARAMETER);
+    CHECK_EQ(ResetWriteWatch(plain, 0x1000), ~0u);
+    CHECK_EQ(GetWriteWatch(2, r, 0x1000, addr, &n, &gran), ~0u);       /* an unknown flag */
+    CHECK_EQ(GetWriteWatch(0, r, 0, addr, &n, &gran), ~0u);            /* an empty range */
+    CHECK_EQ(GetWriteWatch(0, r, 0x6000, addr, &n, &gran), ~0u);       /* beyond the allocation */
+    CHECK_EQ(GetWriteWatch(0, r, 0x1000, NULL, &n, &gran), ~0u);
+    CHECK(VirtualAlloc(NULL, 0x1000, MEM_COMMIT | MEM_WRITE_WATCH, PAGE_READWRITE) == NULL);   /* needs MEM_RESERVE */
+    VirtualFree(plain, 0, MEM_RELEASE);
+    VirtualFree(r, 0, MEM_RELEASE);
+}
+
 /* ---- VirtualFree rules */
 TEST(vm_free)
 {

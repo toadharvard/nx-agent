@@ -89,47 +89,26 @@ int *_errno(void) { return &errno; }
 
 void _invalid_parameter_noinfo(void)
 {
-    /* MSVC's default handler reports to Watson and terminates */
-    os_fatal("CRT invalid parameter (_invalid_parameter_noinfo)");
+    /* MSVC's default handler reports to Watson and terminates the process: STATUS_INVALID_CRT_PARAMETER */
+    os_debug_print("CRT invalid parameter (_invalid_parameter_noinfo)");
+    os_exit_process((int)0xC0000417u);
 }
 
-void _purecall(void) { os_fatal("pure virtual function call"); }
+/* the default purecall handler writes R6025 and aborts: exit code 3 */
+void _purecall(void)
+{
+    os_debug_print("R6025 - pure virtual function call");
+    os_exit_process(3);
+}
 
 /* ---- termination. The game's handlers go into S10's single MSVC-style onexit table
- * (startup/guest/onexit.c: LIFO across atexit/_onexit/??__F/__cxa_atexit, registration during exit, nested
- * exit). Referenced weakly: without startup/ (the host tests) the libc atexit list stands in. */
-typedef void (*fnvnx_pvfv_)(void);
-extern int fnvnx_xc_atexit(fnvnx_pvfv_) __attribute__((weak));
-extern fnvnx_pvfv_ fnvnx_xc_onexit(fnvnx_pvfv_) __attribute__((weak));
-extern void fnvnx_xc_doexit(int code, int quick, int retcaller) __attribute__((weak));
+ * (startup/guest/onexit.c: LIFO across atexit/_onexit/??__F/__cxa_atexit, registration during exit, nested exit). */
+int fnvnx_atexit(void (*f)(void)) { return fnvnx_xc_atexit(f); }
 
-int fnvnx_atexit(void (*f)(void))
-{
-    if (fnvnx_xc_atexit)
-        return fnvnx_xc_atexit(f);
-    return f && atexit(f) == 0 ? 0 : -1;
-}
-
-_onexit_t _onexit(_onexit_t f)
-{
-    if (fnvnx_xc_onexit)
-        return (_onexit_t)fnvnx_xc_onexit((fnvnx_pvfv_)f);
-    return f && atexit((fnvnx_pvfv_)f) == 0 ? f : NULL; /* the handler's int result is ignored, as by MSVC */
-}
+_onexit_t _onexit(_onexit_t f) { return (_onexit_t)fnvnx_xc_onexit((fnvnx_pvfv_)f); }
 
 /* doexit(code, quick, retcaller): quick skips the handlers; retcaller returns instead of ending the process */
-void fnvnx_doexit(int code, int quick, int retcaller)
-{
-    if (fnvnx_xc_doexit) {
-        fnvnx_xc_doexit(code, quick, retcaller);
-        return;
-    }
-    if (retcaller)
-        return;
-    if (quick)
-        os_exit_process(code);
-    exit(code);
-}
+void fnvnx_doexit(int code, int quick, int retcaller) { fnvnx_xc_doexit(code, quick, retcaller); }
 
 void fnvnx_exit(int code) /* exit */
 {

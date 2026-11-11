@@ -12,15 +12,12 @@
  *  - a NULL section lists the section names, a NULL key lists the keys of the section, each 0-terminated plus a
  *    final 0; on truncation those lists return size - 2, a single value returns size - 1;
  *  - a missing value copies the default with trailing blanks removed (NULL default = "");
- *  - GetPrivateProfileInt parses like RtlUnicodeStringToInteger(base 0): blanks, sign, 0x/0o/0b prefixes, digits
- *    until the first non-digit; an empty or missing value returns the default;
+ *  - GetPrivateProfileInt reads leading blanks, one optional sign and decimal digits up to the first non-digit (no
+ *    radix prefixes: "0x10" is 0); an empty or missing value returns the default;
  *  - a file name without a directory refers to the Windows directory (C:\Windows\name).
  *
- * Switch defaults (port_default below, docs/PERF.md 6.4): for Fallout.ini and Fallout_default.ini only, a key the
- * file does not have reads as the port's value instead of the caller's default. The engine reads its settings one
- * key at a time, so this sets the Switch value of a setting whose compiled default is the PC's; a key the player
- * writes in the file always wins, and `bPortDefaults=0` in the file's [fnvnx] section turns the table off. Key and
- * section listings are the file's alone.
+ * Allocation: every container allocates through w32_alloc (libc malloc); a failure throws std::bad_alloc, which the
+ * entry points turn into their documented failure (0 / FALSE with ERROR_NOT_ENOUGH_MEMORY), the lock released.
  */
 #include "w32.h"
 
@@ -39,21 +36,21 @@ namespace {
  * Windows never allocate from the exe's replacement new. A game heap in a bad state (stand-ins, D26) had corrupted
  * the profile cache's strings there (S5's --alloc-check: 22,251 unknown-block and 4,215 double frees from
  * section_of / key_of). */
-template <class T> struct w32_alloc {
-    typedef T value_type;
-    w32_alloc() noexcept {}
-    template <class U> w32_alloc(const w32_alloc<U> &) noexcept {}
+template <class T> struct w32_alloc : std::allocator<T> {
+    using std::allocator<T>::allocator;   /* stateless: equality and copies are std::allocator's */
+    template <class U> struct rebind { typedef w32_alloc<U> other; };
     T *allocate(size_t n)
     {
-        void *p = malloc(n * sizeof(T) ? n * sizeof(T) : 1);
+        if (n > (size_t)-1 / sizeof(T))
+            throw std::bad_array_new_length();
+        size_t bytes = n * sizeof(T);
+        void *p = malloc(bytes ? bytes : 1);
         if (!p)
-            abort();
+            throw std::bad_alloc();
         return (T *)p;
     }
     void deallocate(T *p, size_t) noexcept { free(p); }
 };
-template <class T, class U> bool operator==(const w32_alloc<T> &, const w32_alloc<U> &) { return true; }
-template <class T, class U> bool operator!=(const w32_alloc<T> &, const w32_alloc<U> &) { return false; }
 typedef std::basic_string<char, std::char_traits<char>, w32_alloc<char>> pstring;
 template <class T> using pvec = std::vector<T, w32_alloc<T>>;
 struct phash {
@@ -71,7 +68,7 @@ template <class T> T *pnew()   /* a T on malloc */
 {
     void *m = malloc(sizeof(T));
     if (!m)
-        abort();
+        throw std::bad_alloc();
     return new (m) T();
 }
 template <class T> void pdelete(T *p)
@@ -102,6 +99,10 @@ struct IniFile {
 };
 
 os_lock_t g_ini_lock;
+struct IniLock {   /* released on every exit, an exception included */
+    IniLock() { os_lock(&g_ini_lock); }
+    ~IniLock() { os_unlock(&g_ini_lock); }
+};
 /* process-lifetime cache; a heap vector so no static destructor runs at exit (other threads may still read). Made on
  * first use, so a game static that reads an ini file before the platform's constructors ran still finds it. */
 pvec<IniFile *> &ini_cache()
@@ -357,44 +358,12 @@ DWORD copy_value(const pstring &v, LPSTR buf, DWORD size)
     return n;
 }
 
-/* The Switch values of engine settings (section, key, value). Each row names what it turns on and why it is safe:
- * docs/PERF.md 6.4 and 11. */
-struct PortDefault {
-    const char *sec, *key, *val;
-};
-const PortDefault k_port_defaults[] = {
-    /* threaded_anim: morph, particle and temporary-effect updates through the packed task queue, which the AI linear
-     * task threads drain (cores 2 and 1). The exe's defaults are 0; the PC's Fallout_default.ini turns them on. */
-    {"General", "bUseThreadedMorpher", "1"},
-    {"General", "bUseThreadedParticleSystem", "1"},
-    {"General", "bUseThreadedTempEffects", "1"},
-    /* not bMTRendering:Display: on the PC code the worker would share main's batch renderer and index a NULL second
-     * one (docs/PERF.md 6.8); it needs port code first. */
-};
-
-/* the base name of an ini path, lower case */
-pstring ini_base(const char *file)
-{
-    const char *b = file;
-    for (const char *p = file; *p; p++)
-        if (*p == '\\' || *p == '/' || *p == ':')
-            b = p + 1;
-    pstring r(b);
-    for (char &c : r)
-        if (c >= 'A' && c <= 'Z')
-            c = (char)(c - 'A' + 'a');
-    return r;
-}
-
-/* the port's value of sec/key when f is the engine's ini and does not switch the table off, else NULL */
-const char *port_default(IniFile *f, const char *file, const char *sec, const char *key);
-
 DWORD get_string(const char *sec, const char *key, const char *def, LPSTR buf, DWORD size, const char *file)
 {
     size = W32_DW(size);
     if (!buf)
         return 0;
-    os_lock(&g_ini_lock);
+    IniLock guard;
     IniFile *f = open_ini(file);
     DWORD r;
     if (!f) {
@@ -428,11 +397,7 @@ DWORD get_string(const char *sec, const char *key, const char *def, LPSTR buf, D
                     found = true;
                 }
             }
-            const char *pd = found ? NULL : port_default(f, file, sec, key);
-            if (pd) {
-                v = pd;
-                SetLastError(ERROR_SUCCESS);
-            } else if (!found) {
+            if (!found) {
                 v = def ? def : "";
                 while (!v.empty() && v.back() == ' ')
                     v.pop_back();
@@ -443,77 +408,56 @@ DWORD get_string(const char *sec, const char *key, const char *def, LPSTR buf, D
             r = copy_value(v, buf, size);
         }
     }
-    os_unlock(&g_ini_lock);
     return r;
 }
 
-const char *port_default(IniFile *f, const char *file, const char *sec, const char *key)
+/* the entry points' failure: out of memory, the only way a profile call fails here besides its own error codes */
+template <class F> auto guarded(F body, decltype(body()) failed) -> decltype(body())
 {
-    pstring base = ini_base(file);
-    if (base != "fallout.ini" && base != "fallout_default.ini")
-        return NULL;
-    const PortDefault *hit = NULL;
-    for (const PortDefault &d : k_port_defaults)
-        if (!w32_stricmp(d.sec, sec) && !w32_stricmp(d.key, key))
-            hit = &d;
-    if (!hit)
-        return NULL;
-    if (const IniSection *s = section_ix(f, "fnvnx")) {
-        auto it = s->values.find("bportdefaults");
-        if (it != s->values.end())
-            return atoi(it->second.c_str()) ? hit->val : NULL;
+    try {
+        return body();
+    } catch (const std::bad_alloc &) {
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return failed;
     }
-    return hit->val;
 }
 
 } // namespace
 
+static BOOL write_string(LPCSTR sec, LPCSTR key, LPCSTR val, LPCSTR file);
+
 extern "C" DWORD GetPrivateProfileStringA(LPCSTR sec, LPCSTR key, LPCSTR def, LPSTR buf, DWORD size, LPCSTR file)
 {
-    return get_string(sec, key, def, buf, size, file);
+    return guarded([&] { return get_string(sec, key, def, buf, size, file); }, (DWORD)0);
 }
 
 extern "C" UINT GetPrivateProfileIntA(LPCSTR sec, LPCSTR key, INT def, LPCSTR file)
 {
     char buf[30];
-    if (!get_string(sec, key, "", buf, sizeof buf, file) || !buf[0])
+    if (!GetPrivateProfileStringA(sec, key, "", buf, sizeof buf, file) || !buf[0])
         return (UINT)def;
     const char *p = buf;
     while (*p == ' ' || *p == '\t')
         p++;
-    int neg = 0;
-    while (*p == '+' || *p == '-') {
-        if (*p == '-')
-            neg = !neg;
+    bool neg = *p == '-';
+    if (*p == '-' || *p == '+')
         p++;
-    }
-    unsigned base = 10;
-    if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) { base = 16; p += 2; }
-    else if (p[0] == '0' && (p[1] == 'o' || p[1] == 'O')) { base = 8; p += 2; }
-    else if (p[0] == '0' && (p[1] == 'b' || p[1] == 'B')) { base = 2; p += 2; }
     uint32_t v = 0;
-    for (;; p++) {
-        unsigned d;
-        if (*p >= '0' && *p <= '9') d = (unsigned)(*p - '0');
-        else if (*p >= 'a' && *p <= 'f') d = (unsigned)(*p - 'a' + 10);
-        else if (*p >= 'A' && *p <= 'F') d = (unsigned)(*p - 'A' + 10);
-        else break;
-        if (d >= base)
-            break;
-        v = v * base + d;
-    }
-    return (UINT)(neg ? (uint32_t)(0u - v) : v);
+    for (; *p >= '0' && *p <= '9'; p++)
+        v = v * 10u + (uint32_t)(*p - '0');
+    return (UINT)(neg ? 0u - v : v);
 }
 
 extern "C" DWORD GetPrivateProfileSectionNamesA(LPSTR buf, DWORD size, LPCSTR file)
 {
-    return get_string(NULL, NULL, NULL, buf, size, file);
+    return GetPrivateProfileStringA(NULL, NULL, NULL, buf, size, file);
 }
 
 extern "C" DWORD GetPrivateProfileSectionA(LPCSTR sec, LPSTR buf, DWORD size, LPCSTR file)
 {
     size = W32_DW(size);
-    os_lock(&g_ini_lock);
+    return guarded([&]() -> DWORD {
+    IniLock guard;
     IniFile *f = sec ? open_ini(file) : NULL;
     pvec<pstring> items;
     size_t a, b;
@@ -523,24 +467,22 @@ extern "C" DWORD GetPrivateProfileSectionA(LPCSTR sec, LPSTR buf, DWORD size, LP
             if (!t.empty() && t[0] != ';')
                 items.push_back(t);
         }
-    DWORD r = copy_list(items, buf, size);
-    os_unlock(&g_ini_lock);
-    return r;
+    return copy_list(items, buf, size);
+    }, (DWORD)0);
 }
 
-extern "C" BOOL WritePrivateProfileStringA(LPCSTR sec, LPCSTR key, LPCSTR val, LPCSTR file)
+static BOOL write_string(LPCSTR sec, LPCSTR key, LPCSTR val, LPCSTR file)
 {
     if (!sec) {
         /* (NULL, NULL, NULL, file): flush; we write through, so drop the cache instead */
-        os_lock(&g_ini_lock);
+        IniLock guard;
         for (IniFile *f : ini_cache())
             pdelete(f);
         ini_cache().clear();
         ini_names().clear();
-        os_unlock(&g_ini_lock);
         return TRUE;
     }
-    os_lock(&g_ini_lock);
+    IniLock guard;
     IniFile *f = open_ini(file);
     BOOL ok = FALSE;
     if (f) {
@@ -586,8 +528,12 @@ extern "C" BOOL WritePrivateProfileStringA(LPCSTR sec, LPCSTR key, LPCSTR val, L
             f->indexed = false;
         ok = changed ? save(f) : TRUE;
     }
-    os_unlock(&g_ini_lock);
     return ok;
+}
+
+extern "C" BOOL WritePrivateProfileStringA(LPCSTR sec, LPCSTR key, LPCSTR val, LPCSTR file)
+{
+    return guarded([&] { return write_string(sec, key, val, file); }, (BOOL)FALSE);
 }
 
 extern "C" BOOL WritePrivateProfileSectionA(LPCSTR sec, LPCSTR data, LPCSTR file)
@@ -595,7 +541,8 @@ extern "C" BOOL WritePrivateProfileSectionA(LPCSTR sec, LPCSTR data, LPCSTR file
     /* data: "key=value\0key=value\0\0"; replaces the whole section; NULL deletes it */
     if (!sec)
         return FALSE;
-    if (!WritePrivateProfileStringA(sec, NULL, NULL, file))
+    return guarded([&]() -> BOOL {
+    if (!write_string(sec, NULL, NULL, file))
         return FALSE;
     if (!data)
         return TRUE;
@@ -606,8 +553,9 @@ extern "C" BOOL WritePrivateProfileSectionA(LPCSTR sec, LPCSTR data, LPCSTR file
             k = l.substr(0, eq);
             v = l.substr(eq + 1);
         }
-        if (!WritePrivateProfileStringA(sec, k.c_str(), v.c_str(), file))
+        if (!write_string(sec, k.c_str(), v.c_str(), file))
             return FALSE;
     }
     return TRUE;
+    }, (BOOL)FALSE);
 }

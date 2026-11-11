@@ -27,9 +27,7 @@ extern "C" {
 #endif
 
 /* ---- process */
-void os_init(void);                         /* idempotent; called by the runtime before first use */
 void os_debug_print(const char *s);         /* one line to the debug log (stderr / svcOutputDebugString) */
-void os_fatal(const char *msg) __attribute__((noreturn));
 void os_exit_process(int code) __attribute__((noreturn));
 unsigned os_cpu_count(void);                /* cores the game may use */
 uint32_t os_process_id(void);
@@ -88,10 +86,6 @@ int os_thread_resume(os_thread *t);
 void os_thread_exit(void) __attribute__((noreturn));
 void os_yield(void);
 void os_sleep_ns(uint64_t ns);
-
-/* One pointer of native thread-local storage for the runtime's per-thread block. */
-void *os_tls_get(void);
-void os_tls_set(void *p);
 
 /* ---- time */
 uint64_t os_ticks(void);                    /* monotonic */

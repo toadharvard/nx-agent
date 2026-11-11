@@ -941,8 +941,6 @@ extern "C" BOOL EnumSystemLocalesA(LOCALE_ENUMPROCA proc, DWORD flags)
     return TRUE;
 }
 
-extern "C" LCID GetUserDefaultLCID(void) { return 0x0409; }
-
 /* ---- GetDateFormatA / GetTimeFormatA: the picture-string grammar over the locale record's own strings
  * (short/long date, year-month, time format, day/month names, AM/PM markers) and the calendar's era name. Both
  * installed locales use the Gregorian calendar and have no optional one, so DATE_USE_ALT_CALENDAR selects the

@@ -85,3 +85,15 @@ Buffer::Initialize	C++	HRESULT STDMETHODCALLTYPE	IDirectSound *, LPCDSBUFFERDESC
 Buffer::Restore	C++	HRESULT STDMETHODCALLTYPE	void	DS_OK	ENV:A1 software buffers are never lost; MSDN:IDirectSoundBuffer::Restore DS_OK for a buffer that is not lost		audio/dsound.cpp
 waveOutGetNumDevs	C	UINT	void	1	ENV:A1 one output device		audio/waveout.cpp
 Device::SendForceFeedbackCommand	C++	HRESULT STDMETHODCALLTYPE	DWORD	DIERR_UNSUPPORTED	ENV:I3 no force feedback device; MSDN:IDirectInputDevice8::SendForceFeedbackCommand DIERR_UNSUPPORTED for a device without force feedback		input/dinput.cpp
+fnvnx_nvapi_not_initialized	C	int	void	-4	ENV:M2 nvapi.dll is absent: every NvAPI entry answers NVAPI_API_NOT_INITIALIZED		win32/env_const.cpp
+SteamAPI_Init	C	bool	void	false	ENV:M6 no Steam client: SteamAPI_Init = false		win32/env_const.cpp
+SteamAPI_IsSteamRunning	C	bool	void	false	ENV:M6 no Steam client: SteamAPI_IsSteamRunning = false		win32/env_const.cpp
+SteamUser	C	void *	void	NULL	ENV:M6 interface accessors are NULL without a client		win32/env_const.cpp
+SteamFriends	C	void *	void	NULL	ENV:M6 interface accessors are NULL without a client		win32/env_const.cpp
+SteamUtils	C	void *	void	NULL	ENV:M6 interface accessors are NULL without a client		win32/env_const.cpp
+SteamApps	C	void *	void	NULL	ENV:M6 interface accessors are NULL without a client		win32/env_const.cpp
+SteamUserStats	C	void *	void	NULL	ENV:M6 interface accessors are NULL without a client		win32/env_const.cpp
+GetCurrentThread	C	HANDLE	void	W32_PSEUDO_THREAD	MSDN:GetCurrentThread returns the pseudo handle (HANDLE)-2 for every call		win32/env_const.cpp
+GetCurrentProcess	C	HANDLE	void	W32_PSEUDO_PROCESS	MSDN:GetCurrentProcess returns the pseudo handle (HANDLE)-1 for every call		win32/env_const.cpp
+GetProcessHeap	C	HANDLE	void	PROCESS_HEAP	MSDN:GetProcessHeap the default process heap handle, one for the life of the process (HeapDestroy on it fails)		win32/env_const.cpp
+GetUserDefaultLCID	C	LCID	void	0x0409	ENV:L1 user locale en-US (0x0409)		win32/env_const.cpp

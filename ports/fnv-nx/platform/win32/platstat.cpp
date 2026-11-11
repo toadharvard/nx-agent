@@ -3,8 +3,6 @@
  * Off until fnvnx_plat_start / fnvnx_plat_autostart (tools/perf/plat_autostart.c). While on, the stand-ins report:
  *   unimpl   a call to an entry whose function is missing (FNVNX_UNIMPL(): E_NOTIMPL methods, an unsupported TEB offset, ...); an import with no export is the boot's own line
  *            ("fnvnx boot: import <dll>!<name>: no export") and its call a trap (tools/perf/plat.py reads both)
- *   noop     a call to an entry that is a documented no-op on the Switch (FNVNX_NOOP(): Steam / GOG Galaxy,
- *            winsock offline, DebugBreak): reported, not counted in the metric
  *   open     a failed file open (CreateFileA, the CRT's fopen / _open): the path's class (bsa, esm, save, ini,
  *            other), the Win32 error, whether a case-insensitive scan of the parent directory finds the name
  *            ("ci yes": the path mapper missed a spelling; "ci no"; "ci nodir": the directory itself is missing),
@@ -16,7 +14,7 @@
  * and every 30 s from the flusher):
  *   plat: <class> <name> caller 0x<pc>[ <detail>]
  *   plat: count <class> <name> caller 0x<pc> n <count>[ <detail>]
- *   plat: summary unimpl <distinct> <calls> noop <distinct> <calls> open <d> <c> decode <d> <c> input <d> <c> dropped <n>
+ *   plat: summary unimpl <distinct> <calls> open <d> <c> decode <d> <c> input <d> <c> dropped <n>
  * Names are function names of our own stand-ins (Class::method), callers addresses only. */
 #include "w32.h"
 
@@ -26,7 +24,7 @@ volatile int fnvnx_plat_on;
 
 #define NPLAT 2048
 #define NPRINT 256
-static const char *const cls_name[FNVNX_PLAT_NCLASS] = {"unimpl", "noop", "open", "decode", "input"};
+static const char *const cls_name[FNVNX_PLAT_NCLASS] = {"unimpl", "open", "decode", "input"};
 struct pent { const char *name; unsigned caller; uint8_t cls, used; char detail[64]; uint64_t n; };
 static struct pent g_e[NPLAT];
 static unsigned g_ne, g_dropped, g_printed;

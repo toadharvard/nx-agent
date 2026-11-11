@@ -2,7 +2,7 @@
  *
  * Not buildable yet (stream S5 owns the devkitA64/ILP32 toolchain and the libnx boundary); written against the
  * libnx API at the pinned revision. Requirements on the build (S5):
- *   - files: fsdev mounted ("sdmc:") before os_init; newlib POSIX calls go through the devoptab;
+ *   - files: fsdev mounted ("sdmc:") before the first file call; newlib POSIX calls go through the devoptab;
  *   - virtual memory: svcMapPhysicalMemory needs a non-zero system resource size in the NPDM, and the reserved
  *     ranges are carved out of the alias region (svcGetInfo InfoType_AliasRegionAddress/Size);
  *   - the address-space type must keep the alias region inside the 32-bit range used by ILP32 pointers.
@@ -31,18 +31,6 @@
 #include <time.h>
 #include <unistd.h>
 
-static s32 g_tls_slot = -1;
-
-void os_init(void)
-{
-    static volatile uint32_t once;
-    if (__atomic_exchange_n(&once, 1, __ATOMIC_ACQ_REL))
-        return;
-    g_tls_slot = threadTlsAlloc(NULL);
-    if (g_tls_slot < 0)
-        os_fatal("threadTlsAlloc failed");
-}
-
 void os_debug_print(const char *s)
 {
     size_t n = strlen(s);
@@ -50,13 +38,6 @@ void os_debug_print(const char *s)
     fwrite(s, 1, n, stderr);
     if (n == 0 || s[n - 1] != '\n')
         fputc('\n', stderr);
-}
-
-void os_fatal(const char *msg)
-{
-    os_debug_print("fnvnx fatal:");
-    os_debug_print(msg);
-    abort();
 }
 
 void os_exit_process(int code)
@@ -279,14 +260,6 @@ int os_display_docked(void) { return appletGetOperationMode() == AppletOperation
 void os_yield(void) { svcSleepThread(0); } /* 0 = yield to threads of the same priority */
 
 void os_sleep_ns(uint64_t ns) { svcSleepThread(ns ? (s64)ns : 0); }
-
-void *os_tls_get(void) { return g_tls_slot >= 0 ? threadTlsGet(g_tls_slot) : NULL; }
-void os_tls_set(void *p)
-{
-    if (g_tls_slot < 0)
-        os_init();
-    threadTlsSet(g_tls_slot, p);
-}
 
 /* ---- time: the ARM generic timer (CNTPCT_EL0 / CNTFRQ_EL0, 19.2 MHz; CNTVCT_EL0 traps at EL0 on Horizon). QueryPerformanceCounter, __rdtsc
  * (shim/include/fnvnx_asm.h) and os_cycle_counter all read the same counter so calibrations line up. */

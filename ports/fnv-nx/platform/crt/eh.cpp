@@ -239,11 +239,10 @@ int ncatchable(const void *throw_info)
 }
 } // namespace
 
-extern "C" void fnvnx_eh_register_throw(const void *throw_info, const std::type_info *ti, size_t size,
-                                        fnvnx_eh_copy_fn copy, fnvnx_eh_dtor_fn dtor)
+extern "C" int fnvnx_eh_register_throw(const void *throw_info, const std::type_info *ti, size_t size,
+                                       fnvnx_eh_copy_fn copy, fnvnx_eh_dtor_fn dtor)
 {
-    if (!add(reg{ throw_info, K_NATIVE, ti, size, copy, dtor, nullptr }))
-        os_fatal("out of memory in fnvnx_eh_register_throw");
+    return add(reg{ throw_info, K_NATIVE, ti, size, copy, dtor, nullptr }) ? 0 : -1;
 }
 
 extern "C" int fnvnx_eh_register_msvc_std(const void *throw_info, const char *msvc_type_name)

@@ -33,13 +33,13 @@ int fnvnx_window_surface(HWND, void **pixels, int *w, int *h, int *pitch);
 void fnvnx_window_surface_dirty(HWND, const RECT *);
 }
 
-/* ---- weak default surfaces */
+/* ---- the window surfaces: one 32bpp buffer per window */
 namespace {
 struct wbuf { HWND h; int used, w, ht; uint8_t *p; RECT dirty; };
 wbuf g_wb[64];
 os_lock_t g_wb_lock;
 }
-extern "C" __attribute__((weak)) int fnvnx_window_surface(HWND h, void **px, int *w, int *ht, int *pitch)
+extern "C" int fnvnx_window_surface(HWND h, void **px, int *w, int *ht, int *pitch)
 {
     int cw, ch;
     RECT r;
@@ -71,7 +71,7 @@ extern "C" __attribute__((weak)) int fnvnx_window_surface(HWND h, void **px, int
     os_unlock(&g_wb_lock);
     return ok;
 }
-extern "C" __attribute__((weak)) void fnvnx_window_surface_dirty(HWND h, const RECT *r)
+extern "C" void fnvnx_window_surface_dirty(HWND h, const RECT *r)
 {
     if (!r) return;
     os_lock(&g_wb_lock);   /* the default surface keeps the union of what was written, per window */

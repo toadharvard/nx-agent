@@ -59,7 +59,7 @@ void fnvnx_set_command_line(int argc, char **argv);
 #define FNVNX_PROFILE_PLUGINS 4u  /* AppData\Local\FalloutNV\plugins.txt: empty, as the launcher leaves it */
 unsigned fnvnx_first_run_profile(void);
 /* implicit TLS of the image (.tls section of FalloutNV.exe, from the loader, S3) */
-void fnvnx_tls_set_template(const void *init_data, size_t init_size, size_t total_size);
+BOOL fnvnx_tls_set_template(const void *init_data, size_t init_size, size_t total_size);
 void *fnvnx_tls_block(void);                     /* this thread's block; what fs:[0x2c][0] points at */
 void **fnvnx_tls_array(void);                    /* what fs:[0x2c] returns */
 /* Wait-graph watchdog (platform/win32/waitgraph.cpp, D25 #7): every blocking wait on a critical section, event,
@@ -80,8 +80,7 @@ void fnvnx_waitgraph_summary(void);
 /* an interposer around EnterCriticalSection / WaitFor* (the race checker's --wrap) names the real call site: set it
  * before the call, 0 after; the watchdog records it instead of the interposer's own address */
 void fnvnx_waitgraph_set_caller(unsigned pc);
-/* prints what the thread checkers have so far: the race checker's pairs (hb_dump, when linked) and the watchdog's
- * summary (when on). ExitProcess calls it; the scanner every FNVNX_THREADS_DUMP_S seconds (default 10). */
+/* prints what the watchdog has so far (its summary, when on); a race checker prints its own pairs (hb_dump). ExitProcess calls it; the scanner every FNVNX_THREADS_DUMP_S seconds (default 10). */
 void fnvnx_threads_flush(void);              /* "wg: summary cycles N long-waits N scans N threads N" */
 /* Memory lane (platform/win32/memtrack.cpp, D25 #8; tools/perf/MEM.md): live bytes by kind (0 heap, 1 virtual,
  * 2 gpu), the peak, failed allocations and allocation sites by caller address, "mem: ..." lines to the sink (default
@@ -101,24 +100,23 @@ int fnvnx_mem_enter(unsigned caller);             /* a stand-in records its own 
 void fnvnx_mem_leave(int entered);
 int fnvnx_mem_inside(void);
 unsigned fnvnx_mem_caller(unsigned fallback);
-/* Platform lane (platform/win32/platstat.cpp, D25 #3 #4 #6; tools/perf/PLAT.md): calls to unimplemented and no-op
+/* Platform lane (platform/win32/platstat.cpp, D25 #3 #4 #6; tools/perf/PLAT.md): calls to unimplemented
  * entries, failed file opens, audio decode failures and unmapped inputs, counted per (class, name, caller, detail),
  * "plat: ..." lines to the sink (default os_debug_print). Off (one load per report site) until started. */
-enum { FNVNX_PLAT_UNIMPL = 0, FNVNX_PLAT_NOOP, FNVNX_PLAT_OPEN, FNVNX_PLAT_DECODE, FNVNX_PLAT_INPUT, FNVNX_PLAT_NCLASS };
+enum { FNVNX_PLAT_UNIMPL = 0, FNVNX_PLAT_OPEN, FNVNX_PLAT_DECODE, FNVNX_PLAT_INPUT, FNVNX_PLAT_NCLASS };
 typedef void (*fnvnx_plat_sink)(const char *line);
 extern volatile int fnvnx_plat_on;
 void fnvnx_plat_start(fnvnx_plat_sink sink);
 void fnvnx_plat_autostart(void);                  /* from a static constructor (tools/perf/plat_autostart.c) */
 void fnvnx_plat_stop(void);
 void fnvnx_plat_flush(void);                      /* counts and summary (ExitProcess calls it) */
-void fnvnx_plat_counts(unsigned long long distinct[5], unsigned long long calls[5]);
+void fnvnx_plat_counts(unsigned long long distinct[FNVNX_PLAT_NCLASS], unsigned long long calls[FNVNX_PLAT_NCLASS]);
 void fnvnx_plat_note(int cls, const char *name, unsigned caller, const char *detail);
 /* win: the Windows path as the game gave it; host: what the mapper made of it (NULL if it failed); api: the entry */
 void fnvnx_plat_open_failed(const char *win, const char *host, unsigned err, unsigned caller, const char *api);
 #define FNVNX_PLAT_RA ((unsigned)(unsigned long)__builtin_return_address(0))
-/* in a stand-in's body: a call to a missing function / to a documented no-op (named by the enclosing function) */
+/* in a body that answers for a missing function (named by the enclosing function) */
 #define FNVNX_UNIMPL() (fnvnx_plat_on ? fnvnx_plat_note(FNVNX_PLAT_UNIMPL, __PRETTY_FUNCTION__, FNVNX_PLAT_RA, 0) : (void)0)
-#define FNVNX_NOOP() (fnvnx_plat_on ? fnvnx_plat_note(FNVNX_PLAT_NOOP, __PRETTY_FUNCTION__, FNVNX_PLAT_RA, 0) : (void)0)
 /* builtin modules for LoadLibraryA/GetProcAddress (xinput1_3.dll, ... registered by S6/S7) */
 typedef FARPROC (*fnvnx_module_resolver)(const char *proc);
 void fnvnx_register_module(const char *dll_name, fnvnx_module_resolver resolve);
@@ -127,7 +125,7 @@ void *fnvnx_win32_lookup_export(const char *dll, const char *name);
 /* A constant of the player's exe that the loader left unmapped (MSVC put some .rdata-like constants, e.g.
  * dinput8.lib's GUID_XAxis..GUID_Key, into .text; the port maps the image's data sections only): its bytes, read
  * from the exe file into buf (n bytes), else p itself (a mapped address, or no image). toolchain/game/boot.cpp
- * defines it; the weak default in platform/win32/module.cpp returns p. */
+ * defines it; the host tests (tests/s4/host_image_const.cpp) have no unmapped constants and return p. */
 const void *fnvnx_image_const(const void *p, uint32_t n, void *buf);
 /* An import slot of the exe, as the loader hands it over: by name (ordinal == FNVNX_IMPORT_BY_NAME, the loader's
  * FNVNX_BY_NAME) or by ordinal (name NULL). NULL: no export (the slot stays 0). */
@@ -156,7 +154,24 @@ void fnvnx_set_key_state(int vk, int down);
 void fnvnx_set_cursor_pos(int x, int y);
 /* COM classes (e.g. XAudio2 from S7) for CoCreateInstance */
 typedef HRESULT (*fnvnx_com_factory)(const GUID *iid, void **out);
-void fnvnx_register_com_class(const GUID *clsid, fnvnx_com_factory f);
+/* A statically linked server (resident for the life of the process); 0 when the registry (16 classes) is full. */
+int fnvnx_register_com_class(const GUID *clsid, fnvnx_com_factory f);
+/* A server with its own unload query (DllCanUnloadNow: S_OK when idle); CoFreeUnusedLibraries drops the idle ones. */
+typedef HRESULT (*fnvnx_com_can_unload)(void);
+int fnvnx_register_com_dll(const GUID *clsid, fnvnx_com_factory f, fnvnx_com_can_unload can_unload);
+#ifndef CLSCTX_INPROC_SERVER
+#define CLSCTX_INPROC_SERVER 0x1
+#define CLSCTX_INPROC_HANDLER 0x2
+#endif
+#ifndef CO_E_NOTINITIALIZED
+#define CO_E_NOTINITIALIZED ((HRESULT)0x800401F0L)
+#endif
+#ifndef RPC_E_CHANGED_MODE
+#define RPC_E_CHANGED_MODE ((HRESULT)0x80010106L)
+#endif
+#ifndef CLASS_E_NOAGGREGATION
+#define CLASS_E_NOAGGREGATION ((HRESULT)0x80040110L)
+#endif
 /* ---- virtual memory (platform/win32/memory.cpp, filemap.cpp): the process has ONE page map of its user address space
  * [0x00010000, 0x7FFEFFFF]; every page has a state, type, allocation base and protections. */
 #ifndef ERROR_NOACCESS
@@ -185,6 +200,9 @@ void fnvnx_register_com_class(const GUID *clsid, fnvnx_com_factory f);
 #define MEM_RESET 0x80000
 #define MEM_RESET_UNDO 0x1000000
 #define MEM_WRITE_WATCH 0x200000
+#define WRITE_WATCH_FLAG_RESET 1
+UINT GetWriteWatch(DWORD flags, PVOID base, SIZE_T size, PVOID *addresses, PULONG_PTR count, PULONG granularity);
+UINT ResetWriteWatch(PVOID base, SIZE_T size);
 #define MEM_PHYSICAL 0x400000
 #define MEM_LARGE_PAGES 0x20000000
 #endif

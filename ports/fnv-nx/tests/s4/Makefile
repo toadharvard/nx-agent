@@ -34,12 +34,12 @@ FT_CFLAGS := -O2 -w -DFT2_BUILD_LIBRARY -I$(FT)/include -I$(FT)/src
 CC ?= gcc
 CXX ?= g++
 FLAGS := -g -O1 -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wchar -pthread \
-         -I$(P)/include -iquote $(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(FT)/include
+         -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(FT)/include
 CFLAGS_ := -std=gnu11 $(FLAGS)
 CXXFLAGS_ := -std=gnu++17 $(FLAGS)
 
 PLAT_C := $(P)/os/os_posix.c $(wildcard $(P)/crt/*.c)
-PLAT_CXX := $(wildcard $(P)/win32/*.cpp) $(wildcard $(P)/crt/*.cpp)
+PLAT_CXX := $(wildcard $(P)/win32/*.cpp) $(wildcard $(P)/crt/*.cpp) $(wildcard $(P)/audio/*.cpp)   # audio: winmm waveOut* are exports of the table
 TEST_CXX := $(wildcard $(HERE)/*.cpp)
 
 OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
@@ -67,6 +67,11 @@ $(P)/win32/nls_tables.inc: $(P)/win32/tools/gen_nls.py
 	python3 $< $(NLS_DIR) $@
 $(OUT)/platform/win32/nls.cpp.o: $(P)/win32/nls_tables.inc
 
+# platform/win32/env_const.gen.inc: the constant-result imports, generated from platform/manifest/env_const.tsv
+$(P)/win32/env_const.gen.inc: $(P)/manifest/env_const.tsv $(P)/manifest/gen_env_const.py
+	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only win32/
+$(OUT)/platform/win32/env_const.cpp.o: $(P)/win32/env_const.gen.inc
+
 $(OUT)/%.cpp.o: $(ROOT)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_) -c $< -o $@
@@ -84,7 +89,7 @@ M32FLAGS := -m32 -idirafter /usr/include/x86_64-linux-gnu $(FLAGS) -I$(ROOT)/shi
 M32_CXX := $(PLAT_CXX) $(wildcard $(P)/audio/*.cpp) $(filter-out %/input_horizon.cpp,$(wildcard $(P)/input/*.cpp))   # input_horizon.cpp: libnx only; m32/host_input.cpp pumps
 # the D3D9=null guest's D3D side (toolchain/game/build.sh): D3DX and the null device (d3d9.dll module)
 M32_D3D := $(wildcard $(ROOT)/render/nine/d3dx/*.cpp) $(ROOT)/toolchain/game/null_d3d9.cpp
-M32_TEST := $(wildcard $(HERE)/m32/*.cpp)
+M32_TEST := $(wildcard $(HERE)/m32/*.cpp) $(HERE)/host_hooks.cpp $(HERE)/host_image_const.cpp
 M32_OBJS := $(patsubst $(ROOT)/%,$(M32OUT)/%.o,$(PLAT_C) $(M32_CXX) $(M32_D3D) $(M32_TEST))
 M32_D3DFLAGS := -std=gnu++17 -m32 -idirafter /usr/include/x86_64-linux-gnu -g -O1 -frounding-math -Wall -fshort-wchar \
 	-include $(HERE)/m32/compat_m32.h -I$(ROOT)/shim/include -I$(ROOT)/toolchain/include -I$(P)/include
@@ -142,7 +147,7 @@ XCC ?= aarch64-linux-gnu-gcc
 XCXX ?= aarch64-linux-gnu-g++
 LIBNX ?= $(ROOT)/ext/libnx
 XFLAGS := -mabi=ilp32 -fsyntax-only -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wchar \
-          -I$(P)/include -iquote $(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(FT)/include
+          -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(FT)/include
 ilp32:
 	@set -e; for f in $(PLAT_C); do echo "ilp32 cc  $${f#$(ROOT)/}"; $(XCC) -std=gnu11 $(XFLAGS) $$f; done
 	@set -e; for f in $(PLAT_CXX); do echo "ilp32 c++ $${f#$(ROOT)/}"; $(XCXX) -std=gnu++17 $(XFLAGS) $$f; done

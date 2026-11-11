@@ -48,7 +48,6 @@ static volatile int g_run;
 static void emit(const char *line) { (g_sink ? g_sink : os_debug_print)(line); }
 static volatile int g_auto_pending;
 static void start_scanner(void);
-extern "C" void hb_dump(void) __attribute__((weak));   /* tests/s15/mtqemu/hb.c, in a race-checker guest */
 
 /* safe from a static constructor: no thread, no allocation, no lock */
 extern "C" void fnvnx_waitgraph_autostart(unsigned limit_ms)
@@ -326,8 +325,6 @@ extern "C" void fnvnx_waitgraph_scan(void)
 
 extern "C" void fnvnx_threads_flush(void)
 {
-    if (hb_dump)
-        hb_dump();
     if (w32_wg_on)
         fnvnx_waitgraph_summary();
 }

@@ -3,8 +3,7 @@
  * The authoritative name of every IAT slot of FalloutNV.exe is in the exe's own import directory (the decomp
  * names some slots inconsistently, docs/RUNTIME.md). The loader/link step reads that directory and asks
  * fnvnx_win32_lookup_export(dll, name) for each slot; NULL means "not provided" (d3d9 -> the device's module,
- * DirectInput/DirectSound/XInput -> S7's registered modules). D3DX (render/nine/d3dx) is listed here by
- * weak reference. */
+ * DirectInput/DirectSound/XInput, d3dx9_38 -> their providers' registered modules). */
 #include "w32.h"
 #include "fnvnx_mmio.h"
 
@@ -116,36 +115,9 @@ BOOL EnumResourceNamesA(HMODULE, LPCSTR, BOOL (*)(HMODULE, LPCSTR, LPSTR, LONG_P
     X(waveOutOpen) X(waveOutClose) X(waveOutPrepareHeader) X(waveOutUnprepareHeader) X(waveOutWrite)         \
     X(waveOutPause) X(waveOutRestart) X(waveOutReset) X(waveOutSetVolume) X(waveOutGetVolume)                \
     X(waveOutGetPosition) X(waveOutGetNumDevs) X(waveOutGetDevCapsA) X(waveOutGetErrorTextA)
-#define FNVNX_WAVEOUT_DECL(f) void f(void) __attribute__((weak));   /* tests/s4 does not link platform/audio */
+#define FNVNX_WAVEOUT_DECL(f) void f(void);
 FNVNX_WAVEOUT_EXPORTS(FNVNX_WAVEOUT_DECL)
 #undef FNVNX_WAVEOUT_DECL
-}
-
-/* d3dx9_38.dll: render/nine/d3dx, linked into both guests (toolchain/game/build.sh D3D9=null, render/nine/game
- * D3D9=external). Weak references: a build without it (the host tests) links, and those slots stay NULL. */
-#define FNVNX_D3DX_EXPORTS(X)                                                                                 \
-    X(D3DXAssembleShader) X(D3DXAssembleShaderFromFileA) X(D3DXCompileShader) X(D3DXCompileShaderFromFileA)  \
-    X(D3DXCreateBuffer) X(D3DXCreateCubeTextureFromFileInMemory) X(D3DXCreateCubeTextureFromFileInMemoryEx)   \
-    X(D3DXCreateTextureFromFileInMemory) X(D3DXCreateTextureFromFileInMemoryEx)                              \
-    X(D3DXCreateVolumeTextureFromFileInMemory) X(D3DXCreateVolumeTextureFromFileInMemoryEx)                  \
-    X(D3DXFindShaderComment) X(D3DXGetImageInfoFromFileInMemory) X(D3DXGetPixelShaderProfile)                \
-    X(D3DXGetShaderConstantTable) X(D3DXGetShaderConstantTableEx) X(D3DXGetShaderSize) X(D3DXGetShaderVersion) \
-    X(D3DXGetVertexShaderProfile) X(D3DXLoadSurfaceFromMemory) X(D3DXLoadSurfaceFromSurface) X(D3DXMatrixInverse) \
-    X(D3DXMatrixLookAtLH) X(D3DXMatrixMultiply) X(D3DXMatrixMultiplyTranspose) X(D3DXMatrixOrthoOffCenterLH)  \
-    X(D3DXMatrixPerspectiveFovLH) X(D3DXMatrixRotationYawPitchRoll) X(D3DXMatrixTranspose) X(D3DXPlaneNormalize) \
-    X(D3DXPlaneTransform) X(D3DXVec3Normalize) X(D3DXVec3TransformCoord) X(D3DXVec3TransformNormal)           \
-    X(D3DXVec4Transform)
-extern "C" {
-#define FNVNX_D3DX_DECL(f) void f(void) __attribute__((weak));
-FNVNX_D3DX_EXPORTS(FNVNX_D3DX_DECL)
-#undef FNVNX_D3DX_DECL
-}
-
-/* D3DXSaveTextureToFileA: the exe imports it for the developer screenshot path; render/nine/d3dx does not write
- * image files. A weak fallback that fails (D3DERR_INVALIDCALL) as for an unwritable file; d3dx may override it. */
-extern "C" __attribute__((weak)) HRESULT D3DXSaveTextureToFileA(const char *, int, void *, const void *)
-{
-    return (HRESULT)0x8876086Cu;
 }
 
 /* user32 window functions without a declaration in the shim (platform/win32/window.cpp) */
@@ -190,7 +162,7 @@ const exp g_exports[] = {
     K(SetLastError), K(SetThreadAffinityMask), K(SetThreadIdealProcessor), K(SetThreadPriority),
     K(SetThreadPriorityBoost), K(Sleep), K(SleepEx), K(SuspendThread), K(SwitchToThread),
     K(SystemTimeToFileTime), K(SystemTimeToTzSpecificLocalTime), K(TlsAlloc), K(TlsFree), K(TlsGetValue),
-    K(TlsSetValue), K(TryEnterCriticalSection), K(VirtualAlloc), K(VirtualFree), K(VirtualProtect), K(VirtualQuery),
+    K(TlsSetValue), K(TryEnterCriticalSection), K(VirtualAlloc), K(VirtualFree), K(VirtualProtect), K(VirtualQuery), K(GetWriteWatch), K(ResetWriteWatch),
     K(CreateFileMappingA), K(MapViewOfFile), K(UnmapViewOfFile), K(FlushViewOfFile),
     K(WaitForMultipleObjects), K(WaitForSingleObject), K(WriteFile), K(WritePrivateProfileSectionA),
     K(WritePrivateProfileStringA), K(lstrcatA), K(lstrcmpiA), K(lstrcpyA), K(lstrlenA),
@@ -271,10 +243,6 @@ const exp g_exports[] = {
     E("steam_api", SteamAPI_UnregisterCallback), E("steam_api", SteamUser), E("steam_api", SteamFriends),
     E("steam_api", SteamUtils), E("steam_api", SteamApps), E("steam_api", SteamUserStats),
     D("d3d9"), D("dinput8"), D("dsound"), D("xinput1_3"), D("msvcrt"),
-#define FNVNX_D3DX_ENTRY(f) E("d3dx9_38", f),
-    FNVNX_D3DX_EXPORTS(FNVNX_D3DX_ENTRY)
-#undef FNVNX_D3DX_ENTRY
-    E("d3dx9_38", D3DXSaveTextureToFileA),
     /* binkw32.dll and libvorbisfile.dll are not provided here: they are loaded as translated PE images */
 };
 #undef E

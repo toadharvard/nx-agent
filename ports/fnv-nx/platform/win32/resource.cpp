@@ -7,7 +7,7 @@
  * for type / name / language. Names are integers or UTF-16 strings compared case-insensitively; "#n" is the integer n.
  * Language: the requested LANGID, else 0x0409 (the user default), else neutral, else any English, else the first.
  * The image of a module is the one registered with fnvnx_resource_register_image (the loader calls it when it maps
- * an image; module.cpp keeps no image base/size), else `fnvnx_module_image` (weak: 0 = no image). HRSRC is the pointer to the IMAGE_RESOURCE_DATA_ENTRY inside the image,
+ * an image; module.cpp keeps no image base/size); a module without one has no resources. HRSRC is the pointer to the IMAGE_RESOURCE_DATA_ENTRY inside the image,
  * HGLOBAL the pointer to the data (the image is mapped: RVA == offset), so FreeResource has nothing to free.
  *
  * Icons/cursors: group directory -> best image (closest size to SM_CXICON/SM_CXCURSOR, then most colours <= 32 bpp)
@@ -25,8 +25,6 @@
 #define EXE_MODULE ((HMODULE)(uintptr_t)0x00400000u)
 #define E_INVALID_DATA 13
 #define E_BAD_EXE 193
-
-extern "C" __attribute__((weak)) int fnvnx_module_image(HMODULE, const void **, size_t *) { return 0; }
 
 namespace {
 os_lock_t g_lock;
@@ -52,7 +50,7 @@ bool open_image(HMODULE m, Img *im)
     if (!m) m = EXE_MODULE;
     const void *b = NULL; size_t n = 0;
     { Lk l; for (TI *t = g_ti; t; t = t->next) if (t->b && t->m == m) { b = t->b; n = t->n; } }
-    if (!b && (!fnvnx_module_image(m, &b, &n) || !b)) return fail(1812 /* ERROR_RESOURCE_DATA_NOT_FOUND */);
+    if (!b) return fail(1812 /* ERROR_RESOURCE_DATA_NOT_FOUND */);
     im->b = (const uint8_t *)b; im->n = n;
     if (!ok(*im, 0, 0x40) || r16(im->b) != 0x5A4D) return fail(E_BAD_EXE);
     uint64_t pe = r32(im->b + 0x3C), opt = pe + 24;

@@ -25,12 +25,13 @@
 
 enum { ST_FREE = 0, ST_RESERVE = 1, ST_COMMIT = 2 };
 enum { TY_PRIVATE = 0, TY_MAPPED = 1, TY_IMAGE = 2 };
-enum { F_FOREIGN = 1, F_VIEW = 2, F_RESERVESEC = 4, F_RESET = 8, F_NEW = 16 };
+enum { F_FOREIGN = 1, F_VIEW = 2, F_RESERVESEC = 4, F_RESET = 8, F_NEW = 16, F_WATCH = 32 };
 struct pg {
     uint32_t base;      /* allocation base address >> 12; 0: free */
     uint32_t caller;    /* the memory lane (memtrack.cpp): the call that reserved the allocation */
     uint16_t cur, aprot;
-    uint8_t state, type, flags, pad;
+    uint8_t state, type, flags;
+    uint8_t wdirty;     /* F_WATCH: written since the last reset (the page is writable at the OS level again) */
 };
 #define MEM_RA ((unsigned)(uintptr_t)__builtin_return_address(0))
 enum { MEMK_HEAP = 0, MEMK_VIRTUAL = 1 };
@@ -65,6 +66,14 @@ static int os_prot_of(DWORD p)
     return OS_VM_READ | (prot_write(p) ? OS_VM_WRITE : 0) | (prot_exec(p) ? OS_VM_EXEC : 0);
 }
 
+/* the protection the OS gets for a page of the map: a write-watched page that is not yet written is read-only, so
+ * that its first write faults into fnvnx_win32_vm_fault, which records it */
+static int os_prot_pg(const struct pg &p)
+{
+    int o = os_prot_of(p.cur);
+    return (p.flags & F_WATCH) && !p.wdirty ? o & ~OS_VM_WRITE : o;
+}
+
 static bool pg_init(void)   /* under the lock */
 {
     if (!g_pg)
@@ -85,6 +94,7 @@ static void pg_set(size_t i, uintptr_t base, uint8_t state, uint8_t type, DWORD 
     g_pg[i].state = state;
     g_pg[i].type = type;
     g_pg[i].flags = flags;
+    g_pg[i].wdirty = 0;
 }
 static void pg_clear(size_t i)
 {
@@ -248,21 +258,31 @@ static int commit_pages(size_t first, size_t last, DWORD prot)
             }
         return -1;
     }
-    /* the protection: pages whose real protection differs from the wanted one */
+    /* the protection: pages whose real protection differs from the wanted one. A new page is read-write at the OS
+     * level whatever the map says; a watched page that is not written wants no write. */
+    for (size_t p = first; p <= last; p++)
+        g_pg[p].flags &= ~F_RESET;
     for (size_t p = first; p <= last;) {
-        if (os_prot_of(g_pg[p].cur) == want) {
+        int want_p = (g_pg[p].flags & F_WATCH) && !g_pg[p].wdirty ? want & ~OS_VM_WRITE : want;
+        int have = (g_pg[p].flags & F_NEW) ? OS_VM_READ | OS_VM_WRITE : os_prot_pg(g_pg[p]);
+        if (have == want_p) {
             p++;
             continue;
         }
-        size_t q = p;
-        while (q <= last && os_prot_of(g_pg[q].cur) != want)
+        size_t q = p + 1;
+        while (q <= last) {
+            int wq = (g_pg[q].flags & F_WATCH) && !g_pg[q].wdirty ? want & ~OS_VM_WRITE : want;
+            int hq = (g_pg[q].flags & F_NEW) ? OS_VM_READ | OS_VM_WRITE : os_prot_pg(g_pg[q]);
+            if (hq == wq || wq != want_p)
+                break;
             q++;
-        os_vm_protect((void *)paddr(p), (q - p) * PAGE, want);
+        }
+        os_vm_protect((void *)paddr(p), (q - p) * PAGE, want_p);
         p = q;
     }
     for (size_t p = first; p <= last; p++) {
         g_pg[p].cur = (uint16_t)prot;
-        g_pg[p].flags &= ~(F_RESET | F_NEW);
+        g_pg[p].flags &= ~F_NEW;
     }
     return 0;
 }
@@ -311,10 +331,6 @@ extern "C" LPVOID VirtualAlloc(LPVOID addr, SIZE_T size, DWORD type, DWORD prote
             goto bad;
         if (type & (MEM_PHYSICAL | MEM_LARGE_PAGES)) {   /* AWE and large pages need SeLockMemoryPrivilege: this process has none */
             err = ERROR_PRIVILEGE_NOT_HELD;
-            goto bad;
-        }
-        if (type & MEM_WRITE_WATCH) {   /* write tracking needs the fault path; not available (reported) */
-            err = ERROR_NOT_SUPPORTED;
             goto bad;
         }
     }
@@ -371,7 +387,7 @@ extern "C" LPVOID VirtualAlloc(LPVOID addr, SIZE_T size, DWORD type, DWORD prote
         }
         uintptr_t ab = paddr(at);
         for (size_t i = 0; i < np; i++)
-            pg_set(at + i, ab, ST_RESERVE, TY_PRIVATE, 0, protect, 0, caller);
+            pg_set(at + i, ab, ST_RESERVE, TY_PRIVATE, 0, protect, (type & MEM_WRITE_WATCH) ? F_WATCH : 0, caller);
         if (type & MEM_COMMIT) {
             size_t f = a ? pidx((uintptr_t)(a & ~(uint64_t)(PAGE - 1))) : at, l = at + np - 1;
             if (commit_pages(f, l, protect)) {
@@ -471,6 +487,7 @@ extern "C" BOOL VirtualFree(LPVOID addr, SIZE_T size, DWORD type)
                 g_pg[k].state = ST_RESERVE;
                 g_pg[k].cur = 0;
                 g_pg[k].flags &= ~F_RESET;
+                g_pg[k].wdirty = 0;
             }
         }
         ok = TRUE;
@@ -498,7 +515,7 @@ static int range_access(uint64_t a, uint64_t n, int access, bool consume_guard)
         if (p->cur & PAGE_GUARD) {
             if (consume_guard) {
                 p->cur &= ~PAGE_GUARD;
-                os_vm_protect((void *)paddr(i), PAGE, os_prot_of(p->cur));
+                os_vm_protect((void *)paddr(i), PAGE, os_prot_pg(*p));
             }
             return 0;
         }
@@ -538,12 +555,16 @@ static DWORD protect_pages(uint64_t a, uint64_t sz, DWORD prot, DWORD *was)   /*
                 err = ERROR_INVALID_ADDRESS;
         if (!err && g_pg[f].type != TY_PRIVATE && ((prot_write(prot) && !prot_write(g_pg[f].aprot)) || (prot_exec(prot) && !prot_exec(g_pg[f].aprot))))
             err = ERROR_INVALID_PARAMETER;   /* beyond what the section / view grants */
-        if (!err && os_vm_protect((void *)paddr(f), (l - f + 1) * PAGE, os_prot_of(prot)))
+        if (!err && !(g_pg[f].flags & F_WATCH) && os_vm_protect((void *)paddr(f), (l - f + 1) * PAGE, os_prot_of(prot)))
             err = ERROR_INVALID_PARAMETER;
         if (!err) {
             *was = g_pg[f].cur;
             for (size_t i = f; i <= l; i++)
                 g_pg[i].cur = (uint16_t)prot;
+            if (g_pg[f].flags & F_WATCH)   /* each page by its own tracking state */
+                for (size_t i = f; i <= l && !err; i++)
+                    if (os_vm_protect((void *)paddr(i), PAGE, os_prot_pg(g_pg[i])))
+                        err = ERROR_INVALID_PARAMETER;
         }
     }
     os_unlock(&g_vm_lock);
@@ -622,9 +643,13 @@ extern "C" int fnvnx_win32_vm_fault(uintptr_t addr, int access, uint32_t *code_o
         struct pg *p = &g_pg[pidx((uintptr_t)a)];
         if (p->cur & PAGE_GUARD) {
             p->cur &= ~PAGE_GUARD;   /* once: the access is retried after the handler */
-            os_vm_protect((void *)(uintptr_t)(a & ~(uint64_t)(PAGE - 1)), PAGE, os_prot_of(p->cur));
+            os_vm_protect((void *)(uintptr_t)(a & ~(uint64_t)(PAGE - 1)), PAGE, os_prot_pg(*p));
             code = STATUS_GUARD_PAGE_VIOLATION;
             r = 1;
+        } else if (access == 1 && (p->flags & F_WATCH) && !p->wdirty && prot_write(p->cur)) {
+            p->wdirty = 1;   /* the first write since the reset: record it, let the page be written, retry */
+            os_vm_protect((void *)(uintptr_t)(a & ~(uint64_t)(PAGE - 1)), PAGE, os_prot_pg(*p));
+            r = 2;
         } else if (access == 1 ? prot_write(p->cur) : access == 8 ? prot_exec(p->cur) : prot_read(p->cur)) {
             r = 2;   /* the map permits it: another thread cleared the guard first */
         }
@@ -633,6 +658,74 @@ extern "C" int fnvnx_win32_vm_fault(uintptr_t addr, int access, uint32_t *code_o
     if (code_out)
         *code_out = code;
     return r;
+}
+
+/* The pages [pa, pe) as map indices, when they lie in one MEM_WRITE_WATCH allocation (under the lock). */
+static bool watch_range(uint64_t a, uint64_t sz, size_t *f, size_t *l)
+{
+    uint64_t pa = a & ~(uint64_t)(PAGE - 1), pe = (a + sz + PAGE - 1) & ~(uint64_t)(PAGE - 1);
+    if (!sz || a + sz < a || pa < UMIN || pe > UEND || !pg_init())
+        return false;
+    *f = pidx((uintptr_t)pa);
+    *l = pidx((uintptr_t)pe) - 1;
+    for (size_t i = *f; i <= *l; i++)
+        if (g_pg[i].state == ST_FREE || g_pg[i].base != g_pg[*f].base || !(g_pg[i].flags & F_WATCH))
+            return false;
+    return true;
+}
+
+static void watch_rearm(size_t i)
+{
+    g_pg[i].wdirty = 0;
+    if (g_pg[i].state == ST_COMMIT)
+        os_vm_protect((void *)paddr(i), PAGE, os_prot_pg(g_pg[i]));
+}
+
+/* GetWriteWatch: the page addresses in [base, base + size) written since allocation or the last reset, in address order
+ * (at most *count of them; *count = the number stored, *granularity = the page size). WRITE_WATCH_FLAG_RESET (1)
+ * re-arms the pages it returned. 0, or ~0u with ERROR_INVALID_PARAMETER: another flag, no output, or a range that is not
+ * inside one MEM_WRITE_WATCH allocation. */
+extern "C" UINT GetWriteWatch(DWORD flags, PVOID base, SIZE_T size, PVOID *addresses, PULONG_PTR count, PULONG granularity)
+{
+    flags = W32_DW(flags);
+    size_t f, l;
+    if ((flags & ~1u) || !addresses || !count || !granularity) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return ~0u;
+    }
+    os_lock(&g_vm_lock);
+    if (!watch_range((uint64_t)(uintptr_t)base, (uint64_t)size, &f, &l)) {
+        os_unlock(&g_vm_lock);
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return ~0u;
+    }
+    ULONG_PTR cap = *count, n = 0;
+    for (size_t i = f; i <= l && n < cap; i++)
+        if (g_pg[i].wdirty) {
+            addresses[n++] = (PVOID)paddr(i);
+            if (flags & 1)
+                watch_rearm(i);
+        }
+    os_unlock(&g_vm_lock);
+    *count = n;
+    *granularity = PAGE;
+    return 0;
+}
+
+/* ResetWriteWatch: every page of the range is clean and armed again. 0, or ~0u with ERROR_INVALID_PARAMETER. */
+extern "C" UINT ResetWriteWatch(PVOID base, SIZE_T size)
+{
+    size_t f, l;
+    os_lock(&g_vm_lock);
+    if (!watch_range((uint64_t)(uintptr_t)base, (uint64_t)size, &f, &l)) {
+        os_unlock(&g_vm_lock);
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return ~0u;
+    }
+    for (size_t i = f; i <= l; i++)
+        watch_rearm(i);
+    os_unlock(&g_vm_lock);
+    return 0;
 }
 
 /* memory that did not come from VirtualAlloc: the loader's image sections, heap regions and thread stacks */
@@ -739,7 +832,6 @@ void w32_vm_view_prot(uintptr_t base, size_t size, DWORD prot)
  * Every block carries a header {heap, requested size, capacity, list links}, 16-byte aligned, in front of the
  * payload. A heap is {flags, fixed-size limit, bytes in use, block list, lock}; blocks belong to the heap in their
  * header. Unless HEAP_NO_SERIALIZE is in effect (call flags | heap flags), every operation holds the heap's lock. */
-#define PROCESS_HEAP ((HANDLE)(uintptr_t)0x00150000u)
 #ifndef STATUS_NO_MEMORY
 #define STATUS_NO_MEMORY 0xC0000017u
 #endif
@@ -837,8 +929,6 @@ static void heap_free_blk(w32_heap *h, heap_blk *b)   /* under the heap's lock; 
     h->used -= b->size;
     free(b);
 }
-
-extern "C" HANDLE GetProcessHeap(void) { return PROCESS_HEAP; }
 
 extern "C" HANDLE HeapCreate(DWORD f, SIZE_T i, SIZE_T m)
 {

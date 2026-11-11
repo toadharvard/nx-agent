@@ -32,36 +32,115 @@ extern "C" HRESULT SHGetFolderPathA(HWND h, int csidl, HANDLE tok, DWORD flags, 
     return S_OK;
 }
 
-/* ---- ole32 */
-struct comclass { GUID clsid; fnvnx_com_factory f; };
+/* ---- ole32
+ * Apartments: every thread has an initialisation count and the apartment model of its first successful
+ * CoInitialize[Ex] (COINIT_APARTMENTTHREADED = 2 is an STA, anything else an MTA). A thread that never initialised is
+ * implicitly in the MTA while at least one thread of the process holds an MTA initialisation (g_mta_threads).
+ * Servers: the in-process servers are registered with their class factory; a server registered with
+ * fnvnx_register_com_class is part of the image (resident: DllCanUnloadNow would answer S_FALSE for ever), one
+ * registered with fnvnx_register_com_dll carries its own can-unload query which CoFreeUnusedLibraries asks. No registered
+ * factory takes an outer unknown, so no class supports aggregation. */
+enum { W32_COINIT_STA = 2 };
+static __thread int g_co_count;
+static __thread DWORD g_co_model;
+static int g_mta_threads;
+
+struct comclass { GUID clsid; fnvnx_com_factory f; fnvnx_com_can_unload can_unload; };
 static struct comclass g_com[16];
 static int g_ncom;
+static os_lock_t g_com_lock;
 
-extern "C" void fnvnx_register_com_class(const GUID *clsid, fnvnx_com_factory f)
+static int com_register(const GUID *clsid, fnvnx_com_factory f, fnvnx_com_can_unload can_unload)
 {
-    if (g_ncom < 16) {
+    os_lock(&g_com_lock);
+    int ok = g_ncom < 16;
+    if (ok) {
         g_com[g_ncom].clsid = *clsid;
         g_com[g_ncom].f = f;
+        g_com[g_ncom].can_unload = can_unload;
         g_ncom++;
     }
+    os_unlock(&g_com_lock);
+    return ok;
 }
 
-extern "C" HRESULT CoInitialize(LPVOID r) { W32_UNUSED(r); return S_OK; }
-extern "C" HRESULT CoInitializeEx(LPVOID r, DWORD m) { W32_UNUSED(r); W32_UNUSED(m); return S_OK; }
-extern "C" void CoUninitialize(void) {}
-extern "C" void CoFreeUnusedLibraries(void) {}
+extern "C" int fnvnx_register_com_class(const GUID *clsid, fnvnx_com_factory f)
+{
+    return com_register(clsid, f, NULL);
+}
+
+extern "C" int fnvnx_register_com_dll(const GUID *clsid, fnvnx_com_factory f, fnvnx_com_can_unload can_unload)
+{
+    return can_unload && com_register(clsid, f, can_unload);
+}
+
+extern "C" HRESULT CoInitializeEx(LPVOID reserved, DWORD model)
+{
+    if (reserved)
+        return E_INVALIDARG;
+    DWORD m = (model & W32_COINIT_STA) ? W32_COINIT_STA : 0;
+    if (g_co_count && g_co_model != m)
+        return RPC_E_CHANGED_MODE;
+    HRESULT hr = g_co_count ? S_FALSE : S_OK;
+    if (!g_co_count) {
+        g_co_model = m;
+        if (!m)
+            __atomic_add_fetch(&g_mta_threads, 1, __ATOMIC_SEQ_CST);
+    }
+    g_co_count++;
+    return hr;
+}
+
+extern "C" HRESULT CoInitialize(LPVOID reserved)
+{
+    return CoInitializeEx(reserved, W32_COINIT_STA);
+}
+
+extern "C" void CoUninitialize(void)
+{
+    if (!g_co_count)
+        return; /* no successful CoInitialize on this thread to balance */
+    if (--g_co_count == 0 && !g_co_model)
+        __atomic_sub_fetch(&g_mta_threads, 1, __ATOMIC_SEQ_CST);
+}
+
+extern "C" void CoFreeUnusedLibraries(void)
+{
+    os_lock(&g_com_lock);
+    int o = 0;
+    for (int i = 0; i < g_ncom; i++) {
+        if (g_com[i].can_unload && g_com[i].can_unload() == S_OK)
+            continue; /* the server's DllCanUnloadNow said it is idle: its class leaves the registry */
+        g_com[o++] = g_com[i];
+    }
+    g_ncom = o;
+    os_unlock(&g_com_lock);
+}
 extern "C" LPVOID CoTaskMemAlloc(SIZE_T n) { return malloc(n ? n : 1); }
 extern "C" void CoTaskMemFree(LPVOID p) { free(p); }
 
 extern "C" HRESULT CoCreateInstance(const GUID *clsid, void *outer, DWORD ctx, const GUID *iid, LPVOID *out)
 {
-    W32_UNUSED(outer); W32_UNUSED(ctx);
-    if (out)
-        *out = NULL;
-    for (int i = 0; i < g_ncom; i++)
+    if (!out)
+        return E_POINTER;
+    *out = NULL;
+    if (!clsid || !iid)
+        return E_INVALIDARG;
+    if (!g_co_count && !__atomic_load_n(&g_mta_threads, __ATOMIC_SEQ_CST))
+        return CO_E_NOTINITIALIZED;
+    if (!(ctx & (CLSCTX_INPROC_SERVER | CLSCTX_INPROC_HANDLER)))
+        return REGDB_E_CLASSNOTREG; /* only in-process servers exist */
+    fnvnx_com_factory f = NULL;
+    os_lock(&g_com_lock);
+    for (int i = 0; i < g_ncom && !f; i++)
         if (!memcmp(&g_com[i].clsid, clsid, sizeof(GUID)))
-            return g_com[i].f(iid, out);
-    return REGDB_E_CLASSNOTREG;
+            f = g_com[i].f;
+    os_unlock(&g_com_lock);
+    if (!f)
+        return REGDB_E_CLASSNOTREG;
+    if (outer)
+        return CLASS_E_NOAGGREGATION;
+    return f(iid, out);
 }
 
 extern "C" HRESULT CoCreateGuid(GUID *g)
@@ -82,8 +161,7 @@ extern "C" HRESULT CoCreateGuid(GUID *g)
  * table nvapi_QueryInterface fills at run time (0x009fead6, 0x009feae8, 0x009febd8; crt_symbols.tsv class thunk);
  * with the library absent each returns NVAPI_API_NOT_INITIALIZED (-4) and the renderer takes its non-NVIDIA path
  * (R2 recon2-002, R6 recon6-007). Any arguments, nothing written. */
-extern "C" int fnvnx_nvapi_not_initialized(void) { FNVNX_NOOP(); return -4; }
-
+/* fnvnx_nvapi_not_initialized: win32/env_const.cpp, from env_const.tsv (ENV:M2) */
 /* ---- steam_api / galaxywrp.dll: the public Steamworks contract in the state "Steam client not running"
  * (ENV_TRUTH M6). SteamAPI_Init fails every time (no client to connect to), SteamAPI_IsSteamRunning is false, every
  * interface accessor is NULL (no ISteam* object exists without a client), no callback is ever delivered (callbacks
@@ -93,12 +171,27 @@ static os_lock_t g_steam_lock;
 static struct steam_reg { void *cb; int id; } *g_steam_regs;
 static int g_steam_nregs, g_steam_cap;
 
-extern "C" bool SteamAPI_Init(void) { return false; }
-extern "C" bool SteamAPI_IsSteamRunning(void) { return false; }
-/* nothing was initialised, so there is nothing to release; the registrations belong to their objects */
-extern "C" void SteamAPI_Shutdown(void) {}
-/* with no client no callback exists to dispatch; the registered objects are not touched */
-extern "C" void SteamAPI_RunCallbacks(void) {}
+/* SteamAPI_Init, SteamAPI_IsSteamRunning and the interface accessors: env_const.tsv (ENV:M6). Init never succeeds, so
+ * the pipe to the client (HSteamPipe, 0 = none) is never opened. */
+static int g_steam_pipe;
+
+/* releases the pipe to the client and marks the API uninitialised; the registrations belong to their objects */
+extern "C" void SteamAPI_Shutdown(void)
+{
+    os_lock(&g_steam_lock);
+    g_steam_pipe = 0;
+    os_unlock(&g_steam_lock);
+}
+
+/* dispatches the callbacks the client queued on the pipe to the registered objects; without a pipe nothing is queued */
+extern "C" void SteamAPI_RunCallbacks(void)
+{
+    os_lock(&g_steam_lock);
+    int pipe = g_steam_pipe;
+    os_unlock(&g_steam_lock);
+    if (!pipe)
+        return;
+}
 
 extern "C" void SteamAPI_RegisterCallback(void *cb, int id)
 {
@@ -138,9 +231,3 @@ extern "C" int fnvnx_steam_callback_count(void)
     os_unlock(&g_steam_lock);
     return n;
 }
-
-extern "C" void *SteamUser(void) { return NULL; }
-extern "C" void *SteamFriends(void) { return NULL; }
-extern "C" void *SteamUtils(void) { return NULL; }
-extern "C" void *SteamApps(void) { return NULL; }
-extern "C" void *SteamUserStats(void) { return NULL; }

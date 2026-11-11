@@ -5,12 +5,15 @@
 
 #include <stdlib.h>
 
+extern "C" long CoInitializeEx(void *reserved, unsigned long model);   /* platform/win32/services.cpp */
+
 int s7_failures, s7_checks;
 s7_case *s7_cases;
 
 int main(int argc, char **argv)
 {
     fnvnx_audio_configure("manual");
+    CoInitializeEx(nullptr, 0);   /* the test thread is a COM thread, as the game's main thread is */
     int n = 0;
     for (s7_case *c = s7_cases; c; c = c->next) n++;
     s7_case **v = (s7_case **)malloc(sizeof(s7_case *) * (size_t)n);

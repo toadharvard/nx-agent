@@ -24,20 +24,12 @@
 #endif
 
 /* ---- process */
-void os_init(void) {}
-
 void os_debug_print(const char *s)
 {
     size_t n = strlen(s);
     fwrite(s, 1, n, stderr);
     if (n == 0 || s[n - 1] != '\n')
         fputc('\n', stderr);
-}
-
-void os_fatal(const char *msg)
-{
-    fprintf(stderr, "fnvnx fatal: %s\n", msg);
-    abort();
 }
 
 void os_exit_process(int code)
@@ -340,10 +332,6 @@ void os_sleep_ns(uint64_t ns)
     while (nanosleep(&ts, &ts) && errno == EINTR) {
     }
 }
-
-static __thread void *g_tls;
-void *os_tls_get(void) { return g_tls; }
-void os_tls_set(void *p) { g_tls = p; }
 
 /* ---- time. Host ticks are 100 ns (10 MHz, the usual Windows QPC rate). */
 uint64_t os_monotonic_ns(void)

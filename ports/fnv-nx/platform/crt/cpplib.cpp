@@ -124,7 +124,7 @@ rmtx *mtx_of(void *self)
         return m;
     rmtx *n = (rmtx *)calloc(1, sizeof(rmtx));
     if (!n)
-        os_fatal("out of memory in std::_Mutex");
+        throw std::bad_alloc();
     void *expected = nullptr;
     if (__atomic_compare_exchange_n(slot, &expected, (void *)n, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
         return n;
@@ -139,7 +139,7 @@ extern "C" void *fnvnx_mutex_ctor(void *self)
 {
     ((mutex *)self)->_Mtx = calloc(1, sizeof(rmtx));
     if (!((mutex *)self)->_Mtx)
-        os_fatal("out of memory in std::_Mutex");
+        throw std::bad_alloc();
     return self;
 }
 

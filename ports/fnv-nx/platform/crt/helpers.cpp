@@ -79,7 +79,7 @@ const std::type_info *rtti_lookup(const void *td)
 }
 } // namespace
 
-void fnvnx_rtti_register(const void *td, const std::type_info *ti)
+int fnvnx_rtti_register(const void *td, const std::type_info *ti)
 {
     os_lock(&g_rtti_lock);
     if (g_nrtti == g_caprtti) {
@@ -87,7 +87,7 @@ void fnvnx_rtti_register(const void *td, const std::type_info *ti)
         rtti_entry *n = (rtti_entry *)realloc(g_rtti, cap * sizeof *n);
         if (!n) {
             os_unlock(&g_rtti_lock);
-            os_fatal("out of memory in fnvnx_rtti_register");
+            return -1;
         }
         g_rtti = n;
         g_caprtti = cap;
@@ -96,6 +96,7 @@ void fnvnx_rtti_register(const void *td, const std::type_info *ti)
     g_rtti[g_nrtti].ti = ti;
     g_nrtti++;
     os_unlock(&g_rtti_lock);
+    return 0;
 }
 
 extern "C" void *fnvnx_rt_dynamic_cast(void *inptr, long vfdelta, void *src_type, void *target_type, int is_reference)

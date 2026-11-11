@@ -78,6 +78,8 @@ void w32_mutexes_abandon_locked(DWORD tid);        /* a thread ended: its mutexe
 /* ---- threads (thread.cpp) */
 #define W32_PSEUDO_THREAD ((HANDLE)(LONG_PTR)-2)
 #define W32_PSEUDO_PROCESS ((HANDLE)(LONG_PTR)-1)
+/* the handle of the process heap (memory.cpp g_proc_heap) */
+#define PROCESS_HEAP ((HANDLE)(uintptr_t)0x00150000u)
 struct w32_thread_obj;
 int w32_thread_signaled(struct w32_obj *o);
 DWORD w32_thread_obj_tid(struct w32_obj *o);       /* the thread id of a W32_THREAD object */

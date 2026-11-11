@@ -83,7 +83,7 @@ TEST(ini_get_int)
     seed();
     CHECK_EQ(GetPrivateProfileIntA("General", "uGridsToLoad", 3, INI), 5);
     CHECK_EQ((INT)GetPrivateProfileIntA("General", "iNeg", 0, INI), -42);
-    CHECK_EQ(GetPrivateProfileIntA("General", "iHex", 0, INI), 31);
+    CHECK_EQ(GetPrivateProfileIntA("General", "iHex", 9, INI), 0);   /* "0x1F": decimal only, stops at the x */
     CHECK_EQ(GetPrivateProfileIntA("General", "iJunk", 0, INI), 12);
     CHECK_EQ(GetPrivateProfileIntA("General", "sLanguage", 7, INI), 0); /* not a number */
     CHECK_EQ(GetPrivateProfileIntA("General", "bNoValue", 7, INI), 7);  /* empty: default */
@@ -137,36 +137,19 @@ TEST(ini_bare_name_is_windows_dir)
     CHECK(GetFileAttributesA("C:\\Windows\\fnvnx_test.ini") != INVALID_FILE_ATTRIBUTES);
 }
 
-/* the Switch defaults (ini.cpp port_default): only the engine's ini, only keys the file lacks, [fnvnx] switch */
-TEST(ini_port_defaults)
+/* a key the file does not have reads as the caller's default, whatever the key and the file: the profile calls hold no
+ * settings of the port */
+TEST(ini_absent_key_is_callers_default)
 {
     seed();
     char b[64];
     CHECK_EQ(GetPrivateProfileStringA("General", "bUseThreadedMorpher", "0", b, sizeof b, INI), 1);
-    CHECK_STR(b, "1");
-    CHECK_EQ(GetPrivateProfileIntA("GENERAL", "BUSETHREADEDPARTICLESYSTEM", 0, INI), 1);
-    CHECK_EQ(GetPrivateProfileIntA("General", "bUseThreadedTempEffects", 0,
-                                   "C:\\FalloutNV\\Fallout_default.ini"), 1);   /* missing file: still the engine's */
-    CHECK_EQ(GetPrivateProfileIntA("Display", "bUseThreadedMorpher", 7, INI), 7);  /* other section */
-    CHECK_EQ(GetPrivateProfileIntA("General", "bUseThreadedMorpher", 7,
-                                   "C:\\Users\\Player\\Documents\\My Games\\FalloutNV\\FalloutPrefs.ini"), 7);
-    CHECK_EQ(GetPrivateProfileIntA("General", "iNotInTable", 5, INI), 5);
-    /* listings stay the file's */
-    char l[256];
-    DWORD n = GetPrivateProfileStringA("General", NULL, "", l, sizeof l, INI);
-    bool listed = false;
-    for (DWORD i = 0; i < n; i += (DWORD)strlen(l + i) + 1)
-        listed |= !strcmp(l + i, "bUseThreadedMorpher");
-    CHECK(!listed);
-    /* the player's value wins */
-    CHECK(WritePrivateProfileStringA("General", "bUseThreadedMorpher", "0", INI));
-    CHECK_EQ(GetPrivateProfileIntA("General", "bUseThreadedMorpher", 7, INI), 0);
-    /* and [fnvnx] bPortDefaults=0 turns the table off */
-    CHECK_EQ(GetPrivateProfileIntA("General", "bUseThreadedParticleSystem", 7, INI), 1);
-    CHECK(WritePrivateProfileStringA("fnvnx", "bPortDefaults", "0", INI));
-    CHECK_EQ(GetPrivateProfileIntA("General", "bUseThreadedParticleSystem", 7, INI), 7);
-    CHECK(WritePrivateProfileStringA("fnvnx", "bPortDefaults", "1", INI));
-    CHECK_EQ(GetPrivateProfileIntA("General", "bUseThreadedParticleSystem", 7, INI), 1);
+    CHECK_STR(b, "0");
+    CHECK_EQ(GetPrivateProfileIntA("GENERAL", "BUSETHREADEDPARTICLESYSTEM", 7, INI), 7);
+    CHECK_EQ(GetPrivateProfileIntA("General", "bUseThreadedTempEffects", 3,
+                                   "C:\\FalloutNV\\Fallout_default.ini"), 3);   /* missing file */
+    CHECK(WritePrivateProfileStringA("fnvnx", "bPortDefaults", "0", INI));      /* just a key now */
+    CHECK_EQ(GetPrivateProfileIntA("General", "bUseThreadedMorpher", 7, INI), 7);
 }
 
 /* the engine's pattern at start-up: thousands of one-key reads against a ~1,500-line file. Checks the answers of an
@@ -205,7 +188,6 @@ TEST(ini_many_lookups)
     char b[64];
     CHECK_EQ(GetPrivateProfileStringA("Section03", "iMissing", "dflt ", b, sizeof b, BIG), 4);
     CHECK_STR(b, "dflt");
-    CHECK_EQ(GetPrivateProfileIntA("General", "bUseThreadedMorpher", 0, BIG), 0);   /* not the engine's ini */
     CHECK(WritePrivateProfileStringA("Section05", "iKey05_03", "77", BIG));
     CHECK_EQ(GetPrivateProfileIntA("Section05", "iKey05_03", -1, BIG), 77);
     CHECK_EQ(GetPrivateProfileIntA("Section05", "iKey05_04", -1, BIG), 504);

@@ -243,7 +243,56 @@ TEST(modules_and_exports)
     CoCreateGuid(&g1);
     CoCreateGuid(&g2);
     CHECK(memcmp(&g1, &g2, sizeof g1) != 0);
+    CHECK_EQ(CoCreateInstance(&g1, NULL, 1, &g2, (LPVOID *)&x), CO_E_NOTINITIALIZED);   /* no CoInitialize on this thread */
+    CHECK_EQ(CoInitialize(NULL), S_OK);
     CHECK_EQ(CoCreateInstance(&g1, NULL, 1, &g2, (LPVOID *)&x), REGDB_E_CLASSNOTREG);
+    CoUninitialize();
+}
+
+static HRESULT com_test_factory(const GUID *, void **out)
+{
+    *out = (void *)&com_test_factory;
+    return S_OK;
+}
+static int g_com_idle = 1;
+static HRESULT com_test_can_unload(void) { return g_com_idle ? S_OK : S_FALSE; }
+
+/* COM apartments (ole32): the per-thread initialisation count, the model of the first call, the creation errors */
+TEST(com_apartments_and_creation)
+{
+    GUID clsid = { 0x11111111, 0x2222, 0x3333, { 1, 2, 3, 4, 5, 6, 7, 8 } }, iid = clsid, dll_clsid = clsid;
+    dll_clsid.Data1 = 0x22222222;
+    void *obj = NULL;
+    CHECK_EQ(CoInitializeEx((LPVOID)&obj, 0), E_INVALIDARG);           /* the reserved pointer must be NULL */
+    CHECK_EQ(CoInitializeEx(NULL, 2), S_OK);                           /* STA, first time */
+    CHECK_EQ(CoInitializeEx(NULL, 2), S_FALSE);                        /* repeat */
+    CHECK_EQ(CoInitializeEx(NULL, 0), RPC_E_CHANGED_MODE);             /* MTA after STA on this thread */
+    CHECK_EQ(CoInitialize(NULL), S_FALSE);
+    CHECK(fnvnx_register_com_class(&clsid, com_test_factory));
+    CHECK_EQ(CoCreateInstance(&clsid, NULL, 1, &iid, &obj), S_OK);
+    CHECK(obj == (void *)&com_test_factory);
+    CHECK_EQ(CoCreateInstance(&clsid, NULL, 1, &iid, NULL), E_POINTER);
+    CHECK_EQ(CoCreateInstance(&clsid, (void *)&obj, 1, &iid, &obj), CLASS_E_NOAGGREGATION);
+    CHECK(obj == NULL);
+    CHECK_EQ(CoCreateInstance(&clsid, NULL, 4 /* CLSCTX_LOCAL_SERVER */, &iid, &obj), REGDB_E_CLASSNOTREG);
+    /* servers: a resident one stays through CoFreeUnusedLibraries, a DLL server goes when it says it is idle */
+    CHECK(fnvnx_register_com_dll(&dll_clsid, com_test_factory, com_test_can_unload));
+    g_com_idle = 0;
+    CoFreeUnusedLibraries();
+    CHECK_EQ(CoCreateInstance(&dll_clsid, NULL, 1, &iid, &obj), S_OK);
+    g_com_idle = 1;
+    CoFreeUnusedLibraries();
+    CHECK_EQ(CoCreateInstance(&dll_clsid, NULL, 1, &iid, &obj), REGDB_E_CLASSNOTREG);
+    CHECK_EQ(CoCreateInstance(&clsid, NULL, 1, &iid, &obj), S_OK);
+    /* the count balances: three successful calls above (S_OK, S_FALSE, S_FALSE) */
+    CoUninitialize();
+    CoUninitialize();
+    CHECK_EQ(CoCreateInstance(&clsid, NULL, 1, &iid, &obj), S_OK);
+    CoUninitialize();
+    CHECK_EQ(CoCreateInstance(&clsid, NULL, 1, &iid, &obj), CO_E_NOTINITIALIZED);
+    CoUninitialize();                                                  /* unbalanced: nothing to release */
+    CHECK_EQ(CoInitializeEx(NULL, 0), S_OK);                           /* the model is free again: MTA */
+    CoUninitialize();
 }
 
 /* many regions, created and released out of order, committed page by page (the game's MemoryPool::CommitPage): the

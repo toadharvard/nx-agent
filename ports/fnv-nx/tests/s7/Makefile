@@ -20,7 +20,7 @@ S4_C := $(P)/os/os_posix.c $(wildcard $(P)/crt/*.c)
 S4_CXX := $(wildcard $(P)/win32/*.cpp) $(wildcard $(P)/crt/*.cpp)
 S7_CXX := $(wildcard $(P)/audio/*.cpp) $(filter-out %/input_horizon.cpp,$(wildcard $(P)/input/*.cpp))   # input_horizon.cpp: libnx only (make ilp32)
 S7_HZ := $(P)/audio/backend_audren.c
-TEST_CXX := $(wildcard $(HERE)/*.cpp)
+TEST_CXX := $(wildcard $(HERE)/*.cpp) $(ROOT)/tests/s4/host_hooks.cpp
 
 OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(S4_C) $(S4_CXX) $(S7_CXX) $(TEST_CXX))
 
@@ -38,6 +38,11 @@ $(foreach s,$(ENVC_SRC),$(eval $(OUT)/platform/$(s).cpp.o: $(P)/$(s).env_const.g
 $(OUT)/%.c.o: $(ROOT)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_) -c $< -o $@
+
+# platform/win32/env_const.gen.inc: the constant-result imports, generated from platform/manifest/env_const.tsv
+$(P)/win32/env_const.gen.inc: $(P)/manifest/env_const.tsv $(P)/manifest/gen_env_const.py
+	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only win32/
+$(OUT)/platform/win32/env_const.cpp.o: $(P)/win32/env_const.gen.inc
 
 $(OUT)/%.cpp.o: $(ROOT)/%.cpp
 	@mkdir -p $(dir $@)
