@@ -128,6 +128,11 @@ for h in sorted(f for f in os.listdir(os.path.join(HERE, "dev")) if f.endswith((
     txt = open(os.path.join(HERE, "dev", h), errors="replace").read()
     txt = re.sub(r"/\*.*?\*/", " ", txt, flags=re.S); txt = re.sub(r"//[^\n]*", " ", txt)
     hooks |= {t for t in ident.findall(txt) if t.startswith(("nxd3d_", "nx_"))}
+# platform hooks: exact names of dev/platform_hooks.tsv (column 1) - the functions the platform defines, not backend glue the product could define
+plat = set()
+for l in open(os.path.join(HERE, "dev", "platform_hooks.tsv")):
+    if l.startswith("#") or not l.strip() or l.startswith("name\t"): continue
+    plat.add(l.split("\t")[0])
 L1L3 = {"fnvnx_import_key": "L1/L3a", "fnvnx_guest_invoke": "L1/L3a", "nx_env_profile": "L5 platform"}
 libdirs = [os.path.join(TC, "aarch64-none-elf", "lib", "ilp32"), os.path.join(TC, "aarch64-none-elf", "lib")]
 libdefs = set()
@@ -145,6 +150,7 @@ def owner(s):
     d = dem[s]; base = d.split("(")[0]
     if base in methods: return "L6 method without body"
     if base in L1L3: return L1L3[base]
+    if base in plat: return "platform hook (platform_hooks.tsv)"
     if base in hooks: return "L6 backend glue"
     if s in libdefs: return "toolchain library"
     return "unknown"

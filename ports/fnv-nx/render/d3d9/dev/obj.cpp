@@ -3,6 +3,8 @@
 #include <string.h>
 void* nxd3d_alloc(size_t n) { return malloc(n ? n : 1); }  // NULL on exhaustion: a result (obj.h)
 void nxd3d_free(void* p) { free(p); }
+void* nx_alloc_face(size_t n) { uint8_t* r = (uint8_t*)nxd3d_alloc(n + NX_FACE_SIZE); if (!r) return nullptr; for (int i = 0; i < NX_FACE_SIZE; i++) r[i] = 0; return r + NX_FACE_SIZE; }
+void nx_free_face(void* object) { if (object) nxd3d_free((uint8_t*)object - NX_FACE_SIZE); }
 const GUID IID_NxObj = {0x4e784f62, 0x6a5b, 0x4cf1, {0x9d, 0x01, 0x6e, 0x3f, 0xa0, 0x5b, 0x00, 0x01}};
 static bool eq(const GUID& a, const GUID& b) { return memcmp(&a, &b, sizeof(GUID)) == 0; }
 

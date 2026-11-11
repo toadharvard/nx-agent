@@ -46,8 +46,8 @@ static HRESULT do_stretch(NxObj* dev, IDirect3DSurface9* ps, const RECT* sr, IDi
     if (di->ms > 1 && !dnull) return D3DERR_INVALIDCALL;                                                                                                                 // S9
     if (dnull) return D3D_OK;
     if (sg && dg) {
-        si->upload(); di->upload();
-        nxs_blit(nx_target(s), a.l, a.t, a.r - a.l, a.b - a.t, nx_target(d), b.l, b.t, b.r - b.l, b.b - b.t, (!zs && filter == D3DTEXF_LINEAR) ? 1u : 0u);
+        if (!si->upload() || !di->upload()) return E_OUTOFMEMORY;                                                                                                       // allocation failure: a conversion buffer
+        if (!nxs_blit(nx_target(s), a.l, a.t, a.r - a.l, a.b - a.t, nx_target(d), b.l, b.t, b.r - b.l, b.b - b.t, (!zs && filter == D3DTEXF_LINEAR) ? 1u : 0u)) return D3DERR_OUTOFVIDEOMEMORY;   // glue_stream.h E1
         nx_img_gpu_wrote(di, d->level, d->face);
     } else if (!sg && !dg && ss->mem && ds->mem) nx_cpu_copy_rect(si, ss, a, di, ds, b.l, b.t);                                                                          // CPU-only formats: equal, unscaled
     else return D3DERR_INVALIDCALL;

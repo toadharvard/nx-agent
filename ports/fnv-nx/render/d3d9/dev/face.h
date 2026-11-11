@@ -15,6 +15,7 @@
 // d9bridge.gen.cpp: the key table of a class, 0 when the import table of this build lacks one of its rows (the build gate forbids that state).
 uint32_t nx_bridge_keytab(const NxClassInfo* ci);
 inline void* nx_unface(void* f) { return f ? (uint8_t*)f + NX_FACE_SIZE : nullptr; }
+inline void* nx_unface_this(void* f) { return (uint8_t*)f + NX_FACE_SIZE; }   // the `this` of a method call is never null (D3D9 contract: a null this faults on Windows too); no branch, so no null path for the analyzer (tests/l6/oom gate N) to follow
 inline void* nx_face(IUnknown* o) {
     if (!o) return nullptr;
     uint32_t* f = (uint32_t*)((uint8_t*)o - NX_FACE_SIZE);

@@ -4,6 +4,7 @@
 #define WINAPI  /* shim: one calling convention (as gen/d9wrap_port.h) */
 #endif
 #include <d3d9.h>
+#include <new>
 #include <stddef.h>
 #include <stdint.h>
 #ifndef E_POINTER
@@ -19,9 +20,12 @@
 #define NX_ALLOCATOR(dealloc) __attribute__((warn_unused_result))
 #endif
 #define NX_MUST_USE __attribute__((warn_unused_result))
+#define NX_USE_MAKE __attribute__((deprecated("use nx_make<T>() / nx_make_plain<T>(): the allocation is a result (obj.h, README Allocation failure)")))
 void nxd3d_free(void* p);
 void* nxd3d_alloc(size_t n) NX_ALLOCATOR(nxd3d_free);  // the only CPU allocator the layer uses (obj.cpp: malloc/free); replaceable per platform; NULL = out of memory
 enum { NX_FACE_SIZE = 8 };  // face.h
+void nx_free_face(void* object);                               // the block of an object made by nx_alloc_face (NX_FACE_SIZE bytes in front of it)
+void* nx_alloc_face(size_t n) NX_ALLOCATOR(nx_free_face);      // n bytes behind a zeroed guest face; the pointer is the OBJECT's address; NULL = out of memory
 // IUnknown objects of the application kept as private data (D3DSPD_IUNKNOWN): AddRef / Release on them are calls into the application.
 // app_unk_guest.cpp (lifted guest: fnvnx_guest_invoke) or app_unk_native.cpp (native hosts: tests, the replayer) defines them; exactly one is linked.
 ULONG nxd3d_app_addref(IUnknown* u); ULONG nxd3d_app_release(IUnknown* u);
@@ -50,9 +54,10 @@ struct NxObj {
     NxPriv* priv = nullptr;
     NxObj* rnext = nullptr; NxObj* rprev = nullptr; NxObj* rhead = nullptr; uint8_t rlinked = 0;   // device resource registry: a device's rhead lists its live Create* resources (pool != 0xFF); Reset / eviction / memory accounting walk it
     // every object is allocated behind its guest face (face.h): NX_FACE_SIZE bytes in front of the complete object
-    // `new T` of any object yields nullptr on exhaustion (noexcept: the compiler skips the constructor): EVERY use of `new` of a layer class is followed by a check
-    void* operator new(size_t n) noexcept NX_MUST_USE { uint8_t* r = (uint8_t*)nxd3d_alloc(n + NX_FACE_SIZE); if (!r) return nullptr; for (int i = 0; i < NX_FACE_SIZE; i++) r[i] = 0; return r + NX_FACE_SIZE; }
-    void operator delete(void* p) { if (p) nxd3d_free((uint8_t*)p - NX_FACE_SIZE); }
+    // Objects are made by nx_make<T>() (below), never by a `new` expression: operator new is deprecated, so every `new T` of a layer class is a compiler diagnostic (the gates build with -Werror=deprecated-declarations).
+    // It stays defined (noexcept, nullptr on exhaustion) for code that has not moved yet.
+    void* operator new(size_t n) noexcept NX_MUST_USE NX_USE_MAKE { return nx_alloc_face(n); }
+    void operator delete(void* p) { nx_free_face(p); }
     ~NxObj();                    // frees private data (Releases D3DSPD_IUNKNOWN entries)
     // ---- construction (the creating code calls exactly one of these after `new`)
     void asRoot(uint32_t refs = 1);                                                  // IDirect3D9: public count `refs`
@@ -77,6 +82,14 @@ struct NxObj {
 private:
     void destroyNow();
 };
+// THE allocation of a layer object: constructed in memory from the layer's allocator, nullptr when there is none (no constructor ran). nx_make: an NxObj-derived object, behind its guest face (face.h);
+// nx_make_plain: any other class of the layer (image records, caches, lifecycle states). Both are warn_unused_result and the analyzer follows the null; `new T` of these classes is deprecated (NX_USE_MAKE).
+template <class T> NX_MUST_USE inline T* nx_make() { void* p = nx_alloc_face(sizeof(T)); return p ? ::new (p) T() : nullptr; }
+template <class T> NX_MUST_USE inline T* nx_make_plain() { void* p = nxd3d_alloc(sizeof(T)); return p ? ::new (p) T() : nullptr; }
+// An object that was made by nx_make and never handed out (no counts, no device reference): destroyed through its class (the generated destroy), exactly as its last release would.
+inline void nx_destroy(NxObj* o) { o->ci->destroy(o); }
+// The one way to drop an NX_MUST_USE result on purpose (GCC ignores a (void) cast for warn_unused_result): every use states, at the call, why the result cannot be acted on.
+template <class T> inline void nx_ignore(const T&) {}
 // null-safe: NxObj of one of our objects, or null for null / foreign pointers
 NxObj* nx_obj_of(IUnknown* p);
 inline void nx_obj_init(NxObj* o, IUnknown* self, const NxClassInfo* ci) { o->self = self; o->ci = ci; }

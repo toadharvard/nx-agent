@@ -37,15 +37,15 @@ struct NxImg {
     bool rec_dirty, autogen, mip_dirty, ext;                 // dirty regions recorded (MANAGED, SYSTEMMEM); AUTOGENMIPMAP; levels changed since the last generation; CPU memory supplied by the application
     uint32_t filter, lod;
     ~NxImg();
-    void* operator new(size_t n) { return nxd3d_alloc(n); } void operator delete(void* p) { nxd3d_free(p); }   // always `new NxImg()` (value-initialised)
-    HRESULT init(NxObj* own, uint32_t kind, uint32_t w, uint32_t h, uint32_t d, uint32_t levels, uint32_t faces, uint32_t fmt, uint32_t usage, uint32_t pool, uint32_t access, bool autogen_gpu, void* user_mem, uint32_t ms = 0, uint32_t msq = 0, uint32_t samples = 1, uint32_t bind = 0);
+    void* operator new(size_t n) noexcept NX_MUST_USE NX_USE_MAKE { return nxd3d_alloc(n); } void operator delete(void* p) { nxd3d_free(p); }   // made by nx_make_plain<NxImg>() (value-initialised); nullptr on exhaustion
+    NX_MUST_USE HRESULT init(NxObj* own, uint32_t kind, uint32_t w, uint32_t h, uint32_t d, uint32_t levels, uint32_t faces, uint32_t fmt, uint32_t usage, uint32_t pool, uint32_t access, bool autogen_gpu, void* user_mem, uint32_t ms = 0, uint32_t msq = 0, uint32_t samples = 1, uint32_t bind = 0);
     NxSub* at(uint32_t level, uint32_t face) { return &sub[face * levels + level]; }
     void add_dirty(uint32_t level, uint32_t face, const NxBox3* b);   // union into the sub-resource's region (null = whole)
-    void upload();                                                    // flush: image_update per dirty sub-resource (face-major, level order), then clear
-    void sync(bool gen);                                              // upload(), and (gen) the AUTOGENMIPMAP generation when the levels changed
+    NX_MUST_USE bool upload();                                        // flush: image_update per dirty sub-resource (face-major, level order), then clear; false = out of memory, the sub-resource that failed (and every later one) stays dirty
+    NX_MUST_USE bool sync(bool gen);                                  // upload(), and (gen) the AUTOGENMIPMAP generation when the levels changed; false = upload failed (nothing generated)
 };
-void nx_img_push(NxImg*, uint32_t level, uint32_t face, const NxSub* s, const NxBox3* b);   // image_update of a box of a D3D-layout sub-resource (converts formats with NXFMT_CONVERT)
-void nx_img_push_at(NxImg*, uint32_t level, uint32_t face, const NxBox3* b, const uint8_t* texels, uint32_t row, uint32_t slice);   // the same for texels (D3D layout) given by the pointer to the first one of the box
+NX_MUST_USE bool nx_img_push(NxImg*, uint32_t level, uint32_t face, const NxSub* s, const NxBox3* b);   // image_update of a box of a D3D-layout sub-resource (converts formats with NXFMT_CONVERT)
+NX_MUST_USE bool nx_img_push_at(NxImg*, uint32_t level, uint32_t face, const NxBox3* b, const uint8_t* texels, uint32_t row, uint32_t slice);   // the same for texels (D3D layout) given by the pointer to the first one of the box
 enum { NXI_DISCARD = 1 };            // NxImg::flags: Discard flag of CreateDepthStencilSurface
 // ---- locks (res_surf.cpp): `box` null = the whole sub-resource
 HRESULT nx_img_lock(NxImg* img, uint32_t level, uint32_t face, const D3DBOX* box, DWORD flags, void** bits, uint32_t* row, uint32_t* slice);

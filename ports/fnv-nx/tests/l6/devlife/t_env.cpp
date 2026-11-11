@@ -27,11 +27,14 @@ void nxd3d_query_destroy(NxQueryCore*) {}
 // ---- presentation hooks
 PRec g_pres[256]; int g_npres = 0, g_seq = 0, g_ncur = 0, g_nidle = 0, g_nfront = 0, g_nvblank = 0, g_present_result = 0; CRec g_cur[64]; uint64_t g_qpc = 0, g_qpf = 1000000; int32_t g_ospos[2] = {77, 88};
 void t_clear_hooks() { g_npres = g_ncur = g_nidle = g_nfront = g_nvblank = 0; g_seq = 0; g_present_result = 0; }
-int nxd3d_present(NxObj*, const NxPresent* p) { PRec* r = &g_pres[g_npres++ & 255]; r->p = *p; r->seq = g_seq++; r->has_gamma = p->gamma != 0; if (p->gamma) memcpy(r->gamma, (const void*)(uintptr_t)p->gamma, sizeof r->gamma); return g_present_result; }
-void nxd3d_present_cursor(NxObj*, const uint8_t* bgra, uint32_t w, uint32_t h, int32_t x, int32_t y) { CRec* r = &g_cur[g_ncur++ & 63]; r->w = w; r->h = h; r->x = x; r->y = y; memcpy(r->px0, bgra, 4); r->seq = g_seq++; }
+int nxd3d_present(NxObj*, const NxPresent* p) {
+    PRec* r = &g_pres[g_npres++ & 255]; r->p = *p; r->seq = g_seq++; r->has_gamma = p->gamma != 0; if (p->gamma) memcpy(r->gamma, (const void*)(uintptr_t)p->gamma, sizeof r->gamma);
+    if (p->cursor) { CRec* c = &g_cur[g_ncur++ & 63]; c->w = p->cw; c->h = p->ch; c->x = p->cx; c->y = p->cy; memcpy(c->px0, (const void*)(uintptr_t)p->cursor, 4); c->seq = g_seq++; }   // the cursor rides in the present (nxgpu4.h P2)
+    return g_present_result;
+}
 void nxd3d_wait_idle(NxObj*) { g_nidle++; }
-void nxd3d_frontbuffer_read(NxObj*, uint32_t w, uint32_t h, void* dst, uint32_t pitch) { g_nfront++; for (uint32_t y = 0; y < h; y++) for (uint32_t x = 0; x < w; x++) { uint8_t* p = (uint8_t*)dst + (size_t)y * pitch + x * 4; p[0] = (uint8_t)x; p[1] = (uint8_t)y; p[2] = 7; p[3] = 200; } }
-void nxd3d_wait_vblank(NxObj*) { g_nvblank++; }
+int nxd3d_frontbuffer_read(NxObj*, uint32_t w, uint32_t h, void* dst, uint32_t pitch) { g_nfront++; for (uint32_t y = 0; y < h; y++) for (uint32_t x = 0; x < w; x++) { uint8_t* p = (uint8_t*)dst + (size_t)y * pitch + x * 4; p[0] = (uint8_t)x; p[1] = (uint8_t)y; p[2] = 7; p[3] = 200; } return 0; }
+int nxd3d_wait_vblank(NxObj*) { g_nvblank++; return 0; }
 bool nxd3d_window_client(void* h, RECT* r) {
     uint32_t sw, sh; t_screen(&sw, &sh); RECT v;
     switch ((uintptr_t)h) { case W_A: v = {10, 20, 810, 620}; break; case W_EMPTY: v = {0, 0, 0, 0}; break; case W_SCREEN: v = {0, 0, (LONG)sw, (LONG)sh}; break; case W_SMALL: v = {5, 5, 105, 55}; break; default: return false; }

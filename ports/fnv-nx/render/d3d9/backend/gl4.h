@@ -168,6 +168,8 @@ void gl4_query_resume(void);
 void gl4_scale_point(const Gl4Sub* s, const Gl4Sub* d, const uint16_t* ramp);   /* ramp: 3 x 256 u16 or NULL */
 /* gl4_present.c */
 uint64_t gl4_api_present(uint64_t desc);
+uint64_t gl4_api_wait_vblank(uint64_t output);
+int gl4_swap_zero(void);   /* the swapchain image starts as RGBA 0; 1 = failed */
 /* gl4_check.c: whole-stream checks done before anything executes */
 int gl4_stream_check(const uint32_t* w, const uint32_t* end);
 /* gl4_shader.c */
@@ -200,7 +202,8 @@ uint64_t gl4_api_wait_frame(uint64_t frame);
     X(IMAGE_CREATE4, image_create4, gl4_api_image_create4, 1) X(IMAGE_DESTROY, image_destroy, gl4_api_image_destroy, 1) \
     X(MEM_DESTROY, mem_destroy, gl4_api_mem_destroy, 1) X(SHADER_DESTROY, shader_destroy, gl4_api_shader_destroy, 1) \
     X(SAMPLER_UPDATE, sampler_update, gl4_api_sampler_update, 2) X(IMAGE_READ, image_read, gl4_api_image_read, 1) \
-    X(QUERY_RESULT, query_result, gl4_api_query_result, 3) X(PRESENT, present, gl4_api_present, 1)
+    X(QUERY_RESULT, query_result, gl4_api_query_result, 3) X(PRESENT, present, gl4_api_present, 1) \
+    X(WAIT_VBLANK, wait_vblank, gl4_api_wait_vblank, 1)
 uint64_t gl4_api_mem_create(uint64_t desc);
 uint64_t gl4_api_mem_gpu_addr(uint64_t id);
 uint64_t gl4_api_mem_destroy(uint64_t id);

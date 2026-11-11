@@ -86,8 +86,8 @@ HRESULT NxChainCore::present(const RECT* s, const RECT* dr, void* ov, DWORD flag
     if (!img->gpu) { L->frame++; rotate(this); pcount++; return D3D_OK; }   // NXFMT_NULL: no pixels
     NxPresent p = {}; p.image = img->gpu; p.sx = src.left; p.sy = src.top; p.sw = src.right - src.left; p.sh = src.bottom - src.top; p.dx = dst.left; p.dy = dst.top; p.dw = dst.right - dst.left; p.dh = dst.bottom - dst.top;
     p.interval = (flags & D3DPRESENT_FORCEIMMEDIATE) ? 0 : nx_pp_interval(pp.PresentationInterval); p.gamma = ramp_set ? (uint64_t)(uintptr_t)&ramp : 0; p.frame = ++L->frame;
-    if (nxd3d_present(this, &p)) return D3DERR_DRIVERINTERNALERROR;   // the rects were validated: a refusal is a backend defect
-    if (L->cur.visible && L->cur.bgra) nxd3d_present_cursor(this, L->cur.bgra, L->cur.w, L->cur.h, L->cur.x - (int32_t)L->cur.hx - cr.left, L->cur.y - (int32_t)L->cur.hy - cr.top);
+    if (L->cur.visible && L->cur.bgra) { p.cursor = (uint64_t)(uintptr_t)L->cur.bgra; p.cw = L->cur.w; p.ch = L->cur.h; p.cx = L->cur.x - (int32_t)L->cur.hx - cr.left; p.cy = L->cur.y - (int32_t)L->cur.hy - cr.top; }   // nxgpu4.h P2: blended onto the presented image, never into the back buffer
+    if (int rc = nxd3d_present(this, &p)) return rc == NXD3D_HOOK_NOMEM ? D3DERR_OUTOFVIDEOMEMORY : D3DERR_DRIVERINTERNALERROR;   // the rects were validated: a refusal is a backend defect
     rotate(this); pcount++; return D3D_OK;
 }
 HRESULT NxChainCore::backbuffer(UINT i, IDirect3DSurface9** out) {   // backbuffer type ignored by native (Wine comment); the out pointer is untouched on failure (test_swapchain)
@@ -101,7 +101,8 @@ HRESULT NxChainCore::frontbuffer_data(IDirect3DSurface9* dst) {
     uint32_t ox = 0, oy = 0; if (pp.Windowed) { if (!nxd3d_window_client(pp.hDeviceWindow, &cr) || cr.left < 0 || cr.top < 0) return INV; ox = (uint32_t)cr.left; oy = (uint32_t)cr.top; }   // wined3d: MapWindowPoints
     D3DBOX box = {ox, oy, ox + w, oy + h, 0, 1}; void* bits; uint32_t row, slice;
     if (!nx_box_valid(im, 0, &box) || FAILED(nx_img_lock(im, 0, 0, &box, 0, &bits, &row, &slice))) return INV;
-    uint8_t* tmp = (uint8_t*)nxd3d_alloc((size_t)w * h * 4); nxd3d_frontbuffer_read(this, w, h, tmp, w * 4);
+    uint8_t* tmp = (uint8_t*)nxd3d_alloc((size_t)w * h * 4); int rc = tmp ? nxd3d_frontbuffer_read(this, w, h, tmp, w * 4) : NXD3D_HOOK_NOMEM;
+    if (rc) { nxd3d_free(tmp); bool w0; nx_img_unlock(im, 0, 0, &w0); return rc == NXD3D_HOOK_NOMEM ? D3DERR_OUTOFVIDEOMEMORY : D3DERR_DRIVERINTERNALERROR; }
     for (uint32_t y = 0; y < h; y++) { const uint8_t* sp = tmp + (size_t)y * w * 4; uint8_t* dp = (uint8_t*)bits + (size_t)y * row; for (uint32_t x = 0; x < w; x++, sp += 4, dp += 4) { dp[0] = sp[2]; dp[1] = sp[1]; dp[2] = sp[0]; dp[3] = im->fmt == D3DFMT_X8R8G8B8 ? 0xFF : sp[3]; } }
     nxd3d_free(tmp); bool was; nx_img_unlock(im, 0, 0, &was); return D3D_OK;
 }

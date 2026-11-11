@@ -62,6 +62,10 @@ HRESULT NxStateBlockCore::Capture() {
 }
 HRESULT NxStateBlockCore::Apply() {
     NxDeviceCore* d = devc;
+    // All or nothing (README "Allocation failure"): the lights this block writes may need new entries in the set they land in (the recording block's while the device records, else the device's). The capacity is
+    // reserved BEFORE the first write, so the writes below cannot run out of memory and a failed Apply leaves the device as it was (wined3d_stateblock_apply has no failure; E_OUTOFMEMORY is ours).
+    NxSparse<NxLightEnt>& dst = d->rec ? d->rec->st.lights : d->lights;
+    if (!dst.reserve(st.lights.n)) return E_OUTOFMEMORY;
     for (uint32_t w = 0; w < NX_MASK_WORDS; w++)
         for (uint32_t m = st.mask[w]; m; m &= m - 1) { uint32_t slot = w * 32 + __builtin_ctz(m); d->put_direct(slot, slot_ptr(st.v, slot)); }
     for (uint32_t i = 0; i < st.lights.n; i++) {

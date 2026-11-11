@@ -39,9 +39,11 @@ static HRESULT do_update_surface(NxObj* dev, IDirect3DSurface9* ps, const RECT* 
     }
     if ((f.flags & NXTF_BROKEN) && !(w == (int32_t)ss->w && h == (int32_t)ss->h && w == (int32_t)ds->w && h == (int32_t)ds->h)) return D3DERR_INVALIDCALL;              // U6
     if (di->gpu) {
-        di->upload(); bool blk = (f.flags & NXTF_BLOCKS) != 0; NxBox3 b = {(uint32_t)dx, (uint32_t)dy, 0, (uint32_t)(dx + w), (uint32_t)(dy + h), 1};
-        if (f.flags & NXTF_BROKEN) nx_img_push(di, d->level, d->face, ss, &b);
-        else nx_img_push_at(di, d->level, d->face, &b, ss->mem + (size_t)(blk ? sy / f.bh : sy) * ss->row + (size_t)(blk ? sx / f.bw * f.bb : sx * f.bytes), ss->row, ss->slice);
+        if (!di->upload()) return E_OUTOFMEMORY;
+        bool blk = (f.flags & NXTF_BLOCKS) != 0; NxBox3 b = {(uint32_t)dx, (uint32_t)dy, 0, (uint32_t)(dx + w), (uint32_t)(dy + h), 1};
+        bool ok = (f.flags & NXTF_BROKEN) ? nx_img_push(di, d->level, d->face, ss, &b)
+                : nx_img_push_at(di, d->level, d->face, &b, ss->mem + (size_t)(blk ? sy / f.bh : sy) * ss->row + (size_t)(blk ? sx / f.bw * f.bb : sx * f.bytes), ss->row, ss->slice);
+        if (!ok) return E_OUTOFMEMORY;                                                                                                                                  // a conversion buffer; the destination is unchanged
         nx_img_gpu_wrote(di, d->level, d->face);
     } else if (ds->mem && ss->mem) nx_cpu_copy_rect(si, ss, {sx, sy, sx + w, sy + h}, di, ds, dx, dy);
     return D3D_OK;
@@ -62,7 +64,7 @@ static HRESULT do_update_texture(NxObj* dev, IDirect3DBaseTexture9* ps, IDirect3
     if (dimv(si->w, skip) != di->w || dimv(si->h, skip) != di->h || dimv(si->d, skip) != di->d || skip >= si->levels) return D3DERR_INVALIDCALL;
     uint32_t count = si->levels - skip < di->levels ? si->levels - skip : di->levels; const NxTexFmt& f = si->tf; bool blk = (f.flags & NXTF_BLOCKS) != 0;
     if (di->gpu) {
-        di->upload();
+        if (!di->upload()) return E_OUTOFMEMORY;
         for (uint32_t face = 0; face < si->faces; face++) {                                                                                                          // T5
             const NxSub* s0 = si->at(0, face); if (!s0->dirty) continue;
             for (uint32_t j = 0; j < count; j++) {
@@ -74,7 +76,8 @@ static HRESULT do_update_texture(NxObj* dev, IDirect3DBaseTexture9* ps, IDirect3
                 if (f.flags & NXTF_BROKEN) b = {0, 0, 0, sl->w, sl->h, sl->d};
                 else if (blk) { b.l = b.l / f.bw * f.bw; b.t = b.t / f.bh * f.bh; b.r = ((b.r + f.bw - 1) / f.bw) * f.bw; b.b = ((b.b + f.bh - 1) / f.bh) * f.bh; if (b.r > sl->w) b.r = sl->w; if (b.b > sl->h) b.b = sl->h; }
                 if (b.l >= b.r || b.t >= b.b || b.f >= b.k || !sl->mem) continue;
-                nx_img_push(di, j, face, sl, &b); nx_img_gpu_wrote(di, j, face);
+                if (!nx_img_push(di, j, face, sl, &b)) return E_OUTOFMEMORY;   // the source keeps its dirty regions (T6 is not reached): the same call again completes the copy
+                nx_img_gpu_wrote(di, j, face);
             }
         }
     }
@@ -88,7 +91,7 @@ static HRESULT do_rt_data(NxObj* dev, IDirect3DSurface9* prt, IDirect3DSurface9*
     if (si->ms > 1) return D3DERR_INVALIDCALL;                                                                                                                       // G2
     if (ss->w != ds->w || ss->h != ds->h || si->fmt != di->fmt || nx_img_null(si)) return D3DERR_INVALIDCALL;                                                       // G3, G4
     if (!ds->mem) return D3DERR_INVALIDCALL;
-    if (si->gpu) { si->upload(); nxd3d_image_read(si->owner, si->gpu, s->level, s->face, ds->mem, ds->row, ds->slice); }
+    if (si->gpu) { if (!si->upload()) return E_OUTOFMEMORY; nxd3d_image_read(si->owner, si->gpu, s->level, s->face, ds->mem, ds->row, ds->slice); }
     else if (ss->mem) nx_cpu_copy_rect(si, ss, {0, 0, (int32_t)ss->w, (int32_t)ss->h}, di, ds, 0, 0);
     else return D3DERR_INVALIDCALL;
     if (di->rec_dirty) { if (d->level == 0) { NxBox3 b = {0, 0, 0, ds->w, ds->h, 1}; di->add_dirty(0, d->face, &b); } else di->add_dirty(d->level, d->face, nullptr); }

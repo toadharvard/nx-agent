@@ -75,15 +75,26 @@ struct FvfCache : IUnknown {
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void** pp) override { *pp = nullptr; return E_NOINTERFACE; }
     ULONG STDMETHODCALLTYPE AddRef() override { return ++refs; }
     ULONG STDMETHODCALLTYPE Release() override { long r = --refs; if (!r) delete this; return r; }
-    void* operator new(size_t n) { return nxd3d_alloc(n); } void operator delete(void* p) { nxd3d_free(p); }
+    void* operator new(size_t n) noexcept NX_MUST_USE NX_USE_MAKE { return nxd3d_alloc(n); } void operator delete(void* p) { nxd3d_free(p); }
 };
+// null = no declaration: `fvf` is outside the grammar, or the layer is out of memory (d3d9_device_SetFVF reports both as D3DERR_DRIVERINTERNALERROR). Every step that can fail comes before the next one,
+// and what a failed call made is released: a cache that could not be attached dies with this call, a declaration that could not be entered into the cache dies with it. A success is cached for the device's life.
 IDirect3DVertexDeclaration9* nx_device_fvf_decl(NxDeviceCore* dev, DWORD fvf) {
     NxFvfLayout L; if (!fvf || !nx_fvf_to_decl(fvf, &L)) return nullptr;
     FvfCache* c = nullptr; DWORD sz = sizeof c;
-    if (dev->getPrivateData(kCache, &c, &sz) == D3D_OK) c->Release();
-    else { c = new FvfCache; dev->setPrivateData(kCache, &c, sizeof c, D3DSPD_IUNKNOWN | NX_SPD_NATIVE); c->Release(); }
+    if (dev->getPrivateData(kCache, &c, &sz) == D3D_OK) c->Release();   // the device's entry keeps it alive
+    else {
+        c = nx_make_plain<FvfCache>(); if (!c) return nullptr;
+        HRESULT hr = dev->setPrivateData(kCache, &c, sizeof c, D3DSPD_IUNKNOWN | NX_SPD_NATIVE);   // AddRefs it (2 on success)
+        c->Release();                                                                                // our creation reference: on success the entry holds the cache, on failure this deletes it
+        if (FAILED(hr)) return nullptr;
+    }
     if (FvfEnt* f = c->m.find(fvf)) return f->d;
-    NxVertexDeclaration9* d = new NxVertexDeclaration9; d->asImplicit(dev, nullptr); d->fvf = fvf;
-    d->n = L.n + 1; d->el = (D3DVERTEXELEMENT9*)nxd3d_alloc(d->n * sizeof(D3DVERTEXELEMENT9)); memcpy(d->el, L.el, d->n * sizeof(D3DVERTEXELEMENT9));
-    d->stream_mask = 1; d->stride[0] = L.stride; c->m.add(fvf)->d = d; return d;
+    NxVertexDeclaration9* d = nx_make<NxVertexDeclaration9>(); if (!d) return nullptr;
+    d->asImplicit(dev, nullptr); d->fvf = fvf;
+    d->n = L.n + 1; d->el = (D3DVERTEXELEMENT9*)nxd3d_alloc(d->n * sizeof(D3DVERTEXELEMENT9)); if (!d->el) { nx_destroy(d); return nullptr; }
+    memcpy(d->el, L.el, d->n * sizeof(D3DVERTEXELEMENT9));
+    d->stream_mask = 1; d->stride[0] = L.stride;
+    FvfEnt* e = c->m.add(fvf); if (!e) { nx_destroy(d); return nullptr; }
+    e->d = d; return d;
 }

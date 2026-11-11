@@ -28,12 +28,26 @@ template <class E> struct NxSparse {  // sorted by idx, O(log n) find; unbounded
     void clear() { nxd3d_free(a); a = nullptr; n = cap = 0; }
     uint32_t lower(DWORD idx) const { uint32_t lo = 0, hi = n; while (lo < hi) { uint32_t m = (lo + hi) / 2; if (a[m].idx < idx) lo = m + 1; else hi = m; } return lo; }
     E* find(DWORD idx) const { uint32_t i = lower(idx); return i < n && a[i].idx == idx ? &a[i] : nullptr; }
-    E* add(DWORD idx) {  // existing entry, or a zeroed new one
+    // capacity for `extra` more entries: false = out of memory, nothing changed. After a successful reserve(k) the next k add() calls (new keys) cannot fail: transactional writers reserve first, then commit.
+    NX_MUST_USE bool reserve(uint32_t extra) {
+        uint64_t want = (uint64_t)n + extra; if (want <= cap) return true;
+        if (want > 0x7fffffffu / sizeof(E)) return false;
+        uint32_t c = cap ? cap : 8; while (c < want) c *= 2;
+        E* b = (E*)nxd3d_alloc((size_t)c * sizeof(E)); if (!b) return false;
+        if (n) memcpy((void*)b, (void*)a, n * sizeof(E));
+        nxd3d_free(a); a = b; cap = c; return true;
+    }
+    // existing entry, or a zeroed new one; nullptr = out of memory (the set is unchanged)
+    NX_MUST_USE E* add(DWORD idx) {
         uint32_t i = lower(idx); if (i < n && a[i].idx == idx) return &a[i];
-        if (n == cap) { uint32_t c = cap ? cap * 2 : 8; E* b = (E*)nxd3d_alloc(c * sizeof(E)); if (n) memcpy((void*)b, (void*)a, n * sizeof(E)); nxd3d_free(a); a = b; cap = c; }
+        if (!reserve(1)) return nullptr;
         memmove((void*)(a + i + 1), (void*)(a + i), (n - i) * sizeof(E)); memset((void*)&a[i], 0, sizeof(E)); a[i].idx = idx; n++; return &a[i];
     }
-    void copy_from(const NxSparse& o) { clear(); if (o.n) { a = (E*)nxd3d_alloc(o.n * sizeof(E)); memcpy((void*)a, (void*)o.a, o.n * sizeof(E)); n = cap = o.n; } }
+    // replace the contents by a copy of `o`; false = out of memory, this set is unchanged
+    NX_MUST_USE bool copy_from(const NxSparse& o) {
+        E* b = nullptr; if (o.n) { b = (E*)nxd3d_alloc((size_t)o.n * sizeof(E)); if (!b) return false; memcpy((void*)b, (void*)o.a, o.n * sizeof(E)); }
+        clear(); a = b; n = cap = o.n; return true;
+    }
 };
 struct NxLightEnt { DWORD idx; D3DLIGHT9 light; BOOL enabled; uint8_t has_light, has_enable; };  // blocks: which halves the entry records
 struct NxPalEnt { DWORD idx; uint8_t e[256 * 4]; };                                                // PALETTEENTRY[256], 4 bytes each (wingdi.h)
@@ -55,7 +69,7 @@ IDirect3DVertexDeclaration9* nx_device_fvf_decl(NxDeviceCore* dev, DWORD fvf);
 
 struct NxDevLifeBase {  // owner of the lifecycle state of a device (dev_core.h NxDevLife): implicit swap chain, back buffers, auto depth stencil, cursor; destroyed with the device after its bindings are dropped
     virtual ~NxDevLifeBase() {}
-    void* operator new(size_t n) { return nxd3d_alloc(n); } void operator delete(void* p) { nxd3d_free(p); }
+    void* operator new(size_t n) noexcept NX_MUST_USE NX_USE_MAKE { return nxd3d_alloc(n); } void operator delete(void* p) { nxd3d_free(p); }   // made by nx_make_plain<T>(); nullptr on exhaustion
 };
 struct NxDeviceCore : NxObj {
     NxDevLifeBase* life = nullptr;

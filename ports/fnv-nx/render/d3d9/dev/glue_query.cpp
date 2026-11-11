@@ -21,6 +21,7 @@ uint32_t kind(const NxQueryCore* q) { return q->type == D3DQUERYTYPE_OCCLUSION ?
 
 bool nxd3d_query_create(NxQueryCore* q) {
     if (derived(q)) return true;
+    if (!nxs_reserve()) return false;   // glue_stream.h E1: issue / ready / flush of this query never need memory afterwards (the result goes through the ring's scratch, E2)
     for (uint32_t id = 1; id <= 4096; id++) if (!(g_used[(id - 1) >> 3] >> ((id - 1) & 7) & 1)) { g_used[(id - 1) >> 3] |= (uint8_t)(1u << ((id - 1) & 7)); q->gid = id; return true; }
     return false;
 }
@@ -28,13 +29,16 @@ void nxd3d_query_destroy(NxQueryCore* q) { if (q->gid) { g_used[(q->gid - 1) >> 
 void nxd3d_query_issue(NxQueryCore* q, DWORD flags) {
     q->gready = 0;
     if (derived(q)) { q->gvalue = q->type == D3DQUERYTYPE_TIMESTAMPFREQ ? (uint64_t)NX_TIMESTAMP_HZ : 0; return; }
-    if (flags & D3DISSUE_BEGIN) { nxs_query_begin(q->gid, kind(q)); q->gbegun = 1; }
-    if (flags & D3DISSUE_END) { if (!q->gbegun) nxs_query_begin(q->gid, kind(q)); nxs_query_end(q->gid); q->gbegun = 0; }
+    bool ok = true;   // E1: reserved by nxd3d_query_create; false is a device bug, counted
+    if (flags & D3DISSUE_BEGIN) { ok = nxs_query_begin(q->gid, kind(q)) && ok; q->gbegun = 1; }
+    if (flags & D3DISSUE_END) { if (!q->gbegun) ok = nxs_query_begin(q->gid, kind(q)) && ok; ok = nxs_query_end(q->gid) && ok; q->gbegun = 0; }
+    if (!ok) nxs_error();
 }
 bool nxd3d_query_ready(NxQueryCore* q) {
     if (q->gready || derived(q)) return true;
     nxs_flush();
-    uint64_t* out = (uint64_t*)nxs_scratch(16); *out = 0; uint64_t a[3] = {q->gid, 0, FNVNX_ADDR_(out)};
+    uint64_t* out = (uint64_t*)nxs_scratch(16); if (!out) { nxs_error(); return false; }   // E1 / E2: reserved by nxd3d_query_create; a device bug, counted
+    *out = 0; uint64_t a[3] = {q->gid, 0, FNVNX_ADDR_(out)};
     if (nxd3d_gpu_call(NXGPU_FN_QUERY_RESULT, a, 3) != 0) return false;
     q->gvalue = *out; q->gready = 1; return true;
 }

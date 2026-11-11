@@ -6,6 +6,10 @@
 // DECISIONS (doubt): levels > 32 = D3DERR_INVALIDCALL (no chain is longer; Wine accepts any); an image above NX_MAX_TEX_BYTES = OUT-OF-MEMORY (GPU pools D3DERR_OUTOFVIDEOMEMORY, others E_OUTOFMEMORY); a single GPU-pool resource
 // above the env VideoMemorySize = OUTOFVIDEOMEMORY (non-Ex; no cross-resource accounting, the device has none); Lockable RT with a multisample type = INVALIDCALL (MS CreateRenderTarget: only non-multisampled targets are lockable);
 // CreateOffscreenPlainSurfaceEx (D6, below): MS page, shares mk_surf. Null output pointer = INVALIDCALL (Windows faults).
+// ALLOCATION FAILURE (README "Allocation failure"), by the role of the allocation, Wine 9.0 d3d9/device.c: the container object of CreateTexture / CreateCubeTexture / CreateVolumeTexture (and its image record) = D3DERR_OUTOFVIDEOMEMORY
+// (calloc, lines of d3d9_device_Create{Texture,VolumeTexture,CubeTexture}); the level / face objects and their table = E_OUTOFMEMORY (d3d9_surface_create / device_parent_texture_sub_resource_created); a surface (RT, DS,
+// offscreen plain) = E_OUTOFMEMORY (d3d9_device_create_surface); the CPU storage = E_OUTOFMEMORY (wined3d_texture_init); the backend refusing the image = D3DERR_OUTOFVIDEOMEMORY (NxImg::init). A failed call releases everything
+// it made through the object's own destruction (the object holds its device reference and registry entry only once made, and gives them back), and leaves *out null.
 #include "res_tex.h"
 #include "d9impl.gen.h"
 #include "env_table.gen.h"
@@ -37,12 +41,17 @@ static bool ms_ok(int p, uint32_t fmt, uint32_t type, uint32_t q, uint32_t* samp
     *samples = type; return true;
 }
 struct IA { uint32_t kind, w, h, d, lv, faces, fmt, usage, pool, acc; bool ag; void* um; uint32_t ms, msq, samples, bind; };
-template <class T, class K> static T* build(NxObj* dev, const IA& a, uint32_t n) {
-    NxImg* img = new NxImg(); T* t = new T; t->img = img; t->asChild(dev, a.pool); NxTexCore* c = t;
-    img->init(t, a.kind, a.w, a.h, a.d, a.lv, a.faces, a.fmt, a.usage, a.pool, a.acc, a.ag, a.um, a.ms, a.msq, a.samples, a.bind);
-    c->kids = (NxObj**)nxd3d_alloc(sizeof(NxObj*) * n); c->nkids = n;
-    for (uint32_t i = 0; i < n; i++) { K* k = new K; k->img = img; k->level = i % a.lv; NxObj* ko = k; ko->asSubResource(dev, t); c->kids[i] = k; }
-    return t;
+template <class T, class K> static HRESULT build(NxObj* dev, const IA& a, uint32_t n, T** out) {
+    NxImg* img = nx_make_plain<NxImg>(); if (!img) return D3DERR_OUTOFVIDEOMEMORY;
+    T* t = nx_make<T>(); if (!t) { delete img; return D3DERR_OUTOFVIDEOMEMORY; }
+    t->img = img; t->asChild(dev, a.pool); NxTexCore* c = t; NxObj* to = t;   // from here on `to->release()` unwinds everything (the texture's destructor deletes the image and the kids made so far)
+    HRESULT hr = img->init(t, a.kind, a.w, a.h, a.d, a.lv, a.faces, a.fmt, a.usage, a.pool, a.acc, a.ag, a.um, a.ms, a.msq, a.samples, a.bind); if (FAILED(hr)) { to->release(); return hr; }
+    c->kids = (NxObj**)nxd3d_alloc(sizeof(NxObj*) * n); if (!c->kids) { to->release(); return E_OUTOFMEMORY; }
+    for (uint32_t i = 0; i < n; i++) {
+        K* k = nx_make<K>(); if (!k) { to->release(); return E_OUTOFMEMORY; }
+        k->img = img; k->level = i % a.lv; NxObj* ko = k; ko->asSubResource(dev, t); c->kids[i] = k; c->nkids = i + 1;
+    }
+    *out = t; return D3D_OK;
 }
 static void fix_faces(NxTexCore* t) { if (t->img->kind != NXK_VOLUME) for (uint32_t i = 0; i < t->nkids; i++) static_cast<NxSurfCore*>(t->kids[i])->face = i / t->img->levels; }
 static HRESULT mk_tex(NxObj* dev, uint32_t kind, UINT w, UINT h, UINT d, UINT levels, DWORD usage, D3DFORMAT fmt, D3DPOOL pool, void** out, HANDLE* sh) {
@@ -76,9 +85,11 @@ static HRESULT mk_tex(NxObj* dev, uint32_t kind, UINT w, UINT h, UINT d, UINT le
     if (gpu && !ex && nx_tex_size(f, w, h, d) > nxenv_video_memory(p)) return D3DERR_OUTOFVIDEOMEMORY;
     uint32_t acc = (pool != D3DPOOL_DEFAULT || (usage & D3DUSAGE_DYNAMIC) || (f.flags & NXTF_MAPPABLE)) ? 12 : 0;
     IA a = {kind, w, h, d, lv, faces, (uint32_t)fmt, usage, (uint32_t)pool, acc, ag, um, 0, 0, 1, bind}; NxTexCore* t;
-    if (kind == NXK_VOLUME) { NxVolumeTexture9* v = build<NxVolumeTexture9, NxVolume9>(dev, a, lv); t = v; *out = v; }
-    else if (kind == NXK_CUBE) { NxCubeTexture9* v = build<NxCubeTexture9, NxSurface9>(dev, a, lv * 6); t = v; *out = v; }
-    else { NxTexture9* v = build<NxTexture9, NxSurface9>(dev, a, lv); t = v; *out = v; }
+    HRESULT hr;
+    if (kind == NXK_VOLUME) { NxVolumeTexture9* v = nullptr; hr = build<NxVolumeTexture9, NxVolume9>(dev, a, lv, &v); t = v; *out = v; }
+    else if (kind == NXK_CUBE) { NxCubeTexture9* v = nullptr; hr = build<NxCubeTexture9, NxSurface9>(dev, a, lv * 6, &v); t = v; *out = v; }
+    else { NxTexture9* v = nullptr; hr = build<NxTexture9, NxSurface9>(dev, a, lv, &v); t = v; *out = v; }
+    if (FAILED(hr)) { *out = nullptr; return hr; }
     fix_faces(t); return D3D_OK;
 }
 // ---- surfaces (d3d9_device_create_surface): level 1, layer 1; every NOTAVAILABLE becomes INVALIDCALL
@@ -104,8 +115,11 @@ static HRESULT mk_surf(NxObj* dev, int what /*0 RT, 1 DS, 2 plain*/, UINT w, UIN
     if (!fits(f, w, h, 1, 1, 1)) return gpu ? D3DERR_OUTOFVIDEOMEMORY : E_OUTOFMEMORY;
     if (gpu && !ex && nx_tex_size(f, w, h, 1) > nxenv_video_memory(p)) return D3DERR_OUTOFVIDEOMEMORY;
     uint32_t acc = (what == 2 || (what == 0 && flag) || (f.flags & NXTF_MAPPABLE)) ? 12 : 0;
-    NxImg* img = new NxImg(); NxSurface9* s = new NxSurface9; s->img = s->own = img; s->asChild(dev, pl);
-    img->init(s, NXK_SURFACE, w, h, 1, 1, 1, fmt, (usage & 0x10007bf0u) | bind, pl, acc, false, um, ms, msq, samples, bind);
+    NxImg* img = nx_make_plain<NxImg>(); if (!img) return E_OUTOFMEMORY;
+    NxSurface9* s = nx_make<NxSurface9>(); if (!s) { delete img; return E_OUTOFMEMORY; }
+    s->img = s->own = img; s->asChild(dev, pl);
+    HRESULT hr = img->init(s, NXK_SURFACE, w, h, 1, 1, 1, fmt, (usage & 0x10007bf0u) | bind, pl, acc, false, um, ms, msq, samples, bind);
+    if (FAILED(hr)) { static_cast<NxObj*>(s)->release(); return hr; }   // the surface's destructor deletes the image
     if (what == 1 && flag) img->flags |= NXI_DISCARD;
     *out = s; return D3D_OK;
 }

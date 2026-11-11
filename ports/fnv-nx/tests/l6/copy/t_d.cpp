@@ -23,11 +23,11 @@ static void d_big(TDev& d) {
     CHECK_HR(d.i9->Clear(N, rc, D3DCLEAR_TARGET, 0xFFFFFFFF, 0, 0), D3D_OK); IDirect3DSurface9* sys = t_surf(d, 2, W, W, 21, D3DPOOL_SYSTEMMEM); CHECK_HR(d.i9->GetRenderTargetData(rt, sys), D3D_OK);
     CHECK(submits() >= s0 + 2); static uint32_t px[W * W]; CHECK(t_get(sys, (uint8_t*)px, sizeof px)); bool ok = true;
     for (int y = 0; y < W; y++) for (int x = 0; x < W; x++) ok = ok && px[y * W + x] == ((x < 200 && y < 200) ? 0xFFFFFFFFu : 0xFF000000u); CHECK(ok); free(rc);
-    // a payload larger than half a segment: UpdateSurface of 4 MiB (own memory block), then many small flushes (the ring of segments)
+    // a payload larger than half a segment: UpdateSurface of 4 MiB (split into sub-boxes, E4), then many small flushes (the ring of segments)
     const int B = 1024; IDirect3DSurface9* big = t_surf(d, 2, B, B, 21, D3DPOOL_SYSTEMMEM); IDirect3DSurface9* g = t_surf(d, 2, B, B, 21, D3DPOOL_DEFAULT); uint32_t* data = (uint32_t*)malloc(B * B * 4);
     for (int i = 0; i < B * B; i++) data[i] = 0xFF000000u ^ (uint32_t)(i * 2654435761u); t_put(big, (uint8_t*)data, B * B * 4); int m0 = g_calls[NXGPU_FN_MEM_CREATE];
     CHECK_HR(d.i9->UpdateSurface(big, nullptr, g, nullptr), D3D_OK); IDirect3DSurface9* back = t_surf(d, 2, B, B, 21, D3DPOOL_SYSTEMMEM); CHECK_HR(d.i9->GetRenderTargetData(g, back), D3D_OK);
-    uint32_t* out = (uint32_t*)malloc(B * B * 4); CHECK(t_get(back, (uint8_t*)out, B * B * 4)); CHECK(!memcmp(out, data, B * B * 4)); CHECK(g_calls[NXGPU_FN_MEM_CREATE] > m0);
+    uint32_t* out = (uint32_t*)malloc(B * B * 4); CHECK(t_get(back, (uint8_t*)out, B * B * 4)); CHECK(!memcmp(out, data, B * B * 4)); CHECK_EQ(g_calls[NXGPU_FN_MEM_CREATE], m0);   // glue_stream.h E4: a 4 MiB box is split into ops of at most half a segment, no block of its own (an op never allocates)
     for (int i = 0; i < 12; i++) { d.i9->ColorFill(rt, nullptr, 0xFF000000 | i); CHECK_HR(d.i9->GetRenderTargetData(rt, sys), D3D_OK); } CHECK(t_get(sys, (uint8_t*)px, sizeof px)); CHECK_EQ(px[0], 0xFF00000Bu);
     CHECK_EQ(nxs_in_flight() <= NXS_RING, 1); free(data); free(out); for (auto* s : {rt, sys, big, g, back}) s->Release();
 }

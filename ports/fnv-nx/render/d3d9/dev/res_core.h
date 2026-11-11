@@ -19,7 +19,7 @@ struct NxBufCore : NxObj {
     uint32_t fmt = 0;                                       // FVF (vertex buffer) / D3DFORMAT (index buffer)
     void* gmem = nullptr; uint32_t gsize = 0, gblock = 0;   // GPU mirror (glue_buf.cpp nx_buf_gpu_sync): 4 KiB aligned copy, backend memory block id
     ~NxBufCore() { nxd3d_free(raw); nxd3d_buf_destroy(this); }
-    HRESULT init(uint32_t len, uint32_t use, uint32_t fmt_, uint32_t pool);   // validation is in the Create* functions; this allocates
+    NX_MUST_USE HRESULT init(uint32_t len, uint32_t use, uint32_t fmt_, uint32_t pool);   // validation is in the Create* functions; this allocates (E_OUTOFMEMORY: nothing allocated)
     HRESULT lock(uint32_t off, uint32_t size, void** pp, DWORD flags);
     HRESULT unlock();
     bool take_dirty(uint32_t* lo, uint32_t* hi);            // false = nothing dirty; else the range, now cleared

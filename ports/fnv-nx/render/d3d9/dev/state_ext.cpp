@@ -4,22 +4,24 @@
 #include "d9impl.gen.h"
 #define INV return D3DERR_INVALIDCALL
 
+// Allocation failure (README "Allocation failure"): a light / palette entry the set cannot grow for = E_OUTOFMEMORY with the device unchanged (wined3d_stateblock_set_light: heap_alloc_zero failure ->
+// E_OUTOFMEMORY, returned through d3d9_device_SetLight / LightEnable); the new entry is added only when no further step can fail.
 // ---- lights. MS SetLight: any index; GetLight/GetLightEnable of an unassigned index: D3DERR_INVALIDCALL; LightEnable of an unassigned index creates a
 // default light (MS LightEnable remarks: DIRECTIONAL, diffuse (1,1,1,0), direction (0,0,1), all else 0) with the requested enable. New lights are disabled.
 // Light type must be POINT, SPOT or DIRECTIONAL (Wine wined3d_stateblock_set_light: other types INVALIDCALL).
 HRESULT NxDeviceCore::SetLight(DWORD index, const D3DLIGHT9* light) {
     if (!light || light->Type < D3DLIGHT_POINT || light->Type > D3DLIGHT_DIRECTIONAL) INV;
-    if (rec) { NxLightEnt* e = rec->st.lights.add(index); e->light = *light; e->has_light = 1; return D3D_OK; }
-    NxLightEnt* e = lights.add(index); e->light = *light; e->has_light = 1; dirty |= NX_G_LIGHTS; return D3D_OK;
+    if (rec) { NxLightEnt* e = rec->st.lights.add(index); if (!e) return E_OUTOFMEMORY; e->light = *light; e->has_light = 1; return D3D_OK; }
+    NxLightEnt* e = lights.add(index); if (!e) return E_OUTOFMEMORY; e->light = *light; e->has_light = 1; dirty |= NX_G_LIGHTS; return D3D_OK;
 }
 HRESULT NxDeviceCore::GetLight(DWORD Index, D3DLIGHT9* pLight) {
     NxLightEnt* e = lights.find(Index); if (!pLight || !e) INV; *pLight = e->light; return D3D_OK;
 }
 HRESULT NxDeviceCore::LightEnable(DWORD Index, BOOL Enable) {
-    if (rec) { NxLightEnt* e = rec->st.lights.add(Index); e->enabled = Enable != 0; e->has_enable = 1; return D3D_OK; }
+    if (rec) { NxLightEnt* e = rec->st.lights.add(Index); if (!e) return E_OUTOFMEMORY; e->enabled = Enable != 0; e->has_enable = 1; return D3D_OK; }
     NxLightEnt* e = lights.find(Index);
     if (!e) {
-        e = lights.add(Index); D3DLIGHT9 d = D3DLIGHT9(); d.Type = D3DLIGHT_DIRECTIONAL; d.Diffuse.r = d.Diffuse.g = d.Diffuse.b = 1.0f; d.Direction.z = 1.0f;
+        e = lights.add(Index); if (!e) return E_OUTOFMEMORY; D3DLIGHT9 d = D3DLIGHT9(); d.Type = D3DLIGHT_DIRECTIONAL; d.Diffuse.r = d.Diffuse.g = d.Diffuse.b = 1.0f; d.Direction.z = 1.0f;
         e->light = d; e->has_light = 1;
     }
     e->enabled = Enable != 0; e->has_enable = 1; dirty |= NX_G_LIGHTS; return D3D_OK;
@@ -34,7 +36,8 @@ HRESULT NxDeviceCore::SetPaletteEntries(UINT palette_idx, const PALETTEENTRY* en
     if (!entries) INV;
     const uint8_t* e = (const uint8_t*)entries;
     if (!NX_D3D_TEXTURECAPS_ALPHAPALETTE) for (int i = 0; i < 256; i++) if (e[i * 4 + 3] != 255) INV;
-    memcpy(pals.add(palette_idx)->e, e, sizeof(NxPalEnt::e)); dirty |= NX_G_PALETTE; return D3D_OK;
+    NxPalEnt* p = pals.add(palette_idx); if (!p) return E_OUTOFMEMORY;   // Wine's d3d9 palette API is a stub; the closed choice is wined3d's light precedent
+    memcpy(p->e, e, sizeof(NxPalEnt::e)); dirty |= NX_G_PALETTE; return D3D_OK;
 }
 HRESULT NxDeviceCore::GetPaletteEntries(UINT PaletteNumber, PALETTEENTRY* pEntries) {
     NxPalEnt* p = pals.find(PaletteNumber); if (!pEntries || !p) INV; memcpy(pEntries, p->e, sizeof(p->e)); return D3D_OK;
@@ -44,7 +47,7 @@ HRESULT NxDeviceCore::GetPaletteEntries(UINT PaletteNumber, PALETTEENTRY* pEntri
 // declaration was made from (0 for an element declaration or none). SetFVF(0) changes nothing and succeeds (Wine).
 HRESULT NxDeviceCore::SetFVF(DWORD FVF) {
     if (!FVF) return D3D_OK;
-    IDirect3DVertexDeclaration9* d = nx_device_fvf_decl(this, FVF); if (!d) return D3DERR_DRIVERINTERNALERROR;
+    IDirect3DVertexDeclaration9* d = nx_device_fvf_decl(this, FVF); if (!d) return D3DERR_DRIVERINTERNALERROR;   // d3d9_device_SetFVF: "Failed to create a vertex declaration for fvf" (invalid FVF or out of memory alike); the binding is untouched
     put(NX_S_vdecl, &d); return D3D_OK;
 }
 HRESULT NxDeviceCore::GetFVF(DWORD* pFVF) {
@@ -99,14 +102,20 @@ BOOL NxDeviceCore::GetSoftwareVertexProcessing() {
 HRESULT NxDeviceCore::CreateStateBlock(D3DSTATEBLOCKTYPE Type, IDirect3DStateBlock9** ppSB) {
     int t = Type == D3DSBT_ALL ? 0 : Type == D3DSBT_PIXELSTATE ? 1 : Type == D3DSBT_VERTEXSTATE ? 2 : -1;
     if (t < 0 || !ppSB) INV;
-    NxStateBlock9* b = new NxStateBlock9; b->asChild(this, ~0u); b->devc = this;
+    NxStateBlock9* b = nx_make<NxStateBlock9>(); if (!b) return E_OUTOFMEMORY;   // d3d9_device_CreateStateBlock: calloc failure -> E_OUTOFMEMORY
+    b->asChild(this, ~0u); b->devc = this;
     memcpy(b->st.mask, nx_tab.mask[t], sizeof b->st.mask);
-    if (t != 1) for (uint32_t i = 0; i < lights.n; i++) { NxLightEnt* e = b->st.lights.add(lights.a[i].idx); e->light = lights.a[i].light; e->enabled = lights.a[i].enabled; e->has_light = e->has_enable = 1; }
-    b->Capture(); *ppSB = b; return D3D_OK;
+    if (t != 1) for (uint32_t i = 0; i < lights.n; i++) {   // on failure nothing of the device was touched; the half-made block goes back through its public count
+        NxLightEnt* e = b->st.lights.add(lights.a[i].idx); if (!e) { static_cast<NxObj*>(b)->release(); return E_OUTOFMEMORY; }
+        e->light = lights.a[i].light; e->enabled = lights.a[i].enabled; e->has_light = e->has_enable = 1;
+    }
+    HRESULT hr = b->Capture(); if (FAILED(hr)) { static_cast<NxObj*>(b)->release(); return hr; }
+    *ppSB = b; return D3D_OK;
 }
 HRESULT NxDeviceCore::BeginStateBlock() {
     if (rec) INV;
-    NxStateBlock9* b = new NxStateBlock9; b->asDeferred(this); b->devc = this; rec = b; return D3D_OK;
+    NxStateBlock9* b = nx_make<NxStateBlock9>(); if (!b) return E_OUTOFMEMORY;   // wined3d_stateblock_create: heap_alloc_zero failure -> E_OUTOFMEMORY (through d3d9_device_BeginStateBlock)
+    b->asDeferred(this); b->devc = this; rec = b; return D3D_OK;
 }
 HRESULT NxDeviceCore::EndStateBlock(IDirect3DStateBlock9** ppSB) {
     if (!rec || !ppSB) INV;

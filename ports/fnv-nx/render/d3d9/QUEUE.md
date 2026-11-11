@@ -212,3 +212,10 @@ Lead's run: copy ALL OK (a 189 533, b 3 767, c 72, d 75 checks by the worker's c
 - ABI question: nxd3d_frontbuffer_read assumes NxImageRead with image 0 = the swapchain image: write it into nxgpu4.h and implement in gl4, or add a function.
 - Hooks owed: backend nxd3d_present, nxd3d_present_cursor, nxd3d_wait_idle, nxd3d_frontbuffer_read, nxd3d_wait_vblank (product definitions = glue task); platform nxd3d_window_client, nxd3d_perf_counter, nxd3d_os_cursor_pos (ask L5).
 - contract_consts.tsv: + SetDialogBoxMode (both classes) = D3D_OK.
+
+## GLUE2 accepted 2026-11-11 (Present glue, front buffer read, platform hook table); D7 rerun green
+
+Lead's run: present a 128, b 103, c 170, d 25 checks, 0 failed; devlife ALL OK (the build that failed earlier passes now). Worker's guest build: undefined 43 -> 29 (L6 backend glue 2 = nx_ffp_vs_program / nx_ffp_ps_program; platform hooks 8; methods without body 9).
+- ABI v4 changed: NxPresent 56 -> 80 bytes (cursor image, position, size: blended after the gamma blit, back buffer untouched); new NXGPU_FN_WAIT_VBLANK; NxImageRead image 0 = the swapchain image; rules P1-P5 at NxPresent in nxgpu4.h. B3 (deko3d) must follow this text.
+- `dev/platform_hooks.tsv`: 8 functions the platform defines (sent to L5).
+- OPEN: (1) vblank on GL surfaceless is a MODELLED 60 Hz clock (no display): acceptable only for the emulator stage, the console waits on the display vsync event; under B5's virtual clocks it must read the virtual clock, not CLOCK_MONOTONIC. (2) Present with a visible cursor allocates per call (can fail with OUTOFVIDEOMEMORY): reserve at SetCursorProperties instead. (3) the Wine citation for the cursor order was written from memory: verify against the source.

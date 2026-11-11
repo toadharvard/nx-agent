@@ -6,12 +6,10 @@
 //  P3 variant bit 0 = fnvnx_dk_vs_needs_complete(VS written = declared outputs without POSITION0 / PSIZE0 plus FOG0, PS read = declared inputs plus FOG0 for ps < 3.0). A fixed-function VS is complete by construction
 //     (draw_ffp.h): variant 0 and no pair of its own. A PS stage has variant 0.
 //  P4 a backend shader id is made at the first draw that needs the (shader, variant, L) and cached on the shader object (NxShaderCore::progs); it is destroyed with the object (nxd3d_shader_ids_destroy).
-//     A 0 from the backend = D3DERR_DRIVERINTERNALERROR (a backend defect, never a skipped draw).
+//     A 0 from the backend = D3DERR_DRIVERINTERNALERROR (a backend defect, never a skipped draw); no backend memory for the bytecode copy = D3DERR_OUTOFVIDEOMEMORY (glue_stream.h exhaustion rules: the result of the call, nothing recorded).
 #include "draw_core.h"
 #include "d9impl.gen.h"
 #include <string.h>
-
-void nx_state_forget_shader(uint32_t id);
 
 bool nx_vs_sig(const NxSmIface& i, NxVsSig* out) {
     static const uint8_t sm1[16][2] = {{0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0}, {10, 0}, {10, 1}, {5, 0}, {5, 1}, {5, 2}, {5, 3}, {5, 4}, {5, 5}, {5, 6}, {5, 7}, {0, 1}};
@@ -37,15 +35,19 @@ int nx_link_set(const uint8_t* vs_out, uint32_t nv, const uint8_t* ps_in, uint32
     for (uint32_t i = 1; i < m; i++) { uint8_t v = d[i]; uint32_t q = i; while (q > 0 && d[q - 1] > v) { d[q] = d[q - 1]; q--; } d[q] = v; }
     memcpy(l, d, m); *nl = m; return 0;
 }
-static uint32_t shader_prog(NxShaderCore* s, uint32_t stage, uint32_t variant, const uint8_t* l, uint32_t nl) {
+static uint32_t shader_prog(NxShaderCore* s, uint32_t stage, uint32_t variant, const uint8_t* l, uint32_t nl, HRESULT* hr) {
     for (uint32_t i = 0; i < s->nprogs; i++) { const NxShaderProg& p = s->progs[i]; if (p.variant == variant && p.n_l == nl && !memcmp(p.l, l, nl)) return p.id; }
-    uint32_t cb = (s->nbytes + 3u) & ~3u, bytes = (cb + nl + 4095u) & ~4095u; uint8_t* m = (uint8_t*)nxd3d_gpu_alloc(bytes); memset(m, 0, bytes);
+    if (s->nprogs == s->cprogs) {   // room for the entry first: a shader made by the backend is never left without its record
+        uint32_t c = s->cprogs ? s->cprogs * 2 : 4; NxShaderProg* n = (NxShaderProg*)nxd3d_alloc(c * sizeof(NxShaderProg)); if (!n) { *hr = D3DERR_OUTOFVIDEOMEMORY; return 0; }
+        if (s->nprogs) memcpy(n, s->progs, s->nprogs * sizeof(NxShaderProg));
+        nxd3d_free(s->progs); s->progs = n; s->cprogs = c;
+    }
+    uint32_t cb = (s->nbytes + 3u) & ~3u, bytes = (cb + nl + 4095u) & ~4095u; uint8_t* m = (uint8_t*)nxd3d_gpu_alloc(bytes); if (!m) { *hr = D3DERR_OUTOFVIDEOMEMORY; return 0; } memset(m, 0, bytes);
     memcpy(m, s->code, s->nbytes); memcpy(m + cb, l, nl);
     NxShaderD3D* d = (NxShaderD3D*)nxs_scratch(sizeof *d); memset(d, 0, sizeof *d);
     d->bytecode = FNVNX_ADDR_(m); d->size = s->nbytes; d->stage = (uint8_t)stage; d->variant = (uint8_t)variant; d->hash = s->hash; d->link_pairs = FNVNX_ADDR_(m + cb); d->n_link_pairs = nl;
     uint64_t a[1] = {FNVNX_ADDR_(d)}, r = nxd3d_gpu_call(NXGPU_FN_SHADER_CREATE_D3D, a, 1); nxd3d_gpu_free(m);
-    if (!nxs_ok(r) || r == 0 || r >= (1u << 16)) return 0;
-    if (s->nprogs == s->cprogs) { uint32_t c = s->cprogs ? s->cprogs * 2 : 4; NxShaderProg* n = (NxShaderProg*)nxd3d_alloc(c * sizeof(NxShaderProg)); if (s->nprogs) memcpy(n, s->progs, s->nprogs * sizeof(NxShaderProg)); nxd3d_free(s->progs); s->progs = n; s->cprogs = c; }
+    if (!nxs_ok(r) || r == 0 || r >= (1u << 16)) { *hr = D3DERR_DRIVERINTERNALERROR; return 0; }
     NxShaderProg& p = s->progs[s->nprogs++]; memset(&p, 0, sizeof p); p.variant = (uint8_t)variant; p.n_l = (uint8_t)nl; memcpy(p.l, l, nl); p.id = (uint32_t)r; return p.id;
 }
 void nxd3d_shader_ids_destroy(NxShaderCore* s) {
@@ -75,7 +77,8 @@ HRESULT nx_prog_resolve(NxDeviceCore* d, NxProg* p) {
         npi = npr = p->fp.n_in > 31 ? 31 : p->fp.n_in; memcpy(pin, p->fp.in_pair, npi); memcpy(pr, p->fp.in_pair, npr);
     }
     if (nx_link_set(vout, nvo, pin, npi, l, &nl)) return D3DERR_DRIVERINTERNALERROR;
-    if (vsc) { p->vs = shader_prog(vsc, 0, fnvnx_dk_vs_needs_complete(vw, (int)nvw, pr, (int)npr), l, nl); if (!p->vs) return D3DERR_DRIVERINTERNALERROR; }
-    if (psc) { p->ps = shader_prog(psc, 1, 0, l, nl); if (!p->ps) return D3DERR_DRIVERINTERNALERROR; }
+    HRESULT hr = D3D_OK;
+    if (vsc) { p->vs = shader_prog(vsc, 0, fnvnx_dk_vs_needs_complete(vw, (int)nvw, pr, (int)npr), l, nl, &hr); if (!p->vs) return hr; }
+    if (psc) { p->ps = shader_prog(psc, 1, 0, l, nl, &hr); if (!p->ps) return hr; }
     return D3D_OK;
 }

@@ -20,15 +20,19 @@
 
 static NxRc whole(const NxSub* s) { return {0, 0, (int32_t)s->w, (int32_t)s->h}; }
 static float clamp01(float z) { return z != z ? 0.0f : z < 0.0f ? 0.0f : z > 1.0f ? 1.0f : z; }
-static void fill(NxSurfCore* sc, const NxRc* rects, uint32_t n, uint32_t flags, uint32_t rgba, float z, uint32_t stencil) {
-    NxImg* im = sc->img; if (!im->gpu) return;
-    im->upload(); NxTarget t = nx_target(sc); const NxSub* sub = nx_surf_sub(sc); bool any = false;
+// Allocation failure (README "Allocation failure"): nothing here allocates. Clear takes its rectangles from the application's array one at a time (no copy of the list); a flush of pending CPU writes that cannot get
+// its conversion buffer = E_OUTOFMEMORY, a stream that cannot take the ops (glue_stream.h E1) = D3DERR_OUTOFVIDEOMEMORY; both leave the targets as they were up to the last op written.
+template <class RectAt> static HRESULT fill(NxSurfCore* sc, uint32_t n, RectAt rect_at, uint32_t flags, uint32_t rgba, float z, uint32_t stencil) {
+    NxImg* im = sc->img; if (!im->gpu) return D3D_OK;
+    if (!im->upload()) return E_OUTOFMEMORY;
+    NxTarget t = nx_target(sc); const NxSub* sub = nx_surf_sub(sc); bool any = false;
     for (uint32_t i = 0; i < n; i++) {
-        NxRc c = nx_rc_and(rects[i], whole(sub)); if (nx_rc_empty(c)) continue;
-        if (!any) { if (flags & NxClear_Color) nxs_pass_begin(1, &t, nullptr); else nxs_pass_begin(0, nullptr, &t); any = true; }
-        nxs_clear(flags, rgba, z, stencil, (uint32_t)c.l, (uint32_t)c.t, (uint32_t)(c.r - c.l), (uint32_t)(c.b - c.t));
+        NxRc c = nx_rc_and(rect_at(i), whole(sub)); if (nx_rc_empty(c)) continue;
+        if (!any) { if (!((flags & NxClear_Color) ? nxs_pass_begin(1, &t, nullptr) : nxs_pass_begin(0, nullptr, &t))) return D3DERR_OUTOFVIDEOMEMORY; any = true; }
+        if (!nxs_clear(flags, rgba, z, stencil, (uint32_t)c.l, (uint32_t)c.t, (uint32_t)(c.r - c.l), (uint32_t)(c.b - c.t))) { nxs_pass_end(); return D3DERR_OUTOFVIDEOMEMORY; }
     }
     if (any) { nxs_pass_end(); nx_img_gpu_wrote(im, sc->level, sc->face); }
+    return D3D_OK;
 }
 static HRESULT do_clear(NxDeviceCore* d, DWORD count, const D3DRECT* rects, DWORD flags, D3DCOLOR color, float z, DWORD stencil) {
     if (count && !rects) count = 0;
@@ -42,22 +46,20 @@ static HRESULT do_clear(NxDeviceCore* d, DWORD count, const D3DRECT* rects, DWOR
     const D3DVIEWPORT9& vp = d->cur.viewport[0];
     NxRc draw = {(int32_t)vp.X, (int32_t)vp.Y, (int32_t)(vp.X + vp.Width), (int32_t)(vp.Y + vp.Height)};                 // R-C3
     if (d->cur.rs[D3DRS_SCISSORTESTENABLE]) { const RECT& s = d->cur.scissor[0]; draw = nx_rc_and(draw, {s.left, s.top, s.right, s.bottom}); }
-    uint32_t n = count ? count : 1; NxRc* rc = (NxRc*)nxd3d_alloc(sizeof(NxRc) * n); uint32_t m = 0;
-    for (uint32_t i = 0; i < n; i++) {
-        NxRc r = count ? NxRc{rects[i].x1, rects[i].y1, rects[i].x2, rects[i].y2} : draw; r = nx_rc_and(r, draw); if (!nx_rc_empty(r)) rc[m++] = r;
-    }
+    uint32_t n = count ? count : 1;   // no rects = the clipping rectangle itself
+    auto rect_at = [&](uint32_t i) { NxRc r = count ? NxRc{rects[i].x1, rects[i].y1, rects[i].x2, rects[i].y2} : draw; return nx_rc_and(r, draw); };
     if (flags & D3DCLEAR_TARGET) {                                                                                              // R-C4
         for (uint32_t i = 0; i < NX_D3D_MAX_RTS; i++) {
             NxSurfCore* t = nx_surf_core(d->cur.rt[i]); if (!t || nx_img_null(t->img)) continue;
             uint32_t fl = NxClear_Color | ((d->cur.rs[D3DRS_SRGBWRITEENABLE] && (t->img->ni.flags & NXFMT_SRGB)) ? NxClear_Srgb : 0);   // R-C5
-            fill(t, rc, m, fl, nx_d3d9_clear_rgba8(t->img->fmt, color), 0.0f, 0);
+            HRESULT hr = fill(t, n, rect_at, fl, nx_d3d9_clear_rgba8(t->img->fmt, color), 0.0f, 0); if (FAILED(hr)) return hr;
         }
     }
     if (ds) {
         uint32_t fl = ((flags & D3DCLEAR_ZBUFFER) && nx_img_is_depth(ds->img) ? NxClear_Depth : 0) | ((flags & D3DCLEAR_STENCIL) && (ds->img->ni.flags & NXFMT_STENCIL) ? NxClear_Stencil : 0);
-        if (fl) fill(ds, rc, m, fl, 0, clamp01(z), stencil & 0xFF);
+        if (fl) { HRESULT hr = fill(ds, n, rect_at, fl, 0, clamp01(z), stencil & 0xFF); if (FAILED(hr)) return hr; }
     }
-    nxd3d_free(rc); return D3D_OK;
+    return D3D_OK;
 }
 static HRESULT do_fill(NxObj* dev, IDirect3DSurface9* surface, const RECT* rect, D3DCOLOR color) {
     NxSurfCore* sc = nx_surf_core(surface);
@@ -71,7 +73,7 @@ static HRESULT do_fill(NxObj* dev, IDirect3DSurface9* surface, const RECT* rect,
     if (nxenv_check_device_format(nx_dev_profile(dev), 0, 1, 22, D3DUSAGE_RENDERTARGET, D3DRTYPE_SURFACE, im->fmt) != 0) return D3DERR_INVALIDCALL;   // colour-renderable per the env table
     if (nx_img_null(im)) return D3D_OK;                                                                                   // nothing to fill
     NxRc r = rect ? NxRc{rect->left, rect->top, rect->right, rect->bottom} : whole(s);
-    fill(sc, &r, 1, NxClear_Color, nx_d3d9_clear_rgba8(im->fmt, color), 0.0f, 0); return D3D_OK;
+    return fill(sc, 1, [&](uint32_t) { return r; }, NxClear_Color, nx_d3d9_clear_rgba8(im->fmt, color), 0.0f, 0);
 }
 #define CLEAR_METHODS(C) \
     HRESULT STDMETHODCALLTYPE C::Clear(DWORD n, const D3DRECT* r, DWORD f, D3DCOLOR c, float z, DWORD s) { return do_clear(this, n, r, f, c, z, s); } \

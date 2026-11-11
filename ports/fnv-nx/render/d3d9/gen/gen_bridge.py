@@ -49,8 +49,8 @@ def ret_of(what, m):
 
 def thunk(spec, what, sym, m, callee, this_t):
     """one extern "C" function; callee = 'o->Name' or the export's native function"""
-    P = m.get("params", []); decl, args, pre, post = [], [], [], []
-    if this_t: decl.append("void* nxb_this"); pre.append(f"{this_t}* o = ({this_t}*)nx_unface(nxb_this);")
+    P = m.get("params", []); decl, args, pre, post, allocd = [], [], [], [], []
+    if this_t: decl.append("void* nxb_this"); pre.append(f"{this_t}* o = ({this_t}*)nx_unface_this(nxb_this);")
     for p in P:
         n, k, ct = p["name"], p["kind"], p["ctype"]
         slot_of(what, p)
@@ -68,7 +68,9 @@ def thunk(spec, what, sym, m, callee, this_t):
                 ln = Ctx(m, spec, None, False, what).c(p["len"])
                 et = ct.replace('**', '*').strip()
                 decl.append(f"void** {n}"); pre.append(f"uint64_t nxb_n_{n} = {n} ? ({ln}) / 4 : 0; {et}* nxb_a_{n} = nullptr;")
-                pre.append(f"if (nxb_n_{n}) {{ if (nxb_n_{n} > 0x3fffffffu || !(nxb_a_{n} = ({ct})nxd3d_alloc((size_t)nxb_n_{n} * sizeof(void*)))) return E_OUTOFMEMORY; }}")
+                undo = "".join(f"nxd3d_free(nxb_a_{u}); " for u in allocd)   # allocation failure: what the earlier buffers of this thunk allocated goes back before the E_OUTOFMEMORY (Wine d3d9: allocation failure = E_OUTOFMEMORY)
+                pre.append(f"if (nxb_n_{n}) {{ if (nxb_n_{n} > 0x3fffffffu || !(nxb_a_{n} = ({ct})nxd3d_alloc((size_t)nxb_n_{n} * sizeof(void*)))) {{ {undo}return E_OUTOFMEMORY; }} }}")
+                allocd.append(n)
                 pre.append(f"for (uint64_t i = 0; i < nxb_n_{n}; i++) nxb_a_{n}[i] = ({et})nx_unface({n}[i]);")
                 post.append(f"nxd3d_free(nxb_a_{n});")
                 if m.get("ret_kind") != "hresult": die(f"{what}: canon handle buffer in a method without HRESULT has no rule")

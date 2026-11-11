@@ -17,7 +17,8 @@
  *   queries                                      -> NxOp_QueryBegin/End, query_result
  *   multisampling, line/point states             -> NxRenderState w[3], NxImageDesc4.samples
  *   more sampler states than descriptor slots    -> sampler_update (the device evicts by rule, the id is redefined)
- *   presentation interval, gamma ramp            -> NxPresent
+ *   presentation interval, gamma ramp, software
+ *   cursor, GetFrontBufferData, WaitForVBlank    -> NxPresent (rules P1-P5), image_read of image 0, wait_vblank
  * User clip planes, point size, alpha test and fog are shader epilogue work (driver UBO): no backend state beyond
  * the clip enable mask (w[2] bits 8-15) and the point bits already in v3.
  */
@@ -185,11 +186,47 @@ typedef struct NxImageRead {         /* waits for all submitted work */
  * the presentation filter to the driver). Source values are converted to the 8-bit RGBA swapchain as for a Blit.
  * Gamma ramp (3 x 256 u16: red, green, blue): per colour channel v = round(clamp(channel, 0, 1) * 255) (the 8-bit
  * value of an 8-bit source), out = ramp[channel][v] >> 8; alpha unchanged. interval is 0-4 (else BAD_CALL) and has
- * no observable effect on a surfaceless GL context: pacing belongs to the embedder. After the image is complete
+ * no observable effect on a surfaceless GL context: pacing belongs to the embedder (on the console the display's
+ * vertical blank paces the swapchain: the call returns after `interval` blanks). After the image is complete
  * the backend calls the embedder's `void nxgl4_on_present(uint32_t frame)` (gl4.h) and, when the environment
  * variable NXGL4_FRAMES names a directory, first writes <dir>/frame_%06u.rgba (the swapchain image, RGBA8, top row
  * first) and frame_%06u.txt ("width height"). Rects outside either image, empty rects, a bad image = BAD_CALL (no
- * hook runs). */
+ * hook runs).
+ *
+ * Ordering and memory (v4 rule P1): PRESENT is ordered after every stream submitted before it (the device submits
+ * its pending stream first; GL: submits are synchronous, deko3d: one queue). Every byte PRESENT reads (this
+ * struct, the ramp, the cursor pixels) is consumed before the call returns: the caller may reuse or free that
+ * memory immediately. The device never uses NxSubmit.present and never calls WAIT_FRAME for a present: frames in
+ * flight are bounded by the stream ring of the glue (glue_stream.h R4).
+ *
+ * The software cursor (rule P2). D3D9 draws the software cursor over the PRESENTED image, never into the back
+ * buffer (Wine 9.0 wined3d/swapchain.c swapchain_gl_present, cursor_texture: drawn onto the drawable after the back
+ * buffer was blitted into it, recalled, the Wine source is not in this tree; the back buffer is not touched, so a later GetBackBuffer / lock reads what the application
+ * drew). NxOp_Blit cannot express it (a Blit copies raw values, no blending, and is a stream op that runs before the
+ * present), so the cursor is part of the present: when cursor != 0, after the destination rect has been written
+ * (gamma included) and before the frame file / hook / display, the cursor image is alpha blended onto the swapchain
+ * image. `cursor` = address of cw x ch pixels, D3DFMT_A8R8G8B8 (bytes B, G, R, A in memory), rows cw * 4 bytes
+ * apart, top row first; (cx, cy) = the top-left corner in swapchain pixels (may be negative or outside: the part
+ * outside the swapchain image is dropped; entirely outside = no change). 1 <= cw, ch <= 4096, else BAD_CALL (no hook
+ * runs). Blend, exactly: a = pixel alpha (0-255); for each colour channel c with cursor value v (the gamma ramp,
+ * when the present has one, is applied to v first: v = ramp[c][v] >> 8, as the display's ramp acts on the whole
+ * output) and swapchain value d: out = (v * a + d * (255 - a) + 127) / 255 (integer division); the swapchain
+ * alpha is unchanged. cursor = 0: no cursor.
+ *
+ * Swapchain image contents (rule P3): RGBA8, row 0 = top; the backend creates it all zero (RGBA 0, 0, 0, 0);
+ * afterwards it holds what was last written to it (presents; v3 passes / blits that target image 0).
+ *
+ * Reading the front buffer (rule P4): NxImageRead with src.image == 0 reads the swapchain image: level 0, layer 0,
+ * z = 0, d = 1, any box inside the image, bytes RGBA8 (R, G, B, A), top row first, rowPitch apart. It waits for
+ * all submitted work like every image_read. D3D9 GetFrontBufferData before any Present returns the desktop under
+ * the window; this environment has no desktop, its swapchain image is the all-zero image of rule P3 and the read
+ * returns exactly that. No swapchain (NxGpuInfo.width == 0) = BAD_CALL.
+ *
+ * Vertical blank (rule P5): NXGPU_FN_WAIT_VBLANK(output): blocks until the next vertical blank of output 0 (the
+ * only output, the one the swapchain presents to; any other value = BAD_CALL). Console: waits for the display's
+ * vsync event (libnx viGetDisplayVsyncEvent). GL host reference (no display): a modelled 60 Hz panel, blanks at
+ * k * 10^9 / 60 ns of CLOCK_MONOTONIC, the call returns at the first blank strictly after the call. It does not
+ * touch the swapchain image. */
 typedef struct NxPresent {
     uint32_t image;                  /* the back buffer image the device renders to */
     int32_t sx, sy, sw, sh;          /* source rect */
@@ -197,7 +234,11 @@ typedef struct NxPresent {
     uint32_t interval;               /* vertical blanks to wait: 0 immediate, 1-4 */
     uint64_t gamma;                  /* 0 or the address of 3 x 256 u16 (D3DGAMMARAMP) applied by the present blit */
     uint32_t frame, pad;
+    uint64_t cursor;                 /* 0 or the address of cw x ch BGRA pixels (rule P2) */
+    int32_t cx, cy;                  /* top-left corner of the cursor in swapchain pixels */
+    uint32_t cw, ch;
 } NxPresent;
+NX_ASSERT_(sizeof(NxPresent) == 80, "NxPresent");
 
 typedef struct NxGpuApi4 {
     NxGpuApi v3;
@@ -215,11 +256,13 @@ typedef struct NxGpuApi4 {
                                         ready; wait = 1 on a query whose QueryEnd was never issued, an unknown id or
                                         wait > 1 = BAD_CALL */
     uint64_t present;                /* (NxPresent*) -> 0: see NxPresent */
+    uint64_t wait_vblank;            /* (output) -> 0 after the next vertical blank: rule P5 at NxPresent */
 } NxGpuApi4;
 
 enum NxGpuFn4 {
     NXGPU_FN_IMAGE_CREATE4 = NXGPU_FN_COUNT, NXGPU_FN_IMAGE_DESTROY, NXGPU_FN_MEM_DESTROY, NXGPU_FN_SHADER_DESTROY,
     NXGPU_FN_SAMPLER_UPDATE, NXGPU_FN_IMAGE_READ, NXGPU_FN_QUERY_RESULT, NXGPU_FN_PRESENT,
+    NXGPU_FN_WAIT_VBLANK,
     NXGPU_FN_COUNT4
 };
 

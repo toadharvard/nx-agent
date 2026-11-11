@@ -4,20 +4,20 @@
 #include "obj.h"
 #include "nxgpu4.h"
 
-// ---- backend, 1:1 onto nxgpu4.h
-// NxGpuApi4.present: `p` is the NxPresent of the call (image = the GPU image id of the chain's current back buffer 0, rects, interval 0-4, gamma = 0 or the address of the chain's D3DGAMMARAMP,
-// frame = the device's present counter). Returns the backend result: 0 = done, anything else = BAD_CALL (the device validates the rects first, so this cannot happen on a valid image).
+// ---- backend, 1:1 onto nxgpu4.h; product definitions in glue_present.cpp. Result of the int hooks: 0 = done, NXD3D_HOOK_NOMEM = nxd3d_gpu_alloc returned null (the device reports D3DERR_OUTOFVIDEOMEMORY),
+// anything else = the backend refused the call (a defect: the device validated everything first; D3DERR_DRIVERINTERNALERROR).
+enum { NXD3D_HOOK_NOMEM = 2 };
+// NxGpuApi4.present: `p` is the NxPresent of the call (image = the GPU image id of the chain's current back buffer 0, rects, interval 0-4, gamma = 0 or the HOST address of the chain's D3DGAMMARAMP, frame = the
+// device's present counter, cursor = 0 or the HOST address of the software cursor's A8R8G8B8 pixels with (cx, cy, cw, ch) = its place in the presented image: nxgpu4.h rule P2, the cursor is blended onto the
+// presented image by the backend as part of the present and never touches the back buffer). The hook copies the host memory into nxd3d_gpu_alloc memory; `p` itself is the caller's.
 int nxd3d_present(NxObj* chain, const NxPresent* p);
-// The software cursor of the device, composited over the presented image after nxd3d_present of the same Present call: `bgra` = w x h pixels of D3DFMT_A8R8G8B8 (row pitch w * 4),
-// (x, y) = top-left corner in the presented image's coordinates (cursor position minus hot spot), alpha blended (SRCALPHA, INVSRCALPHA) onto the presented image.
-void nxd3d_present_cursor(NxObj* chain, const uint8_t* bgra, uint32_t w, uint32_t h, int32_t x, int32_t y);
-// Waits until all submitted work has completed (the backend's image_read semantics without a read; used by Reset before images are destroyed and by Present with a frame latency).
+// Waits until all submitted work has completed (the backend's image_read semantics without a read; used by Reset before images are destroyed).
 void nxd3d_wait_idle(NxObj* device);
-// GetFrontBufferData: the presented image of `chain` (the swapchain image, RGBA8, top row first, w x h = the chain's back buffer size) read into dst (rowPitch bytes per row).
-// ASSUMPTION on nxgpu4.h: NxImageRead with src.image 0 reads the swapchain image, as NxPresent / NxOp_Blit use image 0 as the destination; if the ABI lacks it the hook needs a backend addition.
-void nxd3d_frontbuffer_read(NxObj* chain, uint32_t w, uint32_t h, void* dst, uint32_t rowPitch);
-// IDirect3DDevice9Ex::WaitForVBlank: blocks until the next vertical blank of the output the chain presents to.
-void nxd3d_wait_vblank(NxObj* chain);
+// GetFrontBufferData: the presented image of `chain` (the swapchain image, RGBA8, top row first: nxgpu4.h rule P4) read into dst (rowPitch bytes per row), w x h = the chain's back buffer size. The part of the
+// w x h rectangle outside the swapchain image reads as zero bytes.
+int nxd3d_frontbuffer_read(NxObj* chain, uint32_t w, uint32_t h, void* dst, uint32_t rowPitch);
+// IDirect3DDevice9Ex::WaitForVBlank: blocks until the next vertical blank of the output the chain presents to (nxgpu4.h rule P5).
+int nxd3d_wait_vblank(NxObj* chain);
 
 // ---- platform (Win32 facts, each stated)
 // Win32: GetClientRect(w) mapped to screen coordinates with MapWindowPoints; false iff w is not a window (IsWindow(w) == FALSE, including NULL); r may be null. *r = {left, top, right, bottom} of the client area in

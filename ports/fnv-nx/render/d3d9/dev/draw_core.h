@@ -68,22 +68,26 @@ struct NxDrawDev : NxDevLifeBase { NxD3D9Latch latch; NxDrawDev() { nx_d3d9_latc
 NxDrawDev* nx_draw_dev(NxDeviceCore* d);
 
 struct NxPassSet { uint32_t nc; NxTarget col[4]; NxSurfCore* csc[4]; NxTarget dep; bool has_dep; NxSurfCore* dsc; uint32_t depth_fmt; };
-void nx_pass_resolve(NxDeviceCore* d, NxPassSet* ps);                       // the target set of the device state by the NULL-format rules (draw_state.cpp)
+HRESULT nx_pass_resolve(NxDeviceCore* d, NxPassSet* ps);                       // the target set of the device state by the NULL-format rules (draw_state.cpp)
 void nx_pass_ensure(NxDeviceCore* d, const NxPassSet& ps);                  // a pass of these targets is open (begins one if not); may flush
-void nx_state_flush(NxDeviceCore* d, const NxDrawReq& r, const NxProg& pr, const NxLayout& lay, const NxPassSet& ps, uint32_t groups);   // viewport, scissor, dynamics, layout / state ids, BindState
-uint32_t nx_dirty_all();
+void nx_state_flush(NxDeviceCore* d, const NxDrawReq& r, const NxProg& pr, const NxLayout& lay, const NxPassSet& ps, uint64_t groups);   // viewport, scissor, dynamics, layout / state ids, BindState
+uint32_t nx_layout_id(const NxVtxLayout4& v, uint32_t* serial);   // draw_ids.cpp: ids of the process-global tables; both emit their Define op when the content is new
+uint32_t nx_state_id(uint32_t vs, uint32_t ps, uint32_t lay, uint32_t lserial, const NxRenderState& rs, uint32_t* serial);
+void nx_state_forget_shader(uint32_t id);
 
 // ---- draw_const.cpp
-void nx_ubo_emit(uint32_t stage, uint32_t slot, const void* data, uint32_t bytes, bool full);   // BindUbo of `data` unless the same bytes are bound
-void nx_const_flush(NxDeviceCore* d, const NxProg& pr, const NxPassSet& ps, bool full, uint32_t groups);   // UBO 0 / 1 / 2 of both stages and the fixed-function blocks
+bool nx_ubo_reserve(uint32_t stage, uint32_t slot, uint32_t bytes);                               // capacity of the comparison copy of a block (the only allocation of the flush: made before anything is written; false = no memory)
+void nx_ubo_emit(uint32_t stage, uint32_t slot, const void* data, uint32_t bytes, bool full);   // BindUbo of `data` unless the same bytes are bound (nx_ubo_reserve'd)
+void nx_const_flush(NxDeviceCore* d, const NxProg& pr, const NxPassSet& ps, bool full, uint64_t groups);   // UBO 0 / 1 / 2 of both stages and the fixed-function blocks
 void nx_driver_blocks(NxDeviceCore* d, const NxProg& pr, uint8_t* vs64, uint8_t* ps352);          // the contents of the two driver blocks (also for tests)
 
 // ---- draw_tex.cpp: samplers and textures
 struct NxTexPlan { uint32_t h[2][24]; uint32_t lo[2], hi[2]; uint8_t stype[8]; };   // texture handles per stage and slot (0 = none), used slot span [lo, hi) per stage, ps_1_x / fixed function type word per stage
-void nx_tex_plan(NxDeviceCore* d, const NxProg& pr, NxTexPlan* plan);              // syncs images, resolves sampler ids (may flush the stream: call BEFORE the pass is ensured)
+HRESULT nx_tex_plan(NxDeviceCore* d, const NxProg& pr, NxTexPlan* plan);              // syncs images, resolves sampler ids (may flush the stream: call BEFORE the pass is ensured)
 void nx_tex_flush(const NxTexPlan& plan, bool full);
 
 // ---- draw_bind.cpp: vertex streams, index buffer, UP data
-struct NxBindPlan { uint32_t vtx[NX4_MAX_STREAMS][4]; uint32_t nvtx_mask; uint32_t idx[4]; bool has_idx; uint32_t zero_blk; };
-void nx_bind_plan(NxDeviceCore* d, const NxDrawReq& r, const NxLayout& lay, NxBindPlan* bp);   // mirrors of the buffers (flushes when the hazard rule says so)
+struct NxBindPlan { uint32_t vtx[NX4_MAX_STREAMS][4]; uint32_t nvtx_mask; uint32_t idx[4]; bool has_idx; uint32_t zero_blk; void* big_mem[2]; uint32_t big_blk[2]; uint32_t up_v[2], up_i[2]; };   // big_*: dedicated blocks of oversize UP data (draw_bind.cpp B5)
+HRESULT nx_bind_plan(NxDeviceCore* d, const NxDrawReq& r, const NxLayout& lay, NxBindPlan* bp);   // mirrors of the buffers (flushes when the hazard rule says so)
 void nx_bind_flush(const NxDrawReq& r, const NxLayout& lay, const NxBindPlan& bp, bool full);  // BindVtxN / BindIdx (UP: payload binds)
+void nx_bind_done(NxBindPlan* bp);                                                              // after the draw op: oversize UP blocks are released (the stream is finished first)

@@ -22,8 +22,8 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 BACK = os.path.join(ROOT, "render", "d3d9", "backend"); NXINC = BACK
 ENV = dict(os.environ, LIBGL_ALWAYS_SOFTWARE="1", GALLIUM_DRIVER="llvmpipe", EGL_PLATFORM="surfaceless")
-TESTS = ["t_main.c", "t_parts_ab.c", "t_parts_cd.c", "t_parts_ef.c", "t_parts_i.c", "t_parts_j.c", "t_parts_k.c", "t_parts_l.c", "t_parts_m.c", "t_parts_n.c"]
-PARTS = "abcdefijklmn"
+TESTS = ["t_main.c", "t_parts_ab.c", "t_parts_cd.c", "t_parts_ef.c", "t_parts_i.c", "t_parts_j.c", "t_parts_k.c", "t_parts_l.c", "t_parts_m.c", "t_parts_n.c", "t_parts_o.c"]
+PARTS = "abcdefijklmno"
 fails = []
 
 
@@ -86,7 +86,9 @@ def ctypes_child(so, pre, outdir):
     assert ext(6, addr(sub)) == 0
     class Pres(ctypes.Structure):   # NxPresent
         _fields_ = [("image", ctypes.c_uint32)] + [(n, ctypes.c_int32) for n in ("sx", "sy", "sw", "sh", "dx", "dy", "dw", "dh")] + \
-                   [("interval", ctypes.c_uint32), ("gamma", ctypes.c_uint64), ("frame", ctypes.c_uint32), ("pad", ctypes.c_uint32)]
+                   [("interval", ctypes.c_uint32), ("gamma", ctypes.c_uint64), ("frame", ctypes.c_uint32), ("pad", ctypes.c_uint32),
+                   ("cursor", ctypes.c_uint64), ("cx", ctypes.c_int32), ("cy", ctypes.c_int32), ("cw", ctypes.c_uint32), ("ch", ctypes.c_uint32)]
+    assert ctypes.sizeof(Pres) == 80
     ramp = (ctypes.c_uint16 * 768)(*[(255 - (i & 255)) * 257 for i in range(768)])   # inverts every channel
     for frame, gamma, want in ((7, 0, (0x40, 0x80, 0xC0, 0xFF)), (8, addr(ramp), (0xBF, 0x7F, 0x3F, 0xFF))):
         pr = Pres(img, 0, 0, 8, 8, 0, 0, 16, 16, 1, gamma, frame, 0)
@@ -152,6 +154,15 @@ MUTS = [  # (part that must catch it, file, old text (exactly once), replacement
     ("m", "gl4_state.c", "if (w3 >> NXRS_M_AALINE & 1) p_glEnable(GL_LINE_SMOOTH); else p_glDisable(GL_LINE_SMOOTH);", "p_glDisable(GL_LINE_SMOOTH);"),
     ("m", "gl4_state.c", "if (mask != 0xFFFFFFFFu && g4.passSamples > 1) { p_glEnable(GL_SAMPLE_MASK); p_glSampleMaski(0, mask); } else p_glDisable(GL_SAMPLE_MASK);", "if (mask == 0x12345u && g4.passSamples > 1) { p_glEnable(GL_SAMPLE_MASK); p_glSampleMaski(0, mask); } else p_glDisable(GL_SAMPLE_MASK);"),
     ("m", "gl4_check.c", "&& lastpixel[bound])", "&& lastpixel[bound] && 0)"),
+    ("o", "gl4_present.c", "d[c] * (255 - a) + 127) / 255);", "d[c] * (255 - a) + 0) / 255);"),
+    ("o", "gl4_present.c", "if (ramp) v = ramp[c * 256 + v] >> 8;", "if (0) v = ramp[c * 256 + v] >> 8;"),
+    ("o", "gl4_present.c", "if (x1 > sw->w) x1 = sw->w;", "if (x1 > sw->w) x1 = sw->w - 1;"),
+    ("o", "gl4_present.c", "uint32_t v = s[2 - c];", "uint32_t v = s[c];"),
+    ("o", "gl4_present.c", "p->cw <= 4096 && p->ch <= 4096", "p->cw <= 4097 && p->ch <= 4096"),
+    ("o", "gl4_present.c", "uint8_t* z = (uint8_t*)calloc((size_t)sw->w * sw->h, 4);", "uint8_t* z = (uint8_t*)malloc((size_t)sw->w * sw->h * 4); if (z) memset(z, 1, (size_t)sw->w * sw->h * 4);"),
+    ("o", "gl4_present.c", "k = ns * 60 / 1000000000ull + 1", "k = ns * 60 / 1000000000ull + 0"),
+    ("o", "gl4_present.c", "if (output != 0 || !g4.swapImage)", "if (!g4.swapImage)"),
+    ("o", "gl4_read.c", "gl4_img(r->src.image ? r->src.image : g4.swapImage);   /* image 0", "gl4_img(r->src.image);   /* image 0"),
 ]
 
 

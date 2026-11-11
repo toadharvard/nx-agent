@@ -69,13 +69,15 @@ HRESULT STDMETHODCALLTYPE NxDirect3D9Ex::GetAdapterDisplayModeEx(UINT adapter_id
 HRESULT STDMETHODCALLTYPE NxDirect3D9Ex::GetAdapterLUID(UINT adapter_idx, LUID* luid) { return a_luid(prof(M(NxDirect3D9Ex, this)), adapter_idx, luid); }
 
 // ---- creation (d3d9_main.c Direct3DCreate9 / Direct3DCreate9Ex -> d3d9_init: refcount 1, the answers are those of the profile)
-template <class C> static C* make() {
-    C* c = new C; if (!c) return nullptr;   // NxObj::operator new: the object sits behind its guest face (face.h)
+// Allocation failure (README "Allocation failure"): Direct3DCreate9 returns NULL for both (d3d9_main.c: calloc and d3d9_init failure -> NULL); Direct3DCreate9Ex = E_OUTOFMEMORY for the object (calloc failure) and
+// D3DERR_NOTAVAILABLE when the object cannot be initialised (d3d9_init failure; here: the profile entry); *out is null and the half-made object is released through its count.
+template <class C> static HRESULT make(C** out) {
+    C* c = nx_make<C>(); if (!c) return E_OUTOFMEMORY;   // NxObj::operator new: the object sits behind its guest face (face.h)
     NxObj* o = c; o->asRoot(1); uint32_t p = (uint32_t)nx_env_profile();
-    if (FAILED(o->setPrivateData(G_NXENV_PROFILE, &p, sizeof p, 0))) { o->release(); return nullptr; }
-    return c;
+    if (FAILED(o->setPrivateData(G_NXENV_PROFILE, &p, sizeof p, 0))) { o->release(); return D3DERR_NOTAVAILABLE; }
+    *out = c; return D3D_OK;
 }
-IDirect3D9* nx_Direct3DCreate9(UINT) { return make<NxDirect3D9>(); }
-HRESULT nx_Direct3DCreate9Ex(UINT, IDirect3D9Ex** out) { if (!out) return D3DERR_INVALIDCALL; NxDirect3D9Ex* c = make<NxDirect3D9Ex>(); if (!c) { *out = nullptr; return D3DERR_NOTAVAILABLE; } *out = c; return D3D_OK; }
+IDirect3D9* nx_Direct3DCreate9(UINT) { NxDirect3D9* c = nullptr; return SUCCEEDED(make<NxDirect3D9>(&c)) ? c : nullptr; }
+HRESULT nx_Direct3DCreate9Ex(UINT, IDirect3D9Ex** out) { if (!out) return D3DERR_INVALIDCALL; NxDirect3D9Ex* c = nullptr; HRESULT hr = make<NxDirect3D9Ex>(&c); *out = SUCCEEDED(hr) ? c : nullptr; return hr; }
 // D4 (res_tex.h): the profile of a device = the profile of the IDirect3D9 that created it
 int nx_env_profile_of(NxObj* device) { return prof(device->owner); }

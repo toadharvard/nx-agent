@@ -1,7 +1,8 @@
 /* fnv-nx L6 GL 4.5 backend v4: reading images back. image_read returns the native bytes of any level / layer / rect
  * (layouts: gl4_fmt.c); a multisampled source is resolved first (sample-average for colour, sample 0 for depth and
  * stencil: what glBlitFramebuffer resolves to). v3 readback (RGBA8 / RGBA32F / Depth32F / Stencil8 of a 2D image,
- * level 0) is kept with its semantics. Submits are synchronous, so everything submitted is complete here. */
+ * level 0) is kept with its semantics. src.image 0 = the swapchain image: RGBA8, top row first, level 0 (what the last
+ * present / pass wrote; all zero before the first write); no swapchain = BAD_CALL. Submits are synchronous, so everything submitted is complete here. */
 #include "gl4.h"
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +21,7 @@ static void pack_defaults(void) {
 uint64_t gl4_api_image_read(uint64_t a) {
     const NxImageRead* r = (const NxImageRead*)nxgl4_guest_ptr(a, sizeof *r);
     if (!r) return NXGPU_BAD_CALL;
-    const Gl4Image* im = gl4_img(r->src.image);
+    const Gl4Image* im = gl4_img(r->src.image ? r->src.image : g4.swapImage);   /* image 0 = the swapchain image (nxgpu4.h) */
     if (im && im->isView) im = gl4_img(im->base);
     uint32_t level = r->src.level, layer = r->src.layer;
     if (!im || level >= im->mips) { gl4_err("image_read: bad image %u level %u", r->src.image, level); return NXGPU_BAD_CALL; }

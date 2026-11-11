@@ -15,7 +15,7 @@ HRESULT STDMETHODCALLTYPE NxDevice9Ex::PresentEx(const RECT* s, const RECT* dr, 
 }
 HRESULT STDMETHODCALLTYPE NxDevice9Ex::GetGPUThreadPriority(INT* p) { if (!p) return INV; *p = nx_life(this)->gpu_prio; return D3D_OK; }
 HRESULT STDMETHODCALLTYPE NxDevice9Ex::SetGPUThreadPriority(INT p) { if (p < -7 || p > 7) return INV; nx_life(this)->gpu_prio = p; return D3D_OK; }
-HRESULT STDMETHODCALLTYPE NxDevice9Ex::WaitForVBlank(UINT i) { NxDevLife* L = nx_life(this); if (i >= 1 || !L->nchains) return INV; nxd3d_wait_vblank(L->chains[0]); return D3D_OK; }
+HRESULT STDMETHODCALLTYPE NxDevice9Ex::WaitForVBlank(UINT i) { NxDevLife* L = nx_life(this); if (i >= 1 || !L->nchains) return INV; return nxd3d_wait_vblank(L->chains[0]) ? D3DERR_DRIVERINTERNALERROR : D3D_OK; }
 HRESULT STDMETHODCALLTYPE NxDevice9Ex::CheckResourceResidency(IDirect3DResource9** r, UINT32 n) {
     if (!r || !n) return INV;
     for (UINT32 i = 0; i < n; i++) { NxObj* o = nx_obj_of(r[i]); if (!o || o->dev != this || !o->ci->rtype) return INV; }

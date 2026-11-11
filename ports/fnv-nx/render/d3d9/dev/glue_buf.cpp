@@ -5,11 +5,16 @@
 
 uint32_t nx_buf_gpu_sync(NxBufCore* b) {
     if (!b->gblock) {
-        b->gsize = (b->length + 4095u) & ~4095u; if (!b->gsize) b->gsize = 4096;
-        b->gmem = nxd3d_gpu_alloc(b->gsize); memset(b->gmem, 0, b->gsize);
-        NxMemBlockDesc* d = (NxMemBlockDesc*)nxs_scratch(sizeof *d); d->storage = FNVNX_ADDR_(b->gmem); d->size = b->gsize; d->kind = NxMem_Generic;
+        // 0 = the backend has no memory for the mirror (or for the ring): nothing of the buffer changed (the dirty range stays), the next sync retries
+        if (!nxs_reserve()) return 0;
+        uint32_t gsize = (b->length + 4095u) & ~4095u; if (!gsize) gsize = 4096;
+        void* gmem = nxd3d_gpu_alloc(gsize); if (!gmem) return 0;
+        memset(gmem, 0, gsize);
+        NxMemBlockDesc* d = (NxMemBlockDesc*)nxs_scratch(sizeof *d); if (!d) { nxd3d_gpu_free(gmem); return 0; }   // E2: the ring's scratch
+        d->storage = FNVNX_ADDR_(gmem); d->size = gsize; d->kind = NxMem_Generic;
         uint64_t a[1] = {FNVNX_ADDR_(d)}, r = nxd3d_gpu_call(NXGPU_FN_MEM_CREATE, a, 1);
-        b->gblock = nxs_ok(r) ? (uint32_t)r : 0; b->dirty_lo = 0; b->dirty_hi = b->length;                    // a new mirror holds zeros: the whole buffer is dirty
+        if (!nxs_ok(r)) { nxd3d_gpu_free(gmem); return 0; }
+        b->gmem = gmem; b->gsize = gsize; b->gblock = (uint32_t)r; b->dirty_lo = 0; b->dirty_hi = b->length;   // a new mirror holds zeros: the whole buffer is dirty
     }
     uint32_t lo, hi; if (b->take_dirty(&lo, &hi)) memcpy((uint8_t*)b->gmem + lo, b->mem + lo, hi - lo);
     return b->gblock;

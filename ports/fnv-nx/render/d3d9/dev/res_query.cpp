@@ -3,6 +3,7 @@
 // CreateQuery: type with no documented data size (7, 20+, ...) or not supported by the ENV (nx_env_query_supported) = D3DERR_NOTAVAILABLE; ppQuery null = support check (D3D_OK / NOTAVAILABLE, nothing created).
 // Issue(flags): any flags succeed (Wine); state BEGIN -> building, else signaled (END); the backend is told (nxd3d_query_issue) after the state change.
 // GetData: building -> S_FALSE; created (never issued) -> S_OK, data = 0xdd in min(size, data_size) bytes, 0 beyond (Wine d3d9 query.c; deterministic); signaled -> backend ready? no: D3DGETDATA_FLUSH
+// Allocation failure: the object = E_OUTOFMEMORY (d3d9_device_CreateQuery), the backend's id / stream memory = D3DERR_OUTOFVIDEOMEMORY (nxd3d_query_create false); nothing left behind.
 // calls nxd3d_query_flush, S_FALSE; yes: copy min(size, data_size) result bytes, S_OK. pData may be null (status only). The result values are the backend's (hooks declared in res_core.h, not defined).
 #include "res_core.h"
 #include "d9impl.gen.h"
@@ -41,8 +42,9 @@ static HRESULT make(NxObj* dev, D3DQUERYTYPE t, IDirect3DQuery9** pp) {
     uint32_t sz = nx_query_data_size(t);
     if (!sz || !nx_env_query_supported(t)) { if (pp) *pp = nullptr; return D3DERR_NOTAVAILABLE; }
     if (!pp) return D3D_OK;
-    NxQuery9* q = new NxQuery9; q->asChild(dev, ~0u); q->type = t; q->data_size = sz;
-    if (!nxd3d_query_create(q)) { NxObj* o = q; o->release(); return D3DERR_OUTOFVIDEOMEMORY; }   // the backend has no id left (nxgpu4.h: ids 1..4096)
+    NxQuery9* q = nx_make<NxQuery9>(); if (!q) return E_OUTOFMEMORY;                                    // d3d9_device_CreateQuery: calloc failure -> E_OUTOFMEMORY
+    q->asChild(dev, ~0u); q->type = t; q->data_size = sz;
+    if (!nxd3d_query_create(q)) { NxObj* o = q; o->release(); return D3DERR_OUTOFVIDEOMEMORY; }   // the backend has no id (nxgpu4.h: ids 1..4096) or no memory for the stream it needs
     *pp = q; return D3D_OK;
 }
 HRESULT STDMETHODCALLTYPE NxDevice9::CreateQuery(D3DQUERYTYPE t, IDirect3DQuery9** pp) { return make(this, t, pp); }

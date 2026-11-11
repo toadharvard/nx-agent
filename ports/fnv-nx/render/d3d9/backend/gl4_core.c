@@ -122,7 +122,7 @@ const NxGpuApi4* nxgl4_create(uint32_t width, uint32_t height, char* err, size_t
         d.width = (uint16_t)width; d.height = (uint16_t)height; d.depth = 1; d.type = NxImgType_2D;
         d.format = NxFmt_RGBA8; d.mips = 1; d.samples = 1; d.flags = NxImg_RenderTarget;
         g4.swapImage = gl4_image_make(&d);
-        if (!g4.swapImage) { if (err && errlen) snprintf(err, errlen, "swapchain image"); return NULL; }
+        if (!g4.swapImage || gl4_swap_zero()) { if (err && errlen) snprintf(err, errlen, "swapchain image"); return NULL; }
     }
     NxGpuApi4* api = &g4.api;
     api->v3.info.magic = NXGPU_MAGIC; api->v3.info.version = NXGL4_VERSION; api->v3.info.frames_in_flight = 2;
