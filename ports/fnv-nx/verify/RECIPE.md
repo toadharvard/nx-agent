@@ -13,6 +13,9 @@ the hash of the stage document + tool code. All paths are root-relative unless m
  "generated": [{"tool": "ports/fnv-nx/contract/gen.py", "args": ["/out/gen/t.h"], "inputs": ["ports/fnv-nx/X/table.tsv"], "outputs": ["gen/t.h"]}],
  "os_layer": ["os.S"], "constants": "constants.tsv", "contract_names": "contract.tsv",
  "link": {"script": "link.ld", "output": "x.elf", "flags": ["-e", "entry"]},
+ "plugin_cxx": "x86_64-linux-gnu-g++-13",
+ "plugins": [{"name": "fnvnx_order", "source": "ports/fnv-nx/toolchain/order/fnvnx_order.cc", "args": {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}},
+             {"name": "fnvnx_ftoi", "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc", "args": {"enum": "error"}}],
  "external": [{"name": "ft", "repo": "fnv-nx-build", "ref": "mirror/freetype", "commit": "<40 hex>", "tree_sha256": "<64 hex>", "at": "/ext/ft"}]}
 ```
 
@@ -30,6 +33,7 @@ the hash of the stage document + tool code. All paths are root-relative unless m
   Outputs are root-relative, never tracked files, and appear in the root's view for `include` and as units when named like a source.
   The script must itself pass `puregate`; wall-clock reads and other open channels of the sandbox make `determinism` red.
 - `os_layer`: units that implement the OS interface (may contain SVC). They are flagged `os_layer: true` in objects.json for `objstub --os-layer`.
+- `game`: root-relative directory whose units are the game's (decomp) objects; the contract gates (gate_contract.py) require it of a root that links, no default.
 - `constants`: the constants table, a tracked file or a generated output, copied to `constants.tsv`. Rows
   `unit<TAB>symbol<TAB>kind<TAB>value<TAB>contract_ref`, key (unit, symbol), `unit` = the root-relative unit path as in `objects.json`
   (so two local symbols of equal name in two objects do not collide). Kinds: `void`, `u32`, `u64`, `addr` (the value of a function that
@@ -47,6 +51,54 @@ the hash of the stage document + tool code. All paths are root-relative unless m
   `ld`; `aarch64elf32` also links a static image). The objects are ELF32 (`SHT_RELA` with `Elf32_Rela`, relocations `R_AARCH64_P32_*`),
   the linked ELF is ELF32. LP64 is the default, with no flag.
 - `external`: content-pinned inputs (see below).
+- `plugins`, `plugin_cxx`: GCC plugins of the C++ front end (see "Plugins"). `flags` may not hold any `-fplugin*` token.
+
+- `unit_flags`, `unit_facts`: per-unit flags of the CC stage (see "Per-unit flags").
+
+### Per-unit flags (`unit_flags`, `unit_facts`)
+`unit_flags` is `{unit: [flag]}` for C++ units under `game`; the only flag is `-fplugin-arg-fnvnx_pi-fpfast` (the pi plugin: this unit is built with
+/fp:fast, so its source does not fix the evaluation order of floating-point arguments). It enters the argv of that unit's CC stage, so it is in the CC
+key (the PP key is unchanged). `unit_facts` is a tracked file or generated output of the root, units.json: `{"units": [{"source": UNIT, "flags": [...]}]}`
+with `source` equal to the root-relative unit path. RULE: the flag stands on a unit iff its entry lists `/fp:fast`; a unit with no entry has no such
+fact (compile.sh: no entry, no argument). A mismatch in either direction, a fact for a source that is no game C++ unit, or a flag on a unit outside `game`
+is red (build stage `unit_facts`, before any compile). A native guest root that declares `game` must declare `unit_facts`. Assumption: units.json is
+generated from the exe/decomp facts, not written by hand. No other flag can be attached to a unit: a flag not derived from a fact has no place here.
+
+## Plugins (`fnvnx_order`, `fnvnx_ftoi`)
+Our compiler is the pinned g++-13 with our two plugins. Their sources are tracked under the tool root `ports/fnv-nx/toolchain` (no build script:
+the recipe is the only way they are built). Each entry of `plugins` is `{"name", "source", "args"}`: `source` is `<dir>/<name>.cc`, a tracked file of an
+admitted tool root; `args` becomes `-fplugin-arg-<name>-<key>[=<value>]`. `plugin_cxx` is the host driver under `/usr/bin` (env.json) that builds
+them: x86_64 `x86_64-linux-gnu-g++-13` (the bare `g++-13` prints no path for `as`/`ld`), same GCC version as `compiler.cxx`.
+- Stage `plugin:<name>` (sandbox, class build): `plugin_cxx -shared -nostdlib -fPIC -fno-rtti -fno-exceptions -O2 -I<compiler.cxx -print-file-name=plugin>/include
+  crti.o crtbeginS.o SOURCE crtendS.o crtn.o`. Declared inputs: the driver's tool runtime, the plugin headers of the target compiler
+  (gcc-13-plugin-dev-aarch64-linux-gnu of env.json), the source, crti.o/crtn.o of libc6-dev. Key = content of these + driver + flags, like every stage.
+  The `.so` is stored in `GATE_CACHE/store`, copied to `OUT/plugins/<name>.so`, listed in `objects.json` (`plugins`: name, sha256, path).
+  It is linked against no library (symbols come from the compiler that loads it; `-fno-exceptions` because `_Unwind_Resume` is not exported by cc1plus).
+- CC stage of every C++ unit (only C++: C and assembler units load nothing): the `.so` of each plugin is a declared input at `/plug/<name>`,
+  and the stage argv holds `-fplugin=/plug/<name>/<name>.so` and the `-fplugin-arg-*` flags, so they are part of its key. The preprocessor stage loads
+  no plugin. `toolflags` accepts `-fplugin=P` only under a declared input; it is not relaxed.
+- Memory ordering has no option: `fnvnx_order` makes every access to memory that is not a proven local `ldar`/`stlr` (x86 TSO), volatile or not.
+  `ORDER_MODE` of the old compile.sh no longer exists in the plugin (it rejects an unknown argument).
+### Guest roots: the game's compiler (MSVCMODEL1)
+Every product root's admit.json entry declares `"target": "guest"` (the game's code) or `"host"`; missing = invalid recipe = red `build`. A guest root's
+compiler, for C and C++ alike, is the external compiler pinned in `verify/guest_compiler.json`
+(`{"format": "fnvnx-guest-compiler/1", "external": {EXT_KEYS}, "cc", "cxx"}`): GCC 13.3.0 + `toolchain/msvcmodel/msvcmodel.patch`, a fnv-nx-build mirror
+(`tools/gcc-ilp32-msvcmodel`). The root's `compiler` must be `{"external", "cc", "cxx"}` naming an `external` entry equal to the pinned one (name, commit,
+tree_sha256, at) with the pinned driver paths. The distribution g++-13 is the base the compiler is built from, never the compiler of guest code. A tree
+without the pin file has no valid guest root. The plugins are built against this compiler's own plugin headers (the plugin stage reads
+`<cxx> -print-file-name=plugin`, inside the external).
+What an external compiler names outside its tree is declared as inputs at their own paths, from the compiler's own answers: the assembler and linker it is
+configured with (`-print-prog-name=as|ld`) and the header directories of its search list, symlink targets included (the distribution's cross binutils and
+headers pinned by env.json). The CC stage mounts the compiler external, the plugins and unit.ii only; other externals are PP inputs.
+
+### Gate rule: native and decomp C++ is compiled with both plugins; lifted C++ with none
+`admit.json` entry of a product root with at least one C++ unit declares `"cxx_origin"`: `"native"` (hand-written or decomp C++), or
+`{"lifted_by": "<tracked .py of a tool root>", "pack": "<external name of the recipe>"}`. Missing declaration = invalid recipe = red `build`.
+- `native`: `plugins` must hold `fnvnx_order` and `fnvnx_ftoi`, with the sources `PLUGIN_SOURCES` and the arguments `PLUGIN_ARGS` of recipe.py (the MSVC
+  semantics; `ltr`, `first`, `cpp17` exist for A/B measurements and are no product). Anything missing or different is a finding naming it.
+- lifted (the lifter emits `ldar`/`stlr` itself): consistent only if the root has NO tracked C++ unit, every C++ unit is an output of a `generated`
+  step whose tool is `lifted_by`, and `pack` is an external of the recipe (an input of every generator). Plugins are then not required.
+Assumption: the declaration `lifted_by` names the lifter is the owner's (admit.json is reviewed); the gate proves that no hand-written C++ sits in a lifted root.
 
 ## Refusal set R (GNU ld option syntax, not a text guess)
 Options that let a link accept missing or substituted symbols: `--unresolved-symbols`, `--allow-shlib-undefined`, `--noinhibit-exec`,
