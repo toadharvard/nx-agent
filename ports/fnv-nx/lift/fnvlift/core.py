@@ -6,6 +6,7 @@ then Unsupported('insn ...')."""
 import bisect
 import capstone
 from capstone import x86 as X
+from . import memclass as _r9
 
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 md.detail = True
@@ -34,6 +35,7 @@ CC = {'o': 'of', 'no': '!of', 'b': 'cf', 'ae': '!cf', 'e': 'zf', 'ne': '!zf', 'b
       's': 'sf', 'ns': '!sf', 'p': 'pf', 'np': '!pf', 'l': '(sf!=of)', 'ge': '(sf==of)', 'le': '(zf||sf!=of)',
       'g': '(!zf&&sf==of)'}
 
+MEMCLASS = _r9.from_env()   # R9 (fnvlift/memclass.py): object with plain(insn_addr); None = every access ORDERED (the default)
 SKIP = object()      # a handler returns this when its extra condition fails: dispatch continues
 OPS = {}             # mnemonic -> handler(cx, ins)
 FALLBACKS = []       # (pred(cx, ins), handler(cx, ins)), tried in order when no mnemonic handler took the insn
@@ -263,6 +265,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
         cx.b0 = ins.opcode[0]
         cx.modrm = ins.modrm
         dispatch(cx, ins)
+        cx.L[n0:] = _r9.apply(cx, ins, n0, MEMCLASS)
         if not cx.term and (idx + 1 == len(order) or order[idx + 1] != nxt):
             if nxt in insns or nxt in bad:
                 em('goto %s;' % cx.lab(nxt))

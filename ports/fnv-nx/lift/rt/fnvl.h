@@ -73,6 +73,7 @@ static inline __attribute__((always_inline)) unsigned long P(u32 a){ __asm__("" 
 extern "C" { u32 fnvl_rcp32(u32 bits); u32 fnvl_rsqrt32(u32 bits); }   /* reference-CPU tables, supplied by the runtime owner */
 typedef xmm_t __attribute__((aligned(1))) xmm_ua;
 #define MX(a) (*(xmm_ua*)P(a))
+#include "fnvl_mem.h"   /* R9 ordered accessors MO8..MOX, XCHGn */
 static inline xmm_t mmx_x(u64 v){ xmm_t r; r.q[0]=v; r.q[1]=0; return r; }
 template<class T> struct FX;
 template<> struct FX<float>{ typedef u32 U; static const U S=0x80000000u, E=0x7f800000u, M=0x7fffffu, Q=0x400000u; };
