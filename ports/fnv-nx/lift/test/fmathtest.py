@@ -23,7 +23,7 @@ gmpy2.get_context().emin = -(1 << 40)
 DRIVER = r'''
 #include "fmath.h"
 typedef unsigned long long u64;
-enum { O_SIN, O_COS, O_TAN, O_ATAN2, O_2XM1, O_YL2X, O_YL2XP1, O_SCALE, O_XTRACT, O_FPREM, O_FPREM1 };
+enum { O_SIN, O_COS, O_TAN, O_ATAN2, O_2XM1, O_YL2X, O_YL2XP1, O_SCALE, O_XTRACT, O_FPREM, O_FPREM1, O_SINCOS };
 void run_m(int op, unsigned n, const double *a, const double *b, double *o1, double *o2, unsigned *fl, unsigned *cf) {
   for (unsigned i = 0; i < n; i++) { unsigned f = 0, c = 0; double r = 0, r2 = 0;
     switch (op) {
@@ -38,8 +38,9 @@ void run_m(int op, unsigned n, const double *a, const double *b, double *o1, dou
     case O_XTRACT: fnvl_m_xtract(a[i], &r, &r2, &f); break;
     case O_FPREM: r = fnvl_m_fprem(a[i], b[i], 0, &c, &f); break;
     case O_FPREM1: r = fnvl_m_fprem(a[i], b[i], 1, &c, &f); break;
+    case O_SINCOS: fnvl_m_sincos(a[i], &r2, &r, &f); break;       /* o1 = cos (ST0), o2 = sin (ST1) like the x87 */
     }
-    o1[i] = r; o2[i] = r2; fl[i] = f; cf[i] = c | (op <= O_TAN ? (fnvl_m_trig_big(a[i]) ? 0x400 : 0) : 0); } }
+    o1[i] = r; o2[i] = r2; fl[i] = f; cf[i] = c | ((op <= O_TAN || op == O_SINCOS) ? (fnvl_m_trig_big(a[i]) ? 0x400 : 0) : 0); } }
 unsigned bigflag(double x) { return fnvl_m_trig_big(x); }
 extern int fm_nstart;
 void set_nstart(int n) { fm_nstart = n; }
@@ -74,11 +75,12 @@ void run_h(int op, unsigned n, const double *a, const double *b, double *o1, dou
     case O_SCALE: __asm__ volatile("fninit; fldl %4; fldl %3; fscale; fnstsw %2; fstpl %0; fstpl %1" : "=m"(r1), "=m"(r2), "=m"(s) : "m"(x), "m"(y) : "st", "st(1)"); break;
     case O_XTRACT: __asm__ volatile("fninit; fldl %3; fxtract; fnstsw %2; fstpl %1; fstpl %0" : "=m"(r1), "=m"(r2), "=m"(s) : "m"(x) : "st", "st(1)"); break;
     case O_FPREM: __asm__ volatile("fninit; fldl %4; fldl %3; fprem; fnstsw %2; fstpl %0; fstpl %1" : "=m"(r1), "=m"(r2), "=m"(s) : "m"(x), "m"(y) : "st", "st(1)"); break;
+    case O_SINCOS: __asm__ volatile("fninit; fldl %3; fsincos; fnstsw %2; fstpl %0; fstpl %1" : "=m"(r1), "=m"(r2), "=m"(s) : "m"(x) : "st", "st(1)"); break;
     case O_FPREM1: __asm__ volatile("fninit; fldl %4; fldl %3; fprem1; fnstsw %2; fstpl %0; fstpl %1" : "=m"(r1), "=m"(r2), "=m"(s) : "m"(x), "m"(y) : "st", "st(1)"); break;
     }
     o1[i] = r1; o2[i] = r2; sw[i] = s; } }
 '''
-OPS = {n: i for i, n in enumerate('sin cos tan atan2 2xm1 yl2x yl2xp1 scale xtract fprem fprem1'.split())}
+OPS = {n: i for i, n in enumerate('sin cos tan atan2 2xm1 yl2x yl2xp1 scale xtract fprem fprem1 sincos'.split())}
 LIB = None
 
 
@@ -422,6 +424,51 @@ def bound_check(args):
     return used, bad
 
 
+def gen_consts(N=40):
+    c = gmpy2.get_context().copy(); c.precision = 32 * N + 200
+    with c:
+        out = {}
+        for name, v, e in (('PI4_T', gmpy2.const_pi() / 4, 2), ('LN2_T', gmpy2.log(gmpy2.mpfr(2)), 0)):
+            m = int(v * gmpy2.mpfr(2) ** (32 * N))
+            out[name] = [(m >> (32 * i)) & 0xffffffff for i in range(N)]
+    return out
+
+
+def const_check():
+    """the pi / ln 2 table of rt/fmath.c equals MPFR's, and both the table path and the series path (Machin, atanh) give the constant at every limb count
+    n = 6..60 within the relative error the proofs assume (table: < 2^(1-32n); series: <= 2^(64-32n))"""
+    import re
+    src = open(RT + '/fmath.c').read()
+    bad = []; n_ok = 0
+    G = gen_consts()
+    for name in ('PI4_T', 'LN2_T'):
+        body = re.search(name + r'\[FM_TN\] = \{(.*?)\};', src, re.S).group(1)
+        L = [int(x.strip().rstrip('u'), 16) for x in body.replace('\n', ' ').split(',') if x.strip()]
+        if L != G[name]:
+            bad.append(('table ' + name + ' differs from MPFR',))
+    LIB.fm_dbg_const.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p]
+    m = (ctypes.c_uint * 128)(); e = ctypes.c_int()
+    c = gmpy2.get_context().copy(); c.precision = 2200
+    with c:
+        truth = [gmpy2.const_pi(), gmpy2.log(gmpy2.mpfr(2))]
+        for n in range(6, 61):
+            for which in (0, 1):
+                for notable in (0, 1):
+                    if notable == 0 and n > 40:
+                        continue
+                    LIB.fm_dbg_const(which, n, notable, ctypes.addressof(m), ctypes.addressof(e))
+                    mi = 0
+                    for k in range(n - 1, -1, -1):
+                        mi = (mi << 32) | m[k]
+                    val = gmpy2.mpfr(mi) * gmpy2.mpfr(2) ** (e.value - 32 * n)
+                    rel = abs(val - truth[which]) / truth[which]
+                    bound = gmpy2.mpfr(2) ** ((1 if notable == 0 else 64) - 32 * n)
+                    n_ok += 1
+                    if not rel < bound:
+                        bad.append(('const', which, n, notable, float(rel / bound)))
+    return n_ok, bad
+
+
 def split(lst, k):
     return [lst[i::k] for i in range(k)]
 
@@ -500,7 +547,7 @@ def host_specials():
     out = []
     one = {'sin': lambda x: not math.isfinite(x) or x == 0 or abs(x) >= 2.0 ** 63, 'cos': lambda x: not math.isfinite(x) or x == 0 or abs(x) >= 2.0 ** 63,
            'tan': lambda x: not math.isfinite(x) or x == 0 or abs(x) >= 2.0 ** 63,
-           '2xm1': lambda x: not math.isfinite(x) or x == 0}
+           '2xm1': lambda x: not math.isfinite(x) or x == 0, 'sincos': lambda x: not math.isfinite(x) or x == 0 or abs(x) >= 2.0 ** 63}
     for w, sel in one.items():
         pts = [x for x in SPEC if sel(x)]
         m1, m2, mfl, mcf = run('m', w, pts)
@@ -512,6 +559,13 @@ def host_specials():
             if w == '2xm1' and math.isfinite(x) is False and x == math.inf:
                 pass
             # tan/fptan: ST0 = 1.0 pushed, ST1 = tan; for the big case the stack is unchanged; the host's st0 is then x
+            if w == 'sincos' and not big:
+                hres = None
+                ok2 = u64_(float(m1[i])) == u64_(float(h1[i])) and u64_(float(m2[i])) == u64_(float(h2[i]))
+                tot += 0
+                if not ok2:
+                    bad += 1; out.append('sincos %s: got cos %s sin %s host cos %s sin %s' % (float.hex(x), float.hex(float(m1[i])), float.hex(float(m2[i])), float.hex(float(h1[i])), float.hex(float(h2[i]))))
+                continue
             if w == 'tan':
                 hres = float(h2[i]) if not big else None
             else:
@@ -621,7 +675,12 @@ def main():
     ap.add_argument('--seed', type=int, default=20261111)
     ap.add_argument('--nper', type=int, default=40)
     ap.add_argument('--jobs', type=int, default=2)
+    ap.add_argument('--gen-consts', action='store_true', help='print the pi/4, ln2 limb tables of rt/fmath.c')
     o = ap.parse_args()
+    if o.gen_consts:
+        for k, L in gen_consts().items():
+            print('static const u32 %s[FM_TN] = {\n%s\n};' % (k, '\n'.join('  ' + ', '.join('0x%08xu' % x for x in L[i:i + 6]) + ',' for i in range(0, len(L), 6))))
+        return
     t0 = time.time()
     build()
     print(cpu_id())
@@ -640,6 +699,11 @@ def main():
         for b in bad[:5]:
             print('   DIFF', fmt(b[0]) if isinstance(b[0], tuple) else float.hex(b[0]), 'got', float.hex(b[1]), 'want', float.hex(b[2]), *b[3:])
         fail += len(bad)
+    nc, badc = const_check()
+    print('constants pi, ln2: table text and %d (constant, limb count, path) values vs MPFR, violated %d' % (nc, len(badc)))
+    for b in badc[:5]:
+        print('   CONST', b)
+    fail += len(badc)
     # the error bounds claimed by the evaluators (the proof obligation), checked on a deterministic sample at n = 6, 7, 9 limbs
     for f in fns:
         pts = gens[f]()

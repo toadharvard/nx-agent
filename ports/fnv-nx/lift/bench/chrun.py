@@ -51,13 +51,39 @@ def fsw_form(code):
     if code[i] == 0xdd and code[i + 1] < 0xc0 and (code[i + 1] >> 3) & 7 == 7: return 'm'
 
 
+_RCP = []
+
+
+def rcp_host():
+    """the reference-CPU functions (rt/rcptab.c, equal to the pinned host on all 2^32 inputs: test/rcptest.py), built for this host. Unicorn computes
+    rcp/rsqrt exactly, which is not what the reference CPU returns, so the oracle's results of these instructions are replaced by the reference ones;
+    everything downstream is compared bit for bit."""
+    if not _RCP:
+        import ctypes, subprocess, tempfile
+        so = os.path.join(tempfile.gettempdir(), 'fnvl_rcptab_%d.so' % os.getuid())
+        subprocess.check_call(['gcc', '-O2', '-shared', '-fPIC', os.path.join(os.path.dirname(HERE), 'rt', 'rcptab.c'), '-o', so + '.%d' % os.getpid()]); os.replace(so + '.%d' % os.getpid(), so)
+        lib = ctypes.CDLL(so)
+        for f in (lib.fnvl_rcp32, lib.fnvl_rsqrt32): f.argtypes = [ctypes.c_uint32]; f.restype = ctypes.c_uint32
+        _RCP.append({0x53: lib.fnvl_rcp32, 0x52: lib.fnvl_rsqrt32})
+    return _RCP[0]
+
+
+def rcp_form(b):
+    """-> (opcode 0x52 rsqrt / 0x53 rcp, scalar, dest xmm, source xmm or None for a memory operand) when the bytes are rcpps/rcpss/rsqrtps/rsqrtss"""
+    i = 1 if b[0] == 0xf3 else 0
+    if b[i] != 0x0f or b[i + 1] not in (0x52, 0x53): return None
+    m = b[i + 2]
+    return b[i + 1], i == 1, (m >> 3) & 7, (m & 7) if m >> 6 == 3 else None
+
+
 class X86(T.World):
     def run(s, root, ents, st, budget, sticky=None):
         """sticky: the sticky bits the lifted run delivered to its flag-reading instructions, in order; the oracle substitutes them (same ordinal) into the FSW it delivers"""
         s.sticky, s.pend, s.fsw = sticky, None, []
+        s.rp = None
         uc = Uc(UC_ARCH_X86, UC_MODE_32); s.init_world(uc, True); s.reset(st['wk']); s.ents, s.trace, s.n = ents, [], 0
         uc.hook_add(UC_HOOK_MEM_WRITE, lambda uc, ac, a, n, v, ud: s.writes.add((a & 0xffffffff, n)))
-        uc.hook_add(UC_HOOK_CODE, s.code); uc.hook_add(UC_HOOK_MEM_WRITE, s.wr_fsw)
+        uc.hook_add(UC_HOOK_CODE, s.code); uc.hook_add(UC_HOOK_MEM_WRITE, s.wr_fsw); uc.hook_add(UC_HOOK_MEM_READ, s.rd_rcp)
         sp = st['regs'][4]; s.ensure(sp, 4, False); uc.mem_write(sp, struct.pack('<I', SENT)); s.writes.clear()
         for k, v in zip(T.X86R, st['regs']): uc.reg_write(k, v)
         uc.reg_write(UC_X86_REG_EFLAGS, 0x202); uc.reg_write(UC_X86_REG_FPCW, 0x27f)
@@ -73,8 +99,17 @@ class X86(T.World):
     def wr_fsw(s, uc, ac, a, n, v, ud):
         if s.pend == 'm' and n == 2: s.pend = ('m', a)
 
+    def rd_rcp(s, uc, ac, a, n, v, ud):
+        if s.rp is not None and s.rp[4] is None: s.rp[4] = a          # the memory operand of the rcp/rsqrt instruction being executed
+
     def code(s, uc, a, size, ud):
         s.n += 1
+        if s.rp is not None:        # the previous instruction was rcp/rsqrt: the reference CPU's result replaces the oracle's
+            op, scalar, d, src, ma = s.rp; s.rp = None; f = rcp_host()[op]
+            x = src if src is not None else int.from_bytes(bytes(uc.mem_read(ma, 4 if scalar else 16)), 'little')
+            r = uc.reg_read(UC_X86_REG_XMM0 + d)
+            for k in range(1 if scalar else 4): r = (r & ~(0xffffffff << (32 * k))) | (f((x >> (32 * k)) & 0xffffffff) << (32 * k))
+            uc.reg_write(UC_X86_REG_XMM0 + d, r)
         if s.pend is not None:      # the previous instruction was a flag reader: its result is now in EAX / memory
             if s.pend == 'ax' or s.pend[0] == 'm' and s.pend != 'm':
                 if s.pend == 'ax': v = uc.reg_read(UC_X86_REG_EAX) & 0xffff
@@ -87,6 +122,8 @@ class X86(T.World):
             s.pend = None
         if a in s.ents: s.trace.append((a, uc.reg_read(UC_X86_REG_ESP)))
         s.pend = fsw_form(bytes(uc.mem_read(a, 8)))
+        rf = rcp_form(bytes(uc.mem_read(a, 8)))
+        if rf: s.rp = [rf[0], rf[1], rf[2], uc.reg_read(UC_X86_REG_XMM0 + rf[3]) if rf[3] is not None else None, None if rf[3] is None else 0]
 
 
 class Image:

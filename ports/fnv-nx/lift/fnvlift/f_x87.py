@@ -11,7 +11,7 @@ CONST = {0xe8: '0x3ff0000000000000ull', 0xe9: '0x400a934f0979a371ull', 0xea: '0x
          0xec: '0x3fd34413509f79ffull', 0xed: '0x3fe62e42fefa39efull', 0xee: '0x0ull'}      # fld1 fldl2t fldl2e fldpi fldlg2 fldln2 fldz: the nearest double
 INT_ST = {(0xdb, 1): (32, 1, 1), (0xdb, 2): (32, 0, 0), (0xdb, 3): (32, 0, 1), (0xdf, 1): (16, 1, 1), (0xdf, 2): (16, 0, 0), (0xdf, 3): (16, 0, 1),
           (0xdf, 7): (64, 0, 1), (0xdd, 1): (64, 1, 1)}       # (bits, truncate (fisttp), pop)
-# d9 /reg forms served by rt/fmath.c: modrm -> (name, operand count)
+# d9 /reg forms served by rt/fmath.c: modrm -> mnemonic
 FM = {0xf0: 'f2xm1', 0xf1: 'fyl2x', 0xf2: 'fptan', 0xf3: 'fpatan', 0xf4: 'fxtract', 0xf5: 'fprem1', 0xf8: 'fprem', 0xf9: 'fyl2xp1', 0xfb: 'fsincos', 0xfd: 'fscale',
       0xfe: 'fsin', 0xff: 'fcos'}
 

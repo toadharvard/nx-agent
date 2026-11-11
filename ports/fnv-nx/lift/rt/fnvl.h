@@ -129,3 +129,44 @@ extern "C" { void fnvl_cpuid(u32 leaf, u32 sub, u32 out[4]); u64 fnvl_rdtsc(void
 #define SEL_CS 0x1bu
 #define SEL_DS 0x23u
 #define SEL_FS 0x3bu
+/* ---- W15: class rules of the system / rare-instruction family (fnvlift/f_sys.py, f_int.py). Appended; nothing above changed. ----
+   More hardware exception codes for fnvl_raise(code, at) (the mapping lines for rt/seh.c are in the W15 report):
+   FNVL_STEP 10  STATUS_SINGLE_STEP 0x80000004 (`int1` / icebp, F1: a debug TRAP): ExceptionAddress = Context.Eip = at, which is the address of the NEXT instruction
+   (KiTrap01: KiDispatchException0Args(STATUS_SINGLE_STEP, TrapFrame->Eip), no parameters). */
+#define FNVL_STEP 10
+/* Segment registers of the process model (rt/seh.c CONTEXT values above): index into the register file. Every segment has base 0 and limit 4 GiB except FS
+   (base = TEB, limit 0xFFF); the only descriptors a ring-3 load can reach are the three of the model GDT below, plus the null selector for ES/DS/FS/GS.
+   SELK strips the RPL: it keeps the descriptor index and the TI bit (a TI=1 selector names the LDT, which a Win32 process has none of: always invalid). */
+#define SEG_ES 0
+#define SEG_CS 1
+#define SEG_SS 2
+#define SEG_DS 3
+#define SEG_FS 4
+#define SEG_GS 5
+#define SELK(s_) ((s_)&0xfffcu)
+/* Model GDT (the NT x86 user descriptors; SDM Vol 3 3.4.5 for the layout): high dword of the descriptor of the selector, 0 = no descriptor a ring-3 process can name
+   (null, kernel segments and TSS: DPL 0, not accessible at CPL 3; every index outside the three: not present).
+   CS 0x00cffb00: G=1 D=1 limit 0xfffff, P DPL=3 S=1 type 0xb (execute/read, accessed).  DS 0x00cff300: the same as data, type 0x3 (read/write, accessed).
+   FS 0x0040f300: G=0 D=1 limit 0xfff (the TEB page), DPL=3 data read/write; its base is the TEB (the cpu's fs base), which no instruction below reads. */
+static inline u32 fnvl_gdt_hi(u32 sel){ u32 k=SELK(sel); return k==SELK(SEL_CS)?0x00cffb00u:k==SELK(SEL_DS)?0x00cff300u:k==SELK(SEL_FS)?0x0040f300u:0u; }
+static inline u32 fnvl_gdt_limit(u32 hi){ u32 l=hi==0x0040f300u?0xfffu:0xfffffu; return (hi&0x00800000u)?(l<<12)|0xfffu:l; }
+/* May a MOV/POP/LDS... load selector `sel` into segment register idx at CPL 3 (SDM Vol 3 5.2 / MOV-to-Sreg pseudo-code)? ES/DS/FS/GS: the null selector (index 0, TI 0, any RPL),
+   or a data / readable-code segment with DPL >= max(CPL, RPL) = 3: all three model descriptors. SS: not null, RPL == CPL == 3, a writable data segment (DS or FS). CS is never
+   loaded by these instructions (a far transfer checks it: RPL <= 3 and the CS index). */
+static inline u32 fnvl_seg_ok(u32 idx, u32 sel){ u32 k=SELK(sel);
+  if(idx==SEG_SS) return (sel&3)==3&&(k==SELK(SEL_DS)||k==SELK(SEL_FS));
+  return k==0||k==SELK(SEL_CS)||k==SELK(SEL_DS)||k==SELK(SEL_FS); }
+/* Segment register STATE (lead): fnvl_seg_set(c, idx, sel): c->sel[idx] = sel and, for FS, c->fs = (SELK(sel)==SELK(SEL_FS)) ? c->teb : 0 (a flat selector has base 0; the null
+   selector leaves no usable base); fnvl_seg_get(c, idx) reads c->sel[idx] (CS: SEL_CS). The caller has already checked fnvl_seg_ok. The lifter emits fnvl_seg_set only for a load
+   instruction and, while f_int.SEG_STATE is False, still reads the register as the process constant of SEGSEL. */
+extern "C" { void fnvl_seg_set(struct cpu*, u32 idx, u32 sel); u32 fnvl_seg_get(struct cpu*, u32 idx); }
+/* Descriptor-table registers as sgdt/sidt/sldt/str/smsw read them (readable at CPL 3, CR4.UMIP = 0). The reference OS state is not derivable from the instruction set, so the
+   model fixes it: GDT/IDT in kernel space with the standard NT x86 sizes (GDT 128 descriptors, IDT 256 gates), no LDT (selector 0), TR = KGDT_TSS 0x28 (RPL 0),
+   MSW/CR0 = PG|WP|NE|ET|MP|PE with TS clear: 0x80010033. */
+#define FNVL_GDTR_BASE 0x80b95000u
+#define FNVL_GDTR_LIMIT 0x03ffu
+#define FNVL_IDTR_BASE 0x80b95400u
+#define FNVL_IDTR_LIMIT 0x07ffu
+#define FNVL_LDTR_SEL 0u
+#define FNVL_TR_SEL 0x28u
+#define FNVL_CR0 0x80010033u

@@ -261,8 +261,6 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     code = img.bytes(addr, fall_hi - addr)
     insns, tables, taken, bad = explore(img, lo, hi, code, start, owns if start == addr and explore_owns else (), fall_hi)
     order = sorted(insns)
-    if not order:
-        raise Unsupported('undecodable bytes')
     cx = Ctx(addr, size, insns, tables, taken)
     cx.start = start
     xc.prepass(cx, img, 'dyn' if x87 == 'dyn' else None, x87 if isinstance(x87, int) else 0)     # x87 stack-depth pre-pass: cx.xm 's' static / 'd' dynamic / None
@@ -306,7 +304,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     for a in sorted(bad):      # bytes that do not decode: the CPU raises #UD there
         cx.nonlocal_ = True
         em('%s: ; SYNC_OUT; REGS(); fnvl_raise(FNVL_UD,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (cx.lab(a), a))
-    if start != order[0]:
+    if not order or start != order[0]:       # also an entry whose first byte does not decode: its body is the #UD at that address
         cx.L.insert(0, 'goto %s;' % cx.lab(start))
     if cx.nonlocal_:
         labs = sorted(set(x for x in cx.callrets + owns + list(tables_all(tables)) + taken + sorted(cx.raises | bad) if x in insns or x in bad))
