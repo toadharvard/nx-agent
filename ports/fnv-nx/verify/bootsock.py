@@ -8,7 +8,9 @@ needs real traffic, or an OS's own choice, is NOT answered: the model raises Not
 precondition of the header; the machine ends the run as a host-call fault). Never an invented value.
 
 Stated assumptions (each is a fact of the stage's model, not of the header):
-  A1 handle numbers: the lowest number >= 3 that is not open (0..2 are the host's stdio descriptors); SOCKET never fails for lack of room.
+  A1 handle numbers: the header says only that a handle is the descriptor number the bsd service returned and that the host keeps just the
+     set of open ones (no numbering of its own, no "lowest free"). The stage's model chooses: the lowest number >= 3 that is not open (0..2
+     are stdio); a number is reused after its close. Guest programs must not depend on it. SOCKET never fails for lack of room.
   A2 the host's loopback has the addresses 127.0.0.0/8 and ::1; "any" is 0.0.0.0 / ::; every other unicast address is not local.
   A3 getaddrinfo with no network: a numeric node is parsed (strict dotted quad, or an RFC 4291 text without a scope) and a null hints
      argument is a hints record of zeros (POSIX); the list of a numeric node is one record per socket type STREAM/TCP 6, DGRAM/UDP 17,
@@ -16,11 +18,11 @@ Stated assumptions (each is a fact of the stage's model, not of the header):
   A4 EPROTONOSUPPORT: STREAM takes protocol 0 or 6, DGRAM 0 or 17; any other protocol is EPROTONOSUPPORT except those a real OS may
      implement for the type (1, 58, 132, 136, 262, or outside 0..255), which are not answered.
 
-Where the header text and host_sock.inc disagree, the case is not answered (SETFL with a bit other than NONBLOCK, GETSOCKOPT with a
-capacity below the option's size, GETSOCKOPT with a null value and capacity 0).
+The header (hostapi.h at a1923f65) and host_sock.inc agree on every case below; where a result is "the platform's answer" and depends on
+traffic or on the OS's own choice, the case is NOT answered.
 
 Served per service (everything else listed here as NOT answered):
-  SOCKET     unknown domain (not 0/2/10, or wider than int32) EAFNOSUPPORT; unknown type EINVAL; STREAM/DGRAM (domain 2 or 10) -> a handle
+  SOCKET     the domain is checked before the type: unknown domain (not 0/2/10, or wider than int32) EAFNOSUPPORT; unknown type EINVAL; STREAM/DGRAM (domain 2 or 10) -> a handle
              (A1, A4). NOT answered: domain AF_UNSPEC, type RAW, the protocols of A4's exception.
   CLOSE      an open handle -> 0 and gone; not open -> EBADF.
   every handle-first service: a handle that is not open (or wider than int32) -> EBADF before anything else.
@@ -31,7 +33,7 @@ Served per service (everything else listed here as NOT answered):
              later asked by GETSOCKNAME.
   LISTEN     DGRAM EOPNOTSUPP; a bound STREAM -> 0. NOT answered: an unbound STREAM.
   ACCEPT     DGRAM EOPNOTSUPP; not listening EINVAL; listening: non-blocking EAGAIN, blocking waits for ever (nothing can arrive).
-  CONNECT    null address EFAULT; family not 0/2/10 EAFNOSUPPORT; an address that is not local (A2) ENETUNREACH; a local address on a
+  CONNECT    (the host checks only null and family, then the system service) null address EFAULT; family not 0/2/10 EAFNOSUPPORT; an address that is not local (A2) ENETUNREACH; a local address on a
              DGRAM socket (port != 0) -> 0, the peer recorded. NOT answered: a local address on a STREAM socket (loopback traffic), AF_UNSPEC
              or another family than the socket's, multicast / broadcast / link-local / v4-mapped addresses, flowinfo or scope_id != 0,
              a listening socket, address any, port 0.
@@ -45,14 +47,20 @@ Served per service (everything else listed here as NOT answered):
              (SO_DEBUG REUSEADDR DONTROUTE BROADCAST KEEPALIVE OOBINLINE REUSEPORT, TCP_NODELAY), SO_LINGER (onoff, linger_s >= 0) and
              SO_RCVTIMEO / SO_SNDTIMEO (sec >= 0, 0 <= usec < 1000000): 0 and recorded. NOT answered: every other option (its accepted
              range is the OS's), a linger / timeval outside those ranges.
-  GETSOCKOPT as SETSOCKOPT up to the null value (null vallen EFAULT); then, for an option never set on this socket: SO_TYPE, SO_ERROR 0, the
-             boolean options 0, SO_LINGER {0, 0}, the timeouts {0, 0}. NOT answered: an option that was set (the OS stores its own form),
-             every other option, SO_ACCEPTCONN, a capacity below the size, a null value with capacity 0.
+  GETSOCKOPT order: handle EBADF, unknown (level, option) ENOPROTOOPT, null value EFAULT (also with capacity 0), null vallen EFAULT; then,
+             for an option never set on this socket: SO_TYPE, SO_ERROR 0, the boolean options 0, SO_LINGER {0, 0}, the timeouts {0, 0}:
+             min(capacity, size) bytes are written and *vallen is ALWAYS the full size (INT/TYPE/ERRNO 4, LINGER 8, TIMEVAL 16), result 0.
+             NOT answered: an option that was set (the OS stores its own form), every other option, SO_ACCEPTCONN, an option of another
+             protocol level than the socket's.
   SHUTDOWN   how > 2 EINVAL; a socket with no peer ENOTCONN; a DGRAM socket with a peer -> 0 (recorded).
   GETSOCKNAME null EFAULT; a bound socket (port != 0) -> its address. NOT answered: an unbound socket, a bound port 0.
   GETPEERNAME null EFAULT; no peer ENOTCONN; a recorded peer -> it.
-  GETFL / SETFL  RDWR | NONBLOCK as the header says; SETFL with only NONBLOCK of its bits. NOT answered: any other bit.
-  POLL       as before (negative fds ignored, nfds checks, virtual wait). NOT answered: an entry whose fd is an open handle (its readiness).
+  GETFL / SETFL  RDWR | NONBLOCK as the header says; SETFL sets NONBLOCK from that bit, other bits are ignored, result 0 (always answered).
+  POLL       nfds > 0x1000000 EINVAL, nfds > 0 with a null array EFAULT; a negative fd is ignored (revents 0); an fd that is not an open
+             handle gets POLLNVAL, counts, and makes the call not wait (timeout 0); event bits outside the wire list are dropped; an open
+             socket with no local peer has no traffic ever (no network): revents 0, and after the timeout (virtual time; for ever for -1)
+             the result is 0. NOT answered: an open socket that has a local peer or could get one: a recorded peer, a bound or a listening
+             socket (a local sender could produce traffic; the model never produces it, so the case is left to the OS).
   GAI_OPEN   hints checked first (BADFLAGS, FAMILY, SOCKTYPE), both nodes null NONAME; node a name: AI_NUMERICHOST NONAME, else -EAI_AGAIN
              (*sys_errno not written); node null with a family INET / INET6 in the hints, or numeric of that family or of AF_UNSPEC hints
              (A3), service null or decimal 0..65535 (no leading zero): a ticket; a non-numeric service with AI_NUMERICSERV NONAME.
@@ -357,20 +365,15 @@ class SockModel:
             return o
         key, shape = o
         if not a[3] or not a[4]:
-            if not a[4]:
-                return neg(WE_FAULT)
-            if struct.unpack("<I", self._read(a[4], 4))[0]:
-                return neg(WE_FAULT)
-            raise NotDetermined("getsockopt: null value with capacity 0 (header and host_sock.inc differ)")
+            return neg(WE_FAULT)
         if key in s.opts or not (shape in (TYPE, ERRNO, LINGER, TIMEVAL) or key in BOOLEAN):
             raise NotDetermined("getsockopt level %d option %d: the OS's own value" % key)
         if LEVEL_TYPE.get(key[0], s.typ) != s.typ or LEVEL_FAMILY.get(key[0], s.dom) != s.dom:
             raise NotDetermined("getsockopt level %d option %d on a socket of another protocol" % key)
         val = struct.pack("<i", s.typ) if shape == TYPE else bytes(SIZE[shape])
         cap = struct.unpack("<I", self._read(a[4], 4))[0]
-        if cap < len(val):
-            raise NotDetermined("getsockopt: capacity %d below the option's size (header and host_sock.inc differ)" % cap)
-        self._write(a[3], val)
+        if cap:
+            self._write(a[3], val[:cap])
         self._write(a[4], struct.pack("<I", len(val)))
         return 0
 
@@ -402,8 +405,6 @@ class SockModel:
         return WO_RDWR | (WO_NONBLOCK if s.nonblock else 0)
 
     def _setfl(self, a, s):
-        if a[1] & ~WO_NONBLOCK:
-            raise NotDetermined("setfl with a bit other than NONBLOCK (header: EINVAL, host_sock.inc: ignored)")
         s.nonblock = bool(a[1] & WO_NONBLOCK)
         return 0
 
@@ -417,12 +418,14 @@ class SockModel:
         if nfds and not (self.mem.can_read(fds, fds + 8 * nfds) and self.mem.can_write(fds, fds + 8 * nfds)):
             raise BadGuestMemory("sock_poll: fds %#x not readable and writable guest memory" % fds)
         fdv = [struct.unpack("<i", self.mem.read(fds + 8 * i, 4))[0] for i in range(nfds)]
-        if any(f in self.socks for f in fdv):
-            raise NotDetermined("poll of an open socket: its readiness")
+        for f in fdv:   # an open socket with no local peer never has traffic: revents 0
+            o = self.socks.get(f) if f >= 0 else None
+            if o is not None and (o.peer is not None or o.bound or o.listening):
+                raise NotDetermined("poll of an open socket with a local peer or a bound / listening socket: its readiness")
         nval = 0
         for i, fd in enumerate(fdv):   # a handle that is not open: POLLNVAL; a negative fd is ignored
-            self.mem.write(fds + 8 * i + 6, struct.pack("<H", WPOLLNVAL if fd >= 0 else 0))
-            nval += fd >= 0
+            self.mem.write(fds + 8 * i + 6, struct.pack("<H", WPOLLNVAL if fd >= 0 and fd not in self.socks else 0))
+            nval += fd >= 0 and fd not in self.socks
         if nval or tmo == 0:   # an entry that is ready already ends the wait
             return nval
         return (("sleep", None if tmo < 0 else self.now_ns() + tmo * 1_000_000), 0)

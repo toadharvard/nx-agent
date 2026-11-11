@@ -29,8 +29,8 @@ Rules:
    (fewer arguments than the row, or nargs > 0 with a null array); nargs above UINT32_MAX counts as UINT32_MAX; only a handler raising
    ExtMissing ends the run. Module 11 serves fn 1..35 here. The stage has no network interface and a fixed UTC zone (VC1). Sockets 16..33 are bootsock.py's model (a host with no network interface; its docstring lists every
    served and every NOT answered (service, case); the latter end the run as "ext-module-missing" naming the service, with an event
-   "sock-undetermined" saying why): the nargs rule (exactly the count, else -EINVAL; but nargs > 0 with a null argument array is BAD_NARGS first,
-   as for every module-11 service: the general check precedes the socket dispatch, owner's answer). TZ_AT 34: UTC, offset 0, no DST, abbr "UTC",
+   "sock-undetermined" saying why): the nargs rule (sockets dispatch before the general check: nargs != the exact count, null array or not, is -EINVAL;
+   the exact count with a null array is BAD_NARGS). TZ_AT 34: UTC, offset 0, no DST, abbr "UTC",
    for every instant of the years 1970..2100 inclusive (0 <= utc_seconds < 4133980800; stated assumption of the stage), else -EOVERFLOW (-75), nothing written;
    tz_offset_minutes is the same zone's off_s / 60. THREAD_SELF 35: a record of the calling thread under a new id
    (never a second thread): started, so thread_start and thread_join answer BadInput; thread_free ends the record only.
@@ -604,11 +604,11 @@ class Machine:
     def _platform_ext(self, fn, args, nargs):
         """host_platform.inc: sockets 16..33 check nargs themselves (exactly the count, else -WE_INVAL); a fn without a row is
         NO_SERVICE; fewer arguments than the row, or nargs > 0 with a null array, is BAD_NARGS; extra arguments are ignored"""
-        if nargs and not args:   # the general check of host_platform.inc precedes the socket dispatch (owner's answer)
-            return EXT_BAD_NARGS
-        if fn in SOCK_SERVICES:
+        if fn in SOCK_SERVICES:   # host_platform.inc: 16..33 dispatch BEFORE the general nargs / null-array check
             if nargs != SOCK_SERVICES[fn][1]:
                 return -WE_INVAL & U64
+            if not args:
+                return EXT_BAD_NARGS
             try:
                 return self.socks.call(fn, self._words(args, nargs))
             except bootsock.NotDetermined as e:
@@ -619,7 +619,7 @@ class Machine:
         if fn not in PLATFORM_FNS:
             return EXT_NO_SERVICE
         _name, need = PLATFORM_FNS[fn]
-        if nargs < need:
+        if nargs < need or (nargs and not args):
             return EXT_BAD_NARGS
         return self.plat[fn](self._words(args, need))
 

@@ -396,6 +396,9 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("self-n0-null", EC(11, 35, 0, 0));
     num("self-n1-null", EC(11, 35, 0, 1));
     num("sock-null-array-wrongn", EC(11, 17, 0, 2));
+    num("sock-null-array-n0", EC(11, 17, 0, 0));
+    num("sock-null-array-exact", EC(11, 17, 0, 1));
+    num("fn0-null-array", EC(11, 0, 0, 2));
     num("fn-u32max", EC(11, 0xFFFFFFFFull, FNVNX_ADDR(v), 4));
     num("fn-above-u32", EC(11, 0x100000004ull, FNVNX_ADDR(v), 4));
     num("fn10-nargs1", EC(11, 10, FNVNX_ADDR(v), 1));
@@ -1458,14 +1461,15 @@ def main():
     r40, l40 = run(built[40][0], root)[:2]
     k = kv(l40)
     NOMOD, NOSVC, BADN, EINVAL = "ffffffffffffff01", "ffffffffffffff02", "ffffffffffffff03", "ffffffffffffffea"
-    want40 = {"mod64": NOMOD, "mod-huge": NOMOD, "mod9-unreg": NOMOD, "mod12-fn-huge": NOMOD, "fn0": NOSVC, "fn36": NOSVC, "self-n1-null": BADN, "sock-null-array-wrongn": BADN,
+    want40 = {"mod64": NOMOD, "mod-huge": NOMOD, "mod9-unreg": NOMOD, "mod12-fn-huge": NOMOD, "fn0": NOSVC, "fn36": NOSVC, "self-n1-null": BADN, "sock-null-array-wrongn": EINVAL,
+              "sock-null-array-n0": EINVAL, "sock-null-array-exact": BADN, "fn0-null-array": NOSVC,
               "fn-u32max": NOSVC, "fn-above-u32": NOSVC, "fn10-nargs1": BADN, "vm-reserve-n1": BADN, "null-array": BADN,
               "docked-n0-null": "0", "docked-n1-null": BADN, "docked-n3": "0", "docked-ncap": "0", "boost-extra-args": "0",
               "sock-wrong-n": EINVAL, "sock-wrong-n0": EINVAL, "sock-too-many": EINVAL, "tz-n1": BADN, "tz-null": BADN,
               "reserve-above-4g": "0", "reserve-4g": "0"}
     bad = {n: (k.get(n), v) for n, v in want40.items() if k.get(n) != v}
     case("ext_call (guest): NO_MODULE / NO_SERVICE / BAD_NARGS are returned to the guest, nargs above UINT32_MAX counts as UINT32_MAX, "
-         "extra arguments ignored, sockets -EINVAL on wrong nargs, BAD_NARGS first on a null array (%d values)" % len(want40), r40["reason"] == "exit" and not bad, (bad, r40))
+         "extra arguments ignored, sockets dispatch first: -EINVAL on wrong nargs (null array or not), BAD_NARGS on the exact count with a null array (%d values)" % len(want40), r40["reason"] == "exit" and not bad, (bad, r40))
     # DISPLAY_DOCKED: the profile
     for prof, want in (("handheld", "0"), ("docked", "1")):
         rp, lp = run(built[40][0], root, profile=prof)[:2]
