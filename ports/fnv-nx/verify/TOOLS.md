@@ -76,6 +76,82 @@ check, not a reference of the source; it is dropped from both sides.
 Several native copies of one address: each is judged, the worst verdict stands.
 ```
 
+## contract/gate_reach.py
+
+```text
+gate_reach - certificates that a branch of a platform import body is unreachable (L1 CONTRACT, gate `reach`).
+
+    gate_reach.py --requests reach_requests.tsv --gpa gpa_names.tsv --image NAME=pe,ranges.tsv ... [--bridge bridge.tsv]
+                  [--out DIR/reach.tsv] [--facts-h reach_facts.h] [--facts-tsv reach.facts.tsv]
+    gate_reach.py --objects <ld out>/inputs.rsp --requests reach_requests.tsv --certified reach.facts.tsv [--out reach.link.tsv]
+
+Why.  A request that a Win32 import accepts by its documentation but the target cannot express leads, in the body of the platform
+import, to `fnvnx_reach_violation(fact_id)` (loader/include/fnvnx_reach.h).  The build is valid only if that call is unreachable
+for exactly the linked set of images.  Every fact_id has a certificate from this gate, produced from the machine code of the
+images; a referenced fact without a certificate makes the build red.  No hand-written list: the requests are data of the platform
+manifest (manifest/reach_requests.tsv, columns request dll name arg_index kind values note) and the images are an explicit --image
+list of the stage.
+
+Request kinds (the TSV `values` column; `note` is free text and is not read):
+  imm_set    `0xA,0xB,...`  (separators , | space)  stdcall argument arg_index of every call of dll!name is one of the values or not in them: forbidden set
+  imm_mask   `0xM`          (argument & M) == 0 for every value of the argument
+  result_of  `callee=d!n|d!n; argI [& M] == V; argI [& M] != V; ...`     (the platform may spell the kind handle_origin: accepted,
+             same grammar and meaning; argflow.handle_origin is the engine.)  The argument arg_index "is, on all paths, the result
+             of a call of an import in the callee set whose own stdcall arguments satisfy every clause": argI is the callee's
+             stdcall argument I (0 = pushed last), the clause holds when (argI & M) op V for each of its derived immediate values
+             (M omitted = all bits).  The callee set is dll!name pairs (dll normalised: lowercase, .dll appended).  A failed call
+             returns a value that is not a handle: that case is the business of the immediate-value facts about the same argument.
+             A further clause `ret != V on every path to the site` (V a number): on every control-flow path from that call to the
+             site the result was compared with V by a still-valid copy and the path crossed the `!= V` edge of the deciding branch
+             (argflow.result_predicate: cmp / test / inc idioms, flags not redefined; anything else is `ret-predicate` open).
+Numbers: C syntax (0x..., decimal), 32-bit.  A row that does not parse is an error (exit 2), never skipped.
+
+Fact ids: index (from 1) of the request in the canonical order (dll, name, arg_index, kind, canonical values) over the request list;
+the table id is the sha256 of the canonical request list.  Both are functions of the requests alone.
+
+Rule.  A request about import I = (dll D, name N, argument k) is CERTIFIED for the image set S iff
+ (a) every static use of I's slot in every image of S has argument k derived CLOSED on all paths by argflow (derive_arg; the uses:
+     imports_called: call [slot], thunks, register-loaded calls) and every derived value satisfies the predicate; an escape of
+     the slot value (imports_called's open list) or an import of D by ordinal (it could be I) is not certified.  A leaf that is not
+     an immediate (string, ret, import slot) is not an immediate: for imm_set / imm_mask it is not certified; for result_of the
+     value is the eax result of a call, which must be a call of an import of the callee set (handle_origin, mode `strict`:
+     a call between the store and the load of the handle breaks the chain), whose arguments are derived the same way;
+ (b) I is not obtainable dynamically: every GetProcAddress site of every image of S (gpa_names.tsv; every static reference to a
+     GetProcAddress slot must be covered by a row of the table) is closed, and no pair (D, N), (*, N) (module unknown) or (D, #n)
+     / (*, #n) (an ordinal in D could be N) exists.  An OPEN site (name or module not derived) anywhere in S makes (b) fail for
+     EVERY request: reason `gpa-open`, the condition under which certificates are not valid yet;
+ (c) the assumptions of argflow A1..A6 (and A8, the provenance premise of memfx, when its rule closed a handle chain) are recorded in each certificate (BASE: the contract's standing assumptions, the same for
+     every gate that uses argflow); an assumption that is not a proven rule makes the fact NOT certified: BLOCKING = {A7} (a call
+     between a store and a load does not write that memory; only the `open` handle mode depends on it).  A fact whose only
+     derivation needs A7 is listed `assumption:A7`.
+Proof argument: (a) says that the argument at every call that can execute is in the set the predicate admits (argflow's walk covers
+all paths of the function backwards, expands own parameters to every caller, and is closed or reports a break); (b) says that no
+call can execute that is not a static use of the slot (the only way to get an import's address other than its slot is
+GetProcAddress, G1; a forwarder chain between distinct dll names is not followed, G2); therefore no execution passes a value
+outside the predicate to the import, and the branch of the body that handles it is unreachable.  Assumptions: A1..A6, G1, G2, and
+that the facts' ranges contain every executed instruction of the images (A4).  The certificate fixes the set of images by hash
+(sha256 of the PE and of the ranges file), the request, the GetProcAddress rows used, the assumptions and the per-site proof chain.
+
+Outputs ($GATE_OUT, gatefile.py): reach.json (gate `reach`; universe = facts, certified = certified facts; uncertified ids
+`<fact_id>:<reason>:<image>:<address>`, reason `assumption:A7` etc. may contain a colon: split the last two fields off), reach.ids
+(all of them, sorted), reach.facts.tsv (`fact_id<TAB>sha256 of the certificate`, certified facts only, sorted by id).  --out: per
+fact status, sites examined and reasons.  --facts-h: the C header (FNVNX_REACH_<DLL>_<NAME>_<n> with n the 1-based position among
+the requests of the same dll!name in canonical order; FNVNX_<request id> for the platform's own names; FNVNX_REACH_TABLE_ID).
+
+Mode --objects (gate `reachlink`, the link side).  The universe is every reference to the ELF symbol fnvnx_reach_violation in the
+objects and archive members of the response file (one quoted path per line, ld.py's inputs.rsp), read from the relocation
+tables (sh_info of a SHT_RELA / SHT_REL names the section; no text).  A reference is green iff
+  - it is a R_AARCH64_P32_CALL26 / JUMP26 in an executable section (any other reference, e.g. a pointer in data, lets w0 be
+    anything: `reference-not-call`);
+  - w0 is set at the call by an immediate move (mov / movz, followed in program order by movk) in the same basic block: walking
+    backwards from the call every instruction before the move is a non-branch, no instruction between the move and the call (the
+    call included) is a branch target, a symbol, or the target of a relocation, and the last write of w0 before the call is the move (`no-immediate`, `block-boundary`, `label`).  Decoded with capstone ARM64;
+  - the function that contains the call has no indirect jump (`br`: its tables hide branch targets: `indirect-jump`);
+  - the immediate is a fact id of the table and has a certificate (`fact-not-in-table`, `fact-not-certified`).
+Red ids `member:section+offset:reason`; gate `reachlink` (universe = references, certified = green ones).
+Exe-derived: container and fnv-nx-build only.
+```
+
 ## contract/gate_vcall.py
 
 ```text
@@ -105,6 +181,104 @@ is the first 50 of the sorted ids (strings), so the file is a function of its ar
 to $GATE_OUT only, never committed.  The only environment variable read is the declared GATE_OUT.
 ```
 
+## contract/gpa_names.py
+
+```text
+gpa_names - the (module, name) pairs every GetProcAddress site of the images can ask for (L1 CONTRACT, import manifest).
+
+    gpa_names.py --sites dynsites.tsv --image NAME=pe[,ranges.tsv] ... [--bridge bridge.tsv] [--modules modules.tsv] --out DIR
+
+Input rows (dynsites.tsv of L5: module, site, api, operand): `site` is the address of the relocated 4-byte slot operand (at
+the module's preferred base) of an instruction that reads the IAT slot of the import `api`.  Only api = GetProcAddress rows
+are derived.  One rule for every row (argflow.py): the uses of the slot value are
+
+  call [slot]                          the instruction itself;
+  jmp [slot] (an import thunk)         every direct call of the thunk; the thunk's address taken by a relocated word, or a jump
+                                       to it that is not a call, makes the site open; a thunk no code of the facts reaches
+                                       (the facts are closed under direct targets and relocated code pointers) has no use;
+  mov reg,[slot]                       every `call reg` on the forward paths (copies tracked; any other read of the register,
+                                       a return of it in eax: the value escapes and the site is open).
+
+At every use, lpProcName (stdcall argument 1) and hModule (argument 0) are derived by argflow.derive_arg: definitions D1 string,
+D2 constant-indexed table, D3 ordinal, D4 own parameter (expanded to every caller, open when the function is address-taken).
+hModule: result of LoadLibrary*/GetModuleHandle* with a derived string, directly or through a direct callee (parameters bound
+to the arguments of the call); NULL contributes nothing (GetProcAddress(NULL, ..) fails).  A site is `closed` when every use
+has a derived name set and no escape; its module set is `derived` when every use has one, else `unknown` and the pairs are
+written (*, name): the platform must provide the name in every module.
+
+Output gpa_names.tsv: module, site, api, operand, status, modules, npairs, ndlls, pairs, uses, proof, breaks.
+proof = per use `call@va<-args`: name definition addresses | module definition addresses.  Gate `gpa` (gatefile.py): universe =
+GetProcAddress rows with a dynamic operand, certified = closed ones.  Cross-check: rows with a constant operand are derived
+too and compared with the platform's constant.  Check (--bridge): pairs the platform does not provide.
+Exe-derived: container and fnv-nx-build only.
+```
+
+## contract/iat.py
+
+```text
+iat - the value the loader writes in every import slot of an image (L1 CONTRACT, loader contract with L3 and L5).
+
+    iat.py --facts facts.json --bridge bridge.tsv [--module name.dll=exports.tsv ...] --out iat.tsv
+
+Image code pointers are not rewritten and `call [slot]` is an ordinary indirect call, so a slot must hold a 32-bit
+value the dispatcher of the lifted code maps to an entry.  Rule, total over the image's import directory:
+
+  module    the dll is a lifted PE module: the slot holds the address of the module's export (exports.tsv of
+            modules.py: name or #ordinal, address at the module's assigned base, forwarder, ordinal), as the Windows
+            loader does; a forwarder export holds the value of its target (resolve_exports).
+  key       the dll is implemented by the platform (a bridge.tsv row of L5): the slot holds the function's key,
+            IMPORT_BASE + STEP * (index of (dll, name) among the non-data rows of bridge.tsv sorted by dll, name).
+            One function has one key in every image, so pointer equality behaves as on Windows.
+  data      bridge.tsv conv `data`: the slot holds the address of the native object; no key (bound by the loader
+            from the ELF symbol).
+
+Keys lie in [IMPORT_BASE, LIMIT), and SENTINEL (the return address under the first guest frame) below them.
+Assumption, checked by the loader at start: no mapping of the process intersects [SENTINEL, LIMIT) - the range
+is below the lowest address the 32-bit address space hands out (0x00200000), so a key is never a readable or
+executable address and never the address of an image, module, heap or stack.
+
+A slot without a provider, an export the module does not have, a dll that is both a module and a bridge dll: the
+stage fails and lists them (gate `iat`: universe = slots, certified = slots with a value).  Output rows:
+slot VA, dll, name (an import by ordinal is written with the name bridge.tsv gives that ordinal), kind, value
+(empty for data).  Exe-derived: container and fnv-nx-build only.
+
+One key table, three consumers (the loader binding slots, the lifter's import stubs, the platform's GetProcAddress):
+
+  --keys-out keys.tsv   key (8 hex), dll, name, ordinal, conv, ret, args, native_symbol; one row per non-data row of
+                        bridge.tsv, sorted by key; first line `# table_id <sha256 of bridge.tsv>`.  Input of the stubs.
+  --c-out import_keys.c the C table of loader/src/importkey.c (`fnvnx_import_rows`, sorted by (dll, name) for binary
+                        search, `fnvnx_import_by_key_idx`, `fnvnx_import_table_id` = the same sha256).  No timestamps.
+
+Rules fixed here (all three consumers use them through this file and importkey.c, nowhere else):
+  dll name   as the Windows loader compares module names: ASCII case-insensitive, and a name with no '.' gets ".dll"
+             appended (LoadLibrary / the import directory: "KERNEL32" and "kernel32.dll" are one module).  A name with
+             another extension keeps it.  norm_dll() here and the same function in importkey.c.  Function names are
+             compared exactly (GetProcAddress is case-sensitive).
+  same name  in two dlls: two functions, two keys (the key is a function of (dll, name), never of name alone).
+  ordinal    an import by ordinal (facts name `#N`) is the row of bridge.tsv with that (dll, ordinal), as the export
+             table of the real dll maps ordinal to export; no row, no provider.  Two rows with one (dll, ordinal), or
+             one (dll, name) twice, are a stage error.  Rows without an ordinal are reachable by name only.
+  bridge.tsv gains or loses a row: keys of all later rows shift.  Keys, stubs and the loader table are generated from
+             the same bridge.tsv in one link; the stage key of all three includes the SHA-256 of bridge.tsv, and
+             keys.tsv and import_keys.c each carry it (`table_id`) so the gate can check they come from one input.
+  data row   a bridge row of conv `data` whose native_symbol is a C identifier is a table row of kind data (value =
+             address of the native object).  A data row with native_symbol `-` has no native object: it is left out of
+             the table (the lookup returns 0 = the platform does not provide it) and counted in the stdout line.
+```
+
+## contract/images.py
+
+```text
+images - the guest image set of the contract gates (L1 CONTRACT): one pure function, no hand list.
+
+RULE: the set is the transitive closure of the PE import directories (normal and delay-load) starting from the exe, in modules.PE's
+reading. An imported dll name (iat.norm_dll: ASCII lowercase, ".dll" when it has no '.') is resolved case-insensitively against the
+files of the given directories (first directory in list order that has it; two files of one directory that differ only in case are an
+error). A dll found there is a GUEST IMAGE and is walked further; a dll not found there is a platform import (gate `imports`, owner L5)
+and is not an image. Assumption (stated, VERDICT.md): dynamic LoadLibrary names are facts of the `gpa` gate, not of this rule.
+Order: the exe, then the images in discovery order (depth first, import directory then delay-load directory).
+```
+
 ## contract/l2sections.py
 
 ```text
@@ -122,6 +296,45 @@ fields, offsets decimal.  n3: 2..5 fields (the producer omits trailing empty one
 Itanium type strings (the producer's own separator; the task brief said `;`).  Any other line is an error
 `<where>: line N: <what>`; no line is skipped, a final line without LF is an error, an empty section is [].
 Pure: bytes in, tuples out (rows keep the section's order).
+```
+
+## contract/memfx.py
+
+```text
+memfx - may-write analysis of an x86 PE image (L1 CONTRACT): which writes can reach a memory location?
+
+    mx = Memfx(img, imports=ImportInfo(...))          img: argflow.Image
+    mx.const_range(lo, hi)        -> Verdict            no write in the process changes [lo, hi) after load (case: global constancy)
+    mx.call_keeps(fn, call_va, R) -> (bool, why)        the call at call_va does not write [R+d] of the object R points to
+    mx.words(addr)                -> (leaves, writers, why)   value set of the global dword at addr (initial bytes + every writer)
+
+The question and the rule.  A write modifies location L only through (W1) an instruction that names L (an absolute operand
+[disp] or [disp+idx*s] whose address range covers L), or (W2) an instruction whose address register holds a pointer value.
+Rule (P, provenance - the one memory-model premise of this file): a pointer value is built from an address constant of
+its object (a relocated immediate / lea of a section address, the address of a stack frame) by copies, constant offsets and
+arithmetic, and a memory access through it stays inside the object that address belongs to.  Object = one image section
+(a global), or the frame of one function activation (a frame slot).  Under P the writers of L through pointers are exactly
+the stores through values of the forward flow of the address constants of L's object, so the whole question is a taint
+closure (class Closure) of that object's address values over the image's direct call graph:
+  * state: registers, dword stack slots relative to the entry esp, the numeric esp/ebp; a tainted value is a set of
+    absolute addresses (section objects), the marker 'F' (frame) and ANY (unknown offset: arithmetic, an index);
+  * every instruction not modelled that reads a tainted value is an ESCAPE (the closure is then open); a tainted value
+    stored to memory that is not a tracked slot, returned in eax/edx to a caller the analysis cannot see (address-taken
+    function), passed to an indirect call, passed to an import whose escape letter is not n/r, left in a callee-saved
+    register at ret, or stored into a slot of a function whose frame address is taken (class exposed) is an ESCAPE;
+  * a store through a tainted base is a WRITE event (address set, disp, size); a call that receives a tainted register or
+    stack slot (direct callee: the closure continues in the callee with that state; import: pointer arguments) is a CALL
+    event; an import receives tainted data = it may write through it (ImportInfo.may_write, default yes).
+The location L of an object is not written by a call c iff the object's closure has no ESCAPE and c is not a CALL event
+(it receives no value derived from the object's address; it cannot get one except through memory, and a tainted value
+reaches memory only through an ESCAPE).  For a global, additionally (W1) no direct store anywhere in the image covers L
+(exact for [disp]; [disp+idx*s] covers [disp, disp+max*s+size) when the index maximum is proven (and-mask, movzx, constant)
+and else the whole section), no relocated data word points into the section (that word is a pointer stored in memory: an
+ESCAPE of the section's closure), and the loader does not write L (base relocations, import slots, IAT / TLS-index of the
+PE directories).  Assumptions (stated, not proven): P; the image's code ranges are instruction-aligned and complete (A4); a
+callee preserves ebx/esi/edi/ebp (A1) and reads no register of an import call (the platform's calling convention); the
+platform implementation writes through a pointer argument only when ImportInfo says so (default: every pointer argument
+may be written); no code outside the images (the loader, the OS) writes L except through those imports.
 ```
 
 ## contract/objfacts_merge.py
@@ -249,6 +462,72 @@ The lists are generated from env.json (no second list). A package version that t
 script FAIL naming the package; another version is never installed: the fix is a deliberate new snapshot commit
 (`envcheck.py snapshot -o verify/env.json --from-code` on a machine set up by this script) .
 Env: ENV_JSON (default verify/env.json next to this script's tree).
+```
+
+## link/gate_abs.py
+
+```text
+gate_abs - no input of the link refers to an absolute symbol (part of the L1 verdict; closes the binutils ILP32-PIE case of docs/TOOLCHAIN.md section 9).
+
+    gate_abs.py --inputs inputs.rsp [--inputs ...] [--object FILE ...] [--elf guest.elf]
+
+The guest is linked at base 0 and moved by the loader: a value that the linker takes for absolute (SHN_ABS) is not moved, and binutils turns such
+values into R_AARCH64_P32_RELATIVE entries with the absolute value as addend (a plain "add the slide" would corrupt them).  No absolute symbol
+may take part in the link: then every dynamic relocation is an image address and the guest's self-relocation moves all of them.
+The linker's command line carries no symbol definition (ld.py accepts only the emulation options), so an absolute symbol can come only from an
+input object or from the script, and both are in the universe below.
+Universe (no sampling): every relocation of every object and of every member of every archive named by --inputs (response files, one quoted
+path per line, as ld.py writes them) or --object, and every symbol DEFINED by those files.  Read from the section headers and symbol tables
+(relocs.py): no tool output, no text.
+Red items:
+  - a relocation whose symbol is SHN_ABS in its own object                                  id `member:section+offset:symbol`
+  - a relocation without a symbol (symbol index 0 with a type: the assembler folded an absolute value into the addend), symbol `*ABS*`
+  - with --elf: a relocation whose symbol is undefined in its object and defined SHN_ABS in the linked image (a symbol of the script or
+    of the linker; the same id)
+  - a symbol an input defines as SHN_ABS (not a file or section symbol)                      id `member:def:symbol`
+member is `file` for an object and `archive(member)` for an archive member (base names); offsets are 8 hex digits.
+Gate file `abs` ($GATE_OUT/abs.json, gatefile.py; full list in $GATE_OUT/abs.ids): universe = relocations + defined symbols;
+certified = universe - red.  Counts on stdout.  Exit status 1 when red.
+```
+
+## link/gate_disp.py
+
+```text
+gate_disp - the dispatcher of the lifted guest holds exactly the code entries (part of the L1 verdict).
+
+    gate_disp.py --elf guest.elf --universe universe.tsv --entries entries.tsv [--keys keys.tsv] [--missing missing.tsv]
+
+The lifted code reaches every code entry of the exe through `fnvl_dispatch(a)` (lift/rt/rt.c, FNVL_PHF_REL), which looks the
+address up in the table `fnvl_disp_table` (lift/bench/phf.py `table_asm`):
+    i = ((a ^ fnvl_g[(a * K1) >> (32 - NBITS)]) * K2) >> (32 - TBITS)          (all arithmetic modulo 2^32)
+    slot i = {u32 key, s32 offset}; the entry is found iff key == a and offset != 0; the body is `(char *)fnvl_disp_table + offset`.
+A slot is OCCUPIED iff its offset is not 0 (the key of an empty slot is arbitrary).  {K1, K2, NBITS, TBITS} are the four u32 words of
+`fnvl_phf_params`, stored with the table (disp.o), the one source rt.c reads.  Sizes come from the symbols' st_size: the table has
+8 << TBITS bytes, `fnvl_g` (u16) 2 << NBITS bytes, `fnvl_phf_params` 16; a table whose size or parameters do not fit is red.
+
+Inputs:  --universe  the code entries (universe.tsv: first column the address as hex, `#` lines skipped);
+         --entries   `address<TAB>symbol[<TAB>kind]` (liftall's entries.tsv), kind `code` (default) or `import`: an import row is a
+                     dispatcher key that is not a universe address (its symbol is `I_<key>` or a runtime symbol); the last
+                     line may be `# table_id <hex>`;
+         --keys      optional, the import key set of the bridge (keys.tsv: first column the key as hex, other columns ignored, `#` lines
+                     skipped); each key must be named by an entries.tsv row (the symbol of its body is never taken from this file);
+                     it may carry `# table_id <hex>`.  When both files carry a table_id the two must be equal (else the item
+                     `table_id` is red);
+         --missing   optional, `address` rows of universe addresses the lifter reports as without a body.  REPORTING only: it never
+                     certifies anything; a universe address without an entry stays `no-entry` and red.  The detail line says how
+                     the list and the entries agree.
+Rule, for EVERY key k of the universe, of the import rows and of --keys (no sampling), certified when all hold:
+  - a symbol is named for k by entries.tsv (two rows naming different symbols for k are a violation);
+  - the ELF defines that symbol, at one address (a symbol defined at two addresses is a violation);
+  - the LOOKUP: the slot i the hash computes for k is occupied, holds key k, and `table_address + stored_offset == symbol address`
+    modulo 2^32 (`hash-miss` when slot i is not k's slot, `wrong-target` when it points elsewhere);
+  - no other occupied slot holds k.
+Every occupied slot whose key is neither in the universe nor an import key is a violation (`extra-key`).
+That the parameters in the ELF are those the build chose is not this gate's business: the lookup is proven with them, for every key.
+
+Gate file `disp` ($GATE_OUT/disp.json, gatefile.py; full list in $GATE_OUT/disp.ids): universe = the keys of universe + import keys +
+the extra table keys (+ the item `table_id` when both files carry one), certified = those satisfying the rule, uncertified =
+`<key as 8 hex digits>:<reason>`.  Counts only on stdout.  Exit status 1 when the gate is red.
 ```
 
 ## verify/a64access.cc
@@ -797,6 +1076,42 @@ compares a warm and a cold build). Hand-over to later gates: verdict.py gives EV
 read this gate's GATE_OUT. objects.json of a root is therefore also kept at GATE_CACHE/objects/<tree>/<root name>/objects.json (with
 obj/, the ELF and constants.tsv beside it; <tree> = git tree of the commit under test, <root name> = path with / as __), and later
 gates call ensure() (build or cache hits, same result). Without GATE_CACHE nothing outlives the gate except GATE_OUT/objects/<root name>.json.
+```
+
+## verify/gate_contract.py
+
+```text
+Gate "contract" family (fnvnx-gate/1, class 8 of VERDICT.md): the whole-binary gates of contract/ judged on the link of the product root.
+    python3 -I gate_contract.py --gate NAME     NAME: n1 n2_data n2_call n2_vcall xc xunit rtti pcrel bodysel
+    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/NAME.json (gatefile.py shape).
+One entry per gate in gates.json, so each is its own line of the verdict; the stages are the ones of contract/verdict.py (exefacts, n1,
+objfacts, registry, xunit, rtti, pcrel, bodysel), run with the same arguments, in the order of their dependencies, each once per input set:
+their outputs are kept in GATE_CACHE/contract/<key>/ (key = sha256 of contract_inputs.json, the git tree under test and the content of
+the objects and ELF of the root), so the nine gates cost one run of the chain and a cold run gives the same files.
+
+Universe (the convention of build, objstub, linkstrict, determinism: gate_build.quantify): the admitted product roots of admit.json. Every gate is
+judged on every root and the items are summed; no product root: universe 0, green. A root that is admitted but lacks objects, an ELF, a result
+file or an input is RED with the reason (item `<root>:inputs`), never skipped. Admission (gate_admit rule 3 + REQUIRED_PRODUCT) is what forces
+each of these gates to exist before a root can be admitted.
+
+Per-root inputs are outputs of the root's own build and link, read from the out dir of gate_build.ensure (beside objects.json), the names
+declared in contract_inputs.json "root_results": units.json (the exe's unit/function table), addrmap.tsv, aliases.ld (the link stage's maps),
+entries.tsv (liftall's entries, gate disp only). A file the root's recipe/link does not emit yet makes the gate red for that root naming it
+(owner: L1 link stage). The game's units are those under the root-relative directory build.json declares as "game" (no default).
+
+Inputs shared by every root (verify/contract_inputs.json, "fnvnx-contract-inputs/1"; no other source, nothing comes from an argument):
+  external     content-pinned inputs of fnv-nx-build, the same keys and the same fetch as a recipe's externals (recipe.fetch_externals:
+               exact commit, tree_sha256 checked): the exe-derived private facts never enter this repository
+  exe msvc universe   `NAME/path` inside an external: FalloutNV.exe, the pristine MSVC objects (dir of u<i>.obj), L3's universe.tsv
+  root_results {units, addrmap, aliases[, entries]} file names in the root's out dir
+  ranges       {exe: NAME/path, module: NAME/path with %s = the dll's stem}: where an image's range facts are in an external
+  The image set of gpa/reach/reachlink is not an input: contract/images.py derives it (transitive closure of the normal and delay-load import
+  directories from the exe, resolved against the files of externals exe and redist). An image without range facts is a red item of those gates.
+A gate whose input is missing is RED with the reason, never skipped: no inputs file, an invalid one, an external that does not fetch or does
+not match its hash, a root that has no link, no "game", does not build or lacks a result file.
+n2_data n2_call n2_vcall xc (registry.py counts, rows = functions that are not N2): not failures in themselves (the function becomes LIFTED, a
+legal outcome); the invariant that closes the class is that EVERY row is turned into LIFTED by bodysel. Universe = the functions the gate
+judged, certified = judged minus the rows whose address bodysel does not give LIFTED (the function would run a native body that fails its contract).
 ```
 
 ## verify/gate_linkstrict.py

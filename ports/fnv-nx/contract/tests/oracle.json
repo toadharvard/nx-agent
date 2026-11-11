@@ -25,6 +25,24 @@
     "ports/fnv-nx/contract/bodysel.py"
    ]
   },
+  "test_gate_reach.py": {
+   "references": [
+    {
+     "anchor": "## contract/gate_reach.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/gpa_names.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/gate_reach.py",
+    "ports/fnv-nx/contract/gpa_names.py"
+   ]
+  },
   "test_gates.py": {
    "references": [
     {
@@ -55,6 +73,47 @@
     "ports/fnv-nx/contract/gate_xc.py"
    ]
   },
+  "test_gpa_names.py": {
+   "references": [
+    {
+     "anchor": "## contract/gpa_names.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/gpa_names.py"
+   ]
+  },
+  "test_iat.py": {
+   "references": [
+    {
+     "anchor": "## contract/iat.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/iat.py"
+   ]
+  },
+  "test_images.py": {
+   "references": [
+    {
+     "anchor": "## The guest image set",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
+    },
+    {
+     "anchor": "## contract/images.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/images.py"
+   ]
+  },
   "test_l2sections.py": {
    "references": [
     {
@@ -65,6 +124,18 @@
    ],
    "subject": [
     "ports/fnv-nx/contract/l2sections.py"
+   ]
+  },
+  "test_memfx.py": {
+   "references": [
+    {
+     "anchor": "## contract/memfx.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/memfx.py"
    ]
   },
   "test_objmerge.py": {
