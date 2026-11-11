@@ -10,7 +10,7 @@ Output rows: dll, name, ordinal, conv, ret, args, native_symbol, bind
         lookup the implementation has internal linkage or is the C library's: its address is
                fnvnx_win32_lookup_export(dll, name) at load time (native_symbol is then `-`)
         l3     provided by the lifter runtime under native_symbol
-        data   the slot holds the address of an object: fnvnx_win32_lookup_export(dll, name)
+        data   the slot holds the address of the object native_symbol (a defined external symbol, checked)
         none   no implementation yet: a build that needs this row must fail
   conv  stdcall | cdecl | vararg | thiscall (this in ecx) | data (the slot is the address of an object)
   ret   v | i | q | f | d      (a spec file does not state the return type: `i` is written
@@ -97,6 +97,10 @@ L3_NAMES = {"?terminate@@YAXXZ": "terminate", "??1type_info@@UAE@XZ": "type_info
 L3_KERNEL32 = ("RaiseException", "RtlUnwind", "DebugBreak")
 
 
+# msvcrt data exports whose object has another symbol name in platform/crt
+DATA_SYMS = {"_iob": "fnvnx_iob"}
+
+
 def native(dll, name):
     if dll == "msvcrt.dll" and (name in L3_MSVCRT or name.startswith("_CI")):
         return "fnvl_msvcrt_" + L3_NAMES.get(name, name.lstrip("_"))
@@ -131,7 +135,9 @@ def main(names, spec_dir, out, symfile, crt_table):
         if sym.startswith("fnvl_"):
             bind = "l3"
         elif conv == "data":
-            sym, bind = "-", ("data" if real in crt else "l3" if real == "_adjust_fdiv" else "none")
+            # a data slot holds the address of the ELF symbol named here (loader rule, L1): the object's own symbol
+            dsym = DATA_SYMS.get(real, real)
+            sym, bind = (dsym, "data") if real in crt and dsym in syms else ("-", "none")
         elif dll == "msvcrt.dll":
             sym, bind = "-", ("lookup" if real in crt else "none")
         else:
