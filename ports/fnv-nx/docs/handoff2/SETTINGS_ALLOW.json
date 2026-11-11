@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash", "Agent", "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch",
+      "mcp__claude-code-remote__add_repo", "mcp__claude-code-remote__send_message",
+      "mcp__claude-code-remote__list_sessions", "mcp__claude-code-remote__get_session",
+      "mcp__claude-code-remote__list_events", "mcp__claude-code-remote__create_session",
+      "mcp__claude-code-remote__send_later", "mcp__claude-code-remote__interrupt_session",
+      "mcp__claude-code-remote__archive_session",
+      "Bash(git push:*)", "Bash(git push --force-with-lease:*)", "Bash(git fetch:*)", "Bash(git clone:*)",
+      "Bash(git rebase:*)", "Bash(git reset:*)",
+      "Bash(apt-get update:*)", "Bash(apt-get install:*)", "Bash(pip install:*)",
+      "Bash(opam:*)", "Bash(cargo:*)", "Bash(make:*)", "Bash(cmake:*)", "Bash(ninja:*)"
+    ]
+  }
+}
