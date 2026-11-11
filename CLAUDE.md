@@ -99,6 +99,13 @@ The owner's words: "Транк никогда красный. Всегда зе�
   - Every `fact_id` is produced only by the call-graph gate from the exe and module facts, and carries a certificate of unreachability. A missing certificate makes the build red. There are no hand-written lists.
   - It is an assertion of a proven build invariant, not a trap path. Inventing behaviour or leaving the symbol undefined stays forbidden.
   - Certificates count as valid only once every dynamic-name GetProcAddress site is statically resolved. Until then, the build is a measurement build.
+- **Memory safety of hand-written native code (owner decision, 2026-11-11, option A).**
+  - All hand-written native code (platform, render, loader and host, lifter runtime) is written in a compiler-checked subset of C/C++ where a memory fault is impossible by construction:
+    - (a) no pointer arithmetic and no raw indexing: only bounds-carrying spans and checked access;
+    - (b) guest memory only through one accessor with a range check; an invalid guest pointer raises the contract's exception through R4, as on Windows;
+    - (c) no recursion, and a static stack bound over the call graph.
+  - The gate is a GCC plugin, "body in the subset" (a compile error otherwise). The IKOS sound analyzer is a check only.
+  - L4 owns the subset definition and the gate.
 - Merges stop while anything is red. That is intended. Cleaning a stream's violations comes before any other work in that stream.
 
 ## Owner decisions of 2026-11-10 (do not re-ask)
