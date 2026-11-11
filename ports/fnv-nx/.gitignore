@@ -3,7 +3,6 @@ build/
 render/native/vftables.tsv
 platform/win32/nls_tables.inc
 platform/win32/winerr_msgs.inc
-platform/win32/registry_seed.gen.inc
 platform/**/env_const.gen.inc
 platform/**/*.env_const.gen.inc
 platform/**/env_const*.gen.inc

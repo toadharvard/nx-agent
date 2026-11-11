@@ -42,7 +42,7 @@ PLAT_C := $(P)/os/os_posix.c $(P)/os/os_world.c $(wildcard $(P)/crt/*.c)
 # the clock interface (platform/include/fnvnx_clock.h): clock_rt.cpp is in both, clock_real.cpp is the product's clock; `make vclock`
 # links clock_virtual.cpp instead (the verification mode, definition VC1)
 CLOCK_CXX := $(P)/clock/clock_rt.cpp $(P)/clock/clock_real.cpp
-PLAT_CXX := $(CLOCK_CXX) $(P)/com/combridge.cpp $(P)/com/combridge.gen.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(wildcard $(P)/crt/*.cpp) $(wildcard $(P)/audio/*.cpp) $(filter-out %/input_horizon.cpp,$(wildcard $(P)/input/*.cpp))   # audio: winmm waveOut* are exports of the table; input: DirectInput, XInput, the keyboard applet (input_horizon.cpp is libnx only)
+PLAT_CXX := $(CLOCK_CXX) $(P)/com/combridge.cpp $(P)/com/combridge.gen.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(filter-out %/msvcrt_table.gen.cpp,$(wildcard $(P)/crt/*.cpp)) $(P)/crt/msvcrt_table.gen.cpp $(wildcard $(P)/audio/*.cpp) $(filter-out %/input_horizon.cpp,$(wildcard $(P)/input/*.cpp))   # audio: winmm waveOut* are exports of the table; input: DirectInput, XInput, the keyboard applet (input_horizon.cpp is libnx only)
 TEST_CXX := $(filter-out %/host_section.cpp,$(wildcard $(HERE)/*.cpp)) $(HERE)/m32/host_input.cpp   # host_input.cpp: the host has no polled input source (input_horizon.cpp is libnx only)   # the host section services belong to the private binary only
 
 OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
@@ -120,6 +120,9 @@ ENVC_SRC := audio/dshow audio/dshow_filters audio/dsound audio/waveout input/din
 $(P)/%.env_const.gen.inc: $(P)/manifest/env_const.tsv $(P)/manifest/gen_env_const.py
 	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only $*.cpp
 $(foreach s,$(ENVC_SRC),$(eval $(OUT)/platform/$(s).cpp.o: $(P)/$(s).env_const.gen.inc))
+# the msvcrt lookup table: msvcrt_names.tsv (name, symbol, kind) is the one source; the generated unit is tracked and the gate `imports` reads the tsv
+$(P)/crt/msvcrt_table.gen.cpp: $(P)/crt/msvcrt_names.tsv $(P)/crt/gen_msvcrt_table.py
+	python3 -I $(P)/crt/gen_msvcrt_table.py $(P)/crt/msvcrt_names.tsv $@
 COMGEN := $(P)/com/gen_combridge.py $(P)/com/com_spec.json
 COMOUT := $(P)/com/combridge.gen.cpp $(P)/com/combridge_exports.gen.cpp $(P)/com/combridge_if.gen.h $(P)/com/combridge_rows.tsv
 $(COMOUT) &: $(COMGEN)
@@ -128,13 +131,8 @@ $(COMOUT) &: $(COMGEN)
 $(OUT)/s4_tests: $(OBJS) $(OUT)/libfreetype.a
 	$(CXX) $(CXXFLAGS_) $(OBJS) $(OUT)/libfreetype.a -o $@ -lm $(LDEXTRA)
 
-# ---- probe of the import table (platform/manifest/probe_imports.cpp): the platform objects of this build, FreeType, no tests;
-# `make probe` builds $(OUT)/probe_imports, which the imports gate runs (platform/manifest/gate_imports.sh)
-PROBE_OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX)) $(OUT)/tests/s4/host_boundary.cpp.o $(OUT)/tests/s4/m32/host_input.cpp.o $(OUT)/platform/manifest/probe_imports.cpp.o
-$(OUT)/platform/manifest/probe_imports.cpp.o: CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
-$(OUT)/probe_imports: $(PROBE_OBJS) $(OUT)/libfreetype.a
-	$(CXX) $(CXXFLAGS_) $(PROBE_OBJS) $(OUT)/libfreetype.a -o $@ -lm $(LDEXTRA)
-probe: $(OUT)/probe_imports $(OUT)/probe_dynsites
+# ---- probe of the module/name lookups: `make probe` builds $(OUT)/probe_dynsites
+probe: $(OUT)/probe_dynsites
 
 # the probe of the module/name lookups (platform/manifest/probe_dynsites.cpp), driven by platform/manifest/check_dynsites.py
 DYN_OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX)) $(OUT)/tests/s4/host_boundary.cpp.o $(OUT)/tests/s4/m32/host_input.cpp.o $(OUT)/platform/manifest/probe_dynsites.cpp.o

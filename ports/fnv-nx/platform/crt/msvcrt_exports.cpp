@@ -30,18 +30,18 @@ void ExitProcess(UINT);
 void GetLocalTime(LPSYSTEMTIME);
 }
 
-namespace {
+namespace fnvnx_msvcrt_impl {
 typedef unsigned short u16;
 
 /* ---------------------------------------------------------------- heap: one heap (the libc's) for all six */
-void *c_malloc(size_t n)
+extern "C" void *c_malloc(size_t n)
 {
     void *p = malloc(n ? n : 1); /* malloc(0): a unique non-NULL block */
     if (!p)
         errno = ENOMEM;
     return p;
 }
-void *c_calloc(size_t a, size_t b)
+extern "C" void *c_calloc(size_t a, size_t b)
 {
     if (b && a > (size_t)-1 / b) {
         errno = ENOMEM;
@@ -53,7 +53,7 @@ void *c_calloc(size_t a, size_t b)
         errno = ENOMEM;
     return p;
 }
-void *c_realloc(void *p, size_t n)
+extern "C" void *c_realloc(void *p, size_t n)
 {
     if (!p)
         return c_malloc(n);
@@ -66,7 +66,7 @@ void *c_realloc(void *p, size_t n)
         errno = ENOMEM;
     return q;
 }
-void c_free(void *p) { free(p); }
+extern "C" void c_free(void *p) { free(p); }
 
 /* ---------------------------------------------------------------- locale and ctype */
 enum { T_UP = 1, T_LO = 2, T_DIG = 4, T_SP = 8, T_PU = 0x10, T_CT = 0x20, T_BL = 0x40, T_HEX = 0x80, T_AL = 0x100 };
@@ -113,7 +113,7 @@ void build_tables()
     g_ct[1].cp = 1252;
 }
 
-const char *c_setlocale(int cat, const char *loc)
+extern "C" const char *c_setlocale(int cat, const char *loc)
 {
     static char composite[160];
     if (cat < 0 || cat > 5)
@@ -161,14 +161,16 @@ inline const ctab *cur()
     return g_cur;
 }
 inline int cls(int c, unsigned m) { return c >= 0 && c <= 255 ? cur()->t[c] & m : 0; } /* EOF and out of range: 0 */
-int c_isalpha(int c) { return cls(c, T_AL | T_UP | T_LO); }
-int c_isalnum(int c) { return cls(c, T_AL | T_UP | T_LO | T_DIG); }
-int c_isdigit(int c) { return cls(c, T_DIG); }
-int c_isspace(int c) { return cls(c, T_SP); }
-int c_isxdigit(int c) { return cls(c, T_HEX); }
+extern "C" int c_isalpha(int c) { return cls(c, T_AL | T_UP | T_LO); }
+extern "C" int c_isalnum(int c) { return cls(c, T_AL | T_UP | T_LO | T_DIG); }
+extern "C" int c_isdigit(int c) { return cls(c, T_DIG); }
+extern "C" int c_isspace(int c) { return cls(c, T_SP); }
+extern "C" int c_isxdigit(int c) { return cls(c, T_HEX); }
+extern "C" {
 #include "env_const.gen.inc"   /* c_isleadbyte: manifest/env_const.tsv */
-int c_tolower(int c) { return c >= 0 && c <= 255 ? cur()->lo[c] : c; }
-int c_toupper(int c) { return c >= 0 && c <= 255 ? cur()->up[c] : c; }
+}
+extern "C" int c_tolower(int c) { return c >= 0 && c <= 255 ? cur()->lo[c] : c; }
+extern "C" int c_toupper(int c) { return c >= 0 && c <= 255 ? cur()->up[c] : c; }
 int wcls(int c, unsigned m)
 {
     if (c < 0 || c >= 0xFFFF) /* WEOF and out of range */
@@ -178,10 +180,10 @@ int wcls(int c, unsigned m)
     GetStringTypeW(CT_CTYPE1, &w, 1, &t);
     return t & m;
 }
-int c_iswalpha(int c) { return wcls(c, C1_ALPHA); }
-int c_iswdigit(int c) { return wcls(c, C1_DIGIT); }
-int c_iswpunct(int c) { return wcls(c, C1_PUNCT); }
-int c_iswspace(int c) { return wcls(c, C1_SPACE); }
+extern "C" int c_iswalpha(int c) { return wcls(c, C1_ALPHA); }
+extern "C" int c_iswdigit(int c) { return wcls(c, C1_DIGIT); }
+extern "C" int c_iswpunct(int c) { return wcls(c, C1_PUNCT); }
+extern "C" int c_iswspace(int c) { return wcls(c, C1_SPACE); }
 
 /* wide -> narrow in the current code page; 1 on success */
 int wc_to_byte(u16 wc, unsigned char *out)
@@ -197,7 +199,7 @@ int wc_to_byte(u16 wc, unsigned char *out)
     *out = (unsigned char)b;
     return r == 1 && !used;
 }
-size_t c_wcstombs(char *d, const u16 *s, size_t n)
+extern "C" size_t c_wcstombs(char *d, const u16 *s, size_t n)
 {
     size_t k = 0;
     if (!s) {
@@ -220,7 +222,7 @@ size_t c_wcstombs(char *d, const u16 *s, size_t n)
         k++;
     }
 }
-int c_wctomb(char *d, u16 wc)
+extern "C" int c_wctomb(char *d, u16 wc)
 {
     if (!d)
         return 0; /* stateless encoding */
@@ -234,7 +236,7 @@ int c_wctomb(char *d, u16 wc)
 }
 
 /* ---------------------------------------------------------------- printf and scanf: the engine is msvcrt_format.cpp */
-int c_sprintf(char *buf, const char *fmt, ...)
+extern "C" int c_sprintf(char *buf, const char *fmt, ...)
 {
     if (!buf || !fmt) {
         errno = EINVAL;
@@ -248,7 +250,7 @@ int c_sprintf(char *buf, const char *fmt, ...)
         buf[r] = 0;
     return r;
 }
-int c_sscanf(const char *in, const char *fmt, ...)
+extern "C" int c_sscanf(const char *in, const char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
@@ -258,7 +260,7 @@ int c_sscanf(const char *in, const char *fmt, ...)
 }
 
 /* ---------------------------------------------------------------- numbers */
-double c_atof(const char *s) { return fnvnx_msvc_strtod(s, NULL); }
+extern "C" double c_atof(const char *s) { return fnvnx_msvc_strtod(s, NULL); }
 /* atox.c: a 32-bit long accumulates c - '0' unchecked: values past the range wrap, as in MSVCRT.DLL */
 int32_t atox(const char *s)
 {
@@ -272,12 +274,12 @@ int32_t atox(const char *s)
         t = 10u * t + (uint32_t)(*s - '0');
     return (int32_t)(neg ? 0u - t : t);
 }
-int c_atoi(const char *s) { return atox(s); }
-long c_atol(const char *s) { return (long)atox(s); }
+extern "C" int c_atoi(const char *s) { return atox(s); }
+extern "C" long c_atol(const char *s) { return (long)atox(s); }
 
 /* ---------------------------------------------------------------- strings, sort, misc */
-char *w_strchr(const char *s, int c) { return (char *)strchr(s, c); }
-char *w_strrchr(const char *s, int c) { return (char *)strrchr(s, c); }
+extern "C" char *w_strchr(const char *s, int c) { return (char *)strchr(s, c); }
+extern "C" char *w_strrchr(const char *s, int c) { return (char *)strrchr(s, c); }
 
 /* the comparator is the game's: a guest address, called through the boundary */
 FNVNX_CALLBACK_T(cmp_t, int, (const void *, const void *));
@@ -305,7 +307,7 @@ void sift(char *a, size_t w, size_t root, size_t n, cmp_t cmp)
     }
 }
 /* heapsort: no recursion, no allocation, every index < n whatever the comparator returns */
-void c_qsort(void *base, size_t n, size_t w, cmp_t cmp)
+extern "C" void c_qsort(void *base, size_t n, size_t w, cmp_t cmp)
 {
     if (n < 2 || !w)
         return;
@@ -322,7 +324,7 @@ void c_qsort(void *base, size_t n, size_t w, cmp_t cmp)
     }
 }
 
-char *c_strdate(char *b)
+extern "C" char *c_strdate(char *b)
 {
     SYSTEMTIME t;
     GetLocalTime(&t);
@@ -331,7 +333,7 @@ char *c_strdate(char *b)
     memcpy(b, o, 9);
     return b;
 }
-char *c_strtime(char *b)
+extern "C" char *c_strtime(char *b)
 {
     SYSTEMTIME t;
     GetLocalTime(&t);
@@ -341,7 +343,7 @@ char *c_strtime(char *b)
     return b;
 }
 
-char *c_tempnam(const char *dir, const char *prefix)
+extern "C" char *c_tempnam(const char *dir, const char *prefix)
 {
     static volatile uint32_t seq;
     char env[260], cand[3][260];
@@ -373,7 +375,7 @@ char *c_tempnam(const char *dir, const char *prefix)
 /* ---------------------------------------------------------------- process: init/exit, locks, environment */
 FNVNX_CALLBACK_T(pvfv, void, (void));       /* _initterm's table entries: guest addresses (one word each in the game) */
 FNVNX_CALLBACK_T(onexit_fn, int, (void));
-void c_initterm(pvfv *first, pvfv *last)
+extern "C" void c_initterm(pvfv *first, pvfv *last)
 {
     for (; first < last; first++)
         if (*first)
@@ -381,9 +383,9 @@ void c_initterm(pvfv *first, pvfv *last)
 }
 
 /* _onexit: the handler (a game function pointer) goes into the exit-handler list (exitlist.cpp) */
-onexit_fn c_onexit(onexit_fn f) { return fnvnx_exit_register((uintptr_t)f) == 0 ? f : NULL; }
+extern "C" onexit_fn c_onexit(onexit_fn f) { return fnvnx_exit_register((uintptr_t)f) == 0 ? f : NULL; }
 /* __dllonexit: the DLL's own table [*begin, *end), grown by one on the msvcrt heap; both pointers updated */
-onexit_fn c_dllonexit(onexit_fn f, onexit_fn **begin, onexit_fn **end)
+extern "C" onexit_fn c_dllonexit(onexit_fn f, onexit_fn **begin, onexit_fn **end)
 {
     if (!f || !begin || !end || (*begin == NULL) != (*end == NULL) || *end < *begin)
         return NULL;
@@ -395,21 +397,21 @@ onexit_fn c_dllonexit(onexit_fn f, onexit_fn **begin, onexit_fn **end)
     *begin = t, *end = t + len;
     return f;
 }
-void c_exit(int code)
+extern "C" void c_exit(int code)
 {
     fnvnx_doexit(code, 0, 1); /* the handlers, last registered first */
     fnvnx_iob_fflush(NULL);
     ExitProcess((UINT)code);
     os_exit_process(code);
 }
-void c_abort(void)
+extern "C" void c_abort(void)
 {
     static const char m[] = "\nabnormal program termination\n";
     fnvnx_write(2, m, sizeof m - 1);
     ExitProcess(3);
     os_exit_process(3);
 }
-void c_amsg_exit(int n)
+extern "C" void c_amsg_exit(int n)
 {
     const char *t;
     switch (n) {
@@ -429,11 +431,11 @@ void c_amsg_exit(int n)
     ExitProcess(255);
     os_exit_process(255);
 }
-void c_purecall(void) { c_amsg_exit(25); }
+extern "C" void c_purecall(void) { c_amsg_exit(25); }
 
 struct rlock { os_lock_t m; void *volatile owner; int count; };
 rlock g_locks[64];
-void c_lock(int n)
+extern "C" void c_lock(int n)
 {
     if (n < 0 || n >= 64) {
         errno = EINVAL;
@@ -448,7 +450,7 @@ void c_lock(int n)
     os_glock(&l.m);   /* _lock: the game's own lock, held across its callbacks (os.h) */
     l.owner = me, l.count = 1;
 }
-void c_unlock(int n)
+extern "C" void c_unlock(int n)
 {
     if (n < 0 || n >= 64)
         return;
@@ -462,7 +464,7 @@ void c_unlock(int n)
 struct envc { char *key, *val; envc *next; };
 os_lock_t g_env_lock = OS_LOCK_INIT;
 envc *g_envc;
-char *c_getenv(const char *name)
+extern "C" char *c_getenv(const char *name)
 {
     if (!name || !*name || strchr(name, '='))
         return NULL;
@@ -509,14 +511,14 @@ char *c_getenv(const char *name)
 }
 
 /* ---------------------------------------------------------------- math */
-double c_ldexp(double x, int e)
+extern "C" double c_ldexp(double x, int e)
 {
     double r = scalbn(x, e); /* one rounding, to nearest even, subnormals included */
     if (std::isfinite(x) && x != 0.0 && (std::isinf(r) || r == 0.0))
         errno = ERANGE;
     return r;
 }
-double c_frexp(double x, int *e)
+extern "C" double c_frexp(double x, int *e)
 {
     if (!std::isfinite(x)) {
         *e = 0;
@@ -524,46 +526,20 @@ double c_frexp(double x, int *e)
     }
     return frexp(x, e);
 }
-double c_ceil(double x) { return ceil(x); }
-double c_floor(double x) { return floor(x); }
-double c_modf(double x, double *ip) { return modf(x, ip); }
+extern "C" double c_ceil(double x) { return ceil(x); }
+extern "C" double c_floor(double x) { return floor(x); }
+extern "C" double c_modf(double x, double *ip) { return modf(x, ip); }
 
-/* ---------------------------------------------------------------- the table */
-struct row { const char *dll, *name; void *fn; };
-#define R(n, f) { "msvcrt.dll", n, (void *)(f) }
-const row g_rows[] = {
-    R("malloc", c_malloc), R("calloc", c_calloc), R("realloc", c_realloc), R("free", c_free),
-    R("??2@YAPAXI@Z", c_malloc), R("??3@YAXPAX@Z", c_free), R("_strdup", _strdup),
-    R("_iob", fnvnx_iob), R("__pioinfo", __pioinfo), R("__badioinfo", &__badioinfo),
-    R("fread", fnvnx_iob_fread), R("fwrite", fnvnx_iob_fwrite), R("fflush", fnvnx_iob_fflush),
-    R("_write", fnvnx_write), R("_lseeki64", fnvnx_lseeki64), R("_fileno", fnvnx_iob_fileno),
-    R("_isatty", fnvnx_isatty), R("_tempnam", c_tempnam),
-    R("memcpy", memcpy), R("memmove", memmove), R("memset", memset), R("strchr", w_strchr), R("strrchr", w_strrchr),
-    R("strncmp", strncmp), R("strncpy", strncpy), R("_stricmp", _stricmp), R("_strnicmp", _strnicmp),
-    R("wcslen", fnvnx_wcslen16), R("wcstombs", c_wcstombs), R("wctomb", c_wctomb),
-    R("isalnum", c_isalnum), R("isalpha", c_isalpha), R("isdigit", c_isdigit), R("isspace", c_isspace),
-    R("isxdigit", c_isxdigit), R("isleadbyte", c_isleadbyte), R("iswalpha", c_iswalpha), R("iswdigit", c_iswdigit),
-    R("iswpunct", c_iswpunct), R("iswspace", c_iswspace), R("tolower", c_tolower), R("toupper", c_toupper),
-    R("setlocale", c_setlocale),
-    R("sprintf", c_sprintf), R("_snprintf", _snprintf), R("_vsnprintf", fnvnx_msvcrt_va_vsnprintf), R("sscanf", c_sscanf),
-    R("atof", c_atof), R("atoi", c_atoi), R("atol", c_atol), R("strtod", fnvnx_msvc_strtod), R("_itoa", _itoa), R("_ultoa", _ultoa),
-    R("qsort", c_qsort), R("rand", fnvnx_rand), R("srand", fnvnx_srand), R("_strdate", c_strdate), R("_strtime", c_strtime),
-    R("_initterm", c_initterm), R("__dllonexit", c_dllonexit), R("_onexit", c_onexit), R("exit", c_exit),
-    R("abort", c_abort), R("_amsg_exit", c_amsg_exit), R("_purecall", c_purecall),
-    R("_lock", c_lock), R("_unlock", c_unlock), R("_errno", _errno), R("getenv", c_getenv),
-    R("ceil", c_ceil), R("floor", c_floor), R("modf", c_modf), R("frexp", c_frexp), R("ldexp", c_ldexp),
-};
-#undef R
-}   // namespace
+}   // namespace fnvnx_msvcrt_impl
+using namespace fnvnx_msvcrt_impl;
 
-/* the hook fnvnx_win32_lookup_export calls for the dll "msvcrt": NULL when the name is not provided here */
-extern "C" void *fnvnx_msvcrt_lookup(const char *name)
-{
-    for (const row &r : g_rows)
-        if (!strcmp(r.name, name))
-            return r.fn;
-    return NULL;
-}
+/* the names that msvcrt shares with the libc: the body is the libc's, and a symbol of this product is what the name table (msvcrt_names.tsv)
+   names, so that the gate `imports` proves the row from the product objects */
+extern "C" void *fnvnx_msvcrt_memcpy(void *d, const void *s, size_t n) { return memcpy(d, s, n); }
+extern "C" void *fnvnx_msvcrt_memmove(void *d, const void *s, size_t n) { return memmove(d, s, n); }
+extern "C" void *fnvnx_msvcrt_memset(void *d, int c, size_t n) { return memset(d, c, n); }
+extern "C" int fnvnx_msvcrt_strncmp(const char *a, const char *b, size_t n) { return strncmp(a, b, n); }
+extern "C" char *fnvnx_msvcrt_strncpy(char *d, const char *s, size_t n) { return strncpy(d, s, n); }
 
 /* the code-page conversions of the formatter and scanner (msvcrt_format.cpp): the current locale's narrow <-> UTF-16 */
 extern "C" int fnvnx_msvcrt_wc_to_byte(unsigned short wc, unsigned char *out) { return wc_to_byte(wc, out); }
