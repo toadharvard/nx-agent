@@ -25,7 +25,7 @@ ARCH="-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE -ftls-model=
 CFLAGS="-std=gnu99 -O2 -Wall -Wextra -Werror -ffunction-sections -fdata-sections -I$L/include -I$L/src -I$G/../../toolchain/include"
 OBJ="$OUT/obj"; rm -rf "$OBJ"; mkdir -p "$OBJ"
 members=()
-for f in "$L/src/"{pe,sha256,image,imports,identity,tls,start,modules,importkey}.c "$G/boot.c"; do
+for f in "$L/src/"{pe,sha256,image,imports,identity,tls,start,modules,importkey}.c "$G/boot.c" "$G/reach.c"; do
 	o="$OBJ/$(basename "$f" .c).o"
 	aarch64-none-elf-gcc $ARCH $CFLAGS -c "$f" -o "$o"; members+=("$o")
 done
