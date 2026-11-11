@@ -56,3 +56,11 @@ When guest_compiler.json lands, the test should fetch the pinned external instea
 - vtnames (part 3): clang plugin, not a GCC plugin: it is a separate clang run per unit that writes facts files (.vt/.sym/.mem), and its command line comes from
   tools/link/layoutgate.py msvc_flags. Building it needs the clang headers (libclang-18-dev, /usr/lib/llvm-18/include/clang/AST/Mangle.h), which env.json does
   not pin and this container lacks. To be pinned.
+
+## Mirror pin (a8a2ed5)
+verify/guest_compiler.json: name gcc-msvcmodel, ref tools/gcc-ilp32-msvcmodel, commit b4057704c0babd012e466cc89181132e02542289,
+tree_sha256 b60eafe7a5b0ae3dc679f9bf21e20d3363e3bac2af7379e34127ea5cf8455116, at /ext/gcc, cc/cxx bin/aarch64-linux-gnu-{gcc,g++}.
+Provenance in the json: gcc-13.3.0.tar.xz sha256 0845e962..c083, msvcmodel.patch sha256 08c9569a..59d3, src_commit 7ac84bda; dpkg versions stay in env.json.
+Fresh checkout of the mirror (no local prefix): guest build, 8 plugins, test_msvcmodel.py all pass with NO changes to the mirror; the 3 empty
+dirs / include symlink were not needed (the compiler's own include search list is declared as inputs). Cold 19-21 s (store empty), warm 1.7 s.
+test_guest fetches by the pin and is red with the reason when the fetch or tree hash fails; FNVNX_TEST_GCC_PREFIX removed. Oracle entries added.
