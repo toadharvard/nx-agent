@@ -477,7 +477,9 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
  *             out and *n untouched. -FNVNX_HE_BADINPUT is the one the host produces itself (the table above).
  * The guest-side check of a name dialog (accept / reject at index) is the guest's loop: call, run the check on out[0..*n), on rejection call again
  * with init = that text. Host-side tests: the swkbd calls are stubbed in tests/s4/backends/host_total_test.c.
- * Under the L4 emulator (no human): the emulator's host answers 0 (cancelled) for every well-formed call. */
+ * Under the L4 emulator (no human): the scenario supplies the text. With a scenario text the emulator answers 1 and
+ * that text (a text longer than max_len is a scenario error and stops the run); without one it answers 0
+ * (cancelled, out and *n untouched). Argument checks are the same as on the console. */
 #define FNVNX_PLAT_TEXT_ENTRY 36u
 #define FNVNX_TEXT_ENTRY_MAX 500u
 typedef struct FnvnxTzAt {
