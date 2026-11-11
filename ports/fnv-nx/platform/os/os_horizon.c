@@ -22,6 +22,7 @@
 #include <switch/kernel/svc.h>
 #include <switch/kernel/thread.h>
 #include <switch/services/applet.h>
+#include <switch/services/time.h>
 #include <switch/applets/error.h>
 
 #include <dirent.h>
@@ -278,28 +279,29 @@ int64_t os_wall_time_us(void)
     return (int64_t)tv.tv_sec * 1000000 + tv.tv_usec;
 }
 
-static int64_t days_from_civil(int64_t y, unsigned m, unsigned d)
+
+/* the zone of the console's time service (the user's setting): offset, daylight flag and abbreviation at an instant */
+static int tzr_at(int64_t utc_s, int32_t *off_s, int *is_dst, char abbr[8])
 {
-    y -= m <= 2;
-    int64_t era = (y >= 0 ? y : y - 399) / 400;
-    unsigned yoe = (unsigned)(y - era * 400);
-    unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
-    unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    return era * 146097 + (int64_t)doe - 719468;
+    TimeCalendarTime cal;
+    TimeCalendarAdditionalInfo info;
+    if (R_FAILED(timeToCalendarTimeWithMyRule((u64)utc_s, &cal, &info)))
+        return -1;
+    *off_s = info.offset;
+    *is_dst = info.DST != 0;
+    memcpy(abbr, info.timezoneName, 8);
+    abbr[7] = 0;
+    return 0;
 }
 
 int32_t os_tz_offset_minutes(void)
 {
-    time_t now = time(NULL);
-    struct tm l, g;
-    localtime_r(&now, &l);
-    gmtime_r(&now, &g);
-    int64_t ls = days_from_civil(l.tm_year + 1900, (unsigned)l.tm_mon + 1, (unsigned)l.tm_mday) * 86400 +
-                 l.tm_hour * 3600 + l.tm_min * 60 + l.tm_sec;
-    int64_t gs = days_from_civil(g.tm_year + 1900, (unsigned)g.tm_mon + 1, (unsigned)g.tm_mday) * 86400 +
-                 g.tm_hour * 3600 + g.tm_min * 60 + g.tm_sec;
-    return (int32_t)((ls - gs) / 60);
+    int32_t off;
+    int dst;
+    char n[8];
+    return tzr_at((int64_t)(os_wall_time_us() / 1000000), &off, &dst, n) ? 0 : off / 60;
 }
+#include "os_tzrule.inc"
 
 /* ---- files: newlib POSIX on the fsdev devoptab */
 static int neg_errno(void)

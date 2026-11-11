@@ -42,17 +42,7 @@ extern "C" UINT GetConsoleOutputCP(void)
     return 0;
 }
 
-extern "C" DWORD GetTimeZoneInformation(LPTIME_ZONE_INFORMATION tz)
-{
-    if (!tz) {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return 0xFFFFFFFFu;   /* TIME_ZONE_ID_INVALID */
-    }
-    /* one zone without daylight rules, at the offset GetLocalTime applies (UTC unless the OS reports one) */
-    memset(tz, 0, sizeof *tz);
-    tz->Bias = -(LONG)os_tz_offset_minutes();
-    return TIME_ZONE_ID_UNKNOWN;
-}
+/* GetTimeZoneInformation: time.cpp, next to the rule its time conversions apply */
 
 /* ---- standard handles: NULL (none) until SetStdHandle sets one; the value is not checked, as on Windows */
 static HANDLE g_std[3];

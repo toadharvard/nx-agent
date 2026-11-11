@@ -206,30 +206,86 @@ static int64_t tz_transition(int64_t year, const SYSTEMTIME *r)
     return days_from_civil(year, r->wMonth, (unsigned)day) * 86400 + r->wHour * 3600 + r->wMinute * 60 + r->wSecond;
 }
 
+/* is utc (seconds since 1970) in daylight time under the rule of tz? (the one rule, applied to the year of that instant:
+ * the historical rule is the present rule, as Windows 7 applies a TIME_ZONE_INFORMATION without dynamic DST data) */
+static bool tz_is_dst(const TIME_ZONE_INFORMATION *tz, int64_t utc)
+{
+    if (!tz->StandardDate.wMonth || !tz->DaylightDate.wMonth)
+        return false;
+    int64_t std_local = utc - (int64_t)tz->Bias * 60;
+    int y;
+    unsigned m, d;
+    civil_from_days(std_local >= 0 ? std_local / 86400 : -((-std_local + 86399) / 86400), &y, &m, &d);
+    int64_t begin = tz_transition(y, &tz->DaylightDate);  /* standard wall time */
+    int64_t end = tz_transition(y, &tz->StandardDate);    /* daylight wall time */
+    int64_t dst_local = utc - ((int64_t)tz->Bias + tz->DaylightBias) * 60;
+    return begin < end ? (std_local >= begin && dst_local < end) : (std_local >= begin || dst_local < end);
+}
+
+static void tz_date(SYSTEMTIME *st, const os_tzdate_t *d)
+{
+    memset(st, 0, sizeof *st);
+    st->wYear = d->year;
+    st->wMonth = d->month;
+    st->wDayOfWeek = d->wday;
+    st->wDay = d->week;
+    st->wHour = d->hour;
+    st->wMinute = d->minute;
+}
+
+/* The active zone (ENV L2: the Switch time service; the OS layer derives its rule): Bias in minutes west of UTC,
+ * StandardDate = when standard time begins (daylight wall time), DaylightDate = when daylight time begins (standard wall
+ * time), DaylightBias the daylight offset's difference to standard; the names are the zone's abbreviations. Without
+ * daylight time the dates are zero (TIME_ZONE_ID_UNKNOWN). */
+static bool tz_current(TIME_ZONE_INFORMATION *tz)
+{
+    os_tzrule_t r;
+    memset(tz, 0, sizeof *tz);
+    if (os_tz_rule(&r))
+        return false;
+    tz->Bias = -(LONG)r.std_off_min;
+    for (int i = 0; i < 8 && r.std_name[i]; i++)
+        tz->StandardName[i] = (WCHAR)(unsigned char)r.std_name[i];
+    for (int i = 0; i < 8 && r.dst_name[i]; i++)
+        tz->DaylightName[i] = (WCHAR)(unsigned char)r.dst_name[i];
+    if (r.has_dst) {
+        tz->DaylightBias = -(LONG)(r.dst_off_min - r.std_off_min);
+        tz_date(&tz->StandardDate, &r.dst_end);
+        tz_date(&tz->DaylightDate, &r.dst_begin);
+    }
+    return true;
+}
+
+extern "C" DWORD GetTimeZoneInformation(LPTIME_ZONE_INFORMATION tz)
+{
+    if (!tz) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0xFFFFFFFFu;   /* TIME_ZONE_ID_INVALID */
+    }
+    if (!tz_current(tz)) {
+        SetLastError(ERROR_INVALID_FUNCTION);   /* the platform has no time zone data */
+        return 0xFFFFFFFFu;
+    }
+    if (!tz->StandardDate.wMonth)
+        return TIME_ZONE_ID_UNKNOWN;
+    return tz_is_dst(tz, os_wall_time_us() / 1000000) ? 2 /* TIME_ZONE_ID_DAYLIGHT */ : 1 /* TIME_ZONE_ID_STANDARD */;
+}
+
 extern "C" BOOL SystemTimeToTzSpecificLocalTime(LPTIME_ZONE_INFORMATION tz, const SYSTEMTIME *utc, LPSYSTEMTIME local)
 {
     FILETIME ft;
     if (!utc || !local || !SystemTimeToFileTime(utc, &ft))
         return FALSE;
-    int64_t off_min;   /* minutes to add to UTC */
-    if (!tz) {
-        off_min = os_tz_offset_minutes();   /* the current zone, as GetLocalTime applies it */
-    } else {
-        int64_t usecs = ((int64_t)w32_ft64(&ft) - FT_UNIX_EPOCH) / 10000000;
-        int64_t std_local = usecs - (int64_t)tz->Bias * 60;
-        off_min = -((int64_t)tz->Bias + tz->StandardBias);
-        if (tz->StandardDate.wMonth && tz->DaylightDate.wMonth) {
-            int y;
-            unsigned m, d;
-            civil_from_days(std_local >= 0 ? std_local / 86400 : -((-std_local + 86399) / 86400), &y, &m, &d);
-            int64_t begin = tz_transition(y, &tz->DaylightDate);  /* standard wall time */
-            int64_t end = tz_transition(y, &tz->StandardDate);    /* daylight wall time */
-            int64_t dst_local = usecs - ((int64_t)tz->Bias + tz->DaylightBias) * 60;
-            bool dst = begin < end ? (std_local >= begin && dst_local < end) : (std_local >= begin || dst_local < end);
-            if (dst)
-                off_min = -((int64_t)tz->Bias + tz->DaylightBias);
+    TIME_ZONE_INFORMATION cur;
+    if (!tz) {      /* NULL: the active time zone, with its rule applied to this time */
+        if (!tz_current(&cur)) {
+            SetLastError(ERROR_INVALID_FUNCTION);
+            return FALSE;
         }
+        tz = &cur;
     }
+    int64_t usecs = ((int64_t)w32_ft64(&ft) - FT_UNIX_EPOCH) / 10000000;
+    int64_t off_min = -((int64_t)tz->Bias + (tz_is_dst(tz, usecs) ? tz->DaylightBias : tz->StandardBias));
     ft_to_st((ULONGLONG)((int64_t)w32_ft64(&ft) + off_min * 600000000ll), local);
     return TRUE;
 }

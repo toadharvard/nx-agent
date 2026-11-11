@@ -303,7 +303,7 @@ TEST(crt_k32_time_zone)
     CHECK_EQ(tz.Bias, -(LONG)os_tz_offset_minutes());
     CHECK_EQ(tz.StandardBias, 0);
     CHECK_EQ(tz.DaylightBias, 0);
-    CHECK_EQ(tz.StandardName[0], 0);
+    CHECK(tz.StandardName[0] != 0);   /* W20: the zone's abbreviation (was: empty) */
     CHECK_EQ(tz.DaylightDate.wMonth, 0);
 }
 

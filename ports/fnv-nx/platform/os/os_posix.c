@@ -374,6 +374,19 @@ int32_t os_tz_offset_minutes(void)
     return (int32_t)(lt.tm_gmtoff / 60);
 }
 
+static int tzr_at(int64_t utc_s, int32_t *off_s, int *is_dst, char abbr[8])
+{
+    time_t t = (time_t)utc_s;
+    struct tm lt;
+    if (!localtime_r(&t, &lt))
+        return -1;
+    *off_s = (int32_t)lt.tm_gmtoff;
+    *is_dst = lt.tm_isdst > 0;
+    snprintf(abbr, 8, "%s", lt.tm_zone ? lt.tm_zone : "");
+    return 0;
+}
+#include "os_tzrule.inc"
+
 /* ---- files */
 static int neg_errno(void)
 {

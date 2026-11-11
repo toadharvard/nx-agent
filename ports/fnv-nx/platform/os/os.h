@@ -94,6 +94,19 @@ uint64_t os_monotonic_ns(void);
 uint64_t os_cycle_counter(void);            /* cheap free-running counter (rdtsc stand-in) */
 int64_t os_wall_time_us(void);              /* microseconds since 1970-01-01 UTC */
 int32_t os_tz_offset_minutes(void);         /* local = UTC + offset */
+/* The zone's rule in the terms of a Windows TIME_ZONE_INFORMATION (derived from the platform's own time zone data). A date is
+ * recurring (year == 0: `week` = 1..5 is the n-th, 5 the last, `wday` of `month`) or absolute (year != 0: `week` is the day of
+ * the month); `hour`:`minute` is the wall time just before the transition. dst_begin is in standard wall time, dst_end in
+ * daylight wall time. Without daylight time has_dst is 0 and both offsets are the present one. Offsets: local = UTC + offset.
+ * Returns 0, or < 0 when the platform has no zone data. */
+typedef struct { uint16_t year, month, wday, week, hour, minute; } os_tzdate_t;
+typedef struct {
+    int32_t std_off_min, dst_off_min;
+    int has_dst;
+    os_tzdate_t dst_begin, dst_end;
+    char std_name[8], dst_name[8];       /* the zone's abbreviations */
+} os_tzrule_t;
+int os_tz_rule(os_tzrule_t *r);
 
 /* ---- files (host paths, '/' separated) */
 #define OS_O_READ   0x01
