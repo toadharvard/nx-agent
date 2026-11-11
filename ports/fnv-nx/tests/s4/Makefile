@@ -121,14 +121,14 @@ $(OUT)/s4_tests: $(OBJS) $(OUT)/libfreetype.a
 
 # ---- probe of the import table (platform/manifest/probe_imports.cpp): the platform objects of this build, FreeType, no tests;
 # `make probe` builds $(OUT)/probe_imports, which the imports gate runs (platform/manifest/gate_imports.sh)
-PROBE_OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX)) $(OUT)/tests/s4/host_boundary.cpp.o $(OUT)/platform/manifest/probe_imports.cpp.o
+PROBE_OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX)) $(OUT)/tests/s4/host_boundary.cpp.o $(OUT)/tests/s4/m32/host_input.cpp.o $(OUT)/platform/manifest/probe_imports.cpp.o
 $(OUT)/platform/manifest/probe_imports.cpp.o: CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 $(OUT)/probe_imports: $(PROBE_OBJS) $(OUT)/libfreetype.a
 	$(CXX) $(CXXFLAGS_) $(PROBE_OBJS) $(OUT)/libfreetype.a -o $@ -lm $(LDEXTRA)
 probe: $(OUT)/probe_imports $(OUT)/probe_dynsites
 
 # the probe of the module/name lookups (platform/manifest/probe_dynsites.cpp), driven by platform/manifest/check_dynsites.py
-DYN_OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX)) $(OUT)/tests/s4/host_boundary.cpp.o $(OUT)/platform/manifest/probe_dynsites.cpp.o
+DYN_OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX)) $(OUT)/tests/s4/host_boundary.cpp.o $(OUT)/tests/s4/m32/host_input.cpp.o $(OUT)/platform/manifest/probe_dynsites.cpp.o
 $(OUT)/platform/manifest/probe_dynsites.cpp.o: CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 $(OUT)/probe_dynsites: $(DYN_OBJS) $(OUT)/libfreetype.a
 	$(CXX) $(CXXFLAGS_) $(DYN_OBJS) $(OUT)/libfreetype.a -o $@ -lm $(LDEXTRA)
