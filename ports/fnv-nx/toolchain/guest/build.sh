@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build the ILP32 guest runtime: <out>/crt0.o and <out>/libfnvnx-guest.a (runtime, threads, fs, tm).
+# Build the ILP32 guest runtime: <out>/crt0.o and <out>/libfnvnx-guest.a (runtime, threads, fs, section_guest, tm).
 #   DEVKITPRO=... toolchain/guest/build.sh <out dir>
 # Link a guest with:
 #   aarch64-none-elf-g++ $FNVNX_GUEST_ARCH -specs=$FNVNX_TOOLCHAIN/guest/guest_pie.specs <out>/crt0.o <objs> \
@@ -13,10 +13,10 @@ export PATH=$DEVKITPRO/devkitA64/bin:$PATH
 ARCH="-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE -ftls-model=local-exec"   # PIC: links into fixed and relocatable guests
 CFLAGS="-O2 -g -Wall -Wextra -ffunction-sections -fdata-sections -I$G/../include"
 aarch64-none-elf-gcc $ARCH -c "$G/crt0.s" -o "$OUT/crt0.o"
-for f in runtime threads fs; do
+for f in runtime threads fs section_guest; do
 	aarch64-none-elf-gcc $ARCH $CFLAGS -c "$G/$f.c" -o "$OUT/$f.o"
 done
 aarch64-none-elf-g++ $ARCH -O2 -g -Wall -Wextra -ffunction-sections -fdata-sections -c "$G/tm.cpp" -o "$OUT/tm.o"
 rm -f "$OUT/libfnvnx-guest.a"
-aarch64-none-elf-ar rcs "$OUT/libfnvnx-guest.a" "$OUT/runtime.o" "$OUT/threads.o" "$OUT/fs.o" "$OUT/tm.o"
+aarch64-none-elf-ar rcs "$OUT/libfnvnx-guest.a" "$OUT/runtime.o" "$OUT/threads.o" "$OUT/fs.o" "$OUT/section_guest.o" "$OUT/tm.o"
 echo "guest runtime: $OUT/crt0.o $OUT/libfnvnx-guest.a"

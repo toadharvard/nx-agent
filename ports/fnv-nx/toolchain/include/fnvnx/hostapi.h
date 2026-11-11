@@ -188,6 +188,7 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
 #define FNVNX_SEC_E_ID 0xE401u
 #define FNVNX_SEC_E_NOMEM 0xD001u
 #define FNVNX_SEC_E_FULL 0xCE01u
+#define FNVNX_SEC_E_NOSERVICE 0xFFu   /* the host answers FNVNX_EXT_NO_MODULE (= -255): an older host without sections */
 #define FNVNX_SEC_MAX_SIZE 0x80000000ull
 /* 16 and above: guest sockets (platform/, table published by the platform lead) */
 

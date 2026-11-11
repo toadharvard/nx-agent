@@ -8,11 +8,17 @@ The emulator stage proper (L4) must provide what this file adds; tests/s5 is not
     is not mapped (map_fixed and VM-commit memory both);
   - a VM commit / decommit gives read-write pages again, whatever VM_PROTECT did to them (guard pages of a freed stack);
   - the VM service on (it is opt-in in emu_guest);
+  - FNVNX_EXT_PLATFORM fn 11..14 SECTION_CREATE / MAP / UNMAP / FREE (include/fnvnx/hostapi.h; the device: toolchain/host/host_section.inc)
+    with the same semantics, errors and limits (128 sections, 512 views), and its interplay with VM services 5..8 (a range holding a
+    view: commit / decommit / protect / release -> 0xD401). Construction: a section is ONE anonymous host mmap; every view is
+    uc.mem_map_ptr of that buffer at the view's address, so the views are the same host memory (Unicorn translates a guest access to the
+    host pointer of the region; no copy exists, so a write through one view is the very byte another view reads, exactly like the
+    kernel's shared physical pages). A view is always read-write;
   - at the end of the run: the protection map of [image base, + SizeOfImage) as the emulator holds it, compared page by
     page with the PE section table (R if MEM_READ, W if MEM_WRITE, never X, headers R, gaps no access), and nothing
     mapped inside the reserved address set (keys range, exe, every row of modules.tsv) outside the loaded images.  Prints `e2e-host: ...` lines.
 """
-import os, struct, sys
+import ctypes, mmap, os, struct, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "tests", "s5"))
@@ -52,8 +58,94 @@ def pe_expect(path, rebase=None):
     return base, size, pages, secs
 
 
+SEC_E_SIZE, SEC_E_ALIGN, SEC_E_RANGE, SEC_E_REGION, SEC_E_ID, SEC_E_NOMEM, SEC_E_FULL = 0xCA01, 0xCC01, 0xD401, 0xDA01, 0xE401, 0xD001, 0xCE01
+SEC_MAX_SIZE, SEC_SECTIONS, SEC_VIEWS = 0x80000000, 128, 512
+M64 = (1 << 64) - 1
+
+
+def sec_err(code):
+    return (-code) & M64
+
+
 class E2EEmu(emu_guest.Emu):
     vm_service = True
+
+    # -- memory sections (hostapi.h 11..14) ------------------------------------------------------------------
+    def sec_state(self):
+        if not hasattr(self, "sections"):
+            self.sections, self.sec_views, self.sec_next = {}, {}, 1   # id -> [mmap, size, live, view count]; addr -> (size, off, id)
+        return self.sections, self.sec_views
+
+    def view_overlap(self, a, n):
+        return any(va < a + n and a < va + vs for va, (vs, _o, _i) in self.sec_state()[1].items())
+
+    def sec_release(self, sid):
+        self.sections[sid][0].close()
+        del self.sections[sid]
+
+    def section_call(self, fn, av):
+        secs, views = self.sec_state()
+        ra = lambda k: av[k] if k < len(av) else 0
+        if fn == 11:    # CREATE (size)
+            size = ra(0)
+            if not size or size & (P - 1) or size > SEC_MAX_SIZE:
+                return sec_err(SEC_E_SIZE)
+            if len(secs) >= SEC_SECTIONS:
+                return sec_err(SEC_E_FULL)
+            if self.sec_next > 0x7FFFFFFF:
+                return sec_err(SEC_E_NOMEM)
+            sid, self.sec_next = self.sec_next, self.sec_next + 1
+            secs[sid] = [mmap.mmap(-1, size), size, True, 0]   # anonymous: zero
+            return sid
+        if fn == 12:    # MAP (id, addr, offset, size)
+            sid, addr, off, size = ra(0), ra(1), ra(2), ra(3)
+            if not size or size & (P - 1) or size > SEC_MAX_SIZE:
+                return sec_err(SEC_E_SIZE)
+            if (addr | off) & (P - 1):
+                return sec_err(SEC_E_ALIGN)
+            sec = secs.get(sid)
+            if not sec or not sec[2]:
+                return sec_err(SEC_E_ID)
+            if off + size > sec[1]:
+                return sec_err(SEC_E_RANGE)
+            if len(views) >= SEC_VIEWS:
+                return sec_err(SEC_E_FULL)
+            if addr:
+                if not any(b <= addr and addr + size <= b + s for b, s in getattr(self, "vm_resv", {}).items()):
+                    return sec_err(SEC_E_REGION)
+                a = addr
+            else:   # the host's own range: 64 KiB aligned, from the top of the arena band downward
+                a = next((c for c in range((self.VM_ANY[1] - size) & ~(self.VM_ALIGN - 1), self.VM_ANY[0], -self.VM_ALIGN) if self.vm_free(c, size)), 0)
+                if not a:
+                    return sec_err(SEC_E_NOMEM)
+            if any(b <= a + size - 1 and a < e + 1 for b, e, _p in self.uc.mem_regions()):   # kernel-free: nothing mapped there
+                return sec_err(SEC_E_RANGE)
+            ptr = ctypes.addressof(ctypes.c_char.from_buffer(sec[0])) + off
+            self.uc.mem_map_ptr(a, size, UC_PROT_READ | UC_PROT_WRITE, ptr)
+            views[a] = (size, off, sid)
+            sec[3] += 1
+            return a
+        if fn == 13:    # UNMAP (addr, size): exactly a view
+            a, size = ra(0), ra(1)
+            v = views.get(a)
+            if not v or v[0] != size:
+                return sec_err(SEC_E_RANGE)
+            self.uc.mem_unmap(a, size)
+            del views[a]
+            sec = secs[v[2]]
+            sec[3] -= 1
+            if not sec[2] and not sec[3]:
+                self.sec_release(v[2])
+            return 0
+        if fn == 14:    # FREE (id): deferred while views live
+            sec = secs.get(ra(0))
+            if not sec or not sec[2]:
+                return sec_err(SEC_E_ID)
+            sec[2] = False
+            if not sec[3]:
+                self.sec_release(ra(0))
+            return 0
+        return 0xFFFFFFFFFFFFFF01
 
     def mapped_perms(self, lo, hi):
         """{page: perms} of the mapped pages in [lo, hi)"""
@@ -64,8 +156,20 @@ class E2EEmu(emu_guest.Emu):
         return out
 
     def h_ext_call(self, module, fn, args, nargs, *_):
+        if module == 11 and 11 <= fn <= 14:
+            av = struct.unpack("<%dQ" % nargs, bytes(self.uc.mem_read(args, 8 * nargs))) if nargs and args else ()
+            return self.section_call(fn, av)
+        if module == 11 and fn in (5, 6, 7) and nargs >= 1:   # VM commit / decommit / release versus views (host_vm.inc vm_has_view)
+            a0, a1 = struct.unpack("<QQ", bytes(self.uc.mem_read(args, 16)))
+            if fn == 7:
+                resv = getattr(self, "vm_resv", {})
+                a0, a1 = (a0, resv[a0]) if a0 in resv else (0, 0)
+            if a1 and self.view_overlap(a0 & ~(P - 1), ((a0 + a1 + P - 1) & ~(P - 1)) - (a0 & ~(P - 1))):
+                return 0xD401
         if module == 11 and fn == 8:   # FNVNX_PLAT_VM_PROTECT
             addr, size, prot = struct.unpack("<QQQ", bytes(self.uc.mem_read(args, 24)))
+            if size and self.view_overlap(addr, size):
+                return 0xD401   # SharedCode cannot be reprotected
             if addr & (P - 1) or size & (P - 1) or not size or prot & ~3 or addr + size > 1 << 32:
                 return 1
             if len(self.mapped_perms(addr, addr + size)) != size // P:
