@@ -67,7 +67,7 @@ check('RCAST1 reference cast of a plain lvalue untouched',
 check('RCAST1 reference cast of a parenthesized expression',
       run(s1.r_ref_cast_temporaries, 'return ((const V&)(a - b)).Len();\n'), ['(const V&)fnvnx_lvalue((a - b))'])
 
-# ---- SPEC2 is limited to its files; TPL2
+# ---- TPL2
 got = run(s1.r_namespace_template_decls, 'namespace N {\ntemplate <class T> class A\n{\n  public:\n    void d(T* p)\n'
           '    {\n        D(p);\n    }\n};\ntemplate <class T> inline void D(T* p)\n{\n    p->~T();\n}\n}\n')
 check('TPL2 forward-declares a namespace function template used earlier', got,
@@ -145,11 +145,6 @@ check('STL2 size_t in the unit\'s own namespace std is MSVC\'s (unsigned int)', 
 check('STL2 line count kept', str(got.count('\n') == _stl2.count('\n')), ['True'])
 check('STL2 leaves a unit without the real container headers', run(s1.r_vc9_containers,
       '#include "rstd.h"\nstd::string s;\n'), ['std::string s;'], ['fnvnx_vc9'])
-got = s1.r_specialization_decls('/x/src/speedtree/projectedshadow_ob1_variant.cpp',
-      'void a();\n#include "h.h"\n#include <memory>\ntemplate <class T> struct B;\nvoid g() {}\n'
-      'template <> X<char>::X(int);\n', Counter())
-check('SPEC1 never prefixes a preprocessor line: after the directives that follow its anchor', got,
-      ['#include <memory>\ntemplate <> X<char>::X(int); /* fnv-nx SPEC1 */ template <class T> struct B;'])
 
 got = run(s1.r_dependent_base_members, 'template <class T> struct V\n{\n    struct A {};\n    struct CI\n    {\n'
           '        A* aux;\n        T* ptr;\n    };\n    struct I : CI\n    {\n'
@@ -214,11 +209,6 @@ check('CTOR1 explicit constructor call of a template class',
 
 check('CTOR1 a constructor definition after a comment ending in "." is not a call',
       run(s1.r_ctor_calls, '// see the matcher checks.\nA::A(int x)\n    : m(x)\n{}\n'), ['A::A(int x)'], ['::new'])
-
-# ---- CSX1
-got = run(s1.r_xbox_cs_asserts, 'FNV_STATIC_ASSERT(sizeof(RecursiveLock) == 0x28);\n'
-          'FNV_STATIC_ASSERT(offsetof(_FILETIME, dwHighDateTime) == 0x0);\n')
-check('CSX1 drops only the Xbox _FILETIME order now', got, ['sizeof(RecursiveLock) == 0x28', 'CSX1'], ['dwHighDateTime) =='])
 
 # ---- LEX1
 got = run(s1.r_msvc_tokens, 'extern"C"enum E { A };\nchar pad[0xae-0x34];\nlong long k = 0xff00ffffui64 + 5i64;\n'
@@ -745,7 +735,7 @@ check('ENUM2 gives enums with values >= 2^31 MSVC\'s int', got,
        'enum Small { S0 = 1 };', 'enum Expr { E0 = 0x80000000 | 1 };', 'enum class Sc { Q = 0x80000000 };',
        'enum Huge { H = 0x100000000 };', 'enum Based : unsigned { U = 0x80000000 };'])
 
-# ---- NATIVE1 (render R3): the drop list's matching, shared by prepare's drop_native_units and tools/rules/native1.py
+# ---- NATIVE1 (render R3): the drop list's matching of tools/rules/native1.py (a command line tool; prepare no longer runs it)
 _spec = importlib.util.spec_from_file_location('native1', os.path.join(HERE, '..', '..', 'tools', 'rules', 'native1.py'))
 native1 = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(native1)
 _d = tempfile.mkdtemp()
@@ -833,10 +823,6 @@ check('VLIT1 stores the vftable address the unit binds the misread literal to; a
       ['#include "x.h"\nextern "C" char DAT_0101212c; /* fnv-nx VLIT1 */ void* F::Init()\n',
        'm_p = (char*)&DAT_0101212c; /* fnv-nx VLIT1: "@K@" */\n', 'void f() { m_p = "@K@"; g("text"); }', ' 1'])
 check('VLIT1 keeps the line count', str(got.count('\n')), ['6'])
-check('VLIT1 binds its DAT name in the unit (BIND1 hook)', repr(sorted(s1.VLIT1_BINDS)),
-      ["('src/n.cpp', '_DAT_0101212c', '0x0101212c')"])
-s1.VLIT1_BINDS.clear()
-
 # ---- SSE2 with the decomp's own name for __m128
 got = prepare.r_sse_local_protos('/x/src/a.cpp', 'typedef __m128 ClosestPointQuad;\nClosestPointQuad _mm_shuffle_ps(ClosestPointQuad, ClosestPointQuad, unsigned int);\n'
                                  'extern "C" ::hkQuadReal __cdecl _mm_load_ps(const float*);\n'
@@ -1032,7 +1018,7 @@ if _shutil.which('aarch64-linux-gnu-g++'):
     _r = _subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-std=gnu++17', '-fsyntax-only', '-Werror', _c5],
                          capture_output=True, text=True)
     check('NEW5 output compiles (derived class too)', _r.stderr or 'ok', ['ok'])
-# ---- S1-refs agent C: TPL1 out-of-class members of a header's class template, SPEC1 through a typedef name,
+# ---- S1-refs agent C: TPL1 out-of-class members of a header's class template,
 # RCAST1 in comments
 _c = tempfile.mkdtemp()
 os.makedirs(os.path.join(_c, 'src'))
@@ -1052,18 +1038,6 @@ check('TPL1 out-of-class member, the template\'s own parameter shadows nothing: 
       run(s1.r_dependent_base_members, '#include "pb.h"\ntemplate <class A, class m_pFirst>\nint PList<A, m_pFirst>::Pop()\n'
           '{\n    return m_uiCount + sizeof(m_pFirst);\n}\n', os.path.join(_c, 'src', 'pn.h')),
       ['return this->m_uiCount + sizeof(m_pFirst);'], ['this->m_pFirst'])
-_sp = os.path.join(_c, 'src', 'gamebryo2.2', 'corelibs', 'nimain', 'nitset.inl')
-got = run(s1.r_specialization_decls, 'class Item;\ntemplate <class T> class Ref\n{\n};\n'
-          'template <class T> class Alloc\n{\n};\ntemplate <class T, class B>\nclass Bag\n{\npublic:\n    void Put(const T& v);\n'
-          '    void Grow(unsigned int n);\n};\n\ntypedef Bag<Ref<Item>,\n            Alloc<Ref<Item> > >\n    ItemBag;\n\n'
-          'template <>\n// @x\nFNVNX_KEEP void ItemBag::Put(const Ref<Item>& v)\n{\n    Grow(2);\n}\n\n'
-          'void ItemBag::Grow(unsigned int n)\n{\n}\n', _sp)
-check('SPEC1 a member defined through a typedef name of the specialization', got,
-      ['};\ntemplate <> void Bag<Ref<Item>, Alloc<Ref<Item> >>::Put(const Ref<Item>& v) FNVNX_KEEP; /* fnv-nx SPEC1 */ '
-       'template <> void Bag<Ref<Item>, Alloc<Ref<Item> >>::Grow(unsigned int n); /* fnv-nx SPEC1 */'])
-check('SPEC1 a typedef of a template the file does not define: nothing',
-      run(s1.r_specialization_decls, '#include <x.h>\ntypedef Bag<int, int> IB;\nvoid IB::Grow(unsigned int n)\n{\n}\n', _sp),
-      (), ['SPEC1'])
 check('RCAST1 a reference cast spelled in a comment: untouched',
       run(s1.r_ref_cast_temporaries, 'class P\n{\n    // bool __cdecl P::*(const P&)\n    P();\n    /* (Q&)\n    f(); */\n};\n'),
       ['    P();\n', '    f(); */'], ['fnvnx_lvalue'])
@@ -1291,7 +1265,7 @@ check('REC1-DUP-DEF an append that redefines a function the unit defines (split 
       ['unchanged', "'REC1-REJECT': 1", '-2, ', 'Copy(E*,E*,unsignedint)'], ['appended'])
 check('REC1-DUP-DEF the same body when a rule left only the declaration: appended',
       _kdup('d2', 'static void Copy(E* d, const E* s, unsigned int n)\n{\n}\n',
-            'struct E { int a; };\nstatic void Copy(E* d, const E* s, unsigned int n); /* fnv-nx STAND1 */\n'),
+            'struct E { int a; };\nstatic void Copy(E* d, const E* s, unsigned int n);\n'),
       ['appended'], ['REC1-REJECT'])
 check('REC1-DUP-DEF an overload (other parameters) and a member of another class are not duplicates',
       _kdup('d3', 'void Copy(E* d, int n)\n{\n}\nvoid F::Copy(E* d, const E* s, unsigned int n)\n{\n}\n', _dt),
@@ -1312,27 +1286,6 @@ prepare.__dict__['_fnvnx_recon_rejected'] = []
 os.environ.pop('FNVNX_RECON', None)
 prepare.__dict__['_fnvnx_recon'] = None
 _shutil.rmtree(_rc, ignore_errors=True)
-
-# ---- S1-refs: HUNIT1 (explicit instantiations of a header unit's listed template members)
-_hu = run(s1.r_header_unit_instantiations, '#include "nitarray.inl"\nvoid NiTArray_UnitReference() {}\n',
-          '/nonexistent/src/gamebryo2.2/corelibs/nimain/nitarray_h_unit.cpp')
-check('HUNIT1 the listed members are explicitly instantiated', _hu,
-      ['template void NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*> >::SetAt(unsigned int, ActorCombatGroup*&);',
-       'fnv-nx HUNIT1'])
-check('HUNIT1 once only', str(run(s1.r_header_unit_instantiations, _hu,
-      '/nonexistent/src/gamebryo2.2/corelibs/nimain/nitarray_h_unit.cpp').count('fnv-nx HUNIT1')), ['1'])
-check('HUNIT1 other units untouched', run(s1.r_header_unit_instantiations, 'int x;\n', '/nonexistent/src/x_h_unit.cpp'),
-      [], ['HUNIT1'])
-
-# ---- S1-refs: XC2 (a hand-written dynamic initializer in XC1's form)
-_x2 = run(s1.r_handwritten_dyninit, 'struct NiPoint3StartupTable { int data[17]; };\nNiPoint3StartupTable gNiPoint3StartupSrc;\n'
-          'NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;\n',
-          '/nonexistent/src/gamebryo2.2/corelibs/nimain/console/nipoint3_console.cpp')
-check('XC2 the copy-initialization becomes extern + __fnvnx_dyninit_<addr>', _x2,
-      ['extern NiPoint3StartupTable gNiPoint3StartupDst;', 'extern "C" void __fnvnx_dyninit_00a62110(void)'],
-      ['gNiPoint3StartupDst = gNiPoint3StartupSrc;\n'])
-check('XC2 other units untouched', run(s1.r_handwritten_dyninit, 'NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;\n',
-      '/nonexistent/src/x.cpp'), [], ['XC2'])
 
 # ---- S1-layout: EBO3 (an empty base after a base with data goes after it, as in MSVC)
 _E3 = ('struct NodeBase0\n{\n    int a, b, c, d;\n};\nstruct NodeBase16\n{\n    NodeBase16* Next(NodeBase16* p);\n};\n'
@@ -1457,40 +1410,12 @@ check('determinism: all rules give the same output under PYTHONHASHSEED 1, 2, 3'
       [], ['error', ' | '])
 _shutil.rmtree(_dd, ignore_errors=True)
 
-# ---- VFTBL1: a table the decomp defines for a name bound to an exe vftable becomes a declaration
-_VP = os.path.normpath(os.path.abspath('/nonexistent/src/x.cpp'))
-_saved_v = s1._VFT_NAMES
-_vt = ('struct VTable { void* entries[4]; };\nvoid __cdecl AgentRelease(void*);\nnamespace fnv_00d2eae0 {\n'
-       'static const VTable g_vtblAgent = {\n    {(void*)&AgentRelease, (void*)&AgentRelease, 0, 0}};\n'
-       'static const VTable g_vtblBase = {{(void*)&AgentRelease}};\nstatic const VTable g_vtblPlain = {{0}};\n'
-       'void f(void** o) { *o = (void*)&g_vtblAgent; *o = (void*)&g_vtblBase; *o = (void*)g_vtblPlain.entries[1]; }\n}\n'
-       'static const VTable g_vtblGlobal = {{(void*)&AgentRelease}};\nvoid g(void** o) { *o = (void*)&g_vtblGlobal; }\n')
-s1._VFT_NAMES = {_VP: {'g_vtblAgent': True, 'g_vtblBase': False, 'g_vtblPlain': True, 'g_vtblGlobal': False}}
-_vo = run(s1.r_vftable_standins, _vt)
-check('VFTBL1 a namespace table bound by its C name becomes an extern "C" declaration', _vo,
-      ['extern "C" { extern const VTable g_vtblAgent; }'], ['g_vtblAgent = {'])
-check('VFTBL1 a namespace table not bound by its plain name stays', _vo, ['static const VTable g_vtblBase = {{('])
-check('VFTBL1 a table read through entries[k] stays (x86 slot k is native slot k+1)', _vo,
-      ['static const VTable g_vtblPlain = {{0}};'])
-check('VFTBL1 a global table becomes a plain declaration', _vo, ['extern const VTable g_vtblGlobal;'],
-      ['g_vtblGlobal = {'])
-check('VFTBL1 idempotent', run(s1.r_vftable_standins, _vo), [_vo])
-_st = Counter()
-s1.r_vftable_standins('/nonexistent/src/x.cpp', _vt, _st)
-check('VFTBL1 stats', str(_st['VFTBL1']), ['2'])
-s1._VFT_NAMES = {}
-check('VFTBL1 a name no unit binds to an exe vftable stays', run(s1.r_vftable_standins, _vt), [_vt])
-s1._VFT_NAMES = _saved_v
-check('VFTBL1 the committed list has the exe vftables 0x010ce838 and 0x0102e388',
-      str({0x010ce838, 0x0102e388} <= s1._exe_vftable_addrs()), ['True'])
-
 # ---- S1-rules: VFPAD1 (MSVC pads a class's own vfptr to the class's alignment; LAYOUT gate vfpad rows)
 _VF = ('struct V16 { virtual ~V16(); unsigned int m10; hkVector4 m20; };\n'
        'struct VD { FNVNX_D22(VD, virtual void v0() ;) /* fnv-nx D22 */\n    double m08; int* p; };\n'
        'struct VS { virtual void f(); int a; char b[4]; };\n'
        'struct VB : B { virtual void f(); hkVector4 m; };\n'
        'struct VN { struct In { __m128 q; }; virtual void f(); In m; };\n'
-       'struct hkpSphereMotionD1E4 { virtual void f(); short m_s; hkVector4 unk10; };\n'
        'class NF\n{\n  public:\n    typedef unsigned(__cdecl* RFN)(NF* p);\n    virtual ~NF();\n    RFN m_r; double d;\n};\n'
        '#pragma pack(push, 4)\nstruct VP4 { virtual void f(); double d; };\n#pragma pack(pop)\n'
        '#pragma pack(push, 8)\nstruct VP8 { virtual void f(); hkVector4 v; };\n#pragma pack(pop)\n')
@@ -1498,6 +1423,6 @@ _vfo = run(s1.r_vfptr_pad, _VF)
 check('VFPAD1 puts FNVNX_VFPAD(member types) first in a no-base class with a vfptr (not D22\'s macro text, not pointers)',
       _vfo, ['struct V16 { FNVNX_VFPAD(hkVector4) virtual', 'struct VD { FNVNX_VFPAD(double) FNVNX_D22',
              'struct VP8 { FNVNX_VFPAD_PACK(8, hkVector4) virtual', 'class NF\n{ FNVNX_VFPAD(double)\n'],
-      ['struct VS { FNVNX', 'struct VB : B { FNVNX', 'struct VN { FNVNX', 'struct hkpSphereMotionD1E4 { FNVNX',
+      ['struct VS { FNVNX', 'struct VB : B { FNVNX', 'struct VN { FNVNX',
        'struct VP4 { FNVNX', 'int*)'])
 

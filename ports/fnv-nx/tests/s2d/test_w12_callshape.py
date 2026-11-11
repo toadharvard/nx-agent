@@ -3,7 +3,6 @@
 
     python3 -I tests/s2d/test_w12_callshape.py
 
-* THIS2_SITES lists the this-not-passed callers the first scan missed (0x00c2a960 ...).
 * The three patch files (dbug1_w12_*, ret1_w12_*) parse, carry evidence, and their renames are in units_renames.tsv.
 * The by-value-member shape: GCC calls `o->member.vf()` directly (never reading the vptr); the patched shape (a local
   pointer to the member) reads the vptr and calls the slot. A search function whose index is dropped compiles to a
@@ -21,9 +20,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, '..', '..')
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 sys.path.insert(0, os.path.join(ROOT, 'tools', 'rules'))
-import prepare      # noqa: E402
-sys.modules.setdefault('prepare', prepare)
-import s2_bodies    # noqa: E402
 
 CXX = shutil.which('aarch64-linux-gnu-g++') or shutil.which('g++')
 
@@ -57,13 +53,6 @@ def body(text, sym_part):
 
 
 class W12(unittest.TestCase):
-    def test_sites(self):
-        self.assertEqual(s2_bodies.THIS2_SITES[0x00c2a960], 0x00c32f60)
-        self.assertEqual(s2_bodies.THIS2_SITES[0x00c2b1b0], 0x00c32f60)
-        self.assertEqual(s2_bodies.THIS2_SITES[0x00a99270], 0x00a9a730)
-        self.assertEqual(len(s2_bodies.THIS2_SITES), 47)
-        self.assertNotIn(0x00d31730, s2_bodies.THIS2_SITES)     # its callee 0x00d315d0 never reads ecx
-
     def test_patch_files(self):
         pd = os.path.join(ROOT, 'patches')
         ren = open(os.path.join(pd, 'units_renames.tsv')).read()

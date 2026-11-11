@@ -1061,23 +1061,6 @@ def load_stream_rules():
 # after the tree and build/ are written
 STREAM_POST = []
 
-def drop_native_units(out_root, stats, files):
-    """NATIVE1: units listed in render/native/drop_units.txt (source paths or glob patterns, `#` comments; D6, the
-    native renderer replaces them) leave the build list (<out>/build/units.json, which census.sh and the link step
-    read). The list is an input of prepare. The matching is tools/rules/native1.py's (also a command line tool)."""
-    import json, importlib.util
-    here = os.path.dirname(os.path.abspath(__file__))
-    spec = importlib.util.spec_from_file_location('fnvnx_native1', os.path.join(here, 'rules', 'native1.py'))
-    native1 = importlib.util.module_from_spec(spec); spec.loader.exec_module(native1)
-    drop = native1.load_list(os.path.join(here, '..', 'render', 'native', 'drop_units.txt'))
-    stats['NATIVE1'] += 0
-    if not drop: return
-    p = os.path.join(out_root, 'build', 'units.json')
-    data, gone = native1.drop_units(json.load(open(p)), drop)
-    stats['NATIVE1'] += len(gone)
-    files['NATIVE1'] += len({u.get('source') for u in gone})
-    json.dump(data, open(p, 'w'))
-
 class Memo:
     """FNVNX_PREPARE_MEMO=<dir> (T1: after a rule change prepare must stay incremental): each rule's result per file,
     keyed by (the rule's code, the file's path, the sha1 of the text it was given). The rule's code is its module
@@ -1351,7 +1334,6 @@ def main():
     # third_party/ (zlib 1.2.1: C units of units.json, compiled as C) is copied as it is: no rule edits it
     if os.path.isdir(os.path.join(src_root, 'third_party')):
         shutil.copytree(os.path.join(src_root, 'third_party'), os.path.join(out_root, 'third_party'), dirs_exist_ok=True)
-    drop_native_units(out_root, stats, files)
     for hook in STREAM_POST:
         hook(out_root, stats, files)
     with open(os.path.join(out_root, 'prepare_stats.tsv'), 'w') as f:

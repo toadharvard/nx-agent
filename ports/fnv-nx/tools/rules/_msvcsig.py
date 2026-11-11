@@ -1,4 +1,4 @@
-"""_msvcsig.py - the subset of MSVC 2008 decorated function names the S2-bodies call-site rules read (POP2, THIS2:
+"""_msvcsig.py - the subset of MSVC 2008 decorated function names the S2-bodies call-site rule reads (POP2:
 tools/rules/s2_bodies.py): scopes, member kind, convention, result, parameter codes and the stack words a call pushes.
 A helper module of tools/rules (prepare loads no RULES from a name starting with `_`)."""
 

@@ -161,8 +161,7 @@ SDK_TAGS = ('tagRECT tagPOINT tagSIZE _FILETIME _SYSTEMTIME _GUID _RTL_CRITICAL_
 # CRITICAL_SECTION: a struct copy of the PC type. _RTL_CRITICAL_SECTION_DEBUG: the decomp's SDK copy of
 # hkpcpuworldgetclosestpointsjob merges winnt.h's two records into `typedef struct _RTL_CRITICAL_SECTION_DEBUG {...}
 # RTL_CRITICAL_SECTION, *PRTL_CRITICAL_SECTION;` (so its CRITICAL_SECTION was the 32-byte debug record under MSVC);
-# dropped, the unit's CRITICAL_SECTION is the platform's 24-byte PC section (D15; no assert of the unit sizes it, so
-# neither CSX1 applies, and no code of the unit reads the holder's layout)
+# dropped, the unit's CRITICAL_SECTION is the platform's 24-byte PC section (D15)
 SDK_TYPEDEFS = {n: '"fnvnx_win32.h"' for n in '''DWORD BOOL BYTE WORD LONG UINT HANDLE HRESULT LPVOID ULONG_PTR
     DWORD_PTR WPARAM LPARAM LRESULT HINSTANCE HMODULE HWND HHOOK HKEY HDC HICON HMENU HBRUSH HFONT HBITMAP HCURSOR
     UINT_PTR LONG_PTR INT_PTR ATOM COLORREF LPSTR LPCSTR'''.split()}
@@ -415,13 +414,7 @@ def r_msvc_base_layout(path, text, stats):
 # nothing for N <= 4): a zero-width bit-field aligned like the most aligned member type (fnvnx_compat.h). Pointers,
 # references, function pointers and the 4-byte-or-smaller builtins are left out of the list; a class whose members
 # use a type nested in it (declared after the filler), an anonymous union / struct or a nested class member is held
-# (VFPAD-HELD). VFPAD1_SRC holds the classes whose member offset names say the exe has no padding there (the gate's
-# vfpad-src rows: the source's own vfptr stands for a 4-aligned base's), counted as VFPAD-SRC.
-
-VFPAD1_SRC = {
-    # hkpspheremotion.cpp: hkReferencedObject's members flattened in (m_usMemSizeAndFlags at 4, ..., unk10 at 0x10)
-    'hkpSphereMotionD1E4',
-}
+# (VFPAD-HELD).
 VFPAD1_SMALL = re.compile(r'^(?:(?:const|volatile|mutable|signed|unsigned|short|int|long|char|bool|float|wchar_t|'
                           r'__int8|__int16|__int32|BYTE|WORD|DWORD|UINT|INT|BOOL|LONG|ULONG|USHORT|UCHAR|FLOAT)\b\s*)+$')
 
@@ -482,8 +475,6 @@ def r_vfptr_pad(path, text, stats):
         if not types: continue
         if held:
             stats['VFPAD-HELD'] += 1; continue
-        if own in VFPAD1_SRC:
-            stats['VFPAD-SRC'] += 1; continue
         pk = None
         for at, v in packs:
             if at > o: break
@@ -1112,30 +1103,6 @@ def r_ref_cast_temporaries(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-# ---------------------------------------------------------------------------------------------------------- CSX1
-#
-# Asserts of the decomp's generated layouts that only hold on the Xbox 360: the member order of its big-endian
-# _FILETIME (tesform's layout header). The critical-section asserts this rule dropped under D15 (J-0051) hold again
-# since D15 was reopened (J-0067). Every other assert stays.
-
-CSX1_ASSERTS = {
-    # not a critical section: the Xbox 360 SDK's big-endian _FILETIME puts dwHighDateTime first (PC: dwLowDateTime)
-    '_FILETIME': 'dwHighDateTime dwLowDateTime'.split(),
-}
-
-CSX1_LINE = re.compile(r'^[ \t]*\w*ASSERT\s*\(\s*(?:sizeof\s*\(\s*([\w:]+)\s*\)|offsetof\s*\(\s*([\w:]+)\s*,\s*([\w.\[\]]+)\s*\))'
-                       r'[^\n]*\)\s*;[ \t]*$', re.M)
-
-def r_xbox_cs_asserts(path, text, stats):
-    """CSX1: drop the decomp's asserts that only hold on the Xbox 360 (see above)."""
-    if 'ASSERT' not in text or not any(c.split('::')[-1] in text for c in CSX1_ASSERTS): return text
-    def sub(m):
-        cls, member = (m.group(1), 'sizeof') if m.group(1) else (m.group(2), m.group(3))
-        if member not in CSX1_ASSERTS.get(cls, ()): return m.group(0)
-        stats['CSX1'] += 1
-        return '/* fnv-nx CSX1: Xbox 360 layout */'
-    return CSX1_LINE.sub(sub, text)
-
 # ---------------------------------------------------------------------------------------------------------- NEW3
 
 GLOBAL_DELETE = re.compile(r'^([ \t]*(?:static\s+)?(?:inline\s+|__forceinline\s+)?void\s+(?:__cdecl\s+)?operator\s+delete\s*'
@@ -1162,195 +1129,6 @@ def r_typeid_include(path, text, stats):
     if 'typeid' not in text or not re.search(r'\btypeid\s*\(', text) or prepare.OWN_STD.search(text): return text
     stats['TYPEID1'] += 1
     return '#include <typeinfo> /* fnv-nx TYPEID1 */\n' + text
-
-# ---------------------------------------------------------------------------------------------------------- UNIT1
-#
-# Targeted substitutions for single files (pragmatic fixes; every entry says why).
-
-UNIT_RENAMES = {
-    # tesdatahandler: a local `struct FILETIME {low, high}` / `struct WIN32_FIND_DATAA` with its own member names,
-    # in a header that also needs the SDK's file functions; the local types keep their layout under new names.
-    'fallout_shared/tesdatahandler_files.h': [(r'\bFILETIME\b', 'TesFileTime'), (r'\bWIN32_FIND_DATAA\b', 'TesFindData')],
-    'fallout_shared/tesdatahandler_decls.h': [(r'\bFILETIME\b', 'TesFileTime'), (r'\bWIN32_FIND_DATAA\b', 'TesFindData')],
-    'fallout_shared/tesdatahandler.cpp': [(r'\bFILETIME\b', 'TesFileTime'), (r'\bWIN32_FIND_DATAA\b', 'TesFindData')],
-    # SpeedTree: the stack object handed to the std::exception constructor (FUN_00ec78f1) is declared 8 bytes, but
-    # that constructor writes 12 (vfptr, _m_what, _m_doFree; S4b): without the third member the write runs past
-    # the object on the stack.
-    # blk_00c20000: FindFirstNonCancelButton is declared twice (C3C2B0HWND, long) / (void*, int); the decomp's own
-    # EnumChildWindows prototype (dropped by DECL1) took int (__stdcall*)(void*, int), which picked the second
-    'staging/blk_00c20000_od.cpp': [(r'EnumChildWindows\(owner, FindFirstNonCancelButton,',
-                                     r'EnumChildWindows(owner, (int(__stdcall*)(void*, int))FindFirstNonCancelButton,')],
-    'speedtree/frondengine.cpp': [(r'(struct FUN_00ec78f1_t\s*\{\s*int m0;\s*int m4;)', r'\1 int m8; /* fnv-nx UNIT1 */')],
-    'speedtree/frondengine_ob1_variant.cpp': [(r'(struct FUN_00ec78f1_t\s*\{\s*int m0;\s*int m4;)',
-                                               r'\1 int m8; /* fnv-nx UNIT1 */')],
-}
-
-def r_unit_renames(path, text, stats):
-    """UNIT1: targeted per-file renames (UNIT_RENAMES)."""
-    p = path.replace(os.sep, '/')
-    for key, subs in UNIT_RENAMES.items():
-        if p.endswith('/src/' + key):
-            for pat, rep in subs:
-                text, n = re.subn(pat, rep, text)
-                stats['UNIT1'] += n
-    return text
-
-# ---------------------------------------------------------------------------------------------------------- SPEC1
-#
-# The decomp defines members of class template specializations (`T<A>::m(...) { ... }`, often without the
-# `template <>`) after the unit has already used T<A>::m. MSVC takes the later definition as the one; C++ calls it an
-# explicit specialization after implicit instantiation. The primary template only declares those members, so an
-# early declaration `template <> R T<A>::m(P);` gives exactly MSVC's meaning: SPEC1 puts one right after the primary
-# template's definition (when it is in the same file) or after the file's last #include before the definition, with
-# typedef names of the template arguments that are declared later in the file expanded. A member defined through a
-# typedef name of the specialization (`typedef T<A> N;` ... `void N::m(...) { ... }`, T a class template of the
-# file) is the same member T<A>::m and gets the same declaration.
-
-SPEC_DEF = re.compile(r'^([ \t]*)(template\s*<\s*>\s*)?((?:FNVNX_KEEP\s+)?(?:(?:inline|static|virtual)\s+)*)'
-                      r'((?:[\w:<>,\*& \t]+?[\s\*&])?)'                    # return type (none for constructors)
-                      r'(\b(?:[A-Za-z_]\w*\s*::\s*)*[A-Za-z_]\w*)\s*<([^<>;{}()]*(?:<[^<>;{}()]*(?:<[^<>;{}()]*>[^<>;{}()]*)*>[^<>;{}()]*)*)>'
-                      r'\s*::\s*(~?\w+)\s*'
-                      r'\(([^;{}]*)\)\s*(const\s*)?(?=[{;:])', re.M)
-TEMPLATE_PARAM_LIKE = re.compile(r'^\s*(?:class|typename)\b|^\s*[A-Z]\s*$')
-
-def _primary_template_end(text, name):
-    m = re.search(r'\btemplate\s*<[^{};]*>\s*(?:class|struct)\s+%s\s*(?::[^;{}]*)?\{' % re.escape(name), text)
-    if not m: return None
-    end = prepare.match_brace(text, m.end() - 1)
-    semi = text.find(';', end - 1)
-    return semi + 1 if semi >= 0 else end
-
-# The files where GCC reports a member specialization defined after its implicit instantiation (census c8); the
-# rule only adds declarations, so it is limited to them rather than run on every member definition of the decomp.
-SPEC1_FILES = ('unmapped/threadsafestructures.cpp', 'bsmain/threadsafestructures.inl', 'fallout_shared/tesdatahandler.cpp',
-               'gamebryo2.2/corelibs/nimain/nitarray.inl', 'gamebryo2.2/corelibs/nimain/nitset.inl',
-               'bsshader/shadowscenelight.cpp', 'fallout/ai/movement/actormover.cpp', 'bscore/bssimplearray.h',
-               'speedtree/projectedshadow_ob1_variant.cpp')
-
-class _SpecVia:
-    """a member definition through a typedef name of a specialization, read like a SPEC_DEF match"""
-    def __init__(self, m, tmpl, args):
-        self._m, self._g = m, {5: tmpl, 6: args}
-    def start(self): return self._m.start()
-    def group(self, i): return self._g[i] if i in self._g else self._m.group({7: 5, 8: 6, 9: 7}.get(i, i))
-
-def _typedef_spec_defs(text):
-    """member definitions `N::m(...)` where the file declares `typedef T<A> N;` at the start of a line, T being a
-    class template the file defines: they define the members of the specialization T<A>, like SPEC_DEF's"""
-    out = []
-    for t in re.finditer(r'^[ \t]*typedef\s+([A-Za-z_]\w*)\s*<', text, re.M):
-        depth, i = 1, t.end()
-        while i < len(text) and depth:
-            if text[i] == '<': depth += 1
-            elif text[i] == '>': depth -= 1
-            elif text[i] in ';{}()': break
-            i += 1
-        if depth: continue
-        n = re.match(r'\s*([A-Za-z_]\w*)\s*;', text[i:])
-        if not n or not re.search(r'\btemplate\s*<[^{};]*>\s*(?:class|struct)\s+%s\s*(?::[^;{}]*)?\{'
-                                  % re.escape(t.group(1)), text[:t.start()]):
-            continue
-        args = re.sub(r'\s+', ' ', text[t.end():i - 1]).strip()
-        for m in re.finditer(r'^([ \t]*)(template\s*<\s*>\s*)?((?:FNVNX_KEEP\s+)?(?:(?:inline|static|virtual)\s+)*)'
-                             r'((?:[\w:<>,\*& \t]+?[\s\*&])?)\b%s\s*::\s*(~?\w+)\s*\(([^;{}]*)\)\s*(const\s*)?(?=[{;:])'
-                             % re.escape(n.group(1)), text[i:], re.M):
-            out.append(_SpecVia(_Shifted(m, i), t.group(1), args))
-    return out
-
-class _Shifted:
-    """a match of a slice text[off:], with positions in text"""
-    def __init__(self, m, off): self._m, self._off = m, off
-    def start(self): return self._m.start() + self._off
-    def group(self, i): return self._m.group(i)
-
-def r_specialization_decls(path, text, stats):
-    """SPEC1: declare explicit specializations of class template members before their first use (see above)."""
-    if '::' not in text or not path.replace(os.sep, '/').endswith(tuple('/src/' + f for f in SPEC1_FILES)):
-        return text
-    spans, edits = None, []
-    for m in sorted(list(SPEC_DEF.finditer(text)) + _typedef_spec_defs(text), key=lambda m: m.start()):
-        tmpl, args, member = m.group(5), m.group(6).strip(), m.group(7)
-        if tmpl in ('static_cast', 'reinterpret_cast', 'const_cast', 'dynamic_cast'): continue
-        if not args or any(TEMPLATE_PARAM_LIKE.match(a) for a in args.split(',')): continue
-        squash = lambda x: re.sub(r'\s+', '', x)
-        if any(squash(c) == squash(args) for c in re.findall(
-                r'\btemplate\s*<\s*>\s*(?:class|struct)\s+%s\s*<([^{};]*)>\s*(?::[^{};]*)?\{' % re.escape(tmpl), text)):
-            continue                                                 # this very T<A> is a class specialization
-        if spans is None: spans = prepare.scope_spans(text)
-        if any(k != 'namespace' for k, _ in prepare.scope_chain(spans, m.start())): continue
-        if prepare.scope_chain(spans, m.start()): continue          # file scope only
-        last = text[max(0, m.start() - 200):m.start()].rstrip()
-        if last.endswith('>') and re.search(r'\btemplate\s*<[^\n]*>$', last): continue   # template <class U> ...
-        p0 = _primary_template_end(text[:m.start()], tmpl)
-        if p0 is None:
-            # after the file's include preamble (the #includes before its first line of code): later #includes
-            # (DECL1 puts some mid-file) may come after the first use
-            pre = re.match(r'(?:[ \t]*(?:#[^\n]*|//[^\n]*)?\n|[ \t]*/\*.*?\*/[ \t]*\n)*', text[:m.start()], re.S)
-            incs = [i.end() for i in re.finditer(r'^[ \t]*#[ \t]*include[^\n]*', text[:pre.end()], re.M)]
-            if not incs:
-                incs = [i.end() for i in re.finditer(r'^[ \t]*#[ \t]*include[^\n]*', text[:m.start()], re.M)][:1]
-            if not incs: continue
-            p0 = incs[-1]
-        # typedef names in the arguments that the file declares after p0: use what they stand for
-        for _ in range(4):
-            changed = False
-            for name in set(re.findall(r'\b[A-Za-z_]\w*\b', args)):
-                td = re.search(r'^[ \t]*typedef\s+([^;{}()]+?)\s+%s\s*;' % re.escape(name), text[p0:m.start()], re.M)
-                if td: args = re.sub(r'\b%s\b' % re.escape(name), td.group(1).strip(), args); changed = True
-            if not changed: break
-        ret = re.sub(r'\b(?:FNVNX_KEEP|inline|static|virtual)\b', '', m.group(4) or '').strip()
-        params = re.sub(r'=\s*[^,]+', '', m.group(8))                # default arguments stay on the definition
-        keep = 'FNVNX_KEEP' in (m.group(3) or '')
-        # (GCC takes no attribute between `template <>` and the declarator: `used` goes after it)
-        decl = 'template <> %s%s<%s>::%s(%s)%s%s;' % (ret + ' ' if ret else '', tmpl, args, member, params,
-                                                     ' const' if m.group(9) else '', ' FNVNX_KEEP' if keep else '')
-        nl = text.find('\n', p0)
-        if nl < 0 or nl >= m.start(): continue
-        # not into a preprocessor line: after the directives that follow p0 (`#include <memory>` under an include)
-        while re.match(r'[ \t]*#', text[nl + 1:nl + 80]):
-            nxt = text.find('\n', nl + 1)
-            if nxt < 0 or nxt >= m.start(): break
-            nl = nxt
-        if re.match(r'[ \t]*#', text[nl + 1:nl + 80]): continue
-        # names of the declaration that are not declared yet at that point get a forward declaration when the file
-        # declares them as a class / struct at file scope; otherwise the declaration is not moved
-        fwd, unknown = [], False
-        # + the local headers included before it, transitively
-        seen_text, todo, done = text[:nl], [(path, text[:nl])], set()
-        root = _roots(path)
-        while todo:
-            fpath, ftext = todo.pop()
-            for inc in re.findall(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', ftext, re.M):
-                f = _resolve(inc, os.path.dirname(fpath), root)
-                if not f or f in done: continue
-                done.add(f)
-                with open(f, encoding='utf-8', errors='surrogateescape') as h: t2 = h.read()
-                seen_text += '\n' + t2
-                todo.append((f, t2))
-        if any(squash(c) == squash(args) for c in re.findall(
-                r'\btemplate\s*<\s*>\s*(?:class|struct)\s+%s\s*<([^{};]*)>\s*(?::[^{};]*)?\{' % re.escape(tmpl), seen_text)):
-            continue                                                 # a class specialization in an included header
-        ptypes = ','.join(re.sub(r'\b[A-Za-z_]\w*\s*$', '', p) if len(re.findall(r'[A-Za-z_]\w*', p)) > 1 else p
-                          for p in _split_args(params))                # parameter names are not types
-        for n in sorted(set(re.findall(r'(?<![\w:])([A-Za-z_]\w*)\b(?!\s*::)', args + ',' + ptypes + ',' + ret))):
-            if n in TPL_PLAIN or n in CXX_WORDS or n == tmpl or re.search(r'\b%s\b' % re.escape(n), seen_text): continue
-            if n in ('FNVNX_KEEP',): continue
-            k = re.search(r'^[ \t]*(class|struct|union)\s+%s\s*[;:{]' % re.escape(n), text, re.M)
-            if not k: unknown = True; break
-            fwd.append('%s %s;' % (k.group(1), n))
-        if unknown: continue
-        for n in set(re.findall(r'(?<![\w:])([A-Za-z_]\w*)\s*::', args + ',' + params + ',' + ret)):
-            if not re.search(r'\b%s\b' % re.escape(n), seen_text): unknown = True
-        if unknown: continue
-        edits.append((nl + 1, nl + 1, ' '.join(fwd + [decl]) + ' /* fnv-nx SPEC1 */ '))
-        stats['SPEC1'] += 1
-    if not edits: return text
-    out, pos = [], 0
-    for a, b, r in sorted(edits, key=lambda x: (x[0], x[1])):
-        if a < pos: continue
-        out.append(text[pos:a]); out.append(r); pos = b
-    out.append(text[pos:])
-    return ''.join(out)
 
 # ---------------------------------------------------------------------------------------------------------- VA1
 #
@@ -1507,8 +1285,7 @@ def _decl_end(text, i):
         if depth < 0: return None
     return None
 
-SCALAR_WORDS = set('volatile unsigned signed short long int char bool float double __int64 wchar_t BOOL BYTE WORD DWORD '
-                   'UInt8 UInt16 UInt32 SInt32 hkUint8 hkUint16 hkUint32 hkInt32 hkReal'.split())
+SCALAR_WORDS = set('volatile unsigned signed short long int char bool float double __int64 wchar_t BOOL BYTE WORD DWORD'.split())
 
 def _declared_once(text, name, spans, addrs, image=False):
     """True when the namespace static `name` is the file's only declaration of that name that its C name could
@@ -1573,104 +1350,6 @@ def r_image_statics(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-# ---------------------------------------------------------------------------------------------------------- VFTBL1
-#
-# The decomp sometimes stands a table of its own in for an exe vftable: `static const VTable g_vtblAgent = {{(void*)
-# &AgentRelease, ...}};` for the vftable at 0x010ce838 (hkpBvTreeStreamAgent, RTTI `.?AVhkpBvTreeStreamAgent@@`), with
-# declared-only functions as the slots, and units.json binds the name to that address. The link renames the definition
-# to `__fnv_<address>` and aliases.ld assigns that symbol the native vtable's address point (hand_vptrs / vmap, else
-# the D26 (c) minus-one copy), which overrides the definition (tools/link/test_vtables.py); but the invented
-# initializer stays in the object, and the functions it names (AgentRelease, AgentFlush) are undefined names nothing
-# else references. VFTBL1 turns such a definition into a declaration, `extern const VTable g_vtblAgent;` (a namespace
-# one under C linkage like STATIC1's, where the name is bound as `_g_vtblAgent`), so that `&g_vtblAgent` is an
-# undefined reference bound by address like any other, and no initializer remains.
-# Only a name that units.json binds, at file scope, to an address in VFTBL1_SITES (exe vftables with an RTTI locator;
-# tools/rules/check_vftbl1.py checks each against the exe, and lists the units.json-bound initialised tables at other
-# exe vftables, which a new site must come from), defined with a brace initializer, and that the file
-# uses only through `&name`: a reader indexing `name.entries[k]` expects x86 slot k, and under D26 native slot k+1 is
-# exe slot k, so it is left as written. (Uninitialised `int DAT_<address>;` definitions need no rule: no initializer,
-# the link renames them the same way.)
-
-VFT_INIT = re.compile(r'^([ \t]*)(?:static\s+)?((?:const\s+|volatile\s+)*[A-Za-z_][\w:<>,\s\*&]*?[\s\*&](\w+)'
-                      r'(?:\s*\[[^\]]*\])*)\s*=\s*\{', re.M)
-# The exe vftables (RTTI class) whose units.json-bound name the decomp defines with an initialised stand-in table
-VFTBL1_SITES = {
-    0x010ce838,   # .?AVhkpBvTreeStreamAgent@@ - g_vtblAgent, hkpbvtreestreamagent.cpp
-    0x0102e388,   # .?AVhkBaseObject@@ - g_vtblBase, hkpbvtreestreamagent.cpp
-    0x01030bf4,   # g_vtblShape, bstreenode_o2_variant.cpp
-    0x01030b0c,   # g_vtblSphereRep, bstreenode_o2_variant.cpp
-    0x01066c5c,   # g_vtblMultiSphere, bstreenode_o2_variant.cpp
-}
-_VFT_NAMES = None        # file -> {name: is it bound as a C name (`_name`)}
-
-def _exe_vftable_addrs():
-    return VFTBL1_SITES
-
-def _vftable_bound_names(path):
-    """{absolute file: {name: bound as a C name}} of data names a unit including the file binds to an exe vftable."""
-    global _VFT_NAMES
-    if _VFT_NAMES is not None: return _VFT_NAMES
-    import json
-    _VFT_NAMES = {}
-    root, uj = prepare._units_json(path)
-    if not uj: return _VFT_NAMES
-    vft = _exe_vftable_addrs()
-    inc = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', re.M)
-    for u in json.load(open(uj))['units']:
-        names = {}
-        for n, a in u.get('symbols', {}).items():
-            if int(a, 16) not in vft or n.startswith('??_7'): continue
-            m = DATA_NAME.match(n)
-            if m: names.setdefault(m.group(1), False)
-            elif n.startswith('_') and n[1:].isidentifier(): names[n[1:]] = True
-        if not names: continue
-        todo, seen = [os.path.normpath(os.path.join(root, u['source']))], set()
-        while todo:
-            f = todo.pop()
-            if f in seen or not os.path.isfile(f): continue
-            seen.add(f)
-            with open(f, encoding='utf-8', errors='surrogateescape') as h: t = h.read()
-            e = _VFT_NAMES.setdefault(f, {})
-            for n, c in names.items(): e[n] = e.get(n, False) or c
-            for i in inc.findall(t):
-                for base in (os.path.dirname(f), os.path.join(root, 'include')):
-                    g = os.path.normpath(os.path.join(base, i))
-                    if os.path.isfile(g): todo.append(g); break
-    return _VFT_NAMES
-
-def r_vftable_standins(path, text, stats):
-    """VFTBL1: a table the decomp defines for a name bound to an exe vftable becomes a declaration (see above)."""
-    if '=' not in text: return text
-    names = _vftable_bound_names(path).get(os.path.normpath(os.path.abspath(path)))
-    if not names: return text
-    bare = COMMENT.sub(lambda m: re.sub(r'[^\n]', ' ', m.group(0)), text)
-    spans, edits = None, []
-    for m in VFT_INIT.finditer(bare):
-        name = m.group(3)
-        if name not in names: continue
-        if re.search(r'\bextern\b', bare[bare.rfind('\n', 0, m.start()) + 1:m.start(2)]): continue
-        if spans is None: spans = prepare.scope_spans(bare)
-        chain = prepare.scope_chain(spans, m.start())
-        if any(k not in ('namespace', 'extern') for k, _ in chain): continue
-        namespaced = any(k == 'namespace' for k, _ in chain)
-        if namespaced and not names[name]: continue     # not bound by its plain name: C linkage would name another symbol
-        end = _decl_end(bare, m.end() - 1)
-        if end is None or '#' in bare[m.end():end]: continue
-        # every other use of the name takes its address: `vtbl = &name;`, `(void*)&name`
-        if any(not re.search(r'&\s*$', bare[:u.start()]) for u in re.finditer(r'(?<![\w:.>])%s\b' % re.escape(name), bare)
-               if not m.start(3) <= u.start() < m.end(3)):
-            continue
-        decl = bare[m.start(2):m.end(2)].rstrip()
-        new = m.group(1) + ('extern "C" { extern %s; }' if namespaced else 'extern %s;') % decl
-        edits.append((m.start(), end + 1, new))
-    if not edits: return text
-    out, pos = [], 0
-    for a, b, r in edits:
-        out.append(text[pos:a]); out.append(r); pos = b
-        stats['VFTBL1'] += 1
-    out.append(text[pos:])
-    return ''.join(out)
-
 # ---------------------------------------------------------------------------------------------------------- DUPINT1
 #
 # The decomp sometimes declares the same function twice in one unit, differing only in an integer parameter's type
@@ -1705,11 +1384,6 @@ def _unit_symbols(path):
         if uj:
             for u in json.load(open(uj))['units']:
                 _UNIT_SYMBOLS[os.path.normpath(os.path.join(root, u['source']))] = dict(u.get('symbols', {}))
-            # BIND1's rows and VLIT's bindings: the source rules see these names bound
-            for src, name, addr in BIND1_REFS + sorted(VLIT1_BINDS):
-                k = os.path.normpath(os.path.join(root, src))
-                if k in _UNIT_SYMBOLS:
-                    _UNIT_SYMBOLS[k].setdefault(name, addr)
     return _UNIT_SYMBOLS.get(os.path.normpath(os.path.abspath(path)))
 
 def _param_type(p):
@@ -2164,43 +1838,6 @@ def math_own_statics(text, stats):
         text = re.sub(r'(?<![\w.>:~])%s(?=\s*\()' % n, 'fnvnx_own_' + n, text)
         stats['MATH1-OWN'] += 1
     return text
-
-# ---------------------------------------------------------------------------------------------------------- SPEC2
-
-# Files where GCC reports "specializing member ... requires 'template<>' syntax" (census c16): definitions of members
-# of a class template specialization, which MSVC took without `template <>`.
-SPEC2_FILES = ('staging/blk_00440000_od.cpp', 'staging/blk_006e0000_od.cpp', 'staging/blk_00b40000_od_ob1_variant.cpp',
-               'staging/blk_00b40000_od_ob1_variant_rtm_variant.cpp', 'unmapped/bssimplearray.cpp')
-
-def r_specialization_prefix(path, text, stats):
-    """SPEC2: `template <>` in front of the decomp's definitions of members of class template specializations
-    (`void BSTFreeList<QueuedMessage>::f(...) {`) at file scope in SPEC2_FILES, as C++ requires and MSVC did not.
-    Members of an explicitly specialized class (`template <> class T<A> {...}`) take no prefix and are left alone."""
-    if '>::' not in text or not path.replace(os.sep, '/').endswith(tuple('/src/' + f for f in SPEC2_FILES)):
-        return text
-    spans, edits = None, []
-    squash = lambda x: re.sub(r'\s+', '', x)
-    explicit = [squash(c) for c in re.findall(r'\btemplate\s*<\s*>\s*(?:class|struct)\s+\w+\s*<([^{};]*)>\s*(?::[^{};]*)?\{',
-                                              text)]
-    for m in SPEC_DEF.finditer(text):
-        if m.group(2): continue
-        if not text[m.end():].lstrip().startswith(('{', ':')): continue          # a definition
-        tmpl, args = m.group(5), m.group(6).strip()
-        if tmpl in ('static_cast', 'reinterpret_cast', 'const_cast', 'dynamic_cast'): continue
-        if not args or any(TEMPLATE_PARAM_LIKE.match(a) for a in args.split(',')): continue
-        if squash(args) in explicit: continue
-        before = re.sub(r'(?://[^\n]*\n|/\*.*?\*/|\s)+$', '', text[max(0, m.start() - 400):m.start()], flags=re.S)
-        if re.search(r'\btemplate\s*<[^\n]*>$', before): continue                  # already a template head
-        if spans is None: spans = prepare.scope_spans(text)
-        if any(k != 'namespace' for k, _ in prepare.scope_chain(spans, m.start())): continue
-        edits.append(m.start(3))
-        stats['SPEC2'] += 1
-    if not edits: return text
-    out, pos = [], 0
-    for at in edits:
-        out.append(text[pos:at]); out.append('template <> '); pos = at
-    out.append(text[pos:])
-    return ''.join(out)
 
 # ---------------------------------------------------------------------------------------------------------- LEX1
 #
@@ -3381,54 +3018,7 @@ def r_class_alignment(path, text, stats):
         return m.group(3) + m.group(4) + ' ' + m.group(1) + ws
     return ALIGN_HEAD.sub(sub, text)
 
-# ---------------------------------------------------------------------------------------------------------- BIND1
-#
-# A member or variable of a stand-in class that the unit uses but units.json does not bind: MSVC never emitted a
-# reference to it as such (the use sits in an inline function MSVC compiled out of line, and the matcher bound that
-# copy to the exe's function), while GCC inlines that function and references the name itself, which the link cannot
-# resolve (S2 leaves it to a trap). BIND1 adds the binding to the unit's symbols in the prepared build/units.json
-# (POST hook) where the decomp shows what the name is in the exe:
-# * blk_00aa0000_od_ob1_variant.cpp, MemoryManager's constructor 0x00aa3880 (f13, J-0080): its m_kTable is a
-#   TableAA3880 whose base constructor TableBaseAA3880(37) allocates through g_kMemoryAA3880.Allocate. The unit
-#   binds that inline constructor (??0TableBaseAA3880@@QAE@I@Z) to 0x00aa47e0, and the decomp's 0x00aa47e0
-#   (blk_00aa0000_od.cpp, FUN_00aa47e0_Class::FUN_00aa47e0) makes that allocation as g_memoryManager.Allocate, which
-#   its unit binds to 0x00aa3e40 (MemoryManager::Allocate, defined in this unit as MemoryManagerStandIn::FUN_00aa3e40)
-#   on 0x011f6238 (the memory manager, ?DAT_011f6238@@3UMemoryManager@@A here too).
-
-# VLIT1's `DAT_<addr>` names, bound in their unit (the C name `_DAT_<addr>`), filled while the tree is prepared
-VLIT1_BINDS = set()
-BIND1_REFS = [
-    # (unit source, MSVC decorated name, address)
-    ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?Allocate@MemoryManagerAA3880@@QAEPAXI@Z', '0x00aa3e40'),
-    ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?g_kMemoryAA3880@@3UMemoryManagerAA3880@@A', '0x011f6238'),
-    # Placeholder variables decl-data would give a zero copy (S2-bodies), each with the exe's bytes at the site the
-    # unit's pristine object references it:
-    # * RefSet6b3c0::Insert (the unit binds it to 0x00c68b50; Node6b3c0::operator new inlined): the exe has
-    #   `push 8; mov ecx, 0x011f6238; call 0x00aa3e40` at 0x00c68b63, where the pristine object relocates
-    #   g_memoryManager6b3c0 (DIR32) and MemoryManager6b3c0::Allocate (REL32): the memory manager and its Allocate.
-    ('src/fallout_shared/globalfunc_o2_variant.cpp', '?g_memoryManager6b3c0@@3UMemoryManager6b3c0@@A', '0x011f6238'),
-    ('src/fallout_shared/globalfunc_o2_variant.cpp', '?Allocate@MemoryManager6b3c0@@QAEPAXI@Z', '0x00aa3e40'),
-    # * ??_G of FUN_00ae8d10 (slot 0 of the vftable the unit binds, 0x010a3328 -> 0x00ae9060; MapBase8D10's
-    #   operator delete inlined): `if (flags & 1) { push this; mov ecx, 0x011f6238; call 0x00aa4060 }` at 0x00ae90cf.
-    ('src/staging/blk_00ae0000_od_ob1_variant.cpp', '?g_kMemoryManager8D10@@3UMemoryManager8D10@@A', '0x011f6238'),
-    ('src/staging/blk_00ae0000_od_ob1_variant.cpp', '?Deallocate@MemoryManager8D10@@QAEXPAX@Z', '0x00aa4060'),
-    # * OutlinedEntry's constructor 0x00aaec10 (`assign(rhs, 0, entryNpos)`): `mov edx, [0x010173f0]; push edx` at
-    #   0x00aaec6f, the .rdata word 0xffffffff (npos) other units bind as DAT_010173f0.
-    ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?entryNpos@@3IA', '0x010173f0'),
-    # * Vector12::length_error (blk_00ac0000_od_ob1_variant.cpp, a static in-class stand-in throwing with the
-    #   placeholder vector_error_message): the exe's ReserveItems 0x0065cfd0 calls 0x0065f640 (ThrowVectorTooLong,
-    #   which pushes the exe's own message) at 0x0065d00e, where the pristine object calls this name
-    ('src/staging/blk_00ac0000_od_ob1_variant.cpp', '?length_error@Vector12@@SAXXZ', '0x0065f640'),
-    # * W28 (top-down 44): MMAlloc::Allocate (blk_00aa0000_od_ob1_variant.cpp, exe 0x00aa3e40) reads the small-pool
-    #   table `if (n <= 0x3fc) pool = smallPools[n >> 2]`: the exe has `cmp [ebp+8], 0x3fc; shr edx, 2;
-    #   mov eax, [edx*4 + 0x011f67b8]` at 0x00aa3ee8 (and 0x00aa498b). The unit's pristine object relocates it (DIR32) in
-    #   a COMDAT function the exe compiled with GetHeapIndex inlined, so exe-data's byte match never finds the site.
-    ('src/staging/blk_00aa0000_od_ob1_variant.cpp', '?smallPools@fnv_00aafc80@@3PAPAUDeallocPool@1@A', '0x011f67b8'),
-    # * W28 (top-down 109): LNode_af5480::AddTail (src/bssystem/archive.cpp; exe 0x00afcc10): `push 8;
-    #   mov ecx, 0x011f6238; call 0x00aa3e40` at 0x00afcc5c: the memory manager, as for g_memoryManager6b3c0.
-    ('src/bssystem/archive.cpp', '?g_memoryManager_af5480@fnv_00af5480@@3UMemoryManager_af5480@1@A', '0x011f6238'),
-]
-
+# POST hooks of this module (STD2, REC1)
 POST = []
 
 # ---------------------------------------------------------------------------------------------------------- VA2
@@ -3556,9 +3146,8 @@ def _vlit_exe_stores(path, text, stats, defs):
 
 def _vlit_apply(path, text, stats, hits):
     """VLIT2's edits: each literal -> `(char*)&DAT_<V>` (its cast kept), `extern "C" char DAT_<V>;` in front of the
-    outermost function or class around its first store, a binding row for the link (VLIT1_BINDS). All positions are
+    outermost function or class around its first store, All positions are
     in the original text; the edits apply from the end."""
-    root, _ = prepare._units_json(path)
     masked = FRIEND_MASK.sub(lambda x: re.sub(r'[^\n]', ' ', x.group()), text)
     spans = prepare.scope_map(masked)
     edits, first = [], {}
@@ -3568,8 +3157,6 @@ def _vlit_apply(path, text, stats, hits):
             m.group(1), m.group(2), v, m.group(4), m.group(3).replace('*/', '* /'))))
         first[name] = min(first.get(name, m.start()), m.start())
         stats['VLIT2'] += 1
-        if root: VLIT1_BINDS.add((os.path.relpath(os.path.abspath(path), root).replace(os.sep, '/'), '_' + name,
-                                  '0x%08x' % v))
     for name, pos in first.items():
         # its own identifier for the symbol DAT_<V> (asm label): the file may declare DAT_<V> itself, with another
         # type or in another scope (blk_004c0000_od.cpp `int DAT_01020944`)
@@ -3608,9 +3195,6 @@ def r_vptr_literals(path, text, stats):
     m, _ = hits[0]
     stats['VLIT1'] += 1
     name = 'DAT_%08x' % next(iter(addrs))
-    root, _ = prepare._units_json(path)
-    if root: VLIT1_BINDS.add((os.path.relpath(os.path.abspath(path), root).replace(os.sep, '/'), '_' + name,
-                              '0x%08x' % next(iter(addrs))))
     text = (text[:m.start()] + '%s(char*)&%s%s /* fnv-nx VLIT1: "%s" */' % (m.group(1), name, m.group(3),
                                                                              m.group(2).replace('*/', '* /'))
             + text[m.end():])
@@ -3716,7 +3300,7 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_unit_renames, r_include_case, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_xbox_cs_asserts, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_specialization_decls, r_specialization_prefix, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals_exe, r_vptr_literals, r_vftable_standins, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_msvc_base_layout, r_vfptr_pad, r_msvc_empty_bases, r_class_alignment, r_friend_class_visibility]
+RULES = [r_include_case, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals_exe, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_msvc_base_layout, r_vfptr_pad, r_msvc_empty_bases, r_class_alignment, r_friend_class_visibility]
 
 # ==================================================================================================== stream S1-refs
 #
@@ -4354,9 +3938,7 @@ def r_vfptr_empty_base(path, text, stats):
 # unit, pair index, count, the start of `old`) by the POST hook.
 # REC1-DUP-DEF (orchestrator, R2): an append that would define a function the unit already defines (same namespace
 # path, qualified name and parameter types, at namespace scope) is rejected the same way (pair index -2), instead of
-# failing the compile with a redefinition. A recon that restored a body a rule had stripped (STAND1 with a split head)
-# then stops applying by itself once the rule keeps the body.
-
+# failing the compile with a redefinition. 
 def _reccert():
     import importlib.util
     m = prepare.__dict__.get('_fnvnx_reccert')
@@ -4489,15 +4071,6 @@ def _recon_reject(r, d, src, bad, stats):
         msg = 'replace[%d] "old" occurs %d times, not once: %r' % (k, c, what)
     sys.stderr.write('REC1-REPL: recon rejected for %s: %s (%s); its rows stay trap stubs\n' % (src, d, msg))
 
-def _rec1_unstand4(path, text):
-    """text with every STAND4 rewrite put back to the definition it replaced (None when STAND4 rewrote nothing here)."""
-    spans = prepare.__dict__.get('_fnvnx_stand4_spans', {}).get(os.path.abspath(path))
-    if not spans: return None
-    out = text
-    for marker, orig in spans:
-        if out.count(marker) == 1: out = out.replace(marker, orig)
-    return out if out != text else None
-
 def r_recon_bodies(path, text, stats):
     """REC1: append the reconstructed bodies FNVNX_RECON holds for this unit (D20; see above)."""
     if not os.environ.get('FNVNX_RECON') or not path.endswith(('.cpp', '.c')): return text
@@ -4516,15 +4089,6 @@ def r_recon_bodies(path, text, stats):
             if not isinstance(old, str) or not old or not isinstance(new, str):
                 bad = (k, -1, 'needs a non-empty "old" and a "new" string'); break
             c = edited.count(old)
-            if c == 0:
-                # REC1 x STAND4: a recon is written against the decomp text, and STAND4 (which runs before REC1) turned a
-                # lone static stand-in into an extern declaration. Match on the text before STAND4 (its marker put back
-                # to the original definition), apply the pair there, and let STAND4 convert what is left of it.
-                un = _rec1_unstand4(path, edited)
-                if un is not None and un.count(old) == 1:
-                    edited = un.replace(old, new)
-                    edited = r_static_stand_ins(path, edited, stats)
-                    continue
             if c != 1:
                 bad = (k, c, old[:120]); break
             edited = edited.replace(old, new)
@@ -4606,64 +4170,6 @@ def add_recon_definitions(out_root, stats, files=None):
         if files is not None: files['REC1-DEF'] += 1
 
 POST.append(add_recon_definitions)
-
-# ---------------------------------------------------------------------------------------------------------- HUNIT1
-#
-# A header unit (nitarray_h_unit.cpp) exists only to make MSVC emit the COMDATs of class-template members its recipe
-# lists (NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*>>::SetAt 0x0096ae90, SetAtGrow 0x00470000,
-# SetSize 0x0096ad30): it calls them through a null pointer in NiTArray_UnitReference. MSVC /Od emitted each one. GCC
-# at -O2 inlines the calls, so SetAt and SetAtGrow were emitted nowhere and their addresses had no native definition
-# (S5-boot collect-all: 0x0096ae90, 1,238 trap hits from FUN_0096a850's constructor). An `used` attribute cannot
-# help: the unit instantiates the class (a sizeof check) before the members' definitions, and GCC does not attach a
-# later definition's attributes to it. HUNIT1 appends explicit instantiation definitions of exactly those members,
-# which emits them (weak) as MSVC did. Neutral: under MSVC an explicit instantiation of members the unit already
-# emits changes nothing (S11 gate). Sites: HUNIT1_SITES.
-
-HUNIT1_SITES = [
-    ('gamebryo2.2/corelibs/nimain/nitarray_h_unit.cpp',
-     'template void NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*> >::SetAt(unsigned int, '
-     'ActorCombatGroup*&);\n'
-     'template unsigned int NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*> >::SetAtGrow(unsigned int, '
-     'ActorCombatGroup*&);\n'
-     'template void NiTArray<ActorCombatGroup*, NiTMallocInterface<ActorCombatGroup*> >::SetSize(unsigned int);\n'),
-]
-
-def r_header_unit_instantiations(path, text, stats):
-    """HUNIT1: explicit instantiations of the class-template members a header unit's recipe lists (see above)."""
-    rel = path.replace(os.sep, '/')
-    for unit, inst in HUNIT1_SITES:
-        if rel.endswith('/' + unit) and 'fnv-nx HUNIT1' not in text:
-            text = text.rstrip('\n') + '\n\n/* fnv-nx HUNIT1: the members the recipe lists, emitted as MSVC did */\n' + inst
-            stats['HUNIT1'] += inst.count('template ')
-    return text
-
-# ---------------------------------------------------------------------------------------------------------- XC2
-#
-# XC1 (S10, startup/tools/dyninit_rewrite.py) gives every ??__E dynamic initializer of the generated units its own
-# extern "C" __fnvnx_dyninit_<addr>, which the link maps to the address and the startup runner calls in the image's
-# order. A hand-written unit can spell one as a plain copy-initialization, which XC1 does not see (it rewrites
-# generated/ only): nipoint3_console.cpp's `NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;` is
-# ??__EgNiPoint3StartupDst@@YAXXZ at 0x00a62110 (the 17-dword copy; the decomp's tag sits on the line above), which
-# InitializeGameSystems calls directly (S5-boot collect-all: "decomp body exists, not in the link"). GCC made it an
-# anonymous local static initializer, so the address had no native definition. XC2 writes XC1's form for the sites
-# of XC2_SITES: the object becomes `extern` (the recipe binds it to its image address, 0x011f4600) and the copy
-# becomes __fnvnx_dyninit_<addr>. Same line. Platform, like XC1.
-
-XC2_SITES = [
-    ('gamebryo2.2/corelibs/nimain/console/nipoint3_console.cpp',
-     'NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;',
-     'extern NiPoint3StartupTable gNiPoint3StartupDst; extern "C" void __fnvnx_dyninit_00a62110(void) '
-     '{ gNiPoint3StartupDst = gNiPoint3StartupSrc; } /* fnv-nx XC2: ??__EgNiPoint3StartupDst 0x00a62110 */'),
-]
-
-def r_handwritten_dyninit(path, text, stats):
-    """XC2: XC1's extern + __fnvnx_dyninit_<addr> form for hand-written dynamic initializers (XC2_SITES, above)."""
-    rel = path.replace(os.sep, '/')
-    for unit, old, new in XC2_SITES:
-        if rel.endswith('/' + unit) and text.count(old) == 1:
-            text = text.replace(old, new)
-            stats['XC2'] += 1
-    return text
 
 # ---------------------------------------------------------------------------------------------------------- EBO3
 #
@@ -4787,8 +4293,8 @@ def r_split_virtual_declarators(path, text, stats):
 # basic_string&, unsigned, unsigned) { ... if (_Roff == 0x7f3f3f3f) {...; _Tidy(...)} ... }` only to reproduce the
 # frame MSVC /Ob1 reserves before it rolls the expansion back to a call. The unit binds
 # `?assign@?$basic_string@...` to 0x0044a580, the exe's assign, which another unit decompiles. GCC inlined the stand-in
-# and called _Tidy (0x0044a730) where the exe calls 0x0044a580 with the real arguments. STAND5 covers in-class bodies;
-# this one is out of class. STAND7 puts such a definition under `#ifdef _MSC_VER`: MSVC keeps its byte-match body, and
+# and called _Tidy (0x0044a730) where the exe calls 0x0044a580 with the real arguments.
+# STAND7 puts such a definition under `#ifdef _MSC_VER`: MSVC keeps its byte-match body, and
 # GCC sees only the class's declaration and calls the bound name, which the link binds to the exe's function. Only
 # where:
 # - the definition is `inline`, in an /Od /Ob1 unit (MSVC expanded it, then rolled the expansion back to the call the
@@ -4833,6 +4339,6 @@ def r_template_member_stand_ins(path, text, stats):
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
               r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
-              r_header_unit_instantiations, r_handwritten_dyninit, r_later_empty_base,
+              r_later_empty_base,
               r_split_virtual_declarators, r_template_member_stand_ins]
 RULES += REFS_RULES
