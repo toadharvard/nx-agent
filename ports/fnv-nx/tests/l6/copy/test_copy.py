@@ -166,8 +166,8 @@ def main():
     gate_report(tmp, prod)
     if "--no-guest" not in sys.argv:
         before = os.path.join(tmp, "head"); os.makedirs(before)
-        a = subprocess.run("git -C %s archive %s ports/fnv-nx/render ports/fnv-nx/shim ports/fnv-nx/tests/l6/env | tar -x -C %s" % (ROOT, os.environ.get("NXCOPY_BASE", "f712b9e1"), before), shell=True, capture_output=True, text=True)
-        b = guest_undefined(os.path.join(before, "ports", "fnv-nx"), os.path.join(tmp, "gb")) if a.returncode == 0 else None; c = guest_undefined(ROOT, os.path.join(tmp, "ga"))
+        a = subprocess.run("git -C %s archive %s render shim tests/l6/env | tar -x -C %s" % (ROOT, os.environ.get("NXCOPY_BASE", "f712b9e1"), before), shell=True, capture_output=True, text=True)
+        b = guest_undefined(before, os.path.join(tmp, "gb")) if a.returncode == 0 else None; c = guest_undefined(ROOT, os.path.join(tmp, "ga"))
         print(f"guest build undefined symbols: before (HEAD) {b[1] if b else 'n/a'} -> after {c[1] if c else 'n/a'}")
         for name, x in (("before", b), ("after", c)):
             if x and isinstance(x[0], dict): print(f"  {name} by owner: " + ", ".join(f"{k} {v}" for k, v in sorted(x[0].items())))

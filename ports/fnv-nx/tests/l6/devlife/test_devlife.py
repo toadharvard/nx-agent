@@ -190,9 +190,9 @@ def gen(tmp):
     return None
 
 
-def compile_all(tmp, dev, objs, jobs=4, only=None):
+def compile_all(tmp, dev, objs, jobs=4, only=None, outdir=None):
     """objs: {name: source}; compiles the ones in `only` (all when None) into tmp/objs/name.o"""
-    od = os.path.join(tmp, "objs"); os.makedirs(od, exist_ok=True); cmds = []
+    od = outdir or os.path.join(tmp, "objs"); os.makedirs(od, exist_ok=True); cmds = []
     for n, src in objs.items():
         if only is not None and n not in only: continue
         cmds.append((n, (["gcc", "-m32", "-std=c11", "-w", "-I", BACK, "-I", FRONT] if src.endswith(".c") else fl(tmp, dev)) + ["-c", src, "-o", os.path.join(od, os.path.splitext(n)[0] + ".o")]))
@@ -262,7 +262,7 @@ def main():
             part, f, old, new = muts[i]; mdev = os.path.join(tmp, f"m{i}_dev"); shutil.copytree(DEV, mdev, ignore=shutil.ignore_patterns("__pycache__")); txt = open(os.path.join(mdev, f)).read()
             if old not in txt: return i, None, "pattern not found"
             open(os.path.join(mdev, f), "w").write(txt.replace(old, new, 1)); mt = os.path.join(tmp, f"m{i}"); os.makedirs(os.path.join(mt, "objs"), exist_ok=True)
-            e2 = compile_all(mt, mdev, {f: os.path.join(mdev, f)}); 
+            e2 = compile_all(tmp, mdev, {f: os.path.join(mdev, f)}, outdir=os.path.join(mt, 'objs'))
             if e2: return i, None, e2
             names = list(prod); od = os.path.join(mt, "objs"); mexe = os.path.join(mt, "t")
             rr = sh(["g++", "-m32", "-no-pie", "-o", mexe] + [os.path.join(od if n == f else os.path.join(tmp, "objs"), os.path.splitext(n)[0] + ".o") if n == f else os.path.join(tmp, "objs", os.path.splitext(n)[0] + ".o") for n in names]

@@ -192,3 +192,14 @@ Gate `GATE_OUT=<dir> python3 -I ports/fnv-nx/render/total/gate_d3d9total.py` (1.
   4. the 16 vendor FOURCC formats are a hand list in gen_enums.py (from Wine's table): derive it from the env table instead.
 - Owed: tests/l6/tex/test_tex.py still names render/native/front/d3d9_state.c (now render/d3d9/front/front_fmt.c) and reads the table from C text: rewrite on the generated data in D4b. render/native/gl (v3 nxgl) goes when B2b lands.
 - The old directories toolchain/game, toolchain/host, tools/pipeline, tests/v1, tests/v6n, tests/s5 still name deleted render paths (other owners).
+
+## D6 + GLUE accepted 2026-11-11 (copies, Clear, device -> backend glue, format roles)
+
+Lead's run: copy ALL OK (a 189 533, b 3 767, c 72, d 75 checks by the worker's count), tex ALL OK incl. part h (format completeness per role, the hand pins are deleted). Guest build undefined 134 -> 41 in the working tree (includes D7's files in progress).
+- Format rule per role is in front_fmt.c / front_conv.c / front_rt.c (A2R10G10B10 native; A8, L8, R8G8B8, L6V5U5, X8L8V8U8 by exact storage conversion + write mask / sampler fixup; INDEX16/32 as R16 / R32F; NULL = pass without attachment; INST, RESZ, ATOC, NVDB not creatable).
+- Left without body, no complete contract: ProcessVertices; SetClipStatus / GetClipStatus (until the draw path defines the status).
+- TO RECHECK (lead): DrawRectPatch / DrawTriPatch / DeletePatch return D3DERR_INVALIDCALL because the env caps have no patch bits (Wine returns D3D_OK without drawing): constant-result functions need rows in contract_consts.tsv with the contract source, or a different rule.
+- Backend limits that make the device answer INVALIDCALL where Windows accepts (no rule yet): StretchRect into a multisampled destination; compressed <-> uncompressed StretchRect.
+- Lossy by construction: L6V5U5 / X8L8V8U8 at the most negative code and the x byte.
+- Owed by the draw path: nx_d3d9_rt_rule (write mask, red replication), nx_d3d9_sample_fixup, flush before rewriting a bound buffer mirror, rebind on nxs_pass_epoch change; occlusion queries with real draws are untested.
+- Platform hooks (undefined in the product): nxd3d_gpu_call, nxd3d_gpu_alloc / free, nxd3d_dc_create / release.

@@ -82,7 +82,7 @@ def surf_oracle(E, what, w, h, fmt, ms, q, flag, pool, ex, usage):
     if L[4] and not L[5] and (w % L[1] or h % L[2]): return Z
     pl = pool if what == 2 else 0
     gpu = int(pl == 0 and fmt in NX); lock = int(what == 2 or (what == 0 and flag) or fmt in MAPPABLE)
-    return (0, gpu, lock, gpu)
+    return (0, gpu, lock, int(gpu and ms == 0))   # a multisampled image takes no zero ImageUpdate (res_tex.cpp)
 
 
 def write_data(d):
