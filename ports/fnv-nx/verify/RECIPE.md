@@ -53,17 +53,6 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 - `external`: content-pinned inputs (see below).
 - `plugins`, `plugin_cxx`: GCC plugins of the C++ front end (see "Plugins"). `flags` may not hold any `-fplugin*` token.
 
-- `unit_flags`, `unit_facts`: per-unit flags of the CC stage (see "Per-unit flags").
-
-### Per-unit flags (`unit_flags`, `unit_facts`)
-`unit_flags` is `{unit: [flag]}` for C++ units under `game`; the only flag is `-fplugin-arg-fnvnx_pi-fpfast` (the pi plugin: this unit is built with
-/fp:fast, so its source does not fix the evaluation order of floating-point arguments). It enters the argv of that unit's CC stage, so it is in the CC
-key (the PP key is unchanged). `unit_facts` is a tracked file or generated output of the root, units.json: `{"units": [{"source": UNIT, "flags": [...]}]}`
-with `source` equal to the root-relative unit path. RULE: the flag stands on a unit iff its entry lists `/fp:fast`; a unit with no entry has no such
-fact (compile.sh: no entry, no argument). A mismatch in either direction, a fact for a source that is no game C++ unit, or a flag on a unit outside `game`
-is red (build stage `unit_facts`, before any compile). A native guest root that declares `game` must declare `unit_facts`. Assumption: units.json is
-generated from the exe/decomp facts, not written by hand. No other flag can be attached to a unit: a flag not derived from a fact has no place here.
-
 ## Plugins (`fnvnx_order`, `fnvnx_ftoi`)
 Our compiler is the pinned g++-13 with our two plugins. Their sources are tracked under the tool root `ports/fnv-nx/toolchain` (no build script:
 the recipe is the only way they are built). Each entry of `plugins` is `{"name", "source", "args"}`: `source` is `<dir>/<name>.cc`, a tracked file of an
