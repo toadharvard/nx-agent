@@ -1,6 +1,6 @@
 # L4 VERIFY status (lead: Opus 5.5, branch claude/fnv-l4-verify)
 
-Updated 2026-11-11 23:10Z. Merged head 5db8b0b: L1 verdict of the merge run in the background (w2). Trunk claude/fnv-nx-clean a2453fe9 holds L4 e8b2c4ad (L1 green, tree 6dbf402b, 23 gates). Trunk CLAUDE.md d7fac9b50 merged (GL is the reference for deko3d). claude/fnv-l4-verify-w1 (68e37dab7) is never merged. L4 fully in the trunk: claude/fnv-nx-clean 41c9eca merged a4b0a84 (93477f2, 5d106a8 included).
+Updated 2026-11-11 23:10Z. Merged head 1979832: L1 GREEN (tree da24d4be, 24 gates, selftests 52/52, admit 427/427, oracle 52/52, 196.7 s), ready for the trunk. Trunk claude/fnv-nx-clean a2453fe9 holds L4 e8b2c4ad (L1 green, tree 6dbf402b, 23 gates). Trunk CLAUDE.md d7fac9b50 merged (GL is the reference for deko3d). claude/fnv-l4-verify-w1 (68e37dab7) is never merged. L4 fully in the trunk: claude/fnv-nx-clean 41c9eca merged a4b0a84 (93477f2, 5d106a8 included).
 Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; session_01KmtZKURkbywQNqjAdqyELR archived).
 
 ## Tasks
@@ -32,3 +32,4 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; session_01KmtZKURk
 - Was open (boot path, L4): bootsock's NotDetermined path (18 sites at 1979832); now task 7 (rule R-SOCK, inbox 009). w1b archived 23:15Z (merged).
 - 23:00Z: tc-repro farm (session_01KmtZKSzcic61GPMwx3wqug) finished and archived. TC-REPRO toolchain/gcc/build.sh @eb6c2c96 DIFFERS from the mirror: tree_sha256 5d848dfe... (028639d3... without 4 empty dirs) vs 3f25152c...; 2,069 files, 314 differ. Class: build inputs leak into the output: (1) absolute build/prefix paths (binutils binaries, 174 ldscripts SEARCH_DIR); (2) non-deterministic ar (member dates in libc.a/libm.a); also packages missing from the script (texinfo/flex/libmpc-dev). Rule sent to L5 (owner of build.sh): canonical prefix/build dir fixed by the script or prefix maps, --enable-deterministic-archives / ar D, SOURCE_DATE_EPOCH from the pins; check = a second build at another host path gives the same tree_sha256. Off the first-frame path unless the mirror must be rebuilt.
 - 23:20Z: L5 accepted the TC-REPRO rule (after the platform root and the ELF; the mirror 3f25152c stays the pin). L3b told: one test ELF loops over N cases (not 300 boot.py runs, verdict budget).
+- 23:25Z: w2 archived after the verdict of 1979832 (green).
