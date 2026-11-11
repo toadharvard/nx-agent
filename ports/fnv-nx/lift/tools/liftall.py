@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The packager: the lifter's output for the whole code universe as linkable objects.
     liftall.py --shard K/N --out DIR [--jobs J]    lift + compile the entries whose index (address order) mod N == K  -> lift_K_of_N.a, manifest_K.tsv, missing_K.tsv, forms_K.tsv, undef_K.tsv
-    liftall.py --finish --out DIR                  merge the shards -> manifest/missing/forms/undef.tsv, entries.tsv, disp.o (perfect-hash table, position independent), rt.a, gate_liftall.json
+    liftall.py --finish --out DIR [--also MODDIR=UNIVERSE.tsv ...] [--bridge bridge.tsv --need iat.tsv ...]   merge the shards (and the entries of the module packs) -> manifest/missing/forms/undef.tsv, entries.tsv, disp.o (perfect-hash table, position independent), rt.a, gate_liftall.json
 liftall.py --module NAME ...                  (any mode) a module of modules.tsv: its file, its assigned load base (FNVNX_BASE) and FNVNX_FACTS_OUT/<name>/universe.tsv
 Deterministic: sorted iteration, no clocks in the outputs. Inputs FNVNX_EXE, FNVNX_UNIVERSE (universe.tsv), FNVNX_PROOF (certificates); outputs only under --out (exe-derived, never in the repository).
 Prerequisites: python3 with capstone, numpy, pyelftools, unicorn (test/instest.py imports them); aarch64-linux-gnu-g++/gcc/binutils."""
@@ -160,6 +160,14 @@ def finish(a):
     w('manifest', man); w('missing', miss); w('forms', [(f, v[0], v[1]) for f, v in sorted(forms.items())]); w('undef', [(s, v[0], v[1]) for s, v in sorted(undef.items())])
     syms = {int(r[0], 16): r[1] for r in man}
     code = dict(syms)
+    also = []          # other images of the process (modules packed with --module into their own directories): ONE dispatcher table for all of them
+    for spec in a.also:
+        d, u = spec.split('=', 1); eu = L.universe.load(u)[0]
+        m2 = sorted(r for f in sorted(glob.glob(d + '/manifest_*.tsv')) for r in tsv(f)); x2 = sorted(r for f in sorted(glob.glob(d + '/missing_*.tsv')) for r in tsv(f))
+        s2 = {int(r[0], 16): r[1] for r in m2}
+        if set(s2) & set(syms): sys.exit('finish: %s shares entry addresses with another image' % d)
+        if set(s2) != set(eu): sys.exit('finish: %s: %d universe entries, %d bodies, %d missing: the pack is not complete' % (d, len(eu), len(s2), len(x2)))
+        syms.update(s2); code.update(s2); also.append((d, len(eu), sum(int(r[3]) for r in m2)))
     imp = []
     # runtime: plain AAPCS files without -ffixed, guest-register files with the lifted-code flags
     rd = out + '/rt'; os.makedirs(rd, exist_ok=True)
@@ -191,6 +199,7 @@ def finish(a):
     bytes_ = sum(int(r[3]) for r in man)
     res = dict(schema='fnvnx-gate/1', name='l3.liftall', status='green' if len(man) == len(ent) else 'red', universe=len(ent), certified=len(man), uncertified=len(ent) - len(man), imports=len(imp),
                build='measurement: forms without a certificate %d of %d' % (len(forms) - nc, len(forms)))
+    res['images'] = 1 + len(also); res['universe_all'] = len(ent) + sum(n for _, n, _ in also); res['code_bytes_all'] = bytes_ + sum(b for _, _, b in also)
     json.dump(res, open(out + '/gate_liftall.json', 'w'), sort_keys=True)
     print('finish: shards %s; universe %d, body %d, missing %d (top: %s), %d entries without a body; objects %d, code bytes %d; forms %d (certified %d, uncertified %d; sites %d / %d); undefined non-lifted symbols %d; dispatcher %d slots, %d hash attempts; %s' % (
         ks, len(ent), len(man), len(miss), '; '.join('%d %s' % (n, r) for r, n in reasons), nobody, len(set(r[2] for r in man)), bytes_, len(forms), nc, len(forms) - nc, cert, tot - cert,
@@ -211,7 +220,7 @@ def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
     A('--shard'); A('--finish', action='store_true'); A('--out', default='/home/user/l3work/liftall'); A('--jobs', type=int, default=3)
     A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')); A('--module', help='a module of modules.tsv (lifted at its assigned base, with its universe)')
-    A('--bridge', default=os.environ.get('FNVNX_BRIDGE')); A('--need', action='append', default=[]); A('--l3', default=None)     # --finish: import entries
+    A('--bridge', default=os.environ.get('FNVNX_BRIDGE')); A('--need', action='append', default=[]); A('--l3', default=None); A('--also', action='append', default=[], metavar='DIR=UNIVERSE.tsv')     # --finish: packed module directories that share the dispatcher table     # --finish: import entries
     a = ap.parse_args(); os.makedirs(a.out, exist_ok=True)
     if a.module: a.exe = module_env(a.module)
     if a.finish: finish(a)
