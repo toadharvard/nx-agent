@@ -9,7 +9,25 @@
  e for store / indirect call / unknown use, r for return, and for a call (callee, par) the callee's own value if it is e, else 0;
  a conditional sink (X, cond, s) contributes s only when some (callee, par) in cond is >= r (the callee may hand the address back in eax,
  so the caller's eax is the same frame address). Imports come from FNVNX_IMPORT_ESCAPE (dll, name, args over {n, r, e}); missing = all e.
- ro-const (IAT, .rdata, jump tables) is plain; TLS stays ordered. Count-only stdout; per-entry TSV in /home/user/l3facts/memclass/."""
+ ro-const (IAT, .rdata, jump tables) is plain; TLS stays ordered.
+ STACK CLASSES: what is PROVED and what is ASSUMED (an access whose coordinate is not proved is class `stack-unproven` = ORDERED, never plain)
+  PROVED by x86flow.track (total tracking): esp / ebp = entry_esp + constant at an instruction. esp: every esp write is modelled (push pop pushal popal call leave
+   enter ret, add/sub esp imm, mov esp ebp, lea esp [ebp+d]); any other write (and, mov esp reg, xchg, pop esp, ...) opens a new epoch (unresolved). ebp: the value of esp
+   at a `mov ebp, esp`, lost by ANY other write of ebp (capstone's explicit and implicit write sets: pop, leave, popal, xchg, xadd, mov, ...) and at joins that differ.
+   A function can prove for ITSELF (x86flow.conformance) that it returns with esp balanced and ebp restored; this is only MEASURED here (a closure over the direct-call
+   graph that enforced it would order 62 % of all accesses): callees obeying the calling convention is an ASSUMPTION, listed below.
+  stack-local   plain iff the coordinate is proved (c < 0, or the return-address slot 0 <= c < 4) and no frame address of the activation escapes into that slot's object
+                (rules 1, 2): the slot's address can only be created by this activation (own events; callee-created addresses of it come from a pointer parameter, whose
+                summaries are in the flow). Accesses below esp (call pushes the return address at s-4) are fresh stores: no live pointer reaches them.
+  stack-args-out plain (a store into a fresh slot below the caller's esp, before the callee runs; contamination as above; a pointer published later by the callee is
+                released by an ordered store, which orders this earlier store).
+  stack-args-in ORDERED: the slot belongs to the CALLER's frame; the caller may have created its address (an event of the caller contaminates its own `o` slot, but this
+                analysis of the callee does not see that). Plain would need a caller-side proof for every possible caller (indirect callers are unknown): not available.
+  stack-funclet ORDERED: a funclet's ebp = the parent's frame pointer is the protocol of the EH runtime (the lifted L3 runtime), not provable from the bytes.
+  stack-unproven ORDERED: unresolved esp / ebp (ebp as a general register, alloca, `and esp, -16`, esp from a register, indexed esp/ebp addressing, data decoded as code),
+                funclet esp, poisoned entries.
+  ASSUMED, not proved: EVERY callee (direct, indirect, import) pops esp as RETN says and preserves ebp (conformance counts how many prove it themselves); the guest does not use a frame slot through a dangling
+                pointer after its frame is gone; stack walks by the EH runtime run on the same thread. Count-only stdout; per-entry TSV in /home/user/l3facts/memclass/."""
 import os, sys, json, bisect, hashlib
 from array import array
 from collections import Counter, defaultdict
@@ -28,9 +46,9 @@ if os.path.exists(IMPTAB):
             IMPESC[_f[1]] = _f[2]
 OUT = os.environ.get('FNVNX_MEMCLASS_OUT', W.FACTS + '/memclass')
 NPROC = int(os.environ.get('FNVNX_PROCS', '2'))
-STK = ('stack-local', 'stack-args-in', 'stack-args-out', 'stack-funclet', 'stack-escaped', 'stack-unk')
+STK = ('stack-local', 'stack-args-in', 'stack-args-out', 'stack-funclet', 'stack-unproven', 'stack-escaped', 'stack-unk')
 ORDER = STK + ('ro-iat', 'ro-rdata', 'ro-text', 'tls', 'tls-derived', 'global', 'heap/other')
-PLAIN = ('stack-local', 'stack-args-in', 'stack-args-out', 'stack-funclet', 'ro-iat', 'ro-rdata', 'ro-text')
+PLAIN = ('stack-local', 'stack-args-out', 'ro-iat', 'ro-rdata', 'ro-text')      # args-in and funclet frames are ordered: see "stack classes" in the docstring
 WID = (1, 2, 4, 8, 10, 16)
 REGS = ('eax', 'ecx', 'edx', 'ebx', 'esi', 'edi')
 IMPL = frozenset('mul imul div idiv cdq cwde cwd cbw lodsb lodsw lodsd stosb stosw stosd scasb scasw scasd xchg cmpxchg xadd lahf sahf xlatb'.split())
@@ -313,6 +331,9 @@ def analyze(args):
     # fact: per-instruction esp/ebp offsets (or a named reason); funclets are tracked with ebp = the parent's frame pointer
     track(F)
     fun = kind in FUNK
+    # fact: conformance of this entry as a CALLEE (proved from the tracking, W.conformance), and its direct call edges
+    ret_ok, ebp_ok = W.conformance(F)
+    callees = sorted({target(F, x)[1] for x in F.ins if (mn(F.ins[x]) == 'call' or (mn(F.ins[x]) == 'jmp' and x in F.tails)) and target(F, x)[0] == 'A'})
     # fact: which pushes feed a call (outgoing arguments) and which are entry register saves
     reach, saved = argreach(F)
     nf, fr, misc, ev, srcs, taint, prev, offs, cidx = [], [], [], [], [], {}, None, [], False
@@ -332,8 +353,10 @@ def analyze(args):
                 fr.append((x, 1, 4, 'o' if reach.get(x) and x not in saved else 'l', s - 4))
         elif m in ('pop', 'popfd'):
             fr.append((x, 0, 4, 'u' if fun or not ok else 'l', 0 if fun or not ok else s))
-        elif m in ('call', 'ret', 'retf'):
-            nf.append((x, 1 if m == 'call' else 0, 4, 'stack-local'))
+        elif m == 'call':                  # the return address is stored below esp: slot s-4 of this frame
+            fr.append((x, 1, 4, 'u' if fun or not ok else 'l', 0 if fun or not ok else s - 4))
+        elif m in ('ret', 'retf'):         # the return address is loaded from slot s (0 when the frame is balanced)
+            fr.append((x, 0, 4, 'u' if fun or not ok else 'r', 0 if fun or not ok else s))
         elif m == 'leave':
             fr.append((x, 0, 4, 'u' if fun or b is None or F.multi else 'r', 0 if fun or b is None or F.multi else b))
         if taint or any(p.type == X.X86_OP_MEM and p.mem.segment and p.mem.disp == 0x2c for p in o):
@@ -427,7 +450,7 @@ def analyze(args):
             summ.setdefault('fwd', []).append(t)
     bpv = sorted({v for v in F.bp.values() if v is not None})
     return a, dict(addrs=array('I', sorted(F.ins)).tobytes(), nf=nf, fr=fr, misc=misc, ev=events, summ=summ, allstack=allstack, aw=sorted(aw), cidx=cidx, multi=F.multi,
-                   why=F.why, bpv=bpv[0] if len(bpv) == 1 else None, offs=offs, undecoded=not F.ok)
+                   why=F.why, bpv=bpv[0] if len(bpv) == 1 else None, offs=offs, undecoded=not F.ok, ret_ok=ret_ok, ebp_ok=ebp_ok, callees=callees)
 
 
 def hx(v):
@@ -469,6 +492,30 @@ def main():
             owner.setdefault(x, a)
     # funclets belong to their parent frame
     par = parents_map(rows)
+    # ---- conformance closure over the direct-call graph. A frame coordinate (esp / ebp = entry esp + const) is only meaningful after a call if the callee returns with esp
+    # balanced and ebp restored. Each entry proves both for ITSELF (W.conformance: ret_ok, ebp_ok); bad = entries that do not, closed upwards: a caller of a bad or unknown
+    # direct callee is bad. A caller of a bad callee is POISONED: its coordinates after that call are not proved, so every stack access of it is class `unproven` (ordered).
+    # Assumed (not proved): indirect calls and imports obey the same convention (Win32 stdcall: ebp / ebx / esi / edi preserved, esp popped by the callee as RETN says).
+    bad = {f for f in R if not (R[f]['ret_ok'] and R[f]['ebp_ok'])}
+    unknown = {f for f in R if kind[f] not in FUNK and any(c not in R for c in R[f]['callees'])}
+    rev = defaultdict(list)
+    for f in sorted(R):
+        for c in R[f]['callees']:
+            rev[c].append(f)
+    poison, work = set(unknown), sorted(bad)
+    inbad = set(bad) | set(unknown)
+    for f in sorted(unknown):
+        work.append(f)
+    while work:
+        c = work.pop()
+        for f in rev.get(c, ()):
+            if kind[f] not in FUNK and f not in poison:
+                poison.add(f); work.append(f); inbad.add(f)
+    npoison, poison = len(poison), set()      # MEASURED only: enforcing it poisons 38,450 entries (62 % of accesses ordered); the ABI of callees stays an ASSUMPTION (docstring)
+    nbad = Counter(('ret' if not R[f]['ret_ok'] else '') + ('ebp' if not R[f]['ebp_ok'] else '') for f in bad)
+    for f in sorted(poison):                                     # the sinks of a poisoned entry were computed from coordinates that are not proved: all pessimistic
+        R[f]['ev'] = [(c, idx, [('U', 'poisoned')]) for c, idx, sk in R[f]['ev']]
+        R[f]['summ'] = {q: ([('U', 'poisoned')] if q != 'fwd' else v) for q, v in R[f]['summ'].items()}
     # ---- parameter summaries (lattice n < r < e, least fixed point from n)
     keys = [(f, p) for f in sorted(R) for p in sorted(R[f]['summ']) if p != 'fwd']
 
@@ -562,10 +609,12 @@ def main():
             bp = R[g]['bpv']
             whole = whole or (r['multi'] and not fun) or r['cidx']
             for c, idx, sk in r['ev']:
-                if fun:
+                if f in poison:
+                    c = None                                    # coordinates are not proved after a call to a non-conforming callee
+                elif fun:
                     c = None if c is None or bp is None else bp + c
                 evs.append((c, idx, verdict(sk, False), bool(sk), verdict(sk, True)))
-            bnd.update(c if not fun else (bp + c if bp is not None else 0) for x, ls, w, role, c in r['fr'] if role in 'alorp')
+            bnd.update(c if not fun else (bp + c if bp is not None else 0) for x, ls, w, role, c in r['fr'] if role in 'alorp' and f not in poison)
         frame[g] = (sorted(bnd), evs, whole)
     res_t, per, lost, whatif, retrule = Counter(), {}, Counter(), Counter(), Counter()
     nescf, reasons, rule2, rulef, ureasons = 0, Counter(), Counter(), Counter(), Counter()
@@ -622,21 +671,28 @@ def main():
                     atom.append((x, kd))
         for x, ls, w, role, c in r['fr']:
             cnt = mine(x)            # counters below only for the owner; the class is computed for every entry containing x
+            if a in poison:
+                role = 'u'
             ps = [p for p in (par.get(a, []) if kind[a] in FUNK else [a]) if p in R and kind[p] not in FUNK]
             if not ps:
                 cls = 'stack-unk'; res_t['funclet-parent-unknown'] += cnt
             else:
-                cl = {}
+                cl = {}; unp = role not in 'alorp'
                 for g in ps:
                     cc = c
                     if kind[a] in FUNK and role == 'p':
                         cc = None if R[g]['bpv'] is None else R[g]['bpv'] + c
+                    unp = unp or cc is None or g in poison
                     if role in 'alorp' and cc is not None:
                         v = contam(g, cc, 'new'); v1 = contam(g, cc, 'old'); v0 = contam(g, cc, 'v1')
                     else:
                         v = ['frame'] if anyesc(g, 'new') else []; v1 = ['frame'] if anyesc(g, 'old') else []; v0 = ['frame'] if anyesc(g, 'v1') else []
                     cl[g] = (v, v1, v0)
-                if any(c3[0] for c3 in cl.values()):
+                if unp:
+                    cls = 'stack-unproven'                       # the coordinate of the access is not proved (rule R9: ordered)
+                    if cnt:
+                        res_t['unproven:' + ('poisoned' if a in poison else 'role-' + role)] += 1
+                elif any(c3[0] for c3 in cl.values()):
                     cls = 'stack-escaped'
                     rs_ = sorted({t for c3 in cl.values() for t in c3[0]})
                     for t in rs_ if cnt else ():
@@ -652,8 +708,6 @@ def main():
                         retrule[role] += 1                       # contaminated under the previous rules, plain with conditional return flow
                     elif any(c3[2] for c3 in cl.values()):
                         rule2[role] += 1
-                    elif role in 'up' and not kind[a] in FUNK:
-                        rulef['unresolved-offset'] += 1
             seen.add(x)
             if cls not in PLAIN:
                 nonplain.add(x)
@@ -675,8 +729,11 @@ def main():
     tlsc = Counter(w if w == 'push fs:[2c]' else 'call' if w.startswith('call') else 'ret' if w.startswith('ret') else 'use:' + w.split(' ')[0] for x, w in offs)
     print('plain-eligible accesses %d of %d (%.1f %%)  [v1: 46.1 %%]; tls (%d) and tls-derived (%d) are ordered; fs:[2c] array address leaves a register at %d sites (L-TLS facts: %s)' % (
         plain, nacc, 100.0 * plain / max(nacc, 1), pc['tls'], pc['tls-derived'], len(offs), ' '.join('%s=%d' % kv for kv in sorted(tlsc.items()))))
-    print('contribution: rule1 locals %d, args-in %d, args-out %d, funclet frames %d; formerly stack-unk now plain (non-funclet unresolved offsets) %d; rule2 (summary-proved, formerly stack-escaped) %d (by role %s)' % (
-        pc['stack-local'], pc['stack-args-in'], pc['stack-args-out'], pc['stack-funclet'], rulef['unresolved-offset'], sum(rule2.values()), dict(sorted(rule2.items()))))
+    print('contribution (plain): rule1 locals %d, args-out %d; ORDERED by rule (not plain): args-in %d (caller side not analysed), funclet frames %d (EH runtime protocol not analysed), unproven coordinates %d; rule2 (summary-proved, formerly stack-escaped) %d (by role %s)' % (
+        pc['stack-local'], pc['stack-args-out'], pc['stack-args-in'], pc['stack-funclet'], pc['stack-unproven'], sum(rule2.values()), dict(sorted(rule2.items()))))
+    print('unproven coordinates by cause: %s' % ' '.join('%s=%d' % kv for kv in sorted(res_t.items()) if kv[0].startswith('unproven:')))
+    print('conformance (callee proofs): entries %d, not proved conforming (own code) %d (%s), unknown direct callee %d, would be poisoned (call a non-conforming / unknown callee, closed over direct calls; measured, NOT enforced) %d' % (
+        len(R), len(bad), ' '.join('%s=%d' % kv for kv in sorted(nbad.items())), len(unknown), npoison))
     rs = Counter(w for a in order if kind[a] not in FUNK for w in R[a]['why'][:1])
     print('esp-tracking residue: entries with an unresolved instruction %d (non-funclet %d) by first reason: %s; funclets without a known parent frame: %d accesses' % (
         sum(1 for a in order if R[a]['why']), sum(1 for a in order if R[a]['why'] and kind[a] not in FUNK), dict(sorted(rs.items())), res_t['funclet-parent-unknown']))
