@@ -52,7 +52,7 @@ typedef struct FnvnxHostApi {
                                       The new thread calls the guest function entry(arg) (u64 arg) and ends
                                       when it returns. prio: Win32 scale -15..15; cpu: -1 default placement,
                                       0..63 that core only, FNVNX_THREAD_ROLE(r) the placement role r
-                                      (host side). Not started. */
+                                      (toolchain/host/placement.h). Not started. */
     uint64_t thread_start;         /* (id) -> 0 or Result */
     uint64_t thread_join;          /* (id) -> 0 when the thread has ended */
     uint64_t thread_free;          /* (id) -> 0; after join, or detaches a running thread */
@@ -89,7 +89,7 @@ typedef struct FnvnxHostApi {
     uint64_t fs_dir_next;          /* (dir, buf, cap) -> name length (without NUL), 0 at end; skips . and .. */
     uint64_t fs_dir_close;         /* (dir) -> 0 */
 
-    /* ---- version 3: audio out and input (platform audio, input) */
+    /* ---- version 3: audio out and input (platform/audio, platform/input via toolchain/guest/platform_glue) */
     uint64_t audio_open;           /* (rate = 48000, period frames) -> 0 or negative; stereo PCM16 */
     uint64_t audio_submit;         /* (pcm, frames = period) -> 0; blocks until the device takes it */
     uint64_t audio_close;          /* () -> 0 */
@@ -105,20 +105,52 @@ typedef struct FnvnxHostApi {
 } FnvnxHostApi;
 
 #define FNVNX_EXT_NO_MODULE 0xFFFFFFFFFFFFFF01ull
-/* ext_call module of the host's platform services (host side; nine is 9, native 10) */
+/* ext_call module of the host's platform services (toolchain/host/host.c; render/nine is 9, render/native 10) */
 #define FNVNX_EXT_PLATFORM 11u
 #define FNVNX_PLAT_CPU_BOOST 1u   /* (mode: 0 normal, 1 fast load) -> 0 set, 1 off by the platform config (boost_loading) */
 #define FNVNX_PLAT_THREAD_ACTIVITY 2u   /* (host thread id != 0, paused 0/1) -> 0, or the Horizon result of svcSetThreadActivity */
 #define FNVNX_PLAT_MESSAGE 3u           /* (caption, text: guest strings) -> 0 after the player closed the dialog, or the applet's result */
-/* VirtualAlloc's address space (host side): reserve (hint or 0, size) -> address or 0; commit /
+/* VirtualAlloc's address space (toolchain/host/host_vm.inc): reserve (hint or 0, size) -> address or 0; commit /
  * decommit (address, size) -> 0 or a Horizon result; release (address) -> 0 or a result */
 #define FNVNX_PLAT_VM_RESERVE 4u
 #define FNVNX_PLAT_VM_COMMIT 5u
 #define FNVNX_PLAT_VM_DECOMMIT 6u
 #define FNVNX_PLAT_VM_RELEASE 7u
+/* VM_PROTECT (address, size, prot) -> 0 or a result. prot: bit 0 readable, bit 1 writable, 0 = no access; never
+ * executable. Works on whole pages the guest owns: map_fixed memory and committed pages of a VM reservation.
+ * DECOMMIT is as the host implements it (host_vm.inc): an extent wholly inside the range is unmapped, a partly covered
+ * one is zeroed and stays mapped; the protection of a page that stays mapped is NOT reset, so a caller restores
+ * read-write with VM_PROTECT before it decommits. Results: 0xD401 a page of the range
+ * is not the guest's (the guest module, host pages, unmapped), 0xD801 prot has other bits, 0xCA01 size is 0 or not
+ * page aligned, 0xCC01 address not page aligned. The loader sets the PE section protection and the stack guard
+ * pages with it; the platform's VirtualProtect uses the same call. */
+#define FNVNX_PLAT_VM_PROTECT 8u
+#define FNVNX_VM_PROT_R 1u
+#define FNVNX_VM_PROT_W 2u
+/* DISPLAY_DOCKED () -> 1 docked (1080p output), 0 handheld (720p) */
+#define FNVNX_PLAT_DISPLAY_DOCKED 9u
+/* ACCESS_FAULT_HANDLER {handler, stack_top} -> 0. Registers, for the CALLING thread, the guest function
+ * `uint64_t handler(FnvnxFaultFrame *frame)` and the top of a separate stack it runs on (16-byte aligned, guest memory).
+ * On a data or instruction access fault of that thread the host fills a frame at stack_top - sizeof(frame), switches to
+ * that stack and calls handler with faults of the same kind masked (a fault inside the handler ends the process).
+ * Return 0: the host loads every register from the frame (the handler may have changed any of them, pc included) and
+ * resumes. Return non-zero: the process ends with that value as exit code. A thread without a handler: the fault ends
+ * the process. handler == 0 unregisters. */
+#define FNVNX_PLAT_ACCESS_FAULT_HANDLER 10u
+typedef struct FnvnxFaultFrame {
+    uint32_t kind;        /* 0 read, 1 write, 2 execute */
+    uint32_t reason;      /* 0 unmapped, 1 protection, 2 alignment */
+    uint64_t addr;        /* faulting data address (kind 0, 1) or pc (kind 2) */
+    uint64_t pc, sp, pstate;
+    uint64_t x[31];       /* x0..x30 */
+    uint32_t fpcr, fpsr;
+    uint64_t v[32][2];    /* v0..v31, low then high 64 bits */
+} __attribute__((aligned(16))) FnvnxFaultFrame;
+typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 : -1];   /* both sides of the host boundary */
+/* 16 and above: guest sockets (platform/, table published by the platform lead) */
 
 /* Thread placement (docs/PERF.md 6.3): roles for thread_create's cpu argument; the host's table
- * (host side) gives each an ideal core, an affinity mask and a priority. */
+ * (toolchain/host/placement.h) gives each an ideal core, an affinity mask and a priority. */
 enum {
     FNVNX_ROLE_DEFAULT = 0,       /* game threads without a role of their own (Havok, ...) */
     FNVNX_ROLE_MAIN = 1,          /* the main thread */
@@ -150,7 +182,7 @@ typedef struct FnvnxInputEvent {
     uint32_t reserved;
 } FnvnxInputEvent;
 
-/* fs_open flags and fs_seek whence (same values as os.h OS_O_* / OS_SEEK_*). Errors are negated
+/* fs_open flags and fs_seek whence (same values as platform/os/os.h OS_O_* / OS_SEEK_*). Errors are negated
  * errno values as in os.h (OS_ENOENT 2, ...). */
 #define FNVNX_O_READ   0x01
 #define FNVNX_O_WRITE  0x02

@@ -12,7 +12,8 @@ Rules:
    slice while another thread is ready: no wall clock, no instruction counts, so switch points repeat. Nothing ready:
    the virtual tick jumps to the earliest deadline; none: reason "deadlock" with a per-thread wait report.
 4. Any invalid access (unmapped or protection violation), Unicorn error, or host call on an unmapped guest pointer
-   ends the run, reason "fault", record {kind, addr, size, pc, lr, tid}. There is no continue path.
+   ends the run, reason "fault", record {kind, addr, size, pc, lr, tid}. There is no continue path, except the thread's own
+   FNVNX_PLAT_ACCESS_FAULT_HANDLER (5c).
 5. map_fixed(addr, size, src) follows svcMapMemory (hostapi.h): src is a page-aligned block of the heap region, wholly
    inside it and not given away before; addr gets RW memory holding the CONTENT of src, and [src, src+size) becomes
    unmapped for good (a later access ends the run with "fault"). addr: exactly there, wholly inside a plan["free"]
@@ -37,6 +38,18 @@ Rules:
    stays accessible RW. A reserved page never committed is unmapped (a reservation is address space only): an access faults. release(base): unmaps the reservation's committed pages and frees it (not a base: 0xCC01). Pages committed here are
    owned: VM_PROTECT works on them. map_fixed over a reservation is refused (0xD401). thread_activity(tid, paused): a paused thread is
    never picked (a pause of the running thread takes effect at once); unknown tid 0xE401, not started or ended 0xFA01.
+5c. ACCESS_FAULT_HANDLER (module 11 fn 10, args {handler, stack_top}, result 0; handler 0 unregisters; stack_top must be 16-byte
+   aligned, >= 816 and <= 4 GiB, else 0xCC01 and an event). Per calling thread. A data or instruction access fault (Unicorn's
+   UC_HOOK_MEM_INVALID: unmapped or protection, read/write/fetch) of a thread with a handler, not already inside it, is
+   delivered at once: the frame (FnvnxFaultFrame, 816 bytes) is written at stack_top - 816 from the exact register state at the
+   faulting instruction (pc = that instruction; pstate = NZCV only, bits 31..28), then x0 = frame, sp = frame, lr = a return stub
+   on the host page, pc = handler. reason is 0 (unmapped) or 1 (protection); 2 (alignment) is never produced: Unicorn raises no
+   alignment fault through the hook (an alignment trap ends the run as "uc-error"), so the machine cannot tell it. When the
+   handler returns to the stub: x0 == 0 loads x0..x30, sp, pc, NZCV, fpcr, fpsr, v0..v31 from the frame in guest memory and
+   resumes; x0 != 0 ends the run, reason "exit", exit_code x0. A fault of a thread inside its handler ends the run: reason
+   "fault", record with in_handler. A frame range that is not wholly guest memory the guest can write (not host page) ends the
+   run, reason "fault", kind "frame-unwritable". Each delivery is an event {kind "fault-handler", tid, access, reason, addr, pc}.
+   Faults of host calls on bad guest pointers ("host-access") are not thread faults and are not delivered.
 6. Bound and count: one UC_HOOK_BLOCK over the image region (installed only with limit_instructions or attach_icount)
    adds size/4 per block, feeds the Icount if attached, and stops at the first block boundary where the total >=
    limit_instructions: reason "limit", the same stop point on every run (the stopping block is counted).
@@ -46,10 +59,12 @@ Rules:
 """
 import struct
 
+from unicorn import arm64_const
+
 from unicorn import UC_ARCH_ARM64, UC_HOOK_BLOCK, UC_HOOK_CODE, UC_HOOK_MEM_INVALID, UC_HOOK_MEM_WRITE, UC_MODE_ARM, UC_PROT_ALL, \
     UC_PROT_EXEC, UC_PROT_READ, UC_PROT_WRITE, Uc, UcError
 from unicorn import unicorn_const as UCC
-from unicorn.arm64_const import UC_ARM64_REG_CPACR_EL1, UC_ARM64_REG_LR, UC_ARM64_REG_PC, UC_ARM64_REG_SP, \
+from unicorn.arm64_const import UC_ARM64_REG_CPACR_EL1, UC_ARM64_REG_FPCR, UC_ARM64_REG_FPSR, UC_ARM64_REG_LR, UC_ARM64_REG_NZCV, UC_ARM64_REG_PC, UC_ARM64_REG_SP, \
     UC_ARM64_REG_TPIDR_EL0, UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3, UC_ARM64_REG_X4
 
 import bootlayout
@@ -69,14 +84,18 @@ SLOTS = ["output_debug_string", "sleep_ns", "exit", "console_write", "console_fl
 API_SIZE = 0x30 + 8 * len(SLOTS)
 FNVNX_EXT_PLATFORM = 11
 # hostapi.h FNVNX_PLAT_* of module 11 (the header defines 1..7; VM_PROTECT = 8 is the loader's addition): fn -> (name, min args)
+FAULT_FRAME = 816
 PLATFORM_FNS = {1: ("cpu_boost", 1), 2: ("thread_activity", 2), 3: ("message", 2), 4: ("vm_reserve", 2), 5: ("vm_commit", 2),
-                6: ("vm_decommit", 2), 7: ("vm_release", 1), 8: ("vm_protect", 3)}
+                6: ("vm_decommit", 2), 7: ("vm_release", 1), 8: ("vm_protect", 3),
+                10: ("access_fault_handler", 2)}
 VM_ALIGN, VM_FLOOR = 0x10000, 0x10000   # host_vm.inc FNVNX_VM_ALIGN; the guest's low 64 KiB stay unmapped. Forbidden ranges are plan data.
 ERR_INVALID_SIZE, ERR_INVALID_ADDRESS, ERR_INVALID_CURRENT_MEMORY = 0xCA01, 0xCC01, 0xD401
 ERR_INVALID_NEW_MEMORY_PERMISSION, ERR_INVALID_HANDLE, ERR_INVALID_STATE = 0xD801, 0xE401, 0xFA01
 ACCESS_KINDS = {UCC.UC_MEM_READ_UNMAPPED: "read-unmapped", UCC.UC_MEM_WRITE_UNMAPPED: "write-unmapped",
                 UCC.UC_MEM_FETCH_UNMAPPED: "fetch-unmapped", UCC.UC_MEM_WRITE_PROT: "write-protected",
                 UCC.UC_MEM_READ_PROT: "read-protected", UCC.UC_MEM_FETCH_PROT: "fetch-protected"}
+X_REGS = tuple(getattr(arm64_const, "UC_ARM64_REG_X%d" % i) for i in range(31))
+V_REGS = tuple(getattr(arm64_const, "UC_ARM64_REG_V%d" % i) for i in range(32))
 REGS = (UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3, UC_ARM64_REG_X4)
 
 
@@ -114,6 +133,7 @@ class Thread:
     def __init__(self, tid):
         self.tid, self.ctx, self.state, self.wait, self.result, self.resume_pc = tid, None, "new", None, 0, None
         self.paused = False
+        self.fh, self.in_handler, self.frame = None, False, 0   # fault handler (handler, stack_top); inside it; its frame address
         self.entry = self.arg = 0   # new: new, ready, running, blocked, done; wait: ("addr", a, dl) / ("join", t) / ("sleep", dl)
 
 
@@ -160,6 +180,7 @@ class Machine:
         self.host_page = hp = reg["host_page"][0]
         uc.mem_map(hp, PAGE, UC_PROT_ALL)
         self.stub_base, self.return_addr, self.thread_end = hp + 0x800, hp + 0xFF0, hp + 0xFF8
+        self.fault_ret, self.pending = hp + 0xFE0, None
         self.stubs = {self.stub_base + 4 * i: n for i, n in enumerate(SLOTS)}
         api = struct.pack("<IIII", 0x48584E46, 3, API_SIZE, 0)
         api += struct.pack("<QQQQ", ilo, ihi - ilo, reg["heap"][0], reg["heap"][1] - reg["heap"][0])
@@ -463,6 +484,76 @@ class Machine:
         self.uc.mem_protect(addr, size, (UC_PROT_READ if prot & 1 else 0) | (UC_PROT_WRITE if prot & 2 else 0))
         return 0
 
+    def _plat_access_fault_handler(self, a):
+        handler, top = a[:2]
+        t = self.cur
+        if handler == 0:
+            t.fh = None
+            return 0
+        if top % 16 or top < FAULT_FRAME or top > 1 << 32:
+            return self._refuse("access_fault_handler", handler, top, "stack_top not 16-byte aligned or outside 816..4 GiB",
+                                ERR_INVALID_ADDRESS)
+        t.fh = (handler, top)
+        return 0
+
+    def _writable(self, lo, hi):
+        """[lo, hi) is wholly mapped writable guest memory, not the host page"""
+        if lo < self.host_page + PAGE and self.host_page < hi:
+            return False
+        while lo < hi:
+            r = next(((b, e) for b, e, pr in self.uc.mem_regions() if b <= lo <= e and pr & UC_PROT_WRITE), None)
+            if r is None:
+                return False
+            lo = r[1] + 1
+        return True
+
+    def _deliver_fault(self, t):
+        """rule 5c: build the frame from the thread's registers at the faulting instruction and enter its handler"""
+        uc, (access, addr, size) = self.uc, self.pending
+        self.pending = None
+        handler, top = t.fh
+        pc, fa = uc.reg_read(UC_ARM64_REG_PC), top - FAULT_FRAME
+        kind = 1 if access in (UCC.UC_MEM_WRITE_UNMAPPED, UCC.UC_MEM_WRITE_PROT) else 2 if access in (
+            UCC.UC_MEM_FETCH_UNMAPPED, UCC.UC_MEM_FETCH_PROT) else 0
+        reason = 0 if access in (UCC.UC_MEM_READ_UNMAPPED, UCC.UC_MEM_WRITE_UNMAPPED, UCC.UC_MEM_FETCH_UNMAPPED) else 1
+        if not self._writable(fa, top):
+            self.fault = dict(kind="frame-unwritable", addr=fa, size=FAULT_FRAME, pc=pc, lr=uc.reg_read(UC_ARM64_REG_LR), tid=t.tid)
+            return
+        f = struct.pack("<IIQQQQ", kind, reason, pc if kind == 2 else addr, pc, uc.reg_read(UC_ARM64_REG_SP),
+                        uc.reg_read(UC_ARM64_REG_NZCV) & 0xF0000000)
+        f += b"".join(struct.pack("<Q", uc.reg_read(r)) for r in X_REGS)
+        f += struct.pack("<II", uc.reg_read(UC_ARM64_REG_FPCR), uc.reg_read(UC_ARM64_REG_FPSR))
+        f += b"".join(struct.pack("<QQ", v & U64, v >> 64) for v in (uc.reg_read(r) for r in V_REGS))
+        uc.mem_write(fa, f.ljust(FAULT_FRAME, b"\0"))
+        self._event("fault-handler", access=ACCESS_KINDS.get(access), reason=reason, addr=addr, pc=pc)
+        uc.reg_write(UC_ARM64_REG_X0, fa)
+        uc.reg_write(UC_ARM64_REG_SP, fa & ~15)
+        uc.reg_write(UC_ARM64_REG_LR, self.fault_ret)
+        t.ctx, t.resume_pc, t.result, t.state = uc.context_save(), handler, fa, "ready"
+        t.in_handler, t.frame = True, fa
+
+    def _fault_return(self):
+        """the handler returned to the stub: 0 resumes from the frame, else the process ends with that value"""
+        uc, t = self.uc, self.cur
+        rv = uc.reg_read(UC_ARM64_REG_X0)
+        if rv:
+            self.exit(rv)
+            return
+        f = bytes(uc.mem_read(t.frame, FAULT_FRAME))
+        _k, _r, _a, pc, sp, pstate = struct.unpack_from("<IIQQQQ", f, 0)
+        for i, r in enumerate(X_REGS):
+            uc.reg_write(r, struct.unpack_from("<Q", f, 40 + 8 * i)[0])
+        fpcr, fpsr = struct.unpack_from("<II", f, 288)
+        uc.reg_write(UC_ARM64_REG_FPCR, fpcr)
+        uc.reg_write(UC_ARM64_REG_FPSR, fpsr)
+        for i, r in enumerate(V_REGS):
+            lo, hi = struct.unpack_from("<QQ", f, 296 + 16 * i)
+            uc.reg_write(r, lo | hi << 64)
+        uc.reg_write(UC_ARM64_REG_NZCV, pstate & 0xF0000000)
+        uc.reg_write(UC_ARM64_REG_SP, sp)
+        uc.reg_write(UC_ARM64_REG_PC, pc)
+        t.in_handler = False
+
     def _plat_thread_activity(self, a):
         tid, paused = a[0], a[1]
         t = self.threads.get(tid)
@@ -550,9 +641,14 @@ class Machine:
 
     # -- host-call dispatch
     def _on_bad(self, uc, access, addr, size, value, _):
+        t = self.cur
+        if self.fault is None and t is not None and t.fh and not t.in_handler:
+            self.pending = (access, addr, size)   # delivered by run() once Unicorn has stopped with the error
+            return False
         if self.fault is None:
             self.fault = dict(kind=ACCESS_KINDS.get(access, "access-%d" % access), addr=addr, size=size,
-                              pc=uc.reg_read(UC_ARM64_REG_PC), lr=uc.reg_read(UC_ARM64_REG_LR), tid=self.tid())
+                              pc=uc.reg_read(UC_ARM64_REG_PC), lr=uc.reg_read(UC_ARM64_REG_LR), tid=self.tid(),
+                              **({"in_handler": True} if t is not None and t.in_handler else {}))
         return False
 
     def _stop_fault(self, kind, addr=None, size=None):
@@ -562,6 +658,12 @@ class Machine:
         self.uc.emu_stop()
 
     def _on_code(self, uc, addr, size, _):
+        if addr == self.fault_ret:
+            try:
+                self._fault_return()
+            except UcError as e:
+                self._stop_fault("host-access")
+            return
         if addr == self.thread_end:
             self._block(("done",), 0)
             return
@@ -633,7 +735,10 @@ class Machine:
             try:
                 uc.emu_start(t.resume_pc, self.return_addr)
             except UcError as e:
-                self._stop_fault("uc-error: %s" % e)
+                if self.pending is not None:
+                    self._deliver_fault(t)
+                else:
+                    self._stop_fault("uc-error: %s" % e)
                 continue
             if self.cur is t and self.fault is None and not self.limit_hit and self.exit_code is None \
                     and not self.ext_missing:

@@ -86,6 +86,30 @@ static uint64_t plat(uint32_t fn, uint64_t a, uint64_t b, uint64_t c, uint32_t n
     uint64_t v[3] = {a, b, c};
     return fnvnx_hcall4(H->ext_call, 11, fn, FNVNX_ADDR(v), n);
 }
+/* ACCESS_FAULT_HANDLER tests (MODE 12..22) */
+#define PG(h) ((h)->heap_base + 0x40000)
+#define STK(h) ((h)->heap_base + 0x51000)
+static volatile uint64_t gk, gr, ga, gpc, gsp, gps, gv0, gv1, gcnt;
+static void note(FnvnxFaultFrame *f) { gk = f->kind; gr = f->reason; ga = f->addr; gpc = f->pc; gsp = (uint64_t)(uintptr_t)__builtin_frame_address(0);   /* the handler's own stack */ gps = f->pstate; gv0 = f->v[8][0]; gv1 = f->v[8][1]; gcnt++; }
+static uint64_t fh_fix(FnvnxFaultFrame *f) {   /* make the page RW again and retry the store */
+    note(f);
+    if (f->kind == 1 && f->reason == 1 && f->addr == PG(fnvnx_host)) plat(8, PG(fnvnx_host), 0x1000, 3, 3);
+    return 0;
+}
+static uint64_t fh_skip(FnvnxFaultFrame *f) {   /* continue after the faulting instruction with a marker in x5 */
+    note(f);
+    f->pc += 4; f->x[5] = 0xABCD;
+    return 0;
+}
+static uint64_t fh_five(FnvnxFaultFrame *f) { note(f); return 5; }
+static uint64_t fh_nested(FnvnxFaultFrame *f) { note(f); return *(volatile uint32_t *)0x30000000; }
+static uint64_t fh_regs(FnvnxFaultFrame *f) {
+    note(f);
+    __asm__ volatile("movi v8.2d, #0\n cmp xzr, xzr" ::: "v8", "cc");   /* dirty what the frame must restore */
+    plat(8, PG(fnvnx_host), 0x1000, 3, 3);
+    return 0;
+}
+static uint64_t fault_thread(uint64_t arg) { *(volatile uint32_t *)(uintptr_t)PG(fnvnx_host) = (uint32_t)arg; return 0; }
 /* boot-stage CLI test (MODE 6): three functions called in order; results 0, 1, 0 */
 __attribute__((noinline, used)) uint32_t fnvboot_a(uint32_t x) { __asm__ volatile("" ::: "memory"); return x - x; }
 __attribute__((noinline, used)) uint32_t fnvboot_b(uint32_t x) { __asm__ volatile("" ::: "memory"); return (x | 1) & 1; }
@@ -187,6 +211,72 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     say("after the fault\n");
 #else
     plat(9, 0, 0, 0, 0);   /* a fn of module 11 the header does not define */
+#endif
+#elif MODE >= 12
+    volatile uint32_t *pg = (volatile uint32_t *)(uintptr_t)PG(H);
+    plat(8, PG(H), 0x1000, 3, 3);
+    pg[0] = 1;
+#if MODE == 12 || MODE == 20
+    plat(8, PG(H), 0x1000, 1, 3);
+#if MODE == 12
+    num("reg", plat(10, FNVNX_ADDR(fh_fix), STK(H), 0, 2));
+    pg[0] = 0x77;
+    num("val", pg[0]); num("kind", gk); num("reason", gr); num("addr-ok", ga == PG(H)); num("count", gcnt);
+    num("sp-in-stack", gsp < PG(H) + 0x20000 && gsp > PG(H));
+#else
+    plat(8, PG(H), 0x1000, 1, 3);
+    uint64_t lo = 0x1122334455667788ull, hi = 0x99aabbccddeeff00ull, olo, ohi, nz;
+    plat(10, FNVNX_ADDR(fh_regs), STK(H), 0, 2);
+    __asm__ volatile("fmov d8, %[lo]\n ins v8.d[1], %[hi]\n mov x9, #5\n cmp x9, #7\n str w9, [%[p]]\n"
+                     "mrs %[nz], nzcv\n fmov %[olo], d8\n mov %[ohi], v8.d[1]\n"
+                     : [olo] "=&r"(olo), [ohi] "=&r"(ohi), [nz] "=&r"(nz)
+                     : [lo] "r"(lo), [hi] "r"(hi), [p] "r"(pg) : "x9", "v8", "cc", "memory");
+    num("v8lo", olo == lo); num("v8hi", ohi == hi); num("nzcv", nz >> 28);
+    num("frame-pstate", gps >> 28); num("frame-v8", gv0 == lo && gv1 == hi); num("store", pg[0]);
+#endif
+#elif MODE == 13
+    plat(8, PG(H), 0x1000, 1, 3);
+    plat(10, FNVNX_ADDR(fh_skip), STK(H), 0, 2);
+    uint64_t out, v = 9;
+    __asm__ volatile("mov x5, #0\n str %w1, [%2]\n mov %0, x5" : "=r"(out) : "r"(v), "r"(pg) : "x5", "memory");
+    num("marker", out); num("ins", *(volatile uint32_t *)(uintptr_t)gpc >> 22); num("still-ro", pg[0]);
+#elif MODE == 14
+    plat(10, FNVNX_ADDR(fh_skip), STK(H), 0, 2);
+    uint64_t out;
+    __asm__ volatile("mov x5, #0\n ldr w6, [%1]\n mov %0, x5" : "=r"(out) : "r"(0x30000000ull) : "x5", "x6", "memory");
+    num("marker", out); num("kind", gk); num("reason", gr); num("addr", ga);
+#elif MODE == 15
+    plat(10, FNVNX_ADDR(fh_five), STK(H), 0, 2);
+    plat(8, PG(H), 0x1000, 1, 3);
+    pg[0] = 2;
+    say("after the fault\n");
+#elif MODE == 16
+    plat(10, FNVNX_ADDR(fh_nested), STK(H), 0, 2);
+    plat(8, PG(H), 0x1000, 1, 3);
+    pg[0] = 2;
+    say("after the fault\n");
+#elif MODE == 17 || MODE == 18
+    plat(8, PG(H), 0x1000, 1, 3);
+#if MODE == 18
+    num("reg", plat(10, FNVNX_ADDR(fh_fix), STK(H), 0, 2));
+    num("unreg", plat(10, 0, 0, 0, 2));
+#endif
+    pg[0] = 2;
+    say("after the fault\n");
+#elif MODE == 19
+    plat(8, PG(H), 0x1000, 1, 3);
+    plat(10, FNVNX_ADDR(fh_fix), STK(H), 0, 2);   /* main's handler; the fault below is thread 2's */
+    uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(fault_thread), 3, 0x10000, 0, ~0ull);
+    fnvnx_hcall1(H->thread_start, id);
+    fnvnx_hcall1(H->thread_join, id);
+    say("after the fault\n");
+#elif MODE == 21
+    plat(8, PG(H), 0x1000, 1, 3);
+    num("misaligned", plat(10, FNVNX_ADDR(fh_fix), STK(H) + 8, 0, 2));
+    plat(10, FNVNX_ADDR(fh_fix), STK(H), 0, 2);
+    plat(8, STK(H) - 0x1000, 0x1000, 1, 3);   /* the frame page is read-only */
+    pg[0] = 2;
+    say("after the fault\n");
 #endif
 #else
     num("marker", marker(41));
@@ -325,7 +415,7 @@ def main():
     root = os.path.join(TMP, "sd")
     os.makedirs(root)
     open(os.path.join(root, "data.bin"), "wb").write(b"01ABCDEFGH23")
-    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11)}   # MODE 6 (boot CLI guest) is built by test_boot.py
+    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, *range(12, 22))}   # MODE 6 (boot CLI guest) is built by test_boot.py
     elf0, path0 = built[0]
     plan0 = make_plan(elf0)
     base = plan0["image"]["base"]
@@ -504,7 +594,53 @@ def main():
     except bootmachine.MachineError as e:
         ok, msg = "message" in str(e), str(e)
     case("a header-defined platform fn nobody implements raises at construction", ok, msg)
-    case("every header fn 1..8 of module 11 resolves", sorted(bootmachine.Machine(elf0, plan0, boothost.Services(root)).plat) == list(range(1, 9)))
+    case("every header fn 1..8 and 10 of module 11 resolves", sorted(bootmachine.Machine(elf0, plan0, boothost.Services(root)).plat) == [*range(1, 9), 10])
+    # ACCESS_FAULT_HANDLER (module 11 fn 10)
+    def kv(lines):
+        return {l.split("=")[0]: l.split("=")[1] for l in lines if "=" in l}
+
+    ra, la = run(built[12][0], root)[:2]
+    k = kv(la)
+    case("fault handler: write to a read-only page, handler restores RW, the store is re-executed",
+         ra["reason"] == "exit" and ra["exit_code"] == 7 and k.get("reg") == "0" and k.get("val") == "77" and k.get("kind") == "1"
+         and k.get("reason") == "1" and k.get("addr-ok") == "1" and k.get("count") == "1" and k.get("sp-in-stack") == "1"
+         and len(ra["events"]) == 1 and ra["events"][0]["kind"] == "fault-handler" and ra["events"][0]["reason"] == 1, (ra, la))
+    rb, lb = run(built[13][0], root)[:2]
+    k = kv(lb)
+    case("fault handler: handler advances pc and sets x5; execution continues after the faulting instruction",
+         rb["reason"] == "exit" and k.get("marker") == "abcd" and k.get("ins") == "2e4" and k.get("still-ro") == "1", (rb, lb))
+    rc, lc = run(built[14][0], root)[:2]
+    k = kv(lc)
+    case("fault handler: read of an unmapped address: kind 0, reason 0", rc["reason"] == "exit" and k.get("kind") == "0"
+         and k.get("reason") == "0" and k.get("addr") == "30000000" and k.get("marker") == "abcd", (rc, lc))
+    rd, ld = run(built[15][0], root)[:2]
+    case("fault handler: non-zero return ends the run with that exit code", rd["reason"] == "exit" and rd["exit_code"] == 5
+         and "after the fault" not in ld, (rd, ld))
+    re_, le = run(built[16][0], root)[:2]
+    case("fault handler: a fault inside the handler ends the run (in_handler)", re_["reason"] == "fault"
+         and re_["fault"].get("in_handler") is True and re_["fault"]["kind"] == "read-unmapped"
+         and re_["fault"]["addr"] == 0x30000000 and "after the fault" not in le, (re_, le))
+    rf, lf = run(built[17][0], root)[:2]
+    case("fault handler: no handler registered: the fault ends the run as before", rf["reason"] == "fault"
+         and rf["fault"]["kind"] == "write-protected" and "in_handler" not in rf["fault"] and rf["events"] == []
+         and "after the fault" not in lf, (rf, lf))
+    rg, lg = run(built[19][0], root)[:2]
+    case("fault handler: a handler of thread 1 does not serve thread 2's fault", rg["reason"] == "fault"
+         and rg["fault"]["tid"] == 2 and rg["fault"]["kind"] == "write-protected" and rg["events"] == [], (rg, lg))
+    rh, lh = run(built[18][0], root)[:2]
+    k = kv(lh)
+    case("fault handler: handler 0 unregisters", rh["reason"] == "fault" and k.get("reg") == "0" and k.get("unreg") == "0"
+         and rh["fault"]["kind"] == "write-protected" and rh["events"] == [], (rh, lh))
+    ri, li = run(built[20][0], root)[:2]
+    k = kv(li)
+    case("fault handler: v8 and NZCV round trip through the frame (handler dirties both)", ri["reason"] == "exit"
+         and k.get("v8lo") == "1" and k.get("v8hi") == "1" and k.get("nzcv") == "8" and k.get("frame-pstate") == "8"
+         and k.get("frame-v8") == "1" and k.get("store") == "5", (ri, li))
+    rj, lj = run(built[21][0], root)[:2]
+    case("fault handler: unwritable frame page ends the run as frame-unwritable; misaligned stack_top is refused",
+         rj["reason"] == "fault" and rj["fault"]["kind"] == "frame-unwritable" and kv(lj).get("misaligned") == "cc01", (rj, lj))
+    case("fault handler: two identical runs give identical run() dicts", ra == run(built[12][0], root)[0]
+         and ri == run(built[20][0], root)[0], ra)
     print("%d cases, %.1f s" % (N[0], time.time() - t0))
     return 1 if FAILED else 0
 
