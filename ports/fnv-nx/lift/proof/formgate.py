@@ -11,11 +11,10 @@ Keys: external; shapes = `liftpack/<path>` (shapes.tsv of the lifted pack); cert
 Universe: the ENCODING SHAPES of the lifted pack, whole: the rows `shape_key<TAB>family<TAB>count` of shapes.tsv (sorted by key, unique, family in
 int x87 simd sys) inside the external `liftpack`; the generate driver of the pack writes it with proof/shape.py:shape_key. The gate has no decoder
 of the exe and no census of its own. A shape is certified iff certs.tsv (rows shape_key family dsl_sha model_sha reference result) has a row with
-the same shape key, the dsl_sha that the CURRENT code gives (Form.sha() of forms.build on the representative shape.rep_bytes(key) at shape.ADDR;
-none when forms.build has no builder for it or the representative does not decode back to the shape: then the shape is uncertified), the pinned
-model_sha256 and result == proved. dsl_sha convention: symbolic fields (immediate, displacement, relative target, far pointer, moffs) are 0 in the
-representative; the hash binds the certificate to the builder code (forms*.py, dsl.py); that the Form is right for every field value is what the
-certificate (the proof) asserts. The gate imports no SMT solver (the DSL imports z3 only inside to_smt / post).
+the same shape key, the dsl_sha that the CURRENT code gives (symform.shape_sha(key): sha256 of the symbolic Form, immediate / displacement /
+relative-target fields as variables; the same function the prover writes the field with; none when the shape has no symbolic Form: then the shape
+is uncertified), the pinned model_sha256 and result == proved. The hash binds the certificate to the builder code (forms*.py, dsl.py, symform.py)
+and to the object that was proved. The gate imports no SMT solver (the DSL imports z3 only inside to_smt / post).
 
 Pinned model: formgate_inputs.json model_sha256 must equal the `x86_proof.ir` pin of proof/sail_pins.txt (red otherwise): one pin, two readers.
 
@@ -40,7 +39,7 @@ VERIFY = os.path.normpath(os.path.join(LIFT, "..", "verify"))
 sys.path.insert(0, LIFT)
 sys.path.insert(0, os.path.join(VERIFY, "..", "contract"))
 sys.path.insert(0, VERIFY)
-from proof import forms, shape  # noqa: E402
+from proof import shape, symform  # noqa: E402
 import gatefile  # noqa: E402     (ports/fnv-nx/contract)
 import recipe  # noqa: E402
 
@@ -135,15 +134,13 @@ def path_in(ext, v, what):
 
 
 def dsl_sha(key, md):
-    """Form.sha() of the current builder on the shape's representative; None = no builder (or the representative is not the shape)."""
-    r = shape.rep_bytes(key)
-    got = list(md.disasm(r, shape.ADDR))
-    if len(got) != 1 or got[0].size != len(r) or shape.shape_key(got[0]) != key:
-        return None
+    """the certificate field dsl_sha of the shape under the CURRENT code: symform.shape_sha, the one function the prover (proof/shapeprove.py) writes
+    the field with: sha256 of the SYMBOLIC Form (fields are variables), i.e. of the very object the proof is about. None = the shape has no symbolic
+    Form (no builder, builder precondition, builder branches on a field, field decode): it stays uncertified."""
     try:
-        return forms.build(got[0], shape.ADDR).sha()
-    except (KeyError, AssertionError):   # KeyError: mnemonic outside the covered set; AssertionError: the DSL width check rejects the operand form
-        return None                      # the builder produces. No Form exists, so the shape stays uncertified
+        return symform.shape_sha(key)
+    except (KeyError, AssertionError, symform.SymbolicBranch, symform.FieldDecodeError, shape.ShapeError):
+        return None
 
 
 def load_shapes(path):
