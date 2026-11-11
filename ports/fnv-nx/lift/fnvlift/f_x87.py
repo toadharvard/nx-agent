@@ -1,7 +1,8 @@
 """x87 (opcode bytes 0xd8..0xdf): data movement, arithmetic, compares (R8, W13). Stack model and control instructions: f_x87_ctl.py; the carrier
 semantics (what each load/store/arithmetic does to the value) are in rt/fnvl_x87.h. The transcendental / remainder forms (fsin fcos fsincos fptan fpatan f2xm1 fyl2x
 fyl2xp1 fscale fprem fprem1 fxtract) call rt/fmath.c: correctly rounded binary64 (R8, one reference CPU model); fsincos and fptan always use the dynamic stack because
-their stack effect depends on the operand (C2 = 1: |x| >= 2^63, nothing pushed). Not in this file: fbld fbstp fnsave frstor fnstenv fldenv (Unsupported with the mnemonic)."""
+their stack effect depends on the operand (C2 = 1: |x| >= 2^63, nothing pushed). fbld / fbstp (packed BCD, rt/x87.c) and fstpnce (D9 D8+i, the undocumented alias of fstp st(i)) are here;
+fldenv / frstor (dynamic stack only) and fnstenv / fnsave (blocked, see ctl) are in f_x87_ctl.py."""
 from .core import fallback, op, Unsupported, X87Dyn
 from .f_x87_ctl import ctl
 
@@ -83,7 +84,7 @@ def x87_reg(cx, ins, b0, mr, g):
         em(push(cx, R(i)))
     elif b0 == 0xd9 and g == 1:                                                    # fxch
         em('{ fv t_=%s; %s=%s; %s=t_; }' % (R(0), wr(cx, 0), R(i), wr(cx, i)))
-    elif b0 == 0xdd and g in (2, 3):                                               # fst fstp st(i)
+    elif b0 == 0xdd and g in (2, 3) or b0 == 0xd9 and g == 3:                      # fst fstp st(i); D9 D8+i = fstpnce: the same operation as DD D8+i (alias)
         em('%s=%s;%s' % (wr(cx, i), R(0), pop(cx) if g == 3 else ''))
     elif b0 == 0xd9 and mr == 0xe0:
         em('%s=fv_sg(%s,1);' % (wr(cx, 0), R(0)))
@@ -162,6 +163,10 @@ def x87_mem(cx, ins, b0, mr, g):
         em(a + 'M64(a_)=fv_s64(%s); }%s' % (r0(), pop(cx) if g == 3 else ''))
     elif b0 == 0xdb and g == 7:
         em(a + 'fnvl_f80 t_=fv_x(%s); M64(a_)=t_.m; M16(a_+8u)=t_.se; }%s' % (r0(), pop(cx)))
+    elif b0 == 0xdf and g == 4:                                                    # fbld m80: packed BCD -> ST(0) (rt/x87.c fnvl_x_from_bcd: A-BCD)
+        em(a + push(cx, 'fv_ldbcd(M64(a_),M16(a_+8u))') + ' }')
+    elif b0 == 0xdf and g == 6:                                                    # fbstp m80: round per RC, 18 digits, indefinite on NaN / inf / out of range; pop
+        em(a + 'u64 lo_, hi_; fv_stbcd(%s,&lo_,&hi_); M64(a_)=lo_; M16(a_+8u)=(u16)hi_; }%s' % (r0(), pop(cx)))
     elif (b0, g) in INT_ST:
         bits, tt, pp = INT_ST[(b0, g)]
         em(a + 'M%d(a_)=(u%d)%s(%s,%d); }%s' % (bits, bits, 'FISTT' if tt else 'FIST', r0(), bits, pop(cx) if pp else ''))

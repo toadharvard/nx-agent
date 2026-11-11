@@ -103,3 +103,13 @@ static inline fv dyn_rd(u32 i){ fv *p=&c->fx[(c->ftop+i)&7]; if(__builtin_expect
 static inline void dyn_push(fv v){ u32 t=(c->ftop-1)&7; if(__builtin_expect(c->fx[t].k!=0,0)){ c->fex|=0x41; v=FV_INDEF; } c->ftop=t; c->fx[t]=v; }
 static inline void dyn_pop(void){ fv *p=&c->fx[c->ftop&7]; if(__builtin_expect(!p->k,0)) c->fex|=0x41; p->k=0; c->ftop=(c->ftop+1)&7; }
 static inline void fnvl_x87_init(void){ for(int i=0;i<8;i++) c->fx[i].k=0; c->ftop=0; c->fcw=0x37f; c->fex=0; fnvl_fp_set_rc_x87(0); fnvl_fp_x87_clear(); }
+/* fbld / fbstp: packed BCD (rt/x87.c; A-BCD: digits above 9 follow the arithmetic formula d*10^k). The value of an 18-digit number is an integer below 10^18: exact in the M80 carrier. */
+static inline fv fv_ldbcd(u64 lo,u32 hi){ u8 b[10]; u16 h=(u16)hi; __builtin_memcpy(b,&lo,8); __builtin_memcpy(b+8,&h,2); fnvl_f80 r=fnvl_x_from_bcd(b); return fvmk(FK_M80,r.m,r.se); }
+static inline void fv_stbcd(fv a,u64 *lo,u64 *hi){ u8 b[10]; u32 f=0; u16 h; fnvl_x_to_bcd(fv_x(a),c->fcw,b,&f); __builtin_memcpy(lo,b,8); __builtin_memcpy(&h,b+8,2); *hi=h; FM_FL(f); }
+/* fldenv / frstor (SDM Vol 1 8.1.10, 32-bit layout fig 8-9, 16-bit layout fig 8-11; assumptions A-EMPTY and A-ES: see f_x87_ctl.py env()). Dynamic stack only. The image words: FCW at 0,
+   FSW at w, FTW at 2w with w = 4 (32-bit operand size) or 2; frstor's ST(i) images follow the 7 dwords (28 bytes) / 7 words (14 bytes) of the environment, 10 bytes each in ST order. */
+static inline u32 fx_env_ld(u32 a,u32 w,u32 *ftw){ u32 fsw=M16(a+w); *ftw=M16(a+2*w); FLDCW(M16(a)); c->ftop=(fsw>>11)&7; c->fex=fsw&0x27fu; fnvl_fp_x87_clear(); return fsw; }
+#define FLDENV(A,D32) do{ u32 ftw_, a_=(A), fsw_=fx_env_ld(a_,(D32)?4u:2u,&ftw_); c0=(fsw_>>8)&1; c2=(fsw_>>10)&1; c3=(fsw_>>14)&1; \
+  for(u32 p_=0;p_<8;p_++){ if(((ftw_>>(2*p_))&3)==3) c->fx[p_].k=0; else if(!c->fx[p_].k) c->fx[p_]=FV_INDEF; } }while(0)
+#define FRSTOR(A,D32) do{ u32 ftw_, a_=(A), r_=a_+((D32)?28u:14u), fsw_=fx_env_ld(a_,(D32)?4u:2u,&ftw_); c0=(fsw_>>8)&1; c2=(fsw_>>10)&1; c3=(fsw_>>14)&1; \
+  for(u32 i_=0;i_<8;i_++){ u32 p_=(c->ftop+i_)&7; if(((ftw_>>(2*p_))&3)==3) c->fx[p_].k=0; else c->fx[p_]=fv_ld80(M64(r_+10*i_),M16(r_+10*i_+8u)); } }while(0)

@@ -92,6 +92,11 @@ mfence|0faef0
 lfence|0faee8
 sfence|0faef8
 clflush|0fae38 0fae7804
+fldenv|d920 d96004 66d920 66d96004
+frstor|dd20 dd6004 66dd20 66dd6004
+fbld|df20 df6004 df6424fc
+fbstp|df30 df7004 df7424fc
+fstpnce|d9d8 d9d9 d9da d9df
 '''
 SPEC = []
 for line in ENC.strip().split('\n'):
@@ -157,7 +162,7 @@ CLASS_EXPECT = [
     ('f2700a', 'bnd jo', ['if(of)']), ('f2c3', 'bnd ret', ['return;']), ('3effe0', 'notrack jmp eax', ['c->ra=eax']), ('f2f00108', 'xacquire lock add [eax],ecx', ['M32(']),
     ('f30fb8c1', 'popcnt', [RUD]), ('0f38f001', 'movbe', [RUD]), ('f20f38f1c1', 'crc32', [RUD]), ('0fc7f0', 'rdrand', [RUD]), ('0f01d0', 'xgetbv', [RUD]), ('0fae20', 'xsave', [RUD]), ('0f05', 'syscall', [RUD]),
     ('0f07', 'sysret', [RUD]), ('0f01f8', 'swapgs', [RUD]), ('0f01c1', 'vmcall', [RUD]), ('0f01c8', 'monitor', [RUD]), ('0fb9c1', 'ud1', [RUD]), ('0fff00', 'ud0', [RUD]), ('c5f877', 'vzeroupper', [RUD]),
-    ('c5e1e3c0', 'vpavgw', [RUD]), ('0f380000', 'pshufb', [RUD]), ('660f3a0f0000', 'palignr', [RUD]), ('f20f7c00', 'haddps', [RUD]), ('c4e272f7c1', 'sarx', [RUD]), ('62f17c4858c0', 'evex vaddps', [RUD]),
+    ('c5e1e3c0', 'vpavgw', [RUD]), ('c4e171e300', 'vpavgw 3-byte VEX, memory', [RUD]), ('0f380000', 'pshufb', [RUD]), ('660f3a0f0000', 'palignr', [RUD]), ('f20f7c00', 'haddps', [RUD]), ('c4e272f7c1', 'sarx', [RUD]), ('62f17c4858c0', 'evex vaddps', [RUD]),
     ('c7f800000000', 'xbegin', [RUD]), ('0f0b', 'ud2', ['fnvl_raise(FNVL_UD,']), ('0f01d6', 'xtest', [RUD]), ('0faee0', 'ptwrite? (F3 0F AE /4 needs F3: this is 0F AE E0 = xsave-like #UD)', []),
 ]
 # reserved-NOP bytes capstone refuses: (hex, expected instruction length or None). Lengths cross-checked against the Unicorn oracle over the whole 0F 0D / 0F 18..1F ModRM grid (340 encodings, 0 mismatches).
@@ -187,6 +192,57 @@ def class_tables(img):
         miss = [x for x in subs if x != NORAISE and x not in txt] + (['no raise of any kind'] if NORAISE in subs and ('fnvl_raise(FNVL' in txt or 'fnvl_raise_av' in txt) else [])
         bad += bool(miss); print('%-22s %-44s %s' % (hx, what, 'ok' if not miss else 'FAIL missing/forbidden: %s' % miss))
     return bad
+# ---- X1: x87 environment loads, packed BCD, fstpnce, VEX (vpavgw) ----------------------------------------------------------------------------------------------------
+# fldenv / frstor: the oracle is Unicorn. Assumption A-EMPTY (f_x87_ctl.py env()): a register the loaded tag word marks non-empty while it was empty holds the real indefinite in the
+# lifted code, a stale value in the oracle (QEMU keeps the register file). Those registers are masked in the comparison and COUNTED ("masked fields" below), never silently equal.
+# The FIP / FCS / FOP / FDP / FDS words of the image are not part of any state the lifted code keeps (open class question Q-FIP); a load discards them and the oracle's are checked by
+# nobody because the only observers are fnstenv / fnsave, which are not lifted (no case here).
+# fbstp: QEMU's helper does not implement the packed-BCD indefinite (SDM: NaN / infinity / |x| >= 10^18 after rounding store FFFF C000 0000 0000 0000), so the expected bytes come from an
+# independent Python reference over the exact 80-bit value (Fraction arithmetic, RC from the control word).
+# VEX (vpavgw): the reference CPU model reports AVX = 0 and OSXSAVE = 0 (rt/cpumodel.c, leaf 1 ECX = 0), so every VEX-encoded instruction raises #UD: the expected oracle outcome is the
+# fault class #UD (trap4) with the architectural state unchanged, whatever Unicorn does with the bytes.
+import fractions
+MASKED = 'masked'
+def is_vex(raw):
+    i = 0
+    while i < len(raw) and raw[i] in T.PFX: i += 1
+    return i + 1 < len(raw) and raw[i] in (0xc4, 0xc5) and raw[i + 1] & 0xc0 == 0xc0       # in 32-bit mode C4/C5 with ModRM.mod == 3 is VEX (else LES / LDS)
+def bcd_ref(m, se, rc):
+    sg, e = se >> 15, se & 0x7fff; ind = bytes([0] * 7 + [0xc0, 0xff, 0xff])
+    if e == 0x7fff or (e and not m >> 63): return ind
+    mag = fractions.Fraction(m) * fractions.Fraction(2) ** ((e or 1) - 16383 - 63); fl = mag.numerator // mag.denominator; fr = mag - fl
+    up = (fr > fractions.Fraction(1, 2) or (fr == fractions.Fraction(1, 2) and fl % 2 == 1)) if rc == 0 else (bool(sg) and fr > 0) if rc == 1 else (not sg and fr > 0) if rc == 2 else False
+    r = fl + up
+    if r >= 10 ** 18: return ind
+    return bytes((((r // 100 ** i) % 100 // 10) << 4) | ((r // 100 ** i) % 10) for i in range(9)) + bytes([sg << 7])
+orig_x87_range, orig_compare, orig_run = T.x87_range, T.compare, T.Oracle.run
+def x87_range(E):
+    b, mr = E['base'], E['ins'].modrm
+    if b == 'fbld': return 0, 7                                 # pushes
+    if b in ('fldenv', 'frstor'): return 0, 8                   # replace the whole state
+    if b == 'fstpnce': return max(1, (mr & 7) + 1), 8           # pops, needs st(i)
+    return orig_x87_range(E)
+def oracle_run(s, E, st):
+    if is_vex(E['raw']):
+        return dict(regs=list(st['regs']), eip='trap4', fl=st['fl'] & 0xcd5, eflx=st['eflx'] & 0x240000, mem={}, fp=None, xmm=list(st['xmm']), mm=None, mxcsr=st['mxcsr'], wr=[])
+    return orig_run(s, E, st)
+def compare(E, st, o, c, X):
+    b, masked = E['base'], 0
+    if b == 'fbstp' and o.get('wr') and 'fault' not in c:
+        a0 = min(a for a, n in o['wr']); rc = st['fcw'] >> 10 & 3; m, se = img80(*st['fx'][st['ftop']])
+        want = bcd_ref(m, se, rc); o['mem'] = {a0 + k: v for k, v in enumerate(want) if v != T.origbyte(st, a0 + k)}
+    if b in ('fldenv', 'frstor') and o.get('fp') and 'fault' not in c and c.get('fp'):
+        for p in range(8):
+            if o['fp']['valid'] >> p & 1 and not st['valid'] >> p & 1 and b == 'fldenv' and c['fp']['valid'] >> p & 1:
+                c['fp']['st'][p] = (o['fp']['st'][p][0], o['fp']['st'][p][1], 6); masked += 1
+    r = orig_compare(E, st, o, c, X)
+    return (r[0], MASKED + ':%d' % masked if r[0] == 'equal' and masked else r[1]) + tuple(r[2:])
+T.x87_range, T.compare, T.Oracle.run = x87_range, compare, oracle_run
+img80 = T.img80
+def masked_report(work):
+    import json
+    js = json.load(open(work + '/result.json')); n = sum(int(r[1].split(':')[1]) for v in js.values() for e in v['encodings'] for r in e['cases'] if r[0] == 'equal' and r[1].startswith(MASKED + ':'))
+    print('masked fields: %d  (fldenv registers revived by the tag word: A-EMPTY; FIP/FCS/FOP/FDP/FDS: no case, fnstenv/fnsave are not lifted: Q-FIP)' % n)
 def tables():
     img = FImage(os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')); bad = 0
     PRIVS = [('fa', 'FNVL_PRIV'), ('fb', 'FNVL_PRIV'), ('f4', 'FNVL_PRIV'), ('ee', 'FNVL_PRIV'), ('e6 10'.replace(' ', ''), 'FNVL_PRIV'), ('6c', 'FNVL_PRIV'), ('f36e', 'FNVL_PRIV'), ('ce', 'FNVL_INTO'), ('cc', 'FNVL_BP')]
@@ -211,6 +267,7 @@ def main():
     T.load_forms = lambda a, rows: dict(forms=forms, mnf=mnf, nfuncs=1, undecodable=0)
     sys.argv = [sys.argv[0], '--work', '/home/user/l3work/xinstest', '--k', '40'] + [x for x in sys.argv[1:] if x not in ('--only',) and not (only and x == ','.join(only))]
     T.main()
+    masked_report(sys.argv[len(sys.argv) - sys.argv[::-1].index('--work')])      # the last --work wins (argparse)
 if __name__ == '__main__':
     if '--tables' in sys.argv: tables()
     else: main()
