@@ -41,6 +41,15 @@
    "result": "admit.json"
   },
   {
+   "name": "oracle",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_oracle.py"
+   ],
+   "result": "oracle.json"
+  },
+  {
    "name": "build",
    "argv": [
     "python3",

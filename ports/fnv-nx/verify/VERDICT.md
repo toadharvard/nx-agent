@@ -32,7 +32,7 @@ below, not written yet, so no product root can be admitted; **no rule** = report
 | 7 | D3D9 enum value or SM1-3 op without a translation | `d3d9total` | generated tables against the enum and op universes | L6 | required with the render root |
 | 8 | Layout or calling-contract mismatch of a native body | `n1`, `n2_data`, `n2_call`, `n2_vcall`, `xc`, `xunit`, `rtti`, `pcrel`, `bodysel` | exe facts against object facts | L1 | required with the first native root |
 | 9 | Non-deterministic build | `determinism` | two cold builds of every recipe in the sandbox, compared bit for bit | L4 | required |
-| 10 | Test that can pass on a wrong body: the expected value comes from the code under test | `oracle` | provenance of every expected value (exe, Wine dump, contract, independent model) | L4 | required |
+| 10 | Test that can pass on a wrong body: the expected value comes from the code under test | `oracle` | the declared reference of every test file (`tests/oracle.json`): a dump of the exe under Wine 9.0, a cited text, a contract table or an independent model, outside the import closure of the code under test | L4 | runs |
 | 14 | Memory fault in a hand-written native body: null or wild pointer, access out of bounds, stack exhaustion | none (verification) | AddressSanitizer and UndefinedBehaviorSanitizer in the stage runs and tests; the sound analyzer for information | L4 | covered by verification, not a required gate |
 | 15 | Hang or deadlock | none (verification) | the same stage runs and tests (AddressSanitizer and UndefinedBehaviorSanitizer; the sound analyzer for information) | L4 | covered by verification, not a required gate |
 | 17 | Memory exhaustion: an allocation path without a contract result | `oom` | not chosen yet | the owners of the code | after the first frame |
@@ -129,8 +129,27 @@ every merge pays today; with a product root each judges it (tested on a toy root
   identical after normalising relocations; differing copies are `comdat-differs` (an ODR violation). A symbol the link script defines
   is a definition when the root links an ELF and the ELF defines it GLOBAL. Both ABIs are tested.
 
-Required by `gate_admit.REQUIRED_PRODUCT` and not written yet, so no product root can be admitted: `oracle` (10). Required with their roots, not written: `reach` (16, writes the facts file), `imports` (4),
+Required with their roots, not written: `reach` (16, writes the facts file), `imports` (4),
 `disp` (5), `forms` (6), `d3d9total` (7), `n1`, `n2_data`, `n2_call`, `n2_vcall`, `xc`, `xunit`, `rtti`, `pcrel`, `bodysel` (8).
+
+## References of tests (class 10, gate `oracle`)
+
+Every test file of the `selftests` universe has one entry in `DIR/tests/oracle.json` ("fnvnx-oracle/1"): the files under
+test (`subject`) and the references its expected values come from. The rule, its argument and the reference forms are in
+the `gate_oracle.py` docstring. In short:
+
+- a reference is a dump of the pinned exe under Wine 9.0 (a file of a commit of `fnv-nx-build`, fetched as an external and
+  checked by `tree_sha256`), a cited text (a tracked file plus an anchor that resolves in it: a heading line or a line
+  range), a contract table, or an independent model;
+- a text without a file and an anchor is not a reference;
+- no cited text, contract table or model may be a file the subject can import (closure over the syntax trees, a superset
+  of what python can load): a tool cannot cite itself. The stated rules of the tools are `verify/TOOLS.md`;
+- a test of product code needs a Wine dump or a cited text, and none of its references may lie in a product root.
+
+The pinned exe is `verify/oracle_pins.json`. Assumption: the declaration is true. It is checked by verification, not by the
+gate: `verify/oraclecheck.py` runs every test under strace and compares the tracked files the run opened with the import
+closure of the subject plus the references (a file opened outside them, or a subject file never opened, fails the test's
+check). It is a job of the after-merge verifier.
 
 ## Where no closing rule is known
 
