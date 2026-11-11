@@ -4,7 +4,7 @@
 #          shards are numbered 0 .. N-1; last line: LIFTALL first= count= published= failed= seconds=; exit 1 if any shard is unpublished
 # Inputs (exe-derived, private): fnv-nx-build branches gamedata/exe (FalloutNV.exe) and l3a-lift/facts (universe.tsv); the lifter is this checkout.
 # Output: fnv-nx-build branch l3a-lift/obj/<lifter sha12>/<K>of<N> = lift_K_of_N.a, manifest_K.tsv, missing_K.tsv, forms_K.tsv, undef_K.tsv, shard.txt (the count line).
-# Every compile goes through the exact object cache (tools/link/objcache.py), seeded from / published to fnv-nx-build branch l3a-lift/objcache.
+# Every compile goes through the exact object cache (tools/link/objcache.py), seeded from / published to fnv-nx-build branch l3a-lift/objcache-<env_id[:12]>.
 # Prerequisites (installed here when absent): gcc/g++/binutils aarch64-linux-gnu, python3 capstone unicorn numpy pyelftools.
 # Nothing exe-derived is written into this repository. Env: FNVNX_BUILD (clone of fnv-nx-build, default /home/user/fnv-nx-build), FNVNX_WORK (default /home/user/l3work/farm).
 set -euo pipefail
@@ -12,8 +12,8 @@ FIRST=$1; COUNT=$2; N=$3; JOBS=${4:-$(nproc)}
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 B=${FNVNX_BUILD:-/home/user/fnv-nx-build}; W=${FNVNX_WORK:-/home/user/l3work/farm}
 SHA=$(git -C "$HERE" rev-parse HEAD | cut -c1-12)
-command -v aarch64-linux-gnu-g++ >/dev/null || { apt-get update -qq; apt-get install -y -qq gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu; }
-python3 -c 'import capstone, unicorn, numpy, elftools' 2>/dev/null || pip install -q --break-system-packages capstone unicorn numpy pyelftools
+# the declared verdict environment (verify/env.json): exact package and module versions, then envcheck.py check; a non-zero status stops the job (set -e), no other version is installed
+bash "$HERE/../farm/setup_verdict_env.sh"
 mkdir -p "$W/in" "$W/$SHA"
 for br in gamedata/exe gamedata/redist l3a-lift/facts l1-contract/mp4; do
     d="$W/in/$(echo $br | tr / _)"
@@ -28,8 +28,10 @@ fi
 mkdir -p "$W/$TAG"
 (cd "$W/in/gamedata_exe" && sha256sum -c FalloutNV.exe.sha256 >/dev/null)
 # Every compile of the packer goes through tools/link/objcache.py (exact key); the cache is shared through the artifacts repository
-# (branch l3a-lift/objcache, content-addressed: seed before the shards, publish after them; tools/farm/linkcache.sh).
-export FNVNX_LINK_OBJCACHE="${FNVNX_LINK_OBJCACHE:-$W/objcache}" ARTIFACTS="${ARTIFACTS:-$B}" LINKCACHE_BRANCH="${LINKCACHE_BRANCH:-l3a-lift/objcache}"
+# (branch l3a-lift/objcache-<env_id[:12]>, content-addressed: seed before the shards, publish after them; tools/farm/linkcache.sh).
+# namespace: the declared environment id (verify/envcheck.py id), so a cache made under another environment is never seeded (the key holds the compiler bytes as well)
+ENVID=$(python3 -I "$HERE/../verify/envcheck.py" id | cut -c1-12)
+export FNVNX_LINK_OBJCACHE="${FNVNX_LINK_OBJCACHE:-$W/objcache-$ENVID}" ARTIFACTS="${ARTIFACTS:-$B}" LINKCACHE_BRANCH="${LINKCACHE_BRANCH:-l3a-lift/objcache-$ENVID}"
 bash "$HERE/../tools/farm/linkcache.sh" seed "$FNVNX_LINK_OBJCACHE" || true
 T0=$(date +%s); PUB=0; FAIL=0
 for K in $(seq "$FIRST" $((FIRST + COUNT - 1))); do
