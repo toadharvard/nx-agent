@@ -367,7 +367,7 @@ def cl_targets(a, kids):
     lo, hi = cl_range(a); own = tuple(x for x in kids.get(lo, ()) if lo <= x < hi)
     key = (lo, hi, a, own)
     if key not in cl_cache:
-        fh = hi + 0x1000; ins, tabs, tk, bad = LCore.explore(limg, lo, hi, limg.bytes(lo, fh - lo), a, own if a == lo else (), fh); cs = set(); ts = set(); jx = set()
+        fh = hi; ins, tabs, tk, bad = LCore.explore(limg, lo, hi, limg.bytes(lo, hi - lo + 16), a, own if a == lo else (), fh); cs = set(); ts = set(); jx = set()
         for x, g in ins.items():
             m = g.mnemonic; o = g.operands
             if m == 'call' and o[0].type == X.X86_OP_IMM: cs.add(o[0].imm & 0xffffffff)

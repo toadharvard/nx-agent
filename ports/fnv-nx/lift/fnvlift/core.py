@@ -279,8 +279,8 @@ def gs_guard(cx, ins):
 def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     from . import f_x87_ctl as xc, f_sys
     addr, size = lo, hi - lo
-    fall_hi = hi + 0x1000 if strict else hi
-    code = img.bytes(addr, fall_hi - addr)
+    fall_hi = hi          # a body is exactly its range: falling past it is a transfer to the next address (f_flow.jump_out), never a copy of the code that follows
+    code = img.bytes(addr, hi - addr + 16)      # 16 more bytes: the last instruction may straddle hi
     insns, tables, taken, bad = explore(img, lo, hi, code, start, owns if start == addr and explore_owns else (), fall_hi)
     if start not in insns and start not in bad:     # an entry with an empty range (the universe found no decodable byte at it): its body is the #UD at its address
         if next(iter(md.disasm(img.bytes(start, 16), start, 1)), None) is not None:
