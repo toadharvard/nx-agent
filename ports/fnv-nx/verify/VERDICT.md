@@ -42,6 +42,20 @@ below, not written yet, so no product root can be admitted; **no rule** = report
 Gate rules decide on what the program is (machine code, symbol tables, syntax trees, content hashes). No gate decides
 on a word in a name, a comment or a string.
 
+## State of the product gates
+
+- `objstub` is written and tested (`objstub.py`, `gate_objstub.py`), and is NOT in `gates.json` yet.
+  - Class 1 decides on instruction encodings and relocations. The set of terminating routines is derived by a GCC
+    plugin from the declarations the compiler itself sees (8 names from the C headers of the cross toolchain).
+  - Class 2 flags a function unless the analysis proves a call, an access outside its own frame, or an input
+    register live at entry. Its register read and write sets come from the capstone decoder, and three encodings
+    were found where those sets are wrong (`cmp`, `fmov` with an immediate, `ldadd`). A spurious read lets a
+    vacuous function pass, so the gate is not sound until the sets are derived from Arm's machine-readable
+    specification. Until then it is not accepted as a gate.
+  - Measured cost: about 3 s per MB of code, so about 6 minutes for a 120 MB text. This is over the 5 minute
+    budget and needs sharding by object with a content-keyed cache.
+- `build`, `determinism`, `oracle`, `linkstrict`, `memsafe`, `nodeadlock`: not written.
+
 ## Where no closing rule is known
 
 Reported to the orchestrator; none of these is patched around.
