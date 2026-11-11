@@ -27,12 +27,12 @@ def make(asm_fn):
     out, mk, A = build(asm_fn)
     full = lambda f: (lambda ix, iy: [f(ix, iy)])
     # ---------------------------------------------------------------- a: constants (float, int, bool)
-    c = mk("const_float", "a"); vs = c.vs(A("vs_2_0\ndcl_position v0\nmov r0, v0\nmad oPos, r0, c0, c1\nadd oD0, c2, c200\n"))
+    c = mk("const_float", "a"); vs = c.vs(A("vs_2_0\ndcl_position v0\nmov r0, v0\nmad oPos, r0, c0, c1\nadd r1, c2, c200\nadd oD0, r1, c255\n"))
     ps = c.ps(A("ps_2_0\ndcl v0\nmul r0, v0, c5\nadd oC0, r0, c31\n")); d = c.decl(elems([(FLOAT4, POSITION, 0)])); c.use(vs, ps, d)
-    c.consts(0, 0, [2, 2, 2, 1, -0.5, 0.5, 0, 0, 0.2, 0.4, 0.6, 0.8]); c.consts(0, 200, [0.1, 0, 0, 0]); c.consts(1, 5, [1.0, 0.5, 0.25, 0.75]); c.consts(1, 31, [0, 0.1, 0, 0])
+    c.consts(0, 0, [2, 2, 2, 1, -0.5, 0.5, 0, 0, 0.2, 0.4, 0.6, 0.8]); c.consts(0, 200, [0.1, 0, 0, 0]); c.consts(0, 255, [0, 0.05, 0, 0]); c.consts(1, 5, [1.0, 0.5, 0.25, 0.75]); c.consts(1, 31, [0, 0.1, 0, 0])
     verts = []
     for p in SCR: x, y = ndc(p); verts.append([fb(x * 0.5 + 0.25), fb(y * 0.5 - 0.25), fb(0.25), fb(1.0)])
-    c.run("up", 16, verts); c.ref = full(lambda ix, iy: ((0.2 + 0.1) * 1.0, 0.4 * 0.5 + 0.1, 0.6 * 0.25, 0.8 * 0.75))
+    c.run("up", 16, verts); c.ref = full(lambda ix, iy: ((0.2 + 0.1) * 1.0, (0.4 + 0.05) * 0.5 + 0.1, 0.6 * 0.25, 0.8 * 0.75))
     c = mk("const_float_c223", "a"); vs = c.vs(A("vs_3_0\ndcl_position v0\ndcl_position o0\nmov o0, v0\n")); ps = c.ps(A("ps_3_0\nmov oC0, c223\n"))
     c.use(vs, ps, c.decl(elems([(FLOAT4, POSITION, 0)]))); c.consts(1, 223, [0.3, 0.6, 0.9, 0.5]); c.consts(1, 222, [0.9, 0.9, 0.9, 0.9]); s, vv = tri([("pos", None)]); c.run("up", s, vv)
     c.ref = full(lambda ix, iy: (0.3, 0.6, 0.9, 0.5))
@@ -123,7 +123,7 @@ def make(asm_fn):
         else: t = c.tex(2, 2, 2, 2, VOL); cf = vf; tf = lambda ix, iy: a8(VOL[math.floor(vf(ix, iy)[2] * 2) * 4 + math.floor(vf(ix, iy)[1] * 2) * 2 + math.floor(vf(ix, iy)[0] * 2)])
         c.bind(0, t); c.samp(0, "ADDRESSU", 3); c.samp(0, "ADDRESSV", 3); s, vv = tri([("pos", None), ("f4", lambda sx, sy: (1, 1, 1, 1)), ("f3", cf)]); c.run("up", s, vv); c.ref = full(tf)
     # ---------------------------------------------------------------- c: vertex colour, the unwritten-input rule, non-canonical links
-    cf = lambda sx, sy: (sx / 32, sy / 32, 0.5, (sx + sy) / 64)
+    cf = lambda sx, sy: ((sx + 2) / 68, (sy + 2) / 68, 0.5, (sx + sy + 4) / 136)   # in [0, 1] at the three vertices: vertex colours are saturated by the vertex shader stage
     c = mk("vcolor_float4", "c"); vs = c.vs(A(VS_PCT)); ps = c.ps(A(PS_COL)); c.use(vs, ps, c.decl(elems([(FLOAT4, POSITION, 0), (FLOAT4, COLOR, 0), (FLOAT2, TEXCOORD, 0)])))
     s, vv = tri([("pos", None), ("f4", cf), ("f2", lambda sx, sy: (0, 0))]); c.run("up", s, vv); c.ref = full(lambda ix, iy: cf(ix, iy))
     c = mk("vcolor_d3dcolor", "c"); vs = c.vs(A("vs_2_0\ndcl_position v0\ndcl_color0 v1\nmov oPos, v0\nmov oD0, v1\n")); ps = c.ps(A(PS_COL)); c.use(vs, ps, c.decl(elems([(FLOAT4, POSITION, 0), (D3DCOLOR, COLOR, 0)])))
@@ -147,6 +147,12 @@ def make(asm_fn):
     for nm, psa, f in (("link_color3", "ps_3_0\ndcl_color3 v0\nmov oC0, v0\n", lambda: (0.6, 0.5, 0.4, 0.3)), ("link_color2_color3", "ps_3_0\ndcl_color2 v0\ndcl_color3 v1\nadd oC0, v0, v1\n", lambda: (0.7, 0.7, 0.7, 0.7))):
         c = mk(nm, "c"); vs = c.vs(A("vs_3_0\ndcl_position v0\ndcl_position o0\ndcl_color2 o1\ndcl_color3 o2\nmov o0, v0\nmov o1, c1\nmov o2, c2\n")); ps = c.ps(A(psa))
         c.use(vs, ps, c.decl(elems([(FLOAT4, POSITION, 0)]))); c.consts(0, 1, [0.1, 0.2, 0.3, 0.4, 0.6, 0.5, 0.4, 0.3]); c.run("up", 16, vv); c.ref = full(lambda ix, iy, f=f: f())
+    c = mk("link_vs_subset_of_ps", "c"); vs = c.vs(A("vs_3_0\ndcl_position v0\ndcl_position o0\ndcl_color3 o1\nmov o0, v0\nmov o1, c2\n")); ps = c.ps(A("ps_3_0\ndcl_color2 v0\ndcl_color3 v1\nadd oC0, v0, v1\n"))
+    c.use(vs, ps, c.decl(elems([(FLOAT4, POSITION, 0)]))); c.consts(0, 2, [0.6, 0.5, 0.4, 0.3]); c.run("up", 16, vv); c.ref = full(lambda ix, iy: (0.6, 0.5, 0.4, 0.3))
+    # two pixel shader objects with one bytecode share one backend shader (memo); releasing one must not take it from the other
+    c = mk("shared_bytecode_release", "f"); vs = c.vs(A("vs_2_0\ndcl_position v0\nmov oPos, v0\n")); code = A("ps_2_0\nmov oC0, c0\n"); p1, p2 = c.ps(code), c.ps(code); d1 = c.decl(elems([(FLOAT4, POSITION, 0)]))
+    c.clear(); c.use(vs, p1, d1); c.consts(1, 0, [0.9, 0.1, 0.1, 1.0]); c.draw("up", 16, vv); c.use(vs, p2, d1); c.consts(1, 0, [0.1, 0.9, 0.1, 1.0]); c.draw("up", 16, vv)
+    c.add("z", 1, p1); c.consts(1, 0, [0.1, 0.1, 0.9, 1.0]); c.draw("up", 16, vv); c.out(); c.ref = full(lambda ix, iy: (0.1, 0.1, 0.9, 1.0))
     # ---------------------------------------------------------------- d: fog (ps_2_0 with a vs_1_1 without oFog)
     FC = 0x00FF8000; fc = a8(FC); base = (0.8, 0.4, 0.2, 0.6)
     def fogc(f): return tuple(fc[k] + (base[k] - fc[k]) * f for k in range(3)) + (base[3],)
@@ -171,11 +177,11 @@ def make(asm_fn):
     for fn, nm in ((5, "greater"), (4, "lessequal"), (1, "never"), (8, "always"), (6, "notequal"), (2, "less"), (7, "greaterequal"), (3, "equal")):
         c = mk("alpha_" + nm, "e"); vs = c.vs(A(VS_PCT)); ps = c.ps(A(PS_COL)); c.use(vs, ps, c.decl(elems([(FLOAT4, POSITION, 0), (FLOAT4, COLOR, 0), (FLOAT2, TEXCOORD, 0)])))
         c.rs("ALPHATESTENABLE", 1); c.rs("ALPHAFUNC", fn); c.rs("ALPHAREF", 0x66)
-        s, vv2 = tri([("pos", None), ("f4", lambda sx, sy: (0.3, 0.6, 0.9, sx / 32)), ("f2", lambda sx, sy: (0, 0))]); c.run("up", s, vv2)
-        c.ref = full(lambda ix, iy, fn=fn: (0.3, 0.6, 0.9, ix / 32) if PASS[fn](ix / 32, 0x66 / 255) else None)
+        s, vv2 = tri([("pos", None), ("f4", lambda sx, sy: (0.3, 0.6, 0.9, (sx + 2) / 68)), ("f2", lambda sx, sy: (0, 0))]); c.run("up", s, vv2)
+        c.ref = full(lambda ix, iy, fn=fn: (0.3, 0.6, 0.9, (ix + 2) / 68) if PASS[fn]((ix + 2) / 68, 0x66 / 255) else None)
     c = mk("alpha_disabled_ignores_func", "e"); vs = c.vs(A(VS_PCT)); ps = c.ps(A(PS_COL)); c.use(vs, ps, c.decl(elems([(FLOAT4, POSITION, 0), (FLOAT4, COLOR, 0), (FLOAT2, TEXCOORD, 0)])))
-    c.rs("ALPHATESTENABLE", 0); c.rs("ALPHAFUNC", 1); c.rs("ALPHAREF", 0x66); s, vv2 = tri([("pos", None), ("f4", lambda sx, sy: (0.3, 0.6, 0.9, sx / 32)), ("f2", lambda sx, sy: (0, 0))]); c.run("up", s, vv2)
-    c.ref = full(lambda ix, iy: (0.3, 0.6, 0.9, ix / 32))
+    c.rs("ALPHATESTENABLE", 0); c.rs("ALPHAFUNC", 1); c.rs("ALPHAREF", 0x66); s, vv2 = tri([("pos", None), ("f4", lambda sx, sy: (0.3, 0.6, 0.9, (sx + 2) / 68)), ("f2", lambda sx, sy: (0, 0))]); c.run("up", s, vv2)
+    c.ref = full(lambda ix, iy: (0.3, 0.6, 0.9, (ix + 2) / 68))
     # ---------------------------------------------------------------- f: MRT
     c = mk("mrt_two_targets", "f", nrt=2); vs = c.vs(A("vs_2_0\ndcl_position v0\nmov oPos, v0\n")); ps = c.ps(A("ps_2_0\nmov oC0, c0\nmov oC1, c1\n")); c.use(vs, ps, c.decl(elems([(FLOAT4, POSITION, 0)])))
     c.rt(1); c.consts(1, 0, [0.2, 0.4, 0.6, 0.8, 0.9, 0.7, 0.5, 0.3]); c.run("up", 16, vv); c.ref = lambda ix, iy: [(0.2, 0.4, 0.6, 0.8), (0.9, 0.7, 0.5, 0.3)]

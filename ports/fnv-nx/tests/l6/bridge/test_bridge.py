@@ -6,6 +6,7 @@
  e  private data D3DSPD_IUNKNOWN of a guest object: AddRef / Release go through fnvnx_guest_invoke (app_unk_guest.cpp)
  d  generator totality: a spec item without a rule stops the generator (exit 2)"""
 import copy, json, os, subprocess, sys, tempfile, shutil
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 D9 = os.path.join(ROOT, "render", "d3d9"); DEV = os.path.join(D9, "dev"); GEN = os.path.join(D9, "gen"); SPEC = os.path.join(D9, "spec", "d3d9_spec.json"); ENV = os.path.join(D9, "env")

@@ -5,6 +5,7 @@ Regenerates the universe from render/shaders/total/sm_table.json, translates eve
 universe size, ok, fail by class count, unresolved, conflicts.  --classes: one line per failure class with its row count (the fix-task work list).
 Writes render/shaders/total/sm_total.tsv (row, status, class, detail, tag).  Exit 0 only when fail == 0 and unresolved == 0 and conflicts == 0."""
 import argparse, collections, json, os, sys
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".")); import san; san.install()
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 TOT = os.path.join(ROOT, "render", "shaders", "total")
 sys.path.insert(0, TOT)

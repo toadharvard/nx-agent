@@ -6,6 +6,7 @@ shader extractor (d9s_shaders.py) and the link-set key rule.  python3 -I tests/l
  e link-set rule vs fnvnx_dk_assign (exhaustive singletons + 30000 random sets, both stages), reflection JSON pairs   f pipeline on synthetic shaders (only when the
  translator is built: FNVNX_SHCACHE_BUILD=dir with libfnvnx_shaders.a and deps)   g mutation checks (each must make parts a-e or d fail)."""
 import importlib.util, json, os, random, shutil, subprocess, sys, tempfile, concurrent.futures as cf
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 CACHE = os.path.join(ROOT, "render", "shaders", "cache"); SHD = os.path.join(ROOT, "render", "shaders")

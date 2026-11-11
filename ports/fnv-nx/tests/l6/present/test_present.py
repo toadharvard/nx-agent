@@ -7,6 +7,7 @@ python3 -I tests/l6/present/test_present.py [--no-mutations]
  h mutations (one rule broken in a copy of the product sources; the named part must fail).
 Prints `PART x: n checks, f failed` and `ALL OK`."""
 import concurrent.futures as cf, os, re, subprocess, sys, tempfile, shutil
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, os.path.join(HERE, "..", "gl4")); import xl  # noqa: E402  (the translator build libnxgl4 links: FNVNX_SHADERS_BUILD, required)

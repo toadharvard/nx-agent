@@ -9,6 +9,7 @@ python3 -I tests/l6/m1/test_m1.py [--no-mutations] [--no-guest]
  f method gate before -> after (tests/l6/dev/test_dev.py gate()) and the guest build's undefined symbols before -> after   g mutation checks (one rule broken in a copy of dev/, the named part must fail).
 Product objects = render/d3d9/dev/*.cpp minus app_unk_guest.cpp and glue_*.cpp + generated sources + render/d3d9/front/*.c; the hooks of dev_hooks.h / res_tex.h are recorded by t_env.cpp (as tests/l6/devlife)."""
 import concurrent.futures as cf, importlib.util, os, random, re, shutil, subprocess, sys, tempfile
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 D3 = os.path.join(ROOT, "render", "d3d9"); DEV = os.path.join(D3, "dev"); GEN = os.path.join(D3, "gen"); ENV = os.path.join(D3, "env"); SPEC = os.path.join(D3, "spec", "d3d9_spec.json")

@@ -5,6 +5,7 @@
  f  mutation checks: one rule broken in a copy of dev/ -> the named part must fail
 TEST builds link with -Wl,--unresolved-symbols=ignore-all: the spec methods without a definition (the gate's missing count) stay unresolved; the tests never call them."""
 import concurrent.futures as cf, json, os, re, shutil, subprocess, sys, tempfile
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 DEV = os.path.join(ROOT, "render", "d3d9", "dev"); GEN = os.path.join(ROOT, "render", "d3d9", "gen"); SPEC = os.path.join(ROOT, "render", "d3d9", "spec", "d3d9_spec.json")

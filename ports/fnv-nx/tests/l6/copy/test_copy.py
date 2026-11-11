@@ -8,6 +8,7 @@ Architecture (decision): the device layer is -m32 (ILP32 like the guest); the GL
 with libnxgl4's sources) and both share one arena file mapped at the same address, so every block the glue allocates (stream words, payloads, descriptors, read-back staging) is at the same address in both.
 Oracle = independent python + C++ reference code in the t_*.cpp: the env tsv, the rules stated in the product file headers, wined3d / Nine formulas."""
 import concurrent.futures as cf, importlib.util, os, re, shutil, subprocess, sys, tempfile
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, os.path.join(HERE, "..", "gl4")); import xl  # noqa: E402  (the translator build libnxgl4 links: FNVNX_SHADERS_BUILD, required)

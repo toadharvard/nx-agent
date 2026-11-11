@@ -6,6 +6,7 @@
 Oracle = independent python: the env tsv (render/d3d9/env/env_<profile>.tsv, CheckDeviceFormat / CheckDeviceMultiSampleType / GetDeviceCaps rows) + the stated Wine 9.0 rules (res_create.cpp header) + its own
 format layout table from wined3d utils.c (bpp, block info, MAPPABLE, BROKEN_PITCH, YV12 / NV12 height scale) + the NxFormat set parsed from render/native/front/d3d9_state.c (case labels of nx_d3d9_format)."""
 import concurrent.futures as cf, importlib.util, os, re, shutil, subprocess, sys, tempfile
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 DEV = os.path.join(ROOT, "render", "d3d9", "dev"); GEN = os.path.join(ROOT, "render", "d3d9", "gen"); ENV = os.path.join(ROOT, "render", "d3d9", "env"); SPEC = os.path.join(ROOT, "render", "d3d9", "spec", "d3d9_spec.json")

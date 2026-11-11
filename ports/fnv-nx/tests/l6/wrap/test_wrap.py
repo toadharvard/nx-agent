@@ -5,6 +5,7 @@
  3 runs it twice (determinism), decodes the stream with d9s1_read.py and compares every record/item with the plan's expected stream (enc.py);
  4 mutation checks: one input / one echo output byte / one handle changed -> the comparison must fail.   Exit != 0 on any failure."""
 import hashlib, json, os, shutil, subprocess, sys, tempfile, concurrent.futures as cf
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 GEN = os.path.join(ROOT, "render", "d3d9", "gen"); SPEC = os.path.join(ROOT, "render", "d3d9", "spec", "d3d9_spec.json"); INC = os.path.join(ROOT, "shim", "include")

@@ -88,7 +88,32 @@ def compare(cs, data):
 def script_of(cs): return "\n".join(l for c in cs for l in c.lines) + "\n"
 
 
-MUTS = []   # (parts that must catch, file relative to render/d3d9, old, new)
+MUTS = [   # (parts that must catch it, file relative to render/d3d9, old (exactly once), new): the draw path's program / constant / texture binding and the backend function
+    ("abcdefg", "dev/draw_const.cpp", "w[0] = stage ? 2u : 1u;", "w[0] = stage ? 1u : 2u;"),
+    ("abcdefg", "dev/draw_const.cpp", "v[2] = 1.0f; v[FNVNX_DK_VS_PAD_OFFSET / 4]", "v[2] = -1.0f; v[FNVNX_DK_VS_PAD_OFFSET / 4]"),
+    ("c", "dev/draw_const.cpp", "pr.ps_version == 0x0300 ? 0.0f : 1.0f", "pr.ps_version == 0x0300 ? 1.0f : 0.0f"),
+    ("e", "dev/draw_const.cpp", "p[12] = dyn.alphaRef;", "p[12] = 0.0f;"),
+    ("e", "dev/draw_const.cpp", "((sb >> NXSB_ALPHAFUNC & 7) + 1) : 0;", "((sb >> NXSB_ALPHAFUNC & 7) + 2) : 0;"),
+    ("d", "dev/draw_const.cpp", "fm == NxFog_Linear ? 4 : 0;", "fm == NxFog_Linear ? 3 : 0;"),
+    ("d", "dev/draw_const.cpp", "memcpy(p, dyn.fogColor, 16);", "memcpy(p + 1, dyn.fogColor, 12);"),
+    ("a", "dev/draw_const.cpp", "memcpy(ib, s.psi, 256);", "memcpy(ib, s.psi, 128);"),
+    ("a", "dev/draw_const.cpp", "((uint32_t*)(ib + 256 + 16 * k))[0] = s.psb[k] != 0; } nx_ubo_emit(1,", "((uint32_t*)(ib + 256 + 16 * k))[0] = s.psb[k] == 1; } nx_ubo_emit(1,"),
+    ("a", "dev/draw_const.cpp", "memcpy(f, s.psf, sizeof s.psf);", "memcpy(f, s.psf, sizeof s.psf - 16);"),
+    ("a", "dev/draw_const.cpp", "memcpy(f, s.vsf, sizeof f);", "memcpy(f, s.vsf, sizeof f - 16);"),
+    ("b", "dev/draw_const.cpp", "im && im->kind == NXK_CUBE ? FNVNX_DK_STYPE_CUBE", "im && im->kind == NXK_CUBE ? FNVNX_DK_STYPE_2D"),
+    ("c", "dev/draw_prog.cpp", "fnvnx_dk_vs_needs_complete(vw, (int)nvw, pr, (int)npr), l, nl, &hr)", "0, l, nl, &hr)"),
+    ("c", "dev/draw_prog.cpp", "p->ps = shader_prog(psc, 1, 0, l, nl, &hr);", "p->ps = shader_prog(psc, 1, 0, l, 0, &hr);"),
+    ("c", "dev/draw_prog.cpp", "p->vs = shader_prog(vsc, 0, fnvnx_dk_vs_needs_complete(vw, (int)nvw, pr, (int)npr), l, nl, &hr);", "p->vs = shader_prog(vsc, 0, fnvnx_dk_vs_needs_complete(vw, (int)nvw, pr, (int)npr), l, 0, &hr);"),
+    ("c", "dev/draw_prog.cpp", "if (fnvnx_dk_varying_location(d[i] / 16, d[i] % 16) < 0) canon = false;", "if (false) canon = false;"),
+    ("b", "dev/draw_tex.cpp", "put(plan, 1, n, handle_of(d, n, &dm, &hr));", "put(plan, 1, n, handle_of(d, 0, &dm, &hr));"),
+    ("b", "dev/draw_tex.cpp", "((ss.filter & NXSMP_SRGB) ? 1u : 0u)", "0u"),
+    ("b", "dev/draw_tex.cpp", "put(plan, 1, dm == 1 ? 8 + n : dm == 2 ? 16 + n : n, h);", "put(plan, 1, dm == 1 ? 9 + n : dm == 2 ? 16 + n : n, h);"),
+    ("f", "dev/draw_exec.cpp", "w[4] = (uint32_t)r.base; w[5] = 0; }", "w[4] = 0; w[5] = 0; }"),
+    ("f", "dev/draw_exec.cpp", "w[3] = r.first; w[4] = 0; }", "w[3] = 0; w[4] = 0; }"),
+    ("c", "backend/gl4_d3dshader.c", "o.link_pairs = key.nl ? key.l : NULL; o.n_link_pairs = key.nl;", "o.link_pairs = NULL; o.n_link_pairs = 0;"),
+    ("c", "backend/gl4_d3dshader.c", "(d.stage == 0 && d.variant ? FNVNX_SHADER_VS_COMPLETE : 0)", "0"),
+    ("f", "backend/gl4_shader.c", "if (g4.sh[id].d3d && --g4.sh[id].d3d->refs) return 0;", "if (0) return 0;"),
+]
 
 
 def mutated(base, tmp, rel, old, new, idx):
@@ -132,7 +157,6 @@ def main():
         def one(i):
             parts, rel, old, new = MUTS[i]; x, s, e = mutated(base, tmp, rel, old, new, i)
             if not x: return i, None, e
-            rr, rs, _ = run_all(x, s, "m%d" % i) if False else (None, None, None)
             dd = os.path.join(tmp, "md%d" % i); os.makedirs(dd, exist_ok=True); r2 = play(x, script, dd, s, "m"); rs2, _ = compare(cs, dd)
             return i, (r2, rs2), ""
         with cf.ThreadPoolExecutor(2) as ex:

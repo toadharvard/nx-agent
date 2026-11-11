@@ -2,6 +2,7 @@
 """tests/l6/test_spec.py: checks render/d3d9/spec/d3d9_spec.json against the shim headers and the SDK.
 Run: python3 -I tests/l6/test_spec.py    (exit != 0 on any failure; prints counts, plus every unresolved item)"""
 import json, os, re, subprocess, sys, tempfile
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".")); import san; san.install()
 sys.dont_write_bytecode = True
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

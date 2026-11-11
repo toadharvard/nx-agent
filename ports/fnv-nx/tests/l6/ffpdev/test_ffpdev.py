@@ -9,6 +9,7 @@ python3 -I tests/l6/ffpdev/test_ffpdev.py [--no-mutations] [--no-guest]      (FN
  d  program ids: creation, caching, destruction counts of the backend calls       e  the embedded programs (generated header == the GLSL sources, DKSH by uam) and the guest build before -> after
  f  mutations.   Architecture: the device layer is -m32; the GL backend is LP64 (libnxgl4 in an RPC process, tests/l6/copy/server.c)."""
 import concurrent.futures as cf, os, re, shutil, subprocess, sys, tempfile
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, os.path.join(HERE, "..", "gl4")); import xl  # noqa: E402  (the translator build libnxgl4 links: FNVNX_SHADERS_BUILD, required)

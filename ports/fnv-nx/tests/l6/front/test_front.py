@@ -13,6 +13,7 @@
  f  mutations of a copy of the sources: each must make the sweeps fail, or the build (a case removed from a switch)
 The oracles are independent of the C: python tables and rules from wined3d 9.0 (state.c, stateblock.c, shader.c, utils.c) and Nine."""
 import ctypes as C, json, os, re, shutil, subprocess, sys, tempfile
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install(preload=True)
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 FRONT = os.path.join(ROOT, "render", "d3d9", "front"); BACKEND = os.path.join(ROOT, "render", "d3d9", "backend")

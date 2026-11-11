@@ -5,6 +5,7 @@
  e program pairs: link set L and variant bit vs a python reimplementation, lazy creation / caching / destruction   f UP draws   g method gate and guest undefined count of the current tree vs the numbers it records (g_record.json; --record rewrites it)   h mutations.
 The device is the product code (obj, state, res_*, glue, draw_*) built -m32 over a RECORDING backend (t_rec.cpp: it decodes every submitted stream and logs every backend call)."""
 import concurrent.futures as cf, json, os, re, shutil, subprocess, sys, tempfile
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(HERE, "..", "dev"))

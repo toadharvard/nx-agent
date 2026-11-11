@@ -8,6 +8,7 @@
  f  mutations: one null check removed in a copy of the tree -> the sweep must fail
 Every product file of render/d3d9/dev and render/d3d9/front is scanned and gated, except ffp_*.cpp / m1_*.cpp (other workers, in progress: scanned, findings listed as OTHER, not counted; ffp_* is not in the native build)."""
 import concurrent.futures as cf, glob, json, os, re, shutil, subprocess, sys, tempfile
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, HERE)

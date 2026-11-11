@@ -16,6 +16,7 @@ Synthetic shaders only (hand-assembled with render/shaders/total/sm_hand.py, rea
   uam    uam accepts every shader of the matrix (both variants)
   mutate >= 6 mutations of the translator's GLSL, each must be caught by the same checks"""
 import argparse, itertools, math, os, re, subprocess, sys, tempfile
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 sys.path.insert(0, os.path.join(ROOT, "render", "shaders", "total"))

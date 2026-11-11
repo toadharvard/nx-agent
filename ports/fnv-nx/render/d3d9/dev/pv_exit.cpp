@@ -1,19 +1,24 @@
-// pv_exit.cpp: ProcessVertices, SetClipStatus, GetClipStatus of both device classes.
-// Owner decision of 2026-11-11 (relayed by the orchestrator): "as in Wine, but a crash if we do get called". These methods are NOT implemented:
-// the Microsoft contract needs the bound vertex pipeline executed on the CPU (fixed function and vs_1_1 .. vs_3_0) and, under software vertex
-// processing, clip codes computed for every draw; Wine 9.0 (the reference) does neither (wined3d_device_process_vertices ignores the vertex shader,
-// the clip status calls have no effect). A silent success here would be a fake body, so a call ends the process through the platform's process
-// exit (os_exit_process, the host exit slot) with a code that names the method. The codes are data of this file; nothing else uses the range.
+// pv_exit.cpp: SetClipStatus, GetClipStatus, ProcessVertices of both device classes.
+// Owner decision of 2026-11-11 ("Wine 9.0 as an acceptable implementation"): where Wine 9.0 implements an API in a simplified way the body does
+// exactly what Wine 9.0 does, with one log line per call (fnvnx_wine_fixme, loader/include/fnvnx_reach.h; ids = rows of verify/wine_fixme.tsv).
+//
+// SetClipStatus / GetClipStatus: wine-9.0 dlls/d3d9/device.c d3d9_device_SetClipStatus / d3d9_device_GetClipStatus forward to
+// dlls/wined3d/device.c wined3d_device_set_clip_status / wined3d_device_get_clip_status, which are:
+//     FIXME("... stub!"); if (!clip_status) return WINED3DERR_INVALIDCALL; return WINED3D_OK;
+// Nothing is stored and GetClipStatus writes nothing to *clip_status.
+//
+// ProcessVertices: Wine 9.0 is NOT a no-op here: d3d9_device_ProcessVertices calls wined3d_device_process_vertices -> process_vertices_strided,
+// which transforms the vertices on the CPU with the fixed-function state (it ignores a bound vertex shader) and writes the destination buffer.
+// "As Wine" therefore means that algorithm (task PVW, in progress). Until it lands a call ends the process through the platform's process exit
+// with a code naming the method: returning D3D_OK without writing the destination buffer would be neither Wine's behaviour nor the contract.
 #include "d9impl.gen.h"
+extern "C" void fnvnx_wine_fixme(uint32_t id);                          // loader/include/fnvnx_reach.h: writes one line and returns
 extern "C" void os_exit_process(int code) __attribute__((noreturn));   // platform/os/os.h
-enum : int {
-    NX_EXIT_D3D9_ProcessVertices = 0x6E780101,   // IDirect3DDevice9::ProcessVertices, IDirect3DDevice9Ex::ProcessVertices
-    NX_EXIT_D3D9_SetClipStatus = 0x6E780102,     // ::SetClipStatus
-    NX_EXIT_D3D9_GetClipStatus = 0x6E780103,     // ::GetClipStatus
-};
-#define NX_PV_EXIT(C)                                                                                                                                              \
-    HRESULT STDMETHODCALLTYPE C::ProcessVertices(UINT, UINT, UINT, IDirect3DVertexBuffer9*, IDirect3DVertexDeclaration9*, DWORD) { os_exit_process(NX_EXIT_D3D9_ProcessVertices); } \
-    HRESULT STDMETHODCALLTYPE C::SetClipStatus(const D3DCLIPSTATUS9*) { os_exit_process(NX_EXIT_D3D9_SetClipStatus); }                                            \
-    HRESULT STDMETHODCALLTYPE C::GetClipStatus(D3DCLIPSTATUS9*) { os_exit_process(NX_EXIT_D3D9_GetClipStatus); }
-NX_PV_EXIT(NxDevice9)
-NX_PV_EXIT(NxDevice9Ex)
+enum : uint32_t { NX_WINE_FIXME_SetClipStatus = 2, NX_WINE_FIXME_GetClipStatus = 3 };   // verify/wine_fixme.tsv
+enum : int { NX_EXIT_D3D9_ProcessVertices = 0x6E780101 };
+#define NX_PV_BODIES(C)                                                                                                                                            \
+    HRESULT STDMETHODCALLTYPE C::SetClipStatus(const D3DCLIPSTATUS9* s) { fnvnx_wine_fixme(NX_WINE_FIXME_SetClipStatus); return s ? D3D_OK : D3DERR_INVALIDCALL; } \
+    HRESULT STDMETHODCALLTYPE C::GetClipStatus(D3DCLIPSTATUS9* s) { fnvnx_wine_fixme(NX_WINE_FIXME_GetClipStatus); return s ? D3D_OK : D3DERR_INVALIDCALL; }       \
+    HRESULT STDMETHODCALLTYPE C::ProcessVertices(UINT, UINT, UINT, IDirect3DVertexBuffer9*, IDirect3DVertexDeclaration9*, DWORD) { os_exit_process(NX_EXIT_D3D9_ProcessVertices); }
+NX_PV_BODIES(NxDevice9)
+NX_PV_BODIES(NxDevice9Ex)

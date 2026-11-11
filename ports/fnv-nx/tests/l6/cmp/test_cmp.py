@@ -4,6 +4,7 @@
  b comparator mutations (one per item kind) -> exit 1 naming the record; pix masked; env -> env_diff;  c replay mutation: an echo with one det output changed -> exactly that method
  d polling collapse (k vs m repeats; a non-poll repeat is a mismatch);  e threads: other interleaving equal + counted (also with renumbered object ids); fail-closed generator, spec-hash refusal.  Exit != 0 on any failure."""
 import contextlib, hashlib, io, json, os, re, shutil, struct, subprocess, sys, tempfile, concurrent.futures as cf
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 GEN, CMP, SPEC = (os.path.join(ROOT, "render", "d3d9", x) for x in ("gen", "cmp", os.path.join("spec", "d3d9_spec.json"))); INC = os.path.join(ROOT, "shim", "include")

@@ -4,6 +4,7 @@
  f gate G-METHOD before -> after (tests/l6/dev/test_dev.py's gate())   g mutation checks.   Oracles are independent of the C++: fvf_oracle() from the MS D3DFVF page + Wine's Windows-validated
  fvf_to_decl_tests, shader bytecode from render/total/census/sm_hand.py (read-only import) over sm_universe.py rows and the sm_cases rows behind sm_illegal.tsv."""
 import concurrent.futures as cf, csv, importlib.util, json, os, random, re, shutil, subprocess, sys, tempfile
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 DEV = os.path.join(ROOT, "render", "d3d9", "dev"); GEN = os.path.join(ROOT, "render", "d3d9", "gen"); SPEC = os.path.join(ROOT, "render", "d3d9", "spec", "d3d9_spec.json")

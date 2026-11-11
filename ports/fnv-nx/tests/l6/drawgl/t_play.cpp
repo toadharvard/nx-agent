@@ -11,6 +11,7 @@
 //  w id stride W..  a vertex buffer made from the words    a id W..  a 16-bit index buffer, one index per word
 //  q stream vb offset stride   SetStreamSource            j ib   SetIndices
 //  g nprim first   DrawPrimitive(TRIANGLELIST)            h base minidx nverts startidx nprim   DrawIndexedPrimitive(TRIANGLELIST)
+//  z kind id    release the vertex (0) / pixel (1) shader object id (the device destroys its backend shaders)
 //  o nrt        read back render targets 0..nrt-1 (GetRenderTargetData) into <data>/o<case>_<rt>.bin (BGRA bytes, 32 x 32)
 #include "t_common.h"
 #include <string.h>
@@ -52,7 +53,7 @@ void make_tex(const std::vector<uint32_t>& v) {
         for (int f = 0; f < 6; f++) {
             D3DLOCKED_RECT lr; if (!CHECK_HR(t->LockRect((D3DCUBEMAP_FACES)f, 0, &lr, nullptr, 0), D3D_OK)) return;
             for (uint32_t y = 0; y < w; y++) { memcpy((uint8_t*)lr.pBits + (size_t)y * lr.Pitch, data + at, w * bpp); at += w * bpp; }
-            t->UnlockRect((D3DCUBEMAP_FACES)f);
+            t->UnlockRect((D3DCUBEMAP_FACES)f, 0);
         }
         g.tex[id] = t;
     } else {
@@ -103,6 +104,7 @@ void line(char tag, const std::vector<uint32_t>& v) {
     case 'j': CHECK_HR(i9->SetIndices(g.ib[v[0]]), D3D_OK); break;
     case 'g': CHECK_HR(i9->DrawPrimitive(D3DPT_TRIANGLELIST, v[1], v[0]), D3D_OK); break;
     case 'h': CHECK_HR(i9->DrawIndexedPrimitive(D3DPT_TRIANGLELIST, (INT)v[0], v[1], v[2], v[3], v[4]), D3D_OK); break;
+    case 'z': if (v[0] == 0) rel(g.vs[v[1]]); else rel(g.ps[v[1]]); break;
     case 'o': output(v[0]); break;
     default: CHECK(false); break;
     }

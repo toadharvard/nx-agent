@@ -8,6 +8,7 @@
  d  mutation: one table cell / one rule constant broken in a copy of the generated tables -> (a) must fail.   e  ENV_PIN sha256 of the tsv files; the two profiles' tables.
 exit 0 iff all pass."""
 import concurrent.futures as cf, hashlib, os, re, shutil, subprocess, sys, tempfile
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 ENV = os.path.join(ROOT, "render", "d3d9", "env"); DEV = os.path.join(ROOT, "render", "d3d9", "dev"); GEN = os.path.join(ROOT, "render", "d3d9", "gen"); INC = os.path.join(ROOT, "shim", "include")

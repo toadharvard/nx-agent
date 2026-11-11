@@ -19,6 +19,7 @@
     with ctypes next to a preload embedder: clear + present, frame file, hook
 Oracle = CPU code in tests/l6/gl4 (patterns, filters, format table, vertex expansion); LP64 host build, identity guest addresses."""
 import ctypes, glob, os, re, shutil, subprocess, sys, tempfile
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install(preload=True)
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, HERE)
