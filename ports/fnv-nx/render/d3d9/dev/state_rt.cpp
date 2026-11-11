@@ -1,5 +1,5 @@
 #include "state_rt.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 
 const GUID& nx_iid_of(IDirect3DBaseTexture9*) { return IID_IDirect3DBaseTexture9; }
 const GUID& nx_iid_of(IDirect3DIndexBuffer9*) { return IID_IDirect3DIndexBuffer9; }

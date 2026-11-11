@@ -1,6 +1,6 @@
 // Runtime of the generated device state (state.gen.h): the device core, state blocks, sparse sets. Rules: README.md.
 #pragma once
-#include "state.gen.h"
+#include "../gen/state.gen.h"
 #include <string.h>
 inline uint32_t nx_f(float f) { uint32_t u; memcpy(&u, &f, 4); return u; }
 inline D3DVIEWPORT9 nx_vp(const NxCreateParams* c) { D3DVIEWPORT9 v = {0, 0, c->width, c->height, 0.0f, 1.0f}; return v; }

@@ -6,7 +6,7 @@
 // ComposeRects: wine-9.0 dlls/d3d9/device.c d3d9_device_ComposeRects is `FIXME("... stub!"); return E_NOTIMPL;` and looks at no argument: the body does exactly that, one fnvnx_wine_fixme(47) per call
 //  (const_fixme.tsv). (The earlier decision D3DERR_INVALIDCALL, from the proof that no D3DFMT_A1 surface exists, is replaced by the Wine rule: the result of the Wine function is the source.)
 #include "res_tex.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include "dev_core.h"
 #include "const_fixme.h"
 

@@ -8,7 +8,7 @@
 #include "res_tex.h"
 #include "dev_core.h"
 #include "dev_hooks.h"
-#include "env_table.gen.h"
+#include "../gen/env_table.gen.h"
 #define INV D3DERR_INVALIDCALL
 #define NA D3DERR_NOTAVAILABLE
 static const uint32_t X8 = 22, R5 = 23;

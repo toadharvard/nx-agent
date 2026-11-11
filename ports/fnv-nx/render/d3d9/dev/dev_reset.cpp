@@ -6,7 +6,7 @@
 // as an ordinary object). M1 recheck: the back buffer count changes as requested (MS D3DPRESENT_PARAMETERS BackBufferCount is a parameter of the new swap chain; Windows rows of test_swapchain_parameters: Reset with 0 / 1 / 2 / 3 = D3D_OK, 4 and COPY with 2 = INVALIDCALL; Wine keeps the old count, a Wine limitation, no Windows row shows that); DECISIONS (doubt): state blocks and additional swap chains do not block Reset
 // (Wine: only DEFAULT pool resources do; MS lists state blocks / additional chains: not checked by any source we have); the gamma ramp and present count are kept; the gamma ramp is the chain's (task rule).
 #include "res_tex.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include "dev_core.h"
 #include "dev_hooks.h"
 #include "d3d9_adapter.h"

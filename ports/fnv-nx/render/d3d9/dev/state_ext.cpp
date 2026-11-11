@@ -1,7 +1,7 @@
 // The device methods that are state but need more than a table store (lists in state_model.py HAND). Sources: MS IDirect3DDevice9 method pages (sdk-api
 // d3d9helper), Wine d3d9/device.c + wined3d/stateblock.c for behaviour the MS pages leave open (each marked "Wine:"; doubts in README.md).
 #include "state_rt.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #define INV return D3DERR_INVALIDCALL
 
 // Allocation failure (README "Allocation failure"): a light / palette entry the set cannot grow for = E_OUTOFMEMORY with the device unchanged (wined3d_stateblock_set_light: heap_alloc_zero failure ->

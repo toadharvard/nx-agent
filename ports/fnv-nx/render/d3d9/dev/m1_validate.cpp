@@ -16,8 +16,8 @@
 #include "copy_util.h"
 #include "dev_core.h"
 #include "dev_hooks.h"
-#include "d9impl.gen.h"
-#include "env_table.gen.h"
+#include "../gen/d9impl.gen.h"
+#include "../gen/env_table.gen.h"
 #include "m1_validate.h"
 
 namespace {

@@ -13,7 +13,7 @@
 //     (Wine: idx_fmt_size = index_format == D3DFMT_INDEX16 ? 2 : 4). DrawIndexedPrimitiveUP uploads vertex_count vertices from data + min_vertex_idx * stride and draws with base vertex -min_vertex_idx (Wine).
 //  D6 DrawIndexedPrimitive's MinVertexIndex / NumVertices are ignored (Wine passes only BaseVertexIndex and startIndex to wined3d; they are hints for software vertex processing).
 #include "draw_core.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 
 namespace {
 HRESULT finish_up(NxDeviceCore* d, bool indexed, HRESULT hr) {

@@ -6,7 +6,7 @@
 //     bytes, no derivation). The FFP-only groups the module consumes are cleared after the consumer ran (VS: LIGHTS XFORM MATERIAL TESS; PS: TEXFACTOR); no result depends on them.
 #pragma once
 #include "draw_core.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include "state_rt.h"
 #define NX_RS_COUNT NX_FFP_PS_RS_COUNT_   // ffp_state.h declares its own NX_RS_COUNT (= 210); the device's generated one (state.gen.h) is the same number: keep both, rename the module's
 extern "C" {

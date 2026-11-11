@@ -6,7 +6,7 @@
 // The hash is fnvnx_shader_hash (render/shaders/src/translate.c: FNV-1a 64 of the bytecode, offset 0xcbf29ce484222325, prime 0x100000001b3) re-implemented here: that TU links MojoShader (the translator
 // front end parse / reflection is MojoShader based: frontend.c needs mojoshader.h, so it cannot be linked into this freestanding object; the interface in res_sm.h is our own decoder's).
 #include "res_core.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include <string.h>
 
 uint64_t nx_shader_hash(const void* p, size_t n) {

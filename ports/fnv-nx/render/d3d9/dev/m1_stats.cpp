@@ -6,10 +6,10 @@
 //  SyncRefreshCount / SyncQPCTime = V of the QPC sample taken when GetPresentStats runs (the scheduler samples on request) and that sample. SyncGPUTime = 0 ("This value is not used").
 //  V(c) = floor(c * R / f): c the nxd3d_perf_counter value, f its frequency, R the refresh rate; ASSUMPTION (stated, platform fact): the counter and the display clock of NXGPU_FN_WAIT_VBLANK have one origin, so blank k is at c = k * f / R.
 #include "res_tex.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include "dev_core.h"
 #include "dev_hooks.h"
-#include "env_table.gen.h"
+#include "../gen/env_table.gen.h"
 
 static uint32_t vblank(NxChainCore* c, uint64_t qpc, uint64_t f) {
     NxEnvMode m; NxDevLife* L = nx_life(c->d); uint64_t r = nxenv_display_mode((int)L->prof, L->cp.AdapterOrdinal, &m) == 0 && m.RefreshRate ? m.RefreshRate : 60;

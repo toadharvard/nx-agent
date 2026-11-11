@@ -6,7 +6,7 @@
 // Allocation failure: the object = E_OUTOFMEMORY (d3d9_device_CreateQuery), the backend's id / stream memory = D3DERR_OUTOFVIDEOMEMORY (nxd3d_query_create false); nothing left behind.
 // calls nxd3d_query_flush, S_FALSE; yes: copy min(size, data_size) result bytes, S_OK. pData may be null (status only). The result values are the backend's (hooks declared in res_core.h, not defined).
 #include "res_core.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include <string.h>
 
 uint32_t nx_query_data_size(uint32_t t) {

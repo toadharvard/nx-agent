@@ -6,8 +6,8 @@
 // NOT IMPLEMENTED (no complete contract): ProcessVertices (Wine ignores the vertex shader and the output declaration, FIXME; MS requires running the shader: needs the shader interpreter stream),
 //  SetClipStatus / GetClipStatus (the status is produced by the draw path; no contract before it exists).
 #include "copy_util.h"
-#include "env_table.gen.h"
-#include "d9impl.gen.h"
+#include "../gen/env_table.gen.h"
+#include "../gen/d9impl.gen.h"
 
 #define MISC(C) \
     HRESULT STDMETHODCALLTYPE C::DrawRectPatch(UINT, const float*, const D3DRECTPATCH_INFO*) { return D3DERR_INVALIDCALL; } \

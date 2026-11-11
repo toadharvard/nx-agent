@@ -8,7 +8,7 @@
 // Nothing is stored and GetClipStatus writes nothing to *clip_status.
 //
 // ProcessVertices is in pvw_api.cpp (task PVW).
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 extern "C" void fnvnx_wine_fixme(uint32_t id);                          // loader/include/fnvnx_reach.h: writes one line and returns
 enum : uint32_t { NX_WINE_FIXME_SetClipStatus = 2, NX_WINE_FIXME_GetClipStatus = 3 };   // verify/wine_fixme.tsv
 #define NX_PV_BODIES(C)                                                                                                                                            \

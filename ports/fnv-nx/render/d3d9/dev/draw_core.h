@@ -8,7 +8,7 @@
 #include "glue_buf.h"
 #include "draw_ffp.h"
 #include "nxgpu4_shader.h"
-#include "d3d9_state.h"
+#include "../front/d3d9_state.h"
 #include "fnvnx_dk_layout.h"
 #include <string.h>
 

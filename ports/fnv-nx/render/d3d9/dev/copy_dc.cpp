@@ -6,7 +6,7 @@
 //  layer) and counts as a lock of the sub-resource. D4 ReleaseDC: a DC must be out, the handle must be that DC; the DC is destroyed (not OWNDC), the lock ends (AUTOGENMIPMAP: levels changed) and the pixels
 //  the application drew are uploaded (the GPU copy was invalidated at GetDC).
 #include "copy_util.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include <string.h>
 
 static bool gdi_format(uint32_t f) { return f == 20 || f == 21 || f == 22 || f == 23 || f == 24 || f == 25; }

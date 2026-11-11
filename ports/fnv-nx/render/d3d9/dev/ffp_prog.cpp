@@ -9,8 +9,8 @@
 //  P4 The blocks handed out (ubo[i].data) are the record's: the vertex block (memoised by its inputs, ffp_dev.h F2), the pixel block, and the world palette = the device's own WORLDMATRIX(0..255) states
 //     (256 consecutive D3DMATRIX = the std140 mat4[256] of the program, row-major bytes: ffp_vs_state.h).
 #include "ffp_dev.h"
-#include "ffp_glsl.gen.h"
-#include "ffp_dksh.gen.h"
+#include "../gen/ffp_glsl.gen.h"
+#include "../gen/ffp_dksh.gen.h"
 
 namespace {
 struct Blob { const unsigned char* p; unsigned n; };

@@ -7,7 +7,7 @@
 // Allocation failure: the declaration object = E_OUTOFMEMORY, its element copy = D3DERR_OUTOFVIDEOMEMORY (Wine d3d9 vertexdeclaration.c d3d9_vertex_declaration_create / convert_to_wined3d_declaration); nothing is left behind.
 // GetDeclaration: *count = number of elements INCLUDING the END element (always written); pDecl != null copies exactly that many elements (END verbatim as passed to Create).
 #include "res_core.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include <string.h>
 
 HRESULT nx_decl_validate(const D3DVERTEXELEMENT9* e, uint32_t* n) {
