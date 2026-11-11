@@ -4,7 +4,7 @@ process, RPC + shared arena as in tests/l6/copy, llvmpipe) -> GetRenderTargetDat
 Needs FNVNX_SHADERS_BUILD (the translator build, required: the backend links it).  Synthetic shaders only (hand-assembled, render/shaders/total/sm_hand.py).  Parts (one line `PART x: n checks, f failed` each, a check = one pixel
 of one render target, plus the API results of the player in part p):
  a constants (float / int / bool, high registers)   b textures (2D address modes, bilinear, cube all faces, volume, sRGB read, sampler slots, ps_1_x type word)   c vertex colour, the unwritten-input rule, non-canonical links
- d fog (ps_2_0 + vs_1_1 without oFog; table / vertex modes; ps_3_0 none)   e alpha test (all 8 functions)   f MRT, vertex buffer, indexed draws   g fixed-function VS + user PS, user VS + fixed-function PS   h clip planes / point size   i storage rule of the CONVERT formats (L6V5U5 / X8L8V8U8 sampled values, L8 / A8 render target textures)   m mutations
+ d fog (ps_2_0 + vs_1_1 without oFog; table / vertex modes; ps_3_0 none)   e alpha test (all 8 functions)   f MRT, vertex buffer, indexed draws   g fixed-function VS + user PS, user VS + fixed-function PS   h clip planes / point size   i storage rule of the CONVERT formats (L6V5U5 / X8L8V8U8 sampled values, L8 / A8 render target textures)   j SHADEMODE = FLAT with every pair kind (COLOR0 takes the first vertex, the rest stays interpolated)   k SM1 texcoord / texcrd reading tN as data   m mutations
 Tolerance: <= 1/255 per channel unless a case says so (bilinear filtering: 3/255, fixed-function modulate: 2/255)."""
 import concurrent.futures as cf, os, re, shutil, subprocess, sys, tempfile
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
@@ -107,9 +107,9 @@ MUTS = [   # (parts that must catch it, file relative to render/d3d9, old (exact
     ("h", "dev/draw_const.cpp", "q[1] = fbits(s.rs[D3DRS_POINTSIZE_MIN]); q[2] = fbits(s.rs[D3DRS_POINTSIZE_MAX]);", "q[1] = fbits(s.rs[D3DRS_POINTSIZE_MAX]); q[2] = fbits(s.rs[D3DRS_POINTSIZE_MIN]);"),
     ("h", "dev/draw_const.cpp", "q[0] = fbits(s.rs[D3DRS_POINTSIZE]);", "q[0] = fbits(s.rs[D3DRS_POINTSIZE_MIN]);"),
     ("b", "dev/draw_const.cpp", "im && im->kind == NXK_CUBE ? FNVNX_DK_STYPE_CUBE", "im && im->kind == NXK_CUBE ? FNVNX_DK_STYPE_2D"),
-    ("c", "dev/draw_prog.cpp", "fnvnx_dk_vs_needs_complete(vw, (int)nvw, pr, (int)npr), l, nl, &hr)", "0, l, nl, &hr)"),
-    ("c", "dev/draw_prog.cpp", "p->ps = shader_prog(psc, 1, 0, l, nl, &hr);", "p->ps = shader_prog(psc, 1, 0, l, 0, &hr);"),
-    ("c", "dev/draw_prog.cpp", "p->vs = shader_prog(vsc, 0, fnvnx_dk_vs_needs_complete(vw, (int)nvw, pr, (int)npr), l, nl, &hr);", "p->vs = shader_prog(vsc, 0, fnvnx_dk_vs_needs_complete(vw, (int)nvw, pr, (int)npr), l, 0, &hr);"),
+    ("c", "dev/draw_prog.cpp", "fnvnx_dk_vs_needs_complete(vw, (int)nvw, pr, (int)npr) | flat << 1, l, nl, &hr)", "0, l, nl, &hr)"),
+    ("c", "dev/draw_prog.cpp", "p->ps = shader_prog(psc, 1, flat << 1, l, nl, &hr);", "p->ps = shader_prog(psc, 1, flat << 1, l, 0, &hr);"),
+    ("c", "dev/draw_prog.cpp", "p->vs = shader_prog(vsc, 0, fnvnx_dk_vs_needs_complete(vw, (int)nvw, pr, (int)npr) | flat << 1, l, nl, &hr);", "p->vs = shader_prog(vsc, 0, fnvnx_dk_vs_needs_complete(vw, (int)nvw, pr, (int)npr) | flat << 1, l, 0, &hr);"),
     ("c", "dev/draw_prog.cpp", "if (fnvnx_dk_varying_location(d[i] / 16, d[i] % 16) < 0) canon = false;", "if (false) canon = false;"),
     ("b", "dev/draw_tex.cpp", "put(plan, 1, n, handle_of(d, n, &dm, &hr));", "put(plan, 1, n, handle_of(d, 0, &dm, &hr));"),
     ("b", "dev/draw_tex.cpp", "((ss.filter & NXSMP_SRGB) ? 1u : 0u)", "0u"),
@@ -117,8 +117,12 @@ MUTS = [   # (parts that must catch it, file relative to render/d3d9, old (exact
     ("f", "dev/draw_exec.cpp", "w[4] = (uint32_t)r.base; w[5] = 0; }", "w[4] = 0; w[5] = 0; }"),
     ("f", "dev/draw_exec.cpp", "w[3] = r.first; w[4] = 0; }", "w[3] = 0; w[4] = 0; }"),
     ("c", "backend/gl4_d3dshader.c", "o.link_pairs = key.nl ? key.l : NULL; o.n_link_pairs = key.nl;", "o.link_pairs = NULL; o.n_link_pairs = 0;"),
-    ("c", "backend/gl4_d3dshader.c", "(d.stage == 0 && d.variant ? FNVNX_SHADER_VS_COMPLETE : 0)", "0"),
+    ("c", "backend/gl4_d3dshader.c", "(d.stage == 0 && (d.variant & 1) ? FNVNX_SHADER_VS_COMPLETE : 0)", "0"),
     ("i", "dev/draw_state.cpp", "((uint64_t)m << NXRS_B_MASK(i)); }", "((uint64_t)15 << NXRS_B_MASK(i)); }"),
+    ("j", "backend/gl4_d3dshader.c", "((d.variant & 2) ? FNVNX_SHADER_FLAT_COLOR : 0)", "0"),
+    ("j", "backend/gl4_d3dshader.c", "if (d.variant > 3 ||", "if (d.variant > 1 ||"),
+    ("j", "dev/draw_prog.cpp", "shader_prog(psc, 1, flat << 1, l, nl, &hr); if (!p->ps) return hr; }", "shader_prog(psc, 1, 0, l, nl, &hr); if (!p->ps) return hr; }"),
+    ("j", "dev/draw_prog.cpp", "if ((vsc || psc) && !nx_ffp_flat(d, &flat))", "if (false && !nx_ffp_flat(d, &flat))"),
     ("f", "backend/gl4_shader.c", "if (g4.sh[id].d3d && --g4.sh[id].d3d->refs) return 0;", "if (0) return 0;"),
 ]
 
