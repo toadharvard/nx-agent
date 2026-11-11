@@ -6,6 +6,7 @@ usage: fmathtest.py [--n N] [--only fn,fn] [--seed S] [--quick]
 (2) special operands (zeros, infinities, NaNs, |x| >= 2^63 C2 case) and fprem / fprem1 / fscale / fxtract BIT FOR BIT vs the real x87 of this host
     (family/model/stepping printed), incl. every exponent difference -3..2100 for fprem / fprem1 (partial reduction rule of the reference CPU);
 (3) the arena high-water mark (FM_DEBUG traps on overflow of the preallocated temporaries).
+FMATH_NSTART=2 forces every call through the doubling loop (stress of the Ziv iteration; the default start is 6 limbs).
 Needs gmpy2 (pip install --break-system-packages gmpy2). Exit 1 on any difference."""
 import argparse, ctypes, math, multiprocessing as mp, os, random, struct, subprocess, sys, time
 import numpy as np
@@ -40,6 +41,8 @@ void run_m(int op, unsigned n, const double *a, const double *b, double *o1, dou
     }
     o1[i] = r; o2[i] = r2; fl[i] = f; cf[i] = c | (op <= O_TAN ? (fnvl_m_trig_big(a[i]) ? 0x400 : 0) : 0); } }
 unsigned bigflag(double x) { return fnvl_m_trig_big(x); }
+extern int fm_nstart;
+void set_nstart(int n) { fm_nstart = n; }
 /* error-bound check: record the first evaluation (n limbs, A, B) of a call */
 extern int fm_nstart; extern void (*fm_hook)(int, const unsigned *, int, int, int, int, int);
 static int h_n, h_e, h_s, h_z, h_B, h_r, h_cnt; static unsigned h_m[4096];
@@ -85,6 +88,7 @@ def build():
     open(WORK + '/driver.c', 'w').write(DRIVER)
     subprocess.check_call(['gcc', '-O2', '-shared', '-fPIC', '-DFM_DEBUG', '-I', RT, RT + '/fmath.c', WORK + '/driver.c', '-o', WORK + '/fmath_t.so'])
     LIB = ctypes.CDLL(WORK + '/fmath_t.so')
+    LIB.set_nstart(int(os.environ.get('FMATH_NSTART', '6')))
 
 
 def u64_(x): return struct.unpack('<Q', struct.pack('<d', x))[0]
