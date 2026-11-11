@@ -151,7 +151,7 @@ MUT = [
     ("rect sum in 32 bits", "dk_swap.c", "(int64_t)x + w <= (int64_t)iw", "x + w <= (int64_t)iw"),
     ("barrier before the flip dropped", "dk_swap.c", "    dkCmdBufBarrier(nxdk.cmd, DkBarrier_Full, DkInvalidateFlags_Image | DkInvalidateFlags_L2Cache);\n", ""),
     ("depth image accepted", "dk_swap.c", " || (src->flags & NxImg_Depth)", ""),
-    ("queue destroyed before the idle wait", "dk_core.c", "    if (nxdk.q) dkQueueWaitIdle(nxdk.q);\n    nxdk_swap_destroy();", "    nxdk_swap_destroy();\n    if (nxdk.q) dkQueueWaitIdle(nxdk.q);"),
+    ("queue destroyed before the idle wait", "dk_core.c", "    if (nxdk.q) dkQueueWaitIdle(nxdk.q);\n    nxdk_stream_shutdown();\n    nxdk_swap_destroy();", "    nxdk_stream_shutdown();\n    nxdk_swap_destroy();\n    if (nxdk.q) dkQueueWaitIdle(nxdk.q);"),
     ("storage alignment check dropped", "dk_core.c", " || ((uintptr_t)host & (DK_MEMBLOCK_ALIGNMENT - 1))", ""),
 ]
 caught = 0
