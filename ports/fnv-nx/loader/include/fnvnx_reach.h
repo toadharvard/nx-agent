@@ -21,11 +21,11 @@ extern "C" {
 #endif
 void fnvnx_reach_violation(uint32_t fact_id) __attribute__((noreturn));
 
-/* Owner exit (owner decision of 2026-11-11): a contract function the owner decided NOT to implement ends the process
- * loudly instead of answering. `code` is a row of verify/owner_exit.tsv (its source is CLAUDE.md; no other caller
- * may exist). One log line, then the host's exit slot with FNVNX_OWNER_EXIT | code. Never a silent return. */
-#define FNVNX_OWNER_EXIT 0x4F000000u   /* exit code = FNVNX_OWNER_EXIT | code; code < 2^24 */
-void fnvnx_owner_exit(uint32_t code) __attribute__((noreturn));
+/* Wine 9.0 as an acceptable implementation (owner decision of 2026-11-11): where Wine 9.0 implements an API in a
+ * simplified way, a body may do exactly what Wine 9.0 does, with one log line per call. fnvnx_wine_fixme(id) writes
+ * that line (`fnvnx-wine-fixme: <id>`) and RETURNS; the caller then returns Wine's value. `id` is a row of
+ * verify/wine_fixme.tsv (id -> the Wine 9.0 function it cites and the value). */
+void fnvnx_wine_fixme(uint32_t id);
 #ifdef __cplusplus
 }
 #endif

@@ -11,9 +11,8 @@ void fnvnx_reach_violation(uint32_t fact_id) {
     for (;;) fnvnx_hcall1(fnvnx_host->exit, FNVNX_REACH_EXIT | (fact_id & 0x00ffffffu));   /* the host slot does not return */
 }
 
-void fnvnx_owner_exit(uint32_t code) {
+void fnvnx_wine_fixme(uint32_t id) {
     char line[64];
-    int n = snprintf(line, sizeof line, "fnvnx-owner-exit: %u\n", (unsigned)code);
+    int n = snprintf(line, sizeof line, "fnvnx-wine-fixme: %u\n", (unsigned)id);
     if (n > 0) fnvnx_hcall2(fnvnx_host->console_write, FNVNX_ADDR(line), (uint64_t)n);
-    for (;;) fnvnx_hcall1(fnvnx_host->exit, FNVNX_OWNER_EXIT | (code & 0x00ffffffu));   /* the host slot does not return */
 }
