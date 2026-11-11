@@ -34,6 +34,7 @@ import sys
 import argflow
 import gatefile
 import iat
+import memfx
 
 
 def pair_key(dll):
@@ -78,7 +79,7 @@ def handle_report(img, call_va):
       open     a call lies between them (its memory effect is not bounded by a rule): the breaking call is reported, and the
                origin set is given as conditional on A7 (the call does not write that memory)."""
     out = {}
-    for mode in ('strict', 'open'):
+    for mode in ('strict', 'rule', 'open'):
         ok, origins, brk = argflow.handle_origin(img, call_va, 0, mode)
         shares = []
         for c, va, chain in origins:
@@ -198,6 +199,9 @@ def main(argv=None):
     ap.add_argument('--image', action='append', required=True, help='name=pe_path,ranges_path')
     ap.add_argument('--handle', action='append', default=[], help='name:0xVA of a CreateFileMapping call')
     ap.add_argument('--bridge')
+    ap.add_argument('--escape', action='append', default=[], help='import_escape.tsv of a platform backend (repeat; the worst letter counts)')
+    ap.add_argument('--writes', help='tsv dll, name, letters (n = never written through) per import argument; default: all may be written')
+    ap.add_argument('--no-memfx', action='store_true', help='derive without the may-write rule')
     ap.add_argument('--modules', help='modules.tsv (lifted modules provide their own names)')
     ap.add_argument('--out', required=True)
     a = ap.parse_args(argv)
@@ -212,6 +216,11 @@ def main(argv=None):
         with open(pe, 'rb') as fh, open(rg) as fr:
             images[nm.lower()] = argflow.Image(fh.read(), nm.lower(), argflow.read_ranges(fr.read()))
         images[nm.lower()].import_stack = stacks
+    if not a.no_memfx:
+        bt = open(a.bridge).read() if a.bridge else ''
+        info = memfx.ImportInfo(bt, [open(p).read() for p in a.escape], open(a.writes).read() if a.writes else '')
+        for im in images.values():
+            memfx.Memfx(im, info)
     with open(a.sites) as fh:
         rows = read_sites(fh.read())
     results = run(rows, images)

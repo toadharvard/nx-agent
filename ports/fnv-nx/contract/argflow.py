@@ -27,8 +27,15 @@ outgoing-argument area and a frame slot whose address is never taken (no lea of 
 instructions that name them; (A3) the only way code obtains a code address is a relocated word (no PIC); (A4) the facts'
 ranges contain every instruction of the function and every target of an indirect jump of the function is a relocated word
 into the ranges (a table entry); (A5) a call to a direct callee removes the callee's uniform `ret n` bytes;
-(A6) memory [R+d] through a pointer register is not a slot of the current frame; (A7, only handle_origin 'open' mode) a call between a
-store through R and a load through R does not write that memory.
+(A6) memory [R+d] through a pointer register is not a slot of the current frame;
+(A7, retired) a call between a store through R and a load through R does not write that memory: handle_origin / derive_arg with
+`img.mx` (memfx.Memfx) use the rule `call_keeps` instead - the call writes [R+d] only if a value derived from the address of R's
+object (frame of a function / image section; origins are derived backwards through callers) reaches the call, or that address
+escaped; the rule rests on the provenance premise P stated in memfx.py (A8); mode 'open' (no rule, calls transparent) is kept
+only for comparison and is the assumption A7.
+Also with `img.mx`: a load of a writable global, and a string in a writable section, are constants of the image bytes when
+memfx proves nothing writes them (memfx.const_range); a load [R+d] whose pointer is the exact address of a global at every
+origin yields the image bytes plus the value stored by every writer of that dword (memfx.words).
 """
 import bisect
 import struct
@@ -105,6 +112,7 @@ class Image:
         self._ins, self._funcs, self._ctx = {}, {}, None
         self.flat = sorted((a, b, e) for e, rs in ranges.items() for a, b in rs)
         self._callers = None
+        self.mx = None              # memfx.Memfx: the may-write rule (None = writable memory is never constant)
         self.import_stack = {}      # (dll lower with .dll, name) -> bytes the callee removes (stack_bytes of bridge.tsv)
 
     # ---- bytes
@@ -123,10 +131,15 @@ class Image:
         return struct.unpack('<I', self.pe.rd(va - self.base, 4))[0]
 
     def cstr(self, va, wide=False):
-        """The NUL-terminated string at va, or None (not read-only / unterminated / not printable ASCII)."""
+        """The NUL-terminated string at va, or None (not printable ASCII / unterminated / in a writable section whose bytes the
+        may-write rule (memfx) does not prove constant)."""
         step = 2 if wide else 1
+        sec = self.sec_of(va)
+        if not sec or not self.in_raw(va, step):
+            return None
+        ro = self.readonly(va, step)
         out, a = [], va
-        while self.readonly(a, step):
+        while self.in_raw(a, step) and self.sec_of(a) == sec:
             b = self.pe.rd(a - self.base, step)
             if wide:
                 if b[1]:
@@ -135,12 +148,18 @@ class Image:
             else:
                 c = b[0]
             if c == 0:
-                return ''.join(out)
+                if ro or (self.mx is not None and self.mx.const_range(va, a + step).ok):
+                    return ''.join(out)
+                return None
             if not 0x20 <= c < 0x7f or len(out) > 256:
                 return None
             out.append(chr(c))
             a += step
         return None
+
+    def in_raw(self, va, n=1):
+        s = self.sec_of(va)
+        return bool(s) and va + n - 1 - self.base < s[0] + s[3] and self.sec_of(va + n - 1) == s
 
     def insn(self, va):
         i = self._ins.get(va)
@@ -165,17 +184,16 @@ class Image:
         """[(site va, 'call'|'jmp')] of the direct calls / jumps to target in every range of the facts."""
         if self._callers is None:
             self._callers = {}
-            seen = set()
-            for a, b, e in self.flat:
-                v = a
-                while v < b:
-                    i = self.insn(v)
-                    if not i:
-                        break
-                    if v not in seen and i.mnemonic in ('call', 'jmp') and i.operands[0].type == X.X86_OP_IMM:
-                        self._callers.setdefault(i.operands[0].imm, set()).add((v, i.mnemonic))
-                    seen.add(v)
-                    v += i.size
+            merged = []
+            for a, b in sorted({(a, b) for a, b, e in self.flat}):
+                if merged and a <= merged[-1][1]:
+                    merged[-1][1] = max(merged[-1][1], b)
+                else:
+                    merged.append([a, b])
+            for a, b in merged:          # linear decode of the union of the ranges; no instruction object is kept
+                for i in self.cs.disasm(self.pe.rd(a - self.base, b - a), a):
+                    if i.mnemonic in ('call', 'jmp') and i.operands[0].type == X.X86_OP_IMM:
+                        self._callers.setdefault(i.operands[0].imm, set()).add((i.address, i.mnemonic))
         return sorted(self._callers.get(target, ()))
 
     def address_taken(self, va):
@@ -405,8 +423,8 @@ class Flow:
             v = src.imm & 0xffffffff
             fld = i.address + i.size - 4
             if fld in self.img.relocs:
-                s = self.img.cstr(v) if self.img.readonly(v) else None
-                w = self.img.cstr(v, True) if self.img.readonly(v) else None
+                s = self.img.cstr(v)
+                w = self.img.cstr(v, True)
                 if s is not None or w is not None:
                     res.add('str', (s, w), chain)
                 else:
@@ -431,6 +449,8 @@ class Flow:
             elif d in self.img.relocs or self.img.sec_of(d):
                 if self.img.readonly(d, 4):
                     res.add('imm', self.img.word(d), chain + ('ro@%x' % d,))
+                elif self.img.mx is not None and self.img.in_raw(d, 4) and self.img.mx.const_range(d, d + 4).ok:
+                    res.add('imm', self.img.word(d), chain + ('const@%x' % d,))
                 else:
                     res.brk(a, 'load of writable global %x' % d)
             else:
@@ -446,10 +466,72 @@ class Flow:
             work.append((a, ('sk', m.disp), chain))
         elif not base and idx and m.disp in self.img.relocs | {m.disp} and self.img.readonly(m.disp & 0xffffffff, 4):
             self.table(res, i, m, chain)
+        elif base and not idx and self.mem == 'rule' and base not in ('esp', 'ebp') and self.global_load(res, work, i, base, m.disp, chain):
+            pass
         elif base and not idx and self.mem and base not in ('esp', 'ebp'):
             work.append((a, ('mem', base, m.disp), chain))
         else:
             res.brk(a, 'load through a register pointer')
+
+    def global_load(self, res, work, i, base, disp, chain):
+        """A load [base+disp] whose pointer is the exact address of a global at every origin (memfx.origins): the value set is the
+        image bytes plus the value stored by every writer of that dword (memfx.words).  False: not that case (the caller
+        falls back to the store walk)."""
+        mx = self.img.mx
+        a = i.address
+        orgs = mx.origins(self.fn, a, base)
+        if not orgs or any(o[0] != 'sec' or o[1] is None for o in orgs):
+            return False
+        for o in sorted(orgs):
+            addr = (o[1] + disp) & 0xffffffff
+            key = ('words', addr)
+            if key in mx.busy:
+                continue
+            mx.busy.add(key)
+            try:
+                leaves, writers, why = mx.words(addr)
+                if why:
+                    res.brk(a, 'global %x: %s' % (addr, why[0]))
+                    continue
+                ch = chain + ('g@%x' % addr,)
+                for _, v, reloc in leaves:
+                    self.imm_leaf(res, v, reloc, ch)
+                for va, w in writers:
+                    self.writer_value(res, va, addr, ch + (va,))
+            finally:
+                mx.busy.discard(key)
+        return True
+
+    def imm_leaf(self, res, v, reloc, chain):
+        if reloc:
+            s, w = self.img.cstr(v), self.img.cstr(v, True)
+            if s is not None or w is not None:
+                res.add('str', (s, w), chain)
+                return
+            res.add('imm', v, chain)
+        elif v < 0x10000:
+            res.add('ord', v, chain)
+        else:
+            res.add('imm', v, chain)
+
+    def writer_value(self, res, va, addr, chain):
+        """The value stored by the instruction at va (a 4-byte mov [..], src)."""
+        i = self.img.insn(va)
+        if not i or i.mnemonic != 'mov' or i.operands[0].type != X.X86_OP_MEM or i.operands[0].size != 4:
+            res.brk(va, 'writer of %x is %s' % (addr, i.mnemonic + ' ' + i.op_str if i else '?'))
+            return
+        src = i.operands[1]
+        if src.type == X.X86_OP_IMM:
+            self.define(res, [], i, ('reg', None), chain, src)
+            return
+        if src.type != X.X86_OP_REG:
+            res.brk(va, 'writer of %x stores %s' % (addr, i.op_str))
+            return
+        es = entries_for(self.img, va)
+        if not es:
+            res.brk(va, 'no function contains the writer %x' % va)
+        for e in es:
+            res.merge(Flow(self.img, self.img.func(e), self.depth, self.mem).run(va, ('reg', rn(i, src.reg))))
 
     def table(self, res, i, m, chain):
         """D2 with a proven constant index: one table entry per index value."""
@@ -560,6 +642,12 @@ class Flow:
             elif m == 'call':
                 if self.mem == 'strict':
                     res.brk(a, 'call at %x may write [%s%+d]' % (a, R, d))
+                elif self.mem == 'rule':
+                    ok, why = self.img.mx.call_keeps(self.fn, p.address, R)
+                    if ok:
+                        work.append((a, loc, chain + (('call-keeps', a),)))
+                    else:
+                        res.brk(a, 'call at %x may write [%s%+d]: %s' % (a, R, d, why))
                 else:
                     work.append((a, loc, chain + (('call-transparent', a),)))
             elif m in ('rep movsd', 'movsd', 'movsb', 'stosd', 'stosb') or m.startswith('rep') or m.startswith('movs') or m.startswith('stos'):
@@ -636,7 +724,7 @@ def derive_arg(img, call_va, k, depth=0, seen=None, ctx=None):
         res.brk(call_va, 'no function of the facts contains %x' % call_va)
         return res
     for e in es:
-        res.merge(Flow(img, img.func(e), depth).run(call_va, ('sk', 4 * k)))
+        res.merge(Flow(img, img.func(e), depth, 'rule' if img.mx is not None else None).run(call_va, ('sk', 4 * k)))
     return expand_params(img, res, k, depth, seen, ctx)
 
 
