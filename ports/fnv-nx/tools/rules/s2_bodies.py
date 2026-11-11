@@ -32,7 +32,6 @@ import s1_compile                  # noqa: E402  (the units.json readers)
 
 CLASS_HEAD = re.compile(r'^(?:template\s*<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>\s*)?(?:typedef\s+)?(?:class|struct|union)\s+'
                         r'(?:__declspec\s*\([^()]*\)\s*)?([A-Za-z_]\w*)')
-UNIT_NS_HEAD = re.compile(r'^fnv_[0-9a-f]{8}$')
 
 
 def _scope_name(kind, head):
@@ -431,14 +430,20 @@ def _pop_sites(text, refs, why):
         return []
     out = []
     spans = prepare.scope_spans(masked)
+    # the namespaces in which the text defines functions (a body there sees that namespace's classes only from inside)
+    nsall = set()
+    for fo, _ in _pop_function_bodies(masked):
+        ch = prepare.scope_chain(spans, fo)
+        if ch and ch[-1][0] == 'namespace' and ch[-1][1].split():
+            nsall.add(ch[-1][1].split()[-1])
     bases = collections.defaultdict(set)
     for hb in re.finditer(r'\b(?:struct|class)\s+([A-Za-z_]\w*)\s*:\s*([^;{}()]*)\{', masked):
         bases[hb.group(1)] |= set(re.findall(r'[A-Za-z_]\w*', hb.group(2))) - {'public', 'private', 'protected',
                                                                                  'virtual'}
     for o, c in _pop_function_bodies(masked):
         seg = masked[o:c]
-        # the decomp's per-function namespaces a call here can see (a class of a sibling fnv_<a> namespace cannot be
-        # the object's type)
+        # the namespaces of this unit's text a call here can see (a class of a sibling namespace cannot be the
+        # object's type); nsall: the namespaces the text defines functions in
         chain = prepare.scope_chain(spans, o)
         vis = {h.split()[-1] for k, h in chain if k == 'namespace' and h.split()}
         # the class whose member this body defines (`R C::f(..) {` or a body inside `struct C {`): an unqualified call
@@ -457,7 +462,7 @@ def _pop_sites(text, refs, why):
                     continue
                 before = seg[:m.start()].rstrip()
                 qualified = before.endswith(('.', '->', '::'))
-                vw = _PopVisible(refs, vis, None if qualified else own)
+                vw = _PopVisible(refs, vis, nsall, None if qualified else own)
                 vw.cast = _pop_cast(before) if qualified else None
                 site = _pop_site(seg, o, m.start(), p, e, dn, vw, pg, why, text)
                 if site:
@@ -468,18 +473,18 @@ def _pop_sites(text, refs, why):
 
 
 class _PopVisible:
-    """A unit's references as seen from one function: those of a class in a per-function namespace (fnv_<a>) count
+    """A unit's references as seen from one function: those of a class in a namespace the unit's text defines functions in count
     only inside that namespace, and there a class of that namespace hides the global class of the same name (the
     decomp declares one `Holder` per namespace)."""
 
-    def __init__(self, refs, vis, own=None):
-        self.refs, self.vis, self.own, self.cast = refs, vis, own, None
+    def __init__(self, refs, vis, ns, own=None):
+        self.refs, self.vis, self.ns, self.own, self.cast = refs, vis, ns, own, None
 
     def named(self, name, scopes):
         """The references of name in exactly the class MSVC's scopes name (innermost first), as a per-function
         namespace the call sees allows."""
         return [r for r in self.refs.get(name, ()) if r.fn.scopes == scopes
-                and all(sc in self.vis for sc in scopes if UNIT_NS_HEAD.match(sc))]
+                and all(sc in self.vis for sc in scopes if sc in self.ns)]
 
     def donor(self, name):
         """The references an unqualified call of name in a member of class `own` can be (its own class's); for a
@@ -488,23 +493,23 @@ class _PopVisible:
             cls, quals = self.cast
             return [r for r in self.refs.get(name, ()) if r.fn.scopes[0] == cls
                     and r.fn.scopes[1:1 + len(quals)] == quals
-                    and all(sc in self.vis for sc in r.fn.scopes[1 + len(quals):] if UNIT_NS_HEAD.match(sc))
-                    and all(UNIT_NS_HEAD.match(sc) for sc in r.fn.scopes[1 + len(quals):])
-                    and all(sc in self.vis for sc in r.fn.scopes if UNIT_NS_HEAD.match(sc))]
+                    and all(sc in self.vis for sc in r.fn.scopes[1 + len(quals):] if sc in self.ns)
+                    and all(sc in self.ns for sc in r.fn.scopes[1 + len(quals):])
+                    and all(sc in self.vis for sc in r.fn.scopes if sc in self.ns)]
         rs = self.get(name)
         return [r for r in rs if r.fn.scopes[0] in self.own] if self.own else rs
 
     def get(self, name, default=()):
         seen = [r for r in self.refs.get(name, default)
-                if all(sc in self.vis for sc in r.fn.scopes if UNIT_NS_HEAD.match(sc))]
+                if all(sc in self.vis for sc in r.fn.scopes if sc in self.ns)]
         # classes declared in the global namespace or one around the call come before those of other scopes
         near = [r for r in seen if all(sc in self.vis for sc in r.fn.scopes[1:])]
         seen = near or seen
         depth = collections.defaultdict(int)
         for r in seen:
-            d = sum(1 for sc in r.fn.scopes if UNIT_NS_HEAD.match(sc))
+            d = sum(1 for sc in r.fn.scopes if sc in self.ns)
             depth[r.fn.scopes[0]] = max(depth[r.fn.scopes[0]], d)
-        return [r for r in seen if sum(1 for sc in r.fn.scopes if UNIT_NS_HEAD.match(sc)) == depth[r.fn.scopes[0]]]
+        return [r for r in seen if sum(1 for sc in r.fn.scopes if sc in self.ns) == depth[r.fn.scopes[0]]]
 
     def __contains__(self, name):
         return bool(self.get(name))

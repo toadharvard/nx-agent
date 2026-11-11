@@ -550,12 +550,12 @@ def r_msvc_empty_bases(path, text, stats):
 
 C_DATA_DECL = re.compile(r'^([ \t]*extern)\s+"C"(\s+[\w \t\*&:<>,]*?[\s\*&]\w+(?:\s*\[[^\]]*\])*'
                          r'(?:\s*,\s*[\*&]*\s*\w+(?:\s*\[[^\]]*\])*)*\s*;)', re.M)   # `extern "C" char a[], b[];` too
-C_FNPTR_DECL = re.compile(r'^([ \t]*extern)\s+"C"(\s*[\w \t\*&:<>,]*?\(\s*(?:__\w+\s*)?\*\s*(?:DAT|PTR|g)_\w+\s*\)\s*\([^;{}]*\)\s*;)',
+C_FNPTR_DECL = re.compile(r'^([ \t]*extern)\s+"C"(\s*[\w \t\*&:<>,]*?\(\s*(?:__\w+\s*)?\*\s*\w+\s*\)\s*\([^;{}]*\)\s*;)',
                           re.M)
 
 def r_c_data_linkage(path, text, stats):
-    """LINK1: `extern "C" T DAT_x;` at file scope -> `extern T DAT_x;`. The decomp declares the same image variable
-    with both linkages; MSVC kept them apart, GCC rejects the pair. For a variable at global scope both linkages
+    """LINK1: `extern "C" T x;` (also a function-pointer variable `T (*x)(..)`) at file scope -> `extern T x;`. The decomp
+    declares the same image variable with both linkages; MSVC kept them apart, GCC rejects the pair. For a variable at global scope both linkages
     name the same symbol under the Itanium ABI (no mangling), so nothing changes for the link."""
     if 'extern "C"' not in text: return text
     spans, out, pos = None, [], 0
@@ -571,9 +571,35 @@ def r_c_data_linkage(path, text, stats):
 
 # ---------------------------------------------------------------------------------------------------------- GOTO1
 
-SCALAR_INIT = re.compile(r'^([ \t]*)((?:const\s+)?(?:(?:unsigned|signed|volatile)\s+)*(?:bool|char|short|int|long(?:\s+long)?|'
-                         r'float|double|unsigned|__m128[id]?|__m64|hkQuadReal|hkReal|[\w:]+(?:\s+const)?\s*\*+))\s+'
-                         r'(\**\s*\w+)\s*=\s*([^;{}=][^;{}]*);', re.M)
+SCALAR_BASE = r'(?:(?:unsigned|signed)\s+)?(?:bool|char|short|int|long(?:\s+long)?|float|double|unsigned)'
+SCALAR_TYPEDEF = re.compile(r'\btypedef\s+(%s)\s+([A-Za-z_]\w*)\s*;' % SCALAR_BASE)
+VECTOR_TYPEDEF = re.compile(r'\btypedef\s+(?:const\s+)?(?:::\s*)?__m128[id]?\s+([A-Za-z_]\w*)\s*;')
+ANY_TYPEDEF = re.compile(r'\btypedef\b[^;{}]*?([A-Za-z_]\w*)\s*;')
+
+def _typedef_aliases(text):
+    """({name: scalar type}, {vector names}) of the typedefs the text itself declares (`typedef float hkReal;`,
+    `typedef __m128 hkQuadReal;`): the underlying type is the declaration's own. A name that the text also
+    typedefs to anything else is left out (its meaning depends on the scope)."""
+    code = COMMENT.sub(' ', text)
+    sc = {m.group(2): m.group(1) for m in SCALAR_TYPEDEF.finditer(code)}
+    vec = {m.group(1) for m in VECTOR_TYPEDEF.finditer(code)}
+    for m in ANY_TYPEDEF.finditer(code):
+        n = m.group(1)
+        if n in sc and SCALAR_TYPEDEF.fullmatch(m.group(0)) is None or n in vec and VECTOR_TYPEDEF.fullmatch(m.group(0)) is None:
+            sc.pop(n, None); vec.discard(n)
+    return sc, vec
+
+_SCALAR_INIT = {}
+
+def _scalar_init(aliases):
+    """SCALAR_INIT for a text whose scalar / vector typedef names are `aliases`."""
+    key = tuple(sorted(aliases))
+    if key not in _SCALAR_INIT:
+        extra = ''.join(r'|' + re.escape(a) for a in key)
+        _SCALAR_INIT[key] = re.compile(r'^([ \t]*)((?:const\s+)?(?:(?:unsigned|signed|volatile)\s+)*(?:bool|char|short|int|'
+                                       r'long(?:\s+long)?|float|double|unsigned|__m128[id]?|__m64%s|[\w:]+(?:\s+const)?\s*\*+))\s+'
+                                       r'(\**\s*\w+)\s*=\s*([^;{}=][^;{}]*);' % extra, re.M)
+    return _SCALAR_INIT[key]
 
 INT_LITERAL_EXPR = re.compile(r'^[\s()+\-~!*/%<>&|^]*(?:(?:0[xX][0-9a-fA-F]+|\d+)[uUlL]*[\s()+\-~!*/%<>&|^]*)+$')
 
@@ -613,13 +639,17 @@ def r_goto_scalar_inits(path, text, stats):
     if 'goto' not in text: return text
     spans = [sp for sp in prepare.scope_spans(text) if sp[2] == 'function']
     edits = []
+    sc, vec = _typedef_aliases(text)
+    nonint = vec | {a for a, b in sc.items() if re.search(r'float|double', b)}
+    scalar_init = _scalar_init(set(sc) | vec)
     for o, c, k, h in spans:
         body = text[o:c]
         if not re.search(r'\bgoto\s+\w+\s*;', body): continue
-        for m in SCALAR_INIT.finditer(text, o, c):
+        for m in scalar_init.finditer(text, o, c):
             t = m.group(2)
             if re.match(r'(?:return|else|case|goto|delete|throw|typedef|using)\b', t): continue
-            if (t.startswith('const') and '*' not in t and not re.search(r'\b(?:float|double|__m|hk)', t)
+            if (t.startswith('const') and '*' not in t and not re.search(r'\b(?:float|double|__m)', t)
+                    and not nonint & set(re.findall(r'\w+', t))
                     and ',' not in m.group(4) and INT_LITERAL_EXPR.match(m.group(4))):
                 if _goto_crosses(text, o, c, m.start()):
                     edits.append((m.start(), m.end(), '%sstatic %s %s = %s;' % (m.group(1), m.group(2), m.group(3),
@@ -666,8 +696,13 @@ GOTO_DECLARATOR = re.compile(r'^\s*([\*&\s]*)(?:const\s+)?([A-Za-z_]\w*)\s*(\S?)
 GOTO_LABEL = re.compile(r'(?:[;{}]|^)\s*([A-Za-z_]\w*)[ \t]*:(?!:)', re.M)
 GOTO_STARTS = re.compile(r'[;{}]|(?<!:):(?!:)|\bfor\s*\(')
 GOTO_STMT = re.compile(r'\bgoto\s+([A-Za-z_]\w*)\s*;')
-GOTO_SCALAR = r'(?:(?:unsigned|signed)\s+)?(?:bool|char|short|int|long(?:\s+long)?|float|double|unsigned|hkReal)'
-GOTO_CREF = re.compile(r'^const\s+(%s)\s*&\s*([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*)\s*(\(.*\))\s*;$' % GOTO_SCALAR, re.S)
+
+def _goto_scalar(aliases):
+    """The scalar type words, plus the scalar typedef names `aliases` of the text (_typedef_aliases)."""
+    return '(?:%s%s)' % (SCALAR_BASE, ''.join('|' + re.escape(a) for a in sorted(aliases)))
+
+def _goto_cref(scalar):
+    return re.compile(r'^const\s+(%s)\s*&\s*([A-Za-z_]\w*)\s*=\s*([A-Za-z_]\w*)\s*(\(.*\))\s*;$' % scalar, re.S)
 CXX_WORDS = GOTO_KW | frozenset('int char short long float double bool void unsigned signed auto inline'.split())
 
 def _goto_decls(masked, o, c):
@@ -704,6 +739,7 @@ def _goto_fix(text, stats, skip):
     """One GOTO2 edit in `text` (the first crossing it can fix), or None."""
     masked = FRIEND_MASK.sub(lambda x: re.sub(r'[^\n]', ' ', x.group()), text)
     spans = prepare.scope_spans(masked)
+    scalar = _goto_scalar(_typedef_aliases(text)[0])
     funcs, last = [], -1
     for sp in spans:
         if sp[2] == 'function' and sp[0] > last:
@@ -728,10 +764,10 @@ def _goto_fix(text, stats, skip):
                 if key in skip: continue
                 s, te, e, dl, _ = d
                 # (a) const scalar reference to a by-value scalar result
-                cm = GOTO_CREF.match(text[s:e])
+                cm = _goto_cref(scalar).match(text[s:e])
                 if cm and len(dl) == 1:
                     rets = re.findall(r'\b(%s)\s*(&?)\s*(?:(?:__cdecl|__stdcall|__fastcall|__thiscall)\s+)?%s\s*\('
-                                      % (GOTO_SCALAR, re.escape(cm.group(3))), masked)
+                                      % (scalar, re.escape(cm.group(3))), masked)
                     if rets and all(not r for _, r in rets) and \
                             not re.search(r'[\w>]\s*&\s*(?:\w+::)*%s\s*\(' % re.escape(cm.group(3)), masked):
                         stats['GOTO2'] += 1
@@ -861,24 +897,30 @@ def r_sdk_guarded_copies(path, text, stats):
     stats['SDK1'] += n
     return text
 
-STR_ADDR = re.compile(r'&\s*(str_[0-9a-fA-F]{8})\b(?!\s*\[)')
+STR_ADDR = re.compile(r'&\s*([A-Za-z_]\w*)\b(?!\s*\[)')
 
-# a declaration statement (it may go on over lines: `extern "C" char str_a[], str_b[],\n    str_c[];`), up to its
-# first initializer or parameter list: the names in it are the ones it declares
+# a declaration statement (it may go on over lines: `extern "C" char a[], b[],\n    c[];`), up to its first
+# initializer or parameter list: the names in it are the ones it declares
 STR_DECL_LINE = re.compile(r'^[ \t]*(?:extern\b|static\b|const\b|char\b|unsigned\b|signed\b|wchar_t\b)[^;{}=(]*', re.M)
-STR_DECL_NAME = re.compile(r'\b(str_[0-9a-fA-F]{8})\b\s*(\[)?')
+STR_DECL_NAME = re.compile(r'\b([A-Za-z_]\w*)\b\s*(\[\s*\])?')
+STR_TYPE_WORDS = frozenset('extern static const volatile char unsigned signed wchar_t'.split())
 
 def r_string_array_address(path, text, stats):
-    """STR1: `&str_01082ab8` where the declaration in scope is `extern char str_01082ab8[];` -> `str_01082ab8`: the
-    same address; MSVC converted char (*)[] to const char* silently, GCC does not. A file may declare the same name
-    as an array in one place and as a scalar `char` in another: the declaration in scope at the use decides (the
-    latest one before it, in the use's namespace or an enclosing one)."""
-    if 'str_' not in text or not re.search(r'\bstr_[0-9a-fA-F]{8}\s*\[', text): return text
+    """STR1: `&x` where the declaration in scope is `extern char x[];` (a char array of unknown bound) -> `x`: the
+    same address; MSVC converted char (*)[] to const char* silently, GCC does not. An array of unknown bound has no
+    size, so its address admits no arithmetic and the decayed pointer names the same object. A file may declare the
+    same name as an array in one place and as a scalar `char` in another: the declaration in scope at the use
+    decides (the latest one before it, in the use's namespace or an enclosing one). Only declarations of plain
+    `char` (no pointer) count."""
+    if not re.search(r'\b\w+\s*\[\s*\]', text): return text
     spans = prepare.scope_spans(text)
     heads = lambda pos: tuple(h for k, h in prepare.scope_chain(spans, pos) if k == 'namespace')
     decls = {}                                             # name -> [(pos, scope, is_array)]
     for line in STR_DECL_LINE.finditer(text):
-        for d in STR_DECL_NAME.finditer(line.group(0)):
+        seg = line.group(0)
+        if '*' in seg or not re.search(r'\bchar\b', seg): continue
+        for d in STR_DECL_NAME.finditer(seg):
+            if d.group(1) in STR_TYPE_WORDS or seg[max(0, d.start() - 1):d.start()] == '"' : continue
             pos = line.start() + d.start()
             decls.setdefault(d.group(1), []).append((pos, heads(pos), bool(d.group(2))))
     if not decls: return text
@@ -1206,10 +1248,10 @@ CXX_WORDS = set('''const volatile unsigned signed int char short long float doub
 # only rebind global symbols, so the unit would use a private copy while everything else sees the image's (S13:
 # fadermanager's s_faders at 0x011d8828). STATIC1 gives those variables external linkage: `static` is dropped, a
 # namespace-scope `const` definition gets `extern`, and so does an array of unknown size declared without `extern`
-# (`const void* DAT_010d0fc4[];`, which MSVC took as a reference to the image's table and GCC rejects as a definition
-# of unknown size). Only names that a unit including the file binds to an image data address (`?name@@3...` /
-# `_name` in its units.json symbols) at file scope are touched, and for the unsized arrays also address names
-# (`DAT_<address>`, which the link binds by the address in the name).
+# at file scope (`const void* x[];`, which MSVC took as a reference to the image's table; as a definition of unknown
+# size it is ill-formed in C++, so `extern` is its only reading, whatever the name). Only names that a unit
+# including the file binds to an image data address (`?name@@3...` / `_name` in its units.json symbols) at file
+# scope are touched otherwise.
 # A namespace-scope static (`namespace fnv_007bd2a0 { static float s_fSpinTime; }`, S13: 77 with an image address,
 # three of them uninitialised and written, so the private copy diverges for real: HUDMainMenu's instance pointer
 # 0x011d96c0, roulettemenu's s_fSpinTime / s_bValidBet 0x011da904 / 0x011da900) is bound under its plain name
@@ -1221,9 +1263,6 @@ STATIC_DEF = re.compile(r'^([ \t]*)static\s+(?!inline\b)((?:const\s+|volatile\s+
                         r'\s*(?:\[[^\]]*\]\s*)*(?:=|;|\(|\{))', re.M)
 UNSIZED_DECL = re.compile(r'^([ \t]*)(?:static\s+)?((?!(?:extern|typedef|friend|return)\b)(?:const\s+|volatile\s+)*'
                           r'[A-Za-z_][\w:<>,\s\*&]*?[\s\*&](\w+)\s*\[\s*\]\s*;)', re.M)
-# an address name (DAT_010cc0ec) is bound by its address whatever units.json lists (tools/link: ADDR_IN_NAME)
-ADDR_NAME = re.compile(r'^(?:DAT|g|UNK|PTR)_[0-9a-f]{8}$')
-UNSIZED_ADDR = re.compile(r'\b(?:DAT|g|UNK|PTR)_[0-9a-f]{8}\s*\[\s*\]\s*;')
 CONST_DEF = re.compile(r'^([ \t]*)(const\s+[A-Za-z_][\w:<>,\s\*&]*?[\s\*&](\w+)\s*(?:\[[^\]]*\]\s*)*=)', re.M)
 DATA_NAME = re.compile(r'^\?(\w+)@@3')
 _IMAGE_NAMES = None
@@ -1309,16 +1348,16 @@ def _declared_once(text, name, spans, addrs, image=False):
 def r_image_statics(path, text, stats):
     """STATIC1: file-static / internal const variables bound to image addresses get external linkage, a namespace
     static bound by its plain name C linkage (see above)."""
-    if 'static' not in text and 'const' not in text: return text
+    if 'static' not in text and 'const' not in text and not re.search(r'\[\s*\]\s*;', text): return text
     key = os.path.normpath(os.path.abspath(path))
     names = _image_bound_names(path).get(key) or set()
     cnames = _IMAGE_CNAMES.get(key) or set()
-    if not names and not UNSIZED_ADDR.search(text): return text
+    if not names and not UNSIZED_DECL.search(text): return text
     spans, edits = None, {}
     for rx, kind in ((UNSIZED_DECL, 'unsized'), (STATIC_DEF, 'static'), (CONST_DEF, 'const')):
         for m in rx.finditer(text):
             if m.start() in edits: continue
-            if m.group(3) not in names and not (kind == 'unsized' and ADDR_NAME.match(m.group(3))): continue
+            if kind != 'unsized' and m.group(3) not in names: continue
             if kind == 'const' and re.search(r'\bextern\b', text[text.rfind('\n', 0, m.start()) + 1:m.start()]): continue
             if spans is None: spans = prepare.scope_spans(text)
             chain = prepare.scope_chain(spans, m.start())
@@ -3055,155 +3094,6 @@ def r_va_enum_args(path, text, stats):
         return '(%s)va_arg(%s, int)' % (m.group(2), m.group(1))
     return VA_ARG.sub(sub, text)
 
-# ---------------------------------------------------------------------------------------------------------- VLIT1
-#
-# A vptr store the decompiler printed as a string literal: `m_p = "@K@";` in nitmapbase.cpp's FUN_00404b10. The
-# instruction stores an image address whose bytes it read as text: "@K@\0" is 0x00404b40, slot 0 (the scalar
-# deleting destructor, S00404b40::DestroyIfFlagged) of the vftable at that address (S5 J-0102: the
-# GameSettingCollection vptr, 3,454 setting initializers). The unit's recipe binds the literal (MSVC `$SG2541`)
-# to that vftable address, 0x0101212c. VLIT1 stores the address through the image symbol the link maps image
-# vftables by: `m_p = (char*)&DAT_0101212c;`, with `extern "C" char DAT_0101212c;` declared at namespace scope in
-# front of the storing function (S2c 1aeaa9b: an unbound DAT_<hex> right side counts as that image address, so the
-# store can be mapped to a native vtable; a raw constant could not be). The comment goes behind the `;`, outside the
-# statement the link reads. Only where a literal
-# of at most 3 characters stored with `=` reads as the address of a function the recipe defines, and the unit's
-# `$SG` binding can only be that literal (the unit binds one `$SG` address and the file has one string literal);
-# the other sites (45 in the tree) are counted as VLIT1-LIST and left as they are until the exe says which.
-
-VLIT_STORE = re.compile(r'(=\s*)"([^"\\\n]{1,3})"(\s*;)')
-STRING_LIT = re.compile(r'"(?:\\.|[^"\\\n])*"')
-_VLIT = None
-
-def _vlit_index(path):
-    """(defined function addresses, {unit source: {$SG addresses}})"""
-    global _VLIT
-    if _VLIT is not None: return _VLIT
-    import json
-    root, uj = prepare._units_json(path)
-    defs, sg = set(), {}
-    if uj:
-        for u in json.load(open(uj))['units']:
-            defs.update(int(f['address'], 16) for f in u.get('functions', []))
-            s = {int(v, 16) for k, v in u.get('symbols', {}).items() if k.startswith('$SG')}
-            sg.setdefault(os.path.normpath(os.path.join(root, u['source'])), set()).update(s)
-    _VLIT = (defs, sg)
-    return _VLIT
-
-# VLIT2: VLIT1 by the exe's vftables (S1-rules, from S2-bodies: TESObjectARMA's constructor 0x00511f60 stores its
-# secondary vptr at +0x68 as `" rH"`, the bytes of 0x00487220, slot 0 of 0x0102a28c; the unit has many literals, so
-# VLIT1 left it to VLIT1-LIST and the store could not reach the minus-one copy). The table is exe-derived and
-# private: tools/rules/_vlit_vftables.py writes vlit.json (fnvnx-vlit/1: slot 0 -> [(vftable, COL offset)], vftable ->
-# RTTI class) to fnv-nx-build recon/vlit_vftables, read from FNVNX_RECON (or the file FNVNX_VLIT). For each 1-3
-# character literal stored with `=` (also through a `(void*)` / `(const char*)` cast) whose bytes read as a decompiled
-# function's address: the store offset comes from the left side (`(char*)this + N`, else 0 when it stores through
-# `this`). The literal becomes `(char*)&DAT_<V>` when exactly one vftable V has that slot 0 at that offset. When
-# several have it, V is the one whose class is the class of the other vftables (`DAT_<hex>`) the same function stores.
-# Without the table VLIT1 is unchanged; the stores VLIT2 cannot decide are VLIT2-LIST.
-VLIT_STORE2 = re.compile(r'(=\s*)((?:\((?:const\s+)?(?:void|char)\s*\*\s*\)\s*)?)"([^"\\\n]{1,3})"(\s*;)')
-VLIT_THIS_OFF = re.compile(r'\bthis\s*\)?\s*\+\s*(0[xX][0-9a-fA-F]+|\d+)')
-
-def _vlit_table():
-    st = prepare.__dict__.get('_fnvnx_vlit')
-    if st is not None: return st
-    import json
-    files = []
-    if os.environ.get('FNVNX_VLIT') and os.path.isfile(os.environ['FNVNX_VLIT']): files.append(os.environ['FNVNX_VLIT'])
-    top = os.environ.get('FNVNX_RECON')
-    if top and os.path.isdir(top):
-        files += sorted(os.path.join(dp, 'vlit.json') for dp, _, ns in os.walk(top) if 'vlit.json' in ns)
-    st = {}
-    for f in files:
-        try: d = json.load(open(f))
-        except (OSError, ValueError): continue
-        if d.get('format') == 'fnvnx-vlit/1':
-            st = d; break
-    prepare.__dict__['_fnvnx_vlit'] = st
-    return st
-
-def _vlit_exe_stores(path, text, stats, defs):
-    """VLIT2 (above): [(match, vftable address)] for the stores the exe's vftables decide"""
-    tab = _vlit_table()
-    if not tab: return []
-    out, spans = [], None
-    for m in VLIT_STORE2.finditer(text):
-        a = int.from_bytes((m.group(3).encode('latin-1', 'replace') + b'\0' * 4)[:4], 'little')
-        if not 0x00401000 <= a < 0x00fde578 or a not in defs: continue
-        ls = max(text.rfind(';', 0, m.start()), text.rfind('{', 0, m.start()), text.rfind('}', 0, m.start())) + 1
-        lv = text[ls:m.start()]
-        om = VLIT_THIS_OFF.search(lv)
-        off = int(om.group(1), 0) if om else (0 if re.search(r'\bthis\b', lv) else None)
-        cands = [c for c in tab.get('slot0', {}).get('%08x' % a, ()) if off is None or c[1] == off]
-        if len(cands) > 1:
-            if spans is None: spans = prepare.scope_map(text)
-            outer = [sp for sp in spans if sp[0] < m.start() < sp[1] and sp[2] not in ('namespace', 'extern')]
-            body = text[outer[0][0]:outer[0][1]] if outer else ''
-            cls = {tab.get('class', {}).get(h.lower()) for h in re.findall(r'\bDAT_([0-9a-fA-F]{8})\b', body)} - {None}
-            cands = [c for c in cands if tab.get('class', {}).get(c[0]) in cls]
-        if len(cands) != 1:
-            stats['VLIT2-LIST'] += 1; continue
-        out.append((m, int(cands[0][0], 16)))
-    return out
-
-def _vlit_apply(path, text, stats, hits):
-    """VLIT2's edits: each literal -> `(char*)&DAT_<V>` (its cast kept), `extern "C" char DAT_<V>;` in front of the
-    outermost function or class around its first store, All positions are
-    in the original text; the edits apply from the end."""
-    masked = FRIEND_MASK.sub(lambda x: re.sub(r'[^\n]', ' ', x.group()), text)
-    spans = prepare.scope_map(masked)
-    edits, first = [], {}
-    for m, v in hits:
-        name = 'DAT_%08x' % v
-        edits.append((m.start(), m.end(), '%s%s(char*)&fnvnx_vlit_%08x%s /* fnv-nx VLIT2: "%s" */' % (
-            m.group(1), m.group(2), v, m.group(4), m.group(3).replace('*/', '* /'))))
-        first[name] = min(first.get(name, m.start()), m.start())
-        stats['VLIT2'] += 1
-    for name, pos in first.items():
-        # its own identifier for the symbol DAT_<V> (asm label): the file may declare DAT_<V> itself, with another
-        # type or in another scope (blk_004c0000_od.cpp `int DAT_01020944`)
-        outer = [sp for sp in spans if sp[0] < pos < sp[1] and sp[2] not in ('namespace', 'extern')]
-        at = _decl_start(masked, outer[0][0]) if outer else 0
-        edits.append((at, at, 'extern "C" char fnvnx_vlit_%s __asm__("%s"); /* fnv-nx VLIT2 */ ' % (name[4:], name)))
-    for a, b, r in sorted(edits, key=lambda e: (e[0], e[1]), reverse=True):
-        text = text[:a] + r + text[b:]
-    return text
-
-def r_vptr_literals_exe(path, text, stats):
-    """VLIT2: a 1-3 character string literal stored as a vptr -> the exe vftable with that slot 0 at the store's
-    offset (vlit.json; see above). Runs before VLIT1, which sees only what is left."""
-    if '"' not in text or not _vlit_table(): return text
-    defs, _ = _vlit_index(path)
-    hits = _vlit_exe_stores(path, text, stats, defs)
-    return _vlit_apply(path, text, stats, hits) if hits else text
-
-def r_vptr_literals(path, text, stats):
-    """VLIT1: a 1-3 character string literal stored as a vptr -> the vftable address the unit binds it to (see
-    above)."""
-    if '"' not in text: return text
-    hits = []
-    for m in VLIT_STORE.finditer(text):
-        a = int.from_bytes((m.group(2).encode('latin-1', 'replace') + b'\0' * 4)[:4], 'little')
-        if 0x00401000 <= a < 0x00fde578: hits.append((m, a))
-    if not hits: return text
-    defs, sg = _vlit_index(path)
-    hits = [(m, a) for m, a in hits if a in defs]
-    if not hits: return text
-    addrs = sg.get(os.path.normpath(os.path.abspath(path)), set())
-    code = re.sub(r'^[ \t]*#[^\n]*', '', COMMENT.sub(' ', text), flags=re.M)
-    if len(addrs) != 1 or len(hits) != 1 or len(STRING_LIT.findall(code)) != 1:
-        stats['VLIT1-LIST'] += len(hits)
-        return text
-    m, _ = hits[0]
-    stats['VLIT1'] += 1
-    name = 'DAT_%08x' % next(iter(addrs))
-    text = (text[:m.start()] + '%s(char*)&%s%s /* fnv-nx VLIT1: "%s" */' % (m.group(1), name, m.group(3),
-                                                                             m.group(2).replace('*/', '* /'))
-            + text[m.end():])
-    # the declaration, at namespace scope in front of the outermost function or class around the store (same line)
-    masked = FRIEND_MASK.sub(lambda x: re.sub(r'[^\n]', ' ', x.group()), text)
-    outer = [sp for sp in prepare.scope_map(masked) if sp[0] < m.start() < sp[1] and sp[2] not in ('namespace', 'extern')]
-    at = _decl_start(masked, outer[0][0]) if outer else 0
-    return text[:at] + 'extern "C" char %s; /* fnv-nx VLIT1 */ ' % name + text[at:]
-
 # ---------------------------------------------------------------------------------------------------------- KEEP1
 
 FNV_TAG = re.compile(r'^[ \t]*//[ \t]*@fnv[ \t]+0x[0-9a-fA-F]+[^\n]*\n((?:[ \t]*//[^\n]*\n)*)([ \t]*)(?=\S)', re.M)
@@ -3300,7 +3190,7 @@ def r_friend_class_visibility(path, text, stats):
     out.append(text[pos:])
     return ''.join(out)
 
-RULES = [r_include_case, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_namespace_specializations, r_va_list, r_va_enum_args, r_vptr_literals_exe, r_vptr_literals, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_msvc_base_layout, r_vfptr_pad, r_msvc_empty_bases, r_class_alignment, r_friend_class_visibility]
+RULES = [r_include_case, r_msvc_tokens, r_std_struct, r_vc9_containers, r_msvc_library_internals, r_anonymous_return_types, r_opaque_enums, r_enum_int_values, r_function_named_classes, r_anonymous_aggregate_members, r_local_anonymous_unions, r_pointer_zero_compares, r_global_allocators, r_keep_definitions, r_if_exists, r_sal_attributes, r_sdk_types, r_own_iunknown, r_exception_specs, r_placement_new, r_ctor_calls, r_c_data_linkage, r_goto_scalar_inits, r_goto_crossed_scopes, r_quad_returns, r_msc_version_values, r_sdk_guarded_copies, r_string_array_address, r_interlocked_fallbacks, r_win32_call_args, r_ref_cast_temporaries, r_temporaries_to_references, r_global_delete_noexcept, r_typeid_include, r_namespace_specializations, r_va_list, r_va_enum_args, r_image_statics, r_duplicate_int_overloads, r_placement_include, r_namespace_template_decls, r_dependent_typenames, r_forward_template_calls, r_instantiation_size_types, r_copy_ctor_base_casts, r_dependent_base_members, r_math_overloads, r_msvc_base_layout, r_vfptr_pad, r_msvc_empty_bases, r_class_alignment, r_friend_class_visibility]
 
 # ==================================================================================================== stream S1-refs
 #
@@ -4069,7 +3959,7 @@ def _recon_reject(r, d, src, bad, stats):
         msg = 'replace[%d] %s' % (k, what)
     else:
         msg = 'replace[%d] "old" occurs %d times, not once: %r' % (k, c, what)
-    sys.stderr.write('REC1-REPL: recon rejected for %s: %s (%s); its rows stay trap stubs\n' % (src, d, msg))
+    sys.stderr.write('REC1-REPL: recon rejected for %s: %s (%s); its functions get no native body from it\n' % (src, d, msg))
 
 def r_recon_bodies(path, text, stats):
     """REC1: append the reconstructed bodies FNVNX_RECON holds for this unit (D20; see above)."""

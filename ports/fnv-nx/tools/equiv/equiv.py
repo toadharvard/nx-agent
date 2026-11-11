@@ -79,8 +79,6 @@ CLASSES = {
     'ALIGN1': 'neutral',       # __declspec(align(n)) moved behind the class key: the type's alignment on both compilers
     'ENUM2': 'neutral',        # enum with enumerators >= 2^31: MSVC's int base written out, (int) on those literals
     'VA2': 'neutral',          # va_arg(ap, Enum) -> (Enum)va_arg(ap, int): the int MSVC read
-    'VLIT1': 'platform',       # a vptr store printed as a string literal -> the vftable address the recipe binds it to
-    'VLIT2': 'platform',       # VLIT1 by the exe's vftables (private vlit.json): slot 0 at the store's COL offset, the class of the function's other vptrs
     'ADDRFN1': 'platform',     # a code address cast to void* takes the address symbol __fnv_<a> (a GCC asm label)
     'POP2': 'neutral',          # POST hook: pop-mismatch chains, the words a getter leaves move to the call that pops them
     'HARN1': 'platform',        # an untagged free harness definition no unit references gets internal linkage (static);

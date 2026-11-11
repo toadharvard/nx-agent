@@ -245,9 +245,9 @@ check('SPEC3 specialization of a namespace template: untouched',
           'template <> class P<R>\n{\n    R* p;\n};\n}\n'), ['    R* p;'], ['N::R'])
 
 # ---- STATIC1 unsized arrays of address names
-check('STATIC1 unsized DAT_ array becomes a declaration',
-      run(s1.r_image_statics, 'const void* DAT_010d0fc4[];\nconst void* local_table[];\n'),
-      ['extern const void* DAT_010d0fc4[];', '\nconst void* local_table[];'])
+check('STATIC1 an unsized array at file scope becomes a declaration, whatever its name; a sized one stays',
+      run(s1.r_image_statics, 'const void* DAT_010d0fc4[];\nconst void* local_table[];\nconst void* sized[4];\n'),
+      ['extern const void* DAT_010d0fc4[];', 'extern const void* local_table[];', '\nconst void* sized[4];'])
 
 check('RCAST1 a cast operand and a declarator are left alone',
       run(s1.r_ref_cast_temporaries, 'a.Add((void* const&)(void*)this);\nbool GetAt(const char*, void(__cdecl*&)());\n'),
@@ -347,6 +347,10 @@ check('SAL1 drops the attributes of the annotation classes',
 check('LINK1 C-linkage declarator list over two lines',
       run(s1.r_c_data_linkage, 'extern "C" char str_a[], str_b[],\n    str_c[];\nextern "C" int f(int);\n'),
       ['extern char str_a[], str_b[],\n    str_c[];', 'extern "C" int f(int);'])
+
+check('LINK1 a C-linkage function-pointer variable at file scope, any name; a function returning one stays',
+      run(s1.r_c_data_linkage, 'extern "C" void (__cdecl *pfn)(int);\nextern "C" void (*get(int))(int);\n'),
+      ['extern void (__cdecl *pfn)(int);', 'extern "C" void (*get(int))(int);'])
 
 # ---- SSE3 / SSE1 forms
 check('SSE3 __m64 members', prepare.r_sse_members('x.cpp', 'short s = v.m64_i16[2];\n', Counter()), ['((short*)&(v))[2]'])
@@ -546,6 +550,13 @@ got = run(s1.r_goto_scalar_inits, 'int g(H* h, int e)\n{\n    if (e) goto out;\n
 check('GOTO1-CONST: a crossed const integer literal becomes static const (still a constant)', got,
       ['    static const int slots = 4;', '{ const int k = 2; h->n = k; }'])
 
+got = run(s1.r_goto_scalar_inits, 'typedef float Real;\ntypedef __m128 Quad;\nstruct Hk;\nint f(int e)\n{\n    if (e) goto out;\n    {\n'
+          '        const Real r = 4;\n        Quad q = g();\n        Hk h = 3;\n        return (int)r;\n    }\nout:\n    return 0;\n}\n')
+check('GOTO1 takes the scalar types from the unit\'s own typedefs, not from names (Hk is no typedef)', got,
+      ['Real r; r = 4;', 'Quad q; q = g();', 'Hk h = 3;'])
+got = run(s1.r_goto_scalar_inits, 'typedef int Real;\nint f(int e)\n{\n    const Real k = 2;\n    int a[k];\n    if (e) goto out;\n    a[0] = 1;\nout:\n    return k;\n}\n')
+check('GOTO1 a typedef of an integer type is an integer scalar (const literal kept)', got, ['    const Real k = 2;'])
+
 # ---- GOTO2
 got = run(s1.r_goto_crossed_scopes, 'int f(const P* p, int n)\n{\n    if (n < 2) goto out;\n    Cmp cmp = {0};\n'
           '    Vec& v = p->v;\n    sort(p, n, cmp, v);\nout:\n    return n;\n}\n')
@@ -559,6 +570,10 @@ got = run(s1.r_goto_crossed_scopes, 'static float dot(V a, V b) { return a.x * b
           '    if (d > r) { miss: return false; }\n    return d < 2 * r;\n}\n')
 check('GOTO2 (a) copies a const scalar reference to a by-value result', got, ['float d; d = dot(a, b);'],
       ['const float&'])
+got = run(s1.r_goto_crossed_scopes, 'typedef float Real;\nstatic Real dot(V a, V b) { return a.x * b.x; }\n'
+          'bool f(V a, V b, float r)\n{\n    if (r < 0) goto miss;\n    const Real& d = dot(a, b);\n'
+          '    if (d > r) { miss: return false; }\n    return d < 2 * r;\n}\n')
+check('GOTO2 (a) the scalar is a typedef of the unit (typedef float Real)', got, ['Real d; d = dot(a, b);'], ['const Real&'])
 got = run(s1.r_goto_crossed_scopes, 'static const float& dot(V a, V b);\n'
           'bool f(V a, V b, float r)\n{\n    if (r < 0) goto miss;\n    const float& d = dot(a, b);\n'
           '    if (d > r) { miss: return false; }\n    return d < 2 * r;\n}\n')
@@ -695,6 +710,11 @@ got = run(s1.r_string_array_address, 'extern char str_01082ab8[];\nvoid f() { g(
 check('STR1 rewrites only where the array is the declaration in scope', got,
       ['void f() { g(str_01082ab8); }', 'void h() { g(&str_01082ab8); }', 'g(str_c0000000); }'])
 
+got = run(s1.r_string_array_address, 'extern char tbl[];\nextern char sized[8];\nextern int ints[];\nextern const char* ptrs[];\n'
+          'void f() { g(&tbl); g(&sized); g(&ints); g(&ptrs); }\n')
+check('STR1 only char arrays of unknown bound, whatever their names', got,
+      ['g(tbl); g(&sized); g(&ints); g(&ptrs);'])
+
 # ---- FRIEND1
 src = ('namespace N {\nint a;\nclass A : public B\n{\n    friend class W;\n    W* m_w;\n};\nclass W { int x; };\n}\n'
        'struct T;\nclass D { friend struct T; };\ntypedef int Q;\nclass E { friend class Q; };\n'
@@ -734,20 +754,6 @@ check('ENUM2 gives enums with values >= 2^31 MSVC\'s int', got,
        'enum ShaderParameter : int { SP_NONE = (int)0xffffffff, SP_X = (int)0x80000000u, SP_Y = -1 };',
        'enum Small { S0 = 1 };', 'enum Expr { E0 = 0x80000000 | 1 };', 'enum class Sc { Q = 0x80000000 };',
        'enum Huge { H = 0x100000000 };', 'enum Based : unsigned { U = 0x80000000 };'])
-
-# ---- NATIVE1 (render R3): the drop list's matching of tools/rules/native1.py (a command line tool; prepare no longer runs it)
-_spec = importlib.util.spec_from_file_location('native1', os.path.join(HERE, '..', '..', 'tools', 'rules', 'native1.py'))
-native1 = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(native1)
-_d = tempfile.mkdtemp()
-open(os.path.join(_d, 'drop.txt'), 'w').write('# N1\nsrc/gamebryo2.2/corelibs/niconsolerenderer/*  # whole dir\nsrc/b.cpp\n')
-open(os.path.join(_d, 'ov.tsv'), 'w').write('# x\n00bca760\tnx_a\tthiscall\nvslot:??_7X@@6B@:3\tnx_b\t\n')
-_data = {'units': [{'source': 'src/a.cpp'}, {'source': 'src/gamebryo2.2/corelibs/niconsolerenderer/x.cpp',
-                    'functions': [{'address': '0x00bca760'}, {'address': '0x00bca800'}]}, {'source': 'src/b.cpp'}]}
-_kept, _gone = native1.drop_units(_data, native1.load_list(os.path.join(_d, 'drop.txt')))
-check('NATIVE1 drops listed units and glob matches, reports the addresses no override covers',
-      repr([u['source'] for u in _kept['units']]) + ' %d ' % len(_gone) + repr(native1.uncovered(_gone, os.path.join(_d, 'ov.tsv'))),
-      ["['src/a.cpp'] 2 [12363776]"])
-check('NATIVE1 with no list file drops nothing', repr(native1.load_list(os.path.join(_d, 'none.txt'))), ['[]'])
 
 # ---- shim packing: fnvnx_win32.h included inside a decomp #pragma pack(push, 4) region (DECL1 / DECL2, 16 sites)
 import re, shutil as _shutil, subprocess as _subprocess
@@ -808,21 +814,6 @@ got = run(s1.r_va_enum_args, 'enum Index : int { A };\nvoid f(va_list args) {\n 
 check('VA2 reads an enum through ... as the int it was passed as', got,
       ['Index d = (Index)va_arg(args, int);', 'va_arg(args, const char*)', 'int i = va_arg(args, int);'])
 
-# ---- VLIT1
-_v = tempfile.mkdtemp()
-os.makedirs(os.path.join(_v, 'src')); os.makedirs(os.path.join(_v, 'build'))
-_json.dump({'units': [{'source': 'src/n.cpp', 'symbols': {'$SG2541': '0x0101212c'}, 'functions': []},
-                      {'source': 'src/k.cpp', 'symbols': {}, 'functions': [{'address': '0x00404b40', 'symbol': '?f@@YAXXZ'}]}]},
-           open(os.path.join(_v, 'build', 'units.json'), 'w'))
-_saved, s1._VLIT = s1._VLIT, None
-_st = Counter()
-got = s1.r_vptr_literals(os.path.join(_v, 'src', 'n.cpp'), '#include "x.h"\nvoid* F::Init()\n{\n    m_p = "@K@";\n    return this;\n}\n', _st)
-got2 = s1.r_vptr_literals(os.path.join(_v, 'src', 'n.cpp'), 'void f() { m_p = "@K@"; g("text"); }\n', _st)
-s1._VLIT = _saved
-check('VLIT1 stores the vftable address the unit binds the misread literal to; ambiguous sites are listed', got + got2 + ' %d' % _st['VLIT1-LIST'],
-      ['#include "x.h"\nextern "C" char DAT_0101212c; /* fnv-nx VLIT1 */ void* F::Init()\n',
-       'm_p = (char*)&DAT_0101212c; /* fnv-nx VLIT1: "@K@" */\n', 'void f() { m_p = "@K@"; g("text"); }', ' 1'])
-check('VLIT1 keeps the line count', str(got.count('\n')), ['6'])
 # ---- SSE2 with the decomp's own name for __m128
 got = prepare.r_sse_local_protos('/x/src/a.cpp', 'typedef __m128 ClosestPointQuad;\nClosestPointQuad _mm_shuffle_ps(ClosestPointQuad, ClosestPointQuad, unsigned int);\n'
                                  'extern "C" ::hkQuadReal __cdecl _mm_load_ps(const float*);\n'
@@ -1315,30 +1306,6 @@ if _shutil.which('aarch64-linux-gnu-g++'):
                          capture_output=True, text=True)
     check('EBO3 output: the empty base at +16, after the base with data; sizes as MSVC (ILP32)',
           _r.stderr or _r.stdout, ['mov\tw0, 16'], ['error'])
-
-# ---- S1-rules: VLIT2 (a vptr literal by the exe's vftables: slot 0 at the store's offset, the function's class)
-_vl = tempfile.mkdtemp(); os.makedirs(os.path.join(_vl, 'src')); os.makedirs(os.path.join(_vl, 'build'))
-_json.dump({'units': [{'source': 'src/a.cpp', 'symbols': {}, 'functions': [{'address': '0x00487220', 'symbol': '?f@@YAXXZ', 'size': 4}]}]},
-           open(os.path.join(_vl, 'build', 'units.json'), 'w'))
-_json.dump({'format': 'fnvnx-vlit/1', 'slot0': {'00487220': [['0101cb94', 0], ['0102a28c', 104], ['0102a59c', 104]]},
-            'class': {'0101cb94': '.?AVTESHealthForm@@', '0102a28c': '.?AVTESObjectARMA@@', '0102a59c': '.?AVTESObjectARMO@@',
-                      '0102a31c': '.?AVTESObjectARMA@@'}}, open(os.path.join(_vl, 'vlit.json'), 'w'))
-os.environ['FNVNX_VLIT'] = os.path.join(_vl, 'vlit.json')
-prepare.__dict__['_fnvnx_vlit'] = None
-_saved_vlit = s1._VLIT; s1._VLIT = None
-_VL = ('struct C { C(); };\nC::C()\n{\n    *(int*)((char*)this + 0x0) = (int)&DAT_0102a31c;\n'
-       '    *(const char**)((char*)this + 0x68) = " rH";\n    *(void**)((char*)this + 0x68) = (void*)" rH";\n}\n'
-       'struct H { void f(); };\nvoid H::f()\n{\n    *reinterpret_cast<const char**>(this) = " rH";\n}\n'
-       'struct Z { void g(); };\nvoid Z::g()\n{\n    *(const char**)((char*)this + 0x10) = " rH";\n}\n')
-_vlo = run(s1.r_vptr_literals_exe, _VL, os.path.join(_vl, 'src', 'a.cpp'))
-check('VLIT2 the store at +0x68 takes the vftable of the function\'s class (ARMA, not ARMO); the cast is kept', _vlo,
-      ['*(const char**)((char*)this + 0x68) = (char*)&fnvnx_vlit_0102a28c;', '= (void*)(char*)&fnvnx_vlit_0102a28c;',
-       'extern "C" char fnvnx_vlit_0102a28c __asm__("DAT_0102a28c"); /* fnv-nx VLIT2 */ C::C()'])
-check('VLIT2 a store through this at offset 0: the one vftable with that slot 0 there', _vlo,
-      ['*reinterpret_cast<const char**>(this) = (char*)&fnvnx_vlit_0101cb94;'])
-check('VLIT2 no vftable with that slot 0 at the offset: left as it is', _vlo,
-      ['*(const char**)((char*)this + 0x10) = " rH";'])
-os.environ.pop('FNVNX_VLIT', None); prepare.__dict__['_fnvnx_vlit'] = None; s1._VLIT = _saved_vlit
 
 # ---- S1-rules: STAND7 (an out-of-class inline template member stand-in bound elsewhere -> MSVC only)
 _s7 = tempfile.mkdtemp(); os.makedirs(os.path.join(_s7, 'src')); os.makedirs(os.path.join(_s7, 'build'))
