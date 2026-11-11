@@ -203,6 +203,8 @@ extern "C" void fnvnx_path_reset(const char *root)
     mkdirs(h);
     snprintf(h, sizeof h, "%s/user/AppData/Local/FalloutNV", g_root);
     mkdirs(h);
+    snprintf(h, sizeof h, "%s/user/AppData/Local/Temp", g_root);   /* the TEMP/TMP directory of the environment */
+    mkdirs(h);
     snprintf(h, sizeof h, "%s/drive_c", g_root); /* C:\ itself exists */
     mkdirs(h);
 }

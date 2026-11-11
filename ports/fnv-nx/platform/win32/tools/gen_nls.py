@@ -213,6 +213,22 @@ arr("uint16_t", "klocale_us", us)
 arr("uint16_t", "klocale_inv", inv)
 arr("uint16_t", "klocale_pool", pool)
 
+# ---- the calendar records of locale.nls: both locales use the Gregorian calendar (id 1, ICALENDARTYPE) and have no
+# optional one; the era name (CAL_SERASTRING, the "g" of a date picture) is the first element of its era-string array
+for rec in (us, inv):
+    cal_pos = rec[62] | rec[63] << 16
+    assert pool[cal_pos + 1] == 1 and pool[cal_pos + 2] == 0, "Gregorian calendar only, no optional calendar"
+for c in range(ncal):
+    cal = struct.unpack_from("<18I", ln, lo + caloff + c * calsz)
+    if cal[0] & 0xFFFF == 1:
+        n = struct.unpack_from("<H", ln, pool_src + 2 * cal[4])[0]
+        assert n >= 1
+        era = struct.unpack_from("<I", ln, pool_src + 2 * cal[4] + 2)[0]
+        arr("uint16_t", "kcal_gregorian_era", pool_str(era)[1:])
+        break
+else:
+    raise SystemExit("calendar id 1 not found")
+
 emit("struct nls_cp { uint16_t cp, def, unidef, transdef, transunidef; const uint16_t *mb, *glyph, *wcidx; "
      "const uint8_t *wc; };")
 emit("static const struct nls_cp kcodepages[%d] = {" % len(cpinfo))

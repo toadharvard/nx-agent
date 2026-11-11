@@ -39,7 +39,7 @@ uint32_t g_icc;
 struct Lk { Lk() { os_lock(&g_lock); } ~Lk() { os_unlock(&g_lock); } };
 
 struct Img { const uint8_t *b; size_t n; uint32_t root; };
-struct Key { int is_id; uint32_t id; const char *s; };
+struct Key { int is_id; uint32_t id; const WCHAR *w; size_t wn; };   // a name is UTF-16, as the directory stores it
 struct Dib { uint32_t *px; int w, h; uint8_t *inv; };
 
 inline unsigned r16(const uint8_t *p) { return p[0] | p[1] << 8; }
@@ -66,18 +66,42 @@ bool open_image(HMODULE m, Img *im)
     return true;
 }
 
-Key mkkey(LPCSTR p)
+/* a resource name or type argument: IS_INTRESOURCE gives an integer id, "#digits" the integer (modulo 2^32), any other
+ * string a UTF-16 name (an ANSI name is converted in the ANSI code page; one rule for both entry points) */
+Key mkkeyw(const WCHAR *p)
 {
-    Key k = { 0, 0, p };
+    Key k = { 0, 0, p, 0 };
     uintptr_t v = (uintptr_t)p;
-    if (v <= 0xFFFF) { k.is_id = 1; k.id = (uint32_t)v; }
-    else if (p[0] == '#' && p[1] >= '0' && p[1] <= '9') {
-        char *e; unsigned long x = strtoul(p + 1, &e, 10);
-        if (!*e) { k.is_id = 1; k.id = (uint32_t)x; }
+    if (v <= 0xFFFF) { k.is_id = 1; k.id = (uint32_t)v; return k; }
+    size_t n = 0;
+    while (p[n]) n++;
+    k.wn = n;
+    if (p[0] == '#' && n > 1) {
+        uint32_t x = 0; size_t i = 1;
+        for (; i < n && p[i] >= '0' && p[i] <= '9'; i++) x = x * 10 + (uint32_t)(p[i] - '0');
+        if (i == n) { k.is_id = 1; k.id = x; k.w = NULL; k.wn = 0; }
     }
     return k;
 }
-Key idkey(uint32_t id) { Key k = { 1, id, NULL }; return k; }
+struct KeyA {
+    Key k;
+    WCHAR st[128];
+    WCHAR *hp;
+    explicit KeyA(LPCSTR p) : hp(NULL)
+    {
+        k.is_id = 1; k.id = (uint32_t)(uintptr_t)p; k.w = NULL; k.wn = 0;
+        if ((uintptr_t)p <= 0xFFFF) return;
+        int n = MultiByteToWideChar(CP_ACP, 0, p, -1, NULL, 0);
+        WCHAR *w = st;
+        if (n > (int)(sizeof st / sizeof st[0])) w = hp = (WCHAR *)malloc((size_t)n * sizeof(WCHAR));
+        k.is_id = 0;
+        if (n <= 0 || !w || MultiByteToWideChar(CP_ACP, 0, p, -1, w, n) != n) return;   /* k.w == NULL: no such name */
+        k = mkkeyw(w);
+    }
+    ~KeyA() { free(hp); }
+    KeyA(const KeyA &) = delete;
+};
+Key idkey(uint32_t id) { Key k = { 1, id, NULL, 0 }; return k; }
 
 struct Dir { uint64_t ents; unsigned n; };
 bool open_dir(const Img &im, uint32_t rel, Dir *d)
@@ -88,6 +112,11 @@ bool open_dir(const Img &im, uint32_t rel, Dir *d)
     d->ents = a + 16;
     return ok(im, d->ents, 8ull * d->n) || fail(E_BAD_EXE);
 }
+WCHAR upcase(WCHAR c)   /* names compare case-insensitively: the invariant locale's upper case of the UTF-16 unit */
+{
+    WCHAR u;
+    return LCMapStringW(0x7F, LCMAP_UPPERCASE, &c, 1, &u, 1) == 1 ? u : c;
+}
 /* 1 = entry offset in *off, 0 = no such entry, -1 = malformed */
 int lookup(const Img &im, const Dir &d, const Key &k, uint32_t *off)
 {
@@ -95,16 +124,15 @@ int lookup(const Img &im, const Dir &d, const Key &k, uint32_t *off)
         uint32_t nm = r32(im.b + d.ents + 8 * i);
         if (k.is_id) { if (!(nm & 0x80000000u) && nm == k.id) { *off = r32(im.b + d.ents + 8 * i + 4); return 1; } continue; }
         if (!(nm & 0x80000000u)) continue;
+        if (!k.w) { fail(ERROR_NOT_ENOUGH_MEMORY); return -1; }   /* the name could not be built */
         uint64_t a = (uint64_t)im.root + (nm & 0x7FFFFFFFu);
         if (!ok(im, a, 2) || !ok(im, a + 2, 2ull * r16(im.b + a))) { fail(E_BAD_EXE); return -1; }
         size_t len = r16(im.b + a);
-        if (strlen(k.s) != len) continue;
+        if (k.wn != len) continue;
         size_t j = 0;
         for (; j < len; j++) {
-            unsigned c = r16(im.b + a + 2 + 2 * j), q = (uint8_t)k.s[j];
-            if (c >= 'a' && c <= 'z') c -= 32;
-            if (q >= 'a' && q <= 'z') q -= 32;
-            if (c != q) break;
+            WCHAR c = (WCHAR)r16(im.b + a + 2 + 2 * j), q = k.w[j];
+            if (c != q && upcase(c) != upcase(q)) break;
         }
         if (j == len) { *off = r32(im.b + d.ents + 8 * i + 4); return 1; }
     }
@@ -435,9 +463,16 @@ extern "C" void *FindResourceExA(HMODULE m, LPCSTR type, LPCSTR name, WORD lang)
 {
     Img im;
     if (!open_image(m, &im)) return NULL;
-    return (void *)find(im, mkkey(type), mkkey(name), lang & 0xFFFF);
+    return (void *)find(im, KeyA(type).k, KeyA(name).k, lang & 0xFFFF);
 }
 extern "C" void *FindResourceA(HMODULE m, LPCSTR name, LPCSTR type) { return FindResourceExA(m, type, name, 0); }
+extern "C" void *FindResourceExW(HMODULE m, LPCWSTR type, LPCWSTR name, WORD lang)
+{
+    Img im;
+    if (!open_image(m, &im)) return NULL;
+    return (void *)find(im, mkkeyw(type), mkkeyw(name), lang & 0xFFFF);
+}
+extern "C" void *FindResourceW(HMODULE m, LPCWSTR name, LPCWSTR type) { return FindResourceExW(m, type, name, 0); }
 extern "C" void *LoadResource(HMODULE m, void *r)
 {
     Img im; const uint8_t *d; size_t n;
@@ -459,7 +494,7 @@ extern "C" BOOL EnumResourceNamesA(HMODULE m, LPCSTR type, BOOL (*cb)(HMODULE, L
 {
     Img im; Dir d; uint32_t off;
     if (!cb || !open_image(m, &im) || !open_dir(im, 0, &d)) return FALSE;
-    int r = lookup(im, d, mkkey(type), &off);
+    int r = lookup(im, d, KeyA(type).k, &off);
     if (r <= 0) { if (!r) SetLastError(1813); return FALSE; }
     if (!(off & 0x80000000u) || !open_dir(im, off & 0x7FFFFFFFu, &d)) { SetLastError(E_BAD_EXE); return FALSE; }
     for (int pass = 0; pass < 2; pass++)   /* the directory lists named entries first */
@@ -485,7 +520,7 @@ extern "C" HANDLE fnvnx_load_icon_resource(HINSTANCE hi, LPCSTR name, int is_cur
     Img im; Dib dib = { NULL, 0, 0, NULL }; int hx, hy;
     HMODULE m = hi ? (HMODULE)hi : EXE_MODULE;
     if (!open_image(m, &im)) return NULL;
-    const uint8_t *g = find(im, idkey(is_cursor ? 12 : 14), mkkey(name), 0);
+    const uint8_t *g = find(im, idkey(is_cursor ? 12 : 14), KeyA(name).k, 0);
     if (!g) return NULL;
     { Lk l; for (Icon *i = g_icons; i; i = i->next) if (i->m == m && i->ent == g && i->cur == is_cursor) return i; }
     int sz = GetSystemMetrics(is_cursor ? 13 /* SM_CXCURSOR */ : 11 /* SM_CXICON */), sy = GetSystemMetrics(is_cursor ? 14 : 12);
@@ -555,9 +590,9 @@ extern "C" void *ImageList_LoadImageA(HINSTANCE hi, LPCSTR name, int cx, int gro
         size_t n;
         int hx, hy;
         if (type == 0) {
-            if (!(e = find(im, idkey(2), mkkey(name), 0)) || !entry_data(im, e, &src, &n) || !dib_decode(src, n, false, false, fl, &d)) return NULL;
+            if (!(e = find(im, idkey(2), KeyA(name).k, 0)) || !entry_data(im, e, &src, &n) || !dib_decode(src, n, false, false, fl, &d)) return NULL;
         } else {
-            if (!(e = find(im, idkey(type == 1 ? 14 : 12), mkkey(name), 0)) || !load_icon_dib(im, e, type == 2, cx, cx, &d, &hx, &hy)) return NULL;
+            if (!(e = find(im, idkey(type == 1 ? 14 : 12), KeyA(name).k, 0)) || !load_icon_dib(im, e, type == 2, cx, cx, &d, &hx, &hy)) return NULL;
             cx = d.w; mask = 0xFFFFFFFFu;   /* an icon carries its own mask */
         }
     }

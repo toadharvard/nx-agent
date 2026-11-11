@@ -193,6 +193,8 @@ const exp g_exports[] = {
     K(WriteConsoleW), K(ExpandEnvironmentStringsA), K(GetSystemDirectoryA), K(GetVersion), K(GetVersionExA),
     K(GetWindowsDirectoryA), K(IsDBCSLeadByte), K(IsProcessorFeaturePresent), K(SetConsoleCtrlHandler),
     K(SetErrorMode),
+    K(DeleteFileW), K(MoveFileW), K(GetTempPathA), K(GetTempFileNameA), K(GetTempFileNameW),
+    K(GetDateFormatA), K(GetTimeFormatA),
     /* user32 */
     U(AdjustWindowRect), U(AdjustWindowRectEx), U(CallNextHookEx), U(ClientToScreen), U(ClipCursor),
     U(CreateWindowExA), U(DefWindowProcA), U(DestroyWindow), U(DispatchMessageA), U(EnumChildWindows),
@@ -208,7 +210,7 @@ const exp g_exports[] = {
     U(SetCursor), U(SetDoubleClickTime),
     E("comctl32", InitCommonControlsEx), E("comctl32", ImageList_LoadImageA), E("comctl32", ImageList_Destroy),
     E("comctl32", ImageList_GetImageCount), E("comctl32", ImageList_GetIconSize),
-    K(FindResourceA), K(FindResourceExA), K(LoadResource), K(LockResource), K(SizeofResource), K(FreeResource),
+    K(FindResourceA), K(FindResourceExA), K(FindResourceW), K(FindResourceExW), K(LoadResource), K(LockResource), K(SizeofResource), K(FreeResource),
     K(EnumResourceNamesA),
     E("gdi32", GetStockObject), E("gdi32", DeleteObject), E("gdi32", CreateCompatibleDC), E("gdi32", DeleteDC),
     E("gdi32", CreateCompatibleBitmap), E("gdi32", CreateDIBSection), E("gdi32", SelectObject), E("gdi32", GetDIBits),

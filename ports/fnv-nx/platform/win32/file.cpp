@@ -607,10 +607,24 @@ extern "C" BOOL GetFileTime(HANDLE h, LPFILETIME c, LPFILETIME a, LPFILETIME w)
     return TRUE;
 }
 
-extern "C" BOOL DeleteFileA(LPCSTR name)
+/* a W name is UTF-16: the layer's internal UTF-8 name, as CreateFileW makes it (one rule for every W file call) */
+static BOOL wide_name(LPCWSTR w, char *out, size_t n)
+{
+    if (!w) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return FALSE;
+    }
+    if (utf16_to_utf8(w, out, n)) {
+        SetLastError(ERROR_INVALID_NAME);
+        return FALSE;
+    }
+    return TRUE;
+}
+
+static BOOL delete_core(LPCSTR name, int utf8)
 {
     char host[W32_PATH_MAX], key[W32_PATH_MAX];
-    if (!map_or_fail(name, host))
+    if (!map_or_fail(name, host, utf8))
         return FALSE;
     make_key(host, key);
     BOOL ok = FALSE;
@@ -632,6 +646,14 @@ extern "C" BOOL DeleteFileA(LPCSTR name)
     }
     os_unlock(&g_flock);
     return ok;
+}
+
+extern "C" BOOL DeleteFileA(LPCSTR name) { return delete_core(name, 0); }
+
+extern "C" BOOL DeleteFileW(LPCWSTR name)
+{
+    char u[W32_PATH_MAX * 2];
+    return wide_name(name, u, sizeof u) && delete_core(u, 1);
 }
 
 extern "C" BOOL CreateDirectoryA(LPCSTR name, void *sa)
@@ -666,10 +688,10 @@ extern "C" BOOL RemoveDirectoryA(LPCSTR name)
     return TRUE;
 }
 
-extern "C" BOOL MoveFileA(LPCSTR from, LPCSTR to)
+static BOOL move_core(LPCSTR from, LPCSTR to, int utf8)
 {
     char a[W32_PATH_MAX], b[W32_PATH_MAX], ka[W32_PATH_MAX], kb[W32_PATH_MAX];
-    if (!map_or_fail(from, a) || !map_or_fail(to, b))
+    if (!map_or_fail(from, a, utf8) || !map_or_fail(to, b, utf8))
         return FALSE;
     make_key(a, ka);
     make_key(b, kb);
@@ -701,6 +723,14 @@ extern "C" BOOL MoveFileA(LPCSTR from, LPCSTR to)
     }
     os_unlock(&g_flock);
     return ok;
+}
+
+extern "C" BOOL MoveFileA(LPCSTR from, LPCSTR to) { return move_core(from, to, 0); }
+
+extern "C" BOOL MoveFileW(LPCWSTR from, LPCWSTR to)
+{
+    char a[W32_PATH_MAX * 2], b[W32_PATH_MAX * 2];
+    return wide_name(from, a, sizeof a) && wide_name(to, b, sizeof b) && move_core(a, b, 1);
 }
 
 extern "C" BOOL CopyFileA(LPCSTR from, LPCSTR to, BOOL fail_if_exists)
@@ -928,4 +958,171 @@ extern "C" BOOL FindNextFileA(HANDLE h, LPWIN32_FIND_DATAA fd)
 extern "C" BOOL FindClose(HANDLE h)
 {
     return w32_handle_close(h, W32_FIND);
+}
+
+/* ---- temporary files (kernel32 GetTempPathA, GetTempFileNameA/W) */
+#ifndef ERROR_DIRECTORY
+#define ERROR_DIRECTORY 267L
+#endif
+#ifndef ERROR_BUFFER_OVERFLOW
+#define ERROR_BUFFER_OVERFLOW 111L
+#endif
+extern "C" DWORD GetEnvironmentVariableA(LPCSTR, LPSTR, DWORD);   /* crt_kernel32.cpp: the process environment block */
+extern "C" UINT GetWindowsDirectoryA(LPSTR, UINT);
+extern "C" void GetSystemTimeAsFileTime(LPFILETIME);
+
+/* The documented lookup order: the TMP, TEMP, USERPROFILE variables of the environment block, else the Windows
+ * directory; the result ends with a backslash. Size protocol: the length without the NUL when the buffer holds it,
+ * else the size needed with the NUL. */
+extern "C" DWORD GetTempPathA(DWORD n, LPSTR buf)
+{
+    static const char *const vars[] = { "TMP", "TEMP", "USERPROFILE" };
+    n = W32_DW(n);
+    char *dir = NULL;
+    size_t len = 0;
+    for (const char *v : vars) {
+        DWORD need = GetEnvironmentVariableA(v, NULL, 0);   /* 0: unset, 1: empty */
+        if (need <= 1)
+            continue;
+        if (!(dir = (char *)malloc((size_t)need + 2))) {
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            return 0;
+        }
+        DWORD got = GetEnvironmentVariableA(v, dir, need);
+        if (got && got < need) {
+            len = got;
+            break;
+        }
+        free(dir);   /* changed meanwhile: as unset */
+        dir = NULL;
+    }
+    if (!dir) {
+        UINT need = GetWindowsDirectoryA(NULL, 0);
+        if (need <= 1 || !(dir = (char *)malloc((size_t)need + 2))) {
+            SetLastError(need <= 1 ? ERROR_PATH_NOT_FOUND : ERROR_NOT_ENOUGH_MEMORY);
+            return 0;
+        }
+        UINT got = GetWindowsDirectoryA(dir, need);
+        if (!got || got >= need) {
+            free(dir);
+            SetLastError(ERROR_PATH_NOT_FOUND);
+            return 0;
+        }
+        len = got;
+    }
+    if (dir[len - 1] != '\\')
+        dir[len++] = '\\';
+    dir[len] = 0;
+    DWORD ret;
+    if (n > len && buf) {
+        memcpy(buf, dir, len + 1);
+        ret = (DWORD)len;
+    } else if (n > len) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        ret = 0;
+    } else {
+        ret = (DWORD)len + 1;
+    }
+    free(dir);
+    return ret;
+}
+
+/* the name is `base` + "<hex>.tmp" (base = directory, separator and the prefix, in the layer's name encoding `enc`);
+ * `dir` must be an existing directory. unique != 0: the name only, with that number. unique == 0: a number from the
+ * system time (1..65535, wrapping), the first whose file can be created exclusively; the file is created and closed.
+ * Returns the number used; 0 with the error set. */
+static UINT temp_core(const char *dir, const char *base, int enc, UINT unique, char *tail)
+{
+    char conv[W32_PATH_MAX * 2], host[W32_PATH_MAX], name[W32_PATH_MAX * 2];
+    const char *d = enc ? dir : ansi_to_utf8(dir, conv, sizeof conv);
+    os_stat_t st;
+    if (!d || w32_map_path(d, host, sizeof host) || os_stat(host, &st) || !st.is_dir) {
+        SetLastError(ERROR_DIRECTORY);
+        return 0;
+    }
+    if (unique) {
+        snprintf(tail, 16, "%X.tmp", (unsigned)(unique & 0xFFFF));
+        return unique;
+    }
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    unsigned u = (unsigned)((w32_ft64(&ft) / 10000) % 0xFFFF) + 1;
+    for (unsigned i = 0; i < 0xFFFF; i++, u = u % 0xFFFF + 1) {
+        snprintf(tail, 16, "%X.tmp", u);
+        snprintf(name, sizeof name, "%s%s", base, tail);
+        HANDLE h = w32_create_file_name(name, GENERIC_WRITE, 0, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, enc);
+        if (h != INVALID_HANDLE_VALUE) {
+            CloseHandle(h);
+            return u;
+        }
+        if (GetLastError() != ERROR_FILE_EXISTS)
+            return 0;
+    }
+    SetLastError(ERROR_FILE_EXISTS);   /* all 65535 names are taken */
+    return 0;
+}
+
+/* a path longer than MAX_PATH - 14 leaves no room for "\\pre1234.tmp" */
+#define TEMP_PATH_MAX 246
+
+extern "C" UINT GetTempFileNameA(LPCSTR path, LPCSTR prefix, UINT unique, LPSTR out)
+{
+    unique = W32_DW(unique);
+    if (!path || !prefix || !out) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+    size_t pl = strlen(path), k = 0;
+    if (pl > TEMP_PATH_MAX) {
+        SetLastError(ERROR_BUFFER_OVERFLOW);
+        return 0;
+    }
+    char base[TEMP_PATH_MAX + 8], tail[16];
+    memcpy(base, path, pl);
+    if (!pl || path[pl - 1] != '\\')
+        base[pl++] = '\\';
+    while (k < 3 && prefix[k])   /* the first three characters */
+        base[pl++] = prefix[k++];
+    base[pl] = 0;
+    UINT u = temp_core(path, base, 0, unique, tail);
+    if (u) {   /* at most 259 bytes with the NUL, by the path limit */
+        memcpy(out, base, pl);
+        memcpy(out + pl, tail, strlen(tail) + 1);
+    }
+    return u;
+}
+
+extern "C" UINT GetTempFileNameW(LPCWSTR path, LPCWSTR prefix, UINT unique, LPWSTR out)
+{
+    unique = W32_DW(unique);
+    if (!path || !prefix || !out) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+    size_t pl = 0, k = 0;
+    while (path[pl])
+        pl++;
+    if (pl > TEMP_PATH_MAX) {
+        SetLastError(ERROR_BUFFER_OVERFLOW);
+        return 0;
+    }
+    WCHAR wbase[TEMP_PATH_MAX + 8];
+    char dir8[TEMP_PATH_MAX * 3 + 4], base8[TEMP_PATH_MAX * 3 + 16], tail[16];
+    memcpy(wbase, path, pl * sizeof(WCHAR));
+    if (!pl || path[pl - 1] != '\\')
+        wbase[pl++] = '\\';
+    while (k < 3 && prefix[k])
+        wbase[pl + k] = prefix[k], k++;
+    pl += k;
+    wbase[pl] = 0;
+    if (utf16_to_utf8(path, dir8, sizeof dir8) || utf16_to_utf8(wbase, base8, sizeof base8)) {
+        SetLastError(ERROR_INVALID_NAME);
+        return 0;
+    }
+    UINT u = temp_core(dir8, base8, 1, unique, tail);
+    if (u) {
+        memcpy(out, wbase, pl * sizeof(WCHAR));
+        for (size_t i = 0; (out[pl + i] = (WCHAR)(unsigned char)tail[i]) != 0; i++) {}
+    }
+    return u;
 }

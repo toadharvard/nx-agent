@@ -196,7 +196,7 @@ TEST(env_date_time_format)
     CHECK_EQ(GetDateFormatA(0x409, 0, &st, NULL, b, sizeof b), 11); CHECK_STR(b, "10/19/2010");
     CHECK_EQ(GetDateFormatA(0x400, 1, &st, NULL, b, sizeof b), 11); CHECK_STR(b, "10/19/2010");
     CHECK(GetDateFormatA(0x409, 2, &st, NULL, b, sizeof b)); CHECK_STR(b, "Tuesday, October 19, 2010");
-    CHECK(GetDateFormatA(0x409, 8 | 0x80000000u, &st, NULL, b, sizeof b)); CHECK_STR(b, "October, 2010");
+    CHECK(GetDateFormatA(0x409, 8 | 0x80000000u, &st, NULL, b, sizeof b)); CHECK_STR(b, "October 2010");
     CHECK(GetDateFormatA(0x409, 0, &st, "d dd ddd dddd ddddd|M MM MMM MMMM|y yy yyyy yyyyy|g gg", b, sizeof b));
     CHECK_STR(b, "19 19 Tue Tuesday Tuesday|10 10 Oct October|10 10 2010 2010|A.D. A.D.");
     SYSTEMTIME s2 = { 2005, 3, 0, 4, 0, 0, 0, 0 };

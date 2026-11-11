@@ -943,6 +943,275 @@ extern "C" BOOL EnumSystemLocalesA(LOCALE_ENUMPROCA proc, DWORD flags)
 
 extern "C" LCID GetUserDefaultLCID(void) { return 0x0409; }
 
+/* ---- GetDateFormatA / GetTimeFormatA: the picture-string grammar over the locale record's own strings
+ * (short/long date, year-month, time format, day/month names, AM/PM markers) and the calendar's era name. Both
+ * installed locales use the Gregorian calendar and have no optional one, so DATE_USE_ALT_CALENDAR selects the
+ * default calendar (a locale without an optional calendar uses its default). */
+enum { DF_SHORT = 1, DF_LONG = 2, DF_ALTCAL = 4, DF_YEARMONTH = 8, DF_LTR = 0x10, DF_RTL = 0x20, DF_AUTO = 0x40,
+       TF_NOMINSEC = 1, TF_NOSEC = 2, TF_NOMARK = 4, TF_24H = 8 };
+
+struct dt_item { bool field; WCHAR letter; int count; int start, len; bool dead; };   /* literal: lit[start, start+len) */
+struct dt_pic { WCHAR *lit; int nlit; dt_item *it; int nit; };
+
+static bool dt_add_item(dt_pic &p, int &cap, const dt_item &v)
+{
+    if (p.nit == cap) {
+        cap = cap ? cap * 2 : 16;
+        dt_item *n = (dt_item *)realloc(p.it, (size_t)cap * sizeof *n);
+        if (!n)
+            return false;
+        p.it = n;
+    }
+    p.it[p.nit++] = v;
+    return true;
+}
+
+/* split a picture into literal runs and field runs (a run of one letter of `fields` is one field). Quotes: 'text' is
+ * literal, '' is an apostrophe inside and outside a quote, an open quote ends with the string. Any other character
+ * is copied. */
+static bool dt_parse(dt_pic &p, const WCHAR *pic, const char *fields)
+{
+    int cap = 0, n = (int)wlen(pic);
+    bool inq = false;
+    p.lit = (WCHAR *)malloc(((size_t)n + 1) * sizeof(WCHAR));
+    p.nlit = 0;
+    p.it = NULL;
+    p.nit = 0;
+    if (!p.lit)
+        return false;
+    int litstart = -1;
+    for (int i = 0; i < n; i++) {
+        WCHAR c = pic[i];
+        if (c == '\'') {
+            if (pic[i + 1] != '\'') {
+                inq = !inq;
+                continue;
+            }
+            i++;
+        } else if (!inq && c < 128 && in_set(c, fields)) {
+            int k = 1;
+            while (pic[i + k] == c)
+                k++;
+            if (litstart >= 0) {
+                if (!dt_add_item(p, cap, dt_item{false, 0, 0, litstart, p.nlit - litstart, false}))
+                    return false;
+                litstart = -1;
+            }
+            if (!dt_add_item(p, cap, dt_item{true, c, k, 0, 0, false}))
+                return false;
+            i += k - 1;
+            continue;
+        }
+        if (litstart < 0)
+            litstart = p.nlit;
+        p.lit[p.nlit++] = c;
+    }
+    return litstart < 0 || dt_add_item(p, cap, dt_item{false, 0, 0, litstart, p.nlit - litstart, false});
+}
+
+static void dt_kill(dt_pic &p, WCHAR letter)   /* drop the field and the separator that joins it to its neighbour */
+{
+    for (int i = 0; i < p.nit; i++) {
+        if (!p.it[i].field || p.it[i].letter != letter || p.it[i].dead)
+            continue;
+        p.it[i].dead = true;
+        if (i > 0 && !p.it[i - 1].field && !p.it[i - 1].dead)
+            p.it[i - 1].dead = true;
+        else if (i == 0 && i + 1 < p.nit && !p.it[i + 1].field)
+            p.it[i + 1].dead = true;
+    }
+}
+
+struct dt_out { WCHAR *s; int n, cap; bool bad; };
+static void dt_put(dt_out &o, const WCHAR *w, int n)
+{
+    if (o.bad)
+        return;
+    if (o.n + n + 1 > o.cap) {
+        int nc = (o.n + n + 1) * 2;
+        WCHAR *p = (WCHAR *)realloc(o.s, (size_t)nc * sizeof(WCHAR));
+        if (!p) {
+            o.bad = true;
+            return;
+        }
+        o.s = p;
+        o.cap = nc;
+    }
+    memcpy(o.s + o.n, w, (size_t)n * sizeof(WCHAR));
+    o.n += n;
+}
+static void dt_num(dt_out &o, unsigned v, int width)
+{
+    WCHAR b[12];
+    int n = 0;
+    do
+        b[n++] = (WCHAR)('0' + v % 10);
+    while ((v /= 10) != 0);
+    while (n < width)
+        b[n++] = '0';
+    for (int i = 0; i < n / 2; i++) {
+        WCHAR t = b[i];
+        b[i] = b[n - 1 - i];
+        b[n - 1 - i] = t;
+    }
+    dt_put(o, b, n);
+}
+static void dt_loc(dt_out &o, const uint16_t *r, LCID lcid, DWORD type, bool first_only)
+{
+    WCHAR b[128];
+    int n = get_locale_info(r, lcid, type, b, 128);
+    if (n > 1)
+        dt_put(o, b, first_only ? 1 : n - 1);   /* the string without its NUL */
+}
+
+static int dt_dow(unsigned y, unsigned m, unsigned d)   /* 0 = Sunday */
+{
+    static const int t[] = { 0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4 };
+    if (m < 3)
+        y--;
+    return (int)((y + y / 4 - y / 100 + y / 400 + (unsigned)t[m - 1] + d) % 7);
+}
+static bool dt_valid_date(const SYSTEMTIME *s)
+{
+    static const unsigned char dim[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    unsigned y = s->wYear, m = s->wMonth, d = s->wDay;
+    if (y < 1601 || y > 30827 || m < 1 || m > 12)
+        return false;
+    unsigned max = dim[m - 1] + (m == 2 && (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)));
+    return d >= 1 && d <= max;
+}
+static bool dt_valid_time(const SYSTEMTIME *s)
+{
+    return s->wHour < 24 && s->wMinute < 60 && s->wSecond < 60 && s->wMilliseconds < 1000;
+}
+
+/* render the items; nu = the LOCALE_NOUSEROVERRIDE bit to pass on to the locale strings */
+static void dt_render(dt_out &o, const dt_pic &p, const uint16_t *r, LCID lcid, DWORD nu, const SYSTEMTIME *st, bool date)
+{
+    for (int i = 0; i < p.nit; i++) {
+        const dt_item &it = p.it[i];
+        if (it.dead)
+            continue;
+        if (!it.field) {
+            dt_put(o, p.lit + it.start, it.len);
+            continue;
+        }
+        int c = it.count;
+        if (date) {
+            int dow = dt_dow(st->wYear, st->wMonth, st->wDay);
+            switch (it.letter) {
+            case 'd':
+                if (c <= 2)
+                    dt_num(o, st->wDay, c);
+                else   /* SDAYNAME1..7 and SABBREVDAYNAME1..7 start on Monday */
+                    dt_loc(o, r, lcid, (DWORD)((c == 3 ? 0x31 : 0x2A) + (dow + 6) % 7) | nu, false);
+                break;
+            case 'M':
+                if (c <= 2)
+                    dt_num(o, st->wMonth, c);
+                else
+                    dt_loc(o, r, lcid, (DWORD)((c == 3 ? 0x44 : 0x38) + st->wMonth - 1) | nu, false);
+                break;
+            case 'y':
+                dt_num(o, c <= 2 ? st->wYear % 100u : st->wYear, c == 1 ? 1 : c == 2 ? 2 : 4);
+                break;
+            case 'g':
+                dt_put(o, (const WCHAR *)kcal_gregorian_era, (int)NELEM(kcal_gregorian_era) - 1);
+                break;
+            }
+        } else {
+            switch (it.letter) {
+            case 'h': dt_num(o, st->wHour % 12 ? st->wHour % 12u : 12, c >= 2 ? 2 : 1); break;
+            case 'H': dt_num(o, st->wHour, c >= 2 ? 2 : 1); break;
+            case 'm': dt_num(o, st->wMinute, c >= 2 ? 2 : 1); break;
+            case 's': dt_num(o, st->wSecond, c >= 2 ? 2 : 1); break;
+            case 't': dt_loc(o, r, lcid, (DWORD)(st->wHour < 12 ? 0x28 : 0x29) | nu, c == 1); break;
+            }
+        }
+    }
+}
+
+/* fmt: a picture in the locale's ANSI code page, or NULL for the locale's own picture of the flags */
+static int dt_format(LCID lcid, DWORD flags, bool date, const SYSTEMTIME *in, LPCSTR fmt, LPSTR out, int cch)
+{
+    const uint16_t *r = loc_rec(lcid);
+    SYSTEMTIME now;
+    if (cch < 0 || (cch && !out) || !r)
+        return er(ERROR_INVALID_PARAMETER);
+    DWORD nu = flags & LNOUSER, f = flags & ~LNOUSER;
+    if (date) {
+        DWORD shape = f & (DF_SHORT | DF_LONG | DF_YEARMONTH);
+        if ((f & ~(DWORD)(DF_SHORT | DF_LONG | DF_ALTCAL | DF_YEARMONTH | DF_LTR | DF_RTL | DF_AUTO)) ||
+            (shape & (shape - 1)) || (fmt && shape))
+            return er(ERROR_INVALID_FLAGS);
+    } else if ((f & ~(DWORD)(TF_NOMINSEC | TF_NOSEC | TF_NOMARK | TF_24H)) || (fmt && f)) {
+        return er(ERROR_INVALID_FLAGS);
+    }
+    if (!in) {
+        GetLocalTime(&now);
+        in = &now;
+    }
+    if (date ? !dt_valid_date(in) : !dt_valid_time(in))
+        return er(ERROR_INVALID_PARAMETER);
+    UINT cp = r[55] == 65001 ? 1252 : r[55];
+    WCHAR *pic = NULL, tmp[128];
+    if (fmt) {
+        int n = MultiByteToWideChar(cp, 0, fmt, -1, NULL, 0);
+        if (n <= 0)
+            return 0;
+        if (!(pic = (WCHAR *)malloc((size_t)n * sizeof(WCHAR))))
+            return er(ERROR_NOT_ENOUGH_MEMORY);
+        MultiByteToWideChar(cp, 0, fmt, -1, pic, n);
+    } else {
+        /* SSHORTDATE, SLONGDATE, SYEARMONTH, STIMEFORMAT */
+        DWORD ty = date ? ((f & DF_LONG) ? 0x20 : (f & DF_YEARMONTH) ? 0x1006 : 0x1F) : 0x1003;
+        if (!get_locale_info(r, W32_DW(lcid), ty | nu, tmp, 128))
+            return 0;
+        pic = tmp;
+    }
+    dt_pic p;
+    dt_out o = { NULL, 0, 0, false };
+    bool ok = dt_parse(p, pic, date ? "dMyg" : "hHmst");
+    if (ok) {
+        if (!date && !fmt) {
+            if (f & TF_24H)
+                for (int i = 0; i < p.nit; i++)
+                    if (p.it[i].field && p.it[i].letter == 'h')
+                        p.it[i].letter = 'H';
+            if (f & TF_NOMINSEC)
+                dt_kill(p, 'm');
+            if (f & (TF_NOMINSEC | TF_NOSEC))
+                dt_kill(p, 's');
+            if (f & TF_NOMARK)
+                dt_kill(p, 't');
+        }
+        dt_render(o, p, r, W32_DW(lcid), nu, in, date);
+        WCHAR z = 0;
+        dt_put(o, &z, 1);
+    }
+    int ret;
+    if (!ok || o.bad)
+        ret = er(ERROR_NOT_ENOUGH_MEMORY);
+    else
+        ret = WideCharToMultiByte(cp, 0, o.s, o.n, out, cch, NULL, NULL);
+    free(o.s);
+    free(p.lit);
+    free(p.it);
+    if (pic != tmp)
+        free(pic);
+    return ret;
+}
+
+extern "C" int GetDateFormatA(LCID lcid, DWORD flags, const SYSTEMTIME *date, LPCSTR fmt, LPSTR out, int cch)
+{
+    return dt_format(lcid, W32_DW(flags), true, date, fmt, out, cch);
+}
+
+extern "C" int GetTimeFormatA(LCID lcid, DWORD flags, const SYSTEMTIME *time, LPCSTR fmt, LPSTR out, int cch)
+{
+    return dt_format(lcid, W32_DW(flags), false, time, fmt, out, cch);
+}
+
 /* ---- character types */
 extern "C" BOOL GetStringTypeW(DWORD info, LPCWSTR src, int cch, LPWORD out)
 {
