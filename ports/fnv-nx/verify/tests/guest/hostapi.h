@@ -443,6 +443,10 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
                                            getaddrinfo() and its answer is the result: a ticket, or -(its EAI code mapped through FNVNX_WIRE_EAI_LIST;
                                            a code outside the list is -EAI_FAIL); host-generated: an empty result -> -EAI_NONAME, the ticket table out of
                                            memory -> -EAI_MEMORY. A null errno_out (sys_errno) is allowed */
+/* Declared machine (CLAUDE.md, owner decision 2026-11-11: no network connection). Under the L4 emulator the stage host is that
+ * machine: GAI_OPEN with a node that is not a numeric address and not the local host answers -FNVNX_WEAI_NONAME (what
+ * Windows answers without a connection: WSAHOST_NOT_FOUND 11001); connect/sendto to a non-local address answer
+ * -ENETUNREACH (WSAENETUNREACH 10051). On the console the answer is whatever the bsd service gives. */
 #define FNVNX_PLAT_SOCK_GAI_FETCH 33u   /* (ticket, buf or 0, cap) -> total bytes of the result: a sequence of
                                            FnvnxWireAddrinfo records each followed by its canonical name bytes, padded
                                            to 8. cap < total: nothing is written, the ticket stays. cap >= total: the
@@ -477,7 +481,9 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
  *             out and *n untouched. -FNVNX_HE_BADINPUT is the one the host produces itself (the table above).
  * The guest-side check of a name dialog (accept / reject at index) is the guest's loop: call, run the check on out[0..*n), on rejection call again
  * with init = that text. Host-side tests: the swkbd calls are stubbed in tests/s4/backends/host_total_test.c.
- * Under the L4 emulator (no human): the emulator's host answers 0 (cancelled) for every well-formed call. */
+ * Under the L4 emulator (no human): the scenario supplies the text. With a scenario text the emulator answers 1 and
+ * that text (a text longer than max_len is a scenario error and stops the run); without one it answers 0
+ * (cancelled, out and *n untouched). Argument checks are the same as on the console. */
 #define FNVNX_PLAT_TEXT_ENTRY 36u
 #define FNVNX_TEXT_ENTRY_MAX 500u
 typedef struct FnvnxTzAt {
