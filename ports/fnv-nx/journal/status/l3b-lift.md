@@ -17,9 +17,9 @@ on 2026-11-11 22:35 UTC. Handoff read: `journal/inbox/l3b-lift-handoff-opus.md` 
 | 4c | gate forms red: liftpack external (shapes.tsv) not declared | - | - | blocked by the pack coordinates, L3a (liftgen writes shapes.tsv at L3a 3461ebb3; pack l3a-lift/pack/3461ebb3… being published) |
 | 4d | Test migration plan (8 tests, 10 gaps) | w3 session_01KmtZKSe6CHsWxfNeCn25nG | claude/fnv-l3b-lift-w3 | done ca4bcfe4 |
 | 4e | dsl_emit_test onto the recipe: generated lifted root lift/test/dslemit, FNVL_EMIT as generator argument, no direct g++ | w3 | claude/fnv-l3b-lift-w3 | doing |
-| 4f | Tests needing a link (instest_extra, x87dyn, mmxtest, sehcodes, chain, ehtest) | - | - | blocked by: two-root link (L1); G1 ticks, G2 tls slot, G3 set_raise_backend, G5 libc (L5); G4 dispatcher table generator, G7 cpu entry (L3a); G6 watch-point log (L4 w4 doing, boot.py --watch-log). G8 closed: boot.py --reserved TSV generated from PE headers + lifter constants. Shape decided: one test ELF loops over N cases, per-case result lines |
+| 4f | Tests needing a link (instest_extra, x87dyn, mmxtest, sehcodes, chain, ehtest) | - | - | blocked by: two-root link root (L1 w15, doing; + library-input key for newlib libc.a asked). All symbol gaps have real bodies: G1/G2/G3 in platform root (L5 claude/fnv-l5-platform-w10 f872bcd2, merge pending), G5 = newlib libc.a (tools/fnvnx-a64-msvcmodel 00e3d42a), G4 dispgen.py (L3a w4, doing), G7 exists (fnvnx_lift_attach + fnvnx_guest_invoke, rt/enter), G6 (L4 w4, doing), G8 closed |
 | 4g | EH oracle independent of rt/seh (Wine 9.0 trace or cited ReactOS rules) for ehtest (G9) | - | - | open, L3b (with item 5) |
-| 4h | test_fpexact onto recipe fixtures | - | - | blocked by: negative-fixture root class (L1), w2g |
+| 4h | test_fpexact onto recipe fixtures | - | - | blocked by: fixtures key in build.json (L1 w16, doing), w2g |
 | 5 | EH/SEH through lifted frames against the exe's EH tables (gate `eh`, class D) | - | - | open |
 | 6 | Open assumption records (12 of 41 open; A-FPMASK 55/830 unproven; fpm bundle WIP: libvorbis 15 -> 12) | - | - | open |
 | 7 | A-CTX: seh.c restores only integer regs + eip from CONTEXT after ContinueExecution; Windows also restores FP/SSE | - | - | open, reported to the orchestrator |
