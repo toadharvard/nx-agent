@@ -5,6 +5,31 @@ reference (`tests/oracle.json`, gate `oracle`): the expected values of the test 
 code. This file is the reference; the doc comment at the top of each tool repeats its section. When a rule changes, change
 it here first, then the tool and its test.
 
+## contract/bind.py
+
+```text
+bind - the exe addresses of what L2's sections name (L1 CONTRACT; uses l2sections.py rows and the N1 certificate).
+
+    bind.py --obj obj.json --n1 n1.json --units units.json --out bind.json      (prints counts only)
+
+Pure functions; `unit_index` is the index of the object's unit in units.json (n1.py's unit number).
+  symbol_addresses(unit_index, sympair_rows, n1) -> ({symbol: address}, [(symbol, kind, reason)])
+      address = n1['sym'][(unit_index, msvc name)], as pinned (an absolute-value pin keeps its ABSOLUTE flag bit).
+      kinds thunk, vtable, gcc, internal have no exe twin by definition: unbound, reason as in NO_TWIN, not an error.
+      Other rows without an address: unbound with the kind's own `unnamed:*` text, 'no MSVC name', or 'not in N1'.
+      One symbol with two different addresses or names is a ValueError.
+  vtable_addresses(unit_index, vtpair_rows, n1) -> ({(_ZTV symbol, address point): vftable address}, [(ztv, point, reason)])
+      through n1['vt'][(unit_index, ??_7 name)]; an empty or unnamed:* name, or a name N1 never pinned, is unbound.
+  n3_verdicts(unit_index, n3_rows, symbol_addresses) -> {exe address: (verdict, [inlined exe addresses])}
+      the shape bodysel.decide takes as `n3`.  A row whose symbol has no exe address is not an exe function: ignored.
+      An ok / ok+E row with an inlined symbol that has no exe address keeps its verdict only when every n3 row of that
+      symbol has kind `inline` and verdict ok (that body is part of this one: nothing to list); otherwise the verdict
+      is 'inlined body without a verdict'.  Rows of one address (clones, aliases) combine: any non-ok verdict wins
+      (the first in sorted order of the reasons), `ok+E` only when all rows say ok+E; inlined lists are unioned, sorted.
+The CLI binds every object of obj.json that has section rows (unit = the unit whose source.replace('/', '_') + '.o' is
+the object's basename; such an object with no unit is an error; objects without rows, e.g. the link's zz_* helpers, need none) and writes store kind `bind`.
+```
+
 ## contract/bodysel.py
 
 ```text
@@ -80,6 +105,25 @@ is the first 50 of the sorted ids (strings), so the file is a function of its ar
 to $GATE_OUT only, never committed.  The only environment variable read is the declared GATE_OUT.
 ```
 
+## contract/l2sections.py
+
+```text
+l2sections - the three non-loaded ELF sections that L2's compiler plugins put into every game object (L1 CONTRACT).
+
+    parse_sympair(data, where) -> [(symbol, msvc_name, kind, 'def'|'ref')]            .fnvnx.sympair (plugin NAMES1)
+    parse_vtpair(data, where)  -> [(ztv symbol, address point, ??_7 name, vfptr offset)]   .fnvnx.vtpair (NAMES1)
+    parse_n3(data, where)      -> [(symbol, verdict, (inlined symbols), kind, (types))]   .fnvnx.n3 (plugin pi, sdd)
+    read(path)                 -> {'sympair': [...], 'vtpair': [...], 'n3': [...]}; an absent section gives []
+
+Format: plain text, LF-terminated lines, TAB-separated.  sympair: exactly 4 fields, kind one of KINDS or
+`unnamed:<reason>` (reason not empty); the name may be empty only for the kinds in NAMELESS.  vtpair: exactly 4
+fields, offsets decimal.  n3: 2..5 fields (the producer omits trailing empty ones), verdict not empty, inlined a
+`,`-separated list of symbols, kind one of N3_KINDS or a clone suffix (not empty, no blank), types `,`-separated
+Itanium type strings (the producer's own separator; the task brief said `;`).  Any other line is an error
+`<where>: line N: <what>`; no line is skipped, a final line without LF is an error, an empty section is [].
+Pure: bytes in, tuples out (rows keep the section's order).
+```
+
 ## contract/objfacts_merge.py
 
 ```text
@@ -130,8 +174,13 @@ Kinds (the explicit per-file encoding):
   n1     n1.py         fn keys decimal address, F['relocs'] list of tuples;
                        sym keys "unit\tsymbol" (2-tuple) or "unit\tindex\tsymbol" (3-tuple), unit and index decimal;
                        vt keys "unit\tsymbol"
-  obj    objfacts.py   keys "object basename\t%08x" (function) or "object basename\tztv"; function value
-                       (vt [tuples], data set, calls set, other set, vcall list), ztv value {symbol: [tuples]}
+  obj    objfacts.py   keys "object basename\t%08x" (function) or "object basename\t<section kind>", the kind one of
+                       SECTION_KINDS; function value (vt [tuples], data set, calls set, other set, vcall list), ztv value
+                       {symbol: [tuples]}, sympair / vtpair / n3 values the row lists of l2sections.py (tuples; in n3 rows
+                       the inlined and types fields are tuples too)
+  bind   bind.py       sym keys "object\tsymbol" -> address; vt keys "object\t_ZTV symbol\toffset" -> address; n3 keys
+                       "object\t%08x" -> [verdict, [addresses]]; unbound sym [(object, symbol, kind, reason)] and
+                       vt [(object, _ZTV symbol, offset, reason)]
   objone objfacts_one.py  the same encoding as `obj`, for the entries of one object (one file per object)
   vtid   vtid.py       bind keys "unit\t_ZTV symbol\toffset" (offset decimal), errors [tuples]
   eh     ehfacts.py    funcinfo/stubs/owner/kind keys decimal address; unwind_at, catch_at sorted lists (sets in memory)
