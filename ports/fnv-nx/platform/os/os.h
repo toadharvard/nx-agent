@@ -78,6 +78,23 @@ void os_cpu_boost(int fast_load);
 /* A system dialog with the caption, the text and an OK button, blocking until it is closed (MessageBoxA): the
  * Switch's error applet; a no-op where the platform has none (the caller logs the text). */
 void os_show_message(const char *caption, const char *text);
+
+/* Text entry through the system software keyboard (docs/AUDIO_INPUT.md "Text entry"); the host service FNVNX_PLAT_TEXT_ENTRY
+ * (toolchain/include/fnvnx/hostapi.h), same arguments. Opens the applet for at most max_len UTF-16 units (1..500) starting with
+ * init[0..init_n) (init NULL: empty). Returns 1: entered (out[0..*n) holds the text, out[*n] = 0, *n <= max_len; out has room for
+ * max_len + 1 units), 0: the user cancelled (out and *n untouched), <0: -FNVNX_HE_BADINPUT (max_len 0 or above 500, out or n NULL)
+ * or -(the applet's Horizon result): the caller treats it as fatal. The backend does no validation of the text: that is the caller's,
+ * which calls again with init = the text it refused. The guest backend is toolchain/guest/os_guest.c; the host test backend
+ * (os_posix.c) plays a script the test fills, one entry per applet round, cut to max_len as the applet's field would. */
+int os_text_entry(unsigned max_len, const uint16_t *init, size_t init_n, uint16_t *out, size_t *n);
+/* host test backend only (os_posix.c): the script of what the user types, one entry per applet round; an empty script is a user who
+ * closes the applet. os_text_script_calls: the rounds since the last reset; os_text_script_init: the init of the last round copied
+ * into buf (cap units), its length, or (size_t)-1 when it was NULL. */
+void os_text_script_push(const uint16_t *text, size_t n);
+void os_text_script_cancel(void);
+unsigned os_text_script_calls(void);
+size_t os_text_script_init(uint16_t *buf, size_t cap);
+void os_text_script_reset(void);
 /* The console's output mode: 1 = docked (the TV output, 1920x1080), 0 = handheld (the built-in panel, 1280x720).
  * Switch: appletGetOperationMode() == AppletOperationMode_Console. Host tests (os_posix.c): the state set by
  * os_posix_set_docked, handheld at start. */

@@ -111,6 +111,7 @@ Device *g_devices;
 uint8_t g_keys[KEYS];
 uint8_t g_buttons[MOUSE_BUTTONS];
 int32_t g_mouse_abs[MOUSE_AXES];
+uint64_t g_kbd_reads;   /* keyboard reads (GetDeviceState/GetDeviceData) that returned data: what swkbd paces by */
 uint32_t g_sequence;    /* shared by every device: DIDEVICEOBJECTDATA.dwSequence */
 
 const GUID &inst_guid(Kind k) { return k == KBD ? GUID_SysKeyboard : GUID_SysMouse; }
@@ -425,6 +426,7 @@ struct Device final : IDirectInputDevice8A {
             }
         }
         rel[0] = rel[1] = rel[2] = 0;
+        if (kind == KBD) g_kbd_reads++;
         os_unlock(&g_lock);
         return DI_OK;
     }
@@ -454,6 +456,7 @@ struct Device final : IDirectInputDevice8A {
         *inout = n;
         HRESULT hr = overflow ? DI_BUFFEROVERFLOW : DI_OK;
         if (!peek) overflow = false;
+        if (kind == KBD) g_kbd_reads++;
         os_unlock(&g_lock);
         return hr;
     }
@@ -864,6 +867,23 @@ extern "C" HRESULT fnvnx_dinput_com_factory(const GUID *iid, void **out)
 }
 
 /* ---- producers */
+extern "C" uint64_t fnvnx_input_kbd_reads(void)
+{
+    os_lock(&g_lock);
+    uint64_t r = g_kbd_reads;
+    os_unlock(&g_lock);
+    return r;
+}
+extern "C" unsigned fnvnx_input_kbd_room(void)
+{
+    unsigned room = 0xFFFFFFFFu;
+    bool any = false;
+    os_lock(&g_lock);
+    for (Device *d = g_devices; d; d = d->next)
+        if (d->kind == KBD && d->acquired) { any = true; if (d->qcap && d->qcap - d->qcount < room) room = d->qcap - d->qcount; }
+    os_unlock(&g_lock);
+    return any ? room : 0;
+}
 extern "C" void fnvnx_input_key(uint8_t dik, int down)
 {
     os_lock(&g_lock);

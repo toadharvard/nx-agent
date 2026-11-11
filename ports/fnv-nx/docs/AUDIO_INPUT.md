@@ -163,7 +163,19 @@ syntax check of all S7 sources for AArch64 ILP32 (+ libnx files).
 * HRTF/surround: not implemented. The I3DL2 reverb for SetFX runs in the mixer per voice (platform/audio/reverb.h:
   room shelf, early taps, a 4-line FDN with decay_time / decay_hf_ratio; SetPreset uses the SDK's I3DL2 presets);
   the Waves reverb keeps its parameters only.
-* Text entry: no software keyboard (swkbd) yet; WM_CHAR/VK key state is not fed from the USB keyboard
-  (`fnvnx_set_key_state`/`fnvnx_post_message` hooks are available).
+* Text entry (platform/input/swkbd.cpp): L3+R3 together open the system software keyboard (`os_text_entry`); the combination is
+  withheld from the game until both clicks are up, a single click is still the game's button. The entered UTF-16 text becomes key
+  strokes (Shift down, key down, key up, Shift up), found by inverting the platform's own layout table (`fnvnx_win_vk_char`,
+  main block, printable ASCII), released one edge per pump through `fnvnx_swkbd_inject`: the message queue
+  (WM_KEYDOWN/UP, WM_CHAR by TranslateMessage, GetAsyncKeyState) and DirectInput (immediate and buffered) from one point.
+  Pacing has no time in it: the next edge goes in only after the game observed the previous one, that is a DirectInput
+  keyboard read that returned data (either kind) happened after it and its key message was removed by PeekMessageA, and
+  only while every acquired keyboard buffer has a free slot (no overflow). With no acquired keyboard or no reads the edges
+  stay queued; nothing is dropped or timed out.
+  `os_text_entry(max_len, init, init_n, out, n)` is the host service TEXT_ENTRY (hostapi.h, PLATFORM 36; the guest backend is
+  os_guest.c): 1 entered, 0 cancelled (nothing typed), negative = -FNVNX_HE_BADINPUT or -(Horizon result). The text is validated
+  here: a character no key makes is never dropped, the applet is called again with the refused text as its initial text, until
+  the text has strokes or the player cancels (a rule, not a retry count). A negative result ends the process loudly with that
+  code; there is no other path to the text. The USB keyboard is not fed into the queue.
 * Touch taps press and release in the same pump: visible to buffered reads, not to `GetDeviceState` polling.
 * Single sideways Joy-Con not supported; the deadzone is left to the engine.

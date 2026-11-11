@@ -64,11 +64,25 @@ TEST(contract_xinput_state)
     CHECK_EQ(st.Gamepad.wButtons, 0);
     /* every button 1:1, sticks, sign convention (y up), triggers digital 0/255 (Switch ZL/ZR) */
     pad(FNVNX_NPAD_A | FNVNX_NPAD_B | FNVNX_NPAD_X | FNVNX_NPAD_Y | FNVNX_NPAD_L | FNVNX_NPAD_R | FNVNX_NPAD_PLUS |
+            FNVNX_NPAD_MINUS | FNVNX_NPAD_STICKL | FNVNX_NPAD_UP | FNVNX_NPAD_DOWN | FNVNX_NPAD_LEFT |
+            FNVNX_NPAD_RIGHT | FNVNX_NPAD_ZL,
+        -32768, 32767, 1, -1);
+    XInputGetState(0, &st);
+    CHECK_EQ(st.Gamepad.wButtons, 0xF37F);   /* all but the right click: both clicks together are the text-entry combination, withheld from the game */
+    pad(FNVNX_NPAD_STICKR);
+    XInputGetState(0, &st);
+    CHECK_EQ(st.Gamepad.wButtons, 0x0080);   /* a single click is still the game's button */
+    pad(FNVNX_NPAD_A | FNVNX_NPAD_B | FNVNX_NPAD_X | FNVNX_NPAD_Y | FNVNX_NPAD_L | FNVNX_NPAD_R | FNVNX_NPAD_PLUS |
             FNVNX_NPAD_MINUS | FNVNX_NPAD_STICKL | FNVNX_NPAD_STICKR | FNVNX_NPAD_UP | FNVNX_NPAD_DOWN | FNVNX_NPAD_LEFT |
             FNVNX_NPAD_RIGHT | FNVNX_NPAD_ZL,
         -32768, 32767, 1, -1);
     XInputGetState(0, &st);
-    CHECK_EQ(st.Gamepad.wButtons, 0xF3FF);
+    CHECK_EQ(st.Gamepad.wButtons, 0xF33F);   /* the combination opens the applet and reaches the game as neither click */
+    pad(FNVNX_NPAD_A | FNVNX_NPAD_B | FNVNX_NPAD_X | FNVNX_NPAD_Y | FNVNX_NPAD_L | FNVNX_NPAD_R | FNVNX_NPAD_PLUS |
+            FNVNX_NPAD_MINUS | FNVNX_NPAD_STICKL | FNVNX_NPAD_UP | FNVNX_NPAD_DOWN | FNVNX_NPAD_LEFT |
+            FNVNX_NPAD_RIGHT | FNVNX_NPAD_ZL,
+        -32768, 32767, 1, -1);
+    XInputGetState(0, &st);
     CHECK_EQ(st.Gamepad.bLeftTrigger, 255);
     CHECK_EQ(st.Gamepad.bRightTrigger, 0);
     CHECK_EQ(st.Gamepad.sThumbLX, -32768); CHECK_EQ(st.Gamepad.sThumbLY, 32767);

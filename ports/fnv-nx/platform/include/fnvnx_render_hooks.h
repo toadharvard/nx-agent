@@ -18,8 +18,8 @@
 
 #include "fnvnx_win32.h"
 
-/* the host module of the GPU backend (hostapi.h: "render/native 10") */
-#define FNVNX_EXT_GPU 10u
+/* the host module of the GPU backend, FNVNX_EXT_GPU, is declared by hostapi.h */
+#include "fnvnx/hostapi.h"
 
 uint64_t nxd3d_gpu_call(uint32_t fn, const uint64_t *args, uint32_t nargs);
 void *nxd3d_gpu_alloc(size_t bytes);
