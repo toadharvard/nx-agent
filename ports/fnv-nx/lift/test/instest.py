@@ -31,6 +31,7 @@ NOT_EQ = ('diff', 'unlifted', 'nocompile', 'x87-prec')
 OUTS = ('equal', 'diff', 'unlifted', 'nocompile', 'fault', 'x87-prec')
 XD = 3                           # entry depth of the static-stack variant
 G = {}
+LOWOK = False       # instest_extra: 16-bit addressing (0x67) reaches the low 64 KiB, which the census run treats as a NULL-page collision
 R8 = {'al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh'}; R16 = {'ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di'}
 R32 = ['eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi']; SEGS = {'cs', 'ds', 'es', 'ss', 'fs', 'gs'}
 GREG = [UC_ARM64_REG_X19 + i for i in range(8)]
@@ -128,7 +129,7 @@ class World:
         return True
     def unm(s, uc, access, addr, size, value, ud):
         s.bad = '%x+%d' % (addr, size)
-        if s.guard and access != UC_MEM_FETCH_UNMAPPED and (addr < 0x10000 or addr + size > 0xffff0000): s.collide = True; return False
+        if s.guard and access != UC_MEM_FETCH_UNMAPPED and ((addr < 0x10000 and not LOWOK) or addr + size > 0xffff0000): s.collide = True; return False
         if addr + size > 0x100000000: return False   # NULL page / top 64K: no Win32 code touches them, 32-bit address wrap is out of scope
         return s.ensure(addr, size, s.guard and access != UC_MEM_FETCH_UNMAPPED)
     def reset(s, wk):

@@ -89,24 +89,26 @@ class Ctx:
         Segment overrides: FS = c->fs (fnvl_seg_set keeps it right); GS = FNVL_GS_BASE() by the CURRENT c->sel[GS] (the null / code-selector #GP is the guard lift2 emits before the
         instruction, gs_guard); ES/CS/SS/DS (and the defaults) are flat while the selector in that register is a valid flat one (open class: DS/ES/SS/FS reloaded, README of the lift lead)."""
         m = op.mem
+        seg = None
+        if m.segment:
+            if m.segment == X.X86_REG_FS:
+                seg = 'fsb'
+                self.usesfs = True
+            elif m.segment == X.X86_REG_GS:
+                seg = 'FNVL_GS_BASE()'
+            elif m.segment not in (X.X86_REG_DS, X.X86_REG_SS, X.X86_REG_ES, X.X86_REG_CS):
+                raise Unsupported('segment')
         parts = []
         if m.base:
             parts.append(reg(ins.reg_name(m.base))[0])
         if m.index:
             parts.append('%s*%du' % (reg(ins.reg_name(m.index))[0], m.scale))
-        if m.disp or not parts:
+        if m.disp or not (parts or seg):
             parts.append('0x%xu' % (m.disp & 0xffffffff))
         off = '+'.join(parts)
-        off = '((%s)&0xffffu)' % off if ins.prefix[3] == 0x67 else off
-        if m.segment:
-            if m.segment == X.X86_REG_FS:
-                off = 'fsb+' + off
-                self.usesfs = True
-            elif m.segment == X.X86_REG_GS:
-                off = 'FNVL_GS_BASE()+' + off
-            elif m.segment not in (X.X86_REG_DS, X.X86_REG_SS, X.X86_REG_ES, X.X86_REG_CS):
-                raise Unsupported('segment')
-        return '(u32)(' + off + ')'
+        if parts and ins.prefix[3] == 0x67:
+            off = '((%s)&0xffffu)' % off
+        return '(u32)(' + '+'.join(([seg] if seg else []) + ([off] if off else [])) + ')'
 
     def rd(self, ins, op, size=None):
         s = (size or op.size) * 8
@@ -280,6 +282,15 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     code = img.bytes(addr, fall_hi - addr)
     insns, tables, taken, bad = explore(img, lo, hi, code, start, owns if start == addr and explore_owns else (), fall_hi)
     order = sorted(insns)
+    def head4(a):
+        """the first four bytes at `a` (what KiTrap06Handler scans for F0): from `code`, beyond it from the image (none when the image has no byte there)"""
+        t = code[a - lo:a - lo + 4]
+        if len(t) < 4:
+            try:
+                t = img.bytes(a, 4)
+            except (TypeError, ValueError, IndexError):
+                pass
+        return t
     cx = Ctx(addr, size, insns, tables, taken)
     cx.start = start
     xc.prepass(cx, img, 'dyn' if x87 == 'dyn' else None, x87 if isinstance(x87, int) else 0)     # x87 stack-depth pre-pass: cx.xm 's' static / 'd' dynamic / None
@@ -302,7 +313,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
             pfx, m = m.split(' ', 1)
         bad_lock = False
         w = m.split(' ')
-        if 'lock' in w[:-1] and all(x in f_sys.STRIP for x in w[:-1]):      # LOCK among the leading prefix words (capstone: `lock add`, `xacquire lock add`): SDM Vol 2 "LOCK"
+        if 'lock' in w[:-1] and all(x + ' ' in f_sys.STRIP for x in w[:-1]):      # LOCK among the leading prefix words (capstone: `lock add`, `xacquire lock add`): SDM Vol 2 "LOCK"
             m = w[-1]
             bad_lock = not f_sys.lock_ok(ins, m)
             if not bad_lock:
@@ -319,7 +330,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
         else:
             gs_guard(cx, ins)
             dispatch(cx, ins)
-        if 0xf0 in (code[a - lo:a - lo + 4] or img.bytes(a, 4)):      # KiTrap06Handler: a #UD with an F0 byte among the first four bytes at Eip is STATUS_INVALID_LOCK_SEQUENCE
+        if any('fnvl_raise(FNVL_UD,' in t for t in cx.L[n0:]) and 0xf0 in head4(a):      # KiTrap06Handler: a #UD with an F0 byte among the first four bytes at Eip is STATUS_INVALID_LOCK_SEQUENCE
             cx.L[n0:] = [t.replace('fnvl_raise(FNVL_UD,', 'fnvl_raise(FNVL_LOCK,') for t in cx.L[n0:]]
         if not cx.term and (idx + 1 == len(order) or order[idx + 1] != nxt):
             if nxt in insns or nxt in bad:
@@ -332,7 +343,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
             xc.fix_lines(cx, a, n0)
     for a in sorted(bad):      # bytes that do not decode: the CPU raises #UD there
         cx.nonlocal_ = True
-        em('%s: ; SYNC_OUT; REGS(); fnvl_raise(%s,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (cx.lab(a), 'FNVL_LOCK' if 0xf0 in code[a - lo:a - lo + 4] else 'FNVL_UD', a))
+        em('%s: ; SYNC_OUT; REGS(); fnvl_raise(%s,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (cx.lab(a), 'FNVL_LOCK' if 0xf0 in head4(a) else 'FNVL_UD', a))
     if not order or start != order[0]:       # also an entry whose first byte does not decode: its body is the #UD at that address
         cx.L.insert(0, 'goto %s;' % cx.lab(start))
     if cx.nonlocal_:

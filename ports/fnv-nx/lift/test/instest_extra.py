@@ -92,6 +92,14 @@ mfence|0faef0
 lfence|0faee8
 sfence|0faef8
 clflush|0fae38 0fae7804
+mov|678b00 678b01 678b02 678b03 678b04 678b05 678b063412 678b07 678b4010 678b4610 678b40f0 678b803412 678b863412 678b80f0ff 678a4710 67a13412 67a03412 67a33412 67a23412 67c700ffff0000 67c6400101 66678b00 66678b4210 678b84ff7f
+lea|678d00 678d01 678d4010 678d803412 678d863412 678d40f0 678d80f0ff 66678d00 66678d4210
+add|670300 67014010 67028412ff 66670340ff
+xchg|678700 678640ff
+movzx|670fb600 670fb7801000 670fb6863412
+push|67ff30 67ff7010 67ff363412
+fld|67d900 67dd4010 67d9863412
+movups|670f1000 670f11801234
 '''
 SPEC = []
 for line in ENC.strip().split('\n'):
@@ -117,6 +125,8 @@ A0 = 0x7d000000
 RAV = 'fnvl_raise_av(0,0xffffffffu,0x%xu)' % A0
 RPRIV = 'fnvl_raise(FNVL_PRIV,0x%xu)' % A0
 RUD = 'fnvl_raise(FNVL_UD,0x%xu)' % A0
+RLOCK = 'fnvl_raise(FNVL_LOCK,0x%xu)' % A0      # a #UD with an F0 byte among the first four bytes at Eip (KiTrap06Handler scans them all, not only the prefixes): STATUS_INVALID_LOCK_SEQUENCE
+GSAV = 'if(SELK(c->sel[SEG_GS])==0){ SYNC_OUT; REGS(); fnvl_raise_av(0,0xffffffffu,0x%xu)' % A0      # a gs: access with GS = the null selector: #GP(0)
 GPS = lambda i: 'if(!fnvl_seg_ok(%d,s)){ SYNC_OUT; REGS(); %s' % (i, 'fnvl_raise_av(0,0xffffffffu,0x%xu)' % A0)
 NORAISE = '\x00'      # marker: the text must raise nothing (no fnvl_raise(FNVL_*) / fnvl_raise_av; the stub event of falling off the one-instruction function is not a raise)
 # hex -> (what, substrings that must all occur; NORAISE: no raise of any kind). KiTrap0D rows (ReactOS traphdlr.c): privileged = F4; 0F 08 09 35 21 23 06 20 22 30 33; 0F 00 /2 (mask 38 == 10), 0F 00 18;
@@ -154,8 +164,21 @@ CLASS_EXPECT = [
     ('f390', 'pause', ['yield']), ('0faef0', 'mfence', ['__sync_synchronize']), ('0fae38', 'clflush [eax]', ['M8(']), ('f30fbcc1', 'tzcnt = bsf', ['__builtin_ctz']), ('f30fbdc1', 'lzcnt = bsr', ['__builtin_clz']),
     ('0f1c00', 'cldemote (reserved NOP)', [NORAISE]), ('f30f1efb', 'endbr32', [NORAISE]), ('0f1a00', 'bndldx', [NORAISE]), ('0f0d00', 'prefetch', [NORAISE]), ('0f19c0', 'nop eax,eax', [NORAISE]),
     ('f30f1ec8', 'rdsspd', [NORAISE]),
+    ('658b00', 'mov eax,gs:[eax]', [GSAV, 'M32((u32)(FNVL_GS_BASE()+eax))']), ('658900', 'mov gs:[eax],eax: also #GP when GS holds CS', ['if(SELK(c->sel[SEG_GS])==0||SELK(c->sel[SEG_GS])==SELK(SEL_CS)){']),
+    ('65a100000000', 'mov eax,gs:[0]', [GSAV, 'M32((u32)(FNVL_GS_BASE()))']), ('65ff30', 'push gs:[eax]', [GSAV]), ('65678b00', 'mov eax,gs:[bx+si]', [GSAV, 'FNVL_GS_BASE()+((ebx+esi*1u)&0xffffu)']),
+    ('658d00', 'lea eax,gs:[eax]: no access, no guard', [NORAISE, 'FNVL_GS_BASE()']), ('648b00', 'mov eax,fs:[eax]: base c->fs, no guard', [NORAISE, 'fsb+eax']),
+    ('8b00', 'mov eax,[eax]: default segment, no guard', [NORAISE]), ('658b00', 'GS guard comes before the access', ['SELK(c->sel[SEG_GS])==0']),
+    ('8cc8', 'mov eax,cs reads the state', ['fnvl_seg_get(c,1)']), ('8ce8', 'mov eax,gs reads the state', ['fnvl_seg_get(c,5)']), ('0fa8', 'push gs reads the state', ['fnvl_seg_get(c,5)']),
+    ('678b00', 'mov eax,[bx+si] (16-bit addressing)', ['((ebx+esi*1u)&0xffffu)']), ('678a4710', 'mov al,[bx+0x10]', ['((ebx+0x10u)&0xffffu)']), ('67a13412', 'mov eax,[0x1234]', ['((0x1234u)&0xffffu)']),
+    ('678b4600', 'mov eax,[bp]', ['((ebp)&0xffffu)']), ('678b40f0', 'mov eax,[bx+si-16] wraps in 16 bits', ['((ebx+esi*1u+0xfffffff0u)&0xffffu)']), ('678d803412', 'lea eax,[bx+si+0x1234]', ['((ebx+esi*1u+0x1234u)&0xffffu)']),
+    ('8b4010', 'mov eax,[eax+0x10]: 32-bit addressing is not masked', ['(u32)(eax+0x10u)']),
+    ('f08b0d3cea1d01', 'lock mov (undecodable)', [RLOCK]), ('f0f7d0', 'lock not eax (register destination)', [RLOCK]), ('f00f1f00', 'lock nop [eax]', [RLOCK]), ('f001c8', 'lock add eax,ecx', [RLOCK]),
+    ('f0a4', 'lock movsb', [RLOCK]), ('f090', 'lock nop', [RLOCK]), ('f00108', 'lock add [eax],ecx: valid', [NORAISE, 'M32(']), ('f0870a', 'lock xchg [edx],ecx: valid', [NORAISE]),
+    ('f00fc70a', 'lock cmpxchg8b: valid', [NORAISE]), ('f00fb10a', 'lock cmpxchg [edx],ecx: valid', [NORAISE]), ('f00fab08', 'lock bts [eax],ecx: valid', [NORAISE]), ('f0ff08', 'lock dec [eax]: valid', [NORAISE]),
+    ('f001c801', 'lock add eax,ecx + tail', [RLOCK]), ('f2f001c8', 'xacquire lock add eax,ecx', [RLOCK]),
+    ('0f0b|f0', 'ud2, F0 is the third byte at Eip', [RLOCK]), ('0f0b|90f0', 'ud2, F0 is the fourth byte at Eip', [RLOCK]), ('0f0b|909090f0', 'ud2, F0 is the fifth byte: outside the 4-byte scan', [RUD]),
     ('f2700a', 'bnd jo', ['if(of)']), ('f2c3', 'bnd ret', ['return;']), ('3effe0', 'notrack jmp eax', ['c->ra=eax']), ('f2f00108', 'xacquire lock add [eax],ecx', ['M32(']),
-    ('f30fb8c1', 'popcnt', [RUD]), ('0f38f001', 'movbe', [RUD]), ('f20f38f1c1', 'crc32', [RUD]), ('0fc7f0', 'rdrand', [RUD]), ('0f01d0', 'xgetbv', [RUD]), ('0fae20', 'xsave', [RUD]), ('0f05', 'syscall', [RUD]),
+    ('f30fb8c1', 'popcnt', [RUD]), ('0f38f001', 'movbe (F0 is its opcode byte: KiTrap06 reports a lock sequence)', [RLOCK]), ('f20f38f1c1', 'crc32', [RUD]), ('0fc7f0', 'rdrand (F0 = its ModRM byte)', [RLOCK]), ('0f01d0', 'xgetbv', [RUD]), ('0fae20', 'xsave', [RUD]), ('0f05', 'syscall', [RUD]),
     ('0f07', 'sysret', [RUD]), ('0f01f8', 'swapgs', [RUD]), ('0f01c1', 'vmcall', [RUD]), ('0f01c8', 'monitor', [RUD]), ('0fb9c1', 'ud1', [RUD]), ('0fff00', 'ud0', [RUD]), ('c5f877', 'vzeroupper', [RUD]),
     ('c5e1e3c0', 'vpavgw', [RUD]), ('0f380000', 'pshufb', [RUD]), ('660f3a0f0000', 'palignr', [RUD]), ('f20f7c00', 'haddps', [RUD]), ('c4e272f7c1', 'sarx', [RUD]), ('62f17c4858c0', 'evex vaddps', [RUD]),
     ('c7f800000000', 'xbegin', [RUD]), ('0f0b', 'ud2', ['fnvl_raise(FNVL_UD,']), ('0f01d6', 'xtest', [RUD]), ('0faee0', 'ptwrite? (F3 0F AE /4 needs F3: this is 0F AE E0 = xsave-like #UD)', []),
@@ -181,7 +204,7 @@ def lockcheck():
 def class_tables(img):
     bad = nopgap() + lockcheck()
     for hx, what, subs in CLASS_EXPECT:
-        raw = bytes.fromhex(hx); a = A0; fake[a] = raw + b'\x90' * 8
+        hx, _, tail = hx.partition('|'); raw = bytes.fromhex(hx); a = A0; fake[a] = raw + bytes.fromhex(tail) + b'\x90' * 8      # `fn|tail`: bytes after the function that the F0 scan of KiTrap06 still sees
         try: txt = fnvlift.lift(img, a, len(raw), strict=False)[0]
         except Exception as e: print('%-22s %-44s FAIL lift: %s' % (hx, what, e)); bad += 1; continue
         miss = [x for x in subs if x != NORAISE and x not in txt] + (['no raise of any kind'] if NORAISE in subs and ('fnvl_raise(FNVL' in txt or 'fnvl_raise_av' in txt) else [])
@@ -207,7 +230,7 @@ def main():
         if not g or g[0].size != len(raw): print('BAD ENCODING', mn, raw.hex(), file=sys.stderr); continue
         key = T.form_key(g[0], X)[0]; f = forms.setdefault(key, [1, 1, {}]); f[2][raw] = a
     mnf = {k.split('|')[0]: 1 for k in forms}
-    T.imgpage = imgpage; fnvlift.Image = FImage
+    T.imgpage = imgpage; fnvlift.Image = FImage; T.LOWOK = True      # 16-bit addressing forms reach the low 64 KiB
     T.load_forms = lambda a, rows: dict(forms=forms, mnf=mnf, nfuncs=1, undecodable=0)
     sys.argv = [sys.argv[0], '--work', '/home/user/l3work/xinstest', '--k', '40'] + [x for x in sys.argv[1:] if x not in ('--only',) and not (only and x == ','.join(only))]
     T.main()
