@@ -146,7 +146,10 @@ def main():
     tb.case("host_ptr: uncommitted/unmapped is None", hp(A + 0x8000, 0x10) is None and hp(0x30000000, 4) is None)
     tb.case("host_ptr: heap block given away by map_fixed is None, a range over it too",
             hp(m.heap[0] + 0x20000, 0x10) is None and hp(m.heap[0] + 0x1f000, 0x4000) is None)
-    tb.case("host_ptr: host page and empty range are None", hp(m.host_page, 8) is None and hp(m.heap[0], 0) is None)
+    tb.case("host_ptr: the host page is None", hp(m.host_page, 8) is None)
+    tb.case("host_ptr: an empty range inside a mapping, and exactly at its end, gets a pointer",
+            hp(m.heap[0], 0) == hp(m.heap[0], 8) and hp(m.heap[0] + 0x1000, 0) == hp(m.heap[0], 8) + 0x1000)
+    tb.case("host_ptr: an empty range outside every mapping is None", hp(0x000F8000, 0) is None)
     tb.case("host_ptr: the host window and a stack are readable and writable",
             hp(bootmachine.WINDOW[0], 16) is not None and hp(m.stacks_top - 0x1000, 16) is not None)
 

@@ -436,13 +436,19 @@ class Machine:
 
     def host_ptr(self, addr, size):
         """host address of [addr, addr + size) when it lies wholly inside ONE mapping (one host buffer) that is now readable and
-        writable for the guest (never the host page; none-protected, unmapped and empty ranges: None)"""
-        if size <= 0 or addr < 0 or addr + size > 1 << 64:
+        writable for the guest (never the host page; none-protected and unmapped ranges: None). An EMPTY range (size 0, the
+        renderer library's contract: it asks for it and never dereferences the result) gets a pointer when addr lies inside
+        such a mapping or exactly at its end, and None when addr is outside every mapping."""
+        if size < 0 or addr < 0 or addr + size > 1 << 64:
             return None
+        rw = lambda lo, hi: self.accessible(lo, hi, UC_PROT_READ) and self.accessible(lo, hi, UC_PROT_WRITE)  # noqa: E731
         for lo, hi, ptr, _k in self.backs:
-            if lo <= addr and addr + size <= hi:
-                ok = self.accessible(addr, addr + size, UC_PROT_READ) and self.accessible(addr, addr + size, UC_PROT_WRITE)
-                return ptr + (addr - lo) if ok else None
+            if size and lo <= addr and addr + size <= hi:
+                return ptr + (addr - lo) if rw(addr, addr + size) else None
+            if not size and lo <= addr <= hi:
+                probe = addr if addr < hi else addr - 1          # the byte the empty range touches the mapping at
+                if rw(probe, probe + 1):
+                    return ptr + (addr - lo)
         return None
 
     def stack_for(self, tid):
