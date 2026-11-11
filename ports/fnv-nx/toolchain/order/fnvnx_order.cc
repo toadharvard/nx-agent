@@ -82,7 +82,7 @@
 int plugin_is_GPL_compatible;   // the plugin interface asks for it; the code is MIT (LICENSE), which is compatible
 
 static bool verbose, verbose_sites;
-struct counts { unsigned long ldar, stlr, fence_ld, fence_st; };
+struct counts { unsigned long ldar, stlr, fence_ld, fence_st, fence_resume; };
 static counts unit_total;
 static bool args_rtl = true;
 static unsigned long calls_reordered, calls_skipped;
@@ -197,17 +197,79 @@ static counts *cur;   // the counters of the function being ordered
 // totality (R9): `ref = ...` / `... = ref` forms ordered scalar-wise where expressible, fenced otherwise
 static void order_single(gimple_stmt_iterator *gsi);
 
-// a fence after a statement; one that ends its block (a trapping load) gets it on the fall-through edge
+// ORDER-CONT: where the acquire fence after a load goes when the statement ends its block.
+//
+// The acquire fence (dmb ishld) after a load L orders L before every later access of the same thread. A later access
+// after a block-ending statement S is reached only along S's continuation:
+//   (a) S's fall-through edge, or
+//   (b) a resumption point: an EH landing pad, or the point after a returns-twice call (the setjmp family,
+//       __builtin_setjmp_receiver, a nonlocal-goto receiver) in this function or in another frame (longjmp, unwinding).
+// Rule: (1) a block-ending S with a fall-through edge gets the fence on that edge. (2) Every resumption point of every
+// function this plugin orders begins with the same acquire fence (add_resume_fences): the head of every block that is
+// the target of an EDGE_EH edge; right AFTER a returns-twice call or __builtin_setjmp_receiver (execution resumes after
+// the call, not before it); the head of every other block that is the target of an EDGE_ABNORMAL edge (a nonlocal
+// label). (3) A block-ending S without a fall-through edge (a noreturn call such as __builtin_longjmp, a resx) needs
+// nothing on its other paths: every continuation of S starts at a resumption point or does not exist. No error path.
+// Proof: TSO orders a thread's accesses in program order; every program-order successor of S lies on the fall-through
+// edge or after a resumption point; each of those begins with the fence; extra fences on other incoming paths of a
+// resumption point only add order. Scope: native code that loads fnvnx_order. A longjmp or unwind into a frame of
+// lifted code relies on the lifter's own resumption fence (owner: L3a).
 static void fence_after(gimple_stmt_iterator *gsi, enum memmodel m) {
   gimple *stmt = gsi_stmt(*gsi);
   if (stmt_ends_bb_p(stmt)) {
     edge e = find_fallthru_edge(gimple_bb(stmt)->succs);
-    if (!e) { error_at(gimple_location(stmt), "%<fnvnx_order%>: cannot fence after a block-ending statement"); return; }
+    if (!e) return;   // no fall-through edge: covered by ORDER-CONT (2), counts nothing
     gsi_insert_on_edge_immediate(e, fence(m));
   } else {
     gsi_insert_after(gsi, fence(m), GSI_SAME_STMT);
   }
   (m == MEMMODEL_ACQUIRE ? cur->fence_ld : cur->fence_st)++;
+}
+
+static bool resume_call_p(gimple *stmt) {
+  gcall *call = dyn_cast<gcall *>(stmt);
+  if (!call) return false;
+  if (gimple_call_flags(call) & ECF_RETURNS_TWICE) return true;
+  tree fn = gimple_call_fndecl(call);
+  return fn && fndecl_built_in_p(fn, BUILT_IN_SETJMP_RECEIVER);
+}
+
+// ORDER-CONT (2): the fence at every resumption point of the function. Run after the per-statement walk (the fences
+// are then not visited as accesses).
+static void add_resume_fences(function *fun) {
+  std::vector<gimple *> after;
+  std::vector<basic_block> heads;
+  basic_block bb;
+  FOR_EACH_BB_FN(bb, fun) {
+    for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi))
+      if (resume_call_p(gsi_stmt(gsi))) after.push_back(gsi_stmt(gsi));
+    bool head = false;
+    edge e; edge_iterator ei;
+    FOR_EACH_EDGE(e, ei, bb->preds) {
+      if (e->flags & EDGE_EH) head = true;
+      else if (e->flags & EDGE_ABNORMAL) {
+        gimple_stmt_iterator g = gsi_after_labels(bb);
+        if (gsi_end_p(g) || !resume_call_p(gsi_stmt(g))) head = true;   // else the fence after that call covers it
+      }
+    }
+    if (head) heads.push_back(bb);
+  }
+  for (gimple *s : after) {
+    gimple_stmt_iterator g = gsi_for_stmt(s);
+    if (stmt_ends_bb_p(s)) {
+      edge e = find_fallthru_edge(gimple_bb(s)->succs);
+      if (!e) continue;
+      gsi_insert_on_edge_immediate(e, fence(MEMMODEL_ACQUIRE));
+    } else {
+      gsi_insert_after(&g, fence(MEMMODEL_ACQUIRE), GSI_SAME_STMT);
+    }
+    cur->fence_resume++;
+  }
+  for (basic_block b : heads) {
+    gimple_stmt_iterator g = gsi_after_labels(b);
+    gsi_insert_before(&g, fence(MEMMODEL_ACQUIRE), GSI_SAME_STMT);
+    cur->fence_resume++;
+  }
 }
 
 // an operand that is a shared memory reference but sits where only a value can (a call argument, a return value, a
@@ -372,7 +434,7 @@ struct order_pass : gimple_opt_pass {
   order_pass(gcc::context *ctx, const pass_data &d) : gimple_opt_pass(d, ctx) {}
 
   unsigned int execute(function *fun) final override {
-    counts c = {0, 0, 0, 0};
+    counts c = {0, 0, 0, 0, 0};
     cur = &c;
     basic_block bb;
     // a local that receives an aggregate returned in memory is the object whose address goes to the callee (the hidden
@@ -388,11 +450,12 @@ struct order_pass : gimple_opt_pass {
       }
     FOR_EACH_BB_FN(bb, fun)
       for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) order_stmt(&gsi);
+    add_resume_fences(fun);
     unit_total.ldar += c.ldar; unit_total.stlr += c.stlr;
-    unit_total.fence_ld += c.fence_ld; unit_total.fence_st += c.fence_st;
-    if (verbose && (c.ldar || c.stlr || c.fence_ld || c.fence_st))
-      inform(DECL_SOURCE_LOCATION(fun->decl), "%<fnvnx_order%>: %lu acquire loads, %lu release stores, %lu+%lu fenced",
-             c.ldar, c.stlr, c.fence_ld, c.fence_st);
+    unit_total.fence_ld += c.fence_ld; unit_total.fence_st += c.fence_st; unit_total.fence_resume += c.fence_resume;
+    if (verbose && (c.ldar || c.stlr || c.fence_ld || c.fence_st || c.fence_resume))
+      inform(DECL_SOURCE_LOCATION(fun->decl), "%<fnvnx_order%>: %lu acquire loads, %lu release stores, %lu+%lu fenced, %lu resume fences",
+             c.ldar, c.stlr, c.fence_ld, c.fence_st, c.fence_resume);
     cur = NULL;
     return 0;
   }
@@ -502,9 +565,9 @@ static void emit_frame_section() {
 static void finish(void *, void *) {
   emit_frame_section();
   if (verbose)
-    inform(UNKNOWN_LOCATION, "%<fnvnx_order%>: unit: %lu ldar, %lu stlr, %lu fenced loads, %lu fenced stores; "
+    inform(UNKNOWN_LOCATION, "%<fnvnx_order%>: unit: %lu ldar, %lu stlr, %lu fenced loads, %lu fenced stores, %lu resume fences; "
            "%lu calls with arguments right to left, %lu left (class-type argument with side effects)",
-           unit_total.ldar, unit_total.stlr, unit_total.fence_ld, unit_total.fence_st, calls_reordered, calls_skipped);
+           unit_total.ldar, unit_total.stlr, unit_total.fence_ld, unit_total.fence_st, unit_total.fence_resume, calls_reordered, calls_skipped);
   if (verbose && (object_last || operator_rtl))
     inform(UNKNOWN_LOCATION, "%<fnvnx_order%>: unit: %lu calls with the object after the arguments, "
            "%lu overloaded operators right to left, %lu prvalue virtual calls with the object first, "
