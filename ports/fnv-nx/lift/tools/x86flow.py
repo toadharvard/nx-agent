@@ -238,22 +238,30 @@ def track(F):
         a = work.pop(); ep, k, vs, bp = st[a]; i = F.ins[a]; m = mn(i); o = i.operands
         r0 = rn(i, o[0]) if o else None; r1 = rn(i, o[1]) if len(o) > 1 else None
         nbp = bp
+        wr = {base(i.reg_name(r)) for r in i.regs_access()[1]}       # every register the instruction writes, explicit and implicit (xchg esp, popal, xadd ..., ebp as a second operand)
+        hs = m in ('ret', 'retf')                                    # True: the esp effect is modelled (here or in the chain below)
         if m in ('push', 'pushfd'):
-            k -= 4
+            k -= 4; hs = True
+        elif m == 'pop' and r0 == 'esp':
+            ep, k, vs, multi = a, 0, (), True; why.add('esp-pop'); hs = True
         elif m in ('pop', 'popfd'):
-            k += 4
+            k += 4; hs = True
             nbp = None if r0 == 'ebp' else bp
         elif m in ('pushal', 'popal'):
-            k += -32 if m == 'pushal' else 32
+            k += -32 if m == 'pushal' else 32; hs = True
+            if m == 'popal':
+                nbp = None                                           # popal reloads ebp from the stack
         elif m == 'enter':
-            ep, k, vs, multi = a, 0, (), True; why.add('enter')
+            ep, k, vs, multi = a, 0, (), True; why.add('enter'); hs = True
         elif m == 'leave':
+            hs = True
             if bp is None:
                 ep, k, vs, multi = a, 0, (), True; why.add('esp-from-unknown-ebp')
             else:
                 ep, k, vs = bp[0], bp[1] + 4, bp[2]
             nbp = None
         elif m == 'call':
+            hs = True
             cp = callpop(F, a)
             if cp[0] == 'c':
                 k += cp[1]
@@ -289,6 +297,10 @@ def track(F):
             ep, k, vs, multi = a, 0, (), True; why.add('esp-align' if m == 'and' else 'esp-other')
         elif r0 == 'ebp' and m not in ('cmp', 'test', 'push'):
             nbp = None
+        if 'esp' in wr and not hs and r0 != 'esp':                    # an esp write the chain above does not model (xchg reg, esp; xadd ...): a new epoch
+            ep, k, vs, multi = a, 0, (), True; why.add('esp-implicit')
+        if 'ebp' in wr and not (m == 'mov' and r0 == 'ebp' and r1 == 'esp'):
+            nbp = None                                                # any other write of ebp, whatever the operand position
         if (m in ('ret', 'retf') or (m == 'jmp' and a in F.tails)) and ep == F.a and not funclet:
             eqs.append((tuple((v, 1) for v in vs), k))
         for t in reversed(F.succ[a]):
@@ -359,6 +371,51 @@ def frame_events(F):
             mm = o[0].mem; v = s if mm.base and i.reg_name(mm.base) == 'esp' else b if mm.base and i.reg_name(mm.base) == 'ebp' else None
             out.append((x, s if r1 == 'esp' else b, False, None, None if v is None or mm.index or F.multi else v + mm.disp))
     return out
+
+
+def conformance(F):
+    """-> (ret_ok, ebp_ok) of a non-funclet entry, PROVED from F.sp / F.bp (call track(F) first):
+    ret_ok: every `ret` / tail jump is reached with esp = entry esp exactly (F.sp == 0), the entry is single-epoch and its stack constraints are consistent;
+    ebp_ok: on every path to a `ret` / tail jump ebp holds its entry value: the value is saved by `push ebp` (or `mov [esp+k], ebp`) in a slot of known entry-relative
+    coordinate and reloaded from that very slot (`pop ebp`, `leave` through a proven ebp, `mov ebp, [..]`); any other write of ebp loses it; a store to the slot kills the save.
+    Lattice (eo, sv): eo = ebp holds the entry value, sv = coordinate of the save slot or None; join = (and, equal or None). Callees are not looked at here
+    (memclass closes both properties over the direct-call graph)."""
+    if F.kind in FUNK:
+        return True, True
+    ends = [x for x in F.ins if mn(F.ins[x]) in ('ret', 'retf') or (mn(F.ins[x]) == 'jmp' and x in F.tails)]
+    ret_ok = not F.multi and all(F.sp.get(x) == 0 for x in ends)
+    st, work, ebp_ok = {F.a: (True, None)}, [F.a], True
+    while work:
+        a = work.pop(); eo, sv = st[a]; i = F.ins[a]; m = mn(i); o = i.operands
+        s, b = F.sp.get(a), F.bp.get(a)
+        if a in ends and not eo:
+            ebp_ok = False
+        r0 = rn(i, o[0]) if o else None
+        coord = lambda p: None if p.type != X.X86_OP_MEM or not p.mem.base or p.mem.index or F.multi else (None if i.reg_name(p.mem.base) not in ('esp', 'ebp') else (lambda v: None if v is None else v + p.mem.disp)(s if i.reg_name(p.mem.base) == 'esp' else b))
+        wr = {base(i.reg_name(r)) for r in i.regs_access()[1]}
+        if m == 'push' and r0 == 'ebp':
+            sv = (s - 4 if s is not None else None) if eo else sv
+        elif m == 'pop' and r0 == 'ebp':
+            eo = s is not None and s == sv
+        elif m == 'leave':
+            eo = b is not None and b == sv
+        elif m == 'mov' and r0 == 'ebp' and len(o) == 2 and o[1].type == X.X86_OP_MEM:
+            c = coord(o[1]); eo = c is not None and c == sv
+        elif m == 'mov' and len(o) == 2 and o[0].type == X.X86_OP_MEM and rn(i, o[1]) == 'ebp':
+            c = coord(o[0]); sv = c if eo and c is not None else sv
+        elif 'ebp' in wr:
+            eo = False
+        elif sv is not None and any(p.type == X.X86_OP_MEM and p.access & 2 and coord(p) is not None and coord(p) <= sv < coord(p) + max(p.size, 1) for p in o):
+            sv = None
+        for t in F.succ[a]:
+            ns = (eo, sv)
+            if t not in st:
+                st[t] = ns; work.append(t)
+            else:
+                e0, v0 = st[t]; j = (e0 and eo, v0 if v0 == sv else None)
+                if j != (e0, v0):
+                    st[t] = j; work.append(t)
+    return ret_ok, ebp_ok
 
 
 # ---- x87 stack depth ----
