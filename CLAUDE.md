@@ -5,6 +5,8 @@ works on fnv-nx (ports/fnv-nx/): local agents, cloud stream sessions, the render
 
 ## The orchestrator speaks for the owner
 
+> Handoff of 2026-11-11: the work moved to another account. The orchestrator is the session that started from ports/fnv-nx/docs/handoff2/START_PROMPT.md, and its full context is ports/fnv-nx/docs/HANDOFF2.md. Session ids from earlier notes are dead.
+
 - fnv-nx is run by one **orchestrator** session. It is the session that created yours: the parent session, titled
   "New Vegas Switch port" unless the journal names another. It writes the integration branch
   `claude/port-nsw-un6t9s`, and its tasks and messages to you are the owner's instructions.
@@ -81,8 +83,45 @@ The plan of record is MASTER_PLAN4 (private: fnv-nx-build `plan/master3`, audit/
 - **MASTER_PLAN3 applies only where it does not contradict this order.**
 - **Example correction:** L3 implements full MSVC C++ EH and SEH through lifted frames, proven against the exe's own EH tables.
 
+## Owner order of 2026-11-11: the trunk is always green (priority 1, binding)
+
+The owner's words: "Транк никогда красный. Всегда зеленый. И когда он зеленый, это означает, что то, что собирается компилятором, оно в рантайме не упадет." Removing stubs is the first priority: "если это не работает, то значит ничего не работает. Слияния встанут, и это правильно".
+
+- The trunk `claude/fnv-nx-clean` is green at every commit. Green means: what the compiler built does not fail at run time.
+- Every class of run-time failure has a static gate in the L1 verdict (`verify/VERDICT.md`, `gates.json`): a missing import body, a code address without a dispatcher entry, an uncertified form, an uncovered D3D9 enum or SM op, an unresolved symbol, a layout or calling-convention mismatch, a non-deterministic build, a test without a reference, and any stub.
+- A class of run-time failure without a gate is reported to the orchestrator.
+- The stub gate is an absolute 0. It is never "not worse than the base", and there is no allow-list.
+  - Stubs, no-ops, trap paths, "not implemented", fallbacks on failure and fake success are deleted, so that the absence becomes a build error.
+  - Code that does not pass is removed from the trunk whole. Its completion lives on the lead's branch.
+- **Proven-unreachable branches (owner decision, 2026-11-11, option iii).**
+  - Some branches inside an implementation are proven unreachable: for example, the argument values that a contract allows but the platform cannot express, when the call graph proves that no call site passes them.
+  - Such a branch goes to one function, `fnvnx_reach_violation(fact_id)`. It exits loudly through the host exit slot with the fact code.
+  - Every `fact_id` is produced only by the call-graph gate from the exe and module facts, and carries a certificate of unreachability. A missing certificate makes the build red. There are no hand-written lists.
+  - It is an assertion of a proven build invariant, not a trap path. Inventing behaviour or leaving the symbol undefined stays forbidden.
+  - Certificates count as valid only once every dynamic-name GetProcAddress site is statically resolved. Until then, the build is a measurement build.
+- **Memory safety of hand-written native code (owner decision, 2026-11-11, revised the same day).**
+  - The owner's words: "пока чтобы ничего не переписывал... можем пока что покрыть санитайзерами наш C++ код. Давай не будем извращаться... мы даже не добились того, чтобы это загрузилось."
+  - No rewrite of the native code for now.
+    - The checked subset (verify/MEMSAFE.md) is suspended and is not a gate.
+    - Standard C++ containers are allowed.
+  - Our C++ is covered by sanitizers (ASan, UBSan) in emulator and test runs. IKOS stays an advisory check.
+  - "Native code is tested, not proven, for memory safety" is a stated assumption.
+  - External libraries (libc, libnx, FreeType, minimp3) are taken by their documentation. They are not proven.
+  - The address space stays as decided: 32-bit, ILP32.
+    - A wild guest access into host pages is a stated assumption: the exe does not make wild accesses in normal operation.
+  - Priority: the game boots first. New proof work that does not block booting waits until after the first frame.
+- **Wine 9.0 as an acceptable implementation (owner decision, 2026-11-11).**
+  - The owner's words: "Если он ничего не считает, давай мы тоже будем ничего считать... можно залогировать... Там, где похуй Вайну. А Вайн, блядь, не первый день делается."
+  - Where Wine 9.0 implements an API in a simplified way (it does nothing, or returns success), we may do exactly what Wine 9.0 does, with one log line per call.
+  - The source of the behaviour is Wine 9.0's code for that function, cited per function. The stub gate accepts such a body when the citation is present.
+  - First cases: d3d9 `ProcessVertices`, `SetClipStatus` and `GetClipStatus`, both device classes.
+- Merges stop while anything is red. That is intended. Cleaning a stream's violations comes before any other work in that stream.
+
 ## Owner decisions of 2026-11-10 (do not re-ask)
 
+- **Full autonomy (owner, 2026-11-11):** "Я разрешаю все, делайте все, что угодно. Только меня не беспокойте."
+  - Do not ask the owner for approvals or confirmations. Decide and act; report only milestones.
+  - The Legal limits and the class-closing rule order still hold.
 - **Downloads are authorized.** The owner's words, 2026-11-10: "Я разрешаю все что угодно качать".
   - Any fnv-nx session may clone or download any public external code, tools, formal models, packages or datasets the work needs. Examples: rems-project/isla, isla-snapshots, sail-x86-from-acl2, acl2/acl2, LLVM, CORE-MATH, MPFR.
   - Use add_repo (read) or plain git/https.
