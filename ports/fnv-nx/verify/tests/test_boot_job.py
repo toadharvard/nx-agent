@@ -140,10 +140,27 @@ def main():
     open(gpu_c, "w").write(tg.FAKE_C)
     gpu_so = os.path.join(SCRATCH, "libnxgl4.so")
     subprocess.run(["gcc", "-O2", "-fPIC", "-shared", gpu_c, "-o", gpu_so], check=True)
-    publish_branch("l1-contract/elf/gpuid", dict(contract, **{"guest.elf": lifted_elf(50)}))
-    publish_branch("fake-gpu", {"libnxgl4.so": open(gpu_so, "rb").read()})
+    gpu_elf, lib, ar = lifted_elf(50), open(gpu_so, "rb").read(), b"!<arch>\nfake bridge archive\n"
+    sha = lambda b: hashlib.sha256(b).hexdigest()
+    H1, H2 = "1" * 40, "2" * 40
+    jd = lambda d: json.dumps(d).encode()
+    gman = lambda render: jd(dict({"schema": "fnvnx-elf/1", "name": "guest.elf", "size": len(gpu_elf), "sha256": sha(gpu_elf), "parts": []},
+                                  **({"render": render} if render is not None else {})))
+    render = {"branch": "fake-bridge", "archive_sha256": sha(ar)}
+    publish_branch("l1-contract/elf/gpuid", dict(contract, **{"guest.elf": gpu_elf, "manifest.json": gman(render)}))
+    publish_branch("l1-contract/elf/gpunoman", dict(contract, **{"guest.elf": gpu_elf}))
+    publish_branch("l1-contract/elf/gpunorender", dict(contract, **{"guest.elf": gpu_elf, "manifest.json": gman(None)}))
+    publish_branch("l1-contract/elf/gpuothersha", dict(contract, **{"guest.elf": gpu_elf, "manifest.json": gman(dict(render, archive_sha256="0" * 64))}))
+    publish_branch("l1-contract/elf/gpuoldbridge", dict(contract, **{"guest.elf": gpu_elf, "manifest.json": gman(dict(render, branch="fake-bridge-h2"))}))
+    publish_branch("l1-contract/elf/gpunocommit", dict(contract, **{"guest.elf": gpu_elf, "manifest.json": gman(dict(render, branch="fake-bridge-nocommit"))}))
+    publish_branch("fake-bridge", {"build.json": jd({"archive_sha256": sha(ar), "nx_agent_commit": H1}), "libfnvnx-d3d9.a": ar})
+    publish_branch("fake-bridge-h2", {"build.json": jd({"archive_sha256": sha(ar), "nx_agent_commit": H2}), "libfnvnx-d3d9.a": ar})
+    publish_branch("fake-bridge-nocommit", {"build.json": jd({"archive_sha256": sha(ar)}), "libfnvnx-d3d9.a": ar})
+    publish_branch("fake-gpu", {"libnxgl4.so": lib, "meta.json": jd({"sha256": sha(lib), "nx_agent_commit": H1})})
+    publish_branch("fake-gpu-nometa", {"libnxgl4.so": lib})
+    publish_branch("fake-gpu-othersha", {"libnxgl4.so": lib, "meta.json": jd({"sha256": "0" * 64, "nx_agent_commit": H1})})
     publish_branch("fake-gpu-empty", {"README": b"no library here\n"})
-    publish_branch("fake-gpu-bad", {"libnxgl4.so": b"not an elf\n"})
+    publish_branch("fake-gpu-bad", {"libnxgl4.so": b"not an elf\n", "meta.json": jd({"sha256": sha(b"not an elf\n"), "nx_agent_commit": H1})})
     tb.case("setup: contract branches built", True)
 
     rc, out, err = run_job(["testid"])
@@ -160,7 +177,7 @@ def main():
     elf_commit = git("rev-parse", "refs/heads/l1-contract/elf/testid", cwd=BARE).strip()
     nx_commit = git("rev-parse", "HEAD", cwd=NX).strip()
     tb.case("meta.json keys and values", sorted(meta) == sorted(["elf_id", "elf_branch_commit", "nx_agent_commit", "exe_sha256", "boot_rc",
-            "seconds", "limit_instructions", "profile", "host_cpu_model", "softfloat"])
+            "seconds", "limit_instructions", "profile", "host_cpu_model", "softfloat", "data_items"])
             and meta["elf_id"] == "testid" and meta["elf_branch_commit"] == elf_commit and meta["nx_agent_commit"] == nx_commit
             and meta["exe_sha256"] == hashlib.sha256(EXE).hexdigest() and meta["boot_rc"] == 0 and meta["limit_instructions"] is None
             and meta["profile"] == "handheld" and meta["host_cpu_model"] and meta["softfloat"] == "absent", meta)
@@ -252,6 +269,20 @@ def main():
         tb.case("OUT.json gpu record, meta.json gpu fields", doc["gpu"]["presents"] == 4 and doc["gpu"]["first_module10_call"]
                 and meta["gpu_branch"] == "fake-gpu"
                 and meta["gpu_branch_commit"] == git("rev-parse", "refs/heads/fake-gpu", cwd=BARE).strip(), (doc.get("gpu"), meta))
+        tb.case("meta.json records the renderer pair", meta.get("bridge_branch") == "fake-bridge" and meta.get("render_head") == "1" * 40
+                and meta.get("bridge_branch_commit") == git("rev-parse", "refs/heads/fake-bridge", cwd=BARE).strip()
+                and "data_items" in meta and meta["data_items"] is None, meta)
+    # the renderer pair rule: every broken link of the chain ELF -> bridge -> nxgl4 fails the job before the run
+    for eid, gb, word, what in (("gpunoman", "fake-gpu", "manifest.json", "ELF branch without manifest.json"),
+                                ("gpunorender", "fake-gpu", "render", "manifest.json without the render object"),
+                                ("gpuothersha", "fake-gpu", "bridge archive", "ELF linked with another archive than the bridge branch holds"),
+                                ("gpuoldbridge", "fake-gpu", "!= nxgl4 head", "bridge head != nxgl4 head"),
+                                ("gpunocommit", "fake-gpu", "nx_agent_commit", "bridge build.json without nx_agent_commit"),
+                                ("gpuid", "fake-gpu-nometa", "meta.json", "nxgl4 branch without meta.json"),
+                                ("gpuid", "fake-gpu-othersha", "libnxgl4.so", "libnxgl4.so bytes differ from meta.json")):
+        rc, out, err = run_job([eid, "--gpu-branch", gb], genv)
+        tb.case("pair rule: %s: job fails naming it, nothing published" % what, rc == 1 and word in err and out == ""
+                and (eid == "gpuid" or not git("ls-remote", BARE, "refs/heads/l4-verify/boot/" + eid)), (rc, err[-400:]))
     rc, out, err = run_job(["gpuid", "--gpu-branch", "no-such-gpu"], genv)
     tb.case("missing renderer branch: job fails", rc == 1 and "no-such-gpu" in err, (rc, err[-300:]))
     rc, out, err = run_job(["gpuid", "--gpu-branch", "fake-gpu-empty"], genv)
