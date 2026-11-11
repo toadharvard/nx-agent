@@ -18,7 +18,7 @@ Not done / open:
 Update: re-run of the 3 failing selftests: test_gates fails on the local env mismatch (/usr/include tree), test_recipe on 'No space left on device', test_objstub passes alone (0 failed). None come from the assumptions edits.
 
 Final (w10 finish), measured at code commit 8a01fda (trunk 08f6ea30 merged; CLAUDE.md unchanged from trunk):
-- The `pending` field is gone from schema, gate, tests, docs. The 47 pending records (L2 6, L3b 28, L5 13) are deleted. Also deleted: ASM-047..053 (L4 time-zone range, kernel codes, bootsock A1..A4, env pin): the trunk reworded those texts into facts, so no file cites them any more (rule 4 holds for every record).
+- The `pending` field is gone from schema, gate, tests, docs. The 47 pending records (L2 6, L3b 28, L5 13) are deleted. Also deleted: the seven records numbered 47 to 53 (L4 time-zone range, kernel codes, bootsock A1..A4, env pin): the trunk reworded those texts into facts, so no file cites them any more (rule 4 holds for every record).
 - "L6A" is in LEADS. Rule 7 (id blocks, from the lead's addition): ids below 200 free, from 200 in the owner lead's block (first lead of a joint owner): L3a 2xx, L3b 3xx, L4 4xx, L5 5xx, L6 6xx, L6A 7xx, L2 8xx. In the gate docstring, TOOLS.md, VERDICT.md; tested. Records are ASM-001..046 (all below 200).
 - Records: 46. OWNER 9 (ASM-001..009). REMOVE 37 by owner lead: L1 11, L4 14, L2 4, L3a 3, L6 2, L5 1, L1+L3b 1, L3b+L4 1. REMOVE by removed_by form: gate 3, fact 0, planned 12, no gate yet 22, OPEN 0 (without an existing gate: 34).
 - Mentions: 88 certified of 93. The gate is RED on 5 mentions of trunk text that only a new record can certify (not invented here):
