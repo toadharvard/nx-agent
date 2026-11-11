@@ -359,7 +359,7 @@ def h_ljmp_any(cx, ins):
 @op('retf')
 def h_retf(cx, ins):
     """RETF [imm16]: pops EIP then CS (and imm16 bytes). Same-level return only (an outer level would need RPL > CPL = 3): valid exactly when the popped CS is SEL_CS (index of CS, RPL 3);
-    RPL < CPL, another index, the null selector are #GP(selector) (SDM Vol 3 6.? RETF: "#GP(selector) if the return code segment selector RPL is less than CPL / null / not a code segment")."""
+    RPL < CPL, another index, the null selector are #GP(selector) (SDM Vol 2 RET, protected-mode far return: "#GP(selector) if the return code segment selector RPL is less than CPL / null / not a code segment")."""
     n = cx.ops[0].imm & 0xffff if cx.ops else 0
     if n:
         cx.kinds.add('retn')
@@ -384,7 +384,7 @@ def h_iret(cx, ins):
 
 @op('int1')
 def h_int1(cx, ins):
-    """INT1 / ICEBP (F1): #DB as a trap (SDM Vol 3 17.3.1.? / Vol 2 INT1: not subject to IDT-gate DPL, DR6/TF not changed). KiTrap01: STATUS_SINGLE_STEP, ExceptionAddress = Context.Eip =
+    """INT1 / ICEBP (F1): #DB as a trap (SDM Vol 2 INT1: "not subject to IDT-gate DPL checks"). KiTrap01: STATUS_SINGLE_STEP, ExceptionAddress = Context.Eip =
     the NEXT instruction. (`int 1`, CD 01, is the vector-1 gate with DPL 0: #GP -> access violation, INT_VECTORS default.)"""
     raise_code(cx, 'FNVL_STEP', cx.nxt)
 
