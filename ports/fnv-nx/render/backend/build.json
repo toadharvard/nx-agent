@@ -8,7 +8,6 @@
   "c": [
    "-march=armv8-a+crc+crypto",
    "-mtune=cortex-a57",
-   "-mtp=soft",
    "-fPIE",
    "-O2",
    "-g",
@@ -23,7 +22,6 @@
   "cxx": [
    "-march=armv8-a+crc+crypto",
    "-mtune=cortex-a57",
-   "-mtp=soft",
    "-fPIE",
    "-O2",
    "-g",
