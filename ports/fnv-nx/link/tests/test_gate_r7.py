@@ -253,6 +253,15 @@ try:
           (1, ['x.cpp:UPlain@@: undecided: the key has 1 gcc and 2 cl different definitions in the unit']))
     check('set: an unreadable object is red', run_set([good, b'junk'])[1][0].startswith('x.cpp:UPlain@@: undecided: a cl object of the unit is unreadable'), True)
 
+    # rows(): (stem, key, verdict, reason)
+    rr = gate_r7.rows([tmp + '/a/g/u.o'], [tmp + '/a/c/u.obj'])
+    check('rows count', len(rr), len(keys))
+    check('rows sorted', rr, sorted(rr))
+    check('rows shape', [r for r in rr if r[1] in ('UPlain@@', 'USizeBad@@', 'UNoCl@@')],
+          [('u', 'UNoCl@@', 'only-gcc', "cl's debug info of the unit has no definition of the type"), ('u', 'UPlain@@', 'equal', ''), ('u', 'USizeBad@@', 'differs', 'size gcc 12 cl 8')])
+    check('rows verdicts', sorted({r[2] for r in rr}), ['differs', 'equal', 'only-gcc', 'undecided'])
+    check('rows error', gate_r7.rows([tmp + '/gj/u.o'], [])[0][:3], ('u', '', 'error'))
+
     # the gate file and the exit status
     def go(g, c, out, extra=()):
         os.makedirs(out)

@@ -140,12 +140,12 @@ def compare_one(g, c, gcc_of, cl_of):
     return 'equal', ''
 
 
-def unit_items(stem, gpath, cpaths):
-    """(universe, [red ids], Counter of verdicts) of one unit"""
+def unit_rows(stem, gpath, cpaths):
+    """[(stem, key, verdict, reason)] of one unit"""
     try:
         lays = objsections.parse_layout(objsections.section(elfobj.read(gpath), '.fnvnx.layout'), stem + ':.fnvnx.layout')
     except ValueError as e:
-        return 1, ['%s:error: %s' % (stem, e)], collections.Counter(error=1)
+        return [(stem, '', 'error', str(e))]
     ug = {}
     for lay in lays:
         r = gcc_rec(lay)
@@ -176,7 +176,7 @@ def unit_items(stem, gpath, cpaths):
             cache[k] = recs
         return cache[k]
 
-    red, cnt = [], collections.Counter()
+    out = []
     for k in keys:
         gl = ug[k]
         if table is None:
@@ -197,21 +197,31 @@ def unit_items(stem, gpath, cpaths):
                         verdict, reason = 'undecided', 'CodeView: %s' % e
                 else:
                     verdict, reason = 'undecided', 'the key has %d gcc and %d cl different definitions in the unit' % (len(gl), len(cl))
-        cnt[verdict] += 1
-        if verdict != 'equal':
-            red.append('%s:%s: %s: %s' % (stem, k, verdict, reason))
-    return len(keys), red, cnt
+        out.append((stem, k, verdict, reason))
+    return out
+
+
+def rows(gcc_objs, cl_objs, units=None):
+    """Library entry (no GATE_OUT, no printing, no exit): the sorted list of (stem, key, verdict, reason), one row per (unit, type key)
+    of the universe.  gcc_objs / cl_objs: lists of object FILE paths (directories are accepted too, as in unitpairs.pairs); units:
+    path of units.json or None.  verdict: equal (reason ''), differs, undecided, only-gcc; reason: the first difference or the missing
+    fact.  A GCC object that cannot be read or parsed gives one row (stem, '', 'error', message).  Raises unitpairs.GateInputError only
+    for malformed declared inputs (missing path, bad units file, two objects of one stem)."""
+    out = []
+    for stem, g, c in unitpairs.pairs(gcc_objs, cl_objs, units):
+        out += unit_rows(stem, g, c)
+    return sorted(out)
+
+
+def row_id(r):
+    stem, key, verdict, reason = r
+    return '%s:error: %s' % (stem, reason) if verdict == 'error' else '%s:%s: %s: %s' % (stem, key, verdict, reason)
 
 
 def check(gcc, cl, units=None):
     """(universe, sorted red ids, Counter of verdicts)"""
-    uni, red, cnt = 0, [], collections.Counter()
-    for stem, g, c in unitpairs.pairs(gcc, cl, units):
-        u, r, n = unit_items(stem, g, c)
-        uni += u
-        red += r
-        cnt.update(n)
-    return uni, sorted(red), cnt
+    rs = rows(gcc, cl, units)
+    return len(rs), sorted(row_id(r) for r in rs if r[2] != 'equal'), collections.Counter(r[2] for r in rs)
 
 
 def main(argv):

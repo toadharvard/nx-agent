@@ -61,15 +61,15 @@ def strong_defs(elf):
     return out
 
 
-def unit_items(stem, gpath, cpaths):
-    """(universe, [red ids]) of one unit"""
+def unit_rows(stem, gpath, cpaths):
+    """[(stem, symbol, msvc name, reason)] of one unit; reason '' = certified"""
     try:
         elf = elfobj.read(gpath)
         sp = l2sections.parse_sympair(objsections.section(elf, '.fnvnx.sympair'), stem + ':.fnvnx.sympair')
         vt = l2sections.parse_vtpair(objsections.section(elf, '.fnvnx.vtpair'), stem + ':.fnvnx.vtpair')
         strong = strong_defs(elf)
     except ValueError as e:
-        return 1, ['%s:error: %s' % (stem, e)]
+        return [(stem, '', '', 'error: %s' % e)]
     cls, bad = [], []
     for cpath in cpaths:
         try:
@@ -77,34 +77,51 @@ def unit_items(stem, gpath, cpaths):
         except ValueError as e:
             bad.append(str(e))
     why = 'no cl object for the unit' if not cpaths else ('the cl object is unreadable: %s' % bad[0] if bad else '')
-    uni, red = 0, []
+    out = []
     for sym, ms, kind, df in sp:
         if kind.startswith('unnamed:'):
-            uni += 1
-            red.append('%s:%s:unnamed' % (stem, sym))
+            out.append((stem, sym, ms, 'unnamed'))
         elif kind in NAMED and df == 'def' and sym in strong:
-            uni += 1
             if any(cl.get(ms.encode('utf-8')) in DEFINED_BY_CL for cl in cls):
-                continue
-            if not cls:
-                red.append('%s:%s: %s' % (stem, sym, why))
+                out.append((stem, sym, ms, ''))
+            elif not cls:
+                out.append((stem, sym, ms, why))
             else:
-                red.append('%s:%s: %s is not a definition of the cl object' % (stem, sym, ms) + (' (a cl object of the unit is unreadable)' if bad else ''))
+                out.append((stem, sym, ms, '%s is not a definition of the cl object' % ms + (' (a cl object of the unit is unreadable)' if bad else '')))
     for z, _ap, ms, _off in vt:
         if ms.startswith('unnamed:'):
-            uni += 1
-            red.append('%s:%s:vftable-unnamed' % (stem, z))
-    return uni, red
+            out.append((stem, z, ms, 'vftable-unnamed'))
+    return out
+
+
+def rows(gcc_objs, cl_objs, units=None):
+    """Library entry (no GATE_OUT, no printing, no exit): the sorted list of (stem, symbol, msvc_name, reason), one row per item
+    of the universe.  gcc_objs / cl_objs: lists of object FILE paths (directories are accepted too, as in unitpairs.pairs); units:
+    path of units.json or None.  stem: the unit (unitpairs); symbol: the GCC assembler symbol (the stem is part of the item because
+    two units can define one symbol strongly); msvc_name: the plugin's name (certified when reason is ''; for a nameless item ''
+    or the `unnamed:` text); reason: '' certified, else `<name> is not a definition of the cl object[...]`, `no cl object for the
+    unit`, `the cl object is unreadable: ...`, `unnamed` (a sympair row no rule names), `vftable-unnamed` (symbol = the _ZTV
+    symbol), or `error: ...` (a GCC object that cannot be read or parsed: symbol and name ''; one row for the unit).
+    Raises unitpairs.GateInputError only for malformed declared inputs (missing path, bad units file, two objects of one stem)."""
+    out = []
+    for stem, g, c in unitpairs.pairs(gcc_objs, cl_objs, units):
+        out += unit_rows(stem, g, c)
+    return sorted(out)
+
+
+def row_id(r):
+    stem, sym, ms, why = r
+    if why.startswith('error: '):
+        return '%s:%s' % (stem, why)
+    if why in ('unnamed', 'vftable-unnamed'):
+        return '%s:%s:%s' % (stem, sym, why)
+    return '%s:%s: %s' % (stem, sym, why)
 
 
 def check(gcc, cl, units=None):
     """(universe, sorted red ids)"""
-    uni, red = 0, []
-    for stem, g, c in unitpairs.pairs(gcc, cl, units):
-        u, r = unit_items(stem, g, c)
-        uni += u
-        red += r
-    return uni, sorted(red)
+    rs = rows(gcc, cl, units)
+    return len(rs), sorted(row_id(r) for r in rs if r[3])
 
 
 def main(argv):

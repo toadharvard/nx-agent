@@ -176,6 +176,20 @@ try:
     except unitpairs.GateInputError:
         pass
 
+    # rows(): file lists, one row per item, (stem, symbol, msvc name, reason); '' = certified
+    rs = gate_names.rows([os.path.join(g, 'u.o')], [os.path.join(c, 'u.obj')])
+    check('rows count', len(rs), 7)
+    check('rows sorted', rs, sorted(rs))
+    check('rows certified', [r for r in rs if not r[3]], [('u', '_Z1fv', '?f@@YAXXZ', ''), ('u', '_ZN1AC1Ev', '??0A@@QAE@XZ', ''), ('u', '_ZN1AC2Ev', '??0A@@QAE@XZ', ''), ('u', 'gdata', '?gdata@@3HA', '')])
+    check('rows red', sorted((r[1], r[3]) for r in rs if r[3]), [('_Z1gv', '?g@@YAXXZ is not a definition of the cl object'), ('_Z1kv', 'unnamed'), ('_ZTV1B', 'vftable-unnamed')])
+    check('rows error', gate_names.rows([os.path.join(tmp, 'e_junk', 'u.o')], [os.path.join(c, 'u.obj')])[0][:3] + ('',), ('u', '', '', ''))
+    check('rows error reason', gate_names.rows([os.path.join(tmp, 'e_junk', 'u.o')], [os.path.join(c, 'u.obj')])[0][3].startswith('error: '), True)
+    try:
+        gate_names.rows([os.path.join(tmp, 'missing.o')], [])
+        fails.append('rows: missing file is no error')
+    except unitpairs.GateInputError:
+        pass
+
     # the gate file and the exit status (a separate process, as the verdict runs it)
     def run(args, out):
         os.makedirs(out, exist_ok=True)
