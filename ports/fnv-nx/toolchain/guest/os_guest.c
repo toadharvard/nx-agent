@@ -158,7 +158,25 @@ uint64_t os_cycle_counter(void) {
     return v;
 }
 int64_t os_wall_time_us(void) { return hs(fnvnx_hcall0(fnvnx_host->wall_time_us)); }
-int32_t os_tz_offset_minutes(void) { return (int32_t)hs(fnvnx_hcall0(fnvnx_host->tz_offset_minutes)); }
+/* the console's time zone: the host's TZ_AT service (hostapi.h) gives offset, daylight flag and abbreviation at an instant; an older
+ * host without it answers FNVNX_EXT_NO_MODULE (no zone data: UTC for the offset, os_tz_rule fails) */
+static int tzr_at(int64_t utc_s, int32_t *off_s, int *is_dst, char abbr[8]) {
+    FnvnxTzAt o;
+    uint64_t arg[2] = {(uint64_t)utc_s, FNVNX_ADDR(&o)};
+    if (!fnvnx_host->ext_call || fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_TZ_AT, FNVNX_ADDR(arg), 2)) return -1;
+    *off_s = o.off_s;
+    *is_dst = o.dst != 0;
+    memcpy(abbr, o.abbr, 8);
+    abbr[7] = 0;
+    return 0;
+}
+int32_t os_tz_offset_minutes(void) {
+    int32_t off;
+    int dst;
+    char n[8];
+    return tzr_at(os_wall_time_us() / 1000000, &off, &dst, n) ? 0 : off / 60;
+}
+#include "../../platform/os/os_tzrule.inc"
 
 /* ---- files: host fs calls return -errno, os.h wants -OS_E* (same numbers) */
 int os_file_open(const char *path, int flags) {

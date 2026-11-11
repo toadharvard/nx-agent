@@ -243,6 +243,14 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
                                            is written and the ticket is freed: how a result that cannot be taken
                                            is released). -FNVNX_WE_INVAL for a ticket
                                            that is not open. */
+/* TZ_AT (utc_seconds, FnvnxTzAt *) -> 0, or non-zero when the host has no time zone data. The zone of the console's time service
+ * (timeToCalendarTimeWithMyRule) at one instant; platform/os/os_tzrule.inc derives the zone's rule (os_tz_rule) from it. */
+#define FNVNX_PLAT_TZ_AT 34u
+typedef struct FnvnxTzAt {
+    int32_t off_s;      /* local = UTC + off_s */
+    uint32_t dst;       /* 1: daylight time at that instant */
+    char abbr[8];       /* the zone's abbreviation then, NUL-terminated */
+} FnvnxTzAt;
 #define FNVNX_PLAT_SOCK_FIRST 16u
 #define FNVNX_PLAT_SOCK_LAST 33u
 

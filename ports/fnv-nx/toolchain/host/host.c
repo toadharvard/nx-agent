@@ -201,6 +201,17 @@ static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) 
     if (fn == FNVNX_PLAT_VM_COMMIT && nargs >= 2) return host_vm_commit(args[0], args[1]);
     if (fn == FNVNX_PLAT_VM_DECOMMIT && nargs >= 2) return host_vm_decommit(args[0], args[1]);
     if (fn == FNVNX_PLAT_VM_RELEASE && nargs >= 1) return host_vm_release(args[0]);
+    if (fn == FNVNX_PLAT_TZ_AT && nargs >= 2) {
+        FnvnxTzAt *o = (FnvnxTzAt *)args[1];
+        TimeCalendarTime cal;
+        TimeCalendarAdditionalInfo info;
+        if (R_FAILED(timeToCalendarTimeWithMyRule(args[0], &cal, &info))) return 1;
+        o->off_s = info.offset;
+        o->dst = info.DST != 0;
+        memcpy(o->abbr, info.timezoneName, sizeof o->abbr);
+        o->abbr[sizeof o->abbr - 1] = 0;
+        return 0;
+    }
     if (fn == FNVNX_PLAT_DISPLAY_DOCKED) {
         AppletOperationMode m = appletGetOperationMode();
         return m == AppletOperationMode_Console ? 1 : 0;
