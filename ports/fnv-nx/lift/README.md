@@ -164,6 +164,16 @@ through every function that has one, comparing the unwind actions with the x86 e
 targets, the PE entry point and every .reloc'd pointer into `.text` (vtables, callback tables, EH funclets), and
 classifies every byte of `.text`. The exit gate "100 % of exe functions lifted" is measured on that list.
 
+## The dispatcher table: one generator (`tools/dispgen.py`)
+
+`disp.S` (`fnvl_disp_table`, `fnvl_g`, `fnvl_phf_params`, read by `rt/rt.c`) is a pure function of an entry list, and `tools/dispgen.py` is its only
+implementation (`bench/phf.py` is the hash it calls). It reads rows `addr<TAB>sym[...]` (the format of the pack's `entries.tsv`, `#` lines ignored) and writes
+the assembly; the row order, the clock and the environment do not change a byte. `liftgen.py --finish` writes `entries.tsv` first and calls `dispgen.table` on
+those same rows. A test root builds its own table by naming the tool in the `generated` stage of its `build.json` (`verify/RECIPE.md`): the stage's declared
+inputs are `lift/tools/dispgen.py`, `lift/bench/phf.py` and the root's entries file, and its command is `python3 -I lift/tools/dispgen.py <entries file> <disp.S>`;
+the output `disp.S` is then one of the root's units, like the pack's. A key that is not in the list resolves to `fnvl_nobody`. `test/dispgentest.py` checks the
+determinism and the lookup.
+
 ## Cache
 
 A lifted object is keyed by (function bytes, relocation mask inside them, lifter version = digest of `fnvlift/` and
