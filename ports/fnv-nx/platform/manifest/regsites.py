@@ -13,13 +13,24 @@ Abstract values (per function, forward flow, state joined at forward-jump target
                    HKEY name, path the key path below it; None when not static
   ("a", slot)      address of an ebp slot (out parameter or a stack buffer)
   ("p", k)         parameter k of the function ([ebp+8+4k], not written in the function)
+  ("t",)           `this`: ecx at the entry of the function (thiscall), until the function writes ecx
+  ("f", base, d)   the 32-bit field at displacement d of the object `base` (a "t", "p" or "f" value)
+  ("g", base, d)   the address base+d inside the object `base` (an embedded array or sub-object)
   ("u", reason)    unknown, with the reason that ends up in the table
 Wrapper rule: an intra-module function that passes a parameter into a registry call is a wrapper. Its parameters are bound from the
 arguments pushed at every direct `call rel32` site that targets it (found by scanning the code for E8 and checked against the
 caller's disassembly) and the function is analysed again per caller binding, up to DEPTH levels of wrappers calling wrappers. What
-cannot be bound statically stays `dynamic` with the reason. Object fields ([reg+disp]) are not tracked: a key or name read from an
-object is `dynamic` (reason `object field`).
-Assumptions: as for pemanifest.py (function boundaries, forward-only control flow, no ebp slot written through a pointer);
+cannot be bound statically stays `dynamic` with the reason.
+Parameter rule (closes the set of callers): the binding of a parameter from the direct call sites is complete only when no other
+reference to the function exists. `entries` lists every other reference over the whole image: a `jmp rel32` to the entry, a relocated
+word in code (address taken by a push/mov), and a relocated word in data. A data word is classified by its run of relocated code
+pointers: the run start is the vtable and the position in the run is the slot. A function with any such reference is entered by a path
+that the direct-caller binding does not cover, so its rows stay `dynamic` and the reason names the reference.
+Field rule: a key or name read from a field of `this` or of a parameter is a ("f", base, d) value. It is resolved only by the set of
+all writers of that field for the objects that reach the function; the writers of a field are the stores at displacement d through
+objects of one class, and the receivers of a vtable slot are the objects whose vtable word is that vtable. The pass has no typing of
+receivers to classes, so the row stays `dynamic` and the reason names the field, the entry references and the two facts that are missing.
+Scope: as for pemanifest.py (function boundaries, forward-only control flow, no ebp slot written through a pointer);
 stdcall/cdecl argument order (the first argument is the last push); a call through a function pointer other than a register loaded
 from the import slot, and a `jmp [slot]` thunk, is reported `dynamic` (reason `indirect`), never skipped; a global cell is not
 tracked.
@@ -162,7 +173,7 @@ class Analyzer:
         """Flow over one function. Returns (calls, tracked): calls = [(site, api, args)] with args a list of values;
         tracked = [(site, target, pushes)] for direct calls to an address in `track`."""
         rset, binds = self.rset, binds or {}
-        reg, slots, pushes, saved, dead, fptr = {}, {}, [], {}, False, {}
+        reg, slots, pushes, saved, dead, fptr = {"ecx": ("t",)}, {}, [], {}, False, {}
         calls, tracked = [], []
         cur = [None]
 
@@ -179,6 +190,10 @@ class Analyzer:
                 return ("c", op.imm & 0xffffffff)
             k = kd(op)
             if k is None:
+                if op.type == X.X86_OP_MEM and op.mem.base != 0 and op.mem.index == 0 and op.mem.segment == 0 and op.size == 4:
+                    b = reg.get(P.get(i.reg_name(op.mem.base), ""), UNK)
+                    if b[0] in ("t", "p", "f"):
+                        return ("f", b, op.mem.disp)
                 return ("u", "object field" if op.type == X.X86_OP_MEM and op.mem.base != 0 else "global cell")
             if k in slots:
                 return slots[k]
@@ -261,11 +276,18 @@ class Analyzer:
                 continue
             if i.mnemonic == "lea" and len(ops) == 2 and ops[0].type == X.X86_OP_REG:
                 s = ops[1]
-                setreg(ops[0], ("a", s.mem.disp) if s.mem.base == X.X86_REG_EBP and s.mem.index == 0 else ("u", "computed address"))
+                b = reg.get(P.get(i.reg_name(s.mem.base), ""), UNK) if s.mem.base and s.mem.index == 0 and s.mem.segment == 0 else UNK
+                setreg(ops[0], ("a", s.mem.disp) if s.mem.base == X.X86_REG_EBP and s.mem.index == 0 else
+                       ("g", b, s.mem.disp) if b[0] in ("t", "p", "f", "g") else ("u", "computed address"))
                 continue
             if i.mnemonic == "xor" and len(ops) == 2 and ops[0].type == X.X86_OP_REG and ops[1].type == X.X86_OP_REG \
                     and ops[0].reg == ops[1].reg:
                 setreg(ops[0], ("c", 0))
+                continue
+            if i.mnemonic == "add" and len(ops) == 2 and ops[0].type == X.X86_OP_REG and ops[1].type == X.X86_OP_IMM \
+                    and ops[0].size == 4 and reg.get(P.get(i.reg_name(ops[0].reg), ""), UNK)[0] in ("t", "p", "f", "g"):
+                v = reg[P[i.reg_name(ops[0].reg)]]  # base + constant: an address inside the object
+                setreg(ops[0], ("g", v[1], v[2] + ops[1].imm) if v[0] == "g" else ("g", v, ops[1].imm))
                 continue
             for r in i.regs_access()[1]:
                 nm = P.get(i.reg_name(r))
@@ -278,6 +300,16 @@ class Analyzer:
         return calls, tracked
 
     @staticmethod
+    def describe(v):
+        if v[0] == "t":
+            return "this"
+        if v[0] == "p":
+            return "parameter %d" % v[1]
+        if v[0] == "g":
+            return "address of offset 0x%x in %s" % (v[2], Analyzer.describe(v[1]))
+        return "field 0x%x of %s" % (v[2], Analyzer.describe(v[1]))
+
+    @staticmethod
     def hkey_of(v):
         """(root | None, path | None, reason | None) of a key argument value."""
         if v[0] == "c":
@@ -285,8 +317,8 @@ class Analyzer:
             return (r, "", None) if r else (None, None, "key constant 0x%x is not a root" % v[1])
         if v[0] == "h":
             return v[1], v[2], (None if v[1] is not None and v[2] is not None else "handle from a dynamic open")
-        if v[0] == "p":
-            return None, None, "parameter %d" % v[1]
+        if v[0] in ("p", "t", "f", "g"):
+            return None, None, Analyzer.describe(v)
         return None, None, v[1] if v[0] == "u" else "not a key"
 
     @staticmethod
@@ -296,8 +328,8 @@ class Analyzer:
             return v[1], None
         if v[0] == "c" and v[1] == 0:
             return "", None
-        if v[0] == "p":
-            return None, "parameter %d" % v[1]
+        if v[0] in ("p", "t", "f", "g"):
+            return None, Analyzer.describe(v)
         if v[0] == "a":
             return None, "computed buffer"
         return None, v[1] if v[0] == "u" else "not a string"
@@ -329,6 +361,31 @@ class Analyzer:
                         out.append((va, st))
             self.callers_cache[target] = out
         return self.callers_cache[target]
+
+    def entries(self, target):
+        """Every reference to the entry of `target` other than a direct `call rel32`, over the whole image, as text:
+        a `jmp rel32`, a relocated word in code, a relocated word in data (vtable and slot by the run of relocated code pointers)."""
+        mod, out = self.mod, []
+        for a, n in mod.code:
+            o0, k = a - mod.base, a - mod.base
+            while True:
+                k = mod.img.find(b"\xe9", k, o0 + n - 4)
+                if k < 0:
+                    break
+                va = mod.base + k
+                k += 1
+                if (va + 5 + struct.unpack_from("<i", mod.img, k)[0]) & 0xffffffff == target:
+                    out.append("jmp from 0x%08x" % va)
+        rs = set(mod.relocs)
+        for r in sorted(mod.targets().get(target, [])):
+            if mod.in_code(r):
+                out.append("address word in code at 0x%08x" % r)
+                continue
+            b = r
+            while b - 4 in rs and mod.in_code(mod.u32(b - 4) or 0):
+                b -= 4
+            out.append("vtable 0x%08x slot %d (word 0x%08x)" % (b, (r - b) // 4, r))
+        return out
 
     def arg_sets(self, target, depth, chain=()):
         """[(call site, pushes)] of every direct call to `target`; pushes of a caller that is itself a wrapper are resolved
@@ -393,11 +450,21 @@ def regsites(mod):
                 if ROLES[f][5] == "close":
                     continue
                 refs = [args[k] for k in (ROLES[f][1], ROLES[f][2], ROLES[f][3]) if k is not None]
-                if any(v[0] == "p" or (v[0] == "h" and v[2] is None) for v in refs):
+                if any(v[0] in ("p", "t", "f", "g") or (v[0] == "h" and v[2] is None) for v in refs):
                     pend.append((site, f, args))
                 else:
                     rows.append(row_of(an, site, f, args))
             if not pend:
+                continue
+            ent = an.entries(st)
+            fld = [(s, f, a) for s, f, a in pend if any(a[k][0] in ("t", "f", "g") for k in (ROLES[f][1], ROLES[f][2], ROLES[f][3]) if k is not None)]
+            if ent or fld:
+                why = "entered also through " + ", ".join(ent) if ent else "no other entry"
+                if fld:
+                    why += "; the receivers of the entry are not typed to a class and the writers of the field are not closed"
+                else:
+                    why += "; the direct callers do not cover these entries"
+                rows += [row_of(an, s, f, a, why) for s, f, a in pend]
                 continue
             sets = an.arg_sets(st, 0)
             if not sets:
@@ -437,6 +504,6 @@ def write(mods, out):
         for name in sorted(mods):
             for site, api, root, sub, val, st, why, via in sorted(set(regsites(mods[name])), key=lambda r: (r[0], str(r[7]))):
                 s = "0x%08x" % site + ("<-" + via.split()[-1] if via and via.startswith("via ") else "")
-                f.write("\t".join((name, s, api, root, sub, val, st, why or (via if via and not via.startswith("via ") else ""))) + "\n")
+                f.write("\t".join((name, s, api, root, sub, val, st, "; ".join(x for x in (why, via if via and not via.startswith("via ") else "") if x))) + "\n")
                 n += 1
     return n
