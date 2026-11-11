@@ -16,17 +16,18 @@ OUT="${FNVNX_SHADERS_BUILD:-$HERE/build/host}"
 TESTS=OFF
 [[ "${1:-}" == "--tests" ]] && TESTS=ON
 
-MOJO_URL=https://github.com/icculus/mojoshader.git
+MOJO_URL=${FNVNX_MOJO_URL:-https://github.com/icculus/mojoshader.git}
 MOJO_PIN=ad5dff84830c2863c841f4b1f4e3df78c705b383   # 2026-09-03
-UAM_URL=https://github.com/devkitPro/uam.git
+UAM_URL=${FNVNX_UAM_URL:-https://github.com/devkitPro/uam.git}
 UAM_PIN=5a5afc2bae8b55409ab36ba45be63fcb73f68993    # v1.1.0+ (2020-12-16)
-ASM_URL=https://github.com/icculus/mojoshader_assembler.git
+ASM_URL=${FNVNX_ASM_URL:-https://github.com/icculus/mojoshader_assembler.git}
 ASM_PIN=c4b96e2ff21afbbbb844d933fe96936e6aeeea3b    # 2026-08-31
 
 fetch() { # name url pin [patch]
     local dir="$DEPS/$1" want=""
     if [[ ! -d "$dir/.git" ]]; then
-        git clone -q "$2" "$dir"
+        # only the pinned commit is fetched: works for the upstream and for a mirror branch of a large repository (FNVNX_*_URL)
+        git init -q "$dir" && git -C "$dir" fetch -q --depth 1 "$2" "$3"
     fi
     # the marker holds the hash of the applied patch, so an edited patch is re-applied
     [[ -n "${4:-}" ]] && want="$(sha256sum "$4" | cut -d' ' -f1)"

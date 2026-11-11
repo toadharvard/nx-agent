@@ -2,7 +2,7 @@
 """test_x1.py: X1 = DebugSetMute + Direct3DShaderValidatorCreate9 + IDirect3DShaderValidator9, exactly Wine 9.0 d3d9_main.c (+ one fixme line per stub body).  python3 -I tests/l6/x1/test_x1.py [--no-mutations]
  a  exports / table / bridge rows: 514 rows, the 8 new ones exact (6 methods of the interface, 2 exports); the table: interface 6 slots, iid null, signatures; spec / bridge / exports / wrap / cmp tests green
  b  behaviour: Create = the one static object + log id 20; Begin / Instruction / End = S_OK, ids 22 / 23 / 24, arguments not looked at; DebugSetMute no log line
- c  the callback of Begin is never called   d  IUnknown lattice: AddRef 2 / Release 1, QueryInterface E_NOINTERFACE (id 21) for every iid, layer-private IID_NxObj
+ c  the callback of Begin is never called   d  IUnknown lattice: AddRef 2 / Release 1, QueryInterface E_NOINTERFACE (no log line) for every iid, layer-private IID_NxObj
  e  no allocation: the object file references no allocator (nm)   f  guest build: defined nxb 514/514, undefined set unchanged   g  mutations"""
 import json, os, re, shutil, subprocess, sys, tempfile, concurrent.futures as cf
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
@@ -63,7 +63,7 @@ def main():
     und = sh(["nm", "-u", os.path.join(tmp, "n", "x1.o")]).stdout
     check("e", not re.search(r"nxd3d_alloc|malloc|_Znw|_Zna|calloc|nx_make|nx_alloc", und), und)
     # ---- g mutations
-    muts = [("fixme Create", "fnvnx_wine_fixme(NX_WINE_FIXME_ShaderValidatorCreate9);", ""), ("QI id", "NX_WINE_FIXME_ShaderValidator_QueryInterface = 21", "NX_WINE_FIXME_ShaderValidator_QueryInterface = 31"),
+    muts = [("fixme Create", "fnvnx_wine_fixme(NX_WINE_FIXME_ShaderValidatorCreate9);", ""), ("QI foreign iid", "*out = nullptr; return E_NOINTERFACE;", "*out = nullptr; return S_OK;"),
             ("AddRef", "ULONG STDMETHODCALLTYPE NxShaderValidator9::AddRef() { return 2; }", "ULONG STDMETHODCALLTYPE NxShaderValidator9::AddRef() { return 1; }"),
             ("Release", "NxShaderValidator9::Release() { return 1; }", "NxShaderValidator9::Release() { return 0; }"),
             ("QI IUnknown", "*out = nullptr; return E_NOINTERFACE;", "*out = nullptr; return E_NOINTERFACE;" .replace("E_NOINTERFACE;", "riid.Data1 == 0 ? S_OK : E_NOINTERFACE;")),

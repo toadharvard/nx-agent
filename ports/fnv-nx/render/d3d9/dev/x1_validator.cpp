@@ -2,7 +2,7 @@
 // Source: wine-9.0 dlls/d3d9/d3d9_main.c (fetched, not from memory). Where Wine's body is a stub, the body does what Wine's does plus one log line (fnvnx_wine_fixme; ids = rows of verify/wine_fixme.tsv):
 //   DebugSetMute              `/* nothing to do */`, no log line in Wine: no log line here (contract_consts.tsv, kind void)
 //   Direct3DShaderValidatorCreate9   FIXME("Returning stub validator %p."); returns the ONE static object (the same pointer every call, never freed)      id 20
-//   QueryInterface            WARN("%s not implemented, returning E_NOINTERFACE."); *out = NULL; E_NOINTERFACE for EVERY iid (IUnknown included)        id 21
+//   QueryInterface            WARN("%s not implemented, returning E_NOINTERFACE."); *out = NULL; E_NOINTERFACE for EVERY iid (IUnknown included): a real QueryInterface body (COM contract for a foreign iid), no log line
 //   AddRef / Release          TRACE only: return 2 / 1 (a static object has no count)
 //   Begin / Instruction / End WARN("... stub!"); S_OK, the arguments are not looked at                                                                    id 22 / 23 / 24
 // Layer-private exception: QueryInterface(IID_NxObj) (obj.h: the identity query nx_obj_of / nx_face use on every object of the layer, never an application iid) answers the object itself.
@@ -14,10 +14,9 @@
 #include "d9impl.gen.h"
 #include "face.h"
 extern "C" void fnvnx_wine_fixme(uint32_t id);   // loader/include/fnvnx_reach.h: writes one line and returns
-enum : uint32_t { NX_WINE_FIXME_ShaderValidatorCreate9 = 20, NX_WINE_FIXME_ShaderValidator_QueryInterface = 21, NX_WINE_FIXME_ShaderValidator_Begin = 22,
+enum : uint32_t { NX_WINE_FIXME_ShaderValidatorCreate9 = 20, NX_WINE_FIXME_ShaderValidator_Begin = 22,
                   NX_WINE_FIXME_ShaderValidator_Instruction = 23, NX_WINE_FIXME_ShaderValidator_End = 24 };   // verify/wine_fixme.tsv
 HRESULT STDMETHODCALLTYPE NxShaderValidator9::QueryInterface(REFIID riid, void** out) {
-    fnvnx_wine_fixme(NX_WINE_FIXME_ShaderValidator_QueryInterface);
     if (!out) return E_POINTER;   // Wine writes *out unconditionally (a fault); the defined error is the layer's closed choice (README "Decided with doubt")
     if (!memcmp(&riid, &IID_NxObj, sizeof(GUID))) { *out = static_cast<NxObj*>(this); return S_OK; }
     *out = nullptr; return E_NOINTERFACE;

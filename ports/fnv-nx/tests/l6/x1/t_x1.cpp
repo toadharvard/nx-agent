@@ -33,7 +33,7 @@ int main() {
     g_fix.clear(); void* q = (void*)1; CHECK(v->QueryInterface(IID_IUnknown, &q) == E_NOINTERFACE); CHECK(q == nullptr);
     q = (void*)1; CHECK(v->QueryInterface(IID_IDirect3DDevice9, &q) == E_NOINTERFACE); CHECK(q == nullptr);
     static const GUID zero = {0, 0, 0, {0}}; q = (void*)1; CHECK(v->QueryInterface(zero, &q) == E_NOINTERFACE); CHECK(q == nullptr);
-    CHECK(g_fix.size() == 3 && g_fix[0] == 21); CHECK(v->QueryInterface(IID_IUnknown, nullptr) == E_POINTER);
+    CHECK(g_fix.size() == 0);   /* a real QueryInterface body: no log line */ CHECK(v->QueryInterface(IID_IUnknown, nullptr) == E_POINTER);
     q = nullptr; CHECK(v->QueryInterface(IID_NxObj, &q) == S_OK && q == static_cast<NxObj*>(static_cast<NxShaderValidator9*>(v)));   // the layer's private identity query
     CHECK(v->AddRef() == 2);                                                                                                         // ... took no reference
     void* f = nx_face(v); CHECK((uint8_t*)f + NX_FACE_SIZE == (uint8_t*)static_cast<NxShaderValidator9*>(v) && *(uint32_t*)f == 0x1234); CHECK(nx_unface(f) == (void*)static_cast<NxShaderValidator9*>(v));
