@@ -20,7 +20,7 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` a2453fe9 (w4 @39c4
 | 3a | recipe: bare prog name (as, ld) resolved like the driver (programs: list, then PATH); host x86_64 roots red today (L6A render/gl4) | w16 | claude/fnv-l1-contract-w16 | doing |
 | 3n | recipe check: include dir inside the root's own tree refused (#pragma once identity; L6) | w16 | claude/fnv-l1-contract-w16 | doing |
 | 3i | recipe key isystem (paths inside externals only) for libnx/newlib headers (L6A) | w16 | claude/fnv-l1-contract-w16 | doing |
-| 1u | contract-gate universe for roots without game/link (blocks lift/rt admission) + GalaxyWrp.dll row in l1-contract/mp4 modules.tsv (L3a) | session_01KmtZKQwjYFpEvoHtfEjCcb (w18) | claude/fnv-l1-contract-w18 | doing |
+| 1u | GalaxyWrp: no row (bridge dll, decided (a)); one image-set rule for images.py+modules.py (bridge dll = not an image, not walked); then contract-gate universe for roots without game/link (lift/rt) | session_01KmtZKQwjYFpEvoHtfEjCcb (w18) | claude/fnv-l1-contract-w18 | doing |
 | 3w | recipe: -Werror=attributes required in guest roots (L3a); envcheck before any stage, env failures never cached (L2) | w14 | claude/fnv-l1-contract-w14 | queued |
 | 2b | budget in VERDICT.md, budget gate, delete second build paths | lead | - | blocked by 2 (numbers) |
 | 4a | assumptions gate over verify/ASSUMPTIONS.json (OWNER = 9; field `pending` removed) | session_01KmtZKQZb21XFPG5GMjmjUp | claude/fnv-l1-contract-w10 (from b9f7cf14) | doing: rebase on trunk, drop `pending` + 47 pending records, add L6A, selftests in pinned env |
