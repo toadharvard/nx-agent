@@ -5,7 +5,7 @@
  c  the callback of Begin is never called   d  IUnknown lattice: AddRef 2 / Release 1, QueryInterface E_NOINTERFACE (no log line) for every iid, layer-private IID_NxObj
  e  no allocation: the object file references no allocator (nm)   f  guest build: defined nxb 514/514, undefined set unchanged   g  mutations"""
 import json, os, re, shutil, subprocess, sys, tempfile, concurrent.futures as cf
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install(); import mutsrc
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 D9 = os.path.join(ROOT, "render", "d3d9"); DEV = os.path.join(D9, "dev"); GEN = os.path.join(D9, "gen"); SPEC = os.path.join(D9, "spec", "d3d9_spec.json"); INC = os.path.join(ROOT, "shim", "include")
@@ -69,14 +69,13 @@ def main():
             ("QI IUnknown", "*out = nullptr; return E_NOINTERFACE;", "*out = nullptr; return E_NOINTERFACE;" .replace("E_NOINTERFACE;", "riid.Data1 == 0 ? S_OK : E_NOINTERFACE;")),
             ("Begin result", "fnvnx_wine_fixme(NX_WINE_FIXME_ShaderValidator_Begin); return S_OK;", "fnvnx_wine_fixme(NX_WINE_FIXME_ShaderValidator_Begin); return E_FAIL;"),
             ("Instruction result", "NX_WINE_FIXME_ShaderValidator_Instruction); return S_OK;", "NX_WINE_FIXME_ShaderValidator_Instruction); return E_FAIL;"),
-            ("End id", "ShaderValidator_End = 24", "ShaderValidator_End = 23"), ("object behind face", "::new (g_mem + NX_FACE_SIZE) NxShaderValidator9();", "::new (g_mem + 0) NxShaderValidator9();"),
+            ("End id", "ShaderValidator_End = 24", "ShaderValidator_End = 23"), ("object behind face", "return &g_mem.obj;", "return (IDirect3DShaderValidator9*)&g_mem;"),
             ("QI out null", "*out = nullptr; return E_NOINTERFACE;", "return E_NOINTERFACE;")]
     if "--no-mutations" not in sys.argv:
         def one(i):
             n, old, new_ = muts[i]; d = os.path.join(tmp, f"m{i}"); shutil.copytree(DEV, os.path.join(d, "dev"), ignore=shutil.ignore_patterns("__pycache__"))
             f = os.path.join(d, "dev", "x1_validator.cpp"); t = open(f).read()
-            if old not in t: return i, None
-            open(f, "w").write(t.replace(old, new_, 1)); x, e = build(os.path.join(d, "dev"), os.path.join(d, "b"))
+            open(f, "w").write(mutsrc.apply(t, old, new_, f"x1_validator.cpp #{i}")); x, e = build(os.path.join(d, "dev"), os.path.join(d, "b"))
             if not x: return i, "build"
             r, ps = run(x); return i, (r.returncode != 0 or any(v[1] for v in ps.values()) or not all(p in ps for p in "bcd"))
         with cf.ThreadPoolExecutor(3) as pool:

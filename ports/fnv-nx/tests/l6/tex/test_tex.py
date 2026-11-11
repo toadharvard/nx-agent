@@ -6,7 +6,7 @@
 Oracle = independent python: the env tsv (render/d3d9/env/env_<profile>.tsv, CheckDeviceFormat / CheckDeviceMultiSampleType / GetDeviceCaps rows) + the stated Wine 9.0 rules (res_create.cpp header) + its own
 format layout table from wined3d utils.c (bpp, block info, MAPPABLE, BROKEN_PITCH, YV12 / NV12 height scale) + the NxFormat set parsed from render/native/front/d3d9_state.c (case labels of nx_d3d9_format)."""
 import concurrent.futures as cf, importlib.util, os, re, shutil, subprocess, sys, tempfile
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install(); import mutsrc
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 DEV = os.path.join(ROOT, "render", "d3d9", "dev"); GEN = os.path.join(ROOT, "render", "d3d9", "gen"); ENV = os.path.join(ROOT, "render", "d3d9", "env"); SPEC = os.path.join(ROOT, "render", "d3d9", "spec", "d3d9_spec.json")
@@ -205,8 +205,7 @@ def main():
             part, f, old, new = muts[i]; root = os.path.join(tmp, f"m{i}_root", "d3d9"); mdev = os.path.join(root, "dev"); os.makedirs(root)
             shutil.copytree(DEV, mdev, ignore=shutil.ignore_patterns("__pycache__")); os.symlink(os.path.join(ROOT, "render", "d3d9", "ffp"), os.path.join(root, "ffp"))
             txt = open(os.path.join(mdev, f)).read()
-            if old not in txt: return i, None, "pattern not found"
-            open(os.path.join(mdev, f), "w").write(txt.replace(old, new, 1))
+            open(os.path.join(mdev, f), "w").write(mutsrc.apply(txt, old, new, f"{f} #{i}"))
             x, pr, e = build(mdev, os.path.join(tmp, f"m{i}"), jobs=2)
             if not x: return i, None, e
             rr, ps = run(x, data); return i, ps, rr.returncode

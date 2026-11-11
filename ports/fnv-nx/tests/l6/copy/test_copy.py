@@ -8,7 +8,7 @@ Architecture (decision): the device layer is -m32 (ILP32 like the guest); the GL
 with libnxgl4's sources) and both share one arena file mapped at the same address, so every block the glue allocates (stream words, payloads, descriptors, read-back staging) is at the same address in both.
 Oracle = independent python + C++ reference code in the t_*.cpp: the env tsv, the rules stated in the product file headers, wined3d / Nine formulas."""
 import concurrent.futures as cf, importlib.util, os, re, shutil, subprocess, sys, tempfile
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install(); import mutsrc
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, os.path.join(HERE, "..", "gl4")); import xl  # noqa: E402  (the translator build libnxgl4 links: FNVNX_SHADERS_BUILD, required)
@@ -110,8 +110,7 @@ def gate_report(tmp, prod):
 def mut_build(base, tmp, src_rel, old, new, idx):
     """one mutation: a copy of the source tree with one line changed; only the changed file is recompiled (objects of the base build are reused). -> exe path or error"""
     mroot = os.path.join(tmp, f"m{idx}"); os.makedirs(mroot, exist_ok=True); path = os.path.join(ROOT, "render", "d3d9", src_rel); txt = open(path).read()
-    if old not in txt: return None, "pattern not found"
-    mp = os.path.join(mroot, os.path.basename(src_rel)); open(mp, "w").write(txt.replace(old, new, 1)); o = os.path.join(mroot, "x.o"); objs = dict(base["objs"])
+    mp = os.path.join(mroot, os.path.basename(src_rel)); open(mp, "w").write(mutsrc.apply(txt, old, new, f"{src_rel} #{idx}")); o = os.path.join(mroot, "x.o"); objs = dict(base["objs"])
     if src_rel.startswith("dev/"):
         r = sh(["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O1", "-w", "-I", INC, "-I", base["gen"], "-I", DEV, "-I", BACK, "-I", FRONT, "-I", HERE, "-c", mp, "-o", o]); key = os.path.basename(src_rel) + ".o"
     elif src_rel.startswith("front/"):
@@ -139,10 +138,10 @@ MUTS = [   # (part that must fail, file under render/d3d9, old, new)
     ("b", "dev/copy_update.cpp", "for (uint32_t i = 0; i < si->levels * si->faces; i++) si->sub[i].dirty = 0;", ""),
     ("b", "dev/copy_update.cpp", "NxBox3 b = {(uint32_t)dx, (uint32_t)dy, 0, (uint32_t)(dx + w), (uint32_t)(dy + h), 1};", "NxBox3 b = {0, 0, 0, (uint32_t)w, (uint32_t)h, 1};"),
     ("b", "dev/copy_stretch.cpp", "(!zs && filter == D3DTEXF_LINEAR) ? 1u : 0u", "1u"),
-    ("c", "dev/glue_image.cpp", "if (conv) { nx_d3d9_unconvert(im->fmt, s->w, s->h, src, g.rb * g.rows, t, ob * orows); src = t; }", ""),
+    ("c", "dev/glue_image.cpp", "if (conv) { nx_d3d9_unconvert(im->fmt, s->w, s->h, src, rb * rws, t, ob * orows); src = t; }", ""),
     ("d", "dev/glue_image.cpp", "    nxs_flush();                                                                                          // R3\n", ""),
     ("d", "dev/glue_stream.cpp", "void nxs_image_destroyed(uint32_t id) { if (id && id < NX_MAX_IMAGES && (g.img[id >> 3] >> (id & 7) & 1)) nxs_flush(); }", "void nxs_image_destroyed(uint32_t id) { (void)id; }"),
-    ("d", "dev/glue_query.cpp", "if (!q->gbegun) nxs_query_begin(q->gid, kind(q)); nxs_query_end", "nxs_query_end"),
+    ("d", "dev/glue_query.cpp", "if (!q->gbegun) ok = nxs_query_begin(q->gid, kind(q)) && ok; ok = nxs_query_end(q->gid) && ok;", "ok = nxs_query_end(q->gid) && ok;"),
     ("d", "dev/glue_buf.cpp", "memcpy((uint8_t*)b->gmem + lo, b->mem + lo, hi - lo);", "memcpy((uint8_t*)b->gmem + lo, b->mem + lo, 1);"),
     ("b", "front/front_rt.c", "d[i] = s[i * 4 + 3]; return n;", "d[i] = s[i * 4]; return n;"),
     ("a", "env/env_rules.cpp.in", "if (f == 2u) return (c & 0x02000200u) == 0x02000200u;", "if (f == 2u) return 0;"),

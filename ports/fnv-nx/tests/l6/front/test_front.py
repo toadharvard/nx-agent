@@ -13,7 +13,7 @@
  f  mutations of a copy of the sources: each must make the sweeps fail, or the build (a case removed from a switch)
 The oracles are independent of the C: python tables and rules from wined3d 9.0 (state.c, stateblock.c, shader.c, utils.c) and Nine."""
 import ctypes as C, json, os, re, shutil, subprocess, sys, tempfile
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install(preload=True)
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install(preload=True); import mutsrc
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 FRONT = os.path.join(ROOT, "render", "d3d9", "front"); BACKEND = os.path.join(ROOT, "render", "d3d9", "backend")
@@ -446,8 +446,7 @@ def mutations(tmp, ck, K):
     def one(i):
         f, old, new = MUTATIONS[i]; d = os.path.join(tmp, f"m{i}"); shutil.copytree(FRONT, d, ignore=shutil.ignore_patterns("__pycache__"))
         txt = open(os.path.join(d, f)).read()
-        if old not in txt: return i, "pattern not found"
-        open(os.path.join(d, f), "w").write(txt.replace(old, new, 1)); L = Lib(d, os.path.join(tmp, f"m{i}o"), "m")
+        open(os.path.join(d, f), "w").write(mutsrc.apply(txt, old, new, f"{f} #{i}")); L = Lib(d, os.path.join(tmp, f"m{i}o"), "m")
         if L.lib is None: return i, "build fails" if "switch" in L.err else "unexpected build error: " + L.err
         c = Chk(); sweeps(L, K, c); latch_checks(L, K, c); format_checks(L, K, c); return i, "caught" if c.failed() else "NOT CAUGHT"
     with cf.ThreadPoolExecutor(2) as ex:

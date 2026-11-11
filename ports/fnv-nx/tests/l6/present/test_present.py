@@ -91,7 +91,7 @@ MUTS = [
     ("b", "glue_present.cpp", "if (cbytes && !(cur = nxd3d_gpu_alloc((cbytes + 4095u) & ~(size_t)4095u))) return NXD3D_HOOK_NOMEM;", "if (cbytes && !(cur = nxd3d_gpu_alloc((cbytes + 4095u) & ~(size_t)4095u))) return 1;"),
     ("b", "dev_chain.cpp", "p.cx = L->cur.x - (int32_t)L->cur.hx - cr.left;", "p.cx = L->cur.x - (int32_t)L->cur.hx;"),
     ("b", "dev_chain.cpp", "if (L->cur.visible && L->cur.bgra) { p.cursor", "if (L->cur.bgra) { p.cursor"),
-    ("c", "dev_chain.cpp", "for (uint32_t i = 0; i + 1 < c->nbb; i++) im[i]->gpu = im[i + 1]->gpu;", "for (uint32_t i = 0; i + 1 < c->nbb; i++) im[i]->gpu = im[i]->gpu;"),
+    ("c", "dev_chain.cpp", "for (uint32_t i = 0; i + 1 < c->nbb; i++) bbimg(c, i)->gpu = bbimg(c, i + 1)->gpu;", "for (uint32_t i = 0; i + 1 < c->nbb; i++) bbimg(c, i)->gpu = bbimg(c, i)->gpu;"),
     ("a", "dev_chain.cpp", "p.interval = (flags & D3DPRESENT_FORCEIMMEDIATE) ? 0 :", "p.interval = (flags & D3DPRESENT_FORCEIMMEDIATE) ? 1 :"),
     ("b", "gl4_present.c", "(uint8_t)((v * a + d[c] * (255 - a) + 127) / 255)", "(uint8_t)((v * a + d[c] * (255 - a)) / 255)"),
     ("a", "gl4_read.c", "gl4_img(r->src.image ? r->src.image : g4.swapImage);   /* image 0", "gl4_img(r->src.image);   /* image 0"),
