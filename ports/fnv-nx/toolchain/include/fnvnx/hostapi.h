@@ -145,7 +145,7 @@ typedef struct FnvnxFaultFrame {
     uint32_t fpcr, fpsr;
     uint64_t v[32][2];    /* v0..v31, low then high 64 bits */
 } __attribute__((aligned(16))) FnvnxFaultFrame;
-_Static_assert(sizeof(FnvnxFaultFrame) == 816, "FnvnxFaultFrame is 816 bytes on both sides of the host boundary");
+typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 : -1];   /* both sides of the host boundary */
 /* 16 and above: guest sockets (platform/, table published by the platform lead) */
 
 /* Thread placement (docs/PERF.md 6.3): roles for thread_create's cpu argument; the host's table
