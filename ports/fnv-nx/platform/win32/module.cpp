@@ -1,5 +1,6 @@
 /* module.cpp - modules, command line, process exit, debugging and small kernel32 helpers. */
 #include "w32.h"
+#include "fnvnx_boundary.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,24 +8,32 @@
 /* ---- modules. ONE table, ONE rule: a module is (a) the exe, whose HMODULE is its original image base where the
  * loader (S3) maps the data image, (b) a system DLL - one per distinct DLL name of the export table
  * (fnvnx_win32_system_module), all "loaded" and pinned - or (c) a translated game module registered by the loader
- * with fnvnx_register_module. Whatever is not in the table is not loaded: ERROR_MOD_NOT_FOUND.
+ * with fnvnx_register_module, or (d) a translated game module / the exe, whose image the loader reports with
+ * fnvnx_win32_register_image: its HMODULE is its base address and its exports are read from the PE export directory
+ * in memory. A translated module that is not loaded yet is loaded by the loader (fnvnx_bnd_module_load). Whatever is
+ * not in the table and not loadable is not loaded: ERROR_MOD_NOT_FOUND.
  *
  * Name matching is the loader's search for an already loaded module: case-insensitive; a name without an extension
  * gets ".dll", a trailing '.' means "no extension"; a name without a path is matched by the module's file name, a
  * name with a path by the module's full path ('/' is '\'). */
-#define EXE_MODULE ((HMODULE)(uintptr_t)0x00400000u)
-#define MAX_MODULES 64
+#define EXE_BASE_DEFAULT 0x00400000u   /* the exe's HMODULE until the loader registers its image */
+#define MAX_MODULES 128
 
 struct module {
     char file[64];                 /* "kernel32.dll", "atimgpud.dll" */
     fnvnx_module_resolver resolve; /* registered resolver, or NULL */
     int refs;                      /* registered modules: the loader's own reference + one per LoadLibrary */
     int system;                    /* pinned */
+    int image;                     /* a registered image: HMODULE = base, exports from its PE export directory */
+    uint32_t base, size;           /* the image */
 };
 static struct module g_modules[MAX_MODULES];
 static int g_nmodules;
 static int g_modules_init;
 static os_lock_t g_mod_lock;
+extern "C" HMODULE fnvnx_win32_exe_module(void);
+static uint32_t g_exe_base = EXE_BASE_DEFAULT, g_exe_size;   /* the exe's image (size 0: not registered) */
+#define EXE_MODULE ((HMODULE)(uintptr_t)g_exe_base)
 
 extern "C" const char *fnvnx_win32_system_module(unsigned i);   /* exports.cpp */
 
@@ -140,7 +149,7 @@ static HMODULE module_lookup(const char *name, int take)
     for (int i = 0; i < g_nmodules && !h; i++) {
         module_path(&g_modules[i], full, sizeof full);
         if (!w32_stricmp(f, hp ? full : g_modules[i].file)) {
-            h = (HMODULE)&g_modules[i];
+            h = g_modules[i].image ? (HMODULE)(uintptr_t)g_modules[i].base : (HMODULE)&g_modules[i];
             if (take && !g_modules[i].system)
                 g_modules[i].refs++;
         }
@@ -152,6 +161,9 @@ static HMODULE module_lookup(const char *name, int take)
 /* the table entry of a handle (not the exe) or NULL */
 static struct module *module_of(HMODULE h)
 {
+    for (int i = 0; i < g_nmodules; i++)
+        if (g_modules[i].image && (uintptr_t)g_modules[i].base == (uintptr_t)h)
+            return &g_modules[i];
     struct module *m = (struct module *)h;
     uintptr_t d = (uintptr_t)h - (uintptr_t)g_modules;
     if (d >= sizeof g_modules || d % sizeof g_modules[0])
@@ -185,9 +197,20 @@ extern "C" HMODULE LoadLibraryA(LPCSTR name)
         return NULL;
     }
     HMODULE h = module_lookup(name, 1);
-    if (!h) {
-        w32_log("LoadLibraryA(\"%s\"): no such module on this platform", name);
-        SetLastError(ERROR_MOD_NOT_FOUND);
+    if (h)
+        return h;
+    /* not loaded: a translated module is loaded by the loader (it registers the image); anything else is absent */
+    uint32_t base = 0;
+    uint32_t err = fnvnx_bnd_module_load(name, &base);
+    if (!err) {
+        h = module_lookup(name, 1);
+        if (!h)
+            err = ERROR_DLL_INIT_FAILED;   /* the loader reported success without registering the image */
+    }
+    if (err) {
+        w32_log("LoadLibraryA(\"%s\"): error %u", name, (unsigned)err);
+        SetLastError(err);
+        return NULL;
     }
     return h;
 }
@@ -218,34 +241,197 @@ extern "C" BOOL DisableThreadLibraryCalls(HMODULE h)
     return ok;
 }
 
-extern "C" FARPROC GetProcAddress(HMODULE h, LPCSTR proc)
+/* ---- the PE export directory of a registered image, read from memory (every offset bounds-checked against the
+ * image: a malformed directory is "not found"). 0: found (*rva = the export's address, or *fwd = its forwarder string,
+ * NUL-terminated inside the image); 1: not found. */
+static uint32_t rd32(const uint8_t *p) { uint32_t v; memcpy(&v, p, 4); return v; }
+static uint32_t rd16(const uint8_t *p) { uint16_t v; memcpy(&v, p, 2); return v; }
+static bool in_img(uint32_t n, uint64_t off, uint64_t len) { return off <= n && len <= n - off; }
+
+static int pe_export(uint32_t base, uint32_t n, LPCSTR proc, uint32_t *rva, const char **fwd)
+{
+    const uint8_t *b = (const uint8_t *)(uintptr_t)base;
+    *fwd = NULL;
+    if (!in_img(n, 0, 0x40) || rd16(b) != 0x5A4D)
+        return 1;
+    uint64_t pe = rd32(b + 0x3C), opt = pe + 24;
+    if (!in_img(n, pe, 24) || rd32(b + pe) != 0x4550 || !in_img(n, opt, 96 + 8) || rd16(b + opt) != 0x10B ||
+        rd32(b + opt + 92) < 1)
+        return 1;
+    uint32_t drva = rd32(b + opt + 96), dsize = rd32(b + opt + 100);
+    if (!drva || !dsize || !in_img(n, drva, 40))
+        return 1;
+    const uint8_t *d = b + drva;
+    uint32_t obase = rd32(d + 16), nfun = rd32(d + 20), nnam = rd32(d + 24), af = rd32(d + 28), an = rd32(d + 32),
+             ao = rd32(d + 36);
+    uint64_t idx;
+    if ((uintptr_t)proc <= 0xFFFF) {
+        uint32_t ord = (uint32_t)(uintptr_t)proc;
+        if (ord < obase)
+            return 1;
+        idx = ord - obase;
+    } else {
+        bool found = false;
+        idx = 0;
+        if (!in_img(n, an, 4ull * nnam) || !in_img(n, ao, 2ull * nnam))
+            return 1;
+        size_t pl = strlen(proc);
+        for (uint32_t i = 0; i < nnam && !found; i++) {
+            uint32_t nr = rd32(b + an + 4ull * i);
+            if (!in_img(n, nr, pl + 1) || memcmp(b + nr, proc, pl + 1))
+                continue;
+            idx = rd16(b + ao + 2ull * i);
+            found = true;
+        }
+        if (!found)
+            return 1;
+    }
+    if (idx >= nfun || !in_img(n, af, 4ull * nfun))
+        return 1;
+    uint32_t r = rd32(b + af + 4 * idx);
+    if (!r || !in_img(n, r, 1))
+        return 1;
+    if (r >= drva && r - drva < dsize) {   /* a forwarder: "DLL.Name" or "DLL.#ordinal" inside the directory */
+        uint32_t len = 0;
+        while (r + len < n && b[r + len])
+            len++;
+        if (r + len >= n)
+            return 1;
+        *fwd = (const char *)b + r;
+        return 0;
+    }
+    *rva = r;
+    return 0;
+}
+
+static FARPROC proc_address(HMODULE h, LPCSTR proc, int depth);
+
+/* a forwarder string "DLL.Name" / "DLL.#N": the target module is loaded (as the loader does when it resolves the
+ * forward), then looked up by name or ordinal; a cycle of forwarders ends at depth 16 */
+static FARPROC follow_forwarder(const char *f, int depth)
+{
+    const char *dot = strchr(f, '.');
+    char mod[64];
+    if (!dot || dot == f || (size_t)(dot - f) >= sizeof mod || !dot[1] || depth >= 16) {
+        SetLastError(ERROR_PROC_NOT_FOUND);
+        return NULL;
+    }
+    memcpy(mod, f, (size_t)(dot - f));
+    mod[dot - f] = 0;
+    HMODULE t = LoadLibraryA(mod);
+    if (!t)
+        return NULL;
+    LPCSTR pn = dot + 1;
+    if (*pn == '#') {
+        unsigned long o = strtoul(pn + 1, NULL, 10);
+        if (!o || o > 0xFFFF) {
+            SetLastError(ERROR_PROC_NOT_FOUND);
+            return NULL;
+        }
+        pn = (LPCSTR)(uintptr_t)o;
+    }
+    return proc_address(t, pn, depth + 1);
+}
+
+static FARPROC proc_address(HMODULE h, LPCSTR proc, int depth)
 {
     FARPROC f = NULL;
     char dll[64] = "";
+    uint32_t ibase = 0, isize = 0;
     int known = h == EXE_MODULE;
     os_lock(&g_mod_lock);
     struct module *m = module_of(h);
     if (m) {
         known = 1;
         snprintf(dll, sizeof dll, "%s", m->file);
+        if (m->image) {
+            ibase = m->base;
+            isize = m->size;
+        }
+    } else if (known && g_exe_size) {
+        ibase = g_exe_base;
+        isize = g_exe_size;
     }
     os_unlock(&g_mod_lock);
     if (!known || !proc) {
         SetLastError(known ? ERROR_PROC_NOT_FOUND : ERROR_INVALID_HANDLE);
         return NULL;
     }
+    if (isize) {   /* a registered image: its own export directory */
+        uint32_t rva = 0;
+        const char *fwd = NULL;
+        if (pe_export(ibase, isize, proc, &rva, &fwd)) {
+            SetLastError(ERROR_PROC_NOT_FOUND);
+            return NULL;
+        }
+        return fwd ? follow_forwarder(fwd, depth) : (FARPROC)(uintptr_t)(ibase + rva);
+    }
     if (m) {
         /* by name, or by ordinal ((uintptr_t)proc <= 0xFFFF): the import binding's lookup */
-        if ((uintptr_t)proc > 0xFFFF)
-            f = (FARPROC)fnvnx_win32_lookup_import(dll, proc, FNVNX_IMPORT_BY_NAME);
-        else if ((uintptr_t)proc)
-            f = (FARPROC)fnvnx_win32_lookup_import(dll, NULL, (unsigned)(uintptr_t)proc);
-        if (f && (uintptr_t)proc > 0xFFFF && w32_mem_on)
+        const char *nm = (uintptr_t)proc > 0xFFFF ? proc : NULL;
+        unsigned ord = nm ? FNVNX_IMPORT_BY_NAME : (unsigned)(uintptr_t)proc;
+        f = (FARPROC)fnvnx_win32_lookup_import(dll, nm, ord);
+        if (f && nm && w32_mem_on)
             f = w32_mem_hook_proc(proc, f);   /* the memory lane: D3D9 resources (memtrack.cpp) */
+        /* the value the game gets for a platform function: its import key (product), its address (host tests) */
+        if (f)
+            f = (FARPROC)(uintptr_t)fnvnx_bnd_export_value(dll, nm, ord, (const void *)f);
     }
     if (!f)
         SetLastError(ERROR_PROC_NOT_FOUND);
     return f;
+}
+
+extern "C" FARPROC GetProcAddress(HMODULE h, LPCSTR proc) { return proc_address(h, proc, 0); }
+
+/* ---- images (fnvnx_win32_ext.h) */
+extern "C" HMODULE fnvnx_win32_exe_module(void) { return (HMODULE)(uintptr_t)g_exe_base; }
+static unsigned prot_of(unsigned rwx)
+{
+    if (rwx & 4)
+        return rwx & 2 ? 0x40 /* PAGE_EXECUTE_READWRITE */ : rwx & 1 ? 0x20 /* PAGE_EXECUTE_READ */ : 0x10 /* PAGE_EXECUTE */;
+    return rwx & 2 ? 0x04 /* PAGE_READWRITE */ : rwx & 1 ? 0x02 /* PAGE_READONLY */ : 0x01 /* PAGE_NOACCESS */;
+}
+
+extern "C" void fnvnx_resource_register_image(HMODULE m, const void *base, size_t size);   /* resource.cpp */
+
+extern "C" void fnvnx_win32_register_image(const char *name, uint32_t base, uint32_t size)
+{
+    char f[64], exe[W32_PATH_MAX];
+    int hp;
+    if (!normalize(base_name(name), f, sizeof f, &hp))
+        return;
+    snprintf(exe, sizeof exe, "%s", W32_EXE_PATH);
+    HMODULE h = (HMODULE)(uintptr_t)base;
+    os_lock(&g_mod_lock);
+    init_locked();
+    if (!w32_stricmp(f, base_name(exe))) {   /* the process image: the HMODULE of GetModuleHandle(NULL) */
+        g_exe_base = base;
+        g_exe_size = size;
+    } else {
+        struct module *m = find_locked(f);   /* a system DLL's name, or the same module again: its image is replaced */
+        if (!m && g_nmodules < MAX_MODULES) {
+            m = &g_modules[g_nmodules++];
+            snprintf(m->file, sizeof m->file, "%s", f);
+            m->refs = 1;
+        }
+        if (!m) {
+            os_unlock(&g_mod_lock);
+            return;
+        }
+        m->image = 1;
+        m->base = base;
+        m->size = size;
+    }
+    os_unlock(&g_mod_lock);
+    fnvnx_resource_register_image(h, (const void *)(uintptr_t)base, size);
+    /* the page map: the whole image, then each range of it with its protection */
+    fnvnx_win32_vm_note(base, size, MEM_IMAGE, PAGE_READONLY);
+    struct fnvnx_bnd_range r[96];
+    unsigned n = fnvnx_bnd_image_ranges(base, r, 96);
+    for (unsigned i = 0; i < n && i < 96; i++)
+        if (r[i].va >= base && r[i].size && r[i].size <= size && r[i].va - base <= size - r[i].size)
+            fnvnx_win32_vm_note(r[i].va, r[i].size, MEM_IMAGE, prot_of(r[i].prot));
 }
 
 extern "C" DWORD GetModuleFileNameA(HMODULE h, LPSTR buf, DWORD n)
@@ -423,6 +609,7 @@ extern "C" LPWSTR *CommandLineToArgvW(LPCWSTR cmd, int *argc)
 extern "C" void ExitProcess(UINT code)
 {
     w32_log("ExitProcess(%u)", (unsigned)code);
+    fnvnx_bnd_process_detach();   /* DllMain(DLL_PROCESS_DETACH) of the translated modules */
     fnvnx_threads_flush();   /* the race checker's pairs and the watchdog's summary, when they are on */
     fnvnx_mem_flush();       /* the memory lane's peak, sites and summary, when it is on */
     fnvnx_plat_flush();      /* the platform lane's counts and summary, when it is on */

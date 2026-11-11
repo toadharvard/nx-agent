@@ -156,12 +156,9 @@ void *_recalloc(void *, size_t, size_t);
 int *_errno(void);
 void _invalid_parameter_noinfo(void);
 void _purecall(void);
-/* atexit / _onexit / doexit / exit / _cexit / _c_exit go to S10's game onexit table: fnvnx_xc_atexit, fnvnx_xc_onexit,
- * fnvnx_xc_doexit, provided by startup/guest/onexit.c in the guest and by tests/s4/host_hooks.cpp in the host tests */
-typedef void (*fnvnx_pvfv_)(void);
-int fnvnx_xc_atexit(fnvnx_pvfv_);
-fnvnx_pvfv_ fnvnx_xc_onexit(fnvnx_pvfv_);
-void fnvnx_xc_doexit(int code, int quick, int retcaller);
+/* atexit / _onexit / doexit / exit / _cexit / _c_exit: the exit-handler list of exitlist.cpp (handlers are game function
+ * pointers, run through the boundary's guest_invoke). fnvnx_exit_register: 0, or -1 for a NULL handler / no memory. */
+int fnvnx_exit_register(uintptr_t handler);
 int fnvnx_atexit(void (*)(void));
 typedef int (*_onexit_t)(void);
 _onexit_t _onexit(_onexit_t);

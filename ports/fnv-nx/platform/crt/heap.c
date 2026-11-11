@@ -101,14 +101,10 @@ void _purecall(void)
     os_exit_process(3);
 }
 
-/* ---- termination. The game's handlers go into S10's single MSVC-style onexit table
- * (startup/guest/onexit.c: LIFO across atexit/_onexit/??__F/__cxa_atexit, registration during exit, nested exit). */
-int fnvnx_atexit(void (*f)(void)) { return fnvnx_xc_atexit(f); }
+/* ---- termination: the exit-handler list and doexit are exitlist.cpp's */
+int fnvnx_atexit(void (*f)(void)) { return fnvnx_exit_register((uintptr_t)f); }
 
-_onexit_t _onexit(_onexit_t f) { return (_onexit_t)fnvnx_xc_onexit((fnvnx_pvfv_)f); }
-
-/* doexit(code, quick, retcaller): quick skips the handlers; retcaller returns instead of ending the process */
-void fnvnx_doexit(int code, int quick, int retcaller) { fnvnx_xc_doexit(code, quick, retcaller); }
+_onexit_t _onexit(_onexit_t f) { return fnvnx_exit_register((uintptr_t)f) == 0 ? f : NULL; }
 
 void fnvnx_exit(int code) /* exit */
 {

@@ -22,7 +22,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define EXE_MODULE ((HMODULE)(uintptr_t)0x00400000u)
+extern "C" HMODULE fnvnx_win32_exe_module(void);   // module.cpp: the exe image's base (0x00400000 until the loader registers it)
+#define EXE_MODULE fnvnx_win32_exe_module()
 #define E_INVALID_DATA 13
 #define E_BAD_EXE 193
 

@@ -9,9 +9,21 @@
  * Locking: g_ui_lock guards the tree, is never held across a window procedure call and is not recursive; the *_l
  * helpers expect it held. */
 #include "window_int.h"
+#include "fnvnx_boundary.h"
 
 #include <stdio.h>
 #include <stdlib.h>
+
+/* DefWindowProcA is the window procedure the platform owns. The game sees its export value (the import key in the
+ * product), wherever a procedure is read back (GetWindowLong/GetClassLong), and a procedure it hands in that equals
+ * that value is the platform's default again (stored as NULL): one rule for classes, windows and subclassing. */
+extern "C" LRESULT DefWindowProcA(HWND h, UINT m, WPARAM w, LPARAM l);
+static uintptr_t defproc_value(void)
+{
+    return (uintptr_t)fnvnx_bnd_export_value("user32.dll", "DefWindowProcA", FNVNX_BOUNDARY_BY_NAME, (const void *)DefWindowProcA);
+}
+static WNDPROC proc_in(uintptr_t v) { return v == defproc_value() ? NULL : (WNDPROC)v; }
+static uintptr_t proc_out(WNDPROC p) { return p ? (uintptr_t)p : defproc_value(); }
 
 #define S_CHILD 0x40000000u
 #define S_POPUP 0x80000000u
@@ -249,7 +261,7 @@ extern "C" ATOM RegisterClassA(const WNDCLASSA *wc)
     for (wclass *c = g_classes; c; c = c->next)
         if (!c->sys && c->inst == inst && !w32_stricmp(c->name, n))
             err = 1410;
-    wclass *c = err ? NULL : new_class_l(n, wc->lpfnWndProc, wc->style, wc->cbClsExtra, wc->cbWndExtra, inst, 0);
+    wclass *c = err ? NULL : new_class_l(n, proc_in((uintptr_t)wc->lpfnWndProc), wc->style, wc->cbClsExtra, wc->cbWndExtra, inst, 0);
     if (c) {
         c->icon = wc->hIcon; c->cursor = wc->hCursor; c->bg = wc->hbrBackground;
         set_menu_l(c, (uintptr_t)wc->lpszMenuName);
@@ -315,11 +327,11 @@ static DWORD class_long(HWND h, int idx, bool set, LONG v)
         case -18: old = (uintptr_t)c->cbwnd; if (set) c->cbwnd = (int)v; break;              /* new windows only */
         case -20: old = (uintptr_t)c->cbcls; if (set) err = 1413; break;
         case -24:                                                                           /* GCL_WNDPROC: windows using the old one follow */
-            old = (uintptr_t)c->proc;
+            old = proc_out(c->proc);
             if (set) {
                 for (window *p = g_all; p; p = p->all)
-                    if (p->cls == c && p->proc == c->proc) p->proc = (WNDPROC)(uintptr_t)v;
-                c->proc = (WNDPROC)(uintptr_t)v;
+                    if (p->cls == c && p->proc == c->proc) p->proc = proc_in((uintptr_t)(DWORD)v);
+                c->proc = proc_in((uintptr_t)(DWORD)v);
             }
             break;
         case -26: old = c->style; if (set) c->style = (UINT)v; break;
@@ -1249,7 +1261,7 @@ extern "C" LONG GetWindowLongA(HWND h, int idx)
         else err = 1413;
     } else
         switch (idx) {
-        case GWL_WNDPROC: r = (LONG)(uintptr_t)w->proc; break;   /* only meaningful with 32-bit pointers (ILP32) */
+        case GWL_WNDPROC: r = (LONG)proc_out(w->proc); break;   /* only meaningful with 32-bit pointers (ILP32) */
         case GWL_HINSTANCE: r = (LONG)(uintptr_t)w->inst; break;
         case -8: r = (LONG)(uintptr_t)((w->style & S_CHILD) ? w->parent : w->owner); break;   /* GWL_HWNDPARENT */
         case GWL_ID: r = w->id; break;
@@ -1300,7 +1312,7 @@ extern "C" LONG SetWindowLongA(HWND h, int idx, LONG v)
         switch (idx) {
         case GWL_WNDPROC:
             if (w->tid != GetCurrentThreadId()) err = 5;   /* the procedure of another thread's window */
-            else { old = (LONG)(uintptr_t)w->proc; w->proc = (WNDPROC)(uintptr_t)v; }
+            else { old = (LONG)proc_out(w->proc); w->proc = proc_in((uintptr_t)(DWORD)v); }
             break;
         case GWL_HINSTANCE: old = (LONG)(uintptr_t)w->inst; w->inst = (HINSTANCE)(uintptr_t)v; break;
         case GWL_ID: old = w->id; w->id = v; break;

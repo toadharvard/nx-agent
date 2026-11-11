@@ -933,27 +933,8 @@ void c_initterm(pvfv *first, pvfv *last)
             (*first)();
 }
 
-os_lock_t g_ox_lock = OS_LOCK_INIT;
-onexit_fn *g_ox;
-size_t g_ox_n, g_ox_cap;
-onexit_fn c_onexit(onexit_fn f)
-{
-    if (!f)
-        return NULL;
-    os_lock(&g_ox_lock);
-    if (g_ox_n == g_ox_cap) {
-        size_t cap = g_ox_cap ? g_ox_cap * 2 : 32;
-        onexit_fn *t = (onexit_fn *)realloc(g_ox, cap * sizeof *t);
-        if (!t) {
-            os_unlock(&g_ox_lock);
-            return NULL;
-        }
-        g_ox = t, g_ox_cap = cap;
-    }
-    g_ox[g_ox_n++] = f;
-    os_unlock(&g_ox_lock);
-    return f;
-}
+/* _onexit: the handler (a game function pointer) goes into the exit-handler list (exitlist.cpp) */
+onexit_fn c_onexit(onexit_fn f) { return fnvnx_exit_register((uintptr_t)f) == 0 ? f : NULL; }
 /* __dllonexit: the DLL's own table [*begin, *end), grown by one on the msvcrt heap; both pointers updated */
 onexit_fn c_dllonexit(onexit_fn f, onexit_fn **begin, onexit_fn **end)
 {
@@ -969,15 +950,7 @@ onexit_fn c_dllonexit(onexit_fn f, onexit_fn **begin, onexit_fn **end)
 }
 void c_exit(int code)
 {
-    for (;;) { /* LIFO; handlers registered while running are run next */
-        os_lock(&g_ox_lock);
-        onexit_fn f = g_ox_n ? g_ox[--g_ox_n] : NULL;
-        os_unlock(&g_ox_lock);
-        if (!f)
-            break;
-        f();
-    }
-    fnvnx_doexit(code, 0, 1); /* the exe's own table (startup/guest/onexit.c) when it is linked */
+    fnvnx_doexit(code, 0, 1); /* the handlers, last registered first */
     fnvnx_iob_fflush(NULL);
     ExitProcess((UINT)code);
     os_exit_process(code);

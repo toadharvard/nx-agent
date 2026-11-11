@@ -35,6 +35,7 @@ extern "C" {
 #define ERROR_INVALID_NAME 123L
 #define ERROR_MOD_NOT_FOUND 126L
 #define ERROR_PROC_NOT_FOUND 127L
+#define ERROR_DLL_INIT_FAILED 1114L
 #define ERROR_DIR_NOT_EMPTY 145L
 #define ERROR_ALREADY_EXISTS 183L
 #define ERROR_MORE_DATA 234L
@@ -140,6 +141,11 @@ void fnvnx_win32_set_raise_backend(fnvnx_raise_fn fn);
 /* Test hooks. Module table: -1 for a system DLL (pinned), the reference count of a registered module, 0 for a
  * handle that is no module. Steam: the number of (object, id) registrations of SteamAPI_RegisterCallback. */
 int fnvnx_module_load_count(HMODULE);
+/* The loader reports a mapped image (the exe, or a translated game module after mapping it): the module table gets it
+ * (HMODULE = base; GetModuleHandle/GetModuleFileName/LoadLibrary/GetProcAddress by the PE export directory in memory,
+ * forwarders followed; FindResource* on its resource directory) and the page map records it as MEM_IMAGE, the whole
+ * image and then each of its sections with the protection of its R/W/X bits. `name` is the file name or path. */
+void fnvnx_win32_register_image(const char *name, uint32_t base, uint32_t size);
 int fnvnx_steam_callback_count(void);
 /* The i-th system module (the distinct DLL names of the export table, as the exe imports them), NULL past the last */
 const char *fnvnx_win32_system_module(unsigned i);

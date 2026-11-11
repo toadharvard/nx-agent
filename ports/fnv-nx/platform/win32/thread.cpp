@@ -1,6 +1,7 @@
 /* thread.cpp - threads, thread ids, last error, TlsAlloc slots, the image's implicit TLS and the fake TEB
  * behind __readfsdword. */
 #include "w32.h"
+#include "fnvnx_boundary.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -257,6 +258,7 @@ struct w32_thread_obj {
     int cpu;
     int boost;                     /* OS_THREAD_BOOST from the role hook */
     void *tls_block;               /* the image's TLS block of the new thread, until the thread adopts it */
+    fnvnx_bnd_thread *gt;          /* the game thread context (fnvnx_boundary.h); NULL once released */
     os_cond_t resumed;             /* a thread that suspended itself waits here until its count is 0 */
 };
 
@@ -268,6 +270,8 @@ static void thread_destroy(struct w32_obj *o)
     struct w32_thread_obj *t = (struct w32_thread_obj *)o;
     os_thread_free(t->os); /* detaches a thread that still runs */
     free(t->tls_block);
+    if (t->gt)   /* never ran (closed while suspended, or never started) */
+        fnvnx_bnd_thread_release(t->gt, 0);
 }
 
 static void thread_finish(struct w32_thread_obj *to, DWORD code)
@@ -278,6 +282,15 @@ static void thread_finish(struct w32_thread_obj *to, DWORD code)
     w32_mutexes_abandon_locked(to->tid);
     w32_obj_signal_locked(&to->o);
     os_unlock(&w32_wait_lock);
+}
+
+/* the game thread is over (its start routine returned, or ExitThread): the modules hear of it and the context goes back */
+static void thread_end(struct w32_thread_obj *to)
+{
+    fnvnx_bnd_thread *g = to->gt;
+    to->gt = NULL;
+    if (g)
+        fnvnx_bnd_thread_release(g, 1);
 }
 
 static void thread_trampoline(void *p)
@@ -294,7 +307,8 @@ static void thread_trampoline(void *p)
     self->boost = to->boost;
     if (self->boost)
         os_cpu_boost(1);
-    DWORD code = to->fn(to->arg);
+    DWORD code = W32_DW(fnvnx_bnd_thread_run(to->gt, (fnvnx_gaddr)(uintptr_t)to->arg));
+    thread_end(to);
     if (self->boost) {
         os_cpu_boost(0);
         self->boost = 0;
@@ -334,6 +348,12 @@ extern "C" HANDLE CreateThread(void *sa, SIZE_T stack, LPTHREAD_START_ROUTINE fn
     size_t s = stack ? (size_t)stack : 1024 * 1024;
     if (s < 256 * 1024)
         s = 256 * 1024;
+    t->gt = fnvnx_bnd_thread_create((fnvnx_gaddr)(uintptr_t)fn, s);
+    if (!t->gt) {
+        w32_obj_unref(&t->o);
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return NULL;
+    }
     int place = fnvnx_thread_role_hook ? fnvnx_thread_role_hook((void *)fn, arg) : -1;
     if (place >= 0 && (place & OS_THREAD_BOOST)) {
         t->boost = 1;
@@ -459,6 +479,7 @@ extern "C" void ExitThread(DWORD code)
         self->boost = 0;
     }
     if (to) {
+        thread_end(to);
         thread_finish(to, code);
         self->self_obj = NULL;
         w32_obj_unref(&to->o);
