@@ -1025,26 +1025,6 @@ int fnvnx_iob_vfprintf(struct _iobuf *f, const char *fmt, va_list ap)
     return w == (size_t)n ? n : -1;
 }
 
-int fnvnx_iob_fprintf(struct _iobuf *f, const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    int r = fnvnx_iob_vfprintf(f, fmt, ap);
-    va_end(ap);
-    return r;
-}
-
-int fnvnx_iob_vprintf(const char *fmt, va_list ap) { return fnvnx_iob_vfprintf(&fnvnx_iob[1], fmt, ap); }
-
-int fnvnx_iob_printf(const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    int r = fnvnx_iob_vfprintf(&fnvnx_iob[1], fmt, ap);
-    va_end(ap);
-    return r;
-}
-
 /* ---- positioning, state */
 int fnvnx_iob_fseeki64(struct _iobuf *f, long long off, int whence)
 {
@@ -1105,28 +1085,6 @@ long fnvnx_iob_ftell(struct _iobuf *f)
         return -1;
     }
     return (long)r;
-}
-
-int fnvnx_iob_fgetpos(struct _iobuf *f, long long *pos)
-{
-    if (!pos) {
-        errno = EINVAL;
-        return -1;
-    }
-    long long r = fnvnx_iob_ftelli64(f);
-    if (r < 0)
-        return -1;
-    *pos = r;
-    return 0;
-}
-
-int fnvnx_iob_fsetpos(struct _iobuf *f, const long long *pos)
-{
-    if (!pos) {
-        errno = EINVAL;
-        return -1;
-    }
-    return fnvnx_iob_fseeki64(f, *pos, 0);
 }
 
 void fnvnx_iob_rewind(struct _iobuf *f)

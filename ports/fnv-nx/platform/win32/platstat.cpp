@@ -1,7 +1,7 @@
 /* platstat.cpp - the platform lane's recorder (D25 #3, #4, #6; tools/perf/PLAT.md).
  *
  * Off until fnvnx_plat_start / fnvnx_plat_autostart (tools/perf/plat_autostart.c). While on, the stand-ins report:
- *   unimpl   a call to an entry whose function is missing (FNVNX_UNIMPL(): E_NOTIMPL methods, an unsupported TEB offset, ...); an import with no export is the boot's own line
+ *   unimpl   a call to an entry whose function is missing (fnvnx_plat_note(FNVNX_PLAT_UNIMPL, ...): an unsupported TEB offset, a Wine 9.0 simplified body (fnvnx_wine_fixme), ...); an import with no export is the boot's own line
  *            ("fnvnx boot: import <dll>!<name>: no export") and its call a trap (tools/perf/plat.py reads both)
  *   open     a failed file open (CreateFileA, the CRT's fopen / _open): the path's class (bsa, esm, save, ini,
  *            other), the Win32 error, whether a case-insensitive scan of the parent directory finds the name
@@ -66,6 +66,19 @@ static uint32_t hstr(const char *s)
 }
 
 static void start_flusher(void);
+
+/* The log line of a body that does what Wine 9.0's simplified implementation does (verify/VERDICT.md "Bodies that do what
+ * Wine 9.0's simplified implementation does", verify/wine_fixme.tsv): one line at every call, as Wine's FIXME, whether the plat
+ * lane is on or not; while it is on the call is also counted as an "unimpl" entry named wine-fixme with the id. */
+extern "C" void fnvnx_wine_fixme(uint32_t id)
+{
+    char l[48];
+    snprintf(l, sizeof l, "fixme: wine-9.0 id %u", (unsigned)id);
+    emit(l);
+    char d[24];
+    snprintf(d, sizeof d, "id %u", (unsigned)id);
+    fnvnx_plat_note(FNVNX_PLAT_UNIMPL, "wine-fixme", FNVNX_PLAT_RA, d);
+}
 
 extern "C" void fnvnx_plat_note(int cls, const char *name, unsigned caller, const char *detail)
 {

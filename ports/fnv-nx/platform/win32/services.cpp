@@ -254,11 +254,6 @@ extern "C" HRESULT CoCreateGuid(GUID *g)
 }
 
 
-/* ---- NVAPI: no nvapi.dll on the Switch. The exe's NvAPI_* entry points are `jmp [slot]` thunks into the
- * table nvapi_QueryInterface fills at run time (0x009fead6, 0x009feae8, 0x009febd8; crt_symbols.tsv class thunk);
- * with the library absent each returns NVAPI_API_NOT_INITIALIZED (-4) and the renderer takes its non-NVIDIA path
- * (R2 recon2-002, R6 recon6-007). Any arguments, nothing written. */
-/* fnvnx_nvapi_not_initialized: win32/env_const.cpp, from env_const.tsv (ENV:M2) */
 /* ---- steam_api / galaxywrp.dll: the public Steamworks contract in the state "Steam client not running"
  * (ENV_TRUTH M6). SteamAPI_Init fails every time (no client to connect to), SteamAPI_IsSteamRunning is false, every
  * interface accessor is NULL (no ISteam* object exists without a client), no callback is ever delivered (callbacks

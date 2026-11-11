@@ -13,6 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+extern "C" void fnvnx_wine_fixme(uint32_t id);   /* one log line: the body does what wine-9.0 does (verify/wine_fixme.tsv row `id`) */
+
 namespace dsh {
 
 typedef int32_t HR;
@@ -39,6 +41,8 @@ DSH_L(IID_IEnumFilters_, 0x56a86893);
 DSH_L(IID_IBaseFilter_, 0x56a86895);
 DSH_L(IID_IReferenceClock_, 0x56a86897);
 DSH_L(IID_IMediaFilter_, 0x56a86899);
+DSH_L(IID_IMediaSample_, 0x56a8689a);
+DSH_L(IID_IMemAllocator_, 0x56a8689c);
 DSH_L(IID_IGraphVersion_, 0x56a868ab);
 DSH_L(IID_IMediaEventSink_, 0x56a868a2);
 DSH_L(IID_IFilterMapper_, 0x56a868a3);
@@ -56,6 +60,7 @@ DSH_L(IID_IMediaEvent_, 0x56a868b6);
 DSH_L(IID_IMediaEventEx_, 0x56a868c0);
 DSH_G(IID_IEnumMediaTypes_, 0x89c31040, 0x846b, 0x11ce, 0x97, 0xd3, 0x00, 0xaa, 0x00, 0x55, 0x59, 0x5a);
 DSH_G(IID_IMediaSeeking_, 0x36b73880, 0xc2c8, 0x11cf, 0x8b, 0x46, 0x00, 0x80, 0x5f, 0x6c, 0xef, 0x60);
+DSH_G(IID_IMediaSample2_, 0x36b73884, 0xc2c8, 0x11cf, 0x8b, 0x46, 0x00, 0x80, 0x5f, 0x6c, 0xef, 0x60);
 DSH_G(IID_IFilterGraph2_, 0x36b73882, 0xc2c8, 0x11cf, 0x8b, 0x46, 0x00, 0x80, 0x5f, 0x6c, 0xef, 0x60);
 /* classes */
 DSH_E(CLSID_FilterGraph_, 0xe436ebb3);
@@ -77,7 +82,7 @@ DSH_G(FORMAT_None_, 0x0f6417d6, 0xc318, 0x11d0, 0xa4, 0x3f, 0x00, 0xa0, 0xc9, 0x
 DSH_T(TIME_FORMAT_SAMPLE_, 0x7b785572);
 DSH_T(TIME_FORMAT_MEDIA_TIME_, 0x7b785574);
 
-const HR S_OK_ = 0, S_FALSE_ = 1, E_NOTIMPL_ = (HR)0x80004001, E_NOINTERFACE_ = (HR)0x80004002, E_POINTER_ = (HR)0x80004003,
+const HR S_OK_ = 0, S_FALSE_ = 1, E_NOINTERFACE_ = (HR)0x80004002, E_POINTER_ = (HR)0x80004003,
          E_ABORT_ = (HR)0x80004004, E_FAIL_ = (HR)0x80004005, E_UNEXPECTED_ = (HR)0x8000FFFF, E_INVALIDARG_ = (HR)0x80070057,
          E_OUTOFMEMORY_ = (HR)0x8007000E, CLASS_E_NOAGGREGATION_ = (HR)0x80040110,
          VFW_E_INVALID_DIRECTION_ = (HR)0x80040208, VFW_E_NOT_CONNECTED_ = (HR)0x80040209, VFW_E_NO_ACCEPTABLE_TYPES_ = (HR)0x80040207,
@@ -85,7 +90,12 @@ const HR S_OK_ = 0, S_FALSE_ = 1, E_NOTIMPL_ = (HR)0x80004001, E_NOINTERFACE_ = 
          VFW_E_CANNOT_RENDER_ = (HR)0x80040218, VFW_E_NOT_STOPPED_ = (HR)0x80040224, VFW_E_TYPE_NOT_ACCEPTED_ = (HR)0x8004022A,
          VFW_E_DUPLICATE_NAME_ = (HR)0x8004022D, VFW_E_START_TIME_AFTER_END_ = (HR)0x80040228, VFW_E_ENUM_OUT_OF_SYNC_ = (HR)0x80040203,
          VFW_E_UNKNOWN_FILE_TYPE_ = (HR)0x80040240, VFW_E_NOT_IN_GRAPH_ = (HR)0x8004025F,
-         VFW_E_UNSUPPORTED_AUDIO_ = (HR)0x8004025C, VFW_E_NO_TRANSPORT_ = (HR)0x80040266,
+         VFW_E_UNSUPPORTED_AUDIO_ = (HR)0x8004025C,
+         VFW_E_BUFFER_NOTSET_ = (HR)0x8004020C, VFW_E_BUFFER_OVERFLOW_ = (HR)0x8004020D, VFW_E_BADALIGN_ = (HR)0x8004020E,
+         VFW_E_ALREADY_COMMITTED_ = (HR)0x8004020F, VFW_E_BUFFERS_OUTSTANDING_ = (HR)0x80040210, VFW_E_NOT_COMMITTED_ = (HR)0x80040211,
+         VFW_E_SIZENOTSET_ = (HR)0x80040212, VFW_E_WRONG_STATE_ = (HR)0x80040227, VFW_E_TIMEOUT_ = (HR)0x8004022E,
+         VFW_E_SAMPLE_TIME_NOT_SET_ = (HR)0x80040249, VFW_E_MEDIA_TIME_NOT_SET_ = (HR)0x80040251, VFW_S_NO_STOP_TIME_ = (HR)0x00040270,
+         HR_ERROR_HANDLE_EOF_ = (HR)0x80070026, HR_ERROR_INVALID_HANDLE_ = (HR)0x80070006, VFW_E_NO_TRANSPORT_ = (HR)0x80040266,
          VFW_S_DUPLICATE_NAME_ = (HR)0x0004022D, VFW_S_STATE_INTERMEDIATE_ = (HR)0x00040237, VFW_S_PARTIAL_RENDER_ = (HR)0x00040242,
          VFW_S_CANT_CUE_ = (HR)0x00040268, VFW_S_NO_MORE_ITEMS_ = (HR)0x00040103,
          DISP_E_UNKNOWNINTERFACE_ = (HR)0x80020001, DISP_E_MEMBERNOTFOUND_ = (HR)0x80020003, DISP_E_TYPEMISMATCH_ = (HR)0x80020005,
@@ -179,6 +189,36 @@ struct AsyncReader : Unk {   /* IAsyncReader */
     virtual HR BeginFlush() = 0;
     virtual HR EndFlush() = 0;
 };
+struct AllocProps { int32_t cBuffers, cbBuffer, cbAlign, cbPrefix; };   /* ALLOCATOR_PROPERTIES */
+struct IMediaSample_ : Unk {   /* IMediaSample2: strmif.h / axcore.idl order */
+    virtual HR GetPointer(uint8_t **) = 0;
+    virtual int32_t GetSize() = 0;
+    virtual HR GetTime(LL *, LL *) = 0;
+    virtual HR SetTime(LL *, LL *) = 0;
+    virtual HR IsSyncPoint() = 0;
+    virtual HR SetSyncPoint(int) = 0;
+    virtual HR IsPreroll() = 0;
+    virtual HR SetPreroll(int) = 0;
+    virtual int32_t GetActualDataLength() = 0;
+    virtual HR SetActualDataLength(int32_t) = 0;
+    virtual HR GetMediaType(struct MT **) = 0;
+    virtual HR SetMediaType(struct MT *) = 0;
+    virtual HR IsDiscontinuity() = 0;
+    virtual HR SetDiscontinuity(int) = 0;
+    virtual HR GetMediaTime(LL *, LL *) = 0;
+    virtual HR SetMediaTime(LL *, LL *) = 0;
+    virtual HR GetProperties(uint32_t, uint8_t *) = 0;
+    virtual HR SetProperties(uint32_t, const uint8_t *) = 0;
+};
+struct IMemAllocator_ : Unk {
+    virtual HR SetProperties(AllocProps *request, AllocProps *actual) = 0;
+    virtual HR GetProperties(AllocProps *) = 0;
+    virtual HR Commit() = 0;
+    virtual HR Decommit() = 0;
+    virtual HR GetBuffer(IMediaSample_ **, LL *start, LL *end, uint32_t flags) = 0;
+    virtual HR ReleaseBuffer(IMediaSample_ *) = 0;
+};
+IMemAllocator_ *make_mem_allocator();   /* the platform's CLSID_MemoryAllocator object (quartz memallocator), refcount 1; null: out of memory */
 struct IFilterGraph_ : Unk {
     virtual HR AddFilter(IBaseFilter_ *filter, const WCH *name) = 0;
     virtual HR RemoveFilter(IBaseFilter_ *filter) = 0;
@@ -387,7 +427,6 @@ namespace dsh {
 /* private IIDs: our own pin / filter behind an IPin / IBaseFilter (no RTTI: the game's toolchain has none) */
 DSH_G(IID_DshPin_, 0x6e766e78, 0x7064, 0x7069, 0x6e, 0x70, 0x69, 0x6e, 0x00, 0x00, 0x00, 0x01);
 DSH_G(IID_DshFilter_, 0x6e766e78, 0x7064, 0x7069, 0x66, 0x69, 0x6c, 0x74, 0x00, 0x00, 0x00, 0x02);
-const HR VFW_E_BUFFER_OVERFLOW_ = (HR)0x8004020D;
 
 template <class T> struct Vec {
     T *p = nullptr;
@@ -471,6 +510,13 @@ struct BPin : IPin_, AsyncReader {   /* IAsyncReader is served only by a file so
     uintptr_t file = 0;     /* serves: the layer's file handle and size */
     LL fsize = 0;
     bool serves = false;
+    /* serves: the overlapped half of IAsyncReader (filesource.c): requests are read when made and handed back by WaitForNext */
+    struct Req { void *sample; uintptr_t cookie; LL pos; uint32_t size; };
+    Vec<Req> reqs;
+    bool flushing = false;
+    os_lock_t rlock = {0};
+    uintptr_t flush_evt = 0;   /* manual-reset event, set while flushing (wakes WaitForNext) */
+    bool rd_at(LL pos, long len, uint8_t *buf, uint32_t *got, uint32_t *err);   /* a read at an offset: false + Win32 error */
     BPin(BFilter *o, int d, const char *n);
     virtual ~BPin();
     HR QueryInterface(const void *iid, void **out) override;

@@ -90,20 +90,6 @@
 /* file status flags of SOCK_GETFL/SETFL (the Linux values) */
 #define FNVNX_WO_RDWR 2
 #define FNVNX_WO_NONBLOCK 0x800
-/* getaddrinfo: hint flags */
-#define FNVNX_WIRE_AI_LIST(X) \
-    X(AI_PASSIVE, 0x1) X(AI_CANONNAME, 0x2) X(AI_NUMERICHOST, 0x4) X(AI_V4MAPPED, 0x8) X(AI_ALL, 0x10) \
-    X(AI_ADDRCONFIG, 0x20) X(AI_NUMERICSERV, 0x400)
-/* getaddrinfo failures: GAI_OPEN's result is -FNVNX_WEAI_x (kept apart from the errno values) */
-#define FNVNX_WIRE_EAI_LIST(X) \
-    X(EAI_BADFLAGS, 2001) X(EAI_NONAME, 2002) X(EAI_AGAIN, 2003) X(EAI_FAIL, 2004) X(EAI_FAMILY, 2005) \
-    X(EAI_SOCKTYPE, 2006) X(EAI_SERVICE, 2007) X(EAI_MEMORY, 2008) X(EAI_SYSTEM, 2009) X(EAI_OVERFLOW, 2010)
-#define FNVNX_WEAI_BADFLAGS 2001
-#define FNVNX_WEAI_FAMILY 2005
-#define FNVNX_WEAI_SOCKTYPE 2006
-#define FNVNX_WEAI_MEMORY 2008
-#define FNVNX_WEAI_SYSTEM 2009
-
 /* ---- structs (fixed width, little endian, no padding surprises; numbers are values, never byte-swapped fields) */
 typedef struct FnvnxWireSockaddr {
     uint16_t family;       /* FNVNX_WAF_*; WAF_UNSPEC = no address */
@@ -124,16 +110,6 @@ typedef struct FnvnxWireLinger {
 typedef struct FnvnxWireTimeval {
     int64_t sec, usec;
 } FnvnxWireTimeval;
-typedef struct FnvnxWireAddrinfo {
-    int32_t flags;         /* FNVNX_WIRE_AI_LIST bits */
-    int32_t family;        /* FNVNX_WAF_* */
-    int32_t socktype;      /* FNVNX_WSOCK_*, or 0 */
-    int32_t protocol;      /* IANA, or 0 */
-    uint32_t canon_len;    /* bytes of the canonical name that follow this record, NUL included; 0 = none */
-    uint32_t reserved;
-    FnvnxWireSockaddr addr;   /* in a result; unused in hints */
-} FnvnxWireAddrinfo;
-/* a GAI_FETCH record occupies sizeof(FnvnxWireAddrinfo) + ((canon_len + 7) & ~7) bytes */
 
 #if defined(__cplusplus)
 #define FNVNX_SA static_assert
@@ -141,10 +117,9 @@ typedef struct FnvnxWireAddrinfo {
 #define FNVNX_SA _Static_assert
 #endif
 FNVNX_SA(sizeof(FnvnxWireSockaddr) == 32 && sizeof(FnvnxWirePollfd) == 8 && sizeof(FnvnxWireLinger) == 8 &&
-         sizeof(FnvnxWireTimeval) == 16 && sizeof(FnvnxWireAddrinfo) == 56, "socket wire struct sizes");
+         sizeof(FnvnxWireTimeval) == 16, "socket wire struct sizes");
 FNVNX_SA(__builtin_offsetof(FnvnxWireSockaddr, port) == 2 && __builtin_offsetof(FnvnxWireSockaddr, addr) == 4 &&
          __builtin_offsetof(FnvnxWireSockaddr, flowinfo) == 20 && __builtin_offsetof(FnvnxWireSockaddr, scope_id) == 24 &&
-         __builtin_offsetof(FnvnxWireAddrinfo, canon_len) == 16 && __builtin_offsetof(FnvnxWireAddrinfo, addr) == 24 &&
          __builtin_offsetof(FnvnxWirePollfd, events) == 4 && __builtin_offsetof(FnvnxWirePollfd, revents) == 6 &&
          __builtin_offsetof(FnvnxWireTimeval, usec) == 8, "socket wire struct offsets");
 

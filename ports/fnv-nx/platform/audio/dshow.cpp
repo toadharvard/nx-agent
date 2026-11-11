@@ -432,9 +432,10 @@ struct Control final : IMediaControl_ {
     HR Stop() override;
     HR GetState(long ms, long *state) override;
     HR RenderFile(const WCH *) override;
-    HR AddSourceFilter(const WCH *, void **) override { return FNVNX_UNIMPL(), E_NOTIMPL_; }   /* needs IFilterInfo automation objects */
-    HR get_FilterCollection(void **) override { return FNVNX_UNIMPL(), E_NOTIMPL_; }          /* IAMCollection of IFilterInfo */
-    HR get_RegFilterCollection(void **) override { return FNVNX_UNIMPL(), E_NOTIMPL_; }
+    /* Wine 9.0's quartz returns S_OK from all three after a FIXME and leaves the out pointer alone */
+    HR AddSourceFilter(const WCH *, void **) override { fnvnx_wine_fixme(200); return S_OK_; }
+    HR get_FilterCollection(void **) override { fnvnx_wine_fixme(201); return S_OK_; }
+    HR get_RegFilterCollection(void **) override { fnvnx_wine_fixme(202); return S_OK_; }
     HR StopWhenReady() override;
 };
 struct Event final : IMediaEventEx_ {

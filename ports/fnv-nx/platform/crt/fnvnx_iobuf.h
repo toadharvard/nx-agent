@@ -108,16 +108,11 @@ int fnvnx_iob_ungetc(int c, struct _iobuf *f);
 char *fnvnx_iob_fgets(char *buf, int n, struct _iobuf *f);
 int fnvnx_iob_fputs(const char *s, struct _iobuf *f);
 int fnvnx_iob_puts(const char *s);
-int fnvnx_iob_fprintf(struct _iobuf *f, const char *fmt, ...);          /* MSVC formats (%I64d ...) */
 int fnvnx_iob_vfprintf(struct _iobuf *f, const char *fmt, va_list ap);
-int fnvnx_iob_printf(const char *fmt, ...);                              /* to __iob_func()[1] */
-int fnvnx_iob_vprintf(const char *fmt, va_list ap);
 int fnvnx_iob_fseek(struct _iobuf *f, long off, int whence);
 long fnvnx_iob_ftell(struct _iobuf *f);
 int fnvnx_iob_fseeki64(struct _iobuf *f, long long off, int whence);
 long long fnvnx_iob_ftelli64(struct _iobuf *f);
-int fnvnx_iob_fgetpos(struct _iobuf *f, long long *pos);                 /* MSVC fpos_t is __int64 */
-int fnvnx_iob_fsetpos(struct _iobuf *f, const long long *pos);
 void fnvnx_iob_rewind(struct _iobuf *f);
 int fnvnx_iob_feof(struct _iobuf *f);
 int fnvnx_iob_ferror(struct _iobuf *f);
@@ -181,8 +176,6 @@ inline int fseek(_iobuf *f, long o, int w) { return fnvnx_iob_fseek(f, o, w); }
 inline long ftell(_iobuf *f) { return fnvnx_iob_ftell(f); }
 inline int _fseeki64(_iobuf *f, long long o, int w) { return fnvnx_iob_fseeki64(f, o, w); }
 inline long long _ftelli64(_iobuf *f) { return fnvnx_iob_ftelli64(f); }
-inline int fgetpos(_iobuf *f, long long *p) { return fnvnx_iob_fgetpos(f, p); }
-inline int fsetpos(_iobuf *f, const long long *p) { return fnvnx_iob_fsetpos(f, p); }
 inline void rewind(_iobuf *f) { fnvnx_iob_rewind(f); }
 inline int feof(_iobuf *f) { return fnvnx_iob_feof(f); }
 inline int ferror(_iobuf *f) { return fnvnx_iob_ferror(f); }

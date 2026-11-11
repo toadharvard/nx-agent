@@ -55,7 +55,7 @@ void fnvnx_path_reset(const char *root);        /* default mounts under root (NU
 DWORD fnvnx_path_map(const char *win_path, char *host, size_t host_size);
 void fnvnx_set_command_line(int argc, char **argv);
 /* the first run's profile files, as the PC launcher writes them (platform/win32/profile.cpp); a mask of what it made */
-#define FNVNX_PROFILE_INI 1u      /* My Games\FalloutNV\Fallout.ini: a copy of Fallout_default.ini */
+/* bit 1 is retired: Fallout.ini is made by the exe itself, not by this layer */
 #define FNVNX_PROFILE_PREFS 2u    /* My Games\FalloutNV\FalloutPrefs.ini: Fallout_default.ini + [Display] sD3DDevice */
 #define FNVNX_PROFILE_PLUGINS 4u  /* AppData\Local\FalloutNV\plugins.txt: empty, as the launcher leaves it */
 unsigned fnvnx_first_run_profile(void);
@@ -119,8 +119,6 @@ void fnvnx_plat_note(int cls, const char *name, unsigned caller, const char *det
 /* win: the Windows path as the game gave it; host: what the mapper made of it (NULL if it failed); api: the entry */
 void fnvnx_plat_open_failed(const char *win, const char *host, unsigned err, unsigned caller, const char *api);
 #define FNVNX_PLAT_RA ((unsigned)(unsigned long)__builtin_return_address(0))
-/* in a body that answers for a missing function (named by the enclosing function) */
-#define FNVNX_UNIMPL() (fnvnx_plat_on ? fnvnx_plat_note(FNVNX_PLAT_UNIMPL, __PRETTY_FUNCTION__, FNVNX_PLAT_RA, 0) : (void)0)
 /* builtin modules for LoadLibraryA/GetProcAddress (xinput1_3.dll, ... registered by S6/S7) */
 typedef FARPROC (*fnvnx_module_resolver)(const char *proc);
 void fnvnx_register_module(const char *dll_name, fnvnx_module_resolver resolve);
