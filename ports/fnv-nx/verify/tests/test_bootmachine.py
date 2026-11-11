@@ -134,13 +134,21 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("recommit-protected", plat(5, A, 0x2000, 0, 2));
     pa[0x400] = 0x55;
     num("zero-rw-after-protect", pa[0] | (pa[0x400] - 0x55));
+    plat(5, A + 0x10000, 0x2000, 0, 2);
+    pa[0x4000] = 0x66; pa[0x4400] = 0x77;
+    num("partial-decommit", plat(6, A + 0x10000, 0x1000, 0, 2));
+    num("partial-zero-writable", pa[0x4000] | (pa[0x4400] - 0x77));
+    pa[0x4000] = 0x88;
+    num("partial-write", pa[0x4000]);
     num("mapfixed-over-resv", fnvnx_hcall3(H->map_fixed, A, 0x1000, H->heap_base + 0x20000));
     num("release", plat(7, A, 0, 0, 1));
     num("release-again", plat(7, A, 0, 0, 1));
     num("release-inner", plat(7, A + 0x10000, 0, 0, 1));
     num("resA2", plat(4, 0, 0x8000000, 0, 2));
     num("hint-overlap", plat(4, A + 0x10000, 0x10000, 0, 2));
-    num("hint-nogo", plat(4, 0x500000, 0x10000, 0, 2));
+    num("hint-exe", plat(4, 0x500000, 0x10000, 0, 2));
+    num("hint-module", plat(4, 0x1420000, 0x10000, 0, 2));
+    num("hint-gap", plat(4, 0x3000000, 0x10000, 0, 2));
     num("hint-above-4g", plat(4, 0xFFFF0000u, 0x20000, 0, 2));
     num("hint-in-image", plat(4, H->guest_base, 0x10000, 0, 2));
     num("hint-size0", plat(4, 0x20000000, 0, 0, 2));
@@ -295,7 +303,7 @@ def symbol(elf, name):
 
 
 def make_plan(elf_bytes):
-    rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x2100000)]
+    rows = [("keys", 0xf0000, 0x200000), ("exe", 0x400000, 0x1409000), ("mod1", 0x1410000, 0x1500000)]
     plan = bootlayout.plan(bootlayout.parse_elf(elf_bytes), rows, 1 << 20)
     # the free range for map_fixed: the exe image window; keys stays never-mapped
     return plan
@@ -426,11 +434,20 @@ def main():
     A, B, A2 = vals.get("resA", 0), vals.get("resB", 0), vals.get("resA2", 0)
     textv = "\n".join(linesv)
     case("vm: run exits 7", rv["reason"] == "exit" and rv["exit_code"] == 7, (rv, textv))
-    case("vm: hintless 128 MiB reserve: lowest 64 KiB multiple >= 0x02100000 clear of the image",
-         A >= 0x02100000 and A % 0x10000 == 0 and not (A < image_hi and plan0["regions"]["image"]["lo"] < A + 0x8000000)
-         and A == (image_hi + 0xFFFF) // 0x10000 * 0x10000, hex(A))
-    case("vm: the second reserve (64 KiB) does not overlap the first and takes the lowest gap, 0x02100000",
-         B == 0x02100000 and not (B < A + 0x8000000 and A < B + 0x10000), (hex(A), hex(B)))
+    def lowest(size, taken):
+        """reference: the lowest 64 KiB multiple >= 0x10000 below 4 GiB clear of the plan's regions, free ranges and taken"""
+        blocked = [(r["lo"], r["hi"]) for r in plan0["regions"].values()] + [(f["lo"], f["hi"]) for f in plan0["free"]] + taken
+        c = 0x10000
+        while c + size <= 1 << 32:
+            if not any(c < b and a < c + size for a, b in blocked):
+                return c
+            c += 0x10000
+    expA = lowest(0x8000000, [])
+    expB = lowest(0x10000, [(expA, expA + 0x8000000)])
+    case("vm: hintless 128 MiB reserve is the lowest fitting 64 KiB multiple by the rule (plan with two image ranges)",
+         A == expA and A % 0x10000 == 0 and A >= 0x10000, (hex(A), hex(expA)))
+    case("vm: the second reserve (64 KiB) does not overlap the first and is the lowest fitting address",
+         B == expB and not (B < A + 0x8000000 and A < B + 0x10000), (hex(A), hex(B), hex(expB)))
     case("vm: commit, write, decommit, recommit gives zeros", all(vals.get(k) == v for k, v in (
         ("commit", 0), ("rb", 0x33), ("decommit", 0), ("recommit", 0), ("zero", 0))), textv)
     case("vm: recommit of a committed page keeps its content", vals.get("recommit-keeps") == 0x33, textv)
@@ -442,17 +459,20 @@ def main():
     case("vm: VM_PROTECT with an X bit is refused", vals.get("protect-x") == 0xD801, textv)
     case("vm: recommit after decommit is RW and zero whatever the protection was",
          vals.get("recommit-protected") == 0 and vals.get("zero-rw-after-protect") == 0, textv)
+    case("vm: decommit of part of an extent zeroes it and it stays accessible (host_vm.inc)",
+         vals.get("partial-decommit") == 0 and vals.get("partial-zero-writable") == 0 and vals.get("partial-write") == 0x88, textv)
     case("vm: map_fixed over a reservation refused", vals.get("mapfixed-over-resv") == 0xD401, textv)
     case("vm: release frees the whole reservation; a non-base address is refused",
          vals.get("release") == 0 and vals.get("release-again") == 0xCC01 and vals.get("release-inner") == 0xCC01, textv)
     case("vm: reserve after release gives the same address", A2 == A, (hex(A), hex(A2)))
-    case("vm: hints: overlap, no-go range, above 4 GiB, image, size 0 fail; a free hint is exact (64 KiB rounded)",
-         all(vals.get(k) == 0 for k in ("hint-overlap", "hint-nogo", "hint-above-4g", "hint-in-image", "hint-size0",
-                                        "hint-ok-overlap")) and vals.get("hint-ok") == 0x20000000, textv)
+    case("vm: hints: overlap, inside the exe or a module range, above 4 GiB, image, size 0 fail; a hint in a gap or free address is exact (64 KiB rounded)",
+         all(vals.get(k) == 0 for k in ("hint-overlap", "hint-exe", "hint-module", "hint-above-4g", "hint-in-image", "hint-size0",
+                                        "hint-ok-overlap")) and vals.get("hint-ok") == 0x20000000
+         and vals.get("hint-gap") == 0x3000000, textv)
     kinds = [e["kind"] for e in rv["events"]]
     case("vm: every refusal is an event with its result", kinds == [
         "vm_commit-refused"] * 3 + ["vm_protect-refused"] * 2 + ["map_fixed-refused"] + ["vm_release-refused"] * 2
-        + ["vm_reserve-refused"] * 6 + ["thread_activity-refused"] * 3, kinds)
+        + ["vm_reserve-refused"] * 7 + ["thread_activity-refused"] * 3, kinds)
     case("platform: thread_activity: unknown / tid 0 -> 0xE401, new thread -> 0xFA01, pause holds the worker, resume runs it",
          vals.get("tact-nothread") == 0xE401 and vals.get("tact-tid0") == 0xE401 and vals.get("tact-new") == 0xFA01
          and vals.get("tact-pause") == 0 and vals.get("paused-flag") == 0 and vals.get("tact-resume") == 0
@@ -469,7 +489,7 @@ def main():
     case("vm: write to a VM_PROTECT read-only committed page: fault", rf9["reason"] == "fault"
          and rf9["fault"]["kind"] == "write-protected" and "after the fault" not in lines9, (rf9, lines9))
     rf10, lines10 = run(built[10][0], root)[:2]
-    case("vm: access to a decommitted page: fault", rf10["reason"] == "fault" and rf10["fault"]["kind"] == "read-unmapped"
+    case("vm: access to a wholly decommitted extent: fault", rf10["reason"] == "fault" and rf10["fault"]["kind"] == "read-unmapped"
          and "after the fault" not in lines10, (rf10, lines10))
     rf11 = run(built[11][0], root)[0]
     case("platform: a fn of module 11 the header does not define ends the run as ext-module-missing",

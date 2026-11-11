@@ -26,14 +26,15 @@ Rules:
    resolves to services.plat_<name>(args) or the machine's own _plat_<name>(args), else MachineError (the machine serves
    thread_activity and vm_*; the services serve cpu_boost and message). A fn the header does not define is
    "ext-module-missing". VM service: reserve(hint, size) -> address or 0; size rounds up to 64 KiB, size 0 and every failure
-   give 0. Without a hint the arena is the lowest 64 KiB multiple >= 0x02100000 clear of the plan's regions, every plan["free"]
+   give 0. Without a hint the arena is the lowest 64 KiB multiple >= 0x10000 clear of the plan's regions, every plan["free"]
    range, map_fixed mappings and earlier reservations (one pass over the intervals sorted by lo: c only grows, and an
    interval that overlapped c is cleared by the move, an earlier one cannot overlap the new c because it ends below
    the old c + size or was cleared), end <= 4 GiB. A hint (rounded down to 64 KiB) is taken exactly or refused: it must not be 0, end
-   above 4 GiB, touch the no-go range [0x400000, 0x02100000), or overlap anything listed above. commit(addr, size): the page-rounded
+   above 4 GiB, or overlap anything listed above (the plan's free ranges are the module and key ranges: data, no fixed no-go). commit(addr, size): the page-rounded
    range must lie inside one reservation (else 0xCC01); uncommitted pages become RW and zero, already committed pages keep their
-   content and become RW. decommit: committed pages of the range are unmapped (an access ends the run with "fault"), others are
-   unchanged. release(base): unmaps the reservation's committed pages and frees it (not a base: 0xCC01). Pages committed here are
+   content and become RW. Each commit call maps its uncommitted gaps as extents (host_vm.inc). decommit follows host_vm.inc: an extent
+   wholly inside the range is unmapped (an access ends the run with "fault"), a partly covered extent has the covered part zeroed and
+   stays accessible RW. A reserved page never committed is unmapped (a reservation is address space only): an access faults. release(base): unmaps the reservation's committed pages and frees it (not a base: 0xCC01). Pages committed here are
    owned: VM_PROTECT works on them. map_fixed over a reservation is refused (0xD401). thread_activity(tid, paused): a paused thread is
    never picked (a pause of the running thread takes effect at once); unknown tid 0xE401, not started or ended 0xFA01.
 6. Bound and count: one UC_HOOK_BLOCK over the image region (installed only with limit_instructions or attach_icount)
@@ -70,7 +71,7 @@ FNVNX_EXT_PLATFORM = 11
 # hostapi.h FNVNX_PLAT_* of module 11 (the header defines 1..7; VM_PROTECT = 8 is the loader's addition): fn -> (name, min args)
 PLATFORM_FNS = {1: ("cpu_boost", 1), 2: ("thread_activity", 2), 3: ("message", 2), 4: ("vm_reserve", 2), 5: ("vm_commit", 2),
                 6: ("vm_decommit", 2), 7: ("vm_release", 1), 8: ("vm_protect", 3)}
-VM_ALIGN, VM_FLOOR, VM_NO_GO = 0x10000, 0x02100000, (0x00400000, 0x02100000)   # host_vm.inc FNVNX_VM_ALIGN / FNVNX_VM_NO_GO_*
+VM_ALIGN, VM_FLOOR = 0x10000, 0x10000   # host_vm.inc FNVNX_VM_ALIGN; the guest's low 64 KiB stay unmapped. Forbidden ranges are plan data.
 ERR_INVALID_SIZE, ERR_INVALID_ADDRESS, ERR_INVALID_CURRENT_MEMORY = 0xCA01, 0xCC01, 0xD401
 ERR_INVALID_NEW_MEMORY_PERMISSION, ERR_INVALID_HANDLE, ERR_INVALID_STATE = 0xD801, 0xE401, 0xFA01
 ACCESS_KINDS = {UCC.UC_MEM_READ_UNMAPPED: "read-unmapped", UCC.UC_MEM_WRITE_UNMAPPED: "write-unmapped",
@@ -137,7 +138,7 @@ class Machine:
         self.handlers = self._resolve(services)
         self.plat = self._resolve_platform(services)
         self.regions = sorted(reg.values())
-        self.vm_resv, self.vm_pages = {}, set()   # base -> size; committed page addresses
+        self.vm_resv, self.vm_pages, self.vm_ext = {}, set(), []   # base -> size; committed page addresses; extents [lo, hi): one per commit gap (host_vm.inc)
         self.ext = {int(n[4:]): getattr(services, n) for n in dir(services) if n.startswith("ext_") and n[4:].isdigit()}
         uc = self.uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
         uc.reg_write(UC_ARM64_REG_CPACR_EL1, 3 << 20)   # FP/SIMD on
@@ -368,8 +369,6 @@ class Machine:
             lo = hint & ~(VM_ALIGN - 1)
             if lo == 0 or lo + size > 1 << 32:
                 return self._refuse("vm_reserve", hint, want, "address", 0)
-            if lo < VM_NO_GO[1] and lo + size > VM_NO_GO[0]:
-                return self._refuse("vm_reserve", hint, want, "no-go range", 0)
             if any(b > lo and lo + size > x for x, b in blocked):
                 return self._refuse("vm_reserve", hint, want, "overlaps a mapping, a free range or a reservation", 0)
         else:
@@ -415,25 +414,39 @@ class Machine:
         for x, y in self._vm_runs(lo, hi, False):
             self.uc.mem_map(x, y - x, UC_PROT_READ | UC_PROT_WRITE)
             self.vm_pages.update(range(x, y, PAGE))
+            self.vm_ext.append([x, y])
         return 0
 
-    def _vm_unmap(self, lo, hi):
-        for x, y in self._vm_runs(lo, hi, True):
-            self.uc.mem_unmap(x, y - x)
-            self.vm_pages.difference_update(range(x, y, PAGE))
+    def _vm_decommit(self, lo, hi):
+        """host_vm.inc: an extent wholly inside [lo, hi) is unmapped (an access faults), a partly covered one has the covered part
+        zeroed and stays accessible RW"""
+        keep = []
+        for e in self.vm_ext:
+            x, y = e
+            if y <= lo or x >= hi:
+                keep.append(e)
+            elif lo <= x and y <= hi:
+                self.uc.mem_unmap(x, y - x)
+                self.vm_pages.difference_update(range(x, y, PAGE))
+            else:
+                s, t = max(x, lo), min(y, hi)
+                self.uc.mem_protect(s, t - s, UC_PROT_READ | UC_PROT_WRITE)
+                self.uc.mem_write(s, bytes(t - s))
+                keep.append(e)
+        self.vm_ext = keep
 
     def _plat_vm_decommit(self, a):
         rng, res = self._vm_range("vm_decommit", a)
         if rng is None:
             return res
-        self._vm_unmap(*rng)
+        self._vm_decommit(*rng)
         return 0
 
     def _plat_vm_release(self, a):
         base = a[0]
         if base not in self.vm_resv:
             return self._refuse("vm_release", base, 0, "not the base of a reservation", ERR_INVALID_ADDRESS)
-        self._vm_unmap(base, base + self.vm_resv.pop(base))
+        self._vm_decommit(base, base + self.vm_resv.pop(base))
         return 0
 
     def _plat_vm_protect(self, a):
