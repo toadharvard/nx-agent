@@ -185,7 +185,7 @@ The owner's words: "Ты когда пишешь че-то агентом они
   orchestrator and pushed to the trunk and the integration branch. A message only points to it.
   - Every lead merges the trunk's `CLAUDE.md` into its branch when told, and re-reads this file after every compaction.
   - If an orchestrator message and this file disagree, this file wins; report the conflict.
-- **Assumptions: one registry, eight accepted.** The owner asked "Сколько допущений?", and no one could answer.
+- **Assumptions: one registry, nine accepted.** The owner asked "Сколько допущений?", and no one could answer.
   - Every assumption has an id in `verify/ASSUMPTIONS.json`. The `assumptions` gate makes the trunk red for:
     - an "Assumption"/"допущение" in code or docs without an id;
     - an id without a record;
@@ -198,7 +198,9 @@ The owner's words: "Ты когда пишешь че-то агентом они
     5. native code is tested by ASan/UBSan, not proven;
     6. the exe makes no wild accesses (array indices in bounds);
     7. ILP32;
-    8. IEEE floating point.
+    8. IEEE floating point;
+    9. the pinned formal tools and published theorems are correct: the Sail CPU model at its pinned patch, isla and z3,
+       the published proof of the x86-TSO to Arm memory mapping (owner decision, 2026-11-11).
   - Every other assumption is REMOVE. Its record names the fact or gate that removes it and the owner of that work.
     Examples: callee-saved registers, `ret n`, no PIC and complete code ranges are checked from the exe's code; kernel
     result codes come from the pinned libnx headers; guard zones are a fact of the loader's layout.
