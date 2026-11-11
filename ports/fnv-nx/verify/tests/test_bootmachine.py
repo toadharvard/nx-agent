@@ -182,7 +182,8 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("partial-zero-writable", pa[0x4000] | (pa[0x4400] - 0x77));
     pa[0x4000] = 0x88;
     num("partial-write", pa[0x4000]);
-    num("mapfixed-over-resv", fnvnx_hcall3(H->map_fixed, A, 0x1000, H->heap_base + 0x20000));
+    num("mapfixed-over-resv", fnvnx_hcall3(H->map_fixed, A, 0x1000, H->heap_base + 0x20000));   /* a committed page: occupied */
+    num("mapfixed-over-resv-free", fnvnx_hcall3(H->map_fixed, A + 0x20000, 0x1000, H->heap_base + 0x20000));   /* reserved, uncommitted */
     num("release", plat(7, A, 0, 0, 1));
     num("release-again", plat(7, A, 0, 0, 1));
     num("release-inner", plat(7, A + 0x10000, 0, 0, 1));
@@ -260,12 +261,12 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("commit-gap", plat(5, R + 0x8000, 0x1000, 0, 2));
     num("h-over-committed", SM(s, R + 0x8000, 0, 0x1000));
     num("vm-commit", plat(5, A, 0x1000, 0, 2)); num("vm-commit-wide", plat(5, R, 0x10000, 0, 2));
-    num("vm-commit-B", plat(5, B, 0x1000, 0, 2));
+    num("vm-commit-B", plat(5, B, 0x1000, 0, 2)); num("vm-decommit-B", plat(6, B, 0x1000, 0, 2));
     num("vm-decommit", plat(6, A, 0x1000, 0, 2)); num("vm-protect", plat(8, A, 0x1000, 1, 3));
     num("vm-protect-B", plat(8, B, 0x1000, 1, 3)); num("vm-release", plat(7, R, 0, 0, 1));
     num("view-intact", W32(A) == 0x11 && W32(C + 0x1000) == 0x22);
-    num("mf-B", fnvnx_hcall3(H->map_fixed, B, 0x1000, H->heap_base + 0x20000) != 0);
-    num("mf-A", fnvnx_hcall3(H->map_fixed, A, 0x1000, H->heap_base + 0x20000) != 0);
+    num("mf-B", fnvnx_hcall3(H->map_fixed, B, 0x1000, H->heap_base + 0x20000));   /* a host-placed view */
+    num("mf-A", fnvnx_hcall3(H->map_fixed, A, 0x1000, H->heap_base + 0x20000));   /* a view inside a reservation */
     uint64_t r2 = plat(4, 0, 0x1000, 0, 2);
     num("resv2-clear", r2 && (r2 + 0x10000 <= B || r2 >= B + 0x2000));
     num("resv-hint-B", plat(4, B, 0x10000, 0, 2));
@@ -322,6 +323,39 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("views-ok", cnt); num("views-ascending", asc);
     num("v-full", SM(id129, 0, 0, 0x1000));
     num("unmap-one", SU(prev, 0x1000)); num("v-after", SM(id129, 0, 0, 0x1000) == prev);
+#elif MODE >= 37 && MODE <= 39
+    /* UNMAP_FIXED (fn 15) */
+    #define UF(a, s, z) plat(FNVNX_PLAT_UNMAP_FIXED, a, s, z, 3)
+    #define MF(a, z, s) fnvnx_hcall3(H->map_fixed, a, z, s)
+    uint64_t src = H->heap_base + 0x30000, dst = 0x500000;
+    W32(src) = 0x1234;
+    num("map", MF(dst, 0x2000, src));
+    num("carried", W32(dst));
+    W32(dst) = 0xAAAA; W32(dst + 0x1004) = 0xBBBB;   /* written through the mapping */
+#if MODE == 37
+    num("u-wrong-src", UF(dst, 0x2000, src + 0x1000));
+    num("u-wrong-addr", UF(dst + 0x1000, 0x1000, src));
+    num("u-wrong-size", UF(dst, 0x1000, src));
+    num("u-addr-unal", UF(dst + 4, 0x2000, src));
+    num("u-src-unal", UF(dst, 0x2000, src + 4));
+    num("u-size0", UF(dst, 0, src)); num("u-size-unal", UF(dst, 0x1800, src));
+    num("still-mapped", W32(dst) == 0xAAAA);
+    num("ok", UF(dst, 0x2000, src));
+    num("src-bytes", W32(src) == 0xAAAA && W32(src + 0x1004) == 0xBBBB);
+    W32(src + 8) = 0x77; num("src-writable", W32(src + 8));
+    num("twice", UF(dst, 0x2000, src));
+    num("map-again", MF(dst, 0x2000, src));
+    num("again-bytes", W32(dst) == 0xAAAA && W32(dst + 0x1004) == 0xBBBB && W32(dst + 8) == 0x77);
+    num("src-given-again", MF(0x600000, 0x1000, src));
+    num("ok-again", UF(dst, 0x2000, src));
+#elif MODE == 38
+    num("ok", UF(dst, 0x2000, src));
+    num("touch-dst", W32(dst));   /* unmapped: the run must end here */
+    say("after the fault\n");
+#else
+    plat(8, dst, 0x1000, 1, 3);   /* read-only: the header's precondition of UNMAP_FIXED is violated */
+    num("ok", UF(dst, 0x2000, src));
+#endif
 #elif MODE == 35
     fnvnx_hcall1(H->exit, 0x5200002A);   /* fnvnx_reach_violation(42) */
 #elif MODE == 36
@@ -529,7 +563,7 @@ def main():
     root = os.path.join(TMP, "sd")
     os.makedirs(root)
     open(os.path.join(root, "data.bin"), "wb").write(b"01ABCDEFGH23")
-    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, *range(12, 22), *range(30, 37))}   # MODE 6 (boot CLI guest) is built by test_boot.py
+    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, *range(12, 22), *range(30, 40))}   # MODE 6 (boot CLI guest) is built by test_boot.py
     elf0, path0 = built[0]
     plan0 = make_plan(elf0)
     base = plan0["image"]["base"]
@@ -546,7 +580,7 @@ def main():
     text = "\n".join(lines1)
     case("exit code 7, reason exit", r1["reason"] == "exit" and r1["exit_code"] == 7, r1)
     case("console: self-relocated string pointers", lines1[:2] == ["hello from the guest", "second line"], lines1[:3])
-    for k, v in (("marker", "2a"), ("map", "0"), ("readback", "68ac"), ("overlap", "d401"), ("keys", "cc01"),
+    for k, v in (("marker", "2a"), ("map", "0"), ("readback", "68ac"), ("overlap", "f59"), ("keys", "cc01"),
                  ("carried", str(hex(0xabcd0001 ^ 0xabcd0002))[2:]), ("zeroed-rest", "0"), ("src-unaligned", "cc01"),
                  ("src-given", "d401"), ("src-outside", "cc01"), ("src-past-end", "cc01"),
                  ("protect", "0"), ("protect-unmapped", "d401"), ("protect-image", "d401"),
@@ -656,7 +690,7 @@ def main():
         ("commit", 0), ("rb", 0x33), ("decommit", 0), ("recommit", 0), ("zero", 0))), textv)
     case("vm: recommit of a committed page keeps its content", vals.get("recommit-keeps") == 0x33, textv)
     case("vm: commit outside, past the end of, and of size 0 in a reservation fail",
-         vals["commit-outside"] == 0xCC01 and vals["commit-past-end"] == 0xCC01 and vals["commit-size0"] == 0xCA01, textv)
+         vals["commit-outside"] == 0x1759 and vals["commit-past-end"] == 0x1759 and vals["commit-size0"] == 0x1759, textv)
     case("vm: VM_PROTECT on an uncommitted page: nonzero", vals.get("protect-uncommitted") == 0xD401, textv)
     case("vm: VM_PROTECT on a committed page works, read-only reads, rw writes", vals.get("protect-committed") == 0
          and vals.get("ro-read") == 0x33 and vals.get("protect-rw") == 0 and vals.get("rw-write") == 0x44, textv)
@@ -665,9 +699,10 @@ def main():
          vals.get("recommit-protected") == 0 and vals.get("zero-rw-after-protect") == 0, textv)
     case("vm: decommit of part of an extent zeroes it and it stays accessible (host_vm.inc)",
          vals.get("partial-decommit") == 0 and vals.get("partial-zero-writable") == 0 and vals.get("partial-write") == 0x88, textv)
-    case("vm: map_fixed over a reservation refused", vals.get("mapfixed-over-resv") == 0xD401, textv)
+    case("vm: map_fixed over a committed page is occupied (AlreadyInitialized), over an uncommitted reserved page refused 0xD401",
+         vals.get("mapfixed-over-resv") == 0xF59 and vals.get("mapfixed-over-resv-free") == 0xD401, textv)
     case("vm: release frees the whole reservation; a non-base address is refused",
-         vals.get("release") == 0 and vals.get("release-again") == 0xCC01 and vals.get("release-inner") == 0xCC01, textv)
+         vals.get("release") == 0 and vals.get("release-again") == 0x1759 and vals.get("release-inner") == 0x1759, textv)
     case("vm: reserve after release gives the same address", A2 == A, (hex(A), hex(A2)))
     case("vm: hints: overlap, inside the exe or a module range, above 4 GiB, image, size 0 fail; a hint in a gap or free address is exact (64 KiB rounded)",
          all(vals.get(k) == 0 for k in ("hint-overlap", "hint-exe", "hint-module", "hint-above-4g", "hint-in-image", "hint-size0",
@@ -675,10 +710,10 @@ def main():
          and vals.get("hint-gap") == 0x3000000, textv)
     kinds = [e["kind"] for e in rv["events"]]
     case("vm: every refusal is an event with its result", kinds == [
-        "vm_commit-refused"] * 3 + ["vm_protect-refused"] * 2 + ["map_fixed-refused"] + ["vm_release-refused"] * 2
+        "vm_commit-refused"] * 3 + ["vm_protect-refused"] * 2 + ["map_fixed-refused"] * 2 + ["vm_release-refused"] * 2
         + ["vm_reserve-refused"] * 7 + ["thread_activity-refused"] * 3, kinds)
-    case("platform: thread_activity: unknown / tid 0 -> 0xE401, new thread -> 0xFA01, pause holds the worker, resume runs it",
-         vals.get("tact-nothread") == 0xE401 and vals.get("tact-tid0") == 0xE401 and vals.get("tact-new") == 0xFA01
+    case("platform: thread_activity: unknown -> 0xE401, tid 0 -> BadInput 0x1759, new thread -> 0xFA01, pause holds the worker, resume runs it",
+         vals.get("tact-nothread") == 0xE401 and vals.get("tact-tid0") == 0x1759 and vals.get("tact-new") == 0xFA01
          and vals.get("tact-pause") == 0 and vals.get("paused-flag") == 0 and vals.get("tact-resume") == 0
          and vals.get("resumed-flag") == 0x4d, textv)
     case("platform: cpu_boost and message are the services'", svcv.boosts == [1] and svcv.messages == [("cap", "body")]
@@ -708,7 +743,7 @@ def main():
     except bootmachine.MachineError as e:
         ok, msg = "message" in str(e), str(e)
     case("a header-defined platform fn nobody implements raises at construction", ok, msg)
-    case("every header fn 1..8, 10 and 11..14 of module 11 resolves", sorted(bootmachine.Machine(elf0, plan0, boothost.Services(root)).plat) == [*range(1, 9), 10, 11, 12, 13, 14])
+    case("every header fn 1..8, 10 and 11..15 of module 11 resolves", sorted(bootmachine.Machine(elf0, plan0, boothost.Services(root)).plat) == [*range(1, 9), *range(10, 16)])
 
     class NoSec(boothost.Services):
         plat_section_map = None
@@ -795,8 +830,8 @@ def main():
                "m-off-unal": E(0xCC01), "m-id": E(0xE401), "m-id0": E(0xE401), "m-range": E(0xD401), "m-range-wrap": E(0xD401),
                "h-outside": E(0xDA01), "h-keys": E(0xDA01), "h-image": E(0xDA01), "h-heap": E(0xDA01), "h-straddle": E(0xDA01),
                "h-over-view": E(0xD401), "commit-gap": "0", "h-over-committed": E(0xD401),
-               "vm-commit": "d401", "vm-commit-wide": "d401", "vm-commit-B": "d401", "vm-decommit": "d401", "vm-protect": "d401",
-               "vm-protect-B": "d401", "vm-release": "d401", "view-intact": "1", "mf-B": "1", "mf-A": "1", "resv2-clear": "1",
+               "vm-commit": "d401", "vm-commit-wide": "d401", "vm-commit-B": "1759", "vm-decommit-B": "d401", "vm-decommit": "d401", "vm-protect": "d401",
+               "vm-protect-B": "d401", "vm-release": "d401", "view-intact": "1", "mf-B": "f59", "mf-A": "f59", "resv2-clear": "1",
                "resv-hint-B": "0", "u-wrong-size": E(0xD401), "u-wrong-addr": E(0xD401), "u-nonview": E(0xD401),
                "free": "0", "map-after-free": E(0xE401), "free-twice": E(0xE401), "free-unknown": E(0xE401), "alive-A": "1",
                "alive-B": "55", "u-A": "0", "u-B-still": "55", "u-C": "0", "u-B": "0", "u-B-twice": E(0xD401),
@@ -809,10 +844,30 @@ def main():
     case("section: refusals recorded in order (create, map errors)", ev[:len(want)] == want, ev[:len(want)])
     tail = ev[len(want):]
     case("section: later refusals are vm_*, map_fixed, section_map/unmap/free refusals with the codes",
-         tail[:1] == [("section_map-refused", 0xD401)] and tail[1:8] == [("vm_commit-refused", 0xD401)] * 3
-         + [("vm_decommit-refused", 0xD401), ("vm_protect-refused", 0xD401), ("vm_protect-refused", 0xD401), ("vm_release-refused", 0xD401)]
-         and ("map_fixed-refused", 0xCC01) in tail and tail.count(("section_unmap-refused", 0xD401)) == 4
+         tail[:1] == [("section_map-refused", 0xD401)] and tail[1:9] == [("vm_commit-refused", 0xD401)] * 2 + [("vm_commit-refused", 0x1759)]
+         + [("vm_decommit-refused", 0xD401)] * 2 + [("vm_protect-refused", 0xD401)] * 2 + [("vm_release-refused", 0xD401)]
+         and tail.count(("map_fixed-refused", 0xF59)) == 2 and tail.count(("section_unmap-refused", 0xD401)) == 4
          and tail.count(("section_free-refused", 0xE401)) == 2 and ("section_map-refused", 0xE401) in tail, tail)
+    # UNMAP_FIXED (module 11 fn 15)
+    r37, l37 = run(built[37][0], root)[:2]
+    k = kv(l37)
+    want37 = {"map": "0", "carried": "1234", "u-wrong-src": "d401", "u-wrong-addr": "d401", "u-wrong-size": "d401", "u-addr-unal": "cc01",
+              "u-src-unal": "cc01", "u-size0": "ca01", "u-size-unal": "ca01", "still-mapped": "1", "ok": "0", "src-bytes": "1",
+              "src-writable": "77", "twice": "d401", "map-again": "0", "again-bytes": "1", "src-given-again": "d401", "ok-again": "0"}
+    bad = {n: (k.get(n), v) for n, v in want37.items() if k.get(n) != v}
+    case("unmap_fixed: exact (addr, size, src) pairs undo the map_fixed, src readable again with the written bytes, "
+         "errors 0xD401 / 0xCC01 / 0xCA01, twice refused, map again works", r37["reason"] == "exit" and not bad, (bad, r37, l37))
+    ev37 = [(e["kind"], e["result"]) for e in r37["events"]]
+    case("unmap_fixed: refusals are events with their codes", ev37 == [("unmap_fixed-refused", c) for c in (
+        0xD401, 0xD401, 0xD401, 0xCC01, 0xCC01, 0xCA01, 0xCA01)] + [("unmap_fixed-refused", 0xD401), ("map_fixed-refused", 0xD401)], ev37)
+    r38, l38 = run(built[38][0], root)[:2]
+    case("unmap_fixed: the unmapped addr faults", r38["reason"] == "fault" and r38["fault"]["kind"] == "read-unmapped"
+         and r38["fault"]["addr"] == 0x500000 and "ok=0" in l38 and "after the fault" not in l38, (r38, l38))
+    r39, l39 = run(built[39][0], root)[:2]
+    case("unmap_fixed: a page that is not read-write (the header's precondition) ends the run as a host-call fault, no result is invented",
+         r39["reason"] == "fault" and r39["fault"]["kind"].startswith("host-call:") and "precondition" in r39["fault"]["kind"]
+         and "ok=0" not in l39, (r39, l39))
+    case("unmap_fixed: two identical runs give identical run() dicts", r37 == run(built[37][0], root)[0])
     r31, l31 = run(built[31][0], root)[:2]
     k = kv(l31)
     case("section: unmapped view faults, the other view still works and writes",

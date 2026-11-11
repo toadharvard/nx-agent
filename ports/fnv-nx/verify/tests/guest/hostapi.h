@@ -135,7 +135,11 @@ typedef struct FnvnxHostApi {
  * that stack and calls handler with faults of the same kind masked (a fault inside the handler ends the process).
  * Return 0: the host loads every register from the frame (the handler may have changed any of them, pc included) and
  * resumes. Return non-zero: the process ends with that value as exit code. A thread without a handler: the fault ends
- * the process. handler == 0 unregisters. */
+ * the process. handler == 0 unregisters.
+ * Registration results: stack_top not 16-byte aligned, below sizeof(FnvnxFaultFrame) or >= 4 GiB -> 0xCC01 (nothing
+ * registered). The frame's `pstate` carries only the condition flags NZCV (bits 31..28); every other bit reads as 0 and is
+ * ignored when the host resumes. A fault taken while the HOST dereferences a bad guest pointer passed to a host slot is not
+ * delivered to the guest: the process ends. */
 #define FNVNX_PLAT_ACCESS_FAULT_HANDLER 10u
 typedef struct FnvnxFaultFrame {
     uint32_t kind;        /* 0 read, 1 write, 2 execute */
@@ -166,14 +170,22 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
  *   14 SECTION_FREE (id)                     -> 0 | error. The id dies at once (MAP with it fails with 0xE401); the pages
  *                                               live until the last view is unmapped (the kernel needs the backing mapped
  *                                               to unmap a view), then they are released. Deferred, never refused.
- * 15 is unused. Error codes (the Horizon result values the kernel uses for the same condition, kernel results of a
+ * 15 is UNMAP_FIXED below. Error codes (the Horizon result values the kernel uses for the same condition, kernel results of a
  * failing svc are passed through unchanged):
  *   0xCA01 size is 0, not a 4 KiB multiple or too large   0xCC01 addr or offset not 4 KiB aligned
  *   0xD401 range outside the section; addr range not free in the kernel; not exactly a view
  *   0xDA01 addr range not inside a VM reservation          0xE401 unknown id (never created, or freed)
  *   0xD001 out of address space or memory                  0xCE01 table full (128 sections, 512 views)
- * Interplay with the VM services 4..8 (a view is memory the VM service did not commit): VM_COMMIT and VM_DECOMMIT of a
- * range containing a page of a view -> 0xD401, nothing done; VM_RELEASE of a reservation that still holds a view ->
+ * Order of checks of SECTION_MAP (host_section.inc): size (0, not a 4 KiB multiple, or > 2 GiB) -> 0xCA01; then alignment of
+ * addr and offset -> 0xCC01; then the id -> 0xE401; then offset + size inside the section -> 0xD401; then the view table
+ * -> 0xCE01; then the address (0xDA01 / the kernel's result). The size check therefore comes before the range check.
+ * Interplay with the VM services 4..8 (a view is memory the VM service did not commit): VM_DECOMMIT of a range containing
+ * a page of a view -> 0xD401, nothing done (it is the first check: host_vm_decommit has no reservation check). VM_COMMIT:
+ * a range that is not inside one VM reservation (or size 0) is refused FIRST with the libnx result LibnxError_BadInput; only
+ * a range inside a reservation is then checked for view pages -> 0xD401, nothing done. map_fixed (slot above) of a range
+ * with any view page, whether the view was placed by the host (addr == 0) or inside a reservation, is refused the same way
+ * as any occupied range: svcQueryMemory reports a type other than Unmapped (a view is MemType_ProcessMem) and the host
+ * returns the libnx result LibnxError_AlreadyInitialized, nothing is mapped; VM_RELEASE of a reservation that still holds a view ->
  * 0xD401 (its decommit is refused); VM_PROTECT of a view page -> 0xD401 (SharedCode has no CanReprotect, see host_section.inc).
  * NOT provided, by the mechanism: a view is always read-write (the kernel fixes the alias permission to UserReadWrite),
  * so there is no read-only view of a section and no copy-on-write view; no view with a permission different from
@@ -191,6 +203,15 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
 #define FNVNX_SEC_E_FULL 0xCE01u
 #define FNVNX_SEC_E_NOSERVICE 0xFFu   /* the host answers FNVNX_EXT_NO_MODULE (= -255): an older host without sections */
 #define FNVNX_SEC_MAX_SIZE 0x80000000ull
+/* UNMAP_FIXED (addr, size, src) -> 0 or an error, the undo of the host slot map_fixed. (addr, size, src) must be exactly
+ * the arguments of one earlier successful map_fixed call (src: the page-aligned guest heap block that call was given). Effect: the range stops being mapped (the kernel's svcUnmapMemory(addr, src,
+ * size)); the source heap block becomes ordinary accessible heap again, with the contents the guest had left in the
+ * mapped range, and the guest frees it. The range is unmapped, so a later map_fixed of it, or any VM service reservation,
+ * can use it again. Precondition: every page of the range is read-write (the guest restores it with VM_PROTECT first, as
+ * for DECOMMIT). A range inside the data window the host claimed at startup (where map_fixed only zeroes) is zeroed
+ * again and stays the host's window; src is not looked at there. Results: 0xCC01 addr or src not 4 KiB aligned; 0xCA01 size 0
+ * or not a 4 KiB multiple; otherwise the kernel's result (0xD401: the range is not the mapping of that src). */
+#define FNVNX_PLAT_UNMAP_FIXED 15u
 /* 16 and above: guest sockets (platform/, table published by the platform lead) */
 
 /* Thread placement (docs/PERF.md 6.3): roles for thread_create's cpu argument; the host's table

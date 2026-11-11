@@ -17,13 +17,14 @@ Rules:
 5. map_fixed(addr, size, src) follows svcMapMemory (hostapi.h): src is a page-aligned block of the heap region, wholly
    inside it and not given away before; addr gets RW memory holding the CONTENT of src, and [src, src+size) becomes
    unmapped for good (a later access ends the run with "fault"). addr: exactly there, wholly inside a plan["free"]
-   range other than "keys", no overlap with a mapping or with src; refusals return libnx kernel results (InvalidSize 0xCA01, InvalidAddress 0xCC01, InvalidCurrentMemory
+   range other than "keys", no overlap with src; a range holding any mapping (image, heap, commit, section view, ...) is refused with
+   the libnx result LibnxError_AlreadyInitialized 0xF59 first (hostapi.h: "any occupied range"); other refusals return libnx kernel results (InvalidSize 0xCA01, InvalidAddress 0xCC01, InvalidCurrentMemory
    0xD401) and are recorded in run()["events"]. ext_call(11, 8 VM_PROTECT, {addr,size,prot}) re-protects any pages the
    guest owns (heap region minus given-away blocks, map_fixed mappings; bit0 R, bit1 W, 0 none), else a refusal likewise
    (image, host page, stacks, given-away blocks, unmapped: 0xD401). Other modules go to services.ext_<module>
    (fn, args) found at construction; an unregistered module, or a handler raising ExtMissing, ends the run with reason
    "ext-module-missing": a configuration error, never answered with a value.
-5b. Platform service (module 11, the header's FNVNX_PLAT_* list 1..8; always on). Totality at construction: every fn of PLATFORM_FNS
+5b. Platform service (module 11, the header's FNVNX_PLAT_* list 1..8, 10..15 (9 DISPLAY_DOCKED is defined but the host serves nothing for it); always on). Totality at construction: every fn of PLATFORM_FNS
    resolves to services.plat_<name>(args) or the machine's own _plat_<name>(args), else MachineError (the machine serves
    thread_activity and vm_*; the services serve cpu_boost and message). A fn the header does not define is
    "ext-module-missing". VM service: reserve(hint, size) -> address or 0; size rounds up to 64 KiB, size 0 and every failure
@@ -32,12 +33,16 @@ Rules:
    interval that overlapped c is cleared by the move, an earlier one cannot overlap the new c because it ends below
    the old c + size or was cleared), end <= 4 GiB. A hint (rounded down to 64 KiB) is taken exactly or refused: it must not be 0, end
    above 4 GiB, or overlap anything listed above (the plan's free ranges are the module and key ranges: data, no fixed no-go). commit(addr, size): the page-rounded
-   range must lie inside one reservation (else 0xCC01); uncommitted pages become RW and zero, already committed pages keep their
+   range must lie inside one reservation and size > 0 (else the libnx result LibnxError_BadInput 0x1759, checked FIRST; then a view page -> 0xD401); uncommitted pages become RW and zero, already committed pages keep their
    content and become RW. Each commit call maps its uncommitted gaps as extents (host_vm.inc). decommit follows host_vm.inc: an extent
    wholly inside the range is unmapped (an access ends the run with "fault"), a partly covered extent has the covered part zeroed and
-   stays accessible RW. A reserved page never committed is unmapped (a reservation is address space only): an access faults. release(base): unmaps the reservation's committed pages and frees it (not a base: 0xCC01). Pages committed here are
-   owned: VM_PROTECT works on them. map_fixed over a reservation is refused (0xD401). thread_activity(tid, paused): a paused thread is
+   stays accessible RW. A reserved page never committed is unmapped (a reservation is address space only): an access faults. release(base): unmaps the reservation's committed pages and frees it (not a base: BadInput 0x1759). decommit has no size or reservation check (host_vm.inc): view page -> 0xD401 first, else the extents inside the range are handled, a range holding none is 0. Pages committed here are
+   owned: VM_PROTECT works on them. map_fixed over a reservation is refused (0xD401). thread_activity(tid, paused): tid 0 (the calling thread) BadInput 0x1759; a paused thread is
    never picked (a pause of the running thread takes effect at once); unknown tid 0xE401, not started or ended 0xFA01.
+5e. UNMAP_FIXED (fn 15, addr, size, src): the undo of exactly one earlier map_fixed. addr or src unaligned 0xCC01; size 0 / unaligned 0xCA01; (addr, size,
+   src) not exactly a live map_fixed mapping 0xD401 (so a second unmap refuses). Success: the range is unmapped (an access faults), the src heap block
+   is accessible RW again with the content the mapping had, and addr may be mapped again. A page of the range that is not RW is the header's
+   violated precondition: MachineError, which ends the run as a host-call fault (the contract defines no result).
 5d. Sections (module 11 fn 11..14, host_section.inc; errors are -(code) as u64, recorded as events section_*-refused with the
    positive code). A section is one anonymous mmap (zero, page aligned) kept alive for the machine's life; each view is
    uc.mem_map_ptr of that buffer at the view's address, so views share bytes. MAP checks in the host's order: size, alignment, id,
@@ -48,7 +53,7 @@ Rules:
    map_fixed cannot land on one (refused by its own range rules). FREE kills the id at once, the pages live until the last view is
    unmapped. The fault-handler frame may live in a view: a view is writable guest memory (rule 5c asks only that).
 5c. ACCESS_FAULT_HANDLER (module 11 fn 10, args {handler, stack_top}, result 0; handler 0 unregisters; stack_top must be 16-byte
-   aligned, >= 816 and <= 4 GiB, else 0xCC01 and an event). Per calling thread. A data or instruction access fault (Unicorn's
+   aligned, >= 816 and < 4 GiB, else 0xCC01 and an event). Per calling thread. A data or instruction access fault (Unicorn's
    UC_HOOK_MEM_INVALID: unmapped or protection, read/write/fetch) of a thread with a handler, not already inside it, is
    delivered at once: the frame (FnvnxFaultFrame, 816 bytes) is written at stack_top - 816 from the exact register state at the
    faulting instruction (pc = that instruction; pstate = NZCV only, bits 31..28), then x0 = frame, sp = frame, lr = a return stub
@@ -102,10 +107,13 @@ FAULT_FRAME = 816
 PLATFORM_FNS = {1: ("cpu_boost", 1), 2: ("thread_activity", 2), 3: ("message", 2), 4: ("vm_reserve", 2), 5: ("vm_commit", 2),
                 6: ("vm_decommit", 2), 7: ("vm_release", 1), 8: ("vm_protect", 3),
                 10: ("access_fault_handler", 2), 11: ("section_create", 1), 12: ("section_map", 4), 13: ("section_unmap", 2),
-                14: ("section_free", 1)}
+                14: ("section_free", 1), 15: ("unmap_fixed", 3)}
 SEC_E_SIZE, SEC_E_ALIGN, SEC_E_RANGE, SEC_E_REGION, SEC_E_ID, SEC_E_NOMEM, SEC_E_FULL = 0xCA01, 0xCC01, 0xD401, 0xDA01, 0xE401, 0xD001, 0xCE01
 SEC_MAX_SIZE, SEC_SECTIONS, SEC_VIEWS = 0x80000000, 128, 512   # host_section.inc
 VM_ALIGN, VM_FLOOR = 0x10000, 0x10000   # host_vm.inc FNVNX_VM_ALIGN; the guest's low 64 KiB stay unmapped. Forbidden ranges are plan data.
+# libnx result values (hostapi.h names them, the repo does not define them): MAKERESULT(Module_Libnx = 345, desc) = 345 | desc << 9,
+# desc from libnx's result.h enum LibnxError (BadInput = 11, AlreadyInitialized = 7)
+LIBNX_BAD_INPUT, LIBNX_ALREADY_INITIALIZED = 345 | 11 << 9, 345 | 7 << 9   # 0x1759, 0xF59
 ERR_INVALID_SIZE, ERR_INVALID_ADDRESS, ERR_INVALID_CURRENT_MEMORY = 0xCA01, 0xCC01, 0xD401
 ERR_INVALID_NEW_MEMORY_PERMISSION, ERR_INVALID_HANDLE, ERR_INVALID_STATE = 0xD801, 0xE401, 0xFA01
 ACCESS_KINDS = {UCC.UC_MEM_READ_UNMAPPED: "read-unmapped", UCC.UC_MEM_WRITE_UNMAPPED: "write-unmapped",
@@ -211,6 +219,7 @@ class Machine:
         self.calls, self.switches, self.slice_calls0, self.exit_code = 0, 0, 0, None
         self.fault, self.events, self.ext_missing, self.limit_hit = None, [], None, False
         self.mapped = []   # merged [lo, hi) ranges mapped by map_fixed
+        self.mf_live = {}   # addr -> (size, src) of every live map_fixed mapping (the kernel's own record, UNMAP_FIXED checks against it)
         self.cb_thread, self.cb_console, self.line = None, None, bytearray()
         self.ret_pending, self.console_text = {}, []
         self.limit_instr, self.instr, self.icount, self.block_hook = limit_instructions, 0, None, False
@@ -348,12 +357,12 @@ class Machine:
             return self._refuse("map_fixed", addr, size, "size", ERR_INVALID_SIZE)
         if addr % PAGE or addr + size > 1 << 32:
             return self._refuse("map_fixed", addr, size, "address", ERR_INVALID_ADDRESS)
+        if any(b > addr and addr + size > a for a, b, _p in self.uc.mem_regions()):   # any occupied range, a section view included
+            return self._refuse("map_fixed", addr, size, "range is occupied", LIBNX_ALREADY_INITIALIZED)
         if any(addr < r + n and r < addr + size for r, n in self.vm_resv.items()):
             return self._refuse("map_fixed", addr, size, "overlaps a VM reservation", ERR_INVALID_CURRENT_MEMORY)
         if not any(n != "keys" and lo <= addr and addr + size <= hi for n, lo, hi in self.free):
             return self._refuse("map_fixed", addr, size, "not wholly inside a mappable reserved range", ERR_INVALID_ADDRESS)
-        if any(b > addr and addr + size > a for a, b, _p in self.uc.mem_regions()):
-            return self._refuse("map_fixed", addr, size, "overlaps a mapping", ERR_INVALID_CURRENT_MEMORY)
         if src % PAGE or not (self.heap[0] <= src and src + size <= self.heap[1]):
             return self._refuse("map_fixed", addr, size, "src not a page-aligned block wholly inside the heap region 0x%x" % src,
                                 ERR_INVALID_ADDRESS)
@@ -365,13 +374,43 @@ class Machine:
         self.given.append((src, src + size))
         self.uc.mem_map(addr, size, UC_PROT_READ | UC_PROT_WRITE)
         self.uc.mem_write(addr, content)
-        spans = sorted(self.mapped + [(addr, addr + size)])
-        self.mapped = [spans[0]]
+        self.mf_live[addr] = (size, src)
+        self._merge_mapped()
+        return 0
+
+    def _merge_mapped(self):
+        spans = sorted((a, a + n) for a, (n, _s) in self.mf_live.items())
+        self.mapped = spans[:1]
         for a, b in spans[1:]:
             if a <= self.mapped[-1][1]:
                 self.mapped[-1] = (self.mapped[-1][0], max(b, self.mapped[-1][1]))
             else:
                 self.mapped.append((a, b))
+
+    def _plat_unmap_fixed(self, a):
+        """FNVNX_PLAT_UNMAP_FIXED (addr, size, src): the undo of exactly one earlier map_fixed (hostapi.h 15)"""
+        addr, size, src = a[:3]
+        if (addr | src) % PAGE:
+            return self._refuse("unmap_fixed", addr, size, "addr or src not page aligned", ERR_INVALID_ADDRESS)
+        if size == 0 or size % PAGE:
+            return self._refuse("unmap_fixed", addr, size, "size", ERR_INVALID_SIZE)
+        if self.mf_live.get(addr) != (size, src):
+            return self._refuse("unmap_fixed", addr, size, "not the mapping of that src (kernel: InvalidCurrentMemory)",
+                                ERR_INVALID_CURRENT_MEMORY)
+        perms = {}
+        for lo, hi, p in self.uc.mem_regions():
+            for pg in range(max(lo, addr), min(hi + 1, addr + size), PAGE):
+                perms[pg] = p
+        if any(perms.get(pg) != (UC_PROT_READ | UC_PROT_WRITE) for pg in range(addr, addr + size, PAGE)):
+            # the header's precondition ("every page of the range is read-write") is violated: the contract defines no result
+            raise MachineError("unmap_fixed 0x%x+0x%x: precondition violated, a page is not read-write" % (addr, size))
+        content = bytes(self.uc.mem_read(addr, size))
+        self.uc.mem_unmap(addr, size)
+        del self.mf_live[addr]
+        self.given.remove((src, src + size))
+        self.uc.mem_map(src, size, UC_PROT_READ | UC_PROT_WRITE)   # the heap block is ordinary accessible heap again
+        self.uc.mem_write(src, content)
+        self._merge_mapped()
         return 0
 
     def _refuse(self, what, addr, size, why, code):
@@ -429,14 +468,13 @@ class Machine:
         return lo
 
     def _vm_range(self, what, a):
+        """commit's checks in host_vm_commit's order: size 0 or not inside one reservation (libnx BadInput) first, then a section view"""
         addr, size = a[0], a[1]
-        if size == 0 or addr + size >= 1 << 64:
-            return None, self._refuse(what, addr, size, "size", ERR_INVALID_SIZE)
         lo, hi = addr // PAGE * PAGE, _up(addr + size)
+        if size == 0 or addr + size >= 1 << 64 or self._vm_resv_of(lo, hi) is None:
+            return None, self._refuse(what, addr, size, "size 0 or not inside one reservation", LIBNX_BAD_INPUT)
         if self._view_overlap(lo, hi):
             return None, self._refuse(what, addr, size, "range holds a page of a section view", ERR_INVALID_CURRENT_MEMORY)
-        if self._vm_resv_of(lo, hi) is None:
-            return None, self._refuse(what, addr, size, "not inside one reservation", ERR_INVALID_ADDRESS)
         return (lo, hi), 0
 
     def _vm_runs(self, lo, hi, committed):
@@ -485,16 +523,22 @@ class Machine:
         self.vm_ext = keep
 
     def _plat_vm_decommit(self, a):
-        rng, res = self._vm_range("vm_decommit", a)
-        if rng is None:
-            return res
-        self._vm_decommit(*rng)
+        # host_vm_decommit has no reservation or size check: the view check is first, then the extents inside the range are handled
+        addr, size = a[0], a[1]
+        if addr + size >= 1 << 64:
+            raise MachineError("vm_decommit 0x%x+0x%x wraps the address space: the contract defines no result" % (addr, size))
+        lo, hi = addr // PAGE * PAGE, _up(addr + size)
+        if hi <= lo:
+            return 0
+        if self._view_overlap(lo, hi):
+            return self._refuse("vm_decommit", addr, size, "range holds a page of a section view", ERR_INVALID_CURRENT_MEMORY)
+        self._vm_decommit(lo, hi)
         return 0
 
     def _plat_vm_release(self, a):
         base = a[0]
         if base not in self.vm_resv:
-            return self._refuse("vm_release", base, 0, "not the base of a reservation", ERR_INVALID_ADDRESS)
+            return self._refuse("vm_release", base, 0, "not the base of a reservation", LIBNX_BAD_INPUT)
         if self._view_overlap(base, base + self.vm_resv[base]):
             return self._refuse("vm_release", base, 0, "reservation holds a section view", ERR_INVALID_CURRENT_MEMORY)
         self._vm_decommit(base, base + self.vm_resv.pop(base))
@@ -597,8 +641,8 @@ class Machine:
         if handler == 0:
             t.fh = None
             return 0
-        if top % 16 or top < FAULT_FRAME or top > 1 << 32:
-            return self._refuse("access_fault_handler", handler, top, "stack_top not 16-byte aligned or outside 816..4 GiB",
+        if top % 16 or top < FAULT_FRAME or top >= 1 << 32:
+            return self._refuse("access_fault_handler", handler, top, "stack_top not 16-byte aligned or outside 816..4 GiB (exclusive)",
                                 ERR_INVALID_ADDRESS)
         t.fh = (handler, top)
         return 0
@@ -663,6 +707,8 @@ class Machine:
 
     def _plat_thread_activity(self, a):
         tid, paused = a[0], a[1]
+        if tid == 0:   # the calling thread: the kernel cannot pause it (host_thread_activity.inc)
+            return self._refuse("thread_activity", tid, paused, "the calling thread", LIBNX_BAD_INPUT)
         t = self.threads.get(tid)
         if t is None:
             return self._refuse("thread_activity", tid, paused, "no such thread", ERR_INVALID_HANDLE)
