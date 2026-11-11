@@ -20,6 +20,9 @@
  *   "Stopped" is stated for registered threads. Before its registration and after its unregistration a thread executes
  *   only the backend's entry / exit code (no guest memory access, no game code).
  *
+ * FAIRNESS. The world lock is granted in arrival order (world_lock below): a stopper repeating stop/resume cannot starve a
+ * thread that is starting, ending or suspending a thread.
+ *
  * DEADLOCK-FREEDOM. The stopper takes the world lock first and only then pauses anyone, so no stopped thread holds it
  * (the lock has one holder: the registry lock and the world lock are the same lock). The pause primitive needs no
  * cooperation from its target (a signal handler on POSIX, the kernel on Horizon), so a target that holds or waits for any
@@ -37,12 +40,31 @@
 #include "os_world.h"
 
 static os_lock_t g_world;
+/* FIFO order of the world lock (a ticket gate in front of g_world). os_lock is a barging mutex: a stopper that runs
+ * stop/resume back to back re-takes the lock in the gap between a resume and the next stop, and a thread blocked in
+ * os_world_register / os_world_unregister / os_thread_suspend never wins it (observed: four starting threads blocked for
+ * good against 400+ consecutive stops). Tickets are served in arrival order, so every waiter is served after at most the
+ * holders that arrived before it: registration, unregistration and a second stop cannot be starved by a stopper. Only the
+ * ticket holder takes g_world, so the lock itself is never contended. */
+static volatile uint32_t g_tkt_next, g_tkt_serve;
 static os_wslot *g_head;
+static void world_lock(void)
+{
+    uint32_t my = __atomic_fetch_add(&g_tkt_next, 1, __ATOMIC_RELAXED);
+    while (__atomic_load_n(&g_tkt_serve, __ATOMIC_ACQUIRE) != my)
+        os_yield();
+    os_lock(&g_world);
+}
+static void world_unlock(void)
+{
+    os_unlock(&g_world);
+    __atomic_store_n(&g_tkt_serve, __atomic_load_n(&g_tkt_serve, __ATOMIC_RELAXED) + 1, __ATOMIC_RELEASE);
+}
 static __thread os_wslot *g_self;
 
 void os_world_register(os_wslot *s, os_thread *t)
 {
-    os_lock(&g_world);
+    world_lock();
     s->t = t;
     s->prev = NULL;
     s->next = g_head;
@@ -51,12 +73,12 @@ void os_world_register(os_wslot *s, os_thread *t)
     g_head = s;
     s->linked = 1;
     g_self = s;
-    os_unlock(&g_world);
+    world_unlock();
 }
 
 void os_world_unregister(os_wslot *s)
 {
-    os_lock(&g_world);
+    world_lock();
     if (s->linked) {
         if (s->prev)
             s->prev->next = s->next;
@@ -69,7 +91,7 @@ void os_world_unregister(os_wslot *s)
     s->dead = 1;
     if (g_self == s)
         g_self = NULL;
-    os_unlock(&g_world);
+    world_unlock();
 }
 
 int os_thread_suspend(os_thread *t)
@@ -78,12 +100,12 @@ int os_thread_suspend(os_thread *t)
         return -1;
     os_wslot *s = os_thread_wslot(t);
     int r = -1;
-    os_lock(&g_world);
+    world_lock();
     if (!s->user && !s->dead && os_raw_pause(t) == 0) {
         s->user = 1;
         r = 0;
     }
-    os_unlock(&g_world);
+    world_unlock();
     return r;
 }
 
@@ -93,19 +115,19 @@ int os_thread_resume(os_thread *t)
         return -1;
     os_wslot *s = os_thread_wslot(t);
     int r = -1;
-    os_lock(&g_world);
+    world_lock();
     if (s->user) {
         s->user = 0;
         os_raw_resume(t);
         r = 0;
     }
-    os_unlock(&g_world);
+    world_unlock();
     return r;
 }
 
 void fnvl_host_world_stop(void)
 {
-    os_lock(&g_world);
+    world_lock();
     for (os_wslot *s = g_head; s; s = s->next) {
         if (s == g_self || s->user)
             continue;
@@ -121,7 +143,7 @@ void fnvl_host_world_resume(void)
             continue;
         os_raw_resume(s->t);
     }
-    os_unlock(&g_world);
+    world_unlock();
 }
 
 /* the process's first thread: before the clock (FNVNX_INIT_CLOCK 101) and every game static */

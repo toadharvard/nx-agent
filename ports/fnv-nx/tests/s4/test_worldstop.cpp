@@ -159,7 +159,12 @@ TEST(ws2_create_exit_during_stops)
     HANDLE c[2];
     for (int i = 0; i < 2; i++) c[i] = CreateThread(NULL, 0, creator_thread, NULL, 0, NULL);
     int moved = 0;
-    for (int round = 0; round < 400; round++) {
+    /* The invariant is checked only against stops that overlap thread creation and exit, so the run is progress-bound,
+     * not a fixed round count: a fixed count can finish before the creators have started a single thread (stop and
+     * resume are faster than thread start), which proves nothing. Stops continue until at least MIN_RAN short threads
+     * have run inside the stopped-and-resumed sequence, and at least 400 rounds have been made. */
+    const unsigned long MIN_RAN = 200;
+    for (int round = 0; round < 400 || __atomic_load_n(&g_ran, __ATOMIC_RELAXED) < MIN_RAN; round++) {
         fnvl_host_world_stop();
         unsigned long a = g_ran;
         gap();
@@ -170,7 +175,7 @@ TEST(ws2_create_exit_during_stops)
     g_creating = 0;
     join_all(c, 2);
     CHECK_EQ(moved, 0);
-    CHECK(g_ran > 0);
+    CHECK(g_ran >= MIN_RAN);
 }
 
 /* (f) threads blocked in a wait, asleep, or holding a critical section continue correctly after the stops */
