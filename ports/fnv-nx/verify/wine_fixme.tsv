@@ -15,3 +15,10 @@
 14	IDirect3DDevice9::ProcessVertices	wine-9.0:dlls/d3d9/device.c:d3d9_device_ProcessVertices	branch	-
 15	IDirect3DDevice9::ProcessVertices	wine-9.0:dlls/wined3d/device.c:init_transformed_lights	branch	-
 40	IDirect3DDevice9::SetRenderState	wine-9.0:dlls/wined3d/stateblock.c:wined3d_device_apply_stateblock	branch	-
+41	D3DPERF_GetStatus	wine-9.0:dlls/d3d9/d3d9_main.c:D3DPERF_GetStatus	u32	0
+42	D3DPERF_QueryRepeatFrame	wine-9.0:dlls/d3d9/d3d9_main.c:D3DPERF_QueryRepeatFrame	u32	0
+43	D3DPERF_SetMarker	wine-9.0:dlls/d3d9/d3d9_main.c:D3DPERF_SetMarker	void	
+44	D3DPERF_SetOptions	wine-9.0:dlls/d3d9/d3d9_main.c:D3DPERF_SetOptions	void	
+45	D3DPERF_SetRegion	wine-9.0:dlls/d3d9/d3d9_main.c:D3DPERF_SetRegion	void	
+46	IDirect3DDevice9::SetDialogBoxMode	wine-9.0:dlls/wined3d/device.c:wined3d_device_set_dialog_box_mode	u32	0
+47	IDirect3DDevice9Ex::ComposeRects	wine-9.0:dlls/d3d9/device.c:d3d9_device_ComposeRects	u32	0x80004001
