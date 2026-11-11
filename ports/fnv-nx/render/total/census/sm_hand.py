@@ -21,28 +21,28 @@ def load_opcodes(hdr):
     names = []
     for ln in open(hdr):
         m = re.match(r"INSTRUCTION(?:_STATE)?\((\w+),", ln)
-        if m: names.append(m.group(1))
+        if m: names.append(m[1])
     return {n: i for i, n in enumerate(names) if n != "RESERVED"} | {"PHASE": 0xFFFD}
 
 def regspec(t):
     """register text (no modifiers) -> (type, num, rel_token or None, swizzle)"""
     m = re.fullmatch(r"(\w+?)(?:\[(.*)\])?(?:\.(\w+))?", t)
-    base, rel, sw = m.group(1), m.group(2), m.group(3)
+    base, rel, sw = m[1], m[2], m[3]
     named = {"oPos": (4, 0), "oFog": (4, 1), "oPts": (4, 2), "oDepth": (9, 0), "aL": (15, 0), "vPos": (17, 0), "vFace": (17, 1)}
     if base in named: ty, n = named[base]
     else:
         mm = re.fullmatch(r"(oD|oT|oC|[rvctasbiplo])(\d*)", base)
         if not mm: raise ValueError("register " + t)
-        k, n = mm.group(1), int(mm.group(2) or 0)
+        k, n = mm[1], int(mm[2] or 0)
         ty = {"r": 0, "v": 1, "c": 2, "a": 3, "t": 3, "oD": 5, "oT": 6, "o": 6, "oC": 8, "s": 10, "b": 14, "i": 7, "l": 18,
               "p": 19}[k]
     rt = None
     if rel is not None:
         r = re.fullmatch(r"\s*(a0|aL)(?:\.(\w))?\s*(?:\+\s*(\d+))?\s*", rel)
         if not r: raise ValueError("relative " + t)
-        n = int(r.group(3) or 0)
-        if r.group(1) == "aL": rt = 0x80000000 | (7 << 28) | (1 << 11) | (0xE4 << 16)
-        else: rt = 0x80000000 | (3 << 28) | ("xyzw".index(r.group(2) or "x") * 0x55 << 16)
+        n = int(r[3] or 0)
+        if r[1] == "aL": rt = 0x80000000 | (7 << 28) | (1 << 11) | (0xE4 << 16)
+        else: rt = 0x80000000 | (3 << 28) | ("xyzw".index(r[2] or "x") * 0x55 << 16)
     return ty, n, rt, sw
 
 major_of = [0]
@@ -83,11 +83,11 @@ def assemble(text, ops):
         if not ln: continue
         m = re.fullmatch(r"(vs|ps)_(\d)_(\w)", ln)
         if m:
-            major_of[0] = int(m.group(2)); major, minor = int(m.group(2)), (1 if m.group(3) == "x" else int(m.group(3)))
-            toks.append((0xFFFE if m.group(1) == "vs" else 0xFFFF) << 16 | major << 8 | minor); continue
+            major_of[0] = int(m[2]); major, minor = int(m[2]), (1 if m[3] == "x" else int(m[3]))
+            toks.append((0xFFFE if m[1] == "vs" else 0xFFFF) << 16 | major << 8 | minor); continue
         pred = None
         mp = re.match(r"\((!?p0(?:\.\w)?)\)\s*", ln)
-        if mp: pred, ln = mp.group(1), ln[mp.end():]
+        if mp: pred, ln = mp[1], ln[mp.end():]
         w, _, rest = ln.partition(" ")
         args = [a.strip() for a in re.split(r",(?![^\[]*\])", rest)] if rest.strip() else []
         parts = w.split("_"); op = parts[0]; sfx = parts[1:]
@@ -97,7 +97,7 @@ def assemble(text, ops):
             if sfx and sfx[0] in TEXTYPE: t = TEXTYPE[sfx[0]] << 27
             elif sfx:
                 u = re.fullmatch(r"([a-z]+)(\d*)", sfx[0])
-                t = USAGES.index(u.group(1)) | int(u.group(2) or 0) << 16
+                t = USAGES.index(u[1]) | int(u[2] or 0) << 16
             toks += [31 | (2 << 24 if major >= 2 else 0), 0x80000000 | t] + dst(args[0], rm); continue
         if op in ("def", "defi", "defb"):
             if op == "def": v = [struct.unpack("<I", struct.pack("<f", float(x)))[0] for x in args[1:]]
