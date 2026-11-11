@@ -270,7 +270,35 @@ def model_post_shape(code, fields, pre, eip_sym=True, timeout=600):
     cb = z3.Concat(*[byte.get(i, z3.BitVecVal(code[i] if i < len(code) else 0, 8)) for i in reversed(range(16))])
     extra = {'code_bytes': cb, 'code_base': z3.ZeroExt(16, pre['eip'])}
     out = run_isla(code, timeout, (tuple(rg), eip_sym))
-    return _post(code, pre, out, extra, z3.ULT(pre['eip'], z3.BitVecVal(EIP_LIMIT, 32)) if eip_sym else None)
+    r = _post(code, pre, out, extra, z3.ULT(pre['eip'], z3.BitVecVal(EIP_LIMIT, 32)) if eip_sym else None)
+    if eip_sym:                                      # terms of the dict, flattened, rewritten, put back
+        flat = [(k, None, v) for k, v in r.items() if not isinstance(v, dict) and k != 'domain'] + [(k, n, x) for k, v in r.items() if isinstance(v, dict) for n, x in v.items()]
+        new = eip_nowrap([x for *_, x in flat], pre['eip']); r2 = {k: ({} if isinstance(v, dict) else v) for k, v in r.items()}
+        for (k, n, _), t in zip(flat, new):
+            if n is None: r2[k] = t
+            else: r2[k][n] = t
+        r = r2
+    return r
+
+def eip_nowrap(terms, eip):
+    """rewrite of model terms under the domain eip < EIP_LIMIT (every query of a shape run assumes it): the 32-bit sum eip + K (K a small constant: the
+    offsets of the bytes of ONE instruction) zero-extended to a wider sort equals the wide sum zext(eip) + K, because eip + K < 2^32 cannot wrap.
+    Without it z3 cannot see that the fetch index (rip + offset) - code_base is a constant and bit-blasts the 128-bit shifts of code_bytes.
+    terms -> simplified terms with every `zero_extend(eip + K)` / `concat(0, eip + K)` replaced"""
+    terms = [z3.simplify(t) for t in terms]; pairs, seen, st = {}, set(), list(terms)
+    while st:
+        t = st.pop()
+        if t.get_id() in seen: continue
+        seen.add(t.get_id()); ch = t.children(); st.extend(ch)
+        k = t.decl().kind()
+        if k in (z3.Z3_OP_CONCAT, z3.Z3_OP_ZERO_EXT) and z3.is_bv(t) and (len(ch) == 1 or (z3.is_bv_value(ch[0]) and ch[0].as_long() == 0)):
+            x = ch[-1]
+            if z3.is_bv(x) and x.decl().kind() == z3.Z3_OP_BADD and x.num_args() == 2:
+                a, b = x.arg(0), x.arg(1)
+                if z3.is_bv_value(a): a, b = b, a
+                if a.eq(eip) and z3.is_bv_value(b) and 0 <= b.as_long() <= 16:
+                    pairs[t.get_id()] = (t, z3.ZeroExt(t.size() - 32, eip) + z3.BitVecVal(b.as_long(), t.size()))
+    return [z3.simplify(z3.substitute(t, *pairs.values())) if pairs else t for t in terms]
 
 def _post(code, pre, out_err, extra, extra_assume=None):
     out, err = out_err; blocks = split_blocks(out); ok, bad = [], []
