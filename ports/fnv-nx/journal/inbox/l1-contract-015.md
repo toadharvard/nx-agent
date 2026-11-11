@@ -33,3 +33,8 @@ If a root needs such data in an object, it must come through the preprocessor (a
   names outside its tree (the distribution cross binutils/headers of env.json) become declared inputs of the tool runtime.
 - D (order, ftoi): plugin stage reads the plugin headers of the external compiler. Tests: tests/test_guest.py (rule: 8 cases; the compiler cases need
   FNVNX_TEST_GCC_PREFIX = a prefix built by toolchain/msvcmodel/build.sh and print SKIP without it).
+Verified with a real prefix (toolchain/msvcmodel/build.sh, GCC 13.3.0 + patch, 1.1 GB, packed as a local external): test_guest.py all passed, 0 skipped:
+guest root builds; plugins built against the external's headers, .so equal in two cold stores; warm run 0 stages; size_t mangles `j`; ldar/stlr and _ftol
+on it; test_msvcmodel.py passes on it. Times (dominated by ingesting the 1.1 GB tree): cold 107 s, warm 9.7 s.
+Open: without FNVNX_TEST_GCC_PREFIX the compiler cases print SKIP and the file exits 0 (the selftests gate has no skip logic, so this is a silent pass).
+When guest_compiler.json lands, the test should fetch the pinned external instead and fail without it.
