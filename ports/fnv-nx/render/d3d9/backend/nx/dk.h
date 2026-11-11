@@ -285,6 +285,9 @@ void nxdk_scale_shutdown(void);
 enum { NXDK_MSRES_AVG = 0, NXDK_MSRES_S0_DEPTH = 1, NXDK_MSRES_S0_STENCIL = 2 };
 /* layer `layer` of the 2/4/8-sample 2D image src into the single-sample dst of the same format and size; 0 = recorded, 1 = one nxdk_err */
 uint32_t nxdk_ms_resolve(const NxDkImage* src, uint32_t layer, const NxDkImage* dst, uint32_t mode);
+/* As nxdk_ms_resolve, recording into `cmd`: either nxdk_s.cmd (inside a SUBMIT, no open pass) or the command buffer of a live NxDkSync outside any SUBMIT
+ * (no query slice is open there, so no query pause/resume is recorded, and the stale nxdk_s.inPass is not consulted); 0 = recorded, 1 = one nxdk_err */
+uint32_t nxdk_ms_resolve_on(DkCmdBuf cmd, const NxDkImage* src, uint32_t layer, const NxDkImage* dst, uint32_t mode);
 uint32_t nxdk_msres_init(void);                   /* 0 = ok; called by nxdk_stream_init after nxdk_scale_init */
 void nxdk_msres_shutdown(void);
 /* dk_stream.c: nxdk_img_storage for a temporary image; dk_stream.c releases it after the wait of the SUBMIT that covers every command recorded up to
