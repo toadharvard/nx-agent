@@ -37,7 +37,8 @@ static void *slot; void **fnvl_host_tls_slot(void) { return &slot; }
 unsigned long long fnvl_host_ticks_ns(void) { return 0; }
 void *memcpy(void *d, const void *s, unsigned long n) { char *a = d; const char *b = s; while (n--) *a++ = *b++; return d; }
 void *memset(void *d, int v, unsigned long n) { char *a = d; while (n--) *a++ = (char)v; return d; }
-u32 t_add2(u32 a, u32 b) { return a + b; }
+void fnvnx_guest_current(u32 *esp, u32 *teb);
+u32 t_add2(u32 a, u32 b) { u32 sp, teb; fnvnx_guest_current(&sp, &teb); return a + b + (teb != 0x50000000u) + (*(u32 *)(unsigned long)(sp + 4) != a); }      /* also checks fnvnx_guest_current: the esp of this call, the thread's TEB */
 u64 t_mul64(u32 a, u64 b) { return (u64)a * b; }
 static double t_half(double x) { return x * 0.5; }
 float t_fmix(float x, u32 k) { return x * (float)k; }

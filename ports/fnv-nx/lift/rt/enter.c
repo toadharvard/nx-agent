@@ -15,6 +15,8 @@
           and returns eax, edx and, for kind 2, the popped ST0. It works for stdcall and cdecl alike: the activation is over when a `ret` pops the
           sentinel with esp above the pushed frame, and the guest esp is then reset to its value before the call.
           kind: 0 integer / void / pointer result, 1 64-bit integer (edx:eax), 2 float or double in ST0.
+     void fnvnx_guest_current(u32 *esp, u32 *teb)
+          The guest esp and TEB of the calling host thread's guest state (inside an import call: the esp of that call).
    Host hooks the runtime needs (provided by the loader / platform):
      struct cpu **fnvl_host_tls_slot(void)      a pointer-sized slot private to the calling host thread, zero in a new thread
      unsigned long long fnvl_host_ticks_ns(void)  (cpumodel.c)
@@ -30,6 +32,7 @@ struct cpu **fnvl_host_tls_slot(void);
 u32 fnvl_thread_main(u32 eip, u32 sp, u32 teb) __attribute__((noinline));
 void fnvl_attach_main(void *mem, u32 sp, u32 teb) __attribute__((noinline));
 void fnvl_detach_main(void) __attribute__((noinline));
+void fnvl_current_main(u32 *sp, u32 *teb) __attribute__((noinline));
 void fnvl_invoke_main(u32 addr, u32 ecxv, u32 nargs, const u32 *args, u32 kind, struct fnvnx_guest_ret *out) __attribute__((noinline));
 void fnvl_nobody(void);
 extern const u32 fnvnx_lift_cpu_bytes;
@@ -77,6 +80,9 @@ extern "C" void fnvl_attach_main(void *mem, u32 sp, u32 teb)
 
 extern "C" void fnvl_detach_main(void) { *fnvl_host_tls_slot() = 0; }
 
+/* esp and TEB of the guest thread this host thread carries: during an import call, the esp of the call (it points at the return address) */
+extern "C" void fnvl_current_main(u32 *sp, u32 *teb) { struct cpu *p = *fnvl_host_tls_slot(); *sp = p->r[4]; *teb = p->teb; }
+
 extern "C" void fnvl_invoke_main(u32 addr, u32 ecxv, u32 nargs, const u32 *args, u32 kind, struct fnvnx_guest_ret *out)
 {
     c = *fnvl_host_tls_slot();
@@ -110,6 +116,7 @@ WRAP(fnvnx_lift_enter, fnvl_thread_main)
 WRAP(fnvnx_lift_attach, fnvl_attach_main)
 WRAP(fnvnx_lift_detach, fnvl_detach_main)
 WRAP(fnvnx_guest_invoke, fnvl_invoke_main)
+WRAP(fnvnx_guest_current, fnvl_current_main)
 
 /* The routine an address that is not a key of the dispatcher table resolves to (rt/rt.c): #UD at that address, through the SEH runtime (rt/seh.c).
    The table holds every entry of the universe (tools/liftall.py --finish fails otherwise), so no relocated code pointer and no direct target gets here. */
