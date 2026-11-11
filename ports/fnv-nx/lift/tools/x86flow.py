@@ -7,8 +7,9 @@ from collections import defaultdict
 import capstone
 from capstone import x86 as X
 
-UNI = '/home/user/l3facts/universe.tsv'
-EHJ = '/home/user/l3facts/ehtables.json'
+FACTS = os.environ.get('FNVNX_FACTS', '/home/user/l3facts')       # facts root: every input / output path below derives from it
+UNI = FACTS + '/universe.tsv'
+EHJ = FACTS + '/ehtables.json'
 M32 = 0xffffffff
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 md.detail = True
@@ -452,7 +453,7 @@ def depth(F, tabl):
 
 # ---- whole-program prerequisites: imports, callee pops (ret N, jmp-thunk chains), alloca helpers ----
 THUNK = {}                     # entry -> IAT slot of a `jmp [iat]` stub
-CACHE = '/home/user/l3facts/flow/retn.tsv'
+CACHE = FACTS + '/flow/retn.tsv'
 
 
 def parse_imports():

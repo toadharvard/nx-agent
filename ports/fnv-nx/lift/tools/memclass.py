@@ -19,14 +19,15 @@ import x86flow as W
 from x86flow import X, M32, mn, rn, base, memslot, Fn, FUNK, KINDS, THUNK, IATADDR, track, frame_events, load_universe, pmap
 
 EXE = os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')
-IMPTAB = os.environ.get('FNVNX_IMPORT_ESCAPE', '/home/user/l3facts/import_escape.tsv')
+IMPTAB = os.environ.get('FNVNX_IMPORT_ESCAPE', W.FACTS + '/import_escape.tsv')
 IMPESC = {}                  # import name -> per-argument string over n / r / e (conservative default: all e)
 if os.path.exists(IMPTAB):
     for _ln in open(IMPTAB).read().splitlines():
         _f = _ln.split('\t')
         if len(_f) >= 3 and not _ln.startswith('#'):
             IMPESC[_f[1]] = _f[2]
-OUT = '/home/user/l3facts/memclass'
+OUT = os.environ.get('FNVNX_MEMCLASS_OUT', W.FACTS + '/memclass')
+NPROC = int(os.environ.get('FNVNX_PROCS', '2'))
 STK = ('stack-local', 'stack-args-in', 'stack-args-out', 'stack-funclet', 'stack-escaped', 'stack-unk')
 ORDER = STK + ('ro-iat', 'ro-rdata', 'ro-text', 'tls', 'tls-derived', 'global', 'heap/other')
 PLAIN = ('stack-local', 'stack-args-in', 'stack-args-out', 'stack-funclet', 'ro-iat', 'ro-rdata', 'ro-text')
@@ -242,11 +243,13 @@ def flow(F, x0, regs, saved, entry=False, spill=False, slots0=()):
                 N = {(r, c) for r, c in N if r != d} | {(d, c) for c in add}
         elif m == 'mov' and o[0].type == X.X86_OP_MEM and len(o) > 1 and conds(reg(o[1])):
             mm = o[0].mem
+            if spill and mc[0] is not None and not (mm.segment and i.reg_name(mm.segment) == 'fs'):
+                NS = {(q, c) for q, c in NS if q != mc[0]}          # one strong update of the slot, then EVERY condition of the stored register joins it (a per-condition update kept only the last one in set order)
             for cond in conds(reg(o[1])):
                 if mm.segment and i.reg_name(mm.segment) == 'fs':
                     pass
                 elif spill and mc[0] is not None:
-                    NS = {(q, c) for q, c in NS if q != mc[0]} | {(mc[0], cond)}
+                    NS = NS | {(mc[0], cond)}
                 elif mm.base and i.reg_name(mm.base) in ('esp', 'ebp') and not mm.index:
                     emit(cond, ('U', 'spill'))
                 else:
@@ -424,7 +427,7 @@ def analyze(args):
             summ.setdefault('fwd', []).append(t)
     bpv = sorted({v for v in F.bp.values() if v is not None})
     return a, dict(addrs=array('I', sorted(F.ins)).tobytes(), nf=nf, fr=fr, misc=misc, ev=events, summ=summ, allstack=allstack, aw=sorted(aw), cidx=cidx, multi=F.multi,
-                   why=F.why, bpv=bpv[0] if len(bpv) == 1 else None, offs=offs[:5], undecoded=not F.ok)
+                   why=F.why, bpv=bpv[0] if len(bpv) == 1 else None, offs=offs, undecoded=not F.ok)
 
 
 def hx(v):
@@ -453,9 +456,9 @@ def main():
     key = hashlib.sha256(open(EXE, 'rb').read()).hexdigest()[:16] + hashlib.md5(raw).hexdigest()[:16]
     print('memclass: exe sha256 %s  universe.tsv md5 %s  entries %d' % (key[:12], key[16:28], len(rows)))
     kind = {a: k for a, e, k in rows}
-    with Pool(2) as p0:
+    with Pool(NPROC) as p0:
         W.prepare(p0, rows, key)
-    with Pool(2) as pool:
+    with Pool(NPROC) as pool:
         out = pmap(pool, analyze, [(a, e, k) for a, e, k in rows], 100)
     R = {a: r for a, r in out if r}
     # every instruction address is counted once: decomp entries first, then by address
@@ -665,10 +668,13 @@ def main():
         L, S = [sum(v for k, v in tot.items() if k[0] == c and k[1] == t) for t in 'LS']
         print('%-15s %9d %9d %5.1f%% %6s   %s | %s' % (c, L, S, 100.0 * (L + S) / max(nacc, 1), BEFORE.get(c, '-'), '/'.join(str(tot[(c, 'L', w)]) for w in WID + ('o',)), '/'.join(str(tot[(c, 'S', w)]) for w in WID + ('o',))))
     offs = [(x, w) for a in order for x, w in R[a]['offs'] if owner.get(x) == a]
-    tlsp = pc['tls'] + pc['tls-derived']
     plain = sum(pc[c] for c in PLAIN)
-    print('plain-eligible accesses %d of %d (%.1f %%)  [v1: 46.1 %%]; tls (%d) and tls-derived (%d) stay ordered: check %s (%d offending sites)' % (
-        plain, nacc, 100.0 * plain / max(nacc, 1), pc['tls'], pc['tls-derived'], 'PASSED' if not offs else 'FAILED', len(offs)))
+    # L-TLS (rule R9): a TLS slot may become plain only if NO function stores or passes an address derived from fs:[2Ch]. Today every tls / tls-derived access is ORDERED
+    # (not in PLAIN), whatever the taint finds; the taint (tls_taint) only labels class tls-derived. Sites where the array address leaves in a register are listed in tls_escapes.tsv
+    # as the facts a future TLS promotion needs; they are not a soundness condition of the plain set. The invariant of the export is asserted below (hard failure).
+    tlsc = Counter(w if w == 'push fs:[2c]' else 'call' if w.startswith('call') else 'ret' if w.startswith('ret') else 'use:' + w.split(' ')[0] for x, w in offs)
+    print('plain-eligible accesses %d of %d (%.1f %%)  [v1: 46.1 %%]; tls (%d) and tls-derived (%d) are ordered; fs:[2c] array address leaves a register at %d sites (L-TLS facts: %s)' % (
+        plain, nacc, 100.0 * plain / max(nacc, 1), pc['tls'], pc['tls-derived'], len(offs), ' '.join('%s=%d' % kv for kv in sorted(tlsc.items()))))
     print('contribution: rule1 locals %d, args-in %d, args-out %d, funclet frames %d; formerly stack-unk now plain (non-funclet unresolved offsets) %d; rule2 (summary-proved, formerly stack-escaped) %d (by role %s)' % (
         pc['stack-local'], pc['stack-args-in'], pc['stack-args-out'], pc['stack-funclet'], rulef['unresolved-offset'], sum(rule2.values()), dict(sorted(rule2.items()))))
     rs = Counter(w for a in order if kind[a] not in FUNK for w in R[a]['why'][:1])
@@ -698,6 +704,14 @@ def main():
         for c in ORDER:
             f.write('%s\t%d\t%d\t%d\n' % (c, sum(v for k, v in tot.items() if k[0] == c and k[1] == 'L'), sum(v for k, v in tot.items() if k[0] == c and k[1] == 'S'), int(c in PLAIN)))
     plset = set(pl)
+    tlssites = {x for a in order for x, ls, w, cls in R[a]['nf'] if cls.startswith('tls') or cls in ('tls-derived', 'tls:reg')}
+    if tlssites & plset:                      # export invariant: an instruction with a TLS access (any entry that contains it) is never plain
+        print('memclass: INVARIANT VIOLATED: %d instructions with a TLS access are in the plain set (first %08x)' % (len(tlssites & plset), min(tlssites & plset)), file=sys.stderr)
+        sys.exit(1)
+    with open(OUT + '/tls_escapes.tsv', 'w') as f:      # L-TLS facts: sites where the address of the TLS array (fs:[2Ch]) leaves a register
+        f.write('insn\tcause\n')
+        for x, w in sorted(offs):
+            f.write('%08x\t%s\n' % (x, w))
     with open(OUT + '/atomic_sites.tsv', 'w') as f:      # xchg-mem / lock sites with their class (plain = proven thread-local: no atomic needed)
         f.write('insn\tkind\tclass\n')
         for x, kd in sorted(atom):
