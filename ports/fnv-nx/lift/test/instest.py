@@ -24,7 +24,7 @@ STUBX = 'extern "C" void fnvl_call(struct cpu*, u32 target);\n#undef CALLX\n#def
 FLAGS = ('-mabi=ilp32 -std=gnu++17 -c -O2 -fms-extensions -fshort-wchar -frounding-math -fsigned-char -fno-strict-aliasing '
          '-fwrapv -fno-delete-null-pointer-checks -fcheck-new -fno-sized-deallocation -fno-lifetime-dse -ffp-contract=off '
          '-fPIC -fpermissive -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack-protector -fno-stack-clash-protection '
-         '-mno-outline-atomics -U_FORTIFY_SOURCE -ffreestanding -fno-exceptions -fno-asynchronous-unwind-tables -fno-math-errno -w '
+         '-mno-outline-atomics -U_FORTIFY_SOURCE -ffreestanding -fno-exceptions -fno-asynchronous-unwind-tables -fno-math-errno -fno-jump-tables -fno-ipa-ra -w '
          '-DFNVL_FLAGS_IO -ffixed-x19 -ffixed-x20 -ffixed-x21 -ffixed-x22 -ffixed-x23 -ffixed-x24 -ffixed-x25 -ffixed-x26 -ffixed-x27').split()
 HARN, HARN_END, CPU, ASTACK, RETPAD = 0xE0000000, 0xE2000000, 0xE1000000, 0xE1F00000, 0xE1FF0000
 HX = 0xE1E00000                  # x86 oracle harness page (inside the guarded range: a test access to it counts as a collision)
