@@ -15,11 +15,12 @@
 #include "dk.h"
 
 NxDk nxdk;
+NxDkStream nxdk_s;   /* nxdk_s.cmd: the buffer nxdk_ms_resolve records into (the product publishes its section's buffer for that one call) */
 void nxchk_err(const char* fmt, ...) { va_list ap; va_start(ap, fmt); vsnprintf(nxdk.lastErr, sizeof nxdk.lastErr, fmt, ap); va_end(ap); nxdk.errCount++; }
 #define EV(...) do { printf("EV "); printf(__VA_ARGS__); putchar('\n'); } while (0)
 
 /* ---- failure injection ---------------------------------------------------------------------------------------------------------------- */
-enum { F_SYNC, F_END, F_SCALE, F_BLOCK, F_STAGE, F_IMG, F_N };
+enum { F_SYNC, F_END, F_SCALE, F_BLOCK, F_STAGE, F_IMG, F_MSRES, F_N };
 static int failn[F_N];
 static int should_fail(int k) { if (failn[k] > 0 && --failn[k] == 0) return 1; return 0; }
 
@@ -108,6 +109,15 @@ void nxdk_scale_point(DkCmdBuf c, const NxDkSub* s, const NxDkSub* d, const uint
        imid(d->im), d->id, d->level, d->layer, d->x, d->y, d->w, d->h, r);
     ops[nops++] = (Op){ 0, d->x, d->y, d->w, d->h, ramp != NULL, 0 };
 }
+/* recording double of dk_msres.c: the preconditions of its mr_check are asserted (a violation prints BADRESOLVE and ends the host); it stages like the real one */
+uint32_t nxdk_ms_resolve(const NxDkImage* s, uint32_t layer, const NxDkImage* d, uint32_t mode) {
+    if (should_fail(F_MSRES)) { nxdk_err("msres: refused (double)"); return 1; }
+    if (!open_sec || nxdk_s.cmd != CMD(sec_id) || nxdk_s.inPass || !s->used || !d->used || s->type != NxImgType_2D || (s->samples != 2 && s->samples != 4 && s->samples != 8) ||
+        d->samples != 1 || d->fmt != s->fmt || d->w != s->w || d->h != s->h || layer != 0 || mode != NXDK_MSRES_AVG || !d->blk) { puts("BADRESOLVE"); exit(3); }
+    if (!nxdk_stage_alloc(4096)) return 1;
+    EV("msres src=%u dst=%u layer=%u mode=%u samples=%u", imid(s), imid(d), layer, mode, s->samples);
+    return 0;
+}
 uint32_t nxdk_img_storage(NxDkImage* im) {
     if (should_fail(F_IMG)) { nxdk_err("image: storage refused (double)"); return 1; }
     im->dk._storage[0] = (uint8_t)(100 + ++tmp_made); im->blk = (DkMemBlock)&tmp_live; tmp_live++;
@@ -159,7 +169,7 @@ int main(void) {
         else if (!strcmp(t[0], "dead") && nt == 2) { ims[atoi(t[1])].used = 0; puts("OK"); }
         else if (!strcmp(t[0], "cfmt")) { int f = -1; for (int i = 0; i < 256 && f < 0; i++) if (dk_fmt((uint32_t)i).flags & DKFMT_COMPRESSED) f = i; printf("C %d\n", f); }
         else if (!strcmp(t[0], "fail") && nt == 3) {
-            const char* K[F_N] = { "sync", "end", "scale", "block", "stage", "img" }; int ok = 0;
+            const char* K[F_N] = { "sync", "end", "scale", "block", "stage", "img", "msres" }; int ok = 0;
             for (int i = 0; i < F_N; i++) if (!strcmp(t[1], K[i])) { failn[i] = atoi(t[2]); ok = 1; }
             if (!ok) return 2;
             puts("OK");
@@ -188,7 +198,7 @@ int main(void) {
             uint32_t x0 = (uint32_t)atoi(t[1]), y0 = (uint32_t)atoi(t[2]), w = (uint32_t)atoi(t[3]), h = (uint32_t)atoi(t[4]);
             printf("F "); for (uint32_t y = y0; y < y0 + h; y++) for (uint32_t x = x0; x < x0 + w; x++) for (uint32_t c = 0; c < 4; c++) printf("%02x", fr[(y * FW + x) * 4 + c]);
             putchar('\n');
-        } else if (!strcmp(t[0], "state")) printf("S live %d tmp %d open %d\n", live_blk, tmp_live, open_sec);
+        } else if (!strcmp(t[0], "state")) printf("S live %d tmp %d open %d scmd %d\n", live_blk, tmp_live, open_sec, nxdk_s.cmd != NULL);
         else { printf("BADCMD %s\n", t[0]); return 2; }
         fflush(stdout);
     }

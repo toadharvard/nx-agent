@@ -5,7 +5,7 @@
  b  cross build (aarch64, -Werror) by build_dk.sh; the union of the undefined nxdk_* symbols of all backend objects (minus what they define) is exactly
     {nxdk_guest_ptr, nxdk_on_present, nxdk_shader_pack}
  c  host run of the real product file (+ dk_fmt.c) under ASan + UBSan against a recording / executing double (host_main.c): the exact recorded
-    sequence for several scale rects, with and without ramp, resolve of 2x / 4x sources, the cursor inside / clipped on each edge / on all four /
+    sequence for several scale rects, with and without ramp, resolve (nxdk_ms_resolve, no 2D engine) of 2x / 4x / 8x sources and a format without the 2D engine, the cursor inside / clipped on each edge / on all four /
     fully outside / NULL (no GPU work), the front's final bytes against the model of the reference equation (and the exact bytes uploaded), the
     lifetime of every block and the temporary image (released once, after the wait that consumes it), every error path, the validation
  d  mutations of a copy of the product file: every one must be caught
@@ -35,6 +35,7 @@ check(max(len(l) for l in SRC.splitlines()) <= 160, "dk_present.c has a line lon
 m = FORBID.search(SRC); check(not m, "dk_present.c contains the forbidden word " + (m.group(0) if m else ""))
 check(not re.search(r"\)\s*\{\s*\}", SRC), "dk_present.c has an empty function body")
 check("__attribute__" not in SRC, "dk_present.c uses an attribute")
+check("dkCmdBufResolveImage(" not in SRC and "dkImageFormatGetFlags" not in SRC, "dk_present.c still uses the 2D engine resolve")
 
 # ---- b ----
 out = os.path.join(tmp, "cross")
@@ -51,7 +52,7 @@ if r.returncode == 0:
     left = {s for s in und - dfn if s.startswith("nxdk_")}
     check(left == {"nxdk_guest_ptr", "nxdk_on_present", "nxdk_shader_pack"}, "undefined nxdk_ symbols of the backend: " + " ".join(sorted(left)))
     po = sh([NM, "-u", os.path.join(out, "dk_present.o")]).stdout.split()
-    check({"nxdk_scale_point", "nxdk_sync_begin", "nxdk_sync_end", "nxdk_stage_alloc"} <= set(po), "dk_present.o does not use the sync / scale hooks: " + " ".join(po))
+    check({"nxdk_scale_point", "nxdk_sync_begin", "nxdk_sync_end", "nxdk_stage_alloc", "nxdk_ms_resolve"} <= set(po), "dk_present.o does not use the sync / scale hooks: " + " ".join(po))
 
 # ---- c ----
 consts = os.path.join(tmp, "consts.c")
@@ -108,8 +109,8 @@ def model(P, f0, tmpbase, secbase, rd_after=True):
     sec = secbase; im = IMGS[P["img"]]; sid = P["img"] + 1; ev.append("sync_begin n=%d" % sec)
     tid = None
     if im[4] > 1:
-        tid = 101 + tmpbase; ev += ["img_storage id=%d w=%d h=%d fmt=%d samples=1 mips=1 layers=1" % (tid, im[2], im[3], im[1]), "resolve src=%d dst=%d" % (sid, tid),
-                                    "barrier mode=%d flags=%d" % (FULL, IMGL2)]; sid = tid
+        tid = 101 + tmpbase; ev += ["img_storage id=%d w=%d h=%d fmt=%d samples=1 mips=1 layers=1" % (tid, im[2], im[3], im[1]), "stage_alloc bytes=4096",
+                                    "msres src=%d dst=%d layer=0 mode=0 samples=%d" % (sid, tid, im[4])]; sid = tid
     s, d = P["s"], P["d"]
     ev += ["stage_alloc bytes=816", "scale src=%d:%d:0:0:%d:%d:%d:%d dst=0:0:0:0:%d:%d:%d:%d ramp=%s" % ((sid, P["img"]) + tuple(s) + tuple(d) + (RAMPH if P["ramp"] else "none",))]
     for j in range(d[3]):
@@ -121,7 +122,7 @@ def model(P, f0, tmpbase, secbase, rd_after=True):
         x0, y0, w, h = v; box = "box im=1 lvl=0 lay=0 %d,%d,0,%d,%d,1" % (x0, y0, w, h)
         ev += ["block_create size=%d flags=%d" % ((w * h * 4 + 4095) // 4096 * 4096, MEMF), box.replace("im=1", "im=0"), "barrier mode=%d flags=%d" % (FULL, IMGL2),
                "i2b im=0 rect=%d,%d,0,%d,%d,1 blk=@ off=0 rl=0 ih=0 flags=0" % (x0, y0, w, h)]
-    ev += ["sync_end n=%d" % sec, "stage_free n=1"]
+    ev += ["sync_end n=%d" % sec, "stage_free n=%d" % (2 if tid else 1)]
     if tid: ev.append("img_release id=%d" % tid)
     if v:
         x0, y0, w, h = v; sec += 1; cur = cursor(P["cur"][0], int(P["cur"][1:]), P["cw"] * P["ch"] * 4); data = []
@@ -164,7 +165,7 @@ def scenarios(exe):
         nb = sum(1 for e in ev if e.startswith("sync_begin")); ne = sum(1 for e in ev if e.startswith("sync_end"))
         mk = sum(1 for e in ev if e.startswith("block_create")); dt = sum(1 for e in ev if e.startswith("block_destroy"))
         im = sum(1 for e in ev if e.startswith("img_storage")); ir = sum(1 for e in ev if e.startswith("img_release"))
-        ck(nb == ne and mk == dt and im == ir and s == "S live 0 tmp 0 open 0" and not any("LIFETIME" in e for e in ev),
+        ck(nb == ne and mk == dt and im == ir and s == "S live 0 tmp 0 open 0 scmd 0" and not any("LIFETIME" in e or e.startswith("resolve") for e in ev),
            "%s: sections %d/%d blocks %d/%d images %d/%d state %s" % (what, nb, ne, mk, dt, im, ir, s))
     D = (0, 0, FW, FH)
     rects = [((0, 0, 64, 48), D), ((5, 6, 17, 9), (3, 4, 20, 11)), ((0, 0, 1, 1), (39, 29, 1, 1)), ((10, 10, 30, 30), (0, 0, 40, 30)), ((0, 0, 64, 48), (7, 8, 9, 10))]
@@ -189,15 +190,17 @@ def scenarios(exe):
         P = dict(img=0, s=(0, 0, 64, 48), d=D, ramp=True, cx=cx, cy=cy, cw=cw, ch=ch, cur=cu); reset(); want, wf = model(P, st["front"], 0, st["sec"] + 1)
         e, msg, ev, fr, s_ = run(P); ck(e == 0 and [norm(x) for x in ev] == want and list(fr) == wf and not any(x.startswith("block_create") for x in ev),
                                         "no GPU work for the cursor %s: %s" % ((cx, cy, cw, ch, cu), [norm(x) for x in ev])); inv(ev, s_, "outside %s" % ((cx, cy),)); st["sec"] += 1
-    # 3: multisampled sources: 2x and 4x resolved into a temporary image released after the wait; the scale reads the temporary
-    for img, tm in ((1, 0), (2, 1)):
+    # 3: multisampled sources: 2x / 4x / 8x and a format without the 2D engine, all by nxdk_ms_resolve into a temporary image released after the wait;
+    # the order is resolve -> scale (reading the temporary) -> cursor pass; dkCmdBufResolveImage is never recorded
+    for img, tm in ((1, 0), (2, 1), (3, 2), (4, 3)):
         P = dict(img=img, s=(0, 0, 64, 48), d=D, ramp=False, cx=4, cy=4, cw=6, ch=6, cur="p2"); reset(); want, wf = model(P, st["front"], st["tmp"], st["sec"] + 1)
         e, msg, ev, fr, s_ = run(P); ck(e == 0 and [norm(x) for x in ev] == want and list(fr) == wf, "msaa image %d: %s" % (img, [norm(x) for x in ev])); inv(ev, s_, "msaa %d" % img)
+        k_ = [x.split()[0] for x in ev]; t_ = [x for x in ev if x.startswith("msres")][0].split("dst=")[1].split()[0]
+        ck(k_.index("msres") < k_.index("scale") < k_.index("i2b") < k_.index("b2i") and ("scale src=%s:" % t_) in ev[k_.index("scale")], "order resolve, scale, cursor: %s" % ev)
         st["sec"] += 2; st["tmp"] += 1
     # 4: refusals: ONE error, nothing recorded, the front unchanged
     base_ = dict(img=0, s=(0, 0, 64, 48), d=D, ramp=False, cx=4, cy=4, cw=6, ch=6, cur="p2")
-    for name, ch_, text, over in [("8x source", dict(img=3), "samples", None), ("2x source without 2D engine", dict(img=4), "2D engine", None),
-                                  ("cube source", dict(img=5), "bad image", None), ("compressed source", dict(img=6), "bad image", None), ("view source", dict(img=7), "bad image", None),
+    for name, ch_, text, over in [("cube source", dict(img=5), "bad image", None), ("compressed source", dict(img=6), "bad image", None), ("view source", dict(img=7), "bad image", None),
                                   ("dead source", dict(img=8), "bad image", None), ("cursor width 0", dict(cw=0), "cursor size", None), ("cursor height 0", dict(ch=0), "cursor size", None),
                                   ("cursor width 4097", dict(cw=4097, ch=1), "cursor size", None), ("cursor height 4097", dict(cw=1, ch=4097), "cursor size", None),
                                   ("NULL present", {}, "bad image", "nullpresent"), ("NULL source", {}, "bad image", "nullsrc")]:
@@ -233,6 +236,10 @@ def scenarios(exe):
     reset(); h.cmd("fail img 1"); e, msg, ev, fr, s_ = run(Pm); h.cmd("fail img 0")
     ck(e == 1 and "storage" in msg and [norm(x) for x in ev] == ["sync_begin n=%d" % (st["sec"] + 1), "sync_end n=%d" % (st["sec"] + 1), "stage_free n=0"] and list(fr) == st["front"],
        "temporary image refused: %s %s %s" % (e, msg, ev)); inv(ev, s_, "img refused"); st["sec"] += 1
+    for kind, nth, text in (("msres", 1, "msres: refused"), ("stage", 1, "staging")):   # the resolve itself fails: nothing recorded after the temporary, which is released
+        reset(); h.cmd("fail %s %d" % (kind, nth)); e, msg, ev, fr, s_ = run(Pm); h.cmd("fail %s 0" % kind)
+        ck(e == 1 and text in msg and [norm(x) for x in ev] == model(Pm, front0(), st["tmp"], st["sec"] + 1)[0][:2] + ["sync_end n=%d" % (st["sec"] + 1), "stage_free n=0",
+           "img_release id=%d" % (101 + st["tmp"])] and list(fr) == st["front"], "resolve failure (%s): %s %s" % (kind, msg, ev)); inv(ev, s_, "resolve " + kind); st["sec"] += 1; st["tmp"] += 1
     reset(); h.cmd("fail end 1"); e, msg, ev, fr, s_ = run(Pm); h.cmd("fail end 0")
     ck(e == 1 and ev[-2] == "img_release id=%d" % (101 + st["tmp"]) and list(fr) == st["front"], "msaa: failed wait still releases the temporary image: %s" % ev); inv(ev, s_, "msaa end"); st["sec"] += 1; st["tmp"] += 1
     # a present after all the failures still works (nothing stayed half open)
@@ -270,9 +277,11 @@ MUT = [
     ('read-back block uncached flag lost', 'DkMemBlockFlags_CpuUncached | DkMemBlockFlags_GpuCached', 'DkMemBlockFlags_CpuUncached'),
     ('block size unaligned', '(bytes + DK_MEMBLOCK_ALIGNMENT - 1) / DK_MEMBLOCK_ALIGNMENT * DK_MEMBLOCK_ALIGNMENT', 'bytes'),
     ('block refusal silent', 'nxdk_err("present: deko3d refused the cursor block of %u bytes", bytes); return NULL;', 'return NULL;'),
-    ('resolve only above 2x', 'src->samples > 1) { bad', 'src->samples > 2) { bad'), ('8x accepted', 'src->samples > 4 ||', 'src->samples > 8 ||'),
-    ('2D engine check dropped', '& DkImageFlags_Usage2DEngine', '| DkImageFlags_Usage2DEngine'), ('resolve target multisampled', 'tmp->samples = 1;', ''),
-    ('resolve dropped', 'dkCmdBufResolveImage(cmd, &sv, &dv);', ''), ('resolve target is the source', 'dkImageViewDefaults(&dv, &tmp->dk);', 'dkImageViewDefaults(&dv, &src->dk);'),
+    ('resolve only above 2x', 'src->samples > 1) { bad', 'src->samples > 2) { bad'), ('resolve mode depth', 'NXDK_MSRES_AVG);', 'NXDK_MSRES_S0_DEPTH);'), ('resolve layer 1', '= nxdk_ms_resolve(src, 0, tmp', '= nxdk_ms_resolve(src, 1, tmp'),
+    ('resolve buffer not published', '    nxdk_s.cmd = cmd;\n', ''), ('resolve buffer not restored', '    nxdk_s.cmd = prev;\n', ''),
+    ('resolve error swallowed', '    nxdk_s.cmd = prev;\n    return bad;', '    nxdk_s.cmd = prev;\n    return 0;'), ('resolve target multisampled', 'tmp->samples = 1;', ''),
+    ('resolve dropped', 'const uint32_t bad = nxdk_ms_resolve(src, 0, tmp, NXDK_MSRES_AVG);', 'const uint32_t bad = 0;'),
+    ('resolve target is the source', '= nxdk_ms_resolve(src, 0, tmp,', '= nxdk_ms_resolve(src, 0, src,'),
     ('scale reads the unresolved source', 'use = &tmp;', 'use = src;'), ('temporary image leaked', '    nxdk_img_release(&tmp);\n', ''),
     ('failed wait ignored', 'bad |= nxdk_sync_end(&sy);', 'nxdk_sync_end(&sy);'), ('scale error ignored', 'bad = nxdk.errCount != e0;', 'bad = 0;'),
     ('source x / y swapped', '(uint32_t)p->sx, (uint32_t)p->sy, (uint32_t)p->sw', '(uint32_t)p->sy, (uint32_t)p->sx, (uint32_t)p->sw'),
@@ -294,7 +303,6 @@ MUT = [
     ('NULL cursor drawn', 'const int vis = cursor && x0 < x1', 'const int vis = x0 < x1'), ('resolve failure ignored', 'bad = pc_resolve(sy.cmd, src, &tmp);', 'pc_resolve(sy.cmd, src, &tmp);'),
     ('temporary storage failure ignored', 'if (nxdk_img_storage(tmp)) return 1;', 'nxdk_img_storage(tmp);'),
     ('bad image returns 0', 'p ? p->image : 0u);\n        return 1;', 'p ? p->image : 0u);\n        return 0;'),
-    ('samples refusal returns 0', 'src->samples, src->fmt);\n        return 1;', 'src->samples, src->fmt);\n        return 0;'),
     ('cursor size refusal returns 0', 'p->cw, p->ch); return 1; }', 'p->cw, p->ch); return 0; }'),
     ('sync_begin refusal returns 0', 'if (nxdk_sync_begin(&sy)) return 1;', 'if (nxdk_sync_begin(&sy)) return 0;'),
     ('pass 1 / read-back / wait failure returns 0', 'if (rd) dkMemBlockDestroy(rd); return bad; }', 'if (rd) dkMemBlockDestroy(rd); return 0; }'),
