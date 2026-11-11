@@ -36,11 +36,11 @@ static void run_case(IDirect3D9* d3d[2], const char* line) {
     }
     D3DPRESENT_PARAMETERS pp = t_pp(); pp.EnableAutoDepthStencil = TRUE; pp.AutoDepthStencilFormat = D3DFMT_D24S8;
     IDirect3DDevice9* d = t_dev(d3d[ex], &pp); if (!CHECK(d)) return;
-    IDirect3DBaseTexture9* tx[8] = {}; IDirect3DSurface9* sf[8] = {}; int ns = 0;
+    std::vector<IDirect3DBaseTexture9*> tx; IDirect3DSurface9* sf[8] = {}; int ns = 0;
     for (auto& t : tok) {
         size_t e = t.find('='); if (e == std::string::npos) continue; std::string k = t.substr(0, e), v = t.substr(e + 1);
         if (k == "s") for (auto& it : split(v, ';')) { if (it.empty()) continue; auto a = split(it, ':'); auto f = split(a[1], ','); int sl = atoi(a[0].c_str()); d->SetSamplerState(sid(sl), D3DSAMP_MINFILTER, atoi(f[0].c_str())); d->SetSamplerState(sid(sl), D3DSAMP_MAGFILTER, atoi(f[1].c_str())); d->SetSamplerState(sid(sl), D3DSAMP_MIPFILTER, atoi(f[2].c_str())); }
-        else if (k == "t") for (auto& it : split(v, ';')) { if (it.empty()) continue; auto a = split(it, ':'); int id = atoi(a[1].c_str()); if (!id) continue; IDirect3DBaseTexture9* b = mktex(d, id); if (b) { d->SetTexture(sid(atoi(a[0].c_str())), b); tx[id] = b; } }
+        else if (k == "t") for (auto& it : split(v, ';')) { if (it.empty()) continue; auto a = split(it, ':'); int id = atoi(a[1].c_str()); if (!id) continue; IDirect3DBaseTexture9* b = mktex(d, id); if (b) { d->SetTexture(sid(atoi(a[0].c_str())), b); tx.push_back(b); } }
         else if (k == "g") for (auto& it : split(v, ';')) { if (it.empty()) continue; auto a = split(it, ':'); auto f = split(a[1], ','); uint32_t s = atoi(a[0].c_str()); static const D3DTEXTURESTAGESTATETYPE ty[9] = {D3DTSS_COLOROP, D3DTSS_COLORARG1, D3DTSS_COLORARG2, D3DTSS_COLORARG0, D3DTSS_ALPHAOP, D3DTSS_ALPHAARG1, D3DTSS_ALPHAARG2, D3DTSS_ALPHAARG0, D3DTSS_RESULTARG};
             for (int i = 0; i < 9; i++) d->SetTextureStageState(s, ty[i], (DWORD)strtoul(f[i].c_str(), nullptr, 10)); }
     }
@@ -56,7 +56,7 @@ static void run_case(IDirect3D9* d3d[2], const char* line) {
     if (!lost) { HRESULT dr = d->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 0); CHECK_EQ(dr == D3DERR_INVALIDCALL, !decl); }   // draw rule D1 (draw_api.cpp) = V1: no declaration <=> the draw is refused and ValidateDevice says INVALIDCALL
     if (!lost) CHECK_EQ(!decl, hr == D3DERR_INVALIDCALL);
     if (lost) nx_life(O(d))->state = NX_DEV_OK;
-    for (int i = 0; i < 8; i++) if (tx[i]) tx[i]->Release();
+    for (IDirect3DBaseTexture9* b : tx) b->Release();
     for (int i = 0; i < ns; i++) sf[i]->Release();
     d->Release();
 }

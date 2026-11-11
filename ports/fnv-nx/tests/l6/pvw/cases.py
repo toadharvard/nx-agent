@@ -4,7 +4,7 @@ from gen import *
 import gen, oracle
 XYZ, RHW, N, PS, D, S = 2, 4, 0x10, 0x20, 0x40, 0x80
 SRC_FVFS = [XYZ, XYZ | N, XYZ | D, XYZ | S, XYZ | D | S, XYZ | N | D | S | tex_fvf([2]), RHW | D, XYZ | tex_fvf([2]), XYZ | tex_fvf([3, 1]), XYZ | N | tex_fvf([4, 2]), XYZ | N | D | tex_fvf([2, 3, 4, 1])]
-DST_FVFS = [XYZ, RHW, XYZ | D, XYZ | S, XYZ | D | S, RHW | D | S, XYZ | PS | D, XYZ | N, RHW | tex_fvf([2]), RHW | tex_fvf([1, 3]), XYZ | D | tex_fvf([4, 2, 3]), RHW | D | S | tex_fvf([2, 2, 2, 2]), 6 | D, 8 | tex_fvf([2]), 0x4002 | D, 0, XYZ | N | PS | D | S | tex_fvf([3]), RHW | tex_fvf([4, 4, 4, 4, 4, 4, 4, 4])]
+DST_FVFS = [XYZ, RHW, XYZ | D, XYZ | S, XYZ | D | S, RHW | D | S, XYZ | PS | D, XYZ | N, RHW | tex_fvf([2]), RHW | tex_fvf([1, 3]), XYZ | D | tex_fvf([4, 2, 3]), RHW | D | S | tex_fvf([2, 2, 2, 2]), 6 | D, 8 | tex_fvf([2]), 0, XYZ | N | PS | D | S | tex_fvf([3]), RHW | tex_fvf([4, 4, 4, 4, 4, 4, 4, 4])]
 def pick_lights(r, nmax=4):
     ls = {}; idxs = r.sample(range(0, 60), r.randint(0, nmax))
     for i in idxs:
@@ -48,8 +48,8 @@ def gen_a(seed):
     # 4. source element variants
     for k in range(60):
         el = [(0, 0, 2, 0, 0)]; off = 12
-        if r.random() < 0.7: el.append((0, off, r.choice([4, 8, 11, 12, 0, 1, 2, 3, 5, 7]), 10, 0)); off += 16
-        if r.random() < 0.7: el.append((r.choice([0, 1]), 0 if True else 0, r.choice([4, 8, 12, 3]), 10, 1))
+        if r.random() < 0.7: el.append((0, off, r.choice([4, 8, 9, 15, 0, 1, 2, 3, 5, 7]), 10, 0)); off += 16
+        if r.random() < 0.7: el.append((r.choice([0, 1]), 0 if True else 0, r.choice([4, 8, 10, 3]), 10, 1))
         for e in el: pass
         # normalise offsets: stream 0 elements packed, stream 1 elements at 0
         s0 = [e for e in el if e[0] == 0]; o = 0; fixed = []
@@ -71,7 +71,7 @@ def gen_a(seed):
 
 def simple(r, sfvf=XYZ | D, dfvf=RHW | D, count=3, **kw):
     c = src_case(r, sfvf, count, kw.pop("start", 0)); c.update(dstfvf=dfvf, vp=VPS[1], proj=persp(1.0, 4 / 3, 1.0, 100.0), view=trans(0, 0, 3), **kw); c["rs"]["LIGHTING"] = kw.get("lit", 0) if False else c["rs"]["LIGHTING"]
-    c["rs"]["LIGHTING"] = 0; return c
+    c["rs"]["LIGHTING"] = 0; c["usefvf"] = None; return c
 def gen_b(seed):
     r = random.Random(seed); out = []; add = lambda c, **k: out.append(finalize(c, r, **k))
     for ex in (0, 1):

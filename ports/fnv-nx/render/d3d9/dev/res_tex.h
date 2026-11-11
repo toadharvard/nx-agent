@@ -26,7 +26,7 @@ int nx_env_profile_of(NxObj* device);                              // the ENV pr
 
 // ---- storage
 struct NxSub {                       // one sub-resource: level x face (volume: level)
-    uint8_t* mem; uint32_t w, h, d, row, slice, size;      // mem: CPU copy (null: GPU-only); row / slice: LockRect / LockBox pitches (wined3d sub_resource_get_map_pitch)
+    uint8_t* mem; uint32_t w, h, d, row, slice, size, store;      // size: the D3D size; store: bytes kept at mem (nx_tex_store, >= size); mem: CPU copy (null: GPU-only); row / slice: LockRect / LockBox pitches (wined3d sub_resource_get_map_pitch)
     uint8_t locked, lock_w, gpu_newer, dirty;                // lock_w: the lock may write; gpu_newer: the GPU wrote since the CPU copy was last read back; dirty: dbox is valid
     NxBox3 dbox;                     // dirty region (union), consumed by upload
 };

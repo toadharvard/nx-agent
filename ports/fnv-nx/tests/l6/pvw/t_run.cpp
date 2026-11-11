@@ -56,7 +56,7 @@ static void run_line(char* line, int lineno) {
     t.next(); uint32_t dfvf = t.u(), dlen = t.u(); std::vector<uint8_t> dinit = hex(t.next()); IDirect3DVertexBuffer9* dst = nullptr;
     bool alias = dlen == 0;
     if (alias) { dst = src[0]; dst->AddRef(); dlen = (uint32_t)sdata[0].size(); dinit = sdata[0]; }
-    else { CHECK_HR(dev->CreateVertexBuffer(dlen, 0, dfvf, (D3DPOOL)pool, &dst, nullptr), D3D_OK); if (!dst) return;
+    else { HRESULT chr = dev->CreateVertexBuffer(dlen, 0, dfvf, (D3DPOOL)pool, &dst, nullptr); if (chr != D3D_OK) printf("  line %d: CreateVertexBuffer len %u fvf %x pool %u ex %d hr %08x\n", lineno, dlen, dfvf, pool, ex, (unsigned)chr); CHECK_HR(chr, D3D_OK); if (!dst) return;
         void* p; CHECK_HR(dst->Lock(0, 0, &p, 0), D3D_OK); memcpy(p, dinit.data(), dinit.size()); dst->Unlock(); }
     NxBufCore* db = static_cast<NxBufCore*>(nx_obj_of((IUnknown*)dst)); uint32_t lo, hi; db->take_dirty(&lo, &hi); uint32_t rev0 = db->rev;
     t.next(); uint32_t start = t.u(), didx = t.u(), count = t.u(), declarg = t.u(), dstnull = t.u(), flags = t.u();

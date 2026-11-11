@@ -49,25 +49,25 @@ static int mode_lookup(char **a)
         if (!strcmp(px, "MISS")) CHECK(!hit);
         else { uint8_t exp[100000]; size_t en = unhex(px, exp); CHECK(hit && n == en && !memcmp(p, exp, en)); }
     }
-    printf("CHECKS %d FAIL %d\n", checks, fails); shcache_close(c); return fails != 0;
+    printf("CHECKS %d FAIL %d\n", checks, fails); shcache_close(c); free(m); free(l); free(rows); return fails != 0;
 }
 static void print_info(const shcache *c) { shcache_info i; shcache_get_info(c, &i); printf("%d %u %u %zu %u\n", i.main_valid, i.main_entries, i.log_entries, i.log_valid_len, i.log_ignored); }
 static int mode_info(char **a)
 {
-    size_t mn, ln; uint8_t *m = slurp(a[0], &mn), *l = slurp(a[1], &ln), bid[16]; shcache *c; bid_of(a[2], bid); c = shcache_open(m, mn, l, ln, bid); print_info(c); shcache_close(c); return 0;
+    size_t mn, ln; uint8_t *m = slurp(a[0], &mn), *l = slurp(a[1], &ln), bid[16]; shcache *c; bid_of(a[2], bid); c = shcache_open(m, mn, l, ln, bid); print_info(c); shcache_close(c); free(m); free(l); return 0;
 }
 static int mode_put(char **a)
 {
     size_t mn, ln, pn; uint8_t *m = slurp(a[0], &mn), *l = slurp(a[1], &ln), bid[16], pay[100000]; shcache *c; shcache_key k; shcache_info in; FILE *f; int rc;
     bid_of(a[2], bid); c = shcache_open(m, mn, l, ln, bid); shcache_get_info(c, &in);
-    if (mkkey(&k, a[3], a[4], a[5], a[6], a[7])) { puts("ERR"); return 1; }
+    if (mkkey(&k, a[3], a[4], a[5], a[6], a[7])) { puts("ERR"); shcache_close(c); free(m); free(l); return 1; }
     pn = unhex(a[8], pay);
     { FILE *t = fopen(a[1], "ab"); if (t) fclose(t); }
     { char *buf = (char *)malloc(in.log_valid_len + 1); FILE *r = fopen(a[1], "rb"); size_t got = r ? fread(buf, 1, in.log_valid_len, r) : 0; if (r) fclose(r);   /* truncate to the valid prefix */
       f = fopen(a[1], "wb"); fwrite(buf, 1, got, f); fclose(f); free(buf); }
     f = fopen(a[1], "ab"); rc = shcache_put(c, &k, pay, pn, file_sink, f); fclose(f);
     printf("%d\n", rc);
-    shcache_close(c); return 0;
+    shcache_close(c); free(m); free(l); return 0;
 }
 static int mode_flips(char **a)
 {
@@ -78,7 +78,7 @@ static int mode_flips(char **a)
     accepted = 0;                                          /* every proper prefix of the file (a truncated download) */
     for (i = 0; i < mn; i++) { shcache *c = shcache_open(m, i, NULL, 0, bid); shcache_get_info(c, &in); accepted += in.main_valid; shcache_close(c); }
     printf("prefixes %d\n", accepted);
-    return 0;
+    free(m); return 0;
 }
 static int mode_logscan(char **a, int flip)
 {
@@ -90,7 +90,7 @@ static int mode_logscan(char **a, int flip)
         c = shcache_open(m, mn, l, flip ? ln : k, bid); shcache_get_info(c, &in); printf("%zu %u %zu\n", k, in.log_entries, in.log_valid_len); shcache_close(c);
         if (flip) l[k] ^= 0x55;
     }
-    return 0;
+    free(m); free(l); return 0;
 }
 
 static int mode_verify(char **a)
@@ -106,7 +106,7 @@ static int mode_verify(char **a)
         pk = (uint8_t *)malloc(8 + dn + jn); pn = shcache_payload_pack(d, (uint32_t)dn, (const char *)j, (uint32_t)jn, pk, 8 + dn + jn);
         hit = shcache_lookup(c, &k, &p, &n); CHECK(hit && n == pn && !memcmp(p, pk, pn)); free(d); free(j); free(pk);
     }
-    printf("CHECKS %d FAIL %d\n", checks, fails); shcache_close(c); return fails != 0;
+    printf("CHECKS %d FAIL %d\n", checks, fails); shcache_close(c); free(m); free(tsv); return fails != 0;
 }
 
 static unsigned rng_s = 12345u;
@@ -183,6 +183,6 @@ int main(int argc, char **argv)
     if (!strcmp(m, "keymake") && argc == 7) { shcache_key k; char o[80] = ""; int i; if (mkkey(&k, argv[2], argv[3], argv[4], argv[5], argv[6])) { puts("ERR"); return 0; } for (i = 0; i < k.n_l; i++) sprintf(o + 2 * i, "%02x", k.l[i]); printf("%u %s %u\n", k.n_l, o, k.flags); return 0; }
     if (!strcmp(m, "hash") && argc == 3) { uint8_t b[4096]; size_t n = unhex(argv[2], b); printf("%016llx %016llx\n", (unsigned long long)shcache_hash64(b, n), (unsigned long long)shcache_l_hash(b, (uint32_t)n)); return 0; }
     if (!strcmp(m, "refl") && argc == 4) { size_t n; uint8_t *j = slurp(argv[2], &n), p[300]; int r, i; j = (uint8_t *)realloc(j, n + 1); j[n] = 0; r = shcache_refl_pairs((char *)j, argv[3], p, sizeof p);
-        if (r < 0) puts("ERR"); else { for (i = 0; i < r; i++) printf("%02x", p[i]); puts(""); } return 0; }
+        if (r < 0) puts("ERR"); else { for (i = 0; i < r; i++) printf("%02x", p[i]); puts(""); } free(j); return 0; }
     fprintf(stderr, "bad usage\n"); return 2;
 }

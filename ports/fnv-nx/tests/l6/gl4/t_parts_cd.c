@@ -64,6 +64,7 @@ static void c_scale(void) {
     got = t_read_all(d2, 0, 0, 16, 16, 1, f);
     CHECK(got && !memcmp(got, dp, sizeof dp)); free(got);
     /* point downscale 16 -> 8: the rule takes the texel 2d + 1 of each pair */
+    free(sp);   /* the 8x8 source of the upscales above; sp is reassigned */
     uint32_t big = mk(NxFmt_RGBA8, 16, 16, 9, &sp), small = mk(NxFmt_RGBA8, 8, 8, 0, NULL);
     uint32_t bs[4] = {0, 0, 16, 16}, ss[4] = {0, 0, 8, 8};
     CHECK(blit(big, bs, small, ss, 0) == 0);

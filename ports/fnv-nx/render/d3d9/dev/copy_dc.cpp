@@ -12,10 +12,10 @@
 static bool gdi_format(uint32_t f) { return f == 20 || f == 21 || f == 22 || f == 23 || f == 24 || f == 25; }
 static bool ensure_cpu(NxImg* im) {   // a CPU copy of every sub-resource of a GPU-only image (a GPU image may hold anything: the first read-back makes the copy current); false = out of memory, nothing changed
     if (im->raw || im->sub[0].mem) return true;
-    uint64_t tot = 0; for (uint32_t i = 0; i < im->levels * im->faces; i++) tot += (im->sub[i].size + 15u) & ~15u;
+    uint64_t tot = 0; for (uint32_t i = 0; i < im->levels * im->faces; i++) tot += (im->sub[i].store + 15u) & ~15u;
     im->raw = (uint8_t*)nxd3d_alloc((size_t)tot + 15); if (!im->raw) return false;
     memset(im->raw, 0, (size_t)tot + 15); uint8_t* c = (uint8_t*)(((uintptr_t)im->raw + 15) & ~(uintptr_t)15);
-    for (uint32_t i = 0; i < im->levels * im->faces; i++) { im->sub[i].mem = c; im->sub[i].gpu_newer = im->gpu != 0; c += (im->sub[i].size + 15u) & ~15u; }
+    for (uint32_t i = 0; i < im->levels * im->faces; i++) { im->sub[i].mem = c; im->sub[i].gpu_newer = im->gpu != 0; c += (im->sub[i].store + 15u) & ~15u; }
     return true;
 }
 HRESULT STDMETHODCALLTYPE NxSurface9::GetDC(HDC* out) {

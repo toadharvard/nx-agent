@@ -30,9 +30,9 @@ HRESULT NxImg::init(NxObj* own, uint32_t k, uint32_t w_, uint32_t h_, uint32_t d
     uint64_t tot = 0;
     for (uint32_t fi = 0; fi < fc; fi++) for (uint32_t l = 0; l < lv; l++) {
         NxSub* s = at(l, fi); s->w = dim(w, l); s->h = dim(h, l); s->d = dim(d, l);
-        s->size = (uint32_t)nx_tex_store(tf, s->w, s->h, s->d);
+        s->size = (uint32_t)nx_tex_size(tf, s->w, s->h, s->d); s->store = (uint32_t)nx_tex_store(tf, s->w, s->h, s->d);
         if (tf.flags & NXTF_BROKEN) { s->row = s->w * tf.bytes; s->slice = s->h * s->row; } else nx_tex_pitch(tf, s->w, s->h, &s->row, &s->slice);   // texture_resource_sub_resource_get_map_pitch
-        tot += (s->size + 15u) & ~15u;
+        tot += (s->store + 15u) & ~15u;
     }
     if (cpu) {
         if (um) { raw = (uint8_t*)um; ext = true; sub[0].mem = raw; }
@@ -40,7 +40,7 @@ HRESULT NxImg::init(NxObj* own, uint32_t k, uint32_t w_, uint32_t h_, uint32_t d
             raw = (uint8_t*)nxd3d_alloc((size_t)tot + 15); if (!raw) return E_OUTOFMEMORY;
             memset(raw, 0, (size_t)tot + 15);
             uint8_t* c = (uint8_t*)(((uintptr_t)raw + 15) & ~(uintptr_t)15);
-            for (uint32_t i = 0; i < lv * fc; i++) { sub[i].mem = c; c += (sub[i].size + 15u) & ~15u; }
+            for (uint32_t i = 0; i < lv * fc; i++) { sub[i].mem = c; c += (sub[i].store + 15u) & ~15u; }
         }
     }
     if (ni.format != NxFmt_None && (p == D3DPOOL_DEFAULT || p == D3DPOOL_MANAGED)) {

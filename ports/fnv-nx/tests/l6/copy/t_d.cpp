@@ -54,7 +54,7 @@ static void d_queries(TDev& d) {
     IDirect3DQuery9* oc = nullptr; CHECK_HR(d.i9->CreateQuery(D3DQUERYTYPE_OCCLUSION, &oc), D3D_OK); DWORD px = 77;
     oc->Issue(D3DISSUE_BEGIN); oc->Issue(D3DISSUE_END); CHECK(poll(oc, &px, 4)); CHECK_EQ(px, 0);                 // an interval with no draw counts 0
     px = 77; oc->Issue(D3DISSUE_END); CHECK(poll(oc, &px, 4)); CHECK_EQ(px, 0);                                      // END without BEGIN: an empty interval
-    CHECK_HR(d.i9->CreateQuery(D3DQUERYTYPE_VCACHE, &oc), D3DERR_NOTAVAILABLE); CHECK_HR(d.i9->CreateQuery((D3DQUERYTYPE)7, nullptr), D3DERR_NOTAVAILABLE); CHECK_HR(d.i9->CreateQuery(D3DQUERYTYPE_OCCLUSION, nullptr), D3D_OK);
+    IDirect3DQuery9* nq = oc; CHECK_HR(d.i9->CreateQuery(D3DQUERYTYPE_VCACHE, &nq), D3DERR_NOTAVAILABLE); CHECK(nq == nullptr);   /* a refused creation nulls *pp: it must not be the pointer the test still owns */ CHECK_HR(d.i9->CreateQuery((D3DQUERYTYPE)7, nullptr), D3DERR_NOTAVAILABLE); CHECK_HR(d.i9->CreateQuery(D3DQUERYTYPE_OCCLUSION, nullptr), D3D_OK);
     // ids 1..4096: the 4097th live id-holding query is refused, a released id is reused
     static IDirect3DQuery9* q[4200]; int n = 0; for (; n < 4200; n++) { HRESULT hr = d.i9->CreateQuery(D3DQUERYTYPE_EVENT, &q[n]); if (hr != D3D_OK) { CHECK_HR(hr, D3DERR_OUTOFVIDEOMEMORY); break; } }
     CHECK(n >= 4000 && n < 4200); q[0]->Release(); IDirect3DQuery9* again = nullptr; CHECK_HR(d.i9->CreateQuery(D3DQUERYTYPE_EVENT, &again), D3D_OK); for (int i = 1; i < n; i++) q[i]->Release();
