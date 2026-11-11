@@ -79,6 +79,8 @@ void nxdk_present_compose(const NxPresent* p, const NxDkImage* s, const uint16_t
 static int hit[24];
 uint32_t nxdk_img_init(void) { ev("img_init"); return 0; }
 void nxdk_img_shutdown(void) { ev("img_shutdown"); }
+uint32_t nxdk_stream_init(void) { return 0; }   /* dk_stream.c has its own test (tests/l6/dkstream) */
+void nxdk_stream_shutdown(void) {}
 void nxdk_img_describe(uint32_t id, const NxDkImage* im, int srgb) { (void)id; (void)im; (void)srgb; ev("img_describe"); }
 #define H1(name, n) uint64_t name(uint64_t a) { hit[n]++; return 0x1000u + n + a * 0x10000; }
 H1(nxdk_image_create, 3) H1(nxdk_sampler_create, 4) H1(nxdk_shader_create, 5) H1(nxdk_submit, 6) H1(nxdk_wait_frame, 7) H1(nxdk_readback, 8)

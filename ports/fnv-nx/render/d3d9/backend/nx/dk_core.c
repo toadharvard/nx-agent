@@ -128,6 +128,7 @@ const NxGpuApi4* nxdk_create(uint32_t width, uint32_t height, char* err, size_t 
     nxdk.q = dkQueueCreate(&qm);
     if (!nxdk.q) return fail(err, errlen, "dkQueueCreate");
     if (nxdk_img_init()) return fail(err, errlen, "image tables");
+    if (nxdk_stream_init()) return fail(err, errlen, "command stream");
     if (width && height && nxdk_swap_create(width, height)) return fail(err, errlen, "swapchain");
     NxGpuApi4* api = &nxdk.api;
     api->v3.info.magic = NXGPU_MAGIC; api->v3.info.version = NXGPU_VERSION4; api->v3.info.frames_in_flight = NXDK_FRAMES;
@@ -142,6 +143,7 @@ const NxGpuApi4* nxdk_create(uint32_t width, uint32_t height, char* err, size_t 
 /* safe on any partial state: only what exists is released; the queue is idle before anything it may use goes away, the device goes last */
 void nxdk_destroy(void) {
     if (nxdk.q) dkQueueWaitIdle(nxdk.q);
+    nxdk_stream_shutdown();
     nxdk_swap_destroy();
     nxdk_img_shutdown();
     for (uint32_t id = 1; id <= NXDK_MAX_MEM; id++)
