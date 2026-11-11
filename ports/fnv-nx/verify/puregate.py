@@ -18,7 +18,9 @@ Rules: the class rules of POLICY/ATTR (clock inode entropy unsorted-listing host
                    directory (one level up per extra dot); `x` must be a submodule or (module a real file) a name in it.
                    The file must be among the checked files (a namespace directory counts only for submodules); a
                    checked file with the name of a listed module is ambiguous. Project modules are checked in the same
-                   run, reported under their own path.
+                   run, reported under their own path. Import roots (`--import-roots DIR...`, table IMPORT_ROOTS of the
+                   policy): a module found there is allowed iff its file has no violation itself (its imports included);
+                   else `import-unlisted impure:MOD -> FILE: n violations (first ...)` at the importer; the file is not an item.
   stat-result      os.stat/lstat/fstat or a .stat()/.lstat() method call: only as the value of `.st_size`/`.st_mode`.
   unsorted-set     set literal/comprehension/set()/frozenset() (also |,&,-,^ and union..copy of those) directly iterated,
                    unpacked, starred, or passed to list tuple enumerate iter map zip filter reversed, .join .extend
@@ -163,7 +165,8 @@ class Analyzer:
             self.is_set(x.left, sc) or self.is_set(x.right, sc))
     def bad_imports(self, n):
         """Symbols of the imports of an Import/ImportFrom node that are outside the allow-list."""
-        files, roots = self.proj
+        files, roots, *imp = self.proj
+        imp = imp[0] if imp else None
         lvl, here, out = getattr(n, "level", 0), os.path.dirname(self.src), []
         ents = [(a.name, []) for a in n.names] if isinstance(n, ast.Import) else [
             (n.module or "", [a.name for a in n.names if a.name != "*"])]
@@ -180,6 +183,9 @@ class Analyzer:
                 elif parts[0] in P.EXTERNAL: self.ext.add(parts[0])
             elif not lvl and listed(parts[0]): out.append("ambiguous:" + mod)
             else: out += [mod + "." + x for x in names if not hit and locate(files, b, parts + [x]) is None]
+            if hit and imp and hit in imp.files:  # a module of an import root: allowed iff that file is itself accepted
+                why = imp.verdict(hit)
+                if why: out.append("impure:%s -> %s" % (mod, why))
         return out
     def leaf(self, n, sc):
         if not self.final: return self.binder(n, sc)
@@ -301,6 +307,20 @@ class Analyzer:
 
 NOPROJ = (frozenset(), ())
 
+class ImportRoots:
+    """Files below the import roots (policy table IMPORT_ROOTS, each an admitted tool root): they resolve like project files but are
+    not items of the run. An import that resolves into one is allowed iff that file is itself accepted (no violation of its own,
+    which includes its own imports: transitive); else the importer gets `import-unlisted impure:MOD -> FILE: n violations (first)`.
+    A cycle is judged by the violations of its members. proj: the project context the files are analysed in (set by main)."""
+    def __init__(self, files): self.files, self.memo, self.proj = frozenset(files), {}, None
+    def verdict(self, f):
+        if f not in self.memo:
+            self.memo[f] = None
+            r = analyse(f, self.proj)
+            v = r[0] if r else []
+            self.memo[f] = ("%s: %d violations (first: line %d %s %s)" % (os.path.relpath(f), len(v), v[0][0], v[0][1], v[0][2])) if v else None
+        return self.memo[f]
+
 def scan(text, name, proj=NOPROJ):
     """([(line, rule, symbol)] sorted unique, set_iterations_unproven, external modules imported) of one Python source."""
     try:
@@ -368,13 +388,24 @@ def main(argv):
         i = args.index("--json")
         js = args[i + 1]
         del args[i:i + 2]
+    iroots = []
+    if "--import-roots" in args:  # directories (table IMPORT_ROOTS) whose files are importable if accepted, not items
+        i = args.index("--import-roots")
+        j = next((k for k in range(i + 1, len(args)) if args[k].startswith("--")), len(args))
+        iroots = args[i + 1:j]
+        del args[i:j]
     paths = args[1:]
-    if args[:1] != ["check"] or not paths or any(not os.path.exists(p) for p in paths):
-        sys.stderr.write("usage: puregate.py check PATH... [--json OUT.json] | audit-stdlib (PATHs must exist)\n")
+    if args[:1] != ["check"] or not paths or any(not os.path.exists(p) for p in paths + iroots):
+        sys.stderr.write("usage: puregate.py check PATH... [--import-roots DIR...] [--json OUT.json] | audit-stdlib (PATHs must exist)\n")
         return 1
     files, seen, viol, by_rule, by_file, unproven, ext = [], [], [], {}, {}, {}, set()
     for p in paths: collect(p, files)
-    proj = (frozenset(norm(f) for f in files if f.endswith(".py")), tuple(norm(p) for p in paths if os.path.isdir(p)))
+    ifiles = []
+    for p in iroots: collect(p, ifiles)
+    imp = ImportRoots(norm(f) for f in ifiles if f.endswith(".py") and f not in files)
+    proj = (frozenset(norm(f) for f in files if f.endswith(".py")) | imp.files,
+            tuple(norm(p) for p in paths if os.path.isdir(p)) + tuple(norm(p) for p in iroots if os.path.isdir(p)), imp)
+    imp.proj = proj
     for f in files:
         r = analyse(f, proj)
         if r is not None:
