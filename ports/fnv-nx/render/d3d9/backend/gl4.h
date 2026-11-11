@@ -18,6 +18,9 @@ extern "C" {
 
 /* ---- public ------------------------------------------------------------------------------------------------- */
 /* The embedder maps a guest address range [addr, addr + size) to a host pointer (the test provides identity). */
+/* Contract of the embedder: a host pointer to [addr, addr + size) when the whole range lies in ONE guest mapping the guest may read and write,
+ * else NULL (the call then fails with NXGPU_BAD_CALL). size == 0: a non-NULL pointer when addr lies inside a mapping or exactly at its end (the
+ * library does not dereference it), NULL when addr is outside every mapping. The device passes only memory of nxd3d_gpu_alloc (glue_stream.h). */
 void* nxgl4_guest_ptr(uint64_t addr, uint64_t size);
 /* Creates the surfaceless GL 4.5 core context (current on the calling thread; every later call comes from that
  * thread) and the swapchain image (image 0 names it) of width x height (none when 0). NULL on failure (err). */
