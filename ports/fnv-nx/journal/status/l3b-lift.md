@@ -8,7 +8,7 @@ on 2026-11-11 22:35 UTC. Handoff read: `journal/inbox/l3b-lift-handoff-opus.md` 
 | # | Task (goal-path item) | Worker | Branch | Status |
 |---|---|---|---|---|
 | 0 | Trunk CLAUDE.md into claude/fnv-l3b-lift | lead | claude/fnv-l3b-lift | done 6385fff6 (trunk 58a79b3e) |
-| 1 | Census: direct toolchain calls and doubles over all of lift/ (item 2 measurement) | w1 session_01KmtZKSxmMppxYbrn72CCBH | claude/fnv-l3b-lift-w1 | doing |
+| 1 | Census: direct toolchain calls and doubles over all of lift/ (item 2 measurement) | w1 session_01KmtZKSxmMppxYbrn72CCBH | claude/fnv-l3b-lift-w1 | done 1fb13833 (source-level: clang AST of the harness sources, no cross nm in the worker container) |
 | 2 | lift/rt as a guest product root on verify/recipe.py (msvcmodel b4057704, plugins), flags = the pack flags (item 1) | w2 session_01KmtZKUEwDammyW56Dx37m8 | claude/fnv-l3b-lift-w2 | doing |
 | 3 | R9 one form: merge L3a 160438e, delete rt/fnvl_mem.h and duplicate ordering tests; golden + gate_order | w3 session_01KmtZKSe6CHsWxfNeCn25nG | claude/fnv-l3b-lift-w3 | doing |
 | 4 | forms prover: per-encoding cert key (key, shape_sha, IR sha), 0x67 prefix, push/pop r16 + bound builders, farm run from the mirror | w4 session_01KmtZKSmVSGEpAznLZh6oF7 | claude/fnv-l3b-lift-w4 | doing |
@@ -24,8 +24,9 @@ on 2026-11-11 22:35 UTC. Handoff read: `journal/inbox/l3b-lift-handoff-opus.md` 
 
 | quantity | value | commit |
 |---|---|---|
-| lift test files with doubles | >= 9 of 23 (rt.S 11 symbols, sehcodes memset/memcpy, imptest/msvcrttest native.c) | 641ff7d5 |
-| lift files calling the compiler directly | 12 files (test 8, bench 2, proof/tests 1, tools/liftgen 1 recipe with stock gcc-13) | 6385fff6 |
+| lift test/bench programs with doubles | 9 of 35; 19 distinct symbols (6 collide with rt units, 13 boundary), 67 (file, symbol) pairs | 6385fff6 (w1) |
+| direct toolchain sites in lift/ | 46 (45 subprocess, 1 recipe naming stock g++-13 in liftgen.py:181); 0 use msvcmodel | 6385fff6 (w1) |
+| symbols lift/rt declares that no unit defines (ELF gap) | 16: ExitProcess, UnhandledExceptionFilter, fnvl_call, fnvl_disp_table, fnvl_g, fnvl_phf_params, fnvl_host_ticks_ns, fnvl_host_tls_slot, fnvl_trace, fnvl_world_stop, fnvl_world_resume, fnvnx_lift_cpu_bytes, fnvnx_lift_raise_backend, fnvnx_win32_lookup_export, fnvnx_win32_set_raise_backend, cxx_frame_handler | 6385fff6 (w1) |
 | forms + fpexact gate selftests | 70/70 | eb6f0b2b |
 | encodings certified by the shape prover (gate forms) | 0 / 26 500 (DSL builds 19 481) | eb6f0b2b |
 | golden translation | 99 927 / 99 927, 0 errors | 49f16df2 (not re-run since) |
