@@ -35,12 +35,28 @@ below, not written yet, so no product root can be admitted; **no rule** = report
 | 10 | Test that can pass on a wrong body: the expected value comes from the code under test | `oracle` | provenance of every expected value (exe, Wine dump, contract, independent model) | L4 | required |
 | 14 | Memory fault in a hand-written native body: null or wild pointer, access out of bounds, stack exhaustion | `memsafe` | a static proof per native function; the means is not chosen yet (L4 with L5, L6, L1) | L4 | required, no means yet |
 | 15 | Hang or deadlock | `nodeadlock` | a static rule; none is known yet | L4 | required, no rule yet |
+| 16 | A branch treated as unreachable that can be reached | `reach` | call-graph facts of the exe and the modules; one certificate per `fact_id` | L1 | required with the first root that calls `fnvnx_reach_violation` |
 | 11 | Tool that is not a pure function of its declared inputs | `pure` | AST of every stage tool | L4 | runs |
 | 12 | Tool defect covered by its own tests | `selftests` | every test file, in the declared environment | L4 | runs |
 | 13 | Code in the trunk that no gate judges | `admit` | tracked files against `admit.json` | L4 | runs |
 
 Gate rules decide on what the program is (machine code, symbol tables, syntax trees, content hashes). No gate decides
 on a word in a name, a comment or a string.
+
+## Proven-unreachable branches (owner decision of 2026-11-11, option iii)
+
+A branch that the call graph proves unreachable goes to `fnvnx_reach_violation(fact_id)`, which exits through the
+host exit slot with the fact code. It is an assertion of a proven build invariant, not a trap path. The rule for the
+gates:
+
+- `reach` (class 16) produces every `fact_id` from the exe and module facts, each with a certificate of
+  unreachability. Certificates are valid only when every `GetProcAddress` site with a non-constant name is
+  statically resolved; until then a build that relies on them is a measurement build and stays out of the trunk.
+- `objstub` (class 1) accepts a call of `fnvnx_reach_violation` only if the argument is a constant at the call site
+  and that constant is a `fact_id` with a certificate of the same verdict run. A call with a non-constant argument,
+  an unknown `fact_id`, or a certificate without a call site (stale) is a finding. There is no hand-written list.
+- `fnvnx_reach_violation` itself is the one function, besides the process-exit import, whose body may end in the
+  host exit slot.
 
 ## State of the product gates
 
