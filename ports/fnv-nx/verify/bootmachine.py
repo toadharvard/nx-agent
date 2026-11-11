@@ -38,6 +38,15 @@ Rules:
    stays accessible RW. A reserved page never committed is unmapped (a reservation is address space only): an access faults. release(base): unmaps the reservation's committed pages and frees it (not a base: 0xCC01). Pages committed here are
    owned: VM_PROTECT works on them. map_fixed over a reservation is refused (0xD401). thread_activity(tid, paused): a paused thread is
    never picked (a pause of the running thread takes effect at once); unknown tid 0xE401, not started or ended 0xFA01.
+5d. Sections (module 11 fn 11..14, host_section.inc; errors are -(code) as u64, recorded as events section_*-refused with the
+   positive code). A section is one anonymous mmap (zero, page aligned) kept alive for the machine's life; each view is
+   uc.mem_map_ptr of that buffer at the view's address, so views share bytes. MAP checks in the host's order: size, alignment, id,
+   range, view table, then placement: addr != 0 must lie inside one VM reservation (else 0xDA01) with no committed extent and no
+   view (else 0xD401); addr == 0 takes the lowest free 64 KiB multiple clear of plan regions, free ranges, mappings,
+   reservations and views (not a VM reservation). Views are RW guest memory but not guest-owned pages: VM_PROTECT / COMMIT /
+   DECOMMIT of a range holding a view page and VM_RELEASE of a reservation holding one are refused 0xD401 (nothing done);
+   map_fixed cannot land on one (refused by its own range rules). FREE kills the id at once, the pages live until the last view is
+   unmapped. The fault-handler frame may live in a view: a view is writable guest memory (rule 5c asks only that).
 5c. ACCESS_FAULT_HANDLER (module 11 fn 10, args {handler, stack_top}, result 0; handler 0 unregisters; stack_top must be 16-byte
    aligned, >= 816 and <= 4 GiB, else 0xCC01 and an event). Per calling thread. A data or instruction access fault (Unicorn's
    UC_HOOK_MEM_INVALID: unmapped or protection, read/write/fetch) of a thread with a handler, not already inside it, is
@@ -54,9 +63,13 @@ Rules:
    adds size/4 per block, feeds the Icount if attached, and stops at the first block boundary where the total >=
    limit_instructions: reason "limit", the same stop point on every run (the stopping block is counted).
 7. Observation only: on_thread, watch_pc, watch_ret (same thread, sp and return address as at entry), watch_store,
-   on_console. run() -> {reason, exit_code, host_calls, switches, threads, virtual_ns, events, console, fault|waits|ext};
+   on_console. An exit code of the form 0x52000000 | fact_id (exit_code >> 24 == 0x52, nothing above) is a violated build
+   invariant, not an ordinary exit: reason "reach-violation" with "fact_id" (exit_code stays the raw value).
+   run() -> {reason, exit_code, host_calls, switches, threads, virtual_ns, events, console, fault|waits|ext};
    "console" is the whole text the guest wrote (decoded with errors="replace").
 """
+import ctypes
+import mmap
 import struct
 
 from unicorn import arm64_const
@@ -71,6 +84,7 @@ import bootlayout
 import icount
 
 PAGE, U64 = 0x1000, (1 << 64) - 1
+REACH_VIOLATION = 0x52   # top byte of a guest exit code 0x52000000 | fact_id: a build invariant was violated (fnvnx_reach_violation)
 SLOTS = ["output_debug_string", "sleep_ns", "exit", "console_write", "console_flush", "main_loop",
          "buttons_down", "system_tick", "system_tick_freq",
          "thread_create", "thread_start", "thread_join", "thread_free", "thread_exit", "thread_yield",
@@ -87,7 +101,10 @@ FNVNX_EXT_PLATFORM = 11
 FAULT_FRAME = 816
 PLATFORM_FNS = {1: ("cpu_boost", 1), 2: ("thread_activity", 2), 3: ("message", 2), 4: ("vm_reserve", 2), 5: ("vm_commit", 2),
                 6: ("vm_decommit", 2), 7: ("vm_release", 1), 8: ("vm_protect", 3),
-                10: ("access_fault_handler", 2)}
+                10: ("access_fault_handler", 2), 11: ("section_create", 1), 12: ("section_map", 4), 13: ("section_unmap", 2),
+                14: ("section_free", 1)}
+SEC_E_SIZE, SEC_E_ALIGN, SEC_E_RANGE, SEC_E_REGION, SEC_E_ID, SEC_E_NOMEM, SEC_E_FULL = 0xCA01, 0xCC01, 0xD401, 0xDA01, 0xE401, 0xD001, 0xCE01
+SEC_MAX_SIZE, SEC_SECTIONS, SEC_VIEWS = 0x80000000, 128, 512   # host_section.inc
 VM_ALIGN, VM_FLOOR = 0x10000, 0x10000   # host_vm.inc FNVNX_VM_ALIGN; the guest's low 64 KiB stay unmapped. Forbidden ranges are plan data.
 ERR_INVALID_SIZE, ERR_INVALID_ADDRESS, ERR_INVALID_CURRENT_MEMORY = 0xCA01, 0xCC01, 0xD401
 ERR_INVALID_NEW_MEMORY_PERMISSION, ERR_INVALID_HANDLE, ERR_INVALID_STATE = 0xD801, 0xE401, 0xFA01
@@ -158,6 +175,7 @@ class Machine:
         self.handlers = self._resolve(services)
         self.plat = self._resolve_platform(services)
         self.regions = sorted(reg.values())
+        self.sections, self.views, self.sec_next = {}, {}, 1   # id -> Section dict; view addr -> view dict; next id (never reused)
         self.vm_resv, self.vm_pages, self.vm_ext = {}, set(), []   # base -> size; committed page addresses; extents [lo, hi): one per commit gap (host_vm.inc)
         self.ext = {int(n[4:]): getattr(services, n) for n in dir(services) if n.startswith("ext_") and n[4:].isdigit()}
         uc = self.uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
@@ -375,7 +393,18 @@ class Machine:
     def _vm_blocked(self):
         """sorted (lo, hi) of everything a reservation must not overlap"""
         return sorted(self.regions + [(lo, hi) for _n, lo, hi in self.free] + self.mapped
-                      + [(b, b + n) for b, n in self.vm_resv.items()])
+                      + [(b, b + n) for b, n in self.vm_resv.items()] + [(a, a + v["size"]) for a, v in self.views.items()])
+
+    def _find_free(self, size):
+        """lowest 64 KiB multiple >= VM_FLOOR whose [c, c + size) is clear of _vm_blocked(), end <= 4 GiB; None if none"""
+        lo = VM_FLOOR
+        for x, b in self._vm_blocked():
+            if lo < b and x < lo + size:
+                lo = _up(b, VM_ALIGN)
+        return lo if lo + size <= 1 << 32 else None
+
+    def _view_overlap(self, lo, hi):
+        return any(a < hi and lo < a + v["size"] for a, v in self.views.items())
 
     def _vm_resv_of(self, lo, hi):
         return next((b for b, n in self.vm_resv.items() if b <= lo and hi <= b + n), None)
@@ -393,11 +422,8 @@ class Machine:
             if any(b > lo and lo + size > x for x, b in blocked):
                 return self._refuse("vm_reserve", hint, want, "overlaps a mapping, a free range or a reservation", 0)
         else:
-            lo = VM_FLOOR
-            for x, b in blocked:
-                if lo < b and x < lo + size:
-                    lo = _up(b, VM_ALIGN)
-            if lo + size > 1 << 32:
+            lo = self._find_free(size)
+            if lo is None:
                 return self._refuse("vm_reserve", hint, want, "no address space", 0)
         self.vm_resv[lo] = size
         return lo
@@ -407,6 +433,8 @@ class Machine:
         if size == 0 or addr + size >= 1 << 64:
             return None, self._refuse(what, addr, size, "size", ERR_INVALID_SIZE)
         lo, hi = addr // PAGE * PAGE, _up(addr + size)
+        if self._view_overlap(lo, hi):
+            return None, self._refuse(what, addr, size, "range holds a page of a section view", ERR_INVALID_CURRENT_MEMORY)
         if self._vm_resv_of(lo, hi) is None:
             return None, self._refuse(what, addr, size, "not inside one reservation", ERR_INVALID_ADDRESS)
         return (lo, hi), 0
@@ -467,6 +495,8 @@ class Machine:
         base = a[0]
         if base not in self.vm_resv:
             return self._refuse("vm_release", base, 0, "not the base of a reservation", ERR_INVALID_ADDRESS)
+        if self._view_overlap(base, base + self.vm_resv[base]):
+            return self._refuse("vm_release", base, 0, "reservation holds a section view", ERR_INVALID_CURRENT_MEMORY)
         self._vm_decommit(base, base + self.vm_resv.pop(base))
         return 0
 
@@ -479,9 +509,86 @@ class Machine:
         if prot & ~3:
             return self._refuse("vm_protect", addr, size, "prot 0x%x has bits other than R and W" % prot,
                                 ERR_INVALID_NEW_MEMORY_PERMISSION)
+        if self._view_overlap(addr, addr + size):
+            return self._refuse("vm_protect", addr, size, "pages of a section view (not guest-owned pages)", ERR_INVALID_CURRENT_MEMORY)
         if not self._owned(addr, addr + size):
             return self._refuse("vm_protect", addr, size, "pages the guest does not own", ERR_INVALID_CURRENT_MEMORY)
         self.uc.mem_protect(addr, size, (UC_PROT_READ if prot & 1 else 0) | (UC_PROT_WRITE if prot & 2 else 0))
+        return 0
+
+    # -- memory sections, module 11 fn 11..14 (rule 5d)
+    def _sec_refuse(self, what, addr, size, why, code):
+        self._refuse(what, addr, size, why, code)
+        return -code & U64
+
+    def _plat_section_create(self, a):
+        size = a[0]
+        if not size or size % PAGE or size > SEC_MAX_SIZE:
+            return self._sec_refuse("section_create", 0, size, "size", SEC_E_SIZE)
+        if len(self.sections) >= SEC_SECTIONS:
+            return self._sec_refuse("section_create", 0, size, "table full", SEC_E_FULL)
+        if self.sec_next > 0x7FFFFFFF:
+            return self._sec_refuse("section_create", 0, size, "ids exhausted", SEC_E_NOMEM)
+        sid, self.sec_next = self.sec_next, self.sec_next + 1
+        mm = mmap.mmap(-1, size)   # anonymous: zero, page aligned; mem_map_ptr needs it alive and at a fixed address
+        buf = ctypes.c_char.from_buffer(mm)
+        self.sections[sid] = dict(mm=mm, buf=buf, ptr=ctypes.addressof(buf), size=size, live=True, views=0)
+        return sid
+
+    def _plat_section_map(self, a):
+        sid, addr, off, size = a[:4]
+        if not size or size % PAGE or size > SEC_MAX_SIZE:
+            return self._sec_refuse("section_map", addr, size, "size", SEC_E_SIZE)
+        if (addr | off) % PAGE:
+            return self._sec_refuse("section_map", addr, size, "addr or offset not page aligned", SEC_E_ALIGN)
+        sec = self.sections.get(sid)
+        if sec is None or not sec["live"]:
+            return self._sec_refuse("section_map", addr, size, "unknown id %d" % sid, SEC_E_ID)
+        if off + size > sec["size"]:
+            return self._sec_refuse("section_map", addr, size, "range outside the section", SEC_E_RANGE)
+        if len(self.views) >= SEC_VIEWS:
+            return self._sec_refuse("section_map", addr, size, "view table full", SEC_E_FULL)
+        if addr:
+            if self._vm_resv_of(addr, addr + size) is None:
+                return self._sec_refuse("section_map", addr, size, "not inside one VM reservation", SEC_E_REGION)
+            if self._view_overlap(addr, addr + size) or any(x < addr + size and addr < y for x, y in self.vm_ext):
+                return self._sec_refuse("section_map", addr, size, "range not free: committed pages or another view", SEC_E_RANGE)
+            own = False
+        else:
+            addr = self._find_free(size)
+            if addr is None:
+                return self._sec_refuse("section_map", 0, size, "no address space", SEC_E_NOMEM)
+            own = True
+        self.uc.mem_map_ptr(addr, size, UC_PROT_READ | UC_PROT_WRITE, sec["ptr"] + off)
+        self.views[addr] = dict(size=size, off=off, sid=sid, own=own)
+        sec["views"] += 1
+        return addr
+
+    def _sec_release(self, sid):
+        sec = self.sections.pop(sid)
+        del sec["buf"]   # the exported pointer first, then the mapping can close (no view of it is mapped any more)
+        sec["mm"].close()
+
+    def _plat_section_unmap(self, a):
+        addr, size = a[:2]
+        v = self.views.get(addr)
+        if v is None or v["size"] != size:
+            return self._sec_refuse("section_unmap", addr, size, "not exactly a view", SEC_E_RANGE)
+        self.uc.mem_unmap(addr, size)
+        del self.views[addr]
+        sec = self.sections[v["sid"]]
+        sec["views"] -= 1
+        if not sec["live"] and not sec["views"]:
+            self._sec_release(v["sid"])
+        return 0
+
+    def _plat_section_free(self, a):
+        sec = self.sections.get(a[0])
+        if sec is None or not sec["live"]:
+            return self._sec_refuse("section_free", 0, a[0], "unknown id", SEC_E_ID)
+        sec["live"] = False   # the id is dead now; with views the pages stay until the last one is unmapped
+        if not sec["views"]:
+            self._sec_release(a[0])
         return 0
 
     def _plat_access_fault_handler(self, a):
@@ -710,6 +817,8 @@ class Machine:
         while True:
             if self.exit_code is not None:
                 reason = "exit"
+                if self.exit_code >> 24 == REACH_VIOLATION:   # fnvnx_reach_violation(fact_id): exit code 0x52000000 | fact_id
+                    reason, extra["fact_id"] = "reach-violation", self.exit_code & 0xFFFFFF
             elif self.fault is not None:
                 reason, extra["fault"] = "fault", self.fault
             elif self.ext_missing:

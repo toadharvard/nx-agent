@@ -9,7 +9,7 @@ plan = bootlayout (same rules as its CLI), watch points = bootmiles.resolve(tabl
 base). OUT.json ("fnvnx-boot/1", sorted keys, indent 1, no wall time) holds the plan, the run record, the milestone state
 and log, and the Icount report; the console text is OUT.console.txt. The tool only reports: which milestone must be
 reached is the caller's verdict. Exit 0: run reason "exit" with code 0, or "limit"; 2: fault / deadlock /
-ext-module-missing / nonzero exit; 1: usage or input error (message on stderr).
+ext-module-missing / nonzero exit / reach-violation (guest exit code 0x52000000|fact_id, reported with its fact_id); 1: usage or input error (message on stderr).
 
 Host parts: the table's `host` target is an ID word, so the exact console line a part waits for is spelled
 `console.<hex>` (hex of the line's UTF-8 bytes, no newline; helper console_part(line)). The part fires when the guest

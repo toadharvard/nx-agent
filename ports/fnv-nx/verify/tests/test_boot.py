@@ -46,7 +46,7 @@ def main():
         """the patched ELF bytes (crt0 header) as a file, unstripped: the reader skips the mapping symbols itself"""
         open(os.path.join(d, n), "wb").write(tb.build(mode)[0])
         return os.path.join(d, n)
-    elf6, elf3 = patched("h6.elf", 6), patched("h3.elf", 3)
+    elf6, elf3, elf35 = patched("h6.elf", 6), patched("h3.elf", 3), patched("h35.elf", 35)
 
     def args(elf, out, tbl=table, man=manifest, *extra):
         return ["run", "--elf", elf, "--reserved", reserved, "--keys", "f0000:200000", "--heap-size", "0x100000",
@@ -89,6 +89,12 @@ def main():
     f = fd["run"].get("fault", {})
     tb.case("faulting guest: exit 2 with the fault record", rc == 2 and fd["run"]["reason"] == "fault"
             and f.get("kind") == "write-protected" and set(f) == {"kind", "addr", "size", "pc", "lr", "tid"}, (rc, fd["run"]))
+
+    rc, o, e = cli(args(elf35, "v.json"))
+    vd = json.load(open(os.path.join(d, "v.json")))
+    tb.case("reach-violation guest (exit 0x5200002A): exit 2, reason reach-violation, fact_id 42", rc == 2
+            and vd["run"]["reason"] == "reach-violation" and vd["run"]["fact_id"] == 42 and o.startswith("boot: reason=reach-violation"),
+            (rc, o, vd["run"]))
 
     stops = []
     for k in range(2):
