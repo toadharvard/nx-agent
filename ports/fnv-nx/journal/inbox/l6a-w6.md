@@ -24,3 +24,9 @@ Root ports/fnv-nx/render/gl4: 17 gl4_*.c, gl4.h, gl4_funcs.h, libnxgl4.map, NXGL
 ## Update after lead's L1 answers (w15/w16 not on any pushed branch yet)
 build.json link now written to the announced keys: {"kind":"shared","output":"libnxgl4.so","version_script":"libnxgl4.map","libs":["libEGL.so.1","libGL.so.1"],"roots":["ports/fnv-nx/render/nxgpu@x86_64"],"flags":[]}.
 Key names beyond kind/version_script are my reading of the lead's text; w15's schema is not visible yet, so recipe check is the expected red until w15/w16 land. Re-check then and adjust key names only.
+
+## Translator root (head 1bbfd5c)
+- The lead named render/shaders/glsl @ 7ae3ac87. On branch claude/fnv-l6-render-w1b that root was renamed to render/shaders/translator at 8ce32e8 (Q6). I merged the branch head 8ce32e8 and used render/shaders/translator (include dir .../translator/include, link.roots .../translator). The branch's admit.json has no entry for the translator root; I kept my gl4/backend entries in the merge conflict.
+- Source edit, one commit alone: gl4_d3dshader.c line 58 fnvnx_shader_translate( -> fnvnx_shader_translate_glsl(, same arguments.
+- Proof so far: the source has 0 `fnvnx_shader_translate(` calls. The PP output cannot be produced yet (gcc -E stops at missing GL/glcorearb.h, w16). Note: PP output will still contain the declaration of fnvnx_shader_translate from fnvnx_shaders.h (line 90), so "0 references" must mean 0 call sites, not 0 textual matches.
+- Undefined-symbols subset check: after the build, not done.
