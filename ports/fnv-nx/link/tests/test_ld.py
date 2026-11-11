@@ -44,6 +44,8 @@ for flags, want in ((0x08000000, True), (1, False)):
     hdr = b'\x7fELF' + bytes([1, 1, 1, 0]) + bytes(8) + struct.pack('<HHIIIIIHHHHHH', 2, 183, 1, 0, 52, 0, 0, 52, 32, 1, 40, 0, 0)
     open(os.path.join(d, 'pie.elf'), 'wb').write(hdr + ph + dyn)
     check('pie flag %x' % flags, ld.is_pie(os.path.join(d, 'pie.elf')), want)
+open(p, 'wb').write(elf([('local', 1, 0, 2), ('sec', 1, 0, 3), ('defined', 1, 1, 2), ('missing', 0, 1, 0)]))
+check('all_defined: local symbols included, sections and references not', sorted(ld.all_defined(p)), ['defined', 'local'])
 # hidden symbols become local in a link: still a definition; a plain local is not
 hid = elf([('h', 1, 0, 2)])
 i = hid.index(struct.pack('<BBH', 2, 0, 1), 52 + 16)

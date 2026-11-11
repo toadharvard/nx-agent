@@ -57,6 +57,7 @@ import gateids
 
 EM_AARCH64, SHT_SYMTAB, SHN_UNDEF = 183, 2, 0
 PT_LOAD, PT_DYNAMIC = 1, 2
+SHN_ABS, SHN_COMMON, STT_SECTION, STT_FILE, STT_GNU_IFUNC = 0xfff1, 0xfff2, 3, 4, 10
 R_AARCH64_P32_RELATIVE = 183
 GUEST_MAGIC = 0x47584E46      # "FNXG" at the first segment + 8 (toolchain/guest/crt0.s)
 PAGE = 0x1000
@@ -132,6 +133,26 @@ def symbols(path):
         for n, df in elf_symbols(label, d).items():
             out[n] = out.get(n, False) or df
     return sorted(out.items())
+
+
+def all_defined(path):
+    """The names of every defined, named symbol of the symbol table of an ELF32 image, local ones included (the linker makes the symbols a script
+    defines with HIDDEN() local), file and section symbols excluded."""
+    with open(path, 'rb') as fh:
+        d = fh.read()
+    elf_symbols(path, d)
+    shoff, = struct.unpack_from('<I', d, 32)
+    shentsize, shnum = struct.unpack_from('<HH', d, 46)
+    sh = [struct.unpack_from('<IIIIIIIIII', d, shoff + i * shentsize) for i in range(shnum)]
+    out = set()
+    for s in sh:
+        if s[1] == SHT_SYMTAB:
+            stroff = sh[s[6]][4]
+            for o in range(s[4] + s[9], s[4] + s[5], s[9]):
+                name, _, _, info, _, shndx = struct.unpack_from('<IIIBBH', d, o)
+                if name and shndx != SHN_UNDEF and (info & 15) not in (STT_SECTION, STT_FILE):
+                    out.add(d[stroff + name:d.index(b'\0', stroff + name)].decode())
+    return out
 
 
 def elf_header(d):
@@ -242,9 +263,6 @@ def write_header(path):
     with open(path, 'wb') as fh:
         fh.write(d)
     return base, span, flags
-
-
-SHN_ABS, SHN_COMMON, STT_SECTION, STT_FILE, STT_GNU_IFUNC = 0xfff1, 0xfff2, 3, 4, 10
 
 
 def symtab_info(d):
@@ -456,7 +474,7 @@ def main():
     if r.returncode != 0 or not os.path.exists(probe):
         sys.stderr.write(r.stderr[-4000:])
         sys.exit('ld: the linker failed on the script alone (exit %d)' % r.returncode)
-    scripted = {n for n, df in symbols(probe) if df}
+    scripted = all_defined(probe)
     for f in (probe_o, probe, prsp):
         os.remove(f)
     objs = a.startfile + ins + a.endfile
@@ -490,8 +508,8 @@ def main():
             sys.stderr.write(rl.stderr[-4000:])
             sys.exit('ld: the linker failed (exit %d)' % rl.returncode)
         out = symbols(elf)
-        have = {n for n, df in out if df}
-        ids += ['cover:' + n for n in sorted(names - have - scripted)] + ['output-undefined:' + n for n, df in out if not df]
+        have = all_defined(elf)
+        ids += ['cover:' + n for n in sorted(names - have)] + ['output-undefined:' + n for n, df in out if not df]
         cnt, badrel = dyn_relocs(elf)
         ids += badrel
         if not is_pie(elf):

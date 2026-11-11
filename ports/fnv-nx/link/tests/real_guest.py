@@ -31,6 +31,7 @@ def main():
     ap.add_argument('--scale', type=int, default=9)
     ap.add_argument('--jobs', type=int, default=2)
     ap.add_argument('--l3a', default='/home/user/l1work/l3a2')
+    ap.add_argument('--reuse', action='store_true', help='keep the synthetic lifted set already built under OUT/synth')
     ap.add_argument('--fixture', help='C file with the names the platform provides (linked as an input)')
     a = ap.parse_args()
     out = os.path.abspath(a.out)
@@ -56,7 +57,11 @@ def main():
     os.makedirs(work, exist_ok=True)
     with open(os.path.join(work, 'universe.tsv'), 'w', newline='\n') as fh:
         fh.write(''.join('%08x\tdecomp\t%d\t-\n' % e for e in ents))
-    far = synth_lift.build(ents, work, a.scale, a.shards, 8, a.l3a, jobs=a.jobs, test_objects=False)
+    if a.reuse and os.path.isdir(os.path.join(work, 'in')):
+        order = [ents[i][0] for k in range(a.shards) for i in range(k, len(ents), a.shards)]
+        far = (order[0], order[-1])
+    else:
+        far = synth_lift.build(ents, work, a.scale, a.shards, 8, a.l3a, jobs=a.jobs, test_objects=False)
     built = round(time.monotonic() - t, 1)
     # the runtime and the fixture main, as the in/ directory next to the lifted set
     rin = os.path.join(out, 'rtin')
