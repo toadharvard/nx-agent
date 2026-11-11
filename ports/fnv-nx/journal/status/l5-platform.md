@@ -39,9 +39,11 @@ Old workers w1, w2, w3 (session_01KmtZKSjF1rc6JAiuz1rvJg, _01KmtZKU6xzxGuGdkrtzw
 
 
 ## On the path, new
+- 1 platform root census (w10, 2026-11-11 23:00, trunk a2453fe9 + w4r): recipe valid, 73 units admitted; as committed 13 green / 60 red. 55 of the red only need shim/loader headers, now admitted as header roots (shim → L5, loader → L1). With them: 65 green / 8 red, of which 7 are libstdc++ 15 under GCC 13 and 1 is FreeType (L1 `sources`). Warm: 0 run / 149 hit. Verdict red: 11 REQUIRED_PRODUCT gates missing from gates.json (other layers).
+- 1e guest runtime from the game compiler: newlib/libstdc++/libgcc rebuilt by GCC 13.3 msvcmodel, ILP32, -fshort-wchar, reproducible (TC-REPRO rule), as mirror tools/fnvnx-a64-msvcmodel13; w14 session_01KmtZKRTZQHQpngLDfUUZTy + farm session_01KmtZKSzcic61GPMwx3wqug, doing.
 - 1d Galaxy declared-machine bodies (owner order 23:00): reach-set census from import tables + dynsites, body per reached name with SDK citation and log line; w15 session_01KmtZKUyMdaSxX1XL93a9dF, -w15, doing.
 - L3b G1-G5 answered: ticks/tls slot = platform/boundary/host_hooks.cpp, raise backend = win32/thread.cpp:607 (both in the w10 root); memcpy/memset/memmove = newlib libc.a of fnvnx-a64-msvcmodel at the ELF link (L1 link recipe).
 
 ## Queued (off the first-frame path)
-- toolchain/gcc/build.sh reproducibility (L4 TC-REPRO eb6c2c96: 314/2069 files differ; embedded prefix/build paths, non-deterministic ar). Rule accepted; queued after the platform root and ELF. The mirror 3f25152c stays the pin.
+- (moved into 1e) toolchain/gcc/build.sh reproducibility.
 - TEXT_ENTRY 36 host server (swkbd).
