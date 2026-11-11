@@ -77,6 +77,35 @@ guess.
 - A stale handle reaches a slot that holds a `T` or fails the generation check: wrong value at worst, never a fault.
 - S1 and S2 bound the stack statically.
 
+## 4a. Where each rule comes from (studied practice, not invention)
+
+The subset is assembled from three published disciplines, each with its own safety argument. The references are
+given from memory and are to be checked against the papers before the gate is switched on.
+
+| Our rules | Source discipline | What that source proves or enforces | Why not the source alone |
+|---|---|---|---|
+| P1 to P4, A2 | C++ Core Guidelines Bounds and Type profiles (no pointer arithmetic, no array decay, `span` and `at()`, no `reinterpret_cast`, no union punning, no uninitialised use); the same discipline as the checked pointer kinds of Checked C | Spatial safety of every access that is not a raw dereference; Checked C has a proof that checked regions cannot be blamed for a spatial violation (Ruef et al., 2019) | Checked C needs its own Clang fork, and the port's compiler is a patched GCC. The Core Guidelines Lifetime profile detects common dangling cases and does not claim a proof |
+| L1 to L3 | Second-class references: a pointer may be passed down and used, never stored or returned (Osvald et al., OOPSLA 2016). In production: the stack-only rule of C# `ref struct` and `Span<T>` | Stack discipline: a second-class value cannot outlive the frame that made it; proved for the calculus in that paper | — (taken whole; our L2 exception "derived from a parameter" is their rule for returning a borrowed argument) |
+| A1, pools and handles | Type-homogeneous pools that are never released (SAFECode, Dhurjati, Kowshik and Adve, PLDI 2006) with generation-checked handles | A dangling reference reaches an object of the same type or is refused: no memory fault without garbage collection | SAFECode is a whole-program compiler transformation; we take its invariant and make the pools explicit in the source |
+| S1, S2 | The static stack bound of MISRA C (no recursion, rule 17.2) and of SPARK and other high-integrity profiles | A bound on stack use computed from the call graph | — |
+
+Considered and not chosen as the base:
+
+- **MISRA C and CERT C.** Coding rules that reduce undefined behaviour. Many are not decidable and none comes with
+  a theorem of memory safety; passing them is not a proof. We take the decidable rules that our disciplines share.
+- **Frama-C with ACSL (WP and the runtime-error plugin).** Sound and precise, but it needs a contract on every
+  function, proves C and not C++, and most of the port's native code is C++. It stays available as a verification
+  of the trusted base, which is small C-like code.
+- **SPARK.** Proves absence of run-time errors, with ownership for pointers; it is Ada, so it means rewriting into
+  another language with a compiler that does not target this platform's ABI.
+- **Rust.** The same structure as ours (safe code proved relative to a small unsafe base, RustBelt, 2018), by a
+  mature checker. It means rewriting into another language and a toolchain for an ILP32 AArch64 target that does
+  not exist upstream. If the owner prefers a rewrite to a subset, this is the alternative.
+
+What the plugin proves: that a function contains none of P1 to S1 (a decidable property of typed GIMPLE). What it
+does not prove: the trusted base, the `borrows` declarations of external libraries, and S2's stack sizes, which the
+gate checks over the linked call graph.
+
 ## 5. Assumptions
 
 - The compiler and the plugin are correct (A2).
