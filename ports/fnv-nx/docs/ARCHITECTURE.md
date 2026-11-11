@@ -1,5 +1,12 @@
 # fnv-nx architecture
 
+> **Superseded in part (2026-11-10).** The owner order and decisions of 2026-11-10 in the repository's CLAUDE.md, and MASTER_PLAN4 (private: fnv-nx-build `plan/master3`), override this document where they conflict.
+> - **D7, D22 and D26 (destructor slot order):** replaced by SDD1.
+> - **D18 (frame target):** now a 45 fps gate, 60 a stretch; perf is counted in executed instructions.
+> - **D23/D24 (bodies):** native or lifted, decided by N1-N4.
+> - **Removed:** stand-ins, null device, recon fleet and the heuristic slot stack.
+
+
 Goal: a native Nintendo Switch (Horizon OS, Atmosphère) build of FNV PC 1.4.0.525, compiled from the
 [fnv_decomp](https://github.com/momusdigital/fnv_decomp) reconstruction, running with the player's own game data.
 

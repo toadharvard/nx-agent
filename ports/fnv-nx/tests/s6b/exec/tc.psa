@@ -1,4 +1,0 @@
-ps_2_0
-dcl t0
-mov r0, t0
-mov oC0, r0

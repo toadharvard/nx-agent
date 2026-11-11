@@ -3746,3 +3746,55 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   - Artifact branches, reports and caches stay in the private repo. HANDOFF.md section 3 tells how to recreate the farms if ever wanted.
 * **scope** - This covers the first account only. The farms named in J-0149..J-0165 (bl1, full2, full3, sw13, sw14, nr1) belong to the resumed orchestrator in the other account and were not touched.
 * **left** - The first account's S2d, S12 and S13b stream sessions are idle. Their results are on their branches.
+
+### J-0167 | 2026-11-10 | stream: orchestration | status: active | parent: J-0166
+
+* **decided (owner)**
+  - Universal, correct-by-construction fixes instead of per-item patches.
+  - Work is organized as Fable leads with Sonnet workers.
+  - The plan is MASTER_PLAN3, private, at fnv-nx-build `plan/master3`. Its super-rule: the contract comes from the exe, and a native body earns its place, otherwise the body is lifted from the exe's x86 bytes.
+* **found**
+  - Four audits plus reconciliation against the 11-09 farm reports (head e1ca6b02): about 480 rows, of which 66 closed, 164 open, 225 unverified and 16 audit-wrong.
+  - Lifter PoC: 1,000 of 1,025 exe functions equal to x86 on every input, with 0 real divergences. 98.94 % of decomp functions are liftable.
+* **did** - Started four leads (P0/P1), each on its own branch:
+  - L4 VERIFY: fast loop, warm==cold every head, farm fleet. Branch `claude/fnv-l4-verify`.
+  - L1 CONTRACT: exefacts, VT-ID, PROTO, gates. Branch `claude/fnv-l1-contract`.
+  - L3 LIFT: lifter, ABI glue, BODYSEL, deep bench. Branch `claude/fnv-l3-lift`.
+  - L2 SOURCE: SDD1, flags, one recompile. Branch `claude/fnv-l2-source`.
+* **provisional (owner may override)**
+  - Lifted bodies are allowed for cold code.
+  - SDD1 replaces D7/D22/D26, and the recon fleet is closed.
+  - The clean branch is created after P0.
+  - At most 12 farms.
+* **next** - L5 PLATFORM and L6 RENDER start at the P0 gate. L7 PERF starts after the first measured frame.
+
+### J-0168 | 2026-11-10 | stream: orchestration | status: active | parent: J-0167
+
+* **decided (owner)**
+  - Class-closing rules only (CLAUDE.md order).
+  - MASTER_PLAN4 is the plan of record.
+  - Real multicore parallelism with the TSO-MAP rule.
+  - N1-N4 without SMT for native bodies; SMT against Sail x86 for lifter forms.
+  - Plain IEEE float, with exact classes for ftoi, NaN compares and bit patterns.
+  - One reference CPU model.
+  - Perf counted in executed instructions.
+  - Downloads authorized.
+  - Merges into the clean branch only on a green L1 verdict.
+  - Switch product decisions recorded in CLAUDE.md.
+* **did** - Started L5 PLATFORM (`claude/fnv-l5-platform`) and L6 RENDER (`claude/fnv-l6-render`).
+  - New areas:
+    - L4: NRO packaging plus console smoke package, and the scenario bench.
+    - L1: loader and start.
+    - L5: the Switch app lifecycle, and memory including code size.
+  - ARCHITECTURE.md and RENDER_NATIVE.md marked as superseded in part.
+* **found** (lead notes)
+  - L1: N1 holds for 68,354 / 68,657 functions; the exefacts base takes 33 s; the gates take 2.4 s.
+  - L4: instruction counter delivered; 357 M instructions before WinMain; link breakdown 835 s (exe RTTI 38 %).
+  - L3: the m80 core equals the host on 70.4 M cases; 482 instruction forms, 407 equal.
+* **P0 exit**
+  - L1 ≤5 min, measured twice.
+  - The sandbox plus the R12-T determinism rule.
+  - The instruction counter.
+  - Tables as data and static BODYSEL.
+  - The clean branch is created at P0 exit.
+* **next** - L7 PERF starts at the first measured frame.
