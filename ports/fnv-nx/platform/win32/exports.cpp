@@ -37,6 +37,8 @@ UINT GetOutlineTextMetricsA(HDC, UINT, void *);
 BOOL GetCharABCWidthsI(HDC, UINT, UINT, unsigned short *, void *);
 BOOL GetCharWidthI(HDC, UINT, UINT, unsigned short *, int *);
 DWORD GetFontUnicodeRanges(HDC, void *);
+int D3DKMTOpenAdapterFromHdc(void *);   /* d3dkmt.cpp */
+int D3DKMTEscape(const void *);
 HDC CreateDCA(LPCSTR, LPCSTR, LPCSTR, const void *);
 int ExtEscape(HDC, int, int, LPCSTR, int, LPSTR);
 int GetObjectA(HGDIOBJ, int, void *);
@@ -225,7 +227,7 @@ const exp g_exports[] = {
     E("gdi32", SetMapMode), E("gdi32", MoveToEx), E("gdi32", GetCurrentObject),
     E("gdi32", ExtTextOutA), E("gdi32", ExtTextOutW), E("gdi32", GetTextExtentPoint32A), E("gdi32", GetTextExtentPoint32W),
     E("gdi32", GetTextExtentExPointA), E("gdi32", GetTextExtentExPointW), E("gdi32", GetCharacterPlacementA), E("gdi32", GetCharacterPlacementW),
-    E("gdi32", GetOutlineTextMetricsA), E("gdi32", GetCharABCWidthsI), E("gdi32", GetCharWidthI), E("gdi32", GetFontUnicodeRanges), E("gdi32", CreateDCA), E("gdi32", ExtEscape),
+    E("gdi32", GetOutlineTextMetricsA), E("gdi32", GetCharABCWidthsI), E("gdi32", GetCharWidthI), E("gdi32", GetFontUnicodeRanges), E("gdi32", D3DKMTOpenAdapterFromHdc), E("gdi32", D3DKMTEscape), E("gdi32", CreateDCA), E("gdi32", ExtEscape),
     E("gdi32", GetDeviceCaps), E("user32", GetDC), E("user32", ReleaseDC), E("user32", BeginPaint), E("user32", EndPaint),
     E("advapi32", RegCloseKey), E("advapi32", RegCreateKeyExA), E("advapi32", RegOpenKeyExA), E("advapi32", RegOpenKeyA),
     E("advapi32", RegQueryValueExA), E("advapi32", RegSetValueExA), E("advapi32", GetUserNameA),

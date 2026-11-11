@@ -697,3 +697,77 @@ TEST(gpa_font_unicode_ranges)
     CHECK_EQ(GetFontUnicodeRanges(NULL, NULL), 0);
     CHECK_EQ(GetLastError(), ERROR_INVALID_HANDLE);
 }
+
+/* ---- group 4: gdi32 D3DKMTOpenAdapterFromHdc / D3DKMTEscape (natural-layout D3DKMT structures) */
+extern "C" {
+int D3DKMTOpenAdapterFromHdc(void *);
+int D3DKMTEscape(const void *);
+HDC GetDC(HWND);
+int ReleaseDC(HWND, HDC);
+HDC CreateDCA(LPCSTR, LPCSTR, LPCSTR, const void *);
+}
+namespace {
+struct KmtOpen { HDC hDc; uint32_t hAdapter; uint32_t luid_low; int32_t luid_high; uint32_t vidpn; };
+struct KmtEsc { uint32_t hAdapter, hDevice, Type, Flags; void *data; uint32_t size, hContext; };
+const int ST_OK = 0, ST_INVALID = (int)0xC000000D, ST_NO_MEMORY = (int)0xC0000017;
+}
+
+TEST(gpa_d3dkmt)
+{
+    CHECK(export_of("gdi32", "D3DKMTOpenAdapterFromHdc") == (void *)&D3DKMTOpenAdapterFromHdc);
+    CHECK(export_of("gdi32", "D3DKMTEscape") == (void *)&D3DKMTEscape);
+    CHECK(export_of("gdi32", "D3DKMTCloseAdapter") == NULL);   /* only the names the game's DLLs take */
+    /* open: every kind of display DC works, a memory DC and garbage do not */
+    HDC scr = GetDC(NULL);
+    KmtOpen o = { scr, 0xdead, 0xdead, 0xdead, 0xdead };
+    CHECK_EQ(D3DKMTOpenAdapterFromHdc(&o), ST_OK);
+    CHECK(o.hAdapter != 0 && o.hAdapter != 0xdead);
+    CHECK_EQ(o.vidpn, 0);
+    uint32_t h1 = o.hAdapter, low = o.luid_low;
+    int32_t high = o.luid_high;
+    HDC disp = CreateDCA("DISPLAY", NULL, NULL, NULL);
+    KmtOpen o2 = { disp, 0, 0, 0, 7 };
+    CHECK_EQ(D3DKMTOpenAdapterFromHdc(&o2), ST_OK);
+    CHECK(o2.hAdapter == h1 && o2.luid_low == low && o2.luid_high == high && o2.vidpn == 0);   /* one adapter */
+    DeleteDC(disp);
+    ReleaseDC(NULL, scr);
+    HDC mem = CreateCompatibleDC(NULL);
+    KmtOpen bad = { mem, 0x55, 0x55, 0x55, 0x55 };
+    CHECK_EQ(D3DKMTOpenAdapterFromHdc(&bad), ST_INVALID);
+    CHECK(bad.hAdapter == 0x55);                                  /* untouched on failure */
+    DeleteDC(mem);
+    bad.hDc = NULL;
+    CHECK_EQ(D3DKMTOpenAdapterFromHdc(&bad), ST_INVALID);
+    bad.hDc = (HDC)(uintptr_t)0x7ee4;
+    CHECK_EQ(D3DKMTOpenAdapterFromHdc(&bad), ST_INVALID);
+    CHECK_EQ(D3DKMTOpenAdapterFromHdc(NULL), ST_INVALID);
+    /* the handle is a real handle of the table: it is not an event, and a closed one is replaced */
+    HANDLE ev = CreateEventA(NULL, TRUE, FALSE, NULL);
+    KmtEsc e = { (uint32_t)(uintptr_t)ev, 0, 0, 0, NULL, 0, 0 };
+    CHECK_EQ(D3DKMTEscape(&e), ST_INVALID);
+    CloseHandle(ev);
+    /* escape: NULL, bad handles, 0 */
+    CHECK_EQ(D3DKMTEscape(NULL), ST_INVALID);
+    e.hAdapter = 0;
+    CHECK_EQ(D3DKMTEscape(&e), ST_INVALID);
+    e.hAdapter = 0x7ee4;
+    CHECK_EQ(D3DKMTEscape(&e), ST_INVALID);
+    /* a valid adapter and every escape type: the display driver has no escape entry (Wine 9.0 parity: STATUS_NO_MEMORY) */
+    char priv[16] = { 0 };
+    for (uint32_t type = 0; type < 6; type++) {
+        KmtEsc ok = { h1, 0, type, 0, priv, sizeof priv, 0 };
+        CHECK_EQ(D3DKMTEscape(&ok), ST_NO_MEMORY);
+    }
+    KmtEsc none = { h1, 0, 0, 0, NULL, 0, 0 };
+    CHECK_EQ(D3DKMTEscape(&none), ST_NO_MEMORY);
+    SetLastError(1234);
+    CHECK_EQ(D3DKMTEscape(&none), ST_NO_MEMORY);
+    CHECK_EQ(GetLastError(), 1234);                               /* NTSTATUS API: GetLastError untouched */
+    CHECK(CloseHandle((HANDLE)(uintptr_t)h1));
+    CHECK_EQ(D3DKMTEscape(&none), ST_INVALID);                    /* closed handle */
+    KmtOpen again = { GetDC(NULL), 0, 0, 0, 0 };
+    CHECK_EQ(D3DKMTOpenAdapterFromHdc(&again), ST_OK);
+    CHECK(again.hAdapter != 0);
+    KmtEsc fresh = { again.hAdapter, 0, 0, 0, NULL, 0, 0 };
+    CHECK_EQ(D3DKMTEscape(&fresh), ST_NO_MEMORY);
+}

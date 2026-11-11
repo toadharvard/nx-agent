@@ -49,7 +49,7 @@ struct w32_thread *w32_self(void);
 void w32_fls_thread_exit(void);   /* fls.cpp: the calling thread ends: its FLS callbacks run, its cells go */
 
 /* ---- kernel objects: HANDLE is a pointer to one of these */
-enum { W32_EVENT = 1, W32_MUTEX, W32_SEMAPHORE, W32_THREAD, W32_FILE, W32_FIND, W32_HEAP, W32_MAPPING, W32_WINSTA, W32_DESKTOP };
+enum { W32_EVENT = 1, W32_MUTEX, W32_SEMAPHORE, W32_THREAD, W32_FILE, W32_FIND, W32_HEAP, W32_MAPPING, W32_WINSTA, W32_DESKTOP, W32_ADAPTER };
 #define W32_MAGIC 0x46564E58u /* "FVNX" */
 struct w32_link {                  /* one waiter linked to one object */
     struct w32_link *next, *prev;

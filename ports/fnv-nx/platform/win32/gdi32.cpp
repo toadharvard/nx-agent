@@ -1016,6 +1016,14 @@ extern "C" int ExtEscape(HDC hd, int esc, int cb_in, LPCSTR in, int cb_out, LPST
     return 0;
 }
 
+/* 1: hd is a DC of the display (screen, window, paint, CreateDC("DISPLAY")); 0: a memory DC; -1: not a DC (d3dkmt.cpp) */
+extern "C" int gdi_dc_display(void *hd)
+{
+    Lk l;
+    obj *d = get(hd, T_DC);
+    return !d ? -1 : d->kind == K_MEM ? 0 : 1;
+}
+
 /* ---- text drawing side (gdi_int.h) */
 extern "C" int gdi_dc_depth(void *hd)
 {
