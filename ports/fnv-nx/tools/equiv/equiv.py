@@ -53,18 +53,14 @@ CMATH = PORT / 'shim/include/fnvnx_cmath'           # DECL1's one-function C mat
 CLASSES = {
     'SSE1': 'platform', 'SSE2': 'platform', 'SSE3': 'platform', 'SSE4': 'platform',
     'DECL1': 'neutral', 'NEW1': 'neutral',
-    'UNIT1': 'neutral', 'KEEP1': 'neutral', 'IFX1': 'neutral', 'SAL1': 'neutral', 'CSX1': 'neutral',
-    'DECL2': 'neutral', 'EXC1': 'neutral', 'NEW2': 'neutral', 'CTOR1': 'neutral', 'LINK1': 'neutral',
+    'KEEP1': 'neutral', 'IFX1': 'neutral', 'SAL1': 'neutral', 'DECL2': 'neutral', 'EXC1': 'neutral', 'NEW2': 'neutral', 'CTOR1': 'neutral', 'LINK1': 'neutral',
     'GOTO1': 'neutral', 'SDK1': 'layout', 'STR1': 'neutral', 'INTL1': 'platform', 'CALL1': 'neutral',
     'RCAST1': 'neutral', 'NEW3': 'neutral', 'TYPEID1': 'neutral', 'TAIL1': 'layout', 'EBO1': 'layout',
     'ASM': 'platform',          # s8_asm.py (docstring id "ASM-Pi"): __asm spans kept for cl, one empty GNU asm for GCC
-    'NATIVE1': 'platform',      # drop_native_units in prepare.py (not a text rule)
     # classified by the orchestrator (J-0051) from each rule's docstring; the S11 gate confirms or refutes:
     'GAME1': 'neutral',         # renames a unit's own declaration + call sites; binding by address unchanged
     'COM1': 'neutral',          # renames a unit's own IUnknown copy (types only; the decomp's vtable slots kept)
-    'SPEC1': 'neutral',         # early template<> declarations
     'STATIC1': 'neutral',       # internal -> external linkage of image-bound variables (MSVC may inline less)
-    'VFTBL1': 'neutral',        # the decomp's stand-in table for an exe vftable becomes a declaration (`&name` is the same symbol)
     'XINC1': 'neutral',         # corrected caller declarations (S1b: 62/66 identical, 4 ecx reloads)
     'RET1': 'neutral',          # return <trailing stmt> where MSVC code is identical (S1b)
     'DBUG1': 'neutral',         # decomp-bug fixes per site (S1-crt 0x00b01510: identical)
@@ -87,7 +83,6 @@ CLASSES = {
     'VLIT2': 'platform',       # VLIT1 by the exe's vftables (private vlit.json): slot 0 at the store's COL offset, the class of the function's other vptrs
     'ADDRFN1': 'platform',     # a code address cast to void* takes the address symbol __fnv_<a> (a GCC asm label)
     'POP2': 'neutral',          # POST hook: pop-mismatch chains, the words a getter leaves move to the call that pops them
-    'THIS2': 'neutral',         # POST hook: a caller that hands its ecx to a thiscall callee calls it on its object
     'HARN1': 'platform',        # an untagged free harness definition no unit references gets internal linkage (static);
                                # not neutral: MSVC then drops the static recipe functions only a harness referenced
     'PTR1': 'neutral',          # ordered compare of a function / pointer with 0 -> the equality MSVC computed
@@ -98,12 +93,9 @@ CLASSES = {
     'ANON1': 'platform',        # names an unnamed struct defined in a return type (MSVC decorates the name)
     'STL1': 'platform',        # fnvnx_msvcstl.h: MSVC <xutility> internals (_SCL_SECURE_VALIDATE, _Ptr_cat) for libstdc++
     'STL2': 'platform',        # fnvnx_vc9.h: VC9's containers in their x86 layout for units using real <string>/<vector>/<map>
-    'STLB1': 'platform',      # VC9 helper template bodies (_Allocate, _Destroy, fill, swap, vector::_Xlen) an in-unit std copy declares only
-    'STLB2': 'platform',      # VC9 bodies of an in-unit ifstream / vector<T> model's declared members (setstate, init, UseFacet, widen, open, vector ctor/dtor)
     'SPEC3': 'neutral',         # namespace qualification of names in specializations written inside a namespace
     'LEX1': 'neutral',          # MSVC token spellings (i64 suffixes, 0xae-0x34, "C"enum) -> standard ones
     'STD1': 'platform',         # a decomp `struct std { static float abs(float); }` -> <cmath>'s std::abs
-    'SPEC2': 'neutral',         # template<> on member definitions of class template specializations
     'NEW4': 'neutral',          # adds <new> where placement new is used
     'ALLOC1': 'platform',       # drops untagged TU-local replacements of the global operator new/delete
     'FTOL1': 'platform',        # fnvnx_ftol2(expr): neutral with #define fnvnx_ftol2(x) ((__int64)(x)) under MSVC
@@ -126,20 +118,18 @@ CLASSES = {
     'REC1': 'neutral',         # D20: reconstructed bodies from fnv-nx-build recon/ appended (new functions); REC1-REPL: a recon's
                                # exact-text replace pairs, applied before the append (part of REC1; each pair is the recon's
                                # accepted edit, gated with it)
-    'HUNIT1': 'neutral',       # explicit instantiations of the template members a header unit's recipe lists (MSVC emitted them)
-    'XC2': 'platform',         # XC1's extern + __fnvnx_dyninit_<addr> form for a hand-written dynamic initializer (site table)
     'EBO3': 'layout',           # FNVNX_EBO2 (empty under MSVC) in an empty base after a base with data: after it, as MSVC
     'VORDER1': 'layout',        # R2: same-name virtual overloads in exe slot order (GCC lays them in declaration order, MSVC reversed)
     'VSPLIT1': 'neutral',      # one declaration per virtual declarator (`virtual T a(), b();` -> two): the same declarations
     'STAND7': 'neutral',       # #ifdef _MSC_VER around an inline out-of-class template member stand-in bound elsewhere (MSVC keeps it)
 }
-# rules that are not rule functions: prepare's NATIVE1 step and the stream modules' POST hooks that have a rule id
-PSEUDO = {'NATIVE1': 'drop_native_units', 'POP2': 'pop_chains', 'THIS2': 'this_members'}
+# rules that are not rule functions: the stream modules' POST hooks that have a rule id
+PSEUDO = {'POP2': 'pop_chains'}
 # POST hooks (prepare.STREAM_POST, by function name) -> the rule (or 's1b': S1b's units.json renames, which belong to
 # its patches XINC1 / FTOL1 / RET1 / DBUG1) that must be allowed for the hook to run; other hooks always run (their
 # stats then fail the allow-list check until they are classified here)
 POST_RULES = {'fix_units_json': 's1b', 'rename_std_definitions': 'STD2', 'add_recon_definitions': 'REC1',
-              'pop_chains': 'POP2', 'this_members': 'THIS2',
+              'pop_chains': 'POP2',
               'vorder_post_check': 'VORDER1'}
 S1B = {'XINC1', 'FTOL1', 'RET1', 'DBUG1'}
 
@@ -150,10 +140,10 @@ DEFAULT_GROUPS = {
     'sdk': 'DECL1 DECL2 CALL1 GAME1 DUPINT1 MATH1 ELAB1 STD2 NSCALL1',
     'newdel': 'NEW1 NEW2 NEW3 NEW4 NEW5 CTOR1',
     'EXC1': 'EXC1',
-    'link': 'LINK1 STATIC1 VFTBL1',
+    'link': 'LINK1 STATIC1',
     's1b': 'XINC1 RET1 FTOL1 DBUG1',
-    'tpl': 'TPL1 TPL2 SPEC1 SPEC2 SPEC3',
-    'lex': 'LEX1 PTR1 INC1 ENUM1 RREF1 RREF2 ADDR1 COND1 RSTR1 FINL1 RCAST1 GOTO1 GOTO2 QUAD1 MSCV1 STR1 IFX1 SAL1 TYPEID1 UNIT1 CSX1',
+    'tpl': 'TPL1 TPL2 SPEC3',
+    'lex': 'LEX1 PTR1 INC1 ENUM1 RREF1 RREF2 ADDR1 COND1 RSTR1 FINL1 RCAST1 GOTO1 GOTO2 QUAD1 MSCV1 STR1 IFX1 SAL1 TYPEID1',
     'plat': 'STL1 STD1 ANON1 ANON2 ANON3',
 }
 RULE_ID = re.compile(r'\s*([A-Z]+[0-9]+|[A-Z]+(?=-[A-Z][a-z]+:))\b')
@@ -166,7 +156,7 @@ def load_prepare():
 
 
 def rule_table():
-    """[(id, function name, module, class, first docstring line)] in prepare's order, plus NATIVE1."""
+    """[(id, function name, module, class, first docstring line)] in prepare's order, plus the PSEUDO hooks."""
     prepare = load_prepare()
     out = []
     for fn in prepare.RULES + prepare.load_stream_rules():
@@ -175,8 +165,6 @@ def rule_table():
         rid = m.group(1) if m else '?' + fn.__name__
         out.append((rid, fn.__name__, fn.__module__.replace('fnvnx_rules_', 'rules/'), CLASSES.get(rid, '?'),
                     doc.split('\n')[0]))
-    out.append(('NATIVE1', PSEUDO['NATIVE1'], 'prepare', CLASSES['NATIVE1'], 'units in render/native/drop_units.txt '
-                'leave build/units.json'))
     hooks = {h.__name__: h for h in prepare.STREAM_POST}
     for rid, name in PSEUDO.items():
         if name in hooks:
@@ -214,8 +202,6 @@ def cmd_prepare(a):
     table = rule_table()
     skip = [name for rid, name, *_ in table if rid not in allow and rid not in PSEUDO]
     prepare = load_prepare()
-    if 'NATIVE1' not in allow:
-        prepare.drop_native_units = lambda *args, **kw: None
     load_stream = prepare.load_stream_rules
 
     def allowed_post():     # POST hooks of allowed rules only, each once (every load appends the modules' hooks)
@@ -1132,7 +1118,7 @@ def cmd_attribute(a):
         for gname, ids in DEFAULT_GROUPS.items():
             groups.append('%s=%s' % (gname, ','.join(ids.split())))
             grouped.update(ids.split())
-        groups += ['%s=%s' % (r, r) for r in sorted(allow - grouped - {'KEEP1', 'NATIVE1'})]
+        groups += ['%s=%s' % (r, r) for r in sorted(allow - grouped - {'KEEP1'})]
     for g in groups:
         gname, _, ids = g.partition('=')
         cands.append((gname, set(ids.split(',')) & allow))

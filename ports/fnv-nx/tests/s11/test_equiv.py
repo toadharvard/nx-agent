@@ -20,7 +20,7 @@ def check(cond, what):
         print('FAIL', what)
 
 
-# 1. every prepare rule (core, stream modules, NATIVE1) has an id and a class; ids and function names are unique
+# 1. every prepare rule (core, stream modules) has an id and a class; ids and function names are unique
 table = eq.rule_table()
 ids = [r[0] for r in table]
 check(all(r[3] in ('neutral', 'layout', 'platform') for r in table),

@@ -64,10 +64,6 @@ set +o pipefail
   clean=$(awk -F'\t' '$2==0' "$OUT/units.tsv" | wc -l)
   echo "units: $total  clean: $clean  failing: $((total - clean))"
   echo "errors total: $(awk -F'\t' '{s+=$2} END {print s}' "$OUT/units.tsv")"
-  # (line 3: farm reports quote lines 1-2) NATIVE1: units the native renderer replaces left the prepared tree's units.json (render/native/drop_units.txt)
-  if [ -f "$DECOMP/prepare_stats.tsv" ]; then
-    echo "native units dropped (NATIVE1): $(awk -F'\t' '$1=="NATIVE1" {print $3+0}' "$DECOMP/prepare_stats.tsv" | head -1)"
-  fi
   echo; echo "== error kinds (normalized, all errors)"
   cat "$OUT"/logs/*.log | grep ': error:' | sed -E "s/^[^:]+:[0-9]+:[0-9]+: error: //; s/'[^']*'/'X'/g; s/[0-9]+/N/g" \
     | sort | uniq -c | sort -rn | head -40
