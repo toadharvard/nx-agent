@@ -4,7 +4,9 @@ plugin built from the tracked source (the argv of verify/recipe.py's plugin stag
 the plugin writes `.fnvnx.addr` with seen == routed and a barrier asm at every address sum (the code has a 32-bit add and no
 `uxtw` addressing mode); thunks and constructor aliases get records; the gate is green on those objects; red and named: an
 object without the section, a function without a record, two records, seen != routed, a malformed line (every function of
-the object), an unreadable object; the gate file and exit status.  No network, no game data.  Run: python3 -I <this file>."""
+the object), an unreadable object; the layout fact (valid; each failing check; missing file; zero objects with and without one);
+the plugin's LIMIT equals gate_addr.GUARD and a large or run-time displacement is routed (32-bit add, no 64-bit one); the
+library form rows(); the gate file and exit status.  No network, no game data.  Run: python3 -I <this file>."""
 import json
 import os
 import shutil
@@ -70,10 +72,30 @@ def asm(name, text):
     return o
 
 
-def gate(*objs):
+def layout_file(name, doc, raw=None):
+    p = os.path.join(tmp, name + '.json')
+    with open(p, 'w') as fh:
+        fh.write(raw if raw is not None else json.dumps(doc))
+    return p
+
+
+def reg(name, lo, hi, prot='rw-', kind='image'):
+    return {'name': name, 'lo': lo, 'hi': hi, 'prot': prot, 'kind': kind}
+
+
+def good_doc():
+    return {'schema': 'fnvnx-layout/1', 'regions': [
+        reg('lowguard', 0, 0x10000, '---', 'guard'), reg('image', 0x10000, 0x40000000, 'r-x'), reg('heap', 0x40000000, 0xFFFF0000, 'rw-', 'heap'),
+        reg('highguard', 0xFFFF0000, 1 << 32, '---', 'guard')]}
+
+
+LAY = layout_file('good_layout', good_doc())
+
+
+def gate(*objs, layout=LAY):
     d = tempfile.mkdtemp(dir=tmp)
-    r = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'gate_addr.py')] + list(objs), capture_output=True, text=True,
-                       env={'GATE_OUT': d, 'PATH': os.environ.get('PATH', '')})
+    r = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'gate_addr.py')] + (['--layout', layout] if layout else []) + list(objs),
+                       capture_output=True, text=True, env={'GATE_OUT': d, 'PATH': os.environ.get('PATH', '')})
     return r, json.load(open(os.path.join(d, 'addr.json')))
 
 
@@ -136,7 +158,7 @@ for k, bad in enumerate(['fa\\t0\\n', 'fa\\t0\\t0', 'fa\\t-1\\t0\\n', 'fa\\t0\\t
     check('malformed %r: all functions red' % bad, (r.returncode, sorted(j['uncertified'])), (2, sorted([o, o + ':fa', o + ':fb'])))
 o = asm_obj('ok', ['fa', 'fb'], 'fb\\t3\\t3\\nfa\\t0\\t0\\nzz\\t1\\t0\\n')
 r, j = gate(o)
-check('record of a non-function is ignored; green', (r.returncode, j['status'], j['universe']), (0, 'green', 3))
+check('record of a non-function is ignored; green', (r.returncode, j['status'], j['universe']), (0, 'green', 4))
 o = asm_obj('empty', [], '')
 r, j = gate(o)
 check('no functions, empty section: green', (r.returncode, j['status']), (0, 'green'))
@@ -147,6 +169,97 @@ check('unreadable object', (r.returncode, j['uncertified']), (2, [junk]))
 r1, j1 = gate(o, junk)
 r2, j2 = gate(junk, o)
 check('deterministic', j1, j2)
+
+# layout
+check('GUARD equals the plugin LIMIT', ('LIMIT = 0x%x;' % gate_addr.GUARD) in open(TOOL).read(), True)
+check('layout item is certified with a good file', [x for x in gate_addr.rows([o], LAY) if x[1] == 'layout'], [('', 'layout', '')])
+r, j = gate(layout=None)
+check('zero objects, no layout: universe 0, green', (r.returncode, j['status'], j['universe']), (0, 'green', 0))
+r, j = gate(layout=LAY)
+check('zero objects with layout: one item, green', (r.returncode, j['status'], j['universe']), (0, 'green', 1))
+r, j = gate(o, layout=None)
+check('objects without layout: red on layout', (r.returncode, j['uncertified']), (2, ['layout']))
+check('missing layout file', gate_addr.layout_reason(os.path.join(tmp, 'absent.json'))[:14], 'layout: file: ')
+bad = [
+    ('shape', 'not json', None, '{'),
+    ('shape', 'trailing text', None, json.dumps(good_doc()) + ' x'),
+    ('shape', 'duplicate key', None, '{"schema":"fnvnx-layout/1","schema":"fnvnx-layout/1","regions":[]}'),
+    ('shape', 'NaN', None, '{"schema":"fnvnx-layout/1","regions":[],"x":NaN}'),
+    ('shape', 'not an object', [], None),
+    ('shape', 'extra key', dict(good_doc(), extra=1), None),
+    ('shape', 'missing key', {'schema': 'fnvnx-layout/1'}, None),
+    ('shape', 'regions not a list', {'schema': 'fnvnx-layout/1', 'regions': {}}, None),
+]
+for what, nm, doc, raw in bad:
+    check('layout %s: %s' % (what, nm), gate_addr.layout_reason(layout_file('b_' + nm.replace(' ', '_'), doc, raw)).startswith('layout: ' + what), True)
+
+
+def mut(f):
+    d = good_doc()
+    f(d)
+    return d
+
+
+cases = [
+    ('shape', 'float bound', mut(lambda d: d['regions'][1].update(lo=65536.0))),
+    ('shape', 'bool bound', mut(lambda d: d['regions'][1].update(lo=True))),
+    ('shape', 'empty name', mut(lambda d: d['regions'][1].update(name=''))),
+    ('shape', 'bad prot', mut(lambda d: d['regions'][1].update(prot='rwx'))),
+    ('shape', 'bad kind', mut(lambda d: d['regions'][1].update(kind='rom'))),
+    ('shape', 'lo >= hi', mut(lambda d: d['regions'][1].update(lo=0x40000000))),
+    ('shape', 'hi above 2^32', mut(lambda d: d['regions'][3].update(hi=(1 << 32) + 1))),
+    ('shape', 'region extra key', mut(lambda d: d['regions'][1].update(x=1))),
+    ('schema', 'schema string', mut(lambda d: d.update(schema='fnvnx-layout/2'))),
+    ('partition', 'hole', mut(lambda d: d['regions'][1].update(lo=0x20000))),
+    ('partition', 'overlap', mut(lambda d: d['regions'][1].update(lo=0x8000))),
+    ('partition', 'not from 0', mut(lambda d: d['regions'].pop(0))),
+    ('partition', 'not to 2^32', mut(lambda d: d['regions'].pop())),
+    ('partition', 'empty', mut(lambda d: d['regions'].clear())),
+    ('guard', 'low guard readable', mut(lambda d: d['regions'][0].update(prot='r--'))),
+    ('guard', 'low guard kind', mut(lambda d: d['regions'][0].update(kind='host'))),
+    ('guard', 'high guard writable', mut(lambda d: d['regions'][3].update(prot='rw-'))),
+    ('guard', 'guard too small', {'schema': 'fnvnx-layout/1', 'regions': [
+        reg('g0', 0, 0xFFFF, '---', 'guard'), reg('image', 0xFFFF, 0xFFFF0000, 'rw-'), reg('g1', 0xFFFF0000, 1 << 32, '---', 'guard')]}),
+    ('guard', 'image over the top', {'schema': 'fnvnx-layout/1', 'regions': [
+        reg('g0', 0, 0x10000, '---', 'guard'), reg('image', 0x10000, 1 << 32, 'rw-')]}),
+]
+for what, nm, doc in cases:
+    check('layout %s: %s' % (what, nm), gate_addr.layout_reason(layout_file('c_' + nm.replace(' ', '_'), doc)).startswith('layout: ' + what + ':'), True)
+check('layout unsorted regions still a partition', gate_addr.layout_reason(layout_file('uns', mut(lambda d: d['regions'].reverse()))), '')
+check('layout a guard larger than 0x10000 is fine', gate_addr.layout_reason(layout_file('big', {'schema': 'fnvnx-layout/1', 'regions': [
+    reg('g0', 0, 0x100000, '---', 'guard'), reg('image', 0x100000, 0xFFF00000, 'rw-'), reg('g1', 0xFFF00000, 1 << 32, '---', 'guard')]})), '')
+r, j = gate(o, layout=layout_file('badgate', mut(lambda d: d['regions'][0].update(prot='rw-'))))
+check('gate red on a bad layout', (r.returncode, j['uncertified']), (2, ['layout']))
+# rows shape
+rs = gate_addr.rows([o], LAY)
+check('rows shape', rs, sorted(rs))
+check('rows tuples', all(len(x) == 3 and all(isinstance(y, str) for y in x) for x in rs), True)
+check('rows object item', ('empty', '', '') in rs, True)
+try:
+    gate_addr.rows([o, o], LAY)
+    check('duplicate stem raises', False, True)
+except ValueError:
+    pass
+
+# plugin: displacements of 2^16 or more and run-time field-array sums are routed (32-bit add, no 64-bit sum)
+if plug:
+    dsrc = '''
+struct S { int pad[40000]; int f[8]; };
+int big(S* s) { return s->pad[39000]; }
+int fld(S* s, unsigned i) { return s->f[i]; }
+int small(int* p) { return p[100]; }
+'''
+    d = compile_cxx(dsrc, 'disp', plug)
+    rr = {s: (a, b) for s, a, b in addrsec.read(d) or []}
+    check('big displacement routed', rr.get('_Z3bigP1S', (0, 1))[0] >= 1 and rr['_Z3bigP1S'][0] == rr['_Z3bigP1S'][1], True)
+    check('field-array index routed', rr.get('_Z3fldP1Sj', (0, 1))[0] >= 1 and rr['_Z3fldP1Sj'][0] == rr['_Z3fldP1Sj'][1], True)
+    check('small displacement not routed', rr.get('_Z5smallPi'), (0, 0))
+    dis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', d]).stdout
+    for fn in ('_Z3bigP1S', '_Z3fldP1Sj'):
+        body = dis.split('<%s>:' % fn)[1].split('\n\n')[0]
+        check('%s: no 64-bit add or uxtw' % fn, ('add\tx' in body) or ('uxtw' in body), False)
+    rg, jg = gate(d)
+    check('gate green on the displacement object', (rg.returncode, jg['status']), (0, 'green'))
 shutil.rmtree(tmp, ignore_errors=True)
 if fails:
     print('FAIL\n' + '\n'.join(fails))
