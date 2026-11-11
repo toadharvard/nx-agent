@@ -115,7 +115,9 @@ def mut_build(base, tmp, src_rel, old, new, idx):
     elif src_rel.startswith("front/"):
         r = sh(["gcc", "-m32", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK, "-c", mp, "-o", o]); key = "nx_" + os.path.basename(src_rel) + ".o"
     else:   # env/env_rules.cpp.in: regenerate the table with the mutated rules
-        e = os.path.join(mroot, "env"); shutil.copytree(ENV, e, ignore=shutil.ignore_patterns("*.tsv")); shutil.copy(mp, os.path.join(e, "env_rules.cpp.in")); g = os.path.join(mroot, "gen"); os.makedirs(g)
+        e = os.path.join(mroot, "render", "d3d9", "env"); os.makedirs(os.path.dirname(e), exist_ok=True); shutil.copytree(ENV, e, ignore=shutil.ignore_patterns("*.tsv"))
+        for ln, tg in (("tests", "tests"), ("shim", "shim")): os.symlink(os.path.join(ROOT, tg), os.path.join(mroot, ln))
+        os.symlink(os.path.join(ROOT, "render", "d3d9", "spec"), os.path.join(os.path.dirname(e), "spec")); shutil.copy(mp, os.path.join(e, "env_rules.cpp.in")); g = os.path.join(mroot, "gen"); os.makedirs(g)
         r = subprocess.run([sys.executable, "-I", os.path.join(e, "gen_env.py"), g], capture_output=True, text=True, env=dict(os.environ, ENV_TSV_DIR=ENV))
         if r.returncode: return None, "gen_env: " + r.stderr[-200:]
         r = sh(["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O1", "-w", "-I", g, "-c", os.path.join(g, "env_table.gen.cpp"), "-o", o]); key = "env_table.gen.cpp.o"
@@ -128,7 +130,7 @@ MUTS = [   # (part that must fail, file under render/d3d9, old, new)
     ("a", "dev/copy_stretch.cpp", "    if (zs != zsrc) return D3DERR_INVALIDCALL;", ""),
     ("a", "dev/copy_stretch.cpp", "    if (same && !nx_rc_empty(nx_rc_and(a, b))) return D3DERR_INVALIDCALL;", ""),
     ("b", "dev/copy_clear.cpp", "if (d->cur.rs[D3DRS_SCISSORTESTENABLE]) {", "if (false) {"),
-    ("b", "dev/copy_clear.cpp", "static float clamp01(float z) { return z != z ? 0.0f : z < 0.0f ? 0.0f : z > 1.0f ? 1.0f : z; }", "static float clamp01(float z) { return z; }"),
+    ("b", "dev/copy_clear.cpp", "if (a->w < b->w || a->h < b->h) return D3D_OK; }", "if (false) return D3D_OK; }"),
     ("a", "dev/copy_clear.cpp", "        if (!ds) return D3DERR_INVALIDCALL;", "        if (!ds) return D3D_OK;"),
     ("b", "dev/copy_clear.cpp", "for (uint32_t i = 0; i < NX_D3D_MAX_RTS; i++) {\n            NxSurfCore* t", "for (uint32_t i = 0; i < 1; i++) {\n            NxSurfCore* t"),
     ("b", "dev/copy_update.cpp", "b.l >>= l; b.t >>= l; b.f >>= l;", ""),
@@ -140,7 +142,7 @@ MUTS = [   # (part that must fail, file under render/d3d9, old, new)
     ("d", "dev/glue_stream.cpp", "void nxs_image_destroyed(uint32_t id) { if (id && id < NX_MAX_IMAGES && (g.img[id >> 3] >> (id & 7) & 1)) nxs_flush(); }", "void nxs_image_destroyed(uint32_t id) { (void)id; }"),
     ("d", "dev/glue_query.cpp", "if (!q->gbegun) nxs_query_begin(q->gid, kind(q)); nxs_query_end", "nxs_query_end"),
     ("d", "dev/glue_buf.cpp", "memcpy((uint8_t*)b->gmem + lo, b->mem + lo, hi - lo);", "memcpy((uint8_t*)b->gmem + lo, b->mem + lo, 1);"),
-    ("b", "front/front_rt.c", "    if (rep) g = b = r;", ""),
+    ("b", "front/front_rt.c", "d[i] = s[i * 4 + 3]; return n;", "d[i] = s[i * 4]; return n;"),
     ("a", "env/env_rules.cpp.in", "if (f == 2u) return (c & 0x02000200u) == 0x02000200u;", "if (f == 2u) return 0;"),
     ("a", "dev/copy_misc.cpp", "DrawRectPatch(UINT, const float*, const D3DRECTPATCH_INFO*) { return D3DERR_INVALIDCALL; }", "DrawRectPatch(UINT, const float*, const D3DRECTPATCH_INFO*) { return D3D_OK; }"),
     ("a", "dev/copy_dc.cpp", "for (uint32_t i = 0; i < im->levels * im->faces; i++) if (im->sub[i].locked) return D3DERR_INVALIDCALL;", ""),
@@ -164,7 +166,7 @@ def main():
     gate_report(tmp, prod)
     if "--no-guest" not in sys.argv:
         before = os.path.join(tmp, "head"); os.makedirs(before)
-        a = subprocess.run("git -C %s archive HEAD ports/fnv-nx/render ports/fnv-nx/shim ports/fnv-nx/tests/l6/env | tar -x -C %s" % (ROOT, before), shell=True, capture_output=True, text=True)
+        a = subprocess.run("git -C %s archive %s ports/fnv-nx/render ports/fnv-nx/shim ports/fnv-nx/tests/l6/env | tar -x -C %s" % (ROOT, os.environ.get("NXCOPY_BASE", "f712b9e1"), before), shell=True, capture_output=True, text=True)
         b = guest_undefined(os.path.join(before, "ports", "fnv-nx"), os.path.join(tmp, "gb")) if a.returncode == 0 else None; c = guest_undefined(ROOT, os.path.join(tmp, "ga"))
         print(f"guest build undefined symbols: before (HEAD) {b[1] if b else 'n/a'} -> after {c[1] if c else 'n/a'}")
         for name, x in (("before", b), ("after", c)):

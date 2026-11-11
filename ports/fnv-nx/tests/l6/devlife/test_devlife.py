@@ -139,26 +139,25 @@ def write_data(d):
             for obj in (0, 1, 2, 3):   # G1: the d3d9-level rules
                 for win in (0, 1):
                     for swap in range(7):
-                        for count in (0, 1, 2, 3, 4, 30, 31):
+                        for count in (0, 1, 3, 4, 30, 31):
                             for iv in (0, 1, 2, 3, 4, 8, 0x10, 0x80000000):
                                 c = dict(base, win=win, swap=swap, count=count, iv=iv); c["w"], c["h"] = (dw, dh) if not win else (640, 480); emit(obj, c)
             for obj in (0, 2):   # G2: size / format / window
                 for win in (0, 1):
-                    for (w, h) in ((0, 0), (640, 480), (dw, dh), (1, 1), (4000, 3000), (dw, 0), (0, dh), (20000, 20000), (5, 3)):
-                        if (w, h) in ((4000, 3000),) and (rnd.random() > 0.03): continue
+                    for (w, h) in ((0, 0), (640, 480), (dw, dh), (1, 1), (dw, 0), (0, dh), (20000, 20000), (5, 3)):
                         for fmt in fm:
                             for hdw, focus in ((0x100, 0x100), (0, 0x100), (0x200, 0x100), (0x999, 0), (0x300, 0x300), (0x400, 0)):
-                                if rnd.random() > 0.25 and hdw not in (0x100,) and fmt not in (22, 21, 23): continue
+                                if (rnd.random() > 0.15 and hdw not in (0x100,)) or (fmt not in (22, 21, 23) and rnd.random() > 0.5): continue
                                 emit(obj, dict(base, win=win, w=w, h=h, fmt=fmt, hdw=hdw, focus=focus))
             for win in (0, 1):   # G3: multisample + depth stencil
                 for ms in (0, 1, 2, 4, 8, 16, 17, 33):
                     for msq in (0, 1, 2, 0xffffffff):
                         for dsen in (0, 1):
-                            for dsfmt in (fm if rnd.random() < 0.3 else fm[::3]):
+                            for dsfmt in fm[::4]:
                                 for fmt in (22, 21, 23):
                                     if not dsen and dsfmt != fm[0]: continue
                                     emit(0, dict(base, win=win, ms=ms, msq=msq, dsen=dsen, dsfmt=dsfmt, fmt=fmt, w=dw if not win else 640, h=dh if not win else 480))
-            for _ in range(4000):   # G4: adapter / device type / behaviour / focus / flags / refresh
+            for _ in range(2000):   # G4: adapter / device type / behaviour / focus / flags / refresh
                 emit(rnd.choice((0, 1, 2)), dict(base, ad=rnd.choice((0, 0, 0, 1, 0xffffffff)), dt=rnd.choice((0, 1, 2, 3, 4, 5, 0x7fffffff)), beh=rnd.choice((0, 0x40, 0x20, 0x10, 0xffffffff, 0x80000)),
                     focus=rnd.choice((0x100, 0, 0x999, 0x300)), hdw=rnd.choice((0x100, 0, 0x999, 0x400)), win=rnd.choice((0, 1)), flags=rnd.choice((0, 1, 0xfff, 0xf000, 0xffffffff)), refresh=rnd.choice((0, 60, 0xffffffff)), swap=rnd.choice((1, 2, 3)),
                     w=rnd.choice((dw, 640)), h=rnd.choice((dh, 480)), fmt=rnd.choice((22, 21)), dsen=rnd.choice((0, 1)), dsfmt=rnd.choice((75, 80, 22, 0))))

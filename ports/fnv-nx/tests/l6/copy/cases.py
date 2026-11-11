@@ -59,6 +59,7 @@ def zoo():
     for l in range(3): add("tex", A8R8G8B8, 64 >> l, 64 >> l, pool=2, tex=2, level=l, levels=3)                                                             # 32-34 sysmem texture
     for l in range(4): add("tex", DXT1, 64 >> l, 64 >> l, pool=2, tex=3, level=l, levels=4)                                                                  # 35-38 sysmem DXT1
     for l in range(4): add("tex", DXT1, 64 >> l, 64 >> l, tex=4, level=l, levels=4)                                                                          # 39-42 default DXT1
+    for l in range(3): add("tex", A8R8G8B8, 64 >> l, 64 >> l, pool=2, tex=5, level=l, levels=3)                                                             # 43-45 second sysmem texture
     return Z
 
 
