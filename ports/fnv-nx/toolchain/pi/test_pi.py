@@ -62,19 +62,19 @@ def main():
         ('_Z2m3v', ''): ['uninit-mem', '', '1Q'],
         ('_Z2m4i', ''): ['uninit-mem', '_Z2uni', '1Q'],        # ICF made its body one with un's: GCC inlined un (the scope blocks never showed it)
         ('_Z2m5v', ''): ['ok', '', '1Q'],
-        ('_Z2o1v', ''): ['ok', '', ''],
+        ('_Z2o1v', ''): ['argorder', '', ''],
         ('_Z2o2v', ''): ['argorder', '', ''],
         ('_Z2o3i', ''): ['argorder', '', ''],
         ('_Z2o4v', ''): ['ok', '', ''],
-        ('_Z2o5R1W', ''): ['ok', '', '1W'],
+        ('_Z2o5R1W', ''): ['argorder', '', '1W'],
         ('_Z3fo1i', ''): ['falloff', '', ''],                          # FALL2
         ('_Z3fo2i', ''): ['ok', '_Z2uni', ''],                         # the same: ICF
         ('_Z3fo3i', ''): ['ok', '', ''],
         ('_Z3fo4i', ''): ['ok', '', ''],
         ('_Z3fo5i', ''): ['falloff', '', ''],
         ('_ZN1KC2Ev', ''): ['ok', '', '1K'],
-        ('_ZN2KDD2Ev', ''): ['ok', '', '2KD'],
-        ('_ZN2KDD1Ev', 'alias'): ['ok', '', '2KD'],
+        ('_ZN2KDD2Ev', ''): ['argorder', '', '2KD'],
+        ('_ZN2KDD1Ev', 'alias'): ['argorder', '', '2KD'],
         ('_ZN2KED2Ev', ''): ['argorder', '', '2KE'],
         ('_ZN2KED1Ev', 'alias'): ['argorder', '', '2KE'],
         ('_ZN1KD2Ev', ''): ['ok', '', '1K'],
@@ -124,6 +124,10 @@ def main():
         ('_ZN2MaC2Ev', 'inline'): ['ok', '', '2Ma'],
         ('_ZN2RaC2Ev', 'inline'): ['ok', '', '2Ra'],
         ('_ZN2VaC2Ev', 'inline'): ['ok', '', '2Va'],
+        # INL5: a record whose receiver's body is not output here (extern template member): no error, the body has a row
+        ('_Z2f5PKc', ''): ['ok', '', '3Ex5IcE'],
+        ('_ZN4Ex5iIcEC2Ev', 'inline'): ['ok', '', '4Ex5iIcE'],
+        ('_ZN3Ex5IcEC2EPKc', 'inline'): ['ok', '', '3Ex5IcE'],
     }
     fails = 0
     for k, w in want.items():

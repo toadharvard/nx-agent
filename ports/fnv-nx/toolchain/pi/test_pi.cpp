@@ -92,3 +92,11 @@ struct Ma { Va a, b, c; };
 struct Ra : Ma {};
 struct Ta { Ra r; Va t; FI4 Ta() {} };
 float inl4(Ta* p) { Ta l; return l.t.x[0] + p->t.x[1]; }
+// INL5: a receiver whose body this unit does not output: a member of an extern template, too big to inline. GCC inlines
+// the small constructors into its (external, never written) body and the out-of-line call stays; the records of the
+// inlinees belong to code in another object
+template <class T> struct Ex5i { T v; Ex5i(const Ex5i &o) : v(o.v) {} Ex5i() : v() {} };
+template <class T> struct Ex5 { Ex5i<T> i; T w; __attribute__((noinline)) Ex5(const T *p) : i(), w(*p) {} };
+extern template struct Ex5<char>;
+void use5(Ex5<char> *);
+void f5(const char *p) { Ex5<char> e(p); use5(&e); }

@@ -48,7 +48,15 @@ int plugin_is_GPL_compatible;
 static std::vector<tree> found;
 static std::set<tree> found_set;
 
-static tree note_record(tree t);
+/* GCC invariant: trees live in garbage-collected memory, and ggc_collect runs between functions, freeing every tree
+   no root reaches (a function-local class dies with its function body; its memory is then reused for other nodes).
+   `found` is read at FINISH_UNIT, so each recorded type is also chained from `keep`, a GC root (registered at
+   PLUGIN_REGISTER_GGC_ROOTS), which keeps it and everything it reaches alive until then. */
+static tree keep = NULL_TREE;
+static const struct ggc_root_tab keep_roots[] = {
+  { &keep, 1, sizeof(keep), &gt_ggc_mx_lang_tree_node, NULL },
+  LAST_GGC_ROOT_TAB
+};
 
 static void add_type(tree t)
 {
@@ -59,7 +67,10 @@ static void add_type(tree t)
   t = TYPE_MAIN_VARIANT(t);
   /* a pointer to member function is a record of the compiler's own making: a member's size, no layout to compare */
   if (!CLASS_TYPE_P(t) && TREE_CODE(t) != UNION_TYPE) return;
-  if (found_set.insert(t).second) found.push_back(t);
+  if (found_set.insert(t).second) {
+    found.push_back(t);
+    keep = tree_cons(NULL_TREE, t, keep);
+  }
 }
 
 static void finish_type_cb(void *gcc_data, void *) { add_type((tree)gcc_data); }
@@ -267,6 +278,7 @@ extern "C" int plugin_init(struct plugin_name_args *info, struct plugin_gcc_vers
     return 1;
   }
   /* the name rules need the class-key reports and the scope numbers of toolchain/names */
+  register_callback(info->base_name, PLUGIN_REGISTER_GGC_ROOTS, NULL, (void *)keep_roots);
   register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_DECL, finish_decl_cb, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_TYPE, (plugin_callback_func)+[](void *d, void *u) { finish_type(d, u); finish_type_cb(d, u); }, NULL);

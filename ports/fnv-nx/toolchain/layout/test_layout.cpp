@@ -56,3 +56,11 @@ void use()
   (void)p; (void)m; (void)vd; (void)vm; (void)v; (void)v2; (void)ed; (void)em; (void)te; (void)ea; (void)b; (void)b2;
   (void)w; (void)k1; (void)k2; (void)td; (void)tc; (void)o; (void)u; (void)an; (void)ar; (void)pm; (void)ni;
 }
+
+// GC: a class local to a function is garbage once the function is compiled (ggc_collect runs between functions): the
+// plugin keeps what it recorded alive until the end of the unit. The test compiles with a collection after every function.
+static inline unsigned loc_a(float x) { struct LocA { int a; char b; short c; } l; l.a = (int)x; l.b = 1; l.c = 2; return l.a + l.b + l.c; }
+static inline unsigned loc_b(float x) { union { float f; unsigned u; } v; v.f = x; return v.u; }
+unsigned gc_use(float x) { return loc_a(x) + loc_b(x); }
+unsigned gc_f1(float x) { Plain p; (void)p; return loc_a(x * 2) ^ gc_use(x); }
+unsigned gc_f2(float x) { Multi m; (void)m; return loc_b(x * 3) ^ gc_f1(x); }

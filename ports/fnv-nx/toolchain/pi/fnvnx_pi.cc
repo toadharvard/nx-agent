@@ -30,8 +30,8 @@
  *              volatile  a volatile access
  *              fpfast    the unit is built with /fp:fast (a fact of the recipe, plugin argument `fpfast`) and
  *                        the body has a floating-point operand: the source does not fix what the exe computes
- *              argorder  a call with side effects in two or more arguments whose order cannot be read out of an
- *                        object (see "argument order" below); also any call of two or more arguments with a
+ *              argorder  a call with side effects in two or more arguments, always (the right-to-left lemma does
+ *                        not hold for the class; see "argument order" below); also any call of two or more arguments with a
  *                        side-effecting argument of non-scalar type, which the order plugin leaves in GCC order
  *              div       an integer division or remainder by a non-constant (x86 traps where AArch64 gives 0)
  *              shift     a shift or rotate by a non-constant count (x86 masks the count, C leaves it undefined)
@@ -244,9 +244,8 @@ static bool uninit_use(tree op)
        function <TAB> callee <TAB> a0|a1|... <TAB> k/n
    each a_k: the `,`-separated callees of the calls inside argument k; k/n: this call is number k (from 0) of the
    function's n calls of that callee, in the order of the source. In section .fnvnx.argorder. The gate reads the same calls out of the MSVC object of the function and checks that
-   their order there is the one the order plugin makes GCC use. A site where that cannot be read from an object -
-   an argument whose effect is not only calls of named functions, or two arguments calling the same function -
-   puts the function outside Π (`argorder`): a static rule, no site is skipped. */
+   their order there is the one the order plugin makes GCC use. Every such site, readable or not, puts the
+   function outside Π (`argorder`): a static rule, no site is skipped; the rows are only a measurement for the gate. */
 static std::vector<std::string> arg_sites;
 /* per function, while it is walked: how many calls of each callee were met so far (source order), and the sites
    found, each with the number its call has among the calls of its callee */
@@ -319,6 +318,10 @@ static tree walk_calls(tree *tp, int *walk_subtrees, void *data)
     }
   }
   if (with < 2) return NULL_TREE;
+  /* ORDER-ARGS: the lemma "cl evaluates the arguments right to left" does not hold for the whole class (the gate found
+     contradictions against cl's code), so no function may rely on it: two or more side-effecting arguments, readable
+     or not, put the function outside Π. The row below is still written, as a measurement for the gate. */
+  arg_unreadable.insert((const char *)data);
   std::string row = std::string((const char *)data) + "\\t" + callee + "\\t";
   bool readable = true;
   std::set<std::string> seen;
@@ -334,7 +337,6 @@ static tree walk_calls(tree *tp, int *walk_subtrees, void *data)
     for (size_t k = 0; k < e.calls.size(); k++) row += (k ? "," : "") + e.calls[k];
   }
   if (readable) fn_sites.push_back({row, callee, ordinal});
-  else arg_unreadable.insert((const char *)data);
   return NULL_TREE;
 }
 
@@ -574,11 +576,21 @@ static void ipa_start(void *, void *)
    last caller keeps the receiver's name for the inlinee records while the function itself is gone with its caller).
    `inside` is that closure: from each dead X or inl_gone body, its callees by their own names (inl_walk) and by origin names
    (inl_direct), transitively. A record whose receiver is used, dead or inside dead code is consumed or in no emitted
-   code. Anything else is an error. */
+   code. Anything else is an error.
+   Third seed of `inside`: a node still in the symbol table whose body is not output in this unit. At FINISH_UNIT
+   every body the unit writes is expanded and GCC has set TREE_ASM_WRITTEN on its decl (final.cc, rest_of_handle_final);
+   a function node without it (and, for an alias, whose ultimate target has none) writes no code: an extern
+   (DECL_EXTERNAL) body that was only inlined from, or a comdat body every user inlined and remove_unreachable_nodes
+   released but kept as an abstract origin (definition == false). Such a body is in no emitted code, so the copies of its
+   inlinees in it are neither. Inline clones still attached to a root (inlined_to) are no seeds: their code is the root's. */
 static void check_records()
 {
   std::set<std::string> inside(inl_dead.begin(), inl_dead.end());
   inside.insert(inl_gone.begin(), inl_gone.end());
+  cgraph_node *fn;
+  FOR_EACH_FUNCTION(fn)
+    if (!fn->inlined_to && DECL_ASSEMBLER_NAME_SET_P(fn->decl) && !TREE_ASM_WRITTEN((fn->alias ? fn->ultimate_alias_target() : fn)->decl))
+      inside.insert(asmname(fn->decl));
   std::vector<std::string> work(inside.begin(), inside.end());
   while (!work.empty()) {
     std::string f = work.back(); work.pop_back();

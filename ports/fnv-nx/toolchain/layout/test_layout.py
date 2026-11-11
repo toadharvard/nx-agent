@@ -52,7 +52,7 @@ def main():
                 print('skip: the %s plugin does not build here' % p); return 0
             so[p] = r.stdout.strip().splitlines()[-1]
         obj = os.path.join(td, 't.o')
-        r = subprocess.run([cxx, '-mabi=ilp32', '-std=gnu++17', '-O2', '-fPIC', '-fplugin=' + so['pi'], '-fplugin=' + so['layout'],
+        r = subprocess.run([cxx, '-mabi=ilp32', '-std=gnu++17', '-O2', '-fPIC', '--param', 'ggc-min-expand=0', '--param', 'ggc-min-heapsize=0', '-fplugin=' + so['pi'], '-fplugin=' + so['layout'],
                             '-c', '-o', obj, os.path.join(HERE, 'test_layout.cpp')], capture_output=True, text=True)
         if r.returncode != 0:
             print('FAIL compiles', r.stderr[:2000]); return 1
