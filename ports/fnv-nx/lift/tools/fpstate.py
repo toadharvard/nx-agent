@@ -116,6 +116,8 @@ def a3_tags(ins, m):
             how = 'covered:h_absent_ext'
         elif m in core.OPS or m in f_sse.SSE or 0xd8 <= ins.opcode[0] <= 0xdf:
             how = 'NOT-covered:handler-wins'
+        elif f_sys._is_simd(type('C', (), {'ops': ins.operands})(), ins):
+            how = 'NOT-covered:h_sse-lift-error'          # an mm / xmm operand: f_sys.h_default stands aside, f_sse.h_sse raises Unsupported('sse <m>')
         else:
             how = 'covered:h_default'
         t.append('absent:%s:%s:%s' % (f, m, how))

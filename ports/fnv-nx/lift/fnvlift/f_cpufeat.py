@@ -36,10 +36,19 @@ GROUP_FEATURE = {'mmx': 'MMX', 'sse1': 'SSE', 'sse2': 'SSE2', 'sse3': 'SSE3', 's
 MNEMONIC_FEATURE = {'fisttp': 'SSE3', 'popcnt': 'POPCNT', 'movbe': 'MOVBE'}
 
 
+# forms that the SDM defines as ANOTHER legal instruction on a CPU without the feature (so the absent feature is not #UD): TZCNT F3 0F BC executes as BSF and LZCNT F3 0F BD as BSR (SDM Vol 2
+# TZCNT / LZCNT: "on processors that do not support ... the instruction is executed as BSF / BSR"), PREFETCH / PREFETCHW 0F 0D are reserved-NOP hints (Vol 2 Table A-6, executed as NOP by a CPU
+# that lacks them). They are implemented by fnvlift/f_sys.py (classes 4 and 5), not gated here.
+LEGACY_ALIAS = frozenset(('tzcnt', 'lzcnt', 'prefetch', 'prefetchw'))
+
+
 def required(ins):
     """the set of features the decoded form needs"""
+    mn = ins.mnemonic.split()[-1]
+    if mn in LEGACY_ALIAS:
+        return set()
     r = {GROUP_FEATURE[n] for n in (ins.group_name(g) for g in getattr(ins, 'groups', ())) if n in GROUP_FEATURE}
-    m = MNEMONIC_FEATURE.get(ins.mnemonic.split()[-1])
+    m = MNEMONIC_FEATURE.get(mn)
     if m:
         r.add(m)
     return r
