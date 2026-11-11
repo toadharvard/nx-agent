@@ -193,16 +193,16 @@ uint32_t fnvnx_modules_resolve(void *ctx, const char *dll, const char *name, uin
 
 /* ---- M2: map ---- */
 
-/* The table itself (every row, static or on demand): usable entries, names unique, ranges inside the address space,
- * outside the reserved range [LO, HI), the exe image and each other. */
+/* The table itself (every row, static or on demand): usable entries, names unique and in normal form, ranges inside the
+ * address space, outside the reserved range [LO, HI), the exe image and each other. */
 static int check_table(const fnvnx_proc *p) {
-    unsigned k, j;
+    unsigned k;
     for (k = 0; k < p->nmod; k++) {
         const fnvnx_module_desc *d = &p->cfg.modules[k];
         if (!d->name || !d->name[0] || !d->file_size || !d->size_of_image || (d->base & 0xffffu) || (d->size_of_image & (FNVNX_PAGE - 1u)) ||
             !fnvnx_in(d->base, d->size_of_image, 0, 0xffff0000u) ||
             (d->base < FNVNX_START_RESERVED_HI && (uint64_t)d->base + d->size_of_image > FNVNX_START_RESERVED_LO) ||
-            fnvnx_images_overlap(p, d->base, d->size_of_image, -1) == 0 ? 0 : 0) {
+            fnvnx_images_overlap(p, d->base, d->size_of_image, (int)k)) {
             fnvnx_logf(p->os, "fnvnx-start: module table entry %u is not usable (name, size, 64 KiB base or range)", k);
             return FNVNX_START_E_STATE;
         }
@@ -211,5 +211,247 @@ static int check_table(const fnvnx_proc *p) {
             return FNVNX_START_E_STATE;
         }
     }
+    return FNVNX_OK;
+}
+
+/* Read, hash-check, parse, map at the static base, relocate and check the exports of table row k. */
+static int load_one(fnvnx_proc *p, unsigned k) {
+    const fnvnx_module_desc *d = &p->cfg.modules[k];
+    fnvnx_loaded *L = &p->mod[k];
+    uint8_t sha[32], extra;
+    uint8_t *buf;
+    int r;
+    L->name = d->name;
+    L->file = FNVNX_FILE_MODULE(k);
+    if (!(buf = (uint8_t *)p->os->alloc(p->os->ctx, d->file_size))) return FNVNX_E_NOMEM;
+    r = p->os->read(p->os->ctx, L->file, 0, buf, d->file_size) ? FNVNX_E_IO : FNVNX_OK;
+    if (r) fnvnx_logf(p->os, "fnvnx-start: cannot read module %s", L->name);
+    else fnvnx_sha256(buf, d->file_size, sha);
+    p->os->free(p->os->ctx, buf);
+    if (r) return r;
+    if (memcmp(sha, d->sha256, 32)) {
+        fnvnx_logf(p->os, "fnvnx-start: identity mismatch: module %s is not the file the table was built from", L->name);
+        return FNVNX_START_E_IDENTITY;
+    }
+    if (!p->os->read(p->os->ctx, L->file, d->file_size, &extra, 1)) {   /* the file must end where the table says */
+        fnvnx_logf(p->os, "fnvnx-start: identity mismatch: module %s is longer than the table says", L->name);
+        return FNVNX_START_E_IDENTITY;
+    }
+    if ((r = fnvnx_pe_open(&L->pe, p->os, L->file, d->file_size))) {
+        fnvnx_logf(p->os, "fnvnx-start: PE headers of %s: %s", L->name, fnvnx_strerror(r));
+        return r;
+    }
+    if (!(L->pe.characteristics & FILE_DLL) || L->pe.size_of_image != d->size_of_image) {
+        fnvnx_logf(p->os, "fnvnx-start: %s is not a DLL image of the size the table says", L->name);
+        return FNVNX_E_UNSUPPORTED;
+    }
+    L->img.pe = &L->pe;
+    if ((r = fnvnx_loaded_map(p, L, d->base, (int)k))) return r;
+    L->state = FNVNX_MOD_MAPPED;
+    r = fnvnx_image_relocate(&L->img, p->os, &L->relocs_applied);
+    fnvnx_image_release(&L->img, p->os);
+    if (r) { fnvnx_logf(p->os, "fnvnx-start: relocating %s from 0x%08x to 0x%08x: %s", L->name, (unsigned)L->pe.image_base, (unsigned)d->base, fnvnx_strerror(r)); return r; }
+    if ((r = exp_check(p, L))) return r;
+    fnvnx_logf(p->os, "fnvnx-start: module %s mapped at 0x%08x, relocations %u", L->name, (unsigned)d->base, (unsigned)L->relocs_applied);
+    return FNVNX_OK;
+}
+
+/* the static modules only: the on-demand ones wait for fnvnx_module_load */
+int fnvnx_modules_map(fnvnx_proc *p) {
+    unsigned k;
+    int r;
+    if ((r = check_table(p))) return r;
+    for (k = 0; k < p->nmod; k++)
+        if (p->cfg.modules[k].is_static && (r = load_one(p, k))) return r;
+    return FNVNX_OK;
+}
+
+/* ---- M3, M4 setup ---- */
+
+int fnvnx_modules_prepare_tls(fnvnx_proc *p) {
+    unsigned k;
+    uint32_t next = 1u;
+    int r;
+    for (k = 0; k < p->nmod; k++) {
+        if (p->mod[k].state == FNVNX_MOD_UNLOADED) continue;
+        if ((r = fnvnx_loaded_tls(p, &p->mod[k], next))) return r;
+        if (p->mod[k].tls.present) next++;
+    }
+    p->tls_slots = next;
+    return FNVNX_OK;
+}
+
+static int finish_one(fnvnx_proc *p, fnvnx_loaded *L) {
+    int r;
+    if ((r = fnvnx_loaded_entry(p, L, 0))) return r;
+    if ((r = fnvnx_loaded_protect(p, L))) fnvnx_logf(p->os, "fnvnx-start: protecting %s failed", L->name);
+    return r;
+}
+
+int fnvnx_modules_finish(fnvnx_proc *p) {
+    unsigned k;
+    int r;
+    for (k = 0; k < p->nmod; k++)
+        if (p->mod[k].state != FNVNX_MOD_UNLOADED && (r = finish_one(p, &p->mod[k]))) return r;
+    return FNVNX_OK;
+}
+
+/* ---- M4: initialisation and notifications ---- */
+
+typedef struct gthread { uint32_t teb, esp; } gthread;   /* the guest thread a call runs on: its TEB and current esp */
+
+/* TLS callbacks of L with (base, reason, cb_reserved); then, when `entry` and L has an entry point, DllMain(base, reason,
+ * reserved). Returns DllMain's eax, or 1 when there was none. */
+static uint32_t notify(const fnvnx_proc *p, gthread t, const fnvnx_loaded *L, uint32_t reason, uint32_t cb_reserved,
+                       int entry, uint32_t reserved) {
+    uint32_t k;
+    for (k = 0; k < L->ntls_cb; k++)
+        (void)fnvnx_call_guest_at(p, t.teb, t.esp, L->tls_cb[k], L->img.load_base, reason, cb_reserved);
+    return entry && L->entry_va ? fnvnx_call_guest_at(p, t.teb, t.esp, L->entry_va, L->img.load_base, reason, reserved) : 1u;
+}
+
+/* DLL_PROCESS_ATTACH of module k; FALSE (low byte) = refusal; on success k joins the initialisation order */
+static int attach_process(fnvnx_proc *p, gthread t, unsigned k, uint32_t reserved) {
+    fnvnx_loaded *L = &p->mod[k];
+    if (L->ntls_cb || L->entry_va) fnvnx_logf(p->os, "fnvnx-start: init %s", L->name);
+    if (!(notify(p, t, L, DLL_PROCESS_ATTACH, 0u, 1, reserved) & 0xffu)) {
+        fnvnx_logf(p->os, "fnvnx-start: DllMain of %s returned FALSE (STATUS_DLL_INIT_FAILED)", L->name);
+        L->state = FNVNX_MOD_FAILED;
+        return FNVNX_START_E_DLLINIT;
+    }
+    L->state = FNVNX_MOD_READY;
+    p->init_order[p->ninit++] = (uint16_t)k;
+    return FNVNX_OK;
+}
+
+int fnvnx_start_init_modules(fnvnx_proc *p) {
+    unsigned k;
+    gthread t;
+    int r;
+    if (!p || !p->exe.nmap) return FNVNX_E_ARG;
+    t.teb = p->main.teb_va;
+    t.esp = p->main.stack_base;
+    for (k = 0; k < p->nmod && !p->modules_ready; k++)
+        if (p->mod[k].state == FNVNX_MOD_MAPPED && (r = attach_process(p, t, k, 1u))) return r;
+    p->modules_ready = 1;
+    return FNVNX_OK;
+}
+
+static void attach_order(const fnvnx_proc *p, gthread t, uint32_t reason) {
+    unsigned k;
+    for (k = 0; k < p->ninit; k++) (void)notify(p, t, &p->mod[p->init_order[k]], reason, 0u, 1, 0u);
+    (void)notify(p, t, &p->exe, reason, 0u, 0, 0u);
+}
+
+static void detach_order(const fnvnx_proc *p, gthread t, uint32_t reason, uint32_t reserved) {
+    unsigned k;
+    (void)notify(p, t, &p->exe, reason, reserved, 0, 0u);
+    for (k = p->ninit; k--;) (void)notify(p, t, &p->mod[p->init_order[k]], reason, reserved, 1, reserved);
+}
+
+void fnvnx_modules_thread_attach(const fnvnx_thread_block *b) {
+    gthread t;
+    t.teb = b->teb_va; t.esp = b->stack_base;
+    attach_order(fnvnx_start_proc(), t, DLL_THREAD_ATTACH);
+}
+void fnvnx_modules_thread_detach(const fnvnx_thread_block *b) {
+    gthread t;
+    t.teb = b->teb_va; t.esp = b->stack_base;
+    detach_order(fnvnx_start_proc(), t, DLL_THREAD_DETACH, 0u);
+}
+void fnvnx_modules_process_detach(uint32_t reserved) {
+    const fnvnx_proc *p = fnvnx_start_proc();
+    gthread t;
+    t.teb = p->main.teb_va; t.esp = p->main.stack_base;
+    detach_order(p, t, DLL_PROCESS_DETACH, reserved);
+}
+
+/* ---- on demand: LoadLibrary ---- */
+
+/* Map table row k and, depth first in import-directory order, every table module it imports that is not loaded yet; a
+ * module joins `batch` after its dependencies (the Windows initialisation order). A module still being loaded (state
+ * MAPPED) is not followed again: a cycle. */
+static int dyn_map(fnvnx_proc *p, unsigned k, uint16_t *batch, unsigned *nb) {
+    fnvnx_loaded *L = &p->mod[k];
+    uint32_t rva, size, d;
+    int r;
+    if (L->state != FNVNX_MOD_UNLOADED) return FNVNX_OK;
+    if ((r = load_one(p, k))) { L->state = FNVNX_MOD_FAILED; return r; }
+    r = fnvnx_tls_layout_read(&L->img, &L->tls);
+    if (!r && L->tls.present) {
+        fnvnx_logf(p->os, "fnvnx-start: %s has a TLS directory: threads that exist already have no TLS slot for it, only static modules can", L->name);
+        r = FNVNX_E_UNSUPPORTED;
+    }
+    if (r) { L->state = FNVNX_MOD_FAILED; return r; }
+    rva = L->pe.ndirs > FNVNX_DIR_IMPORT ? L->pe.dir[FNVNX_DIR_IMPORT].rva : 0;
+    size = L->pe.ndirs > FNVNX_DIR_IMPORT ? L->pe.dir[FNVNX_DIR_IMPORT].size : 0;
+    for (d = 0; size && d + 20 <= size; d += 20) {
+        const uint8_t *desc = (const uint8_t *)fnvnx_image_ptr(&L->img, L->img.load_base + rva + d, 20);
+        const char *dll;
+        int j;
+        if (!desc) { L->state = FNVNX_MOD_FAILED; return FNVNX_E_RANGE; }
+        if (!fnvnx_rd32(desc) && !fnvnx_rd32(desc + 12) && !fnvnx_rd32(desc + 16)) break;
+        dll = fnvnx_image_str(&L->img, L->img.load_base + fnvnx_rd32(desc + 12), 256, NULL);
+        if (!dll) { L->state = FNVNX_MOD_FAILED; return FNVNX_E_FORMAT; }
+        if ((j = table_index(p, dll)) >= 0 && (r = dyn_map(p, (unsigned)j, batch, nb))) return r;
+    }
+    batch[(*nb)++] = (uint16_t)k;
+    return FNVNX_OK;
+}
+
+int fnvnx_module_load(fnvnx_proc *p, uint32_t teb, uint32_t esp, const char *name, uint32_t *base) {
+    uint16_t batch[FNVNX_MAX_MODULES];
+    unsigned nb = 0, i, missing = 0;
+    gthread t;
+    int k, r;
+    if (!p || !name || !base || !p->exe.nmap || !p->modules_ready) return FNVNX_E_ARG;
+    if ((k = table_index(p, name)) < 0) { fnvnx_logf(p->os, "fnvnx-start: LoadLibrary: %s is not a module of the table", name); return FNVNX_E_ARG; }
+    switch (p->mod[k].state) {
+    case FNVNX_MOD_READY:
+    case FNVNX_MOD_MAPPED: *base = p->mod[k].img.load_base; return FNVNX_OK;
+    case FNVNX_MOD_FAILED: return FNVNX_START_E_DLLINIT;
+    default: break;
+    }
+    r = dyn_map(p, (unsigned)k, batch, &nb);
+    for (i = 0; !r && i < nb; i++) {   /* every module of the batch is mapped: bind, protect */
+        fnvnx_loaded *L = &p->mod[batch[i]];
+        uint32_t n = 0;
+        int rb;
+        fnvnx_logf(p->os, "fnvnx-start: binding the imports of %s", L->name);
+        rb = fnvnx_imports_bind_strict(&L->img, p->os, fnvnx_modules_resolve, p, &n);
+        L->imports_bound = n;
+        if (rb == FNVNX_E_MISMATCH) missing = 1;
+        else if (rb) r = rb;
+    }
+    if (!r && missing) r = FNVNX_START_E_IMPORTS;
+    for (i = 0; !r && i < nb; i++) r = finish_one(p, &p->mod[batch[i]]);
+    t.teb = teb; t.esp = esp;
+    for (i = 0; !r && i < nb; i++) r = attach_process(p, t, batch[i], 0u);
+    if (r) {   /* nothing is unmapped: what this call mapped and did not finish stays, failed */
+        for (i = 0; i < nb; i++)
+            if (p->mod[batch[i]].state != FNVNX_MOD_READY) p->mod[batch[i]].state = FNVNX_MOD_FAILED;
+        if (p->mod[k].state == FNVNX_MOD_MAPPED) p->mod[k].state = FNVNX_MOD_FAILED;
+        return r;
+    }
+    *base = p->mod[k].img.load_base;
+    return FNVNX_OK;
+}
+
+/* ---- the image list ---- */
+
+uint32_t fnvnx_images_count(const fnvnx_proc *p) { return p->exe.nmap ? 1u + p->ninit : 0u; }
+
+int fnvnx_images_get(const fnvnx_proc *p, uint32_t i, fnvnx_image_info *out) {
+    const fnvnx_loaded *L;
+    if (!p || !out || i >= fnvnx_images_count(p)) return FNVNX_E_ARG;
+    L = i ? &p->mod[p->init_order[i - 1u]] : &p->exe;
+    out->name = L->name;
+    out->base = L->img.load_base;
+    out->size_of_image = L->pe.size_of_image;
+    out->entry_va = L->entry_va;
+    out->tls_index = L->tls_index;
+    out->has_tls = L->tls.present;
+    out->map = L->map;
+    out->nmap = L->nmap;
     return FNVNX_OK;
 }

@@ -115,6 +115,18 @@ typedef struct FnvnxHostApi {
 #define FNVNX_PLAT_VM_COMMIT 5u
 #define FNVNX_PLAT_VM_DECOMMIT 6u
 #define FNVNX_PLAT_VM_RELEASE 7u
+/* VM_PROTECT (address, size, prot) -> 0 or a result. prot: bit 0 readable, bit 1 writable, 0 = no access; never
+ * executable. Works on whole pages the guest owns: map_fixed memory and committed pages of a VM reservation.
+ * DECOMMIT returns a page to zeroed read-write whatever VM_PROTECT set before. Results: 0xD401 a page of the range
+ * is not the guest's (the guest module, host pages, unmapped), 0xD801 prot has other bits, 0xCA01 size is 0 or not
+ * page aligned, 0xCC01 address not page aligned. The loader sets the PE section protection and the stack guard
+ * pages with it; the platform's VirtualProtect uses the same call. */
+#define FNVNX_PLAT_VM_PROTECT 8u
+#define FNVNX_VM_PROT_R 1u
+#define FNVNX_VM_PROT_W 2u
+/* DISPLAY_DOCKED () -> 1 docked (1080p output), 0 handheld (720p) */
+#define FNVNX_PLAT_DISPLAY_DOCKED 9u
+/* 16 and above: guest sockets (platform/, table published by the platform lead) */
 
 /* Thread placement (docs/PERF.md 6.3): roles for thread_create's cpu argument; the host's table
  * (toolchain/host/placement.h) gives each an ideal core, an affinity mask and a priority. */
