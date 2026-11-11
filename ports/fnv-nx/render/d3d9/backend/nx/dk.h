@@ -9,8 +9,14 @@
  *   dk_xfer.c   the shared transfer rules: box validation, staging memory, row conversion, the upload primitive, the synchronous submit
  *   dk_sampler.c SAMPLER_CREATE / SAMPLER_UPDATE (the ABI sampler word -> DkSampler; dk_state.c is not on this base)
  *   dk_read.c   IMAGE_READ and v3 READBACK
- *   to come, each one defines the symbols listed under NXDK_PENDING below (until then they are required symbols of the link):
- *   dk_shader.c, dk_stream.c (the 28 ops), dk_query.c, dk_present.c (the present compose passes)
+ *   dk_shader.c SHADER_CREATE / SHADER_CREATE_D3D / SHADER_DESTROY (DKSH blobs, the install-time pack)
+ *   the stream (contract: the section "The stream" below; until a file exists its symbols are required symbols of the link):
+ *   dk_stream.c SUBMIT, WAIT_FRAME, the 28-entry op table, the recording command buffer, ops End Barrier Marker ImageUpdate
+ *   dk_draw.c   ops DefineState BindState BindUbo BindIdx BindTextures Draw DrawIndexed Viewport Scissor StencilRef BlendConst DepthBias
+ *   dk_vtx.c    ops DefineLayout DefineLayout4 BindVtx BindVtxN, the layout bind and the pre-draw flush
+ *   dk_pass.c   ops BeginPass BeginPass4 EndPass Clear, the sRGB-write rebind
+ *   dk_scale.c  the point-scale primitive (internal DKSH programs), dk_present.c the compose passes of PRESENT
+ *   dk_blit.c   ops Blit GenMips;  dk_query.c  ops QueryBegin QueryEnd, QUERY_RESULT, the submit hooks
  *
  * Embedder obligations (stated assumptions, the same as the GL backend's two hooks):
  *   - nxdk_guest_ptr(addr, len): guest address -> host pointer; the mapping is stable while the guest block lives (one shared address space).
@@ -29,7 +35,9 @@
 #include <switch/display/native_window.h>
 #include "nxgpu4.h"
 #include "nxgpu4_shader.h"
+#include "nxgpu4_check.h"
 #include "dk_fmt.h"
+#include "dk_state.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -179,20 +187,112 @@ uint32_t nxdk_sync_end(NxDkSync* s);             /* submit, signal, wait, destro
 uint64_t nxdk_image_read(uint64_t a);
 uint64_t nxdk_readback(uint64_t a);
 
-/* ---- NXDK_PENDING: required symbols of files not written yet (the link names them, nothing stands in for them) ------------------------------ */
-uint64_t nxdk_shader_create(uint64_t a);         /* dk_shader.c */
+/* ---- dk_shader.c ------------------------------------------------------------------------------------------------------------- */
+uint64_t nxdk_shader_create(uint64_t a);
 uint64_t nxdk_shader_destroy(uint64_t a);
 uint64_t nxdk_shader_create_d3d(uint64_t a);
-const DkShader* nxdk_shader(uint32_t id);   /* NULL = not a live shader (dk_shader.c) */
-void nxdk_shader_release_all(void);        /* destroys every code block; nxdk_destroy must call it before the device goes (dkDeviceDestroy) */
-uint64_t nxdk_submit(uint64_t a);                /* dk_stream.c */
-uint64_t nxdk_wait_frame(uint64_t a);
-uint64_t nxdk_query_result(uint64_t a, uint64_t b, uint64_t c);   /* dk_query.c */
-/* image by id (any slot incl. views); id 0 is &nxdk.front; NULL = not a live image (dk_image.c). dk_stream.c fills NxChkImage from it */
+const DkShader* nxdk_shader(uint32_t id);   /* NULL = not a live shader */
+void nxdk_shader_release_all(void);        /* destroys every code block; nxdk_destroy calls it before the device goes */
+/* image by id (any slot incl. views); id 0 is &nxdk.front; NULL = not a live image (dk_image.c) */
 const NxDkImage* nxdk_img(uint32_t id);
-/* the compose passes of PRESENT: writes the source rect of `src` into the destination rect of nxdk.front (gamma ramp: 3 x 256 u16 or NULL), then blends
- * the cursor (cw x ch BGRA or NULL), all queued on nxdk.q ahead of the flip (dk_present.c; rule P1: it consumes the memory it reads before it returns) */
+
+/* ==== The stream ================================================================================================================
+ * Rules (the GL backend's gl4_stream.c and its op files are the behavioural reference: same acceptance, same messages where the check is
+ * backend neutral, same pixels):
+ *  S1 SUBMIT is synchronous, like the reference (glFinish): dk_stream.c validates the whole stream (opcode table, overrun, End, then
+ *     nxchk_stream with nxdk_chk_env) before anything is recorded, records the ops into nxdk.s.cmd, submits the list, waits for the queue
+ *     (dkQueueWaitIdle), then nxdk_query_collect, nxdk_stage_free, the stats. WAIT_FRAME therefore returns 0. An op that reports through
+ *     nxdk_err stops the replay; what was recorded before it is still submitted and waited for (the reference executed it), and SUBMIT
+ *     returns NXGPU_BAD_CALL.
+ *  S2 Only dk_stream.c creates, finishes and submits nxdk.s.cmd. Its memory grows by the command buffer's add-memory callback
+ *     (dkCmdBufSetAddMemFunc) in chunks of NXDK_STREAM_CHUNK listed for release after the wait: no stream is refused for its length.
+ *     Every command buffer starts with nxdk_bind_descriptors and a DkInvalidateFlags_Descriptors barrier.
+ *  S3 An op handler is  void nxdk_op_<snake>(const uint32_t* a, uint32_t argc)  (a = the words after the header word). It checks argc with
+ *     the reference's message, records dkCmdBuf* calls into nxdk.s.cmd and updates nxdk.s; it never submits, waits or reads GPU results.
+ *     A violated contract is one nxdk_err call and a return; nothing is approximated, skipped or deferred.
+ *  S4 State shared between the op files lives in nxdk.s (below) and is written only by the file named next to the field. File-private
+ *     tables (layouts, queries, internal programs) are static in their file and reached through the functions below.
+ *  S5 Memory blocks are caller backed: the GPU reads guest bytes in place. The file that binds a range (ubo, vertex, index, upload source)
+ *     flushes it first with dkMemBlockFlushCpuCache(blk, offset, size) and checks the range against NxDkMem.size.
+ *  S6 Pass state is reset by EndPass and at the start of every SUBMIT: inPass = 0, boundState = 0, the index binding stays (reference).
+ *  S7 A render-state property that dk_state.h reports as derived (NxDkDerived) is applied by the file named there; a combination this
+ *     backend has no rule for yet is rejected with nxdk_err naming the property (never dropped) and listed in the worker's report. */
+enum { NXDK_MAX_STATES = 4096, NXDK_MAX_LAYOUTS = 256, NXDK_MAX_QUERIES = 4096, NXDK_STREAM_CHUNK = 0x40000 };
+typedef struct NxDkStateRec { NxRenderState rs; uint16_t vs, ps, layout, defined; } NxDkStateRec;
+typedef struct NxDkSub { const NxDkImage* im; uint32_t id, level, layer, x, y, w, h; } NxDkSub;   /* a rect of one subresource (blit, scale, present) */
+typedef struct NxDkStream {
+    DkCmdBuf cmd;                  /* dk_stream.c: the recording buffer; NULL outside SUBMIT */
+    NxFrameStats* stats;           /* dk_stream.c: the stats of the running SUBMIT (never NULL inside one); dk_draw.c counts into it */
+    NxDkStateRec st[NXDK_MAX_STATES + 1];   /* dk_draw.c (DefineState) */
+    uint32_t boundState;           /* dk_draw.c; 0 = none. dk_pass.c and dk_stream.c reset it (S6) */
+    uint32_t idxBlock, idxOffset, idxType;   /* dk_draw.c (BindIdx) */
+    uint32_t stencilRef;           /* dk_draw.c */
+    int32_t scissor[4];            /* dk_draw.c: the last Scissor op (x y w h) */
+    uint32_t inPass, passW, passH, passSamples, passColors, passSrgb;   /* dk_pass.c: the open pass; passSrgb = colour views are the sRGB ones */
+    NxDkSub passColor[4], passDepth;   /* dk_pass.c: the targets of the open pass (im NULL = none) */
+    uint32_t frameDraws; uint64_t drawsFrame;   /* dk_stream.c resets per frame number, dk_draw.c counts (reference: g4.frameDraws) */
+} NxDkStream;
+extern NxDkStream nxdk_s;          /* defined by dk_stream.c; "nxdk.s" in the rules above */
+
+/* ---- dk_stream.c */
+uint32_t nxdk_stream_init(void);   /* 0 = ok; called by nxdk_create after nxdk_img_init */
+void nxdk_stream_shutdown(void);   /* called by nxdk_destroy while the device lives; the queue is idle */
+uint64_t nxdk_submit(uint64_t a);
+uint64_t nxdk_wait_frame(uint64_t a);
+const NxChkEnv* nxdk_chk_env(void);   /* the neutral view of this backend for nxgpu4_check.c (reference: gl4_check.c) */
+const NxDkMem* nxdk_mem(uint32_t id);   /* a live memory block, else NULL (dk_core.c) */
+void nxdk_op_end(const uint32_t* a, uint32_t argc);
+void nxdk_op_barrier(const uint32_t* a, uint32_t argc);
+void nxdk_op_marker(const uint32_t* a, uint32_t argc);
+void nxdk_op_image_update(const uint32_t* a, uint32_t argc);   /* through nxdk_image_upload */
+/* ---- dk_draw.c */
+void nxdk_op_define_state(const uint32_t* a, uint32_t argc);
+void nxdk_op_bind_state(const uint32_t* a, uint32_t argc);     /* nxdk_state + nxdk_dyn (dk_state.h), shaders, nxdk_vtx_bind_layout, nxdk_pass_srgb */
+void nxdk_op_bind_ubo(const uint32_t* a, uint32_t argc);
+void nxdk_op_bind_idx(const uint32_t* a, uint32_t argc);
+void nxdk_op_bind_textures(const uint32_t* a, uint32_t argc);  /* handle rule: "Descriptor sets" above */
+void nxdk_op_draw(const uint32_t* a, uint32_t argc);
+void nxdk_op_draw_indexed(const uint32_t* a, uint32_t argc);
+void nxdk_op_viewport(const uint32_t* a, uint32_t argc);
+void nxdk_op_scissor(const uint32_t* a, uint32_t argc);
+void nxdk_op_stencil_ref(const uint32_t* a, uint32_t argc);
+void nxdk_op_blend_const(const uint32_t* a, uint32_t argc);
+void nxdk_op_depth_bias(const uint32_t* a, uint32_t argc);
+void nxdk_draw_neutral(DkCmdBuf cmd);   /* known state for internal draws (scale, compose): no blend, no tests, all channels, cull none; forces the next BindState to re-apply */
+/* ---- dk_vtx.c */
+void nxdk_op_define_layout(const uint32_t* a, uint32_t argc);
+void nxdk_op_define_layout4(const uint32_t* a, uint32_t argc);
+void nxdk_op_bind_vtx(const uint32_t* a, uint32_t argc);
+void nxdk_op_bind_vtxn(const uint32_t* a, uint32_t argc);
+uint32_t nxdk_vtx_bind_layout(uint32_t layout);   /* records the attribute and buffer state of a defined layout; 0 = ok, 1 = nxdk_err'd */
+uint32_t nxdk_vtx_flush(void);                    /* before a draw: binds (and flushes, S5) the streams the bound layout reads; 0 = ok */
+/* ---- dk_pass.c */
+void nxdk_op_begin_pass(const uint32_t* a, uint32_t argc);
+void nxdk_op_begin_pass4(const uint32_t* a, uint32_t argc);
+void nxdk_op_end_pass(const uint32_t* a, uint32_t argc);
+void nxdk_op_clear(const uint32_t* a, uint32_t argc);
+void nxdk_pass_srgb(uint32_t on);                 /* rebinds the colour targets of the open pass with (on) or without their sRGB views; no-change calls record nothing */
+/* binds one subresource as the only colour target of `cmd` with a full viewport and scissor (internal draws: scale, compose, mip generation) */
+void nxdk_target_bind(DkCmdBuf cmd, const NxDkSub* dst);
+/* ---- dk_scale.c: point-filtered scaling by rule (source texel floor((d + 0.5) * sw / dw); reference gl4_scale.c), internal DKSH programs */
+uint32_t nxdk_scale_init(void);                   /* 0 = ok; called by nxdk_stream_init */
+void nxdk_scale_shutdown(void);
+void nxdk_scale_point(DkCmdBuf cmd, const NxDkSub* s, const NxDkSub* d, const uint16_t* ramp);   /* ramp: 3 x 256 u16 or NULL */
+/* ---- dk_present.c: the compose passes of PRESENT: writes the source rect of `src` into the destination rect of nxdk.front (gamma ramp: 3 x 256 u16 or
+ * NULL), then blends the cursor (cw x ch BGRA or NULL), all queued on nxdk.q ahead of the flip (rule P1: it consumes the memory it reads before it returns) */
 void nxdk_present_compose(const NxPresent* p, const NxDkImage* src, const uint16_t* gamma, const uint8_t* cursor);
+/* ---- dk_blit.c */
+void nxdk_op_blit(const uint32_t* a, uint32_t argc);
+void nxdk_op_gen_mips(const uint32_t* a, uint32_t argc);
+/* ---- dk_query.c: occlusion queries counted in slices (reference gl4_query.c: one counter interval per constant set of active queries) */
+void nxdk_op_query_begin(const uint32_t* a, uint32_t argc);
+void nxdk_op_query_end(const uint32_t* a, uint32_t argc);
+uint64_t nxdk_query_result(uint64_t a, uint64_t b, uint64_t c);
+void nxdk_query_submit_begin(void);   /* dk_stream.c calls these around the replay, collect after the wait */
+void nxdk_query_submit_end(void);
+void nxdk_query_collect(void);
+void nxdk_query_pause(void);          /* internal draws must not count */
+void nxdk_query_resume(void);
 
 #ifdef __cplusplus
 }

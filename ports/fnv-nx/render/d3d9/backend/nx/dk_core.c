@@ -51,6 +51,8 @@ uint64_t nxdk_mem_create(uint64_t a) {
     return 0;
 }
 
+const NxDkMem* nxdk_mem(uint32_t id) { return live(id); }
+
 uint64_t nxdk_mem_gpu_addr(uint64_t id) {
     const NxDkMem* m = live(id);
     if (!m) { nxdk_err("mem_gpu_addr: %llu is not a live block", (unsigned long long)id); return NXGPU_BAD_CALL; }
