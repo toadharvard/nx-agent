@@ -31,10 +31,10 @@ cat build/report.md
 ```
 
 The full run S2c and S5 drove by hand (J-0056, J-0057), as one command, on the dev machine (its toolchain, its
-seeds; the extern-text list and Ogg Vorbis are made by the pipeline):
+seeds; the extern-text list is made by the pipeline):
 
 ```sh
-nice -n 19 make EXT=$S/ext FNVNX_TC=$S/s5/tc/fnvnx-a64 DEVKITPRO=$S/s5/dkp VORBIS=$S/s5/vorbis/prefix \
+nice -n 19 make EXT=$S/ext FNVNX_TC=$S/s5/tc/fnvnx-a64 DEVKITPRO=$S/s5/dkp \
     LINK_SEED=$S/s2c/latest/out JOBS=2 BOOT=1 [PRISTINE_OBJS=$S/s11/obj/pristine]
 ```
 
@@ -55,7 +55,7 @@ the variables, `make clean` removes `build/`, and `make clean-<stage>` removes o
 | stage | output | what runs | needs |
 |---|---|---|---|
 | `fetch` | `build/fetch/pins.tsv` | Checks that `fnv_decomp`, `sse2neon` and `libnx` are at the commits `tools/fetch.sh` pins. It reads the checkouts' HEAD files and never runs git on them. Without `EXT`, it runs `tools/fetch.sh ext/` when a pin is missing. | - |
-| `toolchain` | `build/toolchain/{tools.tsv,toolchain.env}` (+ `cross/`, `prefix/`, `dkp/`, `vorbis/` when it makes them) | Provides what is not given, then validates fnvnx-a64 (version, the ILP32 multilib with libc/libsysbase/libm/libgcc/libstdc++/libsupc++), DEVKITPRO (libnx, switch.specs, packers) and the host tools each later stage uses, and chooses the game compiler. Provides: the AArch64 cross tools (`CROSS=auto`: the system's when they are the pinned Ubuntu build, else `toolchain/cross/setup.sh` unpacks the pinned packages, no root); fnvnx-a64 and the DEVKITPRO tree with the pinned libnx (`TC_DL=auto`: `toolchain/sources.sh` fetches the pinned tarballs and devkitPro checkouts, then `toolchain/gcc/build.sh` and `toolchain/devkita64/setup.sh`, ~1 h on 4 cores, rebuilt only when those scripts change); Ogg Vorbis (`VORBIS=auto`: `toolchain/vorbis/build.sh`). Given `FNVNX_TC` / `DEVKITPRO` / `CROSS_BIN` / a `VORBIS` prefix are used as they are and never modified. | fetch (soft) |
+| `toolchain` | `build/toolchain/{tools.tsv,toolchain.env}` (+ `cross/`, `prefix/`, `dkp/` when it makes them) | Provides what is not given, then validates fnvnx-a64 (version, the ILP32 multilib with libc/libsysbase/libm/libgcc/libstdc++/libsupc++), DEVKITPRO (libnx, switch.specs, packers) and the host tools each later stage uses, and chooses the game compiler. Provides: the AArch64 cross tools (`CROSS=auto`: the system's when they are the pinned Ubuntu build, else `toolchain/cross/setup.sh` unpacks the pinned packages, no root); fnvnx-a64 and the DEVKITPRO tree with the pinned libnx (`TC_DL=auto`: `toolchain/sources.sh` fetches the pinned tarballs and devkitPro checkouts, then `toolchain/gcc/build.sh` and `toolchain/devkita64/setup.sh`, ~1 h on 4 cores, rebuilt only when those scripts change). Given `FNVNX_TC` / `DEVKITPRO` / `CROSS_BIN` are used as they are and never modified. | fetch (soft) |
 | `prepare` | `build/prepare/{tree/,prepared_from.txt,prepared_from.json}` | `tools/prepare.py <decomp> build/prepare/staging`, then a sync into `tree/` that keeps unchanged files, mtimes included. The compile step then sees only real changes. Also writes `prepare_stats.tsv`, `changed.txt` (A/M/D) and the provenance record: the commit of ports/fnv-nx (first line of `prepared_from.txt`, the format of S2c's driver), the decomp commit, uncommitted changes to the prepare inputs. Reruns when the head or any prepare input changes (`tools/prepare.py`, `tools/rules/`, `patches/`, `shim/include/fnvnx_win32.h`, `render/native/drop_units.txt`). `PREPARED=<tree>` adopts a tree another run prepared (read only) with the provenance its `prepared_from.txt` states. | fetch |
 | `census` | `build/census/` | `tools/census.sh` (`-fsyntax-only` of every unit, or of the `UNITS` list) with the game compiler. `CENSUS=0` skips it. | prepare |
 | `compile` | `build/compile/{obj/,objects.tsv,failed.tsv}` | `tools/link/compile.sh` (its flag set: `-O2 -fPIC`, J-0034's MSVC semantics, `-Werror=return-type`) with `CXX="<game compiler> -MD"`, the `UNITS` list or every unit. Objects a restart left truncated are deleted first (S2c's objcheck); an object is deleted when a header in its `.o.d` changed, since compile.sh checks only the unit's own source. Units that fail are listed with their first error in `failed.tsv` and excluded from the link. If the compiler, `OPT`, compile.sh, its `FLAGS=(...)` array or the tree's path changes, every object is rebuilt (the flag text is in the cache key and in the report). | prepare |
@@ -152,7 +152,6 @@ made from pinned sources by the pipeline:
 | decomp, sse2neon, libnx checkouts | `tools/fetch.sh` (fetch stage, without `EXT`) | commits in `tools/fetch.sh` |
 | AArch64 cross tools (S2c's `s2c/xtc`: Ubuntu's `g++-13-aarch64-linux-gnu` unpacked by hand, the rest from the installed packages) | `toolchain/cross/setup.sh` (toolchain stage, `CROSS=auto` when the host's are not the pinned build) | `toolchain/cross/packages.tsv`: package, version, pool path, SHA-256 (archive.ubuntu.com, or a snapshot.ubuntu.com date) |
 | fnvnx-a64 + DEVKITPRO with libnx | `toolchain/sources.sh`, `toolchain/gcc/build.sh`, `toolchain/devkita64/setup.sh` (toolchain stage, `TC_DL=auto`) | tarball SHA-256s and devkitPro commits in `toolchain/sources.sh` |
-| Ogg Vorbis | `toolchain/vorbis/build.sh` (`VORBIS=auto`) | git tags and commits in the script |
 | the extern-text list (S4's `addr_ids.txt`) | `tools/pipeline/extern_text.py` (link stage, `EXTERN_TEXT=auto`) | the tree's `units.json`; byte-identical to S4's file for the f11/f12 tree and for the pristine decomp |
 | boot data image | S14's `loader/synth/synth_image.py` (boot stage, `BOOT_IMAGE=auto`) when `PRISTINE_OBJS` is given, else the all-zero image | the pristine decomp's `units.json` + S11's MSVC objects |
 
@@ -193,7 +192,7 @@ pipeline did before this round, and what it does now:
 | resolve 2 | always | only when `layouts.tsv` changed (missed new synthesized vtables) | always |
 | apply, check | `apply out fixed`, `check out fixed` | same | same |
 | summary | `summary.txt`: commit, WinMain units' status, `f3check.py`, `check_rebind.py`, `undefcat.py`; `s2c/latest` switched | report only | `build/link/summary.txt` (same first line), `check_rebind.py` metric; the report has the trial-link classes |
-| guest | `DEVKITPRO=s5/dkp D3D9=null toolchain/game/build.sh latest/out latest/fixed g4 vorbis/prefix`, `JOBS=3`, `GAME_NEW` default `runtime` | same script, `D3D9` from `NINE`, `GAME_NEW` from the environment | `GAME_NEW` explicit (default `runtime`); `dynbrk.py` and `pcrel_abs` metrics |
+| guest | `DEVKITPRO=s5/dkp D3D9=null toolchain/game/build.sh latest/out latest/fixed g4`, `JOBS=3`, `GAME_NEW` default `runtime` | same script, `D3D9` from `NINE`, `GAME_NEW` from the environment | `GAME_NEW` explicit (default `runtime`); `dynbrk.py` and `pcrel_abs` metrics |
 | boot | `emu_guest.py --skip-faulting-init --expect "fnvnx boot: calling WinMain"` (zero image and S14's synthesized exe), `timeout 3000`; `frontier.py` with S1's latest census | informational suite `emu-game` (no frontier, 1800 s) | `boot` stage (emulator, summary, frontier; `BOOT_IMAGE`, `BOOT_CENSUS`, `EMU_TIMEOUT=3000`) |
 | provenance | by hand: the summary names the commit; boots use links of the current head (J-0054) | none | enforced (above) |
 
@@ -282,7 +281,6 @@ fresh8 tree (`PREPARED`, prepared from `0c630cf`, the tree of f11/f12, hence `FO
 | `LINK_SEED` | | fnvlink out dir of an earlier run; its demangle cache, `layouts.tsv` and `vtables/` seed a new `build/link/out/`. |
 | `GUEST_LINK` | auto | `auto`: S5's `toolchain/game/build.sh` when present, else the adapter. `adapter` forces the adapter. Any other value is a script with the same CLI. |
 | `GAME_NEW` | runtime | toolchain/game/build.sh `GAME_NEW`: `runtime` (the game objects' global new/delete weakened, malloc stand-ins) or `game`. |
-| `VORBIS` | auto | ILP32 libogg/libvorbis for S5's guest link script: `auto` = built by the toolchain stage, `none` = without, or a prefix. |
 | `BOOT` | 0 | 1: the `boot` stage runs with `all` (it always runs when named: `make boot`). |
 | `BOOT_IMAGE` | auto | Data image for the emulated boot (`sdmc:/fnvnx/game/FalloutNV.exe`): `auto` = S14's synthesized image when `PRISTINE_OBJS` is given, else none; `none` = the all-zero image; or an exe file. |
 | `PRISTINE_OBJS` | | S11's MSVC 2008 objects of the pristine decomp (`u<index>.obj`) for the synthesized image. |

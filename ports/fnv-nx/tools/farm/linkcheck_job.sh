@@ -142,7 +142,7 @@ fi
 
 # the toolchain: full_job.sh's directory (restored from the artifacts repository on a fresh machine)
 TCID=$(cat "$P"/toolchain/sources.sh "$P"/toolchain/gcc/build.sh "$P"/toolchain/devkita64/* "$P"/toolchain/cross/* \
-	"$P"/toolchain/vorbis/build.sh "$P"/tools/fetch.sh | sha256sum | cut -c1-12)
+	"$P"/tools/fetch.sh | sha256sum | cut -c1-12)
 TCB=$FARM_HOME/toolchain-$TCID; mkdir -p "$TCB"
 if [ ! -f "$TCB/toolchain/stage.json" ]; then hostcache fetch toolchain "$TCID" "$TCB" || true; fi
 make -C "$P" fetch toolchain BUILD_DIR="$TCB" EXT="$EXT" JOBS="$JOBS" TESTS=none > "$TCB/make.log" 2>&1 || true
@@ -231,7 +231,6 @@ step base
 ARGS=(FNVNX_TC="$(art prefix)" DEVKITPRO="$(art devkitpro)" LINK_OVERRIDES="${LINK_OVERRIDES:-render}"
 	PREPARED="$BT" FORCE_STALE=1)
 XCB=$(usable_cross "$(art cross_bin)"); [ -n "$XCB" ] && ARGS+=(CROSS_BIN="$XCB")
-if [ -n "$(art vorbis)" ]; then ARGS+=(VORBIS="$(art vorbis)"); else ARGS+=(VORBIS=none); fi
 [ -n "${RENDER_LIB:-}" ] && ARGS+=(RENDER_LIB="$RENDER_LIB")
 job_pristine
 [ -n "$PR" ] && ARGS+=(PRISTINE_OBJS="$PR" MSVC_CODE="$PR")

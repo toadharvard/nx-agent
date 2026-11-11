@@ -248,7 +248,7 @@ application memory the heap region cannot use.
 ## 7. The game with Nine (`game/build.sh`)
 
 ```sh
-SSE2NEON=... DEVKITPRO=... NINE=<build.sh work dir> [VORBIS=...] [HOST_HEAP_MIB=512] [HEAPLOG_S=60] \
+SSE2NEON=... DEVKITPRO=... NINE=<build.sh work dir> [HOST_HEAP_MIB=512] [HEAPLOG_S=60] \
     render/nine/game/build.sh <S2 out> <S2 fixed objects> <out> [program id]   # GUEST_ONLY=1: game guest only
 <gate>/gate_launcher -I render/nine/test/gate.py --game [--heaplog] --guest <out>/game/guest.nso \
     --elf <out>/game/fnvnx.elf --lib <gate>/libnine_gate.so --out <dir>        # exit 0 = PASS

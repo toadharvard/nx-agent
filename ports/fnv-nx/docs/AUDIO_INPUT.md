@@ -103,15 +103,8 @@ they are checked by a probe TU with the census flags (`-mabi=ilp32 -include fnvn
 * `backend.{h,cpp}` - backends `manual` (tests), `null` and `wav:PATH` (host, real-time paced thread);
   `backend_audren.c` - Horizon: audren + audrv, one PCM16 stereo voice, 4 x 512-frame wave buffers (~43 ms).
   Selection `fnvnx_audio_configure()` / `$FNVNX_AUDIO`; started by the first `DirectSoundCreate8`.
-* `vorbisfile.cpp` - `ov_open_callbacks, ov_clear, ov_info, ov_seekable, ov_pcm_total, ov_read` (+ time/pcm seek
-  and tell): the engine's 0x2D0-byte block stores a magic + pointer to a heap `OggVorbis_File` ("boxed"), so the
-  build's libvorbisfile layout does not matter. Real decoding needs `-DFNVNX_HAVE_VORBIS` and the libraries below;
-  without them opens fail with `OV_ENOTVORBIS` (the engine then plays no music).
-
-**External dependency (not fetched, not built here):** libogg **1.3.5** and libvorbis **1.3.7** (BSD-3-Clause,
-xiph.org release tarballs; record their SHA-256 when the build step fetches them), built as static libraries for
-the game's ABI (AArch64, the same data model as `vorbisfile.cpp`), `-DFNVNX_HAVE_VORBIS`, include path
-`<vorbis/vorbisfile.h>`. Owner of the fetch/build step: S5 (toolchain).
+* vorbisfile: not provided by the platform. `libvorbisfile.dll` and `libvorbis.dll` are game PE modules, lifted by L3a
+  (platform/manifest/ENV_TRUTH.md row M1); the platform defines none of their names (platform/win32/exports.cpp).
 
 ### Input (`platform/input/`)
 
@@ -155,7 +148,7 @@ syntax check of all S7 sources for AArch64 ILP32 (+ libnx files).
 * S4: `fnvnx_win32_lookup_export` does not consult modules registered with `fnvnx_register_module`; either it
   falls back to them or the loader (S3) also asks `fnvnx_audio_input_lookup_export`. `imports.tsv` lacks slot
   `0x00fdf438` (vorbisfile `ov_open_callbacks`); confirm all slot names from the player's exe import directory.
-* S5: fetch/build libogg 1.3.5 + libvorbis 1.3.7 (pinned above) and define `FNVNX_HAVE_VORBIS`; build the
+* S5: build the
   Horizon files (`backend_audren.c`, `input_horizon.cpp`) on the LP64 side and decide how ILP32 game code links
   with them.
 * S6: Bink audio (`BinkOpenDirectSound` with our IDirectSound8).

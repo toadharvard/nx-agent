@@ -30,7 +30,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 SDLAYOUT = os.path.join(ROOT, "toolchain", "include", "fnvnx", "sdlayout.h")
 SHIPPED = ["toolchain/nro", "toolchain/host", "toolchain/guest", "toolchain/game", "toolchain/include", "platform",
-           "startup", "loader/src", "loader/host", "loader/include"]
+           "startup"]
 sys.path.insert(0, HERE)
 from check_nro import Checks  # noqa: E402
 

@@ -10,9 +10,9 @@ P=$(cd "$(dirname "$0")/../.." && pwd); T=${KEEP_T:-$(mktemp -d)}; [ -n "${KEEP_
 fails=0; ok() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 # a stand-in source tree: the job's own scripts, a Makefile that writes stage records, a farm_boot.sh
 S=$T/src; Q=$S/ports/fnv-nx
-mkdir -p "$Q/tools/farm" "$Q/tests/s5" "$Q/toolchain/gcc" "$Q/toolchain/devkita64" "$Q/toolchain/cross" "$Q/toolchain/vorbis"
+mkdir -p "$Q/tools/farm" "$Q/tests/s5" "$Q/toolchain/gcc" "$Q/toolchain/devkita64" "$Q/toolchain/cross"
 for f in bootloop_job.sh lib_job.sh recon.sh linkcache.sh ratchet.py boot_determinism.py fetch_tree.sh tree_hash.sh; do cp "$P/tools/farm/$f" "$Q/tools/farm/"; done
-for f in toolchain/sources.sh toolchain/gcc/build.sh toolchain/devkita64/x toolchain/cross/x toolchain/vorbis/build.sh; do echo x > "$Q/$f"; done
+for f in toolchain/sources.sh toolchain/gcc/build.sh toolchain/devkita64/x toolchain/cross/x; do echo x > "$Q/$f"; done
 printf '# pins\n' > "$Q/tools/fetch.sh"
 cat > "$Q/Makefile" <<'MK'
 # stand-in: records the goals and writes ok records for the stages of `guest`; FAKE_FAIL=<stage> fails that one

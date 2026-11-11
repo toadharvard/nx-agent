@@ -37,7 +37,6 @@
 #   FARM_PIN        1: pack the farm's guest pinned to its link base (elf2nso --pin; default relocatable, as the
 #                   farm boots it)
 #   PY              the Python with unicorn (default python3)
-#   VORBIS          the libvorbis prefix for build.sh; JOBS, SSE2NEON, DEVKITPRO passed to build.sh
 #   FARM_NATIVE_RENDER  1: build those inputs here (cached in $FARM_HOME/native_render-<key>; needs root for the
 #                   cross compiler on first use), or a dir with tests/s5/native_render_inject.sh's outputs (nxrender_inject.o, libnxgl.so): every
 #                   boot runs on the native renderer's engine path (tests/s5/native_render.py --native-render --gpu,
@@ -148,7 +147,7 @@ else
   done
   log "guest link (build.sh, D3D9=null)"
   GDIR=$OUT/guest
-  if ! D3D9=null nice "$ROOT/toolchain/game/build.sh" "$LINK/out" "$LINK/fixed" "$GDIR" ${VORBIS:+"$VORBIS"} \
+  if ! D3D9=null nice "$ROOT/toolchain/game/build.sh" "$LINK/out" "$LINK/fixed" "$GDIR" \
       > "$OUT/build.log" 2>&1; then
     tail -20 "$OUT/build.log" >&2
     echo "farm_boot: the guest does not build (build.log)" >&2

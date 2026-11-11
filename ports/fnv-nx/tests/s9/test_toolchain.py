@@ -4,9 +4,9 @@ the build scripts replaced by stand-ins that only record their command and leave
 
     python3 -I tests/s9/test_toolchain.py
 
-Checks: with nothing given, the stage fetches the pinned sources, builds fnvnx-a64, then the DEVKITPRO tree, then
-Ogg Vorbis, in that order, each once (a second run reuses them); a changed build script rebuilds; TC_DL=none never
-builds; FNVNX_TC / DEVKITPRO / VORBIS given are used as they are; CROSS=pinned unpacks the cross packages and
+Checks: with nothing given, the stage fetches the pinned sources, builds fnvnx-a64, then the DEVKITPRO tree,
+in that order, each once (a second run reuses them); a changed build script rebuilds; TC_DL=none never
+builds; FNVNX_TC / DEVKITPRO given are used as they are; CROSS=pinned unpacks the cross packages and
 CROSS=system leaves PATH alone; the pinned-version check accepts only the packages.tsv version.
 """
 import os
@@ -38,8 +38,6 @@ class FakeBuild(build.Build):
             os.makedirs(os.path.join(argv[4], 'bin'))
         elif name == 'toolchain/devkita64/setup.sh':
             os.makedirs(os.path.join(argv[5], 'libnx', 'lib'))
-        elif name == 'toolchain/vorbis/build.sh':
-            os.makedirs(os.path.join(argv[3], 'lib'), exist_ok=True)
         elif name == 'toolchain/cross/setup.sh':
             os.makedirs(os.path.join(argv[2], 'bin'), exist_ok=True)
         return 0
@@ -67,18 +65,16 @@ class Toolchain(unittest.TestCase):
         r = build.Record(stage='toolchain', log=os.path.join(b.sdir('toolchain'), 'stage.log'))
         d = b.sdir('toolchain')
         prefix, dkp = build.provide_fnvnx_a64(b, r, d)
-        vorbis = build.provide_vorbis(b, r, d, dkp)
         b.plog.close()
-        return prefix, dkp, vorbis
+        return prefix, dkp
 
     def test_fresh_machine_builds_once(self):
         b = self.make()
-        prefix, dkp, vorbis = self.provide(b)
-        self.assertEqual(b.calls, ['toolchain/sources.sh', 'toolchain/gcc/build.sh', 'toolchain/devkita64/setup.sh',
-                                   'toolchain/vorbis/build.sh'])
-        self.assertTrue(prefix.endswith('toolchain/prefix') and dkp.endswith('toolchain/dkp') and vorbis)
+        prefix, dkp = self.provide(b)
+        self.assertEqual(b.calls, ['toolchain/sources.sh', 'toolchain/gcc/build.sh', 'toolchain/devkita64/setup.sh'])
+        self.assertTrue(prefix.endswith('toolchain/prefix') and dkp.endswith('toolchain/dkp'))
         b = self.make()
-        self.assertEqual(self.provide(b), (prefix, dkp, vorbis))
+        self.assertEqual(self.provide(b), (prefix, dkp))
         self.assertEqual(b.calls, [])
 
     def test_script_change_rebuilds(self):
@@ -90,20 +86,19 @@ class Toolchain(unittest.TestCase):
             self.provide(b)
         finally:
             build.build_id = saved
-        self.assertEqual(b.calls, ['toolchain/sources.sh', 'toolchain/gcc/build.sh', 'toolchain/devkita64/setup.sh',
-                                   'toolchain/vorbis/build.sh'])
+        self.assertEqual(b.calls, ['toolchain/sources.sh', 'toolchain/gcc/build.sh', 'toolchain/devkita64/setup.sh'])
 
     def test_never_build(self):
-        b = self.make(TC_DL='none', VORBIS='none')
-        self.assertEqual([bool(x) for x in self.provide(b)], [False, False, False])
+        b = self.make(TC_DL='none')
+        self.assertEqual([bool(x) for x in self.provide(b)], [False, False])
         self.assertEqual(b.calls, [])
 
     def test_given_ones_used(self):
         tc, dkp = os.path.join(self.tmp, 'tc'), os.path.join(self.tmp, 'dkp')
         os.makedirs(tc)
         os.makedirs(dkp)
-        b = self.make(FNVNX_TC=tc, DEVKITPRO=dkp, VORBIS=os.path.join(self.tmp, 'v'))
-        self.assertEqual(self.provide(b), (tc, dkp, os.path.join(self.tmp, 'v')))
+        b = self.make(FNVNX_TC=tc, DEVKITPRO=dkp)
+        self.assertEqual(self.provide(b), (tc, dkp))
         self.assertEqual(b.calls, [])
 
     def test_cross_modes(self):

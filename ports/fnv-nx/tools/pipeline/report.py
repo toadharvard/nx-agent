@@ -59,7 +59,7 @@ def snapshot(b, stages):
                 'NINE', 'PROGRAM_ID', 'GAME_CXX', 'CROSS_BIN', 'OPT', 'JOBS', 'EXT', 'FNVNX_TC', 'DEVKITPRO',
                 'GUEST_LINK', 'GAME_NEW', 'CENSUS', 'TESTS', 'OVERRIDE', 'EXTERN_TEXT', 'MSVC_OBJS', 'UNITS_RENAMES',
                 'LINK_SEED', 'UNITS', 'PREPARED', 'FORCE_STALE', 'BOOT', 'BOOT_IMAGE', 'BOOT_CENSUS', 'CROSS', 'TC_DL',
-                'VORBIS', 'PRISTINE_OBJS')},
+                'PRISTINE_OBJS')},
             'head': b.head, 'prepared_from': b.rec('prepare').get('prepared_from'),
             'stages': {}, 'metrics': {}, 'tests': {}}
     for s in stages:
@@ -147,7 +147,7 @@ def render(b, stages, snap, prev):
                  c['NINE'], c['PROGRAM_ID'], c['GAME_CXX'], c['OPT'], c['JOBS'], c['GUEST_LINK'], c['GAME_NEW'],
                  c['EXT'] or 'ext/ (fetch.sh)', R('toolchain').get('artifacts', {}).get('prefix') or '-',
                  R('toolchain').get('artifacts', {}).get('devkitpro') or '-',
-                 ''.join('; %s `%s`' % (k, c[k]) for k in ('CROSS', 'CROSS_BIN', 'TC_DL', 'VORBIS', 'UNITS', 'PREPARED',
+                 ''.join('; %s `%s`' % (k, c[k]) for k in ('CROSS', 'CROSS_BIN', 'TC_DL', 'UNITS', 'PREPARED',
                                                            'EXTERN_TEXT', 'MSVC_OBJS', 'UNITS_RENAMES', 'LINK_SEED',
                                                            'OVERRIDE', 'BOOT_IMAGE', 'PRISTINE_OBJS') if c.get(k))
                  + ('; **FORCE_STALE=1**' if c.get('FORCE_STALE') == '1' else '')))
@@ -202,9 +202,8 @@ def render(b, stages, snap, prev):
         L.append('')
     t = R('toolchain')
     if t.get('metrics'):
-        L.append('Toolchain: %s; game units compiled with %s (cross tools: %s); Ogg Vorbis %s.%s' % (
+        L.append('Toolchain: %s; game units compiled with %s (cross tools: %s).%s' % (
             t['metrics'].get('tc_gcc'), t['metrics'].get('game_cxx'), t.get('cross', '-'),
-            rel(t.get('artifacts', {}).get('vorbis')) if t.get('artifacts', {}).get('vorbis') else 'none',
             (' Notes: ' + ' '.join(t.get('notes', []))) if t.get('notes') else ''))
         L.append('')
     # ---- census / compile

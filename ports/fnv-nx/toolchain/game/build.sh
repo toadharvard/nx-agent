@@ -2,7 +2,7 @@
 # Full ILP32 guest link of the game: S2's fixed objects + aliases.ld + bridges + addrmap, platform/ (win32, crt,
 # audio, input) on the guest OS backend, S3's loader, the null D3D9 device, the guest boot code.
 #
-#   DEVKITPRO=... toolchain/game/build.sh <S2 out dir> <S2 fixed objects dir> <out dir> [vorbis prefix]
+#   DEVKITPRO=... toolchain/game/build.sh <S2 out dir> <S2 fixed objects dir> <out dir>
 #
 # Output: <out>/fnvnx.elf (+ .map), <out>/guest.nso, <out>/undefined.txt (unresolved symbols, one per line,
 # demangled in undefined_demangled.txt), and the host exefs.nsp built by tests/s5/hello/build.sh's recipe.
@@ -14,7 +14,7 @@
 # (xc.c, onexit.c) and the generated initializer table (mkxctab.py -> xctab.c) are linked as objects.
 set -euo pipefail
 : "${DEVKITPRO:?set DEVKITPRO}"
-S2=$(realpath "$1"); FIXED=$(realpath "$2"); OUT=$(mkdir -p "$3" && realpath "$3"); VORBIS=${4:-}
+S2=$(realpath "$1"); FIXED=$(realpath "$2"); OUT=$(mkdir -p "$3" && realpath "$3"); 
 HERE=$(cd "$(dirname "$0")" && pwd)
 export FNVNX_TOOLCHAIN=$(cd "$HERE/.." && pwd)
 TC=$FNVNX_TOOLCHAIN; ROOT=$(cd "$TC/.." && pwd); P=$ROOT/platform
@@ -31,8 +31,6 @@ case "${GUEST:-pie}" in
 esac
 COMMON="$ARCH -O2 -g -ffunction-sections -fdata-sections -frounding-math -fshort-wchar -w"
 PINC="-I$P/include -iquote $ROOT/shim/include -I$ROOT/shim/include -I$P/crt -I$TC/include -I$ROOT/loader/include -I$ROOT/startup/guest -I$MINIMP3"   # minimp3: platform/audio/dshow.cpp (tools/fetch.sh)
-VFLAGS=""
-if [ -n "$VORBIS" ]; then VFLAGS="-DFNVNX_HAVE_VORBIS -I$VORBIS/include"; fi
 rm -rf "$OUT/obj"; mkdir -p "$OUT/obj"
 
 "$TC/guest/build.sh" "$OUT/rt" >/dev/null
@@ -81,7 +79,6 @@ esac
 case " ${EXTRA_OBJS:-} " in
 	*libnxrender.a\ *) SRCS+=("$TC/game/native_device.cpp") ;;
 esac
-SRCS+=("$ROOT"/loader/src/*.c)
 # S10 startup: initializer runner and the MSVC onexit table, plus the generated table (as objects: xc.c
 # references the table weakly, an archive member would not be pulled)
 # XCGEN_EXE=<the owner's FalloutNV.exe>: natives for the exe initializers the decomp lacks (startup/tools/mkxcgen.py,
@@ -105,7 +102,6 @@ for f in "${SRCS[@]}"; do
 	extra=""
 	case "$f" in
 		*/audio/backend.cpp) extra="-D__SWITCH__" ;;          # selects the "audren" backend (guest glue)
-		*/loader/src/*) extra="-I$ROOT/loader/include -I$ROOT/loader/src" ;;
 		*/game/boot.cpp) extra="-I$ROOT/loader/include" ;;
 		*/game/native_device.cpp) extra="-I$ROOT/render/native/include -I$ROOT/render/native/front -I$ROOT/render/native/n1 -fno-exceptions -fno-rtti -fno-threadsafe-statics" ;;
 		*/game/null_d3d9.cpp) extra="-USTDMETHODCALLTYPE -include $ROOT/shim/include/fnvnx_compat.h -I$SSE2NEON -fms-extensions -fpermissive" ;;
@@ -118,7 +114,6 @@ done | xargs -P "$JOBS" -L 1 bash -c 'compile "$0" "$1" ${@:2}'
 rm -rf "$OUT/obj_new"
 python3 -I "$HERE/objlist.py" "$FIXED" "$OUT" "${GAME_NEW:-runtime}" aarch64-none-elf-nm aarch64-none-elf-objcopy
 LIBS="-L$OUT/rt"
-[ -n "$VORBIS" ] && LIBS="$LIBS -L$VORBIS/lib -lvorbisfile -lvorbis -logg"
 link() {   # extra objects...
 	aarch64-none-elf-g++ $ARCH -specs="$SPECS" $BASEFLAG -Wl,-T,"$S2/aliases.ld" "$OUT/rt/crt0.o" \
 		@"$OUT/game_objects.list" "$OUT"/obj/*.o ${EXTRA_OBJS:-} "$@" $LIBS \
