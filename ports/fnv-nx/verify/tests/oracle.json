@@ -1,0 +1,540 @@
+{
+ "format": "fnvnx-oracle/1",
+ "tests": {
+  "test_a64access.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/a64access.cc",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/a64access.cc",
+     "section": "// a64access: per-word register read/write sets of AArch64 code, derived from LLVM MC (MCInstrDesc)."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/a64access.cc"
+   ]
+  },
+  "test_admit.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/gate_admit.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/gate_admit.py",
+     "section": "Gate \"admit\" (fnvnx-gate/1): nothing is in the trunk without the gates that close its classes of failure."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_admit.py"
+   ]
+  },
+  "test_boot.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/boot.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/boot.py",
+     "section": "The boot stage CLI: runs the guest ELF under bootmachine.Machine, watches the milestone table, counts instructions."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/boot.py"
+   ]
+  },
+  "test_boot_job.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/farm/boot_job.sh",
+     "kind": "spec",
+     "path": "ports/fnv-nx/farm/boot_job.sh",
+     "section": "# boot_job.sh - L4 farm job: run the boot stage (verify/boot.py) on one real guest ELF and publish the result."
+    },
+    {
+     "document": "ports/fnv-nx/verify/bootinputs.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/bootinputs.py",
+     "section": "Converters from the L1 contract branch files (l1-contract/elf/<id>) to what boot.py takes. Pure, stdlib only. Every"
+    },
+    {
+     "document": "ports/fnv-nx/verify/boot.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/boot.py",
+     "section": "The boot stage CLI: runs the guest ELF under bootmachine.Machine, watches the milestone table, counts instructions."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/farm/boot_job.sh",
+    "ports/fnv-nx/verify/bootinputs.py",
+    "ports/fnv-nx/verify/boot.py"
+   ]
+  },
+  "test_bootgpu.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/bootgpu.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/bootgpu.py",
+     "section": "The renderer of the boot stage: ext module 10 (the guest's GPU calls) forwarded to the renderer's host library libnxgl4.so"
+    },
+    {
+     "document": "ports/fnv-nx/verify/boot.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/boot.py",
+     "section": "The boot stage CLI: runs the guest ELF under bootmachine.Machine, watches the milestone table, counts instructions."
+    },
+    {
+     "document": "ports/fnv-nx/verify/boothost.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/boothost.py",
+     "section": "The host services of the boot stage: the 50 h_<slot> methods of the FnvnxHostApi v3 table. Policy (address space, scheduling, ext modules) lives in bootmachine.Machine; these"
+    },
+    {
+     "document": "ports/fnv-nx/verify/bootmachine.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/bootmachine.py",
+     "section": "The machine of the emulator boot stage: runs the guest ELF (elf32-littleaarch64 ILP32 PIE, crt0 \"FNXG\", entry(api)"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/bootgpu.py",
+    "ports/fnv-nx/verify/boot.py",
+    "ports/fnv-nx/verify/boothost.py",
+    "ports/fnv-nx/verify/bootmachine.py"
+   ]
+  },
+  "test_bootinputs.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/bootinputs.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/bootinputs.py",
+     "section": "Converters from the L1 contract branch files (l1-contract/elf/<id>) to what boot.py takes. Pure, stdlib only. Every"
+    },
+    {
+     "document": "ports/fnv-nx/verify/boot.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/boot.py",
+     "section": "The boot stage CLI: runs the guest ELF under bootmachine.Machine, watches the milestone table, counts instructions."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/bootinputs.py",
+    "ports/fnv-nx/verify/boot.py"
+   ]
+  },
+  "test_bootlayout.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/bootlayout.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/bootlayout.py",
+     "section": "Address-space plan of the emulator boot stage for the guest ELF (elf32-littleaarch64, ILP32, PIE)."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/bootlayout.py"
+   ]
+  },
+  "test_bootmachine.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/bootmachine.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/bootmachine.py",
+     "section": "The machine of the emulator boot stage: runs the guest ELF (elf32-littleaarch64 ILP32 PIE, crt0 \"FNXG\", entry(api)"
+    },
+    {
+     "document": "ports/fnv-nx/verify/boothost.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/boothost.py",
+     "section": "The host services of the boot stage: the 50 h_<slot> methods of the FnvnxHostApi v3 table. Policy (address space, scheduling, ext modules) lives in bootmachine.Machine; these"
+    },
+    {
+     "document": "ports/fnv-nx/verify/bootlayout.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/bootlayout.py",
+     "section": "Address-space plan of the emulator boot stage for the guest ELF (elf32-littleaarch64, ILP32, PIE)."
+    },
+    {
+     "kind": "contract",
+     "path": "ports/fnv-nx/verify/tests/guest/hostapi.h"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/bootmachine.py",
+    "ports/fnv-nx/verify/boothost.py",
+    "ports/fnv-nx/verify/bootlayout.py"
+   ]
+  },
+  "test_bootmiles.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/bootmiles.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/bootmiles.py",
+     "section": "Boot milestones on exe addresses and exact symbols: table -> watch points, and progress as events arrive."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/bootmiles.py"
+   ]
+  },
+  "test_bootpath.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/bootpath.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/bootpath.py",
+     "section": "bootpath.py - the guest-path rule of the boot stage: where a guest SD path lands on the host."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/bootpath.py"
+   ]
+  },
+  "test_bootsock.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/bootsock.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/bootsock.py",
+     "section": "The socket services (module 11, fn 16..33, hostapi.h + sockwire.h) of the boot stage machine, for a host that has NO network interface."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/bootsock.py"
+   ]
+  },
+  "test_cas.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/cas.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/cas.py",
+     "section": "Content-addressed store and tree manifests (base of the hermetic build sandbox, rule R12)."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/cas.py"
+   ]
+  },
+  "test_coffnorm.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/coffnorm.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/coffnorm.py",
+     "section": "coffnorm: zero the time-dependent fields of a COFF object or COFF/ar archive. stdlib only; run as `python3 -I`."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/coffnorm.py"
+   ]
+  },
+  "test_envcheck.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/envcheck.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/envcheck.py",
+     "section": "envcheck: the declared, reproducible environment of the L1 verdict (verify/env.json, \"fnvnx-env/1\"). Run as `python3 -I`."
+    },
+    {
+     "document": "ports/fnv-nx/farm/setup_verdict_env.sh",
+     "kind": "spec",
+     "path": "ports/fnv-nx/farm/setup_verdict_env.sh",
+     "section": "# setup_verdict_env.sh - bring a fresh container of the base image (Ubuntu 24.04, root) to the environment DECLARED in"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/envcheck.py",
+    "ports/fnv-nx/farm/setup_verdict_env.sh",
+    "ports/fnv-nx/verify/env.json"
+   ]
+  },
+  "test_fpbound.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/fpbound.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/fpbound.py",
+     "section": "fpbound: rule V-FP, derived floating-point comparison bounds (stdlib only, exact Fractions)."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/fpbound.py"
+   ]
+  },
+  "test_gates.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/gate_pure.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/gate_pure.py",
+     "section": "Gate \"pure\" (fnvnx-gate/1): every Python file of the stage-tool directories is accepted by puregate."
+    },
+    {
+     "document": "ports/fnv-nx/verify/gate_tests.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/gate_tests.py",
+     "section": "Gate \"selftests\" (fnvnx-gate/1): every test file of the given directories passes."
+    },
+    {
+     "document": "ports/fnv-nx/verify/l1.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/l1.py",
+     "section": "L1: the one command a merger runs. Run as `python3 -I l1.py CMD ...`. Exit codes: 0 green/merged, 2 red/blocked, 3 conflict, 4 blocked: env, 1 error."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_pure.py",
+    "ports/fnv-nx/verify/gate_tests.py",
+    "ports/fnv-nx/verify/gates.json",
+    "ports/fnv-nx/verify/l1.py"
+   ]
+  },
+  "test_graph.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/graph.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/graph.py",
+     "section": "graph: the incremental build. A build is a DAG of hermetic sandbox stages (sandbox.py, \"fnvnx-stage/1\"); a stage's key"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/graph.py"
+   ]
+  },
+  "test_icount.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/icount.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/icount.py",
+     "section": "Deterministic executed-instruction counter for a Unicorn AArch64 guest (the owner's perf metric)."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/icount.py"
+   ]
+  },
+  "test_l1graph.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/l1graph.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/l1graph.py",
+     "section": "l1graph: the L1 CONTRACT stages and gates as one \"fnvnx-graph/1\" graph (graph.py), and the merge verdict read from its report."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/l1graph.py"
+   ]
+  },
+  "test_linkstrict.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/gate_linkstrict.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/gate_linkstrict.py",
+     "section": "Gate \"linkstrict\" (fnvnx-gate/1, class 3 of VERDICT.md): no symbol is unresolved or substitutable. Decides on symbol tables only."
+    },
+    {
+     "document": "ports/fnv-nx/verify/verdict.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/verdict.py",
+     "section": "L4 verdict: gate certificates, merge gate, build/verification separation, rule-defect queue. stdlib only."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_linkstrict.py",
+    "ports/fnv-nx/verify/verdict.py"
+   ]
+  },
+  "test_objstub.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/objstub.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/objstub.py",
+     "section": "objstub: decide on MACHINE CODE whether built AArch64 objects contain (T) a trap/abort path or (V) a vacuous function."
+    },
+    {
+     "document": "ports/fnv-nx/verify/objstub_plugin.cc",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/objstub_plugin.cc",
+     "section": "// GCC plugin for objstub.py `terminators`: prints the assembler name of every FUNCTION_DECL the compiler itself"
+    },
+    {
+     "document": "ports/fnv-nx/verify/gate_objstub.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/gate_objstub.py",
+     "section": "Gate \"objstub\" (fnvnx-gate/1, classes 1 and 2 of VERDICT.md): no built function holds a trap/abort path or is vacuous (rules and proofs: objstub.py)."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/objstub.py",
+    "ports/fnv-nx/verify/objstub_plugin.cc",
+    "ports/fnv-nx/verify/gate_objstub.py"
+   ]
+  },
+  "test_opentrace.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/opentrace.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/opentrace.py",
+     "section": "opentrace: prove a build stage is hermetic by checking every file read under strace."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/opentrace.py"
+   ]
+  },
+  "test_oracle.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/gate_oracle.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/gate_oracle.py",
+     "section": "Gate \"oracle\" (fnvnx-gate/1): every test names where its expected values come from, and that source is not the"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_oracle.py"
+   ]
+  },
+  "test_puregate.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/puregate.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/puregate.py",
+     "section": "puregate: DEFAULT-DENY static gate for rule R12-T (a build stage's output is a function of its declared inputs)."
+    },
+    {
+     "document": "ports/fnv-nx/verify/puregate_policy.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/puregate_policy.py",
+     "section": "puregate policy tables: DATA ONLY (the rules that read them are in puregate.py, which documents the assumptions)."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/puregate.py",
+    "ports/fnv-nx/verify/puregate_policy.py"
+   ]
+  },
+  "test_recipe.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/recipe.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/recipe.py",
+     "section": "recipe: build a product root from its recipe `build.json` (\"fnvnx-recipe/1\", contract in RECIPE.md) on the stage machinery:"
+    },
+    {
+     "document": "ports/fnv-nx/verify/gate_build.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/gate_build.py",
+     "section": "Gate \"build\" (fnvnx-gate/1): every product root's recipe (build.json, see RECIPE.md) builds, all in the sandbox."
+    },
+    {
+     "document": "ports/fnv-nx/verify/unitstage.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/unitstage.py",
+     "section": "unitstage (level L0 of the fast loop): one C++ translation unit as two hermetic stages (sandbox.py), so an object is never"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/verify/gate_build.py",
+    "ports/fnv-nx/verify/unitstage.py"
+   ]
+  },
+  "test_runtime.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/runtime.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/runtime.py",
+     "section": "runtime: a python interpreter and everything it loads, as declared sandbox inputs (rule R12), plus stage documents running a"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/runtime.py"
+   ]
+  },
+  "test_sandbox.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/sandbox.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/sandbox.py",
+     "section": "Hermetic build sandbox (rule R12 BUILD-PURE): a stage sees ONLY its declared inputs, so its outputs are a"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/sandbox.py"
+   ]
+  },
+  "test_sdcheck.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/sdcheck.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/sdcheck.py",
+     "section": "sdcheck.py - rule: the SD tree equals the reference manifest."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/sdcheck.py"
+   ]
+  },
+  "test_toolflags.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/toolflags.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/toolflags.py",
+     "section": "toolflags: gate for rule R12-T class 2 (external tools): a stage whose command is a compiler/assembler/linker/archiver/"
+    },
+    {
+     "document": "ports/fnv-nx/verify/toolflags_policy.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/toolflags_policy.py",
+     "section": "toolflags policy table (data only): key -> (kind, requirement, citation). The reviewable statement of assumption A-env."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/toolflags.py",
+    "ports/fnv-nx/verify/toolflags_policy.py"
+   ]
+  },
+  "test_unitstage.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/unitstage.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/unitstage.py",
+     "section": "unitstage (level L0 of the fast loop): one C++ translation unit as two hermetic stages (sandbox.py), so an object is never"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/unitstage.py"
+   ]
+  },
+  "test_verdict.py": {
+   "references": [
+    {
+     "document": "ports/fnv-nx/verify/verdict.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/verdict.py",
+     "section": "L4 verdict: gate certificates, merge gate, build/verification separation, rule-defect queue. stdlib only."
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/verdict.py"
+   ]
+  }
+ }
+}
