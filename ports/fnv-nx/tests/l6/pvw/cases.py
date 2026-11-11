@@ -67,6 +67,17 @@ def gen_a(seed):
             data += bytes(8); streams[st] = dict(stride=stride, offset=len(data) - n * stride - 8, data=bytes(data), cfvf=0)
         c = base_case(r, decl=fixed, streams=streams, start=r.randint(0, 2), count=r.randint(1, 3), dstidx=r.randint(0, 2), dstfvf=r.choice([XYZ | D | S, RHW | D | tex_fvf([2, 3]), XYZ | N | D | tex_fvf([4, 1])]), vp=r.choice(VPS), proj=persp(1.0, 1.3, 1.0, 50.0), view=trans(0, 0, 2))
         c["rs"] = rand_rs(r); c["material"] = rand_material(r); c["lights"] = pick_lights(r); out.append(finalize(c, r))
+    # 7. duplicate usages in one declaration (POSITION, NORMAL, COLOR0, TEXCOORD0 twice): the later element of a usage replaces the earlier one
+    for rep in range(16):
+        el = [(0, 0, 2, 0, 0), (0, 12, 2, 3, 0), (0, 24, 4, 10, 0), (0, 28, 1, 5, 0), (0, 36, 2, 0, 0), (0, 48, 2, 3, 0), (0, 60, 4, 10, 0), (0, 64, 1, 5, 0)]
+        streams = make_streams(r, el, {0: 72}, {0: r.choice([0, 8])}, 6)
+        c = base_case(r, decl=el, streams=streams, start=r.randint(0, 2), count=r.randint(1, 3), dstidx=r.randint(0, 2), dstfvf=r.choice([XYZ | N | D | tex_fvf([2]), XYZ | D | tex_fvf([2]), RHW | D | tex_fvf([2])]), vp=r.choice(VPS), proj=persp(1.0, 1.3, 1.0, 50.0), view=trans(0, 0, 2), ex=rep & 1)
+        c["rs"] = rand_rs(r, lit=rep >> 1 & 1); c["material"] = rand_material(r); c["lights"] = pick_lights(r); out.append(finalize(c, r))
+    # 8. dense random world / view / projection: no zero term in the 4-term matrix products, so the summation order is visible in the bits and the normal-matrix inverse pivots
+    for rep in range(24):
+        c = src_case(r, XYZ | N | D, r.randint(1, 4), r.randint(0, 2)); sc = r.choice([0.5, 1.5, 3.0])
+        c.update(world=rnd(r, sc), view=rnd(r, sc), proj=rnd(r, sc), vp=r.choice(VPS), dstfvf=r.choice([XYZ | D, RHW | D, XYZ | N | D]), ex=rep & 1)
+        c["rs"] = rand_rs(r, lit=1 if rep % 3 else 0); c["material"] = rand_material(r); c["lights"] = pick_lights(r); out.append(finalize(c, r))
     return out
 
 def simple(r, sfvf=XYZ | D, dfvf=RHW | D, count=3, **kw):
@@ -82,6 +93,13 @@ def gen_b(seed):
         c = simple(r, ex=ex); c["streams"] = {}; add(c)                                                                  # declaration but no stream buffer bound: INVALIDCALL
         c = simple(r, ex=ex, dstnull=1); add(c); c = simple(r, ex=ex, dstnull=1, declarg=1); add(c)                      # NULL destination (rule P1): INVALIDCALL, nothing, no FIXME
         c = simple(r, ex=ex, declarg=1); add(c); c = simple(r, ex=ex, declarg=0); add(c)                                 # fixme 1 / none
+        for bad in (1, 2):
+            for da in (0, 1):
+                c = simple(r, ex=ex, declarg=da, bad=bad); add(c)                                                        # wrong-type destination / declaration object: INVALIDCALL, no FIXME, nothing written
+        for cnt, st0 in itertools.product((1, 3), (0, 2)):
+            for delta in (0, -1):                                                                                       # source stream ends exactly at / one byte before the end of the last element read (XYZ|DIFFUSE: 16 bytes)
+                c = simple(r, ex=ex, count=cnt, start=st0); s0 = c["streams"][0]
+                s0["data"] = s0["data"][:s0["offset"] + (st0 + cnt - 1) * s0["stride"] + 16 + delta]; add(c)
         for clip in (0, 1):
             c = simple(r, ex=ex); c["rs"]["CLIPPING"] = clip; add(c)                                                     # fixme 10 iff CLIPPING
         c = simple(r, ex=ex, dfvf=0); add(c); c = simple(r, ex=ex, dfvf=0, count=0); add(c)                              # FVF without position: fixme 13, writes nothing, D3D_OK
