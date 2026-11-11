@@ -122,6 +122,15 @@ VARIANT_KIND = {'C1': 'C', 'C2': 'C', 'D1': 'X', 'D2': 'X'}   # addrmap kind an 
 
 # ---------------------------------------------------------------------------------------------------- inputs
 
+def _table(name):
+    """a decomp-derived table of fnv-nx-build (tools/tables.py: FNVNX_TABLES, sha256 against tools/tables.pin.json)"""
+    import importlib.util
+    s = importlib.util.spec_from_file_location('fnvnx_tables', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tables.py'))
+    m = importlib.util.module_from_spec(s)
+    s.loader.exec_module(m)
+    return m.path(name)
+
+
 def load_trapped(refs_tsv, names_txt=None):
     """refs.tsv rows still undefined after resolve -> {Itanium name: set(referencing units)}; names_txt (the guest
     link's undefined.txt) adds names with no unit."""
@@ -163,8 +172,6 @@ def load_native_names(addrmap_tsv):
     return res
 
 
-CRT_SYMBOLS_TSV = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'platform',
-                                                'crt', 'crt_symbols.tsv'))
 
 
 def load_provider_params(crt_symbols_tsv=None):
@@ -173,7 +180,7 @@ def load_provider_params(crt_symbols_tsv=None):
     `std::_Locinfo::_Locinfo_ctor(_Locinfo*, const std::string&)` -> 2, `std::locale::_Getgloballocale() [note]` -> 0.
     A trailing `[note]` is dropped first; a row with no parameter list is not listed."""
     res = {}
-    path = crt_symbols_tsv or CRT_SYMBOLS_TSV
+    path = crt_symbols_tsv or _table('crt_symbols.tsv')
     if not os.path.exists(path):
         return res
     for line in open(path, encoding='utf-8', errors='surrogateescape'):

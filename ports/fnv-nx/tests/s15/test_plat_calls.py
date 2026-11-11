@@ -104,7 +104,10 @@ def main():
            r.returncode == 0 and lines == ['kernel32!CreateFileA CreateFileA 0', 'kernel32!Sleep',
                                            'kernel32!EnterCriticalSection', 'user32!PeekMessageA'], (r.stderr, lines))
         r = subprocess.run([sys.executable, '-I', TOOL, 'list'], capture_output=True, text=True)
-        ok('list without --exe: imports.tsv', r.returncode == 0 and 'kernel32!CreateFileA CreateFileA 0' in r.stdout
+        if not os.environ.get('FNVNX_TABLES'):
+            print('skip: list without --exe needs FNVNX_TABLES (private imports.tsv)')
+        else:
+          ok('list without --exe: imports.tsv', r.returncode == 0 and 'kernel32!CreateFileA CreateFileA 0' in r.stdout
            and r.stdout.count('\n') > 150, r.stdout[:200])
 
         tsv = os.path.join(d, 'wine.tsv')

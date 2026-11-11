@@ -71,9 +71,18 @@ memalign posix_memalign aligned_alloc strdup strndup strnlen getpid nanosleep us
 __errno __assert_func _impure_ptr __getreent _ctype_ __locale_ctype_ptr'''.split())
 
 
+def _table(name):
+    """a decomp-derived table of fnv-nx-build (tools/tables.py: FNVNX_TABLES, sha256 against tools/tables.pin.json)"""
+    import importlib.util
+    s = importlib.util.spec_from_file_location('fnvnx_tables', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tables.py'))
+    m = importlib.util.module_from_spec(s)
+    s.loader.exec_module(m)
+    return m.path(name)
+
+
 def load_crt():
     m = {}
-    p = os.path.join(ROOT, 'platform', 'crt', 'crt_symbols.tsv')
+    p = _table('crt_symbols.tsv')
     if os.path.isfile(p):
         for line in open(p, errors='replace'):
             if line.startswith('#'):
@@ -86,7 +95,7 @@ def load_crt():
 
 def load_imports():
     s = set()
-    p = os.path.join(ROOT, 'platform', 'win32', 'imports.tsv')
+    p = _table('imports.tsv')
     if os.path.isfile(p):
         for line in open(p, errors='replace'):
             if line.startswith('#'):
