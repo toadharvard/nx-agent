@@ -64,3 +64,19 @@ Provenance in the json: gcc-13.3.0.tar.xz sha256 0845e962..c083, msvcmodel.patch
 Fresh checkout of the mirror (no local prefix): guest build, 8 plugins, test_msvcmodel.py all pass with NO changes to the mirror; the 3 empty
 dirs / include symlink were not needed (the compiler's own include search list is declared as inputs). Cold 19-21 s (store empty), warm 1.7 s.
 test_guest fetches by the pin and is red with the reason when the fetch or tree hash fails; FNVNX_TEST_GCC_PREFIX removed. Oracle entries added.
+
+## Backlog B-D (lead messages of 22:08-22:09Z)
+- (A) a8a2ed5: trunk 7de7469 merged, oracle entries for test_plugins/test_guest, verdict green.
+- (B) 168006e: env.json + libclang-18-dev, libclang-common-18-dev, libclang1-18 (1:18.1.3-1ubuntu1), libc6-dev-i386 2.39-0ubuntu8.9; envcheck derives them by rule
+  (clang API headers + libs, `clang -m32 -M` of stdint/stdlib). No deb sha256 field exists in env.json (versions pinned by apt index).
+- (C) bc406ec: gate argordergate (gate_argorder.py): certifies fnvnx_order (not fnvnx_pi) in the rule's plugin list/order; test_argorder.py.
+- (D) a626984: unit_flags/unit_facts (fpfast of pi iff the unit's /fp:fast fact in units.json), test_unitflags.py. Needs a units.json in the root (source = root-relative unit path).
+- The lead session (01KmtZ...) was inactive when I tried to report (D); heads are in this note. A verdict run was red once only because /tmp/objstub-* filled the disk.
+- Open: (E) facts stage / vtnames.
+
+## (E) facts stage / vtnames: NOT started, blocked on inputs (reported, nothing invented)
+- env.json now pins clang-18 + libclang-18-dev (B), so the plugin (toolchain/vtnames/fnvnx_vtnames.cc, only on claude/port-nsw-un6t9s) can be built as a hermetic stage.
+- The per-unit MSVC-ABI command line must come by rule from units.json; in the L1 tree there is no units.json of a root and no source for the clang
+  flags except tools/link/layoutgate.py msvc_flags, which reads private shim headers (shim/include, layoutgate_msvc/*.h) that are not in this tree.
+  A facts stage written now would hand-copy those flags. Needs from the orchestrator: where units.json and those headers enter a root (external or tracked), and the rule for the flags.
+- The orchestrator session (01KmtZKUSQnbJKPPsvtTQXf7) was inactive, so this could not be asked.

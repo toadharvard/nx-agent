@@ -256,6 +256,24 @@
     "ports/fnv-nx/verify/gate_argorder.py"
    ],
    "result": "argordergate.json"
+   },
+   {
+   "name": "imports",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_imports.py"
+   ],
+   "result": "imports.json"
+  },
+  {
+   "name": "machine",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_machine.py"
+   ],
+   "result": "machine.json"
   }
  ]
 }
