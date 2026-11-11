@@ -154,6 +154,81 @@ void fnvnx_set_cursor_pos(int x, int y);
 /* COM classes (e.g. XAudio2 from S7) for CoCreateInstance */
 typedef HRESULT (*fnvnx_com_factory)(const GUID *iid, void **out);
 void fnvnx_register_com_class(const GUID *clsid, fnvnx_com_factory f);
+/* ---- virtual memory (platform/win32/memory.cpp, filemap.cpp): the process has ONE page map of its user address space
+ * [0x00010000, 0x7FFEFFFF]; every page has a state, type, allocation base and protections. */
+#ifndef ERROR_NOACCESS
+#define ERROR_NOACCESS 998L
+#endif
+#ifndef ERROR_BAD_LENGTH
+#define ERROR_BAD_LENGTH 24L
+#endif
+#ifndef ERROR_FILE_INVALID
+#define ERROR_FILE_INVALID 1006L
+#endif
+#ifndef ERROR_MAPPED_ALIGNMENT
+#define ERROR_MAPPED_ALIGNMENT 1132L
+#endif
+#ifndef ERROR_PRIVILEGE_NOT_HELD
+#define ERROR_PRIVILEGE_NOT_HELD 1314L
+#endif
+#ifndef ERROR_BAD_EXE_FORMAT
+#define ERROR_BAD_EXE_FORMAT 193L
+#endif
+#ifndef MEM_MAPPED
+#define MEM_MAPPED 0x40000
+#define MEM_IMAGE 0x1000000
+#endif
+#ifndef MEM_RESET
+#define MEM_RESET 0x80000
+#define MEM_RESET_UNDO 0x1000000
+#define MEM_WRITE_WATCH 0x200000
+#define MEM_PHYSICAL 0x400000
+#define MEM_LARGE_PAGES 0x20000000
+#endif
+#ifndef PAGE_WRITECOMBINE
+#define PAGE_WRITECOMBINE 0x400
+#endif
+#ifndef FILE_MAP_READ
+#define FILE_MAP_COPY 0x0001
+#define FILE_MAP_WRITE 0x0002
+#define FILE_MAP_READ 0x0004
+#define FILE_MAP_ALL_ACCESS 0x000F001F
+#define FILE_MAP_EXECUTE 0x0020
+#define SEC_FILE 0x00800000
+#define SEC_IMAGE 0x01000000
+#define SEC_RESERVE 0x04000000
+#define SEC_COMMIT 0x08000000
+#define SEC_NOCACHE 0x10000000
+#define SEC_WRITECOMBINE 0x40000000
+#define SEC_LARGE_PAGES 0x80000000
+#endif
+#ifndef STATUS_GUARD_PAGE_VIOLATION
+#define STATUS_GUARD_PAGE_VIOLATION 0x80000001u
+#endif
+#ifndef STATUS_ACCESS_VIOLATION
+#define STATUS_ACCESS_VIOLATION 0xC0000005u
+#endif
+BOOL VirtualProtect(LPVOID, SIZE_T, DWORD, PDWORD);
+HANDLE CreateFileMappingA(HANDLE, void *, DWORD, DWORD, DWORD, LPCSTR);
+LPVOID MapViewOfFile(HANDLE, DWORD, DWORD, DWORD, SIZE_T);
+BOOL UnmapViewOfFile(LPCVOID);
+BOOL FlushViewOfFile(LPCVOID, SIZE_T);
+/* The loader records memory it did not get from VirtualAlloc: base/size (page granular), type MEM_IMAGE / MEM_MAPPED /
+ * MEM_PRIVATE, the pages' protection. The pages become committed in the map (the platform does not touch the OS
+ * protection of noted memory except through VirtualProtect). A note over pages that are free starts a new allocation
+ * at base; a note over pages of an existing allocation of the same type only sets their protection: the loader notes
+ * the whole image first (headers, PAGE_READONLY) and then each section with its own protection, so one image is one
+ * allocation. The platform records heap-less regions it obtains itself the same way. Ranges outside the 32-bit user
+ * space [0x10000, 0x7FFEFFFF] are not part of the map and are ignored. */
+void fnvnx_win32_vm_note(uintptr_t base, size_t size, DWORD type, DWORD protect);
+/* The memory noted above is gone (a thread's stack ended, a module unloaded): its pages are free in the map again. */
+void fnvnx_win32_vm_unnote(uintptr_t base, size_t size);
+/* The host fault handler asks what a memory fault at addr (access 0 read, 1 write, 8 exec) is, by the map:
+ * returns 1: a guard-page hit (the guard bit is cleared, *code_out = STATUS_GUARD_PAGE_VIOLATION: raise it, the
+ * access is retried after the handler), 0: an access violation (*code_out = STATUS_ACCESS_VIOLATION), 2: the map
+ * permits the access (another thread cleared the guard first): just retry. */
+int fnvnx_win32_vm_fault(uintptr_t addr, int access, uint32_t *code_out);
+
 /* message boxes: default answer policy is the default button; tests can capture the text */
 typedef int (*fnvnx_msgbox_hook)(const char *text, const char *caption, UINT type);
 void fnvnx_set_msgbox_hook(fnvnx_msgbox_hook);

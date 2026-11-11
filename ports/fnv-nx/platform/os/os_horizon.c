@@ -570,4 +570,14 @@ int os_vm_release(void *addr, size_t size)
     return r;
 }
 
+/* committed pages are kernel-mapped physical memory: their permission is svcSetMemoryPermission's. The kernel
+ * grants R and RW (and no W without R); execute needs a code mapping and is the kernel's answer (an error).
+ * os_shm_* (file mappings) has no Horizon backend yet: svcCreateSharedMemory / svcMapSharedMemory mapped
+ * into the alias region is the mechanism; reported to the orchestrator. */
+int os_vm_protect(void *addr, size_t size, int os_prot)
+{
+    u32 perm = (os_prot & OS_VM_READ ? Perm_R : 0) | (os_prot & OS_VM_WRITE ? Perm_W : 0) | (os_prot & OS_VM_EXEC ? Perm_X : 0);
+    return R_FAILED(svcSetMemoryPermission(addr, (u64)size, perm)) ? -OS_EINVAL : 0;
+}
+
 const char *os_default_root(void) { return "sdmc:/switch/fnv"; }   /* = FNVNX_SD_DIR (toolchain/include/fnvnx/sdlayout.h) */

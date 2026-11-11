@@ -153,6 +153,23 @@ void *os_vm_reserve(void *hint, size_t size);   /* hint NULL: anywhere; else exa
 int os_vm_commit(void *addr, size_t size);
 int os_vm_decommit(void *addr, size_t size);
 int os_vm_release(void *addr, size_t size);
+/* Changes the access of committed pages (page-aligned range). os_prot: OS_VM_* bits; OS_VM_NONE makes the pages
+ * inaccessible without dropping their contents. 0 or -OS_E*. */
+#define OS_VM_NONE  0
+#define OS_VM_READ  1
+#define OS_VM_WRITE 2
+#define OS_VM_EXEC  4
+int os_vm_protect(void *addr, size_t size, int os_prot);
+
+/* ---- shared memory objects (file mappings): a zero-filled object of a given size that can be mapped several
+ * times, the mappings sharing the same pages (priv == 0) or each getting copy-on-write pages (priv != 0). */
+typedef struct os_shm os_shm;
+os_shm *os_shm_create(uint64_t size);          /* NULL: out of memory / size too large */
+/* maps [off, off + size) (page-aligned) with OS_VM_* bits at exactly hint (not NULL: the range must be free) or
+ * anywhere (NULL); NULL on failure */
+void *os_shm_map(os_shm *s, uint64_t off, size_t size, void *hint, int os_prot, int priv);
+int os_shm_unmap(void *addr, size_t size);     /* a range os_shm_map returned */
+void os_shm_free(os_shm *s);                   /* the mappings stay valid until unmapped */
 
 /* ---- host directories the path mapper mounts (see docs/RUNTIME.md "Paths") */
 const char *os_default_root(void);          /* "sdmc:/switch/fnv" (sdlayout.h); host: $FNVNX_ROOT or "./fnvnx-root" */

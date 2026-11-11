@@ -548,6 +548,63 @@ int os_vm_decommit(void *addr, size_t size)
 
 int os_vm_release(void *addr, size_t size) { return munmap(addr, size) ? -OS_EINVAL : 0; }
 
+static int posix_prot(int p)
+{
+    return (p & OS_VM_READ ? PROT_READ : 0) | (p & OS_VM_WRITE ? PROT_WRITE : 0) | (p & OS_VM_EXEC ? PROT_EXEC : 0);
+}
+
+int os_vm_protect(void *addr, size_t size, int os_prot)
+{
+    return mprotect(addr, size, posix_prot(os_prot)) ? -OS_EINVAL : 0;
+}
+
+struct os_shm { int fd; };
+
+os_shm *os_shm_create(uint64_t size)
+{
+    int fd = (int)syscall(SYS_memfd_create, "fnvnx-shm", 1u /* MFD_CLOEXEC */);
+    if (fd < 0)
+        return NULL;
+    if (size > (uint64_t)INT64_MAX || ftruncate(fd, (off_t)size)) {
+        close(fd);
+        return NULL;
+    }
+    os_shm *s = (os_shm *)malloc(sizeof *s);
+    if (!s) {
+        close(fd);
+        return NULL;
+    }
+    s->fd = fd;
+    return s;
+}
+
+void *os_shm_map(os_shm *s, uint64_t off, size_t size, void *hint, int os_prot, int priv)
+{
+    int fl = priv ? MAP_PRIVATE : MAP_SHARED;
+#ifdef MAP_FIXED_NOREPLACE
+    if (hint)
+        fl |= MAP_FIXED_NOREPLACE;
+#endif
+    void *p = mmap(hint, size, posix_prot(os_prot), fl, s->fd, (off_t)off);
+    if (p == MAP_FAILED)
+        return NULL;
+    if (hint && p != hint) {
+        munmap(p, size);
+        return NULL;
+    }
+    return p;
+}
+
+int os_shm_unmap(void *addr, size_t size) { return munmap(addr, size) ? -OS_EINVAL : 0; }
+
+void os_shm_free(os_shm *s)
+{
+    if (s) {
+        close(s->fd);
+        free(s);
+    }
+}
+
 const char *os_default_root(void)
 {
     const char *r = getenv("FNVNX_ROOT");

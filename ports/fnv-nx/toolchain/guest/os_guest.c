@@ -277,6 +277,17 @@ int os_vm_decommit(void *addr, size_t size) {
     memset(addr, 0, size);
     return 0;
 }
+/* needs a host service call that does not exist yet: FNVNX_PLAT_VM_PROTECT (hostapi.h + host.c / host_vm.inc: the
+ * host applies the permission to the reservation); without the service the memalign fallback has no page
+ * permissions to change, and the answer is an error */
+#ifndef FNVNX_PLAT_VM_PROTECT
+#define FNVNX_PLAT_VM_PROTECT 8u
+#endif
+int os_vm_protect(void *addr, size_t size, int os_prot) {
+    if (!vm_host()) return -1;
+    uint64_t arg[3] = {FNVNX_ADDR(addr), size, (uint64_t)os_prot};
+    return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_VM_PROTECT, FNVNX_ADDR(arg), 3) ? -1 : 0;
+}
 int os_vm_release(void *addr, size_t size) {
     (void)size;
     if (vm_host()) return vm_ext(FNVNX_PLAT_VM_RELEASE, FNVNX_ADDR(addr), 0) ? -1 : 0;

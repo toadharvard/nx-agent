@@ -47,7 +47,7 @@ struct w32_thread {
 struct w32_thread *w32_self(void);
 
 /* ---- kernel objects: HANDLE is a pointer to one of these */
-enum { W32_EVENT = 1, W32_MUTEX, W32_SEMAPHORE, W32_THREAD, W32_FILE, W32_FIND, W32_HEAP };
+enum { W32_EVENT = 1, W32_MUTEX, W32_SEMAPHORE, W32_THREAD, W32_FILE, W32_FIND, W32_HEAP, W32_MAPPING };
 #define W32_MAGIC 0x46564E58u /* "FVNX" */
 struct w32_link {                  /* one waiter linked to one object */
     struct w32_link *next, *prev;
@@ -106,6 +106,16 @@ const char *w32_user_dir(void);              /* virtual Windows path of the docu
 /* errno-style os error -> Win32 error code */
 DWORD w32_os_error(int neg);
 int w32_wildcard_match(const char *pat, const char *name); /* Windows *, ? matching, case-insensitive */
+
+/* ---- the page map's services (memory.cpp) to IsBad*Ptr (module.cpp) and to file views (filemap.cpp) */
+int w32_vm_probe(const void *p, size_t n, int access);   /* access 0 read, 1 write, 8 code; 1: accessible */
+typedef void *(*w32_view_osmap)(void *hint, size_t size, void *ctx);   /* maps the OS range of a view: exactly at hint */
+/* enters a view allocation of size bytes (granule placement at want or anywhere; osmap is called with the address
+ * the map chose, and again with the next one if the OS refuses); image: MEM_IMAGE, else MEM_MAPPED. NULL: last error */
+void *w32_vm_view_place(uintptr_t want, size_t size, w32_view_osmap osmap, void *ctx, DWORD alloc_prot, DWORD page_prot,
+                        int committed, int image, int reserve_section);
+size_t w32_vm_view_remove(uintptr_t base);   /* the view allocation at base leaves the map; its size, 0: not a view base */
+void w32_vm_view_prot(uintptr_t base, size_t size, DWORD prot);   /* the pages' current protection (map only) */
 
 /* ---- misc */
 void w32_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));

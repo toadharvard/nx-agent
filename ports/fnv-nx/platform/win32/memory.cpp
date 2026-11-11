@@ -1,8 +1,16 @@
-/* memory.cpp - VirtualAlloc/VirtualFree/VirtualQuery over os_vm_*, the heap functions over malloc, memory
- * status and system info.
+/* memory.cpp - the virtual-memory part: ONE page map of the process' 32-bit user address space
+ * [0x00010000, 0x7FFEFFFF] (ENV_TRUTH P1: page 4 KiB, allocation granularity 64 KiB); VirtualAlloc, VirtualFree,
+ * VirtualProtect, VirtualQuery, IsBad*Ptr (module.cpp calls w32_vm_probe), GlobalMemoryStatus(Ex) are functions of that
+ * map, and keep the real OS protection (os_vm_*) in step with it. Then the heap functions over malloc, memory status
+ * and system info.
  *
- * Regions follow Windows' granularity: reservations are 64 KiB aligned, commits are page (4 KiB) granular.
- * A table of reservations lets MEM_RELEASE with size 0 free the whole region and VirtualQuery answer. */
+ * Every page of the range has: state (FREE / RESERVE / COMMIT), type (MEM_PRIVATE / MEM_MAPPED / MEM_IMAGE), the
+ * allocation it belongs to (its base), the allocation protection and the current protection (with the PAGE_GUARD /
+ * PAGE_NOCACHE / PAGE_WRITECOMBINE modifier bits as given). The real protection of a page is a function of its
+ * current protection: none for a guard page (its first access faults; fnvnx_win32_vm_fault turns that into the
+ * guard-page exception and clears the bit), none for reserved pages, else the access of the PAGE_* value.
+ * Memory the platform or the loader got elsewhere is entered with fnvnx_win32_vm_note (flag F_FOREIGN: the OS
+ * range is not ours to release); file views are entered by filemap.cpp through w32_vm_view_*. */
 #include "w32.h"
 
 #include <malloc.h>
@@ -10,216 +18,721 @@
 
 #define GRAN 0x10000u
 #define PAGE 0x1000u
-#define MAX_REGIONS 4096
+#define UMIN 0x00010000u     /* lowest user address */
+#define UEND 0x7FFF0000u     /* one past the highest user address (lpMaximumApplicationAddress + 1) */
+#define NPAGES ((UEND - UMIN) / PAGE)
+#define PPG (GRAN / PAGE)    /* pages per granule */
 
-struct region {
-    uintptr_t base;
-    size_t size;
-    DWORD protect;
-    uint8_t *committed; /* one byte per page */
-    unsigned caller;    /* the memory lane (memtrack.cpp): the VirtualAlloc call that reserved it */
+enum { ST_FREE = 0, ST_RESERVE = 1, ST_COMMIT = 2 };
+enum { TY_PRIVATE = 0, TY_MAPPED = 1, TY_IMAGE = 2 };
+enum { F_FOREIGN = 1, F_VIEW = 2, F_RESERVESEC = 4, F_RESET = 8, F_NEW = 16 };
+struct pg {
+    uint32_t base;      /* allocation base address >> 12; 0: free */
+    uint32_t caller;    /* the memory lane (memtrack.cpp): the call that reserved the allocation */
+    uint16_t cur, aprot;
+    uint8_t state, type, flags, pad;
 };
 #define MEM_RA ((unsigned)(uintptr_t)__builtin_return_address(0))
 enum { MEMK_HEAP = 0, MEMK_VIRTUAL = 1 };
 
-static size_t committed_pages(struct region *r, uintptr_t a, size_t n)
-{
-    size_t c = 0;
-    for (size_t p = (a - r->base) / PAGE, last = (a + n - 1 - r->base) / PAGE; p <= last; p++)
-        c += r->committed[p];
-    return c;
-}
-static struct region g_regions[MAX_REGIONS];
-static int g_nregions;
+static struct pg *g_pg;          /* NPAGES entries, zero = free; calloc'd lazily (untouched pages cost nothing) */
+static size_t g_free_pages = NPAGES;
 static os_lock_t g_vm_lock;
 
-/* g_regions is sorted by base (regions never overlap): a binary search. The game commits its pools one page per
- * VirtualAlloc call (MemoryPool::CommitPage, ~340,000 calls to the main menu), so a linear scan of hundreds of
- * regions per call cost seconds of emulation (S5's profile: 358,223 calls, 26 s). */
-static int region_index(uintptr_t a)   /* the first region whose base is above a */
+#define PROT_BASE_MASK 0xFFu
+#define PROT_MOD_MASK (PAGE_GUARD | PAGE_NOCACHE | PAGE_WRITECOMBINE)
+
+/* a PAGE_* value: exactly one base protection, at most one modifier, and no modifier on PAGE_NOACCESS */
+static bool prot_valid(DWORD p)
 {
-    int lo = 0, hi = g_nregions;
-    while (lo < hi) {
-        int m = (lo + hi) / 2;
-        if (g_regions[m].base <= a)
-            lo = m + 1;
-        else
-            hi = m;
+    DWORD b = p & PROT_BASE_MASK, m = p & PROT_MOD_MASK;
+    if (p & ~(PROT_BASE_MASK | PROT_MOD_MASK))
+        return false;
+    if (!b || (b & (b - 1)))
+        return false;
+    if (m & (m - 1))
+        return false;
+    return !(m && b == PAGE_NOACCESS);
+}
+static bool prot_write(DWORD p) { DWORD b = p & PROT_BASE_MASK; return b == PAGE_READWRITE || b == PAGE_WRITECOPY || b == PAGE_EXECUTE_READWRITE || b == 0x80; }
+static bool prot_exec(DWORD p) { return (p & PROT_BASE_MASK) >= PAGE_EXECUTE; }
+static bool prot_read(DWORD p) { return (p & PROT_BASE_MASK) != PAGE_NOACCESS; }
+/* the real protection: a guard page is inaccessible until its first access is turned into the exception */
+static int os_prot_of(DWORD p)
+{
+    if ((p & PAGE_GUARD) || !prot_read(p))
+        return OS_VM_NONE;
+    return OS_VM_READ | (prot_write(p) ? OS_VM_WRITE : 0) | (prot_exec(p) ? OS_VM_EXEC : 0);
+}
+
+static bool pg_init(void)   /* under the lock */
+{
+    if (!g_pg)
+        g_pg = (struct pg *)calloc(NPAGES, sizeof(struct pg));
+    return g_pg != NULL;
+}
+static inline size_t pidx(uintptr_t a) { return (size_t)((a - UMIN) / PAGE); }
+static inline uintptr_t paddr(size_t i) { return (uintptr_t)i * PAGE + UMIN; }
+
+static void pg_set(size_t i, uintptr_t base, uint8_t state, uint8_t type, DWORD cur, DWORD aprot, uint8_t flags, uint32_t caller)
+{
+    if (g_pg[i].state == ST_FREE)
+        g_free_pages--;
+    g_pg[i].base = (uint32_t)(base / PAGE);
+    g_pg[i].caller = caller;
+    g_pg[i].cur = (uint16_t)cur;
+    g_pg[i].aprot = (uint16_t)aprot;
+    g_pg[i].state = state;
+    g_pg[i].type = type;
+    g_pg[i].flags = flags;
+}
+static void pg_clear(size_t i)
+{
+    if (g_pg[i].state != ST_FREE)
+        g_free_pages++;
+    memset(&g_pg[i], 0, sizeof g_pg[i]);
+}
+
+/* bytes committed/uncommitted in [first, first + n) by caller, for the memory lane */
+static void mem_account(size_t first, size_t n, bool committed, long long sign)
+{
+    if (!w32_mem_on)
+        return;
+    for (size_t i = first; i < first + n;) {
+        if ((g_pg[i].state == ST_COMMIT) != committed) {
+            i++;
+            continue;
+        }
+        size_t j = i;
+        while (j < first + n && (g_pg[j].state == ST_COMMIT) == committed && g_pg[j].caller == g_pg[i].caller)
+            j++;
+        fnvnx_mem_delta(MEMK_VIRTUAL, sign * (long long)((j - i) * PAGE), g_pg[i].caller);
+        i = j;
     }
-    return lo;
 }
 
-static struct region *region_of(uintptr_t a)
+/* the extent (in pages) of the allocation page i belongs to, from its first page */
+static size_t alloc_pages(size_t i)
 {
-    int i = region_index(a) - 1;
-    return i >= 0 && a < g_regions[i].base + g_regions[i].size ? &g_regions[i] : NULL;
+    size_t j = i;
+    while (j < NPAGES && g_pg[j].state != ST_FREE && g_pg[j].base == g_pg[i].base)
+        j++;
+    return j - i;
 }
 
-static int commit_range(struct region *r, uintptr_t a, size_t n)
+/* is every granule of [first, first + n pages) free? (a reservation owns its granules) */
+static bool granules_free(size_t first, size_t n)
 {
-    size_t first = (a - r->base) / PAGE, last = (a + n - 1 - r->base) / PAGE;
-    for (size_t p = first; p <= last;) {
-        if (r->committed[p]) {
+    size_t g0 = first & ~(size_t)(PPG - 1), g1 = (first + n + PPG - 1) & ~(size_t)(PPG - 1);
+    if (g1 > NPAGES)
+        return false;
+    for (size_t i = g0; i < g1; i++)
+        if (g_pg[i].state != ST_FREE)
+            return false;
+    return true;
+}
+
+/* first-fit / top-down search for n pages of free granules: the granule-aligned start page in [lo, hi) or NPAGES */
+static size_t find_free(size_t n, bool top_down, size_t lo, size_t hi)
+{
+    size_t need = (n + PPG - 1) / PPG;
+    if (!top_down) {
+        size_t run = 0, start = 0;
+        for (size_t g = lo / PPG; g < hi / PPG; g++) {
+            bool f = true;
+            for (size_t k = 0; k < PPG && f; k++)
+                f = g_pg[g * PPG + k].state == ST_FREE;
+            if (!f) {
+                run = 0;
+                continue;
+            }
+            if (!run)
+                start = g;
+            if (++run == need)
+                return start * PPG;
+        }
+    } else {
+        size_t run = 0;
+        for (size_t g = hi / PPG; g-- > lo / PPG;) {
+            bool f = true;
+            for (size_t k = 0; k < PPG && f; k++)
+                f = g_pg[g * PPG + k].state == ST_FREE;
+            if (!f) {
+                run = 0;
+                continue;
+            }
+            if (++run == need)
+                return g * PPG;
+        }
+    }
+    return NPAGES;
+}
+
+typedef void *(*osmap_fn)(void *hint, size_t size, void *ctx);
+static void *os_reserve_cb(void *hint, size_t size, void *) { return os_vm_reserve(hint, (size + GRAN - 1) & ~(size_t)(GRAN - 1)); }   /* the OS holds the whole granule */
+
+/* places an allocation of n pages: at the granule of want (0: first fit or top down) with the OS range obtained by
+ * osmap (hinted: exactly there). Returns the page index of the base or NPAGES with the last error set. */
+static size_t place(uintptr_t want, size_t n, bool top_down, osmap_fn osmap, void *ctx)
+{
+    size_t span = (n + PPG - 1) / PPG * PPG;
+    if (want) {
+        size_t first = pidx(want & ~(uintptr_t)(GRAN - 1));
+        if (!granules_free(first, n)) {
+            SetLastError(ERROR_INVALID_ADDRESS);
+            return NPAGES;
+        }
+        void *p = osmap((void *)paddr(first), n * PAGE, ctx);
+        if (!p) {
+            SetLastError(ERROR_INVALID_ADDRESS);
+            return NPAGES;
+        }
+        return first;
+    }
+    size_t lo = 0, hi = NPAGES;
+    for (;;) {
+        size_t at = n <= NPAGES ? find_free(n, top_down, lo, hi) : NPAGES;
+        if (at == NPAGES) {
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            return NPAGES;
+        }
+        /* the OS may hold the address (the host's own mappings): the map is the rule, the next free fit is the answer */
+        void *p = osmap((void *)paddr(at), n * PAGE, ctx);
+        if (p)
+            return at;
+        if (top_down)
+            hi = at + span - PPG;
+        else
+            lo = at + PPG;
+        if (lo >= hi)
+            break;
+    }
+    SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+    return NPAGES;
+}
+
+/* commits pages [first, last] of a private allocation with protection prot; 0 or -1 (out of memory: this call's
+ * commits are rolled back) */
+static int commit_pages(size_t first, size_t last, DWORD prot)
+{
+    int want = os_prot_of(prot);
+    bool fail = false;
+    for (size_t p = first; p <= last && !fail;) {
+        if (g_pg[p].state == ST_COMMIT) {
             p++;
             continue;
         }
         size_t q = p;
-        while (q <= last && !r->committed[q])
+        while (q <= last && g_pg[q].state != ST_COMMIT)
             q++;
-        if (os_vm_commit((void *)(r->base + p * PAGE), (q - p) * PAGE))
-            return -1;
-        memset(r->committed + p, 1, q - p);
-        if (w32_mem_on)
-            fnvnx_mem_delta(MEMK_VIRTUAL, (long long)((q - p) * PAGE), r->caller);
+        if (os_vm_commit((void *)paddr(p), (q - p) * PAGE)) {
+            fail = true;
+            break;
+        }
+        mem_account(p, q - p, false, +1);
+        for (size_t k = p; k < q; k++) {
+            g_pg[k].state = ST_COMMIT;
+            g_pg[k].cur = PAGE_READWRITE;   /* what os_vm_commit gives */
+            g_pg[k].flags |= F_NEW;
+        }
         p = q;
+    }
+    if (fail) {
+        for (size_t p = first; p <= last; p++)
+            if (g_pg[p].flags & F_NEW) {
+                mem_account(p, 1, true, -1);
+                os_vm_decommit((void *)paddr(p), PAGE);
+                g_pg[p].state = ST_RESERVE;
+                g_pg[p].cur = 0;
+                g_pg[p].flags &= ~F_NEW;
+            }
+        return -1;
+    }
+    /* the protection: pages whose real protection differs from the wanted one */
+    for (size_t p = first; p <= last;) {
+        if (os_prot_of(g_pg[p].cur) == want) {
+            p++;
+            continue;
+        }
+        size_t q = p;
+        while (q <= last && os_prot_of(g_pg[q].cur) != want)
+            q++;
+        os_vm_protect((void *)paddr(p), (q - p) * PAGE, want);
+        p = q;
+    }
+    for (size_t p = first; p <= last; p++) {
+        g_pg[p].cur = (uint16_t)prot;
+        g_pg[p].flags &= ~(F_RESET | F_NEW);
     }
     return 0;
 }
 
+static void release_alloc(size_t first)   /* a private allocation, all of it */
+{
+    size_t n = alloc_pages(first);
+    mem_account(first, n, true, -1);
+    os_vm_release((void *)paddr(first), (n + PPG - 1) / PPG * PPG * PAGE);
+    for (size_t i = 0; i < n; i++)
+        pg_clear(first + i);
+}
+
+#define VA_KNOWN (MEM_COMMIT | MEM_RESERVE | MEM_RESET | MEM_RESET_UNDO | MEM_TOP_DOWN | MEM_WRITE_WATCH | MEM_PHYSICAL | MEM_LARGE_PAGES)
+
 extern "C" LPVOID VirtualAlloc(LPVOID addr, SIZE_T size, DWORD type, DWORD protect)
 {
     type = W32_DW(type);
-    if (!size || !(type & (MEM_COMMIT | MEM_RESERVE))) {
-        SetLastError(ERROR_INVALID_PARAMETER);
-        return NULL;
-    }
+    protect = W32_DW(protect);
+    uint64_t a = (uint64_t)(uintptr_t)addr, sz = (uint64_t)size;
+    if (sizeof(void *) == 4)
+        sz = (uint64_t)(SIZE_T)size;
     unsigned caller = MEM_RA;
-    os_lock(&g_vm_lock);
     LPVOID res = NULL;
-    uintptr_t a = (uintptr_t)addr;
-    struct region *r = a ? region_of(a) : NULL;
-    if ((type & MEM_RESERVE) || !r) {
-        if (!(type & MEM_RESERVE) && a) { /* commit outside any reservation */
-            SetLastError(ERROR_INVALID_ADDRESS);
-            goto out;
+    DWORD err = ERROR_INVALID_PARAMETER;
+
+    /* the flags, as documented */
+    if (type & ~(DWORD)VA_KNOWN)
+        goto bad;
+    if (type & (MEM_RESET | MEM_RESET_UNDO)) {   /* each stands alone */
+        if ((type & (MEM_RESET | MEM_RESET_UNDO)) == (MEM_RESET | MEM_RESET_UNDO) || (type & ~(DWORD)(MEM_RESET | MEM_RESET_UNDO)))
+            goto bad;
+        if (!sz)
+            goto bad;
+    } else {
+        if (!(type & (MEM_COMMIT | MEM_RESERVE)) || !sz)
+            goto bad;
+        if ((type & MEM_PHYSICAL) && (!(type & MEM_RESERVE) || (type & MEM_COMMIT) || (type & ~(DWORD)(MEM_RESERVE | MEM_PHYSICAL | MEM_TOP_DOWN))
+                                      || (protect & PROT_BASE_MASK) != PAGE_READWRITE))
+            goto bad;
+        if ((type & MEM_LARGE_PAGES) && (type & (MEM_COMMIT | MEM_RESERVE)) != (MEM_COMMIT | MEM_RESERVE))
+            goto bad;
+        if ((type & MEM_WRITE_WATCH) && !(type & MEM_RESERVE))
+            goto bad;
+        if (!prot_valid(protect))
+            goto bad;
+        if (type & (MEM_PHYSICAL | MEM_LARGE_PAGES)) {   /* AWE and large pages need SeLockMemoryPrivilege: this process has none */
+            err = ERROR_PRIVILEGE_NOT_HELD;
+            goto bad;
         }
-        if (g_nregions == MAX_REGIONS) {
-            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
-            goto out;
+        if (type & MEM_WRITE_WATCH) {   /* write tracking needs the fault path; not available (reported) */
+            err = ERROR_NOT_SUPPORTED;
+            goto bad;
         }
-        uintptr_t base = a & ~(uintptr_t)(GRAN - 1);
-        size_t sz = ((a + size - base) + PAGE - 1) & ~(size_t)(PAGE - 1);
-        if (!a)
-            sz = (size + PAGE - 1) & ~(size_t)(PAGE - 1);
-        size_t rsz = (sz + GRAN - 1) & ~(size_t)(GRAN - 1);
-        void *p = os_vm_reserve(a ? (void *)base : NULL, rsz);
-        if (!p) {
-            SetLastError(a ? ERROR_INVALID_ADDRESS : ERROR_NOT_ENOUGH_MEMORY);
-            goto out;
+    }
+    os_lock(&g_vm_lock);
+    if (!pg_init()) {
+        err = ERROR_NOT_ENOUGH_MEMORY;
+        os_unlock(&g_vm_lock);
+        goto bad;
+    }
+    if (type & (MEM_RESET | MEM_RESET_UNDO)) {
+        uint64_t pa = a & ~(uint64_t)(PAGE - 1), pe = (a + sz + PAGE - 1) & ~(uint64_t)(PAGE - 1);
+        err = ERROR_INVALID_ADDRESS;
+        if (pa < UMIN || pe > UEND || pe < pa)
+            goto unlock_bad;
+        size_t f = pidx((uintptr_t)pa), n = (size_t)((pe - pa) / PAGE);
+        for (size_t i = f; i < f + n; i++)
+            if (g_pg[i].state != ST_COMMIT || g_pg[i].base != g_pg[f].base)
+                goto unlock_bad;
+        if (type & MEM_RESET) {   /* the contents become undefined: they are kept */
+            for (size_t i = f; i < f + n; i++)
+                g_pg[i].flags |= F_RESET;
+        } else {
+            for (size_t i = f; i < f + n; i++)
+                if (!(g_pg[i].flags & F_RESET)) {
+                    err = ERROR_INVALID_PARAMETER;
+                    goto unlock_bad;
+                }
+            for (size_t i = f; i < f + n; i++)
+                g_pg[i].flags &= ~F_RESET;
         }
-        uint8_t *pages = (uint8_t *)calloc(rsz / PAGE, 1);
-        if (!pages) {
-            os_vm_release(p, rsz);
-            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
-            goto out;
+        res = (LPVOID)(uintptr_t)pa;
+        goto unlock_ok;
+    }
+    if ((type & MEM_RESERVE) || !a) {   /* a new allocation (a commit without an address reserves too) */
+        uint64_t base = a & ~(uint64_t)(GRAN - 1), end = a ? (a + sz + PAGE - 1) & ~(uint64_t)(PAGE - 1) : sz;
+        size_t np;
+        if (a) {
+            if (a + sz < a || base < UMIN || end > UEND) {
+                err = ERROR_INVALID_PARAMETER;
+                goto unlock_bad;
+            }
+            np = (size_t)((end - base) / PAGE);
+        } else {
+            if (sz > (uint64_t)(UEND - UMIN)) {
+                err = ERROR_NOT_ENOUGH_MEMORY;
+                goto unlock_bad;
+            }
+            np = (size_t)((sz + PAGE - 1) / PAGE);
         }
-        int at = region_index((uintptr_t)p);   /* keep g_regions sorted */
-        memmove(&g_regions[at + 1], &g_regions[at], (size_t)(g_nregions - at) * sizeof g_regions[0]);
-        r = &g_regions[at];
-        r->base = (uintptr_t)p;
-        r->size = rsz;
-        r->protect = protect;
-        r->caller = caller;
-        r->committed = pages;
-        g_nregions++;
-        a = (uintptr_t)p + (a ? a - base : 0);
+        size_t at = place(a ? (uintptr_t)base : 0, np, (type & MEM_TOP_DOWN) != 0, os_reserve_cb, NULL);
+        if (at == NPAGES) {
+            err = GetLastError();
+            goto unlock_bad;
+        }
+        uintptr_t ab = paddr(at);
+        for (size_t i = 0; i < np; i++)
+            pg_set(at + i, ab, ST_RESERVE, TY_PRIVATE, 0, protect, 0, caller);
         if (type & MEM_COMMIT) {
-            if (commit_range(r, a & ~(uintptr_t)(PAGE - 1), size + (a & (PAGE - 1)))) {
-                SetLastError(ERROR_NOT_ENOUGH_MEMORY);
-                goto out;
+            size_t f = a ? pidx((uintptr_t)(a & ~(uint64_t)(PAGE - 1))) : at, l = at + np - 1;
+            if (commit_pages(f, l, protect)) {
+                release_alloc(at);
+                err = ERROR_NOT_ENOUGH_MEMORY;
+                goto unlock_bad;
             }
         }
-        res = (LPVOID)(type & MEM_COMMIT ? (a & ~(uintptr_t)(PAGE - 1)) : (uintptr_t)p);
-    } else {
-        uintptr_t pa = a & ~(uintptr_t)(PAGE - 1);
-        size_t n = size + (a - pa);
-        if (pa + n > r->base + r->size) {
-            SetLastError(ERROR_INVALID_ADDRESS);
-            goto out;
+        res = (LPVOID)ab;
+    } else {   /* commit inside an existing reservation */
+        uint64_t pa = a & ~(uint64_t)(PAGE - 1), pe = (a + sz + PAGE - 1) & ~(uint64_t)(PAGE - 1);
+        err = ERROR_INVALID_ADDRESS;
+        if (pa < UMIN || a + sz < a || pe > UEND)
+            goto unlock_bad;
+        size_t f = pidx((uintptr_t)pa), l = pidx((uintptr_t)pe) - 1;
+        for (size_t i = f; i <= l; i++)
+            if (g_pg[i].state == ST_FREE || g_pg[i].base != g_pg[f].base)
+                goto unlock_bad;
+        uint8_t fl = g_pg[f].flags;
+        if (fl & F_FOREIGN)
+            goto unlock_bad;
+        if (fl & F_VIEW) {   /* only the reserved part of a SEC_RESERVE section can be committed, within the view's access */
+            if (!(fl & F_RESERVESEC))
+                goto unlock_bad;
+            if ((prot_write(protect) && !prot_write(g_pg[f].aprot)) || (prot_exec(protect) && !prot_exec(g_pg[f].aprot))) {
+                err = ERROR_INVALID_PARAMETER;
+                goto unlock_bad;
+            }
+            for (size_t i = f; i <= l; i++) {
+                g_pg[i].state = ST_COMMIT;
+                g_pg[i].cur = (uint16_t)protect;
+            }
+            os_vm_protect((void *)paddr(f), (l - f + 1) * PAGE, os_prot_of(protect));
+        } else if (commit_pages(f, l, protect)) {
+            err = ERROR_NOT_ENOUGH_MEMORY;
+            goto unlock_bad;
         }
-        if (commit_range(r, pa, n)) {
-            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
-            goto out;
-        }
-        res = (LPVOID)pa;
+        res = (LPVOID)(uintptr_t)pa;
     }
-out:
+unlock_ok:
     os_unlock(&g_vm_lock);
-    if (!res && w32_mem_on && GetLastError() == ERROR_NOT_ENOUGH_MEMORY)
-        fnvnx_mem_fail(MEMK_VIRTUAL, size, caller);
     return res;
+unlock_bad:
+    os_unlock(&g_vm_lock);
+bad:
+    SetLastError(err);
+    if (err == ERROR_NOT_ENOUGH_MEMORY && w32_mem_on)
+        fnvnx_mem_fail(MEMK_VIRTUAL, (size_t)sz, caller);
+    return NULL;
 }
 
 extern "C" BOOL VirtualFree(LPVOID addr, SIZE_T size, DWORD type)
 {
     type = W32_DW(type);
-    os_lock(&g_vm_lock);
+    uint64_t a = (uint64_t)(uintptr_t)addr, sz = (uint64_t)size;
+    DWORD err = ERROR_INVALID_PARAMETER;
     BOOL ok = FALSE;
-    uintptr_t a = (uintptr_t)addr;
-    struct region *r = region_of(a);
-    if (!r) {
-        SetLastError(ERROR_INVALID_ADDRESS);
-    } else if (type & MEM_RELEASE) {
-        if (size || a != r->base) {
-            SetLastError(ERROR_INVALID_PARAMETER);
-        } else {
-            if (w32_mem_on)
-                fnvnx_mem_delta(MEMK_VIRTUAL, -(long long)(committed_pages(r, r->base, r->size) * PAGE), r->caller);
-            os_vm_release((void *)r->base, r->size);
-            free(r->committed);
-            int at = (int)(r - g_regions);
-            memmove(r, r + 1, (size_t)(g_nregions - at - 1) * sizeof g_regions[0]);
-            g_nregions--;
-            ok = TRUE;
-        }
-    } else if (type & MEM_DECOMMIT) {
-        uintptr_t pa = a & ~(uintptr_t)(PAGE - 1);
-        size_t n = size ? ((a + size - pa) + PAGE - 1) & ~(size_t)(PAGE - 1) : r->base + r->size - pa;
-        if (!size && a != r->base) {
-            SetLastError(ERROR_INVALID_PARAMETER);
-        } else if (pa + n > r->base + r->size) {
-            SetLastError(ERROR_INVALID_PARAMETER);
-        } else {
-            if (w32_mem_on)
-                fnvnx_mem_delta(MEMK_VIRTUAL, -(long long)(committed_pages(r, pa, n) * PAGE), r->caller);
-            os_vm_decommit((void *)pa, n);
-            memset(r->committed + (pa - r->base) / PAGE, 0, n / PAGE);
-            ok = TRUE;
-        }
-    } else {
-        SetLastError(ERROR_INVALID_PARAMETER);
+    if ((type != MEM_RELEASE && type != MEM_DECOMMIT))
+        goto bad;
+    os_lock(&g_vm_lock);
+    if (!pg_init()) {
+        err = ERROR_NOT_ENOUGH_MEMORY;
+        os_unlock(&g_vm_lock);
+        goto bad;
     }
+    {
+        err = ERROR_INVALID_ADDRESS;
+        if (a < UMIN || a >= UEND || g_pg[pidx((uintptr_t)a)].state == ST_FREE)
+            goto unlock_bad;
+        size_t i = pidx((uintptr_t)a);
+        size_t first = pidx((uintptr_t)((uint64_t)g_pg[i].base * PAGE));   /* the allocation's first page */
+        err = ERROR_INVALID_PARAMETER;
+        if (g_pg[i].type != TY_PRIVATE || (g_pg[i].flags & (F_FOREIGN | F_VIEW)))
+            goto unlock_bad;   /* views end with UnmapViewOfFile, noted memory is not ours */
+        if (type == MEM_RELEASE) {
+            if (sz || a != paddr(first))
+                goto unlock_bad;
+            release_alloc(first);
+        } else {
+            size_t n = alloc_pages(first), f, l;
+            if (!sz) {   /* the whole allocation, named by its base */
+                if (a != paddr(first))
+                    goto unlock_bad;
+                f = first;
+                l = first + n - 1;
+            } else {
+                uint64_t pa = a & ~(uint64_t)(PAGE - 1), pe = (a + sz + PAGE - 1) & ~(uint64_t)(PAGE - 1);
+                err = ERROR_INVALID_ADDRESS;
+                if (a + sz < a || pe > paddr(first) + (uint64_t)n * PAGE)
+                    goto unlock_bad;
+                f = pidx((uintptr_t)pa);
+                l = pidx((uintptr_t)pe) - 1;
+            }
+            mem_account(f, l - f + 1, true, -1);
+            os_vm_decommit((void *)paddr(f), (l - f + 1) * PAGE);
+            for (size_t k = f; k <= l; k++) {
+                g_pg[k].state = ST_RESERVE;
+                g_pg[k].cur = 0;
+                g_pg[k].flags &= ~F_RESET;
+            }
+        }
+        ok = TRUE;
+    }
+unlock_bad:
+    os_unlock(&g_vm_lock);
+    if (ok)
+        return TRUE;
+bad:
+    SetLastError(err);
+    return FALSE;
+}
+
+/* the access a thread of the guest has to [a, a + n) by the map: 1 yes. access 0 read, 1 write, 8 code. A guard page
+ * is no access (the first access is the exception): consume_guard clears the bit of the first one found, as
+ * IsBad*Ptr's probe does. Under the lock. */
+static int range_access(uint64_t a, uint64_t n, int access, bool consume_guard)
+{
+    if (a < UMIN || a >= UEND || n > UEND - a)
+        return 0;
+    for (size_t i = pidx((uintptr_t)a), e = pidx((uintptr_t)(a + n - 1)); i <= e; i++) {
+        struct pg *p = &g_pg[i];
+        if (p->state != ST_COMMIT)
+            return 0;
+        if (p->cur & PAGE_GUARD) {
+            if (consume_guard) {
+                p->cur &= ~PAGE_GUARD;
+                os_vm_protect((void *)paddr(i), PAGE, os_prot_of(p->cur));
+            }
+            return 0;
+        }
+        if (access == 1 ? !prot_write(p->cur) : access == 8 ? !prot_read(p->cur) && !prot_exec(p->cur) : !prot_read(p->cur))
+            return 0;
+    }
+    return 1;
+}
+
+/* IsBadReadPtr / IsBadWritePtr / IsBadCodePtr (module.cpp). Memory of the LP64 host (addresses beyond 32 bits)
+ * is not guest memory and has no entry in the map: the host build only ever passes such addresses for its own
+ * buffers, which are valid. */
+int w32_vm_probe(const void *p, size_t n, int access)
+{
+    uint64_t a = (uint64_t)(uintptr_t)p;
+    if (!n)
+        return 1;
+    if (sizeof(void *) > 4 && a > 0xFFFFFFFFull)
+        return 1;
+    os_lock(&g_vm_lock);
+    int ok = pg_init() && range_access(a, n, access, true);
     os_unlock(&g_vm_lock);
     return ok;
 }
 
-extern "C" SIZE_T VirtualQuery(LPCVOID addr, PMEMORY_BASIC_INFORMATION mbi, SIZE_T len)
+static DWORD protect_pages(uint64_t a, uint64_t sz, DWORD prot, DWORD *was)   /* 0 or the error */
 {
-    if (len < sizeof *mbi)
-        return 0;
-    uintptr_t a = (uintptr_t)addr & ~(uintptr_t)(PAGE - 1);
+    uint64_t pa = a & ~(uint64_t)(PAGE - 1), pe = (a + sz + PAGE - 1) & ~(uint64_t)(PAGE - 1);
+    DWORD err = 0;
     os_lock(&g_vm_lock);
-    struct region *r = region_of(a);
-    memset(mbi, 0, sizeof *mbi);
-    mbi->BaseAddress = (PVOID)a;
-    if (!r) {
-        mbi->State = MEM_FREE;
-        mbi->Protect = PAGE_NOACCESS;
-        mbi->RegionSize = PAGE;
+    if (!pg_init() || pa < UMIN || a + sz < a || pe > UEND) {
+        err = ERROR_INVALID_ADDRESS;
     } else {
-        size_t p = (a - r->base) / PAGE, q = p;
-        uint8_t c = r->committed[p];
-        while (q < r->size / PAGE && r->committed[q] == c)
-            q++;
-        mbi->AllocationBase = (PVOID)r->base;
-        mbi->AllocationProtect = r->protect;
-        mbi->RegionSize = (q - p) * PAGE;
-        mbi->State = c ? MEM_COMMIT : MEM_RESERVE;
-        mbi->Protect = c ? r->protect : 0;
-        mbi->Type = MEM_PRIVATE;
+        size_t f = pidx((uintptr_t)pa), l = pidx((uintptr_t)pe) - 1;
+        for (size_t i = f; i <= l && !err; i++)   /* committed, and in one allocation */
+            if (g_pg[i].state != ST_COMMIT || g_pg[i].base != g_pg[f].base)
+                err = ERROR_INVALID_ADDRESS;
+        if (!err && g_pg[f].type != TY_PRIVATE && ((prot_write(prot) && !prot_write(g_pg[f].aprot)) || (prot_exec(prot) && !prot_exec(g_pg[f].aprot))))
+            err = ERROR_INVALID_PARAMETER;   /* beyond what the section / view grants */
+        if (!err && os_vm_protect((void *)paddr(f), (l - f + 1) * PAGE, os_prot_of(prot)))
+            err = ERROR_INVALID_PARAMETER;
+        if (!err) {
+            *was = g_pg[f].cur;
+            for (size_t i = f; i <= l; i++)
+                g_pg[i].cur = (uint16_t)prot;
+        }
     }
     os_unlock(&g_vm_lock);
+    return err;
+}
+
+extern "C" BOOL VirtualProtect(LPVOID addr, SIZE_T size, DWORD prot, PDWORD old)
+{
+    prot = W32_DW(prot);
+    DWORD err = ERROR_INVALID_PARAMETER, was = 0;
+    if (size && prot_valid(prot)) {
+        if (!old || !w32_vm_probe(old, sizeof *old, 1))   /* before anything changes */
+            err = ERROR_NOACCESS;
+        else
+            err = protect_pages((uint64_t)(uintptr_t)addr, (uint64_t)size, prot, &was);
+    }
+    if (err) {
+        SetLastError(err);
+        return FALSE;
+    }
+    *old = was;
+    return TRUE;
+}
+
+extern "C" SIZE_T VirtualQuery(LPCVOID addr, PMEMORY_BASIC_INFORMATION mbi, SIZE_T len)
+{
+    uint64_t a = (uint64_t)(uintptr_t)addr;
+    if (len < sizeof *mbi) {
+        SetLastError(ERROR_BAD_LENGTH);
+        return 0;
+    }
+    if (a < UMIN || a >= UEND) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+    os_lock(&g_vm_lock);
+    if (!pg_init()) {
+        os_unlock(&g_vm_lock);
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return 0;
+    }
+    size_t p = pidx((uintptr_t)a), q = p + 1;
+    struct pg c = g_pg[p];
+    while (q < NPAGES) {
+        const struct pg &d = g_pg[q];
+        if (d.state != c.state || (c.state != ST_FREE && (d.base != c.base || d.type != c.type || d.aprot != c.aprot || d.cur != c.cur)))
+            break;
+        q++;
+    }
+    os_unlock(&g_vm_lock);
+    memset(mbi, 0, sizeof *mbi);
+    mbi->BaseAddress = (PVOID)(uintptr_t)paddr(p);
+    mbi->RegionSize = (q - p) * PAGE;
+    if (c.state == ST_FREE) {
+        mbi->Protect = PAGE_NOACCESS;
+    } else {
+        mbi->AllocationBase = (PVOID)(uintptr_t)((uint64_t)c.base * PAGE);
+        mbi->AllocationProtect = c.aprot;
+        mbi->State = c.state == ST_COMMIT ? MEM_COMMIT : MEM_RESERVE;
+        mbi->Protect = c.state == ST_COMMIT ? c.cur : 0;
+        mbi->Type = c.type == TY_IMAGE ? MEM_IMAGE : c.type == TY_MAPPED ? MEM_MAPPED : MEM_PRIVATE;
+        return sizeof *mbi;
+    }
+    mbi->State = MEM_FREE;
     return sizeof *mbi;
+}
+
+/* a memory fault at addr, by the map (the host fault handler of the lifter runtime asks) */
+extern "C" int fnvnx_win32_vm_fault(uintptr_t addr, int access, uint32_t *code_out)
+{
+    uint32_t code = STATUS_ACCESS_VIOLATION;
+    int r = 0;
+    uint64_t a = (uint64_t)addr;
+    os_lock(&g_vm_lock);
+    if (pg_init() && a >= UMIN && a < UEND && g_pg[pidx((uintptr_t)a)].state == ST_COMMIT) {
+        struct pg *p = &g_pg[pidx((uintptr_t)a)];
+        if (p->cur & PAGE_GUARD) {
+            p->cur &= ~PAGE_GUARD;   /* once: the access is retried after the handler */
+            os_vm_protect((void *)(uintptr_t)(a & ~(uint64_t)(PAGE - 1)), PAGE, os_prot_of(p->cur));
+            code = STATUS_GUARD_PAGE_VIOLATION;
+            r = 1;
+        } else if (access == 1 ? prot_write(p->cur) : access == 8 ? prot_exec(p->cur) : prot_read(p->cur)) {
+            r = 2;   /* the map permits it: another thread cleared the guard first */
+        }
+    }
+    os_unlock(&g_vm_lock);
+    if (code_out)
+        *code_out = code;
+    return r;
+}
+
+/* memory that did not come from VirtualAlloc: the loader's image sections, heap regions and thread stacks */
+extern "C" void fnvnx_win32_vm_note(uintptr_t base, size_t size, DWORD type, DWORD protect)
+{
+    uint64_t pa = (uint64_t)base & ~(uint64_t)(PAGE - 1), pe = ((uint64_t)base + size + PAGE - 1) & ~(uint64_t)(PAGE - 1);
+    protect = W32_DW(protect);
+    type = W32_DW(type);
+    uint8_t ty = type == MEM_IMAGE ? TY_IMAGE : type == MEM_MAPPED ? TY_MAPPED : TY_PRIVATE;
+    if (!size || pa < UMIN || pe > UEND || pe < pa || !prot_valid(protect))
+        return;
+    os_lock(&g_vm_lock);
+    if (pg_init()) {
+        DWORD ap = ty == TY_IMAGE ? 0x80 /* PAGE_EXECUTE_WRITECOPY */ : protect;
+        for (size_t i = pidx((uintptr_t)pa), e = pidx((uintptr_t)pe); i < e; i++) {
+            if (g_pg[i].state == ST_FREE) {
+                size_t j = i;
+                while (j < e && g_pg[j].state == ST_FREE)
+                    pg_set(j++, paddr(i), ST_COMMIT, ty, protect, ap, F_FOREIGN, 0);
+                i = j - 1;
+            } else if (g_pg[i].type == ty) {   /* a page of an allocation: its protection */
+                g_pg[i].cur = (uint16_t)protect;
+            }
+        }
+    }
+    os_unlock(&g_vm_lock);
+}
+
+extern "C" void fnvnx_win32_vm_unnote(uintptr_t base, size_t size)
+{
+    uint64_t pa = (uint64_t)base & ~(uint64_t)(PAGE - 1), pe = ((uint64_t)base + size + PAGE - 1) & ~(uint64_t)(PAGE - 1);
+    if (!size || pa < UMIN || pe > UEND || pe < pa)
+        return;
+    os_lock(&g_vm_lock);
+    if (pg_init())
+        for (size_t i = pidx((uintptr_t)pa), e = pidx((uintptr_t)pe); i < e; i++)
+            if (g_pg[i].flags & F_FOREIGN)
+                pg_clear(i);
+    os_unlock(&g_vm_lock);
+}
+
+/* ---- the page map's services to file views (filemap.cpp) */
+struct view_ctx { w32_view_osmap fn; void *ctx; };
+static void *view_osmap(void *hint, size_t size, void *c)
+{
+    struct view_ctx *v = (struct view_ctx *)c;
+    return v->fn(hint, size, v->ctx);
+}
+
+void *w32_vm_view_place(uintptr_t want, size_t size, w32_view_osmap osmap, void *ctx, DWORD alloc_prot, DWORD page_prot,
+                        int committed, int image, int reserve_section)
+{
+    size_t np = (size + PAGE - 1) / PAGE;
+    void *res = NULL;
+    os_lock(&g_vm_lock);
+    if (!pg_init()) {
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+    } else if (want && (want < UMIN || want >= UEND || np > NPAGES)) {
+        SetLastError(ERROR_INVALID_ADDRESS);
+    } else if (!size || np > NPAGES) {
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+    } else {
+        struct view_ctx v = { osmap, ctx };
+        size_t at = place(want, np, false, view_osmap, &v);
+        if (at != NPAGES) {
+            uint8_t fl = (uint8_t)(F_VIEW | (reserve_section ? F_RESERVESEC : 0));
+            for (size_t i = 0; i < np; i++)
+                pg_set(at + i, paddr(at), committed ? ST_COMMIT : ST_RESERVE, image ? TY_IMAGE : TY_MAPPED, committed ? page_prot : 0,
+                       alloc_prot, fl, 0);
+            res = (void *)paddr(at);
+        }
+    }
+    os_unlock(&g_vm_lock);
+    return res;
+}
+
+size_t w32_vm_view_remove(uintptr_t base)
+{
+    size_t n = 0;
+    os_lock(&g_vm_lock);
+    if (pg_init() && base >= UMIN && base < UEND && !(base & (PAGE - 1))) {
+        size_t i = pidx(base);
+        if (g_pg[i].state != ST_FREE && (g_pg[i].flags & F_VIEW) && paddr(i) == (uintptr_t)((uint64_t)g_pg[i].base * PAGE)) {
+            n = alloc_pages(i);
+            for (size_t k = 0; k < n; k++)
+                pg_clear(i + k);
+        }
+    }
+    os_unlock(&g_vm_lock);
+    return n * PAGE;
+}
+
+void w32_vm_view_prot(uintptr_t base, size_t size, DWORD prot)
+{
+    os_lock(&g_vm_lock);
+    if (pg_init() && base >= UMIN && base + size <= UEND)
+        for (size_t i = pidx(base), e = pidx(base + size - 1); i <= e; i++)
+            if (g_pg[i].flags & F_VIEW && g_pg[i].state == ST_COMMIT)
+                g_pg[i].cur = (uint16_t)prot;
+    os_unlock(&g_vm_lock);
 }
 
 /* ---- heaps over the C heap (the engine replaces allocation with its own MemoryManager).
@@ -478,6 +991,16 @@ extern "C" HANDLE LocalFree(HANDLE h)
 static uint64_t pagefile_total(uint64_t t) { return 2 * t; }
 static uint64_t pagefile_avail(uint64_t t, uint64_t a) { return a + t; }
 
+/* virtual address space: the user range, and what of it is free in the page map */
+static uint64_t virt_total(void) { return (uint64_t)UEND - UMIN; }
+static uint64_t virt_avail(void)
+{
+    os_lock(&g_vm_lock);
+    uint64_t n = pg_init() ? g_free_pages : NPAGES;
+    os_unlock(&g_vm_lock);
+    return n * PAGE;
+}
+
 extern "C" void GlobalMemoryStatus(LPMEMORYSTATUS ms)
 {
     uint64_t t, a;
@@ -490,12 +1013,16 @@ extern "C" void GlobalMemoryStatus(LPMEMORYSTATUS ms)
     ms->dwAvailPhys = a > cap ? cap : (SIZE_T)a;
     ms->dwTotalPageFile = pagefile_total(t) > cap ? cap : (SIZE_T)pagefile_total(t);
     ms->dwAvailPageFile = pagefile_avail(t, a) > cap ? cap : (SIZE_T)pagefile_avail(t, a);
-    ms->dwTotalVirtual = (SIZE_T)0x7FFE0000u;
-    ms->dwAvailVirtual = ms->dwAvailPhys < ms->dwTotalVirtual ? ms->dwAvailPhys : ms->dwTotalVirtual;
+    ms->dwTotalVirtual = (SIZE_T)virt_total();   /* both below 2 GiB: no clamping applies */
+    ms->dwAvailVirtual = (SIZE_T)virt_avail();
 }
 
 extern "C" BOOL GlobalMemoryStatusEx(LPMEMORYSTATUSEX ms)
 {
+    if (!ms || W32_DW(ms->dwLength) != sizeof *ms) {
+        SetLastError(ms ? ERROR_INVALID_PARAMETER : ERROR_NOACCESS);
+        return FALSE;
+    }
     uint64_t t, a;
     os_memory_info(&t, &a);
     ms->dwLength = sizeof *ms;
@@ -504,8 +1031,8 @@ extern "C" BOOL GlobalMemoryStatusEx(LPMEMORYSTATUSEX ms)
     ms->ullAvailPhys = a;
     ms->ullTotalPageFile = pagefile_total(t);
     ms->ullAvailPageFile = pagefile_avail(t, a);
-    ms->ullTotalVirtual = 0x7FFE0000ull;
-    ms->ullAvailVirtual = a < 0x7FFE0000ull ? a : 0x7FFE0000ull;
+    ms->ullTotalVirtual = virt_total();
+    ms->ullAvailVirtual = virt_avail();
     ms->ullAvailExtendedVirtual = 0;
     return TRUE;
 }

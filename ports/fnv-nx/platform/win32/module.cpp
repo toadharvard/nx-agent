@@ -449,9 +449,11 @@ extern "C" void FatalAppExitA(UINT action, LPCSTR msg)
     ExitProcess(0);
 }
 
-extern "C" BOOL IsBadCodePtr(FARPROC p) { return p == NULL; }
-extern "C" BOOL IsBadReadPtr(const void *p, UINT_PTR n) { return n && !p; }
-extern "C" BOOL IsBadWritePtr(LPVOID p, UINT_PTR n) { return n && !p; }
+/* answered from the page map for every byte of the range; a guard page makes the probe fail and consumes the guard
+ * (the probe's own access is the first one). IsBadCodePtr probes one byte for read, as Windows does. */
+extern "C" BOOL IsBadCodePtr(FARPROC p) { return !w32_vm_probe((const void *)p, 1, 8); }
+extern "C" BOOL IsBadReadPtr(const void *p, UINT_PTR n) { return !w32_vm_probe(p, (size_t)n, 0); }
+extern "C" BOOL IsBadWritePtr(LPVOID p, UINT_PTR n) { return !w32_vm_probe(p, (size_t)n, 1); }
 
 extern "C" BOOL GetComputerNameA(LPSTR buf, LPDWORD n)
 {
