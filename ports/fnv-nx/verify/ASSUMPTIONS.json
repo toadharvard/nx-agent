@@ -725,7 +725,7 @@
    ],
    "aliases": [],
    "status": "REMOVE",
-   "removed_by": "OPEN: L2 states the fact that discharges it or rewords the comment",
+   "removed_by": "planned: gate namegate (L2 w5) compares every name with cl's symbol table and so certifies the names; closes when L2's plugin sources reach the trunk",
    "owner": "L2"
   }
  ]
