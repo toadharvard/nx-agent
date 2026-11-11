@@ -26,7 +26,7 @@ class Echo:
                 elif k == "locked": self.item(struct.pack("<5I", v["pitch"], v["spitch"], v["slot"], v["base_off"], v["hdc"]))
                 elif k in ("struct", "buffer"): self.item(self.mutate(c, bytearray(v or b"")))
                 else: self.item(self.mutate(c, bytearray(struct.pack("<I", v & 0xFFFFFFFF))))
-            if m["ret_kind"] == "handle": self.item(struct.pack("<2I", c["retv"], self.names.index("IDirect3D9")))
+            if m["ret_kind"] == "handle": self.item(struct.pack("<2I", c["retv"], self.names.index(self.pl.objs[c["retv"]].iface)))
             elif m["ret_kind"] != "void": self.item(struct.pack("<I", c["retv"] & 0xFFFFFFFF))
 
     def mutate(self, c, b):

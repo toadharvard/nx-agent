@@ -124,6 +124,7 @@ class Plan:
         if "sm_bytes(" in ln: body = SHADER
         elif re.search(r"\bdecl_bytes\(", ln): body = DECL
         elif "wstr_bytes" in ln: body = "AB".encode("utf-16-le") + b"\0\0"
+        elif "str_bytes" in ln: body = b"AB\0"
         elif "u32(" in ln: body = struct.pack("<8I", 32, 1, 2, 64, 0, 0, 0, 0) + struct.pack("<8i", 0, 0, 1, 1, 0, 0, 1, 1)
         elif on and p["canon"]["as"] == "handle":
             nums = [next(x.num for x in self.objs.values() if x.rc > 0 and self.isa(x.iface, p["canon"]["iface"]))] * (self.ev(c, ln) // 4)
