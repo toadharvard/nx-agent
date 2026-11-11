@@ -56,6 +56,25 @@ Gate `bodysel` ($GATE_OUT/bodysel.json, gatefile.py): universe = the code addres
 with a verdict (totality).  The result is a function of the argument files only; rows are written sorted.
 ```
 
+## contract/bridgetable.py
+
+```text
+Bridge table of the import guest entries, pure derivation (rows: dll, name, ordinal, conv, ret, args, native_symbol, bind).
+
+A pure function of its arguments (no file, no process): the driver verify/gate_imports.py reads the declared inputs and calls derive().
+  names       text of sys_names.tsv (dll TAB name per line) from the private manifest
+  spec_text   function dll -> text of the export specification of the reference environment (Wine 9.0 dlls/<dll>/<dll>.spec)
+  syms        the set of symbol names that the product objects define or reference (objects.json defined + undefined)
+  name_table  {msvcrt name: (symbol, kind)} of the name table the product serves msvcrt names from (read_name_table)
+  extra       texts of rows in this 8-column format (other owners' rows: COM interfaces); a row of the same (dll, name) replaces the derived one
+bind  sym    native_symbol is a symbol of the product objects     lookup  msvcrt name served by the name table (native_symbol `-`)
+      l3     provided by the lifter runtime under native_symbol   data    the slot holds the address of the object native_symbol
+      none   no implementation: the gate `imports` is red for the row
+conv  stdcall | cdecl | vararg | thiscall | fastcall | data;  ret v|i|q|f|d;  args: x86 stack slots i|q|f|d.
+A name missing from its spec, a stub in the spec, a forward that cannot be followed or an unknown argument type is an error: total or failing.
+`lookup` is decided by the name table, a declared input (a name is in it or not), not by a run.
+```
+
 ## contract/gate_call.py
 
 ```text
@@ -233,6 +252,30 @@ too and compared with the platform's constant.  Check (--bridge): pairs the plat
 Exe-derived: container and fnv-nx-build only.
 ```
 
+## contract/hive.py
+
+```text
+Gate `registry` (class G of verify/VERDICT.md, the declared machine's registry), pure rules: the product's hive holds exactly the keys that
+the exe and the modules read, found statically from their call sites, with the values of the declared machine.
+
+Values (no file, no process): `sites` text of regsites.tsv (module, site, api, root, subkey, value, status static|dynamic, reason: the registry-API
+call sites of the exe and its modules, exe-derived and private), `declared` text of declared_registry.tsv (root, key, name, type, data, source:
+public), `seed` text of the include the product is built from, `refs` {unit: set of referenced symbol names} of the product objects.
+Items of the universe and their certification:
+  declared:<root>\<key>:<name>   every declared row; certified iff a static read site (role read, status static) reads it (root, key and
+                                  name equal, case-insensitive as the registry compares)
+  site:<module>:<site>:<api>      every site of role open, create or read whose root, key or value is not statically resolved; never certified
+                                  (class dynamic). While one exists the verdict is a MEASUREMENT build, as for a dynamic-name GetProcAddress
+                                  site in the reach gate (VERDICT.md): a declared row cannot be proven complete against an unresolved site
+  seed                            certified iff `seed` equals, byte for byte, the include generate() makes from (sites, declared)
+  writer:<unit>                   every product object that references a hive-writing API (role create or write); certified iff it is the
+                                  declared seed unit: no other code of the product makes a hive key
+generate() is the port of platform/manifest/gen_registry_seed.py (L5): it refuses a declared row that no static read site reads, a malformed or
+duplicate row, a value not valid for its type, and a `{` that is not `{game_dir}`. Assumptions: regsites.tsv is complete over the exe and the
+modules (the registry-site pass reports what it cannot bind as dynamic, never skips); the seed unit and the registry implementation are the only
+code that reaches the hive, and the implementation creates no key by itself (the writers rule closes the entry points, not the internals).
+```
+
 ## contract/iat.py
 
 ```text
@@ -297,6 +340,25 @@ files of the given directories (first directory in list order that has it; two f
 error). A dll found there is a GUEST IMAGE and is walked further; a dll not found there is a platform import (gate `imports`, owner L5)
 and is not an image. Assumption (stated, VERDICT.md): dynamic LoadLibrary names are facts of the `gpa` gate, not of this rule.
 Order: the exe, then the images in discovery order (depth first, import directory then delay-load directory).
+```
+
+## contract/imports.py
+
+```text
+Gate `imports` (class 4 of verify/VERDICT.md), pure judgement: every row of the bridge table has a body proven by the build products.
+
+Inputs (all values, no file): rows from bridgetable.derive; `syms` {symbol: [(bind, type)]} of the product objects (objects.json `defined`);
+`table` the msvcrt name table {name: (symbol, kind)}; `others` the same kind of map over every product root that is not the one the rows belong
+to; `owner_of` {(dll, name): index} of rows taken from files that belong to another owner's build (the `external` rows).
+A row is certified iff its body is proven by the symbol table of a build product:
+  sym/data  a GLOBAL (or UNIQUE) symbol of type FUNC (sym) or OBJECT (data) is defined in the row's root
+  lookup    the name table entry of the name names a symbol defined GLOBAL of type FUNC (kind func) or OBJECT (kind data) in the root
+  l3        and rows of another owner's file: such a symbol is defined in another product root (the lifter runtime's build); else `external`
+Classes of an uncertified row: none (no symbol of that name is defined or referenced), unresolved-symbol (referenced only), weak (defined weak
+only), not-a-function (defined global of the wrong type), lookup-miss (an msvcrt name that the name table does not carry, or whose entry names
+no proven symbol), external (l3 or another owner's row that no other root defines).
+The decision reads symbol tables and tables, never a source text, a run or a name pattern. Assumption: objects.json lists every global, weak
+and unique symbol of every object of the root (recipe.symbols); locals are not symbols a row can bind to.
 ```
 
 ## contract/l2sections.py
@@ -1159,6 +1221,24 @@ legal outcome); the invariant that closes the class is that EVERY row is turned 
 judged, certified = judged minus the rows whose address bodysel does not give LIFTED (the function would run a native body that fails its contract).
 ```
 
+## verify/gate_imports.py
+
+```text
+Gate "imports" (fnvnx-gate/1, class 4 of VERDICT.md): every import of the manifest has a body, proven by the build products (rules: contract/imports.py).
+    python3 -I gate_imports.py      cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/imports.json and GATE_OUT/imports.ids
+Roots come only from verify/admit.json (class product); for each the gate calls gate_build.ensure (build or cache hits) and reads the symbol
+tables the recipe wrote (objects.json: defined {symbol, bind, type}, undefined). No nm, no ELF parsing, no probe run.
+A product root DECLARES its imports in `<root>/imports.in.json` ("fnvnx-imports-in/1"):
+  {"format", "external": NAME of an entry of the root's recipe `external` (the private manifest: fnv-nx-build commit + tree_sha256),
+   "names": path of sys_names.tsv inside it, "specs": directory of the reference environment's .spec files inside it,
+   "extra": [row files inside it, judged against this root], "extra_other": [row files of another owner's build, judged against the other roots],
+   "name_table": path inside the root of the msvcrt name table `name TAB symbol TAB func|data` (the same file the root generates its lookup table from)}
+The external is checked out from the build's own fetch (GATE_CACHE/external/<commit>) and its tree hash must equal tree_sha256.
+Universe (gate_build.quantify, the convention of build/objstub): the admitted product roots; per root every row of the bridge table (contract/bridgetable.derive). A root without imports.in.json is one red item. Certified: rows with no class
+(contract/imports.py). uncertified: the first 50 ids `dll!name`; imports.ids lists `id TAB class`, sorted. No product root: universe 0, green. Bad input, a red build, an invalid recipe or an
+external that fails its hash is red with the reason in detail. Exit 0 iff green.
+```
+
 ## verify/gate_linkstrict.py
 
 ```text
@@ -1212,6 +1292,22 @@ the rule's list in the rule's load order (recipe.PLUGIN_SOURCES order, the order
 (recipe.PLUGIN_ARGS); (3) the build is green and its result holds the fnvnx_order .so (the file built by the hermetic plugin stage); (4) the unit's object
 was built. The .so is a declared input of every CC stage of a C++ unit (recipe.Job.compile: cc_inputs), so it is in the CC stage key; an
 object compiled without it, or with another .so, has another key and is not this object. A red build or invalid recipe certifies no unit of the root.
+```
+
+## verify/gate_machine.py
+
+```text
+Gate "machine" (fnvnx-gate/1, class G of VERDICT.md): the product's registry hive holds exactly the keys that the exe and the modules read
+(rules: contract/hive.py).
+    python3 -I gate_machine.py     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/machine.json and machine.ids
+Roots come only from verify/admit.json (class product). A root DECLARES its hive in `<root>/registry.in.json` ("fnvnx-registry-in/1"):
+  {"format", "external": NAME of an entry of the root's recipe `external` (private: fnv-nx-build commit + tree_sha256),
+   "sites": path of regsites.tsv inside it (the registry-API call sites of the exe and the modules),
+   "declared": path inside the root of declared_registry.tsv, "seed": path inside the root of the tracked seed include the product is built from,
+   "seed_unit": the recipe unit that applies the seed (the only unit allowed to reference a hive-writing API)}
+Universe, classes and certification: contract/hive.py. Writers are read from the objects of the build (recipe.symbols per object: undefined
+names). A dynamic site (root, key or value not statically resolved) is class `dynamic`: the gate is red and its detail says MEASUREMENT, as the reach
+gate treats a dynamic-name GetProcAddress site; there is no allow-list. Universe: gate_build.quantify (the admitted product roots; a root without registry.in.json is one red item). No product root: universe 0, green. Bad input, a red build, an invalid recipe or an external that fails its hash is red. Exit 0 iff green.
 ```
 
 ## verify/gate_hostapi.py

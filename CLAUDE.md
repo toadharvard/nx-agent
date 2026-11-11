@@ -303,3 +303,27 @@ The owner's words: "Трекай прогресс послойно и прогр
   that breaks a rule (a stub, a double, a second build path, a new assumption, a heuristic) is not progress: it is red.
 - **Progress is tracked per layer** in `ports/fnv-nx/journal/status/<layer>.md` (see "late night"); the orchestrator
   collects them into `ports/fnv-nx/journal/status/ALL.md` on the integration branch every hour.
+
+## Owner order of 2026-11-11, 23:00: the orchestrator decides, the owner is not disturbed (binding)
+
+The owner's words: "Я запрещаю меня тревожить и просить мое да. Делай что хочешь... Я разрешаю тебе как оркестратору
+решать что архивировать закрывать а что нет. Ты главный. А я сплю. Меня нельзя тревожить и нельзя не делать то что
+необходимо."
+
+- No session asks the owner for a yes, a confirmation or a choice. The orchestrator decides everything the owner would
+  decide, within these rules and the Legal limits, and records the decision in ALL.md.
+- The orchestrator decides which sessions are archived, stopped, resumed or created (leads, workers, farms, old waves).
+  Stale, finished or duplicate sessions are archived without asking.
+- Nothing necessary is left undone for want of an answer: a blocked decision goes to the orchestrator, never to the owner.
+- No messages to the owner except milestones on the goal path (exe entry, WinMain, menu, first frame, Switch).
+
+## Owner order of 2026-11-11, 23:00: GOG Galaxy is not lifted (binding)
+
+The owner's words: "нахуя лифтить гэлакси... Ну нет доступа к нему. Похуй на него. Это как сокеты."
+
+- Galaxy.dll and GalaxyWrp.dll are not lifted. The declared machine has no Galaxy service, the same as it has no network.
+- Every Galaxy entry the exe or a module reaches answers the documented "Galaxy unavailable / not initialized / not
+  signed in" result of the Galaxy SDK, the same way network calls answer the documented "network down" error. It is a
+  declared-machine body (CLAUDE.md "The declared machine"), with the SDK documentation cited per function, not a stub.
+- Owner of the bodies: platform (L5). Lifting work on Galaxy stops; modules.tsv lists Galaxy as a declared-machine
+  module, not as a lifted one.
