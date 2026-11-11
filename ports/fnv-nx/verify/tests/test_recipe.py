@@ -276,7 +276,7 @@ def main():
     check("warm == cold (objects, ELF)", [o["sha256"] for o in r1["objects"]] == [o["sha256"] for o in r2["objects"]]
           and r1["elf"]["sha256"] == r2["elf"]["sha256"] and r1["stage_keys"] == r2["stage_keys"])
     d, u = r1["defined"], r1["undefined"]
-    check("objects.json: defined symbols from .symtab (struct), undefined list", {"symbol": "f_a", "bind": "GLOBAL", "type": "FUNC", "object": "a.c"} in d
+    check("objects.json: defined symbols from .symtab (struct), undefined list", {"symbol": "f_a", "bind": "GLOBAL", "type": "FUNC", "object": "a.c", "comdat": None} in d
           and any(x["symbol"] == "os_svc" and x["object"] == "os.S" for x in d) and "f_b" in u and "f_a" not in u
           and d == sorted(d, key=lambda x: (x["symbol"], x["object"])) and u == sorted(u), (d, u))
 
@@ -291,7 +291,7 @@ def main():
           and [o["unit"] for o in rt["objects"]] == ["a.c", "b.c", "c.c", "os.S"], rt.get("failure"))
     check("tests: each test is linked from every product unit plus its own units and has its own ELF; its symbols are its own objects'",
           all(set(t["linked"]) == {"a.c", "b.c", "c.c", "os.S"} | set(t["units"]) and t["elf"] for t in tl.values())
-          and {"symbol": "t_only", "bind": "GLOBAL", "type": "FUNC", "object": "tests/t_clean.c"} in tl["clean"]["defined"]
+          and {"symbol": "t_only", "bind": "GLOBAL", "type": "FUNC", "object": "tests/t_clean.c", "comdat": None} in tl["clean"]["defined"]
           and not any(d["object"].startswith("tests/") for d in rt["defined"]), tl)
     rs = recipe.build(make_repo("tests-strong", rec=mut(tests=[{"name": "s", "units": ["tests/t_s.c"]}]), files={"toy/tests/t_s.c": "int f_b(void) { return 99; }\n"}),
                       ROOT, SS, BASE + "/outs")

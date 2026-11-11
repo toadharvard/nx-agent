@@ -281,28 +281,84 @@ def tail(store, res):
     return open(p, errors="replace").read().splitlines()[-20:]
 
 
+def _comdat_digests(d, w64, secs, shstr, syms):
+    """{section index: sha256 hex} of the COMDAT groups of an ELF object: for every SHT_GROUP section with the GRP_COMDAT flag, one digest over the
+    group signature (the name of the signature symbol) and, for every member section in index order, its name, type, flags and bytes, and its
+    relocations (offset, type, symbol by NAME, addend; a section symbol is named by its section). Every member section maps to its group's digest.
+    Two objects that define the same vague-linkage group carry the same digest iff signature, section contents and relocations are equal."""
+    import hashlib
+
+    def sname(i):
+        o = secs[i][0]
+        return shstr[o:shstr.index(b"\0", o)].decode()
+
+    def rsym(k):
+        n, info, shndx = syms[k]
+        return n if n else "section:" + (sname(shndx) if 0 < shndx < len(secs) else str(shndx))
+    relocs = {}   # target section -> [section index of its REL/RELA]
+    for i, x in enumerate(secs):
+        if x[1] in (4, 9):
+            relocs.setdefault(x[7], []).append(i)
+    out = {}
+    for g in secs:
+        if g[1] != 17:
+            continue
+        words = struct.unpack_from("<%dI" % (g[5] // 4), d, g[4])
+        if not words[0] & 1:
+            continue   # not COMDAT (GRP_COMDAT)
+        h = hashlib.sha256()
+        h.update(("sig %s\n" % syms[g[7]][0]).encode())
+        for m in sorted(words[1:]):
+            x = secs[m]
+            h.update(("sec %s %d %d %d\n" % (sname(m), x[1], x[2], x[5])).encode())
+            if x[1] != 8:   # SHT_NOBITS has no bytes
+                h.update(d[x[4]:x[4] + x[5]])
+            rows = []
+            for r in relocs.get(m, []):
+                rs = secs[r]
+                if rs[1] == 4:
+                    for t in struct.iter_unpack("<QQq" if w64 else "<IIi", d[rs[4]:rs[4] + rs[5]]):
+                        sy, ty = (t[1] >> 32, t[1] & 0xffffffff) if w64 else (t[1] >> 8, t[1] & 0xff)
+                        rows.append((t[0], ty, rsym(sy), t[2]))
+                else:
+                    for t in struct.iter_unpack("<QQ" if w64 else "<II", d[rs[4]:rs[4] + rs[5]]):
+                        sy, ty = (t[1] >> 32, t[1] & 0xffffffff) if w64 else (t[1] >> 8, t[1] & 0xff)
+                        rows.append((t[0], ty, rsym(sy), 0))
+            for r in sorted(rows):
+                h.update(("rel %d %d %s %d\n" % r).encode())
+        for m in words[1:]:
+            out[m] = h.hexdigest()
+    return out
+
+
 def symbols(path, unit):
-    """(defined [{symbol,bind,type,object}], undefined {symbol}) of the global and weak symbols of ELF32 or ELF64 little-endian
-    object PATH (.symtab; ELF32 is the ILP32 ABI, ELF64 the LP64 one: the layouts of Elf32_/Elf64_ Shdr and Sym)."""
+    """(defined [{symbol,bind,type,object,comdat}], undefined {symbol}) of the global and weak symbols of ELF32 or ELF64 little-endian
+    object PATH (.symtab; ELF32 is the ILP32 ABI, ELF64 the LP64 one: the layouts of Elf32_/Elf64_ Shdr and Sym). `comdat` is null, or, when the
+    symbol is defined in a member section of a COMDAT group (vague linkage), the group digest of _comdat_digests."""
     d = open(path, "rb").read()
     if d[:4] != b"\x7fELF" or d[4] not in (1, 2) or d[5] != 1:
         raise ValueError("%s: not an ELF32/ELF64 little-endian object" % path)
     w64 = d[4] == 2
     shoff, = struct.unpack_from("<Q" if w64 else "<I", d, 0x28 if w64 else 0x20)
-    esz, num = struct.unpack_from("<HH", d, 0x3a if w64 else 0x2e)
+    esz, num, shstrndx = struct.unpack_from("<HHH", d, 0x3a if w64 else 0x2e)
     secs = [struct.unpack_from("<IIQQQQIIQQ" if w64 else "<IIIIIIIIII", d, shoff + i * esz) for i in range(num)]   # name type flags addr off size link info align entsize
+    shstr = d[secs[shstrndx][4]:secs[shstrndx][4] + secs[shstrndx][5]]
     defined, undefined = [], set()
     for s in (x for x in secs if x[1] == 2):
         st = secs[s[6]]
         strtab = d[st[4]:st[4] + st[5]]
+        raw = []
         for t in struct.iter_unpack("<IBBHQQ" if w64 else "<IIIBBH", d[s[4]:s[4] + s[5]]):
             name, info, shndx = (t[0], t[1], t[3]) if w64 else (t[0], t[3], t[5])
-            n = strtab[name:strtab.index(b"\0", name)].decode()
+            raw.append((strtab[name:strtab.index(b"\0", name)].decode(), info, shndx))
+        groups = _comdat_digests(d, w64, secs, shstr, raw) if any(x[1] == 17 for x in secs) else {}
+        for n, info, shndx in raw:
             if info >> 4 in SBIND and n:
                 if shndx == 0:
                     undefined.add(n)
                 else:
-                    defined.append({"symbol": n, "bind": SBIND[info >> 4], "type": STYPE.get(info & 15, str(info & 15)), "object": unit})
+                    defined.append({"symbol": n, "bind": SBIND[info >> 4], "type": STYPE.get(info & 15, str(info & 15)), "object": unit,
+                                    "comdat": groups.get(shndx)})
     return defined, undefined
 
 

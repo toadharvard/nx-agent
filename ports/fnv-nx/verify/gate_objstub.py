@@ -9,8 +9,11 @@ its flags and every header the unit really includes (a function of the compiler 
 key). The set is cached per unit under GATE_CACHE/objstub.
 No doubles in tests (doubles.py, owner order of 2026-11-11 night): for every declared test of every root (RECIPE.md "tests"), symbols the test's own
 objects define INTERSECT symbols the objects of ALL product roots define = EMPTY, the test link holds every product unit of its root, and no GLOBAL
-symbol is defined by two product objects of one root; each test and each root's product units is an item. Result fields: tests_total,
-tests_with_doubles, double_symbols, doubles (first 50 reasons). No product root: universe 0, green.
+symbol is defined by two product objects of one root; each test and each root's product units is an item. A symbol defined in a COMDAT group
+on both sides with equal digest (signature, bytes, relocations) is no double: comdat_shared. Python tests (pydoubles.py): every .py below a tests/
+directory of the tree is an item, red when it rebinds an attribute of a project module, writes sys.modules or uses mock/monkeypatch. Result fields:
+tests_total, tests_with_doubles, double_symbols, comdat_shared, py_tests_total, py_tests_with_doubles, py_double_names, doubles (first 50 reasons).
+No product root and no python test: universe 0, green.
 Wine rows: verify/wine_fixme.tsv of the tree under test (objstub.read_wine_table; missing or malformed is a gate error, red); the result
 holds "wine_fixme": {id: call sites} so growth of the simplified bodies is visible.
 Declared-machine rows: verify/declared_machine.tsv of the tree under test (objstub.read_declared_table; missing or malformed is a gate error, red),
@@ -31,6 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import doubles  # noqa: E402
 import gate_build  # noqa: E402
 import objstub  # noqa: E402
+import pydoubles  # noqa: E402
 import recipe  # noqa: E402
 import unitstage  # noqa: E402
 
@@ -62,7 +66,8 @@ def main(argv):
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-objstub-")
     cache, repo = os.environ.get("GATE_CACHE") or tmp, "."
     items, finds, why, results, rows, roots = [], [], "", {}, {}, gate_build.product_roots(repo)
-    built, stats = {}, {"tests_total": 0, "tests_with_doubles": 0, "double_symbols": 0}
+    built, stats = {}, {"tests_total": 0, "tests_with_doubles": 0, "double_symbols": 0, "comdat_shared": 0}
+    pstats = {"py_tests_total": 0, "py_tests_with_doubles": 0, "py_double_names": 0}
     try:
         wine = objstub.read_wine_table(os.path.join(repo, "ports/fnv-nx/verify/wine_fixme.tsv"))   # the table of the tree under test
         declared = objstub.read_declared_table(os.path.join(repo, "ports/fnv-nx/verify/declared_machine.tsv"))   # the table of the tree under test
@@ -79,6 +84,10 @@ def main(argv):
         items, finds = items + its, finds + fs
         dit, dfs, stats = doubles.judge(built)   # no doubles in tests: part of this gate (doubles.py)
         items, finds = items + dit, finds + dfs
+        tracked = recipe.tracked(repo)   # python tests: every .py below a tests/ directory of the tree under test (pydoubles.py)
+        srcs = {p: open(os.path.join(repo, p), errors="replace").read() for p in tracked if pydoubles.is_test_path(p)}
+        pit, pfs, pstats = pydoubles.judge(srcs, tracked)
+        items, finds = items + pit, finds + pfs
     except (ValueError, KeyError, OSError) as e:
         why = "input error: %s" % (str(e)[:300] or type(e).__name__)
     finally:
@@ -92,7 +101,7 @@ def main(argv):
         kinds[k] = kinds.get(k, 0) + 1
     if why:
         status, detail = "red", why
-    elif not roots:
+    elif not roots and not finds:
         status, detail = "green", "no product root (nothing to certify yet)"
     elif finds:
         status, detail = "red", "%d findings: %s" % (len(finds), ", ".join("%s %d" % kv for kv in sorted(kinds.items())))
@@ -102,7 +111,9 @@ def main(argv):
            "uncertified": bad[:50], "detail": detail, "wine_fixme": {str(k): v for k, v in objstub.wine_counts(results).items()},
            "declared_machine": {str(k): v for k, v in objstub.declared_counts(results).items()},
            "tests_total": stats["tests_total"], "tests_with_doubles": stats["tests_with_doubles"], "double_symbols": stats["double_symbols"],
-           "doubles": sorted("%s: %s" % (o, d) for o, _, k, d in finds if k in ("test-double", "test-omits-unit", "test-not-linked", "product-duplicate"))[:50]}
+           "comdat_shared": stats["comdat_shared"], "py_tests_total": pstats["py_tests_total"],
+           "py_tests_with_doubles": pstats["py_tests_with_doubles"], "py_double_names": pstats["py_double_names"],
+           "doubles": sorted("%s: %s" % (o, d) for o, _, k, d in finds if k in ("test-double", "test-omits-unit", "test-not-linked", "product-duplicate", "py-double", "py-unparsable"))[:50]}
     with open(os.path.join(os.environ["GATE_OUT"], "objstub.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     print("objstub: %s %d/%d %s" % (status, cert, len(items), detail[:200]))

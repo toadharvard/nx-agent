@@ -66,7 +66,7 @@ obj("u_dup", "int real_b(void){return 66;}\n")
 
 # positive: a test that defines only its own names, linking every product unit
 k, f, st, items = kinds({"R": result(["a", "b"], [("clean", ["t_clean"], None)])})
-check("clean test: green, 1 test, 0 doubles", k == [] and st == {"tests_total": 1, "tests_with_doubles": 0, "double_symbols": 0}, (k, f, st))
+check("clean test: green, 1 test, 0 doubles", k == [] and st == {"tests_total": 1, "tests_with_doubles": 0, "double_symbols": 0, "comdat_shared": 0}, (k, f, st))
 check("clean test: items are the test and the product units of the root", sorted(i for i, _ in items) == ["R:product-units", "R:test:clean"], items)
 check("local (static) symbols are no definition", doubles.judge({"R": result(["a", "b"], [("st", ["t_static"], None)])})[1] == [], None)
 
@@ -91,7 +91,36 @@ check("undeclared test source (a product unit that replaces a product body): pro
 check("two product objects with the same WEAK symbol: no finding (inline functions)",
       doubles.judge({"R": {"units": ["a", "b"], "defined": [{"symbol": "inl", "bind": "WEAK", "type": "FUNC", "object": "a"},
                                                                 {"symbol": "inl", "bind": "WEAK", "type": "FUNC", "object": "b"}], "tests": []}})[1] == [])
-check("no roots: universe 0, no finding, stats 0", doubles.judge({}) == ([], [], {"tests_total": 0, "tests_with_doubles": 0, "double_symbols": 0}))
+check("no roots: universe 0, no finding, stats 0", doubles.judge({}) == ([], [], {"tests_total": 0, "tests_with_doubles": 0, "double_symbols": 0, "comdat_shared": 0}))
+
+# COMDAT (vague linkage): the same group in test and product is no double; any difference is
+def cobj(unit, src):
+    c = os.path.join(BASE, unit + ".cc")
+    open(c, "w").write(src)
+    subprocess.run(["aarch64-linux-gnu-g++-13", "-O1", "-ffreestanding", "-fno-exceptions", "-fno-rtti", "-c", "-o", os.path.join(BASE, unit + ".o"), c], check=True)
+    return unit
+
+
+INL = "extern int ext1(int);\ninline __attribute__((noinline)) int sh(int x){ return ext1(x) + 1; }\n"
+cobj("c_prod", INL + "int use_p(int x){ return sh(x); }\n")
+cobj("c_same", INL + "int use_t(int x){ return sh(x) * 2; }\n")                                  # same inline, other user
+cobj("c_body", "extern int ext1(int);\ninline __attribute__((noinline)) int sh(int x){ return ext1(x) + 2; }\nint use_b(int x){ return sh(x); }\n")   # other bytes
+cobj("c_rel", "extern int ext2(int);\ninline __attribute__((noinline)) int sh(int x){ return ext2(x) + 1; }\nint use_r(int x){ return sh(x); }\n")   # other relocation symbol
+obj("c_weak", "__attribute__((weak)) int _Z2shi(int x){ return x; }\n")                          # weak outside a COMDAT group, same name
+dd = [d for d in defined("c_prod") if d["symbol"] == "_Z2shi"]
+check("C++ inline function is WEAK in a COMDAT group (digest set)", len(dd) == 1 and dd[0]["bind"] == "WEAK" and dd[0]["comdat"], dd)
+k, f, st, _ = kinds({"R": result(["c_prod"], [("c", ["c_same"], None)])})
+check("same COMDAT group in test and product (signature, bytes, relocations equal): no double, counted as comdat_shared",
+      k == [] and st["double_symbols"] == 0 and st["comdat_shared"] == 1 and st["tests_with_doubles"] == 0, (k, f, st))
+k, f, st, _ = kinds({"R": result(["c_prod"], [("c", ["c_body"], None)])})
+check("COMDAT group with different bytes: red test-double", k == ["test-double"] and "_Z2shi" in f[0][3] and st["comdat_shared"] == 0, (k, f, st))
+k, f, st, _ = kinds({"R": result(["c_prod"], [("c", ["c_rel"], None)])})
+check("COMDAT group with a relocation against another symbol: red test-double", k == ["test-double"] and st["double_symbols"] >= 1, (k, f, st))
+k, f, st, _ = kinds({"R": result(["c_prod"], [("c", ["c_weak"], None)])})
+check("weak definition outside a COMDAT group against a COMDAT one: red test-double", k == ["test-double"], (k, f, st))
+k, f, st, _ = kinds({"R": result(["c_weak"], [("c", ["c_same"], None)])})
+check("COMDAT in the test, weak non-COMDAT in the product: red test-double", k == ["test-double"], (k, f, st))
+check("two product objects with equal COMDAT groups: no product-duplicate", kinds({"R": result(["c_prod", "c_same"], [])})[0] == [])
 
 # recipe.check: the `tests` key
 T = "ports/fnv-nx/"
