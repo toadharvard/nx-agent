@@ -23,8 +23,8 @@ const fnvnx_start_range *fnvnx_range_of(const fnvnx_loaded *L, uint32_t va, uint
 }
 
 static int overlaps(const fnvnx_loaded *L, uint32_t base, uint32_t size) {
-    uint32_t b = L->pe.image_base == 0 && !L->img.nmapped ? 0 : L->img.load_base, n = L->pe.size_of_image;
-    return n && (uint64_t)base < (uint64_t)b + n && (uint64_t)base + size > b;
+    uint32_t b = L->img.load_base, n = L->pe.size_of_image;
+    return L->img.nmapped && (uint64_t)base < (uint64_t)b + n && (uint64_t)base + size > b;
 }
 
 int fnvnx_images_overlap(const fnvnx_proc *p, uint32_t base, uint32_t size) {

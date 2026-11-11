@@ -130,6 +130,8 @@ SECTIONS
 	} :data
 
 	.dynamic : { *(.dynamic) } :data :dyn
+	/* the start of .dynamic as a section-relative symbol: the linker's own _DYNAMIC is absolute (gate abs) */
+	HIDDEN( __fnvnx_dynamic = ADDR(.dynamic) );
 
 	.got     : { *(.got) *(.igot) } :data
 	.got.plt : { *(.got.plt)  *(.igot.plt) } :data

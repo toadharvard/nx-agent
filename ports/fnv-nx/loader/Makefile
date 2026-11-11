@@ -7,12 +7,12 @@ CFLAGS  ?= -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
 WARN     = -std=c99 -Wall -Wextra -Wshadow -Wconversion -Wno-sign-conversion -Werror
 ILP32_CC ?= aarch64-linux-gnu-gcc
 
-SRC  = src/pe.c src/sha256.c src/image.c src/imports.c src/identity.c src/tls.c src/start.c
+SRC  = src/pe.c src/sha256.c src/image.c src/imports.c src/identity.c src/tls.c src/start.c src/modules.c
 INC  = -Iinclude -Isrc
 
 all: $(OUT)/libfnvnx_loader.a
 
-$(OUT)/%.o: src/%.c include/fnvnx_loader.h src/internal.h | $(OUT)
+$(OUT)/%.o: src/%.c include/fnvnx_loader.h src/internal.h src/start_internal.h include/fnvnx_start.h include/fnvnx_modules.h | $(OUT)
 	$(CC) $(CFLAGS) $(WARN) $(INC) -c $< -o $@
 
 $(OUT)/libfnvnx_loader.a: $(SRC:src/%.c=$(OUT)/%.o)

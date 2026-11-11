@@ -33,8 +33,9 @@ static uint32_t g_next_va;
 static char g_log[64][160]; static unsigned g_nlog;
 static fnvnx_proc *g_proc;
 
-static int h_read(void *c, uint32_t off, void *dst, uint32_t size) {
+static int h_read(void *c, uint32_t file, uint32_t off, void *dst, uint32_t size) {
     (void)c;
+    if (file != FNVNX_FILE_EXE) return -1;
     if ((uint64_t)off + size > g_file_len) return -1;
     memcpy(dst, g_file + off, size);
     return 0;
@@ -212,12 +213,12 @@ static int main_run(const char *tag, const uint8_t *file, uint32_t len, const ui
     plat_up(file, len);
     g_proc = p; g_ndeny = 0; g_ncalls = 0;
     memset(&cfg, 0, sizeof cfg);
-    cfg.file_size = len; memcpy(cfg.sha256, sha, 32); cfg.resolve = resolve; cfg.bias = g_bias;
+    cfg.file_size = len; memcpy(cfg.sha256, sha, 32); cfg.resolve = resolve; cfg.bias = g_bias; cfg.exe_name = "synth.exe";
     r = fnvnx_start_prepare(p, &g_os, &cfg);
     CHECK(r == 0, "%s: prepare returned %d", tag, r);
     if (r || build_expect(&e, file, len)) { n_bad++; goto out; }
     nslots = expect_imports(&e);
-    CHECK(p->imports_bound == nslots, "%s: imports bound %u, independent count %u", tag, (unsigned)p->imports_bound, (unsigned)nslots);
+    CHECK(p->exe.imports_bound == nslots, "%s: imports bound %u, independent count %u", tag, (unsigned)p->exe.imports_bound, (unsigned)nslots);
     CHECK(g_nlog == 3 && !strcmp(g_log[0], "fnvnx-start: identity ok") && !strcmp(g_log[1], "fnvnx-start: image mapped") &&
           !strncmp(g_log[2], "fnvnx-start: imports bound ", 27) && (uint32_t)atoi(g_log[2] + 27) == nslots, "%s: log lines before enter (%u)", tag, g_nlog);
     /* TLS index word is 0 in the expectation */
@@ -235,9 +236,9 @@ static int main_run(const char *tag, const uint8_t *file, uint32_t len, const ui
     CHECK(nbad == 0, "%s: %u of %u image pages differ in mapping, protection or content", tag, nbad, e.size >> 12);
     CHECK(mapped_pages_in(0, e.base) == 0 && mapped_pages_in(FNVNX_START_RESERVED_LO, FNVNX_START_RESERVED_HI) == 0, "%s: nothing below the image / in the reserved range", tag);
     /* section map */
-    CHECK(p->nmap == e.nsec + 1 && p->map[0].sec == 0xffff && p->map[0].prot == FNVNX_PROT_R, "%s: section map head", tag);
+    CHECK(p->exe.nmap == e.nsec + 1 && p->exe.map[0].sec == 0xffff && p->exe.map[0].prot == FNVNX_PROT_R, "%s: section map head", tag);
     for (i = 0; i < e.nsec; i++) {
-        const fnvnx_start_range *m = &p->map[i + 1];
+        const fnvnx_start_range *m = &p->exe.map[i + 1];
         unsigned want = (e.s[i].ch & 0x40000000u ? 1u : 0) | (e.s[i].ch & 0x80000000u ? 2u : 0) | (e.s[i].ch & 0x20000000u ? 4u : 0);
         CHECK(m->va == e.base + e.s[i].rva && m->size == up(e.s[i].vsize) && m->prot == want && !strcmp(m->name, e.s[i].name), "%s: map entry %s", tag, e.s[i].name);
     }
@@ -262,18 +263,18 @@ static int main_run(const char *tag, const uint8_t *file, uint32_t len, const ui
             CHECK(!memcmp(g_res + tls_va, e.img + (ts - e.base), te - ts), "%s: TLS block = template", tag);
             for (k = 0; k < zf; k++) if (g_res[tls_va + (te - ts) + k]) zero_rest = 0;
             CHECK(zero_rest, "%s: TLS block zero fill", tag);
-            CHECK(p->tls.template_size == te - ts && p->tls.zero_fill == zf, "%s: TLS layout", tag);
+            CHECK(p->exe.tls.template_size == te - ts && p->exe.tls.zero_fill == zf, "%s: TLS layout", tag);
         } else CHECK(tls_va == 0, "%s: no TLS dir: slot 0 is 0", tag);
     }
     /* enter */
     ret = fnvnx_start_enter(p);
     esp = (p->main.stack_base - 16) & ~15u;
-    CHECK(ret == 0xC0DE0001u && g_ncalls == p->ntls_cb + 1, "%s: enter returned 0x%x after %u calls", tag, (unsigned)ret, g_ncalls);
-    for (i = 0; i < p->ntls_cb && i + 1 < g_ncalls; i++)
-        CHECK(g_calls[i].eip == p->tls_cb[i] && g_calls[i].esp == esp && g_calls[i].teb == p->main.teb_va && g_calls[i].w[0] == FNVNX_START_SENTINEL &&
+    CHECK(ret == 0xC0DE0001u && g_ncalls == p->exe.ntls_cb + 1, "%s: enter returned 0x%x after %u calls", tag, (unsigned)ret, g_ncalls);
+    for (i = 0; i < p->exe.ntls_cb && i + 1 < g_ncalls; i++)
+        CHECK(g_calls[i].eip == p->exe.tls_cb[i] && g_calls[i].esp == esp && g_calls[i].teb == p->main.teb_va && g_calls[i].w[0] == FNVNX_START_SENTINEL &&
               g_calls[i].w[1] == e.base && g_calls[i].w[2] == 1 && g_calls[i].w[3] == 0 && g_calls[i].in_stack && g_calls[i].nlog == 3, "%s: callback %u call", tag, i);
     {
-        call_rec *c = &g_calls[p->ntls_cb];
+        call_rec *c = &g_calls[p->exe.ntls_cb];
         CHECK(c->eip == e.base + e.entry && c->esp == esp && !(c->esp & 15) && c->teb == p->main.teb_va && c->w[0] == FNVNX_START_SENTINEL && c->w[1] == 0 && c->in_stack, "%s: entry call", tag);
         CHECK(c->nlog == 4 && g_nlog == 4, "%s: enter log line before the entry call", tag);
         { char want[64]; snprintf(want, sizeof want, "fnvnx-start: enter %08x", (unsigned)(e.base + e.entry)); CHECK(!strcmp(g_log[3], want), "%s: enter line '%s'", tag, g_log[3]); }
@@ -281,16 +282,16 @@ static int main_run(const char *tag, const uint8_t *file, uint32_t len, const ui
     check_no_exec();
     if (synth) {
         unsigned k;
-        CHECK(p->imports_bound == SS_NIMPORTS && p->ntls_cb == 2 && p->tls_cb[0] == SS_CB1 && p->tls_cb[1] == SS_CB2 && p->ngap == 2, "synthetic facts");
+        CHECK(p->exe.imports_bound == SS_NIMPORTS && p->exe.ntls_cb == 2 && p->exe.tls_cb[0] == SS_CB1 && p->exe.tls_cb[1] == SS_CB2 && p->exe.ngap == 2, "synthetic facts");
         for (k = 0; k < SS_NIMPORTS; k++) CHECK(rd32(g_res + ss_imports[k].slot) == key_of(ss_imports[k].dll, ss_imports[k].name, ss_imports[k].ordinal), "slot %u value", k);
         CHECK(rd32(g_res + ss_delay_slots[0]) == 0xd1d1d1d1u && rd32(g_res + ss_delay_slots[1]) == 0xd2d2d2d2u, "delay slots untouched");
         CHECK(rd32(g_res + SS_TLS_INDEX) == 0, "TLS index word 0");
         CHECK(mapped_pages_in(ALLOC_BASE, 0x20000000u) == 0x30 + 1 + 1 + 1, "pages allocated for the thread block");
-        CHECK(p->main.stack_base - p->main.stack_limit == SS_STACK_RESERVE && p->pe.stack_commit == 0x2000, "stack reserve/commit");
+        CHECK(p->main.stack_base - p->main.stack_limit == SS_STACK_RESERVE && p->exe.pe.stack_commit == 0x2000, "stack reserve/commit");
     } else {
         printf("exe: sections mapped %u (+headers), SizeOfImage 0x%x, import slots bound %u, entry eip 0x%08x, stack 0x%x, TLS template %u bytes (+%u zero), tls callbacks %u, gap ranges %u\n",
-               (unsigned)e.nsec, (unsigned)e.size, (unsigned)p->imports_bound, (unsigned)(e.base + e.entry), (unsigned)(p->main.stack_base - p->main.stack_limit),
-               (unsigned)p->tls.template_size, (unsigned)p->tls.zero_fill, p->ntls_cb, p->ngap);
+               (unsigned)e.nsec, (unsigned)e.size, (unsigned)p->exe.imports_bound, (unsigned)(e.base + e.entry), (unsigned)(p->main.stack_base - p->main.stack_limit),
+               (unsigned)p->exe.tls.template_size, (unsigned)p->exe.tls.zero_fill, p->exe.ntls_cb, p->exe.ngap);
     }
     {   /* create -> free -> create: every range comes back, nothing stays mapped, the recycled addresses read as fresh */
         fnvnx_thread_block a, b, c2;
@@ -348,7 +349,7 @@ int main(int argc, char **argv) {
         plat_down();
         /* range in use: a page inside a section / inside a gap */
         for (i = 0; i < 2; i++) {
-            plat_up(file, len); cfg.file_size = len; memcpy(cfg.sha256, sha, 32); cfg.resolve = resolve; cfg.bias = g_bias;
+            plat_up(file, len); cfg.file_size = len; memcpy(cfg.sha256, sha, 32); cfg.resolve = resolve; cfg.bias = g_bias; cfg.exe_name = "synth.exe";
             CHECK(h_map(NULL, (uintptr_t)(i ? 0x00408000u : 0x00402000u) + g_bias, 0x1000, FNVNX_PROT_R) == 0, "pre-map");
             r = fnvnx_start_prepare(p, &g_os, &cfg);
             CHECK(r != 0 && logged("identity ok") && !logged("imports bound") && g_alloc_calls == 0, "range in use (%s): rc %d", i ? "gap" : "section", r);
