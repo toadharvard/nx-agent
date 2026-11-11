@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check of link/gate_abs.py (H3a): a relocation to an absolute symbol is red, in a loose object and in an archive member; so are an absolute
-definition, a `--defsym` argument and a reference to a symbol that the linked ELF defines as absolute; clean inputs are green.  Needs the
-AArch64 cross toolchain (as test_link_synth.py)."""
+definition and a reference to a name the linked image defines as absolute; clean inputs are green.  Needs the AArch64 cross toolchain
+(as test_link_synth.py)."""
 import json
 import os
 import subprocess
@@ -11,6 +11,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
 import gate_abs
+import relocs
 
 X = 'aarch64-linux-gnu-'
 fails = []
@@ -42,26 +43,25 @@ def obj(name, src):
 clean = obj('clean', '.text\n.globl f\nf: adrp x0, g\n add x0, x0, :lo12:g\n ret\n.data\n.globl g\ng: .word 1\n')
 absref = obj('absref', '.set absv, 0x1000\n.text\n.globl h\nh: adrp x0, absv\n ldr w1, [x0, :lo12:absv]\n ret\n')
 scriptref = obj('scriptref', '.text\n.globl k\nk: adrp x0, scr\n ldr w1, [x0, :lo12:scr]\n ret\n')
+absdef = obj('absdef', '.globl scr\n.set scr, 0x1000\n')
 
-uni, red = gate_abs.check([clean], [], [])
+uni, red = gate_abs.check([clean], [])
 check('clean is green', red, [])
-check('clean universe: 3 relocation-free... counted items', uni > 0, True)
-uni, red = gate_abs.check([absref], [], [])
-check('absolute reference and definition', red, ['absref.o:.text+0:*ABS*', 'absref.o:.text+4:*ABS*', 'absref.o:def:absv'])
+check('clean universe: 2 relocations + 3 defined symbols (f, g and the mapping symbol)', uni, 5)
+uni, red = gate_abs.check([absref], [])
+check('absolute reference and definition', red, ['absref.o:.text+00000000:*ABS*', 'absref.o:.text+00000004:*ABS*', 'absref.o:def:absv'])
 # an archive member: the id names archive(member)
 lib = os.path.join(d, 'lib.a')
 sh([X + 'ar', 'Dcr', lib, clean, absref])
-check('archive member', gate_abs.check([lib], [], [])[1], ['lib.a(absref.o):.text+0:*ABS*', 'lib.a(absref.o):.text+4:*ABS*', 'lib.a(absref.o):def:absv'])
-# --defsym among the linker arguments, in both spellings
-check('defsym arguments', gate_abs.check([clean], ['-m', 'aarch64linux32', '--defsym=A=1', '-defsym', 'B=2', '-z', 'text'], [])[1],
-      ['ld-arg:--defsym=A=1', 'ld-arg:-defsym'])
-# a reference to a name the linker (a script or --defsym) makes absolute in the output
+check('archive member', gate_abs.check([lib], [])[1], ['lib.a(absref.o):.text+00000000:*ABS*', 'lib.a(absref.o):.text+00000004:*ABS*', 'lib.a(absref.o):def:absv'])
+# a global absolute symbol an object defines (a `.set` constant) and the reference to it from another object
 elf = os.path.join(d, 'x.elf')
-sh([X + 'ld', '-m', 'aarch64linux32', '-pie', '--defsym=scr=0x1000', '--no-dynamic-linker', '-e', 'k', scriptref, '-o', elf])
-names = gate_abs.abs_names(elf)
-check('abs names of the output', 'scr' in names, True)
-check('script-defined absolute symbol referenced', gate_abs.check([scriptref], [], names)[1], ['scriptref.o:.text+0:scr', 'scriptref.o:.text+4:scr'])
-check('same input, nothing absolute in the output', gate_abs.check([scriptref], [], [])[1], [])
+sh([X + 'ld', '-m', 'aarch64linux32', '-pie', '--no-dynamic-linker', '-e', 'k', scriptref, absdef, '-o', elf])
+names = relocs.abs_names(elf)
+check('abs names of the linked image', 'scr' in names, True)
+check('definition is red', gate_abs.check([absdef], [])[1], ['absdef.o:def:scr'])
+check('reference to a name the image defines as absolute', gate_abs.check([scriptref], names)[1], ['scriptref.o:.text+00000000:scr', 'scriptref.o:.text+00000004:scr'])
+check('same input, nothing absolute in the image', gate_abs.check([scriptref], [])[1], [])
 # the gate file: format, name and the full id list
 go = os.path.join(d, 'go')
 os.makedirs(go)
