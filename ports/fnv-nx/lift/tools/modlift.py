@@ -151,7 +151,7 @@ def run(arg):
         if k not in lcache:
             lo, hi = e, e + ext; fh = hi; ins, tabs, tk, bad = LCore.explore(limg, lo, hi, limg.bytes(lo, hi - lo + 16), e, (), fh); cs = {}; ts = {}; jx = set(); ft = set()
             for a_, g in sorted(ins.items()):
-                m = g.mnemonic; o = g.operands
+                m = g.mnemonic.split(' ')[-1]; o = g.operands
                 if m == 'call' and o[0].type == X.X86_OP_IMM: cs.setdefault(o[0].imm & M32, a_)
                 elif (m == 'jmp' or (m[0] == 'j' and m != 'jecxz') or m in JMP) and o[0].type == X.X86_OP_IMM:
                     t = o[0].imm & M32

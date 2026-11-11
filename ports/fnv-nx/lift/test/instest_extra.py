@@ -336,6 +336,12 @@ def tables():
     bad += class_tables(img)
     for hx, code in PRIVS:
         a = 0x7d000000; fake[a] = bytes.fromhex(hx); txt = fnvlift.lift(img, a, len(fake[a]), strict=False)[0]; ok = code in txt; bad += not ok; print('%s %s %s' % (hx, 'ok' if ok else 'FAIL', code))
+    # a direct transfer under prefix bytes (capstone prints them as prefix words: `repne jne`, `bnd jmp`, `repe jmp`): the target is reached by the body's descent
+    # exactly as for the bare instruction, so the label the emitted `goto` names is defined. Expectation by hand: the target instruction (inc eax) is decoded.
+    for hx in ('f27502', 'f37502', 'f2eb02', 'f3eb02', 'f2e902000000', 'f30f8502000000', '2e7502', '3e7502', 'f2f37502'):
+        a = 0x7d000000; raw = bytes.fromhex(hx); fake[a] = raw + b'\xc3\xc3\x40\xc3'; n = len(fake[a]); t = a + len(raw) + 2
+        ins = fnvlift.core.explore(img, a, a + n, img.bytes(a, n))[0]; txt = fnvlift.lift(img, a, n, strict=False)[0]
+        ok = t in ins and ins[t].mnemonic == 'inc' and ('L_%08x:' % t) in txt; bad += not ok; print('prefixed transfer %s %s' % (hx, 'ok' if ok else 'FAIL'))
     sys.exit(1 if bad else 0)
 def main():
     only = sys.argv[sys.argv.index('--only') + 1].split(',') if '--only' in sys.argv else None

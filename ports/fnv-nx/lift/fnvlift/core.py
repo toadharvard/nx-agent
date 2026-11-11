@@ -170,7 +170,7 @@ def explore(img, lo, hi, code, start=None, extra=(), fall_hi=None):
                 bad.add(a)
                 break
             insns[a] = ins
-            m = ins.mnemonic
+            m = ins.mnemonic.split(' ')[-1]      # the instruction under its prefix words (`repne jne`, `bnd jmp`, `lock ...`): control flow is decided by the instruction, as the emitter does
             nxt = a + ins.size
             ops = ins.operands
             if m == 'jmp':
@@ -206,7 +206,7 @@ def tab_tails(img, insns, lo, hi):
     the table address (the first relocated dword at or above the displacement, within TAB_BIAS dwords) (a run ends at the first dword that is not relocated, or at an instruction of this function), outside [lo, hi)."""
     out = set()
     for a, ins in insns.items():
-        if ins.mnemonic != 'jmp' or not ins.operands or ins.operands[0].type != X.X86_OP_MEM:
+        if ins.mnemonic.split(' ')[-1] != 'jmp' or not ins.operands or ins.operands[0].type != X.X86_OP_MEM:
             continue
         m = ins.operands[0].mem
         if m.scale == 4 and m.index and (a + ins.size - 4) in img.rset:
