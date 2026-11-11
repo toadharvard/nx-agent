@@ -5,7 +5,8 @@
  b  every value of every state field is run through the real functions (single-field enumeration over several baselines, the full cross products
     of blend factors x alpha factors, blend ops x dst factors, the four colour masks, cull x fill x flags, and seeded random words) and compared with
     an expectation written from the GL reference (gl4_state.c, gl4_sampler.c: GL enum -> meaning -> Dk enum by NAME through dk_facts.tsv)
- c  the expressibility rule is checked on its own meaning table: an alpha-channel factor meaning, per factor, not the dk_state.c table
+ c  the patched deko3d: toolchain/deko3d/build.sh lists 0001-blend-alpha-dst-factor.patch and the built source tree writes FuncAlphaDst from dstAlphaBlendFactor;
+    all 15 x 15 dst colour / dst alpha factor pairs map (a blend row with dst alpha != dst colour is a success)
  d  errors: precedence, *out all zero on every error, the exact error code
  e  mutations of a copy of dk_state.c: every one must be caught
 Output: rows per table, the number of cases, mutations caught, ALL OK."""
@@ -61,18 +62,13 @@ for n, ln, lm, nn, nm in re.findall(r"case NxMip_(\w+): return minL \? GL_(\w+?)
     assert ln == "LINEAR" and nn == "NEAREST" and lm == nm
     MIP[NXMIP[n]] = {"": "None", "NEAREST": "Nearest", "LINEAR": "Linear"}[lm]
 assert (len(CMP), len(SOP), len(BF), len(BOP), len(FILL), len(CULL), len(WRAP), len(MIP)) == (8, 8, NBF, 5, 3, 3, 5, 3), "GL tables not parsed"
-# GL semantics of an alpha-slot factor (GL 4.5 17.3.8: the factor is evaluated per channel, so a colour factor in the alpha slot is its alpha component)
-ALPHA_MEANING = {"Zero": "0", "One": "1", "SrcColor": "sa", "InvSrcColor": "1-sa", "SrcAlpha": "sa", "InvSrcAlpha": "1-sa", "DstAlpha": "da", "InvDstAlpha": "1-da",
-                 "DstColor": "da", "InvDstColor": "1-da", "SrcAlphaSaturate": "1", "ConstColor": "ca", "InvConstColor": "1-ca", "Src1Color": "s1a", "InvSrc1Color": "1-s1a"}
-assert set(ALPHA_MEANING) == set(BF.values())
-
 def g(n, w): return (w >> RS[n]) & 1
 def bits(w, sh, n): return (w >> sh) & ((1 << n) - 1)
 def f32(x): return struct.unpack("<I", struct.pack("<f", x))[0]
 def fl(b): return struct.unpack("<f", struct.pack("<I", b))[0]
 
 # ---- expectation: GL semantics -> Dk values -------------------------------------------------------------------------------------------------
-E_FIELD, E_SAMPLES, E_BLEND, E_RANGE = 1, 2, 3, 4
+E_FIELD, E_SAMPLES, E_RANGE = 1, 2, 3
 SZ = 10 + 3 + 1 + 6 + 12 + 6
 def exp_state(w0, w1, w2, w3, samples):
     on = w0 & 1
@@ -81,7 +77,6 @@ def exp_state(w0, w1, w2, w3, samples):
     bad = (on and (max(sf, df, saf, daf) >= NBF or op not in BOP or opa not in BOP)) or cull not in CULL or fill not in FILL or bits(w3, 4, 28) != 0
     if bad: return E_FIELD, [0] * SZ
     if samples not in (1, 2, 4, 8): return E_SAMPLES, [0] * SZ
-    if on and BOP[opa] not in ("Min", "Max") and ALPHA_MEANING[BF[daf]] != ALPHA_MEANING[BF[df]]: return E_BLEND, [0] * SZ
     ms = {1: "1x", 2: "2x", 4: "4x", 8: "8x"}[samples] if g_(w3, "MSAA") else "1x"
     v = [1, g_(w3, "NOCLIP"), 0, dk("DkPolygonMode", FILL[fill]), dk("DkPolygonMode", FILL[fill]), dk("DkFace", CULL[cull]), dk("DkFrontFace", "CW"),
          dk("DkProvokingVertex", "First"), dk("DkPolygonFlag", "Line") if g_(w3, "AALINE") else 0, dk("DkPolygonFlag", "All") if g("NXRS_R_BIAS", w2) else 0]
@@ -260,9 +255,8 @@ def cross(dkc):
     return None if r.returncode == 0 else (r.stderr.strip().splitlines() or ["?"])[-1][:200]
 
 def mutations(src):
-    M = [("AM: DstColor means SrcAlpha", "[NxBf_DstColor] = NxBf_DstAlpha", "[NxBf_DstColor] = NxBf_SrcAlpha"),
-         ("AM: SrcAlphaSat is not One", "[NxBf_SrcAlphaSat] = NxBf_One", "[NxBf_SrcAlphaSat] = NxBf_SrcAlpha"),
-         ("Min / Max exemption dropped", "opa != NxBop_Min && opa != NxBop_Max && ", ""),
+    M = [("dst alpha factor from dst colour", "o->blend.dstAlphaBlendFactor = BF[daf];", "o->blend.dstAlphaBlendFactor = BF[df];"),
+         ("src alpha factor from src colour", "o->blend.srcAlphaBlendFactor = BF[saf];", "o->blend.srcAlphaBlendFactor = BF[sf];"),
          ("frontFace CCW", "o->rast.frontFace = DkFrontFace_CW;", "o->rast.frontFace = DkFrontFace_CCW;"),
          ("cull CW/CCW swapped", "[NxCull_CW] = DkFace_Front, [NxCull_CCW] = DkFace_Back", "[NxCull_CW] = DkFace_Back, [NxCull_CCW] = DkFace_Front"),
          ("Sub / RevSub swapped", "[NxBop_Subtract] = DkBlendOp_Sub, [NxBop_RevSubtract] = DkBlendOp_RevSub", "[NxBop_Subtract] = DkBlendOp_RevSub, [NxBop_RevSubtract] = DkBlendOp_Sub"),
@@ -279,13 +273,31 @@ def mutations(src):
          ("depth bias on fill only", "? DkPolygonFlag_All : 0;", "? DkPolygonFlag_Fill : 0;"),
          ("lod clamp > 15 accepted", "s->minLod > 15 || s->maxLod > 15 ||", "s->minLod > 15 ||"),
          ("lodBias NaN accepted", "!(s->lodBias >= -15.0f && s->lodBias <= 15.0f)", "(s->lodBias < -15.0f || s->lodBias > 15.0f)"),
-         ("error leaves *out filled", "static int fail(void* o, size_t n, int e) { memset(o, 0, n); return e; }", "static int fail(void* o, size_t n, int e) { (void)o; (void)n; return e; }")]
+         ("error leaves *out filled", "    uint64_t w0 = rs->w[0], w1 = rs->w[1], w2 = rs->w[2], w3 = rs->w[3];\n    memset(o, 0, sizeof *o);", "    uint64_t w0 = rs->w[0], w1 = rs->w[1], w2 = rs->w[2], w3 = rs->w[3];")]
     for desc, a, b in M:
         if src.count(a) != 1: sys.exit("mutation %r: pattern occurs %d times" % (desc, src.count(a)))
     return [(d, src.replace(a, b)) for d, a, b in M]
 
+def check_patch():
+    """build.sh lists the patch, the patch is the one-line dstAlpha fix, and the built source tree has the fixed line (and not the broken one)."""
+    TC = os.path.join(ROOT, "toolchain", "deko3d"); p = "0001-blend-alpha-dst-factor.patch"
+    bs, pt = rd(TC, "build.sh"), rd(TC, p)
+    if "[0-9][0-9][0-9][0-9]-*.patch" not in bs or "apply" not in bs: sys.exit("FAIL build.sh does not apply toolchain/deko3d/NNNN-*.patch")
+    ch = [l for l in pt.splitlines() if l[:1] in "+-" and l[:3] not in ("+++", "---")]
+    if len(ch) != 2 or "FuncAlphaDst" not in ch[0] or "dstColorBlendFactor" not in ch[0] or "dstAlphaBlendFactor" not in ch[1] or not ch[1].startswith("+"):
+        sys.exit("FAIL %s is not the one-line FuncAlphaDst fix: %s" % (p, ch))
+    f = os.path.join(DK, "deko3d", "src", "deko3d", "source", "maxwell", "gpu_3d_state.cpp")
+    if not os.path.exists(f): sys.exit("FAIL no built deko3d source tree at " + f + " (run toolchain/deko3d/build.sh)")
+    t = rd(f)
+    if not re.search(r"getBlendFactorSetting\(state\.dstAlphaBlendFactor\)\s*// FuncAlphaDst", t) or re.search(r"getBlendFactorSetting\(state\.dstColorBlendFactor\)\s*// FuncAlphaDst", t):
+        sys.exit("FAIL the deko3d tree at %s lacks the FuncAlphaDst fix" % f)
+    stamp = os.path.join(DK, "deko3d", ".stamp")
+    if not os.path.exists(stamp) or "patches" not in rd(stamp): sys.exit("FAIL the libdeko3d.a build stamp does not record the patches")
+    return "ok (build.sh applies %s; source tree fixed; lib stamped)" % p
+
 def main():
     src = rd(NXD, "dk_state.c"); nl = len(src.splitlines()) + len(rd(NXD, "dk_state.h").splitlines())
+    print("c  patched deko3d:", check_patch())
     print("a  size: dk_state.c + dk_state.h = %d lines (limit 300)" % nl)
     if nl > 300: sys.exit("FAIL too long")
     e = cross(os.path.join(NXD, "dk_state.c"))
@@ -295,8 +307,8 @@ def main():
         fails, st = check(d, os.path.join(NXD, "dk_state.c"))
         for f in fails: print("FAIL", f)
         if fails: sys.exit(1)
-        print("b  rows: blend factor %d, blend op %d, cull %d, fill %d, compare %d, stencil op %d, wrap %d, mip %d; %d cases ok (success %d / E_FIELD %d / E_SAMPLES %d / E_BLEND_ALPHA_DST %d / E_RANGE %d)" % (
-            len(BF), len(BOP), len(CULL), len(FILL), len(CMP), len(SOP), len(WRAP), len(MIP), st["cases"], *(sum(v for (k, c), v in st["errs"].items() if c == ec) for ec in (0, 1, 2, 3, 4))))
+        print("b  rows: blend factor %d, blend op %d, cull %d, fill %d, compare %d, stencil op %d, wrap %d, mip %d; %d cases ok (success %d / E_FIELD %d / E_SAMPLES %d / E_RANGE %d)" % (
+            len(BF), len(BOP), len(CULL), len(FILL), len(CMP), len(SOP), len(WRAP), len(MIP), st["cases"], *(sum(v for (k, c), v in st["errs"].items() if c == ec) for ec in (0, 1, 2, 3))))
         if "--no-mutations" not in sys.argv:
             caught = 0; ms = mutations(src)
             for desc, text in ms:
