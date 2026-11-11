@@ -21,6 +21,7 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` a2453fe9 (w4 @39c4
 | 3n | recipe check: include dir inside the root's own tree refused (#pragma once identity; L6) | w16 | claude/fnv-l1-contract-w16 | doing |
 | 3i | recipe key isystem (paths inside externals only) for libnx/newlib headers (L6A) | w16 | claude/fnv-l1-contract-w16 | doing |
 | 1u | contract-gate universe for roots without game/link (blocks lift/rt admission) + GalaxyWrp.dll row in l1-contract/mp4 modules.tsv (L3a) | session_01KmtZKQwjYFpEvoHtfEjCcb (w18) | claude/fnv-l1-contract-w18 | doing |
+| 3w | recipe: -Werror=attributes required in guest roots (L3a); envcheck before any stage, env failures never cached (L2) | w14 | claude/fnv-l1-contract-w14 | queued |
 | 2b | budget in VERDICT.md, budget gate, delete second build paths | lead | - | blocked by 2 (numbers) |
 | 4a | assumptions gate over verify/ASSUMPTIONS.json (OWNER = 9; field `pending` removed) | session_01KmtZKQZb21XFPG5GMjmjUp | claude/fnv-l1-contract-w10 (from b9f7cf14) | doing: rebase on trunk, drop `pending` + 47 pending records, add L6A, selftests in pinned env |
 | 4b | w11 test-defined symbols ∩ product-root symbols = ∅ in objstub | predecessor's local agent -> moving to a cloud worker | claude/fnv-l1-contract-w11 001306f0 | doing: stage 2 (COMDAT, python AST rule, six L1 names to 0) |
@@ -51,7 +52,7 @@ Global count: 13 missing of 32 required at trunk a2453fe9 (gates.json has 23). N
 - gates in gates.json: 22; product roots in admit.json: 0 (every per-root gate has universe 0).
 - verdict seconds: pending w13.
 - tests with doubles (trunk c9765781, AST rule, whole ports/fnv-nx): 8 of 47 python test files, 9 names; L1 owns 6 (gate_build.ensure, l1._check, runtime.DEFAULT_DIRS, runtime.conf_dirs, sandbox.launch, verdict._git), L4 owns 2.
-- assumptions (w10 b9f7cf14, before cleanup, not global): 100 records = 9 OWNER + 91 REMOVE; 47 of them pending -> removed; L6 not entered (enters with L6's merge).
+- assumptions (w10 943d70d, trunk 08f6ea30 registry): 46 records = 9 OWNER + 37 REMOVE (L1 11, L4 14, L2 4, L3a 3, L6 2, L5 1, L1+L3b 1, L3b+L4 1); removed_by gate 3, planned 12, no gate yet 22, OPEN 0; mentions 88/93 certified (5 red, decided: 2 records + 1 check). Layer branches add their records at merge.
 - hostapi (w12 6766d18a): 5 services removed (27, 28, 29, 32, 33; 0 call sites in platform 2951f7ae); gate hostapi 0 of 0, no roots.
 - handoff read: c1431c5d.
 
