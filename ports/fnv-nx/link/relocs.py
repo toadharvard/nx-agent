@@ -11,7 +11,32 @@ A relocation section is a SHT_RELA or SHT_REL section; `section` is the name of 
 import os
 import struct
 
-import ld
+
+def ar_members(path):
+    """[(name, offset, bytes)] of an `ar` archive (GNU names, long names through the `//` table; the symbol index and the tables skipped)."""
+    with open(path, 'rb') as fh:
+        d = fh.read()
+    if d[:8] != b'!<arch>\n':
+        raise ValueError('%s: not an ar archive' % path)
+    raw, longnames, o = [], b'', 8
+    while o + 60 <= len(d):
+        name, size = d[o:o + 16].rstrip(), int(d[o + 48:o + 58])
+        body = d[o + 60:o + 60 + size]
+        if name == b'//':
+            longnames = body
+        elif name not in (b'/', b'/SYM64/'):
+            raw.append((name, o, body))
+        o += 60 + size + (size & 1)
+    out = []
+    for name, off, body in raw:
+        if name[:1] == b'/' and name[1:].isdigit():
+            i = int(name[1:])
+            name = longnames[i:longnames.index(b'\n', i)].rstrip(b'/')
+        else:
+            name = name.rstrip(b'/')
+        out.append((name.decode(), off, body))
+    return out
+
 
 SHT_SYMTAB, SHT_RELA, SHT_REL = 2, 4, 9
 SHN_ABS = 0xfff1
@@ -59,7 +84,7 @@ def files(path):
         d = fh.read()
     if d[:8] != b'!<arch>\n':
         return [(b, d)]
-    return [('%s(%s)' % (b, n), body) for n, _, body in ld.ar_members(path)]
+    return [('%s(%s)' % (b, n), body) for n, _, body in ar_members(path)]
 
 
 def abs_names(path):
