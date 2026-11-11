@@ -15,7 +15,10 @@ static DkCmdBuf rec;              /* the recording buffer; published as nxdk_s.c
 static DkMemBlock firstBlk;       /* the first chunk: lives as long as the buffer, re-added after every clear */
 static StreamChunk* extra;        /* chunks added by the callback during one SUBMIT: released once the queue is idle */
 static int scaleInit;             /* nxdk_scale_init was called: nxdk_scale_shutdown releases whatever it made */
+static int msresInit;             /* nxdk_msres_init was called: nxdk_msres_shutdown releases whatever it made */
 static int done;                  /* the End op ran */
+typedef struct TmpImg { struct TmpImg* next; NxDkImage im; } TmpImg;
+static TmpImg* tmpImgs;           /* images from nxdk_tmp_image, released after the queue wait of the next SUBMIT (or at shutdown) */
 
 /* ---- command memory ------------------------------------------------------------------------------------------------------------------------- */
 static DkMemBlock cmd_block(uint32_t bytes) {
@@ -41,6 +44,27 @@ static void add_mem(void* user, DkCmdBuf cmd, size_t min) {
     dkCmdBufAddMemory(cmd, c->blk, 0, bytes);
 }
 
+/* Release rule: only called with the queue idle (after dkQueueWaitIdle of a SUBMIT, or at shutdown). Every command recorded so far was submitted
+ * and waited for by then (SUBMIT is synchronous, S1; nothing is recorded outside a SUBMIT), so no pending command can reference a listed image. */
+static void tmp_release_all(void) {
+    while (tmpImgs) {
+        TmpImg* t = tmpImgs;
+        tmpImgs = t->next;
+        nxdk_img_release(&t->im);
+        free(t);
+    }
+}
+
+uint32_t nxdk_tmp_image(NxDkImage* im) {
+    if (nxdk_img_storage(im)) return 1;
+    TmpImg* t = (TmpImg*)malloc(sizeof *t);
+    if (!t) { nxdk_img_release(im); nxdk_err("stream: no host memory for the temporary image list"); return 1; }
+    t->im = *im;
+    t->next = tmpImgs;
+    tmpImgs = t;
+    return 0;
+}
+
 /* the queue is idle: the commands are consumed, so every chunk but the first goes and the buffer restarts on the first */
 static void recycle(void) {
     dkCmdBufClear(rec);
@@ -64,12 +88,16 @@ uint32_t nxdk_stream_init(void) {
     if (!firstBlk) { nxdk_err("stream: deko3d refused the first command chunk"); return 1; }
     dkCmdBufAddMemory(rec, firstBlk, 0, NXDK_STREAM_CHUNK);
     scaleInit = 1;
-    return nxdk_scale_init();
+    if (nxdk_scale_init()) return 1;
+    msresInit = 1;
+    return nxdk_msres_init();
 }
 
 /* safe on any partial state (nxdk_destroy calls it after a failed nxdk_create too); the queue is idle */
 void nxdk_stream_shutdown(void) {
+    if (msresInit) nxdk_msres_shutdown();
     if (scaleInit) nxdk_scale_shutdown();
+    tmp_release_all();
     if (rec) dkCmdBufDestroy(rec);
     while (extra) {
         StreamChunk* c = extra;
@@ -78,7 +106,7 @@ void nxdk_stream_shutdown(void) {
         free(c);
     }
     if (firstBlk) dkMemBlockDestroy(firstBlk);
-    firstBlk = NULL; rec = NULL; scaleInit = 0;
+    firstBlk = NULL; rec = NULL; scaleInit = 0; msresInit = 0;
     memset(&nxdk_s, 0, sizeof nxdk_s);
 }
 
@@ -199,7 +227,7 @@ static void replay(const uint32_t* w) {
     }
 }
 
-/* S1: record, submit, wait for the queue, then the query results, the staging blocks, the command chunks */
+/* S1: record, submit, wait for the queue, then the query results, the staging blocks, the temporary images, the command chunks */
 static void execute(const uint32_t* w) {
     nxdk_s.cmd = rec;
     nxdk_s.boundState = 0; nxdk_s.inPass = 0;   /* S6; the index binding stays */
@@ -213,6 +241,7 @@ static void execute(const uint32_t* w) {
     dkQueueWaitIdle(nxdk.q);
     nxdk_query_collect();
     nxdk_stage_free();
+    tmp_release_all();
     nxdk_s.cmd = NULL;
     recycle();
 }

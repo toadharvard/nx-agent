@@ -13,15 +13,17 @@ HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.pat
 BACK = os.path.join(ROOT, "render", "d3d9", "backend"); NXD = os.path.join(BACK, "nx")
 DK = os.environ.get("FNVNX_DK", "/home/user/work/l6/dk")
 FILES = ["dk_stream.c"]
-EXPECT_CHECKS = 157
-MUST_NAMES = ["init_ok", "init_first_chunk", "shutdown_order", "init_cmdbuf_fail_reported", "init_block_fail_reported", "init_scale_fail_returned", "submit_ok",
+EXPECT_CHECKS = 178
+MUST_NAMES = ["init_ok", "init_first_chunk", "shutdown_order", "init_cmdbuf_fail_reported", "init_block_fail_reported", "init_scale_fail_returned", "init_msres_after_scale_once", "shutdown_msres_before_scale", "init_msres_fail_returned", "init_msres_fail_balanced",
+              "tmp_released_after_wait", "tmp_not_before_wait", "tmp_several_released_once_after_wait", "tmp_released_at_shutdown", "tmp_refusal_returns_1",
+              "tmp_refusal_lists_nothing", "tmp_node_alloc_fail", "tmp_stopped_submit_released", "submit_ok",
               "submit_start_barrier", "submit_order", "submit_recycles_buffer", "stats_written", "cmd_published_only_inside", "present_flag_ignored",
               "wait_frame_zero", "map_op_1", "map_op_27", "map_s6_reset", "map_image_update_routed", "chk_swap_colour_ok", "env_limits", "env_swap_resolves_front",
               "stop_later_ops_skipped", "stop_recorded_still_submitted", "barrier_kind1", "marker_short", "iu_good", "iu_short", "iu_box_rejected_once",
               "grow_chunk_sizes", "grow_released_after_wait", "grow_too_big_reported", "grow_block_refused_reported", "grow_listed_released_at_shutdown",
               "frame_draws_reset_new_frame", "submit_null_struct", "submit_bad_stream_address", "opcode_28_reported", "overrun_reported", "no_end_reported"]
 HANDLERS = {"nxdk_submit", "nxdk_wait_frame", "nxdk_stream_init", "nxdk_stream_shutdown", "nxdk_chk_env", "nxdk_op_end", "nxdk_op_barrier", "nxdk_op_marker",
-            "nxdk_op_image_update", "nxdk_s"}
+            "nxdk_op_image_update", "nxdk_tmp_image", "nxdk_s"}
 FORBID = re.compile(r"stub|todo|not implemented|placeholder|fallback|no-op|noop|weak", re.I)
 
 fails = []
@@ -55,7 +57,7 @@ def host(srcdir, exe):
     inc = ["-I" + os.path.join(HERE, "shim"), "-I" + os.path.join(DK, "dkp", "libnx", "include"), "-I" + os.path.join(DK, "deko3d", "include"),
            "-I" + NXD, "-I" + BACK]
     cmd = ["gcc", "-std=gnu11", "-g", "-O1", "-fsanitize=address,undefined", "-fno-sanitize-recover=undefined", "-Wall", "-Wextra", "-Werror"] + inc + \
-          [os.path.join(HERE, "host_main.c"), os.path.join(BACK, "nxgpu4_check.c")] + [os.path.join(srcdir, f) for f in FILES] + ["-o", exe]
+          [os.path.join(HERE, "host_main.c"), os.path.join(BACK, "nxgpu4_check.c")] + [os.path.join(srcdir, f) for f in FILES] + ["-Wl,--wrap=malloc", "-o", exe]
     return sh(cmd)
 
 def run_host(srcdir, tag):
@@ -92,7 +94,27 @@ MUT = [
     ("scale shutdown skipped", "dk_stream.c", "if (scaleInit) nxdk_scale_shutdown();", ""),
     ("first chunk leaked", "dk_stream.c", "    if (firstBlk) dkMemBlockDestroy(firstBlk);\n", ""),
     ("extra chunks leaked at shutdown", "dk_stream.c", "    if (rec) dkCmdBufDestroy(rec);\n    while (extra) {", "    if (rec) dkCmdBufDestroy(rec);\n    while (0) {"),
-    ("scale init result dropped", "dk_stream.c", "return nxdk_scale_init();", "nxdk_scale_init(); return 0;"),
+    ("msres init skipped", "dk_stream.c", "    return nxdk_msres_init();", "    return 0;"),
+    ("msres init before scale", "dk_stream.c", "    if (nxdk_scale_init()) return 1;\n    msresInit = 1;\n    return nxdk_msres_init();", "    msresInit = 1;\n    if (nxdk_msres_init()) return 1;\n    return nxdk_scale_init();"),
+    ("msres init result dropped", "dk_stream.c", "return nxdk_msres_init();", "nxdk_msres_init(); return 0;"),
+    ("msres shutdown skipped", "dk_stream.c", "if (msresInit) nxdk_msres_shutdown();", ""),
+    ("msres shutdown after scale", "dk_stream.c", "    if (msresInit) nxdk_msres_shutdown();\n    if (scaleInit) nxdk_scale_shutdown();", "    if (scaleInit) nxdk_scale_shutdown();\n    if (msresInit) nxdk_msres_shutdown();"),
+    ("msres flag set after a good init only", "dk_stream.c", "    msresInit = 1;\n    return nxdk_msres_init();", "    int r_ = (int)nxdk_msres_init(); msresInit = !r_; return (uint32_t)r_;"),
+    ("msres flag kept after shutdown", "dk_stream.c", "scaleInit = 0; msresInit = 0;", "scaleInit = 0;"),
+    ("tmp images not released after the wait", "dk_stream.c", "    nxdk_stage_free();\n    tmp_release_all();\n", "    nxdk_stage_free();\n"),
+    ("tmp images released before the wait", "dk_stream.c", "    dkQueueSubmitCommands(nxdk.q, dkCmdBufFinishList(rec));\n    dkQueueWaitIdle(nxdk.q);\n", "    tmp_release_all();\n    dkQueueSubmitCommands(nxdk.q, dkCmdBufFinishList(rec));\n    dkQueueWaitIdle(nxdk.q);\n"),
+    ("tmp images leaked at shutdown", "dk_stream.c", "    tmp_release_all();\n    if (rec)", "    if (rec)"),
+    ("tmp list not advanced", "dk_stream.c", "        tmpImgs = t->next;\n", ""),
+    ("tmp node not freed", "dk_stream.c", "        nxdk_img_release(&t->im);\n        free(t);", "        nxdk_img_release(&t->im);"),
+    ("tmp image not released", "dk_stream.c", "        nxdk_img_release(&t->im);\n        free(t);", "        free(t);"),
+    ("tmp node not listed", "dk_stream.c", "    t->next = tmpImgs;\n    tmpImgs = t;\n", ""),
+    ("tmp refusal reported as ok", "dk_stream.c", "if (nxdk_img_storage(im)) return 1;", "if (nxdk_img_storage(im)) return 0;"),
+    ("tmp alloc failure leaks storage", "dk_stream.c", "{ nxdk_img_release(im); nxdk_err(\"stream: no host memory for the temporary image list\"); return 1; }", "{ nxdk_err(\"stream: no host memory for the temporary image list\"); return 1; }"),
+    ("tmp alloc failure silent", "dk_stream.c", "nxdk_err(\"stream: no host memory for the temporary image list\"); return 1;", "return 1;"),
+    ("tmp alloc failure returns ok", "dk_stream.c", "nxdk_err(\"stream: no host memory for the temporary image list\"); return 1;", "nxdk_err(\"stream: no host memory for the temporary image list\"); return 0;"),
+    ("tmp alloc unchecked", "dk_stream.c", "if (!t) { nxdk_img_release(im);", "if (0) { nxdk_img_release(im);"),
+    ("tmp copy dropped", "dk_stream.c", "    t->im = *im;\n", "    memset(&t->im, 0, sizeof t->im);\n"),
+    ("scale init result dropped", "dk_stream.c", "if (nxdk_scale_init()) return 1;", "nxdk_scale_init();"),
     ("swapchain id not substituted", "dk_stream.c", "e.swapImage = NXDK_SWAP_ID;", "e.swapImage = 0;"),
     ("swap id not resolved", "dk_stream.c", "nxdk_img(id == NXDK_SWAP_ID ? 0 : id)", "nxdk_img(id)"),
     ("depth flag dropped", "dk_stream.c", "out->isDepth = (im->flags & NxImg_Depth) != 0;", "out->isDepth = 0;"),

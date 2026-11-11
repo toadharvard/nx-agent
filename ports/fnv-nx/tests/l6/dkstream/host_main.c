@@ -78,6 +78,20 @@ void nxdk_query_collect(void) { ev("qcollect"); }
 void nxdk_stage_free(void) { ev("stage_free"); }
 uint32_t nxdk_scale_init(void) { ev("scale_init"); return fail_scale; }
 void nxdk_scale_shutdown(void) { ev("scale_shutdown"); }
+static int fail_msres, fail_storage, fail_malloc, img_live, img_seq, img_rel[64];
+uint32_t nxdk_msres_init(void) { ev("msres_init"); return fail_msres; }
+void nxdk_msres_shutdown(void) { ev("msres_shutdown"); }
+/* storage double: blk = 1000 + n; the release double counts every release of block n (a second release of the same block is visible) */
+uint32_t nxdk_img_storage(NxDkImage* im) {
+    if (fail_storage) { nxchk_err("image: storage refused"); return 1; }
+    im->blk = (DkMemBlock)(uintptr_t)(1000 + ++img_seq); img_live++; ev("storage%d", img_seq); return 0;
+}
+void nxdk_img_release(NxDkImage* im) {
+    if (im->blk) { const int n = (int)((uintptr_t)im->blk - 1000); img_live--; if (n < 64) img_rel[n]++; ev("imgrel%d", n); }
+    memset(im, 0, sizeof *im);
+}
+void* __real_malloc(size_t n);
+void* __wrap_malloc(size_t n) { return fail_malloc ? NULL : __real_malloc(n); }
 
 /* handler doubles: record the context of every call */
 typedef struct { int op; uint32_t argc; const uint32_t* a; DkCmdBuf cmd; NxFrameStats* stats; uint32_t bound, inPass, idx; } Hit;
@@ -105,7 +119,7 @@ static uint64_t submit_with(const uint32_t* w, uint32_t n, uint32_t frame, uint3
 }
 static uint64_t sub(const uint32_t* w, uint32_t n, uint32_t frame) { return submit_with(w, n, frame, 0, P(&st)); }
 static void reset(void) {
-    nev = 0; nhits = 0; n_mbm = 0; mb_seq = 0; mb_live = 0; cmd_live = 0; fail_cmd = fail_mb = fail_scale = box_fail = 0; fail_op = -1; draw_hook = NULL; n_asked = 0;
+    nev = 0; nhits = 0; n_mbm = 0; mb_seq = 0; mb_live = 0; cmd_live = 0; fail_cmd = fail_mb = fail_scale = box_fail = fail_msres = fail_storage = fail_malloc = img_live = img_seq = 0; memset(img_rel, 0, sizeof img_rel); fail_op = -1; draw_hook = NULL; n_asked = 0;
     nxdk.errCount = 0; nxdk.lastErr[0] = 0; nxdk.dev = (DkDevice)&obj_dev; nxdk.q = (DkQueue)&obj_q; memset(&up, 0, sizeof up);
 }
 static int errs_is(const char* s) { return !strcmp(nxdk.lastErr, s); }
@@ -121,7 +135,9 @@ static void scen_init(void) {
     char want[64]; snprintf(want, sizeof want, "addmem1_0_%u", (unsigned)NXDK_STREAM_CHUNK);
     CHK("init_adds_first_chunk", cnt(want) == 1 && pos("cmdbuf") < pos("mb1") && pos("mb1") < pos(want) && pos(want) < pos("scale_init"));
     CHK("init_scale_called_once", cnt("scale_init") == 1);
+    CHK("init_msres_after_scale_once", cnt("msres_init") == 1 && pos("scale_init") < pos("msres_init"));
     nxdk_stream_shutdown();
+    CHK("shutdown_msres_before_scale", cnt("msres_shutdown") == 1 && pos("msres_shutdown") < pos("scale_shutdown"));
     CHK("shutdown_order", pos("scale_shutdown") >= 0 && pos("scale_shutdown") < pos("cmdbuf_destroy") && pos("cmdbuf_destroy") < pos("mbdestroy1"));
     CHK("shutdown_balanced", cmd_live == 0 && mb_live == 0 && cnt("scale_shutdown") == 1);
     int n = nev; nxdk_stream_shutdown();
@@ -137,7 +153,15 @@ static void scen_init(void) {
     reset(); fail_scale = 1;
     CHK("init_scale_fail_returned", nxdk_stream_init() == 1 && cnt("scale_init") == 1);
     nxdk_stream_shutdown();
-    CHK("init_scale_fail_balanced", cmd_live == 0 && mb_live == 0);
+    CHK("init_scale_fail_balanced", cmd_live == 0 && mb_live == 0 && cnt("msres_init") == 0 && cnt("msres_shutdown") == 0);
+    reset(); fail_msres = 1;
+    CHK("init_msres_fail_returned", nxdk_stream_init() == 1 && cnt("scale_init") == 1 && cnt("msres_init") == 1);
+    nxdk_stream_shutdown();
+    CHK("init_msres_fail_balanced", cmd_live == 0 && mb_live == 0 && cnt("msres_shutdown") == 1 && cnt("scale_shutdown") == 1 && cnt("msres_init") == 1);
+    int m = nev; nxdk_stream_shutdown();
+    CHK("init_msres_fail_shutdown_twice", nev == m && cnt("msres_shutdown") == 1);
+    reset(); fail_cmd = 1; nxdk_stream_init(); nxdk_stream_shutdown();
+    CHK("init_early_fail_no_msres", cnt("msres_init") == 0 && cnt("msres_shutdown") == 0);
     (void)up_mb;
 }
 
@@ -328,6 +352,50 @@ static const NxDkMem* gm;
 static int hook_n; static uint32_t hook_min[4];
 static void grow(void) { for (int i = 0; i < hook_n; i++) cbm.cbAddMem(cbm.userData, (DkCmdBuf)&obj_cmd, hook_min[i]); }
 
+/* temporary images (nxdk_tmp_image): created inside a SUBMIT by the Draw op double, released after its wait, or at shutdown */
+static int tmp_n, tmp_rc[4]; static NxDkImage tmp_im[4];
+static void tmp_hook(void) { for (int i = 0; i < tmp_n; i++) { memset(&tmp_im[i], 0, sizeof tmp_im[i]); tmp_rc[i] = (int)nxdk_tmp_image(&tmp_im[i]); } }
+static void scen_tmp(void) {
+    static const uint32_t s[] = { HDR(NxOp_Draw, 0), HDR(NxOp_End, 0) }, e[] = { HDR(NxOp_End, 0) };
+    run_init(); nev = 0; draw_hook = tmp_hook; tmp_n = 1;
+    CHK("tmp_submit_ok", sub(s, 2, 1) == 0 && tmp_rc[0] == 0 && tmp_im[0].blk == (DkMemBlock)(uintptr_t)1001 && img_seq == 1);
+    CHK("tmp_released_after_wait", cnt("imgrel1") == 1 && pos("submit 7") < pos("waitidle") && pos("waitidle") < pos("imgrel1") && img_live == 0);
+    CHK("tmp_not_before_wait", pos("storage1") < pos("finish") && pos("finish") < pos("submit 7") && pos("op6") < pos("imgrel1"));
+    nev = 0; draw_hook = NULL;
+    CHK("tmp_not_released_twice", sub(e, 1, 2) == 0 && cntp("imgrel") == 0 && img_rel[1] == 1);
+    nxdk_stream_shutdown();
+    CHK("tmp_not_released_again_at_shutdown", img_rel[1] == 1 && img_live == 0);
+    run_init(); nev = 0; draw_hook = tmp_hook; tmp_n = 3;
+    CHK("tmp_several_per_submit", sub(s, 2, 1) == 0 && tmp_rc[0] == 0 && tmp_rc[1] == 0 && tmp_rc[2] == 0 && img_seq == 3 && cntp("storage") == 3);
+    CHK("tmp_several_released_once_after_wait", cntp("imgrel") == 3 && img_rel[1] == 1 && img_rel[2] == 1 && img_rel[3] == 1 && img_live == 0 &&
+        pos("waitidle") < pos("imgrel1") && pos("waitidle") < pos("imgrel2") && pos("waitidle") < pos("imgrel3"));
+    nev = 0; draw_hook = NULL;
+    nxdk_stream_shutdown();
+    /* no submit came: released at shutdown, after the queue is idle by contract, exactly once */
+    run_init(); nev = 0; tmp_n = 2; tmp_hook();
+    CHK("tmp_listed_outside_submit", tmp_rc[0] == 0 && tmp_rc[1] == 0 && img_live == 2 && cntp("imgrel") == 0);
+    nxdk_stream_shutdown();
+    CHK("tmp_released_at_shutdown", img_live == 0 && img_rel[1] == 1 && img_rel[2] == 1 && cntp("imgrel") == 2 && cmd_live == 0 && mb_live == 0);
+    nxdk_stream_shutdown();
+    CHK("tmp_shutdown_twice_safe", img_rel[1] == 1 && img_rel[2] == 1 && img_live == 0);
+    /* a refusal returns 1, the error is the storage's own (one), nothing is listed */
+    run_init(); nev = 0; tmp_n = 1; fail_storage = 1; tmp_hook();
+    CHK("tmp_refusal_returns_1", tmp_rc[0] == 1 && nxdk.errCount == 1 && errs_is("image: storage refused") && img_live == 0);
+    nxdk_stream_shutdown();
+    CHK("tmp_refusal_lists_nothing", cntp("imgrel") == 0 && img_live == 0);
+    /* a list node that cannot be allocated: storage released, one error from dk_stream, 1 */
+    run_init(); nev = 0; tmp_n = 1; fail_malloc = 1; tmp_hook(); fail_malloc = 0;
+    CHK("tmp_node_alloc_fail", tmp_rc[0] == 1 && nxdk.errCount == 1 && errs_is("stream: no host memory for the temporary image list") && img_live == 0 &&
+        cnt("imgrel1") == 1 && tmp_im[0].blk == NULL);
+    nxdk_stream_shutdown();
+    CHK("tmp_node_alloc_fail_balanced", cntp("imgrel") == 1 && img_live == 0 && mb_live == 0 && cmd_live == 0);
+    /* a stopped stream is still submitted and waited for: its temporary images go after that wait */
+    run_init(); nev = 0; draw_hook = tmp_hook; tmp_n = 1; fail_op = NxOp_Draw;
+    CHK("tmp_stopped_submit_released", sub(s, 2, 1) == NXGPU_BAD_CALL && cnt("imgrel1") == 1 && pos("waitidle") < pos("imgrel1") && img_live == 0);
+    fail_op = -1; draw_hook = NULL;
+    nxdk_stream_shutdown();
+}
+
 static void scen_grow(void) {
     static const uint32_t s[] = { HDR(NxOp_Draw, 0), HDR(NxOp_End, 0) };
     char a1[64]; (void)gm;
@@ -394,7 +462,7 @@ static void scen_args(void) {
 }
 
 int main(void) {
-    scen_init(); scen_basic(); scen_map(); scen_bad(); scen_env(); scen_stop(); scen_ops(); scen_grow(); scen_frame(); scen_args();
+    scen_init(); scen_basic(); scen_map(); scen_bad(); scen_env(); scen_stop(); scen_ops(); scen_tmp(); scen_grow(); scen_frame(); scen_args();
     printf("NCHK %d\n", nchk);
     return 0;
 }
