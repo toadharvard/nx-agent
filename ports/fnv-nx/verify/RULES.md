@@ -131,3 +131,14 @@ second complete path (`ldr` + `dmb ishld`, `dmb ishst` + `str`); (c) native bodi
 release, program order between them is preserved, so executions are sequentially consistent and SC is within TSO.
 Assumptions: A7 (the ARMv8 model matches the A57), A10 (the lifter keeps the exe's access order exactly; a native body runs
 the source's accesses in GCC's order, so at a race site it gives the source's behaviour under SC, not necessarily the exe's).
+
+## T1 NO-DOUBLES
+
+A test binary of a product root is linked from the root's whole product unit set plus its own units (same script and flags), and defines no
+symbol that any product root defines: `symbols(test objects) INTERSECT symbols(all product objects) = EMPTY` (global, weak and unique;
+no allow-list). Every source of a root is a product unit or a unit of exactly one declared test, so an undeclared test source is product code and
+meets the second half of the rule: no GLOBAL symbol is defined by two product objects of one root.
+Proof argument: a double of a product body, fake, mock or recording stand-in is, at the object level, a second definition of that name; the
+intersection is empty iff no test replaces a product symbol. Failure injection is an input of the shared boot machine, never a replaced function.
+Depends only on the accepted OWNER item 1 (the compiler is correct).
+Gate: `objstub` (`doubles.py`; fields `tests_total`, `tests_with_doubles`, `double_symbols`). Owner order of 2026-11-11 night (CLAUDE.md).

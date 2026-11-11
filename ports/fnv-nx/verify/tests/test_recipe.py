@@ -280,6 +280,29 @@ def main():
           and any(x["symbol"] == "os_svc" and x["object"] == "os.S" for x in d) and "f_b" in u and "f_a" not in u
           and d == sorted(d, key=lambda x: (x["symbol"], x["object"])) and u == sorted(u), (d, u))
 
+    # --- declared tests (RECIPE.md "tests"): linked from the root's whole product unit set + the test's own units; the stub gate's doubles rule
+    trec = mut(tests=[{"name": "clean", "units": ["tests/t_clean.c"]}, {"name": "dbl", "units": ["tests/t_dbl.c"]}])
+    tfiles = {"toy/tests/t_clean.c": "int t_only(void) { return f_b() + 1; }\nint f_b(void);\n", "toy/tests/t_dbl.c": "__attribute__((weak)) int f_b(void) { return 99; }\n"}   # weak: the link succeeds, only the symbol rule sees it
+    trepo = make_repo("tests", rec=trec, files=tfiles)
+    rt = recipe.build(trepo, ROOT, SS, BASE + "/outt")
+    tl = {t["name"]: t for t in rt.get("tests", [])}
+    check("tests: green; product units exclude the test units, the product ELF and objects are those of the root without tests",
+          rt["status"] == "green" and sorted(rt["units"]) == ["a.c", "b.c", "c.c", "os.S"] and rt["elf"] and set(tl) == {"clean", "dbl"}
+          and [o["unit"] for o in rt["objects"]] == ["a.c", "b.c", "c.c", "os.S"], rt.get("failure"))
+    check("tests: each test is linked from every product unit plus its own units and has its own ELF; its symbols are its own objects'",
+          all(set(t["linked"]) == {"a.c", "b.c", "c.c", "os.S"} | set(t["units"]) and t["elf"] for t in tl.values())
+          and {"symbol": "t_only", "bind": "GLOBAL", "type": "FUNC", "object": "tests/t_clean.c"} in tl["clean"]["defined"]
+          and not any(d["object"].startswith("tests/") for d in rt["defined"]), tl)
+    rs = recipe.build(make_repo("tests-strong", rec=mut(tests=[{"name": "s", "units": ["tests/t_s.c"]}]), files={"toy/tests/t_s.c": "int f_b(void) { return 99; }\n"}),
+                      ROOT, SS, BASE + "/outs")
+    check("tests: a strong double makes the test link itself fail (ld multiple definition): the build is red at the link stage",
+          rs["status"] == "red" and "ld:" in rs["failure"]["stage"] and ROOT in rs["failure"]["stage"], rs.get("failure"))
+    import doubles
+    items, finds, st = doubles.judge({ROOT: rt})
+    check("tests + doubles.judge: the test that redefines product f_b is red, naming test, symbol and product object; the clean one is not",
+          [f[0] for f in finds] == [ROOT + ":test:dbl"] and "f_b" in finds[0][3] and ROOT + "/b.c" in finds[0][3]
+          and st == {"tests_total": 2, "tests_with_doubles": 1, "double_symbols": 1}, (finds, st))
+
     print("INFO +%.1f s: toy builds done" % (time.time() - t_start))
     tcc, tct = tc_fut.result()
     tcx = {"name": "tc", "repo": "fnv-nx-build", "ref": "tc", "commit": tcc, "tree_sha256": tct, "at": "/opt/tc"}

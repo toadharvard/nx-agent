@@ -1037,6 +1037,25 @@ PE images (MZ) and anything unrecognised: exit 1. Exit codes: 0 ok, 1 error, 2 `
 usage: coffnorm.py normalize IN -o OUT [--allow-typeserver] | check FILE... [--allow-typeserver] | fields FILE
 ```
 
+## verify/doubles.py
+
+```text
+doubles: the rule "no doubles in tests" (CLAUDE.md, owner order of 2026-11-11 night) as a pure function over the results of the
+product roots' builds (objects.json of recipe.py, RECIPE.md "tests"). Called by gate_objstub.py: the check is part of the stub gate.
+Rule, per test binary T of a root R: (symbols defined by T's own objects) INTERSECT (symbols defined by the objects of ALL admitted
+product roots) = EMPTY. A symbol is any global, weak or unique definition of the ELF .symtab of an object (recipe.symbols). No allow-list,
+no exclusion by name. Also red:
+  - a test link that omits a product unit of its root (`linked` must contain every unit of the root);
+  - a declared test without a linked ELF in the result;
+  - two product objects of one root that both define the same GLOBAL symbol: this is how a test source that was not declared (and so is a
+    product unit, linked into the product) is caught when it replaces a product body; a link of the root would fail the same way.
+Argument: the recipe makes every source of a root either a product unit or a unit of exactly one declared test (recipe.check), and a test
+is linked by the recipe from the root's whole product unit set. A test therefore contains the real product objects; a double is a second
+definition of a name, which is exactly the set intersection above. A source that is not declared as a test is product code and meets the
+product-duplicate rule. Weak and unique symbols (inline functions, template instances) count like global ones, as the owner's rule says.
+Depends only on the accepted OWNER item 1 (the compiler is correct): the symbol table of an object is the set of names it defines.
+```
+
 ## verify/envcheck.py
 
 ```text
@@ -1219,7 +1238,11 @@ cache hits) and judges what the recipe says (RECIPE.md): the objects (os_layer o
 and the terminator set DERIVED from the recipe's compiler: objstub.unit_terminators runs the compiler's own plugin over the preprocessed text
 of every C/C++ unit (the stage result unit.ii of the build, found by the pp_key in objects.json), so the set is a function of the compiler,
 its flags and every header the unit really includes (a function of the compiler and the header set; the finer key is the preprocessor stage
-key). The set is cached per unit under GATE_CACHE/objstub. No product root: universe 0, green.
+key). The set is cached per unit under GATE_CACHE/objstub.
+No doubles in tests (doubles.py, owner order of 2026-11-11 night): for every declared test of every root (RECIPE.md "tests"), symbols the test's own
+objects define INTERSECT symbols the objects of ALL product roots define = EMPTY, the test link holds every product unit of its root, and no GLOBAL
+symbol is defined by two product objects of one root; each test and each root's product units is an item. Result fields: tests_total,
+tests_with_doubles, double_symbols, doubles (first 50 reasons). No product root: universe 0, green.
 Wine rows: verify/wine_fixme.tsv of the tree under test (objstub.read_wine_table; missing or malformed is a gate error, red); the result
 holds "wine_fixme": {id: call sites} so growth of the simplified bodies is visible.
 Reach facts: GATE_CACHE/reach/<git tree>/reach.facts.tsv (rows fact_id<TAB>sha256, written by the gate `reach`, which does not exist yet).
@@ -1637,7 +1660,9 @@ every step is a sandbox stage (sandbox.py) keyed by its declared inputs, cached 
 Steps: (1) generated stages (python runtime, runtime.py), (2) one unit stage per source: .c/.cc/.cpp/.cxx = unitstage.Build (PP on
 name-complete views, then CC on the preprocessed text), .s/.S = unitstage.Build too (.S: PP then CC; .s: one stage on its own file), (3) the link stage
 (`ld` of the compiler, objects + script as inputs). Tools (compilers, ld) are runtime.py `tool` runtimes: declared inputs, no host /usr.
-RULE units: every tracked *.c *.cc *.cpp *.cxx *.s *.S under the root, and every generated output with such a name, is a unit.
+RULE units: every tracked *.c *.cc *.cpp *.cxx *.s *.S under the root, and every generated output with such a name, is a unit: a PRODUCT unit, or
+  a unit of exactly one declared test (key "tests", RECIPE.md). A test is linked (test-NAME.elf) from the root's whole product unit set plus its own
+  units, same script and flags; its objects and defined symbols are in objects.json "tests" and not in "objects"/"defined".
 RULE refusal set R: an option of GNU ld's grammar that lets a link accept missing or substituted symbols. Matched by OPTION SYNTAX:
   strip one or two leading dashes, cut at `=`; a name that is a prefix (getopt_long abbreviation) of a refused long name is refused (a
   single-dash name needs >= 2 chars); `-z undefs|muldefs` as `-z X` or `-zX`; `-Wl,a,b` and `-Xlinker a` are split into the options

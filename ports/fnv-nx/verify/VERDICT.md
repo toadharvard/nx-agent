@@ -114,6 +114,9 @@ every merge pays today; with a product root each judges it (tested on a toy root
 - `build` (all roots build in the sandbox), `determinism` (two cold builds and the warm one equal bit for bit): class 9 and the precondition
   of the others.
 - `objstub` (classes 1, 2 and the reach rule of 16): `gate_objstub.py`, rules in `objstub.py`.
+  - No doubles in tests (owner order of 2026-11-11 night; `doubles.py`, in the same gate and the same absolute 0): per declared test of a root,
+    (symbols its own objects define) INTERSECT (symbols the objects of all product roots define) = EMPTY; the test link holds every product unit;
+    no GLOBAL symbol twice among the product objects of a root. Fields `tests_total`, `tests_with_doubles`, `double_symbols`, `doubles`.
   - Terminator set derived from the recipe's compiler by a GCC plugin run over the preprocessed text of every unit (exactly the
     declarations the compiler sees, headers included), cached per unit; assumption: a terminating routine is declared noreturn.
     A terminator ends the process. Unwinding is not: the EH-resume builtins of GCC's own EH lowering (`_Unwind_Resume`) and, in C++, a

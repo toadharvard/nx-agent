@@ -6,7 +6,11 @@ cache hits) and judges what the recipe says (RECIPE.md): the objects (os_layer o
 and the terminator set DERIVED from the recipe's compiler: objstub.unit_terminators runs the compiler's own plugin over the preprocessed text
 of every C/C++ unit (the stage result unit.ii of the build, found by the pp_key in objects.json), so the set is a function of the compiler,
 its flags and every header the unit really includes (a function of the compiler and the header set; the finer key is the preprocessor stage
-key). The set is cached per unit under GATE_CACHE/objstub. No product root: universe 0, green.
+key). The set is cached per unit under GATE_CACHE/objstub.
+No doubles in tests (doubles.py, owner order of 2026-11-11 night): for every declared test of every root (RECIPE.md "tests"), symbols the test's own
+objects define INTERSECT symbols the objects of ALL product roots define = EMPTY, the test link holds every product unit of its root, and no GLOBAL
+symbol is defined by two product objects of one root; each test and each root's product units is an item. Result fields: tests_total,
+tests_with_doubles, double_symbols, doubles (first 50 reasons). No product root: universe 0, green.
 Wine rows: verify/wine_fixme.tsv of the tree under test (objstub.read_wine_table; missing or malformed is a gate error, red); the result
 holds "wine_fixme": {id: call sites} so growth of the simplified bodies is visible.
 Declared-machine rows: verify/declared_machine.tsv of the tree under test (objstub.read_declared_table; missing or malformed is a gate error, red),
@@ -24,6 +28,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import doubles  # noqa: E402
 import gate_build  # noqa: E402
 import objstub  # noqa: E402
 import recipe  # noqa: E402
@@ -31,14 +36,14 @@ import unitstage  # noqa: E402
 
 
 def root_check(root, repo, cache, jobs):
-    """-> (results {unit path: analysis}, rows {(unit path, symbol): row}, os_layer ids, root-level findings [(id, name, kind, detail)])"""
+    """-> (results {unit path: analysis}, rows {(unit path, symbol): row}, os_layer ids, root-level findings [(id, name, kind, detail)], build result|None)"""
     rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
     try:
         res, _ = gate_build.ensure(root, cache, repo)
     except recipe.RecipeError as e:
-        return {}, {}, set(), [("-", root, "recipe-invalid", "; ".join(e.errors)[:200])]
+        return {}, {}, set(), [("-", root, "recipe-invalid", "; ".join(e.errors)[:200])], None
     if res["status"] == "red":
-        return {}, {}, set(), [("-", root, "build-red", "stage %s" % res["failure"]["stage"])]
+        return {}, {}, set(), [("-", root, "build-red", "stage %s" % res["failure"]["stage"])], None
     base = root + "/"
     objs = [(base + o["unit"], o["object"]) for o in res["objects"]]
     drv = dict(zip(("c", "c++"), recipe.host_compilers(rec, cache)))
@@ -49,7 +54,7 @@ def root_check(root, repo, cache, jobs):
             names |= set(objstub.unit_terminators(drv[lang], us, {"c": rec["flags"]["c"], "c++": rec["flags"]["cxx"]}, cache, jobs)[0])
     os_ids = {base + o["unit"] for o in res["objects"] if o["os_layer"]}
     rows = objstub.read_rows(res["constants"], base) if res["constants"] else {}
-    return objstub.analyse_all(objs, names, os_ids, cache, jobs), rows, os_ids, []
+    return objstub.analyse_all(objs, names, os_ids, cache, jobs), rows, os_ids, [], res
 
 
 def main(argv):
@@ -57,18 +62,23 @@ def main(argv):
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-objstub-")
     cache, repo = os.environ.get("GATE_CACHE") or tmp, "."
     items, finds, why, results, rows, roots = [], [], "", {}, {}, gate_build.product_roots(repo)
+    built, stats = {}, {"tests_total": 0, "tests_with_doubles": 0, "double_symbols": 0}
     try:
         wine = objstub.read_wine_table(os.path.join(repo, "ports/fnv-nx/verify/wine_fixme.tsv"))   # the table of the tree under test
         declared = objstub.read_declared_table(os.path.join(repo, "ports/fnv-nx/verify/declared_machine.tsv"))   # the table of the tree under test
         facts = objstub.read_facts(os.path.join(cache, "reach", gate_build.tree_of(repo), "reach.facts.tsv")) if roots else None
         for root in roots:
-            r, w, _, fs = root_check(root, repo, cache, jobs)
+            r, w, _, fs, b = root_check(root, repo, cache, jobs)
+            if b:
+                built[root] = b
             results.update(r)
             rows.update(w)
             finds += fs
             items += [(i, n) for i, n, _, _ in fs]
         its, fs = objstub.judge(results, rows, facts, wine, declared)
         items, finds = items + its, finds + fs
+        dit, dfs, stats = doubles.judge(built)   # no doubles in tests: part of this gate (doubles.py)
+        items, finds = items + dit, finds + dfs
     except (ValueError, KeyError, OSError) as e:
         why = "input error: %s" % (str(e)[:300] or type(e).__name__)
     finally:
@@ -90,7 +100,9 @@ def main(argv):
         status, detail = "green", "%d functions in %d objects of %d roots, no trap path, no vacuous body" % (len(items), len(results), len(roots))
     res = {"format": "fnvnx-gate/1", "name": "objstub", "status": status, "universe": len(items), "certified": cert,
            "uncertified": bad[:50], "detail": detail, "wine_fixme": {str(k): v for k, v in objstub.wine_counts(results).items()},
-           "declared_machine": {str(k): v for k, v in objstub.declared_counts(results).items()}}
+           "declared_machine": {str(k): v for k, v in objstub.declared_counts(results).items()},
+           "tests_total": stats["tests_total"], "tests_with_doubles": stats["tests_with_doubles"], "double_symbols": stats["double_symbols"],
+           "doubles": sorted("%s: %s" % (o, d) for o, _, k, d in finds if k in ("test-double", "test-omits-unit", "test-not-linked", "product-duplicate"))[:50]}
     with open(os.path.join(os.environ["GATE_OUT"], "objstub.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     print("objstub: %s %d/%d %s" % (status, cert, len(items), detail[:200]))

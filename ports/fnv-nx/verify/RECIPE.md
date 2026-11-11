@@ -11,7 +11,7 @@ the hash of the stage document + tool code. All paths are root-relative unless m
  "include": ["ports/fnv-nx/X/inc", "ports/fnv-nx/X/gen", "/ext/ft/include"],
  "units": "all",
  "generated": [{"tool": "ports/fnv-nx/contract/gen.py", "args": ["/out/gen/t.h"], "inputs": ["ports/fnv-nx/X/table.tsv"], "outputs": ["gen/t.h"]}],
- "os_layer": ["os.S"], "constants": "constants.tsv", "contract_names": "contract.tsv",
+ "os_layer": ["os.S"], "tests": [{"name": "t1", "units": ["tests/t1.cc"]}], "constants": "constants.tsv", "contract_names": "contract.tsv",
  "link": {"script": "link.ld", "output": "x.elf", "flags": ["-e", "entry"]},
  "external": [{"name": "ft", "repo": "fnv-nx-build", "ref": "mirror/freetype", "commit": "<40 hex>", "tree_sha256": "<64 hex>", "at": "/ext/ft"}]}
 ```
@@ -24,6 +24,13 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 - `units`: must be `"all"`. A `.S` unit is preprocessed as its own stage like a C unit (its key covers exactly the headers it includes);
   a `.s` unit sees nothing but its own file (`.include` fails: use `.S` and `#include`). RULE: every tracked `*.c *.cc *.cpp *.cxx *.s *.S` under the root, and every generated output with such a name, is
   compiled. A file that must not be compiled does not belong in the root; there is no `exclude`.
+- `tests`: the declared test binaries of the root, `[{"name": N, "units": [root-relative sources]}]` (no double in tests, CLAUDE.md of 2026-11-11 night).
+  Every source of the root is a PRODUCT unit or a unit of exactly one test (a unit listed in two tests, or not a source of the root, is an error).
+  A test is linked by the recipe as `test-N.elf` from ALL product units of the root plus its own units, with the root's `link` script and flags
+  (so `tests` needs `link`); it never replaces a product file. A test unit is not in `objects`/`defined`/`units` of the result: the result has
+  `tests` [{name, units, objects, linked, defined, elf}]. The stub gate (`objstub`, doubles.py) is red when a test defines a symbol that any
+  product root defines (global, weak or unique; no allow-list), when `linked` lacks a product unit, or when two product objects of one root define
+  the same GLOBAL symbol (an undeclared test source is a product unit and is caught here).
 - `generated`: python generators run as sandbox stages before compilation, in list order. `tool` is a tracked `.py` of an admitted tool or product
   root (the whole root is mounted at `/tool`, the script at `/tool/<path in its root>`), `inputs` are tracked files or directories (repo-relative;
   mounted at `/in/<repo path>`; they may not nest), the generator writes ONLY `/out/<output>` (the set of produced files must equal `outputs`).
@@ -69,7 +76,7 @@ inputs); a library that cannot be resolved is a red build naming the object and 
 it is passed as `-I<that path>` (the external is a declared input of every stage, so keys stay content-addressed).
 
 ## Result (`objects.json`, "fnvnx-objects/1")
-`objects` [{unit, object, sha256, os_layer}], `elf` {path, sha256}|null, `constants`, `contract_names` (paths of the copies or null),
+`objects` [{unit, object, sha256, os_layer}] (product units), `tests`, `elf` {path, sha256}|null, `constants`, `contract_names` (paths of the copies or null),
 `pp_keys` {unit: stage key of its preprocessor stage; its result `unit.ii` is in the store GATE_CACHE/store, read by objstub to derive the
 terminator set}, `units`, `defined` [{symbol, bind GLOBAL|WEAK|UNIQUE, type, object}] and
 `undefined` [symbol] from the ELF `.symtab` of every object, `stage_keys`, `stages` {run, hit}, `status`; red adds `failure` {stage, exit, stderr

@@ -6,7 +6,9 @@ every step is a sandbox stage (sandbox.py) keyed by its declared inputs, cached 
 Steps: (1) generated stages (python runtime, runtime.py), (2) one unit stage per source: .c/.cc/.cpp/.cxx = unitstage.Build (PP on
 name-complete views, then CC on the preprocessed text), .s/.S = unitstage.Build too (.S: PP then CC; .s: one stage on its own file), (3) the link stage
 (`ld` of the compiler, objects + script as inputs). Tools (compilers, ld) are runtime.py `tool` runtimes: declared inputs, no host /usr.
-RULE units: every tracked *.c *.cc *.cpp *.cxx *.s *.S under the root, and every generated output with such a name, is a unit.
+RULE units: every tracked *.c *.cc *.cpp *.cxx *.s *.S under the root, and every generated output with such a name, is a unit: a PRODUCT unit, or
+  a unit of exactly one declared test (key "tests", RECIPE.md). A test is linked (test-NAME.elf) from the root's whole product unit set plus its own
+  units, same script and flags; its objects and defined symbols are in objects.json "tests" and not in "objects"/"defined".
 RULE refusal set R: an option of GNU ld's grammar that lets a link accept missing or substituted symbols. Matched by OPTION SYNTAX:
   strip one or two leading dashes, cut at `=`; a name that is a prefix (getopt_long abbreviation) of a refused long name is refused (a
   single-dash name needs >= 2 chars); `-z undefs|muldefs` as `-z X` or `-zX`; `-Wl,a,b` and `-Xlinker a` are split into the options
@@ -43,7 +45,7 @@ import unitstage  # noqa: E402
 FORMAT, OBJ_FORMAT = "fnvnx-recipe/1", "fnvnx-objects/1"
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
-KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external"}
+KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external", "tests"}
 EXT_KEYS = {"name", "repo", "ref", "commit", "tree_sha256", "at"}
 SANDBOX_PATHS = ("/src", "/inc", "/in", "/out", "/tool", "/objs", "/ld", "/work", "/proc", "/dev", "/tmp", "/oldroot")
 STYPE = {0: "NOTYPE", 1: "OBJECT", 2: "FUNC", 5: "COMMON", 6: "TLS", 10: "IFUNC"}
@@ -122,10 +124,27 @@ def generated_outputs(rec):
             for o in x["outputs"] if isinstance(o, str)]
 
 
-def units_of(rec, root, files):
-    """Sorted root-relative unit paths: tracked source files + generated outputs with a source name."""
+def all_units_of(rec, root, files):
+    """Sorted root-relative paths of every source of the root: tracked source files + generated outputs with a source name."""
     mine = {f[len(root) + 1:] for f in files if under(f, root)}
     return sorted(u for u in mine | set(generated_outputs(rec)) if is_unit(u))
+
+
+def tests_of(rec):
+    """The declared tests of REC: [(name, [unit, ..])] (entries that are not well formed are left to check())."""
+    t = rec.get("tests") if isinstance(rec, dict) else None
+    return [(x["name"], list(x["units"])) for x in (t if isinstance(t, list) else []) if isinstance(x, dict) and isinstance(x.get("name"), str)
+            and isinstance(x.get("units"), list) and all(isinstance(u, str) for u in x["units"])]
+
+
+def test_units_of(rec):
+    return {u for _, us in tests_of(rec) for u in us}
+
+
+def units_of(rec, root, files):
+    """Sorted root-relative PRODUCT unit paths: every source of the root that is not a unit of a declared test (RECIPE.md, tests)."""
+    tu = test_units_of(rec)
+    return [u for u in all_units_of(rec, root, files) if u not in tu]
 
 
 def check(rec, root, files, roots):
@@ -208,11 +227,30 @@ def check(rec, root, files, roots):
             if o in seen:
                 err.append("generated output %s is produced twice" % o)
             seen.add(o)
+    allu = set(all_units_of(rec, root, files))
+    tl = rec.get("tests", [])
+    seen_t, seen_u = set(), set()
+    for i, t in enumerate(tl if isinstance(tl, list) else err.append("tests must be a list") or []):
+        if not (isinstance(t, dict) and set(t) == {"name", "units"} and isinstance(t["name"], str) and re.fullmatch(r"[A-Za-z0-9_+-]+", t["name"])
+                and isinstance(t["units"], list) and t["units"] and all(isinstance(u, str) for u in t["units"])):
+            err.append("tests[%d] needs exactly name ([A-Za-z0-9_+-]+) and units (a non-empty list of root-relative units)" % i)
+            continue
+        if t["name"] in seen_t:
+            err.append("test %r is declared twice" % t["name"])
+        seen_t.add(t["name"])
+        for u in t["units"]:
+            if u not in allu:
+                err.append("test %r: %r is not a source of the root" % (t["name"], u))
+            if u in seen_u:
+                err.append("test unit %r is declared by two tests (or twice)" % u)
+            seen_u.add(u)
+    if seen_t and not rec.get("link"):
+        err.append("tests need the root's link (a test is linked with the same script and flags)")
     units = set(units_of(rec, root, files))
     ol = rec.get("os_layer", [])
     for u in ol if isinstance(ol, list) else err.append("os_layer must be a list") or []:
         if u not in units:
-            err.append("os_layer entry %r is not a unit" % (u,))
+            err.append("os_layer entry %r is not a unit (a test unit is no os_layer unit)" % (u,))
     gm = rec.get("game")
     if gm is not None and not (isinstance(gm, str) and rel_ok(gm) and any(u.startswith(gm.strip("/") + "/") for u in units)):
         err.append("game %r is not a root-relative directory holding units" % (gm,))
@@ -458,8 +496,10 @@ class Job:
             raise BuildRed(dict(failed[sorted(failed)[0]], units=sorted(failed), done=sorted(res)))
         return res
 
-    def link(self, ws, objs):
+    def link(self, ws, objs, output=None, tag=""):
+        """ld OBJS (unit -> compile result) to OUTPUT (default the recipe's); TAG tells the links of one root apart."""
         lk, cc = self.rec["link"], self.drivers()[0]
+        output = output or lk["output"]
         pn = subprocess.run([self.hostpath(cc), "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
         ld = posixpath.normpath(pn)
         if "external" in self.rec["compiler"]:
@@ -468,15 +508,15 @@ class Job:
             rt = self.toolrt([cc])[1]
         else:
             rt = self.cached_rt("tool-ld-" + hashlib.sha256(repr((ld, sorted((e["at"], e["tree"]) for e in self.ext.values()))).encode()).hexdigest()[:16], lambda: self.plus(runtime.build_tool(self.store, [ld], [])))[1]
-        od, sd = os.path.join(ws, "objs"), os.path.join(ws, "ld")
+        od, sd = os.path.join(ws, "objs" + tag), os.path.join(ws, "ld" + tag)
         for u, o in objs.items():
             os.makedirs(os.path.dirname(os.path.join(od, u + ".o")), exist_ok=True)
             shutil.copyfile(cas._obj(self.store, cas.manifest(o, self.store)["entries"]["unit.o"]), os.path.join(od, u + ".o"))
         os.makedirs(sd)
         shutil.copyfile(os.path.join(self.repo, self.root, lk["script"]), os.path.join(sd, os.path.basename(lk["script"])))
-        argv = [ld, "--build-id=none", "-T", "/ld/" + os.path.basename(lk["script"])] + lk["flags"] + ["-o", "/out/" + lk["output"]] + [
+        argv = [ld, "--build-id=none", "-T", "/ld/" + os.path.basename(lk["script"])] + lk["flags"] + ["-o", "/out/" + output] + [
             "/objs/%s.o" % u for u in sorted(objs)]
-        doc = {"format": "fnvnx-stage/1", "stage": "ld:" + self.root, "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
+        doc = {"format": "fnvnx-stage/1", "stage": "ld:" + self.root + (":" + tag if tag else ""), "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
                "env": dict(unitstage.ENV, PATH=os.path.dirname(ld)), "outputs": ["/out"],
                "inputs": sorted(rt["inputs"] + [{"at": "/objs", "tree": cas.ingest(od, self.store)},
                                                 {"at": "/ld", "tree": cas.ingest(sd, self.store)}], key=lambda i: i["at"])}
@@ -514,8 +554,8 @@ def build(repo, root, store, out, jobs=4, ext=None):
     errs = check(j.rec, root, j.files, j.roots)
     if errs:
         raise RecipeError(errs)
-    units = units_of(j.rec, root, j.files)
-    res = {"format": OBJ_FORMAT, "root": root, "objects": [], "elf": None, "constants": None, "contract_names": None, "defined": [], "undefined": [],
+    units, tests = units_of(j.rec, root, j.files), tests_of(j.rec)
+    res = {"format": OBJ_FORMAT, "root": root, "objects": [], "tests": [], "elf": None, "constants": None, "contract_names": None, "defined": [], "undefined": [],
            "stage_keys": [], "status": "green"}
     ws = tempfile.mkdtemp(prefix="recipe-")
     os.makedirs(out, exist_ok=True)
@@ -523,7 +563,7 @@ def build(repo, root, store, out, jobs=4, ext=None):
         _copy(repo, [f for f in j.files if under(f, root)], root, os.path.join(ws, "root"))
         j.externals(ws)
         j.generate(ws)
-        objs, und = j.compile(ws, units), set()
+        objs, und = j.compile(ws, units + sorted(test_units_of(j.rec))), set()
         for u in units:
             dest = os.path.join(out, "obj", u + ".o")
             os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -534,9 +574,23 @@ def build(repo, root, store, out, jobs=4, ext=None):
             und |= x
             res["objects"].append({"unit": u, "object": os.path.abspath(dest), "sha256": ent["h"], "os_layer": u in j.rec.get("os_layer", [])})
         res.update(defined=sorted(res["defined"], key=lambda d: (d["symbol"], d["object"])), undefined=sorted(und))
+        for tname, tunits in tests:   # a test: the root's WHOLE product unit set + its own units, same script and flags (RECIPE.md, tests)
+            tout, tobjs, tdef = "test-%s.elf" % tname, [], []
+            for u in tunits:
+                dest = os.path.join(out, "obj", u + ".o")
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                ent = cas.manifest(objs[u], store)["entries"]["unit.o"]
+                shutil.copyfile(cas._obj(store, ent), dest)
+                tdef += symbols(dest, u)[0]
+                tobjs.append({"unit": u, "object": os.path.abspath(dest), "sha256": ent["h"]})
+            linked = {u: objs[u] for u in units + tunits}
+            ent = cas.manifest(j.link(ws, linked, tout, "test-" + tname), store)["entries"][tout]
+            shutil.copyfile(cas._obj(store, ent), os.path.join(out, tout))
+            res["tests"].append({"name": tname, "units": list(tunits), "objects": tobjs, "linked": sorted(linked), "defined": sorted(
+                tdef, key=lambda d: (d["symbol"], d["object"])), "elf": {"path": os.path.abspath(os.path.join(out, tout)), "sha256": ent["h"]}})
         if j.rec.get("link"):
             name = j.rec["link"]["output"]
-            ent = cas.manifest(j.link(ws, objs), store)["entries"][name]
+            ent = cas.manifest(j.link(ws, {u: objs[u] for u in units}), store)["entries"][name]
             shutil.copyfile(cas._obj(store, ent), os.path.join(out, name))
             res["elf"] = {"path": os.path.abspath(os.path.join(out, name)), "sha256": ent["h"]}
         for key in ("constants", "contract_names"):
