@@ -1,11 +1,14 @@
 """PE loader: sections, base relocations (HIGHLOW) and the address-taken value list."""
-import struct
+import os, struct
 
 
 class Image:
     def __init__(self, path, base=None):
         """base: None = the image as stored (preferred base). Otherwise the image as the Windows loader maps it at `base`: sections at the new
-        addresses and delta = base - preferred added to the dword of every HIGHLOW relocation site (u32/bytes/taken/rset/relocs speak `base` addresses)."""
+        addresses and delta = base - preferred added to the dword of every HIGHLOW relocation site (u32/bytes/taken/rset/relocs speak `base` addresses).
+        base None and env FNVNX_BASE (hex) set: base = FNVNX_BASE (tools that construct Image(path) pick the module's assigned base from the environment)."""
+        if base is None and os.environ.get('FNVNX_BASE'):        # the one resolver: the image as mapped at the load base the loader assigned (default: the preferred base)
+            base = int(os.environ['FNVNX_BASE'], 16)
         d = self.d = open(path, 'rb').read()
         pe = struct.unpack_from('<I', d, 0x3c)[0]
         n = struct.unpack_from('<H', d, pe + 6)[0]
@@ -32,6 +35,7 @@ class Image:
                     self.relocs.append(self.base + page + (e & 0xfff))
             p += bs
         pref = self.base
+        self.nobytes = sum(1 for r in self.relocs if self.off(r) is None)      # HIGHLOW sites in the zero-filled tail of a section (no file bytes: the rebase cannot patch them)
         if base is not None and base != pref:
             delta = (base - pref) & 0xffffffff
             self.d = d = bytearray(d)

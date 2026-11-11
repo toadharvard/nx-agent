@@ -2,6 +2,7 @@
 """The packager: the lifter's output for the whole code universe as linkable objects.
     liftall.py --shard K/N --out DIR [--jobs J]    lift + compile the entries whose index (address order) mod N == K  -> lift_K_of_N.a, manifest_K.tsv, missing_K.tsv, forms_K.tsv, undef_K.tsv
     liftall.py --finish --out DIR                  merge the shards -> manifest/missing/forms/undef.tsv, entries.tsv, disp.o (perfect-hash table, position independent), rt.a, gate_liftall.json
+liftall.py --module NAME ...                  (any mode) a module of modules.tsv: its file, its assigned load base (FNVNX_BASE) and FNVNX_FACTS_OUT/<name>/universe.tsv
 Deterministic: sorted iteration, no clocks in the outputs. Inputs FNVNX_EXE, FNVNX_UNIVERSE (universe.tsv), FNVNX_PROOF (certificates); outputs only under --out (exe-derived, never in the repository).
 Prerequisites: python3 with capstone, numpy, pyelftools, unicorn (test/instest.py imports them); aarch64-linux-gnu-g++/gcc/binutils."""
 import argparse, collections, glob, hashlib, json, multiprocessing as mp, os, re, subprocess, sys, threading, time
@@ -195,12 +196,22 @@ def finish(a):
     if res['status'] != 'green': sys.exit('finish: %d universe entries have no body (missing.tsv): the pack is not complete' % (len(ent) - len(man)))
 
 
+def module_env(name):
+    """--module NAME: the file, the assigned load base and the universe of a modules.tsv module, as the environment the lifter tools read (FNVNX_EXE, FNVNX_BASE, FNVNX_UNIVERSE)."""
+    import pemod
+    path, row = pemod.locate(name); u = '%s/%s/universe.tsv' % (os.environ.get('FNVNX_FACTS_OUT', '/home/user/l3facts2'), os.path.splitext(row.name)[0])
+    if not os.path.exists(u): sys.exit('--module %s: no universe %s (tools/universe.py --module)' % (name, u))
+    os.environ.update(FNVNX_EXE=path, FNVNX_BASE='%08x' % row.base, FNVNX_UNIVERSE=u)
+    return path
+
+
 def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
     A('--shard'); A('--finish', action='store_true'); A('--out', default='/home/user/l3work/liftall'); A('--jobs', type=int, default=3)
-    A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe'))
+    A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')); A('--module', help='a module of modules.tsv (lifted at its assigned base, with its universe)')
     A('--bridge', default=os.environ.get('FNVNX_BRIDGE')); A('--need', action='append', default=[]); A('--l3', default=None)     # --finish: import entries
     a = ap.parse_args(); os.makedirs(a.out, exist_ok=True)
+    if a.module: a.exe = module_env(a.module)
     if a.finish: finish(a)
     elif a.shard: shard(a)
     else: ap.error('--shard K/N or --finish')
