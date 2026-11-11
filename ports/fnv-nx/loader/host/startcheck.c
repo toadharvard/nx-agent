@@ -129,6 +129,7 @@ static uint32_t resolve(void *c, const char *dll, const char *name, uint32_t ord
 
 /* ---- our lifter ---- */
 typedef struct { uint32_t eip, esp, teb, w[4]; unsigned nlog; int in_stack; } call_rec;
+const fnvnx_proc *fnvnx_start_proc(void) { return g_proc; }
 static call_rec g_calls[8]; static unsigned g_ncalls;
 uint32_t fnvnx_lift_enter(uint32_t eip, uint32_t esp, uint32_t teb) {
     call_rec *r = &g_calls[g_ncalls++ % 8];
@@ -136,7 +137,7 @@ uint32_t fnvnx_lift_enter(uint32_t eip, uint32_t esp, uint32_t teb) {
     r->eip = eip; r->esp = esp; r->teb = teb; r->nlog = g_nlog;
     for (k = 0; k < 4; k++) memcpy(&r->w[k], g_res + esp + 4 * k, 4);
     r->in_stack = g_proc && esp >= g_proc->main.stack_limit && esp + 16 <= g_proc->main.stack_base;
-    return eip == g_proc->entry_va ? 0xC0DE0001u : 0xdead0000u + g_ncalls;
+    return eip == g_proc->exe.entry_va ? 0xC0DE0001u : 0xdead0000u + g_ncalls;
 }
 
 /* ---- independent expectation ---- */
@@ -341,6 +342,7 @@ int main(int argc, char **argv) {
         uint8_t bad[32];
         memcpy(bad, sha, 32); bad[7] ^= 1;
         memset(&cfg, 0, sizeof cfg);
+        cfg.exe_name = "synth.exe";
         g_proc = p;
         /* wrong SHA-256: refused before anything is mapped */
         plat_up(file, len); cfg.file_size = len; memcpy(cfg.sha256, bad, 32); cfg.resolve = resolve; cfg.bias = g_bias; g_ndeny = 0;

@@ -10,7 +10,7 @@ The emulator stage proper (L4) must provide what this file adds; tests/s5 is not
   - the VM service on (it is opt-in in emu_guest);
   - at the end of the run: the protection map of [image base, + SizeOfImage) as the emulator holds it, compared page by
     page with the PE section table (R if MEM_READ, W if MEM_WRITE, never X, headers R, gaps no access), and nothing
-    mapped in [0, 0x02100000) outside the image.  Prints `e2e-host: ...` lines.
+    mapped below the VM arena outside the exe and module images.  Prints `e2e-host: ...` lines.
 """
 import os, struct, sys
 
@@ -22,7 +22,7 @@ from unicorn import UC_PROT_READ, UC_PROT_WRITE, UC_PROT_EXEC, UcError
 P = 0x1000
 
 
-def pe_expect(path):
+def pe_expect(path, rebase=None):
     """(base, size_of_image, {page va: prot}) from the file's headers, Windows rule: prot from the section's bits"""
     with open(path, "rb") as f:
         d = f.read(0x1000)
@@ -33,6 +33,7 @@ def pe_expect(path):
         shoff = opt + optsz
         f.seek(0)
         d = f.read(shoff + 40 * nsec)
+    base = rebase if rebase is not None else base
     size = (size + P - 1) & ~(P - 1)
     pages = {base + k: 0 for k in range(0, size, P)}
     soh = struct.unpack_from("<I", d, opt + 60)[0]
@@ -76,12 +77,18 @@ class E2EEmu(emu_guest.Emu):
             self.protects = getattr(self, "protects", 0) + 1
             return 0
         r = super().h_ext_call(module, fn, args, nargs, *_)
-        if module == 11 and fn in (5, 6) and r == 0:   # commit / decommit: fresh read-write pages
+        # DECOMMIT as hostapi.h states it: the protection of a page that stays mapped is NOT reset (the loader restores
+        # read-write with VM_PROTECT before it decommits); only a COMMIT hands out fresh read-write pages
+        if module == 11 and fn == 5 and r == 0:
             a, n = struct.unpack("<QQ", bytes(self.uc.mem_read(args, 16)))
             for pg in range(a & ~(P - 1), (a + n + P - 1) & ~(P - 1), P):
                 if pg in getattr(self, "vm_mapped", {}):
                     self.uc.mem_protect(pg, P, UC_PROT_READ | UC_PROT_WRITE)
         return r
+
+    def arena_lo(self):
+        resv = getattr(self, "vm_resv", {})
+        return min(resv) if resv else self.VM_ANY[0]
 
     def run(self):
         rc = super().run()
@@ -92,10 +99,23 @@ class E2EEmu(emu_guest.Emu):
 
     def image_protection_report(self, exe):
         base, size, want, secs = pe_expect(exe)
-        have = self.mapped_perms(base, base + size)
+        extra = []   # the static modules of modules.tsv (E2E_MODULES), at their assigned bases
+        mt, md = os.environ.get("E2E_MODULES"), os.environ.get("E2E_MODDIR")
+        if mt:
+            for ln in open(mt):
+                c = ln.rstrip("\n").split("\t")
+                if ln[:1] != "#" and c[8] == "1":
+                    b2, s2, w2, _ = pe_expect(os.path.join(md, c[0]), int(c[4], 16))
+                    extra.append((b2, s2, w2))
+        for b2, s2, w2 in extra:
+            want.update(w2)
+        have = {}
+        for b0, s0 in [(base, size)] + [(b2, s2) for b2, s2, _ in extra]:
+            have.update(self.mapped_perms(b0, b0 + s0))
         bad = [hex(a) for a in want if have.get(a) != want[a]]
         x = [hex(a) for a, p in have.items() if p & UC_PROT_EXEC]
-        low = [hex(a) for a in self.mapped_perms(0, 0x02100000) if not base <= a < base + size]
+        # nothing else is mapped below the arena: the reserved address set is the exe, the modules and the keys' range
+        low = [hex(a) for a in self.mapped_perms(0, self.arena_lo()) if a not in have]
         runs = []
         for a in sorted(have):
             if runs and runs[-1][1] == a and runs[-1][2] == have[a]:
@@ -107,7 +127,7 @@ class E2EEmu(emu_guest.Emu):
         for name, va, vs, prot in secs:
             print("e2e-host: section %-8s %08x +%06x %s%s" % (name, va, vs, "r" if prot & 1 else "-", "w" if prot & 2 else "-"))
         print("e2e-host: VM_PROTECT calls %d; image pages %d, differing from the section table %d, executable %d; "
-              "mapped below 0x02100000 outside the image %d" % (getattr(self, "protects", 0), len(want), len(bad), len(x), len(low)))
+              "mapped below the arena outside the images %d" % (getattr(self, "protects", 0), len(want), len(bad), len(x), len(low)))
         print("e2e-host: image protection %s" % ("ok" if not (bad or x or low) and getattr(self, "protects", 0) else "MISMATCH"))
 
 

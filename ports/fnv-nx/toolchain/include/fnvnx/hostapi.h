@@ -128,11 +128,24 @@ typedef struct FnvnxHostApi {
 #define FNVNX_VM_PROT_W 2u
 /* DISPLAY_DOCKED () -> 1 docked (1080p output), 0 handheld (720p) */
 #define FNVNX_PLAT_DISPLAY_DOCKED 9u
-/* ACCESS_FAULT_HANDLER (handler, frame buffer) -> 0: registers the guest function the host enters when a guest thread
- * takes an access fault (the lifter runtime turns it into the SEH exception the x86 code would get). The frame layout
- * {kind, addr, pc, sp, x[31], pstate, v[32], fpcr, fpsr} is defined next to the handler in the lifter runtime and the
- * emulator stage; this header only reserves the number. */
+/* ACCESS_FAULT_HANDLER {handler, stack_top} -> 0. Registers, for the CALLING thread, the guest function
+ * `uint64_t handler(FnvnxFaultFrame *frame)` and the top of a separate stack it runs on (16-byte aligned, guest memory).
+ * On a data or instruction access fault of that thread the host fills a frame at stack_top - sizeof(frame), switches to
+ * that stack and calls handler with faults of the same kind masked (a fault inside the handler ends the process).
+ * Return 0: the host loads every register from the frame (the handler may have changed any of them, pc included) and
+ * resumes. Return non-zero: the process ends with that value as exit code. A thread without a handler: the fault ends
+ * the process. handler == 0 unregisters. */
 #define FNVNX_PLAT_ACCESS_FAULT_HANDLER 10u
+typedef struct FnvnxFaultFrame {
+    uint32_t kind;        /* 0 read, 1 write, 2 execute */
+    uint32_t reason;      /* 0 unmapped, 1 protection, 2 alignment */
+    uint64_t addr;        /* faulting data address (kind 0, 1) or pc (kind 2) */
+    uint64_t pc, sp, pstate;
+    uint64_t x[31];       /* x0..x30 */
+    uint32_t fpcr, fpsr;
+    uint64_t v[32][2];    /* v0..v31, low then high 64 bits */
+} __attribute__((aligned(16))) FnvnxFaultFrame;
+_Static_assert(sizeof(FnvnxFaultFrame) == 816, "FnvnxFaultFrame is 816 bytes on both sides of the host boundary");
 /* 16 and above: guest sockets (platform/, table published by the platform lead) */
 
 /* Thread placement (docs/PERF.md 6.3): roles for thread_create's cpu argument; the host's table

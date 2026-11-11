@@ -48,3 +48,15 @@ startcheck: $(OUT)/startcheck $(OUT)/synth_start.pe
 ilp32-importkey:
 	$(ILP32_CC) -mabi=ilp32 -O2 $(WARN) -ffreestanding -Iinclude -c src/importkey.c -o /dev/null
 .PHONY: ilp32-importkey
+
+# Module loader test (rules M2..M4): synthetic exe + DLLs from synth/synth_modules.py.
+$(OUT)/sm/synth_mod.h: synth/synth_modules.py synth/pebuild.py | $(OUT)
+	python3 -I synth/synth_modules.py $(OUT)/sm
+
+$(OUT)/modcheck: host/modcheck.c $(OUT)/sm/synth_mod.h $(OUT)/libfnvnx_loader.a include/fnvnx_start.h include/fnvnx_modules.h
+	$(CC) $(CFLAGS) -std=c99 -Wall -Wextra -Werror $(INC) -I$(OUT)/sm host/modcheck.c $(OUT)/libfnvnx_loader.a -o $@
+
+modcheck: $(OUT)/modcheck
+	$(OUT)/modcheck $(OUT)/sm
+
+.PHONY: modcheck

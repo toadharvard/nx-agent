@@ -163,7 +163,9 @@ static int h_free_va(void *c, uint32_t va, uint32_t size) {
     pg = (va - g_arena) / PAGE;
     fnvnx_lock(&g_lock);
     for (k = 0; k < n && used(pg + k); k++) {}
-    if (k == n && !plat(FNVNX_PLAT_VM_DECOMMIT, va, size, 0, 2)) { mark(pg, n, 0); r = 0; }
+    /* DECOMMIT does not reset the protection of a page that stays mapped (hostapi.h), and a freed thread block holds the
+     * no-access guard page: the range goes back to read-write first, so that its next user gets what alloc_va promises */
+    if (k == n && !plat(FNVNX_PLAT_VM_PROTECT, va, size, FNVNX_PROT_R | FNVNX_PROT_W, 3) && !plat(FNVNX_PLAT_VM_DECOMMIT, va, size, 0, 2)) { mark(pg, n, 0); r = 0; }
     fnvnx_unlock(&g_lock);
     return r;
 }

@@ -331,8 +331,10 @@ int fnvnx_start_init_modules(fnvnx_proc *p) {
     if (!p || !p->exe.nmap) return FNVNX_E_ARG;
     t.teb = p->main.teb_va;
     t.esp = p->main.stack_base;
-    for (k = 0; k < p->nmod && !p->modules_ready; k++)
+    for (k = 0; k < p->nmod && !p->modules_ready; k++) {
+        if (p->mod[k].state == FNVNX_MOD_FAILED) return FNVNX_START_E_DLLINIT;   /* a refused DllMain stays refused */
         if (p->mod[k].state == FNVNX_MOD_MAPPED && (r = attach_process(p, t, k, 1u))) return r;
+    }
     p->modules_ready = 1;
     return FNVNX_OK;
 }
