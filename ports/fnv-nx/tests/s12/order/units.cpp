@@ -1,7 +1,8 @@
 // units.cpp - code generation of the fnvnx_order plugin and the barrier header, AArch64 ILP32 with the build's flags
 // (tests/s12/order/run.py). Each function's body must match every `// expect:` regex and none of its
-// `// reject:` regexes (searched in the function's assembly). `// mode: <m>` lines select a compile.
-// mode: volatile (default) - the build's configuration; compiled with -include fnvnx_compat.h
+// `// reject:` regexes (searched in the function's assembly). Compiled with -include fnvnx_compat.h and no plugin
+// option: the plugin has one memory rule (R9 TSO-MAP).
+#include "fnvnx_win32.h"   // the inline Interlocked* as decomp units see them
 struct Q {
   int data[4];
   volatile unsigned head;
@@ -48,9 +49,9 @@ int ldpacked(Packed *p) { return p->x; }
 // a volatile bit-field: release fence, then the read-modify-write
 // expect: dmb\tish\n
 void stbits(Bits *b) { b->b = 7; }
-// a load of a volatile aggregate: the plain copy, then an acquire fence (the store to *out is not volatile)
+// a copy of an aggregate: the plain copy, an acquire fence after the load and a release fence before the store
 // expect: dmb\tishld
-// reject: dmb\tish\n
+// expect: dmb\tish\n
 void copypair(Pair *out) { *out = const_cast<Pair &>(g_pair); }
 // a local volatile whose address is never taken: invisible to other threads, left alone
 // reject: ldar
@@ -68,20 +69,45 @@ unsigned inc(Q *q) { return q->head++; }
 // expect: stlr\tw
 void stcall() { g_flag = make_value(); }
 // message passing: the store of 1 must stay (GCC deletes it without the plugin: dead before `g_data = 2`)
-// expect: mov\tw\d+, 1\n
-// expect: str\tw\d+, \[x\d+\]\n(.*\n)*\tstlr
+// expect: (\tstlr\t.*\n(.*\n)*?){2}\tstlr\t
 void dse() { g_data = 1; g_flag = 1; g_data = 2; }
-// a plain field stays plain
+// R9 TSO-MAP: volatile is no mark, every access to memory that is not a proven local is ordered. A plain (non-
+// volatile) field through a pointer, a plain global and a volatile global alike:
+// expect: ldar\tw
+// expect: stlr\tw
+int plain(Q *q) { q->plain = q->data[1]; return q->data[0]; }
+// expect: ldar\tw
+// reject: dmb
+int ld_global() { return g_data; }
+// expect: stlr\tw
+// reject: dmb
+void st_global() { g_data = 3; }
+// expect: ldar\tw
+int ld_vglobal() { return g_flag; }
+// expect: stlr\tw
+void st_vglobal() { g_flag = 3; }
+// an address-not-taken local, volatile or not, is no shared memory: plain code, no ordering
 // reject: ldar
 // reject: stlr
-int plain(Q *q) { q->plain = q->data[1]; return q->data[0]; }
-// a plain field this unit hands to an Interlocked function (NiRefObject::m_uiRefCount style): its plain accesses
-// are ordered too (ATOMIC-PLAIN-STORE: the x86 plain store is the release half)
-struct RC { long m_uiRefCount; long other; };
-extern "C" long InterlockedIncrement(volatile long *);
-void rc_inc(RC *r) { InterlockedIncrement((volatile long *)&r->m_uiRefCount); }
+// reject: dmb
+int local_plain(int n) { int s = 0; for (int i = 0; i < n; i++) s += i; return s; }
+// a local whose address is taken is shared memory as far as the rule can prove: ordered
 // expect: stlr\tw
-// reject: ldar
+extern void sink(int *);
+int local_taken() { int x = 1; sink(&x); return x; }
+// a plain field next to an Interlocked operand (NiRefObject::m_uiRefCount style)
+struct RC { LONG m_uiRefCount; long other; };
+// Interlocked* sites keep the full x86 lock semantics, a refcount increment or decrement included
+// expect: ldaxr\tw
+// expect: dmb\tish\n
+// reject: ldxr\tw
+void rc_inc(RC *r) { InterlockedIncrement((volatile LONG *)&r->m_uiRefCount); }
+// expect: ldaxr\tw
+// expect: dmb\tish\n
+// reject: ldxr\tw
+void rc_dec(RC *r, void (*f)(RC *)) { if (InterlockedDecrement((volatile LONG *)&r->m_uiRefCount) == 0) f(r); }
+// expect: stlr\tw
+// expect: ldar\tw
 void rc_zero(RC *r) { r->m_uiRefCount = 0; r->other = r->other + 1; }
 // expect: ldar\tw
 long rc_get(RC *r) { return r->m_uiRefCount; }
@@ -96,19 +122,3 @@ void wb() { _WriteBarrier(); }
 void mb() { MemoryBarrier(); }
 // expect: yield
 void yp() { YieldProcessor(); }
-
-// mode: keys - the ATOMIC-USE key list: a plain Q::plain becomes release/acquire
-// keys-expect: stlr\tw
-void keyed_store(Q *q) { q->plain = 0; }
-// keys-expect: ldar\tw
-int keyed_load(Q *q) { return q->plain; }
-
-// mode: tso - every shared access ordered
-// tso-expect: ldar\tw
-// tso-expect: stlr\tw
-void tso(Q *q) { q->plain = q->data[0]; }
-
-// mode: off - no ordering at all
-// off-reject: ldar
-// off-reject: stlr
-int off(Q *q) { q->done = 2; return q->head; }

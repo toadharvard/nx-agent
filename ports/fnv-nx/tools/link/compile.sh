@@ -34,8 +34,25 @@ if [ "${1:-}" = --print-flags ]; then PRINT_FLAGS=1; shift; fi
 TREE=$(cd "$1" && pwd); OUT=$(mkdir -p "$2" && cd "$2" && pwd)
 LIST=${3:-}; JOBS=${4:-$(nproc)}
 HERE=$(cd "$(dirname "$0")/../.." && pwd)
+# One compiler for the whole tree: C units compiled by another build would use another data model. CC is CXX's
+# name with its last g++ replaced by gcc; an explicit CC is accepted only when it reports the same version line and
+# the same target.
 CXX=${CXX:-aarch64-linux-gnu-g++}
-CC=${CC:-aarch64-linux-gnu-gcc}
+case $CXX in *g++*) CC_DERIVED=${CXX%g++*}gcc${CXX##*g++} ;;
+  *) echo "compile.sh: CXX=$CXX: no g++ in its name to derive the C compiler from" >&2; exit 2 ;; esac
+if ! command -v "$CC_DERIVED" > /dev/null; then echo "compile.sh: the C compiler $CC_DERIVED (derived from CXX=$CXX) does not exist" >&2; exit 2; fi
+CC=${CC:-$CC_DERIVED}
+if [ "$CC" != "$CC_DERIVED" ]; then
+  # --version's first line is "<program> (<pkgversion>) <version>": equal after the program name, and the same
+  # -dumpmachine (a distro's host and cross gcc print the same line), = the same build
+  cc_v=$("$CC" --version 2>&1 | head -n 1); cc_v="${cc_v#* } $("$CC" -dumpmachine 2>&1)"
+  cxx_v=$("$CXX" --version 2>&1 | head -n 1); cxx_v="${cxx_v#* } $("$CXX" -dumpmachine 2>&1)"
+  if [ "$cc_v" != "$cxx_v" ]; then
+    echo "compile.sh: CC=$CC ($cc_v) is not the same build as CXX=$CXX ($cxx_v)" >&2; exit 2
+  fi
+fi
+# objects of the SDD2 set only: an environment asking for another kind must fail, never mix
+if [ "${FNVNX_SDD:-1}" != 1 ]; then echo "compile.sh: FNVNX_SDD=$FNVNX_SDD: only the SDD2 build exists (FNVNX_SDD=1)" >&2; exit 2; fi
 SSE2NEON=${SSE2NEON:-$HERE/ext/sse2neon}
 OPT=${OPT:--O2}
 # -fcheck-new (S1-fuzzA): MSVC 2008 tests the result of every new-expression for null before it constructs, the
@@ -55,18 +72,13 @@ FLAGS=(-mabi=ilp32 -std=gnu++17 -c $OPT -fms-extensions -fshort-wchar -frounding
 FTOI_SO=$(CXX=$CXX bash "$HERE/toolchain/ftoi/build.sh" "$OUT/.ftoi") \
   || { echo "compile.sh: the fnvnx_ftoi plugin does not build (install gcc-13-plugin-dev-aarch64-linux-gnu and g++)" >&2; exit 2; }
 FLAGS+=(-fplugin="$FTOI_SO")
-# S12-ordering (docs/ORDERING.md): the fnvnx_order plugin gives volatile accesses MSVC's /volatile:ms meaning on the
-# A57 (acquire loads ldar, release stores stlr; fences where ldar/stlr cannot reach). Same rule: no fallback.
-# ORDER_MODE=off (with the compiler-only barriers of fnvnx_compat.h) or tso only for A/B measurements, never for a
-# build that runs: ORDER_MODE=volatile is the program's semantics.
-ORDER_MODE=${ORDER_MODE:-volatile}
+# S12-ordering (docs/ORDERING.md, R9 TSO-MAP): the fnvnx_order plugin orders every access to memory that is not a
+# proven local of the function (acquire load / release store), in every unit; refcount sites keep x86 lock semantics;
+# a read of an unassigned local stays a read (the N3 verdict below sees it). Same rule: no fallback.
 ORDER_SO=$(CXX=$CXX bash "$HERE/toolchain/order/build.sh" "$OUT/.order") \
   || { echo "compile.sh: the fnvnx_order plugin does not build (install gcc-13-plugin-dev-aarch64-linux-gnu and g++)" >&2; exit 2; }
 # ORDER_ARGS=rtl: call arguments evaluated right to left like MSVC x86 (ORDER-ARGS); ltr only for A/B measurements.
 ORDER_ARGS=${ORDER_ARGS:-rtl}
-# ORDER_REFCOUNT=weak: refcount sites of InterlockedIncrement/Decrement relaxed / release (docs/ORDERING.md
-# "Refcounts"); full keeps x86 lock semantics everywhere (A/B, or a suspected refcount ordering bug).
-ORDER_REFCOUNT=${ORDER_REFCOUNT:-weak}
 # ORDER_OBJECT / ORDER_OPERATOR / ORDER_ASSIGN: evaluation order as MSVC 2008 x86, per shape, from S11's recorded
 # MSVC runs (tests/s11/order/order.msvc, all five configurations; docs/ORDERING.md "Evaluation order"):
 #   ORDER_OBJECT=msvc    a direct member call (member operators too) evaluates its arguments, then the object; a
@@ -77,56 +89,39 @@ ORDER_REFCOUNT=${ORDER_REFCOUNT:-weak}
 ORDER_OBJECT=${ORDER_OBJECT:-msvc}
 ORDER_OPERATOR=${ORDER_OPERATOR:-rtl}
 ORDER_ASSIGN=${ORDER_ASSIGN:-msvc}
-FLAGS+=(-fplugin="$ORDER_SO" -fplugin-arg-fnvnx_order-mode="$ORDER_MODE" -fplugin-arg-fnvnx_order-args="$ORDER_ARGS"
-        -fplugin-arg-fnvnx_order-refcount="$ORDER_REFCOUNT" -fplugin-arg-fnvnx_order-object="$ORDER_OBJECT"
+FLAGS+=(-fplugin="$ORDER_SO" -fplugin-arg-fnvnx_order-args="$ORDER_ARGS" -fplugin-arg-fnvnx_order-object="$ORDER_OBJECT"
         -fplugin-arg-fnvnx_order-operator="$ORDER_OPERATOR" -fplugin-arg-fnvnx_order-assign="$ORDER_ASSIGN")
-if [ "$ORDER_MODE" = off ]; then FLAGS+=(-DFNVNX_COMPILER_BARRIERS=1); fi
-# SDD2 and the semantics set (toolchain/sdd, pi, dispatch, addr, names): one vtable slot per virtual destructor, as
-# MSVC's ??_G, and one symbol per vtable address point. The fnvnx_sdd plugin makes the deleting destructor non-virtual
-# inside the front end, so GCC itself builds every table, index and member pointer with one slot. -fno-devirtualize:
-# MSVC 2008 kept every virtual call of an object of unknown dynamic type virtual, so the exe's functions have those
-# calls and the vcall gate pairs them one to one; a speculative direct call would also go to a unit-local alias,
-# past the link's by-address binding. This is the only way the tree compiles to the exe's tables: the source rules
-# that rewrote slot numbers are gone. FNVNX_SDD=0 remains only to read old objects' flags; such objects never mix
-# with these.
-SDD_SO=""; PI_SO=""; DISPATCH_SO=""; ADDR_SO=""; NAMES_SO=""
-if [ "${FNVNX_SDD:-1}" = 1 ]; then
-  SDD_SO=$(CXX=$CXX bash "$HERE/toolchain/sdd/build.sh" "$OUT/.sdd") \
-    || { echo "compile.sh: the fnvnx_sdd plugin does not build (install gcc-13-plugin-dev-aarch64-linux-gnu and g++)" >&2; exit 2; }
-  FLAGS+=(-DFNVNX_SDD=1 -fno-devirtualize -fplugin="$SDD_SO")
-  # FTOI: a direct float -> enum conversion is an error, as for cl (C2440): the source names the integer type
-  FLAGS+=(-fplugin-arg-fnvnx_ftoi-enum=error)
-  # uninit=keep: the order plugin's default reads an unassigned local as 0, a stand-in (forbidden, MASTER_PLAN4) that
-  # also hides the read from the N3 verdict below. With keep, a function that reads an unassigned local gets the
-  # verdict `uninit` / `uninit-mem` and is not a native body; nothing is invented for it.
-  FLAGS+=(-fplugin-arg-fnvnx_order-uninit=keep)
-  # R9 TSO-MAP (MASTER_PLAN4): every access to memory that is not a proven local of the function is ordered
-  # (acquire load / release store), in every unit: mode=tso. The earlier contract (volatile as the mark, the
-  # whole-program key list, wait-loop polls, relaxed refcounts) guessed which accesses are shared and is not used:
-  # refcount=full, and no key list is read or discovered (ORDER_KEYS=unit below).
-  FLAGS+=(-fplugin-arg-fnvnx_order-mode=tso -fplugin-arg-fnvnx_order-refcount=full)
-  ORDER_KEYS=unit
-  # N3 (toolchain/pi, MASTER_PLAN4 R1): each object carries, per function, the verdict "inside the portable subset",
-  # its inline tree and the record types it touches (section .fnvnx.n3). It changes no code.
-  PI_SO=$(CXX=$CXX bash "$HERE/toolchain/pi/build.sh" "$OUT/.pi") \
-    || { echo "compile.sh: the fnvnx_pi plugin does not build" >&2; exit 2; }
-  FLAGS+=(-fplugin="$PI_SO")
-  # DISPATCH1 (toolchain/dispatch): code pointer values stay the exe's addresses, so every indirect call checks its
-  # own two-word site and otherwise asks the runtime's fnvnx_dispatch(exe address, site) for the entry to call.
-  DISPATCH_SO=$(CXX=$CXX bash "$HERE/toolchain/dispatch/build.sh" "$OUT/.dispatch") \
-    || { echo "compile.sh: the fnvnx_dispatch plugin does not build" >&2; exit 2; }
-  FLAGS+=(-fplugin="$DISPATCH_SO")
-  # ADDR32 (toolchain/addr): an address the game computes as a 32-bit integer sum is finished in 32 bits (x86 wraps
-  # it) before it is used; GCC ILP32 alone folds the constant into a 64-bit addressing mode.
-  ADDR_SO=$(CXX=$CXX bash "$HERE/toolchain/addr/build.sh" "$OUT/.addr") \
-    || { echo "compile.sh: the fnvnx_addr plugin does not build" >&2; exit 2; }
-  FLAGS+=(-fplugin="$ADDR_SO")
-  # NAMES1 (toolchain/names): the MSVC name of every external symbol (.fnvnx.sympair), of every vftable
-  # (.fnvnx.vtpair); it registers the CC1 convention attribute the dispatcher's descriptors read.
-  NAMES_SO=$(CXX=$CXX bash "$HERE/toolchain/names/build.sh" "$OUT/.names") \
-    || { echo "compile.sh: the fnvnx_names plugin does not build" >&2; exit 2; }
-  FLAGS+=(-fplugin="$NAMES_SO")
-fi
+# SDD2 and the semantics set (toolchain/sdd, pi, dispatch, addr, names), always loaded: one vtable slot per virtual
+# destructor, as MSVC's ??_G, and one symbol per vtable address point. The fnvnx_sdd plugin makes the deleting
+# destructor non-virtual inside the front end, so GCC itself builds every table, index and member pointer with one
+# slot. -fno-devirtualize: MSVC 2008 kept every virtual call of an object of unknown dynamic type virtual, so the exe's
+# functions have those calls and the vcall gate pairs them one to one; a speculative direct call would also go to a
+# unit-local alias, past the link's by-address binding.
+SDD_SO=$(CXX=$CXX bash "$HERE/toolchain/sdd/build.sh" "$OUT/.sdd") \
+  || { echo "compile.sh: the fnvnx_sdd plugin does not build (install gcc-13-plugin-dev-aarch64-linux-gnu and g++)" >&2; exit 2; }
+FLAGS+=(-DFNVNX_SDD=1 -fno-devirtualize -fplugin="$SDD_SO")
+# FTOI: a direct float -> enum conversion is an error, as for cl (C2440): the source names the integer type
+FLAGS+=(-fplugin-arg-fnvnx_ftoi-enum=error)
+# N3 (toolchain/pi, MASTER_PLAN4 R1): each object carries, per function, the verdict "inside the portable subset",
+# its inline tree and the record types it touches (section .fnvnx.n3). It changes no code.
+PI_SO=$(CXX=$CXX bash "$HERE/toolchain/pi/build.sh" "$OUT/.pi") \
+  || { echo "compile.sh: the fnvnx_pi plugin does not build" >&2; exit 2; }
+FLAGS+=(-fplugin="$PI_SO")
+# DISPATCH1 (toolchain/dispatch): code pointer values stay the exe's addresses, so every indirect call checks its
+# own two-word site and otherwise asks the runtime's fnvnx_dispatch(exe address, site) for the entry to call.
+DISPATCH_SO=$(CXX=$CXX bash "$HERE/toolchain/dispatch/build.sh" "$OUT/.dispatch") \
+  || { echo "compile.sh: the fnvnx_dispatch plugin does not build" >&2; exit 2; }
+FLAGS+=(-fplugin="$DISPATCH_SO")
+# ADDR32 (toolchain/addr): an address the game computes as a 32-bit integer sum is finished in 32 bits (x86 wraps
+# it) before it is used; GCC ILP32 alone folds the constant into a 64-bit addressing mode.
+ADDR_SO=$(CXX=$CXX bash "$HERE/toolchain/addr/build.sh" "$OUT/.addr") \
+  || { echo "compile.sh: the fnvnx_addr plugin does not build" >&2; exit 2; }
+FLAGS+=(-fplugin="$ADDR_SO")
+# NAMES1 (toolchain/names): the MSVC name of every external symbol (.fnvnx.sympair), of every vftable
+# (.fnvnx.vtpair); it registers the CC1 convention attribute the dispatcher's descriptors read.
+NAMES_SO=$(CXX=$CXX bash "$HERE/toolchain/names/build.sh" "$OUT/.names") \
+  || { echo "compile.sh: the fnvnx_names plugin does not build" >&2; exit 2; }
+FLAGS+=(-fplugin="$NAMES_SO")
 # AB_FLAGS: extra flags appended after all of the above, so they win (e.g. -fstrict-aliasing against the parity set).
 # For A/B measurements only (tools/perf/unit_ab.sh, docs/PERF.md 11.8), never for a build that runs; unset = no
 # change.
@@ -135,89 +130,29 @@ if [ -n "${AB_FLAGS:-}" ]; then read -r -a _ab <<< "$AB_FLAGS"; FLAGS+=("${_ab[@
 # (hb.c is their runtime, linked by tools/pipeline/guest_link.py RACE=1); the code is otherwise the same build. Its
 # own object directory: objects with and without it never mix (the flag is in the cache key like every flag).
 if [ "${RACE:-0}" = 1 ]; then FLAGS+=(-fsanitize=thread -Wno-tsan); fi
-# ORDER_KEYS: the whole program's key list (docs/ORDERING.md "Whole-program keys"): every field and global that some
-# unit hands to Interlocked* (directly or through a forwarder) or polls in a wait-only loop. Their plain accesses are
-# ordered in every unit, not only in the unit that calls Interlocked on them (ATOMIC-PLAIN-STORE, the writer side of
-# POLL-PLAIN). Default: <obj dir>/order.keys, which this script keeps current itself from a syntax-only discovery
-# pass over ALL units of units.json (not only [units.list]; cached per unit in <obj dir>/.keys/), so a shard or a
-# one-unit compile sees the same list as the full build. The farm computes it once per tree (tools/farm/keys_job.sh)
-# and hands it in as ORDER_KEYS=<file>. ORDER_KEYS=unit: in-unit discovery only, for A/B runs and quick local checks,
-# never for a build that runs. KEYS_ONLY=1: write the key list and stop.
-# --print-flags on a tree without units.json (hand-written test units): the unit is the whole program
-if [ "$PRINT_FLAGS" = 1 ] && [ -z "${ORDER_KEYS:-}" ] && [ ! -f "$TREE/build/units.json" ]; then ORDER_KEYS=unit; fi
-ORDER_KEYS=${ORDER_KEYS:-$OUT/order.keys}
-KEYFLAGS=("${FLAGS[@]}")
-if [ "$ORDER_KEYS" != unit ]; then FLAGS+=(-fplugin-arg-fnvnx_order-keys="$ORDER_KEYS"); fi
-export CXX TREE OUT FLAGS_STR="${FLAGS[*]}" ORDER_KEYS
+export CXX TREE OUT FLAGS_STR="${FLAGS[*]}"
 if [ -z "$LIST" ] && [ "$PRINT_FLAGS" = 0 ]; then LIST="$OUT/units.list"; jq -r '.units[].source' "$TREE/build/units.json" | sort -u > "$LIST"; fi
-
-# ---- whole-program keys: discover=<unit>.keys under -fsyntax-only (no code generation), merged and sorted
-keys_key() { printf '%s' "$1" | sha256sum | cut -c1-24; }   # src/a_b.cpp and src_a/b.cpp must not share a file
-keys_one() {
-  local src=$1 k dep stale=0 h
-  k="$OUT/.keys/$(keys_key "$1").keys"
-  h=$(sha256sum < "$TREE/$src" | cut -c1-16)
-  # up to date only when the unit's content is the same (a copy with an older mtime is still a change) and no header
-  # it includes (its .d from the last discovery) is newer
-  if [ -f "$k" ] && [ -f "$k.d" ] && [ "$(cat "$k.src" 2>/dev/null)" = "$h" ]; then
-    for dep in $(sed -e 's/\\$//' -e 's/^[^:]*://' "$k.d"); do
-      case $dep in /*) ;; *) dep=$TREE/$dep ;; esac
-      if [ ! -e "$dep" ] || [ "$dep" -nt "$k" ]; then stale=1; break; fi
-    done
-    [ $stale = 0 ] && return
-  fi
-  # shellcheck disable=SC2086
-  (cd "$TREE" && timeout 900 $CXX $KEYFLAGS_STR -fsyntax-only -MMD -MF "$k.d.tmp" -MT x \
-     -fplugin-arg-fnvnx_order-discover="$k.tmp" "$src") > /dev/null 2>&1 || true   # a unit that does not compile still contributes what it parsed
-  if [ -f "$k.tmp" ]; then mv "$k.tmp" "$k"; else : > "$k"; fi
-  if [ -f "$k.d.tmp" ]; then mv "$k.d.tmp" "$k.d"; else echo "x: $src" > "$k.d"; fi
-  echo "$h" > "$k.src"
-}
-if [ "$ORDER_KEYS" = "$OUT/order.keys" ]; then
-  KEYFLAGS_STR=$(printf '%s\n' "${KEYFLAGS[@]}" | grep -vxF -- -c | tr '\n' ' ')
-  # per-unit results are kept while the plugin, the shim headers and the flags stay the same
-  stamp=$( (echo "$KEYFLAGS_STR"; cat "$ORDER_SO"; find "$HERE/shim/include" -type f -print0 | LC_ALL=C sort -z | xargs -0 cat) |
-          sha256sum | cut -c1-16)
-  if [ "$(cat "$OUT/.keys/.stamp" 2>/dev/null)" != "$stamp" ]; then rm -rf "$OUT/.keys"; fi
-  mkdir -p "$OUT/.keys"; echo "$stamp" > "$OUT/.keys/.stamp"
-  export KEYFLAGS_STR; export -f keys_one keys_key
-  jq -r '.units[].source' "$TREE/build/units.json" | sort -u > "$OUT/.keys/units.list"
-  xargs -a "$OUT/.keys/units.list" -P "$JOBS" -I{} bash -c 'keys_one "$@"' _ {}
-  # forwarders defined in one unit and called in another are resolved over all units (keys_merge.py)
-  while read -r src; do echo "$OUT/.keys/$(keys_key "$src").keys"; done < "$OUT/.keys/units.list" > "$OUT/.keys/files.list"
-  python3 "$HERE/toolchain/order/keys_merge.py" --list "$OUT/.keys/files.list" > "$OUT/order.keys.tmp"
-  # replaced only when it changes: its mtime decides which objects are stale (compile_one)
-  if cmp -s "$OUT/order.keys.tmp" "$OUT/order.keys"; then rm "$OUT/order.keys.tmp"; else mv "$OUT/order.keys.tmp" "$OUT/order.keys"; fi
-  # stderr under --print-flags: stdout is the flag list there (layout.game_flags parses it)
-  if [ "$PRINT_FLAGS" = 1 ]; then echo "order keys: $(wc -l < "$OUT/order.keys") fields and globals ($OUT/order.keys)" >&2
-  else echo "order keys: $(wc -l < "$OUT/order.keys") fields and globals ($OUT/order.keys)"; fi
-elif [ "$ORDER_KEYS" != unit ] && [ ! -f "$ORDER_KEYS" ]; then
-  echo "compile.sh: ORDER_KEYS=$ORDER_KEYS does not exist (unset it to compute the list, or use tools/farm/keys_job.sh)" >&2
-  exit 2
-fi
-if [ "${KEYS_ONLY:-0}" = 1 ]; then exit 0; fi
-# --print-flags: after the keys, so the flags name the same key list a compile with these settings would use
 if [ "$PRINT_FLAGS" = 1 ]; then printf '%s\n' "${FLAGS[@]}"; exit 0; fi
 
 # C units (third_party/zlib-1.2.1/*.c; MSVC compiled them as C: K&R definitions, C names such as `_adler32`) build
 # with the C compiler (tools/census.sh does the same): the same flags with C's -std, without the C++-only ones and
-# without the plugins (fnvnx_order is built against the C++ front end). The plugins have nothing to do there: the
-# zlib sources have no volatile access, no Interlocked call and no floating-point type, and their portable C does not
-# depend on argument evaluation order. Every unit gets its units.json /D defines (only zlib has any).
+# without the plugins (they are built against the C++ front end). A C unit carries no N3 verdict and no ordered
+# accesses, so its functions are never native bodies (BODYSEL gives them lifted bodies). Every unit gets its
+# units.json /D defines (only zlib has any).
 CFLAGS=()
 for f in "${FLAGS[@]}"; do
   case $f in -std=gnu++17) CFLAGS+=(-std=gnu99) ;; -fpermissive|-Wno-narrowing|-fplugin=*|-fplugin-arg-*) ;; *) CFLAGS+=("$f") ;; esac
 done
 export CC CFLAGS_STR="${CFLAGS[*]}"
-# A unit the recipe builds with /fp:fast tells the N3 plugin so (FNVNX_SDD=1): there the source does not fix the
+# A unit the recipe builds with /fp:fast tells the N3 plugin so: there the source does not fix the
 # exe's floating-point semantics, and the plugin puts its functions that use floating point outside the subset.
-FPFAST_ARG=""; [ "${FNVNX_SDD:-1}" = 1 ] && FPFAST_ARG="-fplugin-arg-fnvnx_pi-fpfast"
+FPFAST_ARG="-fplugin-arg-fnvnx_pi-fpfast"
 jq -r --arg fpfast "$FPFAST_ARG" '.units[] | [.source, (([.flags[]? | select(startswith("/D")) | "-D" + .[2:]]
     + (if $fpfast != "" and ([.flags[]? | select(. == "/fp:fast")] | length) > 0 then [$fpfast] else [] end)) | join(" "))] | @tsv' \
   "$TREE/build/units.json" | awk -F'\t' '$2 != ""' > "$OUT/defines.tsv"
 # Objects are kept only while the flags (the order options included), the plugins and the shim headers stay the
 # same: a change of any of them rebuilds every object of <obj dir> (V1's C4: an ORDER_OBJECT change kept old objects).
-objstamp=$( (echo "$FLAGS_STR"; cat "$ORDER_SO" "$FTOI_SO" $SDD_SO $PI_SO $DISPATCH_SO $ADDR_SO $NAMES_SO; find "$HERE/shim/include" -type f -print0 | LC_ALL=C sort -z |
+objstamp=$( (echo "$FLAGS_STR"; cat "$FTOI_SO" "$ORDER_SO" "$SDD_SO" "$PI_SO" "$DISPATCH_SO" "$ADDR_SO" "$NAMES_SO"; find "$HERE/shim/include" -type f -print0 | LC_ALL=C sort -z |
             xargs -0 cat) | sha256sum | cut -c1-16)
 # One compile.sh at a time per object directory: a second run with other flags would delete the first one's objects
 # here (the stamp above) while it works (try1of1, D26: 2,499 units "failed (no error line)", 1,716 logs of 0 bytes,
@@ -231,7 +166,7 @@ if [ "$(cat "$OUT/.objstamp" 2>/dev/null)" != "$objstamp" ]; then
   if [ -n "$LIST" ] && [ "$LIST" != "$OUT/units.list" ]; then
     jq -r '.units[].source' "$TREE/build/units.json" | sort -u | while read -r s_; do
       # if/fi, never `[ ] && echo`: under pipefail a last unit without an object ends the loop with status 1, and
-      # set -e then stops compile.sh with no message (full1 on c46cd30231d9: "exit 1" right after the order keys)
+      # set -e then stops compile.sh with no message (full1 on c46cd30231d9: "exit 1" right after the flags)
       if [ -f "$OUT/$(echo "$s_" | tr / _).o" ]; then echo "$s_"; fi
     done > "$OUT/.wiped.list"
     sort -u "$LIST" "$OUT/.wiped.list" > "$OUT/.rebuild.list"
@@ -246,7 +181,7 @@ fi
 compile_one() {
   local src=$1 base
   base="$OUT/$(echo "$1" | tr / _)"
-  if [ -f "$base.o" ] && [ "$base.o" -nt "$TREE/$src" ] && { [ "$ORDER_KEYS" = unit ] || [ "$base.o" -nt "$ORDER_KEYS" ]; }; then
+  if [ -f "$base.o" ] && [ "$base.o" -nt "$TREE/$src" ]; then
     return
   fi
   # shellcheck disable=SC2086
