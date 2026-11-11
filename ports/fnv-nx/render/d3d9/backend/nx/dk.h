@@ -205,8 +205,10 @@ const NxDkImage* nxdk_img(uint32_t id);
  *     nxdk_err stops the replay; what was recorded before it is still submitted and waited for (the reference executed it), and SUBMIT
  *     returns NXGPU_BAD_CALL.
  *  S2 Only dk_stream.c creates, finishes and submits nxdk.s.cmd. Its memory grows by the command buffer's add-memory callback
- *     (dkCmdBufSetAddMemFunc) in chunks of NXDK_STREAM_CHUNK listed for release after the wait: no stream is refused for its length.
+ *     (DkCmdBufMaker.cbAddMem) in chunks of NXDK_STREAM_CHUNK listed for release after the wait: no stream is refused for its length.
  *     Every command buffer starts with nxdk_bind_descriptors and a DkInvalidateFlags_Descriptors barrier.
+ *     The swapchain image has two ids: colour id 0 of a pass, and NxChkEnv.swapImage of nxdk_chk_env (the first id past the image table,
+ *     because swapImage 0 means "no swapchain"). Both name nxdk.front in every op; a file compares against nxdk_chk_env()->swapImage.
  *  S3 An op handler is  void nxdk_op_<snake>(const uint32_t* a, uint32_t argc)  (a = the words after the header word). It checks argc with
  *     the reference's message, records dkCmdBuf* calls into nxdk.s.cmd and updates nxdk.s; it never submits, waits or reads GPU results.
  *     A violated contract is one nxdk_err call and a return; nothing is approximated, skipped or deferred.
@@ -227,7 +229,7 @@ typedef struct NxDkStream {
     uint32_t boundState;           /* dk_draw.c; 0 = none. dk_pass.c and dk_stream.c reset it (S6) */
     uint32_t idxBlock, idxOffset, idxType;   /* dk_draw.c (BindIdx) */
     uint32_t stencilRef;           /* dk_draw.c */
-    int32_t scissor[4];            /* dk_draw.c: the last Scissor op (x y w h) */
+    int32_t scissor[4];            /* dk_draw.c: the last Scissor op (x y w h); dk_pass.c sets it to the full target at BeginPass */
     uint32_t inPass, passW, passH, passSamples, passColors, passSrgb;   /* dk_pass.c: the open pass; passSrgb = colour views are the sRGB ones */
     NxDkSub passColor[4], passDepth;   /* dk_pass.c: the targets of the open pass (im NULL = none) */
     uint32_t frameDraws; uint64_t drawsFrame;   /* dk_stream.c resets per frame number, dk_draw.c counts (reference: g4.frameDraws) */

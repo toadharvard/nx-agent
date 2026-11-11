@@ -15,6 +15,9 @@ for f in $FILES; do
         -I"$DK/dkp/libnx/include" -I"$DK/deko3d/include" -I"$HERE" -I"$HERE/.." \
         -c "$HERE/$f.c" -o "$OUT/$f.o"
 done
-"$NM" -u "$OUT"/dk_*.o > "$OUT/undefined.txt"
-"$NM" --defined-only "$OUT"/dk_*.o > "$OUT/defined.txt"
+# the backend-neutral stream checks link into the same library
+"$CC" -march=armv8-a+crc+crypto -mtune=cortex-a57 -mtp=soft -fPIE -O2 -g -Wall -Wextra -Werror \
+    -ffunction-sections -fdata-sections -D__SWITCH__ -I"$HERE/.." -c "$HERE/../nxgpu4_check.c" -o "$OUT/nxgpu4_check.o"
+"$NM" -u "$OUT"/*.o > "$OUT/undefined.txt"
+"$NM" --defined-only "$OUT"/*.o > "$OUT/defined.txt"
 echo "built $(echo $FILES | wc -w) objects in $OUT"
