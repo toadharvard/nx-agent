@@ -8,8 +8,15 @@ Certified, enum values: the front (render/d3d9/front/front_*.c) compiles with -W
   from the spec (equal to the committed one), AND the enumeration is switched in the front: the same sources compiled against a copy of the
   header with one extra enumerator of that enumeration FAIL with the flags and COMPILE without them (so the failure is the missing case, no
   other error). An enumeration that fails the sensitivity check certifies none of its values.
-Certified, SM opcodes: none. Whether the SM1-3 translator has an emitter for an opcode is not a build error today (see SM_DETAIL), so the
-  part is reported uncertified; the gate does not guess from names or text.  Result extras: "parts"."""
+Certified, SM commands (the 171 rows of render/shaders/total/sm_table.json = (stage, opcode form) of SM1-3): the pinned MojoShader clone (declared
+  input: FNVNX_SHADERS_DEPS/mojoshader, default render/shaders/build/deps/mojoshader; its git object database must hold the commit MOJO_PIN of
+  render/shaders/build.sh) is exported at that commit, render/shaders/mojoshader.patch is applied and render/shaders/total/fnvnx_sm_rows.h (equal to
+  gen_sm_rows.py's output for sm_table.json, one row line per command) is put next to it; the translator sources (mojoshader.c, the glsl profile)
+  must compile, which evaluates the _Static_asserts of fnvnx_sm_check.h: every row's opcode is an instructions[] entry at its opcode value
+  (not RESERVED, emitter linked for every profile), its shader-type mask holds the stage, comparison forms have their control value in the
+  translator's comparison table, token rows (phase) supply the token the parser compares with.  Sensitivity, as for the enums: in scratch copies
+  (1) a removed table entry, (2) a stage mask without the stage, (3) a row with an unknown name must each FAIL with the assertion, else no row is
+  certified.  Without the clone nothing is certified (red).  Not decided from runs, names or text.  Result extras: "parts"."""
 import importlib.util, json, os, shutil, subprocess, sys, tempfile, time
 sys.dont_write_bytecode = True
 
@@ -19,14 +26,12 @@ FRONT = os.path.join(PORT, "render", "d3d9", "front")
 BACKEND = os.path.join(PORT, "render", "d3d9", "backend")
 SM_TABLE = os.path.join(PORT, "render", "shaders", "total", "sm_table.json")
 STRICT = ["-Wall", "-Wextra", "-Werror", "-Werror=switch", "-Werror=switch-enum"]
-SM_DETAIL = ("SM1-3: MojoShader (pinned ad5dff8 + render/shaders/mojoshader.patch) dispatches through instructions[], positional (index = opcode "
-             "value) and generated from the INSTRUCTION/INSTRUCTION_STATE X-macro list with emit_<PROFILE>_<op> from PROFILE_EMITTERS(op): a listed "
-             "opcode without an emitter function is a link error already. NOT a build error: (1) the (stage, opcode value) rows of sm_table.json "
-             "against that list (an opcode value that falls on a RESERVED row, whose emitter is an empty function that fails only at run time in the "
-             "state machine; a stage mask t that excludes the stage), (2) emitters that handle only part of an opcode's forms. Build error needs: "
-             "a header generated from sm_table.json (rows STAGE_MASK, OPCODE_VALUE, NAME), included by the patched mojoshader.c, with "
-             "_Static_assert(OPIDX_<NAME> == OPCODE_VALUE) from an enum built by the same X-macro (an unknown NAME is an undeclared identifier) "
-             "and a static assert on the row's stage mask; the gate then compiles the patched source (needs the pinned clone).")
+SHADERS = os.path.join(PORT, "render", "shaders")
+CLONE = os.path.join(os.environ.get("FNVNX_SHADERS_DEPS", os.path.join(SHADERS, "build", "deps")), "mojoshader")   # declared input
+# the profiles of the translator build (render/shaders/build.sh keeps glsl only; the others are compiled out)
+SM_CC = ["cc", "-fsyntax-only", "-Wall"] + ["-DSUPPORT_PROFILE_%s=0" % p for p in
+         ("ARB1", "ARB1_NV", "D3D", "GLSL120", "GLSPIRV", "HLSL", "METAL", "SPIRV")]
+SM_SOURCES = ["mojoshader.c", os.path.join("profiles", "mojoshader_profile_glsl.c")]
 
 
 def load(path, name):
@@ -53,6 +58,70 @@ def front_copy(tmp, name, header_text):
     shutil.copytree(FRONT, d, ignore=shutil.ignore_patterns("__pycache__", "*.so"))
     open(os.path.join(d, "d3d9_enums.gen.h"), "w").write(header_text)
     return d
+
+
+def sm_compile(tree):
+    """compile the translator sources of a clone export; returns (ok, stderr)"""
+    for src in SM_SOURCES:
+        r = subprocess.run(SM_CC + ["-I", tree, os.path.join(tree, src)], capture_output=True, text=True)
+        if r.returncode:
+            return False, r.stderr
+    return True, ""
+
+
+def sm_part(tmp, gen_rows):
+    """returns (certified row keys, detail dict)"""
+    sm = json.load(open(SM_TABLE))["opcodes"]
+    info = {"clone": CLONE, "rows_header_equals_generated": False, "baseline_compiles": False, "sensitivity": {}}
+    rows_path = os.path.join(SHADERS, "total", "fnvnx_sm_rows.h")
+    info["rows_header_equals_generated"] = open(rows_path).read() == gen_rows.render()
+    pin = None
+    for line in open(os.path.join(SHADERS, "build.sh")):
+        if line.startswith("MOJO_PIN="):
+            pin = line[len("MOJO_PIN="):].split()[0].strip("\"'")
+    if not pin or len(pin) != 40 or any(c not in "0123456789abcdef" for c in pin):
+        info["error"] = "MOJO_PIN not found in render/shaders/build.sh"
+        return [], info
+    tree = os.path.join(tmp, "mojo")
+    os.makedirs(tree)
+    ar = subprocess.run("git -C '%s' archive %s | tar -x -C '%s'" % (CLONE, pin, tree), shell=True, capture_output=True, text=True)
+    if ar.returncode:
+        info["error"] = "clone %s lacks commit %s: %s" % (CLONE, pin, ar.stderr[-200:])
+        return [], info
+    ap = subprocess.run(["git", "apply", os.path.join(SHADERS, "mojoshader.patch")], cwd=tree, capture_output=True, text=True)
+    if ap.returncode:
+        info["error"] = "mojoshader.patch does not apply: " + ap.stderr[-200:]
+        return [], info
+    shutil.copy(rows_path, os.path.join(tree, "fnvnx_sm_rows.h"))
+    open(os.path.join(tree, "mojoshader_version.h"), "w").write('#define MOJOSHADER_VERSION -1\n#define MOJOSHADER_CHANGESET "gate"\n')   # cmake-generated, not in the export
+    info["baseline_compiles"], err = sm_compile(tree)
+    info["error"] = err[-400:]
+
+    def edit(path, fn):
+        t = open(path).read()
+        u = fn(t)
+        assert u != t
+        open(path, "w").write(u)
+
+    def probe(name, mutate):
+        d = os.path.join(tmp, "probe_" + name)
+        shutil.copytree(tree, d)
+        mutate(d)
+        ok, e = sm_compile(d)
+        info["sensitivity"][name] = (not ok) and ("static assertion failed" in e or "undeclared" in e or "not declared" in e)
+
+    internal = lambda d: os.path.join(d, "mojoshader_internal.h")
+    probe("removed_table_entry", lambda d: edit(internal(d),
+          lambda t: "\n".join(l for l in t.split("\n") if not l.startswith("INSTRUCTION(MOV, "))))
+    probe("stage_not_in_mask", lambda d: edit(internal(d),
+          lambda t: t.replace('INSTRUCTION(DST, "DST", 1, DSS, MOJOSHADER_TYPE_VERTEX', 'INSTRUCTION(DST, "DST", 1, DSS, MOJOSHADER_TYPE_PIXEL')))
+    probe("unknown_name", lambda d: open(os.path.join(d, "fnvnx_sm_rows.h"), "a").write('FNVNX_SM_OP("probe", MOJOSHADER_TYPE_PIXEL, 0, NOSUCHOP)\n'))
+    ids = set()
+    for line in open(rows_path):
+        if line.startswith("FNVNX_SM_OP(") or line.startswith("FNVNX_SM_TOKEN("):
+            ids.add(line.split('"')[1])
+    good = info["rows_header_equals_generated"] and info["baseline_compiles"] and len(info["sensitivity"]) == 3 and all(info["sensitivity"].values())
+    return ([k for k in sorted(sm) if k in ids] if good else []), info
 
 
 def main():
@@ -84,17 +153,21 @@ def main():
         n_enum = len(universe)
         sm = json.load(open(SM_TABLE))["opcodes"]
         sm_ids = ["sm:" + k for k in sorted(sm)]
+        sm_cert, sm_info = sm_part(tmp, load(os.path.join(PORT, "render", "shaders", "total", "gen_sm_rows.py"), "gen_sm_rows"))
+        sm_ok = {"sm:" + k for k in sm_cert}
         universe += sm_ids
-        uncert += sm_ids
+        uncert += [i for i in sm_ids if i not in sm_ok]
         cert = len(universe) - len(uncert)
+        n_enum_ok = n_enum - sum(1 for u in uncert if u.startswith("enum:"))
         res = {"format": "fnvnx-gate/1", "name": "d3d9total", "status": "green" if not uncert else "red", "universe": len(universe), "certified": cert,
                "uncertified": uncert[:50],
-               "detail": "enum values %d of %d certified (header==spec %s, front builds %s, sensitivity %d of %d enumerations); SM opcodes 0 of %d certified: %s; %.1f s"
-                         % (n_enum - sum(1 for u in uncert if u.startswith("enum:")), n_enum, header_ok, built, sum(1 for s in sens.values() if
-                            s["fails_with_switch_enum"] and s["compiles_without"]), len(sens), len(sm_ids), SM_DETAIL, time.time() - t0),
-               "parts": {"enums": {"universe": n_enum, "certified": n_enum - sum(1 for u in uncert if u.startswith("enum:")), "sensitivity": sens,
-                                   "front_error": berr},
-                         "sm": {"universe": len(sm_ids), "certified": 0}}}
+               "detail": "enum values %d of %d certified (header==spec %s, front builds %s, sensitivity %d of %d enumerations); SM commands %d of %d certified "
+                         "(clone %s, rows header == generated %s, patched translator compiles %s, sensitivity %s, %s); %.1f s"
+                         % (n_enum_ok, n_enum, header_ok, built, sum(1 for s in sens.values() if s["fails_with_switch_enum"] and s["compiles_without"]),
+                            len(sens), len(sm_cert), len(sm_ids), CLONE, sm_info["rows_header_equals_generated"], sm_info["baseline_compiles"],
+                            json.dumps(sm_info["sensitivity"], sort_keys=True), sm_info.get("error", "")[-200:].replace("\n", " "), time.time() - t0),
+               "parts": {"enums": {"universe": n_enum, "certified": n_enum_ok, "sensitivity": sens, "front_error": berr},
+                         "sm": {"universe": len(sm_ids), "certified": len(sm_cert), "info": sm_info}}}
         with open(os.path.join(os.environ["GATE_OUT"], "d3d9total.json"), "w") as fh:
             json.dump(res, fh, sort_keys=True)
         return 0 if not uncert else 2
