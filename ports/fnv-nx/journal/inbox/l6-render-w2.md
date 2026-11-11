@@ -4,7 +4,7 @@ Branch claude/fnv-l6-render-w2. Measured at commit 5f27ad66 (+ this note commit)
 
 ## Result
 - `recipe.py check --root ports/fnv-nx/render/d3d9`: "recipe valid" (with render/backend and render/shaders/include admitted locally, see blockers).
-- Units: 70 = 69 compile + 1 fails. Unit set equals the old build_guest.sh set exactly (diff both ways empty: 59 dev/*.cpp-minus-app_unk_native + 4 generated .cpp + 6 front/*.c... listed by recipe.units_of vs the script's job list, 70 = 70). build_guest.sh deleted.
+- Units: 70 = 69 compile + 1 fails. Unit set equals the old build_guest.sh set exactly (diff both ways empty: 58 dev/*.cpp + 4 generated .cpp + 6 front/*.c + 2 ffp/*.c, recipe.units_of vs the script job list). build_guest.sh deleted.
 - FAILS (1): dev/ffp_prog.cpp, first error `fatal error: ../gen/ffp_glsl.gen.h: No such file or directory` (ffp_dksh.gen.h likewise). Cause: the gen_glsl.py step is not in the recipe (it needs the uam binary). Blocker: needs recipe stage: host tool run (owner L1) / lead decision on the ffp program ABI (see report to the lead).
 - Because the recipe stops at the first red unit, the committed root is red (151 stages run, 0 objects.json). Determinism / warm figures were measured on a scratch copy without dev/ffp_prog.cpp (not committed):
   - cold build 1: green, 69 objects, stages run 151 hit 0, 30 s (j default of the machine).
