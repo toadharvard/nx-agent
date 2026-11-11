@@ -938,3 +938,184 @@ def handle_origin(img, call_va, k, mem):
         else:
             brk.add((call_va, 'handle is %s %r' % (kind, val)))
     return not brk, origins, sorted(brk)
+
+
+# ---------------------------------------------------------------- path predicate on a call result
+M32 = 0xffffffff
+# jcc mnemonics (capstone spelling and synonyms) -> which edge is the `result != K` edge, per flag source.
+#   cmp r,K : ZF = (r == K), CF = (r <u K); test r,r (K = 0): ZF = (r == 0), CF = 0; inc r / add r,1 (K = 0xffffffff): ZF = (r == K).
+#   jb: CF=1 <=> r <u 0xffffffff <=> r != 0xffffffff;  ja: CF=0 and ZF=0 <=> r != 0 (r >=u 0 always).
+_EQ_TAKEN, _NE_TAKEN = 'eq', 'ne'
+_JCC_ZF = {'je': _EQ_TAKEN, 'jz': _EQ_TAKEN, 'jne': _NE_TAKEN, 'jnz': _NE_TAKEN}
+_JCC_MAX = {'jb': _NE_TAKEN, 'jnae': _NE_TAKEN, 'jc': _NE_TAKEN, 'jae': _EQ_TAKEN, 'jnb': _EQ_TAKEN, 'jnc': _EQ_TAKEN}
+_JCC_ZERO = {'ja': _NE_TAKEN, 'jnbe': _NE_TAKEN, 'jbe': _EQ_TAKEN, 'jna': _EQ_TAKEN}
+
+
+def _jcc_kind(kind, K, m):
+    """'eq' / 'ne' (the edge taken when the compared copy equals / differs from K), or None (not exactly equivalent)."""
+    if m in _JCC_ZF:
+        return _JCC_ZF[m]
+    if kind == 'cmp' and K == M32:
+        return _JCC_MAX.get(m)
+    if kind in ('cmp', 'test') and K == 0:
+        return _JCC_ZERO.get(m)
+    return None
+
+
+def _path_pred(img, fn, C, S, K):
+    """Every path of fn from the call at C to the instruction at S crosses an edge of a conditional branch that is decided by flags
+    from a compare of a copy of the result of C with K and takes the `!= K` side.  -> (ok, [(compare va, branch va)], [(va, why)])."""
+    import memfx
+    fb = fn.ebp_frame() and not memfx.frame_exposed(fn)
+    brk = {}
+
+    def slot(i, op):
+        m = op.mem
+        if fb and m.base and rn(i, m.base) == 'ebp' and not m.index and not m.segment and op.size == 4:
+            return ('bp', m.disp)
+        return None
+
+    def after(v, st):
+        i = fn.nodes[v]
+        copies, flags, chk = st
+        if v == C:
+            return (frozenset([('reg', 'eax')]), None, False)
+        m = i.mnemonic
+        ops = i.operands
+        r, w = i.regs_access()
+        wn = {rn(i, x) for x in w}
+        nf = flags
+        new = None
+        if m == 'cmp' and len(ops) == 2 and ops[1].type == X.X86_OP_IMM and (ops[1].imm & M32) == K and (v + i.size - 4) not in img.relocs \
+                and ops[0].size == 4:
+            loc = ('reg', rn(i, ops[0].reg)) if ops[0].type == X.X86_OP_REG else slot(i, ops[0]) if ops[0].type == X.X86_OP_MEM else None
+            if loc in copies:
+                new = ('cmp', v)
+        elif m == 'test' and K == 0 and ops[0].type == ops[1].type == X.X86_OP_REG and ops[0].reg == ops[1].reg and ops[0].size == 4 \
+                and ('reg', rn(i, ops[0].reg)) in copies:
+            new = ('test', v)
+        elif K == M32 and ops and ops[0].type == X.X86_OP_REG and ops[0].size == 4 and ('reg', rn(i, ops[0].reg)) in copies \
+                and (m == 'inc' or (m == 'add' and ops[1].type == X.X86_OP_IMM and ops[1].imm == 1)):
+            new = ('inc', v)
+        if new is not None:
+            nf = new
+        elif 'eflags' in wn:
+            nf = None
+        nc = set(copies)
+        for x in wn:
+            nc.discard(('reg', x))
+        if m == 'call':
+            for x in CALLER_SAVED:
+                nc.discard(('reg', x))
+        for o in ops:
+            if o.type == X.X86_OP_MEM and o.access & 2:
+                s = slot(i, o)
+                mm = o.mem
+                framey = s is not None or (mm.base and rn(i, mm.base) in ('esp', 'ebp')) or (mm.index and rn(i, mm.index) in ('esp', 'ebp'))
+                for loc in [c for c in nc if c[0] == 'bp']:
+                    if framey and (s is None or abs(loc[1] - s[1]) < 4):
+                        nc.discard(loc)
+        if m == 'mov' and len(ops) == 2 and ops[0].size == 4:
+            if ops[0].type == X.X86_OP_REG and ops[1].type == X.X86_OP_REG and ('reg', rn(i, ops[1].reg)) in copies:
+                nc.add(('reg', rn(i, ops[0].reg)))
+            elif ops[0].type == X.X86_OP_REG and ops[1].type == X.X86_OP_MEM and slot(i, ops[1]) in copies:
+                nc.add(('reg', rn(i, ops[0].reg)))
+            elif ops[0].type == X.X86_OP_MEM and ops[1].type == X.X86_OP_REG and ('reg', rn(i, ops[1].reg)) in copies \
+                    and slot(i, ops[0]) is not None:
+                nc.add(slot(i, ops[0]))
+        return (frozenset(nc), nf, chk)
+
+    def edge(v, st, s):
+        i = fn.nodes[v]
+        copies, flags, chk = st
+        m = i.mnemonic
+        if chk or not (m.startswith('j') and m != 'jmp'):
+            return st
+        if flags is None:
+            brk[v] = 'branch at %x is not decided by a compare of a copy of the result with 0x%x (flags unset or clobbered)' % (v, K)
+            return st
+        kind = _jcc_kind(flags[0], K, m)
+        if kind is None:
+            brk[v] = 'condition %s after the %s at %x is not exactly equivalent to != 0x%x' % (m, flags[0], flags[1], K)
+            return st
+        tgt = i.operands[0].imm if i.operands[0].type == X.X86_OP_IMM else None
+        fall = v + i.size
+        if tgt == fall:
+            return st
+        ne_target = kind == _NE_TAKEN
+        if (s == tgt and ne_target) or (s == fall and not ne_target):
+            return (copies, flags, True)
+        return st
+
+    ins = {}
+    work = []
+    for s in sorted(fn.succ[C]):
+        ins[s] = (frozenset([('reg', 'eax')]), None, False)
+        work.append(s)
+    outs = {}
+    while work:
+        v = work.pop()
+        st = ins[v]
+        a = after(v, st)
+        for s in sorted(fn.succ[v]):
+            e = edge(v, a, s)
+            cur = ins.get(s)
+            if s == C:
+                continue
+            if cur is None:
+                ins[s] = e
+                work.append(s)
+            else:
+                n = (cur[0] & e[0], cur[1] if cur[1] == e[1] else None, cur[2] and e[2])
+                if n != cur:
+                    ins[s] = n
+                    work.append(s)
+    if S not in ins:
+        return False, [], [(S, 'the site is not reachable from the call at %x' % C)]
+    if ins[S][2]:
+        dec = []
+        for v in sorted(ins):
+            i = fn.nodes[v]
+            if i.mnemonic.startswith('j') and i.mnemonic != 'jmp' and ins[v][1] is not None and not ins[v][2]:
+                dec.append((ins[v][1][1], v))
+        return True, dec, []
+    b = sorted(brk.items())
+    b.append((S, 'a path from the call at %x reaches the site with no `!= 0x%x` edge crossed' % (C, K)))
+    return False, [], b
+
+
+def result_predicate(img, call_site_va, k, callee_set, relation, constant):
+    """Path predicate on the argument k of the call at call_site_va: the argument is, on all paths, the result of a call of an
+    import in callee_set ({(dll, name)}, dll normalised), AND on every path from that call to the site the result was compared
+    (a still-valid copy: register or private frame slot) with `constant` and the path crossed the exactly-equivalent `relation`
+    ('!=') edge of the branch deciding it.  Equivalences used: cmp r,K / test r,r (K = 0) with je/jne (any K), jb/jae (K = 0xffffffff)
+    and ja/jbe (K = 0); inc r / add r,1 with je/jne (K = 0xffffffff).  The flags must not be redefined between the compare and
+    the branch.  Anything else is reported as a break.  -> Result: .closed, .leaves ('pred', (dll, name, call va), chain of
+    (compare va, branch va)), .breaks."""
+    import iat
+    res = Result()
+    if relation != '!=':
+        res.brk(call_site_va, 'unsupported relation %r' % relation)
+        return res
+    K = constant & M32
+    ok, origins, brk = handle_origin(img, call_site_va, k, 'strict')
+    if not ok and img.mx is not None:
+        ok, origins, brk = handle_origin(img, call_site_va, k, 'rule')
+    if not ok:
+        for b in brk:
+            res.breaks.add(b)
+        return res
+    for c, va, chain in origins:
+        if c[0] != 'import' or (iat.norm_dll(c[1]), c[2]) not in callee_set:
+            res.brk(va, 'origin %r is not in the callee set' % (c,))
+            continue
+        entries = [e for e in entries_for(img, call_site_va) if va in img.func(e).nodes]
+        if not entries:
+            res.brk(va, 'no function contains both the call and the site')
+        for e in entries:
+            good, dec, bad = _path_pred(img, img.func(e), va, call_site_va, K)
+            for b in bad:
+                res.breaks.add(b)
+            if good:
+                res.add('pred', (iat.norm_dll(c[1]), c[2], va), tuple(x for p in dec for x in p))
+    return res

@@ -21,6 +21,9 @@ Request kinds (the TSV `values` column; `note` is free text and is not read):
              stdcall argument I (0 = pushed last), the clause holds when (argI & M) op V for each of its derived immediate values
              (M omitted = all bits).  The callee set is dll!name pairs (dll normalised: lowercase, .dll appended).  A failed call
              returns a value that is not a handle: that case is the business of the immediate-value facts about the same argument.
+             A further clause `ret != V on every path to the site` (V a number): on every control-flow path from that call to the
+             site the result was compared with V by a still-valid copy and the path crossed the `!= V` edge of the deciding branch
+             (argflow.result_predicate: cmp / test / inc idioms, flags not redefined; anything else is `ret-predicate` open).
 Numbers: C syntax (0x..., decimal), 32-bit.  A row that does not parse is an error (exit 2), never skipped.
 
 Fact ids: index (from 1) of the request in the canonical order (dll, name, arg_index, kind, canonical values) over the request list;
@@ -37,7 +40,7 @@ Rule.  A request about import I = (dll D, name N, argument k) is CERTIFIED for t
      GetProcAddress slot must be covered by a row of the table) is closed, and no pair (D, N), (*, N) (module unknown) or (D, #n)
      / (*, #n) (an ordinal in D could be N) exists.  An OPEN site (name or module not derived) anywhere in S makes (b) fail for
      EVERY request: reason `gpa-open`, the condition under which certificates are not valid yet;
- (c) the assumptions of argflow A1..A6 are recorded in each certificate (BASE: the contract's standing assumptions, the same for
+ (c) the assumptions of argflow A1..A6 (and A8, the provenance premise of memfx, when its rule closed a handle chain) are recorded in each certificate (BASE: the contract's standing assumptions, the same for
      every gate that uses argflow); an assumption that is not a proven rule makes the fact NOT certified: BLOCKING = {A7} (a call
      between a store and a load does not write that memory; only the `open` handle mode depends on it).  A fact whose only
      derivation needs A7 is listed `assumption:A7`.
@@ -80,6 +83,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..', 'link'))
 import argflow
 import gatefile
+import memfx
 import gateids
 import gpa_names
 import iat
@@ -138,7 +142,20 @@ def parse_values(kind, text):
     for c in parts[0][len('callee='):].split('|'):
         d, n = c.strip().split('!', 1)
         callee.append([iat.norm_dll(d), n])
-    return {'callee': sorted(callee), 'where': sorted(parse_clause(p) for p in parts[1:])}
+    spec = {'callee': sorted(callee), 'where': sorted(parse_clause(p) for p in parts[1:] if not p.startswith('ret'))}
+    rets = [parse_ret(p) for p in parts[1:] if p.startswith('ret')]
+    if rets:
+        spec['ret'] = sorted(rets)
+    return spec
+
+
+def parse_ret(s):
+    """`ret != V on every path to the site` -> ['!=', V]: on every control-flow path from the call to the site the result was compared
+    with V and the `!= V` edge taken (argflow.result_predicate)."""
+    t = s.replace('!=', ' != ').split()
+    if len(t) != 9 or t[:2] != ['ret', '!='] or t[3:] != ['on', 'every', 'path', 'to', 'the', 'site']:
+        raise FormatError('clause %r is not `ret != V on every path to the site`' % s)
+    return ['!=', num(t[2])]
 
 
 def parse_requests(text):
@@ -246,6 +263,7 @@ class Fact:
         self.detail = {}              # (reason, image, address) -> text
         self.sites = []               # certificate material
         self.examined = 0
+        self.assumptions = set()      # beyond BASE_ASSUMPTIONS: A8 when the may-write rule (memfx) closed a chain
 
     def fail(self, reason, image, addr, detail=''):
         key = (reason, image, addr)
@@ -280,6 +298,10 @@ def check_result_of(f, nm, img, call):
     req = f.req
     site = '0x%x' % call
     mode, (ok, origins, brk) = 'strict', argflow.handle_origin(img, call, req['k'], 'strict')
+    if not ok and img.mx is not None:
+        mode, (ok, origins, brk) = 'rule', argflow.handle_origin(img, call, req['k'], 'rule')
+        if ok:
+            f.assumptions.add('A8')
     if not ok:
         ok2, origins2, brk2 = argflow.handle_origin(img, call, req['k'], 'open')
         if ok2:
@@ -309,7 +331,13 @@ def check_result_of(f, nm, img, call):
             for v in vals:
                 if not holds(v, mask, op, want):
                     f.fail('origin-violates', nm, '0x%x' % va, 'arg%d = 0x%x violates (& 0x%x) %s 0x%x' % (i, v, mask, op, want))
-    f.sites.append(dict(image=nm, call='%x' % call, mode=mode, origins=out))
+    rp = []
+    for op, want in req['spec'].get('ret', []):
+        r = argflow.result_predicate(img, call, req['k'], callee, op, want)
+        if not r.closed:
+            f.fail('ret-predicate', nm, site, 'result %s 0x%x on every path: %s' % (op, want, ';'.join('%x %s' % b for b in sorted(r.breaks)[:3])))
+        rp.append(dict(relation=op, value=want, chain=[hexchain(c) for k2, v2, c in r.sorted_leaves()], ok=r.closed))
+    f.sites.append(dict(image=nm, call='%x' % call, mode=mode, origins=out, **({'ret': rp} if rp else {})))
 
 
 def check_request(req, images, gpa_global, gpa_pairs):
@@ -345,7 +373,7 @@ def check_request(req, images, gpa_global, gpa_pairs):
 def certificate(f, imgmeta, gpa_digest):
     return canon(dict(request=dict(id=f.req['id'], request=f.req['request'], dll=f.req['dll'], name=f.req['name'], k=f.req['k'],
                                   kind=f.req['kind'], spec=f.req['spec']),
-                      images=imgmeta, gpa=gpa_digest, assumptions=list(BASE_ASSUMPTIONS), sites=sorted(f.sites, key=canon)))
+                      images=imgmeta, gpa=gpa_digest, assumptions=list(BASE_ASSUMPTIONS) + sorted(f.assumptions), sites=sorted(f.sites, key=canon)))
 
 
 def run(reqs, images, imgmeta, gpa_rows):
@@ -583,7 +611,7 @@ def main_objects(a):
     return 1 if red else 0
 
 
-def load_images(specs, stacks):
+def load_images(specs, stacks, info=None):
     images, meta = {}, []
     for spec in specs:
         nm, rest = spec.split('=', 1)
@@ -594,6 +622,8 @@ def load_images(specs, stacks):
             rb = fh.read()
         img = argflow.Image(pb, nm.lower(), argflow.read_ranges(rb.decode()))
         img.import_stack = stacks
+        if info is not None:
+            memfx.Memfx(img, info)
         images[nm.lower()] = img
         meta.append(dict(name=nm.lower(), pe=sha(pb), ranges=sha(rb)))
     return images, sorted(meta, key=lambda m: m['name'])
@@ -605,6 +635,8 @@ def main(argv=None):
     ap.add_argument('--gpa')
     ap.add_argument('--image', action='append', default=[], help='name=pe_path,ranges_path (the image set of the stage)')
     ap.add_argument('--bridge')
+    ap.add_argument('--escape', action='append', default=[], help='import_escape.tsv of a platform backend (repeat; worst letter counts)')
+    ap.add_argument('--writes', help='per import argument write facts (memfx.ImportInfo); default: every pointer argument may be written')
     ap.add_argument('--out')
     ap.add_argument('--facts-h')
     ap.add_argument('--facts-tsv')
@@ -627,7 +659,12 @@ def main(argv=None):
     if a.bridge:
         with open(a.bridge) as fh:
             stacks = gpa_names.import_stacks(fh.read())
-    images, meta = load_images(a.image, stacks)
+    info = None
+    if a.bridge:
+        with open(a.bridge) as fh:
+            bt = fh.read()
+        info = memfx.ImportInfo(bt, [open(p).read() for p in a.escape], open(a.writes).read() if a.writes else '')
+    images, meta = load_images(a.image, stacks, info)
     with open(a.gpa) as fh:
         rows = read_gpa(fh.read())
     facts, certs, g = run(reqs, images, meta, rows)

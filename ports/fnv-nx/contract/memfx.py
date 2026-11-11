@@ -792,6 +792,15 @@ class Closure:
         return out, rets
 
 
+def frame_exposed(fn):
+    """The address of the frame of fn is taken somewhere in fn (see Memfx.exposed)."""
+    mx = fn.img.mx
+    if mx is None:
+        mx = Memfx.__new__(Memfx)
+        mx._exposed = {}
+    return mx.exposed(fn)
+
+
 class Memfx:
     def __init__(self, img, imports=None):
         self.img = img
