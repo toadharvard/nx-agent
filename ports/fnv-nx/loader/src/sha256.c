@@ -22,6 +22,7 @@ static void block(uint32_t h[8], const uint8_t *p) {
     uint32x4_t abcd = vld1q_u32(h), efgh = vld1q_u32(h + 4), s0 = abcd, s1 = efgh, m[4], tmp, t;
     unsigned i;
     for (i = 0; i < 4; i++) m[i] = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(p + 16 * i)));
+    _Pragma("GCC unroll 16")
     for (i = 0; i < 16; i++) {
         uint32x4_t *w = &m[i & 3];
         tmp = vaddq_u32(*w, vld1q_u32(K + 4 * i));
