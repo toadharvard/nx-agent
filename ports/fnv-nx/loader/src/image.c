@@ -31,14 +31,19 @@ int fnvnx_image_map(fnvnx_image *img, const fnvnx_pe *pe, const fnvnx_os *os, ui
         const fnvnx_section *s = &pe->sec[i];
         fnvnx_mapping *m;
         int code = (s->characteristics & (FNVNX_SCN_CNT_CODE | FNVNX_SCN_MEM_EXECUTE)) != 0;
-        if (s->characteristics & FNVNX_SCN_DISCARDABLE) continue;
-        if (code && !(flags & FNVNX_MAP_CODE)) continue;
+        int all = (flags & FNVNX_MAP_ALL) != 0;
+        if (!all && (s->characteristics & FNVNX_SCN_DISCARDABLE)) continue;
+        if (!all && code && !(flags & FNVNX_MAP_CODE)) continue;
         m = &img->map[img->nmapped++];
         m->va = load_base + s->rva;
         m->size = page_up(vsize_eff(s));
         m->file_bytes = s->raw_size < vsize_eff(s) ? s->raw_size : vsize_eff(s);
-        m->prot = code ? FNVNX_PROT_R
-                       : FNVNX_PROT_R | ((s->characteristics & FNVNX_SCN_MEM_WRITE) ? FNVNX_PROT_W : 0);
+        if (all)   /* the section's own bits (Windows rule); host-executable never */
+            m->prot = ((s->characteristics & FNVNX_SCN_MEM_READ) ? FNVNX_PROT_R : 0u) |
+                      ((s->characteristics & FNVNX_SCN_MEM_WRITE) ? FNVNX_PROT_W : 0u);
+        else
+            m->prot = code ? FNVNX_PROT_R
+                           : FNVNX_PROT_R | ((s->characteristics & FNVNX_SCN_MEM_WRITE) ? FNVNX_PROT_W : 0);
         m->sec = i;
         m->code = (unsigned)code;
     }

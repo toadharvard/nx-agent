@@ -55,6 +55,11 @@ typedef struct fnvnx_os {
     void *(*alloc)(void *ctx, uint32_t size);
     void (*free)(void *ctx, void *p);
     void (*log)(void *ctx, const char *msg);
+    /* Guest-visible memory for the start sequence (src/start.c): `size` bytes (a multiple of 4 KiB) of zeroed
+     * read-write memory at a page-aligned 32-bit VA chosen by the platform, or 0 on failure. The platform never
+     * returns a range that intersects [0x000f0000, 0x00200000) or the image; the host address is VA + bias.
+     * Optional for the old pipeline, required by fnvnx_start_prepare. Placed last: older initialisers stay valid. */
+    uint32_t (*alloc_va)(void *ctx, uint32_t size, unsigned prot);
 } fnvnx_os;
 
 /* ---- PE32 headers ---------------------------------------------------------------------------------------- */
@@ -82,6 +87,7 @@ typedef struct fnvnx_pe {
     uint16_t machine, characteristics, dll_characteristics, nsections;
     uint32_t timestamp, image_base, size_of_image, size_of_headers, entry_rva, checksum;
     uint32_t section_align, file_align;
+    uint32_t stack_reserve, stack_commit;   /* SizeOfStackReserve / SizeOfStackCommit of the optional header */
     uint32_t ndirs;
     struct { uint32_t rva, size; } dir[16];
     fnvnx_section sec[FNVNX_MAX_SECTIONS];
@@ -145,6 +151,9 @@ typedef struct fnvnx_image {
 #define FNVNX_MAP_CODE 2u         /* also map code sections (.text) read-only, never executable: their bytes read as
                                      data as on Windows (constant tables, GUIDs, DirectInput formats the game keeps
                                      in .text); a branch there still faults. Not scanned for code pointers. */
+#define FNVNX_MAP_ALL 4u          /* map EVERY section (code and discardable ones included) as the Windows loader
+                                     does: protection from the section's own R/W bits, never executable; implies
+                                     FNVNX_MAP_CODE. Code sections are still flagged `code`. */
 
 /* Map every section that is neither code nor discardable at load_base + rva (host: + bias). All of it must lie in
  * [window_lo, window_hi) (current VAs). load_base is normally pe->image_base. */
@@ -198,9 +207,19 @@ typedef uint32_t (*fnvnx_import_resolver)(void *ctx, const char *dll, const char
 typedef struct fnvnx_import_stats {
     unsigned dlls, slots, resolved, unresolved, delay_dlls, delay_slots;
 } fnvnx_import_stats;
-/* Fill every IAT slot (and delay-load IAT slot) with resolver's value; unresolved slots get `unresolved_value`. */
+/* Fill every IAT slot (and delay-load IAT slot) with resolver's value; unresolved slots get `unresolved_value`.
+ * Old pipeline only; the start sequence uses fnvnx_imports_bind_strict. */
 int fnvnx_imports_bind(fnvnx_image *img, fnvnx_import_resolver resolver, void *ctx, uint32_t unresolved_value,
                        fnvnx_import_stats *stats);
+
+/* Rule S4 (src/start.c): the import slots of the regular import table (by name and by ordinal) get the value of
+ * `resolve(ctx, dll, name, ordinal)` (name NULL and ordinal set for an ordinal import, else ordinal ==
+ * FNVNX_BY_NAME). 0 means "no provider": the slot is left alone, `dll!name` (or `dll!#ordinal`) is logged through
+ * os->log, and after ALL slots were visited FNVNX_E_MISMATCH is returned. Delay-load tables are not bound (and not
+ * even parsed): the exe's own delay-load helper binds them at run time. *bound = number of slots written. */
+typedef uint32_t (*fnvnx_import_resolve3)(void *ctx, const char *dll, const char *name, uint32_t ordinal);
+int fnvnx_imports_bind_strict(fnvnx_image *img, const fnvnx_os *os, fnvnx_import_resolve3 resolve, void *ctx,
+                              uint32_t *bound);
 
 /* ---- address map (S2 -> S3, docs/DATAIMAGE.md "Address map") ---------------------------------------------- */
 

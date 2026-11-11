@@ -14,7 +14,7 @@ typedef int (*thunk_cb)(void *ctx, const char *dll, const char *name, uint32_t o
                         uint32_t slot, uint32_t lookup, uint32_t hn, uint32_t hnlen);
 typedef int (*dll_cb)(void *ctx, uint32_t name_va, uint32_t name_len, int delay);
 
-static int walk_imports(const fnvnx_image *img, thunk_cb tcb, dll_cb dcb, void *ctx) {
+static int walk_imports_x(const fnvnx_image *img, thunk_cb tcb, dll_cb dcb, void *ctx, int with_delay) {
     const fnvnx_pe *pe = img->pe;
     uint32_t base = img->load_base, d, j;
     uint32_t rva = dir_rva(pe, FNVNX_DIR_IMPORT), size = dir_size(pe, FNVNX_DIR_IMPORT);
@@ -54,7 +54,7 @@ static int walk_imports(const fnvnx_image *img, thunk_cb tcb, dll_cb dcb, void *
         }
     }
     /* delay-load descriptors (ImgDelayDescr, 32 bytes) */
-    rva = dir_rva(pe, FNVNX_DIR_DELAY_IMPORT); size = dir_size(pe, FNVNX_DIR_DELAY_IMPORT);
+    rva = dir_rva(pe, FNVNX_DIR_DELAY_IMPORT); size = with_delay ? dir_size(pe, FNVNX_DIR_DELAY_IMPORT) : 0;
     for (d = 0; size && d + 32 <= size; d += 32) {
         const uint8_t *desc = (const uint8_t *)fnvnx_image_ptr(img, base + rva + d, 32);
         uint32_t attrs, name, iat, intt, rel, nlen;
@@ -91,6 +91,10 @@ static int walk_imports(const fnvnx_image *img, thunk_cb tcb, dll_cb dcb, void *
         }
     }
     return FNVNX_OK;
+}
+
+static int walk_imports(const fnvnx_image *img, thunk_cb tcb, dll_cb dcb, void *ctx) {
+    return walk_imports_x(img, tcb, dcb, ctx, 1);
 }
 
 /* ---- binding ---- */
@@ -229,4 +233,45 @@ int fnvnx_collect_exclusions(const fnvnx_image *img, const fnvnx_os *os, fnvnx_r
     }
     *out = e.r; *n = k;
     return FNVNX_OK;
+}
+
+/* ---- strict binding (rule S4) ---- */
+
+typedef struct strict_ctx {
+    fnvnx_image *img;
+    const fnvnx_os *os;
+    fnvnx_import_resolve3 resolve;
+    void *ctx;
+    uint32_t bound, missing;
+} strict_ctx;
+
+static int strict_thunk(void *c, const char *dll, const char *name, uint32_t ord, unsigned hint, uint32_t slot,
+                        uint32_t lookup, uint32_t hn, uint32_t hnlen) {
+    strict_ctx *b = (strict_ctx *)c;
+    uint32_t v;
+    (void)lookup; (void)hn; (void)hnlen;
+    if (hint & TERM) return 0;
+    v = b->resolve(b->ctx, dll, name, name ? FNVNX_BY_NAME : ord);
+    if (!v) {
+        if (name) fnvnx_logf(b->os, "fnvnx-start: no provider for %s!%s", dll, name);
+        else fnvnx_logf(b->os, "fnvnx-start: no provider for %s!#%u", dll, (unsigned)ord);
+        b->missing++;
+        return 0;
+    }
+    fnvnx_wr32(fnvnx_image_ptr(b->img, slot, 4), v);
+    b->bound++;
+    return 0;
+}
+
+int fnvnx_imports_bind_strict(fnvnx_image *img, const fnvnx_os *os, fnvnx_import_resolve3 resolve, void *ctx,
+                              uint32_t *bound) {
+    strict_ctx b;
+    int r;
+    if (!img || !resolve) return FNVNX_E_ARG;
+    memset(&b, 0, sizeof b);
+    b.img = img; b.os = os; b.resolve = resolve; b.ctx = ctx;
+    r = walk_imports_x(img, strict_thunk, NULL, &b, 0);
+    if (bound) *bound = b.bound;
+    if (r) return r;
+    return b.missing ? FNVNX_E_MISMATCH : FNVNX_OK;
 }

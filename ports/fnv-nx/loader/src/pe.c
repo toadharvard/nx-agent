@@ -64,6 +64,8 @@ int fnvnx_pe_open(fnvnx_pe *pe, const fnvnx_os *os, uint32_t file_size) {
     pe->image_base = fnvnx_rd32(opt + 28);
     pe->section_align = fnvnx_rd32(opt + 32);
     pe->file_align = fnvnx_rd32(opt + 36);
+    pe->stack_reserve = fnvnx_rd32(opt + 72);
+    pe->stack_commit = fnvnx_rd32(opt + 76);
     pe->size_of_image = fnvnx_rd32(opt + 56);
     pe->size_of_headers = fnvnx_rd32(opt + 60);
     pe->checksum = fnvnx_rd32(opt + 64);

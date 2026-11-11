@@ -35,3 +35,8 @@ clean:
 	rm -rf $(OUT)
 
 .PHONY: all ilp32-check clean
+
+# The import-key lookup compiles for ILP32 (the generated table is checked by contract/tests/test_iat_keys.py).
+ilp32-importkey:
+	$(ILP32_CC) -mabi=ilp32 -O2 $(WARN) -ffreestanding -Iinclude -c src/importkey.c -o /dev/null
+.PHONY: ilp32-importkey
