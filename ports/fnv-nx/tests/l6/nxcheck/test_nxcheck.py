@@ -12,7 +12,7 @@ The driver defines nxchk_err and an image table (the neutral view), the way a ba
 import os, re, shutil, subprocess, sys, tempfile
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-BACK = os.path.join(ROOT, "render", "d3d9", "backend"); NXB = os.path.normpath(os.path.join(BACK, "..", "..", "backend"))
+BACK = os.path.join(ROOT, "render", "gl4"); NXB = os.path.normpath(os.path.join(BACK, "..", "backend"))
 SRC = ["nxgpu4.h", "nxgpu4_check.h", "nxgpu4_check.c", "nx/gpu_abi.h", "nx/state.h"]   # the ABI headers only
 fails = []; nchecks = 0
 

@@ -263,7 +263,7 @@ if [ -n "$GPU_LIB" ]; then   # the first 3 frames only (lexical order = present 
   done
 fi
 TREE=$(GIT_INDEX_FILE=$IDX GITA write-tree) || die "write-tree failed"; rm -f "$IDX"
-MSG=$(printf 'boot %s: rc %s reason %s last %s instr %s\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>' "$ELF_ID" "$RC" "$REASON" "$LAST" "$INSTR")
+MSG=$(printf 'boot %s: rc %s reason %s last %s instr %s' "$ELF_ID" "$RC" "$REASON" "$LAST" "$INSTR")
 COMMIT=$(GITA "${GIT_ID[@]}" commit-tree "$TREE" -m "$MSG") || die "commit-tree failed"
 retry GITA push -q -f "$ARTIFACTS_URL" "$COMMIT:refs/heads/$OUT_BRANCH" || die "push of $OUT_BRANCH failed"
 [ "$(git ls-remote "$ARTIFACTS_URL" "refs/heads/$OUT_BRANCH" | cut -f1)" = "$COMMIT" ] || die "$OUT_BRANCH on the remote is not the pushed commit $COMMIT"

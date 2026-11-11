@@ -10,7 +10,7 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."));
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 DEV = os.path.join(ROOT, "render", "d3d9", "dev"); GEN = os.path.join(ROOT, "render", "d3d9", "gen"); ENV = os.path.join(ROOT, "render", "d3d9", "env"); SPEC = os.path.join(ROOT, "render", "d3d9", "spec", "d3d9_spec.json")
-INC = os.path.join(ROOT, "shim", "include"); NXF = os.path.join(ROOT, "render", "native"); DEVT = os.path.join(ROOT, "tests", "l6", "dev"); BACK = os.path.join(ROOT, "render", "d3d9", "backend"); NXB = os.path.normpath(os.path.join(BACK, "..", "..", "backend"))
+INC = os.path.join(ROOT, "shim", "include"); NXF = os.path.join(ROOT, "render", "native"); DEVT = os.path.join(ROOT, "tests", "l6", "dev"); BACK = os.path.join(ROOT, "render", "gl4"); NXB = os.path.normpath(os.path.join(BACK, "..", "backend"))
 LIB = ["obj.cpp", "app_unk_native.cpp", "state_rt.cpp", "state_ext.cpp"]; GENS = ["d9impl_unk.gen.cpp", "state.gen.cpp"]; NATIVE = os.path.join(ROOT, "tests", "l6", "native")
 RES = ["res_buf.cpp", "res_fvf.cpp", "res_decl.cpp", "res_shader.cpp", "res_smcheck.cpp", "res_query.cpp"]; TEX = ["res_fmt.cpp", "res_tex.cpp", "res_surf.cpp", "res_create.cpp"]
 TESTS = ["t_env.cpp", "t_a.cpp", "t_b.cpp", "t_c.cpp", "t_d.cpp", "t_e.cpp", "t_h.cpp"]

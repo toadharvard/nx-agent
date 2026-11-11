@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_selftest.py: the nxgpu v4.1 first-frame self test (tests/l6/selftest/nx) over the GL backend.
+"""test_selftest.py: the nxgpu v4.1 first-frame self test (render/gl4/selftest) over the GL backend.
   python3 -I tests/l6/selftest/test_selftest.py [--no-mutations]      (after: set -a; . /home/user/work/l6/ENV_READY; set +a)
  a  libnxgl4.so is built by build_gl4.sh; harness.c (a Linux host of nxgpu4_selftest.c) is linked against it
  b  an independent pure-Python rasterizer (exact integer arithmetic) gives the FNV-1a 64 of the scene for 1280x720 and 1920x1080
@@ -15,7 +15,7 @@ import os, re, shutil, subprocess, sys, tempfile
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-BACK = os.path.join(ROOT, "render", "d3d9", "backend"); NXB = os.path.normpath(os.path.join(BACK, "..", "..", "backend")); ST = os.path.join(ROOT, "tests", "l6", "selftest", "nx")
+BACK = os.path.join(ROOT, "render", "gl4"); NXB = os.path.normpath(os.path.join(BACK, "..", "backend")); ST = os.path.join(ROOT, "render", "gl4", "selftest")
 SIZES = [(1280, 720), (1920, 1080)]
 fails = []
 

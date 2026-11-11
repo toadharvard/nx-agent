@@ -14,7 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.pat
 sys.path.insert(0, HERE)
 import allocscan  # noqa: E402
 D3 = os.path.join(ROOT, "render", "d3d9"); DEV = os.path.join(D3, "dev"); GEN = os.path.join(D3, "gen"); ENV = os.path.join(D3, "env"); SPEC = os.path.join(D3, "spec", "d3d9_spec.json")
-INC = os.path.join(ROOT, "shim", "include"); FRONT = os.path.join(D3, "front"); BACK = os.path.join(D3, "backend"); NXB = os.path.normpath(os.path.join(BACK, "..", "..", "backend"))
+INC = os.path.join(ROOT, "shim", "include"); FRONT = os.path.join(D3, "front"); BACK = os.path.join(D3, "..", "gl4"); NXB = os.path.normpath(os.path.join(BACK, "..", "backend"))
 ALL_DEV = sorted(os.path.splitext(os.path.basename(p))[0] for p in glob.glob(os.path.join(DEV, "*.cpp")))
 NOT_YET = [n for n in ALL_DEV if n.startswith(("ffp_", "m1_"))]   # other workers, in progress: scanned and listed (OTHER), not gated, not mutated
 OWNED = [n for n in ALL_DEV if n not in NOT_YET]

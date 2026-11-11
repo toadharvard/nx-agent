@@ -16,7 +16,7 @@ import ctypes as C, json, os, re, shutil, subprocess, sys, tempfile
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install(preload=True); import mutsrc
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-FRONT = os.path.join(ROOT, "render", "d3d9", "front"); BACKEND = os.path.join(ROOT, "render", "d3d9", "backend"); NXB = os.path.normpath(os.path.join(BACKEND, "..", "..", "backend"))
+FRONT = os.path.join(ROOT, "render", "d3d9", "front"); BACKEND = os.path.join(ROOT, "render", "gl4"); NXB = os.path.normpath(os.path.join(BACKEND, "..", "backend"))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "..", "render", "d3d9", "env")); sys.path.insert(0, os.path.join(HERE, "..", "tex")); import envq, texoracle   # noqa: E402  (query domains of the environment table; the layout oracle)
 M32, MASKS = 0xffffffff, [0, 1, 2, 3, 0xf, 0x10, 0xff, 0x100, 0x80000000, 0x7fffffff, 0xffffffff]
 

@@ -15,5 +15,5 @@ if [ "$1" = "--shaders-build" ]; then build=$2; shift 2; fi
 out=${1:-libnxgl4.so}
 xl=$("$here/gl4_xlator.sh" "$build") || exit 2
 # shellcheck disable=SC2086
-gcc -std=c11 -Wall -Werror -Werror=switch-enum -O2 -fPIC -shared -I"$here" -I"$here/../../backend" "$here"/gl4_*.c "$here/../../backend"/nxgpu4_check.c $xl \
+gcc -std=c11 -Wall -Werror -Werror=switch-enum -O2 -fPIC -shared -I"$here" -I"$here/../backend" "$here"/gl4_*.c "$here/../backend"/nxgpu4_check.c $xl \
     -Wl,--version-script="$here/libnxgl4.map" -lEGL -lGL -lm -o "$out"

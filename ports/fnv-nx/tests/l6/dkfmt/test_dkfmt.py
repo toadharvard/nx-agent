@@ -14,7 +14,7 @@ Output: 'rows mapped N/35', the not-closed list, mutations caught, ALL OK."""
 import os, re, subprocess, sys, tempfile
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-BACK = os.path.join(ROOT, "render", "d3d9", "backend"); NXB = os.path.normpath(os.path.join(BACK, "..", "..", "backend")); NXD = os.path.join(os.path.normpath(os.path.join(BACK, "..", "..", "backend")), "nx"); FRONT = os.path.join(ROOT, "render", "d3d9", "front")
+BACK = os.path.join(ROOT, "render", "gl4"); NXB = os.path.normpath(os.path.join(BACK, "..", "backend")); NXD = os.path.join(os.path.normpath(os.path.join(BACK, "..", "backend")), "nx"); FRONT = os.path.join(ROOT, "render", "d3d9", "front")
 DK = os.environ.get("FNVNX_DK", "/home/user/work/l6/dk")
 INC = os.path.join(DK, "deko3d", "include"); SRC = os.path.join(DK, "deko3d", "src", "deko3d")
 CROSS = os.path.join(DK, "dkp", "devkitA64", "bin", "aarch64-none-elf-gcc")
