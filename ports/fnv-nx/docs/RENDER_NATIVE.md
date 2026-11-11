@@ -888,7 +888,7 @@ Marker). A reader skips an unknown opcode by its count. `NxOp_Marker` with tag `
 **NXD9** (`render/native/capture/d3d9cap.h`; Python reference writer `tests/s6n/nxd9.py`). `nx_render d3d9` runs it
 through the native D3D9 translator (`front/d3d9_state.h`, Nine 20.1 rules) and S6b's translated shaders into the GL
 backend. **Choice:** shader translation is S6b's (`render/shaders`, MojoShader `glsldk` profile, layout contract
-`render/shaders/include/fnvnx_dk_layout.h`); nx_render does not link it. The converter either embeds each shader's
+`render/shaders/translator/include/fnvnx_dk_layout.h`); nx_render does not link it. The converter either embeds each shader's
 GLSL in its `VSH`/`PSH` record, or leaves it empty and passes `--shaders <dir>` holding `<hash %016llx>.glsl` as
 `sdp2dksh -o <dir> --glsl shaderpackage*.sdp` writes them (hash = `fnvnx_shader_hash`, FNV-1a 64 of the bytecode).
 
