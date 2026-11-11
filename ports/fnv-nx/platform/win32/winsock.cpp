@@ -5,23 +5,11 @@
  * host's bsd would say):
  *   reach_of(IPv4 address): 127.x.y.z = LOOPBACK (local: host call), 0.0.0.0 = ANY, everything else (unicast, 240/4,
  *   multicast 224/4, the limited broadcast 255.255.255.255) = EXTERNAL.
- *   bind     LOOPBACK, ANY: the host (ANY = every local address = the loopback); EXTERNAL: WSAEADDRNOTAVAIL 10049.
- *            MSDN bind: "WSAEADDRNOTAVAIL: The specified address is not a valid address for this computer"; Wine 9.0
- *            ntdll/unix/socket.c sock_errno_to_status(EADDRNOTAVAIL) -> STATUS_INVALID_ADDRESS_COMPONENT, ws2_32/socket.c
- *            NtStatusToWSAError -> WSAEADDRNOTAVAIL.
- *   connect  LOOPBACK: the host. ANY: WSAEADDRNOTAVAIL 10049 (MSDN connect: "The remote address is not a valid address
- *            (such as ADDR_ANY)"). EXTERNAL: WSAENETUNREACH 10051 (no route: Linux ENETUNREACH ->
- *            sock_errno_to_status -> STATUS_NETWORK_UNREACHABLE -> WSAENETUNREACH; MSDN connect: "The network cannot be
- *            reached from this host at this time").
- *   IP_ADD_MEMBERSHIP / IP_DROP_MEMBERSHIP / IP_MULTICAST_IF to an EXTERNAL interface or group: no interface can carry
- *            multicast, so WSAEADDRNOTAVAIL 10049 (no Wine/MSDN text for this state: the same "address is not valid for
- *            this computer" class as bind).
- *   gethostbyname(name): a dotted address -> itself (a local parse); "localhost" -> 127.0.0.1; the computer name
- *            (GetComputerNameA) -> the loopback "magic" address 127.12.34.56 (Wine 9.0 ws2_32/protocol.c get_local_ips:
- *            "No routes, fall back to the Magic IP"; gethostbyname substitutes it for a 127.x answer unless the name is
- *            "localhost"); an empty name = the computer name (Wine: "if (!name || !name[0]) name = hostname"); any other
- *            name -> WSAHOST_NOT_FOUND 11001 with no resolver call (no DNS server; Windows and Wine's host lookup
- *            answer HOST_NOT_FOUND for a name no server can resolve).
+ *   net_verdict(operation, reach) is the one mapping table (bind, connect, IP_MULTICAST_IF, IP_ADD/DROP_MEMBERSHIP); each
+ *            cell carries its citation at the table. Citations are win-doc:<page>:<item> (Windows documentation, which
+ *            wins where it states the result) or wine-9.0:<path>:<function> (the code of Wine 9.0, wine-9.0.tar.xz sha256
+ *            7cfd090a5395f5b76d95bb5defac8a312c8de4c070c1163b8b58da38330ca6ee, where the documentation is silent).
+ *   gethostbyname(name): see fnvnx_ws2_gethostbyname.
  *   gethostname: the computer name. Local operations (WSAStartup, WSACleanup, WSAGetLastError, htons, ntohs, inet_addr,
  *   inet_ntoa, select, closesocket, ioctlsocket, socket on AF_INET) really work. IPv6 does not exist (AF_INET6 ->
  *   WSAEAFNOSUPPORT, the Winsock 1.1 surface the bridge rows define).
@@ -170,13 +158,39 @@ Reach reach_of(const in_addr &a)
     if (!b[0] && !b[1] && !b[2] && !b[3]) return R_ANY;
     return R_EXTERNAL;
 }
-/* the one mapping table: (operation, reach) -> the Winsock error, 0 = the host may be asked */
-enum NetOp { OP_BIND, OP_CONNECT };
+/* the one mapping table: (operation, reach) -> the Winsock error, 0 = the host may be asked. LOOPBACK is always the host.
+ *   OP_BIND ANY: the host (every local address = the loopback). OP_BIND EXTERNAL: 10049 WSAEADDRNOTAVAIL.
+ *     win-doc:bind:WSAEADDRNOTAVAIL ("The specified address is not a valid address for this computer").
+ *     wine-9.0:server/sock.c:sock_get_ntstatus (EADDRNOTAVAIL -> STATUS_INVALID_ADDRESS_COMPONENT), reached through
+ *     IOCTL_AFD_BIND in sock_ioctl; wine-9.0:dlls/ws2_32/socket.c:NtStatusToWSAError (-> WSAEADDRNOTAVAIL).
+ *   OP_CONNECT ANY: 10049 WSAEADDRNOTAVAIL. win-doc:connect:WSAEADDRNOTAVAIL ("The remote address is not a valid address
+ *     (such as ADDR_ANY)"). The documentation decides; wine-9.0:server/sock.c:sock_ioctl (IOCTL_AFD_WINE_CONNECT) does not test
+ *     for it.
+ *   OP_CONNECT EXTERNAL: 10051 WSAENETUNREACH (the declared machine has no route: ENETUNREACH).
+ *     win-doc:connect:WSAENETUNREACH; wine-9.0:server/sock.c:sock_get_ntstatus (ENETUNREACH -> STATUS_NETWORK_UNREACHABLE);
+ *     wine-9.0:dlls/ntdll/unix/socket.c:sock_errno_to_status (the same); wine-9.0:dlls/ws2_32/socket.c:NtStatusToWSAError
+ *     (-> WSAENETUNREACH).
+ *   OP_MCAST_IF ANY: the host (clears the choice). OP_MCAST_IF EXTERNAL: 10022 WSAEINVAL. No interface owns the address, so
+ *     the Linux setsockopt fails with EADDRNOTAVAIL; wine-9.0:dlls/ntdll/unix/socket.c:sock_errno_to_status maps it to
+ *     STATUS_INVALID_PARAMETER (setsockopt goes through do_setsockopt in that file), and
+ *     wine-9.0:dlls/ws2_32/socket.c:NtStatusToWSAError has no row for it, so it is WSAEINVAL. win-doc:setsockopt:WSAEINVAL.
+ *     Assumption: the host kernel answers as Linux does, seen through Wine's mapping.
+ *   OP_MCAST_MEMBER ANY/EXTERNAL: 10022 WSAEINVAL. ANY asks the kernel to pick the interface by a route to the group, the
+ *     declared machine has no route; EXTERNAL names no interface: both are ENODEV, which
+ *     wine-9.0:dlls/ntdll/unix/socket.c:sock_errno_to_status does not list (STATUS_UNSUCCESSFUL), and
+ *     wine-9.0:dlls/ws2_32/socket.c:NtStatusToWSAError gives WSAEINVAL. A group outside 224/4 is EINVAL, also WSAEINVAL.
+ *     Same assumption; no Windows documentation text states this case. */
+enum NetOp { OP_BIND, OP_CONNECT, OP_MCAST_IF, OP_MCAST_MEMBER };
 int net_verdict(NetOp op, Reach r)
 {
     if (r == R_LOOPBACK) return 0;
-    if (op == OP_BIND) return r == R_ANY ? 0 : 10049;   /* WSAEADDRNOTAVAIL */
-    return r == R_ANY ? 10049 : 10051;                  /* connect: WSAEADDRNOTAVAIL / WSAENETUNREACH */
+    switch (op) {
+    case OP_BIND:         return r == R_ANY ? 0 : 10049;        /* WSAEADDRNOTAVAIL */
+    case OP_CONNECT:      return r == R_ANY ? 10049 : 10051;    /* WSAEADDRNOTAVAIL / WSAENETUNREACH */
+    case OP_MCAST_IF:     return r == R_ANY ? 0 : 10022;        /* WSAEINVAL */
+    case OP_MCAST_MEMBER: return 10022;                         /* WSAEINVAL */
+    }
+    return 10022;
 }
 int xlat_flags(int f, int *o)
 {
@@ -531,14 +545,21 @@ extern "C" int fnvnx_ws2_setsockopt(UINT_PTR s, int level, int opt, const char *
         case 9: {                                                /* IP_MULTICAST_IF: the interface's in_addr */
             if (!need(4)) return fail(10014);
             memcpy(&ia, val, 4);
-            if (reach_of(ia) == R_EXTERNAL) return fail(10049);   /* no such interface (head of file) */
+            if (int w = net_verdict(OP_MCAST_IF, reach_of(ia))) return fail(w);   /* no such interface: net_verdict */
             ho = IP_MULTICAST_IF; hv = &ia; hn = sizeof ia;
             break;
         }
-        case 12: case 13:                                        /* IP_ADD_MEMBERSHIP / IP_DROP_MEMBERSHIP: struct ip_mreq */
+        case 12: case 13: {                                      /* IP_ADD_MEMBERSHIP / IP_DROP_MEMBERSHIP: struct ip_mreq {group, interface} */
             if (!need(8)) return fail(10014);
             if (!(k.f & F_DGRAM)) return fail(10042);
-            return fail(10049);   /* the declared machine has no multicast-capable interface (head of file): nothing to join or leave */
+            in_addr grp;
+            memcpy(&grp, val, 4); memcpy(&ia, val + 4, 4);
+            if ((((const uint8_t *)&grp)[0] & 0xF0) != 0xE0) return fail(10022);   /* group not in 224/4: EINVAL, see net_verdict OP_MCAST_MEMBER */
+            if (int w = net_verdict(OP_MCAST_MEMBER, reach_of(ia))) return fail(w);
+            ho = opt == 12 ? IP_ADD_MEMBERSHIP : IP_DROP_MEMBERSHIP;
+            hv = val; hn = 8;
+            break;
+        }
         case 1:                                                  /* IP_OPTIONS: at most 40 bytes of IP options */
             if (len > 40) return fail(10022);
             memcpy(opts, val, (size_t)len);
@@ -696,11 +717,23 @@ extern "C" void *fnvnx_ws2_gethostbyname(const char *name)
     DWORD sl = sizeof self;
     GetComputerNameA(self, &sl);
     if (!name) { SetLastError(10014); return NULL; }
-    if (!name[0]) name = self;                                  /* Wine 9.0 protocol.c: an empty name is the computer's */
+    /* gethostbyname on the declared machine (loopback only, no DNS server):
+     *   empty name = the computer's own name: win-doc:gethostbyname ("If the name parameter points to an empty string or name is
+     *     NULL, the returned string is the same as the string returned by a successful gethostname function call") and
+     *     wine-9.0:dlls/ws2_32/protocol.c:gethostbyname (an empty name is replaced by the gethostname result).
+     *   a dotted address: parsed locally (win-doc:gethostbyname: "If the name parameter contains a string representation of a
+     *     legal IPv4 address, then the binary IPv4 address that represents the string is returned").
+     *   own name and "localhost": 127.0.0.1. wine-9.0:dlls/ws2_32/protocol.c:get_local_ips returns no address on a machine
+     *     whose only interface is the loopback (it takes them from GetAdaptersInfo, which skips loopback), so the Magic IP
+     *     127.12.34.56 substitution in gethostbyname never applies and the host resolver answers (wine-9.0:dlls/ws2_32/unixlib.c:
+     *     unix_gethostbyname); on the declared machine that answer for the own name is the loopback. Assumption (neither source
+     *     fixes the address): 127.0.0.1.
+     *   any other name: 11001 WSAHOST_NOT_FOUND. win-doc:gethostbyname:WSAHOST_NOT_FOUND; wine-9.0:dlls/ws2_32/unixlib.c:host_errno_from_unix
+     *     (HOST_NOT_FOUND -> WSAHOST_NOT_FOUND). Assumption: with no DNS server the host resolver answers HOST_NOT_FOUND. */
+    if (!name[0]) name = self;
     uint32_t ip;
     if (parse_ip(name, &ip)) { uint32_t b = bswap(ip); memcpy(t.ad[0], &b, 4); }   /* memory order a.b.c.d = network order */
-    else if (!strcasecmp(name, "localhost")) { static const uint8_t lo[4] = { 127, 0, 0, 1 }; memcpy(t.ad[0], lo, 4); }
-    else if (self[0] && !strcasecmp(name, self)) { static const uint8_t magic[4] = { 127, 12, 34, 56 }; memcpy(t.ad[0], magic, 4); }
+    else if (!strcasecmp(name, "localhost") || (self[0] && !strcasecmp(name, self))) { static const uint8_t lo[4] = { 127, 0, 0, 1 }; memcpy(t.ad[0], lo, 4); }
     else { SetLastError(11001); return NULL; }                  /* WSAHOST_NOT_FOUND: no resolver exists (head of file) */
     snprintf(t.name, sizeof t.name, "%s", name);
     t.alias[0] = NULL;

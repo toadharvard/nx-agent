@@ -146,9 +146,14 @@ TEST(ws_hostnames)
     char name[64];
     CHECK_EQ(fnvnx_ws2_gethostname(name, sizeof name), 0);
     CHECK(name[0] != 0);
-    h = (ws_hostent *)fnvnx_ws2_gethostbyname(name);   /* the declared computer name: Wine's magic loopback address */
+    /* the declared computer name and the empty name (win-doc:gethostbyname): the loopback. Wine 9.0 protocol.c get_local_ips has no
+     * address on a loopback-only machine, so the magic 127.12.34.56 is not used (see gethostbyname in winsock.cpp) */
+    h = (ws_hostent *)fnvnx_ws2_gethostbyname(name);
     CHECK(h != NULL);
-    if (h) CHECK(h->addrs && h->addrs[0] && memcmp(h->addrs[0], "\x7f\x0c\x22\x38", 4) == 0);
+    if (h) CHECK(h->addrs && h->addrs[0] && memcmp(h->addrs[0], "\x7f\0\0\x01", 4) == 0);
+    h = (ws_hostent *)fnvnx_ws2_gethostbyname("");
+    CHECK(h != NULL);
+    if (h) { CHECK_STR(h->name, name); CHECK(h->addrs && h->addrs[0] && memcmp(h->addrs[0], "\x7f\0\0\x01", 4) == 0); }
     char tiny[1];
     CHECK_EQ(fnvnx_ws2_gethostname(tiny, 1), -1); CHECK_EQ(LASTERR(), 10014);   /* WSAEFAULT: buffer too small */
     CHECK(fnvnx_ws2_gethostbyname("no-such-host.invalid") == NULL);
@@ -265,10 +270,20 @@ TEST(ws_no_network)
     fnvnx_ws2_closesocket(a);
     UINT_PTR u = fnvnx_ws2_socket(2, 2, 17);
     struct { uint32_t group, ifc; } m = { 0x010000E0u, 0 };                              /* 224.0.0.1 */
-    CHECK_EQ(fnvnx_ws2_setsockopt(u, 0, 12, (const char *)&m, 8), -1); CHECK_EQ(LASTERR(), 10049);   /* IP_ADD_MEMBERSHIP */
-    CHECK_EQ(fnvnx_ws2_setsockopt(u, 0, 13, (const char *)&m, 8), -1); CHECK_EQ(LASTERR(), 10049);   /* IP_DROP_MEMBERSHIP */
+    /* membership and multicast interface: WSAEINVAL 10022, not 10049 (net_verdict in winsock.cpp: wine-9.0 ntdll sock_errno_to_status ->
+     * ws2_32 NtStatusToWSAError, EADDRNOTAVAIL/ENODEV/EINVAL have no WSA row of their own on the setsockopt path) */
+    CHECK_EQ(fnvnx_ws2_setsockopt(u, 0, 12, (const char *)&m, 8), -1); CHECK_EQ(LASTERR(), 10022);   /* IP_ADD_MEMBERSHIP, interface ANY: no route */
+    CHECK_EQ(fnvnx_ws2_setsockopt(u, 0, 13, (const char *)&m, 8), -1); CHECK_EQ(LASTERR(), 10022);   /* IP_DROP_MEMBERSHIP */
+    m.ifc = 0x08080808u;
+    CHECK_EQ(fnvnx_ws2_setsockopt(u, 0, 12, (const char *)&m, 8), -1); CHECK_EQ(LASTERR(), 10022);   /* external interface */
+    m.group = 0x0100000Au; m.ifc = 0x0100007Fu;                                                       /* 10.0.0.1: not a multicast group */
+    CHECK_EQ(fnvnx_ws2_setsockopt(u, 0, 12, (const char *)&m, 8), -1); CHECK_EQ(LASTERR(), 10022);
     uint32_t ifc = 0x08080808u;
-    CHECK_EQ(fnvnx_ws2_setsockopt(u, 0, 9, (const char *)&ifc, 4), -1); CHECK_EQ(LASTERR(), 10049);  /* IP_MULTICAST_IF external */
+    CHECK_EQ(fnvnx_ws2_setsockopt(u, 0, 9, (const char *)&ifc, 4), -1); CHECK_EQ(LASTERR(), 10022);  /* IP_MULTICAST_IF external */
+    ifc = 0x02000000u;                                                                                /* 0.0.0.2: interface index 2, none exists */
+    CHECK_EQ(fnvnx_ws2_setsockopt(u, 0, 9, (const char *)&ifc, 4), -1); CHECK_EQ(LASTERR(), 10022);
+    ifc = 0;                                                                                          /* INADDR_ANY clears the choice */
+    CHECK_EQ(fnvnx_ws2_setsockopt(u, 0, 9, (const char *)&ifc, 4), 0);
     fnvnx_ws2_closesocket(u);
     CHECK(fnvnx_ws2_gethostbyname("www.example.com") == NULL); CHECK_EQ(LASTERR(), 11001);
     fnvnx_ws2_WSACleanup();
