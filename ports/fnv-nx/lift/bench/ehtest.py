@@ -2,8 +2,8 @@
 """Exception bench (R4): SEH frames on fs:[0], hardware exceptions, RtlUnwind, RaiseException, on BOTH sides with the same seeded state.
     ehtest.py [--census]
 x86 side: Unicorn runs the code; there is no OS, so the harness (Python) is the OS: on a divide error / int3 / ud2 / call of a service address it runs
-the SAME algorithm as rt/seh.c (record and context on the guest stack, fs:[0] walk, handlers run through Unicorn, unwind, ContinueExecution).
-Lifted side: the lifted code + rt/seh.c under Unicorn AArch64. Compared: call trace (entry address, esp: handlers, funclets, continuations
+the SAME algorithm as rt/seh.cc (record and context on the guest stack, fs:[0] walk, handlers run through Unicorn, unwind, ContinueExecution).
+Lifted side: the lifted code + rt/seh.cc under Unicorn AArch64. Compared: call trace (entry address, esp: handlers, funclets, continuations
 included), registers, every written byte (records and contexts too), the root's return address, the unhandled-exception report.
 COVERAGE (honest): hand-assembled functions (synthetic image at 0x401000) with the shapes of the exe's frames; NOT yet real exe functions: those need
 the IAT (RtlUnwind, RaiseException) patched to the service entries and a host-fault -> guest eip map for access violations.
@@ -58,7 +58,7 @@ class Done(Exception):
 
 
 class EH(chrun.X86):
-    """x86 oracle with the OS in Python: mirrors rt/seh.c statement by statement"""
+    """x86 oracle with the OS in Python: mirrors rt/seh.cc statement by statement"""
     def r32(s, a): s.ensure(a, 4, False); return struct.unpack('<I', bytes(s.uc.mem_read(a, 4)))[0]
     def w32(s, a, v): s.ensure(a, 4, False); s.uc.mem_write(a & M, struct.pack('<I', v & M)); s.writes.add((a & M, 4))
     def zero(s, a, n): [s.w32(a + i, 0) for i in range(0, n, 4)]
@@ -120,7 +120,7 @@ class EH(chrun.X86):
             if r == 'root': return 'root'
             pc = r                                     # ('resume' at the address)
 
-    # ---- the OS, mirroring rt/seh.c ----
+    # ---- the OS, mirroring rt/seh.cc ----
     def make_context(s, top, sp, eip):
         x = top - 716; s.zero(x, 716); w = lambda o, v: s.w32(x + o, v); R = s.R()
         w(0, 0x1000F); w(28, 0x27f); w(32, 0); w(36, 0xffff)
@@ -204,8 +204,8 @@ def main():
     flags = [f for f in T.FLAGS if f != '-DFNVL_FLAGS_IO'] + ['-I', LIFT + '/rt']
     o, err = chain.comp_chunk((L.PRELUDE + '\n'.join(texts.values()), flags + ['-DFNVL_TRACE'], a.work))
     if not o: sys.exit('compile: ' + err)
-    so = a.work + '/seh.o'; r = subprocess.run(['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++', '-I', LIFT + '/rt', LIFT + '/rt/seh.c', '-o', so], capture_output=True, text=True)
-    if r.returncode: sys.exit('seh.c: ' + r.stderr[:600])
+    so = a.work + '/seh.o'; r = subprocess.run(['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++', '-I', LIFT + '/rt', LIFT + '/rt/seh.cc', '-o', so], capture_output=True, text=True)
+    if r.returncode: sys.exit('seh.cc: ' + r.stderr[:600])
     syms = {ad: 'L_%08x' % ad for ad in texts}; syms[SVC_UNW] = 'fnvl_os_RtlUnwind'; syms[SVC_RAISE] = 'fnvl_os_RaiseException'
     im = chrun.Image(chain.link(a, [o, so], syms, flags, ['--defsym', 'L_%08x=fnvl_os_RtlUnwind' % SVC_UNW, '--defsym', 'L_%08x=fnvl_os_RaiseException' % SVC_RAISE])); evs = set(st_ for ad, sz, st_, ow in ents.values()); bad = 0    # a direct call of a service address is a call of L_<addr>
     CASES = (('mA', 'unwind through 2 frames after #DE'), ('f3', '#BP, ContinueExecution'), ('mB', 'RaiseException, unwind'), ('fU', '#DE no frame: unhandled'),

@@ -1,6 +1,0 @@
-ps_2_0
-def c0, 0.5, 0.0, 0.0, 0.0
-dcl t0
-dcl t1
-mad r0, t1, c0.x, t0
-mov oC0, r0

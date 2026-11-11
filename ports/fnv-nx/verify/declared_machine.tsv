@@ -1,0 +1,4 @@
+# id	contract_name	fact	source	kind	value
+# fact: no-network | time-zone | registry (CLAUDE.md "The declared machine"); source: win-doc:<documentation page or header path>:<function> | wine-9.0:<path>:<function>; kind void|u32|u64|addr|u32nz<N> as in wine_fixme.tsv
+# rows come from the platform owner (L5) with the body that cites them; see VERDICT.md "Declared-machine bodies"
+# registry rows are never written by hand: the L5 tool derives them from the static Reg* reads of the exe and modules; hand-written rows are machine facts only (no-network, time-zone) with their source

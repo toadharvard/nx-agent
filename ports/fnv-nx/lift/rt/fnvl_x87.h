@@ -8,6 +8,9 @@
    compared or stored as m80) goes through rt/x87.c (fnvl_x_*), which is hardware-equal. */
 #include "x87.h"
 #include "fmath.h"
+/* FNVL_F2I marks a float -> integer conversion helper: the only functions whose bodies may convert a float to an integer (x86 semantics:
+   out of range / NaN -> integer indefinite). toolchain/f2i_check/fnvnx_f2i_check.cc finds any other conversion in a unit; proof/gate_fpexact.py judges. */
+#define FNVL_F2I __attribute__((fnvnx_f2i))
 enum { FK_E, FK_F64, FK_F32, FK_I16, FK_I32, FK_I64, FK_M80 };
 #define FQ64 (1ull<<51)
 static inline fv fvmk(u32 k,u64 v,u32 e){ fv r; r.v=v; r.e=e; r.k=k; return r; }
@@ -71,7 +74,7 @@ static inline u64 fv_s64(fv a){ u32 f=0;
   switch(a.k){ case FK_F64: return a.v; case FK_F32: return d2u((double)u2f((u32)a.v)); case FK_I16: case FK_I32: case FK_I64: return d2u((double)(s64)a.v);
     default: return fnvl_x_to_f64(fv_x(a),c->fcw,&f); } }
 /* fist/fistp/fisttp: round by rc (fist: the control word's RC), out of range and NaN give the integer indefinite. Returns the pattern, the caller truncates it. */
-static inline u64 fv_i(fv a,u32 bits,u32 rc){ u64 ind=1ull<<(bits-1); u32 f=0; double d,r;
+FNVL_F2I static inline u64 fv_i(fv a,u32 bits,u32 rc){ u64 ind=1ull<<(bits-1); u32 f=0; double d,r;
   switch(a.k){
   case FK_I16: case FK_I32: case FK_I64: { s64 x=(s64)a.v; return (bits==64||(x>=-(s64)ind&&x<(s64)ind))?(u64)x:ind; }
   case FK_F64: case FK_F32: d=fv_d(a); if(d!=d) return ind; r=fx_round(d,rc); break;
@@ -138,7 +141,7 @@ static inline void fv_stbcd(fv a,u64 *lo,u64 *hi){ u8 b[10]; u32 f=0; u16 h; fnv
    A-FDP: the SDM leaves the data pointer of an instruction without a memory operand unspecified; it is modelled as unchanged. A-FDS: FDS is DS whenever FDP != 0 (an FS-relative operand is
    reported with the DS selector: the selector is not kept per operand). A-FOP: FOP is not stored, it is the low 11 bits of the two opcode bytes at FIP (first byte & 7, second byte), read
    from the code when an image is written; FIP == 0 (no x87 instruction since FNINIT / thread start) gives the FNINIT state: FIP = FCS = FOP = FDP = FDS = 0. FCS and FDS are the model's
-   selectors (c->sel[], the CONTEXT SegCs / SegDs of rt/seh.c). A-RES: reserved bits of the image are 0. */
+   selectors (c->sel[], the CONTEXT SegCs / SegDs of rt/seh.cc). A-RES: reserved bits of the image are 0. */
 static inline u32 fx_fop(void){ u32 a=c->fip, b;
   if(!a) return 0;
   for(int n=0;n<14;n++){ b=M8(a); if(b==0x66||b==0x67||b==0xf0||b==0xf2||b==0xf3||b==0x2e||b==0x36||b==0x3e||b==0x26||b==0x64||b==0x65) a++; else break; }

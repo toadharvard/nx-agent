@@ -280,25 +280,58 @@ def model_post_shape(code, fields, pre, eip_sym=True, timeout=600):
         r = r2
     return r
 
-def eip_nowrap(terms, eip):
-    """rewrite of model terms under the domain eip < EIP_LIMIT (every query of a shape run assumes it): the 32-bit sum eip + K (K a small constant: the
-    offsets of the bytes of ONE instruction) zero-extended to a wider sort equals the wide sum zext(eip) + K, because eip + K < 2^32 cannot wrap.
-    Without it z3 cannot see that the fetch index (rip + offset) - code_base is a constant and bit-blasts the 128-bit shifts of code_bytes.
-    terms -> simplified terms with every `zero_extend(eip + K)` / `concat(0, eip + K)` replaced"""
-    terms = [z3.simplify(t) for t in terms]; pairs, seen, st = {}, set(), list(terms)
+def zext_base(t):
+    """t = zero extension of a narrower term e (z3 ZeroExt, or Concat with a leading all-zero constant) -> (e, width of e), else None"""
+    if not z3.is_bv(t): return None
+    k = t.decl().kind(); ch = t.children()
+    if k == z3.Z3_OP_ZERO_EXT: return ch[0], ch[0].size()
+    if k == z3.Z3_OP_CONCAT and len(ch) == 2 and z3.is_bv_value(ch[0]) and ch[0].as_long() == 0: return ch[1], ch[1].size()
+    return None
+
+def zext_add_pairs(terms):
+    """{id: (term, replacement)} for the sub-terms  Z_V(c + Z_W(e))  (Z = zero extension, c a constant, e of n < W bits, c < 2^W - 2^n).  Identity (unconditional):
+    Z_W(e) < 2^n and c < 2^W - 2^n, so the W-bit sum cannot wrap, hence the zero extension of the sum is the sum of the zero extensions at any V >= W:
+        Z_V(c + Z_W(e))  =  c + Z_V(e).
+    The model computes instruction-fetch offsets as (code_base + K) - (rip + K) in 48/64/128 bits; without this identity z3 does not see that the difference is
+    the constant K and bit-blasts the 128-bit shifts of code_bytes by a symbolic amount."""
+    pairs, seen, st = {}, set(), list(terms)
     while st:
         t = st.pop()
         if t.get_id() in seen: continue
         seen.add(t.get_id()); ch = t.children(); st.extend(ch)
-        k = t.decl().kind()
-        if k in (z3.Z3_OP_CONCAT, z3.Z3_OP_ZERO_EXT) and z3.is_bv(t) and (len(ch) == 1 or (z3.is_bv_value(ch[0]) and ch[0].as_long() == 0)):
-            x = ch[-1]
-            if z3.is_bv(x) and x.decl().kind() == z3.Z3_OP_BADD and x.num_args() == 2:
-                a, b = x.arg(0), x.arg(1)
-                if z3.is_bv_value(a): a, b = b, a
-                if a.eq(eip) and z3.is_bv_value(b) and 0 <= b.as_long() <= 16:
-                    pairs[t.get_id()] = (t, z3.ZeroExt(t.size() - 32, eip) + z3.BitVecVal(b.as_long(), t.size()))
-    return [z3.simplify(z3.substitute(t, *pairs.values())) if pairs else t for t in terms]
+        zb = zext_base(t)
+        if zb is None or not z3.is_bv(zb[0]) or zb[0].decl().kind() != z3.Z3_OP_BADD or zb[0].num_args() != 2: continue
+        x = zb[0]; a, b = x.arg(0), x.arg(1)
+        if z3.is_bv_value(a): a, b = b, a
+        inner = zext_base(a)
+        if inner is None or not z3.is_bv_value(b): continue
+        e, n = inner; W = x.size(); V = t.size()
+        if n < W and b.as_long() < (1 << W) - (1 << n): pairs[t.get_id()] = (t, z3.ZeroExt(V - n, e) + z3.BitVecVal(b.as_long(), V))
+    return pairs
+
+def eip_nowrap(terms, eip):
+    """rewrite of model terms under the domain eip < EIP_LIMIT (every query of a shape run assumes it): the 32-bit sum eip + K (K a small constant: the
+    offsets of the bytes of ONE instruction) zero-extended to a wider sort equals the wide sum zext(eip) + K, because eip + K < 2^32 cannot wrap.
+    Without it z3 cannot see that the fetch index (rip + offset) - code_base is a constant and bit-blasts the 128-bit shifts of code_bytes.
+    Also the unconditional zext_add_pairs identity.  terms -> simplified terms with every `zero_extend(eip + K)` / `concat(0, eip + K)` replaced"""
+    terms = [z3.simplify(t) for t in terms]
+    while True:                                      # each rewrite can expose the other's pattern; terminates: every round removes a zero-extended sum
+        pairs, seen, st = {}, set(), list(terms)
+        while st:
+            t = st.pop()
+            if t.get_id() in seen: continue
+            seen.add(t.get_id()); ch = t.children(); st.extend(ch)
+            k = t.decl().kind()
+            if k in (z3.Z3_OP_CONCAT, z3.Z3_OP_ZERO_EXT) and z3.is_bv(t) and (len(ch) == 1 or (z3.is_bv_value(ch[0]) and ch[0].as_long() == 0)):
+                x = ch[-1]
+                if z3.is_bv(x) and x.decl().kind() == z3.Z3_OP_BADD and x.num_args() == 2:
+                    a, b = x.arg(0), x.arg(1)
+                    if z3.is_bv_value(a): a, b = b, a
+                    if a.eq(eip) and z3.is_bv_value(b) and 0 <= b.as_long() <= 16:
+                        pairs[t.get_id()] = (t, z3.ZeroExt(t.size() - 32, eip) + z3.BitVecVal(b.as_long(), t.size()))
+        for i, pr in zext_add_pairs(terms).items(): pairs.setdefault(i, pr)
+        if not pairs: return terms
+        terms = [z3.simplify(z3.substitute(t, *pairs.values())) for t in terms]
 
 def _post(code, pre, out_err, extra, extra_assume=None):
     out, err = out_err; blocks = split_blocks(out); ok, bad = [], []
@@ -321,7 +354,10 @@ def _post(code, pre, out_err, extra, extra_assume=None):
             'mem': merge(paths, lambda p: p.mem), 'eip': merge(paths, lambda p: p.eip)}
     asm = [s for p in paths for s in p.side]
     LAST.clear(); LAST.update(paths=len(ok), fault_paths=len(faults))
-    if faults: asm.append(z3.Not(z3.Or(*[run_path('f%d' % i, tr, pre, seg_adj, True, extra).pc for i, tr in enumerate(faults)])))
+    side = list(asm); nofault = None
+    if faults: nofault = z3.Not(z3.Or(*[run_path('f%d' % i, tr, pre, seg_adj, True, extra).pc for i, tr in enumerate(faults)])); asm.append(nofault)
     if asm: ret['assume'] = z3.And(*asm)
+    ret['side'] = z3.And(*side) if side else z3.BoolVal(True)       # closed constraints on free values (undefined / nondeterministic results): satisfiable for every pre-state iff satisfiable at all
+    ret['nofault'] = nofault if nofault is not None else z3.BoolVal(True)       # the pre-state conditions under which the model does not fault
     if extra_assume is not None: ret['domain'] = extra_assume
     return ret

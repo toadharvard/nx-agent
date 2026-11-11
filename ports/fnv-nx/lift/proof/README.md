@@ -87,6 +87,14 @@ count >= 2) are spliced in by `sail_build.sh` (default; `x86_proof.ir` sha256 55
 (sha256 1de1cdc6...). `test/rothost.py` compares the patched model with the native host exhaustively (8/16-bit rol ror rcl rcr shl shr sar, all values x counts 0..255 x
 CF-in, cl and imm8 forms, second pre-flag pattern too): 488,112,128 cases, diff 0 on every SDM-defined output; `mfree` = model leaves a defined output
 undefined (shl/shr/sar CF beyond the width), `undef-info` = host value of an SDM-undefined output differing from the model's.
+Third patch (L3b, `sail_patches/bt_bitnumber.sail`): `x86_bt_0f_a3` (BT r/m, r with a memory operand) took `bitnumber = mod(abs(signed(offset)), 8)` while the byte
+address is `floor(offset / 8)`: for a negative offset it selected the mirror bit (offset -1: bit 1 of byte -1; SDM and hardware: bit 7). The patch uses
+`offset - 8 * floor2(offset, 8)`. The SDM says the addressed unit is `EA + size/8 * (BitOffset DIV size)` and the bit `BitOffset MOD size` (floor); `test/bthost.py` runs the real
+instruction on the host (bt/bts/btr/btc, m16 and m32, register offset, memory window compared byte by byte, two memory patterns) against the DSL: m16 all 2^16 offsets,
+m32 a class cover (all 32 residues x q in -4096..4095 and every power-of-two boundary up to 2^26 and both extremes), 2,642,944 cases, 0 disagreements; the stock formula
+disagrees with the host in 123,756 of the bt cases. The DSL (and the hand emitter `fnvlift/f_int.py bitstr`, which uses the same word-wise rule) is right. The model implements only 0F A3 and 0F BA /4 of the bit group;
+0F AB/B3/BB and 0F BA /5../7 are `Opcode Unimplemented` (model-gap, so bts/btr/btc shapes cannot be certified against it: their DSL is checked on the host only), 0F BA /4 takes the
+bit index mod size from an 8-bit immediate (no sign issue). The IR is now sha256 e436ee6f... (10,389,445 B).
 Gate with the patched IR (forms.py md5 5ba2bb32...): proved 358, FAILED 33 (rol/ror OF at masked count 0, shl/shr/sar CF beyond the width), model-gap 2.
 
 ### Shape proofs (L3b C1c): the unit is the encoding SHAPE, not one encoding
@@ -108,3 +116,30 @@ Gate with the patched IR (forms.py md5 5ba2bb32...): proved 358, FAILED 33 (rol/
 * **Obligation** = `prove.prove_one` (imported); the field variables are free in the unsat query. `shapeprove.py --shard K/N`, farm: `bash ports/fnv-nx/farm/farm_shapeprove.sh K N`.
   `dsl_sha` = `symform.shape_sha(key)` (no z3). Assumptions: A-FLAT, A-EIPRANGE | A-EIP, A-SEGLIM (the model's segment-limit faults, now also
   `:OUT-OF-SEGMENT-INSTRUCTION-POINTER`, are excluded; symcheck counts the relative targets of the image that leave [0, 2^32): 0 expected).
+
+## Gates `forms` and `fpexact` (fnvnx-gate/1, verify/VERDICT.md classes 6 and C)
+Both read their private inputs the way verify/gate_contract.py does: declared as content-pinned externals of fnv-nx-build, loaded by `recipe.fetch_externals`
+from `ports/fnv-nx/verify` (sibling of lift/; a lift-only branch has no verify/, so the gates are red with that reason and the tests overlay it through
+`FNVNX_TEST_VERIFY`). No path arguments, no environment variables other than the verdict's `GATE_OUT` / `GATE_CACHE`. A missing or invalid input is RED with the reason.
+* `formgate.py` (gate `forms`): universe = the shapes of `shapes.tsv` in the external `liftpack` (`shape_key<TAB>family<TAB>count`, sorted); certificates = `certs.tsv`
+  of the external `certs` (fnv-nx-build `l3b-lift/certs`). Inputs: `formgate_inputs.json` (`fnvnx-forms-inputs/1`; `model_sha256` must equal the `x86_proof.ir` pin of
+  `sail_pins.txt`). A shape is certified iff a `proved` row of the pinned model carries the dsl_sha the current code gives. Today the file declares no `liftpack`:
+  red, `inputs: external liftpack not declared` (the docstring says what to add). Tests: `tests/test_formgate.py` (local bare repos as externals).
+* `gate_fpexact.py` (gate `fpexact`): per admitted product root (gate_build.quantify convention, no root = universe 0 green): the rcp/rsqrt certificate, no A64
+  estimate instruction, float->int conversions only in marked helpers (plugin `toolchain/f2i_check/fnvnx_f2i_check.cc`, result file `obj/<unit>.o.f2i.json`), and the item
+  `<root>:forms` = the gate forms is green (the helpers' correctness is the form certificates'; evaluated by calling `formgate.judge`, since each gate has its own GATE_OUT).
+  Tests: `tests/test_fpexact.py`.
+
+### Why the first 340-shape measurement timed out, and the rules that closed it (L3b)
+Measured causes (12 shapes: `mov m32,r32` x5, `mov m16,r16` x2, `mov m32,imm`, `imul r32,m32`, `imul r32,r32,imm`, `div m32`, `div r32`): not the isla path count (1-3 paths) but the queries.
+* Fetch offsets: the model reads displacement / immediate bytes of the instruction window with 128-bit `lshr` by `8 * ((code_base + K) - (rip + K))`, the sums formed at 48 or 64 bits.
+  `model_sail.zext_add_pairs`: `Z_V(c + Z_W(e)) = c + Z_V(e)` for a constant `c < 2^W - 2^n` (the sum cannot wrap), unconditional; with the existing eip rule, applied to a fixpoint (each exposes the other),
+  the shift amount becomes a constant and the window read a plain extract. Closed: every `mov`/`imul` timeout.
+* One query per output: `prove.check` solves `assume AND ci` for each differing output (one register, one flag, the memory, eip) instead of one query over the disjunction (a complete split: unsat iff all are).
+* SIB scale: the DSL has `index * 8`, the model a shift; `rewrite.pow2_mul` turns `x * 2^k` into the wiring `concat(x[w-1-k:0], 0^k)` on both sides.
+* Division: the model computes the remainder as `a - b * floor(a / b)`, the DSL as `bvurem`; z3 cannot relate them (the identity is `unknown` after 60 s even at 16 bits).
+  `rewrite.div_norm`: `bvurem(a, b) = If(b = 0, a, a - b * bvudiv(a, b))`, the SMT-LIB definition, and truncation of `+ - *` distributes (`Extract(h, 0, a op b) = Extract(h, 0, a) op Extract(h, 0, b)`).
+* The fault-equivalence check ("no DSL fault implies the model does not fault") negated the full `assume`, which also holds closed constraints on the model's free values (`0 <= v` of an Int that stands for an
+  undefined result), so it was satisfiable by choosing `v < 0`. The model now returns `side` (those closed constraints) and `nofault` (the pre-state condition); the check negates `nofault` and requires
+  `side` satisfiable once (a closed formula over free values is satisfiable for every pre-state iff it is satisfiable).
+All rewrites are identities of the bit-vector semantics (tests/test_rewrite.py checks each on 8/16-bit instances for all inputs); none changes what is proved.

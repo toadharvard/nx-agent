@@ -68,7 +68,15 @@ def post_of(F):
     return r
 
 def check(conds, assume, args):
-    s = z3.Solver(); s.set('timeout', int(args.timeout * 1000)); s.add(assume); s.add(z3.Or(conds) if conds else z3.BoolVal(False)); return s.check(), s
+    """assume AND (c1 OR ... OR cn) is checked as the n queries assume AND ci, one after the other (a complete case split of the disjunction: the disjunction is unsat iff
+    every ci is; a sat ci gives a model of the whole).  Each query is much smaller than the disjunction (one register / flag / the memory), which the solver
+    decides in seconds where the disjunction takes minutes.  -> (sat, solver with the model) | (unknown, s) at the first query that times out | (unsat, s)"""
+    s = z3.Solver(); s.set('timeout', int(args.timeout * 1000)); s.add(assume)
+    for c in conds:
+        s.push(); s.add(c); r = s.check()
+        if r != z3.unsat: return r, s
+        s.pop()
+    return z3.unsat, s
 
 def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     """-> (result, note, certificate extras).  Shape proofs (shapeprove.py) pass pre = a pre-state with a symbolic eip, model = a thunk returning the model
@@ -78,12 +86,16 @@ def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     drv = False; M = model() if model else mod.model_post(code, pre); memo = {}; domain = M.pop('domain', z3.BoolVal(True))    # domain: restriction of the pre-state by construction (shape runs: eip range), not a model fault
     M = {k: (rewrite.narrow_div(v, memo) if not isinstance(v, dict) else {n: rewrite.narrow_div(t, memo) for n, t in v.items()}) for k, v in M.items()}
     D = post_of(F); assume = M.get('assume', z3.BoolVal(True))
+    mm2 = {}; mm3 = {}; fx = lambda v: rewrite.div_norm(rewrite.pow2_mul(v, mm2), mm3)
+    M = {k: (fx(v) if not isinstance(v, dict) else {n: fx(t) for n, t in v.items()}) for k, v in M.items()}; D = {k: (fx(v) if not isinstance(v, dict) else {n: fx(t) for n, t in v.items()}) for k, v in D.items()}
+    assume = M.get('assume', z3.BoolVal(True))
     if not any(b in (0x64, 0x65) for b in code[:defects.prefix_skip(code)]) and any(b in (0x64, 0x65) for b in code[:4]):
         # model_sail.py takes a 0x64/0x65 ModRM/SIB/opcode byte among the first four bytes for an FS/GS prefix and adds a free fs_base/gs_base to every address;
         # with no segment prefix the base is 0 (flat), so those free variables are set to 0 in the model terms
         z0 = [(z3.BitVec('fs_base', 32), z3.BitVecVal(0, 32)), (z3.BitVec('gs_base', 32), z3.BitVecVal(0, 32))]
         M = {k: (z3.substitute(v, *z0) if not isinstance(v, dict) else {n: z3.substitute(t, *z0) for n, t in v.items()}) for k, v in M.items()}
         assume = M.get('assume', z3.BoolVal(True)); drv = True
+    side = M.pop('side', z3.BoolVal(True)); nofault = M.pop('nofault', None)
     assume_d = z3.And(assume, D['fault'] == 0, domain) if F.faults else z3.And(assume, domain)
     probe = z3.BitVec('probe', 32); diffs = []                     # (field, dsl, model, strict difference)
     for r in REGS: diffs.append((r, D['regs'][r], M['regs'][r], z3.And(D['rdefined'][r], D['regs'][r] != M['regs'][r])))
@@ -113,7 +125,8 @@ def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     if r != z3.unsat: return 'timeout', '', extra
     if F.faults:                                                 # the model faults exactly where the DSL does
         r1, _ = check([D['fault'] != 0], z3.And(assume, domain), args); has_mem = 'm' in key.split('|')[1].replace('imm', '')
-        r2 = z3.unsat if has_mem else check([z3.Not(assume)], z3.And(D['fault'] == 0, domain), args)[0]
+        r2 = z3.unsat if has_mem else check([z3.Not(assume if nofault is None else nofault)], z3.And(D['fault'] == 0, domain), args)[0]
+        if not has_mem and nofault is not None and z3.Solver().check(side) != z3.sat: r2 = z3.unknown       # exists free values with `side` (closed): one satisfiability check
         extra['fault_checks'] = 'assume=>no DSL fault: %s; no DSL fault=>assume: %s' % (r1, 'not applicable (memory operand: segment-limit faults)' if has_mem else r2)
         if r1 != z3.unsat or r2 != z3.unsat: return 'FAILED(dsl)', 'fault condition differs: ' + extra['fault_checks'], extra
     if F.writes_unobserved(): return 'model-gap', 'post-state of df / other EFLAGS bits is not exposed by the model interface (other fields proved)', extra

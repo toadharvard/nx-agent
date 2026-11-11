@@ -1,11 +1,11 @@
-/* Import entries and native <-> guest transitions (included after fnvl.h by the generated imp.cpp and by enter.c; lifted-code flags).
+/* Import entries and native <-> guest transitions (included after fnvl.h by the generated imp.cpp and by enter.cc; lifted-code flags).
 
    An import entry I_<key> is the guest entry of one row of the bridge table (tools/impgen.py): arguments from the guest stack by the row's
    prototype, the native call under the AAPCS, the result into eax / edx:eax / ST0, `ret N` applied, c->ra = the popped return address.
 
    While native code runs:
    - c->r[0..7] hold the guest registers of the import call (esp = the address of the return address). A callback into guest code
-     (fnvnx_guest_invoke, enter.c) starts from them and pushes below that esp.
+     (fnvnx_guest_invoke, enter.cc) starts from them and pushes below that esp.
    - the host FPCR is the default (round to nearest, no flush-to-zero); the guest's FPCR and FPSR are parked in c->hfpcr / c->hfpsr and come back on
      return, so native arithmetic neither sees the guest rounding mode nor leaves bits in the guest's sticky flags. A callback runs with the parked
      values and parks what it leaves (an x86 callback's control-word change survives its return).

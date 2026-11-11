@@ -174,12 +174,19 @@ def finish(a):
         len(images), len(texts), len(imp), NBUCKET + 2, res['text_bytes'], max(sum(map(len, u)) for u in units.values()), len(forms), nc, len(h['slots']), h['attempts']))
 
 
+PACK_DROP = ('-c', '-DFNVL_FLAGS_IO')      # instest's own: -c is the recipe's, FNVL_FLAGS_IO makes a test carry the flags in *c
+
+
+def pack_flags(instest_flags):
+    """The flag set of the lifted code, per language: the ONE definition (lift/rt/build.json is checked against it)."""
+    return {'c': ['-mabi=ilp32'], 'cxx': [f for f in instest_flags if f not in PACK_DROP], 'asm': ['-mabi=ilp32', '-fPIC']}
+
+
 def recipe(ref, commit, tree):
     """lift/pack/build.json: the flags are the lifted-code flags of test/instest.py (one source), the units are the fixed names."""
     import instest
-    drop = ('-c', '-DFNVL_FLAGS_IO')
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'cc': 'aarch64-linux-gnu-gcc-13', 'cxx': 'aarch64-linux-gnu-g++-13'},
-           'flags': {'c': ['-mabi=ilp32'], 'cxx': [f for f in instest.FLAGS if f not in drop], 'asm': ['-mabi=ilp32', '-fPIC']},
+           'flags': pack_flags(instest.FLAGS),
            'include': ['/ext/liftpack/inc'], 'units': 'all',
            'generated': [{'tool': 'ports/fnv-nx/lift/tools/packcopy.py', 'args': ['/ext/liftpack', '/out'], 'inputs': [], 'outputs': unit_names()}],
            'link': None,
