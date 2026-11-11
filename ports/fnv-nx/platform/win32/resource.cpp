@@ -138,7 +138,7 @@ int lookup(const Img &im, const Dir &d, const Key &k, uint32_t *off)
     return 0;
 }
 /* the IMAGE_RESOURCE_DATA_ENTRY of (type, name, language) or NULL with the error set */
-const uint8_t *find(const Img &im, Key type, Key name, unsigned lang)
+const uint8_t *find(const Img &im, Key type, Key name, unsigned lang, bool strict = false)   /* strict: only an entry of exactly this language */
 {
     Dir d; uint32_t off;
     if (!open_dir(im, 0, &d)) return NULL;
@@ -158,6 +158,7 @@ const uint8_t *find(const Img &im, Key type, Key name, unsigned lang)
         if (id == 0 && neut < 0) neut = (int)i;
         if ((id & 0x3FF) == 9 && eng < 0) eng = (int)i;
     }
+    if (strict && exact < 0) { SetLastError(1815); return NULL; }   /* ERROR_RESOURCE_LANG_NOT_FOUND */
     int pick = exact >= 0 ? exact : def >= 0 ? def : neut >= 0 ? neut : eng >= 0 ? eng : first;
     if (pick < 0) { SetLastError(1815); return NULL; }
     off = r32(im.b + d.ents + 8 * pick + 4);
@@ -463,6 +464,14 @@ extern "C" void *FindResourceExA(HMODULE m, LPCSTR type, LPCSTR name, WORD lang)
     Img im;
     if (!open_image(m, &im)) return NULL;
     return (void *)find(im, KeyA(type).k, KeyA(name).k, lang & 0xFFFF);
+}
+/* FindResourceEx without the language fallback: the entry of exactly this language (message-table lookup, whose
+ * language is specific; lang 0 keeps the ordinary neutral/default order) */
+extern "C" void *fnvnx_resource_find_exact(HMODULE m, LPCSTR type, LPCSTR name, WORD lang)
+{
+    Img im;
+    if (!open_image(m, &im)) return NULL;
+    return (void *)find(im, KeyA(type).k, KeyA(name).k, lang & 0xFFFF, (lang & 0xFFFF) != 0);
 }
 extern "C" void *FindResourceA(HMODULE m, LPCSTR name, LPCSTR type) { return FindResourceExA(m, type, name, 0); }
 extern "C" void *FindResourceExW(HMODULE m, LPCWSTR type, LPCWSTR name, WORD lang)

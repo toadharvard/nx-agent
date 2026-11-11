@@ -71,6 +71,15 @@ $(P)/win32/nls_tables.inc: $(P)/win32/tools/gen_nls.py
 	python3 $< $(NLS_DIR) $@
 $(OUT)/platform/win32/nls.cpp.o: $(P)/win32/nls_tables.inc
 
+# platform/win32/winerr_msgs.inc (the FormatMessage system message table) is generated from Wine 9.0's
+# dlls/kernelbase/winerror.mc (LGPL; mirrored in the private fnv-nx-build branch tools/mc); MC_DIR=<directory with it>.
+MC_DIR ?= /home/user/gd/wine-mc
+$(P)/win32/winerr_msgs.inc: $(P)/win32/tools/gen_winerr.py
+	@test -f $(MC_DIR)/winerror.mc || { echo "winerr_msgs.inc: set MC_DIR to the directory with Wine 9.0 winerror.mc (fnv-nx-build tools/mc)"; exit 1; }
+	python3 -I $< $(MC_DIR)/winerror.mc $@
+$(OUT)/platform/win32/module.cpp.o: $(P)/win32/winerr_msgs.inc
+$(OUT)-m32/platform/win32/module.cpp.o: $(P)/win32/winerr_msgs.inc
+
 # the constant-result functions (platform/manifest/env_const.tsv), generated per source file that includes them
 ENV_GEN := $(P)/win32/env_const.gen.inc $(P)/crt/env_const.gen.inc $(P)/os/env_const_posix.gen.inc $(P)/os/env_const_horizon.gen.inc
 ENV_SRC := $(P)/manifest/env_const.tsv $(P)/manifest/gen_env_const.py

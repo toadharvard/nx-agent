@@ -706,36 +706,509 @@ extern "C" BOOL GetComputerNameA(LPSTR buf, LPDWORD n)
 
 /* GetEnvironmentVariableA: crt_kernel32.cpp, next to the environment block it reads */
 
-/* FormatMessageA: FROM_SYSTEM yields "Error <n>." (no message tables); FROM_STRING copies the string
- * without insert processing beyond %0. */
+extern "C" void *fnvnx_resource_find_exact(HMODULE, LPCSTR, LPCSTR, WORD);   /* resource.cpp */
+extern "C" void *LoadResource(HMODULE, void *);
+extern "C" DWORD SizeofResource(HMODULE, void *);
+#ifndef ERROR_NO_WORK_DONE
+#define ERROR_NO_WORK_DONE 1237L
+#endif
+#ifndef ERROR_NOT_ENOUGH_MEMORY
+#define ERROR_NOT_ENOUGH_MEMORY 8L
+#endif
+/* ---- FormatMessageA.
+ * Message sources: FROM_STRING (the string wins over the other two), FROM_HMODULE (the RT_MESSAGETABLE resource, name 1,
+ * of the module: how the system finds it), FROM_SYSTEM (the reference environment's English table, generated from
+ * Wine 9.0's winerror.mc into winerr_msgs.inc: language 0x0409 only; an HRESULT of FACILITY_WIN32 with severity error
+ * is folded to its Win32 code first). Formatting follows the Windows 7 rules recorded by Wine's conformance tests
+ * (kernel32/tests/format_msg.c): inserts %1..%99 with optional !printf spec!, %0 ends the text, %n %r %t, %% %. %! %space
+ * give the character, line breaks of the source are CRLF (a space under a width), MAX_WIDTH_MASK wraps at the width.
+ * Arguments are 32-bit words (the ILP32 guest's va_list / DWORD_PTR array); a pointer argument is such a word. */
+#include "winerr_msgs.inc"
+
+namespace {
+struct fm_args {
+    int last;                 /* argument slots fetched so far */
+    const uint32_t *array;    /* ARGUMENT_ARRAY: the array */
+    const uint32_t *list;     /* va_list: the next unread word */
+    bool have;
+    uint64_t slot[102];
+    char *tmp, *conv;         /* FM_TMP bytes each */
+};
+#define FM_TMP 33000
+
+/* the argument slot nr (1-based; -1: the slot after the last fetched); a va_list is read forward as it is needed */
+uint64_t fm_fetch(fm_args *a, int nr, bool is64)
+{
+    if (nr == -1)
+        nr = a->last + 1;
+    while (nr > a->last && a->last < 100) {
+        uint64_t v = *a->list++;
+        if (is64)
+            v |= (uint64_t)*a->list++ << 32;
+        a->slot[a->last++] = v;
+    }
+    return a->slot[nr - 1 < 0 ? 0 : (nr - 1 > 100 ? 100 : nr - 1)];
+}
+
+const char *fm_ptr(uint32_t w) { return (const char *)(uintptr_t)w; }
+
+/* narrow a UTF-16 string / character for the ANSI output */
+void fm_narrow(const WCHAR *w, char *out, size_t n)
+{
+    int k = WideCharToMultiByte(CP_ACP, 0, w, -1, out, (int)n, NULL, NULL);
+    if (k <= 0)
+        out[0] = 0;
+}
+
+/* one insert: %N or %N!spec!; returns false (INVALID_PARAMETER) on a malformed or unsupported spec, or the text overflowing */
+enum { FM_OK, FM_BAD, FM_FULL };
+int fm_insert(char *buf, size_t cap, size_t *pos, const char **srcp, int insert, fm_args *a)
+{
+    const char *f = *srcp;
+    char flags[8] = "";
+    int nflags = 0, width = 0, prec = -1, stars = 0, star_w = 0, star_p = 0;
+    bool wide = false, is64 = false, have_prec = false;
+    char type = 's';
+    if (*f++ == '!') {
+        const char *end = strchr(f, '!');
+        if (!end || end - f > 30)
+            return FM_BAD;
+        *srcp = end + 1;
+        for (; f < end && strchr(" +-#0", *f); f++)
+            if (nflags < 6)
+                flags[nflags++] = *f;
+        flags[nflags] = 0;
+        if (*f == '*') {
+            star_w = ++stars;
+            f++;
+        } else
+            for (; f < end && *f >= '0' && *f <= '9'; f++) {
+                width = width * 10 + (*f - '0');
+                if (width > 32768)
+                    return FM_FULL;
+            }
+        if (f < end && *f == '.') {
+            f++;
+            have_prec = true;
+            prec = 0;
+            if (*f == '*') {
+                star_p = ++stars;
+                f++;
+            } else
+                for (; f < end && *f >= '0' && *f <= '9'; f++) {
+                    prec = prec * 10 + (*f - '0');
+                    if (prec > 32768)
+                        return FM_FULL;
+                }
+        }
+        if (stars > 2)
+            return FM_BAD;
+        /* size prefix: h l ll w I I32 I64 */
+        if (f < end && *f == 'h') { wide = false; f++; }
+        else if (f < end && *f == 'l') { wide = true; f++; if (f < end && *f == 'l') { is64 = true; f++; } }
+        else if (f < end && *f == 'w') { wide = true; f++; }
+        else if (f < end && *f == 'I') {
+            f++;
+            if (end - f >= 2 && f[0] == '6' && f[1] == '4') { is64 = true; f += 2; }
+            else if (end - f >= 2 && f[0] == '3' && f[1] == '2') f += 2;
+        }
+        if (f + 1 != end || !strchr("cCsSdiuxXop", *f))
+            return FM_BAD;
+        type = *f;
+        if (type == 'S' || type == 'C')
+            wide = true;   /* in an ANSI message %S / %C are the wide forms */
+    }       /* "%N": the string argument, *srcp stays at the character after the number */
+    if (!a->have)
+        return FM_BAD;
+    /* the printf argument vector: star values, then the value (see the model in the tests: Windows' slot rules) */
+    uint64_t av[3];
+    int nav = 0;
+    if (a->list) {
+        fm_fetch(a, insert - 1, is64);
+        int use = insert;
+        for (int i = 0; i < stars; i++, use = -1)
+            av[nav++] = fm_fetch(a, use, false);
+        if (use == -1)
+            a->last--;      /* Windows drops one slot after a star: the value is the next word */
+        av[nav++] = fm_fetch(a, use, is64);
+    } else {
+        if (insert > 99)
+            return FM_BAD;
+        av[nav++] = a->array[insert - 1];
+        if (a->last < insert)
+            a->last = insert;
+        for (int i = 0; i < stars; i++)
+            av[nav++] = a->array[a->last++];
+    }
+    /* when stars are used the first arguments are width/precision */
+    int vi = 0;
+    if (star_w) {
+        int w = (int)(int32_t)(uint32_t)av[vi++];
+        if (w < 0) {
+            if (nflags < 6) flags[nflags++] = '-';
+            flags[nflags] = 0;
+            w = -w;
+        }
+        width = w;
+    }
+    if (star_p) {
+        int p = (int)(int32_t)(uint32_t)av[vi++];
+        prec = p < 0 ? -1 : p;
+        have_prec = p >= 0;
+    }
+    uint64_t val = av[vi];
+    char *tmp = a->tmp, *conv = a->conv;
+    const size_t TN = FM_TMP;
+    char fmt[24];
+    int n = 0;
+    switch (type) {
+    case 'd': case 'i':
+        snprintf(fmt, sizeof fmt, "%%%s*.*%s", flags, is64 ? "lld" : "d");
+        n = is64 ? snprintf(tmp, TN, fmt, width, have_prec ? prec : -1, (long long)val)
+                 : snprintf(tmp, TN, fmt, width, have_prec ? prec : -1, (int)(int32_t)(uint32_t)val);
+        break;
+    case 'u': case 'x': case 'X': case 'o':
+        snprintf(fmt, sizeof fmt, "%%%s*.*%s%c", flags, is64 ? "ll" : "", type);
+        n = is64 ? snprintf(tmp, TN, fmt, width, have_prec ? prec : -1, (unsigned long long)val)
+                 : snprintf(tmp, TN, fmt, width, have_prec ? prec : -1, (unsigned)(uint32_t)val);
+        break;
+    case 'p':
+        snprintf(fmt, sizeof fmt, "%%%s*.*s", flags);
+        snprintf(conv, FM_TMP, "%08X", (unsigned)(uint32_t)val);
+        n = snprintf(tmp, TN, fmt, width, -1, conv);
+        break;
+    case 'c': case 'C': {
+        char one[8];
+        if (wide) {
+            WCHAR w2[2] = { (WCHAR)(uint16_t)val, 0 };
+            fm_narrow(w2, one, sizeof one);
+        } else {
+            one[0] = (char)val;
+            one[1] = 0;
+        }
+        snprintf(fmt, sizeof fmt, "%%%s*s", flags);
+        n = snprintf(tmp, TN, fmt, width, one[0] ? one : "");
+        if (!one[0] && n >= 0) {            /* a NUL character prints as nothing, its field is still padded */
+            n = snprintf(tmp, TN, fmt, width, "");
+        }
+        break;
+    }
+    default: { /* 's' 'S' */
+        const char *s;
+        if (wide) {
+            const WCHAR *w = (const WCHAR *)(uintptr_t)(uint32_t)val;
+            if (!w)
+                s = "(null)";
+            else {
+                fm_narrow(w, conv, FM_TMP);
+                s = conv;
+            }
+        } else
+            s = val ? fm_ptr((uint32_t)val) : "(null)";
+        snprintf(fmt, sizeof fmt, "%%%s*.*s", flags);
+        n = snprintf(tmp, TN, fmt, width, have_prec ? prec : -1, s);
+        break;
+    }
+    }
+    if (n < 0 || (size_t)n >= TN || *pos + (size_t)n > cap - 1)
+        return FM_FULL;
+    memcpy(buf + *pos, tmp, (size_t)n);
+    *pos += (size_t)n;
+    return FM_OK;
+}
+
+/* the text of the message with its inserts; returns FM_OK, FM_BAD or FM_FULL; the result in buf (NUL-terminated) */
+int fm_format(const char *src, unsigned long width, bool ignore_inserts, fm_args *a, char *buf, size_t cap)
+{
+    size_t pos = 0, line = 0;
+    long space = -1;                      /* the last space of the line, -1: none */
+    auto put = [&](const char *s, size_t k) -> bool {
+        if (k > cap - pos)
+            return false;
+        memcpy(buf + pos, s, k);
+        pos += k;
+        return true;
+    };
+    for (; *src; src++) {
+        bool ok = true;
+        switch (*src) {
+        case '\r':
+            if (src[1] == '\n')
+                src++;
+            /* fall through */
+        case '\n':
+            if (!width) {
+                ok = put("\r\n", 2);
+                line = pos;
+                space = -1;
+                break;
+            }
+            /* fall through */
+        case ' ':
+            space = (long)pos;
+            ok = put(" ", 1);
+            break;
+        case '\t':
+            if (space == (long)pos - 1)
+                space = (long)pos;
+            ok = put("\t", 1);
+            break;
+        case '%':
+            src++;
+            switch (*src) {
+            case 0:
+                return FM_BAD;
+            case 't':
+                if (!width) {
+                    ok = put("\t", 1);
+                    break;
+                }
+                /* fall through */
+            case 'n':
+                ok = put("\r\n", 2);
+                line = pos;
+                space = -1;
+                break;
+            case 'r':
+                ok = put("\r", 1);
+                line = pos;
+                space = -1;
+                break;
+            case '0':
+                while (src[1])
+                    src++;
+                break;
+            case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
+                if (!ignore_inserts) {
+                    int nr = *src++ - '0';
+                    if (*src >= '0' && *src <= '9')
+                        nr = nr * 10 + *src++ - '0';
+                    int r = fm_insert(buf, cap, &pos, &src, nr, a);
+                    if (r)
+                        return r;
+                    src--;
+                    break;
+                }
+                /* fall through */
+            default:
+                ok = ignore_inserts ? put(src - 1, 2) : put(src, 1);
+                break;
+            }
+            break;
+        default:
+            ok = put(src, 1);
+            break;
+        }
+        if (!ok)
+            return FM_FULL;
+        if (width && pos - line >= width) {
+            long diff = 2;
+            size_t sp, next;
+            if (space >= 0) {                         /* split at the last space */
+                sp = (size_t)space;
+                next = sp + 1;
+                while (sp > line && (buf[sp - 1] == ' ' || buf[sp - 1] == '\t'))
+                    sp--;
+                diff -= (long)(next - sp);
+            } else
+                sp = next = pos;                      /* split at the end */
+            if (diff > 0 && cap - pos < (size_t)diff)
+                return FM_FULL;
+            memmove(buf + sp + 2, buf + next, pos - next);
+            pos = (size_t)((long)pos + diff);
+            memcpy(buf + sp, "\r\n", 2);
+            line = sp + 2;
+            space = -1;
+        }
+    }
+    if (pos >= cap)
+        return FM_FULL;
+    buf[pos] = 0;
+    return FM_OK;
+}
+
+/* a message-table entry {USHORT Length, USHORT Flags, text}: copy the text as ANSI into out */
+bool fm_entry_text(const uint8_t *e, const uint8_t *end, char *out, size_t n)
+{
+    if (end - e < 4)
+        return false;
+    unsigned len = e[0] | (e[1] << 8), flags = e[2] | (e[3] << 8);
+    if (len < 4 || (size_t)(end - e) < len)
+        return false;
+    size_t tl = len - 4;
+    if (flags & 1) {                                  /* UTF-16 */
+        size_t k = tl / 2;
+        WCHAR *w = (WCHAR *)malloc((k + 1) * 2);
+        if (!w)
+            return false;
+        memcpy(w, e + 4, k * 2);
+        w[k] = 0;
+        fm_narrow(w, out, n);
+        free(w);
+    } else {
+        size_t k = tl < n - 1 ? tl : n - 1;
+        memcpy(out, e + 4, k);
+        out[k] = 0;
+    }
+    return true;
+}
+
+/* RT_MESSAGETABLE of a module: resource name 1, the language asked for; error codes as RtlFindMessage maps them */
+DWORD fm_find_module(HMODULE m, DWORD lang, DWORD id, char *out, size_t n)
+{
+    if (!m)
+        m = GetModuleHandleA(NULL);
+    SetLastError(ERROR_SUCCESS);
+    void *r = fnvnx_resource_find_exact(m, (LPCSTR)(uintptr_t)11 /* RT_MESSAGETABLE */, (LPCSTR)(uintptr_t)1, (WORD)(lang & 0xFFFF));
+    if (!r)
+        return GetLastError() ? GetLastError() : 1814;
+    const uint8_t *d = (const uint8_t *)LoadResource(m, r);
+    DWORD sz = SizeofResource(m, r);
+    if (!d || sz < 4)
+        return 1814;
+    const uint8_t *end = d + sz;
+    uint32_t nb = d[0] | (d[1] << 8) | (d[2] << 16) | ((uint32_t)d[3] << 24);
+    if (nb > (sz - 4) / 12)
+        return 1812; /* ERROR_RESOURCE_DATA_NOT_FOUND */
+    for (uint32_t i = 0; i < nb; i++) {
+        const uint8_t *b = d + 4 + 12 * i;
+        uint32_t lo = b[0] | (b[1] << 8) | (b[2] << 16) | ((uint32_t)b[3] << 24);
+        uint32_t hi = b[4] | (b[5] << 8) | (b[6] << 16) | ((uint32_t)b[7] << 24);
+        uint32_t off = b[8] | (b[9] << 8) | (b[10] << 16) | ((uint32_t)b[11] << 24);
+        if (id < lo || id > hi)
+            continue;
+        if (off >= sz)
+            return 1812;
+        const uint8_t *e = d + off;
+        for (uint32_t k = id - lo; k; k--) {
+            if (end - e < 4)
+                return 1812;
+            e += e[0] | (e[1] << 8);
+            if (e > end)
+                return 1812;
+        }
+        return fm_entry_text(e, end, out, n) ? 0 : 1812;
+    }
+    return 317; /* ERROR_MR_MID_NOT_FOUND */
+}
+
+/* the system table: language 0x0409 only (a specific other language has no message: ERROR_RESOURCE_LANG_NOT_FOUND) */
+DWORD fm_find_system(DWORD lang, DWORD id, char *out, size_t n)
+{
+    if (lang != 0 && lang != 0x0409)
+        return 1815;
+    if ((id >> 31) == 1 && ((id >> 16) & 0x1FFF) == 7)         /* an error HRESULT of FACILITY_WIN32 */
+        id &= 0xFFFF;
+    size_t lo = 0, hi = sizeof g_sysmsg_ids / sizeof *g_sysmsg_ids;
+    while (lo < hi) {
+        size_t mid = (lo + hi) / 2;
+        if (g_sysmsg_ids[mid] < id)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    if (lo == sizeof g_sysmsg_ids / sizeof *g_sysmsg_ids || g_sysmsg_ids[lo] != id)
+        return 317;
+    snprintf(out, n, "%s", g_sysmsg_text + g_sysmsg_off[lo]);
+    return 0;
+}
+}   // namespace
+
+static DWORD fm_message(DWORD, LPCVOID, DWORD, DWORD, LPSTR, DWORD, void *, char *, char *, char *, char *, unsigned long);
+
 extern "C" DWORD FormatMessageA(DWORD flags, LPCVOID src, DWORD id, DWORD lang, LPSTR buf, DWORD n, void *args)
 {
-    W32_UNUSED(lang);
-    W32_UNUSED(args);
     flags = W32_DW(flags);
-    char msg[512];
-    if (flags & FORMAT_MESSAGE_FROM_STRING) {
-        snprintf(msg, sizeof msg, "%s", src ? (const char *)src : "");
-        char *z = strstr(msg, "%0");
-        if (z)
-            *z = 0;
-    } else {
-        snprintf(msg, sizeof msg, "Error %lu.\r\n", (unsigned long)W32_DW(id));
-    }
-    DWORD len = (DWORD)strlen(msg);
+    id = W32_DW(id);
+    lang = W32_DW(lang);
+    n = W32_DW(n);
     if (flags & FORMAT_MESSAGE_ALLOCATE_BUFFER) {
-        char *p = (char *)LocalAlloc(0, (len + 1 > W32_DW(n) ? len + 1 : W32_DW(n)));
-        if (!p)
+        if (!buf) {
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
             return 0;
-        memcpy(p, msg, len + 1);
-        *(char **)buf = p;
-        return len;
+        }
+        *(char **)buf = NULL;
     }
-    if (W32_DW(n) <= len) {
+    if (n >= 32768) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+    unsigned long width = flags & 0xff;
+    if (width == 0xff)
+        width = ~0ul;
+    struct fm_work { char text[32768], out[32768], tmp[FM_TMP], conv[FM_TMP]; };
+    fm_work *wk = (fm_work *)malloc(sizeof *wk);
+    if (!wk) {
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return 0;
+    }
+    DWORD ret = fm_message(flags, src, id, lang, buf, n, args, wk->text, wk->out, wk->tmp, wk->conv, width);
+    free(wk);
+    return ret;
+}
+
+static DWORD fm_message(DWORD flags, LPCVOID src, DWORD id, DWORD lang, LPSTR buf, DWORD n, void *args, char *text, char *out, char *tmp, char *conv, unsigned long width)
+{
+    const char *msg;
+    if (flags & 0x400 /* FROM_STRING */) {
+        if (!src) {                                   /* documented as a fault: no text to format */
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return 0;
+        }
+        msg = (const char *)src;
+    } else {
+        DWORD e = ERROR_INVALID_PARAMETER;
+        if (flags & 0x800 /* FROM_HMODULE */)
+            e = fm_find_module((HMODULE)src, lang, id, text, 32768);
+        if (e && (flags & FORMAT_MESSAGE_FROM_SYSTEM))
+            e = fm_find_system(lang, id, text, 32768);
+        if (e) {
+            SetLastError(e);
+            return 0;
+        }
+        msg = text;
+    }
+    fm_args a;
+    memset(&a, 0, sizeof a);
+    a.tmp = tmp;
+    a.conv = conv;
+    if (args) {
+        a.have = true;
+        if (flags & 0x2000 /* ARGUMENT_ARRAY */)
+            a.array = (const uint32_t *)args;
+        else
+            a.list = *(const uint32_t *const *)args;
+    }
+    /* the message may live in text[]: the result goes to out[] */
+    int r = fm_format(msg, width, (flags & FORMAT_MESSAGE_IGNORE_INSERTS) != 0, &a, out, 32768);
+    if (r == FM_FULL) {
         SetLastError(ERROR_INSUFFICIENT_BUFFER);
         return 0;
     }
-    memcpy(buf, msg, len + 1);
+    if (r) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+    DWORD len = (DWORD)strlen(out);
+    if (!len) {
+        SetLastError(ERROR_NO_WORK_DONE);
+        return 0;
+    }
+    if (flags & FORMAT_MESSAGE_ALLOCATE_BUFFER) {
+        char *p = (char *)LocalAlloc(0x40 /* LMEM_ZEROINIT */, len + 1 > n ? len + 1 : n);
+        if (!p) {
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            return 0;
+        }
+        memcpy(p, out, len + 1);
+        *(char **)buf = p;
+        return len;
+    }
+    if (len + 1 > n) {
+        SetLastError(ERROR_INSUFFICIENT_BUFFER);
+        return 0;
+    }
+    memcpy(buf, out, len + 1);
     return len;
 }
 

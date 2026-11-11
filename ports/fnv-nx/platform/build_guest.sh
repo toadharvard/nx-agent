@@ -8,6 +8,7 @@
 #             Default: $DEVKITPRO/devkitA64.
 # GUEST_RT    directory holding libfnvnx-guest.a (toolchain/guest/build.sh output). Default: built here with
 #             toolchain/guest/build.sh into <out>/rt (the runtime is three small C files).
+# MC_DIR      directory with Wine 9.0 dlls/kernelbase/winerror.mc for platform/win32/winerr_msgs.inc (default /home/user/gd/wine-mc; mirror: fnv-nx-build tools/mc).
 # NLS_DIR     Wine 9.0 nls directory for platform/win32/nls_tables.inc (default /home/user/gd/nls; mirror: fnv-nx-build tools/nls).
 # LIBNX_INC   libnx's include directory (headers only; sockets declarations of winsock.cpp).
 # EXT         directory with freetype/ (win32/tools/fetch_freetype.sh; mirror tools/freetype) and minimp3/ (mirror tools/minimp3;
@@ -97,6 +98,14 @@ NLS_INC=$HERE/win32/nls_tables.inc
 if [ ! -f "$NLS_INC" ] || [ "$HERE/win32/tools/gen_nls.py" -nt "$NLS_INC" ]; then
     [ -f "$NLS_DIR/locale.nls" ] || { echo "build_guest: nls_tables.inc: set NLS_DIR to the Wine 9.0 nls directory"; exit 2; }
     python3 -I "$HERE/win32/tools/gen_nls.py" "$NLS_DIR" "$NLS_INC"
+fi
+
+# ---- generated system message table of FormatMessage (rule of tests/s4/Makefile)
+MC_DIR=${MC_DIR:-/home/user/gd/wine-mc}
+MC_INC=$HERE/win32/winerr_msgs.inc
+if [ ! -f "$MC_INC" ] || [ "$HERE/win32/tools/gen_winerr.py" -nt "$MC_INC" ]; then
+    [ -f "$MC_DIR/winerror.mc" ] || { echo "build_guest: winerr_msgs.inc: set MC_DIR to the directory with Wine 9.0 winerror.mc"; exit 2; }
+    python3 -I "$HERE/win32/tools/gen_winerr.py" "$MC_DIR/winerror.mc" "$MC_INC"
 fi
 
 # ---- generated sources of a fresh checkout: the constant-result bodies (platform/manifest/env_const.tsv: one .inc per file
