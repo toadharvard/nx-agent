@@ -109,8 +109,8 @@ static bool is_memory_ref(tree t) {
     case MEM_REF: case TARGET_MEM_REF: case COMPONENT_REF: case ARRAY_REF: case ARRAY_RANGE_REF:
     case BIT_FIELD_REF: case REALPART_EXPR: case IMAGPART_EXPR: case VIEW_CONVERT_EXPR:
       return true;
-    case VAR_DECL:   // a global register variable (`register T v asm("xN")`) is a machine register: it has no address and is no memory
-      return !DECL_HARD_REGISTER(t) && (TREE_STATIC(t) || DECL_EXTERNAL(t) || TREE_ADDRESSABLE(t));
+    case VAR_DECL:
+      return TREE_STATIC(t) || DECL_EXTERNAL(t) || TREE_ADDRESSABLE(t);
     default:
       return false;
   }
@@ -230,8 +230,7 @@ static void order_builtin_call(gimple_stmt_iterator *gsi, gcall *call) {
     if (!known || spec.arg_maybe_written_p(i)) wr = true;
   }
   if (wr) { gsi_insert_before(gsi, fence(MEMMODEL_RELEASE), GSI_SAME_STMT); cur->fence_st++; }
-  // a call that does not return (__builtin_longjmp, __builtin_trap, ...) reads nothing afterwards: no statement follows it, so no acquire fence
-  if (rd && !(gimple_call_flags(call) & ECF_NORETURN)) fence_after(gsi, MEMMODEL_ACQUIRE);
+  if (rd) fence_after(gsi, MEMMODEL_ACQUIRE);
 }
 
 // one statement. Every memory operand is classified (local or read-only: plain; else ordered or fenced); a statement
