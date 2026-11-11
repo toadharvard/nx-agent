@@ -202,8 +202,11 @@ def main():
     ids = [i for i in ids if i]
     id_bad = len(ids) == 2 and ids[0] != ids[1]
     keys = universe | extra
-    syms, sizes, loads, d = read_elf(a.elf)
-    table = table_slots(syms, sizes, loads, d)
+    if not os.path.exists(a.elf):
+        table = 'there is no ELF %s (the link stage makes none when it is red)' % os.path.basename(a.elf)
+    else:
+        syms, sizes, loads, d = read_elf(a.elf)
+        table = table_slots(syms, sizes, loads, d)
     if isinstance(table, str):
         n = len(keys)
         unc = ['%08x:no-table' % k for k in sorted(keys)]

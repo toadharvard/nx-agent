@@ -12,10 +12,16 @@ Rules (each violated precondition is a stage error that lists everything it foun
             are an error); its own import directory is followed the same way.  A dll that is found nowhere is an error
             (all such dlls are listed).  Delay-load directories do not add modules (the exe's own delay-load helper binds
             them at run time).  A module is an i386 PE32 DLL image, SectionAlignment 4 KiB (what loader/src/pe.c accepts).
+  total     Base assignment and the table cover EVERY *.dll file of the --dir list that is not a system dll (a module loaded
+            later through LoadLibrary must already have its static base: lifted code is keyed by image address), not
+            only the static closure; a file that is not an i386 PE32 DLL (e.g. a 64-bit dll) is a stage error naming it;
+            the imports of the static modules must be system dlls or found modules (an on-demand module may import a dll nobody provides:
+            its slots are reported as without provider and its LoadLibrary fails).  `static` = in the exe's closure; the others
+            are loadable on demand (loader: fnvnx_module_load).
   order     The Windows rule for static imports: depth first over the import directories in directory order, a module is
             initialised after all modules it imports from.  Assumption (documented Windows behaviour): in a dependency
             cycle the module visited first is initialised last, i.e. an edge back to a module still being visited is not
-            followed.  The table order is this order; it is the mapping order, the init order and the TLS-index order (the
+            followed.  The table order is this order for the static modules, followed by the on-demand ones sorted by name; it is the mapping order, the init order and the TLS-index order (the
             Windows loader numbers TLS indices in map order, which differs; the number is private to the loader and the
             lifted code reads it only through the TLS index word, so nothing depends on which module gets which number).
   bases     Static: modules sorted by lowercase name are placed after the end of the exe image (ImageBase + SizeOfImage
@@ -29,8 +35,8 @@ Rules (each violated precondition is a stage error that lists everything it foun
             export), address at the assigned base (empty for a forwarder), forwarder (empty otherwise), ordinal; one row per
             (export, name) sorted by ordinal then name.  A named export is also reachable as #ordinal (iat.py).
 
-Outputs in OUT: modules.tsv (index, name, sha256, size, preferred base, assigned base, SizeOfImage, has TLS, entry rva; hex
-for addresses), modules.c (`fnvnx_modules[]` + `fnvnx_module_count` for loader/src/modules.c), exports/<name>.tsv per module,
+Outputs in OUT: modules.tsv (sorted by name: name, sha256, size, preferred base, assigned base, SizeOfImage, has TLS, entry rva, static,
+load index; hex for addresses), modules.c (`fnvnx_modules[]` + `fnvnx_module_count` for loader/src/modules.c), exports/<name>.tsv per module,
 iat.tsv (the exe's import slots through iat.py with these modules), imports/<name>.tsv per module (that module's own
 import slots through iat.py: slot, dll, name, kind, value; empty value + kind `none` = no provider).  Exit 1 when an exe
 slot has no value (gate `iat`).  A module's own slots without provider are listed on stdout (the platform's work list):
@@ -224,6 +230,7 @@ class Module:
             raise StageError('%s: not a DLL' % name)
         self.imports = self.pe.import_directory()
         self.base = None
+        self.static = False
         self.relocs = 0
 
 
@@ -238,39 +245,58 @@ def find_file(dirs, name):
     return None
 
 
-def closure(exe, system, dirs):
-    """-> modules in init order (dependencies first), per the rules in the docstring."""
-    mods, order, missing, errors = {}, [], set(), []
+def scan(dirs, system):
+    """Every *.dll file of the --dir list that is not a system dll: {lowercase name: Module}.  The first directory in list
+    order that has a name wins; a file that is not an i386 PE32 DLL image is an error naming it (all are listed)."""
+    mods, errors = {}, []
+    for d in dirs:
+        for f in sorted(os.listdir(d)):
+            name = lower(f)
+            if not name.endswith('.dll') or not os.path.isfile(os.path.join(d, f)) or name in system or name in mods:
+                continue
+            if sum(1 for g in os.listdir(d) if lower(g) == name) > 1:
+                errors.append('%s: %s holds files that differ only in case' % (name, d))
+                continue
+            with open(os.path.join(d, f), 'rb') as fh:
+                data = fh.read()
+            try:
+                mods[name] = Module(name, os.path.join(d, f), data)
+            except StageError as e:
+                errors.append(str(e))
+    if errors:
+        raise StageError('; '.join(errors))
+    return mods
+
+
+def closure(exe, system, mods):
+    """-> (static modules in init order, dependencies first; the rest sorted by name).  Every import of a STATIC module that
+    is not a system dll must be a module of `mods` (all missing ones are listed); an on-demand module whose dll is
+    missing simply has slots without provider (its LoadLibrary fails; listed in the import report)."""
+    order, seen, missing = [], set(), set()
 
     def visit(dll_names):
         for raw in dll_names:
             name = iat.norm_dll(raw)
-            if name in system or name in mods:   # a module still being visited: the cycle edge is not followed
+            if name in system or name in seen:   # a module still being visited: the cycle edge is not followed
                 continue
-            path = find_file(dirs, name)
-            if path is None:
+            if name not in mods:
                 missing.add(name)
                 continue
-            with open(path, 'rb') as fh:
-                data = fh.read()
-            try:
-                m = Module(name, path, data)
-            except StageError as e:
-                errors.append(str(e))
-                continue
-            mods[name] = m
-            visit([d for d, _ in m.imports])
-            order.append(m)
+            seen.add(name)
+            visit([d for d, _ in mods[name].imports])
+            order.append(mods[name])
 
     visit([d for d, _ in exe.import_directory()])
-    if missing or errors:
-        raise StageError('; '.join(errors + (['module not found in any --dir: ' + ', '.join(sorted(missing))] if missing else [])))
-    return order
+    if missing:
+        raise StageError('module not found in any --dir: ' + ', '.join(sorted(missing)))
+    for m in mods.values():
+        m.static = m.name in seen
+    return order + sorted((m for m in mods.values() if not m.static), key=lambda m: m.name)
 
 
-def assign_bases(exe, order):
+def assign_bases(exe, mods):
     cur = (exe.base + exe.size_of_image + ALIGN - 1) & ~(ALIGN - 1)
-    for m in sorted(order, key=lambda m: m.name):
+    for m in sorted(mods, key=lambda m: m.name):
         m.base = cur
         cur = (cur + m.pe.size_of_image + ALIGN - 1) & ~(ALIGN - 1)
         if cur > TOP:
@@ -284,9 +310,9 @@ def c_source(order):
     t = ['/* Generated by contract/modules.py: do not edit.  Game-derived hashes: not for the public tree. */\n',
          '#include "fnvnx_modules.h"\n\n', 'const fnvnx_module_desc fnvnx_modules[] = {\n']
     for m in order:
-        t.append('    {"%s", {%s}, %du, 0x%08xu},\n' % (m.name, ', '.join('0x%02x' % b for b in bytes.fromhex(m.sha256)), m.size, m.base))
+        t.append('    {"%s", {%s}, %du, 0x%08xu, %du},\n' % (m.name, ', '.join('0x%02x' % b for b in bytes.fromhex(m.sha256)), m.size, m.base, int(m.static)))
     if not order:   # C has no zero-size array; the count says there is no entry
-        t.append('    {"", {0}, 0u, 0u}\n')
+        t.append('    {"", {0}, 0u, 0u, 0u}\n')
     t += ['};\n', 'const uint32_t fnvnx_module_count = %du;\n' % len(order)]
     return ''.join(t)
 
@@ -305,13 +331,16 @@ def run(exe_path, bridge_path, dirs, out):
         exe = PE(fh.read(), os.path.basename(exe_path))
     brows, _ = iat.bridge_rows(bridge_path)
     bridge = [(r['dll'], r['name'], r['conv'], r['ordinal']) for r in brows]
-    order = closure(exe, {r['dll'] for r in brows}, dirs)
+    system = {r['dll'] for r in brows}
+    order = closure(exe, system, scan(dirs, system))
     end = assign_bases(exe, order)
     os.makedirs(os.path.join(out, 'exports'), exist_ok=True)
     os.makedirs(os.path.join(out, 'imports'), exist_ok=True)
-    tsv(os.path.join(out, 'modules.tsv'), '# index\tname\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\n' +
-        ''.join('%d\t%s\t%s\t%d\t%08x\t%08x\t%08x\t%d\t%08x\n' % (i, m.name, m.sha256, m.size, m.pe.base, m.base, m.pe.size_of_image,
-                                                                  1 if m.pe.dirs[9][1] else 0, m.pe.entry_rva) for i, m in enumerate(order)))
+    load_index = {m.name: i for i, m in enumerate(m for m in order if m.static)}
+    tsv(os.path.join(out, 'modules.tsv'), '# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\n' +
+        ''.join('%s\t%s\t%d\t%08x\t%08x\t%08x\t%d\t%08x\t%d\t%s\n' % (
+            m.name, m.sha256, m.size, m.pe.base, m.base, m.pe.size_of_image, 1 if m.pe.dirs[9][1] else 0, m.pe.entry_rva,
+            int(m.static), load_index.get(m.name, '')) for m in sorted(order, key=lambda m: m.name)))
     tsv(os.path.join(out, 'modules.c'), c_source(order))
     raw = {}
     for m in order:
@@ -325,7 +354,7 @@ def run(exe_path, bridge_path, dirs, out):
     gatefile.write('iat', len(rows) + len(bad), len(rows), ['%08x %s!%s: %s' % b for b in bad],
                    '%d slots, %d without a value' % (len(rows) + len(bad), len(bad)))
     summary = ['modules %d: range 0x%08x..0x%08x' % (len(order), order and min(m.base for m in order) or 0, end)]
-    summary += ['  %d %s base 0x%08x preferred 0x%08x size 0x%x relocs %d' % (i, m.name, m.base, m.pe.base, m.pe.size_of_image, m.relocs)
+    summary += ['  %d %s base 0x%08x preferred 0x%08x size 0x%x relocs %d static %d' % (i, m.name, m.base, m.pe.base, m.pe.size_of_image, m.relocs, int(m.static))
                 for i, m in enumerate(order)]
     summary.append('exe slots with a value %d of %d' % (len(rows), len(rows) + len(bad)))
     for b in bad:

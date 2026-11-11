@@ -7,13 +7,13 @@
 #include <stdint.h>
 #include <stdio.h>
 
-/* hidden: the code takes their addresses PC-relatively (adrp), not through the GOT, which the self-relocation also fills */
+/* volatile: the compiler may not fold the words away; hidden: the code takes their addresses PC-relatively (adrp), not through the GOT, which the self-relocation also fills */
 extern char __end__[] __attribute__((visibility("hidden")));
 extern char __fnvnx_guest_base[] __attribute__((visibility("hidden")));
 
-static char *const past_end = __end__;
-static char *const below_base = __fnvnx_guest_base - 4;
-static char *const inside = __fnvnx_guest_base + 8;
+static char *volatile past_end = __end__;
+static char *volatile below_base = __fnvnx_guest_base - 4;
+static char *volatile inside = __fnvnx_guest_base + 8;
 
 int main(int argc, char **argv) {
     (void)argc; (void)argv;
