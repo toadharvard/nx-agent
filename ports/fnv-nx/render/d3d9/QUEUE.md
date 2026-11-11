@@ -141,3 +141,10 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
 | L4-IF | off-console render interface for L4's boot stage: `nxgl4_ext(fn, args, n)` + `nxgl4_guest_ptr`, frames to NXGL4_FRAMES, `nxgl4_on_present` | proposed to L4, waiting |
 | B5 | virtual clocks in check mode (Wine side L4, guest side L5): menu run1 vs run2 equal 163 927 of 1 345 369, first mismatch seq 12198 SetPixelShaderConstantF | asked L4 |
 | X1 | the 5 exports without a spec signature (DebugSetLevel, DebugSetMute, Direct3DShaderValidatorCreate9, PSGPError, PSGPSampleTexture): the exe names none of them; not exported by us yet | open, does not block the first ELF |
+
+## Seam with the guest (2026-11-11, agreed with L5, L3a, L1)
+
+- COM bridge: `gen/gen_bridge.py` -> 506 rows (497 methods as `!<Interface>` rows by slot, 9 exports `nxb_*`), in L5's bridge.tsv 7f90015; slot values are L1 import keys; guest face in front of every object (`dev/face.h`). L3a generates no proxies.
+- Calls into the guest: only AddRef / Release of application IUnknown private data, through `fnvnx_guest_invoke` (`dev/app_unk_guest.cpp`). L3a's conditions: guest thread only; no lock held across the call.
+- OPEN (no rule yet): the guest may leave `fnvnx_guest_invoke` by a non-local unwind, native frames are then dropped. In `NxObj::setPrivateData` the entry list stays consistent, but the entry allocated before the AddRef call leaks; in object destruction the remaining entries are not released.
+- Owner order relayed by the orchestrator: zero stubs in the tree, gate `nostub` (L4) at absolute 0 for merges into clean. First item when L4's table arrives: remove every stub / no-op / trap path in L6 directories so that absence is a build error; report before -> after. Known candidates: old null device and skip-draw paths, `abort()` on allocation failure in `nxd3d_alloc`.
