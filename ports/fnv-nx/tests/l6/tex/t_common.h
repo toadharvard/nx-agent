@@ -2,6 +2,7 @@
 #pragma once
 #include "d9impl.gen.h"
 #include "res_tex.h"
+#include <initializer_list>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
