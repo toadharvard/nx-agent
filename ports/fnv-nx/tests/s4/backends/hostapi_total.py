@@ -66,6 +66,10 @@ exe = os.path.join(OUT, "host_total_test")
 cmd = [XCC, "-O2", "-static", "-std=gnu11", "-Wall", "-D__SWITCH__", '-DFNVNX_DECL_H="%s"' % os.path.join(OUT, "decl.h"),
        "-I", os.path.join(DKP, "libnx", "include"), "-I", os.path.join(ROOT, "tests", "s4", "ilp32-stubs"),
        "-I", os.path.join(ROOT, "toolchain", "include"), os.path.join(HERE, "host_total_test.c"), "-o", exe, "-lm"]
+r = run([XCC, "-O2", "-c", "-std=gnu11", "-I", os.path.join(ROOT, "toolchain", "include"), os.path.join(HERE, "host_sock_total.c"), "-o", os.path.join(OUT, "host_sock_total.o")])
+if r.returncode:
+    fail("compiling host_sock_total.c: " + r.stderr[-600:])
+cmd.insert(-3, os.path.join(OUT, "host_sock_total.o"))
 r = run(cmd)
 if r.returncode:
     fail("compiling host_total_test.c: " + r.stderr[-600:])

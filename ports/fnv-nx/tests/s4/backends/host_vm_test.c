@@ -1,111 +1,91 @@
-/* host_vm_test.c - VirtualAlloc's device backend (toolchain/host/host_vm.inc) executed under qemu-aarch64 with
- * libnx's svcQueryMemory / svcMapMemory / svcUnmapMemory / virtmem / mutex stubbed over a test arena that stands for
- * the stack region: reservations take no memory, a fixed address is honoured or refused (taken, overlapping, the
- * image window), commits map one zeroed heap block per gap and are idempotent, decommits unmap whole extents and
- * zero partial ones, release unmaps everything and frees the address range. */
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <malloc.h>
-#include <sys/mman.h>
-#include <switch.h>
+/* host_vm_test.c - VirtualAlloc's device backend (toolchain/host/host_vm.inc) executed under qemu-aarch64 against the kernel double
+ * kdouble.h: reservations take no memory, a fixed address is honoured or refused (taken, overlapping, the image window), commits map
+ * one zeroed heap block per gap as a code alias (AliasCodeData, reprotectable) and are idempotent, decommits unmap whole extents (in
+ * any protection) and zero partial ones, release unmaps everything and frees the address range; every range-taking service answers
+ * a range that wraps. Test names (hostapi.h table): vm_reserve, vm_commit, vm_decommit, vm_release. */
+#include "kdouble.h"
+#include "fnvnx/hostapi.h"
 
-#define ARENA (64ull << 20)
-static uint8_t *g_arena;
-static u64 g_busy_lo, g_busy_hi;   /* "someone else's mapping" inside the arena */
-static int g_maps, g_unmaps, g_resv, g_unresv;
-static u64 g_find_next;
-
-void mutexLock(Mutex *m) { (void)m; }
-void mutexUnlock(Mutex *m) { (void)m; }
-void virtmemLock(void) {}
-void virtmemUnlock(void) {}
-void *virtmemFindStack(size_t size, size_t guard)
-{
-    u64 a = (u64)(uintptr_t)g_arena + (32ull << 20) + g_find_next + guard;   /* the upper half of the arena */
-    g_find_next += size + 2 * guard;
-    return a + size <= (u64)(uintptr_t)g_arena + ARENA ? (void *)(uintptr_t)a : NULL;
-}
-VirtmemReservation *virtmemAddReservation(void *mem, size_t size)
-{
-    (void)size;
-    g_resv++;
-    return (VirtmemReservation *)mem;
-}
-void virtmemRemoveReservation(VirtmemReservation *rv) { (void)rv; g_unresv++; }
-Result svcQueryMemory(MemoryInfo *mi, u32 *pi, u64 addr)
-{
-    u64 lo = (u64)(uintptr_t)g_arena, hi = lo + ARENA;
-    memset(mi, 0, sizeof *mi);
-    *pi = 0;
-    if (addr >= g_busy_lo && addr < g_busy_hi) {
-        mi->addr = g_busy_lo; mi->size = g_busy_hi - g_busy_lo; mi->type = MemType_MappedMemory;
-    } else if (addr >= lo && addr < hi) {
-        mi->addr = addr < g_busy_lo ? lo : g_busy_hi;
-        mi->size = (addr < g_busy_lo ? g_busy_lo : hi) - mi->addr;
-        mi->type = MemType_Unmapped;
-    } else {
-        mi->addr = addr & ~0xFFFull; mi->size = 0x1000; mi->type = MemType_Heap;
-    }
-    return 0;
-}
-Result svcMapMemory(void *dst, void *src, u64 size) { g_maps++; memcpy(dst, src, size); return 0; }
-Result svcUnmapMemory(void *dst, void *src, u64 size) { (void)src; g_unmaps++; memset(dst, 0xEE, size); return 0; }
-
+static void logf_(const char *fmt, ...) { (void)fmt; }
+static Handle g_own_process = OWN_HANDLE;
 #include "../../../toolchain/host/host_vm.inc"
-
-static int g_fail;
-#define T(c) do { if (!(c)) { g_fail++; printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #c); } } while (0)
+#undef free
+#undef memalign
+#define B(a) ((volatile uint8_t *)(uintptr_t)(a))
 
 int main(void)
 {
-    g_arena = mmap((void *)0x20000000, ARENA, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-    if (g_arena == MAP_FAILED) g_arena = mmap((void *)0x60000000, ARENA, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);   /* below 4 GiB, as the stack region */
-    T(g_arena != MAP_FAILED);
-    u64 lo = (u64)(uintptr_t)g_arena;
-    lo = (lo + 0xFFFFFF) & ~0xFFFFFFull;   /* 16 MiB step inside the arena (VirtualReservationSearch style) */
-    g_busy_lo = lo + (8ull << 20);
-    g_busy_hi = g_busy_lo + 0x10000;
+    kdouble_init();
+    u64 lo = g_alo + (16ull << 20);   /* a 16 MiB step inside the arena (VirtualReservationSearch style); the lower half is the stack region */
+    T(lo + (8ull << 20) < g_alo + ARENA / 2);
 
-    /* the probe the guest makes: a 0-byte reservation answers 0 */
+    /* vm_reserve: the probe the guest makes: a 0-byte reservation answers 0 */
     T(host_vm_reserve(0, 0) == 0);
-
-    /* anywhere: address space only */
+    T(host_vm_reserve(0, 0x100000001ull) == 0 && host_vm_reserve(0, ~0ull) == 0);   /* above 4 GiB: 0 (no wrap to a tiny size) */
     u64 a = host_vm_reserve(0, 0x800000);   /* a scrap heap's 8 MiB */
-    T(a != 0 && (a & 0xFFFF) == 0 && g_resv == 1 && g_maps == 0);
-
+    T(a != 0 && (a & 0xFFFF) == 0 && g_live_resv == 1 && heap_pages_in(H_LOCKED) == 0);
     /* fixed addresses: free -> exactly there; taken, overlapping or in the image window -> 0 */
     u64 f = host_vm_reserve(lo, 0x100000);
     T(f == lo);
     T(host_vm_reserve(lo + 0x80000, 0x10000) == 0);          /* inside the reservation above */
-    T(host_vm_reserve(g_busy_lo, 0x10000) == 0);             /* someone's mapping */
+    u64 busy = lo + (8ull << 20);
+    void *blk = t_memalign(PG, PG);
+    T(svcMapMemory((void *)(uintptr_t)busy, blk, PG) == 0);   /* someone's mapping */
+    T(host_vm_reserve(busy, 0x10000) == 0);
     T(host_vm_reserve(0x01000000, 0x10000) == 0);            /* the data window */
+    T(host_vm_reserve(0x00300000, 0x200000) == 0);           /* overlapping the image range's start */
+    T(host_vm_reserve(0xFFFFFFFF00000000ull, 0x10000) == 0);   /* hint wraps / above 4 GiB */
     T(host_vm_reserve(lo + 0x123456, 0x1000) == lo + 0x120000);   /* rounded down to 64 KiB */
 
-    /* commit: one zeroed block per gap, idempotent, only inside a reservation */
-    memset((void *)(uintptr_t)a, 0x55, 0x3000);   /* stale contents of the address range */
-    T(host_vm_commit(a + 0x1000, 0x2000) == 0 && g_maps == 1);
-    T(((uint8_t *)(uintptr_t)a)[0x1000] == 0 && ((uint8_t *)(uintptr_t)a)[0x2fff] == 0);
-    ((uint8_t *)(uintptr_t)a)[0x1800] = 7;
-    T(host_vm_commit(a + 0x1000, 0x2000) == 0 && g_maps == 1);   /* already committed */
-    T(((uint8_t *)(uintptr_t)a)[0x1800] == 7);                     /* and kept */
-    T(host_vm_commit(a, 0x6000) == 0 && g_maps == 3);              /* the two gaps around it */
-    T(host_vm_commit(a + 0x800000 - 0x1000, 0x2000) != 0);         /* past the reservation */
-    T(host_vm_commit(lo + (60ull << 20), 0x1000) != 0);            /* not reserved */
+    /* vm_commit: one zeroed block per gap, AliasCodeData, idempotent, only inside a reservation */
+    T(host_vm_commit(a + 0x1000, 0x2000) == 0 && kstate(a + 0x1000) == A_ALIAS_CODE_DATA && kstate(a) == A_FREE);
+    T(B(a + 0x1000)[0] == 0 && B(a + 0x2fff)[0] == 0);
+    B(a + 0x1800)[0] = 7;
+    T(host_vm_commit(a + 0x1000, 0x2000) == 0 && g_vm_next == 1);   /* already committed */
+    T(B(a + 0x1800)[0] == 7);                                        /* and kept */
+    T(host_vm_commit(a, 0x6000) == 0 && g_vm_next == 3);             /* the two gaps around it */
+    T(host_vm_commit(a + 0x800000 - 0x1000, 0x2000) == FNVNX_HE_BADINPUT);   /* past the reservation */
+    T(host_vm_commit(lo + (60ull << 20), 0x1000) == FNVNX_HE_BADINPUT);      /* not reserved */
+    T(host_vm_commit(a, 0) == FNVNX_HE_BADINPUT);                              /* size 0 */
+    T(host_vm_commit(~0ull - 0xFF, 0x1000) == FNVNX_HE_BADINPUT && host_vm_commit(~0ull - 0xFFF, 0xFFFF) == FNVNX_HE_BADINPUT);   /* wraps */
+    T(host_vm_commit(a + 0x6000, 0xFFFFFFFFFFFFF000ull) == FNVNX_HE_BADINPUT);
+    T(g_vm_next == 3);
 
-    /* decommit: part of an extent is zeroed and stays mapped; a whole extent goes back */
-    ((uint8_t *)(uintptr_t)a)[0x1800] = 9;
-    T(host_vm_decommit(a + 0x1000, 0x1000) == 0 && g_unmaps == 0);   /* half of the 0x1000..0x3000 extent */
-    T(((uint8_t *)(uintptr_t)a)[0x1800] == 0);
-    T(host_vm_decommit(a + 0x1000, 0x2000) == 0 && g_unmaps == 1);   /* the whole extent */
-    T(host_vm_commit(a + 0x1000, 0x1000) == 0 && g_maps == 4);       /* recommit: a new block */
+    /* the protection of a committed page is kept by a second commit; a fresh page is read-write */
+    T(host_vm_protect(a + 0x1000, 0x1000, FNVNX_VM_PROT_R) == 0 && kperm(a + 0x1000) == 1);
+    T(host_vm_commit(a, 0x6000) == 0 && kperm(a + 0x1000) == 1 && kperm(a) == 3);
+    T(host_vm_protect(a + 0x1000, 0x1000, 3) == 0);
 
-    /* release: everything inside goes, the range can be reserved again */
-    T(host_vm_release(a + 0x1000) != 0);   /* not the base */
-    T(host_vm_release(a) == 0 && g_unresv == 1 && g_unmaps == 4);
-    T(host_vm_commit(a, 0x1000) != 0);
+    /* vm_decommit: part of an extent is zeroed, stays mapped and is read-write; a whole extent goes back, in any protection */
+    B(a + 0x1800)[0] = 9;
+    T(host_vm_protect(a + 0x1000, 0x1000, 0) == 0 && !CAN_READ(a + 0x1000));
+    int locked = heap_pages_in(H_LOCKED);
+    T(host_vm_decommit(a + 0x1000, 0x1000) == 0 && heap_pages_in(H_LOCKED) == locked);   /* half of the 0x1000..0x3000 extent */
+    T(CAN_WRITE(a + 0x1000) && kperm(a + 0x1000) == 3 && B(a + 0x1800)[0] == 0);          /* no access before: read-write and zero now */
+    T(host_vm_protect(a + 0x2000, 0x1000, 0) == 0);
+    T(host_vm_decommit(a + 0x1000, 0x2000) == 0 && kstate(a + 0x1000) == A_FREE && heap_pages_in(H_LOCKED) == locked - 2);   /* the whole extent, one page no-access */
+    T(host_vm_commit(a + 0x1000, 0x1000) == 0 && B(a + 0x1000)[0] == 0 && kperm(a + 0x1000) == 3);   /* recommit: a new block, fresh read-write */
+    T(host_vm_decommit(a, 0) == 0);                                  /* size 0: nothing done */
+    T(host_vm_decommit(a + 0x100, 0) == 0 && kstate(a) == A_ALIAS_CODE_DATA);   /* not the page the unaligned address is in */
+    T(host_vm_decommit(~0ull - 0xFF, 0x1000) == FNVNX_HE_RANGE && host_vm_decommit(1, ~0ull) == FNVNX_HE_RANGE);   /* wraps */
+    T(host_vm_decommit(a + 0x700000, 0x1000) == 0);                   /* committed nowhere: ignored */
+
+    /* vm_release: not from the base -> BadInput; everything inside goes, the range can be reserved again */
+    T(host_vm_release(a + 0x1000) == FNVNX_HE_BADINPUT && host_vm_release(0) == FNVNX_HE_BADINPUT && host_vm_release(~0ull) == FNVNX_HE_BADINPUT);
+    T(host_vm_release(a) == 0 && g_live_resv == 2 && kstate(a) == A_FREE && kstate(a + 0x1000) == A_FREE);
+    T(host_vm_release(a) == FNVNX_HE_BADINPUT);
+    T(host_vm_commit(a, 0x1000) == FNVNX_HE_BADINPUT);
     T(host_vm_release(f) == 0);
     T(host_vm_reserve(lo, 0x100000) == lo);
+    T(g_free_while_locked == 0 && g_unmapcode_with_views == 0);
+
+    /* a kernel refusal reaches the caller and leaves nothing behind */
+    u64 r2 = host_vm_reserve(0, 0x100000);
+    g_force_mapcode = R_KERNEL(103);
+    int l0 = heap_pages_in(H_NORMAL);
+    T(host_vm_commit(r2, 0x2000) == R_KERNEL(103) && kstate(r2) == A_FREE && heap_pages_in(H_NORMAL) == l0 && !g_vm_ext[0].size);
+    g_force_setperm = R_KERNEL(103);   /* the alias is built but cannot become data: it is undone, the block is given back */
+    T(host_vm_commit(r2, 0x2000) == R_KERNEL(103) && kstate(r2) == A_FREE && heap_pages_in(H_LOCKED) == 0 && g_free_while_locked == 0);
     printf("host_vm: %s\n", g_fail ? "FAIL" : "ok");
     return g_fail != 0;
 }

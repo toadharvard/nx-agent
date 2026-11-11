@@ -10,8 +10,9 @@ LIBNX=${LIBNX:-$ROOT/ext/libnx}
 fail=0
 for t in "$HERE"/*_test.c; do
 	n=$(basename "$t" .c)
+	extra=; [ "$n" = host_total_test ] && { $CC -O2 -c -std=gnu11 -I"$ROOT/toolchain/include" "$HERE/host_sock_total.c" -o "$OUT/host_sock_total.o"; extra="$OUT/host_sock_total.o"; }
 	$CC -O2 -static -std=gnu11 -Wall -D__SWITCH__ -I"$LIBNX/nx/include" -I"$ROOT/tests/s4/ilp32-stubs" \
-		-I"$ROOT/toolchain/include" "$t" -o "$OUT/$n" -lm
+		-I"$ROOT/toolchain/include" "$t" $extra -o "$OUT/$n" -lm
 	qemu-aarch64 "$OUT/$n" || fail=1
 done
 exit $fail

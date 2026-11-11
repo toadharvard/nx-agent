@@ -4,9 +4,11 @@
     python3 -I loader/guest/e2e_host.py guest.nso [emu_guest.py arguments]      (env E2E_EXE = the exe, for the check)
 
 The emulator stage proper (L4) must provide what this file adds; tests/s5 is not touched.  What it adds:
-  - FNVNX_EXT_PLATFORM fn 8 VM_PROTECT (addr, size, prot): R bit0, W bit1, 0 = no access; 0, or 1 when a page of the range
-    is not mapped (map_fixed and VM-commit memory both);
-  - a VM commit / decommit gives read-write pages again, whatever VM_PROTECT did to them (guard pages of a freed stack);
+  - FNVNX_EXT_PLATFORM as hostapi.h's totality table states it: ONE dispatch (unknown fn -> NO_SERVICE, too few args -> BAD_NARGS), fn 8
+    VM_PROTECT (addr, size, prot 0/1/3) on guest-owned pages (VM extents, map_fixed ranges, the windows) with the header's results, fn 9
+    DISPLAY_DOCKED (env E2E_DOCKED, default docked), map_fixed / UNMAP_FIXED with the header's checks (UNMAP_FIXED in any protection),
+    the VM services 5..7 with extents (a whole extent in a decommit is unmapped, a partial one zeroed and read-write), thread ids that
+    name nothing -> NOTFOUND;
   - the VM service on (it is opt-in in emu_guest);
   - FNVNX_EXT_PLATFORM fn 11..14 SECTION_CREATE / MAP / UNMAP / FREE (include/fnvnx/hostapi.h; the device: toolchain/host/host_section.inc)
     with the same semantics, errors and limits (128 sections, 512 views), and its interplay with VM services 5..8 (a range holding a
@@ -61,6 +63,9 @@ def pe_expect(path, rebase=None):
 SEC_E_SIZE, SEC_E_ALIGN, SEC_E_RANGE, SEC_E_REGION, SEC_E_ID, SEC_E_NOMEM, SEC_E_FULL = 0xCA01, 0xCC01, 0xD401, 0xDA01, 0xE401, 0xD001, 0xCE01
 SEC_MAX_SIZE, SEC_SECTIONS, SEC_VIEWS = 0x80000000, 128, 512
 M64 = (1 << 64) - 1
+E_NOMEM, E_ALREADY, E_NOTFOUND, E_BADINPUT = 0x559, 0xF59, 0x1359, 0x1759   # libnx results, hostapi.h FNVNX_E_*
+E_SIZE, E_ADDR, E_RANGE, E_PERM = 0xCA01, 0xCC01, 0xD401, 0xD801               # kernel results
+NO_MODULE, NO_SERVICE, BAD_NARGS = M64 - 254, M64 - 253, M64 - 252              # FNVNX_EXT_NO_MODULE (-255), _NO_SERVICE (-254), _BAD_NARGS (-253)
 
 
 def sec_err(code):
@@ -155,66 +160,229 @@ class E2EEmu(emu_guest.Emu):
                 out[a] = perm
         return out
 
-    # -- map_fixed / UNMAP_FIXED (hostapi.h 15): exactly the (addr, size, src) of one earlier map_fixed, once
-    def h_map_fixed(self, addr, size, src, *_):
-        r = super().h_map_fixed(addr, size, src)
-        if r == 0:
-            if not hasattr(self, "mf_live"):
-                self.mf_live = {}
-            self.mf_live[(addr, size)] = src
-        return r
+    # -- the platform services as hostapi.h states them (totality table): ONE dispatch, every (fn, nargs) has one answer
+    NEED = {1: 1, 2: 2, 3: 2, 4: 2, 5: 2, 6: 2, 7: 1, 8: 3, 9: 0, 11: 1, 12: 4, 13: 2, 14: 1, 15: 3}   # fn -> least nargs; 10 (access fault) is not served
+    WINDOW = (0x00400000, 0x02100000)   # the windows the host claimed at start (original image range + data window), owned from the start
+    MF_MAX = 512
 
-    def unmap_fixed(self, addr, size, src):
-        if addr & (P - 1) or src & (P - 1):
-            return 0xCC01
-        if not size or size & (P - 1):
-            return 0xCA01
-        if getattr(self, "mf_live", {}).get((addr, size)) != src:
-            return 0xD401   # the kernel: not the mapping of that source
+    def u64s(self, args, k):
+        return struct.unpack("<%dQ" % k, bytes(self.uc.mem_read(args, 8 * k))) if k else ()
+
+    def cstr(self, p):
+        out = b""
+        while p:
+            c = bytes(self.uc.mem_read(p + len(out), 1))
+            if c == b"\0":
+                break
+            out += c
+        return out.decode("latin-1")
+
+    def mf_overlap(self, lo, hi):
+        return any(a < hi and lo < a + n for (a, n) in getattr(self, "mf_live", {}))
+
+    def in_window(self, a, n):
+        return self.WINDOW[0] <= a and a + n <= self.WINDOW[1]
+
+    def window_fill(self, lo, hi):
+        """claimed memory exists: window pages not mapped yet are read-write zero (the host mapped them at start)"""
+        pg = lo
+        while pg < hi:
+            if not any(b <= pg <= e for b, e, _p in self.uc.mem_regions()):
+                self.uc.mem_map(pg, P, UC_PROT_READ | UC_PROT_WRITE)
+            pg += P
+
+    def owned(self, lo, hi):
+        """every page of [lo, hi) is guest-owned: a VM extent, a map_fixed range or a window page"""
+        mapped = getattr(self, "vm_mapped", {})
+        mf = getattr(self, "mf_live", {})
+        return all(pg in mapped or self.WINDOW[0] <= pg < self.WINDOW[1] or any(a <= pg < a + n for (a, n) in mf) for pg in range(lo, hi, P))
+
+    # map_fixed (addr, size, src): size 0, wrap or unaligned -> BADINPUT; in a window: read-write and zero; src 0 or unaligned -> BADINPUT;
+    # 512 live -> NOMEM; mapped -> ALREADY; else mapped (reprotectable)
+    def h_map_fixed(self, addr, size, src, *_):
+        if not size or addr + size >= 1 << 64 or (addr | size) & (P - 1):
+            return E_BADINPUT
+        if self.in_window(addr, size):
+            self.window_fill(addr, addr + size)
+            self.uc.mem_protect(addr, size, UC_PROT_READ | UC_PROT_WRITE)
+            self.uc.mem_write(addr, bytes(size))
+            self.mf_win = getattr(self, "mf_win", 0) + 1
+            return 0
+        if not src or src & (P - 1):
+            return E_BADINPUT
+        if not hasattr(self, "mf_live"):
+            self.mf_live = {}
+        if len(self.mf_live) >= self.MF_MAX:
+            return E_NOMEM
+        if any(b <= addr + size - 1 and addr <= e for b, e, _p in self.uc.mem_regions()):
+            return E_ALREADY
         try:
-            self.uc.mem_unmap(addr, size)
+            self.uc.mem_map(addr, size, UC_PROT_READ | UC_PROT_WRITE)
         except UcError:
-            return 0xD401
+            return E_RANGE
+        self.mapped_fixed = getattr(self, "mapped_fixed", []) + [(addr, size)]
+        self.mf_live[(addr, size)] = src
+        return 0
+
+    # UNMAP_FIXED (addr, size, src): alignment, size, wrap, then a window (read-write and zero) or exactly one live map_fixed, in any protection
+    def unmap_fixed(self, addr, size, src):
+        if (addr | src) & (P - 1):
+            return E_ADDR
+        if not size or size & (P - 1):
+            return E_SIZE
+        if addr + size >= 1 << 64:
+            return E_RANGE
+        if self.in_window(addr, size):
+            self.window_fill(addr, addr + size)
+            self.uc.mem_protect(addr, size, UC_PROT_READ | UC_PROT_WRITE)
+            self.uc.mem_write(addr, bytes(size))
+            return 0
+        if getattr(self, "mf_live", {}).get((addr, size)) != src:
+            return E_RANGE
+        self.uc.mem_unmap(addr, size)
         del self.mf_live[(addr, size)]
         self.mf_unmaps = getattr(self, "mf_unmaps", 0) + 1
         return 0
 
-    def h_ext_call(self, module, fn, args, nargs, *_):
-        if module == 11 and fn == 15 and nargs >= 3:   # FNVNX_PLAT_UNMAP_FIXED
-            return self.unmap_fixed(*struct.unpack("<QQQ", bytes(self.uc.mem_read(args, 24))))
-        if module == 11 and 11 <= fn <= 14:
-            av = struct.unpack("<%dQ" % nargs, bytes(self.uc.mem_read(args, 8 * nargs))) if nargs and args else ()
-            return self.section_call(fn, av)
-        if module == 11 and fn in (5, 6, 7) and nargs >= 1:   # VM commit / decommit / release versus views (host_vm.inc vm_has_view)
-            a0, a1 = struct.unpack("<QQ", bytes(self.uc.mem_read(args, 16)))
-            if fn == 7:
-                resv = getattr(self, "vm_resv", {})
-                a0, a1 = (a0, resv[a0]) if a0 in resv else (0, 0)
-            if a1 and self.view_overlap(a0 & ~(P - 1), ((a0 + a1 + P - 1) & ~(P - 1)) - (a0 & ~(P - 1))):
-                return 0xD401
-        if module == 11 and fn == 8:   # FNVNX_PLAT_VM_PROTECT
-            addr, size, prot = struct.unpack("<QQQ", bytes(self.uc.mem_read(args, 24)))
-            if size and self.view_overlap(addr, size):
-                return 0xD401   # SharedCode cannot be reprotected
-            if addr & (P - 1) or size & (P - 1) or not size or prot & ~3 or addr + size > 1 << 32:
-                return 1
-            if len(self.mapped_perms(addr, addr + size)) != size // P:
-                return 1
+    # VM_PROTECT (address, size, prot): address, size, wrap, prot (0, 1, 3), ownership; views and non-owned pages -> RANGE
+    def vm_protect(self, addr, size, prot):
+        if addr & (P - 1):
+            return E_ADDR
+        if not size or size & (P - 1):
+            return E_SIZE
+        if addr + size >= 1 << 64:
+            return E_RANGE
+        if prot > 3 or prot == 2:
+            return E_PERM
+        if self.view_overlap(addr, size) or not self.owned(addr, addr + size):
+            return E_RANGE
+        if self.in_window(addr, size):
+            self.window_fill(addr, addr + size)
+        self.uc.mem_protect(addr, size, (UC_PROT_READ if prot & 1 else 0) | (UC_PROT_WRITE if prot & 2 else 0))
+        self.protects = getattr(self, "protects", 0) + 1
+        return 0
+
+    # VM services (host_vm.inc): extents are one per gap of a commit; decommit unmaps extents wholly inside, zeroes the rest read-write
+    def vm_commit(self, a, n):
+        if not n or a + n + P > 1 << 64:
+            return E_BADINPUT
+        lo, hi = a & ~(P - 1), (a + n + P - 1) & ~(P - 1)
+        resv, mapped = getattr(self, "vm_resv", {}), self.vm_mapped
+        base = next((b for b, s in resv.items() if b <= lo and hi <= b + s), None)
+        if base is None:
+            return E_BADINPUT
+        if self.view_overlap(lo, hi - lo) or self.mf_overlap(lo, hi):
+            return E_RANGE
+        if not hasattr(self, "vm_ext"):
+            self.vm_ext = []
+        pg = lo
+        while pg < hi:
+            if pg in mapped:
+                pg += P
+                continue
+            run = pg
+            while run < hi and run not in mapped:
+                run += P
             try:
-                self.uc.mem_protect(addr, size, (UC_PROT_READ if prot & 1 else 0) | (UC_PROT_WRITE if prot & 2 else 0))
+                self.uc.mem_map(pg, run - pg, UC_PROT_READ | UC_PROT_WRITE)
             except UcError:
-                return 1
-            self.protects = getattr(self, "protects", 0) + 1
+                return E_NOMEM
+            for q in range(pg, run, P):
+                mapped[q] = base
+            self.vm_ext.append([pg, run - pg])
+            pg = run
+        return 0
+
+    def vm_decommit(self, a, n):
+        if not n:
             return 0
-        r = super().h_ext_call(module, fn, args, nargs, *_)
-        # DECOMMIT as hostapi.h states it: the protection of a page that stays mapped is NOT reset (the loader restores
-        # read-write with VM_PROTECT before it decommits); only a COMMIT hands out fresh read-write pages
-        if module == 11 and fn == 5 and r == 0:
-            a, n = struct.unpack("<QQ", bytes(self.uc.mem_read(args, 16)))
-            for pg in range(a & ~(P - 1), (a + n + P - 1) & ~(P - 1), P):
-                if pg in getattr(self, "vm_mapped", {}):
-                    self.uc.mem_protect(pg, P, UC_PROT_READ | UC_PROT_WRITE)
-        return r
+        if a + n + P > 1 << 64:
+            return E_RANGE
+        lo, hi = a & ~(P - 1), (a + n + P - 1) & ~(P - 1)
+        if self.view_overlap(lo, hi - lo) or self.mf_overlap(lo, hi):
+            return E_RANGE
+        for e in list(getattr(self, "vm_ext", [])):
+            s, sz = e
+            if s >= hi or s + sz <= lo:
+                continue
+            if s >= lo and s + sz <= hi:
+                self.uc.mem_unmap(s, sz)
+                for q in range(s, s + sz, P):
+                    self.vm_mapped.pop(q, None)
+                self.vm_ext.remove(e)
+            else:
+                x, y = max(s, lo), min(s + sz, hi)
+                self.uc.mem_protect(x, y - x, UC_PROT_READ | UC_PROT_WRITE)
+                self.uc.mem_write(x, bytes(y - x))
+        return 0
+
+    def vm_release(self, a):
+        resv = getattr(self, "vm_resv", {})
+        if a not in resv:
+            return E_BADINPUT
+        r = self.vm_decommit(a, resv[a])
+        if r:
+            return r
+        del resv[a]
+        return 0
+
+    def h_thread_start(self, tid, *_):
+        return super().h_thread_start(tid) if self.live_thread(tid) else E_NOTFOUND
+
+    def h_thread_join(self, tid, *_):
+        if not self.live_thread(tid):
+            return E_NOTFOUND
+        if self.threads[tid].state == "new":
+            return E_BADINPUT
+        return super().h_thread_join(tid)
+
+    def h_thread_free(self, tid, *_):
+        if not self.live_thread(tid):
+            return E_NOTFOUND
+        self.freed_threads = getattr(self, "freed_threads", set()) | {tid}
+        return 0
+
+    def live_thread(self, tid):
+        return tid in self.threads and tid not in getattr(self, "freed_threads", set())
+
+    def h_thread_set_priority(self, tid, prio, *_):
+        return super().h_thread_set_priority(tid, prio) if (tid == 0 or self.live_thread(tid)) else E_NOTFOUND
+
+    def h_thread_set_cpu(self, tid, spec, *_):
+        return super().h_thread_set_cpu(tid, spec) if (tid == 0 or self.live_thread(tid)) else E_NOTFOUND
+
+    def h_fs_dir_next(self, d, buf, cap, *_):
+        return super().h_fs_dir_next(d, buf, cap) if cap else 0
+
+    def h_ext_call(self, module, fn, args, nargs, *_):
+        if module != 11:
+            return super().h_ext_call(module, fn, args, nargs)
+        if fn > 0xFFFFFFFF or fn not in self.NEED:
+            return NO_SERVICE
+        nargs = min(nargs, 0xFFFFFFFF)
+        if nargs < self.NEED[fn] or (nargs and not args):
+            return BAD_NARGS
+        av = self.u64s(args, self.NEED[fn])
+        if fn == 1:
+            return super().h_ext_call(module, fn, args, nargs)
+        if fn == 2:   # THREAD_ACTIVITY (id, paused): 0 is the caller, an id that names no live thread
+            return E_BADINPUT if av[0] == 0 else (0 if self.live_thread(av[0]) else E_NOTFOUND)
+        if fn == 3:   # MESSAGE: the dialog closes at once in the model
+            print("   message box: %s | %s" % (self.cstr(av[0]), self.cstr(av[1])))
+            return 0
+        if fn == 4:
+            self.vm_mapped = getattr(self, "vm_mapped", {})
+            return 0 if av[1] > 0x100000000 else self.vm_call(4, av[0], av[1])
+        if fn in (5, 6, 7):
+            self.vm_mapped = getattr(self, "vm_mapped", {})
+            return {5: self.vm_commit, 6: self.vm_decommit, 7: self.vm_release}[fn](*av[:2 if fn != 7 else 1])
+        if fn == 8:
+            return self.vm_protect(*av)
+        if fn == 9:   # DISPLAY_DOCKED
+            return 1 if os.environ.get("E2E_DOCKED", "1") == "1" else 0
+        if fn == 15:
+            return self.unmap_fixed(*av)
+        return self.section_call(fn, av)
 
     def arena_lo(self):
         resv = getattr(self, "vm_resv", {})

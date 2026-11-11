@@ -5,7 +5,7 @@
  * (hostapi_total.py generates the list of declared services from the header with the C preprocessor: FNVNX_DECL_H); every service gets
  * its wrong-nargs, invalid-argument and success cases. Test names (hostapi.h table): total_declared, total_unknown, total_nargs,
  * total_ext, cpu_boost, thread_activity, thread_ids, message, display_docked, via_dispatch_vm, via_dispatch_section,
- * via_dispatch_unmap_fixed. */
+ * via_dispatch_unmap_fixed, tz_at, via_dispatch_sock. */
 #include "kdouble.h"
 #include "fnvnx/hostapi.h"
 
@@ -34,6 +34,15 @@ Result errorApplicationCreate(ErrorApplicationConfig *c, const char *d, const ch
 }
 Result errorApplicationShow(ErrorApplicationConfig *c) { (void)c; s_shown++; return 0; }
 
+static int s_tz_fail;
+Result timeToCalendarTimeWithMyRule(u64 ts, TimeCalendarTime *c, TimeCalendarAdditionalInfo *i)
+{
+    memset(c, 0, sizeof *c); memset(i, 0, sizeof *i);
+    i->offset = (s32)(ts % 7200) - 3600; i->DST = (ts & 1); strcpy(i->timezoneName, "CESTXYZW");
+    return s_tz_fail ? MAKERESULT(Module_Libnx, LibnxError_NotFound) : 0;
+}
+uint64_t host_sock_call_ext(uint32_t fn, const uint64_t *a, uint32_t n);   /* host_sock_total.c: the real host_sock.inc */
+#define host_sock_call host_sock_call_ext
 static Handle g_own_process = OWN_HANDLE;
 static struct { int core3, boost_loading; } g_cfg = {1, 1};
 #include "../../../toolchain/host/host_ids.inc"
@@ -58,13 +67,13 @@ static const struct { const char *name; unsigned v; } g_decl[] = {
     {"FNVNX_PLAT_DISPLAY_DOCKED", FNVNX_PLAT_DISPLAY_DOCKED}, {"FNVNX_PLAT_ACCESS_FAULT_HANDLER", FNVNX_PLAT_ACCESS_FAULT_HANDLER},
     {"FNVNX_PLAT_SECTION_CREATE", FNVNX_PLAT_SECTION_CREATE}, {"FNVNX_PLAT_SECTION_MAP", FNVNX_PLAT_SECTION_MAP},
     {"FNVNX_PLAT_SECTION_UNMAP", FNVNX_PLAT_SECTION_UNMAP}, {"FNVNX_PLAT_SECTION_FREE", FNVNX_PLAT_SECTION_FREE},
-    {"FNVNX_PLAT_UNMAP_FIXED", FNVNX_PLAT_UNMAP_FIXED},
+    {"FNVNX_PLAT_UNMAP_FIXED", FNVNX_PLAT_UNMAP_FIXED}, {"FNVNX_PLAT_TZ_AT", FNVNX_PLAT_TZ_AT},
 };
 #endif
 #define NDECL (sizeof g_decl / sizeof g_decl[0])
 
 /* what the header states a service may answer with nargs = 0: the dispatch's own refusal, or (DISPLAY_DOCKED takes no argument) 0 / 1 */
-static int stated_with_no_args(u64 r) { return r == FNVNX_EXT_BAD_NARGS || r == 0 || r == 1; }
+static int stated_with_no_args(u64 r) { return r == FNVNX_EXT_BAD_NARGS || r == 0 || r == 1 || r == (u64)-(s64)FNVNX_WE_INVAL; }   /* sockets: hostapi.h "nargs must be exactly ... else -FNVNX_WE_INVAL" */
 
 static u64 call(u32 fn, u32 nargs, u64 a0, u64 a1, u64 a2, u64 a3)
 {
@@ -110,7 +119,7 @@ int main(int argc, char **argv)
         {FNVNX_PLAT_CPU_BOOST, 1}, {FNVNX_PLAT_THREAD_ACTIVITY, 2}, {FNVNX_PLAT_MESSAGE, 2}, {FNVNX_PLAT_VM_RESERVE, 2}, {FNVNX_PLAT_VM_COMMIT, 2},
         {FNVNX_PLAT_VM_DECOMMIT, 2}, {FNVNX_PLAT_VM_RELEASE, 1}, {FNVNX_PLAT_VM_PROTECT, 3}, {FNVNX_PLAT_DISPLAY_DOCKED, 0},
         {FNVNX_PLAT_SECTION_CREATE, 1}, {FNVNX_PLAT_SECTION_MAP, 4}, {FNVNX_PLAT_SECTION_UNMAP, 2}, {FNVNX_PLAT_SECTION_FREE, 1},
-        {FNVNX_PLAT_UNMAP_FIXED, 3},
+        {FNVNX_PLAT_UNMAP_FIXED, 3}, {FNVNX_PLAT_TZ_AT, 2},
     };
     int calls0 = s_act_calls + s_boost_calls + s_shown;
     for (size_t i = 0; i < sizeof need / sizeof need[0]; i++) {
@@ -194,6 +203,19 @@ int main(int argc, char **argv)
     u64 va = call(12, 4, sid, 0, 0, 0x2000);
     T(va && !(va >> 63) && kstate(va) == A_SHARED && call(12, 4, 99, 0, 0, 0x1000) == ERR(FNVNX_SEC_E_ID));
     T(call(13, 2, va, 0x2000, 0, 0) == 0 && call(13, 2, va, 0x2000, 0, 0) == ERR(FNVNX_SEC_E_RANGE) && call(14, 1, sid, 0, 0, 0) == 0 && call(14, 1, sid, 0, 0, 0) == ERR(FNVNX_SEC_E_ID));
+
+    /* ---- tz_at (utc_seconds, FnvnxTzAt *): 0 and the zone, or non-zero when the time service has none */
+    {
+        FnvnxTzAt z;
+        T(call(34, 2, 5000, (u64)(uintptr_t)&z, 0, 0) == 0 && z.off_s == (s32)(5000 % 7200) - 3600 && z.dst == 0 && !strcmp(z.abbr, "CESTXYZ"));
+        T(call(34, 2, 5001, (u64)(uintptr_t)&z, 0, 0) == 0 && z.dst == 1);
+        s_tz_fail = 1;
+        T(call(34, 2, 5000, (u64)(uintptr_t)&z, 0, 0) == 1);
+        s_tz_fail = 0;
+    }
+    /* ---- sockets 16..33 reach the real handler: a wrong count is -WE_INVAL (the handler's own rule), 35 and up are NO_SERVICE */
+    for (u32 fn = FNVNX_PLAT_SOCK_FIRST; fn <= FNVNX_PLAT_SOCK_LAST; fn++) T(call(fn, 0, 0, 0, 0, 0) == (u64)-(s64)FNVNX_WE_INVAL);
+    T(call(35, 0, 0, 0, 0, 0) == FNVNX_EXT_NO_SERVICE);
 
     /* ---- via_dispatch_unmap_fixed */
     {
