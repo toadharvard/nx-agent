@@ -111,6 +111,7 @@ struct obj {
     void *fdata;                             /* font: LOGFONTW copy (gdifont.cpp) */
     bool ext;                                /* bitmap: bits are the caller's memory (memdc_over_bits), never freed here */
     uint32_t xbmp;                           /* DC made by memdc_over_bits: the bitmap it made */
+    void *view;                              /* a DIB section made over a file mapping: the base of its view (UnmapViewOfFile on delete) */
     RECT *clip; int nclip;                   /* DC: the clip region as disjoint rectangles in DC coordinates (a paint DC: the update region) */
 };
 struct slot { obj *o; uint32_t gen; };
@@ -149,7 +150,8 @@ void release(uint32_t h)
     uint32_t idx = h & 0xFFFF;
     obj *o = g_slots[idx].o;
     if (!o) return;
-    if (!o->ext) free(o->bits);
+    if (o->view) UnmapViewOfFile(o->view);   /* the view holds the section until the bitmap goes */
+    else if (!o->ext) free(o->bits);          /* external bits (memdc_over_bits) are the caller's */
     free(o->fdata);
     free(o->clip);
     free(o);
@@ -295,43 +297,54 @@ bool masks_ok(const uint32_t *m, int bpp)
     }
     return !((m[0] & m[1]) || (m[0] & m[2]) || (m[1] & m[2]));
 }
-/* the format a BITMAPINFOHEADER asks for; false = not a valid DIB description */
-struct fmt { int w, h, bpp, comp; bool td; uint32_t m[3]; int nct; };
+/* the format a BITMAPINFOHEADER / BITMAPCOREHEADER asks for; false = not a valid DIB description */
+struct fmt { int w, h, bpp, comp, planes; bool td, core; uint32_t m[3]; int nct; uint32_t hsz; };
 bool read_fmt(const uint8_t *b, fmt &f, bool need_wh)
 {
-    if (u32(b) < 40) return false;
-    int32_t w = (int32_t)u32(b + 4), h = (int32_t)u32(b + 8);
-    f.bpp = u16(b + 14); f.comp = (int)u32(b + 16); f.td = h < 0; f.w = w; f.h = h < 0 ? -h : h;
+    f.hsz = u32(b);
+    f.core = f.hsz == 12;   /* BITMAPCOREHEADER: 16-bit fields, RGBTRIPLE colour table, always BI_RGB */
+    int32_t w, h;
+    uint32_t used = 0;
+    if (f.core) {
+        w = u16(b + 4); h = (int16_t)u16(b + 6); f.planes = u16(b + 8); f.bpp = u16(b + 10); f.comp = 0;
+    } else if (f.hsz >= 40) {
+        w = (int32_t)u32(b + 4); h = (int32_t)u32(b + 8); f.planes = u16(b + 12); f.bpp = u16(b + 14); f.comp = (int)u32(b + 16); used = u32(b + 32);
+    } else return false;
+    f.td = h < 0; f.w = w; f.h = h < 0 ? -h : h;
     if (need_wh && (w <= 0 || h == 0 || h == INT32_MIN)) return false;
     if (f.bpp != 1 && f.bpp != 4 && f.bpp != 8 && f.bpp != 16 && f.bpp != 24 && f.bpp != 32) return false;
     if (f.comp == 0) { memcpy(f.m, f.bpp == 16 ? M16 : M32, sizeof f.m); }
     else if (f.comp == 3 && (f.bpp == 16 || f.bpp == 32)) { for (int i = 0; i < 3; i++) f.m[i] = u32(b + 40 + 4 * i); if (!masks_ok(f.m, f.bpp)) return false; }
     else return false;
     if (f.comp == 0 && (f.bpp == 24 || f.bpp <= 8)) memset(f.m, 0, sizeof f.m);
-    uint32_t used = u32(b + 32);
     f.nct = 0;
     if (f.bpp <= 8) { if (used > (1u << f.bpp)) return false; f.nct = used ? (int)used : 1 << f.bpp; }
     return true;
 }
+/* the default colour table of a depth (ref get_default_color_table): 1 bpp black and white, 4 bpp the 16 VGA colours in
+ * the reference's order, 8 bpp the 256-colour table: the 20 system colours at both ends, between them the 8 x 8 x 4
+ * (red, green, blue) lattice. 0x00RRGGBB */
 uint32_t std_pal(int bpp, int i)
 {
-    static const uint32_t vga[16] = { 0, 0x800000, 0x008000, 0x808000, 0x000080, 0x800080, 0x008080, 0xC0C0C0, 0x808080, 0xFF0000,
+    static const uint32_t vga[16] = { 0, 0x800000, 0x008000, 0x808000, 0x000080, 0x800080, 0x008080, 0x808080, 0xC0C0C0, 0xFF0000,
                                       0x00FF00, 0xFFFF00, 0x0000FF, 0xFF00FF, 0x00FFFF, 0xFFFFFF };
     if (bpp == 1) return i ? 0xFFFFFF : 0;
     if (bpp == 4) return vga[i & 15];
-    return (uint32_t)(((i >> 5) * 255 / 7) << 16 | (((i >> 2) & 7) * 255 / 7) << 8 | ((i & 3) * 255 / 3));
+    if (i < 10) return SYSPAL[i];
+    if (i >= 246) return SYSPAL[10 + i - 246];
+    return (uint32_t)(((i & 7) * 0x20) << 16 | (((i >> 3) & 7) * 0x20) << 8 | (i >> 6) * 0x40);
 }
-uint32_t new_bitmap(int w, int h, int bpp, bool td, bool dib, obj **out)
+uint32_t new_bitmap(int w, int h, int bpp, bool td, bool dib, obj **out, uint8_t *ext = NULL, void *view = NULL)
 {
     if (w <= 0 || h <= 0 || stride_of(w, bpp) > (1 << 30)) return 0;
     int64_t sz = stride_of(w, bpp) * h;
     if (sz > (1 << 30)) return 0;
-    uint8_t *bits = (uint8_t *)calloc((size_t)sz, 1);
+    uint8_t *bits = ext ? ext : (uint8_t *)calloc((size_t)sz, 1);   /* ext: the bits live in a mapped view */
     if (!bits) return 0;
     obj *o = NULL;
     uint32_t hd = alloc(T_BMP, &o);
-    if (!hd) { free(bits); return 0; }
-    o->w = w; o->h = h; o->bpp = bpp; o->pitch = (int)stride_of(w, bpp); o->td = td; o->dib = dib; o->bits = bits;
+    if (!hd) { if (!ext) free(bits); return 0; }
+    o->w = w; o->h = h; o->bpp = bpp; o->pitch = (int)stride_of(w, bpp); o->td = td; o->dib = dib; o->bits = bits; o->view = view;
     *out = o;
     return hd;
 }
@@ -438,25 +451,47 @@ extern "C" HBITMAP CreateCompatibleBitmap(HDC hd, int w, int h)
     memcpy(b->mask, s.m, sizeof b->mask);
     return (HBITMAP)(uintptr_t)bh;
 }
+/* CreateDIBSection (MSDN): the bits are system memory, or, with hSection, a view of that file-mapping object starting at
+ * dwOffset (a multiple of 4; the view itself starts at the allocation granularity below it, and the bits are at the rest).
+ * The view keeps the section referenced until the bitmap is deleted. The section must be writable (PAGE_READWRITE or
+ * PAGE_WRITECOPY); a view that cannot be made fails the call. The header is a BITMAPINFOHEADER (or larger) or a
+ * BITMAPCOREHEADER; BI_RGB, and BI_BITFIELDS for 16 and 32 bits. */
 extern "C" HBITMAP CreateDIBSection(HDC hd, const void *bmi, UINT usage, void **ppv, HANDLE section, DWORD offset)
 {
-    W32_UNUSED(offset);
     Lk l;
     init_stock();
+    if (ppv) *ppv = NULL;
     fmt f;
     const uint8_t *b = (const uint8_t *)bmi;
-    if (!bmi || !ppv || section || usage > 1 || !read_fmt(b, f, true) || (usage == 1 && !get(hd, T_DC)) || u16(b + 12) != 1) {
+    offset = W32_DW(offset);
+    if (!bmi || !ppv || usage > 1 || !read_fmt(b, f, true) || (usage == 1 && !get(hd, T_DC)) || f.planes != 1 || (section && (offset & 3))) {
         SetLastError(ERROR_INVALID_PARAMETER);
         return NULL;
     }
+    uint8_t *ext = NULL;
+    void *view = NULL;
+    if (section) {
+        int64_t need = stride_of(f.w, f.bpp) * f.h;
+        DWORD base = offset & ~0xFFFFu;   /* views start at the allocation granularity */
+        view = MapViewOfFile(section, 0x2 /* FILE_MAP_WRITE */, 0, base, (SIZE_T)(offset - base + need));
+        if (!view) { SetLastError(ERROR_INVALID_PARAMETER); return NULL; }
+        ext = (uint8_t *)view + (offset - base);
+    }
     obj *o = NULL;
-    uint32_t bh = new_bitmap(f.w, f.h, f.bpp, f.td, true, &o);
-    if (!bh) { SetLastError(ERROR_INVALID_PARAMETER); return NULL; }
+    uint32_t bh = new_bitmap(f.w, f.h, f.bpp, f.td, true, &o, ext, view);
+    if (!bh) {
+        if (view) UnmapViewOfFile(view);
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return NULL;
+    }
     o->nct = f.nct;
     memcpy(o->mask, f.m, sizeof o->mask);
-    const uint8_t *tab = b + u32(b);
-    for (int i = 0; i < f.nct; i++)
-        o->ct[i] = usage == 0 ? u32(tab + 4 * i) & 0xFFFFFF : (u16(tab + 2 * i) < 20 ? SYSPAL[u16(tab + 2 * i)] : 0);
+    const uint8_t *tab = b + f.hsz;
+    for (int i = 0; i < f.nct; i++) {
+        if (usage == 1) { uint32_t ix = u16(tab + 2 * i); o->ct[i] = ix < 20 ? SYSPAL[ix] : 0; }   /* DIB_PAL_COLORS: the DC's palette entries */
+        else if (f.core) o->ct[i] = (uint32_t)tab[3 * i + 2] << 16 | (uint32_t)tab[3 * i + 1] << 8 | tab[3 * i];   /* RGBTRIPLE */
+        else o->ct[i] = u32(tab + 4 * i) & 0xFFFFFF;                                                              /* RGBQUAD */
+    }
     *ppv = o->bits;
     return (HBITMAP)(uintptr_t)bh;
 }
@@ -596,53 +631,121 @@ extern "C" BOOL StretchBlt(HDC hd, int x, int y, int w, int h, HDC hs, int sx, i
     return TRUE;
 }
 
+/* GetDIBits (MSDN; the reference's NtGdiGetDIBitsInternal is the data for what the text leaves open).
+ * lpbi may be a BITMAPCOREHEADER or a BITMAPINFOHEADER (or larger): the header says what format the caller wants. The bitmap
+ * may be selected into a DC. With no bits and biBitCount 0 the call describes the bitmap: width, height, planes, bit count
+ * (BI_BITFIELDS for 16 and 32 bits), size; no colour table. Otherwise the bitmap is converted to the requested depth:
+ * bottom-up (positive height) or top-down; scan lines counted from the bottom of the bitmap, `cScanLines` of them from
+ * `uStartScan`, clamped to the header's height; lines the bitmap does not have are zero. The colour table is the
+ * bitmap's own when the depths agree (DIB_RGB_COLORS), else the default table of the depth, or with DIB_PAL_COLORS the
+ * DC's palette and the table written back is the indices 0.. . The return value is the number of scan lines copied
+ * (bits), nonzero (no bits), or 0. Compressed (RLE) bits cannot be retrieved: asked for with a buffer the call fails; JPEG
+ * and PNG never. */
 extern "C" int GetDIBits(HDC hd, HBITMAP hb, UINT start, UINT lines, void *bits, void *bmi, UINT usage)
 {
     Lk l;
-    obj *d = get(hd, T_DC), *bm = get(hb, T_BMP);
-    if (!d || !bm || bm->selin || !bmi || usage != 0) return 0;
     uint8_t *b = (uint8_t *)bmi;
-    surf S;
-    bm_surf(bm, S);
-    fmt f;
-    int bc = u16(b + 14);
-    if (u32(b) < 40) return 0;
-    bool stdm = bm->bpp == 16 ? !memcmp(bm->mask, M16, 12) : bm->bpp == 32 ? !memcmp(bm->mask, M32, 12) : true;
-    if (!bits && bc == 0) {   /* describe the bitmap itself */
-        w32p(b + 4, (uint32_t)bm->w); w32p(b + 8, (uint32_t)bm->h);
-        b[12] = 1; b[13] = 0; b[14] = (uint8_t)bm->bpp; b[15] = 0;
-        w32p(b + 16, stdm ? 0 : 3); w32p(b + 20, (uint32_t)bm->pitch * bm->h);
-        if (!stdm) for (int i = 0; i < 3; i++) w32p(b + 40 + 4 * i, bm->mask[i]);
-        if (bm->bpp <= 8) { w32p(b + 32, (uint32_t)bm->nct); for (int i = 0; i < bm->nct; i++) w32p(b + u32(b) + 4 * i, bm->ct[i]); }
-        return bm->h;
+    if (!b) return 0;
+    start = W32_DW(start); lines = W32_DW(lines);
+    uint32_t hsz = u32(b);
+    bool core = hsz == 12;
+    int32_t dw_, dh_;
+    int dplanes, dbpp;
+    uint32_t dcomp;
+    if (core) { dw_ = u16(b + 4); dh_ = (int16_t)u16(b + 6); dplanes = u16(b + 8); dbpp = u16(b + 10); dcomp = 0; }
+    else if (hsz >= 40) { dw_ = (int32_t)u32(b + 4); dh_ = (int32_t)u32(b + 8); dplanes = u16(b + 12); dbpp = u16(b + 14); dcomp = u32(b + 16); }
+    else return 0;
+    if (usage > 1) return 0;                                  /* DIB_RGB_COLORS, DIB_PAL_COLORS */
+    if (bits && (dcomp == 4 || dcomp == 5)) return 0;         /* BI_JPEG, BI_PNG */
+    obj *d = get(hd, T_DC), *bm = get(hb, T_BMP);
+    if (!d) { SetLastError(ERROR_INVALID_PARAMETER); return 0; }
+    if (!bm) return 0;
+    if (dh_ == INT32_MIN) return 0;
+    int Hd = dh_ < 0 ? -dh_ : dh_, Hs = bm->h, Ws = bm->w;
+    if (lines == 0 || start >= (UINT)Hd) bits = NULL;
+    if (!bits && dbpp == 0) {   /* describe the bitmap */
+        uint32_t scomp = (bm->bpp == 16 || bm->bpp == 32) ? 3 : 0;
+        uint32_t simg = (uint32_t)((int64_t)bm->pitch * bm->h);
+        if (core) { b[4] = (uint8_t)Ws; b[5] = (uint8_t)(Ws >> 8); b[6] = (uint8_t)Hs; b[7] = (uint8_t)(Hs >> 8); b[8] = 1; b[9] = 0; b[10] = (uint8_t)bm->bpp; b[11] = 0; }
+        else {
+            w32p(b + 4, (uint32_t)Ws); w32p(b + 8, (uint32_t)Hs); b[12] = 1; b[13] = 0; b[14] = (uint8_t)bm->bpp; b[15] = 0;
+            w32p(b + 16, scomp); w32p(b + 20, simg); w32p(b + 24, 0); w32p(b + 28, 0); w32p(b + 32, 0); w32p(b + 36, 0);
+        }
+        return Hs;
     }
-    if (!read_fmt(b, f, false)) return 0;
+    if (dw_ <= 0 || dh_ == 0) return 0;
+    switch (dcomp) {
+    case 2: if (dbpp != 4 || dh_ < 0 || bits) return 0; break;            /* BI_RLE4, BI_RLE8: described, never retrieved */
+    case 1: if (dbpp != 8 || dh_ < 0 || bits) return 0; break;
+    case 3: if (dbpp != 16 && dbpp != 32) return 0; /* fall through */
+    case 0:
+        if (lines && !dplanes) return 0;
+        if (dbpp != 1 && dbpp != 4 && dbpp != 8 && dbpp != 16 && dbpp != 24 && dbpp != 32) return 0;
+        break;
+    default: return 0;
+    }
+    /* the destination's format: depth, masks, colour table */
+    bool same = dbpp == bm->bpp && usage == 0;
+    uint32_t dm[3] = { 0, 0, 0 };
+    int n = dbpp <= 8 ? 1 << dbpp : 0;
     uint32_t tab[256];
-    int n = f.bpp <= 8 ? 1 << f.bpp : 0;
-    bool same = f.bpp <= 8 && bm->bpp == f.bpp && bm->nct > 0;
-    for (int i = 0; i < n; i++) tab[i] = same ? (i < bm->nct ? bm->ct[i] : 0) : std_pal(f.bpp, i);
-    int64_t pitch64 = stride_of(bm->w, f.bpp);
-    if (pitch64 > (1 << 30)) return 0;
-    int pitch = (int)pitch64;
-    w32p(b + 4, (uint32_t)bm->w); w32p(b + 8, (uint32_t)(f.td ? -bm->h : bm->h));
-    b[12] = 1; b[13] = 0;
-    w32p(b + 20, (uint32_t)pitch * bm->h); w32p(b + 32, (uint32_t)n);
-    for (int i = 0; i < n; i++) w32p(b + u32(b) + 4 * i, tab[i]);
-    if (!bits) return bm->h;
-    if (start >= (UINT)bm->h || !lines) return 0;
-    int cnt = (UINT)bm->h - start < lines ? bm->h - (int)start : (int)lines;
-    surf T = S;
-    T.p = (uint8_t *)bits; T.bpp = f.bpp; T.pitch = pitch; T.td = true; T.nct = n; T.ct = tab; T.ddb = false;
-    memcpy(T.m, f.m, sizeof T.m);
-    for (int k = 0; k < cnt; k++) {
-        int line = (int)start + k, vy = f.td ? line : bm->h - 1 - line;
-        memset(T.p + (size_t)k * pitch, 0, (size_t)pitch);
-        for (int x = 0; x < bm->w; x++) {
-            if (same) raw_put(T, x, k, raw_get(S, x, vy));
-            else px_put(T, x, k, px_get(S, x, vy));
+    int tabn = 0;                                             /* entries to copy back */
+    if (dbpp == 16 || dbpp == 32) {
+        if (same) memcpy(dm, bm->mask, sizeof dm);              /* the bitmap's own masks, whatever the caller asked for */
+        else if (dcomp == 3) { for (int i = 0; i < 3; i++) dm[i] = u32(b + 40 + 4 * i); if (!masks_ok(dm, dbpp)) return 0; }
+        else memcpy(dm, dbpp == 16 ? M16 : M32, sizeof dm);
+    }
+    if (same && dbpp <= 8) {
+        tabn = bm->nct > 0 ? bm->nct : n;
+        for (int i = 0; i < tabn; i++) tab[i] = bm->nct > 0 ? bm->ct[i] : std_pal(dbpp, i);
+        for (int i = tabn; i < n; i++) tab[i] = 0;
+    } else if (dbpp <= 8) {
+        tabn = n;
+        for (int i = 0; i < n; i++) tab[i] = usage == 1 ? (i < 20 ? SYSPAL[i] : 0) : std_pal(dbpp, i);
+    }
+    /* scan lines: the block of `lines` rows that ends `start` rows above the bottom, clamped to the requested height */
+    int copied = 0;
+    UINT cnt = lines;
+    if (bits) {
+        if (cnt > (UINT)Hd - start) cnt = (UINT)Hd - start;
+        int y0 = Hd - (int)start - (int)cnt;                    /* bitmap row of the block's visually top row */
+        int64_t pitch64 = stride_of(dw_, dbpp);
+        if (pitch64 > (1 << 30)) return 0;
+        int pitch = (int)pitch64, cw = dw_ < Ws ? dw_ : Ws;
+        surf S;
+        bm_surf(bm, S);
+        surf T = S;
+        T.bpp = dbpp; T.pitch = pitch; T.td = true; T.h = 1; T.w = dw_; T.nct = n; T.ct = tab; T.ddb = false; T.win = NULL; T.onwin = false; T.clip = NULL; T.nclip = 0;
+        memcpy(T.m, dm, sizeof T.m);
+        bool raw = same;                                        /* same depth, masks and table: the pixel values are copied */
+        for (UINT r = 0; r < cnt; r++) {
+            int y = y0 + (int)r;
+            UINT m = dh_ > 0 ? cnt - 1 - r : r;                 /* memory order: bottom-up buffers hold the bottom row first */
+            uint8_t *row = (uint8_t *)bits + (size_t)m * pitch;
+            T.p = row;
+            if (y < 0 || y >= Hs) { memset(row, 0, (size_t)pitch); continue; }   /* a line the bitmap does not have */
+            for (int x = 0; x < cw; x++) {
+                if (raw) raw_put(T, x, 0, raw_get(S, x, y));
+                else px_put(T, x, 0, px_get(S, x, y));
+            }
+            copied++;
         }
     }
-    return cnt;
+    /* write the format back: colour table or masks, biClrUsed 0, biSizeImage */
+    if (core) {
+        uint8_t *t = b + 12;
+        if (usage == 1) for (int i = 0; i < tabn; i++) { t[2 * i] = (uint8_t)i; t[2 * i + 1] = (uint8_t)(i >> 8); }
+        else for (int i = 0; i < tabn; i++) { t[3 * i] = (uint8_t)tab[i]; t[3 * i + 1] = (uint8_t)(tab[i] >> 8); t[3 * i + 2] = (uint8_t)(tab[i] >> 16); }
+    } else {
+        if (same && (dbpp == 16 || dbpp == 32)) for (int i = 0; i < 3; i++) w32p(b + 40 + 4 * i, dm[i]);   /* the masks are returned */
+        uint8_t *t = b + hsz;
+        if (dbpp <= 8 && usage == 1) for (int i = 0; i < n; i++) { t[2 * i] = (uint8_t)i; t[2 * i + 1] = (uint8_t)(i >> 8); }
+        else if (dbpp <= 8) for (int i = 0; i < tabn; i++) w32p(t + 4 * i, tab[i] & 0xFFFFFF);
+        w32p(b + 32, 0);
+        w32p(b + 20, (uint32_t)(stride_of(dw_, dbpp) * Hd));
+    }
+    if (bits) return copied;
+    return 1;
 }
 
 extern "C" int GetDeviceCaps(HDC hd, int idx)

@@ -619,3 +619,235 @@ TEST(u32c_enum_display_devices_reference_strings)
     CHECK(EnumDisplayDevicesA("\\\\.\\DISPLAY1", 0, &d, 1));
     CHECK_STR(d.id, "\\\\?\\DISPLAY#Default_Monitor#0000&0000#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}");
 }
+
+/* ---- group 7: CreateDIBSection over a section, GetDIBits */
+extern "C" {
+HBITMAP CreateDIBSection(HDC, const void *, UINT, void **, HANDLE, DWORD);
+int GetDIBits(HDC, HBITMAP, UINT, UINT, void *, void *, UINT);
+HDC CreateCompatibleDC(HDC);
+BOOL DeleteDC(HDC);
+BOOL DeleteObject(HGDIOBJ);
+HGDIOBJ SelectObject(HDC, HGDIOBJ);
+HANDLE CreateFileMappingA(HANDLE, void *, DWORD, DWORD, DWORD, LPCSTR);
+LPVOID MapViewOfFile(HANDLE, DWORD, DWORD, DWORD, SIZE_T);
+BOOL UnmapViewOfFile(LPCVOID);
+BOOL CloseHandle(HANDLE);
+}
+namespace {
+struct BI { uint8_t b[40 + 1024]; };
+void w32(uint8_t *p, uint32_t v) { memcpy(p, &v, 4); }
+uint32_t r32(const uint8_t *p) { uint32_t v; memcpy(&v, p, 4); return v; }
+void mkbi(BI &x, int w, int h, int bpp, uint32_t comp = 0)
+{
+    memset(&x, 0, sizeof x);
+    w32(x.b, 40); w32(x.b + 4, (uint32_t)w); w32(x.b + 8, (uint32_t)h); x.b[12] = 1; x.b[14] = (uint8_t)bpp; w32(x.b + 16, comp);
+}
+uint32_t quad(const BI &x, int i) { return r32(x.b + 40 + 4 * i) & 0xFFFFFF; }
+}
+
+TEST(u32c_dibsection_over_section)
+{
+    BI bi;
+    mkbi(bi, 4, 4, 32);
+    HANDLE sec = CreateFileMappingA((HANDLE)(intptr_t)-1, NULL, PAGE_READWRITE, 0, 0x20000, NULL);
+    CHECK(sec != NULL);
+    void *bits = NULL;
+    HBITMAP bm = CreateDIBSection(NULL, &bi, 0, &bits, sec, 0x10008);       /* a section offset above the allocation granularity, dword aligned */
+    CHECK(bm != NULL && bits != NULL);
+    CHECK_EQ(((uintptr_t)bits) & 3, 0);
+    if (bits) memset(bits, 0xAB, 64);
+    void *view = MapViewOfFile(sec, 0x4 /* FILE_MAP_READ */, 0, 0x10000, 0x1000);
+    CHECK(view != NULL);
+    if (view) CHECK_EQ(((uint8_t *)view)[8], 0xAB);                         /* the bits live in the section */
+    if (view && bits) ((uint8_t *)bits)[0] = 0x5A;
+    if (view) CHECK_EQ(((uint8_t *)view)[8], 0x5A);
+    CloseHandle(sec);                                                        /* the bitmap keeps the section referenced */
+    if (bits) CHECK_EQ(((uint8_t *)bits)[0], 0x5A);
+    HDC dc = CreateCompatibleDC(NULL);
+    HGDIOBJ old = SelectObject(dc, bm);
+    CHECK(old != NULL);
+    SelectObject(dc, old); DeleteDC(dc);
+    CHECK(DeleteObject(bm));
+    if (view) UnmapViewOfFile(view);
+    /* failures: offset not a multiple of 4, no room, a read-only section, a handle that is not a section */
+    sec = CreateFileMappingA((HANDLE)(intptr_t)-1, NULL, PAGE_READWRITE, 0, 0x1000, NULL);
+    SetLastError(0);
+    bits = (void *)1;
+    CHECK(CreateDIBSection(NULL, &bi, 0, &bits, sec, 2) == NULL); CHECK_EQ(GetLastError(), 87); CHECK(bits == NULL);
+    mkbi(bi, 64, 64, 32);                                                    /* 16 KiB do not fit a 4 KiB section */
+    CHECK(CreateDIBSection(NULL, &bi, 0, &bits, sec, 0) == NULL);
+    mkbi(bi, 4, 4, 32);
+    CHECK(CreateDIBSection(NULL, &bi, 0, &bits, sec, 0x1000) == NULL);       /* starts at the end */
+    HBITMAP ok = CreateDIBSection(NULL, &bi, 0, &bits, sec, 0xFC0);          /* ends exactly at the end */
+    CHECK(ok != NULL);
+    if (ok) DeleteObject(ok);
+    CHECK(CreateDIBSection(NULL, &bi, 0, &bits, (HANDLE)(uintptr_t)0x1234, 0) == NULL);
+    CloseHandle(sec);
+    HANDLE ro = CreateFileMappingA((HANDLE)(intptr_t)-1, NULL, PAGE_READONLY, 0, 0x1000, NULL);
+    CHECK(CreateDIBSection(NULL, &bi, 0, &bits, ro, 0) == NULL);             /* read-only sections are not supported */
+    CloseHandle(ro);
+    HANDLE cow = CreateFileMappingA((HANDLE)(intptr_t)-1, NULL, PAGE_WRITECOPY, 0, 0x1000, NULL);
+    HBITMAP cb = CreateDIBSection(NULL, &bi, 0, &bits, cow, 0);              /* PAGE_WRITECOPY is accepted */
+    CHECK(cb != NULL);
+    if (cb) DeleteObject(cb);
+    CloseHandle(cow);
+}
+
+TEST(u32c_dibsection_core_header)
+{
+    uint8_t core[12 + 3 * 2];
+    memset(core, 0, sizeof core);
+    w32(core, 12); core[4] = 3; core[6] = 2; core[8] = 1; core[10] = 1;      /* a 3 x 2, 1-bit BITMAPCOREHEADER */
+    core[12] = 0x10; core[13] = 0x20; core[14] = 0x30; core[15] = 0xA0; core[16] = 0xB0; core[17] = 0xC0;   /* RGBTRIPLE: blue, green, red */
+    void *bits = NULL;
+    HBITMAP bm = CreateDIBSection(NULL, core, 0, &bits, NULL, 0);
+    CHECK(bm != NULL && bits != NULL);
+    HDC dc = CreateCompatibleDC(NULL);
+    BI out; mkbi(out, 0, 0, 0);
+    CHECK_EQ(GetDIBits(dc, bm, 0, 0, NULL, out.b, 0), 2);                    /* described: the height */
+    CHECK_EQ(r32(out.b + 4), 3u); CHECK_EQ(r32(out.b + 8), 2u); CHECK_EQ(out.b[14], 1);
+    BI q; mkbi(q, 3, 2, 1);
+    uint8_t px[16];
+    CHECK_EQ(GetDIBits(dc, bm, 0, 2, px, q.b, 0), 2);
+    CHECK_EQ(quad(q, 0), 0x302010u);                                         /* triple: B=0x10 G=0x20 R=0x30 */
+    CHECK_EQ(quad(q, 1), 0xC0B0A0u);
+    DeleteObject(bm); DeleteDC(dc);
+    core[6] = 0;
+    CHECK(CreateDIBSection(NULL, core, 0, &bits, NULL, 0) == NULL);          /* a zero height */
+}
+
+TEST(u32c_getdibits_default_tables_and_pal_colors)
+{
+    HDC dc = CreateCompatibleDC(NULL);
+    BI src; mkbi(src, 2, 1, 32);
+    void *bits;
+    HBITMAP bm = CreateDIBSection(NULL, &src, 0, &bits, NULL, 0);
+    ((uint32_t *)bits)[0] = 0xFF0000; ((uint32_t *)bits)[1] = 0x0000FF;
+    uint8_t buf[64];
+    BI t; mkbi(t, 2, 1, 8);                                                  /* 8 bits: the 256-colour default table */
+    CHECK_EQ(GetDIBits(dc, bm, 0, 1, buf, t.b, 0), 1);
+    CHECK_EQ(quad(t, 0), 0x000000u); CHECK_EQ(quad(t, 1), 0x800000u); CHECK_EQ(quad(t, 7), 0xC0C0C0u); CHECK_EQ(quad(t, 8), 0xC0DCC0u);
+    CHECK_EQ(quad(t, 9), 0xA6CAF0u);
+    CHECK_EQ(quad(t, 10), 0x402000u);                                        /* lattice entry 10: red 0x40, green 0x20, blue 0 */
+    CHECK_EQ(quad(t, 64), 0x000040u);                                        /* blue steps by 0x40 every 64 entries */
+    CHECK_EQ(quad(t, 246), 0xFFFBF0u); CHECK_EQ(quad(t, 249), 0xFF0000u); CHECK_EQ(quad(t, 255), 0xFFFFFFu);
+    CHECK_EQ(quad(t, 100), (uint32_t)((4 * 0x20) << 16 | (4 * 0x20) << 8 | 1 * 0x40));
+    CHECK_EQ(buf[0], 249); CHECK_EQ(buf[1], 252);                            /* red, blue: exact entries */
+    BI f; mkbi(f, 2, 1, 4);                                                  /* 4 bits: the 16 VGA colours in the reference's order */
+    CHECK_EQ(GetDIBits(dc, bm, 0, 1, buf, f.b, 0), 1);
+    CHECK_EQ(quad(f, 7), 0x808080u); CHECK_EQ(quad(f, 8), 0xC0C0C0u); CHECK_EQ(quad(f, 9), 0xFF0000u); CHECK_EQ(quad(f, 12), 0x0000FFu);
+    BI m; mkbi(m, 2, 1, 1);
+    CHECK_EQ(GetDIBits(dc, bm, 0, 1, buf, m.b, 0), 1);
+    CHECK_EQ(quad(m, 0), 0u); CHECK_EQ(quad(m, 1), 0xFFFFFFu);
+    /* DIB_PAL_COLORS: the table is the indices, the pixels are matched against the DC's palette (the 20 system colours) */
+    BI p; mkbi(p, 2, 1, 8);
+    CHECK_EQ(GetDIBits(dc, bm, 0, 1, buf, p.b, 1), 1);
+    bool ident = true;
+    for (int i = 0; i < 256; i++) { uint16_t ix; memcpy(&ix, p.b + 40 + 2 * i, 2); ident = ident && ix == i; }
+    CHECK(ident);
+    CHECK_EQ(buf[0], 13); CHECK_EQ(buf[1], 16);                              /* 0xFF0000 and 0x0000FF are system entries 13 and 16 */
+    CHECK_EQ(GetDIBits(dc, bm, 0, 1, buf, p.b, 2), 0);                       /* DIB_PAL_INDICES is not for GetDIBits */
+    DeleteObject(bm); DeleteDC(dc);
+}
+
+TEST(u32c_getdibits_scan_lines_and_padding)
+{
+    HDC dc = CreateCompatibleDC(NULL);
+    BI src; mkbi(src, 2, 4, 32);
+    void *bits;
+    HBITMAP bm = CreateDIBSection(NULL, &src, 0, &bits, NULL, 0);
+    uint32_t *px = (uint32_t *)bits;                                         /* bottom-up: row 0 of memory is the bottom line */
+    for (int line = 0; line < 4; line++) for (int x = 0; x < 2; x++) px[line * 2 + x] = 0x100 * (line + 1) + x;
+    uint32_t out[16];
+    BI q; mkbi(q, 2, 4, 32);
+    memset(out, 0xEE, sizeof out);
+    CHECK_EQ(GetDIBits(dc, bm, 1, 2, out, q.b, 0), 2);                       /* scan lines 1 and 2, counted from the bottom */
+    CHECK_EQ(out[0], 0x200u); CHECK_EQ(out[2], 0x300u);
+    CHECK_EQ(out[4], 0xEEEEEEEEu);                                           /* nothing past the block */
+    mkbi(q, 2, -4, 32);                                                      /* top-down: the same block, upper line first */
+    memset(out, 0xEE, sizeof out);
+    CHECK_EQ(GetDIBits(dc, bm, 1, 2, out, q.b, 0), 2);
+    CHECK_EQ(out[0], 0x300u); CHECK_EQ(out[2], 0x200u);
+    mkbi(q, 2, 4, 32);
+    CHECK_EQ(GetDIBits(dc, bm, 3, 9, out, q.b, 0), 1); CHECK_EQ(out[0], 0x400u);   /* clamped to the header's height */
+    CHECK_EQ(GetDIBits(dc, bm, 4, 1, out, q.b, 0), 1);                       /* beyond the height: no bits, a description (reference: 1) */
+    CHECK_EQ(GetDIBits(dc, bm, 0, 0, out, q.b, 0), 1);
+    /* a header taller than the bitmap: the lines the bitmap does not have are zero and not counted */
+    mkbi(q, 2, 6, 32);
+    memset(out, 0xEE, sizeof out);
+    CHECK_EQ(GetDIBits(dc, bm, 0, 6, out, q.b, 0), 4);
+    CHECK_EQ(out[0], 0u); CHECK_EQ(out[3], 0u); CHECK_EQ(out[4], 0x100u); CHECK_EQ(out[10], 0x400u);   /* bottom-up: the missing lines lie below the bitmap, first in memory */
+    /* a narrower header copies the columns that exist */
+    mkbi(q, 1, 4, 32);
+    memset(out, 0xEE, sizeof out);
+    CHECK_EQ(GetDIBits(dc, bm, 0, 4, out, q.b, 0), 4);
+    CHECK_EQ(out[0], 0x100u); CHECK_EQ(out[3], 0x400u);
+    DeleteObject(bm); DeleteDC(dc);
+}
+
+TEST(u32c_getdibits_formats_and_masks)
+{
+    HDC dc = CreateCompatibleDC(NULL);
+    BI src; mkbi(src, 1, 1, 24);
+    void *bits;
+    HBITMAP bm = CreateDIBSection(NULL, &src, 0, &bits, NULL, 0);
+    ((uint8_t *)bits)[0] = 0xFF; ((uint8_t *)bits)[1] = 0x80; ((uint8_t *)bits)[2] = 0x00;   /* B G R */
+    uint8_t buf[16];
+    BI q; mkbi(q, 1, 1, 16, 3);                                              /* 16 bits with the caller's 5-6-5 masks */
+    w32(q.b + 40, 0xF800); w32(q.b + 44, 0x07E0); w32(q.b + 48, 0x001F);
+    CHECK_EQ(GetDIBits(dc, bm, 0, 1, buf, q.b, 0), 1);
+    uint16_t v;
+    memcpy(&v, buf, 2);
+    CHECK_EQ(v, (uint16_t)(0x001F | (0x20 << 5)));                           /* blue 0xFF -> 31, green 0x80 -> 32 (6 bits), red 0 */
+    mkbi(q, 1, 1, 16);                                                       /* BI_RGB 16 bits is 5-5-5 */
+    CHECK_EQ(GetDIBits(dc, bm, 0, 1, buf, q.b, 0), 1);
+    memcpy(&v, buf, 2); CHECK_EQ(v, (uint16_t)(0x001F | (0x10 << 5)));
+    mkbi(q, 1, 1, 24);                                                       /* the same depth: the bytes are copied */
+    CHECK_EQ(GetDIBits(dc, bm, 0, 1, buf, q.b, 0), 1);
+    CHECK(buf[0] == 0xFF && buf[1] == 0x80 && buf[2] == 0x00);
+    CHECK_EQ(r32(q.b + 32), 0u);                                             /* biClrUsed is returned 0 */
+    CHECK_EQ(r32(q.b + 20), 4u);                                             /* biSizeImage: the padded size */
+    /* invalid requests */
+    mkbi(q, 1, 1, 24, 3);                                                    /* BI_BITFIELDS at 24 bits */
+    CHECK_EQ(GetDIBits(dc, bm, 0, 1, buf, q.b, 0), 0);
+    mkbi(q, 1, 1, 16, 3);
+    w32(q.b + 40, 0xFF00); w32(q.b + 44, 0x0FF0); w32(q.b + 48, 0);         /* overlapping masks */
+    CHECK_EQ(GetDIBits(dc, bm, 0, 1, buf, q.b, 0), 0);
+    mkbi(q, 1, 1, 24, 4);                                                    /* BI_JPEG with a buffer */
+    CHECK_EQ(GetDIBits(dc, bm, 0, 1, buf, q.b, 0), 0);
+    mkbi(q, 0, 1, 24); CHECK_EQ(GetDIBits(dc, bm, 0, 1, buf, q.b, 0), 0);   /* zero width */
+    mkbi(q, 1, 0, 24); CHECK_EQ(GetDIBits(dc, bm, 0, 1, buf, q.b, 0), 0);
+    mkbi(q, 1, 1, 24); w32(q.b, 24); CHECK_EQ(GetDIBits(dc, bm, 0, 1, buf, q.b, 0), 0);   /* a header size that is none */
+    mkbi(q, 1, 1, 24); q.b[12] = 0; CHECK_EQ(GetDIBits(dc, bm, 0, 1, buf, q.b, 0), 0);   /* no planes */
+    /* RLE: described when no bits are asked for, never retrieved */
+    mkbi(q, 1, 1, 8, 1);
+    CHECK_EQ(GetDIBits(dc, bm, 0, 1, buf, q.b, 0), 0);
+    CHECK(GetDIBits(dc, bm, 0, 0, NULL, q.b, 0) != 0);
+    mkbi(q, 1, -1, 8, 1); CHECK_EQ(GetDIBits(dc, bm, 0, 0, NULL, q.b, 0), 0);               /* RLE is bottom-up only */
+    mkbi(q, 1, 1, 4, 2); CHECK(GetDIBits(dc, bm, 0, 0, NULL, q.b, 0) != 0);
+    mkbi(q, 1, 1, 8, 2); CHECK_EQ(GetDIBits(dc, bm, 0, 0, NULL, q.b, 0), 0);               /* BI_RLE4 is 4 bits */
+    DeleteObject(bm); DeleteDC(dc);
+}
+
+TEST(u32c_getdibits_same_depth_keeps_the_table_and_masks)
+{
+    HDC dc = CreateCompatibleDC(NULL);
+    BI src; mkbi(src, 2, 1, 8);
+    w32(src.b + 40, 0x00112233); w32(src.b + 44, 0x00445566); w32(src.b + 48, 0x00778899);
+    void *bits;
+    HBITMAP bm = CreateDIBSection(NULL, &src, 0, &bits, NULL, 0);
+    ((uint8_t *)bits)[0] = 1; ((uint8_t *)bits)[1] = 2;
+    uint8_t buf[8];
+    BI q; mkbi(q, 2, 1, 8);
+    CHECK_EQ(GetDIBits(dc, bm, 0, 1, buf, q.b, 0), 1);                       /* same depth: the DIB's own table, the indices copied */
+    CHECK_EQ(quad(q, 0), 0x112233u); CHECK_EQ(quad(q, 1), 0x445566u); CHECK_EQ(quad(q, 2), 0x778899u);
+    CHECK(buf[0] == 1 && buf[1] == 2);
+    BI d; mkbi(d, 1, 1, 32, 3); w32(d.b + 40, 0xFF0000); w32(d.b + 44, 0xFF00); w32(d.b + 48, 0xFF);
+    void *b2;
+    HBITMAP b32 = CreateDIBSection(NULL, &d, 0, &b2, NULL, 0);
+    BI r; mkbi(r, 1, 1, 32);
+    uint32_t px;
+    CHECK_EQ(GetDIBits(dc, b32, 0, 1, &px, r.b, 0), 1);
+    CHECK_EQ(r32(r.b + 40), 0xFF0000u); CHECK_EQ(r32(r.b + 44), 0xFF00u); CHECK_EQ(r32(r.b + 48), 0xFFu);   /* the masks come back */
+    DeleteObject(bm); DeleteObject(b32); DeleteDC(dc);
+}

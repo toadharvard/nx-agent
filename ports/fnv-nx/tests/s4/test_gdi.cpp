@@ -463,10 +463,10 @@ TEST(gdi_getdibits_conversions)
     for (int y = 0; y < 3; y++) for (int x = 0; x < 5; x++) put(d, x, y, C[y][x]);
     tbmi b; mkbmi(b, 0, 0, 0);
     uint8_t buf[256];
-    CHECK(GetDIBits(d.dc, d.bm, 0, 3, NULL, &b, 0) == 0);          /* selected into a DC: fails */
+    CHECK(GetDIBits(d.dc, d.bm, 0, 3, NULL, &b, 0) != 0);          /* selected into a DC: the reference answers (MSDN says "must not be", Windows does) */
     SelectObject(d.dc, d.prev);
     CHECK(GetDIBits(d.dc, d.bm, 0, 3, NULL, &b, 0) != 0);
-    CHECK_EQ(b.h.w, 5); CHECK_EQ(b.h.h, 3); CHECK_EQ(b.h.bc, 32); CHECK_EQ(b.h.planes, 1); CHECK_EQ(b.h.comp, 0);
+    CHECK_EQ(b.h.w, 5); CHECK_EQ(b.h.h, 3); CHECK_EQ(b.h.bc, 32); CHECK_EQ(b.h.planes, 1); CHECK_EQ(b.h.comp, 3);   /* the description of a 16 or 32-bit bitmap is BI_BITFIELDS (the reference); masks follow once the depth is asked for */
     CHECK_EQ(b.h.simg, 5 * 4 * 3);
     mkbmi(b, 5, 3, 24);
     memset(buf, 0xAA, sizeof buf);
@@ -482,8 +482,8 @@ TEST(gdi_getdibits_conversions)
     CHECK_EQ(GetDIBits(d.dc, d.bm, 1, 1, buf, &b, 0), 1);          /* one line: row 1 */
     CHECK(buf[0] == 0xFF && buf[1] == 0xFF && buf[2] == 0xFF);
     CHECK_EQ(GetDIBits(d.dc, d.bm, 2, 5, buf, &b, 0), 1);          /* clamped to the bitmap */
-    CHECK_EQ(GetDIBits(d.dc, d.bm, 3, 1, buf, &b, 0), 0);
-    CHECK_EQ(GetDIBits(d.dc, d.bm, 0, 0, buf, &b, 0), 0);
+    CHECK_EQ(GetDIBits(d.dc, d.bm, 3, 1, buf, &b, 0), 1);          /* no such line: no bits, the header is described (the reference's answer is 1) */
+    CHECK_EQ(GetDIBits(d.dc, d.bm, 0, 0, buf, &b, 0), 1);          /* no lines: the same */
     mkbmi(b, 5, -3, 8);                                            /* 32 -> 8: colour table filled, nearest entries */
     CHECK_EQ(GetDIBits(d.dc, d.bm, 0, 3, buf, &b, 0), 3);
     for (int y = 0; y < 3; y++) for (int x = 0; x < 5; x++) CHECK_EQ(b.t[buf[y * 8 + x]] & 0xFFFFFF, C[y][x]);
@@ -498,7 +498,8 @@ TEST(gdi_getdibits_conversions)
     CHECK_EQ(w16, 0x001F);
     /* failures */
     mkbmi(b, 5, 3, 24);
-    CHECK_EQ(GetDIBits(d.dc, d.bm, 0, 3, buf, &b, 1), 0);          /* usage other than DIB_RGB_COLORS */
+    CHECK_EQ(GetDIBits(d.dc, d.bm, 0, 3, buf, &b, 2), 0);          /* usage other than DIB_RGB_COLORS, DIB_PAL_COLORS */
+    CHECK_EQ(GetDIBits(d.dc, d.bm, 0, 3, buf, &b, 1), 3);          /* DIB_PAL_COLORS with a 24-bit target: no table to build */
     CHECK_EQ(GetDIBits(d.dc, d.bm, 0, 3, buf, NULL, 0), 0);
     CHECK_EQ(GetDIBits(d.dc, (HBITMAP)SO(0), 0, 3, buf, &b, 0), 0);
     CHECK_EQ(GetDIBits((HDC)(uintptr_t)4, d.bm, 0, 3, buf, &b, 0), 0);
