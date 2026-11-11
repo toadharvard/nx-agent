@@ -15,6 +15,7 @@ SPEC = os.path.join(HERE, "..", "spec", "d3d9_spec.json")
 RES_TYPES = {"IDirect3DSurface9": "SURFACE", "IDirect3DVolume9": None, "IDirect3DTexture9": "TEXTURE", "IDirect3DVolumeTexture9": "VOLUMETEXTURE",
              "IDirect3DCubeTexture9": "CUBETEXTURE", "IDirect3DVertexBuffer9": "VERTEXBUFFER", "IDirect3DIndexBuffer9": "INDEXBUFFER"}
 DEV = ["struct IDirect3DDevice9**"]
+NO_COMMON = {"IDirect3DShaderValidator9"}   # Wine 9.0 d3d9_main.c: one static stub object whose IUnknown is not the reference-counted NxObj model; dev/x1_validator.cpp defines every method
 # spec method name -> (NxObj member, ret, [ctypes]); checked against the spec, never guessed
 COMMON = {"QueryInterface": ("qi", "HRESULT", ["REFIID", "void**"]), "AddRef": ("addref", "ULONG", []), "Release": ("release", "ULONG", []),
           "GetDevice": ("getDevice", "HRESULT", DEV), "GetContainer": ("getContainer", "HRESULT", ["REFIID", "void**"]),
@@ -64,7 +65,7 @@ def main():
         cpp.append(f"static void nx_destroy_{c}(NxObj* o) {{ delete static_cast<{c}*>(o); }}")
         cpp.append(f"const NxClassInfo nx_ci_{c} = {{\"{i}\", nx_g_{c}, {len(chain)}, {'D3DRTYPE_' + t if t else 0}, &nx_destroy_{c}}};")
         for m in ms:
-            if m["name"] not in COMMON: continue
+            if m["name"] not in COMMON or i in NO_COMMON: continue
             mem, ret, cts = COMMON[m["name"]]
             if m["name"] == "GetType" and m["ret"] != "D3DRESOURCETYPE": continue
             nz = lambda x: x.replace(" ", "")

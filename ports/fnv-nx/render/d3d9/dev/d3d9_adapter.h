@@ -9,3 +9,5 @@ NxEnvProfile nx_env_profile();
 // Direct3DCreate9 returns NULL only when the allocation fails, Direct3DCreate9Ex returns D3DERR_NOTAVAILABLE then (E_OUTOFMEMORY for the allocation of the object itself).
 IDirect3D9* nx_Direct3DCreate9(UINT sdk);
 HRESULT nx_Direct3DCreate9Ex(UINT sdk, IDirect3D9Ex** out);
+// Direct3DShaderValidatorCreate9 (x1_validator.cpp): the ONE static stub object of Wine 9.0 d3d9_main.c, never freed.
+IDirect3DShaderValidator9* nx_Direct3DShaderValidatorCreate9(void);

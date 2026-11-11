@@ -27,6 +27,9 @@ void WINAPI D3DPERF_SetOptions(DWORD) {}
 void WINAPI D3DPERF_SetRegion(D3DCOLOR, LPCWSTR) {}
 IDirect3D9* WINAPI Direct3DCreate9(UINT sdk) { return nx_Direct3DCreate9(sdk); }
 HRESULT WINAPI Direct3DCreate9Ex(UINT sdk, IDirect3D9Ex** out) { return nx_Direct3DCreate9Ex(sdk, out); }
+// Wine 9.0 d3d9_main.c: `void WINAPI DebugSetMute(void) { /* nothing to do */ }` (contract_consts.tsv). D3DX pushes one word and removes it itself: the code of a 0-argument stdcall function is the same.
+void WINAPI DebugSetMute(void) {}
+IDirect3DShaderValidator9* WINAPI Direct3DShaderValidatorCreate9(void) { return nx_Direct3DShaderValidatorCreate9(); }
 
 // name -> body, sorted by name (the order of the spec's export table)
 static const struct { const char* name; void* fn; } g_exports[] = {
@@ -37,8 +40,10 @@ static const struct { const char* name; void* fn; } g_exports[] = {
     {"D3DPERF_SetMarker", (void*)D3DPERF_SetMarker},
     {"D3DPERF_SetOptions", (void*)D3DPERF_SetOptions},
     {"D3DPERF_SetRegion", (void*)D3DPERF_SetRegion},
+    {"DebugSetMute", (void*)DebugSetMute},
     {"Direct3DCreate9", (void*)Direct3DCreate9},
     {"Direct3DCreate9Ex", (void*)Direct3DCreate9Ex},
+    {"Direct3DShaderValidatorCreate9", (void*)Direct3DShaderValidatorCreate9},
 };
 
 // The resolver of the module "d3d9.dll" (signature of fnvnx_module_resolver, platform/include/fnvnx_win32_ext.h):

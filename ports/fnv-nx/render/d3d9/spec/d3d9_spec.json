@@ -64,7 +64,7 @@
   {"callconv":"stdcall","name":"DebugSetMute","params":[],"ret":"void","ret_cls":"det","ret_kind":"void"},
   {"callconv":"stdcall","iface":"IDirect3D9","name":"Direct3DCreate9","own":"new","params":[{"byref":false,"ctype":"UINT","dir":"in","kind":"value","name":"SDKVersion","signed":false,"size":4}],"ret":"IDirect3D9*","ret_cls":"env","ret_kind":"handle","ret_why":"fails (NULL) when the runtime does not support the SDK version"},
   {"callconv":"stdcall","name":"Direct3DCreate9Ex","params":[{"byref":false,"ctype":"UINT","dir":"in","kind":"value","name":"SDKVersion","signed":false,"size":4},{"byref":true,"cls":"det","ctype":"IDirect3D9Ex**","dir":"out","iface":"IDirect3D9Ex","kind":"handle","name":"ppD3D","null":true,"own":"new","when":"always"}],"ret":"HRESULT","ret_cls":"env","ret_kind":"hresult","ret_why":"Ex runtime availability is a property of the environment"},
-  {"callconv":"stdcall","iface":"IDirect3DShaderValidator9","name":"Direct3DShaderValidatorCreate9","own":"new","params":[],"ret":"IDirect3DShaderValidator9*","ret_cls":"env","ret_kind":"handle","ret_why":"fails (NULL) when the object cannot be allocated"},
+  {"callconv":"stdcall","iface":"IDirect3DShaderValidator9","name":"Direct3DShaderValidatorCreate9","own":"new","params":[],"ret":"IDirect3DShaderValidator9*","ret_cls":"det","ret_kind":"handle"},
   {"callconv":"stdcall","name":"PSGPError","note":"internal processor-specific-geometry-pipeline hook; not in the SDK; signature unknown","undocumented":true},
   {"callconv":"stdcall","name":"PSGPSampleTexture","note":"internal processor-specific-geometry-pipeline hook; not in the SDK; signature unknown","undocumented":true}
  ],

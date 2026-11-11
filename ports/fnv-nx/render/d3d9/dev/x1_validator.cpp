@@ -1,0 +1,40 @@
+// x1_validator.cpp: DebugSetMute, Direct3DShaderValidatorCreate9 and IDirect3DShaderValidator9, exactly what Wine 9.0 does (owner decision 2026-11-11 "Wine 9.0 as an acceptable implementation").
+// Source: wine-9.0 dlls/d3d9/d3d9_main.c (fetched, not from memory). Where Wine's body is a stub, the body does what Wine's does plus one log line (fnvnx_wine_fixme; ids = rows of verify/wine_fixme.tsv):
+//   DebugSetMute              `/* nothing to do */`, no log line in Wine: no log line here (contract_consts.tsv, kind void)
+//   Direct3DShaderValidatorCreate9   FIXME("Returning stub validator %p."); returns the ONE static object (the same pointer every call, never freed)      id 20
+//   QueryInterface            WARN("%s not implemented, returning E_NOINTERFACE."); *out = NULL; E_NOINTERFACE for EVERY iid (IUnknown included)        id 21
+//   AddRef / Release          TRACE only: return 2 / 1 (a static object has no count)
+//   Begin / Instruction / End WARN("... stub!"); S_OK, the arguments are not looked at                                                                    id 22 / 23 / 24
+// Layer-private exception: QueryInterface(IID_NxObj) (obj.h: the identity query nx_obj_of / nx_face use on every object of the layer, never an application iid) answers the object itself.
+// Evidence for the callers (D3DX call sites, shim/include/d3d9.h comment): D3DX calls Create with no arguments, Begin(callback, context, arg3), Instruction(file, line, tokens, count), End() and Release(),
+// all stdcall, and treats a NULL Create result or a failing Begin as "no validation"; it never calls QueryInterface.
+#include <atomic>
+#include <stdint.h>
+#include <string.h>
+#include "d9impl.gen.h"
+#include "face.h"
+extern "C" void fnvnx_wine_fixme(uint32_t id);   // loader/include/fnvnx_reach.h: writes one line and returns
+enum : uint32_t { NX_WINE_FIXME_ShaderValidatorCreate9 = 20, NX_WINE_FIXME_ShaderValidator_QueryInterface = 21, NX_WINE_FIXME_ShaderValidator_Begin = 22,
+                  NX_WINE_FIXME_ShaderValidator_Instruction = 23, NX_WINE_FIXME_ShaderValidator_End = 24 };   // verify/wine_fixme.tsv
+HRESULT STDMETHODCALLTYPE NxShaderValidator9::QueryInterface(REFIID riid, void** out) {
+    fnvnx_wine_fixme(NX_WINE_FIXME_ShaderValidator_QueryInterface);
+    if (!out) return E_POINTER;   // Wine writes *out unconditionally (a fault); the defined error is the layer's closed choice (README "Decided with doubt")
+    if (!memcmp(&riid, &IID_NxObj, sizeof(GUID))) { *out = static_cast<NxObj*>(this); return S_OK; }
+    *out = nullptr; return E_NOINTERFACE;
+}
+ULONG STDMETHODCALLTYPE NxShaderValidator9::AddRef() { return 2; }
+ULONG STDMETHODCALLTYPE NxShaderValidator9::Release() { return 1; }
+HRESULT STDMETHODCALLTYPE NxShaderValidator9::Begin(D3DSHADERVALIDATORCALLBACK, void*, DWORD_PTR) { fnvnx_wine_fixme(NX_WINE_FIXME_ShaderValidator_Begin); return S_OK; }
+HRESULT STDMETHODCALLTYPE NxShaderValidator9::Instruction(const char*, int, const DWORD*, unsigned int) { fnvnx_wine_fixme(NX_WINE_FIXME_ShaderValidator_Instruction); return S_OK; }
+HRESULT STDMETHODCALLTYPE NxShaderValidator9::End() { fnvnx_wine_fixme(NX_WINE_FIXME_ShaderValidator_End); return S_OK; }
+
+// the one static object, behind its guest face (face.h); made on first use (0 = not made, 1 = being made, 2 = made)
+alignas(8) static unsigned char g_mem[NX_FACE_SIZE + sizeof(NxShaderValidator9)];
+static std::atomic<int> g_state{0};
+IDirect3DShaderValidator9* nx_Direct3DShaderValidatorCreate9(void) {
+    fnvnx_wine_fixme(NX_WINE_FIXME_ShaderValidatorCreate9);
+    int z = 0;
+    if (g_state.compare_exchange_strong(z, 1)) { ::new (g_mem + NX_FACE_SIZE) NxShaderValidator9(); g_state.store(2); }
+    else while (g_state.load() != 2) {}
+    return static_cast<NxShaderValidator9*>(reinterpret_cast<NxShaderValidator9*>(g_mem + NX_FACE_SIZE));
+}

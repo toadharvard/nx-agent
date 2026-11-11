@@ -45,7 +45,7 @@ UAM=${FNVNX_SHADERS_DEPS:-$ROOT/render/shaders/build/deps}/uam/build/uam
 "${PY[@]}" "$HERE/ffp/gen_glsl.py" "$GEN" --uam "$UAM"
 
 # ---- flags (platform/build_guest.sh ARCH + COMMON without -w)
-ARCH=(-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-pie -ftls-model=local-exec -fsigned-char)
+ARCH=(-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE -ftls-model=local-exec -fsigned-char)
 COMMON=("${ARCH[@]}" -O2 -g -ffunction-sections -fdata-sections -frounding-math -fshort-wchar -Wall
         "-ffile-prefix-map=$ROOT=." "-ffile-prefix-map=$OUT=out")
 INC=("-I$ROOT/shim/include" "-I$GEN" "-I$HERE/dev" "-I$HERE/front" "-I$HERE/backend")

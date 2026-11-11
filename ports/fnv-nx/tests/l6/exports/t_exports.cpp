@@ -7,6 +7,8 @@ extern "C" { void* nx_d3d9_export(const char*); int nx_d3d9_export_count(void); 
 // test-provided factory bodies (the product ones are d3d9_adapter.cpp): distinct marks show which body an export reaches
 IDirect3D9* nx_Direct3DCreate9(UINT sdk) { return (IDirect3D9*)(uintptr_t)(0x1000 + sdk); }
 HRESULT nx_Direct3DCreate9Ex(UINT sdk, IDirect3D9Ex** out) { *out = (IDirect3D9Ex*)(uintptr_t)(0x2000 + sdk); return (HRESULT)sdk; }
+IDirect3DShaderValidator9* nx_Direct3DShaderValidatorCreate9(void) { return (IDirect3DShaderValidator9*)(uintptr_t)0x3000; }
+extern "C" void fnvnx_wine_fixme(uint32_t) {}
 static int fails = 0, checks = 0;
 #define CHECK(c) do { checks++; if (!(c)) { fails++; printf("FAIL %s (line %d)\n", #c, __LINE__); } } while (0)
 template <class F> static F ex(const char* n) { return (F)nx_d3d9_export(n); }
@@ -26,6 +28,8 @@ int main() {
     CHECK(end() == -1); CHECK(begin(0, name) == -1); CHECK(begin(0, name) == 0); CHECK(end() == 0);     // the level is a plain signed counter in the reference: unbalanced End goes below zero
     CHECK(ex<IDirect3D9* (WINAPI*)(UINT)>("Direct3DCreate9")(32) == (IDirect3D9*)(uintptr_t)0x1020);
     IDirect3D9Ex* x = nullptr; CHECK(ex<HRESULT (WINAPI*)(UINT, IDirect3D9Ex**)>("Direct3DCreate9Ex")(7, &x) == 7 && x == (IDirect3D9Ex*)(uintptr_t)0x2007);
+    ex<void (WINAPI*)(void)>("DebugSetMute")();
+    CHECK(ex<IDirect3DShaderValidator9* (WINAPI*)(void)>("Direct3DShaderValidatorCreate9")() == (IDirect3DShaderValidator9*)(uintptr_t)0x3000);
     printf("PART exports: %d checks, %d failed\n", checks, fails);
     return fails != 0;
 }

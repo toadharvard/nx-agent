@@ -32,7 +32,7 @@ def exports():
         _fn("D3DPERF_SetRegion", "void", [col, ev], "void"),
         _undoc("DebugSetLevel", "export of the debug runtime; not in the SDK headers and absent from Wine; signature unknown"),
         _fn("DebugSetMute", "void", [], "void"),
-        _fn("Direct3DShaderValidatorCreate9", "IDirect3DShaderValidator9*", [], "handle", "env", "fails (NULL) when the object cannot be allocated", iface="IDirect3DShaderValidator9", own="new"),
+        _fn("Direct3DShaderValidatorCreate9", "IDirect3DShaderValidator9*", [], "handle", "det", None, iface="IDirect3DShaderValidator9", own="new"),
         _undoc("PSGPError", "internal processor-specific-geometry-pipeline hook; not in the SDK; signature unknown"),
         _undoc("PSGPSampleTexture", "internal processor-specific-geometry-pipeline hook; not in the SDK; signature unknown"),
     ]
