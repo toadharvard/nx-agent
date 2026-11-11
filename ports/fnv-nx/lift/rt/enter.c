@@ -41,7 +41,7 @@ static void cpu_reset(struct cpu *p, u32 sp, u32 teb)
 {
     u32 *z = (u32 *)p;
     for (u32 i = 0; i < sizeof *p / 4; i++) z[i] = 0;
-    p->r[4] = sp; p->fs = teb; p->fcw = 0x027f; p->mxcsr = 0x1f80;
+    p->r[4] = sp; fnvl_seg_init(p, teb); p->fcw = 0x027f; p->mxcsr = 0x1f80;      /* segment state: process constants, fs base = teb (rt/fnvl.h) */
 }
 static inline void fp_set(u32 fpcr, u32 fpsr) { u64 a = fpcr, b = fpsr; __asm__ volatile("msr fpcr, %0\n msr fpsr, %1" :: "r"(a), "r"(b)); }
 static inline void fp_park(void)

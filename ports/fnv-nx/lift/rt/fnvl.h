@@ -9,7 +9,7 @@ typedef union { u32 u[4]; float f[4]; double d[2]; u64 q[2]; u8 b[16]; s8 sb[16]
    3/4/5 I16/I32/I64 (v = the integer sign-extended to 64 bits), 6 M80 (v = significand, e = sign<<15|exp). rt/fnvl_x87.h */
 struct fv { u64 v; u32 e; u32 k; };
 struct fnvl_nframe;   /* rt/imp.h: one per live import entry of the thread (native frames between lifted frames) */
-struct cpu { u32 r[8]; u32 fs; u32 ftop, ftag, fcw, fc; double st[8]; xmm_t x[8]; u32 fl; u32 mxcsr; u64 mm[8]; u32 ra; u32 fex; fv fx[8]; u32 eflx; struct fnvl_nframe *nf; u32 hfpcr, hfpsr; };   /* mxcsr (reset 0x1f80) and mm0-7 are appended: SSE family (W6). r[] is only the save area of the
+struct cpu { u32 r[8]; u32 fs; u32 ftop, ftag, fcw, fc; double st[8]; xmm_t x[8]; u32 fl; u32 mxcsr; u64 mm[8]; u32 ra; u32 fex; fv fx[8]; u32 eflx; struct fnvl_nframe *nf; u32 hfpcr, hfpsr; u32 sel[6]; u32 teb; };   /* mxcsr (reset 0x1f80) and mm0-7 are appended: SSE family (W6). r[] is only the save area of the
    entry/exit bridges (fnvl_enter): while lifted code runs the eight guest registers live in w19..w26. ra: the address the last `ret` popped (control-transfer rule, README).
    x87 (W13): fx[8] are the PHYSICAL registers (carriers; k==0 is the empty tag), ftop the TOP, fcw the control word, fex the exception status bits that the host FPSR cannot
    hold (invalid + stack fault of an overflow/underflow). eflx (W14): the EFLAGS bits AC (18) and ID (21), the only non-arithmetic bits pushfd/popfd keep (reset 0; see EFL_PUSH). `st` and `ftag` are the pre-R8 double stack and tag word: unused, kept so the offsets of the other fields hold. */
@@ -134,6 +134,8 @@ extern "C" { void fnvl_cpuid(u32 leaf, u32 sub, u32 out[4]); u64 fnvl_rdtsc(void
    FNVL_STEP 10  STATUS_SINGLE_STEP 0x80000004 (`int1` / icebp, F1: a debug TRAP): ExceptionAddress = Context.Eip = at, which is the address of the NEXT instruction
    (KiTrap01: KiDispatchException0Args(STATUS_SINGLE_STEP, TrapFrame->Eip), no parameters). */
 #define FNVL_STEP 10
+/* FNVL_LOCK 11  STATUS_INVALID_LOCK_SEQUENCE 0xC000001E: #UD of an instruction that has an F0 prefix among its bytes (KiTrap06Handler); at = the instruction, a fault. */
+#define FNVL_LOCK 11
 /* Segment registers of the process model (rt/seh.c CONTEXT values above): index into the register file. Every segment has base 0 and limit 4 GiB except FS
    (base = TEB, limit 0xFFF); the only descriptors a ring-3 load can reach are the three of the model GDT below, plus the null selector for ES/DS/FS/GS.
    SELK strips the RPL: it keeps the descriptor index and the TI bit (a TI=1 selector names the LDT, which a Win32 process has none of: always invalid). */
@@ -159,7 +161,13 @@ static inline u32 fnvl_seg_ok(u32 idx, u32 sel){ u32 k=SELK(sel);
 /* Segment register STATE (lead): fnvl_seg_set(c, idx, sel): c->sel[idx] = sel and, for FS, c->fs = (SELK(sel)==SELK(SEL_FS)) ? c->teb : 0 (a flat selector has base 0; the null
    selector leaves no usable base); fnvl_seg_get(c, idx) reads c->sel[idx] (CS: SEL_CS). The caller has already checked fnvl_seg_ok. The lifter emits fnvl_seg_set only for a load
    instruction and, while f_int.SEG_STATE is False, still reads the register as the process constant of SEGSEL. */
-extern "C" { void fnvl_seg_set(struct cpu*, u32 idx, u32 sel); u32 fnvl_seg_get(struct cpu*, u32 idx); }
+static inline void fnvl_seg_set(struct cpu *p, u32 idx, u32 sel){ p->sel[idx]=sel; if(idx==SEG_FS) p->fs=(SELK(sel)==SELK(SEL_FS))?p->teb:0u; }
+static inline u32 fnvl_seg_get(struct cpu *p, u32 idx){ return p->sel[idx]; }
+/* Segment state of a fresh thread (rt/enter.c cpu_reset): the process constants of a native 32-bit Windows 7 user process (rt/seh.c make_context): CS 0x1b, DS=ES=SS 0x23, FS 0x3b with
+   base = TEB, GS null. struct cpu.sel is indexed ES, CS, SS, DS, FS, GS (SEG_*); sel and teb are the last fields of struct cpu. */
+static inline void fnvl_seg_init(struct cpu *p, u32 teb){ p->teb=teb; p->sel[SEG_ES]=SEL_DS; p->sel[SEG_CS]=SEL_CS; p->sel[SEG_SS]=SEL_DS; p->sel[SEG_DS]=SEL_DS; p->sel[SEG_FS]=SEL_FS; p->sel[SEG_GS]=0u; p->fs=teb; }
+/* Base of a `gs:` access, by the CURRENT GS selector (the null selector never gets here: the lifter emits a #GP(0) guard before the instruction): the FS descriptor -> TEB, a flat one -> 0. */
+#define FNVL_GS_BASE() (SELK(c->sel[SEG_GS])==SELK(SEL_FS)?c->teb:0u)
 /* Descriptor-table registers as sgdt/sidt/sldt/str/smsw read them (readable at CPL 3, CR4.UMIP = 0). The reference OS state is not derivable from the instruction set, so the
    model fixes it: GDT/IDT in kernel space with the standard NT x86 sizes (GDT 128 descriptors, IDT 256 gates), no LDT (selector 0), TR = KGDT_TSS 0x28 (RPL 0),
    MSW/CR0 = PG|WP|NE|ET|MP|PE with TS clear: 0x80010033. */

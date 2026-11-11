@@ -1,7 +1,7 @@
 /* What the OS does on a hardware exception in a Win32 process, on the guest state (R4). C++ (it includes fnvl.h: guest registers w19..w26,
    c in x27); compile with the lifted-code flags, -x c++, WITHOUT -DFNVL_TRACE:  aarch64-linux-gnu-g++ -x c++ <FLAGS> -c seh.c
    Entry points:
-     fnvl_raise(code, at)            hardware fault of the instruction at guest address `at` (code: FNVL_DE0/DEOVF/BP/UD) -- called by lifted code
+     fnvl_raise(code, at)            hardware fault of the instruction at guest address `at` (code: the FNVL_* list of fnvl.h, a total switch) -- called by lifted code
      fnvl_raise_av(access, addr, at) access violation (access 0 read, 1 write, 8 execute); the host fault handler calls it with the guest eip
      fnvl_os_RtlUnwind, fnvl_os_RaiseException   guest entries of the two kernel32 services (stdcall: arguments on the guest stack, `ret 16`)
    Contract after return: ContinueExecution -> guest registers loaded from the CONTEXT and c->ra = Context.Eip; a handler that left by a
@@ -45,7 +45,8 @@ static u32 make_context(u32 top, u32 sp, u32 eip) {      /* placed below `top`; 
     u32 tag = 0; for (int i = 0; i < 8; i++) tag |= ((c->ftag >> i & 1) ? 0u : 3u) << 2 * i;
     M32(x + C_FLOAT + 8) = tag;
     for (int i = 0; i < 8; i++) f80(x + C_FLOAT + 28 + 10 * i, c->st[(c->ftop + i) & 7]);
-    M32(x + C_FS) = 0x3B; M32(x + C_ES) = 0x23; M32(x + C_DS) = 0x23; M32(x + C_CS) = 0x1B; M32(x + C_SS) = 0x23;
+    M32(x + C_GS) = fnvl_seg_get(c, SEG_GS); M32(x + C_FS) = fnvl_seg_get(c, SEG_FS); M32(x + C_ES) = fnvl_seg_get(c, SEG_ES); M32(x + C_DS) = fnvl_seg_get(c, SEG_DS);
+    M32(x + C_CS) = fnvl_seg_get(c, SEG_CS); M32(x + C_SS) = fnvl_seg_get(c, SEG_SS);      /* the CURRENT selectors (fnvl_seg_set), initially the process constants */
     M32(x + C_EDI) = edi; M32(x + C_ESI) = esi; M32(x + C_EBX) = ebx; M32(x + C_EDX) = edx; M32(x + C_ECX) = ecx; M32(x + C_EAX) = eax; M32(x + C_EBP) = ebp;
     M32(x + C_EIP) = eip; M32(x + C_EFL) = 0x202; M32(x + C_ESP) = sp;
     return x;
@@ -99,11 +100,33 @@ int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 e
     return d != 0;
 }
 
+/* Hardware exception -> NTSTATUS record, a TOTAL switch over the codes of rt/fnvl.h (the lifter emits no other value; there is no default arm, so a code outside the list is not
+   turned into some status). Each row is what the Windows 7 kernel's trap handler reports (ReactOS traphdlr.c, a transcription of it):
+     DE0 / DEOVF   #DE: STATUS_INTEGER_DIVIDE_BY_ZERO / quotient overflow = STATUS_INTEGER_OVERFLOW; fault, Eip = at, no parameters
+     BP            #BP trap (int3, `int 3`, `int 0x2d`): ExceptionAddress = at (the int3 byte), Context.Eip = at + 1, one parameter (0)
+     UD            #UD: STATUS_ILLEGAL_INSTRUCTION, fault
+     PRIV          #GP(0) of a privileged opcode (KiTrap0D table): STATUS_PRIVILEGED_INSTRUCTION, fault
+     BOUNDS        STATUS_ARRAY_BOUNDS_EXCEEDED, fault
+     INTO          #OF trap: STATUS_INTEGER_OVERFLOW, ExceptionAddress = at, Context.Eip = at + 1
+     ASSERT        `int 0x2c`: STATUS_ASSERTION_FAILURE, ExceptionAddress = Context.Eip = at
+     STEP          #DB trap (icebp): STATUS_SINGLE_STEP, at = the address of the NEXT instruction (ExceptionAddress = Context.Eip = at)
+     LOCK          #UD with an F0 byte among the first 4 bytes at Eip (KiTrap06Handler): STATUS_INVALID_LOCK_SEQUENCE, fault */
 extern "C" void fnvl_raise(u32 code, u32 at) {
-    u32 sp = esp, eip = at, info[2] = { 0, 0 };
-    u32 nt = code == FNVL_DE0 ? 0xC0000094u : code == FNVL_DEOVF ? 0xC0000095u : code == FNVL_BP ? 0x80000003u : 0xC000001Du;
-    if (code == FNVL_BP) eip = at + 1;                      /* Windows: ExceptionAddress is the int3, Context.Eip the byte after it */
-    fnvl_raise_rec(nt, 0, at, code == FNVL_BP ? 1 : 0, info, eip, sp);
+    u32 sp = esp, eip = at, np = 0, nt = 0, info[2] = { 0, 0 };
+    switch (code) {
+    case FNVL_DE0:    nt = 0xC0000094u; break;
+    case FNVL_DEOVF:  nt = 0xC0000095u; break;
+    case FNVL_BP:     nt = 0x80000003u; eip = at + 1; np = 1; break;
+    case FNVL_UD:     nt = 0xC000001Du; break;
+    case FNVL_PRIV:   nt = 0xC0000096u; break;
+    case FNVL_BOUNDS: nt = 0xC000008Cu; break;
+    case FNVL_INTO:   nt = 0xC0000095u; eip = at + 1; break;
+    case FNVL_ASSERT: nt = 0xC0000420u; break;
+    case FNVL_STEP:   nt = 0x80000004u; break;
+    case FNVL_LOCK:   nt = 0xC000001Eu; break;
+    }
+    if (nt == 0) __builtin_unreachable();       /* not reached: every emitted code is a case above */
+    fnvl_raise_rec(nt, 0, at, np, info, eip, sp);
 }
 
 /* a transfer to an address without a body (the dispatcher's miss, rt/rt.c): #UD at that address */

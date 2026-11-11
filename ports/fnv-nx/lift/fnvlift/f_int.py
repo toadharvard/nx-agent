@@ -3,10 +3,10 @@ from capstone import x86 as X
 from .core import op, SKIP, Unsupported, MASK, CC, reg
 
 
-SEGSEL = {'cs': 'SEL_CS', 'ss': 'SEL_DS', 'ds': 'SEL_DS', 'es': 'SEL_DS', 'fs': 'SEL_FS', 'gs': '0u'}    # selectors of a Win32 x86 user process (as in rt/seh.c CONTEXT)
+SEGSEL = {'cs': 'SEL_CS', 'ss': 'SEL_DS', 'ds': 'SEL_DS', 'es': 'SEL_DS', 'fs': 'SEL_FS', 'gs': '0u'}    # initial selectors of a Win32 x86 user process (fnvl_seg_init; GS is null); the current values live in c->sel (SEG_STATE)
 
 
-SEG_STATE = False      # True once struct cpu holds the six selector values (rt/fnvl.h fnvl_seg_get): then `mov r, Sreg` / `push Sreg` read the state instead of the process constants above
+SEG_STATE = True       # struct cpu holds the six selector values: `mov r, Sreg` / `push Sreg` read the state (rt/fnvl.h fnvl_seg_get) instead of the initial constants above
 
 
 def segread(sg):
