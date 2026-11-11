@@ -14,7 +14,7 @@ so no game code is built or gated on trunk yet. Frames rendered: 0.
 | 7 | loader product root (L1 owns; L5 copy with trap.c retired) | L1, L5 | open |
 | 8 | platform + guest runtime product roots; dshow E_NOTIMPL out; crt how=inferred out | L5 | open |
 | 9 | render product root; 29 markers to 0 | L6 | open |
-| 10 | lifted pack product root: liftall generate-only, no g++/objcache/apt | L3a + L3b | L3a liftgen pushed |
+| 10 | lifted pack product root: liftall generate-only, no g++/objcache/apt | L3a + L3b | done on L3a 73a708c (liftgen, root lift/pack, gate_forms.py); not on trunk |
 | 11 | d3dx9_38 collect (32/32 lifted) and exe collect (64/64) | L3a | collect |
 | 12 | rules/ root on trunk; s1b 224 uncertified sites become rules; r2_vorder on vft facts | L2 | woken 21:35 |
 | 13 | gates.json: n1 n2 call data vcall xc xunit rtti pcrel bodysel disp abs reach imports d3d9total forms R7 | L1 | open |
