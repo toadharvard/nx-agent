@@ -194,6 +194,7 @@ static fnvnx_xpad xpoll(uint32_t *packet)
     fnvnx_pad_raw raw;
     memset(&raw, 0, sizeof raw);
     source()->read(0, &raw);
+    fnvnx_swkbd_filter(&raw.buttons);   /* L3+R3 opens the system keyboard and never reaches the game */
     os_lock(&g_xlock);
     fnvnx_xpad x;
     if (g_enabled)

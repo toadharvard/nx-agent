@@ -87,6 +87,7 @@ extern "C" void fnvnx_input_pump(void)
         pump_locked();
     }
     os_unlock(&g_lock);
+    fnvnx_swkbd_pump(now);   /* the strokes of an entered text, one edge per due pump */
 }
 
 static int hz_read(unsigned i, fnvnx_pad_raw *o)

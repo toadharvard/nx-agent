@@ -78,6 +78,22 @@ void os_cpu_boost(int fast_load);
 /* A system dialog with the caption, the text and an OK button, blocking until it is closed (MessageBoxA): the
  * Switch's error applet; a no-op where the platform has none (the caller logs the text). */
 void os_show_message(const char *caption, const char *text);
+
+/* Text entry through the system software keyboard (docs/AUDIO_INPUT.md "Text entry"). Opens the applet for at most
+ * max_len UTF-16 units. `check` is the caller's validator: it returns 0 to accept the text, else the 1-based index of
+ * the first unit it refuses; the backend then keeps the applet open (or reopens it) showing that refusal, so
+ * the text that returns has passed `check`. Returns 1: entered (out[0..*n) holds the text, *n <= max_len; out has
+ * room for max_len units), 0: the user cancelled, <0: the applet could not be run. The Horizon backend needs the host
+ * service the L5 report names (os_horizon.c has no body: a guest link without it fails); the host test backend
+ * (os_posix.c) plays a script the test fills. */
+typedef size_t (*os_text_check_fn)(const uint16_t *text, size_t n, void *ctx);
+int os_text_entry(unsigned max_len, os_text_check_fn check, void *ctx, uint16_t *out, size_t *n);
+/* host test backend only (os_posix.c): the script of what the user types, one entry per applet round; an empty script
+ * is a user who closes the applet. os_text_script_rejects: how many entries `check` refused since the last reset. */
+void os_text_script_push(const uint16_t *text, size_t n);
+void os_text_script_cancel(void);
+unsigned os_text_script_rejects(void);
+void os_text_script_reset(void);
 /* The console's output mode: 1 = docked (the TV output, 1920x1080), 0 = handheld (the built-in panel, 1280x720).
  * Switch: appletGetOperationMode() == AppletOperationMode_Console. Host tests (os_posix.c): the state set by
  * os_posix_set_docked, handheld at start. */

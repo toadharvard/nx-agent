@@ -334,11 +334,17 @@ static int to_1252(unsigned u)
         if (hi[i] == u) return 0x80 + i;
     return '?';
 }
+/* the layout table: the character of a virtual key under a modifier state (pure); TranslateMessage reads the state from the
+ * key state, platform/input/swkbd.cpp inverts it for every state it types */
+extern "C" int fnvnx_win_vk_char(unsigned vk, int sh, int ctl, int caps, int num);
 static int vk_char(unsigned wp)
 {
     unsigned vk = wp & 0xFFFF;
     if (vk == 0xE7) return to_1252((wp >> 16) & 0xFFFF);   /* VK_PACKET: the on-screen keyboard's character */
-    bool sh = GetKeyState(0x10) & 0x8000, ctl = GetKeyState(0x11) & 0x8000, caps = GetKeyState(0x14) & 1, num = GetKeyState(0x90) & 1;
+    return fnvnx_win_vk_char(vk, (GetKeyState(0x10) & 0x8000) != 0, (GetKeyState(0x11) & 0x8000) != 0, GetKeyState(0x14) & 1, GetKeyState(0x90) & 1);
+}
+extern "C" int fnvnx_win_vk_char(unsigned vk, int sh, int ctl, int caps, int num)
+{
     if (vk >= 'A' && vk <= 'Z') return ctl ? (int)vk - 64 : (sh != caps) ? (int)vk : (int)vk + 32;
     if (vk >= '0' && vk <= '9') return ctl ? (vk == '6' && sh ? 0x1E : -1) : sh ? ")!@#$%^&*("[vk - '0'] : (int)vk;
     switch (vk) {
@@ -428,7 +434,7 @@ static RECT clip_rect_locked(void);   /* ClipCursor, below */
 
 
 /* ---- keyboard and mouse input */
-static unsigned vk_scan(unsigned vk, unsigned *ext)   /* the scan code (set 1) of a key of the US layout; 0 if none */
+extern "C" unsigned fnvnx_win_vk_scan(unsigned vk, unsigned *ext)   /* the scan code (set 1) of a key of the US layout; 0 if none */
 {
     *ext = 0;
     if (vk >= 'A' && vk <= 'Z') {   /* the three letter rows start at scan 0x10, 0x1E, 0x2C */
@@ -466,7 +472,7 @@ extern "C" void fnvnx_win_key(unsigned vk, unsigned scan, int down, unsigned fla
     else if (vk == 0x11) spec = ext ? 0xA3 : 0xA2;
     else if (vk == 0x12) spec = ext ? 0xA5 : 0xA4;
     unsigned gen = (spec >= 0xA0 && spec <= 0xA5) ? 0x10 + (spec - 0xA0) / 2 : spec, e2 = 0;
-    if (!scan && !pack) scan = vk_scan(spec, &e2), ext |= e2;
+    if (!scan && !pack) scan = fnvnx_win_vk_scan(spec, &e2), ext |= e2;
     if (spec == 0xA3 || spec == 0xA5) ext = 1;
     bool prev = !pack && (GetKeyState((int)spec) & 0x8000), isalt = gen == 0x12;
     bool alt = isalt ? down : (GetKeyState(0x12) & 0x8000) != 0;
@@ -558,7 +564,7 @@ extern "C" UINT SendInput(UINT n, void *in, int sz)
             if (fl & 4) { if (vk) { SetLastError(ERROR_INVALID_PARAMETER); continue; } vk = 0xE7; }   /* KEYEVENTF_UNICODE */
             else if (fl & 8) {   /* KEYEVENTF_SCANCODE: the key of that scan code */
                 unsigned v = 1, e;
-                for (; v < 255; v++) if (vk_scan(v, &e) == sc && e == ext && v != 0x10 && v != 0x11 && v != 0x12) break;
+                for (; v < 255; v++) if (fnvnx_win_vk_scan(v, &e) == sc && e == ext && v != 0x10 && v != 0x11 && v != 0x12) break;
                 vk = (uint16_t)v;
             } else if (!vk || vk > 254) { SetLastError(ERROR_INVALID_PARAMETER); continue; }
             fnvnx_win_key(vk, (fl & 4) ? sc : (fl & 8) ? sc : 0, !(fl & 2), ext | 0x10);

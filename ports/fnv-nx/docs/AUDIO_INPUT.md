@@ -163,7 +163,13 @@ syntax check of all S7 sources for AArch64 ILP32 (+ libnx files).
 * HRTF/surround: not implemented. The I3DL2 reverb for SetFX runs in the mixer per voice (platform/audio/reverb.h:
   room shelf, early taps, a 4-line FDN with decay_time / decay_hf_ratio; SetPreset uses the SDK's I3DL2 presets);
   the Waves reverb keeps its parameters only.
-* Text entry: no software keyboard (swkbd) yet; WM_CHAR/VK key state is not fed from the USB keyboard
-  (`fnvnx_set_key_state`/`fnvnx_post_message` hooks are available).
+* Text entry (platform/input/swkbd.cpp): L3+R3 together open the system software keyboard (`os_text_entry`); the combination is
+  withheld from the game until both clicks are up, a single click is still the game's button. The entered UTF-16 text becomes key
+  strokes (Shift down, key down, key up, Shift up), found by inverting the platform's own layout table (`fnvnx_win_vk_char`,
+  main block, printable ASCII), released one edge per pump, 20 ms apart, through `fnvnx_swkbd_inject`: the message queue
+  (WM_KEYDOWN/UP, WM_CHAR by TranslateMessage, GetAsyncKeyState) and DirectInput (immediate and buffered) from one point.
+  A character no key makes, or text over 64 units, is refused to the applet (it stays open on it), never dropped; cancel types
+  nothing. The Horizon applet backend of `os_text_entry` is a service of L1 (hostapi) and is not written yet: the guest link
+  fails until it is. The USB keyboard is not fed into the queue.
 * Touch taps press and release in the same pump: visible to buffered reads, not to `GetDeviceState` polling.
 * Single sideways Joy-Con not supported; the deadzone is left to the engine.

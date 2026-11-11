@@ -42,8 +42,8 @@ PLAT_C := $(P)/os/os_posix.c $(P)/os/os_world.c $(wildcard $(P)/crt/*.c)
 # the clock interface (platform/include/fnvnx_clock.h): clock_rt.cpp is in both, clock_real.cpp is the product's clock; `make vclock`
 # links clock_virtual.cpp instead (the verification mode, definition VC1)
 CLOCK_CXX := $(P)/clock/clock_rt.cpp $(P)/clock/clock_real.cpp
-PLAT_CXX := $(CLOCK_CXX) $(P)/com/combridge.cpp $(P)/com/combridge.gen.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(wildcard $(P)/crt/*.cpp) $(wildcard $(P)/audio/*.cpp)   # audio: winmm waveOut* are exports of the table
-TEST_CXX := $(filter-out %/host_section.cpp,$(wildcard $(HERE)/*.cpp))   # the host section services belong to the private binary only
+PLAT_CXX := $(CLOCK_CXX) $(P)/com/combridge.cpp $(P)/com/combridge.gen.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(wildcard $(P)/crt/*.cpp) $(wildcard $(P)/audio/*.cpp) $(filter-out %/input_horizon.cpp,$(wildcard $(P)/input/*.cpp))   # audio: winmm waveOut* are exports of the table; input: DirectInput, XInput, the keyboard applet (input_horizon.cpp is libnx only)
+TEST_CXX := $(filter-out %/host_section.cpp,$(wildcard $(HERE)/*.cpp)) $(HERE)/m32/host_input.cpp   # host_input.cpp: the host has no polled input source (input_horizon.cpp is libnx only)   # the host section services belong to the private binary only
 
 OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
 
@@ -169,7 +169,7 @@ test: hostapi-check $(OUT)/s4_tests
 # missing when a cross compiler replaced them; the x86-64 asm headers serve i386 too.
 M32OUT := $(OUT)-m32
 M32FLAGS := -m32 -idirafter /usr/include/x86_64-linux-gnu $(FLAGS) -I$(ROOT)/shim/include
-M32_CXX := $(PLAT_CXX) $(P)/com/combridge_exports.gen.cpp $(wildcard $(P)/audio/*.cpp) $(filter-out %/input_horizon.cpp,$(wildcard $(P)/input/*.cpp))   # input_horizon.cpp: libnx only; m32/host_input.cpp pumps
+M32_CXX := $(PLAT_CXX) $(P)/com/combridge_exports.gen.cpp   # input and audio are in PLAT_CXX; the pump is m32/host_input.cpp
 # the D3D9=null guest's D3D side (toolchain/game/build.sh): D3DX and the null device (d3d9.dll module)
 M32_D3D := $(wildcard $(ROOT)/render/nine/d3dx/*.cpp) $(ROOT)/toolchain/game/null_d3d9.cpp
 M32_TEST := $(wildcard $(HERE)/m32/*.cpp) $(HERE)/host_boundary.cpp

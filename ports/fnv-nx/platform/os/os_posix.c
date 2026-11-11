@@ -433,6 +433,53 @@ void os_thread_exit(void)
 }
 void os_cpu_boost(int fast_load) { (void)fast_load; }   /* no CPU boost on a PC */
 void os_show_message(const char *caption, const char *text) { (void)caption; (void)text; }   /* logged by the caller */
+
+/* ---- text entry: the scripted user of the host tests */
+#define TS_MAX 32
+static struct { uint16_t *text; size_t n; int cancel; } g_ts[TS_MAX];
+static unsigned g_ts_head, g_ts_count, g_ts_rejects;
+static os_lock_t g_ts_lock;
+static void ts_put(const uint16_t *t, size_t n, int cancel)
+{
+    os_lock(&g_ts_lock);
+    if (g_ts_count < TS_MAX) {
+        unsigned i = (g_ts_head + g_ts_count++) % TS_MAX;
+        g_ts[i].text = n ? (uint16_t *)malloc(n * 2) : NULL;
+        if (n) memcpy(g_ts[i].text, t, n * 2);
+        g_ts[i].n = n;
+        g_ts[i].cancel = cancel;
+    }
+    os_unlock(&g_ts_lock);
+}
+void os_text_script_push(const uint16_t *t, size_t n) { ts_put(t, n, 0); }
+void os_text_script_cancel(void) { ts_put(NULL, 0, 1); }
+unsigned os_text_script_rejects(void) { return g_ts_rejects; }
+void os_text_script_reset(void)
+{
+    os_lock(&g_ts_lock);
+    while (g_ts_count) { free(g_ts[g_ts_head].text); g_ts_head = (g_ts_head + 1) % TS_MAX; g_ts_count--; }
+    g_ts_rejects = 0;
+    os_unlock(&g_ts_lock);
+}
+int os_text_entry(unsigned max_len, os_text_check_fn check, void *ctx, uint16_t *out, size_t *n)
+{
+    for (;;) {   /* one iteration: the applet is open; a refused text reopens it */
+        os_lock(&g_ts_lock);
+        if (!g_ts_count) { os_unlock(&g_ts_lock); return 0; }
+        uint16_t *t = g_ts[g_ts_head].text;
+        size_t len = g_ts[g_ts_head].n;
+        int cancel = g_ts[g_ts_head].cancel;
+        g_ts_head = (g_ts_head + 1) % TS_MAX;
+        g_ts_count--;
+        os_unlock(&g_ts_lock);
+        if (cancel) return 0;
+        int ok = len <= max_len && !check(t, len, ctx);
+        if (ok) { if (len) memcpy(out, t, len * 2); *n = len; }
+        else { os_lock(&g_ts_lock); g_ts_rejects++; os_unlock(&g_ts_lock); }
+        free(t);
+        if (ok) return 1;
+    }
+}
 /* the console's dock state of the host tests: handheld until a test says otherwise */
 static volatile int g_posix_docked;
 int os_display_docked(void) { return __atomic_load_n(&g_posix_docked, __ATOMIC_ACQUIRE); }
