@@ -13,6 +13,8 @@ HERE=$(cd "$(dirname "$0")/.." && pwd)
 B=${FNVNX_BUILD:-/home/user/fnv-nx-build}; W=${FNVNX_WORK:-/home/user/l3work/farm}
 SHA=$(git -C "$HERE" rev-parse HEAD | cut -c1-12)
 # the declared verdict environment (verify/env.json): exact package and module versions, then envcheck.py check; a non-zero status stops the job (set -e), no other version is installed
+# numpy is the packer's own prerequisite (test/instest.py), not part of env.json: the exact version, installed before the check
+python3 -c 'import numpy,sys; sys.exit(numpy.__version__ != "2.5.3")' 2>/dev/null || python3 -m pip install -q --break-system-packages numpy==2.5.3
 bash "$HERE/../farm/setup_verdict_env.sh"
 mkdir -p "$W/in" "$W/$SHA"
 for br in gamedata/exe gamedata/redist l3a-lift/facts l1-contract/mp4; do
@@ -47,6 +49,8 @@ for K in $(seq "$FIRST" $((FIRST + COUNT - 1))); do
     rm -rf "$p" "$out/obj"
     echo "shard $K/$N: published $(cut -c1-160 "$out.txt")"
 done
+# farms publish in parallel and a publish replaces the branch: take in what the others published meanwhile first (content-addressed union)
+LINKCACHE_SEED_MIN=999999999 bash "$HERE/../tools/farm/linkcache.sh" seed "$FNVNX_LINK_OBJCACHE" || true
 LINKCACHE_NOTE="liftall $TAG" bash "$HERE/../tools/farm/linkcache.sh" publish "$FNVNX_LINK_OBJCACHE" || true
 echo "LIFTALL module=${MODULE:-exe} first=$FIRST count=$COUNT published=$PUB failed=$FAIL seconds=$(( $(date +%s) - T0 ))"
 [ "$FAIL" -eq 0 ]
