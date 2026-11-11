@@ -24,6 +24,7 @@ BRIDGE = [  # dll, name, conv, ret, args, native symbol, bind
     ('t.dll', 'nobody', 'stdcall', 'i', '', '-', 'none'),
     ('t.dll', 'fmix', 'stdcall', 'f', 'fi', 't_fmix', 'sym'),
     ('t.dll', 'boom', 'stdcall', 'i', 'i', 't_boom', 'sym'),
+    ('t.dll', 'vsum', 'vararg', 'i', 'i', 't_vsum', 'sym'),
     ('kernel32.dll', 'DebugBreak', 'stdcall', 'v', '', 'fnvl_os_DebugBreak', 'l3'),
 ]
 KEY = {r[1]: 0x00100000 + 16 * i for i, r in enumerate(sorted(BRIDGE, key=lambda r: (r[0], r[1])))}      # the key rule of tools/impgen.py
@@ -38,6 +39,8 @@ unsigned long long fnvl_host_ticks_ns(void) { return 0; }
 void *memcpy(void *d, const void *s, unsigned long n) { char *a = d; const char *b = s; while (n--) *a++ = *b++; return d; }
 void *memset(void *d, int v, unsigned long n) { char *a = d; while (n--) *a++ = (char)v; return d; }
 void fnvnx_guest_current(u32 *esp, u32 *teb);
+/* variadic: n fixed, then n guest stack words to add */
+u32 t_vsum(u32 n, u32 va) { u32 r = 0; for (u32 i = 0; i < n; i++) r += ((u32 *)(unsigned long)va)[i]; return r; }
 u32 t_add2(u32 a, u32 b) { u32 sp, teb; fnvnx_guest_current(&sp, &teb); return a + b + (teb != 0x50000000u) + (*(u32 *)(unsigned long)(sp + 4) != a); }      /* also checks fnvnx_guest_current: the esp of this call, the thread's TEB */
 u64 t_mul64(u32 a, u64 b) { return (u64)a * b; }
 static double t_half(double x) { return x * 0.5; }
@@ -102,6 +105,8 @@ def guest():
     h9 = BASE + 0x80 * 13
     fn('c9', 'push 0x%x; push dword ptr fs:[0]; mov dword ptr fs:[0], esp; call %s; pop dword ptr fs:[0]; add esp, 4; mov eax, 0x99; ret' % (h9, S('DebugBreak')))
     fn('c9h', 'xor eax, eax; ret')
+    # c10: variadic cdecl import: vsum(3, 10, 20, 30) = 60; the caller pops 16 bytes; esp balanced (ebx - esp == 0 added)
+    fn('c10', 'mov ebx, esp; push 30; push 20; push 10; push 3; call %s; add esp, 16; sub ebx, esp; add eax, ebx; ret' % S('vsum'))
     ents = {}
     for i, (name, text, owns) in enumerate(srcs):
         if name == 'c6':
@@ -109,7 +114,7 @@ def guest():
         if name == 'c6b': text = text.replace('push 0x0;', 'push 0x%x;' % c6lab) if 'push 0x0;' in text else text.replace('push 0x0', 'push 0x%x' % c6lab)
         b = bytes(ks.asm(text, F[name])[0]); assert len(b) <= 0x80, name
         code[F[name] - BASE:F[name] - BASE + len(b)] = b.ljust(0x80, b'\xcc'); ents[name] = (F[name], len(b), [c6lab] if name == 'c6' else [])
-    cases = [('c1', 12), ('c2', 0x00030003 ^ 0x10001), ('c3', 12), ('c4', 330), ('c5', 1013), ('c6', 0x1077), ('c7', 0x1239), ('c8', 0x5c), ('c9', 0x99)]
+    cases = [('c1', 12), ('c2', 0x00030003 ^ 0x10001), ('c3', 12), ('c4', 330), ('c5', 1013), ('c6', 0x1077), ('c7', 0x1239), ('c8', 0x5c), ('c9', 0x99), ('c10', 60)]
     return bytes(code), ents, cases
 
 
@@ -119,7 +124,7 @@ def main():
     open(w + '/bridge.tsv', 'w').write('dll\tname\tordinal\tconv\tret\targs\tnative_symbol\tbind\n' + ''.join('%s\t%s\t\t%s\t%s\t%s\t%s\t%s\n' % r for r in BRIDGE))
     open(w + '/need.tsv', 'w').write(''.join('%08x\t%s\t%s\tkey\t%08x\n' % (SLOT[r[1]], r[0], r[1], KEY[r[1]]) for r in BRIDGE if r[6] != 'none'))
     ent, blocked, hit, absent = impgen.generate(w + '/bridge.tsv', w, [w + '/need.tsv'], None)
-    ok = len(ent) == 9 and len(blocked) == 1 and not hit and not absent
+    ok = len(ent) == 10 and len(blocked) == 1 and not hit and not absent
     print('gen   %s entries %d blocked %d' % ('equal' if ok else 'DIFF', len(ent), len(blocked))); bad = not ok
     texts = [L.lift(img, ad, sz, owns=owns)[0] for ad, sz, owns in ents.values()]
     flags = [f for f in instest.FLAGS if f not in ('-DFNVL_FLAGS_IO', '-DFNVL_STUBX')] + ['-I', LIFT + '/rt']
