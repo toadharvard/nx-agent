@@ -241,6 +241,18 @@
     "ports/fnv-nx/verify/fpbound.py"
    ]
   },
+  "test_gate_contract.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_contract.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_contract.py"
+   ]
+  },
   "test_gates.py": {
    "references": [
     {
