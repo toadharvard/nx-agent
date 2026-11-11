@@ -63,13 +63,16 @@ TEST(heap_destroy_invalid)
 
 TEST(heap_destroy_frees_all_and_isolates)
 {
-    HANDLE a = HeapCreate(0, 0, 0), b = HeapCreate(0, 0, 0);
+    HANDLE b = HeapCreate(0, 0, 0);
     void *keep[8];
     for (int i = 0; i < 8; i++) {
         keep[i] = HeapAlloc(b, 0, 100 + i);
         memset(keep[i], 0x40 + i, 100 + i);
     }
+    /* exact accounting: the test binary runs with the allocator's thread cache off (GLIBC_TUNABLES in the Makefile),
+       so a freed chunk is never counted as in use; `before` is taken before the heap object itself exists */
     size_t before = mallinfo2().uordblks;
+    HANDLE a = HeapCreate(0, 0, 0);
     void *blk[1000];
     for (int i = 0; i < 1000; i++) blk[i] = HeapAlloc(a, 0, 2000 + i);   /* above the tcache sizes: mallinfo counts cached chunks as in use */
     CHECK(mallinfo2().uordblks > before);
