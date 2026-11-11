@@ -20,13 +20,18 @@ Row classes (the operand column is a 48-byte window of string literals, so it is
               module API, and every api that is not a name lookup (CoCreateInstance). Counted, never decided.
   unbound     GetProcAddress rows whose window holds names but no module token: the module is not statically known. Checked only
               by the necessary condition "some present module defines the name" (or the name is ENV_TRUTH's for an absent one).
+Run time (platform/win32/module.cpp proc_address): GetProcAddress returns the import-key table's value for (dll, name), which
+is generated from bridge.tsv, so a name resolves iff bridge.tsv has a row for it whose bind is not `none` - of ANY bind kind (sym, lookup,
+l3, data): the platform's host tables are asked first only for the native address of host tests. With --bridge (default: bridge.tsv next
+to dynsites.tsv) a (module, name) is therefore resolved iff that row exists; names the host probe or the resolver tables answer but that have
+no row are reported as UNRESOLVED too (the product would fail them). Without --bridge only the probe and the tables decide.
 For a static row:
   module token  -> translated | absent-by-ENV_TRUTH (the probe must answer 126 to both calls) | resolved (the probe answers a
                    module for both calls, in the letter-case and with/without `.dll` as the site passes it) | unresolved
   GetProcAddress (module token, name token) pairs -> translated | absent-by-ENV_TRUTH | resolved (probe yes / resolver table)
                    | unresolved (the module is present and defines no body for the name)
 Output: counts, then one line per unresolved (module, name) and per unbound name defined nowhere. Exit 1 if anything is unresolved.
-Usage: check_dynsites.py <dynsites.tsv> [--root ports/fnv-nx] [--closure closure.tsv] [--probe path] [--selftest]
+Usage: check_dynsites.py <dynsites.tsv> [--root ports/fnv-nx] [--closure closure.tsv] [--bridge bridge.tsv] [--probe path] [--selftest]
 """
 import os
 import re
@@ -104,7 +109,7 @@ class Probe:
         return [l.split("\t") for l in r.stdout.splitlines()]
 
 
-def classify(rows, probe, absent_mods, absent_funcs, reg, translated):
+def classify(rows, probe, absent_mods, absent_funcs, reg, translated, bridge=None):
     """rows: [(module, site, api, operand)]. Returns (counts, unresolved list, unbound-undefined list)."""
     mods = [c[1] for c in probe.ask(["MODS"]) if c[0] == "MODS"]
     known = {norm(m) for m in mods} | set(reg) | absent_mods | translated
@@ -193,31 +198,48 @@ def classify(rows, probe, absent_mods, absent_funcs, reg, translated):
                     cnt["translated"] += 1
                 elif nm in absent_mods:
                     cnt["absent"] += 1
-                elif n in reg.get(nm, ()) or ans.get(("GPA", m, n)) == "yes":
+                elif (nm + ".dll", n) in bridge if bridge is not None else \
+                        (n in reg.get(nm, ()) or ans.get(("GPA", m, n)) == "yes"):
                     cnt["resolved"] += 1
                 else:
                     cnt["unresolved"] += 1
                     note(m, n)
         else:
             for n in body:
-                if n in absent_funcs or any(n in t for t in reg.values()) or \
-                        any(ans.get(("GPA", m, n)) == "yes" for m in mods):
+                if n in absent_funcs or (any(k[1] == n for k in bridge) if bridge is not None else
+                                         (any(n in t for t in reg.values()) or
+                                          any(ans.get(("GPA", m, n)) == "yes" for m in mods))):
                     continue
                 if n not in unbound_bad:
                     unbound_bad.append(n)
     return cnt, unresolved, unbound_bad
 
 
-def run(tsv, root, closure, probe_path):
+def read_bridge(path):
+    """{(dll, name)} of the rows whose bind is not `none`, dll lowercase; interface rows (`!Name`) are not modules."""
+    out = set()
+    if path and os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            for line in f.read().splitlines()[1:]:
+                c = line.split("\t")
+                if len(c) >= 8 and c[7] != "none" and not c[0].startswith("!"):
+                    out.add((c[0].lower(), c[1]))
+        return out
+    return None
+
+
+def run(tsv, root, closure, probe_path, bridge_path=None):
     with open(tsv, encoding="utf-8") as f:
         lines = f.read().splitlines()
     rows = [tuple((l.split("\t") + [""] * 4)[:4]) for l in lines[1:] if l.strip()]
     absent_mods, absent_funcs = env_truth(root)
     cnt, bad, unbound_bad = classify(rows, Probe(probe_path), absent_mods, absent_funcs, registered_tables(root),
-                                     translated_modules(closure))
+                                     translated_modules(closure), read_bridge(bridge_path))
     print("dynsites: rows=%(rows)d static=%(static)d resolved=%(resolved)d absent-by-ENV_TRUTH=%(absent)d "
           "translated=%(translated)d unresolved=%(unresolved)d non-static=%(nonstatic)d (other-api=%(other_api)d) "
           "unbound-GetProcAddress=%(unbound)d" % cnt)
+    if bridge_path and not os.path.exists(bridge_path):
+        print("note: %s absent - decided by the host probe and resolver tables only" % bridge_path)
     for m, n in bad:
         print("UNRESOLVED %s!%s" % (m, n))
     for n in unbound_bad:
@@ -269,13 +291,21 @@ def selftest():
     if not ok:
         print("selftest FAILED:", c, bad, ub)
         return 1
+    # with a bridge: the row decides - a body-less name with a row resolves, a host-answered name without one does not
+    br = {("kernel32.dll", "EncodePointer"), ("d3d9.dll", "DebugSetMute")}
+    rows = [("x", "1", "GetProcAddress", "d3d9.dll DebugSetMute"), ("x", "2", "GetProcAddress", "kernel32 GetTickCount"),
+            ("x", "3", "GetProcAddress", "EncodePointer"), ("x", "4", "GetProcAddress", "Other")]
+    c, bad, ub = classify(rows, FakeProbe({"kernel32", "d3d9"}, {("kernel32", "GetTickCount")}), set(), set(), {}, set(), br)
+    if c["resolved"] != 1 or bad != [("kernel32", "GetTickCount")] or ub != ["Other"]:
+        print("selftest FAILED (bridge):", c, bad, ub)
+        return 1
     print("selftest ok")
     return 0
 
 
 def main(argv):
     root = "."
-    closure = probe = tsv = None
+    closure = probe = tsv = bridge = None
     selftest_only = False
     i = 1
     while i < len(argv):
@@ -284,6 +314,8 @@ def main(argv):
             root = argv[i + 1]; i += 1
         elif a == "--closure":
             closure = argv[i + 1]; i += 1
+        elif a == "--bridge":
+            bridge = argv[i + 1]; i += 1
         elif a == "--probe":
             probe = argv[i + 1]; i += 1
         elif a == "--selftest":
@@ -303,7 +335,7 @@ def main(argv):
     closure = closure or os.path.join(os.path.dirname(tsv), "closure.tsv")
     if not os.path.exists(probe):
         sys.exit("check_dynsites: %s missing - build it: make -C tests/s4 probe" % probe)
-    return run(tsv, root, closure, probe)
+    return run(tsv, root, closure, probe, bridge or os.path.join(os.path.dirname(tsv), "bridge.tsv"))
 
 
 if __name__ == "__main__":

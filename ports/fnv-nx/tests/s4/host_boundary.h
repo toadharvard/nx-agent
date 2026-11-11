@@ -25,6 +25,7 @@ struct fnvnx_bnd_mark fnvnx_bnd_violation_mark(void);
 void fnvnx_bnd_violation_forget(struct fnvnx_bnd_mark m);
 /* the acquisition sites of the platform locks the calling thread holds now */
 void fnvnx_bnd_print_held(void);
+extern fnvnx_gaddr (*g_bnd_key_hook)(const char *dll, const char *name, uint32_t ordinal);   /* a bridge row without a platform body */
 extern int g_bnd_exports, g_bnd_invokes, g_bnd_threads_created, g_bnd_threads_run, g_bnd_threads_freed,
     g_bnd_threads_freed_unrun, g_bnd_process_detaches;
 /* the modules (bases) DisableThreadLibraryCalls told the boundary about */

@@ -451,9 +451,10 @@ static FARPROC proc_address(HMODULE h, LPCSTR proc, int depth)
         f = (FARPROC)fnvnx_win32_lookup_import(dll, nm, ord);
         if (f && nm && w32_mem_on)
             f = w32_mem_hook_proc(proc, f);   /* the memory lane: D3D9 resources (memtrack.cpp) */
-        /* the value the game gets for a platform function: its import key (product), its address (host tests) */
-        if (f)
-            f = (FARPROC)(uintptr_t)fnvnx_bnd_export_value(dll, nm, ord, (const void *)f);
+        /* the value the game gets for a function: its import key (product), its address (host tests). Asked also when the
+         * platform tables have no body (f NULL): a bridge row (any bind: its body is bound at build, e.g. L6's d3d9 `sym`
+         * rows) is a function GetProcAddress can return; no row -> 0 -> ERROR_PROC_NOT_FOUND below. */
+        f = (FARPROC)(uintptr_t)fnvnx_bnd_export_value(dll, nm, ord, (const void *)f);
     }
     if (!f)
         SetLastError(ERROR_PROC_NOT_FOUND);

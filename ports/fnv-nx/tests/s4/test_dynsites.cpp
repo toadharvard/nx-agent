@@ -3,6 +3,7 @@
  * declares absent answer NULL + ERROR_MOD_NOT_FOUND; RtlGenRandom (SystemFunction036) fills its buffer. Cases dyn_*. */
 #include "s4_test.h"
 #include "host_boundary.h"
+#include <strings.h>
 
 #ifndef ERROR_MOD_NOT_FOUND
 #define ERROR_MOD_NOT_FOUND 126L
@@ -72,4 +73,25 @@ TEST(dyn_rtlgenrandom)
     CHECK(f(g + 4, 5) != 0);
     CHECK(g[3] == 0xA5 && g[9] == 0xA5);         /* exactly len bytes written */
     CHECK(f(g, 0) != 0);                          /* len 0: success, nothing written */
+}
+
+/* a name with a bridge row but no platform body (L6's d3d9 `sym` rows: DebugSetMute, Direct3DShaderValidatorCreate9,
+ * D3DPERF_SetOptions) is returned by GetProcAddress as the row's value; a name with no row stays ERROR_PROC_NOT_FOUND */
+static fnvnx_gaddr key_hook(const char *dll, const char *name, uint32_t)
+{
+    return dll && name && !strcasecmp(dll, "d3d9.dll") && !strcmp(name, "DebugSetMute") ? (fnvnx_gaddr)0x00100010u : 0;
+}
+TEST(dyn_bridge_row_without_platform_body)
+{
+    HMODULE d = GetModuleHandleA("d3d9");
+    CHECK(d != NULL);
+    SetLastError(0);
+    CHECK(GetProcAddress(d, "DebugSetMute") == NULL);            /* no row, no body */
+    CHECK_EQ(GetLastError(), 127L);
+    g_bnd_key_hook = key_hook;
+    CHECK((uintptr_t)GetProcAddress(d, "DebugSetMute") == 0x00100010u);
+    SetLastError(0);
+    CHECK(GetProcAddress(d, "NoSuchExport") == NULL);
+    CHECK_EQ(GetLastError(), 127L);
+    g_bnd_key_hook = NULL;
 }

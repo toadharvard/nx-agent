@@ -176,10 +176,17 @@ uint32_t (*g_bnd_loader)(const char *name, uint32_t *base);
 int (*g_bnd_invoke_hook)(fnvnx_gaddr addr, uint32_t ecx, uint32_t nargs, const fnvnx_gword *args, uint32_t kind,
                          struct fnvnx_bnd_ret *out);
 
-fnvnx_gaddr fnvnx_bnd_export_value(const char *, const char *, uint32_t, const void *native)
+/* the product's import-key table has rows the platform tables do not (bridge `sym` rows of other owners): the hook stands
+ * for such a row, asked when the platform has no body */
+fnvnx_gaddr (*g_bnd_key_hook)(const char *dll, const char *name, uint32_t ordinal);
+fnvnx_gaddr fnvnx_bnd_export_value(const char *dll, const char *name, uint32_t ord, const void *native)
 {
-    __atomic_fetch_add(&g_bnd_exports, 1, __ATOMIC_RELAXED);
-    return (fnvnx_gaddr)native;
+    fnvnx_gaddr v = (fnvnx_gaddr)native;
+    if (!v && g_bnd_key_hook)
+        v = g_bnd_key_hook(dll, name, ord);
+    if (v)
+        __atomic_fetch_add(&g_bnd_exports, 1, __ATOMIC_RELAXED);
+    return v;
 }
 
 typedef uintptr_t W;
