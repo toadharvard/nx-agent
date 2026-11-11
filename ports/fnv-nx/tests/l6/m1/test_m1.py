@@ -16,7 +16,7 @@ D3 = os.path.join(ROOT, "render", "d3d9"); DEV = os.path.join(D3, "dev"); GEN = 
 INC = os.path.join(ROOT, "shim", "include"); BACK = os.path.join(D3, "backend"); FRONT = os.path.join(D3, "front"); DEVT = os.path.join(ROOT, "tests", "l6", "dev"); TOT = os.path.join(ROOT, "render", "shaders", "total")
 TESTS = ["t_env.cpp", "t_a.cpp", "t_b.cpp", "t_c.cpp", "t_d.cpp", "t_e.cpp"]; GENS = ["d9impl_unk.gen.cpp", "state.gen.cpp", "env_table.gen.cpp"]
 M1 = ["m1_validate.cpp", "m1_stats.cpp", "m1_misc.cpp"]
-TC = "/home/user/work/l6/toolchain/toolchain-1fc1f7b1ef44/toolchain/prefix"; UAM_DEPS = "/home/user/work/l6/s2a/build/deps"
+TC = os.environ.get("FNVNX_TC", "/home/user/work/l6/toolchain/toolchain-1fc1f7b1ef44/toolchain/prefix"); UAM_DEPS = os.environ.get("FNVNX_SHADERS_DEPS", "/home/user/work/l6/s2a/build/deps")
 fails = []
 HR = dict(OK=0, INV=0x8876086C, LOST=0x88760868, WRONGFMT=0x88760818, COLOROP=0x88760819, COLORARG=0x8876081A, ALPHAOP=0x8876081B, ALPHAARG=0x8876081C, TOOMANY=0x8876081D, FILTER=0x88760822, CONFLICTRS=0x88760821, EFAIL=0x80004005)
 
