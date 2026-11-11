@@ -217,7 +217,9 @@ class Progress:
 
 
 def read_symtab(path):
-    """ELF32 little-endian .symtab -> {name: value} (defined, named symbols; the same name at two values is an error)."""
+    """ELF32 little-endian .symtab -> {name: value} (defined, named symbols; the same name at two values is an error).
+    AArch64 mapping symbols ($x, $d, $x.<any>, $d.<any>: AAELF64 "Mapping symbols") mark code/data runs, name nothing
+    and repeat by design: they are left out."""
     with open(path, "rb") as f:
         d = f.read()
     if d[:4] != b"\x7fELF" or len(d) < 52 or d[4] != 1 or d[5] != 1:
@@ -237,6 +239,8 @@ def read_symtab(path):
             continue
         e = d.index(b"\0", stroff + nm, stroff + strsize)
         name = d[stroff + nm:e].decode("ascii")
+        if name in ("$x", "$d") or name[:3] in ("$x.", "$d."):
+            continue
         if out.setdefault(name, val) != val:
             raise ElfError(f"{path}: symbol {name} defined at two values (0x{out[name]:x}, 0x{val:x})")
     return out

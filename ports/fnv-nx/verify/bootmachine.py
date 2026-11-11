@@ -13,24 +13,32 @@ Rules:
    the virtual tick jumps to the earliest deadline; none: reason "deadlock" with a per-thread wait report.
 4. Any invalid access (unmapped or protection violation), Unicorn error, or host call on an unmapped guest pointer
    ends the run, reason "fault", record {kind, addr, size, pc, lr, tid}. There is no continue path.
-5. map_fixed: zeroed RW, exactly at addr, wholly inside a plan["free"] range other than "keys", no overlap with a
-   mapping; refusals return libnx kernel results (InvalidSize 0xCA01, InvalidAddress 0xCC01, InvalidCurrentMemory
-   0xD401) and are recorded in run()["events"]. ext_call(11, 8 VM_PROTECT, {addr,size,prot}) re-protects pages wholly
-   mapped by map_fixed (bit0 R, bit1 W, 0 none), else a refusal likewise. Other modules go to services.ext_<module>
+5. map_fixed(addr, size, src) follows svcMapMemory (hostapi.h): src is a page-aligned block of the heap region, wholly
+   inside it and not given away before; addr gets RW memory holding the CONTENT of src, and [src, src+size) becomes
+   unmapped for good (a later access ends the run with "fault"). addr: exactly there, wholly inside a plan["free"]
+   range other than "keys", no overlap with a mapping or with src; refusals return libnx kernel results (InvalidSize 0xCA01, InvalidAddress 0xCC01, InvalidCurrentMemory
+   0xD401) and are recorded in run()["events"]. ext_call(11, 8 VM_PROTECT, {addr,size,prot}) re-protects any pages the
+   guest owns (heap region minus given-away blocks, map_fixed mappings; bit0 R, bit1 W, 0 none), else a refusal likewise
+   (image, host page, stacks, given-away blocks, unmapped: 0xD401). Other modules go to services.ext_<module>
    (fn, args) found at construction; an unregistered module, or a handler raising ExtMissing, ends the run with reason
    "ext-module-missing": a configuration error, never answered with a value.
-6. Observation only: on_thread, watch_pc, watch_ret (same thread, sp and return address as at entry), watch_store,
-   on_console. run() -> {reason, exit_code, host_calls, switches, threads, virtual_ns, events, fault|waits|ext}.
+6. Bound and count: one UC_HOOK_BLOCK over the image region (installed only with limit_instructions or attach_icount)
+   adds size/4 per block, feeds the Icount if attached, and stops at the first block boundary where the total >=
+   limit_instructions: reason "limit", the same stop point on every run (the stopping block is counted).
+7. Observation only: on_thread, watch_pc, watch_ret (same thread, sp and return address as at entry), watch_store,
+   on_console. run() -> {reason, exit_code, host_calls, switches, threads, virtual_ns, events, console, fault|waits|ext};
+   "console" is the whole text the guest wrote (decoded with errors="replace").
 """
 import struct
 
-from unicorn import UC_ARCH_ARM64, UC_HOOK_CODE, UC_HOOK_MEM_INVALID, UC_HOOK_MEM_WRITE, UC_MODE_ARM, UC_PROT_ALL, \
+from unicorn import UC_ARCH_ARM64, UC_HOOK_BLOCK, UC_HOOK_CODE, UC_HOOK_MEM_INVALID, UC_HOOK_MEM_WRITE, UC_MODE_ARM, UC_PROT_ALL, \
     UC_PROT_EXEC, UC_PROT_READ, UC_PROT_WRITE, Uc, UcError
 from unicorn import unicorn_const as UCC
 from unicorn.arm64_const import UC_ARM64_REG_CPACR_EL1, UC_ARM64_REG_LR, UC_ARM64_REG_PC, UC_ARM64_REG_SP, \
     UC_ARM64_REG_TPIDR_EL0, UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3, UC_ARM64_REG_X4
 
 import bootlayout
+import icount
 
 PAGE, U64 = 0x1000, (1 << 64) - 1
 SLOTS = ["output_debug_string", "sleep_ns", "exit", "console_write", "console_flush", "main_loop",
@@ -94,11 +102,12 @@ def _up(v, a=PAGE):
 
 class Machine:
     def __init__(self, elf_bytes, plan, services, clock=None, *, hc_slice=2000, limit_host_calls=None, n_stacks=32,
-                 stack_size=0x40000):
+                 stack_size=0x40000, limit_instructions=None):
         self.elf = elf = bootlayout.parse_elf(elf_bytes)
         self.services, self.clock, self.hc_slice, self.limit = services, clock or VirtualClock(), hc_slice, limit_host_calls
         reg = {n: (r["lo"], r["hi"]) for n, r in plan["regions"].items()}
         base, (ilo, ihi) = plan["image"]["base"], reg["image"]
+        self.image, self.heap, self.given = (ilo, ihi), reg["heap"], []   # given: heap blocks consumed by map_fixed
         self.base, self.entry = base, plan["image"]["entry"]
         self.free = [(f["name"], f["lo"], f["hi"]) for f in plan["free"]]
         slo, shi = reg["stacks"]
@@ -140,7 +149,12 @@ class Machine:
         self.fault, self.events, self.ext_missing, self.limit_hit = None, [], None, False
         self.mapped = []   # merged [lo, hi) ranges mapped by map_fixed
         self.cb_thread, self.cb_console, self.line = None, None, bytearray()
-        self.ret_pending = {}
+        self.ret_pending, self.console_text = {}, []
+        self.limit_instr, self.instr, self.icount, self.block_hook = limit_instructions, 0, None, False
+        if limit_instructions is not None:
+            if limit_instructions <= 0:
+                raise MachineError("limit_instructions must be positive, got %r" % (limit_instructions,))
+            self._block_hook()
         uc.hook_add(UC_HOOK_CODE, self._on_code, begin=hp, end=hp + PAGE - 1)
         uc.hook_add(UC_HOOK_MEM_INVALID, self._on_bad)
         services.bind(self)
@@ -156,6 +170,29 @@ class Machine:
         if not callable(getattr(services, "bind", None)):
             raise MachineError("services has no bind(machine)")
         return h
+
+    # -- instruction bound and count
+    def _block_hook(self):
+        if not self.block_hook:
+            self.block_hook = True
+            self.uc.hook_add(UC_HOOK_BLOCK, self._on_block, begin=self.image[0], end=self.image[1] - 1)
+
+    def attach_icount(self, spec=None, bias=0):
+        """the Icount of this machine (icount.py, fed by the machine's one block hook); returns it"""
+        if self.icount is not None:
+            raise MachineError("attach_icount called twice")
+        self.icount = ic = icount.Icount(spec, bias)
+        ic.uc = self.uc
+        self._block_hook()
+        return ic
+
+    def _on_block(self, uc, addr, size, _):
+        if self.icount is not None:
+            self.icount._block(uc, addr, size, _)
+        self.instr += size // 4
+        if self.limit_instr is not None and self.instr >= self.limit_instr and not self.limit_hit:
+            self.limit_hit = True
+            uc.emu_stop()
 
     # -- observation
     def on_thread(self, cb):
@@ -205,6 +242,7 @@ class Machine:
         return self.cur.tid if self.cur else 0
 
     def console_write(self, data):
+        self.console_text.append(bytes(data))
         self.line += data
         while b"\n" in self.line:
             line, _, rest = bytes(self.line).partition(b"\n")
@@ -223,6 +261,12 @@ class Machine:
     def _covered(self, lo, hi):
         return any(a <= lo and hi <= b for a, b in self.mapped)
 
+    def _owned(self, lo, hi):
+        """wholly guest-owned: inside the heap region and clear of given-away blocks, or inside map_fixed mappings"""
+        if self.heap[0] <= lo and hi <= self.heap[1]:
+            return not any(a < hi and lo < b for a, b in self.given)
+        return self._covered(lo, hi)
+
     def map_fixed(self, addr, size, src):
         if size == 0 or size % PAGE:
             return self._refuse("map_fixed", addr, size, "size", ERR_INVALID_SIZE)
@@ -232,7 +276,17 @@ class Machine:
             return self._refuse("map_fixed", addr, size, "not wholly inside a mappable reserved range", ERR_INVALID_ADDRESS)
         if any(b > addr and addr + size > a for a, b, _p in self.uc.mem_regions()):
             return self._refuse("map_fixed", addr, size, "overlaps a mapping", ERR_INVALID_CURRENT_MEMORY)
+        if src % PAGE or not (self.heap[0] <= src and src + size <= self.heap[1]):
+            return self._refuse("map_fixed", addr, size, "src not a page-aligned block wholly inside the heap region 0x%x" % src,
+                                ERR_INVALID_ADDRESS)
+        if any(a < src + size and src < b for a, b in self.given) or (src < addr + size and addr < src + size):
+            return self._refuse("map_fixed", addr, size, "src block 0x%x already given away or overlaps addr" % src,
+                                ERR_INVALID_CURRENT_MEMORY)
+        content = bytes(self.uc.mem_read(src, size))
+        self.uc.mem_unmap(src, size)
+        self.given.append((src, src + size))
         self.uc.mem_map(addr, size, UC_PROT_READ | UC_PROT_WRITE)
+        self.uc.mem_write(addr, content)
         spans = sorted(self.mapped + [(addr, addr + size)])
         self.mapped = [spans[0]]
         for a, b in spans[1:]:
@@ -252,10 +306,12 @@ class Machine:
             if len(a) != 3:
                 raise MachineError("VM_PROTECT needs 3 arguments, the guest passed %d" % len(a))
             addr, size, prot = a
-            if addr % PAGE or size % PAGE or size == 0:
-                return self._refuse("vm_protect", addr, size, "unaligned", ERR_INVALID_ADDRESS)
-            if not self._covered(addr, addr + size):
-                return self._refuse("vm_protect", addr, size, "not wholly mapped by map_fixed", ERR_INVALID_CURRENT_MEMORY)
+            if size == 0 or size % PAGE:
+                return self._refuse("vm_protect", addr, size, "size", ERR_INVALID_SIZE)
+            if addr % PAGE or addr + size > 1 << 32:
+                return self._refuse("vm_protect", addr, size, "address", ERR_INVALID_ADDRESS)
+            if not self._owned(addr, addr + size):
+                return self._refuse("vm_protect", addr, size, "pages the guest does not own", ERR_INVALID_CURRENT_MEMORY)
             self.uc.mem_protect(addr, size, (UC_PROT_READ if prot & 1 else 0) | (UC_PROT_WRITE if prot & 2 else 0))
             return 0
         if module not in self.ext:
@@ -433,7 +489,7 @@ class Machine:
         if self.line and self.cb_console:
             self.cb_console(bytes(self.line).decode(errors="replace"))
             self.line = bytearray()
-        r = dict(reason=reason, exit_code=self.exit_code, host_calls=self.calls, switches=self.switches,
+        r = dict(reason=reason, console=b"".join(self.console_text).decode(errors="replace"), exit_code=self.exit_code, host_calls=self.calls, switches=self.switches,
                  threads=len(self.threads), virtual_ns=self.clock.now_ns(), events=list(self.events))
         r.update(extra)
         return r

@@ -83,27 +83,66 @@ static void num(const char *what, uint64_t v) {
     b[n++] = '\n'; b[n] = 0;
     say(b);
 }
+/* boot-stage CLI test (MODE 6): three functions called in order; results 0, 1, 0 */
+__attribute__((noinline, used)) uint32_t fnvboot_a(uint32_t x) { __asm__ volatile("" ::: "memory"); return x - x; }
+__attribute__((noinline, used)) uint32_t fnvboot_b(uint32_t x) { __asm__ volatile("" ::: "memory"); return (x | 1) & 1; }
+__attribute__((noinline, used)) uint32_t fnvboot_c(uint32_t x) { __asm__ volatile("" ::: "memory"); return x ^ x; }
 uint64_t __fnvnx_guest_entry(uint64_t api) {
     relocate((uint32_t)(uintptr_t)__fnvnx_guest_start);
     fnvnx_host = (const FnvnxHostApi *)(uintptr_t)api;
     say(MSG[0]); say(MSG[1]);
-#if MODE == 1
+#if MODE == 6
+    uint32_t acc = fnvboot_a(3);
+    acc += fnvboot_b(acc);
+    say("fnvnx-start: identity ok\n");
+    acc += fnvboot_c(acc);
+    fnvnx_hcall1(H->exit, acc - 1);
+#elif MODE == 1
     uint64_t a3[3] = {0x500000, 0x1000, 1};   /* a 3-argument call to module 9: not registered */
     fnvnx_hcall4(H->ext_call, 9, 1, FNVNX_ADDR(a3), 3);
 #elif MODE == 2
     fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&flag), 0, ~0ull);   /* nobody wakes it, no deadline */
 #else
     num("marker", marker(41));
-    num("map", fnvnx_hcall3(H->map_fixed, 0x400000, 0x10000, 0));
+    volatile uint32_t *hp = (volatile uint32_t *)(uintptr_t)H->heap_base;
+    hp[0] = 0xabcd0001; hp[0x3FFF] = 0xabcd0002;
+    num("map", fnvnx_hcall3(H->map_fixed, 0x400000, 0x10000, H->heap_base));
     volatile uint32_t *p = (volatile uint32_t *)0x400000;
+    num("carried", p[0] ^ p[0x3FFF]);
+    num("zeroed-rest", p[1] | p[0x3FFE]);
+#if MODE == 4
+    num("touch-src", hp[0]);   /* the given-away block: the run must end here */
+    say("after the fault\n");
+#endif
     p[0] = 0x1234; p[0x3FFF] = 0x5678;
     num("readback", p[0] + p[0x3FFF]);
-    num("overlap", fnvnx_hcall3(H->map_fixed, 0x400000, 0x1000, 0));
-    num("keys", fnvnx_hcall3(H->map_fixed, 0xf0000, 0x1000, 0));
+    num("overlap", fnvnx_hcall3(H->map_fixed, 0x400000, 0x1000, H->heap_base + 0x20000));
+    num("keys", fnvnx_hcall3(H->map_fixed, 0xf0000, 0x1000, H->heap_base + 0x20000));
+    num("src-unaligned", fnvnx_hcall3(H->map_fixed, 0x500000, 0x1000, H->heap_base + 0x20001));
+    num("src-given", fnvnx_hcall3(H->map_fixed, 0x500000, 0x1000, H->heap_base));
+    num("src-outside", fnvnx_hcall3(H->map_fixed, 0x500000, 0x1000, 0x10000));
+    num("src-past-end", fnvnx_hcall3(H->map_fixed, 0x500000, 0x2000, H->heap_base + H->heap_size - 0x1000));
     uint64_t a[3] = {0x400000, 0x10000, 1};
     num("protect", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(a), 3));
     uint64_t u[3] = {0x500000, 0x1000, 1};
     num("protect-unmapped", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(u), 3));
+    uint64_t im[3] = {H->guest_base, 0x1000, 0};
+    num("protect-image", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(im), 3));
+    uint64_t hg[3] = {H->heap_base, 0x1000, 0};
+    num("protect-given-src", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(hg), 3));
+    uint64_t hp0[3] = {H->heap_base + 0x30000, 0x1000, 0}, hp1[3] = {H->heap_base + 0x30000, 0x1000, 3};
+    num("protect-heap-none", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(hp0), 3));
+#if MODE == 5
+    num("touch-guard", *(volatile uint32_t *)(uintptr_t)(H->heap_base + 0x30000));
+    say("after the fault\n");
+#endif
+    num("protect-heap-rw", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(hp1), 3));
+    *(volatile uint32_t *)(uintptr_t)(H->heap_base + 0x30000) = 5;
+    num("heap-rw-works", *(volatile uint32_t *)(uintptr_t)(H->heap_base + 0x30000));
+    uint64_t hu[3] = {H->heap_base + 0x30000, 0x800, 3};
+    num("protect-bad-size", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(hu), 3));
+    hu[0]++; hu[1] = 0x1000;
+    num("protect-bad-addr", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(hu), 3));
 #if MODE == 3
     p[0] = 9;   /* a write to the read-only page: the run must end here */
     say("after the fault\n");
@@ -148,7 +187,7 @@ def sh(cmd):
 
 
 def build(mode):
-    """crt0.s + test C -> PIE ELF at base 0; the crt0 header's +20 size and +24 flags are filled as elf2nso does"""
+    """crt0.s + test C (GUEST with -DMODE) -> (ELF bytes, ELF path); importable: test_boot.py uses it"""
     src, ld = os.path.join(TMP, "g.c"), os.path.join(TMP, "guest.ld")
     if not os.path.exists(ld):
         txt = open(os.path.join(TC, "guest", "guest.ld")).read()
@@ -157,6 +196,7 @@ def build(mode):
         open(ld, "w").write(txt)
         open(src, "w").write(GUEST)
         sh([CC] + CFLAGS[:3] + ["-c", os.path.join(TC, "guest", "crt0.s"), "-o", os.path.join(TMP, "crt0.o")])
+    # crt0 header: the +20 size and +24 flags are filled as elf2nso does
     obj, elf = os.path.join(TMP, "g%d.o" % mode), os.path.join(TMP, "g%d.elf" % mode)
     sh([CC] + CFLAGS + ["-DMODE=%d" % mode, "-g", "-c", src, "-o", obj])
     sh(["aarch64-linux-gnu-ld"] + LDFLAGS + ["-T", ld, os.path.join(TMP, "crt0.o"), obj, "-o", elf])
@@ -202,7 +242,7 @@ def main():
     root = os.path.join(TMP, "sd")
     os.makedirs(root)
     open(os.path.join(root, "data.bin"), "wb").write(b"01ABCDEFGH23")
-    built = {m: build(m) for m in (0, 1, 2, 3)}
+    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5)}   # MODE 6 (boot CLI guest) is built by test_boot.py
     elf0, path0 = built[0]
     plan0 = make_plan(elf0)
     base = plan0["image"]["base"]
@@ -220,13 +260,17 @@ def main():
     case("exit code 7, reason exit", r1["reason"] == "exit" and r1["exit_code"] == 7, r1)
     case("console: self-relocated string pointers", lines1[:2] == ["hello from the guest", "second line"], lines1[:3])
     for k, v in (("marker", "2a"), ("map", "0"), ("readback", "68ac"), ("overlap", "d401"), ("keys", "cc01"),
-                 ("protect", "0"), ("protect-unmapped", "d401"), ("unprotect", "0"), ("tickdiff", "3e8"),
+                 ("carried", str(hex(0xabcd0001 ^ 0xabcd0002))[2:]), ("zeroed-rest", "0"), ("src-unaligned", "cc01"),
+                 ("src-given", "d401"), ("src-outside", "cc01"), ("src-past-end", "cc01"),
+                 ("protect", "0"), ("protect-unmapped", "d401"), ("protect-image", "d401"),
+                 ("protect-given-src", "d401"), ("protect-heap-none", "0"), ("protect-heap-rw", "0"),
+                 ("heap-rw-works", "5"), ("protect-bad-size", "ca01"), ("protect-bad-addr", "cc01"), ("unprotect", "0"), ("tickdiff", "3e8"),
                  ("thread", "2"), ("woken", "0"), ("flag", "4d"), ("pread", "8"), ("rand-calls-equal", "1")):
         case("guest saw %s=%s" % (k, v), (k + "=" + v) in lines1, text)
     case("pread through fs_* (case-folded path)", "ABCDEFGH" in lines1, text)
     case("two threads, a context switch", r1["threads"] == 2 and r1["switches"] >= 2, r1)
-    case("refusals recorded", [e["kind"] for e in r1["events"]] == ["map_fixed-refused", "map_fixed-refused",
-                                                                      "vm_protect-refused"], r1["events"])
+    case("refusals recorded", [e["kind"] for e in r1["events"]] == ["map_fixed-refused"] * 6
+                                                                      + ["vm_protect-refused"] * 5, r1["events"])
     case("watch_pc fired once, main thread", hits["pc"] == [(1, marker)], hits["pc"])
     case("watch_ret fired once with x0=42", hits["ret"] == [(1, 42)], hits["ret"])
     case("watch_store saw the worker's store", any(h[0] == 2 and h[3] == 77 for h in hits["store"]), hits["store"])
@@ -241,6 +285,41 @@ def main():
     case("fault record", f.get("kind") == "write-protected" and f.get("addr") == 0x400000 and f.get("tid") == 1
         and f.get("size") == 4 and set(f) == {"kind", "addr", "size", "pc", "lr", "tid"}, f)
     case("nothing runs after the fault", "after the fault" not in linesf, linesf)
+
+    rf4, lines4 = run(built[4][0], root)[:2]
+    case("touching the given-away src block ends the run: fault", rf4["reason"] == "fault"
+        and rf4["fault"]["kind"] == "read-unmapped" and rf4["fault"]["addr"] == plan0["regions"]["heap"]["lo"], rf4)
+    rg, linesg = run(built[5][0], root)[:2]
+    case("protected-none heap page: read faults at that address", rg["reason"] == "fault"
+        and rg["fault"]["kind"] == "read-protected" and rg["fault"]["addr"] == plan0["regions"]["heap"]["lo"] + 0x30000
+        and "after the fault" not in linesg, rg)
+    case("image-page protect refused and recorded", any(e["kind"] == "vm_protect-refused" and e["addr"] == base
+        and e["result"] == 0xD401 for e in r1["events"]), r1["events"])
+    case("nothing runs after the src fault", "after the fault" not in lines4 and "map=0" in lines4, lines4)
+    case("run() carries the whole console text", r1["console"] == "\n".join(lines1) + "\n", r1["console"][:80])
+
+    # instruction bound: one block hook, deterministic stop, reuse of the Icount total
+    def limited(limit, with_ic):
+        svc = boothost.Services(root)
+        m = bootmachine.Machine(elf0, plan0, svc, limit_instructions=limit)
+        ic = m.attach_icount(None, base) if with_ic else None
+        return m.run(), ic, m.instr
+
+    full, icf, ninstr = limited(10**9, True)
+    case("limit not reached: normal exit, run() equals the unbounded run",
+         full["reason"] == "exit" and full == r1, full)
+    case("instr total equals Icount total", ninstr == icf.report()["totals"]["all"]["total"] > 1000, ninstr)
+    lim = ninstr // 2
+    la, ica, na = limited(lim, True)
+    lb, _, nb = limited(lim, False)
+    case("limit: reason limit, same stop point, with and without icount", la["reason"] == lb["reason"] == "limit"
+        and la == lb and na == nb >= lim and na - lim < 64 and ica.report()["totals"]["all"]["total"] == na, (la, na, nb))
+    try:
+        bootmachine.Machine(elf0, plan0, boothost.Services(root), limit_instructions=0)
+        ok = False
+    except bootmachine.MachineError:
+        ok = True
+    case("limit_instructions <= 0 is a construction error", ok)
 
     re_, _, _, _ = run(built[1][0], root)
     case("unregistered ext module ends the run", re_["reason"] == "ext-module-missing"
