@@ -226,6 +226,16 @@ r2 = small_repo(link={"ports/fnv-nx/link/bad.py": BAD})
 rc, line, out, err = l1("verdict", "--repo", r2, "--commit", "main", "--verdicts", vd)
 check("l1 verdict: red file -> red, exit 2", rc == 2 and line.startswith("L1 red "), (rc, line, out, err))
 
+vd = tmp("verdicts")
+r3 = small_repo(link={"ports/fnv-nx/link/tests/test_x.py": "import sys\nprint('boom: [Errno 28] No space left on device')\nsys.exit(1)\n"})
+rc, line, out, err = l1("verdict", "--repo", r3, "--commit", "main", "--verdicts", vd)
+tree3 = git(r3, "rev-parse", "main^{tree}")
+stored = json.load(open(os.path.join(vd, tree3 + ".json")))
+gt = [g for g in stored["gates"] if g["name"] == "selftests"][0]
+check("l1 verdict: the reason of an uncertified test (exit status, errno text) is in the stored verdict and the printed gate line",
+      rc == 2 and "test_x.py" in gt["reason"] and "exit 1" in gt["reason"] and "[Errno 28] No space left on device" in gt["reason"]
+      and "[Errno 28]" in out, (rc, gt, out))
+
 # merge: bootstrap
 r = small_repo()
 vd = tmp("verdicts")

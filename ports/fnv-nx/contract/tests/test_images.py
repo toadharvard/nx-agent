@@ -7,6 +7,10 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, ".."))
+sys.path.append(os.path.join(HERE, "..", "..", "verify"))
+import scratch  # noqa: E402
+
+scratch.install()
 import images  # noqa: E402
 import modules  # noqa: E402
 

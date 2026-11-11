@@ -7,7 +7,8 @@ Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 
               given, GATE_CACHE (absolute path of a caller-owned directory that outlives the run). A gate may store results in
               GATE_CACHE only under a key that covers everything it reads (its inputs' content, the declared environment, its own
               arguments); it must work, and give the same verdict, without GATE_CACHE. A gate writes
-              {"format":"fnvnx-gate/1","name","status","universe","certified","uncertified":[<=50 ids],"detail"} at GATE_OUT/<result>.
+              {"format":"fnvnx-gate/1","name","status","universe","certified","uncertified":[<=50 ids],"detail"[,"reasons":{id: text}]} at GATE_OUT/<result>
+              (reasons: why an uncertified id is uncertified; the first 10, each cut to its last 400 characters, join the gate's red reason).
               Gate green iff exit 0, valid result, name equal, status green and certified == universe (completeness of
               certificates, not a run counter; certified > universe is invalid). Verdict green iff >=1 gate and all gates green.
               over_budget is reported only; it never changes the verdict.
@@ -97,7 +98,9 @@ def _gate_result(g, out_dir, rc):
     if c > u:
         return "red", u, c, "certified %d > universe %d" % (c, u)
     if c < u:
-        return "red", u, c, "certified %d < universe %d; uncertified: %s" % (c, u, ",".join(r["uncertified"][:50]))
+        why = r.get("reasons") if isinstance(r.get("reasons"), dict) else {}   # optional {id: text}: why a test/item is uncertified
+        more = "".join("\n  %s: %s" % (x, str(why[x]).replace("\n", " ")[-400:]) for x in r["uncertified"][:10] if isinstance(why.get(x), str))
+        return "red", u, c, "certified %d < universe %d; uncertified: %s%s" % (c, u, ",".join(r["uncertified"][:50]), more)
     if rc != 0:
         return "red", u, c, "exit %d" % rc
     if r["status"] != "green":
@@ -148,7 +151,7 @@ def cmd_run(a):
         v["env_id"] = o["--env-id"]  # sha256 of the env.json the verdict was computed in (envcheck.py id)
     open(o["--out"], "wb").write(cas.canon(v) + b"\n")
     for r in res:
-        print("%-5s %-24s %d/%d %s" % (r["status"], r["name"], r["certified"], r["universe"], r["reason"][:120]))
+        print("%-5s %-24s %d/%d %s" % (r["status"], r["name"], r["certified"], r["universe"], r["reason"][:1500]))
     print("verdict %s (%.1fs%s)" % (v["verdict"], total, ", over budget" if v["over_budget"] else ""))
     return 0 if v["verdict"] == "green" else 2
 
