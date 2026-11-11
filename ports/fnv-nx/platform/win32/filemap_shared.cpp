@@ -19,6 +19,8 @@ struct fm_backing {
     os_lock_t lock;
 };
 
+const char *fm_backend_name(void) { return "shared"; }
+
 static uint64_t page_round(uint64_t n) { return (n + PAGE - 1) & ~(uint64_t)(PAGE - 1); }
 
 struct fm_backing *fm_backing_create(const struct fm_spec *sp, fm_fill_fn fill, void *ctx, DWORD *err)

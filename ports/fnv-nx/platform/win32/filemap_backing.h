@@ -4,14 +4,18 @@
  * Two implementations, chosen when the program is linked, never at run time:
  *   filemap_shared.cpp   over os_shm_* (shared memory objects): every kind of section with its full contract; the host
  *                        test builds (tests/s4, tests/s7) link it.
- *   filemap_private.cpp  the product (guest) build, which has no shared-memory primitive: a view of a read-only
- *                        file-backed section is private pages holding the file's bytes; build_guest.sh links it.
+ *   filemap_private.cpp  the product (guest) build, which has no shared-memory primitive: a view is private pages
+ *                        holding the section's bytes; build_guest.sh links it. It expresses exactly the sections whose
+ *                        views never need to alias (see its header comment); the rest goes to fm_private_residue.
  * A section is created with fm_backing_create; a view of it is one fm_view_map ... fm_view_unmap pair. */
 #ifndef FNVNX_FILEMAP_BACKING_H
 #define FNVNX_FILEMAP_BACKING_H
 #include "w32.h"
 
 struct fm_backing;
+
+/* "shared" or "private": which backend this program links (the tests ask, to run the cases of their backend) */
+const char *fm_backend_name(void);
 
 struct fm_spec {
     uint64_t size;   /* the section's size in bytes (the image's size for SEC_IMAGE) */
@@ -20,6 +24,8 @@ struct fm_spec {
     bool image;      /* SEC_IMAGE */
     bool reserve;    /* SEC_RESERVE */
     HANDLE fh;       /* the section's own handle of the backing file (owned by the caller; valid while the backing lives) */
+    bool writers;    /* file: the file's bytes can change while the section lives (the handle has write access or
+                      * allows FILE_SHARE_WRITE: w32_file_writers_possible) */
 };
 
 /* filled by the backend into zeroed memory of the section's size, before the section exists (SEC_IMAGE: the layout) */

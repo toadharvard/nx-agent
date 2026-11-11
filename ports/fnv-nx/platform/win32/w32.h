@@ -124,6 +124,10 @@ void *w32_vm_view_place(uintptr_t want, size_t size, w32_view_osmap osmap, void 
 size_t w32_vm_view_remove(uintptr_t base);   /* the view allocation at base leaves the map; its size, 0: not a view base */
 void w32_vm_view_prot(uintptr_t base, size_t size, DWORD prot);   /* the pages' current protection (map only) */
 
+/* file.cpp: can the bytes of the file behind this handle change while the handle's file object lives? Yes iff the open
+ * has write access or allows FILE_SHARE_WRITE (the share table admits no other writer otherwise) */
+bool w32_file_writers_possible(HANDLE h);
+
 /* ---- misc */
 void w32_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 #define W32_UNUSED(x) ((void)(x))

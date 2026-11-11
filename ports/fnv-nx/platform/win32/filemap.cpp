@@ -237,7 +237,7 @@ static DWORD image_load(struct w32_map *m, uint64_t fsize, uint32_t *preferred_b
     if (!m->pprot)
         return ERROR_NOT_ENOUGH_MEMORY;
     struct image_ctx x = { m, oh + optsz, nsec, hsize, salign, fsize, imsz };
-    struct fm_spec sp = { imsz, m->prot, true, true, false, m->fh };
+    struct fm_spec sp = { imsz, m->prot, true, true, false, m->fh, w32_file_writers_possible(m->fh) };
     DWORD err = 0;
     m->bk = fm_backing_create(&sp, image_fill, &x, &err);
     return err;
@@ -299,7 +299,7 @@ extern "C" HANDLE CreateFileMappingA(HANDLE file, void *sa, DWORD flprot, DWORD 
         if (!want)
             err = ERROR_INVALID_PARAMETER;
         else {
-            struct fm_spec sp = { want, base, false, false, m->reserve != 0, NULL };
+            struct fm_spec sp = { want, base, false, false, m->reserve != 0, NULL, false };
             m->bk = fm_backing_create(&sp, NULL, NULL, &err);
         }
         m->size = want;
@@ -341,7 +341,7 @@ extern "C" HANDLE CreateFileMappingA(HANDLE file, void *sa, DWORD flprot, DWORD 
                 }
                 m->size = size;
                 if (!err) {
-                    struct fm_spec sp = { size, base, true, false, false, m->fh };
+                    struct fm_spec sp = { size, base, true, false, false, m->fh, w32_file_writers_possible(m->fh) };
                     m->bk = fm_backing_create(&sp, NULL, NULL, &err);
                 }
             }

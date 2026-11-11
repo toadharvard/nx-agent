@@ -346,6 +346,19 @@ static HANDLE create_core(LPCSTR name, DWORD access, DWORD share, DWORD disp, DW
 }
 
 /* the one implementation: name is ANSI (utf8 == 0) or UTF-8 (CreateFileW) */
+bool w32_file_writers_possible(HANDLE h)
+{
+    struct w32_obj *o = w32_obj_get_ref(h, W32_FILE);
+    if (!o)
+        return true;   /* not a file: nothing is known, so the answer that excludes the exact private copy */
+    struct w32_file *f = (struct w32_file *)o;
+    os_lock(&g_flock);
+    bool w = (f->se.rights & SR_W) || (f->se.share & FILE_SHARE_WRITE);
+    os_unlock(&g_flock);
+    w32_obj_unref(o);
+    return w;
+}
+
 HANDLE w32_create_file_name(LPCSTR name, DWORD access, DWORD share, DWORD disp, DWORD flags, int utf8)
 {
     char host[W32_PATH_MAX];

@@ -40,7 +40,7 @@ CXXFLAGS_ := -std=gnu++17 $(FLAGS)
 
 PLAT_C := $(P)/os/os_posix.c $(wildcard $(P)/crt/*.c)
 PLAT_CXX := $(P)/com/combridge.cpp $(P)/com/combridge.gen.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(wildcard $(P)/crt/*.cpp) $(wildcard $(P)/audio/*.cpp)   # audio: winmm waveOut* are exports of the table
-TEST_CXX := $(wildcard $(HERE)/*.cpp)
+TEST_CXX := $(filter-out %/private_residue_probe.cpp,$(wildcard $(HERE)/*.cpp))   # the probe belongs to the private binary only
 
 OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
 
@@ -48,7 +48,7 @@ OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
 # a call goes through the boundary, a direct call does not compile); the tests are "the game" and keep plain pointers.
 $(filter $(OUT)/platform/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 
-.PHONY: all test ilp32 m32 iat device qemu clean gfn-nocompile
+.PHONY: all test private ilp32 m32 iat device qemu clean gfn-nocompile
 all: test
 
 $(OUT)/%.c.o: $(ROOT)/%.c
@@ -106,6 +106,15 @@ $(COMOUT) &: $(COMGEN)
 
 $(OUT)/s4_tests: $(OBJS) $(OUT)/libfreetype.a
 	$(CXX) $(CXXFLAGS_) $(OBJS) $(OUT)/libfreetype.a -o $@ -lm $(LDEXTRA)
+
+# ---- the same test objects linked with the product's file-mapping backend (platform/win32/filemap_private.cpp) instead of
+# filemap_shared.cpp, plus the test-only definition of its residue (private_residue_probe.cpp); runs the vmp_ cases
+PRIV_OBJS := $(filter-out %/filemap_shared.cpp.o,$(OBJS)) $(OUT)/platform/win32/filemap_private.cpp.o $(OUT)/tests/s4/private_residue_probe.cpp.o
+$(OUT)/platform/win32/filemap_private.cpp.o: CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
+$(OUT)/s4_tests_private: $(PRIV_OBJS) $(OUT)/libfreetype.a
+	$(CXX) $(CXXFLAGS_) $(PRIV_OBJS) $(OUT)/libfreetype.a -o $@ -lm $(LDEXTRA)
+private: $(OUT)/s4_tests_private
+	rm -rf $(OUT)/root-private && FNVNX_TEST_ONLY=vmp_ FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root-private $(OUT)/s4_tests_private
 
 test: $(OUT)/s4_tests
 	rm -rf $(OUT)/root && FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root GLIBC_TUNABLES=glibc.malloc.tcache_count=0 $(OUT)/s4_tests
