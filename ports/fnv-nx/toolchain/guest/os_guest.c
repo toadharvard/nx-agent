@@ -6,6 +6,7 @@
  * go to the host's newlib/fsdev. Paths are host paths ("sdmc:/...").
  */
 #include "../../platform/os/os_clock.h"
+#include "../../platform/os/os_world.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -62,11 +63,28 @@ struct os_thread {
     struct __pthread_t *t;
     os_thread_fn fn;
     void *arg;
+    uint64_t hid;                  /* the host thread id: stays valid until the host thread is freed */
+    int refs;                      /* the owner's reference, and the running thread's from os_thread_start until its end */
+    os_wslot slot;                 /* the world registry (os_world.c) */
 };
+static __thread os_thread *g_me;   /* the platform-made thread this is (NULL: the adopted main thread) */
+
+static void thread_unref(os_thread *t) {
+    if (__atomic_sub_fetch(&t->refs, 1, __ATOMIC_ACQ_REL) == 0) free(t);
+}
+/* the thread's last act: leave the registry (under the world lock, so never during a stop), then drop its reference */
+static void thread_done(os_thread *t) {
+    os_world_unregister(&t->slot);
+    g_me = NULL;
+    thread_unref(t);
+}
 
 static void *trampoline(void *p) {
     os_thread *t = (os_thread *)p;
+    g_me = t;
+    os_world_register(&t->slot, t);   /* blocks while the world is stopped: no guest code starts during a stop */
     t->fn(t->arg);
+    thread_done(t);
     return NULL;
 }
 
@@ -77,10 +95,16 @@ os_thread *os_thread_create(os_thread_fn fn, void *arg, size_t stack_size, int p
     t->arg = arg;
     size_t s = stack_size ? stack_size : 1024 * 1024;
     if (s < 0x10000) s = 0x10000;
+    t->refs = 1;
     if (fnvnx_thread_create(&t->t, trampoline, t, s, prio, cpu) != 0) { free(t); return NULL; }
+    t->hid = fnvnx_thread_host_id(t->t);
     return t;
 }
-int os_thread_start(os_thread *t) { return fnvnx_thread_start(t->t) ? -1 : 0; }
+int os_thread_start(os_thread *t) {
+    __atomic_add_fetch(&t->refs, 1, __ATOMIC_ACQ_REL);
+    if (fnvnx_thread_start(t->t)) { __atomic_sub_fetch(&t->refs, 1, __ATOMIC_ACQ_REL); return -1; }
+    return 0;
+}
 int os_thread_join(os_thread *t) {
     if (!t->t) return -1;
     fnvnx_thread_join(t->t);
@@ -92,7 +116,7 @@ void os_thread_free(os_thread *t) {
         extern int __syscall_thread_detach(struct __pthread_t *);
         __syscall_thread_detach(t->t);
     }
-    free(t);
+    thread_unref(t);
 }
 /* t: another thread (also one not started yet) through its host id; NULL: the calling thread (id 0) */
 static int host_id_of(os_thread *t, uint64_t *id) {
@@ -116,17 +140,36 @@ int os_thread_set_affinity(os_thread *t, int ideal, unsigned mask) {
     uint64_t spec = FNVNX_CPU_SPEC(ideal < 0 ? FNVNX_CPU_KEEP : (unsigned)ideal, mask);
     return fnvnx_hcall2(fnvnx_host->thread_set_cpu, id, spec) ? -1 : 0;
 }
-/* another thread: the host pauses or resumes it (svcSetThreadActivity); the calling thread (NULL) cannot be paused
- * by the kernel, thread.cpp blocks it instead. An older host without the call answers FNVNX_EXT_NO_MODULE. */
-static int thread_activity(os_thread *t, int paused) {
-    uint64_t id;
-    if (!t || host_id_of(t, &id) || !id || !fnvnx_host->ext_call) return -1;
-    uint64_t arg[2] = {id, paused ? 1u : 0u};
+/* the calling thread cannot be paused by the kernel: thread.cpp blocks it instead (SuspendThread on itself). */
+/* The pause primitive (os_world.h): the host's svcSetThreadActivity through FNVNX_PLAT_THREAD_ACTIVITY, a boolean per thread
+ * (os_world.c combines the user and world reasons). The host call returns only when the thread is stopped: it waits
+ * for svcGetThreadContext3 to succeed, which the kernel allows only for a paused, descheduled thread (host_thread_activity.inc;
+ * the guarantee is cited there). The calling thread cannot be paused: -1. */
+os_wslot *os_thread_wslot(os_thread *t) { return &t->slot; }
+int os_raw_pause(os_thread *t) {
+    if (t == g_me || !t->hid) return -1;
+    uint64_t arg[2] = {t->hid, 1u};
     return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_THREAD_ACTIVITY, FNVNX_ADDR(arg), 2) ? -1 : 0;
 }
-int os_thread_suspend(os_thread *t) { return thread_activity(t, 1); }
-int os_thread_resume(os_thread *t) { return thread_activity(t, 0); }
-void os_thread_exit(void) { fnvnx_thread_exit(NULL); }
+void os_raw_resume(os_thread *t) {
+    uint64_t arg[2] = {t->hid, 0u};
+    fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_THREAD_ACTIVITY, FNVNX_ADDR(arg), 2);
+}
+/* the main thread: the host registers a record for the calling thread (FNVNX_PLAT_THREAD_SELF) and returns its id */
+os_thread *os_raw_adopt_self(void) {
+    uint64_t arg[1] = {0};
+    uint64_t id = fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_THREAD_SELF, FNVNX_ADDR(arg), 0);
+    if (!id) return NULL;
+    os_thread *t = calloc(1, sizeof *t);
+    if (!t) return NULL;
+    t->hid = id;
+    t->refs = 1;
+    return t;
+}
+void os_thread_exit(void) {
+    if (g_me) thread_done(g_me);
+    fnvnx_thread_exit(NULL);
+}
 /* the host's platform services (toolchain/host/host.c platform_ext): appletSetCpuBoostMode, unless the config
  * (sdmc:/switch/fnv/fnvnx.ini boost_loading=0) turns it off */
 _Static_assert(OS_ROLE_AUDIO == FNVNX_ROLE_AUDIO, "platform/os/os.h OS_ROLE_AUDIO = hostapi.h FNVNX_ROLE_AUDIO");

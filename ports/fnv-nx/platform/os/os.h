@@ -89,10 +89,15 @@ int os_thread_set_priority(os_thread *t, int prio);   /* t == NULL: calling thre
 int os_thread_set_cpu(os_thread *t, int cpu);         /* t == NULL: calling thread; best effort; that core only */
 /* ideal core (< 0: keep) and affinity mask over the logical processors (0: keep); t == NULL: calling thread */
 int os_thread_set_affinity(os_thread *t, int ideal, unsigned mask);
-int os_thread_suspend(os_thread *t);        /* -1 where unsupported */
+int os_thread_suspend(os_thread *t);        /* user reason (SuspendThread), synchronous, os_world.c; -1: calling thread / already suspended */
 int os_thread_resume(os_thread *t);
 void os_thread_exit(void) __attribute__((noreturn));
 void os_yield(void);
+
+/* ---- the world (platform/os/os_world.c has the contract and the proof). Lifter hooks (rule R9): stop / resume every other
+ * thread of the process, synchronously, under one global lock; the caller calls nothing of the platform in between. */
+void fnvl_host_world_stop(void);
+void fnvl_host_world_resume(void);
 
 /* ---- time: the clock primitives are in os_clock.h, which only the clock implementations (platform/clock/clock_*.cpp)
  * and the OS backends include; the platform above reads time through fnvnx_clock.h */

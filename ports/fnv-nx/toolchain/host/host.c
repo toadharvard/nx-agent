@@ -196,6 +196,7 @@ static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) 
         return 0;
     }
     if (fn == FNVNX_PLAT_THREAD_ACTIVITY && nargs >= 2) return h_thread_activity(args[0], args[1]);
+    if (fn == FNVNX_PLAT_THREAD_SELF) return h_thread_self();
     if (fn == FNVNX_PLAT_MESSAGE && nargs >= 2) return host_show_message((const char *)args[0], (const char *)args[1]);
     if (fn == FNVNX_PLAT_VM_RESERVE && nargs >= 2) return host_vm_reserve(args[0], args[1]);
     if (fn == FNVNX_PLAT_VM_COMMIT && nargs >= 2) return host_vm_commit(args[0], args[1]);

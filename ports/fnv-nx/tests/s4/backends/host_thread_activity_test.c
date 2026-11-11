@@ -15,6 +15,9 @@ static int s_calls;
 static Result s_rc;
 Result svcSetThreadActivity(Handle h, ThreadActivity a) { s_handle = h; s_act = a; s_calls++; return s_rc; }
 
+static int s_ctx_calls, s_ctx_fail;   /* the first s_ctx_fail dumps refuse (the thread is not yet suspended) */
+Result svcGetThreadContext3(ThreadContext *c, Handle h) { (void)c; (void)h; return s_ctx_calls++ < s_ctx_fail ? MAKERESULT(1, 59) : 0; }
+void svcSleepThread(s64 ns) { (void)ns; }
 #include "../../../toolchain/host/host_thread_activity.inc"
 
 static int g_fail;
@@ -30,6 +33,11 @@ int main(void)
     T(s_calls == 2);
     s_rc = MAKERESULT(1, 59);   /* a kernel refusal (KernelError_InvalidState) goes back as it is */
     T(host_thread_activity(0x1234, 0, 1) == MAKERESULT(1, 59));
+    s_rc = 0;
+    s_ctx_calls = 0; s_ctx_fail = 3;   /* a pause returns only after the kernel gave the context: 4 tries */
+    T(host_thread_activity(0x1234, 0, 1) == 0 && s_ctx_calls == 4);
+    s_ctx_calls = 0;
+    T(host_thread_activity(0x1234, 0, 0) == 0 && s_ctx_calls == 0);   /* a resume asks for no context */
     printf("host_thread_activity: %s\n", g_fail ? "FAIL" : "ok");
     return g_fail != 0;
 }

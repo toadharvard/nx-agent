@@ -145,6 +145,7 @@ def find_sources(root, backend):
         if s.endswith('input_horizon.cpp') and backend != 'horizon':
             continue   # guest: its libnx part is on the host (toolchain/game/build.sh)
         out.append((s, []))
+    out.append((P + '/os/os_world.c', []))   # the world registry, common to the three backends
     if backend == 'posix':
         out.append((P + '/os/os_posix.c', []))
         out.append((P + '/audio/backend_audren.c', []))

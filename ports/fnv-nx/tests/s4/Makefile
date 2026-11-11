@@ -38,7 +38,7 @@ FLAGS := -g -O1 -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wcha
 CFLAGS_ := -std=gnu11 $(FLAGS)
 CXXFLAGS_ := -std=gnu++17 $(FLAGS)
 
-PLAT_C := $(P)/os/os_posix.c $(wildcard $(P)/crt/*.c)
+PLAT_C := $(P)/os/os_posix.c $(P)/os/os_world.c $(wildcard $(P)/crt/*.c)
 # the clock interface (platform/include/fnvnx_clock.h): clock_rt.cpp is in both, clock_real.cpp is the product's clock; `make vclock`
 # links clock_virtual.cpp instead (the verification mode, definition VC1)
 CLOCK_CXX := $(P)/clock/clock_rt.cpp $(P)/clock/clock_real.cpp

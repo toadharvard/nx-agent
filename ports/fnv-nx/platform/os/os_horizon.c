@@ -8,6 +8,7 @@
  *   - the address-space type must keep the alias region inside the 32-bit range used by ILP32 pointers.
  */
 #include "os_clock.h"
+#include "os_world.h"
 
 /* os_cpu_count, os_vm_page_size, os_default_root, os_fs_case_insensitive: manifest/env_const.tsv (os_default_root = FNVNX_SD_DIR,
  * toolchain/include/fnvnx/sdlayout.h) */
@@ -102,7 +103,9 @@ struct os_thread {
     int created, started, joined;
     u64 tid;                       /* kernel thread id, set by the thread itself on entry */
     struct os_thread *zombie_next; /* g_zombies */
+    os_wslot slot;                 /* the world registry (os_world.c); the record outlives the thread (zombies, join) */
 };
+static __thread os_thread *t_self; /* the platform-made thread this is (NULL: the adopted main thread) */
 
 /* A thread whose last reference goes away on the thread itself (CreateThread, CloseHandle, then the thread ends)
  * cannot wait for its own exit in os_thread_free: that would never return and the thread would leak for good.
@@ -148,7 +151,10 @@ static void thread_entry(void *p)
     u64 id = 0;
     svcGetThreadId(&id, CUR_THREAD_HANDLE);
     __atomic_store_n(&t->tid, id, __ATOMIC_RELEASE);
+    t_self = t;
+    os_world_register(&t->slot, t);   /* blocks while the world is stopped: no guest code starts during a stop */
     t->fn(t->arg);
+    os_world_unregister(&t->slot);
 }
 
 os_thread *os_thread_create(os_thread_fn fn, void *arg, size_t stack_size, int prio, int cpu)
@@ -239,17 +245,59 @@ int os_thread_set_affinity(os_thread *t, int ideal, unsigned mask)
     return R_FAILED(svcSetThreadCoreMask(handle_of(t), id, m)) ? -1 : 0;
 }
 
-int os_thread_suspend(os_thread *t)
+os_wslot *os_thread_wslot(os_thread *t) { return &t->slot; }
+
+/* The pause primitive of Horizon: svcSetThreadActivity(handle, Paused) / (Runnable), a boolean (os_world.c combines the
+ * user and world reasons). Synchronous guarantee, from libnx's own header (switch/kernel/svc.h): svcGetThreadContext3
+ * "dumps the registers of a thread paused by svcSetThreadActivity", and the kernel gives that dump only for a thread
+ * that is suspended, i.e. no longer executing (it fails for a thread that is merely requested to pause).
+ * svcSetThreadActivity itself returns once the pause is requested, so the primitive waits until svcGetThreadContext3
+ * succeeds: then the thread is stopped. A thread requested to pause always reaches the suspended state (the kernel
+ * interrupts the core it runs on, or it is already waiting), so the loop ends; it yields between tries.
+ * Assumption (the header's contract): GetThreadContext3 succeeds only for a paused, descheduled thread.
+ * The calling thread cannot pause itself (the kernel refuses): -1. */
+static int is_self(os_thread *t)
 {
-    return t && R_SUCCEEDED(svcSetThreadActivity(t->th.handle, ThreadActivity_Paused)) ? 0 : -1;
+    u64 me = 0;
+    svcGetThreadId(&me, CUR_THREAD_HANDLE);
+    return __atomic_load_n(&t->tid, __ATOMIC_ACQUIRE) == me;
 }
 
-int os_thread_resume(os_thread *t)
+int os_raw_pause(os_thread *t)
 {
-    return t && R_SUCCEEDED(svcSetThreadActivity(t->th.handle, ThreadActivity_Runnable)) ? 0 : -1;
+    if (!t->started || t->joined || is_self(t))
+        return -1;
+    if (R_FAILED(svcSetThreadActivity(t->th.handle, ThreadActivity_Paused)))
+        return -1;
+    ThreadContext ctx;
+    while (R_FAILED(svcGetThreadContext3(&ctx, t->th.handle)))
+        svcSleepThread(0);
+    return 0;
 }
 
-void os_thread_exit(void) { threadExit(); }
+void os_raw_resume(os_thread *t) { svcSetThreadActivity(t->th.handle, ThreadActivity_Runnable); }
+
+/* the main thread: libnx's record of it carries its real handle (envGetMainThreadHandle) */
+os_thread *os_raw_adopt_self(void)
+{
+    os_thread *t = (os_thread *)calloc(1, sizeof *t);
+    if (!t)
+        return NULL;
+    t->th.handle = threadGetSelf()->handle;
+    u64 id = 0;
+    svcGetThreadId(&id, CUR_THREAD_HANDLE);
+    t->tid = id;
+    t->started = 1;
+    return t;
+}
+
+/* ExitThread: leave the registry first (thread_entry's own unregister is not reached) */
+void os_thread_exit(void)
+{
+    if (t_self)
+        os_world_unregister(&t_self->slot);
+    threadExit();
+}
 void os_cpu_boost(int fast_load) {
     appletSetCpuBoostMode(fast_load ? ApmCpuBoostMode_FastLoad : ApmCpuBoostMode_Normal);
 }

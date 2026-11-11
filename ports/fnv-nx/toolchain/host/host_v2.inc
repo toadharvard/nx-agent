@@ -129,6 +129,15 @@ static u64 h_thread_set_priority(u64 id, u64 prio) {   /* id: any guest thread, 
 static u64 h_thread_activity(u64 id, u64 paused) {   /* id 0: the calling thread */
     return host_thread_activity(id ? ((HostThread *)id)->t.handle : 0, id == 0, paused);
 }
+/* a record for the calling thread (the main thread: libnx's threadGetSelf carries its real handle); never freed, never
+ * started by thread_start: only FNVNX_PLAT_THREAD_ACTIVITY uses its id */
+static u64 h_thread_self(void) {
+    HostThread *h = calloc(1, sizeof *h);
+    if (!h) return 0;
+    h->t.handle = threadGetSelf()->handle;
+    h->state = HT_STARTED;
+    return (u64)h;
+}
 static u64 h_thread_set_cpu(u64 id, u64 spec) {
     Handle th = id ? ((HostThread *)id)->t.handle : CUR_THREAD_HANDLE;
     if ((spec >> 40) & 0x7FFFFFull) return 0;   /* -1 and other negative values: nothing to do */

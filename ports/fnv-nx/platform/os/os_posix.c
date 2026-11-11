@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include "os_world.h"
 #include <semaphore.h>
 #include <signal.h>
 #include <sched.h>
@@ -196,27 +197,52 @@ struct os_thread {
     int started, joined;
     os_lock_t lock;
     os_cond_t cond;
-    volatile int paused;           /* os_thread_suspend: the thread waits in its SIGUSR2 handler while set */
-    sem_t pause_ack;
+    volatile uint32_t ps;          /* the pause word, see ps_park */
+    int refs;                      /* the owner's reference, and the running thread's from os_thread_start until its end */
+    os_wslot slot;                 /* the world registry (os_world.c) */
 };
 
-/* Suspend for the host tests (Horizon: svcSetThreadActivity): SIGUSR2 makes the target wait in the handler while
- * `paused` is set; os_thread_resume clears it and signals again. Synchronous: suspend returns once the target is
- * in the handler. */
+/* The pause primitive (one boolean per thread: os_world.c combines the two reasons, user SuspendThread and world stop,
+ * under the world lock, so this layer only ever sees "paused" or "running").
+ *   os_raw_pause: sets PS_REQ, sends SIGUSR2 and returns only when the target has acknowledged by setting PS_PARKED
+ *   inside the handler (ps_park), where it waits on the futex word until PS_REQ is cleared. A parked thread executes
+ *   nothing but the futex wait of the handler: that is the synchronous guarantee of the POSIX backend.
+ *   Stale-acknowledgement proof: the handler leaves ps_park only by a compare-and-swap that clears PS_PARKED from a value
+ *   observed without PS_REQ. If a new request (fetch_or PS_REQ) lands after that observation the CAS fails and the thread
+ *   stays parked; if it lands before it, the thread has already left and the signal sent after the request parks it
+ *   afresh. So when the requester sees PS_PARKED with its own PS_REQ set, the target is inside the handler and cannot
+ *   return to the interrupted code before the request is cleared.
+ * A thread that has not set t_self yet (the very start of thread_entry) ignores the signal; thread_entry checks the word
+ * itself after setting t_self, and the request is set before the signal is sent, so no request is lost. */
+#define PS_REQ 1u
+#define PS_PARKED 2u
 static __thread os_thread *t_self;
+static void ps_park(os_thread *t)
+{
+    for (;;) {
+        uint32_t v = __atomic_load_n(&t->ps, __ATOMIC_ACQUIRE);
+        if (!(v & PS_REQ)) {
+            if (!(v & PS_PARKED) || __atomic_compare_exchange_n(&t->ps, &v, v & ~PS_PARKED, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+                return;
+            continue;
+        }
+        if (!(v & PS_PARKED)) {
+            if (!__atomic_compare_exchange_n(&t->ps, &v, v | PS_PARKED, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+                continue;
+            futex_wake(&t->ps, 0x7fffffff);
+            v |= PS_PARKED;
+        }
+        futex_wait(&t->ps, v, NULL);
+    }
+}
 static void pause_handler(int sig)
 {
     (void)sig;
     os_thread *t = t_self;
-    if (!t || !t->paused)
+    if (!t)
         return;
     int e = errno;
-    sem_post(&t->pause_ack);
-    sigset_t m;
-    pthread_sigmask(SIG_SETMASK, NULL, &m);
-    sigdelset(&m, SIGUSR2);
-    while (__atomic_load_n(&t->paused, __ATOMIC_ACQUIRE))
-        sigsuspend(&m);
+    ps_park(t);
     errno = e;
 }
 static pthread_once_t g_pause_once = PTHREAD_ONCE_INIT;
@@ -230,13 +256,56 @@ static void pause_install(void)
     sigaction(SIGUSR2, &sa, NULL);
 }
 
+os_wslot *os_thread_wslot(os_thread *t) { return &t->slot; }
+
+int os_raw_pause(os_thread *t)
+{
+    if (!t->started || t->joined || t == t_self)
+        return -1;
+    __atomic_fetch_or(&t->ps, PS_REQ, __ATOMIC_ACQ_REL);
+    if (pthread_kill(t->th, SIGUSR2)) {
+        __atomic_fetch_and(&t->ps, ~PS_REQ, __ATOMIC_ACQ_REL);
+        return -1;
+    }
+    for (;;) {
+        uint32_t v = __atomic_load_n(&t->ps, __ATOMIC_ACQUIRE);
+        if (v & PS_PARKED)
+            return 0;
+        futex_wait(&t->ps, v, NULL);
+    }
+}
+void os_raw_resume(os_thread *t)
+{
+    __atomic_fetch_and(&t->ps, ~PS_REQ, __ATOMIC_ACQ_REL);
+    futex_wake(&t->ps, 0x7fffffff);
+}
+
+static void thread_unref(os_thread *t)
+{
+    if (__atomic_sub_fetch(&t->refs, 1, __ATOMIC_ACQ_REL) == 0)
+        free(t);
+}
+
+/* the thread's last act: leave the registry (under the world lock, so never during a stop), then drop the thread's
+ * reference. After os_world_unregister the thread executes only this exit code. */
+static void thread_done(os_thread *t)
+{
+    os_world_unregister(&t->slot);
+    t_self = NULL;
+    thread_unref(t);
+}
+
 static void *thread_entry(void *p)
 {
     os_thread *t = (os_thread *)p;
+    t->th = pthread_self();
     t_self = t;
+    ps_park(t);                    /* a pause requested before t_self existed */
+    os_world_register(&t->slot, t);   /* blocks while the world is stopped: no guest code starts during a stop */
     if (t->cpu >= 0)
         os_thread_set_cpu(NULL, t->cpu);
     t->fn(t->arg);
+    thread_done(t);
     return NULL;
 }
 
@@ -246,8 +315,24 @@ os_thread *os_thread_create(os_thread_fn fn, void *arg, size_t stack_size, int p
     if (!t)
         return NULL;
     t->fn = fn; t->arg = arg; t->stack = stack_size; t->prio = prio; t->cpu = cpu;
-    sem_init(&t->pause_ack, 0, 0);
+    t->refs = 1;
     pthread_once(&g_pause_once, pause_install);
+    return t;
+}
+
+/* the process's first thread (and any thread the platform did not create) joins the world registry: os_world.c calls
+ * this once, on that thread, before any guest code runs */
+os_thread *os_raw_adopt_self(void)
+{
+    os_thread *t = (os_thread *)calloc(1, sizeof *t);
+    if (!t)
+        return NULL;
+    t->th = pthread_self();
+    t->started = 1;
+    t->refs = 1;
+    t->cpu = -1;
+    pthread_once(&g_pause_once, pause_install);
+    t_self = t;
     return t;
 }
 
@@ -259,11 +344,15 @@ int os_thread_start(os_thread *t)
         size_t s = t->stack < 65536 ? 65536 : t->stack;
         pthread_attr_setstacksize(&a, (s + 4095) & ~(size_t)4095);
     }
+    t->started = 1;                /* before the thread exists: it may be registered, and paused, at once */
+    __atomic_add_fetch(&t->refs, 1, __ATOMIC_ACQ_REL);
     int r = pthread_create(&t->th, &a, thread_entry, t);
     pthread_attr_destroy(&a);
-    if (r)
+    if (r) {
+        t->started = 0;
+        __atomic_sub_fetch(&t->refs, 1, __ATOMIC_ACQ_REL);
         return -1;
-    t->started = 1;
+    }
     return 0;
 }
 
@@ -283,8 +372,7 @@ void os_thread_free(os_thread *t)
         return;
     if (t->started && !t->joined)
         pthread_detach(t->th);
-    sem_destroy(&t->pause_ack);
-    free(t);
+    thread_unref(t);
 }
 
 int os_thread_set_priority(os_thread *t, int prio)
@@ -336,25 +424,13 @@ int os_thread_set_affinity(os_thread *t, int ideal, unsigned mask)
 #endif
 }
 
-int os_thread_suspend(os_thread *t)
+void os_thread_exit(void)
 {
-    if (!t || !t->started || t->joined || t == t_self || __atomic_exchange_n(&t->paused, 1, __ATOMIC_ACQ_REL))
-        return -1;
-    if (pthread_kill(t->th, SIGUSR2)) {
-        t->paused = 0;
-        return -1;
-    }
-    while (sem_wait(&t->pause_ack) && errno == EINTR) {
-    }
-    return 0;
+    os_thread *t = t_self;
+    if (t)
+        thread_done(t);
+    pthread_exit(NULL);
 }
-int os_thread_resume(os_thread *t)
-{
-    if (!t || !__atomic_exchange_n(&t->paused, 0, __ATOMIC_ACQ_REL))
-        return -1;
-    return pthread_kill(t->th, SIGUSR2) ? -1 : 0;
-}
-void os_thread_exit(void) { pthread_exit(NULL); }
 void os_cpu_boost(int fast_load) { (void)fast_load; }   /* no CPU boost on a PC */
 void os_show_message(const char *caption, const char *text) { (void)caption; (void)text; }   /* logged by the caller */
 /* the console's dock state of the host tests: handheld until a test says otherwise */

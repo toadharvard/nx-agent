@@ -246,6 +246,9 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
 /* TZ_AT (utc_seconds, FnvnxTzAt *) -> 0, or non-zero when the host has no time zone data. The zone of the console's time service
  * (timeToCalendarTimeWithMyRule) at one instant; platform/os/os_tzrule.inc derives the zone's rule (os_tz_rule) from it. */
 #define FNVNX_PLAT_TZ_AT 34u
+/* THREAD_SELF () -> a host thread id (!= 0) for the CALLING thread, which the host did not create (the main thread), or 0.
+ * The id is only for FNVNX_PLAT_THREAD_ACTIVITY (the world registry, platform/os/os_world.c). Call once per such thread. */
+#define FNVNX_PLAT_THREAD_SELF 35u
 typedef struct FnvnxTzAt {
     int32_t off_s;      /* local = UTC + off_s */
     uint32_t dst;       /* 1: daylight time at that instant */
