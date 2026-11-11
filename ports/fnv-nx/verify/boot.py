@@ -9,7 +9,7 @@ plan = bootlayout (same rules as its CLI), watch points = bootmiles.resolve(tabl
 base). OUT.json ("fnvnx-boot/1", sorted keys, indent 1, no wall time) holds the plan, the run record, the milestone state
 and log, and the Icount report; the console text is OUT.console.txt. The tool only reports: which milestone must be
 reached is the caller's verdict. Exit 0: run reason "exit" with code 0, or "limit"; 2: fault / deadlock /
-ext-module-missing / nonzero exit / reach-violation (guest exit code 0x52000000|fact_id, reported with its fact_id); 1: usage or input error (message on stderr).
+ext-module-missing / scenario-error (a --text-entry text longer than the call's max_len) / nonzero exit / reach-violation (guest exit code 0x52000000|fact_id, reported with its fact_id); 1: usage or input error (message on stderr).
 
 Host parts: the table's `host` target is an ID word, so the exact console line a part waits for is spelled
 `console.<hex>` (hex of the line's UTF-8 bytes, no newline; helper console_part(line)). The part fires when the guest
@@ -91,7 +91,7 @@ def run(a):
     host = _host_lines(watch["host"])
     kw = {"hc_slice": a.hc_slice} if a.hc_slice else {}
     m = bootmachine.Machine(raw, plan, boothost.Services(a.root, a.game), limit_instructions=a.limit_instructions, profile=a.profile,
-                            n_stacks=a.threads, **kw)
+                            text_entries=a.text_entry, n_stacks=a.threads, **kw)
     ic = m.attach_icount(a.icount_spec if a.icount_spec else {}, base)
     prog, log = bootmiles.Progress(table), []
 
@@ -146,7 +146,7 @@ def run(a):
     rep = ic.report()
     doc = {"elf_sha256": hashlib.sha256(raw).hexdigest(), "plan": plan, "run": r,
            "console_sha256": hashlib.sha256(console.encode()).hexdigest(), "milestones": prog.state(),
-           "milestone_log": log, "manifest_id": manifest.table_id, "last_reached": prog.last_reached(), "icount": rep}
+           "milestone_log": log, "inputs": {"text_entry": list(a.text_entry)}, "manifest_id": manifest.table_id, "last_reached": prog.last_reached(), "icount": rep}
     if gpu:
         doc["gpu"] = gpu_report
     with open(a.out, "w") as f:
@@ -178,6 +178,9 @@ def main(argv=None):
                          "thread_create returns 0 as the header says for exhaustion); default 256")
     sp.add_argument("--profile", choices=("handheld", "docked"), default="handheld",
                     help="what FNVNX_PLAT_DISPLAY_DOCKED answers: docked 1, handheld 0 (default handheld)")
+    sp.add_argument("--text-entry", action="append", default=[], metavar="TEXT",
+                    help="the answer of one TEXT_ENTRY call (the system keyboard), repeatable, consumed in order; none left: the call "
+                         "is cancelled (0); a text longer than the call's max_len ends the run as scenario-error")
     a = ap.parse_args(argv)
     if a.frames and not a.gpu:
         ap.error("--frames needs --gpu")

@@ -121,6 +121,25 @@ def main():
     except SystemExit as x:
         rc = x.code
     tb.case("--profile with another value is a usage error (exit 2)", rc == 2, rc)
+    # --text-entry: the scenario of TEXT_ENTRY (MODE 59: one call, max_len 2; MODE 58: max_len 3)
+    elf59, elf58 = patched("h59.elf", 59), patched("h58.elf", 58)
+    rc, o, e = cli(args(elf59, "t1.json", table, manifest, "--text-entry", "\U0001F600"))
+    td = json.load(open(os.path.join(d, "t1.json")))
+    con = open(os.path.join(d, "t1.console.txt"), encoding="utf-8").read()
+    tb.case("--text-entry TEXT: the guest gets the text, recorded in OUT.json inputs, one text-entry event",
+            td["run"]["reason"] == "exit" and td["inputs"] == {"text_entry": ["\U0001F600"]} and "te-fit=1\n" in con
+            and [x["result"] for x in td["run"]["events"] if x["kind"] == "text-entry"] == [1], (rc, td["run"]["reason"], con))
+    rc, o, e = cli(args(elf59, "t0.json", table, manifest))
+    td = json.load(open(os.path.join(d, "t0.json")))
+    tb.case("no --text-entry: inputs record an empty list, the call is cancelled (0)", td["inputs"] == {"text_entry": []}
+            and [x["result"] for x in td["run"]["events"] if x["kind"] == "text-entry"] == [0], td["inputs"])
+    rc, o, e = cli(args(elf58, "t2.json", table, manifest, "--text-entry", "abcd"))
+    td = json.load(open(os.path.join(d, "t2.json")))
+    tb.case("--text-entry longer than the call's max_len: reason scenario-error, exit 2", rc == 2
+            and td["run"]["reason"] == "scenario-error" and "abcd" in td["run"]["scenario"], (rc, td["run"]))
+    rc, o, e = cli(args(elf59, "t3.json", table, manifest, "--text-entry", "x", "--text-entry", "yz"))
+    td = json.load(open(os.path.join(d, "t3.json")))
+    tb.case("--text-entry repeated: order kept", td["inputs"] == {"text_entry": ["x", "yz"]}, td["inputs"])
     print("%d cases, %.1f s" % (tb.N[0], time.time() - t0))
     return 1 if tb.FAILED else 0
 

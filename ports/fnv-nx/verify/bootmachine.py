@@ -25,16 +25,16 @@ Rules:
    (fn, args) found at construction; an unregistered module, or a handler raising ExtMissing, ends the run with reason
    "ext-module-missing": a configuration error, never answered with a value.
 5a. TOTAL against the header (hostapi.h TOTALITY TABLE, checked mechanically by tests/test_bootmachine.py against the parsed table): ext_call returns
-   NO_MODULE (module >= 64 or not registered), NO_SERVICE (fn > UINT32_MAX, or a module-11 fn without a row: 0, 36 and up), BAD_NARGS
+   NO_MODULE (module >= 64 or not registered), NO_SERVICE (fn > UINT32_MAX, or a module-11 fn without a row: 0, 37 and up), BAD_NARGS
    (fewer arguments than the row, or nargs > 0 with a null array); nargs above UINT32_MAX counts as UINT32_MAX; only a handler raising
-   ExtMissing ends the run. Module 11 serves fn 1..35 here. The stage has no network interface and a fixed UTC zone (VC1). Sockets 16..33 are bootsock.py's model (a host with no network interface; its docstring lists every
+   ExtMissing ends the run. Module 11 serves fn 1..36 here. The stage has no network interface and a fixed UTC zone (VC1). Sockets 16..33 are bootsock.py's model (a host with no network interface; its docstring lists every
    served and every NOT answered (service, case); the latter end the run as "ext-module-missing" naming the service, with an event
    "sock-undetermined" saying why): the nargs rule (sockets dispatch before the general check: nargs != the exact count, null array or not, is -EINVAL;
    the exact count with a null array is BAD_NARGS). TZ_AT 34: UTC, offset 0, no DST, abbr "UTC",
    for every instant of the years 1970..2100 inclusive (0 <= utc_seconds < 4133980800; stated assumption of the stage), else -EOVERFLOW (-75), nothing written;
    tz_offset_minutes is the same zone's off_s / 60. THREAD_SELF 35: a record of the calling thread under a new id
    (never a second thread): started, so thread_start and thread_join answer BadInput; thread_free ends the record only.
-   ACCESS_FAULT_HANDLER (10) stays implemented in the machine (rule 5c) although the console host answers NO_SERVICE for it: a recorded difference.
+   ACCESS_FAULT_HANDLER (10) is the machine's own (rule 5c); the console host serves it too (host_fault.inc).
    DISPLAY_DOCKED (9) answers 1 for the constructor argument profile="docked", 0 for "handheld" (default). Thread and directory ids are table
    handles (IdTable: (generation << 16) | slot, at most 1024 live together); the stack count (n_stacks) is a limit of this machine, not of the header.
 5b. Platform service (module 11; always on). Totality at construction: every fn of PLATFORM_FNS
@@ -67,6 +67,12 @@ Rules:
    DECOMMIT of a range holding a view page and VM_RELEASE of a reservation holding one are refused 0xD401 (nothing done);
    map_fixed cannot land on one (refused by its own range rules). FREE kills the id at once, the pages live until the last view is
    unmapped. The fault-handler frame may live in a view: a view is writable guest memory (rule 5c asks only that).
+5d. TEXT_ENTRY (module 11 fn 36, args {max_len, init, init_n, out, n}; _plat_text_entry): the run's scenario `text_entries` (a list of
+   strings, one consumed per successful call, in order). Checks as on the console: max_len 0 or > 500, out or n null -> -FNVNX_HE_BADINPUT, no
+   text consumed. A text left -> 1, its UTF-16 units + NUL at out, *n = units; no text left (or no scenario) -> 0 (cancel, out and *n
+   untouched). DIFFERENCE from the console, as the header says for the emulator: no human, so the answer comes from the scenario instead of
+   always 0. A text of more than max_len units is a scenario error: the run ends, reason "scenario-error", extra["scenario"] = why (never
+   truncated). A non-writable out / n on an answer of 1 is a host-call fault. Every call is an event {kind "text-entry", max_len, result}.
 5c. ACCESS_FAULT_HANDLER (module 11 fn 10, args {handler, stack_top}, result 0; handler 0 unregisters; stack_top must be 16-byte
    aligned, >= 816 and < 4 GiB, else 0xCC01 and an event). Per calling thread. A data or instruction access fault (Unicorn's
    UC_HOOK_MEM_INVALID: unmapped or protection, read/write/fetch) of a thread with a handler, not already inside it, is
@@ -121,13 +127,13 @@ FNVNX_EXT_PLATFORM = 11
 EXT_NO_MODULE, EXT_NO_SERVICE, EXT_BAD_NARGS = U64 - 254, U64 - 253, U64 - 252   # FNVNX_EXT_*: -255, -254, -253 as int64 (hostapi.h)
 FNVNX_EXT_MODULES, UINT32_MAX, INT64_MAX = 64, 0xFFFFFFFF, (1 << 63) - 1
 FAULT_FRAME = 816
-# hostapi.h TOTALITY TABLE, module 11 services 1..15, 34 and 35: fn -> (name, least nargs). 10 is served here although the console host
-# answers NO_SERVICE for it (recorded difference). The sockets 16..33 are SOCK_SERVICES; both tables are checked against the header's
-# parsed table by tests/test_bootmachine.py.
+FNVNX_TEXT_ENTRY_MAX = 500   # hostapi.h
+# hostapi.h TOTALITY TABLE, module 11 services 1..15, 34, 35 and 36: fn -> (name, least nargs). The sockets 16..33 are SOCK_SERVICES;
+# both tables are checked against the header's parsed table by tests/test_bootmachine.py.
 PLATFORM_FNS = {1: ("cpu_boost", 1), 2: ("thread_activity", 2), 3: ("message", 2), 4: ("vm_reserve", 2), 5: ("vm_commit", 2),
                 6: ("vm_decommit", 2), 7: ("vm_release", 1), 8: ("vm_protect", 3), 9: ("display_docked", 0),
                 10: ("access_fault_handler", 2), 11: ("section_create", 1), 12: ("section_map", 4), 13: ("section_unmap", 2),
-                14: ("section_free", 1), 15: ("unmap_fixed", 3), 34: ("tz_at", 2), 35: ("thread_self", 0)}
+                14: ("section_free", 1), 15: ("unmap_fixed", 3), 34: ("tz_at", 2), 35: ("thread_self", 0), 36: ("text_entry", 5)}
 SOCK_SERVICES = {16: ("sock_socket", 3), 17: ("sock_close", 1), 18: ("sock_bind", 2), 19: ("sock_listen", 2), 20: ("sock_accept", 2),
                  21: ("sock_connect", 2), 22: ("sock_sendto", 5), 23: ("sock_recvfrom", 5), 24: ("sock_setsockopt", 5),
                  25: ("sock_getsockopt", 5), 26: ("sock_poll", 3), 27: ("sock_shutdown", 2), 28: ("sock_getsockname", 2),
@@ -161,6 +167,10 @@ REGS = (UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3, UC_A
 
 class MachineError(Exception):
     """a construction-time error: the plan, the ELF or the services do not fit the machine"""
+
+
+class ScenarioError(Exception):
+    """the scenario (the run's inputs) contradicts the call it is consumed by: ends the run as reason "scenario-error" """
 
 
 class ExtMissing(Exception):
@@ -261,10 +271,19 @@ class IdTable:
 
 class Machine:
     def __init__(self, elf_bytes, plan, services, clock=None, *, hc_slice=2000, limit_host_calls=None, n_stacks=32,
-                 stack_size=0x40000, limit_instructions=None, profile="handheld"):
+                 stack_size=0x40000, limit_instructions=None, profile="handheld", text_entries=None):
         if profile not in ("handheld", "docked"):
             raise MachineError("profile must be 'handheld' or 'docked', got %r" % (profile,))
         self.profile = profile   # FNVNX_PLAT_DISPLAY_DOCKED: docked 1, handheld 0
+        if text_entries is None:
+            text_entries = []
+        if not isinstance(text_entries, (list, tuple)) or not all(isinstance(t, str) for t in text_entries):
+            raise MachineError("text_entries must be a list of strings")
+        try:
+            self.text_units = [struct.unpack("<%dH" % (len(b) // 2), b) for b in (t.encode("utf-16-le") for t in text_entries)]
+        except UnicodeEncodeError as e:
+            raise MachineError("text_entries: a text is not a sequence of Unicode scalars: %s" % e) from None
+        self.text_texts, self.text_next, self.scenario_error = list(text_entries), 0, None   # TEXT_ENTRY scenario (rule 5d)
         self.ids = IdTable()
         self.socks = bootsock.SockModel(_GuestMem(self), lambda: self.clock.now_ns())
         self.elf = elf = bootlayout.parse_elf(elf_bytes)
@@ -856,6 +875,29 @@ class Machine:
             self._sec_release(a[0])
         return 0
 
+    def _plat_text_entry(self, a):
+        """rule 5d. FNVNX_PLAT_TEXT_ENTRY (max_len, init, init_n, out, n): the checks of host_textentry.inc (max_len 0 or > 500, out or n
+        null -> -FNVNX_HE_BADINPUT, nothing shown, no text consumed); then the scenario answers: the next text -> 1 with its UTF-16 units,
+        a NUL and *n; no text left -> 0 (cancelled; out and *n untouched). init is not read (the answer does not depend on it)."""
+        max_len, _init, _init_n, out, n = a[:5]
+        if max_len == 0 or max_len > FNVNX_TEXT_ENTRY_MAX or out == 0 or n == 0:
+            self._event("text-entry", max_len=max_len, result=-LIBNX_BAD_INPUT)
+            return -LIBNX_BAD_INPUT & U64
+        if self.text_next >= len(self.text_units):
+            self._event("text-entry", max_len=max_len, result=0)
+            return 0
+        units = self.text_units[self.text_next]
+        if len(units) > max_len:
+            raise ScenarioError("scenario text %d (%r) is %d UTF-16 units, the guest's TEXT_ENTRY call has max_len %d (a scenario text is never truncated)"
+                                % (self.text_next, self.text_texts[self.text_next], len(units), max_len))
+        if not self._writable(out, out + 2 * (len(units) + 1)) or not self._writable(n, n + 4):
+            raise MachineError("text_entry: out %#x (%d units and a NUL) or n %#x is not writable guest memory" % (out, len(units), n))
+        self.text_next += 1
+        self.uc.mem_write(out, struct.pack("<%dH" % (len(units) + 1), *units, 0))
+        self.uc.mem_write(n, struct.pack("<I", len(units)))
+        self._event("text-entry", max_len=max_len, result=1, units=len(units))
+        return 1
+
     def _plat_access_fault_handler(self, a):
         handler, top = a[:2]
         t = self.cur
@@ -1070,6 +1112,10 @@ class Machine:
             self.ext_missing = (e.module, e.fn)
             uc.emu_stop()
             return
+        except ScenarioError as e:
+            self.scenario_error = str(e)
+            uc.emu_stop()
+            return
         except (UcError, MachineError) as e:
             self._stop_fault("host-access" if isinstance(e, UcError) else "host-call: %s" % e)
             return
@@ -1103,6 +1149,8 @@ class Machine:
                     reason, extra["fact_id"] = "reach-violation", self.exit_code & 0xFFFFFF
             elif self.fault is not None:
                 reason, extra["fault"] = "fault", self.fault
+            elif self.scenario_error is not None:
+                reason, extra["scenario"] = "scenario-error", self.scenario_error
             elif self.ext_missing:
                 reason, extra["ext"] = "ext-module-missing", {"module": self.ext_missing[0], "fn": self.ext_missing[1]}
             elif self.limit_hit:
@@ -1132,7 +1180,7 @@ class Machine:
                     self._stop_fault("uc-error: %s" % e)
                 continue
             if self.cur is t and self.fault is None and not self.limit_hit and self.exit_code is None \
-                    and not self.ext_missing:
+                    and not self.ext_missing and self.scenario_error is None:
                 if uc.reg_read(UC_ARM64_REG_PC) == self.return_addr and t.tid == 1:   # main returned
                     self.exit_code = uc.reg_read(UC_ARM64_REG_X0)
                 else:
