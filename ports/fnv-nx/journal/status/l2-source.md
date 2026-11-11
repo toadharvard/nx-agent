@@ -5,12 +5,12 @@ Handoff read: d79467e6 (journal/inbox/l2-source-handoff-opus.md). Trunk CLAUDE.m
 ## Tasks
 | # | Task | Worker | Status |
 |---|---|---|---|
-| 1 | /Z7 tree hash: rule `canon-recon-1` (tree_hash.sh of the tree with the FNVNX_RECON path replaced by `RECON/`), pin = C from the first farm with A=42a47a07ddaab6b0, B=94094fd8e6e1633f | z7 farms 1-4 (L4): session_01KmtZKSuxC7ks3kferbyC6D, session_01KmtZKS3a468SDWPQW1Drrm, session_01KmtZKU9urUtsHPMAyeK4X9, session_01KmtZKTm9tSnKho4mw4Ehyw | doing (rule sent to farms and L4; C pending) |
-| 1b | prepare writes no host path into a tree (RECON/<entry> in recon_rejected.tsv; post-check: no input-root path in any output file) | rules/ worker (to start) | open, after rules/ review |
-| 2 | Plugins addr/dispatch/names/sdd/pi/layout/order/ftoi as recipe stages on msvcmodel | L1 w4 session_01KmtZKRkugvim1Bfui5aFTw (recipe); L2 worker w1 (L2 sources + tests through the stage) | doing: w4 has older L2 sources, w1 to rebase them |
+| 1 | /Z7 tree hash: rule `canon-recon-1` (tree_hash.sh of the tree with the FNVNX_RECON path replaced by `RECON/`), pin = C from the first farm with A=42a47a07ddaab6b0, B=94094fd8e6e1633f | z7 farms 1-4 (L4): session_01KmtZKSuxC7ks3kferbyC6D, session_01KmtZKS3a468SDWPQW1Drrm, session_01KmtZKU9urUtsHPMAyeK4X9, session_01KmtZKTm9tSnKho4mw4Ehyw | done: pin tree_hash = 5dd203b860b5cc52 (rule canon-recon-1, A 42a47a07ddaab6b0, B 94094fd8e6e1633f); shard 1 republished @ dd3e3088; shards 2-4 publish with it; L4 told |
+| 1b | prepare writes no host path into a tree (RECON/<entry> in recon_rejected.tsv; post-check: no input-root path in any output file) | — | waits: not on the first-frame path (the fully lifted ELF takes no prepared decomp tree) |
+| 2 | Plugins addr/dispatch/names/sdd/pi/layout/order/ftoi as recipe stages on msvcmodel | L1 w4 (recipe stage, merged on trunk e90a7e43); L2 w1 session_01KmtZKTcvH46vVSGgeKTGru, branch claude/fnv-l2-source-w1 | doing: trunk has older copies of all 7 L2 plugin sources; w1 brings the current ones and moves toolchain/tests/plugbuild.py (a direct g++-13 call) onto the recipe stages with msvcmodel |
 | 2b | vtnames (clang plugin) | not started | waits on libclang-18-dev in env.json (w4 168006e9, not on trunk) |
-| 3 | names to all units by rule | w3 (census by gate reason) | to start |
-| 4 | 6 link test files onto msvcmodel objects from the recipe; negatives = byte mutations | w2 | to start |
+| 3 | names to all units by rule | — | waits: not on the first-frame path (uncertified names go LIFTED; the first ELF is fully lifted) |
+| 4 | 6 link test files onto msvcmodel objects from the recipe; negatives = byte mutations | w2 session_01KmtZKUiDYYhRvaS8TJ2kGu, branch claude/fnv-l2-source-w2 | doing (ELF side; COFF/CV/PE side blocked by the cl toolchain as a recipe external, L1) |
 | 5 | VC8 for cl u2713: installer toolchain/msvc/setup_msvc.sh (6892de7), mirror fnv-nx-build tools/msvc8 @ 5881374b0e69 | — | done 6892de7; u2713 /Z7 object to rebuild on a farm |
 
 ## Global numbers (from the handoff, not re-measured)
