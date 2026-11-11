@@ -88,8 +88,8 @@ def guest_undefined(root, out):
     if not os.path.isdir(tc): return None
     r = subprocess.run(["bash", os.path.join(root, "render", "d3d9", "build_guest.sh"), out], capture_output=True, text=True, env=dict(os.environ, FNVNX_TC=tc, JOBS="3"), timeout=900)
     if r.returncode: return ("build failed: " + (r.stdout + r.stderr)[-300:], None)
-    names = [l.split("\t")[0] for l in open(os.path.join(out, "undefined.tsv")).read().split("\n")[1:] if l]
-    return names
+    rows = [l.split("\t") for l in open(os.path.join(out, "undefined.tsv")).read().split("\n")[1:] if l]
+    return [r[0] for r in rows if r[2] != "toolchain library"]   # libc symbols (memcmp, ...) are the toolchain's, not missing implementations
 
 
 MUTS = [   # (part that must fail, file, old text, new text)

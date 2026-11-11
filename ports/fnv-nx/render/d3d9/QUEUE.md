@@ -219,3 +219,15 @@ Lead's run: present a 128, b 103, c 170, d 25 checks, 0 failed; devlife ALL OK (
 - ABI v4 changed: NxPresent 56 -> 80 bytes (cursor image, position, size: blended after the gamma blit, back buffer untouched); new NXGPU_FN_WAIT_VBLANK; NxImageRead image 0 = the swapchain image; rules P1-P5 at NxPresent in nxgpu4.h. B3 (deko3d) must follow this text.
 - `dev/platform_hooks.tsv`: 8 functions the platform defines (sent to L5).
 - OPEN: (1) vblank on GL surfaceless is a MODELLED 60 Hz clock (no display): acceptable only for the emulator stage, the console waits on the display vsync event; under B5's virtual clocks it must read the virtual clock, not CLOCK_MONOTONIC. (2) Present with a visible cursor allocates per call (can fail with OUTOFVIDEOMEMORY): reserve at SetCursorProperties instead. (3) the Wine citation for the cursor order was written from memory: verify against the source.
+
+## D5a accepted 2026-11-11 (draw path, programmable pipeline core)
+
+`dev/draw_*.cpp|h` (717 lines), `backend/nxgpu4_shader.h` (NXGPU_FN_SHADER_CREATE_D3D, not yet in gl4), `tests/l6/draw`. Lead's run: ALL OK, 21/21 mutations (worker's counts: a 14 606, b 6 024, c 1 209, d 2 528, e 2 633, f 64 checks, 0 failed). Methods defined 357 -> 365 (the 8 Draw*).
+STATE NOT CARRIED TO THE BACKEND (each is a correctness gap of drawn pixels, none blocks the link; no rule / no field yet):
+1. D3DRS_LASTPIXEL = TRUE (the D3D9 DEFAULT) on line draws: GL 4.5 cannot express it, the backend makes the submit BAD_CALL. Every line draw with default state fails. Needs a rule (extra last-pixel point per segment, as the semantics say) in the backend or the front.
+2. User clip plane equations and point size / point scale of programmable vertex shaders: no field in the VS driver block (translator task S2).
+3. L8 red replication and bump-format sample fixups (nx_d3d9_rt_rule / nx_d3d9_sample_fixup): need a shader feature; only the write mask is applied.
+4. Depth surface larger than the colour targets: the backend's pass rule rejects it.
+5. Flat-shading variants of translated programs: only the raster bit is set.
+6. PreLoad of a managed buffer bypasses the draw path's buffer hazard table.
+Decisions to recheck: posfix = (0, 0, 1, 0) because the backend viewport already carries the half pixel (contradicts the shaders README wording: reconcile the two texts); missing VS input = (0,0,0,0) (Wine; Nine uses w = 1); NULL index buffer = D3D_OK (Windows row of Wine's test, Wine itself differs); shadow-sampler flag by format class; null-format colour target below a real one = scratch attachment.
