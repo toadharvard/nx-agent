@@ -97,7 +97,7 @@ def main():
     seen = {(r.iface, r.slot) for r in act if r.iface}; mexp = {(m["iface"], m["slot"]) for m in spec["methods"]}
     sx = {r.slot for r in act if not r.iface}; nx = wrapped_e
     print(f"coverage: methods {len(seen & mexp)}/{len(mexp)}, exports {len(sx)}/{len(spec['exports'])} ({len(unw)} exports have no signature in the spec: {', '.join(l.split()[2] for l in unw)})")
-    check("coverage methods 497/497", len(seen & mexp) == len(mexp) == 497, f"{len(seen & mexp)}/{len(mexp)}")
+    check("coverage methods 503/503", len(seen & mexp) == len(mexp) == 503, f"{len(seen & mexp)}/{len(mexp)}")
     check("coverage wrappable exports", len(sx) == nx, f"{len(sx)}/{nx}")
     nret = sum(len(r.retired) for r in act); check("retired ids", nret == sum(len(r.retired) for r in exp) and nret > 0, f"{nret}")
     # 4 mutation checks

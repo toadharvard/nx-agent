@@ -72,7 +72,7 @@ def main():
     rc, js = run_cmp(R1, R2, tmp, "--fold-threads"); check("a: d9cmp R1 R2 equal (exit 0)", rc == 0 and js["det_mismatch"] == 0, str(js and js["first_mismatch"]))
     check("a: records compared == records in R1 (nested ones reappeared by themselves)", js["compared"] == len(recs) == js["records_b"], f"{js['compared']} {len(recs)} {js['records_b']}")
     check("a: re-issued == depth-0 records of R1", int(st["issued"]) == len(d0) and int(st["nested_skipped"]) == len(recs) - len(d0), f"{st} {len(d0)}")
-    check("a: every spec method replayed (497/497)", int(st["methods"]) == len(spec["methods"]) == 497 and len({(r.iface, r.slot) for r in d0 if r.iface}) == 497, st["methods"])
+    check("a: every spec method replayed (503/503)", int(st["methods"]) == len(spec["methods"]) == 503 and len({(r.iface, r.slot) for r in d0 if r.iface}) == 503, st["methods"])
     check("a: every recordable export replayed", int(st["exports"]) == wrapped_e == len({r.slot for r in d0 if not r.iface}), f"{st['exports']}/{wrapped_e}")
     print(f"replay: records {len(recs)}, depth-0 {len(d0)}, masked pix {js['masked_pix']}, env equal {js['env_equal']}, collapsed {js['collapsed']}; methods {st['methods']}/{len(spec['methods'])}, exports {st['exports']}/{wrapped_e}")
     rc, _ = run_cmp(R1, R2, tmp); check("a: without --fold-threads the 2-thread record vs the 1-thread replay is reported (thread count differs)", rc == 1)
