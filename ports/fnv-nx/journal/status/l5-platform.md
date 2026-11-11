@@ -18,7 +18,7 @@ Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-plat
 | 2b | Dynamic-key Reg* sites (4 of 20, wrappers 0xc5d670/0xc5d780/0xc5d920): parameter rule over all entries + RTTI receiver/field-writer rule; keeps `machine` a measurement build until done | w12 session_01KmtZKTLfyNCVz9mSxafRwL | -w12 (draft a2fe53fb picked) | doing |
 | 2c | World stop under ASan (draft 50956c3e on -w8) | — | -w8 | deferred: it patches os_posix.c, a test double that item 3 removes |
 | 1b | hostapi.h = L1 -w12 6766d18a byte for byte; delete sock services 27/28/29/32/33 wrappers; dispatch = declared table; six zero-use services answered | w15 session_01KmtZKUyMdaSxX1XL93a9dF | -w15 | doing |
-| 1c | lift/rt undefined symbols on the platform side (world stop exists: fnvl_host_world_stop/resume, os_world.c; host_ticks_ns, host_tls_slot, fnvnx_win32_*, trace sink) | lead | — | waiting for L3a's owner table |
+| 1c | lift/rt undefined symbols on the platform side (world stop exists: fnvl_host_world_stop/resume, os_world.c; host_ticks_ns, host_tls_slot, fnvnx_win32_*, trace sink) | lead | — | names agreed with L3a (fnvl_host_* prefix, rt adopts fnvl_host_world_stop/resume); owner table waits for L3a w3 rt build (blocked on L2 fnvnx_order fix) |
 | 5 | FILETIME/SYSTEMTIME domain 1601..30827 (Wine 9.0 cited); Fallout.ini absent if the exe's create path is found | w13 session_01KmtZKSGk4B4w7m8NiPpsWR | -w13 | doing: Fallout.ini first (boot path); time domain only for pre-first-frame calls |
 
 Branch names -w7/-w8 hold the predecessor's drafts (a2fe53fb regsites, 50956c3e world stop); -w6 is an accidental old pointer. New workers use -w9 and up.
