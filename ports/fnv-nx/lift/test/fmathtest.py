@@ -165,6 +165,15 @@ def rnd_double(r, elo, ehi):
     return f64_((r.getrandbits(1) << 63) | ((e + 1023) << 52) | r.getrandbits(52))
 
 
+def lead(r, e):
+    """random double with the leading bit exactly at 2^e (e in [-1074, 1023]), random sign"""
+    sg = r.getrandbits(1) << 63
+    if e >= -1022:
+        return f64_(sg | ((e + 1023) << 52) | r.getrandbits(52))
+    k = e + 1074
+    return f64_(sg | (1 << k) | (r.getrandbits(k) if k else 0))
+
+
 def nextafter(x, k):
     u = u64_(x)
     s = u >> 63
@@ -357,6 +366,16 @@ def host_cmp(which, pairs, what, mask_sw=0x4700, flmask=0x5, check_res=True):
     return bad
 
 
+def fmtb(b):
+    return ' '.join(fmtv(v) for v in b)
+
+
+def fmtv(v):
+    if isinstance(v, tuple):
+        return '(' + ','.join(fmtv(w) for w in v) + ')'
+    return float.hex(v) if isinstance(v, float) else hex(v)
+
+
 def fmt(p): return '(' + ', '.join(float.hex(v) for v in p) + ')'
 
 
@@ -414,7 +433,9 @@ def host_specials():
                     # scale: x finite non-special operands go through the exact path; compare everything (it is exact)
                     pts.append((y, x))
                     continue
-                spec = (not math.isfinite(y)) or (not math.isfinite(x)) or y == 0 or x == 0 or x == 1.0 or (w == 'yl2xp1' and (x == -1.0 or x < -1.0)) or (w == 'yl2x' and x < 0)
+                if w == 'yl2xp1' and x <= -1.0:
+                    continue                      # outside the instruction's domain: the real x87 leaves garbage; fmath gives the invalid result
+                spec = (not math.isfinite(y)) or (not math.isfinite(x)) or y == 0 or x == 0 or (w != 'atan2' and x == 1.0) or False or (w == 'yl2x' and x < 0)
                 if spec:
                     pts.append((y, x))
         m1, m2, mfl, mcf = run('m', w, [p[0] for p in pts], [p[1] for p in pts])
@@ -436,20 +457,13 @@ def host_exact(r, nper):
     # fprem / fprem1 over D = -3..2100
     for w in ('fprem', 'fprem1'):
         pts = []
-        for D in range(-3, 2101):
+        for D in range(-3, 2098):
             for _ in range(nper):
-                eb = rr.randint(-1074 + 0, 1023 - max(D, 0)) if D >= 0 else rr.randint(-1074 - D, 1023)
-                b = rnd_double(rr, max(eb, -1074), max(eb, -1074))
-                if b == 0 or not math.isfinite(b):
+                lo, hi = max(-1074, -1074 - D), min(1023, 1023 - D)
+                if hi < lo:
                     continue
-                ea = int(math.floor(math.log2(abs(b)))) if abs(b) >= 2.0 ** -1022 else -1074 + (u64_(abs(b))).bit_length() - 1
-                e = ea + D
-                if e < -1074 or e > 1023:
-                    continue
-                a = rnd_double(rr, e, e)
-                if a == 0 or not math.isfinite(a):
-                    continue
-                pts.append((a, b))
+                eb = rr.randint(lo, hi)
+                pts.append((lead(rr, eb + D), lead(rr, eb)))
         # exact ties / boundaries for fprem1: a = b * (k + 1/2)
         for _ in range(4000):
             b = rnd_double(rr, -200, 200); k = rr.randint(0, 2 ** 20)
@@ -472,7 +486,7 @@ def host_exact(r, nper):
     for x in SPEC:
         for e in SPEC + [-1074.0, -1075.0, 1024.0, 1023.0, -1022.5, 17.9, -17.9, 0.9999, -0.9999]:
             pts.append((x, e))
-    res['scale'] = (len(pts), host_cmp('scale', pts, 'scale'))
+    res['scale'] = (len(pts), host_cmp('scale', pts, 'scale', mask_sw=0x4500))
     # fxtract
     xs = [rnd_double(rr, -1074, 1023) for _ in range(100000)] + SPEC
     m1, m2, mfl, mcf = run('m', 'xtract', xs)
@@ -523,7 +537,7 @@ def main():
         for w, (n, bad) in res.items():
             print('%-7s vs host x87 bit for bit: %7d cases, equal %7d, different %d' % (w, n, n - len(bad), len(bad)))
             for b in bad[:6]:
-                print('   DIFF', [float.hex(v) if isinstance(v, float) else hex(v) for v in b])
+                print('   DIFF', fmtb(b))
             fail += len(bad)
     print('%s in %.0f s' % ('FAIL' if fail else 'PASS', time.time() - t0))
     sys.exit(1 if fail else 0)

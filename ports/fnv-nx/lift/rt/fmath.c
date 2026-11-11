@@ -72,6 +72,8 @@ static void bf_u64(cx *c, bf *r, u64 v, int sh, int s) {
   t[0] = (u32)v; t[1] = (u32)(v >> 32);
   bf_nw(c, r, t, 2, 64 + sh, s);
 }
+/* convert a bf of context cw (nw limbs) into context c */
+static void bf_conv(cx *c, int nw, bf *r, const bf *a) { if (a->z) bzero_(r); else bf_nw(c, r, a->m, nw, a->e, a->s); }
 static int cmpmag(const bf *a, const bf *b, int n) {
   if (a->e != b->e) return a->e > b->e ? 1 : -1;
   for (int i = n - 1; i >= 0; i--) if (a->m[i] != b->m[i]) return a->m[i] > b->m[i] ? 1 : -1;
@@ -343,8 +345,9 @@ static double nan2(double a, double b, u32 *fl) {
   u64 x = d2u(a), y = d2u(b);
   int na = (x & ~SGNM) > EXPM, nb = (y & ~SGNM) > EXPM;
   if ((na && !(x & FQ)) || (nb && !(y & FQ))) *fl |= IE;
-  if (na && nb) { u64 ma = x & (FQ * 2 - 1), mb = y & (FQ * 2 - 1); return u2d((ma > mb ? x : mb > ma ? y : (x >> 63 ? y : x)) | FQ); }
-  return u2d((na ? x : y) | FQ);
+  x |= FQ; y |= FQ;                                          /* both quieted first (an x87 register holds the quiet NaN of a loaded signalling one) */
+  if (na && nb) { u64 ma = x & (FQ * 2 - 1), mb = y & (FQ * 2 - 1); return u2d(ma > mb ? x : mb > ma ? y : (x >> 63 ? y : x)); }
+  return u2d(na ? x : y);
 }
 static int isnan_(u64 a) { return (a & ~SGNM) > EXPM; }
 static int isinf_(u64 a) { return (a & ~SGNM) == EXPM; }
@@ -383,7 +386,7 @@ static int ev_trig(cx *c, cx *cw, const za *a, bf *A, int *B) {
     bf_mul(cw, &P, &K, &pi2); bf_sub(cw, &Rw, &X, &P);
     if (Rw.z) { c->p = mk; cw->p = mkw; return 0; }
     br = 32 * n + 62 + Rw.e;
-    bf_nw(c, &R, Rw.m, nw, Rw.e, Rw.s);
+    bf_conv(c, nw, &R, &Rw);
     cw->p = mkw;
   }
   if (br > 32 * n - 64) br = 32 * n - 64;
@@ -462,7 +465,7 @@ static int ev_log(cx *c, cx *cw, const za *a, bf *A, int *B) {
   if (N.z) { bf_mul(c, A, &Y, &Kb); cw->p = mkw; c->p = mk; return 2; }
   bf Z = bnew(c), D = bnew(c), Sx = bnew(c), Lw = bnew(c), L2 = bnew(c), Q = bnew(c), V = bnew(c), two = bnew(c);
   N.e -= k;
-  bf_nw(c, &Z, N.m, cw->n, N.e, N.s);
+  bf_conv(c, cw->n, &Z, &N);
   bf_u64(c, &two, 1, 1, 0); bf_add(c, &D, &Z, &two); bf_div(c, &Sx, &Z, &D);
   ser_atanh2(c, &Lw, &Sx);
   bf_ln2(c, &L2); bf_div(c, &Q, &Lw, &L2);
@@ -485,7 +488,7 @@ static int ev_atan(cx *c, cx *cw, const za *a, bf *A, int *B) {
   int swap = cmpmag(&ya, &xa, cw->n) > 0;
   const bf *Pw = swap ? &xa : &ya, *Qw = swap ? &ya : &xa;
   bf Pm = bnew(c), Qm = bnew(c), Zm = bnew(c), t8 = bnew(c), half = bnew(c), Hm = bnew(c), Jf = bnew(c);
-  bf_nw(c, &Pm, Pw->m, cw->n, Pw->e, 0); bf_nw(c, &Qm, Qw->m, cw->n, Qw->e, 0);
+  bf_conv(c, cw->n, &Pm, Pw); bf_conv(c, cw->n, &Qm, Qw);
   bf_div(c, &Zm, &Pm, &Qm);
   t8 = Zm; t8.e += 3;
   bf_u64(c, &half, 1, -1, 0); bf_add(c, &Hm, &t8, &half); bf_floor(c, &Jf, &Hm);
@@ -496,7 +499,7 @@ static int ev_atan(cx *c, cx *cw, const za *a, bf *A, int *B) {
   bf_sub(cw, &Num, &P8, &Nj);
   Q8 = *Qw; Q8.e += 3; bf_mulu(cw, &Jp, Pw, j); bf_add(cw, &Den, &Q8, &Jp);
   bf Wn = bnew(c), Wd = bnew(c), Wv = bnew(c), Ac = bnew(c), Aw = bnew(c), Th = bnew(c), pi = bnew(c), pi2 = bnew(c);
-  bf_nw(c, &Wn, Num.m, cw->n, Num.e, Num.s); bf_nw(c, &Wd, Den.m, cw->n, Den.e, Den.s);
+  bf_conv(c, cw->n, &Wn, &Num); bf_conv(c, cw->n, &Wd, &Den);
   bf_div(c, &Wv, &Wn, &Wd);
   bf_pi(c, &pi); pi2 = pi; pi2.e -= 1;
   if (j == 0) bzero_(&Ac); else if (j == 8) { Ac = pi; Ac.e -= 2; } else ser_atan_c(c, &Ac, j);
@@ -655,13 +658,12 @@ double fnvl_m_scale(double x, double e, u32 *fl) {
   }
   if (iszero_(ux) || isinf_(ux)) return x;
   /* trunc(e) saturated to +-2^20 (any |e| >= 4400 already over/underflows every double) */
-  u64 mant; int e2; unpack(ue & ~SGNM, &mant, &e2);
+  u64 emant; int e2, ef = (int)((ue >> 52) & 0x7ff);
+  unpack(ue, &emant, &e2);
   long long t;
-  if (!mant) t = 0;
-  else if (e2 >= 0) t = (e2 >= 20 || (mant << e2) >= (1ull << 20)) ? (1 << 20) : (long long)(mant << e2);
-  else if (-e2 >= 64) t = 0;
-  else t = (long long)(mant >> -e2);
-  if (t > (1 << 20)) t = 1 << 20;
+  if (ef < 1023) t = 0;                                              /* |e| < 1 */
+  else if (ef >= 1023 + 20) t = 1 << 20;
+  else t = (long long)(emant >> (52 - (ef - 1023)));                 /* trunc(|e|) < 2^20 */
   if (eneg) t = -t;
   u64 m; int xe; unpack(ux & ~SGNM, &m, &xe);
   return exact_double(m, xe + (int)t, (int)(ux >> 63), fl);
@@ -688,7 +690,7 @@ void fnvl_m_xtract(double x, double *expo, double *sig, u32 *fl) {
 
 /* ================= public: fprem, fprem1 ================= */
 /* a = Ma 2^(ea-52), b = Mb 2^(eb-52) (53-bit normalised mantissas, ea, eb the exponents of the leading bits), D = ea - eb.
-   D < 64 (complete, C2 = 0): Q = trunc (fprem) or round-to-nearest-even (fprem1) of a/b, a - Q b exact; C0 = Q2, C3 = Q0, C1 = Q1.
+   D < 64 (complete, C2 = 0): Q = trunc (fprem) or round-to-nearest-even (fprem1) of a/b, a - Q b exact; C0 = Q2, C3 = Q1, C1 = Q0.
    D >= 64 (partial, C2 = 1, C0 = C1 = C3 = 0): the reference CPU (Intel family 6 model 207, verified in test/fmathtest.py) reduces by exactly K = 32 floor(D/32) - 32 bits:
    Q' = trunc(a / (b 2^K)), result a - b Q' 2^K = (Ma 2^N mod Mb) 2^(K + eb - 52), N = D - K = 32 + D mod 32 in [32, 63] (SDM: "N between 32 and 63"). The truncation also
    holds for fprem1 when partial. Special operands: NaN -> nan2; a infinite or b zero -> invalid; b infinite or a zero -> a. */
@@ -708,7 +710,7 @@ double fnvl_m_fprem(double a, double b, u32 near, u32 *cf, u32 *fl) {
   if (D < 0) {
     if (!near || D < -1 || Ma <= Mb) return a;                /* |a/b| < 1/2 or a tie (even quotient 0) */
     q = 1; r = 2 * Mb - Ma; neg ^= 1;                         /* |b| - |a| in units 2^(ea-52) */
-    *cf = (q & 1 ? 0x4000u : 0) | (q & 2 ? 0x200u : 0) | (q & 4 ? 0x100u : 0);
+    *cf = (q & 1 ? 0x200u : 0) | (q & 2 ? 0x4000u : 0) | (q & 4 ? 0x100u : 0);
     return exact_double(r, ea - 52, neg, fl);
   }
   int N = D < 64 ? D : 32 + (D & 31), K = D < 64 ? 0 : D - N;
@@ -721,6 +723,6 @@ double fnvl_m_fprem(double a, double b, u32 near, u32 *cf, u32 *fl) {
   }
   if (D >= 64) { *cf = 0x400; return exact_double(r, K + eb - 52, sa, fl); }
   if (near && (2 * r > Mb || (2 * r == Mb && (q & 1)))) { q++; r = Mb - r; neg ^= 1; }
-  *cf = (q & 1 ? 0x4000u : 0) | (q & 2 ? 0x200u : 0) | (q & 4 ? 0x100u : 0);
+  *cf = (q & 1 ? 0x200u : 0) | (q & 2 ? 0x4000u : 0) | (q & 4 ? 0x100u : 0);
   return exact_double(r, eb - 52, neg, fl);
 }
