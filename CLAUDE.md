@@ -110,10 +110,11 @@ The owner's words: "Транк никогда красный. Всегда зе�
   - The address space stays as decided: 32-bit, ILP32.
     - A wild guest access into host pages is a stated assumption: the exe does not make wild accesses in normal operation.
   - Priority: the game boots first. New proof work that does not block booting waits until after the first frame.
-- **Loud failure for unimplemented D3D9 software vertex processing (owner decision, 2026-11-11).**
-  - d3d9 `ProcessVertices`, `SetClipStatus` and `GetClipStatus` (both device classes) are not implemented. The owner's words: "сделать как в Вайне и сделать типа падение, если вдруг мы все-таки вызвались".
-  - Their bodies terminate loudly through the host exit slot with a code that names the method. They never return success silently.
-  - This is the only such exception. The stub gate accepts exactly these bodies, with this line as the source.
+- **Wine 9.0 as an acceptable implementation (owner decision, 2026-11-11).**
+  - The owner's words: "Если он ничего не считает, давай мы тоже будем ничего считать... можно залогировать... Там, где похуй Вайну. А Вайн, блядь, не первый день делается."
+  - Where Wine 9.0 implements an API in a simplified way (it does nothing, or returns success), we may do exactly what Wine 9.0 does, with one log line per call.
+  - The source of the behaviour is Wine 9.0's code for that function, cited per function. The stub gate accepts such a body when the citation is present.
+  - First cases: d3d9 `ProcessVertices`, `SetClipStatus` and `GetClipStatus`, both device classes.
 - Merges stop while anything is red. That is intended. Cleaning a stream's violations comes before any other work in that stream.
 
 ## Owner decisions of 2026-11-10 (do not re-ask)
