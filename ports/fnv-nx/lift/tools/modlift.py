@@ -145,6 +145,7 @@ def run(arg):
     # ---- rule C: the entry set is closed under the direct control transfers of EVERY entry (proven or candidate), computed with the lifter's own explore: the body of entry e is
     # the descent from e over the range [e, e + extent(e)) (extent = the universe.tsv column), a direct call target is an entry (the lifter emits L_<target>() for every
     # direct call), a direct jmp/jcc/loop target outside the range is an entry; a target outside every executable section is no entry (the lifter sends it through the dispatcher).
+    TRACE = os.environ.get('FNVNX_CLOSURE_TRACE')
     limg = LImage(path, M.base); lcache = {}; clos = {}; closure_new = Counter(); rounds = 0; n_before = 0; JMP = ('loop', 'loope', 'loopne')
     def lc_targets(e, ext):
         k = (e, ext)
@@ -173,7 +174,9 @@ def run(arg):
             for kd, T in (('call', cs), ('tail', ts)):
                 for t, a_ in T.items():
                     if t in ent: continue
-                    if intext(t): viol.setdefault(t, kd)
+                    if intext(t):
+                        viol.setdefault(t, kd)
+                        if TRACE: print('closure-trace round %d: %08x %s from entry %08x ext %d at %08x' % (rounds, t, kd, e, sum(dec[x][0] for x in exts[e]), a_), file=sys.stderr, flush=True)
                     else: outside[e, a_, t] = kd
         if not viol: break      # terminates: every round adds at least one entry and entries are addresses of the executable sections
         for t, k in sorted(viol.items()):
