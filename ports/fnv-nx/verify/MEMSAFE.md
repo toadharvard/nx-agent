@@ -79,8 +79,12 @@ guess.
 
 ## 4a. Where each rule comes from (studied practice, not invention)
 
-The subset is assembled from three published disciplines, each with its own safety argument. The references are
-given from memory and are to be checked against the papers before the gate is switched on.
+The subset is assembled from three published disciplines, each with its own safety argument. The three
+papers named in the table were checked against their published records on 2026-11-11 (Ruef, Lampropoulos, Sweet,
+Tarditi and Hicks, "Achieving Safety Incrementally with Checked C", POST 2019, proof mechanised in Coq; Osvald,
+Essertel, Wu, Gonzalez Alayon and Rompf, "Gentrification Gone too Far? Affordable 2nd-Class Values for Fun and
+(Co-)Effect", OOPSLA 2016; Dhurjati, Kowshik and Adve, "SAFECode: Enforcing Alias Analysis for Weakly Typed
+Languages", PLDI 2006). The RustBelt reference below was not checked.
 
 | Our rules | Source discipline | What that source proves or enforces | Why not the source alone |
 |---|---|---|---|
@@ -117,7 +121,9 @@ gate checks over the linked call graph.
 
 ## 5a. Revision 2: classes raised by the leads (2026-11-11) and the rule for each
 
-Status: draft for the orchestrator. Nothing here is fixed until the owner answers the open points at the end.
+Status: approved by the owner on 2026-11-11 and binding. External libraries that are not under our control (C
+library, libnx, FreeType, minimp3) stay outside the subset by the owner's word: their functions that take pointers
+are declared from their documentation, each row with its source, and the length of the list is a gate number.
 
 **Guest memory**
 
@@ -201,6 +207,42 @@ closure (IKOS with zero alarms, tests against a reference, review) and its size 
 3. **Memory exhaustion.** A pool or block that cannot grow has a contract result only where the contract defines
    one. Elsewhere there is no rule.
 4. **The system libraries** (C library, libnx) stay outside the subset as part of the platform, like the kernel.
+
+## 5b. Revision 3: the import boundary and the platform (2026-11-11)
+
+- **I1 The address type.** `guest::addr` is a 32-bit value. Arithmetic on it is integer arithmetic modulo 2^32 and
+  is not P1. Every import and COM method receives guest words, never host pointers; the generators of the import
+  entries pass words. Guest allocators (heaps, the page map, stdio buffers) are written as arithmetic on
+  `guest::addr` with the accessor; one range check per call through `bytes(addr, n)`, not one per byte.
+- **I2 Three accessor forms, chosen by the contract of the caller.** `guest::load<T>(addr)` and
+  `guest::store<T>(addr, v)` copy a value once (no reference into guest memory, so no unaligned reference and no
+  double read of a field another thread changes) and carry the memory-ordering discipline of R9 inside the
+  accessor. `guest::bytes(addr, n)` gives a byte span. Each has a faulting form (the fault is the game's exception
+  through R4) for contracts that fault on Windows, and a probing form `try_…` that answers `opt` from the page map
+  for contracts that return an error (`ERROR_NOACCESS`, the `IsBad*Ptr` family, the string functions that catch the
+  fault). `guest::obj<T>` as a reference is removed.
+- **I3 A guest access may not return.** A page can vanish between a probe and the access, and the fault then
+  discards the native frames. So every call of a faulting accessor is a point of possible no-return: none may occur
+  while a platform lock is held or while platform state is half updated (copy in, work on the copy, copy out). The
+  plugin refuses an accessor call inside the scope of the lock type.
+- **I4 Memory published to the game.** What an import hands to the game for longer than the call (the command
+  line, environment strings, resource data, the stdio table, locked sound and bitmap buffers, COM faces) is
+  allocated from guest-visible memory by one primitive, kept by the platform as a `guest::addr`, and reached by the
+  platform through the accessor. The address of a static platform object may not become the result of an import.
+- **I5 Tests.** A test of an import runs as an ILP32 guest in the boot-stage machine, with its data in guest
+  memory; a host-pointer test above 4 GiB cannot express the import's real signature.
+- **I6 Containers.** The standard library's containers are not used in the subset: growth moves their storage, so
+  a reference taken before `push_back` dangles within one function, which L1 to L3 do not see. The `memsafe` root
+  provides `str`, `map`, `hash_map` and `sort(span)`; they count in its size.
+- **I7 Foreign objects.** A pointer returned by an external library that must be kept between calls (a font face,
+  a decoder context) is stored as `foreign<T>` in a pool slot. It is never dereferenced in the subset, only passed
+  back to the same library. A library function that keeps a buffer until a paired call is declared `retains`.
+- **I8 Stack check at the crossing.** In the variant with a separate native stack, each entry into the guest
+  checks the remaining native stack against the static bound of the deepest native segment; too little is the
+  game's stack-overflow exception through R4.
+- **I9 Variadics.** A variadic function definition is outside the subset; the product reads guest words.
+- **I10 Pool reserve is a gate number.** The total reserve of all pools is reported at each boot milestone, and its
+  bound is part of the memory budget.
 
 ## 6. What each lead does
 
