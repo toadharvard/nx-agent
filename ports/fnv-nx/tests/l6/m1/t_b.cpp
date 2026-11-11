@@ -15,7 +15,6 @@ void t_b() {
         CHECK_HR(sc->Present(nullptr, nullptr, nullptr, nullptr, 0), D3D_OK); g_qpc = qpc + qpf;   // time passes after the present: the Sync sample is a later one
         CHECK_HR(sc->GetPresentStats(&st), D3D_OK); CHECK_EQ(st.PresentCount, before + 1); CHECK_EQ(st.PresentRefreshCount, (uint32_t)v); CHECK_EQ(st.SyncQPCTime.QuadPart, (long long)(qpc + qpf));
         UINT lp = 0; sc->GetLastPresentCount(&lp); CHECK_EQ(lp, st.PresentCount); CHECK_EQ(st.SyncGPUTime.QuadPart, 0);
-        CHECK(st.SyncRefreshCount == (uint32_t)(v + 60) || st.SyncRefreshCount == (uint32_t)v + 60u || true);   // exact value checked from the oracle's second column below
         unsigned long long w; if (fgets(buf, sizeof buf, f) && sscanf(buf, "%llu", &w) == 1) CHECK_EQ(st.SyncRefreshCount, (uint32_t)w);
     }
     if (f) fclose(f); CHECK(n > 100);
