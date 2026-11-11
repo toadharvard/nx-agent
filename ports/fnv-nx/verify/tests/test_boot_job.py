@@ -40,7 +40,7 @@ MODULES = ("# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\t
 KEYS_TSV = "# table_id %s\n000ff000\tm.dll\tf\t1\tstdcall\ti\ti\tI_rt\n" % TID
 TRAILER = "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 FINAL = re.compile(r"^BOOT elf=(\S+) rc=(\d+) reason=(\S+) last=(\S+) instr=(\d+) main=(\d+) threads=(\d+) seconds=(\d+) "
-                   r"published=(\S+)@([0-9a-f]{12})( presents=\d+)?$")
+                   r"published=(\S+)@([0-9a-f]{12})( presents=\d+)? stage_table=(\S+)$")
 HOME = os.path.join(SCRATCH, "home")
 BARE = os.path.join(SCRATCH, "artifacts.git")
 GAME = os.path.join(SCRATCH, "game")
@@ -210,6 +210,20 @@ def main():
     rc, out, err = run_job(["noentries"])
     tb.case("missing entries.tsv: job fails naming the file, nothing published", rc == 1 and "entries.tsv" in err and "lacks" in err
             and subprocess.run(["git", "rev-parse", "-q", "--verify", "refs/heads/l4-verify/boot/noentries"], cwd=BARE).returncode != 0, (rc, err[-400:]))
+    tb.case("no stage branch: final line says stage_table=absent", m is not None and m.group(12) == "absent", last)
+    publish_branch("test-stage", {"stage.milestones": b"late any call 0x2000\n"})
+    publish_branch("test-stage-bad", {"stage.milestones": b"late any call 0x7000\n"})
+    publish_branch("test-stage-nofile", {"README": b"x\n"})
+    rc, out, err = run_job(["testid"], {"BOOT_STAGE_TABLE_BRANCH": "test-stage"})
+    m = FINAL.match(out.strip().splitlines()[-1]) if out.strip() else None
+    doc = json.loads(published("l4-verify/boot/testid")[0]["OUT.json"]) if rc == 0 else {}
+    tb.case("stage branch: rows appended after the contract's, final line names branch@commit",
+            rc == 0 and m and m.group(12) == "test-stage@" + git("rev-parse", "refs/heads/test-stage", cwd=BARE).strip()[:12]
+            and [x["name"] for x in doc["milestones"]] == ["start-01", "exe-entry", "late"], (rc, out, err[-400:], doc.get("milestones")))
+    rc, out, err = run_job(["testid"], {"BOOT_STAGE_TABLE_BRANCH": "test-stage-bad"})
+    tb.case("stage row on an address without a lifted entry: job fails naming the stage table", rc == 1 and "stage table" in err, (rc, err[-300:]))
+    rc, out, err = run_job(["testid"], {"BOOT_STAGE_TABLE_BRANCH": "test-stage-nofile"})
+    tb.case("stage branch without stage.milestones: job fails naming it", rc == 1 and "stage.milestones" in err, (rc, err[-300:]))
     rc, out, err = run_job(["nosuchid"])
     tb.case("missing branch: job fails naming it", rc == 1 and "l1-contract/elf/nosuchid" in err, (rc, err[-400:]))
     empty = os.path.join(SCRATCH, "nogame")

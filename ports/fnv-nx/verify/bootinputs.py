@@ -13,11 +13,35 @@ row or line a converter does not understand is an InputError carrying the file l
                                       prints LO:HI = the import-key range: lowest import key of entries.tsv .. highest + 0x10 (every
                                       key 16-byte aligned); every key of keys.tsv (`key module name ordinal conv ret args symbol`)
                                       must be an import key of entries.tsv and the two table ids must be equal
-  milestones --table milestones.tsv --run run.txt -o table.txt
-                                      milestones.tsv (an optional `# table_id H`, which must equal entries.tsv's, and rows `exe_entry_va<TAB>0xADDR`) + the loader's console lines
-                                      of the contract's run.txt (every line that is exactly three spaces + `fnvnx-start: ...`, in file
-                                      order, each distinct) -> a bootmiles table: milestones start-01.. (host console.<hex>, one per
-                                      line, in boot order) and then exe-entry (call ADDR)
+  milestones --table milestones.tsv --run run.txt [--entries entries.tsv] [--stage-table FILE] -o table.txt
+                                      milestones.tsv + the loader's console lines of the contract's run.txt (every line that is exactly
+                                      three spaces + `fnvnx-start: ...`, in file order, each distinct) -> a bootmiles table.
+                                      Accepted grammar of milestones.tsv (TAB separated; `# table_id H` once, which must equal entries.tsv's;
+                                      any other comment and every other row is an error naming its line):
+                                        exe_entry_va  <TAB> 0xADDR                    exactly once  -> milestone exe-entry (call)
+                                        module_entry  <TAB> NAME <TAB> 0xADDR <TAB> S  S = 1|0 (static|not). S=1 -> milestone
+                                                                                       module-entry-NAME (call); S=0 -> no milestone.
+                                                                                       NAME unique, [A-Za-z0-9_.-]
+                                        present_key   <TAB> 0xKEY                     one row per Present import key (must be an import
+                                                                                       row of entries.tsv when --entries is given); all
+                                                                                       together -> milestone first-present, group any,
+                                                                                       one `call` part per key
+                                      Milestones come out in this order: start-01.. (console lines), then the rows above in FILE order
+                                      (file order = boot order, as the ELF owner states it), then the stage table.
+                                      --stage-table FILE: a table in the bootmiles format (verify/bootmiles.py), its milestones appended after
+                                      all of those. Errors: a name used by both sources; an address-kind part (call/ret/retzero/rettrue) whose
+                                      exe address is not a `code` row of --entries (the stage cannot observe a call of an address without a
+                                      lifted entry; --entries is then required); a table that bootmiles rejects.
+  stage-table --old milestones.txt -o stage.milestones
+                                      the old S5 table (`<name> [all|seq|all:ID|seq:ID] <kind> <target> [main-thread]`, `#` comments, trailing
+                                      `# ...` allowed) -> bootmiles format by RULE. kinds: call->call, ret->ret, callok->retzero,
+                                      calltrue->rettrue (same semantics: the callee returns to its caller on the same thread and sp; w0==0 /
+                                      low byte of w0 != 0). Plain `all`/`seq` get the group id `all`/`seq`. Dropped by class, listed in
+                                      `# dropped:` lines: kind data and kind store (the old store targets and data steps are not the
+                                      bootmiles host/store events: class `kind-data`, `kind-store`), target re:REGEX (class `regex-target`:
+                                      names no exe address). A group (name, group id) that loses any part is dropped WHOLE (class
+                                      `group-incomplete`): a group with fewer parts would be a weaker condition. A milestone left without
+                                      rows is listed as `# dropped-milestone:`.
 """
 import argparse
 import hashlib
@@ -142,27 +166,139 @@ def key_range(entries_text, keys_text):
     return min(man.imports), max(man.imports) + KEYS_STRIDE
 
 
-def milestone_table(milestones_text, run_text, entries_id=None):
-    rows, tid = _rows(milestones_text, ncols=2)
+NAME_CHARS = bootmiles.ID_CHARS
+ADDR_PARTS = ("call", "ret", "retzero", "rettrue")
+OLD_KINDS = {"call": "call", "ret": "ret", "callok": "retzero", "calltrue": "rettrue"}
+
+
+def _addr(tok, what, no):
+    if not tok.startswith("0x"):
+        raise InputError(f"line {no}: {what} must be 0x<hex>, got {tok!r}")
+    return _hex(tok[2:], what, no)
+
+
+def stage_check(stage_text, man, taken):
+    """the stage table's text after bootmiles' own parse and the rules: names not in `taken`, address-kind targets code rows of man"""
+    try:
+        tab = bootmiles.load_table(stage_text)
+    except bootmiles.TableError as e:
+        raise InputError(f"stage table: {e}") from None
+    for m in tab.milestones:
+        if m["name"] in taken:
+            raise InputError(f"stage table: milestone {m['name']!r} is also built from the contract rows")
+        for p in m["parts"]:
+            if p["kind"] in ADDR_PARTS and p["target"] not in man:
+                raise InputError(f"stage table: milestone {m['name']!r} part {p['kind']} 0x{p['target']:x}: no lifted code entry "
+                                 "for this address in entries.tsv (the stage cannot observe it)")
+    return [ln.strip() for ln in stage_text.split("\n") if ln.strip() and not ln.strip().startswith("#")]
+
+
+def milestone_table(milestones_text, run_text, entries_id=None, stage_text=None, man=None):
+    rows, tid = _rows(milestones_text)
     if tid is not None and entries_id is not None and tid != entries_id:
         raise InputError(f"milestones.tsv table_id {tid} differs from entries.tsv {entries_id}")
-    if [f[0] for _, f in rows] != ["exe_entry_va"]:
-        raise InputError("milestones.tsv: the only row understood is exe_entry_va")
-    tok = rows[0][1][1]
-    if not tok.startswith("0x"):
-        raise InputError(f"line {rows[0][0]}: exe_entry_va must be 0x<hex>, got {tok!r}")
-    entry = _hex(tok[2:], "exe_entry_va", rows[0][0])
-    lines = []
-    for line in run_text.split("\n"):
-        if line.startswith(CONSOLE_PREFIX):
-            lines.append(line[3:].rstrip("\r"))
+    lines = [line[3:].rstrip("\r") for line in run_text.split("\n") if line.startswith(CONSOLE_PREFIX)]
     if len(set(lines)) != len(lines):
         raise InputError("run.txt: a loader console line occurs twice; its milestone would be ambiguous")
     out = [f"# generated from milestones.tsv and the loader's console lines of run.txt (table_id {tid})"]
     for i, ln in enumerate(lines, 1):
         out.append("start-%02d any host %s" % (i, boot.console_part(ln)))
-    out.append("exe-entry any call 0x%x" % entry)
+    names, entry_seen, present = set(), False, []
+    present_at = None
+    body = []   # (kind, ...) in file order
+    for no, f in rows:
+        k = f[0]
+        if k == "exe_entry_va" and len(f) == 2:
+            if entry_seen:
+                raise InputError(f"line {no}: exe_entry_va twice")
+            entry_seen = True
+            body.append(("exe-entry", _addr(f[1], "exe_entry_va", no)))
+        elif k == "module_entry" and len(f) == 4:
+            if not f[1] or any(c not in NAME_CHARS for c in f[1]):
+                raise InputError(f"line {no}: bad module name {f[1]!r}")
+            if f[3] not in ("0", "1"):
+                raise InputError(f"line {no}: the static flag must be 0 or 1, got {f[3]!r}")
+            if f[1] in names:
+                raise InputError(f"line {no}: module {f[1]!r} twice")
+            names.add(f[1])
+            addr = _addr(f[2], "module_entry address", no)
+            if f[3] == "1":
+                body.append(("module-entry-" + f[1], addr))
+        elif k == "present_key" and len(f) == 2:
+            key = _addr(f[1], "present_key", no)
+            if man is not None and key not in man.imports:
+                raise InputError(f"line {no}: present key 0x{key:x} is not an import row of entries.tsv")
+            if key in present:
+                raise InputError(f"line {no}: present key 0x{key:x} twice")
+            present.append(key)
+            if present_at is None:
+                present_at = len(body)
+                body.append(None)
+        else:
+            raise InputError(f"line {no}: row {k!r} with {len(f)} fields is not understood "
+                             "(exe_entry_va/2, module_entry/4, present_key/2)")
+    if not entry_seen:
+        raise InputError("milestones.tsv: no exe_entry_va row")
+    for item in body:
+        if item is None:
+            out += ["first-present any call 0x%x" % key for key in present]
+        else:
+            out.append("%s any call 0x%x" % item)
+    if stage_text is not None:
+        if man is None:
+            raise InputError("a stage table needs entries.tsv (--entries)")
+        taken = {item[0] for item in body if item} | {"first-present"} | {"start-%02d" % i for i in range(1, len(lines) + 1)}
+        out += stage_check(stage_text, man, taken)
     return "\n".join(out) + "\n"
+
+
+def stage_table(old_text, source="4b1a7bb"):
+    """(bootmiles text, dropped lines) from the old S5 table; see the module docstring for the rules"""
+    parts, order = [], []   # (no, name, gkey, kind, target, main)
+    for no, line in enumerate(old_text.split("\n"), 1):
+        line = line.split("#", 1)[0].split()
+        if not line:
+            continue
+        main = line[-1] == "main-thread"
+        if main:
+            line = line[:-1]
+        if len(line) == 3:
+            line.insert(1, "any")
+        if len(line) != 4:
+            raise InputError(f"line {no}: expected '<name> [group] <kind> <target> [main-thread]'")
+        name, group, kind, target = line
+        gk, _, gid = group.partition(":")
+        if gk not in ("any", "all", "seq"):
+            raise InputError(f"line {no}: bad group {group!r}")
+        parts.append((no, name, "any" if gk == "any" else f"{gk}:{gid or gk}", kind, target, main))
+        if name not in order:
+            order.append(name)
+    reason = {}
+    for i, (no, name, g, kind, target, main) in enumerate(parts):
+        if kind in ("data", "store"):
+            reason[i] = "kind-" + kind
+        elif kind not in OLD_KINDS:
+            raise InputError(f"line {no}: unknown kind {kind!r}")
+        elif target.startswith("re:"):
+            reason[i] = "regex-target"
+        elif not target.startswith("0x"):
+            raise InputError(f"line {no}: target {target!r} is neither 0x<hex> nor re:<regex>")
+    for i, (no, name, g, *_r) in enumerate(parts):   # group closure: a group that lost a part loses all
+        if g != "any" and i not in reason and any(j in reason for j, q in enumerate(parts) if q[1] == name and q[2] == g):
+            reason[i] = "group-incomplete"
+    out = [f"# generated by verify/bootinputs.py stage-table from the old S5 milestones table (source commit {source})"]
+    kept, dropped, lost = set(), [], []
+    for n in order:
+        rows = [(i, q) for i, q in enumerate(parts) if q[1] == n]
+        for i, (no, name, g, kind, target, main) in rows:
+            if i in reason:
+                dropped.append(f"# dropped: {name} {g} {kind} {target}{' main-thread' if main else ''} : {reason[i]}")
+            else:
+                kept.add(n)
+                out.append(f"{name} {g} {OLD_KINDS[kind]} {target}" + (" main-thread" if main else ""))
+        if n not in kept:
+            lost.append(f"# dropped-milestone: {n}")
+    return "\n".join(out + dropped + lost) + "\n"
 
 
 def main(argv=None):
@@ -182,7 +318,12 @@ def main(argv=None):
     m.add_argument("--table", required=True)
     m.add_argument("--run")
     m.add_argument("--entries", help="entries.tsv whose table_id the milestones.tsv must carry")
+    m.add_argument("--stage-table", help="a bootmiles table appended after the contract's milestones (needs --entries)")
     m.add_argument("-o", required=True)
+    st = sub.add_parser("stage-table")
+    st.add_argument("--old", required=True)
+    st.add_argument("--source", default="4b1a7bb")
+    st.add_argument("-o", required=True)
     a = ap.parse_args(argv)
     rd = lambda p: open(p, encoding="utf-8").read()
     try:
@@ -195,11 +336,14 @@ def main(argv=None):
         elif a.cmd == "keys":
             lo, hi = key_range(rd(a.entries), rd(a.keys))
             print("%x:%x" % (lo, hi))
+        elif a.cmd == "stage-table":
+            open(a.o, "w").write(stage_table(rd(a.old), a.source))
         else:
-            eid = bootmiles.load_manifest(rd(a.entries)).table_id if a.entries else None
-            open(a.o, "w").write(milestone_table(rd(a.table), rd(a.run) if a.run else "", eid))
+            man = bootmiles.load_manifest(rd(a.entries)) if a.entries else None
+            open(a.o, "w").write(milestone_table(rd(a.table), rd(a.run) if a.run else "", man.table_id if man else None,
+                                                 rd(a.stage_table) if a.stage_table else None, man))
     except (InputError, bootmiles.ManifestError, OSError) as e:
-        src = {"join": "manifest.json", "reserved": "modules.tsv", "keys": "keys.tsv", "milestones": "milestones.tsv"}[a.cmd]
+        src = {"join": "manifest.json", "reserved": "modules.tsv", "keys": "keys.tsv", "milestones": "milestones.tsv", "stage-table": "old table"}[a.cmd]
         print(f"bootinputs {a.cmd} ({src}/entries.tsv/run.txt): {e}", file=sys.stderr)
         return 1
     return 0

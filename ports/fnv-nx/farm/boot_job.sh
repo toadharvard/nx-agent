@@ -28,6 +28,9 @@
 #    gcc (the callback shim of verify/bootgpu.py), checks that the library loads, and runs boot.py with --gpu LIB --frames DIR. The first 3
 #    frames (frame_*.rgba + .txt) are published under frames/ with the result; later ones are not. meta.json gains gpu_branch and
 #    gpu_branch_commit, the final line gains presents=<n>.
+# Stage table: env BOOT_STAGE_TABLE_BRANCH (default l4-verify/milestones), file stage.milestones (bootmiles format), appended after the
+#    contract's rows (bootinputs.py milestones --stage-table: names unique, every exe address a lifted code entry). A missing branch: the
+#    job runs with the contract rows only and the final line says stage_table=absent; a present branch without the file fails the job.
 # Env: GPU_PKGS (see above), ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
 # when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (default $HOME/fnvnx-farm),
 # WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
@@ -160,7 +163,24 @@ conv() { "$@" 2> "$WORK/conv.err" || die "$(tail -1 "$WORK/conv.err" | cut -c1-4
 conv "${BI[@]}" reserved --modules "$IN/modules.tsv" --exe "$GAME_DIR/FalloutNV.exe" -o "$IN/reserved.tsv"
 KEYS=$("${BI[@]}" keys --entries "$IN/entries.tsv" --keys "$IN/keys.tsv" 2> "$WORK/conv.err") || die "$(tail -1 "$WORK/conv.err" | cut -c1-400)"
 RUN_ARGS=(); [ $HAVE_RUN = 0 ] || RUN_ARGS=(--run "$IN/run.txt")
-conv "${BI[@]}" milestones --table "$IN/milestones.tsv" --entries "$IN/entries.tsv" "${RUN_ARGS[@]}" -o "$IN/table.txt"
+# the stage table (milestones after the exe entry: WinMain .. first frame): branch $BOOT_STAGE_TABLE_BRANCH, file stage.milestones,
+# appended after the contract's rows; an absent branch means contract rows only (reported as stage_table=absent)
+STAGE_BRANCH=${BOOT_STAGE_TABLE_BRANCH:-l4-verify/milestones}
+case $STAGE_BRANCH in *[!A-Za-z0-9._/-]*|-*) die "BOOT_STAGE_TABLE_BRANCH '$STAGE_BRANCH' is not a branch name" ;; esac
+STAGE_ARGS=(); STAGE=absent
+retry GITA ls-remote "$ARTIFACTS_URL" "refs/heads/$STAGE_BRANCH" > "$WORK/ls-stage.txt" || die "ls-remote of $ARTIFACTS_URL failed"
+if [ -s "$WORK/ls-stage.txt" ]; then
+  retry GITA fetch -q "$ARTIFACTS_URL" "+refs/heads/$STAGE_BRANCH:refs/remotes/boot-job/stage/$STAGE_BRANCH" || die "fetch of $STAGE_BRANCH failed"
+  STAGE_COMMIT=$(GITA rev-parse "refs/remotes/boot-job/stage/$STAGE_BRANCH^{commit}") || die "no commit for $STAGE_BRANCH after fetch"
+  GITA ls-tree --name-only "$STAGE_COMMIT" | grep -qxF stage.milestones || die "branch $STAGE_BRANCH@${STAGE_COMMIT:0:12} lacks stage.milestones"
+  stage_extract() { GITA show "$STAGE_COMMIT:stage.milestones" > "$IN/stage.milestones"; }
+  retry stage_extract || die "cannot extract stage.milestones from $STAGE_BRANCH"
+  STAGE_ARGS=(--stage-table "$IN/stage.milestones"); STAGE=${STAGE_BRANCH}@${STAGE_COMMIT:0:12}
+  log "stage table $STAGE"
+else
+  log "no branch $STAGE_BRANCH: contract milestones only"
+fi
+conv "${BI[@]}" milestones --table "$IN/milestones.tsv" --entries "$IN/entries.tsv" "${RUN_ARGS[@]}" "${STAGE_ARGS[@]}" -o "$IN/table.txt"
 
 # 5. boot
 OUT=$WORK/OUT.json; rm -f "$OUT" "$WORK/OUT.console.txt"
@@ -219,4 +239,4 @@ retry GITA push -q -f "$ARTIFACTS_URL" "$COMMIT:refs/heads/$OUT_BRANCH" || die "
 [ "$(git ls-remote "$ARTIFACTS_URL" "refs/heads/$OUT_BRANCH" | cut -f1)" = "$COMMIT" ] || die "$OUT_BRANCH on the remote is not the pushed commit $COMMIT"
 
 # 7. result
-echo "BOOT elf=$ELF_ID rc=$RC reason=$REASON last=$LAST instr=$INSTR main=$MAIN threads=$THREADS seconds=$SECONDS_RUN published=$OUT_BRANCH@${COMMIT:0:12}${GPU_LIB:+ presents=$PRESENTS}"
+echo "BOOT elf=$ELF_ID rc=$RC reason=$REASON last=$LAST instr=$INSTR main=$MAIN threads=$THREADS seconds=$SECONDS_RUN published=$OUT_BRANCH@${COMMIT:0:12}${GPU_LIB:+ presents=$PRESENTS} stage_table=$STAGE"
