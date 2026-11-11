@@ -41,7 +41,7 @@ NxFmtRow nxfront_fmt_row(uint32_t d) {
     case NX_D3DFMT_G16R16: NAT(NxFmt_RG16, R, G, 1, 1, RT_, 4); break;
     case NX_D3DFMT_A16B16G16R16: NAT(NxFmt_RGBA16, R, G, B, A, RT_, 8); break;
     case NX_D3DFMT_A8: CNV(NxFmt_RGBA8, R, G, B, A, RT_, 4, 1, NXCONV_A8); break;              /* -> (0, 0, 0, A); target: write mask A (nx_d3d9_rt_rule) */
-    case NX_D3DFMT_L8: CNV(NxFmt_RGBA8, R, G, B, 1, SR_ | RT_, 4, 1, NXCONV_L8); break;       /* -> (L, L, L, 1); target: red written to all three (nx_d3d9_rt_rule) */
+    case NX_D3DFMT_L8: CNV(NxFmt_RGBA8, R, R, R, 1, SR_ | RT_, 4, 1, NXCONV_L8); break;       /* sampled (L, L, L, 1) by the view swizzle; target: write mask R (nx_d3d9_rt_rule) */
     case NX_D3DFMT_A8L8: CNV(NxFmt_RGBA8, R, G, B, A, SR_, 4, 2, NXCONV_A8L8); break;         /* -> (L, L, L, A) */
     case NX_D3DFMT_L16: CNV(NxFmt_RGBA16, R, G, B, 1, 0, 8, 2, NXCONV_L16); break;            /* -> (L, L, L, 1) */
     case NX_D3DFMT_V8U8: NAT(NxFmt_RG8S, R, G, 1, 1, RT_, 2); break;
@@ -82,8 +82,8 @@ NxFmtRow nxfront_fmt_row(uint32_t d) {
     case NX_D3DFMT_A8P8: break;
     case NX_D3DFMT_P8: break;
     case NX_D3DFMT_A4L4: break;
-    case NX_D3DFMT_L6V5U5: CNV(NxFmt_RGBA8, R, G, B, 1, 0, 4, 2, NXCONV_L6V5U5); break;        /* biased integers + sampler fixup (nx_d3d9_sample_fixup) */
-    case NX_D3DFMT_X8L8V8U8: CNV(NxFmt_RGBA8, R, G, B, 1, 0, 4, 4, NXCONV_X8L8V8U8); break;
+    case NX_D3DFMT_L6V5U5: CNV(NxFmt_RGBA32F, R, G, B, 1, 0, 16, 2, NXCONV_L6V5U5); break;      /* exact (U, V, L) floats, alpha = the side word of front_int.h */
+    case NX_D3DFMT_X8L8V8U8: CNV(NxFmt_RGBA32F, R, G, B, 1, 0, 16, 4, NXCONV_X8L8V8U8); break;
     case NX_D3DFMT_A2W10V10U10: break;
     case NX_D3DFMT_UYVY: break;
     case NX_D3DFMT_YUY2: break;

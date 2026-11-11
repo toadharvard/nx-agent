@@ -67,7 +67,7 @@ void nx_state_flush(NxDeviceCore* d, const NxDrawReq&, const NxProg& pr, const N
     if (!rs[D3DRS_LASTPIXEL] && !b.fx_lastpixel) { b.fx_lastpixel = true; fnvnx_wine_fixme(D5A_FIXME_LASTPIXEL); }
     st.w[3] = (rs[D3DRS_MULTISAMPLEANTIALIAS] != 0 ? 1ull << NXRS_M_MSAA : 0) | (rs[D3DRS_ANTIALIASEDLINEENABLE] != 0 ? 1ull << NXRS_M_AALINE : 0) | (rs[D3DRS_LASTPIXEL] != 0 ? 1ull << NXRS_M_LASTPIXEL : 0)   // S3
               | (rs[D3DRS_CLIPPING] == 0 ? 1ull << NXRS_M_NOCLIP : 0) | (uint64_t)rs[D3DRS_MULTISAMPLEMASK] << NXRS_M_SAMPLEMASK;
-    for (uint32_t i = 0; i < ps.nc; i++) if (ps.csc[i]) { uint8_t m, rep; nx_d3d9_rt_rule(ps.csc[i]->img->fmt, &m, &rep); st.w[0] &= ~(0xFull << NXRS_B_MASK(i)) | ((uint64_t)m << NXRS_B_MASK(i)); }
+    for (uint32_t i = 0; i < ps.nc; i++) if (ps.csc[i]) { uint8_t m; nx_d3d9_rt_rule(ps.csc[i]->img->fmt, &m); st.w[0] &= ~(0xFull << NXRS_B_MASK(i)) | ((uint64_t)m << NXRS_B_MASK(i)); }
     if (!b.vp_ok || memcmp(&b.vp, &dyn.viewport, sizeof b.vp)) emit_vp(dyn.viewport);
     if (!b.sc_ok || memcmp(&b.sc, &dyn.scissor, sizeof b.sc)) { uint32_t* w = nxs_op(NxOp_Scissor, 4); memcpy(w, &dyn.scissor, sizeof dyn.scissor); b.sc = dyn.scissor; b.sc_ok = 1; }
     if (!b.blend_ok || memcmp(b.blend, dyn.blendConstant, 16)) { uint32_t* w = nxs_op(NxOp_BlendConst, 4); memcpy(w, dyn.blendConstant, 16); memcpy(b.blend, dyn.blendConstant, 16); b.blend_ok = 1; }

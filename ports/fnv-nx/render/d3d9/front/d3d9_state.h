@@ -130,26 +130,24 @@ void nx_d3d9_sampler(const uint32_t* samp, const NxD3D9Texture* tex, NxSamplerSt
 /* D3DFORMAT -> native format and view swizzle; format = NxFmt_None for a format without a native layout. */
 NxFormatInfo nx_d3d9_format(uint32_t d3dfmt);
 
-/* Formats with NXFMT_CONVERT are stored expanded: A8 -> RGBA8 (0,0,0,A); L8 -> RGBA8 (L,L,L,255) read as RGB1; A8L8 ->
- * RGBA8 (L,L,L,A); L16 -> RGBA16 (L,L,L,1) read as RGB1; R8G8B8 -> BGRX8 (B,G,R,255); L6V5U5 / X8L8V8U8 -> RGBA8 (U, V biased
- * signed integers, L); ATI1 (BC4) -> decoded to RGBA8 (R,0,0,255). Source = all mips (and faces, face-major) tightly packed as D3D lays them out. Returns the bytes
+/* Formats with NXFMT_CONVERT are stored in a backend format plus view swizzle so that PLAIN sampling returns exactly the D3D9 (r,g,b,a) and plain rendering with the write mask writes exactly the
+ * D3D9 channels (no shader-side fixup exists): A8 -> RGBA8 (0,0,0,A); L8 -> RGBA8 (L,.,.,.) sampled by the swizzle (R,R,R,1); A8L8 ->
+ * RGBA8 (L,L,L,A); L16 -> RGBA16 (L,L,L,1) read as RGB1; R8G8B8 -> BGRX8 (B,G,R,255); L6V5U5 / X8L8V8U8 -> RGBA32F (U, V as max(c, -m) / m, L as c / (2^n - 1), alpha = the integer side word
+ * of front_int.h that makes the readback exact, never sampled: the swizzle gives 1); ATI1 (BC4) -> decoded to RGBA8 (R,0,0,255). Source = all mips (and faces, face-major) tightly packed as D3D lays them out. Returns the bytes
  * written to dst, 0 if the format needs no conversion, the source is short or dstCap is too small. */
 uint32_t nx_d3d9_converted_size(uint32_t d3dfmt, uint32_t width, uint32_t height, uint32_t mips, uint32_t faces);
 uint32_t nx_d3d9_convert(uint32_t d3dfmt, uint32_t width, uint32_t height, uint32_t mips, uint32_t faces,
                          const void* src, uint32_t srcSize, void* dst, uint32_t dstCap);
 
 /* The rules of the CONVERT formats that are not only sampled (front_rt.c). All take a D3DFORMAT; a format with no such rule has the identity answer.
- *  - nx_d3d9_rt_rule: the draw path ANDs the colour write mask of a target of this format with *mask (bit 0 R .. bit 3 A) and, when *replicate_r,
- *    makes the colour output (r, r, r, a) before blending (L8: the storage keeps (L, L, L, 1) and alpha is never written, so a read of the destination in a blend sees L three times).
- *  - nx_d3d9_clear_rgba8: the RGBA8 clear value (R in the low byte) for a D3DCOLOR on a target of this format, the same rules applied.
- *  - nx_d3d9_unconvert: native rows -> D3D rows of one level (tight rows both): A8 takes alpha, L8 red, A8L8 / L16 their luminance + alpha, R8G8B8 drops the x byte, L6V5U5 / X8L8V8U8 remove the
- *    bias; returns the bytes written, 0 for ATI1 (BC4 is decoded on upload: not invertible), for a format without conversion, or a short buffer.
- *  - nx_d3d9_sample_fixup: for the biased signed formats (L6V5U5, X8L8V8U8) the shader must compute v = sampled * scale + offset per channel after
- *    filtering (the bias and the scale are linear, so the result equals filtering the decoded values); returns 0 when the format needs none. */
-void nx_d3d9_rt_rule(uint32_t d3dfmt, uint8_t* mask, uint8_t* replicate_r);
+ *  - nx_d3d9_rt_rule: the draw path ANDs the colour write mask of a target of this format with *mask (bit 0 R .. bit 3 A); it is the only thing the device applies (A8: A; L8: R; R8G8B8: RGB).
+ *  - nx_d3d9_clear_rgba8: the RGBA8 clear value (R in the low byte) for a D3DCOLOR on a target of this format, the same rule applied.
+ *  - nx_d3d9_unconvert: native rows -> D3D rows of one level (tight rows both): A8 takes alpha, L8 red, A8L8 / L16 their luminance + alpha, R8G8B8 drops the x byte, L6V5U5 / X8L8V8U8 are exactly
+ *    the codes that nx_d3d9_convert read (all 2^16 / 2^32 codes round-trip; the most negative code of a signed channel is restored from the side word, although it SAMPLES as -1 like the code -m);
+ *    returns the bytes written, 0 for ATI1 (BC4 is decoded on upload: not invertible), for a format without conversion, or a short buffer. */
+void nx_d3d9_rt_rule(uint32_t d3dfmt, uint8_t* mask);
 uint32_t nx_d3d9_clear_rgba8(uint32_t d3dfmt, uint32_t d3dcolor);
 uint32_t nx_d3d9_unconvert(uint32_t d3dfmt, uint32_t width, uint32_t height, const void* src, uint32_t srcSize, void* dst, uint32_t dstCap);
-int nx_d3d9_sample_fixup(uint32_t d3dfmt, float scale[4], float offset[4]);
 
 /* D3D9 defaults (IDirect3DDevice9 after Reset), as Nine's nine_render_state_defaults / sampler defaults. */
 void nx_d3d9_default_rs(uint32_t rs[NXD3D_RS_COUNT]);

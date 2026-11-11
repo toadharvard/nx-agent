@@ -241,4 +241,43 @@ def make(asm_fn):
     ptcase("point_vs2_oPts_min", VS_PS, 8, 4, 64, 4, cst=1.0)
     ptcase("point_vs3_psize_out", VS_PS3, 2, 1, 64, 6, cst=6.0)
     ptcase("point_vs3_psize_out_min_above_max", VS_PS3, 2, 6, 4, 4, cst=6.0)
+    # ---------------------------------------------------------------- i: the storage rule of the CONVERT formats (front_fmt.c): PLAIN sampling returns the D3D9 (r, g, b, a), a render target texture of L8 / A8 holds the D3D9 channels
+    def pack(bs): bs = list(bs); bs += [0] * (-len(bs) % 4); return [int.from_bytes(bytes(bs[k:k + 4]), "little") for k in range(0, len(bs), 4)]
+    PS_BUMP = "ps_2_0\ndcl t0\ndcl_2d s0\ntexld r0, t0, s0\nmul r0, r0, c0\nadd oC0, r0, c1\n"           # o = 0.5 * sampled + 0.5: the signed range [-1, 1] fits the 8-bit target
+    DECL3 = lambda c: c.decl(elems([(FLOAT4, POSITION, 0), (FLOAT4, COLOR, 0), (FLOAT2, TEXCOORD, 0)]))
+    UVT = lambda sx, sy: ((sx + 0.5) / 32, (sy + 0.5) / 32)
+    sg = lambda v, n: v - (1 << n) if v >> (n - 1) else v
+    def upcase(nm, fmt, bpp, texel, ref, bump):
+        c = mk(nm, "i"); vs = c.vs(A(VS_PCT)); ps = c.ps(A(PS_BUMP if bump else PS_TEX["2d"])); c.use(vs, ps, DECL3(c))
+        if bump: c.consts(1, 0, [0.5] * 8)
+        t = c.tex(0, 32, 32, 1, pack(b for iy in range(32) for ix in range(32) for b in texel(ix, iy)), fmt, bpp); c.bind(0, t)
+        s, vv = tri([("pos", None), ("f4", lambda sx, sy: (1, 1, 1, 1)), ("f2", UVT)]); c.run("up", s, vv); c.ref = full(ref)
+    h2 = lambda x: 0.5 * x + 0.5
+    def l6code(kind, ix, iy): return (ix | iy << 5 | 37 << 10) if kind == 0 else (((iy % 16) & 31) | (((iy % 16) ^ 16) & 31) << 5 | ((iy // 16) * 32 + ix) << 10)
+    def l6ref(code): return lambda ix, iy: (h2(max(sg(code(ix, iy) & 31, 5), -15) / 15), h2(max(sg(code(ix, iy) >> 5 & 31, 5), -15) / 15), h2((code(ix, iy) >> 10) / 63), 1.0)
+    for kind, nm in ((0, "uv_all_codes"), (1, "l_all_codes")):
+        cd = lambda ix, iy, kind=kind: l6code(kind, ix, iy)
+        upcase("tex_l6v5u5_" + nm, 61, 2, lambda ix, iy, cd=cd: (cd(ix, iy) & 255, cd(ix, iy) >> 8), l6ref(cd), True)
+    UV4, VU4 = (0x80, 0x7F, 0, 1), (1, 0x80, 0x7F, 0)
+    xch = {0: lambda ix, iy: (iy * 8 + ix // 4, UV4[ix % 4], VU4[ix % 4]), 1: lambda ix, iy: (UV4[ix % 4], iy * 8 + ix // 4, VU4[ix % 4]), 2: lambda ix, iy: (UV4[ix % 4], VU4[ix % 4], iy * 8 + ix // 4)}
+    for k, nm in ((0, "u_all_codes"), (1, "v_all_codes"), (2, "l_all_codes")):
+        g3 = xch[k]
+        upcase("tex_x8l8v8u8_" + nm, 62, 4, lambda ix, iy, g3=g3: (*g3(ix, iy), 0xAB), lambda ix, iy, g3=g3: (h2(max(sg(g3(ix, iy)[0], 8), -127) / 127), h2(max(sg(g3(ix, iy)[1], 8), -127) / 127), h2(g3(ix, iy)[2] / 255), 1.0), True)
+    upcase("tex_l8_upload", 50, 1, lambda ix, iy: ((ix * 8 + iy * 3) & 255,), lambda ix, iy: ((((ix * 8 + iy * 3) & 255) / 255,) * 3) + (1.0,), False)
+    upcase("tex_a8_upload", 28, 1, lambda ix, iy: ((ix * 5 + iy * 11) & 255,), lambda ix, iy: (0.0, 0.0, 0.0, ((ix * 5 + iy * 11) & 255) / 255), False)
+    CF = lambda sx, sy: (0.3, 0.6, 0.45, 0.7)   # constant: the targets are compared pixel for pixel without a rasterisation model
+    CF2 = lambda sx, sy: (0.2, 0.1, 0.1, 0.3)
+    def rtcase(nm, fmt, ref, draws, blend=False):
+        c = mk(nm, "i"); vs = c.vs(A(VS_PCT)); psc = c.ps(A(PS_COL)); pst = c.ps(A(PS_TEX["2d"])); d = DECL3(c)
+        t = c.rttex(fmt); c.rt_to(t); c.use(vs, psc, d); c.clear()
+        if draws:
+            s, vv = tri([("pos", None), ("f4", CF), ("f2", lambda sx, sy: (0, 0))]); c.draw("up", s, vv)
+            if blend:
+                c.rs("SRCBLEND", 2); c.rs("DESTBLEND", 7); c.rs("ALPHABLENDENABLE", 1); s, vv = tri([("pos", None), ("f4", CF2), ("f2", lambda sx, sy: (0, 0))]); c.draw("up", s, vv); c.rs("ALPHABLENDENABLE", 0)
+        c.rt_main(); c.use(vs, pst, d); c.bind(0, t); s, vv = tri([("pos", None), ("f4", lambda sx, sy: (1, 1, 1, 1)), ("f2", UVT)]); c.draw("up", s, vv); c.out(); c.ref = full(ref)
+    rtcase("rt_a8_draw", 28, lambda ix, iy: (0.0, 0.0, 0.0, CF(ix, iy)[3]), True)
+    rtcase("rt_a8_clear", 28, lambda ix, iy: (0.0, 0.0, 0.0, 0x80 / 255), False)
+    rtcase("rt_l8_draw", 50, lambda ix, iy: (CF(ix, iy)[0],) * 3 + (1.0,), True)
+    rtcase("rt_l8_clear", 50, lambda ix, iy: (0x40 / 255,) * 3 + (1.0,), False)
+    rtcase("rt_l8_destalpha_is_one", 50, lambda ix, iy: ((CF(ix, iy)[0] + 0.2,) * 3) + (1.0,), True, blend=True)
     return out

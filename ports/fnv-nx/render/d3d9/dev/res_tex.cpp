@@ -46,7 +46,8 @@ HRESULT NxImg::init(NxObj* own, uint32_t k, uint32_t w_, uint32_t h_, uint32_t d
     if (ni.format != NxFmt_None && (p == D3DPOOL_DEFAULT || p == D3DPOOL_MANAGED)) {
         NxImageDesc4 g; memset(&g, 0, sizeof g);
         g.width = (uint16_t)w; g.height = (uint16_t)h; g.depth = (uint16_t)d; g.type = k == NXK_CUBE ? NxImgType_Cube : k == NXK_VOLUME ? NxImgType_3D : NxImgType_2D;
-        g.format = ni.format; g.mips = (uint8_t)nlev; g.samples = (uint8_t)samples; g.flags = (uint8_t)((((u | bind) & D3DUSAGE_RENDERTARGET) || (k == NXK_SURFACE && (ni.flags & NXFMT_RENDER)) ? NxImg_RenderTarget : 0) | ((u | bind) & D3DUSAGE_DEPTHSTENCIL ? NxImg_Depth : 0) | (k == NXK_CUBE ? NxImg_Cube : 0));
+        g.format = ni.format; g.swizzle = NXIMG_SWIZZLE(ni.swizzle[0], ni.swizzle[1], ni.swizzle[2], ni.swizzle[3]);   // the row's view swizzle: plain sampling returns the D3D9 (r,g,b,a)
+        g.mips = (uint8_t)nlev; g.samples = (uint8_t)samples; g.flags = (uint8_t)((((u | bind) & D3DUSAGE_RENDERTARGET) || (k == NXK_SURFACE && (ni.flags & NXFMT_RENDER)) ? NxImg_RenderTarget : 0) | ((u | bind) & D3DUSAGE_DEPTHSTENCIL ? NxImg_Depth : 0) | (k == NXK_CUBE ? NxImg_Cube : 0));
         gpu = nxd3d_image_create(own, &g); if (!gpu) return D3DERR_OUTOFVIDEOMEMORY;   // the backend refused: out of video memory / image ids / stream memory
     }
     for (uint32_t fi = 0; fi < fc; fi++) for (uint32_t l = 0; l < nlev; l++) {

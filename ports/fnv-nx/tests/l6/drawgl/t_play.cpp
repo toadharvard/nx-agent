@@ -13,6 +13,7 @@
 //  g nprim first   DrawPrimitive(TRIANGLELIST)            h base minidx nverts startidx nprim   DrawIndexedPrimitive(TRIANGLELIST)
 //  z kind id    release the vertex (0) / pixel (1) shader object id (the device destroys its backend shaders)
 //  l idx a b c d  SetClipPlane (plane words are float bit patterns)   U prim n stride W..  DrawPrimitiveUP(prim = D3DPRIMITIVETYPE, n primitives)
+//  R id fmt     CreateTexture(32 x 32, level 0, D3DUSAGE_RENDERTARGET, fmt, DEFAULT) as texture id    T idx id   SetRenderTarget(idx, level 0 of texture id)    B idx   SetRenderTarget(idx, the case's own target 0)
 //  o nrt        read back render targets 0..nrt-1 (GetRenderTargetData) into <data>/o<case>_<rt>.bin (BGRA bytes, 32 x 32)
 #include "t_common.h"
 #include <string.h>
@@ -108,6 +109,10 @@ void line(char tag, const std::vector<uint32_t>& v) {
     case 'g': CHECK_HR(i9->DrawPrimitive(D3DPT_TRIANGLELIST, v[1], v[0]), D3D_OK); break;
     case 'h': CHECK_HR(i9->DrawIndexedPrimitive(D3DPT_TRIANGLELIST, (INT)v[0], v[1], v[2], v[3], v[4]), D3D_OK); break;
     case 'z': if (v[0] == 0) rel(g.vs[v[1]]); else rel(g.ps[v[1]]); break;
+    case 'R': { IDirect3DTexture9* t = nullptr; if (CHECK_HR(i9->CreateTexture(SZ, SZ, 1, D3DUSAGE_RENDERTARGET, (D3DFORMAT)v[1], D3DPOOL_DEFAULT, &t, nullptr), D3D_OK)) g.tex[v[0]] = t; break; }
+    case 'T': { IDirect3DSurface9* s = nullptr; if (!g.tex[v[1]] || !CHECK_HR(static_cast<IDirect3DTexture9*>(g.tex[v[1]])->GetSurfaceLevel(0, &s), D3D_OK)) break;
+        CHECK_HR(i9->SetRenderTarget(v[0], s), D3D_OK); s->Release(); break; }
+    case 'B': CHECK_HR(i9->SetRenderTarget(v[0], g.rt[0]), D3D_OK); break;
     case 'o': output(v[0]); break;
     default: CHECK(false); break;
     }
