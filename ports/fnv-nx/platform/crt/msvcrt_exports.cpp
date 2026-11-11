@@ -445,7 +445,7 @@ void c_lock(int n)
         l.count++;
         return;
     }
-    os_lock(&l.m);
+    os_glock(&l.m);   /* _lock: the game's own lock, held across its callbacks (os.h) */
     l.owner = me, l.count = 1;
 }
 void c_unlock(int n)
@@ -456,7 +456,7 @@ void c_unlock(int n)
     if (l.owner != (void *)&errno || --l.count)
         return;
     l.owner = NULL;
-    os_unlock(&l.m);
+    os_gunlock(&l.m);
 }
 
 struct envc { char *key, *val; envc *next; };

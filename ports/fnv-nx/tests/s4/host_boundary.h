@@ -10,10 +10,14 @@ extern "C" {
    os_glock family is not counted): the test mains require it to stay 0. The count is kept by the host test backend
    (platform/os/os_posix.c calls fnvnx_lockcount_note, defined in host_boundary.cpp); the product has neither. */
 extern int g_bnd_lock_violations;
+/* the test case that runs now (the mains set it): the coverage aid of host_boundary.cpp names it */
+extern const char *g_bnd_test;
 /* the number of platform locks the calling thread holds now */
 unsigned fnvnx_bnd_locks_held(void);
 /* the first distinct acquisition sites of the locks that were held at a guest call (module offsets for addr2line), to stdout */
 void fnvnx_bnd_print_lock_violations(void);
+/* the acquisition sites of the platform locks the calling thread holds now */
+void fnvnx_bnd_print_held(void);
 extern int g_bnd_exports, g_bnd_invokes, g_bnd_threads_created, g_bnd_threads_run, g_bnd_threads_freed,
     g_bnd_threads_freed_unrun, g_bnd_process_detaches;
 /* the modules (bases) DisableThreadLibraryCalls told the boundary about */

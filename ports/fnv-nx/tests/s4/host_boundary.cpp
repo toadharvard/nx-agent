@@ -6,6 +6,7 @@
 #include "fnvnx_boundary.h"
 #include "host_boundary.h"
 #include <dlfcn.h>
+#include <execinfo.h>
 #include <stdio.h>
 
 #include <stdlib.h>
@@ -19,6 +20,10 @@ extern "C" void fnvnx_reach_violation(uint32_t fact_id)
     g_reach_count++;
     throw ReachHit{fact_id};
 }
+
+extern "C" int g_bnd_lock_violations;
+extern "C" const char *g_bnd_test;
+extern "C" unsigned fnvnx_bnd_locks_held(void);
 
 /* ---- the platform locks each thread holds (os_posix.c reports every os_lock / os_trylock / os_unlock). The list keeps the
  * lock and the address its acquirer returns to, so a violation names the acquisition site. */
@@ -67,18 +72,89 @@ static void note_violation(fnvnx_gaddr callee)
     __atomic_store_n(&g_sites_lock, 0, __ATOMIC_RELEASE);
 }
 
+/* ---- the entries into the game seen so far, per call stack (development aid for the coverage table of the rule): with
+ * FNVNX_BND_SITES=<file> set, the stacks (5 frames above the boundary function) and the test case that first drove them are
+ * written there at exit; resolve with `addr2line -i -e <test binary>`. */
+namespace {
+struct Trace { const char *kind, *test; void *fr[6]; int n; };
+const int TRACES_MAX = 8192;
+Trace g_traces[TRACES_MAX];
+int g_ntraces;
+volatile int g_trace_lock;
+const char *g_trace_path = getenv("FNVNX_BND_SITES");
+
+void trace_dump()
+{
+    FILE *f = fopen(g_trace_path, "w");
+    if (!f)
+        return;
+    Dl_info di = {};
+    dladdr((void *)&trace_dump, &di);
+    fprintf(f, "BASE %p\n", di.dli_fbase);   /* the load address of the test binary (a PIE): addr2line takes addr - BASE */
+    for (int i = 0; i < g_ntraces; i++) {
+        fprintf(f, "%s %s", g_traces[i].kind, g_traces[i].test ? g_traces[i].test : "-");
+        for (int k = 0; k < g_traces[i].n; k++)
+            fprintf(f, " %p", g_traces[i].fr[k]);
+        fprintf(f, "\n");
+    }
+    fclose(f);
+}
+
+__attribute__((noinline)) void trace_entry(const char *kind)
+{
+    if (!g_trace_path)
+        return;
+    void *fr[8];
+    int n = backtrace(fr, 8);
+    Trace t = {kind, g_bnd_test, {}, 0};
+    for (int k = 2; k < n && t.n < 6; k++)   /* skip trace_entry and the boundary function itself */
+        t.fr[t.n++] = fr[k];
+    while (__atomic_exchange_n(&g_trace_lock, 1, __ATOMIC_ACQUIRE)) {}
+    bool seen = false;
+    for (int i = 0; i < g_ntraces && !seen; i++)
+        seen = g_traces[i].n == t.n && !memcmp(g_traces[i].fr, t.fr, sizeof(void *) * (size_t)t.n);
+    if (!seen && g_ntraces < TRACES_MAX) {
+        if (!g_ntraces)
+            atexit(trace_dump);
+        g_traces[g_ntraces++] = t;
+    }
+    __atomic_store_n(&g_trace_lock, 0, __ATOMIC_RELEASE);
+}
+
+/* every entry into the game: the platform may hold no lock, and the entry is recorded for the coverage table */
+void enter_game(const char *kind, fnvnx_gaddr callee)
+{
+    if (fnvnx_bnd_locks_held()) {
+        __atomic_fetch_add(&g_bnd_lock_violations, 1, __ATOMIC_RELAXED);
+        note_violation(callee);
+    }
+    trace_entry(kind);
+}
+}
+
 extern "C" {
+const char *g_bnd_test;
 unsigned fnvnx_bnd_locks_held(void) { return t_nheld; }
+
+static void print_site(const void *site, const char *what, const void *callee)
+{
+    Dl_info di = {};
+    dladdr(site, &di);
+    printf("  lock taken at %p (%s+0x%lx, module offset 0x%lx)%s%p\n", site, di.dli_sname ? di.dli_sname : "?",
+           di.dli_saddr ? (unsigned long)((const char *)site - (const char *)di.dli_saddr) : 0ul,
+           (unsigned long)((const char *)site - (const char *)di.dli_fbase), what, callee);
+}
 
 void fnvnx_bnd_print_lock_violations(void)
 {
-    for (int k = 0; k < g_nsites; k++) {
-        Dl_info di = {};
-        dladdr(g_sites[k].site, &di);
-        printf("  lock taken at %p (%s+0x%lx, module offset 0x%lx), guest callee %p\n", g_sites[k].site,
-               di.dli_sname ? di.dli_sname : "?", di.dli_saddr ? (unsigned long)((const char *)g_sites[k].site - (const char *)di.dli_saddr) : 0ul,
-               (unsigned long)((const char *)g_sites[k].site - (const char *)di.dli_fbase), g_sites[k].callee);
-    }
+    for (int k = 0; k < g_nsites; k++)
+        print_site(g_sites[k].site, ", guest callee ", g_sites[k].callee);
+}
+
+void fnvnx_bnd_print_held(void)
+{
+    for (unsigned i = 0; i < t_nheld && i < HELD_MAX; i++)
+        print_site(t_held[i].site, ", still held ", 0);
 }
 
 int g_bnd_lock_violations;   /* guest calls made while the thread held a platform lock (see host_boundary.h) */
@@ -99,10 +175,7 @@ void fnvnx_bnd_guest_invoke(fnvnx_gaddr addr, uint32_t ecx, uint32_t nargs, cons
                             struct fnvnx_bnd_ret *out)
 {
     __atomic_fetch_add(&g_bnd_invokes, 1, __ATOMIC_RELAXED);
-    if (fnvnx_bnd_locks_held()) {
-        __atomic_fetch_add(&g_bnd_lock_violations, 1, __ATOMIC_RELAXED);
-        note_violation(addr);
-    }
+    enter_game("invoke", addr);
     if (g_bnd_invoke_hook && g_bnd_invoke_hook(addr, ecx, nargs, args, kind, out))
         return;
     W a[16] = {0};
@@ -140,6 +213,7 @@ fnvnx_bnd_thread *fnvnx_bnd_thread_create(fnvnx_gaddr start, size_t)
 
 uint32_t fnvnx_bnd_thread_run(fnvnx_bnd_thread *t, fnvnx_gaddr param)
 {
+    enter_game("thread_run", t->start);
     __atomic_fetch_add(&g_bnd_threads_run, 1, __ATOMIC_RELAXED);
     /* the parameter is a native pointer here, wider than a stack word: the start routine is called directly */
     return (uint32_t)((unsigned long (*)(void *))t->start)((void *)param);
@@ -150,11 +224,14 @@ void fnvnx_bnd_thread_release(fnvnx_bnd_thread *t, int notify)
     __atomic_fetch_add(&g_bnd_threads_freed, 1, __ATOMIC_RELAXED);
     if (!notify)
         __atomic_fetch_add(&g_bnd_threads_freed_unrun, 1, __ATOMIC_RELAXED);
+    else   /* the modules hear of the thread detach: a call into the game */
+        enter_game("thread_release", t->start);
     free(t);
 }
 
 uint32_t fnvnx_bnd_module_load(const char *name, uint32_t *base)
 {
+    enter_game("module_load", 0);   /* the loader runs the modules' DllMain */
     if (g_bnd_loader)
         return g_bnd_loader(name, base);
     return 126;   /* ERROR_MOD_NOT_FOUND: the host process has no translated modules */
@@ -180,6 +257,7 @@ int g_bnd_unload_outcome = FNVNX_BND_PINNED;     /* the outcome the next calls r
 uint32_t g_bnd_unload_error;                     /* nonzero: the Win32 error the next calls report */
 uint32_t fnvnx_bnd_module_unload(uint32_t base, int *outcome)
 {
+    enter_game("module_unload", 0);   /* FreeLibrary runs DllMain(DETACH) of the module */
     if (g_bnd_unload_n < 16)
         g_bnd_unload_base[g_bnd_unload_n] = base;
     g_bnd_unload_n++;
@@ -187,5 +265,9 @@ uint32_t fnvnx_bnd_module_unload(uint32_t base, int *outcome)
     return g_bnd_unload_error;
 }
 
-void fnvnx_bnd_process_detach(void) { __atomic_fetch_add(&g_bnd_process_detaches, 1, __ATOMIC_RELAXED); }
+void fnvnx_bnd_process_detach(void)
+{
+    enter_game("process_detach", 0);   /* DllMain(DLL_PROCESS_DETACH) of the modules */
+    __atomic_fetch_add(&g_bnd_process_detaches, 1, __ATOMIC_RELAXED);
+}
 }

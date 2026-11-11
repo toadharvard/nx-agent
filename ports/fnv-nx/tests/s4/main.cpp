@@ -50,7 +50,15 @@ int main(int argc, char **argv)
         if (only && strncmp(v[i]->name, only, strlen(only)) != 0)
             continue;
         int before = s4_failures;
+        g_bnd_test = v[i]->name;
         v[i]->fn();
+        /* an import that returns to the game with a platform lock still held (a lock taken in one import and released in
+         * another) would leave it counted on the test thread: the game's own locks (os_glock) are not counted */
+        if (fnvnx_bnd_locks_held()) {
+            s4_failures++;
+            printf("%s: returned with %u platform locks held\n", v[i]->name, fnvnx_bnd_locks_held());
+            fnvnx_bnd_print_held();
+        }
         int bad = s4_failures - before;
         failed_cases += bad != 0;
         printf("%-34s %s\n", v[i]->name, bad ? "FAIL" : "ok");

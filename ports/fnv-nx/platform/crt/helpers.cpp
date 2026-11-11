@@ -47,7 +47,7 @@ extern "C" void fnvnx_lockit_ctor(void *self, int kind)
         r.depth++;
         return;
     }
-    os_lock(&r.l);
+    os_glock(&r.l);   /* the game's own _Lockit: held across its callbacks (os.h) */
     __atomic_store_n(&r.owner, me, __ATOMIC_RELAXED);
     r.depth = 1;
 }
@@ -57,7 +57,7 @@ extern "C" void fnvnx_lockit_dtor(void *self)
     rlock &r = g_lockit[(unsigned)*(int *)self & 7];
     if (--r.depth == 0) {
         __atomic_store_n(&r.owner, 0u, __ATOMIC_RELAXED);
-        os_unlock(&r.l);
+        os_gunlock(&r.l);
     }
 }
 

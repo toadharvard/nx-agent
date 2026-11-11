@@ -28,7 +28,13 @@ int main(int argc, char **argv)
     for (i = 0; i < n; i++) {
         if (only && !strstr(v[i]->name, only)) continue;
         int before = s7_failures;
+        g_bnd_test = v[i]->name;
         v[i]->fn();
+        if (fnvnx_bnd_locks_held()) {   /* see tests/s4/main.cpp */
+            s7_failures++;
+            printf("%s: returned with %u platform locks held\n", v[i]->name, fnvnx_bnd_locks_held());
+            fnvnx_bnd_print_held();
+        }
         run++;
         printf("%-40s %s\n", v[i]->name, s7_failures == before ? "ok" : "FAILED");
     }

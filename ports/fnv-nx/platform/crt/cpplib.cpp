@@ -157,7 +157,7 @@ extern "C" void fnvnx_mutex_lock(void *self)
         m->depth++;
         return;
     }
-    os_lock(&m->l);
+    os_glock(&m->l);   /* the game's own std::mutex: held across its callbacks (os.h) */
     __atomic_store_n(&m->owner, me, __ATOMIC_RELAXED);
     m->depth = 1;
 }
@@ -169,7 +169,7 @@ extern "C" void fnvnx_mutex_unlock(void *self)
         return; /* not held by this thread: ignore, as a CRITICAL_SECTION would corrupt silently */
     if (--m->depth == 0) {
         __atomic_store_n(&m->owner, 0u, __ATOMIC_RELAXED);
-        os_unlock(&m->l);
+        os_gunlock(&m->l);
     }
 }
 
