@@ -35,6 +35,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
+import envcheck  # noqa: E402
 import runtime  # noqa: E402
 import sandbox  # noqa: E402
 import toolflags  # noqa: E402
@@ -43,6 +44,7 @@ import unitstage  # noqa: E402
 FORMAT, OBJ_FORMAT = "fnvnx-recipe/1", "fnvnx-objects/1"
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
+ENV_JSON = TREE + "/verify/env.json"   # the declared environment of the checkout (l1.py checks the same file)
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
         "plugins", "plugin_cxx", "unit_flags", "unit_facts"}
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
@@ -87,6 +89,29 @@ class RecipeError(Exception):
 
 class BuildRed(Exception):
     pass
+
+
+class EnvBlocked(RecipeError):
+    """The machine does not match the env.json of the checkout: no stage runs and nothing is stored (a result computed in the wrong
+    environment is not a result: a stage that failed for a tool that was not installed yet must not stay cached red)."""
+
+
+_ENV_OK = set()   # sha256 of the env.json files this process already found matching (an install between processes is seen by the next one)
+
+
+def env_blocked(repo):
+    """Raise EnvBlocked unless this machine matches repo/verify/env.json (envcheck.py check; a missing file is a mismatch, as in l1.py)."""
+    p = os.path.join(repo, ENV_JSON)
+    if not os.path.exists(p):
+        raise EnvBlocked(["env: " + ENV_JSON + ": want a declared environment, have none"])
+    raw = open(p, "rb").read()
+    h = hashlib.sha256(raw).hexdigest()
+    if h in _ENV_OK:
+        return
+    bad = envcheck.check(json.loads(raw))
+    if bad:
+        raise EnvBlocked(list(bad))
+    _ENV_OK.add(h)
 
 
 def refused(tokens):
@@ -757,6 +782,7 @@ def host_compilers(rec, cache):
 def build(repo, root, store, out, jobs=4, ext=None):
     """Build product ROOT of the checkout REPO into STORE; write OUT/objects.json and the files it names. EXT: bare cache dir of
     externals (default STORE/external). -> the objects dict; raises RecipeError for an invalid recipe."""
+    env_blocked(repo)   # BEFORE any stage: nothing below runs or stores on a machine that is not the declared one
     j = Job(repo, root, store, jobs, ext or os.path.join(store, "external"))
     errs = check(j.rec, root, j.files, j.roots, load_pin(repo))
     if errs:
@@ -826,6 +852,9 @@ def main(argv):
         if res["status"] == "red":
             print(json.dumps(res["failure"], indent=1))
         return 0 if res["status"] == "green" else 2
+    except EnvBlocked as e:
+        print("\n".join(["blocked: env"] + e.errors))
+        return 4
     except RecipeError as e:
         print("\n".join(e.errors), file=sys.stderr)
         return 2

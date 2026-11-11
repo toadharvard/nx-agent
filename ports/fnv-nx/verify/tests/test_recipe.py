@@ -80,6 +80,7 @@ def make_repo(name, gen_extra="", rec=None, files=None):
     imp, _, ex = gen_extra.partition("|")
     w(repo, "gen/gen.py", GEN.replace("@IMPORT@", imp).replace("@EXTRA@", ex or "0"))
     w(repo, "toy/build.json", json.dumps(rec or RECIPE, indent=1))
+    w(repo, "verify/env.json", open(os.path.join(os.path.dirname(os.path.dirname(VERIFY)), recipe.ENV_JSON)).read())   # the declared environment
     w(repo, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
         {"path": ROOT, "class": "product", "target": "host", "gates": [], "recipe": ROOT + "/build.json"},
         {"path": T + "gen", "class": "tool", "gates": []}, {"path": T + "verify", "class": "tool", "gates": []}]}))
@@ -227,6 +228,29 @@ def main():
               and r1["failure"]["stage"] == "cc:b.c" and r1["elf"] is None and r1["objects"] == [], (fu, r1.get("failure")))
         norm = lambda r: json.dumps({k: v for k, v in r.items() if k not in ("stages", "stage_keys")}, sort_keys=True).replace(BASE + "/two-out1", "O").replace(BASE + "/two-out2", "O")
         check("two cold runs of the failing root give the same objects.json", norm(r1) == norm(r2))
+
+        # an environment mismatch blocks BEFORE any stage: exit 4 "blocked: env", nothing stored, so no red stage result can come from it
+        env = make_repo("envbad")
+        w(env, "toy/c.c", "int f_c(void) { return undeclared_thing; }\n")
+        ej = json.load(open(os.path.join(env, recipe.ENV_JSON)))
+        k = sorted(ej["packages"])[0]
+        ej["packages"][k] = ej["packages"][k] + "+mismatch"
+        w(env, "verify/env.json", json.dumps(ej))
+        git(env, "add", "-A")
+        git(env, "commit", "-q", "-m", "env mismatch")
+        es = BASE + "/env-store"
+        try:
+            recipe.build(env, ROOT, es, BASE + "/env-out")
+            raised = None
+        except recipe.EnvBlocked as x:
+            raised = x.errors
+        check("recipe.build on a mismatched env raises EnvBlocked naming the mismatch, before any stage", bool(raised) and any(k in l for l in raised), raised)
+        check("nothing is stored by a blocked build (no stage result, red or green, in the store; no objects.json)",
+              not os.path.exists(es) or not any(files for _, _, files in os.walk(es)) and not os.path.exists(BASE + "/env-out/objects.json"))
+        p = subprocess.run(PY + [VERIFY + "/recipe.py", "build", "--root", ROOT, "--store", BASE + "/env-store2", "--out", BASE + "/env-out2"],
+                           cwd=env, capture_output=True, text=True)
+        check("recipe.py build on a mismatched env prints `blocked: env` and exits 4, storing nothing",
+              p.returncode == 4 and p.stdout.startswith("blocked: env") and not os.path.exists(BASE + "/env-store2"), (p.returncode, p.stdout[:200], p.stderr[:200]))
 
     def gate_toy():
         og = BASE + "/gg"
