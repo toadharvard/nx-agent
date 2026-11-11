@@ -10,7 +10,7 @@ inbox notes and the dk_* sources of the integration lineage. The two histories a
 ## Tasks
 | # | task | worker | status |
 |---|---|---|---|
-| 1 | dk product root ports/fnv-nx/render/d3d9/backend (dk_*.c + nxgpu4_check.c + include closure), recipe.py, msvcmodel b4057704, admitted | w4 session_01KmtZKT5Qhn2Ywp9VAbJkmt -> claude/fnv-l6a-deko-w4 | doing |
+| 1 | dk product root ports/fnv-nx/render/backend (agreed with L6: render/d3d9 is L6's root, no nesting; dk_*.c + nxgpu4_check.c + include closure), recipe.py, msvcmodel b4057704, admitted | w4 session_01KmtZKT5Qhn2Ywp9VAbJkmt -> claude/fnv-l6a-deko-w4 | doing |
 | 1a | plugins in the recipe | w4 | trunk e90a7e43 has them; they load only into C++ units (RECIPE.md "Plugins"); the dk root is all C, so 0 plugins apply by the trunk rule |
 | 2 | doubles: 12/12 harnesses -> real dk_* files on the L4 deko3d model, or deleted; dkall gate | — | blocked by L4 deko3d model (0 lines), L4 |
 | 3 | dk boundary contract (67 dk*, 206 sites, 7 libnx; fnv-nx-build l6a/dkabi @071b497) for the L4 model; uam as hermetic stage -> DKSH | — | doing (contract sent to L4) |
