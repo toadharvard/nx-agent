@@ -278,6 +278,11 @@ The owner's words: "Агенты вызывают соннетов которы�
   - The OpenGL backend (`gl4`, `nxgl`, the renderer pair and `verify/bootgpu.py` with its GL library) is product and
     stays. It is the backend that already rendered frames, and it renders in the emulator. Nothing of it is deleted.
   - The deko3d backend (L6A, `render/backend`) is the second backend, built beside it, for the console.
+  - **OpenGL is the reference for deko3d** (owner, 22:50: "Опенгл должен был быть эталоном для деко"). The same
+    nxgpu command stream (the same D3D9 front end, the same scenes and game frames) is rendered by both backends, and
+    the deko3d frames are checked against the GL frames. A difference is a deko3d defect until it is explained by
+    rule. GL frames are produced on the boot machine with the GL library. This check verifies deko3d; it never
+    selects code.
   - The D3D9 front end (L6) serves both through the same nxgpu ABI.
   - The worker branches that deleted GL (`claude/fnv-l6-render-w1` 89fa6a889, `claude/fnv-l4-verify-w1` 68e37dab7)
     are not merged, ever. No session deletes or disables GL, Mesa in the boot machine, or their tests.
