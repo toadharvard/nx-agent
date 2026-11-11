@@ -351,8 +351,8 @@ TEST(wt_creation_and_destruction_sequences)
     CHECK(seq(hidden, { 0x02, 0x82 }));
     reset_log();
     CHECK(DestroyWindow(h));                                /* the active window, with a child */
-    /* deactivation, hide, WM_DESTROY, the children the same way, WM_NCDESTROY last */
-    CHECK(seq(h, { 0x86, 0x06, 0x46, 0x18, 0x47, 0x02, 0x82 }));
+    /* deactivation, the focus leaves (WM_KILLFOCUS: the active window held it), hide, WM_DESTROY, the children the same way, WM_NCDESTROY last */
+    CHECK(seq(h, { 0x86, 0x06, 0x08, 0x46, 0x18, 0x47, 0x02, 0x82 }));
     CHECK_EQ(g_lg[log_pos(h, 0x86)].w, 0);                  /* NCACTIVATE(FALSE) */
     CHECK_EQ(g_lg[log_pos(h, 0x06)].w & 0xFFFF, 0);         /* WA_INACTIVE */
     CHECK(log_pos(h, 0x02) < log_pos(ch, 0x02));

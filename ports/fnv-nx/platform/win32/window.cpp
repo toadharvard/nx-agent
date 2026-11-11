@@ -13,6 +13,24 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <vector>
+
+/* the DC side of painting (gdi32.cpp) and the text colours (gdifont.cpp) */
+extern "C" {
+HDC BeginPaint(HWND, void *);
+BOOL EndPaint(HWND, const void *);
+int gdi_dc_clipbox(void *hdc, RECT *out);
+int gdi_fill_rect(void *hdc, const RECT *rc, void *hbr);
+void gdi_dc_set_clip(void *hdc, const RECT *r, int n);
+COLORREF gdi_syscolor(int index);
+HBRUSH gdi_sys_brush(int index);
+COLORREF SetTextColor(HDC, COLORREF);
+COLORREF SetBkColor(HDC, COLORREF);
+HDC GetDC(HWND);
+int ReleaseDC(HWND, HDC);
+int fnmq_get_message(MSG *m, HWND f, UINT lo, UINT hi);
+void fnwin_erase_now(HWND h, bool children);
+}
 
 /* DefWindowProcA is the window procedure the platform owns. The game sees its export value (the import key in the
  * product), wherever a procedure is read back (GetWindowLong/GetClassLong), and a procedure it hands in that equals
@@ -103,11 +121,15 @@ struct window {
     int restore_max, paint, destroying, hasmenu;
     char *text;
     uint8_t *extra;
+    HICON icon_big, icon_small;                                  /* WM_SETICON (ICON_BIG, ICON_SMALL) */
+    int ncactive, owned_hidden, nc_pending, erase;               /* WIN_NCACTIVATED, WIN_NEEDS_SHOW_OWNEDPOPUP, frame and background to paint */
+    RECT *upd;                                                   /* the update region: disjoint rectangles, client coordinates */
+    int nupd, cupd;
 };
 #define WND_MAGIC 0x574E4457u
 static wclass *g_classes;
 static unsigned g_next_atom = 0xC000;
-static window g_desk, *g_all, *g_all_tail, *g_active, *g_capture;   /* g_capture: the window that has the mouse (SetCapture) */
+static window g_desk, *g_all, *g_all_tail, *g_active, *g_capture, *g_focus, *g_focus_saved;   /* g_capture: the window that has the mouse (SetCapture) */
 static os_lock_t g_ui_lock;
 
 static char *dup_str(const char *s)
@@ -213,15 +235,6 @@ extern "C" void fnwin_desktop_resize(void)   /* the display's size is display.cp
     g_desk.wr.bottom = g_desk.rr.bottom = fnvnx_display_h();
     os_unlock(&g_ui_lock);
 }
-extern "C" void fnvnx_window_validate(HWND h)   /* BeginPaint/ValidateRect: the update region becomes empty */
-{
-    os_lock(&g_ui_lock);
-    window *w = wnd_l(h);
-    if (w)
-        w->paint = 0;
-    os_unlock(&g_ui_lock);
-}
-
 /* ---- classes */
 static wclass *find_class_l(LPCSTR n, HINSTANCE inst)   /* the application's class of that module first, then the global ones */
 {
@@ -393,15 +406,210 @@ static void shift_l(window *w, long dx, long dy)
 }
 static void fill_mmi(window *w, fn_mmi *m)
 {
+    int mnx = GetSystemMetrics(34), mny = GetSystemMetrics(35), mxx = GetSystemMetrics(59), mxy = GetSystemMetrics(60);   /* SM_C*MINTRACK, SM_C*MAXTRACK (outside the lock: font metrics) */
     os_lock(&g_ui_lock);
     RECT c = container_l(w);
     long b = ncrule(w->style, w->exstyle, false).l;
     memset(m, 0, sizeof *m);
     m->maxpos.x = m->maxpos.y = -b;
     m->maxsize.x = c.right - c.left + 2 * b; m->maxsize.y = c.bottom - c.top + 2 * b;
-    m->mintrack.x = 112; m->mintrack.y = 27;
-    m->maxtrack = m->maxsize;
+    m->mintrack.x = mnx; m->mintrack.y = mny;
+    m->maxtrack.x = mxx; m->maxtrack.y = mxy;
     os_unlock(&g_ui_lock);
+}
+
+/* ---- update regions (MSDN: InvalidateRect, ValidateRect, GetUpdateRect, BeginPaint, UpdateWindow; reference: win32u painting)
+ * Each window holds an update region: disjoint rectangles in its client coordinates, an erase flag (the background is to
+ * be erased by WM_ERASEBKGND at the next BeginPaint) and a frame flag (WM_NCPAINT is due). A window has `paint` set iff the
+ * region or the frame flag is not empty: that is what makes the queue produce WM_PAINT for it. */
+typedef std::vector<RECT> rlist;
+static bool rc_empty(const RECT &r) { return r.right <= r.left || r.bottom <= r.top; }
+static bool rc_isect(const RECT &a, const RECT &b, RECT *o)
+{
+    o->left = a.left > b.left ? a.left : b.left;
+    o->top = a.top > b.top ? a.top : b.top;
+    o->right = a.right < b.right ? a.right : b.right;
+    o->bottom = a.bottom < b.bottom ? a.bottom : b.bottom;
+    return !rc_empty(*o);
+}
+static void rl_sub(rlist &a, const RECT &s)   /* a = a minus s, still disjoint */
+{
+    rlist o;
+    for (const RECT &e : a) {
+        RECT x;
+        if (!rc_isect(e, s, &x)) { o.push_back(e); continue; }
+        if (e.top < x.top) o.push_back(RECT{ e.left, e.top, e.right, x.top });
+        if (x.bottom < e.bottom) o.push_back(RECT{ e.left, x.bottom, e.right, e.bottom });
+        if (e.left < x.left) o.push_back(RECT{ e.left, x.top, x.left, x.bottom });
+        if (x.right < e.right) o.push_back(RECT{ x.right, x.top, e.right, x.bottom });
+    }
+    a.swap(o);
+}
+static void rl_add(rlist &a, const RECT &r)   /* a = a union r, still disjoint */
+{
+    rlist p;
+    p.push_back(r);
+    for (const RECT &e : a) rl_sub(p, e);
+    a.insert(a.end(), p.begin(), p.end());
+}
+static RECT rl_bbox(const rlist &a)
+{
+    RECT u = { 0, 0, 0, 0 };
+    for (size_t i = 0; i < a.size(); i++) {
+        if (!i) { u = a[0]; continue; }
+        if (a[i].left < u.left) u.left = a[i].left;
+        if (a[i].top < u.top) u.top = a[i].top;
+        if (a[i].right > u.right) u.right = a[i].right;
+        if (a[i].bottom > u.bottom) u.bottom = a[i].bottom;
+    }
+    return u;
+}
+static rlist upd_load_l(window *w) { return rlist(w->upd, w->upd + w->nupd); }
+static void upd_store_l(window *w, const rlist &a)
+{
+    free(w->upd);
+    w->nupd = 0;
+    w->upd = a.empty() ? NULL : (RECT *)malloc(a.size() * sizeof(RECT));
+    if (w->upd) { memcpy(w->upd, a.data(), a.size() * sizeof(RECT)); w->nupd = (int)a.size(); }
+    if (!w->nupd) w->erase = 0;   /* a window with nothing to paint has nothing to erase */
+    w->paint = w->nupd > 0 || w->nc_pending;
+}
+static RECT client_box_l(window *w)   /* the client area in client coordinates */
+{
+    RECT c = client_l(w);
+    return RECT{ 0, 0, c.right - c.left, c.bottom - c.top };
+}
+extern "C" BOOL fnwin_invalidate(HWND h, const RECT *rc, int erase)
+{
+    window *w = wnd_e(h);
+    if (!w) return FALSE;
+    os_lock(&g_ui_lock);
+    RECT box = client_box_l(w), r = box, o;
+    if (rc) r = *rc;
+    rlist a = upd_load_l(w);
+    if (rc_isect(r, box, &o)) {
+        rl_add(a, o);
+        if (erase) w->erase = 1;
+    }
+    int e = w->erase;
+    upd_store_l(w, a);
+    if (w->nupd) w->erase = e;
+    os_unlock(&g_ui_lock);
+    return TRUE;
+}
+extern "C" BOOL fnwin_validate(HWND h, const RECT *rc)
+{
+    window *w = wnd_e(h);
+    if (!w) return FALSE;
+    os_lock(&g_ui_lock);
+    rlist a = upd_load_l(w);
+    if (rc) rl_sub(a, *rc); else a.clear();
+    int e = w->erase;
+    upd_store_l(w, a);
+    if (w->nupd) w->erase = e;
+    os_unlock(&g_ui_lock);
+    return TRUE;
+}
+extern "C" BOOL fnwin_update_rect(HWND h, RECT *bbox, int *erase)
+{
+    window *w = wnd_e(h);
+    if (!w) return FALSE;
+    os_lock(&g_ui_lock);
+    rlist a = upd_load_l(w);
+    RECT box = client_box_l(w), u = { 0, 0, 0, 0 }, o;
+    rlist c;
+    for (const RECT &e : a) if (rc_isect(e, box, &o)) c.push_back(o);
+    if (!c.empty()) u = rl_bbox(c);
+    if (bbox) *bbox = u;
+    if (erase) *erase = !c.empty() && w->erase;
+    os_unlock(&g_ui_lock);
+    return !c.empty();
+}
+extern "C" void fnwin_invalidate_frame(HWND h)
+{
+    os_lock(&g_ui_lock);
+    window *w = wnd_l(h);
+    if (w && w != &g_desk) { w->nc_pending = 1; w->paint = 1; }
+    os_unlock(&g_ui_lock);
+}
+extern "C" int fnwin_take_frame_paint(HWND h)
+{
+    os_lock(&g_ui_lock);
+    window *w = wnd_l(h);
+    int r = w ? w->nc_pending : 0;
+    if (w) { w->nc_pending = 0; w->paint = w->nupd > 0; }
+    os_unlock(&g_ui_lock);
+    return r;
+}
+/* the visible children (WS_CLIPCHILDREN) and the siblings above (WS_CLIPSIBLINGS) are not part of what a window paints */
+extern "C" RECT *fnwin_begin_paint(HWND h, int *n, RECT *bbox, int *erase)
+{
+    os_lock(&g_ui_lock);
+    window *w = wnd_l(h);
+    *n = 0; *erase = 0; *bbox = RECT{ 0, 0, 0, 0 };
+    RECT *out = NULL;
+    if (w) {
+        RECT box = client_box_l(w), cl = client_l(w), o;
+        rlist a = upd_load_l(w), c;
+        for (const RECT &e : a) if (rc_isect(e, box, &o)) c.push_back(o);
+        auto cut = [&](window *k) {
+            if (!(k->style & S_VISIBLE) || (k->style & S_MINIMIZE)) return;
+            RECT kr = { k->wr.left - cl.left, k->wr.top - cl.top, k->wr.right - cl.left, k->wr.bottom - cl.top };
+            rl_sub(c, kr);
+        };
+        if (w->style & 0x02000000u) for (window *k = w->first; k; k = k->next) cut(k);            /* WS_CLIPCHILDREN */
+        if ((w->style & 0x04000000u) && w->parent)                                                   /* WS_CLIPSIBLINGS: the windows above */
+            for (window *k = w->prev; k; k = k->prev) {
+                RECT pc = (w->parent == &g_desk) ? RECT{ 0, 0, 0, 0 } : client_l(w->parent);
+                RECT kr = { k->wr.left - cl.left, k->wr.top - cl.top, k->wr.right - cl.left, k->wr.bottom - cl.top };
+                (void)pc;
+                if ((k->style & S_VISIBLE) && !(k->style & S_MINIMIZE)) rl_sub(c, kr);
+            }
+        *erase = w->erase && !c.empty();
+        if (!c.empty()) {
+            *bbox = rl_bbox(c);
+            out = (RECT *)malloc(c.size() * sizeof(RECT));
+            if (out) { memcpy(out, c.data(), c.size() * sizeof(RECT)); *n = (int)c.size(); }
+        }
+        w->erase = 0;
+        upd_store_l(w, rlist());   /* BeginPaint validates the whole update region */
+    }
+    os_unlock(&g_ui_lock);
+    return out;
+}
+extern "C" void fnvnx_window_validate(HWND h) { fnwin_validate(h, NULL); }   /* BeginPaint/ValidateRect: the update region becomes empty */
+
+/* the window's area that a hide, destroy, move or shrink exposes goes into the update region of what lies beneath: the
+ * windows below it in the z-order (and their descendants) and its parents. r: screen coordinates. */
+static void expose_in_l(window *x, const RECT &r)
+{
+    RECT cl = client_l(x), o, box = { 0, 0, cl.right - cl.left, cl.bottom - cl.top };
+    RECT rr = { r.left - cl.left, r.top - cl.top, r.right - cl.left, r.bottom - cl.top };
+    if (x != &g_desk && (x->style & S_VISIBLE) && rc_isect(rr, box, &o)) {
+        rlist a = upd_load_l(x);
+        rl_add(a, o);
+        upd_store_l(x, a);
+        x->erase = 1;
+    }
+    for (window *k = x->first; k; k = k->next)
+        expose_in_l(k, r);
+}
+static void expose_l(window *w, const RECT &r)
+{
+    for (window *p = w; p && p->parent; p = p->parent) {
+        for (window *s = p->next; s; s = s->next)   /* lower siblings */
+            if (s != &g_desk) expose_in_l(s, r);
+        window *par = p->parent;
+        if (par == &g_desk) break;
+        RECT cl = client_l(par), o, box = { 0, 0, cl.right - cl.left, cl.bottom - cl.top };
+        RECT rr = { r.left - cl.left, r.top - cl.top, r.right - cl.left, r.bottom - cl.top };
+        if ((par->style & S_VISIBLE) && rc_isect(rr, box, &o)) {
+            rlist a = upd_load_l(par);
+            rl_add(a, o);
+            upd_store_l(par, a);
+            par->erase = 1;
+        }
+    }
 }
 
 /* ---- z-order */
@@ -517,6 +725,84 @@ extern "C" int fnwin_toplevels(HWND *out, int max)
     return n;
 }
 
+/* ---- keyboard focus (MSDN SetFocus, GetFocus, WM_SETFOCUS, WM_KILLFOCUS): one window of the process holds it, or none */
+static void activate(window *w);
+extern "C" HWND fnwin_focus_get(void) { os_lock(&g_ui_lock); HWND h = (HWND)g_focus; os_unlock(&g_ui_lock); return h; }
+extern "C" HWND fnwin_key_target(void)
+{
+    os_lock(&g_ui_lock);
+    HWND h = (HWND)(g_focus ? g_focus : g_active);
+    os_unlock(&g_ui_lock);
+    return h;
+}
+/* the focus moves to n (NULL: none); the old holder is told first, and GetFocus is NULL while it is told */
+static void focus_to(window *n)
+{
+    os_lock(&g_ui_lock);
+    window *old = g_focus;
+    if (old == n) { os_unlock(&g_ui_lock); return; }
+    g_focus = NULL;
+    os_unlock(&g_ui_lock);
+    if (old) SendMessageA((HWND)old, 0x0008, (WPARAM)(uintptr_t)n, 0);   /* WM_KILLFOCUS */
+    os_lock(&g_ui_lock);
+    bool ok = n && wnd_l((HWND)n) && !n->destroying && !g_focus;
+    if (ok) g_focus = n;
+    os_unlock(&g_ui_lock);
+    if (ok) SendMessageA((HWND)n, 0x0007, (WPARAM)(uintptr_t)old, 0);   /* WM_SETFOCUS */
+}
+extern "C" void fnwin_focus_suspend(void)   /* the application loses the focus: it is remembered for the way back */
+{
+    os_lock(&g_ui_lock);
+    g_focus_saved = g_focus;
+    os_unlock(&g_ui_lock);
+    focus_to(NULL);
+}
+extern "C" void fnwin_focus_resume(HWND fallback)   /* the application has it back: the window that held it, else fallback */
+{
+    os_lock(&g_ui_lock);
+    window *n = g_focus_saved && wnd_l((HWND)g_focus_saved) ? g_focus_saved : wnd_l(fallback);
+    g_focus_saved = NULL;
+    if (n == &g_desk) n = NULL;
+    os_unlock(&g_ui_lock);
+    if (n) focus_to(n);
+}
+extern "C" HWND SetFocus(HWND h)
+{
+    os_lock(&g_ui_lock);
+    window *old = g_focus;
+    os_unlock(&g_ui_lock);
+    if (!h) { focus_to(NULL); return (HWND)old; }   /* keystrokes are ignored from here */
+    window *w = wnd_e(h);
+    if (!w) return NULL;
+    os_lock(&g_ui_lock);
+    bool ok = w != &g_desk, mine = w->tid == GetCurrentThreadId();
+    window *top = w;
+    for (window *p = w; ok && p && p != &g_desk; p = p->parent) {   /* shown, enabled and not minimized all the way up */
+        top = p;
+        if ((p->style & (S_MINIMIZE | S_DISABLED)) || !(p->style & S_VISIBLE) || p->destroying) ok = false;
+        if (!(p->style & S_CHILD)) break;
+    }
+    os_unlock(&g_ui_lock);
+    if (!ok) { if (w == &g_desk) SetLastError(ERROR_INVALID_PARAMETER); return NULL; }
+    if (!mine) { SetLastError(5); return NULL; }   /* ERROR_ACCESS_DENIED: another thread's queue */
+    os_lock(&g_ui_lock);
+    bool isactive = g_active == top;
+    os_unlock(&g_ui_lock);
+    if (!isactive) activate(top);
+    focus_to(w);
+    os_lock(&g_ui_lock);
+    bool got = g_focus == w;
+    os_unlock(&g_ui_lock);
+    return got ? (HWND)old : NULL;
+}
+extern "C" HWND GetFocus(void)
+{
+    os_lock(&g_ui_lock);
+    HWND h = (g_focus && g_focus->tid == GetCurrentThreadId()) ? (HWND)g_focus : NULL;
+    os_unlock(&g_ui_lock);
+    return h;
+}
+
 /* ---- activation */
 static void activate(window *w)   /* w is a top-level window */
 {
@@ -541,7 +827,12 @@ static void activate(window *w)   /* w is a top-level window */
     os_unlock(&g_ui_lock);
     SendMessageA(hw, M_NCACTIVATE, 1, 0);
     SendMessageA(hw, M_ACTIVATE, 1 | ((st & S_MINIMIZE) ? 0x10000 : 0), (LPARAM)(uintptr_t)ho);
-    SendMessageA(hw, M_SETFOCUS, 0, (LPARAM)(uintptr_t)ho);
+    os_lock(&g_ui_lock);   /* if the focus is held by another window it moves here */
+    window *f = g_focus, *fo = f;
+    while (f && f != &g_desk && f != w && (f->style & S_CHILD)) f = f->parent;
+    bool mine = f == w;
+    os_unlock(&g_ui_lock);
+    if (fo && !mine && !(st & S_MINIMIZE)) focus_to(w);   /* the focus was elsewhere: it follows the activation (DefWindowProc sets it when there was none) */
 }
 static void deactivate(window *w)   /* w stops being able to be active: the next visible top-level window takes over */
 {
@@ -560,6 +851,7 @@ static void deactivate(window *w)   /* w stops being able to be active: the next
     else if (was) {
         SendMessageA((HWND)w, M_NCACTIVATE, 0, 0);
         SendMessageA((HWND)w, M_ACTIVATE, 0, 0);
+        focus_to(NULL);
     }
 }
 static void notify_children(window *w, int show)   /* WM_SHOWWINDOW for the visible children of a window that was shown or hidden */
@@ -633,8 +925,30 @@ static BOOL set_pos(window *w, HWND after, int x, int y, int cx, int cy, UINT fl
     if (fl & P_SHOWWINDOW) w->style |= S_VISIBLE;
     if (fl & P_HIDEWINDOW) w->style &= ~S_VISIBLE;
     bool nowvis = (w->style & S_VISIBLE) != 0;
-    if ((nowvis && !wasvis) || (sized && !(fl & P_NOREDRAW)) || (fl & P_FRAMECHANGED))
-        w->paint = 1;
+    {   /* what the change leaves to be painted: a shown or re-framed window wholly; a resized one the part that is new, or
+         * all of it when the class redraws on that direction (CS_HREDRAW, CS_VREDRAW); the frame whenever it changed */
+        long ow = oc.right - oc.left, oh = oc.bottom - oc.top, cw = nc.right - nc.left, ch = nc.bottom - nc.top;
+        UINT cst = w->cls->style;
+        bool whole = (nowvis && !wasvis) || (fl & P_FRAMECHANGED);
+        if (!whole && sized && !(fl & P_NOREDRAW)) whole = ((cst & 2) && cw != ow) || ((cst & 1) && ch != oh);
+        rlist a = upd_load_l(w);
+        if (whole) { if (cw > 0 && ch > 0) rl_add(a, RECT{ 0, 0, cw, ch }); }
+        else if (sized && !(fl & P_NOREDRAW)) {
+            if (cw > ow && ch > 0) rl_add(a, RECT{ ow, 0, cw, ch });
+            if (ch > oh && cw > 0) rl_add(a, RECT{ 0, oh, cw, ch });
+        }
+        int e = w->erase || !a.empty();
+        upd_store_l(w, a);
+        w->erase = w->nupd ? e : 0;
+        if ((nowvis && !wasvis) || sized || (fl & P_FRAMECHANGED)) { w->nc_pending = 1; w->paint = 1; }
+        if (wasvis && !nowvis) expose_l(w, old);   /* what it covered is exposed: the windows beneath repaint it */
+        else if (nowvis && (moved || sized)) {
+            rlist gone;
+            gone.push_back(old);
+            rl_sub(gone, w->wr);
+            for (const RECT &g : gone) expose_l(w, g);
+        }
+    }
     bool child = (w->style & S_CHILD) != 0, noact = (w->exstyle & X_NOACTIVATE) != 0;
     RECT nwr = w->wr;
     os_unlock(&g_ui_lock);
@@ -720,6 +1034,17 @@ extern "C" HWND CreateWindowExA(DWORD ex, LPCSTR cls, LPCSTR title, DWORD style,
         fn_mmi mmi;
         fill_mmi(win, &mmi);
         SendMessageA(hw, M_GETMINMAXINFO, 0, (LPARAM)(uintptr_t)&mmi);
+        if ((style & S_THICK) || !(style & S_POPUP)) {   /* an overlapped or sizing-border window is created within its track sizes */
+            os_lock(&g_ui_lock);
+            long cw = win->wr.right - win->wr.left, ch = win->wr.bottom - win->wr.top;
+            if (cw > mmi.maxtrack.x) cw = mmi.maxtrack.x;
+            if (ch > mmi.maxtrack.y) ch = mmi.maxtrack.y;
+            if (cw < mmi.mintrack.x) cw = mmi.mintrack.x;
+            if (ch < mmi.mintrack.y) ch = mmi.mintrack.y;
+            win->wr.right = win->wr.left + cw; win->wr.bottom = win->wr.top + ch;
+            win->rr = win->wr;
+            os_unlock(&g_ui_lock);
+        }
     }
     ok = SendMessageA(hw, M_NCCREATE, 0, (LPARAM)(uintptr_t)&cs);
     if (!ok) {   /* only WM_NCDESTROY follows a refused WM_NCCREATE */
@@ -770,6 +1095,12 @@ static void destroy_rec(window *w, bool skip_destroy)
     os_unlock(&g_ui_lock);
     if (vis)
         set_pos(w, NULL, 0, 0, 0, 0, P_HIDEWINDOW | P_NOZORDER | P_NOMOVE | P_NOSIZE | P_NOACTIVATE, -1);
+    os_lock(&g_ui_lock);   /* the focus leaves the window (and the ones inside it) before it is destroyed */
+    bool hasfocus = false;
+    for (window *f = g_focus; f && f != &g_desk; f = f->parent)
+        if (f == w) { hasfocus = true; break; }
+    os_unlock(&g_ui_lock);
+    if (hasfocus) focus_to(NULL);
     if (!skip_destroy)
         SendMessageA(hw, WM_DESTROY, 0, 0);
     for (;;) {   /* the children go the same way, inside the parent's WM_DESTROY .. WM_NCDESTROY */
@@ -792,12 +1123,14 @@ static void destroy_rec(window *w, bool skip_destroy)
     g_all_tail = NULL;
     for (window *p = g_all; p; p = p->all) g_all_tail = p;
     if (g_active == w) g_active = NULL;
+    if (g_focus == w) g_focus = NULL;
+    if (g_focus_saved == w) g_focus_saved = NULL;
     if (g_capture == w) g_capture = NULL;   /* a destroyed window loses the capture */
     w->cls->nwin--;
     os_unlock(&g_ui_lock);
     fnmq_purge(hw);
     w->magic = 0;
-    free(w->text); free(w->extra);
+    free(w->text); free(w->extra); free(w->upd);
     free(w);
 }
 
@@ -946,131 +1279,758 @@ extern "C" HWND FindWindowA(LPCSTR cls, LPCSTR title)
     return r;
 }
 
-/* WM_NCHITTEST: HTNOWHERE outside the window, HTCLIENT in the client area; in the frame the edge or corner of a
- * sizing border, the caption, the menu bar, else HTBORDER */
+/* ---- DefWindowProc: ONE table, message -> rule. Source of each rule: MSDN's default action for the message and the
+ * reference's default_window_proc (win32u defwnd.c, "ref"). A message that has no documented default action is not in the
+ * table and answers 0: that is the contract's own answer (MSDN: "if an application processes this message, it should
+ * return zero"; WM_SETFONT/WM_GETFONT are handled by controls, never by DefWindowProc), the one explicit default of
+ * def_dispatch(). Environment: no IME (ENV: SM_IMMENABLED 0), no menu or scroll-bar subsystem (the window's frame has no
+ * surface of its own: the platform presents client surfaces), one keyboard layout (ENV I4). */
+enum { HT_NOWHERE = 0, HT_CLIENT = 1, HT_CAPTION = 2, HT_SYSMENU = 3, HT_MENU = 5, HT_HSCROLL = 6, HT_VSCROLL = 7, HT_MINBUTTON = 8,
+       HT_MAXBUTTON = 9, HT_LEFT = 10, HT_RIGHT = 11, HT_TOP = 12, HT_TOPLEFT = 13, HT_TOPRIGHT = 14, HT_BOTTOM = 15,
+       HT_BOTTOMLEFT = 16, HT_BOTTOMRIGHT = 17, HT_BORDER = 18, HT_SIZE = 4, HT_CLOSE = 20 };
+enum { SC_SIZE_ = 0xF000, SC_MOVE_ = 0xF010, SC_MINIMIZE_ = 0xF020, SC_MAXIMIZE_ = 0xF030, SC_NEXTWINDOW_ = 0xF040,
+       SC_PREVWINDOW_ = 0xF050, SC_CLOSE_ = 0xF060, SC_VSCROLL_ = 0xF070, SC_HSCROLL_ = 0xF080, SC_MOUSEMENU_ = 0xF090,
+       SC_KEYMENU_ = 0xF100, SC_ARRANGE_ = 0xF110, SC_RESTORE_ = 0xF120, SC_TASKLIST_ = 0xF130, SC_SCREENSAVE_ = 0xF140,
+       SC_HOTKEY_ = 0xF150 };
+#define S_MINIMIZEBOX 0x00020000u
+#define S_MAXIMIZEBOX 0x00010000u
+#define S_SYSMENU 0x00080000u
+#define S_HSCROLL 0x00100000u
+#define S_VSCROLL 0x00200000u
+#define X_TOOLWINDOW 0x80u
+#define X_ACCEPTFILES 0x10u
+#define X_LAYERED 0x80000u
+#define C_PARENTDC 0x80u
+#define C_NOCLOSE 0x200u
+
+static bool g_menu_sys_key, g_f10_key;   /* the Alt / F10 press-and-release state of the thread's keyboard (ref menu_sys_key, f10_key) */
+static bool win_has_icon_l(window *w) { return w->icon_small || w->icon_big || w->cls->icon || w->cls->iconsm; }
+static window *parent_l(window *w)   /* ref get_parent: the parent of a child, the owner of a popup */
+{
+    if (w->style & S_CHILD) return w->parent == &g_desk ? NULL : w->parent;
+    return w->owner;
+}
+static LRESULT send_parent(window *w, UINT m, WPARAM wp, LPARAM lp)
+{
+    os_lock(&g_ui_lock);
+    window *p = parent_l(w);
+    os_unlock(&g_ui_lock);
+    return p ? SendMessageA((HWND)p, m, wp, lp) : 0;
+}
+static HWND root_of(window *w)   /* GA_ROOT: the top-level ancestor through parents (not owners) */
+{
+    os_lock(&g_ui_lock);
+    while (w->parent && w->parent != &g_desk && (w->style & S_CHILD)) w = w->parent;
+    os_unlock(&g_ui_lock);
+    return (HWND)w;
+}
+static bool is_iconic_w(window *w) { os_lock(&g_ui_lock); bool r = (w->style & S_MINIMIZE) != 0; os_unlock(&g_ui_lock); return r; }
+
+/* WM_NCHITTEST (ref handle_nc_hit_test): the frame decides, from the outside in: sizing border, caption with its buttons,
+ * menu bar, scroll bars */
+static bool in_rect(const RECT &r, int x, int y);
 static int hit_test(window *w, int x, int y)
 {
     os_lock(&g_ui_lock);
     RECT r = w->wr, c = client_l(w);
-    DWORD st = w->style;
-    nc_t n = ncrule(st, w->exstyle, false);
+    DWORD st = w->style, ex = w->exstyle;
+    bool menu = w->hasmenu != 0, icon = win_has_icon_l(w);
     os_unlock(&g_ui_lock);
-    if (!in_rect(r, x, y))
-        return 0;
-    if (in_rect(c, x, y) || w == &g_desk)
-        return 1;
-    int cap = (st & S_CAPTION) == S_CAPTION ? GetSystemMetrics(4) : 0, ft = n.t - cap;
-    bool l = x < r.left + n.l, rt = x >= r.right - n.r, t = y < r.top + ft, b = y >= r.bottom - n.b;
+    if (!in_rect(r, x, y)) return HT_NOWHERE;
+    if (in_rect(c, x, y) || w == &g_desk) return HT_CLIENT;
+    auto infl = [&](int dx, int dy) { r.left += dx; r.right -= dx; r.top += dy; r.bottom -= dy; };
     if (st & S_THICK) {
-        if (t && l) return 13;
-        if (t && rt) return 14;
-        if (b && l) return 16;
-        if (b && rt) return 17;
-        if (l) return 10;
-        if (rt) return 11;
-        if (t) return 12;
-        if (b) return 15;
+        int fx = GetSystemMetrics(32), fy = GetSystemMetrics(33), sx = GetSystemMetrics(30), sy = GetSystemMetrics(31);
+        infl(fx, fy);
+        if (!in_rect(r, x, y)) {
+            if (y < r.top) return x < r.left + sx ? HT_TOPLEFT : x >= r.right - sx ? HT_TOPRIGHT : HT_TOP;
+            if (y >= r.bottom) return x < r.left + sx ? HT_BOTTOMLEFT : x >= r.right - sx ? HT_BOTTOMRIGHT : HT_BOTTOM;
+            if (x < r.left) return y < r.top + sy ? HT_TOPLEFT : y >= r.bottom - sy ? HT_BOTTOMLEFT : HT_LEFT;
+            if (x >= r.right) return y < r.top + sy ? HT_TOPRIGHT : y >= r.bottom - sy ? HT_BOTTOMRIGHT : HT_RIGHT;
+        }
+    } else {
+        if ((ex & X_DLGMODAL) || (st & S_DLGFRAME)) infl(GetSystemMetrics(7), GetSystemMetrics(8));
+        else if (st & S_BORDER) infl(GetSystemMetrics(5), GetSystemMetrics(6));
+        if (!in_rect(r, x, y)) return HT_BORDER;
     }
-    if (!l && !rt && !t && !b && y < c.top)
-        return y < r.top + ft + cap ? 2 /* HTCAPTION */ : 5 /* HTMENU */;
-    return 18;   /* HTBORDER */
+    if ((st & S_CAPTION) == S_CAPTION) {
+        r.top += ((ex & X_TOOLWINDOW) ? GetSystemMetrics(51) : GetSystemMetrics(4)) - 1;
+        if (!in_rect(r, x, y)) {
+            bool minmax = (st & S_SYSMENU) && (st & (S_MINIMIZEBOX | S_MAXIMIZEBOX));
+            bool rtl = (ex & 0x400000u) != 0;
+            int cap = GetSystemMetrics(4), bx = GetSystemMetrics(30);
+            long &inner = rtl ? r.right : r.left;   /* the system-menu side */
+            long &outer = rtl ? r.left : r.right;   /* the buttons' side */
+            auto beyond = [&](int d) { return rtl ? (outer += d, (long)x < outer) : (outer -= d, (long)x > outer); };
+            if ((st & S_SYSMENU) && !(ex & X_TOOLWINDOW) && icon) {
+                inner += rtl ? -(cap - 1) : cap - 1;
+                if (rtl ? (long)x > inner : (long)x < inner) return HT_SYSMENU;
+            }
+            if ((st & S_SYSMENU) && beyond(cap)) return HT_CLOSE;
+            if (minmax && !(ex & X_TOOLWINDOW)) {
+                if (beyond(bx)) return HT_MAXBUTTON;
+                if (beyond(bx)) return HT_MINBUTTON;
+            }
+            return HT_CAPTION;
+        }
+    }
+    if (menu && y < c.top && x >= c.left && x < c.right) return HT_MENU;
+    RECT sc = c;
+    bool left = (ex & 0x4000u) != 0;   /* WS_EX_LEFTSCROLLBAR */
+    if (st & S_VSCROLL) {
+        if (left) sc.left -= GetSystemMetrics(2); else sc.right += GetSystemMetrics(2);
+        if (in_rect(sc, x, y)) return HT_VSCROLL;
+    }
+    if (st & S_HSCROLL) {
+        sc.bottom += GetSystemMetrics(3);
+        if (in_rect(sc, x, y)) {
+            if ((st & S_VSCROLL) && (left ? x <= sc.left + GetSystemMetrics(2) : x >= sc.right - GetSystemMetrics(2))) return HT_SIZE;
+            return HT_HSCROLL;
+        }
+    }
+    return HT_NOWHERE;   /* a frame the window drew itself */
+}
+
+/* ---- shared pieces of the rules */
+static void set_text_l(window *w, const char *t)
+{
+    char *n = dup_str(t ? t : "");
+    if (!n) return;
+    os_lock(&g_ui_lock);
+    free(w->text);
+    w->text = n;
+    os_unlock(&g_ui_lock);
+}
+static void set_style_bits(window *w, DWORD set, DWORD clr)
+{
+    os_lock(&g_ui_lock);
+    w->style = (w->style | set) & ~clr;
+    os_unlock(&g_ui_lock);
+}
+/* WM_SHOWWINDOW to the owned pop-ups of a window that is minimized, restored or maximized (ref show_owned_popups) */
+static void show_owned_popups(window *w, bool show)
+{
+    HWND list[64];
+    int n = 0;
+    os_lock(&g_ui_lock);
+    for (window *c = g_all; c && n < 64; c = c->all)
+        if (c->owner == w && !c->destroying && (show ? c->owned_hidden : (c->style & S_VISIBLE) != 0)) list[n++] = (HWND)c;
+    os_unlock(&g_ui_lock);
+    for (int i = 0; i < n; i++) SendMessageA(list[i], M_SHOWWINDOW, show, show ? 3 /* SW_PARENTOPENING */ : 1 /* SW_PARENTCLOSING */);
+}
+/* the modal loop of SC_MOVE / SC_SIZE (MSDN WM_SYSCOMMAND, WM_ENTERSIZEMOVE, WM_MOVING, WM_SIZING): the window follows the
+ * pointer (touch or mouse) or the arrow keys until the button is released or Enter is pressed; Escape puts it back */
+extern "C" int fnmq_get_message(MSG *m, HWND f, UINT lo, UINT hi);
+static RECT moved_rect(int op, int dir, RECT o, long dx, long dy)
+{
+    if (op == SC_MOVE_) { o.left += dx; o.right += dx; o.top += dy; o.bottom += dy; return o; }
+    /* WMSZ_LEFT 1, RIGHT 2, TOP 3, TOPLEFT 4, TOPRIGHT 5, BOTTOM 6, BOTTOMLEFT 7, BOTTOMRIGHT 8 */
+    if (dir == 1 || dir == 4 || dir == 7) o.left += dx;
+    if (dir == 2 || dir == 5 || dir == 8) o.right += dx;
+    if (dir == 3 || dir == 4 || dir == 5) o.top += dy;
+    if (dir == 6 || dir == 7 || dir == 8) o.bottom += dy;
+    return o;
+}
+static void sys_size_move(window *w, WPARAM cmd, LPARAM lp)
+{
+    HWND h = (HWND)w;
+    int op = (int)(cmd & 0xFFF0), dir = (int)(cmd & 0xF);
+    os_lock(&g_ui_lock);
+    DWORD st = w->style;
+    RECT orig = w->wr;
+    long ox, oy;
+    origin_l(w->parent, &ox, &oy);
+    os_unlock(&g_ui_lock);
+    if ((st & (S_MAXIMIZE | S_MINIMIZE)) || (op == SC_SIZE_ && !(st & S_THICK))) return;   /* only a normal window moves, only a sizing border sizes */
+    POINT start = { (long)(short)(lp & 0xFFFF), (long)(short)((lp >> 16) & 0xFFFF) };
+    if (!lp) GetCursorPos(&start);
+    SendMessageA(h, 0x0231, 0, 0);   /* WM_ENTERSIZEMOVE */
+    SetCapture(h);
+    bool done = false, cancel = false;
+    long pdx = 0, pdy = 0, kx = 0, ky = 0;
+    while (!done) {
+        MSG m;
+        if (!fnmq_get_message(&m, NULL, 0, 0)) break;
+        bool upd = false;
+        if (m.message == 0x0200) {   /* WM_MOUSEMOVE */
+            POINT p = { (long)(short)(m.lParam & 0xFFFF), (long)(short)((m.lParam >> 16) & 0xFFFF) };
+            ClientToScreen(m.hwnd, &p);
+            pdx = p.x - start.x; pdy = p.y - start.y;
+            upd = true;
+        } else if (m.message == 0x0202 || m.message == 0x0205 || m.message == 0x0208) {   /* a button is released */
+            done = true;
+        } else if (m.message == 0x0100) {   /* WM_KEYDOWN */
+            long sx = m.wParam == 0x25 ? -8 : m.wParam == 0x27 ? 8 : 0, sy = m.wParam == 0x26 ? -8 : m.wParam == 0x28 ? 8 : 0;
+            if (m.wParam == 0x0D) done = true;
+            else if (m.wParam == 0x1B) done = cancel = true;
+            else if (sx || sy) {
+                if (op == SC_SIZE_ && dir == 0) { dir = sx < 0 ? 1 : sx > 0 ? 2 : sy < 0 ? 3 : 6; }   /* the first arrow chooses the edge */
+                else { kx += sx; ky += sy; upd = true; }
+            }
+        } else {
+            TranslateMessage(&m);
+            DispatchMessageA(&m);
+        }
+        if (!upd) continue;
+        RECT n = moved_rect(op, dir, orig, pdx + kx, pdy + ky);
+        SendMessageA(h, op == SC_MOVE_ ? 0x0216 : 0x0214, op == SC_MOVE_ ? 0 : (WPARAM)dir, (LPARAM)(uintptr_t)&n);   /* WM_MOVING / WM_SIZING: the window may edit it */
+        SetWindowPos(h, NULL, (int)(n.left - ox), (int)(n.top - oy), (int)(n.right - n.left), (int)(n.bottom - n.top), 0x4 | 0x10);
+    }
+    ReleaseCapture();
+    if (cancel)
+        SetWindowPos(h, NULL, (int)(orig.left - ox), (int)(orig.top - oy), (int)(orig.right - orig.left), (int)(orig.bottom - orig.top), 0x4 | 0x10);
+    SendMessageA(h, 0x0232, 0, 0);   /* WM_EXITSIZEMOVE */
+}
+/* the caption button that was pressed acts when the pointer is released on it (ref track_min_max_box, track_close_button) */
+static void track_caption_button(window *w, int ht, LPARAM lp)
+{
+    HWND h = (HWND)w;
+    SetCapture(h);
+    int at = ht;
+    MSG m;
+    while (fnmq_get_message(&m, NULL, 0x200, 0x20E)) {
+        POINT p = { (long)(short)(m.lParam & 0xFFFF), (long)(short)((m.lParam >> 16) & 0xFFFF) };
+        ClientToScreen(m.hwnd, &p);
+        if (m.message == 0x0200) at = hit_test(w, (int)p.x, (int)p.y);
+        else if (m.message == 0x0202) { at = hit_test(w, (int)p.x, (int)p.y); break; }
+    }
+    ReleaseCapture();
+    if (at != ht) return;
+    os_lock(&g_ui_lock);
+    bool max = (w->style & S_MAXIMIZE) != 0;
+    os_unlock(&g_ui_lock);
+    UINT sc = ht == HT_MINBUTTON ? (is_iconic_w(w) ? SC_RESTORE_ : SC_MINIMIZE_) : ht == HT_MAXBUTTON ? (max ? SC_RESTORE_ : SC_MAXIMIZE_) : SC_CLOSE_;
+    SendMessageA(h, 0x0112, sc, lp);
+}
+
+/* WM_SYSCOMMAND (MSDN, ref handle_sys_command) */
+static LRESULT def_syscommand(window *w, HWND h, WPARAM wp, LPARAM lp)
+{
+    os_lock(&g_ui_lock);
+    bool disabled = (w->style & S_DISABLED) != 0;
+    os_unlock(&g_ui_lock);
+    if (disabled) return 0;
+    if (fnmq_hook(5 /* WH_CBT */, 8 /* HCBT_SYSCOMMAND */, wp, lp)) return 0;
+    switch (wp & 0xFFF0) {
+    case SC_SIZE_: case SC_MOVE_: sys_size_move(w, wp, lp); break;
+    case SC_MINIMIZE_: show_owned_popups(w, false); ShowWindow(h, 6 /* SW_MINIMIZE */); break;
+    case SC_MAXIMIZE_: if (is_iconic_w(w)) show_owned_popups(w, true); ShowWindow(h, 3 /* SW_MAXIMIZE */); break;
+    case SC_CLOSE_: return SendMessageA(h, WM_CLOSE, 0, 0);
+    case SC_RESTORE_: if (is_iconic_w(w)) show_owned_popups(w, true); ShowWindow(h, 9 /* SW_RESTORE */); break;
+    case SC_VSCROLL_: case SC_HSCROLL_: case SC_MOUSEMENU_: case SC_KEYMENU_:
+        break;   /* tracked by the menu and scroll-bar subsystems; the platform has none, so a window has no menu or scroll bar to track */
+    case SC_TASKLIST_: case SC_SCREENSAVE_: return 1;   /* ref: the shell's, answered 1 */
+    case SC_HOTKEY_: case SC_ARRANGE_: case SC_NEXTWINDOW_: case SC_PREVWINDOW_: break;   /* ref: a one-window session has nothing to switch */
+    default: return 1;   /* a command of the application's own: "handle on client side" */
+    }
+    return 0;
+}
+
+static void validate_tree(HWND h)
+{
+    HWND kids[256];
+    int n = 0;
+    os_lock(&g_ui_lock);
+    window *w = wnd_l(h);
+    if (w) for (window *c = w->first; c && n < 256; c = c->next) kids[n++] = (HWND)c;
+    os_unlock(&g_ui_lock);
+    fnwin_validate(h, NULL);
+    for (int i = 0; i < n; i++) validate_tree(kids[i]);
+}
+static void foreach_child(window *w, void (*fn)(HWND, UINT, WPARAM, LPARAM), UINT m, WPARAM wp, LPARAM lp)
+{
+    HWND kids[256];
+    int n = 0;
+    os_lock(&g_ui_lock);
+    for (window *c = w->first; c && n < 256; c = c->next) kids[n++] = (HWND)c;
+    os_unlock(&g_ui_lock);
+    for (int i = 0; i < n; i++) fn(kids[i], m, wp, lp);
+}
+static void send_to(HWND h, UINT m, WPARAM wp, LPARAM lp) { SendMessageA(h, m, wp, lp); }
+
+/* WM_ERASEBKGND / WM_ICONERASEBKGND: the class brush fills the DC's clip box (the client area for CS_PARENTDC) */
+static LRESULT def_erase(window *w, HWND h, WPARAM wp, LPARAM)
+{
+    os_lock(&g_ui_lock);
+    HBRUSH bg = w->cls->bg;
+    bool pdc = (w->cls->style & C_PARENTDC) != 0;
+    os_unlock(&g_ui_lock);
+    if (!bg) return 0;
+    RECT r;
+    if (pdc) GetClientRect(h, &r);
+    else if (!gdi_dc_clipbox((void *)(uintptr_t)wp, &r)) return 1;   /* no usable DC: nothing to fill (ref: still 1) */
+    gdi_fill_rect((void *)(uintptr_t)wp, &r, bg);
+    return 1;
+}
+/* WM_CTLCOLOR*: the colours of the reference's system palette for the control, and the brush that goes with them */
+static LRESULT def_ctlcolor(HDC dc, unsigned type /* 0 msgbox 1 edit 2 listbox 3 button 4 dialog 5 scrollbar 6 static */)
+{
+    if (type == 5) {
+        SetTextColor(dc, gdi_syscolor(15));   /* COLOR_3DFACE */
+        SetBkColor(dc, gdi_syscolor(20));     /* COLOR_3DHILIGHT */
+        return (LRESULT)(uintptr_t)gdi_sys_brush(0);   /* COLOR_SCROLLBAR (the reference dithers it with a pattern brush; the platform has none) */
+    }
+    SetTextColor(dc, gdi_syscolor(8));   /* COLOR_WINDOWTEXT */
+    if (type == 1 || type == 2) { SetBkColor(dc, gdi_syscolor(5)); return (LRESULT)(uintptr_t)gdi_sys_brush(5); }   /* COLOR_WINDOW */
+    SetBkColor(dc, gdi_syscolor(15));
+    return (LRESULT)(uintptr_t)gdi_sys_brush(15);                                                                  /* COLOR_3DFACE */
+}
+static LRESULT def_paint(window *, HWND h, WPARAM, LPARAM)
+{
+    alignas(8) uint8_t ps[128];   /* a PAINTSTRUCT of the build */
+    if (BeginPaint(h, ps)) EndPaint(h, ps);
+    return 0;
+}
+static LRESULT def_setcursor(window *w, HWND h, WPARAM wp, LPARAM lp)
+{
+    os_lock(&g_ui_lock);
+    bool child = (w->style & S_CHILD) != 0;
+    window *par = (child && w->parent != &g_desk) ? w->parent : NULL;
+    HCURSOR cls = w->cls->cursor;
+    os_unlock(&g_ui_lock);
+    unsigned ht = (unsigned)(lp & 0xFFFF);
+    if (par && (ht < HT_LEFT || ht > HT_BOTTOMRIGHT) && SendMessageA((HWND)par, 0x20, wp, lp)) return TRUE;   /* the parent first, except on the sizing border */
+    HCURSOR c = NULL;
+    switch (ht) {
+    case HT_CLIENT: c = cls; break;
+    case HT_LEFT: case HT_RIGHT: c = LoadCursorA(NULL, (LPCSTR)32644); break;               /* IDC_SIZEWE */
+    case HT_TOP: case HT_BOTTOM: c = LoadCursorA(NULL, (LPCSTR)32645); break;               /* IDC_SIZENS */
+    case HT_TOPLEFT: case HT_BOTTOMRIGHT: c = LoadCursorA(NULL, (LPCSTR)32642); break;      /* IDC_SIZENWSE */
+    case HT_TOPRIGHT: case HT_BOTTOMLEFT: c = LoadCursorA(NULL, (LPCSTR)32643); break;      /* IDC_SIZENESW */
+    default: c = fnmq_arrow_cursor(); break;                                                 /* IDC_ARROW */
+    }
+    (void)h;
+    if (c) fnmq_set_cursor(c);
+    return c != NULL;
+}
+struct fn_helpinfo { UINT cb; int ctx, ctl; HANDLE item; ULONG_PTR ctxid; POINT pos; };
+#define LPOINT(x, y) ((LPARAM)(((uint32_t)(x) & 0xFFFF) | ((uint32_t)(y) << 16)))
+
+/* RDW_ERASENOW: a pending background erase is done now, to the window's DC clipped to its update region */
+extern "C" void gdi_dc_set_clip(void *hd, const RECT *r, int n);
+extern "C" void fnwin_erase_now(HWND h, bool children)
+{
+    window *w = wnd(h);
+    if (!w) return;
+    os_lock(&g_ui_lock);
+    RECT box = client_box_l(w), o;
+    rlist a = upd_load_l(w), c;
+    for (const RECT &e : a) if (rc_isect(e, box, &o)) c.push_back(o);
+    bool pend = w->erase && !c.empty();
+    if (pend) w->erase = 0;
+    os_unlock(&g_ui_lock);
+    if (pend) {
+        HDC dc = GetDC(h);
+        if (dc) {
+            gdi_dc_set_clip(dc, c.data(), (int)c.size());
+            SendMessageA(h, 0x0014, (WPARAM)(uintptr_t)dc, 0);   /* WM_ERASEBKGND */
+            ReleaseDC(h, dc);
+        }
+    }
+    if (children) {
+        HWND kids[256];
+        int n = 0;
+        os_lock(&g_ui_lock);
+        for (window *k = w->first; k && n < 256; k = k->next) kids[n++] = (HWND)k;
+        os_unlock(&g_ui_lock);
+        for (int i = 0; i < n; i++) fnwin_erase_now(kids[i], true);
+    }
+}
+
+static LRESULT def_dblclick(window *w, HWND h, WPARAM hit, LPARAM lp)   /* ref handle_nc_button_dbl_click */
+{
+    if (is_iconic_w(w)) { SendMessageA(h, 0x0112, SC_RESTORE_, lp); return 0; }
+    os_lock(&g_ui_lock);
+    DWORD st = w->style;
+    bool noclose = (w->cls->style & C_NOCLOSE) != 0;
+    os_unlock(&g_ui_lock);
+    switch ((int)hit) {
+    case HT_CAPTION:
+        if (st & S_MAXIMIZEBOX) SendMessageA(h, 0x0112, (st & S_MAXIMIZE) ? SC_RESTORE_ : SC_MAXIMIZE_, lp);
+        break;
+    case HT_SYSMENU:   /* the system menu's Close item is there for a WS_SYSMENU window and enabled unless the class is CS_NOCLOSE */
+        if ((st & S_SYSMENU) && !noclose) SendMessageA(h, 0x0112, SC_CLOSE_, lp);
+        break;
+    case HT_HSCROLL: SendMessageA(h, 0x0112, SC_HSCROLL_ + HT_HSCROLL, lp); break;
+    case HT_VSCROLL: SendMessageA(h, 0x0112, SC_VSCROLL_ + HT_VSCROLL, lp); break;
+    default: break;
+    }
+    return 0;
+}
+static LRESULT def_nclbuttondown(window *w, HWND h, WPARAM wp, LPARAM lp)   /* ref handle_nc_lbutton_down */
+{
+    os_lock(&g_ui_lock);
+    DWORD st = w->style;
+    os_unlock(&g_ui_lock);
+    switch ((int)wp) {
+    case HT_CAPTION: {
+        HWND top = root_of(w);
+        BOOL ok = SetForegroundWindow(top);
+        if (ok || GetActiveWindow() == top) SendMessageA(h, 0x0112, SC_MOVE_ + HT_CAPTION, lp);
+        break; }
+    case HT_SYSMENU: if (st & S_SYSMENU) SendMessageA(h, 0x0112, SC_MOUSEMENU_ + HT_SYSMENU, lp); break;
+    case HT_MENU: SendMessageA(h, 0x0112, SC_MOUSEMENU_, lp); break;
+    case HT_HSCROLL: SendMessageA(h, 0x0112, SC_HSCROLL_ + HT_HSCROLL, lp); break;
+    case HT_VSCROLL: SendMessageA(h, 0x0112, SC_VSCROLL_ + HT_VSCROLL, lp); break;
+    case HT_MINBUTTON: case HT_MAXBUTTON: case HT_CLOSE: track_caption_button(w, (int)wp, lp); break;
+    case HT_LEFT: case HT_RIGHT: case HT_TOP: case HT_TOPLEFT: case HT_TOPRIGHT: case HT_BOTTOM: case HT_BOTTOMLEFT: case HT_BOTTOMRIGHT:
+        SendMessageA(h, 0x0112, SC_SIZE_ + wp - (HT_LEFT - 1), lp);   /* SC_SIZE + WMSZ_* */
+        break;
+    default: break;   /* HTBORDER, and the rest: nothing */
+    }
+    return 0;
+}
+static LRESULT def_ncrbuttondown(window *w, HWND h, WPARAM wp, LPARAM)   /* ref handle_nc_rbutton_down */
+{
+    if (wp != HT_CAPTION && wp != HT_SYSMENU) return 0;
+    SetCapture(h);
+    MSG m;
+    int ht = (int)wp;
+    memset(&m, 0, sizeof m);
+    while (fnmq_get_message(&m, NULL, 0x200, 0x20E))
+        if (m.message == 0x0205) { ht = hit_test(w, (int)m.pt.x, (int)m.pt.y); break; }
+    ReleaseCapture();
+    if (ht == HT_CAPTION || ht == HT_SYSMENU) SendMessageA(h, 0x007B, (WPARAM)(uintptr_t)h, LPOINT(m.pt.x, m.pt.y));
+    return 0;
+}
+static LRESULT def_sysmenu_key(window *w, HWND h, WPARAM wp, LPARAM lp)   /* ref WM_SYSKEYDOWN */
+{
+    bool menu_key = wp == 0x12 || wp == 0xA4 || wp == 0xA5;   /* VK_MENU, VK_LMENU, VK_RMENU */
+    if ((lp >> 29) & 1) {   /* KEYDATA_ALT */
+        g_menu_sys_key = menu_key && !g_menu_sys_key;
+        g_f10_key = false;
+        if (wp == 0x73) {   /* VK_F4: close the top-level window */
+            HWND top = root_of(w);
+            window *t = wnd(top);
+            if (t && !(t->cls->style & C_NOCLOSE)) PostMessageA(top, 0x0112, SC_CLOSE_, 0);
+        }
+    } else if (wp == 0x79) {   /* VK_F10 */
+        if (GetKeyState(0x10) & 0x8000) SendMessageA(h, 0x007B, (WPARAM)(uintptr_t)h, (LPARAM)-1);
+        g_f10_key = true;
+    } else if (wp == 0x1B && (GetKeyState(0x10) & 0x8000))
+        SendMessageA(h, 0x0112, SC_KEYMENU_, ' ');
+    return 0;
+}
+static LRESULT def_keyup(window *w, HWND, WPARAM wp, LPARAM)   /* ref WM_KEYUP, WM_SYSKEYUP: Alt or F10 pressed and released */
+{
+    if (((wp == 0x12 || wp == 0xA4 || wp == 0xA5) && g_menu_sys_key) || (wp == 0x79 && g_f10_key))
+        SendMessageA(root_of(w), 0x0112, SC_KEYMENU_, 0);
+    g_menu_sys_key = g_f10_key = false;
+    return 0;
+}
+static LRESULT def_syschar(window *w, HWND h, WPARAM wp, LPARAM lp)   /* ref WM_SYSCHAR */
+{
+    g_menu_sys_key = false;
+    if (wp == '\r' && is_iconic_w(w)) { PostMessageA(h, 0x0112, SC_RESTORE_, 0); return 0; }
+    if (((lp >> 29) & 1) && wp) {
+        if (wp == '\t' || wp == 0x1B) return 0;
+        if (wp == ' ' && (w->style & S_CHILD)) send_parent(w, 0x0106, wp, lp);
+        else SendMessageA(h, 0x0112, SC_KEYMENU_, wp);
+    }
+    return 0;   /* a Ctrl-Esc or an unhandled character would beep: the platform has no system sounds */
+}
+static LRESULT def_rbuttonup(window *w, HWND h, WPARAM, LPARAM lp)
+{
+    POINT p = { (long)(short)(lp & 0xFFFF), (long)(short)((lp >> 16) & 0xFFFF) };
+    ClientToScreen(h, &p);
+    SendMessageA(h, 0x007B, (WPARAM)(uintptr_t)h, LPOINT(p.x, p.y));   /* WM_CONTEXTMENU */
+    (void)w;
+    return 0;
+}
+static LRESULT def_xbuttonup(window *, HWND h, WPARAM wp, LPARAM)
+{
+    unsigned which = (unsigned)((wp >> 16) & 0xFFFF);
+    if (which == 1 || which == 2)   /* XBUTTON1, XBUTTON2: WM_APPCOMMAND, FAPPCOMMAND_MOUSE */
+        SendMessageA(h, 0x0319, (WPARAM)(uintptr_t)h, LPOINT(wp & 0xFFFF, 0x8000 | which));
+    return 0;
+}
+static LRESULT def_mousewheel(window *w, HWND h, WPARAM wp, LPARAM lp)
+{
+    if (!(w->style & S_CHILD)) return 0;
+    os_lock(&g_ui_lock);
+    window *p = parent_l(w);
+    os_unlock(&g_ui_lock);
+    (void)h;
+    return p ? SendMessageA((HWND)p, 0x020A, wp, lp) : 0;
+}
+static LRESULT def_mousehwheel(window *w, HWND, WPARAM wp, LPARAM lp) { return (w->style & S_CHILD) ? send_parent(w, 0x020E, wp, lp) : 0; }
+static LRESULT def_print(window *w, HWND h, WPARAM wp, LPARAM lp)   /* ref WM_PRINT: PRF_ERASEBKGND then PRF_CLIENT */
+{
+    if ((lp & 1 /* PRF_CHECKVISIBLE */) && !IsWindowVisible(h)) return 0;
+    if (lp & 8 /* PRF_ERASEBKGND */) SendMessageA(h, 0x0014, wp, 0);
+    if (lp & 4 /* PRF_CLIENT */) SendMessageA(h, 0x0318, wp, lp);
+    (void)w;
+    return 0;
+}
+static LRESULT def_appcommand(window *w, HWND, WPARAM wp, LPARAM lp)
+{
+    os_lock(&g_ui_lock);
+    window *p = parent_l(w);
+    os_unlock(&g_ui_lock);
+    if (!p) fnmq_hook(10 /* WH_SHELL */, 12 /* HSHELL_APPCOMMAND */, wp, lp);
+    else SendMessageA((HWND)p, 0x0319, wp, lp);
+    return 0;
+}
+static LRESULT def_none(window *, HWND, WPARAM, LPARAM) { return 0; }
+static LRESULT def_buttondown_reset(window *, HWND, WPARAM, LPARAM) { g_f10_key = g_menu_sys_key = false; return 0; }
+static LRESULT def_keydown(window *, HWND, WPARAM wp, LPARAM) { if (wp == 0x79) g_f10_key = true; return 0; }
+static LRESULT def_lbuttondbl(window *w, HWND h, WPARAM, LPARAM lp) { return def_dblclick(w, h, HT_CLIENT, lp); }
+static LRESULT def_activate(window *w, HWND h, WPARAM wp, LPARAM) { if ((wp & 0xFFFF) != 0 && !is_iconic_w(w)) SetFocus(h); return 0; }
+static LRESULT def_setredraw(window *w, HWND h, WPARAM wp, LPARAM)
+{
+    if (wp) set_style_bits(w, S_VISIBLE, 0);
+    else { validate_tree(h); set_style_bits(w, 0, S_VISIBLE); }
+    return 0;
+}
+static LRESULT def_settext(window *w, HWND, WPARAM, LPARAM lp) { set_text_l(w, lp ? (const char *)(uintptr_t)lp : ""); return TRUE; }
+static LRESULT def_gettext(window *w, HWND, WPARAM wp, LPARAM lp)
+{
+    if (!lp || !wp) return 0;
+    os_lock(&g_ui_lock);
+    size_t n = strlen(w->text), k = n < (size_t)wp - 1 ? n : (size_t)wp - 1;
+    memcpy((char *)(uintptr_t)lp, w->text, k);
+    ((char *)(uintptr_t)lp)[k] = 0;
+    os_unlock(&g_ui_lock);
+    return (LRESULT)k;
+}
+static LRESULT def_gettextlen(window *w, HWND, WPARAM, LPARAM) { os_lock(&g_ui_lock); size_t n = strlen(w->text); os_unlock(&g_ui_lock); return (LRESULT)n; }
+static LRESULT def_close(window *, HWND h, WPARAM, LPARAM) { DestroyWindow(h); return 0; }
+static LRESULT def_one(window *, HWND, WPARAM, LPARAM) { return 1; }
+static LRESULT def_minus1(window *, HWND, WPARAM, LPARAM) { return (LRESULT)-1; }
+static LRESULT def_showwindow(window *w, HWND h, WPARAM wp, LPARAM lp)   /* ref WM_SHOWWINDOW: the owner's pop-ups follow its minimize and restore */
+{
+    if (!lp) return 0;   /* sent from ShowWindow */
+    os_lock(&g_ui_lock);
+    bool vis = (w->style & S_VISIBLE) != 0, owned = w->owner != NULL, act = false;
+    if (!((vis && wp) || (!vis && !wp)) && owned) {
+        if (wp) { if (w->owned_hidden) { w->owned_hidden = 0; act = true; } }
+        else { w->owned_hidden = 1; act = true; }
+    }
+    os_unlock(&g_ui_lock);
+    if (act) ShowWindow(h, wp ? 4 /* SW_SHOWNOACTIVATE */ : 0);
+    return 0;
+}
+static LRESULT def_cancelmode(window *, HWND h, WPARAM, LPARAM) { g_menu_sys_key = false; if (GetCapture() == h) ReleaseCapture(); return 0; }
+static LRESULT def_mouseactivate(window *w, HWND, WPARAM wp, LPARAM lp)
+{
+    if (w->style & S_CHILD) { LRESULT r = send_parent(w, 0x21, wp, lp); if (r) return r; }
+    return (((lp >> 16) & 0xFFFF) == 0x0201 && (lp & 0xFFFF) == HT_CAPTION) ? 3 /* MA_NOACTIVATE */ : 1 /* MA_ACTIVATE */;
+}
+static LRESULT def_isactiveicon(window *w, HWND, WPARAM, LPARAM) { os_lock(&g_ui_lock); int a = w->ncactive; os_unlock(&g_ui_lock); return a != 0; }
+static LRESULT def_querydragicon(window *w, HWND, WPARAM, LPARAM)
+{
+    if (w->cls->icon) return (LRESULT)(uintptr_t)w->cls->icon;
+    for (unsigned id = 1; id < 64; id++) { HICON i = LoadIconA(w->inst, (LPCSTR)(uintptr_t)id); if (i) return (LRESULT)(uintptr_t)i; }
+    return (LRESULT)(uintptr_t)LoadIconA(NULL, (LPCSTR)32512);   /* IDI_APPLICATION */
+}
+static LRESULT def_wpchanging(window *w, HWND h, WPARAM, LPARAM lp)   /* ref: an overlapped or sizing-border window stays within its track sizes */
+{
+    fn_wpos *p = (fn_wpos *)(uintptr_t)lp;
+    if (!p || (p->flags & P_NOSIZE)) return 0;
+    os_lock(&g_ui_lock);
+    DWORD st = w->style;
+    os_unlock(&g_ui_lock);
+    if (!(st & S_THICK) && (st & (S_POPUP | S_CHILD))) return 0;
+    fn_mmi mi;
+    fill_mmi(w, &mi);
+    SendMessageA(h, M_GETMINMAXINFO, 0, (LPARAM)(uintptr_t)&mi);
+    if (p->cx > mi.maxtrack.x) p->cx = (int)mi.maxtrack.x;
+    if (p->cy > mi.maxtrack.y) p->cy = (int)mi.maxtrack.y;
+    if (!(st & S_MINIMIZE)) {
+        if (p->cx < mi.mintrack.x) p->cx = (int)mi.mintrack.x;
+        if (p->cy < mi.mintrack.y) p->cy = (int)mi.mintrack.y;
+    }
+    return 0;
+}
+static LRESULT def_wpchanged(window *w, HWND h, WPARAM, LPARAM lp)   /* ref: WM_SIZE and WM_MOVE follow a size or position change */
+{
+    fn_wpos *p = (fn_wpos *)(uintptr_t)lp;
+    if (!p) return 0;
+    os_lock(&g_ui_lock);
+    RECT c = client_l(w);
+    long ox, oy;
+    origin_l(w->parent, &ox, &oy);
+    DWORD st = w->style;
+    os_unlock(&g_ui_lock);
+    if (!(p->flags & P_NOSIZE)) SendMessageA(h, M_SIZE, (st & S_MINIMIZE) ? 1 : (st & S_MAXIMIZE) ? 2 : 0, LPOINT(c.right - c.left, c.bottom - c.top));
+    if (!(p->flags & P_NOMOVE)) SendMessageA(h, M_MOVE, 0, LPOINT(c.left - ox, c.top - oy));
+    return 0;
+}
+static LRESULT def_keyf1(window *w, HWND h, WPARAM, LPARAM)   /* ref WM_KEYF1: WM_HELP for the window */
+{
+    fn_helpinfo hi;
+    memset(&hi, 0, sizeof hi);
+    hi.cb = sizeof hi; hi.ctx = 1 /* HELPINFO_WINDOW */; hi.ctl = (int)w->id; hi.item = (HANDLE)h;
+    GetCursorPos(&hi.pos);
+    SendMessageA(h, 0x0053, 0, (LPARAM)(uintptr_t)&hi);
+    return 0;
+}
+static LRESULT def_inputlang(window *w, HWND, WPARAM wp, LPARAM lp) { foreach_child(w, send_to, 0x51, wp, lp); return 0; }
+static LRESULT def_help(window *w, HWND, WPARAM wp, LPARAM lp) { return send_parent(w, 0x53, wp, lp); }
+static LRESULT def_contextmenu(window *w, HWND, WPARAM wp, LPARAM lp)   /* a child passes it on; a caption would pop up the system menu */
+{
+    if (w->style & S_CHILD) send_parent(w, 0x7B, wp, lp);
+    return 0;
+}
+static LRESULT def_stylechanged(window *w, HWND h, WPARAM wp, LPARAM lp)
+{
+    fn_stylestruct *s = (fn_stylestruct *)(uintptr_t)lp;
+    if ((int)wp == -16 && s && (w->exstyle & X_LAYERED) && ((s->old ^ s->now) & (S_CAPTION | S_THICK | S_VSCROLL | S_HSCROLL)))
+        SetWindowPos(h, NULL, 0, 0, 0, 0, P_FRAMECHANGED | P_NOACTIVATE | P_NOZORDER | P_NOSIZE | P_NOMOVE);
+    return 0;
+}
+static LRESULT def_geticon(window *w, HWND, WPARAM wp, LPARAM)
+{
+    os_lock(&g_ui_lock);
+    HICON r = (wp == 0 || wp == 2) ? w->icon_small : wp == 1 ? w->icon_big : NULL;
+    os_unlock(&g_ui_lock);
+    return (LRESULT)(uintptr_t)r;
+}
+static LRESULT def_seticon(window *w, HWND, WPARAM wp, LPARAM lp)
+{
+    os_lock(&g_ui_lock);
+    HICON old = NULL;
+    if (wp == 0) { old = w->icon_small; w->icon_small = (HICON)(uintptr_t)lp; }
+    else if (wp == 1) { old = w->icon_big; w->icon_big = (HICON)(uintptr_t)lp; }
+    os_unlock(&g_ui_lock);
+    return (LRESULT)(uintptr_t)old;
+}
+static LRESULT def_nccreate(window *w, HWND, WPARAM, LPARAM lp)
+{
+    fnv_createstruct *cs = (fnv_createstruct *)(uintptr_t)lp;
+    if (!cs) return 0;
+    set_text_l(w, cs->name);
+    return 1;
+}
+static LRESULT def_ncdestroy(window *w, HWND, WPARAM, LPARAM) { set_text_l(w, ""); return 0; }
+static LRESULT def_nccalcsize(window *w, HWND, WPARAM wp, LPARAM lp)
+{
+    if (!lp) return 0;
+    RECT *r = wp ? &((fn_nccs *)(uintptr_t)lp)->rgrc[0] : (RECT *)(uintptr_t)lp;
+    os_lock(&g_ui_lock);
+    DWORD st = w->style, ex = w->exstyle;
+    bool menu = w->hasmenu != 0;
+    os_unlock(&g_ui_lock);
+    if (st & S_MINIMIZE) return 0;
+    nc_t n = ncrule(st, ex, menu);
+    r->left += n.l; r->top += n.t; r->right -= n.r; r->bottom -= n.b;
+    if (r->bottom < r->top) r->bottom = r->top;
+    if (r->right < r->left) r->right = r->left;
+    return 0;
+}
+static LRESULT def_nchittest(window *w, HWND, WPARAM, LPARAM lp) { return hit_test(w, (int)(short)(lp & 0xFFFF), (int)(short)((lp >> 16) & 0xFFFF)); }
+static LRESULT def_ncpaint(window *, HWND h, WPARAM, LPARAM) { fnwin_take_frame_paint(h); return 0; }
+static LRESULT def_ncactivate(window *w, HWND, WPARAM wp, LPARAM) { os_lock(&g_ui_lock); w->ncactive = wp != 0; os_unlock(&g_ui_lock); return TRUE; }
+static LRESULT def_syncpaint(window *, HWND h, WPARAM, LPARAM) { fnwin_erase_now(h, true); return 0; }
+static LRESULT def_ctl(unsigned type, WPARAM wp) { return def_ctlcolor((HDC)(uintptr_t)wp, type); }
+static LRESULT def_ctl0(window *, HWND, WPARAM wp, LPARAM) { return def_ctl(0, wp); }
+static LRESULT def_ctl1(window *, HWND, WPARAM wp, LPARAM) { return def_ctl(1, wp); }
+static LRESULT def_ctl2(window *, HWND, WPARAM wp, LPARAM) { return def_ctl(2, wp); }
+static LRESULT def_ctl3(window *, HWND, WPARAM wp, LPARAM) { return def_ctl(3, wp); }
+static LRESULT def_ctl4(window *, HWND, WPARAM wp, LPARAM) { return def_ctl(4, wp); }
+static LRESULT def_ctl5(window *, HWND, WPARAM wp, LPARAM) { return def_ctl(5, wp); }
+static LRESULT def_ctl6(window *, HWND, WPARAM wp, LPARAM) { return def_ctl(6, wp); }
+static LRESULT def_ctlold(window *, HWND, WPARAM wp, LPARAM lp) { return def_ctl((unsigned)((lp >> 16) & 0xFFFF), wp); }
+static LRESULT def_dropobject(window *, HWND, WPARAM, LPARAM) { return 0x454C4946; }   /* DRAG_FILE */
+static LRESULT def_querydrop(window *w, HWND, WPARAM, LPARAM) { return (w->exstyle & X_ACCEPTFILES) != 0; }
+static LRESULT def_erase_msg(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_erase(w, h, wp, lp); }
+static LRESULT def_syscmd_msg(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_syscommand(w, h, wp, lp); }
+static LRESULT def_setcursor_msg(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_setcursor(w, h, wp, lp); }
+static LRESULT def_paint_msg(window *w, HWND h, WPARAM wp, LPARAM lp) { return def_paint(w, h, wp, lp); }
+
+/* ---- THE table: message -> rule. Sorted by message number; src: where the rule comes from. */
+struct defrule { UINT msg; LRESULT (*fn)(window *, HWND, WPARAM, LPARAM); const char *src; };
+static const defrule k_defrules[] = {
+    { 0x0006, def_activate, "ref WM_ACTIVATE: an activated, not minimized window takes the keyboard focus" },
+    { 0x000B, def_setredraw, "MSDN WM_SETREDRAW; ref: WS_VISIBLE follows, the region is validated when redraw is off" },
+    { 0x000C, def_settext, "MSDN WM_SETTEXT: stored, TRUE" },
+    { 0x000D, def_gettext, "MSDN WM_GETTEXT: at most wParam - 1 characters and the terminator, the count copied" },
+    { 0x000E, def_gettextlen, "MSDN WM_GETTEXTLENGTH" },
+    { 0x000F, def_paint_msg, "MSDN WM_PAINT: BeginPaint + EndPaint validates" },
+    { 0x0010, def_close, "MSDN WM_CLOSE: DestroyWindow" },
+    { 0x0011, def_one, "MSDN WM_QUERYENDSESSION: the session may end" },
+    { 0x0013, def_one, "MSDN WM_QUERYOPEN: the icon may open" },
+    { 0x0014, def_erase_msg, "MSDN WM_ERASEBKGND: the class background brush" },
+    { 0x0018, def_showwindow, "ref WM_SHOWWINDOW: owned pop-ups follow their owner" },
+    { 0x0019, def_ctlold, "MSDN WM_CTLCOLOR (16-bit form: the control type in the high word of lParam)" },
+    { 0x001F, def_cancelmode, "MSDN WM_CANCELMODE: menu mode ends, the capture is released" },
+    { 0x0020, def_setcursor_msg, "MSDN WM_SETCURSOR: parent first, the class cursor in the client area, a sizing cursor on the border" },
+    { 0x0021, def_mouseactivate, "ref WM_MOUSEACTIVATE: parent first; MA_ACTIVATE, MA_NOACTIVATE for a caption click" },
+    { 0x0026, def_paint_msg, "MSDN WM_PAINTICON" },
+    { 0x0027, def_erase_msg, "MSDN WM_ICONERASEBKGND" },
+    { 0x002E, def_minus1, "MSDN WM_VKEYTOITEM: -1, the list box does its default" },
+    { 0x002F, def_minus1, "MSDN WM_CHARTOITEM: -1, the list box does its default" },
+    { 0x0035, def_isactiveicon, "ref WM_ISACTIVEICON: the frame is drawn active" },
+    { 0x0037, def_querydragicon, "ref WM_QUERYDRAGICON: class icon, else the application's first icon, else IDI_APPLICATION" },
+    { 0x0046, def_wpchanging, "ref WM_WINDOWPOSCHANGING: track sizes" },
+    { 0x0047, def_wpchanged, "ref WM_WINDOWPOSCHANGED: WM_SIZE and WM_MOVE" },
+    { 0x004D, def_keyf1, "ref WM_KEYF1: WM_HELP for the window" },
+    { 0x0050, def_none, "MSDN WM_INPUTLANGCHANGEREQUEST: ActivateKeyboardLayout; the environment has the one layout (ENV I4), already active" },
+    { 0x0051, def_inputlang, "ref WM_INPUTLANGCHANGE: passed on to the children" },
+    { 0x0053, def_help, "ref WM_HELP: the parent" },
+    { 0x0055, def_one, "ref WM_NOTIFYFORMAT: NFR_ANSI (an ANSI window)" },
+    { 0x007B, def_contextmenu, "ref WM_CONTEXTMENU: a child passes it on; the system menu has no menu subsystem to pop up" },
+    { 0x007D, def_stylechanged, "ref WM_STYLECHANGED: a layered window's frame change is re-framed" },
+    { 0x007F, def_geticon, "ref WM_GETICON" },
+    { 0x0080, def_seticon, "ref WM_SETICON" },
+    { 0x0081, def_nccreate, "ref WM_NCCREATE: the creation text is stored; creation goes on" },
+    { 0x0082, def_ncdestroy, "ref WM_NCDESTROY: the window text goes" },
+    { 0x0083, def_nccalcsize, "ref WM_NCCALCSIZE: the client rectangle less the non-client area" },
+    { 0x0084, def_nchittest, "MSDN WM_NCHITTEST" },
+    { 0x0085, def_ncpaint, "MSDN WM_NCPAINT: the frame has no surface of its own in the platform (client surfaces are presented): nothing is pending after it" },
+    { 0x0086, def_ncactivate, "ref WM_NCACTIVATE: the frame takes the active state; TRUE" },
+    { 0x0088, def_syncpaint, "ref WM_SYNCPAINT: RDW_ERASENOW | RDW_ERASE | RDW_ALLCHILDREN" },
+    { 0x00A0, def_none, "ref WM_NCMOUSEMOVE: only scroll-bar hot tracking (no scroll bars in the platform)" },
+    { 0x00A1, def_nclbuttondown, "ref WM_NCLBUTTONDOWN" },
+    { 0x00A3, [](window *w, HWND h, WPARAM wp, LPARAM lp) -> LRESULT { return def_dblclick(w, h, wp, lp); }, "ref WM_NCLBUTTONDBLCLK" },
+    { 0x00A4, def_ncrbuttondown, "ref WM_NCRBUTTONDOWN" },
+    { 0x00A5, def_none, "ref WM_NCRBUTTONUP: nothing" },
+    { 0x00AC, def_xbuttonup, "ref WM_NCXBUTTONUP: WM_APPCOMMAND" },
+    { 0x0100, def_keydown, "ref WM_KEYDOWN: F10 pressed" },
+    { 0x0101, def_keyup, "ref WM_KEYUP: Alt or F10 released" },
+    { 0x0104, def_sysmenu_key, "ref WM_SYSKEYDOWN: Alt+F4 closes, F10 and Alt arm the menu key" },
+    { 0x0105, def_keyup, "ref WM_SYSKEYUP" },
+    { 0x0106, def_syschar, "ref WM_SYSCHAR: the Alt+character menu key" },
+    { 0x010D, def_none, "ref WM_IME_STARTCOMPOSITION: to the default IME window; the environment has no IME (SM_IMMENABLED 0)" },
+    { 0x010E, def_none, "ref WM_IME_ENDCOMPOSITION: as above" },
+    { 0x010F, def_none, "ref WM_IME_COMPOSITION: as above" },
+    { 0x0112, def_syscmd_msg, "MSDN WM_SYSCOMMAND" },
+    { 0x0132, def_ctl0, "MSDN WM_CTLCOLORMSGBOX" },
+    { 0x0133, def_ctl1, "MSDN WM_CTLCOLOREDIT" },
+    { 0x0134, def_ctl2, "MSDN WM_CTLCOLORLISTBOX" },
+    { 0x0135, def_ctl3, "MSDN WM_CTLCOLORBTN" },
+    { 0x0136, def_ctl4, "MSDN WM_CTLCOLORDLG" },
+    { 0x0137, def_ctl5, "MSDN WM_CTLCOLORSCROLLBAR" },
+    { 0x0138, def_ctl6, "MSDN WM_CTLCOLORSTATIC" },
+    { 0x0201, def_buttondown_reset, "ref WM_LBUTTONDOWN" },
+    { 0x0203, def_lbuttondbl, "ref WM_LBUTTONDBLCLK: the client double click" },
+    { 0x0204, def_buttondown_reset, "ref WM_RBUTTONDOWN" },
+    { 0x0205, def_rbuttonup, "ref WM_RBUTTONUP: WM_CONTEXTMENU" },
+    { 0x0207, def_buttondown_reset, "ref WM_MBUTTONDOWN" },
+    { 0x020A, def_mousewheel, "ref WM_MOUSEWHEEL: a child passes it on" },
+    { 0x020C, def_xbuttonup, "ref WM_XBUTTONUP: WM_APPCOMMAND" },
+    { 0x020E, def_mousehwheel, "ref WM_MOUSEHWHEEL: a child passes it on" },
+    { 0x0218, def_one, "MSDN WM_POWERBROADCAST: a query is granted" },
+    { 0x022A, def_dropobject, "ref WM_DROPOBJECT: DRAG_FILE" },
+    { 0x022B, def_querydrop, "ref WM_QUERYDROPOBJECT: whether the window accepts files" },
+    { 0x0281, def_none, "ref WM_IME_SETCONTEXT: to the default IME window; the environment has no IME" },
+    { 0x0282, def_none, "ref WM_IME_NOTIFY: as above" },
+    { 0x02A2, def_none, "ref WM_NCMOUSELEAVE: only scroll-bar hot tracking" },
+    { 0x0313, def_none, "ref WM_POPUPSYSTEMMENU: the system menu (no menu subsystem)" },
+    { 0x0317, def_print, "ref WM_PRINT: PRF_ERASEBKGND, PRF_CLIENT" },
+    { 0x0319, def_appcommand, "ref WM_APPCOMMAND: the parent, else the shell hook" },
+};
+/* the dispatch: a message with a row runs it; every other message has no documented default action and answers 0 */
+static LRESULT def_dispatch(window *w, HWND h, UINT m, WPARAM wp, LPARAM lp)
+{
+    for (const defrule &r : k_defrules)
+        if (r.msg == m) return r.fn(w, h, wp, lp);
+    return 0;
 }
 extern "C" LRESULT DefWindowProcA(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     window *win = wnd(h);
-    switch (m) {
-    case WM_CLOSE: DestroyWindow(h); return 0;
-    case M_NCCREATE: return TRUE;      /* creation goes on */
-    case 0x0011: case 0x0013: return TRUE;   /* WM_QUERYENDSESSION, WM_QUERYOPEN */
-    case 0x0014: {                     /* WM_ERASEBKGND: the class brush erases (no device context here); no brush: not erased */
-        if (!win) return 0;
-        os_lock(&g_ui_lock);
-        HBRUSH bg = win->cls->bg;
-        os_unlock(&g_ui_lock);
-        return bg != NULL;
-    }
-    case 0x0021: return 1;             /* WM_MOUSEACTIVATE: MA_ACTIVATE */
-    case 0x0084: return win ? hit_test(win, (int)(short)(l & 0xFFFF), (int)(short)((l >> 16) & 0xFFFF)) : 0;
-    case 0x0218: return TRUE;          /* WM_POWERBROADCAST */
-    case M_ACTIVATE:                   /* activated and not minimized: the window takes the keyboard focus */
-        if ((w & 0xFFFF) != 0 && ((w >> 16) & 0xFFFF) == 0) SetFocus(h);
-        return 0;
-    case 0x0020: {                     /* WM_SETCURSOR: the parent first, then the class cursor (client) or the arrow */
-        if (!win) return 0;
-        os_lock(&g_ui_lock);
-        window *par = win->parent != &g_desk ? win->parent : NULL;
-        HCURSOR c = (l & 0xFFFF) == 1 ? win->cls->cursor : fnmq_arrow_cursor();
-        os_unlock(&g_ui_lock);
-        if (par && SendMessageA((HWND)par, m, w, l)) return TRUE;
-        if (c) fnmq_set_cursor(c);
-        return c != NULL;
-    }
-    case 0x0112:                       /* WM_SYSCOMMAND */
-        switch (w & 0xFFF0) {
-        case 0xF060: SendMessageA(h, WM_CLOSE, 0, 0); break;   /* SC_CLOSE */
-        case 0xF020: ShowWindow(h, 6); break;                  /* SC_MINIMIZE */
-        case 0xF030: ShowWindow(h, 3); break;                  /* SC_MAXIMIZE */
-        case 0xF120: ShowWindow(h, 9); break;                  /* SC_RESTORE */
-        }
-        return 0;
-    case 0x0104:                       /* WM_SYSKEYDOWN: Alt+F4 closes */
-        if (w == 0x73 && (l & (1 << 29))) SendMessageA(h, 0x0112, 0xF060, 0);
-        return 0;
-    case M_NCDESTROY: {                /* the window text goes */
-        char *t = win ? dup_str("") : NULL;
-        if (!t) return 0;
-        os_lock(&g_ui_lock);
-        free(win->text);
-        win->text = t;
-        os_unlock(&g_ui_lock);
-        return 0;
-    }
-    case M_NCACTIVATE: return TRUE;
-    case M_PAINT: fnvnx_window_validate(h); return 0;   /* BeginPaint + EndPaint */
-    case M_NCCALCSIZE: {               /* the client rectangle is the window rectangle less the non-client area */
-        if (!win || !l) return 0;
-        RECT *r = w ? &((fn_nccs *)(uintptr_t)l)->rgrc[0] : (RECT *)(uintptr_t)l;
-        nc_t n = ncrule(win->style, win->exstyle, win->hasmenu);
-        r->left += n.l; r->top += n.t; r->right -= n.r; r->bottom -= n.b;
-        return 0;
-    }
-    case M_WPCHANGED: {                /* WM_SIZE and WM_MOVE follow a size or position change */
-        fn_wpos *p = (fn_wpos *)(uintptr_t)l;
-        if (!win || !p) return 0;
-        os_lock(&g_ui_lock);
-        RECT c = client_l(win);
-        long ox, oy;
-        origin_l(win->parent, &ox, &oy);
-        DWORD st = win->style;
-        os_unlock(&g_ui_lock);
-        if (!(p->flags & P_NOSIZE))
-            SendMessageA(h, M_SIZE, (st & S_MINIMIZE) ? 1 : (st & S_MAXIMIZE) ? 2 : 0,
-                         (LPARAM)(((uint32_t)(c.right - c.left) & 0xFFFF) | ((uint32_t)(c.bottom - c.top) << 16)));
-        if (!(p->flags & P_NOMOVE))
-            SendMessageA(h, M_MOVE, 0, (LPARAM)(((uint32_t)(c.left - ox) & 0xFFFF) | ((uint32_t)(c.top - oy) << 16)));
-        return 0;
-    }
-    case 0x000D: { /* WM_GETTEXT */
-        if (!win || !l || !w) return 0;
-        os_lock(&g_ui_lock);
-        size_t n = strlen(win->text), k = n < (size_t)w - 1 ? n : (size_t)w - 1;
-        memcpy((char *)(uintptr_t)l, win->text, k);
-        ((char *)(uintptr_t)l)[k] = 0;
-        os_unlock(&g_ui_lock);
-        return (LRESULT)k;
-    }
-    case 0x000E: return win ? (LRESULT)strlen(win->text) : 0; /* WM_GETTEXTLENGTH */
-    case 0x000C: { /* WM_SETTEXT */
-        char *t = win ? dup_str(l ? (const char *)(uintptr_t)l : "") : NULL;
-        if (!t) return FALSE;
-        os_lock(&g_ui_lock);
-        free(win->text);
-        win->text = t;
-        os_unlock(&g_ui_lock);
-        return TRUE;
-    }
-    default: return 0;
-    }
+    return win ? def_dispatch(win, h, m, w, l) : 0;
 }
 
 extern "C" BOOL ShowWindow(HWND h, int cmd)
@@ -1179,8 +2139,6 @@ extern "C" BOOL SetForegroundWindow(HWND h)
 }
 extern "C" HWND GetForegroundWindow(void) { os_lock(&g_ui_lock); HWND h = (HWND)g_active; os_unlock(&g_ui_lock); return h; }
 extern "C" HWND GetActiveWindow(void) { return GetForegroundWindow(); }
-extern "C" HWND SetFocus(HWND h) { W32_UNUSED(h); return fnvnx_main_window(); }
-extern "C" HWND GetFocus(void) { return fnvnx_main_window(); }
 
 extern "C" BOOL SetWindowTextA(HWND h, LPCSTR t)
 {

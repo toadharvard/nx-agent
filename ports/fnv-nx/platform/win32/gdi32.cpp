@@ -21,6 +21,7 @@
  * DC defaults); colour -> mono DDB: pixels equal to the source background colour become 1. */
 #include "w32.h"
 #include "gdi_int.h"
+#include "window_int.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -110,6 +111,7 @@ struct obj {
     void *fdata;                             /* font: LOGFONTW copy (gdifont.cpp) */
     bool ext;                                /* bitmap: bits are the caller's memory (memdc_over_bits), never freed here */
     uint32_t xbmp;                           /* DC made by memdc_over_bits: the bitmap it made */
+    RECT *clip; int nclip;                   /* DC: the clip region as disjoint rectangles in DC coordinates (a paint DC: the update region) */
 };
 struct slot { obj *o; uint32_t gen; };
 slot g_slots[65536];
@@ -149,6 +151,7 @@ void release(uint32_t h)
     if (!o) return;
     if (!o->ext) free(o->bits);
     free(o->fdata);
+    free(o->clip);
     free(o);
     g_slots[idx].o = NULL;
     g_slots[idx].gen = (g_slots[idx].gen % 4095) + 1;
@@ -177,13 +180,14 @@ uint32_t stock_h(int i) { return mkh(g_slots[1 + i].o->type, 0, 1 + i); }
 /* ---- surfaces and pixels */
 struct surf {
     uint8_t *p; int w, h, bpp, pitch, nct; bool td, ddb; const uint32_t *ct; uint32_t m[3]; HWND win; bool onwin;
+    const RECT *clip; int nclip;   /* the DC's clip region: nothing outside it is written (nclip 0: no clip) */
 };
 const uint32_t M16[3] = { 0x7C00, 0x03E0, 0x001F }, M32[3] = { 0xFF0000, 0xFF00, 0xFF };
 
 bool bm_surf(const obj *b, surf &s)
 {
     s.p = b->bits; s.w = b->w; s.h = b->h; s.bpp = b->bpp; s.pitch = b->pitch; s.nct = b->nct; s.td = b->td; s.ddb = !b->dib;
-    s.ct = b->ct; memcpy(s.m, b->mask, sizeof s.m); s.win = NULL; s.onwin = false;
+    s.ct = b->ct; memcpy(s.m, b->mask, sizeof s.m); s.win = NULL; s.onwin = false; s.clip = NULL; s.nclip = 0;
     return true;
 }
 bool dc_surf(obj *dc, surf &s)
@@ -193,6 +197,7 @@ bool dc_surf(obj *dc, surf &s)
     if (!fnvnx_window_surface(dc->hwnd, &px, &w, &h, &pitch) || !px || w <= 0 || h <= 0) return false;
     s.p = (uint8_t *)px; s.w = w; s.h = h; s.bpp = 32; s.pitch = pitch; s.nct = 0; s.td = true; s.ddb = true; s.ct = NULL;
     memcpy(s.m, M32, sizeof s.m); s.win = dc->hwnd; s.onwin = true;
+    s.clip = dc->clip; s.nclip = dc->nclip;
     return true;
 }
 inline uint8_t *rowp(const surf &s, int y) { return s.p + (size_t)(s.td ? y : s.h - 1 - y) * s.pitch; }
@@ -234,8 +239,16 @@ uint32_t raw_get(const surf &s, int x, int y)
     default: { uint32_t v; memcpy(&v, r + 4 * x, 4); return v; }
     }
 }
+bool in_clip(const surf &s, int x, int y)
+{
+    if (!s.nclip) return true;
+    for (int i = 0; i < s.nclip; i++)
+        if (x >= s.clip[i].left && x < s.clip[i].right && y >= s.clip[i].top && y < s.clip[i].bottom) return true;
+    return false;
+}
 void raw_put(const surf &s, int x, int y, uint32_t v)
 {
+    if (!in_clip(s, x, y)) return;
     uint8_t *r = rowp(s, y);
     switch (s.bpp) {
     case 1: r[x >> 3] = (uint8_t)((r[x >> 3] & ~(0x80 >> (x & 7))) | ((v & 1) << (7 - (x & 7)))); break;
@@ -695,16 +708,116 @@ extern "C" int ReleaseDC(HWND hw, HDC hd)
     free_dc((uint32_t)(uintptr_t)hd, d);
     return 1;
 }
+/* the DC's clip: nothing is written outside the rectangles (a DC without a clip writes everywhere) */
+extern "C" void gdi_dc_set_clip(void *hdv, const RECT *r, int n)
+{
+    uint32_t hd = (uint32_t)(uintptr_t)hdv;
+    Lk l;
+    obj *d = get((void *)(uintptr_t)hd, T_DC);
+    if (!d) return;
+    free(d->clip);
+    d->clip = NULL; d->nclip = 0;
+    if (n > 0 && (d->clip = (RECT *)malloc((size_t)n * sizeof(RECT)))) { memcpy(d->clip, r, (size_t)n * sizeof(RECT)); d->nclip = n; }
+}
+/* GetClipBox of a window or paint DC: the bounding box of the clip, else the surface (client area) */
+extern "C" int gdi_dc_clipbox(void *hd, RECT *out)
+{
+    Lk l;
+    obj *d = get(hd, T_DC);
+    surf s;
+    if (!d || !out || !dc_surf(d, s)) return 0;
+    RECT b = { 0, 0, s.w, s.h };
+    if (s.nclip) {
+        RECT u = s.clip[0];
+        for (int i = 1; i < s.nclip; i++) {
+            if (s.clip[i].left < u.left) u.left = s.clip[i].left;
+            if (s.clip[i].top < u.top) u.top = s.clip[i].top;
+            if (s.clip[i].right > u.right) u.right = s.clip[i].right;
+            if (s.clip[i].bottom > u.bottom) u.bottom = s.clip[i].bottom;
+        }
+        if (u.left > b.left) b.left = u.left;
+        if (u.top > b.top) b.top = u.top;
+        if (u.right < b.right) b.right = u.right;
+        if (u.bottom < b.bottom) b.bottom = u.bottom;
+        if (b.right < b.left) b.right = b.left;
+        if (b.bottom < b.top) b.bottom = b.top;
+    }
+    *out = b;
+    return 1;
+}
+/* the system colours of the reference environment (win32u sysparams system_colors), COLORREF, index COLOR_SCROLLBAR..COLOR_MENUBAR */
+static const uint32_t k_syscolor[31] = {
+    0xC8D0D4, 0xA56E3A, 0x6A240A, 0x808080, 0xC8D0D4, 0xFFFFFF, 0x000000, 0x000000, 0x000000, 0xFFFFFF, 0xC8D0D4, 0xC8D0D4,
+    0x808080, 0x6A240A, 0xFFFFFF, 0xC8D0D4, 0x808080, 0x808080, 0x000000, 0xC8D0D4, 0xFFFFFF, 0x404040, 0xC8D0D4, 0x000000,
+    0xE1FFFF, 0xB5B5B5, 0xC80000, 0xF0CAA6, 0xC0C0C0, 0x6A240A, 0xC8D0D4 };
+/* the system colours of the reference environment, and the shared brush of each (GetSysColor, GetSysColorBrush) */
+extern "C" COLORREF gdi_syscolor(int i) { return i >= 0 && i < 31 ? (COLORREF)k_syscolor[i] : 0; }
+extern "C" HBRUSH gdi_sys_brush(int i)
+{
+    static uint32_t brush[31];
+    if (i < 0 || i >= 31) return NULL;
+    Lk l;
+    init_stock();
+    if (!brush[i]) {
+        obj *o = NULL;
+        brush[i] = alloc(T_BRUSH, &o);
+        if (!brush[i]) return NULL;
+        o->stock = 1;   /* shared: never deleted */
+        o->color = k_syscolor[i];
+    }
+    return (HBRUSH)(uintptr_t)brush[i];
+}
+/* FillRect for the platform's own drawing: hbr is a brush object or a system colour index + 1 (a class background) */
+extern "C" int gdi_fill_rect(void *hd, const RECT *rc, void *hbr)
+{
+    Lk l;
+    obj *d = get(hd, T_DC);
+    surf s;
+    if (!d || !rc || !dc_surf(d, s)) return 0;
+    uint32_t col;
+    uintptr_t v = (uintptr_t)hbr;
+    if (v >= 1 && v <= 31) col = k_syscolor[v - 1];
+    else {
+        obj *b = get(hbr, T_BRUSH);
+        if (!b) return 0;
+        if (b->hollow) return 1;
+        col = b->color;
+    }
+    int x0 = rc->left > 0 ? (int)rc->left : 0, y0 = rc->top > 0 ? (int)rc->top : 0;
+    int x1 = rc->right < s.w ? (int)rc->right : s.w, y1 = rc->bottom < s.h ? (int)rc->bottom : s.h;
+    for (int y = y0; y < y1; y++)
+        for (int x = x0; x < x1; x++) px_put(s, x, y, swp(col & 0xFFFFFF));
+    if (x1 > x0 && y1 > y0) dirty(s, x0, y0, x1, y1);
+    return 1;
+}
+/* BeginPaint (MSDN, reference user32): WM_NCPAINT when the frame is pending, rcPaint = the update region clipped to the
+ * client area (less the clipped children), the region is validated, the DC is clipped to it, and WM_ERASEBKGND is sent
+ * when the region was marked for erasing: fErase is TRUE when the procedure did not erase. */
 extern "C" HDC BeginPaint(HWND hw, void *psv)
 {
     fnvnx_paintstruct *ps = (fnvnx_paintstruct *)psv;
-    RECT rc;
-    if (!ps || !hw || !IsWindow(hw) || !GetClientRect(hw, &rc)) { SetLastError(ERROR_INVALID_PARAMETER); return NULL; }
-    Lk l;
-    HDC hd = (HDC)(uintptr_t)new_dc(K_PAINT, hw);
+    if (!ps) { SetLastError(ERROR_INVALID_PARAMETER); return NULL; }
+    if (!hw || !IsWindow(hw)) { SetLastError(1400); return NULL; }
+    if (fnwin_take_frame_paint(hw))
+        SendMessageA(hw, 0x0085, 1, 0);   /* WM_NCPAINT, the whole frame */
+    HDC hd;
+    {
+        Lk l;
+        hd = (HDC)(uintptr_t)new_dc(K_PAINT, hw);
+    }
     if (!hd) return NULL;
+    int n = 0, erase = 0;
+    RECT bb = { 0, 0, 0, 0 };
+    RECT *rects = fnwin_begin_paint(hw, &n, &bb, &erase);   /* malloc'd; the update region is validated */
     memset(ps, 0, sizeof *ps);
-    ps->hdc = hd; ps->fErase = 0; ps->rcPaint = rc;
+    ps->hdc = hd; ps->rcPaint = bb;
+    {   /* an empty update region clips everything away: one empty rectangle */
+        RECT none = { 0, 0, 0, 0 };
+        gdi_dc_set_clip((void *)hd, n ? rects : &none, n ? n : 1);
+    }
+    free(rects);
+    if (erase)
+        ps->fErase = SendMessageA(hw, 0x0014, (WPARAM)(uintptr_t)hd, 0) == 0;   /* WM_ERASEBKGND */
     return hd;
 }
 extern "C" BOOL EndPaint(HWND hw, const void *psv)

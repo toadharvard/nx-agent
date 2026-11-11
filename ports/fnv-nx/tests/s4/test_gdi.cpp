@@ -21,6 +21,7 @@ int GetDeviceCaps(HDC, int);
 HDC GetDC(HWND);
 int ReleaseDC(HWND, HDC);
 HDC BeginPaint(HWND, void *);
+BOOL fnwin_invalidate(HWND, const RECT *, int);
 BOOL EndPaint(HWND, const void *);
 int fnvnx_window_surface(HWND, void **pixels, int *w, int *h, int *pitch);
 }
@@ -575,7 +576,14 @@ TEST(gdi_window_dcs)
     CHECK_EQ(ReleaseDC(NULL, dc2), 0);                                     /* wrong window */
     CHECK_EQ(ReleaseDC(hw, dc2), 1);
     tps ps; memset(&ps, 0xEE, sizeof ps);
-    HDC pd = BeginPaint(hw, &ps);
+    HDC pd = BeginPaint(hw, &ps);                                          /* a hidden window has no update region: rcPaint is empty */
+    CHECK(pd != NULL && ps.hdc == pd);
+    CHECK_EQ(ps.fErase, 0);
+    CHECK(ps.rc.left == 0 && ps.rc.top == 0 && ps.rc.right == 0 && ps.rc.bottom == 0);
+    CHECK(EndPaint(hw, &ps));
+    fnwin_invalidate(hw, NULL, 0);                                         /* the client area is to be painted */
+    memset(&ps, 0xEE, sizeof ps);
+    pd = BeginPaint(hw, &ps);
     CHECK(pd != NULL && ps.hdc == pd);
     CHECK_EQ(ps.fErase, 0);
     CHECK(ps.rc.left == 0 && ps.rc.top == 0 && ps.rc.right == cw && ps.rc.bottom == ch);

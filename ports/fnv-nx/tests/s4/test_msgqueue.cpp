@@ -539,7 +539,7 @@ TEST(mq_lifecycle)
     CHECK(seqs({ 0x218 }, a)); CHECK(seqs({ 0x218 }, b)); CHECK_EQ(g_l[0].w, 4);
     g_n = 0;
     fnvnx_app_resume();
-    CHECK(seqs({ 0x218, 0x218, 0x86, 0x06, 0x1C, 0x07 }, a));
+    CHECK(seqs({ 0x218, 0x218, 0x1C, 0x86, 0x06, 0x07 }, a));   /* gaining: WM_ACTIVATEAPP first; DefWindowProc takes the focus in WM_ACTIVATE */
     CHECK(GetForegroundWindow() == a);
     int k = 0;
     for (int i = 0; i < g_n; i++) if (g_l[i].h == a) { static const int w[] = { 0x12, 7, 1, 1, 1, 0 }; CHECK_EQ(g_l[i].w, w[k++]); }   /* the power events, then the focus return */
@@ -592,6 +592,7 @@ TEST(mq_defwindowproc)
     /* WM_SYSKEYDOWN F4 with Alt, WM_SYSCOMMAND SC_CLOSE, WM_CLOSE */
     g_n = 0;
     SendMessageA(a, WM_SYSKEYDOWN, 0x73, 1u << 29);
+    pump();   /* DefWindowProc posts WM_SYSCOMMAND(SC_CLOSE) to the top-level window (ref) */
     CHECK(has(a, WM_SYSKEYDOWN) == 1 && has(a, 0x112) == 1 && has(a, WM_CLOSE) == 1 && has(a, 0x82) == 1); CHECK(!IsWindow(a));
     g_n = 0;
     SendMessageA(br, WM_SYSKEYDOWN, 0x73, 0);

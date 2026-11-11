@@ -16,7 +16,19 @@ struct fnwin_info {
 int fnwin_info_get(HWND h, fnwin_info *o);
 HWND fnwin_from_point(int x, int y);                 /* the deepest visible window at a screen point, else NULL */
 HWND fnwin_next_paint(DWORD tid, HWND filter);       /* a visible window of the thread with a non-empty update region */
+/* update regions (client coordinates; a rectangle NULL is the whole client area) */
+BOOL fnwin_invalidate(HWND h, const RECT *rc, int erase);       /* InvalidateRect: add rc; erase marks the background for WM_ERASEBKGND */
+BOOL fnwin_validate(HWND h, const RECT *rc);                    /* ValidateRect: remove rc */
+BOOL fnwin_update_rect(HWND h, RECT *bbox, int *erase);         /* GetUpdateRect: the region's bounding box clipped to the client area; FALSE if empty */
+void fnwin_invalidate_frame(HWND h);                            /* the frame needs WM_NCPAINT */
+int fnwin_take_frame_paint(HWND h);                             /* BeginPaint: was the frame pending (cleared) */
+RECT *fnwin_begin_paint(HWND h, int *n, RECT *bbox, int *erase);   /* BeginPaint: validates; returns malloc'd rectangles (clipped), bbox, whether it was marked for erasing */
 HWND fnwin_active(void);
+HWND fnwin_key_target(void);                          /* where keyboard messages go: the focus window, else the active one */
+void fnwin_focus_set(HWND h);                        /* the lifecycle code: the focus moves with KILLFOCUS/SETFOCUS (NULL: none) */
+HWND fnwin_focus_get(void);
+void fnwin_focus_suspend(void);                      /* the application lost the focus: remembered, KILLFOCUS to the holder */
+void fnwin_focus_resume(HWND fallback);              /* the application has it back: SETFOCUS to the remembered window, else fallback */
 void fnwin_set_active(HWND h);                       /* no notification: the lifecycle code sends its own */
 int fnwin_toplevels(HWND *out, int max);             /* every top-level window, z-order; returns the count */
 void fnmq_purge(HWND h);                             /* a window is gone: its posted and input messages go with it */

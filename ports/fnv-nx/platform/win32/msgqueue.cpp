@@ -250,6 +250,21 @@ extern "C" void PostQuitMessage(int code)
     os_unlock(&g_mql);
 }
 
+/* GetMessage for the platform's own modal loops (MessageBox, SC_MOVE, caption buttons): waits for a message of the calling thread,
+ * dispatching nothing; 0 when it is WM_QUIT (re-posted for the loop that is waiting for it) */
+extern "C" int fnmq_get_message(MSG *m, HWND f, UINT lo, UINT hi)
+{
+    for (;;) {
+        if (PeekMessageA(m, f, lo, hi, 1 /* PM_REMOVE */)) {
+            if (m->message != WM_QUIT) return 1;
+            PostQuitMessage((int)m->wParam);
+            return 0;
+        }
+        os_lock(&g_mql);
+        os_cond_wait(&g_mqc, &g_mql, 20000000ull);   /* 20 ms: a message that arrives meanwhile wakes it */
+        os_unlock(&g_mql);
+    }
+}
 extern "C" BOOL PeekMessageA(LPMSG msg, HWND f, UINT lo, UINT hi, UINT flags)
 {
     fnwin_info wi;
@@ -456,7 +471,7 @@ extern "C" void fnvnx_win_key(unsigned vk, unsigned scan, int down, unsigned fla
     struct { uint32_t vk, scan, flags, time; ULONG_PTR extra; } ll = { pack ? 0xE7 : spec, scan, (ext ? 1u : 0u) | ((flags & 0x10) ? 0x10u : 0u) | (alt ? 0x20u : 0u) | (up ? 0x80u : 0u), (uint32_t)GetTickCount(), 0 };
     if (call_hook(13, 0, msg, (LPARAM)(uintptr_t)&ll)) return;   /* WH_KEYBOARD_LL: nonzero swallows the event */
     if (!pack) fnvnx_set_key_state((int)spec, down);
-    HWND tgt = fnwin_active();
+    HWND tgt = fnwin_key_target();   /* the keyboard focus, else the active window */
     journal(msg, gen | (scan << 8), 1 | (ext << 15), tgt);
     if (!tgt) return;
     bool sys = msg >= 0x104;
@@ -700,15 +715,19 @@ extern "C" void fnvnx_app_focus(int in)
         tgt = fnvnx_main_window();
     if (!tgt || !fnwin_info_get(tgt, &wi)) return;
     fnwin_set_active(in ? tgt : NULL);
+    auto activate_app = [&] {                                 /* WM_ACTIVATEAPP: the thread id of the receiver */
+        HWND t[256];
+        int n = fnwin_toplevels(t, 256);
+        for (int i = 0; i < n; i++) {
+            fnwin_info ti;
+            if (fnwin_info_get(t[i], &ti)) SendMessageA(t[i], 0x1C, in, (LPARAM)ti.tid);
+        }
+    };
+    if (in) activate_app();                                   /* gaining: the application first, then the window */
     SendMessageA(tgt, 0x86, in, 0);                          /* WM_NCACTIVATE */
-    SendMessageA(tgt, 0x06, in ? 1 : 0, 0);                  /* WM_ACTIVATE: WA_ACTIVE / WA_INACTIVE */
-    HWND t[256];
-    int n = fnwin_toplevels(t, 256);
-    for (int i = 0; i < n; i++) {                            /* WM_ACTIVATEAPP: the thread id of the receiver */
-        fnwin_info ti;
-        if (fnwin_info_get(t[i], &ti)) SendMessageA(t[i], 0x1C, in, (LPARAM)ti.tid);
-    }
-    SendMessageA(tgt, in ? 0x07 : 0x08, 0, 0);               /* WM_SETFOCUS / WM_KILLFOCUS */
+    SendMessageA(tgt, 0x06, in ? 1 : 0, 0);                  /* WM_ACTIVATE: WA_ACTIVE / WA_INACTIVE (DefWindowProc takes the focus) */
+    if (!in) activate_app();                                  /* losing: the window first, then the application */
+    if (in) fnwin_focus_resume(tgt); else fnwin_focus_suspend();   /* WM_SETFOCUS / WM_KILLFOCUS: the window that had the focus */
 }
 extern "C" void fnvnx_app_suspend(void) { to_all(0x218, 4 /* PBT_APMSUSPEND */, 0); }
 extern "C" void fnvnx_app_resume(void)
