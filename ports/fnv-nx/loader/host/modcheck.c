@@ -59,7 +59,7 @@ static int h_read(void *c, uint32_t file, uint32_t off, void *dst, uint32_t size
     return 0;
 }
 static int to_prot(unsigned p) { return (p & FNVNX_PROT_R ? PROT_READ : 0) | (p & FNVNX_PROT_W ? PROT_WRITE : 0); }
-static int h_map(void *c, uintptr_t addr, uint32_t size, unsigned prot) {
+static int map_pages(void *c, uintptr_t addr, uint32_t size, unsigned prot) {
     uintptr_t lo = (uintptr_t)g_res; uint32_t i, p0;
     (void)c;
     if ((addr & 0xfff) || (size & 0xfff) || addr < lo || addr - lo + size > WINDOW) return -1;
@@ -68,6 +68,25 @@ static int h_map(void *c, uintptr_t addr, uint32_t size, unsigned prot) {
     if (mmap((void *)addr, size, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) == MAP_FAILED) return -1;
     if (prot & FNVNX_PROT_X) g_saw_x = 1;
     for (i = 0; i < size >> 12; i++) { g_pt[p0 + i].mapped = 1; g_pt[p0 + i].prot = (uint8_t)(FNVNX_PROT_R | FNVNX_PROT_W); }
+    return 0;
+}
+/* the map_fixed hook records every successful call; unmap_fixed accepts exactly one recorded (addr, size) pair and only once */
+static struct { uintptr_t addr; uint32_t size; int live; } g_rec[512]; static unsigned g_nrec, g_unmaps, g_unmap_refused;
+static int h_map(void *c, uintptr_t addr, uint32_t size, unsigned prot) {
+    int r = map_pages(c, addr, size, prot);
+    if (!r && g_nrec < 512) { g_rec[g_nrec].addr = addr; g_rec[g_nrec].size = size; g_rec[g_nrec++].live = 1; }
+    return r;
+}
+static uintptr_t g_fail_unmap;   /* a range at this address cannot be given back (a failing platform) */
+static int h_unmap(void *c, uintptr_t addr, uint32_t size) {
+    unsigned k, hit = 512; uint32_t i, p0 = (uint32_t)((addr - (uintptr_t)g_res) >> 12);
+    (void)c;
+    if (g_fail_unmap && addr == g_fail_unmap) return -1;
+    for (k = 0; k < g_nrec; k++) if (g_rec[k].live && g_rec[k].addr == addr && g_rec[k].size == size) hit = k;
+    if (hit == 512) { g_unmap_refused++; return -1; }
+    if (mmap((void *)addr, size, PROT_NONE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0) == MAP_FAILED) return -1;
+    for (i = 0; i < size >> 12; i++) g_pt[p0 + i].mapped = 0;
+    g_rec[hit].live = 0; g_unmaps++;
     return 0;
 }
 static int h_prot(void *c, uintptr_t addr, uint32_t size, unsigned prot) {
@@ -95,21 +114,21 @@ static int h_free_va(void *c, uint32_t va, uint32_t size) {
 static uint32_t h_alloc_va(void *c, uint32_t size, unsigned prot) {
     uint32_t va = g_next_va;
     (void)prot;
-    if (g_force_va) { va = g_force_va; g_force_va_calls++; if (h_map(c, (uintptr_t)va + g_bias, size, FNVNX_PROT_R | FNVNX_PROT_W)) return 0; return va; }
-    if (h_map(c, (uintptr_t)va + g_bias, size, FNVNX_PROT_R | FNVNX_PROT_W)) return 0;
+    if (g_force_va) { va = g_force_va; g_force_va_calls++; if (map_pages(c, (uintptr_t)va + g_bias, size, FNVNX_PROT_R | FNVNX_PROT_W)) return 0; return va; }
+    if (map_pages(c, (uintptr_t)va + g_bias, size, FNVNX_PROT_R | FNVNX_PROT_W)) return 0;
     g_next_va += size + 0x1000;
     return va;
 }
 static unsigned g_nreg; static uint32_t g_regbase[32], g_regsize[32]; static char g_regname[32][64];
 static void h_reg(void *c, const char *n, uint32_t b, uint32_t s) { (void)c; if (g_nreg < 32) { snprintf(g_regname[g_nreg], 64, "%s", n); g_regbase[g_nreg] = b; g_regsize[g_nreg] = s; } g_nreg++; }
-static fnvnx_os g_os = {NULL, h_read, h_map, h_prot, h_alloc, h_free, h_log, h_alloc_va, h_free_va, h_reg};
+static fnvnx_os g_os = {NULL, h_read, h_map, h_prot, h_alloc, h_free, h_log, h_alloc_va, h_free_va, h_reg, h_unmap};
 
 static void plat_up(void) {
     g_res = (uint8_t *)mmap(NULL, WINDOW, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     if (g_res == (uint8_t *)MAP_FAILED) { perror("mmap"); exit(2); }
     g_bias = (uintptr_t)g_res;
     g_pt = (__typeof__(g_pt))calloc(NPAGES, sizeof *g_pt);
-    g_saw_x = 0; g_force_va = 0; g_force_va_calls = 0; g_next_va = ALLOC_BASE; g_nlog = 0;
+    g_saw_x = 0; g_force_va = 0; g_force_va_calls = 0; g_next_va = ALLOC_BASE; g_nlog = 0; g_nrec = g_unmaps = g_unmap_refused = 0;
 }
 static void plat_down(void) { munmap(g_res, WINDOW); free(g_pt); g_pt = NULL; }
 static int logged(const char *s) { unsigned i; for (i = 0; i < g_nlog; i++) if (strstr(g_log[i], s)) return 1; return 0; }
@@ -204,7 +223,7 @@ static void check_image(const char *tag, unsigned idx, const blob *b) {
 }
 
 /* ---- scenarios ---- */
-static const char *g_names[1 + SM_NMOD] = {"exe.pe", "c.dll", "b.dll", "a.dll", "d.dll", "e.dll"};
+static const char *g_names[1 + SM_NMOD] = {"exe.pe", "c.dll", "b.dll", "a.dll", "d.dll", "e.dll", "f.dll"};
 static void world(void) {   /* the unmodified world */
     unsigned i;
     for (i = 0; i < 1 + SM_NMOD; i++) g_f[i] = find_blob(g_names[i]);
@@ -232,6 +251,7 @@ typedef struct { unsigned who; const char *what; uint32_t reason, reserved; } wa
 static uint32_t base_of(unsigned who) { return who == 1 ? EXE_BASE : sm_table[who - 2].base; }
 static uint32_t addr_of(const fnvnx_proc *p, unsigned who, const char *what) {
     const fnvnx_loaded *L = who == 1 ? &p->exe : &p->mod[who - 2];
+    if (who > 1 && L->state == FNVNX_MOD_UNLOADED && !strcmp(what, "main")) return sm_images[who - 1].entry;   /* unloaded since: the generator's fact */
     return !strcmp(what, "cb") ? L->tls_cb[0] : L->entry_va;
 }
 static void check_calls(const char *tag, const fnvnx_proc *p, unsigned first, const want_call *w, unsigned n, const fnvnx_thread_block *b, uint32_t esp_now) {
@@ -403,7 +423,10 @@ static void good_world(void) {
     {   /* d and e are mapped as expected, relocated, bound (d imports e.dll!efun and c.dll!cfun) */
         expect e; blob *bd = g_f[4];
         build_expect(&e, 4, bd);
-        CHECK(!memcmp(g_res + e.base, e.img, 0x1000) && rd32(g_res + sm_slots[SM_NSLOTS - 1].slot) == sm_slots[SM_NSLOTS - 1].value, "d.dll header page and import value");
+        {   /* the last import slot of d.dll (image 4) */
+            unsigned s, last = 0; for (s = 0; s < SM_NSLOTS; s++) if (sm_slots[s].img == 4) last = s;
+            CHECK(!memcmp(g_res + e.base, e.img, 0x1000) && rd32(g_res + sm_slots[last].slot) == sm_slots[last].value, "d.dll header page and import value");
+        }
         free(e.img); free(e.prot);
         check_image("load", 4, g_f[4]); check_image("load", 5, g_f[5]);
     }
@@ -528,6 +551,114 @@ static void failing(void) {
     free(p);
 }
 
+
+/* ---- FreeLibrary: fnvnx_module_unload (rule at its declaration in include/fnvnx_start.h) ---- */
+static fnvnx_proc *up_world(void) {
+    fnvnx_proc *p = (fnvnx_proc *)calloc(1, sizeof *p);
+    int r;
+    world(); plat_up();
+    r = start(p, NULL);
+    if (!r) r = fnvnx_start_init_modules(p);
+    CHECK(r == 0, "prepare + init for the unload tests: %d", r);
+    return p;
+}
+static unsigned nranges(const fnvnx_proc *p, unsigned k) { return p->mod[k].img.nmapped + p->mod[k].ngap; }
+static int gone(unsigned k) { return mapped_pages_in(sm_table[k].base, sm_table[k].base + sm_table[k].size_of_image) == 0; }
+static int load(fnvnx_proc *p, const char *n) { uint32_t b; return fnvnx_module_load(p, p->main.teb_va, p->main.stack_base - 0x400, n, &b); }
+static int unload(fnvnx_proc *p, uint32_t base) { return fnvnx_module_unload(p, p->main.teb_va, p->main.stack_base - 0x400, base); }
+enum { C_ = 0, B_, A_, D_, E_, F_ };   /* table rows */
+
+static void unload_tests(void) {
+    fnvnx_proc *p = up_world();
+    uint32_t esp = p->main.stack_base - 0x400, dpg = sm_table[D_].base + 0x4000;
+    unsigned first, nr_d, nr_e, nr_f, k;
+    int r;
+    if (!p->modules_ready) { plat_down(); free(p); return; }
+    /* refusals: static module (pinned), the exe, nothing loaded there, an address inside a module that is not its base, not loaded yet */
+    first = g_ncalls;
+    CHECK(unload(p, base_of(2)) == FNVNX_START_E_PINNED && unload(p, base_of(3)) == FNVNX_START_E_PINNED && unload(p, base_of(4)) == FNVNX_START_E_PINNED &&
+          g_ncalls == first && p->ninit == 3 && p->mod[0].state == FNVNX_MOD_READY && g_unmaps == 0 && logged("is a static module"), "static modules are pinned");
+    CHECK(unload(p, EXE_BASE) == FNVNX_E_ARG && unload(p, 0x00010000u) == FNVNX_E_ARG && unload(p, sm_table[D_].base) == FNVNX_E_ARG && unload(p, 0) == FNVNX_E_ARG &&
+          fnvnx_module_unload(NULL, 0, 0, 0) == FNVNX_E_ARG && g_ncalls == first && g_unmaps == 0, "not a loaded module: exe, unmapped address, not loaded yet");
+    /* load D (E comes as its dependency, held by nobody): E cannot be freed by the platform, D can */
+    CHECK(load(p, "d.dll") == 0 && p->mod[D_].held && !p->mod[E_].held && p->mod[D_].dep_mask == (1u << E_) && p->mod[E_].dep_mask == 0, "load d.dll: held flags and import edges");
+    CHECK(unload(p, sm_table[E_].base) == FNVNX_START_E_NOTHELD && unload(p, sm_table[D_].base + 0x1000) == FNVNX_E_ARG && p->mod[E_].state == FNVNX_MOD_READY, "dependency E is not held, an inner address is no module");
+    nr_d = nranges(p, D_); nr_e = nranges(p, E_);
+    g_res[dpg] = 0xEF; g_res[dpg + 1] = 0xBE; g_res[dpg + 2] = 0xAD; g_res[dpg + 3] = 0xDE;   /* stale data a fresh load must not see */
+    first = g_ncalls;
+    r = unload(p, sm_table[D_].base);
+    CHECK(r == 0, "unload d.dll: %d", r);
+    {
+        static const want_call w[] = {{5, "main", 0, 0}};   /* DllMain(base, DLL_PROCESS_DETACH, 0); E has no entry point */
+        check_calls("unload d", p, first, w, 1, &p->main, esp);
+    }
+    CHECK(gone(D_) && gone(E_) && p->mod[D_].state == FNVNX_MOD_UNLOADED && p->mod[E_].state == FNVNX_MOD_UNLOADED && p->ninit == 3 &&
+          fnvnx_images_count(p) == 4 && g_unmaps == nr_d + nr_e && g_unmap_refused == 0, "d and e: pages released (%u ranges, %u unmaps), image list", nr_d + nr_e, g_unmaps);
+    CHECK(!probe_read(g_res + sm_table[D_].base) && !probe_read(g_res + dpg) && !probe_read(g_res + sm_table[E_].base + 0x1000), "released pages are not accessible");
+    CHECK(unload(p, sm_table[D_].base) == FNVNX_E_ARG, "second unload of the same base");
+    CHECK(h_map(NULL, (uintptr_t)sm_table[D_].base + g_bias, sm_table[D_].size_of_image, 3) == 0 && h_unmap(NULL, (uintptr_t)sm_table[D_].base + g_bias, sm_table[D_].size_of_image) == 0, "the range is free again for map_fixed");
+    /* reload: the file is mapped afresh, DllMain attaches again */
+    first = g_ncalls;
+    CHECK(load(p, "d.dll") == 0 && p->ninit == 5 && p->mod[D_].held, "reload d.dll");
+    {
+        static const want_call w[] = {{5, "main", 1, 0}};
+        check_calls("reload d", p, first, w, 1, &p->main, esp);
+    }
+    check_image("reload", 4, g_f[4]); check_image("reload", 5, g_f[5]);   /* every byte as the file says: the stale word is gone */
+    CHECK(g_res[dpg] == 0 && g_res[dpg + 3] == 0, "fresh data after reload");
+    /* F imports D and E: init order E, D, F. D is released by the platform but F keeps it (and E); freeing F then detaches F, D in reverse init order and unloads E */
+    first = g_ncalls;
+    CHECK(load(p, "f.dll") == 0 && p->mod[F_].dep_mask == ((1u << D_) | (1u << E_)) && p->ninit == 6 && p->init_order[3] == E_ && p->init_order[4] == D_ && p->init_order[5] == F_, "load f.dll: init order e, d, f");
+    {
+        static const want_call w[] = {{7, "main", 1, 0}};
+        check_calls("load f", p, first, w, 1, &p->main, esp);
+    }
+    first = g_ncalls;
+    CHECK(unload(p, sm_table[D_].base) == FNVNX_START_UNLOAD_KEPT && g_ncalls == first && !p->mod[D_].held && p->mod[D_].state == FNVNX_MOD_READY && p->mod[E_].state == FNVNX_MOD_READY, "D released but imported by F: stays, no call");
+    check_image("kept", 4, g_f[4]); check_image("kept", 5, g_f[5]); check_image("kept", 6, g_f[6]);
+    g_unmaps = 0; nr_d = nranges(p, D_); nr_e = nranges(p, E_); nr_f = nranges(p, F_);
+    r = unload(p, sm_table[F_].base);
+    CHECK(r == 0, "unload f.dll: %d", r);
+    {
+        static const want_call w[] = {{7, "main", 0, 0}, {5, "main", 0, 0}};   /* F first, then D: reverse initialisation order */
+        check_calls("unload f", p, first, w, 2, &p->main, esp);
+    }
+    CHECK(gone(D_) && gone(E_) && gone(F_) && p->ninit == 3 && g_unmaps == nr_d + nr_e + nr_f && fnvnx_images_count(p) == 4, "f, d and e are all gone (%u unmaps)", g_unmaps);
+    /* E held explicitly first: D imports it. Freeing E keeps it; freeing D then takes both */
+    CHECK(load(p, "e.dll") == 0 && load(p, "d.dll") == 0 && p->mod[E_].held && p->mod[D_].held, "load e then d");
+    first = g_ncalls;
+    CHECK(unload(p, sm_table[E_].base) == FNVNX_START_UNLOAD_KEPT && g_ncalls == first && !p->mod[E_].held && p->mod[E_].state == FNVNX_MOD_READY, "E released, still imported by D");
+    r = unload(p, sm_table[D_].base);
+    CHECK(r == 0 && g_ncalls == first + 1 && gone(D_) && gone(E_) && p->ninit == 3, "D freed: D detached, E (released earlier, no importer left) unloaded: rc %d", r);
+    /* a dependency shared by two loaded modules stays while either is loaded */
+    CHECK(load(p, "d.dll") == 0 && load(p, "f.dll") == 0, "load d, f");
+    first = g_ncalls;
+    r = unload(p, sm_table[F_].base);
+    CHECK(r == 0 && g_ncalls == first + 1 && gone(F_) && !gone(D_) && !gone(E_) && p->mod[D_].state == FNVNX_MOD_READY && p->mod[E_].state == FNVNX_MOD_READY && p->ninit == 5,
+          "F freed: D (held) and its dependency E stay: rc %d", r);
+    check_image("shared", 4, g_f[4]); check_image("shared", 5, g_f[5]);
+    CHECK(unload(p, sm_table[D_].base) == 0 && gone(D_) && gone(E_) && p->ninit == 3, "D freed: E goes with it");
+    /* a whole chain from nothing: F alone loads D and E; one unload takes all three, detaches F then D */
+    first = g_ncalls;
+    CHECK(load(p, "f.dll") == 0 && g_ncalls == first + 2 && p->ninit == 6, "load f.dll alone: d then f attach");
+    first = g_ncalls;
+    r = unload(p, sm_table[F_].base);
+    {
+        static const want_call w[] = {{7, "main", 0, 0}, {5, "main", 0, 0}};
+        check_calls("unload chain", p, first, w, 2, &p->main, esp);
+    }
+    CHECK(r == 0 && gone(D_) && gone(E_) && gone(F_) && p->ninit == 3 && g_unmap_refused == 0, "chain unloaded: rc %d", r);
+    for (k = 0; k < 3; k++) CHECK(p->mod[k].state == FNVNX_MOD_READY, "static module %u untouched", k);
+    check_image("static", 1, g_f[1]); check_image("static", 2, g_f[2]); check_image("static", 3, g_f[3]);
+    /* the platform cannot give a range back: every range is tried, the module is left failed, the code says so */
+    CHECK(load(p, "e.dll") == 0, "load e");
+    g_unmaps = 0; nr_e = nranges(p, E_); g_fail_unmap = (uintptr_t)sm_table[E_].base + g_bias;
+    r = unload(p, sm_table[E_].base);
+    g_fail_unmap = 0;
+    CHECK(r == FNVNX_E_MAP && g_unmaps == nr_e - 1 && p->mod[E_].state == FNVNX_MOD_FAILED && logged("could not all be released") && p->ninit == 3, "unmap_fixed failure: rc %d, %u of %u ranges", r, g_unmaps, nr_e);
+    plat_down(); free(p);
+}
+
 int main(int argc, char **argv) {
     unsigned i;
     if (argc < 2) { fprintf(stderr, "usage: modcheck DIR\n"); return 2; }
@@ -535,6 +666,7 @@ int main(int argc, char **argv) {
     for (i = 0; i < SM_NVAR; i++) (void)load_blob(argv[1], sm_variants[i].file);
     good_world();
     failing();
+    unload_tests();
     printf("modcheck: %d checks passed, %d failed\n", n_ok, n_bad);
     return n_bad ? 1 : 0;
 }

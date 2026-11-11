@@ -53,6 +53,15 @@ static int h_map(void *c, uintptr_t addr, uint32_t size, unsigned prot) {
     for (i = 0; i < size >> 12; i++) { g_pt[p0 + i].mapped = 1; g_pt[p0 + i].prot = (uint8_t)(FNVNX_PROT_R | FNVNX_PROT_W); }
     return 0;
 }
+static int h_unmap(void *c, uintptr_t addr, uint32_t size) {   /* the undo of h_map: the range is free again */
+    uint32_t i, p0 = (uint32_t)((addr - (uintptr_t)g_res) >> 12);
+    (void)c;
+    if ((addr & 0xfff) || (size & 0xfff) || addr < (uintptr_t)g_res || addr - (uintptr_t)g_res + size > WINDOW) return -1;
+    for (i = 0; i < size >> 12; i++) if (!g_pt[p0 + i].mapped) return -1;
+    if (mmap((void *)addr, size, PROT_NONE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0) == MAP_FAILED) return -1;
+    for (i = 0; i < size >> 12; i++) g_pt[p0 + i].mapped = 0;
+    return 0;
+}
 static int h_prot(void *c, uintptr_t addr, uint32_t size, unsigned prot) {
     uint32_t i, p0 = (uint32_t)((addr - (uintptr_t)g_res) >> 12);
     (void)c;
@@ -94,7 +103,7 @@ static int h_free_va(void *c, uint32_t va, uint32_t size) {
 }
 static unsigned g_nreg; static uint32_t g_regbase[32], g_regsize[32]; static char g_regname[32][64];
 static void h_reg(void *c, const char *n, uint32_t b, uint32_t s) { (void)c; if (g_nreg < 32) { snprintf(g_regname[g_nreg], 64, "%s", n); g_regbase[g_nreg] = b; g_regsize[g_nreg] = s; } g_nreg++; }
-static fnvnx_os g_os = {NULL, h_read, h_map, h_prot, h_alloc, h_free, h_log, h_alloc_va, h_free_va, h_reg};
+static fnvnx_os g_os = {NULL, h_read, h_map, h_prot, h_alloc, h_free, h_log, h_alloc_va, h_free_va, h_reg, h_unmap};
 
 static void plat_up(const uint8_t *file, uint32_t len) {
     g_res = (uint8_t *)mmap(NULL, WINDOW, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);

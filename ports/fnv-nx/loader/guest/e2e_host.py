@@ -155,7 +155,33 @@ class E2EEmu(emu_guest.Emu):
                 out[a] = perm
         return out
 
+    # -- map_fixed / UNMAP_FIXED (hostapi.h 15): exactly the (addr, size, src) of one earlier map_fixed, once
+    def h_map_fixed(self, addr, size, src, *_):
+        r = super().h_map_fixed(addr, size, src)
+        if r == 0:
+            if not hasattr(self, "mf_live"):
+                self.mf_live = {}
+            self.mf_live[(addr, size)] = src
+        return r
+
+    def unmap_fixed(self, addr, size, src):
+        if addr & (P - 1) or src & (P - 1):
+            return 0xCC01
+        if not size or size & (P - 1):
+            return 0xCA01
+        if getattr(self, "mf_live", {}).get((addr, size)) != src:
+            return 0xD401   # the kernel: not the mapping of that source
+        try:
+            self.uc.mem_unmap(addr, size)
+        except UcError:
+            return 0xD401
+        del self.mf_live[(addr, size)]
+        self.mf_unmaps = getattr(self, "mf_unmaps", 0) + 1
+        return 0
+
     def h_ext_call(self, module, fn, args, nargs, *_):
+        if module == 11 and fn == 15 and nargs >= 3:   # FNVNX_PLAT_UNMAP_FIXED
+            return self.unmap_fixed(*struct.unpack("<QQQ", bytes(self.uc.mem_read(args, 24))))
         if module == 11 and 11 <= fn <= 14:
             av = struct.unpack("<%dQ" % nargs, bytes(self.uc.mem_read(args, 8 * nargs))) if nargs and args else ()
             return self.section_call(fn, av)
@@ -218,12 +244,12 @@ class E2EEmu(emu_guest.Emu):
             have.update(self.mapped_perms(b0, b0 + s0))
         bad = [hex(a) for a in want if have.get(a) != want[a]]
         x = [hex(a) for a, p in have.items() if p & UC_PROT_EXEC]
-        # nothing else is mapped below the arena: the reserved address set is the exe, the modules and the keys' range
+        # nothing else is mapped below the arena: the reserved address set is the exe, the static modules and the keys' range
         rows = [(0xf0000, 0x200000), (base, base + size)]
         if mt:
             for ln in open(mt):
                 c = ln.rstrip("\n").split("\t")
-                if ln[:1] != "#":
+                if ln[:1] != "#" and c[8] == "1":   # an on-demand range may hold what a REFUSED load leaves mapped (fnvnx_module_load); the fixture checks that every load that succeeded unloads
                     rows.append((int(c[4], 16), int(c[4], 16) + int(c[5], 16)))
         low = sorted(hex(a) for lo, hi in rows for a in self.mapped_perms(lo, hi) if a not in have)
         runs = []

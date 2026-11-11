@@ -23,6 +23,8 @@ int fnvnx_reserve_map_fixed(uint64_t, uint64_t) __attribute__((weak));
 int fnvnx_reserve_contains(uint64_t, uint64_t) __attribute__((weak));
 Result svcQueryMemory(MemoryInfo *mi, u32 *pi, u64 addr) { (void)addr; memset(mi, 0, sizeof *mi); *pi = 0; return 1; }
 Result svcMapMemory(void *dst, void *src, u64 size) { (void)dst; (void)src; (void)size; return 1; }
+static u64 g_unmap_dst, g_unmap_src, g_unmap_size;
+Result svcUnmapMemory(void *dst, void *src, u64 size) { g_unmap_dst = (u64)(uintptr_t)dst; g_unmap_src = (u64)(uintptr_t)src; g_unmap_size = size; return 0; }
 void mutexLock(Mutex *m) { (void)m; }
 void mutexUnlock(Mutex *m) { (void)m; }
 void armDCacheFlush(void *addr, size_t size) { (void)addr; (void)size; }
@@ -278,6 +280,13 @@ static void test_ext_and_map(void)
     T(h_map_fixed(0x10000000, 0x1000, 0) == MAKERESULT(Module_Libnx, LibnxError_BadInput));
     T(h_map_fixed(0x10000800, 0x1000, 0x20000000) == MAKERESULT(Module_Libnx, LibnxError_BadInput));
     T(h_map_fixed(0x10000000, 0x1000, 0x20000000) == MAKERESULT(Module_Libnx, LibnxError_AlreadyInitialized));
+    /* UNMAP_FIXED (15): argument checks, then exactly the kernel's svcUnmapMemory(addr, src, size) */
+    {
+        uint64_t u[3] = {0x10000000, 0x2000, 0x20000000};
+        T(h_unmap_fixed(0x10000800, 0x1000, 0x20000000) == 0xCC01 && h_unmap_fixed(0x10000000, 0x1000, 0x20000800) == 0xCC01);
+        T(h_unmap_fixed(0x10000000, 0, 0x20000000) == 0xCA01 && h_unmap_fixed(0x10000000, 0x800, 0x20000000) == 0xCA01 && !g_unmap_size);
+        T(h_unmap_fixed(u[0], u[1], u[2]) == 0 && g_unmap_dst == 0x10000000 && g_unmap_src == 0x20000000 && g_unmap_size == 0x2000);
+    }
 }
 
 int main(void)

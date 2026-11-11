@@ -201,6 +201,7 @@ static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) 
     if (fn == FNVNX_PLAT_VM_COMMIT && nargs >= 2) return host_vm_commit(args[0], args[1]);
     if (fn == FNVNX_PLAT_VM_DECOMMIT && nargs >= 2) return host_vm_decommit(args[0], args[1]);
     if (fn == FNVNX_PLAT_VM_RELEASE && nargs >= 1) return host_vm_release(args[0]);
+    if (fn == FNVNX_PLAT_UNMAP_FIXED && nargs >= 3) return h_unmap_fixed(args[0], args[1], args[2]);
     if (fn == FNVNX_PLAT_SECTION_CREATE && nargs >= 1) return host_section_create(args[0]);
     if (fn == FNVNX_PLAT_SECTION_MAP && nargs >= 4) return host_section_map(args[0], args[1], args[2], args[3]);
     if (fn == FNVNX_PLAT_SECTION_UNMAP && nargs >= 2) return host_section_unmap(args[0], args[1]);

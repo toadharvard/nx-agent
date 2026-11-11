@@ -11,7 +11,7 @@
  * when its precondition does not hold; nothing has a fallback value. A failed start leaves the process in an
  * undefined state: the caller exits (nothing is unmapped).
  *
- * Hook contract: fnvnx_os.read/map_fixed/protect/alloc/free/log/alloc_va/free_va are all required. map_fixed returns
+ * Hook contract: fnvnx_os.read/map_fixed/unmap_fixed/protect/alloc/free/log/alloc_va/free_va/register_image are all required. map_fixed returns
  * zero-filled read-write memory at exactly addr (the `prot` argument is the final protection, applied later by
  * protect); it fails if any of it is in use. Host address = guest VA + cfg.bias (0 on the target).
  * Little-endian host, 32-bit guest VAs (uint32_t), C99. */
@@ -27,6 +27,8 @@
 #define FNVNX_START_E_IMPORTS    (-41)         /* import slots without provider (all were logged) */
 #define FNVNX_START_E_STATE      (-42)         /* a precondition of S3/S5/S7 does not hold (logged) */
 #define FNVNX_START_E_DLLINIT    (-43)         /* a module's DllMain(DLL_PROCESS_ATTACH) returned FALSE (STATUS_DLL_INIT_FAILED) */
+#define FNVNX_START_E_PINNED     (-44)         /* fnvnx_module_unload: the module is static (in the exe's import closure) and is never unloaded */
+#define FNVNX_START_E_NOTHELD    (-45)         /* fnvnx_module_unload: the module is loaded but the platform holds no explicit load of it */
 #define FNVNX_START_EXIT_DLLINIT 0xF0000101u   /* fnvnx_start_enter's result when the module initialisation was refused */
 
 /* Provider of an import slot of a PLATFORM dll (a dll that is not in the module table). Value 0 = no provider. name ==
@@ -64,7 +66,8 @@ typedef struct fnvnx_thread_block {
     uint32_t tls_block_va;         /* the exe's block */
 } fnvnx_thread_block;
 
-enum { FNVNX_MOD_UNLOADED = 0, FNVNX_MOD_MAPPED = 1, FNVNX_MOD_READY = 2, FNVNX_MOD_FAILED = 3 };
+/* UNLOADING: fnvnx_module_unload is running the module's detach notification; the pages are still mapped */
+enum { FNVNX_MOD_UNLOADED = 0, FNVNX_MOD_MAPPED = 1, FNVNX_MOD_READY = 2, FNVNX_MOD_FAILED = 3, FNVNX_MOD_UNLOADING = 4 };
 
 /* One mapped image (the exe, or a module). */
 typedef struct fnvnx_loaded {
@@ -82,6 +85,9 @@ typedef struct fnvnx_loaded {
     uint32_t tls_cb[FNVNX_START_MAX_TLS_CALLBACKS];
     unsigned ntls_cb;
     uint32_t imports_bound;
+    uint8_t held;                  /* on-demand module: the platform holds an explicit load (fnvnx_module_load succeeded for it and
+                                      fnvnx_module_unload has not released it since) */
+    uint32_t dep_mask;             /* on-demand module: bit j = it imports table row j, which is on demand (read from its import directory) */
     uint8_t no_thread_calls;       /* DisableThreadLibraryCalls was called: no thread attach/detach notification (TLS callbacks included) */
     uint32_t entry_va;             /* 0: a module without an entry point */
     uint32_t relocs_applied;
@@ -128,13 +134,41 @@ uint32_t fnvnx_start_enter(fnvnx_proc *p);
  * read, hash-checked, mapped at its static base, relocated, bound with the one resolver, protected, and then given
  * DllMain(hModule, DLL_PROCESS_ATTACH, 0: a dynamic load) in dependency order (its TLS callbacks first). The calls run on
  * the calling guest thread: `teb` is its TEB and `esp` its current guest stack pointer (the frames go below it).
- * A module that is ready, or still being loaded (a DllMain loading itself), answers with its base. Refusals (the first
+ * A module that is ready, or still being loaded (a DllMain loading itself), answers with its base (and counts as held by the platform: see fnvnx_module_unload). Refusals (the first
  * failing module is logged; every module this call mapped but did not finish stays mapped and answers FNVNX_START_E_DLLINIT
  * to later loads, nothing is unmapped): not in the table (FNVNX_E_ARG), a file/hash/PE/relocation error, a slot without
  * provider (FNVNX_START_E_IMPORTS, all listed), a TLS directory (FNVNX_E_UNSUPPORTED: threads that exist already have no
  * TLS vector slot for it; only static modules can have TLS), DllMain returning FALSE (FNVNX_START_E_DLLINIT). On success
  * *base = the module's base. Precondition: a successful fnvnx_start_prepare. */
 int fnvnx_module_load(fnvnx_proc *p, uint32_t teb, uint32_t esp, const char *name, uint32_t *base);
+
+/* FreeLibrary for the platform: the platform keeps the LoadLibrary reference count of each module (one per successful
+ * fnvnx_module_load it made) and calls this when that count reaches 0; `base` is the module's base. teb/esp as for
+ * fnvnx_module_load.
+ * Rule (what the Windows loader does at FreeLibrary / LdrUnloadDll, and the one invariant that closes the class):
+ *   - a static module (in the exe's static import closure) is pinned: its load count never reaches 0 on Windows. Refused with
+ *     FNVNX_START_E_PINNED, nothing happens. Not the base of a ready module (or of the exe): FNVNX_E_ARG, nothing happens. A
+ *     ready on-demand module the platform holds no explicit load of: FNVNX_START_E_NOTHELD, nothing happens.
+ *   - the call releases the platform's explicit hold of the module. An on-demand module is LIVE while it is held explicitly or
+ *     imported by a live on-demand module (the load count of Windows: one reference per explicit load plus one per importing
+ *     loaded image; stated as reachability over the import edges, which equals that count on acyclic import graphs and also
+ *     frees an import cycle nothing outside holds, as Windows does). Every ready on-demand module that is no longer live is
+ *     unloaded now, in this order: DllMain(base, DLL_PROCESS_DETACH = 0, lpvReserved = 0) of each, in REVERSE initialisation
+ *     order (importers before the modules they import), each preceded by its TLS callbacks with the same reason as for every
+ *     other detach (one rule: TLS callbacks, then DllMain; an on-demand module has no TLS directory, so none), all on the
+ *     calling guest thread (fnvnx_lift_enter below `esp`); the DllMain results are ignored (Windows ignores them). Then the
+ *     pages of every unloaded module are released through os->unmap_fixed (exactly the ranges map_fixed gave: headers,
+ *     sections and claimed gaps), the module leaves the image list and the initialisation order, and its table row is
+ *     unloaded again: a later fnvnx_module_load of the name reads and maps the file afresh (fresh data, DllMain attach
+ *     again). The platform drops its record of an unloaded image (the images listing no longer has it); a module that is
+ *     kept stays in the listing. Which modules went is visible in fnvnx_images_get.
+ *   - the address range of a module stays in the reserved address set (the table row's static base).
+ * Returns FNVNX_OK when the module `base` was unloaded, FNVNX_START_UNLOAD_KEPT (1) when its explicit hold was released but a
+ * live module imports it (it goes when the last importer does), a negative code above, or FNVNX_E_MAP when a page range could
+ * not be given back (every range is tried; the modules whose pages are not all released are then left in state FAILED).
+ * Serialised with fnvnx_module_load by the platform (the Windows loader lock). Precondition: a successful fnvnx_start_prepare. */
+#define FNVNX_START_UNLOAD_KEPT 1
+int fnvnx_module_unload(fnvnx_proc *p, uint32_t teb, uint32_t esp, uint32_t base);
 
 /* Thread and process notifications for the platform (CreateThread / thread exit / ExitProcess), on the process
  * fnvnx_start_proc() returns. The call runs on the guest stack of the given thread; every module is notified in

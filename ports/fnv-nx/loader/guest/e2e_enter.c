@@ -31,7 +31,16 @@ uint32_t __wrap_fnvnx_import_key(const char *dll, const char *name, uint32_t ord
 
 /* test fixtures of the two components this archive links against: the lifter's import table (here: no rows) and the platform's image record */
 static unsigned g_images;
-int fnvnx_lift_imports_init(void) { return 0; }
+/* the fixture's import table has no rows; the rule of the real runtime is kept: 0 when every row is resolved, else the first
+ * unresolved row + 1 */
+static const struct { uint32_t slot; uint32_t value; } g_rows[1];
+static const unsigned g_nrows = 0;
+int fnvnx_lift_imports_init(void) {
+    unsigned i;
+    for (i = 0; i < g_nrows; i++)
+        if (!g_rows[i].value) return (int)(i + 1);
+    return 0;
+}
 void fnvnx_win32_register_image(const char *name, uint32_t base, uint32_t size) {
     g_images++;
     printf("e2e: image %s base %08x size %08x\n", name, (unsigned)base, (unsigned)size);
@@ -53,5 +62,24 @@ uint32_t fnvnx_lift_enter(uint32_t eip, uint32_t esp, uint32_t teb) {
     printf("e2e: test values %u, module calls %u, imports bound %u\n", g_test_values, g_dllmain, (unsigned)p->exe.imports_bound);
     if (!ok) { printf("e2e: FAIL: [esp]/TEB words/stack bounds/TLS vector differ from the start sequence's contract\n"); return E2E_EXIT_BAD; }
     printf("e2e: contract ok\n");
+    {   /* every on-demand module of the real table that loads must unload again (FreeLibrary rule), through the boot glue's
+         * unmap_fixed and the host's UNMAP_FIXED service, and leave the image list as it was */
+        fnvnx_proc *q = fnvnx_start_proc();
+        unsigned k, loaded = 0, freed = 0, before = (unsigned)fnvnx_images_count(q);
+        for (k = 0; k < fnvnx_module_count; k++) {
+            uint32_t base = 0;
+            int r;
+            if (fnvnx_modules[k].is_static) continue;
+            r = fnvnx_module_load(q, teb, esp, fnvnx_modules[k].name, &base);
+            printf("e2e: on-demand %s load rc %d\n", fnvnx_modules[k].name, r);
+            if (r) continue;
+            loaded++;
+            r = fnvnx_module_unload(q, teb, esp, base);
+            printf("e2e: on-demand %s unload rc %d, images %u\n", fnvnx_modules[k].name, r, (unsigned)fnvnx_images_count(q));
+            freed += r == 0 && fnvnx_images_count(q) == before;
+        }
+        printf("e2e: on-demand loaded %u freed %u\n", loaded, freed);
+        if (loaded != freed) return E2E_EXIT_BAD;
+    }
     return 0;
 }

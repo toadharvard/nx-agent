@@ -25,7 +25,7 @@ static inline int fnvnx_in(uint32_t a, uint32_t n, uint32_t lo, uint32_t hi) {
 /* every hook is required (fnvnx_os) */
 static inline int fnvnx_os_complete(const fnvnx_os *os) {
     return os && os->read && os->map_fixed && os->protect && os->alloc && os->free && os->log && os->alloc_va &&
-           os->free_va && os->register_image;
+           os->free_va && os->register_image && os->unmap_fixed;
 }
 
 void fnvnx_logf(const fnvnx_os *os, const char *fmt, ...);

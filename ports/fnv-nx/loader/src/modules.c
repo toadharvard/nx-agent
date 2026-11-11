@@ -407,7 +407,10 @@ static int dyn_map(fnvnx_proc *p, unsigned k, uint16_t *batch, unsigned *nb) {
         if (!fnvnx_rd32(desc) && !fnvnx_rd32(desc + 12) && !fnvnx_rd32(desc + 16)) break;
         dll = fnvnx_image_str(&L->img, L->img.load_base + fnvnx_rd32(desc + 12), 256, NULL);
         if (!dll) { L->state = FNVNX_MOD_FAILED; return FNVNX_E_FORMAT; }
-        if ((j = table_index(p, dll)) >= 0 && (r = dyn_map(p, (unsigned)j, batch, nb))) return r;
+        if ((j = table_index(p, dll)) >= 0) {
+            if (j != (int)k && !p->cfg.modules[j].is_static) L->dep_mask |= 1u << j;   /* an import edge fnvnx_module_unload follows */
+            if ((r = dyn_map(p, (unsigned)j, batch, nb))) return r;
+        }
     }
     batch[(*nb)++] = (uint16_t)k;
     return FNVNX_OK;
@@ -422,8 +425,12 @@ int fnvnx_module_load(fnvnx_proc *p, uint32_t teb, uint32_t esp, const char *nam
     if ((k = table_index(p, name)) < 0) { fnvnx_logf(p->os, "fnvnx-start: LoadLibrary: %s is not a module of the table", name); return FNVNX_E_ARG; }
     switch (p->mod[k].state) {
     case FNVNX_MOD_READY:
-    case FNVNX_MOD_MAPPED: *base = p->mod[k].img.load_base; return FNVNX_OK;
+    case FNVNX_MOD_MAPPED:
+        p->mod[k].held = !p->cfg.modules[k].is_static;
+        *base = p->mod[k].img.load_base;
+        return FNVNX_OK;
     case FNVNX_MOD_FAILED: return FNVNX_START_E_DLLINIT;
+    case FNVNX_MOD_UNLOADING: return FNVNX_START_E_STATE;   /* its detach notification is running */
     default: break;
     }
     r = dyn_map(p, (unsigned)k, batch, &nb);
@@ -447,8 +454,75 @@ int fnvnx_module_load(fnvnx_proc *p, uint32_t teb, uint32_t esp, const char *nam
         if (p->mod[k].state == FNVNX_MOD_MAPPED) p->mod[k].state = FNVNX_MOD_FAILED;
         return r;
     }
+    p->mod[k].held = 1;
     *base = p->mod[k].img.load_base;
     return FNVNX_OK;
+}
+
+/* ---- on demand: FreeLibrary (the rule is stated in include/fnvnx_start.h at fnvnx_module_unload) ---- */
+
+/* The on-demand modules that stay: the explicitly held ones and everything they import, transitively. Bit k = table row k. */
+static uint32_t live_set(const fnvnx_proc *p) {
+    uint32_t live = 0, prev;
+    unsigned k;
+    for (k = 0; k < p->nmod; k++)
+        if (p->mod[k].state == FNVNX_MOD_READY && !p->cfg.modules[k].is_static && p->mod[k].held) live |= 1u << k;
+    do {
+        prev = live;
+        for (k = 0; k < p->nmod; k++)
+            if ((live >> k) & 1u) live |= p->mod[k].dep_mask;
+    } while (live != prev);
+    return live;
+}
+
+int fnvnx_module_unload(fnvnx_proc *p, uint32_t teb, uint32_t esp, uint32_t base) {
+    uint16_t victims[FNVNX_MAX_MODULES], keep[FNVNX_MAX_MODULES];
+    unsigned nv = 0, nk = 0, i, k, kk = FNVNX_MAX_MODULES, ok_all = 1;
+    uint32_t live;
+    gthread t;
+    int r = FNVNX_OK;
+    if (!p || !p->exe.nmap || !p->modules_ready) return FNVNX_E_ARG;
+    for (k = 0; k < p->nmod; k++)
+        if (p->mod[k].state == FNVNX_MOD_READY && p->mod[k].img.load_base == base) kk = k;
+    if (kk == FNVNX_MAX_MODULES) { fnvnx_logf(p->os, "fnvnx-start: FreeLibrary: 0x%08x is not the base of a loaded module", (unsigned)base); return FNVNX_E_ARG; }
+    if (p->cfg.modules[kk].is_static) { fnvnx_logf(p->os, "fnvnx-start: FreeLibrary: %s is a static module and stays", p->mod[kk].name); return FNVNX_START_E_PINNED; }
+    if (!p->mod[kk].held) { fnvnx_logf(p->os, "fnvnx-start: FreeLibrary: %s is not held by an explicit load", p->mod[kk].name); return FNVNX_START_E_NOTHELD; }
+    p->mod[kk].held = 0;
+    live = live_set(p);
+    for (i = p->ninit; i--;) {   /* reverse initialisation order: importers before the modules they import */
+        unsigned m = p->init_order[i];
+        if (!p->cfg.modules[m].is_static && !((live >> m) & 1u)) victims[nv++] = (uint16_t)m;
+    }
+    if (!nv) return FNVNX_START_UNLOAD_KEPT;
+    for (i = 0; i < nv; i++) p->mod[victims[i]].state = FNVNX_MOD_UNLOADING;
+    t.teb = teb; t.esp = esp;
+    for (i = 0; i < nv; i++) {
+        const fnvnx_loaded *L = &p->mod[victims[i]];
+        if (L->ntls_cb || L->entry_va) fnvnx_logf(p->os, "fnvnx-start: detach %s", L->name);
+        (void)notify(p, t, L, DLL_PROCESS_DETACH, 0u, 1, 0u);
+    }
+    for (i = 0; i < p->ninit; i++)   /* the image list and the initialisation order lose the victims */
+        if (p->mod[p->init_order[i]].state != FNVNX_MOD_UNLOADING) keep[nk++] = p->init_order[i];
+    memcpy(p->init_order, keep, nk * sizeof keep[0]);
+    p->ninit = nk;
+    for (i = 0; i < nv; i++) {   /* every range is tried; only a module whose ranges all went is unloaded */
+        fnvnx_loaded *L = &p->mod[victims[i]];
+        unsigned j, ok = 1;
+        for (j = 0; j < L->img.nmapped; j++)
+            if (p->os->unmap_fixed(p->os->ctx, (uintptr_t)L->img.map[j].va + p->cfg.bias, L->img.map[j].size)) ok = 0;
+        for (j = 0; j < L->ngap; j++)
+            if (p->os->unmap_fixed(p->os->ctx, (uintptr_t)L->gap[j].va + p->cfg.bias, L->gap[j].size)) ok = 0;
+        if (ok) {
+            memset(L, 0, sizeof *L);
+        } else {
+            fnvnx_logf(p->os, "fnvnx-start: FreeLibrary: pages of %s could not all be released", L->name);
+            L->state = FNVNX_MOD_FAILED;
+            ok_all = 0;
+        }
+    }
+    if (!ok_all) r = FNVNX_E_MAP;
+    else if (p->mod[kk].state != FNVNX_MOD_UNLOADED) r = FNVNX_START_UNLOAD_KEPT;
+    return r;
 }
 
 /* ---- the image list ---- */

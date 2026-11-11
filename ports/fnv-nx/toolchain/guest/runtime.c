@@ -49,6 +49,7 @@ extern char *fake_heap_start, *fake_heap_end;
 int main(int argc, char **argv);
 void fnvnx_guest_fs_init(void);
 void __libc_init_array(void);
+void __call_exitprocs(int code, void *d);   /* newlib: runs the atexit list (exit() calls it with d == NULL) */
 
 static EARLY void early_zero(char *p, char *end) {
     while (p < end) *(volatile char *)p++ = 0;
@@ -138,17 +139,22 @@ int __syscall_clock_gettime(clockid_t clock_id, struct timespec *tp) {
 }
 
 /* newlib's register_fini (an init_array entry of __call_atexit.o) registers __libc_fini_array with atexit when the address of
- * __libc_fini is not null: the program's .fini_array (the destructors of its static objects) then runs at exit().  The guest
- * wants exactly that, so the marker is defined. */
+ * __libc_fini is not null (register_fini reads the symbol's address through the GOT and tests it, never its value): the program's
+ * .fini_array (the destructors of its static objects) then runs when the atexit list runs (exit(), or the return from main in
+ * __fnvnx_guest_entry).  The guest wants exactly that, so the marker is defined; its value is not used. */
 const char __libc_fini = 1;
 
 /* The C++ ABI's pure virtual call handler (libsupc++ pure.cc: write the message, std::terminate).  GCC references it weakly from
  * every object with a pure virtual slot, and a weak reference pulls no archive member, so it is defined here: the message goes to
- * the host console and the process ends through the host's exit. */
+ * the host console and the process ends through the host's exit.  The Itanium C++ ABI leaves the call undefined behaviour and
+ * names no action; libstdc++'s pure.cc terminates, and the guest's termination rule is the host's exit slot.  Where libstdc++
+ * reaches the slot through std::terminate (a handler set with set_terminate would run first; the guest sets none) and abort, this
+ * reaches it directly, with its own exit code so that the end is told from every other: FNVNX_EXIT_PURE_VIRTUAL. */
+#define FNVNX_EXIT_PURE_VIRTUAL 0xFBu
 void __cxa_pure_virtual(void) {
     static const char msg[] = "pure virtual method called\n";
     fnvnx_hcall2(fnvnx_host->console_write, FNVNX_ADDR(msg), sizeof msg - 1);
-    fnvnx_hcall1(fnvnx_host->exit, 0xFB);
+    fnvnx_hcall1(fnvnx_host->exit, FNVNX_EXIT_PURE_VIRTUAL);
     for (;;) {}   /* the host's exit does not return */
 }
 
@@ -221,7 +227,12 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     static char arg0[] = "fnvnx-guest";
     static char *argv[] = { arg0, NULL };
     int rc = main(1, argv);
-    fflush(stdout);
+    /* C 7.22.3.4: returning from main is exit(rc): the functions registered with atexit and the program's .fini_array (static
+     * destructors, through __libc_fini_array, which register_fini registered because __libc_fini is defined below) run, in
+     * reverse registration order, and every stream is flushed.  exit() would then end the process; here the process ends by the
+     * return of this function, so everything exit() does before its final _exit is done explicitly. */
+    __call_exitprocs(rc, NULL);
+    fflush(NULL);
 
     __asm__ volatile("msr tpidr_el0, %0" :: "r"(saved_tp) : "memory");
     return (uint32_t)rc;

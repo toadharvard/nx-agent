@@ -208,6 +208,17 @@ static u64 h_map_fixed(u64 addr, u64 size, u64 src) {
     return svcMapMemory((void *)addr, (void *)src, size);
 }
 
+/* FNVNX_PLAT_UNMAP_FIXED (addr, size, src): the undo of h_map_fixed, see hostapi.h. The kernel checks that [addr, addr+size)
+ * is the mapping of exactly [src, src+size) (svcUnmapMemory fails otherwise and changes nothing), so the host keeps no table. */
+static u64 h_unmap_fixed(u64 addr, u64 size, u64 src) {
+    if ((addr | src) & 0xFFF) return 0xCC01;
+    if (!size || (size & 0xFFF)) return 0xCA01;
+    if (fnvnx_reserve_map_fixed && fnvnx_reserve_contains && fnvnx_reserve_contains(addr, size))   /* map_fixed only zeroed it */
+        return fnvnx_reserve_map_fixed(addr, size) == 0 ? 0 : MAKERESULT(Module_Libnx, LibnxError_BadInput);
+    logf_("fnvnx host: unmap_fixed %#010lx..%#010lx to %#010lx\n", addr, addr + size, src);
+    return svcUnmapMemory((void *)addr, (void *)src, size);
+}
+
 static fnvnx_ext_handler g_ext[64];
 int fnvnx_host_register_ext(uint32_t module, fnvnx_ext_handler handler) {
     if (module >= 64 || g_ext[module]) return -1;

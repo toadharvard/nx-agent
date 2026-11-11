@@ -31,6 +31,7 @@ static int h_read(void *c, uint32_t file, uint32_t off, void *dst, uint32_t size
     return fseek(g_fp[file], (long)off, SEEK_SET) || fread(dst, 1, size, g_fp[file]) != size ? -1 : 0;
 }
 static int h_map(void *c, uintptr_t a, uint32_t s, unsigned p) { (void)c; (void)p; return mmap((void *)a, s, PROT_READ | PROT_WRITE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0) == MAP_FAILED; }
+static int h_unmap(void *c, uintptr_t a, uint32_t s) { (void)c; return munmap((void *)a, s); }
 static int h_prot(void *c, uintptr_t a, uint32_t s, unsigned p) { (void)c; return mprotect((void *)a, s, (int)((p & 1 ? PROT_READ : 0) | (p & 2 ? PROT_WRITE : 0))); }
 static void *h_alloc(void *c, uint32_t s) { (void)c; return malloc(s); }
 static void h_free(void *c, void *p) { (void)c; free(p); }
@@ -43,7 +44,7 @@ static uint32_t resolve(void *c, const char *d, const char *n, uint32_t o) { (vo
 static unsigned g_nreg; static uint32_t g_regbase[32], g_regsize[32]; static char g_regname[32][64];
 static void h_reg(void *c, const char *n, uint32_t b, uint32_t s) { (void)c; if (g_nreg < 32) { snprintf(g_regname[g_nreg], 64, "%s", n); g_regbase[g_nreg] = b; g_regsize[g_nreg] = s; } g_nreg++; }
 int main(int argc, char **argv) {
-    static fnvnx_proc p; fnvnx_os os = {NULL, h_read, h_map, h_prot, h_alloc, h_free, h_log, h_va, h_fva, h_reg}; fnvnx_start_cfg cfg; unsigned i; int r;
+    static fnvnx_proc p; fnvnx_os os = {NULL, h_read, h_map, h_prot, h_alloc, h_free, h_log, h_va, h_fva, h_reg, h_unmap}; fnvnx_start_cfg cfg; unsigned i; int r;
     FILE *f; uint8_t *buf; uint32_t len; unsigned nrel = 0;
     if (argc < 3) return 2;
     g_dir = argv[2];

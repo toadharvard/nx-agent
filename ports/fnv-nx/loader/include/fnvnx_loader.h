@@ -70,6 +70,12 @@ typedef struct fnvnx_os {
      * run yet (its DllMain and TLS callbacks follow). `name` is the file name as in the table, `base` the load base, `size` the
      * SizeOfImage rounded up to a page. The platform records it for GetModuleHandle / VirtualQuery. Called once per image. */
     void (*register_image)(void *ctx, const char *name, uint32_t base, uint32_t size);
+    /* The undo of map_fixed, for fnvnx_module_unload: addr and size are exactly the arguments of ONE earlier successful
+     * map_fixed call (the loader never unmaps part of a mapping or a union of two). Afterwards [addr, addr+size) is not
+     * mapped at all and may be handed to map_fixed again, which then yields fresh zero-filled memory; the memory that backed
+     * the mapping goes back to the platform. The pages may hold any protection protect gave them (the hook restores what its
+     * host needs). 0 on success. */
+    int (*unmap_fixed)(void *ctx, uintptr_t addr, uint32_t size);
 } fnvnx_os;
 
 /* ---- PE32 headers ---------------------------------------------------------------------------------------- */

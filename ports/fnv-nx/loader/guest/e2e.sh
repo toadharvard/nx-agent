@@ -65,7 +65,7 @@ echo "guest: $(grep -o 'rc=0x[0-9a-f]*' "$LOG" | head -1)"
 t "identity ok" "grep -q 'fnvnx-start: identity ok' '$LOG'"
 t "image mapped" "grep -q 'fnvnx-start: image mapped' '$LOG'"
 t "iat.py: every exe slot has a value" "grep -q '^280 slots with a value, 0 without' '$W/iat.log'"
-t "static modules mapped (one line each)" "[ \$(grep -v '\[debug\]' '$LOG' | grep -c 'fnvnx-start: module .* mapped at') = \$(awk -F'\t' '!/^#/ && \$9 == 1' '$W/mods/modules.tsv' | wc -l) ]"
+t "static modules mapped (one line each, before the entry: the fixture's on-demand loads come after)" "[ \$(grep -v '\[debug\]' '$LOG' | awk '/fnvnx-start: enter/ {exit} /fnvnx-start: module .* mapped at/ {n++} END {print n + 0}') = \$(awk -F'\t' '!/^#/ && \$9 == 1' '$W/mods/modules.tsv' | wc -l) ]"
 if [ "$NP_EXPECT" != 0 ]; then
   NP=$(awk '/fnvnx-start: no provider for / && !/\[debug\]/ {n++} END {print n + 0}' "$LOG")
   echo "static module slots without provider (modules.py): $NP_EXPECT, listed by the loader: $NP (start refused expected)"
