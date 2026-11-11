@@ -722,6 +722,7 @@ extern "C" LPWSTR *CommandLineToArgvW(LPCWSTR cmd, int *argc)
 extern "C" void ExitProcess(UINT code)
 {
     w32_log("ExitProcess(%u)", (unsigned)code);
+    w32_fls_thread_exit();   /* the calling thread's FLS callbacks, before the modules detach (fls.cpp) */
     fnvnx_bnd_process_detach();   /* DllMain(DLL_PROCESS_DETACH) of the translated modules */
     fnvnx_threads_flush();   /* the race checker's pairs and the watchdog's summary, when they are on */
     fnvnx_mem_flush();       /* the memory lane's peak, sites and summary, when it is on */

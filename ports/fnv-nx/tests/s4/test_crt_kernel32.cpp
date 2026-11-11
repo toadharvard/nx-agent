@@ -381,10 +381,10 @@ TEST(crt_k32_create_file_w_and_modules)
     CHECK_EQ(GetLastError(), ERROR_FILE_NOT_FOUND);
     CHECK(GetModuleHandleW(NULL) == GetModuleHandleA(NULL));
     CHECK(GetModuleHandleW(L"FalloutNV.exe") == GetModuleHandleA(NULL));
-    /* the CRT's _mtinit needs kernel32; its Fls* are absent (TLS fallback), its exports resolve */
+    /* the CRT's _mtinit needs kernel32: its Fls* exist (W27, test_gpa_names.cpp), its exports resolve */
     HMODULE k = GetModuleHandleW(L"KERNEL32.DLL");
     CHECK(k != NULL);
-    CHECK(GetProcAddress(k, "FlsAlloc") == NULL);
+    CHECK((void *)GetProcAddress(k, "FlsAlloc") != NULL);
     CHECK((void *)GetProcAddress(k, "TlsAlloc") == (void *)&TlsAlloc);
     CHECK((void *)GetProcAddress(k, "MultiByteToWideChar") == (void *)&MultiByteToWideChar);
     HMODULE u = LoadLibraryA("USER32.DLL");

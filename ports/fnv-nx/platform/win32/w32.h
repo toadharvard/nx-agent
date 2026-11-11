@@ -46,6 +46,7 @@ struct w32_thread {
     struct w32_wait_rec wait;
 };
 struct w32_thread *w32_self(void);
+void w32_fls_thread_exit(void);   /* fls.cpp: the calling thread ends: its FLS callbacks run, its cells go */
 
 /* ---- kernel objects: HANDLE is a pointer to one of these */
 enum { W32_EVENT = 1, W32_MUTEX, W32_SEMAPHORE, W32_THREAD, W32_FILE, W32_FIND, W32_HEAP, W32_MAPPING };

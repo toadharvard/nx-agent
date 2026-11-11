@@ -120,6 +120,16 @@ FNVNX_WAVEOUT_EXPORTS(FNVNX_WAVEOUT_DECL)
 #undef FNVNX_WAVEOUT_DECL
 }
 
+/* kernel32 (encptr.cpp, fls.cpp) */
+extern "C" {
+LPVOID EncodePointer(LPVOID);
+LPVOID DecodePointer(LPVOID);
+DWORD FlsAlloc(void *);   /* its parameter is the game's callback: one guest word */
+BOOL FlsFree(DWORD);
+LPVOID FlsGetValue(DWORD);
+BOOL FlsSetValue(DWORD, LPVOID);
+}
+
 /* user32 window functions without a declaration in the shim (platform/win32/window.cpp) */
 extern "C" {
 HWND GetTopWindow(HWND);
@@ -162,7 +172,7 @@ const exp g_exports[] = {
     K(SetLastError), K(SetThreadAffinityMask), K(SetThreadIdealProcessor), K(SetThreadPriority),
     K(SetThreadPriorityBoost), K(Sleep), K(SleepEx), K(SuspendThread), K(SwitchToThread),
     K(SystemTimeToFileTime), K(SystemTimeToTzSpecificLocalTime), K(TlsAlloc), K(TlsFree), K(TlsGetValue),
-    K(TlsSetValue), K(TryEnterCriticalSection), K(VirtualAlloc), K(VirtualFree), K(VirtualProtect), K(VirtualQuery), K(GetWriteWatch), K(ResetWriteWatch),
+    K(TlsSetValue), K(EncodePointer), K(DecodePointer), K(FlsAlloc), K(FlsFree), K(FlsGetValue), K(FlsSetValue), K(TryEnterCriticalSection), K(VirtualAlloc), K(VirtualFree), K(VirtualProtect), K(VirtualQuery), K(GetWriteWatch), K(ResetWriteWatch),
     K(CreateFileMappingA), K(MapViewOfFile), K(UnmapViewOfFile), K(FlushViewOfFile),
     K(WaitForMultipleObjects), K(WaitForSingleObject), K(WriteFile), K(WritePrivateProfileSectionA),
     K(WritePrivateProfileStringA), K(lstrcatA), K(lstrcmpiA), K(lstrcpyA), K(lstrlenA),

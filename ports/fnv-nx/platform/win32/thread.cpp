@@ -310,6 +310,7 @@ static void thread_trampoline(void *p)
     if (self->boost)
         os_cpu_boost(1);
     DWORD code = W32_DW(fnvnx_bnd_thread_run(to->gt, (fnvnx_gaddr)(uintptr_t)to->arg));
+    w32_fls_thread_exit();   /* before the modules hear of the detach, as the reference does */
     thread_end(to);
     if (self->boost) {
         os_cpu_boost(0);
@@ -481,6 +482,7 @@ extern "C" void ExitThread(DWORD code)
         os_cpu_boost(0);
         self->boost = 0;
     }
+    w32_fls_thread_exit();
     if (to) {
         thread_end(to);
         thread_finish(to, code);
