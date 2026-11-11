@@ -1227,7 +1227,7 @@ def main():
     r50, l50 = run(built[50][0], root)[:2]
     k50 = kv(l50)
     BI, NF = "1759", "1359"
-    want50 = {"self-id": "1", "self-distinct": "1", "self-start": BI, "self-join": BI, "self-prio": "0", "self-resume": "f201",
+    want50 = {"self-id": "1", "self-distinct": "1", "self-start": BI, "self-join": BI, "self-prio": "0", "self-resume": "f401",
               "self-free": "0", "self-free-again": NF, "self-use-freed": NF, "pause-by-worker": "64", "act-new": BI, "start": "0",
               "start-again": BI, "start-finished": BI, "act-finished": BI, "count": "65"}
     bad50 = {n: (k50.get(n), v) for n, v in want50.items() if k50.get(n) != v}
@@ -1245,14 +1245,14 @@ def main():
     case("TZ_AT beyond year 2100 is -EOVERFLOW and the run goes on", r53["reason"] == "exit"
          and kv(l53) == {"tz-below": "%x" % (M - 75), "tz-above": "%x" % (M - 75)}, (r53, l53))
     r54, l54 = run(built[54][0], root)[:2]
-    case("THREAD_ACTIVITY on the calling thread's own THREAD_SELF record: ResultBusy 0xF201 for pause and resume, the run goes on",
-         r54["reason"] == "exit" and kv(l54) == {"self-pause": "f201", "self-resume": "f201"} and "after the pause" in l54, (r54, l54))
+    case("THREAD_ACTIVITY on the calling thread's own THREAD_SELF record: ResultBusy 0xF401 for pause and resume, the run goes on",
+         r54["reason"] == "exit" and kv(l54) == {"self-pause": "f401", "self-resume": "f401"} and "after the pause" in l54, (r54, l54))
     r55, l55 = run(built[55][0], root)[:2]
     k55 = kv(l55)
     want55 = {"not-started-pause": "1759", "resume-running": "fa01", "pause": "0", "pause-paused": "fa01", "resume": "0", "resume-again": "fa01",
-              "finished": "1759", "me-pause": "f201", "me-resume": "f201", "me-zero": "1759", "rec-finished": "1759", "rec-finished-resume": "1759",
+              "finished": "1759", "me-pause": "f401", "me-resume": "f401", "me-zero": "1759", "rec-finished": "1759", "rec-finished-resume": "1759",
               "no-record": "1359"}
-    case("THREAD_ACTIVITY: new / finished thread or record BadInput, resume of a running and pause of a paused thread 0xFA01, own record 0xF201, "
+    case("THREAD_ACTIVITY: new / finished thread or record BadInput, resume of a running and pause of a paused thread 0xFA01, own record 0xF401, "
          "unknown id NotFound (%d values)" % len(want55), r55["reason"] == "exit" and k55 == want55, (k55, r55))
     r56, l56 = run(built[56][0], root)[:2]
     k56 = kv(l56)
