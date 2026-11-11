@@ -103,6 +103,9 @@ FARPROC w32_mem_hook_proc(const char *name, FARPROC f);   /* GetProcAddress: Dir
 DWORD w32_map_path(const char *win, char *host, size_t n);
 void w32_virtual_cwd(char *out, size_t n);
 DWORD w32_full_path(const char *win, char *out, size_t n); /* normalised "x:\\a\\b" */
+/* what a name opened by CreateFile is (path.cpp): a file-system name, or a DOS device / device-namespace name */
+enum { W32_NC_FILE, W32_NC_NUL, W32_NC_CONSOLE, W32_NC_PORT, W32_NC_PIPE, W32_NC_UNC, W32_NC_NONE };
+int w32_name_class(const char *name, char *dev, size_t n);
 /* virtual Windows paths of the environment (ENV_TRUTH F1, F2, P5): the install, the exe, the user's folder, the
  * system and Windows directories */
 static const char W32_GAME_DIR[] = "C:\\FalloutNV";

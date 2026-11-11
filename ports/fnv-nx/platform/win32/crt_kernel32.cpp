@@ -88,13 +88,14 @@ extern "C" BOOL SetStdHandle(DWORD which, HANDLE h)
     return TRUE;
 }
 
+bool w32_file_is_device(HANDLE h);   /* file.cpp */
 extern "C" DWORD GetFileType(HANDLE h)
 {
     struct w32_obj *o = w32_obj_get(h, 0);   /* ERROR_INVALID_HANDLE when bad (NULL included) */
     if (!o)
         return FILE_TYPE_UNKNOWN;
     if (o->type == W32_FILE)
-        return FILE_TYPE_DISK;
+        return w32_file_is_device(h) ? FILE_TYPE_CHAR : FILE_TYPE_DISK;
     SetLastError(ERROR_SUCCESS);
     return FILE_TYPE_UNKNOWN;
 }

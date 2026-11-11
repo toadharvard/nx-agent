@@ -14,6 +14,19 @@
 #ifndef FILE_FLAG_DELETE_ON_CLOSE
 #define FILE_FLAG_DELETE_ON_CLOSE 0x04000000
 #endif
+#ifndef ERROR_BAD_NETPATH
+#define ERROR_BAD_NETPATH 53L
+#endif
+#ifndef FILE_FLAG_NO_BUFFERING
+#define FILE_FLAG_NO_BUFFERING 0x20000000
+#endif
+#ifndef FILE_FLAG_WRITE_THROUGH
+#define FILE_FLAG_WRITE_THROUGH 0x80000000u
+#endif
+#ifndef ERROR_INVALID_FUNCTION
+#define ERROR_INVALID_FUNCTION 1L
+#endif
+#define W32_SECTOR 512   /* logical sector size of the C: volume (what an emulated 512-byte-sector disk reports) */
 #ifndef ERROR_FILE_EXISTS
 #define ERROR_FILE_EXISTS 80L
 #endif
@@ -48,6 +61,8 @@ struct w32_file {
     int fd;         /* -1: a directory handle the host could not open (attribute queries only) */
     DWORD access;
     int async, append, is_dir, linked;
+    int dev;        /* 1: the NUL device (no descriptor, no share entry) */
+    int nobuf, wt;  /* FILE_FLAG_NO_BUFFERING (sector rules) / FILE_FLAG_WRITE_THROUGH */
     struct share_ent se;
 };
 
@@ -214,7 +229,11 @@ static int map_or_fail(const char *win, char *host, int utf8 = 0)
         SetLastError(ERROR_INVALID_PARAMETER);
         return 0;
     }
-    if (strpbrk(win, "*?\"<>|")) { /* wildcards and reserved characters are not file names */
+    const char *chk = win;
+    if ((win[0] == '\\' || win[0] == '/') && (win[1] == '\\' || win[1] == '/') && (win[2] == '?' || win[2] == '.') &&
+        (win[3] == '\\' || win[3] == '/'))
+        chk = win + 4; /* the "\\?\" and "\\.\" prefixes are not wildcards */
+    if (strpbrk(chk, "*?\"<>|")) { /* wildcards and reserved characters are not file names */
         SetLastError(ERROR_INVALID_NAME);
         return 0;
     }
@@ -232,18 +251,55 @@ static HANDLE create_core(LPCSTR name, DWORD access, DWORD share, DWORD disp, DW
         SetLastError(ERROR_PATH_NOT_FOUND);
         return INVALID_HANDLE_VALUE;
     }
-    if (!map_or_fail(name, host, utf8)) {
-        *rep = 1;
-        return INVALID_HANDLE_VALUE;
-    }
     access = W32_DW(access);
     share = W32_DW(share) & 7;
     disp = W32_DW(disp);
     flags = W32_DW(flags);
+    /* a DOS device name or device-namespace name (path.cpp: the Windows 7 rules) is not a file */
+    char dev[8];
+    int nc = w32_name_class(name, dev, sizeof dev);
+    if (nc != W32_NC_FILE && (disp < CREATE_NEW || disp > TRUNCATE_EXISTING)) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return INVALID_HANDLE_VALUE;
+    }
+    if (nc == W32_NC_UNC) { /* ENV N1: no network interface: the server cannot be reached */
+        SetLastError(ERROR_BAD_NETPATH);
+        return INVALID_HANDLE_VALUE;
+    }
+    if (nc == W32_NC_CONSOLE) { /* ENV F5: the process has no console */
+        SetLastError(ERROR_INVALID_HANDLE);
+        return INVALID_HANDLE_VALUE;
+    }
+    if (nc == W32_NC_PORT || nc == W32_NC_PIPE || nc == W32_NC_NONE) { /* no serial/parallel port, no pipe, no such object */
+        SetLastError(ERROR_FILE_NOT_FOUND);
+        return INVALID_HANDLE_VALUE;
+    }
+    if (nc == W32_NC_NUL) {
+        struct w32_file *f = (struct w32_file *)w32_obj_new(W32_FILE, sizeof *f, file_destroy);
+        if (!f)
+            return INVALID_HANDLE_VALUE;
+        f->fd = -1;
+        f->dev = 1;
+        f->access = access;
+        f->async = (flags & FILE_FLAG_OVERLAPPED) != 0;
+        HANDLE h = w32_handle_open(&f->o);
+        if (!h) {
+            w32_obj_unref(&f->o);
+            return INVALID_HANDLE_VALUE;
+        }
+        SetLastError(ERROR_SUCCESS);
+        return h;
+    }
+    if (!map_or_fail(name, host, utf8)) {
+        *rep = 1;
+        return INVALID_HANDLE_VALUE;
+    }
     if (disp < CREATE_NEW || disp > TRUNCATE_EXISTING || (disp == TRUNCATE_EXISTING && !(access & ACC_WDATA))) {
         SetLastError(ERROR_INVALID_PARAMETER);
         return INVALID_HANDLE_VALUE;
     }
+    size_t nl = strlen(name);
+    int trailing_sep = nl && (name[nl - 1] == '\\' || name[nl - 1] == '/');
     int doc = (flags & FILE_FLAG_DELETE_ON_CLOSE) != 0;
     unsigned rights = rights_of(access) | (doc ? SR_D : 0); /* DELETE_ON_CLOSE needs DELETE sharing */
     char key[W32_PATH_MAX];
@@ -253,7 +309,7 @@ static HANDLE create_core(LPCSTR name, DWORD access, DWORD share, DWORD disp, DW
     int isdir = exists && st.is_dir;
     if (isdir) {
         if (!(flags & FILE_FLAG_BACKUP_SEMANTICS)) {
-            SetLastError(ERROR_ACCESS_DENIED);
+            SetLastError(trailing_sep ? ERROR_PATH_NOT_FOUND : ERROR_ACCESS_DENIED); /* "dir\\" is not a file name */
             return INVALID_HANDLE_VALUE;
         }
         if (disp == CREATE_NEW) {
@@ -322,6 +378,8 @@ static HANDLE create_core(LPCSTR name, DWORD access, DWORD share, DWORD disp, DW
     f->fd = fd;
     f->access = access;
     f->async = (flags & FILE_FLAG_OVERLAPPED) != 0;
+    f->nobuf = (flags & FILE_FLAG_NO_BUFFERING) != 0;
+    f->wt = (flags & FILE_FLAG_WRITE_THROUGH) != 0;
     f->append = append;
     f->is_dir = isdir;
     snprintf(f->se.host, sizeof f->se.host, "%s", host);
@@ -373,6 +431,9 @@ HANDLE w32_create_file_name(LPCSTR name, DWORD access, DWORD share, DWORD disp, 
 
 extern "C" HANDLE CreateFileA(LPCSTR name, DWORD access, DWORD share, void *sa, DWORD disp, DWORD flags, HANDLE tmpl)
 {
+    /* hTemplateFile only supplies extended attributes, which this file system has none of. lpSecurityAttributes'
+     * bInheritHandle marks the handle inheritable by a child process: the manifest has no CreateProcess,
+     * DuplicateHandle or GetHandleInformation, so the process can observe no difference. */
     W32_UNUSED(sa);
     W32_UNUSED(tmpl);
     return w32_create_file_name(name, access, share, disp, flags, 0);
@@ -412,11 +473,24 @@ static struct w32_file *io_file(HANDLE h, LPDWORD count, LPOVERLAPPED ov, DWORD 
         SetLastError(ERROR_INVALID_PARAMETER);
         return NULL;
     }
-    if (!(f->access & need) || f->fd < 0) {
+    if (!(f->access & need) || (f->fd < 0 && !f->dev)) {
         SetLastError(ERROR_ACCESS_DENIED);
         return NULL;
     }
     return f;
+}
+
+/* FILE_FLAG_NO_BUFFERING: the buffer address, the length and the file offset are multiples of the sector size */
+static int nobuf_ok(struct w32_file *f, const void *buf, DWORD n, LPOVERLAPPED ov)
+{
+    if (!f->nobuf || f->dev)
+        return 1;
+    int64_t pos = ov ? (int64_t)ov_offset(ov) : os_file_seek(f->fd, 0, OS_SEEK_CUR);
+    if (((uintptr_t)buf % W32_SECTOR) || (W32_DW(n) % W32_SECTOR) || (pos % W32_SECTOR)) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return 0;
+    }
+    return 1;
 }
 
 extern "C" BOOL ReadFile(HANDLE h, LPVOID buf, DWORD n, LPDWORD got, LPOVERLAPPED ov)
@@ -424,14 +498,17 @@ extern "C" BOOL ReadFile(HANDLE h, LPVOID buf, DWORD n, LPDWORD got, LPOVERLAPPE
     struct w32_file *f = io_file(h, got, ov, ACC_READ);
     if (!f)
         return FALSE;
+    if (!nobuf_ok(f, buf, n, ov))
+        return FALSE;
     if (ov)
         ov_begin(ov);
     uint64_t off = ov ? ov_offset(ov) : 0;
     /* ReadFile returns short only at EOF: loop over the partial reads the host may return */
     int64_t r = 0, want = (int64_t)W32_DW(n);
     while (r < want) {
-        int64_t k = ov ? os_file_pread(f->fd, (char *)buf + r, (size_t)(want - r), off + (uint64_t)r)
-                       : os_file_read(f->fd, (char *)buf + r, (size_t)(want - r));
+        int64_t k = f->dev ? 0                                  /* NUL: end of file at once */
+                    : ov ? os_file_pread(f->fd, (char *)buf + r, (size_t)(want - r), off + (uint64_t)r)
+                         : os_file_read(f->fd, (char *)buf + r, (size_t)(want - r));
         if (k < 0) {
             SetLastError(w32_os_error((int)k));
             if (got)
@@ -446,7 +523,7 @@ extern "C" BOOL ReadFile(HANDLE h, LPVOID buf, DWORD n, LPDWORD got, LPOVERLAPPE
     }
     if (got)
         *got = (DWORD)r;
-    if (ov && !f->async)
+    if (ov && !f->async && !f->dev)
         os_file_seek(f->fd, (int64_t)(off + (uint64_t)r), OS_SEEK_SET); /* synchronous handle: the pointer moves */
     if (ov) {
         if (r == 0 && want) { /* with an OVERLAPPED the end of file is an error, on any handle */
@@ -464,14 +541,17 @@ extern "C" BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD n, LPDWORD put, LPOVERLAP
     struct w32_file *f = io_file(h, put, ov, ACC_WRITE);
     if (!f)
         return FALSE;
+    if (!nobuf_ok(f, buf, n, ov))
+        return FALSE;
     if (ov)
         ov_begin(ov);
     uint64_t off = ov ? ov_offset(ov) : 0;
     int64_t done = 0, want = (int64_t)W32_DW(n);
     while (done < want) {
         /* an append-only handle writes at the end whatever the offset (O_APPEND) */
-        int64_t r = ov ? os_file_pwrite(f->fd, (const char *)buf + done, (size_t)(want - done), off + (uint64_t)done)
-                       : os_file_write(f->fd, (const char *)buf + done, (size_t)(want - done));
+        int64_t r = f->dev ? want - done                        /* NUL: discarded, reported written */
+                    : ov ? os_file_pwrite(f->fd, (const char *)buf + done, (size_t)(want - done), off + (uint64_t)done)
+                         : os_file_write(f->fd, (const char *)buf + done, (size_t)(want - done));
         if (r <= 0) {
             SetLastError(r < 0 ? w32_os_error((int)r) : 112 /* ERROR_DISK_FULL */);
             if (put)
@@ -484,7 +564,9 @@ extern "C" BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD n, LPDWORD put, LPOVERLAP
     }
     if (put)
         *put = (DWORD)done;
-    if (ov && !f->async) {
+    if (f->wt && !f->dev)
+        os_file_sync(f->fd);                                    /* WRITE_THROUGH: on the medium before return */
+    if (ov && !f->async && !f->dev) {
         os_stat_t st;
         int64_t end = f->append && os_file_fstat(f->fd, &st) == 0 ? (int64_t)st.size : (int64_t)(off + (uint64_t)done);
         os_file_seek(f->fd, end, OS_SEEK_SET);
@@ -500,6 +582,15 @@ extern "C" BOOL SetFilePointerEx(HANDLE h, LARGE_INTEGER dist, PLARGE_INTEGER ne
     if (!f)
         return FALSE;
     method = W32_DW(method);
+    if (f->dev) { /* the NUL device has no content: its position stays 0 */
+        if (method > FILE_END) {
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return FALSE;
+        }
+        if (newpos)
+            newpos->QuadPart = 0;
+        return TRUE;
+    }
     int w = method == FILE_CURRENT ? OS_SEEK_CUR : method == FILE_END ? OS_SEEK_END : OS_SEEK_SET;
     if (method > FILE_END) {
         SetLastError(ERROR_INVALID_PARAMETER);
@@ -578,10 +669,12 @@ extern "C" BOOL FlushFileBuffers(HANDLE h)
     struct w32_file *f = file_of(h);
     if (!f)
         return FALSE;
-    if (!(f->access & ACC_WRITE) || f->fd < 0) { /* FlushFileBuffers needs GENERIC_WRITE */
+    if (!(f->access & ACC_WRITE) || (f->fd < 0 && !f->dev)) { /* FlushFileBuffers needs GENERIC_WRITE */
         SetLastError(ERROR_ACCESS_DENIED);
         return FALSE;
     }
+    if (f->dev)
+        return TRUE; /* nothing is buffered */
     int r = os_file_sync(f->fd);
     if (r) {
         SetLastError(w32_os_error(r));
@@ -595,10 +688,12 @@ extern "C" BOOL SetEndOfFile(HANDLE h)
     struct w32_file *f = file_of(h);
     if (!f)
         return FALSE;
-    if (!(f->access & ACC_WRITE) || f->fd < 0) {
+    if (!(f->access & ACC_WRITE) || (f->fd < 0 && !f->dev)) {
         SetLastError(ERROR_ACCESS_DENIED);
         return FALSE;
     }
+    if (f->dev)
+        return TRUE;
     int64_t pos = os_file_seek(f->fd, 0, OS_SEEK_CUR);
     int r = pos < 0 ? (int)pos : os_file_truncate(f->fd, (uint64_t)pos);
     if (r) {
@@ -612,6 +707,10 @@ extern "C" BOOL GetFileTime(HANDLE h, LPFILETIME c, LPFILETIME a, LPFILETIME w)
 {
     struct w32_file *f = file_of(h);
     os_stat_t st;
+    if (f && f->dev) {
+        SetLastError(ERROR_INVALID_FUNCTION); /* a device has no time stamps */
+        return FALSE;
+    }
     if (!f || os_file_fstat(f->fd, &st))
         return FALSE;
     if (c) w32_set_ft(c, w32_unix_us_to_filetime(st.ctime_us));
@@ -1138,4 +1237,15 @@ extern "C" UINT GetTempFileNameW(LPCWSTR path, LPCWSTR prefix, UINT unique, LPWS
         for (size_t i = 0; (out[pl + i] = (WCHAR)(unsigned char)tail[i]) != 0; i++) {}
     }
     return u;
+}
+
+/* GetFileType: a NUL handle is a character device (crt_kernel32.cpp asks) */
+bool w32_file_is_device(HANDLE h)
+{
+    struct w32_obj *o = w32_obj_get_ref(h, W32_FILE);
+    if (!o)
+        return false;
+    bool d = ((struct w32_file *)o)->dev != 0;
+    w32_obj_unref(o);
+    return d;
 }
