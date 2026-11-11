@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <GL/glcorearb.h>
 #include "nxgpu4.h"
+#include "nxgpu4_shader.h"
 #include "gl4_funcs.h"
 
 #ifdef __cplusplus
@@ -22,7 +23,7 @@ void* nxgl4_guest_ptr(uint64_t addr, uint64_t size);
  * thread) and the swapchain image (image 0 names it) of width x height (none when 0). NULL on failure (err). */
 const NxGpuApi4* nxgl4_create(uint32_t width, uint32_t height, char* err, size_t errlen);
 void nxgl4_destroy(void);
-/* ext_call dispatch for fn 0..NXGPU_FN_COUNT4-1 over the table the backend created; arguments as in NxGpuApi4. */
+/* ext_call dispatch for fn 0..NXGPU_FN_SHADER_CREATE_D3D (= NXGPU_FN_COUNT4) over the table the backend created; arguments as in NxGpuApi4. */
 uint64_t nxgl4_ext(uint32_t fn, const uint64_t* args, uint32_t nargs);
 const char* nxgl4_last_error(void);
 /* The embedder's present hook, called by the present call (gl4_present.c) after the frame file (below) is written.
@@ -54,7 +55,10 @@ typedef struct {
     uint16_t w, h, d;
     uint8_t fmt, type, samples, mips, isView, used, isDepth, hasStencil;
 } Gl4Image;
-typedef struct { GLuint sh; uint8_t stage, used; } Gl4Shader;
+/* A shader made by NXGPU_FN_SHADER_CREATE_D3D: its memo key (the bytecode itself, so two codes never share an entry whatever their hash) and the number of
+ * creates that returned this id (each SHADER_DESTROY takes one back; the last one releases the GL shader). */
+typedef struct Gl4D3d { uint8_t* code; uint32_t size, refs; uint8_t stage, variant, nl, l[31]; } Gl4D3d;
+typedef struct { GLuint sh; uint8_t stage, used; Gl4D3d* d3d; } Gl4Shader;
 typedef struct { uint16_t vs, ps; GLuint prog; uint8_t used; } Gl4Program;
 typedef struct { NxRenderState rs; uint16_t vs, ps, layout, prog; uint32_t epoch; uint8_t defined; } Gl4State;
 typedef struct { NxVtxLayout l; NxVtxLayout4 l4; GLuint vao; uint32_t gen; uint8_t defined, is4, stale; } Gl4Layout;
@@ -175,6 +179,10 @@ int gl4_stream_check(const uint32_t* w, const uint32_t* end);
 /* gl4_shader.c */
 uint64_t gl4_api_shader_create(uint64_t desc);
 uint64_t gl4_api_shader_destroy(uint64_t id);
+uint32_t gl4_shader_from_glsl(const char* glsl, size_t n, uint32_t stage);   /* shim + compile + register: the id, or 0 with nothing registered and the log in gl4_err */
+/* gl4_d3dshader.c: NXGPU_FN_SHADER_CREATE_D3D */
+uint64_t gl4_api_shader_create_d3d(uint64_t desc);
+void gl4_d3d_free(Gl4D3d* d);
 uint16_t gl4_program_for(uint16_t vs, uint16_t ps);
 GLuint gl4_compile_program(const char* vs, const char* fs);   /* internal programs: 0 and an error when they fail */
 /* gl4_core.c */
@@ -204,6 +212,8 @@ uint64_t gl4_api_wait_frame(uint64_t frame);
     X(SAMPLER_UPDATE, sampler_update, gl4_api_sampler_update, 2) X(IMAGE_READ, image_read, gl4_api_image_read, 1) \
     X(QUERY_RESULT, query_result, gl4_api_query_result, 3) X(PRESENT, present, gl4_api_present, 1) \
     X(WAIT_VBLANK, wait_vblank, gl4_api_wait_vblank, 1)
+/* the function of ABI 4.1 (nxgpu4_shader.h): number NXGPU_FN_COUNT4, no NxGpuApi4 field (the ABI struct is v4's), dispatched by nxgl4_ext only */
+#define NXGL4_FN_EXT_LIST(X) X(SHADER_CREATE_D3D, gl4_api_shader_create_d3d, 1)
 uint64_t gl4_api_mem_create(uint64_t desc);
 uint64_t gl4_api_mem_gpu_addr(uint64_t id);
 uint64_t gl4_api_mem_destroy(uint64_t id);

@@ -84,17 +84,17 @@ static GLenum stage_enum(uint32_t stage) {
     return 0;
 }
 
-uint64_t gl4_api_shader_create(uint64_t a) {
-    const NxShaderDesc* d = (const NxShaderDesc*)nxgl4_guest_ptr(a, sizeof *d);
-    if (!d || !d->glsl || !d->glsl_size || !stage_enum(d->stage)) return 0;
+/* GLSL (deko style, "#version 460") -> a registered GL shader of the stage. 0 and a recorded error when the table is full or the compile fails: nothing is registered then. */
+uint32_t gl4_shader_from_glsl(const char* glsl, size_t n, uint32_t stage) {
+    if (!glsl || !n || !stage_enum(stage)) return 0;
     uint32_t id = 1;
     while (id <= GL4_MAX_SHADERS && g4.sh[id].used) id++;
-    if (id > GL4_MAX_SHADERS) return 0;
-    size_t cap = (size_t)d->glsl_size * 2 + 256;
+    if (id > GL4_MAX_SHADERS) { gl4_err("shader: the shader table is full"); return 0; }
+    size_t cap = n * 2 + 256;
     char* src = (char*)malloc(cap);
     if (!src) return 0;
-    if (!nxgl4_shim_glsl((const char*)nxgl4_guest_ptr(d->glsl, d->glsl_size), d->glsl_size, d->stage, src, cap)) { free(src); return 0; }
-    GLuint s = p_glCreateShader(stage_enum(d->stage));
+    if (!nxgl4_shim_glsl(glsl, n, stage, src, cap)) { free(src); gl4_err("shader: the GLSL shim failed"); return 0; }
+    GLuint s = p_glCreateShader(stage_enum(stage));
     const char* srcs[1] = {src};
     p_glShaderSource(s, 1, srcs, NULL);
     p_glCompileShader(s);
@@ -108,14 +108,21 @@ uint64_t gl4_api_shader_create(uint64_t a) {
         p_glDeleteShader(s);
         return 0;
     }
-    g4.sh[id].sh = s; g4.sh[id].stage = (uint8_t)d->stage; g4.sh[id].used = 1;
+    g4.sh[id].sh = s; g4.sh[id].stage = (uint8_t)stage; g4.sh[id].used = 1;
     return id;
+}
+
+uint64_t gl4_api_shader_create(uint64_t a) {
+    const NxShaderDesc* d = (const NxShaderDesc*)nxgl4_guest_ptr(a, sizeof *d);
+    if (!d || !d->glsl || !d->glsl_size) return 0;
+    return gl4_shader_from_glsl((const char*)nxgl4_guest_ptr(d->glsl, d->glsl_size), d->glsl_size, d->stage);
 }
 
 /* Programs are cached by (vs, ps). Destroying a shader deletes the programs built from it and bumps progEpoch: a
  * state that cached a program index re-resolves at its next bind (ids are reused, a stale hit would be wrong). */
 uint64_t gl4_api_shader_destroy(uint64_t id) {
     if (id > GL4_MAX_SHADERS || !id || !g4.sh[id].used) { gl4_err("shader_destroy: %llu is not a live shader", (unsigned long long)id); return NXGPU_BAD_CALL; }
+    if (g4.sh[id].d3d && --g4.sh[id].d3d->refs) return 0;   /* made by SHADER_CREATE_D3D: one create taken back, others still hold the id */
     for (uint32_t i = 1; i <= GL4_MAX_PROGRAMS; i++) {
         Gl4Program* p = &g4.prog[i];
         if (!p->used || (p->vs != id && p->ps != id)) continue;
@@ -124,6 +131,7 @@ uint64_t gl4_api_shader_destroy(uint64_t id) {
     }
     g4.progEpoch++;
     p_glDeleteShader(g4.sh[id].sh);
+    gl4_d3d_free(g4.sh[id].d3d);
     memset(&g4.sh[id], 0, sizeof g4.sh[id]);
     return 0;
 }

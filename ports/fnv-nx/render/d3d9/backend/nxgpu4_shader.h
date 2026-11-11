@@ -10,7 +10,9 @@
  *   variant          bit 0: vertex shader complete (FNVNX_SHADER_VS_COMPLETE; fnvnx_dk_vs_needs_complete), all other bits 0
  *   hash             fnvnx_shader_hash(bytecode) (FNV-1a 64), the cache key's code hash
  *   Every address is an address of memory from nxd3d_gpu_alloc (as every address of every call).
- * NXGPU_FN_COUNT4 is unchanged: gl4 does not implement this function yet (separate task), NXGPU_VERSION4 stays 4. */
+ *   Implemented by gl4 (gl4_d3dshader.c): the same key (bytecode, stage, variant, L) returns the same id, once per create (each NXGPU_FN_SHADER_DESTROY takes one back; the last releases it).
+ *   Reserved fields (pad, pad2) and the variant bits above bit 0 must be 0, a pixel stage has variant 0, size is a multiple of 4: else 0.
+ * NXGPU_FN_COUNT4 is unchanged (the v4 table), NXGPU_VERSION4 stays 4. */
 #ifndef FNVNX_NXGPU4_SHADER_H
 #define FNVNX_NXGPU4_SHADER_H
 #include "nxgpu4.h"

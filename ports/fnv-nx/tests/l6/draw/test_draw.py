@@ -2,9 +2,9 @@
 """test_draw.py: tests of render/d3d9/dev/draw_*.cpp (D5a: the draw path of the D3D9 device). python3 -I tests/l6/draw/test_draw.py [--no-mutations] [--no-guest]
  a validation of the four draw calls over their parameter domain vs the python oracle (oracle.py: Wine 9.0 device.c + the Windows rows of d3d9/tests/device.c)   b primitive / vertex / index formulas, instancing
  c vertex layouts: declarations x vertex shader signatures (hand assembled) x frequencies   d state flush: constants and driver blocks byte-exact vs the python model of the layout contract, every dirty group
- e program pairs: link set L and variant bit vs a python reimplementation, lazy creation / caching / destruction   f UP draws   g method gate and guest undefined count before -> after   h mutations.
+ e program pairs: link set L and variant bit vs a python reimplementation, lazy creation / caching / destruction   f UP draws   g method gate and guest undefined count of the current tree vs the numbers it records (g_record.json; --record rewrites it)   h mutations.
 The device is the product code (obj, state, res_*, glue, draw_*) built -m32 over a RECORDING backend (t_rec.cpp: it decodes every submitted stream and logs every backend call)."""
-import concurrent.futures as cf, os, re, shutil, subprocess, sys, tempfile
+import concurrent.futures as cf, json, os, re, shutil, subprocess, sys, tempfile
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(HERE, "..", "dev"))
@@ -16,6 +16,7 @@ RES = ["res_buf.cpp", "res_fvf.cpp", "res_decl.cpp", "res_shader.cpp", "res_smch
 GLUE = ["glue_stream.cpp", "glue_image.cpp", "glue_query.cpp", "glue_buf.cpp"]
 DRAW = ["draw_api.cpp", "draw_exec.cpp", "draw_prim.cpp", "draw_prog.cpp", "draw_layout.cpp", "draw_ids.cpp", "draw_state.cpp", "draw_const.cpp", "draw_tex.cpp", "draw_bind.cpp"]
 TESTS = ["t_rec.cpp", "t_a.cpp", "t_b.cpp", "t_c.cpp", "t_d.cpp", "t_e.cpp", "t_f.cpp"]
+REC = os.path.join(HERE, "g_record.json")
 fails = []
 
 
@@ -57,32 +58,6 @@ def run(exe, data):
 
 
 # ---- g: gates
-def before_tree(tmp):
-    """a copy of render/d3d9 without the draw path: draw_*, nxgpu4_shader.h, and my additive edits of shared files reversed (res_core.h, res_sm.h, res_smcheck.cpp, state_rt.h/.cpp, glue_stream.h/.cpp)"""
-    root = os.path.join(tmp, "before"); d9 = os.path.join(root, "render", "d3d9"); os.makedirs(os.path.join(root, "render"))
-    shutil.copytree(os.path.join(ROOT, "render", "d3d9"), d9, ignore=shutil.ignore_patterns("draw_*", "nxgpu4_shader.h", "__pycache__"))
-    for l in ("shim", "tests"): os.symlink(os.path.join(ROOT, l), os.path.join(root, l))
-    os.symlink(os.path.join(ROOT, "render", "shaders"), os.path.join(root, "render", "shaders"))
-    dev = os.path.join(d9, "dev")
-    def edit(f, fn):
-        p = os.path.join(dev, f); s = open(p).read(); s2 = fn(s)
-        if s2 == s: raise SystemExit("before_tree: edit of %s did not apply" % f)
-        open(p, "w").write(s2)
-    def cut(s, a, b): i = s.index(a); j = s.index(b, i); return s[:i] + s[j:]
-    edit("res_core.h", lambda s: cut(s, "struct NxShaderCore;\nvoid nxd3d_shader_ids_destroy", "struct NxShaderCore : NxObj {") .replace("    NxShaderProg* progs = nullptr; uint32_t nprogs = 0, cprogs = 0;\n", "").replace("~NxShaderCore() { if (nprogs) nxd3d_shader_ids_destroy(this); nxd3d_free(progs); nxd3d_free(code); }", "~NxShaderCore() { nxd3d_free(code); }"))
-    edit("state_rt.h", lambda s: re.sub(r"    NxDevLifeBase\* draw = nullptr;[^\n]*\n", "", s))
-    edit("state_rt.cpp", lambda s: s.replace("delete life; delete draw; }", "delete life; }"))
-    edit("res_sm.h", lambda s: re.sub(r"    uint32_t pair_set\[7\];.*?\n\};", "};", re.sub(r"uint32_t nx_sm_pairs\([^\n]*\n", "", s), flags=re.S))
-    def smc(s):
-        s = re.sub(r"static void add_pair\([^\n]*\n", "", s); s = re.sub(r"uint32_t nx_sm_pairs\([^\n]*\n", "", s)
-        s = re.sub(r"        if \(!c\.stage && dst\) \{.*?\n        \}\n        if \(c\.stage && c\.major < 3\)[^\n]*\n", "", s, flags=re.S)
-        return re.sub(r"        else if \(c\.acc && c\.stage && cl == NXC_v && c\.major >= 3\)[^\n]*\n        else if[^\n]*\n        else if[^\n]*\n", "", s)
-    edit("res_smcheck.cpp", smc)
-    edit("glue_stream.h", lambda s: cut(s, "// ---- the draw path's writers", "uint32_t nxs_in_flight();"))
-    edit("glue_stream.cpp", lambda s: s[:s.index("// the draw path's writers (glue_stream.h)")].rstrip("\n") + "\n")
-    return root
-
-
 def guest_undefined(root, out):
     tc = os.environ.get("FNVNX_TC") or "/home/user/work/l6/toolchain/toolchain-1fc1f7b1ef44/toolchain/prefix"
     if not os.path.isdir(tc): return None
@@ -126,18 +101,25 @@ def main():
     for p in "abcdef":
         if p not in parts or parts[p][1] or not parts[p][0]: fails.append(f"{p}: {parts.get(p)}")
     import test_dev  # noqa: E402  (tests/l6/dev: gate() over the product objects)
-    prod_before = [o for o in prod if not os.path.basename(o).startswith("draw_")]
-    want, miss_b, _ = test_dev.gate(tmp, prod_before); _, miss_a, unres = test_dev.gate(tmp, prod)
-    print(f"g: method gate (spec {len(want)}): defined before {len(want) - len(miss_b)} -> after {len(want) - len(miss_a)}; newly defined: {sorted(set(miss_b) - set(miss_a))}")
-    if len(set(miss_b) - set(miss_a)) != 8 or set(miss_a) - set(miss_b): fails.append("g: gate did not gain exactly the eight draw methods")
+    want, miss, unres = test_dev.gate(tmp, prod)
+    draw_names = [w for w in want if w.split("::")[1] in ("DrawPrimitive", "DrawIndexedPrimitive", "DrawPrimitiveUP", "DrawIndexedPrimitiveUP")]
+    draw_miss = sorted(set(draw_names) & set(miss)); defined = len(want) - len(miss)
+    rec = json.load(open(REC)) if os.path.exists(REC) else None
+    print(f"g: method gate over the draw test's product set (spec {len(want)}): defined {defined}, draw methods {len(draw_names) - len(draw_miss)}/{len(draw_names)}; recorded {rec}")
+    if len(draw_names) != 8 or draw_miss: fails.append(f"g: draw methods not all defined: {draw_miss}")
     if "--no-guest" not in sys.argv:
-        before = before_tree(tmp); gb = guest_undefined(before, os.path.join(tmp, "guest_before")); ga = guest_undefined(ROOT, os.path.join(tmp, "guest_after"))
-        if gb is None or ga is None: print("g: guest toolchain absent: not run"); fails.append("g: guest toolchain absent")
-        elif isinstance(gb, tuple) or isinstance(ga, tuple): print("g: guest build failed", gb, ga); fails.append("g: guest build failed")
+        ga = guest_undefined(ROOT, os.path.join(tmp, "guest_after"))
+        if ga is None: print("g: guest toolchain absent: not run"); fails.append("g: guest toolchain absent")
+        elif isinstance(ga, tuple): print("g: guest build failed", ga); fails.append("g: guest build failed")
         else:
-            added = sorted(set(ga) - set(gb)); gone = sorted(set(gb) - set(ga)); print(f"g: guest undefined before {len(gb)} -> after {len(ga)}; added {added}; no longer undefined {gone}")
-            if sorted(added) != ["_Z17nx_ffp_ps_programP12NxDeviceCoreP11NxFfpPsBind", "_Z17nx_ffp_vs_programP12NxDeviceCoreP11NxFfpVsBind"]: fails.append("g: guest undefined delta is not exactly the two fixed-function functions")
-            if not any("DrawPrimitive" in g for g in gone) and not any("Draw" in g for g in gone): fails.append("g: the draw methods are not among the symbols that stopped being undefined")
+            dsyms = [g for g in ga if re.search(r"Draw(Indexed)?Primitive|nx_draw_|nx_ffp_[pv]s_program", g)]
+            print(f"g: guest undefined (HEAD sources as they are) {len(ga)}; draw-path / fixed-function symbols among them: {dsyms}")
+            if dsyms: fails.append(f"g: draw path symbols undefined in the guest build: {dsyms}")
+            if "--record" in sys.argv: json.dump({"defined": defined, "guest_undefined": len(ga)}, open(REC, "w")); print("g: recorded", REC)
+            elif rec is None: fails.append("g: no record (run with --record once)")
+            else:
+                if defined < rec["defined"]: fails.append(f"g: defined methods fell {rec['defined']} -> {defined}")
+                if len(ga) > rec["guest_undefined"]: fails.append(f"g: guest undefined rose {rec['guest_undefined']} -> {len(ga)}")
     if "--no-mutations" not in sys.argv:
         def one(i):
             part, f, old, new = MUTS[i]; mdev = os.path.join(tmp, f"m{i}_dev"); shutil.copytree(DEV, mdev, ignore=shutil.ignore_patterns("__pycache__"))

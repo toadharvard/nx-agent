@@ -15,8 +15,10 @@
 /* ---- the tables are total ----------------------------------------------------------------------------------------- */
 #define CNT1(a) +1
 #define CNT4(a, b, c, d) +1
-enum { N_OPS = 0 NXGL4_OP_LIST(CNT1), N_FNS = 2 NXGL4_FN_LIST(CNT4) };
-_Static_assert((int)N_OPS == (int)NxOp_Count4 && (int)N_FNS == (int)NXGPU_FN_COUNT4, "gl4: the op/function tables cover ABI v4 exactly");
+#define CNT3(a, b, c) +1
+enum { N_OPS = 0 NXGL4_OP_LIST(CNT1), N_FNS = 2 NXGL4_FN_LIST(CNT4) NXGL4_FN_EXT_LIST(CNT3) };
+_Static_assert((int)N_OPS == (int)NxOp_Count4 && (int)N_FNS == (int)NXGPU_FN_SHADER_CREATE_D3D + 1 && (int)NXGPU_FN_SHADER_CREATE_D3D == (int)NXGPU_FN_COUNT4,
+               "gl4: the op/function tables cover ABI v4 and the function of v4.1 exactly");
 #define NXGL4_VERSION NXGPU_VERSION4
 
 /* ---- memory blocks ----------------------------------------------------------------------------------------------- */
@@ -66,14 +68,15 @@ typedef uint64_t (*Fn2)(uint64_t, uint64_t);
 typedef uint64_t (*Fn3)(uint64_t, uint64_t, uint64_t);
 typedef struct { uint32_t argc; Fn1 f1; Fn2 f2; Fn3 f3; } FnEnt;   /* exactly the member of the arity is set */
 #define FNENT(id, field, impl, n) [NXGPU_FN_##id] = {n, FNSET##n(impl)},
+#define FNENT_EXT(id, impl, n) [NXGPU_FN_##id] = {n, FNSET##n(impl)},
 #define FNSET1(f) f, 0, 0
 #define FNSET2(f) 0, f, 0
 #define FNSET3(f) 0, 0, f
-static const FnEnt k_fn[NXGPU_FN_COUNT4] = { NXGL4_FN_LIST(FNENT) };
+static const FnEnt k_fn[NXGPU_FN_SHADER_CREATE_D3D + 1] = { NXGL4_FN_LIST(FNENT) NXGL4_FN_EXT_LIST(FNENT_EXT) };
 
 uint64_t nxgl4_ext(uint32_t fn, const uint64_t* a, uint32_t n) {
     if (fn == NXGPU_FN_SHUTDOWN) return api_shutdown();
-    if (fn >= NXGPU_FN_COUNT4) return NXGPU_BAD_CALL;
+    if (fn > NXGPU_FN_SHADER_CREATE_D3D) return NXGPU_BAD_CALL;
     if (fn == NXGPU_FN_INFO) return n >= 1 && a ? api_info(a[0]) : NXGPU_BAD_CALL;
     const FnEnt* e = &k_fn[fn];
     if (n < e->argc || !a) return NXGPU_BAD_CALL;
@@ -139,6 +142,7 @@ void nxgl4_destroy(void) {
     for (uint32_t i = 0; i < NX4_MAX_STREAMS; i++) free(g4.vtx[i].data);
     for (uint32_t i = 0; i < g4.nSlices; i++) free(g4.slices[i].ids);
     free(g4.slices);
+    for (uint32_t i = 1; i <= GL4_MAX_SHADERS; i++) gl4_d3d_free(g4.sh[i].d3d);
     if (g4.dpy) {
         eglMakeCurrent(g4.dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         if (g4.ctx) eglDestroyContext(g4.dpy, g4.ctx);
