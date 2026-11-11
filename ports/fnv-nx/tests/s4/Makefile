@@ -48,7 +48,7 @@ OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
 # a call goes through the boundary, a direct call does not compile); the tests are "the game" and keep plain pointers.
 $(filter $(OUT)/platform/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 
-.PHONY: all test private ilp32 m32 iat device qemu clean gfn-nocompile
+.PHONY: all test probe private ilp32 m32 iat device qemu clean gfn-nocompile
 all: test
 
 $(OUT)/%.c.o: $(ROOT)/%.c
@@ -106,6 +106,14 @@ $(COMOUT) &: $(COMGEN)
 
 $(OUT)/s4_tests: $(OBJS) $(OUT)/libfreetype.a
 	$(CXX) $(CXXFLAGS_) $(OBJS) $(OUT)/libfreetype.a -o $@ -lm $(LDEXTRA)
+
+# ---- probe of the import table (platform/manifest/probe_imports.cpp): the platform objects of this build, FreeType, no tests;
+# `make probe` builds $(OUT)/probe_imports, which the imports gate runs (platform/manifest/gate_imports.sh)
+PROBE_OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX)) $(OUT)/tests/s4/host_boundary.cpp.o $(OUT)/platform/manifest/probe_imports.cpp.o
+$(OUT)/platform/manifest/probe_imports.cpp.o: CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
+$(OUT)/probe_imports: $(PROBE_OBJS) $(OUT)/libfreetype.a
+	$(CXX) $(CXXFLAGS_) $(PROBE_OBJS) $(OUT)/libfreetype.a -o $@ -lm $(LDEXTRA)
+probe: $(OUT)/probe_imports
 
 # ---- the same test objects linked with the product's file-mapping backend (platform/win32/filemap_private.cpp) instead of
 # filemap_shared.cpp, plus the test-only definition of its residue (private_residue_probe.cpp); runs the vmp_ cases

@@ -8,7 +8,10 @@ Output rows: dll, name, ordinal, conv, ret, args, native_symbol, bind
   bind  sym    native_symbol is a defined external symbol of the platform objects (checked against the
                symbol list given as the 4th argument: `nm --defined-only -g` names, one per line)
         lookup the implementation has internal linkage or is the C library's: its address is
-               fnvnx_win32_lookup_export(dll, name) at load time (native_symbol is then `-`)
+               fnvnx_win32_lookup_export(dll, name) at load time (native_symbol is then `-`). Decided by a FACT of
+               the host build: the result file of platform/manifest/probe_imports.cpp (`make -C tests/s4 probe`), which
+               asks fnvnx_win32_lookup_import(dll, name, FNVNX_IMPORT_BY_NAME) for every (dll, name) of sys_names.tsv
+               and prints `dll<TAB>name<TAB>yes|no`; msvcrt rows are `lookup` iff the probe said yes
         l3     provided by the lifter runtime under native_symbol
         data   the slot holds the address of the object native_symbol (a defined external symbol, checked)
         none   no implementation yet: a build that needs this row must fail
@@ -21,7 +24,8 @@ Output rows: dll, name, ordinal, conv, ret, args, native_symbol, bind
 A name missing from its spec file, a forward to another DLL that cannot be followed,
 or an unknown argument type is an error: the table is total or the script fails.
 
-Usage: bridgetable.py sys_names.tsv <spec-dir> out.tsv <defined-symbols.txt> <msvcrt_exports.cpp> [extra-rows.tsv ...]
+Usage: bridgetable.py sys_names.tsv <spec-dir> out.tsv <defined-symbols.txt> <probe-result.tsv> [extra-rows.tsv ...]
+(a row of msvcrt.dll absent from the probe result is an error: the probe must have run over the same sys_names.tsv)
 """
 import os, re, sys
 
@@ -113,10 +117,22 @@ def native(dll, name):
     return name
 
 
-def main(names, spec_dir, out, symfile, crt_table, *extra):
-    syms = set(open(symfile).read().split())
-    crt = set(re.findall(r'R\("([^"]+)",', open(crt_table).read()))
-    rows, errors = [], []
+def read_probe(path):
+    """{(dll, name): bool} from a probe_imports result file (dll TAB name TAB yes|no)."""
+    out = {}
+    for line in open(path, encoding="latin1"):
+        f = line.rstrip("\n").split("\t")
+        if len(f) == 3 and f[2] in ("yes", "no"):
+            out[(f[0], f[1])] = f[2] == "yes"
+        elif line.strip():
+            raise ValueError("%s: bad probe line %r" % (path, line))
+    return out
+
+
+def derive(names, spec_dir, syms, probe, extra):
+    """-> (rows, errors, extra_of): rows (dll, name, ordinal, conv, ret, args, native_symbol, bind) sorted; extra_of maps
+    (dll, name) of a row taken from an extra-rows file to that file's path. `syms` = set of symbol names, `probe` = read_probe()."""
+    rows, errors, extra_of = [], [], {}
     for line in open(names):
         dll, name = line.rstrip("\n").split("\t")[:2]
         if dll in ("galaxywrp.dll",):               # contract-only module: Steamworks prototypes, cdecl
@@ -137,9 +153,11 @@ def main(names, spec_dir, out, symfile, crt_table, *extra):
         elif conv == "data":
             # a data slot holds the address of the ELF symbol named here (loader rule, L1): the object's own symbol
             dsym = DATA_SYMS.get(real, real)
-            sym, bind = (dsym, "data") if real in crt and dsym in syms else ("-", "none")
+            sym, bind = (dsym, "data") if dsym in syms else ("-", "none")
         elif dll == "msvcrt.dll":
-            sym, bind = "-", ("lookup" if real in crt else "none")
+            if (dll, name) not in probe:
+                errors.append("%s!%s: not in the probe result" % (dll, name))
+            sym, bind = "-", ("lookup" if probe.get((dll, name)) else "none")
         else:
             bind = "sym" if sym in syms else "none"
         rows.append((dll, real, ordn, conv, ret, args, sym, bind))
@@ -158,6 +176,11 @@ def main(names, spec_dir, out, symfile, crt_table, *extra):
                 seen[(r[0], r[1])] = path
                 rows = [x for x in rows if (x[0], x[1]) != (r[0], r[1])] + [r]
     rows.sort(key=lambda r: (r[0].lower(), r[1]))
+    return rows, errors, seen
+
+
+def main(names, spec_dir, out, symfile, probe_file, *extra):
+    rows, errors, _ = derive(names, spec_dir, set(open(symfile).read().split()), read_probe(probe_file), extra)
     with open(out, "w") as f:
         f.write("dll\tname\tordinal\tconv\tret\targs\tnative_symbol\tbind\n")
         for r in rows:
