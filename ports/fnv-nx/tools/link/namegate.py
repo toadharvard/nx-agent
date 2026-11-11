@@ -70,8 +70,21 @@ def cl_left_out(n):
 
 
 def section(obj, name):
-    r = subprocess.run([OBJCOPY, '--dump-section', '%s=/dev/stdout' % name, obj, '/dev/null'], capture_output=True)
-    return [l.split('\t') for l in r.stdout.decode('latin-1').splitlines()]
+    """the rows of a plugin section; none when the object's section table has no such section (a unit with nothing
+    for that plugin to write). Dumped to a file of its own (a dump to /dev/stdout is empty where stdout is a pipe
+    objcopy cannot reopen); a section that is there and cannot be read is an error, never an empty list."""
+    import tempfile
+    h = subprocess.run([OBJCOPY.replace('objcopy', 'readelf'), '-SW', obj], capture_output=True, text=True)
+    if h.returncode != 0:
+        sys.exit('%s: cannot read the section table of %s' % (os.path.basename(sys.argv[0]), obj))
+    if not any(name in l.split() for l in h.stdout.splitlines()):
+        return []
+    with tempfile.TemporaryDirectory() as d:
+        sec = os.path.join(d, 's')
+        r = subprocess.run([OBJCOPY, '--dump-section', '%s=%s' % (name, sec), obj, os.path.join(d, 'o')], capture_output=True)
+        if r.returncode != 0 or not os.path.isfile(sec):
+            sys.exit('%s: cannot read section %s of %s: %s' % (os.path.basename(sys.argv[0]), name, obj, r.stderr.decode('latin-1').strip()[:200]))
+        return [l.split('\t') for l in open(sec, 'rb').read().decode('latin-1').splitlines()]
 
 
 def main(argv):
