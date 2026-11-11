@@ -56,11 +56,11 @@ def main():
         if "--no-mutations" not in sys.argv:
             muts = [  # (part that must catch it, old line text, replacement)
                 ("b", "memcpy(tight + (s * rows + r) * rb, src + (s * rows + r) * rowPitch, rb);", "memcpy(tight + (s * rows + r) * rb, src + (s * rows + r) * rb, rb);"),
-                ("e", "uint32_t id = alloc_ids(srgb ? 2 : 1);", "uint32_t id = alloc_ids(1);"),
+                ("e", "if (!im || im->isView || id == g4.swapImage)", "if (!im || id == g4.swapImage)"),
                 ("a", "GLint zo = im->target == GL_TEXTURE_CUBE_MAP ? (GLint)layer : (GLint)z;", "GLint zo = (GLint)z;"),
                 ("f", "data += gl4_row_bytes(&f, box[3]) * gl4_rows(&f, box[4]) * box[5];", "data += gl4_row_bytes(&f, box[3]);"),
                 ("e", "memset(&g4.img[v], 0, sizeof g4.img[v]);", "g4.img[v].tex = 0;"),
-                ("b", "pitch < rb || need > a[10])", "pitch < rb)"),
+                ("b", "pitch < rb || need > a[10])", "pitch < rb || need > (1ull << 40))"),
                 ("a", "(uint64_t)b[0] + b[3] > lw ||", "(uint64_t)b[0] + b[3] >= lw ||"),
             ]
             caught = 0

@@ -5,7 +5,7 @@
 // Order of checks = Wine's. Pool SCRATCH skips the cap loop (resource_init). AUTOGENMIPMAP: levels exposed 1; the GPU chain is the full chain iff CheckDeviceFormat(GENMIPMAP) == D3D_OK (d3d9_texture_init).
 // DECISIONS (doubt): levels > 32 = D3DERR_INVALIDCALL (no chain is longer; Wine accepts any); an image above NX_MAX_TEX_BYTES = OUT-OF-MEMORY (GPU pools D3DERR_OUTOFVIDEOMEMORY, others E_OUTOFMEMORY); a single GPU-pool resource
 // above the env VideoMemorySize = OUTOFVIDEOMEMORY (non-Ex; no cross-resource accounting, the device has none); Lockable RT with a multisample type = INVALIDCALL (MS CreateRenderTarget: only non-multisampled targets are lockable);
-// CreateOffscreenPlainSurfaceEx is NOT implemented (Wine returns E_NOTIMPL, no source for the Windows result). Null output pointer = INVALIDCALL (Windows faults).
+// CreateOffscreenPlainSurfaceEx is left out (Wine's answer is E_NOTIMPL, there is no source for the Windows result). Null output pointer = INVALIDCALL (Windows faults).
 #include "res_tex.h"
 #include "d9impl.gen.h"
 #include "env_table.gen.h"

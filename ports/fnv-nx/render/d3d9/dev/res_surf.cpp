@@ -6,7 +6,7 @@
 // not Windows XP / Wine, which accept it and return a pointer outside the level.
 // UnlockRect of an unlocked sub-resource: D3D_OK for a level of a 2D texture, D3DERR_INVALIDCALL otherwise (d3d9_surface_UnlockRect WINEDDERR_NOTLOCKED). LockBox writes its outputs also on failure (null pBits, pitch 0).
 // GPU readback: a read lock of a sub-resource the GPU wrote (nx_img_gpu_wrote) first refreshes the CPU copy through nxd3d_image_read, unless the lock is an effective DISCARD. MS: Lockable RT + MSAA is refused at creation.
-// GetDC / ReleaseDC are NOT implemented: they need a GDI DIB section, which the backend ABI cannot express (README of dev/: open point).
+// GetDC / ReleaseDC are left out: they need a GDI DIB section, which the backend ABI cannot express (README of dev/: open point).
 #include "res_tex.h"
 #include "d9impl.gen.h"
 #include <string.h>
