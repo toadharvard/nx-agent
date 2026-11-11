@@ -797,7 +797,8 @@ class Job:
 def objects_digest(res):
     """sha256 of the CONTENT of an objects.json dict: its fields without the machine paths (object, plugin, ELF, constants files: their
     sha256 stands for them) and without the cache counters, so two builds of the same sources give the same digest."""
-    keep = {k: res.get(k) for k in ("format", "root", "status", "defined", "undefined", "units", "stage_keys", "pp_keys", "link_roots", "failure")}
+    keep = {k: res.get(k) for k in ("format", "root", "status", "defined", "undefined", "units", "stage_keys", "pp_keys", "failure")}
+    keep["link_roots"] = [{"root": x["root"], "sha256": x["sha256"]} for x in res["link_roots"]]
     keep["objects"] = [{k: o[k] for k in ("unit", "sha256", "os_layer")} for o in res["objects"]]
     keep["plugins"] = [{k: p[k] for k in ("name", "sha256")} for p in res["plugins"]]
     keep["elf"] = res["elf"] and res["elf"]["sha256"]
@@ -878,8 +879,14 @@ def build(repo, root, store, out, jobs=4, ext=None):
                 if r["status"] == "red":
                     f = r["failure"]
                     raise BuildRed({"stage": "ld:" + root, "exit": f["exit"], "stderr": ["input root %s is red: stage %s" % (d, f["stage"])] + f["stderr"][-18:]})
-                res["link_roots"].append({"root": d, "sha256": objects_digest(r)})
-                groups.append(("%02d-%s" % (n + 1, d.replace("/", "__")), [(o["unit"], o["object"]) for o in r["objects"]]))
+                kept = []     # the input root's objects stay beside this root's result (its own build directory is scratch)
+                for o in r["objects"]:
+                    dest = os.path.join(out, "link_roots", d.replace("/", "__"), o["unit"] + ".o")
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    shutil.copyfile(o["object"], dest)
+                    kept.append({"unit": o["unit"], "object": os.path.abspath(dest), "sha256": o["sha256"]})
+                res["link_roots"].append({"root": d, "sha256": objects_digest(r), "objects": kept})
+                groups.append(("%02d-%s" % (n + 1, d.replace("/", "__")), [(o["unit"], o["object"]) for o in kept]))
             elf_tree, objs_tree = j.link(ws, groups)
             fin = j.ldcheck(ws, elf_tree, objs_tree)
             ent = cas.manifest(fin, store)["entries"]

@@ -114,8 +114,8 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   R_AARCH64_P32_RELATIVE or RELR (no REL, JMPREL, TEXTREL table); the PIE mark (DF_1_PIE); the FNXG magic at the first PT_LOAD + 8 and the entry at the
   first PT_LOAD. Then it writes the crt0 header words +16 (link address), +20 (page aligned span), +24 (bit 0: relocatable) and outputs the final ELF and the
   gate file `ld` (`ld.json`, `ld.ids`). A failed rule is a red build, stage `ldcheck:<root>`, stderr: one `ldcheck: <id>` line per finding.
-- `objects.json` of the linking root: `elf` {path, sha256} is the final ELF; `ld_gate` {"ld.json": {path, sha256}, "ld.ids": ..}; `link_roots` [{root, sha256}]:
-  the input roots in link order, the sha256 being the digest of the CONTENT of that root's objects.json (the file itself holds machine paths and cache
+- `objects.json` of the linking root: `elf` {path, sha256} is the final ELF; `ld_gate` {"ld.json": {path, sha256}, "ld.ids": ..}; `link_roots` [{root, sha256, objects [{unit, object, sha256}]}]:
+  the input roots in link order, their objects copied beside the result (out/link_roots/<root>/), the sha256 being the digest of the CONTENT of that root's objects.json (the file itself holds machine paths and cache
   counters; the digest is over the objects' sha256, symbol tables, stage keys, ELF and constants hashes), so a later gate sees exactly what was linked.
 
 ## Refusal set R (GNU ld option syntax, not a text guess)

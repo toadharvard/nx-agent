@@ -67,6 +67,10 @@ def build(repo, store, out=None):
     return recipe.build(repo, ROOT, store, out or BASE + "/o-" + os.path.basename(store))
 
 
+def digests(r):
+    return [(x["root"], x["sha256"]) for x in r["link_roots"]]
+
+
 def err_text(r):
     f = r.get("failure") or {}
     return "%s: %s" % (f.get("stage"), " | ".join(f.get("stderr", [])))
@@ -89,13 +93,14 @@ def main():
     check("crt0 header words written: +8 FNXG, +16 link base 0, +20 page aligned span, +24 flags 1 (PIE)",
           w[2] == 0x47584e46 and w[4] == 0 and w[5] and w[5] % 0x1000 == 0 and w[6] == 1, w)
     ids = r["link_roots"]
-    check("objects.json lists the input root with the digest of its objects.json content", len(ids) == 1 and ids[0]["root"] == LIB
-          and re.fullmatch("[0-9a-f]{64}", ids[0]["sha256"]) and r["objects"][0]["unit"] == "a.c", ids)
+    check("objects.json lists the input root with the digest of its objects.json content and its linked objects (kept beside the result)",
+          len(ids) == 1 and ids[0]["root"] == LIB and re.fullmatch("[0-9a-f]{64}", ids[0]["sha256"]) and r["objects"][0]["unit"] == "a.c"
+          and [o["unit"] for o in ids[0]["objects"]] == ["l.c"] and os.path.isfile(ids[0]["objects"][0]["object"]), ids)
     g = json.load(open(r["ld_gate"]["ld.json"]["path"]))
     check("the gate file `ld` is green and an output of the build", g["status"] == "green" and g["name"] == "ld" and g["universe"] == g["certified"] > 2, g)
     r2 = build(repo, SS, BASE + "/o-two2")
     check("second build: every stage a cache hit, same ELF, same input digest", r2["stages"]["run"] == 0 and r2["elf"]["sha256"] == r["elf"]["sha256"]
-          and r2["link_roots"] == r["link_roots"], r2["stages"])
+          and digests(r2) == digests(r), r2["stages"])
     bad = mk("two-red", main_rec(roots=[LIB]), libs=[(LIB, (LIB_REC, {"l.c": "int f_b(void) { return undeclared_thing; }\n"}))])
     rb = build(bad, SS)
     check("an input root that is red makes the link red: stage ld:<root> naming the red input root", rb["status"] == "red"
@@ -163,7 +168,7 @@ def main():
     c2 = recipe.build(repo, ROOT, BASE + "/cold2", BASE + "/oc2")
     check("two cold builds (two stores): the same ELF bytes, objects and input digests",
           c1["status"] == c2["status"] == "green" and open(c1["elf"]["path"], "rb").read() == open(c2["elf"]["path"], "rb").read()
-          and c1["link_roots"] == c2["link_roots"] and c1["elf"]["sha256"] == r["elf"]["sha256"], (c1["stages"], c2.get("failure")))
+          and digests(c1) == digests(c2) and c1["elf"]["sha256"] == r["elf"]["sha256"], (c1["stages"], c2.get("failure")))
 
     # no subprocess call of a linker or compiler outside the recipe is left in link/
     leaks = subprocess.run(["grep", "-rnE", r"subprocess|os\.system|os\.exec", "--include=*.py", "--exclude-dir=tests", os.path.join(TR.VERIFY, "..", "link")], capture_output=True, text=True).stdout
