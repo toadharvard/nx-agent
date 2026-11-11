@@ -42,11 +42,11 @@ MUST_NAMES = ["lay_2d", "lay_cube", "lay_3d", "lay_ms4", "srgb_pair", "srgb_desc
               "roundtrip_bc1", "bc1_unaligned_bad", "rot8_roundtrip", "bgrx_x_byte", "view_reads_base", "read_errors", "readback_rgba8", "readback_depth32f",
               "readback_stencil", "ms4_resolve_read", "ms8_read_bad", "ms_depth_read_bad", "smp_wrap_table", "smp_capacity", "smp_update_wrap5_bad", "bind_sets",
               "tex_handle", "balanced_layouts", "balanced_ids", "balanced_cleanup", "balanced_xfer", "balanced_read", "balanced_ms", "balanced_sampler"]
-PENDING = {"nxdk_shader_create", "nxdk_shader_destroy", "nxdk_shader_create_d3d", "nxdk_submit", "nxdk_wait_frame", "nxdk_query_result", "nxdk_present_compose"}
-EMBEDDER = {"nxdk_guest_ptr", "nxdk_on_present"}
+PENDING = {"nxdk_present_compose"}
+EMBEDDER = {"nxdk_guest_ptr", "nxdk_on_present", "nxdk_shader_pack"}
 HANDLERS = {"nxdk_mem_create", "nxdk_mem_gpu_addr", "nxdk_mem_destroy", "nxdk_present", "nxdk_wait_vblank", "nxdk_shutdown", "nxdk_image_create", "nxdk_image_create4",
             "nxdk_image_destroy", "nxdk_image_read", "nxdk_readback", "nxdk_sampler_create", "nxdk_sampler_update", "nxdk_img"}
-LIBC = {"memset", "memcpy", "snprintf", "vsnprintf", "malloc", "free", "calloc", "memcmp", "memmove"}
+LIBC = {"memset", "memcpy", "snprintf", "vsnprintf", "malloc", "free", "calloc", "memcmp", "memmove", "strncmp", "strcmp", "clock_gettime", "realloc"}
 LIBCALL = re.compile(r"^(dk|nwindow|vi|event)[A-Z]\w*$")
 FORBID = re.compile(r"stub|todo|not implemented|placeholder|fallback|no-op|noop|weak", re.I)
 BAD = 0xFFFFFFFFFFFFFF02
