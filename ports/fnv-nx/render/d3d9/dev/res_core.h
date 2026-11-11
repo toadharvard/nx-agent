@@ -8,7 +8,7 @@
 // backend hooks of the GPU mirrors of buffers and queries (glue_buf.cpp / glue_query.cpp; the tests define their own)
 struct NxBufCore; struct NxQueryCore;
 void nxd3d_buf_destroy(NxBufCore* b);                      // the object dies: its GPU mirror (if any) goes
-bool nxd3d_query_create(NxQueryCore* q);                   // the query object exists: reserve what the backend needs for its type; false = out of backend query ids (CreateQuery: D3DERR_OUTOFVIDEOMEMORY)
+bool nxd3d_query_create(NxQueryCore* q);                   // the query object exists: reserve what the backend needs for its type; false = out of backend query ids or no memory for the stream ring (glue_stream.h E1; CreateQuery: D3DERR_OUTOFVIDEOMEMORY)
 void nxd3d_query_destroy(NxQueryCore* q);                  // the object dies: release what nxd3d_query_create reserved
 
 // ---- vertex / index buffers. CPU memory owned by the object, 16-byte aligned, zero-filled at creation (RD7: and again on an effective DISCARD).
