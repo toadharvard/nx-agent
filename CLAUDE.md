@@ -158,3 +158,62 @@ The owner's words: "Транк никогда красный. Всегда зе�
   - Packaging is deferred until the game runs in the emulator.
     - The final package is the game's own installed title: an NSP with its own title id, NPDM (32-bit address space), NACP and icon, packed with the owner's console keys.
     - Development runs use an Atmosphere exefs override.
+
+## The prepared build machinery is the only one (owner, 2026-11-11, binding)
+
+The owner's words: "Я буквально сказал, что я использую только конкретный компилятор... Мы нахуя инструменты подготавливали? Чтобы потом просто игнорить?"
+
+- **Compiler:** only the one pinned in `verify/env.json` (g++-13-aarch64-linux-gnu 13.3.0-6ubuntu2~24.04.1cross1, binutils 2.42-4ubuntu2.10), installed by `farm/setup_verdict_env.sh` and checked by `envcheck.py`. No unpinned apt, no other gcc.
+- **Our own compiler (the game's compiler)** is `toolchain/msvcmodel` (MSVCMODEL1). It is GCC 13.3.0 built from the sha256-pinned GNU tarball, with `msvcmodel.patch` applied. Under `-mabi=ilp32` it has the exe's Visual C++ 2008 data model: `size_t` = `unsigned int`, `ptrdiff_t` = `int`, and MSVC's new[] cookie and delete[] size. The headers and binutils come from the pinned distribution cross packages in `env.json`.
+  - It enters every guest product root as the recipe's external compiler (`{"external", "cc", "cxx"}`, RECIPE.md): a fnv-nx-build mirror `tools/gcc-ilp32-msvcmodel`, pinned by commit and `tree_sha256`.
+  - Our GCC plugins are built against its own plugin headers, as hermetic recipe stages; each `.so` is a declared input, so it is in every key. They are `fnvnx_order` (x86 TSO and MSVC volatile become `ldar`/`stlr`; MSVC argument order), `fnvnx_ftoi` (MSVC `_ftol`), and L2's `addr`, `dispatch`, `names`, `sdd` and `pi` (plus the clang `vtnames`).
+  - Native and decomp C++ load them all.
+  - Lifted C++ is compiled by the same compiler; the lifter emits the memory ordering itself (R9 (б)).
+  - The stock `g++-13` of `env.json` is the base the compiler is built from. It is not the game's compiler.
+  - fnvnx-a64 (gcc 15 + newlib) provides the guest's libc/libstdc++ and libnx.
+- **Build:** `verify/recipe.py` (`verify/RECIPE.md`). A product root has `build.json` and is admitted in `verify/admit.json`. Each unit is two hermetic stages (`unitstage.py`: PP, then CC), keyed by the content of what they read plus compiler and flags.
+- **Cache:** the verdict's own store, `GATE_CACHE` (`l1.py` gives `VDIR/cache`; objects in `GATE_CACHE/store`). An unchanged unit is never compiled again. Do not add another cache or call the compiler directly.
+- **Private sources** (lifted C++, decomp trees) enter a recipe only as an `external`: a fnv-nx-build commit plus `tree_sha256`.
+- **Lifter:** `liftall.py` generates C++. Its objects are built by `recipe.py` in that store, as a product root with the pack as an external.
+- Missing something in this machinery? Extend it and say so in the inbox. A parallel path is a rule violation.
+
+## Owner orders of 2026-11-11, evening (binding for every session; an order sent only by message is not enough)
+
+The owner's words: "Ты когда пишешь че-то агентом они проебываются. Потому что это не в глобальных правилах."
+
+- **Standing orders live here.** An order that binds more than one session is written into this file by the
+  orchestrator and pushed to the trunk and the integration branch. A message only points to it.
+  - Every lead merges the trunk's `CLAUDE.md` into its branch when told, and re-reads this file after every compaction.
+  - If an orchestrator message and this file disagree, this file wins; report the conflict.
+- **Assumptions: one registry, eight accepted.** The owner asked "Сколько допущений?", and no one could answer.
+  - Every assumption has an id in `verify/ASSUMPTIONS.json`. The `assumptions` gate makes the trunk red for:
+    - an "Assumption"/"допущение" in code or docs without an id;
+    - an id without a record;
+    - a new OWNER record without the owner's decision.
+  - OWNER, the only accepted ones:
+    1. the compiler is correct;
+    2. SHA-256;
+    3. Win32 and D3D9 as documented;
+    4. the console's behaviour until a run on it;
+    5. native code is tested by ASan/UBSan, not proven;
+    6. the exe makes no wild accesses (array indices in bounds);
+    7. ILP32;
+    8. IEEE floating point.
+  - Every other assumption is REMOVE. Its record names the fact or gate that removes it and the owner of that work.
+    Examples: callee-saved registers, `ret n`, no PIC and complete code ranges are checked from the exe's code; kernel
+    result codes come from the pinned libnx headers; guard zones are a fact of the loader's layout.
+  - A session never introduces a new assumption to get a gate green. It reports it to the orchestrator.
+- **Real global numbers.** Every status, note and report gives totals over the whole set (all units, all sites, all
+  tests) with the commit they were measured at. Sample counts ("on a sample of 232 units") never stand for a result.
+- **The goal comes first.** The goal is a fully lifted ELF, then exe entry, WinMain, the main menu, the first frame in
+  the emulator, then the Switch.
+  - The next steps are:
+    1. the first product root on the trunk (platform, built by the recipe with the msvcmodel compiler and all plugins);
+    2. the lifted packs as product roots;
+    3. the ELF;
+    4. the boot.
+  - A new gate or proof is written now only if it blocks one of these steps. Everything else waits until after the
+    first frame.
+- **Sanitizer builds** are a flags variant of the same product root in `verify/recipe.py`, with the msvcmodel compiler and
+  plugins, in `GATE_CACHE`. The boot machine holds the shadow memory and the `__asan_*` callbacks; UBSan traps report
+  the pc.
