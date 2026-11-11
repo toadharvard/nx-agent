@@ -85,6 +85,9 @@ The plan of record is MASTER_PLAN4 (private: fnv-nx-build `plan/master3`, audit/
 
 ## Owner decisions of 2026-11-10 (do not re-ask)
 
+- **Full autonomy (owner, 2026-11-11):** "Я разрешаю все, делайте все, что угодно. Только меня не беспокойте."
+  - Do not ask the owner for approvals or confirmations. Decide and act; report only milestones.
+  - The Legal limits and the class-closing rule order still hold.
 - **Downloads are authorized.** The owner's words, 2026-11-10: "Я разрешаю все что угодно качать".
   - Any fnv-nx session may clone or download any public external code, tools, formal models, packages or datasets the work needs. Examples: rems-project/isla, isla-snapshots, sail-x86-from-acl2, acl2/acl2, LLVM, CORE-MATH, MPFR.
   - Use add_repo (read) or plain git/https.
