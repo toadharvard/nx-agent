@@ -147,6 +147,50 @@ typedef struct FnvnxFaultFrame {
     uint64_t v[32][2];    /* v0..v31, low then high 64 bits */
 } __attribute__((aligned(16))) FnvnxFaultFrame;
 typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 : -1];   /* both sides of the host boundary */
+/* Memory sections: SHARED views of the same pages (Win32 CreateFileMapping over the paging file + MapViewOfFile
+ * FILE_MAP_WRITE). Implemented by toolchain/host/host_section.inc; the proofs from the Mesosphere sources (commit
+ * 4e3f37038d9e82dde7054897213ab32b2ecf651f) are in that file's header. All four take their arguments as a uint64 array
+ * like the VM services. A result with the top bit set is an error: -(code) as int64, code from the table below;
+ * a non-negative result is the value (id, address, 0).
+ *   11 SECTION_CREATE (size)                 -> id (1..0x7FFFFFFF) | error. A zeroed, page-aligned backing of `size` bytes
+ *                                               (4 KiB multiple, 0 < size <= 2 GiB) that is never given an address.
+ *   12 SECTION_MAP (id, addr, offset, size)  -> the view's address | error. A READ-WRITE view of [offset, offset+size)
+ *                                               of the section (offset, size multiples of 4 KiB, inside the section).
+ *                                               addr != 0: the view is placed at exactly addr, which must lie inside a
+ *                                               VM reservation (VM_RESERVE) and be kernel-free there (nothing committed,
+ *                                               no other view); addr == 0: the host takes a fresh range of its own (not a VM reservation; 64 KiB
+ *                                               aligned) of its own for the view and returns it. Views of one section may
+ *                                               overlap, and see each other's writes at once (same physical pages).
+ *   13 SECTION_UNMAP (addr, size)            -> 0 | error. Exactly a view (same addr and size as SECTION_MAP made it).
+ *                                               The other views and the data stay. A host-reserved range is released.
+ *   14 SECTION_FREE (id)                     -> 0 | error. The id dies at once (MAP with it fails with 0xE401); the pages
+ *                                               live until the last view is unmapped (the kernel needs the backing mapped
+ *                                               to unmap a view), then they are released. Deferred, never refused.
+ * 15 is unused. Error codes (the Horizon result values the kernel uses for the same condition, kernel results of a
+ * failing svc are passed through unchanged):
+ *   0xCA01 size is 0, not a 4 KiB multiple or too large   0xCC01 addr or offset not 4 KiB aligned
+ *   0xD401 range outside the section; addr range not free in the kernel; not exactly a view
+ *   0xDA01 addr range not inside a VM reservation          0xE401 unknown id (never created, or freed)
+ *   0xD001 out of address space or memory                  0xCE01 table full (128 sections, 512 views)
+ * Interplay with the VM services 4..8 (a view is memory the VM service did not commit): VM_COMMIT and VM_DECOMMIT of a
+ * range containing a page of a view -> 0xD401, nothing done; VM_RELEASE of a reservation that still holds a view ->
+ * 0xD401 (its decommit is refused); VM_PROTECT of a view page -> 0xD401 (SharedCode has no CanReprotect, see host_section.inc).
+ * NOT provided, by the mechanism: a view is always read-write (the kernel fixes the alias permission to UserReadWrite),
+ * so there is no read-only view of a section and no copy-on-write view; no view with a permission different from
+ * another view of the same section; no view of a file or of a section that is not a SECTION_CREATE object. */
+#define FNVNX_PLAT_SECTION_CREATE 11u
+#define FNVNX_PLAT_SECTION_MAP 12u
+#define FNVNX_PLAT_SECTION_UNMAP 13u
+#define FNVNX_PLAT_SECTION_FREE 14u
+#define FNVNX_SEC_E_SIZE 0xCA01u
+#define FNVNX_SEC_E_ALIGN 0xCC01u
+#define FNVNX_SEC_E_RANGE 0xD401u
+#define FNVNX_SEC_E_REGION 0xDA01u
+#define FNVNX_SEC_E_ID 0xE401u
+#define FNVNX_SEC_E_NOMEM 0xD001u
+#define FNVNX_SEC_E_FULL 0xCE01u
+#define FNVNX_SEC_E_NOSERVICE 0xFFu   /* the host answers FNVNX_EXT_NO_MODULE (= -255): an older host without sections */
+#define FNVNX_SEC_MAX_SIZE 0x80000000ull
 /* ---- BSD sockets (FNVNX_PLAT_SOCK_*, services 16..33; guest: platform/os/sock_guest.c, host:
  * toolchain/host/host_sock.inc; the wire constants and structs: fnvnx/sockwire.h). The rule: EVERY BSD-socket
  * operation of the guest is one of these services; the guest's C library has no network device of its own.
