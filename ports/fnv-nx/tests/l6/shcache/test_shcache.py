@@ -119,7 +119,14 @@ class Suite:
             for data in (b"", b"abc", bytes(range(256)), b"\xff" * 33):
                 h, lh = s.run(exe, "hash", data.hex())[0].split(); s.check(int(h, 16) == s.mk.fnv1a64(data) and int(lh, 16) == s.mk.l_hash(data), "FNV-1a / l_hash equal in C and python")
             s.check(int(s.run(exe, "hash", "")[0].split()[0], 16) == 0xCBF29CE484222325, "FNV offset basis"); s.check(s.run(exe, "hash", b"a".hex())[0].split()[0] == "af63dc4c8601ec8c", "FNV-1a 64 of 'a' (published vector)")
-            s.check(s.run(exe, "keymake", "ab", 5, 1, "ffff", "5a0a")[0] == "2 0a5a 60", "key_make sorts L and masks flags (KEEP_GLSL|NO_DKSH not in the key)")
+            s.check(s.run(exe, "keymake", "ab", 5, 1, "ffff", "5a0a")[0] == "2 0a5a 65532", "key_make sorts L and masks flags (only KEEP_GLSL|NO_DKSH are not in the key)")
+            # the key covers every translator input: one flag bit set -> a different key, for EVERY bit but the two declared non-key ones (FLAT_COLOR and VS_COMPLETE among them)
+            base = s.run(exe, "keymake", "ab", 5, 0, "0", "-")[0]
+            for b in range(32):
+                got = s.run(exe, "keymake", "ab", 5, 0, "%x" % (1 << b), "-")[0]
+                s.check((got != base) == (b >= 2), f"flag bit {b} {'is' if b >= 2 else 'is not'} part of the key")
+            s.check(s.run(exe, "keymake", "ab", 5, 0, "80", "-")[0] == "0  128", "FNVNX_SHADER_FLAT_COLOR (bit 7) is kept in the key")
+            s.check(s.run(exe, "keymake", "ab", 5, 0, "40", "-")[0] == "0  64", "FNVNX_SHADER_VS_COMPLETE (bit 6) is kept in the key")
             for bad in ("0a0a", "e0", "00" * 32): s.check(s.run(exe, "keymake", "ab", 5, 1, 0, bad)[0] == "ERR", f"key_make rejects {bad[:6]}")
             s.check(s.run(exe, "keymake", "ab", 5, 2, 0, "-")[0] == "ERR", "stage 2 rejected")
             s.check(s.run(exe, "payload")[0].endswith("FAIL 0"), "payload container + failing sink stores nothing")

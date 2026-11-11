@@ -8,7 +8,18 @@ TRANSLATED_DIR/entries.tsv (written by shxlate): id code_hash code_len stage(v|p
 translator makes the file EMPTY at load, never stale."""
 import hashlib, os, struct, sys
 
-MAGIC, VERSION, FLAGS_MASK = b"FNSC", 1, (1 << 2) | (1 << 3) | (1 << 4) | (1 << 5)
+def _key_flags_mask():
+    """the key mask from the translator header: the complement of FNVNX_SHADER_NONKEY_FLAGS (one definition, shared with shcache.h)"""
+    import os, re
+    t = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "include", "fnvnx_shaders.h")).read()
+    bit = dict((m.group(1), int(m.group(2))) for m in re.finditer(r"FNVNX_SHADER_(\w+)\s*=\s*1u\s*<<\s*(\d+)", t))
+    nk = re.search(r"#define\s+FNVNX_SHADER_NONKEY_FLAGS\s+\(\(uint32_t\)\(([^)]*)\)\)", t).group(1)
+    v = 0
+    for nm in re.findall(r"FNVNX_SHADER_(\w+)", nk): v |= 1 << bit[nm]
+    return 0xFFFFFFFF & ~v
+
+
+MAGIC, VERSION, FLAGS_MASK = b"FNSC", 1, _key_flags_mask()
 HEADER, INDEX = 64, 36
 M64 = 0xFFFFFFFFFFFFFFFF
 

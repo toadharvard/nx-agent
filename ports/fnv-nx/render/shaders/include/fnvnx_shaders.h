@@ -52,6 +52,12 @@ enum {
     FNVNX_SHADER_FLAT_COLOR = 1u << 7
 };
 
+/* THE cache-key rule (cache/shcache.h): every bit of fnvnx_shader_opts.flags is an input of the translation and is part of its key, except the
+ * bits declared here, which only choose how much of the one translation is returned (the cache holds complete translations: DKSH + reflection).
+ * The key set is the COMPLEMENT of this list, so a flag added to the enum above is in every key unless it is put here on purpose. */
+#define FNVNX_SHADER_NONKEY_FLAGS ((uint32_t)(FNVNX_SHADER_KEEP_GLSL | FNVNX_SHADER_NO_DKSH))
+#define FNVNX_SHADER_KEY_FLAGS (~FNVNX_SHADER_NONKEY_FLAGS)
+
 typedef struct fnvnx_shader_opts {
     uint32_t flags;
     const char *backend;               /* NULL = default ("mojoshader-glsldk") */
