@@ -69,6 +69,8 @@ def guest_undefined(root, out):
 
 
 MUTS = [   # (part that must fail, file, old text, new text)
+    ("d", "draw_state.cpp", "fnvnx_wine_fixme(D5A_FIXME_LASTPIXEL);", "(void)0;"),
+    ("d", "draw_state.cpp", "!rs[D3DRS_LASTPIXEL] && !b.fx_lastpixel", "!b.fx_lastpixel"),
     ("b", "draw_prim.cpp", "case D3DPT_TRIANGLELIST: return n * 3;", "case D3DPT_TRIANGLELIST: return n * 2;"),
     ("b", "draw_prim.cpp", "case D3DPT_TRIANGLEFAN: return n + 2;", "case D3DPT_TRIANGLEFAN: return n + 1;"),
     ("b", "draw_prim.cpp", "return s.freq[0] & NXD_FREQ_MASK;", "return s.freq[0] & 0x7FFFF;"),

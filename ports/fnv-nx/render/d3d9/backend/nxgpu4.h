@@ -111,10 +111,9 @@ typedef struct NxVtxLayout4 {
                                    single-sample (every sample of a covered pixel gets the pixel-centre result) */
 #define NXRS_M_AALINE      1   /* D3DRS_ANTIALIASEDLINEENABLE != 0: lines have fractional coverage (the coverage
                                    function is implementation defined, in D3D9 and in GL) */
-#define NXRS_M_LASTPIXEL   2   /* D3DRS_LASTPIXEL != 0 (lines). GL 4.5 rasterizes lines with the diamond-exit rule and
-                                   cannot draw the last pixel: a Lines / LineStrip draw under a state with this bit
-                                   set makes the submit BAD_CALL before anything runs (the bit is harmless for every
-                                   other primitive; with the bit clear lines are GL's diamond-exit lines) */
+#define NXRS_M_LASTPIXEL   2   /* D3DRS_LASTPIXEL != 0. No effect: lines are GL's diamond-exit lines whatever the bit is, as in
+                                   Wine 9.0 wined3d (WINED3D_RS_LASTPIXEL has no GL state); the bit only keeps the state
+                                   identity equal to the D3D9 state */
 #define NXRS_M_NOCLIP      3   /* D3DRS_CLIPPING == 0: no near / far plane clipping, depth clamped to the depth range
                                    (user clip planes, w[2] bits 8-15, are independent) */
 #define NXRS_M_SAMPLEMASK  32  /* bits 32-63: D3DRS_MULTISAMPLEMASK (all ones = every sample); bit i = sample i of a

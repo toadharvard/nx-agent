@@ -78,39 +78,30 @@ static void aaline_bit(void) {
 }
 
 static void lastpixel_bit(void) {
+    /* Wine 9.0 wined3d: WINED3D_RS_LASTPIXEL has no GL state (wined3d_device_apply_stateblock only logs a FIXME when it is FALSE);
+     * the line is GL's diamond-exit line whatever the value is. The bit must not change a draw of any primitive and must not refuse it. */
     uint32_t T = t_image(NxImgType_2D, NxFmt_RGBA8, 16, 16, 1, 1, 1), vs = line_vs(2.0f, 4.0f, 9.0f, 4.0f), fs = t_shader(NxStage_Fragment, T_FS_WHITE);
     t_zero(T, NxImgType_2D, NxFmt_RGBA8, 16, 16, 1, 1);
     Stream* s = (Stream*)calloc(1, sizeof *s);
     t_state(s, 1, vs, fs, 0, T_W0_ALL, 0, 0, W3_LASTPIXEL);
     t_state(s, 2, vs, fs, 0, T_W0_ALL, 0, 0, 0);
-    CHECK(t_submit(s) == 0);   /* defining the state is fine: the bit matters when a line is drawn with it */
-    uint8_t zero[1024] = {0};
-    for (int kind = 0; kind < 2; kind++) {   /* kind 0: Lines, kind 1: LineStrip */
-        t_op(s, NxOp_BeginPass, 8, T, 0, NxClear_Color, 0xFF0000FFu, 0, 0, 16, 16);
-        t_op(s, NxOp_BindState, 1, 1);
+    CHECK(t_submit(s) == 0);
+    for (int kind = 0; kind < 2; kind++) for (int st = 1; st <= 2; st++) {   /* kind 0: Lines, kind 1: LineStrip; state 1 = bit set, 2 = clear */
+        t_op(s, NxOp_BeginPass, 8, T, 0, NxClear_Color, 0xFF000000u, 0, 0, 16, 16);
+        t_op(s, NxOp_BindState, 1, st);
         t_op(s, NxOp_Draw, 5, kind ? NxPrim_LineStrip : NxPrim_Lines, 2, 1, 0, 0);
-        CHECKM(t_submit(s) == NXGPU_BAD_CALL, "a line draw under D3DRS_LASTPIXEL = TRUE is refused (kind %d)", kind);
+        t_op(s, NxOp_EndPass, 0);
+        CHECKM(t_submit(s) == 0, "a line draw under LASTPIXEL bit %d is accepted (kind %d)", st == 1, kind);
         uint8_t* g = t_read_all(T, 0, 0, 16, 16, 1, t_fmt(NxFmt_RGBA8));
-        CHECKM(g && !memcmp(g, zero, sizeof zero) , "nothing ran (the clear before the bad draw did not happen)");
+        int ok = g != NULL;
+        for (int y = 0; ok && y < 16; y++) for (int x = 0; x < 16; x++) {
+            int want = y == 4 && x >= 2 && x <= 8;   /* the segment exits the diamonds of pixels 2..8; its end lies inside pixel 9's */
+            ok &= (g[(y * 16 + x) * 4] == 255) == want;
+        }
+        CHECKM(ok, "LASTPIXEL bit %d, kind %d: horizontal line from window (2.5, 4.5) to (9.5, 4.5) = pixels 2..8 of row 4 (diamond exit, as Wine)", st == 1, kind);
         free(g);
     }
-    t_op(s, NxOp_BeginPass, 8, T, 0, NxClear_Color, 0xFF000000u, 0, 0, 16, 16);   /* the same state, a triangle: no line, no problem */
-    t_op(s, NxOp_BindState, 1, 1);
-    t_op(s, NxOp_Draw, 5, NxPrim_Triangles, 3, 1, 0, 0);
-    CHECK(t_submit(s) == 0);
-    t_op(s, NxOp_BeginPass, 8, T, 0, NxClear_Color, 0xFF000000u, 0, 0, 16, 16);   /* bit clear: GL's diamond-exit line, last pixel not drawn */
-    t_op(s, NxOp_BindState, 1, 2);
-    t_op(s, NxOp_Draw, 5, NxPrim_Lines, 2, 1, 0, 0);
-    CHECK(t_submit(s) == 0);
-    uint8_t* g = t_read_all(T, 0, 0, 16, 16, 1, t_fmt(NxFmt_RGBA8));
-    int ok = g != NULL;
-    for (int y = 0; ok && y < 16; y++) for (int x = 0; x < 16; x++) {
-        int want = y == 4 && x >= 2 && x <= 8;   /* the segment exits the diamonds of pixels 2..8; its end lies inside pixel 9's */
-        ok &= (g[(y * 16 + x) * 4] == 255) == want;
-    }
-    if (!ok) { for (int y = 3; y < 6; y++) { printf("  row %d:", y); for (int x = 0; x < 16; x++) printf(" %02x", g[(y * 16 + x) * 4]); printf("\n"); } }
-    CHECKM(ok, "LASTPIXEL clear: horizontal line from window (2.5, 4.5) to (9.5, 4.5) = pixels 2..8 of row 4 (diamond exit)");
-    free(g); free(s);
+    free(s);
 }
 
 static void noclip_bit(void) {
