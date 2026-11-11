@@ -19,9 +19,9 @@ G=(-mabi=ilp32 -O2 -g -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-pic -fno-pie -f
    -I"$ROOT/platform/crt")
 GXX=(-std=gnu++17 -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit)
 TSAN=(-fsanitize=thread)
-objs=()
-cc() { local o="$OUT/$(basename "$1").o"; shift_src=$1; shift; $CC -std=gnu11 "${G[@]}" "$@" -c "$shift_src" -o "$o"; objs+=("$o"); }
-cxx() { local o="$OUT/$(basename "$1").o"; shift_src=$1; shift; $CXX "${GXX[@]}" "${G[@]}" "$@" -c "$shift_src" -o "$o"; objs+=("$o"); }
+objs=(); lm=()   # lm: the link map of guest.elf, "<root-relative source>=<object>" (platform/manifest/check_doubles.py)
+cc() { local o="$OUT/$(basename "$1").o"; shift_src=$1; shift; $CC -std=gnu11 "${G[@]}" "$@" -c "$shift_src" -o "$o"; objs+=("$o"); lm+=("${shift_src#"$ROOT"/}=$o"); }
+cxx() { local o="$OUT/$(basename "$1").o"; shift_src=$1; shift; $CXX "${GXX[@]}" "${G[@]}" "$@" -c "$shift_src" -o "$o"; objs+=("$o"); lm+=("${shift_src#"$ROOT"/}=$o"); }
 
 for f in sync thread handles waitgraph platstat; do cxx "$ROOT/platform/win32/$f.cpp"; done
 for f in clock_real clock_rt; do cxx "$ROOT/platform/clock/$f.cpp"; done   # the clock interface (fnvnx_clock.h) the sync layer reads time through
@@ -49,6 +49,7 @@ if ORDER_SO=$(CXX=$CXX bash "$ROOT/toolchain/order/build.sh" "$OUT/.order" 2>/de
   $CXX "${GXX[@]}" "${G[@]}" "${LIT[@]}" -DLITMUS_NS=lit_plain -DLITMUS_MAIN=litmus_main_plain \
     -c "$HERE/litmus_mt.cpp" -o "$OUT/litmus_plain.o"
   objs+=("$OUT/litmus_order.o" "$OUT/litmus_plain.o")
+  lm+=("${HERE#"$ROOT"/}/litmus_mt.cpp=$OUT/litmus_order.o" "${HERE#"$ROOT"/}/litmus_mt.cpp=$OUT/litmus_plain.o")
 else
   cc "$HERE/litmus_none.c"
 fi
@@ -61,6 +62,7 @@ for s in EnterCriticalSection LeaveCriticalSection TryEnterCriticalSection SetEv
 done
 # --wrap applies to every object's undefined references; the platform objects define these names and call each other
 # directly (definitions are not wrapped), so only the test's and the override's calls are intercepted.
+(IFS=$'\t'; printf 'mtqemu_guest\t%s\n' "${lm[*]}") > "$OUT/linkmap.tsv"
 $LD -m aarch64linux32 -T "$HERE/mt.ld" "${wraps[@]}" "${objs[@]}" -o "$OUT/guest.elf"
 
 # host: LP64, static, freestanding, below 4 GiB

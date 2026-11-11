@@ -37,6 +37,12 @@ $(OUT)/sockwire_test.o: $(HERE)/sockwire_test.c $(INCS)
 $(OUT)/host_glue.o: $(HERE)/host_glue.c $(ROOT)/toolchain/host/host_sock.inc $(INCS)
 	@mkdir -p $(OUT) && $(CC) $(HOSTCF) -c $< -o $@
 
+# the link map of sockwire_test (platform/manifest/check_doubles.py): <root-relative source>=<object>
+TAB := $(shell printf '\t')
+linkmap:
+	@printf 'sockwire_test$(TAB)platform/os/sock_guest.c=$(OUT)/sock_guest.o$(TAB)tests/s4/sockwire/guest_shim.c=$(OUT)/guest_shim.o$(TAB)tests/s4/sockwire/sockwire_test.c=$(OUT)/sockwire_test.o$(TAB)tests/s4/sockwire/host_glue.c=$(OUT)/host_glue.o\n'
+.PHONY: linkmap
+
 clean:
 	rm -rf $(OUT)
 .PHONY: sockwire clean

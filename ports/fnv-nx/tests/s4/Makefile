@@ -247,6 +247,49 @@ gfn-nocompile:
 		then echo "gfn-nocompile: CASE $$c COMPILED: a game code pointer can be called natively"; exit 1; fi; done; \
 	echo "gfn-nocompile: ok (control compiles, 4 native-call forms rejected)"
 
+# ---- the census of test doubles (platform/manifest/check_doubles.py; owner order 2026-11-11 night). Not part of the default
+# target. Builds every object of every test binary (S4: s4_tests, vclock, private, probe_dynsites, m32; S7: its two) and every
+# product unit for the guest (AArch64 ILP32, GOBJ), then checks (test-file symbols) ∩ (product symbols) = ∅.
+#   make -C tests/s4 doubles [S4LOG=<log of make test> S7LOG=<log of make -C tests/s7 test>]
+GOBJ := $(OUT)/guest-objs
+TAB := $(shell printf '\t')
+empty :=
+space := $(empty) $(empty)
+FNVNX_TC ?= /home/user/gd/toolchain/prefix
+NEWLIB_INC ?= $(FNVNX_TC)/aarch64-none-elf/include
+LIBNX_INC ?= $(ROOT)/ext/libnx/nx/include
+PRODUCT_UNITS := $(shell python3 -I $(P)/manifest/check_doubles.py --root $(ROOT) --list-units)
+GUESTF := -DFNVNX_PLATFORM_BUILD -mabi=ilp32 -frounding-math -fshort-wchar -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(FT)/include -I$(ROOT)/loader/include -I$(ROOT)/toolchain/include
+# a guest object is named like build_guest.sh names it: the root-relative path with '/' -> '_'
+define GUEST_RULE
+$(GOBJ)/$(subst /,_,$(1)).o: $(ROOT)/$(1) | $(ENV_GEN) $(COMOUT)
+	@mkdir -p $(GOBJ)
+	$$(if $$(filter %.c,$(1)),$$(XCC) -std=gnu11,$$(XCXX) -std=gnu++17) $(GUESTF) $$(if $$(filter %/sock_guest.c,$(1)),-D__SWITCH__ -I$(NEWLIB_INC) -I$(LIBNX_INC),) -c $$< -o $$@
+endef
+$(foreach u,$(PRODUCT_UNITS),$(eval $(call GUEST_RULE,$(u))))
+GUEST_OBJS := $(foreach u,$(PRODUCT_UNITS),$(GOBJ)/$(subst /,_,$(u)).o)
+# units that need the guest toolchain's newlib headers are skipped when it is absent (their symbols are then reported UNKNOWN)
+GUEST_OK := $(filter-out $(if $(wildcard $(NEWLIB_INC)/reent.h),,$(GOBJ)/platform_os_sock_guest.c.o),$(GUEST_OBJS))
+$(OUT)/linkmaps.tsv: $(OUT)/mtq/linkmap.tsv $(OBJS) $(VC_OBJS) $(PRIV_OBJS) $(DYN_OBJS) $(M32_OBJS)
+	@mkdir -p $(OUT)
+	@{ printf 's4_tests$(TAB)%s\n' "$(subst $(space),$(TAB),$(OBJS))"; \
+	   printf 's4_tests_vclock$(TAB)%s\n' "$(subst $(space),$(TAB),$(VC_OBJS))"; \
+	   printf 's4_tests_private$(TAB)%s\n' "$(subst $(space),$(TAB),$(PRIV_OBJS))"; \
+	   printf 'probe_dynsites$(TAB)%s\n' "$(subst $(space),$(TAB),$(DYN_OBJS))"; \
+	   printf 's4_m32$(TAB)%s\n' "$(subst $(space),$(TAB),$(M32_OBJS))"; \
+	   $(MAKE) --no-print-directory -s -C $(HERE)/../s7 linkmap; \
+	   $(MAKE) --no-print-directory -s -C $(HERE)/sockwire linkmap OUT=$(HERE)/sockwire/build; \
+	   cat $(OUT)/mtq/linkmap.tsv; } > $@
+# the mtqemu guest (tests/s15/mtqemu/build.sh): its objects are built there; the script writes its link map before the link, which
+# does not complete today (os_world_* are undefined in guest.elf), hence the leading '-'
+$(OUT)/mtq/linkmap.tsv:
+	-bash $(ROOT)/tests/s15/mtqemu/build.sh $(OUT)/mtq >$(OUT)/mtq.log 2>&1
+	@test -f $@
+doubles: $(OUT)/linkmaps.tsv $(GUEST_OK)
+	python3 -I $(P)/manifest/check_doubles.py --root $(ROOT) --linkmaps $(OUT)/linkmaps.tsv --guest-objs $(GOBJ) --tsv $(OUT)/doubles.tsv \
+		$(if $(S4LOG),--test-log s4_tests=$(S4LOG)) $(if $(S7LOG),--test-log s7_tests=$(S7LOG))
+.PHONY: doubles
+
 # ---- AArch64 ILP32 syntax check (the game's data model)
 XCC ?= aarch64-linux-gnu-gcc
 XCXX ?= aarch64-linux-gnu-g++
