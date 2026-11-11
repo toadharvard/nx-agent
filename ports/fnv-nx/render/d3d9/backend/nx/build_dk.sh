@@ -7,6 +7,7 @@ DK=${FNVNX_DK:-/home/user/work/l6/dk}
 OUT=${1:-$HERE/build}
 CC=$DK/dkp/devkitA64/bin/aarch64-none-elf-gcc
 NM=$DK/dkp/devkitA64/bin/aarch64-none-elf-nm
+AR=$DK/dkp/devkitA64/bin/aarch64-none-elf-ar
 mkdir -p "$OUT"
 FILES=$(cd "$HERE" && ls dk_*.c | sed 's/\.c$//')
 for f in $FILES; do
@@ -20,4 +21,5 @@ done
     -ffunction-sections -fdata-sections -D__SWITCH__ -I"$HERE/.." -c "$HERE/../nxgpu4_check.c" -o "$OUT/nxgpu4_check.o"
 "$NM" -u "$OUT"/*.o > "$OUT/undefined.txt"
 "$NM" --defined-only "$OUT"/*.o > "$OUT/defined.txt"
-echo "built $(echo $FILES | wc -w) objects in $OUT"
+rm -f "$OUT/libnxdk.a"; "$AR" rcsD "$OUT/libnxdk.a" "$OUT"/*.o   # deterministic archive (D: zero timestamps/ids), members in name order
+echo "built $(echo $FILES | wc -w) objects and libnxdk.a in $OUT"
