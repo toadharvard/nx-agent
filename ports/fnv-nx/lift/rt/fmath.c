@@ -1123,13 +1123,12 @@ double fnvl_m_log(double x, u32 *fl) {
   if (u == 0x3ff0000000000000ull) return 0.0;
   return ziv(W_LOG, x, 0.0, 0, fl);
 }
-/* pow(x, y), C99 Annex F: y = +-0 -> 1 (also for NaN x); x = 1 -> 1 (also for NaN y); a signalling NaN is quieted with IE; other NaNs propagate; y = +-inf: |x| = 1 -> 1, (|x| < 1) == (y > 0) -> +0 else +inf;
+/* pow(x, y), C99 Annex F: y = +-0 -> 1 (also for NaN x); x = 1 -> 1 (also for NaN y; no exception even for a signalling NaN, as Annex F words it); other NaNs propagate (nan2); y = +-inf: |x| = 1 -> 1, (|x| < 1) == (y > 0) -> +0 else +inf;
    x = +-inf / +-0: the sign of the result is negative iff x < 0 and y is an odd integer; x = +-0, y < 0: +-inf with ZE; x < 0 finite and y not an integer: invalid; |x| = 1: +-1. Otherwise pow_exact (exact cases) or the loop. */
 double fnvl_m_pow(double x, double y, u32 *fl) {
   u64 ux = d2u(x), uy = d2u(y), ax = ux & ~SGNM, ay = uy & ~SGNM;
   int xs = (int)(ux >> 63);
-  if (!ay) return (ax > EXPM && !(ux & FQ)) ? nan1(x, fl) : 1.0;
-  if (ux == 0x3ff0000000000000ull) return (ay > EXPM && !(uy & FQ)) ? nan1(y, fl) : 1.0;
+  if (!ay || ux == 0x3ff0000000000000ull) return 1.0;
   if (ax > EXPM || ay > EXPM) return nan2(x, y, fl);
   int yint = 0, yodd = 0;
   if (ay != EXPM) {
