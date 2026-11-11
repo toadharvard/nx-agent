@@ -1,11 +1,13 @@
 # L2 w3: plugin census of the platform root (claude/fnv-l5-platform-w10 f872bcd, root ports/fnv-nx/platform)
 
-Status: NO plugin census possible yet; the root does not preprocess. The earlier census on a temp root is withdrawn.
+Status: partial. 73 units seen: 14 OK, 58 fail in the preprocessor (non-plugin), 1 fails in CC (non-plugin, see below); plugin errors: 0. The earlier census on a temp root is withdrawn.
 
 Commits: L5 branch claude/fnv-l5-platform-w10 f872bcd2b2d3 (recipe check: valid), msvcmodel b4057704, L2 w3 branch merged with origin/claude/fnv-nx-clean.
 Build: `recipe.py build --root ports/fnv-nx/platform` (fresh store, unchanged checkout) -> red at stage pp, 0 objects. Every unit that failed failed in the PREPROCESSOR (non-plugin); no CC stage ran for them, so no plugin diagnostic exists.
 
-Units seen: 58 (stage results of this build). First preprocessor error of each unit:
+OK (11 C++ under all 8 plugins + 3 C): audio/backend ds3d mixer reverb, boundary/host_hooks, clock/clock_real clock_rt clock_virtual, com/combridge, crt/msvcrt_table.gen, win32/inflate (C++); guest/os_guest.c, os/os_world.c, os/sock_guest.c (C).
+CC failure: input/swkbd.cpp: /ext/a64/aarch64-none-elf/include/c++/15.2.0/bits/alloc_traits.h:123:7: error: explicit template argument list not allowed (libstdc++ 15.2 headers of the fnvnx-a64 external under the GCC 13 msvcmodel compiler; not a plugin message).
+First preprocessor error of each of the 58 units:
 | count | missing header (non-plugin) |
 |---|---|
 | 41 | fnvnx_win32.h (via fnvnx_win32_ext.h:11) |
