@@ -497,29 +497,89 @@ struct Site final : IObjectWithSite_ {
     HR SetSite(Unk *) override;
     HR GetSite(const void *iid, void **) override;
 };
-/* IVideoWindow (39 methods) and IBasicVideo (32): the graph forwards to a video renderer; with none every method fails
- * with E_NOINTERFACE, as an audio-only graph does (the bodies are the table rows; the slots are what matters). */
-#define V10(n) virtual HR n##0() = 0; virtual HR n##1() = 0; virtual HR n##2() = 0; virtual HR n##3() = 0; virtual HR n##4() = 0; \
-               virtual HR n##5() = 0; virtual HR n##6() = 0; virtual HR n##7() = 0; virtual HR n##8() = 0; virtual HR n##9() = 0;
-#define O10(n) HR n##0() override; HR n##1() override; HR n##2() override; HR n##3() override; HR n##4() override; \
-               HR n##5() override; HR n##6() override; HR n##7() override; HR n##8() override; HR n##9() override;
-struct VideoWindowI : IDispatch_ { V10(a) V10(b) V10(c) virtual HR d0() = 0; virtual HR d1() = 0; virtual HR d2() = 0; virtual HR d3() = 0; virtual HR d4() = 0; virtual HR d5() = 0; virtual HR d6() = 0; virtual HR d7() = 0; virtual HR d8() = 0; };
-struct BasicVideoI : IDispatch_ { V10(a) V10(b) V10(c) virtual HR d0() = 0; virtual HR d1() = 0; };
+/* IVideoWindow and IBasicVideo (dshow_int.h): the graph forwards to a video renderer; with none every method fails with
+ * E_NOINTERFACE, as an audio-only graph does (the bodies are the table rows of env_const.tsv, one per method). */
 #define NOVIDEO_DISPATCH                                                                                      \
     HR GetTypeInfoCount(unsigned *n) override { if (!n) return E_POINTER_; *n = 1; return S_OK_; }           \
     HR GetTypeInfo(unsigned i, uint32_t, void **o) override { if (o) *o = nullptr; return i ? DISP_E_BADINDEX_ : TYPE_E_CANTLOADLIBRARY_; } \
     HR GetIDsOfNames(const void *, WCH **, unsigned, uint32_t, long *) override;                            \
     HR Invoke(long, const void *, uint32_t, uint16_t, void *, void *, void *, unsigned *) override;
-struct VideoWindow final : VideoWindowI {
+struct VideoWindow final : IVideoWindow_ {
     SUB_UNK NOVIDEO_DISPATCH
-    O10(a) O10(b) O10(c)
-    HR d0() override; HR d1() override; HR d2() override; HR d3() override; HR d4() override;
-    HR d5() override; HR d6() override; HR d7() override; HR d8() override;
+    HR put_Caption(WCH *) override;
+    HR get_Caption(WCH **) override;
+    HR put_WindowStyle(long) override;
+    HR get_WindowStyle(long *) override;
+    HR put_WindowStyleEx(long) override;
+    HR get_WindowStyleEx(long *) override;
+    HR put_AutoShow(long) override;
+    HR get_AutoShow(long *) override;
+    HR put_WindowState(long) override;
+    HR get_WindowState(long *) override;
+    HR put_BackgroundPalette(long) override;
+    HR get_BackgroundPalette(long *) override;
+    HR put_Visible(long) override;
+    HR get_Visible(long *) override;
+    HR put_Left(long) override;
+    HR get_Left(long *) override;
+    HR put_Width(long) override;
+    HR get_Width(long *) override;
+    HR put_Top(long) override;
+    HR get_Top(long *) override;
+    HR put_Height(long) override;
+    HR get_Height(long *) override;
+    HR put_Owner(intptr_t) override;
+    HR get_Owner(intptr_t *) override;
+    HR put_MessageDrain(intptr_t) override;
+    HR get_MessageDrain(intptr_t *) override;
+    HR get_BorderColor(long *) override;
+    HR put_BorderColor(long) override;
+    HR get_FullScreenMode(long *) override;
+    HR put_FullScreenMode(long) override;
+    HR SetWindowForeground(long) override;
+    HR NotifyOwnerMessage(intptr_t hwnd, long msg, intptr_t wparam, intptr_t lparam) override;
+    HR SetWindowPosition(long l, long t, long w, long h) override;
+    HR GetWindowPosition(long *l, long *t, long *w, long *h) override;
+    HR GetMinIdealImageSize(long *w, long *h) override;
+    HR GetMaxIdealImageSize(long *w, long *h) override;
+    HR GetRestorePosition(long *l, long *t, long *w, long *h) override;
+    HR HideCursor(long) override;
+    HR IsCursorHidden(long *) override;
 };
-struct BasicVideo final : BasicVideoI {
+struct BasicVideo final : IBasicVideo_ {
     SUB_UNK NOVIDEO_DISPATCH
-    O10(a) O10(b) O10(c)
-    HR d0() override; HR d1() override;
+    HR get_AvgTimePerFrame(REFTIME *) override;
+    HR get_BitRate(long *) override;
+    HR get_BitErrorRate(long *) override;
+    HR get_VideoWidth(long *) override;
+    HR get_VideoHeight(long *) override;
+    HR put_SourceLeft(long) override;
+    HR get_SourceLeft(long *) override;
+    HR put_SourceWidth(long) override;
+    HR get_SourceWidth(long *) override;
+    HR put_SourceTop(long) override;
+    HR get_SourceTop(long *) override;
+    HR put_SourceHeight(long) override;
+    HR get_SourceHeight(long *) override;
+    HR put_DestinationLeft(long) override;
+    HR get_DestinationLeft(long *) override;
+    HR put_DestinationWidth(long) override;
+    HR get_DestinationWidth(long *) override;
+    HR put_DestinationTop(long) override;
+    HR get_DestinationTop(long *) override;
+    HR put_DestinationHeight(long) override;
+    HR get_DestinationHeight(long *) override;
+    HR SetSourcePosition(long l, long t, long w, long h) override;
+    HR GetSourcePosition(long *l, long *t, long *w, long *h) override;
+    HR SetDefaultSourcePosition() override;
+    HR SetDestinationPosition(long l, long t, long w, long h) override;
+    HR GetDestinationPosition(long *l, long *t, long *w, long *h) override;
+    HR SetDefaultDestinationPosition() override;
+    HR GetVideoSize(long *w, long *h) override;
+    HR GetVideoPaletteEntries(long start, long count, long *retrieved, long *palette) override;
+    HR GetCurrentImage(long *size, long *dib) override;
+    HR IsUsingDefaultSource() override;
+    HR IsUsingDefaultDestination() override;
 };
 
 struct Graph final : IFilterGraph2_, GraphCore {
@@ -643,8 +703,8 @@ HR Graph::QueryInterface(const void *iid, void **out)
     else if (geq(iid, IID_IMediaSeeking_)) *out = static_cast<IMediaSeeking_ *>(&seeking);
     else if (geq(iid, IID_IMediaPosition_)) *out = static_cast<IMediaPosition_ *>(&position);
     else if (geq(iid, IID_IBasicAudio_)) *out = static_cast<IBasicAudio_ *>(&audio);
-    else if (geq(iid, IID_IVideoWindow_)) *out = static_cast<VideoWindowI *>(&vwin);
-    else if (geq(iid, IID_IBasicVideo_)) *out = static_cast<BasicVideoI *>(&bvid);
+    else if (geq(iid, IID_IVideoWindow_)) *out = static_cast<IVideoWindow_ *>(&vwin);
+    else if (geq(iid, IID_IBasicVideo_)) *out = static_cast<IBasicVideo_ *>(&bvid);
     else if (geq(iid, IID_IGraphVersion_)) *out = static_cast<IGraphVersion_ *>(&version_if);
     else if (geq(iid, IID_IObjectWithSite_)) *out = static_cast<IObjectWithSite_ *>(&site_if);
     else return E_NOINTERFACE_;

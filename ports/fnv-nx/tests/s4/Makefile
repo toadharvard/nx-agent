@@ -39,7 +39,7 @@ CFLAGS_ := -std=gnu11 $(FLAGS)
 CXXFLAGS_ := -std=gnu++17 $(FLAGS)
 
 PLAT_C := $(P)/os/os_posix.c $(wildcard $(P)/crt/*.c)
-PLAT_CXX := $(wildcard $(P)/win32/*.cpp) $(wildcard $(P)/crt/*.cpp) $(wildcard $(P)/audio/*.cpp)   # audio: winmm waveOut* are exports of the table
+PLAT_CXX := $(P)/com/combridge.cpp $(P)/com/combridge.gen.cpp $(wildcard $(P)/win32/*.cpp) $(wildcard $(P)/crt/*.cpp) $(wildcard $(P)/audio/*.cpp)   # audio: winmm waveOut* are exports of the table
 TEST_CXX := $(wildcard $(HERE)/*.cpp)
 
 OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
@@ -93,6 +93,17 @@ $(OUT)/%.cpp.o: $(ROOT)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_) -c $< -o $@
 
+# the per-source constant-result bodies of platform/audio and platform/input, and the COM bridge generated from
+# platform/com/com_spec.json: a fresh checkout builds with the default target
+ENVC_SRC := audio/dshow audio/dshow_filters audio/dsound audio/waveout input/dinput
+$(P)/%.env_const.gen.inc: $(P)/manifest/env_const.tsv $(P)/manifest/gen_env_const.py
+	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only $*.cpp
+$(foreach s,$(ENVC_SRC),$(eval $(OUT)/platform/$(s).cpp.o: $(P)/$(s).env_const.gen.inc))
+COMGEN := $(P)/com/gen_combridge.py $(P)/com/com_spec.json
+COMOUT := $(P)/com/combridge.gen.cpp $(P)/com/combridge_exports.gen.cpp $(P)/com/combridge_if.gen.h $(P)/com/combridge_rows.tsv
+$(COMOUT) &: $(COMGEN)
+	python3 -I $(P)/com/gen_combridge.py $(P)/com/com_spec.json $(P)/com
+
 $(OUT)/s4_tests: $(OBJS) $(OUT)/libfreetype.a
 	$(CXX) $(CXXFLAGS_) $(OBJS) $(OUT)/libfreetype.a -o $@ -lm $(LDEXTRA)
 
@@ -103,7 +114,7 @@ test: $(OUT)/s4_tests
 # missing when a cross compiler replaced them; the x86-64 asm headers serve i386 too.
 M32OUT := $(OUT)-m32
 M32FLAGS := -m32 -idirafter /usr/include/x86_64-linux-gnu $(FLAGS) -I$(ROOT)/shim/include
-M32_CXX := $(PLAT_CXX) $(wildcard $(P)/audio/*.cpp) $(filter-out %/input_horizon.cpp,$(wildcard $(P)/input/*.cpp))   # input_horizon.cpp: libnx only; m32/host_input.cpp pumps
+M32_CXX := $(PLAT_CXX) $(P)/com/combridge_exports.gen.cpp $(wildcard $(P)/audio/*.cpp) $(filter-out %/input_horizon.cpp,$(wildcard $(P)/input/*.cpp))   # input_horizon.cpp: libnx only; m32/host_input.cpp pumps
 # the D3D9=null guest's D3D side (toolchain/game/build.sh): D3DX and the null device (d3d9.dll module)
 M32_D3D := $(wildcard $(ROOT)/render/nine/d3dx/*.cpp) $(ROOT)/toolchain/game/null_d3d9.cpp
 M32_TEST := $(wildcard $(HERE)/m32/*.cpp) $(HERE)/host_boundary.cpp
@@ -120,10 +131,7 @@ $(M32OUT)/toolchain/game/null_d3d9.cpp.o: $(ROOT)/toolchain/game/null_d3d9.cpp
 $(M32OUT)/tests/s4/m32/%.cpp.o: $(HERE)/m32/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) -std=gnu++17 $(M32FLAGS) -include $(HERE)/m32/compat_m32.h -c $< -o $@
-# the imports whose documented result is one constant are generated from platform/manifest/env_const.tsv
-ENVC_SRC := audio/dshow audio/dshow_filters audio/dsound audio/waveout input/dinput
-$(P)/%.env_const.gen.inc: $(P)/manifest/env_const.tsv $(P)/manifest/gen_env_const.py
-	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only $*.cpp
+# (ENVC_SRC and the generation rule: above)
 $(foreach s,$(ENVC_SRC),$(eval $(M32OUT)/platform/$(s).cpp.o: $(P)/$(s).env_const.gen.inc))
 
 $(M32OUT)/%.c.o: $(ROOT)/%.c
