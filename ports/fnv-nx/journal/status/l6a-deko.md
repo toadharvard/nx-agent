@@ -1,6 +1,6 @@
 # L6A DEKO status (lead: Opus, branch claude/fnv-l6a-deko)
 
-Updated 2026-11-11. Trunk read at claude/fnv-nx-clean 58a79b3e. CLAUDE.md on this branch = trunk 58a79b3e (4335c142).
+Updated 2026-11-11. Trunk read at claude/fnv-nx-clean 08f6ea30. CLAUDE.md on this branch = trunk 08f6ea30.
 
 ## Layout decision
 The trunk is an unrelated history (shared paths: 20, all machinery). Trunk-bound work of L6A is done on trunk-based worker
@@ -11,7 +11,7 @@ inbox notes and the dk_* sources of the integration lineage. The two histories a
 | # | task | worker | status |
 |---|---|---|---|
 | 1 | dk product root ports/fnv-nx/render/d3d9/backend (dk_*.c + nxgpu4_check.c + include closure), recipe.py, msvcmodel b4057704, admitted | w4 session_01KmtZKT5Qhn2Ywp9VAbJkmt -> claude/fnv-l6a-deko-w4 | doing |
-| 1a | plugins in the recipe | — | blocked by plugin stages not in trunk recipe.py at 58a79b3e, L1 (w4 branch claude/fnv-l1-contract-w4) |
+| 1a | plugins in the recipe | w4 | trunk e90a7e43 has them; they load only into C++ units (RECIPE.md "Plugins"); the dk root is all C, so 0 plugins apply by the trunk rule |
 | 2 | doubles: 12/12 harnesses -> real dk_* files on the L4 deko3d model, or deleted; dkall gate | — | blocked by L4 deko3d model (0 lines), L4 |
 | 3 | dk boundary contract (67 dk*, 206 sites, 7 libnx; fnv-nx-build l6a/dkabi @071b497) for the L4 model; uam as hermetic stage -> DKSH | — | doing (contract sent to L4) |
 | 4 | no NRO to the console until dkall green | — | holds; NRO l6a/nro/796aac6c150a withdrawn |
