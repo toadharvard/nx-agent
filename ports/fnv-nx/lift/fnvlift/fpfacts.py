@@ -12,6 +12,11 @@ A lifter body that needs an invariant calls require(); if the fact file says `un
 import os
 from .core import Unsupported
 
+# Recorded assumptions of the owner (not proofs). A-FPMASK, owner word of 2026-11-11 (CLAUDE.md of the integration branch, 0c6667f5): until the first frame,
+# x87/SSE exceptions are taken to stay masked as in the thread start state FCW 0x027F / MXCSR 0x1F80 (ENV_TRUTH P6). Known risk, measured by tools/fpstate.py: the control-word
+# loads whose value is not proven (exe 55, libvorbis 15, libvorbisfile 2, binkw32 1, d3dx9_31 43, d3dx9_38 51). The full semantics (thread flag + exact slow path raising #MF/#XM) is
+# deferred work, not dropped: a body that relies on the assumption records 'A-FPMASK' in its kinds, so every such site is counted in the pack.
+OWNER_ASSUMED = {'I-FPMASK': 'A-FPMASK'}
 ASSUME = set()          # test harness only (test/instest.py): states drawn with every exception masked, so the invariant holds by construction of the test states
 _CACHE = {}
 
@@ -45,8 +50,11 @@ def status(name):
 
 
 def require(name, what):
-    """the body of `what` has no effect under invariant `name`: returns the invariant id when it holds, raises Unsupported otherwise"""
+    """the body of `what` has no effect under invariant `name`: returns the invariant id when it holds, the id of the owner's recorded assumption when
+    the invariant is unproven but assumed (OWNER_ASSUMED), raises Unsupported otherwise"""
     ok, detail = status(name)
+    if not ok and name in OWNER_ASSUMED:
+        return OWNER_ASSUMED[name]
     if not ok:
         raise Unsupported('%s needs %s, which is not proven for this program (%s)' % (what, name, detail))
     return name
