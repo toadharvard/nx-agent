@@ -1,6 +1,6 @@
 // pvw_core.cpp: wined3d_device_process_vertices (device.c) after its declaration FIXME, and process_vertices_strided, for the fixed-function state of the device.
 // Order of events as Wine: (1) the stream info is built from the CURRENT vertex declaration with the vertex shader hidden (a bound vertex shader is ignored, no message); (2) every used element's buffer is mapped for reading at
-// src_start_idx * stride (no failure path: Wine's buffer map never fails); (3) no position element = ERR "Source has no position mask" + WINED3DERR_INVALIDCALL; (4) RS_CLIPPING set = FIXME "Clipping is broken and disabled for now" (the clipped
+// src_start_idx * stride (a failed map = ERR "Failed to map resource" + WINED3DERR_INVALIDCALL: d3d9 gives no MAP_R to a WRITEONLY buffer of D3DPOOL_DEFAULT, so that map is refused, before the position check); (3) no position element = ERR "Source has no position mask" + WINED3DERR_INVALIDCALL; (4) RS_CLIPPING set = FIXME "Clipping is broken and disabled for now" (the clipped
 // branch is dead code in 9.0: do_clip is always FALSE, so it is not implemented); (5) the destination vertex size comes from the FVF the destination buffer was CREATED with (an FVF with no position field: FIXME "Unexpected position mask",
 // size contribution 0); (6) per vertex: position (x y z w=1, world*view*projection, viewport transform, written as 4 floats whatever the FVF: XYZ advances 12, XYZRHW 16, any other position field writes nothing and advances nothing), 4 bytes
 // skipped for PSIZE, the NORMAL copy (FIXME "Didn't expect the destination to have a normal"), lighting, diffuse, specular (with fog in its alpha), then per destination texture set the raw source bytes (size from the destination FVF; a missing
@@ -66,6 +66,7 @@ bool pass(Ctx& c) {
     const D3DMATERIAL9& M = s.material[0]; static const D3DCOLORVALUE black = {0, 0, 0, 0}; const D3DCOLORVALUE* mspec = s.rs[D3DRS_SPECULARENABLE] ? &M.Specular : &black;
     uint64_t dp = c.left; bool fx_normal = false;
     for (uint32_t i = 0; i < c.count; i++) {
+        if (c.dry && c.bad) break;                                                              // the validation pass has its verdict (INVALIDCALL): the rest of the range cannot change it (count may be 2^32 - 1)
         float p[3]; memcpy(p, rd(c, PVW_FFP_POSITION, i, 12), 12); PvVec4 position = {p[0], p[1], p[2], 1.0f};
         pvw_light_vertex(&L, &position);
         if ((pos == D3DFVF_XYZ) || (pos == D3DFVF_XYZRHW)) {

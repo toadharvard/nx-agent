@@ -123,9 +123,9 @@ def gen_b(seed):
         c = simple(r, sfvf=XYZ | N | D | S, dfvf=XYZ | D | S, ex=ex); c["rs"]["LIGHTING"] = 1
         c["lights"] = {i: rand_light(r, [5, 4, 3, 1, 2][i % 5]) for i in range(40)}; add(c)
         c = simple(r, sfvf=XYZ | N | D | S, dfvf=XYZ | D | S, ex=ex); c["rs"]["LIGHTING"] = 0; c["lights"] = {0: rand_light(r, 5)}; add(c)           # no lighting: the lights are not walked, no FIXME
-        # source buffer without read access (D3DUSAGE_WRITEONLY in D3DPOOL_DEFAULT): the READ map fails, INVALIDCALL, nothing written; MANAGED / SYSTEMMEM get MAP_R from d3d9 whatever the usage
+        # source buffer without read access (D3DUSAGE_WRITEONLY in D3DPOOL_DEFAULT): the READ map fails, INVALIDCALL, nothing written; SYSTEMMEM gets MAP_R from d3d9 whatever the usage
         c = simple(r, ex=ex, sfvf=XYZ | D, dfvf=RHW | D, count=3); c["streams"][0]["usage"] = 8; c["streams"][0]["cfvf"] = XYZ | D; c["pool"] = 0; add(c)
-        c = simple(r, ex=ex, sfvf=XYZ | D, dfvf=RHW | D, count=3); c["streams"][0]["usage"] = 8; c["streams"][0]["cfvf"] = XYZ | D; c["pool"] = 1; add(c)
+        c = simple(r, ex=ex, sfvf=XYZ | D, dfvf=RHW | D, count=3); c["streams"][0]["usage"] = 8; c["streams"][0]["cfvf"] = XYZ | D; c["pool"] = 2; add(c)
         c = simple(r, ex=ex, sfvf=XYZ | D, dfvf=RHW | D, count=3); c["streams"][0]["usage"] = 8; c["streams"][0]["cfvf"] = XYZ | D; c["pool"] = 0; c["decl"] = []; add(c)
         # singular modelview (the normal matrix is the modelview itself)
         c = simple(r, sfvf=XYZ | N | D | S, dfvf=XYZ | D | S, ex=ex); c["rs"]["LIGHTING"] = 1; c["world"] = scale(1, 0, 1); c["lights"] = pick_lights(r, 3); add(c)
