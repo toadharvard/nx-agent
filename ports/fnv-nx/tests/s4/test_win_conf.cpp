@@ -423,10 +423,16 @@ TEST(wc_cursor_hooks_and_dialogs)
     CHECK(UnhookWindowsHookEx(h2));
     CHECK(!UnhookWindowsHookEx(NULL));
 
+    /* the dialog is the platform's own now (u32c_messagebox_*); here the hook answers with the default button of the set */
+    fnvnx_set_msgbox_hook([](const char *, const char *, UINT ty) -> int {
+        static const int B[7][3] = { { 1, 1, 1 }, { 1, 2, 2 }, { 3, 4, 5 }, { 6, 7, 2 }, { 6, 7, 7 }, { 4, 2, 2 }, { 2, 10, 11 } };
+        unsigned k = ty & 0xF, d = (ty >> 8) & 0xF;
+        return B[k < 7 ? k : 0][d < 3 ? d : 0]; });
     CHECK_EQ(MessageBoxA(NULL, "t", "c", MB_YESNO), IDYES);
     CHECK_EQ(MessageBoxA(NULL, "t", "c", 3 /* YESNOCANCEL */ | 0x200 /* DEFBUTTON3 */), IDCANCEL);
     CHECK_EQ(MessageBoxA(NULL, "t", "c", 2 /* ABORTRETRYIGNORE */ | 0x100), IDRETRY);
     CHECK_EQ(MessageBoxA(NULL, "t", "c", 6 /* CANCELTRYCONTINUE */ | 0x200), 11);
+    fnvnx_set_msgbox_hook(NULL);
 }
 
 /* ---- input */

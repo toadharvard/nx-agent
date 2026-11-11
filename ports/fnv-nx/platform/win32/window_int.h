@@ -12,6 +12,7 @@ struct fnwin_info {
     HWND parent;                       /* NULL for a top-level window */
     int paint;                         /* the update region is not empty */
     WNDPROC proc;                      /* NULL: DefWindowProcA */
+    LRESULT (*hproc)(HWND, UINT, WPARAM, LPARAM);   /* a procedure of the platform itself (host function), else NULL */
 };
 int fnwin_info_get(HWND h, fnwin_info *o);
 HWND fnwin_from_point(int x, int y);                 /* the deepest visible window at a screen point, else NULL */

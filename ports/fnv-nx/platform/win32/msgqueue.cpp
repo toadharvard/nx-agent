@@ -116,7 +116,7 @@ LRESULT deliver(HWND h, UINT m, WPARAM w, LPARAM l, int local)
         return 0;
     struct { LPARAM l; WPARAM w; UINT m; HWND h; } cwp = { l, w, m, h };
     call_hook(4, 0, (WPARAM)local, (LPARAM)(uintptr_t)&cwp);   /* WH_CALLWNDPROC */
-    LRESULT r = wi.proc ? wi.proc(h, m, w, l) : DefWindowProcA(h, m, w, l);
+    LRESULT r = wi.hproc ? wi.hproc(h, m, w, l) : wi.proc ? wi.proc(h, m, w, l) : DefWindowProcA(h, m, w, l);
     struct { LRESULT r; LPARAM l; WPARAM w; UINT m; HWND h; } ret = { r, l, w, m, h };
     call_hook(12, 0, (WPARAM)local, (LPARAM)(uintptr_t)&ret);  /* WH_CALLWNDPROCRET */
     return r;
@@ -380,7 +380,7 @@ extern "C" LRESULT DispatchMessageA(const MSG *m)
     fnwin_info wi;
     if (!m->hwnd) return 0;
     if (!fnwin_info_get(m->hwnd, &wi) || wi.tid != GetCurrentThreadId()) { SetLastError(1400); return 0; }
-    return wi.proc ? wi.proc(m->hwnd, m->message, m->wParam, m->lParam) : DefWindowProcA(m->hwnd, m->message, m->wParam, m->lParam);
+    return wi.hproc ? wi.hproc(m->hwnd, m->message, m->wParam, m->lParam) : wi.proc ? wi.proc(m->hwnd, m->message, m->wParam, m->lParam) : DefWindowProcA(m->hwnd, m->message, m->wParam, m->lParam);
 }
 
 /* ---- hooks */

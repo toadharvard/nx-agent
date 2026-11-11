@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <vector>
+#include <string>
 
 /* the DC side of painting (gdi32.cpp) and the text colours (gdifont.cpp) */
 extern "C" {
@@ -102,6 +103,7 @@ struct wclass {
     ATOM atom;
     UINT style;
     int cbcls, cbwnd, nwin, sys, menu_own;
+    LRESULT (*hproc)(HWND, UINT, WPARAM, LPARAM);   /* a window procedure of the platform itself (its own dialogs): a host function */
     HINSTANCE inst;
     HICON icon, iconsm;
     HCURSOR cursor;
@@ -121,6 +123,7 @@ struct window {
     int restore_max, paint, destroying, hasmenu;
     char *text;
     uint8_t *extra;
+    LRESULT (*hproc)(HWND, UINT, WPARAM, LPARAM);                /* copied from the class; the game's subclassing replaces it */
     HICON icon_big, icon_small;                                  /* WM_SETICON (ICON_BIG, ICON_SMALL) */
     int ncactive, owned_hidden, nc_pending, erase;               /* WIN_NCACTIVATED, WIN_NEEDS_SHOW_OWNEDPOPUP, frame and background to paint */
     RECT *upd;                                                   /* the update region: disjoint rectangles, client coordinates */
@@ -174,6 +177,16 @@ static wclass *new_class_l(const char *name, WNDPROC proc, UINT style, int cbcls
     c->next = g_classes;
     g_classes = c;
     return c;
+}
+/* a window class of the platform's own (a dialog it draws itself): global, its procedure a host function */
+extern "C" ATOM fnwin_register_host_class(const char *name, LRESULT (*proc)(HWND, UINT, WPARAM, LPARAM), UINT style)
+{
+    os_lock(&g_ui_lock);
+    wclass *c = new_class_l(name, NULL, style, 0, 0, NULL, 1);
+    if (c) c->hproc = proc;
+    ATOM a = c ? c->atom : 0;
+    os_unlock(&g_ui_lock);
+    return a;
 }
 /* the predefined classes (DefWindowProc-backed, global) and the desktop window, made on first use */
 static void ui_init_l(void)
@@ -676,7 +689,7 @@ extern "C" int fnwin_info_get(HWND h, fnwin_info *o)
         o->tid = w == &g_desk ? GetCurrentThreadId() : w->tid;
         o->wr = w->wr; o->cr = client_l(w);
         o->parent = (w->parent && w->parent != &g_desk) ? (HWND)w->parent : NULL;
-        o->paint = w->paint; o->proc = w->proc;
+        o->paint = w->paint; o->proc = w->proc; o->hproc = w->hproc;
     }
     os_unlock(&g_ui_lock);
     return w != NULL;
@@ -996,7 +1009,7 @@ extern "C" HWND CreateWindowExA(DWORD ex, LPCSTR cls, LPCSTR title, DWORD style,
     long ox = 0, oy = 0;
     if (win) {
         win->magic = WND_MAGIC;
-        win->cls = c; win->proc = c->proc; win->inst = norm_inst(inst); win->tid = GetCurrentThreadId();
+        win->cls = c; win->proc = c->proc; win->hproc = c->hproc; win->inst = norm_inst(inst); win->tid = GetCurrentThreadId();
         win->style = style & ~(S_VISIBLE | S_MINIMIZE | S_MAXIMIZE);   /* applied by the show at the end of creation */
         win->exstyle = ex;
         win->id = (LONG)(uintptr_t)menu;
@@ -2270,7 +2283,7 @@ extern "C" LONG SetWindowLongA(HWND h, int idx, LONG v)
         switch (idx) {
         case GWL_WNDPROC:
             if (w->tid != GetCurrentThreadId()) err = 5;   /* the procedure of another thread's window */
-            else { old = (LONG)proc_out(w->proc); w->proc = proc_in((uintptr_t)(DWORD)v); }
+            else { old = (LONG)proc_out(w->proc); w->proc = proc_in((uintptr_t)(DWORD)v); w->hproc = NULL; }
             break;
         case GWL_HINSTANCE: old = (LONG)(uintptr_t)w->inst; w->inst = (HINSTANCE)(uintptr_t)v; break;
         case GWL_ID: old = w->id; w->id = v; break;
@@ -2436,24 +2449,418 @@ extern "C" BOOL SwapMouseButton(BOOL s) { BOOL old = g_swap_buttons != 0; g_swap
 /* GetSystemMetrics, EnumDisplayDevicesA, ChangeDisplaySettingsA: platform/win32/display.cpp */
 /* InitCommonControlsEx, ImageList_*: platform/win32/resource.cpp */
 
-/* ---- message boxes: logged; the answer is the default button */
+/* ---- MessageBoxA (ENV D3: the text is shown modally by the platform's own dialog over the frame; the pressed button is
+ * returned). The dialog is a popup window of the platform's own class (FnvnxMessageBox), owned by hWnd, painted with the
+ * GDI text functions into its own surface (the path every window uses: fnvnx_window_surface), with its own message loop on
+ * the calling thread. Buttons: every MB_* set, MB_DEFBUTTON1-4, MB_HELP; Tab/Shift+Tab/arrows move the focus (the
+ * controller maps to these keys, ENV I1), Return and Space press the focused button, a letter its mnemonic, Escape (and
+ * the close command) is IDCANCEL if there is a Cancel button, IDOK if there is only OK, else ignored; the pointer (touch is
+ * the mouse, ENV I5) presses a button by down and up on it. MB_APPLMODAL disables the owner, MB_TASKMODAL all the thread's
+ * top-level windows (without an owner), MB_SYSTEMMODAL/MB_TOPMOST make it topmost, MB_SETFOREGROUND brings it to the
+ * foreground, MB_RIGHT / MB_RTLREADING right-align the text (RTL also mirrors the icon and the buttons). The test hook
+ * answers instead of the dialog. */
 static fnvnx_msgbox_hook g_msgbox_hook;
 extern "C" void fnvnx_set_msgbox_hook(fnvnx_msgbox_hook h) { g_msgbox_hook = h; }
 
-extern "C" int MessageBoxA(HWND h, LPCSTR text, LPCSTR caption, UINT type)
+extern "C" {
+BOOL ExtTextOutA(HDC, int, int, UINT, const RECT *, LPCSTR, UINT, const INT *);
+BOOL GetTextExtentPoint32A(HDC, LPCSTR, int, SIZE *);
+BOOL GetTextMetricsA(HDC, void *);
+int SetBkMode(HDC, int);
+HGDIOBJ GetStockObject(int);
+HGDIOBJ SelectObject(HDC, HGDIOBJ);
+HDC CreateCompatibleDC(HDC);
+BOOL DeleteDC(HDC);
+HFONT CreateFontIndirectA(const void *);
+BOOL DeleteObject(HGDIOBJ);
+int gdi_dc_poly(void *hdc, const int32_t *xy, int n, uint32_t colorref);
+}
+
+namespace {
+enum { MB_ID_OK = 1, MB_ID_CANCEL = 2, MB_ID_ABORT = 3, MB_ID_RETRY = 4, MB_ID_IGNORE = 5, MB_ID_YES = 6, MB_ID_NO = 7, MB_ID_HELP = 9,
+       MB_ID_TRYAGAIN = 10, MB_ID_CONTINUE = 11 };
+struct mbbtn { int id; const char *label; char mnem; RECT r; };
+struct mbox {
+    HWND dlg, owner;
+    UINT type;
+    std::vector<std::string> lines;
+    std::string caption;
+    int nb, focus, pressed, result;
+    bool done, rtl, right, has_cancel, ok_only;
+    mbbtn b[4];
+    int icon, margin, title_h, line_h, w, h, text_x, text_y, text_w, icon_x, icon_y, body_h;
+};
+mbox *g_mbs[16];
+os_lock_t g_mb_lock;
+mbox *mb_of(HWND h)
 {
-    W32_UNUSED(h);
+    os_lock(&g_mb_lock);
+    mbox *r = NULL;
+    for (mbox *m : g_mbs) if (m && m->dlg == h) r = m;
+    os_unlock(&g_mb_lock);
+    return r;
+}
+bool mb_add(mbox *m)
+{
+    os_lock(&g_mb_lock);
+    bool ok = false;
+    for (mbox *&s : g_mbs) if (!s) { s = m; ok = true; break; }
+    os_unlock(&g_mb_lock);
+    return ok;
+}
+void mb_remove(mbox *m)
+{
+    os_lock(&g_mb_lock);
+    for (mbox *&s : g_mbs) if (s == m) s = NULL;
+    os_unlock(&g_mb_lock);
+}
+inline void fillr(HDC dc, long l, long t, long r, long b, int sysidx)
+{
+    RECT rc = { l, t, r, b };
+    gdi_fill_rect((void *)dc, &rc, (void *)(uintptr_t)(sysidx + 1));
+}
+void frame3d(HDC dc, const RECT &r, bool sunk)   /* the classic two-line edge */
+{
+    int hi = 20, lo = 21, in_hi = 22, in_lo = 16;   /* COLOR_BTNHIGHLIGHT, 3DDKSHADOW, 3DLIGHT, BTNSHADOW */
+    if (sunk) { int t = hi; hi = lo; lo = t; t = in_hi; in_hi = in_lo; in_lo = t; }
+    fillr(dc, r.left, r.top, r.right, r.top + 1, hi); fillr(dc, r.left, r.top, r.left + 1, r.bottom, hi);
+    fillr(dc, r.left, r.bottom - 1, r.right, r.bottom, lo); fillr(dc, r.right - 1, r.top, r.right, r.bottom, lo);
+    fillr(dc, r.left + 1, r.top + 1, r.right - 1, r.top + 2, in_hi); fillr(dc, r.left + 1, r.top + 1, r.left + 2, r.bottom - 1, in_hi);
+    fillr(dc, r.left + 1, r.bottom - 2, r.right - 1, r.bottom - 1, in_lo); fillr(dc, r.right - 2, r.top + 1, r.right - 1, r.bottom - 1, in_lo);
+}
+void text_at(HDC dc, int x, int y, const std::string &s, int color)
+{
+    SetTextColor(dc, gdi_syscolor(color));
+    SetBkMode(dc, 1 /* TRANSPARENT */);
+    if (!s.empty()) ExtTextOutA(dc, x, y, 0, NULL, s.c_str(), (UINT)s.size(), NULL);
+}
+int text_w(HDC dc, const std::string &s)
+{
+    SIZE sz = { 0, 0 };
+    if (!s.empty() && !GetTextExtentPoint32A(dc, s.c_str(), (int)s.size(), &sz)) return 0;
+    return (int)sz.cx;
+}
+/* the one rule that breaks a text into lines of at most `maxw` pixels: at newlines, at the last blank that fits, else
+ * inside a word */
+void wrap_text(HDC dc, const char *t, int maxw, std::vector<std::string> &out)
+{
+    std::string cur, word;
+    auto flush = [&] { out.push_back(cur); cur.clear(); };
+    auto add_word = [&] {
+        if (word.empty()) return;
+        std::string trial = cur.empty() ? word : cur + " " + word;
+        if (text_w(dc, trial) <= maxw) cur = trial;
+        else if (cur.empty()) {   /* a word wider than the line: broken inside */
+            std::string piece;
+            for (char c : word) {
+                if (!piece.empty() && text_w(dc, piece + c) > maxw) { out.push_back(piece); piece.clear(); }
+                piece += c;
+            }
+            cur = piece;
+        } else { flush(); cur = word; }
+        word.clear();
+    };
+    bool any = false;
+    for (const char *p = t; *p; p++) {
+        if (*p == '\r') continue;
+        if (*p == '\n') { add_word(); flush(); any = true; }
+        else if (*p == ' ' || *p == '\t') add_word();
+        else word += *p;
+    }
+    add_word();
+    if (!cur.empty() || !any) flush();
+}
+/* the four message-box icons, 32 x 32: a disc (a triangle for the exclamation mark) with the sign in white */
+void mb_icon(HDC dc, int kind, int x, int y)
+{
+    if (!kind) return;
+    uint32_t col = kind == 0x10 ? 0x2020D0 : kind == 0x30 ? 0x20C8F0 : 0xC07020;   /* COLORREF 0x00BBGGRR */
+    int32_t poly[2 * 16];
+    int n = 0;
+    if (kind == 0x30) { poly[0] = x + 16; poly[1] = y + 1; poly[2] = x + 31; poly[3] = y + 30; poly[4] = x + 1; poly[5] = y + 30; n = 3; }
+    else {
+        static const int8_t ring[16][2] = { { 16, 0 }, { 22, 2 }, { 27, 5 }, { 30, 10 }, { 31, 16 }, { 30, 22 }, { 27, 27 }, { 22, 30 },
+                                             { 16, 31 }, { 10, 30 }, { 5, 27 }, { 2, 22 }, { 1, 16 }, { 2, 10 }, { 5, 5 }, { 10, 2 } };
+        for (; n < 16; n++) { poly[2 * n] = x + ring[n][0]; poly[2 * n + 1] = y + ring[n][1]; }
+    }
+    gdi_dc_poly((void *)dc, poly, n, col);
+    uint8_t lf[60];   /* LOGFONTA: 22 px bold */
+    memset(lf, 0, sizeof lf);
+    int32_t hgt = -22, wgt = 700;
+    memcpy(lf, &hgt, 4); memcpy(lf + 16, &wgt, 4); lf[23] = 1 /* DEFAULT_CHARSET */; memcpy(lf + 28, "Arial", 5);
+    HFONT f = CreateFontIndirectA(lf);
+    HGDIOBJ old = f ? SelectObject(dc, f) : NULL;
+    const char g[2] = { kind == 0x10 ? 'X' : kind == 0x20 ? '?' : kind == 0x30 ? '!' : 'i', 0 };
+    int gw = text_w(dc, g);
+    SetTextColor(dc, 0xFFFFFF);
+    SetBkMode(dc, 1);
+    ExtTextOutA(dc, x + 16 - gw / 2, y + (kind == 0x30 ? 8 : 4), 0, NULL, g, 1, NULL);
+    if (old) SelectObject(dc, old);
+    if (f) DeleteObject(f);
+}
+/* where each button goes: laid out in a row at the bottom, mirrored for right-to-left reading */
+void mb_buttons_rects(mbox *m, int bw, int bh, int y)
+{
+    int gap = 6, total = m->nb * bw + (m->nb - 1) * gap, x = (m->w - total) / 2;
+    for (int i = 0; i < m->nb; i++) {
+        int k = m->rtl ? m->nb - 1 - i : i;
+        m->b[k].r = RECT{ x, y, x + bw, y + bh };
+        x += bw + gap;
+    }
+}
+void mb_draw(mbox *m, HDC dc)
+{
+    HGDIOBJ old = SelectObject(dc, GetStockObject(17 /* DEFAULT_GUI_FONT */));
+    fillr(dc, 0, 0, m->w, m->h, 15);                                           /* COLOR_BTNFACE */
+    fillr(dc, 0, m->title_h, m->w, m->title_h + m->body_h, 5);               /* the text area: COLOR_WINDOW */
+    fillr(dc, 0, 0, m->w, m->title_h, 2);                                      /* the title bar: COLOR_ACTIVECAPTION */
+    text_at(dc, 8, (m->title_h - m->line_h) / 2, m->caption, 9);               /* COLOR_CAPTIONTEXT */
+    mb_icon(dc, m->icon, m->icon_x, m->icon_y);
+    for (size_t i = 0; i < m->lines.size(); i++) {
+        int tw = text_w(dc, m->lines[i]);
+        int x = m->right ? m->text_x + m->text_w - tw : m->text_x;
+        text_at(dc, x, m->text_y + (int)i * m->line_h, m->lines[i], 8);       /* COLOR_WINDOWTEXT */
+    }
+    for (int i = 0; i < m->nb; i++) {
+        RECT r = m->b[i].r;
+        bool down = m->pressed == i;
+        bool foc = m->focus == i;
+        fillr(dc, r.left, r.top, r.right, r.bottom, 15);
+        frame3d(dc, r, down);
+        if (foc) {   /* the default / focused button has a black outline and a focus rectangle */
+            fillr(dc, r.left - 1, r.top - 1, r.right + 1, r.top, 8); fillr(dc, r.left - 1, r.bottom, r.right + 1, r.bottom + 1, 8);
+            fillr(dc, r.left - 1, r.top, r.left, r.bottom, 8); fillr(dc, r.right, r.top, r.right + 1, r.bottom, 8);
+            fillr(dc, r.left + 4, r.top + 4, r.right - 4, r.top + 5, 8); fillr(dc, r.left + 4, r.bottom - 5, r.right - 4, r.bottom - 4, 8);
+            fillr(dc, r.left + 4, r.top + 4, r.left + 5, r.bottom - 4, 8); fillr(dc, r.right - 5, r.top + 4, r.right - 4, r.bottom - 4, 8);
+        }
+        std::string lab = m->b[i].label;
+        int tw = text_w(dc, lab);
+        text_at(dc, (int)(r.left + (r.right - r.left - tw) / 2) + (down ? 1 : 0), (int)(r.top + (r.bottom - r.top - m->line_h) / 2) + (down ? 1 : 0), lab, 18 /* COLOR_BTNTEXT */);
+    }
+    fillr(dc, 0, 0, m->w, 1, 21); fillr(dc, 0, m->h - 1, m->w, m->h, 21); fillr(dc, 0, 0, 1, m->h, 21); fillr(dc, m->w - 1, 0, m->w, m->h, 21);
+    if (old) SelectObject(dc, old);
+}
+int mb_hit(mbox *m, int x, int y)
+{
+    for (int i = 0; i < m->nb; i++)
+        if (x >= m->b[i].r.left && x < m->b[i].r.right && y >= m->b[i].r.top && y < m->b[i].r.bottom) return i;
+    return -1;
+}
+void mb_redraw(mbox *m)
+{
+    fnwin_invalidate(m->dlg, NULL, 0);
+}
+/* a button is pressed: the box ends with its id, except Help, which sends WM_HELP to the owner and goes on */
+void mb_press(mbox *m, int i)
+{
+    if (i < 0 || i >= m->nb) return;
+    if (m->b[i].id == MB_ID_HELP) {
+        struct { UINT cb; int ctx, ctl; HANDLE item; ULONG_PTR ctxid; POINT pos; } hi;
+        memset(&hi, 0, sizeof hi);
+        hi.cb = sizeof hi; hi.ctx = 1; hi.item = (HANDLE)m->dlg;
+        GetCursorPos(&hi.pos);
+        HWND tgt = m->owner ? m->owner : m->dlg;
+        SendMessageA(tgt, 0x0053, 0, (LPARAM)(uintptr_t)&hi);   /* WM_HELP */
+        return;
+    }
+    m->result = m->b[i].id;
+    m->done = true;
+}
+/* Escape and the close command: IDCANCEL when there is a Cancel button, IDOK when OK is the only one, else nothing */
+bool mb_escape(mbox *m)
+{
+    if (m->has_cancel) m->result = MB_ID_CANCEL;
+    else if (m->ok_only) m->result = MB_ID_OK;
+    else return false;
+    m->done = true;
+    return true;
+}
+LRESULT mb_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    mbox *m = mb_of(h);
+    if (!m) return DefWindowProcA(h, msg, wp, lp);
+    switch (msg) {
+    case 0x0014: return 1;   /* WM_ERASEBKGND: the paint covers everything */
+    case 0x000F: {           /* WM_PAINT */
+        alignas(8) uint8_t ps[128];
+        HDC dc = BeginPaint(h, ps);
+        if (dc) { mb_draw(m, dc); EndPaint(h, ps); }
+        return 0; }
+    case 0x0010:             /* WM_CLOSE */
+        mb_escape(m);
+        return 0;
+    case 0x0100: {           /* WM_KEYDOWN */
+        bool shift = (GetKeyState(0x10) & 0x8000) != 0;
+        int n = m->nb;
+        switch (wp) {
+        case 0x1B: mb_escape(m); break;                                                     /* VK_ESCAPE */
+        case 0x0D: case 0x20: mb_press(m, m->focus); break;                                 /* VK_RETURN, VK_SPACE */
+        case 0x09: m->focus = (m->focus + (shift ? n - 1 : 1)) % n; mb_redraw(m); break;   /* VK_TAB */
+        case 0x25: case 0x26: m->focus = (m->focus + n - 1) % n; mb_redraw(m); break;       /* VK_LEFT, VK_UP */
+        case 0x27: case 0x28: m->focus = (m->focus + 1) % n; mb_redraw(m); break;           /* VK_RIGHT, VK_DOWN */
+        case 0x70: for (int i = 0; i < n; i++) if (m->b[i].id == MB_ID_HELP) mb_press(m, i); break;   /* VK_F1 */
+        default: break;
+        }
+        return 0; }
+    case 0x0102: {           /* WM_CHAR: a mnemonic */
+        char c = (char)wp;
+        if (c >= 'a' && c <= 'z') c = (char)(c - 32);
+        for (int i = 0; i < m->nb; i++) if (m->b[i].mnem && m->b[i].mnem == c) { m->focus = i; mb_press(m, i); break; }
+        return 0; }
+    case 0x0201: {           /* WM_LBUTTONDOWN */
+        int i = mb_hit(m, (int)(short)(lp & 0xFFFF), (int)(short)((lp >> 16) & 0xFFFF));
+        if (i >= 0) { m->pressed = i; m->focus = i; SetCapture(h); mb_redraw(m); }
+        return 0; }
+    case 0x0202: {           /* WM_LBUTTONUP: pressed on the button it was released on */
+        int i = mb_hit(m, (int)(short)(lp & 0xFFFF), (int)(short)((lp >> 16) & 0xFFFF));
+        int was = m->pressed;
+        m->pressed = -1;
+        if (was >= 0) { ReleaseCapture(); mb_redraw(m); if (i == was) mb_press(m, i); }
+        return 0; }
+    case 0x0200: {           /* WM_MOUSEMOVE: the pressed button shows pressed only while the pointer is on it */
+        if (m->pressed >= 0) mb_redraw(m);
+        return 0; }
+    default: break;
+    }
+    return DefWindowProcA(h, msg, wp, lp);
+}
+bool g_mb_class;
+} // namespace
+
+extern "C" int MessageBoxA(HWND owner, LPCSTR text, LPCSTR caption, UINT type)
+{
+    type = W32_DW(type);
     w32_log("MessageBox [%s]: %s", caption ? caption : "", text ? text : "");
     if (g_msgbox_hook)
         return g_msgbox_hook(text, caption, type);
-    static const int buttons[7][3] = {
-        { IDOK, IDOK, IDOK }, { IDOK, IDCANCEL, IDCANCEL }, { IDABORT, IDRETRY, IDIGNORE },
-        { IDYES, IDNO, IDCANCEL }, { IDYES, IDNO, IDNO }, { IDRETRY, IDCANCEL, IDCANCEL }, { 2 /* IDCANCEL */, 10 /* IDTRYAGAIN */, 11 /* IDCONTINUE */ },
-    };
-    unsigned kind = type & 0xF, def = (type >> 8) & 0xF;
-    /* MB_OK / MB_OKCANCEL: the player sees it (the device's error applet, os_show_message) and the answer is OK;
-     * questions (retry, yes/no) take their default button without a dialog, as before */
-    if (kind <= 1)
-        os_show_message(caption ? caption : "", text ? text : "");
-    return buttons[kind < 7 ? kind : 0][def < 3 ? def : 0];
+    unsigned kind = type & 0xF, defb = (type >> 8) & 0xF;
+    if (kind > 6 || ((type & 0x00200000u) && owner)) { SetLastError(ERROR_INVALID_PARAMETER); return 0; }   /* MB_SERVICE_NOTIFICATION has no owner */
+    window *ow = NULL;
+    if (owner) {
+        ow = wnd(owner);
+        if (!ow) { SetLastError(1400); return 0; }
+        owner = root_of(ow);   /* the owner of a pop-up is a top-level window */
+        if (owner == (HWND)&g_desk) owner = NULL;
+    }
+    static const struct { int id; const char *label; char mnem; } B[] = {
+        { MB_ID_OK, "OK", 0 }, { MB_ID_CANCEL, "Cancel", 0 }, { MB_ID_ABORT, "Abort", 'A' }, { MB_ID_RETRY, "Retry", 'R' },
+        { MB_ID_IGNORE, "Ignore", 'I' }, { MB_ID_YES, "Yes", 'Y' }, { MB_ID_NO, "No", 'N' }, { MB_ID_TRYAGAIN, "Try Again", 'T' },
+        { MB_ID_CONTINUE, "Continue", 'C' }, { MB_ID_HELP, "Help", 0 } };
+    mbox m;
+    m.dlg = NULL; m.owner = owner; m.type = type; m.nb = 0; m.focus = 0; m.pressed = -1; m.result = 0; m.done = false;
+    m.rtl = (type & 0x00100000u) != 0; m.right = m.rtl || (type & 0x00080000u) != 0;
+    m.icon = (int)(type & 0xF0u) >= 0x10 && (type & 0xF0u) <= 0x40 ? (int)(type & 0xF0u) : 0;
+    m.caption = caption ? caption : "Error";   /* MSDN: the default title */
+    /* the buttons of each set, in order: index into B */
+    static const int SEQ[7][3] = { { 0, -1, -1 }, { 0, 1, -1 }, { 2, 3, 4 }, { 5, 6, 1 }, { 5, 6, -1 }, { 3, 1, -1 }, { 1, 7, 8 } };
+    for (int k = 0; k < 3 && SEQ[kind][k] >= 0; k++) {
+        const auto &s = B[SEQ[kind][k]];
+        m.b[m.nb++] = mbbtn{ s.id, s.label, s.mnem, RECT{ 0, 0, 0, 0 } };
+    }
+    if (type & 0x4000u) m.b[m.nb++] = mbbtn{ MB_ID_HELP, "Help", 0, RECT{ 0, 0, 0, 0 } };   /* MB_HELP */
+    m.has_cancel = false;
+    for (int i = 0; i < m.nb; i++) if (m.b[i].id == MB_ID_CANCEL) m.has_cancel = true;
+    m.ok_only = kind == 0;
+    m.focus = (int)defb < m.nb ? (int)defb : 0;
+    /* layout, from the font the dialog is painted with */
+    HDC mdc = CreateCompatibleDC(NULL);
+    HGDIOBJ oldf = mdc ? SelectObject(mdc, GetStockObject(17)) : NULL;
+    uint8_t tm[60];
+    memset(tm, 0, sizeof tm);
+    int fh = 16;
+    if (mdc && GetTextMetricsA(mdc, tm)) { int32_t h0, el; memcpy(&h0, tm, 4); memcpy(&el, tm + 16, 4); fh = h0 + el; }
+    m.line_h = fh + 1;
+    m.margin = 12;
+    m.title_h = fh + 8;
+    int dispw = fnvnx_display_w(), disph = fnvnx_display_h();
+    int iconw = m.icon ? 32 + 12 : 0;
+    int maxtext = dispw / 2 - 2 * m.margin - iconw;
+    if (maxtext < 120) maxtext = 120;
+    if (mdc) wrap_text(mdc, text ? text : "", maxtext, m.lines); else m.lines.push_back(text ? text : "");
+    int tw = 0;
+    for (const std::string &l : m.lines) { int w = mdc ? text_w(mdc, l) : 0; if (w > tw) tw = w; }
+    int bw = 75, bh = 23;
+    for (int i = 0; i < m.nb; i++) { int w = (mdc ? text_w(mdc, m.b[i].label) : 0) + 24; if (w > bw) bw = w; }
+    int area_h = (int)m.lines.size() * m.line_h;
+    if (m.icon && area_h < 32) area_h = 32;
+    int row_w = m.nb * bw + (m.nb - 1) * 6;
+    m.w = m.margin * 2 + iconw + tw;
+    if (m.w < row_w + 2 * m.margin) m.w = row_w + 2 * m.margin;
+    if (m.w < 160) m.w = 160;
+    int body = m.margin + area_h + m.margin;
+    m.body_h = body;
+    m.h = m.title_h + body + m.margin + bh + m.margin;
+    if (m.w > dispw) m.w = dispw;
+    if (m.h > disph) m.h = disph;
+    m.text_w = m.w - 2 * m.margin - iconw;
+    m.text_x = m.margin + (m.rtl ? 0 : iconw);
+    m.text_y = m.title_h + m.margin + (area_h - (int)m.lines.size() * m.line_h) / 2;
+    m.icon_x = m.rtl ? m.w - m.margin - 32 : m.margin;
+    m.icon_y = m.title_h + m.margin + (area_h - 32) / 2;
+    mb_buttons_rects(&m, bw, bh, m.title_h + body + m.margin);
+    if (oldf) SelectObject(mdc, oldf);
+    if (mdc) DeleteDC(mdc);
+    /* the class, once */
+    if (!g_mb_class) {
+        if (!fnwin_register_host_class("FnvnxMessageBox", mb_proc, 0)) return 0;
+        g_mb_class = true;
+    }
+    /* what the box makes unavailable to input: the owner (MB_APPLMODAL), or without an owner all of the thread's windows
+     * (MB_TASKMODAL) */
+    HWND dis[64];
+    int ndis = 0;
+    if (owner) dis[ndis++] = owner;
+    else if (type & 0x2000u) {
+        HWND all[64];
+        int n = fnwin_toplevels(all, 64);
+        DWORD me = GetCurrentThreadId();
+        for (int i = 0; i < n && ndis < 64; i++) { fnwin_info wi; if (fnwin_info_get(all[i], &wi) && wi.tid == me) dis[ndis++] = all[i]; }
+    }
+    int ndone = 0;
+    for (int i = 0; i < ndis; i++) {
+        window *w = wnd(dis[i]);
+        if (!w) continue;
+        os_lock(&g_ui_lock);
+        bool was = (w->style & S_DISABLED) != 0;
+        os_unlock(&g_ui_lock);
+        if (was) { dis[i] = NULL; continue; }   /* it was disabled already: not the box's to re-enable */
+        set_style_bits(w, S_DISABLED, 0);
+        SendMessageA(dis[i], 0x000A, 0, 0);     /* WM_ENABLE(FALSE) */
+        ndone++;
+    }
+    DWORD ex = 0x1 /* WS_EX_DLGMODALFRAME */ | ((type & 0x40000u) || (type & 0x3000u) == 0x1000u ? X_TOPMOST : 0) | (m.right ? 0x1000u : 0) | (m.rtl ? 0x2000u : 0);
+    int px = (dispw - m.w) / 2, py = (disph - m.h) / 2;
+    HWND dlg = CreateWindowExA(ex, "FnvnxMessageBox", m.caption.c_str(), S_POPUP, px, py, m.w, m.h, owner, NULL, NULL, NULL);
+    if (dlg) {
+        m.dlg = dlg;
+        if (mb_add(&m)) {
+            ShowWindow(dlg, 5);                                   /* SW_SHOW: activates it, the focus follows */
+            if (type & 0x10000u) SetForegroundWindow(dlg);        /* MB_SETFOREGROUND */
+            SetFocus(dlg);
+            mb_redraw(&m);
+            for (;;) {
+                MSG msg;
+                if (m.done) break;
+                if (!fnmq_get_message(&msg, NULL, 0, 0)) { if (!mb_escape(&m)) { m.result = m.b[m.focus].id; m.done = true; } break; }
+                bool input = (msg.message >= 0x100 && msg.message <= 0x109) || (msg.message >= 0x200 && msg.message <= 0x20E);
+                if (input && msg.hwnd != dlg) continue;           /* the windows beneath get no input while the box is up */
+                TranslateMessage(&msg);
+                DispatchMessageA(&msg);
+            }
+            mb_remove(&m);
+        }
+    } else
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+    /* give the windows back before the box goes: the activation then falls to the owner */
+    for (int i = 0; i < ndis; i++) {
+        if (!dis[i]) continue;
+        window *w = wnd(dis[i]);
+        if (!w) continue;
+        set_style_bits(w, 0, S_DISABLED);
+        SendMessageA(dis[i], 0x000A, 1, 0);   /* WM_ENABLE(TRUE) */
+    }
+    (void)ndone;
+    if (dlg) DestroyWindow(dlg);
+    if (owner && wnd(owner)) SetForegroundWindow(owner);
+    return dlg ? m.result : 0;
 }

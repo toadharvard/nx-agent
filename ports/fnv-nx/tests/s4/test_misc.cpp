@@ -210,8 +210,10 @@ TEST(window_and_messages)
     CHECK(GetAsyncKeyState(0x1B) & 0x8000);
     fnvnx_set_key_state(0x1B, 0);
     CHECK_EQ(GetAsyncKeyState(0x1B), 0);
+    fnvnx_set_msgbox_hook([](const char *, const char *, UINT ty) -> int { return (ty & 0xF00) == 0x100 ? IDNO : IDYES; });   /* the dialog itself: u32c_messagebox_* */
     CHECK_EQ(MessageBoxA(h, "Continue?", "test", MB_YESNO), IDYES);
     CHECK_EQ(MessageBoxA(h, "Continue?", "test", MB_YESNO | MB_DEFBUTTON2), IDNO);
+    fnvnx_set_msgbox_hook(NULL);
     CHECK(DestroyWindow(h));
     CHECK(fnvnx_main_window() == NULL);
 }

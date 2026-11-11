@@ -5,6 +5,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <string>
 #include <vector>
 
 extern "C" {
@@ -850,4 +851,204 @@ TEST(u32c_getdibits_same_depth_keeps_the_table_and_masks)
     CHECK_EQ(GetDIBits(dc, b32, 0, 1, &px, r.b, 0), 1);
     CHECK_EQ(r32(r.b + 40), 0xFF0000u); CHECK_EQ(r32(r.b + 44), 0xFF00u); CHECK_EQ(r32(r.b + 48), 0xFFu);   /* the masks come back */
     DeleteObject(bm); DeleteObject(b32); DeleteDC(dc);
+}
+
+/* ---- group 6: MessageBoxA, the platform's own modal dialog */
+#include <atomic>
+#include <chrono>
+#include <thread>
+extern "C" {
+void fnvnx_win_key(unsigned vk, unsigned scan, int down, unsigned flags);
+void fnvnx_win_mouse(int x, int y, unsigned changed, unsigned state, int wheel);
+int MessageBoxA(HWND, LPCSTR, LPCSTR, UINT);
+HWND FindWindowA(LPCSTR, LPCSTR);
+int GetWindowTextA(HWND, LPSTR, int);
+BOOL GetWindowRect(HWND, RECT *);
+void fnvnx_gdi_set_font_dirs(const char *, const char *, const char *);
+typedef int (*fnvnx_msgbox_hook_t)(const char *, const char *, UINT);
+void fnvnx_set_msgbox_hook(fnvnx_msgbox_hook_t);
+}
+namespace {
+struct Driver {
+    std::atomic<HWND> dlg{ NULL };
+    std::atomic<bool> seen{ false };
+    char title[64] = {};
+    RECT rc = {};
+    bool active_when_seen = false, owner_disabled = false, topmost = false;
+    HWND owner = NULL;
+    unsigned color_at_5_5 = 0;
+};
+void sleep_ms(int ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
+HWND wait_dialog(Driver &d)
+{
+    for (int i = 0; i < 400 && !d.seen; i++) {
+        HWND h = FindWindowA("FnvnxMessageBox", NULL);
+        if (h && IsWindowVisible(h) && GetActiveWindow() == h) { sleep_ms(60); d.dlg = h; d.seen = true; break; }
+        sleep_ms(5);
+    }
+    if (d.dlg.load()) {
+        GetWindowTextA(d.dlg, d.title, sizeof d.title);
+        GetWindowRect(d.dlg, &d.rc);
+        d.active_when_seen = GetActiveWindow() == d.dlg;
+        d.topmost = (GetWindowLongA(d.dlg, -20) & 8) != 0;
+        if (d.owner) d.owner_disabled = (GetWindowLongA(d.owner, -16) & 0x08000000) != 0;
+        HDC dc = GetDC(d.dlg);
+        d.color_at_5_5 = GetPixel(dc, 5, 5);
+        ReleaseDC(d.dlg, dc);
+    }
+    return d.dlg;
+}
+void key(unsigned vk) { fnvnx_win_key(vk, 0, 1, 0); sleep_ms(15); fnvnx_win_key(vk, 0, 0, 0); sleep_ms(15); }
+void click(int x, int y)
+{
+    fnvnx_win_mouse(x, y, 0, 0, 0); sleep_ms(10);
+    fnvnx_win_mouse(x, y, 1, 1, 0); sleep_ms(10);
+    fnvnx_win_mouse(x, y, 1, 0, 0); sleep_ms(10);
+}
+/* a box of `type` with keys sent by `act` once it is up; returns what MessageBoxA returned */
+template <class F> int run_box(UINT type, const char *text, const char *cap, Driver &d, F act, HWND owner = NULL)
+{
+    d.owner = owner;
+    std::thread t([&] { if (wait_dialog(d)) act(d); });
+    int r = MessageBoxA(owner, text, cap, type);
+    t.join();
+    return r;
+}
+}
+
+TEST(u32c_messagebox_returns_and_keys)
+{
+    const char *ref = getenv("FNVNX_FONT_REF"), *host = getenv("FNVNX_FONT_HOST");
+    if (ref && host) fnvnx_gdi_set_font_dirs((std::string(ref) + "/wine-fonts/usr/share/wine/fonts").c_str(), host, (std::string(ref) + "/reg").c_str());
+    fnvnx_set_msgbox_hook(NULL);
+    Driver d;
+    auto ret = [&](UINT type, std::vector<unsigned> keys, const char *cap = "Cap") {
+        Driver dd;
+        int r = run_box(type, "A text that is long enough to need no wrapping at all.", cap, dd, [&](Driver &) { for (unsigned k : keys) key(k); });
+        return r;
+    };
+    /* Return presses the default button, per set and MB_DEFBUTTON */
+    CHECK_EQ(ret(0 /* MB_OK */, { 0x0D }), 1);
+    CHECK_EQ(ret(1 /* OKCANCEL */, { 0x0D }), 1);
+    CHECK_EQ(ret(1 | 0x100, { 0x0D }), 2);
+    CHECK_EQ(ret(2 /* ABORTRETRYIGNORE */, { 0x0D }), 3);
+    CHECK_EQ(ret(2 | 0x100, { 0x0D }), 4);
+    CHECK_EQ(ret(2 | 0x200, { 0x0D }), 5);
+    CHECK_EQ(ret(3 /* YESNOCANCEL */, { 0x0D }), 6);
+    CHECK_EQ(ret(3 | 0x200, { 0x0D }), 2);
+    CHECK_EQ(ret(4 /* YESNO */, { 0x0D }), 6);
+    CHECK_EQ(ret(4 | 0x100, { 0x0D }), 7);
+    CHECK_EQ(ret(5 /* RETRYCANCEL */, { 0x0D }), 4);
+    CHECK_EQ(ret(6 /* CANCELTRYCONTINUE */, { 0x0D }), 2);
+    CHECK_EQ(ret(6 | 0x100, { 0x0D }), 10);
+    CHECK_EQ(ret(6 | 0x200, { 0x0D }), 11);
+    CHECK_EQ(ret(4 | 0x300, { 0x0D }), 6);                  /* a default button that does not exist: the first */
+    /* Tab, Shift+Tab, arrows move the focus; Space presses */
+    CHECK_EQ(ret(2, { 0x09, 0x0D }), 4);
+    CHECK_EQ(ret(2, { 0x09, 0x09, 0x0D }), 5);
+    CHECK_EQ(ret(2, { 0x09, 0x09, 0x09, 0x0D }), 3);        /* wraps around */
+    CHECK_EQ(ret(2, { 0x27, 0x27, 0x20 }), 5);              /* right, right, space */
+    CHECK_EQ(ret(2, { 0x25, 0x0D }), 5);                    /* left from the first wraps to the last */
+    CHECK_EQ(ret(3, { 0x28, 0x0D }), 7);
+    /* mnemonics */
+    CHECK_EQ(ret(2, { 'I' }), 5);
+    CHECK_EQ(ret(2, { 'R' }), 4);
+    CHECK_EQ(ret(4, { 'N' }), 7);
+    CHECK_EQ(ret(6, { 'T' }), 10);
+    /* Escape: IDCANCEL if there is a Cancel button, IDOK if OK is the only one, else no effect */
+    CHECK_EQ(ret(0, { 0x1B }), 1);
+    CHECK_EQ(ret(1, { 0x1B }), 2);
+    CHECK_EQ(ret(3, { 0x1B }), 2);
+    CHECK_EQ(ret(5, { 0x1B }), 2);
+    CHECK_EQ(ret(6, { 0x1B }), 2);
+    CHECK_EQ(ret(4, { 0x1B, 0x1B, 0x0D }), 6);               /* YESNO: Escape does nothing, Return then answers */
+    CHECK_EQ(ret(2, { 0x1B, 'R' }), 4);                      /* ABORTRETRYIGNORE: the same */
+    /* the box as a window: the default title, the owner, topmost, painted */
+    Driver e;
+    int r = run_box(0, "text", NULL, e, [&](Driver &x) { key(0x0D); (void)x; });
+    CHECK_EQ(r, 1);
+    CHECK_STR(e.title, "Error");
+    CHECK(e.active_when_seen);
+    CHECK_EQ(e.color_at_5_5, 0x6A240Au);                     /* the title bar: COLOR_ACTIVECAPTION */
+    CHECK(!IsWindow(e.dlg));                                 /* gone when the box returns */
+    /* invalid requests fail with 0 */
+    SetLastError(0);
+    CHECK_EQ(MessageBoxA(NULL, "x", "y", 7), 0); CHECK_EQ(GetLastError(), 87);
+    CHECK_EQ(MessageBoxA(NULL, "x", "y", 15), 0);
+    SetLastError(0);
+    CHECK_EQ(MessageBoxA((HWND)(uintptr_t)0x4444, "x", "y", 0), 0); CHECK_EQ(GetLastError(), 1400);
+    CHECK_EQ(MessageBoxA((HWND)(uintptr_t)0x4444 /* an owner with MB_SERVICE_NOTIFICATION */, "x", "y", 0x00200000), 0);
+}
+
+TEST(u32c_messagebox_mouse_help_and_modality)
+{
+    fnvnx_set_msgbox_hook(NULL);
+    reg("U32MbOwner");
+    HWND owner = mkw("U32MbOwner", POPUP | VIS, 0, 0, 300, 200);
+    pump();
+    /* the pointer: down and up on the button; the box is centred, the buttons sit at the bottom */
+    Driver d;
+    int r = run_box(4 /* YESNO */, "Question?", "Q", d, [&](Driver &x) {
+        int cx = (int)((x.rc.left + x.rc.right) / 2), by = (int)(x.rc.bottom - 24);
+        click(cx + 40, by);                                  /* the second button: No */
+    }, owner);
+    CHECK_EQ(r, 7);
+    CHECK(d.owner_disabled);                                 /* MB_APPLMODAL: the owner is disabled while the box is up */
+    CHECK((GetWindowLongA(owner, -16) & 0x08000000) == 0);   /* and enabled again after */
+    CHECK(GetActiveWindow() == owner);                        /* and active again */
+    /* the owner is not told about keys while the box is up; a click elsewhere does nothing */
+    Driver c;
+    r = run_box(1 /* OKCANCEL */, "x", "c", c, [&](Driver &x) {
+        click(5, 5);                                         /* a click outside the buttons: nothing */
+        click(1, 1);
+        sleep_ms(30);
+        key(0x0D);
+        (void)x;
+    });
+    CHECK_EQ(r, 1);
+    /* a press that is released elsewhere is not a press */
+    Driver p;
+    r = run_box(4, "x", "p", p, [&](Driver &x) {
+        int cx = (int)((x.rc.left + x.rc.right) / 2), by = (int)(x.rc.bottom - 24);
+        fnvnx_win_mouse(cx - 40, by, 0, 0, 0); sleep_ms(10);
+        fnvnx_win_mouse(cx - 40, by, 1, 1, 0); sleep_ms(10);   /* down on Yes */
+        fnvnx_win_mouse(cx + 40, by, 0, 1, 0); sleep_ms(10);   /* dragged to No */
+        fnvnx_win_mouse(cx + 40, by, 1, 0, 0); sleep_ms(10);   /* released there: neither is pressed */
+        key(0x0D);                                             /* the focus is on Yes (pressed it) */
+    });
+    CHECK_EQ(r, 6);
+    /* MB_HELP: F1 and the Help button send WM_HELP to the owner and the box goes on */
+    g_ev.clear();
+    Driver h;
+    r = run_box(0 | 0x4000 /* MB_HELP */, "help me", "h", h, [&](Driver &) { key(0x70); key(0x70); key(0x0D); }, owner);
+    CHECK_EQ(r, 1);
+    CHECK_EQ(count(owner, 0x53), 2);
+    /* MB_TOPMOST and MB_SYSTEMMODAL are topmost; MB_TASKMODAL without an owner disables the thread's windows */
+    Driver t;
+    r = run_box(0 | 0x40000, "x", "t", t, [&](Driver &) { key(0x0D); });
+    CHECK(t.topmost);
+    Driver s;
+    r = run_box(0 | 0x1000, "x", "s", s, [&](Driver &) { key(0x0D); });
+    CHECK(s.topmost);
+    Driver n;
+    r = run_box(0, "x", "n", n, [&](Driver &) { key(0x0D); });
+    CHECK(!n.topmost);
+    Driver tm;
+    HWND probe = owner;
+    bool disabled_during = false;
+    r = run_box(0 | 0x2000, "x", "tm", tm, [&](Driver &) { disabled_during = (GetWindowLongA(probe, -16) & 0x08000000) != 0; key(0x0D); });
+    CHECK(disabled_during);
+    CHECK((GetWindowLongA(owner, -16) & 0x08000000) == 0);
+    DestroyWindow(owner);
+}
+
+TEST(u32c_messagebox_hook_answers)
+{
+    static int calls;
+    calls = 0;
+    fnvnx_set_msgbox_hook([](const char *t, const char *c, UINT ty) -> int { calls++; (void)t; (void)c; return 100 + (int)(ty & 0xF); });
+    CHECK_EQ(MessageBoxA(NULL, "a", "b", 4), 104);
+    CHECK_EQ(MessageBoxA(NULL, "a", "b", 0), 100);
+    CHECK_EQ(calls, 2);
+    fnvnx_set_msgbox_hook(NULL);
 }
