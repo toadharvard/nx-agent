@@ -19,7 +19,7 @@ Classes:
 Argument: the verdict is green only if certified == universe, so a tracked file outside every root, a root with a
 missing gate, or a product root without its gates makes every merge red. The table maps directories to gates; it
 holds no exception for a file, a function or a finding.
-Assumption: `git ls-files` lists the tree under test (the verdict runs gates in a clean worktree of the commit)."""
+Assumption: `git ls-files` lists the tree under test (the verdict runs gates in a clean worktree of the commit). (ASM-041)"""
 import json
 import os
 import subprocess

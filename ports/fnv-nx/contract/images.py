@@ -5,7 +5,7 @@ RULE: the set is the transitive closure of the PE import directories (normal and
 reading. An imported dll name (iat.norm_dll: ASCII lowercase, ".dll" when it has no '.') is resolved case-insensitively against the
 files of the given directories (first directory in list order that has it; two files of one directory that differ only in case are an
 error). A dll found there is a GUEST IMAGE and is walked further; a dll not found there is a platform import (gate `imports`, owner L5)
-and is not an image. Assumption (stated, VERDICT.md): dynamic LoadLibrary names are facts of the `gpa` gate, not of this rule.
+and is not an image. Assumption (stated, VERDICT.md): dynamic LoadLibrary names are facts of the `gpa` gate, not of this rule. (ASM-021)
 Order: the exe, then the images in discovery order (depth first, import directory then delay-load directory)."""
 import os
 import sys

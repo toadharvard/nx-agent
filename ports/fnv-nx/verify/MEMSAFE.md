@@ -4,7 +4,7 @@
 > for it.** The owner's words: the first boot has not happened yet, so no rewriting now; the C++ code is covered by
 > sanitizers for the time being. Standard containers are allowed. Classes 14 and 15 of VERDICT.md are covered by
 > verification (AddressSanitizer and UndefinedBehaviorSanitizer in the stage runs and the tests; the sound analyzer
-> for information) together with the recorded assumption "native code is checked, not proved". The compiler plugin
+> for information) together with the recorded assumption "native code is checked, not proved". The compiler plugin (ASM-005)
 > and the WebAssembly wall for the shader translator are not built. This text is kept as the worked-out design for
 > the day the proof work resumes, after the first frame.
 
@@ -64,7 +64,7 @@ guess.
   trusted primitive called in it; capturing by reference in a closure that is stored or returned.
 - **L3** passing a pointer, reference or span to thread creation, to a callback registration, or to any function
   outside the subset that is not declared `borrows` (it does not keep the pointer; the declaration is checked where
-  that function is defined in the subset, and is an assumption for external libraries, listed per function).
+  that function is defined in the subset, and is an assumption for external libraries, listed per function). (ASM-005)
 - **A1** `new`, `delete`, `malloc`, `free`, `alloca`, variable-length arrays, placement new outside the trusted base.
 - **A2** a call of a memory or string function that takes a raw pointer and a length (`memcpy`, `strcpy`,
   `sprintf` …): the span forms of the trusted header are used instead.
@@ -118,7 +118,7 @@ What the plugin proves: that a function contains none of P1 to S1 (a decidable p
 does not prove: the trusted base, the `borrows` declarations of external libraries, and S2's stack sizes, which the
 gate checks over the linked call graph.
 
-## 5. Assumptions
+## 5. Assumptions (ASM-001, ASM-005)
 
 - The compiler and the plugin are correct (A2).
 - The trusted base meets its contract (closed separately, section 2).
@@ -202,14 +202,14 @@ closure (IKOS with zero alarms, tests against a reference, review) and its size 
 **Decided on 2026-11-11 (owner, through the orchestrator)**
 
 1. **Foreign source built into the product.** FreeType and minimp3, used unmodified from upstream, are external
-   libraries under the owner's assumption. The shader translator (MojoShader and the Mesa-derived code generator)
+   libraries under the owner's assumption. The shader translator (MojoShader and the Mesa-derived code generator) (ASM-005)
    is our modified code and parses data that comes from the game: it is either moved into the subset or built
    behind a wall, compiled to WebAssembly and back to C (`wasm2c`, the RLBox technique), so that all of its memory
    is one bounds-checked linear memory and its inputs and outputs cross by copy through spans. A fault inside the
    wall is a failed call with the D3D9 contract result (`D3DERR_INVALIDCALL` from shader creation). The renderer's
    owner chooses between the two.
-2. **The system libraries** (C library, libnx) are part of the platform, like the kernel: an accepted assumption.
-3. **Memory exhaustion** is work, not an assumption: every allocation path has a contract result. It is a class
+2. **The system libraries** (C library, libnx) are part of the platform, like the kernel: an accepted assumption. (ASM-005)
+3. **Memory exhaustion** is work, not a premise: every allocation path has a contract result. It is a class
    of its own in VERDICT.md with its own gate; the owners of the code close it.
 
 **Open: no rule yet**

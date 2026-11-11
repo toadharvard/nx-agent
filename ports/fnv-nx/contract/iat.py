@@ -16,7 +16,7 @@ value the dispatcher of the lifted code maps to an entry.  Rule, total over the 
             from the ELF symbol).
 
 Keys lie in [IMPORT_BASE, LIMIT), and SENTINEL (the return address under the first guest frame) below them.
-Assumption, checked by the loader at start: no mapping of the process intersects [SENTINEL, LIMIT) - the range
+Assumption, checked by the loader at start: no mapping of the process intersects [SENTINEL, LIMIT) - the range (ASM-020)
 is below the lowest address the 32-bit address space hands out (0x00200000), so a key is never a readable or
 executable address and never the address of an image, module, heap or stack.
 
@@ -185,7 +185,7 @@ def c_source(rows, table_id):
 def split_forwarder(fwd):
     """PE export forwarder "DLL.Name" or "DLL.#N" -> (normalised dll, "Name" | "#N"), or None when it has no '.'.  The
     dll part carries no extension in a forwarder (norm_dll appends ".dll"); the split is at the FIRST '.': function names
-    contain none (assumption of the PE format's "DLLNAME.Function" string)."""
+    contain none (assumption of the PE format's "DLLNAME.Function" string). (ASM-003)"""
     i = fwd.find('.')
     if i <= 0 or i + 1 >= len(fwd):
         return None

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""oraclecheck: verification of the assumption of gate "oracle" - the declaration of a test is true.
+"""oraclecheck: verification of the assumption of gate "oracle" - the declaration of a test is true. (ASM-042)
     python3 -I oraclecheck.py [--jobs N] [--timeout-s N] --out REPORT.json [TEST...]      cwd = checkout root
 
 Runs each test file of the oracle universe (or the TESTs named, repo-relative) as `python3 -I FILE` under

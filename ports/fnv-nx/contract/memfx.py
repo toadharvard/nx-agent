@@ -28,7 +28,7 @@ reaches memory only through an ESCAPE).  For a global, additionally (W1) no dire
 (exact for [disp]; [disp+idx*s] covers [disp, disp+max*s+size) when the index maximum is proven (and-mask, movzx, constant)
 and else the whole section), no relocated data word points into the section (that word is a pointer stored in memory: an
 ESCAPE of the section's closure), and the loader does not write L (base relocations, import slots, IAT / TLS-index of the
-PE directories).  Assumptions (stated, not proven): P; the image's code ranges are instruction-aligned and complete (A4); a
+PE directories).  Assumptions (stated, not proven): P; the image's code ranges are instruction-aligned and complete (A4); a (ASM-010, ASM-013, ASM-017, ASM-022)
 callee preserves ebx/esi/edi/ebp (A1) and reads no register of an import call (the platform's calling convention); the
 platform implementation writes through a pointer argument only when ImportInfo says so (default: every pointer argument
 may be written); no code outside the images (the loader, the OS) writes L except through those imports.

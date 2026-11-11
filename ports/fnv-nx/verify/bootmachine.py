@@ -31,7 +31,7 @@ Rules:
    served and every NOT answered (service, case); the latter end the run as "ext-module-missing" naming the service, with an event
    "sock-undetermined" saying why): the nargs rule (sockets dispatch before the general check: nargs != the exact count, null array or not, is -EINVAL;
    the exact count with a null array is BAD_NARGS). TZ_AT 34: UTC, offset 0, no DST, abbr "UTC",
-   for every instant of the years 1970..2100 inclusive (0 <= utc_seconds < 4133980800; stated assumption of the stage), else -EOVERFLOW (-75), nothing written;
+   for every instant of the years 1970..2100 inclusive (0 <= utc_seconds < 4133980800; stated assumption of the stage), else -EOVERFLOW (-75), nothing written; (ASM-047)
    tz_offset_minutes is the same zone's off_s / 60. THREAD_SELF 35: a record of the calling thread under a new id
    (never a second thread): started, so thread_start and thread_join answer BadInput; thread_free ends the record only.
    ACCESS_FAULT_HANDLER (10) is the machine's own (rule 5c); the console host serves it too (host_fault.inc).
@@ -53,7 +53,7 @@ Rules:
    owned: VM_PROTECT works on them. map_fixed over a reservation is refused (0xD401). thread_activity(tid, paused): tid 0 (the calling thread) BadInput 0x1759; a paused thread is
    never picked; unknown tid NotFound 0x1359, a thread not started or ended BadInput 0x1759 (no kernel call, also for a THREAD_SELF record of such a thread); a thread (or the
    record of a thread) that is the CALLING thread: ResultBusy 0xF201, pause or resume; another live thread: pause of a paused one or resume of one that is not paused
-   ResultInvalidState 0xFA01, else 0 (the two kernel codes are the header owner's statement from memory; assumption of the stage).
+   ResultInvalidState 0xFA01, else 0 (the two kernel codes are the header owner's statement from memory; assumption of the stage). (ASM-048)
 5e. UNMAP_FIXED (fn 15, addr, size, src): the undo of exactly one earlier map_fixed. addr or src unaligned 0xCC01; size 0 / unaligned 0xCA01; (addr, size,
    src) not exactly a live map_fixed mapping 0xD401 (so a second unmap refuses). Success: the range is unmapped (an access faults), the src heap block
    is accessible RW again with the content the mapping had, and addr may be mapped again. A page of the range that is not RW is the header's
@@ -147,7 +147,7 @@ TZ_FIRST, TZ_END = 0, 4133980800   # UTC seconds of 1970-01-01T00:00:00 and of 2
 WINDOW = (0x00400000, 0x02100000)   # the image range 0x00400000..0x00FDF000 and the data window up to 0x02100000: claimed by the host at start
 MAP_FIXED_MAX = 512
 FNVNX_HE_NOMEM, FNVNX_HE_NOTFOUND = 0x0559, 0x1359
-KERNEL_BUSY, KERNEL_INVALID_STATE = 0xF201, 0xFA01   # ResultBusy, ResultInvalidState (the header owner's statement; assumption of the stage)
+KERNEL_BUSY, KERNEL_INVALID_STATE = 0xF201, 0xFA01   # ResultBusy, ResultInvalidState (the header owner's statement; assumption of the stage) (ASM-048)
 SEC_E_SIZE, SEC_E_ALIGN, SEC_E_RANGE, SEC_E_REGION, SEC_E_ID, SEC_E_NOMEM, SEC_E_FULL = 0xCA01, 0xCC01, 0xD401, 0xDA01, 0xE401, 0xD001, 0xCE01
 SEC_MAX_SIZE, SEC_SECTIONS, SEC_VIEWS = 0x80000000, 128, 512   # host_section.inc
 VM_ALIGN, VM_FLOOR = 0x10000, 0x10000   # host_vm.inc FNVNX_VM_ALIGN; the guest's low 64 KiB stay unmapped. Forbidden ranges are plan data.
@@ -643,7 +643,7 @@ class Machine:
         return self.plat[fn](self._words(args, need))
 
     def tz_at(self, utc_s):
-        """VC1's time zone at an instant: (off_s, dst, abbr), None outside the years 1970..2100 (stated assumption of the stage)"""
+        """VC1's time zone at an instant: (off_s, dst, abbr), None outside the years 1970..2100 (stated assumption of the stage) (ASM-047)"""
         return TZ_VC1 if TZ_FIRST <= utc_s < TZ_END else None
 
     def _plat_tz_at(self, a):

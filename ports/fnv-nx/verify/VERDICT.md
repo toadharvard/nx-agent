@@ -36,6 +36,7 @@ below, not written yet, so no product root can be admitted; **no rule** = report
 | 14 | Memory fault in a hand-written native body: null or wild pointer, access out of bounds, stack exhaustion | none (verification) | AddressSanitizer and UndefinedBehaviorSanitizer in the stage runs and tests; the sound analyzer for information | L4 | covered by verification, not a required gate |
 | 15 | Hang or deadlock | none (verification) | the same stage runs and tests (AddressSanitizer and UndefinedBehaviorSanitizer; the sound analyzer for information) | L4 | covered by verification, not a required gate |
 | 17 | Memory exhaustion: an allocation path without a contract result | `oom` | not chosen yet | the owners of the code | after the first frame |
+| 18 | An assumption without an id and a status: a mention of an assumption that cites no entry of `verify/ASSUMPTIONS.json`, an entry without an owner decision or a named discharge, an id that is in no entry (ASM-001 to ASM-009 are the accepted ones) | `assumptions` (`gate_assumptions.py`) | the mentions of the tree against the registry; the registry against `CLAUDE.md` (OWNER) and `gates.json` / the tracked files (REMOVE) | L1 | runs |
 | 16 | A branch treated as unreachable that can be reached | `reach`, `reachlink` (`contract/gate_reach.py`; writes `GATE_CACHE/reach/<tree>/reach.facts.tsv` for `objstub`) | call-graph facts of the exe and the modules; one certificate per `fact_id`; the references in the linked objects | L1 | wired, red until its inputs are declared |
 | 16 | A dynamic-name GetProcAddress site not statically resolved (the certificates are void) | `gpa` (`contract/gpa_names.py`) | argument flow into every GetProcAddress site | L1 | wired, red until its inputs are declared |
 | A | Data model: the product root is not built by the game's compiler (msvcmodel external, ILP32) with every plugin | `datamodel` | the root's compiler is the `msvcmodel` external, pinned by commit and `tree_sha256`; `fnvnx_order`, `fnvnx_ftoi`, `addr`, `dispatch`, `names`, `sdd`, `pi` are loaded declared inputs | L1 | required; the external and plugins are implemented in `recipe.py` and `admit.json` on `claude/fnv-l1-contract-w4` |
@@ -115,7 +116,7 @@ every merge pays today; with a product root each judges it (tested on a toy root
   of the others.
 - `objstub` (classes 1, 2 and the reach rule of 16): `gate_objstub.py`, rules in `objstub.py`.
   - Terminator set derived from the recipe's compiler by a GCC plugin run over the preprocessed text of every unit (exactly the
-    declarations the compiler sees, headers included), cached per unit; assumption: a terminating routine is declared noreturn.
+    declarations the compiler sees, headers included), cached per unit; assumption: a terminating routine is declared noreturn. (ASM-044)
     A terminator ends the process. Unwinding is not: the EH-resume builtins of GCC's own EH lowering (`_Unwind_Resume`) and, in C++, a
     noreturn function that is not nothrow (`__cxa_throw`) are unwinders, so a landing pad or a `throw` is no class 1 finding
     (rule and limits: `objstub.py`). Objects are ELF32 (ILP32) or ELF64; both ABIs are tested.
@@ -125,7 +126,7 @@ every merge pays today; with a product root each judges it (tested on a toy root
     unless `fnvnx_reach_violation` or an `exit` row, and then on every path.
   - Class 2 flags a function unless the analysis proves a call, an access outside its own frame, or an input register live at entry.
     Its register read and write sets come from LLVM 18's instruction descriptions (`a64access.cc`, built against the LLVM libraries);
-    nothing rests on the capstone decoder. Remaining assumption: LLVM's descriptions are correct, and the memory operand fields
+    nothing rests on the capstone decoder. Remaining assumption: LLVM's descriptions are correct, and the memory operand fields (ASM-043)
     (base, index, displacement, size) are derived by the encoding rules listed in `a64access.cc`.
   - Cost: per object cache by content; uncached objects in parallel processes (`--jobs`, default all cores). Measured numbers are in the
     report of the change that introduced the gate (30 MB of code in 64 objects: see `gate_objstub.py` history); a warm verdict re-reads only
@@ -144,9 +145,14 @@ their leads' branches that enter with those merges: `imports` (4; L5), `forms` (
 
 The contract gates (class 8, plus the link-side `abs`, `disp`, `reach`, `reachlink`, `gpa`) run through `gate_contract.py --gate NAME`, one `gates.json` entry each. Per-root inputs are outputs of the root's own build and link, read beside `objects.json` (`root_results` of `contract_inputs.json`): `units.json`, `addrmap.tsv`, `aliases.ld` and, for `disp`, `entries.tsv`; a file the link stage does not emit yet makes the gate red for that root naming it (owner: L1 link stage). The game's units are the directory `build.json` declares as `game` (no default). Shared inputs are the five true externals of fnv-nx-build (commit plus `tree_sha256`: `exe`, `redist`, `msvc`, `facts`, `manifest`), `reach_requests`, `dynsites`, optional `keys`, `bridge`, and `ranges` (where an image's range facts are). The image set of `gpa`, `reach`, `reachlink` is not an input: it is derived by the rule in the section "The guest image set" below. An image of the set without range facts is a reported red item of those gates (owner L3a/L5). `n2_*` and `xc` judge that every function they flag is turned into LIFTED by `bodysel`. Outputs of the chain are cached in `GATE_CACHE/contract/<key>`.
 
+## The assumption registry (class 18, gate `assumptions`; ASM-001 to ASM-009 accepted)
+
+`verify/ASSUMPTIONS.json` is the one list of what the work rests on without proof (ASM-001 to ASM-009 are the accepted ones; every other entry is REMOVE and has an owner who owes its discharge). Every id is ASM-NNN.
+Rule: a text of the tree that mentions an assumption (the words `assum...` and `допущени...`; in a .py file only in comments and docstrings) cites the ids it means, and every cited id has an entry. An OWNER entry quotes the owner's numbered item in `CLAUDE.md` verbatim and the OWNER set is exactly that list (ASM-001 to ASM-009), so nobody can add an accepted assumption. A REMOVE entry names `gate:NAME`, `fact:PATH`, `planned:`, `no gate yet:` or `OPEN:`, with the owner (ASM-010 and later); the verdict reports the counts of the last three, and `pending` marks an entry that a lead's branch carries until the merge. The rule and its limits are in `TOOLS.md`, section `gate_assumptions.py`. The append-only logs (`JOURNAL.md`, `journal/`) are not scanned.
+
 ## The guest image set
 
-Used by `gpa`, `reach`, `reachlink` (not an input of `contract_inputs.json`). `contract/images.py` derives it as the transitive closure of the normal and delay-load import directories from the exe, each dll name resolved case-insensitively against the files of the externals `exe` and `redist` (a dll found there is a guest image and is walked further; a dll not found is a platform import of gate `imports`, owner L5, not an image). Stated assumption: dynamic LoadLibrary names are facts of the `gpa` gate, not of this rule.
+Used by `gpa`, `reach`, `reachlink` (not an input of `contract_inputs.json`). `contract/images.py` derives it as the transitive closure of the normal and delay-load import directories from the exe, each dll name resolved case-insensitively against the files of the externals `exe` and `redist` (a dll found there is a guest image and is walked further; a dll not found is a platform import of gate `imports`, owner L5, not an image). Stated assumption: dynamic LoadLibrary names are facts of the `gpa` gate, not of this rule. (ASM-021)
 
 ## References of tests (class 10, gate `oracle`)
 
@@ -162,7 +168,7 @@ the `gate_oracle.py` docstring. In short:
   of what python can load): a tool cannot cite itself. The stated rules of the tools are `verify/TOOLS.md`;
 - a test of product code needs a Wine dump or a cited text, and none of its references may lie in a product root.
 
-The pinned exe is `verify/oracle_pins.json`. Assumption: the declaration is true. It is checked by verification, not by the
+The pinned exe is `verify/oracle_pins.json`. Assumption: the declaration is true. It is checked by verification, not by the (ASM-042)
 gate: `verify/oraclecheck.py` runs every test under strace and compares the tracked files the run opened with the import
 closure of the subject plus the references (a file opened outside them, or a subject file never opened, fails the test's
 check). It is a job of the after-merge verifier.
@@ -173,23 +179,23 @@ Reported to the orchestrator; none of these is patched around.
 
 - **Classes 14 and 15** (memory faults, hangs): by the owner's revised decision of 2026-11-11 the memory-safe subset is suspended
   (the suspended design is `verify/MEMSAFE.md`). They are covered by verification, not by required gates: AddressSanitizer and
-  UndefinedBehaviorSanitizer in the stage runs and tests, and the sound analyzer for information. Recorded assumptions: native code is
+  UndefinedBehaviorSanitizer in the stage runs and tests, and the sound analyzer for information. Recorded assumptions: native code is (ASM-005, ASM-006)
   checked, not proved; a wild access of the game into host pages is not excluded by any gate.
 - **Class 17** (memory exhaustion: an allocation path without a contract result) has gate `oom`, owned by the owners of the code, to be
   written after the first frame.
 
-Accepted assumptions that cannot be removed (MASTER_PLAN4 section 4):
+Accepted assumptions that cannot be removed (MASTER_PLAN4 section 4): (ASM-001, ASM-002, ASM-003, ASM-004, ASM-005, ASM-006, ASM-007, ASM-008, ASM-009)
 
 - **A8: Win32 and D3D9 are given by documentation, not by a formal model.** A body that is not vacuous but
   implements its contract only in part is therefore closed by conformance evidence per function. Class 10 makes
   that evidence honest; it does not make it complete.
-- **Behaviour of the console** (Horizon, memory limits on hardware) stays an assumption until a run on the console.
+- **Behaviour of the console** (Horizon, memory limits on hardware) stays an assumption until a run on the console. (ASM-004)
 
-## Assumptions
+## Assumptions (ASM-001)
 
 The rules cited by the gates (N1-N4, R1, R3, R5, R6, R12, R13, K16 and others) are defined in `RULES.md`.
 
 - A2: the compiler is correct. The gates judge its output, not its internals.
 - The set of terminating routines for class 1 is derived from the toolchain's own headers (the `noreturn`
   attribute); a terminating routine without that attribute would be missed.
-- The verdict runs gates in a clean worktree of the commit, in the environment declared by `env.json`.
+- The verdict runs gates in a clean worktree of the commit, in the environment declared by `env.json`. (ASM-053)

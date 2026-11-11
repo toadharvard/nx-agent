@@ -1,0 +1,1467 @@
+{
+ "format": "fnvnx-assumptions/1",
+ "entries": [
+  {
+   "id": "ASM-001",
+   "text": "The compiler is correct (the pinned msvcmodel GCC and the pinned toolchain).",
+   "used_by": [
+    "ports/fnv-nx/verify/MEMSAFE.md",
+    "ports/fnv-nx/verify/RULES.md",
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/VERDICT.md",
+    "ports/fnv-nx/verify/gate_assumptions.py"
+   ],
+   "aliases": [
+    "L1:A2",
+    "MASTER_PLAN4:A2",
+    "argflow A2-compiler",
+    "L2:A-kinds"
+   ],
+   "status": "OWNER",
+   "decision": {
+    "file": "CLAUDE.md",
+    "quote": "1. the compiler is correct;"
+   }
+  },
+  {
+   "id": "ASM-002",
+   "text": "SHA-256 is collision resistant and preimage resistant (cache keys, fact hashes).",
+   "used_by": [
+    "ports/fnv-nx/verify/RULES.md",
+    "ports/fnv-nx/verify/VERDICT.md"
+   ],
+   "aliases": [
+    "RULES:A9",
+    "MASTER_PLAN4:A9"
+   ],
+   "status": "OWNER",
+   "decision": {
+    "file": "CLAUDE.md",
+    "quote": "2. SHA-256;"
+   }
+  },
+  {
+   "id": "ASM-003",
+   "text": "Win32 and D3D9 behave as documented (no formal model); the declared machine answers as Wine 9.0 / Windows document.",
+   "used_by": [
+    "ports/fnv-nx/contract/iat.py",
+    "ports/fnv-nx/contract/modules.py",
+    "ports/fnv-nx/verify/VERDICT.md"
+   ],
+   "aliases": [
+    "MASTER_PLAN4:A8",
+    "L3b:A-FLAT",
+    "L3b:A-SYS",
+    "Windows loader documented behaviour"
+   ],
+   "status": "OWNER",
+   "decision": {
+    "file": "CLAUDE.md",
+    "quote": "3. Win32 and D3D9 as documented;"
+   }
+  },
+  {
+   "id": "ASM-004",
+   "text": "The console's behaviour holds as assumed until a run on it.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/VERDICT.md",
+    "ports/fnv-nx/verify/gate_assumptions.py"
+   ],
+   "aliases": [
+    "Horizon behaviour"
+   ],
+   "status": "OWNER",
+   "decision": {
+    "file": "CLAUDE.md",
+    "quote": "4. the console's behaviour until a run on it;"
+   }
+  },
+  {
+   "id": "ASM-005",
+   "text": "Native code is tested by ASan/UBSan, not proven; external libraries (libc, libnx, FreeType, minimp3) are taken by their documentation.",
+   "used_by": [
+    "ports/fnv-nx/verify/MEMSAFE.md",
+    "ports/fnv-nx/verify/VERDICT.md"
+   ],
+   "aliases": [
+    "native code checked not proved",
+    "External libraries by documentation"
+   ],
+   "status": "OWNER",
+   "decision": {
+    "file": "CLAUDE.md",
+    "quote": "5. native code is tested by ASan/UBSan, not proven;"
+   }
+  },
+  {
+   "id": "ASM-006",
+   "text": "The exe makes no wild accesses: array indices are in bounds, guest accesses do not reach host pages.",
+   "used_by": [
+    "ports/fnv-nx/verify/VERDICT.md"
+   ],
+   "aliases": [
+    "L3b:A-SEGLIM",
+    "L3b:A-NOSTRADDLE",
+    "L2:A-EDGE"
+   ],
+   "status": "OWNER",
+   "decision": {
+    "file": "CLAUDE.md",
+    "quote": "6. the exe makes no wild accesses (array indices in bounds);"
+   }
+  },
+  {
+   "id": "ASM-007",
+   "text": "The address space is 32-bit, ILP32.",
+   "used_by": [
+    "ports/fnv-nx/verify/VERDICT.md"
+   ],
+   "aliases": [],
+   "status": "OWNER",
+   "decision": {
+    "file": "CLAUDE.md",
+    "quote": "7. ILP32;"
+   }
+  },
+  {
+   "id": "ASM-008",
+   "text": "Floating point is IEEE binary32/binary64.",
+   "used_by": [
+    "ports/fnv-nx/verify/VERDICT.md"
+   ],
+   "aliases": [
+    "L3b:A-IEEE-X87FLAGS"
+   ],
+   "status": "OWNER",
+   "decision": {
+    "file": "CLAUDE.md",
+    "quote": "8. IEEE floating point;"
+   }
+  },
+  {
+   "id": "ASM-009",
+   "text": "The pinned formal tools and published theorems are correct: the Sail CPU model at its pinned patch, isla and z3, the published proof of the x86-TSO to Arm memory mapping.",
+   "used_by": [
+    "ports/fnv-nx/verify/RULES.md",
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/VERDICT.md",
+    "ports/fnv-nx/verify/gate_assumptions.py"
+   ],
+   "aliases": [
+    "L3b:A-SAILMODEL",
+    "L3b:A-PROVER",
+    "L3b:A-TSO-MAP"
+   ],
+   "status": "OWNER",
+   "decision": {
+    "file": "CLAUDE.md",
+    "quote": "9. the pinned formal tools and published theorems are correct: the Sail CPU model at its pinned patch, isla and z3,"
+   }
+  },
+  {
+   "id": "ASM-010",
+   "text": "A callee preserves ebx, esi, edi, ebp (and not eax, ecx, edx).",
+   "used_by": [
+    "ports/fnv-nx/contract/argflow.py",
+    "ports/fnv-nx/contract/gate_reach.py",
+    "ports/fnv-nx/contract/memfx.py",
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/VERDICT.md"
+   ],
+   "aliases": [
+    "argflow A1",
+    "memfx A1",
+    "L3b:A-CALLEE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: stack delta and ebp/esp restore checked from the exe code at every ret of every function (L3b A-CALLEE)",
+   "owner": "L1+L3b"
+  },
+  {
+   "id": "ASM-011",
+   "text": "The outgoing-argument area and a frame slot whose address is never taken are written only by the instructions that name them.",
+   "used_by": [
+    "ports/fnv-nx/contract/argflow.py",
+    "ports/fnv-nx/contract/gate_reach.py",
+    "ports/fnv-nx/verify/TOOLS.md"
+   ],
+   "aliases": [
+    "argflow A2"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: a check over the exe code that no address of such a slot escapes",
+   "owner": "L1"
+  },
+  {
+   "id": "ASM-012",
+   "text": "The only way code obtains a code address is a relocated word (no PIC).",
+   "used_by": [
+    "ports/fnv-nx/contract/argflow.py",
+    "ports/fnv-nx/contract/gate_reach.py",
+    "ports/fnv-nx/verify/TOOLS.md"
+   ],
+   "aliases": [
+    "argflow A3"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: gate disp (a dispatcher entry for every code address of the R3 universe)",
+   "owner": "L1"
+  },
+  {
+   "id": "ASM-013",
+   "text": "The facts' code ranges contain every instruction of every function and every target of an indirect jump is a relocated word into the ranges; code ranges are instruction-aligned and complete.",
+   "used_by": [
+    "ports/fnv-nx/contract/argflow.py",
+    "ports/fnv-nx/contract/gate_reach.py",
+    "ports/fnv-nx/contract/memfx.py",
+    "ports/fnv-nx/verify/TOOLS.md"
+   ],
+   "aliases": [
+    "argflow A4",
+    "memfx A4",
+    "L3b:A-EIPRANGE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: N1, every byte of .text of every module is classified, checked against the section table",
+   "owner": "L1"
+  },
+  {
+   "id": "ASM-014",
+   "text": "A call to a direct callee removes the callee's uniform `ret n` bytes.",
+   "used_by": [
+    "ports/fnv-nx/contract/argflow.py",
+    "ports/fnv-nx/contract/gate_reach.py",
+    "ports/fnv-nx/verify/TOOLS.md"
+   ],
+   "aliases": [
+    "argflow A5"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: the `ret n` of every function read from the exe code",
+   "owner": "L1"
+  },
+  {
+   "id": "ASM-015",
+   "text": "Memory [R+d] through a pointer register is not a slot of the current frame.",
+   "used_by": [
+    "ports/fnv-nx/contract/argflow.py",
+    "ports/fnv-nx/contract/gate_reach.py",
+    "ports/fnv-nx/verify/TOOLS.md"
+   ],
+   "aliases": [
+    "argflow A6"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: a check over the exe code",
+   "owner": "L1"
+  },
+  {
+   "id": "ASM-016",
+   "text": "Mode 'open' of the handle origin walk (calls transparent): a call between a store through R and a load through R does not write that memory.",
+   "used_by": [
+    "ports/fnv-nx/contract/argflow.py",
+    "ports/fnv-nx/contract/gate_reach.py",
+    "ports/fnv-nx/verify/TOOLS.md"
+   ],
+   "aliases": [
+    "argflow A7",
+    "gate_reach BLOCKING A7"
+   ],
+   "status": "REMOVE",
+   "removed_by": "gate:reach",
+   "owner": "L1",
+   "note": "A fact whose only derivation needs it is not certified by the gate reach."
+  },
+  {
+   "id": "ASM-017",
+   "text": "The provenance premise P of memfx: a value that is not derived from the address of an object does not address it.",
+   "used_by": [
+    "ports/fnv-nx/contract/argflow.py",
+    "ports/fnv-nx/contract/gate_reach.py",
+    "ports/fnv-nx/contract/memfx.py",
+    "ports/fnv-nx/verify/TOOLS.md"
+   ],
+   "aliases": [
+    "argflow A8",
+    "memfx P"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: memfx states the premise P and does not check it",
+   "owner": "L1"
+  },
+  {
+   "id": "ASM-018",
+   "text": "G1: the only way to get an import's address other than its import slot is GetProcAddress.",
+   "used_by": [
+    "ports/fnv-nx/contract/gate_reach.py",
+    "ports/fnv-nx/verify/TOOLS.md"
+   ],
+   "aliases": [
+    "gate_reach G1"
+   ],
+   "status": "REMOVE",
+   "removed_by": "gate:gpa",
+   "owner": "L1"
+  },
+  {
+   "id": "ASM-019",
+   "text": "G2: a forwarder chain between distinct dll names is not followed.",
+   "used_by": [
+    "ports/fnv-nx/contract/gate_reach.py",
+    "ports/fnv-nx/verify/TOOLS.md"
+   ],
+   "aliases": [
+    "gate_reach G2"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: forwarder chains of the closure",
+   "owner": "L1"
+  },
+  {
+   "id": "ASM-020",
+   "text": "No mapping of the process intersects [SENTINEL, LIMIT) (below 0x00200000), so a loader key is never a readable or executable address.",
+   "used_by": [
+    "ports/fnv-nx/contract/iat.py",
+    "ports/fnv-nx/verify/TOOLS.md"
+   ],
+   "aliases": [
+    "iat sentinel"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: a fact of the loader's layout (guard zone), checked by the loader at start",
+   "owner": "L5"
+  },
+  {
+   "id": "ASM-021",
+   "text": "Dynamic LoadLibrary names are facts of the gpa gate, not of the image closure rule.",
+   "used_by": [
+    "ports/fnv-nx/contract/images.py",
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/VERDICT.md"
+   ],
+   "aliases": [
+    "images dynamic names"
+   ],
+   "status": "REMOVE",
+   "removed_by": "gate:gpa",
+   "owner": "L1"
+  },
+  {
+   "id": "ASM-022",
+   "text": "The platform writes through a pointer argument only as ImportInfo says (default: every pointer argument may be written); a callee reads no register of an import call; no code outside the images writes the tracked memory except through the imports.",
+   "used_by": [
+    "ports/fnv-nx/contract/memfx.py",
+    "ports/fnv-nx/verify/TOOLS.md"
+   ],
+   "aliases": [
+    "memfx platform contract"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: ImportInfo is not checked against the import bodies",
+   "owner": "L1"
+  },
+  {
+   "id": "ASM-023",
+   "text": "Pointers into .text used as data are absent (jump tables live in .text and are not needed).",
+   "used_by": [
+    "ports/fnv-nx/docs/DATAIMAGE.md"
+   ],
+   "aliases": [
+    "DATAIMAGE .text pointers"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: relocations of the data image scanned against the section table",
+   "owner": "L2"
+  },
+  {
+   "id": "ASM-024",
+   "text": "IPC 0.8 (range 0.6-1.0) and the clock 1.02-1.785 GHz are the inputs of the instruction budget.",
+   "used_by": [
+    "ports/fnv-nx/docs/PERF.md",
+    "ports/fnv-nx/docs/READINESS.md",
+    "ports/fnv-nx/docs/RENDER_PERF.md"
+   ],
+   "aliases": [
+    "PERF IPC",
+    "READINESS assumptions.ipc"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: the per-block, per-function Cortex-A57 price model of docs/PERF.md replaces the IPC; the first run on the console measures it",
+   "owner": "L2"
+  },
+  {
+   "id": "ASM-025",
+   "text": "The render cost model constants (coverage, overdraw, frames in flight, store bandwidth, draw mix, shader stand-ins) are model inputs, not measurements.",
+   "used_by": [
+    "ports/fnv-nx/docs/RENDER_PERF.md"
+   ],
+   "aliases": [
+    "RENDER_PERF assumptions"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: replaced item by item by measurements of the measured frame (docs/RENDER_PERF.md)",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-026",
+   "text": "The render front submits one packet arena per frame.",
+   "used_by": [
+    "ports/fnv-nx/docs/RENDER_NATIVE.md"
+   ],
+   "aliases": [
+    "RENDER_NATIVE front"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the interface of the front and the back end",
+   "owner": "L6"
+  },
+  {
+   "id": "ASM-027",
+   "text": "The list of GCC/MSVC divergences that defines the native subset P is complete (there is no formal semantics of MSVC 2008).",
+   "used_by": [
+    "ports/fnv-nx/verify/RULES.md"
+   ],
+   "aliases": [
+    "RULES A1"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the list is not derived from a source",
+   "owner": "L2"
+  },
+  {
+   "id": "ASM-028",
+   "text": "The code does not modify itself (.text is mapped read-only).",
+   "used_by": [
+    "ports/fnv-nx/verify/RULES.md"
+   ],
+   "aliases": [
+    "RULES A6"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the exe's code is checked for writes into .text",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-029",
+   "text": "The ARMv8 memory model matches the Cortex-A57.",
+   "used_by": [
+    "ports/fnv-nx/verify/RULES.md"
+   ],
+   "aliases": [
+    "RULES A7"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the console run (see ASM-004)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-030",
+   "text": "The lifter keeps the exe's access order exactly; a native body runs the source's accesses in GCC's order.",
+   "used_by": [
+    "ports/fnv-nx/verify/RULES.md"
+   ],
+   "aliases": [
+    "RULES A10",
+    "L2:ORDERING A10"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: the ordering gate over the lifted code (R9)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-031",
+   "text": "The key (unit, symbol) of a vftable relocation is unambiguous.",
+   "used_by": [
+    "ports/fnv-nx/verify/RULES.md"
+   ],
+   "aliases": [
+    "RULES key unambiguous"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: R6 checks every key",
+   "owner": "L2"
+  },
+  {
+   "id": "ASM-032",
+   "text": "Modules of the PURE table and the allowed members of RESTRICTED ones do not read clock, entropy or host identity.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/puregate.py",
+    "ports/fnv-nx/verify/puregate_policy.py"
+   ],
+   "aliases": [
+    "puregate A-stdlib"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: audit-stdlib over the sources, C modules listed unaudited",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-033",
+   "text": "The external modules of puregate are pure.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/puregate.py",
+    "ports/fnv-nx/verify/puregate_policy.py"
+   ],
+   "aliases": [
+    "puregate A-ext"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: external modules are not analysed",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-034",
+   "text": "PYTHONHASHSEED=0 and set elements of str/bytes/int: set iteration order is a function of the insertion sequence.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/puregate.py"
+   ],
+   "aliases": [
+    "puregate A-hashseed"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: sets held in variables are counted, not proven",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-035",
+   "text": "At run time the project imports resolve to the files the gate resolved (no other sys.path content).",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/puregate.py"
+   ],
+   "aliases": [
+    "puregate A-path"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the imports of the gate's run resolved to the gate's files",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-036",
+   "text": "Subprocess children, the files read and the environment are declared inputs (governed by the stage document).",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/puregate.py"
+   ],
+   "aliases": [
+    "puregate A-child"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the declared inputs of the stage document checked against the files and environment a run touches",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-037",
+   "text": "Strings built at run time are not file names under the host-identity trees.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/puregate.py"
+   ],
+   "aliases": [
+    "puregate A-text"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: a rule that finds file names built at run time",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-038",
+   "text": "External tools invoked through toolflags are deterministic (A-env: the compiler and ld given the flags).",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/verify/toolflags.py",
+    "ports/fnv-nx/verify/toolflags_policy.py"
+   ],
+   "aliases": [
+    "toolflags A-env",
+    "recipe A-env"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: gate_determinism compares two cold builds",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-039",
+   "text": "The sandbox leaves the channels of sandbox.OPEN_CHANNELS open.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/recipe.py"
+   ],
+   "aliases": [
+    "recipe sandbox open channels"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: gate_determinism shows which two cold builds expose",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-040",
+   "text": "GCC reads the content of a file only by lexing it (then it is in deps.d) or it fails.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/unitstage.py"
+   ],
+   "aliases": [
+    "unitstage lexing"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the content of every file GCC reads, checked against deps.d",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-041",
+   "text": "`git ls-files` lists the tree under test.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/gate_admit.py"
+   ],
+   "aliases": [
+    "gate_admit git ls-files"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the verdict runs in a clean worktree of the commit",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-042",
+   "text": "The declaration of a test (the subject list is complete, the references are what it opens) is true.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/VERDICT.md",
+    "ports/fnv-nx/verify/gate_oracle.py",
+    "ports/fnv-nx/verify/oraclecheck.py"
+   ],
+   "aliases": [
+    "gate_oracle declaration"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: oraclecheck runs every test under strace in the after-merge verifier",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-043",
+   "text": "The instruction decoders are correct (LLVM's AArch64 descriptions, capstone).",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/VERDICT.md",
+    "ports/fnv-nx/verify/objstub.py"
+   ],
+   "aliases": [
+    "objstub LLVM decoder",
+    "instrument decoder",
+    "L3b:A-CAPSTONE-X86",
+    "L3b:A-CAPSTONE-A64"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: agreement of independent decoders on every instruction (after the first frame)",
+   "owner": "L3b+L4",
+   "note": "Deferred until the first frame."
+  },
+  {
+   "id": "ASM-044",
+   "text": "Every terminating routine of the toolchain is declared noreturn in the headers given.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/VERDICT.md",
+    "ports/fnv-nx/verify/objstub.py"
+   ],
+   "aliases": [
+    "objstub noreturn"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the headers' noreturn declarations checked against the toolchain's terminating routines",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-045",
+   "text": "The decoder's write sets name every register an instruction writes.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/objstub.py"
+   ],
+   "aliases": [
+    "objstub write sets"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the decoder's write sets checked against the architectural encoding of every instruction",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-046",
+   "text": "A pointer argument is tested alike by its low 32 bits (ILP32) or its full register.",
+   "used_by": [
+    "ports/fnv-nx/verify/objstub.py"
+   ],
+   "aliases": [
+    "objstub pointer argument"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the tested argument registers checked by the ILP32 layout of the pointer",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-047",
+   "text": "The years 1970..2100 bound the time zone of the boot machine.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/bootmachine.py"
+   ],
+   "aliases": [
+    "bootmachine tz range"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the range of the zone source has no bound",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-048",
+   "text": "The kernel result codes 0xF201 and 0xFA01 are the header owner's statement from memory.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/bootmachine.py"
+   ],
+   "aliases": [
+    "bootmachine kernel codes"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: kernel codes from the libnx headers pinned at switchbrew/libnx b156b4774fb2df7b93402169509266da7547fc4c",
+   "owner": "L5",
+   "note": "L5 note 015: checked against libnx at the commit pinned in tools/fetch.sh; 0xFA01 is KernelError_InvalidState, 0xF201 is KernelError_NotFound (not Busy)."
+  },
+  {
+   "id": "ASM-049",
+   "text": "Socket handle numbers: the lowest number >= 3 that is not open, reused after close.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/bootsock.py"
+   ],
+   "aliases": [
+    "bootsock A1"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: no gate for a guest that depends on the number",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-050",
+   "text": "The host's loopback has 127.0.0.0/8 and ::1; every other unicast address is not local.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/bootsock.py"
+   ],
+   "aliases": [
+    "bootsock A2"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: a run on the console (ASM-004)",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-051",
+   "text": "getaddrinfo with no network: numeric nodes are parsed, the list holds one record per socket type STREAM, DGRAM, RAW in this order.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/bootsock.py"
+   ],
+   "aliases": [
+    "bootsock A3"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: a run on the console (ASM-004)",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-052",
+   "text": "EPROTONOSUPPORT: STREAM takes protocol 0 or 6, DGRAM 0 or 17; other protocols as the stage lists.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/bootsock.py"
+   ],
+   "aliases": [
+    "bootsock A4"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: a run on the console (ASM-004)",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-053",
+   "text": "The verdict runs in the environment pinned by env.json.",
+   "used_by": [
+    "ports/fnv-nx/verify/VERDICT.md"
+   ],
+   "aliases": [
+    "VERDICT env.json environment"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: envcheck over the environment of the verdict",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-054",
+   "text": "With --eip fixed: semantics is translation-invariant in eip.",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/shapeprove.py"
+   ],
+   "aliases": [
+    "L3b:A-EIP"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: mode to delete; A-EIPRANGE (symbolic eip) is the only product path",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-055",
+   "text": "Decoding (operand structure, family) is a function of the shape: masked imm/disp fields never change it.",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/census.py"
+   ],
+   "aliases": [
+    "L3b:A-SHAPEFAMILY"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: same decoder-agreement gate, run on every occurrence (not the representative): operand structure of each occurrence equals that of its shape",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-056",
+   "text": "capstone group tags classify the instruction-set extension of a form correctly.",
+   "used_by": [
+    "ports/fnv-nx/lift/fnvlift/f_cpufeat.py"
+   ],
+   "aliases": [
+    "L3b:A-GROUPS"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: same decoder-agreement gate, extension class compared with XED isa-set on every instruction",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-057",
+   "text": "For shapes outside the Sail model (x87 control/state, cpuid, rdtsc, part of SIMD: 7 019 shapes have no DSL builder yet) the reference is a transcription of the SDM compared with the host.",
+   "used_by": [
+    "ports/fnv-nx/lift/README.md"
+   ],
+   "aliases": [
+    "L3b:A-SDMREF"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: no machine reference yet; host comparison is exhaustive only for 16/32-bit input spaces",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-058",
+   "text": "17 (mnemonic, undefined flag) pairs: the value the reference CPU produces is not yet pinned.",
+   "used_by": [
+    "ports/fnv-nx/lift/fnvlift/f_dsl.py"
+   ],
+   "aliases": [
+    "L3b:A-UNDEFFLAGS"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: needs the reference-CPU table (same host as rcp), then a fact",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-059",
+   "text": "No x87/SSE exception is ever unmasked (I-FPMASK); fwait and FP arithmetic never raise.",
+   "used_by": [
+    "ports/fnv-nx/lift/fnvlift/fpfacts.py"
+   ],
+   "aliases": [
+    "L3b:A-FPMASK"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: every control-word write (fldcw, ldmxcsr, fninit, frstor, fldenv, fxrstor, _controlfp/_control87 with operand) found statically and proved to keep the masks; if not proved, exact unmasked-exception semantics before the first frame (orchestrator decision 2026-11-11; owner of the work L3b)",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-060",
+   "text": "Test harness only: sticky flags not observed (I-FPSTICKY set in instest ASSUME).",
+   "used_by": [
+    "ports/fnv-nx/lift/fnvlift/fpfacts.py"
+   ],
+   "aliases": [
+    "L3b:A-FPSTICKY"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: test-only; product path maintains the flags",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-061",
+   "text": "GCC keeps an FP operation before the FPSR read that follows it in program order (GCC has no FENV_ACCESS).",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "L3b:A-ORDER"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: not compiler correctness: GCC is allowed to reorder. Closing rule: FPSR read through an operation the compiler must order (asm with FP operand dependency), then gate on objects",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-062",
+   "text": "Host code between guest instructions (imports, native bodies) runs with the guest FPSR parked or raises nothing the guest sees.",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "L3b:A-NATIVE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: rt/imp.h parks FPSR on imports; native bodies need the same by rule (L2/L3a)",
+   "owner": "L3a",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-063",
+   "text": "A handler resuming by ContinueExecution does not change the FP flag owner nor leave the x87/MMX register file in another carrier format.",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "L3b:A-RESUME"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: closable by canonicalising on resume in rt/seh.c (L3a)",
+   "owner": "L3a",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-064",
+   "text": "An MMX read of a register popped by a static-stack function, with no MMX write since, reads data undefined on the CPU too.",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "L3b:A-STALE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: the CPU value is defined (old bits); closing = write back on pop or prove no such read statically",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-065",
+   "text": "fnsave stores the real indefinite for an empty register; fldenv/frstor treat an empty-tagged register per the tag only.",
+   "used_by": [
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
+   ],
+   "aliases": [
+    "L3b:A-EMPTY"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: the CPU stores the kept 80-bit image; fv_free keeps it, so this can be made exact and the assumption removed",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-066",
+   "text": "ES (bit 7) and B (bit 15) of FSW are 0.",
+   "used_by": [
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
+   ],
+   "aliases": [
+    "L3b:A-ES"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: follows the A-FPMASK fact, or is implemented with the unmasked semantics",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-067",
+   "text": "FDP after an instruction without memory operand is unchanged (SDM leaves it unspecified).",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "L3b:A-FDP"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: pin to the reference CPU by a host table, then fact",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-068",
+   "text": "FDS is DS whenever FDP != 0 (FS-relative operand reported with DS).",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "L3b:A-FDS"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: wrong for FS operands on the CPU; closing = keep the selector per operand (1 store)",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-069",
+   "text": "FOP is recomputed from the opcode bytes at FIP when an image is written.",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "L3b:A-FOP"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: code is read-only (W^X of the lifted image) so the bytes are those executed; needs the read-only fact from L3a universe",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-070",
+   "text": "Reserved bits of the fnstenv/fnsave image are 0.",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "L3b:A-RES"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: pin to the reference CPU by host comparison (exhaustive over the state that feeds them)",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-071",
+   "text": "fbld with a nibble above 9 gives the arithmetic sum nibble*10^i (SDM: undefined).",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/x87.c"
+   ],
+   "aliases": [
+    "L3b:A-BCD"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: pin to the reference CPU; per-digit-position independence would make a host table exhaustive",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-072",
+   "text": "Only instructions of the lifter decode transfer control (constant-address proof for lock/xchg within a block).",
+   "used_by": [
+    "ports/fnv-nx/lift/fnvlift/memclass.py"
+   ],
+   "aliases": [
+    "L3b:A-DECODEFLOW"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: universe closure gate of L3a",
+   "owner": "L3a",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-073",
+   "text": "A stack slot at a proved coordinate of a frame whose address does not escape is accessed by its thread only (class PLAIN).",
+   "used_by": [
+    "ports/fnv-nx/lift/tools/memclass.py"
+   ],
+   "aliases": [
+    "L3b:A-STACKPRIVATE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: escape analysis is in memclass; verify_r9 (deferred until first frame) is the independent check",
+   "owner": "L3a",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-074",
+   "text": "rt/rcptab.cert.json was produced by farm/rcpcert.sh on a CPU with the reference identity.",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+   ],
+   "aliases": [
+    "L3b:A-RCPHOST"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: hash of the certificate is kept in the store (orchestrator: not an assumption)",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@eb6f0b2b"
+  },
+  {
+   "id": "ASM-075",
+   "text": "RCPSS/RSQRTSS are pure functions of the input bits: MXCSR does not influence them.",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/rcptab.c"
+   ],
+   "aliases": [
+    "L3b:A-RCPPURE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: checked on 20e6 inputs x 8 MXCSR values = sampling. Closing: rerun the 2^32 sweep under each MXCSR RC/FTZ/DAZ combination on the farm (8 x 189 s)",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@eb6f0b2b"
+  },
+  {
+   "id": "ASM-076",
+   "text": "The helpers sse_f2i and fv_i are correct (range guard, rounding mode, integer indefinite).",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+   ],
+   "aliases": [
+    "L3b:A-F2IHELPERS"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: forms: fpexact is green only if forms is green on the same helpers",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@eb6f0b2b"
+  },
+  {
+   "id": "ASM-077",
+   "text": "An object and its .f2i.json come from the same compile.",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+   ],
+   "aliases": [
+    "L3b:A-F2IKEY"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: recipe cache key binds both once the plugin is a recipe stage",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@eb6f0b2b"
+  },
+  {
+   "id": "ASM-078",
+   "text": "An inline asm without FP/vector operand and without FP clobber does no float->int conversion.",
+   "used_by": [
+    "ports/fnv-nx/lift/tools/fnvnx_f2i_check.cc"
+   ],
+   "aliases": [
+    "L3b:A-F2IASM"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: check 3b covers units with no site; closing fully = forbid inline asm outside listed rt files by the plugin",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@eb6f0b2b"
+  },
+  {
+   "id": "ASM-079",
+   "text": "No float->int conversion of a C literal occurs in lifted code (GCC folds an out-of-range constant to the saturated value, not the x86 indefinite).",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+   ],
+   "aliases": [
+    "L3b:A-F2ICONST"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: closable in the plugin: constant operand of a conversion = finding",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@eb6f0b2b"
+  },
+  {
+   "id": "ASM-080",
+   "text": "Native bodies compiled with fnvnx_ftoi are judged by L2 rules, not by fpexact.",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+   ],
+   "aliases": [
+    "L3b:A-F2INATIVE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: L2 gate",
+   "owner": "L2",
+   "pending": "claude/fnv-l3b-lift@eb6f0b2b"
+  },
+  {
+   "id": "ASM-081",
+   "text": "The CONTEXT image handed to guest SEH handlers is only read back by the runtime restore, which restores a reachable control state.",
+   "used_by": [
+    "ports/fnv-nx/lift/tools/fpstate.py"
+   ],
+   "aliases": [
+    "L3b:A-CTX"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: a handler may write the FP control words in CONTEXT; being checked against rt/seh.c with the FP-mask fact",
+   "owner": "L3b",
+   "pending": "claude/fnv-l3b-lift@ce152aa2"
+  },
+  {
+   "id": "ASM-082",
+   "text": "A host's own name resolves to 127.0.0.1 on the declared machine without network (neither Windows nor Wine 9.0 fixes the address).",
+   "used_by": [
+    "ports/fnv-nx/platform/win32/winsock.cpp"
+   ],
+   "aliases": [
+    "L5:winsock own name"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: no source fixes the address",
+   "owner": "L5",
+   "pending": "claude/fnv-l5-platform@21e472e9"
+  },
+  {
+   "id": "ASM-083",
+   "text": "With no DNS server the host resolver answers HOST_NOT_FOUND.",
+   "used_by": [
+    "ports/fnv-nx/platform/win32/winsock.cpp"
+   ],
+   "aliases": [
+    "L5:winsock no dns"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: the Windows documentation of gethostbyname separates WSAHOST_NOT_FOUND and WSATRY_AGAIN; no source for no DNS",
+   "owner": "L5",
+   "pending": "claude/fnv-l5-platform@21e472e9"
+  },
+  {
+   "id": "ASM-084",
+   "text": "The font trees 09093ea and fcf99a1 differ outside fontdump.txt and the difference is not analysed.",
+   "used_by": [
+    "ports/fnv-nx/platform/win32/gdifont.cpp"
+   ],
+   "aliases": [
+    "L5:font trees"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: the difference is not analysed",
+   "owner": "L5",
+   "pending": "claude/fnv-l5-platform@21e472e9"
+  },
+  {
+   "id": "ASM-085",
+   "text": "The GDI DC has the identity world transform and GM_COMPATIBLE, no extra character spacing, justification, layout mirroring or clip region (no import of the exe or the modules changes them).",
+   "used_by": [
+    "ports/fnv-nx/platform/win32/gdifont.cpp"
+   ],
+   "aliases": [
+    "L5:gdifont DC"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: a gate over the import lists of the exe and the modules (no SetWorldTransform, SetGraphicsMode, SetTextCharacterExtra, SetTextJustification, SetLayout, SelectClipRgn)",
+   "owner": "L5",
+   "pending": "claude/fnv-l5-platform@21e472e9"
+  },
+  {
+   "id": "ASM-086",
+   "text": "Arguments that Wine does not check but cannot survive fail with ERROR_INVALID_PARAMETER (nls R3).",
+   "used_by": [
+    "ports/fnv-nx/platform/win32/nls.cpp"
+   ],
+   "aliases": [
+    "L5:nls R3"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: cases outside the documentation of GetStringTypeW/LCMapStringW have no source",
+   "owner": "L5",
+   "pending": "claude/fnv-l5-platform@21e472e9"
+  },
+  {
+   "id": "ASM-087",
+   "text": "User registry overrides of locale values do not exist (nls R5).",
+   "used_by": [
+    "ports/fnv-nx/platform/win32/nls.cpp"
+   ],
+   "aliases": [
+    "L5:nls R5"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: gate regsites (no read of Control Panel\\International except the declared machine)",
+   "owner": "L5",
+   "pending": "claude/fnv-l5-platform@21e472e9"
+  },
+  {
+   "id": "ASM-088",
+   "text": "The guest import table of import_escape is built for arm64_32-apple-watchos because clang-18 cannot emit the product triple; nocapture/readonly do not depend on the triple.",
+   "used_by": [
+    "ports/fnv-nx/platform/manifest/import_escape.py"
+   ],
+   "aliases": [
+    "L5:import_escape target"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: no gate and no proof that the properties do not depend on the triple",
+   "owner": "L5",
+   "pending": "claude/fnv-l5-platform@21e472e9"
+  },
+  {
+   "id": "ASM-089",
+   "text": "Volatile accesses are plain memory accesses for capture, an integer parameter is not a pointer, pointers are not smuggled into integers (ptrtoint/inttoptr chains are not followed).",
+   "used_by": [
+    "ports/fnv-nx/platform/manifest/import_escape.py"
+   ],
+   "aliases": [
+    "L5:import_escape pointers"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: an IR pass that rejects ptrtoint and inttoptr on parameter paths (gate import_escape)",
+   "owner": "L5",
+   "pending": "claude/fnv-l5-platform@21e472e9"
+  },
+  {
+   "id": "ASM-090",
+   "text": "A function starts at the nearest preceding `push ebp; mov ebp,esp` or at the 16-aligned address after int3 padding and ends at the next prologue; control flow is followed forward only (pemanifest, regsites).",
+   "used_by": [
+    "ports/fnv-nx/platform/manifest/pemanifest.py"
+   ],
+   "aliases": [
+    "L5:pemanifest boundaries",
+    "L5:regsites boundaries"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: the lifter's function table, built by rule from the exe, compared with the manifest",
+   "owner": "L5",
+   "pending": "claude/fnv-l5-platform@21e472e9"
+  },
+  {
+   "id": "ASM-091",
+   "text": "The values of Fallout.ini (bUseThreaded*) are set nowhere else.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l5-platform-010.md"
+   ],
+   "aliases": [
+    "L5:Fallout.ini"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: no source",
+   "owner": "L5",
+   "pending": "claude/fnv-l5-platform@21e472e9"
+  },
+  {
+   "id": "ASM-092",
+   "text": "DATE_LTRREADING, RTLREADING and AUTOLAYOUT are accepted and add no direction marks: no rule for en-US was found.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l5-platform-009.md"
+   ],
+   "aliases": [
+    "L5:DATE_LTRREADING"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: no source",
+   "owner": "L5",
+   "pending": "claude/fnv-l5-platform@21e472e9"
+  },
+  {
+   "id": "ASM-093",
+   "text": "GetSystemInfo reports 3 cores on the declared machine; the guest backend is not checked.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l5-platform-009.md"
+   ],
+   "aliases": [
+    "L5:GetSystemInfo cores"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: a test backend=declared machine (ENV_TRUTH P1)",
+   "owner": "L5",
+   "pending": "claude/fnv-l5-platform@21e472e9"
+  },
+  {
+   "id": "ASM-094",
+   "text": "Guessed bytes of the synthetic image (soft zero padding, items made from a name alone) are accepted.",
+   "used_by": [
+    "ports/fnv-nx/loader/synth/synth_image.py"
+   ],
+   "aliases": [
+    "L5:synth_image guessed"
+   ],
+   "status": "REMOVE",
+   "removed_by": "OPEN: a guess from a name is forbidden by the order of 2026-11-10; the rule for each category is open",
+   "owner": "L2",
+   "pending": "claude/fnv-l5-platform@21e472e9"
+  },
+  {
+   "id": "ASM-095",
+   "text": "Equal symbol names mean equal symbols (the linker's own rule); the objects are ELF relocatable objects of one target; the plugin's MSVC names are the declarations the units were compiled against (A-names, A-ODR, A-ELF).",
+   "used_by": [
+    "ports/fnv-nx/link/odr.py"
+   ],
+   "aliases": [
+    "L2:A-names",
+    "L2:A-ODR",
+    "L2:A-ELF"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: a rule that equal names are equal symbols, over the linker's symbol table",
+   "owner": "L2",
+   "pending": "claude/fnv-l2-source@f2ef201"
+  },
+  {
+   "id": "ASM-096",
+   "text": "The exe is a PE32 built by MSVC with the COLs in .rdata and the TypeDescriptors in .data (A-layout).",
+   "used_by": [
+    "ports/fnv-nx/link/exevft.py"
+   ],
+   "aliases": [
+    "L2:A-layout"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: exefacts' RTTI scan",
+   "owner": "L2",
+   "pending": "claude/fnv-l2-source@f2ef201"
+  },
+  {
+   "id": "ASM-097",
+   "text": "MSVC x86 gives a record without pack or align modifiers the natural alignment (A-natural).",
+   "used_by": [
+    "ports/fnv-nx/link/gate_r7.py"
+   ],
+   "aliases": [
+    "L2:A-natural"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: MSVC's layout rule for a record without pack or align modifiers, checked against the exe's records",
+   "owner": "L2",
+   "pending": "claude/fnv-l2-source@f2ef201"
+  },
+  {
+   "id": "ASM-098",
+   "text": "A strong definition of a GCC object has a definition in the cl object of the same unit (A-strong).",
+   "used_by": [
+    "ports/fnv-nx/link/gate_names.py"
+   ],
+   "aliases": [
+    "L2:A-strong"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: every strong definition of a GCC object has a definition in the closure, checked in the link",
+   "owner": "L2",
+   "pending": "claude/fnv-l2-source@f2ef201"
+  },
+  {
+   "id": "ASM-099",
+   "text": "A function has one entry convention, visible as the vftables that hold it directly (A-msvc-entry).",
+   "used_by": [
+    "ports/fnv-nx/link/thisadj.py"
+   ],
+   "aliases": [
+    "L2:A-msvc-entry"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: one entry convention per function, checked against the vftables",
+   "owner": "L2",
+   "pending": "claude/fnv-l2-source@f2ef201"
+  },
+  {
+   "id": "ASM-100",
+   "text": "The symbol of kind dtor.d0 carries the MSVC name of the scalar deleting destructor (A-d0).",
+   "used_by": [
+    "ports/fnv-nx/link/vslots.py"
+   ],
+   "aliases": [
+    "L2:A-d0"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the MSVC name of the scalar deleting destructor, checked against the exe's names",
+   "owner": "L2",
+   "pending": "claude/fnv-l2-source@f2ef201"
+  }
+ ]
+}

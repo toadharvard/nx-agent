@@ -6,7 +6,7 @@
 Inputs: ELF relocatable objects, ELF32 (ILP32; SHT_RELA with Elf32_Rela, R_AARCH64_P32_* kinds) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
 the host g++ against LLVM 18's MC layer; env var A64ACCESS names a prebuilt binary): per word the registers read and written
 (MCInstrDesc defs/uses/implicit, tied operands), the memory operand and the kind. Everything the T and V classes need beyond that
-is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64
+is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64 (ASM-043)
 instruction descriptions and disassembler are correct; the test cross-checks the decoded word set against objdump. Output: one line `obj:symbol: KIND detail`, sorted; exit 0 iff no finding.
 
 FUNCTION UNIVERSE. Every STT_FUNC symbol defined in an SHF_EXECINSTR section, range [value, value+size); equal ranges are aliases of
@@ -22,7 +22,7 @@ whose symbol is global/weak and in the TERMINATOR SET (calls, tail calls, GOT/AD
 can be incomplete; a local symbol cannot be the library routine). `T2-noreturn-tail`: the last instruction is a direct BL (callee a symbol; control
 runs off the end after a call the compiler knew not to return), except a BL of `fnvnx_reach_violation` (reach rule below); another last instruction that can fall through (not RET, B, BR*, T1) is
 `fallthrough`. Reachability of a trap is NOT computed: presence anywhere in a function is a finding; every function is judged, so
-a caller of a flagged function is not flagged for it. Assumption: every terminating routine of the toolchain is declared noreturn
+a caller of a flagged function is not flagged for it. Assumption: every terminating routine of the toolchain is declared noreturn (ASM-044)
 in the headers given. TERMINATOR RULE (what is a terminator): a routine that ENDS THE PROCESS. Resuming or starting the propagation of
 an exception is not process end: it transfers control to a handler (or on to the caller), and whether a handler exists is the EH
 class, not class 1. The plugin applies GCC's own flags (TREE_THIS_VOLATILE = noreturn, TREE_NOTHROW) and its own EH lowering: (1) the
@@ -82,7 +82,7 @@ T2-noreturn-tail; it is judged by the reach rule: w0 at the call must be a const
 V dataflow over a CFG where a call returns and clobbers the AAPCS64 caller-saved registers), else `reach-nonconstant`; the constant must be a
 fact of GATE_CACHE/reach/<git tree>/reach.facts.tsv (`fact_id<TAB>sha256`, written by the gate `reach`), else `reach-uncertified` (also
 when the file does not exist); a fact with no call site in the universe is `reach-stale`; any other reference to the symbol (address
-taken, in code or in data) is `reach-address-taken`. Assumption: the decoder's write sets (LLVM defs) name every register an instruction
+taken, in code or in data) is `reach-address-taken`. Assumption: the decoder's write sets (LLVM defs) name every register an instruction (ASM-045)
 writes (a missed write of x0 would make a constant wrong).
 
 CACHE. Per object, CACHE/objstub/<key>.json, key = sha256 of (analysis version = objstub.py + a64access.cc, object sha256, os_layer
@@ -491,7 +491,7 @@ def wine_sim(words, a, b, rels, obj, argn, zero):
     zero: that is the whole permitted use), ("S", k) (own-frame address), None (unknown: every other input, the registers clobbered by the call
     of WINE). Flags are four bits, each 0, 1 or None: comparing ARG with zero gives Z (and C, V) and leaves N unknown when ARG is non-zero; a
     branch or select that needs an unknown bit, any other instruction, any other use of ARG, a step budget of 4000: None (the function is
-    then not a simple body). The argument is a pointer: its low 32 bits (ILP32) or full register are tested alike (stated assumption)."""
+    then not a simple body). The argument is a pointer: its low 32 bits (ILP32) or full register are tested alike (stated assumption). (ASM-046)"""
     R, mem, fl, sp, o = [None] * 31, {}, [None] * 4, ("S", 0), a
     R[argn] = 0 if zero else ARG
     zarg = zero

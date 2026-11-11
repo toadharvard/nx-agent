@@ -8,7 +8,7 @@ needs real traffic, or an OS's own choice, is NOT answered: the model raises Not
 "ext-module-missing" naming the service. A guest address that is not readable / writable memory raises BadGuestMemory (a violated
 precondition of the header; the machine ends the run as a host-call fault). Never an invented value.
 
-Stated assumptions (each is a fact of the stage's model, not of the header):
+Stated assumptions (each is a fact of the stage's model, not of the header): (ASM-049, ASM-050, ASM-051, ASM-052)
   A1 handle numbers: the header says only that a handle is the descriptor number the bsd service returned and that the host keeps just the
      set of open ones (no numbering of its own, no "lowest free"). The stage's model chooses: the lowest number >= 3 that is not open (0..2
      are stdio); a number is reused after its close. Guest programs must not depend on it. SOCKET never fails for lack of room.

@@ -36,7 +36,7 @@ Argument: an expected value "comes from the code under test" when its declared s
 through it. Rules 2-5 leave four sources: a dump of the exe under the pinned Wine, text at a place that exists in a
 file, a contract table and a model, the last three outside everything the subject can load, and for product code never
 the product tree. The verdict is green only if certified == universe, so a test without such a source blocks the merge.
-Assumption (checked by verification, not by this gate): the declaration is true - the subject list is complete and
+Assumption (checked by verification, not by this gate): the declaration is true - the subject list is complete and (ASM-042)
 the test compares against the declared references. The after-merge verifier runs every test under verify/opentrace.py
 and compares the tracked files it opened with subject + references (verify/oraclecheck.py)."""
 import ast

@@ -14,7 +14,7 @@ unreadable or a cycle: `response-file-unreadable`). Output `STAGE: RULE detail [
 Declared dependencies, NOT checked here: "no_date_time_macros": {"checked_by": NAME} names the stage/gate proving the sources
 use no __DATE__/__TIME__ (VC9 has no switch); "coff_normalize"/"pe_normalize": the consumer normalizes time stamps
 (verify/coffnorm.py); a python script must itself pass puregate.
-ASSUMPTION A-env: external tools invoked this way are deterministic. It rests on each tool's reproducible-builds
+ASSUMPTION A-env: external tools invoked this way are deterministic. It rests on each tool's reproducible-builds (ASM-038)
 documentation; the gate enforces the invocation, it does not prove the tool.
 """
 import json

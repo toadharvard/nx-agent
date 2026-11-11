@@ -481,4 +481,4 @@ also a real run: no violation owned by S14),
 * Points 2-4 of the vtable proposal depend on S2 being able to read GCC's class layouts; virtual inheritance classes
   (68 sites) have different object layouts and need patches.
 * Image data written by the original code at runtime before our code runs (none: we run no original code) and
-  pointers into `.text` used as data (jump tables live in `.text` and are not needed) are assumed absent.
+  pointers into `.text` used as data (jump tables live in `.text` and are not needed) are assumed absent. (ASM-023)

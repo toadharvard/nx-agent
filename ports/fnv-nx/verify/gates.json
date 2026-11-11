@@ -50,6 +50,15 @@
    "result": "oracle.json"
   },
   {
+   "name": "assumptions",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_assumptions.py"
+   ],
+   "result": "assumptions.json"
+  },
+  {
    "name": "build",
    "argv": [
     "python3",

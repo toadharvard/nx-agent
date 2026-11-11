@@ -240,6 +240,18 @@
     "ports/fnv-nx/verify/fpbound.py"
    ]
   },
+  "test_gate_assumptions.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_assumptions.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_assumptions.py"
+   ]
+  },
   "test_gate_contract.py": {
    "references": [
     {

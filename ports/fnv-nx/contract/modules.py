@@ -19,7 +19,7 @@ Rules (each violated precondition is a stage error that lists everything it foun
             its slots are reported as without provider and its LoadLibrary fails).  `static` = in the exe's closure; the others
             are loadable on demand (loader: fnvnx_module_load).
   order     The Windows rule for static imports: depth first over the import directories in directory order, a module is
-            initialised after all modules it imports from.  Assumption (documented Windows behaviour): in a dependency
+            initialised after all modules it imports from.  Assumption (documented Windows behaviour): in a dependency (ASM-003)
             cycle the module visited first is initialised last, i.e. an edge back to a module still being visited is not
             followed.  The table order is this order for the static modules, followed by the on-demand ones sorted by name; it is the mapping order, the init order and the TLS-index order (the
             Windows loader numbers TLS indices in map order, which differs; the number is private to the loader and the
