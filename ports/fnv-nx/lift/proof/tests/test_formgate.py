@@ -1,16 +1,31 @@
 """Tests of proof/formgate.py on synthetic fixtures (byte strings written here, nothing derived from game data)."""
+import itertools
 import json
 import os
+import shutil
 import subprocess
 import sys
-import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROOF = os.path.join(HERE, '..')
-sys.path.insert(0, PROOF)
-import formgate
-import shape
+sys.path.insert(0, os.path.join(PROOF, '..'))
+from proof import formgate, shape
+
+WORK = os.environ.get('FNVNX_TEST_WORK', '/home/user/l3work/proof/test_work')     # declared input: the directory the fixtures are written below
+_SEQ = itertools.count()
+
+
+class workdir:
+    """a fresh empty directory WORK/formgate_<n> (n counts the uses in this process), removed on exit"""
+    def __enter__(self):
+        self.path = os.path.join(WORK, 'formgate_%d' % next(_SEQ))
+        shutil.rmtree(self.path, ignore_errors=True)
+        os.makedirs(self.path)
+        return self.path
+
+    def __exit__(self, *exc):
+        shutil.rmtree(self.path)
 
 MD = shape.decoder()
 MODEL = '55f87ab6d6b7d5b26ac0bf4481b3854acee5a5cf2e1d55d842195be6497884f4'
@@ -60,40 +75,40 @@ class Fixture:
 
 class FormGate(unittest.TestCase):
     def test_green(self):
-        with tempfile.TemporaryDirectory() as td:
+        with workdir() as td:
             f = Fixture(td, GOOD)
             self.assertEqual(formgate.check(f.shapes, f.certs, f.pins), (len(GOOD), len(GOOD), []))
 
     def test_wrong_dsl_sha_is_red(self):
-        with tempfile.TemporaryDirectory() as td:
+        with workdir() as td:
             f = Fixture(td, GOOD, dsl_override='0' * 64)
             f.write_pins()
             u, c, unc = formgate.check(f.shapes, f.certs, f.pins)
             self.assertEqual((u, c, len(unc)), (len(GOOD), 0, len(GOOD)))
 
     def test_missing_row_is_red(self):
-        with tempfile.TemporaryDirectory() as td:
+        with workdir() as td:
             k0 = key_of(GOOD[0])[0]
             f = Fixture(td, GOOD, certs_for={key_of(h)[0] for h in GOOD[1:]})
             u, c, unc = formgate.check(f.shapes, f.certs, f.pins)
             self.assertEqual((u, c, unc), (len(GOOD), len(GOOD) - 1, [k0]))
 
     def test_wrong_model_or_result_is_red(self):
-        with tempfile.TemporaryDirectory() as td:
+        with workdir() as td:
             f = Fixture(td, GOOD, model='f' * 64)
             self.assertEqual(formgate.check(f.shapes, f.certs, f.pins)[1], 0)
-        with tempfile.TemporaryDirectory() as td:
+        with workdir() as td:
             f = Fixture(td, GOOD, result='failed')
             self.assertEqual(formgate.check(f.shapes, f.certs, f.pins)[1], 0)
 
     def test_shape_without_builder_is_uncertified(self):
-        with tempfile.TemporaryDirectory() as td:
+        with workdir() as td:
             f = Fixture(td, GOOD + NOBUILD)
             u, c, unc = formgate.check(f.shapes, f.certs, f.pins)
             self.assertEqual((u, c, unc), (len(GOOD) + 1, len(GOOD), [key_of(NOBUILD[0])[0]]))
 
     def test_pin_mismatch_refuses(self):
-        with tempfile.TemporaryDirectory() as td:
+        with workdir() as td:
             f = Fixture(td, GOOD)
             f.write_pins(certs_sha='0' * 64)
             with self.assertRaises(formgate.PinError):
@@ -107,7 +122,7 @@ class FormGate(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(out, 'forms.json')))
 
     def test_shapes_tsv_tamper_refuses(self):
-        with tempfile.TemporaryDirectory() as td:
+        with workdir() as td:
             f = Fixture(td, GOOD)
             with open(os.path.join(f.shapes, 'modA', 'shapes.tsv'), 'a') as fh:
                 fh.write('c3/0.0.0.0\tint\tfk\t1\t00001000\n')
@@ -129,7 +144,7 @@ class FormGate(unittest.TestCase):
                    "    assert not any(m.split('.')[0] == 'z3' for m in sys.modules)\n"
                    "    raise\n" % os.path.join(PROOF, 'formgate.py'))
         for encs, status, rc in ((GOOD, 'green', 0), (GOOD + NOBUILD, 'red', 1)):
-            with tempfile.TemporaryDirectory() as td:
+            with workdir() as td:
                 f = Fixture(td, encs)
                 out = os.path.join(td, 'out')
                 os.makedirs(out)

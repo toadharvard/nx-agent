@@ -10,10 +10,9 @@ Result classes per instance: linked | MISMATCH | unlinked:<class> (symbuild fail
 symbolic Form, so the instance is NOT covered by a shape proof) | no-form (neither builder covers it) | other-family | shape-error.
 Also counted (assumption A-SEGLIM, shapeprove.py): relative targets whose non-wrapping value addr + size + sext(rel) leaves [0, 2^32): seglim-violations.
 Memory: the DSL interns every node, so the intern table and the per-shape cache are cleared every CHUNK instances (nodes are compared by serialization, not identity)."""
-import argparse, collections, json, os, re, sys, time
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(HERE, '..'))
-import forms, symform
-import shape as shp
+import argparse, collections, json, os, re, sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+from proof import forms, symform, shape as shp
 from fnvlift import dsl
 CHUNK = 20000
 
@@ -30,7 +29,7 @@ def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--image', required=True); ap.add_argument('--ranges', required=True); ap.add_argument('--proc', default='1/1')
     ap.add_argument('--out'); ap.add_argument('--limit', type=int); a = ap.parse_args(); k, n = [int(x) for x in a.proc.split('/')]
     from fnvlift import image
-    img = image.Image(a.image); md = shp.decoder(); T0 = time.time()
+    img = image.Image(a.image); md = shp.decoder()
     cnt = collections.Counter(); ex = collections.defaultdict(list); seen = set(); cache = {}; per_class = collections.Counter(); shapes_seen = set(); done = 0
     for ri, (lo, hi) in enumerate(ranges(a.ranges)):
         if ri % n != k - 1: continue
@@ -41,7 +40,7 @@ def main():
             if a.limit and done > a.limit: break
             if done % CHUNK == 0:
                 dsl._I.clear(); cache.clear(); dsl._M.clear()
-                print('%d instances, %.0fs, %s' % (done, time.time() - T0, dict(cnt)), file=sys.stderr, flush=True)
+                print('%d instances, %s' % (done, dict(cnt)), file=sys.stderr, flush=True)
             try: key = shp.shape_key(ins); fam = shp.family(ins)
             except shp.ShapeError: cnt['shape-error'] += 1; continue
             if fam != 'int': cnt['other-family'] += 1; continue
@@ -71,7 +70,7 @@ def main():
                         cnt['seglim-violations'] += 1; len(ex['seglim']) < 5 and ex['seglim'].append('%s@%x' % (raw.hex(), addr))
         else: continue
         break
-    res = dict(proc=a.proc, counts=dict(cnt), shapes=len(shapes_seen), examples={k_: v for k_, v in ex.items()}, seconds=round(time.time() - T0, 1))
+    res = dict(proc=a.proc, counts=dict(cnt), shapes=len(shapes_seen), examples={k_: v for k_, v in ex.items()})
     print(json.dumps(res)); a.out and json.dump(res, open(a.out, 'w'), indent=1)
     return 1 if cnt['MISMATCH'] else 0
 

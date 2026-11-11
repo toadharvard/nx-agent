@@ -3,9 +3,9 @@
   prove.py --model MODULE   per encoding: exists a pre-state with DSL post-state != reference post-state;  unsat = proved.  One line per FORM KEY
                             (all its encodings: the real ones of instest/result.json plus enc_table.py), then totals and gate_forms.json.
   prove.py --backends       emitted C++ (g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=undefined) agrees with the z3 term on N inputs (backends.py).
-Options: --only SUBSTR  --n 1000  --forms-dir DIR (alternative forms*.py, e.g. a deliberately broken copy)  --cert DIR  --timeout SEC  --all
+Options: --only SUBSTR  --n 1000  --cert DIR  --timeout SEC  --all   (a deliberately broken copy of forms*.py is proved by running the prove.py of a copy of the tree)
 Result per key: proved | FAILED(dsl) | FAILED(model-defect:ids) | model-gap | timeout  (worst over its encodings in that order of severity).
-Reference model plug-in: a module on sys.path (proof/ itself) with one function
+Reference model plug-in: a module of the MODELS table below (proof/model_sail.py) with one function
     model_post(code: bytes, pre: dict) -> dict
   pre  = {'regs': {'eax'..'edi': z3 BitVec(name,32)}, 'flags': {'cf','pf','af','zf','sf','of': z3 BitVec(name,1)},
           'mem': z3 Array(BV32->BV8) named 'mem', 'eip': BitVecVal(0x401000,32)}      (code is ONE instruction)
@@ -15,11 +15,12 @@ Reference model plug-in: a module on sys.path (proof/ itself) with one function
 Faults: a form with fault(DE) is compared on the pre-states where the DSL does not fault; additionally (1) assume => DSL does not fault, and (2) for forms
   without a memory operand, DSL does not fault => assume (the model faults exactly where the DSL does).  The model's DE paths are tolerated for such forms only.
 Unobserved: the model interface returns neither DF nor the other EFLAGS bits; a form writing them is certified on its other fields only and reported model-gap."""
-import argparse, hashlib, importlib, json, os, re, sys, time
-HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(HERE, '..'))
+import argparse, hashlib, json, os, re, sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import z3
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32
-import universe, defects, rewrite
+from proof import universe, defects, rewrite, forms, enc_table, model_sail, backends
+MODELS = {'model_sail': model_sail}      # the reference models --model can name
 ADDR = 0x401000
 REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'); FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
 RFO = z3.BitVec('rflags_other', 32)
@@ -29,15 +30,8 @@ SEVERITY = ['FAILED(dsl)', 'timeout', 'FAILED(model-defect)', 'model-gap', 'prov
 class Perm(set):                      # tolerated model faults for forms with fault(DE): the divide error paths
     def __ge__(self, other): return all(re.match(r'\(!!FAULT-FRESH :DE |:(UN)?SIGNED-DIVIDE', m) or m in self for m in other)
 
-def load_forms(forms_dir):
-    if forms_dir:
-        sys.path.insert(0, os.path.abspath(forms_dir))
-        for m in [m for m in sys.modules if m.startswith('forms')]: del sys.modules[m]
-    import forms; return forms
-
 def items(forms, args):
     """[(key, source, F or None, bytes, width, error)] : real encodings of every in-scope key, then enc_table.py extras"""
-    import enc_table
     cs = Cs(CS_ARCH_X86, CS_MODE_32); cs.detail = True; keys, real = universe.load(); out = []
     def add(b, src, key=None):
         ins = list(cs.disasm(b, ADDR))
@@ -126,19 +120,19 @@ def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     return 'proved', '', extra
 
 def prove(args):
-    forms = load_forms(args.forms_dir); mod = importlib.import_module(args.model); os.makedirs(args.cert, exist_ok=True)
-    base_keys, its = items(forms, args); T0 = time.time(); per = {}; order = []
+    mod = MODELS[args.model]; os.makedirs(args.cert, exist_ok=True)
+    base_keys, its = items(forms, args); per = {}; order = []
     for key, src, F, b, w, err in its:
-        e = per.setdefault(key, {'src': src, 'enc': [], 'builds': 0, 'w': w, 'dt': 0.0, 'notes': []})
+        e = per.setdefault(key, {'src': src, 'enc': [], 'builds': 0, 'w': w, 'notes': []})
         if key not in order: order.append(key)
         if F is None: e['notes'].append('%s %s: %s' % (b.hex(), src, err)); continue
-        e['builds'] += 1; t0 = time.time(); extra = {}
+        e['builds'] += 1; extra = {}
         try: res, note, extra = prove_one(mod, F, b, key, args)
         except Exception as ex:
             if type(ex).__name__ != 'ModelGap': raise
             res, note = 'model-gap', 'GAP ' + str(ex)[:110]
-        dt = time.time() - t0; e['enc'].append((res, b.hex())); e['dt'] += dt; note and e['notes'].append('%s: %s' % (b.hex(), note[:230]))
-        json.dump(dict(form=key, encoding=b.hex(), result=res, dsl_sha256=F.sha(), z3=z3.get_version_string(), model=args.model, seconds=round(dt, 3), note=note, **extra),
+        e['enc'].append((res, b.hex())); note and e['notes'].append('%s: %s' % (b.hex(), note[:230]))
+        json.dump(dict(form=key, encoding=b.hex(), result=res, dsl_sha256=F.sha(), z3=z3.get_version_string(), model=args.model, note=note, **extra),
                   open(os.path.join(args.cert, '%s_%s.json' % (re.sub(r'[^\w-]', '_', key), b.hex())), 'w'))
     tot = {k: 0 for k in ('proved', 'FAILED(dsl)', 'FAILED(model-defect)', 'model-gap', 'timeout')}; status = {}; missing = []
     for key in order:
@@ -151,12 +145,11 @@ def prove(args):
             if res.startswith('FAILED(model-defect'): res = 'FAILED(model-defect:%s)' % ','.join(ids)
             tot[res if res in tot else 'FAILED(model-defect)'] += 1
         status[key] = res
-        print('%s %d %s %s %.2f n=%d' % (key, e['w'], e['enc'][0][1] if e['enc'] else '-', res, e['dt'], len(e['enc'])))
+        print('%s %d %s %s n=%d' % (key, e['w'], e['enc'][0][1] if e['enc'] else '-', res, len(e['enc'])))
         for n in e['notes'][:2]: res != 'proved' and print('   ' + n)
     scope = [k for k in order if k in base_keys]; hasf = [k for k in order if per[k]['builds']]
-    slow = max(order, key=lambda k: per[k]['dt'])
-    print('TOTAL keys=%d with_dsl_form=%d proved=%d FAILED(dsl)=%d FAILED(model-defect)=%d model-gap=%d timeout=%d seconds=%.1f slowest=%s %.1fs' % (
-        len(order), len(hasf), tot['proved'], tot['FAILED(dsl)'], tot['FAILED(model-defect)'], tot['model-gap'], tot['timeout'], time.time() - T0, slow, per[slow]['dt']))
+    print('TOTAL keys=%d with_dsl_form=%d proved=%d FAILED(dsl)=%d FAILED(model-defect)=%d model-gap=%d timeout=%d' % (
+        len(order), len(hasf), tot['proved'], tot['FAILED(dsl)'], tot['FAILED(model-defect)'], tot['model-gap'], tot['timeout']))
     print('in-scope keys (result.json)=%d  without a DSL form: %s' % (len(scope), [k for k in scope if k in missing]))
     cert = [k for k in order if status[k] == 'proved']
     json.dump({'schema': 'fnvnx-gate/1', 'name': 'l3.forms.int', 'status': 'green' if not (tot['FAILED(dsl)'] or tot['timeout'] or [k for k in scope if k in missing]) else 'red',
@@ -165,11 +158,11 @@ def prove(args):
     return tot['FAILED(dsl)'] + tot['timeout']
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser(); ap.add_argument('--model'); ap.add_argument('--backends', action='store_true'); ap.add_argument('--only')
-    ap.add_argument('--n', type=int, default=1000); ap.add_argument('--forms-dir'); ap.add_argument('--cert', default='/home/user/l3work/proof')
+    ap = argparse.ArgumentParser(); ap.add_argument('--model', choices=sorted(MODELS)); ap.add_argument('--backends', action='store_true'); ap.add_argument('--only')
+    ap.add_argument('--n', type=int, default=1000); ap.add_argument('--cert', default='/home/user/l3work/proof')
     ap.add_argument('--timeout', type=float, default=180); ap.add_argument('--all', action='store_true'); ap.add_argument('--work', default='/home/user/l3work/proof/backends')
     a = ap.parse_args()
     if a.backends:
-        import backends; sys.exit(1 if backends.run(a, load_forms(a.forms_dir), items, post_of) else 0)
+        sys.exit(1 if backends.run(a, forms, items, post_of) else 0)
     if not a.model: sys.exit('prove.py: give --model MODULE (reference model plug-in, see the docstring) or --backends')
     sys.exit(1 if prove(a) else 0)

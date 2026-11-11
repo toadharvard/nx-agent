@@ -17,18 +17,11 @@ Control transfer is derived from the Form's eip node by structure: constant == n
 (the Form's esp/store effects) and uses f_flow.call_xfer, anything else f_flow.jump_to; ite(c, constant T, next) -> `if (c) jump_to(T)` (jcc, jecxz,
 loop*, and the step repeat of rep string forms, whose eip is `ite(more, this address, next)`: a goto to the instruction's own label); any other
 expression (indirect jmp / call, ret) -> f_flow.jmp_indirect / call_xfer / ret_xfer with the C text of the node, the kind chosen by the mnemonic."""
-import os
-import sys
-
 from .core import CC, SKIP, SUB, Unsupported
 from . import f_flow
 from . import dsl
 
-_PROOF = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'proof')
-if _PROOF not in sys.path:
-    sys.path.insert(0, _PROOF)
-import forms                                                        # noqa: E402  (proof/forms.py: the Form builders)
-import forms_alu, forms_flow, forms_move                             # noqa: E402,F401  (register their handlers in forms.H)
+from proof import forms, forms_alu, forms_flow, forms_move             # noqa: F401  (proof/forms.py: the Form builders; forms_* register their handlers in forms.H)
 
 FAULT = {1: 'DE', 2: 'BP', 3: 'UD'}
 STATE = {'df': 'df', 'fs_base': 'fsb', 'flo': '(c->eflx|0x200u)'}      # Form pre-state variables besides the registers and the five flags
@@ -49,7 +42,7 @@ def varc(cx):
             raise Unsupported('segment')
         if name == 'fs_base':
             cx.usesfs = True
-        if name in forms.REGS or name in SIXFLAGS or name in STATE:
+        if name in dsl.REGS or name in SIXFLAGS or name in STATE:
             return STATE.get(name, name)
         raise Unsupported('form variable ' + name)
     return v
