@@ -61,6 +61,7 @@ def main(argv):
         err.write_text(text, errors='replace')
         return i, False, first_error(text)
 
+    equiv.gen_dir()                            # the generated headers exist before the pool's threads need them
     try:
         with ThreadPoolExecutor(a.jobs) as ex:
             res = list(ex.map(one, sel))
