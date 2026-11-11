@@ -3,7 +3,7 @@
     python3 -I tests/l6/dkcore/test_dkcore.py [--no-mutations]     needs gcc, the devkitA64 cross compiler and libnx / deko3d headers (FNVNX_DK,
                                                                    default /home/user/work/l6/dk)
  a  static: each .c <= 300 lines; no stub-class words and no empty function body in the product files; nxdk_guest_ptr is not defined (not even weak)
- b  cross build (aarch64, -Werror) by build_dk.sh; the undefined symbols after linking the two objects are exactly the embedder hooks, the
+ b  cross build (aarch64, -Werror) by build_dk.sh; the undefined symbols after linking the three objects (dk_core, dk_swap, dk_shader) are exactly the embedder hooks, the
     handlers of files not written yet, and library calls (dk* / nwindow* / vi* / event* / libc); the defined handlers are exactly this task's
  c  host run of the real product files under ASan + UBSan (no recovery) against a recording double of the deko3d / libnx calls (host_main.c):
     every check line 1, the exact number of checks, the named checks present
@@ -25,11 +25,12 @@ MUST_NAMES = ["create_ok", "device_flags", "swap_layout", "front_layout", "swap_
               "interval_4", "interval_5_bad", "depth_image_bad", "src_overflow_bad", "cursor_big_bad", "present_null_struct_bad", "wait_vblank_ok",
               "wait_vblank_bad_output", "destroy_order", "destroy_balanced", "noswap_present_bad", "noswap_balanced", "device_fail_reported",
               "vi_fail_reported"]
-PENDING = {"nxdk_shader_create", "nxdk_shader_destroy", "nxdk_shader_create_d3d", "nxdk_submit", "nxdk_wait_frame", "nxdk_query_result", "nxdk_present_compose"}
-EMBEDDER = {"nxdk_guest_ptr", "nxdk_on_present"}
+PENDING = {"nxdk_submit", "nxdk_wait_frame", "nxdk_query_result", "nxdk_present_compose"}
+EMBEDDER = {"nxdk_guest_ptr", "nxdk_on_present", "nxdk_shader_pack"}
 HANDLERS = {"nxdk_mem_create", "nxdk_mem_gpu_addr", "nxdk_mem_destroy", "nxdk_present", "nxdk_wait_vblank", "nxdk_shutdown", "nxdk_image_create", "nxdk_image_create4",
-            "nxdk_image_destroy", "nxdk_image_read", "nxdk_readback", "nxdk_sampler_create", "nxdk_sampler_update", "nxdk_img"}
-LIBC = {"memset", "memcpy", "snprintf", "vsnprintf", "malloc", "free", "calloc", "memcmp", "memmove"}
+            "nxdk_image_destroy", "nxdk_image_read", "nxdk_readback", "nxdk_sampler_create", "nxdk_sampler_update", "nxdk_img",
+            "nxdk_shader_create", "nxdk_shader_destroy", "nxdk_shader_create_d3d"}
+LIBC = {"memset", "memcpy", "snprintf", "vsnprintf", "malloc", "free", "calloc", "memcmp", "memmove", "strncmp", "strcmp"}
 LIBCALL = re.compile(r"^(dk|nwindow|vi|event)[A-Z]\w*$")
 FORBID = re.compile(r"stub|todo|not implemented|placeholder|fallback|no-op|noop|weak", re.I)
 

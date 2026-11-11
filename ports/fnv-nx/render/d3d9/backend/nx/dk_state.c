@@ -17,22 +17,16 @@ static const DkBlendFactor BF[NxBf_Count] = {
     BFS(DstAlpha, DstAlpha), BFS(InvDstAlpha, InvDstAlpha), BFS(DstColor, DstColor), BFS(InvDstColor, InvDstColor),
     BFS(SrcAlphaSat, SrcAlphaSaturate), BFS(ConstColor, ConstColor), BFS(InvConstColor, InvConstColor), BFS(Src1Color, Src1Color),
     BFS(InvSrc1Color, InvSrc1Color)};
-/* the factor an Nx factor means in an alpha slot (A2), as the canonical Nx factor of that meaning */
-static const uint8_t AM[NxBf_Count] = {
-    [NxBf_Zero] = NxBf_Zero, [NxBf_One] = NxBf_One, [NxBf_SrcColor] = NxBf_SrcAlpha, [NxBf_InvSrcColor] = NxBf_InvSrcAlpha,
-    [NxBf_SrcAlpha] = NxBf_SrcAlpha, [NxBf_InvSrcAlpha] = NxBf_InvSrcAlpha, [NxBf_DstAlpha] = NxBf_DstAlpha, [NxBf_InvDstAlpha] = NxBf_InvDstAlpha,
-    [NxBf_DstColor] = NxBf_DstAlpha, [NxBf_InvDstColor] = NxBf_InvDstAlpha, [NxBf_SrcAlphaSat] = NxBf_One, [NxBf_ConstColor] = NxBf_ConstColor,
-    [NxBf_InvConstColor] = NxBf_InvConstColor, [NxBf_Src1Color] = NxBf_Src1Color, [NxBf_InvSrc1Color] = NxBf_InvSrc1Color};
 static const DkFace CULL[3] = {[NxCull_None] = DkFace_None, [NxCull_CW] = DkFace_Front, [NxCull_CCW] = DkFace_Back};
 static const DkPolygonMode FILL[3] = {[NxFill_Solid] = DkPolygonMode_Fill, [NxFill_Wireframe] = DkPolygonMode_Line, [NxFill_Point] = DkPolygonMode_Point};
 static const DkWrapMode WRAP[5] = {[NxWrap_Repeat] = DkWrapMode_Repeat, [NxWrap_Mirror] = DkWrapMode_MirroredRepeat, [NxWrap_Clamp] = DkWrapMode_ClampToEdge,
                                    [NxWrap_Border] = DkWrapMode_ClampToBorder, [NxWrap_MirrorOnce] = DkWrapMode_MirrorClampToEdge};
 static const DkMipFilter MIP[3] = {[NxMip_None] = DkMipFilter_None, [NxMip_Nearest] = DkMipFilter_Nearest, [NxMip_Linear] = DkMipFilter_Linear};
-_Static_assert(N(BF) == NxBf_Count && N(AM) == NxBf_Count && N(BOP) == 5 && N(CULL) == 3 && N(FILL) == 3 && N(WRAP) == 5 && N(MIP) == 3, "an ABI enum changed");
+_Static_assert(N(BF) == NxBf_Count && N(BOP) == 5 && N(CULL) == 3 && N(FILL) == 3 && N(WRAP) == 5 && N(MIP) == 3, "an ABI enum changed");
 _Static_assert(NxCull_CCW == 2 && NxFill_Point == 2 && NxWrap_MirrorOnce == 4 && NxMip_Linear == 2 && NxBop_Max == 4 && NxBf_Count == 15, "an ABI enum changed");
 
 #define F(w, shift, bits) NXRS_GET(w, shift, bits)
-static int fail(void* o, size_t n, int e) { memset(o, 0, n); return e; }
+static int fail(int e) { return e; }   /* every error path precedes the first write: the entry memset already leaves *out all zero */
 static int ms_mode(uint32_t samples, DkMsMode* m) {
     switch (samples) {
     case 1: *m = DkMsMode_1x; return 0;
@@ -50,8 +44,8 @@ int nxdk_state(const NxRenderState* rs, uint32_t samples, NxDkState* o) {
     uint32_t cull = F(w2, NXRS_R_CULL, 2), fill = F(w2, NXRS_R_FILL, 2);
     int on = F(w0, NXRS_B_ENABLE, 1);
     if ((on && (sf >= NxBf_Count || df >= NxBf_Count || saf >= NxBf_Count || daf >= NxBf_Count || op > NxBop_Max || opa > NxBop_Max)) ||
-        cull > NxCull_CCW || fill > NxFill_Point || (w3 >> 4 & 0x0FFFFFFF) != 0) return fail(o, sizeof *o, NXDK_E_FIELD);
-    if (ms_mode(samples, &o->derived.msMode)) return fail(o, sizeof *o, NXDK_E_SAMPLES);
+        cull > NxCull_CCW || fill > NxFill_Point || (w3 >> 4 & 0x0FFFFFFF) != 0) return fail(NXDK_E_FIELD);
+    if (ms_mode(samples, &o->derived.msMode)) return fail(NXDK_E_SAMPLES);
     if (!(w3 >> NXRS_M_MSAA & 1)) o->derived.msMode = DkMsMode_1x;
     /* rasterizer */
     o->rast.rasterizerEnable = 1;
@@ -73,7 +67,7 @@ int nxdk_state(const NxRenderState* rs, uint32_t samples, NxDkState* o) {
         uint32_t m = F(w0, NXRS_B_MASK(rt), 4), d = (m & 1 ? DkColorMask_R : 0) | (m & 2 ? DkColorMask_G : 0) | (m & 4 ? DkColorMask_B : 0) | (m & 8 ? DkColorMask_A : 0);
         o->write.masks = (o->write.masks & ~(0xFu << 4 * rt)) | d << 4 * rt;
     }
-    /* blend (the fields are ignored when blending is off, as in GL) */
+    /* blend (the fields are ignored when blending is off, as in GL; the patched deko3d, toolchain/deko3d/0001, writes FuncAlphaDst from dstAlphaBlendFactor) */
     o->blend.colorBlendOp = o->blend.alphaBlendOp = DkBlendOp_Add;
     o->blend.srcColorBlendFactor = o->blend.srcAlphaBlendFactor = DkBlendFactor_One;
     o->blend.dstColorBlendFactor = o->blend.dstAlphaBlendFactor = DkBlendFactor_Zero;
@@ -81,7 +75,6 @@ int nxdk_state(const NxRenderState* rs, uint32_t samples, NxDkState* o) {
         o->blend.colorBlendOp = BOP[op]; o->blend.alphaBlendOp = BOP[opa];
         o->blend.srcColorBlendFactor = BF[sf]; o->blend.dstColorBlendFactor = BF[df];
         o->blend.srcAlphaBlendFactor = BF[saf]; o->blend.dstAlphaBlendFactor = BF[daf];
-        if (opa != NxBop_Min && opa != NxBop_Max && AM[daf] != AM[df]) return fail(o, sizeof *o, NXDK_E_BLEND_ALPHA_DST);   /* A3 */
     }
     /* depth / stencil: GL writes depth only while the depth test is on; Always / Keep when a test is off */
     int st = F(w1, NXRS_S_ENABLE, 1), dt = F(w1, NXRS_D_TEST, 1);
@@ -102,7 +95,7 @@ int nxdk_state(const NxRenderState* rs, uint32_t samples, NxDkState* o) {
 int nxdk_dyn(const NxRenderState* rs, const NxDynamicState* d, uint32_t samples, NxDkDyn* o) {
     DkMsMode m;
     memset(o, 0, sizeof *o);
-    if (ms_mode(samples, &m)) return fail(o, sizeof *o, NXDK_E_SAMPLES);
+    if (ms_mode(samples, &m)) return fail(NXDK_E_SAMPLES);
     memcpy(o->blendConst, d->blendConstant, sizeof o->blendConst);
     o->stencilReadMask = F(rs->w[1], NXRS_S_READMASK, 8); o->stencilWriteMask = F(rs->w[1], NXRS_S_WRITEMASK, 8); o->stencilRef = F(rs->w[1], NXRS_S_REF, 8);
     o->biasConstant = d->depthBiasUnits; o->biasClamp = 0.0f; o->biasSlope = d->depthBiasSlope;
@@ -115,8 +108,8 @@ int nxdk_sampler(const NxSamplerState* s, DkSampler* o, uint32_t* srgbView) {
     uint32_t mip = s->filter >> NXSMP_MIP_SHIFT & 3, w[3] = {s->wrap & 7u, s->wrap >> 3 & 7u, s->wrap >> 6 & 7u};
     memset(o, 0, sizeof *o); *srgbView = 0;
     if (mip > NxMip_Linear || (s->filter & 0xC0) || (s->wrap >> 9) || s->pad[0] || s->pad[1] || w[0] > NxWrap_MirrorOnce || w[1] > NxWrap_MirrorOnce || w[2] > NxWrap_MirrorOnce)
-        return fail(o, sizeof *o, NXDK_E_FIELD);
-    if (s->minLod > 15 || s->maxLod > 15 || !(s->lodBias >= -15.0f && s->lodBias <= 15.0f)) return fail(o, sizeof *o, NXDK_E_RANGE);
+        return fail(NXDK_E_FIELD);
+    if (s->minLod > 15 || s->maxLod > 15 || !(s->lodBias >= -15.0f && s->lodBias <= 15.0f)) return fail(NXDK_E_RANGE);
     o->minFilter = (s->filter & NXSMP_MIN_LINEAR) ? DkFilter_Linear : DkFilter_Nearest;
     o->magFilter = (s->filter & NXSMP_MAG_LINEAR) ? DkFilter_Linear : DkFilter_Nearest;
     o->mipFilter = MIP[mip];

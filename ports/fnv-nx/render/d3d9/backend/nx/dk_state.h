@@ -2,18 +2,18 @@
  *
  * Rule: every function is pure and total. Each ABI enum / bitfield value has a row (tables sized by _Static_assert on the Nx enum
  * counts; tests/l6/dkstate enumerates every value against the GL reference gl4_state.c / gl4_sampler.c). A value that the ABI
- * allows and deko3d cannot express is an error code, never a dropped or approximated field. On any error *out is all zero.
- * Error precedence (first that applies): NXDK_E_FIELD, NXDK_E_SAMPLES, NXDK_E_BLEND_ALPHA_DST / NXDK_E_RANGE.
+ * allows and deko3d cannot express is an error code, never a dropped or approximated field. On any error *out is all zero (cleared on entry).
+ * Error precedence (first that applies): NXDK_E_FIELD, NXDK_E_SAMPLES, NXDK_E_RANGE.
  * The caller reports an error through nxchk_err (nxgpu4_check.h).
  *
  * Assumptions (stated, not proven here):
  *   A1 the device is created with the upper-left window origin, so DkFrontFace_CW is the on-screen CW of the y-down window space (state.h);
  *   A2 the blend unit applies a factor per channel with the GL meaning, so a colour factor in an alpha slot means its alpha component
- *      and SrcAlphaSat in an alpha slot is 1 (GL 4.5 section 17.3.8);
- *   A3 Min / Max ignore the factors (GL), so the dst-alpha factor of an alpha op Min / Max is irrelevant;
- *   A4 DkMsMode_1x on a multisampled target is GL_MULTISAMPLE off (gpu_3d_ms.cpp: MultisampleEnable = mode || rasterizerMode);
- *   A5 anisotropy is quantised by the hardware (tsc_generate.cpp anisoTable), which GL_EXT_texture_filter_anisotropic permits;
- *   A6 the sRGB border colour is encoded by deko3d (tsc_generate.cpp floatToSrgb8) so that the sampled border equals the linear value. */
+ *      and SrcAlphaSat in an alpha slot is 1 (GL 4.5 section 17.3.8); all 15 x 15 dst colour / dst alpha factor pairs are expressible
+ *      because the linked libdeko3d carries toolchain/deko3d/0001-blend-alpha-dst-factor.patch (FuncAlphaDst from dstAlphaBlendFactor);
+ *   A3 DkMsMode_1x on a multisampled target is GL_MULTISAMPLE off (gpu_3d_ms.cpp: MultisampleEnable = mode || rasterizerMode);
+ *   A4 anisotropy is quantised by the hardware (tsc_generate.cpp anisoTable), which GL_EXT_texture_filter_anisotropic permits;
+ *   A5 the sRGB border colour is encoded by deko3d (tsc_generate.cpp floatToSrgb8) so that the sampled border equals the linear value. */
 #ifndef FNVNX_DK_STATE_H
 #define FNVNX_DK_STATE_H
 #include <stdint.h>
@@ -28,9 +28,7 @@ enum NxDkErr {
     NXDK_OK = 0,
     NXDK_E_FIELD = 1,           /* a field value outside its ABI enum, or a reserved bit set */
     NXDK_E_SAMPLES = 2,         /* the target sample count is not 1, 2, 4 or 8 */
-    NXDK_E_BLEND_ALPHA_DST = 3, /* dkCmdBufBindBlendStates writes FuncAlphaDst from dstColorBlendFactor (gpu_3d_state.cpp:130), so a
-                                   dst-alpha factor whose alpha meaning differs from the dst-colour factor's cannot be expressed */
-    NXDK_E_RANGE = 4            /* sampler lod clamp > 15 (tsc_generate.cpp:66-67) or lodBias NaN / outside [-15, 15] (tsc_generate.cpp:87) */
+    NXDK_E_RANGE = 3            /* sampler lod clamp > 15 (tsc_generate.cpp:66-67) or lodBias NaN / outside [-15, 15] (tsc_generate.cpp:87) */
 };
 
 /* Properties deko3d applies elsewhere; the caller applies each where noted. */

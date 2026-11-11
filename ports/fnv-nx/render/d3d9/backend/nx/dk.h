@@ -120,6 +120,8 @@ extern NxDk nxdk;
 /* ---- provided by the embedder ---------------------------------------------------------------------------------------------- */
 void* nxdk_guest_ptr(uint64_t addr, uint64_t len);
 void nxdk_on_present(uint32_t frame);
+/* the install-time shader pack (translated.nxsp, NXSP v1) read into memory: the bytes and their size, NULL when none is installed. No default: a build without the embedder does not link (dk_shader.c). */
+const void* nxdk_shader_pack(uint64_t* size);
 
 /* ---- dk_core.c ---------------------------------------------------------------------------------------------------------------- */
 const NxGpuApi4* nxdk_create(uint32_t width, uint32_t height, char* err, size_t errlen);   /* NULL = failed, nothing stays allocated */
@@ -181,6 +183,8 @@ uint64_t nxdk_readback(uint64_t a);
 uint64_t nxdk_shader_create(uint64_t a);         /* dk_shader.c */
 uint64_t nxdk_shader_destroy(uint64_t a);
 uint64_t nxdk_shader_create_d3d(uint64_t a);
+const DkShader* nxdk_shader(uint32_t id);   /* NULL = not a live shader (dk_shader.c) */
+void nxdk_shader_release_all(void);        /* destroys every code block; nxdk_destroy must call it before the device goes (dkDeviceDestroy) */
 uint64_t nxdk_submit(uint64_t a);                /* dk_stream.c */
 uint64_t nxdk_wait_frame(uint64_t a);
 uint64_t nxdk_query_result(uint64_t a, uint64_t b, uint64_t c);   /* dk_query.c */
