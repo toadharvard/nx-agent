@@ -193,12 +193,12 @@ static void ui_init_l(void)
 {
     if (g_desk.magic)
         return;
-    static const struct { const char *name; int cbwnd; } sys[] = {
-        { "Button", 0 }, { "Static", 0 }, { "Edit", 0 }, { "ComboBox", 0 }, { "ListBox", 0 }, { "ScrollBar", 0 },
-        { "#32770", 30 /* DLGWINDOWEXTRA */ }, { "#32769", 0 } };
-    wclass *dc = NULL;
-    for (const auto &e : sys)
-        dc = new_class_l(e.name, NULL, 0, 0, e.cbwnd, NULL, 1);   /* the last one is the desktop's */
+    /* The desktop's class is the only predefined class the platform has. BUTTON, STATIC, EDIT, COMBOBOX, LISTBOX, SCROLLBAR,
+     * MDICLIENT and #32770 are NOT registered: their window procedures (the full message contract of each control) are not
+     * implemented, and a class that only forwarded to DefWindowProc would be a window that looks like a control and is not
+     * one. CreateWindowEx of such a class fails with ERROR_CANNOT_FIND_WND_CLASS (1407), the documented answer for a class
+     * that is not registered. */
+    wclass *dc = new_class_l("#32769", NULL, 0, 0, 0, NULL, 1);
     g_desk.cls = dc;
     g_desk.style = S_POPUP | S_VISIBLE;
     g_desk.wr.right = g_desk.rr.right = fnvnx_display_w();

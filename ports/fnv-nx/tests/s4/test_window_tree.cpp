@@ -177,12 +177,10 @@ TEST(wt_classes)
     CHECK(reg("WtCls2") != b);                            /* atoms are not reused */
     UnregisterClassA("WtCls2", T_INSTANCE);
 
-    /* the predefined control classes */
-    HWND bt = CreateWindowExA(0, "Button", "ok", T_POPUP, 0, 0, 40, 20, NULL, NULL, T_INSTANCE, NULL);
-    CHECK(bt != NULL);
-    CHECK_EQ(GetClassNameA(bt, buf, sizeof buf), 6);
-    CHECK_STR(buf, "Button");
-    CHECK(DestroyWindow(bt));
+    /* the predefined control classes are not registered (their window procedures are not implemented): not found, 1407 */
+    SetLastError(0);
+    CHECK(CreateWindowExA(0, "Button", "ok", T_POPUP, 0, 0, 40, 20, NULL, NULL, T_INSTANCE, NULL) == NULL);
+    CHECK_EQ(GetLastError(), 1407);
 }
 
 TEST(wt_rect_rule)
@@ -675,11 +673,10 @@ TEST(wt_integer_atoms_and_initial_state)
     CHECK(UnregisterClassA("#200", T_INSTANCE));
     CHECK(!UnregisterClassA("#100", T_INSTANCE));
     CHECK_EQ(GetLastError(), 1411);
-    /* the predefined dialog class is the integer atom 0x8002 */
-    HWND d = CreateWindowExA(0, "#32770", "d", T_POPUP, 0, 0, 5, 5, NULL, NULL, T_INSTANCE, NULL);
-    CHECK(d != NULL);
-    CHECK_EQ(GetClassLongA(d, -32), 0x8002);
-    DestroyWindow(d);
+    /* the predefined dialog class (#32770) is not registered either */
+    SetLastError(0);
+    CHECK(CreateWindowExA(0, "#32770", "d", T_POPUP, 0, 0, 5, 5, NULL, NULL, T_INSTANCE, NULL) == NULL);
+    CHECK_EQ(GetLastError(), 1407);
 
     /* WS_MINIMIZE / WS_MAXIMIZE at creation: the state ShowWindow(SW_SHOWMINIMIZED / SW_SHOWMAXIMIZED) gives */
     reg("WtInit");
