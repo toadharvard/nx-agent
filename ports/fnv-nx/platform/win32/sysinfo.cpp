@@ -6,10 +6,6 @@
 #include <stdlib.h>
 
 /* ---- directories (P5): the one source; the environment block derives its paths from here */
-static const char SYS_DIR[] = "C:\\Windows\\system32";
-static const char WIN_DIR[] = "C:\\Windows";
-const char *w32_system_dir(void) { return SYS_DIR; }
-const char *w32_windows_dir(void) { return WIN_DIR; }
 
 /* GetSystemDirectory / GetWindowsDirectory: the length without the NUL when the string fits with its NUL, else the
  * size needed with it */
@@ -23,8 +19,8 @@ static UINT dir_out(const char *d, LPSTR buf, UINT n)
     return len;
 }
 
-extern "C" UINT GetSystemDirectoryA(LPSTR buf, UINT n) { return dir_out(SYS_DIR, buf, n); }
-extern "C" UINT GetWindowsDirectoryA(LPSTR buf, UINT n) { return dir_out(WIN_DIR, buf, n); }
+extern "C" UINT GetSystemDirectoryA(LPSTR buf, UINT n) { return dir_out(W32_SYS_DIR, buf, n); }
+extern "C" UINT GetWindowsDirectoryA(LPSTR buf, UINT n) { return dir_out(W32_WIN_DIR, buf, n); }
 
 /* ---- version: Windows 7 SP1 */
 struct w32_osvi { DWORD dwOSVersionInfoSize, dwMajorVersion, dwMinorVersion, dwBuildNumber, dwPlatformId; char szCSDVersion[128]; };

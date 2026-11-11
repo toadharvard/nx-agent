@@ -9,6 +9,10 @@
  */
 #include "os.h"
 
+/* os_cpu_count, os_vm_page_size, os_default_root, os_fs_case_insensitive: manifest/env_const.tsv (os_default_root = FNVNX_SD_DIR,
+ * toolchain/include/fnvnx/sdlayout.h) */
+#include "env_const_horizon.gen.inc"
+
 #include <switch/types.h>
 #include <switch/result.h>
 #include <switch/arm/counter.h>
@@ -46,7 +50,6 @@ void os_exit_process(int code)
     exit(code);
 }
 
-unsigned os_cpu_count(void) { return 3; } /* application cores 0-2; core 3 belongs to the system */
 
 uint32_t os_process_id(void)
 {
@@ -448,7 +451,6 @@ void os_dir_close(os_dir *d)
     }
 }
 
-int os_fs_case_insensitive(void) { return 1; } /* SD card: FAT32/exFAT fold case */
 
 /* ---- virtual memory: reservations are carved from the alias region (first fit over a small table),
  * commit/decommit map/unmap physical memory there (pages come back zero-filled from the kernel). */
@@ -458,7 +460,6 @@ static int g_vm_n;
 static uintptr_t g_alias_base, g_alias_end;
 static os_lock_t g_vm_lock;
 
-size_t os_vm_page_size(void) { return 0x1000; }
 
 static int vm_init(void)
 {
@@ -555,4 +556,3 @@ int os_vm_protect(void *addr, size_t size, int os_prot)
     return R_FAILED(svcSetMemoryPermission(addr, (u64)size, perm)) ? -OS_EINVAL : 0;
 }
 
-const char *os_default_root(void) { return "sdmc:/switch/fnv"; }   /* = FNVNX_SD_DIR (toolchain/include/fnvnx/sdlayout.h) */

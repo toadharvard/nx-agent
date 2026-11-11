@@ -39,10 +39,20 @@ $(OUT)/%.c.o: $(ROOT)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_) -c $< -o $@
 
-# platform/win32/env_const.gen.inc: the constant-result imports, generated from platform/manifest/env_const.tsv
-$(P)/win32/env_const.gen.inc: $(P)/manifest/env_const.tsv $(P)/manifest/gen_env_const.py
+# the constant-result functions (platform/manifest/env_const.tsv), generated per source file that includes them
+ENV_GEN := $(P)/win32/env_const.gen.inc $(P)/crt/env_const.gen.inc $(P)/os/env_const_posix.gen.inc $(P)/os/env_const_horizon.gen.inc
+ENV_SRC := $(P)/manifest/env_const.tsv $(P)/manifest/gen_env_const.py
+$(P)/win32/env_const.gen.inc: $(ENV_SRC)
 	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only win32/
+$(P)/crt/env_const.gen.inc: $(ENV_SRC)
+	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only crt/
+$(P)/os/env_const_posix.gen.inc: $(ENV_SRC)
+	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only os/os_posix.c
+$(P)/os/env_const_horizon.gen.inc: $(ENV_SRC)
+	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only os/os_horizon.c
 $(OUT)/platform/win32/env_const.cpp.o: $(P)/win32/env_const.gen.inc
+$(OUT)/platform/crt/msvcrt_exports.cpp.o: $(P)/crt/env_const.gen.inc
+$(OUT)/platform/os/os_posix.c.o: $(P)/os/env_const_posix.gen.inc
 
 $(OUT)/%.cpp.o: $(ROOT)/%.cpp
 	@mkdir -p $(dir $@)

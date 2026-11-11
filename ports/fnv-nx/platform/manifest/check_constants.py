@@ -196,7 +196,7 @@ class Side:
                 return None
         try:
             v = eval(compile(tree, "<c>", "eval"), {"__builtins__": {}}, env)
-        except Exception:
+        except (ArithmeticError, TypeError, ValueError):   # what an expression over constants can raise: x / 0, float << n, ...
             return None
         if isinstance(v, float):
             return v

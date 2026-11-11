@@ -617,6 +617,17 @@ TEST(mq_cursor_and_resources)
     CHECK(LoadCursorA((HINSTANCE)(uintptr_t)0x400000, "cursor") == NULL); CHECK_EQ(GetLastError(), 1812);
     CHECK(!GetCursorPos(NULL)); CHECK_EQ(GetLastError(), 998);
     CHECK(SetCursorPos(100000, -5)); POINT p; GetCursorPos(&p); CHECK_EQ(p.x, GetSystemMetrics(0) - 1); CHECK_EQ(p.y, 0);
+    /* ClipCursor: the cursor stays in the rectangle (right/bottom exclusive), moves into it at once, NULL lifts it */
+    RECT cr = { 100, 100, 200, 150 }, got;
+    CHECK(ClipCursor(&cr)); CHECK(GetClipCursor(&got)); CHECK(got.left == 100 && got.top == 100 && got.right == 200 && got.bottom == 150);
+    GetCursorPos(&p); CHECK(p.x >= 100 && p.x < 200 && p.y >= 100 && p.y < 150);
+    SetCursorPos(0, 1000); GetCursorPos(&p); CHECK_EQ(p.x, 100); CHECK_EQ(p.y, 149);
+    RECT empty = { 10, 10, 10, 20 };
+    CHECK(!ClipCursor(&empty)); CHECK_EQ(GetLastError(), ERROR_INVALID_PARAMETER);
+    CHECK(GetClipCursor(&got)); CHECK_EQ(got.left, 100);                       /* the failed call changed nothing */
+    CHECK(ClipCursor(NULL)); CHECK(GetClipCursor(&got)); CHECK(got.left == 0 && got.top == 0 && got.right == GetSystemMetrics(0));
+    SetCursorPos(5, 5); GetCursorPos(&p); CHECK_EQ(p.x, 5);
+    CHECK(!GetClipCursor(NULL)); CHECK_EQ(GetLastError(), 998);
     CHECK_EQ(GetDoubleClickTime(), 500);
     CHECK(SetDoubleClickTime(1000)); CHECK_EQ(GetDoubleClickTime(), 1000);
     CHECK(SetDoubleClickTime(0)); CHECK_EQ(GetDoubleClickTime(), 500);

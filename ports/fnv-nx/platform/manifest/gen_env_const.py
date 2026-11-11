@@ -13,8 +13,9 @@ environment of ENV_TRUTH.md, the function returns `value`. Columns (TAB separate
     source   ENV:<row id of ENV_TRUTH.md> or MSDN:<function or method> - then the words of the rule
     quals    optional: text after the parameter list of a member (const, noexcept)
     file     the source file (relative to platform/) that includes the generated bodies; --only selects by prefix
+             (a .c file gets plain C definitions)
 Checks, each an error: a row without a source of one of the two forms, an empty value, a void return, a symbol
-given twice, a column count other than 8. The output is a pure function of the table (rows in table order).
+given twice for one file, a column count other than 8. The output is a pure function of the table (rows in table order).
 """
 import re
 import sys
@@ -44,9 +45,9 @@ def main(argv):
             errors.append("line %d: %d columns" % (n, len(r)))
             continue
         row = dict(zip(COLS, r))
-        if row["symbol"] in seen:
+        if (row["symbol"], row["file"]) in seen:
             errors.append("line %d: %s given twice" % (n, row["symbol"]))
-        seen.add(row["symbol"])
+        seen.add((row["symbol"], row["file"]))
         if not re.match(r"(ENV:[A-Z]\d+|MSDN:\S+) \S", row["source"]):
             errors.append("line %d: %s: source must be `ENV:<row> words` or `MSDN:<name> words`" % (n, row["symbol"]))
         if not row["value"].strip() or row["ret"].strip() == "void":
@@ -55,7 +56,7 @@ def main(argv):
             errors.append("line %d: %s: linkage %r" % (n, row["symbol"], row["linkage"]))
         if only is not None and not row["file"].startswith(only):
             continue
-        head = 'extern "C" ' if row["linkage"] == "C" else ""
+        head = 'extern "C" ' if row["linkage"] == "C" and not row["file"].endswith(".c") else ""   # a .c file is C already
         quals = (" " + row["quals"]) if row["quals"] else ""
         out.append("/* %s */\n%s%s %s(%s)%s\n{\n    return %s;\n}\n" % (
             row["source"], head, row["ret"], row["symbol"], row["params"], quals, row["value"]))

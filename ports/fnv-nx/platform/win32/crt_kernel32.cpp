@@ -351,7 +351,7 @@ static void env_seed(void)
     if (g_env_seeded)
         return;
     g_env_seeded = true;
-    const char *user = w32_user_dir(), *win = w32_windows_dir(), *sys = w32_system_dir();
+    const char *user = W32_USER_DIR, *win = W32_WIN_DIR, *sys = W32_SYS_DIR;
     SYSTEM_INFO si;
     GetSystemInfo(&si);
     char drive[3] = { win[0], ':', 0 };

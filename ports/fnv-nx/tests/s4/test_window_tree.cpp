@@ -90,6 +90,30 @@ static RECT wrect(HWND h) { RECT r = { -1, -1, -1, -1 }; GetWindowRect(h, &r); r
 static RECT crect(HWND h) { RECT r = { -1, -1, -1, -1 }; GetClientRect(h, &r); return r; }
 #define CHECK_RECT(r, l_, t_, r_, b_) do { RECT q_ = (r); CHECK_EQ(q_.left, l_); CHECK_EQ(q_.top, t_); CHECK_EQ(q_.right, r_); CHECK_EQ(q_.bottom, b_); } while (0)
 
+TEST(wt_mouse_capture)
+{
+    reg("WtCapCls");
+    HWND a = mk(0, "WtCapCls", T_POPUP, 0, 0, 50, 50), b = mk(0, "WtCapCls", T_POPUP, 60, 0, 50, 50);
+    CHECK(a && b);
+    CHECK(GetCapture() == NULL);
+    g_nlg = 0;
+    CHECK(SetCapture(a) == NULL);                       /* the previous holder: none */
+    CHECK(GetCapture() == a);
+    CHECK(SetCapture(b) == a);                          /* a is told it lost the capture, b is the new holder */
+    CHECK_EQ(log_count(a, 0x215), 1);
+    CHECK(GetCapture() == b);
+    CHECK(SetCapture(NULL) == NULL && GetLastError() == 1400);   /* not a window */
+    CHECK(GetCapture() == b);
+    CHECK(ReleaseCapture());
+    CHECK(GetCapture() == NULL);
+    CHECK_EQ(log_count(b, 0x215), 1);
+    CHECK(ReleaseCapture());                            /* nothing held: still fine */
+    SetCapture(a);
+    DestroyWindow(a);                                   /* a destroyed window loses the capture */
+    CHECK(GetCapture() == NULL);
+    DestroyWindow(b);
+}
+
 TEST(wt_classes)
 {
     ATOM a = reg("WtCls", 8, 12);

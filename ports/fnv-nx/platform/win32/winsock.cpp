@@ -5,6 +5,8 @@
  * Winsock equal maps to WSAEINVAL (10022), the one "the request is not valid in this state" code. */
 #include "w32.h"
 
+#include <type_traits>
+
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -105,15 +107,20 @@ void set_nb(int fd, bool nb)
 }
 
 /* Windows sockaddr_in: u16 family (LE), u16 port (network order), 4 address bytes, 8 zero bytes. */
-template <class T> auto setlen(T &a, int) -> decltype((void)a.sin_len, void()) { a.sin_len = sizeof a; }
-template <class T> void setlen(T &, long) {}
+template <class T, class = void> struct has_sin_len : std::false_type {};
+template <class T> struct has_sin_len<T, std::void_t<decltype(T::sin_len)>> : std::true_type {};
+template <class T> void setlen(T &a)   /* BSD-derived sockaddrs carry their length */
+{
+    if constexpr (has_sin_len<T>::value)
+        a.sin_len = sizeof a;
+}
 bool to_host(const void *p, int len, sockaddr_in *o)
 {
     const uint8_t *b = (const uint8_t *)p;
     if (!p || len < 16) { SetLastError(10014); return false; }
     if ((b[0] | b[1] << 8) != 2) { SetLastError(10047); return false; }
     memset(o, 0, sizeof *o);
-    setlen(*o, 0);
+    setlen(*o);
     o->sin_family = AF_INET;
     memcpy(&o->sin_port, b + 2, 2);
     memcpy(&o->sin_addr, b + 4, 4);

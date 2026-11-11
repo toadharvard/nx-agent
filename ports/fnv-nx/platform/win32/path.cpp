@@ -29,12 +29,7 @@ static int g_nmounts;
 static char g_root[W32_PATH_MAX];
 static char g_cwd[W32_PATH_MAX] = "C:\\FalloutNV";
 static os_lock_t g_path_lock;
-static const char GAME_DIR[] = "C:\\FalloutNV";
-static const char EXE_PATH[] = "C:\\FalloutNV\\FalloutNV.exe";
-static const char USER_DIR[] = "C:\\Users\\Player";
 
-const char *w32_exe_path(void) { return EXE_PATH; }
-const char *w32_user_dir(void) { return USER_DIR; }
 
 static int is_sep(char c) { return c == '\\' || c == '/'; }
 
@@ -191,13 +186,13 @@ extern "C" void fnvnx_path_reset(const char *root)
     os_lock(&g_path_lock);
     g_nmounts = 0;
     snprintf(g_root, sizeof g_root, "%s", root ? root : os_default_root());
-    strcpy(g_cwd, GAME_DIR);
+    strcpy(g_cwd, W32_GAME_DIR);
     os_unlock(&g_path_lock);
     char h[W32_PATH_MAX + 64];
     mkdirs(g_root);
-    fnvnx_path_mount(GAME_DIR, g_root);   /* the install is the root itself: <root>/FalloutNV.exe, <root>/Data */
+    fnvnx_path_mount(W32_GAME_DIR, g_root);   /* the install is the root itself: <root>/FalloutNV.exe, <root>/Data */
     snprintf(h, sizeof h, "%s/user", g_root);
-    fnvnx_path_mount(USER_DIR, h);
+    fnvnx_path_mount(W32_USER_DIR, h);
     /* the profile folders the game writes to must exist */
     snprintf(h, sizeof h, "%s/user/Documents/My Games/FalloutNV", g_root);
     mkdirs(h);

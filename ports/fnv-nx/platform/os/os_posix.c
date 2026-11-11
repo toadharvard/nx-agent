@@ -3,6 +3,9 @@
 #define _GNU_SOURCE
 #include "os.h"
 
+/* os_tick_freq, os_fs_case_insensitive: manifest/env_const.tsv */
+#include "env_const_posix.gen.inc"
+
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -341,7 +344,6 @@ uint64_t os_monotonic_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 uint64_t os_ticks(void) { return os_monotonic_ns() / 100; }
-uint64_t os_tick_freq(void) { return 10000000ull; }
 
 uint64_t os_cycle_counter(void)
 {
@@ -492,7 +494,6 @@ void os_dir_close(os_dir *d)
     }
 }
 
-int os_fs_case_insensitive(void) { return 0; }
 
 /* ---- virtual memory */
 size_t os_vm_page_size(void) { return (size_t)sysconf(_SC_PAGESIZE); }

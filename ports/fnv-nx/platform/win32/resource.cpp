@@ -487,7 +487,6 @@ extern "C" DWORD SizeofResource(HMODULE m, void *r)
     if (!entry_ptr(im, r)) { SetLastError(ERROR_INVALID_PARAMETER); return 0; }
     return entry_data(im, (const uint8_t *)r, &d, &n) ? (DWORD)n : 0;
 }
-extern "C" BOOL FreeResource(void *) { return FALSE; }   /* 16-bit contract: FALSE = freed */
 extern "C" BOOL EnumResourceNamesA(HMODULE m, LPCSTR type, BOOL (*cb)(HMODULE, LPCSTR, LPSTR, LONG_PTR), LONG_PTR param)
 {
     Img im; Dir d; uint32_t off;

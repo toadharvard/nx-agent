@@ -167,7 +167,7 @@ int c_isalnum(int c) { return cls(c, T_AL | T_UP | T_LO | T_DIG); }
 int c_isdigit(int c) { return cls(c, T_DIG); }
 int c_isspace(int c) { return cls(c, T_SP); }
 int c_isxdigit(int c) { return cls(c, T_HEX); }
-int c_isleadbyte(int) { return 0; } /* "C" and 1252 are single-byte code pages */
+#include "env_const.gen.inc"   /* c_isleadbyte: manifest/env_const.tsv */
 int c_tolower(int c) { return c >= 0 && c <= 255 ? cur()->lo[c] : c; }
 int c_toupper(int c) { return c >= 0 && c <= 255 ? cur()->up[c] : c; }
 int wcls(int c, unsigned m)

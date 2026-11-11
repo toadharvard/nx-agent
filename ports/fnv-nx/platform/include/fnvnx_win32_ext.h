@@ -152,6 +152,9 @@ void fnvnx_display_mode_changed(void);
 void fnvnx_post_message(HWND, UINT, WPARAM, LPARAM);
 void fnvnx_set_key_state(int vk, int down);
 void fnvnx_set_cursor_pos(int x, int y);
+BOOL GetClipCursor(RECT *);                  /* user32; ClipCursor is in the shim */
+HWND GetCapture(void);
+HWND fnwin_capture(void);                    /* the window with the mouse capture, NULL if none */
 /* COM classes (e.g. XAudio2 from S7) for CoCreateInstance */
 typedef HRESULT (*fnvnx_com_factory)(const GUID *iid, void **out);
 /* A statically linked server (resident for the life of the process); 0 when the registry (16 classes) is full. */

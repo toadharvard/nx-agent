@@ -95,7 +95,7 @@ struct window {
 #define WND_MAGIC 0x574E4457u
 static wclass *g_classes;
 static unsigned g_next_atom = 0xC000;
-static window g_desk, *g_all, *g_all_tail, *g_active;
+static window g_desk, *g_all, *g_all_tail, *g_active, *g_capture;   /* g_capture: the window that has the mouse (SetCapture) */
 static os_lock_t g_ui_lock;
 
 static char *dup_str(const char *s)
@@ -780,6 +780,7 @@ static void destroy_rec(window *w, bool skip_destroy)
     g_all_tail = NULL;
     for (window *p = g_all; p; p = p->all) g_all_tail = p;
     if (g_active == w) g_active = NULL;
+    if (g_capture == w) g_capture = NULL;   /* a destroyed window loses the capture */
     w->cls->nwin--;
     os_unlock(&g_ui_lock);
     fnmq_purge(hw);
@@ -1386,9 +1387,40 @@ extern "C" int fnvnx_swap_buttons(void) { return g_swap_buttons; }   /* SM_SWAPB
 /* ---- cursor and keys */
 static volatile uint8_t g_keys[256];
 
-extern "C" BOOL ClipCursor(const RECT *r) { W32_UNUSED(r); return TRUE; }
-extern "C" HWND SetCapture(HWND h) { W32_UNUSED(h); return NULL; }
-extern "C" BOOL ReleaseCapture(void) { return TRUE; }
+/* mouse capture: the window that gets every mouse message wherever the cursor is, until released. The previous holder
+ * is told with WM_CAPTURECHANGED (lParam: the window that took it, NULL on release). */
+#define W32_WM_CAPTURECHANGED 0x215
+extern "C" HWND fnwin_capture(void)
+{
+    os_lock(&g_ui_lock);
+    HWND h = (HWND)g_capture;
+    os_unlock(&g_ui_lock);
+    return h;
+}
+static HWND capture_swap(window *w)
+{
+    os_lock(&g_ui_lock);
+    ui_init_l();
+    window *old = g_capture;
+    g_capture = w;
+    os_unlock(&g_ui_lock);
+    if (old && old != w)
+        SendMessageA((HWND)old, W32_WM_CAPTURECHANGED, 0, (LPARAM)(uintptr_t)w);
+    return (HWND)old;
+}
+extern "C" HWND SetCapture(HWND h)
+{
+    window *w = wnd_e(h);
+    if (!w || w == &g_desk)
+        return NULL;
+    return capture_swap(w);
+}
+extern "C" BOOL ReleaseCapture(void)
+{
+    capture_swap(NULL);
+    return TRUE;
+}
+extern "C" HWND GetCapture(void) { return fnwin_capture(); }
 /* g_pressed: went down since GetAsyncKeyState last read it (its low bit); g_toggle: GetKeyState's toggle bit */
 static volatile uint8_t g_pressed[256], g_toggle[256];
 static void set_key(int vk, int down)

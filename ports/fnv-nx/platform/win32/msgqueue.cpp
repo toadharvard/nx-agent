@@ -405,6 +405,8 @@ extern "C" LRESULT CallNextHookEx(HHOOK h, int code, WPARAM w, LPARAM l)
     if (!k) { SetLastError(1404); return 0; }
     return call_from(id, k, code, w, l, false);
 }
+static RECT clip_rect_locked(void);   /* ClipCursor, below */
+
 
 /* ---- keyboard and mouse input */
 static unsigned vk_scan(unsigned vk, unsigned *ext)   /* the scan code (set 1) of a key of the US layout; 0 if none */
@@ -467,9 +469,12 @@ extern "C" void fnvnx_win_key(unsigned vk, unsigned scan, int down, unsigned fla
 static void mouse_in(int x, int y, unsigned changed, unsigned state, int wheel, bool hwheel, unsigned inj)
 {
     static const UINT dn[5] = { 0x201, 0x204, 0x207, 0x20B, 0x20B };
-    int W = GetSystemMetrics(0), H = GetSystemMetrics(1), swap = GetSystemMetrics(23);
-    x = x < 0 ? 0 : x >= W ? W - 1 : x;
-    y = y < 0 ? 0 : y >= H ? H - 1 : y;
+    int swap = GetSystemMetrics(23);
+    os_lock(&g_mql);
+    RECT clip = clip_rect_locked();   /* the cursor stays inside the ClipCursor rectangle */
+    os_unlock(&g_mql);
+    x = x < clip.left ? clip.left : x >= clip.right ? clip.right - 1 : x;
+    y = y < clip.top ? clip.top : y >= clip.bottom ? clip.bottom - 1 : y;
     for (int ev = 0; ev < 7; ev++) {   /* 0: move, 1..5: buttons, 6: wheel */
         UINT msg;
         unsigned data = 0, bit = ev >= 1 && ev <= 5 ? 1u << (ev - 1) : 0;
@@ -491,7 +496,8 @@ static void mouse_in(int x, int y, unsigned changed, unsigned state, int wheel, 
                     ((GetKeyState(0x10) & 0x8000) ? 4 : 0) | ((GetKeyState(0x11) & 0x8000) ? 8 : 0);
         if (bit && ev <= 2 && swap) msg = dn[2 - ev] + (d ? 0 : 1);   /* the swapped left/right buttons */
         journal(msg, cx, cy, NULL);
-        HWND tgt = ev == 6 ? fnwin_active() : fnwin_from_point((int)cx, (int)cy);
+        HWND cap = fnwin_capture();   /* the capturing window gets the mouse wherever it is */
+        HWND tgt = cap ? cap : ev == 6 ? fnwin_active() : fnwin_from_point((int)cx, (int)cy);
         fnwin_info wi;
         if (!tgt || !fnwin_info_get(tgt, &wi)) continue;
         if (ev == 6) mk = (mk & 0xFFFF) | (WPARAM)data;
@@ -603,13 +609,58 @@ extern "C" int ShowCursor(BOOL show)
     os_unlock(&g_mql);
     return r;
 }
+/* the cursor clip rectangle (ClipCursor): the whole desktop while none is set; right and bottom are exclusive */
+static RECT g_clip;
+static bool g_clip_set;
+static RECT clip_rect_locked(void)
+{
+    if (g_clip_set)
+        return g_clip;
+    RECT r = { 0, 0, GetSystemMetrics(0), GetSystemMetrics(1) };
+    return r;
+}
+static void cursor_clamp_locked(int x, int y)
+{
+    RECT c = clip_rect_locked();
+    g_cx = x < c.left ? c.left : x >= c.right ? c.right - 1 : x;
+    g_cy = y < c.top ? c.top : y >= c.bottom ? c.bottom - 1 : y;
+}
 extern "C" void fnvnx_set_cursor_pos(int x, int y)
 {
-    int W = GetSystemMetrics(0), H = GetSystemMetrics(1);
     os_lock(&g_mql);
-    g_cx = x < 0 ? 0 : x >= W ? W - 1 : x;
-    g_cy = y < 0 ? 0 : y >= H ? H - 1 : y;
+    cursor_clamp_locked(x, y);
     os_unlock(&g_mql);
+}
+/* ClipCursor: confines the cursor to the rectangle (clipped to the desktop), NULL lifts it; the cursor moves into the
+ * rectangle at once. A rectangle with no area, or outside the desktop, is ERROR_INVALID_PARAMETER. */
+extern "C" BOOL ClipCursor(const RECT *r)
+{
+    RECT d = { 0, 0, GetSystemMetrics(0), GetSystemMetrics(1) };
+    RECT c = d;
+    if (r) {
+        c.left = r->left > d.left ? r->left : d.left;
+        c.top = r->top > d.top ? r->top : d.top;
+        c.right = r->right < d.right ? r->right : d.right;
+        c.bottom = r->bottom < d.bottom ? r->bottom : d.bottom;
+        if (c.right <= c.left || c.bottom <= c.top) {
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return FALSE;
+        }
+    }
+    os_lock(&g_mql);
+    g_clip_set = r != NULL;
+    g_clip = c;
+    cursor_clamp_locked(g_cx, g_cy);
+    os_unlock(&g_mql);
+    return TRUE;
+}
+extern "C" BOOL GetClipCursor(RECT *r)
+{
+    if (!r) { SetLastError(998); return FALSE; }
+    os_lock(&g_mql);
+    *r = clip_rect_locked();
+    os_unlock(&g_mql);
+    return TRUE;
 }
 extern "C" BOOL SetCursorPos(int x, int y) { fnvnx_set_cursor_pos(x, y); return TRUE; }
 extern "C" BOOL GetCursorPos(LPPOINT p)

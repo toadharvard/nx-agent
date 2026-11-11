@@ -59,7 +59,7 @@ static int normalize(const char *in, char *out, size_t n, int *has_path)
 static void module_path(const struct module *m, char *out, size_t n)
 {
     char dir[W32_PATH_MAX];
-    snprintf(dir, sizeof dir, "%s", w32_exe_path());
+    snprintf(dir, sizeof dir, "%s", W32_EXE_PATH);
     *(char *)base_name(dir) = 0;   /* the game directory, with its trailing '\' */
     snprintf(out, n, "%s%s", m->system ? "C:\\Windows\\system32\\" : dir, m->file);
 }
@@ -131,7 +131,7 @@ static HMODULE module_lookup(const char *name, int take)
     if (!normalize(name, f, sizeof f, &hp))
         return NULL;
     char full[W32_PATH_MAX];
-    snprintf(full, sizeof full, "%s", w32_exe_path());
+    snprintf(full, sizeof full, "%s", W32_EXE_PATH);
     if (!w32_stricmp(f, hp ? full : base_name(full)))
         return EXE_MODULE;
     HMODULE h = NULL;
@@ -253,7 +253,7 @@ extern "C" DWORD GetModuleFileNameA(HMODULE h, LPSTR buf, DWORD n)
     n = W32_DW(n);
     char tmp[W32_PATH_MAX];
     if (!h || h == EXE_MODULE) {
-        snprintf(tmp, sizeof tmp, "%s", w32_exe_path());
+        snprintf(tmp, sizeof tmp, "%s", W32_EXE_PATH);
     } else {
         os_lock(&g_mod_lock);
         struct module *m = module_of(h);
@@ -285,13 +285,13 @@ static WCHAR *g_cmdline_w;
 
 extern "C" void fnvnx_set_command_line(int argc, char **argv)
 {
-    size_t n = strlen(w32_exe_path()) + 3;
+    size_t n = strlen(W32_EXE_PATH) + 3;
     for (int i = 1; i < argc; i++)
         n += strlen(argv[i]) * 2 + 3;
     char *s = (char *)malloc(n + 1);
     if (!s)
         return;
-    size_t o = (size_t)sprintf(s, "\"%s\"", w32_exe_path());
+    size_t o = (size_t)sprintf(s, "\"%s\"", W32_EXE_PATH);
     for (int i = 1; i < argc; i++) {
         int q = !*argv[i] || strpbrk(argv[i], " \t\"");
         s[o++] = ' ';
@@ -354,7 +354,7 @@ extern "C" LPWSTR *CommandLineToArgvW(LPCWSTR cmd, int *argc)
     const WCHAR *p = cmd;
     if (!cmd || !*cmd) {
         /* empty: argv[0] = the module path */
-        const char *exe = w32_exe_path();
+        const char *exe = W32_EXE_PATH;
         argv[n++] = out;
         while (*exe)
             *out++ = (WCHAR)(unsigned char)*exe++;
@@ -434,8 +434,6 @@ extern "C" void OutputDebugStringA(LPCSTR s)
     if (s)
         os_debug_print(s);
 }
-
-extern "C" BOOL IsDebuggerPresent(void) { return FALSE; }
 
 /* DebugBreak: EXCEPTION_BREAKPOINT raised by the platform; it returns when the exception was continued. */
 extern "C" void DebugBreak(void) { w32_raise(0x80000003u, 0, 0, NULL); }

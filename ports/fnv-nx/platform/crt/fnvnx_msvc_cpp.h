@@ -120,7 +120,7 @@ struct logic_error_fields {
 
 /* locale::facet: vptr 0 (virtual destructor), size_t _Refs 4; _Refs == (size_t)-1 is immortal */
 struct facet {
-    virtual ~facet() {}
+    virtual ~facet() = default;
     size_t _Refs;
 };
 

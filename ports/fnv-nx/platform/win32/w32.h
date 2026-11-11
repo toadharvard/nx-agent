@@ -103,8 +103,13 @@ FARPROC w32_mem_hook_proc(const char *name, FARPROC f);   /* GetProcAddress: Dir
 DWORD w32_map_path(const char *win, char *host, size_t n);
 void w32_virtual_cwd(char *out, size_t n);
 DWORD w32_full_path(const char *win, char *out, size_t n); /* normalised "x:\\a\\b" */
-const char *w32_exe_path(void);              /* virtual Windows path of FalloutNV.exe */
-const char *w32_user_dir(void);              /* virtual Windows path of the documents folder */
+/* virtual Windows paths of the environment (ENV_TRUTH F1, F2, P5): the install, the exe, the user's folder, the
+ * system and Windows directories */
+static const char W32_GAME_DIR[] = "C:\\FalloutNV";
+static const char W32_EXE_PATH[] = "C:\\FalloutNV\\FalloutNV.exe";
+static const char W32_USER_DIR[] = "C:\\Users\\Player";
+static const char W32_SYS_DIR[] = "C:\\Windows\\system32";
+static const char W32_WIN_DIR[] = "C:\\Windows";
 /* errno-style os error -> Win32 error code */
 DWORD w32_os_error(int neg);
 int w32_wildcard_match(const char *pat, const char *name); /* Windows *, ? matching, case-insensitive */
@@ -322,7 +327,5 @@ BOOL SetConsoleCtrlHandler(BOOL (*)(DWORD), BOOL);   /* crt_kernel32.cpp */
 LSTATUS RegOpenKeyA(HKEY, LPCSTR, PHKEY);            /* advapi32 (registry.cpp) */
 }
 /* the platform's fixed Windows directories (sysinfo.cpp, ENV_TRUTH P5) */
-const char *w32_system_dir(void);            /* "C:\\Windows\\system32" */
-const char *w32_windows_dir(void);           /* "C:\\Windows" */
 
 #endif

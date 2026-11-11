@@ -26,7 +26,7 @@ extern "C" HRESULT SHGetFolderPathA(HWND h, int csidl, HANDLE tok, DWORD flags, 
     case CSIDL_COMMON_APPDATA: snprintf(out, MAX_PATH, "C:\\ProgramData"); return S_OK;
     default: out[0] = 0; return E_FAIL;
     }
-    snprintf(out, MAX_PATH, "%s%s", w32_user_dir(), sub);
+    snprintf(out, MAX_PATH, "%s%s", W32_USER_DIR, sub);
     if (csidl & CSIDL_FLAG_CREATE)
         CreateDirectoryA(out, NULL);
     return S_OK;
