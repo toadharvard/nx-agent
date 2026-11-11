@@ -26,7 +26,7 @@ MUST_NAMES = ["create_ok", "device_flags", "swap_layout", "front_layout", "swap_
               "wait_vblank_bad_output", "destroy_order", "destroy_balanced", "noswap_present_bad", "noswap_balanced", "device_fail_reported",
               "vi_fail_reported"]
 # symbols of the backend files not merged yet (dk_scale, dk_present); empty once the backend is whole
-PENDING = {"nxdk_scale_init", "nxdk_scale_shutdown", "nxdk_scale_point", "nxdk_present_compose"}
+PENDING = {"nxdk_present_compose"}
 EMBEDDER = {"nxdk_guest_ptr", "nxdk_on_present", "nxdk_shader_pack"}
 HANDLERS = {"nxdk_mem_create", "nxdk_mem_gpu_addr", "nxdk_mem_destroy", "nxdk_present", "nxdk_wait_vblank", "nxdk_shutdown", "nxdk_image_create", "nxdk_image_create4",
             "nxdk_image_destroy", "nxdk_image_read", "nxdk_readback", "nxdk_sampler_create", "nxdk_sampler_update", "nxdk_img", "nxdk_mem",
