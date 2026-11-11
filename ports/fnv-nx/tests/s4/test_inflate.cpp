@@ -34,7 +34,7 @@ static bytes zwrap(const bytes &deflate, const bytes &plain, uint8_t cmf = 0x78,
 static int run(const bytes &z, bytes *out = NULL, size_t max = 0)
 {
     /* exact-size heap copy: an over-read is a sanitizer / heap error, not a silent success */
-    uint8_t *c = (uint8_t *)malloc(z.size() ? z.size() : 1); memcpy(c, z.data(), z.size());
+    uint8_t *c = (uint8_t *)malloc(z.size() ? z.size() : 1); if (z.size()) memcpy(c, z.data(), z.size());
     uint8_t *o = NULL; size_t on = 0;
     int r = max ? fnvnx_inflate_zlib_max(c, z.size(), &o, &on, max) : fnvnx_inflate_zlib(c, z.size(), &o, &on);
     if (r == 0 && out) out->assign(o, o + on);

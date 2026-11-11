@@ -454,6 +454,14 @@ TEST(crt_k32_drives_user_class)
     CHECK_EQ(GetClassLongA(NULL, -12 /* GCL_HCURSOR */), 0);
 }
 
+/* prefix compare that stops at the string's end (a memcmp of n units reads past a shorter entry) */
+static bool wprefix(const WCHAR *s, const WCHAR *lit, size_t n)
+{
+    for (size_t i = 0; i < n; i++)
+        if (s[i] != lit[i])
+            return false;
+    return true;
+}
 TEST(crt_k32_environment)
 {
     char *e = GetEnvironmentStrings();
@@ -502,9 +510,9 @@ TEST(crt_k32_environment)
                 if (x > y)
                     sorted = false;
             }
-            if (!memcmp(q, L"FNVNX_K32=on", 12 * sizeof(WCHAR)) && q[12] == 0xE9)
+            if (wprefix(q, L"FNVNX_K32=on", 12) && q[12] == 0xE9)
                 mine = q;
-            if (!memcmp(q, L"NUMBER_OF_PROCESSORS=", 21 * sizeof(WCHAR))) {
+            if (wprefix(q, L"NUMBER_OF_PROCESSORS=", 21)) {
                 SYSTEM_INFO si;
                 GetSystemInfo(&si);
                 nproc = (unsigned)_wtou(q + 21) == (unsigned)si.dwNumberOfProcessors;   /* the one source: GetSystemInfo */
