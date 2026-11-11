@@ -7,11 +7,11 @@ Updated 2026-11-11 22:55Z. Trunk CLAUDE.md 6f5498754 merged. L4 fully in the tru
 | # | task | worker | status |
 |---|---|---|---|
 | 1a | ~~No Mesa~~ CANCELLED by the owner's correction (two backends, OpenGL and deko3d; CLAUDE.md 6f5498754). Branch claude/fnv-l4-verify-w1 68e37dab7 is never merged. w1 reassigned: test_bootgpu.py/test_boot_job.py onto the real libnxgl4 (l6-render/nxgl4/13c4573c49d7 @2f0427f5), its GL packages pinned in env.json (no doubles, no unpinned apt) | w1 session_01KmtZKU8dDYDU7RTpbdfEeL, branch claude/fnv-l4-verify-w1b | doing |
-| 1b | deko3d boundary model, BESIDE the GL path (GL stays the emulator's renderer) of the boot machine (67 dk* functions, 206 call sites, 7 libnx calls, fnv-nx-build l6a/dkabi @071b497; command buffers; DKSH shaders, uncovered instruction = red) | lead (design: inbox l4-verify-008.md, D1-D5, phases P1-P5), workers after | design done, contract agreed with L6A/L1 (dkabi.tsv 74 rows @08252f17, module 12, libdkmodel ABI); P1 blocked by L6A backend product root (L6A); P2 loader next after w1 |
+| 1b | deko3d boundary model, BESIDE the GL path (GL stays the emulator's renderer) of the boot machine (67 dk* functions, 206 call sites, 7 libnx calls, fnv-nx-build l6a/dkabi @071b497; command buffers; DKSH shaders, uncovered instruction = red) | lead (design: inbox l4-verify-008.md, D1-D5, phases P1-P5), workers after | PAUSED 22:46Z (not on the emulator first-frame path: GL renders in the emulator; spend-only-on-path order); design done, contract agreed with L6A/L1 (dkabi.tsv 74 rows @08252f17, module 12, libdkmodel ABI); P1 blocked by L6A backend product root (L6A); P2 loader next after w1 |
 | 2 | /Z7 farms z7 1of4..4of4 (L2's recon rule) | farms of the previous lead: 1of4 session_01KmtZKSuxC7ks3kferbyC6D, 2of4 session_01KmtZKS3a468SDWPQW1Drrm, 3of4 session_01KmtZKU9urUtsHPMAyeK4X9, 4of4 session_01KmtZKTm9tSnKho4mw4Ehyw | 1of4 done (msvc/z7/8f324ecde2a7/1of4 @a8ff7fd5: 742 built, 7 failed); 2of4..4of4 doing under L2 rule canon-recon-1 (pin C = canonical tree hash, checks A 42a47a07ddaab6b0, B 94094fd8e6e1633f); L2 sends C |
 | 3 | Boot run of the next ELF (L3a packs + L5 roots linked by L1): exe entry -> WinMain | lead | blocked by the ELF with module packs (L3a, L1) |
 | 5 | bootsock: remove services 27, 28, 29, 32, 33 with L1's new hostapi.h (w12 @6766d18a, sha256 2e7295fc...3f97) | w2 session_01KmtZKUCth9pSFTz7qdhsJo, branch claude/fnv-l4-verify-w2 | doing |
-| 4 | dk model for L6A's tests (one shared model, failure injection only as model input) | - | after 1b |
+| 4 | dk model for L6A's tests (one shared model, failure injection only as model input) | - | paused with 1b, after the first frame |
 
 ## Global numbers (commit 07158f8dad99 unless stated)
 
@@ -23,3 +23,4 @@ Updated 2026-11-11 22:55Z. Trunk CLAUDE.md 6f5498754 merged. L4 fully in the tru
 
 - 22:55Z: z7 2of4 working (cl shard build, 162 files); tc-repro unblocked, building gcc stage1; w1 stopped by the orchestrator, reassigned; w2 doing. LIFTGEN 160438e is run by L3a's own worker w1 (session_01KmtZKSJcRwWUskQJfty9T7) by the L3a lead's word; no L4 farm duplicates it.
 - z7 pin under L2 rule canon-recon-1: tree_hash 5dd203b860b5cc52 (A 42a47a07ddaab6b0, B 94094fd8e6e1633f); 1of4 republished @dd3e3088 (742/749). The old pin 118e1d681f01970a is void.
+- z7 1of4 failures, 7 of 749, one class: prepared-tree source outside the Visual C++ 2008 language (C++11 decltype x2 in generated global initializers, in-class member initializer C2864, and parse failures C2660/C2065/C2334/C2143 in variant files of teswaterform, hkpcontinuoussimulation, speedtreert, treeengine, blk_00aa0000_od). Owner: L2 (source generator/prepare). Sent to L2.
