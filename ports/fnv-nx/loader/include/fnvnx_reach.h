@@ -20,6 +20,12 @@
 extern "C" {
 #endif
 void fnvnx_reach_violation(uint32_t fact_id) __attribute__((noreturn));
+
+/* Owner exit (owner decision of 2026-11-11): a contract function the owner decided NOT to implement ends the process
+ * loudly instead of answering. `code` is a row of verify/owner_exit.tsv (its source is CLAUDE.md; no other caller
+ * may exist). One log line, then the host's exit slot with FNVNX_OWNER_EXIT | code. Never a silent return. */
+#define FNVNX_OWNER_EXIT 0x4F000000u   /* exit code = FNVNX_OWNER_EXIT | code; code < 2^24 */
+void fnvnx_owner_exit(uint32_t code) __attribute__((noreturn));
 #ifdef __cplusplus
 }
 #endif
