@@ -247,8 +247,8 @@
     "ports/fnv-nx/verify/gate_argorder.py"
    ],
    "result": "argordergate.json"
-  },
-  {
+   },
+   {
    "name": "imports",
    "argv": [
     "python3",
