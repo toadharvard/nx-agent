@@ -196,12 +196,6 @@ long long _time64(long long *);
 
 /* ---- compiler helpers referenced explicitly by decomp source (crt/helpers.cpp) */
 void fnvnx_security_check_cookie(uintptr_t cookie);         /* __security_check_cookie: no /GS here */
-void fnvnx_eh_vector_ctor(void *ptr, size_t size, int count, void (*ctor)(void *), void (*dtor)(void *));
-void fnvnx_eh_vector_dtor(void *ptr, size_t size, int count, void (*dtor)(void *));
-void fnvnx_eh_vector_copy_ctor(void *dst, void *src, size_t size, int count, void (*cctor)(void *, void *),
-                               void (*dtor)(void *));
-void *fnvnx_rt_dynamic_cast(void *inptr, long vfdelta, void *src_type, void *target_type, int is_reference);
-void fnvnx_cxx_throw_exception(void *obj, void *throw_info) __attribute__((noreturn));
 /* MSVC std::_Lockit(int kind) / ~_Lockit as thiscall-shaped functions (self = 4-byte _Lockit) */
 void fnvnx_lockit_ctor(void *self, int kind);
 void fnvnx_lockit_dtor(void *self);
@@ -261,65 +255,7 @@ void *fnvnx_ostream_ctor(void *self, void *strbuf, int isstd, int construct_vbas
 void fnvnx_basic_ios_init(void *self, void *strbuf, int isstd);        /* basic_ios<char>::init */
 void *fnvnx_fiopen(const char *name, int mode, int prot);              /* std::_Fiopen -> struct _iobuf * */
 
-/* ---- S4b: _CxxThrowException data (MSVC x86 EH tables in the image: absolute 32-bit addresses) */
-typedef struct {
-    uint32_t attributes;
-    uint32_t pmfnUnwind;          /* destructor of the thrown object (thiscall) */
-    uint32_t pForwardCompat;
-    uint32_t pCatchableTypeArray;
-} fnvnx_msvc_throw_info;
-typedef struct {
-    uint32_t properties;          /* 1 simple type, 2 by-reference only, 4 has virtual base */
-    uint32_t pType;               /* TypeDescriptor */
-    int32_t mdisp, pdisp, vdisp;  /* PMD: displacement of this base in the thrown object */
-    int32_t sizeOrOffset;         /* size of the object */
-    uint32_t copyFunction;        /* copy constructor (thiscall), 0 = bitwise */
-} fnvnx_msvc_catchable_type;
-typedef struct {
-    int32_t nCatchableTypes;      /* the most-derived type first */
-    uint32_t arrayOfCatchableTypes[1];
-} fnvnx_msvc_catchable_type_array;
-typedef struct {
-    uint32_t pVFTable;            /* type_info's vftable */
-    uint32_t spare;
-    char name[1];                 /* ".?AVbad_alloc@std@@" */
-} fnvnx_msvc_type_descriptor;
-typedef void (*fnvnx_eh_copy_fn)(void *dst, const void *src);
-typedef void (*fnvnx_eh_dtor_fn)(void *obj);
-/* "this ThrowInfo throws MSVC's std::X" (TypeDescriptor name ".?AVbad_alloc@std@@", ...): no image needed */
-int fnvnx_eh_register_msvc_std(const void *throw_info, const char *msvc_type_name);
-/* registers the decomp's two standard-exception ThrowInfos (0x01140ef8 bad_alloc, 0x01140cb0 length_error) */
-void fnvnx_eh_register_fnv_known(void);
-/* code addresses in the image's EH tables (x86 .text) -> native functions (S2 address map / S3 loader) */
-void fnvnx_eh_set_code_resolver(void *(*resolve)(uint32_t va));
-/* where ThrowInfo / CatchableType / TypeDescriptor pointers may point (the data image); default 0x10000.. */
-void fnvnx_eh_set_image_range(uint32_t lo, uint32_t hi);
-const char *fnvnx_eh_describe(const void *throw_info);
-
 #ifdef __cplusplus
 }
-#include <new>
-#include <typeinfo>
-/* RTTI bridge: the MSVC TypeDescriptor address (data image) of a class -> its GCC type_info (S2 generates the
- * table from the class names: ??_R0?AVTESForm@@@8 <-> _ZTI7TESForm). _CxxThrowException uses it too. */
-/* 0, or -1 when the table cannot grow (out of memory) */
-extern "C++" int fnvnx_rtti_register(const void *msvc_type_descriptor, const std::type_info *ti);
-extern "C++" const std::type_info *fnvnx_rtti_lookup(const void *msvc_type_descriptor);
-/* native-type path of _CxxThrowException: objects thrown with this ThrowInfo are GCC objects of type ti */
-/* 0, or -1 when the registry cannot grow (out of memory) */
-extern "C" int fnvnx_eh_register_throw(const void *throw_info, const std::type_info *ti, size_t size,
-                                        fnvnx_eh_copy_fn copy, fnvnx_eh_dtor_fn dtor);
-template <class T> inline int fnvnx_eh_register_type(const void *throw_info)
-{
-    return fnvnx_eh_register_throw(
-        throw_info, &typeid(T), sizeof(T), [](void *d, const void *s) { new (d) T(*(const T *)s); },
-        [](void *p) { ((T *)p)->~T(); });
-}
-/* what fnvnx_cxx_throw_exception throws when the ThrowInfo is unknown: catch (...) sees it, typed handlers do not.
- * object points into the thrower's (unwound) frame: valid only for its address. */
-struct fnvnx_msvc_exception {
-    void *object;
-    void *throw_info;
-};
 #endif
 #endif

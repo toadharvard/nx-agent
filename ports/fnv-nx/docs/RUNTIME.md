@@ -852,6 +852,13 @@ EINVAL, libc would not).
 
 ### `_CxxThrowException(obj, ThrowInfo)` with typed handlers (`eh.cpp`)
 
+> **Removed (W19).** `platform/crt/eh.cpp`, the `fnvnx_eh_vector_*` / `fnvnx_rt_dynamic_cast` / `fnvnx_rtti_*` helpers of
+> `helpers.cpp` and their tests are gone: no import routes to them (the msvcrt name table serves no name the bridge binds
+> `l3`, and no manifest row names them), and the native model called the game's ThrowInfo copy constructors / destructors as
+> native function pointers. In the product the game's own translated EH code and the lifter runtime perform C++ EH and RTTI
+> (`_CxxThrowException`, `__CxxFrameHandler`, `_except_handler3`, `?terminate`, type_info's destructor are bound `l3`). The
+> text below describes the old native-unit pipeline only; `crt_symbols.tsv` rows that name these providers belong to it.
+
 GCC unwinds the thrower's frame before the handler runs, so the object is copied into
 `__cxa_allocate_exception` storage and thrown with an Itanium `type_info`, found in this order:
 

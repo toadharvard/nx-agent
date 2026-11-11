@@ -33,7 +33,6 @@ unsigned long fnvnx_path_map(const char *win, char *host, size_t n); /* win32/pa
 _Static_assert(sizeof(struct _iobuf) == 32 && offsetof(struct _iobuf, _file) == 16, "MSVC FILE layout");
 _Static_assert(sizeof(fnvnx_ctypevec) == 16, "_Ctypevec");
 #endif
-_Static_assert(sizeof(fnvnx_msvc_throw_info) == 16 && sizeof(fnvnx_msvc_catchable_type) == 28, "MSVC EH tables");
 
 #define HOST_MAX 1024
 #define MAX_FD 256

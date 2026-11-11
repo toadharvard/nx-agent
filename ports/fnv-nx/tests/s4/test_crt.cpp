@@ -198,82 +198,8 @@ TEST(crt_controlfp_rounding)
 }
 
 /* helpers called by name from the decomp */
-static int g_built, g_destroyed;
-static void ctor(void *p) { *(int *)p = ++g_built; if (g_built == 4) throw 7; }
-static void dtor(void *p) { g_destroyed = g_destroyed * 10 + *(int *)p; }
-
-TEST(crt_eh_vector_iterators)
+TEST(crt_lockit_and_xlen)
 {
-    int arr[5] = { 0 };
-    g_built = 10;
-    fnvnx_eh_vector_ctor(arr, sizeof(int), 5, [](void *p) { *(int *)p = 1; }, dtor);
-    CHECK(arr[0] == 1 && arr[4] == 1);
-    for (int i = 0; i < 5; i++)
-        arr[i] = i + 1;
-    g_destroyed = 0;
-    fnvnx_eh_vector_dtor(arr, sizeof(int), 5, dtor);
-    CHECK_EQ(g_destroyed, 54321); /* last to first */
-    g_built = 0;
-    g_destroyed = 0;
-    bool caught = false;
-    try {
-        fnvnx_eh_vector_ctor(arr, sizeof(int), 5, ctor, dtor);
-    } catch (int v) {
-        caught = v == 7;
-    }
-    CHECK(caught);
-    CHECK_EQ(g_destroyed, 321); /* the three built objects, in reverse */
-}
-
-struct Base { virtual ~Base() {} int b = 1; };
-struct Other { virtual ~Other() {} int o = 2; };
-struct Derived : Base, Other { int d = 3; };
-static const char TD_BASE[1] = { 0 }, TD_OTHER[1] = { 0 }, TD_DERIVED[1] = { 0 }; /* stand-ins for ??_R0 data */
-
-TEST(crt_rtdynamiccast_bridge)
-{
-    fnvnx_rtti_register(TD_BASE, &typeid(Base));
-    fnvnx_rtti_register(TD_OTHER, &typeid(Other));
-    fnvnx_rtti_register(TD_DERIVED, &typeid(Derived));
-    Derived d;
-    Base *pb = &d;
-    void *r = fnvnx_rt_dynamic_cast(pb, 0, (void *)TD_BASE, (void *)TD_DERIVED, 0);
-    CHECK(r == &d);
-    r = fnvnx_rt_dynamic_cast(pb, 0, (void *)TD_BASE, (void *)TD_OTHER, 0); /* cross cast */
-    CHECK(r == static_cast<Other *>(&d));
-    Base plain;
-    CHECK(fnvnx_rt_dynamic_cast(&plain, 0, (void *)TD_BASE, (void *)TD_DERIVED, 0) == NULL);
-    CHECK(fnvnx_rt_dynamic_cast(NULL, 0, (void *)TD_BASE, (void *)TD_DERIVED, 0) == NULL);
-    bool threw = false;
-    try {
-        fnvnx_rt_dynamic_cast(&plain, 0, (void *)TD_BASE, (void *)TD_DERIVED, 1);
-    } catch (const std::bad_cast &) {
-        threw = true;
-    }
-    CHECK(threw);
-}
-
-TEST(crt_cxx_throw_and_lockit)
-{
-    int obj = 5;
-    bool got = false;
-    try {
-        fnvnx_cxx_throw_exception(&obj, NULL);
-    } catch (const fnvnx_msvc_exception &e) {
-        got = e.object == &obj;
-    }
-    CHECK(got);
-    bool rethrown = false;
-    try {
-        try {
-            throw 3;
-        } catch (...) {
-            fnvnx_cxx_throw_exception(NULL, NULL); /* "throw;" */
-        }
-    } catch (int v) {
-        rethrown = v == 3;
-    }
-    CHECK(rethrown);
     int lk1, lk2;
     fnvnx_lockit_ctor(&lk1, 2);
     fnvnx_lockit_ctor(&lk2, 2); /* recursive */

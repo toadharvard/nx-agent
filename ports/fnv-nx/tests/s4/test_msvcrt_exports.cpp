@@ -9,6 +9,8 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <stdio.h>
 #include <string>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -55,6 +57,42 @@ TEST(msvcrt_names_resolve)
         CHECK(X(n) == NULL); /* provider L3 */
     CHECK(fnvnx_win32_lookup_export("MSVCRT.DLL", "malloc") == X("malloc"));
     CHECK(fnvnx_win32_lookup_export("kernel32.dll", "malloc") == NULL);
+}
+
+/* One body per contract name: a msvcrt name the import bridge binds to the lifter runtime (bind column `l3`) is not served by the
+ * platform's own msvcrt name table. The bridge table is the file FNVNX_BRIDGE names (skipped, with a note, when absent). */
+extern "C" void *fnvnx_msvcrt_lookup(const char *name);
+TEST(msvcrt_table_serves_no_l3_name)
+{
+    const char *path = getenv("FNVNX_BRIDGE");
+    FILE *f = path ? fopen(path, "r") : NULL;
+    if (!f) {
+        fprintf(stderr, "  msvcrt_table_serves_no_l3_name: FNVNX_BRIDGE unset or unreadable, nothing checked\n");
+        return;
+    }
+    char line[1024];
+    int l3 = 0, served = 0;
+    while (fgets(line, sizeof line, f)) {
+        char *col[8] = {0};
+        int nc = 0;
+        char *p = line;
+        for (; nc < 8; nc++) {
+            col[nc] = p;
+            p += strcspn(p, "\t\r\n");
+            if (!*p) { nc++; break; }
+            *p++ = 0;
+        }
+        if (nc < 8 || strcmp(col[7], "l3") || strcasecmp(col[0], "msvcrt.dll"))
+            continue;
+        l3++;
+        if (fnvnx_msvcrt_lookup(col[1]) || X(col[1])) {
+            served++;
+            fprintf(stderr, "  msvcrt!%s is bound l3 and also served by the platform's name table\n", col[1]);
+        }
+    }
+    fclose(f);
+    CHECK(l3 > 0);   /* the bridge has l3 rows for msvcrt: the check looked at something */
+    CHECK_EQ(served, 0);
 }
 
 TEST(msvcrt_heap)
