@@ -243,7 +243,7 @@ class Arm(T.World):
         elif status == 'ok' and uc.reg_read(UC_ARM64_REG_PC) != s.RETPAD: status = 'budget'
         b = bytes(uc.mem_read(s.CPU, 456)); ftop, ftag = struct.unpack_from('<2I', b, 36); fx = struct.unpack_from('<QII', b, 328 + 16 * (ftop & 7))      # W13: carrier (payload, e, kind) of ST0
         return dict(status=status, regs=list(struct.unpack_from('<8I', b)) if status == 'ok' else [uc.reg_read(k) & 0xffffffff for k in T.GREG], n=s.n, nl=s.nl, nd=s.nd, fsw=s.fsw, ndisp=s.nr, ntr=s.ntr, trace=s.trace, ftop=ftop & 7,
-                    st0=carrier_d(*fx) if fx[2] else None, ra=struct.unpack_from('<I', b, 320)[0], mem=s.written() if status == 'ok' or status.startswith('unhandled') else {})
+                    st0=carrier_d(*fx) if fx[2] else None, ra=struct.unpack_from('<I', b, 248)[0], mem=s.written() if status == 'ok' or status.startswith('unhandled') else {})
 
     def code(s, uc, a, size, ud):
         s.n += 1

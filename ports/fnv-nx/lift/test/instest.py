@@ -261,7 +261,7 @@ class Arm(World):
             s.ev = (k, x1, 0) if k == 'fnvl_call' else (k, x0, 0) if k == 'fnvl_dispatch' else (k, uc.reg_read(UC_ARM64_REG_X2) & 0xffffffff, 99) if k == 'fnvl_raise_av' else (k, x1, x0); uc.emu_stop()
     def run(s, E, st):
         uc = s.uc; s.reset(st['wk']); s.ev = None; r0 = st['regs']
-        uc.mem_write(CPU, struct.pack('<13I', *r0, FSB, st['ftop'], st['valid'], st['fcw'], st['fc']) + b'\0' * 4 + struct.pack('<8Q', *st['st'])
+        uc.mem_write(CPU, struct.pack('<12I', *r0, FSB, st['ftop'], st['fcw'], st['fc'])
                      + b''.join(x.to_bytes(16, 'little') for x in st['xmm']) + struct.pack('<II8Q', st['fl'], st['mxcsr'], *st['mm']) + struct.pack('<II', 0, 0)
                      + b''.join(struct.pack('<QII', v, e, k) for k, v, e in st['fx']) + struct.pack('<I', st['eflx']) + b'\0' * 12 + struct.pack('<7I', 0x23, 0x1b, 0x23, 0x23, 0x3b, 0, FSB))     # sel[6] ES CS SS DS FS GS, teb (fnvl_seg_init)
         uc.reg_write(UC_ARM64_REG_FPCR, (0, 2, 1, 3)[(st['fcw'] >> 10 if E['x87'] else st['mxcsr'] >> 13) & 3] << 22)      # what ldmxcsr does on the ARM side (x86 RC 1=down, 2=up)
@@ -276,10 +276,10 @@ class Arm(World):
         if s.ev is None:     # plain return: only `ret` is allowed to; the next EIP is the word it popped
             s.ensure(r0[4], 4, False); eip = struct.unpack('<I', bytes(uc.mem_read(r0[4], 4)))[0] if E['base'] in ('ret', 'retn') else 'returned'
         else: eip = s.ev[1] if s.ev[0] not in ('fnvl_raise', 'fnvl_raise_av') or s.ev[2] == 2 else 'trap%d' % s.ev[2]
-        ftop, ftag, fcw, fc = struct.unpack_from('<4I', b, 36); fxv = [struct.unpack_from('<QII', b, 328 + 16 * i) for i in range(8)]
-        return dict(regs=list(v), eip=eip, fl=struct.unpack_from('<I', b, 248)[0] & 0xcd5, eflx=struct.unpack_from('<I', b, 456)[0] & 0x240000, mem=s.written(), xmm=[int.from_bytes(b[120 + 16 * i:136 + 16 * i], 'little') for i in range(8)],
+        ftop, fcw, fc = struct.unpack_from('<3I', b, 36); fxv = [struct.unpack_from('<QII', b, 256 + 16 * i) for i in range(8)]
+        return dict(regs=list(v), eip=eip, fl=struct.unpack_from('<I', b, 176)[0] & 0xcd5, eflx=struct.unpack_from('<I', b, 384)[0] & 0x240000, mem=s.written(), xmm=[int.from_bytes(b[48 + 16 * i:64 + 16 * i], 'little') for i in range(8)],
                     fp=dict(top=ftop & 7, fcw=fcw, cc=fc & 0x4500, valid=sum(1 << i for i in range(8) if fxv[i][2]), st=dict(enumerate(fxv)), wr=sorted(s.writes)),
-                    mxcsr=struct.unpack_from('<I', b, 252)[0], mm=[img80(k, v, e)[0] for v, e, k in fxv], mme=[img80(k, v, e)[1] & 0xffff for v, e, k in fxv], mtop=ftop & 7, mvalid=sum(1 << i for i in range(8) if fxv[i][2]))
+                    mxcsr=struct.unpack_from('<I', b, 180)[0], mm=[img80(k, v, e)[0] for v, e, k in fxv], mme=[img80(k, v, e)[1] & 0xffff for v, e, k in fxv], mtop=ftop & 7, mvalid=sum(1 << i for i in range(8) if fxv[i][2]))
 def gen_state(E, i, att, xd=None):
     r = random.Random('%x:%d:%d' % (E['addr'], i, att)); regs = []
     for _ in range(8):
@@ -523,7 +523,7 @@ def runtime_objects(work, lifter):
     subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-I', os.path.join(lifter, 'rt'), '-c', os.path.join(lifter, 'rt', 'x87.c'), '-o', work + '/x87.o'])
     # W14: the reference CPU model (rt/cpumodel.c) linked into the ARM side with a counter as the host clock (+1000 ns per call), and built for the host
     # (ctypes) as the expected values of cpuid. fnvl_rdtsc is checked against its definition, ticks = ns * 21 / 10, through the counter.
-    open(work + '/hostticks.c', 'w').write('volatile unsigned fnvnx_split_lock;\nunsigned long long fnvl_host_ticks_ns(void){ static unsigned long long n; return n += 1000; }\n')
+    open(work + '/hostticks.c', 'w').write('unsigned long long fnvl_host_ticks_ns(void){ static unsigned long long n; return n += 1000; }\n')
     subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-c', work + '/hostticks.c', '-o', work + '/hostticks.o'])
     subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-c', os.path.join(lifter, 'rt', 'cpumodel.c'), '-o', work + '/cpumodel.o'])
 def main():
@@ -543,7 +543,7 @@ def main():
     open(a.work + '/hostshim.c', 'w').write('unsigned long long fnvl_host_ticks_ns(void){ return 0; }\n')
     subprocess.check_call(['gcc', '-shared', '-fPIC', '-O1', '-o', a.work + '/cpumodel_host.so', os.path.join(a.lifter, 'rt', 'cpumodel.c'), a.work + '/hostshim.c'])
     import ctypes; G['cpum'] = ctypes.CDLL(a.work + '/cpumodel_host.so')
-    open(a.work + '/off.cpp', 'w').write(L.PRELUDE + '\n#include <stddef.h>\nstatic_assert(offsetof(cpu,fs)==32&&offsetof(cpu,ftop)==36&&offsetof(cpu,st)==56&&offsetof(cpu,x)==120&&offsetof(cpu,fl)==248&&offsetof(cpu,mxcsr)==252&&offsetof(cpu,mm_unused)==256&&offsetof(cpu,ra)==320&&offsetof(cpu,fx)==328&&offsetof(cpu,eflx)==456&&offsetof(cpu,sel)==472&&offsetof(cpu,teb)==496&&offsetof(cpu,fip)==500&&offsetof(cpu,fdp)==504&&sizeof(cpu)==536,"cpu layout");\n')
+    open(a.work + '/off.cpp', 'w').write(L.PRELUDE + '\n#include <stddef.h>\nstatic_assert(offsetof(cpu,fs)==32&&offsetof(cpu,ftop)==36&&offsetof(cpu,fcw)==40&&offsetof(cpu,fc)==44&&offsetof(cpu,x)==48&&offsetof(cpu,fl)==176&&offsetof(cpu,mxcsr)==180&&offsetof(cpu,mm_unused)==184&&offsetof(cpu,ra)==248&&offsetof(cpu,fex)==252&&offsetof(cpu,fx)==256&&offsetof(cpu,eflx)==384&&offsetof(cpu,sel)==400&&offsetof(cpu,teb)==424&&offsetof(cpu,fip)==428&&offsetof(cpu,fdp)==432&&offsetof(cpu,eflags)==460&&offsetof(cpu,dr)==464&&sizeof(cpu)==488,"cpu layout");\n')
     subprocess.check_call(['aarch64-linux-gnu-g++'] + FLAGS + ['-fsyntax-only', a.work + '/off.cpp'])
     d = load_forms(a, None); forms = d['forms']; print('pack: %d forms' % len(forms), file=sys.stderr)
     keys = sorted(k for k in forms if not a.only or k.split('|')[0] in a.only.split(','))

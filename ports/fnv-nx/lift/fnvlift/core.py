@@ -383,6 +383,8 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
         em('after_tail: ; if(esp>E){ SYNC_OUT; return; }')
         em('nonlocal: ; for(;;){ u32 t=c->ra; if(esp>E){ SYNC_OUT; return; } switch(t){ %s default: break; } SYNC_OUT; REGS(); fnvl_dispatch(t)(); REGS(); SYNC_IN; }' % cases)
     body = '\n'.join(cx.L)
+    # R4 raise-site flush rule (rt/fnvl.h RAISE_OUT / RAISE_IN): every explicit call of the OS dispatcher flushes the EFLAGS and x87 condition-bit locals into struct cpu before it and reloads them after
+    body = body.replace('fnvl_raise_av(', 'FNVL_RAISE_AV(').replace('fnvl_raise(', 'FNVL_RAISE(')
     fl = 'SYNC_X_IN;' if 'sse' in kinds else ''
     body = body.replace('SYNC_OUT;', 'SYNC_OUT;' + ('SYNC_X_OUT;' if 'sse' in kinds else ''))
     body = body.replace('SYNC_IN;', 'SYNC_IN;' + fl)

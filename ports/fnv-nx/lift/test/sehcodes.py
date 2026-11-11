@@ -10,7 +10,7 @@ import instest as T, fnvlift as L
 from unicorn import *
 from unicorn.arm64_const import *
 from elftools.elf.elffile import ELFFile
-W = '/home/user/l3work/sehcodes'; CPU, STK, FSB, RET, SEL = 0xE1000000, 0x10100000, 0x7FFDF000, 0xE1FF0000, 472
+W = '/home/user/l3work/sehcodes'; CPU, STK, FSB, RET, SEL = 0xE1000000, 0x10100000, 0x7FFDF000, 0xE1FF0000, 400
 DRV = L.PRELUDE + '''
 extern "C" { u32 g_rec, g_ctx; u32 fnvl_os_unhandled(u32 r, u32 x){ g_rec=r; g_ctx=x; return 0; } void (*fnvl_dispatch(u32 a))(void){ return 0; }
   void drv_raise(u32 code, u32 at){ fnvl_raise(code, at); }
@@ -38,7 +38,7 @@ def run(segs, sym, fn, args, sel):
     uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM); uc.mem_map(0xE0000000, 0x2000000); uc.mem_map(0x10000000, 0x200000); uc.mem_map(FSB, 0x1000)
     for va, d in segs: uc.mem_write(va, d)
     uc.reg_write(UC_ARM64_REG_CPACR_EL1, 3 << 20)
-    uc.mem_write(CPU, b'\0' * 504); uc.mem_write(CPU + 32, struct.pack('<I', FSB)); uc.mem_write(CPU + 44, struct.pack('<I', 0x27f)); uc.mem_write(CPU + SEL, struct.pack('<7I', *sel, FSB))
+    uc.mem_write(CPU, b'\0' * 504); uc.mem_write(CPU + 32, struct.pack('<I', FSB)); uc.mem_write(CPU + 40, struct.pack('<I', 0x27f)); uc.mem_write(CPU + SEL, struct.pack('<7I', *sel, FSB))
     uc.mem_write(FSB, struct.pack('<I', 0xffffffff))
     uc.reg_write(UC_ARM64_REG_X27, CPU); uc.reg_write(UC_ARM64_REG_X23, STK)
     for k, v in zip((UC_ARM64_REG_X0, UC_ARM64_REG_X1), args): uc.reg_write(k, v)

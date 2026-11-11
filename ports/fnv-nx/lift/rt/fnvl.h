@@ -9,10 +9,12 @@ typedef union { u32 u[4]; float f[4]; double d[2]; u64 q[2]; u8 b[16]; s8 sb[16]
    3/4/5 I16/I32/I64 (v = the integer sign-extended to 64 bits), 6 M80 (v = significand, e = sign<<15|exp). rt/fnvl_x87.h */
 struct fv { u64 v; u32 e; u32 k; };
 struct fnvl_nframe;   /* rt/imp.h: one per live import entry of the thread (native frames between lifted frames) */
-struct cpu { u32 r[8]; u32 fs; u32 ftop, ftag, fcw, fc; double st[8]; xmm_t x[8]; u32 fl; u32 mxcsr; u64 mm_unused[8]; u32 ra; u32 fex; fv fx[8]; u32 eflx; struct fnvl_nframe *nf; u32 hfpcr, hfpsr; u32 sel[6]; u32 teb; u32 fip, fdp; u32 msvcrt[6]; };   /* mxcsr (reset 0x1f80) is appended: SSE family (W6); mm_unused is the former separate MM register file, kept only so the offsets hold: mm0-7 ARE the significands of fx[0..7] (rt/fnvl_x87.h, MMX aliasing). r[] is only the save area of the
+struct cpu { u32 r[8]; u32 fs; u32 ftop, fcw, fc; xmm_t x[8]; u32 fl; u32 mxcsr; u64 mm_unused[8]; u32 ra; u32 fex; fv fx[8]; u32 eflx; struct fnvl_nframe *nf; u32 hfpcr, hfpsr; u32 sel[6]; u32 teb; u32 fip, fdp; u32 msvcrt[6]; u32 eflags; u32 dr[6]; };   /* mxcsr (reset 0x1f80) is appended: SSE family (W6); mm_unused is the former separate MM register file, kept only so the offsets hold: mm0-7 ARE the significands of fx[0..7] (rt/fnvl_x87.h, MMX aliasing). r[] is only the save area of the
    entry/exit bridges (fnvl_enter): while lifted code runs the eight guest registers live in w19..w26. ra: the address the last `ret` popped (control-transfer rule, README).
    x87 (W13): fx[8] are the PHYSICAL registers (carriers; k==0 is the empty tag), ftop the TOP, fcw the control word, fex the exception status bits that the host FPSR cannot
-   hold (invalid + stack fault of an overflow/underflow). eflx (W14): the EFLAGS bits AC (18) and ID (21), the only non-arithmetic bits pushfd/popfd keep (reset 0; see EFL_PUSH). `st` and `ftag` are the pre-R8 double stack and tag word: unused, kept so the offsets of the other fields hold. */
+   hold (invalid + stack fault of an overflow/underflow). eflx (W14): the EFLAGS bits AC (18) and ID (21), the only non-arithmetic bits pushfd/popfd keep (reset 0; see EFL_PUSH). The pre-R8 double stack `st` and tag word `ftag` are deleted (nothing read them; the x87 state is fx/ftop/fcw/fex). eflags, fc (and dr, the debug registers Dr0 Dr1 Dr2 Dr3 Dr6 Dr7 of the CONTEXT):
+   the state that a hardware-exception CONTEXT names and that is not a register of the lifted code: at every raise site the lifter flushes its flag and condition-bit locals into c->eflags / c->fc (RAISE_OUT)
+   and reloads them after a continue (RAISE_IN); rt/seh.cc writes the CONTEXT from them and reads them back. */
 /* FNVL_FLAGS_IO (test/instest.py): the arithmetic flags, DF and the x87 condition bits also travel in c->fl / c->fc.
    fl: the EFLAGS bit positions (CF 0, PF 2, AF 4, ZF 6, SF 7, DF 10, OF 11); fc: C0 bit 8, C2 bit 10, C3 bit 14. */
 #ifdef FNVL_FLAGS_IO
@@ -99,36 +101,34 @@ template<class F,class T> struct GMF { u32 a;      /* a float / double cell: the
    changes the copy), then lk_commit replaces the cell by the copy iff it still holds the loaded value (ldaxr / stlxr compare-and-swap); if not, the
    registers and flags are put back and the body runs again on the new value. The commit point is the instruction's place in the total order of
    locked operations; `dmb ish` after it makes it a full barrier like a locked x86 instruction.
-   A misaligned operand (x86 locks a split operand, ldaxr faults) runs between acquire and release of the one global spin lock fnvnx_split_lock, the
-   same word the native Interlocked code uses (docs/ORDERING.md ATOMIC-UNALIGNED, with its assumption). Both templates test the same address, so the
-   load that took the lock is always followed by the commit that releases it. Before it takes the lock the load writes the first and the last byte
-   of the cell back to themselves with a byte compare-and-swap: a cell that is not readable and writable faults there, with the lock free, and no
-   access can fault while the lock is held. */
-extern "C" { extern volatile u32 fnvnx_split_lock __attribute__((visibility("hidden"))); }
-#define FNVL_LOCKADDR_ "adrp %x[t], fnvnx_split_lock\nadd %x[t], %x[t], :lo12:fnvnx_split_lock\n"
+   A misaligned operand (x86 locks a split operand, ldaxr faults) takes the WORLD-STOP PATH: the load runs
+   fnvl_host_world_stop(), then a plain unaligned load; the commit is a plain unaligned store, `dmb ish`, fnvl_host_world_resume(). While every other guest thread is
+   suspended no other guest access interleaves, so that commit never fails. The window holds the body of one lockable instruction (LOCKABLE of fnvlift/f_sys.py: add adc and
+   btc btr bts cmpxchg cmpxchg8b dec inc neg not or sbb sub xor xadd xchg): straight-line register arithmetic with no call, no lock and no raise. Before the stop the load writes the
+   first and the last byte of the cell back to themselves with a byte compare-and-swap: a cell that is not readable and writable faults there, with the world running, and no
+   access can fault while it is stopped. fnvl_host_world_stop / fnvl_host_world_resume are the L5 platform's (platform/os/os.h and os_world.c: stop / resume every other thread of the process, synchronously, under one global lock; resume is called on the thread that stopped). */
+extern "C" { void fnvl_host_world_stop(void); void fnvl_host_world_resume(void); }
 #define FNVL_LK_(T, R, SUF, MASK, LAST, W) \
 template<> struct LKA<T> { \
-  static __attribute__((always_inline)) T load(u32 a){ T o; u32 s, t_; unsigned long t; \
-    if(sizeof(T)==1) __asm__ volatile(FNVL_A_ "ldar" SUF " %" R "[o], [%x[a]]" : [o]"=&r"(o), [a]"+r"(a) : : "memory"); \
-    else __asm__ volatile(FNVL_A_ "tst %w[a], " #MASK "\nb.ne 1f\nldar" SUF " %" R "[o], [%x[a]]\nb 2f\n" \
-      "1: ldaxrb %w[s], [%x[a]]\nstlxrb %w[u], %w[s], [%x[a]]\ncbnz %w[u], 1b\n" \
-      "add %w[t], %w[a], " #LAST "\n" \
-      "3: ldaxrb %w[s], [%x[t]]\nstlxrb %w[u], %w[s], [%x[t]]\ncbnz %w[u], 3b\n" \
-      FNVL_LOCKADDR_ \
-      "4: ldaxr %w[s], [%x[t]]\ncbnz %w[s], 4b\nmov %w[s], 1\nstlxr %w[u], %w[s], [%x[t]]\ncbnz %w[u], 4b\n" \
-      "ldr" SUF " %" R "[o], [%x[a]]\ndmb ishld\n2:" \
-      : [o]"=&r"(o), [a]"+r"(a), [s]"=&r"(s), [u]"=&r"(t_), [t]"=&r"(t) : : "memory", "cc"); \
+  static __attribute__((always_inline)) T load(u32 a){ T o; \
+    if(sizeof(T)==1 || __builtin_expect(!(a & MASK), 1)) __asm__ volatile(FNVL_A_ "ldar" SUF " %" R "[o], [%x[a]]" : [o]"=&r"(o), [a]"+r"(a) : : "memory"); \
+    else { u32 s, t_; unsigned long t; \
+      __asm__ volatile(FNVL_A_ "1: ldaxrb %w[s], [%x[a]]\nstlxrb %w[u], %w[s], [%x[a]]\ncbnz %w[u], 1b\n" \
+        "add %w[t], %w[a], " #LAST "\n" \
+        "3: ldaxrb %w[s], [%x[t]]\nstlxrb %w[u], %w[s], [%x[t]]\ncbnz %w[u], 3b" \
+        : [a]"+r"(a), [s]"=&r"(s), [u]"=&r"(t_), [t]"=&r"(t) : : "memory", "cc"); \
+      fnvl_host_world_stop(); \
+      __asm__ volatile(FNVL_A_ "ldr" SUF " %" R "[o], [%x[a]]\ndmb ishld" : [o]"=&r"(o), [a]"+r"(a) : : "memory"); } \
     return o; } \
-  static __attribute__((always_inline)) bool commit(u32 a, T o, T n){ u32 ok, s; unsigned long t; T v; \
-    if(sizeof(T)==1) __asm__ volatile(FNVL_A_ "3: ldaxr" SUF " %" R "[v], [%x[a]]\ncmp %" R "[v], %" R "[o]\nb.ne 5f\nstlxr" SUF " %w[s], %" R "[n], [%x[a]]\ncbnz %w[s], 3b\n" \
-      "dmb ish\nmov %w[ok], 1\nb 2f\n5: mov %w[ok], 0\n2:" \
-      : [ok]"=&r"(ok), [a]"+r"(a), [s]"=&r"(s), [v]"=&r"(v) : [o]"r"((W)o), [n]"r"((W)n) : "memory", "cc"); \
-    else __asm__ volatile(FNVL_A_ "tst %w[a], " #MASK "\nb.ne 1f\n" \
-      "3: ldaxr" SUF " %" R "[v], [%x[a]]\ncmp %" R "[v], %" R "[o]\nb.ne 5f\nstlxr" SUF " %w[s], %" R "[n], [%x[a]]\ncbnz %w[s], 3b\n" \
-      "dmb ish\nmov %w[ok], 1\nb 2f\n5: mov %w[ok], 0\nb 2f\n" \
-      "1: dmb ishst\nstr" SUF " %" R "[n], [%x[a]]\n" FNVL_LOCKADDR_ "stlr wzr, [%x[t]]\ndmb ish\nmov %w[ok], 1\n2:" \
-      : [ok]"=&r"(ok), [a]"+r"(a), [s]"=&r"(s), [v]"=&r"(v), [t]"=&r"(t) : [o]"r"((W)o), [n]"r"((W)n) : "memory", "cc"); \
-    return ok; } };
+  static __attribute__((always_inline)) bool commit(u32 a, T o, T n){ u32 ok, s; T v; \
+    if(sizeof(T)==1 || __builtin_expect(!(a & MASK), 1)) { \
+      __asm__ volatile(FNVL_A_ "3: ldaxr" SUF " %" R "[v], [%x[a]]\ncmp %" R "[v], %" R "[o]\nb.ne 5f\nstlxr" SUF " %w[s], %" R "[n], [%x[a]]\ncbnz %w[s], 3b\n" \
+        "dmb ish\nmov %w[ok], 1\nb 2f\n5: mov %w[ok], 0\n2:" \
+        : [ok]"=&r"(ok), [a]"+r"(a), [s]"=&r"(s), [v]"=&r"(v) : [o]"r"((W)o), [n]"r"((W)n) : "memory", "cc"); \
+      return ok; } \
+    __asm__ volatile(FNVL_A_ "dmb ishst\nstr" SUF " %" R "[n], [%x[a]]\ndmb ish" : [a]"+r"(a) : [n]"r"((W)n) : "memory"); \
+    fnvl_host_world_resume(); \
+    return true; } };
 FNVL_LK_(u8, "w", "b", 0, 0, u32)
 FNVL_LK_(u16, "w", "h", 1, 1, u32)
 FNVL_LK_(u32, "w", "", 3, 3, u32)
@@ -216,6 +216,14 @@ extern "C" { void fnvl_cpuid(u32 leaf, u32 sub, u32 out[4]); u64 fnvl_rdtsc(void
    popfd loads CF PF AF ZF SF DF OF; AC and ID are kept in c->eflx; TF/IF/IOPL/NT/RF/VM/VIF/VIP changes are ignored (user mode cannot change them). */
 #define EFL_PUSH() ((u32)((cf&1)|2u|((pf&1)<<2)|((af&1)<<4)|((zf&1)<<6)|((sf&1)<<7)|0x200u|((df&1)<<10)|((of&1)<<11)|(c->eflx&0x240000u)))
 #define EFL_POP(v_) do{ u32 f_=(v_); cf=f_&1; pf=(f_>>2)&1; af=(f_>>4)&1; zf=(f_>>6)&1; sf=(f_>>7)&1; df=(f_>>10)&1; of=(f_>>11)&1; c->eflx=f_&0x240000u; }while(0)
+/* RAISE_OUT / RAISE_IN: the flush rule of every explicit raise site (the sites that emit fnvl_raise / fnvl_raise_av: the lifter rewrites each call into FNVL_RAISE / FNVL_RAISE_AV).
+   Everything the CONTEXT names that the lifted function keeps in locals goes to struct cpu before the call: EFLAGS (the pushfd image, EFL_PUSH) into c->eflags and the x87 condition bits
+   C0 C2 C3 (FSW bits 8 10 14) into c->fc; the x87 stack and xmm state are flushed by the same sites (fnvlift f_x87_ctl.store, SYNC_X_OUT). After a continue the handler's EFLAGS and condition
+   bits are loaded back (EFL_POP: the arithmetic flags and DF; AC and ID into c->eflx; the other bits cannot be changed by user mode). */
+#define RAISE_OUT do{ c->eflags=EFL_PUSH(); c->fc=((c0&1)<<8)|((c2&1)<<10)|((c3&1)<<14); }while(0)
+#define RAISE_IN do{ u32 ef_=c->eflags; EFL_POP(ef_); c0=(c->fc>>8)&1; c2=(c->fc>>10)&1; c3=(c->fc>>14)&1; }while(0)
+#define FNVL_RAISE(code, at) do{ RAISE_OUT; fnvl_raise(code, at); RAISE_IN; }while(0)
+#define FNVL_RAISE_AV(acc, addr, at) do{ RAISE_OUT; fnvl_raise_av(acc, addr, at); RAISE_IN; }while(0)
 /* aam/aad/aaa/aas/daa/das are generated inline; segment selector values of a Win32 x86 user process (as in rt/seh.cc's CONTEXT) */
 #define SEL_CS 0x1bu
 #define SEL_DS 0x23u

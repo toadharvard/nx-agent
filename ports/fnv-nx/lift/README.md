@@ -128,7 +128,7 @@ of the image is ever rewritten (vtable slots, EH tables and jump tables included
   Implemented (rt/fnvl.h, fnvlift/core.py lock mode): class (b) for every guest access, the stack included (class (a)
   and the extensions only remove ordering, so leaving them out is safe); every LOCK-prefixed instruction and `xchg`
   with memory is one compare-and-swap commit of the instruction body run on a private copy, followed by `dmb ish`;
-  a misaligned locked operand runs under the one global spin lock `fnvnx_split_lock`.
+  a misaligned locked operand runs between `fnvl_host_world_stop()` and `fnvl_host_world_resume()` (platform/os/os.h and os_world.c: stop / resume every other thread of the process, synchronously, under one global lock; resume is called on the thread that stopped): every other guest thread is suspended, so nothing interleaves.
 - **Modules.** The lifter is applied to every non-system PE of the game (the exe, binkw32 and the rest).
 
 ### One reference CPU model (owner decision 2026-11-10)

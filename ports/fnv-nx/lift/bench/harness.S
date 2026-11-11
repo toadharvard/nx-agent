@@ -1,6 +1,6 @@
 /* Harness side of the bench ELF (bench/chain.py link; not part of the runtime). The Unicorn harness (bench/chrun.py) watches these addresses: it
    stops or records when the pc reaches one. Weak where a bench that links rt/seh.cc brings the real routine.
-   fnvl_nobody: the dispatcher's miss (rt/rt.c) hands the missed address (c->ra, offset 320 of the struct cpu in x27) to the watch point fnvl_raise_ud.
+   fnvl_nobody: the dispatcher's miss (rt/rt.c) hands the missed address (c->ra, offset 248 of the struct cpu in x27) to the watch point fnvl_raise_ud.
    fnvl_enter(struct cpu *c, void (*fn)(void)): the harness starts a lifted entry from a struct cpu image: saves x19..x28, loads the guest registers from
    c->r[0..7] into w19..w26, c into x27, calls fn, stores the guest registers back. */
 .text
@@ -15,7 +15,7 @@ fnvl_trace: ret
 .globl fnvl_trace_sw
 fnvl_trace_sw: ret
 .globl fnvl_nobody
-fnvl_nobody: ldr w0,[x27,#320]
+fnvl_nobody: ldr w0,[x27,#248]
  b fnvl_raise_ud
 .globl fnvl_enter
 .type fnvl_enter,%function

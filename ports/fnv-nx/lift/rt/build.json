@@ -13,7 +13,8 @@
    "-ffreestanding",
    "-fno-stack-protector",
    "-fno-asynchronous-unwind-tables",
-   "-fno-builtin"
+   "-fno-builtin",
+   "-Werror=attributes"
   ],
   "cxx": [
    "-mabi=ilp32",
@@ -52,7 +53,8 @@
    "-ffixed-x26",
    "-ffixed-x27",
    "-DFNVNX_SDD=1",
-   "-fno-devirtualize"
+   "-fno-devirtualize",
+   "-Werror=attributes"
   ],
   "asm": [
    "-mabi=ilp32",
