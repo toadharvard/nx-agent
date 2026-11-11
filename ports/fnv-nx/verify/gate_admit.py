@@ -30,7 +30,7 @@ ADMIT = TREE + "/verify/admit.json"
 GATES = TREE + "/verify/gates.json"
 CLASSES = ("doc", "tool", "product")
 REQUIRED = {"doc": (), "tool": ("selftests",),
-            "product": ("objstub", "linkstrict", "determinism", "oracle")}
+            "product": ("objstub", "linkstrict", "determinism", "oracle", "memsafe", "nodeadlock")}
 
 
 def judge(files, admit, gate_names, exists):
