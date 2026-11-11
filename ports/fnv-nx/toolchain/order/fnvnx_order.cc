@@ -109,8 +109,8 @@ static bool is_memory_ref(tree t) {
     case MEM_REF: case TARGET_MEM_REF: case COMPONENT_REF: case ARRAY_REF: case ARRAY_RANGE_REF:
     case BIT_FIELD_REF: case REALPART_EXPR: case IMAGPART_EXPR: case VIEW_CONVERT_EXPR:
       return true;
-    case VAR_DECL:
-      return TREE_STATIC(t) || DECL_EXTERNAL(t) || TREE_ADDRESSABLE(t);
+    case VAR_DECL:   // a global register variable (`register T v asm("xN")`) is a machine register: it has no address and is no memory
+      return !DECL_HARD_REGISTER(t) && (TREE_STATIC(t) || DECL_EXTERNAL(t) || TREE_ADDRESSABLE(t));
     default:
       return false;
   }
