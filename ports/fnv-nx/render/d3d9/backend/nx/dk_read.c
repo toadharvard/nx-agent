@@ -107,12 +107,13 @@ uint64_t nxdk_image_read(uint64_t a) {
 
 /* ---- v3 readback ---------------------------------------------------------------------------------------------------------------- */
 static float un(uint32_t v, uint32_t max) { return (float)v / (float)max; }
-static float sn(int32_t v, int32_t max) { const float x = (float)v / (float)max; return x < -1.0f ? -1.0f : x; }
+/* glReadPixels of a fixed-point buffer with the default CLAMP_READ_COLOR (FIXED_ONLY, gl4_read.c): a snorm component reads back clamped to [0, 1] */
+static float sn(int32_t v, int32_t max) { return v > 0 ? (float)v / (float)max : 0.0f; }
 
 static float half(uint16_t h) {
     const uint32_t s = (uint32_t)h >> 15 << 31, e = h >> 10 & 31, m = h & 1023;
     if (e == 0) return (s ? -1.0f : 1.0f) * ((float)m * 5.9604645e-8f);   /* subnormal: m * 2^-24, exact */
-    const uint32_t bits = s | (e == 31 ? 255u << 23 : (e + 112) << 23) | m << 13;
+    const uint32_t bits = s | (e == 31 ? 255u << 23 | (m ? 1u << 22 : 0u) : (e + 112) << 23) | m << 13;   /* a NaN converts quiet (IEEE 754 convertFormat) */
     float o;
     memcpy(&o, &bits, 4);
     return o;
@@ -166,8 +167,9 @@ static float depth_of(uint32_t fmt, const uint8_t* p) {
     uint16_t h;
     uint32_t w;
     float f;
-    memcpy(&h, p, 2); memcpy(&w, p, 4); memcpy(&f, p, 4);
-    return fmt == NxFmt_Z16 ? un(h, 65535) : fmt == NxFmt_Z32F || fmt == NxFmt_Z32FS8 ? f : un(w & 0xFFFFFF, 0xFFFFFF);
+    if (fmt == NxFmt_Z16) { memcpy(&h, p, 2); return un(h, 65535); }   /* a Z16 texel is 2 bytes: no wider read */
+    memcpy(&w, p, 4); memcpy(&f, p, 4);
+    return fmt == NxFmt_Z32F || fmt == NxFmt_Z32FS8 ? f : un(w & 0xFFFFFF, 0xFFFFFF);
 }
 
 static uint8_t stencil_of(uint32_t fmt, const uint8_t* p) { return fmt == NxFmt_Z24S8 ? p[3] : p[4]; }
