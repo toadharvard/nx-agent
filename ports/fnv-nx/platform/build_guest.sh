@@ -12,7 +12,7 @@
 # LIBNX_INC   libnx's include directory (headers only; sockets declarations of winsock.cpp).
 # EXT         directory with freetype/ and minimp3/ (default <fnv-nx>/ext).
 #
-# Output:  <out>/libfnvnx-platform.a   every source of platform/{win32,crt,audio,input,boundary} + toolchain/guest/{os_guest.c,
+# Output:  <out>/libfnvnx-platform.a   every source of platform/{win32,crt,audio,input,boundary,com} + toolchain/guest/{os_guest.c,
 #                                      platform_glue.cpp} (minus the host-side files) + FreeType
 #          <out>/defined.txt           nm --defined-only -g names of the archive, sorted
 #                                      (4th argument of platform/manifest/bridgetable.py)
@@ -80,6 +80,17 @@ if [ ! -f "$NLS_INC" ] || [ "$HERE/win32/tools/gen_nls.py" -nt "$NLS_INC" ]; the
     python3 -I "$HERE/win32/tools/gen_nls.py" "$NLS_DIR" "$NLS_INC"
 fi
 
+# ---- generated sources of a fresh checkout: the constant-result bodies (platform/manifest/env_const.tsv: one .inc per file
+# that includes them, lists read from the Makefile) and the COM bridge (platform/com/com_spec.json -> combridge*.gen.*)
+read -r -a ENV_GEN <<<"$(mkvar ENV_GEN)"
+read -r -a ENVC_SRC <<<"$(mkvar ENVC_SRC)"
+ENVC_GEN=()
+for s in "${ENVC_SRC[@]}"; do ENVC_GEN+=("$HERE/$s.env_const.gen.inc"); done
+COM_GEN=("$HERE/com/combridge.gen.cpp" "$HERE/com/combridge_exports.gen.cpp" "$HERE/com/combridge_if.gen.h" "$HERE/com/combridge_rows.tsv")
+make -s -C "$ROOT/tests/s4" "${ENV_GEN[@]}" "${ENVC_GEN[@]}" "${COM_GEN[0]}" \
+    || { echo "build_guest: cannot generate the env_const / COM bridge sources"; exit 2; }
+for f in "${COM_GEN[@]}"; do [ -f "$f" ] || { echo "build_guest: missing generated $f"; exit 2; }; done
+
 # ---- guest runtime
 if [ -z "${GUEST_RT:-}" ]; then
     GUEST_RT=$OUT/rt
@@ -105,7 +116,7 @@ add_src() {                                                         # absolute s
         *.cpp) echo "cxx $s $OBJ/${rel//\//_}.o" >>"$JOBLIST" ;;
     esac
 }
-for sub in win32 crt audio input boundary; do
+for sub in win32 crt audio input boundary com; do
     [ -d "$HERE/$sub" ] || continue
     while IFS= read -r f; do add_src "$f"; done < <(find "$HERE/$sub" -maxdepth 1 -type f \( -name '*.c' -o -name '*.cpp' \) | sort)
 done

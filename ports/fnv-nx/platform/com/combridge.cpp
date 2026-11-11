@@ -1,4 +1,10 @@
-/* combridge.cpp - faces and proxies (the model is described in combridge.h). The tables come from combridge.gen.cpp. */
+/* combridge.cpp - faces and proxies (the model is described in combridge.h). The tables come from combridge.gen.cpp.
+ *
+ * Records are never freed. A Face is a pure function of its key (the interface pointer of the object, the interface) and a
+ * ProxyRec of (the game's pointer, the interface): neither holds state that outlives a reference count, so a record that
+ * outlives its object is harmless (the same address again is the same record, and a proxy reads the vtable of the game object
+ * at every call). Freeing them would break the one thing COM allows a callee to do with a pointer it was only lent: keep it
+ * unreferenced for as long as the other object lives (the weak graph pointer of JoinFilterGraph). */
 #include "combridge.h"
 
 #include "fnvnx_boundary.h"
@@ -23,17 +29,6 @@ ProxyRec *g_by_obj[NBUCKET];       /* by the proxy object */
 inline unsigned hash2(const void *p, unsigned iface) { return (unsigned)(((uintptr_t)p >> 3) * 2654435761u + iface * 40503u) % NBUCKET; }
 inline unsigned hash1(const void *p) { return hash2(p, 0); }
 
-Face *face_find(void *obj, unsigned iface)
-{
-    for (Face *f = g_faces[hash2(obj, iface)]; f; f = f->next)
-        if (f->obj == obj && f->iface == iface) return f;
-    return nullptr;
-}
-void face_remove(Face *f)
-{
-    for (Face **pp = &g_faces[hash2(f->obj, f->iface)]; *pp; pp = &(*pp)->next)
-        if (*pp == f) { *pp = f->next; return; }
-}
 ProxyRec *px_find_gp(const void *gp, unsigned iface)
 {
     for (ProxyRec *r = g_by_gp[hash2(gp, iface)]; r; r = r->next_gp)
@@ -46,19 +41,7 @@ ProxyRec *px_find_obj(const void *obj)
         if (r->obj == obj) return r;
     return nullptr;
 }
-void px_unlink(ProxyRec *r)
-{
-    for (ProxyRec **pp = &g_by_gp[hash2(r->gp, r->iface)]; *pp; pp = &(*pp)->next_gp)
-        if (*pp == r) { *pp = r->next_gp; break; }
-    for (ProxyRec **pp = &g_by_obj[hash1(r->obj)]; *pp; pp = &(*pp)->next_obj)
-        if (*pp == r) { *pp = r->next_obj; break; }
-}
-void px_destroy(ProxyRec *r)   /* unlinked, nobody holds it */
-{
-    g_tables.ifaces[r->iface].free_proxy(r->obj);
-    free(r);
-}
-/* the proxy of (gp, iface), made when there is none; lock held; null when out of memory */
+/* the proxy of (gp, iface), made when there is none; lock held; null when out of memory or when the interface has no proxy */
 ProxyRec *px_get(void *gp, unsigned iface)
 {
     if (ProxyRec *r = px_find_gp(gp, iface)) return r;
@@ -75,6 +58,21 @@ ProxyRec *px_get(void *gp, unsigned iface)
     r->next_obj = g_by_obj[b];
     g_by_obj[b] = r;
     return r;
+}
+/* the face of (obj, iface), made when there is none; lock held */
+Face *face_get(void *obj, unsigned iface)
+{
+    unsigned h = hash2(obj, iface);
+    for (Face *f = g_faces[h]; f; f = f->next)
+        if (f->obj == obj && f->iface == iface) return f;
+    Face *f = (Face *)calloc(1, sizeof *f);
+    if (!f) return nullptr;
+    f->vt = g_tables.keys + g_tables.ifaces[iface].keyoff;
+    f->obj = obj;
+    f->iface = iface;
+    f->next = g_faces[h];
+    g_faces[h] = f;
+    return f;
 }
 
 void game_addref(void *gp) { fnvnx_guest_com_call<unsigned long>(gp, 1); }
@@ -94,6 +92,25 @@ bool is_face_vt(const uintptr_t *vt, unsigned *iface)
 
 unsigned nxcom_iface_count() { return g_tables.niface; }
 
+unsigned live_faces()
+{
+    unsigned n = 0;
+    os_lock(&g_lock);
+    for (unsigned i = 0; i < NBUCKET; i++)
+        for (Face *f = g_faces[i]; f; f = f->next) n += f->refs > 0;
+    os_unlock(&g_lock);
+    return n;
+}
+unsigned live_proxies()
+{
+    unsigned n = 0;
+    os_lock(&g_lock);
+    for (unsigned i = 0; i < NBUCKET; i++)
+        for (ProxyRec *r = g_by_gp[i]; r; r = r->next_gp) n += r->prefs > 0;
+    os_unlock(&g_lock);
+    return n;
+}
+
 unsigned init()
 {
     if (__atomic_load_n(&g_init_state, __ATOMIC_ACQUIRE) == 2) return g_missing;
@@ -110,8 +127,7 @@ unsigned init()
             dll[0] = '!';
             memcpy(dll + 1, f.name, n + 1);
             for (unsigned s = 0; s < f.nslots; s++) {
-                g_tables.keys[f.keyoff + s] =
-                    (uintptr_t)fnvnx_bnd_export_value(dll, f.names[s], s, f.thunks[s]);
+                g_tables.keys[f.keyoff + s] = (uintptr_t)fnvnx_bnd_export_value(dll, f.names[s], s, f.thunks[s]);
                 if (!g_tables.keys[f.keyoff + s]) missing++;
             }
         }
@@ -147,49 +163,6 @@ Face *face_from(const void *gp)
     return (Face *)gp;
 }
 
-Scope::~Scope()
-{
-    for (unsigned i = n; i-- > 0;) {
-        if (e[i].face) {
-            Face *f = (Face *)e[i].p;
-            os_lock(&g_lock);
-            bool dead = --f->tmp == 0 && f->refs == 0;
-            if (dead) face_remove(f);
-            os_unlock(&g_lock);
-            if (dead) free(f);
-        } else {
-            ProxyRec *r = (ProxyRec *)e[i].p;
-            os_lock(&g_lock);
-            bool dead = --r->tmp == 0 && r->prefs == 0;
-            if (dead) px_unlink(r);
-            os_unlock(&g_lock);
-            if (dead) px_destroy(r);
-        }
-    }
-}
-void Scope::add(void *p, bool face)
-{
-    if (n < sizeof e / sizeof *e) { e[n].p = p; e[n].face = face; n++; }
-}
-
-namespace {
-/* the face of (obj, iface), made when there is none; lock held */
-Face *face_get(void *obj, unsigned iface)
-{
-    if (Face *f = face_find(obj, iface)) return f;
-    Face *f = (Face *)calloc(1, sizeof *f);
-    if (!f) return nullptr;
-    const Iface &fi = g_tables.ifaces[iface];
-    f->vt = g_tables.keys + fi.keyoff;
-    f->obj = obj;
-    f->iface = iface;
-    unsigned h = hash2(obj, iface);
-    f->next = g_faces[h];
-    g_faces[h] = f;
-    return f;
-}
-}   // namespace
-
 void *to_game(void *obj, unsigned iface)
 {
     if (!obj) return nullptr;
@@ -198,10 +171,7 @@ void *to_game(void *obj, unsigned iface)
     if (ProxyRec *r = px_find_obj(obj)) {   /* a game object on its way back: the game gets its own pointer */
         void *gp = r->gp;
         bool more = --r->prefs > 0;
-        bool dead = r->prefs == 0 && r->tmp == 0;
-        if (dead) px_unlink(r);
         os_unlock(&g_lock);
-        if (dead) px_destroy(r);
         if (more) game_addref(gp);   /* the platform still holds the reference it had; the game gets one of its own */
         return gp;
     }
@@ -211,7 +181,7 @@ void *to_game(void *obj, unsigned iface)
     return f;
 }
 
-void *borrow_to_game(void *obj, unsigned iface, Scope &sc)
+void *borrow_to_game(void *obj, unsigned iface)
 {
     if (!obj) return nullptr;
     init();
@@ -222,13 +192,11 @@ void *borrow_to_game(void *obj, unsigned iface, Scope &sc)
         return gp;
     }
     Face *f = face_get(obj, iface);
-    if (f) f->tmp++;
     os_unlock(&g_lock);
-    if (f) sc.add(f, true);
     return f;
 }
 
-void *from_game(const void *gp, unsigned iface, Scope &sc)
+void *from_game(const void *gp, unsigned iface)
 {
     if (!gp) return nullptr;
     init();
@@ -236,11 +204,8 @@ void *from_game(const void *gp, unsigned iface, Scope &sc)
     if (f && iface_is(f->iface, iface)) return f->obj;
     os_lock(&g_lock);
     ProxyRec *r = px_get((void *)gp, iface);
-    if (r) r->tmp++;
     os_unlock(&g_lock);
-    if (!r) return nullptr;
-    sc.add(r, false);
-    return r->obj;
+    return r ? r->obj : nullptr;
 }
 
 void *adopt_game(void *gp, unsigned iface)
@@ -275,10 +240,8 @@ void face_ref(Face *f)
 void face_unref(Face *f)
 {
     os_lock(&g_lock);
-    bool dead = --f->refs <= 0 && f->tmp == 0;
-    if (dead) face_remove(f);
+    if (f->refs > 0) f->refs--;
     os_unlock(&g_lock);
-    if (dead) free(f);
 }
 
 unsigned long px_addref(ProxyRec *r)
@@ -291,15 +254,13 @@ unsigned long px_addref(ProxyRec *r)
 }
 unsigned long px_release(ProxyRec *r)
 {
-    void *gp = r->gp;
     os_lock(&g_lock);
-    int n = --r->prefs;
-    bool dead = n == 0 && r->tmp == 0;
-    if (dead) px_unlink(r);
+    int before = r->prefs;
+    int n = before > 0 ? --r->prefs : 0;
+    bool last = before == 1;
     os_unlock(&g_lock);
-    if (n == 0) game_release(gp);
-    if (dead) px_destroy(r);
-    return (unsigned long)(n < 0 ? 0 : n);
+    if (last) game_release(r->gp);
+    return (unsigned long)n;
 }
 int32_t px_qi(ProxyRec *r, const uint8_t canon[16], const void *riid, void **out)
 {

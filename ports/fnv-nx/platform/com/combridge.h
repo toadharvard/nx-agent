@@ -20,9 +20,9 @@
  * Reference rules (a pointer crosses with the reference it carries):
  *   to_game(obj)    the caller hands over one reference of obj (the one a C++ method returned): it becomes a reference of the game
  *                   (face.refs++); a proxy goes back as the game's own pointer.
- *   from_game(gp)   a borrowed pointer (an argument): the C++ object, or a proxy that lives to the end of the call (Scope);
+ *   from_game(gp)   a borrowed pointer (an argument): the C++ object, or the proxy of the game object (no reference moves);
  *   adopt_game(gp)  a pointer the game returned with its reference (an out parameter of a game method): the platform now owns it.
- * The table of interfaces, IIDs and key slots is generated (combridge.gen.cpp) from com_spec.json. */
+ * Faces and proxies are never freed (combridge.cpp says why). The table of interfaces, IIDs and key slots is generated (combridge.gen.cpp) from com_spec.json. */
 #ifndef FNVNX_COMBRIDGE_H
 #define FNVNX_COMBRIDGE_H
 #include <stddef.h>
@@ -61,29 +61,19 @@ unsigned nxcom_iface_count();
 void gen_init();               /* generated: the IID table from the C++ constants */
 unsigned selfcheck();          /* generated: the number of methods whose vtable slot differs from the spec (0) */
 
-/* What a call through a face keeps alive for the length of the call: a face made only for an argument, a proxy made for one. */
 struct Face {
     const uintptr_t *vt;        /* FIRST WORD: the key table the game reads */
     void *obj;                  /* the interface pointer of the platform object (type: the cxx class of `iface`) */
     unsigned iface;
     int refs;                   /* references the game holds through this face */
-    int tmp;                    /* borrowed for the current calls (Scope) */
     Face *next;
 };
 struct ProxyRec {
     void *gp;                   /* the game's interface pointer */
     unsigned iface;
     int prefs;                  /* references the platform holds of the proxy; the game object holds one while > 0 */
-    int tmp;
     void *obj;                  /* the proxy object (the generated class), what the platform calls */
     ProxyRec *next_gp, *next_obj;
-};
-struct Scope {
-    struct E { void *p; bool face; };
-    E e[8];
-    unsigned n = 0;
-    ~Scope();
-    void add(void *p, bool face);
 };
 
 /* Fills the key tables from the import table (fnvnx_bnd_export_value); returns the number of rows the import table lacks (0
@@ -92,13 +82,17 @@ unsigned init();
 
 Face *face_from(const void *gp);                 /* gp is a face of this file: it, else null */
 void *to_game(void *obj, unsigned iface);        /* see the header comment */
-void *borrow_to_game(void *obj, unsigned iface, Scope &sc);   /* an argument the platform passes to a game method */
-void *from_game(const void *gp, unsigned iface, Scope &sc);
+void *borrow_to_game(void *obj, unsigned iface);   /* an argument the platform passes to a game method: no reference moves */
+void *from_game(const void *gp, unsigned iface);   /* a borrowed argument */
 void *adopt_game(void *gp, unsigned iface);
 void face_ref(Face *f);
-void face_unref(Face *f);                        /* before the object's Release: the face goes away with its last game reference */
+void face_unref(Face *f);                        /* one game reference less (the object's own Release is the caller's) */
 int iface_for_iid(const uint8_t canon[16]);      /* -1: not an interface of the spec */
 bool iface_is(unsigned have, unsigned want);     /* have == want or derives from it */
+
+/* observers (tests): the faces and proxies the game / the platform holds a reference through */
+unsigned live_faces();
+unsigned live_proxies();
 
 /* the platform calls a proxy's IUnknown */
 unsigned long px_addref(ProxyRec *r);

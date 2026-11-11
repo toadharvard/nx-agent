@@ -167,7 +167,7 @@ class Gen:
                 if p["iface"] not in self.ix:
                     die(f"{what}: interface {p['iface']} of {p['name']} is not in the spec")
                 nin += 1
-                args.append(f"({ct})nxcom::from_game((const void *){a}, NXIF_{p['iface']}, sc)")
+                args.append(f"({ct})nxcom::from_game((const void *){a}, NXIF_{p['iface']})")
             elif kd in ("handle", "giface"):
                 if p["dir"] != "out" or m["ret_kind"] != "hresult":
                     die(f"{what}: handle {p['name']} by reference needs dir out and an HRESULT method")
@@ -177,12 +177,12 @@ class Gen:
                 if ifc.startswith("$"):
                     cexp = self.canon(P, ifc[1:], var_of, what)
                     post.append(f"if ({a} && *(void **){a}) {{ void *p_ = *(void **){a}; uint8_t c[16]; {cexp}; int ix = nxcom::iface_for_iid(c);\n"
-                                f"        if (r >= 0 && ix >= 0) *(void **){a} = nxcom::to_game(p_, (unsigned)ix);\n"
-                                f"        else {{ if (r >= 0) {{ ((::IUnknown *)p_)->Release(); r = ({m['ret']}){E_NOINTERFACE}; }} *(void **){a} = nullptr; }} }}")
+                                f"        if ((int32_t)r >= 0 && ix >= 0) *(void **){a} = nxcom::to_game(p_, (unsigned)ix);\n"
+                                f"        else {{ if ((int32_t)r >= 0) {{ ((::IUnknown *)p_)->Release(); r = ({m['ret']}){E_NOINTERFACE}; }} *(void **){a} = nullptr; }} }}")
                 else:
                     if ifc not in self.ix:
                         die(f"{what}: interface {ifc} of {p['name']} is not in the spec")
-                    post.append(f"if ({a}) *(void **){a} = r >= 0 ? nxcom::to_game(*(void **){a}, NXIF_{ifc}) : nullptr;")
+                    post.append(f"if ({a}) *(void **){a} = (int32_t)r >= 0 ? nxcom::to_game(*(void **){a}, NXIF_{ifc}) : nullptr;")
             elif kd == "handle_array":
                 if p["dir"] != "out" or m["ret_kind"] != "hresult" or len(p.get("count", [])) != 2:
                     die(f"{what}: handle_array {p['name']} shape has no rule")
@@ -191,7 +191,7 @@ class Gen:
                 if p["iface"] not in self.ix:
                     die(f"{what}: interface {p['iface']} of {p['name']} is not in the spec")
                 args.append(f"({ct}){a}")
-                post.append(f"if (r >= 0 && {a}) {{ uint32_t cnt = a{fi} ? *(uint32_t *)a{fi} : (r == 0 ? (uint32_t)a{ni} : 0);\n"
+                post.append(f"if ((int32_t)r >= 0 && {a}) {{ uint32_t cnt = a{fi} ? *(uint32_t *)a{fi} : (r == 0 ? (uint32_t)a{ni} : 0);\n"
                             f"        for (uint32_t i = 0; i < cnt; i++) ((void **){a})[i] = nxcom::to_game(((void **){a})[i], NXIF_{p['iface']}); }}")
             else:
                 die(f"{what}: kind {kd} has no rule")
@@ -204,8 +204,6 @@ class Gen:
             L.append("    nxcom::Face *f_ = nxcom::face_from((const void *)t);")
             L.append(f"    if (!f_) return{(' ' + bad) if bad else ''};   /* a platform key called with a pointer that is not a face of ours */")
             L.append("    void *o = f_->obj;")
-        if nin:
-            L.append("    nxcom::Scope sc;")
         L += ["    " + x for x in pre]
         call = f"{callee}({', '.join(args)})"
         if rl == "v":
@@ -254,7 +252,7 @@ class Gen:
                 args.append(f"(uintptr_t){a}")
             elif kd in ("handle", "giface") and not p["byref"]:
                 nin += 1
-                args.append(f"nxcom::borrow_to_game((void *){a}, NXIF_{p['iface']}, sc)")
+                args.append(f"nxcom::borrow_to_game((void *){a}, NXIF_{p['iface']})")
             elif kd in ("handle", "giface"):
                 pre.append(f"void *g{k} = nullptr; if ({a}) *(void **){a} = nullptr;")
                 args.append(f"{a} ? (void **)&g{k} : (void **)nullptr")
@@ -262,20 +260,18 @@ class Gen:
                 if ifc.startswith("$"):
                     cexp = self.canon(P, ifc[1:], type("V", (), {"raw": False, "__call__": lambda s, kk: f"a{kk}"})(), what)
                     pre.insert(0, f"uint8_t c[16]; {cexp}; int ix = nxcom::iface_for_iid(c); if (ix < 0) return ({ret}){E_NOINTERFACE};")
-                    post.append(f"if ({a}) *(void **){a} = (r >= 0 && g{k}) ? nxcom::adopt_game(g{k}, (unsigned)ix) : nullptr;")
+                    post.append(f"if ({a}) *(void **){a} = ((int32_t)r >= 0 && g{k}) ? nxcom::adopt_game(g{k}, (unsigned)ix) : nullptr;")
                 else:
-                    post.append(f"if ({a}) *(void **){a} = (r >= 0 && g{k}) ? nxcom::adopt_game(g{k}, NXIF_{ifc}) : nullptr;")
+                    post.append(f"if ({a}) *(void **){a} = ((int32_t)r >= 0 && g{k}) ? nxcom::adopt_game(g{k}, NXIF_{ifc}) : nullptr;")
             elif kd == "handle_array":
                 names = [q["name"] for q in P]
                 ni, fi = (names.index(p["count"][0]), names.index(p["count"][1]))
                 args.append(a)
-                post.append(f"if (r >= 0 && {a}) {{ uint32_t cnt = a{fi} ? *(uint32_t *)a{fi} : (r == 0 ? (uint32_t)a{ni} : 0);\n"
+                post.append(f"if ((int32_t)r >= 0 && {a}) {{ uint32_t cnt = a{fi} ? *(uint32_t *)a{fi} : (r == 0 ? (uint32_t)a{ni} : 0);\n"
                             f"        for (uint32_t i = 0; i < cnt; i++) ((void **){a})[i] = nxcom::adopt_game(((void **){a})[i], NXIF_{p['iface']}); }}")
             else:
                 die(f"{what}: kind {kd} has no rule")
         body = []
-        if nin:
-            body.append("nxcom::Scope sc;")
         body += pre
         call = f"fnvnx_guest_com_call<{ret}>(rec->gp, {m['slot']}{''.join(', ' + x for x in args)})"
         if rk == "void":

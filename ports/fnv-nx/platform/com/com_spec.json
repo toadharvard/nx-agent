@@ -27,7 +27,7 @@
      "byref": false,
      "ctype": "LPUNKNOWN",
      "dir": "in",
-     "iface": "IUnknown",
+     "iface": "IUnknownCom",
      "kind": "giface",
      "name": "pUnkOuter",
      "size": 4
@@ -63,7 +63,7 @@
      "byref": false,
      "ctype": "LPUNKNOWN",
      "dir": "in",
-     "iface": "IUnknown",
+     "iface": "IUnknownCom",
      "kind": "giface",
      "name": "pUnkOuter",
      "size": 4
@@ -146,7 +146,7 @@
      "byref": false,
      "ctype": "LPUNKNOWN",
      "dir": "in",
-     "iface": "IUnknown",
+     "iface": "IUnknownCom",
      "kind": "giface",
      "name": "punkOuter",
      "size": 4
@@ -262,7 +262,7 @@
    "slots": 39
   },
   "IDirectInput8A": {
-   "base": "IUnknown",
+   "base": "IUnknownCom",
    "cxx": "::IDirectInput8A",
    "family": "di",
    "header": "dinput.h",
@@ -273,7 +273,7 @@
    "slots": 11
   },
   "IDirectInputDevice8A": {
-   "base": "IUnknown",
+   "base": "IUnknownCom",
    "cxx": "::IDirectInputDevice8A",
    "family": "di",
    "header": "dinput.h",
@@ -286,7 +286,7 @@
    "slots": 32
   },
   "IDirectInputEffect": {
-   "base": "IUnknown",
+   "base": "IUnknownCom",
    "cxx": "::IDirectInputEffect",
    "family": "di",
    "header": "dinput.h",
@@ -295,7 +295,7 @@
    "slots": 13
   },
   "IDirectSound": {
-   "base": "IUnknown",
+   "base": "IUnknownCom",
    "cxx": "::IDirectSound",
    "family": "ds",
    "header": "dsound.h",
@@ -306,7 +306,7 @@
    "slots": 11
   },
   "IDirectSound3DBuffer": {
-   "base": "IUnknown",
+   "base": "IUnknownCom",
    "cxx": "::IDirectSound3DBuffer",
    "family": "ds",
    "header": "dsound.h",
@@ -317,7 +317,7 @@
    "slots": 21
   },
   "IDirectSound3DListener": {
-   "base": "IUnknown",
+   "base": "IUnknownCom",
    "cxx": "::IDirectSound3DListener",
    "family": "ds",
    "header": "dsound.h",
@@ -339,7 +339,7 @@
    "slots": 12
   },
   "IDirectSoundBuffer": {
-   "base": "IUnknown",
+   "base": "IUnknownCom",
    "cxx": "::IDirectSoundBuffer",
    "family": "ds",
    "header": "dsound.h",
@@ -361,7 +361,7 @@
    "slots": 24
   },
   "IDirectSoundFXChorus": {
-   "base": "IUnknown",
+   "base": "IUnknownCom",
    "cxx": "::FxIf<::FxChorus>",
    "family": "ds",
    "header": "dsound_fx.h",
@@ -372,7 +372,7 @@
    "slots": 5
   },
   "IDirectSoundFXCompressor": {
-   "base": "IUnknown",
+   "base": "IUnknownCom",
    "cxx": "::FxIf<::FxCompressor>",
    "family": "ds",
    "header": "dsound_fx.h",
@@ -383,7 +383,7 @@
    "slots": 5
   },
   "IDirectSoundFXDistortion": {
-   "base": "IUnknown",
+   "base": "IUnknownCom",
    "cxx": "::FxIf<::FxDistortion>",
    "family": "ds",
    "header": "dsound_fx.h",
@@ -394,7 +394,7 @@
    "slots": 5
   },
   "IDirectSoundFXEcho": {
-   "base": "IUnknown",
+   "base": "IUnknownCom",
    "cxx": "::FxIf<::FxEcho>",
    "family": "ds",
    "header": "dsound_fx.h",
@@ -405,7 +405,7 @@
    "slots": 5
   },
   "IDirectSoundFXFlanger": {
-   "base": "IUnknown",
+   "base": "IUnknownCom",
    "cxx": "::FxIf<::FxChorus>",
    "family": "ds",
    "header": "dsound_fx.h",
@@ -416,7 +416,7 @@
    "slots": 5
   },
   "IDirectSoundFXGargle": {
-   "base": "IUnknown",
+   "base": "IUnknownCom",
    "cxx": "::FxIf<::FxGargle>",
    "family": "ds",
    "header": "dsound_fx.h",
@@ -427,7 +427,7 @@
    "slots": 5
   },
   "IDirectSoundFXI3DL2Reverb": {
-   "base": "IUnknown",
+   "base": "IUnknownCom",
    "cxx": "::IDirectSoundFXI3DL2Reverb",
    "family": "ds",
    "header": "dsound.h",
@@ -438,7 +438,7 @@
    "slots": 9
   },
   "IDirectSoundFXParamEq": {
-   "base": "IUnknown",
+   "base": "IUnknownCom",
    "cxx": "::FxIf<::FxParamEq>",
    "family": "ds",
    "header": "dsound_fx.h",
@@ -449,7 +449,7 @@
    "slots": 5
   },
   "IDirectSoundFXWavesReverb": {
-   "base": "IUnknown",
+   "base": "IUnknownCom",
    "cxx": "::IDirectSoundFXWavesReverb",
    "family": "ds",
    "header": "dsound.h",
@@ -460,7 +460,7 @@
    "slots": 5
   },
   "IDirectSoundNotify": {
-   "base": "IUnknown",
+   "base": "IUnknownCom",
    "cxx": "::IDirectSoundNotify",
    "family": "ds",
    "header": "dsound.h",
@@ -592,7 +592,7 @@
    "slots": 4
   },
   "IKsPropertySet": {
-   "base": "IUnknown",
+   "base": "IUnknownCom",
    "cxx": "::KsProperty",
    "family": "ds",
    "header": "dsound_fx.h",
@@ -723,7 +723,7 @@
    ],
    "slots": 7
   },
-  "IUnknown": {
+  "IUnknownCom": {
    "base": null,
    "cxx": "::IUnknown",
    "family": "ds",
@@ -757,7 +757,7 @@
  },
  "methods": [
   {
-   "iface": "IUnknown",
+   "iface": "IUnknownCom",
    "name": "QueryInterface",
    "params": [
     {
@@ -786,7 +786,7 @@
    "slot": 0
   },
   {
-   "iface": "IUnknown",
+   "iface": "IUnknownCom",
    "name": "AddRef",
    "params": [],
    "ret": "ULONG",
@@ -795,7 +795,7 @@
    "slot": 1
   },
   {
-   "iface": "IUnknown",
+   "iface": "IUnknownCom",
    "name": "Release",
    "params": [],
    "ret": "ULONG",
@@ -921,7 +921,7 @@
      "byref": false,
      "ctype": "LPUNKNOWN",
      "dir": "in",
-     "iface": "IUnknown",
+     "iface": "IUnknownCom",
      "kind": "giface",
      "name": "pUnkOuter",
      "size": 4
@@ -1134,7 +1134,7 @@
      "byref": false,
      "ctype": "LPUNKNOWN",
      "dir": "in",
-     "iface": "IUnknown",
+     "iface": "IUnknownCom",
      "kind": "giface",
      "name": "pUnkOuter",
      "size": 4
@@ -4440,7 +4440,7 @@
      "byref": false,
      "ctype": "LPUNKNOWN",
      "dir": "in",
-     "iface": "IUnknown",
+     "iface": "IUnknownCom",
      "kind": "giface",
      "name": "pUnkOuter",
      "size": 4
@@ -5139,7 +5139,7 @@
      "byref": false,
      "ctype": "LPUNKNOWN",
      "dir": "in",
-     "iface": "IUnknown",
+     "iface": "IUnknownCom",
      "kind": "giface",
      "name": "punkOuter",
      "size": 4
@@ -13146,7 +13146,7 @@
      "byref": false,
      "ctype": "Unk *",
      "dir": "in",
-     "iface": "IUnknown",
+     "iface": "IUnknownCom",
      "kind": "giface",
      "name": "a0",
      "size": 4

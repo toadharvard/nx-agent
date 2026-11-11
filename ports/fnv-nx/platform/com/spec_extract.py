@@ -26,28 +26,28 @@ AUDIO = os.path.join(HERE, "..", "audio")
 # family: ds (dsound.h: GUID layout), di (dinput.h), dsh (dshow_int.h: raw 16-byte Guid)
 IFACES = [
     # name, header, struct, cxx, base, family, iid symbol, aliases
-    ("IUnknown", "dsound.h", "IUnknown", "::IUnknown", None, "ds", None, []),
+    ("IUnknownCom", "dsound.h", "IUnknown", "::IUnknown", None, "ds", None, []),
     ("Unk", "dshow_int.h", "Unk", "dsh::Unk", None, "dsh", None, []),
-    ("IDirectSound", "dsound.h", "IDirectSound", "::IDirectSound", "IUnknown", "ds", "IID_IDirectSound", []),
+    ("IDirectSound", "dsound.h", "IDirectSound", "::IDirectSound", "IUnknownCom", "ds", "IID_IDirectSound", []),
     ("IDirectSound8", "dsound.h", "IDirectSound8", "::IDirectSound8", "IDirectSound", "ds", "IID_IDirectSound8", []),
-    ("IDirectSoundBuffer", "dsound.h", "IDirectSoundBuffer", "::IDirectSoundBuffer", "IUnknown", "ds", "IID_IDirectSoundBuffer", []),
+    ("IDirectSoundBuffer", "dsound.h", "IDirectSoundBuffer", "::IDirectSoundBuffer", "IUnknownCom", "ds", "IID_IDirectSoundBuffer", []),
     ("IDirectSoundBuffer8", "dsound.h", "IDirectSoundBuffer8", "::IDirectSoundBuffer8", "IDirectSoundBuffer", "ds", "IID_IDirectSoundBuffer8", []),
-    ("IDirectSound3DListener", "dsound.h", "IDirectSound3DListener", "::IDirectSound3DListener", "IUnknown", "ds", "IID_IDirectSound3DListener", []),
-    ("IDirectSound3DBuffer", "dsound.h", "IDirectSound3DBuffer", "::IDirectSound3DBuffer", "IUnknown", "ds", "IID_IDirectSound3DBuffer", []),
-    ("IDirectSoundNotify", "dsound.h", "IDirectSoundNotify", "::IDirectSoundNotify", "IUnknown", "ds", "IID_IDirectSoundNotify", []),
-    ("IDirectSoundFXI3DL2Reverb", "dsound.h", "IDirectSoundFXI3DL2Reverb", "::IDirectSoundFXI3DL2Reverb", "IUnknown", "ds", "IID_IDirectSoundFXI3DL2Reverb8", []),
-    ("IDirectSoundFXWavesReverb", "dsound.h", "IDirectSoundFXWavesReverb", "::IDirectSoundFXWavesReverb", "IUnknown", "ds", "IID_IDirectSoundFXWavesReverb8", []),
-    ("IKsPropertySet", "dsound_fx.h", "KsProperty", "::KsProperty", "IUnknown", "ds", "IID_KsPropertySet", []),
-    ("IDirectSoundFXChorus", "dsound_fx.h", "FxIf<T>:FxChorus", "::FxIf<::FxChorus>", "IUnknown", "ds", "IID_Chorus", []),
-    ("IDirectSoundFXFlanger", "dsound_fx.h", "FxIf<T>:FxChorus", "::FxIf<::FxChorus>", "IUnknown", "ds", "IID_Flanger", []),
-    ("IDirectSoundFXCompressor", "dsound_fx.h", "FxIf<T>:FxCompressor", "::FxIf<::FxCompressor>", "IUnknown", "ds", "IID_Compressor", []),
-    ("IDirectSoundFXDistortion", "dsound_fx.h", "FxIf<T>:FxDistortion", "::FxIf<::FxDistortion>", "IUnknown", "ds", "IID_Distortion", []),
-    ("IDirectSoundFXEcho", "dsound_fx.h", "FxIf<T>:FxEcho", "::FxIf<::FxEcho>", "IUnknown", "ds", "IID_Echo", []),
-    ("IDirectSoundFXGargle", "dsound_fx.h", "FxIf<T>:FxGargle", "::FxIf<::FxGargle>", "IUnknown", "ds", "IID_Gargle", []),
-    ("IDirectSoundFXParamEq", "dsound_fx.h", "FxIf<T>:FxParamEq", "::FxIf<::FxParamEq>", "IUnknown", "ds", "IID_ParamEq", []),
-    ("IDirectInput8A", "dinput.h", "IDirectInput8A", "::IDirectInput8A", "IUnknown", "di", "IID_IDirectInput8A", []),
-    ("IDirectInputDevice8A", "dinput.h", "IDirectInputDevice8A", "::IDirectInputDevice8A", "IUnknown", "di", "IID_IDirectInputDevice8A", []),
-    ("IDirectInputEffect", "dinput.h", "IDirectInputEffect", "::IDirectInputEffect", "IUnknown", "di", None, []),
+    ("IDirectSound3DListener", "dsound.h", "IDirectSound3DListener", "::IDirectSound3DListener", "IUnknownCom", "ds", "IID_IDirectSound3DListener", []),
+    ("IDirectSound3DBuffer", "dsound.h", "IDirectSound3DBuffer", "::IDirectSound3DBuffer", "IUnknownCom", "ds", "IID_IDirectSound3DBuffer", []),
+    ("IDirectSoundNotify", "dsound.h", "IDirectSoundNotify", "::IDirectSoundNotify", "IUnknownCom", "ds", "IID_IDirectSoundNotify", []),
+    ("IDirectSoundFXI3DL2Reverb", "dsound.h", "IDirectSoundFXI3DL2Reverb", "::IDirectSoundFXI3DL2Reverb", "IUnknownCom", "ds", "IID_IDirectSoundFXI3DL2Reverb8", []),
+    ("IDirectSoundFXWavesReverb", "dsound.h", "IDirectSoundFXWavesReverb", "::IDirectSoundFXWavesReverb", "IUnknownCom", "ds", "IID_IDirectSoundFXWavesReverb8", []),
+    ("IKsPropertySet", "dsound_fx.h", "KsProperty", "::KsProperty", "IUnknownCom", "ds", "IID_KsPropertySet", []),
+    ("IDirectSoundFXChorus", "dsound_fx.h", "FxIf<T>:FxChorus", "::FxIf<::FxChorus>", "IUnknownCom", "ds", "IID_Chorus", []),
+    ("IDirectSoundFXFlanger", "dsound_fx.h", "FxIf<T>:FxChorus", "::FxIf<::FxChorus>", "IUnknownCom", "ds", "IID_Flanger", []),
+    ("IDirectSoundFXCompressor", "dsound_fx.h", "FxIf<T>:FxCompressor", "::FxIf<::FxCompressor>", "IUnknownCom", "ds", "IID_Compressor", []),
+    ("IDirectSoundFXDistortion", "dsound_fx.h", "FxIf<T>:FxDistortion", "::FxIf<::FxDistortion>", "IUnknownCom", "ds", "IID_Distortion", []),
+    ("IDirectSoundFXEcho", "dsound_fx.h", "FxIf<T>:FxEcho", "::FxIf<::FxEcho>", "IUnknownCom", "ds", "IID_Echo", []),
+    ("IDirectSoundFXGargle", "dsound_fx.h", "FxIf<T>:FxGargle", "::FxIf<::FxGargle>", "IUnknownCom", "ds", "IID_Gargle", []),
+    ("IDirectSoundFXParamEq", "dsound_fx.h", "FxIf<T>:FxParamEq", "::FxIf<::FxParamEq>", "IUnknownCom", "ds", "IID_ParamEq", []),
+    ("IDirectInput8A", "dinput.h", "IDirectInput8A", "::IDirectInput8A", "IUnknownCom", "di", "IID_IDirectInput8A", []),
+    ("IDirectInputDevice8A", "dinput.h", "IDirectInputDevice8A", "::IDirectInputDevice8A", "IUnknownCom", "di", "IID_IDirectInputDevice8A", []),
+    ("IDirectInputEffect", "dinput.h", "IDirectInputEffect", "::IDirectInputEffect", "IUnknownCom", "di", None, []),
     # DirectShow (namespace dsh, raw 16-byte GUIDs): the COM surface of the filter graph
     ("IPersist", "dshow_int.h", "IPersist_", "dsh::IPersist_", "Unk", "dsh", "dsh::IID_IPersist_", []),
     ("IReferenceClock", "dshow_int.h", "IReferenceClock_", "dsh::IReferenceClock_", "Unk", "dsh", "dsh::IID_IReferenceClock_", []),
@@ -84,9 +84,9 @@ CXX2SPEC = {}
 for n, h, st, cxx, b, f, iid, al in IFACES:
     CXX2SPEC.setdefault(st.split(":")[0], n)
 CXX2SPEC["IEnum_"] = None
-CXX2SPEC["Unk"] = "IUnknown"   # a parameter `Unk *` is the game's IUnknown
-CXX2SPEC["LPUNKNOWN"] = "IUnknown"
-CXX2SPEC["IUnknown"] = "IUnknown"
+CXX2SPEC["Unk"] = "IUnknownCom"   # a parameter `Unk *` is the game's IUnknown
+CXX2SPEC["LPUNKNOWN"] = "IUnknownCom"
+CXX2SPEC["IUnknown"] = "IUnknownCom"
 CXX2SPEC["KsProperty"] = "IKsPropertySet"
 
 # ---- the untyped `void **` (and `void *`-valued) parameters that carry an interface, per COM interface (MSDN contract):
@@ -109,7 +109,7 @@ ENUM_ITEMS = {"IEnumPins": ("handle", "IPin"), "IEnumFilters": ("handle", "IBase
 ENUM_NEXT_NAMES = {}      # filled per interface below
 
 IID_LIT = {   # IIDs the C++ headers do not name as a constant
-    "IUnknown": ["00000000-0000-0000-c000-000000000046"],
+    "IUnknownCom": ["00000000-0000-0000-c000-000000000046"],
     "IDirectInputDevice8A": ["5944e682-c92e-11cf-bfc7-444553540000", "57d7c6bc-2356-11d3-8e9d-00c04f6844ae"],   # IDirectInputDevice2A, 7A: prefixes of the 8A vtable
 }
 FLOAT_T = {"float", "D3DVALUE", "FLOAT"}
@@ -211,7 +211,7 @@ def classify(spec_if, mname, k, pname, ctype, iface_ov, family):
             p.update(kind="handle", byref=True, iface=sp, dir="out", size=4)
         return p
     if base == "LPUNKNOWN" and stars == 0:
-        p.update(kind="giface", byref=False, iface="IUnknown", dir="in", size=4)
+        p.update(kind="giface", byref=False, iface="IUnknownCom", dir="in", size=4)
         return p
     if stars == 0 and base in CB:
         p.update(kind="callback", byref=False, dir="in", size=4, sig=CB[base])
@@ -275,7 +275,7 @@ def main(out):
     for n, h, st, cxx, base, fam, iid, al in IFACES:
         # IEnumPins & co share one C++ class; the `IUnknown` base of a family is declared per family struct
         ms = full(n)
-        if n == "IUnknown":
+        if n == "IUnknownCom":
             ms = own[n]
         interfaces[n] = {"base": base, "cxx": cxx, "family": fam, "iids": ([iid] if iid else []) + IID_LIT.get(n, []), "hidden": n == "Unk", "slots": len(ms), "header": h}
         for slot, (mname, ret, ps) in enumerate(ms):
@@ -315,12 +315,12 @@ def main(out):
          "decl": "HRESULT (*)(LPCGUID, LPDIRECTSOUND *, LPUNKNOWN)", "params": [
             {"name": "pcGuidDevice", "ctype": "LPCGUID", "kind": "buffer", "byref": True, "dir": "in", "size": 4},
             {"name": "ppDS", "ctype": "LPDIRECTSOUND *", "kind": "handle", "byref": True, "iface": "IDirectSound", "dir": "out", "size": 4},
-            {"name": "pUnkOuter", "ctype": "LPUNKNOWN", "kind": "giface", "byref": False, "iface": "IUnknown", "dir": "in", "size": 4}]},
+            {"name": "pUnkOuter", "ctype": "LPUNKNOWN", "kind": "giface", "byref": False, "iface": "IUnknownCom", "dir": "in", "size": 4}]},
         {"dll": "dsound.dll", "name": "DirectSoundCreate8", "ordinal": 11, "ret": "HRESULT", "ret_kind": "hresult",
          "decl": "HRESULT (*)(LPCGUID, LPDIRECTSOUND8 *, LPUNKNOWN)", "params": [
             {"name": "pcGuidDevice", "ctype": "LPCGUID", "kind": "buffer", "byref": True, "dir": "in", "size": 4},
             {"name": "ppDS8", "ctype": "LPDIRECTSOUND8 *", "kind": "handle", "byref": True, "iface": "IDirectSound8", "dir": "out", "size": 4},
-            {"name": "pUnkOuter", "ctype": "LPUNKNOWN", "kind": "giface", "byref": False, "iface": "IUnknown", "dir": "in", "size": 4}]},
+            {"name": "pUnkOuter", "ctype": "LPUNKNOWN", "kind": "giface", "byref": False, "iface": "IUnknownCom", "dir": "in", "size": 4}]},
         {"dll": "dsound.dll", "name": "DirectSoundEnumerateA", "ordinal": 2, "ret": "HRESULT", "ret_kind": "hresult",
          "decl": "HRESULT (*)(LPDSENUMCALLBACKA, LPVOID)", "params": [
             {"name": "pDSEnumCallback", "ctype": "LPDSENUMCALLBACKA", "kind": "callback", "byref": False, "dir": "in", "size": 4,
@@ -332,7 +332,7 @@ def main(out):
             {"name": "dwVersion", "ctype": "DWORD", "kind": "value", "byref": False, "dir": "in", "size": 4, "signed": False},
             {"name": "riidltf", "ctype": "REFIID", "kind": "struct", "struct": "GUID", "byref": True, "dir": "in", "size": 16},
             {"name": "ppvOut", "ctype": "LPVOID *", "kind": "handle", "byref": True, "iface": "$riidltf", "dir": "out", "size": 4, "null": True},
-            {"name": "punkOuter", "ctype": "LPUNKNOWN", "kind": "giface", "byref": False, "iface": "IUnknown", "dir": "in", "size": 4}]},
+            {"name": "punkOuter", "ctype": "LPUNKNOWN", "kind": "giface", "byref": False, "iface": "IUnknownCom", "dir": "in", "size": 4}]},
         {"dll": "ole32.dll", "name": "CoCreateInstance", "ordinal": "", "ret": "HRESULT", "ret_kind": "hresult",
          "decl": "HRESULT (*)(const GUID *, void *, DWORD, const GUID *, LPVOID *)", "params": [
             {"name": "rclsid", "ctype": "const GUID *", "kind": "buffer", "byref": True, "dir": "in", "size": 4},
