@@ -66,7 +66,7 @@ def link(names, od, exe, repl=None):
 
 
 def build_server(out, backend=BACK):
-    srcs = sorted(os.path.join(backend, f) for f in os.listdir(backend) if f.startswith("gl4_") and f.endswith(".c")) + [os.path.join(HERE, "server.c")]
+    srcs = sorted(os.path.join(backend, f) for f in os.listdir(backend) if (f.startswith("gl4_") or f == "nxgpu4_check.c") and f.endswith(".c")) + [os.path.join(HERE, "server.c")]
     r = sh(["gcc", "-std=gnu11", "-O1", "-w", "-I", backend, *srcs, *xl.flags(), "-lEGL", "-lGL", "-lm", "-o", out])
     return r.stderr[-800:] if r.returncode else None
 

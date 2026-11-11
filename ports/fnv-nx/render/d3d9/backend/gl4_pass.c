@@ -1,54 +1,13 @@
 /* fnv-nx L6 GL 4.5 backend v4: render passes and clears.
  *
  * A pass is a set of up to 4 colour subresources (image, level, layer: a cube face, a 3D slice, a mip level) and an
- * optional depth-stencil subresource, all of one size and one sample count (gl4_pass_check; BeginPass4 that
+ * optional depth-stencil subresource, all of one size and one sample count (nxchk_pass_check; BeginPass4 that
  * violates it makes the submit BAD_CALL before anything runs). Colour image id 0 names the swapchain image. Colour
  * targets are attached through their sRGB view when the format has one (NXRS_R_SRGB then decides whether GL encodes
  * the write), draw buffer i = colour target i. A pass has no GL object: framebuffers are cached by the target
  * tuple. NxOp_Clear clears every colour target of the pass (D3D9 Clear clears all render targets). */
 #include "gl4.h"
 #include <string.h>
-
-static uint32_t layers_of(const Gl4Image* im, uint32_t level) {
-    return im->type == NxImgType_Cube ? 6u : im->type == NxImgType_3D ? gl4_lvl(im->d, level) : 1u;
-}
-
-int gl4_pass_parse4(const uint32_t* a, uint32_t argc, Gl4Pass* p) {
-    memset(p, 0, sizeof *p);
-    if (argc < 1 || a[0] > 4 || argc < 3 + 2 * a[0]) { gl4_err("BeginPass4: %u words for %u colour targets", argc, argc ? a[0] : 0); return 1; }
-    p->nColor = a[0];
-    for (uint32_t i = 0; i < a[0]; i++) {
-        p->c[i].image = a[1 + 2 * i] ? a[1 + 2 * i] : g4.swapImage;
-        p->c[i].sub = a[2 + 2 * i];
-        if (!p->c[i].image) { gl4_err("BeginPass4: colour target %u is the swapchain, which does not exist", i); return 1; }
-    }
-    p->d.image = a[1 + 2 * a[0]]; p->d.sub = a[2 + 2 * a[0]];
-    return 0;
-}
-
-/* sizes: every target's subresource must have the size and sample count of the first */
-int gl4_pass_check(const Gl4Pass* p, uint32_t* w, uint32_t* h, uint32_t* samples) {
-    if (!p->nColor && !p->d.image) { gl4_err("pass: no target"); return 1; }
-    int have = 0;
-    for (uint32_t i = 0; i < p->nColor + 1; i++) {
-        const Gl4Tgt* t = i < p->nColor ? &p->c[i] : &p->d;
-        if (i == p->nColor && !t->image) break;
-        const Gl4Image* im = gl4_img(t->image);
-        uint32_t level = t->sub & 0xFFFF, layer = t->sub >> 16;
-        if (!im || im->isView || (i < p->nColor ? im->isDepth || gl4_fmt(im->fmt).compressed : !im->isDepth)) {
-            gl4_err("pass: target %u (image %u) is not a %s image", i, t->image, i < p->nColor ? "colour" : "depth-stencil");
-            return 1;
-        }
-        if (level >= im->mips || layer >= layers_of(im, level)) { gl4_err("pass: target %u: level %u layer %u outside image %u", i, level, layer, t->image); return 1; }
-        uint32_t tw = gl4_lvl(im->w, level), th = gl4_lvl(im->h, level);
-        if (!have) { *w = tw; *h = th; *samples = im->samples; have = 1; }
-        else if (tw != *w || th != *h || im->samples != *samples) {
-            gl4_err("pass: target %u is %ux%u x%u samples, the pass is %ux%u x%u", i, tw, th, im->samples, *w, *h, *samples);
-            return 1;
-        }
-    }
-    return 0;
-}
 
 void gl4_fbo_forget(uint32_t image) {
     for (uint32_t i = 0; i < GL4_MAX_FBOS; i++) {
@@ -132,7 +91,7 @@ void gl4_op_begin_pass(const uint32_t* a, uint32_t argc) {
     uint32_t w, h, ns;
     memset(&p, 0, sizeof p);
     p.nColor = 1; p.c[0].image = a[0] ? a[0] : g4.swapImage; p.d.image = a[1];
-    if (gl4_pass_check(&p, &w, &h, &ns)) return;
+    if (nxchk_pass_check(gl4_chk_env(), &p, &w, &h, &ns)) return;
     begin(&p, a[6], a[7], ns);
     if (a[2] & NxClear_Color) clear_color(a[3]);
     if ((a[2] & 6) && p.d.image) clear_depth_stencil(a[2], gl4_img(p.d.image), a[4], a[5]);
@@ -143,7 +102,7 @@ void gl4_op_begin_pass(const uint32_t* a, uint32_t argc) {
 void gl4_op_begin_pass4(const uint32_t* a, uint32_t argc) {
     Gl4Pass p;
     uint32_t w, h, ns;
-    if (gl4_pass_parse4(a, argc, &p) || gl4_pass_check(&p, &w, &h, &ns)) return;
+    if (nxchk_pass_parse4(gl4_chk_env(), a, argc, &p) || nxchk_pass_check(gl4_chk_env(), &p, &w, &h, &ns)) return;
     begin(&p, w, h, ns);
     begin_end();
 }

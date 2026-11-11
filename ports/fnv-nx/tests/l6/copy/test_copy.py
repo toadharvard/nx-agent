@@ -41,7 +41,7 @@ def native_formats(tmp):
 
 
 def build_server(tmp):
-    srcs = sorted(os.path.join(BACK, f) for f in os.listdir(BACK) if f.startswith("gl4_") and f.endswith(".c")) + [os.path.join(HERE, "server.c")]
+    srcs = sorted(os.path.join(BACK, f) for f in os.listdir(BACK) if (f.startswith("gl4_") or f == "nxgpu4_check.c") and f.endswith(".c")) + [os.path.join(HERE, "server.c")]
     out = os.path.join(tmp, "server"); r = sh(["gcc", "-std=gnu11", "-O1", "-w", "-I", BACK, *srcs, *xl.flags(), "-lEGL", "-lGL", "-lm", "-o", out])
     return (out, "") if r.returncode == 0 else (None, r.stderr[-800:])
 

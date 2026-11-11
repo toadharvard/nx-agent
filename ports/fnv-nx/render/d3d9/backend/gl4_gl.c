@@ -25,7 +25,7 @@ int gl4_load_gl(void* (*getproc)(const char*), char* err, size_t errlen) {
 
 /* A contract violation (a value the device never sends, a GL error): recorded, counted, and reported by the
  * call that met it (submit / image_read return NXGPU_BAD_CALL); never ignored. */
-void gl4_err(const char* fmt, ...) {
+void nxchk_err(const char* fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(g4.err, sizeof g4.err, fmt, ap);
