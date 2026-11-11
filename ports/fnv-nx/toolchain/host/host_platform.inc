@@ -2,12 +2,12 @@
  * least number of arguments and the handler. platform_ext is total: every (fn, nargs) has exactly one answer.
  *   fn 16..33 (sockets): host_sock_call answers, BEFORE the two checks below: nargs != the service's exact count -> -FNVNX_WE_INVAL
  *                        (even for a null array); the exact count with a null array -> FNVNX_EXT_BAD_NARGS; else the service's answer
- *   fn without a row (0, 36 and up) -> FNVNX_EXT_NO_SERVICE
+ *   fn without a row (0, 37 and up) -> FNVNX_EXT_NO_SERVICE
  *   nargs below the row's number, or nargs > 0 with a null argument array     -> FNVNX_EXT_BAD_NARGS
  *   otherwise the handler's answer, which hostapi.h states per service; more arguments than the row needs are ignored.
  * A service declared in hostapi.h without a row is a test failure (tests/s4/backends/hostapi_total.py).
  * Standalone like the other .inc files: needs the handlers' files included first (host_vm.inc, host_section.inc,
- * host_message.inc, host_ids.inc, host_thread_activity.inc, host_fault.inc), logf_, g_cfg {core3, boost_loading} and libnx's applet. */
+ * host_message.inc, host_ids.inc, host_thread_activity.inc, host_fault.inc, host_textentry.inc), logf_, g_cfg {core3, boost_loading} and libnx's applet. */
 static int g_boost;   /* the CPU boost mode set last */
 static Result set_cpu_boost(int mode) {
     if (mode == g_boost) return 0;
@@ -45,6 +45,8 @@ static u64 pf_section_free(const u64 *a) { return host_section_free(a[0]); }
 static u64 pf_unmap_fixed(const u64 *a) { return h_unmap_fixed(a[0], a[1], a[2]); }
 /* TZ_AT (utc_seconds, FnvnxTzAt *): host_v2.inc:host_tz_at (the platform lead's service; hostapi.h states its results) */
 static u64 pf_tz_at(const u64 *a) { return host_tz_at(a[0], (FnvnxTzAt *)a[1]); }
+/* TEXT_ENTRY (max_len, init, init_n, out, n): host_textentry.inc:host_text_entry (hostapi.h states its results) */
+static u64 pf_text_entry(const u64 *a) { return host_text_entry(a[0], (const uint16_t *)a[1], a[2], (uint16_t *)a[3], (uint32_t *)a[4]); }
 /* THREAD_SELF (): a record for the CALLING thread (the main thread: libnx's threadGetSelf carries its real handle) under a thread id;
  * the platform lead's code, the id being a host_ids.inc table handle. The record is STARTED, so thread_start refuses it; only
  * THREAD_ACTIVITY (and set_priority / set_cpu) use its id. 0 when memory or the id table is exhausted. */
@@ -78,6 +80,7 @@ static const PlatService g_plat[] = {
     [FNVNX_PLAT_TZ_AT] = {2, pf_tz_at},
     [FNVNX_PLAT_THREAD_SELF] = {0, pf_thread_self},
     [FNVNX_PLAT_ACCESS_FAULT_HANDLER] = {2, pf_access_fault_handler},
+    [FNVNX_PLAT_TEXT_ENTRY] = {5, pf_text_entry},
 };
 static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) {
     /* 16..33: the sockets (host_sock.inc, the platform lead's): it checks nargs itself (exactly the count: else -FNVNX_WE_INVAL) */

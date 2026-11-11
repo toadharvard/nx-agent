@@ -1,11 +1,11 @@
 /* host_total_test.c - the guest<->host boundary is TOTAL: the platform dispatch of the console host (toolchain/host/host_platform.inc, with
- * host_vm.inc, host_section.inc, host_message.inc, host_ids.inc, host_thread_activity.inc, host_ext.inc: the same code host.c includes) executed under
+ * host_vm.inc, host_section.inc, host_message.inc, host_textentry.inc, host_ids.inc, host_thread_activity.inc, host_ext.inc: the same code host.c includes) executed under
  * qemu-aarch64 against the kernel double kdouble.h, with libnx's applet / thread-activity / error-applet calls stubbed. Every service
  * number hostapi.h declares is called with nargs = 0 and must answer one of the header's stated codes, never FNVNX_EXT_NO_SERVICE
  * (hostapi_total.py generates the list of declared services from the header with the C preprocessor: FNVNX_DECL_H); every service gets
  * its wrong-nargs, invalid-argument and success cases. Test names (hostapi.h table): total_declared, total_unknown, total_nargs,
  * total_ext, cpu_boost, thread_activity, thread_ids, message, display_docked, via_dispatch_vm, via_dispatch_section,
- * via_dispatch_unmap_fixed, tz_at, thread_self, via_dispatch_sock. */
+ * via_dispatch_unmap_fixed, tz_at, thread_self, text_entry, via_dispatch_sock. */
 #include "kdouble.h"
 #include "fnvnx/hostapi.h"
 
@@ -36,6 +36,24 @@ Result errorApplicationCreate(ErrorApplicationConfig *c, const char *d, const ch
 }
 Result errorApplicationShow(ErrorApplicationConfig *c) { (void)c; s_shown++; return 0; }
 
+/* swkbd double: the applet answers the queued texts (UTF-8) / results in order; records what it was configured with */
+static struct { const char *text; Result rc; } s_kb_q[8];
+static int s_kb_i, s_kb_created, s_kb_closed;
+static u32 s_kb_max;
+static char s_kb_init[8][2048];
+static Result s_kb_create_rc;
+Result swkbdCreate(SwkbdConfig *c, s32 d) { (void)d; memset(c, 0, sizeof *c); if (s_kb_create_rc) return s_kb_create_rc; s_kb_created++; return 0; }
+void swkbdClose(SwkbdConfig *c) { (void)c; s_kb_closed++; }
+void swkbdConfigMakePresetDefault(SwkbdConfig *c) { (void)c; }
+void swkbdConfigSetInitialText(SwkbdConfig *c, const char *str) { (void)c; snprintf(s_kb_init[s_kb_i], sizeof s_kb_init[0], "%s", str); }
+Result swkbdShow(SwkbdConfig *c, char *out, size_t sz)
+{
+    s_kb_max = c->arg.arg.arg.stringLenMax;
+    int i = s_kb_i++;
+    snprintf(out, sz, "%s", s_kb_q[i].text ? s_kb_q[i].text : "");
+    return s_kb_q[i].rc;
+}
+
 static int s_tz_fail;
 Result timeToCalendarTimeWithMyRule(u64 ts, TimeCalendarTime *c, TimeCalendarAdditionalInfo *i)
 {
@@ -63,6 +81,7 @@ static u64 g_crash_guest_base, g_crash_guest_size;
 static const char *g_crash_note;
 alignas(16) u8 __nx_exception_stack[0x4000];
 #include "../../../toolchain/host/host_fault.inc"
+#include "../../../toolchain/host/host_textentry.inc"
 #include "../../../toolchain/host/host_platform.inc"
 #undef free
 #undef memalign
@@ -79,7 +98,7 @@ static const struct { const char *name; unsigned v; } g_decl[] = {
     {"FNVNX_PLAT_DISPLAY_DOCKED", FNVNX_PLAT_DISPLAY_DOCKED}, {"FNVNX_PLAT_ACCESS_FAULT_HANDLER", FNVNX_PLAT_ACCESS_FAULT_HANDLER},
     {"FNVNX_PLAT_SECTION_CREATE", FNVNX_PLAT_SECTION_CREATE}, {"FNVNX_PLAT_SECTION_MAP", FNVNX_PLAT_SECTION_MAP},
     {"FNVNX_PLAT_SECTION_UNMAP", FNVNX_PLAT_SECTION_UNMAP}, {"FNVNX_PLAT_SECTION_FREE", FNVNX_PLAT_SECTION_FREE},
-    {"FNVNX_PLAT_UNMAP_FIXED", FNVNX_PLAT_UNMAP_FIXED}, {"FNVNX_PLAT_TZ_AT", FNVNX_PLAT_TZ_AT}, {"FNVNX_PLAT_THREAD_SELF", FNVNX_PLAT_THREAD_SELF},
+    {"FNVNX_PLAT_UNMAP_FIXED", FNVNX_PLAT_UNMAP_FIXED}, {"FNVNX_PLAT_TZ_AT", FNVNX_PLAT_TZ_AT}, {"FNVNX_PLAT_THREAD_SELF", FNVNX_PLAT_THREAD_SELF}, {"FNVNX_PLAT_TEXT_ENTRY", FNVNX_PLAT_TEXT_ENTRY},
     {"FNVNX_PLAT_SOCK_SOCKET", FNVNX_PLAT_SOCK_SOCKET}, {"FNVNX_PLAT_SOCK_CLOSE", FNVNX_PLAT_SOCK_CLOSE}, {"FNVNX_PLAT_SOCK_BIND", FNVNX_PLAT_SOCK_BIND}, {"FNVNX_PLAT_SOCK_LISTEN", FNVNX_PLAT_SOCK_LISTEN}, {"FNVNX_PLAT_SOCK_ACCEPT", FNVNX_PLAT_SOCK_ACCEPT}, {"FNVNX_PLAT_SOCK_CONNECT", FNVNX_PLAT_SOCK_CONNECT}, {"FNVNX_PLAT_SOCK_SENDTO", FNVNX_PLAT_SOCK_SENDTO}, {"FNVNX_PLAT_SOCK_RECVFROM", FNVNX_PLAT_SOCK_RECVFROM}, {"FNVNX_PLAT_SOCK_SETSOCKOPT", FNVNX_PLAT_SOCK_SETSOCKOPT}, {"FNVNX_PLAT_SOCK_GETSOCKOPT", FNVNX_PLAT_SOCK_GETSOCKOPT}, {"FNVNX_PLAT_SOCK_POLL", FNVNX_PLAT_SOCK_POLL}, {"FNVNX_PLAT_SOCK_SHUTDOWN", FNVNX_PLAT_SOCK_SHUTDOWN}, {"FNVNX_PLAT_SOCK_GETSOCKNAME", FNVNX_PLAT_SOCK_GETSOCKNAME}, {"FNVNX_PLAT_SOCK_GETPEERNAME", FNVNX_PLAT_SOCK_GETPEERNAME}, {"FNVNX_PLAT_SOCK_GETFL", FNVNX_PLAT_SOCK_GETFL}, {"FNVNX_PLAT_SOCK_SETFL", FNVNX_PLAT_SOCK_SETFL}, {"FNVNX_PLAT_SOCK_GAI_OPEN", FNVNX_PLAT_SOCK_GAI_OPEN}, {"FNVNX_PLAT_SOCK_GAI_FETCH", FNVNX_PLAT_SOCK_GAI_FETCH}, 
 };
 #endif
@@ -135,7 +154,7 @@ int main(int argc, char **argv)
         {FNVNX_PLAT_CPU_BOOST, 1}, {FNVNX_PLAT_THREAD_ACTIVITY, 2}, {FNVNX_PLAT_MESSAGE, 2}, {FNVNX_PLAT_VM_RESERVE, 2}, {FNVNX_PLAT_VM_COMMIT, 2},
         {FNVNX_PLAT_VM_DECOMMIT, 2}, {FNVNX_PLAT_VM_RELEASE, 1}, {FNVNX_PLAT_VM_PROTECT, 3}, {FNVNX_PLAT_DISPLAY_DOCKED, 0},
         {FNVNX_PLAT_SECTION_CREATE, 1}, {FNVNX_PLAT_SECTION_MAP, 4}, {FNVNX_PLAT_SECTION_UNMAP, 2}, {FNVNX_PLAT_SECTION_FREE, 1},
-        {FNVNX_PLAT_UNMAP_FIXED, 3}, {FNVNX_PLAT_TZ_AT, 2}, {FNVNX_PLAT_THREAD_SELF, 0}, {FNVNX_PLAT_ACCESS_FAULT_HANDLER, 2},
+        {FNVNX_PLAT_UNMAP_FIXED, 3}, {FNVNX_PLAT_TZ_AT, 2}, {FNVNX_PLAT_THREAD_SELF, 0}, {FNVNX_PLAT_ACCESS_FAULT_HANDLER, 2}, {FNVNX_PLAT_TEXT_ENTRY, 5},
     };
     int calls0 = s_act_calls + s_boost_calls + s_shown;
     for (size_t i = 0; i < sizeof need / sizeof need[0]; i++) {
@@ -259,9 +278,55 @@ int main(int argc, char **argv)
         T(call(10, 2, 0, 7, 0, 0) == 0 && fnvnx_hf_tls.handler == 0);
         T(call(10, 2, 0x1000, 0x100000000ull, 0, 0) == FNVNX_HE_ADDR && fnvnx_hf_tls.handler == 0);
     }
-    /* ---- sockets 16..33 reach the real handler: a wrong count is -WE_INVAL (the handler's own rule), 35 and up are NO_SERVICE (36 and up) */
+    /* ---- text_entry */
+    {
+        uint16_t o[600]; uint32_t nn = 77;
+        u64 a[5];
+#define TE(ml, in, inn, op, np) (a[0] = (ml), a[1] = (u64)(uintptr_t)(in), a[2] = (inn), a[3] = (u64)(uintptr_t)(op), a[4] = (u64)(uintptr_t)(np), \
+                                 h_ext_call(FNVNX_EXT_PLATFORM, FNVNX_PLAT_TEXT_ENTRY, (u64)(uintptr_t)a, 5))
+#define KB(i, t, r) (s_kb_q[i].text = (t), s_kb_q[i].rc = (r))
+#define NEG(r) ((u64)-(s64)(r))
+        /* refused before any applet: max_len 0 / above 500, null out / n */
+        T(TE(0, 0, 0, o, &nn) == NEG(FNVNX_HE_BADINPUT) && TE(501, 0, 0, o, &nn) == NEG(FNVNX_HE_BADINPUT) && TE(~0ull, 0, 0, o, &nn) == NEG(FNVNX_HE_BADINPUT));
+        T(TE(8, 0, 0, 0, &nn) == NEG(FNVNX_HE_BADINPUT) && TE(8, 0, 0, o, 0) == NEG(FNVNX_HE_BADINPUT) && s_kb_i == 0 && s_kb_created == 0 && nn == 77);
+        /* entered text: UTF-8 -> UTF-16 exactly, max_len handed to the applet, NUL after *n, no initial text */
+        KB(0, "Ab\xC3\xA9\xE2\x82\xAC", 0);   /* A b e-acute euro */
+        T(TE(500, 0, 99, o, &nn) == 1 && nn == 4 && o[0] == 'A' && o[1] == 'b' && o[2] == 0xE9 && o[3] == 0x20AC && o[4] == 0 && s_kb_max == 500 && !s_kb_init[0][0]);
+        T(s_kb_created == 1 && s_kb_closed == 1);
+        /* empty text is an entry; a cancel leaves out and *n alone */
+        s_kb_i = 0; KB(0, "", 0); nn = 77; o[0] = 0x1234;
+        T(TE(1, 0, 0, o, &nn) == 1 && nn == 0 && o[0] == 0);
+        s_kb_i = 0; KB(0, "x", MAKERESULT(Module_Libnx, LibnxError_LibAppletBadExit)); nn = 77; o[0] = 0x1234;
+        T(TE(8, 0, 0, o, &nn) == 0 && nn == 77 && o[0] == 0x1234);
+        /* any other applet result is -result; create failure too, and the applet is closed only when created */
+        s_kb_i = 0; KB(0, "x", MAKERESULT(Module_Libnx, LibnxError_ShouldNotHappen)); s_kb_closed = s_kb_created = 0;
+        T(TE(8, 0, 0, o, &nn) == NEG(MAKERESULT(Module_Libnx, LibnxError_ShouldNotHappen)) && nn == 77 && s_kb_created == 1 && s_kb_closed == 1);
+        s_kb_i = 0; s_kb_create_rc = MAKERESULT(Module_Libnx, LibnxError_OutOfMemory);
+        T(TE(8, 0, 0, o, &nn) == NEG(FNVNX_HE_NOMEM) && s_kb_i == 0 && s_kb_closed == 1);
+        s_kb_create_rc = 0;
+        /* initial text: UTF-16 -> UTF-8 (pair -> 4 bytes, lone surrogate -> U+FFFD), cut to max_len units without splitting a pair */
+        static const uint16_t ini[] = {'h', 0xD83D, 0xDE00, 0xDC00, 0x20AC};
+        s_kb_i = 0; KB(0, "z", 0);
+        T(TE(8, ini, 5, o, &nn) == 1 && !strcmp(s_kb_init[0], "h\xF0\x9F\x98\x80\xEF\xBF\xBD\xE2\x82\xAC"));
+        s_kb_i = 0; KB(0, "z", 0);
+        T(TE(2, ini, 5, o, &nn) == 1 && !strcmp(s_kb_init[0], "h"));                  /* the pair would be cut: dropped */
+        s_kb_i = 0; KB(0, "z", 0);
+        T(TE(3, ini, 5, o, &nn) == 1 && !strcmp(s_kb_init[0], "h\xF0\x9F\x98\x80"));
+        /* more units than max_len (a character above U+FFFF counts 2): the applet opens again with that text; the fitting text is returned */
+        s_kb_i = 0; KB(0, "\xF0\x9F\x98\x80\xF0\x9F\x98\x80", 0); KB(1, "\xF0\x9F\x98\x80", 0);   /* 4 units, then 2 */
+        T(TE(3, 0, 0, o, &nn) == 1 && nn == 2 && o[0] == 0xD83D && o[1] == 0xDE00 && o[2] == 0 && s_kb_i == 2 && !strcmp(s_kb_init[1], "\xF0\x9F\x98\x80\xF0\x9F\x98\x80"));
+        s_kb_i = 0; KB(0, "\xF0\x9F\x98\x80\xF0\x9F\x98\x80", 0); KB(1, "q", MAKERESULT(Module_Libnx, LibnxError_LibAppletBadExit));
+        T(TE(3, 0, 0, o, &nn) == 0 && s_kb_i == 2);                                       /* ... until the player cancels */
+        /* invalid UTF-8 from the applet: one U+FFFD per byte that starts no well-formed sequence (continuation, C0, overlong, surrogate, truncated, F5) */
+        s_kb_i = 0; KB(0, "\x80\xC0\xE0\x80\x80\xED\xA0\x80\xE2\x82\xF5k", 0);
+        T(TE(40, 0, 0, o, &nn) == 1 && nn == 12 && o[11] == 'k' && o[0] == 0xFFFD && o[10] == 0xFFFD);
+        /* the maximum: 500 BMP units fit with the NUL after them */
+        { static char big[2048]; memset(big, 'a', 500); big[500] = 0; s_kb_i = 0; KB(0, big, 0); T(TE(500, 0, 0, o, &nn) == 1 && nn == 500 && o[499] == 'a' && o[500] == 0); }
+        T(g_te_busy == 0);
+    }
+    /* ---- sockets 16..33 reach the real handler: a wrong count is -WE_INVAL (the handler's own rule), 35 and up are NO_SERVICE (37 and up) */
     for (u32 fn = FNVNX_PLAT_SOCK_FIRST; fn <= FNVNX_PLAT_SOCK_LAST; fn++) T(call(fn, 0, 0, 0, 0, 0) == (u64)-(s64)FNVNX_WE_INVAL);
-    T(call(36, 0, 0, 0, 0, 0) == FNVNX_EXT_NO_SERVICE);
+    T(call(37, 0, 0, 0, 0, 0) == FNVNX_EXT_NO_SERVICE);
 
     /* ---- via_dispatch_unmap_fixed */
     {

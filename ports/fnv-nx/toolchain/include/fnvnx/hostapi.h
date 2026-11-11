@@ -133,8 +133,7 @@ typedef struct FnvnxHostApi {
 
 /* ext_call results that belong to no service (all three are -255, -254, -253 as int64; no service answers one of them otherwise):
  *   NO_MODULE  the module number is >= 64 or no host module is registered under it
- *   NO_SERVICE the module is registered but has no service of that number (module 11: fn 0, 16 and up, and 10 until the host
- *              serves it)
+ *   NO_SERVICE the module is registered but has no service of that number (module 11: fn 0 and 37 and up)
  *   BAD_NARGS  module 11: fewer arguments than the service takes (the column "n" of the table below), or nargs > 0 with a null array */
 #define FNVNX_EXT_NO_MODULE 0xFFFFFFFFFFFFFF01ull
 #define FNVNX_EXT_NO_SERVICE 0xFFFFFFFFFFFFFF02ull
@@ -304,7 +303,7 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
  *
  * ext_call (slot): module >= 64 or not registered -> NO_MODULE (-255); fn > UINT32_MAX -> NO_SERVICE (-254); nargs > UINT32_MAX counts as
  *   UINT32_MAX; host_ext.inc:h_ext_call, fnvnx_host_register_ext (a null handler or a taken module: -1)      test:total_ext test:test_ext_and_map
- * module 11, platform_ext (host_platform.inc, one row per service); fn 0, fn 10 (not served) and fn >= 36 -> NO_SERVICE (-254):
+ * module 11, platform_ext (host_platform.inc, one row per service); fn 0 and fn >= 37 -> NO_SERVICE (-254):
  *   test:total_unknown test:total_nargs test:total_declared
  *  1 CPU_BOOST          n=1  0 set / already that mode | 1 boost_loading=0 | the Horizon result of appletSetCpuBoostMode, mode unchanged
  *                            host_platform.inc:pf_cpu_boost,set_cpu_boost                                    test:cpu_boost
@@ -347,6 +346,8 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
  *                            host_platform.inc:pf_tz_at, host_v2.inc:host_tz_at (the platform lead's service)  test:tz_at
  * 35 THREAD_SELF        n=0  thread id | 0 (no memory, id table full)
  *                            host_platform.inc:pf_thread_self                                                 test:thread_self
+ * 36 TEXT_ENTRY         n=5  1 text entered | 0 cancelled | -FNVNX_HE_BADINPUT (max_len 0 or > 500, out or n null) | -(the applet's Horizon result)
+ *                            host_textentry.inc:host_text_entry                                               test:text_entry
  * VM services and the sections through the dispatch (argument mapping): test:via_dispatch_vm.
  *
  * FnvnxHostApi slots: the results are stated at each slot above. Host function (file) and tests; "-" = a direct libnx / newlib call
@@ -460,6 +461,25 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
  * and thread_set_cpu). Call once per such thread. thread_start of it -> FNVNX_HE_BADINPUT (it is started), thread_join -> FNVNX_HE_BADINPUT;
  * thread_free ends the id and the record, never the thread. */
 #define FNVNX_PLAT_THREAD_SELF 35u
+/* TEXT_ENTRY (max_len, init, init_n, out, n) -> int64: the system software keyboard (libnx swkbd), modal; blocks only the calling guest thread
+ * (any thread may call; one keyboard exists, so concurrent callers are served one after the other).
+ *   max_len  the most UTF-16 code units of the text, 1..FNVNX_TEXT_ENTRY_MAX (500). 0 or above 500 -> -FNVNX_HE_BADINPUT, nothing shown.
+ *   init     const uint16_t * (guest address), init_n units: the text the keyboard starts with (cursor at its end). init 0: no text (init_n is
+ *            ignored). Only the first max_len units are used (a cut through a surrogate pair drops the pair). A lone surrogate is shown as U+FFFD.
+ *   out      uint16_t *, room for max_len + 1 units; n  uint32_t *. Either null -> -FNVNX_HE_BADINPUT, nothing shown.
+ * Results: 1  text entered: out[0..*n) are the UTF-16 units of the text, out[*n] = 0, *n <= max_len (the text may contain any unit the
+ *             applet returns, newline included only if the applet gives it; an empty text is *n = 0). The applet returns UTF-8, converted exactly
+ *             by the UTF-8 definition (a byte outside a well-formed sequence is U+FFFD, one per byte; characters above U+FFFF are two units).
+ *             swkbd counts characters, the contract counts units: a text of more than max_len units (only possible with characters above
+ *             U+FFFF) is not returned, the keyboard opens again with that text, until the text fits or the player cancels.
+ *          0  the player cancelled (libnx: swkbdShow's LibnxError_LibAppletBadExit, i.e. the applet's exit reason is not Normal); out and *n untouched.
+ *          -r any other failure: r is the Horizon result code (libnx swkbdCreate / swkbdShow) as a positive number, the result is -r as int64;
+ *             out and *n untouched. -FNVNX_HE_BADINPUT is the one the host produces itself (the table above).
+ * The guest-side check of a name dialog (accept / reject at index) is the guest's loop: call, run the check on out[0..*n), on rejection call again
+ * with init = that text. Host-side tests: the swkbd calls are stubbed in tests/s4/backends/host_total_test.c.
+ * Under the L4 emulator (no human): the emulator's host answers 0 (cancelled) for every well-formed call. */
+#define FNVNX_PLAT_TEXT_ENTRY 36u
+#define FNVNX_TEXT_ENTRY_MAX 500u
 typedef struct FnvnxTzAt {
     int32_t off_s;      /* local = UTC + off_s */
     uint32_t dst;       /* 1: daylight time at that instant */
