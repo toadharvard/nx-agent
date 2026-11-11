@@ -54,6 +54,16 @@ EOF
 	done_ multilib
 fi
 
+# MSVCMODEL1 (toolchain/msvcmodel): under ILP32 the compiler's data model and array new/delete are the exe's
+# (size_t = unsigned int, ptrdiff_t = int, the count before a new[] array, the size a sized delete[] gets). The
+# game's units are built with the same patch on GCC 13.3; the ILP32 multilib of this toolchain (newlib, libstdc++,
+# libsupc++) is what they link with, so it is built under the same model: `operator new(unsigned int)` is one
+# symbol on both sides.
+if ! step msvcmodel; then
+	patch -p1 -d "gcc-$GCC_VER" -i "$(dirname "$(realpath "$0")")/../msvcmodel/msvcmodel.patch"
+	done_ msvcmodel
+fi
+
 # GCC 15 warns "-mabi=ilp32 is deprecated" (OPT_Wdeprecated); libgcc builds with -Werror, so the ILP32
 # multilib fails. Drop the warning (the deprecation itself is documented in docs/TOOLCHAIN.md).
 if ! step nodeprecate; then
