@@ -24,3 +24,8 @@ fx_gep_read	nn	nn
 fx_gep_write	nn	yn
 fx_contract	n	n
 fx_contract_ro	e	y
+fx_nullcheck	n	n
+fx_nullcheck_ne	n	n
+fx_nullstore	e	y
+fx_ptrcmp	ee	nn
+fx_ptrtoint	e	n

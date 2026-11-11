@@ -79,8 +79,8 @@ extern "C" unsigned fnvnx_first_run_profile(void)
     if (!exists(LOCAL "NVDLCList.txt"))
         make_empty(LOCAL "NVDLCList.txt");
     if (made)
-        w32_log("first-run profile: made%s%s%s\n", made & FNVNX_PROFILE_INI ? " Fallout.ini" : "",
-                made & FNVNX_PROFILE_PREFS ? " FalloutPrefs.ini" : "",
-                made & FNVNX_PROFILE_PLUGINS ? " plugins.txt" : "");
+        W32Log().s("first-run profile: made").s(made & FNVNX_PROFILE_INI ? " Fallout.ini" : "")
+                .s(made & FNVNX_PROFILE_PREFS ? " FalloutPrefs.ini" : "")
+                .s(made & FNVNX_PROFILE_PLUGINS ? " plugins.txt" : "").s("\n").emit();
     return made;
 }

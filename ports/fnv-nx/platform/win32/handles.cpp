@@ -130,15 +130,52 @@ extern "C" BOOL CloseHandle(HANDLE h)
     return w32_handle_close(h, 0);
 }
 
-void w32_log(const char *fmt, ...)
+W32Log::W32Log() : n(0)
 {
-    char buf[1024];
-    va_list ap;
-    va_start(ap, fmt);
-    int n = snprintf(buf, sizeof buf, "[fnvnx] ");
-    vsnprintf(buf + n, sizeof buf - (size_t)n, fmt, ap);
-    va_end(ap);
-    os_debug_print(buf);
+    buf[0] = 0;
+    s("[fnvnx] ");
+}
+
+W32Log &W32Log::s(const char *str)
+{
+    while (*str && n < sizeof buf - 1)
+        buf[n++] = *str++;
+    buf[n] = 0;
+    return *this;
+}
+
+W32Log &W32Log::u(unsigned long long v)
+{
+    char t[24];
+    size_t k = 0;
+    do {
+        t[k++] = (char)('0' + v % 10);
+        v /= 10;
+    } while (v);
+    while (k && n < sizeof buf - 1)
+        buf[n++] = t[--k];
+    buf[n] = 0;
+    return *this;
+}
+
+W32Log &W32Log::h(unsigned long long v)
+{
+    char t[24];
+    size_t k = 0;
+    do {
+        t[k++] = "0123456789abcdef"[v & 15];
+        v >>= 4;
+    } while (v);
+    s("0x");
+    while (k && n < sizeof buf - 1)
+        buf[n++] = t[--k];
+    buf[n] = 0;
+    return *this;
+}
+
+void W32Log::emit()
+{
+    os_debug_print(buf);   /* the local buffer only */
 }
 
 static inline int lower(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }

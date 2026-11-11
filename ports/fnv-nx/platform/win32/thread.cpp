@@ -449,7 +449,7 @@ extern "C" DWORD SuspendThread(HANDLE h)
     if (prev == 0 && running && os_thread_suspend(t->os)) {
         static int warned;
         if (!warned++)
-            w32_log("SuspendThread: this backend cannot pause a running thread");
+            W32Log().s("SuspendThread: this backend cannot pause a running thread").emit();
     }
     return (DWORD)prev;
 }

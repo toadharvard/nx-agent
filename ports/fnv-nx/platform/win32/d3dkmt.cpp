@@ -75,7 +75,7 @@ extern "C" NTSTATUS_ D3DKMTEscape(const void *desc)
     if (!o)
         return ST_INVALID_PARAMETER;
     w32_obj_unref(o);
-    w32_log("D3DKMTEscape(type %u, %u bytes): the display driver has no escape entry (Wine 9.0 NtGdiDdDDIEscape: STATUS_NO_MEMORY)",
-            (unsigned)e->Type, (unsigned)e->size);
+    W32Log().s("D3DKMTEscape(type ").u((unsigned)e->Type).s(", ").u((unsigned)e->size)
+        .s(" bytes): the display driver has no escape entry (Wine 9.0 NtGdiDdDDIEscape: STATUS_NO_MEMORY)").emit();
     return ST_NO_MEMORY;
 }

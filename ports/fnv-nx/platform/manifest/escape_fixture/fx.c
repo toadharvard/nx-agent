@@ -59,3 +59,10 @@ extern void ext_hook(const char *n);       /* contract: nocapture, readonly */
 extern void ext_hook_ro(const char *n);    /* contract: readonly only (may keep the pointer) */
 void fx_contract(const char *n) { ext_hook(n); }
 void fx_contract_ro(const char *n) { ext_hook_ro(n); }
+
+/* null tests are not captures (hide_null_tests); every other use of the address still is */
+int fx_nullcheck(const char *p) { if (!p) return 0; return *p; }                    /* n / n */
+int fx_nullcheck_ne(const char *p) { return p != 0 && p[1] == 'x'; }                  /* n / n */
+void fx_nullstore(int *p) { if (p) g_saved = p; }                                     /* e / y: the pointer is still stored */
+int fx_ptrcmp(const char *p, const char *q) { return p < q; }                          /* e e / n n: address comparison of two pointers stays a capture; no write happens (but a copy exists: escape e) */
+unsigned long fx_ptrtoint(const char *p) { return (unsigned long)p > 0xFFFF; }         /* e / n: pointer-to-integer stays a capture; no write through p */

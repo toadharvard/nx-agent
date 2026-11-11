@@ -29,3 +29,8 @@ fx.dll	fx_gep_read		stdcall	i	ii	fx_gep_read
 fx.dll	fx_gep_write		stdcall	i	ii	fx_gep_write
 fx.dll	fx_contract		stdcall	i	i	fx_contract
 fx.dll	fx_contract_ro		stdcall	i	i	fx_contract_ro
+fx.dll	fx_nullcheck		stdcall	i	i	fx_nullcheck
+fx.dll	fx_nullcheck_ne		stdcall	i	i	fx_nullcheck_ne
+fx.dll	fx_nullstore		stdcall	i	i	fx_nullstore
+fx.dll	fx_ptrcmp		stdcall	i	ii	fx_ptrcmp
+fx.dll	fx_ptrtoint		stdcall	i	i	fx_ptrtoint

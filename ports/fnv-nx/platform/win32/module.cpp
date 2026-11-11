@@ -235,7 +235,7 @@ extern "C" HMODULE LoadLibraryA(LPCSTR name)
             err = ERROR_DLL_INIT_FAILED;   /* the loader reported success without registering the image */
     }
     if (err) {
-        w32_log("LoadLibraryA(\"%s\"): error %u", name, (unsigned)err);
+        W32Log().s("LoadLibraryA(\"").s(name).s("\"): error ").u((unsigned)err).emit();
         SetLastError(err);
         return NULL;
     }
@@ -721,7 +721,7 @@ extern "C" LPWSTR *CommandLineToArgvW(LPCWSTR cmd, int *argc)
 /* ---- process */
 extern "C" void ExitProcess(UINT code)
 {
-    w32_log("ExitProcess(%u)", (unsigned)code);
+    W32Log().s("ExitProcess(").u((unsigned)code).s(")").emit();
     w32_fls_thread_exit();   /* the calling thread's FLS callbacks, before the modules detach (fls.cpp) */
     fnvnx_bnd_process_detach();   /* DllMain(DLL_PROCESS_DETACH) of the translated modules */
     fnvnx_threads_flush();   /* the race checker's pairs and the watchdog's summary, when they are on */

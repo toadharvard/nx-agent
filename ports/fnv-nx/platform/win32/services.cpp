@@ -11,7 +11,7 @@
 extern "C" HINSTANCE ShellExecuteA(HWND h, LPCSTR op, LPCSTR file, LPCSTR params, LPCSTR dir, INT show)
 {
     W32_UNUSED(h); W32_UNUSED(params); W32_UNUSED(dir); W32_UNUSED(show);
-    w32_log("ShellExecuteA(%s, %s) not available", op ? op : "open", file ? file : "");
+    W32Log().s("ShellExecuteA(").s(op ? op : "open").s(", ").s(file ? file : "").s(") not available").emit();
     return (HINSTANCE)(uintptr_t)31; /* SE_ERR_NOASSOC (<= 32 means failure) */
 }
 

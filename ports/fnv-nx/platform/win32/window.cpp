@@ -2756,7 +2756,7 @@ bool g_mb_class;
 extern "C" int MessageBoxA(HWND owner, LPCSTR text, LPCSTR caption, UINT type)
 {
     type = W32_DW(type);
-    w32_log("MessageBox [%s]: %s", caption ? caption : "", text ? text : "");
+    W32Log().s("MessageBox [").s(caption ? caption : "").s("]: ").s(text ? text : "").emit();
     if (g_msgbox_hook)
         return g_msgbox_hook(text, caption, type);
     unsigned kind = type & 0xF, defb = (type >> 8) & 0xF;

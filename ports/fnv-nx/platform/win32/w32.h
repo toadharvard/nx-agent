@@ -138,7 +138,23 @@ void w32_vm_view_prot(uintptr_t base, size_t size, DWORD prot);   /* the pages' 
 bool w32_file_writers_possible(HANDLE h);
 
 /* ---- misc */
-void w32_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+/* The debug log is typed, not variadic: a caller's pointer reaches only the bounded copy loop s() (a plain read of the
+ * string), never a libc formatter or a `...` argument (LLVM treats a pointer in a C vararg as captured and written, which
+ * would make every import that logs one unprovable). There is deliberately no printf-style entry point.
+ *   W32Log l; l.s("LoadLibraryA(\"").s(name).s("\"): error ").u(err).emit();
+ * One message = one local buffer ("[fnvnx] " + the pieces, truncated at 1023 bytes) handed to os_debug_print. u() prints
+ * an unsigned decimal, h() "0x" + lowercase hex of an unsigned value, p() the address of a pointer (a pointer-to-integer
+ * conversion: the pointer is then a capture, so p() is for pointers that are not import arguments). */
+struct W32Log {
+    char buf[1024];
+    size_t n;
+    W32Log();
+    W32Log &s(const char *str);
+    W32Log &u(unsigned long long v);
+    W32Log &h(unsigned long long v);
+    W32Log &p(const void *ptr) { return h((unsigned long long)(uintptr_t)ptr); }
+    void emit();
+};
 #define W32_UNUSED(x) ((void)(x))
 int w32_stricmp(const char *a, const char *b);
 int w32_strnicmp(const char *a, const char *b, size_t n);

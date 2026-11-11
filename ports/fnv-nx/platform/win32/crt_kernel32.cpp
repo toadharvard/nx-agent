@@ -234,7 +234,7 @@ __attribute__((constructor(FNVNX_INIT_MODULES))) static void sys_modules_registe
 extern "C" BOOL TerminateProcess(HANDLE h, UINT code)
 {
     if (h == W32_PSEUDO_PROCESS) {
-        w32_log("TerminateProcess(%u)", (unsigned)code);
+        W32Log().s("TerminateProcess(").u((unsigned)code).s(")").emit();
         os_exit_process((int)code);
     }
     SetLastError(ERROR_INVALID_HANDLE);   /* no other processes */
@@ -253,7 +253,7 @@ extern "C" LPTOP_LEVEL_EXCEPTION_FILTER SetUnhandledExceptionFilter(LPTOP_LEVEL_
 extern "C" LONG UnhandledExceptionFilter(struct _EXCEPTION_POINTERS *ep)
 {
     LPTOP_LEVEL_EXCEPTION_FILTER f(__atomic_load_n(&g_top_filter, __ATOMIC_SEQ_CST));   /* no lock is held across the call */
-    w32_log("UnhandledExceptionFilter(%p)%s", (void *)ep, f ? ": calling the top-level filter" : "");
+    W32Log().s("UnhandledExceptionFilter(").p(ep).s(")").s(f ? ": calling the top-level filter" : "").emit();
     if (f && ep) {
         LONG r = f(ep);
         if (r != EXCEPTION_CONTINUE_SEARCH)

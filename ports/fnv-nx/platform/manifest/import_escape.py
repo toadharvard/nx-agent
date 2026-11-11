@@ -47,6 +47,8 @@ Method (a sound compiler analysis, no hand-written lists):
    `readonly`/`nocapture` to a declaration is sound exactly when the declared contract holds, which the named
    source (the owner's statement) vouches for; clang has no source spelling that yields `readonly` on a parameter
    (access(read_only) is ignored by clang 18, `noescape` yields only nocapture), hence the tsv.
+7. `icmp eq/ne ptr %x, null` tests are replaced before the pipeline by calls of an opaque, unconstrained, non-capturing
+   function (hide_null_tests: LLVM 18 would otherwise count every null test as a capture); only adds behaviours.
 Mismatches between the bridge `args` and our C prototype (LLVM parameter count / kind), vararg handling,
 missing definitions: rows are omitted and listed in the report.
 """
@@ -79,6 +81,19 @@ HEADER = """\
 # Calls leaving the module (hooks of other components, host services, target libc) carry facts only from attributes on
 #   their declaration: clang's own, LLVM's built-in C library knowledge, and the declared contracts listed below
 #   (`# contract:` lines; each names its source). Nothing else is assumed about them.
+# Null tests: `icmp eq/ne ptr %x, null` is not counted as a capture (one bit, no copy; see hide_null_tests for the
+#   soundness argument). Any other use of the address (ordering / equality of two pointers, ptrtoint, store) still is.
+# ASSUMPTION (target substitution): clang-18 cannot emit the product triple (AArch64 ILP32 ELF), the guest table is
+#   built for arm64_32-apple-watchos (AArch64, 32-bit pointers/long, ILP32 data layout; Mach-O/Darwin ABI, Apple macros
+#   undefined again). `nocapture` and `readonly` are properties of the IR use graph of a pointer parameter (which
+#   instructions use it and what the callees' attributes are); they do not depend on the object format, the section
+#   choices, or the calling-convention details of scalar pointers/integers. What the ABI can change: va_list (char*
+#   here, a struct in AAPCS64), long double, and the passing of structs/unions/arrays by value (byval / sret / split
+#   registers), which alter the LLVM parameter list of a prototype. A row whose prototype has such a construct fails the
+#   parameter-count / kind / aggregate check and is OMITTED and listed in the report, never emitted from this target.
+#   Pointer-width dependent code (uint32_t guest address <-> pointer) is analysed with the real 32-bit width. Residual
+#   risk: code whose control flow depends on ABI macros (__APPLE__ is undefined, __aarch64__ / __ILP32__ are as in the
+#   product); the sources' own preprocessor conditions are those of the product build for these macros.
 # Assumptions: volatile accesses are plain memory accesses for capture purposes (they copy no pointers); an integer
 #   parameter is not a pointer; the backend line below names the OS backend analysed; pointers are not smuggled into
 #   integers that outlive the call (inttoptr/ptrtoint chains are not followed for integer parameters).
@@ -284,6 +299,30 @@ def strip_volatile(ir):
     ir = VOL_RMW.sub(lambda m: 'atomicrmw %s %s %s, ' % (m.group(1), m.group(2), m.group(3)), ir)
     ir = VOL_CX.sub(lambda m: 'cmpxchg %s%s %s, ' % (m.group(1) or '', m.group(2), m.group(3)), ir)
     return ir
+
+
+NULLCMP = re.compile(r'^(\s*)(%[\w.$-]+) = icmp (eq|ne) ptr (?:null, (%[\w.$-]+)|(%[\w.$-]+), null)\s*$', re.M)
+
+
+def hide_null_tests(ir):
+    """LLVM 18 counts `icmp eq/ne ptr %x, null` as a capture of %x unless %x is known dereferenceable (CaptureTracking:
+    comparing a pointer with null leaks one bit of the address). A null test creates no copy of the pointer: the result
+    is one bit, nothing is stored, nothing is read or written through it, so it cannot make a pointer outlive the call,
+    and `if (!name) return` is what every import does with its string arguments. Each such test is replaced by a call
+    of an opaque function whose result is UNCONSTRAINED (fnvw_isnull for eq, fnvw_notnull for ne; declared nounwind
+    willreturn memory(none), parameter nocapture readnone). Soundness: the replacement can only add behaviours
+    (the bit is any value instead of the real comparison; eq and ne are independent), never remove one, so every
+    attribute proven on the rewritten module holds for the original: its executions are a subset. Only comparisons
+    against the null constant are rewritten; comparisons of two pointers (address ordering / equality of two non-null
+    values) stay captures."""
+    def f(m):
+        x = m.group(4) or m.group(5)
+        return '%s%s = call i1 @fnvw_%s(ptr %s)' % (m.group(1), m.group(2), 'isnull' if m.group(3) == 'eq' else 'notnull', x)
+    out, n = NULLCMP.subn(f, ir)
+    if n:
+        out += ('\ndeclare i1 @fnvw_isnull(ptr nocapture readnone) nounwind willreturn memory(none)\n'
+                'declare i1 @fnvw_notnull(ptr nocapture readnone) nounwind willreturn memory(none)\n')
+    return out, n
 
 
 DEF_RE = re.compile(r'^define\s+(.*?)@("(?:[^"\\]|\\.)*"|[\w.$-]+)\(')
@@ -703,7 +742,7 @@ def main():
     r = run([DIS, linked, '-o', '-'])
     if r.returncode:
         die('llvm-dis failed: ' + tail(r.stderr))
-    ir0 = strip_volatile(r.stdout)
+    ir0, n_null = hide_null_tests(strip_volatile(r.stdout))
     contracts = read_contracts(a.contract) if a.contract else []
     if contracts:
         ir0 = apply_contracts(ir0, contracts)
@@ -833,7 +872,7 @@ def main():
                                                  'guest': ' (product source set of platform/build_guest.sh + the guest runtime toolchain/guest/{runtime,threads,fs,section_guest}.c, tm.cpp; target %s; libnx only through FnvnxHostApi)' % (target_desc if a.backend == 'guest' and not a.src else ''),
                                                  'posix': ' (platform/os/os_posix.c, host x86-64)'}[a.backend] if not a.src else ' (explicit sources)'))
         f.write('# libnx commit: %s\n' % libnx_commit)
-        f.write('# pipeline: clang-18 -O1 per file, llvm-link, volatile-clear, opt-18 -passes=\'%s\'\n' % pipeline)
+        f.write('# pipeline: clang-18 -O1 per file, llvm-link, volatile-clear, null-test-hide (%d tests), opt-18 -passes=\'%s\'\n' % (n_null, pipeline))
         for sym, idx, attrs, src in contracts:
             f.write('# contract: %s param %d %s (source: %s)\n' % (sym, idx, ','.join(attrs), src))
         f.write('dll\tname\tescape\twrites\n')

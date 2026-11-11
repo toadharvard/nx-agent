@@ -106,7 +106,7 @@ extern "C" BOOL TryEnterCriticalSection(LPCRITICAL_SECTION cs)
 extern "C" void LeaveCriticalSection(LPCRITICAL_SECTION cs)
 {
     if (cs->RecursionCount <= 0) {
-        w32_log("LeaveCriticalSection on a section that is not held (%p)", (void *)cs);
+        W32Log().s("LeaveCriticalSection on a section that is not held (").p(cs).s(")").emit();
         return;
     }
     if (--cs->RecursionCount == 0) {
