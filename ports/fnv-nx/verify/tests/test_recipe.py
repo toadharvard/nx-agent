@@ -213,7 +213,20 @@ def main():
               and g["universe"] == 5 and g["certified"] == 3 and accepted("build", ob)[0] == "red", (g, txt))
         rb = recipe.build(bad, ROOT, SS, BASE + "/outb")
         check("failing unit: build red, names stage and last stderr lines", rb["status"] == "red" and rb["failure"]["stage"] == "cc:c.c"
-              and rb["failure"]["exit"] and any("undeclared_thing" in l for l in rb["failure"]["stderr"]) and rb["failed_units"] == ["c.c"], rb.get("failure"))
+              and rb["failure"]["exit"] and any("undeclared_thing" in l for l in rb["failure"]["stderr"]) and [f["unit"] for f in rb["failed_units"]] == ["c.c"], rb.get("failure"))
+
+        # 3 units (a.c ok, b.c CC error, c.c PP error): BOTH failures listed with their blocks, in unit order; two cold runs equal
+        two = make_repo("two", rec=dict(RECIPE, os_layer=[]), files={"toy/os.S": None, "toy/b.c": "int f_b(void) { return undeclared_b; }\n",
+                                                                       "toy/c.c": '#include "missing_c.h"\nint f_c(void) { return 1; }\n'})
+        r1, r2 = (recipe.build(two, ROOT, BASE + "/two-store%d" % i, BASE + "/two-out%d" % i) for i in (1, 2))
+        fu = r1.get("failed_units", [])
+        check("two failing units of three: both listed with {unit, stage, exit, stderr}; failure = first in unit order",
+              r1["status"] == "red" and [f["unit"] for f in fu] == ["b.c", "c.c"] and fu[0]["stage"] == "cc:b.c" and fu[1]["stage"] == "pp:c.c"
+              and all(f["exit"] and 0 < len(f["stderr"]) <= 20 and set(f) == {"unit", "stage", "exit", "stderr"} for f in fu)
+              and any("undeclared_b" in l for l in fu[0]["stderr"]) and any("missing_c.h" in l for l in fu[1]["stderr"])
+              and r1["failure"]["stage"] == "cc:b.c" and r1["elf"] is None and r1["objects"] == [], (fu, r1.get("failure")))
+        norm = lambda r: json.dumps({k: v for k, v in r.items() if k not in ("stages", "stage_keys")}, sort_keys=True).replace(BASE + "/two-out1", "O").replace(BASE + "/two-out2", "O")
+        check("two cold runs of the failing root give the same objects.json", norm(r1) == norm(r2))
 
     def gate_toy():
         og = BASE + "/gg"

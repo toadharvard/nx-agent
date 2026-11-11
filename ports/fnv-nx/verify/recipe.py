@@ -684,7 +684,7 @@ class Job:
                 return u, {"status": "cc-failed", "failure": {"stage": "cc:" + u, "exit": None, "stderr": [str(e)[-300:]]}}
         res, failed = {}, {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.jobs) as ex:
-            for u, e in ex.map(one, units):
+            for u, e in ex.map(one, units):   # every unit is judged, PP and CC alike: a failed unit never stops another
                 if e["status"] != "ok":
                     cc = e["status"] == "cc-failed"
                     failed[u] = e.get("failure") or {"stage": "%s:%s" % ("cc" if cc else "pp", u), "exit": e.get("cc_rc" if cc else "pp_rc"),
@@ -696,8 +696,9 @@ class Job:
                 res[u] = e["object"]
                 if e.get("pp_key"):
                     self.ppkeys[u] = e["pp_key"]
-        if failed:
-            raise BuildRed(dict(failed[sorted(failed)[0]], units=sorted(failed), done=sorted(res)))
+        if failed:   # in unit order (UNITS is sorted), so the first failure and the list are deterministic
+            fl = [{"unit": u, "stage": failed[u]["stage"], "exit": failed[u]["exit"], "stderr": list(failed[u]["stderr"])[-20:]} for u in units if u in failed]
+            raise BuildRed(dict(fl[0], failed_units=fl, done=sorted(res)))
         return res
 
     def link(self, ws, objs):
@@ -796,7 +797,8 @@ def build(repo, root, store, out, jobs=4, ext=None):
                 shutil.copyfile(os.path.join(ws, "root", j.rec[key]), os.path.join(out, key + ".tsv"))
                 res[key] = os.path.abspath(os.path.join(out, key + ".tsv"))
     except BuildRed as r:
-        res.update(status="red", failure=r.args[0], failed_units=r.args[0].get("units", []))
+        fl = r.args[0].get("failed_units", [])
+        res.update(status="red", failure={k: v for k, v in r.args[0].items() if k in ("stage", "exit", "stderr")}, failed_units=fl)
     finally:
         shutil.rmtree(ws, ignore_errors=True)
     res.update(stage_keys=sorted(j.keys), stages={"run": j.run, "hit": j.hit}, units=units, pp_keys=dict(sorted(j.ppkeys.items())))
