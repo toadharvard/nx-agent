@@ -43,7 +43,7 @@ d0 = doc()
 check("env.json: format, programs owned, non-trivial package list", d0["format"] == "fnvnx-env/1" and d0["uid"] == 0
       and d0["arch"] == "x86_64" and {"strace", "busybox", "aarch64-linux-gnu-g++", "aarch64-linux-gnu-as"} <= set(d0["programs"])
       and {"busybox-static", "gcc-13-plugin-dev-aarch64-linux-gnu", "libc6-dev-arm64-cross", "strace"} <= set(d0["packages"])
-      and set(d0["python"]["modules"]) == {"capstone", "numpy", "unicorn", "pyelftools"}, d0["programs"])
+      and set(d0["python"]["modules"]) == {"capstone", "gmpy2", "keystone-engine", "numpy", "unicorn", "pyelftools", "z3-solver"}, d0["programs"])
 
 def mutate(f):
     d = doc()
@@ -56,6 +56,10 @@ CASES = [
      "env: package no-such-package-xyz: want 1, have not installed"),
     ("python module version", mutate(lambda d: d["python"]["modules"].__setitem__("capstone", "0.0")),
      "env: python module capstone: want 0.0, have "),
+    ("python module content sha256 (same version, other bytes)", mutate(lambda d: d["python"]["wheels"].__setitem__("z3-solver", "0" * 64)),
+     "env: python module z3-solver content sha256: want 000000000000, have "),
+    ("python module without a content sha256", mutate(lambda d: d["python"]["wheels"].pop("gmpy2")),
+     "env: python module gmpy2: no content sha256 in python.wheels"),
     ("python version", mutate(lambda d: d["python"].__setitem__("version", "2.7.0")), "env: python.version: want 2.7.0, have "),
     ("missing program", mutate(lambda d: d["programs"].append("no-such-program-xyz")), "env: program no-such-program-xyz: want in PATH, have missing"),
     ("program not owned by a listed package", mutate(lambda d: d["packages"].pop("busybox-static")), "env: program busybox: want owned by a listed package"),
