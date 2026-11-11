@@ -80,6 +80,13 @@ What an external compiler names outside its tree is declared as inputs at their 
 configured with (`-print-prog-name=as|ld`) and the header directories of its search list, symlink targets included (the distribution's cross binutils and
 headers pinned by env.json). The CC stage mounts the compiler external, the plugins and unit.ii only; other externals are PP inputs.
 
+The pin file also names the guest's **runtime** (`"runtime": {EXT_KEYS}`, fnv-nx-build `tools/fnvnx-a64-msvcmodel`: gcc 15.2.0 + newlib built with the same
+msvcmodel.patch, target `aarch64-none-elf`, multilibs `.`, `pic`, `ilp32`, `ilp32/pic`; its libc, libm, libstdc++ and headers). A guest recipe may declare it
+as an `external` entry (it is only a PP input of the units, never mounted in the CC stage); if it does, the entry must equal the pinned one exactly (red
+otherwise). `verify/samples/platform.build.json` is the sample recipe of the platform root (compiler + runtime externals, the eight plugins, the semantics
+flags, `include` = the runtime's `c++/15.2.0`, its ilp32 target directory and `include`); `test_guest.py` checks it with `recipe.py check` and builds a unit
+that includes `<vector>`, `<string>`, `<cstdio>`. The 13.3 compiler reads gcc 15.2's libstdc++ headers only with `-std=gnu++20` (the sample's `flags.cxx`).
+
 ### Gate rule: native and decomp C++ is compiled with both plugins; lifted C++ with none
 `admit.json` entry of a product root with at least one C++ unit declares `"cxx_origin"`: `"native"` (hand-written or decomp C++), or
 `{"lifted_by": "<tracked .py of a tool root>", "pack": "<external name of the recipe>"}`. Missing declaration = invalid recipe = red `build`.
