@@ -50,3 +50,26 @@ No pack tree (`l3a-lift/pack/<sha12>`) exists yet for any R9 head.
 
 ### Rules in force
 Commits carry no trailers at all (orchestrator 21:29Z). Decomp / exe-derived artifacts only in fnv-nx-build. No PRs, no JOURNAL.md edits.
+
+### Gate D: the worker's final state (commit e51bc9e, "wip")
+Only `lift/tools/ehtables.py` (the facts side) changed. `tools/gate_eh.py` and `test/gate_eh_test.py` are NOT updated to
+the new facts schema, so the EH gate and its test do not match the facts at this head. None of the four rules is closed.
+- Facts now produced: `throw_sites[{site,ti,obj,tail}]`, `failed_throwinfo`, `thrower_escapes`, `funcinfo[].stubs` with
+  `live`, `scopes[]` with `trylevel_max / nonconst_stores / err / records`, `failed_funcinfo[{addr,err,live}]`. The keys
+  `frame_regs` and `frame_handlers` are gone.
+- The thrower is found by rule (the function that references the cell holding 0xE06D7363, or the IAT slot
+  `_CxxThrowException`). The ThrowInfo argument is resolved by forward constant dataflow over the backward cone of the
+  call site. It relies on callees preserving ebx/esi/edi/ebp: that is the callee-saved REMOVE assumption, to be checked
+  from the exe's code, not accepted.
+- Numbers before the last two fixes (facts in the old container, /home/user/l3facts7): d3dx9_38 347 throw sites, 42
+  non-constant, 33 SEH functions, 0 non-constant trylevel stores, stubs 140 live / 0 unreferenced; binkw32 0 throw sites,
+  31 SEH functions; libvorbis 80 and libvorbisfile 84 SEH functions, each with 1 empty table reported invalid. The exe
+  was not recomputed with this ehtables.py. The d3dx9_38 rerun after the esp-relative fix did not finish: its count is
+  unknown.
+- Known defect: in libvorbis / libvorbisfile the "invalid empty table" is a false table candidate (the operand is the
+  /GS cookie pushed before a `_local_unwind4`-like call) that comes from the `helpers` name-free heuristic in
+  `scan_seh`. That heuristic must be replaced by a rule; until then the gate is red there, which is the correct side.
+- Next: rerun the four modules and the exe (universe.py, about 25 minutes: a farm job), rewrite gate_eh.py and its test
+  for the schema above (red on a throw site without a constant ThrowInfo except rethrow, on `failed_throwinfo`, on
+  `thrower_escapes`, on `nonconst_stores`, on `len(records) != 1 + trylevel_max`), update the ehtables.py docstring and
+  the README EH paragraph.
