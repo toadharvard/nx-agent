@@ -18,6 +18,7 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` a2453fe9 (w4 @39c4
 | 3k | link kinds pie/exe/shared (+version_script) for GL backend render/gl4; shared roots via link.roots; target "variants" (root@NAME; also the sanitizer variant) (L6A) | session_01KmtZKRyNHyAGWeTxKmbdfZ (w15) | claude/fnv-l1-contract-w15 | doing |
 | 3e | env.json pins: patch, libegl-dev, libgl-dev | session_01KmtZKRpuoHrhZqwnLDyQ8L (w16) | claude/fnv-l1-contract-w16 | doing |
 | 3a | recipe: bare prog name (as, ld) resolved like the driver (programs: list, then PATH); host x86_64 roots red today (L6A render/gl4) | w16 | claude/fnv-l1-contract-w16 | doing |
+| 3n | recipe check: include dir inside the root's own tree refused (#pragma once identity; L6) | w16 | claude/fnv-l1-contract-w16 | doing |
 | 3i | recipe key isystem (paths inside externals only) for libnx/newlib headers (L6A) | w16 | claude/fnv-l1-contract-w16 | doing |
 | 1u | contract-gate universe for roots without game/link (blocks lift/rt admission) + GalaxyWrp.dll row in l1-contract/mp4 modules.tsv (L3a) | session_01KmtZKQwjYFpEvoHtfEjCcb (w18) | claude/fnv-l1-contract-w18 | doing |
 | 2b | budget in VERDICT.md, budget gate, delete second build paths | lead | - | blocked by 2 (numbers) |
@@ -38,11 +39,11 @@ Global count: 13 missing of 32 required at trunk a2453fe9 (gates.json has 23). N
 | r7 | L2 | claude/fnv-l2-source-w5 (session_01KmtZKUHWWEEBqzMR6cAtAZ) | - | doing |
 | namegate | L2 | claude/fnv-l2-source-w5 | - | doing |
 | abi | L2 | claude/fnv-l2-source-w5 | - | doing |
-| order | L3a (L2 supplies plugin certificate) | - | - | - |
-| eh | L3a (L3b reviews) | - | - | - |
-| addr32 | L3a | - | - | - |
-| forms | L3b | - | - | - |
-| fpexact | L3b (native criterion: w17 makes fnvnx_ftoi reject any unrewritten FIX_TRUNC_EXPR) | - | - | - |
+| order | L3a (L2 supplies plugin certificate) | claude/fnv-l3a-lift-gates (session_01KmtZKR34WmRCfdDoE7ajAt) | - | doing |
+| eh | L3a (L3b reviews) | claude/fnv-l3a-lift-gates | - | doing |
+| addr32 | L3a | claude/fnv-l3a-lift-gates | - | doing |
+| forms | L3b | claude/fnv-l3b-lift-w2g | - | doing |
+| fpexact | L3b, claude/fnv-l3b-lift-w2g (native criterion: w17 makes fnvnx_ftoi reject any unrewritten FIX_TRUNC_EXPR) | - | - | - |
 | d3d9total | L6 | claude/fnv-l6-render-w4 (session_01KmtZKUN17roaVoBLBe4QKK) | - | doing |
 
 ## Global numbers (trunk 58a79b3e)
