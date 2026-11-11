@@ -20,8 +20,11 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` f1059af7 (L5 w4r @
 | 3a | recipe: bare prog name (as, ld) resolved like the driver (programs: list, then PATH); host x86_64 roots red today (L6A render/gl4) | w16 | claude/fnv-l1-contract-w16 | doing |
 | 3n | recipe check: include dir inside the root's own tree refused (#pragma once identity; L6) | w16 | claude/fnv-l1-contract-w16 | doing |
 | 3i | recipe key isystem (paths inside externals only) for libnx/newlib headers (L6A) | w16 | claude/fnv-l1-contract-w16 | doing |
-| 1u | owner order 9e5856f0: Galaxy/GalaxyWrp not lifted. One rule for images.py+modules.py: guest image = found, no bridge row, closure resolves; else declared-machine module (kind declared, bodies = L5 bridge rows, not walked); then contract-gate universe for roots without game/link (lift/rt) | session_01KmtZKQwjYFpEvoHtfEjCcb (w18) | claude/fnv-l1-contract-w18 | doing |
+| 1u | owner order 9e5856f0: Galaxy/GalaxyWrp not lifted. One rule for images.py+modules.py: guest image = found, no bridge row, closure resolves; else declared-machine module (kind declared, bodies = L5 bridge rows, not walked); item 2 contract universe done a52a6294 (109/109 tests; L1 verdict pending) | session_01KmtZKQwjYFpEvoHtfEjCcb (w18) | claude/fnv-l1-contract-w18 | doing |
 | 3f | link root over admitted roots of mixed cxx_origin (L3b product ELF/tests) | w15 | claude/fnv-l1-contract-w15 | doing |
+| 3l | link.libs: archives inside declared externals (newlib libc.a), pulled members judged by linkstrict+objstub (L3b) | w15 | claude/fnv-l1-contract-w15 | doing |
+| 3m | include mounts at root-relative paths in one mirrored tree (`../` works; undeclared = missing) (L2, L5 platform root) | w16 | claude/fnv-l1-contract-w16 | queued (before 3x) |
+| 3h | guest system headers = linked libc's (fnvnx-a64-msvcmodel newlib+libnx, -nostdinc); glibc cross headers refused in guest roots (L2/L5 socket units) | w4 | claude/fnv-l1-contract-w4 | queued (after w8 rebase) |
 | 3x | fixture roots: per-unit gate + expected finding, never linked or in a universe (L3b forms/fpexact tests) | w16 | claude/fnv-l1-contract-w16 | queued |
 | 3w | recipe: -Werror=attributes required in guest roots (L3a); envcheck before any stage, env failures never cached (L2) | w14 | claude/fnv-l1-contract-w14 | queued |
 | 2b | budget in VERDICT.md, budget gate, delete second build paths | lead | - | blocked by 2 (numbers) |
