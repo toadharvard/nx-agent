@@ -90,11 +90,17 @@ L3_MSVCRT = set("__CxxFrameHandler _CxxThrowException _except_handler3 _setjmp3 
                 "?terminate@@YAXXZ ??1type_info@@UAE@XZ _adjust_fdiv _clearfp _controlfp _fpclass _finite "
                 "_isnan".split())
 L3_NAMES = {"?terminate@@YAXXZ": "terminate", "??1type_info@@UAE@XZ": "type_info_dtor"}
+# kernel32 services that act on the guest state (R4: the SEH dispatch walks the guest fs:[0] chain and calls lifted
+# handlers; DebugBreak is the breakpoint exception at the caller): provided by the lifter runtime as fnvl_os_<name>.
+# The platform raises its own exceptions through w32_raise (platform/win32/thread.cpp), whose backend that runtime installs.
+L3_KERNEL32 = ("RaiseException", "RtlUnwind", "DebugBreak")
 
 
 def native(dll, name):
     if dll == "msvcrt.dll" and (name in L3_MSVCRT or name.startswith("_CI")):
         return "fnvl_msvcrt_" + L3_NAMES.get(name, name.lstrip("_"))
+    if dll == "kernel32.dll" and name in L3_KERNEL32:
+        return "fnvl_os_" + name
     if dll == "wsock32.dll":
         return "fnvnx_ws2_" + {"__WSAFDIsSet": "fdisset"}.get(name, name)
     if dll == "msvcrt.dll" and name.startswith("?"):
