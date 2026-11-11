@@ -42,11 +42,13 @@ def main():
     ap.add_argument('--only', default='')
     a = ap.parse_args()
     facts = store.load(a.facts, 'facts')
+    n1 = store.load(a.n1, 'n1')
     obj = store.load(a.obj, 'obj')
-    ck = {v for k, v in store.load(a.n1, 'n1')['sym'].items() if len(k) == 2 and k[1] == '___security_cookie'}
+    ck = {v for k, v in n1['sym'].items() if len(k) == 2 and k[1] == '___security_cookie'}
     if len(ck) != 1:
         sys.exit('___security_cookie is not one address in the N1 map: %r' % sorted(ck))
     facts['cookie'] = ck.pop()
+    facts['pristine'] = gate_call.pristine_names(n1)
     os.makedirs(a.out, exist_ok=True)
     summary = {}
     rows = []
