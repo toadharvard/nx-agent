@@ -640,6 +640,7 @@ struct Graph final : IFilterGraph2_, GraphCore {
     {
         control.g = event.g = sink.g = mfilter.g = seeking.g = position.g = audio.g = site_if.g = version_if.g = vwin.g = bvid.g = this;
         evt = CreateEventA(nullptr, TRUE, FALSE, nullptr);
+        clk_device_watch(evt, 1);   /* the pump signals it: a wait on it runs the pump on virtual time */
     }
     ~Graph();
     HR QueryInterface(const void *iid, void **out) override;
@@ -2005,7 +2006,7 @@ Graph::~Graph()
         if (queue[i].keep) queue[i].keep->Release();
     for (size_t i = 0; i < lent.n; i++)
         if (lent[i].keep) lent[i].keep->Release();
-    if (evt) CloseHandle(evt);
+    if (evt) { clk_device_watch(evt, 0); CloseHandle(evt); }
 }
 
 /* ---- IDispatch members: each interface's vtable behaviour behind a name and a VARIANT convention */
