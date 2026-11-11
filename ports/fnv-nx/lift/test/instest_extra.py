@@ -7,7 +7,7 @@ of fnvlift/f_sys.py: for every encoding below, the generated C must contain the 
 model GDT, descriptor-table reads, hint NOPs, prefix-only variants, UD by absent extension) and none of the forbidden ones. The expectations are written by hand from the SDM / ReactOS table,
 not computed by the rule under test. No oracle: Unicorn has no OS, ring 3, Win32 selectors or model GDT.
 Everything exe-derived goes to /home/user/l3work/xinstest, never the repo."""
-import sys, os
+import sys, os, struct
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE); sys.path.insert(0, os.path.dirname(HERE))
 import instest as T
 from capstone import x86 as X
@@ -93,6 +93,8 @@ lfence|0faee8
 sfence|0faef8
 clflush|0fae38 0fae7804
 fldenv|d920 d96004 66d920 66d96004
+fnstenv|d930 d97004 66d930 66d97004
+fnsave|dd30 dd7004 66dd30 66dd7004
 frstor|dd20 dd6004 66dd20 66dd6004
 fbld|df20 df6004 df6424fc
 fbstp|df30 df7004 df7424fc
@@ -242,13 +244,62 @@ orig_x87_range, orig_compare, orig_run = T.x87_range, T.compare, T.Oracle.run
 def x87_range(E):
     b, mr = E['base'], E['ins'].modrm
     if b == 'fbld': return 0, 7                                 # pushes
-    if b in ('fldenv', 'frstor'): return 0, 8                   # replace the whole state
+    if b in ('fldenv', 'frstor', 'fnstenv', 'fnsave'): return 0, 8   # replace / read the whole state
     if b == 'fstpnce': return max(1, (mr & 7) + 1), 8           # pops, needs st(i)
     return orig_x87_range(E)
 def oracle_run(s, E, st):
     if is_vex(E['raw']):
         return dict(regs=list(st['regs']), eip='trap4', fl=st['fl'] & 0xcd5, eflx=st['eflx'] & 0x240000, mem={}, fp=None, xmm=list(st['xmm']), mm=None, mxcsr=st['mxcsr'], wr=[])
     return orig_run(s, E, st)
+# fnstenv / fnsave (X1b): the image fields FIP FCS FOP FDP FDS depend on the last non-control x87 instruction, which Unicorn/QEMU does not model (its helper stores 0 there). The lifted side is
+# seeded with a known last-instruction state (c->fip, c->fdp, c->sel[] written into the harness CPU block before the run); the expected fields come from an independent Python model of SDM
+# Vol 1 8.1.8 (FIP = the instruction address, FCS = CS, FOP = (first opcode byte & 7) << 8 | second opcode byte after the prefixes, FDP = the operand offset, FDS = DS when FDP != 0; FIP = 0
+# is the FNINIT state, all five fields 0) and replace the oracle's bytes: every such field is COUNTED in "oracle-unmodelled fields", never silently equal. The sticky exception bits of the FSW word
+# follow the fnstsw convention (not compared) and are counted as "fsw sticky bits masked". An empty register's image in fnsave (stale value in QEMU, real indefinite in the lifted code: A-EMPTY) is
+# counted in the A-EMPTY masks. Everything else of the image is compared against the oracle byte for byte.
+CODE0 = 0x7d0f0000
+SEEDS = [(0, 0, b''), (CODE0, 0x30001234, bytes.fromhex('d94508')), (CODE0 + 0x10, 0x7ffdf00c, bytes.fromhex('66dd4508')), (CODE0 + 0x20, 0x1000, bytes.fromhex('dec1')),
+         (CODE0 + 0x30, 0xffffff00, bytes.fromhex('3ed9c0')), (CODE0 + 0x40, 0x4, bytes.fromhex('f2dd45f8'))]
+for a_, d_, r_ in SEEDS:
+    if r_: fake[a_] = r_
+PFXS = (0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65)
+def fseed(E, st): return SEEDS[st['wk'][0] % len(SEEDS)]
+def model_fields(seed, d32):
+    """[(offset, size, value)] of FIP, FCS(+FOP), FDP, FDS in the image"""
+    ip, dp, code = seed
+    i = 0
+    while code and code[i] in PFXS: i += 1
+    fop = ((code[i] & 7) << 8 | code[i + 1]) if ip else 0
+    cs, ds = (0x1b if ip else 0), (0x23 if dp else 0)
+    return [(12, 4, ip), (16, 4, cs | fop << 16), (20, 4, dp), (24, 4, ds)] if d32 else [(6, 2, ip & 0xffff), (8, 2, cs), (10, 2, dp & 0xffff), (12, 2, ds)]
+orig_arm_run = T.Arm.run
+def arm_run(s, E, st):
+    ip, dp, _ = fseed(E, st)
+    s.uc.mem_write(T.CPU + 472, struct.pack('<6I', 0x23, 0x1b, 0x23, 0x23, 0x3b, 0)); s.uc.mem_write(T.CPU + 500, struct.pack('<2I', ip, dp))
+    return orig_arm_run(s, E, st)
+T.Arm.run = arm_run
+def mset(mem, st, a, v):
+    if v == T.origbyte(st, a): mem.pop(a, None)
+    else: mem[a] = v
+def mget(mem, st, a): return mem.get(a, T.origbyte(st, a))
+def env_compare(E, st, o, c):
+    """fnstenv / fnsave: returns (unmodelled fields, sticky bits masked, A-EMPTY registers masked)"""
+    a0 = min(a for a, n in o['wr']); d32 = E['raw'][0] != 0x66; om, cm = dict(o['mem']), dict(c['mem']); u = 0
+    for off, n, v in model_fields(fseed(E, st), d32):
+        for k in range(n): mset(om, st, a0 + off + k, v >> 8 * k & 0xff)
+        u += 1
+    fo = 4 if d32 else 2
+    for mem in (om, cm):
+        mset(mem, st, a0 + fo, mget(mem, st, a0 + fo) & ~0xff & 0xff); mset(mem, st, a0 + fo + 1, mget(mem, st, a0 + fo + 1) & ~0x82 & 0xff)
+    e = 0
+    if E['base'] == 'fnsave':
+        h = 28 if d32 else 14
+        for i in range(8):
+            if not st['valid'] >> ((st['ftop'] + i) & 7) & 1:
+                for k in range(10): mset(om, st, a0 + h + 10 * i + k, mget(cm, st, a0 + h + 10 * i + k))
+                e += 1
+    o['mem'], c['mem'] = om, cm
+    return u, 2, e
 def compare(E, st, o, c, X):
     b, masked = E['base'], 0
     if b == 'fbstp' and o.get('wr') and 'fault' not in c:
@@ -258,14 +309,24 @@ def compare(E, st, o, c, X):
         for p in range(8):
             if o['fp']['valid'] >> p & 1 and not st['valid'] >> p & 1 and b == 'fldenv' and c['fp']['valid'] >> p & 1:
                 c['fp']['st'][p] = (o['fp']['st'][p][0], o['fp']['st'][p][1], 6); masked += 1
+    u = sk = 0
+    if b in ('fnstenv', 'fnsave') and o.get('wr') and 'fault' not in c:
+        u, sk, e = env_compare(E, st, o, c); masked += e
     r = orig_compare(E, st, o, c, X)
-    return (r[0], MASKED + ':%d' % masked if r[0] == 'equal' and masked else r[1]) + tuple(r[2:])
+    return (r[0], MASKED + ':%d/%d/%d' % (masked, u, sk) if r[0] == 'equal' and (masked or u) else r[1]) + tuple(r[2:])
 T.x87_range, T.compare, T.Oracle.run = x87_range, compare, oracle_run
 img80 = T.img80
 def masked_report(work):
     import json
-    js = json.load(open(work + '/result.json')); n = sum(int(r[1].split(':')[1]) for v in js.values() for e in v['encodings'] for r in e['cases'] if r[0] == 'equal' and r[1].startswith(MASKED + ':'))
-    print('masked fields: %d  (fldenv registers revived by the tag word: A-EMPTY; FIP/FCS/FOP/FDP/FDS: no case, fnstenv/fnsave are not lifted: Q-FIP)' % n)
+    t = [0, 0, 0]
+    for v in json.load(open(work + '/result.json')).values():
+        for e in v['encodings']:
+            for r in e['cases']:
+                if r[0] == 'equal' and r[1].startswith(MASKED + ':'):
+                    for k, x in enumerate(r[1].split(':')[1].split('/')): t[k] += int(x)
+    print('masked fields: %d  (A-EMPTY: fldenv registers revived by the tag word, fnsave images of empty registers)' % t[0])
+    print('oracle-unmodelled fields: %d  (FIP/FCS/FOP/FDP/FDS of fnstenv/fnsave images: asserted against the SDM model of this file, QEMU stores 0)' % t[1])
+    print('fsw sticky bits masked: %d  (fnstsw convention, exception bits / ES / B / C1 are not compared)' % t[2])
 def tables():
     img = FImage(os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')); bad = 0
     PRIVS = [('fa', 'FNVL_PRIV'), ('fb', 'FNVL_PRIV'), ('f4', 'FNVL_PRIV'), ('ee', 'FNVL_PRIV'), ('e6 10'.replace(' ', ''), 'FNVL_PRIV'), ('6c', 'FNVL_PRIV'), ('f36e', 'FNVL_PRIV'), ('ce', 'FNVL_INTO'), ('cc', 'FNVL_BP')]

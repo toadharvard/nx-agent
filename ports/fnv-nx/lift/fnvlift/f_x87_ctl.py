@@ -187,21 +187,21 @@ def env(cx, ins, b0, g):
 
     LOADS (fldenv, frstor): FCW through FLDCW (the one control-word hook: host rounding mode synced), FSW -> TOP, C0 C2 C3 (the lifter's locals), the exception bits IE..PE, SF, C1 -> c->fex
     (the host sticky flags are cleared: c->fex plus the host flags is what FSWV reads); FTW: tag 11 = empty register, any other tag = non-empty (the tag of a non-empty register is
-    recomputed from its contents by every store, SDM 8.1.7, so 00/01/10 carry no state); frstor also loads ST(0..7) as 80-bit images into M80 carriers.
+    recomputed from its contents by every store, SDM 8.1.7, so 00/01/10 carry no state); frstor also loads ST(0..7) as 80-bit images into M80 carriers; FIP and FDP are loaded into
+    c->fip / c->fdp.
+    STORES (fnstenv, fnsave): FCW, FSW (FSWV: TOP, C0..C3, C1, sticky bits), FTW from the register contents, FIP, FCS | FOP << 16, FDP, FDS from the last-instruction state (c->fip, c->fdp:
+    rt/fnvl_x87.h, SDM 8.1.8, assumptions A-FDP A-FDS A-FOP A-RES there); fnsave then writes ST(0..7) and performs FNINIT; fnstenv then masks all exceptions (FCW |= 3F via FLDCW).
     Assumptions: A-EMPTY a register that the image marks non-empty but whose carrier is empty holds the real indefinite (the value the tree gives every read of an empty register:
-    dyn_rd; the carrier of an empty register keeps no value); A-ES the FSW bits ES (7) and B (15) are not kept, no x87 exception is ever pending in the model (R8: all masked, FSWV
-    never reports them); the FIP / FCS / FOP / FDP / FDS fields of the image are not loaded: the model has no state for them (see the stores).
-
-    STORES (fnstenv, fnsave): NOT lifted, and deliberately. The image carries the x87 last-instruction pointer (FIP, FCS, FOP) and last-operand pointer (FDP, FDS) of the most recent
-    non-control x87 instruction; the tree does not track them (no field in struct cpu, no update in any x87 handler), and writing zeros would be a silent wrong answer. This is the
-    open class question Q-FIP of task X1: a rule is needed (struct cpu fields written by every non-control x87 instruction, or another rule), not a patch here."""
+    dyn_rd; the carrier of an empty register keeps no value; fnsave writes it for an empty register too); A-ES the FSW bits ES (7) and B (15) are not kept, no x87 exception is ever pending
+    in the model (R8: all masked, FSWV never reports them)."""
     if cx.xm == 's':
         raise X87Dyn()
-    if g == 6:
-        raise Unsupported('x87 %s: FIP/FCS/FOP/FDP/FDS of the image are not modelled (open class question Q-FIP)' % cx.m)
     d32 = 0 if ins.prefix[2] == 0x66 else 1
     a = cx.ea(ins, cx.ops[0])
-    cx.em(('FLDENV(%s,%d);' if b0 == 0xd9 else 'FRSTOR(%s,%d);') % (a, d32))
+    if g == 6:
+        cx.em(('FNSTENV(%s,%d,FSWV(c->ftop));' if b0 == 0xd9 else 'FNSAVE(%s,%d,FSWV(c->ftop));') % (a, d32))
+    else:
+        cx.em(('FLDENV(%s,%d);' if b0 == 0xd9 else 'FRSTOR(%s,%d);') % (a, d32))
 
 
 # ---- control and status instructions (b0 d8..df); returns True when handled ----

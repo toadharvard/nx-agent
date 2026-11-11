@@ -102,13 +102,40 @@ extern "C" u32 fnvl_trace_sw(u32 fsw);   /* test stand: reports the FSW delivere
 static inline fv dyn_rd(u32 i){ fv *p=&c->fx[(c->ftop+i)&7]; if(__builtin_expect(!p->k,0)){ c->fex|=0x41; return FV_INDEF; } return *p; }
 static inline void dyn_push(fv v){ u32 t=(c->ftop-1)&7; if(__builtin_expect(c->fx[t].k!=0,0)){ c->fex|=0x41; v=FV_INDEF; } c->ftop=t; c->fx[t]=v; }
 static inline void dyn_pop(void){ fv *p=&c->fx[c->ftop&7]; if(__builtin_expect(!p->k,0)) c->fex|=0x41; p->k=0; c->ftop=(c->ftop+1)&7; }
-static inline void fnvl_x87_init(void){ for(int i=0;i<8;i++) c->fx[i].k=0; c->ftop=0; c->fcw=0x37f; c->fex=0; fnvl_fp_set_rc_x87(0); fnvl_fp_x87_clear(); }
+static inline void fnvl_x87_init(void){ for(int i=0;i<8;i++) c->fx[i].k=0; c->ftop=0; c->fcw=0x37f; c->fex=0; c->fip=c->fdp=0; fnvl_fp_set_rc_x87(0); fnvl_fp_x87_clear(); }
 /* fbld / fbstp: packed BCD (rt/x87.c; A-BCD: digits above 9 follow the arithmetic formula d*10^k). The value of an 18-digit number is an integer below 10^18: exact in the M80 carrier. */
 static inline fv fv_ldbcd(u64 lo,u32 hi){ u8 b[10]; u16 h=(u16)hi; __builtin_memcpy(b,&lo,8); __builtin_memcpy(b+8,&h,2); fnvl_f80 r=fnvl_x_from_bcd(b); return fvmk(FK_M80,r.m,r.se); }
 static inline void fv_stbcd(fv a,u64 *lo,u64 *hi){ u8 b[10]; u32 f=0; u16 h; fnvl_x_to_bcd(fv_x(a),c->fcw,b,&f); __builtin_memcpy(lo,b,8); __builtin_memcpy(&h,b+8,2); *hi=h; FM_FL(f); }
+/* x87 last-instruction state (SDM Vol 1 8.1.8, "x87 FPU Instruction and Data (Operand) Pointers"). Sentences relied on: the x87 FPU saves the instruction pointer (FIP, FCS) and the
+   opcode (FOP) of the last non-control instruction it executed, and the data pointer (FDP, FDS) of its memory operand; the control instructions (FNINIT, FNCLEX, FLDCW, FNSTCW, FNSTSW,
+   FNSTENV, FLDENV, FNSAVE, FRSTOR, WAIT) leave them alone; FNINIT / FNSAVE (re-initialisation) zero them. State: c->fip (address of the first byte of the instruction, prefixes included) and
+   c->fdp (offset of the last memory operand, no segment base), written by the lifter's x87 entry (f_x87.py) before every non-control x87 instruction (fdp only with a memory operand).
+   A-FDP: the SDM leaves the data pointer of an instruction without a memory operand unspecified; it is modelled as unchanged. A-FDS: FDS is DS whenever FDP != 0 (an FS-relative operand is
+   reported with the DS selector: the selector is not kept per operand). A-FOP: FOP is not stored, it is the low 11 bits of the two opcode bytes at FIP (first byte & 7, second byte), read
+   from the code when an image is written; FIP == 0 (no x87 instruction since FNINIT / thread start) gives the FNINIT state: FIP = FCS = FOP = FDP = FDS = 0. FCS and FDS are the model's
+   selectors (c->sel[], the CONTEXT SegCs / SegDs of rt/seh.c). A-RES: reserved bits of the image are 0. */
+static inline u32 fx_fop(void){ u32 a=c->fip, b;
+  if(!a) return 0;
+  for(int n=0;n<14;n++){ b=M8(a); if(b==0x66||b==0x67||b==0xf0||b==0xf2||b==0xf3||b==0x2e||b==0x36||b==0x3e||b==0x26||b==0x64||b==0x65) a++; else break; }
+  return ((M8(a)&7u)<<8)|M8(a+1u); }
+/* tag of a physical register (SDM 8.1.7): 0 valid, 1 zero, 2 special (NaN, infinity, denormal, unsupported), 3 empty */
+static inline u32 fx_tag(const fv *p){ if(!p->k) return 3; fnvl_f80 x=fv_x(*p); u32 e=x.se&0x7fff; if(e==0x7fff) return 2; if(e==0) return x.m?2:1; return (x.m>>63)?0:2; }
+/* fnstenv / fnsave image of the environment (32-bit layout fig 8-9 / 16-bit fig 8-11: FCW, FSW (TOP in), FTW (2-bit tags from the contents), FIP, FCS | FOP<<16, FDP, FDS) */
+static inline void fx_env_st(u32 a,u32 d32,u32 fsw,u32 cs,u32 ds){ u32 ftw=0, ip=c->fip, dp=c->fdp, cs_=ip?cs:0, op=fx_fop(), ds_=dp?ds:0;
+  for(u32 p=0;p<8;p++) ftw|=fx_tag(&c->fx[p])<<(2*p);
+  if(d32){ M32(a)=c->fcw&0xffffu; M32(a+4u)=fsw&0xffffu; M32(a+8u)=ftw; M32(a+12u)=ip; M32(a+16u)=cs_|(op<<16); M32(a+20u)=dp; M32(a+24u)=ds_; }
+  else { M16(a)=(u16)c->fcw; M16(a+2u)=(u16)fsw; M16(a+4u)=(u16)ftw; M16(a+6u)=(u16)ip; M16(a+8u)=(u16)cs_; M16(a+10u)=(u16)dp; M16(a+12u)=(u16)ds_; } }
+/* fnstenv: the image, then all exceptions masked (SDM FNSTENV: "then masks all floating-point exceptions": FCW |= 3F through the one control-word hook) */
+#define FNSTENV(A,D32,FSW) do{ u32 a_=(A); fx_env_st(a_,(D32),(FSW),c->sel[SEG_CS],c->sel[SEG_DS]); FLDCW(c->fcw|0x3fu); }while(0)
+/* fnsave: the environment, then ST(0..7) as 80-bit images in ST order (an empty register holds the real indefinite: A-EMPTY), then FNINIT */
+#define FNSAVE(A,D32,FSW) do{ u32 a_=(A), h_=(D32)?28u:14u; fx_env_st(a_,(D32),(FSW),c->sel[SEG_CS],c->sel[SEG_DS]); \
+  for(u32 i_=0;i_<8;i_++){ fv v_=c->fx[(c->ftop+i_)&7]; fnvl_f80 t_=fv_x(v_.k?v_:FV_INDEF); M64(a_+h_+10u*i_)=t_.m; M16(a_+h_+10u*i_+8u)=t_.se; } \
+  fnvl_x87_init(); c0=c2=c3=0; }while(0)
 /* fldenv / frstor (SDM Vol 1 8.1.10, 32-bit layout fig 8-9, 16-bit layout fig 8-11; assumptions A-EMPTY and A-ES: see f_x87_ctl.py env()). Dynamic stack only. The image words: FCW at 0,
-   FSW at w, FTW at 2w with w = 4 (32-bit operand size) or 2; frstor's ST(i) images follow the 7 dwords (28 bytes) / 7 words (14 bytes) of the environment, 10 bytes each in ST order. */
-static inline u32 fx_env_ld(u32 a,u32 w,u32 *ftw){ u32 fsw=M16(a+w); *ftw=M16(a+2*w); FLDCW(M16(a)); c->ftop=(fsw>>11)&7; c->fex=fsw&0x27fu; fnvl_fp_x87_clear(); return fsw; }
+   FSW at w, FTW at 2w with w = 4 (32-bit operand size) or 2; FIP at 12 / 6, FDP at 20 / 10; frstor's ST(i) images follow the 7 dwords (28 bytes) / 7 words (14 bytes) of the environment,
+   10 bytes each in ST order. FIP and FDP are loaded; FCS, FOP, FDS are derived (A-FOP, A-FDS). */
+static inline u32 fx_env_ld(u32 a,u32 w,u32 *ftw){ u32 fsw=M16(a+w); *ftw=M16(a+2*w); FLDCW(M16(a)); c->ftop=(fsw>>11)&7; c->fex=fsw&0x27fu; fnvl_fp_x87_clear();
+  c->fip=w==4?M32(a+12u):M16(a+6u); c->fdp=w==4?M32(a+20u):M16(a+10u); return fsw; }
 #define FLDENV(A,D32) do{ u32 ftw_, a_=(A), fsw_=fx_env_ld(a_,(D32)?4u:2u,&ftw_); c0=(fsw_>>8)&1; c2=(fsw_>>10)&1; c3=(fsw_>>14)&1; \
   for(u32 p_=0;p_<8;p_++){ if(((ftw_>>(2*p_))&3)==3) c->fx[p_].k=0; else if(!c->fx[p_].k) c->fx[p_]=FV_INDEF; } }while(0)
 #define FRSTOR(A,D32) do{ u32 ftw_, a_=(A), r_=a_+((D32)?28u:14u), fsw_=fx_env_ld(a_,(D32)?4u:2u,&ftw_); c0=(fsw_>>8)&1; c2=(fsw_>>10)&1; c3=(fsw_>>14)&1; \

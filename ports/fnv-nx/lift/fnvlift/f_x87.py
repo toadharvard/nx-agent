@@ -2,7 +2,8 @@
 semantics (what each load/store/arithmetic does to the value) are in rt/fnvl_x87.h. The transcendental / remainder forms (fsin fcos fsincos fptan fpatan f2xm1 fyl2x
 fyl2xp1 fscale fprem fprem1 fxtract) call rt/fmath.c: correctly rounded binary64 (R8, one reference CPU model); fsincos and fptan always use the dynamic stack because
 their stack effect depends on the operand (C2 = 1: |x| >= 2^63, nothing pushed). fbld / fbstp (packed BCD, rt/x87.c) and fstpnce (D9 D8+i, the undocumented alias of fstp st(i)) are here;
-fldenv / frstor (dynamic stack only) and fnstenv / fnsave (blocked, see ctl) are in f_x87_ctl.py."""
+fldenv / frstor / fnstenv / fnsave (dynamic stack only) are in f_x87_ctl.py. h_x87 is the one entry of every x87 opcode: it records FIP / FDP (ptrs) for the non-control ones."""
+from capstone import x86 as X
 from .core import fallback, op, Unsupported, X87Dyn
 from .f_x87_ctl import ctl
 
@@ -49,10 +50,31 @@ def arith(cx, dst, x, y, o):
     cx.em('{ double x_=(%s), y_=(%s); %s=fv_f64(FXN(x_%sy_,x_,y_)); }' % (x, y, wr(cx, dst), o))
 
 
+def control(b0, mr):
+    """the x87 control instructions that leave the instruction / data pointers alone (SDM Vol 1 8.1.8: FNINIT FNCLEX FLDCW FNSTCW FNSTSW FNSTENV FLDENV FNSAVE FRSTOR; FWAIT is its own handler)"""
+    g = (mr >> 3) & 7
+    if mr < 0xc0:
+        return b0 == 0xd9 and g in (4, 5, 6, 7) or b0 == 0xdd and g in (4, 6, 7)
+    return b0 == 0xdb and mr in (0xe2, 0xe3) or b0 == 0xdf and mr == 0xe0
+
+
+def ptrs(cx, ins):
+    """the x87 last-instruction state (rt/fnvl_x87.h): FIP = address of this instruction (first byte, prefixes included), FDP = offset of its memory operand (no segment base) when it has one.
+    The one place for every non-control x87 instruction, static and dynamic stack alike."""
+    cx.em('c->fip=0x%xu;' % ins.address)
+    if cx.modrm < 0xc0:
+        a = cx.ea(ins, cx.ops[0])
+        if ins.operands[0].mem.segment == X.X86_REG_FS:                     # the offset, not fs base + offset
+            a = '(u32)(0u)' if a == '(u32)(fsb)' else a.replace('(u32)(fsb+', '(u32)(', 1)
+        cx.em('c->fdp=%s;' % a)
+
+
 @fallback(lambda cx, ins: 0xd8 <= cx.b0 <= 0xdf)
 def h_x87(cx, ins):
     cx.kinds.add('x87')
     g = (cx.modrm >> 3) & 7
+    if not control(cx.b0, cx.modrm):
+        ptrs(cx, ins)
     if ctl(cx, ins, cx.b0, cx.modrm, g):
         return
     (x87_reg if cx.modrm >= 0xc0 else x87_mem)(cx, ins, cx.b0, cx.modrm, g)
