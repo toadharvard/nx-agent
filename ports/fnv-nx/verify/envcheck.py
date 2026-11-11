@@ -15,7 +15,7 @@ tests/test_graph,test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linu
 aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount; ar,clang test_coffnorm;
 git verdict.py,l1.py,test_gates; ldd,true test_runtime; g++,llvm-config-18 build a64access.cc (objstub.py, test_a64access).
 The a64access build set is derived the same way: every header `g++ -M` reports for a64access.cc under `llvm-config-18 --cxxflags`,
-and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). Python modules: capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts)."""
+and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). Python modules: capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts); numpy (lift/test/instest.py packer)."""
 import argparse
 import ctypes
 import hashlib
@@ -38,7 +38,7 @@ UNIT_CC = "aarch64-linux-gnu-g++"  # the unit stage ingests its trees whole
 HOST_GCC_PROGS = ["cc1", "cc1plus", "collect2"]  # gcc -print-prog-name=: what the host gcc runs for the static probe / -fsyntax-only
 HOST_GCC_FILES = ["libc.a", "crt1.o", "libgcc.a", "libgcc_eh.a", "libstdc++.so"]  # gcc -print-file-name=: what `gcc -static` links
 A64ACCESS = (os.path.join(HERE, "a64access.cc"), ["aarch64", "mc", "mcdisassembler", "support"])  # source, llvm-config components
-PY_MODULES = {"capstone": "capstone", "unicorn": "unicorn", "pyelftools": "elftools"}   # distribution -> import name
+PY_MODULES = {"capstone": "capstone", "numpy": "numpy", "unicorn": "unicorn", "pyelftools": "elftools"}   # distribution -> import name
 KERNEL = ["unshare mount+pid+net+uts+ipc namespaces as root", "seccomp filter", "ptrace (strace)"]
 
 def env_id(doc):
