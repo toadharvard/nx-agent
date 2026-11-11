@@ -1,0 +1,22 @@
+# l6a-w6: OpenGL backend as product root render/gl4
+
+Branch claude/fnv-l6a-deko-w6. Base: trunk claude/fnv-nx-clean plus a merge of origin/claude/fnv-l6a-deko-w4, because the trunk has no render/backend root yet (gl4 includes nxgpu4.h, nxgpu4_shader.h, nxgpu4_check.h from it).
+
+Root ports/fnv-nx/render/gl4: 17 gl4_*.c, gl4.h, gl4_funcs.h, libnxgl4.map, NXGL4_HOST.md, byte-for-byte from fnv-l6-render 7f8581af. build.json: x86_64-linux-gnu-gcc-13, flags -std=c11 -Wall -Werror -Werror=switch-enum -O2 -fPIC, include gl4 + render/backend, link null. admit.json entry: product, host, same gate list as render/backend.
+
+## Result
+- recipe.py check --root ports/fnv-nx/render/gl4: valid.
+- envcheck: OK.
+- recipe.py build (twice, fresh stores): RED before any unit is compiled, both times, identical: `recipe: error: --exe /home/user/nx-agent/as is not a file`.
+  Units compiled: 0/17 (+0 nxgpu4_check.c, see gap 3). Determinism: not measurable (no objects).
+- L1 verdict: not run, the root cannot build.
+
+## Machinery gaps (not worked around)
+1. x86_64 host compiler: `x86_64-linux-gnu-gcc-13 -print-prog-name=as` prints bare `as` (native driver finds it on PATH). unitstage.py (norm(q("-print-prog-name=as")), line ~97) turns it into cwd/as, which is not a file. The aarch64 cross drivers print full paths, which is why render/backend builds. recipe.py already knows this for plugins (line ~623: "a native driver prints a bare as/ld") but unitstage does not. L1 must resolve a bare name against /usr/bin (env.json binutils) in unitstage. Owner: L1.
+2. Shared object link: `link` allows only {script, output NAME.elf, flags} via `ld -T script`. No -shared, no --version-script, no .so output. link is null; libnxgl4.so cannot be produced by the recipe. Owner: L1.
+3. One root linking another root's object: the recipe has no key for it. nxgpu4_check.c is a unit of render/backend; the GL image needs its object. Not copied. L1 must offer a cross-root object input (an `objects_from: root` of an admitted root), or the file moves into a shared root.
+
+## Blockers known in advance (when the compiler gap is fixed)
+- EGL/GL headers (EGL/egl.h, EGL/eglext.h, GL/glcorearb.h) are not pinned in env.json (/usr/include/EGL is absent here). gl4.h includes them, so all 17 units that include gl4.h are red: gl4_blit gl4_check gl4_core gl4_d3dshader gl4_fmt gl4_gl gl4_image gl4_pass gl4_present gl4_query gl4_read gl4_sampler gl4_scale gl4_shader gl4_state gl4_stream gl4_vtx. Class: missing GL headers. Owner: L1 (pin libegl-dev, libgl-dev) and add the include dirs.
+- fnvnx_shaders.h: gl4_d3dshader.c includes it; it comes from L6 render/shaders (w1b). Not present, so that unit is red a second time. Class: missing translator. No include entry added for it.
+- libfnvnx_shaders.a, libmojoshader.a, libuam.a: link-time only; link is null.
