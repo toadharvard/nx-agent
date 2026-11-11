@@ -1,5 +1,13 @@
 # MEMSAFE: the subset of C and C++ in which a memory fault cannot be written
 
+> **Suspended by the owner on 2026-11-11 (later the same day): this subset is not a gate and nothing is rewritten
+> for it.** The owner's words: the first boot has not happened yet, so no rewriting now; the C++ code is covered by
+> sanitizers for the time being. Standard containers are allowed. Classes 14 and 15 of VERDICT.md are covered by
+> verification (AddressSanitizer and UndefinedBehaviorSanitizer in the stage runs and the tests; the sound analyzer
+> for information) together with the recorded assumption "native code is checked, not proved". The compiler plugin
+> and the WebAssembly wall for the shader translator are not built. This text is kept as the worked-out design for
+> the day the proof work resumes, after the first frame.
+
 Owner decision of 2026-11-11 (class 14 of VERDICT.md, option A): all hand-written native code of the port (platform,
 renderer, loader and host, lift runtime) is written in a subset that the compiler checks, where a memory fault is
 impossible by construction. A body outside the subset is a compile error. The gate `memsafe` is the plugin's verdict
