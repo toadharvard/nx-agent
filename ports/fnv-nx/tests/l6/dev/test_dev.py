@@ -93,7 +93,7 @@ def main():
                 ("e", "obj.cpp", "    if (unk) { e->u = *(IUnknown* const*)data; uref(e); }", "    if (unk) { e->u = *(IUnknown* const*)data; }"),
                 ("d", "state_rt.cpp", "if (nw) nx_obj_of(nw)->bindRef();", ""), ("d", "state_rt.cpp", "if (e.has_light) { D3DLIGHT9 l = e.light; d->SetLight(e.idx, &l); }", ""),
                 ("b", "state_ext.cpp", "d.Direction.z = 1.0f;", "d.Direction.z = 0.0f;"), ("d", "state_rt.cpp", "if (rec && bit(nx_tab.mask[0], slot))", "if (false)"),
-                ("c", "state_ext.cpp", "light->Type > D3DLIGHT_DIRECTIONAL", "light->Type > D3DLIGHT_DIRECTIONAL + 1")]
+                ("c", "state_ext.cpp", "case 3: case 4: break;", "case 3: break;")]
         def one(i):
             part, f, old, new = muts[i]; mdev = os.path.join(tmp, f"m{i}_dev"); shutil.copytree(DEV, mdev, ignore=shutil.ignore_patterns("__pycache__"))
             txt = open(os.path.join(mdev, f)).read()
