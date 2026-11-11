@@ -5,7 +5,7 @@
  * R_AARCH64_P32_RELATIVE entries of .rela.dyn that the loader applies.
  *
  * Shape as libnx's switch.ld: three PT_LOAD segments text (R-X) / rodata (R--) / data (RW-), page aligned, text first,
- * plus PT_DYNAMIC and PT_TLS.  Order inside the text segment: .crt0 (the entry stub, ENTRY __fnvnx_guest_start) first,
+ * plus PT_DYNAMIC and PT_TLS.  Order inside the text segment: .crt0 (the entry code, ENTRY __fnvnx_guest_start) first,
  * the ordinary code, then the lifted bodies (input section .text.fnvl, one `void L_<addr>(void)` each) as an output
  * section of their own.  The perfect-hash dispatcher table of the lifted code (input section .rodata.fnvl_disp,
  * lift/bench/phf.py table_asm) is kept in rodata.
@@ -26,7 +26,7 @@ PHDRS
 SECTIONS
 {
 	. = 0;
-	PROVIDE_HIDDEN( __fnvnx_guest_base = . );
+	HIDDEN( __fnvnx_guest_base = . );
 
 	/* =========== CODE =========== */
 	/* The first matching statement of the script claims an input section, so `.text.*` would take .text.fnvl.  The
@@ -38,7 +38,7 @@ SECTIONS
 		*(.text.exit .text.exit.*)
 		*(.text.startup .text.startup.*)
 		*(.text.hot .text.hot.*)
-		*(.text .stub .gnu.linkonce.t.*)
+		*(.text .gnu.linkonce.t.*)
 		*(.text.[!f]* .text.f .text.f[!n]* .text.fn .text.fn[!v]* .text.fnv .text.fnv[!l]* .text.fnvl?*)
 		. = ALIGN(8);
 	} :code
@@ -70,7 +70,7 @@ SECTIONS
 	} :rodata
 
 	.tls.align : { LONG( MAX( ALIGNOF(.tdata), ALIGNOF(.tbss) ) ) } :rodata
-	PROVIDE_HIDDEN( __tls_align = ADDR(.tls.align) );
+	HIDDEN( __tls_align = ADDR(.tls.align) );
 
 	.gcc_except_table : { *(.gcc_except_table .gcc_except_table.*) } :rodata
 	.eh_frame_hdr     : { *(.eh_frame_hdr) *(.eh_frame_entry .eh_frame_entry.*) } :rodata
@@ -78,25 +78,25 @@ SECTIONS
 	.gnu_extab        : { *(.gnu_extab*) } :rodata
 	.exception_ranges : { *(.exception_ranges .exception_ranges*) } :rodata
 
-	PROVIDE_HIDDEN( __eh_frame_hdr_start = ADDR(.eh_frame_hdr) );
-	PROVIDE_HIDDEN( __eh_frame_hdr_end   = ADDR(.eh_frame_hdr) + SIZEOF(.eh_frame_hdr) );
+	HIDDEN( __eh_frame_hdr_start = ADDR(.eh_frame_hdr) );
+	HIDDEN( __eh_frame_hdr_end   = ADDR(.eh_frame_hdr) + SIZEOF(.eh_frame_hdr) );
 
 	.note.gnu.build-id : { *(.note.gnu.build-id) } :rodata
 
 	/* =========== DATA (relro first: relocated at startup, stays writable as in libnx) =========== */
 	. = ALIGN(0x1000);
-	PROVIDE_HIDDEN( __relro_start = . );
+	HIDDEN( __relro_start = . );
 
 	.preinit_array :
 	{
-		PROVIDE_HIDDEN( __preinit_array_start = . );
+		HIDDEN( __preinit_array_start = . );
 		KEEP (*(.preinit_array))
-		PROVIDE_HIDDEN( __preinit_array_end = . );
+		HIDDEN( __preinit_array_end = . );
 	} :data
 
 	.init_array :
 	{
-		PROVIDE_HIDDEN( __init_array_start = . );
+		HIDDEN( __init_array_start = . );
 		KEEP( *(SORT_BY_INIT_PRIORITY(.init_array.*) SORT_BY_INIT_PRIORITY(.ctors.*)) )
 		/* the runtime libraries' unprioritized constructors (libstdc++'s exception pools, newlib's stack guard)
 		 * before everyone else's, so a game unit's static constructor may throw or call the C library
@@ -110,15 +110,15 @@ SECTIONS
 		KEEP( *libgcc*.a:*(.init_array .ctors) )
 		KEEP( *libsysbase.a:*(.init_array .ctors) )
 		KEEP( *(.init_array .ctors) )
-		PROVIDE_HIDDEN( __init_array_end = . );
+		HIDDEN( __init_array_end = . );
 	} :data
 
 	.fini_array :
 	{
-		PROVIDE_HIDDEN( __fini_array_start = . );
+		HIDDEN( __fini_array_start = . );
 		KEEP( *(SORT_BY_INIT_PRIORITY(.fini_array.*) SORT_BY_INIT_PRIORITY(.dtors.*)) )
 		KEEP( *(.fini_array .dtors) )
-		PROVIDE_HIDDEN( __fini_array_end = . );
+		HIDDEN( __fini_array_end = . );
 	} :data
 
 	.data.rel.ro :
@@ -134,11 +134,11 @@ SECTIONS
 	.got     : { *(.got) *(.igot) } :data
 	.got.plt : { *(.got.plt)  *(.igot.plt) } :data
 
-	PROVIDE_HIDDEN( __got_start__ = ADDR(.got) );
-	PROVIDE_HIDDEN( __got_end__   = ADDR(.got.plt) + SIZEOF(.got.plt) );
+	HIDDEN( __got_start__ = ADDR(.got) );
+	HIDDEN( __got_end__   = ADDR(.got.plt) + SIZEOF(.got.plt) );
 
 	. = ALIGN(0x1000);
-	PROVIDE_HIDDEN( __data_start = . );
+	HIDDEN( __data_start = . );
 
 	.data :
 	{
@@ -153,8 +153,8 @@ SECTIONS
 		. = ALIGN(8);
 	} :data :tls
 
-	PROVIDE_HIDDEN( __tdata_lma     = ADDR(.tdata) );
-	PROVIDE_HIDDEN( __tdata_lma_end = ADDR(.tdata) + SIZEOF(.tdata) );
+	HIDDEN( __tdata_lma     = ADDR(.tdata) );
+	HIDDEN( __tdata_lma_end = ADDR(.tdata) + SIZEOF(.tdata) );
 
 	.tbss :
 	{
@@ -176,19 +176,19 @@ SECTIONS
 	.main.tls ALIGN(MAX(MAX(ALIGNOF(.tdata), ALIGNOF(.tbss)), 8)) :
 	{
 		. += MAX(MAX(ALIGNOF(.tdata), ALIGNOF(.tbss)), 8);
-		PROVIDE_HIDDEN( __tls_start = . );
+		HIDDEN( __tls_start = . );
 		. += SIZEOF(.tdata);
 		. = ALIGN(ALIGNOF(.tbss));
 		. += SIZEOF(.tbss);
 		. = ALIGN(8);
 	} :data
 
-	PROVIDE_HIDDEN( __tls_tcb     = ADDR(.main.tls) );
-	PROVIDE_HIDDEN( __tls_end     = ADDR(.main.tls) + SIZEOF(.main.tls) );
-	PROVIDE_HIDDEN( __bss_start__ = ADDR(.bss) );
-	PROVIDE_HIDDEN( __bss_end__   = __tls_end );
-	PROVIDE_HIDDEN( __end__ = ALIGN(0x1000) );
-	PROVIDE_HIDDEN( __fnvnx_guest_size = __end__ - __fnvnx_guest_base );
+	HIDDEN( __tls_tcb     = ADDR(.main.tls) );
+	HIDDEN( __tls_end     = ADDR(.main.tls) + SIZEOF(.main.tls) );
+	HIDDEN( __bss_start__ = ADDR(.bss) );
+	HIDDEN( __bss_end__   = __tls_end );
+	HIDDEN( __end__ = ALIGN(0x1000) );
+	HIDDEN( __fnvnx_guest_size = __end__ - __fnvnx_guest_base );
 
 	ASSERT( __fnvnx_guest_base % 0x1000 == 0, "the guest base must be page aligned" )
 
