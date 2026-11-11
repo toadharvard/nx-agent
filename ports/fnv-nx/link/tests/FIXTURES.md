@@ -57,13 +57,13 @@ drop_symtab, truncate, rename_symbol, set_section_flags). `synth.elf` is removed
 
 | file | cases | GCC side real | blocked (reason) |
 |---|---|---|---|
-| test_gate_names.py | 38 check sites (was 39) | 38 | the cl side of every paired case stays `synth.coff` (cl toolchain as recipe external, L1); the ELF64 case ("elf64 gives the same verdicts") is dropped: the guest compiler yields ELF32 objects, an ELF64 real object needs an LP64 host root (not a guest product) |
-| test_gate_r7.py | 35 (loops count once) | 35 | cl side (`synth.CV`/`synth.coff`) hand-built for every case; `!_ZN3fooE` nokey row is a text edit of the real `UE@foo@@` row (no C++ fixture produces a nokey row) |
+| test_gate_names.py | 35 check sites + loops (was 39 incl. the ELF64 case) | all | the cl side of every paired case stays `synth.coff` (cl toolchain as recipe external, L1); the ELF64 case ("elf64 gives the same verdicts") is dropped: the guest compiler yields ELF32 objects, an ELF64 real object needs an LP64 host root (not a guest product) |
+| test_gate_r7.py | 36 check sites (loops count once) | all | cl side (`synth.CV`/`synth.coff`) hand-built for every case; `!_ZN3fooE` nokey row is a text edit of the real `UE@foo@@` row (no C++ fixture produces a nokey row) |
 | test_exevft.py | 24 | 0 | blocked: cl toolchain as recipe external (L1) (abi_fixture.PE) |
 | test_thisadj.py | 7 | 0 | blocked: cl toolchain as recipe external (L1) (abi_fixture.scene: PE + hand obj/bind stores) |
 | test_vslots.py | 8 | 0 | same |
 | test_vtables.py | 11 | 0 | same |
-| total | 123 | 73 | 50 fully blocked (PE) + the cl side of 73 |
+| total | 121 | 71 | 50 fully blocked (PE) + the cl side of 73 |
 
 Real-compiler finding made while building fixtures: a by-value return of a polymorphic struct (`UVf f(UVf x)` with `virtual void f(); int m;`) is an
 internal compiler error of the msvcmodel compiler under the plugins (`expand_expr_addr_expr_1, at expr.cc:8710`, stage cc, during RTL pass expand).
