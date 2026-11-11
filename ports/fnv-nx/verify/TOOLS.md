@@ -59,10 +59,30 @@ with a verdict (totality).  The result is a function of the argument files only;
 ## contract/gate_call.py
 
 ```text
-gate_call - direct call/tail targets of the exe function versus each native copy (L1 CONTRACT).
+gate_call - call targets of the exe function versus each native copy, and the declaration of every edge (L1 CONTRACT).
 
-Native targets are `calls` plus any 8-hex-digit address inside an `other` symbol name that the exe function also
-calls (bridges).  Several native copies of one address: each is judged, the worst verdict stands.
+Two conditions; a function with a row of either is not N2 (bodysel takes LIFTED).
+
+1. Address sets (verdicts none/equal/subset/superset/different; red row only for `different`).  Native targets are `calls`
+   plus any 8-hex-digit address inside an `other` symbol name that the exe function also calls (bridges).
+2. Declaration equality (verdict `undeclared`).  Rule: for EVERY cross-boundary edge of a native copy - a call/tail target
+   (`calls`, bridge addresses) or a data reference (`data`; the /GS cookie is the compiler's own, dropped as in gate_data) to
+   an exe address Y - the copy's object has a `.fnvnx.sympair` row of direction `ref` whose MSVC name is byte-equal to the COFF
+   symbol name of Y in the pristine MSVC objects (facts['pristine'], built from the N1 certificate by `pristine_names`), and
+   that name is decorated (starts with `?`).  Not provable, by rule and with no name table: no sympair section in the object;
+   Y has no pristine COFF symbol; the pristine symbol is undecorated (extern "C", every asm/x87/register CRT helper such as
+   _ftol2 or _CI*: `_f` carries no types); no `ref` row of a named kind (not `unnamed:*`) has the pristine name; a covering
+   row with an undecorated name.  Edge and row are matched by the exe address (objfacts keeps no ELF symbol of an edge): the
+   rows that "cover" Y are the ref rows whose name is a pristine name of Y; all of them must be decorated and one must exist.
+   Proof argument: proto.py (R5) derives cc, stack words, varargs, sret and the argument classes of a boundary only from the
+   decorated name.  The caller's declaration was written by the `names` plugin as `msvc_name`; byte-equality of the full
+   decorated names implies equality of every one of these (and of the scope and the data type), so the call convention and the
+   by-value/sret shape the caller compiled against are the callee's exe contract.  A name that carries no types gives no such
+   equality: the edge is not provable and the caller is LIFTED, never guessed.  Several native copies of one address: each is
+   judged, the worst verdict stands.
+Assumptions: the `names` plugin ran on every native unit (the recipe's guest-compiler/plugin rule); the pristine cl symbol
+names are the exe's contract (N1: byte-equal, one symbol map); an external decorated name denotes one entity link-wide.
+Zero edges: provable.  An object with no sympair section: every function of it with an edge is not N2.
 ```
 
 ## contract/gate_data.py
