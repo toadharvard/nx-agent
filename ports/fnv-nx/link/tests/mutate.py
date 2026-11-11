@@ -1,0 +1,157 @@
+"""mutate - byte mutations of a REAL ELF relocatable object (a negative gate case is a stated edit of an object the one build produced, never a
+hand-assembled object).  Every field is located by parsing with link/elfobj.py (section header table, symbol table), never by a fixed offset.
+
+    sections(data)                       -> [(index, name)]            the section numbers of the object
+    replace_section(data, name, new)     -> bytes   the section's contents become `new` (same size: in place; else the new bytes are appended to
+                                                    the file and the section header is repointed; the rest of the object is unchanged)
+    rename_section(data, name, new)      -> bytes   same-length rename inside .shstrtab (`new` has the length of `name`); the section is then
+                                                    no longer found under its old name
+    duplicate_section(data, name)        -> bytes   a second section header with the same name and contents (appended header table)
+    rename_symbol(data, old, new)        -> bytes   the st_name of the symbol `old` points at a new NUL-terminated name appended to .strtab
+    set_section_flags(data, name, flags) -> bytes   sh_flags of the section
+    drop_symtab(data)                    -> bytes   the symbol table section becomes an unknown section type (SHT 0x70000001)
+    truncate(data, n)                    -> bytes   the first n bytes
+Every function raises ValueError when the asked section or symbol is not there (a mutation that did not apply is an error, never a no-op).
+"""
+import os
+import struct
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+import elfobj  # noqa: E402
+
+
+def _hdr(e, i):
+    """(offset of the section header i in the file, fmt, field names)"""
+    if e.is64:
+        shoff, = struct.unpack_from('<Q', e.data, 0x28)
+        return shoff + i * 64, '<IIQQQQIIQQ'
+    shoff, = struct.unpack_from('<I', e.data, 0x20)
+    return shoff + i * 40, '<IIIIIIIIII'
+
+
+def _fields(e, i):
+    o, fmt = _hdr(e, i)
+    return list(struct.unpack_from(fmt, e.data, o))      # name type flags addr off size link info align entsize
+
+
+def _put(e, data, i, f):
+    o, fmt = _hdr(e, i)
+    struct.pack_into(fmt, data, o, *f)
+
+
+def _one(e, name):
+    ids = e.by_name.get(name)
+    if not ids:
+        raise ValueError('no section %s' % name)
+    if len(ids) != 1:
+        raise ValueError('%d sections named %s' % (len(ids), name))
+    return ids[0]
+
+
+def sections(data):
+    e = elfobj.parse(data, 'mutate')
+    return list(enumerate(e.names))
+
+
+def replace_section(data, name, new):
+    e = elfobj.parse(data, 'mutate')
+    i = _one(e, name)
+    f = _fields(e, i)
+    out = bytearray(data)
+    if len(new) == f[5]:
+        out[f[4]:f[4] + len(new)] = new
+    else:
+        while len(out) % 8:
+            out.append(0)
+        f[4], f[5] = len(out), len(new)
+        out += new
+        _put(e, out, i, f)
+    return bytes(out)
+
+
+def rename_section(data, name, new):
+    if len(new) != len(name):
+        raise ValueError('same-length rename only')
+    e = elfobj.parse(data, 'mutate')
+    i = _one(e, name)
+    so = e._sec[struct.unpack_from('<HHH', data, 0x3a if e.is64 else 0x2e)[2]][3]
+    at = so + e._sec[i][0]
+    if data[at:at + len(name)] != name.encode():
+        raise ValueError('section name not where the table says')
+    out = bytearray(data)
+    out[at:at + len(name)] = new.encode()
+    return bytes(out)
+
+
+def duplicate_section(data, name):
+    e = elfobj.parse(data, 'mutate')
+    i = _one(e, name)
+    n = len(e._sec)
+    o, _ = _hdr(e, 0)
+    size = 64 if e.is64 else 40
+    out = bytearray(data)
+    while len(out) % 8:
+        out.append(0)
+    new_sh = len(out)
+    out += bytes(data[o:o + n * size]) + bytes(data[o + i * size:o + (i + 1) * size])
+    struct.pack_into('<Q' if e.is64 else '<I', out, 0x28 if e.is64 else 0x20, new_sh)
+    struct.pack_into('<H', out, 0x3c if e.is64 else 0x30, n + 1)
+    return bytes(out)
+
+
+def rename_symbol(data, old, new):
+    e = elfobj.parse(data, 'mutate')
+    sy = [i for i, s in enumerate(e._sec) if s[1] == elfobj.SHT_SYMTAB]
+    if len(sy) != 1:
+        raise ValueError('no unique symbol table')
+    sf = _fields(e, sy[0])
+    st = _fields(e, sf[6])                  # its string table
+    ent = 24 if e.is64 else 16
+    hit = None
+    for k in range(sf[5] // ent):
+        a = sf[4] + k * ent
+        nm, = struct.unpack_from('<I', data, a)
+        so = st[4] + nm
+        end = data.index(b'\0', so)
+        if data[so:end] == old.encode():
+            hit = a
+            break
+    if hit is None:
+        raise ValueError('no symbol %s' % old)
+    out = bytearray(data)
+    while len(out) % 8:
+        out.append(0)
+    new_tab = bytes(data[st[4]:st[4] + st[5]]) + new.encode() + b'\0'
+    off_new = len(out)
+    out += new_tab
+    st[4], st[5] = off_new, len(new_tab)
+    _put(e, out, sf[6], st)
+    struct.pack_into('<I', out, hit, len(new_tab) - len(new) - 1)
+    return bytes(out)
+
+
+def set_section_flags(data, name, flags):
+    e = elfobj.parse(data, 'mutate')
+    i = _one(e, name)
+    f = _fields(e, i)
+    f[2] = flags
+    out = bytearray(data)
+    _put(e, out, i, f)
+    return bytes(out)
+
+
+def drop_symtab(data):
+    e = elfobj.parse(data, 'mutate')
+    sy = [i for i, s in enumerate(e._sec) if s[1] == elfobj.SHT_SYMTAB]
+    if len(sy) != 1:
+        raise ValueError('no unique symbol table')
+    f = _fields(e, sy[0])
+    f[1] = 0x70000001
+    out = bytearray(data)
+    _put(e, out, sy[0], f)
+    return bytes(out)
+
+
+def truncate(data, n):
+    return bytes(data[:n])
