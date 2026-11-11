@@ -161,20 +161,32 @@ def finish(a):
     w = lambda n, rows: open('%s/%s.tsv' % (out, n), 'w').write(''.join('\t'.join(map(str, x)) + '\n' for x in rows))
     w('manifest', man); w('missing', miss); w('forms', [(f, v[0], v[1]) for f, v in sorted(forms.items())]); w('undef', [(s, v[0], v[1]) for s, v in sorted(undef.items())])
     syms = {int(r[0], 16): r[1] for r in man}
+    code = dict(syms)
+    imp = []
+    if a.bridge:           # import entries (tools/impgen.py): keys of the bridge table join the dispatcher's domain
+        import impgen
+        imp, blocked, hit, absent = impgen.generate(a.bridge, out, a.need, a.l3)
+        if hit or absent: sys.exit('finish: an import row a loaded image needs has no entry (imp_blocked.tsv)')
+        assert not set(k for k, *_ in imp) & set(syms)
+        syms.update({k: s for k, s, *_ in imp})
     h = phf.build(list(syms)); open(out + '/disp.S', 'w').write(phf.table_asm(syms, h))
-    w('entries', [('%08x' % x, s) for x, s in sorted(syms.items())])
+    w('entries', [('%08x' % x, s, 'code' if x in code else 'import') for x, s in sorted(syms.items())])
     subprocess.check_call([CC, '-mabi=ilp32', '-fPIC', '-c', out + '/disp.S', '-o', out + '/disp.o'])
     # runtime: plain AAPCS files without -ffixed, guest-register files with the lifted-code flags
     rd = out + '/rt'; os.makedirs(rd, exist_ok=True); df = ['-DFNVL_PHF_REL', '-DFNVL_K1=%du' % h['k1'], '-DFNVL_K2=%du' % h['k2'], '-DFNVL_NBITS=%d' % h['nbits'], '-DFNVL_TBITS=%d' % h['tbits']]
-    jobs = [([CC] + CF + df, 'rt.c'), ([CC] + CF + ['-I', LIFT + '/rt'], 'x87.c'), ([CC] + CF, 'cpumodel.c'), ([CXX] + flags() + ['-x', 'c++'], 'seh.c'), ([CXX] + flags() + ['-x', 'c++'], 'enter.c')]
+    jobs = [([CC] + CF + df, 'rt.c'), ([CC] + CF + ['-I', LIFT + '/rt'], 'x87.c'), ([CC] + CF, 'cpumodel.c'), ([CXX] + flags() + ['-x', 'c++'], 'seh.c'), ([CXX] + flags() + ['-x', 'c++'], 'enter.c'), ([CXX] + flags() + ['-x', 'c++'], 'unhandled.c')]
+    jobs += [([CC] + CF + ['-fno-builtin'], f) for f in ('fmath.c', 'rcptab.c') if os.path.exists('%s/rt/%s' % (LIFT, f))]
     for cmd, f in jobs: subprocess.check_call(cmd + ['%s/rt/%s' % (LIFT, f), '-o', '%s/%s.o' % (rd, f[:-2])])
+    if imp:
+        subprocess.check_call([CXX] + flags() + ['-x', 'c++', out + '/imp.cpp', '-o', rd + '/imp.o']); jobs.append((None, 'imp.c'))
     if os.path.exists(out + '/rt.a'): os.remove(out + '/rt.a')
     subprocess.check_call([AR, 'Dcr', out + '/rt.a'] + ['%s/%s.o' % (rd, f[:-2]) for _, f in jobs])
     nobody = len(ent) - len(syms)
     cert = sum(v[0] for v in forms.values() if v[1] == 'sail'); tot = sum(v[0] for v in forms.values()); nc = sum(1 for v in forms.values() if v[1] == 'sail')
     reasons = collections.Counter(rclass(r[2]) for r in miss).most_common(5)
     bytes_ = sum(int(r[3]) for r in man)
-    res = dict(schema='fnvnx-gate/1', name='l3.liftall', status='green' if len(man) == len(ent) else 'red', universe=len(ent), certified=len(man), uncertified=len(ent) - len(man))
+    res = dict(schema='fnvnx-gate/1', name='l3.liftall', status='green' if len(man) == len(ent) else 'red', universe=len(ent), certified=len(man), uncertified=len(ent) - len(man), imports=len(imp),
+               build='measurement: forms without a certificate %d of %d' % (len(forms) - nc, len(forms)))
     json.dump(res, open(out + '/gate_liftall.json', 'w'), sort_keys=True)
     print('finish: shards %s; universe %d, body %d, missing %d (top: %s), %d addresses resolve to fnvl_nobody; objects %d, code bytes %d; forms %d (certified %d, uncertified %d; sites %d / %d); undefined non-lifted symbols %d; dispatcher %d slots, %d hash attempts; %s' % (
         ks, len(ent), len(man), len(miss), '; '.join('%d %s' % (n, r) for r, n in reasons), nobody, len(set(r[2] for r in man)), bytes_, len(forms), nc, len(forms) - nc, cert, tot - cert,
@@ -185,6 +197,7 @@ def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
     A('--shard'); A('--finish', action='store_true'); A('--out', default='/home/user/l3work/liftall'); A('--jobs', type=int, default=3)
     A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe'))
+    A('--bridge', default=os.environ.get('FNVNX_BRIDGE')); A('--need', action='append', default=[]); A('--l3', default=LIFT + '/rt/bridge_l3.tsv')     # --finish: import entries
     a = ap.parse_args(); os.makedirs(a.out, exist_ok=True)
     if a.finish: finish(a)
     elif a.shard: shard(a)

@@ -58,8 +58,11 @@ def table_c(syms, phf=None):
 
 def table_asm(syms, phf):
     """position-independent dispatcher table for rt.c -DFNVL_PHF_REL (tools/liftall.py): AArch64 assembly, section .rodata.fnvl_disp.
-    slot i = {u32 key, s32 L_sym - fnvl_disp_table} (empty slot: key 0xffffffff), then fnvl_g[] (u16). No absolute code address appears."""
+    slot i = {u32 key, s32 L_sym - fnvl_disp_table} (empty slot: a key that does not hash to it), then fnvl_g[] (u16). No absolute code address appears."""
     out = ['.section .rodata.fnvl_disp,"a"', '.balign 8', '.globl fnvl_disp_table', 'fnvl_disp_table:']
-    out += [' .long 0x%x, %s - fnvl_disp_table' % (a, syms[a]) if a is not None else ' .long 0xffffffff, 0' for a in phf['slots']]
+    def idx(a): return (((a ^ phf['g'][((a * phf['k1']) & M) >> (32 - phf['nbits'])]) * phf['k2']) & M) >> (32 - phf['tbits'])
+    def empty(i):       # the key of an empty slot must not be an address that hashes to this slot, or a lookup of that address would hit it
+        return next(k for k in range(M, M - 64, -1) if idx(k) != i)
+    out += [' .long 0x%x, %s - fnvl_disp_table' % (a, syms[a]) if a is not None else ' .long 0x%x, 0' % empty(i) for i, a in enumerate(phf['slots'])]
     out += ['.globl fnvl_g', '.balign 2', 'fnvl_g:'] + [' .short %d' % g for g in phf['g']]
     return '\n'.join(out) + '\n'

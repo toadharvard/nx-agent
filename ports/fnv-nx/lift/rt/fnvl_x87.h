@@ -73,7 +73,13 @@ static inline u32 fv_cmp(fv a,fv b){ u32 f=0;
 #define FCMP(A,B) do{ u32 r_=fv_cmp((A),(B)); c0=(r_>>8)&1; c2=(r_>>10)&1; c3=(r_>>14)&1; }while(0)
 #define FCMPI(A,B) do{ u32 r_=fv_cmp((A),(B)); zf=(r_>>14)&1; pf=(r_>>10)&1; cf=(r_>>8)&1; of=sf=af=0; }while(0)
 #define FXAM(F) do{ fv f_=(F); u32 r_=fnvl_x_xam(fv_x(f_),f_.k==0); c0=(r_>>8)&1; c2=(r_>>10)&1; c3=(r_>>14)&1; }while(0)
-#define FSWV(TOP) ((u32)(TOP)<<11|(c3<<14)|(c2<<10)|(c0<<8)|fnvl_fp_x87_flags()|c->fex)
+#define FSWV_(TOP) ((u32)(TOP)<<11|(c3<<14)|(c2<<10)|(c0<<8)|fnvl_fp_x87_flags()|c->fex)
+#ifdef FNVL_TRACE
+extern "C" u32 fnvl_trace_sw(u32 fsw);   /* test stand: reports the FSW delivered to the guest (sticky exception bits are not compared with the x86 oracle) */
+#define FSWV(TOP) fnvl_trace_sw(FSWV_(TOP))
+#else
+#define FSWV(TOP) FSWV_(TOP)
+#endif
 /* control: fldcw keeps the word and synchronises the host rounding mode; the MSVC bracket fnstcw/fldcw/fistp/fldcw needs no special case.
    TODO(R8 fold): fold the bracket (`fnstcw [a]; or ah,0xc; fldcw [b]; fistp; fldcw [a]`) into one truncating fistp (host rounding mode left alone). */
 #define FLDCW(W) do{ c->fcw=(W)&0xffffu; fnvl_fp_set_rc_x87((c->fcw>>10)&3); }while(0)

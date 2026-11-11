@@ -46,7 +46,7 @@ def main():
         if ad in uni or not a.partial: unres.append(s)
         else: deferred += 1
     res['c'] = (not unres, '%d lifted references to entries without a symbol outside missing (%s); %d refer to other shards (partial)' % (len(unres), ' '.join(unres[:5]), deferred))
-    ents = {int(r[0], 16): r[1] for r in tsv(out + '/entries.tsv')}
+    ents = {int(r[0], 16): r[1] for r in tsv(out + '/entries.tsv') if len(r) < 3 or r[2] == 'code'}     # import keys (kind import) are checked by test/imptest.py
     res['d'] = (set(ents) == set(man) and all(man[x][1] == s for x, s in ents.items()), 'entries %d, manifest %d' % (len(ents), len(man)))
     trial = out + '/trial_r.o'
     r = subprocess.run([LD, '-m', 'aarch64elf32', '-r', '-o', trial, '--whole-archive'] + arcs + [out + '/rt.a', '--no-whole-archive', out + '/disp.o'], capture_output=True, text=True)

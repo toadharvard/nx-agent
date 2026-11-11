@@ -8,11 +8,11 @@
    non-local transfer (the exe's __except_handler3/4 jump to their except block) -> registers and c->ra exactly as the handler left them. The
    lifted raise site then runs the non-local loop, which serves Eip when it is a label of the faulting function (the faulting instruction, an
    except/catch continuation) or an entry; it cannot serve any other address (documented limit). Unhandled: fnvl_os_unhandled(record, context)
-   (declared, supplied by the host) and no return. Not modelled: EFLAGS (lifted flags are locals: Context.EFlags = 0x202), FP/SSE restore
+   (rt/unhandled.c; the benches supply their own stop hook): the process ends, or execution continues from the CONTEXT. Not modelled: EFLAGS (lifted flags are locals: Context.EFlags = 0x202), FP/SSE restore
    from the CONTEXT, nested/collided unwind dispositions (reported as STATUS_INVALID_DISPOSITION to the unhandled hook). */
 #include "fnvl.h"
 extern "C" {
-void fnvl_os_unhandled(u32 record, u32 context);
+u32 fnvl_os_unhandled(u32 record, u32 context);
 void fnvl_raise(u32 code, u32 at);
 void fnvl_raise_av(u32 access, u32 addr, u32 at);
 void fnvl_os_RtlUnwind(void);
@@ -85,7 +85,11 @@ static void raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u3
     u32 ctx = make_context(rec, sp, eip); esp = ctx;            /* record and context live on the guest stack below the faulting esp */
     u32 saved_esp = sp;
     int d = dispatch(rec, ctx);
-    if (d == 2) { fnvl_os_unhandled(rec, ctx); __builtin_trap(); }
+    if (d == 2) {              /* no handler took it: the OS's last step (rt/unhandled.c). It returns only for EXCEPTION_CONTINUE_EXECUTION */
+        if (!fnvl_os_unhandled(rec, ctx)) return;
+        eax = M32(ctx + C_EAX); ecx = M32(ctx + C_ECX); edx = M32(ctx + C_EDX); ebx = M32(ctx + C_EBX); ebp = M32(ctx + C_EBP);
+        esi = M32(ctx + C_ESI); edi = M32(ctx + C_EDI); esp = M32(ctx + C_ESP); c->ra = M32(ctx + C_EIP);
+    }
     (void)saved_esp;
 }
 

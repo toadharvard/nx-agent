@@ -40,11 +40,24 @@ def carrier_d(v, e, k):
     return st80((v, e))
 
 
+STICKY = 0x3f       # FSW IE DE ZE OE UE PE: the sticky exception flags; the Unicorn oracle does not model them (always 0), the lifted side reports the host FPSR (README R8)
+
+
+def fsw_form(code):
+    """'ax' for fnstsw ax, 'm' for fnstsw m16 (the only forms that deliver the FSW to the guest: FSWV in rt/fnvl_x87.h), else None"""
+    i = 0
+    while i < 4 and code[i] in (0x26, 0x2e, 0x36, 0x3e, 0x64, 0x65, 0x66, 0x67): i += 1
+    if code[i] == 0xdf and code[i + 1] == 0xe0: return 'ax'
+    if code[i] == 0xdd and code[i + 1] < 0xc0 and (code[i + 1] >> 3) & 7 == 7: return 'm'
+
+
 class X86(T.World):
-    def run(s, root, ents, st, budget):
+    def run(s, root, ents, st, budget, sticky=None):
+        """sticky: the sticky bits the lifted run delivered to its flag-reading instructions, in order; the oracle substitutes them (same ordinal) into the FSW it delivers"""
+        s.sticky, s.pend, s.fsw = sticky, None, []
         uc = Uc(UC_ARCH_X86, UC_MODE_32); s.init_world(uc, True); s.reset(st['wk']); s.ents, s.trace, s.n = ents, [], 0
         uc.hook_add(UC_HOOK_MEM_WRITE, lambda uc, ac, a, n, v, ud: s.writes.add((a & 0xffffffff, n)))
-        uc.hook_add(UC_HOOK_CODE, s.code)
+        uc.hook_add(UC_HOOK_CODE, s.code); uc.hook_add(UC_HOOK_MEM_WRITE, s.wr_fsw)
         sp = st['regs'][4]; s.ensure(sp, 4, False); uc.mem_write(sp, struct.pack('<I', SENT)); s.writes.clear()
         for k, v in zip(T.X86R, st['regs']): uc.reg_write(k, v)
         uc.reg_write(UC_X86_REG_EFLAGS, 0x202); uc.reg_write(UC_X86_REG_FPCW, 0x27f)
@@ -54,12 +67,26 @@ class X86(T.World):
         if s.collide: status = 'collide'
         elif status == 'ok' and uc.reg_read(UC_X86_REG_EIP) != SENT: status = 'budget'
         top = (uc.reg_read(UC_X86_REG_FPSW) >> 11) & 7
-        return dict(status=status, regs=[uc.reg_read(k) for k in T.X86R], n=s.n, trace=s.trace, ftop=top, st0=st80(uc.reg_read(UC_X86_REG_FP0 + top)) if status == 'ok' else 0.0,
+        return dict(status=status, regs=[uc.reg_read(k) for k in T.X86R], n=s.n, trace=s.trace, ftop=top, fsw=s.fsw, st0=st80(uc.reg_read(UC_X86_REG_FP0 + top)) if status == 'ok' else 0.0,
                     mem=s.written() if status == 'ok' else {})
+
+    def wr_fsw(s, uc, ac, a, n, v, ud):
+        if s.pend == 'm' and n == 2: s.pend = ('m', a)
 
     def code(s, uc, a, size, ud):
         s.n += 1
+        if s.pend is not None:      # the previous instruction was a flag reader: its result is now in EAX / memory
+            if s.pend == 'ax' or s.pend[0] == 'm' and s.pend != 'm':
+                if s.pend == 'ax': v = uc.reg_read(UC_X86_REG_EAX) & 0xffff
+                else: v = struct.unpack('<H', bytes(uc.mem_read(s.pend[1], 2)))[0]
+                s.fsw.append(v & STICKY)
+                if s.sticky is not None and len(s.fsw) <= len(s.sticky):
+                    v = (v & ~STICKY) | s.sticky[len(s.fsw) - 1]
+                    if s.pend == 'ax': uc.reg_write(UC_X86_REG_EAX, (uc.reg_read(UC_X86_REG_EAX) & 0xffff0000) | v)
+                    else: uc.mem_write(s.pend[1], struct.pack('<H', v))
+            s.pend = None
         if a in s.ents: s.trace.append((a, uc.reg_read(UC_X86_REG_ESP)))
+        s.pend = fsw_form(bytes(uc.mem_read(a, 8)))
 
 
 class Image:
@@ -86,7 +113,7 @@ class Arm(T.World):
         s.writes.clear()
         uc.mem_write(s.CPU, struct.pack('<13I', *st['regs'], st.get('fs', 0), 0, 0, 0x27f, 0) + b'\0' * 4 + b'\0' * 64 + b'\0' * 128 + struct.pack('<II', 0, 0x1f80) + b'\0' * 64 + b'\0' * 4)
         s.im, s.n, s.nl, s.nd, s.nt, s.nr, s.ntr, s.trace, s.ev = im, 0, 0, 0, 0, 0, 0, [], None
-        s.sp = {im.sym[k][0]: k for k in ('fnvl_trace', 'fnvl_raise_ud', 'fnvl_raise', 'fnvl_dispatch', 'fnvl_os_unhandled') if k in im.sym}
+        s.sp = {im.sym[k][0]: k for k in ('fnvl_trace', 'fnvl_raise_ud', 'fnvl_raise', 'fnvl_dispatch', 'fnvl_os_unhandled', 'fnvl_trace_sw') if k in im.sym}; s.fsw = []
         s.rng = sorted(im.rt)
         uc.hook_add(UC_HOOK_CODE, s.code)
         uc.reg_write(UC_ARM64_REG_X0, s.CPU); uc.reg_write(UC_ARM64_REG_X1, im.sym['L_%08x' % root][0]); uc.reg_write(UC_ARM64_REG_SP, s.ASTACK); uc.reg_write(UC_ARM64_REG_X30, s.RETPAD)
@@ -96,7 +123,7 @@ class Arm(T.World):
         if s.ev: status = s.ev
         elif status == 'ok' and uc.reg_read(UC_ARM64_REG_PC) != s.RETPAD: status = 'budget'
         b = bytes(uc.mem_read(s.CPU, 456)); ftop, ftag = struct.unpack_from('<2I', b, 36); fx = struct.unpack_from('<QII', b, 328 + 16 * (ftop & 7))      # W13: carrier (payload, e, kind) of ST0
-        return dict(status=status, regs=list(struct.unpack_from('<8I', b)) if status == 'ok' else [uc.reg_read(k) & 0xffffffff for k in T.GREG], n=s.n, nl=s.nl, nd=s.nd, ndisp=s.nr, ntr=s.ntr, trace=s.trace, ftop=ftop & 7,
+        return dict(status=status, regs=list(struct.unpack_from('<8I', b)) if status == 'ok' else [uc.reg_read(k) & 0xffffffff for k in T.GREG], n=s.n, nl=s.nl, nd=s.nd, fsw=s.fsw, ndisp=s.nr, ntr=s.ntr, trace=s.trace, ftop=ftop & 7,
                     st0=carrier_d(*fx) if fx[2] else None, ra=struct.unpack_from('<I', b, 320)[0], mem=s.written() if status == 'ok' or status.startswith('unhandled') else {})
 
     def code(s, uc, a, size, ud):
@@ -107,6 +134,7 @@ class Arm(T.World):
         k = s.sp.get(a)
         if k == 'fnvl_trace': s.trace.append((uc.reg_read(UC_ARM64_REG_X0) & 0xffffffff, uc.reg_read(UC_ARM64_REG_X1) & 0xffffffff)); s.ntr += 1
         elif k == 'fnvl_dispatch': s.nr += 1
+        elif k == 'fnvl_trace_sw': s.fsw.append(uc.reg_read(UC_ARM64_REG_X0) & STICKY)
         elif k == 'fnvl_raise_ud': s.ev = 'fnvl_raise_ud(%x)' % (uc.reg_read(UC_ARM64_REG_X0) & 0xffffffff); uc.emu_stop()
         elif k == 'fnvl_os_unhandled':
             r = uc.reg_read(UC_ARM64_REG_X0) & 0xffffffff; s.ensure(r, 16, False); s.ev = 'unhandled(%x@%x)' % tuple(struct.unpack('<2I', bytes(uc.mem_read(r, 4)) + bytes(uc.mem_read(r + 12, 4)))); uc.emu_stop()
@@ -138,6 +166,12 @@ def run_chain(im, root, ents, seeds, xb=120000, ab=2000000):
     for i in range(seeds):
         st = gen_state(root, i); x = X86().run(root, ents, st, xb)
         if x['status'] != 'ok': out.append(('skip', 'x86 ' + x['status'], 0, 0, 0, 0, 0)); continue
-        y = Arm().run(im, root, st, ab); v, d = compare(x, y)
+        y = Arm().run(im, root, st, ab)
+        y['trace'] = [t for t in y['trace'] if t[0] in ents]     # the lifted side traces every universe entry it passes (also as a local label); the oracle logs the linked entries
+        if y['status'] == 'ok' and x['fsw'] != y['fsw']:     # rule: the sticky exception bits are not compared; everything downstream of them is
+            x = X86().run(root, ents, st, xb, y['fsw'])
+            if x['status'] != 'ok': out.append(('skip', 'x86 ' + x['status'], 0, 0, 0, 0, 0)); continue
+            if len(x['fsw']) != len(y['fsw']): out.append(('diff', 'flag readers x86 %d lifted %d' % (len(x['fsw']), len(y['fsw'])), x['n'], y['nl'], y['nd'], y['ndisp'], y['ntr'])); continue
+        v, d = compare(x, y)
         out.append((v, d, x['n'], y['nl'], y['nd'], y['ndisp'], y['ntr']))
     return out

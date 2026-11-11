@@ -187,6 +187,31 @@ def explore(img, lo, hi, code, start=None, extra=(), fall_hi=None):
     return insns, tables, taken, bad
 
 
+TAB_BIAS = 16     # assumption: the lowest index of a table is below 16 (the table starts at most 16 dwords above the displacement)
+
+
+def tab_tails(img, insns, lo, hi):
+    """Relocated code pointers a `jmp [reloc disp + idx*4]` can hand to the dispatcher (rule R3): the whole run of consecutive .reloc'd dwords from
+    the table address (the first relocated dword at or above the displacement, within TAB_BIAS dwords) (a run ends at the first dword that is not relocated, or at an instruction of this function), outside [lo, hi)."""
+    out = set()
+    for a, ins in insns.items():
+        if ins.mnemonic != 'jmp' or not ins.operands or ins.operands[0].type != X.X86_OP_MEM:
+            continue
+        m = ins.operands[0].mem
+        if m.scale == 4 and m.index and (a + ins.size - 4) in img.rset:
+            t = m.disp & 0xffffffff
+            for _ in range(TAB_BIAS):       # the index may start above 0 (case range k..n: disp = table - 4*k)
+                if t in img.rset:
+                    break
+                t += 4
+            while t in img.rset and t not in insns:
+                v = img.u32(t)
+                if not lo <= v < hi:
+                    out.add(v)
+                t += 4
+    return sorted(out)
+
+
 def dispatch(cx, ins):
     h = OPS.get(cx.m)
     if h is not None and h(cx, ins) is not SKIP:
@@ -243,12 +268,16 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     xc.prepass(cx, img, 'dyn' if x87 == 'dyn' else None, x87 if isinstance(x87, int) else 0)     # x87 stack-depth pre-pass: cx.xm 's' static / 'd' dynamic / None
     em = cx.em
     kinds = cx.kinds
+    from . import universe
+    uent = universe.load()[0]
     for idx, a in enumerate(order):
         ins = insns[a]
         m = ins.mnemonic
         ops = ins.operands
         nxt = a + ins.size
         em('%s: ;' % cx.lab(a))
+        if a == start or a in uent:
+            em('TRACE(0x%xu);' % a)        # every pass over an entry address is a trace event (bench), wherever the function was entered
         pfx = ''
         if m.startswith('rep ') or m.startswith('repe ') or m.startswith('repne '):
             pfx, m = m.split(' ', 1)
@@ -288,11 +317,11 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     body = body.replace('SYNC_IN;', 'SYNC_IN;' + fl)
     decl = ''.join('extern "C" void L_%08x(void);\n' % t for t in sorted(cx.calls | cx.tails))
     txt = '%sextern "C" void L_%08x(void)\n{ DECL; SYNC_IN;%s%s%s u32 E=esp; %s\n%s\n}\n' % (
-        decl, start, xc.decl(cx), fl, ' u32 fsb=c->fs;' if cx.usesfs else '', 'TRACE(0x%xu);' % start if start == addr else '', body)
+        decl, start, xc.decl(cx), fl, ' u32 fsb=c->fs;' if cx.usesfs else '', '', body)
     if cx.usesfs:
         kinds.add('fs')
     meta = dict(addr=start, size=size, selfcalls=cx.selfcalls, callrets=cx.callrets, kinds=sorted(kinds), n=len(order), tables=len(tables),
-                calls=sorted(cx.calls), tails=sorted(cx.tails))
+                calls=sorted(cx.calls), tails=sorted(cx.tails), tabtails=tab_tails(img, insns, lo, hi))
     return txt, meta
 
 

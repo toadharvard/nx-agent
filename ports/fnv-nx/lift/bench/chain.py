@@ -10,7 +10,7 @@ sys.path.insert(0, HERE)
 G = {}
 EXCL = ('indcall', 'import', 'jmp-indirect-untabled', 'fs', 'rcp-rsqrt')   # rcp-rsqrt: the reference-CPU tables are the runtime owner's, not linked here
 CHKSTK = 0xec8660                      # __chkstk / _alloca_probe: returns with a changed esp
-LIBC = ('.text\n.globl fnvl_os_unhandled\nfnvl_os_unhandled: ret\n.globl fnvl_rcp32\nfnvl_rcp32: ret\n.globl fnvl_rsqrt32\nfnvl_rsqrt32: ret\n.globl memcpy\nmemcpy: mov x3,x0\n1: cbz x2,2f\n ldrb w4,[x1],#1\n strb w4,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
+LIBC = ('.text\n.globl fnvl_os_unhandled\nfnvl_os_unhandled: ret\n.globl fnvl_trace_sw\nfnvl_trace_sw: ret\n.globl fnvl_rcp32\nfnvl_rcp32: ret\n.globl fnvl_rsqrt32\nfnvl_rsqrt32: ret\n.globl memcpy\nmemcpy: mov x3,x0\n1: cbz x2,2f\n ldrb w4,[x1],#1\n strb w4,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
         '.globl memset\nmemset: mov x3,x0\n1: cbz x2,2f\n strb w1,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
         '.globl memmove\nmemmove: cmp x0,x1\n b.ls 3f\n add x3,x0,x2\n add x1,x1,x2\n1: cbz x2,2f\n ldrb w4,[x1,#-1]!\n strb w4,[x3,#-1]!\n sub x2,x2,#1\n b 1b\n2: ret\n'
         '3: mov x3,x0\n4: cbz x2,2b\n ldrb w4,[x1],#1\n strb w4,[x3],#1\n sub x2,x2,#1\n b 4b\n')
@@ -37,9 +37,9 @@ def lift_args(a):
 def meta_one(a):
     L = G['L']
     try:
-        t, m = L.lift(G['img'], **lift_args(a)); return a, None, m['calls'], m['tails'], tuple(m['kinds']) + (('rcp-rsqrt',) if 'fnvl_rcp32' in t or 'fnvl_rsqrt32' in t else ()), m['n']
-    except L.Unsupported as e: return a, str(e)[:60], (), (), (), 0
-    except Exception as e: return a, 'error ' + type(e).__name__, (), (), (), 0
+        t, m = L.lift(G['img'], **lift_args(a)); return a, None, m['calls'], m['tails'], tuple(m['kinds']) + (('rcp-rsqrt',) if 'fnvl_rcp32' in t or 'fnvl_rsqrt32' in t else ()), m['n'], m['tabtails']
+    except L.Unsupported as e: return a, str(e)[:60], (), (), (), 0, ()
+    except Exception as e: return a, 'error ' + type(e).__name__, (), (), (), 0, ()
 
 
 def load_meta(a):
@@ -60,7 +60,7 @@ def closure(root, meta, ent, limit=40):
         if m[0]: return None, 0, 'unlifted: ' + m[0].split(' at ')[0]
         bad = [k for k in EXCL if k in m[3]]
         if bad: return None, 0, 'has ' + bad[0]
-        for t in m[1] + m[2]:
+        for t in m[1] + m[2] + m[5]:
             if t not in seen:
                 seen[t] = seen[u] + 1; q.append(t)
                 if len(q) > limit: return None, 0, 'closure > %d' % limit
