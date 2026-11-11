@@ -14,8 +14,8 @@ LIBNX_INC ?= $(abspath $(FNVNX_TC)/../dkp/libnx/include)
 OUT ?= $(HERE)/build
 CC ?= gcc
 GCCINC := $(shell $(CC) -print-file-name=include)
-RENAMES := socket bind listen accept connect send sendto recv recvfrom shutdown getsockname getpeername \
-           setsockopt getsockopt poll fcntl getaddrinfo freeaddrinfo close dup read write
+RENAMES := socket bind listen accept connect send sendto recv recvfrom \
+           setsockopt getsockopt poll fcntl close dup read write
 GUESTCF := -std=gnu11 -O1 -g -Wall -Wextra -Wno-unused-parameter -m64 -nostdinc -isystem $(GCCINC) \
            -isystem $(NEWLIB_INC) -idirafter $(LIBNX_INC) -D__LINUX_ERRNO_EXTENSIONS__ -DFNVNX_HOST_CALLS \
            -I$(ROOT)/toolchain/include $(foreach n,$(RENAMES),-D$(n)=gt_$(n))

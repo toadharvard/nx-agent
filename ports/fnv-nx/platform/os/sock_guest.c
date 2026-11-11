@@ -96,28 +96,6 @@ static int msg_to_wire(int g, int *w) {
     *w = r;
     return 0;
 }
-static int ai_to_wire(int g, int *w) {
-    int r = 0;
-#define X(N, v) if (g & N) { g &= ~N; r |= (v); }
-    FNVNX_WIRE_AI_LIST(X)
-#undef X
-    if (g) return -1;
-    *w = r;
-    return 0;
-}
-static int ai_from_wire(int wv) {
-    int r = 0;
-#define X(N, v) if (wv & (v)) r |= N;
-    FNVNX_WIRE_AI_LIST(X)
-#undef X
-    return r;
-}
-static int eai_from_wire(int w) {
-#define X(N, v) if (w == (v)) return N;
-    FNVNX_WIRE_EAI_LIST(X)
-#undef X
-    return EAI_FAIL;
-}
 static uint16_t poll_to_wire(int g) {
     uint16_t r = 0;
 #define X(N, v) if (g & N) r |= (v);
@@ -322,24 +300,6 @@ ssize_t FNVNX_SOCK_NAME(recvfrom)(int fd, void *buf, size_t n, int flags, struct
 ssize_t FNVNX_SOCK_NAME(recv)(int fd, void *buf, size_t n, int flags) {
     return FNVNX_SOCK_NAME(recvfrom)(fd, buf, n, flags, NULL, NULL);
 }
-int FNVNX_SOCK_NAME(shutdown)(int fd, int how) {
-    OBJ(fd, o);
-    if (how < 0 || how > 2) return fail_e(EINVAL);
-    int64_t v = sc(FNVNX_PLAT_SOCK_SHUTDOWN, 2, (uint64_t)o->h, (uint64_t)how, 0, 0, 0);
-    return v < 0 ? fail(v) : 0;
-}
-static int name_of(uint32_t fn, int fd, struct sockaddr *sa, socklen_t *len) {
-    OBJ(fd, o);
-    if (!sa || !len) return fail_e(EINVAL);
-    FnvnxWireSockaddr w;
-    int64_t v = sc(fn, 2, (uint64_t)o->h, A(&w), 0, 0, 0);
-    if (v < 0) return fail(v);
-    *len = from_wire_sa(&w, sa, *len);
-    return 0;
-}
-int FNVNX_SOCK_NAME(getsockname)(int fd, struct sockaddr *sa, socklen_t *len) { return name_of(FNVNX_PLAT_SOCK_GETSOCKNAME, fd, sa, len); }
-int FNVNX_SOCK_NAME(getpeername)(int fd, struct sockaddr *sa, socklen_t *len) { return name_of(FNVNX_PLAT_SOCK_GETPEERNAME, fd, sa, len); }
-
 /* ---- options */
 static int opt_lookup(int level, int opt, int *wl, int *wo, int *shape) {
 #define X(N, v, s) if (opt == N) { *wo = v; *shape = s; return 0; }
@@ -485,89 +445,4 @@ int FNVNX_SOCK_NAME(fcntl)(int fd, int cmd, ...) {
     }
     default: return fail_e(EINVAL);
     }
-}
-
-/* ---- getaddrinfo: GAI_OPEN resolves under a ticket, GAI_FETCH copies the records out; the guest list is ONE block */
-static size_t al8(size_t n) { return (n + 7) & ~(size_t)7; }
-int FNVNX_SOCK_NAME(getaddrinfo)(const char *node, const char *service, const struct addrinfo *hints, struct addrinfo **res) {
-    FnvnxWireAddrinfo wh;
-    if (hints) {
-        memset(&wh, 0, sizeof wh);
-        int fam = 0, st = 0, fl = 0;
-        if (ai_to_wire(hints->ai_flags, &fl)) return EAI_BADFLAGS;
-        wh.flags = fl;
-        if (af_to_wire(hints->ai_family, &fam)) return EAI_FAMILY;
-        if (hints->ai_socktype && type_to_wire(hints->ai_socktype, &st)) return EAI_SOCKTYPE;
-        wh.family = fam;
-        wh.socktype = st;
-        wh.protocol = hints->ai_protocol;
-    }
-    int32_t sys = 0;
-    int64_t t = sc(FNVNX_PLAT_SOCK_GAI_OPEN, 4, A(node), A(service), hints ? A(&wh) : 0, A(&sys), 0);
-    if (t < 0) {
-        if (t == -FNVNX_WEAI_SYSTEM) { errno = local_errno(sys); return EAI_SYSTEM; }
-        if (t <= -2001) return eai_from_wire((int)-t);
-        errno = local_errno((int)-t);
-        return EAI_SYSTEM;
-    }
-    int64_t total = sc(FNVNX_PLAT_SOCK_GAI_FETCH, 3, (uint64_t)t, 0, 0, 0, 0);
-    if (total < 0) { errno = local_errno((int)-total); return EAI_SYSTEM; }
-    if (total == 0) return EAI_NONAME;   /* nothing with a wire form; (0, 0) frees the ticket, as cap >= total */
-    uint8_t *wb = malloc(total ? (size_t)total : 8);
-    if (!wb) {
-        sc(FNVNX_PLAT_SOCK_GAI_FETCH, 3, (uint64_t)t, 0, (uint64_t)total, 0, 0);   /* buf 0, cap >= total: ticket freed */
-        return EAI_MEMORY;
-    }
-    int64_t got = sc(FNVNX_PLAT_SOCK_GAI_FETCH, 3, (uint64_t)t, A(wb), (uint64_t)total, 0, 0);
-    if (got != total) { free(wb); return EAI_FAIL; }
-    /* pass 1: size of the guest block; pass 2: fill */
-    const size_t sa_sz = al8(sizeof(struct sockaddr_in6) > sizeof(struct sockaddr_in) ? sizeof(struct sockaddr_in6) : sizeof(struct sockaddr_in));
-    size_t need = 0;
-    uint32_t nrec = 0;
-    for (size_t off = 0; off < (size_t)total;) {
-        FnvnxWireAddrinfo r;
-        if (off + sizeof r > (size_t)total) { free(wb); return EAI_FAIL; }
-        memcpy(&r, wb + off, sizeof r);
-        size_t step = sizeof r + al8(r.canon_len);
-        if (off + step > (size_t)total) { free(wb); return EAI_FAIL; }
-        need += al8(sizeof(struct addrinfo)) + sa_sz + al8(r.canon_len);
-        nrec++;
-        off += step;
-    }
-    uint8_t *blk = nrec ? malloc(need) : NULL;
-    if (nrec && !blk) { free(wb); return EAI_MEMORY; }
-    struct addrinfo *head = NULL, *prev = NULL;
-    uint8_t *q = blk;
-    for (size_t off = 0; off < (size_t)total;) {
-        FnvnxWireAddrinfo r;
-        memcpy(&r, wb + off, sizeof r);
-        struct addrinfo *ai = (struct addrinfo *)q;
-        struct sockaddr *sa = (struct sockaddr *)(q + al8(sizeof *ai));
-        char *cn = (char *)(q + al8(sizeof *ai) + sa_sz);
-        memset(ai, 0, sizeof *ai);
-        int fam = AF_UNSPEC, st = 0;
-        af_from_wire(r.family, &fam);
-        if (r.socktype) type_from_wire(r.socktype, &st);
-        ai->ai_flags = ai_from_wire(r.flags);
-        ai->ai_family = fam;
-        ai->ai_socktype = st;
-        ai->ai_protocol = r.protocol;
-        ai->ai_addrlen = from_wire_sa(&r.addr, sa, (socklen_t)sa_sz);
-        ai->ai_addr = ai->ai_addrlen ? sa : NULL;
-        if (r.canon_len) {
-            memcpy(cn, wb + off + sizeof r, r.canon_len);
-            ai->ai_canonname = cn;
-        }
-        if (prev) prev->ai_next = ai; else head = ai;
-        prev = ai;
-        q += al8(sizeof *ai) + sa_sz + al8(r.canon_len);
-        off += sizeof r + al8(r.canon_len);
-    }
-    free(wb);
-    if (!head) return EAI_NONAME;   /* the host answers success with at least one record; an empty list is "no such name" */
-    *res = head;
-    return 0;
-}
-void FNVNX_SOCK_NAME(freeaddrinfo)(struct addrinfo *ai) {
-    free(ai);   /* the head of the one block */
 }

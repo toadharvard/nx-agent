@@ -20,6 +20,7 @@
 extern void sockwire_shim_init(void);
 extern unsigned sockwire_init(void);
 extern void sockwire_exit(void);
+extern unsigned sockwire_free_port(int dgram);   /* a loopback port that nothing holds (host_glue.c, the host's own libc) */
 extern void fnvnx_guest_sock_init(void);
 extern const FnvnxHostApi *fnvnx_host;
 extern int AddDevice(const devoptab_t *);
@@ -39,11 +40,6 @@ static struct sockaddr_in lo(unsigned port) {
     const unsigned char ip[4] = {127, 0, 0, 1};
     memcpy(&a.sin_addr, ip, 4);
     return a;
-}
-static unsigned port_of(int fd) {
-    struct sockaddr_in a;
-    socklen_t l = sizeof a;
-    return getsockname(fd, (struct sockaddr *)&a, &l) == 0 && l == sizeof a ? bs(a.sin_port) : 0;
 }
 static int is_lo(const struct sockaddr_in *a) {
     const unsigned char ip[4] = {127, 0, 0, 1};
@@ -69,11 +65,9 @@ static void test_tcp(void) {
     socklen_t vl = sizeof v;
     CK(setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one) == 0);
     CK(getsockopt(s, SOL_SOCKET, SO_REUSEADDR, &v, &vl) == 0 && v != 0 && vl == sizeof v);
-    struct sockaddr_in a = lo(0), b;
-    socklen_t bl = sizeof b;
-    CK(bind(s, (struct sockaddr *)&a, sizeof a) == 0);
-    CK(getsockname(s, (struct sockaddr *)&b, &bl) == 0 && bl == sizeof b && is_lo(&b) && b.sin_port != 0);
-    unsigned port = bs(b.sin_port);
+    unsigned port = sockwire_free_port(0);
+    struct sockaddr_in a = lo(port);
+    CK(port != 0 && bind(s, (struct sockaddr *)&a, sizeof a) == 0);
     CK(listen(s, 4) == 0);
     vl = sizeof v;
     CK(getsockopt(s, SOL_SOCKET, SO_ACCEPTCONN, &v, &vl) == 0 && v != 0);
@@ -99,11 +93,8 @@ static void test_tcp(void) {
     struct sockaddr_in peer;
     socklen_t pl = sizeof peer;
     int ac = accept(s, (struct sockaddr *)&peer, &pl);
-    CK(ac >= 0 && pl == sizeof peer && is_lo(&peer) && bs(peer.sin_port) == port_of(c));
+    CK(ac >= 0 && pl == sizeof peer && is_lo(&peer));
     CK(!nb(ac));   /* the listener is non-blocking, the accepted socket is not */
-    struct sockaddr_in pn;
-    socklen_t pnl = sizeof pn;
-    CK(getpeername(c, (struct sockaddr *)&pn, &pnl) == 0 && is_lo(&pn) && bs(pn.sin_port) == port);
 
     /* data both ways: send/recv and write/read (the descriptor layer's close_r/read_r/write_r) */
     char buf[64];
@@ -132,10 +123,7 @@ static void test_tcp(void) {
     CKE(fcntl(ff, F_GETFL), ENOSYS);   /* not a socket: the fd layer's old answer */
     close(ff);
 
-    /* shutdown / orderly close */
-    CK(shutdown(c, 1) == 0);
-    CK(recv(ac, buf, sizeof buf, 0) == 0);
-    CKE(shutdown(c, 7), EINVAL);
+    /* orderly close */
     CK(close(c) == 0);
     CKE(send(c, "x", 1, 0), EBADF);   /* a closed descriptor */
     CK(pollone(ac, POLLIN, 1000, &re) == 1 && (re & (POLLIN | POLLHUP)));
@@ -154,16 +142,14 @@ static void test_tcp(void) {
     CK(n1 >= 0 && nb(n1) && (fcntl(n1, F_GETFD) & FD_CLOEXEC));
     CK(fcntl(n1, F_SETFD, 0) == 0 && fcntl(n1, F_GETFD) == 0);
     int d = fcntl(n1, F_DUPFD, 20);
-    CK(d >= 20 && port_of(d) == 0 && nb(d));
+    CK(d >= 20 && nb(d));
     CK(fcntl(d, F_SETFL, 0) == 0 && !nb(n1));   /* one open file description */
     CK(close(d) == 0 && close(n1) == 0);
     CKE(fcntl(s, 99, 0), EINVAL);
 
     /* refused connect (blocking, then non-blocking) to a port nobody listens on */
     int dead = socket(AF_INET, SOCK_STREAM, 0);
-    struct sockaddr_in da = lo(0);
-    CK(bind(dead, (struct sockaddr *)&da, sizeof da) == 0);
-    struct sockaddr_in refuse = lo(port_of(dead));
+    struct sockaddr_in refuse = lo(sockwire_free_port(0));
     close(dead);
     int r1 = socket(AF_INET, SOCK_STREAM, 0);
     CKE(connect(r1, (struct sockaddr *)&refuse, sizeof refuse), ECONNREFUSED);
@@ -225,9 +211,10 @@ static void test_args(void) {
     close(s);
     /* UDP: sendto / recvfrom carry the addresses, listen is refused */
     int u1 = socket(AF_INET, SOCK_DGRAM, 0), u2 = socket(AF_INET, SOCK_DGRAM, 0);
-    struct sockaddr_in z = lo(0);
-    CK(bind(u1, (struct sockaddr *)&z, sizeof z) == 0);
-    struct sockaddr_in to = lo(port_of(u1));
+    unsigned pu1 = sockwire_free_port(1), pu2 = sockwire_free_port(1);
+    struct sockaddr_in z = lo(pu1), z2 = lo(pu2);
+    CK(pu1 != pu2 && bind(u1, (struct sockaddr *)&z, sizeof z) == 0 && bind(u2, (struct sockaddr *)&z2, sizeof z2) == 0);
+    struct sockaddr_in to = lo(pu1);
     CKE(listen(u1, 1), EOPNOTSUPP);
     CK(sendto(u2, "dgram", 5, 0, (struct sockaddr *)&to, sizeof to) == 5);
     short re = 0;
@@ -236,108 +223,21 @@ static void test_args(void) {
     socklen_t fl = sizeof from;
     char buf[16];
     CK(recvfrom(u1, buf, sizeof buf, 0, (struct sockaddr *)&from, &fl) == 5 && !memcmp(buf, "dgram", 5));
-    CK(fl == sizeof from && is_lo(&from) && bs(from.sin_port) == port_of(u2) && port_of(u2) != 0);
+    CK(fl == sizeof from && is_lo(&from) && bs(from.sin_port) == pu2);
     CKE(recvfrom(u1, buf, sizeof buf, MSG_DONTWAIT, NULL, NULL), EWOULDBLOCK);
     close(u1);
     close(u2);
 }
 
-static void test_gai(void) {
-    struct addrinfo h, *r = NULL;
-    memset(&h, 0, sizeof h);
-    h.ai_family = AF_INET;
-    h.ai_socktype = SOCK_STREAM;
-    h.ai_flags = AI_NUMERICHOST;
-    CK(getaddrinfo("127.0.0.1", "80", &h, &r) == 0 && r);
-    if (r) {
-        struct sockaddr_in *a = (struct sockaddr_in *)r->ai_addr;
-        CK(r->ai_family == AF_INET && r->ai_socktype == SOCK_STREAM && r->ai_addrlen == sizeof *a && is_lo(a) && bs(a->sin_port) == 80);
-        CK(r->ai_protocol == IPPROTO_TCP && !r->ai_next);
-        freeaddrinfo(r);
-    }
-    r = NULL;
-    memset(&h, 0, sizeof h);
-    h.ai_family = AF_INET;
-    h.ai_flags = AI_CANONNAME;
-    CK(getaddrinfo("localhost", NULL, &h, &r) == 0 && r);
-    if (r) {
-        int found = 0, canon = r->ai_canonname != NULL;
-        for (struct addrinfo *p = r; p; p = p->ai_next)
-            found += p->ai_family == AF_INET && is_lo((struct sockaddr_in *)p->ai_addr);
-        CK(found >= 1 && canon);
-        freeaddrinfo(r);
-    }
-    r = NULL;
-    memset(&h, 0, sizeof h);
-    h.ai_family = AF_INET6;
-    h.ai_flags = AI_NUMERICHOST;
-    CK(getaddrinfo("::1", "9", &h, &r) == 0 && r);
-    if (r) {
-        struct sockaddr_in6 *a = (struct sockaddr_in6 *)r->ai_addr;
-        static const unsigned char l6[16] = {[15] = 1};
-        CK(r->ai_family == AF_INET6 && r->ai_addrlen == sizeof *a && ((struct sockaddr *)a)->sa_family == AF_INET6 &&
-           !memcmp(&a->sin6_addr, l6, 16) && bs(a->sin6_port) == 9);
-        freeaddrinfo(r);
-    }
-    r = NULL;
-    memset(&h, 0, sizeof h);
-    h.ai_family = AF_INET;
-    h.ai_socktype = SOCK_DGRAM;
-    h.ai_flags = AI_PASSIVE;
-    CK(getaddrinfo(NULL, "5000", &h, &r) == 0 && r && is_lo((struct sockaddr_in *)r->ai_addr) == 0 &&
-       ((struct sockaddr_in *)r->ai_addr)->sin_addr.s_addr == 0 && bs(((struct sockaddr_in *)r->ai_addr)->sin_port) == 5000);
-    if (r) freeaddrinfo(r);
-    /* the failures the guest tells apart: libnx's EAI numbers, not glibc's */
-    memset(&h, 0, sizeof h);
-    h.ai_flags = AI_NUMERICHOST;
-    CK(getaddrinfo("localhost", NULL, &h, &r) == EAI_NONAME);
-    h.ai_flags = 0x40000000;
-    CK(getaddrinfo("127.0.0.1", NULL, &h, &r) == EAI_BADFLAGS);
-    h.ai_flags = 0;
-    h.ai_family = 77;
-    CK(getaddrinfo("127.0.0.1", NULL, &h, &r) == EAI_FAMILY);
-    h.ai_family = AF_INET;
-    h.ai_socktype = 77;
-    CK(getaddrinfo("127.0.0.1", NULL, &h, &r) == EAI_SOCKTYPE);
-    h.ai_socktype = 0;
-    h.ai_flags = AI_NUMERICSERV;
-    CK(getaddrinfo("127.0.0.1", "http", &h, &r) == EAI_NONAME);
-    CK(getaddrinfo(NULL, NULL, NULL, &r) == EAI_NONAME);
-    h.ai_flags = AI_NUMERICHOST;
-    CK(getaddrinfo("999.1.1.1", NULL, &h, &r) == EAI_NONAME);
-}
-
-/* the raw services: argument counts, handles, the GAI_FETCH capacity protocol */
+/* the raw services: argument counts, handles, the answer of every number that is not a declared service */
 static void test_raw(void) {
     CK(raw(FNVNX_PLAT_SOCK_LISTEN, 1, 5, 0, 0, 0, 0) == (uint64_t)-FNVNX_WE_INVAL);   /* wrong nargs */
     CK(raw(FNVNX_PLAT_SOCK_LISTEN, 2, 12345, 1, 0, 0, 0) == (uint64_t)-9);            /* a handle that is not ours */
     CK(raw(FNVNX_PLAT_SOCK_CLOSE, 1, 0, 0, 0, 0, 0) == (uint64_t)-9);                  /* e.g. the host's stdin */
-    CK(raw(FNVNX_PLAT_SOCK_GAI_FETCH, 3, 4242, 0, 0, 0, 0) == (uint64_t)-FNVNX_WE_INVAL);
     CK(raw(FNVNX_PLAT_SOCK_SOCKET, 3, 99, 1, 0, 0, 0) == (uint64_t)-97);               /* wire EAFNOSUPPORT */
     CK(raw(FNVNX_PLAT_TZ_AT, 0, 0, 0, 0, 0, 0) == FNVNX_EXT_NO_MODULE);
-    FnvnxWireAddrinfo hint;
-    memset(&hint, 0, sizeof hint);
-    hint.family = FNVNX_WAF_INET;
-    hint.socktype = FNVNX_WSOCK_STREAM;
-    hint.flags = 0x4;   /* AI_NUMERICHOST */
-    int32_t sys = 0;
-    int64_t t = (int64_t)raw(FNVNX_PLAT_SOCK_GAI_OPEN, 4, (uint64_t)(uintptr_t)"127.0.0.1", 0, (uint64_t)(uintptr_t)&hint, (uint64_t)(uintptr_t)&sys, 0);
-    CK(t > 0);
-    uint64_t total = raw(FNVNX_PLAT_SOCK_GAI_FETCH, 3, (uint64_t)t, 0, 0, 0, 0);
-    CK(total == sizeof(FnvnxWireAddrinfo));
-    char big[256];
-    CK(raw(FNVNX_PLAT_SOCK_GAI_FETCH, 3, (uint64_t)t, (uint64_t)(uintptr_t)big, total - 1, 0, 0) == total);   /* too small: stays */
-    CK(raw(FNVNX_PLAT_SOCK_GAI_FETCH, 3, (uint64_t)t, 0, total, 0, 0) == total);                               /* buf 0: released */
-    CK(raw(FNVNX_PLAT_SOCK_GAI_FETCH, 3, (uint64_t)t, 0, 0, 0, 0) == (uint64_t)-FNVNX_WE_INVAL);
-    t = (int64_t)raw(FNVNX_PLAT_SOCK_GAI_OPEN, 4, (uint64_t)(uintptr_t)"127.0.0.1", 0, (uint64_t)(uintptr_t)&hint, 0, 0);
-    CK(t > 0 && raw(FNVNX_PLAT_SOCK_GAI_FETCH, 3, (uint64_t)t, (uint64_t)(uintptr_t)big, sizeof big, 0, 0) == total);
-    FnvnxWireAddrinfo w;
-    memcpy(&w, big, sizeof w);
-    CK(w.family == FNVNX_WAF_INET && w.socktype == FNVNX_WSOCK_STREAM && w.addr.family == FNVNX_WAF_INET &&
-       w.addr.addr[0] == 127 && w.addr.addr[3] == 1 && w.canon_len == 0);
-    CK(raw(FNVNX_PLAT_SOCK_GAI_FETCH, 3, (uint64_t)t, 0, 0, 0, 0) == (uint64_t)-FNVNX_WE_INVAL);   /* taken: gone */
-    hint.flags = 0x40000000;
-    CK((int64_t)raw(FNVNX_PLAT_SOCK_GAI_OPEN, 4, (uint64_t)(uintptr_t)"127.0.0.1", 0, (uint64_t)(uintptr_t)&hint, 0, 0) == -FNVNX_WEAI_BADFLAGS);
+    for (uint32_t fn = 27; fn <= 29; fn++) CK(raw(fn, 2, 5, 0, 0, 0, 0) == FNVNX_EXT_NO_SERVICE);   /* removed services */
+    CK(raw(32, 4, 0, 0, 0, 0, 0) == FNVNX_EXT_NO_SERVICE && raw(33, 3, 0, 0, 0, 0, 0) == FNVNX_EXT_NO_SERVICE);
 }
 
 int main(void) {
@@ -346,7 +246,6 @@ int main(void) {
     fnvnx_guest_sock_init();
     test_tcp();
     test_args();
-    test_gai();
     test_raw();
     sockwire_exit();
     printf("sockwire: %d checks, %d failed\n", g_checks, g_fails);

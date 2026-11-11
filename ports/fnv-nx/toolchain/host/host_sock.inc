@@ -122,28 +122,6 @@ static int sk_msg_from_wire(int w, int *h) {   /* all bits must be known */
     *h = r;
     return 0;
 }
-static int sk_ai_from_wire(int w, int *h) {
-    int r = 0;
-#define X(N, v) if (w & (v)) { w &= ~(v); r |= N; }
-    FNVNX_WIRE_AI_LIST(X)
-#undef X
-    if (w) return -1;
-    *h = r;
-    return 0;
-}
-static int sk_ai_to_wire(int h) {
-    int r = 0;
-#define X(N, v) if (h & N) r |= (v);
-    FNVNX_WIRE_AI_LIST(X)
-#undef X
-    return r;
-}
-static int sk_eai_to_wire(int h) {   /* a code outside POSIX's set is a failure of the resolver: EAI_FAIL */
-#define X(N, v) if (h == N) return v;
-    FNVNX_WIRE_EAI_LIST(X)
-#undef X
-    return 2004;
-}
 static short sk_poll_from_wire(unsigned w) {
     int r = 0;
 #define X(N, v) if (w & (v)) r |= N;
@@ -245,114 +223,32 @@ static int sk_uchar_opt(int hl, int ho) {
 #endif
 }
 
-/* ---- getaddrinfo tickets */
-typedef struct { int id; struct addrinfo *res; } SkTicket;
-static SkTicket *sk_t;
-static size_t sk_tn, sk_tcap;
-static int sk_tnext = 1;
-static int sk_tadd(struct addrinfo *res) {   /* a ticket > 0, or 0 when out of memory */
-    int id = 0;
-    pthread_mutex_lock(&sk_mu);
-    if (sk_tn == sk_tcap) {
-        size_t nc = sk_tcap ? sk_tcap * 2 : 8;
-        SkTicket *p = realloc(sk_t, nc * sizeof *p);
-        if (p) { sk_t = p; sk_tcap = nc; }
-    }
-    if (sk_tn < sk_tcap) {
-        id = sk_tnext;
-        sk_tnext = sk_tnext == INT32_MAX ? 1 : sk_tnext + 1;
-        sk_t[sk_tn].id = id;
-        sk_t[sk_tn++].res = res;
-    }
-    pthread_mutex_unlock(&sk_mu);
-    return id;
-}
-static struct addrinfo *sk_tfind(int id, int take) {
-    struct addrinfo *r = NULL;
-    pthread_mutex_lock(&sk_mu);
-    for (size_t i = 0; i < sk_tn && !r; i++)
-        if (sk_t[i].id == id) {
-            r = sk_t[i].res;
-            if (take) sk_t[i] = sk_t[--sk_tn];
-        }
-    pthread_mutex_unlock(&sk_mu);
-    return r;
-}
-static size_t sk_al8(size_t n) { return (n + 7) & ~(size_t)7; }
-static int sk_wire_family(const struct addrinfo *a) {   /* 0: no wire form, the record is not carried */
-    int w;
-    if (a->ai_family == AF_UNSPEC || sk_af_to_wire(a->ai_family, &w) || !a->ai_addr) return 0;
-    return 1;
-}
-
-static uint64_t sk_gai_open(const uint64_t *a) {
-    const char *node = (const char *)(uintptr_t)a[0], *svc = (const char *)(uintptr_t)a[1];
-    struct addrinfo hints, *hp = NULL, *res = NULL;
-    if (a[2]) {
-        FnvnxWireAddrinfo wh;
-        memcpy(&wh, (const void *)(uintptr_t)a[2], sizeof wh);
-        memset(&hints, 0, sizeof hints);
-        if (sk_ai_from_wire(wh.flags, &hints.ai_flags)) return sk_e(2001);
-        if (sk_af_from_wire(wh.family, &hints.ai_family)) return sk_e(2005);
-        if (wh.socktype && sk_type_from_wire(wh.socktype, &hints.ai_socktype)) return sk_e(2006);
-        hints.ai_protocol = wh.protocol;
-        hp = &hints;
-    }
-    errno = 0;
-    int rc = getaddrinfo(node, svc, hp, &res);
-    if (rc) {
-        if (rc == EAI_SYSTEM && a[3]) {
-            int32_t we = (int32_t)sk_werr(errno);
-            memcpy((void *)(uintptr_t)a[3], &we, sizeof we);
-        }
-        return sk_e(sk_eai_to_wire(rc));
-    }
-    if (!res) return sk_e(2002);
-    int id = sk_tadd(res);
-    if (!id) { freeaddrinfo(res); return sk_e(2008); }
-    return (uint64_t)id;
-}
-static uint64_t sk_gai_fetch(const uint64_t *a) {
-    int id = (int)a[0];
-    if ((uint64_t)id != a[0] || id <= 0) return sk_e(FNVNX_WE_INVAL);
-    struct addrinfo *res = sk_tfind(id, 0);
-    if (!res) return sk_e(FNVNX_WE_INVAL);
-    uint64_t cap = a[2];
-    uint64_t total = 0;
-    for (struct addrinfo *p = res; p; p = p->ai_next)
-        if (sk_wire_family(p)) total += sizeof(FnvnxWireAddrinfo) + sk_al8(p->ai_canonname ? strlen(p->ai_canonname) + 1 : 0);
-    if (cap < total) return total;
-    uint8_t *out = (uint8_t *)(uintptr_t)a[1];
-    if (out) {
-        for (struct addrinfo *p = res; p; p = p->ai_next) {
-            if (!sk_wire_family(p)) continue;
-            FnvnxWireAddrinfo w;
-            size_t cl = p->ai_canonname ? strlen(p->ai_canonname) + 1 : 0;
-            memset(&w, 0, sizeof w);
-            w.flags = sk_ai_to_wire(p->ai_flags);
-            sk_af_to_wire(p->ai_family, &w.family);
-            if (p->ai_socktype) { int t = 0; if (!sk_type_to_wire(p->ai_socktype, &t)) w.socktype = t; }
-            w.protocol = p->ai_protocol;
-            w.canon_len = (uint32_t)cl;
-            sk_sa_to_wire(p->ai_addr, p->ai_addrlen, &w.addr);
-            sk_put(out, &w, sizeof w);
-            memset(out + sizeof w, 0, sk_al8(cl));
-            if (cl) memcpy(out + sizeof w, p->ai_canonname, cl);
-            out += sizeof w + sk_al8(cl);
-        }
-    }
-    sk_tfind(id, 1);
-    freeaddrinfo(res);
-    return total;
-}
-
 /* ---- the dispatcher */
+/* the served set: exactly the FNVNX_PLAT_SOCK_* services of hostapi.h and the number of arguments each takes (the header's list
+ * "n = the count each service states"); -1: not a service of this file. platform/manifest/check_hostapi.py compares both lists. */
+static int host_sock_nargs(uint32_t fn) {
+    switch (fn) {
+    case FNVNX_PLAT_SOCK_SOCKET: return 3;
+    case FNVNX_PLAT_SOCK_CLOSE: return 1;
+    case FNVNX_PLAT_SOCK_BIND: return 2;
+    case FNVNX_PLAT_SOCK_LISTEN: return 2;
+    case FNVNX_PLAT_SOCK_ACCEPT: return 2;
+    case FNVNX_PLAT_SOCK_CONNECT: return 2;
+    case FNVNX_PLAT_SOCK_SENDTO: return 5;
+    case FNVNX_PLAT_SOCK_RECVFROM: return 5;
+    case FNVNX_PLAT_SOCK_SETSOCKOPT: return 5;
+    case FNVNX_PLAT_SOCK_GETSOCKOPT: return 5;
+    case FNVNX_PLAT_SOCK_POLL: return 3;
+    case FNVNX_PLAT_SOCK_GETFL: return 1;
+    case FNVNX_PLAT_SOCK_SETFL: return 2;
+    default: return -1;
+    }
+}
+/* a number that is no service answers FNVNX_EXT_NO_SERVICE; a service with the wrong count -FNVNX_WE_INVAL (its own rule) */
 static uint64_t host_sock_call(uint32_t fn, const uint64_t *a, uint32_t n) {
-    static const uint8_t want[] = {3, 1, 2, 2, 2, 2, 5, 5, 5, 5, 3, 2, 2, 2, 1, 2, 4, 3};   /* fn 16..33 */
-    if (fn < FNVNX_PLAT_SOCK_FIRST || fn > FNVNX_PLAT_SOCK_LAST || n != want[fn - FNVNX_PLAT_SOCK_FIRST])
-        return sk_e(FNVNX_WE_INVAL);
-    if (fn == FNVNX_PLAT_SOCK_GAI_OPEN) return sk_gai_open(a);
-    if (fn == FNVNX_PLAT_SOCK_GAI_FETCH) return sk_gai_fetch(a);
+    int want = host_sock_nargs(fn);
+    if (want < 0) return FNVNX_EXT_NO_SERVICE;
+    if (n != (uint32_t)want) return sk_e(FNVNX_WE_INVAL);
     if (fn == FNVNX_PLAT_SOCK_POLL) {
         FnvnxWirePollfd *w = (FnvnxWirePollfd *)(uintptr_t)a[0];
         uint64_t nf = a[1];
@@ -535,21 +431,6 @@ static uint64_t host_sock_call(uint32_t fn, const uint64_t *a, uint32_t n) {
         }
         memcpy((void *)(uintptr_t)a[3], &w, cap < wl ? cap : wl);
         memcpy((void *)(uintptr_t)a[4], &wl, sizeof wl);
-        return 0;
-    }
-    case FNVNX_PLAT_SOCK_SHUTDOWN:
-        if (a[1] > 2) return sk_e(FNVNX_WE_INVAL);
-        return shutdown(h, a[1] == 0 ? SHUT_RD : a[1] == 1 ? SHUT_WR : SHUT_RDWR) ? sk_err() : 0;
-    case FNVNX_PLAT_SOCK_GETSOCKNAME:
-    case FNVNX_PLAT_SOCK_GETPEERNAME: {
-        struct sockaddr_storage ss;
-        socklen_t sl = sizeof ss;
-        memset(&ss, 0, sizeof ss);
-        if (!a[1]) return sk_e(14);
-        if ((fn == FNVNX_PLAT_SOCK_GETSOCKNAME ? getsockname : getpeername)(h, (struct sockaddr *)&ss, &sl)) return sk_err();
-        FnvnxWireSockaddr w;
-        sk_sa_to_wire((struct sockaddr *)&ss, sl, &w);
-        memcpy((void *)(uintptr_t)a[1], &w, sizeof w);
         return 0;
     }
     case FNVNX_PLAT_SOCK_GETFL: {
