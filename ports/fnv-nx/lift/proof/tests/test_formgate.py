@@ -136,6 +136,26 @@ class CertificationRule(unittest.TestCase):
             u, c, ids, _ = Fixture(td, GOOD, dsl_override='0' * 64).judge()
             self.assertEqual((u, c, len(ids)), (len(GOOD), 0, len(GOOD)))
 
+    def test_certificate_stale_after_a_dsl_edit_is_refused(self):
+        # certificates written under the current DSL; then the builder of ONE mnemonic (xor) changes: exactly the shapes of xor lose their certificate,
+        # the others (their Form did not change) stay certified.  The key of a certificate is (shape, shape_sha of the CURRENT Form, IR sha), nothing else.
+        from proof import forms
+        with workdir() as td:
+            f = Fixture(td, GOOD)
+            self.assertEqual(f.judge()[:3], (len(GOOD), len(GOOD), []))
+            orig = forms.H['xor']
+
+            def edited(c):
+                orig(c)
+                c.F.undefined('df', 'edited')
+            forms.H['xor'] = edited
+            try:
+                u, c, ids, _ = f.judge()
+            finally:
+                forms.H['xor'] = orig
+            self.assertEqual((u, c, ids), (len(GOOD), len(GOOD) - 1, [key_of('31c0')[0]]))
+            self.assertEqual(f.judge()[:3], (len(GOOD), len(GOOD), []))
+
     def test_wrong_model_sha_in_the_certificates_is_red(self):
         with workdir() as td:
             self.assertEqual(Fixture(td, GOOD, model='f' * 64).judge()[1], 0)
