@@ -191,22 +191,36 @@ closure (IKOS with zero alarms, tests against a reference, review) and its size 
 - **R1 What is a product root.** Test drivers and host tools of the emulator stage (for example the GL backend
   used off-console) are class `tool`. The subset applies to code that ships.
 
-**Open: no rule yet, reported**
+**Decided on 2026-11-11 (owner, through the orchestrator)**
 
-1. **Foreign source built into the product** (shader translator: MojoShader and a Mesa-derived code generator;
-   FreeType; minimp3). It is not written in the subset and cannot be moved into it, and part of it parses input
-   that comes from the game. Declaring it `borrows` would leave class 14 open inside the product. Candidate rule
-   from studied practice: compile each such module to WebAssembly and back to C (`wasm2c`, the RLBox technique
-   used in Firefox), so that all of its memory is one bounds-checked linear memory and a fault inside it cannot
-   reach the rest of the process; its inputs and outputs cross the wall by copy through spans. Cost and the result
-   of a fault inside the wall (a failed call with a contract result) need a decision.
-2. **A wild access by the game itself into host-private pages.** Lifted code reaches memory without a check (that
-   is the exe's semantics and its speed). On Windows such an access faults or damages the game's own data; here it
-   can damage host data, because host and guest share one 32-bit address space. G3 makes the two sets disjoint,
-   but nothing makes host-private pages inaccessible while guest code runs.
-3. **Memory exhaustion.** A pool or block that cannot grow has a contract result only where the contract defines
-   one. Elsewhere there is no rule.
-4. **The system libraries** (C library, libnx) stay outside the subset as part of the platform, like the kernel.
+1. **Foreign source built into the product.** FreeType and minimp3, used unmodified from upstream, are external
+   libraries under the owner's assumption. The shader translator (MojoShader and the Mesa-derived code generator)
+   is our modified code and parses data that comes from the game: it is either moved into the subset or built
+   behind a wall, compiled to WebAssembly and back to C (`wasm2c`, the RLBox technique), so that all of its memory
+   is one bounds-checked linear memory and its inputs and outputs cross by copy through spans. A fault inside the
+   wall is a failed call with the D3D9 contract result (`D3DERR_INVALIDCALL` from shader creation). The renderer's
+   owner chooses between the two.
+2. **The system libraries** (C library, libnx) are part of the platform, like the kernel: an accepted assumption.
+3. **Memory exhaustion** is work, not an assumption: every allocation path has a contract result. It is a class
+   of its own in VERDICT.md with its own gate; the owners of the code close it.
+
+**Open: no rule yet**
+
+- **A wild access by the game itself into host-private pages.** Lifted code reaches memory without a check (the
+  exe's semantics and its speed). On Windows such an access faults or damages the game's own data; here it can
+  damage host data, because host and guest share one 32-bit address space. G3 makes the two sets disjoint, but
+  nothing makes host-private pages unreachable from 32-bit guest addresses. The loader's owner is looking for a
+  layout rule; if it needs another address-space type for the title, that is the owner's decision.
+
+**Sizes of the trusted roots as declared by their owners (to be measured by the gate)**
+
+| Root | Files | Size |
+|---|---|---|
+| `boot` | guest crt0; the self-relocation and entry part of the guest runtime; thread entry and TLS | about 250 lines |
+| `hostcall`, guest side | one wrapper file with a typed function per slot and service | at most 300 lines (81 call sites move into the subset) |
+| `hostcall`, host side | wrappers over the kernel calls that take mapping addresses | at most 250 lines (about 1,500 lines of table logic move into the subset) |
+| `transfer` | 23 places in 6 files of the lift runtime, plus one generated template for import entries | 23 places |
+| `memsafe` | not written yet | — |
 
 ## 5b. Revision 3: the import boundary and the platform (2026-11-11)
 
