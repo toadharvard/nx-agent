@@ -279,7 +279,6 @@ def stamp_patches(stats_tsv, objects, msvc_report, out=None, report=None):
         if st.origin in missed or st.origin not in applied: why = 'did not apply as a whole in the certifying prepare'
         elif st.path not in built: why = 'its file is not a unit that was compiled (a header, or outside the run)'
         elif built[st.path] != 'ok': why = 'GCC does not build its unit'
-        elif st.rule in pm.GATED: m = 'exempt (gated class)'
         else:
             got = msvc.get(st.path, [])
             want = [x for x in got if st.addr is None or x[0] == '0x%08x' % st.addr]

@@ -87,7 +87,8 @@ inline __attribute__((always_inline)) void _WriteBarrier(void) { __asm__ __volat
 inline __attribute__((always_inline)) void MemoryBarrier(void) { __asm__ __volatile__("dmb ish" ::: "memory"); }
 inline __attribute__((always_inline)) void YieldProcessor(void) { __asm__ __volatile__("yield" ::: "memory"); }
 #ifndef FNVNX_MSVC_NAMES   /* the name pass (toolchain/vtnames: clang with the MSVC ABI) has these as builtins */
-inline __attribute__((always_inline)) void __debugbreak(void) { __builtin_trap(); }
+/* an x86 int3 is the exe's instruction, not a GCC trap: declared only, verdict `int3` (toolchain/pi), the body is lifted */
+void __debugbreak(void) __attribute__((fnvnx_lifted("int3")));
 #endif
 /* <stdlib.h> rotates (intrinsics on MSVC; the decomp declares some itself, extern "C" unsigned int _rotl(...)) */
 #ifndef FNVNX_MSVC_NAMES   /* the name pass (toolchain/vtnames: clang with the MSVC ABI) has these as builtins */
@@ -102,20 +103,35 @@ inline __attribute__((always_inline)) unsigned int _rotr(unsigned int v, int s)
     return s ? (v >> s) | (v << (32 - s)) : v;
 }
 #endif
-/* SEH has no exceptions on the target (below): the code of the exception being handled is never asked for */
-#ifndef FNVNX_MSVC_NAMES   /* the name pass (toolchain/vtnames: clang with the MSVC ABI) has these as builtins */
-inline __attribute__((always_inline)) unsigned long _exception_code(void) { return 0UL; }
-#endif
 #ifdef __cplusplus
 }
 #endif
 
-/* SEH: there are no structured exceptions on the target; a __try body runs as a plain block and the __except
- * filter / handler never run (S4 decides whether anything has to raise instead). The decomp has no __finally or
- * __leave. */
-#define __try if (1)
-#define __except(filter) else if (0 && (filter))
-#define GetExceptionCode() 0UL
+/* SEH-Π: structured exception handling is the exe's scope table, not GCC text. Every form is a function that is
+ * declared and never defined, and carries fnvnx_lifted("seh") (toolchain/pi): a function that uses one compiles, gets
+ * the pi verdict `seh` (so it is lifted, never native), and a native body of it could not link. MSVC's grammar maps
+ * onto if / else-if so the text parses; the decomp's own `extern "C" unsigned long __cdecl _exception_code(void);`
+ * redeclares the same function. */
+#ifdef __cplusplus
+extern "C" {
+#endif
+int fnvnx_seh_try(void) __attribute__((fnvnx_lifted("seh")));
+int fnvnx_seh_except(int) __attribute__((fnvnx_lifted("seh")));
+int fnvnx_seh_finally(void) __attribute__((fnvnx_lifted("seh")));
+void fnvnx_seh_leave(void) __attribute__((fnvnx_lifted("seh")));
+unsigned long fnvnx_seh_code(void) __attribute__((fnvnx_lifted("seh")));
+void *fnvnx_seh_info(void) __attribute__((fnvnx_lifted("seh")));
+#ifdef __cplusplus
+}
+#endif
+#define __try if (fnvnx_seh_try())
+#define __except(filter) else if (fnvnx_seh_except((int)(filter)))
+#define __finally if (fnvnx_seh_finally())
+#define __leave fnvnx_seh_leave()
+#define _exception_code fnvnx_seh_code
+#define GetExceptionCode fnvnx_seh_code
+#define _exception_info fnvnx_seh_info
+#define GetExceptionInformation fnvnx_seh_info
 
 /* Every definition tagged `// @fnv 0x...` is emitted out of line and never inlined (prepare.py rule KEEP1): it is a
  * function of the original binary, the decomp's calls of it were real calls, and the link step (tools/link) binds
@@ -273,15 +289,6 @@ extern "C" void _operator_delete_sized(void *, __SIZE_TYPE__);
 /* x87 helper names (fnv_FloatToInt, fnv_SinCos, ...) for units that call them without the decomp's helper header */
 /* MSVC-only CRT names (secure CRT, _stricmp, ...) that units call without a declaration of their own */
 #include "fnvnx_crt.h"
-
-/* Patch class MT1 (docs/PATCHES.md): the one gate, FNVNX_MT1_ON, is defined in fnvnx_mt1.h */
-#include "fnvnx_mt1.h"
-/* MT1 cull sync (patches/mt1_cull_sync.s1b, docs/PERF.md 6.11): wait for this frame's cell update on AI linear
- * thread 2 before the world render culls (toolchain/game/boot.cpp) */
-#ifdef __cplusplus
-extern "C"
-#endif
-void fnvnx_mt1_wait_cell_update(void);
 
 #include "fnvnx_asm.h"
 

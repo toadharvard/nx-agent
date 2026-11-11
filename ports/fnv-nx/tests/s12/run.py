@@ -212,6 +212,15 @@ def ftoi(scratch):
     if r.returncode:
         return
     so = r.stdout.strip().splitlines()[-1]
+    # a direct float -> enum conversion is an error with no option (cl: C2440); an unknown plugin argument is one too
+    en = os.path.join(d, 'enum_direct.cpp')
+    open(en, 'w').write('enum E { A, B };\nE g(float x) { return (E)x; }\nE h(float x) { return (E)(int)x; }\n')
+    r = subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-O2', '-fplugin=' + so, '-S', '-o', os.devnull, en],
+                       capture_output=True, text=True)
+    check(r.returncode != 0 and r.stderr.count('FTOI:') == 1, 'ftoi: float -> enum is one error, no option (%s)' % r.stderr.strip()[-200:])
+    r = subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-O2', '-fplugin=' + so, '-fplugin-arg-fnvnx_ftoi-enum=error',
+                        '-S', '-o', os.devnull, en], capture_output=True, text=True)
+    check(r.returncode != 0 and 'unknown plugin argument' in r.stderr, 'ftoi: an unknown plugin argument is an error')
     if not shutil.which('qemu-aarch64') or not shutil.which('gcc'):
         print('skip ftoi semantics: needs qemu-aarch64 and a host gcc (x86-64)')
         return

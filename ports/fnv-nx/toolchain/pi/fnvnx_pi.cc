@@ -17,6 +17,9 @@
  *            the function it was made from
  *   verdict  `ok`, or the first reason the function's own body is outside Π, in this fixed order:
  *              asm       an asm statement
+ *              seh       uses structured exception handling (__try / __except / __finally / __leave); generally:
+ *                        the word of a fnvnx_lifted callee (below)
+ *              int3      executes an x86 breakpoint instruction (__debugbreak): the body is lifted
  *              setjmp    calls setjmp
  *              varargs   the definition takes variable arguments
  *              falloff   control can reach the end of the function, which must return a value (FALL2: the front
@@ -25,7 +28,8 @@
  *              fpfast    the unit is built with /fp:fast (a fact of the recipe, plugin argument `fpfast`) and
  *                        the body has a floating-point operand: the source does not fix what the exe computes
  *              argorder  a call with side effects in two or more arguments whose order cannot be read out of an
- *                        object (see "argument order" below)
+ *                        object (see "argument order" below); also any call of two or more arguments with a
+ *                        side-effecting argument of non-scalar type, which the order plugin leaves in GCC order
  *              div       an integer division or remainder by a non-constant (x86 traps where AArch64 gives 0)
  *              shift     a shift or rotate by a non-constant count (x86 masks the count, C leaves it undefined)
  *              uninit    a use of a local that no path has assigned
@@ -41,6 +45,10 @@
  *   types    `,`-separated Itanium type strings of the record types whose fields the body accesses or that its
  *            parameters and locals have
  *
+ * fnvnx_lifted("word"): an attribute on a function declaration (registered here). A body that calls a function whose
+ * declaration carries it gets the verdict `word`, whatever the callee's name. The declaration has no body anywhere:
+ * a native body that calls it cannot link (shim/include/fnvnx_compat.h declares the SEH forms so).
+ *
  * Not decided here: facts of the exe (EH tables at the address) and layouts against cl (R7 is checked on `types`).
  * The evaluation order of call arguments is fixed at MSVC's by the fnvnx_order plugin; the sites its lemma is
  * checked on are written to section .fnvnx.argorder.
@@ -49,6 +57,8 @@
 #include "plugin-version.h"
 #include "cp/cp-tree.h"
 #include "context.h"
+#include "stringpool.h"
+#include "attribs.h"
 #include "tree-pass.h"
 #include "function.h"
 #include "basic-block.h"
@@ -199,6 +209,21 @@ static tree walk_calls(tree *tp, int *walk_subtrees, void *data)
   int ordinal = call_count[callee]++;          /* every call counts, a site or not */
   int with = 0;
   for (size_t i = 0; i < args.size(); i++) if (args[i] && TREE_SIDE_EFFECTS(args[i])) with++;
+  /* A call the order plugin leaves in GCC's order: at least one argument (after `this` of a method call) has side
+     effects and is not of scalar (register) type, and the call has two or more arguments. This condition must stay
+     equal to the one in toolchain/order/fnvnx_order.cc reorder_call (skip on `!scalar_arg(a)` with TREE_SIDE_EFFECTS
+     and the CALL_EXPR_REVERSE_ARGS exemption); scalar_arg there is: integral, pointer, scalar float, offset, vector,
+     nullptr type. Such a call has no readable order: argorder, whatever the other arguments are. */
+  if (args.size() >= 2 && !(TREE_CODE(t) == CALL_EXPR && CALL_EXPR_REVERSE_ARGS(t))) {
+    tree fnptr = TREE_CODE(t) == CALL_EXPR ? CALL_EXPR_FN(t) : AGGR_INIT_EXPR_FN(t);
+    tree ft = fnptr && POINTER_TYPE_P(TREE_TYPE(fnptr)) ? TREE_TYPE(TREE_TYPE(fnptr)) : NULL_TREE;
+    for (size_t i = ft && TREE_CODE(ft) == METHOD_TYPE ? 1 : 0; i < args.size(); i++) {
+      tree a = args[i], ty = a ? TREE_TYPE(a) : NULL_TREE;
+      bool scalar = ty && (INTEGRAL_TYPE_P(ty) || POINTER_TYPE_P(ty) || SCALAR_FLOAT_TYPE_P(ty)
+                           || TREE_CODE(ty) == OFFSET_TYPE || TREE_CODE(ty) == VECTOR_TYPE || TREE_CODE(ty) == NULLPTR_TYPE);
+      if (a && TREE_SIDE_EFFECTS(a) && !scalar) { arg_unreadable.insert((const char *)data); break; }
+    }
+  }
   if (with < 2) return NULL_TREE;
   std::string row = std::string((const char *)data) + "\\t" + callee + "\\t";
   bool readable = true;
@@ -315,6 +340,7 @@ struct cfg_pass : gimple_opt_pass {
   cfg_pass(gcc::context *c) : gimple_opt_pass(cfg_data, c) {}
   unsigned int execute(function *fun) override
   {
+    const char *r_lift = NULL;
     bool r_asm = false, r_vol = false, r_div = false, r_shift = false, r_fp = false, r_fall = false;
     facts f; f.emitted = false;
     basic_block bb;
@@ -323,6 +349,10 @@ struct cfg_pass : gimple_opt_pass {
         gimple *st = gsi_stmt(gsi);
         if (is_gimple_debug(st) || gimple_clobber_p(st)) continue;      /* an end-of-life mark is no access */
         if (gimple_code(st) == GIMPLE_ASM) r_asm = true;
+        if (is_gimple_call(st) && !r_lift)
+          if (tree cd = gimple_call_fndecl(st))
+            if (tree la = lookup_attribute("fnvnx_lifted", DECL_ATTRIBUTES(cd)))
+              r_lift = TREE_STRING_POINTER(TREE_VALUE(TREE_VALUE(la)));
         /* FALL2: the front end's own mark of "control reaches the end of a non-void function" (it has no source
            position), in a block the function's CFG reaches. The exe returns whatever eax holds there; C++ gives
            no value and GCC lets the code run on, so the body is not portable. (Blocks no path reaches are already
@@ -350,7 +380,7 @@ struct cfg_pass : gimple_opt_pass {
     unsigned ix; tree v;
     FOR_EACH_LOCAL_DECL(fun, ix, v) note_type(TREE_TYPE(v), f.types);
     /* `uninit` (a local in a register) is decided on SSA and comes before uninit-mem in the order of reasons */
-    f.verdict = r_asm ? "asm" : fun->calls_setjmp ? "setjmp" : stdarg_p(TREE_TYPE(fn)) ? "varargs"
+    f.verdict = r_asm ? "asm" : r_lift ? r_lift : fun->calls_setjmp ? "setjmp" : stdarg_p(TREE_TYPE(fn)) ? "varargs"
               : r_fall ? "falloff" : r_vol ? "volatile" : r_fp ? "fpfast" : arg_unreadable.count(source_name(fn)) ? "argorder"
               : r_div ? "div" : r_shift ? "shift" : "";
     f.mem = unproven_memory_read(fun);
@@ -458,6 +488,9 @@ static void finish_unit(void *, void *)
   fprintf(asm_out_file, "\t.popsection\n");
 }
 
+static struct attribute_spec lifted_attr = { "fnvnx_lifted", 1, 1, true, false, false, false, NULL, NULL };
+static void register_attrs(void *, void *) { register_attribute(&lifted_attr); }
+
 int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
 {
   if (!plugin_default_version_check(ver, &gcc_version)) return 1;
@@ -481,6 +514,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
   pl.ref_pass_instance_number = 1;
   pl.pos_op = PASS_POS_INSERT_AFTER;
   register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pl);
+  register_callback(info->base_name, PLUGIN_ATTRIBUTES, register_attrs, NULL);
   register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, pre_genericize, NULL);
   register_callback(info->base_name, PLUGIN_ALL_IPA_PASSES_START, ipa_start, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);

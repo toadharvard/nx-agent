@@ -38,7 +38,7 @@ for want in fnvnx_ftoi fnvnx_order fnvnx_sdd fnvnx_pi fnvnx_dispatch fnvnx_addr 
 done
 grep -qx -- '-DFNVNX_SDD=1' <<<"$flags" || { echo "FAIL: no -DFNVNX_SDD=1"; fail=1; }
 grep -qx -- '-fno-devirtualize' <<<"$flags" || { echo "FAIL: no -fno-devirtualize"; fail=1; }
-grep -qx -- '-fplugin-arg-fnvnx_ftoi-enum=error' <<<"$flags" || { echo "FAIL: no ftoi enum=error"; fail=1; }
+grep -q 'fnvnx_ftoi-' <<<"$flags" && { echo "FAIL: ftoi plugin argument in the flags"; fail=1; }
 grep -q COMPILER_BARRIERS <<<"$flags" && { echo "FAIL: COMPILER_BARRIERS"; fail=1; }
 
 # (b) a CC of another build is refused, both compilers named

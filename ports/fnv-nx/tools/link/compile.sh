@@ -103,8 +103,6 @@ FLAGS+=(-fplugin="$ORDER_SO" -fplugin-arg-fnvnx_order-args="$ORDER_ARGS" -fplugi
 SDD_SO=$(CXX=$CXX bash "$HERE/toolchain/sdd/build.sh" "$OUT/.sdd") \
   || { echo "compile.sh: the fnvnx_sdd plugin does not build (install gcc-13-plugin-dev-aarch64-linux-gnu and g++)" >&2; exit 2; }
 FLAGS+=(-DFNVNX_SDD=1 -fno-devirtualize -fplugin="$SDD_SO")
-# FTOI: a direct float -> enum conversion is an error, as for cl (C2440): the source names the integer type
-FLAGS+=(-fplugin-arg-fnvnx_ftoi-enum=error)
 # N3 (toolchain/pi, MASTER_PLAN4 R1): each object carries, per function, the verdict "inside the portable subset",
 # its inline tree and the record types it touches (section .fnvnx.n3). It changes no code.
 PI_SO=$(CXX=$CXX bash "$HERE/toolchain/pi/build.sh" "$OUT/.pi") \

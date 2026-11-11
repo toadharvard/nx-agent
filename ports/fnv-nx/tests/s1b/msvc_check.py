@@ -160,7 +160,7 @@ def main():
         s1b_patches.BY_FILE = {}
         for s in s1b_patches.SITES:
             s1b_patches.BY_FILE.setdefault(s.path, []).append(s)
-    sites = s1b_patches.msvc_sites(s1b_patches.SITES)      # gated classes (MT1) are exempt from the byte check
+    sites = list(s1b_patches.SITES)
     files = sorted({s.path for s in sites})
     if a.only:
         files = [f for f in files if f in a.only.split(',')]

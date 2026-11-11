@@ -225,24 +225,6 @@ FNVNX_ILK PVOID InterlockedExchangePointer(PVOID volatile *p, PVOID v)
     return FNVNX_ILK_FULL(__atomic_exchange_n(p, v, __ATOMIC_SEQ_CST));
 }
 #undef FNVNX_ILK_FULL
-/* Refcount sites (docs/ORDERING.md "Refcounts"): the fnvnx_order plugin redirects an InterlockedIncrement whose
- * result is discarded, and an InterlockedDecrement whose result is discarded or only tested against 0, to these when
- * the operand is a 32-bit refcount field by name (m_uiRefCount, refs, ...). What MSVC's own ARM64 STL does for
- * shared_ptr: the increment of a reference one already holds needs no order; the decrement releases this thread's
- * uses of the object, and the thread that reaches 0 acquires everyone's before it deletes. */
-#define FNVNX_RC_HELPER static inline __attribute__((always_inline))   /* a macro: prepare.py's name scan reads lines */
-FNVNX_RC_HELPER LONG fnvnx_refcount_inc(volatile LONG *p)
-{
-    if (FNVNX_ILK_MISALIGNED(p)) return fnvnx_interlocked_slow(0, p, 0, 0);
-    return __atomic_add_fetch(p, 1, __ATOMIC_RELAXED);
-}
-FNVNX_RC_HELPER LONG fnvnx_refcount_dec(volatile LONG *p)
-{
-    if (FNVNX_ILK_MISALIGNED(p)) return fnvnx_interlocked_slow(1, p, 0, 0);
-    LONG r = __atomic_sub_fetch(p, 1, __ATOMIC_RELEASE);
-    if (r == 0) __atomic_thread_fence(__ATOMIC_ACQUIRE);
-    return r;
-}
 #endif
 HANDLE CreateEventA(void *, BOOL, BOOL, LPCSTR);
 HANDLE CreateMutexA(void *, BOOL, LPCSTR);

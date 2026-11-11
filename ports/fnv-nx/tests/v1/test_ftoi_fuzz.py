@@ -48,9 +48,13 @@ def main(argv):
     direct = os.path.join(work, 'enum_direct.cpp')
     with open(direct, 'w') as f:
         f.write('enum E { A, B };\nE g(float x) { return (E)x; }\nE h(float x) { return (E)(int)x; }\n')
-    r = sh(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-O2', '-fplugin=' + so, '-fplugin-arg-fnvnx_ftoi-enum=error', '-S', '-o', os.devnull, direct])
+    r = sh(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-O2', '-fplugin=' + so, '-S', '-o', os.devnull, direct])
     if r.returncode == 0 or r.stderr.count('FTOI:') != 1:
         print('FAIL: a direct float -> enum conversion must be exactly one FTOI error: ' + r.stderr[-300:])
+        return 1
+    r = sh(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-O2', '-fplugin=' + so, '-fplugin-arg-fnvnx_ftoi-enum=error', '-S', '-o', os.devnull, direct])
+    if r.returncode == 0 or 'unknown plugin argument' not in r.stderr:
+        print('FAIL: an unknown plugin argument must be an error: ' + r.stderr[-300:])
         return 1
     r = sh(['gcc', '-O1', '-I' + SRC, '-o', os.path.join(work, 'ref'), os.path.join(SRC, 'ref.c')])
     if r.returncode:

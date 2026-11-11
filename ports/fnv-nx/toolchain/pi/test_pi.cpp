@@ -37,3 +37,15 @@ int fo2(int x) { for (;;) { if (x) return 1; } }                  // every path 
 int fo3(int x) { switch (x) { case 0: return 1; default: return 2; } }
 int fo4(int x) { if (x) return 1; die(); }                        // ends in a call that does not return
 int fo5(int x) { while (x) { if (x == 3) return 1; x--; } }       // the loop can end
+// SEH-PI: the forms are declared functions carrying fnvnx_lifted("seh")
+#include "fnvnx_seh_part.h"   // the SEH / __debugbreak lines of shim/include/fnvnx_compat.h, cut out by test_pi.py
+int plain(int);
+int sx1(int a) { int r = 0; __try { r = plain(a); } __except (1) { r = 2; } return r; }
+int sx2(int a) { int r = 0; __try { r = plain(a); } __finally { r++; } return r; }
+int sx3(int a) { return plain(a) + 1; }
+static inline __attribute__((always_inline)) int sh1(int a) { __try { return plain(a); } __except (1) { return 2; } }
+int sx4(int a) { return sh1(a); }
+int db(int a) { if (a) __debugbreak(); return a; }
+// ARG2: a side-effecting non-scalar argument and one that reads what it writes: the order plugin leaves GCC's order
+struct S1 { int a; }; S1 mk(int&); void fs(S1, int);
+void ao1(int x0) { int x = x0; fs(mk(x), x); }

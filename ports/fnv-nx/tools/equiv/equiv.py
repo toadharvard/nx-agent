@@ -68,7 +68,6 @@ CLASSES = {
     'XINC1': 'neutral',         # corrected caller declarations (S1b: 62/66 identical, 4 ecx reloads)
     'RET1': 'neutral',          # return <trailing stmt> where MSVC code is identical (S1b)
     'DBUG1': 'neutral',         # decomp-bug fixes per site (S1-crt 0x00b01510: identical)
-    'MT1': 'platform',          # gated Switch behaviour changes (S15-threads mt_cull), behind FNVNX_MT1_ON; no MSVC parity
     'XC1': 'platform',          # dynamic initializers -> extern + __fnvnx_dyninit_<addr> (S10 runner order)
     'VA1': 'platform',          # MSVC char* va_list -> real va_list
     'DUPINT1': 'neutral',       # one of two integer-only-different prototypes of one address (same callee)

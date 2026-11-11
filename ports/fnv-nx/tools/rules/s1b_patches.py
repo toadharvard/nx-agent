@@ -37,47 +37,24 @@ TAG = re.compile(r'//[ \t]*@fnv[ \t]+0x([0-9a-fA-F]+)')
 
 # Byte-parity classes: MSVC compiles the patched function to the bytes of the exe (tests/s1b/msvc_check.py).
 MSVC_RULES = ('XINC1', 'FTOL1', 'DBUG1', 'RET1')
-# Gated classes: deliberate Switch-only behaviour changes, exempt from the MSVC byte check, applied by prepare only
-# (the Switch build), every hunk behind the runtime gate (docs/PATCHES.md, "Patch class MT1").
-GATED = ('MT1',)
-MT1_GUARD = 'FNVNX_MT1_ON'          # fnvnx_compat.h: fnvnx_mt1_on() != 0; the engine's copy of bMTRendering, off by default
-MT1_MODES = ('guarded', 'inert')    # `=== guarded`: the new text tests the gate itself; `=== inert`: adds text only
-
-
-def mt1_emit(old, new, mode):
-    """The text an MT1 hunk puts in place of the matched old text: a statement hunk (no mode) becomes
-    `if (FNVNX_MT1_ON) { new } else { old }`, so with the gate off the code is the decomp's."""
-    if mode:
-        return new
-    return 'if (%s) { /* fnv-nx MT1 */\n%s\n} else {\n%s\n}' % (MT1_GUARD, new, old)
-
-
-def msvc_sites(sites):
-    """The sites the MSVC byte check covers (every class but the gated ones)."""
-    return [s for s in sites if s.rule in MSVC_RULES]
 
 
 class Site:
-    __slots__ = ('rule', 'path', 'addr', 'why', 'hunks', 'modes', 'origin')
+    __slots__ = ('rule', 'path', 'addr', 'why', 'hunks', 'origin')
 
     def __init__(self, rule, path, addr, origin):
         self.rule, self.path, self.addr, self.origin = rule, path, addr, origin
-        self.why, self.hunks, self.modes = [], [], []
+        self.why, self.hunks = [], []
 
 
 def parse_patch_file(fname):
     """-> [Site] of one patch file (format in the module docstring)."""
-    sites, cur, mode, old, new, hmode = [], None, None, [], [], ''
+    sites, cur, mode, old, new = [], None, None, [], []
     for n, line in enumerate(open(fname, encoding='utf-8'), 1):
         body = line.rstrip('\n')
         where = '%s:%d' % (os.path.basename(fname), n)
         if mode == 'old':
-            m = re.match(r'^===(?: (\w+))?$', body)
-            if m:
-                hmode = m.group(1) or ''
-                if hmode and (cur.rule not in GATED or hmode not in MT1_MODES):
-                    raise ValueError('%s: hunk mode %r is only for the gated classes %s (%s)'
-                                     % (where, hmode, ','.join(GATED), ','.join(MT1_MODES)))
+            if body == '===':
                 mode = 'new'
             else:
                 old.append(line)
@@ -85,12 +62,7 @@ def parse_patch_file(fname):
         if mode == 'new':
             if body == '>>>':
                 o, nw = ''.join(old).rstrip('\n'), ''.join(new).rstrip('\n')
-                if hmode == 'guarded' and MT1_GUARD not in nw:
-                    raise ValueError('%s: a guarded MT1 hunk must test %s itself' % (where, MT1_GUARD))
-                if hmode == 'inert' and o not in nw:
-                    raise ValueError('%s: an inert MT1 hunk only adds text: its new text must contain the old' % where)
                 cur.hunks.append((o, nw))
-                cur.modes.append(hmode)
                 mode, old, new = None, [], []
             else:
                 new.append(line)
@@ -185,8 +157,8 @@ def site_hash(s):
     """what a certificate names: the site's own text (rule, file, address, hunks)"""
     import hashlib
     h = hashlib.sha256(('%s\0%s\0%s\0' % (s.rule, s.path, s.addr)).encode())
-    for (old, new), mode in zip(s.hunks, s.modes + [''] * len(s.hunks)):
-        h.update(old.encode('utf-8', 'surrogateescape') + b'\0' + new.encode('utf-8', 'surrogateescape') + b'\0' + mode.encode() + b'\0')
+    for old, new in s.hunks:
+        h.update(old.encode('utf-8', 'surrogateescape') + b'\0' + new.encode('utf-8', 'surrogateescape') + b'\0')
     return h.hexdigest()[:24]
 
 
@@ -238,14 +210,11 @@ def apply_sites(path, text, stats, rule, report=None, certs=None):
                 continue
             work, bad = text, None
             for k, (old, new) in enumerate(s.hunks):
-                hmode = s.modes[k] if k < len(s.modes) else ''
                 w = window(work, s.addr)
                 res = (None, 'tag 0x%08x not in the file' % s.addr) if w is None else find_once(work, old, *w)
                 if res[0] is None:
                     bad = (k, res[1]); break
                 a, b = res
-                if rule in GATED:
-                    new = mt1_emit(work[a:b], new, hmode)
                 work = work[:a] + new + work[b:]
             if bad is not None:
                 stats[rule + '-MISS'] += 1
@@ -290,14 +259,7 @@ def r_ret1(path, text, stats):
     return apply_sites(path, text, stats, 'RET1')
 
 
-def r_mt1(path, text, stats):
-    """MT1: gated Switch behaviour changes (patches/mt1_*.s1b, S15-threads: multithreaded culling). Not MSVC byte
-    parity: exempt from msvc_check.py, applied in the Switch build only (class `platform`), every hunk behind
-    FNVNX_MT1_ON (the engine's copy of bMTRendering, off by default), so with the gate off the code is the decomp's."""
-    return apply_sites(path, text, stats, 'MT1')
-
-
-RULES = [r_xinc1, r_ftol1, r_dbug1, r_ret1, r_mt1]
+RULES = [r_xinc1, r_ftol1, r_dbug1, r_ret1]
 
 # ---------------------------------------------------------------------------------------------------------- units.json
 

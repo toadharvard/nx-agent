@@ -127,21 +127,6 @@
    "gcc": "ok",
    "msvc": "identical"
   },
-  "mt1_cull.s1b:14": {
-   "site": "5cbb7c2ccfddd310ac008d79",
-   "gcc": "ok",
-   "msvc": "exempt (gated class)"
-  },
-  "mt1_cull.s1b:27": {
-   "site": "1af7e3fb9cb8477241d6c03b",
-   "gcc": "ok",
-   "msvc": "exempt (gated class)"
-  },
-  "mt1_cull_sync.s1b:8": {
-   "site": "05e12a9bf3c24be945a7148d",
-   "gcc": "ok",
-   "msvc": "exempt (gated class)"
-  },
   "ret1_fall1_r2.s1b:101": {
    "site": "3abe7aa296c62c4150a91287",
    "gcc": "ok",

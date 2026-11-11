@@ -25,11 +25,18 @@ def main():
         if r.returncode != 0:
             print('skip: the plugin does not build here'); return 0
         out = os.path.join(td, 't.s')
-        r = subprocess.run([cxx, '-mabi=ilp32', '-std=gnu++17', '-O2', '-fPIC', '-fplugin=' + r.stdout.strip().splitlines()[-1],
+        # the header as a whole drags in sse2neon (its inline bodies are rows too): take its declarations of the lifted forms
+        hdr = open(os.path.join(HERE, '..', '..', 'shim', 'include', 'fnvnx_compat.h')).read().splitlines()
+        part = [l for l in hdr if (l.endswith(';') and 'fnvnx_lifted' in l) or re.match(r'#define (__try|__except|__finally|__leave|_exception_|GetException)', l)]
+        decl = [l for l in part if not l.startswith('#define')]
+        open(os.path.join(td, 'fnvnx_seh_part.h'), 'w').write('extern "C" {\n' + '\n'.join(decl) + '\n}\n' + '\n'.join(l for l in part if l.startswith('#define')) + '\n')
+        r = subprocess.run([cxx, '-mabi=ilp32', '-std=gnu++17', '-I' + td, '-O2', '-fPIC', '-fplugin=' + r.stdout.strip().splitlines()[-1],
                             '-S', '-o', out, os.path.join(HERE, 'test_pi.cpp')], capture_output=True, text=True)
         if r.returncode != 0:
             print('FAIL compiles', r.stderr[:2000]); return 1
         s = open(out).read()
+        subprocess.run([cxx, '-mabi=ilp32', '-std=gnu++17', '-O2', '-fPIC', '-c', '-o', out.replace('t.s', 't.o'), out], capture_output=True)
+        nm = subprocess.run(['nm', '-u', out.replace('t.s', 't.o')], capture_output=True, text=True).stdout
     s2 = s[s.index('.fnvnx.argorder'):]
     s2 = s2[:s2.index('.popsection')]
     sec = s[s.index('.fnvnx.n3'):]
@@ -71,6 +78,13 @@ def main():
         ('_ZN2KED2Ev', ''): ['argorder', '', '2KE'],
         ('_ZN2KED1Ev', 'alias'): ['argorder', '', '2KE'],
         ('_ZN1KD2Ev', ''): ['ok', '', '1K'],
+        ('_Z3sx1i', ''): ['seh', '', ''],                              # SEH-PI: the callee's attribute, not its name
+        ('_Z3sx2i', ''): ['seh', '', ''],
+        ('_Z3sx3i', ''): ['ok', '', ''],
+        ('_ZL3sh1i', 'inline'): ['seh', '', ''],
+        ('_Z3sx4i', ''): ['ok', '_ZL3sh1i', ''],
+        ('_Z2dbi', ''): ['int3', '', ''],
+        ('_Z3ao1i', ''): ['argorder', '', '2S1'],
         ('_ZN1KC1Ev', 'alias'): ['ok', '', '1K'],                      # the same body under its other symbol
         ('_ZN1KD1Ev', 'alias'): ['ok', '', '1K'],
     }
@@ -90,6 +104,10 @@ def main():
     if ao != wantao:
         fails += 1
         print('FAIL argorder rows', ao)
+    for w in ('fnvnx_seh_try', 'fnvnx_seh_except', 'fnvnx_seh_finally', '__debugbreak'):
+        if not re.search(r'\sU ' + w + r'$', nm, re.M):
+            fails += 1
+            print('FAIL undefined reference to', w)
     print('test_pi: %s' % ('FAILED %d' % fails if fails else 'ok'))
     return 1 if fails else 0
 
