@@ -50,12 +50,54 @@ extern "C" { void fnvl_call(struct cpu*, u32 target); void fnvl_tail(struct cpu*
    sum into the 64-bit addressing mode (uxtw x0,w0; ldr [x0,#64]), which does not wrap; the empty asm makes the 32-bit
    sum a value of its own, so every access uses the wrapped address (test/addrwrap.py). */
 static inline __attribute__((always_inline)) unsigned long P(u32 a){ __asm__("" : "+r"(a)); return (unsigned long)a; }
-#define M8(a) (*(u8a*)P(a))
-#define M16(a) (*(u16a*)P(a))
-#define M32(a) (*(u32a*)P(a))
-#define M64(a) (*(u64a*)P(a))
-#define MF32(a) (*(f32a*)P(a))
-#define MF64(a) (*(f64a*)P(a))
+/* Memory ordering (README R9). x86 is TSO; AArch64 is weakly ordered and guest threads run on separate cores. Rule, for every guest access:
+     aligned    load = ldar, store = stlr (sequentially consistent, stronger than TSO);
+     unaligned  load = ldr + dmb ishld, store = dmb ishst + str (ldar/stlr fault on a misaligned address): the load is ordered before every later
+                access, every earlier store before the store; earlier loads are already ordered by their own acquire / dmb ishld.
+   The address is the wrapped guest address in a register of its own (P), so the access is base-only. Host accesses (struct cpu through x27, C locals
+   through sp) are private to the thread and stay plain. M8..MX yield an accessor: conversion to the value type loads, assignment stores. */
+template<class T> static inline __attribute__((always_inline)) T um_ld(unsigned long p){ T v; __builtin_memcpy(&v,(const void*)p,sizeof v); return v; }   /* a plain load / store at any alignment */
+template<class T> static inline __attribute__((always_inline)) void um_st(unsigned long p,T v){ __builtin_memcpy((void*)p,&v,sizeof v); }
+template<class T> struct GM { unsigned long p;
+  __attribute__((always_inline)) operator T() const { if(p&(sizeof(T)-1)){ T v=um_ld<T>(p); __asm__ volatile("dmb ishld" ::: "memory"); return v; } return __atomic_load_n((T*)p,__ATOMIC_SEQ_CST); }
+  __attribute__((always_inline)) T operator=(T v) const { if(p&(sizeof(T)-1)){ __asm__ volatile("dmb ishst" ::: "memory"); um_st<T>(p,v); } else __atomic_store_n((T*)p,v,__ATOMIC_SEQ_CST); return v; }
+  __attribute__((always_inline)) T operator=(const GM &o) const { return *this=(T)o; } };
+template<class F,class T> struct GMF { unsigned long p;      /* a float / double cell: the same access on its bit pattern */
+  __attribute__((always_inline)) operator F() const { union{ T u; F f; } x; x.u=(T)GM<T>{p}; return x.f; }
+  __attribute__((always_inline)) F operator=(F v) const { union{ T u; F f; } x; x.f=v; GM<T>{p}=x.u; return v; }
+  __attribute__((always_inline)) F operator=(const GMF &o) const { return *this=(F)o; } };
+#define M8(a) (GM<u8>{P(a)})
+#define M16(a) (GM<u16>{P(a)})
+#define M32(a) (GM<u32>{P(a)})
+#define M64(a) (GM<u64>{P(a)})
+#define MF32(a) (GMF<float,u32>{P(a)})
+#define MF64(a) (GMF<double,u64>{P(a)})
+/* LOCK-prefixed instructions and XCHG with memory (SDM Vol 2 "LOCK", "XCHG"): the instruction is one atomic read-modify-write of its memory operand.
+   Rule (fnvlift/core.py lock mode): the instruction body runs on a private copy of the operand (LK8..LK64: the first use loads the cell, a store
+   changes the copy), then LK_COMMIT replaces the cell by the copy iff it still holds the loaded value (ldaxr/stlxr compare-and-swap); if not, the
+   registers and flags are put back and the body runs again on the new value. The commit point is the instruction's place in the total order of
+   locked operations; `dmb ish` after it makes it a full barrier like a locked x86 instruction. A misaligned operand (x86 locks a split operand,
+   ldaxr faults) runs between acquire and release of the one global spin lock fnvnx_split_lock, the same word the native Interlocked code uses
+   (docs/ORDERING.md ATOMIC-UNALIGNED); assumption stated there: a cell is not updated by an aligned and a misaligned locked access at once. */
+extern "C" { extern volatile u32 fnvnx_split_lock; }
+template<class T> struct LKS { unsigned long p; T o, n; u32 st; };
+template<class T> struct LKP { LKS<T> *s; unsigned long p;
+  __attribute__((always_inline)) operator T() const { if(!s->st){ s->p=p; s->st=1;
+      if(p&(sizeof(T)-1)){ while(__atomic_exchange_n((u32*)&fnvnx_split_lock,1u,__ATOMIC_SEQ_CST)){} s->o=um_ld<T>(p); } else s->o=__atomic_load_n((T*)p,__ATOMIC_SEQ_CST);
+      s->n=s->o; } return s->n; }
+  __attribute__((always_inline)) T operator=(T v) const { (void)(T)*this; s->n=v; return v; } };
+template<class T> static inline __attribute__((always_inline)) bool lk_commit(LKS<T> &s){
+  if(!s.st) return true;
+  if(s.p&(sizeof(T)-1)){ um_st<T>(s.p,s.n); __atomic_store_n((u32*)&fnvnx_split_lock,0u,__ATOMIC_SEQ_CST); __asm__ volatile("dmb ish" ::: "memory"); return true; }
+  T e=s.o; bool ok=__atomic_compare_exchange_n((T*)s.p,&e,s.n,0,__ATOMIC_SEQ_CST,__ATOMIC_SEQ_CST);
+  if(ok) __asm__ volatile("dmb ish" ::: "memory"); else s.st=0;
+  return ok; }
+#define LK_BEGIN(n) LKS<u##n> lk_={0,0,0,0}; const u32 lkr_[8]={eax,ecx,edx,ebx,esp,ebp,esi,edi}, lkf_[6]={cf,zf,sf,of,pf,af}
+#define LK_RESTORE do{ eax=lkr_[0];ecx=lkr_[1];edx=lkr_[2];ebx=lkr_[3];esp=lkr_[4];ebp=lkr_[5];esi=lkr_[6];edi=lkr_[7]; cf=lkf_[0];zf=lkf_[1];sf=lkf_[2];of=lkf_[3];pf=lkf_[4];af=lkf_[5]; }while(0)
+#define LK8(a) (LKP<u8>{&lk_,P(a)})
+#define LK16(a) (LKP<u16>{&lk_,P(a)})
+#define LK32(a) (LKP<u32>{&lk_,P(a)})
+#define LK64(a) (LKP<u64>{&lk_,P(a)})
 #define PAR(x) (!(__builtin_popcount((x)&0xffu)&1))
 #define DECL u32 cf=0,zf=0,sf=0,of=0,pf=0,af=0,df=0; u32 c0=0,c2=0,c3=0; xmm_t x0,x1,x2,x3,x4,x5,x6,x7; (void)af;(void)pf;(void)df;(void)c2
 #define SYNC_IN do{ FL_IN; }while(0)
@@ -69,7 +111,11 @@ static inline __attribute__((always_inline)) unsigned long P(u32 a){ __asm__("" 
 #define MMX_TOUCH() do{}while(0)
 extern "C" { u32 fnvl_rcp32(u32 bits); u32 fnvl_rsqrt32(u32 bits); }   /* reference-CPU tables, supplied by the runtime owner */
 typedef xmm_t __attribute__((aligned(1))) xmm_ua;
-#define MX(a) (*(xmm_ua*)P(a))
+struct GMX { unsigned long p;        /* a 16-byte cell: two 8-byte accesses under the rule above */
+  __attribute__((always_inline)) operator xmm_t() const { xmm_t r; r.q[0]=(u64)GM<u64>{p}; r.q[1]=(u64)GM<u64>{p+8}; return r; }
+  __attribute__((always_inline)) xmm_t operator=(const xmm_t &v) const { GM<u64>{p}=v.q[0]; GM<u64>{p+8}=v.q[1]; return v; }
+  __attribute__((always_inline)) xmm_t operator=(const GMX &o) const { return *this=(xmm_t)o; } };
+#define MX(a) (GMX{P(a)})
 static inline xmm_t mmx_x(u64 v){ xmm_t r; r.q[0]=v; r.q[1]=0; return r; }
 template<class T> struct FX;
 template<> struct FX<float>{ typedef u32 U; static const U S=0x80000000u, E=0x7f800000u, M=0x7fffffu, Q=0x400000u; };

@@ -521,7 +521,7 @@ def main():
     subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-I', os.path.join(a.lifter, 'rt'), '-c', os.path.join(a.lifter, 'rt', 'x87.c'), '-o', a.work + '/x87.o'])
     # W14: the reference CPU model (rt/cpumodel.c) linked into the ARM side with a counter as the host clock (+1000 ns per call), and built for the host
     # (ctypes) as the expected values of cpuid. fnvl_rdtsc is checked against its definition, ticks = ns * 21 / 10, through the counter.
-    open(a.work + '/hostticks.c', 'w').write('unsigned long long fnvl_host_ticks_ns(void){ static unsigned long long n; return n += 1000; }\n')
+    open(a.work + '/hostticks.c', 'w').write('volatile unsigned fnvnx_split_lock;\nunsigned long long fnvl_host_ticks_ns(void){ static unsigned long long n; return n += 1000; }\n')
     subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-c', a.work + '/hostticks.c', '-o', a.work + '/hostticks.o'])
     subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-c', os.path.join(a.lifter, 'rt', 'cpumodel.c'), '-o', a.work + '/cpumodel.o'])
     open(a.work + '/hostshim.c', 'w').write('unsigned long long fnvl_host_ticks_ns(void){ return 0; }\n')

@@ -72,6 +72,7 @@ class Ctx:
         self.callrets = []
         self.usesfs = False
         self.kinds = set()
+        self.macc = 'M'       # memory accessor prefix of rd/wr: M, or LK inside a locked instruction (lift2)
         self.selfcalls = {}
         self.noentry = set()                     # direct targets (calls, jumps, fall-throughs) routed to the dispatcher because they are not entries (meta; check (c): all outside the executable sections)
         self.calls, self.tails = set(), set()    # direct call targets / jumps to entries outside the function (meta, closure of the bench)
@@ -118,7 +119,7 @@ class Ctx:
         if op.type == X.X86_OP_REG:
             b, sh, bits = reg(ins.reg_name(op.reg))
             return b if bits == 32 else ('((%s>>%d)&%s)' % (b, sh, MASK[bits]))
-        return 'M%d(%s)' % (s, self.ea(ins, op))
+        return '%s%d(%s)' % (self.macc, s, self.ea(ins, op))
 
     def wr(self, ins, op, v):
         if op.type == X.X86_OP_REG:
@@ -127,7 +128,7 @@ class Ctx:
                 return '%s=(%s);' % (b, v)
             mk = (1 << bits) - 1
             return '%s=(%s&~0x%xu)|(((u32)(%s)&0x%xu)<<%d);' % (b, b, mk << sh, v, mk, sh)
-        return 'M%d(%s)=(%s);' % (op.size * 8, self.ea(ins, op), v)
+        return '%s%d(%s)=(%s);' % (self.macc, op.size * 8, self.ea(ins, op), v)
 
     def zsp(self, s):
         return 'zf=(r&%s)==0; sf=(r>>%d)&1; pf=PAR(r);' % (MASK[s], s - 1)
@@ -317,12 +318,14 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
         if m.startswith('rep ') or m.startswith('repe ') or m.startswith('repne '):
             pfx, m = m.split(' ', 1)
         bad_lock = False
+        locked = False
         w = m.split(' ')
         if 'lock' in w[:-1] and all(x + ' ' in f_sys.STRIP for x in w[:-1]):      # LOCK among the leading prefix words (capstone: `lock add`, `xacquire lock add`): SDM Vol 2 "LOCK"
             m = w[-1]
             bad_lock = not f_sys.lock_ok(ins, m)
             if not bad_lock:
                 kinds.add('lock')
+                locked = True
         cx.a, cx.nxt, cx.m, cx.pfx, cx.ops = a, nxt, m, pfx, ops
         cx.s = ops[0].size * 8 if ops else 32
         cx.term = False
@@ -332,6 +335,14 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
         cx.modrm = ins.modrm
         if bad_lock:
             f_sys.ud_site(cx)                  # LOCK on an instruction that cannot take it (or with a register destination): #UD
+        elif f_sys.locked(ins, m, locked):
+            # R9 atomic rule (rt/fnvl.h LK_*): the body runs on a private copy of the memory operand, the commit is a compare-and-swap, a lost race restores the registers and flags and runs it again
+            gs_guard(cx, ins)
+            cx.macc = 'LK'
+            em('{ LK_BEGIN(%d); lk_%x: ;' % (f_sys.lock_size(ins), a))
+            dispatch(cx, ins)
+            cx.macc = 'M'
+            em('if(!lk_commit(lk_)){ LK_RESTORE; goto lk_%x; } }' % a)
         else:
             gs_guard(cx, ins)
             dispatch(cx, ins)
