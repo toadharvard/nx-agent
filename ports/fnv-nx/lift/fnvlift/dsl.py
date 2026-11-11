@@ -153,6 +153,22 @@ class Emit:
         if o == 'load': return '((u32)M%d(%s))' % (w, a[0])
         raise ValueError(o)
 
+class InlineEmit(Emit):
+    """Emit for code inlined into a lifted function (Form.to_c_inline): the shifts are expanded in place (the lifter's runtime has no shl_/lshr_/ashr_
+    templates), so the count (and the shifted value of ashr) is named once, as a temporary, when it is not a constant or a variable."""
+    def __init__(s, roots, force=()):
+        super().__init__(roots)
+        pick = [n.a[1] for n in s.order if n.op in ('shl', 'lshr', 'ashr')] + [n.a[0] for n in s.order if n.op == 'ashr'] + list(force)
+        for n in pick:
+            if n.op not in ('const', 'var') and id(n) not in s.names: s.names[id(n)] = 't%d' % len(s.names)
+    def ex(s, n):
+        if n.op not in ('shl', 'lshr', 'ashr'): return super().ex(n)
+        w = n.w; M = K(mask(w), w); t = T(w); a, c = s.ref(n.a[0]), s.ref(n.a[1]); Z = '(%s)0' % t
+        if n.op == 'shl': e = '(%s >= %du ? %s : (%s)(%s << %s))' % (c, w, Z, t, a, c); return e if w in (32, 64) else '(%s & %s)' % (e, M)
+        if n.op == 'lshr': return '(%s >= %du ? %s : (%s)(%s >> %s))' % (c, w, Z, t, a, c)
+        sg = '(((%s >> %d) & 1) != 0)' % (a, w - 1)
+        return '(%s >= %du ? (%s ? %s : %s) : (%s)((%s >> %s) | (%s ? (%s ^ (%s >> %s)) : %s)))' % (c, w, sg, M, Z, t, a, c, sg, M, M, c, Z)
+
 PRELUDE = '''typedef unsigned char u8; typedef unsigned short u16; typedef unsigned int u32; typedef unsigned long long u64;
 template<class T> static inline T shl_(T a, T c, unsigned w) { return c >= w ? (T)0 : (T)(a << c); }
 template<class T> static inline T lshr_(T a, T c, unsigned w) { return c >= w ? (T)0 : (T)(a >> c); }
@@ -224,6 +240,23 @@ class Form:
             flo = g(flo, z3.BitVec('flo', 32)); mem = g(mem, mem_array()); eip = g(eip, z3.BitVecVal(s.addr, 32))
         return {'regs': regs, 'flags': flags, 'flo': flo, 'mem': mem, 'eip': eip, 'defined': defined, 'rdefined': rdef, 'fault': ft}
     def writes_unobserved(s): return s.flo is not None or any(f == 'df' for f, _, _ in s.flags)
+    def to_c_inline(s, varc, fault_fn, flo_fn, force=()):
+        """C lines of ONE instruction to be placed inside a block of a lifted function: -> (lines, ref) where ref(node) is the C text of a node
+        usable AFTER the lines (a named temporary or an expression over the `in_` snapshots).  Order = the Form's: snapshots of the used pre-state
+        (varc(name) -> the C expression of a pre-state variable), temporaries for loads and shared sub-expressions (and the `force`d nodes), faults
+        (fault_fn(code, cond_node, ref) -> C line), register writes, flag writes (unconditional, also with `when`; an undefined flag gets none),
+        the other-EFLAGS write (flo_fn(ref of the value) -> C line), stores.  The eip node is not emitted: the caller derives the control transfer from it."""
+        e = InlineEmit(s.roots(), force); L = []
+        for u in sorted(e.used): L.append('const u32 in_%s = %s;' % (u, varc(u)))
+        for n in e.order:
+            if id(n) in e.names: L.append('const %s %s = %s;' % (T(n.w), e.names[id(n)], e.ex(n)))
+        for k, c in s.faults: L.append(fault_fn(k, c, e.ref))
+        cw = lambda w: '' if w is None else 'if (%s) ' % e.ref(w)
+        for r, v, w in s.regs: L.append('%s%s = %s;' % (cw(w), r, e.ref(v)))
+        for f, v, w in s.flags: L.append('%s = %s;' % (f, e.ref(v)))     # `when` only bounds the proof obligation: v is a deterministic value (e.g. SHL CF for count >= size)
+        if s.flo is not None: L.append(flo_fn(e.ref(s.flo)))
+        for a, v in s.stores: L.append('M%d(%s) = %s;' % (v.w, e.ref(a), e.ref(v)))
+        return L, e.ref
     def to_c(s, fname):
         e = Emit(s.roots()); L = []
         L.append('static u32 %s(%s) {' % (fname, SIG))
