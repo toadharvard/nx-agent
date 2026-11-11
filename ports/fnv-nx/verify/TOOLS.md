@@ -448,6 +448,36 @@ passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render
 Exit 0 iff the result was published and boot.py exited 0 or 2; 1 otherwise (one-line reason on stderr).
 ```
 
+## farm/runner.sh
+
+```text
+runner.sh - L4 farm job: the after-merge verification of one commit of the trunk. It reports facts; it decides nothing
+and blocks nothing (a commit that a report shows broke something is reverted by the merger).
+
+  [ARTIFACTS=...] bash <checkout>/ports/fnv-nx/farm/runner.sh <commit> <job>[=<arg>[,<arg>...]] ...
+
+Steps:
+ 1 <commit> (40 hex) of the checkout's repository is fetched from its origin when the object is absent, and checked out
+   detached into a fresh directory $FARM_HOME/runner/<commit12>/src. Every job runs there, from the repository root: the
+   code that verifies is the code of the verified commit, never of the checkout that holds this script
+ 2 verify/envcheck.py check of that tree. A mismatch ends the job with exit 1 and nothing is published: a verification
+   outside the declared environment is not a result
+ 3 the jobs, in the order given, each with its arguments. A job name outside the table below is a usage error (exit 1,
+   before step 1). Jobs:
+     oraclecheck[=TEST,...]   python3 -I verify/oraclecheck.py --jobs $RUNNER_JOBS (default: nproc) --out oraclecheck.json
+                              [TEST...]: the declaration of every test file (or of the TESTs named, repo-relative)
+                              against the files its run opens. Result file oraclecheck.json. Exit 0 = every declaration
+                              holds, 2 = at least one does not; any other exit ends the runner with exit 1
+ 4 publish the orphan commit {report.json, one result file and one <job>.log per job} to branch
+   l4-verify/after-merge/<commit12> of the artifacts repository (forced: the newest run of a commit replaces the older)
+   report.json ("fnvnx-aftermerge/1"): commit, env_id, host_cpu_model, jobs [{name, args, rc, seconds, result}]
+ 5 final line: AFTERMERGE commit=<commit12> jobs=<n> violated=<names joined by ","|none> published=<branch>@<commit12>
+   exit 0 = every job exited 0; 2 = at least one job reports a violation (the result is published either way);
+   1 = usage, environment, tool or publishing error
+Env: FARM_HOME (~/fnvnx-farm), ARTIFACTS (/home/user/fnv-nx-build; a checkout whose origin is the artifacts repository),
+     ARTIFACTS_URL (default: that checkout's origin), RUNNER_JOBS.
+```
+
 ## farm/setup_verdict_env.sh
 
 ```text
