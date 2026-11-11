@@ -15,20 +15,95 @@ extern "C" HINSTANCE ShellExecuteA(HWND h, LPCSTR op, LPCSTR file, LPCSTR params
     return (HINSTANCE)(uintptr_t)31; /* SE_ERR_NOASSOC (<= 32 means failure) */
 }
 
+/* SHGetFolderPathA. The CSIDL table is the Windows 7 default location of every folder id 0x00-0x3e (the shell's
+ * known-folder defaults) in the ENV F2 profile tree; ENV P4/P1 make this a 32-bit Windows 7, so the x86 variants of the
+ * system and Program Files folders equal the base ones. "%U" is the profile directory of the token's user. A null
+ * path marks a virtual folder (no file-system path: E_FAIL); an id not in the table is not a CSIDL (E_INVALIDARG).
+ * Flags (the high byte): CREATE creates the folder (and its parents), DONT_VERIFY returns the path unchecked,
+ * NO_ALIAS and PER_USER_INIT do not change the path (no alias or lazily initialised folder exists here). Without
+ * either, a folder that does not exist gives S_FALSE (with its path). Tokens: NULL is the current user, -1 the default
+ * user profile (C:\Users\Default); any other value is not a token handle (E_FAIL). SHGFP_TYPE_CURRENT and _DEFAULT are the
+ * same location: nothing is redirected. */
+#define SH_RM "%U\\AppData\\Roaming"
+#define SH_SM SH_RM "\\Microsoft\\Windows\\Start Menu"
+#define SH_PD "C:\\ProgramData"
+#define SH_PDSM SH_PD "\\Microsoft\\Windows\\Start Menu"
+#define SH_PUB "C:\\Users\\Public"
+static const struct { unsigned char id; const char *path; } g_csidl[] = {
+    { 0x00, "%U\\Desktop" }, { 0x01, NULL }, { 0x02, SH_SM "\\Programs" }, { 0x03, NULL }, { 0x04, NULL },
+    { 0x05, "%U\\Documents" }, { 0x06, "%U\\Favorites" }, { 0x07, SH_SM "\\Programs\\Startup" },
+    { 0x08, SH_RM "\\Microsoft\\Windows\\Recent" }, { 0x09, SH_RM "\\Microsoft\\Windows\\SendTo" }, { 0x0a, NULL },
+    { 0x0b, SH_SM }, { 0x0c, "%U\\Documents" }, { 0x0d, "%U\\Music" }, { 0x0e, "%U\\Videos" },
+    { 0x10, "%U\\Desktop" }, { 0x11, NULL }, { 0x12, NULL }, { 0x13, SH_RM "\\Microsoft\\Windows\\Network Shortcuts" },
+    { 0x14, "C:\\Windows\\Fonts" }, { 0x15, SH_RM "\\Microsoft\\Windows\\Templates" },
+    { 0x16, SH_PDSM }, { 0x17, SH_PDSM "\\Programs" }, { 0x18, SH_PDSM "\\Programs\\Startup" },
+    { 0x19, SH_PUB "\\Desktop" }, { 0x1a, SH_RM }, { 0x1b, SH_RM "\\Microsoft\\Windows\\Printer Shortcuts" },
+    { 0x1c, "%U\\AppData\\Local" }, { 0x1d, NULL }, { 0x1e, NULL }, { 0x1f, SH_PUB "\\Favorites" },
+    { 0x20, "%U\\AppData\\Local\\Microsoft\\Windows\\Temporary Internet Files" },
+    { 0x21, SH_RM "\\Microsoft\\Windows\\Cookies" }, { 0x22, "%U\\AppData\\Local\\Microsoft\\Windows\\History" },
+    { 0x23, SH_PD }, { 0x24, "C:\\Windows" }, { 0x25, "C:\\Windows\\system32" }, { 0x26, "C:\\Program Files" },
+    { 0x27, "%U\\Pictures" }, { 0x28, "%U" }, { 0x29, "C:\\Windows\\system32" }, { 0x2a, "C:\\Program Files" },
+    { 0x2b, "C:\\Program Files\\Common Files" }, { 0x2c, "C:\\Program Files\\Common Files" },
+    { 0x2d, SH_PD "\\Microsoft\\Windows\\Templates" }, { 0x2e, SH_PUB "\\Documents" },
+    { 0x2f, SH_PDSM "\\Programs\\Administrative Tools" }, { 0x30, SH_SM "\\Programs\\Administrative Tools" },
+    { 0x31, NULL }, { 0x35, SH_PUB "\\Music" }, { 0x36, SH_PUB "\\Pictures" }, { 0x37, SH_PUB "\\Videos" },
+    { 0x38, "C:\\Windows\\Resources" }, { 0x39, "C:\\Windows\\Resources\\1033" }, { 0x3a, SH_PD "\\OEM Links" },
+    { 0x3b, "%U\\AppData\\Local\\Microsoft\\Windows\\Burn\\Burn" }, { 0x3d, NULL }, { 0x3e, "C:\\Users" },
+};
+
 extern "C" HRESULT SHGetFolderPathA(HWND h, int csidl, HANDLE tok, DWORD flags, LPSTR out)
 {
-    W32_UNUSED(h); W32_UNUSED(tok); W32_UNUSED(flags);
-    const char *sub;
-    switch (csidl & 0xFF) {
-    case CSIDL_PERSONAL: sub = "\\Documents"; break;
-    case CSIDL_APPDATA: sub = "\\AppData\\Roaming"; break;
-    case CSIDL_LOCAL_APPDATA: sub = "\\AppData\\Local"; break;
-    case CSIDL_COMMON_APPDATA: snprintf(out, MAX_PATH, "C:\\ProgramData"); return S_OK;
-    default: out[0] = 0; return E_FAIL;
+    W32_UNUSED(h);
+    W32_UNUSED(flags);   /* SHGFP_TYPE_CURRENT / _DEFAULT: one location */
+    if (!out)
+        return E_INVALIDARG;
+    out[0] = 0;
+    unsigned id = (unsigned)csidl & 0xFF, fl = (unsigned)csidl & 0xFF00u;
+    const char *pat = NULL;
+    bool known = false;
+    for (size_t i = 0; i < sizeof g_csidl / sizeof *g_csidl; i++)
+        if (g_csidl[i].id == id) {
+            pat = g_csidl[i].path;
+            known = true;
+            break;
+        }
+    if (!known)
+        return E_INVALIDARG;
+    uintptr_t t = (uintptr_t)tok;
+    if (t != 0 && t != (uintptr_t)-1 && t != 0xFFFFFFFFu)
+        return E_FAIL;          /* no such token handle */
+    if (!pat)
+        return E_FAIL;          /* a virtual folder */
+    const char *user = (t == 0) ? W32_USER_DIR : "C:\\Users\\Default";
+    char path[MAX_PATH];
+    size_t o = 0;
+    for (const char *p = pat; *p && o + 1 < sizeof path; p++) {
+        if (p[0] == '%' && p[1] == 'U') {
+            o += (size_t)snprintf(path + o, sizeof path - o, "%s", user);
+            p++;
+        } else
+            path[o++] = *p;
     }
-    snprintf(out, MAX_PATH, "%s%s", W32_USER_DIR, sub);
-    if (csidl & CSIDL_FLAG_CREATE)
-        CreateDirectoryA(out, NULL);
+    path[o < sizeof path ? o : sizeof path - 1] = 0;
+    snprintf(out, MAX_PATH, "%s", path);
+    if (fl & 0x4000u /* CSIDL_FLAG_DONT_VERIFY */)
+        return S_OK;
+    DWORD a = GetFileAttributesA(path);
+    if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY))
+        return S_OK;
+    if (!(fl & 0x8000u /* CSIDL_FLAG_CREATE */))
+        return S_FALSE;
+    for (char *p = path + 3; ; p++) {   /* "C:\" exists; create each component */
+        if (*p == '\\' || !*p) {
+            char c = *p;
+            *p = 0;
+            if (!CreateDirectoryA(path, NULL) && GetLastError() != ERROR_ALREADY_EXISTS)
+                return E_FAIL;
+            *p = c;
+            if (!c)
+                break;
+        }
+    }
     return S_OK;
 }
 
