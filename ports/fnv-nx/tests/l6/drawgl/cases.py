@@ -312,9 +312,8 @@ def make(asm_fn):
         shade_case("shade_gouraud_tt_" + psk, "tt", psk, [GOURAUD])
         shade_case("shade_gouraud_then_flat_tt_" + psk, "tt", psk, [GOURAUD, FLAT])
         shade_case("shade_flat_then_gouraud_tt_" + psk, "tt", psk, [FLAT, GOURAUD])
-        if psk != "ps11":      # ps_1_1 `texcoord t0` reads 0 on the translator today (independent of the shade mode); the SM1 colour path is covered by the colour-only cases
-            shade_case("shade_flat_texcoord_tt_" + psk, "tt", psk, [FLAT], tex=True)
-            shade_case("shade_flat_texcoord_ft_" + psk, "ft", psk, [FLAT], tex=True)
+        shade_case("shade_flat_texcoord_tt_" + psk, "tt", psk, [FLAT], tex=True)
+        shade_case("shade_flat_texcoord_ft_" + psk, "ft", psk, [FLAT], tex=True)
     shade_case("shade_gouraud_then_flat_ft_ps2", "ft", "ps2", [GOURAUD, FLAT]); shade_case("shade_flat_then_gouraud_ft_ps2", "ft", "ps2", [FLAT, GOURAUD])
     shade_case("shade_flat_tf", "tf", "ps2", [FLAT]); shade_case("shade_gouraud_then_flat_tf", "tf", "ps2", [GOURAUD, FLAT]); shade_case("shade_flat_then_gouraud_tf", "tf", "ps2", [FLAT, GOURAUD])
     # ---------------------------------------------------------------- k: the SM1 texture-address opcodes that read tN as DATA (texcoord t0 of ps_1_1..1_3, texcrd r0, t0 of ps_1_4): the register holds the interpolated texture coordinate of stage 0 clamped to [0, 1], w = 1.  mov_d2 halves it, so both the clamp and w are observable on the 8-bit target
