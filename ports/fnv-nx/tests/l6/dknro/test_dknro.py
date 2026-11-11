@@ -26,7 +26,7 @@ ENV["PATH"] = ENV["FNVNX_TC"] + "/bin:" + ENV["PATH"]
 DK = ENV["FNVNX_DK"]
 BIN = os.path.join(DK, "dkp", "devkitA64", "bin")
 NM, OBJDUMP, GCC = [os.path.join(BIN, "aarch64-none-elf-" + t) for t in ("nm", "objdump", "gcc")]
-PENDING = {"nxdk_present_compose"}   # symbol of nx/dk_present.c, which lands later from another worker
+PENDING = set()
 EMBEDDER = ["nxdk_guest_ptr", "nxdk_on_present", "nxdk_shader_pack"]
 
 fails, nchecks = [], 0
