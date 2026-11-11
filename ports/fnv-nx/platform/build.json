@@ -67,7 +67,8 @@
   "/ext/a64/aarch64-none-elf/include/c++/15.2.0/backward",
   "/ext/gcc/lib/gcc/aarch64-linux-gnu/13/include",
   "/ext/a64/aarch64-none-elf/include",
-  "/ext/libnx/nx/include"
+  "/ext/libnx/nx/include",
+  "/ext/libnx/nx/external/bsd/include"
  ],
  "units": "all",
  "generated": [
