@@ -156,7 +156,7 @@ def run(arg):
                 elif (m == 'jmp' or (m[0] == 'j' and m != 'jecxz') or m in JMP) and o[0].type == X.X86_OP_IMM:
                     t = o[0].imm & M32
                     if not lo <= t < hi: ts.setdefault(t, a_)
-                elif m == 'jecxz' and not lo <= (o[0].imm & M32) < hi: jx.add(a_)
+                elif m == 'jecxz' and not lo <= (o[0].imm & M32) < hi: jx.add(a_); ts.setdefault(o[0].imm & M32, a_)      # jecxz leaving the range: a direct jump out (f_sys, f_flow.jump_out)
                 if m not in ('jmp', 'ret', 'retf', 'hlt', 'ud2') and not (m == 'int3' and a_ + g.size >= hi) and a_ + g.size not in ins and a_ + g.size not in bad:      # explore's own stop rule: the path falls out of what was decoded
                     ts.setdefault(a_ + g.size, a_); ft.add(a_ + g.size)         # a fall-through is a control transfer to its successor, like `jmp nxt` (f_flow.jump_out)
             lcache[k] = (cs, ts, jx, ft)

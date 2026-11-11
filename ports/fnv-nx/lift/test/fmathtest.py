@@ -775,7 +775,7 @@ def gen_exp(r, N):
     return [x for x in xs if math.isfinite(x) and x != 0]
 
 
-def gen_log(r, N):
+def gen_ln(r, N):
     xs = [2.0, 4.0, 0.5, 3.0, 10.0, 1e-300, 5e-324, 1.7976931348623157e308, 2.0 ** -1022, 1.0000000000000002, 0.9999999999999999, 1.5, 0.75, 1.4142135623730951, 0.7071067811865476, 2.718281828459045, 1e10]
     for e in range(-1074, 1024):
         for d in (-1, 0, 1):
@@ -924,7 +924,7 @@ def gen_pow(r, N):
     return out[:max(N, 0)] if len(out) >= N else out
 
 
-GENS_NEW = {'acos': gen_asin, 'asin': gen_asin, 'atan': gen_atan, 'exp': gen_exp, 'log': gen_log, 'cosh': lambda r, N: gen_sinh(r, N, 'cosh'), 'sinh': lambda r, N: gen_sinh(r, N, 'sinh'),
+GENS_NEW = {'acos': gen_asin, 'asin': gen_asin, 'atan': gen_atan, 'exp': gen_exp, 'log': gen_ln, 'cosh': lambda r, N: gen_sinh(r, N, 'cosh'), 'sinh': lambda r, N: gen_sinh(r, N, 'sinh'),
             'tanh': lambda r, N: gen_sinh(r, N, 'tanh'), 'pow': gen_pow}
 
 

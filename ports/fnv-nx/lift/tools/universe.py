@@ -374,7 +374,7 @@ def cl_targets(a, kids):
             elif (m == 'jmp' or (m[0] == 'j' and m != 'jecxz') or m in ('loop', 'loope', 'loopne')) and o[0].type == X.X86_OP_IMM:
                 t = o[0].imm & 0xffffffff
                 if not lo <= t < hi: ts.add(t)
-            elif m == 'jecxz' and not lo <= (o[0].imm & 0xffffffff) < hi: jx.add(x)
+            elif m == 'jecxz' and not lo <= (o[0].imm & 0xffffffff) < hi: jx.add(x); ts.add(o[0].imm & 0xffffffff)      # jecxz leaving the range: a direct jump out (f_sys, f_flow.jump_out)
             if m not in ('jmp', 'ret', 'retf', 'hlt', 'ud2') and not (m == 'int3' and x + g.size >= hi) and x + g.size not in ins and x + g.size not in bad:       # explore's own stop rule: a fall-out is a control transfer to the successor (f_flow.jump_out)
                 ts.add(x + g.size); cl_ft.add((a, x + g.size))
         cl_cache[key] = (cs, ts, jx)
