@@ -38,8 +38,8 @@ class Image:
             for r in self.relocs:
                 o = self.off(r)
                 if o is not None: struct.pack_into('<I', d, o, (struct.unpack_from('<I', d, o)[0] + delta) & 0xffffffff)
-            self.relocs = [r + delta for r in self.relocs]
-            self.secs = [(n, va + delta, vs, ro, rs) for n, va, vs, ro, rs in self.secs]
+            self.relocs = [(r + delta) & 0xffffffff for r in self.relocs]
+            self.secs = [(n, (va + delta) & 0xffffffff, vs, ro, rs) for n, va, vs, ro, rs in self.secs]
             self.base = base
         self.relocs.sort()
         self.rset = set(self.relocs)

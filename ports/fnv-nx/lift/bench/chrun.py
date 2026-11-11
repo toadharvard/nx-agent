@@ -256,6 +256,7 @@ class Arm(T.World):
         elif k == 'fnvl_raise_ud': s.ev = 'fnvl_raise_ud(%x)' % (uc.reg_read(UC_ARM64_REG_X0) & 0xffffffff); uc.emu_stop()
         elif k == 'fnvl_os_unhandled':
             r = uc.reg_read(UC_ARM64_REG_X0) & 0xffffffff; s.ensure(r, 16, False); s.ev = 'unhandled(%x@%x)' % tuple(struct.unpack('<2I', bytes(uc.mem_read(r, 4)) + bytes(uc.mem_read(r + 12, 4)))); uc.emu_stop()
+        elif k == 'fnvl_raise_av': s.ev = 'fnvl_raise_av(%d,%x,%x)' % tuple(uc.reg_read(r_) & 0xffffffff for r_ in (UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2)); uc.emu_stop()
         elif k == 'fnvl_raise': s.ev = 'fnvl_raise(%d,%x)' % (uc.reg_read(UC_ARM64_REG_X0) & 0xffffffff, uc.reg_read(UC_ARM64_REG_X1) & 0xffffffff); uc.emu_stop()
         i = bisect.bisect_right(s.rng, a) - 1
         if i >= 0 and a < s.im.rt[s.rng[i]][1] and s.im.rt[s.rng[i]][0] == 'fnvl_dispatch': s.nd += 1
