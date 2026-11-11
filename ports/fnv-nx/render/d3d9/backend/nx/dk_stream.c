@@ -227,10 +227,14 @@ static void replay(const uint32_t* w) {
     }
 }
 
+/* S6: the one pass-state reset, used at the start of a SUBMIT and again after its queue wait, so that inPass is 1 only between a BeginPass op and the
+ * end of that pass within the command buffer being recorded; the index binding stays (reference) */
+static void pass_state_reset(void) { nxdk_s.boundState = 0; nxdk_s.inPass = 0; }
+
 /* S1: record, submit, wait for the queue, then the query results, the staging blocks, the temporary images, the command chunks */
 static void execute(const uint32_t* w) {
     nxdk_s.cmd = rec;
-    nxdk_s.boundState = 0; nxdk_s.inPass = 0;   /* S6; the index binding stays */
+    pass_state_reset();
     /* the CPU wrote descriptors, shader code and images since the last list: invalidate the caches that read them */
     nxdk_bind_descriptors(rec);
     dkCmdBufBarrier(rec, DkBarrier_Full, DkInvalidateFlags_Descriptors | DkInvalidateFlags_Shader | DkInvalidateFlags_Image);
@@ -239,6 +243,7 @@ static void execute(const uint32_t* w) {
     nxdk_query_submit_end();
     dkQueueSubmitCommands(nxdk.q, dkCmdBufFinishList(rec));
     dkQueueWaitIdle(nxdk.q);
+    pass_state_reset();   /* no pass exists in deko3d after the wait, whether the stream closed it, left it open or stopped on an error */
     nxdk_query_collect();
     nxdk_stage_free();
     tmp_release_all();

@@ -13,13 +13,13 @@ HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.pat
 BACK = os.path.join(ROOT, "render", "d3d9", "backend"); NXD = os.path.join(BACK, "nx")
 DK = os.environ.get("FNVNX_DK", "/home/user/work/l6/dk")
 FILES = ["dk_stream.c"]
-EXPECT_CHECKS = 178
+EXPECT_CHECKS = 185
 MUST_NAMES = ["init_ok", "init_first_chunk", "shutdown_order", "init_cmdbuf_fail_reported", "init_block_fail_reported", "init_scale_fail_returned", "init_msres_after_scale_once", "shutdown_msres_before_scale", "init_msres_fail_returned", "init_msres_fail_balanced",
               "tmp_released_after_wait", "tmp_not_before_wait", "tmp_several_released_once_after_wait", "tmp_released_at_shutdown", "tmp_refusal_returns_1",
               "tmp_refusal_lists_nothing", "tmp_node_alloc_fail", "tmp_stopped_submit_released", "submit_ok",
               "submit_start_barrier", "submit_order", "submit_recycles_buffer", "stats_written", "cmd_published_only_inside", "present_flag_ignored",
               "wait_frame_zero", "map_op_1", "map_op_27", "map_s6_reset", "map_image_update_routed", "chk_swap_colour_ok", "env_limits", "env_swap_resolves_front",
-              "stop_later_ops_skipped", "stop_recorded_still_submitted", "barrier_kind1", "marker_short", "iu_good", "iu_short", "iu_box_rejected_once",
+              "stop_later_ops_skipped", "pass_open_reset_after_submit", "pass_stop_reset_after_submit", "pass_open_seen_until_wait", "stop_recorded_still_submitted", "barrier_kind1", "marker_short", "iu_good", "iu_short", "iu_box_rejected_once",
               "grow_chunk_sizes", "grow_released_after_wait", "grow_too_big_reported", "grow_block_refused_reported", "grow_listed_released_at_shutdown",
               "frame_draws_reset_new_frame", "submit_null_struct", "submit_bad_stream_address", "opcode_28_reported", "overrun_reported", "no_end_reported"]
 HANDLERS = {"nxdk_submit", "nxdk_wait_frame", "nxdk_stream_init", "nxdk_stream_shutdown", "nxdk_chk_env", "nxdk_op_end", "nxdk_op_barrier", "nxdk_op_marker",
@@ -142,8 +142,8 @@ MUT = [
     ("start barrier dropped", "dk_stream.c", "    dkCmdBufBarrier(rec, DkBarrier_Full, DkInvalidateFlags_Descriptors | DkInvalidateFlags_Shader | DkInvalidateFlags_Image);\n", ""),
     ("descriptors not bound", "dk_stream.c", "    nxdk_bind_descriptors(rec);\n", ""),
     ("no wait for the queue", "dk_stream.c", "    dkQueueWaitIdle(nxdk.q);\n", ""),
-    ("staging released before the wait", "dk_stream.c", "    dkQueueSubmitCommands(nxdk.q, dkCmdBufFinishList(rec));\n    dkQueueWaitIdle(nxdk.q);\n    nxdk_query_collect();\n    nxdk_stage_free();\n",
-     "    nxdk_stage_free();\n    dkQueueSubmitCommands(nxdk.q, dkCmdBufFinishList(rec));\n    dkQueueWaitIdle(nxdk.q);\n    nxdk_query_collect();\n"),
+    ("staging released before the wait", "dk_stream.c", "    dkQueueSubmitCommands(nxdk.q, dkCmdBufFinishList(rec));\n    dkQueueWaitIdle(nxdk.q);\n    pass_state_reset();   /* no pass exists in deko3d after the wait, whether the stream closed it, left it open or stopped on an error */\n    nxdk_query_collect();\n    nxdk_stage_free();\n",
+     "    nxdk_stage_free();\n    dkQueueSubmitCommands(nxdk.q, dkCmdBufFinishList(rec));\n    dkQueueWaitIdle(nxdk.q);\n    pass_state_reset();   /* no pass exists in deko3d after the wait, whether the stream closed it, left it open or stopped on an error */\n    nxdk_query_collect();\n"),
     ("queries not collected", "dk_stream.c", "    nxdk_query_collect();\n", ""),
     ("query begin dropped", "dk_stream.c", "    nxdk_query_submit_begin();\n", ""),
     ("query end dropped", "dk_stream.c", "    nxdk_query_submit_end();\n", ""),
@@ -158,6 +158,13 @@ MUT = [
     ("checker skipped", "dk_stream.c", " && nxchk_stream(nxdk_chk_env(), w, w + s->words)", ""),
     ("cmd words not recorded", "dk_stream.c", "st.frame = s->frame; st.cmd_words = s->words;", "st.frame = s->frame;"),
     ("wait frame nonzero", "dk_stream.c", "uint64_t nxdk_wait_frame(uint64_t f) { (void)f; return 0; }", "uint64_t nxdk_wait_frame(uint64_t f) { (void)f; return 1; }"),
+    ("end reset removed", "dk_stream.c", "    pass_state_reset();   /* no pass", "    /* no pass"),
+    ("end reset before the wait", "dk_stream.c", "    dkQueueWaitIdle(nxdk.q);\n    pass_state_reset();", "    pass_state_reset();\n    dkQueueWaitIdle(nxdk.q);"),
+    ("end reset before the submit", "dk_stream.c", "    dkQueueSubmitCommands(nxdk.q, dkCmdBufFinishList(rec));\n    dkQueueWaitIdle(nxdk.q);\n    pass_state_reset();", "    pass_state_reset();\n    dkQueueSubmitCommands(nxdk.q, dkCmdBufFinishList(rec));\n    dkQueueWaitIdle(nxdk.q);"),
+    ("end reset leaves inPass", "dk_stream.c", "static void pass_state_reset(void) { nxdk_s.boundState = 0; nxdk_s.inPass = 0; }", "static void pass_state_reset(void) { nxdk_s.boundState = 0; }"),
+    ("end reset leaves boundState", "dk_stream.c", "static void pass_state_reset(void) { nxdk_s.boundState = 0; nxdk_s.inPass = 0; }", "static void pass_state_reset(void) { nxdk_s.inPass = 0; }"),
+    ("end reset clears the index binding", "dk_stream.c", "static void pass_state_reset(void) { nxdk_s.boundState = 0; nxdk_s.inPass = 0; }", "static void pass_state_reset(void) { nxdk_s.boundState = 0; nxdk_s.inPass = 0; nxdk_s.idxBlock = 0; }"),
+    ("start reset removed", "dk_stream.c", "    nxdk_s.cmd = rec;\n    pass_state_reset();", "    nxdk_s.cmd = rec;"),
     ("op table entry swapped", "dk_stream.c", "#define OPFN_Scissor nxdk_op_scissor", "#define OPFN_Scissor nxdk_op_viewport"),
     ("op table End swapped", "dk_stream.c", "#define OPFN_Clear nxdk_op_clear", "#define OPFN_Clear nxdk_op_blit"),
 ]

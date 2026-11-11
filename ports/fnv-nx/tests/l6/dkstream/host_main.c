@@ -40,7 +40,8 @@ void dkCmdBufClear(DkCmdBuf c) { (void)c; ev("clear"); }
 void dkCmdBufBarrier(DkCmdBuf c, DkBarrier m, uint32_t f) { (void)c; ev("barrier %d %u", (int)m, f); }
 DkCmdList dkCmdBufFinishList(DkCmdBuf c) { (void)c; ev("finish"); return (DkCmdList)7; }
 void dkQueueSubmitCommands(DkQueue q, DkCmdList l) { (void)q; ev("submit %d", (int)l); }
-void dkQueueWaitIdle(DkQueue q) { (void)q; ev("waitidle"); }
+static uint32_t wait_in_pass, wait_bound;   /* the pass state seen at the queue wait */
+void dkQueueWaitIdle(DkQueue q) { (void)q; ev("waitidle"); wait_in_pass = nxdk_s.inPass; wait_bound = nxdk_s.boundState; }
 
 /* ---- doubles of the other files ---------------------------------------------------------------------------------------------------------------- */
 static int fail_scale; static uint64_t gp_addr, gp_len, gpa[8], gpl[8]; static int gn, box_fail;   /* gpa/gpl: the guest-pointer calls of one SUBMIT in order */
@@ -99,6 +100,8 @@ static Hit hits[256]; static int nhits, fail_op; static void (*draw_hook)(void);
 static void hit(int op, const uint32_t* a, uint32_t argc) {
     if (nhits < 256) hits[nhits++] = (Hit){ op, argc, a, nxdk_s.cmd, nxdk_s.stats, nxdk_s.boundState, nxdk_s.inPass, nxdk_s.idxBlock };
     ev("op%d", op);
+    if (op == NxOp_BeginPass || op == NxOp_BeginPass4) { nxdk_s.inPass = 1; nxdk_s.boundState = 5; }   /* what the real handlers set */
+    if (op == NxOp_EndPass) { nxdk_s.inPass = 0; nxdk_s.boundState = 0; }
     if (op == fail_op) nxchk_err("double: op %d fails", op);
     if (op == NxOp_Draw) { nxdk_s.stats->draws++; if (draw_hook) draw_hook(); }
 }
@@ -461,8 +464,29 @@ static void scen_args(void) {
     nxdk_stream_shutdown();
 }
 
+/* S6: after a SUBMIT the pass state is truthful: a stream that leaves a pass open (End inside a pass) or stops on an op error inside one leaves inPass 0 */
+static void scen_passend(void) {
+    static const uint32_t open[] = { HDR(NxOp_BeginPass4, 3), 0, 6, 0, HDR(NxOp_BindState, 0), HDR(NxOp_End, 0) };
+    static const uint32_t stp[] = { HDR(NxOp_BeginPass4, 3), 0, 6, 0, HDR(NxOp_Draw, 0), HDR(NxOp_Viewport, 0), HDR(NxOp_End, 0) };
+    static const uint32_t shut[] = { HDR(NxOp_BeginPass4, 3), 0, 6, 0, HDR(NxOp_EndPass, 0), HDR(NxOp_End, 0) };
+    run_init(); nev = 0; nhits = 0; nxdk_s.idxBlock = 3;
+    uint64_t r = sub(open, 6, 1);
+    CHK("pass_open_submit_ok", r == 0 && nxdk.errCount == 0 && nhits == 2 && hits[0].op == NxOp_BeginPass4);
+    CHK("pass_open_seen_until_wait", wait_in_pass == 1 && wait_bound == 5 && pos("finish") < pos("waitidle"));
+    CHK("pass_open_reset_after_submit", nxdk_s.inPass == 0 && nxdk_s.boundState == 0 && nxdk_s.idxBlock == 3 && nxdk_s.cmd == NULL);
+    nev = 0; nhits = 0; fail_op = NxOp_Draw;
+    r = sub(stp, 7, 2);
+    CHK("pass_stop_submit_bad_call", r == NXGPU_BAD_CALL && nxdk.errCount == 1 && hits[nhits - 1].op == NxOp_Draw && nhits == 2 && cnt("waitidle") == 1);
+    CHK("pass_stop_seen_until_wait", wait_in_pass == 1 && wait_bound == 5);
+    CHK("pass_stop_reset_after_submit", nxdk_s.inPass == 0 && nxdk_s.boundState == 0 && nxdk_s.idxBlock == 3);
+    fail_op = -1; nxdk.errCount = 0; nev = 0; nhits = 0;
+    r = sub(shut, 6, 3);
+    CHK("pass_closed_submit_state", r == 0 && wait_in_pass == 0 && wait_bound == 0 && nxdk_s.inPass == 0 && nxdk_s.boundState == 0);
+    nxdk_stream_shutdown();
+}
+
 int main(void) {
-    scen_init(); scen_basic(); scen_map(); scen_bad(); scen_env(); scen_stop(); scen_ops(); scen_tmp(); scen_grow(); scen_frame(); scen_args();
+    scen_init(); scen_basic(); scen_map(); scen_bad(); scen_env(); scen_stop(); scen_passend(); scen_ops(); scen_tmp(); scen_grow(); scen_frame(); scen_args();
     printf("NCHK %d\n", nchk);
     return 0;
 }
