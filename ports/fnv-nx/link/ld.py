@@ -7,7 +7,8 @@ Inputs are every `*.o` and `*.a` below the --in directories (L3's lifted objects
 runtime, the loader, L5's platform), in the order of their path relative to their directory.  Every archive
 member is linked (`--whole-archive`): nothing is dropped, so the set of symbols is the set of the inputs.
 
-The link is position independent (`-pie`, `-z text`): no code address is fixed (S7).  The exe image is not an
+The link is position independent (`-pie`, `-z text`): no code address is fixed (S7).  Segments are aligned to the
+4 KiB page of the Switch (`-z max-page-size`), not to the 64 KiB default of the AArch64 linker.  The exe image is not an
 input: the loader maps the owner's exe at run time.
 
 Rule (gate `ld`): the output has no undefined symbol, weak ones included.  The linker runs with
@@ -125,8 +126,8 @@ def inputs(dirs):
 
 
 def command(ld, script, out, rsp):
-    return list(ld) + ['-pie', '--no-dynamic-linker', '-z', 'text', '--unresolved-symbols=ignore-all',
-                       '--whole-archive', '-T', script, '-o', out, '@' + rsp]
+    return list(ld) + ['-pie', '--no-dynamic-linker', '-z', 'text', '-z', 'max-page-size=0x1000',
+                       '-z', 'common-page-size=0x1000', '--unresolved-symbols=ignore-all', '--whole-archive', '-T', script, '-o', out, '@' + rsp]
 
 
 def main():
