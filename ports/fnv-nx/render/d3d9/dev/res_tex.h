@@ -31,13 +31,13 @@ struct NxSub {                       // one sub-resource: level x face (volume: 
 };
 enum { NXK_TEXTURE = 0, NXK_CUBE = 1, NXK_VOLUME = 2, NXK_SURFACE = 3 };
 struct NxImg {
-    uint32_t kind, fmt, usage, w, h, d, levels, nlev, faces, ms, msq, pool, access, gpu, flags;   // levels: exposed (subs per face), nlev: GPU chain (AUTOGENMIPMAP: full chain, levels = 1)
+    uint32_t kind, fmt, usage, w, h, d, levels, nlev, faces, ms, msq, samples, pool, access, gpu, flags;   // levels: exposed (subs per face), nlev: GPU chain (AUTOGENMIPMAP: full chain, levels = 1)
     NxTexFmt tf; NxFormatInfo ni;    // layout; ni.format == NxFmt_None: no native representation (the image stays CPU-only)
     NxSub* sub; uint8_t* raw; NxObj* owner;
     bool rec_dirty, autogen, mip_dirty, ext;                 // dirty regions recorded (MANAGED, SYSTEMMEM); AUTOGENMIPMAP; levels changed since the last generation; CPU memory supplied by the application
     uint32_t filter, lod;
     ~NxImg();
-    HRESULT init(NxObj* own, uint32_t kind, uint32_t w, uint32_t h, uint32_t d, uint32_t levels, uint32_t faces, uint32_t fmt, uint32_t usage, uint32_t pool, uint32_t access, bool autogen_gpu, void* user_mem);
+    HRESULT init(NxObj* own, uint32_t kind, uint32_t w, uint32_t h, uint32_t d, uint32_t levels, uint32_t faces, uint32_t fmt, uint32_t usage, uint32_t pool, uint32_t access, bool autogen_gpu, void* user_mem, uint32_t ms = 0, uint32_t msq = 0, uint32_t samples = 1, uint32_t bind = 0);
     NxSub* at(uint32_t level, uint32_t face) { return &sub[face * levels + level]; }
     void add_dirty(uint32_t level, uint32_t face, const NxBox3* b);   // union into the sub-resource's region (null = whole)
     void upload();                                                    // flush: image_update per dirty sub-resource (face-major, level order), then clear

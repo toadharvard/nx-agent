@@ -6,7 +6,7 @@
 #include "res_tex.h"
 #define FC(a, b, c, d) ((uint32_t)(uint8_t)(a) | (uint32_t)(uint8_t)(b) << 8 | (uint32_t)(uint8_t)(c) << 16 | (uint32_t)(uint8_t)(d) << 24)
 namespace {
-const uint8_t BL = NXTF_BLOCKS | NXTF_COMPRESSED, NV = NXTF_NOVERIFY, BK = NXTF_BROKEN, MP = NXTF_MAPPABLE;
+const uint8_t BL = NXTF_BLOCKS | NXTF_COMPRESSED, NV = NXTF_NOVERIFY | NXTF_BLOCKS, BK = NXTF_BROKEN, MP = NXTF_MAPPABLE;
 struct Row { uint32_t id; uint8_t bytes, bw, bh, bb, flags, hn, hd; };
 #define P(id, n) {id, n, 1, 1, n, 0, 0, 0}                       // plain: n bytes per pixel
 const Row T[] = {
