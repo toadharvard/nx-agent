@@ -1325,6 +1325,9 @@ The registry is certified iff ALL hold:
      gate of verify/gates.json), `fact:PATH` (PATH is a tracked file: the fact table that decides it), `planned: TEXT`
      (the gate or fact is named and does not exist yet), `no gate yet: TEXT` (the fact that is needed) or `OPEN: TEXT`
      (nobody has a discharge yet). planned, no gate yet and OPEN are reported by count; they are the debt of the owner named in the entry.
+  7. id blocks: an id below 200 is free (the records that predate the blocks; L1 takes the free numbers below 200); an id from
+     200 lies in the block of the entry's owner lead (the first lead of a joint owner): L3a 2xx, L3b 3xx, L4 4xx, L5 5xx,
+     L6 6xx, L6A 7xx, L2 8xx. A record of a layer branch enters with the branch's merge under its block, so ids never collide.
 And no id outside the registry occurs in any tracked text file of the tree (a .json file included): an id that is
 not in the registry is red wherever it is written.
 Argument: an assumption is introduced by writing it down; every writing with the word in the universe is a mention, and a

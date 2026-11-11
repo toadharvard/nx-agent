@@ -31,6 +31,9 @@ The registry is certified iff ALL hold:
      gate of verify/gates.json), `fact:PATH` (PATH is a tracked file: the fact table that decides it), `planned: TEXT`
      (the gate or fact is named and does not exist yet), `no gate yet: TEXT` (the fact that is needed) or `OPEN: TEXT`
      (nobody has a discharge yet). planned, no gate yet and OPEN are reported by count; they are the debt of the owner named in the entry.
+  7. id blocks: an id below 200 is free (the records that predate the blocks; L1 takes the free numbers below 200); an id from
+     200 lies in the block of the entry's owner lead (the first lead of a joint owner): L3a 2xx, L3b 3xx, L4 4xx, L5 5xx,
+     L6 6xx, L6A 7xx, L2 8xx. A record of a layer branch enters with the branch's merge under its block, so ids never collide.
 And no id outside the registry occurs in any tracked text file of the tree (a .json file included): an id that is
 not in the registry is red wherever it is written.
 Argument: an assumption is introduced by writing it down; every writing with the word in the universe is a mention, and a
@@ -59,6 +62,7 @@ FORMAT = "fnvnx-assumptions/1"
 OWNER_FILE = "CLAUDE.md"
 OWNER_HEAD = "OWNER, the only accepted ones:"
 NUMBERED = re.compile(r"(\s*)\d+\.\s")
+BLOCKS = {"L3a": 200, "L3b": 300, "L4": 400, "L5": 500, "L6": 600, "L6A": 700, "L2": 800}   # first id of the lead's block of 100
 LEADS = ("L1", "L2", "L3a", "L3b", "L4", "L5", "L6", "L6A")
 STATUSES = ("OWNER", "REMOVE")
 WORD = re.compile(r"(?<!\w)assum|(?<!\w)допущени", re.I)
@@ -243,6 +247,11 @@ def judge_registry(doc, tracked, read, gate_names):
                 err.append(w + "owner %r is not LEAD or LEAD+LEAD of %s" % (ow, ", ".join(LEADS)))
             else:
                 count["REMOVE"][ow] = count["REMOVE"].get(ow, 0) + 1
+                n = int(i[4:])
+                lead = parts[0]
+                if n >= 200 and not (lead in BLOCKS and BLOCKS[lead] <= n < BLOCKS[lead] + 100):
+                    err.append(w + "id is not in the block of its owner %s (%s)" % (
+                        lead, "%d..%d" % (BLOCKS[lead], BLOCKS[lead] + 99) if lead in BLOCKS else "L1 has only ids below 200"))
             rb = e["removed_by"]
             ok = False
             if isinstance(rb, str):

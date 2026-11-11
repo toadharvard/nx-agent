@@ -143,6 +143,15 @@ d = base()
 d["entries"][2]["owner"] = "L6A"
 check("owner L6A is green", run(d)[0] == [], run(d)[0])
 
+for i, ow, ok in ((250, "L3a", True), (250, "L3b", False), (700, "L6A", True), (350, "L3b+L4", True), (350, "L4+L3b", False),
+                  (850, "L2", True), (250, "L1", False), (199, "L1", True)):
+    d = base()
+    d["entries"][2]["id"] = asm(i)
+    d["entries"][2]["owner"] = ow
+    d["entries"][2]["used_by"] = [T + "docs/a.md"]
+    e = run(d)[0]
+    check("id %d owner %s block %s" % (i, ow, "green" if ok else "red"), (not has(e, "block")) == ok, e)
+
 d = base()
 d["entries"][2]["extra"] = 1
 check("unknown key is red", has(run(d)[0], "keys are not"), run(d)[0])
