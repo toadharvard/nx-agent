@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """The generator of the lifted pack: the lifter's output for the whole code universe as C++ SOURCE. No compiler runs here: the objects are built
 only by verify/recipe.py from the product root lift/pack (build.json), whose `generated` stage copies the units out of the published pack tree.
-    liftgen.py --shard K/N --out DIR [--jobs J]   lift the entries whose index (address order) mod N == K -> texts_K.txt, missing_K.tsv, forms_K.tsv, encs_K.tsv
+    liftgen.py --shard K/N --out DIR [--jobs J]   lift the entries whose index (address order) mod N == K -> texts_K.txt, missing_K.tsv, forms_K.tsv, encs_K.tsv, shapes_K.tsv
     liftgen.py --finish --out DIR [--also MODDIR=UNIVERSE.tsv ...] --bridge bridge.tsv [--need iat.tsv ...]
         merge the shards of every image of the process -> DIR/pack/: u/000.cpp .. u/fff.cpp, disp.S, imp.cpp, inc/fnvl_prelude.h, inc/imp.h,
-        entries.tsv, forms.tsv, encs.tsv, imp_entries.tsv, imp_blocked.tsv, gate_liftgen.json
+        entries.tsv, forms.tsv, encs.tsv, shapes.tsv, imp_entries.tsv, imp_blocked.tsv, gate_liftgen.json
     liftgen.py --recipe REF COMMIT TREE_SHA256    write lift/pack/build.json for the published pack tree (fnv-nx-build branch, commit, cas.py ingest hash)
     liftgen.py --module NAME ...                  (shard mode) a module of modules.tsv, lifted at its assigned base with its universe
 RULE units: entry A lives in unit u/<(A >> 4) & 0xfff as 3 hex digits>.cpp, for every image. The 4096 unit names are fixed, so the recipe's
@@ -34,8 +34,9 @@ def unit_names(): return ['u/%03x.cpp' % i for i in range(NBUCKET)] + ['disp.S',
 
 
 def lift_one(a):
-    """-> (text, form counter) or (None, reason)"""
+    """-> (text, (form counter, form rows, shape counter)) or (None, reason)"""
     import fnvlift as L
+    from proof import shape
     import formcert
     G['cap'].clear()
     try:
@@ -45,7 +46,8 @@ def lift_one(a):
     t = re.sub(r'extern "C" void (L_%08x\(void\)\n\{)' % a, r'extern "C" __attribute__((section(".text.fnvl"))) void \1', t, count=1)
     assert '.text.fnvl' in t
     ins = G['cap'][-1][0]
-    return t, (formcert.census(ins), [(formcert.form_key(i), bytes(i.bytes), x) for x, i in ins.items()])
+    return t, (formcert.census(ins), [(formcert.form_key(i), bytes(i.bytes), x) for x, i in ins.items()],
+               collections.Counter((shape.shape_key(i), shape.family(i)) for i in ins.values()))
 
 
 def enc_add(encs, rows):
@@ -59,12 +61,12 @@ def enc_add(encs, rows):
 
 
 def work(addrs):
-    ent = G['ent']; texts, forms, missing, encs = [], collections.Counter(), [], {}
+    ent = G['ent']; texts, forms, missing, encs, shapes = [], collections.Counter(), [], {}, collections.Counter()
     for a in addrs:
         t, x = lift_one(a)
         if t is None: missing.append((a, ent[a][0], x))
-        else: texts.append((a, t)); forms.update(x[0]); enc_add(encs, x[1])
-    return texts, dict(forms), missing, [(f, r, x) for f, e in encs.items() for r, x in e.items()]
+        else: texts.append((a, t)); forms.update(x[0]); enc_add(encs, x[1]); shapes.update(x[2])
+    return texts, dict(forms), missing, [(f, r, x) for f, e in encs.items() for r, x in e.items()], dict(shapes)
 
 
 def write_texts(path, texts):
@@ -102,12 +104,15 @@ def shard(a):
     for g in got: forms.update(g[1])
     encs = {}
     for g in got: enc_add(encs, g[3])
+    shapes = collections.Counter()
+    for g in got: shapes.update(g[4])
     certs = formcert.Certs()
     write_texts('%s/texts_%d.txt' % (out, K), texts)
     w = lambda n, rows: open('%s/%s_%d.tsv' % (out, n, K), 'w').write(''.join('\t'.join(map(str, x)) + '\n' for x in rows))
     w('missing', [('%08x' % ad, k, why) for ad, k, why in miss])
     w('forms', [(f, n, certs.status(f)) for f, n in sorted(forms.items())])
     w('encs', [(f, r.hex(), '%08x' % x) for f, e in sorted(encs.items()) for r, x in sorted(e.items(), key=lambda t: (t[1], t[0]))])
+    w('shapes', [(k, fam, n) for (k, fam), n in sorted(shapes.items(), key=lambda t: (t[0][0].encode(), t[0][1]))])    # shape_key, family, instruction count (L3b formgate)
     print('shard %d/%d: entries %d lifted %d missing %d; text bytes %d; forms %d' % (K, N, len(mine), len(texts), len(miss), sum(len(t) for _, t in texts), len(forms)))
 
 
@@ -132,7 +137,7 @@ def finish(a):
     out = a.out; pk = out + '/pack'
     for d in (pk + '/u', pk + '/inc'): os.makedirs(d, exist_ok=True)
     images = [(out, L.universe.load()[0])] + [(s.split('=', 1)[0], L.universe.load(s.split('=', 1)[1])[0]) for s in a.also]
-    texts, forms, encs = {}, collections.defaultdict(lambda: [0, 'none']), {}
+    texts, forms, encs, shapes, shape_fam = {}, collections.defaultdict(lambda: [0, 'none']), {}, collections.Counter(), {}
     for d, ent in images:
         t = image(d, ent)
         if set(t) & set(texts): sys.exit('finish: %s shares entry addresses with another image' % d)
@@ -142,6 +147,12 @@ def finish(a):
             e = f.replace('/forms_', '/encs_')
             if not os.path.isfile(e): sys.exit('finish: %s: no encodings list beside %s' % (d, os.path.basename(f)))
             enc_add(encs, [(form, bytes.fromhex(r), int(x, 16)) for form, r, x in tsv(e)])
+        for f in sorted(glob.glob(d + '/texts_*.txt')):      # completeness: every shard that has texts has its shapes
+            sf = f.replace('/texts_', '/shapes_').replace('.txt', '.tsv')
+            if not os.path.isfile(sf): sys.exit('finish: %s: no shapes list beside %s' % (d, os.path.basename(f)))
+            for k, fam, n in tsv(sf):
+                if shape_fam.setdefault(k, fam) != fam: sys.exit('finish: shape %s has two families (%s, %s)' % (k, shape_fam[k], fam))
+                shapes[k] += int(n)
     if set(encs) != set(forms): sys.exit('finish: the encodings lists and the form lists name different forms')
     units = collections.defaultdict(list)
     for x in sorted(texts): units[bucket(x)].append(texts[x])
@@ -164,6 +175,7 @@ def finish(a):
     w = lambda n, rows: open('%s/%s.tsv' % (pk, n), 'w').write(''.join('\t'.join(map(str, x)) + '\n' for x in rows))
     w('entries', [('%08x' % x, s, 'code' if x in code else 'import' if s.startswith('I_') or x >= 0x00100000 else 'runtime') for x, s in sorted(syms.items())])
     open(pk + '/entries.tsv', 'a').write(open(pk + '/imp_entries.tsv').readline())      # `# table_id <sha256 of bridge.tsv>` (last line)
+    w('shapes', [(k, shape_fam[k], n) for k, n in sorted(shapes.items(), key=lambda t: t[0].encode())])      # the universe of formgate: exactly what was lifted
     w('forms', [(f, v[0], v[1]) for f, v in sorted(forms.items())])
     w('encs', [(f, r.hex(), '%08x' % x) for f, e in sorted(encs.items()) for r, x in sorted(e.items(), key=lambda t: (t[1], t[0]))])
     nc = sum(1 for v in forms.values() if v[1] == 'sail')
