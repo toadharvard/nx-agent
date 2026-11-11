@@ -8,12 +8,9 @@ Rule (the name set of bridgetable.py's input):
   D = every static dynsites.tsv GetProcAddress (module token, name token) pair (check_dynsites.py row classes).
   U = every module-less GetProcAddress name that EXACTLY ONE present system module defines (asked of the platform
       through probe_dynsites; a name defined by none or by several modules is left out and stays reported by check_dynsites.py).
---carry <previous sys_names.tsv>: a name of the previous file that I u D u U no longer derives is KEPT (a regeneration never silently
-drops a name the platform was asked for) and listed on stderr as CARRIED, so the underivable remainder stays visible; it is data from
-an earlier derivation, not a hand edit.
 No hand list; output is sorted, one `dll<TAB>name` per line.
 
-Usage: sys_names.py <manifest-dir> [--root ports/fnv-nx] [--probe path] [--carry old.tsv] [--out file] [--selftest]
+Usage: sys_names.py <manifest-dir> [--root ports/fnv-nx] [--probe path] [--out file] [--selftest]
   <manifest-dir> holds imports.tsv, dynsites.tsv, closure.tsv. Everything read from it stays private; nothing is embedded here.
 """
 import os
@@ -80,7 +77,7 @@ def main(argv):
         return selftest()
     args, opt, i = [], {}, 1
     while i < len(argv):
-        if argv[i] in ("--root", "--probe", "--out", "--carry"):
+        if argv[i] in ("--root", "--probe", "--out"):
             opt[argv[i]] = argv[i + 1]
             i += 1
         else:
@@ -99,13 +96,6 @@ def main(argv):
     absent, _ = cd.env_truth(root)
     lines = derive(imports, dyn, cd.translated_modules(os.path.join(m, "closure.tsv")), absent, cd.registered_tables(root),
                    cd.Probe(probe))
-    if "--carry" in opt:
-        with open(opt["--carry"], encoding="utf-8") as f:
-            old = [l for l in f.read().splitlines() if l]
-        carried = sorted(set(old) - set(lines))
-        for l in carried:
-            print("CARRIED " + l.replace("\t", " "), file=sys.stderr)
-        lines = sorted(set(lines) | set(carried))
     text = "\n".join(lines) + "\n"
     if out:
         with open(out, "w", encoding="utf-8") as f:

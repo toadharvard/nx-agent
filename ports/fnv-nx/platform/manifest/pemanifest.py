@@ -11,6 +11,16 @@ GetModuleHandle*, GetProcAddress, CoCreateInstance) with the constant string or
 GUID operand when the bytes before the call push one. A site without a constant
 is reported as `dynamic`: the implementation must be total over all names anyway.
 
+Dynamic-binding calls (LoadLibrary*, GetModuleHandle*, GetProcAddress) are found by a LINEAR DISASSEMBLY of the whole function that
+loads the import slot (capstone), so a call through a register (`mov esi,[GetProcAddress]; push name; push hmod; call esi`, the CRT
+idiom) is a site like `call [slot]`. Per call: the name operand is the last pushed string literal (a `push imm32` with a relocation); the
+hmod operand is resolved by one local data-flow rule: a register or an ebp-slot holds the literal(s) of the LoadLibrary/GetModuleHandle
+calls whose result (eax) was copied into it, and anything else written to it (or its address taken with lea) makes it `dynamic`; the
+slot value is the union over all writes in the function. Output column hmod = `dynamic` or the comma list of module literals; the
+operand column then holds those literals + the name. Assumptions: the function starts at the nearest preceding `push ebp; mov ebp,esp`
+(hot-patch `mov edi,edi` before it allowed) or, when no prologue lies within the look-back, at the 16-aligned address after int3 linker padding, and ends at the next prologue; control flow is followed forward only (state saved at forward jumps, joined at their target, cleared after ret/jmp unless a jump targets the next address; back-edges assumed not to change a register used after the loop); no jump enters mid-instruction; an ebp slot is not written through
+another pointer (its address is never taken, checked). Without such a boundary every hmod is `dynamic`.
+
 Usage: pemanifest.py <dir-with-modules> <root.exe> <outdir> [contract-only.dll,...] [dynamic.dll,...]
 (dynamic: lifted modules that reachable code loads by constant name with LoadLibrary;
 they join the closure as extra roots.)
@@ -20,10 +30,12 @@ are not part of the manifest.)
 Output (exe-derived; keep out of the public repository):
   imports.tsv   module, dll, name|#ordinal, slot_va, code_refs, data_refs
   closure.tsv   module, role (root|static|absent), imports, exports
-  dynsites.tsv  module, site_va, api, operand
+  dynsites.tsv  module, site_va, api, operand, hmod
 """
 import bisect, collections, os, struct, sys
+import capstone
 import pefile
+from capstone import x86_const as X
 
 DYN = {"LoadLibraryA", "LoadLibraryW", "LoadLibraryExA", "LoadLibraryExW",
        "GetModuleHandleA", "GetModuleHandleW", "GetProcAddress",
@@ -94,29 +106,173 @@ class Mod:
         return code, data
 
     def dynsites(self, code):
+        """Rows (site, api, operand, hmod) of every LoadLibrary*/GetModuleHandle*/GetProcAddress call and CoCreateInstance site."""
         rs = self.relocs
-        for dll, nm, slot in self.imports:
-            if nm not in DYN:
-                continue
+        rset = set(rs)
+        covered = set()
+        api = {s: n for _, n, s in self.imports if n in DYN and n != "CoCreateInstance"}
+        done = set()
+        for slot in api:
             for site in code.get(slot, []):
-                ops = []
-                i = bisect.bisect_left(rs, site - 48)
-                while i < len(rs) and rs[i] < site:
-                    r = rs[i]
-                    i += 1
-                    if self.img[r - 1 - self.base] != 0x68:  # push imm32
-                        continue
-                    t = self.u32(r)
-                    if nm == "CoCreateInstance":
-                        g = self.img[t - self.base:t - self.base + 16]
-                        if len(g) == 16:
-                            a, b, c = struct.unpack_from("<IHH", g)
-                            ops.append("{%08X-%04X-%04X-%s-%s}" % (a, b, c, g[8:10].hex().upper(), g[10:].hex().upper()))
+                start = self.func_start(site)
+                if (start or site) in done:
+                    continue
+                done.add(start or site)
+                for row in self.flow(start, api, rset, site, covered):
+                    yield row
+        for dll, nm, slot in self.imports:
+            for site in code.get(slot, []):
+                if nm == "CoCreateInstance" or (nm in DYN and site not in covered):  # window rule: a thunk or a stored pointer
+                    ops = []
+                    i = bisect.bisect_left(rs, site - 48)
+                    while i < len(rs) and rs[i] < site:
+                        r = rs[i]
+                        i += 1
+                        if self.img[r - 1 - self.base] != 0x68:  # push imm32
+                            continue
+                        t = self.u32(r)
+                        if nm == "CoCreateInstance":
+                            g = self.img[t - self.base:t - self.base + 16]
+                            if len(g) == 16:
+                                a, b, c = struct.unpack_from("<IHH", g)
+                                ops.append("{%08X-%04X-%04X-%s-%s}" % (a, b, c, g[8:10].hex().upper(), g[10:].hex().upper()))
+                        else:
+                            s = self.cstr(t)
+                            if s:
+                                ops.append(s)
+                    yield site, nm, " ".join(ops) if ops else "dynamic", "-" if nm != "GetProcAddress" else "dynamic"
+
+    def func_start(self, site):
+        """Entry of the function holding `site`, or None. Entry = the nearest preceding `push ebp; mov ebp,esp` (framed), or the
+        16-aligned address after the nearest preceding int3 (0xCC) padding when no prologue is in range (frameless: the linker aligns and pads
+        functions, so an aligned address after padding is an entry). Looks back at most 0x1000 bytes; no boundary found -> None (hmod stays dynamic)."""
+        o = site - self.base
+        lo = max(0, o - 0x1000)
+        k = self.img.rfind(b"\x55\x8b\xec", lo, o)
+        c = o
+        while True:  # nearest 16-aligned address whose preceding byte is int3 padding (linker alignment of function entries)
+            c = self.img.rfind(b"\xcc", lo, c)
+            if c < 0 or (self.base + c + 1) % 16 == 0:
+                break
+        if c >= 0 and k < 0:
+            return self.base + c + 1
+        return None if k < 0 else self.base + (k - 2 if self.img[k - 2:k] == b"\x8b\xff" else k)
+
+    def flow(self, start, api, rset, site, covered):
+        md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+        md.detail = True
+        o = (start if start else site - 0x60) - self.base
+        ins = []
+        for k in range(0, 16 if not start else 1):  # without a prologue: resync by trial so that the slot reference is hit
+            ins = list(md.disasm(self.img[o + k:o + k + 0x1400], self.base + o + k))
+            if start or any(i.address <= site < i.address + i.size for i in ins):
+                break
+        end = next((i.address for i in ins[4:] if i.bytes[:3] == b"\x55\x8b\xec" or i.bytes[:2] == b"\x8b\xff"), None)
+        ins = [i for i in ins if end is None or i.address < end]
+        P = {"eax": "eax", "ax": "eax", "al": "eax", "ah": "eax", "ecx": "ecx", "cx": "ecx", "cl": "ecx", "edx": "edx", "dx": "edx",
+             "dl": "edx", "ebx": "ebx", "bx": "ebx", "bl": "ebx", "esi": "esi", "si": "esi", "edi": "edi", "di": "edi"}
+        UNK = None
+
+        def join(a, b):  # state merge at a control-flow join: equal facts stay, module-literal sets unite, anything else is unknown
+            if a is None:
+                return (dict(b[0]), dict(b[1]), list(b[2]))
+            m = lambda x, y: {k: (x[k] if x[k] == y[k] else (x[k] | y[k] if isinstance(x[k], set) and isinstance(y[k], set) else UNK))
+                              for k in x.keys() & y.keys()}
+            return (m(a[0], b[0]), {k: a[1][k] for k in a[1].keys() & b[1].keys() if a[1][k] == b[1][k]}, a[2] if a[2] == b[2] else [])
+        slots, rows = collections.defaultdict(set), []
+        for final in (0, 1):  # pass 0 collects the ebp-slot unions, pass 1 reads them
+            reg, ptr, pushes, saved, dead = {}, {}, [], {}, False
+            dynamic = not start
+            for i in ins:
+                ops = i.operands
+                if dead or i.address in saved:  # control-flow join: forward jumps carry the state to their target
+                    s = saved.pop(i.address, None)
+                    reg, ptr, pushes = (({}, {}, []) if s is None and dead else
+                                        s if dead else join(s, (reg, ptr, pushes)))
+                    dead = False
+                if i.mnemonic.startswith("j") or i.mnemonic == "ret":
+                    t = ops[0].imm if i.mnemonic.startswith("j") and ops and ops[0].type == X.X86_OP_IMM else None
+                    if t is not None and t > i.address:
+                        saved[t] = join(saved.get(t), (reg, ptr, pushes))
+                    dead = dead or i.mnemonic in ("jmp", "ret")
+                    continue
+                mem = lambda op: op.type == X.X86_OP_MEM and op.mem.base == X.X86_REG_EBP and op.mem.index == 0 and op.mem.segment == 0
+                val = lambda op: (op.type == X.X86_OP_REG and reg.get(P.get(i.reg_name(op.reg), ""), UNK)) or \
+                    (slots.get(op.mem.disp, UNK) if mem(op) and final else UNK)
+                if i.mnemonic == "call":
+                    a = ops[0]
+                    f = (a.type == X.X86_OP_MEM and a.mem.base == 0 and a.mem.index == 0 and api.get(a.mem.disp)) or \
+                        (a.type == X.X86_OP_REG and (ptr.get(P.get(i.reg_name(a.reg), "")) or ("", 0))[0])
+                    if f:
+                        if final:
+                            covered.add(i.address + i.size - 4 if a.type == X.X86_OP_MEM else ptr[P[i.reg_name(a.reg)]][1])
+                        nm = lits = None
+                        if pushes:
+                            top = pushes[-1] if f != "GetProcAddress" else (pushes[-2] if len(pushes) > 1 else None)
+                            nm = top[1] if top and top[0] == "s" else None
+                            hm = pushes[-1] if f == "GetProcAddress" else None
+                            lits = None if dynamic else (sorted(hm[1]) if hm and hm[0] == "m" and hm[1] else None)
+                        if final:
+                            toks = (lits or []) if f == "GetProcAddress" else []
+                            rows.append((i.address, f, " ".join(toks + [nm]) if nm else (" ".join(toks) or "dynamic"),
+                                         ",".join(lits) if lits else "dynamic" if f == "GetProcAddress" else "-"))
+                        res = {nm} if f != "GetProcAddress" and nm and not dynamic else UNK
+                        for r in ("eax", "ecx", "edx"):
+                            reg.pop(r, 0)
+                            ptr.pop(r, 0)
+                        reg["eax"] = res
                     else:
-                        s = self.cstr(t)
-                        if s:
-                            ops.append(s)
-                yield site, nm, " ".join(ops) if ops else "dynamic"
+                        for r in ("eax", "ecx", "edx"):
+                            reg.pop(r, 0)
+                            ptr.pop(r, 0)
+                    pushes = []
+                    continue
+                if i.mnemonic == "push":
+                    a = ops[0]
+                    if a.type == X.X86_OP_IMM:
+                        s = self.cstr(a.imm) if (i.address + 1) in rset else None
+                        pushes.append(("s", s) if s else ("x", UNK))
+                    elif a.type == X.X86_OP_REG or mem(a):
+                        v = val(a)
+                        pushes.append(v if isinstance(v, tuple) else ("m", v))
+                    else:
+                        pushes.append(("x", UNK))
+                    continue
+                wr = {P.get(i.reg_name(r), i.reg_name(r)) for r in i.regs_access()[1]}
+                if i.mnemonic == "mov" and len(ops) == 2 and ops[1].type == X.X86_OP_IMM and (i.address + i.size - 4) in rset:
+                    t = self.cstr(ops[1].imm)  # a relocated string address stored in a register or into the pushed argument slot
+                    if ops[0].type == X.X86_OP_REG and P.get(i.reg_name(ops[0].reg)):
+                        reg[P[i.reg_name(ops[0].reg)]], _ = ("s", t) if t else UNK, ptr.pop(P[i.reg_name(ops[0].reg)], 0)
+                        continue
+                    if ops[0].type == X.X86_OP_MEM and ops[0].mem.base == X.X86_REG_ESP and ops[0].mem.disp == 0 and t:
+                        pushes[-1:] = [("s", t)]  # the argument slot at [esp] is replaced, or (after a callee-popped call) opened
+                        continue
+                if i.mnemonic == "mov" and len(ops) == 2 and ops[0].type == X.X86_OP_REG:
+                    d, s = P.get(i.reg_name(ops[0].reg)), ops[1]
+                    if d and ops[0].size == 4:
+                        v = val(s) if s.type == X.X86_OP_REG or mem(s) else UNK
+                        sl = s.type == X.X86_OP_MEM and s.mem.base == 0 and s.mem.index == 0 and api.get(s.mem.disp)
+                        reg[d], ptr[d] = v, (sl, i.address + i.size - 4)
+                        if not sl:
+                            ptr.pop(d, 0)
+                        continue
+                if i.mnemonic == "mov" and len(ops) == 2 and mem(ops[0]):
+                    v = val(ops[1]) if ops[1].type == X.X86_OP_REG else UNK
+                    v = None if isinstance(v, tuple) else v
+                    if not final:
+                        slots[ops[0].mem.disp] = (slots[ops[0].mem.disp] | v) if v and slots[ops[0].mem.disp] is not UNK else UNK
+                    continue
+                if i.mnemonic == "lea" and len(ops) == 2 and mem(ops[1]):
+                    slots[ops[1].mem.disp] = UNK
+                for r in wr:
+                    if r in reg or r in P.values():
+                        reg[r] = UNK
+                        ptr.pop(r, 0)
+                if any(mem(op) and (op.access & 2) for op in ops):  # any other write into an ebp slot
+                    for op in ops:
+                        if mem(op) and (op.access & 2):
+                            slots[op.mem.disp] = UNK
+        return rows
 
 
 def main(d, root, out, contract="", dynamic=""):
@@ -140,15 +296,15 @@ def main(d, root, out, contract="", dynamic=""):
          open(os.path.join(out, "dynsites.tsv"), "w") as fd, \
          open(os.path.join(out, "closure.tsv"), "w") as fc:
         fi.write("module\tdll\tname\tslot\tcode_refs\tdata_refs\n")
-        fd.write("module\tsite\tapi\toperand\n")
+        fd.write("module\tsite\tapi\toperand\thmod\n")
         fc.write("module\trole\timports\texports\n")
         for n in sorted(mods):
             m = mods[n]
             code, data = m.refs()
             for dll, nm, slot in m.imports:
                 fi.write("%s\t%s\t%s\t0x%08x\t%d\t%d\n" % (n, dll, nm, slot, len(code[slot]), len(data[slot])))
-            for site, nm, op in sorted(m.dynsites(code)):
-                fd.write("%s\t0x%08x\t%s\t%s\n" % (n, site, nm, op))
+            for site, nm, op, hm in sorted(set(m.dynsites(code))):
+                fd.write("%s\t0x%08x\t%s\t%s\t%s\n" % (n, site, nm, op, hm))
             fc.write("%s\t%s\t%d\t%d\n" % (n, "root" if n == root.lower() else "dynamic" if n in dyn else "static", len(m.imports), m.exports))
         for n in sorted(absent):
             fc.write("%s\t%s\t-\t-\n" % (n, "contract-only" if n in contract else "absent"))
