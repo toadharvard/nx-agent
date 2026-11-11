@@ -82,6 +82,7 @@ void nxdk_img_shutdown(void) { ev("img_shutdown"); }
 uint32_t nxdk_stream_init(void) { return 0; }   /* dk_stream.c has its own test (tests/l6/dkstream) */
 void nxdk_stream_shutdown(void) {}
 void nxdk_query_shutdown(void) { ev("query_shutdown"); }
+void nxdk_vtx_shutdown(void) { ev("vtx_shutdown"); }
 void nxdk_shader_release_all(void) { ev("shader_release_all"); }
 void nxdk_img_describe(uint32_t id, const NxDkImage* im, int srgb) { (void)id; (void)im; (void)srgb; ev("img_describe"); }
 #define H1(name, n) uint64_t name(uint64_t a) { hit[n]++; return 0x1000u + n + a * 0x10000; }
