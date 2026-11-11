@@ -110,6 +110,24 @@ static uint64_t fh_regs(FnvnxFaultFrame *f) {
     return 0;
 }
 static uint64_t fault_thread(uint64_t arg) { *(volatile uint32_t *)(uintptr_t)PG(fnvnx_host) = (uint32_t)arg; return 0; }
+/* SECTION tests (MODE 30..34) */
+static uint64_t plat4(uint32_t fn, uint64_t a, uint64_t b, uint64_t c, uint64_t d) {
+    uint64_t v[4] = {a, b, c, d};
+    return fnvnx_hcall4(H->ext_call, 11, fn, FNVNX_ADDR(v), 4);
+}
+#define SC(size) plat(FNVNX_PLAT_SECTION_CREATE, size, 0, 0, 1)
+#define SM(id, addr, off, size) plat4(FNVNX_PLAT_SECTION_MAP, id, addr, off, size)
+#define SU(addr, size) plat(FNVNX_PLAT_SECTION_UNMAP, addr, size, 0, 2)
+#define SF(id) plat(FNVNX_PLAT_SECTION_FREE, id, 0, 0, 1)
+#define W32(a) (*(volatile uint32_t *)(uintptr_t)(a))
+static volatile uint64_t g_v1, g_v2, sflag;
+static uint64_t sec_worker(uint64_t arg) {
+    if (arg == 1) W32(g_v2 + 4) = W32(g_v2) + 1;   /* reads what main wrote through the other view */
+    else W32(g_v2 + 8) = 0x77;                     /* writes for main to read through its view */
+    sflag = arg;
+    H2(H->wake_address, FNVNX_ADDR(&sflag), 1);
+    return 0;
+}
 /* boot-stage CLI test (MODE 6): three functions called in order; results 0, 1, 0 */
 __attribute__((noinline, used)) uint32_t fnvboot_a(uint32_t x) { __asm__ volatile("" ::: "memory"); return x - x; }
 __attribute__((noinline, used)) uint32_t fnvboot_b(uint32_t x) { __asm__ volatile("" ::: "memory"); return (x | 1) & 1; }
@@ -212,6 +230,102 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
 #else
     plat(9, 0, 0, 0, 0);   /* a fn of module 11 the header does not define */
 #endif
+#elif MODE == 30
+    uint64_t R = plat(4, 0, 0x10000, 0, 2);
+    num("resv", R != 0);
+    num("c0", SC(0)); num("c-unal", SC(0x800)); num("c-big", SC(0x80001000ull));
+    uint64_t s = SC(0x4000);
+    num("id", s);
+    uint64_t A = SM(s, R, 0, 0x2000);
+    num("A", A == R);
+    uint64_t B = SM(s, 0, 0x1000, 0x2000);
+    num("B-own", B && !(B & 0xFFFF) && (B < R || B >= R + 0x10000));
+    uint64_t C = SM(s, R + 0x4000, 0, 0x4000);
+    num("C", C == R + 0x4000);
+    num("zero", W32(A) | W32(A + 0x1FFC) | W32(B) | W32(C + 0x3FFC));
+    W32(A) = 0x11; W32(A + 0x1000) = 0x22;      /* section page 0, page 1 */
+    num("share1", W32(B));                       /* B page 0 = section page 1 */
+    W32(B + 4) = 0x33; num("share2", W32(A + 0x1004));
+    W32(B + 0x1000) = 0x44;                      /* section page 2: only B and C reach it */
+    num("share3", W32(C + 0x2000));
+    num("C-sees", W32(C) == 0x11 && W32(C + 0x1000) == 0x22 && W32(C + 0x1004) == 0x33);
+    num("m-size0", SM(s, 0, 0, 0)); num("m-size-unal", SM(s, 0, 0, 0x800)); num("m-size-over", SM(s, 0, 0, 0x80001000ull));
+    num("m-addr-unal", SM(s, R + 0x8001, 0, 0x1000)); num("m-off-unal", SM(s, 0, 0x800, 0x1000));
+    num("m-id", SM(999, 0, 0, 0x1000)); num("m-id0", SM(0, 0, 0, 0x1000));
+    num("m-range", SM(s, 0, 0x3000, 0x2000)); num("m-range-wrap", SM(s, 0, 0xFFFFFFFFFFFFF000ull, 0x2000));
+    num("h-outside", SM(s, 0x30000000, 0, 0x1000)); num("h-keys", SM(s, 0xf0000, 0, 0x1000));
+    num("h-image", SM(s, H->guest_base, 0, 0x1000)); num("h-heap", SM(s, H->heap_base, 0, 0x1000));
+    num("h-straddle", SM(s, R + 0xF000, 0, 0x2000));
+    num("h-over-view", SM(s, R + 0x1000, 0, 0x1000));
+    num("commit-gap", plat(5, R + 0x8000, 0x1000, 0, 2));
+    num("h-over-committed", SM(s, R + 0x8000, 0, 0x1000));
+    num("vm-commit", plat(5, A, 0x1000, 0, 2)); num("vm-commit-wide", plat(5, R, 0x10000, 0, 2));
+    num("vm-commit-B", plat(5, B, 0x1000, 0, 2));
+    num("vm-decommit", plat(6, A, 0x1000, 0, 2)); num("vm-protect", plat(8, A, 0x1000, 1, 3));
+    num("vm-protect-B", plat(8, B, 0x1000, 1, 3)); num("vm-release", plat(7, R, 0, 0, 1));
+    num("view-intact", W32(A) == 0x11 && W32(C + 0x1000) == 0x22);
+    num("mf-B", fnvnx_hcall3(H->map_fixed, B, 0x1000, H->heap_base + 0x20000) != 0);
+    num("mf-A", fnvnx_hcall3(H->map_fixed, A, 0x1000, H->heap_base + 0x20000) != 0);
+    uint64_t r2 = plat(4, 0, 0x1000, 0, 2);
+    num("resv2-clear", r2 && (r2 + 0x10000 <= B || r2 >= B + 0x2000));
+    num("resv-hint-B", plat(4, B, 0x10000, 0, 2));
+    num("u-wrong-size", SU(A, 0x1000)); num("u-wrong-addr", SU(A + 0x1000, 0x1000)); num("u-nonview", SU(0x30000000, 0x1000));
+    num("free", SF(s)); num("map-after-free", SM(s, 0, 0, 0x1000)); num("free-twice", SF(s)); num("free-unknown", SF(555));
+    num("alive-A", W32(A) == 0x11);
+    W32(B) = 0x55; num("alive-B", W32(A + 0x1000));
+    num("u-A", SU(A, 0x2000)); num("u-B-still", W32(B)); num("u-C", SU(C, 0x4000));
+    num("u-B", SU(B, 0x2000)); num("u-B-twice", SU(B, 0x2000));
+    num("release-R", plat(7, R, 0, 0, 1));
+    uint64_t s2 = SC(0x1000), B2 = SM(s2, 0, 0, 0x1000);
+    num("B2-lowest", B2 == R); num("s2-id", s2);
+#elif MODE == 31
+    uint64_t s = SC(0x2000), A = SM(s, 0, 0, 0x2000), B = SM(s, 0, 0, 0x2000);
+    W32(A) = 7; num("A-addr", A); num("B-addr", B);
+    num("unmap-A", SU(A, 0x2000));
+    num("B-works", W32(B));
+    W32(B + 4) = 9; num("B-writes", W32(B + 4));
+    num("touch-A", W32(A));   /* the unmapped view: the run must end here */
+    say("after the fault\n");
+#elif MODE == 32
+    uint64_t s = SC(0x2000);
+    g_v1 = SM(s, 0, 0, 0x2000); g_v2 = SM(s, 0, 0, 0x2000);
+    W32(g_v1) = 0xA5A5;
+    for (uint64_t k = 1; k <= 2; k++) {
+        uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(sec_worker), k, 0x10000, 0, ~0ull);
+        fnvnx_hcall1(H->thread_start, id);
+        while (sflag != k) fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&sflag), k - 1, ~0ull);
+        fnvnx_hcall1(H->thread_join, id);
+    }
+    num("thread-read", W32(g_v1 + 4)); num("thread-write", W32(g_v1 + 8));
+#elif MODE == 33
+    uint64_t s = SC(0x4000), v = SM(s, 0, 0, 0x4000), top = v + 0x4000;
+    num("reg", plat(10, FNVNX_ADDR(fh_skip), top, 0, 2));
+    uint64_t out, val = 9;
+    __asm__ volatile("mov x5, #0\n str %w1, [%2]\n mov %0, x5" : "=r"(out) : "r"(val), "r"(0x30000000ull) : "x5", "memory");
+    num("marker", out); num("kind", gk); num("reason", gr); num("addr", ga);
+    num("frame-in-view", W32(top - 816) == 1 && W32(top - 808) == 0x30000000);
+    num("same-pages", W32(top - 816) == W32(SM(s, 0, 0x3000, 0x1000) + 0x1000 - 816));
+#elif MODE == 34
+    uint64_t first = SC(0x1000), n = 1, last = first, r;
+    for (; n < 128 && (r = SC(0x1000)) < 0x80000000ull; n++) last = r;
+    num("sections-ok", n); num("last-id", last);
+    num("c-full", SC(0x1000));
+    uint64_t v = SM(first, 0, 0, 0x1000);
+    num("free-first-deferred", SF(first));
+    num("c-full-deferred", SC(0x1000));
+    num("unmap-last-view", SU(v, 0x1000));
+    uint64_t id129 = SC(0x1000);
+    num("id129", id129);
+    num("free-last", SF(last)); num("id130", SC(0x1000));
+    uint64_t cnt = 0, asc = 1, prev = 0, a;
+    for (; cnt < 512 && (a = SM(id129, 0, 0, 0x1000)) < 0x100000000ull; cnt++) { if (a <= prev || (a & 0xFFFF)) asc = 0; prev = a; }
+    num("views-ok", cnt); num("views-ascending", asc);
+    num("v-full", SM(id129, 0, 0, 0x1000));
+    num("unmap-one", SU(prev, 0x1000)); num("v-after", SM(id129, 0, 0, 0x1000) == prev);
+#elif MODE == 35
+    fnvnx_hcall1(H->exit, 0x5200002A);   /* fnvnx_reach_violation(42) */
+#elif MODE == 36
+    fnvnx_hcall1(H->exit, 0x5100002A);   /* an ordinary non-zero code */
 #elif MODE >= 12
     volatile uint32_t *pg = (volatile uint32_t *)(uintptr_t)PG(H);
     plat(8, PG(H), 0x1000, 3, 3);
@@ -415,7 +529,7 @@ def main():
     root = os.path.join(TMP, "sd")
     os.makedirs(root)
     open(os.path.join(root, "data.bin"), "wb").write(b"01ABCDEFGH23")
-    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, *range(12, 22))}   # MODE 6 (boot CLI guest) is built by test_boot.py
+    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, *range(12, 22), *range(30, 37))}   # MODE 6 (boot CLI guest) is built by test_boot.py
     elf0, path0 = built[0]
     plan0 = make_plan(elf0)
     base = plan0["image"]["base"]
@@ -594,7 +708,34 @@ def main():
     except bootmachine.MachineError as e:
         ok, msg = "message" in str(e), str(e)
     case("a header-defined platform fn nobody implements raises at construction", ok, msg)
-    case("every header fn 1..8 and 10 of module 11 resolves", sorted(bootmachine.Machine(elf0, plan0, boothost.Services(root)).plat) == [*range(1, 9), 10])
+    case("every header fn 1..8, 10 and 11..14 of module 11 resolves", sorted(bootmachine.Machine(elf0, plan0, boothost.Services(root)).plat) == [*range(1, 9), 10, 11, 12, 13, 14])
+
+    class NoSec(boothost.Services):
+        plat_section_map = None
+
+    try:
+        bootmachine.Machine(elf0, plan0, NoSec(root))   # services may override a fn; None means "not there": the machine's own serves it
+        ok = True
+    except bootmachine.MachineError:
+        ok = False
+    case("section fns are served by the machine itself", ok)
+    del bootmachine.PLATFORM_FNS[14]
+    try:
+        bootmachine.Machine(elf0, plan0, boothost.Services(root))
+        ok, msg = True, ""
+    except bootmachine.MachineError as e:
+        ok, msg = False, str(e)
+    case("construction check is over PLATFORM_FNS (fn 14 removed: still builds, 13 others resolve)", ok, msg)
+    bootmachine.PLATFORM_FNS[14] = ("section_free", 1)
+    saved = bootmachine.Machine._plat_section_free
+    del bootmachine.Machine._plat_section_free
+    try:
+        bootmachine.Machine(elf0, plan0, boothost.Services(root))
+        ok, msg = False, "no error"
+    except bootmachine.MachineError as e:
+        ok, msg = "section_free" in str(e), str(e)
+    bootmachine.Machine._plat_section_free = saved
+    case("totality: a missing section fn raises at construction", ok, msg)
     # ACCESS_FAULT_HANDLER (module 11 fn 10)
     def kv(lines):
         return {l.split("=")[0]: l.split("=")[1] for l in lines if "=" in l}
@@ -641,6 +782,68 @@ def main():
          rj["reason"] == "fault" and rj["fault"]["kind"] == "frame-unwritable" and kv(lj).get("misaligned") == "cc01", (rj, lj))
     case("fault handler: two identical runs give identical run() dicts", ra == run(built[12][0], root)[0]
          and ri == run(built[20][0], root)[0], ra)
+    # sections (module 11 fn 11..14)
+    def E(c):
+        return "%x" % (-c & ((1 << 64) - 1))
+
+    r30, l30 = run(built[30][0], root)[:2]
+    k = kv(l30)
+    case("section: run exits", r30["reason"] == "exit" and r30["exit_code"] == 7, (r30, l30))
+    ok_vals = {"resv": "1", "c0": E(0xCA01), "c-unal": E(0xCA01), "c-big": E(0xCA01), "id": "1", "A": "1", "B-own": "1", "C": "1",
+               "zero": "0", "share1": "22", "share2": "33", "share3": "44", "C-sees": "1",
+               "m-size0": E(0xCA01), "m-size-unal": E(0xCA01), "m-size-over": E(0xCA01), "m-addr-unal": E(0xCC01),
+               "m-off-unal": E(0xCC01), "m-id": E(0xE401), "m-id0": E(0xE401), "m-range": E(0xD401), "m-range-wrap": E(0xD401),
+               "h-outside": E(0xDA01), "h-keys": E(0xDA01), "h-image": E(0xDA01), "h-heap": E(0xDA01), "h-straddle": E(0xDA01),
+               "h-over-view": E(0xD401), "commit-gap": "0", "h-over-committed": E(0xD401),
+               "vm-commit": "d401", "vm-commit-wide": "d401", "vm-commit-B": "d401", "vm-decommit": "d401", "vm-protect": "d401",
+               "vm-protect-B": "d401", "vm-release": "d401", "view-intact": "1", "mf-B": "1", "mf-A": "1", "resv2-clear": "1",
+               "resv-hint-B": "0", "u-wrong-size": E(0xD401), "u-wrong-addr": E(0xD401), "u-nonview": E(0xD401),
+               "free": "0", "map-after-free": E(0xE401), "free-twice": E(0xE401), "free-unknown": E(0xE401), "alive-A": "1",
+               "alive-B": "55", "u-A": "0", "u-B-still": "55", "u-C": "0", "u-B": "0", "u-B-twice": E(0xD401),
+               "release-R": "0", "B2-lowest": "1", "s2-id": "2"}
+    bad = {n: (k.get(n), v) for n, v in ok_vals.items() if k.get(n) != v}
+    case("section: every create/map/unmap/free/interplay result as the header says (%d values)" % len(ok_vals), not bad, bad)
+    ev = [(e["kind"], e["result"]) for e in r30["events"]]
+    want = [("section_create-refused", 0xCA01)] * 3 + [("section_map-refused", c) for c in (
+        0xCA01, 0xCA01, 0xCA01, 0xCC01, 0xCC01, 0xE401, 0xE401, 0xD401, 0xD401, 0xDA01, 0xDA01, 0xDA01, 0xDA01, 0xDA01, 0xD401)]
+    case("section: refusals recorded in order (create, map errors)", ev[:len(want)] == want, ev[:len(want)])
+    tail = ev[len(want):]
+    case("section: later refusals are vm_*, map_fixed, section_map/unmap/free refusals with the codes",
+         tail[:1] == [("section_map-refused", 0xD401)] and tail[1:8] == [("vm_commit-refused", 0xD401)] * 3
+         + [("vm_decommit-refused", 0xD401), ("vm_protect-refused", 0xD401), ("vm_protect-refused", 0xD401), ("vm_release-refused", 0xD401)]
+         and ("map_fixed-refused", 0xCC01) in tail and tail.count(("section_unmap-refused", 0xD401)) == 4
+         and tail.count(("section_free-refused", 0xE401)) == 2 and ("section_map-refused", 0xE401) in tail, tail)
+    r31, l31 = run(built[31][0], root)[:2]
+    k = kv(l31)
+    case("section: unmapped view faults, the other view still works and writes",
+         r31["reason"] == "fault" and r31["fault"]["kind"] == "read-unmapped" and r31["fault"]["addr"] == int(k["A-addr"], 16)
+         and k["unmap-A"] == "0" and k["B-works"] == "7" and k["B-writes"] == "9" and k["A-addr"] != k["B-addr"]
+         and "after the fault" not in l31, (r31, l31))
+    r32, l32 = run(built[32][0], root)[:2]
+    k = kv(l32)
+    case("section: threads share views (B reads A's write, main reads the thread's write)",
+         r32["reason"] == "exit" and r32["threads"] == 3 and k.get("thread-read") == "a5a6" and k.get("thread-write") == "77", (r32, l32))
+    r33, l33 = run(built[33][0], root)[:2]
+    k = kv(l33)
+    case("section: the fault-handler frame may live in a view (frame bytes visible through another view)",
+         r33["reason"] == "exit" and k.get("reg") == "0" and k.get("marker") == "abcd" and k.get("kind") == "1"
+         and k.get("addr") == "30000000" and k.get("frame-in-view") == "1" and k.get("same-pages") == "1", (r33, l33))
+    r34, l34 = run(built[34][0], root)[:2]
+    k = kv(l34)
+    case("section: table limits (128 sections incl. deferred ones, 512 views, ids never reused)",
+         r34["reason"] == "exit" and k.get("sections-ok") == "80" and k.get("last-id") == "80" and k.get("c-full") == E(0xCE01)
+         and k.get("free-first-deferred") == "0" and k.get("c-full-deferred") == E(0xCE01) and k.get("unmap-last-view") == "0"
+         and k.get("id129") == "81" and k.get("free-last") == "0" and k.get("id130") == "82" and k.get("views-ok") == "200"
+         and k.get("views-ascending") == "1" and k.get("v-full") == E(0xCE01) and k.get("unmap-one") == "0" and k.get("v-after") == "1",
+         (r34, l34))
+    case("section: two identical runs give identical run() dicts", r30 == run(built[30][0], root)[0]
+         and r32 == run(built[32][0], root)[0] and r34 == run(built[34][0], root)[0], r30)
+    r35 = run(built[35][0], root)[0]
+    r36 = run(built[36][0], root)[0]
+    case("exit code 0x52000000|fact_id is reason reach-violation with fact_id", r35["reason"] == "reach-violation"
+         and r35["fact_id"] == 42 and r35["exit_code"] == 0x5200002A, r35)
+    case("other non-zero exit codes stay ordinary exits (no fact_id)", r36["reason"] == "exit" and "fact_id" not in r36
+         and r1["reason"] == "exit" and "fact_id" not in r1, r36)
     print("%d cases, %.1f s" % (N[0], time.time() - t0))
     return 1 if FAILED else 0
 
