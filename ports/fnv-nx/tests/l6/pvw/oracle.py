@@ -123,6 +123,7 @@ EXT = None   # (left, end) of the destination write range of the last successful
 def model(c):
     """c: dict (see test_pvw.py). -> (hr, set of fixme ids, dst bytes or None)"""
     fx = set(); NSKIP[0] = 0
+    if c.get("bad"): return INV, set(), None   # wrong-type destination / declaration object: INVALIDCALL before anything (memory-safety rule)
     if c["declarg"]: fx.add(14)
     if c["dstnull"]: return INV, set(), None
     # stream info

@@ -59,12 +59,17 @@ static void run_line(char* line, int lineno) {
     else { HRESULT chr = dev->CreateVertexBuffer(dlen, 0, dfvf, (D3DPOOL)pool, &dst, nullptr); if (chr != D3D_OK) printf("  line %d: CreateVertexBuffer len %u fvf %x pool %u ex %d hr %08x\n", lineno, dlen, dfvf, pool, ex, (unsigned)chr); CHECK_HR(chr, D3D_OK); if (!dst) return;
         void* p; CHECK_HR(dst->Lock(0, 0, &p, 0), D3D_OK); memcpy(p, dinit.data(), dinit.size()); dst->Unlock(); }
     NxBufCore* db = static_cast<NxBufCore*>(nx_obj_of((IUnknown*)dst)); uint32_t lo, hi; db->take_dirty(&lo, &hi); uint32_t rev0 = db->rev;
-    t.next(); uint32_t start = t.u(), didx = t.u(), count = t.u(), declarg = t.u(), dstnull = t.u(), flags = t.u();
+    t.next(); uint32_t start = t.u(), didx = t.u(), count = t.u(), declarg = t.u(), dstnull = t.u(), flags = t.u(), bad = t.u();
     t.next(); std::vector<uint8_t> exp = hex(t.next()); t.next(); char* dr = t.next(); uint32_t elo = 0, ehi = 0; bool edirty = strcmp(dr, "-") != 0; if (edirty) { elo = (uint32_t)strtoul(dr, nullptr, 16); ehi = t.u(); }
     IDirect3DVertexDeclaration9* arg = nullptr;
     if (declarg) { D3DVERTEXELEMENT9 el[2] = {{0, 0, D3DDECLTYPE_FLOAT3, 0, D3DDECLUSAGE_POSITION, 0}, D3DDECL_END()}; CHECK_HR(dev->CreateVertexDeclaration(el, &arg), D3D_OK); }
+    IDirect3DIndexBuffer9* ib = nullptr; IDirect3DVertexBuffer9* dstarg = dstnull ? nullptr : dst;
+    // bad=1: the destination is an object of the wrong type (an index buffer); bad=2: the declaration argument is a vertex buffer (rule M: INVALIDCALL, no FIXME, nothing touched)
+    if (bad == 1) { CHECK_HR(dev->CreateIndexBuffer(16, 0, D3DFMT_INDEX16, D3DPOOL_SYSTEMMEM, &ib, nullptr), D3D_OK); dstarg = reinterpret_cast<IDirect3DVertexBuffer9*>(ib); }
+    if (bad == 2) { IDirect3DVertexBuffer9* vb2 = nullptr; CHECK_HR(dev->CreateVertexBuffer(16, 0, 0, D3DPOOL_SYSTEMMEM, &vb2, nullptr), D3D_OK); arg = reinterpret_cast<IDirect3DVertexDeclaration9*>(vb2); }
     ULONG r_dev = rc(dev), r_dst = rc(dst), r_arg = rc(arg), r_decl = rc(decl); std::vector<ULONG> r_src; for (auto* s : src) r_src.push_back(rc(s));
-    Snap before = snap(dev, ex); HRESULT hr; std::vector<uint32_t> got = capture_call([&] { return dev->ProcessVertices(start, didx, count, dstnull ? nullptr : dst, arg, flags); }, &hr);
+    Snap before = snap(dev, ex); HRESULT hr; std::vector<uint32_t> got = capture_call([&] { return dev->ProcessVertices(start, didx, count, dstarg, arg, flags); }, &hr);
+    if (ib) ib->Release();
     char what[96]; snprintf(what, sizeof what, "line %d hr", lineno); if (!t_check((uint32_t)hr == want_hr, what, __FILE__, __LINE__)) printf("  line %d: hr %08x want %08x\n", lineno, (unsigned)hr, want_hr);
     std::vector<uint32_t> g2 = got, w2 = want_fix; std::sort(g2.begin(), g2.end()); std::sort(w2.begin(), w2.end());
     if (!t_check(g2 == w2, "fixme ids", __FILE__, __LINE__)) { printf("  line %d: fixmes got", lineno); for (auto x : g2) printf(" %u", x); printf(" want"); for (auto x : w2) printf(" %u", x); printf("\n"); }

@@ -94,7 +94,7 @@ def encode(c):
     else: o.append("DC %x " % len(c["decl"]) + " ".join("%x %x %x %x %x" % e for e in c["decl"]))
     st = c["streams"]; o.append("ST %x " % len(st) + " ".join("%x %x %x %x %x %x %s" % (i, d["stride"], d["offset"], len(d["data"]), d.get("cfvf", 0), d.get("usage", 0), h(d["data"])) for i, d in st.items()))
     o.append("VS %x" % c["vs"]); o.append("DS %x %x %s" % (c["dstfvf"], 0 if c["alias"] else c["dlen"], h(c["dstbytes"])))
-    o.append("CL %x %x %x %x %x %x" % (c["start"], c["dstidx"], c["count"], c["declarg"], c["dstnull"], c["flags"]))
+    o.append("CL %x %x %x %x %x %x %x" % (c["start"], c["dstidx"], c["count"], c["declarg"], c["dstnull"], c["flags"], c.get("bad", 0)))
     o.append("EX " + h(c["exp"])); e = c["ext"]
     if e is None: o.append("DR -")
     elif c["pool"] == 1: o.append("DR %x %x" % e)
