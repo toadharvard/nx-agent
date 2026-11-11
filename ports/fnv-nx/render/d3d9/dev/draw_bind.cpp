@@ -45,12 +45,13 @@ HRESULT nx_bind_plan(NxDeviceCore* d, const NxDrawReq& r, const NxLayout& lay, N
     for (uint32_t i = 0; i < NX4_MAX_STREAMS; i++) {
         if (!(lay.streams >> i & 1) || (r.up && i == 0)) continue;
         NxBufCore* vb = static_cast<NxBufCore*>(nx_obj_of((IUnknown*)s.stream[i].vb)); uint32_t off = s.stream[i].offset;
-        bp->vtx[i][0] = mirror(vb); bp->vtx[i][1] = off; bp->vtx[i][2] = vb->length - off; bp->vtx[i][3] = s.stream[i].stride; bp->nvtx_mask |= 1u << i;      // B1 (the caller checked off < length)
+        bp->vtx[i][0] = mirror(vb); if (!bp->vtx[i][0]) { nx_bind_done(bp); return D3DERR_OUTOFVIDEOMEMORY; }          // no backend memory for the mirror
+        bp->vtx[i][1] = off; bp->vtx[i][2] = vb->length - off; bp->vtx[i][3] = s.stream[i].stride; bp->nvtx_mask |= 1u << i;      // B1 (the caller checked off < length)
     }
     if (lay.zero_stream >= 0) { bp->zero_blk = zero_block(); if (!bp->zero_blk) return D3DERR_OUTOFVIDEOMEMORY; }
     if (r.up && is_big(r.up->vbytes)) { if (!big_block(r.up->vtx, r.up->vbytes, &bp->big_mem[0], &bp->big_blk[0])) return D3DERR_OUTOFVIDEOMEMORY; }
     if (r.up && r.indexed && is_big(r.up->ibytes)) { if (!big_block(r.up->idx, r.up->ibytes, &bp->big_mem[1], &bp->big_blk[1])) { nx_bind_done(bp); return D3DERR_OUTOFVIDEOMEMORY; } }
-    if (r.indexed && !r.up) { NxBufCore* ib = static_cast<NxBufCore*>(nx_obj_of((IUnknown*)s.ib[0])); bp->idx[0] = mirror(ib); bp->idx[1] = 0; bp->idx[2] = ib->length; bp->idx[3] = ib->fmt == D3DFMT_INDEX32; bp->has_idx = true; }
+    if (r.indexed && !r.up) { NxBufCore* ib = static_cast<NxBufCore*>(nx_obj_of((IUnknown*)s.ib[0])); bp->idx[0] = mirror(ib); if (!bp->idx[0]) { nx_bind_done(bp); return D3DERR_OUTOFVIDEOMEMORY; } bp->idx[1] = 0; bp->idx[2] = ib->length; bp->idx[3] = ib->fmt == D3DFMT_INDEX32; bp->has_idx = true; }
     return D3D_OK;
 }
 void nx_bind_done(NxBindPlan* bp) {

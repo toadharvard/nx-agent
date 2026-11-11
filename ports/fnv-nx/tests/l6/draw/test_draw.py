@@ -46,7 +46,7 @@ def build(dev, tmp, jobs=8, base=None, only=None):
     objdir = tmp
     def obj(n): p = os.path.join(tmp, n + ".o"); return p if os.path.exists(p) else os.path.join(base, n + ".o")
     prod = [obj(n) for _, n in srcs if n in LIB + GENS + RES + GLUE + DRAW]
-    link = [obj(n) for _, n in srcs] + [obj("nx_" + f + ".o".replace(".o", "")) if False else (os.path.join(tmp, "nx_" + f + ".o") if base is None else os.path.join(base, "nx_" + f + ".o")) for f in fronts]
+    link = [obj(n) for _, n in srcs] + [os.path.join(tmp if base is None else base, "nx_" + f + ".o") for f in fronts]
     r = sh(["g++", "-m32", "-no-pie", "-o", os.path.join(tmp, "test_draw")] + link + ["-Wl,--unresolved-symbols=ignore-all"])
     return (os.path.join(tmp, "test_draw"), prod) if r.returncode == 0 else (None, r.stderr[-800:])
 
@@ -57,15 +57,11 @@ def run(exe, data):
 
 
 # ---- g: gates
-SHARED_EDITS = [   # my additive edits of shared files, reversed to build the "before" tree: (file, text now, text before)
-    ("res_core.h", "struct NxShaderCore;\nvoid nxd3d_shader_ids_destroy(NxShaderCore* s);", None), ]
-
-
 def before_tree(tmp):
     """a copy of render/d3d9 without the draw path: draw_*, nxgpu4_shader.h, and my additive edits of shared files reversed (res_core.h, res_sm.h, res_smcheck.cpp, state_rt.h/.cpp, glue_stream.h/.cpp)"""
     root = os.path.join(tmp, "before"); d9 = os.path.join(root, "render", "d3d9"); os.makedirs(os.path.join(root, "render"))
     shutil.copytree(os.path.join(ROOT, "render", "d3d9"), d9, ignore=shutil.ignore_patterns("draw_*", "nxgpu4_shader.h", "__pycache__"))
-    for l in ("shim",): os.symlink(os.path.join(ROOT, l), os.path.join(root, l))
+    for l in ("shim", "tests"): os.symlink(os.path.join(ROOT, l), os.path.join(root, l))
     os.symlink(os.path.join(ROOT, "render", "shaders"), os.path.join(root, "render", "shaders"))
     dev = os.path.join(d9, "dev")
     def edit(f, fn):
@@ -76,7 +72,7 @@ def before_tree(tmp):
     edit("res_core.h", lambda s: cut(s, "struct NxShaderCore;\nvoid nxd3d_shader_ids_destroy", "struct NxShaderCore : NxObj {") .replace("    NxShaderProg* progs = nullptr; uint32_t nprogs = 0, cprogs = 0;\n", "").replace("~NxShaderCore() { if (nprogs) nxd3d_shader_ids_destroy(this); nxd3d_free(progs); nxd3d_free(code); }", "~NxShaderCore() { nxd3d_free(code); }"))
     edit("state_rt.h", lambda s: re.sub(r"    NxDevLifeBase\* draw = nullptr;[^\n]*\n", "", s))
     edit("state_rt.cpp", lambda s: s.replace("delete life; delete draw; }", "delete life; }"))
-    edit("res_sm.h", lambda s: cut(s, "    uint32_t pair_set[7];", "};\nuint32_t nx_sm_bytes") .replace("uint32_t nx_sm_pairs(const NxSmIface* i, uint8_t* out);", "") if False else re.sub(r"    uint32_t pair_set\[7\];.*?\n\};", "};", re.sub(r"uint32_t nx_sm_pairs\([^\n]*\n", "", s), flags=re.S))
+    edit("res_sm.h", lambda s: re.sub(r"    uint32_t pair_set\[7\];.*?\n\};", "};", re.sub(r"uint32_t nx_sm_pairs\([^\n]*\n", "", s), flags=re.S))
     def smc(s):
         s = re.sub(r"static void add_pair\([^\n]*\n", "", s); s = re.sub(r"uint32_t nx_sm_pairs\([^\n]*\n", "", s)
         s = re.sub(r"        if \(!c\.stage && dst\) \{.*?\n        \}\n        if \(c\.stage && c\.major < 3\)[^\n]*\n", "", s, flags=re.S)
