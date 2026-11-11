@@ -4,6 +4,7 @@
  * what Wine 9.0 does. Expected values come from wine-9.0:dlls/quartz/filesource.c (FileAsyncReader_*),
  * dlls/quartz/memallocator.c (BaseMemAllocator_*, StdMediaSample2_*), libs/strmbase/pin.c (pin_ConnectionMediaType) and
  * dlls/quartz/filtergraph.c (MediaControl_*). Everything runs on the real platform files (no double of a platform symbol). */
+#define DSH_IMPL
 #include "s7_test.h"
 
 #include <stdint.h>
@@ -253,7 +254,7 @@ TEST(dshow_memory_allocator)
     CHECK_EQ((uintptr_t)(pa > pb ? pa - pb : pb - pa), (uintptr_t)128);   /* stride: 108 rounded up to 64 */
     CHECK_EQ((uintptr_t)(pa - 8) % 64, (uintptr_t)0);
     CHECK_EQ((uintptr_t)(pb - 8) % 64, (uintptr_t)0);
-    CHECK_EQ(al->SetProperties(&rq, &act), VFW_E_ALREADY_COMMITTED_);
+    CHECK_EQ(al->SetProperties(&rq, &act), VFW_E_BUFFERS_OUTSTANDING_);   /* used_list is checked before committed */
     /* Decommit with buffers out is queued: no new buffer, then the last release frees the buffers */
     CHECK_EQ(al->Decommit(), 0);
     CHECK_EQ(al->GetBuffer(&c, nullptr, nullptr, 4), VFW_E_NOT_COMMITTED_);

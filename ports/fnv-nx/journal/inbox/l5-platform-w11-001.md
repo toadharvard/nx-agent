@@ -1,6 +1,6 @@
-# l5-platform-w8-001: DirectShow без заглушек
+# l5-platform-w11-001: DirectShow без заглушек
 
-Ветка `claude/fnv-l5-platform-w8`. Макросы `FNVNX_UNIMPL` и `E_NOTIMPL_` удалены (определения убраны,
+Ветка `claude/fnv-l5-platform-w11`. Макросы `FNVNX_UNIMPL` и `E_NOTIMPL_` удалены (определения убраны,
 `grep` по ports/fnv-nx в коде и тестах пуст; остались упоминания только в старых journal/inbox).
 
 ## Что было и во что стало
