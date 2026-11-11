@@ -1,24 +1,135 @@
 {
- "_draft": "W1b draft. Product: ELF `sdp2dksh` (D3D9 bytecode -> GLSL -> uam -> DKSH). Needs THREE source sets in one root (see inbox l6-render-w1b.md, question Q1).",
- "name": "fnvnx-sdp2dksh",
- "host": "x86_64-linux-gnu",
- "sources": [
-  {"external": "mojoshader", "dir": ".",
-   "patches": ["render/shaders/mojoshader.patch", "render/shaders/patches/mojoshader_units.patch"],
-   "include": ["."],
-   "generated": [{"python": "render/shaders/total/gen_sm_rows.py", "inputs": ["render/shaders/total/sm_table.json"], "output": "fnvnx_sm_rows.h"}],
-   "flags": {"common": ["-O3", "-DNDEBUG", "-fPIC", "-Wall",
-                        "-DSUPPORT_PROFILE_ARB1=0", "-DSUPPORT_PROFILE_ARB1_NV=0", "-DSUPPORT_PROFILE_D3D=0", "-DSUPPORT_PROFILE_GLSL120=0",
-                        "-DSUPPORT_PROFILE_GLSPIRV=0", "-DSUPPORT_PROFILE_HLSL=0", "-DSUPPORT_PROFILE_METAL=0", "-DSUPPORT_PROFILE_SPIRV=0"]}},
-  {"external": "uam", "dir": ".",
-   "patches": ["render/shaders/uam.patch", "render/shaders/patches/uam_gen.patch", "render/shaders/patches/uam_nomain.patch"],
-   "include": [".", "mesa-imported", "mesa-imported/glsl", "mesa-imported/glsl/glcpp"],
-   "flags": {"common": ["-O3", "-DNDEBUG", "-fPIC", "-Wall", "-D_FILE_OFFSET_BITS=64", "-DDESKTOP", "-D_USE_MATH_DEFINES", "-D_GNU_SOURCE", "-DHAVE_POSIX_MEMALIGN", "-ffunction-sections"],
-             "c": ["-std=c99", "-Werror=implicit-function-declaration"],
-             "cxx": ["-std=c++11", "-Wno-class-memaccess", "-Wno-non-virtual-dtor"]}},
-  {"tree": "render/shaders", "units": ["src/sdp.c", "src/frontend.c", "src/backend_mojoshader.c", "src/translate.c", "src/dk.cpp", "src/sdp2dksh.c"],
-   "include": ["include", "src", "@mojoshader", "@uam/source"],
-   "flags": {"common": ["-O3", "-DNDEBUG"], "c": ["-std=gnu99"], "cxx": ["-std=gnu++17"]}}
+ "_draft": "W1b: trunk keys + `sources` list (needs w16/L1: several externals in one root, Q1). ELF `sdp2dksh`; own units are the tracked src/*.c(pp) of this root.",
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "x86_64-linux-gnu-gcc-13",
+  "cxx": "x86_64-linux-gnu-g++-13"
+ },
+ "flags": {
+  "c": [
+   "-O3",
+   "-DNDEBUG",
+   "-std=gnu99"
+  ],
+  "cxx": [
+   "-O3",
+   "-DNDEBUG",
+   "-std=gnu++17"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/render/shaders/include",
+  "ports/fnv-nx/render/shaders/src",
+  "/ext/mojoshader",
+  "/ext/uam/source"
  ],
- "link": {"output": "sdp2dksh", "flags": ["-Wl,--gc-sections"], "libs": ["-lm", "-lpthread"]}
+ "units": "all",
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/render/shaders/total/gen_sm_rows.py",
+   "args": [
+    "/out/fnvnx_sm_rows.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/render/shaders/total/sm_table.json"
+   ],
+   "outputs": [
+    "fnvnx_sm_rows.h"
+   ]
+  }
+ ],
+ "sources": [
+  {
+   "external": "mojoshader",
+   "dir": "/ext/mojoshader",
+   "patches": [
+    "ports/fnv-nx/render/shaders/mojoshader.patch",
+    "ports/fnv-nx/render/shaders/patches/mojoshader_units.patch"
+   ],
+   "flags": {
+    "c": [
+     "-O3",
+     "-DNDEBUG",
+     "-fPIC",
+     "-Wall",
+     "-DSUPPORT_PROFILE_ARB1=0",
+     "-DSUPPORT_PROFILE_ARB1_NV=0",
+     "-DSUPPORT_PROFILE_D3D=0",
+     "-DSUPPORT_PROFILE_GLSL120=0",
+     "-DSUPPORT_PROFILE_GLSPIRV=0",
+     "-DSUPPORT_PROFILE_HLSL=0",
+     "-DSUPPORT_PROFILE_METAL=0",
+     "-DSUPPORT_PROFILE_SPIRV=0"
+    ]
+   }
+  },
+  {
+   "external": "uam",
+   "dir": "/ext/uam",
+   "patches": [
+    "ports/fnv-nx/render/shaders/uam.patch",
+    "ports/fnv-nx/render/shaders/patches/uam_gen.patch",
+    "ports/fnv-nx/render/shaders/patches/uam_nomain.patch"
+   ],
+   "flags": {
+    "c": [
+     "-O3",
+     "-DNDEBUG",
+     "-fPIC",
+     "-Wall",
+     "-D_FILE_OFFSET_BITS=64",
+     "-DDESKTOP",
+     "-D_USE_MATH_DEFINES",
+     "-D_GNU_SOURCE",
+     "-DHAVE_POSIX_MEMALIGN",
+     "-ffunction-sections",
+     "-std=c99",
+     "-Werror=implicit-function-declaration"
+    ],
+    "cxx": [
+     "-O3",
+     "-DNDEBUG",
+     "-fPIC",
+     "-Wall",
+     "-D_FILE_OFFSET_BITS=64",
+     "-DDESKTOP",
+     "-D_USE_MATH_DEFINES",
+     "-D_GNU_SOURCE",
+     "-DHAVE_POSIX_MEMALIGN",
+     "-ffunction-sections",
+     "-std=c++11",
+     "-Wno-class-memaccess",
+     "-Wno-non-virtual-dtor"
+    ]
+   }
+  }
+ ],
+ "link": {
+  "script": null,
+  "output": "sdp2dksh",
+  "flags": [
+   "-Wl,--gc-sections",
+   "-lm",
+   "-lpthread"
+  ]
+ },
+ "external": [
+  {
+   "name": "mojoshader",
+   "repo": "fnv-nx-build",
+   "ref": "tools/mojoshader",
+   "commit": "ad5dff84830c2863c841f4b1f4e3df78c705b383",
+   "tree_sha256": "e49a1b65e09c86647fd8c0b26c7a8e16e4a16e6ad1290a1e7ada85047306f361",
+   "at": "/ext/mojoshader"
+  },
+  {
+   "name": "uam",
+   "repo": "fnv-nx-build",
+   "ref": "tools/uam",
+   "commit": "5a5afc2bae8b55409ab36ba45be63fcb73f68993",
+   "tree_sha256": "8dbb502db95ccd73e5be58e83a4862be2067540ed5640b65364a71ef9d67201b",
+   "at": "/ext/uam"
+  }
+ ]
 }

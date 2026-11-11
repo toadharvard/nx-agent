@@ -1,17 +1,72 @@
 {
- "_draft": "W1b draft; keys as in the lead's brief (RECIPE.md of w16 not available). Product: ELF `uam` (GLSL -> DKSH).",
- "name": "fnvnx-uam",
- "host": "x86_64-linux-gnu",
- "sources": {
-  "external": "uam",
-  "dir": ".",
-  "patches": ["render/shaders/uam.patch", "render/shaders/patches/uam_gen.patch"],
-  "include": [".", "mesa-imported", "mesa-imported/glsl", "mesa-imported/glsl/glcpp"]
+ "_draft": "W1b: trunk recipe keys (fnvnx-recipe/1) + `sources` (the w16 extension, not yet implemented). ELF `uam`.",
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "cc": "x86_64-linux-gnu-gcc-13",
+  "cxx": "x86_64-linux-gnu-g++-13"
  },
  "flags": {
-  "common": ["-O3", "-DNDEBUG", "-fPIC", "-Wall", "-D_FILE_OFFSET_BITS=64", "-DDESKTOP", "-D_USE_MATH_DEFINES", "-D_GNU_SOURCE", "-DHAVE_POSIX_MEMALIGN", "-ffunction-sections"],
-  "c": ["-std=c99", "-Werror=implicit-function-declaration"],
-  "cxx": ["-std=c++11", "-Wno-class-memaccess", "-Wno-non-virtual-dtor"]
+  "c": [
+   "-O3",
+   "-DNDEBUG",
+   "-fPIC",
+   "-Wall",
+   "-D_FILE_OFFSET_BITS=64",
+   "-DDESKTOP",
+   "-D_USE_MATH_DEFINES",
+   "-D_GNU_SOURCE",
+   "-DHAVE_POSIX_MEMALIGN",
+   "-ffunction-sections",
+   "-std=c99",
+   "-Werror=implicit-function-declaration"
+  ],
+  "cxx": [
+   "-O3",
+   "-DNDEBUG",
+   "-fPIC",
+   "-Wall",
+   "-D_FILE_OFFSET_BITS=64",
+   "-DDESKTOP",
+   "-D_USE_MATH_DEFINES",
+   "-D_GNU_SOURCE",
+   "-DHAVE_POSIX_MEMALIGN",
+   "-ffunction-sections",
+   "-std=c++11",
+   "-Wno-class-memaccess",
+   "-Wno-non-virtual-dtor"
+  ],
+  "asm": []
  },
- "link": {"output": "uam", "flags": ["-Wl,--gc-sections"]}
+ "include": [
+  "/ext/uam",
+  "/ext/uam/mesa-imported",
+  "/ext/uam/mesa-imported/glsl",
+  "/ext/uam/mesa-imported/glsl/glcpp"
+ ],
+ "units": "all",
+ "sources": {
+  "external": "uam",
+  "dir": "/ext/uam",
+  "patches": [
+   "ports/fnv-nx/render/shaders/uam.patch",
+   "ports/fnv-nx/render/shaders/patches/uam_gen.patch"
+  ]
+ },
+ "link": {
+  "script": null,
+  "output": "uam",
+  "flags": [
+   "-Wl,--gc-sections"
+  ]
+ },
+ "external": [
+  {
+   "name": "uam",
+   "repo": "fnv-nx-build",
+   "ref": "tools/uam",
+   "commit": "5a5afc2bae8b55409ab36ba45be63fcb73f68993",
+   "tree_sha256": "8dbb502db95ccd73e5be58e83a4862be2067540ed5640b65364a71ef9d67201b",
+   "at": "/ext/uam"
+  }
+ ]
 }

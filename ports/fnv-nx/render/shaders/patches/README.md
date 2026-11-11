@@ -23,7 +23,7 @@ the patched sources (uam.patch applied), run inside the directory of the input s
 cd mesa-imported/glsl
 bison -o glsl_parser.cpp -p _mesa_glsl_ --defines=glsl_parser.h glsl_parser.yy        # GNU Bison 3.8.2
 flex  -o glsl_lexer.cpp glsl_lexer.ll                                                  # flex 2.6.4 (westes tarball sha256 e87aae03...ee995)
-python3 ir_expression_operation.py enum      > ir_expression_operation.h              # mako 1.x
+python3 ir_expression_operation.py enum      > ir_expression_operation.h              # mako 1.4.3
 python3 ir_expression_operation.py constant  > ir_expression_operation_constant.h
 python3 ir_expression_operation.py strings   > ir_expression_operation_strings.h
 cd glcpp
@@ -43,3 +43,6 @@ All other units are the same in both roots; use the same flags in both so the un
 - MojoShader: 13 units after the patch, defines `SUPPORT_PROFILE_{ARB1,ARB1_NV,D3D,GLSL120,GLSPIRV,HLSL,METAL,SPIRV}=0`, `-O3 -DNDEBUG -fPIC -Wall`, include `.`.
 - uam (libuam.a): 179 units = 175 tracked + `source/uam_api.cpp` (uam.patch) + 4 generated (`glsl_parser.cpp`, `glsl_lexer.cpp`, `glcpp-parse.c`, `glcpp-lex.c`) - `source/main.cpp`; 136 C++ + 43 C.
   The `uam` ELF adds main.cpp: 180 units. No tracked source of uam is unbuilt, so uam needs no deletions.
+
+Provenance test: `tests/l6/shaders_gen/test_uam_gen.py --uam-tree <pinned tree> [--flex P] [--python P]` regenerates the nine files with
+bison 3.8.2, flex 2.6.4 and mako 1.4.3 (versions asserted) and compares them byte for byte with the content of `uam_gen.patch`.

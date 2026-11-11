@@ -103,8 +103,8 @@ def main():
           and d["env"]["PYTHONHASHSEED"] == "0" and d["env"]["PATH"] == os.path.dirname(real) and d["env"]["TZ"] == "UTC")
     p = run(PY + [os.path.join(VERIFY, "toolflags.py"), "check", WORK + "/stage.json"])
     check("stage passes toolflags", p.returncode == 0, p.stdout[-600:])
-    run_doc = WORK + "/stage.run.json"
-    check("sandbox-accepted run document written next to it", os.path.exists(run_doc))
+    run_doc = WORK + "/stage.json"
+    check("the same document (with its \"tool\" key) is accepted by sandbox.check_doc; no second file", not os.path.exists(WORK + "/stage.run.json"))
     t = time.time()
     p = sbx("run", "--store", STORE, run_doc, "--result", WORK + "/res0.json")
     TIMES["sandbox run cold"] = time.time() - t
@@ -142,7 +142,7 @@ def main():
         a2 = ["stage", "--store", STORE, "--runtime", WORK + "/runtime-cs.json", "--name", "rt-capstone", "--class", "verification",
               "--input", "/in=" + WORK + "/in", "--output", "/out", "-o", WORK + "/stage-cs.json", "--", "/in/calc.py", "--mod", "capstone"]
         rt(*a2)
-        p = sbx("run", "--store", STORE, WORK + "/stage-cs.run.json", "--result", WORK + "/res-cs.json")
+        p = sbx("run", "--store", STORE, WORK + "/stage-cs.json", "--result", WORK + "/res-cs.json")
         check("import capstone works inside the sandbox", p.returncode == 0 and json.load(open(WORK + "/res-cs.json"))["rc"] == 0, p.stdout[-300:])
 
 
@@ -205,11 +205,77 @@ def loader_rule():
           and runtime.elf_files(d + "/w64", runtime.ident(libc)) == [d + "/w64/libc.so.6"])
 
 
+def tool_tree_map():
+    """--tree HOST@AT: a toolchain tree that lives at HOST here and at /opt/tc in the sandbox; its binaries find a private library
+    through an absolute RUNPATH into their own prefix (/opt/tc/lib), another through $ORIGIN, a third through an old-style RPATH."""
+    import runtime
+    h = BASE + "/tc"
+    shutil.rmtree(h, ignore_errors=True)
+    for n in ("bin", "lib", "lib2", "lib3", "src"):
+        os.makedirs(h + "/" + n)
+    for n, body in (("priv", "int priv(void){return 40;}"), ("sec", "int sec(void){return 2;}"), ("old", "int old(void){return 100;}")):
+        open("%s/src/%s.c" % (h, n), "w").write(body)
+    open(h + "/src/d.c", "w").write('#include <stdio.h>\nint priv(void);int sec(void);int old(void);\n'
+                                   'int main(void){FILE*f=fopen("/out/r.txt","w");fprintf(f,"%d\\n",priv()+sec()+old());return fclose(f);}\n')
+    cc = lambda *a: run(["gcc"] + list(a), cwd=h + "/src")  # noqa: E731
+    for n, d in (("priv", "lib"), ("sec", "lib2"), ("old", "lib3")):
+        p = cc("-shared", "-fPIC", "-Wl,-soname,lib%s.so" % n, "-o", "../%s/lib%s.so" % (d, n), n + ".c")
+        check("toolchain fixture: lib%s built" % n, p.returncode == 0, p.stdout)
+    link = lambda out, *fl: cc("-o", "../bin/" + out, "d.c", "-L../lib", "-L../lib2", "-L../lib3", "-lpriv", "-lsec", "-lold", *fl)  # noqa: E731
+    p = link("driver", "-Wl,--enable-new-dtags", "-Wl,-rpath,/opt/tc/lib:$ORIGIN/../lib2:/opt/tc/lib3")
+    check("toolchain fixture: driver (absolute + $ORIGIN RUNPATH) built", p.returncode == 0, p.stdout)
+    p = link("drv-rpath", "-Wl,--disable-new-dtags", "-Wl,-rpath,/opt/tc/lib:$ORIGIN/../lib2:/opt/tc/lib3")
+    check("toolchain fixture: drv-rpath (DT_RPATH) built", p.returncode == 0, p.stdout)
+    check("host has no /opt/tc (the sandbox path exists only through the mapping)", not os.path.exists("/opt/tc"))
+    store = BASE + "/store-tc"
+    for exe in ("driver", "drv-rpath"):
+        for how in ("cli", "lib"):
+            if how == "cli":
+                p = rt("tool", "--store", store, "--exe", "/opt/tc/bin/" + exe, "--tree", h + "@/opt/tc", "-o", WORK + "/tc.json")
+                ok, doc = p.returncode == 0, p.returncode == 0 and json.load(open(WORK + "/tc.json"))
+            else:
+                doc = runtime.build_tool(store, ["/opt/tc/bin/" + exe], [h + "@/opt/tc"])
+                ok = True
+            check("tool runtime with --tree HOST@AT (%s, %s)" % (exe, how), ok and [i["at"] for i in doc["inputs"]].count("/opt/tc") == 1
+                  and all(i["at"] == "/opt/tc" or i["at"].startswith(("/lib", "/usr/lib")) for i in doc["inputs"]), p.stdout if how == "cli" else "")
+        d = {"format": "fnvnx-stage/1", "stage": "tc-" + exe, "argv": ["/opt/tc/bin/" + exe], "cwd": "/", "env": {"PATH": "/opt/tc/bin"},
+             "inputs": doc["inputs"], "outputs": ["/out"], "class": "build"}
+        json.dump(d, open(WORK + "/tc-run.json", "w"))
+        p = sbx("run", "--store", store, WORK + "/tc-run.json", "--result", WORK + "/tc-res.json")
+        r = json.load(open(WORK + "/tc-res.json")) if p.returncode == 0 else {}
+        check("%s runs in the sandbox with its libraries found through the mapped paths" % exe, r.get("rc") == 0, p.stdout[-400:])
+        if r.get("rc") == 0:
+            sbx("get", "--store", store, r["key"], "/out", WORK + "/tc-got")
+            check("%s computed 142 from three libraries" % exe, open(WORK + "/tc-got/r.txt").read().strip() == "142")
+            shutil.rmtree(WORK + "/tc-got")
+    # errors: a missing library names object and name; a HOST path in RUNPATH is not a sandbox path
+    shutil.copytree(h, BASE + "/tc-miss", symlinks=True)
+    os.unlink(BASE + "/tc-miss/lib2/libsec.so")
+    try:
+        runtime.build_tool(store, [], [BASE + "/tc-miss@/opt/tc"])
+        check("missing library: error", False, "no error")
+    except runtime.RtError as e:
+        check("missing library: error names the object and the missing name", "libsec.so" in str(e) and "/opt/tc/bin/driver" in str(e), str(e))
+    shutil.copytree(h, BASE + "/tc-host", symlinks=True)
+    for n in ("driver", "drv-rpath"):
+        os.unlink(BASE + "/tc-host/bin/" + n)
+    th = BASE + "/tc-host"
+    p = link("drv-host", "-Wl,--enable-new-dtags", "-Wl,-rpath,%s/lib:%s/lib2:%s/lib3" % (th, th, th))
+    check("fixture: host-path RUNPATH binary", p.returncode == 0, p.stdout)
+    shutil.move(h + "/bin/drv-host", th + "/bin/drv-host")
+    try:
+        runtime.build_tool(store, [], [BASE + "/tc-host@/opt/tc"])
+        check("RUNPATH naming the HOST location: not taken from the host by accident", False, "no error")
+    except runtime.RtError as e:
+        check("RUNPATH naming the HOST location: error names object and name", "libpriv.so" in str(e) and "/opt/tc/bin/drv-host" in str(e), str(e))
+
+
 if os.geteuid() != 0:
     print("FAIL prerequisites: need root (declared environment uid 0)")
     sys.exit(1)
 loader_rule()
 main()
+tool_tree_map()
 print("TIMES " + json.dumps(TIMES, sort_keys=True))
 print("%d failed: %s" % (len(FAILED), FAILED) if FAILED else "ALL PASS")
 sys.exit(1 if FAILED else 0)

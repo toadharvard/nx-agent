@@ -34,3 +34,15 @@ Q2. This branch's verify/env.json has no x86_64 g++ (only gcc-13/cpp-13-x86-64, 
 Q3. Generated bison/flex/mako content: tracked patch (drafted) or pin bison+flex+m4+mako in env.json as recipe tools. The tracked patch is 763 KB of derived text; owner/L1 choice.
 Q4. Unit-cache sharing: both roots use identical uam flags (incl. -fPIC), so 179 of 180 uam units are shared. Keep it so.
 Q5. Not covered yet: shxlate (cache/shxlate.c) and tests/s6b_* roots; libfnvnx_shaders as an archive output.
+
+## Follow-up (lead's order after review of c89fdcc)
+- verify/ of origin/claude/fnv-nx-clean (a2453fe9) is taken into this branch as the measurement base (committed; admit.json unchanged).
+- `recipe.py check` on the drafts, rewritten to the trunk's keys (format, compiler x86_64-linux-gnu-gcc-13/g++-13, flags, include, units all, external with commit+tree_sha256+at),
+  with temporary admit entries (class product, target host; not committed). The trunk's keys alone gave only these findings, besides the w16 key `sources` (unknown key):
+  1. `link must be {script: tracked file of the root, output: NAME.elf, flags}`: a host link has no linker script and the output names are `uam`, `sdp2dksh`.
+     w16 must allow a host link by the driver without `-T`, and output names without `.elf` (or the products get `.elf` names; consumers use `uam`/`sdp2dksh` today).
+  2. `include` of `render/shaders/include` and `render/shaders/src` and `generated[].tool` `render/shaders/total/gen_sm_rows.py`: "not inside an admitted root". render/shaders must be an admitted root (tool or product) first.
+  3. Q6 (new): the sdp2dksh root's own units (src/*.c, dk.cpp) sit in render/shaders/src, next to render/shaders/cache/shxlate.c (has a main). A root = render/shaders would compile every tracked unit under it (shcache, shxlate...). Either move src/ + include/ into a root directory of their own (e.g. render/shaders/translator/, with build.json) or admit sub-roots; I did not move files.
+  4. External pins are accepted as written (names, commits, tree_sha256, `at` /ext/uam, /ext/mojoshader).
+- Patches on externals (`sources.patches`) and the multi-external root are w16 keys; `check` cannot judge them.
+- Selftest tests/l6/shaders_gen/test_uam_gen.py: run once with bison 3.8.2 (distro), flex 2.6.4 (built from the westes tarball sha256 e87aae032bf07c26f85ac0ed3250998c37621d95f8bd748b31f15b33c45ee995), mako 1.4.3: tree_sha256 of the input = the pin, 9/9 generated files byte-equal to uam_gen.patch, ALL OK.
