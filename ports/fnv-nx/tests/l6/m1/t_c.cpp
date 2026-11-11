@@ -1,5 +1,5 @@
-// part c: ComposeRects. Contract (m1_misc.cpp): every call is D3DERR_INVALIDCALL because no D3DFMT_A1 surface can exist. Proof checked here: (1) nx_texfmt has no layout for A1, (2) no creator of the device makes a surface / texture
-// level of format A1 over every format x pool x usage (D3DUSAGE_TEXTAPI included), (3) the env table says NOTAVAILABLE for A1, (4) ComposeRects over every kind of surface / vertex buffer pair, operation, count, offset = INVALIDCALL.
+// part c: ComposeRects. Contract (m1_misc.cpp): every call is Wine 9.0's d3d9_device_ComposeRects (E_NOTIMPL + one fixme line, id 47; tests/l6/const checks the count). Facts checked here (no D3DFMT_A1 surface can exist): (1) nx_texfmt has no layout for A1, (2) no creator of the device makes a surface / texture
+// level of format A1 over every format x pool x usage (D3DUSAGE_TEXTAPI included), (3) the env table says NOTAVAILABLE for A1, (4) ComposeRects over every kind of surface / vertex buffer pair, operation, count, offset = E_NOTIMPL.
 #include "t_common.h"
 #include "env_table.gen.h"
 #include <vector>
@@ -40,8 +40,8 @@ void t_c() {
     const UINT cnt[] = {0, 1, 0xFFFF, 0x10000, 0xFFFFFFFFu}; const INT offs[] = {0, -1, 5, 0x7fffffff, (INT)0x80000000}; int calls = 0, ok = 0; uint32_t rs = 12345;
     for (IDirect3DSurface9* a : sv) for (IDirect3DSurface9* b : sv) for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) for (int k = 0; k < 40; k++) {
         rs = rs * 1664525u + 1013904223u; D3DCOMPOSERECTSOP op = ops[(rs >> 8) % 7]; UINT n = cnt[(rs >> 12) % 5]; INT ox = offs[(rs >> 16) % 5], oy = offs[(rs >> 20) % 5];
-        HRESULT hr = e->ComposeRects(a, b, vb[i], n, vb[j], op, ox, oy); calls++; ok += hr == D3DERR_INVALIDCALL;
+        HRESULT hr = e->ComposeRects(a, b, vb[i], n, vb[j], op, ox, oy); calls++; ok += hr == E_NOTIMPL;
     }
-    CHECK_EQ(ok, calls); CHECK_HR(e->ComposeRects(zoo[0], zoo[0], vb[1], 1, vb[1], D3DCOMPOSERECTS_COPY, 0, 0), D3DERR_INVALIDCALL); printf("c: %d ComposeRects calls\n", calls);
+    CHECK_EQ(ok, calls); CHECK_HR(e->ComposeRects(zoo[0], zoo[0], vb[1], 1, vb[1], D3DCOMPOSERECTS_COPY, 0, 0), E_NOTIMPL); printf("c: %d ComposeRects calls\n", calls);
     for (int i = 0; i < nz; i++) zoo[i]->Release(); foreign->Release(); od->Release(); d2->Release(); for (int i = 1; i < 3; i++) vb[i]->Release(); e->Release(); dx->Release();
 }

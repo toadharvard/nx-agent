@@ -278,7 +278,7 @@ def main():
                 ("a", *P("m1_validate.cpp", "i >= 16 ? c.VertexTextureFilterCaps :", "")), ("a", *P("m1_validate.cpp", "if (hr == D3D_OK) *n = 1;", "if (hr == D3D_OK) *n = 2;")),
                 ("a", *P("m1_validate.cpp", "s.rs[D3DRS_ZENABLE] || s.rs[D3DRS_ZWRITEENABLE] ||", "s.rs[D3DRS_ZENABLE] ||")), ("a", *P("m1_validate.cpp", "if (ao && !op_ok(aop, c.TextureOpCaps))", "if (false)")),
                 ("b", *P("m1_stats.cpp", "+ (qpc % f) * r / f", "")), ("b", *P("m1_stats.cpp", "s->PresentCount = pcount;", "s->PresentCount = pcount + 1;")), ("b", *P("m1_stats.cpp", "s->SyncQPCTime.QuadPart = (LONGLONG)c;", "s->SyncQPCTime.QuadPart = 0;")),
-                ("b", *P("m1_stats.cpp", "pcount++; pres_vb = vblank(this, c, f);", "pcount++;")), ("c", *P("m1_misc.cpp", "{ return D3DERR_INVALIDCALL; }\n", "{ return D3D_OK; }\n")),
+                ("b", *P("m1_stats.cpp", "pcount++; pres_vb = vblank(this, c, f);", "pcount++;")), ("c", *P("m1_misc.cpp", "return E_NOTIMPL; }\n", "return D3D_OK; }\n")),
                 ("d", *P("m1_misc.cpp", "w > M1_KERNEL_MAX", "w > M1_KERNEL_MAX + 1")), ("d", *P("m1_misc.cpp", "put(NX_S_convk + 1, &k[1]);", "")), ("d", *P("m1_misc.cpp", "|| rows || cols)", ")")),
                 ("e", *P("dev_chain.cpp", "if (im->fmt != D3DFMT_A8R8G8B8) return INV;", "if (im->fmt != D3DFMT_A8R8G8B8 && im->fmt != D3DFMT_X8R8G8B8) return INV;")), ("e", *P("dev_chain.cpp", "rotate(this); presented(); return D3D_OK;\n}", "rotate(this); return D3D_OK;\n}")),
                 ("e", *P("dev_reset.cpp", "c->pp.BackBufferCount = e.count;", "c->pp.BackBufferCount = c->pp.BackBufferCount;")),
