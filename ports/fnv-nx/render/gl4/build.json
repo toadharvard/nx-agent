@@ -5,7 +5,14 @@
   "cxx": "x86_64-linux-gnu-g++-13"
  },
  "flags": {
-  "c": ["-std=c11", "-Wall", "-Werror", "-Werror=switch-enum", "-O2", "-fPIC"],
+  "c": [
+   "-std=c11",
+   "-Wall",
+   "-Werror",
+   "-Werror=switch-enum",
+   "-O2",
+   "-fPIC"
+  ],
   "cxx": [],
   "asm": []
  },
@@ -14,5 +21,17 @@
   "ports/fnv-nx/render/backend"
  ],
  "units": "all",
- "link": null
+ "link": {
+  "kind": "shared",
+  "output": "libnxgl4.so",
+  "version_script": "libnxgl4.map",
+  "libs": [
+   "libEGL.so.1",
+   "libGL.so.1"
+  ],
+  "roots": [
+   "ports/fnv-nx/render/nxgpu@x86_64"
+  ],
+  "flags": []
+ }
 }

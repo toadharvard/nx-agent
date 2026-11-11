@@ -20,3 +20,7 @@ Root ports/fnv-nx/render/gl4: 17 gl4_*.c, gl4.h, gl4_funcs.h, libnxgl4.map, NXGL
 - EGL/GL headers (EGL/egl.h, EGL/eglext.h, GL/glcorearb.h) are not pinned in env.json (/usr/include/EGL is absent here). gl4.h includes them, so all 17 units that include gl4.h are red: gl4_blit gl4_check gl4_core gl4_d3dshader gl4_fmt gl4_gl gl4_image gl4_pass gl4_present gl4_query gl4_read gl4_sampler gl4_scale gl4_shader gl4_state gl4_stream gl4_vtx. Class: missing GL headers. Owner: L1 (pin libegl-dev, libgl-dev) and add the include dirs.
 - fnvnx_shaders.h: gl4_d3dshader.c includes it; it comes from L6 render/shaders (w1b). Not present, so that unit is red a second time. Class: missing translator. No include entry added for it.
 - libfnvnx_shaders.a, libmojoshader.a, libuam.a: link-time only; link is null.
+
+## Update after lead's L1 answers (w15/w16 not on any pushed branch yet)
+build.json link now written to the announced keys: {"kind":"shared","output":"libnxgl4.so","version_script":"libnxgl4.map","libs":["libEGL.so.1","libGL.so.1"],"roots":["ports/fnv-nx/render/nxgpu@x86_64"],"flags":[]}.
+Key names beyond kind/version_script are my reading of the lead's text; w15's schema is not visible yet, so recipe check is the expected red until w15/w16 land. Re-check then and adjust key names only.
