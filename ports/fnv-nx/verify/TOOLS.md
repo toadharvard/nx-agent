@@ -768,7 +768,7 @@ Rules:
    served and every NOT answered (service, case); the latter end the run as "ext-module-missing" naming the service, with an event
    "sock-undetermined" saying why): the nargs rule (sockets dispatch before the general check: nargs != the exact count, null array or not, is -EINVAL;
    the exact count with a null array is BAD_NARGS). TZ_AT 34: UTC, offset 0, no DST, abbr "UTC",
-   for every instant of the years 1970..2100 inclusive (0 <= utc_seconds < 4133980800; stated assumption of the stage), else -EOVERFLOW (-75), nothing written;
+   for every instant (utc_seconds is any int64: the declared machine's zone in the emulator is fixed UTC, CLAUDE.md "The declared machine", and UTC has one rule at every instant, so the stage's time service refuses nothing and -EOVERFLOW (-75) never comes from the stage);
    tz_offset_minutes is the same zone's off_s / 60. THREAD_SELF 35: a record of the calling thread under a new id
    (never a second thread): started, so thread_start and thread_join answer BadInput; thread_free ends the record only.
    ACCESS_FAULT_HANDLER (10) is the machine's own (rule 5c); the console host serves it too (host_fault.inc).
@@ -906,9 +906,12 @@ needs real traffic, or an OS's own choice, is NOT answered: the model raises Not
 precondition of the header; the machine ends the run as a host-call fault). Never an invented value.
 
 Stated assumptions (each is a fact of the stage's model, not of the header):
-  A1 handle numbers: the header says only that a handle is the descriptor number the bsd service returned and that the host keeps just the
-     set of open ones (no numbering of its own, no "lowest free"). The stage's model chooses: the lowest number >= 3 that is not open (0..2
-     are stdio); a number is reused after its close. Guest programs must not depend on it. SOCKET never fails for lack of room.
+  A1 handle numbers (a rule of the model, deterministic): a new handle is the lowest number >= 3 that is not open (0..2 are stdio); a
+     number is free again after its close. This is the descriptor rule of POSIX.1-2017 2.14 "File Descriptor Allocation" (the lowest
+     number not open), which the bsd service's descriptors follow. Nothing above the host may depend on the number: the header says only
+     that a handle is the descriptor number the service returned, and on the Windows side a SOCKET is an opaque handle whose only
+     special value is INVALID_SOCKET (Winsock "Socket Data Type"), so a program correct on Windows reads no meaning from it. SOCKET
+     never fails for lack of room.
   A2 the host's loopback has the addresses 127.0.0.0/8 and ::1; "any" is 0.0.0.0 / ::; every other unicast address is not local.
   A3 getaddrinfo with no network: a numeric node is parsed (strict dotted quad, or an RFC 4291 text without a scope) and a null hints
      argument is a hints record of zeros (POSIX); the list of a numeric node is one record per socket type STREAM/TCP 6, DGRAM/UDP 17,

@@ -31,7 +31,7 @@ Rules:
    served and every NOT answered (service, case); the latter end the run as "ext-module-missing" naming the service, with an event
    "sock-undetermined" saying why): the nargs rule (sockets dispatch before the general check: nargs != the exact count, null array or not, is -EINVAL;
    the exact count with a null array is BAD_NARGS). TZ_AT 34: UTC, offset 0, no DST, abbr "UTC",
-   for every instant of the years 1970..2100 inclusive (0 <= utc_seconds < 4133980800; stated assumption of the stage), else -EOVERFLOW (-75), nothing written;
+   for every instant (utc_seconds is any int64: the declared machine's zone in the emulator is fixed UTC, CLAUDE.md "The declared machine", and UTC has one rule at every instant, so the stage's time service refuses nothing and -EOVERFLOW (-75) never comes from the stage);
    tz_offset_minutes is the same zone's off_s / 60. THREAD_SELF 35: a record of the calling thread under a new id
    (never a second thread): started, so thread_start and thread_join answer BadInput; thread_free ends the record only.
    ACCESS_FAULT_HANDLER (10) is the machine's own (rule 5c); the console host serves it too (host_fault.inc).
@@ -143,7 +143,6 @@ SOCK_SERVICES = {16: ("sock_socket", 3), 17: ("sock_close", 1), 18: ("sock_bind"
 from bootsock import (WE_BADF, WE_FAULT, WE_INVAL, WE_OVERFLOW, WE_AFNOSUPPORT, WIRE_AF, WIRE_SOCKTYPE, WIRE_AI_MASK,  # noqa: F401
                       WEAI_BADFLAGS, WEAI_NONAME, WEAI_FAMILY, WEAI_SOCKTYPE, WPOLLNVAL)
 TZ_VC1 = (0, 0, b"UTC")   # VC1's zone: off_s, dst, abbr
-TZ_FIRST, TZ_END = 0, 4133980800   # UTC seconds of 1970-01-01T00:00:00 and of 2101-01-01T00:00:00: the years 1970..2100 inclusive
 WINDOW = (0x00400000, 0x02100000)   # the image range 0x00400000..0x00FDF000 and the data window up to 0x02100000: claimed by the host at start
 MAP_FIXED_MAX = 512
 FNVNX_HE_NOMEM, FNVNX_HE_NOTFOUND = 0x0559, 0x1359
@@ -643,16 +642,14 @@ class Machine:
         return self.plat[fn](self._words(args, need))
 
     def tz_at(self, utc_s):
-        """VC1's time zone at an instant: (off_s, dst, abbr), None outside the years 1970..2100 (stated assumption of the stage)"""
-        return TZ_VC1 if TZ_FIRST <= utc_s < TZ_END else None
+        """VC1's time zone at an instant: (off_s, dst, abbr); fixed UTC, the same at every instant"""
+        return TZ_VC1
 
     def _plat_tz_at(self, a):
         utc_s, out = a
         if not out:
             return -WE_FAULT & U64
         z = self.tz_at(utc_s)
-        if z is None:
-            return -WE_OVERFLOW & U64
         if not self._writable(out, out + 16):
             raise MachineError("tz_at: out %#x not writable guest memory" % out)
         self.uc.mem_write(out, struct.pack("<iI8s", z[0], z[1], z[2][:7]))

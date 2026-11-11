@@ -9,9 +9,12 @@ needs real traffic, or an OS's own choice, is NOT answered: the model raises Not
 precondition of the header; the machine ends the run as a host-call fault). Never an invented value.
 
 Stated assumptions (each is a fact of the stage's model, not of the header):
-  A1 handle numbers: the header says only that a handle is the descriptor number the bsd service returned and that the host keeps just the
-     set of open ones (no numbering of its own, no "lowest free"). The stage's model chooses: the lowest number >= 3 that is not open (0..2
-     are stdio); a number is reused after its close. Guest programs must not depend on it. SOCKET never fails for lack of room.
+  A1 handle numbers (a rule of the model, deterministic): a new handle is the lowest number >= 3 that is not open (0..2 are stdio); a
+     number is free again after its close. This is the descriptor rule of POSIX.1-2017 2.14 "File Descriptor Allocation" (the lowest
+     number not open), which the bsd service's descriptors follow. Nothing above the host may depend on the number: the header says only
+     that a handle is the descriptor number the service returned, and on the Windows side a SOCKET is an opaque handle whose only
+     special value is INVALID_SOCKET (Winsock "Socket Data Type"), so a program correct on Windows reads no meaning from it. SOCKET
+     never fails for lack of room.
   A2 the host's loopback has the addresses 127.0.0.0/8 and ::1; "any" is 0.0.0.0 / ::; every other unicast address is not local.
   A3 getaddrinfo with no network: a numeric node is parsed (strict dotted quad, or an RFC 4291 text without a scope) and a null hints
      argument is a hints record of zeros (POSIX); the list of a numeric node is one record per socket type STREAM/TCP 6, DGRAM/UDP 17,
