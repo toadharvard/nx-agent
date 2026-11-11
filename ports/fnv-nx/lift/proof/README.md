@@ -108,3 +108,16 @@ Gate with the patched IR (forms.py md5 5ba2bb32...): proved 358, FAILED 33 (rol/
 * **Obligation** = `prove.prove_one` (imported); the field variables are free in the unsat query. `shapeprove.py --shard K/N`, farm: `bash ports/fnv-nx/farm/farm_shapeprove.sh K N`.
   `dsl_sha` = `symform.shape_sha(key)` (no z3). Assumptions: A-FLAT, A-EIPRANGE | A-EIP, A-SEGLIM (the model's segment-limit faults, now also
   `:OUT-OF-SEGMENT-INSTRUCTION-POINTER`, are excluded; symcheck counts the relative targets of the image that leave [0, 2^32): 0 expected).
+
+## Gates `forms` and `fpexact` (fnvnx-gate/1, verify/VERDICT.md classes 6 and C)
+Both read their private inputs the way verify/gate_contract.py does: declared as content-pinned externals of fnv-nx-build, loaded by `recipe.fetch_externals`
+from `ports/fnv-nx/verify` (sibling of lift/; a lift-only branch has no verify/, so the gates are red with that reason and the tests overlay it through
+`FNVNX_TEST_VERIFY`). No path arguments, no environment variables other than the verdict's `GATE_OUT` / `GATE_CACHE`. A missing or invalid input is RED with the reason.
+* `formgate.py` (gate `forms`): universe = the shapes of `shapes.tsv` in the external `liftpack` (`shape_key<TAB>family<TAB>count`, sorted); certificates = `certs.tsv`
+  of the external `certs` (fnv-nx-build `l3b-lift/certs`). Inputs: `formgate_inputs.json` (`fnvnx-forms-inputs/1`; `model_sha256` must equal the `x86_proof.ir` pin of
+  `sail_pins.txt`). A shape is certified iff a `proved` row of the pinned model carries the dsl_sha the current code gives. Today the file declares no `liftpack`:
+  red, `inputs: external liftpack not declared` (the docstring says what to add). Tests: `tests/test_formgate.py` (local bare repos as externals).
+* `gate_fpexact.py` (gate `fpexact`): per admitted product root (gate_build.quantify convention, no root = universe 0 green): the rcp/rsqrt certificate, no A64
+  estimate instruction, float->int conversions only in marked helpers (plugin `toolchain/f2i_check/fnvnx_f2i_check.cc`, result file `obj/<unit>.o.f2i.json`), and the item
+  `<root>:forms` = the gate forms is green (the helpers' correctness is the form certificates'; evaluated by calling `formgate.judge`, since each gate has its own GATE_OUT).
+  Tests: `tests/test_fpexact.py`.
