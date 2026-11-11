@@ -309,6 +309,7 @@ struct VaSrc {
     double d() { return va_arg(*ap, double); }
     void *p() { return va_arg(*ap, void *); }
     long long ip() { return (long long)va_arg(*ap, intptr_t); }
+    unsigned long long uip() { return (unsigned long long)va_arg(*ap, uintptr_t); }
 };
 struct WordSrc {
     const uint32_t *w;
@@ -318,6 +319,7 @@ struct WordSrc {
     double d() { long long b = q(); double r; memcpy(&r, &b, 8); return r; }
     void *p() { return (void *)(uintptr_t)*w++; }
     long long ip() { return (int)*w++; }
+    unsigned long long uip() { return *w++; }
 };
 
 /* ------------------------------------------------------------------ output */
@@ -567,7 +569,7 @@ template <class A> int format_impl(char *buf, size_t n, const char *fmt, A &a)
             break;
         }
         case 'u': case 'o': case 'x': case 'X': {
-            unsigned long long v = i64 ? (unsigned long long)a.q() : ip ? (unsigned long long)a.ip()
+            unsigned long long v = i64 ? (unsigned long long)a.q() : ip ? a.uip()
                                  : h ? (unsigned long long)(unsigned short)a.i() : (unsigned long long)(unsigned)a.i();
             put_int(o, v, false, c == 'u' ? 10 : c == 'o' ? 8 : 16, c == 'X', false, false, alt, prec, width, left, zero);
             break;
@@ -712,7 +714,7 @@ template <class A> int scan_impl(const char *in, const char *fmt, A &a)
             s++;
             continue;
         }
-        bool known = strchr("diuoxXpeEfgGsScC[", c) != NULL;
+        bool known = strchr("diuoxXpPeEfgGsScC[", c) != NULL;
         if (!known) { /* '%' followed by any other character: that character is matched as text */
             if (!*s) { input_fail = true; break; }
             if (*s != c) break;
@@ -726,13 +728,13 @@ template <class A> int scan_impl(const char *in, const char *fmt, A &a)
             input_fail = true;
             break;
         }
-        if (c == 'd' || c == 'i' || c == 'u' || c == 'o' || c == 'x' || c == 'X' || c == 'p') {
+        if (c == 'd' || c == 'i' || c == 'u' || c == 'o' || c == 'x' || c == 'X' || c == 'p' || c == 'P') {
             size_t i = 0;
             bool neg = false;
             if (i < w && (s[i] == '+' || s[i] == '-'))
                 neg = s[i++] == '-';
-            int base = c == 'o' ? 8 : (c == 'x' || c == 'X' || c == 'p') ? 16 : c == 'i' ? 0 : 10;
-            if (c != 'p' && (base == 0 || base == 16) && i + 2 < w && s[i] == '0' && (s[i + 1] == 'x' || s[i + 1] == 'X')
+            int base = c == 'o' ? 8 : (c == 'x' || c == 'X' || c == 'p' || c == 'P') ? 16 : c == 'i' ? 0 : 10;
+            if (c != 'p' && c != 'P' && (base == 0 || base == 16) && i + 2 < w && s[i] == '0' && (s[i + 1] == 'x' || s[i + 1] == 'X')
                 && isxdigit((unsigned char)s[i + 2]))
                 i += 2, base = 16;
             else if (base == 0)
@@ -753,7 +755,7 @@ template <class A> int scan_impl(const char *in, const char *fmt, A &a)
                 v = 0ull - v;
             if (!suppress) {
                 void *dst = a.p();
-                if (c == 'p') {
+                if (c == 'p' || c == 'P') {
                     if (A::kPtr == 4) { uint32_t t = (uint32_t)v; put_bytes(dst, &t, 4); }
                     else put_bytes(dst, &v, sizeof v);
                 } else if (ll || i64) put_bytes(dst, &v, 8);
