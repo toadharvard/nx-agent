@@ -58,7 +58,7 @@ bool pass(Ctx& c) {
     PvMat view, proj, world, mat; memcpy(&view, &s.xf[nx_dxf(D3DTS_VIEW)], sizeof view); memcpy(&proj, &s.xf[nx_dxf(D3DTS_PROJECTION)], sizeof proj); memcpy(&world, &s.xf[nx_dxf(D3DTS_WORLD)], sizeof world);
     const D3DVIEWPORT9& v = s.viewport[0]; float vx = (float)v.X, vy = (float)v.Y, vw = (float)v.Width, vh = (float)v.Height, min_z = v.MinZ, max_z = v.MaxZ > v.MinZ + 0.001f ? v.MaxZ : v.MinZ + 0.001f;   // wined3d_viewport_get_z_range
     pvw_mul(&mat, &view, &world); pvw_mul(&mat, &proj, &mat);
-    bool lighting = s.rs[D3DRS_LIGHTING] && (fvf & (D3DFVF_DIFFUSE | D3DFVF_SPECULAR)); PvLights L; pvw_lights_init(&L, d, lighting);
+    bool lighting = s.rs[D3DRS_LIGHTING] && (fvf & (D3DFVF_DIFFUSE | D3DFVF_SPECULAR)); PvLights L; pvw_lights_init(&L, d, lighting, !c.dry);
     uint32_t dmcs, emcs, amcs, smcs;                                                           // wined3d_get_material_colour_source
     if (!s.rs[D3DRS_LIGHTING]) { dmcs = 1; smcs = 2; emcs = amcs = 0; }
     else if (!s.rs[D3DRS_COLORVERTEX]) dmcs = emcs = amcs = smcs = 0;
@@ -116,6 +116,8 @@ bool pass(Ctx& c) {
 
 HRESULT pvw_process(NxDeviceCore* d, UINT start, UINT dst_idx, UINT count, NxBufCore* dst) {
     PvInfo si; pvw_stream_info(&si, d, start);
+    for (uint32_t k = 0; k < PVW_FFP_COUNT; k++)                                           // wined3d_device_context_map(READ) of each source: d3d9 gives MAP_R except for WRITEONLY buffers of D3DPOOL_DEFAULT -> E_INVALIDARG, ERR, WINED3DERR_INVALIDCALL
+        if ((si.use_map >> k & 1) && si.e[k].buf && (si.e[k].buf->usage & D3DUSAGE_WRITEONLY) && si.e[k].buf->pool == (uint8_t)D3DPOOL_DEFAULT) return D3DERR_INVALIDCALL;
     if (!(si.use_map >> PVW_FFP_POSITION & 1)) return D3DERR_INVALIDCALL;                      // ERR "Source has no position mask"
     if (d->cur.rs[D3DRS_CLIPPING]) fnvnx_wine_fixme(PVW_FIXME_CLIPPING);
     uint32_t fvf = dst->fmt, ntex = (fvf & 0x0f00) >> 8, vs = 0, pm = fvf & 0x400e;            // wined3d_get_flexible_vertex_size

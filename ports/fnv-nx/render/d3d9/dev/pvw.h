@@ -21,7 +21,7 @@ struct PvLights {
     PvLight l[PVW_MAX_LIGHTS]; PvCol ambient_light; PvMat modelview; float nm[3][3]; PvVec4 pos_t; float fog_start, fog_end, fog_density;
     uint8_t n_point, n_spot, n_dir, n_par, lighting, legacy, normalise, localviewer, fog_coord_mode, fog_mode;   // fog_mode / fog_coord_mode are 2 bit fields in Wine: stored & 3
 };
-void pvw_lights_init(PvLights* ls, const NxDeviceCore* d, bool compute_lighting);
+void pvw_lights_init(PvLights* ls, const NxDeviceCore* d, bool compute_lighting, bool log_fixme);
 void pvw_light_vertex(PvLights* ls, const PvVec4* position);
 void pvw_compute_light(PvCol* ambient, PvCol* diffuse, PvCol* specular, PvLights* ls, const PvVec3* normal, float shininess);
 float pvw_fog_factor(const PvLights* ls, float current_a);       // update_fog_factor: the new alpha of the specular colour (current_a when fog is off)
@@ -30,6 +30,7 @@ enum { PVW_FFP_POSITION = 0, PVW_FFP_NORMAL = 3, PVW_FFP_DIFFUSE = 5, PVW_FFP_SP
 struct PvElem { const NxBufCore* buf; uint64_t base; uint32_t stride, type; };   // base: byte offset of vertex 0 (src_start_idx applied) in buf->mem
 struct PvInfo { uint32_t use_map; PvElem e[PVW_FFP_COUNT]; };
 void pvw_stream_info(PvInfo* si, const NxDeviceCore* d, uint32_t start);   // wined3d_stream_info_from_declaration with the vertex shader hidden (fixed-function inputs only)
-enum { PVW_FIXME_OUT_DECL = 1, PVW_FIXME_CLIPPING = 10, PVW_FIXME_DST_NORMAL = 11, PVW_FIXME_COLOUR_FORMAT = 12, PVW_FIXME_FVF_POSITION = 13 };   // rows of verify/wine_fixme.tsv
+enum { PVW_LIGHT_PARALLELPOINT = 4 };                            // WINED3D_LIGHT_PARALLELPOINT (GLSPOT = 5)
+enum { PVW_FIXME_CLIPPING = 10, PVW_FIXME_DST_NORMAL = 11, PVW_FIXME_COLOUR_FORMAT = 12, PVW_FIXME_FVF_POSITION = 13, PVW_FIXME_OUT_DECL = 14, PVW_FIXME_LIGHT_TYPE = 15 };   // rows of verify/wine_fixme.tsv
 HRESULT pvw_process(NxDeviceCore* d, UINT start, UINT dst_idx, UINT count, NxBufCore* dst);   // wined3d_device_process_vertices (after its FIXME for the declaration argument)
 extern "C" void fnvnx_wine_fixme(uint32_t id);                   // loader/include/fnvnx_reach.h: writes one line and returns

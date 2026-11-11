@@ -34,8 +34,11 @@ void t_valid() {
     BAD(dv->SetClipPlane(0, nullptr)); BAD(dv->GetClipPlane(0, nullptr)); BAD(dv->SetLight(0, nullptr)); BAD(dv->GetRenderState(D3DRS_ZENABLE, nullptr)); BAD(dv->GetSamplerState(0, D3DSAMP_ADDRESSU, nullptr));
     BAD(dv->GetTextureStageState(0, D3DTSS_COLOROP, nullptr)); BAD(dv->GetTexture(0, nullptr)); BAD(dv->GetCurrentTexturePalette(nullptr)); BAD(dv->GetFVF(nullptr)); BAD(dv->GetLightEnable(0, nullptr));
     // ---- lights: type must be POINT/SPOT/DIRECTIONAL; GetLight / GetLightEnable of an unassigned index
-    D3DLIGHT9 l = D3DLIGHT9(); for (int t : {0, 4, 5, 100, -1}) { l.Type = (D3DLIGHTTYPE)t; BAD(dv->SetLight(3, &l)); }
-    for (int t : {1, 2, 3}) { l.Type = (D3DLIGHTTYPE)t; GOOD(dv->SetLight(3, &l)); }
+    D3DLIGHT9 l = D3DLIGHT9(); for (int t : {0, 6, 100, -1}) { l.Type = (D3DLIGHTTYPE)t; BAD(dv->SetLight(3, &l)); }   // wine-9.0 wined3d_stateblock_set_light: "Light type out of range"
+    for (int t : {1, 2, 3, 4, 5}) { l.Type = (D3DLIGHTTYPE)t; GOOD(dv->SetLight(3, &l)); }   // PARALLELPOINT and GLSPOT are accepted
+    for (int t : {1, 2, 5}) { l.Type = (D3DLIGHTTYPE)t; l.Attenuation0 = 0; l.Attenuation1 = 0; l.Attenuation2 = -1.0f; BAD(dv->SetLight(3, &l)); l.Attenuation2 = 0; l.Attenuation0 = -0.5f; BAD(dv->SetLight(3, &l)); l.Attenuation0 = 0; l.Attenuation1 = -1e-30f; BAD(dv->SetLight(3, &l)); l.Attenuation1 = 0; }   // "Attenuation is negative"
+    for (int t : {3, 4}) { l.Type = (D3DLIGHTTYPE)t; l.Attenuation0 = l.Attenuation1 = l.Attenuation2 = -1.0f; GOOD(dv->SetLight(3, &l)); }   // directional / parallel point ignore attenuation
+    l.Attenuation0 = l.Attenuation1 = l.Attenuation2 = 0;
     BAD(dv->GetLight(4, &l)); BAD(dv->GetLightEnable(4, bb)); BAD(dv->GetLight(0xffffffff, &l)); GOOD(dv->GetLight(3, &l));
     // ---- clip planes: index < NX_D3D_MAX_CLIP_PLANES (6)
     for (DWORD i : {6u, 7u, 100u, 0xffffffffu}) { BAD(dv->SetClipPlane(i, p4)); BAD(dv->GetClipPlane(i, p4)); }

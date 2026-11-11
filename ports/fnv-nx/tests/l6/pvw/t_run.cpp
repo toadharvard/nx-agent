@@ -48,8 +48,8 @@ static void run_line(char* line, int lineno) {
         CHECK_HR(dev->CreateVertexDeclaration(el.data(), &decl), D3D_OK); CHECK_HR(dev->SetVertexDeclaration(decl), D3D_OK); }
     t.next(); n = t.u(); std::vector<IDirect3DVertexBuffer9*> src; std::vector<std::vector<uint8_t>> sdata;
     for (uint32_t i = 0; i < n; i++) {
-        uint32_t idx = t.u(), stride = t.u(), off = t.u(), len = t.u(), cfvf = t.u(); std::vector<uint8_t> d = hex(t.next()); IDirect3DVertexBuffer9* vb = nullptr;
-        CHECK_HR(dev->CreateVertexBuffer(len, 0, cfvf, (D3DPOOL)(cfvf ? pool : D3DPOOL_SYSTEMMEM), &vb, nullptr), D3D_OK); void* p; CHECK_HR(vb->Lock(0, 0, &p, 0), D3D_OK); memcpy(p, d.data(), d.size()); vb->Unlock();
+        uint32_t idx = t.u(), stride = t.u(), off = t.u(), len = t.u(), cfvf = t.u(), susage = t.u(); std::vector<uint8_t> d = hex(t.next()); IDirect3DVertexBuffer9* vb = nullptr;
+        CHECK_HR(dev->CreateVertexBuffer(len, susage, cfvf, (D3DPOOL)(cfvf ? pool : D3DPOOL_SYSTEMMEM), &vb, nullptr), D3D_OK); void* p; CHECK_HR(vb->Lock(0, 0, &p, 0), D3D_OK); memcpy(p, d.data(), d.size()); vb->Unlock();
         CHECK_HR(dev->SetStreamSource(idx, vb, off, stride), D3D_OK); src.push_back(vb); sdata.push_back(d);
     }
     t.next(); if (t.u()) { static const DWORD vs[] = {0xFFFE0101, 0x0000001F, 0x80000000, 0x900F0000, 0x00000001, 0xC00F0000, 0x90E40000, 0x0000FFFF}; IDirect3DVertexShader9* s = nullptr; CHECK_HR(dev->CreateVertexShader(vs, &s), D3D_OK); CHECK_HR(dev->SetVertexShader(s), D3D_OK); if (s) s->Release(); }

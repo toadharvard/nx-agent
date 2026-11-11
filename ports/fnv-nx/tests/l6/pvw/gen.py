@@ -76,7 +76,8 @@ def finalize(c, r, fill=0xAB, dlen=None):
     return c
 def run_model(c):
     hr, fx, out = model(c); ext = oracle.EXT if hr == 0 else None
-    c["hr"] = hr; c["fix"] = sorted(fx); c["exp"] = out if hr == 0 else c["dstbytes"]; c["ext"] = ext; return c
+    c["hr"] = hr; c["fix"] = sorted(fx) + [15] * (oracle.NSKIP[0] - 1 if 15 in fx else 0)   # id 15: one FIXME per enabled light of an unhandled type
+    c["exp"] = out if hr == 0 else c["dstbytes"]; c["ext"] = ext; return c
 def h(b): return b.hex() if b else "-"
 def encode(c):
     o = ["K %x %x %x %x %s" % (c["ex"], c["pool"], c["hr"], len(c["fix"]), " ".join("%x" % x for x in c["fix"]))]
@@ -91,7 +92,7 @@ def encode(c):
     o.append(s)
     if c["usefvf"] is not None: o.append("DC ffffffff %x" % c["usefvf"])
     else: o.append("DC %x " % len(c["decl"]) + " ".join("%x %x %x %x %x" % e for e in c["decl"]))
-    st = c["streams"]; o.append("ST %x " % len(st) + " ".join("%x %x %x %x %x %s" % (i, d["stride"], d["offset"], len(d["data"]), d.get("cfvf", 0), h(d["data"])) for i, d in st.items()))
+    st = c["streams"]; o.append("ST %x " % len(st) + " ".join("%x %x %x %x %x %x %s" % (i, d["stride"], d["offset"], len(d["data"]), d.get("cfvf", 0), d.get("usage", 0), h(d["data"])) for i, d in st.items()))
     o.append("VS %x" % c["vs"]); o.append("DS %x %x %s" % (c["dstfvf"], 0 if c["alias"] else c["dlen"], h(c["dstbytes"])))
     o.append("CL %x %x %x %x %x %x" % (c["start"], c["dstidx"], c["count"], c["declarg"], c["dstnull"], c["flags"]))
     o.append("EX " + h(c["exp"])); e = c["ext"]

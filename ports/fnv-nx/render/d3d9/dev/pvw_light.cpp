@@ -1,7 +1,7 @@
 // pvw_light.cpp: the software lighting and fog of Wine 9.0 process_vertices_strided (device.c init_transformed_lights, light_set_vertex_data, compute_light, update_light_diffuse_specular, update_fog_factor,
 // wined3d_calculate_fog_factor). Re-implemented with Wine's binary32 operation order (no fused operations); transcendentals (sqrtf, powf, expf, cosf) are the platform libm's, which is correctly rounded by the owner's FP rule.
 // Facts taken from the d3d9 build of wined3d: legacy_lighting is false (d3d9_init passes no WINED3D_LEGACY_FFP_LIGHTING); lights are walked in ascending index order (Wine: red-black tree on the index), only ENABLED lights count (`enabled` is the
-// flag LightEnable set, also for lights beyond the hardware slot count), at most 32 are used, in the order directional, point, spot. A light type outside POINT / SPOT / DIRECTIONAL cannot exist here (SetLight refuses it; Wine's FIXME for it is unreachable).
+// flag LightEnable set, also for lights beyond the hardware slot count), at most 32 are used, in the order directional, point, spot. PARALLELPOINT (type 4) is walked as Wine does; any other type (GLSPOT) gets Wine's FIXME (id PVW_FIXME_LIGHT_TYPE) and is skipped, as in init_transformed_lights.
 // The derived per-light vectors of wined3d_device_context_set_light (position, direction w = 0, directional direction NEGATED) are recomputed from the D3DLIGHT9 at each call: every light type sets exactly the vectors its software path reads, so Wine's stale
 // fields of a light that changed type are never read.
 #pragma GCC optimize("fp-contract=off")
@@ -13,7 +13,7 @@ static PvCol colour_of(const D3DCOLORVALUE& v) { PvCol o = {v.r, v.g, v.b, v.a};
 static float float_state(const NxDeviceCore* d, uint32_t rs) { float f; memcpy(&f, &d->cur.rs[rs], 4); return f; }
 static void rgb_mul_add(PvCol* dst, const PvCol* src, float c) { dst->r += src->r * c; dst->g += src->g * c; dst->b += src->b * c; }
 
-void pvw_lights_init(PvLights* ls, const NxDeviceCore* d, bool compute_lighting) {
+void pvw_lights_init(PvLights* ls, const NxDeviceCore* d, bool compute_lighting, bool log_fixme) {
     const NxDeviceState& s = d->cur; memset((void*)ls, 0, sizeof *ls);
     ls->lighting = compute_lighting;
     ls->fog_mode = (uint8_t)(s.rs[D3DRS_FOGVERTEXMODE] & 3);                              // 2 bit field
@@ -30,15 +30,16 @@ void pvw_lights_init(PvLights* ls, const NxDeviceCore* d, bool compute_lighting)
     const D3DLIGHT9* act[PVW_MAX_LIGHTS]; uint32_t n = 0;
     for (uint32_t i = 0; i < d->lights.n && n < PVW_MAX_LIGHTS; i++) {
         const NxLightEnt& e = d->lights.a[i]; if (!e.enabled) continue;
-        if (e.light.Type == D3DLIGHT_DIRECTIONAL) ls->n_dir++; else if (e.light.Type == D3DLIGHT_POINT) ls->n_point++; else if (e.light.Type == D3DLIGHT_SPOT) ls->n_spot++; else continue;
+        if (e.light.Type == D3DLIGHT_DIRECTIONAL) ls->n_dir++; else if (e.light.Type == D3DLIGHT_POINT) ls->n_point++; else if (e.light.Type == D3DLIGHT_SPOT) ls->n_spot++; else if ((int)e.light.Type == PVW_LIGHT_PARALLELPOINT) ls->n_par++; else { if (log_fixme) fnvnx_wine_fixme(PVW_FIXME_LIGHT_TYPE); continue; }   // Wine: FIXME("Unhandled light type")
         act[n++] = &e.light;
     }
     uint32_t idx = 0;
-    for (int pass = 0; pass < 3; pass++) for (uint32_t i = 0; i < n; i++) {                // directional, then point, then spot
-        const D3DLIGHT9& p = *act[i]; D3DLIGHTTYPE want = pass == 0 ? D3DLIGHT_DIRECTIONAL : pass == 1 ? D3DLIGHT_POINT : D3DLIGHT_SPOT; if (p.Type != want) continue;
+    for (int pass = 0; pass < 4; pass++) for (uint32_t i = 0; i < n; i++) {                // directional, then point, then spot
+        const D3DLIGHT9& p = *act[i]; int want = pass == 0 ? (int)D3DLIGHT_DIRECTIONAL : pass == 1 ? (int)D3DLIGHT_POINT : pass == 2 ? (int)D3DLIGHT_SPOT : (int)PVW_LIGHT_PARALLELPOINT; if ((int)p.Type != want) continue;
         PvLight* L = &ls->l[idx++]; PvVec4 v4, pos = {p.Position.x, p.Position.y, p.Position.z, 1.0f};
         L->diffuse = colour_of(p.Diffuse); L->ambient = colour_of(p.Ambient); L->specular = colour_of(p.Specular);
         if (pass == 0) { PvVec4 dir = {-p.Direction.x, -p.Direction.y, -p.Direction.z, 0.0f}; pvw_xform4(&v4, &dir, &view); L->direction = {v4.x, v4.y, v4.z}; pvw_normalise(&L->direction); }
+        else if (pass == 3) { pvw_xform4(&v4, &pos, &view); L->position.x = v4.x; L->position.y = v4.y; L->position.z = v4.z; pvw_normalise((PvVec3*)&L->position); }   // parallel point: only x, y, z are used
         else {
             pvw_xform4(&L->position, &pos, &view); L->range = p.Range; L->c_att = p.Attenuation0; L->l_att = p.Attenuation1; L->q_att = p.Attenuation2;
             if (pass == 2) {
@@ -91,6 +92,10 @@ void pvw_compute_light(PvCol* ambient, PvCol* diffuse, PvCol* specular, PvLights
         t = dst.x * L->c_att + dst.y * L->l_att + dst.z * L->q_att; att /= t;
         rgb_mul_add(ambient, &L->ambient, att);
         if (normal) diffuse_specular(diffuse, specular, &dir, att, shininess, &nt, &pn, L, ls);
+    }
+    for (uint32_t i = 0; i < ls->n_par; i++, index++) {                                    // parallel point: no attenuation, direction = normalised view-space position
+        L = &ls->l[index]; rgb_mul_add(ambient, &L->ambient, 1.0f);
+        if (normal) diffuse_specular(diffuse, specular, (const PvVec3*)&L->position, 1.0f, shininess, &nt, &pn, L, ls);
     }
 }
 float pvw_fog_factor(const PvLights* ls, float cur) {

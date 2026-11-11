@@ -8,9 +8,15 @@
 // E_OUTOFMEMORY, returned through d3d9_device_SetLight / LightEnable); the new entry is added only when no further step can fail.
 // ---- lights. MS SetLight: any index; GetLight/GetLightEnable of an unassigned index: D3DERR_INVALIDCALL; LightEnable of an unassigned index creates a
 // default light (MS LightEnable remarks: DIRECTIONAL, diffuse (1,1,1,0), direction (0,0,1), all else 0) with the requested enable. New lights are disabled.
-// Light type must be POINT, SPOT or DIRECTIONAL (Wine wined3d_stateblock_set_light: other types INVALIDCALL).
+// wine-9.0 wined3d_stateblock_set_light: types 1..5 (POINT, SPOT, DIRECTIONAL, PARALLELPOINT, GLSPOT) are accepted, any other type is INVALIDCALL; POINT / SPOT / GLSPOT with a negative
+// attenuation (any of the three, NaN compares false) is INVALIDCALL as well ("Attenuation is negative"); DIRECTIONAL / PARALLELPOINT ignore attenuation.
 HRESULT NxDeviceCore::SetLight(DWORD index, const D3DLIGHT9* light) {
-    if (!light || light->Type < D3DLIGHT_POINT || light->Type > D3DLIGHT_DIRECTIONAL) INV;
+    if (!light) INV;
+    switch ((uint32_t)light->Type) {
+    case 1: case 2: case 5: if (light->Attenuation0 < 0.0f || light->Attenuation1 < 0.0f || light->Attenuation2 < 0.0f) INV; break;
+    case 3: case 4: break;
+    default: INV;
+    }
     if (rec) { NxLightEnt* e = rec->st.lights.add(index); if (!e) return E_OUTOFMEMORY; e->light = *light; e->has_light = 1; return D3D_OK; }
     NxLightEnt* e = lights.add(index); if (!e) return E_OUTOFMEMORY; e->light = *light; e->has_light = 1; dirty |= NX_G_LIGHTS; return D3D_OK;
 }

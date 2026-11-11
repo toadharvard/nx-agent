@@ -118,11 +118,12 @@ def fvf_size(fvf):
     return s, fx
 def tex_n(fvf, i): return ((((fvf >> (16 + 2 * i)) + 1) & 3) + 1) * 4
 
+NSKIP = [0]   # number of enabled lights of an unhandled type met by the last model() call (id 15 is logged once per such light)
 EXT = None   # (left, end) of the destination write range of the last successful model() call (None: nothing written)
 def model(c):
     """c: dict (see test_pvw.py). -> (hr, set of fixme ids, dst bytes or None)"""
-    fx = set()
-    if c["declarg"]: fx.add(1)
+    fx = set(); NSKIP[0] = 0
+    if c["declarg"]: fx.add(14)
     if c["dstnull"]: return INV, set(), None
     # stream info
     si = {}   # slot -> (stream, stride, base, type)
@@ -132,6 +133,8 @@ def model(c):
         sl = fixed_slot(us, ui)
         if sl is None: continue
         si[sl] = (st, s["stride"], ((c["start"] * s["stride"]) & 0xffffffff) + s["offset"] + off, ty)
+    for sl, (st, _s, _b, _t) in si.items():   # wined3d_resource_map(READ) of every source element: a WRITEONLY buffer of D3DPOOL_DEFAULT has no MAP_R -> INVALIDCALL before anything else
+        if c["streams"][st].get("usage", 0) & 8 and c["streams"][st].get("cfvf", 0) and c["pool"] == 0: return INV, fx, None
     if 0 not in si: return INV, fx, None
     rs = c["rs"]
     if rs["CLIPPING"]: fx.add(10)
@@ -167,13 +170,15 @@ def model(c):
             for idx in sorted(c["lights"]):
                 L_ = c["lights"][idx]
                 if not L_["enabled"]: continue
-                if len(act) == 32: break
+                if L_["type"] not in (1, 2, 3, 4): NSKIP[0] += 1; continue   # Wine: FIXME "Unhandled light type" (id 15) per light, the light is skipped and does not count towards the 32
                 act.append(L_)
-            for ty, name in ((3, "d"), (1, "p"), (2, "s")):
+                if len(act) == 32: break
+            for ty, name in ((3, "d"), (1, "p"), (2, "s"), (4, "q")):
                 for L_ in act:
                     if L_["type"] != ty: continue
                     e = dict(t=ty, dif=L_["dif"], spc=L_["spc"], amb=L_["amb"])
-                    if ty == 3: e["dir"] = normalise(xf4([-L_["dir"][0], -L_["dir"][1], -L_["dir"][2], f32(0)], view)[:3])
+                    if ty == 4: e["dir"] = normalise(xf4([L_["pos"][0], L_["pos"][1], L_["pos"][2], f32(1)], view)[:3])
+                    elif ty == 3: e["dir"] = normalise(xf4([-L_["dir"][0], -L_["dir"][1], -L_["dir"][2], f32(0)], view)[:3])
                     else:
                         e["pos"] = xf4([L_["pos"][0], L_["pos"][1], L_["pos"][2], f32(1)], view); e["range"] = L_["range"]; e["c"], e["l"], e["q"] = L_["att"]
                         if ty == 2:
@@ -209,7 +214,7 @@ def model(c):
                 wr(dp, struct.pack("<3f", x, y, z)); wr(dp + 12, struct.pack("<f", rhw), spill=(pos == 2)); dp += 16 if pos == 4 else 12
             if dfvf & 0x20: dp += 4
             if dfvf & 0x10:
-                if 3 not in si: return INV, fx - {11, 12}, None
+                if 3 not in si: return INV, fx - {11, 12, 15}, None
                 fx.add(11); wr(dp, rd(3, i, 12)); dp += 12
             if lighting:
                 n = None
@@ -237,9 +242,10 @@ def model(c):
                 if (7 + t) in si: wr(dp, rd(7 + t, i, n))
                 dp += n
     except OOB:
-        return INV, fx - {11, 12}, None   # the real pass (fixmes of the loop) never runs after a failed validation
+        return INV, fx - {11, 12, 15}, None   # the real pass (fixmes of the loop) never runs after a failed validation
     for off, d in writes: dst[off:off + len(d)] = d   # (alias: already applied one by one, so later source reads saw them)
     global EXT; EXT = (left, max(o + len(d) for o, d in writes)) if writes else None
+    if NSKIP[0]: fx.add(15)
     return 0, fx, bytes(dst)
 
 def compute(normal, posT, nm, amb_l, lt, rs, shin):
@@ -277,4 +283,8 @@ def compute(normal, posT, nm, amb_l, lt, rs, shin):
         else: att = powf((t - L["cp"]) / (L["ch"] - L["cp"]), L["fall"])
         t = x * L["c"] + y * L["l"] + z * L["q"]; att = att / t; muladd(amb, L["amb"], att)
         if normal is not None: ds(d, att, L)
+    for L in lt:
+        if L["t"] != 4: continue
+        muladd(amb, L["amb"], f32(1))
+        if normal is not None: ds(L["dir"], f32(1), L)
     return amb, dif, spc

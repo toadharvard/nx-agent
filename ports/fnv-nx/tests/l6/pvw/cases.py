@@ -8,7 +8,7 @@ DST_FVFS = [XYZ, RHW, XYZ | D, XYZ | S, XYZ | D | S, RHW | D | S, XYZ | PS | D, 
 def pick_lights(r, nmax=4):
     ls = {}; idxs = r.sample(range(0, 60), r.randint(0, nmax))
     for i in idxs:
-        L = rand_light(r, r.choice([1, 2, 3])); L["enabled"] = r.choice([1, 1, 1, 0]); ls[i] = L
+        L = rand_light(r, r.choice([1, 2, 3, 4, 5])); L["enabled"] = r.choice([1, 1, 1, 0]); ls[i] = L
     return ls
 def rand_rs(r, lit=None):
     rs = rs_default()
@@ -117,6 +117,16 @@ def gen_b(seed):
         # more than 32 enabled lights: only the first 32 (ascending index) count
         c = simple(r, sfvf=XYZ | N | D | S, dfvf=XYZ | D | S, ex=ex); c["rs"]["LIGHTING"] = 1
         c["lights"] = {i: rand_light(r, [1, 2, 3][i % 3]) for i in range(40)}; c["lights"] = dict(sorted(c["lights"].items(), reverse=True)); add(c)
+        # PARALLELPOINT (4) and GLSPOT (5, "Unhandled light type": id 15 once per enabled light, the light is skipped and not counted towards the 32); 33 usable lights after 3 skipped ones
+        c = simple(r, sfvf=XYZ | N | D | S, dfvf=XYZ | D | S, ex=ex); c["rs"]["LIGHTING"] = 1; c["rs"]["LOCALVIEWER"] = ex
+        c["lights"] = {0: rand_light(r, 5), 1: rand_light(r, 4), 2: rand_light(r, 5), 3: rand_light(r, 4), 4: rand_light(r, 5)}; add(c)
+        c = simple(r, sfvf=XYZ | N | D | S, dfvf=XYZ | D | S, ex=ex); c["rs"]["LIGHTING"] = 1
+        c["lights"] = {i: rand_light(r, [5, 4, 3, 1, 2][i % 5]) for i in range(40)}; add(c)
+        c = simple(r, sfvf=XYZ | N | D | S, dfvf=XYZ | D | S, ex=ex); c["rs"]["LIGHTING"] = 0; c["lights"] = {0: rand_light(r, 5)}; add(c)           # no lighting: the lights are not walked, no FIXME
+        # source buffer without read access (D3DUSAGE_WRITEONLY in D3DPOOL_DEFAULT): the READ map fails, INVALIDCALL, nothing written; MANAGED / SYSTEMMEM get MAP_R from d3d9 whatever the usage
+        c = simple(r, ex=ex, sfvf=XYZ | D, dfvf=RHW | D, count=3); c["streams"][0]["usage"] = 8; c["streams"][0]["cfvf"] = XYZ | D; c["pool"] = 0; add(c)
+        c = simple(r, ex=ex, sfvf=XYZ | D, dfvf=RHW | D, count=3); c["streams"][0]["usage"] = 8; c["streams"][0]["cfvf"] = XYZ | D; c["pool"] = 1; add(c)
+        c = simple(r, ex=ex, sfvf=XYZ | D, dfvf=RHW | D, count=3); c["streams"][0]["usage"] = 8; c["streams"][0]["cfvf"] = XYZ | D; c["pool"] = 0; c["decl"] = []; add(c)
         # singular modelview (the normal matrix is the modelview itself)
         c = simple(r, sfvf=XYZ | N | D | S, dfvf=XYZ | D | S, ex=ex); c["rs"]["LIGHTING"] = 1; c["world"] = scale(1, 0, 1); c["lights"] = pick_lights(r, 3); add(c)
     return out
