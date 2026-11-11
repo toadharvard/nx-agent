@@ -272,6 +272,7 @@ for abi in ("ilp32", "lp64"):
           not any(k == "T2" for _, _, k, _ in objstub.run_check([(cc, cc)], {x for x in cterms}, {}, set())[1]))
 
 # --- wine_fixme (the bodies that do what Wine 9.0's simplified implementation does)
+WB = {30: ("m", "wine-9.0:a.c:p", "branch", "-"), 31: ("m", "wine-9.0:a.c:q", "branch", "-")}
 WT = {5: ("IDirect3DDevice9::X", "wine-9.0:dlls/d3d9/device.c:foo", "u32", "7"), 6: ("IDirect3DDevice9::Y", "wine-9.0:dlls/d3d9/device.c:bar", "void", "")}
 HDR = "void fnvnx_wine_fixme(unsigned);\n"
 for abi in ("ilp32", "lp64"):
@@ -302,6 +303,20 @@ for abi in ("ilp32", "lp64"):
     check(T("wine: address taken in data: wine-fixme-address-taken"), any(kk == "wine-fixme-address-taken" for _, kk in k), f)
     k, f = wk("int f(void) { fnvnx_wine_fixme(5); return fnvnx_wine_fixme_res(); }\n".replace("fnvnx_wine_fixme_res()", "ext()") .replace("int f", "int ext(void);\nint f"))
     check(T("wine: another call in the body is a real body"), k == {("f", "wine-fixme-in-real-body")}, f)
+    WTB = {**WT, **WB}
+    RB = "int g;\nint f(int a) { if (a) { fnvnx_wine_fixme(%s); } g = a; return g + 1; }"
+    k, f = wk(RB % 30, WTB)
+    check(T("wine branch: id in a real body: certified"), not k, f)
+    k, f = wk("int g;\nint f(int a) { if (a) fnvnx_wine_fixme(30); else fnvnx_wine_fixme(31); g = a; return g + 1; }", WTB)
+    check(T("wine branch: two branch ids in one real body: certified"), not k, f)
+    k, f = wk("int f(void) { fnvnx_wine_fixme(30); return 1; }", WTB)
+    check(T("wine branch: id in a vacuous body: wine-fixme-branch-in-vacuous-body"), k == {("f", "wine-fixme-branch-in-vacuous-body")}, f)
+    k, f = wk("int g;\nint f(int a) { if (a) fnvnx_wine_fixme(30); else fnvnx_wine_fixme(5); g = a; return 7; }", WTB)
+    check(T("wine branch: branch id with a fixed-result id: wine-fixme-branch-mixed"), k == {("f", "wine-fixme-branch-mixed")}, f)
+    k, f = wk("int g;\nint f(int a) { if (a) { fnvnx_wine_fixme(33); } g = a; return g + 1; }", WTB)
+    check(T("wine branch: unknown id in a real body stays a finding"), k == {("f", "wine-fixme-in-real-body")}, f)
+    k, f = wk("int g;\nint f(void) { fnvnx_wine_fixme(5); g = 1; return 7; }", WTB)
+    check(T("wine branch: non-branch id in a real body: wine-fixme-in-real-body"), k == {("f", "wine-fixme-in-real-body")}, f)
     items, finds = objstub.run_check([(build(HDR + "int f(void) { fnvnx_wine_fixme(5); return 7; }\nint g(void) { fnvnx_wine_fixme(5); return 7; }", abi),) * 2], set(), {}, set(), None, None, 1, WT)
     cnt = objstub.wine_counts(objstub.analyse_all([("x", build(HDR + "int f(void) { fnvnx_wine_fixme(5); return 7; }\nint g(void) { fnvnx_wine_fixme(5); return 7; }", abi))], set(), set()))
     check(T("wine: call sites per id are counted"), cnt == {5: 2}, cnt)
@@ -344,7 +359,7 @@ words = {a: struct.unpack_from("<I", oo.data, oo.secs[tsec][3] + a)[0] for a in 
 bls = [a for a, w in words.items() if w >> 26 == 0b100101]
 check("wine: two different ids on two paths: no single id (wine_path_id None); one id on both paths: that id",
       objstub.wine_path_id(words, 0, oo.secs[tsec][4], {bls[0]: 5, bls[1]: 6}) is None and objstub.wine_path_id(words, 0, oo.secs[tsec][4], {bls[0]: 5, bls[1]: 5}) == 5)
-for bad in ("5\tx\twine-9.0:a.c:f\tu32", "5\tx\twine:a.c:f\tu32\t1", "5\tx\twine-9.0:a.c:f\tu64\tzz", "x\tx\twine-9.0:a.c:f\tvoid\t", "5\tx\twine-9.0:a.c:f\tvoid\t1",
+for bad in ("5\tx\twine-9.0:a.c:f\tu32", "5\tx\twine:a.c:f\tu32\t1", "5\tx\twine-9.0:a.c:f\tu64\tzz", "x\tx\twine-9.0:a.c:f\tvoid\t", "5\tx\twine-9.0:a.c:f\tvoid\t1", "5\tx\twine-9.0:a.c:f\tbranch\t", "5\tx\twine-9.0:a.c:f\tbranch\t0",
             "5\tx\twine-9.0:a.c:f\tvoid\t\n5\ty\twine-9.0:a.c:g\tvoid\t"):
     tf_ = os.path.join(ROOT, "w.tsv")
     open(tf_, "w").write(bad + "\n")
@@ -353,6 +368,8 @@ for bad in ("5\tx\twine-9.0:a.c:f\tu32", "5\tx\twine:a.c:f\tu32\t1", "5\tx\twine
         check("wine table: malformed row rejected: %r" % bad[:30], False)
     except ValueError:
         check("wine table: malformed row rejected: %r" % bad[:30], True)
+open(tf_, "w").write("5\tm\twine-9.0:a.c:f\tbranch\t-\n6\tm\twine-9.0:a.c:g\tbranch\t-\n")
+check("wine table: kind branch with value - parses, contract name may repeat", objstub.read_wine_table(tf_)[6][2:] == ("branch", "-"))
 open(tf_, "w").write("# header\n5\tm\twine-9.0:dlls/x/y.c:f\tu32\t0x10\n")
 check("wine table: header comment and a valid row", objstub.read_wine_table(tf_) == {5: ("m", "wine-9.0:dlls/x/y.c:f", "u32", "0x10")})
 try:
