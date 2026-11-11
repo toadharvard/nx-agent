@@ -134,35 +134,60 @@ static int instr(const Ctx& c, const NxSmOp& o, const uint32_t* t, uint32_t n, u
     if (NxSmIface* a = c.acc) if (o.samples && c.stage && c.major < 2) a->sampler_mask |= 1u << ((o.d == 3 ? t[0] : t[first_src]) & 15);   // ps_1_x: the texture stage = the t# register
     return 0;
 }
-int nx_sm_check(const uint32_t* tok, uint32_t bytes, int stage_expect, NxSmIface* out) {
-    NxSmIface tmp; if (!out) out = &tmp;
-    memset((void*)out, 0, sizeof *out); memset(out->in_usage, 0xFF, sizeof out->in_usage);
-    uint32_t ntok = bytes / 4; if ((bytes & 3) || ntok < 2) return NX_SM_E_UNTERMINATED;
-    uint32_t v = tok[0], hi = v >> 16; int stage = hi == 0xFFFE ? 0 : hi == 0xFFFF ? 1 : -1;
+// ---- the walk (R2) and the per-instruction rules (R3-R9) as ONE resumable scanner: nx_sm_check is "feed every token, then end", the shader validator of x1_validator.cpp feeds what D3DX hands it call by call.
+// The scanner holds the version token's model, the words skipped inside a comment, and the instruction in progress (opcode token + operand words, at most 15: the length field is 4 bits, the sm1 table counts are <= 5);
+// tokens are never stored, so the memory of a scan is constant. The verdict is a function of the token sequence alone, never of how it is cut into feeds.
+static_assert(sizeof(((NxSmScan*)0)->pend) / sizeof(uint32_t) == 16, "an instruction of the 4-bit length field has at most 15 operand words");
+static constexpr uint32_t sm1_max_operands() { uint32_t m = 0; for (int i = 0; i < NX_SM1_N; i++) { if (NX_SM1[i].n > m) m = NX_SM1[i].n; if (NX_SM1[i].n14 > m) m = NX_SM1[i].n14; } return m; }
+static_assert(sm1_max_operands() <= 15, "an sm1 instruction of the table has more operand words than the scanner's buffer");
+enum { SC_VERSION = 0, SC_BODY = 1, SC_OPERANDS = 2, SC_ENDED = 3 };
+void nx_sm_scan_begin(NxSmScan* s, int stage_expect) {
+    memset((void*)s, 0, sizeof *s); memset(s->ifc.in_usage, 0xFF, sizeof s->ifc.in_usage); s->stage_expect = stage_expect;
+}
+static int scan_version(NxSmScan* s, uint32_t v) {
+    uint32_t hi = v >> 16; int stage = hi == 0xFFFE ? 0 : hi == 0xFFFF ? 1 : -1;
     if (stage < 0) return NX_SM_E_VERSION;
-    if (stage != stage_expect) return NX_SM_E_STAGE;
+    if (s->stage_expect >= 0 && stage != s->stage_expect) return NX_SM_E_STAGE;
     const NxSmModel* M = find_model(stage, (v >> 8) & 0xFF, v & 0xFF); if (!M) return NX_SM_E_VERSION;
-    out->stage = stage; out->major = M->major; out->minor = v & 0xFF;
-    Ctx c = {M, stage, (int)M->major, out, (uint32_t)(M - NX_SM_MODELS)}; uint32_t i = 1;
-    for (;;) {
-        if (i >= ntok) return NX_SM_E_UNTERMINATED;
-        uint32_t w = tok[i], op = w & 0xFFFF;
-        if (w == 0x0000FFFF) return i + 1 == ntok ? 0 : NX_SM_E_LENGTH;
-        if (op == OP_COMMENT) { i += 1 + ((w >> 16) & 0x7FFF); continue; }
-        uint32_t len;
-        if (M->major >= 2) len = (w >> 24) & 15;
-        else { const NxSm1P* p = sm1(op); if (!p) return NX_SM_E_OPCODE; len = stage && M->minor == 4 ? p->n14 : p->n; }
-        if (i + 1 + len > ntok) return NX_SM_E_UNTERMINATED;
-        const uint32_t* a = tok + i + 1; bool seen = false, any = false; int err = NX_SM_E_OP_MODEL, ok = 0;
-        for (int r = 0; r < NX_SM_NOPS && !ok; r++) {
-            const NxSmOp& o = NX_SM_OPS[r]; if (o.stage != stage || o.opnum != op) continue;
-            seen = true; if (!((o.models >> c.mbit) & 1)) continue;
-            int e = o.decl ? declare(c, op, a, len) : instr(Ctx{M, stage, c.major, nullptr, c.mbit}, o, a, len, w);
-            if (!e) { ok = 1; if (o.decl) break; Ctx cc = c; instr(cc, o, a, len, w); out->n_instr++; } else if (!any) { err = e; any = true; }
-        }
-        if (!ok) return seen ? err : NX_SM_E_OPCODE;
-        i += 1 + len;
+    s->M = M; s->ifc.stage = stage; s->ifc.major = M->major; s->ifc.minor = v & 0xFF; s->state = SC_BODY; return 0;
+}
+static int scan_instr(NxSmScan* s) {   // the instruction token s->optok with its s->len operand words s->pend: the rows of the table, the first that accepts wins (declare / instr)
+    const NxSmModel* M = (const NxSmModel*)s->M; int stage = (int)s->ifc.stage; uint32_t op = s->optok & 0xFFFF, len = s->len;
+    Ctx c = {M, stage, (int)M->major, &s->ifc, (uint32_t)(M - NX_SM_MODELS)};
+    bool seen = false, any = false; int err = NX_SM_E_OP_MODEL, ok = 0;
+    for (int r = 0; r < NX_SM_NOPS && !ok; r++) {
+        const NxSmOp& o = NX_SM_OPS[r]; if (o.stage != stage || o.opnum != op) continue;
+        seen = true; if (!((o.models >> c.mbit) & 1)) continue;
+        int e = o.decl ? declare(c, op, s->pend, len) : instr(Ctx{M, stage, c.major, nullptr, c.mbit}, o, s->pend, len, s->optok);
+        if (!e) { ok = 1; if (o.decl) break; Ctx cc = c; instr(cc, o, s->pend, len, s->optok); s->ifc.n_instr++; } else if (!any) { err = e; any = true; }
     }
+    return ok ? 0 : seen ? err : NX_SM_E_OPCODE;
+}
+int nx_sm_scan_feed(NxSmScan* s, const uint32_t* tok, uint32_t n) {
+    for (uint32_t k = 0; k < n && !s->err; k++, s->pos++) {
+        uint32_t w = tok[k];
+        if (s->state == SC_ENDED) { s->err = NX_SM_E_LENGTH; break; }                                   // words after END: the stream is exactly version .. END
+        if (s->pos >= NX_SM_MAX_TOKENS) { s->err = NX_SM_E_UNTERMINATED; break; }                       // the walk's limit (nx_sm_bytes): no END within 2^20 tokens
+        if (s->state == SC_VERSION) { s->err = scan_version(s, w); continue; }
+        if (s->skip) { s->skip--; continue; }                                                            // inside a comment
+        if (s->state == SC_OPERANDS) { s->pend[s->npend++] = w; if (s->npend < s->len) continue; s->state = SC_BODY; s->err = scan_instr(s); continue; }
+        uint32_t op = w & 0xFFFF; const NxSmModel* M = (const NxSmModel*)s->M;
+        if (w == 0x0000FFFF) { s->state = SC_ENDED; continue; }
+        if (op == OP_COMMENT) { s->skip = (w >> 16) & 0x7FFF; continue; }
+        if (M->major >= 2) s->len = (w >> 24) & 15;
+        else { const NxSm1P* p = sm1(op); if (!p) { s->err = NX_SM_E_OPCODE; break; } s->len = s->ifc.stage && M->minor == 4 ? p->n14 : p->n; }
+        s->optok = w; s->npend = 0;
+        if (s->len) s->state = SC_OPERANDS; else s->err = scan_instr(s);
+    }
+    return s->err;
+}
+int nx_sm_scan_end(NxSmScan* s) { if (!s->err && s->state != SC_ENDED) s->err = NX_SM_E_UNTERMINATED; return s->err; }
+int nx_sm_check(const uint32_t* tok, uint32_t bytes, int stage_expect, NxSmIface* out) {
+    NxSmScan s; nx_sm_scan_begin(&s, stage_expect); uint32_t ntok = bytes / 4;
+    int e = (bytes & 3) || ntok < 2 ? NX_SM_E_UNTERMINATED : nx_sm_scan_feed(&s, tok, ntok);
+    if (!e) e = nx_sm_scan_end(&s);
+    if (out) *out = s.ifc;
+    return e;
 }
 uint32_t nx_sm_rules_covered(const char* what) {
     if (!strcmp(what, "models")) return NX_SM_NMODELS;

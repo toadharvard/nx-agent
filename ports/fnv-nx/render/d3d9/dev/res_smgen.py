@@ -59,7 +59,7 @@ L.append("struct NxSm1P { uint16_t opnum; uint8_t n, n14; };")
 d14 = {num[k.replace("D3DSIO_", "").upper()]: v for k, v in p14.items()}
 agg = {31: 2}                 # DCL: 2 operand tokens in every version (Wine shader_sm1.c opcode table; the spec SM1_PARAMS omits it: vs_1_1 shaders with dcl_ tokens would not walk)
 for a, v in sm1: agg.setdefault(a, v)            # TEX / TEXLD share number 66: the sm1 count is the pre-ps_1_4 one
-L.append("static const NxSm1P NX_SM1[] = {" + ",".join("{%d,%d,%d}" % (a, v, d14.get(a, v)) for a, v in sorted(agg.items())) + "};")
+L.append("static constexpr NxSm1P NX_SM1[] = {" + ",".join("{%d,%d,%d}" % (a, v, d14.get(a, v)) for a, v in sorted(agg.items())) + "};")
 L.append("#define NX_SM1_N %d" % len(agg))
 # texld operand rule (sm_illegal.tsv rows kind srcmod, feature *@texld.coord / *@texld.sampler-src): the models in which src0 / the sampler take no modifier or swizzle
 ill = list(csv.DictReader(open(os.path.join(os.path.dirname(tabj), "sm_illegal.tsv")), delimiter="\t"))

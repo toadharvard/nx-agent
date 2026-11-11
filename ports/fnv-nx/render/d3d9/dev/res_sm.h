@@ -20,6 +20,17 @@ struct NxSmIface {
     uint32_t pair_set[7];           // bit (usage * 16 + index) = the (usage, index) pair is a varying of the stage: vertex = a written output (declared with dcl in sm3, written in sm < 3: oPos POSITION0, oFog FOG0, oPts PSIZE0, oD# COLOR#, oT# TEXCOORD#),
                                     // pixel = a read input (sm3 dcl'd v#; sm < 3 the t# / v# registers used or dcl'd: TEXCOORD# / COLOR#). vPos / vFace and oC / oDepth are not pairs. The mapping of mojoshader's attribute / output lists (render/shaders/src/frontend.c)
 };
+// The resumable scanner behind nx_sm_check (res_smcheck.cpp): the same rules, fed in pieces. A scan is exactly one call of nx_sm_check on the concatenation of its feeds:
+// nx_sm_scan_feed returns the first violation (sticky) as soon as the instruction holding it is complete, 0 while the stream is legal so far; nx_sm_scan_end additionally requires the closing END (UNTERMINATED otherwise).
+// Words after END = NX_SM_E_LENGTH; the stream may not be longer than NX_SM_MAX_TOKENS before its END (the limit of nx_sm_bytes). stage_expect: 0 / 1 as nx_sm_check, -1 = the stage the version token names.
+enum { NX_SM_MAX_TOKENS = 1 << 20 };
+struct NxSmScan {
+    NxSmIface ifc;                  // what the legal prefix declared (valid after nx_sm_scan_end returned 0)
+    const void* M; uint32_t pos, skip, optok, len, npend, pend[16]; int stage_expect, err; uint8_t state;
+};
+void nx_sm_scan_begin(NxSmScan* s, int stage_expect);
+int nx_sm_scan_feed(NxSmScan* s, const uint32_t* tokens, uint32_t n);
+int nx_sm_scan_end(NxSmScan* s);
 uint32_t nx_sm_bytes(const uint32_t* tokens);                                   // bytes version..END inclusive; 0 = no walkable END (unknown sm1 opcode, > 1M tokens)
 int nx_sm_check(const uint32_t* tokens, uint32_t bytes, int stage_expect, NxSmIface* out);   // stage_expect: 0 vertex, 1 pixel; returns NxSmErr
 uint32_t nx_sm_pairs(const NxSmIface* i, uint8_t* out);                       // the pair_set as FNVNX_DK_PAIR codes (usage * 16 + index), ascending; returns the count (<= 224)
