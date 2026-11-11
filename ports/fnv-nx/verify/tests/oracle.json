@@ -474,10 +474,21 @@
      "anchor": "## verify/unitstage.py",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## Sources and patches (rule A)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    },
+    {
+     "anchor": "## Built tools (rule B)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
     }
    ],
    "subject": [
     "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/verify/patchtree.py",
     "ports/fnv-nx/verify/gate_build.py",
     "ports/fnv-nx/verify/unitstage.py",
     "ports/fnv-nx/verify/gate_determinism.py",

@@ -4,8 +4,8 @@ RB = "reproducible-builds.org"
 GCCENV = "GCC manual, Environment Variables"
 UNV = " (UNVERIFIED: VC9 not available here)"
 FORBID_ENV_GCC = "GCC_EXEC_PREFIX COMPILER_PATH LIBRARY_PATH CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH DEPENDENCIES_OUTPUT SUNPRO_DEPENDENCIES"
-KINDS_TXT = "gcc/as/ld/ar/objcopy/python/msvc-cl/msvc-link/msvc-lib/wine"
-KINDS = ("gcc", "as", "ld", "ar", "objcopy", "python", "msvc-cl", "msvc-link", "msvc-lib")
+KINDS_TXT = "gcc/as/ld/ar/objcopy/python/built/msvc-cl/msvc-link/msvc-lib/wine"
+KINDS = ("gcc", "as", "ld", "ar", "objcopy", "python", "built", "msvc-cl", "msvc-link", "msvc-lib")
 MSVC = ("msvc-cl", "msvc-link", "msvc-lib")
 GNU = ("gcc", "as", "ld", "ar", "objcopy")
 FIXED = (("TZ", "UTC"), ("LC_ALL", "C"), ("PYTHONHASHSEED", "0"))
@@ -50,6 +50,9 @@ POLICY = {
                      "measured: hash(\"a\") differs per run under -I); -c and -m forbidden",
                      "Python docs, Command line (-B, -E, -I, -s); PEP 552 (pyc embed source mtime)"),
     "python.script": ("python", "script path present, under a declared input", "Python docs, Command line (script)"),
+    "built.exe": ("built", "argv[0] is the executable of a root that the same build made (recipe `generated` entry {tool: {root, output}}), "
+                  "under a declared input; it writes only declared outputs (the recipe compares the set)",
+                  "a statically linked host executable of a hermetic stage runs in the stage sandbox; its output is a function of its declared inputs"),
     "msvc.decl": ("msvc-*", "exactly one of msvc_brepro:true (then /Brepro in argv) or coff_normalize/pe_normalize:true",
                   "MSVC /Brepro (VS2015+ linker, VS2017+ cl; not in VC9: use the normalize declaration)" + UNV),
     "cl.forbid": ("msvc-cl", "forbidden: /Zi /ZI (PDB GUID and time stamp; /Z7 ok), /MP[N] (parallel order), /Fd", "MSVC cl /Z7 /Zi /MP /Fd docs" + UNV),
