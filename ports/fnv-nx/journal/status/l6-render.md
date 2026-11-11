@@ -17,7 +17,7 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
 | 2a | Recipe stages render needs: host root from external sources (MojoShader, uam); generated step running a built host ELF (FFP GLSL -> DKSH, SDP -> DKSH) | - | - | doing at L1: w16 session_01KmtZKRpuoHrhZqwnLDyQ8L, claude/fnv-l1-contract-w16 (sources from external + patches; generated tool = ELF of a root) |
 | 2b | Markers (stubs/no-op/refusals) in render -> 0. Count = objstub findings (classes 1, 2) on the render root's objects; the "29" of the orchestrator audit is re-measured by the gate, not by text | - | - | next: after 2 gives objects.json |
 | 3 | Doubles in tests -> 0. Census (partial) at 06097801: claude/fnv-l6-w-doubles render/DOUBLES.md | - | claude/fnv-l6-w-doubles | next: measure the 8 missing, GL library = boundary; path to 0 = tests link the render root + L4 deko3d model (owner L4) |
-| 4 | d3d9total gate into trunk (with render/total tool root) | - | - | blocked by L1: env.json packages libc6-dev-i386, libclang-common-18-dev |
+| 4 | d3d9total gate + render/total tool root on a trunk-based branch, to MERGER when L1 w16 pins libc6-dev-i386, libclang-common-18-dev (on the path: goal step 1 needs the 13 REQUIRED_PRODUCT gates) | session_01KmtZKUN17roaVoBLBe4QKK (w4) | claude/fnv-l6-render-w4 | doing |
 | 5 | FLAT (flat shading of translated programs): claude/fnv-l6-w-int 19c96209, not accepted | w3 (starting) | claude/fnv-l6-render-w3 | doing |
 | 6 | L1 assumption #80 (uam, translator, Wine pins) | lead | - | done: answered L1 22:40Z |
 | 7 | 5 DROP rows of render/ASSUMPTIONS.md; front/gen_enums.py runs g++ -m32 (compile-only rule) | - | - | next |
