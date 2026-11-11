@@ -4,13 +4,7 @@ row or line a converter does not understand is an InputError carrying the file l
 
   join       --dir D -o guest.elf     manifest.json (fnvnx-elf/1: name, size, sha256, parts [[file, size, sha256]]) -> the parts
                                       concatenated in manifest order; each part's size and sha256 and the whole size and sha256 checked
-                                      an optional `render` object is allowed (see pair)
-  render-branch --manifest manifest.json
-                                      prints `BRANCH SHA256`: manifest.json's `render` object {branch, archive_sha256} = the artifacts
-                                      branch of the D3D9 bridge the ELF was linked with and the sha256 of its libfnvnx-d3d9.a
-  pair       --manifest manifest.json --bridge DIR --gpu DIR
-                                      the renderer pair rule (render_pair): the bridge linked into the ELF and libnxgl4.so are of one
-                                      nx-agent commit, and every recorded sha256 equals the bytes; prints the common commit
+                                      an optional `render` object is allowed (L1's manifest format; not read here)
   reserved   --modules modules.tsv --exe FalloutNV.exe -o reserved.tsv
                                       modules.tsv (header `# name sha256 size preferred_base assigned_base size_of_image has_tls
                                       entry_rva static load_index`; one row per module) -> `name lo hi` rows (lo = assigned_base,
@@ -133,57 +127,6 @@ def join_elf(manifest_text, read_part):
     if len(data) != size or hashlib.sha256(data).hexdigest() != sha:
         raise InputError(f"joined ELF: size {len(data)} / sha256 {hashlib.sha256(data).hexdigest()} differs from the manifest ({size} / {sha})")
     return bytes(data)
-
-
-HEX40, HEX64 = re.compile(r"[0-9a-f]{40}\Z"), re.compile(r"[0-9a-f]{64}\Z")
-BRANCH = re.compile(r"[A-Za-z0-9._][A-Za-z0-9._/-]*\Z")
-
-
-def _json_obj(text, what):
-    try:
-        d = json.loads(text)
-    except ValueError as e:
-        raise InputError(f"{what}: not JSON ({e})") from None
-    if not isinstance(d, dict):
-        raise InputError(f"{what}: not a JSON object")
-    return d
-
-
-def _field(d, key, pat, what):
-    v = d.get(key)
-    if not isinstance(v, str) or not pat.match(v):
-        raise InputError(f"{what}: field {key!r} is missing or malformed ({v!r})")
-    return v
-
-
-def render_branch(manifest_text):
-    """the bridge branch and archive sha256 the ELF's manifest.json records: (branch, archive_sha256)"""
-    r = _json_obj(manifest_text, "manifest.json").get("render")
-    if not isinstance(r, dict) or sorted(r) != ["archive_sha256", "branch"]:
-        raise InputError("manifest.json: no `render` object with exactly the fields branch and archive_sha256 "
-                         "(the bridge the ELF was linked with is not recorded)")
-    return _field(r, "branch", BRANCH, "manifest.json render"), _field(r, "archive_sha256", HEX64, "manifest.json render")
-
-
-def render_pair(manifest_text, build_text, archive, meta_text, lib):
-    """The renderer pair rule: the guest side (the D3D9 bridge archive linked into the ELF) and the host side (libnxgl4.so) are
-    built from one nx-agent commit. Checked, each an InputError when false:
-      manifest.json render.archive_sha256 == bridge build.json archive_sha256 == sha256(bridge libfnvnx-d3d9.a)
-      nxgl4 meta.json sha256 == sha256(libnxgl4.so)
-      bridge build.json nx_agent_commit == nxgl4 meta.json nx_agent_commit
-    Returns the common commit (40 hex)."""
-    branch, want = render_branch(manifest_text)
-    build, meta = _json_obj(build_text, "bridge build.json"), _json_obj(meta_text, "nxgl4 meta.json")
-    b_sha, got = _field(build, "archive_sha256", HEX64, "bridge build.json"), hashlib.sha256(archive).hexdigest()
-    if not (want == b_sha == got):
-        raise InputError(f"bridge archive: the ELF was linked with {want}, {branch} build.json says {b_sha}, its libfnvnx-d3d9.a is {got}")
-    l_sha, got = _field(meta, "sha256", HEX64, "nxgl4 meta.json"), hashlib.sha256(lib).hexdigest()
-    if l_sha != got:
-        raise InputError(f"libnxgl4.so: meta.json says {l_sha}, the file is {got}")
-    b_head, g_head = _field(build, "nx_agent_commit", HEX40, "bridge build.json"), _field(meta, "nx_agent_commit", HEX40, "nxgl4 meta.json")
-    if b_head != g_head:
-        raise InputError(f"bridge head {b_head} != nxgl4 head {g_head}: the renderer pair is not of one head")
-    return b_head
 
 
 def pe_image(raw):
@@ -427,12 +370,6 @@ def main(argv=None):
     st.add_argument("--old", required=True)
     st.add_argument("--source", default="4b1a7bb")
     st.add_argument("-o", required=True)
-    rb = sub.add_parser("render-branch")
-    rb.add_argument("--manifest", required=True)
-    pr = sub.add_parser("pair")
-    pr.add_argument("--manifest", required=True)
-    pr.add_argument("--bridge", required=True, help="directory with the bridge branch's build.json and libfnvnx-d3d9.a")
-    pr.add_argument("--gpu", required=True, help="directory with the nxgl4 branch's meta.json and libnxgl4.so")
     a = ap.parse_args(argv)
     rd = lambda p: open(p, encoding="utf-8").read()
     try:
@@ -445,11 +382,6 @@ def main(argv=None):
         elif a.cmd == "keys":
             lo, hi = key_range(rd(a.entries), rd(a.keys))
             print("%x:%x" % (lo, hi))
-        elif a.cmd == "render-branch":
-            print("%s %s" % render_branch(rd(a.manifest)))
-        elif a.cmd == "pair":
-            print(render_pair(rd(a.manifest), rd(os.path.join(a.bridge, "build.json")), open(os.path.join(a.bridge, "libfnvnx-d3d9.a"), "rb").read(),
-                              rd(os.path.join(a.gpu, "meta.json")), open(os.path.join(a.gpu, "libnxgl4.so"), "rb").read()))
         elif a.cmd == "stage-table":
             open(a.o, "w").write(stage_table(rd(a.old), a.source))
         else:
@@ -457,8 +389,7 @@ def main(argv=None):
             open(a.o, "w").write(milestone_table(rd(a.table), rd(a.run) if a.run else "", man.table_id if man else None,
                                                  rd(a.stage_table) if a.stage_table else None, man))
     except (InputError, bootmiles.ManifestError, OSError) as e:
-        src = {"join": "manifest.json", "reserved": "modules.tsv", "keys": "keys.tsv", "milestones": "milestones.tsv", "stage-table": "old table",
-               "render-branch": "manifest.json", "pair": "manifest.json/build.json/meta.json"}[a.cmd]
+        src = {"join": "manifest.json", "reserved": "modules.tsv", "keys": "keys.tsv", "milestones": "milestones.tsv", "stage-table": "old table"}[a.cmd]
         print(f"bootinputs {a.cmd} ({src}/entries.tsv/run.txt): {e}", file=sys.stderr)
         return 1
     return 0

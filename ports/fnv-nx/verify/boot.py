@@ -13,13 +13,8 @@ ext-module-missing / scenario-error (a --text-entry text longer than the call's 
 
 Host parts: the table's `host` target is an ID word, so the exact console line a part waits for is spelled
 `console.<hex>` (hex of the line's UTF-8 bytes, no newline; helper console_part(line)). The part fires when the guest
-writes exactly that line. Two more host events exist: `present` (every present of the renderer) and `gpu-first-call` (the first
-guest call of ext module 10); they only fire with --gpu. Any other host name is an input error listing the known forms.
-
-Renderer: --gpu LIB registers ext module 10 and forwards it to the host library LIB (bootgpu.py); --frames DIR is its
-$NXGL4_FRAMES (the library writes frame_%06u.rgba/.txt there). The three GL variables for software rendering are set for it.
-Without --gpu module 10 is not registered (a guest call answers NO_MODULE). The first 3 presents are icount marks `frame-<n>`;
-OUT.json "gpu" = {library_sha256, presents, first_module10_call, last_error}.
+writes exactly that line. Any other host name is an input error listing the known form. A guest call of ext module 10 (GPU)
+answers NO_MODULE: no module is registered for it, and the run ends as ext-module-missing.
 """
 import argparse
 import hashlib
@@ -28,7 +23,6 @@ import os
 import sys
 import time
 
-import bootgpu
 import bootlayout
 import bootmachine
 import bootmiles
@@ -36,11 +30,8 @@ import boothost
 
 FORMAT = "fnvnx-boot/1"
 HOST_PREFIX = "console."
-HOST_EVENTS = ("present", "gpu-first-call")
-GPU_ENV = {"LIBGL_ALWAYS_SOFTWARE": "1", "GALLIUM_DRIVER": "llvmpipe", "EGL_PLATFORM": "surfaceless"}
-FRAME_MARKS = 3   # presents that get an icount mark; later ones are only counted
 INPUT_ERRORS = (bootlayout.LayoutError, bootmiles.TableError, bootmiles.ManifestError, bootmiles.ResolveError,
-                bootmiles.ElfError, bootmachine.MachineError, bootgpu.GpuError, ValueError, OSError)
+                bootmiles.ElfError, bootmachine.MachineError, ValueError, OSError)
 
 
 def console_part(line):
@@ -51,8 +42,6 @@ def console_part(line):
 def _host_lines(host):
     lines, bad = {}, []
     for name, ids in host.items():
-        if name in HOST_EVENTS:
-            continue
         try:
             if not name.startswith(HOST_PREFIX) or not name[len(HOST_PREFIX):]:
                 raise ValueError
@@ -60,8 +49,8 @@ def _host_lines(host):
         except ValueError:
             bad.append(name)
     if bad:
-        raise bootmiles.ResolveError("unknown host names %s; the host events are %s and %s<hex of the exact console line>"
-                                     % (sorted(bad), ", ".join(HOST_EVENTS), HOST_PREFIX))
+        raise bootmiles.ResolveError("unknown host names %s; the only host form is %s<hex of the exact console line>"
+                                     % (sorted(bad), HOST_PREFIX))
     return lines
 
 
@@ -118,37 +107,13 @@ def run(a):
                     fire(i, tid)
         m.watch_store(addr, stored)
     m.on_console(lambda line: [fire(i, m.tid()) for i in host.get(line, ())])
-    gpu = None
-    if a.gpu:
-        os.environ.update(GPU_ENV)
-        if a.frames:
-            os.makedirs(a.frames, exist_ok=True)
-            os.environ["NXGL4_FRAMES"] = a.frames
-        else:
-            os.environ.pop("NXGL4_FRAMES", None)
-
-        def presented(frame):
-            n = gpu.presents
-            if n <= FRAME_MARKS:
-                ic.mark("frame-%d" % n)
-            for i in watch["host"].get("present", ()):
-                fire(i, m.tid())
-        gpu = bootgpu.Gpu(a.gpu, m, a.profile, on_present=presented,
-                          on_first_call=lambda: [fire(i, m.tid()) for i in watch["host"].get("gpu-first-call", ())])
-    try:
-        r = m.run()
-    finally:
-        if gpu:
-            gpu_report = gpu.report()
-            gpu.close()
+    r = m.run()
     ic.stop(r["reason"])
     console = r.pop("console")
     rep = ic.report()
     doc = {"elf_sha256": hashlib.sha256(raw).hexdigest(), "plan": plan, "run": r,
            "console_sha256": hashlib.sha256(console.encode()).hexdigest(), "milestones": prog.state(),
            "milestone_log": log, "inputs": {"text_entry": list(a.text_entry)}, "manifest_id": manifest.table_id, "last_reached": prog.last_reached(), "icount": rep}
-    if gpu:
-        doc["gpu"] = gpu_report
     with open(a.out, "w") as f:
         f.write(json.dumps(doc, sort_keys=True, indent=1) + "\n")
     with open(os.path.splitext(a.out)[0] + ".console.txt", "w", encoding="utf-8") as f:
@@ -171,8 +136,6 @@ def main(argv=None):
     sp.add_argument("--icount-spec")
     sp.add_argument("--limit-instructions", type=lambda s: int(s, 0))
     sp.add_argument("--hc-slice", type=lambda s: int(s, 0))
-    sp.add_argument("--gpu", help="host renderer library libnxgl4.so: registers ext module 10 (bootgpu.py)")
-    sp.add_argument("--frames", help="directory for the library's frame files ($NXGL4_FRAMES); needs --gpu")
     sp.add_argument("--threads", type=int, default=256,
                     help="guest thread stacks the stage provides (a number of the run, not of the contract; beyond it "
                          "thread_create returns 0 as the header says for exhaustion); default 256")
@@ -182,8 +145,6 @@ def main(argv=None):
                     help="the answer of one TEXT_ENTRY call (the system keyboard), repeatable, consumed in order; none left: the call "
                          "is cancelled (0); a text longer than the call's max_len ends the run as scenario-error")
     a = ap.parse_args(argv)
-    if a.frames and not a.gpu:
-        ap.error("--frames needs --gpu")
     try:
         return run(a)
     except INPUT_ERRORS as e:

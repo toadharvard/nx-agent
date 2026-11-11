@@ -61,36 +61,6 @@
     "ports/fnv-nx/verify/boot.py"
    ]
   },
-  "test_bootgpu.py": {
-   "references": [
-    {
-     "anchor": "## verify/bootgpu.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    },
-    {
-     "anchor": "## verify/boot.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    },
-    {
-     "anchor": "## verify/boothost.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    },
-    {
-     "anchor": "## verify/bootmachine.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/bootgpu.py",
-    "ports/fnv-nx/verify/boot.py",
-    "ports/fnv-nx/verify/boothost.py",
-    "ports/fnv-nx/verify/bootmachine.py"
-   ]
-  },
   "test_bootinputs.py": {
    "references": [
     {

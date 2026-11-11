@@ -23,7 +23,6 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, VERIFY)
 import boot  # noqa: E402
 import test_bootmachine as tb  # noqa: E402
-import test_bootgpu as tg  # noqa: E402
 
 JOB = os.path.join(NX, "farm", "boot_job.sh")
 SCRATCH = tempfile.mkdtemp(prefix="bootjob-")
@@ -39,7 +38,7 @@ MODULES = ("# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\t
            "m.dll\t%s\t16\t10000000\t01410000\t00001000\t0\t00000010\t0\t\n" % ("a" * 64))
 KEYS_TSV = "# table_id %s\n000ff000\tm.dll\tf\t1\tstdcall\ti\ti\tI_rt\n" % TID
 FINAL = re.compile(r"^BOOT elf=(\S+) rc=(\d+) reason=(\S+) last=(\S+) instr=(\d+) main=(\d+) threads=(\d+) seconds=(\d+) "
-                   r"published=(\S+)@([0-9a-f]{12})( presents=\d+)? stage_table=(\S+)$")
+                   r"published=(\S+)@([0-9a-f]{12}) stage_table=(\S+)$")
 HOME = os.path.join(SCRATCH, "home")
 BARE = os.path.join(SCRATCH, "artifacts.git")
 GAME = os.path.join(SCRATCH, "game")
@@ -67,7 +66,7 @@ def git(*args, cwd=None, check=True):
 def lifted_elf(mode):
     """the guest of test_bootmachine.build(mode) with .text renamed to .text.fnvl (crt0 header patched as build() does)"""
     renamed = os.path.join(SCRATCH, "g%d.fnvl.elf" % mode)
-    raw_path = tb.build(mode, tg.MODE50)[1]   # MODE 50: the renderer guest of test_bootgpu
+    raw_path = tb.build(mode)[1]
     subprocess.run(["aarch64-linux-gnu-objcopy", "--rename-section", ".text=.text.fnvl", raw_path, renamed], check=True)
     data = bytearray(open(renamed, "rb").read())
     phoff, phnum = struct.unpack_from("<I", data, 28)[0], struct.unpack_from("<H", data, 44)[0]
@@ -134,31 +133,6 @@ def main():
     publish_branch("l1-contract/elf/badrowid", dict(contract, **{"guest.elf": ok_elf, "keys.tsv": KEYS_TSV.encode() + b"junk\n"}))
     noent = {k: v for k, v in contract.items() if k != "entries.tsv"}
     publish_branch("l1-contract/elf/noentries", dict(noent, **{"guest.elf": ok_elf}))
-    gpu_c = os.path.join(SCRATCH, "fake.c")
-    open(gpu_c, "w").write(tg.FAKE_C)
-    gpu_so = os.path.join(SCRATCH, "libnxgl4.so")
-    subprocess.run(["gcc", "-O2", "-fPIC", "-shared", gpu_c, "-o", gpu_so], check=True)
-    gpu_elf, lib, ar = lifted_elf(50), open(gpu_so, "rb").read(), b"!<arch>\nfake bridge archive\n"
-    sha = lambda b: hashlib.sha256(b).hexdigest()
-    H1, H2 = "1" * 40, "2" * 40
-    jd = lambda d: json.dumps(d).encode()
-    gman = lambda render: jd(dict({"schema": "fnvnx-elf/1", "name": "guest.elf", "size": len(gpu_elf), "sha256": sha(gpu_elf), "parts": []},
-                                  **({"render": render} if render is not None else {})))
-    render = {"branch": "fake-bridge", "archive_sha256": sha(ar)}
-    publish_branch("l1-contract/elf/gpuid", dict(contract, **{"guest.elf": gpu_elf, "manifest.json": gman(render)}))
-    publish_branch("l1-contract/elf/gpunoman", dict(contract, **{"guest.elf": gpu_elf}))
-    publish_branch("l1-contract/elf/gpunorender", dict(contract, **{"guest.elf": gpu_elf, "manifest.json": gman(None)}))
-    publish_branch("l1-contract/elf/gpuothersha", dict(contract, **{"guest.elf": gpu_elf, "manifest.json": gman(dict(render, archive_sha256="0" * 64))}))
-    publish_branch("l1-contract/elf/gpuoldbridge", dict(contract, **{"guest.elf": gpu_elf, "manifest.json": gman(dict(render, branch="fake-bridge-h2"))}))
-    publish_branch("l1-contract/elf/gpunocommit", dict(contract, **{"guest.elf": gpu_elf, "manifest.json": gman(dict(render, branch="fake-bridge-nocommit"))}))
-    publish_branch("fake-bridge", {"build.json": jd({"archive_sha256": sha(ar), "nx_agent_commit": H1}), "libfnvnx-d3d9.a": ar})
-    publish_branch("fake-bridge-h2", {"build.json": jd({"archive_sha256": sha(ar), "nx_agent_commit": H2}), "libfnvnx-d3d9.a": ar})
-    publish_branch("fake-bridge-nocommit", {"build.json": jd({"archive_sha256": sha(ar)}), "libfnvnx-d3d9.a": ar})
-    publish_branch("fake-gpu", {"libnxgl4.so": lib, "meta.json": jd({"sha256": sha(lib), "nx_agent_commit": H1})})
-    publish_branch("fake-gpu-nometa", {"libnxgl4.so": lib})
-    publish_branch("fake-gpu-othersha", {"libnxgl4.so": lib, "meta.json": jd({"sha256": "0" * 64, "nx_agent_commit": H1})})
-    publish_branch("fake-gpu-empty", {"README": b"no library here\n"})
-    publish_branch("fake-gpu-bad", {"libnxgl4.so": b"not an elf\n", "meta.json": jd({"sha256": sha(b"not an elf\n"), "nx_agent_commit": H1})})
     tb.case("setup: contract branches built", True)
 
     rc, out, err = run_job(["testid"])
@@ -224,7 +198,7 @@ def main():
     rc, out, err = run_job(["noentries"])
     tb.case("missing entries.tsv: job fails naming the file, nothing published", rc == 1 and "entries.tsv" in err and "lacks" in err
             and subprocess.run(["git", "rev-parse", "-q", "--verify", "refs/heads/l4-verify/boot/noentries"], cwd=BARE).returncode != 0, (rc, err[-400:]))
-    tb.case("no stage branch: final line says stage_table=absent", m is not None and m.group(12) == "absent", last)
+    tb.case("no stage branch: final line says stage_table=absent", m is not None and m.group(11) == "absent", last)
     publish_branch("test-stage", {"stage.milestones": b"late any call 0x2000\n"})
     publish_branch("test-stage-bad", {"stage.milestones": b"late any call 0x7000\n"})
     publish_branch("test-stage-nofile", {"README": b"x\n"})
@@ -232,7 +206,7 @@ def main():
     m = FINAL.match(out.strip().splitlines()[-1]) if out.strip() else None
     doc = json.loads(published("l4-verify/boot/testid")[0]["OUT.json"]) if rc == 0 else {}
     tb.case("stage branch: rows appended after the contract's, final line names branch@commit",
-            rc == 0 and m and m.group(12) == "test-stage@" + git("rev-parse", "refs/heads/test-stage", cwd=BARE).strip()[:12]
+            rc == 0 and m and m.group(11) == "test-stage@" + git("rev-parse", "refs/heads/test-stage", cwd=BARE).strip()[:12]
             and [x["name"] for x in doc["milestones"]] == ["start-01", "exe-entry", "late"], (rc, out, err[-400:], doc.get("milestones")))
     rc, out, err = run_job(["testid"], {"BOOT_STAGE_TABLE_BRANCH": "test-stage-bad"})
     tb.case("stage row on an address without a lifted entry: job fails naming the stage table", rc == 1 and "stage table" in err, (rc, err[-300:]))
@@ -248,46 +222,6 @@ def main():
     tb.case("bad profile: job fails", rc == 1 and "--profile" in err, (rc, err[-400:]))
     rc, out, err = run_job(["testid", "--limit-instructions", "0"])
     tb.case("bad limit: job fails", rc == 1 and "--limit-instructions" in err, (rc, err[-400:]))
-    # --- the renderer: --gpu-branch
-    genv = {"GPU_PKGS": ""}   # the fake library needs no GL packages (and the test installs nothing)
-    rc, out, err = run_job(["gpuid", "--gpu-branch", "fake-gpu"], genv)
-    last = out.strip().splitlines()[-1] if out.strip() else ""
-    m = FINAL.match(last)
-    tb.case("--gpu-branch: exit 0, final line carries presents=4", rc == 0 and m is not None and m.group(11) == " presents=4", (rc, out, err[-600:]))
-    if rc == 0:
-        files, msg, cm = published("l4-verify/boot/gpuid")
-        fr = sorted(n for n in files if n.startswith("frames/"))
-        tb.case("published: OUT.json, console, spec, meta and the first 3 frames (.rgba + .txt) only",
-                sorted(n for n in files if "/" not in n) == ["OUT.console.txt", "OUT.json", "meta.json", "spec.json"]
-                and fr == ["frames/frame_%06u.%s" % (i, e) for i in range(3) for e in ("rgba", "txt")], sorted(files))
-        tb.case("frame files hold the library's output", files["frames/frame_000001.txt"] == b"1280 720\n"
-                and files["frames/frame_000001.rgba"] == struct.pack("<I", 1), files.get("frames/frame_000001.txt"))
-        doc, meta = json.loads(files["OUT.json"]), json.loads(files["meta.json"])
-        tb.case("OUT.json gpu record, meta.json gpu fields", doc["gpu"]["presents"] == 4 and doc["gpu"]["first_module10_call"]
-                and meta["gpu_branch"] == "fake-gpu"
-                and meta["gpu_branch_commit"] == git("rev-parse", "refs/heads/fake-gpu", cwd=BARE).strip(), (doc.get("gpu"), meta))
-        tb.case("meta.json records the renderer pair", meta.get("bridge_branch") == "fake-bridge" and meta.get("render_head") == "1" * 40
-                and meta.get("bridge_branch_commit") == git("rev-parse", "refs/heads/fake-bridge", cwd=BARE).strip()
-                and "data_items" in meta and meta["data_items"] is None, meta)
-    # the renderer pair rule: every broken link of the chain ELF -> bridge -> nxgl4 fails the job before the run
-    for eid, gb, word, what in (("gpunoman", "fake-gpu", "manifest.json", "ELF branch without manifest.json"),
-                                ("gpunorender", "fake-gpu", "render", "manifest.json without the render object"),
-                                ("gpuothersha", "fake-gpu", "bridge archive", "ELF linked with another archive than the bridge branch holds"),
-                                ("gpuoldbridge", "fake-gpu", "!= nxgl4 head", "bridge head != nxgl4 head"),
-                                ("gpunocommit", "fake-gpu", "nx_agent_commit", "bridge build.json without nx_agent_commit"),
-                                ("gpuid", "fake-gpu-nometa", "meta.json", "nxgl4 branch without meta.json"),
-                                ("gpuid", "fake-gpu-othersha", "libnxgl4.so", "libnxgl4.so bytes differ from meta.json")):
-        rc, out, err = run_job([eid, "--gpu-branch", gb], genv)
-        tb.case("pair rule: %s: job fails naming it, nothing published" % what, rc == 1 and word in err and out == ""
-                and (eid == "gpuid" or not git("ls-remote", BARE, "refs/heads/l4-verify/boot/" + eid)), (rc, err[-400:]))
-    rc, out, err = run_job(["gpuid", "--gpu-branch", "no-such-gpu"], genv)
-    tb.case("missing renderer branch: job fails", rc == 1 and "no-such-gpu" in err, (rc, err[-300:]))
-    rc, out, err = run_job(["gpuid", "--gpu-branch", "fake-gpu-empty"], genv)
-    tb.case("renderer branch without libnxgl4.so: job fails naming it", rc == 1 and "libnxgl4.so" in err, (rc, err[-300:]))
-    rc, out, err = run_job(["gpuid", "--gpu-branch", "fake-gpu-bad"], genv)
-    tb.case("library that does not load: job fails", rc == 1 and "does not load" in err, (rc, err[-300:]))
-    rc, out, err = run_job(["testid", "--gpu-branch", "-bad"], genv)
-    tb.case("bad --gpu-branch value: job fails", rc == 1 and "--gpu-branch" in err, (rc, err[-300:]))
     print("%d cases, %.1f s" % (tb.N[0], time.time() - t0))
     return 1 if tb.FAILED else 0
 

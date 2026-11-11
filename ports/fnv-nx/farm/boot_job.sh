@@ -2,7 +2,6 @@
 # boot_job.sh - L4 farm job: run the boot stage (verify/boot.py) on one real guest ELF and publish the result.
 #
 #   [ARTIFACTS=...] [GAME_DIR=...] bash <checkout>/ports/fnv-nx/farm/boot_job.sh <elf_id> [--limit-instructions N] [--profile handheld|docked]
-#                                [--gpu-branch <artifacts branch>]
 #
 # Steps:
 #  1 setup: what the stage needs (python3, git, the aarch64 binutils readelf/nm that icount.py spec runs, unicorn==2.1.4)
@@ -26,22 +25,13 @@
 #    module or a nonzero exit) is a RESULT; 1 is an input error and fails the job
 #  6 publish the orphan commit of OUT.json, OUT.console.txt, spec.json, meta.json to branch l4-verify/boot/<elf_id>
 #  7 final line: BOOT elf=<id> rc=<boot rc> reason=<r> last=<milestone|none> instr=<n> main=<n> threads=<n> seconds=<s> published=<branch>@<commit12>
-# --gpu-branch B: the renderer. Branch B of the artifacts repository must hold libnxgl4.so (the renderer's host library, GL 4.5 on
-#    Mesa llvmpipe). The job fetches it, installs what is missing of GPU_PKGS (default "libegl1 libgl1-mesa-dri libgles2 mesa-utils") and
-#    gcc (the callback shim of verify/bootgpu.py), checks that the library loads, and runs boot.py with --gpu LIB --frames DIR. The first 3
-#    frames (frame_*.rgba + .txt) are published under frames/ with the result; later ones are not. meta.json gains gpu_branch and
-#    gpu_branch_commit, the final line gains presents=<n>.
-#    The renderer pair rule (bootinputs.py pair), checked before the run; false = the job fails: the ELF branch's manifest.json names
-#    the bridge it was linked with (render: {branch, archive_sha256}); that branch's build.json archive_sha256 and its libfnvnx-d3d9.a
-#    bytes equal it; B's meta.json sha256 equals the libnxgl4.so bytes; bridge build.json nx_agent_commit == B's meta.json
-#    nx_agent_commit (bridge head == nxgl4 head). meta.json gains bridge_branch, bridge_branch_commit and render_head.
 # Stage table: env BOOT_STAGE_TABLE_BRANCH (default l4-verify/milestones), file stage.milestones (bootmiles format), appended after the
 #    contract's rows (bootinputs.py milestones --stage-table: names unique, every exe address a lifted code entry). A missing branch: the
 #    job runs with the contract rows only and the final line says stage_table=absent; a present branch without the file fails the job.
-# Env: GPU_PKGS (see above), ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
+# Env: ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
 # when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (default $HOME/fnvnx-farm),
 # WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
-# passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it).
+# passed to boot.py and recorded in meta.json.
 # Exit 0 iff the result was published and boot.py exited 0 or 2; 1 otherwise (one-line reason on stderr).
 set -euo pipefail
 die() { echo "boot_job: FAILED: $*" >&2; exit 1; }
@@ -49,14 +39,13 @@ log() { echo "boot_job: $*" >&2; }
 
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
 NX=$(cd "$SELF_DIR/.." && pwd)                     # ports/fnv-nx of the checkout this script lives in
-ELF_ID=${1:?usage: boot_job.sh <elf_id> [--limit-instructions N] [--profile handheld|docked] [--gpu-branch B]}; shift
+ELF_ID=${1:?usage: boot_job.sh <elf_id> [--limit-instructions N] [--profile handheld|docked]}; shift
 case $ELF_ID in ''|*[!A-Za-z0-9._-]*|.*) die "elf_id '$ELF_ID' must be letters, digits, '.', '_' or '-' and not start with '.'" ;; esac
-LIMIT=""; PROFILE=handheld; GPU_BRANCH=
+LIMIT=""; PROFILE=handheld
 while [ $# -gt 0 ]; do
   case $1 in
     --limit-instructions) [ $# -ge 2 ] || die "--limit-instructions needs a value"; LIMIT=$2; shift 2 ;;
     --profile) [ $# -ge 2 ] || die "--profile needs a value"; PROFILE=$2; shift 2 ;;
-    --gpu-branch) [ $# -ge 2 ] || die "--gpu-branch needs a value"; GPU_BRANCH=$2; shift 2 ;;
     *) die "unknown argument '$1'" ;;
   esac
 done
@@ -64,8 +53,6 @@ if [ -n "$LIMIT" ]; then
   [[ $LIMIT =~ ^([1-9][0-9]*|0[xX][0-9a-fA-F]*[1-9a-fA-F][0-9a-fA-F]*)$ ]] || die "--limit-instructions '$LIMIT' is not a positive integer (decimal or 0x hex)"
 fi
 case $PROFILE in handheld|docked) ;; *) die "--profile '$PROFILE' is neither handheld nor docked" ;; esac
-export FNVNX_PROFILE=$PROFILE
-case $GPU_BRANCH in *[!A-Za-z0-9._/-]*|-*) die "--gpu-branch '$GPU_BRANCH' is not a branch name" ;; esac
 
 FARM_HOME=${FARM_HOME:-$HOME/fnvnx-farm}
 ARTIFACTS=${ARTIFACTS:-$FARM_HOME/artifacts}
@@ -84,10 +71,6 @@ APT=()
 command -v python3 > /dev/null || APT+=(python3)
 command -v git > /dev/null || APT+=(git)
 { command -v aarch64-linux-gnu-readelf > /dev/null && command -v aarch64-linux-gnu-nm > /dev/null; } || APT+=(binutils-aarch64-linux-gnu)
-if [ -n "$GPU_BRANCH" ]; then
-  command -v gcc > /dev/null || APT+=(gcc)
-  for p in ${GPU_PKGS-libegl1 libgl1-mesa-dri libgles2 mesa-utils}; do dpkg -s "$p" > /dev/null 2>&1 || APT+=("$p"); done
-fi
 unicorn_ok() { python3 -s -c 'import importlib.metadata as m, sys; sys.exit(0 if m.version("unicorn") == "2.1.4" else 1)' 2> /dev/null; }
 if [ ${#APT[@]} -gt 0 ] || ! unicorn_ok; then
   if [ "$(id -u)" = 0 ]; then SUDO=(); else command -v sudo > /dev/null || die "packages are missing (${APT[*]:-unicorn==2.1.4}) and this user is not root and has no sudo"; SUDO=(sudo -n); fi
@@ -121,10 +104,6 @@ want=(entries.tsv modules.tsv keys.tsv milestones.tsv)
 if grep -qxF guest.elf "$WORK/branch-files.txt"; then want+=(guest.elf)
 elif grep -qxF manifest.json "$WORK/branch-files.txt"; then want+=(manifest.json $(grep -E '^part\.[0-9]+$' "$WORK/branch-files.txt"))
 else MISSING="$MISSING guest.elf-or-manifest.json"; fi
-if [ -n "$GPU_BRANCH" ]; then   # the renderer pair rule reads manifest.json
-  if grep -qxF manifest.json "$WORK/branch-files.txt"; then case " ${want[*]} " in *" manifest.json "*) ;; *) want+=(manifest.json) ;; esac
-  else MISSING="$MISSING manifest.json"; fi
-fi
 [ -z "$MISSING" ] || die "branch $IN_BRANCH@${ELF_COMMIT:0:12} lacks the required file(s):$MISSING"
 IN=$WORK/in; SOFT=absent; SOFTFILE=
 for f in softfloat.syms softfloat.tsv; do
@@ -137,36 +116,6 @@ BI=(python3 -s -B "$NX/verify/bootinputs.py")
 if [ ! -f "$IN/guest.elf" ]; then
   "${BI[@]}" join --dir "$IN" -o "$IN/guest.elf" 2> "$WORK/join.err" || die "$(tail -1 "$WORK/join.err" | cut -c1-400)"
   log "guest.elf joined from the manifest's parts and verified"
-fi
-
-# 2b. the renderer library
-GPU_LIB=""; GPU_COMMIT=""
-if [ -n "$GPU_BRANCH" ]; then
-  retry GITA fetch -q "$ARTIFACTS_URL" "+refs/heads/$GPU_BRANCH:refs/remotes/boot-job/gpu/$GPU_BRANCH" || die "fetch of renderer branch $GPU_BRANCH failed"
-  GPU_COMMIT=$(GITA rev-parse "refs/remotes/boot-job/gpu/$GPU_BRANCH^{commit}") || die "no commit for $GPU_BRANCH after fetch"
-  for f in libnxgl4.so meta.json; do
-    GITA ls-tree --name-only "$GPU_COMMIT" | grep -qxF "$f" || die "renderer branch $GPU_BRANCH@${GPU_COMMIT:0:12} lacks $f"
-  done
-  GPU_DIR=$WORK/gpu; rm -rf "$GPU_DIR"; mkdir -p "$GPU_DIR"
-  gpu_extract() { GITA archive "$GPU_COMMIT" libnxgl4.so meta.json | tar -x -C "$GPU_DIR"; }
-  retry gpu_extract || die "cannot extract libnxgl4.so and meta.json from $GPU_BRANCH"
-  # the renderer pair rule: the bridge linked into the ELF and this library are of one head
-  RB=$("${BI[@]}" render-branch --manifest "$IN/manifest.json" 2> "$WORK/pair.err") || die "$(tail -1 "$WORK/pair.err" | cut -c1-400)"
-  BRIDGE_BRANCH=${RB%% *}
-  retry GITA fetch -q "$ARTIFACTS_URL" "+refs/heads/$BRIDGE_BRANCH:refs/remotes/boot-job/bridge/$BRIDGE_BRANCH" || die "fetch of bridge branch $BRIDGE_BRANCH failed"
-  BRIDGE_COMMIT=$(GITA rev-parse "refs/remotes/boot-job/bridge/$BRIDGE_BRANCH^{commit}") || die "no commit for $BRIDGE_BRANCH after fetch"
-  for f in build.json libfnvnx-d3d9.a; do
-    GITA ls-tree --name-only "$BRIDGE_COMMIT" | grep -qxF "$f" || die "bridge branch $BRIDGE_BRANCH@${BRIDGE_COMMIT:0:12} lacks $f"
-  done
-  BRIDGE_DIR=$WORK/bridge; rm -rf "$BRIDGE_DIR"; mkdir -p "$BRIDGE_DIR"
-  bridge_extract() { GITA archive "$BRIDGE_COMMIT" build.json libfnvnx-d3d9.a | tar -x -C "$BRIDGE_DIR"; }
-  retry bridge_extract || die "cannot extract build.json and libfnvnx-d3d9.a from $BRIDGE_BRANCH"
-  RENDER_HEAD=$("${BI[@]}" pair --manifest "$IN/manifest.json" --bridge "$BRIDGE_DIR" --gpu "$GPU_DIR" 2> "$WORK/pair.err") \
-    || die "renderer pair: $(tail -1 "$WORK/pair.err" | cut -c1-500)"
-  log "renderer pair of one head $RENDER_HEAD: $BRIDGE_BRANCH@${BRIDGE_COMMIT:0:12} + $GPU_BRANCH@${GPU_COMMIT:0:12}"
-  GPU_LIB=$GPU_DIR/libnxgl4.so
-  python3 -s -B "$NX/verify/bootgpu.py" "$GPU_LIB" > /dev/null 2> "$WORK/gpu.err" || die "libnxgl4.so does not load: $(tail -1 "$WORK/gpu.err" | cut -c1-300)"
-  log "renderer library $GPU_BRANCH@${GPU_COMMIT:0:12} loads"
 fi
 
 # 3. icount spec
@@ -216,8 +165,6 @@ OUT=$WORK/OUT.json; rm -f "$OUT" "$WORK/OUT.console.txt"
 BOOT=(python3 -s -B "$NX/verify/boot.py" run --elf "$IN/guest.elf" --reserved "$IN/reserved.tsv" --keys "$KEYS" --heap-size 0x40000000
       --profile "$PROFILE" --root "$SD" --game "$GAME_DIR" --milestones "$IN/table.txt" --manifest "$IN/entries.tsv" --icount-spec "$WORK/spec.json")
 [ -z "$LIMIT" ] || BOOT+=(--limit-instructions "$LIMIT")
-FRAMES=$WORK/frames; rm -rf "$FRAMES"
-[ -z "$GPU_LIB" ] || BOOT+=(--gpu "$GPU_LIB" --frames "$FRAMES")
 BOOT+=(--out "$OUT")
 log "${BOOT[*]}"
 T0=$(date +%s)
@@ -230,11 +177,6 @@ REASON=$(field reason); LAST=$(field last); INSTR=$(field instr); MAIN=$(field m
 for v in REASON LAST INSTR MAIN THREADS; do [ -n "${!v}" ] || die "summary line has no $v field: $SUMMARY"; done
 [ -f "$OUT" ] && [ -f "$WORK/OUT.console.txt" ] || die "boot.py exit $RC but OUT.json or OUT.console.txt is missing"
 
-PRESENTS=""
-if [ -n "$GPU_LIB" ]; then
-  PRESENTS=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["gpu"]["presents"])' "$OUT") || die "OUT.json has no gpu record"
-fi
-
 # 6. publish
 CPU=$(lscpu 2> /dev/null | sed -n 's/^Model name:[[:space:]]*//p' | head -1)
 [ -n "$CPU" ] || CPU=$(sed -n 's/^model name[[:space:]]*:[[:space:]]*//p' /proc/cpuinfo | head -1)
@@ -246,22 +188,12 @@ d = dict(zip(k, v))
 d["boot_rc"], d["seconds"] = int(d["boot_rc"]), int(d["seconds"])
 d["limit_instructions"] = int(d["limit_instructions"], 0) if d["limit_instructions"] else None
 d["data_items"] = d["data_items"][len("fetched:"):].split() if d["data_items"] else None
-if v[len(k):]:
-    d["gpu_branch"], d["gpu_branch_commit"], d["bridge_branch"], d["bridge_branch_commit"], d["render_head"] = v[len(k):]
-print(json.dumps(d, sort_keys=True, indent=1))' "$ELF_ID" "$ELF_COMMIT" "$NX_COMMIT" "$EXE_SHA" "$RC" "$SECONDS_RUN" "$LIMIT" "$PROFILE" "$CPU" "$SOFT" "$DATA_ITEMS" ${GPU_BRANCH:+"$GPU_BRANCH" "$GPU_COMMIT" "$BRIDGE_BRANCH" "$BRIDGE_COMMIT" "$RENDER_HEAD"} > "$WORK/meta.json" \
+print(json.dumps(d, sort_keys=True, indent=1))' "$ELF_ID" "$ELF_COMMIT" "$NX_COMMIT" "$EXE_SHA" "$RC" "$SECONDS_RUN" "$LIMIT" "$PROFILE" "$CPU" "$SOFT" "$DATA_ITEMS" > "$WORK/meta.json" \
   || die "meta.json could not be written"
 IDX=$(mktemp -u "$WORK/index.XXXXXX")
 for f in OUT.json OUT.console.txt spec.json meta.json; do
   GIT_INDEX_FILE=$IDX GITA update-index --add --cacheinfo "100644,$(GITA hash-object -w "$WORK/$f"),$f" || die "cannot stage $f"
 done
-if [ -n "$GPU_LIB" ]; then   # the first 3 frames only (lexical order = present order)
-  for r in $(cd "$FRAMES" && ls frame_*.rgba 2> /dev/null | sort | head -3); do
-    for f in "$r" "${r%.rgba}.txt"; do
-      [ -f "$FRAMES/$f" ] || die "frame file $f is missing next to $r"
-      GIT_INDEX_FILE=$IDX GITA update-index --add --cacheinfo "100644,$(GITA hash-object -w "$FRAMES/$f"),frames/$f" || die "cannot stage $f"
-    done
-  done
-fi
 TREE=$(GIT_INDEX_FILE=$IDX GITA write-tree) || die "write-tree failed"; rm -f "$IDX"
 MSG=$(printf 'boot %s: rc %s reason %s last %s instr %s' "$ELF_ID" "$RC" "$REASON" "$LAST" "$INSTR")
 COMMIT=$(GITA "${GIT_ID[@]}" commit-tree "$TREE" -m "$MSG") || die "commit-tree failed"
@@ -269,4 +201,4 @@ retry GITA push -q -f "$ARTIFACTS_URL" "$COMMIT:refs/heads/$OUT_BRANCH" || die "
 [ "$(git ls-remote "$ARTIFACTS_URL" "refs/heads/$OUT_BRANCH" | cut -f1)" = "$COMMIT" ] || die "$OUT_BRANCH on the remote is not the pushed commit $COMMIT"
 
 # 7. result
-echo "BOOT elf=$ELF_ID rc=$RC reason=$REASON last=$LAST instr=$INSTR main=$MAIN threads=$THREADS seconds=$SECONDS_RUN published=$OUT_BRANCH@${COMMIT:0:12}${GPU_LIB:+ presents=$PRESENTS} stage_table=$STAGE"
+echo "BOOT elf=$ELF_ID rc=$RC reason=$REASON last=$LAST instr=$INSTR main=$MAIN threads=$THREADS seconds=$SECONDS_RUN published=$OUT_BRANCH@${COMMIT:0:12} stage_table=$STAGE"

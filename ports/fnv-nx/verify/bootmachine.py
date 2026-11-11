@@ -306,7 +306,7 @@ class Machine:
         self.ext = {int(n[4:]): getattr(services, n) for n in dir(services) if n.startswith("ext_") and n[4:].isdigit()}
         uc = self.uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
         uc.reg_write(UC_ARM64_REG_CPACR_EL1, 3 << 20)   # FP/SIMD on
-        self.backs = []   # [lo, hi, host address, keepalive]: every host-backed mapping, sorted by lo (host_ptr)
+        self.backs = []   # [lo, hi, host address, keepalive]: every host-backed mapping, sorted by lo (the keepalive holds the host buffer)
         used = []
         for s in elf["loads"]:
             lo, hi = (base + s["vaddr"]) // PAGE * PAGE, _up(base + s["vaddr"] + s["memsz"])
@@ -456,7 +456,7 @@ class Machine:
     # -- guest memory services
     def _map(self, addr, size, prot=UC_PROT_READ | UC_PROT_WRITE, ptr=None, track=True):
         """every guest mapping is backed by a host buffer the machine owns (anonymous mmap, zero) or, for a section view, by the
-        section's buffer; mem_map_ptr hands that address to Unicorn, so host_ptr can return a stable host address"""
+        section's buffer; mem_map_ptr hands that address to Unicorn"""
         keep = None
         if ptr is None:
             mm = mmap.mmap(-1, size)
@@ -483,23 +483,6 @@ class Machine:
             if end < hi:
                 out.append([end, hi, ptr + (end - lo), keep])
         self.backs = out
-
-    def host_ptr(self, addr, size):
-        """host address of [addr, addr + size) when it lies wholly inside ONE mapping (one host buffer) that is now readable and
-        writable for the guest (never the host page; none-protected and unmapped ranges: None). An EMPTY range (size 0, the
-        renderer library's contract: it asks for it and never dereferences the result) gets a pointer when addr lies inside
-        such a mapping or exactly at its end, and None when addr is outside every mapping."""
-        if size < 0 or addr < 0 or addr + size > 1 << 64:
-            return None
-        rw = lambda lo, hi: self.accessible(lo, hi, UC_PROT_READ) and self.accessible(lo, hi, UC_PROT_WRITE)  # noqa: E731
-        for lo, hi, ptr, _k in self.backs:
-            if size and lo <= addr and addr + size <= hi:
-                return ptr + (addr - lo) if rw(addr, addr + size) else None
-            if not size and lo <= addr <= hi:
-                probe = addr if addr < hi else addr - 1          # the byte the empty range touches the mapping at
-                if rw(probe, probe + 1):
-                    return ptr + (addr - lo)
-        return None
 
     def stack_for(self, tid):
         return self.stacks_top - self.stack_size * (tid - 1) - 0x100
