@@ -151,29 +151,29 @@ def target_flags(root, newlib, backend):
 
 def find_sources(root, backend):
     """-> list of (source, extra flags)."""
-    P = os.path.join(root, 'platform'); T = os.path.join(root, 'toolchain')
+    P = os.path.join(root, 'platform'); T = os.path.join(root, 'toolchain'); H = os.path.join(root, 'platform_host')
     srcs = []
     for p in ['win32/*.cpp', 'crt/*.c', 'crt/*.cpp', 'audio/*.cpp', 'input/*.cpp']:
         srcs += glob.glob(os.path.join(P, p))
     out = []
     for s in sorted(srcs):
-        if s.endswith('input_horizon.cpp') and backend != 'horizon':
-            continue   # guest: its libnx part is on the host (toolchain/game/build.sh)
         out.append((s, []))
+    if backend == 'horizon':
+        out.append((H + '/input/input_horizon.cpp', []))   # host side: platform_host, not a unit of the guest root
     out.append((P + '/os/os_world.c', []))   # the world registry, common to the three backends
     if backend == 'posix':
-        out.append((P + '/os/os_posix.c', []))
-        out.append((P + '/audio/backend_audren.c', []))
+        out.append((H + '/os/os_posix.c', []))
+        out.append((H + '/audio/backend_audren.c', []))
     elif backend == 'horizon':
-        out.append((P + '/os/os_horizon.c', ['-D__SWITCH__']))
-        out.append((P + '/audio/backend_audren.c', ['-D__SWITCH__']))
+        out.append((H + '/os/os_horizon.c', ['-D__SWITCH__']))
+        out.append((H + '/audio/backend_audren.c', ['-D__SWITCH__']))
     return out
 
 
 GUEST_TRIPLE = 'arm64_32-apple-watchos'
-# platform/build_guest.sh HOST_SIDE: platform files that are on the host (LP64 / libnx), not in the guest archive
-HOST_SIDE = ('platform/input/input_horizon.cpp', 'platform/audio/backend_audren.c', 'platform/os/os_horizon.c',
-             'platform/os/os_posix.c', 'platform/win32/filemap_shared.cpp')
+# platform_host/: files that are on the host (LP64 / libnx), not units of the guest product root platform/
+HOST_SIDE = ('platform_host/input/input_horizon.cpp', 'platform_host/audio/backend_audren.c', 'platform_host/os/os_horizon.c',
+             'platform_host/os/os_posix.c', 'platform_host/win32/filemap_shared.cpp')
 
 
 def make_var(root, name):
@@ -240,7 +240,7 @@ def guest_product(root, tc, libnx_inc, triple):
     for n in ('clock_rt.cpp', 'clock_real.cpp'):
         jobs.append((P + '/clock/' + n, fl(n)))
     for n in ('os_guest.c', 'platform_glue.cpp'):
-        jobs.append((T + '/guest/' + n, fl(n)))
+        jobs.append((P + '/guest/' + n, fl(n)))
     ft_flags = [f if f != '-O2' else '-O1' for f in make_var(root, 'FT_CFLAGS')]
     ftb = [f for f in base if not f.startswith('-std')]
     for m in make_var(root, 'FT_SRCS'):

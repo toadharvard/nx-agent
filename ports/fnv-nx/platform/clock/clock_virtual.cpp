@@ -1,3 +1,6 @@
+/* Clock variant of the root (flags variant, not a second file list): this file is compiled in every build of the root; its body is the
+ * clock selected by the define FNVNX_CLOCK_VIRTUAL (absent = the product's real clock, present = the verification mode's virtual clocks). */
+#ifdef FNVNX_CLOCK_VIRTUAL
 /* clock_virtual.cpp - the virtual clocks of the verification mode (fnvnx_clock.h), definition VC1.
  *
  * Each thread has a counter t, nanoseconds. The main thread (and any thread nobody started through CreateThread) starts at 0;
@@ -386,3 +389,4 @@ int clk_file_times(const char *host, int64_t ft[3])
 }
 
 }
+#endif
