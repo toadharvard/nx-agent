@@ -38,3 +38,21 @@ guest root builds; plugins built against the external's headers, .so equal in tw
 on it; test_msvcmodel.py passes on it. Times (dominated by ingesting the 1.1 GB tree): cold 107 s, warm 9.7 s.
 Open: without FNVNX_TEST_GCC_PREFIX the compiler cases print SKIP and the file exits 0 (the selftests gate has no skip logic, so this is a silent pass).
 When guest_compiler.json lands, the test should fetch the pinned external instead and fail without it.
+
+## Part 2: the L2 plugins (addr, dispatch, names, sdd, pi) + layout
+- Sources imported (the .cc only; their build.sh and test_*.py use the old compile path and are not carried) from claude/fnv-l2-source: order, ftoi, pi, layout
+  are NEWER there than on port-nsw-un6t9s (order +242/-72, ftoi, pi +200, layout exists only there); addr, dispatch, names, sdd are identical on both.
+  msvcmodel/build.sh also from l2-source (reference compiler lookup).
+- l2-source's fnvnx_ftoi has no `enum` argument any more (it accepts only `verbose`), so ftoi args are {} now.
+- Plugin set and load order = compile.sh of l2-source: ftoi, order, sdd, pi, dispatch, addr, names, layout (recipe.py PLUGIN_SOURCES, in that order; a native
+  root must list exactly these, in this order, with PLUGIN_ARGS; only order has arguments: rtl/msvc/rtl/msvc). `layout` includes names' .cc: new optional plugin
+  key "inputs" (tracked files mounted at their repo paths; PLUGIN_INPUTS pins them).
+- Native roots must also carry the semantics flags in flags.cxx (recipe.py SEMANTICS_FLAGS, from compile.sh: -mabi=ilp32 -fms-extensions ... -DFNVNX_SDD=1
+  -fno-devirtualize); missing = red.
+- NOT expressible in the recipe: pi's per-unit `-fplugin-arg-fnvnx_pi-fpfast` (compile.sh derives it per unit from units.json /fp:fast); a recipe has flags per
+  language only. Needs a rule from the owner of N3 (per-unit flags in the recipe?).
+- Tests (test_plugins.py): all 8 plugins build, load, in order; sections .fnvnx.n3/.sympair/.layout/.names appear; indirect call goes through fnvnx_dispatch.
+  Not checked: the behaviour of addr, sdd, and the contents of the sections (L2's own tests need build.sh; they are not run here).
+- vtnames (part 3): clang plugin, not a GCC plugin: it is a separate clang run per unit that writes facts files (.vt/.sym/.mem), and its command line comes from
+  tools/link/layoutgate.py msvc_flags. Building it needs the clang headers (libclang-18-dev, /usr/lib/llvm-18/include/clang/AST/Mangle.h), which env.json does
+  not pin and this container lacks. To be pinned.

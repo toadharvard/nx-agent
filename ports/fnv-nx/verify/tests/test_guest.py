@@ -102,7 +102,7 @@ def main():
     rb, tb = build(gr, "GB")
     rw, tw = build(gr, "GA", os.path.join(BASE, "out-GA2"))
     so = lambda r: {p["name"]: p["sha256"] for p in r["plugins"]}  # noqa: E731
-    check("plugins are built against the external compiler's headers, .so deterministic (two cold stores)", so(ra) == so(rb) and len(so(ra)) == 2, (so(ra), so(rb)))
+    check("plugins are built against the external compiler's headers, .so deterministic (two cold stores)", so(ra) == so(rb) and len(so(ra)) == len(recipe.PLUGIN_SOURCES), (so(ra), so(rb)))
     check("cold and warm build: warm runs no stage, objects equal", rw["stages"]["run"] == 0 and [o["sha256"] for o in rw["objects"]] == [
         o["sha256"] for o in ra["objects"]] == [o["sha256"] for o in rb["objects"]], (rw["stages"], ra["stages"]))
     print("TIME guest cold A %.1fs, cold B %.1fs, warm %.1fs" % (ta, tb, tw))

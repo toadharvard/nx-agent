@@ -45,15 +45,26 @@ TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "constants", "contract_names", "link", "external",
         "plugins", "plugin_cxx"}
-PLUGIN_KEYS = {"name", "source", "args"}
+PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
 GUEST_TARGETS = ("guest", "host")
 # The plugins every product root with native or decomp C++ loads, their only admitted sources and their fixed arguments (RECIPE.md,
 # "Plugins"). The arguments are the MSVC semantics (evaluation order of arguments, objects, operators, assignments; enum conversion
 # an error as for cl). The other values the plugins accept (ltr, first, cpp17) exist for A/B measurements and are no product.
 # The plugin fnvnx_order has no memory-ordering option: every access to shared memory is ordered (x86 TSO), whatever the arguments.
-PLUGIN_SOURCES = {"fnvnx_order": TREE + "/toolchain/order/fnvnx_order.cc", "fnvnx_ftoi": TREE + "/toolchain/ftoi/fnvnx_ftoi.cc"}
-PLUGIN_ARGS = {"fnvnx_order": {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}, "fnvnx_ftoi": {"enum": "error"}}
+# The set and the LOAD ORDER of compile.sh (fnv-l2-source): ftoi, order, sdd, pi, dispatch, addr, names, layout. A plugin that includes another source
+# (layout includes names' .cc) lists it in PLUGIN_INPUTS; the stage mounts the sources at their repo paths.
+_T = TREE + "/toolchain/"
+PLUGIN_SOURCES = {"fnvnx_ftoi": _T + "ftoi/fnvnx_ftoi.cc", "fnvnx_order": _T + "order/fnvnx_order.cc", "fnvnx_sdd": _T + "sdd/fnvnx_sdd.cc",
+                  "fnvnx_pi": _T + "pi/fnvnx_pi.cc", "fnvnx_dispatch": _T + "dispatch/fnvnx_dispatch.cc", "fnvnx_addr": _T + "addr/fnvnx_addr.cc",
+                  "fnvnx_names": _T + "names/fnvnx_names.cc", "fnvnx_layout": _T + "layout/fnvnx_layout.cc"}
+PLUGIN_INPUTS = {"fnvnx_layout": [_T + "names/fnvnx_names.cc"]}
+PLUGIN_ARGS = {n: {} for n in PLUGIN_SOURCES}
+PLUGIN_ARGS["fnvnx_order"] = {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}
+# Flags of the game's C++ that fix its semantics (compile.sh); fnvnx_sdd needs -DFNVNX_SDD=1 and -fno-devirtualize.
+SEMANTICS_FLAGS = ("-mabi=ilp32", "-fms-extensions", "-fshort-wchar", "-frounding-math", "-fsigned-char", "-fno-strict-aliasing", "-fwrapv",
+                   "-fno-delete-null-pointer-checks", "-fcheck-new", "-fno-sized-deallocation", "-fno-lifetime-dse", "-ffp-contract=off",
+                   "-DFNVNX_SDD=1", "-fno-devirtualize")
 EXT_KEYS = {"name", "repo", "ref", "commit", "tree_sha256", "at"}
 SANDBOX_PATHS = ("/src", "/inc", "/in", "/out", "/tool", "/objs", "/ld", "/work", "/proc", "/dev", "/tmp", "/oldroot")
 STYPE = {0: "NOTYPE", 1: "OBJECT", 2: "FUNC", 5: "COMMON", 6: "TLS", 10: "IFUNC"}
@@ -278,7 +289,7 @@ def plugin_errors(rec, root, files, roots, units, ext_names):
         return ["plugins must be a list"]
     loaded = {}
     for i, p in enumerate(pl):
-        if not (isinstance(p, dict) and set(p) == PLUGIN_KEYS and isinstance(p["name"], str) and isinstance(p["source"], str)
+        if not (isinstance(p, dict) and set(p) - {"inputs"} == PLUGIN_KEYS and isinstance(p["name"], str) and isinstance(p["source"], str)
                 and isinstance(p["args"], dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in p["args"].items())):
             err.append("plugins[%d] needs exactly name, source, args (name and source strings, args {string: string})" % i)
             continue
@@ -294,6 +305,11 @@ def plugin_errors(rec, root, files, roots, units, ext_names):
             err.append("plugin %s: source %r is not a tracked file of an admitted tool root" % (n, src))
         elif n in PLUGIN_SOURCES and src != PLUGIN_SOURCES[n]:
             err.append("plugin %s: source must be %s" % (n, PLUGIN_SOURCES[n]))
+        ins = p.get("inputs", [])
+        if not (isinstance(ins, list) and all(isinstance(x, str) and rel_ok(x) and x in files for x in ins)):
+            err.append("plugin %s: inputs must be tracked files (repo-relative)" % n)
+        elif n in PLUGIN_SOURCES and ins != PLUGIN_INPUTS.get(n, []):
+            err.append("plugin %s: inputs must be %s" % (n, PLUGIN_INPUTS.get(n, [])))
         if not all(re.fullmatch("[a-z][a-z0-9-]*", k) for k in p["args"]):
             err.append("plugin %s: argument names must be [a-z][a-z0-9-]*" % n)
         loaded[n] = p
@@ -313,6 +329,10 @@ def plugin_errors(rec, root, files, roots, units, ext_names):
                 err.append("native C++ root %s does not load plugin %s (every native or decomp C++ body is compiled with both)" % (root, n))
             elif loaded[n].get("args") != PLUGIN_ARGS[n]:
                 err.append("plugin %s: arguments must be %s, are %s" % (n, PLUGIN_ARGS[n], loaded[n].get("args")))
+        if list(loaded) != [n for n in PLUGIN_SOURCES if n in loaded]:
+            err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
+        fl = rec.get("flags", {}).get("cxx", []) if isinstance(rec.get("flags"), dict) else []
+        err += ["native C++ root %s: flags.cxx lacks the semantics flag %s" % (root, f) for f in SEMANTICS_FLAGS if f not in fl]
     elif isinstance(origin, dict) and set(origin) == {"lifted_by", "pack"}:
         tool, pack = origin["lifted_by"], origin["pack"]
         mine = {f[len(root) + 1:] for f in files if under(f, root)}
@@ -558,10 +578,10 @@ class Job:
         for p in pl:
             n, src = p["name"], p["source"]
             tmp = tempfile.mkdtemp(dir=ws)
-            tree = self.ingest_files(tmp, "psrc", [src], posixpath.dirname(src))
+            tree = self.ingest_files(tmp, "psrc", [src] + p.get("inputs", []), "")   # at their repo paths: `#include "../names/x.cc"` resolves
             argv = [host, "-shared", "-nostdlib", "-fPIC", "-fno-rtti", "-fno-exceptions", "-O2", "-I" + inc + "/include", "-frandom-seed=" + hashlib.sha256(n.encode()).hexdigest(),
                     "-Werror=date-time", "-ffile-prefix-map=/psrc=psrc", "-o", "/out/%s.so" % n, "/plugcrt/crti.o", pf("crtbeginS.o"),
-                    "/psrc/" + posixpath.basename(src), pf("crtendS.o"), "/plugcrt/crtn.o"]
+                    "/psrc/" + src, pf("crtendS.o"), "/plugcrt/crtn.o"]
             doc = {"format": "fnvnx-stage/1", "stage": "plugin:" + n, "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
                    "env": dict(unitstage.ENV, PATH=os.path.dirname(host)), "outputs": ["/out"],
                    "inputs": sorted(rt["inputs"] + [{"at": "/psrc", "tree": tree}, {"at": "/plugcrt", "tree": crt_tree}], key=lambda i: i["at"])}

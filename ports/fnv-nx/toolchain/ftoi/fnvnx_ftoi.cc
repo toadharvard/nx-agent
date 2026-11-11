@@ -1,7 +1,7 @@
 // fnvnx_ftoi.cc - GCC plugin: every float -> integer conversion of a unit with MSVC 2008 x86 semantics (S12 FTOI2,
 // docs/STATIC_CHECKS.md "float -> integer").
 //
-//   g++ ... -fplugin=<dir>/fnvnx_ftoi.so [-fplugin-arg-fnvnx_ftoi-verbose] [-fplugin-arg-fnvnx_ftoi-enum=error] unit.cpp
+//   g++ ... -fplugin=<dir>/fnvnx_ftoi.so [-fplugin-arg-fnvnx_ftoi-verbose] unit.cpp
 //
 // What MSVC 2008 SP1 compiles for (T)x, x float or double (the same at /Od and /O2; tests/s12 ftoi):
 //   int, long, short, signed char      call __ftol2_sse   - cvttsd2si on every SSE2 PC: int32, 0x80000000 for NaN
@@ -37,7 +37,6 @@
 int plugin_is_GPL_compatible;   // the plugin interface asks for it; the code is MIT (LICENSE), which is compatible
 
 static bool verbose;
-static bool enum_error;        // -fplugin-arg-fnvnx_ftoi-enum=error
 static unsigned long total;
 
 static tree real_cst(double v) {
@@ -72,14 +71,11 @@ struct ftoi_pass : gimple_opt_pass {
         // "conversions between enumeration and floating point values are no longer allowed"; tests/s12 ftoi_enum
         // has the compiler's own answer), so the exe's source named an integer type in between and that type chose
         // the conversion. A text that omits it does not say which, and nothing here picks one.
-        if (TREE_CODE(it) == ENUMERAL_TYPE && enum_error) {
+        if (TREE_CODE(it) == ENUMERAL_TYPE) {
           error_at(gimple_location(stmt), "FTOI: %qT to enum %qT without the integer type in between (MSVC C2440)", ft, it);
           continue;
         }
         bool uns = TYPE_UNSIGNED(it);
-        // without the `enum=error` argument (objects of the old flag set): the int path for an enum that names no
-        // underlying type, as this plugin did before the compiler's own answer was known
-        if (TREE_CODE(it) == ENUMERAL_TYPE && !TYPE_LANG_FLAG_5(TYPE_MAIN_VARIANT(it))) uns = false;
         bool wide = p > 32 || (p == 32 && uns);                  // x87 int64 (__ftol2, fistp QWORD)
         tree st = wide ? long_long_integer_type_node : integer_type_node;
         gimple_seq seq = NULL;
@@ -128,7 +124,10 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
   }
   for (int i = 0; i < info->argc; i++)
     if (!strcmp(info->argv[i].key, "verbose")) verbose = true;
-    else if (!strcmp(info->argv[i].key, "enum") && info->argv[i].value && !strcmp(info->argv[i].value, "error")) enum_error = true;
+    else {
+      error("%<fnvnx_ftoi%>: unknown plugin argument %qs", info->argv[i].key);
+      return 1;
+    }
   struct register_pass_info pass;
   pass.pass = new ftoi_pass(g);
   pass.reference_pass_name = "cfg";

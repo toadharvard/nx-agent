@@ -28,10 +28,12 @@ atexit.register(lambda: subprocess.Popen(["rm", "-rf", BASE], start_new_session=
 FAILED = []
 T = "ports/fnv-nx/"
 ROOT = T + "toy"
-PLUGS = [{"name": n, "source": recipe.PLUGIN_SOURCES[n], "args": dict(recipe.PLUGIN_ARGS[n])} for n in ("fnvnx_order", "fnvnx_ftoi")]
-SRC = "volatile int g;\nint rd() { return g; }\nvoid wr(int v) { g = v; }\nint f2i(float f) { return (int)f; }\n"
+PLUGS = [dict({"name": n, "source": recipe.PLUGIN_SOURCES[n], "args": dict(recipe.PLUGIN_ARGS[n])},
+              **({"inputs": recipe.PLUGIN_INPUTS[n]} if n in recipe.PLUGIN_INPUTS else {})) for n in recipe.PLUGIN_SOURCES]
+P = {p["name"]: p for p in PLUGS}
+SRC = "volatile int g;\nint rd() { return g; }\nvoid wr(int v) { g = v; }\nint f2i(float f) { return (int)f; }\nint ic(int (*f)(int)) { return f(1); }\nstruct S { int a; char b; };\nS gs;\n"
 REC = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
-       "flags": {"c": [], "cxx": ["-O2", "-mabi=ilp32"], "asm": []}, "include": [], "units": "all",
+       "flags": {"c": [], "cxx": ["-O2"] + list(recipe.SEMANTICS_FLAGS), "asm": []}, "include": [], "units": "all",
        "plugin_cxx": "x86_64-linux-gnu-g++-13", "plugins": PLUGS}
 
 
@@ -56,7 +58,7 @@ def make_repo(name, rec, origin, files=None, extra_roots=()):
     repo = os.path.join(BASE, name)
     os.makedirs(repo)
     git(repo, "init", "-q")
-    for n in recipe.PLUGIN_SOURCES.values():   # the real plugin sources
+    for n in list(recipe.PLUGIN_SOURCES.values()) + [i for v in recipe.PLUGIN_INPUTS.values() for i in v]:   # the real plugin sources
         os.makedirs(os.path.dirname(os.path.join(repo, n)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, n), os.path.join(repo, n))
     for k, v in dict({ROOT + "/a.cc": SRC}, **(files or {})).items():
@@ -100,15 +102,18 @@ def main():
     # --- gate rule, validation level (no build)
     repo = make_repo("native", REC, "native")
     check("native root with both plugins is valid", errs(repo, REC) == [], errs(repo, REC))
-    for gone in ("fnvnx_order", "fnvnx_ftoi"):
+    for gone in recipe.PLUGIN_SOURCES:
         r = mut(plugins=[p for p in PLUGS if p["name"] != gone])
         e = errs(repo, r)
         check("native root without %s is red" % gone, any("does not load plugin " + gone in x for x in e), e)
-    check("native root without plugins is red", len([x for x in errs(repo, mut(plugins=[], plugin_cxx=None)) if "does not load" in x]) == 2)
-    r = mut(plugins=[dict(PLUGS[0], args=dict(PLUGS[0]["args"], args="ltr")), PLUGS[1]])
+    check("native root without plugins is red", len([x for x in errs(repo, mut(plugins=[], plugin_cxx=None)) if "does not load" in x]) == len(recipe.PLUGIN_SOURCES))
+    r = mut(plugins=[dict(p, args=dict(p["args"], args="ltr")) if p["name"] == "fnvnx_order" else p for p in PLUGS])
     check("A/B-only argument value is red", any("arguments must be" in x for x in errs(repo, r)), errs(repo, r))
     check("plugin source outside the pinned file is red", any("source must be" in x or "not a tracked" in x for x in errs(
-        repo, mut(plugins=[dict(PLUGS[0], source=T + "toolchain/ftoi/fnvnx_ftoi.cc"), PLUGS[1]]))))
+        repo, mut(plugins=[dict(p, source=recipe.PLUGIN_SOURCES["fnvnx_ftoi"]) if p["name"] == "fnvnx_order" else p for p in PLUGS]))))
+    check("plugins out of load order are red", any("order" in x for x in errs(repo, mut(plugins=PLUGS[::-1]))))
+    check("native root without a semantics flag is red", any("semantics flag -fwrapv" in x for x in errs(repo, mut(
+        flags={"c": [], "cxx": [f for f in REC["flags"]["cxx"] if f != "-fwrapv"], "asm": []}))))
     check("-fplugin in flags is red", any("plugin" in x for x in errs(repo, mut(flags={"c": [], "cxx": ["-fplugin=/x.so"], "asm": []}))))
     check("plugins without plugin_cxx is red", any("plugin_cxx" in x for x in errs(repo, mut(plugin_cxx=None))) or
           any("plugin_cxx" in x for x in errs(repo, {k: v for k, v in REC.items() if k != "plugin_cxx"})))
@@ -123,11 +128,17 @@ def main():
     rb, tb = build(repo, "B")
     rw, tw = build(repo, "A", os.path.join(BASE, "out-A2"))
     so = lambda r: {p["name"]: p["sha256"] for p in r["plugins"]}  # noqa: E731
-    check("plugin .so is byte-equal in two cold stores", so(ra) == so(rb) and len(so(ra)) == 2, (so(ra), so(rb)))
+    check("plugin .so is byte-equal in two cold stores", so(ra) == so(rb) and len(so(ra)) == len(recipe.PLUGIN_SOURCES), (so(ra), so(rb)))
     check("the .so on disk is the one hashed", all(hashlib.sha256(open(p["path"], "rb").read()).hexdigest() == p["sha256"] for p in ra["plugins"]))
     check("warm build runs no stage (all hits, same objects)", rw["stages"]["run"] == 0 and rw["stages"]["hit"] == ra["stages"]["run"] and
           [o["sha256"] for o in rw["objects"]] == [o["sha256"] for o in ra["objects"]] and so(rw) == so(ra), (rw["stages"], ra["stages"]))
-    print("TIME cold A %.1fs, cold B %.1fs, warm %.1fs (whole root: 2 plugins + 1 unit)" % (ta, tb, tw))
+    print("TIME cold A %.1fs, cold B %.1fs, warm %.1fs (whole root: %d plugins + 1 unit)" % (ta, tb, tw, len(recipe.PLUGIN_SOURCES)))
+    o = next(x["object"] for x in ra["objects"] if x["unit"] == "a.cc")
+    secs = subprocess.run(["aarch64-linux-gnu-readelf", "-SW", o], capture_output=True, text=True).stdout
+    have = set(x for x in secs.split() if ".fnvnx" in x)
+    check("pi, names and layout plugins wrote their sections", {".fnvnx.n3", ".fnvnx.sympair", ".fnvnx.layout"} <= have, sorted(have))
+    und = subprocess.run(["aarch64-linux-gnu-nm", "-u", o], capture_output=True, text=True).stdout
+    check("dispatch plugin routes an indirect call through fnvnx_dispatch", "fnvnx_dispatch" in und, und)
     rd, wr_, f2i = disasm(ra, "_Z2rdv"), disasm(ra, "_Z2wri"), disasm(ra, "_Z3f2if")
     check("volatile read is ldar", "ldar" in rd, rd)
     check("volatile write is stlr", "stlr" in wr_, wr_)
@@ -135,15 +146,17 @@ def main():
     # the plugin is a declared input of the CC stage and its flags are in the stage document
     docs = [json.load(open(p)) for p in glob.glob(os.path.join(BASE, "A", "stage-docs", "*", "*.json"))]
     cc = [d for d in docs if d["stage"] == "cc:a.cc"]
-    check("CC stage declares both plugins as inputs and loads them", len(cc) == 1 and all(
+    check("CC stage declares all plugins as inputs and loads them", len(cc) == 1 and all(
         any(i["at"] == "/plug/" + n for i in cc[0]["inputs"]) and "-fplugin=/plug/%s/%s.so" % (n, n) in cc[0]["argv"] for n in recipe.PLUGIN_SOURCES)
-        and "-fplugin-arg-fnvnx_order-args=rtl" in cc[0]["argv"] and "-fplugin-arg-fnvnx_ftoi-enum=error" in cc[0]["argv"], cc and cc[0]["argv"])
+        and "-fplugin-arg-fnvnx_order-args=rtl" in cc[0]["argv"], cc and cc[0]["argv"])
+    pl = [a for a in cc[0]["argv"] if a.startswith("-fplugin=")]
+    check("plugins load in compile.sh order", [os.path.basename(a)[:-3] for a in pl] == list(recipe.PLUGIN_SOURCES), pl)
     pp = [d for d in docs if d["stage"] == "pp:a.cc"]
     check("PP stage has no plugin", len(pp) >= 1 and not any(i["at"].startswith("/plug") for d in pp for i in d["inputs"]) and
           not any(a.startswith("-fplugin") for d in pp for a in d["argv"]), [d["argv"] for d in pp])
 
     # --- (d) gate: a native root without a plugin is a red build gate; a lifted root builds without plugins
-    bad = make_repo("nogate", mut(plugins=PLUGS[:1]), "native")
+    bad = make_repo("nogate", mut(plugins=[p for p in PLUGS if p["name"] != "fnvnx_ftoi"]), "native")
     os.makedirs(os.path.join(BASE, "gate-out"))
     p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_build.py")], cwd=bad, env=dict(
         os.environ, GATE_OUT=os.path.join(BASE, "gate-out"), GATE_CACHE=os.path.join(BASE, "gate-cache")), capture_output=True, text=True)
