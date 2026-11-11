@@ -59,7 +59,7 @@ def main():
         b = asm(parts, F[n]); code[F[n] - BASE:F[n] - BASE + len(b)] = b; ents[n] = (F[n], len(b), owns)
     img = Fake(bytes(code)); img.entries = set(F.values()); chrun.T.G['img'] = img
     for n, (ad, sz, owns) in ents.items(): texts[ad] = L.lift(img, ad, sz, owns=owns)[0]
-    flags = [f for f in chrun.T.FLAGS if f not in ('-DFNVL_FLAGS_IO', '-DFNVL_STUBX')] + ['-DFNVL_TRACE', '-I', LIFT + '/rt']
+    flags = [f for f in chrun.T.FLAGS if f != '-DFNVL_FLAGS_IO'] + ['-DFNVL_TRACE', '-I', LIFT + '/rt']
     o, err = chain.comp_chunk((L.PRELUDE + '\n'.join(texts.values()), flags, a.work))
     if not o: sys.exit('compile: ' + err)
     im = chrun.Image(chain.link(a, [o], {ad: 'L_%08x' % ad for ad in texts}, flags)); bad = 0

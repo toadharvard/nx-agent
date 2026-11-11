@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gate for rt/msvcrt_ci.c: the 15 msvcrt _CI* intrinsics as guest entries (rt/fmath.c under them).
     citest.py [--work DIR] [--count]
-The guest entries (compiled with the lifted-code flags, tools/liftall.py flags()) are driven DIRECTLY from a native `test_main` (a C++ driver compiled with the same flags: guest registers in x19..x27, `c` = struct cpu):
+The guest entries (compiled with the lifted-code flags, test/instest.py FLAGS without the test-only flag) are driven DIRECTLY from a native `test_main` (a C++ driver compiled with the same flags: guest registers in x19..x27, `c` = struct cpu):
 for every case it fills the x87 stack through the runtime's own carriers (dyn_push), points the guest esp at a return address, calls the entry, and records stack depth, ST0..ST2, errno, the x87 exception bits,
 esp and c->ra. All of it runs as AArch64 ILP32 under Unicorn. The platform's `_errno` is a test double (a plain int, preset to 7 so "unchanged" is visible); nothing else of the platform is used.
 Checks per entry: operand order of _CIatan2 / _CIpow / _CIfmod (ST1 first), stack depth before / after (one operand: unchanged; two operands: one less; deeper entries intact; full 8-deep stack), the value
@@ -11,7 +11,7 @@ Prints one line per entry; exit status 1 on any difference."""
 import argparse, math, os, struct, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
 for p in ('tools', 'test', 'bench', ''): sys.path.insert(0, os.path.join(LIFT, p))
-import liftall, fmathtest as FT
+import instest, fmathtest as FT
 import gmpy2
 from fractions import Fraction
 from unicorn import Uc, UcError, UC_ARCH_ARM64, UC_MODE_ARM, UC_HOOK_BLOCK
@@ -57,7 +57,7 @@ CF = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '
 
 def build(w):
     os.makedirs(w, exist_ok=True)
-    fl = liftall.flags()
+    fl = [f for f in instest.FLAGS if f != '-DFNVL_FLAGS_IO'] + ['-I', LIFT + '/rt']
     open(w + '/driver.cpp', 'w').write(DRIVER)
     jobs = [(['aarch64-linux-gnu-g++'] + fl + ['-x', 'c++'], w + '/driver.cpp'), (['aarch64-linux-gnu-g++'] + fl + ['-x', 'c++'], LIFT + '/rt/msvcrt_ci.c'),
             (['aarch64-linux-gnu-gcc'] + CF + ['-I', LIFT + '/rt'], LIFT + '/rt/fmath.c'), (['aarch64-linux-gnu-gcc'] + CF + ['-I', LIFT + '/rt'], LIFT + '/rt/x87.c')]

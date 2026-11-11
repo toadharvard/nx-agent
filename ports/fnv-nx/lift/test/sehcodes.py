@@ -23,7 +23,7 @@ STUBS = ('.text\n.globl memset\nmemset: mov x3,x0\n1: cbz x2,2f\n strb w1,[x3],#
 
 
 def build():
-    os.makedirs(W, exist_ok=True); fl = [f for f in T.FLAGS if f not in ('-DFNVL_FLAGS_IO', '-DFNVL_STUBX')] + ['-I', LIFT + '/rt']
+    os.makedirs(W, exist_ok=True); fl = [f for f in T.FLAGS if f != '-DFNVL_FLAGS_IO'] + ['-I', LIFT + '/rt']
     open(W + '/drv.cpp', 'w').write(DRV); open(W + '/stubs.S', 'w').write(STUBS)
     for src, extra in ((W + '/drv.cpp', []), (LIFT + '/rt/seh.c', ['-x', 'c++'])):
         subprocess.check_call(['aarch64-linux-gnu-g++'] + fl + extra + [src, '-o', W + '/' + os.path.basename(src) + '.o'])

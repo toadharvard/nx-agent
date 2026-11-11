@@ -329,7 +329,7 @@ def main():
     labels = [(P.addr[n], l) for n in P.order for l in P.owns[n]]
     img = Fake(P.code); starts = {P.addr[n] for n in P.order} | {l for _, l in labels}; img.entries = set(starts)
     texts = [L.lift(img, P.addr[n], SLOT, owns=P.owns[n])[0] for n in P.order] + [L.lift(img, a, SLOT, start=l, owns=[l])[0] for a, l in labels]
-    flags = [f for f in instest.FLAGS if f not in ('-DFNVL_FLAGS_IO', '-DFNVL_STUBX')] + ['-I', rt]
+    flags = [f for f in instest.FLAGS if f != '-DFNVL_FLAGS_IO'] + ['-I', rt]
     CF = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-w', '-c']
     CXXF = ['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++']; CCF = ['aarch64-linux-gnu-gcc'] + CF
     jobs = [(CXXF, rt + '/seh.c'), (CXXF, rt + '/enter.c'), (CXXF, rt + '/unhandled.c')] + [(CXXF, rt + '/' + f) for f in RUNTIME] + \
