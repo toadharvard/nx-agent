@@ -37,9 +37,21 @@ def mk(op, w, a=(), x=None):
     n = _I.get(k)
     if n is None: n = _I[k] = N(op, w, tuple(a), x)
     return n
-def C(v, w): return mk('const', w, (), v & mask(w))
+def _unwrap(v):
+    """an object that stands for a DSL node (attribute `_node`, e.g. the symbolic instruction field of proof/symform.py) -> that node"""
+    n = getattr(v, '_node', None)
+    return v if n is None else n
+def C(v, w):
+    """constant of width w; a DSL node (an instruction field computed by a decode adapter) is resized to w instead (truncate / zero-extend)"""
+    v = _unwrap(v)
+    if isinstance(v, N): return v if v.w == w else (extract(v, w - 1, 0) if v.w > w else mk('zext', w, (v,)))
+    return mk('const', w, (), v & mask(w))
 def V(name, w): return mk('var', w, (), name)
+def F(name, w):
+    """instruction FIELD variable (the immediate / displacement bytes of an encoding shape): free in a proof, a constant per concrete instruction"""
+    return mk('fld', w, (), name)
 def bin_(op, x, y):
+    x, y = _unwrap(x), _unwrap(y)
     if not isinstance(x, N): x = C(x, y.w)
     if not isinstance(y, N): y = C(y, x.w)
     assert x.w == y.w, (op, x.w, y.w)
@@ -78,6 +90,7 @@ def to_smt(n):
     A = [to_smt(c) for c in n.a]; o = n.op; one = z3.BitVecVal(1, 1); zero = z3.BitVecVal(0, 1)
     if o == 'const': r = z3.BitVecVal(n.x, n.w)
     elif o == 'var': r = z3.BitVec(n.x, n.w)
+    elif o == 'fld': r = z3.BitVec('fld_' + n.x, n.w)
     elif o in ('add', 'sub', 'mul', 'and', 'or', 'xor', 'shl'):
         r = {'add': lambda a, b: a + b, 'sub': lambda a, b: a - b, 'mul': lambda a, b: a * b, 'and': lambda a, b: a & b,
              'or': lambda a, b: a | b, 'xor': lambda a, b: a ^ b, 'shl': lambda a, b: a << b}[o](*A)
@@ -181,7 +194,7 @@ INW = {'df': 1, 'flo': 32, 'fs_base': 32, 'gs_base': 32}
 
 class Form:
     def __init__(s, key, addr, size):
-        s.key, s.regs, s.flags, s.undef, s.stores, s.faults, s.addr = key, [], [], {}, [], [], addr
+        s.key, s.regs, s.flags, s.undef, s.stores, s.faults, s.addr = key, [], [], {}, [], [], addr     # addr: int, or a node (V('eip', 32)) for a form of a whole shape
         s.eip = C(addr + size, 32); s.pend = {}; s.flo = None
     def cur(s, name): return s.pend.get(name, V(name, 32))      # pending value, only for composing partial-register writes
     def reg(s, name, v, when=None): assert v.w == 32; s.regs.append((name, v, when)); s.pend[name] = v
@@ -209,7 +222,7 @@ class Form:
         for a, v in s.stores: out.append('store n%d n%d' % (go(a), go(v)))
         for k, c in s.faults: out.append('fault %d n%d' % (k, go(c)))
         if s.flo is not None: out.append('flo n%d' % go(s.flo))
-        out.append('eip n%d @%x' % (go(s.eip), s.addr))
+        out.append('eip n%d @%s' % (go(s.eip), '%x' % s.addr if isinstance(s.addr, int) else 'n%d' % go(s.addr)))
         return '\n'.join(out)
     def sha(s): return hashlib.sha256(s.serialize().encode()).hexdigest()
     def fault_term(s):
@@ -237,7 +250,7 @@ class Form:
         if s.faults:
             nf = ft == 0; g = lambda new, old: z3.If(nf, new, old)
             regs = {r: g(regs[r], z3.BitVec(r, 32)) for r in regs}; flags = {f: g(flags[f], z3.BitVec(f, 1)) for f in flags}
-            flo = g(flo, z3.BitVec('flo', 32)); mem = g(mem, mem_array()); eip = g(eip, z3.BitVecVal(s.addr, 32))
+            flo = g(flo, z3.BitVec('flo', 32)); mem = g(mem, mem_array()); eip = g(eip, z3.BitVecVal(s.addr, 32) if isinstance(s.addr, int) else to_smt(s.addr))
         return {'regs': regs, 'flags': flags, 'flo': flo, 'mem': mem, 'eip': eip, 'defined': defined, 'rdefined': rdef, 'fault': ft}
     def writes_unobserved(s): return s.flo is not None or any(f == 'df' for f, _, _ in s.flags)
     def to_c_inline(s, varc, fault_fn, flo_fn, force=()):

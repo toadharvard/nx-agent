@@ -36,7 +36,7 @@ SEG = ('-I', 'msrs=[#x0000000000000000; 7]', '-I', 'ctrs=[#x0000000000000000; 17
        '-I', 'app_view=true', '-I', 'marking_view=false', '-I', 'log_register_writes=false')
 
 # architectural faults the DSL forms do not model (state outside the form's domain): the obligation is restricted to the non-faulting states
-FAULT_OK = {':SEGMENT-LIMIT-FAIL'}
+FAULT_OK = {':SEGMENT-LIMIT-FAIL', ':OUT-OF-SEGMENT-INSTRUCTION-POINTER'}     # the second: a branch target whose unwrapped (64-bit) value leaves the 4 GiB code segment
 
 class ModelGap(Exception):
     """the Sail model does not define the behaviour of this encoding (prove.py reports model-gap)"""
@@ -47,16 +47,32 @@ def ir_sha():
     if _irsha is None: _irsha = hashlib.sha256(open(IR, 'rb').read()).hexdigest()
     return _irsha
 
-def run_isla(code, timeout=600):
-    """raw isla output (stdout, stderr) for one encoding, from the on-disk cache when present"""
+EIP_LIMIT = 0xfffffff0       # symbolic-eip runs: the instruction (at most 16 bytes) lies below 2^32 (assumption A-EIPRANGE)
+
+def sym_constraint(code, ranges, eip_sym):
+    """isla --reset-constraint text of a shape run: the instruction bytes outside `ranges` (the symbolic field byte ranges (off, size)) are the bytes of
+    `code`, the bytes beyond the instruction are 0 (the window the fetch splice reads from), the field bytes are left free; with eip_sym, code_base = rip
+    (the two registers stay symbolic) and rip < EIP_LIMIT"""
+    sym = set(i for o, n in ranges for i in range(o, o + n)); cs = []
+    for i in range(16):
+        if i in sym: continue
+        cs.append('(= ((_ extract %d %d) code_bytes) #x%02x)' % (8 * i + 7, 8 * i, code[i] if i < len(code) else 0))
+    if eip_sym: cs += ['(= code_base ((_ extract 47 0) rip))', '(bvult rip #x%016x)' % EIP_LIMIT]
+    return '(and %s)' % ' '.join(cs)
+
+def run_isla(code, timeout=600, sym=None):
+    """raw isla output (stdout, stderr) for one encoding, from the on-disk cache when present.  sym = (ranges, eip_sym): a SHAPE run, see sym_constraint"""
     if not os.path.exists(IR): raise RuntimeError('missing %s: run proof/sail_build.sh' % IR)
     args = list(SEG) + sum([['--probe', f] for f in ERRFNS], []) + sum([['-L', f] for f in LINEARIZE], [])
-    key = hashlib.sha256(('|'.join([ir_sha(), hashlib.sha256(open(CFG, 'rb').read()).hexdigest(), ' '.join(args), code.hex(), str(ADDR), 'v1'] + ([str(timeout)] if timeout != 600 else []))).encode()).hexdigest()
+    cons = sym_constraint(code, *sym) if sym else ''
+    key = hashlib.sha256(('|'.join([ir_sha(), hashlib.sha256(open(CFG, 'rb').read()).hexdigest(), ' '.join(args), code.hex(), str(ADDR), 'v1'] + ([str(timeout)] if timeout != 600 else []) + ([cons] if sym else []))).encode()).hexdigest()
     os.makedirs(CACHE, exist_ok=True); base = os.path.join(CACHE, key)
     if os.path.exists(base + '.out') and os.path.exists(base + '.err'): return open(base + '.out').read(), open(base + '.err').read()
-    cb = '#x' + code.ljust(16, b'\0')[::-1].hex()
-    cmd = [ISLA, '-A', IR, '-C', CFG, '-T', '1', '--timeout', str(timeout), 'x86_fetch_decode_execute', '()',
-           '-I', 'code_base=#x%012x' % ADDR, '-I', 'code_bytes=' + cb, '-I', 'rip=#x%016x' % ADDR] + args + ['-D', 'p', '--traces', '--error-traces', '-s']
+    if sym:
+        regs = [] if sym[1] else ['-I', 'code_base=#x%012x' % ADDR, '-I', 'rip=#x%016x' % ADDR]
+        regs += ['--reset-constraint', cons]
+    else: regs = ['-I', 'code_base=#x%012x' % ADDR, '-I', 'code_bytes=#x' + code.ljust(16, b'\0')[::-1].hex(), '-I', 'rip=#x%016x' % ADDR]
+    cmd = [ISLA, '-A', IR, '-C', CFG, '-T', '1', '--timeout', str(timeout), 'x86_fetch_decode_execute', '()'] + regs + args + ['-D', 'p', '--traces', '--error-traces', '-s']
     env = dict(os.environ, LD_LIBRARY_PATH=Z3LIB + ':' + os.environ.get('LD_LIBRARY_PATH', ''))
     try: r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=timeout + 20)     # isla's own --timeout is not honoured while z3 is busy
     except subprocess.TimeoutExpired:
@@ -185,7 +201,7 @@ def consts(t):
         st.extend(e.children())
     return out
 
-def run_path(tag, trace, pre, seg_adj, fault=False):
+def run_path(tag, trace, pre, seg_adj, fault=False, extra=None):
     env = Env(tag); P = Path(); P.pc = []; P.side = []
     his = {r: z3.BitVec(r + '_hi', 32) for r in GPR}
     rfl_other = z3.BitVec('rflags_other', 32)
@@ -195,6 +211,7 @@ def run_path(tag, trace, pre, seg_adj, fault=False):
         bits.append(pre['flags'][fl[0]] if fl else z3.BitVecVal(1, 1) if i == 1 else z3.Extract(i, i, rfl_other))
     cur = {r: z3.Concat(his[r], pre['regs'][GPR[r]]) for r in GPR}
     cur['rflags'] = z3.Concat(*bits); cur['rip'] = z3.Concat(z3.BitVecVal(0, 32), pre['eip'])
+    cur.update(extra or {})                          # shape runs: code_bytes / code_base are symbolic registers bound to terms over the field variables
     written = set(); mem = pre['mem']; P.reads = []
     for ev in sexp(trace)[1:]:
         h = ev[0]
@@ -205,6 +222,7 @@ def run_path(tag, trace, pre, seg_adj, fault=False):
             if fv and all(c.startswith(tag + '_') for c in fv): P.side.append(t)       # constrains only a free (undefined/nondeterministic) value
             else: P.pc.append(t)
         elif h in ('branch', 'cycle', 'define-enum', 'branch-address'): pass
+        elif h == 'assume': pass                      # the --reset-constraint of a shape run: holds by construction of `extra` (sym_constraint)
         elif h == 'read-reg':
             r = regname(ev[1]); v = unwrap(ev[3])
             if r in cur and v in env.pending and v not in env.v: env.v[v] = cur[r]       # first use of the pre value (a re-read is skipped)
@@ -234,8 +252,28 @@ def merge(paths, pick):
     for p in reversed(paths[:-1]): r = z3.If(p.pc, pick(p), r)
     return r
 
+class ModelTimeout(Exception):
+    """isla did not finish within the timeout (prove-side result class `timeout`)"""
+LAST = {}
+
 def model_post(code, pre):
-    out, err = run_isla(code); blocks = split_blocks(out); ok, bad = [], []
+    return _post(code, pre, run_isla(code), None)
+
+def model_post_shape(code, fields, pre, eip_sym=True, timeout=600):
+    """model_post for a whole encoding shape: `code` = representative bytes, fields = {name: (offset, size) | None} (imm / disp byte ranges), the bytes of
+    the fields are the z3 variables fld_<name> (BitVec 8*size), eip is pre['eip'] (a variable when eip_sym: then code_base = rip = pre['eip'] and the
+    assumption eip < EIP_LIMIT (A-EIPRANGE) is part of `assume`; otherwise the constant 0x401000, assumption A-EIP in the certificate)"""
+    rg = [(o, n) for o, n in (f for f in fields.values() if f)]; var = {nm: z3.BitVec('fld_' + nm, 8 * f[1]) for nm, f in fields.items() if f}
+    byte = {}
+    for nm, (o, n) in ((nm, f) for nm, f in fields.items() if f):
+        for k in range(n): byte[o + k] = z3.Extract(8 * k + 7, 8 * k, var[nm])
+    cb = z3.Concat(*[byte.get(i, z3.BitVecVal(code[i] if i < len(code) else 0, 8)) for i in reversed(range(16))])
+    extra = {'code_bytes': cb, 'code_base': z3.ZeroExt(16, pre['eip'])}
+    out = run_isla(code, timeout, (tuple(rg), eip_sym))
+    return _post(code, pre, out, extra, z3.ULT(pre['eip'], z3.BitVecVal(EIP_LIMIT, 32)) if eip_sym else None)
+
+def _post(code, pre, out_err, extra, extra_assume=None):
+    out, err = out_err; blocks = split_blocks(out); ok, bad = [], []
     for hdr, tr in blocks:
         (ok if hdr and hdr.startswith('Result: (_ unit)') else bad).append((hdr, tr))
     if bad:
@@ -243,16 +281,19 @@ def model_post(code, pre):
         if ok and msgs and set(msgs) <= FAULT_OK and len(re.findall(r'Calling x86_', err)) == len(bad): faults = [tr for _, tr in bad]; bad = []
         else: faults = []
     else: faults = []
+    if bad and extra is not None and (any((h or '').startswith('Error Timeout') for h, _ in bad) or 'hard timeout' in err): raise ModelTimeout(err[-120:].replace('\n', ' '))
     if bad:
         raise ModelGap('model exception on %d of %d paths: %s' % (len(bad), len(blocks), '; '.join(msgs[:2]) if msgs else first[:80]))
     if not ok: raise ModelGap('isla returned no path: ' + err[-120:].replace('\n', ' '))
     pfx = [b for b in code[:4] if b in (0x64, 0x65)]
     seg_adj = z3.BitVecVal(0, 32) if not pfx else z3.BitVec('fs_base' if pfx[-1] == 0x64 else 'gs_base', 32)
     tagb = code.hex()
-    paths = [run_path('p%d' % i, tr, pre, seg_adj) for i, (_, tr) in enumerate(ok)]
+    paths = [run_path('p%d' % i, tr, pre, seg_adj, False, extra) for i, (_, tr) in enumerate(ok)]
     ret = {'regs': {r: merge(paths, lambda p: p.regs[r]) for r in pre['regs']}, 'flags': {f: merge(paths, lambda p: p.flags[f]) for f in FLAGBIT},
             'mem': merge(paths, lambda p: p.mem), 'eip': merge(paths, lambda p: p.eip)}
     asm = [s for p in paths for s in p.side]
-    if faults: asm.append(z3.Not(z3.Or(*[run_path('f%d' % i, tr, pre, seg_adj, True).pc for i, tr in enumerate(faults)])))
+    LAST.clear(); LAST.update(paths=len(ok), fault_paths=len(faults))
+    if faults: asm.append(z3.Not(z3.Or(*[run_path('f%d' % i, tr, pre, seg_adj, True, extra).pc for i, tr in enumerate(faults)])))
     if asm: ret['assume'] = z3.And(*asm)
+    if extra_assume is not None: ret['domain'] = extra_assume
     return ret

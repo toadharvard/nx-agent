@@ -88,3 +88,23 @@ count >= 2) are spliced in by `sail_build.sh` (default; `x86_proof.ir` sha256 55
 CF-in, cl and imm8 forms, second pre-flag pattern too): 488,112,128 cases, diff 0 on every SDM-defined output; `mfree` = model leaves a defined output
 undefined (shl/shr/sar CF beyond the width), `undef-info` = host value of an SDM-undefined output differing from the model's.
 Gate with the patched IR (forms.py md5 5ba2bb32...): proved 358, FAILED 33 (rol/ror OF at masked count 0, shl/shr/sar CF beyond the width), model-gap 2.
+
+### Shape proofs (L3b C1c): the unit is the encoding SHAPE, not one encoding
+`shape.py` (canonical key `<hex, imm/disp/rel bytes zeroed>/<imm_off>.<imm_size>.<disp_off>.<disp_size>`), `symform.py`, `shapeprove.py`, `symcheck.py`, `farm_shapeprove.sh`.
+* **Model side.** `model_sail.model_post_shape`: isla runs with `code_bytes` as an unconstrained register and `--reset-constraint` fixing every instruction byte
+  outside the symbolic ranges (and the 16 - len window bytes to 0); the field bytes stay free. The traces' `read-reg code_bytes` is bound to
+  `Concat(concrete bytes, fld_imm / fld_disp bytes)`. isla forks only on the sign bit / value ranges of the field (e.g. imm8 sign extension, shift-count
+  masks): the paths come back with their path conditions and are merged as before, so the case split is exhaustive by construction (isla enumerates every
+  feasible branch); no field is split by hand (certificate `split: none`). eip: `code_base = rip` stay symbolic with `rip < 2^32 - 16` (assumption A-EIPRANGE; cost
+  about 10 s per shape instead of 1-2 s); `--eip fixed` keeps 0x401000 (assumption A-EIP "semantics is translation-invariant in eip") and the certificate gives
+  `eip_dependence` per shape by the structure of the Form (`none`: eip only in eip + size; `target`: relative transfer; `data`: eip stored, i.e. call).
+* **DSL side.** `fnvlift/dsl.py` has a field-variable node `F(name, w)` (z3 name `fld_<name>`) and nodes may stand in `C(...)`. `symform.symbuild` presents to the
+  unchanged `forms.build` an adapter instruction whose immediate / displacement operand values are 32-bit DSL nodes (`ext32(slice of F('imm'))`, plus `eip + size`
+  for a relative target) and whose address is `V('eip')`. The slice, the zero/sign extension and the relative flag are read from capstone by probing (closed
+  hypothesis set, else `field-decode`). A builder that compares / branches on the field raises `SymbolicBranch` (class `builder-branches-on-field`):
+  today only `enter` (forms_flow.py: `assert c.ops[1].val == 0`, the nesting level).
+* **Link to the lifter** (it builds concrete Forms): `canon(build(i)) == canon(symbuild(shape(i))[fields := i, eip := addr(i)])`, canon = serialization after constant
+  folding; `symcheck.py` checks it for EVERY instance of the image (all unique (address, bytes) of the code ranges), `tests/test_symform.py` on synthetic encodings.
+* **Obligation** = `prove.prove_one` (imported); the field variables are free in the unsat query. `shapeprove.py --shard K/N`, farm: `bash proof/farm_shapeprove.sh K N`.
+  `dsl_sha` = `symform.shape_sha(key)` (no z3). Assumptions: A-FLAT, A-EIPRANGE | A-EIP, A-SEGLIM (the model's segment-limit faults, now also
+  `:OUT-OF-SEGMENT-INSTRUCTION-POINTER`, are excluded; symcheck counts the relative targets of the image that leave [0, 2^32): 0 expected).

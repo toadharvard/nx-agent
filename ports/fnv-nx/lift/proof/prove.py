@@ -76,10 +76,12 @@ def post_of(F):
 def check(conds, assume, args):
     s = z3.Solver(); s.set('timeout', int(args.timeout * 1000)); s.add(assume); s.add(z3.Or(conds) if conds else z3.BoolVal(False)); return s.check(), s
 
-def prove_one(mod, F, code, key, args):
-    """-> (result, note, certificate extras)"""
+def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
+    """-> (result, note, certificate extras).  Shape proofs (shapeprove.py) pass pre = a pre-state with a symbolic eip, model = a thunk returning the model
+    post-state of the shape, fields = {name: (offset, size)} of the symbolic encoding bytes (z3 variables fld_<name>, free = universally quantified)"""
+    pre = PRE if pre is None else pre
     base = getattr(mod, 'FAULT_OK_ORIG', None) or set(mod.FAULT_OK); mod.FAULT_OK_ORIG = base; mod.FAULT_OK = Perm(base) if F.faults else base
-    drv = False; M = mod.model_post(code, PRE); memo = {}
+    drv = False; M = model() if model else mod.model_post(code, pre); memo = {}; domain = M.pop('domain', z3.BoolVal(True))    # domain: restriction of the pre-state by construction (shape runs: eip range), not a model fault
     M = {k: (rewrite.narrow_div(v, memo) if not isinstance(v, dict) else {n: rewrite.narrow_div(t, memo) for n, t in v.items()}) for k, v in M.items()}
     D = post_of(F); assume = M.get('assume', z3.BoolVal(True))
     if not any(b in (0x64, 0x65) for b in code[:defects.prefix_skip(code)]) and any(b in (0x64, 0x65) for b in code[:4]):
@@ -88,8 +90,7 @@ def prove_one(mod, F, code, key, args):
         z0 = [(z3.BitVec('fs_base', 32), z3.BitVecVal(0, 32)), (z3.BitVec('gs_base', 32), z3.BitVecVal(0, 32))]
         M = {k: (z3.substitute(v, *z0) if not isinstance(v, dict) else {n: z3.substitute(t, *z0) for n, t in v.items()}) for k, v in M.items()}
         assume = M.get('assume', z3.BoolVal(True)); drv = True
-    if F.faults: assume_d = z3.And(assume, D['fault'] == 0)
-    else: assume_d = assume
+    assume_d = z3.And(assume, D['fault'] == 0, domain) if F.faults else z3.And(assume, domain)
     probe = z3.BitVec('probe', 32); diffs = []                     # (field, dsl, model, strict difference)
     for r in REGS: diffs.append((r, D['regs'][r], M['regs'][r], z3.And(D['rdefined'][r], D['regs'][r] != M['regs'][r])))
     for f in FLAGS: diffs.append((f, D['flags'][f], M['flags'][f], z3.And(D['defined'][f], D['flags'][f] != M['flags'][f])))
@@ -99,7 +100,7 @@ def prove_one(mod, F, code, key, args):
     r, s = check([d for *_, d in diffs], assume_d, args); notes = []; ids = []
     if r == z3.sat:                                              # does a declared model defect explain every disagreement?
         mo = s.model(); ev = lambda e: mo.eval(e, model_completion=True)
-        regs = defects.regions(key, (code, PRE))
+        regs = defects.regions(key, (code, pre), fields)
         def excl(field, cond):
             for _, _, fr, other in regs:
                 reg = fr.get(field, other)
@@ -112,13 +113,13 @@ def prove_one(mod, F, code, key, args):
                 if c and check(c, assume_d, args)[0] == z3.sat: ids.append(i)
             return 'FAILED(model-defect:%s)' % ','.join(ids), 'defects: ' + '; '.join(sdm[:90] for i, sdm, _, _ in regs if i in ids), extra
         fld = next(k for k, a, c, d in diffs if z3.is_true(ev(d)))
-        inp = ' '.join('%s=%x' % (v, ev(z3.BitVec(v, 32)).as_long()) for v in REGS) + ' ' + ' '.join('%s=%d' % (v, ev(z3.BitVec(v, 1)).as_long()) for v in FLAGS)
+        inp = ' '.join('%s=%x' % (v, ev(z3.BitVec(v, 32)).as_long()) for v in REGS) + ' ' + ' '.join('%s=%d' % (v, ev(z3.BitVec(v, 1)).as_long()) for v in FLAGS) + ''.join(' fld_%s=%x' % (n, ev(z3.BitVec('fld_' + n, 8 * f[1])).as_long()) for n, f in (fields or {}).items() if f)
         d = [(a, c) for k, a, c, _ in diffs if k == fld][0]
         return 'FAILED(dsl)', 'CE %s: %s dsl=%s model=%s' % (fld, inp, ev(d[0]), ev(d[1])), extra
     if r != z3.unsat: return 'timeout', '', extra
     if F.faults:                                                 # the model faults exactly where the DSL does
-        r1, _ = check([D['fault'] != 0], assume, args); has_mem = 'm' in key.split('|')[1].replace('imm', '')
-        r2 = z3.unsat if has_mem else check([z3.Not(assume)], D['fault'] == 0, args)[0]
+        r1, _ = check([D['fault'] != 0], z3.And(assume, domain), args); has_mem = 'm' in key.split('|')[1].replace('imm', '')
+        r2 = z3.unsat if has_mem else check([z3.Not(assume)], z3.And(D['fault'] == 0, domain), args)[0]
         extra['fault_checks'] = 'assume=>no DSL fault: %s; no DSL fault=>assume: %s' % (r1, 'not applicable (memory operand: segment-limit faults)' if has_mem else r2)
         if r1 != z3.unsat or r2 != z3.unsat: return 'FAILED(dsl)', 'fault condition differs: ' + extra['fault_checks'], extra
     if F.writes_unobserved(): return 'model-gap', 'post-state of df / other EFLAGS bits is not exposed by the model interface (other fields proved)', extra
