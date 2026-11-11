@@ -7,7 +7,7 @@
 //       it, then with each target's size; empty results clear nothing. No rects = the clipping rectangle itself. (Source: wined3d; MS says "clear the viewport rectangles": the same.)
 //  R-C4 TARGET clears render targets 0-3 (all four simultaneous targets), each in a pass of its own (every target of a backend pass must have one size; D3D9 only requires the same size of colour
 //       targets, not of the depth surface); then ZBUFFER / STENCIL in a depth-only pass. A target without storage (D3DFMT_NULL) has nothing to clear.
-//  R-C5 colour: D3DCOLOR 8 bit per channel -> the format's clear value (nx_d3d9_clear_rgba8: A8 writes alpha only, L8 replicates red, ...); under D3DRS_SRGBWRITEENABLE the colour is taken as linear and
+//  R-C5 colour: D3DCOLOR 8 bit per channel -> the format's clear value (nx_d3d9_clear_rgba8: A8 writes alpha only, L8 red only, ...); under D3DRS_SRGBWRITEENABLE the colour is taken as linear and
 //       written through the sRGB view when the format has one (NxClear_Srgb). z is clamped to [0, 1] (NaN -> 0), stencil keeps its low 8 bits; a depth-only format ignores STENCIL, a format without
 //       depth ignores ZBUFFER (the flag is cut by the format's capability, not an error: wined3d only logs it).
 //  R-C6 pending CPU writes of a target (lockable images) are uploaded first (order); afterwards the CPU copy of every cleared sub-resource is stale (nx_img_gpu_wrote).

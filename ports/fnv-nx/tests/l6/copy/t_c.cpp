@@ -1,13 +1,9 @@
 // part c: storage conversions of the gap formats both ways (upload through UpdateSurface, read-back through GetRenderTargetData). Exhaustive over the texel value space where it is <= 2^16, structured above.
-// Expected read-back = the written bits (GL stores snorm bits as written, also the most negative code: observed on llvmpipe), except the documented lossy codes of the BIASED formats: the most negative code
-// of a signed channel of L6V5U5 / X8L8V8U8 is stored as -(max) (both mean -1.0, the clamp is applied before filtering), and the x byte of X8L8V8U8 is not stored (reads 0).
+// Expected read-back = the written bits for every format, also the most negative code of the biased formats (L6V5U5 / X8L8V8U8: stored as exact floats plus a side word, see front_int.h) and the x byte of X8L8V8U8.
 #include "t_common.h"
 #include <initializer_list>
 typedef uint32_t (*Xf)(uint32_t);
 static uint32_t id_(uint32_t v) { return v; }
-static uint32_t s8(uint32_t v) { return (int8_t)v == -128 ? 0x81 : v & 255; }
-static uint32_t l6v5u5(uint32_t v) { uint32_t u = v & 31, w = v >> 5 & 31; if (u == 16) u = 17; if (w == 16) w = 17; return u | w << 5 | (v & 0xFC00); }
-static uint32_t x8l8(uint32_t v) { return s8(v) | s8(v >> 8) << 8 | (v & 0xFF0000); }
 static uint32_t a8l8(uint32_t v) { return v & 0xFFFF; }
 static void sweep(TDev& d, uint32_t fmt, int bytes, bool rt, const uint32_t* texels, uint32_t n, uint32_t w, uint32_t h, Xf want, const char* name) {
     IDirect3DSurface9* src = t_surf(d, 2, w, h, fmt, D3DPOOL_SYSTEMMEM); IDirect3DSurface9* gpu = rt ? t_surf(d, 0, w, h, fmt, D3DPOOL_DEFAULT, 0, false) : t_surf(d, 2, w, h, fmt, D3DPOOL_DEFAULT);
@@ -29,11 +25,11 @@ void t_c() {
     t_part('c'); TDev d = t_dev(false, 64, 64); uint32_t* t16 = all(65536), *t8 = all(256), n4; uint32_t* t4 = structured(&n4, 4);
     sweep(d, 60, 2, true, t16, 65536, 256, 256, id_, "V8U8");                 // RG8S: every one of the 2^16 texels
     sweep(d, 101, 2, true, t16, 65536, 256, 256, id_, "INDEX16");              // R16: bits are the texel
-    sweep(d, 61, 2, false, t16, 65536, 256, 256, l6v5u5, "L6V5U5");            // biased integers: every one of the 2^16 texels
+    sweep(d, 61, 2, false, t16, 65536, 256, 256, id_, "L6V5U5");            // biased integers: every one of the 2^16 texels
     sweep(d, 28, 1, true, t8, 256, 16, 16, id_, "A8"); sweep(d, 50, 1, true, t8, 256, 16, 16, id_, "L8");   // expanded RGBA8: alpha / red read back
     sweep(d, 51, 2, false, t16, 65536, 256, 256, a8l8, "A8L8");                // A8L8 (CONVERT, read through the unconvert)
     sweep(d, 20, 3, true, t4, 4096, 64, 64, [](uint32_t v) { return v & 0xFFFFFF; }, "R8G8B8");
-    sweep(d, 62, 4, false, t4, 4096, 64, 64, x8l8, "X8L8V8U8");
+    sweep(d, 62, 4, false, t4, 4096, 64, 64, id_, "X8L8V8U8");
     sweep(d, 63, 4, true, t4, 4096, 64, 64, id_, "Q8W8V8U8"); sweep(d, 64, 4, true, t4, 4096, 64, 64, id_, "V16U16"); sweep(d, 35, 4, true, t4, 4096, 64, 64, id_, "A2R10G10B10");
     sweep(d, 102, 4, true, t4, 4096, 64, 64, id_, "INDEX32");                  // R32F bits: includes NaN / denormal bit patterns (storage only)
     free(t16); free(t8); free(t4);

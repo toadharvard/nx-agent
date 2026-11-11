@@ -11,7 +11,7 @@ Z = 0.5
 FLOAT1, FLOAT2, FLOAT3, FLOAT4, D3DCOLOR = 0, 1, 2, 3, 4
 POSITION, NORMAL, TEXCOORD, COLOR = 0, 3, 5, 10
 RS = dict(ZENABLE=7, FILLMODE=8, SHADEMODE=9, ALPHATESTENABLE=15, ALPHAREF=24, ALPHAFUNC=25, ALPHABLENDENABLE=27, FOGENABLE=28, FOGCOLOR=34, FOGTABLEMODE=35, FOGSTART=36, FOGEND=37, FOGDENSITY=38,
-          LIGHTING=137, CLIPPING=136, CLIPPLANEENABLE=152, POINTSIZE=154, POINTSIZE_MIN=155, POINTSIZE_MAX=166, CULLMODE=22, FOGVERTEXMODE=140, SRGBWRITEENABLE=194)
+          LIGHTING=137, CLIPPING=136, CLIPPLANEENABLE=152, POINTSIZE=154, POINTSIZE_MIN=155, POINTSIZE_MAX=166, CULLMODE=22, FOGVERTEXMODE=140, SRGBWRITEENABLE=194, SRCBLEND=19, DESTBLEND=20)
 SAMP = dict(ADDRESSU=1, ADDRESSV=2, ADDRESSW=3, BORDERCOLOR=4, MAGFILTER=5, MINFILTER=6, MIPFILTER=7, SRGBTEXTURE=11)
 D3DFMT_A8R8G8B8 = 21
 
@@ -49,6 +49,9 @@ class Case:
     def plane(self, idx, p): self.lines.append("l %x %s" % (idx, " ".join(hx(fb(x)) for x in p)))
     def clear(self): self.add("c", CLEAR)
     def rt(self, idx): self.add("m", idx)
+    def rttex(self, fmt): i = self._id("x"); self.add("R", i, fmt); return i        # a render-target texture (t_play.cpp R)
+    def rt_to(self, tid): self.add("T", 0, tid)                                     # render target 0 = that texture
+    def rt_main(self): self.add("B", 0)                                             # render target 0 = the case's own target
     def out(self): self.add("o", self.nrt)
     def draw(self, mode, stride, verts):
         """verts: three vertices as lists of words. mode up | vb | ib (vb / ib put two unused vertices first: first vertex 2 / base vertex index 2)"""

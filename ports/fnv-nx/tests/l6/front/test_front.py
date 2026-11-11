@@ -208,9 +208,9 @@ def fmt_table(K):
     put(21, "BGRA8", (R, G, B, A), SR | RT, 4); put(22, "BGRX8", (R, G, B, S1), SR | RT, 4); put(32, "RGBA8", (R, G, B, A), SR | RT, 4); put(33, "RGBX8", (R, G, B, S1), SR | RT, 4)
     put(23, "R5G6B5", (R, G, B, S1), RT, 2); put(24, "X1R5G5B5", (R, G, B, S1), RT, 2); put(25, "A1R5G5B5", (R, G, B, A), RT, 2); put(26, "A4R4G4B4", (R, G, B, A), 0, 2)
     put(30, "A4R4G4B4", (R, G, B, S1), 0, 2); put(31, "RGB10A2", (R, G, B, A), RT, 4); put(35, "BGR10A2", (R, G, B, A), RT, 4); put(34, "RG16", (R, G, S1, S1), RT, 4)
-    put(36, "RGBA16", (R, G, B, A), RT, 8); put(28, "RGBA8", (R, G, B, A), CV | RT, 4, 1); put(50, "RGBA8", (R, G, B, S1), SR | CV | RT, 4, 1); put(51, "RGBA8", (R, G, B, A), SR | CV, 4, 2)
+    put(36, "RGBA16", (R, G, B, A), RT, 8); put(28, "RGBA8", (R, G, B, A), CV | RT, 4, 1); put(50, "RGBA8", (R, R, R, S1), SR | CV | RT, 4, 1); put(51, "RGBA8", (R, G, B, A), SR | CV, 4, 2)
     put(81, "RGBA16", (R, G, B, S1), CV, 8, 2); put(60, "RG8S", (R, G, S1, S1), RT, 2); put(63, "RGBA8S", (R, G, B, A), RT, 4); put(64, "RG16S", (R, G, S1, S1), RT, 4)
-    put(110, "RGBA16S", (R, G, B, A), RT, 8); put(20, "BGRX8", (R, G, B, S1), SR | CV | RT, 4, 3); put(61, "RGBA8", (R, G, B, S1), CV, 4, 2); put(62, "RGBA8", (R, G, B, S1), CV, 4, 4)
+    put(110, "RGBA16S", (R, G, B, A), RT, 8); put(20, "BGRX8", (R, G, B, S1), SR | CV | RT, 4, 3); put(61, "RGBA32F", (R, G, B, S1), CV, 16, 2); put(62, "RGBA32F", (R, G, B, S1), CV, 16, 4)
     put(101, "R16", (R, S1, S1, S1), RT, 2); put(102, "R32F", (R, S1, S1, S1), RT, 4); put(111, "R16F", (R, S1, S1, S1), RT, 2); put(112, "RG16F", (R, G, S1, S1), RT, 4); put(113, "RGBA16F", (R, G, B, A), RT, 8)
     put(114, "R32F", (R, S1, S1, S1), RT, 4); put(115, "RG32F", (R, G, S1, S1), RT, 8); put(116, "RGBA32F", (R, G, B, A), RT, 16)
     put(e("DXT1"), "BC1", (R, G, B, A), CMP | SR, 8); put(e("DXT2"), "BC2", (R, G, B, A), CMP | SR, 16); put(e("DXT3"), "BC2", (R, G, B, A), CMP | SR, 16)
@@ -358,32 +358,33 @@ def conv_checks(L, K, ck):
     n, r, o = run(20, 4, 1, 1, 1, src); ck.ok("e", o == bytes(c for p in px for c in (*p, 255)), f"R8G8B8 {o.hex()}")
     nb = (C.c_uint8 * 12)(); lib.nx_d3d9_unconvert.restype = C.c_uint32; lib.nx_d3d9_unconvert.argtypes = [C.c_uint32] * 3 + [C.c_void_p, C.c_uint32, C.c_void_p, C.c_uint32]
     ck.ok("e", lib.nx_d3d9_unconvert(20, 4, 1, o, 16, nb, 12) == 12 and bytes(nb) == bytes(src), "R8G8B8 unconvert = inverse")
-    # L6V5U5: every one of the 2^16 texels against an independent decoder (python), then the sampler fixup reproduces the D3D value
+    # L6V5U5 / X8L8V8U8 storage = RGBA32F (U, V = max(c, -m) / m, L = c / (2^n - 1), alpha = side word): every code against an independent decoder, then the exact round trip through unconvert
+    import struct
     def sgn(v, bits): return v - (1 << bits) if v >> (bits - 1) else v
-    sc, of = (C.c_float * 4)(), (C.c_float * 4)(); lib.nx_d3d9_sample_fixup.argtypes = [C.c_uint32, C.c_void_p, C.c_void_p]
-    ck.ok("e", lib.nx_d3d9_sample_fixup(61, sc, of) == 1, "L6V5U5 has a fixup")
-    allv = b"".join(v.to_bytes(2, "little") for v in range(65536)); n, r, o = run(61, 65536, 1, 1, 1, list(allv)); good = n == 65536 * 4
+    f32 = lambda x: struct.unpack("<f", struct.pack("<f", x))[0]
+    unc = lambda fmt, n, raw, ob: (lambda d: (lib.nx_d3d9_unconvert(fmt, n, 1, raw, len(raw), d, n * ob), bytes(d))[1])((C.c_uint8 * (n * ob))())
+    allv = b"".join(v.to_bytes(2, "little") for v in range(65536)); n, r, o = run(61, 65536, 1, 1, 1, list(allv)); good = n == 65536 * 16 and r == n
     for v in range(65536):
-        u, vv, l = sgn(v & 31, 5), sgn(v >> 5 & 31, 5), v >> 10; w = o[4 * v:4 * v + 4]
-        ru, rv = max(u, -15) / 15, max(vv, -15) / 15                     # the D3D value: s / 15, -16 clamped to -1
-        d0, d1, d2 = w[0] / 255 * sc[0] + of[0], w[1] / 255 * sc[1] + of[1], w[2] / 255 * sc[2] + of[2]
-        if not (w[3] == 255 and abs(d0 - ru) < 1e-6 and abs(d1 - rv) < 1e-6 and abs(d2 - l / 63) < 1e-6): good = False; ck.ok("e", False, f"L6V5U5 {v:#06x}: {w.hex()} -> {d0, d1, d2} vs {ru, rv, l / 63}"); break
-    ck.ok("e", good, "L6V5U5 all 65536 texels")
-    # X8L8V8U8: boundary sweep (every value of U, V; L; X) against the decoder
-    ck.ok("e", lib.nx_d3d9_sample_fixup(62, sc, of) == 1, "X8L8V8U8 has a fixup")
-    vals = [(u, v, l, x) for u in range(256) for v in (0, 1, 127, 128, 129, 255) for l in (0, 77, 255) for x in (0, 200)]
-    src = b"".join(bytes(t) for t in vals); n, r, o = run(62, len(vals), 1, 1, 1, list(src)); good = n == len(vals) * 4
+        u, vv, l = sgn(v & 31, 5), sgn(v >> 5 & 31, 5), v >> 10; w = struct.unpack_from("<4f", o, 16 * v)
+        want = (f32(max(u, -15) / 15), f32(max(vv, -15) / 15), f32(l / 63), float((u == -16) | (vv == -16) << 1))
+        if w != want: good = False; ck.ok("e", False, f"L6V5U5 {v:#06x}: {w} != {want}"); break
+    ck.ok("e", good, "L6V5U5 all 65536 texels = D3D9 sampled values")
+    ck.ok("e", unc(61, 65536, o, 2) == allv, "L6V5U5 unconvert: all 65536 codes round-trip exactly (incl. the most negative U and V)")
+    lib.nx_d3d9_unconvert(61, 1, 1, o, 15, (C.c_uint8 * 2)(), 2); ck.ok("e", lib.nx_d3d9_unconvert(61, 1, 1, o, 15, (C.c_uint8 * 2)(), 2) == 0, "L6V5U5 unconvert: short source")
+    # X8L8V8U8: every code of each channel (U and V over all 256 with every L, and x over all 256), the codes of the three channels independent
+    vals = [(u, v, 0, 0) for u in range(256) for v in range(256)] + [(0x80, 0x80, l, 0) for l in range(256)] + [(5, 0xF0, 3, x) for x in range(256)] + [(l, l, l, l) for l in range(256)]
+    src = b"".join(bytes(t) for t in vals); n, r, o = run(62, len(vals), 1, 1, 1, list(src)); good = n == len(vals) * 16 and r == n
     for k, (u, v, l, x) in enumerate(vals):
-        w = o[4 * k:4 * k + 4]; ru, rv = max(sgn(u, 8), -127) / 127, max(sgn(v, 8), -127) / 127
-        d0, d1 = w[0] / 255 * sc[0] + of[0], w[1] / 255 * sc[1] + of[1]
-        if not (w[3] == 255 and w[2] == l and abs(d0 - ru) < 1e-6 and abs(d1 - rv) < 1e-6): good = False; ck.ok("e", False, f"X8L8V8U8 {(u, v, l, x)}: {w.hex()}"); break
-    ck.ok("e", good, "X8L8V8U8 structured sweep")
-    # target rules: write mask / replication / clear value / read-back of A8, L8, R8G8B8; everything else the identity
-    m, rp = C.c_uint8(), C.c_uint8(); lib.nx_d3d9_rt_rule.argtypes = [C.c_uint32, C.c_void_p, C.c_void_p]; lib.nx_d3d9_clear_rgba8.restype = C.c_uint32; lib.nx_d3d9_clear_rgba8.argtypes = [C.c_uint32] * 2
-    for f, wm, wr in ((28, 8, 0), (50, 7, 1), (20, 7, 0), (21, 15, 0), (51, 15, 0), (36, 15, 0)):
-        lib.nx_d3d9_rt_rule(f, C.byref(m), C.byref(rp)); ck.ok("e", (m.value, rp.value) == (wm, wr), f"rt rule of {f}: {m.value, rp.value}")
+        w = struct.unpack_from("<4f", o, 16 * k); want = (f32(max(sgn(u, 8), -127) / 127), f32(max(sgn(v, 8), -127) / 127), f32(l / 255), float((u == 128) | (v == 128) << 1 | x << 2))
+        if w != want: good = False; ck.ok("e", False, f"X8L8V8U8 {(u, v, l, x)}: {w} != {want}"); break
+    ck.ok("e", good, "X8L8V8U8 every code of U, V, L, x = D3D9 sampled values")
+    ck.ok("e", unc(62, len(vals), o, 4) == src, "X8L8V8U8 unconvert: every code of each channel (incl. the x byte) round-trips exactly")
+    # target rules: write mask / clear value / read-back of A8, L8, R8G8B8; everything else the identity
+    m = C.c_uint8(); lib.nx_d3d9_rt_rule.argtypes = [C.c_uint32, C.c_void_p]; lib.nx_d3d9_clear_rgba8.restype = C.c_uint32; lib.nx_d3d9_clear_rgba8.argtypes = [C.c_uint32] * 2
+    for f, wm in ((28, 8), (50, 1), (20, 7), (21, 15), (51, 15), (36, 15), (61, 15), (62, 15)):
+        lib.nx_d3d9_rt_rule(f, C.byref(m)); ck.ok("e", m.value == wm, f"rt rule of {f}: {m.value}")
     col = 0x80402010                                                                   # A 0x80, R 0x40, G 0x20, B 0x10
-    for f, want in ((28, 0xFF000000 & 0 | 0x80000000), (50, 0xFF404040), (20, 0xFF102040), (21, 0x80102040)):
+    for f, want in ((28, 0xFF000000 & 0 | 0x80000000), (50, 0xFF000040), (20, 0xFF102040), (21, 0x80102040)):
         ck.ok("e", lib.nx_d3d9_clear_rgba8(f, col) == want, f"clear value of {f}: {lib.nx_d3d9_clear_rgba8(f, col):#x} != {want:#x}")
     nat = bytes([5, 6, 7, 8, 1, 2, 3, 4]); b4 = (C.c_uint8 * 2)()
     ck.ok("e", lib.nx_d3d9_unconvert(28, 2, 1, nat, 8, b4, 2) == 2 and bytes(b4) == bytes([8, 4]), "A8 unconvert takes alpha")

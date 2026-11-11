@@ -200,8 +200,8 @@ Lead's run: copy ALL OK (a 189 533, b 3 767, c 72, d 75 checks by the worker's c
 - Left without body, no complete contract: ProcessVertices; SetClipStatus / GetClipStatus (until the draw path defines the status).
 - TO RECHECK (lead): DrawRectPatch / DrawTriPatch / DeletePatch return D3DERR_INVALIDCALL because the env caps have no patch bits (Wine returns D3D_OK without drawing): constant-result functions need rows in contract_consts.tsv with the contract source, or a different rule.
 - Backend limits that make the device answer INVALIDCALL where Windows accepts (no rule yet): StretchRect into a multisampled destination; compressed <-> uncompressed StretchRect.
-- Lossy by construction: L6V5U5 / X8L8V8U8 at the most negative code and the x byte.
-- Owed by the draw path: nx_d3d9_rt_rule (write mask, red replication), nx_d3d9_sample_fixup, flush before rewriting a bound buffer mirror, rebind on nxs_pass_epoch change; occlusion queries with real draws are untested.
+- Bump formats: L6V5U5 / X8L8V8U8 are exact (RGBA32F storage, side word); the most negative code samples as -1 like -m (D3D9) and reads back as itself.
+- Owed by the draw path: flush before rewriting a bound buffer mirror, rebind on nxs_pass_epoch change; occlusion queries with real draws are untested.
 - Platform hooks (undefined in the product): nxd3d_gpu_call, nxd3d_gpu_alloc / free, nxd3d_dc_create / release.
 
 ## D7 delivered 2026-11-11 (device lifecycle, swap chains, Present): worker's verdict green, lead's rerun pending
@@ -226,10 +226,9 @@ Lead's run: present a 128, b 103, c 170, d 25 checks, 0 failed; devlife ALL OK (
 STATE NOT CARRIED TO THE BACKEND (each is a correctness gap of drawn pixels, none blocks the link; no rule / no field yet):
 1. D3DRS_LASTPIXEL = TRUE (the D3D9 DEFAULT) on line draws: GL 4.5 cannot express it, the backend makes the submit BAD_CALL. Every line draw with default state fails. Needs a rule (extra last-pixel point per segment, as the semantics say) in the backend or the front.
 2. User clip plane equations and point size / point scale of programmable vertex shaders: no field in the VS driver block (translator task S2).
-3. L8 red replication and bump-format sample fixups (nx_d3d9_rt_rule / nx_d3d9_sample_fixup): need a shader feature; only the write mask is applied.
-4. Depth surface larger than the colour targets: the backend's pass rule rejects it.
-5. Flat-shading variants of translated programs: only the raster bit is set.
-6. PreLoad of a managed buffer bypasses the draw path's buffer hazard table.
+3. Depth surface larger than the colour targets: the backend's pass rule rejects it.
+4. Flat-shading variants of translated programs: only the raster bit is set.
+5. PreLoad of a managed buffer bypasses the draw path's buffer hazard table.
 Decisions to recheck: posfix = (0, 0, 1, 0) because the backend viewport already carries the half pixel (contradicts the shaders README wording: reconcile the two texts); missing VS input = (0,0,0,0) (Wine; Nine uses w = 1); NULL index buffer = D3D_OK (Windows row of Wine's test, Wine itself differs); shadow-sampler flag by format class; null-format colour target below a real one = scratch attachment.
 
 ## B2c accepted 2026-11-11 (GL backend translates D3D9 shaders: NXGPU_FN_SHADER_CREATE_D3D)

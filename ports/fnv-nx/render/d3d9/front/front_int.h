@@ -22,7 +22,10 @@ uint32_t nxfront_cmp(uint32_t d3dcmp, uint32_t oor);
 typedef enum NxConv { NXCONV_NONE, NXCONV_A8, NXCONV_L8, NXCONV_A8L8, NXCONV_L16, NXCONV_ATI1, NXCONV_R8G8B8, NXCONV_L6V5U5, NXCONV_X8L8V8U8 } NxConv;
 typedef struct NxFmtRow { NxFormatInfo info; float bias; NxConv conv; } NxFmtRow;
 NxFmtRow nxfront_fmt_row(uint32_t d3dfmt);
-/* biased code of a signed texel s of an n-bit signed-normalised channel with maximum m = 2^(n-1) - 1: max(s, -m) + m + 1 (front_rt.c) */
-static inline uint8_t nxfront_bias(int s, int m) { return (uint8_t)((s < -m ? -m : s) + m + 1); }
+/* L6V5U5 / X8L8V8U8 storage (NxFmt_RGBA32F, view swizzle R, G, B, 1): D3D9 sampling of a signed n-bit code s is max(s, -m) / m with m = 2^(n-1) - 1 (the most negative code reads -1 as
+ * the code -m does), of an unsigned n-bit code c / (2^n - 1). Channels 0..2 hold those values, so plain sampling and filtering are exactly the D3D9 result. The alpha channel is never sampled (the
+ * swizzle gives 1) and holds the integer side word that makes the readback exact: bit 0 = U was the most negative code, bit 1 = V was, bits 2.. = the x byte of X8L8V8U8 (0 for L6V5U5). */
+static inline float nxfront_snorm(int s, int m) { return (float)(s < -m ? -m : s) / (float)m; }
+static inline int nxfront_snorm_code(float f, int m) { return (int)(f < 0 ? f * (float)m - 0.5f : f * (float)m + 0.5f); }   /* the integer nearest to f * m (|f * m - code| < 1e-5) */
 
 #endif

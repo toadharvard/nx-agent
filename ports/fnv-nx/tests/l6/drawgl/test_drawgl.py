@@ -4,7 +4,7 @@ process, RPC + shared arena as in tests/l6/copy, llvmpipe) -> GetRenderTargetDat
 Needs FNVNX_SHADERS_BUILD (the translator build, required: the backend links it).  Synthetic shaders only (hand-assembled, render/shaders/total/sm_hand.py).  Parts (one line `PART x: n checks, f failed` each, a check = one pixel
 of one render target, plus the API results of the player in part p):
  a constants (float / int / bool, high registers)   b textures (2D address modes, bilinear, cube all faces, volume, sRGB read, sampler slots, ps_1_x type word)   c vertex colour, the unwritten-input rule, non-canonical links
- d fog (ps_2_0 + vs_1_1 without oFog; table / vertex modes; ps_3_0 none)   e alpha test (all 8 functions)   f MRT, vertex buffer, indexed draws   g fixed-function VS + user PS, user VS + fixed-function PS   m mutations
+ d fog (ps_2_0 + vs_1_1 without oFog; table / vertex modes; ps_3_0 none)   e alpha test (all 8 functions)   f MRT, vertex buffer, indexed draws   g fixed-function VS + user PS, user VS + fixed-function PS   h clip planes / point size   i storage rule of the CONVERT formats (L6V5U5 / X8L8V8U8 sampled values, L8 / A8 render target textures)   m mutations
 Tolerance: <= 1/255 per channel unless a case says so (bilinear filtering: 3/255, fixed-function modulate: 2/255)."""
 import concurrent.futures as cf, os, re, shutil, subprocess, sys, tempfile
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
@@ -118,6 +118,7 @@ MUTS = [   # (parts that must catch it, file relative to render/d3d9, old (exact
     ("f", "dev/draw_exec.cpp", "w[3] = r.first; w[4] = 0; }", "w[3] = 0; w[4] = 0; }"),
     ("c", "backend/gl4_d3dshader.c", "o.link_pairs = key.nl ? key.l : NULL; o.n_link_pairs = key.nl;", "o.link_pairs = NULL; o.n_link_pairs = 0;"),
     ("c", "backend/gl4_d3dshader.c", "(d.stage == 0 && d.variant ? FNVNX_SHADER_VS_COMPLETE : 0)", "0"),
+    ("i", "dev/draw_state.cpp", "((uint64_t)m << NXRS_B_MASK(i)); }", "((uint64_t)15 << NXRS_B_MASK(i)); }"),
     ("f", "backend/gl4_shader.c", "if (g4.sh[id].d3d && --g4.sh[id].d3d->refs) return 0;", "if (0) return 0;"),
 ]
 
