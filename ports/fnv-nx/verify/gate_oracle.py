@@ -10,9 +10,11 @@ Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
   subject     the files under test (repo-relative).
   REF         one of (exactly these keys):
     {"kind": "wine-exe", "wine": "9.0", "exe_sha256": H64, "artifact": {"repo": "fnv-nx-build", "commit": H40,
-     "path": STR, "sha256": H64}}      a dump the game's exe produced under Wine 9.0, stored in the artifacts repository
-    {"kind": "spec", "document": STR, "section": STR, "path": PATH}    cited text held in a tracked file
-    {"kind": "spec", "document": STR, "section": STR, "url": STR}      cited text of an outside document
+     "tree_sha256": H64, "path": STR}}   a dump the game's exe produced under Wine 9.0: file `path` of that commit of
+                                         the artifacts repository (an external, as in RECIPE.md)
+    {"kind": "spec", "path": PATH, "anchor": STR}   cited text: a tracked file and a place in it. `anchor` is a line
+                                         range "L<m>-L<n>" (1 <= m <= n <= number of lines) or a whole line of the file
+                                         that starts with "#" (a heading) and occurs exactly once
     {"kind": "contract", "path": PATH}     a contract table of the tree
     {"kind": "model", "path": PATH}        an independent model in the tree
 Rule. A test file is certified iff ALL hold:
@@ -20,31 +22,33 @@ Rule. A test file is certified iff ALL hold:
      key or a wrong format is an error of the DIR: none of its tests is certified);
   2. `subject` is not empty and every subject path is a tracked file inside a root of verify/admit.json;
   3. `references` is not empty and every REF has one of the forms above; `wine` is "9.0"; `exe_sha256` equals
-     verify/oracle_pins.json "exe_sha256"; every `path` of a REF is a tracked file inside a root; for a spec with
-     `path`, `section` occurs literally in that file (the citation exists); `document`, `section`, `url` are not empty;
-  4. independence: no contract or model `path` is in the import closure of the subject. The closure is computed from the
-     syntax trees: a subject file, plus, for every `import a.b` / `from a.b import c` in a closure file, every tracked
-     file of the tree named a/b.py, b.py, a/b/__init__.py, a/b/c.py or c.py at any depth (a superset of what python
-     can load, whatever sys.path is; a closure file that does not parse makes the test uncertified);
+     verify/oracle_pins.json "exe_sha256"; the artifact is fetched by its exact commit (`git fetch --depth 1
+     $ARTIFACTS_URL <commit>`, cached in GATE_CACHE/external/<commit> like a recipe's external), its tree hash
+     (cas.py) equals `tree_sha256` and `path` is a file of it; every `path` of a spec, contract or model is a tracked
+     file inside a root; a spec's anchor resolves in its file. A spec without a file and an anchor is not a reference;
+  4. independence: no spec, contract or model `path` is in the import closure of the subject. The closure is computed
+     from the syntax trees: a subject file, plus, for every `import a.b` / `from a.b import c` in a closure file, every
+     tracked file of the tree named a/b.py, b.py, a/b/__init__.py, a/b/c.py or c.py at any depth (a superset of what
+     python can load, whatever sys.path is; a closure file that does not parse makes the test uncertified);
   5. product: when a subject file lies in a product root, some REF is wine-exe or spec, and no REF `path` lies in a
      product root.
-A spec whose `path` is a subject file itself is allowed (rule 4 covers contract and model only): a tool's own stated
-rule is the reference of the tool's test; for a product subject rule 5 forbids it.
 Argument: an expected value "comes from the code under test" when its declared source is the subject or is computed
-through it. Rules 2-5 leave four sources: a dump of the exe under the pinned Wine, text cited from a document, a
-contract table and a model, the last two outside everything the subject can load, and for product code never the
-product tree. The verdict is green only if certified == universe, so a test without such a source blocks the merge.
-Assumptions (checked by verification, not by this gate): the declaration is true - the subject list is complete and
-the test compares against the declared references (the after-merge verifier runs the tests under verify/opentrace.py
-and compares the tracked files opened with subject + references); a wine-exe artifact exists at its commit with its
-sha256 (fetched and checked where it is used); the text of a `url` spec says what the test expects."""
+through it. Rules 2-5 leave four sources: a dump of the exe under the pinned Wine, text at a place that exists in a
+file, a contract table and a model, the last three outside everything the subject can load, and for product code never
+the product tree. The verdict is green only if certified == universe, so a test without such a source blocks the merge.
+Assumption (checked by verification, not by this gate): the declaration is true - the subject list is complete and
+the test compares against the declared references. The after-merge verifier runs every test under verify/opentrace.py
+and compares the tracked files it opened with subject + references (verify/oraclecheck.py)."""
 import ast
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import cas  # noqa: E402
 import gate_tests  # noqa: E402
 
 TREE = "ports/fnv-nx"
@@ -116,7 +120,22 @@ def root_of(path, roots):
     return None
 
 
-def judge_ref(ref, tracked, roots, pins, read):
+def anchor_ok(anchor, body):
+    """a line range inside the file, or a heading line that occurs exactly once"""
+    lines = body.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    if not isinstance(anchor, str):
+        return False
+    if anchor.startswith("L") and "-L" in anchor:
+        a, b = anchor[1:].split("-L", 1)
+        if a.isascii() and b.isascii() and a.isdigit() and b.isdigit() and str(int(a)) == a and str(int(b)) == b:
+            return 1 <= int(a) <= int(b) <= len(lines)
+        return False
+    return anchor.startswith("#") and lines.count(anchor) == 1
+
+
+def judge_ref(ref, tracked, roots, pins, read, artifact):
     """-> reason or None (rule 3)"""
     if not isinstance(ref, dict):
         return "a reference is not an object"
@@ -130,18 +149,21 @@ def judge_ref(ref, tracked, roots, pins, read):
         if not is_hex(pins.get("exe_sha256"), 64) or ref["exe_sha256"] != pins["exe_sha256"]:
             return "wine-exe: exe_sha256 is not the pinned exe"
         a = ref["artifact"]
-        if not isinstance(a, dict) or set(a) != {"repo", "commit", "path", "sha256"}:
-            return "wine-exe: artifact keys are not repo, commit, path, sha256"
-        if a["repo"] != "fnv-nx-build" or not is_hex(a["commit"], 40) or not is_hex(a["sha256"], 64) or not text(a["path"]):
-            return "wine-exe: artifact is not fnv-nx-build, a 40 hex commit, a path and a 64 hex sha256"
+        if not isinstance(a, dict) or set(a) != {"repo", "commit", "tree_sha256", "path"}:
+            return "wine-exe: artifact keys are not repo, commit, tree_sha256, path"
+        if a["repo"] != "fnv-nx-build" or not is_hex(a["commit"], 40) or not is_hex(a["tree_sha256"], 64) or not text(a["path"]):
+            return "wine-exe: artifact is not fnv-nx-build, a 40 hex commit, a 64 hex tree_sha256 and a path"
+        tree, files = artifact(a["commit"])
+        if tree is None:
+            return "wine-exe: commit %s cannot be fetched: %s" % (a["commit"], files)
+        if tree != a["tree_sha256"]:
+            return "wine-exe: tree_sha256 of %s is %s" % (a["commit"], tree)
+        if a["path"] not in files:
+            return "wine-exe: %s is not a file of %s" % (a["path"], a["commit"])
         return None
     if kind == "spec":
-        if keys not in ({"kind", "document", "section", "path"}, {"kind", "document", "section", "url"}):
-            return "spec: keys are not kind, document, section and one of path, url"
-        if not text(ref["document"]) or not text(ref["section"]):
-            return "spec: document or section is empty"
-        if "url" in ref:
-            return None if text(ref["url"]) else "spec: url is empty"
+        if keys != {"kind", "path", "anchor"}:
+            return "spec: keys are not kind, path, anchor"
     elif kind in ("contract", "model"):
         if keys != {"kind", "path"}:
             return "%s: keys are not kind, path" % kind
@@ -150,12 +172,12 @@ def judge_ref(ref, tracked, roots, pins, read):
     p = ref["path"]
     if not isinstance(p, str) or p not in tracked or root_of(p, roots) is None:
         return "%s: %r is not a tracked file inside a root" % (kind, p)
-    if kind == "spec" and ref["section"] not in read(p):
-        return "spec: section %r does not occur in %s" % (ref["section"], p)
+    if kind == "spec" and not anchor_ok(ref["anchor"], read(p)):
+        return "spec: anchor %r is not a line range or a single heading line of %s" % (ref["anchor"], p)
     return None
 
 
-def judge_test(entry, tracked, roots, pins, read):
+def judge_test(entry, tracked, roots, pins, read, artifact):
     """-> reason or None (rules 2-5)"""
     if not isinstance(entry, dict) or set(entry) != {"subject", "references"}:
         return "entry keys are not subject, references"
@@ -168,14 +190,14 @@ def judge_test(entry, tracked, roots, pins, read):
     if not isinstance(refs, list) or not refs:
         return "references is empty"
     for ref in refs:
-        why = judge_ref(ref, tracked, roots, pins, read)
+        why = judge_ref(ref, tracked, roots, pins, read, artifact)
         if why:
             return why
     clo, why = closure(subject, tracked, read)
     if why:
         return why
     for ref in refs:
-        if ref["kind"] in ("contract", "model") and ref["path"] in clo:
+        if "path" in ref and ref["path"] in clo:
             return "%s %s is in the import closure of the subject" % (ref["kind"], ref["path"])
     if any(root_of(s, roots)["class"] == "product" for s in subject):
         if not any(ref["kind"] in ("wine-exe", "spec") for ref in refs):
@@ -186,8 +208,9 @@ def judge_test(entry, tracked, roots, pins, read):
     return None
 
 
-def judge(files, decls, tracked, roots, pins, read):
-    """files: the universe; decls: {DIR/tests: parsed oracle.json or None} -> {path: reason} of the uncertified;
+def judge(files, decls, tracked, roots, pins, read, artifact):
+    """files: the universe; decls: {DIR/tests: parsed oracle.json or None}; artifact(commit) -> (tree hash, set of
+    file paths) or (None, reason) -> {path: reason} of the uncertified;
     pure function of its arguments"""
     bad = {}
     by_dir = {}
@@ -210,7 +233,7 @@ def judge(files, decls, tracked, roots, pins, read):
             elif n not in doc["tests"]:
                 bad[f] = "no entry in %s/oracle.json" % d
             else:
-                w = judge_test(doc["tests"][n], tracked, roots, pins, read)
+                w = judge_test(doc["tests"][n], tracked, roots, pins, read, artifact)
                 if w:
                     bad[f] = w
     return bad
@@ -232,6 +255,50 @@ def load(path):
             return json.load(fh, object_pairs_hook=pairs_unique)
     except (OSError, ValueError):
         return None
+
+
+ARTIFACTS_URL = "https://github.com/toadharvard/fnv-nx-build"
+
+
+def fetcher(cache):
+    """artifact(commit) of judge: the commit of the artifacts repository as a tree hash and its file list.
+    Bare fetches are kept in CACHE/<commit> (the layout recipe.py uses for externals); results are memoised per run."""
+    url = os.environ.get("ARTIFACTS_URL", ARTIFACTS_URL)
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    memo = {}
+
+    def artifact(commit):
+        if commit in memo:
+            return memo[commit]
+        bare = os.path.join(cache, commit)
+        work = tempfile.mkdtemp(prefix="gate-oracle-")
+        try:
+            if not os.path.isdir(bare):
+                tmp = "%s.tmp%d-%s" % (bare, os.getpid(), os.urandom(4).hex())
+                os.makedirs(tmp)
+                for cmd in (["init", "-q", "--bare"], ["fetch", "-q", "--depth", "1", url, commit]):
+                    subprocess.run(["git", "-C", tmp] + cmd, env=env, check=True, capture_output=True)
+                os.replace(tmp, bare)
+            dest = os.path.join(work, "tree")
+            os.makedirs(dest)
+            ienv = dict(env, GIT_INDEX_FILE=os.path.join(work, "idx"))
+            subprocess.run(["git", "--git-dir", bare, "read-tree", commit], env=ienv, check=True, capture_output=True)
+            subprocess.run(["git", "--git-dir", bare, "--work-tree", dest, "checkout-index", "-a", "-f"], env=ienv, check=True,
+                           capture_output=True)
+            files = set()
+            for d, _, names in os.walk(dest):
+                for n in names:
+                    f = os.path.join(d, n)
+                    if os.path.isfile(f) and not os.path.islink(f):
+                        files.add(os.path.relpath(f, dest))
+            memo[commit] = (cas.tree_hash(dest), files)
+        except (subprocess.CalledProcessError, OSError, cas.CasError) as x:
+            err = (getattr(x, "stderr", b"") or str(x).encode()).decode(errors="replace").strip().splitlines()
+            memo[commit] = (None, err[-1] if err else "git failed")
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+        return memo[commit]
+    return artifact
 
 
 def main():
@@ -256,7 +323,14 @@ def main():
     def read(p):
         with open(p, encoding="utf-8", errors="surrogateescape") as fh:
             return fh.read()
-    bad = judge(files, decls, tracked, roots, pins, read)
+    tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-oracle-cache-")
+    cache = os.path.join(os.environ.get("GATE_CACHE") or tmp, "external")
+    os.makedirs(cache, exist_ok=True)
+    try:
+        bad = judge(files, decls, tracked, roots, pins, read, fetcher(cache))
+    finally:
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
     kinds = {}
     for d, doc in decls.items():
         for n, e in (doc or {}).get("tests", {}).items() if isinstance(doc, dict) and isinstance(doc.get("tests"), dict) else []:

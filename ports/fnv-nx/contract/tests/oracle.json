@@ -4,28 +4,24 @@
   "test_gates.py": {
    "references": [
     {
-     "document": "ports/fnv-nx/contract/gate_data.py",
+     "anchor": "## contract/gate_data.py",
      "kind": "spec",
-     "path": "ports/fnv-nx/contract/gate_data.py",
-     "section": "gate_data - .data references of the exe function versus each native copy (L1 CONTRACT)."
+     "path": "ports/fnv-nx/verify/TOOLS.md"
     },
     {
-     "document": "ports/fnv-nx/contract/gate_call.py",
+     "anchor": "## contract/gate_call.py",
      "kind": "spec",
-     "path": "ports/fnv-nx/contract/gate_call.py",
-     "section": "gate_call - direct call/tail targets of the exe function versus each native copy (L1 CONTRACT)."
+     "path": "ports/fnv-nx/verify/TOOLS.md"
     },
     {
-     "document": "ports/fnv-nx/contract/gate_vcall.py",
+     "anchor": "## contract/gate_vcall.py",
      "kind": "spec",
-     "path": "ports/fnv-nx/contract/gate_vcall.py",
-     "section": "gate_vcall - virtual-call displacements of the exe function versus each native copy (L1 CONTRACT)."
+     "path": "ports/fnv-nx/verify/TOOLS.md"
     },
     {
-     "document": "ports/fnv-nx/contract/gate_xc.py",
+     "anchor": "## contract/gate_xc.py",
      "kind": "spec",
-     "path": "ports/fnv-nx/contract/gate_xc.py",
-     "section": "gate_xc - does every C++ static initializer (facts['xc']) have an address-bound native function? (L1 CONTRACT)"
+     "path": "ports/fnv-nx/verify/TOOLS.md"
     }
    ],
    "subject": [
@@ -38,16 +34,14 @@
   "test_objmerge.py": {
    "references": [
     {
-     "document": "ports/fnv-nx/contract/objfacts_merge.py",
+     "anchor": "## contract/objfacts_merge.py",
      "kind": "spec",
-     "path": "ports/fnv-nx/contract/objfacts_merge.py",
-     "section": "objfacts_merge - union of the per-object files of objfacts_one.py into obj.json (merge stage of objfacts)."
+     "path": "ports/fnv-nx/verify/TOOLS.md"
     },
     {
-     "document": "ports/fnv-nx/contract/store.py",
+     "anchor": "## contract/store.py",
      "kind": "spec",
-     "path": "ports/fnv-nx/contract/store.py",
-     "section": "store - the one on-disk encoding of every contract stage output: canonical JSON (no pickle)."
+     "path": "ports/fnv-nx/verify/TOOLS.md"
     }
    ],
    "subject": [
@@ -58,16 +52,14 @@
   "test_proto.py": {
    "references": [
     {
-     "document": "ports/fnv-nx/contract/proto.py",
+     "anchor": "## contract/proto.py",
      "kind": "spec",
-     "path": "ports/fnv-nx/contract/proto.py",
-     "section": "proto - the prototype of the native side of every boundary (MASTER_PLAN4 R5)."
+     "path": "ports/fnv-nx/verify/TOOLS.md"
     },
     {
-     "document": "ports/fnv-nx/contract/bodysel.py",
+     "anchor": "## contract/bodysel.py",
      "kind": "spec",
-     "path": "ports/fnv-nx/contract/bodysel.py",
-     "section": "bodysel - the static body selector (MASTER_PLAN4 R1): NATIVE(f) iff N1 and N2 and N3 and N4, else LIFTED."
+     "path": "ports/fnv-nx/verify/TOOLS.md"
     }
    ],
    "subject": [
@@ -78,16 +70,14 @@
   "test_store.py": {
    "references": [
     {
-     "document": "ports/fnv-nx/contract/store.py",
+     "anchor": "## contract/store.py",
      "kind": "spec",
-     "path": "ports/fnv-nx/contract/store.py",
-     "section": "store - the one on-disk encoding of every contract stage output: canonical JSON (no pickle)."
+     "path": "ports/fnv-nx/verify/TOOLS.md"
     },
     {
-     "document": "ports/fnv-nx/contract/gatefile.py",
+     "anchor": "## contract/gatefile.py",
      "kind": "spec",
-     "path": "ports/fnv-nx/contract/gatefile.py",
-     "section": "gatefile - the result file of a gate, in the shape the L4 merge verdict reads (verify/verdict.py, `fnvnx-gate/1`)."
+     "path": "ports/fnv-nx/verify/TOOLS.md"
     }
    ],
    "subject": [

@@ -123,17 +123,18 @@ Every test file of the `selftests` universe has one entry in `DIR/tests/oracle.j
 test (`subject`) and the references its expected values come from. The rule, its argument and the reference forms are in
 the `gate_oracle.py` docstring. In short:
 
-- a reference is a dump of the pinned exe under Wine 9.0 (stored in `fnv-nx-build`, named by commit and sha256), a cited
-  text (a tracked file in which the cited section occurs literally, or an outside document), a contract table, or an
-  independent model;
-- a contract table or model may not be a file the subject can import (closure over the syntax trees, a superset of what
-  python can load);
-- a test of product code needs a Wine dump or a cited text, and none of its references may lie in a product root; a tool's
-  test may cite the tool's own stated rule.
+- a reference is a dump of the pinned exe under Wine 9.0 (a file of a commit of `fnv-nx-build`, fetched as an external and
+  checked by `tree_sha256`), a cited text (a tracked file plus an anchor that resolves in it: a heading line or a line
+  range), a contract table, or an independent model;
+- a text without a file and an anchor is not a reference;
+- no cited text, contract table or model may be a file the subject can import (closure over the syntax trees, a superset
+  of what python can load): a tool cannot cite itself. The stated rules of the tools are `verify/TOOLS.md`;
+- a test of product code needs a Wine dump or a cited text, and none of its references may lie in a product root.
 
-The pinned exe is `verify/oracle_pins.json`. Assumptions, checked by verification and not by the gate: the declaration is
-true (the after-merge verifier runs the tests under `opentrace.py` and compares the tracked files opened with subject +
-references), a Wine dump exists at its commit with its sha256, and an outside document says what the test expects.
+The pinned exe is `verify/oracle_pins.json`. Assumption: the declaration is true. It is checked by verification, not by the
+gate: `verify/oraclecheck.py` runs every test under strace and compares the tracked files the run opened with the import
+closure of the subject plus the references (a file opened outside them, or a subject file never opened, fails the test's
+check). It is a job of the after-merge verifier.
 
 ## Where no closing rule is known
 
