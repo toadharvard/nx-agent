@@ -28,8 +28,6 @@ works on fnv-nx (ports/fnv-nx/): local agents, cloud stream sessions, the render
   - They never go into this public repository. That is how the Legal section is met: they are not distributed.
 - Long jobs (more than about 10 minutes) run on the farms (D17). The farms are cloud sessions the owner runs on
   purpose.
-- Commit messages end with exactly one trailer line, `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
-  There is no Claude-Session line, and no session URL or session id in any commit or file.
 - Push to your own branch after every finished item. Open no pull requests. Do not edit JOURNAL.md: write inbox
   notes (docs/MACHINES.md).
 - Every check runs in the background, never blocking work. This covers tests, censuses, builds, boots and fuzz
