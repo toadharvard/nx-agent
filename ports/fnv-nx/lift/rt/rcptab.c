@@ -1,5 +1,5 @@
 /* rcptab.c: fnvl_rcp32 / fnvl_rsqrt32 = bit patterns of RCPSS / RSQRTSS of the one fixed reference CPU, for every 32-bit input.
- * Reference CPU: GenuineIntel family 6 model 207 (0xCF) stepping 2, "Intel(R) Xeon(R) Processor @ 2.10GHz", microcode 0x1.
+ * Reference CPU: the CPUID identity in rcpref.h (GenuineIntel family 6 model 207 (0xCF) stepping 2, "Intel(R) Xeon(R) Processor @ 2.10GHz", microcode 0x1).
  * Both instructions are pure functions of the 32 input bits (MXCSR RC/FTZ/DAZ and exception masks do not influence them,
  * checked on 20e6 inputs x 8 MXCSR values; DAZ-style: any input with exponent field 0 is treated as zero).
  * Structure: sign s, exponent e (8 bits), mantissa m (23 bits).
@@ -9,7 +9,9 @@
  *          else (380-e)>>1 << 23 | rsqrt_tab[(e&1)<<10 | m>>13]<<11
  * Integer only. Tables: 2 x 2048 x 12 bit stored as unsigned short = 8 KiB.
  * Tables regenerated from the host by tools/rcpgen.py (gcc -O2 -msse2 tools/rcpgen.c; runs the real instructions).
- * Proof of equality with the hardware on all 2^32 inputs of both functions: test/rcptest.py. */
+ * Proof of equality with the hardware on all 2^32 inputs of both functions: test/rcptest.py; the pinned certificate
+ * rt/rcptab.cert.json is made by farm/rcpcert.sh (tools/rcpcert.c) and judged by proof/gate_fpexact.py. */
+#include "rcpref.h"
 typedef unsigned int u32;
 
 /* BEGIN GENERATED */

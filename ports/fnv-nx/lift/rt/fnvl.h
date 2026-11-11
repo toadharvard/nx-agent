@@ -96,7 +96,7 @@ template<int P,class T> static inline bool sse_cmpb(T a,T b,u32 mx){ a=sse_daz(a
   return P==0?a==b:P==1?a<b:P==2?a<=b:P==3?(a!=a||b!=b):P==4?!(a==b):P==5?!(a<b):P==6?!(a<=b):(a==a&&b==b); }
 /* comis/ucomis -> EFLAGS bits (ZF 0x40, PF 4, CF 1) */
 template<class T> static inline u32 sse_comi(T a,T b,u32 mx){ a=sse_daz(a,mx); b=sse_daz(b,mx); return (a!=a||b!=b)?0x45u:a==b?0x40u:a<b?1u:0u; }
-static inline u32 sse_f2i(double v,u32 rc){ double r=rc==0?__builtin_roundeven(v):rc==1?__builtin_floor(v):rc==2?__builtin_ceil(v):__builtin_trunc(v);
+FNVL_F2I static inline u32 sse_f2i(double v,u32 rc){ double r=rc==0?__builtin_roundeven(v):rc==1?__builtin_floor(v):rc==2?__builtin_ceil(v):__builtin_trunc(v);
   if(!(r>=-2147483648.0&&r<=2147483647.0)) return 0x80000000u; return (u32)(s32)r; }
 static inline double sse_f2d(float v,u32 mx){ v=sse_daz(v,mx); if(v!=v){ u32 b=fxbits(v); return fxval<double>((u64)(b&0x80000000u)<<32|0x7ffull<<52|(u64)(b&0x7fffffu)<<29|1ull<<51); } return (double)v; }
 static inline float sse_d2f(double v,u32 mx){ v=sse_daz(v,mx); if(v!=v){ u64 b=fxbits(v); return fxval<float>((u32)(b>>32)&0x80000000u|0x7f800000u|(u32)((b&FX<double>::M)>>29)|0x400000u); } return sse_ftz((float)v,mx); }

@@ -8,6 +8,9 @@
    compared or stored as m80) goes through rt/x87.c (fnvl_x_*), which is hardware-equal. */
 #include "x87.h"
 #include "fmath.h"
+/* FNVL_F2I marks a float -> integer conversion helper: the only functions whose bodies may convert a float to an integer (x86 semantics:
+   out of range / NaN -> integer indefinite). tools/fnvnx_f2i_check.cc finds any other conversion in a unit; proof/gate_fpexact.py judges. */
+#define FNVL_F2I __attribute__((fnvnx_f2i))
 enum { FK_E, FK_F64, FK_F32, FK_I16, FK_I32, FK_I64, FK_M80 };
 #define FQ64 (1ull<<51)
 static inline fv fvmk(u32 k,u64 v,u32 e){ fv r; r.v=v; r.e=e; r.k=k; return r; }
@@ -71,7 +74,7 @@ static inline u64 fv_s64(fv a){ u32 f=0;
   switch(a.k){ case FK_F64: return a.v; case FK_F32: return d2u((double)u2f((u32)a.v)); case FK_I16: case FK_I32: case FK_I64: return d2u((double)(s64)a.v);
     default: return fnvl_x_to_f64(fv_x(a),c->fcw,&f); } }
 /* fist/fistp/fisttp: round by rc (fist: the control word's RC), out of range and NaN give the integer indefinite. Returns the pattern, the caller truncates it. */
-static inline u64 fv_i(fv a,u32 bits,u32 rc){ u64 ind=1ull<<(bits-1); u32 f=0; double d,r;
+FNVL_F2I static inline u64 fv_i(fv a,u32 bits,u32 rc){ u64 ind=1ull<<(bits-1); u32 f=0; double d,r;
   switch(a.k){
   case FK_I16: case FK_I32: case FK_I64: { s64 x=(s64)a.v; return (bits==64||(x>=-(s64)ind&&x<(s64)ind))?(u64)x:ind; }
   case FK_F64: case FK_F32: d=fv_d(a); if(d!=d) return ind; r=fx_round(d,rc); break;
