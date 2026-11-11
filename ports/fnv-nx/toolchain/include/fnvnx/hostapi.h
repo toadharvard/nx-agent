@@ -166,7 +166,9 @@ typedef struct FnvnxHostApi {
 #define FNVNX_PLAT_SOCK_GAI_FETCH 33u   /* (ticket, buf or 0, cap) -> total bytes of the result: a sequence of
                                            FnvnxWireAddrinfo records each followed by its canonical name bytes, padded
                                            to 8. cap < total: nothing is written, the ticket stays. cap >= total: the
-                                           records are written and the ticket is freed. -FNVNX_WE_INVAL for a ticket
+                                           records are written and the ticket is freed (buf 0: nothing
+                                           is written and the ticket is freed: how a result that cannot be taken
+                                           is released). -FNVNX_WE_INVAL for a ticket
                                            that is not open. */
 #define FNVNX_PLAT_SOCK_FIRST 16u
 #define FNVNX_PLAT_SOCK_LAST 33u

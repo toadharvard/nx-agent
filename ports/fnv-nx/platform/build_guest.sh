@@ -85,7 +85,7 @@ if [ -z "${GUEST_RT:-}" ]; then
     GUEST_RT=$OUT/rt
     DKP=$OUT/dkp
     rm -rf "$DKP" "$GUEST_RT"; mkdir -p "$DKP"; ln -s "$TC" "$DKP/devkitA64"
-    DEVKITPRO=$DKP "$TCDIR/guest/build.sh" "$GUEST_RT" >"$OUT/guest_rt.log" 2>&1 \
+    LIBNX_INC=$LIBNX_INC DEVKITPRO=$DKP "$TCDIR/guest/build.sh" "$GUEST_RT" >"$OUT/guest_rt.log" 2>&1 \
         || { echo "build_guest: guest runtime does not compile (see $OUT/guest_rt.log)"; tail -5 "$OUT/guest_rt.log"; exit 1; }
 fi
 RTLIB=$(realpath "$GUEST_RT")/libfnvnx-guest.a

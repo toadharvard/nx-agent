@@ -195,6 +195,8 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     setvbuf(stdout, NULL, _IONBF, 0);
     extern void fnvnx_guest_fs_init(void) __attribute__((weak));   /* fs.c; absent when runtime.c is linked alone */
     if (fnvnx_guest_fs_init) fnvnx_guest_fs_init();
+    extern void fnvnx_guest_sock_init(void) __attribute__((weak));   /* sock_guest.c: the "soc" device */
+    if (fnvnx_guest_sock_init) fnvnx_guest_sock_init();
 
     __libc_init_array();
     /* the game's own initializers in original order (docs/STARTUP.md); the game boot opts in by defining
