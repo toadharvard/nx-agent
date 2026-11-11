@@ -178,3 +178,17 @@ Numbers on the four recordings (worker's run, artifacts in the container only, /
 - FOUND and fixed by rule: uam read an uninitialised `sched` field (nv50_ir Instruction::init), 245 of 765 DKSH differed between repeats in one process; the fix is now part of `uam.patch` (applies to the pin).
 - OPEN (rule missing in the translator): on GL the 33 recorded pairs do not link - a ps_2_x shader reads the fog factor at location 18 and the paired VS does not write it (deko3d accepts, GL rejects). Needed: the VS epilogue always writes the fog varying with the value the reference (wined3d) defines for a VS without oFog. Task S2a.
 - OWED: rebuild the cache with the build id of the new uam.patch (farm job, about 7 min of translation) and publish to fnv-nx-build `l6-render/shcache/<build id>`; part f of the test has skip logic when no translator build is given - make the translator build a declared input of the gate instead.
+
+## N1 accepted 2026-11-11 (state translation total by construction, gate d3d9total): gate RED on the SM part
+
+`render/d3d9/front/` (enum header generated from the spec, switches without default under -Werror=switch-enum, out-of-range values by wined3d's rule before the switch), headers moved to `render/d3d9/backend/nx/`, `render/native` is down to `gl/`. Lead's run: test_front a 88, b 7770, c 341, d 570, e 10, f 14 checks, 0 failed; dev, res, spec green.
+Gate `GATE_OUT=<dir> python3 -I ports/fnv-nx/render/total/gate_d3d9total.py` (1.5 s): universe 332, certified 161, RED. Enum values 161 of 161 (12 enumerations, sensitivity 12 of 12). SM1-3 opcodes 0 of 171.
+- SM part, what is missing: a header generated from sm_table.json included by the patched mojoshader.c with static asserts (opcode value = row of the X-macro list, stage mask); the gate must then compile the pinned MojoShader clone, so it needs that clone as a declared input.
+- Spec defect fixed on the way: D3DFORMAT had junk names from MAKEFOURCC (96 -> 66 names).
+- NOT closed, to decide by rule (not accepted as final):
+  1. in-range values kept from the old Nine-based table where Wine differs: MIN/MAG filter NONE, BOTHSRCALPHA / BOTHINVSRCALPHA as destination factor, SRCCOLOR2 in an alpha slot. The reference is Wine: these three must follow it or be justified by a source.
+  2. ZFUNC, CULLMODE, FILLMODE, SHADEMODE out of range: wined3d makes no GL call, the result is the previous GL state. Modelled as a latch whose START value is invented. No rule.
+  3. the test pins the env-creatable formats without a backend layout as an expected set (hand list): L6V5U5, X8L8V8U8, INDEX16, INDEX32, ATOC, NULL, INST, RESZ; not marked renderable: A8, A2R10G10B10, L8, V8U8, Q8W8V8U8, V16U16, Q16W16V16U16. Same gap as D4 part h: task D4b closes both, then the pinned set is deleted.
+  4. the 16 vendor FOURCC formats are a hand list in gen_enums.py (from Wine's table): derive it from the env table instead.
+- Owed: tests/l6/tex/test_tex.py still names render/native/front/d3d9_state.c (now render/d3d9/front/front_fmt.c) and reads the table from C text: rewrite on the generated data in D4b. render/native/gl (v3 nxgl) goes when B2b lands.
+- The old directories toolchain/game, toolchain/host, tools/pipeline, tests/v1, tests/v6n, tests/s5 still name deleted render paths (other owners).

@@ -49,10 +49,9 @@ void nx_d3d9_sampler(const uint32_t* s, const NxD3D9Texture* tex, NxSamplerState
                 min = filter_class(NXF_SAMP(s, MINFILTER));
     if (mip.mip != NxMip_None) {
         o->lodBias = nxf_asfloat(NXF_SAMP(s, MIPMAPLODBIAS));
-        int lod = (int)NXF_SAMP(s, MAXMIPLEVEL) - (int)tex->managed_lod;
-        if (lod < 0) lod = 0;
-        if (lod > 15) lod = 15;
-        o->minLod = (uint8_t)lod;
+        uint32_t top = NXF_SAMP(s, MAXMIPLEVEL);   /* a DWORD: unsigned, as wined3d (min(max(top, lod), levels - 1)) */
+        uint32_t lod = top > tex->managed_lod ? top - tex->managed_lod : 0;
+        o->minLod = (uint8_t)(lod > 15 ? 15 : lod);
         f |= (uint32_t)mip.mip << NXSMP_MIP_SHIFT;
     }
     o->maxLod = 15;

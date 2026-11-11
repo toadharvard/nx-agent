@@ -184,7 +184,7 @@ class Oracle:
         K, g = self.K, lambda n: s[SMN[n]]; fl = 0; lb = 0.0; minlod = 0
         mip, mag, mn = self.filt(g("MIPFILTER")), self.filt(g("MAGFILTER")), self.filt(g("MINFILTER"))
         if mip[2] != K["NxMip_None"]:
-            lb = f32(g("MIPMAPLODBIAS")); minlod = min(15, max(0, to_i32(g("MAXMIPLEVEL")) - tex["managed_lod"])); fl |= mip[2] << K["NXSMP_MIP_SHIFT"]
+            lb = f32(g("MIPMAPLODBIAS")); minlod = min(15, max(0, g("MAXMIPLEVEL") - tex["managed_lod"])); fl |= mip[2] << K["NXSMP_MIP_SHIFT"]
         wrap = self.wrap(g("ADDRESSU"), tex["cube"]) | self.wrap(g("ADDRESSV"), tex["cube"]) << 3 | self.wrap(g("ADDRESSW"), tex["cube"]) << 6
         if not (mn[0] and not tex["shadow"]): fl |= K["NXSMP_MIN_LINEAR"]
         if not (mag[0] and not tex["shadow"]): fl |= K["NXSMP_MAG_LINEAR"]
@@ -196,7 +196,6 @@ class Oracle:
 
 
 def f32(u): import struct; return struct.unpack("<f", struct.pack("<I", u))[0]
-def to_i32(u): return u - 2 ** 32 if u >= 2 ** 31 else u
 
 
 def fmt_table(K):
@@ -336,7 +335,7 @@ def format_checks(L, K, ck):
 
 EXPECTED_GAPS = {   # creatable in the reference environment, no native layout / not renderable in the table: reported to the lead, not accepted
     "texture": sorted([61, 62, 101, 102, FCC("ATOC"), FCC("NULL"), FCC("INST"), FCC("RESZ")]),
-    "render": sorted([28, 50, 60, 63, 64, 101, 102, 110, FCC("NULL"), FCC("RESZ")]),
+    "render": sorted([28, 35, 50, 60, 63, 64, 101, 102, 110, FCC("NULL"), FCC("RESZ")]),
     "depth": []}
 
 

@@ -57,12 +57,12 @@ typedef struct {
 typedef struct { GLuint sh; uint8_t stage, used; } Gl4Shader;
 typedef struct { uint16_t vs, ps; GLuint prog; uint8_t used; } Gl4Program;
 typedef struct { NxRenderState rs; uint16_t vs, ps, layout, prog; uint32_t epoch; uint8_t defined; } Gl4State;
-typedef struct { NxVtxLayout l; NxVtxLayout4 l4; GLuint vao; uint32_t gen; uint8_t defined, is4; } Gl4Layout;
+typedef struct { NxVtxLayout l; NxVtxLayout4 l4; GLuint vao; uint32_t gen; uint8_t defined, is4, stale; } Gl4Layout;
 typedef struct { uint32_t image, sub; } Gl4Tgt;               /* sub = level | layer << 16; image 0 = none */
 typedef struct { uint32_t nColor; Gl4Tgt c[4]; Gl4Tgt d; } Gl4Pass;   /* unused entries are zero (memcmp key) */
 typedef struct { Gl4Pass key; GLuint fbo; } Gl4Fbo;
 typedef struct {   /* one vertex stream: a snapshot of the bound range, staged into buf when a draw needs it */
-    uint8_t* data; uint32_t size, cap, stride, bindSeq, stagedSeq, stagedSig;
+    uint8_t* data; uint32_t size, cap, stride, bindSeq, stagedSeq; uint64_t stagedSig;
     GLuint buf; uint8_t bound, isV3;
 } Gl4Vtx;
 typedef struct { uint64_t acc; GLuint q; GLsync sync; uint8_t kind, used, active, issued; } Gl4Query;

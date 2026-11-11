@@ -16,7 +16,7 @@ void t_defaults() {
         }
     }
     TEnv e = t_env(0); NxDevice9* d = e.dev; DWORD v;
-    // disagreements with Gallium Nine's table as kept in render/native/front/d3d9_state.c (ZENABLE: Nine assumes no auto depth, matches ad=0)
+    // disagreements with Gallium Nine's table as kept in render/d3d9/front/front_dyn.c (ZENABLE: Nine assumes no auto depth, matches ad=0)
     uint32_t nrs[NX_RS_COUNT]; nx_d3d9_default_rs(nrs); uint32_t nsm[14]; nx_d3d9_default_samp(nsm);
     int dis = 0;
     for (int i = 0; i < T_NRS; i++) if (T_RS[i].k != D3DRS_ZENABLE && nrs[T_RS[i].k] != T_RS[i].def) { printf("DISAGREE rs %d model/MS=%#x nx_d3d9=%#x\n", T_RS[i].k, T_RS[i].def, nrs[T_RS[i].k]); dis++; }
