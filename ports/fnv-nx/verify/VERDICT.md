@@ -26,7 +26,7 @@ below, not written yet, so no product root can be admitted; **no rule** = report
 | 1 | Trap or abort path: a trap instruction or a call of a terminating routine outside the one exit through the host | `objstub` (T) | machine code of every function of the built objects | L4 | required |
 | 2 | No-op or fake success: a function with no store, no call and a result that depends on no input, not generated from contract data | `objstub` (V) | data flow over the machine code; the table of constant answers | L4 | required |
 | 3 | Unresolved or substitutable symbol: undefined, weak undefined, two contract names on one body | `linkstrict` | the linked ELF's symbol table and the link command | L1 | required |
-| 4 | Import without a body | `imports` | manifest of reachable imports against defined symbols | L5 | required with the platform root |
+| 4 | Import without a body | `imports` | manifest of reachable imports against defined symbols | L5 | wired (per root, `gate_build.quantify`); a root without `imports.in.json` is red |
 | 5 | Code address without a dispatcher entry | `disp` (`link/gate_disp.py`; also `abs`, `link/gate_abs.py`) | dispatcher table against the R3 universe | L1 | wired, red until its inputs are declared |
 | 6 | x86 form without a certificate | `forms` | form universe against published proofs of the current DSL hash | L3b | required with the lift root |
 | 7 | D3D9 enum value or SM1-3 op without a translation | `d3d9total` | generated tables against the enum and op universes | L6 | required with the render root |
@@ -44,7 +44,7 @@ below, not written yet, so no product root can be admitted; **no rule** = report
 | D | C++ EH or SEH through lifted frames that does not match the exe's EH tables | `eh` | lifted frames against the exe's own EH tables | L3a, L3b | required |
 | E | The exe that was analysed is not the exe that is declared | `exepin` | exe hash against the declared identity (`contract/exepin.py` on the w8 branch) | L1 | required |
 | F | A guest address that does not fit the 32-bit guest address space | `addr32` | every address constant and pointer width of a product root | L2, L3a | required |
-| G | Registry key read by the exe or a module with no value in the declared machine, or a value with no reading site | `machine` | the hive against the registry call sites found statically | L1, L5 | required |
+| G | Registry key read by the exe or a module with no value in the declared machine, or a value with no reading site | `machine` | the hive against the registry call sites found statically (`gate_machine.py`: regsites.tsv, an `external`, against declared_registry.tsv, the tracked seed include and the symbol tables of the objects; a declared row nobody reads, a seed that is not the generator's output, a writer outside the seed unit, or a site whose key or value is not statically resolved (a measurement build) is red) | L1, L5 | wired per root (`gate_build.quantify`); a root without `registry.in.json` is red |
 | 11 | Tool that is not a pure function of its declared inputs | `pure` | AST of every stage tool | L4 | runs |
 | 12 | Tool defect covered by its own tests | `selftests` | every test file, in the declared environment | L4 | runs |
 | 13 | Code in the trunk that no gate judges | `admit` | tracked files against `admit.json` | L4 | runs |
