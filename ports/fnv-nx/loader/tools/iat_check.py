@@ -50,7 +50,9 @@ def main():
         for slot, (dll, name) in sorted(imports.items()):
             fh.write('%08x\t%s\t%s\n' % (slot, dll, name))
     open(w('drv.c'), 'w').write(DRIVER)
-    subprocess.run(['cc', '-std=c99', '-Wall', '-Wextra', '-Werror', '-I' + os.path.join(ROOT, 'loader', 'include'), w('drv.c'), w('import_keys.c'),
+    with open(w('objs.c'), 'w') as fh:   # stand-ins for the native data objects, only so the check links
+        fh.writelines('char %s[16];\n' % o for o in sorted({r['native_symbol'] for r in rows if r['conv'] == 'data' and iat.IDENT.match(r['native_symbol'])}))
+    subprocess.run(['cc', '-std=c99', '-Wall', '-Wextra', '-Werror', '-I' + os.path.join(ROOT, 'loader', 'include'), w('drv.c'), w('objs.c'), w('import_keys.c'),
                     os.path.join(ROOT, 'loader', 'src', 'importkey.c'), '-o', w('drv')], check=True)
     got = {}
     for ln in subprocess.run([w('drv'), w('slots.tsv')], capture_output=True, text=True, check=True).stdout.splitlines():
