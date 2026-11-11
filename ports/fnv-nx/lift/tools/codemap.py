@@ -5,7 +5,7 @@
 7 hole between executable sections (not part of the universe), 0 unexplained (build error).
 Dead = a run no path reaches that decodes completely from its first byte (no bytes left over), ends at a terminator or at the
 next reached byte, has relocated fields only at instruction operand fields, and has no relocated dword (from a live site) and no
-call pointing into it. Entries made by rule R3 alone (kind ptr, universe.r3: a relocated value whose bytes no rule above reached as an instruction start) are bodies re-read
+call pointing into it. Entries made by rule R3 alone (kind ptr) or by the closure under direct targets (kind call/tail; universe.r3: a value whose bytes no rule above reached as an instruction start) are bodies re-read
 from bytes that are already classified exactly once here; they add no class of their own and take no owner cut in codemap.tsv. Where such a body overlaps
 data named by a relocation (class 3) or instructions of another entry, the byte keeps its class (instruction of a committed entry, else relocation-named
 data): class precedence is for accounting only, the entry still exists and its undecodable bytes raise #UD at run time.

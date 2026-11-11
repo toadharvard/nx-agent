@@ -126,24 +126,45 @@ def log2_exact(fr):
 
 
 # each oracle returns the true value (an mpfr of 400 bits, or an exact Fraction where the value is exactly known)
-def o_sin(x, y=0): return gmpy2.sin(mf(x))
-def o_cos(x, y=0): return gmpy2.cos(mf(x))
-def o_tan(x, y=0): return gmpy2.tan(mf(x))
-def o_atan2(y, x): return gmpy2.atan2(mf(y), mf(x))
+def ex_of(x):
+    return abs(math.frexp(x)[1]) if x != 0 and math.isfinite(x) else 0
+
+
+def prec(bits):
+    """a context with 400 + bits of precision: the true value can lie within 2^-bits (relative) of a double or of a midpoint without being on it"""
+    c = gmpy2.get_context().copy()
+    c.precision = 400 + int(bits)
+    return c
+
+
+def o_sin(x, y=0):
+    with prec(2 * ex_of(x)): return +gmpy2.sin(mf(x))
+
+
+def o_cos(x, y=0):
+    with prec(2 * ex_of(x)): return +gmpy2.cos(mf(x))
+
+
+def o_tan(x, y=0):
+    with prec(2 * ex_of(x)): return +gmpy2.tan(mf(x))
+
+
+def o_atan2(y, x):
+    with prec(abs(ex_of(y) - ex_of(x)) * 2 + 8): return +gmpy2.atan2(mf(y), mf(x))
 
 
 def o_2xm1(x, y=0):
     fx = Fraction(x)
     if fx.denominator == 1 and abs(x) < 1100:
         return Fraction(2) ** int(fx) - 1
-    return gmpy2.expm1(mf(x) * gmpy2.log(mf(2)))
+    with prec(max(0, -x) + 64): return +gmpy2.expm1(mf(x) * gmpy2.log(mf(2)))
 
 
 def o_yl2x(y, x):
     k = log2_exact(Fraction(x))
     if k is not None:
         return Fraction(y) * k
-    return mf(y) * gmpy2.log2(mf(x))
+    with prec(2 * ex_of(x)): return +(mf(y) * gmpy2.log2(mf(x)))
 
 
 def o_yl2xp1(y, x):
@@ -151,7 +172,7 @@ def o_yl2xp1(y, x):
     k = log2_exact(u)
     if k is not None:
         return Fraction(y) * k
-    return mf(y) * gmpy2.log1p(mf(x)) / gmpy2.log(mf(2))
+    with prec(2 * ex_of(x) + 8): return +(mf(y) * gmpy2.log1p(mf(x)) / gmpy2.log(mf(2)))
 
 
 def rnd(v):
@@ -168,17 +189,14 @@ def expect_flags(v, res):
     """PE, OE, UE and C1 (rounded up in magnitude) the instruction must report for true value v and result res"""
     if math.isinf(res):
         return 0x8 | 0x20 | 0x200
-    if isinstance(v, Fraction):
-        r = Fraction(res); av = abs(v)
-    else:
-        r = mf(res); av = abs(v)
+    r = Fraction(res) if isinstance(v, Fraction) else mf(res)
     inexact = r != v
     f = 0
     if inexact:
         f |= 0x20
-        if abs(r) > av:
+        if (r > v) if v > 0 else (r < v):                 # no abs() / arithmetic on the mpfr: it would round to the context precision
             f |= 0x200
-        if av < gmpy2.mpfr(2) ** -1022 if not isinstance(v, Fraction) else av < Fraction(1, 2 ** 1022):
+        if (v < Fraction(1, 2 ** 1022) and v > -Fraction(1, 2 ** 1022)) if isinstance(v, Fraction) else (-gmpy2.mpfr(2) ** -1022 < v < gmpy2.mpfr(2) ** -1022):
             f |= 0x10
     return f
 
@@ -515,7 +533,20 @@ def host_exact(r, nper):
     for x in SPEC:
         for e in SPEC + [-1074.0, -1075.0, 1024.0, 1023.0, -1022.5, 17.9, -17.9, 0.9999, -0.9999]:
             pts.append((x, e))
-    res['scale'] = (len(pts), host_cmp('scale', pts, 'scale', mask_sw=0x4700, flmask=0x1 | 0x8 | 0x10 | 0x20))
+    res['scale'] = (len(pts), host_cmp('scale', pts, 'scale', mask_sw=0x4500, flmask=0x1))
+    # fscale exception bits and C1 against the exact rational value
+    badf = []
+    for x, e in pts:
+        if not (math.isfinite(x) and math.isfinite(e)) or x == 0:
+            continue
+        t = int(e)                                          # trunc toward zero
+        t = max(-3000, min(3000, t))
+        v = Fraction(x) * (Fraction(2) ** t)
+        want = rnd(v)
+        got, _, fl, _ = run('m', 'scale', [x], [e])
+        if u64_(float(got[0])) != u64_(want) or int(fl[0]) & 0x23c != expect_flags(v, want):
+            badf.append((x, e, float(got[0]), want, hex(int(fl[0]) & 0x23c), hex(expect_flags(v, want))))
+    res['scale flags'] = (len(pts), badf)
     # fxtract
     xs = [rnd_double(rr, -1074, 1023) for _ in range(100000)] + SPEC
     m1, m2, mfl, mcf = run('m', 'xtract', xs)
@@ -564,7 +595,7 @@ def main():
     if not o.only or any(k in o.only for k in ('fprem', 'scale', 'xtract')):
         res = host_exact(o.seed, o.nper)
         for w, (n, bad) in res.items():
-            print('%-7s vs host x87 bit for bit: %7d cases, equal %7d, different %d' % (w, n, n - len(bad), len(bad)))
+            print('%-7s %s: %7d cases, equal %7d, different %d' % (w.split()[0], 'vs the exact rational value (result bits, PE OE UE C1)' if 'flags' in w else 'vs host x87 bit for bit (result, C0-C3, IE)', n, n - len(bad), len(bad)))
             for b in bad[:6]:
                 print('   DIFF', fmtb(b))
             fail += len(bad)

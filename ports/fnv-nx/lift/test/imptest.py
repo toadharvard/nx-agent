@@ -35,7 +35,6 @@ void fnvnx_guest_invoke(u32 addr, u32 ecx, u32 nargs, const u32 *args, u32 kind,
 u32 fnvnx_lift_enter(u32 eip, u32 esp, u32 teb); int fnvnx_lift_imports_init(void);
 static void *slot; void **fnvl_host_tls_slot(void) { return &slot; }
 unsigned long long fnvl_host_ticks_ns(void) { return 0; }
-u32 fnvl_rcp32(u32 x) { return x; } u32 fnvl_rsqrt32(u32 x) { return x; }      /* not reached by this test */
 void *memcpy(void *d, const void *s, unsigned long n) { char *a = d; const char *b = s; while (n--) *a++ = *b++; return d; }
 void *memset(void *d, int v, unsigned long n) { char *a = d; while (n--) *a++ = (char)v; return d; }
 u32 t_add2(u32 a, u32 b) { return a + b; }
@@ -126,12 +125,11 @@ def main():
     CF = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-w', '-c']
     syms = {ad: 'L_%08x' % ad for ad, sz, owns in ents.values()}; syms.update({k: s for k, s, *_ in ent})
     assert {n: k for k, s, d, n, b in ent} == {r[1]: KEY[r[1]] for r in BRIDGE if r[6] != 'none'}
-    h = phf.build(list(syms)); open(w + '/tab.c', 'w').write(phf.table_c(syms, h)); open(w + '/native.c', 'w').write(NATIVE); open(w + '/guest.cpp', 'w').write(L.PRELUDE + '\n'.join(texts))
-    df = ['-DFNVL_PHF', '-DFNVL_K1=%du' % h['k1'], '-DFNVL_K2=%du' % h['k2'], '-DFNVL_NBITS=%d' % h['nbits'], '-DFNVL_TBITS=%d' % h['tbits']]
+    h = phf.build(list(syms)); open(w + '/tab.S', 'w').write(phf.table_asm(syms, h)); open(w + '/native.c', 'w').write(NATIVE); open(w + '/guest.cpp', 'w').write(L.PRELUDE + '\n'.join(texts))
     jobs = [(['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], w + '/guest.cpp'), (['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], w + '/imp.cpp'),
             (['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], LIFT + '/rt/enter.c'), (['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], LIFT + '/rt/seh.c'), (['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], LIFT + '/rt/unhandled.c'),
-            (['aarch64-linux-gnu-gcc'] + CF + df, LIFT + '/rt/rt.c'), (['aarch64-linux-gnu-gcc'] + CF + ['-I', LIFT + '/rt'], LIFT + '/rt/x87.c'),
-            (['aarch64-linux-gnu-gcc'] + CF, w + '/tab.c'), (['aarch64-linux-gnu-gcc'] + CF, w + '/native.c')]
+            (['aarch64-linux-gnu-gcc'] + CF, LIFT + '/rt/rt.c'), (['aarch64-linux-gnu-gcc'] + CF, LIFT + '/rt/rcptab.c'), (['aarch64-linux-gnu-gcc'] + CF + ['-I', LIFT + '/rt'], LIFT + '/rt/x87.c'),
+            (['aarch64-linux-gnu-gcc'] + CF, w + '/tab.S'), (['aarch64-linux-gnu-gcc'] + CF, w + '/native.c')]
     objs = []
     for cmd, src in jobs:
         o = '%s/%s.o' % (w, os.path.basename(src).rsplit('.', 1)[0]); objs.append(o)

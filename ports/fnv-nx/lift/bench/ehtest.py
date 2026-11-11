@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Exception bench (R4): SEH frames on fs:[0], hardware exceptions, RtlUnwind, RaiseException, on BOTH sides with the same seeded state.
-    ehtest.py [--dispatch phf|bs] [--census]
+    ehtest.py [--census]
 x86 side: Unicorn runs the code; there is no OS, so the harness (Python) is the OS: on a divide error / int3 / ud2 / call of a service address it runs
 the SAME algorithm as rt/seh.c (record and context on the guest stack, fs:[0] walk, handlers run through Unicorn, unwind, ContinueExecution).
 Lifted side: the lifted code + rt/seh.c under Unicorn AArch64. Compared: call trace (entry address, esp: handlers, funclets, continuations
@@ -194,10 +194,10 @@ def census(a):
 
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument('--dispatch', default='phf'); ap.add_argument('--census', action='store_true'); ap.add_argument('--seeds', type=int, default=3)
+    ap = argparse.ArgumentParser(); ap.add_argument('--census', action='store_true'); ap.add_argument('--seeds', type=int, default=3)
     ap.add_argument('--work', default='/home/user/l3work/chain/ehtest'); a = ap.parse_args(); a.lifter = LIFT
     if a.census: return census(a)
-    a.work += '-' + a.dispatch; os.makedirs(a.work, exist_ok=True)
+    os.makedirs(a.work, exist_ok=True)
     code, ents = build(); nltest.BASE = BASE; img = nltest.Fake(code); T.G['img'] = img; T.G['L'] = L
     texts = {}
     for n, (ad, sz, start, owns) in ents.items(): texts[start] = L.lift(img, ad, sz, start=start, owns=owns)[0]

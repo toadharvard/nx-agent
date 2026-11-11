@@ -174,8 +174,8 @@ def finish(a):
     if imp: open(out + '/entries.tsv', 'a').write(open(out + '/imp_entries.tsv').readline())      # `# table_id <sha256 of bridge.tsv>` (last line)
     subprocess.check_call([CC, '-mabi=ilp32', '-fPIC', '-c', out + '/disp.S', '-o', out + '/disp.o'])
     # runtime: plain AAPCS files without -ffixed, guest-register files with the lifted-code flags
-    rd = out + '/rt'; os.makedirs(rd, exist_ok=True); df = ['-DFNVL_PHF_REL']
-    jobs = [([CC] + CF + df, 'rt.c'), ([CC] + CF + ['-I', LIFT + '/rt'], 'x87.c'), ([CC] + CF, 'cpumodel.c'), ([CXX] + flags() + ['-x', 'c++'], 'seh.c'), ([CXX] + flags() + ['-x', 'c++'], 'enter.c'), ([CXX] + flags() + ['-x', 'c++'], 'unhandled.c')]
+    rd = out + '/rt'; os.makedirs(rd, exist_ok=True)
+    jobs = [([CC] + CF, 'rt.c'), ([CC] + CF + ['-I', LIFT + '/rt'], 'x87.c'), ([CC] + CF, 'cpumodel.c'), ([CXX] + flags() + ['-x', 'c++'], 'seh.c'), ([CXX] + flags() + ['-x', 'c++'], 'enter.c'), ([CXX] + flags() + ['-x', 'c++'], 'unhandled.c')]
     jobs += [([CC] + CF + ['-fno-builtin'], f) for f in ('fmath.c', 'rcptab.c') if os.path.exists('%s/rt/%s' % (LIFT, f))]
     for cmd, f in jobs: subprocess.check_call(cmd + ['%s/rt/%s' % (LIFT, f), '-o', '%s/%s.o' % (rd, f[:-2])])
     if imp:
@@ -191,9 +191,10 @@ def finish(a):
     res = dict(schema='fnvnx-gate/1', name='l3.liftall', status='green' if len(man) == len(ent) else 'red', universe=len(ent), certified=len(man), uncertified=len(ent) - len(man), imports=len(imp),
                build='measurement: forms without a certificate %d of %d' % (len(forms) - nc, len(forms)))
     json.dump(res, open(out + '/gate_liftall.json', 'w'), sort_keys=True)
-    print('finish: shards %s; universe %d, body %d, missing %d (top: %s), %d addresses resolve to fnvl_nobody; objects %d, code bytes %d; forms %d (certified %d, uncertified %d; sites %d / %d); undefined non-lifted symbols %d; dispatcher %d slots, %d hash attempts; %s' % (
+    print('finish: shards %s; universe %d, body %d, missing %d (top: %s), %d entries without a body; objects %d, code bytes %d; forms %d (certified %d, uncertified %d; sites %d / %d); undefined non-lifted symbols %d; dispatcher %d slots, %d hash attempts; %s' % (
         ks, len(ent), len(man), len(miss), '; '.join('%d %s' % (n, r) for r, n in reasons), nobody, len(set(r[2] for r in man)), bytes_, len(forms), nc, len(forms) - nc, cert, tot - cert,
         sum(1 for s, v in undef.items() if v[1] != 'lifted'), len(h['slots']), h['attempts'], res['status']))
+    if res['status'] != 'green': sys.exit('finish: %d universe entries have no body (missing.tsv): the pack is not complete' % (len(ent) - len(man)))
 
 
 def main():

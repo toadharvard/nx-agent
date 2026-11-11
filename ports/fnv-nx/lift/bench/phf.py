@@ -1,4 +1,4 @@
-"""Dispatcher tables for rt/rt.c: the sorted table (reference, binary search) and a minimal-cost perfect hash (hash-and-displace).
+"""Dispatcher table for rt/rt.c: a minimal perfect hash (hash-and-displace).
    idx = ((a ^ g[(a*K1)>>(32-NBITS)]) * K2) >> (32-TBITS); the slot holds the key, empty slots the key 0xffffffff.
    build(keys) -> dict(k1, k2, nbits, tbits, g, slots) ; slots[i] = key or None."""
 import math, random
@@ -40,24 +40,8 @@ def lookup(h, a):
     return i if h['slots'][i] == a else None
 
 
-def table_c(syms, phf=None):
-    """syms: {address: symbol}. -> C text of the entry table (and the displacement table for the hash)"""
-    out = ['typedef unsigned int u32; typedef unsigned short u16; struct fnvl_ent { u32 a; void (*f)(void); };']
-    out += ['extern void %s(void);' % s for s in sorted(syms.values())]
-    if phf is None:
-        ks = sorted(syms)
-        out.append('const struct fnvl_ent fnvl_tab[] = {%s};' % ','.join('{0x%x,%s}' % (a, syms[a]) for a in ks))
-        out.append('const u32 fnvl_ntab = %d;' % len(ks))
-    else:
-        out.append('static void nop(void) {}')
-        out.append('const struct fnvl_ent fnvl_tab[] = {%s};' % ','.join('{0x%x,%s}' % (a, syms[a]) if a is not None else '{0xffffffff,nop}' for a in phf['slots']))
-        out.append('const u32 fnvl_ntab = %d;' % len(phf['slots']))
-        out.append('const u16 fnvl_g[] = {%s};' % ','.join(map(str, phf['g'])))
-    return '\n'.join(out) + '\n'
-
-
 def table_asm(syms, phf):
-    """position-independent dispatcher table for rt.c -DFNVL_PHF_REL (tools/liftall.py): AArch64 assembly, section .rodata.fnvl_disp.
+    """position-independent dispatcher table for rt.c (tools/liftall.py): AArch64 assembly, section .rodata.fnvl_disp.
     slot i = {u32 key, s32 L_sym - fnvl_disp_table} (empty slot: a key that does not hash to it), then fnvl_g[] (u16). No absolute code address appears."""
     out = ['.section .rodata.fnvl_disp,"a"', '.balign 8', '.globl fnvl_disp_table', 'fnvl_disp_table:']
     def idx(a): return (((a ^ phf['g'][((a * phf['k1']) & M) >> (32 - phf['nbits'])]) * phf['k2']) & M) >> (32 - phf['tbits'])
@@ -65,6 +49,6 @@ def table_asm(syms, phf):
         return next(k for k in range(M, M - 64, -1) if idx(k) != i)
     out += [' .long 0x%x, %s - fnvl_disp_table' % (a, syms[a]) if a is not None else ' .long 0x%x, 0' % empty(i) for i, a in enumerate(phf['slots'])]
     out += ['.size fnvl_disp_table, . - fnvl_disp_table', '.globl fnvl_g', '.balign 2', 'fnvl_g:'] + [' .short %d' % g for g in phf['g']] + ['.size fnvl_g, . - fnvl_g']
-    # the hash parameters live with the table (one source): rt.c -DFNVL_PHF_REL reads them from here
+    # the hash parameters live with the table (one source): rt.c reads them from here
     out += ['.balign 4', '.globl fnvl_phf_params', 'fnvl_phf_params:', ' .long %d, %d, %d, %d' % (phf['k1'], phf['k2'], phf['nbits'], phf['tbits']), '.size fnvl_phf_params, . - fnvl_phf_params']
     return '\n'.join(out) + '\n'
