@@ -1,8 +1,8 @@
-# L2 w3: plugin census of the platform root (claude/fnv-l5-platform-w10 f872bcd, root ports/fnv-nx/platform)
+# L2 w3: plugin census of the platform root (claude/fnv-l5-platform-w10 f872bcd, f3a5bd4, root ports/fnv-nx/platform)
 
 Status: partial. 73 units seen: 14 OK, 58 fail in the preprocessor (non-plugin), 1 fails in CC (non-plugin, see below); plugin errors: 0. The earlier census on a temp root is withdrawn.
 
-Commits: L5 branch claude/fnv-l5-platform-w10 f872bcd2b2d3 (recipe check: valid), msvcmodel b4057704, L2 w3 branch merged with origin/claude/fnv-nx-clean.
+Commits: L5 branch claude/fnv-l5-platform-w10 f872bcd2b2d3 and re-run on f3a5bd4 (recipe check: valid), identical result, msvcmodel b4057704, L2 w3 branch merged with origin/claude/fnv-nx-clean.
 Build: `recipe.py build --root ports/fnv-nx/platform` (fresh store, unchanged checkout) -> red at stage pp, 0 objects. Every unit that failed failed in the PREPROCESSOR (non-plugin); no CC stage ran for them, so no plugin diagnostic exists.
 
 OK (11 C++ under all 8 plugins + 3 C): audio/backend ds3d mixer reverb, boundary/host_hooks, clock/clock_real clock_rt clock_virtual, com/combridge, crt/msvcrt_table.gen, win32/inflate (C++); guest/os_guest.c, os/os_world.c, os/sock_guest.c (C).
