@@ -13,11 +13,11 @@ differs between the two is counted as `mfree` (model under-specified), never as 
 SDM-defined outputs (gated): result; CF (all counts; shl/shr: not for masked count > width); OF only for masked count == 1; SF ZF PF for shifts
 (count >= 1) and unchanged for rotates and for count 0; AF never.  Everything else the host shows is information (`undef`: cases where an
 SDM-undefined output of the host differs from the model's value)."""
-import argparse, os, subprocess, sys, time
+import argparse, os, subprocess, sys
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.join(HERE, '..', 'proof')); sys.path.insert(0, os.path.join(HERE, '..'))
 import z3
-import model_sail
+from proof import model_sail
 
 WORK = '/home/user/l3work/rothost'
 OPS = ['rol', 'ror', 'rcl', 'rcr', 'shl', 'shr', 'sar']; REG = {'rol': 0, 'ror': 1, 'rcl': 2, 'rcr': 3, 'shl': 4, 'shr': 5, 'sar': 7}
@@ -54,13 +54,6 @@ int main(void) {
   return 0;
 }
 '''
-def cpu_id():
-    d = {}
-    for l in open('/proc/cpuinfo'):
-        k, _, v = l.partition(':'); k = k.strip(); v = v.strip()
-        if k in ('vendor_id', 'cpu family', 'model', 'stepping', 'microcode', 'model name'): d.setdefault(k, v)
-    return f"cpu {d.get('vendor_id')} family {d.get('cpu family')} model {d.get('model')} stepping {d.get('stepping')} microcode {d.get('microcode')} ({d.get('model name')})"
-
 def build_host():
     os.makedirs(WORK, exist_ok=True); c = WORK + '/host.c'; b = WORK + '/host'
     if not os.path.exists(b) or open(c).read() != CSRC:
@@ -260,23 +253,23 @@ def run_form(proc, op, w, form, counts, fv, stats):
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--only'); ap.add_argument('--width', type=int); ap.add_argument('--quick', action='store_true'); a = ap.parse_args()
-    print(cpu_id()); print('model IR', model_sail.IR, model_sail.ir_sha()[:16])
-    proc = build_host(); tot = {'cases': 0, 'equal': 0, 'diff': 0, 'mfree': 0, 'undef': 0}; T0 = time.time()
+    print('model IR', model_sail.IR, model_sail.ir_sha()[:16])
+    proc = build_host(); tot = {'cases': 0, 'equal': 0, 'diff': 0, 'mfree': 0, 'undef': 0}
     for w in (8, 16):
         if a.width and a.width != w: continue
         for op in OPS:
             if a.only and a.only != op: continue
             for form in (0, 1):
-                st = {'cases': 0, 'equal': 0, 'diff': 0, 'mfree': 0, 'undef': 0, 'ex': 0, 'exs': [], 'immchk': 0, 'immbad': 0}; t0 = time.time()
+                st = {'cases': 0, 'equal': 0, 'diff': 0, 'mfree': 0, 'undef': 0, 'ex': 0, 'exs': [], 'immchk': 0, 'immbad': 0}
                 counts = range(0, 256, 17) if a.quick else range(256)
                 run_form(proc, op, w, form, counts, 0, st)
                 extra = [0, 1, 2, w - 1, w, w + 1, 31, 255] if w == 16 else list(counts)
                 run_form(proc, op, w, form, [c for c in extra if c < 256], 1, st)             # second pre-flags pattern (PF AF ZF SF OF = 1)
-                print('%s w%d %-3s: cases %d equal %d diff %d mfree %d undef-info %d  immcheck %d/%d bad  (%.0fs)' % (op, w, 'cl' if form == 0 else 'imm', st['cases'], st['equal'], st['diff'], st['mfree'], st['undef'], st['immchk'], st['immbad'], time.time() - t0))
+                print('%s w%d %-3s: cases %d equal %d diff %d mfree %d undef-info %d  immcheck %d/%d bad' % (op, w, 'cl' if form == 0 else 'imm', st['cases'], st['equal'], st['diff'], st['mfree'], st['undef'], st['immchk'], st['immbad']))
                 for e in st['exs']: print('    e.g.', e)
                 for k in tot: tot[k] += st[k]
                 sys.stdout.flush()
-    print('TOTAL cases %d equal %d diff %d mfree %d undef-info %d  seconds %.0f' % (tot['cases'], tot['equal'], tot['diff'], tot['mfree'], tot['undef'], time.time() - T0))
+    print('TOTAL cases %d equal %d diff %d mfree %d undef-info %d' % (tot['cases'], tot['equal'], tot['diff'], tot['mfree'], tot['undef']))
     return 1 if tot['diff'] else 0
 
 if __name__ == '__main__': sys.exit(main())

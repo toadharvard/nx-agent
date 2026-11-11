@@ -478,7 +478,7 @@ def main():
     chunks = [[(r, [r] + [m for m in fam[r] if m != r]) for r in roots[k::200]] for k in range(200)]
     with Pool(nproc) as p, open(outdir + '/verdicts.tsv', 'w') as fo:
         fo.write('entry\tkind\troot\tpriv\tfp\tconds\tfirst_events\n')
-        for res in p.imap_unordered(worker, chunks):
+        for res in p.imap(worker, chunks):
             for root, members, ev, fp in res:
                 conds = ''.join(sorted({str(c) for c, *_ in ev}))
                 pr = 0 if ev else 1
