@@ -163,7 +163,7 @@ def finish(a):
     imp = []
     # runtime: plain AAPCS files without -ffixed, guest-register files with the lifted-code flags
     rd = out + '/rt'; os.makedirs(rd, exist_ok=True)
-    jobs = [([CC] + CF, 'rt.c'), ([CC] + CF + ['-I', LIFT + '/rt'], 'x87.c'), ([CC] + CF, 'cpumodel.c'), ([CXX] + flags() + ['-x', 'c++'], 'seh.c'), ([CXX] + flags() + ['-x', 'c++'], 'enter.c'), ([CXX] + flags() + ['-x', 'c++'], 'unhandled.c'), ([CXX] + flags() + ['-x', 'c++'], 'msvcrt_eh.c'), ([CXX] + flags() + ['-x', 'c++'], 'msvcrt_fp.c')]
+    jobs = [([CC] + CF, 'rt.c'), ([CC] + CF + ['-I', LIFT + '/rt'], 'x87.c'), ([CC] + CF, 'cpumodel.c'), ([CXX] + flags() + ['-x', 'c++'], 'seh.c'), ([CXX] + flags() + ['-x', 'c++'], 'enter.c'), ([CXX] + flags() + ['-x', 'c++'], 'unhandled.c'), ([CXX] + flags() + ['-x', 'c++'], 'msvcrt_eh.c'), ([CXX] + flags() + ['-x', 'c++'], 'msvcrt_fp.c'), ([CXX] + flags() + ['-x', 'c++'], 'msvcrt_ci.c')]
     jobs += [([CC] + CF + ['-fno-builtin'], f) for f in ('fmath.c', 'rcptab.c') if os.path.exists('%s/rt/%s' % (LIFT, f))]
     for cmd, f in jobs: subprocess.check_call(cmd + ['%s/rt/%s' % (LIFT, f), '-o', '%s/%s.o' % (rd, f[:-2])])
     rtdef = set(l.split()[-1] for _, f in jobs for l in run([NM, '-g', '--defined-only', '%s/%s.o' % (rd, f[:-2])]).stdout.splitlines() if l.split())

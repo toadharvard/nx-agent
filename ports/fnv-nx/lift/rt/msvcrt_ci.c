@@ -16,7 +16,7 @@
    The platform function used: `int *_errno(void)` (platform/crt/heap.c, bridge row msvcrt.dll _errno, bind lookup): the address of the calling thread's errno, written with the MSVC values EDOM = 33, ERANGE = 34 (the
    same numbers as the platform's newlib / glibc errno.h). Nothing else is called. */
 #include "fnvl.h"
-extern "C" int *_errno(void);
+extern "C" void *fnvnx_win32_lookup_export(const char *dll, const char *name);      /* the platform's own table of its msvcrt exports: the same lookup the import entry of the row uses (resolved for every lookup row before the first guest instruction: fnvnx_lift_imports_init) */
 enum { CI_EDOM = 33, CI_ERANGE = 34 };
 
 static inline int ci_nan(double d) { return (d2u(d) & 0x7fffffffffffffffull) > 0x7ff0000000000000ull; }
@@ -29,7 +29,7 @@ static void ci_errno(double r, double a, double b, u32 fl, int nandom) {
   else if (nandom && ci_nan(a)) err = CI_EDOM;
   else if (ci_inf(r) && ci_fin(a) && ci_fin(b)) err = CI_ERANGE;
   else if ((d2u(r) & 0x7fffffffffffffffull) == 0 && (fl & 0x10u)) err = CI_ERANGE;
-  if (err) { REGS(); *_errno() = (int)err; REGS(); }
+  if (err) { REGS(); *((int *(*)(void))fnvnx_win32_lookup_export("msvcrt.dll", "_errno"))() = (int)err; REGS(); }
 }
 
 #define CI1(NAME, FN, NANDOM) \

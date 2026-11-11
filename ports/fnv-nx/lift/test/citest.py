@@ -31,7 +31,8 @@ extern "C" {
 typedef void (*fn_t)(void);
 static fn_t T[15] = { ''' + ', '.join('fnvl_msvcrt_CI' + n for n in ENT) + r''' };
 static int errno_v;
-extern "C" int *_errno(void) { return &errno_v; }                              /* test double of the platform's _errno (platform/crt/heap.c) */
+extern "C" int *t_errno(void) { return &errno_v; }
+extern "C" void *fnvnx_win32_lookup_export(const char *dll, const char *name) { return name[0] == '_' && name[1] == 'e' ? (void *)t_errno : 0; }                              /* test double of the platform's _errno (platform/crt/heap.c) */
 extern "C" void *memcpy(void *d, const void *s, unsigned long n) { char *a = (char *)d; const char *b = (const char *)s; while (n--) *a++ = *b++; return d; }
 extern "C" void *memset(void *d, int v, unsigned long n) { char *a = (char *)d; while (n--) *a++ = (char)v; return d; }
 struct Rec { u32 entry, depth, pad0, pad1; u64 v[8]; u32 depth_out, err, fex, esp_d, ra_out, pad2; u64 st[3]; };

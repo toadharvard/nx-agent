@@ -22,8 +22,7 @@
 extern "C" {
 void fnvl_os_RtlUnwind(void);
 int fnvl_raise_rec(u32 code, u32 flags, u32 addr, u32 np, const u32 *info, u32 eip, u32 sp);
-void free(void *);
-void abort(void) __attribute__((noreturn));
+void *fnvnx_win32_lookup_export(const char *dll, const char *name);      /* the platform's msvcrt exports free and abort (bridge rows bind lookup): the same lookup their import entries use */
 u32 fnvl_msvcrt_sighandlers[23];
 void fnvl_msvcrt_except_handler3(void);
 void fnvl_msvcrt_CxxFrameHandler(void);
@@ -105,7 +104,7 @@ static int do_terminate(void)
 {
     u32 h = fnvl_msvcrt_td()->terminate_handler, r;
     if (h && !gcall(h, 0, 0, 0, 0, 0, &r)) return 0;
-    abort();
+    for (;;) ((void (*)(void))fnvnx_win32_lookup_export("msvcrt.dll", "abort"))();          /* abort does not return */
 }
 
 /* ---- Wine msvcrt_local_unwind2 / _local_unwind2: run the __finally handlers of `frame` from its current trylevel down to `trylevel` ---- */
@@ -412,7 +411,7 @@ extern "C" void fnvl_msvcrt_terminate(void) { do_terminate(); }
 /* ??1type_info@@UAE@XZ (thiscall, this in ecx): Wine type_info_dtor frees the lazily allocated undecorated name */
 extern "C" void fnvl_msvcrt_type_info_dtor(void)
 {
-    free((void *)P(M32(ecx + 4)));
+    ((void (*)(void *))fnvnx_win32_lookup_export("msvcrt.dll", "free"))((void *)P(M32(ecx + 4)));
     c->ra = M32(esp); esp += 4;
 }
 

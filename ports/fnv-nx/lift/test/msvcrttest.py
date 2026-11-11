@@ -40,12 +40,12 @@ unsigned long long fnvl_host_ticks_ns(void) { return 0; }
 void *memcpy(void *d, const void *s, unsigned long n) { char *a = d; const char *b = s; while (n--) *a++ = *b++; return d; }
 void *memset(void *d, int v, unsigned long n) { char *a = d; while (n--) *a++ = (char)v; return d; }
 u32 g_free_arg, g_free_n, g_ue_code, g_ue_n, g_ue_addr;
-void free(void *p) { g_free_arg = (u32)(unsigned long)p; g_free_n++; }
-void abort(void) { for (;;) ; }
+void t_free(void *p) { g_free_arg = (u32)(unsigned long)p; g_free_n++; }
+void t_abort(void) { for (;;) ; }
 u32 UnhandledExceptionFilter(u32 p) { g_ue_code = *(u32 *)(unsigned long)(*(u32 *)(unsigned long)p); g_ue_addr = *(u32 *)(unsigned long)(*(u32 *)(unsigned long)p + 12); g_ue_n++; return 1; }
 void ExitProcess(u32 code) { for (;;) ; }
 void fnvnx_win32_set_raise_backend(void (*f)(u32, u32, u32, const u32 *)) { }
-void *fnvnx_win32_lookup_export(const char *dll, const char *name) { return 0; }
+void *fnvnx_win32_lookup_export(const char *dll, const char *name) { return name[0] == 'f' ? (void *)t_free : name[0] == 'a' ? (void *)t_abort : 0; }
 u32 test_main(u32 eip, u32 esp, u32 teb) { return fnvnx_lift_enter(eip, esp, teb); }
 '''
 
@@ -375,7 +375,7 @@ def main():
         uc.reg_write(UC_ARM64_REG_CPACR_EL1, 3 << 20); uc.reg_write(UC_ARM64_REG_SP, HSTACK + 0x3f000); uc.reg_write(UC_ARM64_REG_X30, STOP)
         if root == 'xf1': uc.mem_write(sym['fnvl_msvcrt_sighandlers'] + 4 * 11, struct.pack('<I', A['xfh1'])); uc.mem_write(sym['fnvl_msvcrt_sighandlers'] + 4 * 8, struct.pack('<I', A['xfh2'])); uc.mem_write(sym['fnvl_msvcrt_sighandlers'] + 4 * 4, struct.pack('<I', 1))
         if root == 'fp1': uc.mem_write(A['O'] + 4 * 15, struct.pack('<I', 0x0c7f))
-        until = {'ret': STOP, 'abort': sym['abort'], 'exit': sym['ExitProcess']}[stop]
+        until = {'ret': STOP, 'abort': sym['t_abort'], 'exit': sym['ExitProcess']}[stop]
         for i, v in enumerate((A[ENTRY.get(root, root)], GSTACK + 0x1ff00, TEB)): uc.reg_write(UC_ARM64_REG_X0 + i, v)
         err = ''
         try: uc.emu_start(sym['test_main'], until, count=6000000)
