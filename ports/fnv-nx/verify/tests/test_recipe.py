@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Tests for verify/recipe.py, gate_build.py, gate_determinism.py on a toy product root in a temp git repo. Plain script: exit 0 on
 pass, one PASS/FAIL line per case. Needs root (sandbox) and aarch64-linux-gnu-gcc-13/g++-13. Scratch: mkdtemp, removed at exit."""
-import atexit
 import json
 import os
 import shutil
@@ -20,8 +19,10 @@ import recipe  # noqa: E402
 import unitstage  # noqa: E402
 import verdict  # noqa: E402
 
+import scratch  # noqa: E402
+
+scratch.install()  # removed synchronously at exit (the stores are ~50 MB)
 BASE = tempfile.mkdtemp(prefix="recipe-test-")
-atexit.register(lambda: subprocess.Popen(["rm", "-rf", BASE], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))  # detached: the store holds ~100k hardlinks
 FAILED = []
 LOCK = threading.Lock()
 T = "ports/fnv-nx/"
