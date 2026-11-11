@@ -27,6 +27,19 @@ double fnvl_m_scale(double x, double e, u32 *fl);             /* x * 2^trunc(e) 
 void fnvl_m_xtract(double x, double *expo, double *sig, u32 *fl);   /* fxtract: ST0 := expo, then push sig */
 /* fprem (near = 0) and fprem1 (near = 1): a = ST(0), b = ST(1). Returns the new ST(0); *cf gets C0 0x100, C1 0x200, C2 0x400, C3 0x4000 (FSW positions). */
 double fnvl_m_fprem(double a, double b, u32 near, u32 *cf, u32 *fl);
+/* msvcrt math library (the 15 _CI* entries, rt/msvcrt_ci.c): correctly rounded (nearest-even) binary64 results of the true functions, fmod and sqrt exact, C99 Annex F values for zero / infinite / NaN /
+   out-of-domain operands (invalid -> the default NaN 0xFFF8..., NaN -> quiet NaN, log 0 and pow(0, y < 0) -> ZE and +-inf). *fl as above. The caller derives errno from operands, result and *fl (rt/msvcrt_ci.c). */
+double fnvl_m_acos(double x, u32 *fl);
+double fnvl_m_asin(double x, u32 *fl);
+double fnvl_m_atan(double x, u32 *fl);
+double fnvl_m_cosh(double x, u32 *fl);
+double fnvl_m_sinh(double x, u32 *fl);
+double fnvl_m_tanh(double x, u32 *fl);
+double fnvl_m_exp(double x, u32 *fl);
+double fnvl_m_log(double x, u32 *fl);                          /* natural logarithm */
+double fnvl_m_pow(double x, double y, u32 *fl);
+double fnvl_m_fmod(double x, double y, u32 *fl);               /* exact: x - trunc(x/y) y */
+double fnvl_m_sqrt(double x, u32 *fl);                         /* IEEE sqrt */
 #ifdef __cplusplus
 }
 #endif

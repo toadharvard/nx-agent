@@ -76,6 +76,7 @@ class Ctx:
         self.usesfs = False
         self.kinds = set()
         self.selfcalls = {}
+        self.noentry = set()                     # direct targets (calls, jumps, fall-throughs) routed to the dispatcher because they are not entries (meta; check (c): all outside the executable sections)
         self.calls, self.tails = set(), set()    # direct call targets / jumps to entries outside the function (meta, closure of the bench)
         self.nonlocal_ = False                   # a `goto nonlocal` / `goto after_tail` was emitted: the function needs the loop
         self.imports = False
@@ -172,7 +173,7 @@ def explore(img, lo, hi, code, start=None, extra=(), fall_hi=None):
                 bad.add(a)
                 break
             insns[a] = ins
-            m = ins.mnemonic
+            m = ins.mnemonic.split(' ')[-1]      # the instruction under its prefix words (`repne jne`, `bnd jmp`, `lock ...`): control flow is decided by the instruction, as the emitter does
             nxt = a + ins.size
             ops = ins.operands
             if m == 'jmp':
@@ -213,7 +214,7 @@ def tab_tails(img, insns, lo, hi):
     the table address (the first relocated dword at or above the displacement, within TAB_BIAS dwords) (a run ends at the first dword that is not relocated, or at an instruction of this function), outside [lo, hi)."""
     out = set()
     for a, ins in insns.items():
-        if ins.mnemonic != 'jmp' or not ins.operands or ins.operands[0].type != X.X86_OP_MEM:
+        if ins.mnemonic.split(' ')[-1] != 'jmp' or not ins.operands or ins.operands[0].type != X.X86_OP_MEM:
             continue
         m = ins.operands[0].mem
         if m.scale == 4 and m.index and (a + ins.size - 4) in img.rset:
@@ -294,8 +295,8 @@ def gs_guard(cx, ins):
 def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     from . import f_x87_ctl as xc, f_sys
     addr, size = lo, hi - lo
-    fall_hi = hi + 0x1000 if strict else hi
-    code = img.bytes(addr, fall_hi - addr)
+    fall_hi = hi          # a body is exactly its range: falling past it is a transfer to the next address (f_flow.jump_out), never a copy of the code that follows
+    code = img.bytes(addr, hi - addr + 16)      # 16 more bytes: the last instruction may straddle hi
     insns, tables, taken, bad = explore(img, lo, hi, code, start, owns if start == addr and explore_owns else (), fall_hi)
     if start not in insns and start not in bad:     # an entry with an empty range (the universe found no decodable byte at it): its body is the #UD at its address
         if next(iter(md.disasm(img.bytes(start, 16), start, 1)), None) is not None:
@@ -358,8 +359,9 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
                 em('goto %s;' % cx.lab(nxt))
             elif not strict:
                 em('SYNC_OUT; fnvl_raise(2,0x%xu); return;' % nxt)
-            else:
-                raise Unsupported('falls into undecoded bytes at %x' % nxt)
+            else:       # the successor is neither decoded here nor undecodable: control passes to it exactly like `jmp nxt` (one rule, f_flow.jump_out)
+                from . import f_flow
+                f_flow.jump_out(cx, nxt)
         if cx.xm == 's':
             xc.fix_lines(cx, a, n0)
     for a in sorted(bad):      # bytes that do not decode: the CPU raises #UD there
@@ -382,7 +384,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     if cx.usesfs:
         kinds.add('fs')
     meta = dict(addr=start, size=size, selfcalls=cx.selfcalls, callrets=cx.callrets, kinds=sorted(kinds), n=len(order), tables=len(tables),
-                calls=sorted(cx.calls), tails=sorted(cx.tails), tabtails=tab_tails(img, insns, lo, hi))
+                calls=sorted(cx.calls), tails=sorted(cx.tails), noentry=sorted(cx.noentry), tabtails=tab_tails(img, insns, lo, hi))
     return txt, meta
 
 

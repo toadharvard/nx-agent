@@ -230,7 +230,7 @@ class Arm(T.World):
         for a_, v_ in st.get('init', ()): s.ensure(a_, 4, False); uc.mem_write(a_, struct.pack('<I', v_))     # extra initial memory words (fs:[0] chain head)
         s.writes.clear()
         uc.mem_write(s.CPU, struct.pack('<13I', *st['regs'], st.get('fs', 0), 0, 0, 0x27f, 0) + b'\0' * 4 + b'\0' * 64 + b'\0' * 128 + struct.pack('<II', 0, 0x1f80) + b'\0' * 64 + b'\0' * 4
-                     + b'\0' * (472 - 324) + struct.pack('<9I', 0x23, 0x1b, 0x23, 0x23, 0x3b, 0, st.get('fs', 0), 0, 0))      # ... sel[6] (ES CS SS DS FS GS: the process constants), teb, fip, fdp: struct cpu is 512 bytes
+                     + b'\0' * (472 - 324) + struct.pack('<9I', 0x23, 0x1b, 0x23, 0x23, 0x3b, 0, st.get('fs', 0), 0, 0) + b'\0' * 24)      # ... sel[6] (ES CS SS DS FS GS: the process constants), teb, fip, fdp: then msvcrt[6]: struct cpu is 536 bytes
         s.im, s.n, s.nl, s.nd, s.nt, s.nr, s.ntr, s.trace, s.ev = im, 0, 0, 0, 0, 0, 0, [], None
         s.sp = {im.sym[k][0]: k for k in ('fnvl_trace', 'fnvl_raise_ud', 'fnvl_raise', 'fnvl_dispatch', 'fnvl_os_unhandled', 'fnvl_trace_sw') if k in im.sym}; s.fsw = []
         s.rng = sorted(im.rt)

@@ -23,7 +23,7 @@ gmpy2.get_context().emin = -(1 << 40)
 DRIVER = r'''
 #include "fmath.h"
 typedef unsigned long long u64;
-enum { O_SIN, O_COS, O_TAN, O_ATAN2, O_2XM1, O_YL2X, O_YL2XP1, O_SCALE, O_XTRACT, O_FPREM, O_FPREM1, O_SINCOS };
+enum { O_SIN, O_COS, O_TAN, O_ATAN2, O_2XM1, O_YL2X, O_YL2XP1, O_SCALE, O_XTRACT, O_FPREM, O_FPREM1, O_SINCOS, O_ACOS, O_ASIN, O_ATAN, O_COSH, O_SINH, O_TANH, O_EXP, O_LOG, O_POW, O_FMOD, O_SQRT };
 void run_m(int op, unsigned n, const double *a, const double *b, double *o1, double *o2, unsigned *fl, unsigned *cf) {
   for (unsigned i = 0; i < n; i++) { unsigned f = 0, c = 0; double r = 0, r2 = 0;
     switch (op) {
@@ -39,6 +39,17 @@ void run_m(int op, unsigned n, const double *a, const double *b, double *o1, dou
     case O_FPREM: r = fnvl_m_fprem(a[i], b[i], 0, &c, &f); break;
     case O_FPREM1: r = fnvl_m_fprem(a[i], b[i], 1, &c, &f); break;
     case O_SINCOS: fnvl_m_sincos(a[i], &r2, &r, &f); break;       /* o1 = cos (ST0), o2 = sin (ST1) like the x87 */
+    case O_ACOS: r = fnvl_m_acos(a[i], &f); break;
+    case O_ASIN: r = fnvl_m_asin(a[i], &f); break;
+    case O_ATAN: r = fnvl_m_atan(a[i], &f); break;
+    case O_COSH: r = fnvl_m_cosh(a[i], &f); break;
+    case O_SINH: r = fnvl_m_sinh(a[i], &f); break;
+    case O_TANH: r = fnvl_m_tanh(a[i], &f); break;
+    case O_EXP: r = fnvl_m_exp(a[i], &f); break;
+    case O_LOG: r = fnvl_m_log(a[i], &f); break;
+    case O_POW: r = fnvl_m_pow(a[i], b[i], &f); break;
+    case O_FMOD: r = fnvl_m_fmod(a[i], b[i], &f); break;
+    case O_SQRT: r = fnvl_m_sqrt(a[i], &f); break;
     }
     o1[i] = r; o2[i] = r2; fl[i] = f; cf[i] = c | ((op <= O_TAN || op == O_SINCOS) ? (fnvl_m_trig_big(a[i]) ? 0x400 : 0) : 0); } }
 unsigned bigflag(double x) { return fnvl_m_trig_big(x); }
@@ -55,7 +66,10 @@ int dbg_eval(int op, double a, double b, int nstart, unsigned *m, int *info) {
   switch (op) {
   case O_SIN: r1 = fnvl_m_sin(a, &f); break; case O_COS: r1 = fnvl_m_cos(a, &f); break; case O_TAN: r1 = fnvl_m_tan(a, &f); break;
   case O_ATAN2: r1 = fnvl_m_atan2(a, b, &f); break; case O_2XM1: r1 = fnvl_m_2xm1(a, &f); break;
-  case O_YL2X: r1 = fnvl_m_yl2x(a, b, &f); break; case O_YL2XP1: r1 = fnvl_m_yl2xp1(a, b, &f); break; default: break; }
+  case O_YL2X: r1 = fnvl_m_yl2x(a, b, &f); break; case O_YL2XP1: r1 = fnvl_m_yl2xp1(a, b, &f); break;
+  case O_ACOS: r1 = fnvl_m_acos(a, &f); break; case O_ASIN: r1 = fnvl_m_asin(a, &f); break; case O_ATAN: r1 = fnvl_m_atan(a, &f); break;
+  case O_COSH: r1 = fnvl_m_cosh(a, &f); break; case O_SINH: r1 = fnvl_m_sinh(a, &f); break; case O_TANH: r1 = fnvl_m_tanh(a, &f); break;
+  case O_EXP: r1 = fnvl_m_exp(a, &f); break; case O_LOG: r1 = fnvl_m_log(a, &f); break; case O_POW: r1 = fnvl_m_pow(a, b, &f); break; default: break; }
   (void)r1; (void)r2; (void)c; fm_hook = 0;
   if (!h_cnt) return 0;
   for (int i = 0; i < h_n; i++) m[i] = h_m[i];
@@ -77,10 +91,12 @@ void run_h(int op, unsigned n, const double *a, const double *b, double *o1, dou
     case O_FPREM: __asm__ volatile("fninit; fldl %4; fldl %3; fprem; fnstsw %2; fstpl %0; fstpl %1" : "=m"(r1), "=m"(r2), "=m"(s) : "m"(x), "m"(y) : "st", "st(1)"); break;
     case O_SINCOS: __asm__ volatile("fninit; fldl %3; fsincos; fnstsw %2; fstpl %0; fstpl %1" : "=m"(r1), "=m"(r2), "=m"(s) : "m"(x) : "st", "st(1)"); break;
     case O_FPREM1: __asm__ volatile("fninit; fldl %4; fldl %3; fprem1; fnstsw %2; fstpl %0; fstpl %1" : "=m"(r1), "=m"(r2), "=m"(s) : "m"(x), "m"(y) : "st", "st(1)"); break;
+    case O_FMOD: __asm__ volatile("fninit; fldl %4; fldl %3; 1: fprem; fnstsw %%ax; testw $0x400, %%ax; jnz 1b; fnstsw %2; fstpl %0; fstpl %1" : "=m"(r1), "=m"(r2), "=m"(s) : "m"(x), "m"(y) : "st", "st(1)", "ax", "cc"); break;
+    case O_SQRT: __asm__ volatile("sqrtsd %1, %0" : "=x"(r1) : "x"(x)); break;
     }
     o1[i] = r1; o2[i] = r2; sw[i] = s; } }
 '''
-OPS = {n: i for i, n in enumerate('sin cos tan atan2 2xm1 yl2x yl2xp1 scale xtract fprem fprem1 sincos'.split())}
+OPS = {n: i for i, n in enumerate('sin cos tan atan2 2xm1 yl2x yl2xp1 scale xtract fprem fprem1 sincos acos asin atan cosh sinh tanh exp log pow fmod sqrt'.split())}
 LIB = None
 
 
@@ -396,7 +412,7 @@ def bound_check(args):
     which, pts = args
     if LIB is None:
         build()
-    two = which in ('atan2', 'yl2x', 'yl2xp1')
+    two = which in TWO
     opn = OPS[which]
     m = (ctypes.c_uint * 4096)(); info = (ctypes.c_int * 8)()
     LIB.dbg_eval.argtypes = [ctypes.c_int, ctypes.c_double, ctypes.c_double, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p]
@@ -479,7 +495,7 @@ def check_chunk(args):
     which, pts = args
     if LIB is None:
         build()
-    two = which in ('atan2', 'yl2x', 'yl2xp1')
+    two = which in TWO
     a = [p[0] for p in pts] if two else pts
     b = [p[1] for p in pts] if two else None
     o1, o2, fl, cf = run('m', which, a, b)
@@ -669,6 +685,361 @@ def host_exact(r, nper):
     return res
 
 
+
+# ------------------------------------------------------------------ msvcrt library functions: oracles (MPFR; sentinels where the value is out of the mpfr exponent range but its rounding is decided by the region)
+def tb(x):
+    """bits below 1 of the leading bit of x: the extra precision needed to tell 1 + x or x + x^3 from 1 / x"""
+    return max(0, -math.frexp(x)[1]) if x != 0 and math.isfinite(x) else 0
+
+
+def o_acos(x, y=0):
+    with prec(2 * tb(x)): return +gmpy2.acos(mf(x))
+
+
+def o_asin(x, y=0):
+    with prec(2 * tb(x)): return +gmpy2.asin(mf(x))
+
+
+def o_atan(x, y=0):
+    with prec(2 * tb(x)): return +gmpy2.atan(mf(x))
+
+
+def o_cosh(x, y=0):
+    with prec(2 * tb(x) + 8): return +gmpy2.cosh(mf(x))
+
+
+def o_sinh(x, y=0):
+    with prec(2 * tb(x) + 8): return +gmpy2.sinh(mf(x))
+
+
+def o_tanh(x, y=0):
+    if abs(x) >= 100:                                  # 1 - tanh < 2^-288: only the side of 1 matters
+        with prec(0): return mf(math.copysign(1.0, x)) * (1 - gmpy2.mpfr(2) ** -300)
+    with prec(2 * tb(x) + 8): return +gmpy2.tanh(mf(x))
+
+
+def o_exp(x, y=0):
+    if x < -800: return gmpy2.mpfr(2) ** -2000
+    if x > 800: return gmpy2.mpfr(2) ** 2000
+    with prec(tb(x) + 8): return +gmpy2.exp(mf(x))
+
+
+def o_log(x, y=0):
+    with prec(8): return +gmpy2.log(mf(x))
+
+
+def o_pow(x, y):
+    ax = abs(x)
+    neg = x < 0 and int(y) % 2 == 1
+    tf = y * math.log(ax)
+    if abs(tf) > 6000:
+        v = gmpy2.mpfr(2) ** (6000 if tf > 0 else -6000)
+    else:
+        extra = 8 if abs(tf) >= 1e-3 else (int(-math.log2(abs(tf))) + 64 if tf != 0 else 1300)
+        with prec(extra):
+            v = +(mf(ax) ** mf(y))
+    return -v if neg else v
+
+
+ORACLE.update({'acos': o_acos, 'asin': o_asin, 'atan': o_atan, 'cosh': o_cosh, 'sinh': o_sinh, 'tanh': o_tanh, 'exp': o_exp, 'log': o_log, 'pow': o_pow})
+NEWF = ('acos', 'asin', 'atan', 'cosh', 'sinh', 'tanh', 'exp', 'log', 'pow')
+TWO = ('atan2', 'yl2x', 'yl2xp1', 'pow')
+LN2F = None
+
+
+def ln2m():
+    with prec(0): return gmpy2.log(gmpy2.mpfr(2))
+
+
+def gen_exp(r, N):
+    L = ln2m()
+    xs = [1.0, -1.0, 0.5, -0.5, 2.0 ** -54, 2.0 ** -55, -2.0 ** -55, -2.0 ** -54, 709.782712893384, 710.0, 709.0, -745.1332191019411, -745.13321910194122, -746.0, -745.0, 700.0, -700.0,
+          1e-300, 5e-324, -5e-324, float(L), -float(L), 1e5, -1e5, 1e300, -1e300, 800.0, -800.0, 2.0, 10.0, -10.0, 100.5]
+    with prec(0):
+        for k in range(-1080, 1030):
+            for kk in (k, k + 0.5):
+                b = float(kk * L)
+                xs += [ulpstep(b, d) for d in (-1, 0, 1)]
+    for e in range(-1074, 11):
+        for d in (-1, 0, 1):
+            xs.append(ulpstep(2.0 ** e, d)); xs.append(-ulpstep(2.0 ** e, d))
+    for k in range(-750, 711):
+        xs.append(float(k))
+    xs += [ulpstep(709.782712893384, d) for d in range(-4, 5)] + [ulpstep(-745.13321910194122, d) for d in range(-4, 5)]
+    while len(xs) < N:
+        c = r.random()
+        if c < 0.4: xs.append(rnd_double(r, -1074, 9))
+        elif c < 0.8: xs.append(r.uniform(-750, 712))
+        elif c < 0.9: xs.append(r.uniform(-2, 2))
+        else: xs.append(r.uniform(-1, 1) * 2.0 ** r.randint(-60, 0))
+    return [x for x in xs if math.isfinite(x) and x != 0]
+
+
+def gen_ln(r, N):
+    xs = [2.0, 4.0, 0.5, 3.0, 10.0, 1e-300, 5e-324, 1.7976931348623157e308, 2.0 ** -1022, 1.0000000000000002, 0.9999999999999999, 1.5, 0.75, 1.4142135623730951, 0.7071067811865476, 2.718281828459045, 1e10]
+    for e in range(-1074, 1024):
+        for d in (-1, 0, 1):
+            xs.append(ulpstep(2.0 ** e, d)); xs.append(ulpstep(1.5 * 2.0 ** e, d)); xs.append(ulpstep(0.75 * 2.0 ** e, d))
+    for k in range(1, 200):
+        xs += [1 + k * 2.0 ** -52, 1 - k * 2.0 ** -53]
+    while len(xs) < N:
+        c = r.random()
+        if c < 0.5: xs.append(abs(rnd_double(r, -1074, 1023)))
+        elif c < 0.7: xs.append(r.uniform(0.0001, 8))
+        elif c < 0.9: xs.append(1 + r.uniform(-1, 1) * 2.0 ** -r.randint(1, 52))
+        else: xs.append(abs(rnd_double(r, -60, 60)))
+    return [x for x in xs if math.isfinite(x) and x > 0 and x != 1.0]
+
+
+def gen_sinh(r, N, kind):
+    """kind: 'sinh' / 'cosh' (reduction range up to 711) or 'tanh' (up to 20)"""
+    L = ln2m()
+    hi = 20.0 if kind == 'tanh' else 711.0
+    xs = [1.0, 0.5, 2.0 ** -27, 2.0 ** -26, 2.0 ** -28, 2.0 ** -25, 5e-324, 1e-300, 709.0, 710.0, 710.4758600739439, 711.0, 20.0, 19.0, 19.06, 21.0, 40.0, 1e5, 1e300, 0.3466, 0.34657359027997264]
+    for e in range(-1074, 11):
+        for d in (-1, 0, 1):
+            xs.append(ulpstep(2.0 ** e, d))
+    with prec(0):
+        for k in range(0, 1025 if kind != 'tanh' else 60):
+            b = float((k + 0.5) * L / (2 if kind == 'tanh' else 1))
+            xs += [ulpstep(b, d) for d in (-1, 0, 1)]
+    xs += [ulpstep(710.4758600739439, d) for d in range(-4, 5)] + [ulpstep(19.06, d) for d in range(-4, 5)] + [ulpstep(20.0, d) for d in range(-4, 5)] + [ulpstep(2.0 ** -27, d) for d in range(-4, 5)] + [ulpstep(2.0 ** -26, d) for d in range(-4, 5)]
+    xs = xs + [-x for x in xs]
+    while len(xs) < N:
+        c = r.random()
+        if c < 0.4: xs.append(rnd_double(r, -1074, 4 if kind == 'tanh' else 9))
+        elif c < 0.8: xs.append(r.uniform(-hi - 2, hi + 2))
+        elif c < 0.9: xs.append(r.uniform(-1, 1))
+        else: xs.append(r.uniform(-1, 1) * 2.0 ** r.randint(-40, 0))
+    return [x for x in xs if math.isfinite(x) and x != 0]
+
+
+def gen_atan(r, N):
+    xs = [1.0, 0.5, 2.0, 1e-300, 5e-324, 1e300, 1.7976931348623157e308, 2.0 ** -27, 2.0 ** -26, 2.0 ** 54, 2.0 ** 53, 0.125, 0.0625, 8.0, 16.0]
+    for j in range(0, 9):
+        for d in range(-3, 4):
+            b = (2 * j + 1) / 16.0
+            xs += [ulpstep(b, d), ulpstep(1 / b, d), ulpstep(j / 8.0 if j else 2.0 ** -30, d), ulpstep(8.0 / j if j else 1e30, d)]
+    for e in range(-1074, 1024):
+        for d in (-1, 0, 1):
+            xs.append(ulpstep(2.0 ** e, d))
+    xs += [ulpstep(2.0 ** -27, d) for d in range(-4, 5)]
+    xs = xs + [-x for x in xs]
+    while len(xs) < N:
+        c = r.random()
+        if c < 0.5: xs.append(rnd_double(r, -1074, 1023))
+        elif c < 0.8: xs.append(r.uniform(-4, 4))
+        else: xs.append(r.uniform(-1, 1) * 2.0 ** r.randint(-30, 70))
+    return [x for x in xs if math.isfinite(x) and x != 0]
+
+
+def gen_asin(r, N):
+    xs = [1.0, 0.5, 0.7071067811865476, 0.25, 0.75, 2.0 ** -27, 2.0 ** -26, 5e-324, 1e-300, 1 - 2.0 ** -53, 1 - 2.0 ** -52, 0.9999999999999999, 0.0625, 0.125, 0.9, 0.99, 0.999999]
+    for e in range(-1074, 0):
+        for d in (-1, 0, 1):
+            xs.append(ulpstep(2.0 ** e, d))
+    for k in range(1, 400):
+        xs += [1 - k * 2.0 ** -53, 1 - k * 2.0 ** -52, 0.5 - k * 2.0 ** -54, 0.5 + k * 2.0 ** -53, 0.7071067811865476 + (k - 200) * 2.0 ** -53]
+    xs += [ulpstep(2.0 ** -27, d) for d in range(-4, 5)]
+    xs = xs + [-x for x in xs]
+    while len(xs) < N:
+        c = r.random()
+        if c < 0.4: xs.append(rnd_double(r, -1074, -1))
+        elif c < 0.7: xs.append(r.uniform(-1, 1))
+        elif c < 0.85: xs.append(1 - r.random() * 2.0 ** -r.randint(1, 52))
+        else: xs.append(-1 + r.random() * 2.0 ** -r.randint(1, 52))
+    return [x for x in xs if math.isfinite(x) and abs(x) <= 1.0 and x != 0]
+
+
+def isqrt_exact(n):
+    s = math.isqrt(n)
+    return s if s * s == n else None
+
+
+def gen_pow(r, N):
+    ps = []
+    # exact families: x = r^(2^j) 2^(e) with 2^j | e (all other (x, y) pairs are irrational / non-dyadic / beyond the lattice)
+    for _ in range(N // 5):
+        j = r.randint(0, 5)
+        m = r.randrange(1, 1 << max(1, 53 // (1 << j)), 2)
+        mj = m ** (1 << j)
+        if mj >= 1 << 53: continue
+        e = (1 << j) * r.randint(-1074 // (1 << j) + 1, 1023 // (1 << j) - 1)
+        try: x = math.ldexp(float(mj), e)
+        except OverflowError: continue
+        if x == 0 or not math.isfinite(x): continue
+        a = r.choice([1, 2, 3, 4, 5, 7, 9, 13, 33, 34, 35, 40, 1, 2, 3, -1, -2, -3, -5, 0.5, 1.5, 2 ** 20 + 1]) if j == 0 else r.choice([1, 3, 5, 7, 9, 11, 33, 35, -1, -3, -7, 2 ** 20 + 1, 17])
+        y = a / (1 << j)
+        ps.append((x, y)); ps.append((-x if r.random() < 0.5 else x, float(r.randint(-40, 40))))
+    # half-way points: r^a has 53 / 54 / 55 bits (r odd, x = r^(2^j) 2^e with 2^j | e, y = a / 2^j)
+    for _ in range(N // 20):
+        j = r.randint(0, 3); rr = r.randrange(3, 1 << r.randint(2, 26 // (1 << j) + 3), 2)
+        if rr ** (1 << j) >= 1 << 53: continue
+        a = 1
+        while (rr ** (a + 1)).bit_length() <= 53 + r.randint(0, 2): a += 1
+        e = (1 << j) * r.randint(-1074 // (1 << j) + 1, 1023 // (1 << j) - 1 - 53 // (1 << j))
+        try: x = math.ldexp(float(rr ** (1 << j)), e)
+        except OverflowError: continue
+        if x == 0: continue
+        ps.append((x, float(a) if j == 0 else (a | 1) / (1 << j)))
+    # powers of two: x = 2^e, y with e y an integer or not
+    for _ in range(N // 10):
+        e = r.randint(-1074, 1023)
+        if e == 0: continue
+        y = r.choice([r.randint(-2200, 2200), r.randint(-2200, 2200) / 2.0, r.randint(-2200, 2200) / 4.0, r.randint(-2200, 2200) / 1024.0, r.randint(-60, 60) / 2.0 ** r.randint(1, 20),
+                      float(r.randint(1, 2 ** 20)) * 2.0 ** r.randint(-20, 0), 2.0 ** r.randint(-1074, 60), 1.0 / e * r.randint(-3000, 3000)])
+        if y != 0: ps.append((2.0 ** e, y))
+    # near-exact: neighbours of exact cases
+    base = ps[:N // 8]
+    for x, y in base:
+        for d in (-2, -1, 1, 2): ps.append((ulpstep(x, d), y)); ps.append((x, ulpstep(y, d)))
+    # small integer / half-integer exponents of arbitrary x (squares, cubes, sqrt ...): exact when the mantissa is short
+    for _ in range(N // 8):
+        x = abs(rnd_double(r, -1074, 1023)) if r.random() < 0.5 else float(r.randint(2, 1 << r.randint(2, 53))) * 2.0 ** r.randint(-300, 300)
+        y = r.choice([2.0, 3.0, 0.5, 1.5, -1.0, -2.0, 4.0, 10.0, 7.0, 0.25, 0.75, 1.0 / 3, -0.5, 33.0, 34.0, 35.0])
+        ps.append((x, y))
+    # generic: y ln x moderate
+    while len(ps) < N:
+        c = r.random()
+        x = abs(rnd_double(r, -1074, 1023)) if r.random() < 0.5 else 2.0 ** r.uniform(-60, 60)
+        if x == 1.0 or not math.isfinite(x) or x == 0: continue
+        if c < 0.35:
+            y = r.uniform(-760, 760) / math.log(x) if abs(math.log(x)) > 1e-3 else r.uniform(-30, 30)
+        elif c < 0.55: y = rnd_double(r, -60, 12)
+        elif c < 0.7:
+            x = 1 + r.uniform(-1, 1) * 2.0 ** -r.randint(1, 52); y = rnd_double(r, -20, 62)
+            if x == 1.0: continue
+        elif c < 0.8: y = float(r.randint(-60, 60))
+        elif c < 0.9:
+            x = -x; y = float(r.randint(-80, 80)) if r.random() < 0.7 else r.uniform(-30, 30) * 2.0 ** r.randint(0, 40)
+            y = float(round(y))
+        else: y = rnd_double(r, -1074, 1023)
+        if y == 0 or not math.isfinite(y) or not math.isfinite(x): continue
+        ps.append((x, y))
+    out = []
+    for x, y in ps:
+        if not (math.isfinite(x) and math.isfinite(y)) or x == 0 or y == 0 or abs(x) == 1.0: continue
+        if x < 0 and y != math.floor(y): continue
+        out.append((x, y))
+    return out[:max(N, 0)] if len(out) >= N else out
+
+
+GENS_NEW = {'acos': gen_asin, 'asin': gen_asin, 'atan': gen_atan, 'exp': gen_exp, 'log': gen_ln, 'cosh': lambda r, N: gen_sinh(r, N, 'cosh'), 'sinh': lambda r, N: gen_sinh(r, N, 'sinh'),
+            'tanh': lambda r, N: gen_sinh(r, N, 'tanh'), 'pow': gen_pow}
+
+
+def gen_fmod(r, N):
+    ps = []
+    for _ in range(N):
+        c = r.random()
+        if c < 0.3: x, y = rnd_double(r, -1074, 1023), rnd_double(r, -1074, 1023)
+        elif c < 0.6:
+            e = r.randint(-1074, 1000); x, y = lead(r, max(-1074, e + r.randint(-3, 80))), lead(r, e)
+        elif c < 0.75:
+            y = rnd_double(r, -1074, 1000); k = r.randint(0, 1 << r.randint(1, 50)); x = f64_(u64_(y) & ~(1 << 63)) * k
+            x = x if math.isfinite(x) else 1.0
+            ps.append((r.choice([-1, 1]) * x, y)); continue
+        elif c < 0.85:
+            y = rnd_double(r, -1074, 600); k = r.randint(0, 1 << 20); x = (k + 0.5) * y; ps.append((x, y)); continue
+        else: x, y = rnd_double(r, -1074, -1000), rnd_double(r, -1074, -1000)
+        ps.append((x, y))
+    return ps
+
+
+def gen_sqrt(r, N):
+    xs = []
+    for _ in range(N):
+        c = r.random()
+        if c < 0.5: xs.append(abs(rnd_double(r, -1074, 1023)))
+        elif c < 0.7:
+            m = r.randint(1, 1 << 26); xs.append(math.ldexp(float(m * m), 2 * r.randint(-500, 450)))        # exact squares
+        elif c < 0.85:
+            m = r.randint(1, 1 << 26); xs.append(ulpstep(math.ldexp(float(m * m), 2 * r.randint(-500, 450)), r.choice([-1, 1])))
+        else: xs.append(abs(rnd_double(r, -1074, -1000)))
+    xs += [5e-324, 2.0 ** -1022, 1.7976931348623157e308, 2.0, 4.0, 1.0, 1.0000000000000002, 0.9999999999999999]
+    return xs
+
+
+def c99_pow(x, y):
+    """pow of C99 Annex F for the special operands (zero, infinity, NaN, +-1), written from the standard's list"""
+    nan = float('nan'); inf = math.inf
+    if y == 0 or x == 1.0: return 1.0
+    if math.isnan(x) or math.isnan(y): return nan
+    yint = math.isfinite(y) and y == math.floor(y)
+    yodd = yint and abs(y) < 2.0 ** 53 and int(y) % 2 == 1
+    if math.isinf(y):
+        if abs(x) == 1.0: return 1.0
+        return 0.0 if (abs(x) < 1.0) == (y > 0) else inf
+    if x == 0:
+        neg = math.copysign(1.0, x) < 0 and yodd
+        return (-0.0 if neg else 0.0) if y > 0 else (-inf if neg else inf)
+    if math.isinf(x):
+        if x > 0: return inf if y > 0 else 0.0
+        neg = yodd
+        return (-inf if neg else inf) if y > 0 else (-0.0 if neg else 0.0)
+    if x < 0 and not yint: return nan
+    if abs(x) == 1.0: return -1.0 if (x < 0 and yodd) else 1.0
+    return None
+
+
+def new_specials():
+    """special operands (zero, infinity, NaN, out of domain, exact boundary values) of the new functions: C99 Annex F values vs numpy (the host libm); NaN-ness, ZE and IE"""
+    np.seterr(all='ignore')
+    NP = {'acos': np.arccos, 'asin': np.arcsin, 'atan': np.arctan, 'cosh': np.cosh, 'sinh': np.sinh, 'tanh': np.tanh, 'exp': np.exp, 'log': np.log, 'sqrt': np.sqrt}
+    S2 = SPEC + [1.0, -1.0, 1e300, -1e300, 746.0, -746.0, 710.0, -710.0, 2.0 ** -1074, 4.0, -4.0, 0.5, 3.0, -3.0, 2.0 ** 52, 2.0 ** 53 + 2, 1e-300, -2.0 ** 60, 0.25]
+    tot = 0; out = []
+    for w, f in NP.items():
+        pts = []
+        for x in S2:
+            if not math.isfinite(x) or x == 0 or abs(x) >= 1e300 or (w in ('acos', 'asin') and abs(x) >= 1) or (w == 'log' and x in (1.0,)) or (w in ('cosh', 'sinh', 'tanh', 'exp') and abs(x) >= 20) \
+               or (w == 'sqrt' and (x < 0 or x in (4.0, 1.0, 0.25, 2.0 ** 52))) or (w == 'log' and x < 0) or (w == 'atan' and abs(x) >= 1e300):
+                pts.append(x)
+        m1, m2, mfl, mcf = run('m', w, pts)
+        for i, x in enumerate(pts):
+            tot += 1
+            want = float(f(np.float64(x)))
+            got = float(m1[i])
+            ok = (math.isnan(got) and math.isnan(want)) or (u64_(got) == u64_(want))
+            if w in ('cosh', 'sinh', 'tanh', 'exp', 'atan') and math.isfinite(x) and abs(x) < 1e300 and x != 0 and abs(x) < 20:
+                ok = True
+            nn = not math.isnan(x)
+            ie = int(mfl[i]) & 1
+            if math.isnan(got) and nn and not ie: ok = False                       # invalid result from numbers: IE
+            if w == 'log' and x == 0 and not (int(mfl[i]) & 4): ok = False
+            if not ok: out.append('%s %s: got %s fl=%x want %s' % (w, float.hex(x), float.hex(got), int(mfl[i]), float.hex(want)))
+    for w, f in (('pow', c99_pow), ('fmod', lambda a, b: float(np.fmod(a, b)))):
+        pts = []
+        for y in S2:
+            for x in S2:
+                sp = any((not math.isfinite(v)) or v == 0 for v in (x, y)) or abs(x) == 1.0 or (w == 'pow' and y in (1.0, -1.0, 0.5) and x in (0.25, 4.0, 1.0))
+                if sp and not (w == 'pow' and (abs(x) >= 1e300 or abs(y) >= 1e300) and math.isfinite(x) and math.isfinite(y)): pts.append((x, y))
+        m1, m2, mfl, mcf = run('m', w, [p[0] for p in pts], [p[1] for p in pts])
+        for i, (x, y) in enumerate(pts):
+            tot += 1
+            want = f(x, y) if w == 'pow' else float(f(x, y))
+            if want is None: continue
+            got = float(m1[i])
+            ok = (math.isnan(got) and math.isnan(want)) or (u64_(got) == u64_(want))
+            nonan = not (math.isnan(x) or math.isnan(y))
+            if math.isnan(got) and nonan and not (int(mfl[i]) & 1): ok = False
+            if w == 'pow' and x == 0 and y < 0 and math.isfinite(y) and not (int(mfl[i]) & 4): ok = False
+            if w == 'pow' and want is None: continue
+            if not ok: out.append('%s x=%s y=%s: got %s fl=%x want %s' % (w, float.hex(x), float.hex(y), float.hex(got), int(mfl[i]), float.hex(want)))
+    return tot, len(out), out
+
+
+def host_fmod_sqrt(seed, n):
+    r = random.Random(seed + 7)
+    res = {}
+    pts = gen_fmod(r, n)
+    for a in SPEC:
+        for b in SPEC: pts.append((a, b))
+    res['fmod'] = (len(pts), host_cmp('fmod', pts, 'fmod', mask_sw=0, flmask=0))
+    xs = gen_sqrt(r, n) + SPEC + [-x for x in gen_sqrt(r, 2000)]
+    res['sqrt'] = (len(xs), host_cmp('sqrt', [(x, 0.0) for x in xs], 'sqrt', mask_sw=0, flmask=0))
+    return res
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--n', type=int, default=200000)
@@ -690,6 +1061,7 @@ def main():
     r = random.Random(o.seed)
     gens = {'sin': lambda: gen_trig(r, o.n), 'cos': lambda: gen_trig(r, o.n), 'tan': lambda: gen_trig(r, o.n), 'atan2': lambda: gen_atan2(r, o.n), '2xm1': lambda: gen_2xm1(r, o.n),
             'yl2x': lambda: gen_log(r, o.n, False), 'yl2xp1': lambda: gen_log(r, o.n, True)}
+    for k, g in GENS_NEW.items(): gens[k] = (lambda g=g: g(r, o.n))
     fail = 0
     pool = mp.Pool(o.jobs)
     for f in fns:
@@ -721,6 +1093,16 @@ def main():
     for l in out[:12]:
         print('   DIFF', l)
     fail += bad
+    if not o.only or any(k in o.only for k in NEWF):
+        tot, nbad, out = new_specials()
+        print('msvcrt functions, special operands vs the host libm (numpy): %d cases, different %d' % (tot, nbad))
+        for l in out[:12]: print('   DIFF', l)
+        fail += nbad
+    if not o.only or any(k in o.only for k in ('fmod', 'sqrt')):
+        for w, (n, bad) in host_fmod_sqrt(o.seed, o.n).items():
+            print('%-7s vs host CPU bit for bit (result): %7d cases, equal %7d, different %d' % (w, n, n - len(bad), len(bad)))
+            for b in bad[:6]: print('   DIFF', fmtb(b))
+            fail += len(bad)
     if not o.only or any(k in o.only for k in ('fprem', 'scale', 'xtract')):
         res = host_exact(o.seed, o.nper)
         for w, (n, bad) in res.items():

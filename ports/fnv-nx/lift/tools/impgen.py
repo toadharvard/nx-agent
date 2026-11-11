@@ -17,8 +17,9 @@ Rule (the contract agreed with L1 CONTRACT and L5 PLATFORM):
   row by fnvnx_lift_imports_init() before the first guest instruction; an unresolved row makes it return (row index + 1), the loader then
   fails the start exactly as the Windows loader fails on a missing export. bind l3 (or a row named by the --l3 overlay: services that work on
   the guest state itself, e.g. RaiseException, RtlUnwind): the symbol IS the guest entry (void f(void), lifted-code conventions), no thunk.
-- no entry can be generated for: bind none (the platform has no body), conv vararg (a native variadic cannot take the guest's argument
-  words; the platform has to export a body taking the address of the argument words), bind data (the slot holds an object address: the
+- conv vararg (cdecl, the caller pops): `args` lists the fixed slots only; the native body is called with them followed by the guest address
+  of the first stack word after them (the x86 argument words: int/pointer 1 word, 64-bit and double 2 words, low word first).
+- no entry can be generated for: bind none (the platform has no body), bind data (the slot holds an object address: the
   loader's business, no entry). They are listed in imp_blocked.tsv; if a row listed there is named by a --need file (column layout of L1's
   iat.tsv: slot, dll, name, ...), the generator fails: a build that needs the row must fail."""
 import argparse, collections, os, sys
@@ -55,6 +56,8 @@ def thunk(r, target):
     for a in args:
         m, n = RD[a]
         types.append(CT[a]); vals.append('%s(sp+%du)' % (m, off)); off += n
+    if conv == 'vararg':        # the row lists the fixed slots; the native body takes them and the guest address of the first variadic stack word
+        types.append('u32'); vals.append('(u32)(sp+%du)' % off)
     pop = off if conv in ('stdcall', 'thiscall') else 4
     call = '((%s(*)(%s))%s)(%s)' % (CT[ret], ','.join(types) or 'void', target, ','.join(vals))
     if ret == 'v': do, put = call + ';', ''
@@ -94,8 +97,8 @@ def generate(bridge, out, need=(), l3=None, rt_defined=None):
                 blocked.append((r['key'], r['dll'], r['name'], 'no body in the lifter runtime (bind l3)')); continue
             ent.append((r['key'], s, r['dll'], r['name'], 'l3')); continue
         why = ('no body in the platform (bind none)' if r['bind'] == 'none' else 'object address, not code (bind data)' if r['bind'] == 'data' or r['conv'] == 'data'
-               else 'variadic: needs a platform body taking the address of the argument words' if r['conv'] == 'vararg' else None)
-        if why is None and (r['conv'] not in ('stdcall', 'cdecl', 'thiscall') or r['ret'] not in CT or any(a not in RD for a in r['args']) or r['bind'] not in ('sym', 'lookup')):
+               else None)
+        if why is None and (r['conv'] not in ('stdcall', 'cdecl', 'thiscall', 'vararg') or r['ret'] not in CT or any(a not in RD for a in r['args']) or r['bind'] not in ('sym', 'lookup')):
             sys.exit('impgen: row %d (%s!%s) is outside the table grammar' % (r['i'], r['dll'], r['name']))
         if why:
             blocked.append((r['key'] if r['key'] is not None else 0xffffffff, r['dll'], r['name'], why)); continue

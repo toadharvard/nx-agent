@@ -357,7 +357,7 @@ def uni(I):
 # are kept in scx (not in insns/cov), so byte accounting is unchanged. A target outside every executable section is not an entry (counted: lifter needs a rule there).
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fnvlift import Image as LImage; from fnvlift import core as LCore
-limg = LImage(EXE); cl_cache = {}; cl_out = Counter(); cl_outex = {}; cl_outt = {}; cl_outsrc = Counter(); cl_add = Counter(); cl_jx = set(); cl_rounds = 0
+limg = LImage(EXE); cl_cache = {}; cl_ft = set(); cl_out = Counter(); cl_outex = {}; cl_outt = {}; cl_outsrc = Counter(); cl_add = Counter(); cl_jx = set(); cl_rounds = 0
 def cl_range(a):
     p = parent.get(a)
     if p is not None and p in entries: return p, p + fsize[p]
@@ -367,14 +367,16 @@ def cl_targets(a, kids):
     lo, hi = cl_range(a); own = tuple(x for x in kids.get(lo, ()) if lo <= x < hi)
     key = (lo, hi, a, own)
     if key not in cl_cache:
-        fh = hi + 0x1000; ins, tabs, tk, bad = LCore.explore(limg, lo, hi, limg.bytes(lo, fh - lo), a, own if a == lo else (), fh); cs = set(); ts = set(); jx = set()
+        fh = hi; ins, tabs, tk, bad = LCore.explore(limg, lo, hi, limg.bytes(lo, hi - lo + 16), a, own if a == lo else (), fh); cs = set(); ts = set(); jx = set()
         for x, g in ins.items():
-            m = g.mnemonic; o = g.operands
+            m = g.mnemonic.split(' ')[-1]; o = g.operands      # the instruction under its prefix words (core.explore)
             if m == 'call' and o[0].type == X.X86_OP_IMM: cs.add(o[0].imm & 0xffffffff)
             elif (m == 'jmp' or (m[0] == 'j' and m != 'jecxz') or m in ('loop', 'loope', 'loopne')) and o[0].type == X.X86_OP_IMM:
                 t = o[0].imm & 0xffffffff
                 if not lo <= t < hi: ts.add(t)
-            elif m == 'jecxz' and not lo <= (o[0].imm & 0xffffffff) < hi: jx.add(x)
+            elif m == 'jecxz' and not lo <= (o[0].imm & 0xffffffff) < hi: jx.add(x); ts.add(o[0].imm & 0xffffffff)      # jecxz leaving the range: a direct jump out (f_sys, f_flow.jump_out)
+            if m not in ('jmp', 'ret', 'retf', 'hlt', 'ud2') and not (m == 'int3' and x + g.size >= hi) and x + g.size not in ins and x + g.size not in bad:       # explore's own stop rule: a fall-out is a control transfer to the successor (f_flow.jump_out)
+                ts.add(x + g.size); cl_ft.add((a, x + g.size))
         cl_cache[key] = (cs, ts, jx)
     return cl_cache[key]
 while True:
@@ -417,6 +419,7 @@ print('R3 pointer entries: %d new (%d insn-start of decoded code, %d bodies re-r
 print('closure check (old, report only): direct jmp/jcc targets of non-decomp entries inside the span that are neither entries nor in the entry\'s own extent: %d' % eclo)
 print('closure under direct targets: %d rounds, entries added %s; targets outside executable sections (not entries) %d refs / %d distinct targets, by source entry %s, by kind and section %s; first sources %s; jecxz leaving range %d' % (
     cl_rounds, dict(sorted(cl_add.items())), sum(cl_out.values()), len(cl_outt), dict(cl_outsrc), {'%s %s' % k: '%d e.g. %08x' % (v, cl_outex[k]) for k, v in sorted(cl_out.items(), key=str)}, ' '.join('%08x<-%08x' % (t, a) for t, a in sorted(cl_outt.items())[:4]), len(cl_jx)))
+print('fall-through successors of lifter bodies (entry, successor) %d, distinct successors %d' % (len(cl_ft), len({t for e, t in cl_ft})))
 print('ranges.tsv %d rows, noreturn.tsv %d rows; range-sum vs extent mismatches %d (non-decomp rows: equality; %d decomp rows: sum <= declared size)' % (len(rgs), len(NRR), rbad, rdec))
 def gate(green, TNu, why):
     open(OUTD + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap' + ('.' + NAME if STRICT else ''), 'status': 'green' if green else 'red', 'universe': TNu, 'certified': TNu - unexpl, 'uncertified': unexpl}) + '\n')

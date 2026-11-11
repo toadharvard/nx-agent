@@ -87,7 +87,7 @@ def explore(img, lo, hi, code):
             if not g:
                 raise ValueError('undecodable')
             ins = insns[a] = g[0]
-            m = ins.mnemonic
+            m = ins.mnemonic.split(' ')[-1]      # the instruction under its prefix words (fnvlift.core.explore)
             ops = ins.operands
             if m == 'jmp':
                 if ops[0].type == X.X86_OP_IMM:

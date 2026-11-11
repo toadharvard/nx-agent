@@ -23,6 +23,7 @@ def jump_stmt(cx, t):
         cx.kinds.add('tailjmp')
         return '{ SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; goto after_tail; }' % hexs(t)
     cx.kinds.add('jmp-direct-noentry')
+    cx.noentry.add(t)
     return '{ c->ra=0x%xu; goto nonlocal; }' % t
 
 
@@ -49,6 +50,7 @@ def call_xfer(cx, o, t):
             cx.calls.add(t)
             return 'SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal;' % (hexs(t), cx.nxt)
         cx.kinds.add('call-direct-noentry')     # not an entry (see jump_stmt): through the dispatcher
+        cx.noentry.add(t)
         return 'SYNC_OUT; REGS(); fnvl_dispatch(0x%xu)(); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal;' % (t, cx.nxt)
     cx.kinds.add('import' if is_import(cx, o) else 'indcall')
     return 'SYNC_OUT; REGS(); fnvl_dispatch(%s)(); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal;' % (t, cx.nxt)

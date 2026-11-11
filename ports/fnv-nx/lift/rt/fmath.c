@@ -1,4 +1,4 @@
-/* fmath: correctly rounded x87 transcendentals and exact fprem/fprem1/fscale/fxtract (README "One reference CPU model", R8).
+/* fmath: correctly rounded x87 transcendentals and exact fprem/fprem1/fscale/fxtract (README "One reference CPU model", R8), and the msvcrt math library (acos asin atan cosh sinh tanh exp log pow, exact fmod sqrt).
    Freestanding C (no libc, libm, malloc, errno, FPU instruction): doubles are only moved as bit patterns, every computation is integer arithmetic, so the
    host rounding mode and FPSR are irrelevant. Builds natively (x86-64, for test/fmathtest.py) and as aarch64 ILP32.
 
@@ -30,6 +30,30 @@
        2^k expm1(f ln 2) + (2^k - 1), k = nearest integer, f = x - k exact.
      y log2(x), y log2(x+1): the table of FYL2X / FYL2XP1 for zero / infinite / NaN / out-of-domain operands and x = 1 (or x = +-0); u = x or 1 + x is formed EXACTLY in cw
        (every bit between 2^-1074 and 2^1025 fits in 72 limbs), u = 2^k w, z = w - 1 exact; u a power of two (z = 0) gives y k exactly; else ln w = 2 atanh(z/(2+z)).
+   MSVCRT LIBRARY FUNCTIONS (the 15 _CI* intrinsics, rt/msvcrt_ci.c): acos asin atan cosh sinh tanh exp log pow by the same engine (start limb count n >= 2), fmod and sqrt exact. Same rule, same steps 1-3.
+     Irrationality (step 2): for a non-zero algebraic x, e^x (Hermite-Lindemann) and so exp, sinh, cosh, tanh (sinh x = s algebraic gives e^x a root of E^2 - 2 s E - 1, cosh and tanh likewise) are transcendental;
+       ln x for algebraic x > 0, x != 1 is transcendental (e^(ln x) = x algebraic); asin, acos, atan: sin / cos / tan of a non-zero algebraic number is transcendental, and tan(atan x) = x, sin(asin x) = x, cos(acos x) = x
+       are algebraic, so the angle is not algebraic: never a double or half-way point (the lattice of step 3 contains only dyadic rationals). Exact cases decided before the loop: exp 0 -> 1, log 1 -> +0, acos 1 -> +0,
+       asin / atan / sinh / tanh 0 -> x, cosh 0 -> 1 (the only arguments with an algebraic value; everything else is transcendental, hence off the lattice).
+     Out-of-range and tiny arguments are decided by proved bounds, never by sampling: sin-like |x| < 2^-27: atan x, tanh x in (x (1 - x^2/3), x) and asin x, sinh x in (x, x (1 + x^2/3)) round to x (x^2/3 < 2^-55 is below
+       the half-spacing 2^-54 |x| of the nearer neighbour); cosh |x| < 2^-26: 1 < cosh x < 1 + 2^-53, rounds to 1 (below the half-way point); exp: 0 < x < 2^-54: 1 < e^x < 1 + 2^-53 -> 1; -2^-55 < x < 0: 1 - 2^-55 < e^x < 1 -> 1
+       (above the half-way point 1 - 2^-54); x >= 710: e^x > 2^1024 -> inf; x <= -746: e^x < 2^-1076 -> +0; sinh / cosh |x| >= 711 > asinh(2^1024) = 710.4758: inf; tanh |x| >= 20: 1 - |tanh x| < 2 e^-40 < 2^-54: rounds to 1.
+     atan: atan x = atan2(x, 1) of the existing evaluator. asin / acos (ev_asin, ev_acos): asin |x| = atan(|x| / sqrt((1 - |x|)(1 + |x|))), acos x = 2 atan(sqrt((1 - x)/(1 + x))), asin(+-1) = +-pi/2, acos(-1) = pi; the
+       bf_sqrt (Newton from a 32-bit integer square root, fixed iteration count, relative error <= 2^(4-32n)) and atan_core (pi/2 - atan(1/z) for z >= 1, atan(j/8) + atan(w), j = round(8 z), |w| <= 1/16 + d otherwise) carry
+       the error budget derived at each function: B = 32 n - GUARD(n) - 12, worst measured error / budget ~ 2e-10.
+     exp sinh cosh tanh (ev_hyp): X = |x| (tanh: 2|x|), k = round(X / ln 2) and R = X - k ln 2 in a context with n + 4 limbs (abs error <= 2^(-32n-51), then 2^(1-32n) from the truncation to n limbs), e^R by the series expm1;
+       exp = 2^(+-k)(1 + expm1(+-R)); for k = 0 the hyperbolics use E = expm1(X) in positive-term forms (sinh = E(E+2)/(2(E+1)), cosh = 1 + E^2/(2(E+1)), tanh = E/(E+2)), for k >= 1 Y = e^X >= 1.41 and
+       sinh = (Y - 1/Y)/2, cosh = (Y + 1/Y)/2, tanh = (Y - 1)/(Y + 1) (cancellation <= 2 bits). Overflow / underflow / subnormal results: the lattice of step 3.
+     log (ln_core): |x| = 2^k w, w in [3/4, 3/2), z = w - 1 = N 2^-s formed EXACTLY from the 53-bit mantissa (no wide context), ln w = 2 atanh(z/(2+z)), ln|x| = k ln 2 + ln w (cancellation <= 2.5 bits).
+     pow (ev_pow, pow_exact): C99 Annex F table for zero / infinite / NaN operands, |x| = 1, y = 0 and a negative base (sign by the parity of the integer y, non-integer y: invalid); then
+       EXACT CASES. x = m 2^e (m odd), |y| = a 2^f (a odd), j = max(-f, 0). x^y is a rational number iff 2^j | e and m = r^(2^j) (x^y = (x^a')^(1/2^j) with a' = a or |y|; a q-th root of an integer power is rational iff every
+       prime exponent of the radicand is divisible by q: the exponent of 2 is e a', of an odd prime p it is a' v_p(m), and gcd(a', 2^j) = 1); then x^y = r^(+-a') 2^(+-e a'/2^j). It is a dyadic rational iff y > 0 or r = 1
+       (r > 1 and y < 0 gives an odd denominator > 1). Points of the rounding lattice (doubles, half-way points, the overflow / underflow boundaries) are dyadic rationals whose odd part has <= 54 bits (r^a' < 2^64 is tested
+       with an overflow-checked product; j <= 5 since r >= 3 and m < 2^53; a' <= 64), so every other value (irrational, non-dyadic rational, r^a' >= 2^64) is off the lattice and the loop terminates for it. The enumerated cases
+       are therefore exactly: r = 1 (x = 2^e, 2^j | e: v = 2^N, N = (e/2^j) y exact, saturated to +-2^30 where the result is inf / 0 anyway) and r >= 3, y > 0 (v = r^a' 2^(e a'/2^j) < 2^64 2^S); each is rounded once by
+       exact_double (ties, subnormals, overflow, flags). Others: y ln|x| = T with relative error <= 2^-(B_L - 1) (ev_pow comment), |T| >= 2^11 decided by the region (inf / 0), |T| < 2^-59 -> 1 (round down / up), else
+       exp(T) as above with B = 32 n - GUARD(n) - 15 - max(T.e, 0).
+     fmod: exact long division (the remainder is a double: |r| < |y| and r a multiple of the ulp of y or x). sqrt: integer square root of m 2^56 (55 bits) with a sticky bit, rounded once (comment at fnvl_m_sqrt).
    EXACT FORMS (no engine): fscale = integer exponent shift with one rounding (exact_double); fxtract = bit fields; fprem / fprem1 = long division of 53-bit
      mantissas, C0 = Q2, C3 = Q1, C1 = Q0, C2 = 0 for D = exponent difference < 64; D >= 64: C2 = 1 and the reduction by exactly 32 floor(D/32) - 32 bits (the reference CPU, below).
    FLAGS: IE, ZE, OE, UE (tiny before rounding and inexact), PE and C1 (= rounded up in magnitude) are derived from the same cell the rounding uses.
@@ -411,7 +435,7 @@ static void unpack(u64 a, u64 *mant, int *e2) {
 }
 
 /* ================= evaluators ================= */
-enum { W_SIN, W_COS, W_TAN, W_2XM1, W_YL2X, W_YL2XP1, W_ATAN2, W_PIQ };
+enum { W_SIN, W_COS, W_TAN, W_2XM1, W_YL2X, W_YL2XP1, W_ATAN2, W_PIQ, W_ACOS, W_ASIN, W_EXP, W_SINH, W_COSH, W_TANH, W_LOG, W_POW };
 typedef struct { double x, y; int w; int q; } za;
 
 /* pi/2 into out (n limbs of context c) */
@@ -578,6 +602,245 @@ static int ev_piq(cx *c, cx *cw, const za *a, bf *A, int *B) {
   return 1;
 }
 
+/* ================= msvcrt library functions: evaluators (acos asin atan cosh sinh tanh exp log pow) ================= */
+/* floor(sqrt(v)) */
+static u32 isqrt64(u64 v) {
+  u64 res = 0, bit = 1ull << 62;
+  while (bit > v) bit >>= 2;
+  while (bit) { if (v >= res + bit) { v -= res + bit; res = (res >> 1) + bit; } else res >>= 1; bit >>= 2; }
+  return (u32)res;
+}
+/* sqrt(a), a > 0. a = f 2^g with g even and f in [1/4, 1). y0 = isqrt(top 63..64 bits of f) 2^-32 has relative error <= 2^-30; Newton y <- (y + f/y)/2 squares the error
+   (e' <= e^2/2) so after the iterations below (accuracy bits acc -> 2 acc - 1 from 30 until acc >= 32 n + 8) the quadratic remainder is <= 2^(-32n-8); every iteration
+   adds the primitive errors of one bf_div and one bf_add (<= 2^(3-32n)) which later iterations square away, the last one stays: relative error of the result <= 2^(4-32n). */
+static void bf_sqrt(cx *c, bf *out, const bf *a) {
+  int n = c->n; u32 *mk = c->p;
+  bf f = bnew(c), y = bnew(c), t = bnew(c), s = bnew(c);
+  int g = (a->e & 1) ? a->e + 1 : a->e;
+  bf_cpy(c, &f, a); f.e = a->e - g;
+  u64 T = ((u64)f.m[n - 1] << 32) | f.m[n - 2], V = (a->e & 1) ? T >> 1 : T;
+  bf_u64(c, &y, isqrt64(V), -32, 0);
+  for (int acc = 30; acc < 32 * n + 8; acc = 2 * acc - 1) {
+    bf_div(c, &t, &f, &y); bf_add(c, &s, &y, &t); s.e -= 1; bf_cpy(c, &y, &s);
+  }
+  bf_cpy(c, out, &y); out->e += g / 2; c->p = mk;
+}
+/* atan(z) of a bf z > 0 with relative error d: z >= 1 -> pi/2 - atan(1/z); z in (0,1): j = round(8 z), atan z = atan(j/8) + atan(w), w = (8z - j)/(8 + j z), |w| <= 1/16 + d.
+   Errors: 1/z: 2^(2-32n); 8z - j has absolute error <= 8 z d' + 2^(4-32n) (d' = d + 2^(2-32n)), so w has absolute error <= d' + 2^(5-32n) and so has atan w; the sum atan(c) + atan(w) is >= atan(1/16) > 2^-4
+   for j >= 1 and equals atan w = atan z (relative error <= d') for j = 0, and pi/2 - atan(1/z) >= pi/4. Result relative error <= 16 d' + 2^(10-32n) + the series (GUARD). */
+static void atan_core(cx *c, bf *out, const bf *z0) {
+  u32 *mk = c->p;
+  bf z = bnew(c), one = bnew(c), t8 = bnew(c), half = bnew(c), H = bnew(c), Jf = bnew(c), Jb = bnew(c), Wn = bnew(c), Wd = bnew(c), Jp = bnew(c), eight = bnew(c);
+  bf Wv = bnew(c), Ac = bnew(c), Aw = bnew(c), Th = bnew(c), pi = bnew(c);
+  int inv = z0->e >= 1;
+  bf_u64(c, &one, 1, 0, 0);
+  if (inv) bf_div(c, &z, &one, z0); else bf_cpy(c, &z, z0);
+  t8 = z; t8.e += 3;
+  bf_u64(c, &half, 1, -1, 0); bf_add(c, &H, &t8, &half); bf_floor(c, &Jf, &H);
+  u32 j = bf_small(&Jf, c->n);
+  if (j > 8) j = 8;
+  bf_u64(c, &Jb, j, 0, 0); bf_sub(c, &Wn, &t8, &Jb);
+  bf_u64(c, &eight, 8, 0, 0); bf_mulu(c, &Jp, &z, j); bf_add(c, &Wd, &eight, &Jp);
+  bf_div(c, &Wv, &Wn, &Wd);
+  bf_pi(c, &pi);
+  if (j == 0) bzero_(&Ac); else if (j == 8) { bf_cpy(c, &Ac, &pi); Ac.e -= 2; } else ser_atan_c(c, &Ac, j);
+  if (Wv.z) bzero_(&Aw); else ser_atan(c, &Aw, &Wv);
+  bf_add(c, &Th, &Ac, &Aw);
+  if (inv) { bf T2 = bnew(c); pi.e -= 1; bf_sub(c, &T2, &pi, &Th); bf_cpy(c, out, &T2); }
+  else bf_cpy(c, out, &Th);
+  c->p = mk;
+}
+/* asin x, 0 < |x| <= 1. |x| = 1: pi/2. else u = |x| / sqrt((1 - |x|)(1 + |x|)), asin x = sign atan u (u = tan(asin |x|)). 1 -+ |x| carry relative error <= 2^(2-32n) (bf_add: both operands are
+   doubles, so the sum / difference of numbers of binade distance < 2^7 is exact and otherwise the larger operand is 1), the product 2^(2-32n), bf_sqrt 2^(4-32n) + half the input's, the division
+   2^(2-32n): d <= 2^(6-32n) in u; atan_core turns that into <= 2^(11-32n) + the series: B = 32 n - GUARD(n) - 12 covers it with 24+ bits to spare. */
+static int ev_asin(cx *c, cx *cw, const za *a, bf *A, int *B) {
+  (void)cw;
+  u64 ux = d2u(a->x), mant; int e2, n = c->n;
+  unpack(ux & ~SGNM, &mant, &e2);
+  u32 *mk = c->p;
+  bf X = bnew(c), one = bnew(c), om = bnew(c), op = bnew(c), pr = bnew(c), sq = bnew(c), u = bnew(c), th = bnew(c);
+  if ((ux & ~SGNM) == 0x3ff0000000000000ull) { bf_pi(c, &th); th.e -= 1; }
+  else {
+    bf_u64(c, &X, mant, e2, 0); bf_u64(c, &one, 1, 0, 0);
+    bf_sub(c, &om, &one, &X); bf_add(c, &op, &one, &X); bf_mul(c, &pr, &om, &op);
+    bf_sqrt(c, &sq, &pr); bf_div(c, &u, &X, &sq);
+    atan_core(c, &th, &u);
+  }
+  bf_cpy(c, A, &th); A->s = (int)(ux >> 63);
+  *B = 32 * n - GUARD(n) - 12;
+  c->p = mk;
+  return 1;
+}
+/* acos x, -1 <= x < 1 (x = 1 is 0, decided before). x = -1: pi. else acos x = 2 atan(sqrt((1 - x)/(1 + x))) (tan(acos(x)/2)); same error budget as asin. */
+static int ev_acos(cx *c, cx *cw, const za *a, bf *A, int *B) {
+  (void)cw;
+  u64 ux = d2u(a->x), mant; int e2, n = c->n;
+  unpack(ux & ~SGNM, &mant, &e2);
+  u32 *mk = c->p;
+  bf X = bnew(c), one = bnew(c), om = bnew(c), op = bnew(c), q = bnew(c), s = bnew(c), th = bnew(c);
+  if (ux == 0xBFF0000000000000ull) { bf_pi(c, &th); }
+  else {
+    bf_u64(c, &X, mant, e2, (int)(ux >> 63)); bf_u64(c, &one, 1, 0, 0);
+    bf_sub(c, &om, &one, &X); bf_add(c, &op, &one, &X); bf_div(c, &q, &om, &op);
+    bf_sqrt(c, &s, &q);
+    atan_core(c, &th, &s); th.e += 1;
+  }
+  bf_cpy(c, A, &th);
+  *B = 32 * n - GUARD(n) - 12;
+  c->p = mk;
+  return 1;
+}
+/* e^X for X > 0 (X < 2^13): k = round(X / ln 2) and R = X - k ln 2 in cw (nw = n + 4 limbs). Any integer k with |R| < 1 would do (the series below only need it). Errors: K < 2^13 and
+   ln 2 (table or series: relative error <= 2^(64-32nw)) give an absolute error of K ln 2 <= 2^(13+64-32nw) = 2^(-32n-51), the product and the subtraction add <= 2^(15-32nw); then R is truncated to n limbs
+   (absolute error <= 2^(1-32n)). e^R carries the same absolute error, i.e. relative error <= 2^(2-32n) after the factor e^|R| <= 1.45. k = 0: R = X exactly. */
+static int exp_reduce(cx *c, cx *cw, const bf *X, bf *R) {
+  int nw = cw->n; u32 *mkw = cw->p;
+  bf Xw = bnew(cw), L2 = bnew(cw), Z = bnew(cw), H = bnew(cw), K = bnew(cw), half = bnew(cw), P = bnew(cw), Rw = bnew(cw);
+  bf_conv(cw, c->n, &Xw, X);
+  bf_ln2(cw, &L2); bf_div(cw, &Z, &Xw, &L2);
+  bf_u64(cw, &half, 1, -1, 0); bf_add(cw, &H, &Z, &half); bf_floor(cw, &K, &H);
+  int k = (int)bf_small(&K, nw);
+  bf_mul(cw, &P, &K, &L2); bf_sub(cw, &Rw, &Xw, &P);
+  bf_conv(c, nw, R, &Rw);
+  cw->p = mkw;
+  return k;
+}
+/* exp x, sinh x, cosh x, tanh x for finite x (|x| < 746 exp, < 711 sinh/cosh, < 20 tanh; sinh/tanh |x| >= 2^-27, cosh |x| >= 2^-26: the tiny arguments are decided before).
+   X = |x| (tanh: 2|x|), k, R as above. exp: e^x = 2^(+-k) (1 + expm1(+-R)) (sign of x), a sum of terms 1 and expm1(R) >= -0.30: no cancellation beyond 1 bit.
+   Hyperbolics with X = |x| (tanh: X = 2|x|, tanh = (e^X - 1)/(e^X + 1)): k = 0 (X < 0.35): E = expm1(X) > 0 and sinh = E (E + 2) / (2 (E + 1)), cosh = 1 + E^2 / (2 (E + 1)), tanh = E / (E + 2): only
+   products, quotients and sums of positive numbers (error <= 8 primitive errors). k >= 1 (e^X = Y = 2^k (1 + expm1(R)) >= 1.41): sinh = (Y - 1/Y)/2, cosh = (Y + 1/Y)/2, tanh = (Y - 1)/(Y + 1); Y - 1/Y >= 0.7 Y
+   and Y - 1 >= 0.41 Y: cancellation <= 2 bits. Every relative error <= (series 2^(GUARD - 32n)/16 + 40 primitive errors 2^(2-32n)): B = 32 n - GUARD(n) - 12 (exp: -8). */
+static int ev_hyp(cx *c, cx *cw, const za *a, bf *A, int *B) {
+  int n = c->n, w = a->w;
+  u64 u = d2u(a->x), mant; int e2, sx = (int)(u >> 63);
+  unpack(u & ~SGNM, &mant, &e2);
+  if (w == W_TANH) e2 += 1;
+  u32 *mk = c->p;
+  bf X = bnew(c), R = bnew(c), E = bnew(c), one = bnew(c), Y = bnew(c), t1 = bnew(c), t2 = bnew(c), t3 = bnew(c);
+  bf_u64(c, &X, mant, e2, 0); bf_u64(c, &one, 1, 0, 0);
+  int k = exp_reduce(c, cw, &X, &R);
+  if (w == W_EXP) {
+    if (sx) { k = -k; if (!R.z) R.s ^= 1; }
+    ser_expm1(c, &E, &R); bf_add(c, &Y, &E, &one); Y.e += k;
+    bf_cpy(c, A, &Y); *B = 32 * n - GUARD(n) - 8;
+    c->p = mk; return 1;
+  }
+  if (k == 0) {
+    ser_expm1(c, &E, &X);
+    if (w == W_TANH) { bf_u64(c, &t2, 2, 0, 0); bf_add(c, &t1, &E, &t2); bf_div(c, A, &E, &t1); }
+    else {
+      bf_add(c, &t1, &E, &one); t1.e += 1;                                   /* 2 (E + 1) */
+      if (w == W_SINH) { bf_u64(c, &t2, 2, 0, 0); bf_add(c, &t3, &E, &t2); bf_mul(c, &t2, &E, &t3); bf_div(c, A, &t2, &t1); }
+      else { bf_mul(c, &t2, &E, &E); bf_div(c, &t3, &t2, &t1); bf_add(c, A, &one, &t3); }
+    }
+  } else {
+    ser_expm1(c, &E, &R); bf_add(c, &Y, &E, &one); Y.e += k;
+    if (w == W_TANH) { bf_sub(c, &t1, &Y, &one); bf_add(c, &t2, &Y, &one); bf_div(c, A, &t1, &t2); }
+    else {
+      bf_div(c, &t1, &one, &Y);
+      if (w == W_SINH) bf_sub(c, &t2, &Y, &t1); else bf_add(c, &t2, &Y, &t1);
+      bf_cpy(c, A, &t2); A->e -= 1;
+    }
+  }
+  if (!A->z) A->s = (w == W_COSH) ? 0 : sx;
+  *B = 32 * n - GUARD(n) - 12;
+  c->p = mk;
+  return 1;
+}
+/* ln |x| for a finite double x, |x| != 1 into *L (n limbs): |x| = M 2^e2 with M in [2^52, 2^53) normalised; |x| = 2^k w with w in [3/4, 3/2) (k = floor(log2|x|) or one more), z = w - 1 = N 2^-s
+   (N = M - 2^s, s = 52 or 53) is an exact small integer times a power of two, ln w = 2 atanh(z / (2 + z)), |z/(2+z)| <= 1/5; ln|x| = k ln 2 + ln w. For k != 0, |ln|x|| >= ln 2 - ln(4/3) >= 0.4 against
+   |k ln 2| <= 0.7 |k|... (k = -1: w < 3/2 so ln|x| <= -0.28; the sum k ln2 + ln w has |.| >= 0.28 and the terms <= 0.7 |k|, k = 1: >= 0.40; larger |k|: ln w is below 0.41, the sum is >= 0.28 |k|): cancellation <= 2.5 bits.
+   N = 0 (|x| a power of two, k != 0): ln|x| = k ln 2. Relative error <= 2^-(32 n - GUARD(n) - 12) (the existing ev_log budget). */
+static void ln_core(cx *c, u64 ux, bf *L) {
+  int n = c->n; (void)n;
+  u64 mant; int e2; unpack(ux & ~SGNM, &mant, &e2);
+  int lz = __builtin_clzll(mant) - 11;
+  mant <<= lz; e2 -= lz;
+  int Lx = e2 + 52, k, s;
+  if (mant >= 0x18000000000000ull) { k = Lx + 1; s = 53; } else { k = Lx; s = 52; }
+  s64 N = (s64)mant - (s64)(1ull << s);
+  u32 *mk = c->p;
+  bf Z = bnew(c), D = bnew(c), Sx = bnew(c), Lw = bnew(c), L2 = bnew(c), Kb = bnew(c), Q = bnew(c), two = bnew(c);
+  bf_ln2(c, &L2);
+  bf_u64(c, &Kb, (u64)(k < 0 ? -k : k), 0, k < 0);
+  bf_mul(c, &Q, &Kb, &L2);
+  if (N == 0) { bf_cpy(c, L, &Q); c->p = mk; return; }
+  bf_u64(c, &Z, (u64)(N < 0 ? -N : N), -s, N < 0);
+  bf_u64(c, &two, 1, 1, 0); bf_add(c, &D, &Z, &two); bf_div(c, &Sx, &Z, &D);
+  ser_atanh2(c, &Lw, &Sx);
+  bf_add(c, L, &Q, &Lw);
+  c->p = mk;
+}
+static int ev_ln(cx *c, cx *cw, const za *a, bf *A, int *B) {
+  (void)cw;
+  ln_core(c, d2u(a->x), A);
+  *B = 32 * c->n - GUARD(c->n) - 12;
+  return 1;
+}
+/* x^y = exp(y ln|x|) for finite x != 0, |x| != 1 and finite y != 0 whose result is NOT an exact case (pow_exact); sign of the result: a->q = 1 means negative. T = y ln|x| has relative error <= 2^-(B_L - 1)
+   (B_L = 32n - GUARD - 12 of ln_core, plus the product 2^(2-32n)) hence absolute error <= 2^(T.e - B_L + 1) (|T| < 2^T.e); e^T~ / e^T - 1 <= 1.01 2^(T.e - B_L + 1); with the exponential's own error (ev_hyp exp)
+   B = 32 n - GUARD(n) - 15 - max(T.e, 0) covers both. |T| >= 2^11 (T.e >= 12): e^T > 2^1024 resp. < 2^-1075 (e^2048 > 2^2954): the result is inf resp. 0 whatever the digits: A = 2^(+-4096), r = 4 (decided by the
+   region, not an approximation: the test checks the bound only for r = 1). |T| < 2^-59 (T.e <= -59; |T| <= 2^-58 after the 2^-8 relative error): e^T in (1 - 2^-57, 1 + 2^-57) rounds to 1 (the neighbours are
+   2^-53 / 2^-52 away, the half-way points 2^-54 / 2^-53): r = 3, the result 1 rounded down (T > 0) or up (T < 0). */
+static int ev_pow(cx *c, cx *cw, const za *a, bf *A, int *B) {
+  int n = c->n;
+  u64 uy = d2u(a->y), my; int ey; unpack(uy & ~SGNM, &my, &ey);
+  u32 *mk = c->p;
+  bf L = bnew(c), Y = bnew(c), T = bnew(c), X = bnew(c), R = bnew(c), E = bnew(c), one = bnew(c), S = bnew(c);
+  ln_core(c, d2u(a->x), &L);
+  bf_u64(c, &Y, my, ey, (int)(uy >> 63));
+  bf_mul(c, &T, &Y, &L);
+  bf_u64(c, &one, 1, 0, 0);
+  int r = 1;
+  if (T.e >= 12) { bf_u64(c, A, 1, T.s ? -4096 : 4096, 0); *B = 32 * n - 8; r = 4; }
+  else if (T.e <= -59) { bf_cpy(c, A, &one); *B = T.s; r = 3; }
+  else {
+    bf_cpy(c, &X, &T); X.s = 0;
+    int k = exp_reduce(c, cw, &X, &R);
+    if (T.s) { k = -k; if (!R.z) R.s ^= 1; }
+    ser_expm1(c, &E, &R); bf_add(c, &S, &E, &one); S.e += k;
+    bf_cpy(c, A, &S);
+    *B = 32 * n - GUARD(n) - 15 - (T.e > 0 ? T.e : 0);
+  }
+  if (!A->z) A->s = a->q;
+  c->p = mk;
+  return r;
+}
+
+/* x^y exactly representable or a half-way point? x = m 2^e (m odd), |y| = a 2^f (a odd). x^y is rational iff 2^j | e and m = r^(2^j) (j = max(-f, 0)): x^y = r^(+-a') 2^(e a'/2^j) with a' = a (j > 0) or the
+   integer |y| (j = 0). It is a dyadic rational iff y > 0 or r = 1 (r > 1, y < 0 gives an odd denominator > 1). Only dyadic rationals lie on the rounding lattice (doubles and half-way points, the overflow and underflow
+   boundaries included), and the odd part r^a' of a lattice point has <= 54 bits, so r^a' >= 2^64 is off the lattice; every other (irrational or non-dyadic rational) value is not on it either, so the Ziv loop
+   terminates for it. Here: r = 1 (x a power of two): v = 2^N, N = (e / 2^j) y' exact (saturated to +-2^30: the lattice test of bf_pack then gives inf / 0); r >= 3 (j <= 5 as 3^(2^6) > 2^53): v = O 2^S, O = r^a' < 2^64
+   computed with overflow check, S = (e / 2^j) a'; rounded once by exact_double (flags included). Returns 0 when v is not an exact case. neg = sign of the result. */
+static int pow_exact(u64 ax, u64 uy, int neg, double *res, u32 *fl) {
+  u64 mx, my; int ex, ey;
+  unpack(ax, &mx, &ex); unpack(uy & ~SGNM, &my, &ey);
+  int t = __builtin_ctzll(mx); mx >>= t; ex += t;
+  t = __builtin_ctzll(my); my >>= t; ey += t;
+  int ys = (int)(uy >> 63), j = ey < 0 ? -ey : 0;
+  u64 O; s64 S;
+  if (mx == 1) {                                                     /* x = 2^ex, ex != 0 */
+    if (j >= 31 || (j > 0 && (ex & ((1 << j) - 1)))) return 0;
+    u64 ae = ex < 0 ? (u64)-(s64)ex : (u64)ex, mag;                  /* |ex| <= 1074 */
+    if (j > 0) mag = (ae >> j) * my;                                 /* N = (ex / 2^j) my: < 2^11 * 2^53 */
+    else { mag = ae * my; if (ey > 0) mag = (ey >= 32 || (mag >> 32)) ? (1ull << 40) : (mag << ey); }
+    if (mag > (1ull << 30)) mag = 1ull << 30;
+    S = (s64)mag; if ((ex < 0) != (ys != 0)) S = -S;
+    O = 1;
+  } else {
+    if (ys || j > 5 || (j > 0 && (ex & ((1 << j) - 1)))) return 0;
+    u64 r = mx;
+    for (int i = 0; i < j; i++) { u64 s = isqrt64(r); if (s * s != r) return 0; r = s; }
+    u64 ap;                                                          /* the exponent a' >= 1 */
+    if (j > 0) ap = my; else { if (ey > 6) return 0; ap = my << ey; if (ap > 64) return 0; }
+    O = 1;
+    for (u64 i = 0; i < ap; i++) { if (O > 0xffffffffffffffffull / r) return 0; O *= r; }
+    S = (s64)(ex >> j) * (s64)ap;                                    /* ex divisible by 2^j */
+  }
+  *res = exact_double(O, (int)S, neg, fl);
+  return 1;
+}
+
 #ifdef FM_DEBUG
 /* constants at n limbs (which = 0: pi, 1: ln 2), from the table or (notable) from the series: for test/fmathtest.py */
 int fm_dbg_const(int which, int n, int notable, u32 *m, int *e) {
@@ -599,7 +862,7 @@ static double ziv(int w, double x, double y, int q, u32 *fl) {
   u64 ux = d2u(x);
   int ex = (int)((ux >> 52) & 0x7ff) - 1022, exx = ex > 0 ? ex : 0;
   for (int n = FM_NSTART;; n *= 2) {
-    int nw = (w <= W_TAN) ? n + (exx >> 5) + 5 : 72;
+    int nw = (w <= W_TAN) ? n + (exx >> 5) + 5 : (w >= W_ACOS) ? n + 4 : 72;
     u32 arena[48 * n + 24 * nw];
 #ifdef FM_DEBUG
     for (int i = 0; i < 48 * n + 24 * nw; i++) arena[i] = 0x9e3779b9u * (u32)(i + 1);
@@ -612,11 +875,17 @@ static double ziv(int w, double x, double y, int q, u32 *fl) {
     case W_2XM1: r = ev_exp(&c, &cw, &a, &A, &B); break;
     case W_YL2X: case W_YL2XP1: r = ev_log(&c, &cw, &a, &A, &B); break;
     case W_ATAN2: r = ev_atan(&c, &cw, &a, &A, &B); break;
+    case W_ACOS: r = ev_acos(&c, &cw, &a, &A, &B); break;
+    case W_ASIN: r = ev_asin(&c, &cw, &a, &A, &B); break;
+    case W_EXP: case W_SINH: case W_COSH: case W_TANH: r = ev_hyp(&c, &cw, &a, &A, &B); break;
+    case W_LOG: r = ev_ln(&c, &cw, &a, &A, &B); break;
+    case W_POW: r = ev_pow(&c, &cw, &a, &A, &B); break;
     default: r = ev_piq(&c, &cw, &a, &A, &B); break;
     }
 #ifdef FM_DEBUG
     if (fm_hook) fm_hook(n, A.m, A.e, A.s, A.z, B, r);
 #endif
+    if (r == 3) { u64 out; u32 f0 = 0; bf_pack(&c, &A, 0, 1, &out, &f0); *fl |= PE | (B ? C1 : 0); return u2d(out | (A.s ? SGNM : 0)); }     /* pow: A = 1 exactly is the rounded value, B = 1 when it is above the true value */
     if (r) { u64 out; if (bf_pack(&c, &A, B, r == 2, &out, fl)) return u2d(out); }
   }
 }
@@ -797,4 +1066,150 @@ double fnvl_m_fprem(double a, double b, u32 near, u32 *cf, u32 *fl) {
   if (near && (2 * r > Mb || (2 * r == Mb && (q & 1)))) { q++; r = Mb - r; neg ^= 1; }
   *cf = (q & 1 ? 0x200u : 0) | (q & 2 ? 0x4000u : 0) | (q & 4 ? 0x100u : 0);
   return exact_double(r, eb - 52, neg, fl);
+}
+
+/* ================= public: msvcrt math library (acos asin atan cosh sinh tanh exp log pow fmod sqrt) ================= */
+/* C99 Annex F values (what msvcrt / Wine's libm return), decided before the loop; the results of the engine are correctly rounded. NaN operand: the quiet NaN (IE for a signalling one). Invalid: the default NaN
+   (0xFFF8...). The rounding of the "tiny argument" rules is proved at each function. */
+double fnvl_m_atan(double x, u32 *fl) {
+  u64 u = d2u(x), a = u & ~SGNM;
+  if (a > EXPM) return nan1(x, fl);
+  if (!a) return x;
+  if (a < 0x3e40000000000000ull) return small_arg(x, a, 1, fl);   /* |x| < 2^-27: atan x in (x (1 - x^2/3), x) rounds to x as sin does */
+  return fnvl_m_atan2(x, 1.0, fl);                                /* atan x = atan2(x, 1) (+-inf: +-pi/2 by the table) */
+}
+double fnvl_m_asin(double x, u32 *fl) {
+  u64 u = d2u(x), a = u & ~SGNM;
+  if (a > EXPM) return nan1(x, fl);
+  if (!a) return x;
+  if (a > 0x3ff0000000000000ull) return invalid(fl);              /* |x| > 1 (infinities included) */
+  if (a < 0x3e40000000000000ull) return small_arg(x, a, 0, fl);   /* asin x in (x, x (1 + x^2/3)) */
+  return ziv(W_ASIN, x, 0.0, 0, fl);
+}
+double fnvl_m_acos(double x, u32 *fl) {
+  u64 u = d2u(x), a = u & ~SGNM;
+  if (a > EXPM) return nan1(x, fl);
+  if (a > 0x3ff0000000000000ull) return invalid(fl);
+  if (u == 0x3ff0000000000000ull) return 0.0;                     /* acos 1 = +0 exactly */
+  return ziv(W_ACOS, x, 0.0, 0, fl);
+}
+/* cosh x in (1 + x^2/2, 1 + x^2/2 + x^4/20): for |x| < 2^-26 it is in (1, 1 + 2^-53), below the half-way point to 1 + 2^-52: rounds to 1 (down). cosh x >= 2^1024 (1 - 2^-54) for |x| >= 711 > 710.4758. */
+double fnvl_m_cosh(double x, u32 *fl) {
+  u64 u = d2u(x), a = u & ~SGNM;
+  if (a > EXPM) return nan1(x, fl);
+  if (!a) return 1.0;
+  if (a == EXPM) return u2d(EXPM);
+  if (a < 0x3e50000000000000ull) { *fl |= PE; return 1.0; }
+  if (a >= 0x4086380000000000ull) { *fl |= OE | PE | C1; return u2d(EXPM); }
+  return ziv(W_COSH, x, 0.0, 0, fl);
+}
+double fnvl_m_sinh(double x, u32 *fl) {
+  u64 u = d2u(x), a = u & ~SGNM;
+  if (a > EXPM) return nan1(x, fl);
+  if (!a || a == EXPM) return x;
+  if (a < 0x3e40000000000000ull) return small_arg(x, a, 0, fl);   /* sinh x in (x, x (1 + x^2/5)) */
+  if (a >= 0x4086380000000000ull) { *fl |= OE | PE | C1; return u2d((u & SGNM) | EXPM); }
+  return ziv(W_SINH, x, 0.0, 0, fl);
+}
+/* tanh |x| in (|x| (1 - x^2/3), |x|) for tiny x; 1 - tanh |x| < 2 e^(-2|x|) < 2^-54 for |x| >= 20 (e^-40 * 2 = 8.5e-18 < 5.5e-17): the value is inside the last half-ulp cell below 1 and rounds to 1 (up in magnitude). */
+double fnvl_m_tanh(double x, u32 *fl) {
+  u64 u = d2u(x), a = u & ~SGNM;
+  if (a > EXPM) return nan1(x, fl);
+  if (!a) return x;
+  if (a == EXPM) return u2d((u & SGNM) | 0x3ff0000000000000ull);
+  if (a < 0x3e40000000000000ull) return small_arg(x, a, 1, fl);
+  if (a >= 0x4034000000000000ull) { *fl |= PE | C1; return u2d((u & SGNM) | 0x3ff0000000000000ull); }
+  return ziv(W_TANH, x, 0.0, 0, fl);
+}
+/* exp x: x > 0, x < 2^-54: 1 < e^x < 1 + 2^-53: rounds to 1 (down). x < 0, |x| < 2^-55: 1 - 2^-55 < e^x < 1, above the half-way point 1 - 2^-54: rounds to 1 (up). x >= 710: e^x > 2^1024. x <= -746: e^x < 2^-1076 < half the
+   smallest subnormal: rounds to +0 (tiny, inexact). */
+double fnvl_m_exp(double x, u32 *fl) {
+  u64 u = d2u(x), a = u & ~SGNM;
+  if (a > EXPM) return nan1(x, fl);
+  if (u == EXPM) return x;
+  if (u == (SGNM | EXPM)) return 0.0;
+  if (!a) return 1.0;
+  if (!(u >> 63)) {
+    if (a >= 0x4086300000000000ull) { *fl |= OE | PE | C1; return u2d(EXPM); }
+    if (a < 0x3c90000000000000ull) { *fl |= PE; return 1.0; }
+  } else {
+    if (a >= 0x4087500000000000ull) { *fl |= PE | UE; return 0.0; }
+    if (a < 0x3c80000000000000ull) { *fl |= PE | C1; return 1.0; }
+  }
+  return ziv(W_EXP, x, 0.0, 0, fl);
+}
+double fnvl_m_log(double x, u32 *fl) {
+  u64 u = d2u(x), a = u & ~SGNM;
+  if (a > EXPM) return nan1(x, fl);
+  if (!a) { *fl |= ZE; return u2d(SGNM | EXPM); }
+  if (u >> 63) return invalid(fl);
+  if (a == EXPM) return x;
+  if (u == 0x3ff0000000000000ull) return 0.0;
+  return ziv(W_LOG, x, 0.0, 0, fl);
+}
+/* pow(x, y), C99 Annex F: y = +-0 -> 1 (also for NaN x); x = 1 -> 1 (also for NaN y; no exception even for a signalling NaN, as Annex F words it); other NaNs propagate (nan2); y = +-inf: |x| = 1 -> 1, (|x| < 1) == (y > 0) -> +0 else +inf;
+   x = +-inf / +-0: the sign of the result is negative iff x < 0 and y is an odd integer; x = +-0, y < 0: +-inf with ZE; x < 0 finite and y not an integer: invalid; |x| = 1: +-1. Otherwise pow_exact (exact cases) or the loop. */
+double fnvl_m_pow(double x, double y, u32 *fl) {
+  u64 ux = d2u(x), uy = d2u(y), ax = ux & ~SGNM, ay = uy & ~SGNM;
+  int xs = (int)(ux >> 63);
+  if (!ay || ux == 0x3ff0000000000000ull) return 1.0;
+  if (ax > EXPM || ay > EXPM) return nan2(x, y, fl);
+  int yint = 0, yodd = 0;
+  if (ay != EXPM) {
+    u64 my; int ey; unpack(ay, &my, &ey);
+    int f = ey + __builtin_ctzll(my);
+    yint = f >= 0; yodd = f == 0;
+  }
+  if (ay == EXPM) {
+    if (ax == 0x3ff0000000000000ull) return 1.0;
+    int xlt = ax < 0x3ff0000000000000ull, ypos = !(uy >> 63);
+    return xlt == ypos ? 0.0 : u2d(EXPM);
+  }
+  int neg = xs && yodd, ypos = !(uy >> 63);
+  if (ax == EXPM) return u2d((neg ? SGNM : 0) | (ypos ? EXPM : 0));
+  if (!ax) { if (ypos) return u2d(neg ? SGNM : 0); *fl |= ZE; return u2d((neg ? SGNM : 0) | EXPM); }
+  if (xs && !yint) return invalid(fl);
+  if (ax == 0x3ff0000000000000ull) return u2d(neg ? 0xBFF0000000000000ull : 0x3ff0000000000000ull);
+  double r;
+  if (pow_exact(ax, uy, neg, &r, fl)) return r;
+  return ziv(W_POW, u2d(ax), y, neg, fl);
+}
+
+/* ================= public: fmod, sqrt (exact, IEEE: one rounding, none for fmod) ================= */
+/* fmod(x, y) = x - trunc(x/y) y is exactly representable: |x| = Ma 2^(ea-52), |y| = Mb 2^(eb-52) (53-bit normalised mantissas), D = ea - eb: D < 0 -> x; else the remainder is (Ma 2^D mod Mb) 2^(eb-52) by the
+   bitwise long division (r < 2 Mb < 2^54, D + 1 steps), sign of x (also for a zero remainder). x infinite or y zero: invalid; y infinite or x zero: x; NaN: nan2. */
+double fnvl_m_fmod(double x, double y, u32 *fl) {
+  u64 ua = d2u(x), ub = d2u(y);
+  if (isnan_(ua) || isnan_(ub)) return nan2(x, y, fl);
+  if (isinf_(ua) || iszero_(ub)) return invalid(fl);
+  if (isinf_(ub) || iszero_(ua)) return x;
+  u64 Ma, Mb; int ea2, eb2;
+  unpack(ua & ~SGNM, &Ma, &ea2); unpack(ub & ~SGNM, &Mb, &eb2);
+  int la = 63 - __builtin_clzll(Ma), lb = 63 - __builtin_clzll(Mb);
+  int ea = ea2 + la, eb = eb2 + lb;
+  Ma <<= 52 - la; Mb <<= 52 - lb;
+  int D = ea - eb;
+  if (D < 0) return x;
+  u64 r = Ma;
+  for (int i = 0; i <= D; i++) { if (r >= Mb) r -= Mb; if (i < D) r <<= 1; }
+  return exact_double(r, eb - 52, (int)(ua >> 63), fl);
+}
+/* sqrt: |x| = m 2^e with m in [2^52, 2^54) and e even (one doubling of m for an odd exponent): N = m 2^56 in [2^108, 2^110), q = floor(sqrt N) (55 bits) by the bitwise method, sqrt|x| = (q + f) 2^((e-56)/2) with
+   0 <= f < 1, f = 0 iff q^2 = N. (2q + [q^2 != N]) 2^((e-56)/2 - 1) lies on the same side of every rounding boundary of binary64 as the true value (the boundaries are multiples of 2 units of q since q has
+   55 bits, and q + 1/2 is strictly between q and q+1), so one exact_double of it is the correctly rounded root with the right flags. x < 0: invalid, -0 -> -0, +inf -> +inf, NaN -> nan1. */
+double fnvl_m_sqrt(double x, u32 *fl) {
+  u64 u = d2u(x), a = u & ~SGNM;
+  if (a > EXPM) return nan1(x, fl);
+  if (!a) return x;
+  if (u >> 63) return invalid(fl);
+  if (a == EXPM) return x;
+  u64 m; int e; unpack(a, &m, &e);
+  int lz = __builtin_clzll(m) - 11;
+  m <<= lz; e -= lz;
+  if (e & 1) { m <<= 1; e -= 1; }
+  unsigned __int128 N = (unsigned __int128)m << 56;
+  u64 q = 0;
+  for (int b = 54; b >= 0; b--) { u64 t = q | (1ull << b); if ((unsigned __int128)t * t <= N) q = t; }
+  u64 sticky = (unsigned __int128)q * q != N;
+  return exact_double((q << 1) | sticky, (e - 56) / 2 - 1, 0, fl);
 }

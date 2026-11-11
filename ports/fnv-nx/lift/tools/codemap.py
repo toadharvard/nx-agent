@@ -35,7 +35,7 @@ def analyse(U, runs):
             if i.imm_size == 4: f.add(i.address + i.imm_offset)
         r = None
         if not ins or n != e - s: r = 'undecodable' if n == 0 else 'leftover%d' % (e - s - n)
-        elif not (ins[-1].mnemonic in TERM or (e < TN and U.cov[e] == 1)): r = 'no-end'
+        elif not (ins[-1].mnemonic.split(' ')[-1] in TERM or (e < TN and U.cov[e] == 1)): r = 'no-end'
         else:
             lo = bisect.bisect_left(U.relocs, T0 + s); hi = bisect.bisect_left(U.relocs, T0 + e)
             if any(x not in f for x in U.relocs[lo:hi]): r = 'reloc-not-operand'

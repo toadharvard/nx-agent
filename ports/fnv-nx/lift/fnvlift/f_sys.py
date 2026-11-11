@@ -504,7 +504,7 @@ SSE3_SSE4A = ('addsubpd', 'addsubps', 'haddpd', 'haddps', 'hsubpd', 'hsubps', 'm
 
 
 def encoding(ins):
-    """-> (kind, bytes after the legacy prefixes). kind: 'vex' (C4/C5, ModRM.mod == 3 in 32-bit mode), 'evex' (62 with mod == 3), 'xop' (8F with map >= 8), 'map38', 'map3a', '0f', '1'"""
+    """-> (kind, bytes after the legacy prefixes). kind: 'vex' (C4/C5, ModRM.mod == 3 in 32-bit mode), 'evex' (62 with mod == 3), 'xop' (8F with map >= 8), 'map38', 'map3a', 'map0f' (0F 0F: 3DNow!), '0f', '1'"""
     b = bytes(ins.bytes) + b'\0\0\0'
     i = 0
     while b[i] in TRAP0D_PREFIX:
@@ -515,7 +515,7 @@ def encoding(ins):
     if o == 0x8f and (b[i + 1] & 0x1f) >= 8:
         return 'xop', b[i:]
     if o == 0x0f:
-        return ('map38' if b[i + 1] == 0x38 else 'map3a' if b[i + 1] == 0x3a else '0f'), b[i:]
+        return ('map38' if b[i + 1] == 0x38 else 'map3a' if b[i + 1] == 0x3a else 'map0f' if b[i + 1] == 0x0f else '0f'), b[i:]
     return '1', b[i:]
 
 
@@ -524,9 +524,9 @@ def _is_simd(cx, ins):
     return cx.ops and any(f_sse.isx(ins, o) or f_sse.ismm(ins, o) for o in cx.ops)
 
 
-@fallback(lambda cx, ins: encoding(ins)[0] in ('vex', 'evex', 'xop', 'map38', 'map3a') or cx.m in SSE3_SSE4A)
+@fallback(lambda cx, ins: encoding(ins)[0] in ('vex', 'evex', 'xop', 'map38', 'map3a', 'map0f') or cx.m in SSE3_SSE4A)
 def h_absent_ext(cx, ins):
-    """UD by absent extension: VEX/EVEX/XOP encodings (AVX, AVX2, FMA, BMI, AVX-512, XOP: CPUID.1:ECX.AVX = 0 etc.), the whole of the 0F 38 / 0F 3A opcode maps (SSSE3, SSE4.1/4.2, AES, PCLMUL, SHA,
+    """UD by absent extension: VEX/EVEX/XOP encodings (AVX, AVX2, FMA, BMI, AVX-512, XOP: CPUID.1:ECX.AVX = 0 etc.), the whole of the 0F 0F map (3DNow!, AMD only: the reference CPU of rt/cpumodel.c is Intel and cpuid reports no 3DNow), the whole of the 0F 38 / 0F 3A opcode maps (SSSE3, SSE4.1/4.2, AES, PCLMUL, SHA,
     GFNI, MOVBE, CRC32, ADX, INVPCID, CET, MOVDIR: no instruction of those maps belongs to the SSE2-era ISA of the model), SSE3 and SSE4a (CPUID.1:ECX.SSE3 = 0; f_sse's lddqu is an OPS handler and wins)."""
     ud_site(cx)
 
