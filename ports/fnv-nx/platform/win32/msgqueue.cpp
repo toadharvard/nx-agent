@@ -463,6 +463,17 @@ static void journal(UINT msg, unsigned pl, unsigned ph, HWND h)
     struct { UINT m, l, h; uint32_t t; HWND w; } e = { msg, pl, ph, (uint32_t)GetTickCount(), h };
     call_hook(0, 0, 0, (LPARAM)(uintptr_t)&e);   /* WH_JOURNALRECORD */
 }
+/* key messages (WM_KEYDOWN/UP, WM_SYSKEYDOWN/UP) in the input queues that no PeekMessageA has removed yet */
+extern "C" unsigned fnvnx_win_key_backlog(void)
+{
+    unsigned n = 0;
+    os_lock(&g_mql);
+    for (mq *q = g_mqs; q; q = q->next)
+        for (qnode *e = q->ih; e; e = e->next)
+            if (e->m.message >= 0x100 && e->m.message <= 0x105 && e->m.message != 0x102 && e->m.message != 0x103) n++;
+    os_unlock(&g_mql);
+    return n;
+}
 extern "C" void fnvnx_win_key(unsigned vk, unsigned scan, int down, unsigned flags)
 {
     bool pack = vk == 0xE7, up = !down;

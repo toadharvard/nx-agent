@@ -5,5 +5,6 @@
 
 extern "C" void fnvnx_input_pump(void)
 {
-    /* nothing to fetch: the host sources are push-driven */
+    /* nothing to fetch: the host sources are push-driven; the strokes of an entered text are released as on Horizon */
+    fnvnx_swkbd_pump();
 }

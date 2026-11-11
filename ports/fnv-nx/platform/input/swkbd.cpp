@@ -9,9 +9,17 @@
  * The rule: a character is typed by the key and Shift state under which the platform's own layout table
  * (fnvnx_win_vk_char, the table TranslateMessage uses) gives that character. The inverse is computed from that table
  * over every main-block virtual key and both Shift states, so a layout change cannot make the two disagree. A character
- * no key makes (outside printable ASCII on the en-US layout) is refused at entry: the applet is kept open on it with the
- * index of the refused unit, and it is never dropped. Strokes: Shift down, key down, key up, Shift up, one edge per
- * FNVNX_SWKBD_EDGE_NS, so a game that polls once per frame at 30 fps or more sees every edge. */
+ * no key makes (outside printable ASCII on the en-US layout) is refused: the applet is called again with that text as its
+ * initial text, until the text has strokes or the player cancels, and it is never dropped. Strokes: Shift down, key down,
+ * key up, Shift up.
+ *
+ * Pacing has no time in it: the next edge is released only after the game has observed the previous one. Observed means,
+ * on each channel the game imports: (a) a DirectInput keyboard read that returned data (GetDeviceState or GetDeviceData,
+ * peek included) happened after the edge was injected, and (b) no WM_KEYDOWN/UP/SYSKEY of the queues is left undequeued
+ * (PeekMessageA removed it). Which DI mode the game uses is not known here, so a read of either kind counts. Buffered DI
+ * data never overflows: an edge is released only while every acquired keyboard device with a buffer has a free slot, and
+ * it makes at most one event per device. With no acquired keyboard device, or a game that never reads, the edges stay
+ * queued: nothing is dropped and nothing times out. */
 #include "input.h"
 #include "../os/os.h"
 
@@ -19,6 +27,7 @@
 #include <vector>
 
 extern "C" {
+unsigned fnvnx_win_key_backlog(void);
 int fnvnx_win_vk_char(unsigned vk, int sh, int ctl, int caps, int num);
 unsigned fnvnx_win_vk_scan(unsigned vk, unsigned *ext);
 void fnvnx_win_key(unsigned vk, unsigned scan, int down, unsigned flags);
@@ -33,7 +42,8 @@ static bool g_tab_built;
 static os_lock_t g_lock;
 static std::vector<uint8_t> g_edges;   /* vk, scan, down: three bytes per edge */
 static size_t g_head;
-static uint64_t g_last_ns;
+static uint64_t g_mark = UINT64_MAX;   /* DI read count after the last released edge was injected; max: not yet injected */
+static bool g_armed;                   /* an edge was released and may not be observed yet */
 static bool g_combo_held;
 
 static void build(void)
@@ -75,26 +85,32 @@ extern "C" unsigned fnvnx_swkbd_pending(void)
     return n;
 }
 
-extern "C" void fnvnx_swkbd_pump(uint64_t now)
+extern "C" void fnvnx_swkbd_pump(void)
 {
     uint8_t e[3];
+    bool due = false;
     os_lock(&g_lock);
-    bool due = g_head < g_edges.size() && (!g_last_ns || now - g_last_ns >= FNVNX_SWKBD_EDGE_NS);
-    if (due) {
+    if (g_head < g_edges.size() && fnvnx_input_kbd_room() >= 1 &&
+        (!g_armed || (fnvnx_input_kbd_reads() > g_mark && !fnvnx_win_key_backlog()))) {
         memcpy(e, &g_edges[g_head], 3);
         g_head += 3;
-        g_last_ns = now ? now : 1;
+        g_armed = due = true;
+        g_mark = UINT64_MAX;   /* no read counts until the edge is in */
         if (g_head == g_edges.size()) { g_edges.clear(); g_head = 0; }
     }
     os_unlock(&g_lock);
-    if (due) fnvnx_swkbd_inject(e[0], e[1], e[2]);   /* outside the lock: the game's window procedure may run from here */
+    if (!due) return;
+    fnvnx_swkbd_inject(e[0], e[1], e[2]);   /* outside the lock: the game's window procedure may run from here */
+    os_lock(&g_lock);
+    g_mark = fnvnx_input_kbd_reads();       /* a read between the injection and here is not counted: it waits for the next one */
+    os_unlock(&g_lock);
 }
 
-static size_t check(const uint16_t *t, size_t n, void *)
+/* the 1-based index of the first unit no key makes, 0 if every unit has a stroke */
+static size_t refused(const uint16_t *t, size_t n)
 {
     unsigned vk, sc;
     int sh;
-    if (n > FNVNX_SWKBD_MAX_LEN) return FNVNX_SWKBD_MAX_LEN + 1;
     for (size_t i = 0; i < n; i++)
         if (!fnvnx_swkbd_stroke(t[i], &vk, &sc, &sh)) return i + 1;
     return 0;
@@ -102,10 +118,22 @@ static size_t check(const uint16_t *t, size_t n, void *)
 
 extern "C" int fnvnx_swkbd_enter(void)
 {
-    uint16_t text[FNVNX_SWKBD_MAX_LEN];
+    uint16_t text[FNVNX_SWKBD_MAX_LEN + 1], keep[FNVNX_SWKBD_MAX_LEN];
     size_t n = 0;
-    int r = os_text_entry(FNVNX_SWKBD_MAX_LEN, check, NULL, text, &n);
-    if (r <= 0) return r;
+    const uint16_t *init = NULL;
+    size_t init_n = 0;
+    for (;;) {   /* the text is ours to validate: a refused one is shown again, until it has strokes or the player cancels (a rule, not a count) */
+        int r = os_text_entry(FNVNX_SWKBD_MAX_LEN, init, init_n, text, &n);
+        if (r == 0) return 0;
+        if (r < 0) {   /* the applet could not run (or the contract was broken): loud, with the code; there is no other path to the text */
+            os_debug_print("swkbd: the system keyboard failed");
+            os_exit_process(-r);
+        }
+        if (!refused(text, n)) break;
+        memcpy(keep, text, n * 2);   /* init must not alias out */
+        init = keep;
+        init_n = n;
+    }
     std::vector<uint8_t> e;   /* built outside the lock: fnvnx_swkbd_stroke takes it */
     for (size_t i = 0; i < n; i++) {
         unsigned vk, sc;

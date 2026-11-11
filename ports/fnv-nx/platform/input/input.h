@@ -79,14 +79,16 @@ void fnvnx_touch_frame(const fnvnx_touch_point *pts, unsigned count, uint64_t ti
 /* ---- text entry through the system software keyboard (swkbd.cpp; docs/AUDIO_INPUT.md "Text entry")
  * The pad filter takes the combination FNVNX_SWKBD_COMBO out of the buttons the game sees and, once per press of the
  * combination, runs the applet (os_text_entry). The entered text becomes the key strokes of the platform's layout that
- * turn back into it; the strokes are released one edge per fnvnx_swkbd_pump call, at least FNVNX_SWKBD_EDGE_NS apart,
- * through fnvnx_swkbd_inject, the single point that feeds every keyboard channel of the platform. */
+ * turn back into it; the strokes are released one edge per fnvnx_swkbd_pump call, and the next only after the game has
+ * observed the previous one (swkbd.cpp: no time in the rule), through fnvnx_swkbd_inject, the single point that feeds
+ * every keyboard channel of the platform. */
 #define FNVNX_SWKBD_COMBO (FNVNX_NPAD_STICKL | FNVNX_NPAD_STICKR)   /* both stick clicks held together */
 #define FNVNX_SWKBD_MAX_LEN 64                                      /* units per entry */
-#define FNVNX_SWKBD_EDGE_NS 20000000ull
 void fnvnx_swkbd_filter(uint64_t *buttons);          /* pad path: consumes the combination, may run the applet */
 int fnvnx_swkbd_enter(void);                         /* runs the applet now; strokes queued, 0 cancelled, <0 error */
-void fnvnx_swkbd_pump(uint64_t now_ns);              /* releases the next key edge when it is due */
+void fnvnx_swkbd_pump(void);                         /* releases the next key edge if the previous one was observed */
+uint64_t fnvnx_input_kbd_reads(void);                /* DirectInput keyboard reads that returned data, ever (dinput.cpp) */
+unsigned fnvnx_input_kbd_room(void);                 /* free buffered slots over the acquired keyboards; 0 when none is acquired */
 void fnvnx_swkbd_inject(unsigned vk, unsigned scan, int down);   /* the one injection point */
 int fnvnx_swkbd_stroke(uint16_t ch, unsigned *vk, unsigned *scan, int *shift);   /* the layout inverted; 0: no key makes ch */
 unsigned fnvnx_swkbd_pending(void);                  /* edges not yet released */

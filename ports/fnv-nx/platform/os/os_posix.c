@@ -3,6 +3,7 @@
 #define _GNU_SOURCE
 #include "os_clock.h"
 #include "os_shm.h"
+#include "fnvnx/hostapi.h"
 
 /* os_tick_freq, os_fs_case_insensitive: manifest/env_const.tsv */
 #include "env_const_posix.gen.inc"
@@ -437,7 +438,9 @@ void os_show_message(const char *caption, const char *text) { (void)caption; (vo
 /* ---- text entry: the scripted user of the host tests */
 #define TS_MAX 32
 static struct { uint16_t *text; size_t n; int cancel; } g_ts[TS_MAX];
-static unsigned g_ts_head, g_ts_count, g_ts_rejects;
+static unsigned g_ts_head, g_ts_count, g_ts_calls;
+static uint16_t g_ts_init[FNVNX_TEXT_ENTRY_MAX];
+static size_t g_ts_init_n = (size_t)-1;
 static os_lock_t g_ts_lock;
 static void ts_put(const uint16_t *t, size_t n, int cancel)
 {
@@ -453,32 +456,45 @@ static void ts_put(const uint16_t *t, size_t n, int cancel)
 }
 void os_text_script_push(const uint16_t *t, size_t n) { ts_put(t, n, 0); }
 void os_text_script_cancel(void) { ts_put(NULL, 0, 1); }
-unsigned os_text_script_rejects(void) { return g_ts_rejects; }
+unsigned os_text_script_calls(void) { return g_ts_calls; }
+size_t os_text_script_init(uint16_t *buf, size_t cap)
+{
+    os_lock(&g_ts_lock);
+    size_t n = g_ts_init_n;
+    if (n != (size_t)-1) memcpy(buf, g_ts_init, (n < cap ? n : cap) * 2);
+    os_unlock(&g_ts_lock);
+    return n;
+}
 void os_text_script_reset(void)
 {
     os_lock(&g_ts_lock);
     while (g_ts_count) { free(g_ts[g_ts_head].text); g_ts_head = (g_ts_head + 1) % TS_MAX; g_ts_count--; }
-    g_ts_rejects = 0;
+    g_ts_calls = 0;
+    g_ts_init_n = (size_t)-1;
     os_unlock(&g_ts_lock);
 }
-int os_text_entry(unsigned max_len, os_text_check_fn check, void *ctx, uint16_t *out, size_t *n)
+int os_text_entry(unsigned max_len, const uint16_t *init, size_t init_n, uint16_t *out, size_t *n)
 {
-    for (;;) {   /* one iteration: the applet is open; a refused text reopens it */
-        os_lock(&g_ts_lock);
-        if (!g_ts_count) { os_unlock(&g_ts_lock); return 0; }
-        uint16_t *t = g_ts[g_ts_head].text;
-        size_t len = g_ts[g_ts_head].n;
-        int cancel = g_ts[g_ts_head].cancel;
-        g_ts_head = (g_ts_head + 1) % TS_MAX;
-        g_ts_count--;
-        os_unlock(&g_ts_lock);
-        if (cancel) return 0;
-        int ok = len <= max_len && !check(t, len, ctx);
-        if (ok) { if (len) memcpy(out, t, len * 2); *n = len; }
-        else { os_lock(&g_ts_lock); g_ts_rejects++; os_unlock(&g_ts_lock); }
-        free(t);
-        if (ok) return 1;
+    if (max_len == 0 || max_len > FNVNX_TEXT_ENTRY_MAX || !out || !n) return -(int)FNVNX_HE_BADINPUT;
+    os_lock(&g_ts_lock);
+    g_ts_calls++;
+    g_ts_init_n = init ? init_n : (size_t)-1;
+    if (init) memcpy(g_ts_init, init, (init_n < FNVNX_TEXT_ENTRY_MAX ? init_n : FNVNX_TEXT_ENTRY_MAX) * 2);
+    if (!g_ts_count) { os_unlock(&g_ts_lock); return 0; }   /* an empty script is a user who closes the applet */
+    uint16_t *t = g_ts[g_ts_head].text;
+    size_t len = g_ts[g_ts_head].n;
+    int cancel = g_ts[g_ts_head].cancel;
+    g_ts_head = (g_ts_head + 1) % TS_MAX;
+    g_ts_count--;
+    os_unlock(&g_ts_lock);
+    if (!cancel) {
+        if (len > max_len) len = max_len;   /* the applet's field takes no more units */
+        if (len) memcpy(out, t, len * 2);
+        out[len] = 0;
+        *n = len;
     }
+    free(t);
+    return cancel ? 0 : 1;
 }
 /* the console's dock state of the host tests: handheld until a test says otherwise */
 static volatile int g_posix_docked;
