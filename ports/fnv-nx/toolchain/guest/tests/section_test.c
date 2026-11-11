@@ -12,10 +12,10 @@ static int g_n, g_bad;
 #define ERR(code) (-(int)(code))
 #define B(a) ((volatile uint8_t *)(uintptr_t)(a))
 
-static uint64_t vm(uint32_t fn, uint64_t a0, uint64_t a1)
+static uint64_t vmn(uint32_t fn, uint32_t n, uint64_t a0, uint64_t a1)
 {
     uint64_t arg[2] = {a0, a1};
-    return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, fn, FNVNX_ADDR(arg), 2);
+    return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, fn, FNVNX_ADDR(arg), n);
 }
 
 int main(void)
@@ -25,7 +25,7 @@ int main(void)
     CK(fnvnx_section_create(0x10000, &id) == 0 && id == 1);
 
     /* two overlapping views, one host-chosen, one fixed inside a VM reservation */
-    uint32_t resv = (uint32_t)vm(FNVNX_PLAT_VM_RESERVE, 0, 0x40000);
+    uint32_t resv = (uint32_t)vmn(FNVNX_PLAT_VM_RESERVE, 2, 0, 0x40000);
     CK(resv != 0);
     CK(fnvnx_section_map(id, 0, 0x4000, 0, &a) == 0 && a != 0 && !(a & 0xFFFF));
     uint32_t fx = resv + 0x10000;
@@ -57,14 +57,14 @@ int main(void)
     CK(fnvnx_section_map(id, 0, 0x2000, resv + 0x40000 - 0x1000, &t) == ERR(FNVNX_SEC_E_REGION));
 
     /* VM services and views */
-    CK(vm(FNVNX_PLAT_VM_COMMIT, fx, 0x1000) == 0xD401 && vm(FNVNX_PLAT_VM_COMMIT, resv, 0x20000) == 0xD401);
-    CK(vm(FNVNX_PLAT_VM_COMMIT, resv, 0x8000) == 0);
+    CK(vmn(FNVNX_PLAT_VM_COMMIT, 2, fx, 0x1000) == 0xD401 && vmn(FNVNX_PLAT_VM_COMMIT, 2, resv, 0x20000) == 0xD401);
+    CK(vmn(FNVNX_PLAT_VM_COMMIT, 2, resv, 0x8000) == 0);
     CK(fnvnx_section_map(id, 0, 0x1000, resv + 0x4000, &t) == ERR(FNVNX_SEC_E_RANGE));   /* over committed memory */
-    CK(vm(FNVNX_PLAT_VM_DECOMMIT, fx, 0x1000) == 0xD401 && vm(FNVNX_PLAT_VM_DECOMMIT, resv, 0x20000) == 0xD401);
+    CK(vmn(FNVNX_PLAT_VM_DECOMMIT, 2, fx, 0x1000) == 0xD401 && vmn(FNVNX_PLAT_VM_DECOMMIT, 2, resv, 0x20000) == 0xD401);
     uint64_t pr[3] = {fx, 0x1000, FNVNX_VM_PROT_R};
     CK(fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_VM_PROTECT, FNVNX_ADDR(pr), 3) == 0xD401);
-    CK(vm(FNVNX_PLAT_VM_DECOMMIT, resv, 0x8000) == 0);
-    CK(vm(FNVNX_PLAT_VM_RELEASE, resv, 0) == 0xD401 && B(b)[0x1000] == 0x77);
+    CK(vmn(FNVNX_PLAT_VM_DECOMMIT, 2, resv, 0x8000) == 0);
+    CK(vmn(FNVNX_PLAT_VM_RELEASE, 1, resv, 0) == 0xD401 && B(b)[0x1000] == 0x77);
 
     /* unmap: exactly a view; the others and the data stay */
     CK(fnvnx_section_unmap(a, 0x3000) == ERR(FNVNX_SEC_E_RANGE) && fnvnx_section_unmap(a + 0x1000, 0x1000) == ERR(FNVNX_SEC_E_RANGE));
@@ -73,7 +73,7 @@ int main(void)
     CK(B(b)[0] == 0xA5 && B(b)[0x1000] == 0x77 && B(d)[0x2000] == 0xA5 && B(c)[5] == 0x18);
     B(b)[2] = 0x99;
     CK(B(d)[0x2002] == 0x99);
-    CK(fnvnx_section_unmap(b, 0x4000) == 0 && vm(FNVNX_PLAT_VM_RELEASE, resv, 0) == 0);
+    CK(fnvnx_section_unmap(b, 0x4000) == 0 && vmn(FNVNX_PLAT_VM_RELEASE, 1, resv, 0) == 0);
 
     /* free with live views is deferred, the id dies, the data lives, the last unmap releases */
     CK(fnvnx_section_free(id) == 0 && fnvnx_section_free(id) == ERR(FNVNX_SEC_E_ID));

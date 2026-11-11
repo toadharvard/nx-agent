@@ -196,29 +196,6 @@ static u64 h_input_poll(u64 out, u64 cap) {
     return n;
 }
 
-static u64 h_map_fixed(u64 addr, u64 size, u64 src) {
-    /* inside a range S10 claimed at startup (the data window): zero it, nothing to map */
-    if (fnvnx_reserve_map_fixed && fnvnx_reserve_contains && fnvnx_reserve_contains(addr, size))
-        return fnvnx_reserve_map_fixed(addr, size) == 0 ? 0 : MAKERESULT(Module_Libnx, LibnxError_BadInput);
-    if (!src || ((addr | size | src) & 0xFFF)) return MAKERESULT(Module_Libnx, LibnxError_BadInput);
-    MemoryInfo mi; u32 pi;
-    if (R_FAILED(svcQueryMemory(&mi, &pi, addr)) || mi.type != MemType_Unmapped || mi.addr + mi.size < addr + size)
-        return MAKERESULT(Module_Libnx, LibnxError_AlreadyInitialized);   /* occupied (random ASLR placement) */
-    logf_("fnvnx host: map_fixed %#010lx..%#010lx from %#010lx\n", addr, addr + size, src);
-    return svcMapMemory((void *)addr, (void *)src, size);
-}
-
-static fnvnx_ext_handler g_ext[64];
-int fnvnx_host_register_ext(uint32_t module, fnvnx_ext_handler handler) {
-    if (module >= 64 || g_ext[module]) return -1;
-    g_ext[module] = handler;
-    return 0;
-}
-static u64 h_ext_call(u64 module, u64 fn, u64 args, u64 nargs) {
-    if (module >= 64 || !g_ext[module]) return FNVNX_EXT_NO_MODULE;
-    return g_ext[module]((uint32_t)fn, (const uint64_t *)args, (uint32_t)nargs);
-}
-
 #define FNVNX_HOSTAPI_V3_SLOTS                                                                             \
     .audio_open = (u64)h_audio_open, .audio_submit = (u64)h_audio_submit, .audio_close = (u64)h_audio_close, \
     .pad_read = (u64)h_pad_read, .pad_vibrate = (u64)h_pad_vibrate, .input_poll = (u64)h_input_poll,      \

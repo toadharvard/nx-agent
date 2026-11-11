@@ -314,7 +314,7 @@ static void test_raw(void) {
     CK(raw(FNVNX_PLAT_SOCK_CLOSE, 1, 0, 0, 0, 0, 0) == (uint64_t)-9);                  /* e.g. the host's stdin */
     CK(raw(FNVNX_PLAT_SOCK_GAI_FETCH, 3, 4242, 0, 0, 0, 0) == (uint64_t)-FNVNX_WE_INVAL);
     CK(raw(FNVNX_PLAT_SOCK_SOCKET, 3, 99, 1, 0, 0, 0) == (uint64_t)-97);               /* wire EAFNOSUPPORT */
-    CK(raw(34, 0, 0, 0, 0, 0, 0) == FNVNX_EXT_NO_MODULE);
+    CK(raw(FNVNX_PLAT_TZ_AT, 0, 0, 0, 0, 0, 0) == FNVNX_EXT_NO_MODULE);
     FnvnxWireAddrinfo hint;
     memset(&hint, 0, sizeof hint);
     hint.family = FNVNX_WAF_INET;

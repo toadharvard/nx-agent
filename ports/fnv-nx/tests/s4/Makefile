@@ -51,7 +51,7 @@ OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
 # a call goes through the boundary, a direct call does not compile); the tests are "the game" and keep plain pointers.
 $(filter $(OUT)/platform/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 
-.PHONY: all test vclock probe private ilp32 m32 iat device qemu clean gfn-nocompile
+.PHONY: all test vclock probe private ilp32 m32 iat device qemu clean gfn-nocompile hostapi-check
 all: test
 
 $(OUT)/%.c.o: $(ROOT)/%.c
@@ -145,7 +145,11 @@ $(OUT)/s4_tests_private: $(PRIV_OBJS) $(OUT)/libfreetype.a
 private: $(OUT)/s4_tests_private
 	rm -rf $(OUT)/root-private && FNVNX_TEST_ONLY=vmp_ FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root-private $(OUT)/s4_tests_private
 
-test: $(OUT)/s4_tests
+# every ext_call of the guest sources is a service of toolchain/include/fnvnx/hostapi.h with its declared argument count
+hostapi-check:
+	python3 -I $(ROOT)/platform/manifest/check_hostapi.py --root $(ROOT)
+
+test: hostapi-check $(OUT)/s4_tests
 	rm -rf $(OUT)/root && FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root GLIBC_TUNABLES=glibc.malloc.tcache_count=0 $(OUT)/s4_tests
 
 # ---- i386 (-m32) build: the ILP32 data model with a host libc. /usr/include/asm is the multilib packages' symlink,

@@ -23,7 +23,7 @@
  * them (an older render/nine test build) still links and runs, only without the reservation. */
 #pragma weak fnvnx_reserve_early
 #pragma weak fnvnx_reserve_late
-#pragma weak fnvnx_reserve_map_fixed
+#pragma weak fnvnx_reserve_release
 #pragma weak fnvnx_reserve_contains
 #pragma weak fnvnx_reserve_remap_code
 #pragma weak fnvnx_reserve_address_space
@@ -125,7 +125,7 @@ static void log_line(const char *line) { logf_("%s\n", line); }
 
 /* ---- host API implementations (LP64; every parameter and result is u64) -------------------------------- */
 static u64 h_output_debug_string(u64 str, u64 len) { return svcOutputDebugString((const char *)str, len); }
-static u64 h_sleep_ns(u64 ns) { svcSleepThread((s64)ns); return 0; }
+static u64 h_sleep_ns(u64 ns) { svcSleepThread(ns > (u64)INT64_MAX ? INT64_MAX : (s64)ns); return 0; }   /* never a negative duration (those are the kernel's yields) */
 static u64 h_exit(u64 code) {
     logf_("fnvnx host: guest called exit(%d)\n", (int)code);
     pump_stop();
@@ -175,51 +175,16 @@ static void load_config(void) {
           g_cfg.core3, g_cfg.boost_loading);
 }
 
+#include "host_ids.inc"
+#include "host_thread_activity.inc"
+#include "host_vm.inc"
+#include "host_section.inc"
+#include "host_ext.inc"
 #include "host_v2.inc"
 #include "host_v3.inc"
-
-/* ---- platform services (ext_call module FNVNX_EXT_PLATFORM) */
-static int g_boost;   /* the CPU boost mode set last */
-static void set_cpu_boost(int mode) {
-    if (mode == g_boost) return;
-    Result rc = appletSetCpuBoostMode(mode ? ApmCpuBoostMode_FastLoad : ApmCpuBoostMode_Normal);
-    logf_("fnvnx host: cpu boost %s%s\n", mode ? "FastLoad" : "Normal", R_FAILED(rc) ? " (FAILED)" : "");
-    if (R_SUCCEEDED(rc)) g_boost = mode;
-}
 #include "host_message.inc"
-#include "host_vm.inc"
 #include "host_sock.inc"   /* BSD sockets (FNVNX_PLAT_SOCK_*); host_sock_init/exit below */
-static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) {
-    if (fn == FNVNX_PLAT_CPU_BOOST && nargs >= 1) {
-        if (!g_cfg.boost_loading) return 1;
-        set_cpu_boost(args[0] ? 1 : 0);
-        return 0;
-    }
-    if (fn == FNVNX_PLAT_THREAD_ACTIVITY && nargs >= 2) return h_thread_activity(args[0], args[1]);
-    if (fn == FNVNX_PLAT_THREAD_SELF) return h_thread_self();
-    if (fn == FNVNX_PLAT_MESSAGE && nargs >= 2) return host_show_message((const char *)args[0], (const char *)args[1]);
-    if (fn == FNVNX_PLAT_VM_RESERVE && nargs >= 2) return host_vm_reserve(args[0], args[1]);
-    if (fn == FNVNX_PLAT_VM_COMMIT && nargs >= 2) return host_vm_commit(args[0], args[1]);
-    if (fn == FNVNX_PLAT_VM_DECOMMIT && nargs >= 2) return host_vm_decommit(args[0], args[1]);
-    if (fn == FNVNX_PLAT_VM_RELEASE && nargs >= 1) return host_vm_release(args[0]);
-    if (fn == FNVNX_PLAT_TZ_AT && nargs >= 2) {
-        FnvnxTzAt *o = (FnvnxTzAt *)args[1];
-        TimeCalendarTime cal;
-        TimeCalendarAdditionalInfo info;
-        if (R_FAILED(timeToCalendarTimeWithMyRule(args[0], &cal, &info))) return 1;
-        o->off_s = info.offset;
-        o->dst = info.DST != 0;
-        memcpy(o->abbr, info.timezoneName, sizeof o->abbr);
-        o->abbr[sizeof o->abbr - 1] = 0;
-        return 0;
-    }
-    if (fn == FNVNX_PLAT_DISPLAY_DOCKED) {
-        AppletOperationMode m = appletGetOperationMode();
-        return m == AppletOperationMode_Console ? 1 : 0;
-    }
-    if (fn >= FNVNX_PLAT_SOCK_FIRST && fn <= FNVNX_PLAT_SOCK_LAST) return host_sock_call(fn, args, nargs);
-    return FNVNX_EXT_NO_MODULE;
-}
+#include "host_platform.inc"
 
 /* ---- process layout ------------------------------------------------------------------------------------ */
 /* In 32-bit spaces Mesosphere reports the ASLR region as [0x00200000, 4 GiB) (alias code region = small +
@@ -436,6 +401,29 @@ fail:
     return false;
 }
 
+/* The windows S10 claimed (original image + text, data window) are state Stack, which the kernel cannot reprotect (host_vm.inc K1):
+ * each claimed one is released and mapped again by host_win_adopt as AliasCodeData, so VM_PROTECT works on the loader's image
+ * sections. A range that was not claimed (the text range is optional; a host built without S10) is left to map_fixed's own path.
+ * Needs the own-process handle (load_guest made it); single-threaded, before the guest runs. */
+static bool adopt_windows(void) {
+    static const struct { const char *name; u64 lo, hi; } w[] = {
+        { "image+text", FNVNX_RESV_IMAGE_LO, FNVNX_RESV_WINDOW_LO },   /* the names fnvnx_reserve_early gives (S10) */
+        { "data-window", FNVNX_RESV_WINDOW_LO, FNVNX_RESV_WINDOW_HI },
+    };
+    if (!fnvnx_reserve_release) return true;
+    for (size_t i = 0; i < sizeof w / sizeof w[0]; i++) {
+        u64 backing = 0;
+        Result rc = fnvnx_reserve_release(w[i].name, &backing);
+        if (rc == FNVNX_RESV_RC_NO_HEAP || rc == MAKERESULT(Module_Libnx, LibnxError_NotFound)) continue;   /* not claimed */
+        if (R_SUCCEEDED(rc)) rc = host_win_adopt(w[i].lo, w[i].hi, backing);
+        if (R_FAILED(rc)) {
+            logf_("fnvnx host: window %s: %#x\n", w[i].name, rc);
+            return false;
+        }
+    }
+    return true;
+}
+
 int main(int argc, char **argv) {
     (void)argc; (void)argv;
     consoleInit(NULL);
@@ -479,7 +467,7 @@ int main(int argc, char **argv) {
     fnvnx_host_register_ext(FNVNX_EXT_PLATFORM, platform_ext);
 
     u64 gbase = 0, gsize = 0, rc;
-    if (!load_guest(fnvnx_guest_path, &gbase, &gsize)) {
+    if (!load_guest(fnvnx_guest_path, &gbase, &gsize) || !adopt_windows()) {
         rc = 0xF00000FFu;
     } else {
         logf_("fnvnx host: guest %s mapped at %#010lx, %#lx bytes\n", fnvnx_guest_path, gbase, gsize);

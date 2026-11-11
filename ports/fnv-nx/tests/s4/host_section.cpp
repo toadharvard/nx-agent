@@ -131,6 +131,11 @@ int fnvnx_section_map(uint32_t id, uint32_t offset, uint32_t size, uint32_t addr
 {
     if (!g_service)
         return -(int)FNVNX_SEC_E_NOSERVICE;
+    /* the order of checks is the header's (SECTION_MAP): size, alignment of addr and offset, id, range, table, address */
+    if (!size || (size & (SPAGE - 1)) || (uint64_t)size > FNVNX_SEC_MAX_SIZE)
+        return -(int)FNVNX_SEC_E_SIZE;
+    if ((offset & (SPAGE - 1)) || (addr_hint & (SPAGE - 1)))
+        return -(int)FNVNX_SEC_E_ALIGN;
     int si = -1;
     for (int i = 0; i < MAX_SECTIONS; i++)
         if (g_sec[i].used && !g_sec[i].freed && g_sec[i].id == id)
@@ -138,10 +143,6 @@ int fnvnx_section_map(uint32_t id, uint32_t offset, uint32_t size, uint32_t addr
     if (si < 0)
         return -(int)FNVNX_SEC_E_ID;
     Sec &s = g_sec[si];
-    if (!size || (size & (SPAGE - 1)))
-        return -(int)FNVNX_SEC_E_SIZE;
-    if ((offset & (SPAGE - 1)) || (addr_hint & (SPAGE - 1)))
-        return -(int)FNVNX_SEC_E_ALIGN;
     if ((uint64_t)offset + size > s.size)
         return -(int)FNVNX_SEC_E_RANGE;
     int vi = 0;

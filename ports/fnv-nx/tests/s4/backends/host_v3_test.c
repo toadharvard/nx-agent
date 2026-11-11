@@ -9,7 +9,7 @@
  *          pads zeroed, vibration amplitudes as float bits to the right vibration devices (two motors for handheld
  *          and dual Joy-Con, one for a Pro Controller, re-initialised when the style changes)
  *   events keyboard edges as HID usages, mouse motion and buttons, touch frames, and the caller's capacity
- *   ext    the FNVNX_EXT_* dispatch, map_fixed's argument checks (svcQueryMemory stubbed to fail). */
+ *   ext    the FNVNX_EXT_* registry and dispatch (host_ext.inc). map_fixed / UNMAP_FIXED are in host_vm.inc: host_prot_test.c. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,10 +19,6 @@
 
 /* ---- host.c's surroundings */
 static void logf_(const char *fmt, ...) { (void)fmt; }
-int fnvnx_reserve_map_fixed(uint64_t, uint64_t) __attribute__((weak));
-int fnvnx_reserve_contains(uint64_t, uint64_t) __attribute__((weak));
-Result svcQueryMemory(MemoryInfo *mi, u32 *pi, u64 addr) { (void)addr; memset(mi, 0, sizeof *mi); *pi = 0; return 1; }
-Result svcMapMemory(void *dst, void *src, u64 size) { (void)dst; (void)src; (void)size; return 1; }
 void mutexLock(Mutex *m) { (void)m; }
 void mutexUnlock(Mutex *m) { (void)m; }
 void armDCacheFlush(void *addr, size_t size) { (void)addr; (void)size; }
@@ -140,6 +136,7 @@ Result hidSendVibrationValues(const HidVibrationDeviceHandle *h, const HidVibrat
     return 0;
 }
 
+#include "../../../toolchain/host/host_ext.inc"
 #include "../../../toolchain/host/host_v3.inc"
 
 static int g_fail, g_checks;
@@ -265,7 +262,7 @@ static void test_events(void)
     T(n == 1 && ev[0].type == FNVNX_EV_KEY && ev[1].type == 0xABABABABu);
 }
 
-static uint64_t ext_echo(uint32_t fn, const uint64_t *a, uint32_t n) { return fn == 3 && n == 2 ? a[0] + a[1] : 0; }
+static uint64_t ext_echo(uint32_t fn, const uint64_t *a, uint32_t n) { return fn == 3 && n >= 2 ? a[0] + a[1] : 0; }
 
 /* the ext_call dispatch the guest's FNVNX_EXT_PLATFORM calls go through, and map_fixed's argument checks */
 static void test_ext_and_map(void)
@@ -275,9 +272,11 @@ static void test_ext_and_map(void)
     T(fnvnx_host_register_ext(5, ext_echo) == 0 && fnvnx_host_register_ext(5, ext_echo) == -1);
     T(fnvnx_host_register_ext(64, ext_echo) == -1);
     T(h_ext_call(5, 3, (u64)(uintptr_t)args, 2) == 42 && h_ext_call(64, 3, 0, 0) == FNVNX_EXT_NO_MODULE);
-    T(h_map_fixed(0x10000000, 0x1000, 0) == MAKERESULT(Module_Libnx, LibnxError_BadInput));
-    T(h_map_fixed(0x10000800, 0x1000, 0x20000000) == MAKERESULT(Module_Libnx, LibnxError_BadInput));
-    T(h_map_fixed(0x10000000, 0x1000, 0x20000000) == MAKERESULT(Module_Libnx, LibnxError_AlreadyInitialized));
+    /* ext_call: every refusal has its own value; a handler is never called for a fn it cannot be given */
+    T(fnvnx_host_register_ext(6, NULL) == -1 && h_ext_call(6, 3, (u64)(uintptr_t)args, 2) == FNVNX_EXT_NO_MODULE);   /* a null handler registers nothing */
+    T(h_ext_call(5, 0x100000003ull, (u64)(uintptr_t)args, 2) == FNVNX_EXT_NO_SERVICE);   /* fn above 32 bits does not wrap to 3 */
+    T(h_ext_call(5, 3, (u64)(uintptr_t)args, 0x100000002ull) == 42);                      /* nargs above 32 bits is saturated, not wrapped to 2 */
+    T(h_ext_call(63, 1, 0, 0) == FNVNX_EXT_NO_MODULE && h_ext_call(~0ull, 1, 0, 0) == FNVNX_EXT_NO_MODULE);
 }
 
 int main(void)

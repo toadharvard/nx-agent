@@ -6,17 +6,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-/* ---- threads */
-typedef struct HostThread {
-    Thread t;
-    u64 entry, arg;
-    u32 state;                       /* HT_* bits, atomic */
-    struct HostThread *next_zombie;  /* g_zombies */
-} HostThread;
-#define HT_STARTED 1u
-#define HT_FINISHED 2u               /* the guest entry returned: the thread is in libnx's threadExit */
-#define HT_DETACHED 4u               /* thread_free came before the end: the thread hands itself to the reaper */
-
+/* ---- threads (HostThread: host_ids.inc; a thread id is a table handle) */
 /* Detached threads. Win32 code closes a thread handle while the thread runs (CreateThread + CloseHandle), and a
  * thread often drops the last reference itself (platform/win32 thread_trampoline), so thread_free can come before
  * the end or from the thread itself. libnx's threadClose refuses a running thread (tls_array set: BadInput) and
@@ -76,9 +66,15 @@ static u64 h_thread_create(u64 entry, u64 arg, u64 stack, u64 prio, u64 cpu) {
         free(h);
         return 0;
     }
+    u64 id = host_id_new(HOST_ID_THREAD, h);
+    if (!id) {   /* id table full: the thread was never started, it is closed again */
+        threadClose(&h->t);
+        free(h);
+        return 0;
+    }
     Result rc = svcSetThreadCoreMask(h->t.handle, ideal, mask);   /* before it starts */
     place_log("guest", h->t.handle, role, ideal, mask, hprio, rc);
-    return (u64)h;
+    return id;
 }
 
 /* Host-side pthreads (libnx newlib: priority 0x3B, the process's ideal core, all cores) take the render-worker
@@ -100,15 +96,22 @@ int __wrap___syscall_thread_create(struct __pthread_t **t, void *(*fn)(void *), 
     return rc;
 }
 static u64 h_thread_start(u64 id) {
-    HostThread *h = (HostThread *)id;
+    HostThread *h = host_id_get(HOST_ID_THREAD, id);
+    if (!h) return FNVNX_HE_NOTFOUND;
     __atomic_fetch_or(&h->state, HT_STARTED, __ATOMIC_RELEASE);   /* before it runs: its end sees the bit */
     Result rc = threadStart(&h->t);
     if (R_FAILED(rc)) __atomic_fetch_and(&h->state, ~HT_STARTED, __ATOMIC_RELEASE);
     return rc;
 }
-static u64 h_thread_join(u64 id) { return threadWaitForExit(&((HostThread *)id)->t); }
-static u64 h_thread_free(u64 id) {   /* after join, or a detach: also of a running thread, also by itself */
-    HostThread *h = (HostThread *)id;
+static u64 h_thread_join(u64 id) {
+    HostThread *h = host_id_get(HOST_ID_THREAD, id);
+    if (!h) return FNVNX_HE_NOTFOUND;
+    if (!(__atomic_load_n(&h->state, __ATOMIC_ACQUIRE) & HT_STARTED)) return FNVNX_HE_BADINPUT;   /* never started: it would wait forever */
+    return threadWaitForExit(&h->t);
+}
+static u64 h_thread_free(u64 id) {   /* after join, or a detach: also of a running thread, also by itself; the id dies at once */
+    HostThread *h = host_id_del(HOST_ID_THREAD, id);
+    if (!h) return FNVNX_HE_NOTFOUND;
     reap_zombies();
     u32 old = __atomic_fetch_or(&h->state, HT_DETACHED, __ATOMIC_ACQ_REL);
     if ((old & HT_STARTED) && !(old & HT_FINISHED))
@@ -122,24 +125,26 @@ static u64 h_thread_free(u64 id) {   /* after join, or a detach: also of a runni
 static u64 h_thread_exit(void) { threadExit(); }
 static u64 h_thread_yield(void) { svcSleepThread(0); return 0; }
 static u64 h_thread_set_priority(u64 id, u64 prio) {   /* id: any guest thread, also one not started yet */
-    Handle th = id ? ((HostThread *)id)->t.handle : CUR_THREAD_HANDLE;
-    return svcSetThreadPriority(th, win32_to_horizon_prio((s64)prio));
+    HostThread *h = id ? host_id_get(HOST_ID_THREAD, id) : NULL;
+    if (id && !h) return FNVNX_HE_NOTFOUND;
+    return svcSetThreadPriority(id ? h->t.handle : CUR_THREAD_HANDLE, win32_to_horizon_prio((s64)prio));
 }
-#include "host_thread_activity.inc"
-static u64 h_thread_activity(u64 id, u64 paused) {   /* id 0: the calling thread */
-    return host_thread_activity(id ? ((HostThread *)id)->t.handle : 0, id == 0, paused);
-}
-/* a record for the calling thread (the main thread: libnx's threadGetSelf carries its real handle); never freed, never
- * started by thread_start: only FNVNX_PLAT_THREAD_ACTIVITY uses its id */
+/* L5 ADDITION (THREAD_SELF, hostapi.h "L5 ADDITIONS"): a record for the calling thread, which thread_create did not make (the main
+ * thread: libnx's threadGetSelf carries its real handle), under a table id like thread_create's. Never started by thread_start, never
+ * freed by the guest: only FNVNX_PLAT_THREAD_ACTIVITY uses its id. 0 when the id table is full. */
 static u64 h_thread_self(void) {
     HostThread *h = calloc(1, sizeof *h);
     if (!h) return 0;
     h->t.handle = threadGetSelf()->handle;
     h->state = HT_STARTED;
-    return (u64)h;
+    u64 id = host_id_new(HOST_ID_THREAD, h);
+    if (!id) free(h);
+    return id;
 }
 static u64 h_thread_set_cpu(u64 id, u64 spec) {
-    Handle th = id ? ((HostThread *)id)->t.handle : CUR_THREAD_HANDLE;
+    HostThread *h = id ? host_id_get(HOST_ID_THREAD, id) : NULL;
+    if (id && !h) return FNVNX_HE_NOTFOUND;
+    Handle th = id ? h->t.handle : CUR_THREAD_HANDLE;
     if ((spec >> 40) & 0x7FFFFFull) return 0;   /* -1 and other negative values: nothing to do */
     s32 cur_ideal = 0;
     u64 cur_mask = FNVNX_APP_CORES;
@@ -156,11 +161,11 @@ static u64 h_wait_on_address(u64 addr, u64 expected, u64 timeout_ns) {
     Result rc = svcWaitForAddress((void *)addr, ArbitrationType_WaitIfEqual, (s32)(u32)expected, to);
     if (R_SUCCEEDED(rc)) return 0;
     if (R_VALUE(rc) == KERNELRESULT(TimedOut)) return 1;
-    return 2;   /* InvalidState: value differed */
+    if (R_VALUE(rc) == KERNELRESULT(InvalidState)) return 2;   /* value differed */
+    return rc;   /* any other kernel result unchanged, e.g. 0xCC01 addr not 4-aligned, 0xD401 not readable guest memory */
 }
 static u64 h_wake_address(u64 addr, u64 count) {
-    svcSignalToAddress((void *)addr, SignalType_Signal, 0, count > 0x7FFFFFFF ? -1 : (s32)count);
-    return 0;
+    return svcSignalToAddress((void *)addr, SignalType_Signal, 0, count > 0x7FFFFFFF ? -1 : (s32)count);
 }
 
 /* ---- time, misc */
@@ -180,7 +185,9 @@ static u64 h_memory_info(u64 out) {
     m->avail_phys = total > used ? total - used : 0;
     return 0;
 }
-static u64 h_cpu_count(void) { return 3; }   /* application cores 0-2 */
+static u64 h_cpu_count(void) {   /* the cores placement.h lets a guest thread run on: application cores 0-2, plus core 3 with the opt-in */
+    return (u64)__builtin_popcount(g_cfg.core3 ? FNVNX_APP_CORES_CORE3 : FNVNX_APP_CORES);
+}
 
 /* ---- files (newlib POSIX over libnx fsdev; paths like "sdmc:/...") */
 #define NEG_ERRNO ((u64)(s64)-errno)
@@ -242,10 +249,17 @@ static u64 h_fs_mkdir(u64 path) { return mkdir((const char *)path, 0777) < 0 ? N
 static u64 h_fs_rmdir(u64 path) { return rmdir((const char *)path) < 0 ? NEG_ERRNO : 0; }
 static u64 h_fs_remove(u64 path) { return unlink((const char *)path) < 0 ? NEG_ERRNO : 0; }
 static u64 h_fs_rename(u64 a, u64 b) { return rename((const char *)a, (const char *)b) < 0 ? NEG_ERRNO : 0; }
-static u64 h_fs_dir_open(u64 path) { return (u64)opendir((const char *)path); }
-static u64 h_fs_dir_next(u64 d, u64 buf, u64 cap) {
+static u64 h_fs_dir_open(u64 path) {
+    DIR *d = opendir((const char *)path);
+    u64 id = d ? host_id_new(HOST_ID_DIR, d) : 0;
+    if (d && !id) closedir(d);   /* id table full */
+    return id;
+}
+static u64 h_fs_dir_next(u64 id, u64 buf, u64 cap) {
+    DIR *d = host_id_get(HOST_ID_DIR, id);
     struct dirent *e;
-    while ((e = readdir((DIR *)d))) {
+    if (!d || !cap) return 0;   /* not a directory id, or no room for even the NUL: the end, nothing consumed */
+    while ((e = readdir(d))) {
         if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
         size_t n = strlen(e->d_name);
         if (n + 1 > cap) n = cap - 1;
@@ -255,7 +269,11 @@ static u64 h_fs_dir_next(u64 d, u64 buf, u64 cap) {
     }
     return 0;
 }
-static u64 h_fs_dir_close(u64 d) { closedir((DIR *)d); return 0; }
+static u64 h_fs_dir_close(u64 id) {
+    DIR *d = host_id_del(HOST_ID_DIR, id);
+    if (d) closedir(d);   /* a made-up or already closed id: nothing to close */
+    return 0;
+}
 
 #define FNVNX_HOSTAPI_V2_SLOTS                                                                             \
     .thread_create = (u64)h_thread_create, .thread_start = (u64)h_thread_start,                          \
