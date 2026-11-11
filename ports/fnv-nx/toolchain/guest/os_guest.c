@@ -307,50 +307,34 @@ int os_fs_case_insensitive(void) {
     return folds;
 }
 
-/* ---- virtual memory. With a host that has the VM service (toolchain/host/host_vm.inc): reservations are address
- * space only, commits map zeroed heap memory, decommits give it back, fixed addresses are honoured. Otherwise (an
- * older host, the emulator) carved from the guest heap: committed and zeroed at reserve time, no fixed address. */
-static int g_vm_host = -1;   /* -1 not probed yet */
+/* ---- virtual memory: the host's VM service (hostapi.h FNVNX_PLAT_VM_*, toolchain/host/host_vm.inc). Reservations are
+ * address space only, commits map zeroed memory, decommits give it back, fixed addresses are honoured. The unified
+ * host always serves it; there is no other source of pages. */
 static uint64_t vm_ext(uint32_t fn, uint32_t n, uint64_t a0, uint64_t a1) {
     uint64_t arg[2] = {a0, a1};
     return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, fn, FNVNX_ADDR(arg), n);
 }
-static int vm_host(void) {
-    if (g_vm_host < 0)   /* a reservation of 0 bytes: 0 from the service, FNVNX_EXT_NO_MODULE without it */
-        g_vm_host = fnvnx_host->ext_call && vm_ext(FNVNX_PLAT_VM_RESERVE, 2, 0, 0) != FNVNX_EXT_NO_MODULE;
-    return g_vm_host;
-}
 size_t os_vm_page_size(void) { return 0x1000; }
 void *os_vm_reserve(void *hint, size_t size) {
-    if (vm_host()) return (void *)(uintptr_t)vm_ext(FNVNX_PLAT_VM_RESERVE, 2, FNVNX_ADDR(hint), size);
-    if (hint) return NULL;
-    void *p = memalign(0x1000, (size + 0xFFF) & ~(size_t)0xFFF);
-    if (p) memset(p, 0, size);
-    return p;
+    return (void *)(uintptr_t)vm_ext(FNVNX_PLAT_VM_RESERVE, 2, FNVNX_ADDR(hint), size);
 }
 int os_vm_commit(void *addr, size_t size) {
-    return vm_host() ? (vm_ext(FNVNX_PLAT_VM_COMMIT, 2, FNVNX_ADDR(addr), size) ? -1 : 0) : 0;
+    return vm_ext(FNVNX_PLAT_VM_COMMIT, 2, FNVNX_ADDR(addr), size) ? -1 : 0;
 }
 int os_vm_decommit(void *addr, size_t size) {
-    if (vm_host()) return vm_ext(FNVNX_PLAT_VM_DECOMMIT, 2, FNVNX_ADDR(addr), size) ? -1 : 0;
-    memset(addr, 0, size);
-    return 0;
+    return vm_ext(FNVNX_PLAT_VM_DECOMMIT, 2, FNVNX_ADDR(addr), size) ? -1 : 0;
 }
-/* FNVNX_PLAT_VM_PROTECT (hostapi.h): without the VM service the memalign fallback has no page permissions to
- * change, and the answer is an error. The host's pages are never executable (the game's code is native, lifted code
+/* FNVNX_PLAT_VM_PROTECT (hostapi.h). The host's pages are never executable (the game's code is native, lifted code
  * that no page of the guest's data supplies): OS_VM_EXEC is the one os_prot bit with no counterpart there and is
  * dropped; readable and writable map 1:1 onto FNVNX_VM_PROT_R / _W. */
 int os_vm_protect(void *addr, size_t size, int os_prot) {
-    if (!vm_host()) return -1;
     uint64_t arg[3] = {FNVNX_ADDR(addr), size,
                        (uint64_t)(((os_prot & OS_VM_READ) ? FNVNX_VM_PROT_R : 0) | ((os_prot & OS_VM_WRITE) ? FNVNX_VM_PROT_W : 0))};
     return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_VM_PROTECT, FNVNX_ADDR(arg), 3) ? -1 : 0;
 }
 int os_vm_release(void *addr, size_t size) {
     (void)size;
-    if (vm_host()) return vm_ext(FNVNX_PLAT_VM_RELEASE, 1, FNVNX_ADDR(addr), 0) ? -1 : 0;
-    free(addr);
-    return 0;
+    return vm_ext(FNVNX_PLAT_VM_RELEASE, 1, FNVNX_ADDR(addr), 0) ? -1 : 0;
 }
 
 /* One SD directory for everything of the port (fnvnx/sdlayout.h): fnv.nro, guest.nso and the logs, the game's
