@@ -24,6 +24,25 @@ def product_roots(repo="."):
     return sorted(p for p, r in recipe.load_admit(repo).items() if r["class"] == "product")
 
 
+NO_ROOT = "no product root (nothing to build yet)"
+
+
+def quantify(repo, judge_root):
+    """The universe convention of every per-root gate: the admitted product roots of admit.json. JUDGE_ROOT(root) -> (universe, certified,
+    ids, detail); the items are summed (ids <= 50), a root's red detail is kept. No product root: (0, 0, [], NO_ROOT), green."""
+    u = c = 0
+    ids, why = [], []
+    roots = product_roots(repo)
+    for root in roots:
+        ru, rc, rids, rd = judge_root(root)
+        u, c, ids = u + ru, c + rc, ids + rids
+        if rc != ru:
+            why.append("%s: %s" % (root, rd))
+    if not roots:
+        return 0, 0, [], NO_ROOT
+    return u, c, sorted(ids)[:50], ("; ".join(why) or "%d roots" % len(roots))[:900]
+
+
 def tree_of(repo="."):
     return subprocess.run(["git", "-C", repo, "rev-parse", os.environ.get("GATE_COMMIT", "HEAD") + "^{tree}"], capture_output=True,
                           text=True, check=True).stdout.strip()
@@ -70,7 +89,7 @@ def main():
             shutil.rmtree(tmp, ignore_errors=True)
     bad = sorted(set(items) - set(done))
     detail = "; ".join(why) or ("%d units/ELF built from %d product roots" % (len(items), len(product_roots(repo))) if items else
-                                "no product root (nothing to build yet)")
+                                NO_ROOT)
     res = {"format": "fnvnx-gate/1", "name": "build", "status": "red" if why else "green", "universe": len(items),
            "certified": len(set(done) & set(items)), "uncertified": bad[:50], "detail": detail[:900]}
     with open(os.path.join(os.environ["GATE_OUT"], "build.json"), "w") as f:
