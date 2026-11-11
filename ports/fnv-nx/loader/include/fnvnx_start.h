@@ -88,6 +88,10 @@ int fnvnx_thread_block_free(fnvnx_proc *p, const fnvnx_thread_block *b);
  * successful fnvnx_start_prepare on p. The emulator hooks this exact symbol. */
 uint32_t fnvnx_start_enter(fnvnx_proc *p);
 
+/* The process the boot glue (guest/boot.c) started: the section map the platform's VirtualQuery answers from, the
+ * main thread's block. Defined by the glue; valid from the start of main, filled by a successful prepare. */
+const fnvnx_proc *fnvnx_start_proc(void);
+
 /* The lifter runtime (another team): runs the lifted function for guest address exe_eip on the guest stack esp with
  * TEB teb and returns guest eax when the function returns to FNVNX_START_SENTINEL stored at [esp]. */
 uint32_t fnvnx_lift_enter(uint32_t exe_eip, uint32_t esp, uint32_t teb);
