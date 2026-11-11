@@ -36,9 +36,12 @@ static bool ms_ok(int p, uint32_t fmt, uint32_t type, uint32_t q, uint32_t* samp
     if (type > 16 || nxenv_check_msaa(p, 0, 1, fmt, 0, type, nullptr) != 0 || (q && q != 0xFFFFFFFFu)) return false;
     *samples = type; return true;
 }
-template <class T, class K> static T* build(NxObj* dev, NxImg* img, uint32_t pool, uint32_t n) {
-    T* t = new T; t->img = img; t->asChild(dev, pool); NxTexCore* c = t; c->kids = (NxObj**)nxd3d_alloc(sizeof(NxObj*) * n); c->nkids = n; img->owner = t;
-    for (uint32_t i = 0; i < n; i++) { K* k = new K; k->img = img; k->level = i % img->levels; NxObj* ko = k; ko->asSubResource(dev, t); c->kids[i] = k; }
+struct IA { uint32_t kind, w, h, d, lv, faces, fmt, usage, pool, acc; bool ag; void* um; uint32_t ms, msq, samples, bind; };
+template <class T, class K> static T* build(NxObj* dev, const IA& a, uint32_t n) {
+    NxImg* img = new NxImg(); T* t = new T; t->img = img; t->asChild(dev, a.pool); NxTexCore* c = t;
+    img->init(t, a.kind, a.w, a.h, a.d, a.lv, a.faces, a.fmt, a.usage, a.pool, a.acc, a.ag, a.um, a.ms, a.msq, a.samples, a.bind);
+    c->kids = (NxObj**)nxd3d_alloc(sizeof(NxObj*) * n); c->nkids = n;
+    for (uint32_t i = 0; i < n; i++) { K* k = new K; k->img = img; k->level = i % a.lv; NxObj* ko = k; ko->asSubResource(dev, t); c->kids[i] = k; }
     return t;
 }
 static void fix_faces(NxTexCore* t) { if (t->img->kind != NXK_VOLUME) for (uint32_t i = 0; i < t->nkids; i++) static_cast<NxSurfCore*>(t->kids[i])->face = i / t->img->levels; }
@@ -72,9 +75,47 @@ static HRESULT mk_tex(NxObj* dev, uint32_t kind, UINT w, UINT h, UINT d, UINT le
     if (!fits(f, w, h, d, lv, faces)) return gpu ? D3DERR_OUTOFVIDEOMEMORY : E_OUTOFMEMORY;
     if (gpu && !ex && nx_tex_size(f, w, h, d) > nxenv_video_memory(p)) return D3DERR_OUTOFVIDEOMEMORY;
     uint32_t acc = (pool != D3DPOOL_DEFAULT || (usage & D3DUSAGE_DYNAMIC) || (f.flags & NXTF_MAPPABLE)) ? 12 : 0;
-    NxImg* img = new NxImg; memset((void*)img, 0, 0); NxTexCore* t;
-    if (kind == NXK_VOLUME) { NxVolumeTexture9* v = build<NxVolumeTexture9, NxVolume9>(dev, img, pool, lv); t = v; *out = v; }
-    else if (kind == NXK_CUBE) { NxCubeTexture9* v = build<NxCubeTexture9, NxSurface9>(dev, img, pool, lv * 6); t = v; *out = v; }
-    else { NxTexture9* v = build<NxTexture9, NxSurface9>(dev, img, pool, lv); t = v; *out = v; }
-    img->init(t, kind, w, h, d, lv, faces, fmt, usage, pool, acc, ag, um); fix_faces(t); return D3D_OK;
+    IA a = {kind, w, h, d, lv, faces, (uint32_t)fmt, usage, (uint32_t)pool, acc, ag, um, 0, 0, 1, bind}; NxTexCore* t;
+    if (kind == NXK_VOLUME) { NxVolumeTexture9* v = build<NxVolumeTexture9, NxVolume9>(dev, a, lv); t = v; *out = v; }
+    else if (kind == NXK_CUBE) { NxCubeTexture9* v = build<NxCubeTexture9, NxSurface9>(dev, a, lv * 6); t = v; *out = v; }
+    else { NxTexture9* v = build<NxTexture9, NxSurface9>(dev, a, lv); t = v; *out = v; }
+    fix_faces(t); return D3D_OK;
 }
+// ---- surfaces (d3d9_device_create_surface): level 1, layer 1; every NOTAVAILABLE becomes INVALIDCALL
+static HRESULT mk_surf(NxObj* dev, int what /*0 RT, 1 DS, 2 plain*/, UINT w, UINT h, D3DFORMAT fmt, D3DMULTISAMPLE_TYPE ms, DWORD msq, BOOL flag, D3DPOOL pool, IDirect3DSurface9** out, HANDLE* sh, DWORD usage, bool exv) {
+    if (!out) return D3DERR_INVALIDCALL;
+    *out = nullptr; void* um = nullptr; bool ex = is_ex(dev);
+    if (what == 2 && pool == D3DPOOL_MANAGED) return D3DERR_INVALIDCALL;
+    if (what == 2 && (uint32_t)pool > (uint32_t)D3DPOOL_SCRATCH) return D3DERR_INVALIDCALL;
+    if (sh) {
+        if (!ex) return E_NOTIMPL;
+        if (what == 2) { if (pool == D3DPOOL_SYSTEMMEM) um = *sh; else if (pool != D3DPOOL_DEFAULT) return D3DERR_INVALIDCALL; }
+    }
+    if (exv && (usage & (D3DUSAGE_DEPTHSTENCIL | D3DUSAGE_RENDERTARGET))) return D3DERR_INVALIDCALL;
+    int p = nx_env_profile_of(dev); NxTexFmt f; uint32_t samples = 1;
+    if (!w || !h || fmt == D3DFMT_UNKNOWN || !nx_texfmt(fmt, &f)) return D3DERR_INVALIDCALL;
+    uint32_t bind = what == 0 ? D3DUSAGE_RENDERTARGET : what == 1 ? D3DUSAGE_DEPTHSTENCIL : 0;
+    if (what != 2) {
+        if (!ms_ok(p, fmt, ms, msq, &samples) || !cdf(p, bind, 1, fmt)) return D3DERR_INVALIDCALL;
+        if (what == 0 && flag && ms != 0) return D3DERR_INVALIDCALL;
+    }
+    if ((f.flags & (NXTF_BLOCKS | NXTF_NOVERIFY)) == NXTF_BLOCKS && ((w & (f.bw - 1)) || (h & (f.bh - 1)))) return D3DERR_INVALIDCALL;
+    uint32_t pl = what == 2 ? pool : D3DPOOL_DEFAULT; bool gpu = pl == D3DPOOL_DEFAULT;
+    if (!fits(f, w, h, 1, 1, 1)) return gpu ? D3DERR_OUTOFVIDEOMEMORY : E_OUTOFMEMORY;
+    if (gpu && !ex && nx_tex_size(f, w, h, 1) > nxenv_video_memory(p)) return D3DERR_OUTOFVIDEOMEMORY;
+    uint32_t acc = (what == 2 || (what == 0 && flag) || (f.flags & NXTF_MAPPABLE)) ? 12 : 0;
+    NxImg* img = new NxImg(); NxSurface9* s = new NxSurface9; s->img = s->own = img; s->asChild(dev, pl);
+    img->init(s, NXK_SURFACE, w, h, 1, 1, 1, fmt, (usage & 0x10007bf0u) | bind, pl, acc, false, um, ms, msq, samples, bind);
+    if (what == 1 && flag) img->flags |= NXI_DISCARD;
+    *out = s; return D3D_OK;
+}
+#define CREATE(C, EX)                                                                                                                                                                              \
+    HRESULT STDMETHODCALLTYPE C::CreateTexture(UINT w, UINT h, UINT l, DWORD u, D3DFORMAT f, D3DPOOL p, IDirect3DTexture9** pp, HANDLE* sh) { return mk_tex(this, NXK_TEXTURE, w, h, 1, l, u, f, p, (void**)pp, sh); } \
+    HRESULT STDMETHODCALLTYPE C::CreateVolumeTexture(UINT w, UINT h, UINT d, UINT l, DWORD u, D3DFORMAT f, D3DPOOL p, IDirect3DVolumeTexture9** pp, HANDLE* sh) { return mk_tex(this, NXK_VOLUME, w, h, d, l, u, f, p, (void**)pp, sh); } \
+    HRESULT STDMETHODCALLTYPE C::CreateCubeTexture(UINT e, UINT l, DWORD u, D3DFORMAT f, D3DPOOL p, IDirect3DCubeTexture9** pp, HANDLE* sh) { return mk_tex(this, NXK_CUBE, e, e, 1, l, u, f, p, (void**)pp, sh); } \
+    HRESULT STDMETHODCALLTYPE C::CreateRenderTarget(UINT w, UINT h, D3DFORMAT f, D3DMULTISAMPLE_TYPE m, DWORD q, BOOL lk, IDirect3DSurface9** pp, HANDLE* sh) { return mk_surf(this, 0, w, h, f, m, q, lk, D3DPOOL_DEFAULT, pp, sh, 0, false); } \
+    HRESULT STDMETHODCALLTYPE C::CreateDepthStencilSurface(UINT w, UINT h, D3DFORMAT f, D3DMULTISAMPLE_TYPE m, DWORD q, BOOL dc, IDirect3DSurface9** pp, HANDLE* sh) { return mk_surf(this, 1, w, h, f, m, q, dc, D3DPOOL_DEFAULT, pp, sh, 0, false); } \
+    HRESULT STDMETHODCALLTYPE C::CreateOffscreenPlainSurface(UINT w, UINT h, D3DFORMAT f, D3DPOOL p, IDirect3DSurface9** pp, HANDLE* sh) { return mk_surf(this, 2, w, h, f, D3DMULTISAMPLE_NONE, 0, 0, p, pp, sh, 0, false); }
+CREATE(NxDevice9, 0) CREATE(NxDevice9Ex, 1)
+HRESULT STDMETHODCALLTYPE NxDevice9Ex::CreateRenderTargetEx(UINT w, UINT h, D3DFORMAT f, D3DMULTISAMPLE_TYPE m, DWORD q, BOOL lk, IDirect3DSurface9** pp, HANDLE* sh, DWORD u) { return mk_surf(this, 0, w, h, f, m, q, lk, D3DPOOL_DEFAULT, pp, sh, u, true); }
+HRESULT STDMETHODCALLTYPE NxDevice9Ex::CreateDepthStencilSurfaceEx(UINT w, UINT h, D3DFORMAT f, D3DMULTISAMPLE_TYPE m, DWORD q, BOOL dc, IDirect3DSurface9** pp, HANDLE* sh, DWORD u) { return mk_surf(this, 1, w, h, f, m, q, dc, D3DPOOL_DEFAULT, pp, sh, u, true); }

@@ -9,7 +9,7 @@
 #define NX_BASES_NxPixelShader9 NxShaderCore
 #define NX_BASES_NxQuery9 NxQueryCore
 // D4 (textures / surfaces / volumes, res_tex.h)
-#include "res_tex.h"
+#include "res_texcore.h"
 #define NX_BASES_NxTexture9 NxTexCore
 #define NX_BASES_NxCubeTexture9 NxTexCore
 #define NX_BASES_NxVolumeTexture9 NxTexCore

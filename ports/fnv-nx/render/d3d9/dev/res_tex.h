@@ -1,7 +1,7 @@
 // D4: textures, volumes, surfaces of our D3D9 (storage, locks, dirty regions, backend hooks). Rules and sources: res_fmt.cpp / res_tex.cpp / res_surf.cpp / res_create.cpp headers.
 // Link note: the classes are the NX_BASES_<Class> of res_hooks.h. Backend hooks (nxd3d_image_*) are declared here and never defined in the product objects (tests define them).
 #pragma once
-#include "res_core.h"
+#include "res_texcore.h"
 #include "nxgpu4.h"
 #include "d3d9_state.h"   // nx_d3d9_format / nx_d3d9_convert: the one D3DFORMAT -> NxFormat table
 #define NX_MAX_TEX_BYTES 0x40000000u   // largest single image we allocate (1 GiB, as NX_MAX_BUFFER_BYTES)
@@ -37,6 +37,7 @@ struct NxImg {
     bool rec_dirty, autogen, mip_dirty, ext;                 // dirty regions recorded (MANAGED, SYSTEMMEM); AUTOGENMIPMAP; levels changed since the last generation; CPU memory supplied by the application
     uint32_t filter, lod;
     ~NxImg();
+    void* operator new(size_t n) { return nxd3d_alloc(n); } void operator delete(void* p) { nxd3d_free(p); }   // always `new NxImg()` (value-initialised)
     HRESULT init(NxObj* own, uint32_t kind, uint32_t w, uint32_t h, uint32_t d, uint32_t levels, uint32_t faces, uint32_t fmt, uint32_t usage, uint32_t pool, uint32_t access, bool autogen_gpu, void* user_mem, uint32_t ms = 0, uint32_t msq = 0, uint32_t samples = 1, uint32_t bind = 0);
     NxSub* at(uint32_t level, uint32_t face) { return &sub[face * levels + level]; }
     void add_dirty(uint32_t level, uint32_t face, const NxBox3* b);   // union into the sub-resource's region (null = whole)
@@ -49,23 +50,6 @@ HRESULT nx_img_lock(NxImg* img, uint32_t level, uint32_t face, const D3DBOX* box
 HRESULT nx_img_unlock(NxImg* img, uint32_t level, uint32_t face, bool* was_locked);
 bool nx_box_valid(const NxImg* img, uint32_t level, const D3DBOX* b);   // wined3d_resource_check_box_dimensions
 
-// ---- objects
-struct NxTexCore : NxObj {           // NxTexture9 / NxCubeTexture9 / NxVolumeTexture9 / NxBaseTexture9
-    NxImg* img = nullptr; NxObj** kids = nullptr; uint32_t nkids = 0;   // kids: the level surfaces / volumes, created with the texture (identity), public count 0, refcount = ours
-    ~NxTexCore();
-    DWORD setLOD(DWORD l); DWORD getLOD(); DWORD getLevelCount();
-    HRESULT setFilter(D3DTEXTUREFILTERTYPE t); D3DTEXTUREFILTERTYPE getFilter(); void genMips();
-    HRESULT levelDesc2(UINT level, D3DSURFACE_DESC* d); HRESULT levelDesc3(UINT level, D3DVOLUME_DESC* d);
-    HRESULT kid(uint32_t level, uint32_t face, void** pp);               // sub-resource object, AddRef'ed through R4
-    HRESULT lock2(uint32_t level, uint32_t face, D3DLOCKED_RECT* lr, const RECT* r, DWORD f); HRESULT unlock2(uint32_t level, uint32_t face);
-    HRESULT dirty2(uint32_t face, const RECT* r);
-};
-struct NxSurfCore : NxObj {          // NxSurface9: a level / face of a texture (tex != null) or a stand-alone surface (own)
-    NxImg* img = nullptr; NxImg* own = nullptr; uint32_t level = 0, face = 0;
-    ~NxSurfCore();
-    HRESULT desc(D3DSURFACE_DESC* d); HRESULT lockRect(D3DLOCKED_RECT* lr, const RECT* r, DWORD f); HRESULT unlockRect();
-};
-struct NxVolCore : NxObj { NxImg* img = nullptr; uint32_t level = 0; HRESULT desc(D3DVOLUME_DESC* d); HRESULT lockBox(D3DLOCKED_BOX* lb, const D3DBOX* b, DWORD f); HRESULT unlockBox(); };
 void nx_tex_preload(NxObj* resource);   // for the product's nxd3d_preload: MANAGED texture / surface -> upload the dirty regions (Wine: wined3d_resource_preload loads the draw texture)
 NxImg* nx_img_of(NxObj* resource);      // image of a texture / surface / volume object of ours, null otherwise (for the draw path / UpdateTexture)
 void nx_img_gpu_wrote(NxImg* img, uint32_t level, uint32_t face);   // the draw path rendered into the sub-resource: the CPU copy is stale until the next read lock

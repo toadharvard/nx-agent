@@ -77,3 +77,5 @@ template <class C> static C* make() {
 }
 IDirect3D9* nx_Direct3DCreate9(UINT) { return make<NxDirect3D9>(); }
 HRESULT nx_Direct3DCreate9Ex(UINT, IDirect3D9Ex** out) { if (!out) return D3DERR_INVALIDCALL; NxDirect3D9Ex* c = make<NxDirect3D9Ex>(); if (!c) { *out = nullptr; return D3DERR_NOTAVAILABLE; } *out = c; return D3D_OK; }
+// D4 (res_tex.h): the profile of a device = the profile of the IDirect3D9 that created it
+int nx_env_profile_of(NxObj* device) { return prof(device->owner); }
