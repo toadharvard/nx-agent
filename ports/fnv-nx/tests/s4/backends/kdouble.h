@@ -182,6 +182,10 @@ Result svcUnmapMemory(void *dst, void *src, u64 size)
     }
     return 0;
 }
+/* the calling thread of the double: threadGetSelf() (host_platform.inc THREAD_SELF) */
+#define OWN_THREAD 0x5150u
+static Thread s_self_thread = {.handle = OWN_THREAD};
+Thread *threadGetSelf(void) { return &s_self_thread; }
 static int is_real(Handle h) { return h == OWN_HANDLE; }
 Result svcMapProcessCodeMemory(Handle proc, u64 dst, u64 src, u64 size)
 {

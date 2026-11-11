@@ -152,6 +152,8 @@ typedef struct FnvnxHostApi {
 #define FNVNX_HE_PERM     0xD801u   /* kernel InvalidNewMemoryPermission */
 /* ext_call module of the host's platform services (toolchain/host/host.c; render/nine is 9, render/native 10) */
 #define FNVNX_EXT_PLATFORM 11u
+#define FNVNX_EXT_NINE 9u    /* module of the D3D9 proxy (render/nine); its services belong to the render lead */
+#define FNVNX_EXT_GPU 10u    /* module of the native renderer (render/native); its services belong to the render lead */
 #define FNVNX_PLAT_CPU_BOOST 1u   /* (mode: 0 normal, 1 fast load; any non-zero = fast) -> 0 set (or already in that mode), 1 off by the
                                      platform config (boost_loading=0), else the Horizon result of appletSetCpuBoostMode (the
                                      mode stays as it was) */

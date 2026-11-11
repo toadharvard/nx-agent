@@ -24,9 +24,6 @@ static Result s_act_rc;
 Result svcGetThreadContext3(ThreadContext *c, Handle h) { (void)c; (void)h; return 0; }
 void svcSleepThread(s64 ns) { (void)ns; }
 Result svcSetThreadActivity(Handle h, ThreadActivity a) { s_act_handle = h; s_act = a; s_act_calls++; return s_act_rc; }
-#define OWN_THREAD 0x5150u
-static Thread s_self_thread = {.handle = OWN_THREAD};
-Thread *threadGetSelf(void) { return &s_self_thread; }
 static char s_dlg[4096], s_full[4096];
 static int s_shown;
 static Result s_create_rc;
