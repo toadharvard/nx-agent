@@ -270,20 +270,11 @@ TEST(crt_file_wrappers)
     }
     CHECK_EQ(fnvnx_access("data\\crt2.TXT", 0), 0);
     CHECK_EQ(fnvnx_access("data\\none.txt", 0), -1);
-    struct fnvnx_msvc_stat st;
-    CHECK_EQ(sizeof st, 48);
-    CHECK_EQ(offsetof(struct fnvnx_msvc_stat, st_size), 20);
-    CHECK_EQ(offsetof(struct fnvnx_msvc_stat, st_mtime_), 32);
-    CHECK_EQ(fnvnx_stat("Data\\crt.txt", &st), 0);
-    CHECK_EQ(st.st_size, 14);
-    CHECK((st.st_mode & 0170000) == 0100000);
-    CHECK_EQ(fnvnx_rename("Data\\crt2.txt", "Data\\crt.txt"), -1); /* never replaces */
-    CHECK_EQ(fnvnx_rename("Data\\crt2.txt", "Data\\crt3.txt"), 0);
+    CHECK(MoveFileA("Data\\crt2.txt", "Data\\crt.txt") == 0); /* never replaces */
+    CHECK(MoveFileA("Data\\crt2.txt", "Data\\crt3.txt") != 0);
     CHECK_EQ(fnvnx_remove("Data\\crt3.txt"), 0);
     CHECK_EQ(fnvnx_mkdir("Data\\CrtDir"), 0);
     CHECK_EQ(fnvnx_rmdir("Data\\crtdir"), 0);
-    char cwd[64];
-    CHECK_STR(fnvnx_getcwd(cwd, sizeof cwd), "C:\\FalloutNV");
 }
 
 /* NX1 check 5: the SD layout as the player copies it (sdmc:/switch/fnv = <root>: FalloutNV.exe and Data/ from a PC

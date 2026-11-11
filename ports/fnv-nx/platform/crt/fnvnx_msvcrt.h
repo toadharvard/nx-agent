@@ -100,29 +100,15 @@ FILE *fnvnx_fopen(const char *path, const char *mode);
 errno_t fnvnx_fopen_s(FILE **, const char *, const char *);
 FILE *fnvnx_fsopen(const char *, const char *, int);
 int fnvnx_remove(const char *);
-int fnvnx_rename(const char *, const char *);
 int fnvnx_access(const char *, int);
 errno_t fnvnx_access_s(const char *, int);
 int fnvnx_mkdir(const char *);
 int fnvnx_rmdir(const char *);
 int fnvnx_unlink(const char *);
-char *fnvnx_getcwd(char *, int);
 int fnvnx_chdir(const char *);
 int _fseeki64(FILE *, long long, int);
 long long _ftelli64(FILE *);
 int fnvnx_fileno(FILE *);
-/* struct _stat as compiled by MSVC 2008 (64-bit time_t, 32-bit size: _stat64i32), 48 bytes */
-struct fnvnx_msvc_stat {
-    uint32_t st_dev;
-    uint16_t st_ino, st_mode;
-    int16_t st_nlink, st_uid, st_gid;
-    uint16_t pad0_;
-    uint32_t st_rdev;
-    int32_t st_size;
-    int64_t st_atime_, st_mtime_, st_ctime_;
-} __attribute__((aligned(8)));
-int fnvnx_stat(const char *, struct fnvnx_msvc_stat *);
-
 /* ---- math / floating point */
 int _finite(double);
 int _isnan(double);
@@ -203,15 +189,10 @@ void fnvnx_xlength_error(void) __attribute__((noreturn));  /* std::_Xlen: length
 void fnvnx_xout_of_range(void) __attribute__((noreturn));  /* std::_Xran: out_of_range("invalid string position") */
 
 /* ---- S4b: CRT functions identified from the decomp's calls (crt_symbols.tsv) */
-unsigned long fnvnx_byteswap_ulong(unsigned long);         /* _byteswap_ulong (0x00ec3bad) */
-unsigned short fnvnx_byteswap_ushort(unsigned short);      /* _byteswap_ushort (0x00ec3bda) */
-unsigned long long fnvnx_byteswap_uint64(unsigned long long); /* _byteswap_uint64 (0x00ec3bf0) */
-char *fnvnx_mbstok(char *, const char *);                  /* _mbstok: its own per-thread position */
 unsigned char *_mbsnbcpy(unsigned char *, const unsigned char *, size_t); /* single-byte code page */
 unsigned char *_mbsncpy(unsigned char *, const unsigned char *, size_t);
 int _mbsnbcmp(const unsigned char *, const unsigned char *, size_t);
 int _mbsnbicmp(const unsigned char *, const unsigned char *, size_t);
-int fnvnx_wcsicmp16(const unsigned short *, const unsigned short *); /* _wcsicmp on 16-bit wchar_t */
 int fnvnx_wcscmp16(const unsigned short *, const unsigned short *);
 
 /* ---- S4b: MSVC 2008 C++ library (libcpmt) internals, object as first argument, MSVC object layouts
@@ -219,39 +200,23 @@ int fnvnx_wcscmp16(const unsigned short *, const unsigned short *);
 void *fnvnx_exception_ctor(void *self);                                /* std::exception::exception() */
 void *fnvnx_exception_ctor_str(void *self, const char *const *what);  /* exception(const char *const &) */
 void *fnvnx_exception_ctor_noalloc(void *self, const char *const *what, int);
-void *fnvnx_exception_copy_ctor(void *self, const void *other);
 void *fnvnx_exception_assign(void *self, const void *other);
-void fnvnx_exception_dtor(void *self);
-const char *fnvnx_exception_what(const void *self);
 void *fnvnx_bad_cast_ctor(void *self, const char *msg);
 void *fnvnx_bad_alloc_ctor(void *self, const char *msg);              /* std::bad_alloc::bad_alloc(const char *) */               /* std::bad_cast::bad_cast(const char *) */
-void *fnvnx_mutex_ctor(void *self);                                    /* std::_Mutex */
-void fnvnx_mutex_dtor(void *self);
 void fnvnx_mutex_lock(void *self);
 void fnvnx_mutex_unlock(void *self);
-void *fnvnx_init_locks_ctor(void *self);                               /* std::_Init_locks */
-void fnvnx_init_locks_dtor(void *self);
-void *fnvnx_locale_init(void);                                         /* locale::_Init -> _Locimp* */
-void *fnvnx_locale_getgloballocale(void);                              /* locale::_Getgloballocale */
 void fnvnx_facet_register(void *facet);                                /* locale::facet::_Facet_Register */
 void fnvnx_facet_incref(void *facet);                                  /* locale::facet::_Incref */
 size_t fnvnx_cpplib_facet_count(void);
 void fnvnx_cpplib_facet_tidy(void);
-void fnvnx_locinfo_ctor(void *self, const void *locname_str);         /* _Locinfo::_Locinfo_ctor(this, const string&) */
-void fnvnx_locinfo_dtor(void *self);                                   /* _Locinfo::_Locinfo_dtor */
 typedef struct {                                                       /* _Ctypevec, 16 bytes on ILP32 */
     uint32_t _Hand;
     uint32_t _Page;
     const short *_Table;
     int _Delfl;
 } fnvnx_ctypevec;
-fnvnx_ctypevec fnvnx_getctype(void);                                   /* _Getctype (returned by value) */
-int fnvnx_tolower_ctype(int c, const fnvnx_ctypevec *);                /* _Tolower */
-int fnvnx_toupper_ctype(int c, const fnvnx_ctypevec *);                /* _Toupper */
 const short *fnvnx_msvc_ctype_table(void);                             /* MSVC "C" locale _pctype[0..255] */
-void fnvnx_ios_base_addstd(void *ios);                                 /* ios_base::_Addstd */
 void fnvnx_ios_base_dtor(void *ios);                                   /* ios_base::_Ios_base_dtor */
-void *fnvnx_ostream_ctor(void *self, void *strbuf, int isstd, int construct_vbase); /* basic_ostream<char> */
 void fnvnx_basic_ios_init(void *self, void *strbuf, int isstd);        /* basic_ios<char>::init */
 void *fnvnx_fiopen(const char *name, int mode, int prot);              /* std::_Fiopen -> struct _iobuf * */
 

@@ -25,8 +25,6 @@ int SetCurrentDirectoryA(const char *dir);
 
 #define HOST_MAX 1024
 
-_Static_assert(sizeof(struct fnvnx_msvc_stat) == 48, "struct _stat64i32 of MSVC 2008 is 48 bytes");
-
 static int map(const char *win, char *host)
 {
     if (!win) {
@@ -105,20 +103,6 @@ int fnvnx_remove(const char *path)
 
 int fnvnx_unlink(const char *path) { return fnvnx_remove(path); }
 
-int fnvnx_rename(const char *from, const char *to)
-{
-    char a[HOST_MAX], b[HOST_MAX];
-    if (!map(from, a) || !map(to, b))
-        return -1;
-    os_stat_t st;
-    if (os_stat(b, &st) == 0 && strcmp(a, b)) { /* MSVC rename does not replace */
-        errno = EACCES;
-        return -1;
-    }
-    int r = os_rename(a, b);
-    return r ? set_errno(r) : 0;
-}
-
 int fnvnx_access(const char *path, int mode)
 {
     char host[HOST_MAX];
@@ -155,25 +139,6 @@ int fnvnx_rmdir(const char *path)
     return r ? set_errno(r) : 0;
 }
 
-char *fnvnx_getcwd(char *buf, int n)
-{
-    char tmp[HOST_MAX];
-    unsigned long l = GetCurrentDirectoryA(sizeof tmp, tmp);
-    if (!buf) {
-        size_t sz = n > (int)l ? (size_t)n : l + 1;
-        buf = (char *)malloc(sz);
-        if (!buf)
-            return NULL;
-        n = (int)sz;
-    }
-    if ((unsigned long)n <= l) {
-        errno = ERANGE;
-        return NULL;
-    }
-    memcpy(buf, tmp, l + 1);
-    return buf;
-}
-
 int fnvnx_chdir(const char *dir)
 {
     if (!SetCurrentDirectoryA(dir)) {
@@ -187,29 +152,3 @@ int _fseeki64(FILE *f, long long off, int whence) { return fseeko(f, (off_t)off,
 long long _ftelli64(FILE *f) { return (long long)ftello(f); }
 int fnvnx_fileno(FILE *f) { return fileno(f); }
 
-int fnvnx_stat(const char *path, struct fnvnx_msvc_stat *out)
-{
-    char host[HOST_MAX];
-    if (!map(path, host))
-        return -1;
-    /* MSVC _stat rejects a trailing separator except on a root ("C:\") */
-    size_t l = strlen(path);
-    if (l > 3 && (path[l - 1] == '\\' || path[l - 1] == '/')) {
-        errno = ENOENT;
-        return -1;
-    }
-    os_stat_t st;
-    int r = os_stat(host, &st);
-    if (r)
-        return set_errno(r);
-    memset(out, 0, sizeof *out);
-    out->st_dev = out->st_rdev = 2; /* drive C: */
-    out->st_mode = (uint16_t)(st.is_dir ? 0040000 | 0111 : 0100000);
-    out->st_mode |= (uint16_t)(st.read_only ? 0444 : 0666);
-    out->st_nlink = 1;
-    out->st_size = (int32_t)(st.size > 0x7FFFFFFF ? 0x7FFFFFFF : st.size);
-    out->st_atime_ = st.atime_us / 1000000;
-    out->st_mtime_ = st.mtime_us / 1000000;
-    out->st_ctime_ = st.ctime_us / 1000000;
-    return 0;
-}

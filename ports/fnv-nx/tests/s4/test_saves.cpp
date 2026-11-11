@@ -54,7 +54,7 @@ static void rotate(const std::string &name)
     if (fnvnx_access(name.c_str(), 0) == 0) {
         if (fnvnx_access(bak.c_str(), 0) == 0)
             DeleteFileA(bak.c_str());
-        CHECK(fnvnx_rename(name.c_str(), bak.c_str()) == 0);
+        CHECK(MoveFileA(name.c_str(), bak.c_str()) != 0);
     }
 }
 
@@ -110,7 +110,7 @@ TEST(save_folder_and_backup_rotation)
     CHECK(write_crt(save, s2));
 
     /* third save: the old .bak is deleted first, because rename never replaces */
-    CHECK(fnvnx_rename(save.c_str(), (save + ".bak").c_str()) == -1);
+    CHECK(MoveFileA(save.c_str(), (save + ".bak").c_str()) == 0);
     std::vector<unsigned char> s3 = pattern(290 * 1024, 3);
     rotate(save);
     CHECK(read_win32(save + ".bak") == s2);
