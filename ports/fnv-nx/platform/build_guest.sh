@@ -57,7 +57,7 @@ TCDIR=$ROOT/toolchain
 
 # ---- flag sets: tools/pipeline/guest_link.py (ARCH, COMMON, PINC), plus the include directories of the library
 # headers the platform needs (ext/freetype, ext/minimp3: tests/s4/Makefile XFLAGS)
-ARCH=(-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-pie -ftls-model=local-exec -fsigned-char)
+ARCH=(-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE -ftls-model=local-exec -fsigned-char)
 COMMON=("${ARCH[@]}" -O2 -g -ffunction-sections -fdata-sections -frounding-math -fshort-wchar -w
         "-ffile-prefix-map=$ROOT=.")          # (determinism only: no build path in the debug info)
 # BSD sockets headers (sys/socket.h, netdb.h, arpa/inet.h, ...) of winsock.cpp are libnx's (not in newlib):
