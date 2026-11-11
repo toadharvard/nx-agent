@@ -64,10 +64,13 @@ typedef struct fnvnx_thread_block {
     uint32_t tls_block_va;         /* the exe's block */
 } fnvnx_thread_block;
 
+enum { FNVNX_MOD_UNLOADED = 0, FNVNX_MOD_MAPPED = 1, FNVNX_MOD_READY = 2, FNVNX_MOD_FAILED = 3 };
+
 /* One mapped image (the exe, or a module). */
 typedef struct fnvnx_loaded {
     const char *name;
     uint32_t file;                 /* os->read selector */
+    unsigned state;                /* modules: FNVNX_MOD_* */
     fnvnx_pe pe;
     fnvnx_image img;
     fnvnx_tls_layout tls;
@@ -88,7 +91,9 @@ typedef struct fnvnx_proc {
     fnvnx_start_cfg cfg;
     fnvnx_loaded exe;
     fnvnx_loaded mod[FNVNX_MAX_MODULES];   /* cfg.modules in table order */
-    unsigned nmod;
+    unsigned nmod;                 /* entries of the module table (all of them, mapped or not) */
+    uint16_t init_order[FNVNX_MAX_MODULES];   /* modules whose DllMain succeeded, in the order it ran */
+    unsigned ninit;
     uint32_t tls_slots;            /* entries of a thread's TLS vector: 1 + the modules with a TLS directory */
     int modules_ready;             /* fnvnx_start_init_modules succeeded */
     fnvnx_thread_block main;
@@ -106,7 +111,7 @@ int fnvnx_thread_block_create(fnvnx_proc *p, uint32_t stack_size, fnvnx_thread_b
  * fnvnx_thread_block_create on this p and must not be used afterwards. */
 int fnvnx_thread_block_free(fnvnx_proc *p, const fnvnx_thread_block *b);
 
-/* M4, on the main thread: every module in table order gets its TLS callbacks (hModule, DLL_PROCESS_ATTACH = 1,
+/* M4, on the main thread: every STATIC module in table order gets its TLS callbacks (hModule, DLL_PROCESS_ATTACH = 1,
  * NULL) and then its entry point as DllMain(hModule = base, DLL_PROCESS_ATTACH = 1, lpvReserved = 1: non-NULL for a
  * static load); a DllMain that returns FALSE (the low byte, as the Windows loader's BOOLEAN result) stops the
  * sequence with FNVNX_START_E_DLLINIT. Idempotent after success. Precondition: a successful fnvnx_start_prepare. */
@@ -117,18 +122,31 @@ int fnvnx_start_init_modules(fnvnx_proc *p);
  * successful fnvnx_start_prepare on p. The emulator hooks this exact symbol. */
 uint32_t fnvnx_start_enter(fnvnx_proc *p);
 
+/* LoadLibrary for the platform: the same M2..M4 steps for the on-demand module `name` (the table's name rule: ASCII
+ * case-insensitive, ".dll" appended when there is no '.') and its not-yet-loaded dependencies from the table: each is
+ * read, hash-checked, mapped at its static base, relocated, bound with the one resolver, protected, and then given
+ * DllMain(hModule, DLL_PROCESS_ATTACH, 0: a dynamic load) in dependency order (its TLS callbacks first). The calls run on
+ * the calling guest thread: `teb` is its TEB and `esp` its current guest stack pointer (the frames go below it).
+ * A module that is ready, or still being loaded (a DllMain loading itself), answers with its base. Refusals (the first
+ * failing module is logged; every module this call mapped but did not finish stays mapped and answers FNVNX_START_E_DLLINIT
+ * to later loads, nothing is unmapped): not in the table (FNVNX_E_ARG), a file/hash/PE/relocation error, a slot without
+ * provider (FNVNX_START_E_IMPORTS, all listed), a TLS directory (FNVNX_E_UNSUPPORTED: threads that exist already have no
+ * TLS vector slot for it; only static modules can have TLS), DllMain returning FALSE (FNVNX_START_E_DLLINIT). On success
+ * *base = the module's base. Precondition: a successful fnvnx_start_prepare. */
+int fnvnx_module_load(fnvnx_proc *p, uint32_t teb, uint32_t esp, const char *name, uint32_t *base);
+
 /* Thread and process notifications for the platform (CreateThread / thread exit / ExitProcess), on the process
  * fnvnx_start_proc() returns. The call runs on the guest stack of the given thread; every module is notified in
  * Windows order: for each module its TLS callbacks (hModule, reason, NULL) and then DllMain(hModule, reason, 0) (an
- * image without an entry point has none; the exe has TLS callbacks only). Attach (reason 2): modules in table order,
- * then the exe. Detach (reason 3): the exe, then the modules in reverse table order. The result of a DllMain for
+ * image without an entry point has none; the exe has TLS callbacks only). Attach (reason 2): the ready modules in initialisation order,
+ * then the exe. Detach (reason 3): the exe, then the modules in reverse initialisation order. The result of a DllMain for
  * these reasons is ignored (Windows ignores it); DisableThreadLibraryCalls is the platform's business and is not
  * modelled. Process detach (reason 0, on the main thread, lpvReserved = `reserved`): the same order as detach. */
 void fnvnx_modules_thread_attach(const fnvnx_thread_block *b);
 void fnvnx_modules_thread_detach(const fnvnx_thread_block *b);
 void fnvnx_modules_process_detach(uint32_t reserved);
 
-/* The images of the process (exe = 0, then the modules in table order) for GetModuleHandle / VirtualQuery. */
+/* The images of the process (exe = 0, then the ready modules in initialisation order) for GetModuleHandle / VirtualQuery. */
 typedef struct fnvnx_image_info {
     const char *name;              /* module name as in the table; the exe's cfg.exe_name */
     uint32_t base, size_of_image;  /* current load base, SizeOfImage rounded to a page */

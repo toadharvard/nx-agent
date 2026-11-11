@@ -22,16 +22,17 @@ const fnvnx_start_range *fnvnx_range_of(const fnvnx_loaded *L, uint32_t va, uint
     return NULL;
 }
 
-static int overlaps(const fnvnx_loaded *L, uint32_t base, uint32_t size) {
-    uint32_t b = L->img.load_base, n = L->pe.size_of_image;
-    return L->img.nmapped && (uint64_t)base < (uint64_t)b + n && (uint64_t)base + size > b;
-}
-
-int fnvnx_images_overlap(const fnvnx_proc *p, uint32_t base, uint32_t size) {
+/* The reserved address set minus [LO, HI) (the caller checks that): the exe image and the range of EVERY row of the module
+ * table, mapped or not. `skip`: -2 leaves the exe out, k >= 0 leaves table row k out (the image being mapped is that
+ * one), -1 leaves nothing out. */
+int fnvnx_images_overlap(const fnvnx_proc *p, uint32_t base, uint32_t size, int skip) {
     unsigned i;
-    if (overlaps(&p->exe, base, size)) return 1;
-    for (i = 0; i < p->nmod; i++)
-        if (overlaps(&p->mod[i], base, size)) return 1;
+    uint64_t eb = p->exe.pe.image_base, en = p->exe.pe.size_of_image;
+    if (skip != -2 && en && (uint64_t)base < eb + en && (uint64_t)base + size > eb) return 1;
+    for (i = 0; i < p->nmod; i++) {
+        const fnvnx_module_desc *d = &p->cfg.modules[i];
+        if ((int)i != skip && (uint64_t)base < (uint64_t)d->base + d->size_of_image && (uint64_t)base + size > d->base) return 1;
+    }
     return 0;
 }
 
@@ -56,13 +57,13 @@ static int s1_identity(fnvnx_proc *p) {
  * (SizeOfRawData when VirtualSize is 0), min(raw, virtual) bytes from the file, the rest zero. Every other page of
  * [base, base + SizeOfImage) is claimed with no access, so nothing else can ever be placed inside the image range.
  * Assumption: the image is mapped at `base` with no relocation applied yet (a module's relocation follows in M2). */
-int fnvnx_loaded_map(fnvnx_proc *p, fnvnx_loaded *L, uint32_t base) {
+int fnvnx_loaded_map(fnvnx_proc *p, fnvnx_loaded *L, uint32_t base, int self) {
     const fnvnx_pe *pe = &L->pe;
     uint32_t end = base + pe->size_of_image, cur = base;
     unsigned i;
     int r;
     if (!fnvnx_in(base, pe->size_of_image, 0, 0xffff0000u) ||
-        (base < FNVNX_START_RESERVED_HI && end > FNVNX_START_RESERVED_LO) || fnvnx_images_overlap(p, base, pe->size_of_image)) {
+        (base < FNVNX_START_RESERVED_HI && end > FNVNX_START_RESERVED_LO) || fnvnx_images_overlap(p, base, pe->size_of_image, self)) {
         fnvnx_logf(p->os, "fnvnx-start: %s: image range 0x%08x+0x%x not usable", L->name, (unsigned)base, (unsigned)pe->size_of_image);
         return FNVNX_E_RANGE;
     }
@@ -150,7 +151,7 @@ int fnvnx_loaded_protect(fnvnx_proc *p, fnvnx_loaded *L) {
 static uint32_t alloc_checked(fnvnx_proc *p, uint32_t size) {
     uint32_t va = p->os->alloc_va(p->os->ctx, size, FNVNX_PROT_R | FNVNX_PROT_W);
     if (!va || (va & (PAGE - 1)) || (uint64_t)va + size > 0x100000000ull ||
-        (va < FNVNX_START_RESERVED_HI && va + size > FNVNX_START_RESERVED_LO) || fnvnx_images_overlap(p, va, size)) {
+        (va < FNVNX_START_RESERVED_HI && va + size > FNVNX_START_RESERVED_LO) || fnvnx_images_overlap(p, va, size, -1)) {
         fnvnx_logf(p->os, "fnvnx-start: guest memory request of 0x%x bytes failed", (unsigned)size);
         return 0;
     }
@@ -162,7 +163,7 @@ static const fnvnx_loaded *tls_owner(const fnvnx_proc *p, uint32_t idx) {
     unsigned i;
     if (idx == 0) return &p->exe;
     for (i = 0; i < p->nmod; i++)
-        if (p->mod[i].tls.present && p->mod[i].tls_index == idx) return &p->mod[i];
+        if (p->mod[i].state != FNVNX_MOD_UNLOADED && p->mod[i].tls.present && p->mod[i].tls_index == idx) return &p->mod[i];
     return NULL;
 }
 
@@ -250,6 +251,7 @@ static int s4_bind(fnvnx_proc *p) {
         fnvnx_loaded *L = i ? &p->mod[i - 1] : &p->exe;
         uint32_t n = 0;
         int r;
+        if (i && L->state == FNVNX_MOD_UNLOADED) continue;   /* on demand: bound by fnvnx_module_load */
         if (p->nmod) fnvnx_logf(p->os, "fnvnx-start: binding the imports of %s", L->name);
         r = fnvnx_imports_bind_strict(&L->img, p->os, fnvnx_modules_resolve, p, &n);
         L->imports_bound = n;
@@ -259,7 +261,8 @@ static int s4_bind(fnvnx_proc *p) {
     if (missing) { fnvnx_logf(p->os, "fnvnx-start: imports not bound (%s)", fnvnx_strerror(FNVNX_E_MISMATCH)); return FNVNX_START_E_IMPORTS; }
     fnvnx_logf(p->os, "fnvnx-start: imports bound %u", (unsigned)p->exe.imports_bound);
     for (i = 0; i < p->nmod; i++)
-        fnvnx_logf(p->os, "fnvnx-start: module %s imports bound %u", p->mod[i].name, (unsigned)p->mod[i].imports_bound);
+        if (p->mod[i].state != FNVNX_MOD_UNLOADED)
+            fnvnx_logf(p->os, "fnvnx-start: module %s imports bound %u", p->mod[i].name, (unsigned)p->mod[i].imports_bound);
     return FNVNX_OK;
 }
 
@@ -275,6 +278,7 @@ int fnvnx_start_prepare(fnvnx_proc *p, const fnvnx_os *os, const fnvnx_start_cfg
     memset(p, 0, sizeof *p);
     p->os = os;
     p->cfg = *cfg;
+    p->nmod = cfg->nmodules;
     p->exe.name = cfg->exe_name;
     p->exe.file = FNVNX_FILE_EXE;
     if ((r = s1_identity(p))) return r;
@@ -283,7 +287,7 @@ int fnvnx_start_prepare(fnvnx_proc *p, const fnvnx_os *os, const fnvnx_start_cfg
         return r;
     }
     p->exe.img.pe = &p->exe.pe;
-    if ((r = fnvnx_loaded_map(p, &p->exe, p->exe.pe.image_base))) return r;   /* S3 */
+    if ((r = fnvnx_loaded_map(p, &p->exe, p->exe.pe.image_base, -2))) return r;   /* S3 */
     fnvnx_logf(os, "fnvnx-start: image mapped");
     if ((r = fnvnx_modules_map(p))) return r;                                    /* M2: files, hashes, map, relocate */
     if ((r = s4_bind(p))) return r;                                              /* S4 */
@@ -298,13 +302,17 @@ int fnvnx_start_prepare(fnvnx_proc *p, const fnvnx_os *os, const fnvnx_start_cfg
 
 /* S8. Guest stack of a thread: the words under [esp] are rewritten before every call. */
 uint32_t fnvnx_call_guest(const fnvnx_proc *p, const fnvnx_thread_block *b, uint32_t eip, uint32_t a1, uint32_t a2, uint32_t a3) {
-    uint32_t esp = (b->stack_base - 16u) & ~15u;
+    return fnvnx_call_guest_at(p, b->teb_va, b->stack_base, eip, a1, a2, a3);
+}
+
+uint32_t fnvnx_call_guest_at(const fnvnx_proc *p, uint32_t teb, uint32_t esp_now, uint32_t eip, uint32_t a1, uint32_t a2, uint32_t a3) {
+    uint32_t esp = (esp_now - 16u) & ~15u;
     uint8_t *s = fnvnx_host(p, esp);
     fnvnx_wr32(s, FNVNX_START_SENTINEL);
     fnvnx_wr32(s + 4, a1);
     fnvnx_wr32(s + 8, a2);
     fnvnx_wr32(s + 12, a3);
-    return fnvnx_lift_enter(eip, esp, b->teb_va);
+    return fnvnx_lift_enter(eip, esp, teb);
 }
 
 NOINLINE uint32_t fnvnx_start_enter(fnvnx_proc *p) {

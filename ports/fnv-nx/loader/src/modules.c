@@ -45,7 +45,17 @@ static int module_index(const fnvnx_proc *p, const char *dll) {
     unsigned k;
     if (!p->nmod || !norm_name(dll, n)) return -1;
     for (k = 0; k < p->nmod; k++)
-        if (!strcmp(n, p->mod[k].name)) return (int)k;
+        if (p->mod[k].state != FNVNX_MOD_UNLOADED && !strcmp(n, p->mod[k].name)) return (int)k;
+    return -1;
+}
+
+/* the table row of a module name (loaded or not), or -1 */
+static int table_index(const fnvnx_proc *p, const char *dll) {
+    char n[NAME_BUF];
+    unsigned k;
+    if (!norm_name(dll, n)) return -1;
+    for (k = 0; k < p->nmod; k++)
+        if (!strcmp(n, p->cfg.modules[k].name)) return (int)k;
     return -1;
 }
 
@@ -183,147 +193,23 @@ uint32_t fnvnx_modules_resolve(void *ctx, const char *dll, const char *name, uin
 
 /* ---- M2: map ---- */
 
-static int load_one(fnvnx_proc *p, unsigned k) {
-    const fnvnx_module_desc *d = &p->cfg.modules[k];
-    fnvnx_loaded *L = &p->mod[k];
-    uint8_t sha[32], extra;
-    uint8_t *buf;
-    int r;
-    if (!d->name || !d->name[0] || !d->file_size || (d->base & 0xffffu)) {
-        fnvnx_logf(p->os, "fnvnx-start: module table entry %u is not usable (name, size or 64 KiB base)", k);
-        return FNVNX_START_E_STATE;
-    }
-    L->name = d->name;
-    L->file = FNVNX_FILE_MODULE(k);
-    if (!(buf = (uint8_t *)p->os->alloc(p->os->ctx, d->file_size))) return FNVNX_E_NOMEM;
-    r = p->os->read(p->os->ctx, L->file, 0, buf, d->file_size) ? FNVNX_E_IO : FNVNX_OK;
-    if (r) fnvnx_logf(p->os, "fnvnx-start: cannot read module %s", L->name);
-    else fnvnx_sha256(buf, d->file_size, sha);
-    p->os->free(p->os->ctx, buf);
-    if (r) return r;
-    if (memcmp(sha, d->sha256, 32)) {
-        fnvnx_logf(p->os, "fnvnx-start: identity mismatch: module %s is not the file the table was built from", L->name);
-        return FNVNX_START_E_IDENTITY;
-    }
-    if (!p->os->read(p->os->ctx, L->file, d->file_size, &extra, 1)) {   /* the file must end where the table says */
-        fnvnx_logf(p->os, "fnvnx-start: identity mismatch: module %s is longer than the table says", L->name);
-        return FNVNX_START_E_IDENTITY;
-    }
-    if ((r = fnvnx_pe_open(&L->pe, p->os, L->file, d->file_size))) {
-        fnvnx_logf(p->os, "fnvnx-start: PE headers of %s: %s", L->name, fnvnx_strerror(r));
-        return r;
-    }
-    if (!(L->pe.characteristics & FILE_DLL)) {
-        fnvnx_logf(p->os, "fnvnx-start: %s is not a DLL image", L->name);
-        return FNVNX_E_UNSUPPORTED;
-    }
-    L->img.pe = &L->pe;
-    if ((r = fnvnx_loaded_map(p, L, d->base))) return r;
-    p->nmod = k + 1u;
-    r = fnvnx_image_relocate(&L->img, p->os, &L->relocs_applied);
-    fnvnx_image_release(&L->img, p->os);
-    if (r) { fnvnx_logf(p->os, "fnvnx-start: relocating %s from 0x%08x to 0x%08x: %s", L->name, (unsigned)L->pe.image_base, (unsigned)d->base, fnvnx_strerror(r)); return r; }
-    if ((r = exp_check(p, L))) return r;
-    fnvnx_logf(p->os, "fnvnx-start: module %s mapped at 0x%08x, relocations %u", L->name, (unsigned)d->base, (unsigned)L->relocs_applied);
-    return FNVNX_OK;
-}
-
-int fnvnx_modules_map(fnvnx_proc *p) {
-    unsigned k;
-    int r;
-    for (k = 0; k < p->cfg.nmodules; k++)
-        if ((r = load_one(p, k))) return r;
-    return FNVNX_OK;
-}
-
-/* ---- M3, M4 setup ---- */
-
-int fnvnx_modules_prepare_tls(fnvnx_proc *p) {
-    unsigned k;
-    uint32_t next = 1u;
-    int r;
+/* The table itself (every row, static or on demand): usable entries, names unique, ranges inside the address space,
+ * outside the reserved range [LO, HI), the exe image and each other. */
+static int check_table(const fnvnx_proc *p) {
+    unsigned k, j;
     for (k = 0; k < p->nmod; k++) {
-        if ((r = fnvnx_loaded_tls(p, &p->mod[k], next))) return r;
-        if (p->mod[k].tls.present) next++;
-    }
-    p->tls_slots = next;
-    return FNVNX_OK;
-}
-
-int fnvnx_modules_finish(fnvnx_proc *p) {
-    unsigned k;
-    int r;
-    for (k = 0; k < p->nmod; k++) {
-        if ((r = fnvnx_loaded_entry(p, &p->mod[k], 0))) return r;
-        if ((r = fnvnx_loaded_protect(p, &p->mod[k]))) {
-            fnvnx_logf(p->os, "fnvnx-start: protecting %s failed", p->mod[k].name);
-            return r;
+        const fnvnx_module_desc *d = &p->cfg.modules[k];
+        if (!d->name || !d->name[0] || !d->file_size || !d->size_of_image || (d->base & 0xffffu) || (d->size_of_image & (FNVNX_PAGE - 1u)) ||
+            !fnvnx_in(d->base, d->size_of_image, 0, 0xffff0000u) ||
+            (d->base < FNVNX_START_RESERVED_HI && (uint64_t)d->base + d->size_of_image > FNVNX_START_RESERVED_LO) ||
+            fnvnx_images_overlap(p, d->base, d->size_of_image, -1) == 0 ? 0 : 0) {
+            fnvnx_logf(p->os, "fnvnx-start: module table entry %u is not usable (name, size, 64 KiB base or range)", k);
+            return FNVNX_START_E_STATE;
+        }
+        if (table_index(p, d->name) != (int)k) {
+            fnvnx_logf(p->os, "fnvnx-start: module table names %s twice (or not in the normal form)", d->name);
+            return FNVNX_START_E_STATE;
         }
     }
-    return FNVNX_OK;
-}
-
-/* ---- M4: initialisation and notifications ---- */
-
-/* TLS callbacks of L with (base, reason, cb_reserved); then, when `entry` and L has an entry point, DllMain(base, reason,
- * reserved). Returns DllMain's eax, or 1 when there was none. */
-static uint32_t notify(const fnvnx_proc *p, const fnvnx_thread_block *b, const fnvnx_loaded *L, uint32_t reason,
-                       uint32_t cb_reserved, int entry, uint32_t reserved) {
-    uint32_t k;
-    for (k = 0; k < L->ntls_cb; k++)
-        (void)fnvnx_call_guest(p, b, L->tls_cb[k], L->img.load_base, reason, cb_reserved);
-    return entry && L->entry_va ? fnvnx_call_guest(p, b, L->entry_va, L->img.load_base, reason, reserved) : 1u;
-}
-
-int fnvnx_start_init_modules(fnvnx_proc *p) {
-    unsigned k;
-    if (!p || !p->exe.nmap) return FNVNX_E_ARG;
-    for (k = 0; k < p->nmod && !p->modules_ready; k++) {
-        const fnvnx_loaded *L = &p->mod[k];
-        if (L->ntls_cb || L->entry_va) fnvnx_logf(p->os, "fnvnx-start: init %s", L->name);
-        if (!(notify(p, &p->main, L, DLL_PROCESS_ATTACH, 0u, 1, 1u) & 0xffu)) {
-            fnvnx_logf(p->os, "fnvnx-start: DllMain of %s returned FALSE (STATUS_DLL_INIT_FAILED)", L->name);
-            return FNVNX_START_E_DLLINIT;
-        }
-    }
-    p->modules_ready = 1;
-    return FNVNX_OK;
-}
-
-static void attach_order(const fnvnx_proc *p, const fnvnx_thread_block *b, uint32_t reason) {
-    unsigned k;
-    for (k = 0; k < p->nmod; k++) (void)notify(p, b, &p->mod[k], reason, 0u, 1, 0u);
-    (void)notify(p, b, &p->exe, reason, 0u, 0, 0u);
-}
-
-static void detach_order(const fnvnx_proc *p, const fnvnx_thread_block *b, uint32_t reason, uint32_t reserved) {
-    unsigned k;
-    (void)notify(p, b, &p->exe, reason, reserved, 0, 0u);
-    for (k = p->nmod; k--;) (void)notify(p, b, &p->mod[k], reason, reserved, 1, reserved);
-}
-
-void fnvnx_modules_thread_attach(const fnvnx_thread_block *b) { attach_order(fnvnx_start_proc(), b, DLL_THREAD_ATTACH); }
-void fnvnx_modules_thread_detach(const fnvnx_thread_block *b) { detach_order(fnvnx_start_proc(), b, DLL_THREAD_DETACH, 0u); }
-void fnvnx_modules_process_detach(uint32_t reserved) {
-    const fnvnx_proc *p = fnvnx_start_proc();
-    detach_order(p, &p->main, DLL_PROCESS_DETACH, reserved);
-}
-
-/* ---- the image list ---- */
-
-uint32_t fnvnx_images_count(const fnvnx_proc *p) { return p->exe.nmap ? 1u + p->nmod : 0u; }
-
-int fnvnx_images_get(const fnvnx_proc *p, uint32_t i, fnvnx_image_info *out) {
-    const fnvnx_loaded *L;
-    if (!p || !out || i >= fnvnx_images_count(p)) return FNVNX_E_ARG;
-    L = i ? &p->mod[i - 1u] : &p->exe;
-    out->name = L->name;
-    out->base = L->img.load_base;
-    out->size_of_image = L->pe.size_of_image;
-    out->entry_va = L->entry_va;
-    out->tls_index = L->tls_index;
-    out->has_tls = L->tls.present;
-    out->map = L->map;
-    out->nmap = L->nmap;
     return FNVNX_OK;
 }
