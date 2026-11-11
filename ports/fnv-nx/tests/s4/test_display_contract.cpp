@@ -3,11 +3,14 @@
  * ChangeDisplaySettingsA, EnumDisplayDevicesA and nx_env_profile all report it. Contract: MSDN. */
 #include "s4_test.h"
 
+#include <stdlib.h>
+#include <string>
 #include <initializer_list>
 #include <stdint.h>
 
 extern "C" {
 void os_posix_set_docked(int);
+void fnvnx_gdi_set_font_dirs(const char *, const char *, const char *);
 void fnvnx_display_mode_changed(void);
 void fnvnx_registry_set_path(const char *host_path);
 void fnvnx_registry_reset_for_test(void);
@@ -275,17 +278,20 @@ TEST(display_change_message)
 
 TEST(display_metrics_table)
 {
+    { const char *ref = getenv("FNVNX_FONT_REF"), *host = getenv("FNVNX_FONT_HOST");   /* the font-derived rows need the platform fonts */
+      if (ref && host) fnvnx_gdi_set_font_dirs((std::string(ref) + "/wine-fonts/usr/share/wine/fonts").c_str(), host, (std::string(ref) + "/reg").c_str()); }
+    const int CXMIN = 119 /* 91 + 4 * 7: Tahoma -13 px average width 7 */, MENUCHECK = 13 /* Tahoma -11 px: tmHeight 13 */;
     /* the expected table from the contract: Wine 9.0 reference window metrics; index -> value (W, H: the screen) */
     for (int d = 0; d <= 1; d++) {
         dock(d);
         int W = dw(d), H = dh(d), v[110];
         memset(v, 0, sizeof v);
         v[0] = W; v[1] = H; v[2] = 17; v[3] = 17; v[4] = 26; v[5] = 1; v[6] = 1; v[7] = 3; v[8] = 3; v[9] = 17; v[10] = 17;
-        v[11] = 32; v[12] = 32; v[13] = 32; v[14] = 32; v[15] = 19; v[16] = W; v[17] = H - 26; v[19] = 1; v[20] = 17; v[21] = 17;
-        v[28] = 62; v[29] = 34; v[30] = 18; v[31] = 25; v[32] = 4; v[33] = 4; v[34] = 62; v[35] = 34; v[36] = 4; v[37] = 4;
-        v[38] = 75; v[39] = 75; v[43] = 3; v[45] = 2; v[46] = 2; v[47] = 160; v[48] = 28; v[49] = 16; v[50] = 16; v[51] = 18;
-        v[52] = 17; v[53] = 17; v[54] = 18; v[55] = 18; v[56] = 8; v[57] = 160; v[58] = 28; v[59] = W + 8; v[60] = H + 8;
-        v[61] = W + 8; v[62] = H + 8; v[63] = 3; v[68] = 4; v[69] = 4; v[71] = 13; v[72] = 13; v[75] = 1; v[78] = W; v[79] = H;
+        v[11] = 32; v[12] = 32; v[13] = 32; v[14] = 32; v[15] = 19; v[16] = W; v[17] = H + 18; v[19] = 1; v[20] = 17; v[21] = 17;
+        v[28] = CXMIN; v[29] = 34; v[30] = 18; v[31] = 25; v[32] = 4; v[33] = 4; v[34] = CXMIN; v[35] = 34; v[36] = 4; v[37] = 4;
+        v[38] = 75; v[39] = 75; v[43] = 3; v[45] = 2; v[46] = 2; v[47] = 160; v[48] = 31; v[49] = 16; v[50] = 16; v[51] = 18;
+        v[52] = 17; v[53] = 17; v[54] = 18; v[55] = 18; v[56] = 8; v[57] = 160; v[58] = 31; v[59] = W + 12; v[60] = H + 12;
+        v[61] = W + 8; v[62] = H + 52; v[63] = 3; v[68] = 4; v[69] = 4; v[71] = MENUCHECK; v[72] = MENUCHECK; v[75] = 1; v[78] = W; v[79] = H;
         v[80] = 1; v[81] = 1; v[83] = 1; v[84] = 1; v[91] = 1;
         for (int i = 0; i <= 100; i++) {
             CHECK_EQ(GetSystemMetrics(i), v[i]);
