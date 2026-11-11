@@ -195,6 +195,31 @@ if EMIT not in ('', 'dsl'):
     raise ValueError('FNVL_EMIT=%s (want dsl or unset)' % EMIT)
 
 
+TAB_BIAS = 16     # assumption: the lowest index of a table is below 16 (the table starts at most 16 dwords above the displacement)
+
+
+def tab_tails(img, insns, lo, hi):
+    """Relocated code pointers a `jmp [reloc disp + idx*4]` can hand to the dispatcher (rule R3): the whole run of consecutive .reloc'd dwords from
+    the table address (the first relocated dword at or above the displacement, within TAB_BIAS dwords) (a run ends at the first dword that is not relocated, or at an instruction of this function), outside [lo, hi)."""
+    out = set()
+    for a, ins in insns.items():
+        if ins.mnemonic != 'jmp' or not ins.operands or ins.operands[0].type != X.X86_OP_MEM:
+            continue
+        m = ins.operands[0].mem
+        if m.scale == 4 and m.index and (a + ins.size - 4) in img.rset:
+            t = m.disp & 0xffffffff
+            for _ in range(TAB_BIAS):       # the index may start above 0 (case range k..n: disp = table - 4*k)
+                if t in img.rset:
+                    break
+                t += 4
+            while t in img.rset and t not in insns:
+                v = img.u32(t)
+                if not lo <= v < hi:
+                    out.add(v)
+                t += 4
+    return sorted(out)
+
+
 def dispatch(cx, ins):
     if EMIT == 'dsl':
         from . import f_dsl
@@ -226,12 +251,7 @@ def lift(img, addr, size, popn=None, start=None, owns=None, strict=True, x87=Non
     if owns is None:
         owns = universe.load()[1].get(addr, ())
     owns = sorted(x for x in owns if lo <= x < hi)
-    try:
-        return lift1(img, lo, hi, start, owns, strict, True, x87)
-    except Unsupported:
-        if not owns or start != addr:
-            raise
-        return lift1(img, lo, hi, start, owns, strict, False, x87)    # a label of the parent that cannot be lifted must not sink the parent
+    return lift1(img, lo, hi, start, owns, strict, True, x87)
 
 
 def lift1(img, lo, hi, start, owns, strict, explore_owns, x87=None):
@@ -248,19 +268,23 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     code = img.bytes(addr, fall_hi - addr)
     insns, tables, taken, bad = explore(img, lo, hi, code, start, owns if start == addr and explore_owns else (), fall_hi)
     order = sorted(insns)
-    if not order:
-        raise Unsupported('undecodable bytes')
     cx = Ctx(addr, size, insns, tables, taken)
     cx.start = start
     xc.prepass(cx, img, 'dyn' if x87 == 'dyn' else None, x87 if isinstance(x87, int) else 0)     # x87 stack-depth pre-pass: cx.xm 's' static / 'd' dynamic / None
     em = cx.em
     kinds = cx.kinds
+    from . import universe
+    uent = getattr(img, 'entries', None)          # a synthetic image of the unit tests names its entries itself
+    uent = universe.load()[0] if uent is None else uent
+    cx.uent = uent
     for idx, a in enumerate(order):
         ins = insns[a]
         m = ins.mnemonic
         ops = ins.operands
         nxt = a + ins.size
         em('%s: ;' % cx.lab(a))
+        if a == start or a in uent:
+            em('TRACE(0x%xu);' % a)        # every pass over an entry address is a trace event (bench), wherever the function was entered
         pfx = ''
         if m.startswith('rep ') or m.startswith('repe ') or m.startswith('repne '):
             pfx, m = m.split(' ', 1)
@@ -288,7 +312,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     for a in sorted(bad):      # bytes that do not decode: the CPU raises #UD there
         cx.nonlocal_ = True
         em('%s: ; SYNC_OUT; REGS(); fnvl_raise(FNVL_UD,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (cx.lab(a), a))
-    if start != order[0]:
+    if not order or start != order[0]:       # also an entry whose first byte does not decode: its body is the #UD at that address
         cx.L.insert(0, 'goto %s;' % cx.lab(start))
     if cx.nonlocal_:
         labs = sorted(set(x for x in cx.callrets + owns + list(tables_all(tables)) + taken + sorted(cx.raises | bad) if x in insns or x in bad))
@@ -301,11 +325,11 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     body = body.replace('SYNC_IN;', 'SYNC_IN;' + fl)
     decl = ''.join('extern "C" void L_%08x(void);\n' % t for t in sorted(cx.calls | cx.tails))
     txt = '%sextern "C" void L_%08x(void)\n{ DECL; SYNC_IN;%s%s%s u32 E=esp; %s\n%s\n}\n' % (
-        decl, start, xc.decl(cx), fl, ' u32 fsb=c->fs;' if cx.usesfs else '', 'TRACE(0x%xu);' % start if start == addr else '', body)
+        decl, start, xc.decl(cx), fl, ' u32 fsb=c->fs;' if cx.usesfs else '', '', body)
     if cx.usesfs:
         kinds.add('fs')
     meta = dict(addr=start, size=size, selfcalls=cx.selfcalls, callrets=cx.callrets, kinds=sorted(kinds), n=len(order), tables=len(tables),
-                calls=sorted(cx.calls), tails=sorted(cx.tails))
+                calls=sorted(cx.calls), tails=sorted(cx.tails), tabtails=tab_tails(img, insns, lo, hi))
     return txt, meta
 
 

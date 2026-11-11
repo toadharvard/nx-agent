@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Exception bench (R4): SEH frames on fs:[0], hardware exceptions, RtlUnwind, RaiseException, on BOTH sides with the same seeded state.
-    ehtest.py [--dispatch phf|bs] [--census]
+    ehtest.py [--census]
 x86 side: Unicorn runs the code; there is no OS, so the harness (Python) is the OS: on a divide error / int3 / ud2 / call of a service address it runs
 the SAME algorithm as rt/seh.c (record and context on the guest stack, fs:[0] walk, handlers run through Unicorn, unwind, ContinueExecution).
 Lifted side: the lifted code + rt/seh.c under Unicorn AArch64. Compared: call trace (entry address, esp: handlers, funclets, continuations
@@ -194,11 +194,11 @@ def census(a):
 
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument('--dispatch', default='phf'); ap.add_argument('--census', action='store_true'); ap.add_argument('--seeds', type=int, default=3)
+    ap = argparse.ArgumentParser(); ap.add_argument('--census', action='store_true'); ap.add_argument('--seeds', type=int, default=3)
     ap.add_argument('--work', default='/home/user/l3work/chain/ehtest'); a = ap.parse_args(); a.lifter = LIFT
     if a.census: return census(a)
-    a.work += '-' + a.dispatch; os.makedirs(a.work, exist_ok=True)
-    code, ents = build(); nltest.BASE = BASE; img = nltest.Fake(code); T.G['img'] = img; T.G['L'] = L
+    os.makedirs(a.work, exist_ok=True)
+    code, ents = build(); nltest.BASE = BASE; img = nltest.Fake(code); img.entries = set(v[2] for v in ents.values()) | {SVC_UNW, SVC_RAISE}; T.G['img'] = img; T.G['L'] = L
     texts = {}
     for n, (ad, sz, start, owns) in ents.items(): texts[start] = L.lift(img, ad, sz, start=start, owns=owns)[0]
     flags = [f for f in T.FLAGS if f not in ('-DFNVL_FLAGS_IO', '-DFNVL_STUBX')] + ['-I', LIFT + '/rt']
@@ -207,7 +207,7 @@ def main():
     so = a.work + '/seh.o'; r = subprocess.run(['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++', '-I', LIFT + '/rt', LIFT + '/rt/seh.c', '-o', so], capture_output=True, text=True)
     if r.returncode: sys.exit('seh.c: ' + r.stderr[:600])
     syms = {ad: 'L_%08x' % ad for ad in texts}; syms[SVC_UNW] = 'fnvl_os_RtlUnwind'; syms[SVC_RAISE] = 'fnvl_os_RaiseException'
-    im = chrun.Image(chain.link(a, [o, so], syms, flags, ['--defsym', 'L_%08x=fnvl_os_RtlUnwind' % SVC_UNW, '--defsym', 'L_%08x=fnvl_os_RaiseException' % SVC_RAISE])); evs = set(ad for ad, sz, st_, ow in ents.values() if st_ == ad); bad = 0    # a direct call of a service address is a call of L_<addr>
+    im = chrun.Image(chain.link(a, [o, so], syms, flags, ['--defsym', 'L_%08x=fnvl_os_RtlUnwind' % SVC_UNW, '--defsym', 'L_%08x=fnvl_os_RaiseException' % SVC_RAISE])); evs = set(st_ for ad, sz, st_, ow in ents.values()); bad = 0    # a direct call of a service address is a call of L_<addr>
     CASES = (('mA', 'unwind through 2 frames after #DE'), ('f3', '#BP, ContinueExecution'), ('mB', 'RaiseException, unwind'), ('fU', '#DE no frame: unhandled'),
              ('fD', '#UD, search, unhandled'), ('fR', 'RaiseException, ContinueExecution'))
     for root, what in CASES:

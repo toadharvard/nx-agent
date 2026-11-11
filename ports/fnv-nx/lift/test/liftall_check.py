@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(LIFT, 'tools'))
 from liftall import classify
 
 
-def tsv(f): return [l.rstrip('\n').split('\t') for l in open(f)]
+def tsv(f): return [l.rstrip('\n').split('\t') for l in open(f) if l[0] != '#']
 
 
 def defined(archives):
@@ -46,7 +46,7 @@ def main():
         if ad in uni or not a.partial: unres.append(s)
         else: deferred += 1
     res['c'] = (not unres, '%d lifted references to entries without a symbol outside missing (%s); %d refer to other shards (partial)' % (len(unres), ' '.join(unres[:5]), deferred))
-    ents = {int(r[0], 16): r[1] for r in tsv(out + '/entries.tsv')}
+    ents = {int(r[0], 16): r[1] for r in tsv(out + '/entries.tsv') if len(r) < 3 or r[2] == 'code'}     # import keys (kind import) are checked by test/imptest.py
     res['d'] = (set(ents) == set(man) and all(man[x][1] == s for x, s in ents.items()), 'entries %d, manifest %d' % (len(ents), len(man)))
     trial = out + '/trial_r.o'
     r = subprocess.run([LD, '-m', 'aarch64elf32', '-r', '-o', trial, '--whole-archive'] + arcs + [out + '/rt.a', '--no-whole-archive', out + '/disp.o'], capture_output=True, text=True)
@@ -70,16 +70,16 @@ def run_dispatch(out, arcs, ents, uni, und):
     from elftools.elf.elffile import ELFFile
     elf = out + '/blob.elf'     # symbols still undefined after (e) are pointed at fnvl_nobody here: the blob only has to run the dispatcher
     open(out + '/blob.args', 'w').write(''.join('--defsym=%s=fnvl_nobody\n' % s for s in sorted(und)))
-    r = subprocess.run([LD, '-m', 'aarch64elf32', '-Ttext=0x10000000', '-e', 'fnvl_dispatch', '@' + out + '/blob.args', '-o', elf, '--whole-archive'] + arcs + ['--no-whole-archive', out + '/rt.a', out + '/disp.o'], capture_output=True, text=True)
+    r = subprocess.run([LD, '-m', 'aarch64elf32', '-Ttext=0x10000000', '-e', 'fnvl_dispatch', '@' + out + '/blob.args', '-o', elf, '--whole-archive'] + arcs + ['--no-whole-archive', '--start-group', out + '/rt.a', out + '/disp.o', '--end-group'], capture_output=True, text=True)
     if r.returncode: return False, 'link of the blob failed: ' + r.stderr[:200]
     with open(elf, 'rb') as fh:
         e = ELFFile(fh); sym = {s.name: s['st_value'] for s in e.get_section_by_name('.symtab').iter_symbols() if s.name}
-        uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+        uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM); mapped = set()
         for p in e.iter_segments():
             if p['p_type'] != 'PT_LOAD': continue
             lo = p['p_vaddr'] & ~0xfff; hi = (p['p_vaddr'] + p['p_memsz'] + 0xfff) & ~0xfff
-            try: uc.mem_map(lo, hi - lo)
-            except Exception: pass
+            for pg in range(lo, hi, 0x1000):
+                if pg not in mapped: uc.mem_map(pg, 0x1000); mapped.add(pg)
             uc.mem_write(p['p_vaddr'], p.data())
     uc.mem_map(0x7f000000, 0x10000); uc.mem_map(0x7e000000, 0x1000)
     keys = sorted(ents); sample = [keys[i * len(keys) // 200] for i in range(200)] if len(keys) >= 200 else keys

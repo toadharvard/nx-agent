@@ -13,6 +13,29 @@ def is_import(cx, o):
     return o.type == X.X86_OP_MEM and not o.mem.base and not o.mem.index and not o.mem.segment
 
 
+def jump_stmt(cx, t):
+    """C statement of a direct transfer to address t outside the function's range. t is an entry of the universe: the C call of its body, then the
+    tail rule. t is not an entry (the universe is closed under direct targets inside executable sections, so t lies in no executable section): the
+    transfer goes to the dispatcher like any computed one: one rule for every address that has no body (rt/rt.c)."""
+    cx.nonlocal_ = True
+    if t in cx.uent:
+        cx.tails.add(t)
+        cx.kinds.add('tailjmp')
+        return '{ SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; goto after_tail; }' % hexs(t)
+    cx.kinds.add('jmp-direct-noentry')
+    return '{ c->ra=0x%xu; goto nonlocal; }' % t
+
+
+def jump_out(cx, t, cond=None):
+    """a direct jump (cond None) or conditional jump to address t outside the function's range"""
+    cx.em(('if(%s)' % cond if cond else '') + jump_stmt(cx, t))
+
+
+def jump_to(cx, t):
+    """control transfer to the constant address t (jmp, jcc, loop, jecxz, rep step): a label of this function, else jump_stmt. -> C statement"""
+    return 'goto %s;' % cx.lab(t) if cx.lo <= t < cx.hi else jump_stmt(cx, t)
+
+
 def call_xfer(cx, o, t):
     """transfer half of the call at cx.a (the state effect, esp-=4 and the return address store, is the caller's): `t` is a constant target (int) or
     the name of a C u32 holding it; operand `o` only classifies an indirect call (import or not). -> C text"""
@@ -22,20 +45,13 @@ def call_xfer(cx, o, t):
         if cx.lo <= t < cx.hi:
             cx.selfcalls[cx.a] = (t, cx.nxt)
             cx.kinds.add('selfcall')
-        cx.calls.add(t)
-        return 'SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal;' % (hexs(t), cx.nxt)
+        if t in cx.uent:
+            cx.calls.add(t)
+            return 'SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal;' % (hexs(t), cx.nxt)
+        cx.kinds.add('call-direct-noentry')     # not an entry (see jump_stmt): through the dispatcher
+        return 'SYNC_OUT; REGS(); fnvl_dispatch(0x%xu)(); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal;' % (t, cx.nxt)
     cx.kinds.add('import' if is_import(cx, o) else 'indcall')
     return 'SYNC_OUT; REGS(); fnvl_dispatch(%s)(); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal;' % (t, cx.nxt)
-
-
-def jump_to(cx, t):
-    """control transfer to the constant address t (jmp, jcc, loop, jecxz, rep step): a label of this function, else a tail call. -> C statement"""
-    if cx.lo <= t < cx.hi:
-        return 'goto %s;' % cx.lab(t)
-    cx.nonlocal_ = True
-    cx.tails.add(t)
-    cx.kinds.add('tailjmp')
-    return '{ SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; goto after_tail; }' % hexs(t)
 
 
 def jmp_indirect(cx, o, t):
@@ -90,7 +106,11 @@ def h_jcc(cx, ins):
 
 @op('jecxz')
 def h_jecxz(cx, ins):
-    cx.em('if(!ecx) goto %s;' % cx.lab(cx.ops[0].imm & 0xffffffff))
+    t = cx.ops[0].imm & 0xffffffff
+    if cx.lo <= t < cx.hi:
+        cx.em('if(!ecx) goto %s;' % cx.lab(t))
+    else:
+        jump_out(cx, t, '!ecx')
 
 
 @op('ret')

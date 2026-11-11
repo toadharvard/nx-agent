@@ -1,6 +1,7 @@
 """x87 (opcode bytes 0xd8..0xdf): data movement, arithmetic, compares (R8, W13). Stack model and control instructions: f_x87_ctl.py; the carrier
-semantics (what each load/store/arithmetic does to the value) are in rt/fnvl_x87.h. Not in this file: fsin fcos fsincos fptan fpatan f2xm1 fyl2x fyl2xp1
-fscale fprem fprem1 fxtract fbld fbstp fnsave frstor fnstenv fldenv (Unsupported with the mnemonic)."""
+semantics (what each load/store/arithmetic does to the value) are in rt/fnvl_x87.h. The transcendental / remainder forms (fsin fcos fsincos fptan fpatan f2xm1 fyl2x
+fyl2xp1 fscale fprem fprem1 fxtract) call rt/fmath.c: correctly rounded binary64 (R8, one reference CPU model); fsincos and fptan always use the dynamic stack because
+their stack effect depends on the operand (C2 = 1: |x| >= 2^63, nothing pushed). Not in this file: fbld fbstp fnsave frstor fnstenv fldenv (Unsupported with the mnemonic)."""
 from .core import fallback, op, Unsupported, X87Dyn
 from .f_x87_ctl import ctl
 
@@ -10,8 +11,9 @@ CONST = {0xe8: '0x3ff0000000000000ull', 0xe9: '0x400a934f0979a371ull', 0xea: '0x
          0xec: '0x3fd34413509f79ffull', 0xed: '0x3fe62e42fefa39efull', 0xee: '0x0ull'}      # fld1 fldl2t fldl2e fldpi fldlg2 fldln2 fldz: the nearest double
 INT_ST = {(0xdb, 1): (32, 1, 1), (0xdb, 2): (32, 0, 0), (0xdb, 3): (32, 0, 1), (0xdf, 1): (16, 1, 1), (0xdf, 2): (16, 0, 0), (0xdf, 3): (16, 0, 1),
           (0xdf, 7): (64, 0, 1), (0xdd, 1): (64, 1, 1)}       # (bits, truncate (fisttp), pop)
-NOT_YET = {(0xd9, 0xf0): 'f2xm1', (0xd9, 0xf1): 'fyl2x', (0xd9, 0xf2): 'fptan', (0xd9, 0xf3): 'fpatan', (0xd9, 0xf4): 'fxtract', (0xd9, 0xf5): 'fprem1',
-           (0xd9, 0xf8): 'fprem', (0xd9, 0xf9): 'fyl2xp1', (0xd9, 0xfb): 'fsincos', (0xd9, 0xfd): 'fscale', (0xd9, 0xfe): 'fsin', (0xd9, 0xff): 'fcos'}
+# d9 /reg forms served by rt/fmath.c: modrm -> mnemonic
+FM = {0xf0: 'f2xm1', 0xf1: 'fyl2x', 0xf2: 'fptan', 0xf3: 'fpatan', 0xf4: 'fxtract', 0xf5: 'fprem1', 0xf8: 'fprem', 0xf9: 'fyl2xp1', 0xfb: 'fsincos', 0xfd: 'fscale',
+      0xfe: 'fsin', 0xff: 'fcos'}
 
 
 # ---- stack addressing: static = C locals s<j>, dynamic = c->fx through the runtime top ----
@@ -50,8 +52,6 @@ def arith(cx, dst, x, y, o):
 def h_x87(cx, ins):
     cx.kinds.add('x87')
     g = (cx.modrm >> 3) & 7
-    if (cx.b0, cx.modrm) in NOT_YET:
-        raise Unsupported('x87 ' + NOT_YET[(cx.b0, cx.modrm)])
     if ctl(cx, ins, cx.b0, cx.modrm, g):
         return
     (x87_reg if cx.modrm >= 0xc0 else x87_mem)(cx, ins, cx.b0, cx.modrm, g)
@@ -99,8 +99,32 @@ def x87_reg(cx, ins, b0, mr, g):
         em('{ double x_=fv_d(%s); %s=fv_f64(FXN(__builtin_sqrt(x_),x_,x_)); }' % (R(0), wr(cx, 0)))
     elif b0 == 0xd9 and mr == 0xfc:                                                # frndint
         em('%s=fv_rnd(%s);' % (wr(cx, 0), R(0)))
+    elif b0 == 0xd9 and mr in FM:
+        fmath(cx, mr)
     else:
         raise Unsupported('x87 ' + cx.m)
+
+
+def fmath(cx, mr):
+    """fsin fcos fsincos fptan f2xm1 fyl2x fyl2xp1 fpatan fscale fxtract fprem fprem1: macros FM_* of rt/fnvl_x87.h (the same text on the static and the dynamic stack)"""
+    em, R, W = cx.em, lambda k: rd(cx, k), lambda k: wr(cx, k)
+    nm = FM[mr]
+    if nm in ('fsin', 'fcos'):
+        em('FM_TRIG(fnvl_m_%s,%s,%s);' % (nm[1:], W(0), R(0)))
+    elif nm == 'f2xm1':
+        em('FM_UN(fnvl_m_2xm1,%s,%s);' % (W(0), R(0)))
+    elif nm in ('fyl2x', 'fyl2xp1', 'fpatan'):                                     # ST(1) = f(ST(1), ST(0)), pop
+        em('FM_BIN(fnvl_m_%s,%s,%s,%s);%s' % ({'fyl2x': 'yl2x', 'fyl2xp1': 'yl2xp1', 'fpatan': 'atan2'}[nm], W(1), R(1), R(0), pop(cx)))
+    elif nm == 'fscale':
+        em('FM_BIN(fnvl_m_scale,%s,%s,%s);' % (W(0), R(0), R(1)))
+    elif nm in ('fprem', 'fprem1'):
+        em('FM_PREM(%s,%s,%s,%d);' % (W(0), R(0), R(1), nm == 'fprem1'))
+    elif nm == 'fxtract':                                                          # ST0 = exponent, push the significand
+        em('{ u32 f_=0; double e_, s_; fnvl_m_xtract(fv_d(%s),&e_,&s_,&f_); %s=fv_f64(e_); %s FM_FL(f_); }' % (R(0), W(0), push(cx, 'fv_f64(s_)')))
+    else:                                                                          # fptan fsincos: push only when C2 = 0: data dependent depth
+        if cx.xm == 's':
+            raise X87Dyn()
+        em('FM_TAN(%s,%s);' % (W(0), R(0)) if nm == 'fptan' else 'FM_SINCOS(%s,%s);' % (W(0), R(0)))
 
 
 def x87_mem(cx, ins, b0, mr, g):

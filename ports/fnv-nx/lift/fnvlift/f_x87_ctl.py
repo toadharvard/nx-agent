@@ -52,8 +52,8 @@ def effect(b0, mr):
         return t.get(g, 0), False
     if b0 == 0xd8:
         return (-1 if g == 3 else 0), False
-    if b0 == 0xd9:
-        return (1 if mr < 0xc8 or 0xe8 <= mr <= 0xee else 0), False
+    if b0 == 0xd9:                                                    # fld sti, fld1..fldz push; fptan fsincos fxtract push; fpatan fyl2x fyl2xp1 pop
+        return (1 if mr < 0xc8 or 0xe8 <= mr <= 0xee else {0xf1: -1, 0xf2: 1, 0xf3: -1, 0xf4: 1, 0xf9: -1, 0xfb: 1}.get(mr, 0)), False
     if b0 == 0xda:
         return (-2 if mr == 0xe9 else 0), False
     if b0 == 0xdb:

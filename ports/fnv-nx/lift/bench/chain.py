@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Chain gate: multi-function call chains, x86 (Unicorn, real image, real callees) against the lifted closure (AArch64 ILP32, Unicorn).
-    chain.py [--n 300] [--seeds 2] [--jobs 3] [--cap 60] [--dispatch phf|bs] [--lifter DIR] [--work DIR] [--phf-full]
+    chain.py [--n 300] [--seeds 2] [--jobs 3] [--cap 60] [--lifter DIR] [--work DIR] [--phf-full]
 A chain = a decomp root + the closure of its direct calls and tail jumps (<= 40 functions, every one lifts, no indirect call/jump, no import, no fs:).
 Compared per run: call trace (entry address, esp at entry), 8 registers, x87 top/ST0, every written byte, the return address of the root.
 Everything exe-derived goes to --work (default /home/user/l3work/chain/run), never the repo. Inputs FNVNX_EXE, FNVNX_UNIVERSE."""
@@ -8,9 +8,9 @@ import argparse, collections, hashlib, multiprocessing as mp, os, pickle, statis
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 G = {}
-EXCL = ('indcall', 'import', 'jmp-indirect-untabled', 'fs', 'rcp-rsqrt')   # rcp-rsqrt: the reference-CPU tables are the runtime owner's, not linked here
+EXCL = ('indcall', 'import', 'jmp-indirect-untabled', 'fs')
 CHKSTK = 0xec8660                      # __chkstk / _alloca_probe: returns with a changed esp
-LIBC = ('.text\n.globl fnvl_os_unhandled\nfnvl_os_unhandled: ret\n.globl fnvl_rcp32\nfnvl_rcp32: ret\n.globl fnvl_rsqrt32\nfnvl_rsqrt32: ret\n.globl memcpy\nmemcpy: mov x3,x0\n1: cbz x2,2f\n ldrb w4,[x1],#1\n strb w4,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
+LIBC = ('.text\n.weak fnvl_raise_av\nfnvl_raise_av: ret\n.globl memcpy\nmemcpy: mov x3,x0\n1: cbz x2,2f\n ldrb w4,[x1],#1\n strb w4,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
         '.globl memset\nmemset: mov x3,x0\n1: cbz x2,2f\n strb w1,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
         '.globl memmove\nmemmove: cmp x0,x1\n b.ls 3f\n add x3,x0,x2\n add x1,x1,x2\n1: cbz x2,2f\n ldrb w4,[x1,#-1]!\n strb w4,[x3,#-1]!\n sub x2,x2,#1\n b 1b\n2: ret\n'
         '3: mov x3,x0\n4: cbz x2,2b\n ldrb w4,[x1],#1\n strb w4,[x3],#1\n sub x2,x2,#1\n b 4b\n')
@@ -37,9 +37,9 @@ def lift_args(a):
 def meta_one(a):
     L = G['L']
     try:
-        t, m = L.lift(G['img'], **lift_args(a)); return a, None, m['calls'], m['tails'], tuple(m['kinds']) + (('rcp-rsqrt',) if 'fnvl_rcp32' in t or 'fnvl_rsqrt32' in t else ()), m['n']
-    except L.Unsupported as e: return a, str(e)[:60], (), (), (), 0
-    except Exception as e: return a, 'error ' + type(e).__name__, (), (), (), 0
+        t, m = L.lift(G['img'], **lift_args(a)); return a, None, m['calls'], m['tails'], tuple(m['kinds']), m['n'], m['tabtails']
+    except L.Unsupported as e: return a, str(e)[:60], (), (), (), 0, ()
+    except Exception as e: return a, 'error ' + type(e).__name__, (), (), (), 0, ()
 
 
 def load_meta(a):
@@ -60,7 +60,7 @@ def closure(root, meta, ent, limit=40):
         if m[0]: return None, 0, 'unlifted: ' + m[0].split(' at ')[0]
         bad = [k for k in EXCL if k in m[3]]
         if bad: return None, 0, 'has ' + bad[0]
-        for t in m[1] + m[2]:
+        for t in m[1] + m[2] + m[5]:
             if t not in seen:
                 seen[t] = seen[u] + 1; q.append(t)
                 if len(q) > limit: return None, 0, 'closure > %d' % limit
@@ -142,13 +142,12 @@ def comp_chunk(t):
 def link(a, objs, syms, flags, ldextra=()):
     import phf
     CF = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-w', '-c']
-    d = a.work; h = phf.build(list(syms)) if a.dispatch == 'phf' else None
-    open(d + '/tab.c', 'w').write(phf.table_c(syms, h)); open(d + '/libc.S', 'w').write(LIBC)
-    df = ['-DFNVL_PHF', '-DFNVL_K1=%du' % h['k1'], '-DFNVL_K2=%du' % h['k2'], '-DFNVL_NBITS=%d' % h['nbits'], '-DFNVL_TBITS=%d' % h['tbits']] if h else []
-    for src, extra in (('%s/rt/rt.c' % a.lifter, df), ('%s/rt/x87.c' % a.lifter, ['-I', '%s/rt' % a.lifter]), (d + '/tab.c', []), (d + '/libc.S', [])):
+    d = a.work; h = phf.build(list(syms))
+    open(d + '/tab.S', 'w').write(phf.table_asm(syms, h)); open(d + '/libc.S', 'w').write(LIBC)
+    for src, extra in (('%s/rt/rt.c' % a.lifter, []), ('%s/rt/x87.c' % a.lifter, ['-I', '%s/rt' % a.lifter]), ('%s/rt/rcptab.c' % a.lifter, []), (d + '/tab.S', []), (d + '/libc.S', []), (HERE + '/harness.S', [])):
         subprocess.check_call(['aarch64-linux-gnu-gcc'] + CF + extra + [src, '-o', '%s/%s.o' % (d, os.path.basename(src)[:-2])])
     elf = d + '/chain.elf'; open(d + '/objs.txt', 'w').write('\n'.join(sorted(objs)))
-    r = subprocess.run(['aarch64-linux-gnu-ld', '-m', 'aarch64elf32', '-Ttext=0x%x' % 0xE0000000, '-e', '0', '-o', elf] + list(ldextra) + [d + '/rt.o', d + '/x87.o', d + '/tab.o', d + '/libc.o'] + sorted(objs), capture_output=True, text=True)
+    r = subprocess.run(['aarch64-linux-gnu-ld', '-m', 'aarch64elf32', '-Ttext=0x%x' % 0xE0000000, '-e', '0', '-o', elf] + list(ldextra) + [d + '/rt.o', d + '/x87.o', d + '/rcptab.o', d + '/tab.o', d + '/libc.o', d + '/harness.o'] + sorted(objs), capture_output=True, text=True)
     if r.returncode: sys.exit('link failed: ' + r.stderr[:300])
     return elf
 
@@ -162,7 +161,7 @@ def work(job):
 
 def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
-    A('--n', type=int, default=300); A('--seeds', type=int, default=2); A('--jobs', type=int, default=3); A('--cap', type=int, default=60); A('--dispatch', default='phf')
+    A('--n', type=int, default=300); A('--seeds', type=int, default=2); A('--jobs', type=int, default=3); A('--cap', type=int, default=60)
     A('--lifter', default=LIFT); A('--work', default='/home/user/l3work/chain/run'); A('--phf-full', action='store_true')
     A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')); A('--universe', default=os.environ.get('FNVNX_UNIVERSE', '/home/user/l3facts/universe.tsv'))
     a = ap.parse_args(); t0 = time.time(); os.makedirs(a.work, exist_ok=True); sys.path.insert(0, a.lifter)

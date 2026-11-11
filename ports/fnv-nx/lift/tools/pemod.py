@@ -5,7 +5,9 @@ import struct, bisect
 from types import SimpleNamespace
 EXEC = 0x20000000 | 0x20           # IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_CNT_CODE
 
-def load(path):
+def load(path, newbase=None):
+    """newbase=None: the file as stored (preferred base). Else the image as the Windows loader maps it at `base`: every address (sections, relocations,
+    exports, entry VAs) at `newbase`, delta = newbase - preferred added to the dword of every HIGHLOW fixup, so all stored VAs (TLS directory, load config, tables) speak `newbase`."""
     d = open(path, 'rb').read(); pe = struct.unpack_from('<I', d, 0x3c)[0]
     assert d[pe:pe + 4] == b'PE\0\0' and struct.unpack_from('<H', d, pe + 24)[0] == 0x10b, 'not a PE32 image'
     nsec, soh = struct.unpack_from('<H', d, pe + 6)[0], struct.unpack_from('<H', d, pe + 20)[0]
@@ -39,6 +41,15 @@ def load(path):
             while d[e] and e < len(d) - 1: e += 1
         return d[x:e]
     M.cstr = cstr
+    M.pref = M.base
+    if newbase is not None and newbase != M.base:
+        delta = (newbase - M.base) & 0xffffffff; rl = relocs(M)                    # relocation list at the preferred base, read before the shift
+        M.d = d = bytearray(d)
+        for r in rl or ():
+            x = M.off(r)
+            if x is not None: struct.pack_into('<I', d, x, (struct.unpack_from('<I', d, x)[0] + delta) & 0xffffffff)
+        secs[:] = [(n, (va + delta) & 0xffffffff, vs, ro, rs) for n, va, vs, ro, rs in secs]; xs[:] = [(n, (va + delta) & 0xffffffff, z, ro) for n, va, z, ro in xs]
+        starts[:] = [(x + delta) & 0xffffffff for x in starts]; M.base = newbase
     return M
 
 def relocs(M):

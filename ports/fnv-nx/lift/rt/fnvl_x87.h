@@ -4,6 +4,7 @@
    loads, stores, copies, fist, compares, fxam, control/status words, fchs/fabs. Everything that needs 80 bits (m80 carriers, fild m64 beyond 2^53
    compared or stored as m80) goes through rt/x87.c (fnvl_x_*), which is hardware-equal. */
 #include "x87.h"
+#include "fmath.h"
 enum { FK_E, FK_F64, FK_F32, FK_I16, FK_I32, FK_I64, FK_M80 };
 #define FQ64 (1ull<<51)
 static inline fv fvmk(u32 k,u64 v,u32 e){ fv r; r.v=v; r.e=e; r.k=k; return r; }
@@ -70,10 +71,28 @@ static inline fv fv_rnd(fv a){ u32 f=0, rc=(c->fcw>>10)&3; fnvl_f80 r;
 static inline u32 fv_cmp(fv a,fv b){ u32 f=0;
   if(__builtin_expect((0x1eu>>a.k)&(0x1eu>>b.k)&1,1)){ double x=fv_d(a),y=fv_d(b); return (x!=x||y!=y)?0x4500u:x==y?0x4000u:x<y?0x100u:0u; }
   return fnvl_x_cmp(fv_x(a),fv_x(b),1,&f); }
-#define FCMP(A,B) do{ u32 r_=fv_cmp((A),(B)); c0=(r_>>8)&1; c2=(r_>>10)&1; c3=(r_>>14)&1; }while(0)
+#define FCMP(A,B) do{ u32 r_=fv_cmp((A),(B)); c0=(r_>>8)&1; c2=(r_>>10)&1; c3=(r_>>14)&1; c->fex&=~0x200u; }while(0)
 #define FCMPI(A,B) do{ u32 r_=fv_cmp((A),(B)); zf=(r_>>14)&1; pf=(r_>>10)&1; cf=(r_>>8)&1; of=sf=af=0; }while(0)
-#define FXAM(F) do{ fv f_=(F); u32 r_=fnvl_x_xam(fv_x(f_),f_.k==0); c0=(r_>>8)&1; c2=(r_>>10)&1; c3=(r_>>14)&1; }while(0)
-#define FSWV(TOP) ((u32)(TOP)<<11|(c3<<14)|(c2<<10)|(c0<<8)|fnvl_fp_x87_flags()|c->fex)
+#define FXAM(F) do{ fv f_=(F); u32 r_=fnvl_x_xam(fv_x(f_),f_.k==0); c0=(r_>>8)&1; c2=(r_>>10)&1; c3=(r_>>14)&1; c->fex=(c->fex&~0x200u)|(r_&0x200u); }while(0)
+#define FSWV_(TOP) ((u32)(TOP)<<11|(c3<<14)|(c2<<10)|(c0<<8)|fnvl_fp_x87_flags()|c->fex)
+#ifdef FNVL_TRACE
+extern "C" u32 fnvl_trace_sw(u32 fsw);   /* test stand: reports the FSW delivered to the guest (sticky exception bits are not compared with the x86 oracle) */
+#define FSWV(TOP) fnvl_trace_sw(FSWV_(TOP))
+#else
+#define FSWV(TOP) FSWV_(TOP)
+#endif
+/* fsin fcos fsincos fptan f2xm1 fyl2x fyl2xp1 fpatan fscale fxtract fprem fprem1 (rt/fmath.c, README "One reference CPU model"): correctly rounded / exact
+   binary64 results on the carriers' doubles. The exception bits it reports (IE ZE OE UE PE) are ORed into c->fex; C1 (bit 9 of c->fex: the instruction
+   rounded up, or fprem's quotient bit Q0) is ASSIGNED (FM_FL) and cleared by FCMP, set by FXAM. C0/C2/C3 are the lifter's locals. fsin/fcos/fsincos/fptan:
+   for finite |x| >= 2^63 C2 = 1 and the stack is left unchanged (SDM), otherwise C2 = 0. Data dependent stack depth (fptan, fsincos push only when C2 = 0)
+   is why those two always use the dynamic stack. */
+#define FM_FL(F) (c->fex=(c->fex&~0x200u)|(F))
+#define FM_UN(FN,D,S) do{ u32 f_=0; double x_=fv_d(S); D=fv_f64(FN(x_,&f_)); FM_FL(f_); }while(0)                                   /* f2xm1 */
+#define FM_BIN(FN,D,A,B) do{ u32 f_=0; double a_=fv_d(A), b_=fv_d(B); D=fv_f64(FN(a_,b_,&f_)); FM_FL(f_); }while(0)               /* fpatan fyl2x fyl2xp1 fscale: FN(first, second) */
+#define FM_TRIG(FN,D,S) do{ u32 f_=0; double x_=fv_d(S); if(fnvl_m_trig_big(x_)) c2=1; else{ c2=0; D=fv_f64(FN(x_,&f_)); FM_FL(f_); } }while(0)      /* fsin fcos */
+#define FM_TAN(D,S) do{ u32 f_=0; double x_=fv_d(S); if(fnvl_m_trig_big(x_)) c2=1; else{ c2=0; D=fv_f64(fnvl_m_tan(x_,&f_)); dyn_push(fvmk(FK_F64,0x3ff0000000000000ull,0)); FM_FL(f_); } }while(0)
+#define FM_SINCOS(D,S) do{ u32 f_=0; double x_=fv_d(S), s_, k_; if(fnvl_m_trig_big(x_)) c2=1; else{ c2=0; fnvl_m_sincos(x_,&s_,&k_,&f_); D=fv_f64(s_); dyn_push(fv_f64(k_)); FM_FL(f_); } }while(0)
+#define FM_PREM(D,A,B,NEAR) do{ double a_=fv_d(A), b_=fv_d(B); u32 f_=0, k_=0; D=fv_f64(fnvl_m_fprem(a_,b_,(NEAR),&k_,&f_)); c0=(k_>>8)&1; c2=(k_>>10)&1; c3=(k_>>14)&1; FM_FL(f_|(k_&0x200u)); }while(0)
 /* control: fldcw keeps the word and synchronises the host rounding mode; the MSVC bracket fnstcw/fldcw/fistp/fldcw needs no special case.
    TODO(R8 fold): fold the bracket (`fnstcw [a]; or ah,0xc; fldcw [b]; fistp; fldcw [a]`) into one truncating fistp (host rounding mode left alone). */
 #define FLDCW(W) do{ c->fcw=(W)&0xffffu; fnvl_fp_set_rc_x87((c->fcw>>10)&3); }while(0)

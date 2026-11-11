@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Code universe of FalloutNV.exe: recursive descent from decomp starts, entry point, call/tail targets, reloc'd
-pointers (entry unless a consumer rule proves data); jump tables; R3 byte accounting of .text (codemap.py), entry-set
-comparison (reconcile.py). Output: /home/user/l3facts/{universe,codemap}.tsv + count-only stdout; exit 1 if any byte is unexplained."""
+pointers (rule R3: EVERY relocated value into an executable section is an entry; the consumer rules below only classify bytes
+for the accounting and never exclude an entry); jump tables; R3 byte accounting of .text (codemap.py), entry-set
+comparison (reconcile.py). Output: $FNVNX_FACTS_OUT (default /home/user/l3facts)/{universe,codemap}.tsv + count-only stdout; exit 1 if any byte is unexplained."""
 import os, re, sys, json, struct, bisect, capstone
 from types import SimpleNamespace
 import ehtables, codemap, reconcile, pemod
@@ -13,7 +14,7 @@ if STRICT: import modlift; sys.exit(modlift.run(MOD))      # module mode: separa
 EXE = MOD or os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')
 FUNCS = os.environ.get('FNVNX_FUNCS', None if STRICT else '/home/user/l3facts/funcs.tsv')
 NAME = os.path.splitext(os.path.basename(MOD))[0].lower() if STRICT else ''
-OUTD = '/home/user/l3facts' + ('/' + NAME if STRICT else ''); OUT = OUTD + '/universe.tsv'; os.makedirs(OUTD, exist_ok=True)
+OUTD = os.environ.get('FNVNX_FACTS_OUT', '/home/user/l3facts') + ('/' + NAME if STRICT else ''); OUT = OUTD + '/universe.tsv'; os.makedirs(OUTD, exist_ok=True)
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
 M = pemod.load(EXE); d, pe, base, secs, loc, off, sec, u32, dirent = M.d, M.pe, M.base, M.secs, M.loc, M.off, M.sec, M.u32, M.dirent
 RL = pemod.relocs(M); relocs = sorted(RL or []); rset = set(relocs); imports = pemod.imports(M)
@@ -38,7 +39,7 @@ tref = array('I', bytes(4 * TN))          # relocation (site) that names each da
 insns = {}                                # addr -> (size, mnem, feat, fall, targets)
 entries = {}; kinds = {}; PRI = ['decomp', 'entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw', 'inner', 'ptr']
 tslots = set(); tstarts = set(); dinfo = Counter(); midsrc = set(); midcall = set(); bad_entries = set(); queue = deque()
-vsites = set(); vok = set(); jtab = set(); tcons = {}; straddle = set(); deadops = set(); datarec = []; arrays = []; callers = {}; parent = {}; esite = {}; psites = {}; rejects = {}; settled = set()
+r3set = set(); vsites = set(); vok = set(); jtab = set(); tcons = {}; straddle = set(); deadops = set(); datarec = []; arrays = []; callers = {}; parent = {}; esite = {}; psites = {}; rejects = {}; settled = set()
 FEATS = ['ijmp_reg', 'ijmp_mem', 'fs', 'sys', 'lock', 'rep', 'x87', 'sse', 'mmx', 'in', 'out', 'cli', 'sti', 'rdtsc', 'cpuid', 'exotic']
 EXOTIC = set('aaa aas daa das aam aad arpl bound in out insb insd outsb outsd sldt hlt lcall ljmp popal pushal iretd retf into salc'.split())
 EXO = {'hlt', 'rdmsr', 'wrmsr', 'lgdt', 'lidt', 'sgdt', 'sidt', 'ltr', 'str', 'invd', 'wbinvd', 'lmsw', 'smsw', 'clts', 'rdpmc', 'invlpg', 'ud2', 'iret', 'iretd', 'syscall', 'sysret', 'sysexit', 'bound', 'arpl', 'into', 'sldt', 'lldt', 'verr', 'verw'}
@@ -71,8 +72,9 @@ def reloc_conflict(a, ins):
         if relocs[i] not in fs: return True
         i += 1
     return False
-def walk(start, lo, hi, dec):
-    """descent from start within [lo,hi) -> (ok, new insns, refs, tables)."""
+def walk(start, lo, hi, dec, r3=False):
+    """descent from start within [lo,hi) -> (ok, new insns, refs, tables). r3: the body of an R3 pointer entry, read from its first byte whatever
+    covers it (no interior/table stop; an indexed jmp is an indirect jmp, its relocated targets are entries by R3); the result is never committed."""
     out = {}; refs = []; tabs = []; ok = True; work = [start]
     while work:
         a = work.pop(); trail = []
@@ -84,12 +86,12 @@ def walk(start, lo, hi, dec):
                     if a in fsize: refs.append(('tail', a))
                     else: midsrc.add((a, start))
                     break
-                if cov[a - T0] == 2: break
+                if cov[a - T0] == 2 and not r3: break
             n = 0; stop = False; o = a - T0
             for ins in md.disasm(text[o:min(o + 192, hi - T0 + (14 if dec else 0), TN)], a):   # an insn that starts inside a decomp range belongs to it in full
                 a = ins.address; m = ins.mnemonic; mn = m.split()[-1]; nxt = a + ins.size; n += ins.size; ops = ins.operands
                 if a >= hi: break
-                if nxt > hi and dec: dmap[hi - T0:nxt - T0] = b'\1' * (nxt - hi); straddle.add(a)
+                if nxt > hi and dec and not r3: dmap[hi - T0:nxt - T0] = b'\1' * (nxt - hi); straddle.add(a)
                 if STRICT and reloc_conflict(a, ins): dinfo['reloc_conflict'] += 1; stop = True; break         # decoding ran into relocated data
                 feat = 0; tg = (); fall = True; px = ins.prefix
                 if px[1] == 0x64: feat |= 4
@@ -104,7 +106,7 @@ def walk(start, lo, hi, dec):
                 if mn == 'jmp':
                     fall = False; op = ops[0]
                     if op.type == X.X86_OP_IMM: tg = (op.imm & 0xffffffff,)
-                    elif op.type == X.X86_OP_MEM and op.mem.scale == 4 and op.mem.index and (a + ins.disp_offset) in rset:
+                    elif not r3 and op.type == X.X86_OP_MEM and op.mem.scale == 4 and op.mem.index and (a + ins.disp_offset) in rset:
                         tg = table(ins, trail, lo, hi, dec, tabs); jtab.add(a)
                         if not tg: feat |= 2
                     else: feat |= 1 if op.type == X.X86_OP_REG else 2
@@ -304,7 +306,7 @@ U = SimpleNamespace(insns=insns, PRI=PRI, T0=T0, T1=T1, TN=TN, X=X, V=V, bad_ent
                     entries=entries, fsize=fsize, funcs=funcs, indec=indec, intext=intext, kinds=kinds, md=md, pad_split=pad_split, parent=parent, psites=psites,
                     rejects=rejects, relocs=relocs, rset=rset, rvals=rvals, sec=sec, tcons=tcons, text=text, tref=tref, tslots=tslots, tbl=tbl, pedat=pedat, mark=mark,
                     dinfo=dinfo, settled=settled, site_kind=site_kind, disp_ref=disp_ref, ptr_target=ptr_target, deadops=deadops, u32=u32, imports=imports, cont=cont,
-                    cstr=M.cstr, vsites=vsites, vok=vok, tstarts=tstarts, eh_sites=eh.sites, outdir=OUTD)    # state shared with codemap (containers mutate in place)
+                    cstr=M.cstr, r3=r3set, vsites=vsites, vok=vok, tstarts=tstarts, eh_sites=eh.sites, outdir=OUTD)    # state shared with codemap (containers mutate in place)
 fin = False
 for rnd in range(30):
     OWN[:] = sorted(entries); n0 = (len(entries), len(insns), len(tslots), len(tstarts))
@@ -326,22 +328,95 @@ NRN, NRI, NRB, NRR = codemap.exe_noreturn(U, eh.thrower)        # NORETURN: unre
 # ---- extents / features / output
 for v, ss in psites.items():
     if v in kinds and 'ptr' in kinds[v] and len(kinds[v]) > 1 and all(x in eh.sites for x in ss): kinds[v].discard('ptr')
+# ---- R3: EVERY relocated value into executable bytes is an entry (kind ptr); no consumer rule excludes one. Whether the pointer is code or data is never decided:
+# a data pointer's entry is simply never called. The body of an entry is the descent from its address; bytes that do not decode end a path (#UD at run time, flag
+# `ud`), they are not a build error. Entries made here are not committed to insns/cov: their bodies are re-readings of bytes that byte accounting (codemap.py) has
+# already classified exactly once, so accounting stays total; an address inside a decomp function gets parent= like every inner entry.
+scx = {}; udset = set(); r3call = Counter(); r3site = {}
+for r, v in rvals: r3site.setdefault(v, r)
+for v in sorted(r3site):
+    if v in entries: continue
+    f = indec(v); entries[v] = None; kinds[v] = {'ptr'}; esite[v] = r3site[v]; r3set.add(v)
+    if f: parent[v] = f[0]; kinds[v].add('inner')
+    if cov[v - T0] == 1: continue                                   # an instruction start of already decoded code: its extent is that code's descent
+    ok, out, refs, tabs = walk(v, f[0] if f else T0, f[0] + f[1] if f else T1, bool(f), True); scx[v] = out
+    if not ok: udset.add(v)
+    for rf in refs: r3call[rf[0], rf[1] in entries] += 1
+def uni(I):
+    """merged half-open byte ranges of a (possibly self-overlapping) instruction set."""
+    o = []
+    for a in sorted(I):
+        e = a + I[a][0]
+        if o and a <= o[-1][1]: o[-1][1] = max(o[-1][1], e)
+        else: o.append([a, e])
+    return o
+# ---- closure under direct targets (rule C): the entry set is the least fixed point of R3 and of "every direct call target, and every direct jmp/jcc/loop target that leaves
+# the lifter's range [lo,hi), of the body of every entry is an entry". The body and the range are the lifter's own (fnvlift.core.explore from the entry over the range
+# entry_args gives: [parent, parent+size) for an entry with parent=, else [entry, entry+extent)); a call target is an entry even inside the range (the lifter emits
+# L_<target>() for every direct call). A target inside a decomp function gets parent= (kind inner), like every inner entry. Added entries are R3-style entries: their bodies
+# are kept in scx (not in insns/cov), so byte accounting is unchanged. A target outside every executable section is not an entry (counted: lifter needs a rule there).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from fnvlift import Image as LImage; from fnvlift import core as LCore
+limg = LImage(EXE); cl_cache = {}; cl_out = Counter(); cl_outex = {}; cl_outt = {}; cl_outsrc = Counter(); cl_add = Counter(); cl_jx = set(); cl_rounds = 0
+def cl_range(a):
+    p = parent.get(a)
+    if p is not None and p in entries: return p, p + fsize[p]
+    I = scx.get(a)
+    return a, a + (sum(y - x for x, y in uni(I)) if I is not None else sum(insns[x][0] for x in extent_insns(a)))
+def cl_targets(a, kids):
+    lo, hi = cl_range(a); own = tuple(x for x in kids.get(lo, ()) if lo <= x < hi)
+    key = (lo, hi, a, own)
+    if key not in cl_cache:
+        fh = hi + 0x1000; ins, tabs, tk, bad = LCore.explore(limg, lo, hi, limg.bytes(lo, fh - lo), a, own if a == lo else (), fh); cs = set(); ts = set(); jx = set()
+        for x, g in ins.items():
+            m = g.mnemonic; o = g.operands
+            if m == 'call' and o[0].type == X.X86_OP_IMM: cs.add(o[0].imm & 0xffffffff)
+            elif (m == 'jmp' or (m[0] == 'j' and m != 'jecxz') or m in ('loop', 'loope', 'loopne')) and o[0].type == X.X86_OP_IMM:
+                t = o[0].imm & 0xffffffff
+                if not lo <= t < hi: ts.add(t)
+            elif m == 'jecxz' and not lo <= (o[0].imm & 0xffffffff) < hi: jx.add(x)
+        cl_cache[key] = (cs, ts, jx)
+    return cl_cache[key]
+while True:
+    kids = {}
+    for x, q in parent.items(): kids.setdefault(q, []).append(x)
+    miss = {}
+    for a in sorted(entries):
+        cs, ts, jx = cl_targets(a, kids); cl_jx |= {(a, x) for x in jx}
+        for kd, T in (('call', cs), ('tail', ts)):
+            for t in T:
+                if t in entries: continue
+                if not intext(t): cl_out[kd, sec(t)] += 1; cl_outex.setdefault((kd, sec(t)), t); cl_outt.setdefault(t, a); cl_outsrc['R3/closure body' if a in r3set else 'decomp' if a in fsize else 'other'] += 1; continue
+                miss.setdefault(t, (set(), a))[0].add(kd)
+    if not miss: break
+    cl_rounds += 1
+    for t in sorted(miss):
+        kds, a = miss[t]; f = indec(t); entries[t] = None; kinds[t] = set(kds); esite[t] = a; r3set.add(t); cl_add['+'.join(sorted(kds)), 'inner' if f else 'free'] += 1
+        if f: parent[t] = f[0]; kinds[t].add('inner')
+        if cov[t - T0] == 1: continue
+        ok, out, refs, tabs = walk(t, f[0] if f else T0, f[0] + f[1] if f else T1, bool(f), True); scx[t] = out
+        if not ok: udset.add(t)
 rows = []; rgs = []; rbad = rdec = eclo = 0; kc = Counter(); kany = Counter(); fe = Counter(); extsum = 0
 for a in sorted(entries):
-    pk = next(k for k in PRI if k in kinds[a]); isd = a in fsize; xs = extent_insns(a); ex = sum(insns[x][0] for x in xs); ft = 0
-    for x in xs: ft |= insns[x][2]
+    pk = next(k for k in PRI if k in kinds[a]); isd = a in fsize; I = scx.get(a, insns); xs = sorted(I) if a in scx else extent_insns(a); ft = 0
+    ex = sum(y - x for x, y in uni(I)) if a in scx else sum(insns[x][0] for x in xs)
+    for x in xs: ft |= I[x][2]
     kc[pk] += 1; kany.update(kinds[a])
     if not isd and a not in parent: extsum += ex
     fts = [nm for i, nm in enumerate(FEATS) if ft >> i & 1]; fe.update((nm, isd) for nm in fts)
-    fl = sorted(kinds[a] - {pk}) + fts + (['baddecode'] if a in bad_entries else []) + (['parent=%08x' % parent[a]] if a in parent else [])
+    fl = sorted(kinds[a] - {pk}) + fts + (['baddecode'] if a in bad_entries else []) + (['ud'] if a in udset else []) + (['parent=%08x' % parent[a]] if a in parent else [])
     rows.append('%08x\t%s\t%d\t%s' % (a, pk, fsize.get(a, ex), ','.join(fl) or '-'))
-    if not isd: ss_ = set(xs); eclo += sum(1 for x in xs for t in insns[x][4] if intext(t) and t not in entries and t not in ss_)       # closure check (report only)
-    rg = codemap.ranges(xs, lambda x: insns[x][0]); rgs.append('%08x\t%s' % (a, codemap.rng_str(rg))); s_ = sum(y - x for x, y in rg); rbad += (s_ != ex) if not isd else (s_ > fsize[a] + 15); rdec += isd
+    if not isd and a not in scx: ss_ = set(xs); eclo += sum(1 for x in xs for t in insns[x][4] if intext(t) and t not in entries and t not in ss_)       # closure check (report only)
+    rg = uni(I) if a in scx else codemap.ranges(xs, lambda x: insns[x][0]); rgs.append('%08x\t%s' % (a, codemap.rng_str(rg))); s_ = sum(y - x for x, y in rg); rbad += (s_ != ex) if not isd else (s_ > fsize[a] + 15); rdec += isd
 os.makedirs(os.path.dirname(OUT), exist_ok=True); HD = '# base=0x%08x: absolute VAs at the preferred image base (not RVAs)' % base
 open(OUT, 'w').write(HD + '; columns: entry, kind, extent, flags; extent is the SUM of the bytes the entry reaches (not a contiguous span; decomp rows: the declared function size), see ranges.tsv\n' + '\n'.join(rows) + '\n')
 open(OUTD + '/ranges.tsv', 'w').write(HD + '; columns: entry, half-open ranges start-end (hex) of the instruction bytes reached\n' + '\n'.join(rgs) + '\n')
 open(OUTD + '/noreturn.tsv', 'w').write(HD + '; columns: entry, reason\n' + ''.join('%08x\t%s\n' % kv for kv in NRR))
-print('closure check: direct jmp/jcc targets of non-decomp entries inside the span that are neither entries nor in the entry\'s own extent: %d' % eclo)
+print('R3 pointer entries: %d new (%d insn-start of decoded code, %d bodies re-read from their first byte, %d of them hit undecodable bytes #UD, %d inside decomp functions); direct targets of those bodies: %s' % (
+    len(r3set), len(r3set) - len(scx), len(scx), len(udset), sum(1 for a in r3set if a in parent), dict(sorted(r3call.items()))))
+print('closure check (old, report only): direct jmp/jcc targets of non-decomp entries inside the span that are neither entries nor in the entry\'s own extent: %d' % eclo)
+print('closure under direct targets: %d rounds, entries added %s; targets outside executable sections (not entries) %d refs / %d distinct targets, by source entry %s, by kind and section %s; first sources %s; jecxz leaving range %d' % (
+    cl_rounds, dict(sorted(cl_add.items())), sum(cl_out.values()), len(cl_outt), dict(cl_outsrc), {'%s %s' % k: '%d e.g. %08x' % (v, cl_outex[k]) for k, v in sorted(cl_out.items(), key=str)}, ' '.join('%08x<-%08x' % (t, a) for t, a in sorted(cl_outt.items())[:4]), len(cl_jx)))
 print('ranges.tsv %d rows, noreturn.tsv %d rows; range-sum vs extent mismatches %d (non-decomp rows: equality; %d decomp rows: sum <= declared size)' % (len(rgs), len(NRR), rbad, rdec))
 def gate(green, TNu, why):
     open(OUTD + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap' + ('.' + NAME if STRICT else ''), 'status': 'green' if green else 'red', 'universe': TNu, 'certified': TNu - unexpl, 'uncertified': unexpl}) + '\n')

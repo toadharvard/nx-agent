@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Unit test of the control-transfer rule on hand-assembled functions (a synthetic image at 0x401000): the paths no real chain of bench/chain.py
 takes (a callee returning to another address, a return through two frames, a tail jump through a register, an indirect call, a tail jump).
-    nltest.py [--dispatch phf|bs] [--work DIR]      prints one line per case; exit status 1 on any difference to the x86 oracle."""
+    nltest.py [--work DIR]      prints one line per case; exit status 1 on any difference to the x86 oracle."""
 import argparse, os, struct, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.environ.get('FNVL_LIFTER', os.path.dirname(HERE))   # FNVL_LIFTER: a copy of fnvlift/ + rt/ (sanity runs)
 sys.path.insert(0, HERE); sys.path.insert(0, LIFT)
@@ -53,11 +53,11 @@ ROOTS = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6']
 
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument('--dispatch', default='phf'); ap.add_argument('--work', default='/home/user/l3work/chain/nltest'); a = ap.parse_args()
-    os.makedirs(a.work, exist_ok=True); a.lifter = LIFT; a.work += '-' + a.dispatch; os.makedirs(a.work, exist_ok=True); code = bytearray(0x40 * len(F) + 0x40); texts, ents = {}, {}
+    ap = argparse.ArgumentParser(); ap.add_argument('--work', default='/home/user/l3work/chain/nltest'); a = ap.parse_args()
+    os.makedirs(a.work, exist_ok=True); a.lifter = LIFT; os.makedirs(a.work, exist_ok=True); code = bytearray(0x40 * len(F) + 0x40); texts, ents = {}, {}
     for n, (parts, owns) in SRC.items():
         b = asm(parts, F[n]); code[F[n] - BASE:F[n] - BASE + len(b)] = b; ents[n] = (F[n], len(b), owns)
-    img = Fake(bytes(code)); chrun.T.G['img'] = img
+    img = Fake(bytes(code)); img.entries = set(F.values()); chrun.T.G['img'] = img
     for n, (ad, sz, owns) in ents.items(): texts[ad] = L.lift(img, ad, sz, owns=owns)[0]
     flags = [f for f in chrun.T.FLAGS if f not in ('-DFNVL_FLAGS_IO', '-DFNVL_STUBX')] + ['-DFNVL_TRACE', '-I', LIFT + '/rt']
     o, err = chain.comp_chunk((L.PRELUDE + '\n'.join(texts.values()), flags, a.work))

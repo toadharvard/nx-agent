@@ -6,6 +6,13 @@ from .core import op, SKIP, Unsupported, MASK, CC, reg
 SEGSEL = {'cs': 'SEL_CS', 'ss': 'SEL_DS', 'ds': 'SEL_DS', 'es': 'SEL_DS', 'fs': 'SEL_FS', 'gs': '0u'}    # selectors of a Win32 x86 user process (as in rt/seh.c CONTEXT)
 
 
+SEG_STATE = False      # True once struct cpu holds the six selector values (rt/fnvl.h fnvl_seg_get): then `mov r, Sreg` / `push Sreg` read the state instead of the process constants above
+
+
+def segread(sg):
+    return 'fnvl_seg_get(c,%d)' % {'es': 0, 'cs': 1, 'ss': 2, 'ds': 3, 'fs': 4, 'gs': 5}[sg] if SEG_STATE else SEGSEL[sg]
+
+
 def segname(ins, o):
     """the segment register name of a register operand, else None"""
     if o.type == X.X86_OP_REG:
@@ -18,11 +25,17 @@ def segname(ins, o):
 @op('mov')
 def h_mov(cx, ins):
     ops = cx.ops
-    if segname(ins, ops[0]):
-        raise Unsupported('mov to segment register')
+    from . import f_sys
+    sg = segname(ins, ops[0])
+    if sg:      # mov Sreg, r/m16: f_sys (class 3)
+        f_sys.mov_to_sreg(cx, ins, sg)
+        return
+    if any(o.type == X.X86_OP_REG and ins.reg_name(o.reg)[:2] in ('cr', 'dr') for o in ops):      # mov to/from CRn / DRn: CPL 0 only (0F 20..23)
+        f_sys.gp0(cx, ins)
+        return
     sg = segname(ins, ops[1])
     if sg:      # mov r/m16, Sreg (RtlCaptureContext style): the fixed user-mode selector; a 32-bit register destination gets it zero-extended
-        cx.em(cx.wr(ins, ops[0], SEGSEL[sg]))
+        cx.em(cx.wr(ins, ops[0], segread(sg)))
         return
     cx.em(cx.wr(ins, ops[0], cx.rd(ins, ops[1], ops[0].size)))
 
@@ -250,8 +263,11 @@ def h_nop(cx, ins):
 @op('push')
 def h_push(cx, ins):
     sg = segname(ins, cx.ops[0])
-    if sg:      # push Sreg: 32-bit operand size pushes the selector zero-extended
-        cx.em('{ esp-=4; M32(esp)=%s; }' % SEGSEL[sg])
+    if sg:      # push Sreg: 32-bit operand size pushes the selector zero-extended; the 66 prefix (16-bit operand size) pushes the word
+        if ins.prefix[2] == 0x66:
+            cx.em('{ esp-=2; M16(esp)=(u16)(%s); }' % segread(sg))
+        else:
+            cx.em('{ esp-=4; M32(esp)=%s; }' % segread(sg))
         return
     if cx.s == 16:
         cx.em('{ u32 v=%s; esp-=2; M16(esp)=(u16)v; }' % cx.rd(ins, cx.ops[0]))
@@ -261,8 +277,11 @@ def h_push(cx, ins):
 
 @op('pop')
 def h_pop(cx, ins):
-    if segname(ins, cx.ops[0]):
-        raise Unsupported('pop segment register')
+    sg = segname(ins, cx.ops[0])
+    if sg:      # pop Sreg: f_sys (class 3)
+        from . import f_sys
+        f_sys.pop_sreg(cx, ins, sg)
+        return
     if cx.s == 16:
         cx.em('{ u32 v=M16(esp); esp+=2; %s }' % cx.wr(ins, cx.ops[0], 'v'))
         return
@@ -271,6 +290,9 @@ def h_pop(cx, ins):
 
 @op('leave')
 def h_leave(cx, ins):
+    if ins.prefix[2] == 0x66:       # 16-bit operand size (stack size 32): ESP = EBP; BP = pop16, the upper half of EBP is kept (SDM LEAVE)
+        cx.em('esp=ebp; ebp=(ebp&0xffff0000u)|M16(esp); esp+=2;')
+        return
     cx.em('esp=ebp; ebp=M32(esp); esp+=4;')
 
 
@@ -346,6 +368,9 @@ def h_salc(cx, ins):
 
 @op('xlatb')
 def h_xlatb(cx, ins):
+    if ins.prefix[3] == 0x67:       # 16-bit address size: [BX + AL], the sum wraps in 16 bits (SDM XLAT: "uses BX if the address-size attribute is 16")
+        cx.em('eax=(eax&~0xffu)|M8(((ebx&0xffffu)+(eax&0xffu))&0xffffu);')
+        return
     cx.em('eax=(eax&~0xffu)|M8(ebx+(eax&0xffu));')
 
 
@@ -415,6 +440,14 @@ def h_aam(cx, ins):
 @op('enter')
 def h_enter(cx, ins):
     size, lvl = cx.ops[0].imm & 0xffff, cx.ops[1].imm & 31
+    if ins.prefix[2] == 0x66:       # 16-bit operand size, 32-bit stack: words are pushed, EBP (32-bit) walks the frames and receives the whole frame pointer (SDM ENTER: "IF StackSize = 32 THEN EBP := FrameTemp")
+        cx.em('{ u32 fp; esp-=2; M16(esp)=(u16)ebp; fp=esp;')
+        for _ in range(lvl - 1):
+            cx.em('ebp-=2; esp-=2; M16(esp)=M16(ebp);')
+        if lvl:
+            cx.em('esp-=2; M16(esp)=(u16)fp;')
+        cx.em('ebp=fp; esp-=0x%xu; }' % size)
+        return
     cx.em('{ u32 fp; esp-=4; M32(esp)=ebp; fp=esp;')
     for _ in range(lvl - 1):
         cx.em('ebp-=4; esp-=4; M32(esp)=M32(ebp);')
