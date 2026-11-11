@@ -1,5 +1,5 @@
 /* msvcrt.dll _CI* intrinsics as guest entries of the lifter runtime. C++ (it includes fnvl.h: guest registers w19..w26, c in x27); compile with the lifted-code flags, -x c++ (tools/liftall.py flags()):
-     aarch64-linux-gnu-g++ -x c++ <FLAGS> -c msvcrt_ci.c
+     aarch64-linux-gnu-g++ -x c++ <FLAGS> -c msvcrt_ci.cc
    Bridge rows (manifest/bridge.tsv, bind = l3): msvcrt.dll _CIacos _CIasin _CIatan _CIatan2 _CIcos _CIcosh _CIexp _CIfmod _CIlog _CIpow _CIsin _CIsinh _CIsqrt _CItan _CItanh, cdecl, symbols fnvl_msvcrt_CI<name>.
    CALLING CONVENTION (the MSVC intrinsic helpers, as Wine 9.0 dlls/msvcrt/math.c CREATE_FPU_FUNC1 / CREATE_FPU_FUNC2 implement them): no stack arguments; the operands are on the x87 stack and are replaced by the
    result. One operand: ST0 -> ST0. Two operands: the wrapper pops ST0 into the SECOND argument and ST1 into the FIRST (`fstpl 8(%esp)` then `fstpl (%esp)`), calls the C function (arg1, arg2) and pushes the result:

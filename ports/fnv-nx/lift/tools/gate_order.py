@@ -2,7 +2,7 @@
 """Gates "order", "addrwrap" and "align" (fnvnx-gate/1) on the compiled objects of the lifted pack: classes B and F of the
 owner orders (docs/ORDERING.md "Lifted code") and the alignment fault of the ordered instructions.
     python3 -I gate_order.py RTOBJ OBJ...        env GATE_OUT (result dir), JOBS
-RTOBJ  the runtime object of rt/enter.c: its 4-byte object symbol fnvnx_lift_cpu_bytes holds sizeof(struct cpu).
+RTOBJ  the runtime object of rt/enter.cc: its 4-byte object symbol fnvnx_lift_cpu_bytes holds sizeof(struct cpu).
 OBJ    an ELF32 AArch64 object or a directory of *.o. Every object linked into the lifted image is given, the runtime ones too.
 Every instruction of every executable section of every object is decoded (capstone). The gate decides from the decoded
 operands, the encodings and the relocation records only; no symbol name (other than fnvnx_lift_cpu_bytes of RTOBJ) and no
@@ -210,7 +210,7 @@ CPUSIZE = 0
 
 
 def cpusize(path):
-    """sizeof(struct cpu): the value of the 4-byte object symbol fnvnx_lift_cpu_bytes of the runtime object rt/enter.c"""
+    """sizeof(struct cpu): the value of the 4-byte object symbol fnvnx_lift_cpu_bytes of the runtime object rt/enter.cc"""
     b = open(path, 'rb').read()
     shoff, = struct.unpack_from('<I', b, 32); shentsize, shnum = struct.unpack_from('<HH', b, 46)
     sh = [struct.unpack_from('<10I', b, shoff + k * shentsize) for k in range(shnum)]

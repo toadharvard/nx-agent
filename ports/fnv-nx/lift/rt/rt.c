@@ -6,8 +6,8 @@
    The table (bench/phf.py table_asm; tools/liftall.py and the benches write it) is position independent: slots {key, offset of the entry from
    fnvl_disp_table} (an empty slot: a key that does not hash to it, offset 0), the displacement table fnvl_g and the hash parameters fnvl_phf_params
    {K1, K2, NBITS, TBITS}: bucket = (a*K1)>>(32-NBITS); slot = ((a ^ g[bucket]) * K2) >> (32-TBITS). The table holds every entry of the universe, so a
-   relocated pointer always hits. Any other address resolves to fnvl_nobody (rt/enter.c), which raises #UD at that address through the SEH runtime; the
-   address travels in c->ra (the callers of the dispatcher hold the thread's struct cpu in x27; c->ra is at offset 320, checked by rt/enter.c). */
+   relocated pointer always hits. Any other address resolves to fnvl_nobody (rt/enter.cc), which raises #UD at that address through the SEH runtime; the
+   address travels in c->ra (the callers of the dispatcher hold the thread's struct cpu in x27; c->ra is at offset 320, checked by rt/enter.cc). */
 typedef unsigned int u32;
 typedef unsigned short u16;
 extern const u32 fnvl_disp_table[];

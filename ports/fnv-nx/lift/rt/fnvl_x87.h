@@ -138,7 +138,7 @@ static inline void fv_stbcd(fv a,u64 *lo,u64 *hi){ u8 b[10]; u32 f=0; u16 h; fnv
    A-FDP: the SDM leaves the data pointer of an instruction without a memory operand unspecified; it is modelled as unchanged. A-FDS: FDS is DS whenever FDP != 0 (an FS-relative operand is
    reported with the DS selector: the selector is not kept per operand). A-FOP: FOP is not stored, it is the low 11 bits of the two opcode bytes at FIP (first byte & 7, second byte), read
    from the code when an image is written; FIP == 0 (no x87 instruction since FNINIT / thread start) gives the FNINIT state: FIP = FCS = FOP = FDP = FDS = 0. FCS and FDS are the model's
-   selectors (c->sel[], the CONTEXT SegCs / SegDs of rt/seh.c). A-RES: reserved bits of the image are 0. */
+   selectors (c->sel[], the CONTEXT SegCs / SegDs of rt/seh.cc). A-RES: reserved bits of the image are 0. */
 static inline u32 fx_fop(void){ u32 a=c->fip, b;
   if(!a) return 0;
   for(int n=0;n<14;n++){ b=M8(a); if(b==0x66||b==0x67||b==0xf0||b==0xf2||b==0xf3||b==0x2e||b==0x36||b==0x3e||b==0x26||b==0x64||b==0x65) a++; else break; }

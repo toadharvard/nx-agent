@@ -1,7 +1,7 @@
 """System and control instructions of the integer family (W14, W15): cpuid/rdtsc (the one reference CPU model, rt/cpumodel.c), pushad/popad, pushfd/popfd,
 software interrupts, into/bound/icebp, the privileged instructions, segment registers and far transfers, the descriptor-table readers, loop/jcxz, `repz ret`.
 
-Faults are never trap paths: they go through fnvl_raise(code, at) / fnvl_raise_av (rt/seh.c) exactly like #DE and #UD (f_flow.raise_site).
+Faults are never trap paths: they go through fnvl_raise(code, at) / fnvl_raise_av (rt/seh.cc) exactly like #DE and #UD (f_flow.raise_site).
 
 THE TOTALITY RULE (W15). The lifter executes the instruction set of the REFERENCE CPU MODEL: a 32-bit Windows user-mode process (ring 3, CPL 3, IOPL 0, CR4.TSD = 0,
 flat segments), on the CPU that rt/cpumodel.c's cpuid describes (FPU VME DE PSE TSC MSR PAE MCE CX8 APIC SEP MTRR PGE MCA CMOV PAT PSE36 CLFSH MMX FXSR SSE SSE2, NX; leaf 1 ECX = 0,

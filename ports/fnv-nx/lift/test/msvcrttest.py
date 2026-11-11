@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Test of the msvcrt guest entries of the lifter runtime (rt/msvcrt_eh.c, rt/msvcrt_fp.c): _except_handler3, __CxxFrameHandler, _CxxThrowException, _XcptFilter,
+"""Test of the msvcrt guest entries of the lifter runtime (rt/msvcrt_eh.cc, rt/msvcrt_fp.cc): _except_handler3, __CxxFrameHandler, _CxxThrowException, _XcptFilter,
 ?terminate@@YAXXZ, ??1type_info@@UAE@XZ, _setjmp3, longjmp, _controlfp, _clearfp, _fpclass, _finite, _isnan.
     msvcrttest.py [--work DIR] [--only NAME]
 Hand-assembled x86 guest functions (synthetic image at 0x401000, MSVC-shaped frames: SEH3 registration + scope table, C++ registration + FuncInfo) are lifted with
-fnvlift, linked with the runtime (rt/seh.c, rt/enter.c, rt/unhandled.c, the two msvcrt files, the generated import entries of the bind-l3 rows) as AArch64 ILP32 and
+fnvlift, linked with the runtime (rt/seh.cc, rt/enter.cc, rt/unhandled.cc, the two msvcrt files, the generated import entries of the bind-l3 rows) as AArch64 ILP32 and
 run under Unicorn from a native `test_main` (the harness of test/imptest.py). There is no x86 oracle for msvcrt.dll: every expected value is derived by hand from
 the MSVC / Wine 9.0 semantics and stated at its case. `struct cpu` has no `msvcrt` field yet (rt/msvcrt.h): the runtime files are compiled from a copy of rt/ in the
 work directory whose fnvl.h gets `u32 msvcrt[6];` appended to struct cpu unless the real one has it; the lifted guest code does not touch it.
@@ -20,7 +20,7 @@ from elftools.elf.elffile import ELFFile
 
 BASE, SLOT, MAINMAX, CODE_END, IAT, DATA, GSTACK, HSTACK, STOP, TEXT, TEB = 0x401000, 0x300, 0x180, 0x420000, 0x421000, 0x430000, 0x60000000, 0x70000000, 0x7e000000, 0xE0000000, 0x50000000
 M = 0xffffffff
-RUNTIME = ['msvcrt_eh.c', 'msvcrt_fp.c']
+RUNTIME = ['msvcrt_eh.cc', 'msvcrt_fp.cc']
 ROWS = [  # dll, name, conv, ret, args, native symbol, bind: the l3 rows of bridge.tsv for msvcrt.dll
     ('_except_handler3', 'cdecl', 'i', 'iiii'), ('__CxxFrameHandler', 'cdecl', 'i', 'iiii'), ('_CxxThrowException', 'stdcall', 'i', 'ii'), ('_XcptFilter', 'cdecl', 'i', 'ii'),
     ('?terminate@@YAXXZ', 'cdecl', 'i', ''), ('??1type_info@@UAE@XZ', 'thiscall', 'i', 'i'), ('_setjmp3', 'cdecl', 'i', 'ii'), ('longjmp', 'cdecl', 'i', 'ii'),
@@ -332,7 +332,7 @@ def main():
     flags = [f for f in instest.FLAGS if f != '-DFNVL_FLAGS_IO'] + ['-I', rt]
     CF = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-w', '-c']
     CXXF = ['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++']; CCF = ['aarch64-linux-gnu-gcc'] + CF
-    jobs = [(CXXF, rt + '/seh.c'), (CXXF, rt + '/enter.c'), (CXXF, rt + '/unhandled.c')] + [(CXXF, rt + '/' + f) for f in RUNTIME] + \
+    jobs = [(CXXF, rt + '/seh.cc'), (CXXF, rt + '/enter.cc'), (CXXF, rt + '/unhandled.cc')] + [(CXXF, rt + '/' + f) for f in RUNTIME] + \
            [(CCF, rt + '/rt.c'), (CCF, rt + '/rcptab.c'), (CCF + ['-I', rt], rt + '/x87.c'), (CCF + ['-fno-builtin'], rt + '/fmath.c')]
     objs = []
     for cmd, src in jobs:

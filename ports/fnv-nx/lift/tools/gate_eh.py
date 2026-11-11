@@ -7,14 +7,14 @@ EHFACTS  the facts directory: EHFACTS/ehtables.json (the exe) and EHFACTS/<modul
          (tools/universe.py for the exe, tools/modlift.py for a module through pemod: the same parser, rebased addresses).
 
 Universe: every code-address field of every table of every image, counted once per (image, table address, field, target):
-  FuncInfo   unwind[i].action          the unwind funclet the runtime calls (rt/msvcrt_eh.c cxx_local_unwind -> funclet)
+  FuncInfo   unwind[i].action          the unwind funclet the runtime calls (rt/msvcrt_eh.cc cxx_local_unwind -> funclet)
              try[i].handler[j].addr    the catch funclet (call_catch_block)
              stub[k]                   the `mov eax, FuncInfo; jmp handler` stub must lie in the body of a registered handler (see reg); not itself a target
   reg        frame_regs                the handler H that a `push H` registers on fs:[0] with the stub within 0x30 bytes after H (the stub itself, or a /GS
-                                       cookie check before it): rt/seh.c call_handler dispatches H, so H is an entry (ehtables.py `regs`)
+                                       cookie check before it): rt/seh.cc call_handler dispatches H, so H is an entry (ehtables.py `regs`)
   frame_handler                        the target of the stubs' jmp (the CRT's __CxxFrameHandler3, direct transfer)
   catch continuation  cont             the address a catch funclet returns (`mov eax, imm; ret`): the runtime sets c->ra to it, the non-local loop serves it
-  SEH scope  rec[i].filter             call_filter (rt/msvcrt_eh.c except3)
+  SEH scope  rec[i].filter             call_filter (rt/msvcrt_eh.cc except3)
              rec[i].handler            the __except block / __finally funclet (c->ra = it)
              handler                   the frame handler pushed on fs:[0] with the table (__except_handler3/4 or a local one): dispatched by call_handler
   ThrowInfo  unwind                    the destructor funclet (pmfnUnwind)
