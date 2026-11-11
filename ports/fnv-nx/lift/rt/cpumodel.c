@@ -54,3 +54,7 @@ unsigned long long fnvl_rdtsc(void) {
     u64 ns = fnvl_host_ticks_ns();
     return ns / 10 * 21 + ns % 10 * 21 / 10;
 }
+
+/* msvcrt!_adjust_fdiv (a data export: the import slot holds the address of this object). The C runtime sets it to 1 at start-up on a CPU with the
+   Pentium FDIV flaw and compiled code tests it before a division; the reference CPU divides correctly, so the value is 0 and nothing writes it. */
+int fnvl_msvcrt_adjust_fdiv = 0;
