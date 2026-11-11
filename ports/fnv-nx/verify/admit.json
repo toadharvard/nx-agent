@@ -9,6 +9,7 @@
   {"path": "ports/fnv-nx/farm", "class": "tool", "gates": ["selftests"]},
   {"path": "ports/fnv-nx/journal", "class": "doc", "gates": []},
   {"path": "ports/fnv-nx/link", "class": "tool", "gates": ["pure", "selftests"]},
+  {"path": "ports/fnv-nx/render/gl4", "class": "product", "target": "host", "recipe": "ports/fnv-nx/render/gl4/build.json", "gates": ["abi", "abs", "addr32", "argordergate", "bodysel", "d3d9total", "datamodel", "determinism", "disp", "eh", "exepin", "forms", "fpexact", "gpa", "imports", "linkstrict", "machine", "n1", "n2_call", "n2_data", "n2_vcall", "namegate", "objstub", "oracle", "order", "pcrel", "r7", "reach", "reachlink", "rtti", "xc", "xunit"]},
   {"path": "ports/fnv-nx/render/backend", "class": "product", "target": "host", "recipe": "ports/fnv-nx/render/backend/build.json", "gates": ["abi", "abs", "addr32", "argordergate", "bodysel", "d3d9total", "datamodel", "determinism", "disp", "eh", "exepin", "forms", "fpexact", "gpa", "imports", "linkstrict", "machine", "n1", "n2_call", "n2_data", "n2_vcall", "namegate", "objstub", "oracle", "order", "pcrel", "r7", "reach", "reachlink", "rtti", "xc", "xunit"]},
   {"path": "ports/fnv-nx/toolchain", "class": "tool", "gates": ["selftests"]},
   {"path": "ports/fnv-nx/verify", "class": "tool", "gates": ["selftests"]}
