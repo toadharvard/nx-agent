@@ -231,6 +231,10 @@ def tab_tails(img, insns, lo, hi):
 
 
 def dispatch(cx, ins):
+    from . import f_cpufeat, f_sys
+    if f_cpufeat.missing(ins):         # CPUID-UD rule (f_cpufeat.py): a form the model's CPUID denies is #UD before any handler of any family runs
+        f_sys.ud_site(cx)
+        return
     if EMIT == 'dsl':
         from . import f_dsl
         if f_dsl.emit_form(cx, ins) is not SKIP:
