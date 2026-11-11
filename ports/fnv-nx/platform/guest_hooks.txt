@@ -1,0 +1,10 @@
+# Declared hooks of the guest link: symbols the platform archive references that are defined by another
+# component of the guest image (agreed contracts). One symbol per line; the comment names the provider.
+# A hook is listed only while the archive really references it. Do not add a symbol here to make the gate of
+# platform/build_guest.sh pass: an undefined symbol with no provider is reported to the orchestrator.
+#
+# Agreed contracts, not referenced by the platform archive yet (add the line when a platform source starts
+# to reference the symbol):
+#   fnvnx_import_key, fnvnx_import_by_key, fnvnx_thread_block_create, fnvnx_thread_block_free,
+#   fnvnx_lift_enter, fnvnx_start_proc     loader (L1)
+#   nx_d3d9_export                         render (L6)
