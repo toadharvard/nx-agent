@@ -45,11 +45,11 @@ CXX = os.environ.get('CXX', 'aarch64-linux-gnu-g++')
 READELF = os.environ.get('READELF', 'aarch64-linux-gnu-readelf')
 PIC = ['-O2', '-fPIC']   # compile.sh's addressing of the variables a unit defines
 
-CRT = ('# address\tclass\tidentification\thow\tunits\tsrc_files\tprovider\n'
-       '0x00ec1000\tcrt\tstrcpy_s\tn\t1\t1\tplatform/crt: strcpy_s\n'
-       '0x00ec2000\tthunk\tws2_32 closesocket\ti\t1\t1\tfnvnx_ws2_* (see imports.tsv)\n'
-       '0x00ec3000\tmid_data\t?g_bogus@@3HA\tn\t1\t1\tnone: data symbol / bogus address\n'
-       '0x00ec4000\thelper\t_alloca_probe\tn\t1\t1\timplicit: GCC\n')
+CRT = ('# address\tclass\tidentification\tunits\tsrc_files\tprovider\n'
+       '0x00ec1000\tcrt\tstrcpy_s\t1\t1\tplatform/crt: strcpy_s\n'
+       '0x00ec2000\tthunk\tws2_32 closesocket\t1\t1\tfnvnx_ws2_* (see imports.tsv)\n'
+       '0x00ec3000\tmid_data\t?g_bogus@@3HA\t1\t1\tnone: data symbol / bogus address\n'
+       '0x00ec4000\thelper\t_alloca_probe\t1\t1\timplicit: GCC\n')
 IMPORTS = ('# iat_slot\tdll\tapi\tunits\tother_decomp_names\tprovider\n'
            '0x00fdf004\tadvapi32\tRegCloseKey\t2\tEnterCriticalSection\tS4 platform/win32\n'
            '0x00fdf100\td3dx9_38\tD3DXMatrixRotationYawPitchRoll\t1\t-\tS6\n'

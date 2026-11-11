@@ -5628,9 +5628,9 @@ def load_providers(crt_tsv, exports):
         return prov, classes
     for line in open(crt_tsv, encoding='utf-8', errors='surrogateescape'):
         f = line.rstrip('\n').split('\t')
-        if line.startswith('#') or len(f) < 7 or not re.match(r'^0x[0-9a-fA-F]+$', f[0]):
+        if line.startswith('#') or len(f) < 6 or not re.match(r"^0x[0-9a-fA-F]+$", f[0]):
             continue
-        a, cls, ident, p = int(f[0], 16), f[1], f[2], f[6].strip()
+        a, cls, ident, p = int(f[0], 16), f[1], f[2], f[5].strip()
         classes[a] = cls
         sym = None
         m = re.match(r'^(?:libc|libm|platform/crt|platform/win32): (\S+)', p)

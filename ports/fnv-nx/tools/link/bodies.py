@@ -178,7 +178,7 @@ def load_provider_params(crt_symbols_tsv=None):
         return res
     for line in open(path, encoding='utf-8', errors='surrogateescape'):
         f = line.rstrip('\n').split('\t')
-        if line.startswith('#') or len(f) < 7 or not f[0].startswith('0x'):
+        if line.startswith('#') or len(f) < 6 or not f[0].startswith('0x'):
             continue
         m = re.search(r'\((.*)\)\s*(?:const)?\s*$', re.sub(r'\s*\[.*\]\s*$', '', f[2]))
         if not m:
