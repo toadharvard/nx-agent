@@ -4,7 +4,9 @@
 #pragma once
 #include <stdlib.h>
 static inline void t_keep(const void* p) {
-    static const void** tab; static size_t n, cap;
+    static const void** tab; static size_t n, cap; static int off = -1;
+    if (off < 0) off = getenv("NX_SAN_NOKEEP") != nullptr;   // measurement switch: the leak count of the drivers without the table
+    if (off) return;
     if (n == cap) { cap = cap ? cap * 2 : 256; tab = (const void**)realloc((void*)tab, cap * sizeof *tab); if (!tab) abort(); }
     tab[n++] = p;
 }

@@ -6,7 +6,8 @@
 #
 # Env: FNVNX_SHADERS_DEPS  where sources are cloned/built (default: render/shaders/build/deps)
 #      FNVNX_SHADERS_BUILD our CMake build dir      (default: render/shaders/build/host)
-# Needs: git, cmake, ninja, a C/C++ compiler, python3 with meson + mako, bison, flex.
+# Needs: git, cmake, ninja, a C/C++ compiler, python3 with meson + mako, bison, flex. meson must be newer than 1.3.2 (measured on a farm:
+# Ubuntu 24.04 apt meson 1.3.2 fails on File.full_path in uam/meson.build:91; pip meson 1.12.1 builds).
 # Nothing here is vendored; --tests also fetches mojoshader_assembler (test authoring only).
 set -euo pipefail
 
