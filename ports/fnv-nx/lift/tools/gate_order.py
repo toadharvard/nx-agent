@@ -121,6 +121,51 @@ def regno(name):
     return None
 
 
+def gprwrites(w):
+    """the general registers (0-31; 31 is zr or sp) an instruction word writes, from the destination fields of its encoding class: Rd, Rt, Rt2,
+    the status register Rs of exclusives and the compare register of CAS, the base register of a writeback, x30 of bl/blr. Vector destinations
+    are not general registers; a class that is not decoded here (reserved, SME) writes nothing here and is undecodable for capstone."""
+    r = set(); rd, rn, rm, rt2 = w & 31, (w >> 5) & 31, (w >> 16) & 31, (w >> 10) & 31
+    g = (w >> 25) & 15; top = (w >> 24) & 0x3f
+    if g in (8, 9): r.add(rd)                                                   # data processing, immediate
+    elif g in (10, 11):                                                         # branches, exceptions, system
+        if w & 0xffc00000 == 0xd5000000 and w & (1 << 21): r.add(rd)           # mrs, sysl
+        if w & 0xfc000000 == 0x94000000 or w & 0xfffffc1f == 0xd63f0000: r.add(30)     # bl, blr
+    elif g in (5, 13):                                                          # data processing, register
+        if not ((w >> 21) & 0xff == 0xd2 and (w >> 29) & 1): r.add(rd)          # all but ccmp/ccmn (rd is nzcv there)
+    elif g == 2: r.add(rd)                                                      # SVE: a general destination is possible, conservative
+    elif g in (4, 6, 12, 14):                                                   # loads and stores
+        V = (w >> 26) & 1; size = w >> 30; opc = (w >> 22) & 3
+        if w & 0xbf000000 in (0x0c000000, 0x0d000000):                          # AdvSIMD structure: post-index writes the base
+            if w & (1 << 23): r.add(rn)
+        elif w >> 24 == 0xd9 and (w >> 21) & 1: r.update((rd, rn))                                # MTE tag stores and loads
+        elif top == 0x08:                                                       # exclusives, ordered, CAS
+            o2, L, o1 = (w >> 23) & 1, (w >> 22) & 1, (w >> 21) & 1
+            if L: r.update((rd, rt2))
+            if (not L and not o2) or (o2 and o1): r.add(rm)
+        elif top == 0x19:                                                       # RCpc unscaled: ldapur* load (opc != 0)
+            if opc: r.add(rd)
+        elif top & 0x3b == 0x18:                                                # load literal
+            if not V and size != 3: r.add(rd)
+        elif (w >> 27) & 7 == 5:                                                # pairs
+            if not V and (w >> 22) & 1: r.update((rd, rt2))
+            if (w >> 23) & 3 in (1, 3): r.add(rn)
+        elif (w >> 27) & 7 == 7:                                                # single register
+            load = not V and opc != 0 and not (size == 3 and opc == 2)         # prfm is not a load
+            if (w >> 24) & 1: wb = False; ld = load
+            elif not (w >> 21) & 1: wb = (w >> 10) & 3 in (1, 3); ld = load
+            elif (w >> 10) & 3 == 0: wb = False; ld = True                      # atomics (LSE, ldapr): Rt
+            elif (w >> 10) & 3 == 2: wb = False; ld = load
+            else: wb = bool(w & 0x800); ld = True                               # ldraa / ldrab
+            if ld: r.add(rd)
+            if wb: r.add(rn)
+    elif g in (7, 15):                                                          # scalar and vector FP, AdvSIMD
+        if w & 0x7f000000 == 0x1e000000 and (not (w >> 21) & 1 or (w >> 10) & 0x3f == 0):     # FP <-> integer and FP <-> fixed conversions
+            if (w >> 16) & 7 not in (2, 3, 7): r.add(rd)                        # scvtf, ucvtf, fmov to FP write a vector register
+        elif w & 0x9fe08400 == 0x0e000400 and (w >> 11) & 15 in (5, 7): r.add(rd)         # smov, umov
+    return r
+
+
 class Ins:
     __slots__ = ('a', 'txt', 'wr', 'fl', 'kind', 'arg', 'mem', 'term', 'bar', 'call', 'bad', 'wbbase', 'x', 'asz', 'sreg', 'srcs', 'img', 'ix')
 
@@ -202,6 +247,9 @@ def decode(md, code, relocs, data):
                     i.wbbase = base[0]
                     if not any(r == base[0] for r, _ in i.wr): i.wr.append((base[0], False))
                 if rel == R_GOT_LOAD and not m.startswith('st'): i.kind = 'image'      # a GOT load
+            for q in sorted(gprwrites(word)):
+                if 19 <= q <= 27 and q not in [x[0] for x in i.wr]:
+                    i.wr.append((q, False)); i.bad = i.bad or 'a write of x%d that the decoder did not report' % q
             out.append(i)
         if not got and pos < n and not isdata(pos): return None, pos
     return out, None

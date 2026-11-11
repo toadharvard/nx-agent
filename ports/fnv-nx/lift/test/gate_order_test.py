@@ -60,6 +60,163 @@ CASES = {
     'exclusive_pair':       ('tst w19,#3\n b.ne 2f\n1: ldaxr w0,[x19]\n stlxr w2,w1,[x19]\n cbnz w2,1b\n dmb ish\n2: ret', G, G, G),
 }
 
+CASES.update({     # rule (a): no write of x19-x27 but a guest-register write proven below 2^32; decided from the encoding's destination fields
+    'wr_ldp_x_guest':      ('ldp x19,x20,[sp]\n ret', R, G, G),
+    'wr_ldp_w_guest':      ('ldp w19,w20,[sp]\n ret', G, G, G),
+    'wr_ldp_x27':          ('ldp x26,x27,[sp]\n ret', R, G, G),
+    'wr_ldr_w27':          ('ldr w27,[sp]\n ret', R, G, G),
+    'wr_ldr_x_guest':      ('ldr x19,[sp]\n ret', R, G, G),
+    'wr_ldr_w_guest':      ('ldr w19,[sp]\n ret', G, G, G),
+    'wr_ldrsw_guest':      ('ldrsw x19,[sp]\n ret', R, G, G),
+    'wr_ldr_literal_x27':  ('ldr x27,tab\n ret', R, G, G),
+    'wr_writeback_x27':    ('ldr w0,[x27],#4\n ret', R, R, G),
+    'wr_mrs_guest':        ('mrs x19,tpidr_el0\n ret', R, G, G),
+    'wr_mrs_x27':          ('mrs x27,tpidr_el0\n ret', R, G, G),
+    'wr_mrs_scratch':      ('mrs x0,tpidr_el0\n ret', G, G, G),
+    'wr_stxr_status_w19':  ('tst w20,#3\n b.ne 1f\n stlxr w19,w1,[x20]\n1: ret', G, G, G),
+    'wr_stxr_status_x27':  ('tst w20,#3\n b.ne 1f\n stlxr w27,w1,[x20]\n1: ret', R, G, G),
+    'wr_fcvt_x_guest':     ('fcvtzs x19,d0\n ret', R, G, G),
+    'wr_fcvt_w_guest':     ('fcvtzs w19,s0\n ret', G, G, G),
+    'wr_fmov_x_guest':     ('fmov x19,d0\n ret', R, G, G),
+    'wr_scvtf_vector':     ('scvtf d19,x0\n scvtf d27,x0\n ret', G, G, G),
+    'wr_umov_w_guest':     ('umov w19,v0.s[1]\n ret', G, G, G),
+    'wr_smov_x_guest':     ('smov x19,v0.b[1]\n ret', R, G, G),
+    'wr_vector_load_pair': ('ldp q19,q20,[sp]\n ldr d27,[sp]\n ret', G, G, G),
+    'wr_cmp_guest':        ('cmp x19,#1\n ccmp x27,#1,#0,eq\n ret', G, G, G),
+    'wr_and_x_bounded':    ('and x19,x0,#0xffff\n ret', G, G, G),
+    'wr_and_x_unbounded':  ('and x19,x0,x1\n ret', R, G, G),
+    'wr_movz_x27':         ('movz x27,#1\n ret', R, G, G),
+    'wr_csel_x_guest':     ('csel x19,x0,x1,eq\n ret', R, G, G),
+    'wr_csel_w_guest':     ('csel w19,w0,w1,eq\n ret', G, G, G),
+})
+CORPUS = [
+    'add {x}, x0, #1',
+    'sub {w}, w0, w1',
+    'movz {x}, #1',
+    'movk {x}, #1, lsl #16',
+    'and {x}, x0, #0xff',
+    'ubfx {x}, x0, #1, #3',
+    'adrp {x}, f',
+    'adr {x}, f',
+    'mul {x}, x0, x1',
+    'madd {x}, x0, x1, x2',
+    'udiv {w}, w0, w1',
+    'csel {x}, x0, x1, eq',
+    'adc {x}, x0, x1',
+    'rbit {x}, x0',
+    'clz {w}, w0',
+    'extr {x}, x0, x1, #3',
+    'ccmp {x}, #1, #0, eq',
+    'ccmn {w}, w1, #4, ne',
+    'cmp {x}, #1',
+    'tst {x}, #1',
+    'cmn {x}, x1',
+    'mov {x}, x0',
+    'mvn {w}, w0',
+    'smull {x}, w0, w1',
+    'ldr {x}, [sp]',
+    'ldr {w}, [sp, #4]',
+    'ldr {x}, [sp, x1]',
+    'ldr {x}, [sp], #8',
+    'ldr {x}, [sp, #8]!',
+    'ldur {w}, [sp, #-1]',
+    'ldrb {w}, [x0]',
+    'ldrsb {x}, [x0]',
+    'ldrsw {x}, [x0]',
+    'ldrsh {w}, [x0, #2]',
+    'str {x}, [sp]',
+    'str {w}, [sp], #4',
+    'str {x}, [sp, #-8]!',
+    'strb {w}, [x0, x1]',
+    'stur {x}, [sp, #1]',
+    'ldtr {w}, [x0]',
+    'sttr {w}, [x0]',
+    'ldr {x}, f',
+    'ldrsw {x}, f',
+    'prfm pldl1keep, [{x}]',
+    'prfm pstl1keep, f',
+    'ldp {x}, x1, [sp]',
+    'ldp x1, {x}, [sp, #16]',
+    'ldp {w}, w1, [sp], #8',
+    'ldp x1, x2, [{x}], #16',
+    'stp {x}, x1, [sp, #-16]!',
+    'stp x1, x2, [{x}, #16]',
+    'ldpsw {x}, x1, [sp]',
+    'ldnp {x}, x1, [sp]',
+    'stnp {x}, x1, [sp]',
+    'ldxr {x}, [x0]',
+    'ldaxr {w}, [x0]',
+    'ldar {x}, [x0]',
+    'ldaxp {x}, x1, [x0]',
+    'ldaxp x1, {x}, [x0]',
+    'stxr {w}, x1, [x0]',
+    'stlxr w1, {x}, [x0]',
+    'stlxp {w}, x1, x2, [x0]',
+    'stlr {x}, [x0]',
+    'stlr w1, [{x}]',
+    'casal {w}, w1, [x0]',
+    'casal w1, {w}, [x0]',
+    'ldaddal {w}, w1, [x0]',
+    'ldaddal w1, {w}, [x0]',
+    'swpal {w}, {w}, [x0]',
+    'stadd {w}, [x0]',
+    'ldapr {x}, [x0]',
+    'ldapur {x}, [x0]',
+    'stlur {x}, [x0]',
+    'ldr {w}, [x0, #4]!',
+    'ldrb {w}, [x0], #1',
+    'ld1 {{v0.4s}}, [{x}]',
+    'ld1 {{v0.4s}}, [{x}], #16',
+    'ld1 {{v0.4s}}, [x0], {x}',
+    'st1 {{v0.s}}[1], [{x}], #4',
+    'ld1r {{v0.4s}}, [{x}], #4',
+    'ldr q{n}, [sp]',
+    'ldr d{n}, [{x}], #8',
+    'ldp q{n}, q1, [sp]',
+    'stp d{n}, d1, [{x}, #16]!',
+    'str s{n}, [x0, {x}]',
+    'ldr s{n}, f',
+    'mrs {x}, tpidr_el0',
+    'msr tpidr_el0, {x}',
+    'mrs {x}, nzcv',
+    'bl f',
+    'blr {x}',
+    'br {x}',
+    'ret {x}',
+    'cbz {x}, f',
+    'tbz {x}, #1, f',
+    'b.eq f',
+    'fcvtzs {w}, s{n}',
+    'fcvtzs {x}, d{n}',
+    'fcvtzu {x}, d{n}, #3',
+    'fcvtas {w}, s{n}',
+    'fmov {x}, d{n}',
+    'fmov {w}, s{n}',
+    'fmov {x}, v{n}.d[1]',
+    'fjcvtzs {w}, d{n}',
+    'scvtf d{n}, {x}',
+    'ucvtf s{n}, {w}',
+    'scvtf d{n}, {x}, #3',
+    'fmov d{n}, {x}',
+    'fmov s{n}, {w}',
+    'fmov v{n}.d[1], {x}',
+    'umov {w}, v{n}.s[1]',
+    'umov {x}, v{n}.d[1]',
+    'smov {x}, v{n}.b[1]',
+    'smov {w}, v{n}.h[1]',
+    'ins v{n}.s[1], {w}',
+    'dup v{n}.4s, {w}',
+    'fadd d{n}, d0, d1',
+    'fcmp d{n}, d0',
+    'add v{n}.4s, v0.4s, v1.4s',
+    'fcsel d{n}, d0, d1, eq',
+    'sxtw {x}, w0',
+    'uxtb {w}, w0',
+    'neg {x}, x0',
+    'crc32w {w}, w0, w1',
+]
+LSE_FP_UNREPORTED = ('cas', 'swp', 'ldadd', 'fjcvtzs')       # capstone reports no register write for these; the encoding's fields do
+
 
 class T(unittest.TestCase):
     @classmethod
@@ -69,9 +226,9 @@ class T(unittest.TestCase):
     @classmethod
     def tearDownClass(cls): cls.d.cleanup()
     @classmethod
-    def asm(cls, name, text):
+    def asm(cls, name, text, march=None):
         s, o = os.path.join(cls.root, name + '.S'), os.path.join(cls.root, name + '.o')
-        open(s, 'w').write(text); subprocess.run(AS + [s, '-o', o], check=True); return o
+        open(s, 'w').write(text); subprocess.run([a if not (march and a.startswith('-march')) else '-march=' + march for a in AS] + [s, '-o', o], check=True); return o
     def gate(self, objs):
         out = tempfile.mkdtemp(dir=self.root)
         r = subprocess.run([sys.executable, '-I', GATE, self.rt] + objs, env=dict(os.environ, GATE_OUT=out, JOBS='1'), capture_output=True, text=True)
@@ -99,6 +256,23 @@ class T(unittest.TestCase):
         self.assertEqual(rw['order'], sorted(rw['order']))
         self.assertEqual(go.verdict('order', rw['order'], {'instructions': 3})[0], False)
         self.assertEqual(go.verdict('align', rw['align'], {'instructions': 3})[0], True)
+    def test_encoding_destinations(self):
+        # gprwrites (the encoding's destination fields) against capstone's operand view, over every form with each of x19..x27
+        import capstone
+        spec = importlib.util.spec_from_file_location('gate_order', GATE); go = importlib.util.module_from_spec(spec); sys.modules['gate_order'] = go; spec.loader.exec_module(go)
+        lines = [' ' + f.format(x='x%d' % r, w='w%d' % r, n=r) for r in range(19, 28) for f in CORPUS]
+        o = self.asm('corpus', '.text\nf:\n' + '\n'.join(lines) + '\n.section .rodata\ntab: .word 1\n', march='armv8.5-a+lse+crc+rcpc+fp16')
+        md = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM); md.detail = True
+        code = go.elf(o)[0][1]; self.assertEqual(len(code), 4 * len(lines))
+        for k, ln in enumerate(lines):
+            raw = code[4 * k:4 * k + 4]; ci = next(md.disasm(raw, 0)); cap = set()
+            for x in ci.regs_access()[1]:
+                g = go.regno(ci.reg_name(x))
+                if g and 19 <= g[0] <= 27 and ci.mnemonic not in ('tst', 'cmp', 'cmn', 'ccmp', 'ccmn'): cap.add(g[0])
+            enc = {q for q in go.gprwrites(int.from_bytes(raw, 'little')) if 19 <= q <= 27}
+            if ci.mnemonic.startswith(LSE_FP_UNREPORTED): self.assertTrue(enc >= cap, ln)
+            elif ci.mnemonic == 'stlur': self.assertEqual(enc, set(), ln)
+            else: self.assertEqual(enc, cap, ln)
     def test_no_object_red(self):
         self.assertEqual([j['status'] for j in self.gate([]).values()], [R, R, R])
     def test_data_in_text_skipped_and_garbage_red(self):
