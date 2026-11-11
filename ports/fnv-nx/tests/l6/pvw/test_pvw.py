@@ -118,7 +118,7 @@ def main():
                 ("a", *P("pvw_core.cpp", "if (!c.dry && !fx_normal) { fx_normal = true; fnvnx_wine_fixme(PVW_FIXME_DST_NORMAL); }", "")), ("a", *P("pvw_light.cpp", "ls->fog_mode = (uint8_t)(s.rs[D3DRS_FOGVERTEXMODE] & 3);", "ls->fog_mode = (uint8_t)(s.rs[D3DRS_FOGVERTEXMODE] & 1);"))]
         muts += [("a", *P("pvw_light.cpp", "i < ls->n_par; i++, index++", "i < 0; i++, index++")), ("b", *P("pvw_light.cpp", "if (log_fixme) fnvnx_wine_fixme(PVW_FIXME_LIGHT_TYPE);", "")),
                  ("b", *P("pvw_core.cpp", "si.e[k].buf->pool == (uint8_t)D3DPOOL_DEFAULT) return D3DERR_INVALIDCALL;", "si.e[k].buf->pool == (uint8_t)D3DPOOL_DEFAULT) continue;")),
-                 ("b", *P("pvw_core.cpp", "if (c.dry && c.bad) break;", "")), ("b", *P("pvw_light.cpp", "if (log_fixme) fnvnx_wine_fixme(PVW_FIXME_LIGHT_TYPE);", "fnvnx_wine_fixme(PVW_FIXME_LIGHT_TYPE);"))]
+                 ("b", *P("pvw_light.cpp", "if (log_fixme) fnvnx_wine_fixme(PVW_FIXME_LIGHT_TYPE);", "fnvnx_wine_fixme(PVW_FIXME_LIGHT_TYPE);"))]
         def one(i):
             part, f, old, new = muts[i]; mdev = os.path.join(tmp, f"m{i}_dev"); shutil.copytree(DEV, mdev, ignore=shutil.ignore_patterns("__pycache__")); txt = open(os.path.join(mdev, f)).read()
             if old not in txt: return i, None, "pattern not found"
