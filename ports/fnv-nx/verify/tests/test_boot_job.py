@@ -29,23 +29,33 @@ JOB = os.path.join(NX, "farm", "boot_job.sh")
 SCRATCH = tempfile.mkdtemp(prefix="bootjob-")
 atexit.register(shutil.rmtree, SCRATCH, ignore_errors=True)
 LINE = "fnvnx-start: identity ok"
-TABLE = """# milestones of the test guest
-seqm  seq:s call    0x1000
-seqm  seq:s retzero 0x1000
-call2 any   call    0x2000
-rettrue2 any rettrue 0x2000
-console any host    %s
-all3  all:g ret     0x3000
-all3  all:g call    0x3000
-""" % boot.console_part(LINE)
-MANIFEST = "1000\tfnvboot_a\n2000\tfnvboot_b\n3000\tfnvboot_c\n"
+TID = "ef" * 32
+# the contract's own formats (see verify/bootinputs.py): milestones.tsv has the entry address only; the loader console lines
+# come from run.txt
+MILESTONES = "# table_id %s\nexe_entry_va\t0x3000\n" % TID
+RUN = "emulator run: header\n   %s\n   [fnvnx] not a loader line\n" % LINE
+MANIFEST = "00001000\tfnvboot_a\tcode\n00002000\tfnvboot_b\tcode\n00003000\tfnvboot_c\tcode\n000ff000\tI_rt\timport\n# table_id %s\n" % TID
+MODULES = ("# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\n"
+           "m.dll\t%s\t16\t10000000\t01410000\t00001000\t0\t00000010\t0\t\n" % ("a" * 64))
+KEYS_TSV = "# table_id %s\n000ff000\tm.dll\tf\t1\tstdcall\ti\ti\tI_rt\n" % TID
 TRAILER = "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 FINAL = re.compile(r"^BOOT elf=(\S+) rc=(\d+) reason=(\S+) last=(\S+) instr=(\d+) main=(\d+) threads=(\d+) seconds=(\d+) "
                    r"published=(\S+)@([0-9a-f]{12})( presents=\d+)?$")
 HOME = os.path.join(SCRATCH, "home")
 BARE = os.path.join(SCRATCH, "artifacts.git")
 GAME = os.path.join(SCRATCH, "game")
-EXE = b"dummy FalloutNV.exe for the job test\n"
+def _pe():
+    b = bytearray(0x200)
+    b[:2] = b"MZ"
+    struct.pack_into("<I", b, 0x3C, 0x80)
+    b[0x80:0x84] = b"PE\0\0"
+    struct.pack_into("<H", b, 0x80 + 24, 0x10B)
+    struct.pack_into("<I", b, 0x80 + 24 + 28, 0x400000)
+    struct.pack_into("<I", b, 0x80 + 24 + 56, 0x100000)
+    return bytes(b)
+
+
+EXE = _pe()
 
 
 def git(*args, cwd=None, check=True):
@@ -109,21 +119,28 @@ def main():
         f.write(EXE)
     git("init", "-q", "--bare", BARE)
     git("config", "uploadpack.allowFilter", "true", cwd=BARE)
-    contract = {"entries.tsv": MANIFEST.encode(), "modules.tsv": b"exe\t400000\t2100000\n", "keys.tsv": b"f0000\t200000\n",
-                "milestones.tsv": TABLE.encode()}
+    contract = {"entries.tsv": MANIFEST.encode(), "modules.tsv": MODULES.encode(), "keys.tsv": KEYS_TSV.encode(),
+                "milestones.tsv": MILESTONES.encode(), "run.txt": RUN.encode()}
     ok_elf, fault_elf = lifted_elf(6), lifted_elf(3)
     publish_branch("l1-contract/elf/testid", dict(contract, **{"guest.elf": ok_elf}))
     publish_branch("l1-contract/elf/faultid", dict(contract, **{"guest.elf": fault_elf}))
-    publish_branch("l1-contract/elf/softid", dict(contract, **{"guest.elf": ok_elf, "softfloat.syms": b"fnvboot_b\n"}))
+    publish_branch("l1-contract/elf/softid", dict(contract, **{"guest.elf": ok_elf, "softfloat.tsv": b"fnvboot_b\n"}))
+    # the guest in three parts + manifest.json (joined and verified by the job); a corrupt part must fail the job
+    cut = [0, len(ok_elf) // 3, 2 * len(ok_elf) // 3, len(ok_elf)]
+    pieces = {"part.%03d" % i: ok_elf[cut[i]:cut[i + 1]] for i in range(3)}
+    man = {"schema": "fnvnx-elf/1", "name": "guest.elf", "size": len(ok_elf), "sha256": hashlib.sha256(ok_elf).hexdigest(),
+           "parts": [[n, len(b), hashlib.sha256(b).hexdigest()] for n, b in pieces.items()]}
+    publish_branch("l1-contract/elf/partsid", dict(contract, **pieces, **{"manifest.json": json.dumps(man).encode()}))
+    bad = dict(pieces, **{"part.001": b"X" + pieces["part.001"][1:]})
+    publish_branch("l1-contract/elf/badpartid", dict(contract, **bad, **{"manifest.json": json.dumps(man).encode()}))
+    publish_branch("l1-contract/elf/badrowid", dict(contract, **{"guest.elf": ok_elf, "keys.tsv": KEYS_TSV.encode() + b"junk\n"}))
     noent = {k: v for k, v in contract.items() if k != "entries.tsv"}
     publish_branch("l1-contract/elf/noentries", dict(noent, **{"guest.elf": ok_elf}))
     gpu_c = os.path.join(SCRATCH, "fake.c")
     open(gpu_c, "w").write(tg.FAKE_C)
     gpu_so = os.path.join(SCRATCH, "libnxgl4.so")
     subprocess.run(["gcc", "-O2", "-fPIC", "-shared", gpu_c, "-o", gpu_so], check=True)
-    gpu_table = "first any host gpu-first-call\npres any host present\n"
-    publish_branch("l1-contract/elf/gpuid", dict(contract, **{"guest.elf": lifted_elf(50), "milestones.tsv": gpu_table.encode(),
-                                                               "entries.tsv": b"1000\tmarker\n"}))
+    publish_branch("l1-contract/elf/gpuid", dict(contract, **{"guest.elf": lifted_elf(50)}))
     publish_branch("fake-gpu", {"libnxgl4.so": open(gpu_so, "rb").read()})
     publish_branch("fake-gpu-empty", {"README": b"no library here\n"})
     publish_branch("fake-gpu-bad", {"libnxgl4.so": b"not an elf\n"})
@@ -134,7 +151,7 @@ def main():
     m = FINAL.match(last)
     tb.case("clean guest: exit 0, final line has every field", rc == 0 and m is not None and out.count("\n") == 1, (rc, out, err[-600:]))
     f = m.groups() if m else ("",) * 10
-    tb.case("final line values", f[0] == "testid" and f[1] == "0" and f[2] == "exit" and f[3] == "all3" and int(f[4]) > 0
+    tb.case("final line values", f[0] == "testid" and f[1] == "0" and f[2] == "exit" and f[3] == "exe-entry" and int(f[4]) > 0
             and int(f[5]) > 0 and f[6] == "1" and f[8] == "l4-verify/boot/testid", f)
     files, msg, cm = published("l4-verify/boot/testid")
     tb.case("published: exactly the four files", sorted(files) == ["OUT.console.txt", "OUT.json", "meta.json", "spec.json"], sorted(files))
@@ -154,8 +171,10 @@ def main():
     doc = json.loads(files["OUT.json"]) if "OUT.json" in files else {}
     spec = json.loads(files["spec.json"]) if "spec.json" in files else {}
     tb.case("OUT.json is the boot result, spec.json has the lifted range and no softfloat class",
-            doc.get("last_reached") == "all3" and "lifted" in spec.get("ranges", {}) and "softfloat" not in spec.get("entries", {}), (doc.get("last_reached"), spec))
+            doc.get("last_reached") == "exe-entry" and doc.get("manifest_id") == TID and "lifted" in spec.get("ranges", {}) and "softfloat" not in spec.get("entries", {}), (doc.get("last_reached"), spec))
     tb.case("console file holds the guest's line", LINE in files.get("OUT.console.txt", b"").decode(), files.get("OUT.console.txt"))
+    tb.case("milestones: loader console line of run.txt reached in order, then exe-entry",
+            [m["name"] for m in doc.get("milestones", [])] == ["start-01", "exe-entry"] and all(m["reached"] for m in doc["milestones"]), doc.get("milestones"))
     rc2, out2, err2 = run_job(["testid"])
     files2 = published("l4-verify/boot/testid")[0]
     tb.case("second run republishes byte-equal OUT.json and console", rc2 == 0 and files2.get("OUT.json") == files["OUT.json"]
@@ -176,9 +195,18 @@ def main():
     rc, out, err = run_job(["softid"])
     meta = json.loads(published("l4-verify/boot/softid")[0]["meta.json"]) if rc == 0 else {}
     spec = json.loads(published("l4-verify/boot/softid")[0]["spec.json"]) if rc == 0 else {}
-    tb.case("softfloat.syms present: class in the spec, recorded", rc == 0 and meta.get("softfloat") == "present"
+    tb.case("softfloat.tsv present: class in the spec, recorded", rc == 0 and meta.get("softfloat") == "present"
             and len(spec.get("entries", {}).get("softfloat", [])) == 1, (rc, err[-400:], spec))
 
+    rc, out, err = run_job(["partsid"])
+    f2 = published("l4-verify/boot/partsid")[0] if rc == 0 else {}
+    tb.case("guest in parts: joined, same result as the single file", rc == 0 and f2.get("OUT.json") == files["OUT.json"].replace(
+        b'"manifest_id"', b'"manifest_id"') and f2.get("OUT.console.txt") == files["OUT.console.txt"], (rc, err[-400:]))
+    rc, out, err = run_job(["badpartid"])
+    tb.case("corrupt part: job fails naming the part, nothing published", rc == 1 and "part.001" in err
+            and subprocess.run(["git", "rev-parse", "-q", "--verify", "refs/heads/l4-verify/boot/badpartid"], cwd=BARE).returncode != 0, (rc, err[-400:]))
+    rc, out, err = run_job(["badrowid"])
+    tb.case("a keys.tsv row that is not understood fails the job", rc == 1 and "keys.tsv" in err, (rc, err[-400:]))
     rc, out, err = run_job(["noentries"])
     tb.case("missing entries.tsv: job fails naming the file, nothing published", rc == 1 and "entries.tsv" in err and "lacks" in err
             and subprocess.run(["git", "rev-parse", "-q", "--verify", "refs/heads/l4-verify/boot/noentries"], cwd=BARE).returncode != 0, (rc, err[-400:]))
@@ -210,7 +238,6 @@ def main():
         tb.case("OUT.json gpu record, meta.json gpu fields", doc["gpu"]["presents"] == 4 and doc["gpu"]["first_module10_call"]
                 and meta["gpu_branch"] == "fake-gpu"
                 and meta["gpu_branch_commit"] == git("rev-parse", "refs/heads/fake-gpu", cwd=BARE).strip(), (doc.get("gpu"), meta))
-        tb.case("milestones host present and gpu-first-call reached", [x["reached"] for x in doc["milestones"]] == [True, True], doc["milestones"])
     rc, out, err = run_job(["gpuid", "--gpu-branch", "no-such-gpu"], genv)
     tb.case("missing renderer branch: job fails", rc == 1 and "no-such-gpu" in err, (rc, err[-300:]))
     rc, out, err = run_job(["gpuid", "--gpu-branch", "fake-gpu-empty"], genv)

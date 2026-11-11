@@ -7,13 +7,18 @@
 # Steps:
 #  1 setup: what the stage needs (python3, git, the aarch64 binutils readelf/nm that icount.py spec runs, unicorn==2.1.4)
 #    is checked first; only what is missing is installed (apt-get, pip), and an install that fails fails the job
-#  2 branch l1-contract/elf/<elf_id> of the artifacts repository: guest.elf, entries.tsv (exe_addr -> symbol), modules.tsv
-#    (name lo hi), keys.tsv (one row: lo hi of the never-mapped key range), milestones.tsv (verify/bootmiles.py table),
-#    optional softfloat.syms (one symbol per line). Every missing required file is listed and fails the job
-#  3 icount.py spec: range lifted = section .text.fnvl, class softfloat from softfloat.syms (left out when the file is absent)
+#  2 branch l1-contract/elf/<elf_id> of the artifacts repository (the contract's own file formats; verify/bootinputs.py converts
+#    them, and fails on any row or line it does not understand): guest.elf, or manifest.json + part.NNN (joined in manifest
+#    order, every part's and the whole sha256 and size checked; a mismatch fails the job); entries.tsv (addr, symbol, kind
+#    code|import, `# table_id` trailer); modules.tsv (name sha256 size preferred_base assigned_base size_of_image ...; reserved
+#    ranges = assigned_base .. + size_of_image, plus the exe's own PE image range); keys.tsv (import keys; the key range is
+#    derived from the import rows of entries.tsv, and both table ids must agree); milestones.tsv (exe_entry_va) + the loader's
+#    console lines of run.txt (when present) -> the bootmiles table; optional softfloat.syms or softfloat.tsv (one symbol
+#    per line). Every missing required file is listed and fails the job
+#  3 icount.py spec: range lifted = section .text.fnvl, class softfloat from the softfloat file (left out when absent)
 #  4 SD root: a fresh empty card directory (--root); the installed game is mounted in place at the guest's sdmc:/switch/fnv
 #    (--game, verify/bootpath.py). The game is GAME_DIR, else fetched by farm/gamedata_fetch.sh into $FARM_HOME/game
-#    (each item checked against its MANIFEST.tsv there). FalloutNV.exe must be in it; its sha256 is printed
+#    (the exe, INIs, static modules and d3dx9 DLLs; plus the Data items named in BOOT_DATA_ITEMS, none by default). FalloutNV.exe must be in it; its sha256 is printed
 #  5 verify/boot.py run, heap size 0x40000000. Exit 0 or 2 (the guest stopped with a fault, a deadlock, a missing
 #    module or a nonzero exit) is a RESULT; 1 is an input error and fails the job
 #  6 publish the orphan commit of OUT.json, OUT.console.txt, spec.json, meta.json to branch l4-verify/boot/<elf_id>
@@ -26,7 +31,7 @@
 # Env: GPU_PKGS (see above), ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
 # when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (default $HOME/fnvnx-farm),
 # WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
-# recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it; boot.py does not take it).
+# passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it).
 # Exit 0 iff the result was published and boot.py exited 0 or 2; 1 otherwise (one-line reason on stderr).
 set -euo pipefail
 die() { echo "boot_job: FAILED: $*" >&2; exit 1; }
@@ -101,16 +106,24 @@ retry GITA fetch -q "$ARTIFACTS_URL" "+refs/heads/$IN_BRANCH:refs/remotes/boot-j
 ELF_COMMIT=$(GITA rev-parse "refs/remotes/boot-job/$IN_BRANCH^{commit}") || die "no commit for $IN_BRANCH after fetch"
 GITA ls-tree --name-only "$ELF_COMMIT" > "$WORK/branch-files.txt" || die "cannot list the tree of $IN_BRANCH@${ELF_COMMIT:0:12}"
 MISSING=""
-for f in guest.elf entries.tsv modules.tsv keys.tsv milestones.tsv; do grep -qxF "$f" "$WORK/branch-files.txt" || MISSING="$MISSING $f"; done
+for f in entries.tsv modules.tsv keys.tsv milestones.tsv; do grep -qxF "$f" "$WORK/branch-files.txt" || MISSING="$MISSING $f"; done
+want=(entries.tsv modules.tsv keys.tsv milestones.tsv)
+if grep -qxF guest.elf "$WORK/branch-files.txt"; then want+=(guest.elf)
+elif grep -qxF manifest.json "$WORK/branch-files.txt"; then want+=(manifest.json $(grep -E '^part\.[0-9]+$' "$WORK/branch-files.txt"))
+else MISSING="$MISSING guest.elf-or-manifest.json"; fi
 [ -z "$MISSING" ] || die "branch $IN_BRANCH@${ELF_COMMIT:0:12} lacks the required file(s):$MISSING"
-IN=$WORK/in; SOFT=absent
-want=(guest.elf entries.tsv modules.tsv keys.tsv milestones.tsv)
-if grep -qxF softfloat.syms "$WORK/branch-files.txt"; then want+=(softfloat.syms); SOFT=present; fi
+IN=$WORK/in; SOFT=absent; SOFTFILE=
+for f in softfloat.syms softfloat.tsv; do
+  if grep -qxF "$f" "$WORK/branch-files.txt"; then want+=("$f"); SOFT=present; SOFTFILE=$f; break; fi
+done
+HAVE_RUN=0; if grep -qxF run.txt "$WORK/branch-files.txt"; then want+=(run.txt); HAVE_RUN=1; fi
 extract() { rm -rf "$IN"; mkdir -p "$IN"; GITA archive "$ELF_COMMIT" "${want[@]}" | tar -x -C "$IN"; }
 retry extract || die "cannot extract ${want[*]} from $IN_BRANCH@${ELF_COMMIT:0:12}"
-# keys.tsv: exactly one row, two hex fields lo hi -> LO:HI
-KEYS=$(awk -F'[ \t]+' '!/^#/ && NF > 0 { n++; if (NF != 2) bad = 1; lo = $1; hi = $2 } END { if (n != 1 || bad) exit 1; print lo ":" hi }' "$IN/keys.tsv") \
-  || die "$IN_BRANCH keys.tsv must hold exactly one row 'lo hi' (hex)"
+BI=(python3 -s -B "$NX/verify/bootinputs.py")
+if [ ! -f "$IN/guest.elf" ]; then
+  "${BI[@]}" join --dir "$IN" -o "$IN/guest.elf" 2> "$WORK/join.err" || die "$(tail -1 "$WORK/join.err" | cut -c1-400)"
+  log "guest.elf joined from the manifest's parts and verified"
+fi
 
 # 2b. the renderer library
 GPU_LIB=""; GPU_COMMIT=""
@@ -128,25 +141,31 @@ fi
 
 # 3. icount spec
 SPEC_ARGS=(--elf "$IN/guest.elf" --range lifted=section:.text.fnvl -o "$WORK/spec.json")
-[ $SOFT = absent ] || SPEC_ARGS+=(--entries "softfloat=symfile:$IN/softfloat.syms")
+[ $SOFT = absent ] || SPEC_ARGS+=(--entries "softfloat=symfile:$IN/$SOFTFILE")
 python3 -I "$NX/verify/icount.py" spec "${SPEC_ARGS[@]}" 2> "$WORK/spec.err" || die "icount.py spec failed: $(tail -1 "$WORK/spec.err" | cut -c1-300)"
 log "icount spec: lifted=section:.text.fnvl softfloat=$SOFT"
 
 # 4. SD root and the installed game
 if [ -z "${GAME_DIR:-}" ]; then
   GAME_DIR=$FARM_HOME/game
-  ARTIFACTS_URL=$ARTIFACTS_URL bash "$NX/farm/gamedata_fetch.sh" "$GAME_DIR" > "$WORK/gamedata.log" 2>&1 || die "farm/gamedata_fetch.sh failed: $(tail -1 "$WORK/gamedata.log" | cut -c1-300)"
+  ARTIFACTS_URL=$ARTIFACTS_URL bash "$NX/farm/gamedata_fetch.sh" "$GAME_DIR" ${BOOT_DATA_ITEMS:---no-data} > "$WORK/gamedata.log" 2>&1 || die "farm/gamedata_fetch.sh failed: $(tail -1 "$WORK/gamedata.log" | cut -c1-300)"
 fi
 [ -d "$GAME_DIR" ] || die "GAME_DIR $GAME_DIR is not a directory"
 [ -s "$GAME_DIR/FalloutNV.exe" ] || die "$GAME_DIR/FalloutNV.exe is missing or empty"
 EXE_SHA=$(sha256sum "$GAME_DIR/FalloutNV.exe" | cut -c1-64)
 log "game $GAME_DIR: FalloutNV.exe sha256 $EXE_SHA"
 SD=$WORK/sd; rm -rf "$SD"; mkdir -p "$SD"
+# the contract's files in the forms boot.py takes (each converter fails on any row it does not understand)
+conv() { "$@" 2> "$WORK/conv.err" || die "$(tail -1 "$WORK/conv.err" | cut -c1-400)"; }
+conv "${BI[@]}" reserved --modules "$IN/modules.tsv" --exe "$GAME_DIR/FalloutNV.exe" -o "$IN/reserved.tsv"
+KEYS=$("${BI[@]}" keys --entries "$IN/entries.tsv" --keys "$IN/keys.tsv" 2> "$WORK/conv.err") || die "$(tail -1 "$WORK/conv.err" | cut -c1-400)"
+RUN_ARGS=(); [ $HAVE_RUN = 0 ] || RUN_ARGS=(--run "$IN/run.txt")
+conv "${BI[@]}" milestones --table "$IN/milestones.tsv" --entries "$IN/entries.tsv" "${RUN_ARGS[@]}" -o "$IN/table.txt"
 
 # 5. boot
 OUT=$WORK/OUT.json; rm -f "$OUT" "$WORK/OUT.console.txt"
-BOOT=(python3 -s -B "$NX/verify/boot.py" run --elf "$IN/guest.elf" --reserved "$IN/modules.tsv" --keys "$KEYS" --heap-size 0x40000000
-      --root "$SD" --game "$GAME_DIR" --milestones "$IN/milestones.tsv" --manifest "$IN/entries.tsv" --icount-spec "$WORK/spec.json")
+BOOT=(python3 -s -B "$NX/verify/boot.py" run --elf "$IN/guest.elf" --reserved "$IN/reserved.tsv" --keys "$KEYS" --heap-size 0x40000000
+      --profile "$PROFILE" --root "$SD" --game "$GAME_DIR" --milestones "$IN/table.txt" --manifest "$IN/entries.tsv" --icount-spec "$WORK/spec.json")
 [ -z "$LIMIT" ] || BOOT+=(--limit-instructions "$LIMIT")
 FRAMES=$WORK/frames; rm -rf "$FRAMES"
 [ -z "$GPU_LIB" ] || BOOT+=(--gpu "$GPU_LIB" --frames "$FRAMES")

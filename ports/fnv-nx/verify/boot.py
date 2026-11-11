@@ -146,7 +146,7 @@ def run(a):
     rep = ic.report()
     doc = {"elf_sha256": hashlib.sha256(raw).hexdigest(), "plan": plan, "run": r,
            "console_sha256": hashlib.sha256(console.encode()).hexdigest(), "milestones": prog.state(),
-           "milestone_log": log, "last_reached": prog.last_reached(), "icount": rep}
+           "milestone_log": log, "manifest_id": manifest.table_id, "last_reached": prog.last_reached(), "icount": rep}
     if gpu:
         doc["gpu"] = gpu_report
     with open(a.out, "w") as f:
