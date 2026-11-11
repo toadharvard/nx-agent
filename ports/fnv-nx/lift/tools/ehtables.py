@@ -2,7 +2,10 @@
 """Exception-handling tables of FalloutNV.exe, parsed by structure from code the descent reaches (no heuristics):
 C++ FuncInfo (found via `mov eax, offset FuncInfo; jmp handler` stubs), SEH scope tables (v3/v4, inline push or
 __SEH_prolog-style helper), ThrowInfo (pushed before calls to _CxxThrowException). Used by universe.py, which supplies
-the descent state; running this file runs the whole pipeline. Output: /home/user/l3facts/ehtables.json."""
+the descent state (tools/modlift.py supplies it for a module image read through pemod: the same parser, the module's rebased
+addresses); running this file runs the whole pipeline. Output: <facts>/ehtables.json (exe) and <facts>/<module>/ehtables.json, which
+tools/gate_eh.py reads. The JSON also carries the image's executable span `text` and the FuncInfo stubs that failed to parse
+`failed_funcinfo`."""
 import os, re, sys, json, bisect
 from collections import Counter, defaultdict
 MAGIC = (0x19930520, 0x19930521, 0x19930522)
@@ -15,7 +18,7 @@ def le(b): return int.from_bytes(b, 'little')
 class EH:
     def __init__(s, X):
         s.X = X; s.fi = {}; s.stubs = {}; s.noise = Counter(); s.sites = {}; s.scopes = {}; s.helpers = {}; s.seenh = set()
-        s.unknown = 0; s.throws = {}; s.catch = []; s.contdone = set(); s.conts = {}; s.emitted = 0; s.seenstub = set(); s.thrower = None
+        s.regs = {}; s.unknown = 0; s.throws = {}; s.catch = []; s.contdone = set(); s.conts = {}; s.emitted = 0; s.seenstub = set(); s.thrower = None
 
     def mk(s, a, n, ref):
         """EH structures that lie in an executable section (merged .rdata) are data named by the relocation at ref."""
@@ -87,7 +90,7 @@ class EH:
                 if X.strict: s.emit(H, 'seh-frame', p + 1)       # module mode: `push handler; mov eax, fs:[0]` registers H in the exception chain, the OS transfers control through it
                 continue
             s.seenh.add(p)
-            if s.is_stub(H): continue
+            if s.is_stub(H): s.regs[H] = s.sorted_stubs[bisect.bisect_left(s.sorted_stubs, H)]; continue      # `push H` registers H on fs:[0]; the frame-handler stub (mov eax, FuncInfo; jmp) lies within 0x30 bytes after H (H itself, or the /GS cookie check before it)
             q = m.start() - 5
             if q >= 0 and X.text[q] == 0x68 and X.cov[q] == 1 and (p - 4) in X.rset and X.isdata(X.u32(p - 4)): s.add_scope(X.u32(p - 4), H, p - 5)
             else: s.helpers[X.entry_of(p)] = H
@@ -203,6 +206,9 @@ class EH:
             t = s.throws[a]; J['throwinfo'].append({'addr': h(a), 'attrs': t['attrs'], 'unwind': h(t['unwind']) if t['unwind'] else 0,
                 'types': [{'type': h(ty), 'size': sz, 'copy': h(cp) if cp else 0} for _, ty, sz, cp, _ in t['types']]})
         J['conts'] = {h(k): h(v) for k, v in sorted(s.conts.items())}
+        J['frame_regs'] = {h(k): h(v) for k, v in sorted(s.regs.items())}     # registered fs:[0] handler H -> its frame-handler stub; H is what the runtime dispatches
+        J['text'] = [h(X.T0), h(X.T1)]                        # [lo, hi): the executable span of this image (rebased for a module); tools/gate_eh.py assigns the pack's code entries to images by it
+        J['failed_funcinfo'] = [{'addr': h(k), 'err': v} for k, v in sorted(bad.items())]       # a frame-handler stub names a FuncInfo that did not parse: its entries are missing, the gate is red on any
         json.dump(J, open(X.outdir + '/ehtables.json', 'w'), indent=1, sort_keys=True)
         L = []; bm = Counter(r['magic'] for r in s.fi.values()); L.append('FuncInfo found %d parsed %d failed %d; by magic %s' % (len(s.fi), len(ok), len(bad), {h(k): v for k, v in sorted(bm.items())}))
         if bad: L.append('  failed: ' + ' '.join('%x:%s' % kv for kv in sorted(bad.items())[:5]))
