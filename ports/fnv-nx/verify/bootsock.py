@@ -1,6 +1,7 @@
 """The socket services (module 11, fn 16..33, hostapi.h + sockwire.h) of the boot stage machine, for a host that has NO network interface.
 
-Model: the machine's host has only the loopback addresses; no packet ever arrives and nothing can connect. A socket is an entry of a
+Model (owner decision "The declared machine", CLAUDE.md: the machine has no network connection and every network call returns the
+documented error of that state, never a fake success): the machine's host has only the loopback addresses; no packet ever arrives and nothing can connect. A socket is an entry of a
 table of open handles; every result is derived from the header text and host_sock.inc (the reference host: its argument checks, in its
 order) plus POSIX where the header states "an OS result" for a situation that exists without traffic. A (service, case) whose result
 needs real traffic, or an OS's own choice, is NOT answered: the model raises NotDetermined and the machine ends the run as
