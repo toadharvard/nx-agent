@@ -123,6 +123,17 @@ make -s -C "$ROOT/tests/s4" "${ENV_GEN[@]}" "${ENVC_GEN[@]}" "${COM_GEN[0]}" \
     || { echo "build_guest: cannot generate the env_const / COM bridge sources"; exit 2; }
 for f in "${COM_GEN[@]}"; do [ -f "$f" ] || { echo "build_guest: missing generated $f"; exit 2; }; done
 
+# ---- the registry's first-boot rows (platform/manifest/declared_registry.tsv): checked against the static read sites of the exe and
+# its modules (regsites.tsv, exe-derived, private: fnv-nx-build manifest dir, written by pemanifest.py) on every build; a missing
+# regsites.tsv, or a declared row that nothing reads, is an error
+FNVNX_MANIFEST=${FNVNX_MANIFEST:-/home/user/fnv-nx-build/manifest}
+REGSITES=$FNVNX_MANIFEST/regsites.tsv
+[ -f "$REGSITES" ] || { echo "build_guest: registry seed: $REGSITES is missing (FNVNX_MANIFEST = the fnv-nx-build manifest directory)"; exit 2; }
+rm -f "$HERE/win32/registry_seed.gen.inc"
+make -s -C "$ROOT/tests/s4" REGSITES="$REGSITES" "$HERE/win32/registry_seed.gen.inc" \
+    || { echo "build_guest: registry seed: gen_registry_seed.py refused the declared table"; exit 2; }
+[ -f "$HERE/win32/registry_seed.gen.inc" ] || { echo "build_guest: missing generated registry_seed.gen.inc"; exit 2; }
+
 # ---- guest runtime
 if [ -z "${GUEST_RT:-}" ]; then
     GUEST_RT=$OUT/rt

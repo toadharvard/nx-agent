@@ -1,0 +1,5 @@
+module	site	api	root	subkey	value	status	reason
+synth.exe	0x00401000	RegOpenKeyExA	HKEY_LOCAL_MACHINE	Software\Bethesda Softworks\FalloutNV	-	static	
+synth.exe	0x00401020	RegQueryValueExA	HKEY_LOCAL_MACHINE	Software\Bethesda Softworks\FalloutNV	Installed Path	static	
+synth.exe	0x00401060	RegQueryValueExA	HKEY_CURRENT_USER	Control Panel\Synth	UndeclaredValue	static	
+synth.exe	0x00401090	RegQueryValueExA	dynamic	dynamic	dynamic	dynamic	object field

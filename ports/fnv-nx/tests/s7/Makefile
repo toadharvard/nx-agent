@@ -64,6 +64,14 @@ $(OUT)/platform/win32/env_const.cpp.o: $(P)/win32/env_const.gen.inc
 $(OUT)/platform/crt/msvcrt_exports.cpp.o: $(P)/crt/env_const.gen.inc
 $(OUT)/platform/os/os_posix.c.o: $(P)/os/env_const_posix.gen.inc
 
+# the registry's first-boot rows: platform/manifest/declared_registry.tsv, checked against the static read sites (REGSITES, the exe-derived
+# private regsites.tsv of the product build; the tests use their own synthetic file) and generated into registry_seed.gen.inc
+REGSITES ?= $(ROOT)/tests/s4/regsites_synth.tsv
+REG_DECL := $(P)/manifest/declared_registry.tsv
+$(P)/win32/registry_seed.gen.inc: $(REG_DECL) $(P)/manifest/gen_registry_seed.py $(P)/manifest/regsites.py $(REGSITES)
+	python3 -I $(P)/manifest/gen_registry_seed.py $(REGSITES) $(REG_DECL) $@
+$(OUT)/platform/win32/registry_seed.cpp.o: $(P)/win32/registry_seed.gen.inc
+
 $(OUT)/%.cpp.o: $(ROOT)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_) -c $< -o $@

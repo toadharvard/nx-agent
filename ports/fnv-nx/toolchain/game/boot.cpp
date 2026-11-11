@@ -25,6 +25,7 @@ extern "C" {
 void fnvnx_guest_platform_init(void);
 void fnvnx_set_command_line(int argc, char **argv);
 unsigned fnvnx_first_run_profile(void);
+void fnvnx_registry_first_run(void);
 void fnvnx_audio_input_register(void);
 void fnvnx_d3d9_register(void) __attribute__((weak));   /* D3D9=external: d3d9.dll module (render/nine) */
 void *fnvnx_win32_lookup_export(const char *dll, const char *name);
@@ -360,6 +361,7 @@ extern "C" int fnvnx_guest_main(int argc, char **argv) {   /* runtime.c prefers 
         return 3;
     }
     memory_manager_state("before WinMain");
+    fnvnx_registry_first_run();   /* the declared machine's registry rows, before WinMain reads them */
     printf("fnvnx boot: first-run profile: mask %u\n", fnvnx_first_run_profile());   /* the launcher's files */
     printf("fnvnx boot: calling WinMain\n");
     g_trap_phase = 1;

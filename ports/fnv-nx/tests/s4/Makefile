@@ -51,7 +51,7 @@ OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
 # a call goes through the boundary, a direct call does not compile); the tests are "the game" and keep plain pointers.
 $(filter $(OUT)/platform/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 
-.PHONY: all test vclock probe private ilp32 m32 iat device qemu clean gfn-nocompile hostapi-check dynsites-check
+.PHONY: regsites-check all test vclock probe private ilp32 m32 iat device qemu clean gfn-nocompile hostapi-check dynsites-check
 all: test
 
 $(OUT)/%.c.o: $(ROOT)/%.c
@@ -100,6 +100,15 @@ $(OUT)/platform/os/os_posix.c.o: $(P)/os/env_const_posix.gen.inc
 $(OUT)-m32/platform/win32/env_const.cpp.o: $(P)/win32/env_const.gen.inc
 $(OUT)-m32/platform/crt/msvcrt_exports.cpp.o: $(P)/crt/env_const.gen.inc
 $(OUT)-m32/platform/os/os_posix.c.o: $(P)/os/env_const_posix.gen.inc
+
+# the registry's first-boot rows: platform/manifest/declared_registry.tsv, checked against the static read sites (REGSITES, the exe-derived
+# private regsites.tsv of the product build; the tests use their own synthetic file) and generated into registry_seed.gen.inc
+REGSITES ?= $(HERE)/regsites_synth.tsv
+REG_DECL := $(P)/manifest/declared_registry.tsv
+$(P)/win32/registry_seed.gen.inc: $(REG_DECL) $(P)/manifest/gen_registry_seed.py $(P)/manifest/regsites.py $(REGSITES)
+	python3 -I $(P)/manifest/gen_registry_seed.py $(REGSITES) $(REG_DECL) $@
+$(OUT)/platform/win32/registry_seed.cpp.o: $(P)/win32/registry_seed.gen.inc
+$(OUT)-m32/platform/win32/registry_seed.cpp.o: $(P)/win32/registry_seed.gen.inc
 
 $(OUT)/%.cpp.o: $(ROOT)/%.cpp
 	@mkdir -p $(dir $@)
@@ -162,7 +171,12 @@ dynsites-check: probe
 	python3 -I $(ROOT)/platform/manifest/check_dynsites.py --selftest
 	python3 -I $(ROOT)/platform/manifest/check_dynsites.py $(DYNSITES) --root $(ROOT)
 
-test: hostapi-check $(OUT)/s4_tests
+# the registry-site extractor and the seed generator on synthetic input (no exe-derived file needed)
+regsites-check:
+	python3 -I $(ROOT)/platform/manifest/check_regsites.py
+	python3 -I $(ROOT)/platform/manifest/check_gen_registry.py
+
+test: hostapi-check regsites-check $(OUT)/s4_tests
 	rm -rf $(OUT)/root && FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root GLIBC_TUNABLES=glibc.malloc.tcache_count=0 $(OUT)/s4_tests
 
 # ---- i386 (-m32) build: the ILP32 data model with a host libc. /usr/include/asm is the multilib packages' symlink,
