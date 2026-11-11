@@ -422,6 +422,63 @@ TEST(env_steam_not_running)
     CHECK(!SteamAPI_IsSteamRunning());
 }
 
+/* One test per reached Galaxy/Steam entry (platform/manifest/check_galaxy.py: the 11 names of the exe's galaxywrp.dll import). Oracles: the
+ * Steamworks SDK documentation cited at each body (manifest/env_const.tsv, services.cpp), state "client not running / not initialised". */
+TEST(steam_SteamAPI_Init) { CHECK(!SteamAPI_Init()); CHECK(!SteamAPI_Init()); /* a repeated call fails the same way */ }
+TEST(steam_SteamAPI_IsSteamRunning) { CHECK(!SteamAPI_IsSteamRunning()); SteamAPI_Init(); CHECK(!SteamAPI_IsSteamRunning()); }
+TEST(steam_SteamAPI_Shutdown)
+{
+    SteamAPI_Shutdown();   /* valid when never initialised, and twice */
+    SteamAPI_Shutdown();
+    CHECK(!SteamAPI_IsSteamRunning());
+    int o = 0, base = fnvnx_steam_callback_count();
+    SteamAPI_RegisterCallback(&o, 1);
+    SteamAPI_Shutdown();
+    CHECK_EQ(fnvnx_steam_callback_count(), base + 1);   /* the registrations belong to their objects */
+    SteamAPI_UnregisterCallback(&o);
+}
+TEST(steam_SteamAPI_RunCallbacks)
+{
+    int o = 0;
+    SteamAPI_RegisterCallback(&o, 7);
+    SteamAPI_RunCallbacks();
+    SteamAPI_RunCallbacks();
+    CHECK(o == 0);   /* nothing is queued without a client: the registered object is never touched */
+    SteamAPI_UnregisterCallback(&o);
+}
+TEST(steam_SteamAPI_RegisterCallback)
+{
+    int o = 0, p = 0, base = fnvnx_steam_callback_count();
+    SteamAPI_RegisterCallback(&o, 101);
+    CHECK_EQ(fnvnx_steam_callback_count(), base + 1);
+    SteamAPI_RegisterCallback(&o, 102);   /* one object, two ids: two registrations */
+    SteamAPI_RegisterCallback(&p, 101);
+    CHECK_EQ(fnvnx_steam_callback_count(), base + 3);
+    for (int i = 0; i < 100; i++) SteamAPI_RegisterCallback(&p, 200 + i);   /* the registry grows past its first capacity */
+    CHECK_EQ(fnvnx_steam_callback_count(), base + 103);
+    SteamAPI_UnregisterCallback(&o);
+    SteamAPI_UnregisterCallback(&p);
+    CHECK_EQ(fnvnx_steam_callback_count(), base);
+}
+TEST(steam_SteamAPI_UnregisterCallback)
+{
+    int o = 0, p = 0, base = fnvnx_steam_callback_count();
+    SteamAPI_UnregisterCallback(&o);   /* an object with no registration: a no-op */
+    CHECK_EQ(fnvnx_steam_callback_count(), base);
+    SteamAPI_RegisterCallback(&o, 1);
+    SteamAPI_RegisterCallback(&p, 2);
+    SteamAPI_RegisterCallback(&o, 3);
+    SteamAPI_UnregisterCallback(&o);   /* all pairs of the object, the others stay */
+    CHECK_EQ(fnvnx_steam_callback_count(), base + 1);
+    SteamAPI_UnregisterCallback(&p);
+    CHECK_EQ(fnvnx_steam_callback_count(), base);
+}
+TEST(steam_SteamUser) { CHECK(SteamUser() == NULL); SteamAPI_Init(); CHECK(SteamUser() == NULL); }
+TEST(steam_SteamFriends) { CHECK(SteamFriends() == NULL); SteamAPI_Init(); CHECK(SteamFriends() == NULL); }
+TEST(steam_SteamUtils) { CHECK(SteamUtils() == NULL); SteamAPI_Init(); CHECK(SteamUtils() == NULL); }
+TEST(steam_SteamApps) { CHECK(SteamApps() == NULL); SteamAPI_Init(); CHECK(SteamApps() == NULL); }
+TEST(steam_SteamUserStats) { CHECK(SteamUserStats() == NULL); SteamAPI_Init(); CHECK(SteamUserStats() == NULL); }
+
 /* runs f in a child process; the wait status */
 static int in_child(void (*f)(void))
 {
