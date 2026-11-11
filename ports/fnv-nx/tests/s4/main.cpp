@@ -44,7 +44,10 @@ int main(int argc, char **argv)
         return strcmp((*(s4_case *const *)a)->name, (*(s4_case *const *)b)->name);
     });
     int failed_cases = 0;
+    const char *only = getenv("FNVNX_TEST_ONLY");   /* development aid: run the cases whose name starts with this */
     for (i = 0; i < n; i++) {
+        if (only && strncmp(v[i]->name, only, strlen(only)) != 0)
+            continue;
         int before = s4_failures;
         v[i]->fn();
         int bad = s4_failures - before;

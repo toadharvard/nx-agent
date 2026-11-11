@@ -72,7 +72,7 @@ $(OUT)/%.cpp.o: $(ROOT)/%.cpp
 	$(CXX) $(CXXFLAGS_) -c $< -o $@
 
 $(OUT)/s4_tests: $(OBJS) $(OUT)/libfreetype.a
-	$(CXX) $(CXXFLAGS_) $(OBJS) $(OUT)/libfreetype.a -o $@ -lm
+	$(CXX) $(CXXFLAGS_) $(OBJS) $(OUT)/libfreetype.a -o $@ -lm $(LDEXTRA)
 
 test: $(OUT)/s4_tests
 	rm -rf $(OUT)/root && FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root $(OUT)/s4_tests
