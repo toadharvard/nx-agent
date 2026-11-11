@@ -57,13 +57,13 @@ def collect(pk):
             if vi: cx.uent = set()                                # the outside-target copy: not an entry, so the transfer goes to the dispatcher
             try:
                 if f_dsl.emit_form(cx, ins) is core.SKIP: raise core.Unsupported('SKIP')
-            except Exception as e:
+            except core.Unsupported as e:                         # the emitter's stated reason (a build error of the forms is not caught: it propagates)
                 bad.append((s, repr(e)[:100])); continue
             out.append((a, s + ('+' if vi else ''), func(cx, a)))
             F = f_dsl.forms.build(ins, a)
             hx = mkctx(ins, a)
             try: core.dispatch(hx, ins) if core.EMIT == '' else None
-            except Exception: hx.L = []
+            except core.Unsupported: hx.L = []                    # no hand handler for this instruction: nothing assigned
             t = '\n'.join(hx.L)
             for f in F.undef:
                 if re.search(r'(?<![\w])%s\s*=(?!=)' % f, t): undef[ins.mnemonic.split()[-1]].add(f)
