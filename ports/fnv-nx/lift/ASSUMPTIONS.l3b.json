@@ -268,6 +268,27 @@
    "file": "lift/proof/gate_fpexact.py",
    "statement": "Native bodies compiled with fnvnx_ftoi are judged by L2 rules, not by fpexact.",
    "disposition": "gate: L2 gate"
+  },
+  {
+   "id": "A-START",
+   "area": "fp",
+   "file": "lift/tools/fpstate.py",
+   "statement": "Every guest thread starts with FCW 0x027F and MXCSR 0x1F80.",
+   "disposition": "fact: set by the runtime at thread entry (rt/enter.c); being verified against the code with the FP-mask fact"
+  },
+  {
+   "id": "A-SYS",
+   "area": "fp",
+   "file": "lift/tools/fpstate.py",
+   "statement": "An imported system function changes the x87/SSE control state only if it is a control import (_controlfp, _control87, _fpreset).",
+   "disposition": "owner: 3, Win32 and CRT as documented, plus the runtime import bodies"
+  },
+  {
+   "id": "A-CTX",
+   "area": "fp",
+   "file": "lift/tools/fpstate.py",
+   "statement": "The CONTEXT image handed to guest SEH handlers is only read back by the runtime restore, which restores a reachable control state.",
+   "disposition": "open: a handler may write the FP control words in CONTEXT; being checked against rt/seh.c with the FP-mask fact"
   }
  ],
  "not_mine": [
