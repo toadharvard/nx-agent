@@ -33,6 +33,8 @@ below, not written yet, so no product root can be admitted; **no rule** = report
 | 8 | Layout or calling-contract mismatch of a native body | `n1`, `n2_data`, `n2_call`, `n2_vcall`, `xc`, `xunit`, `rtti`, `pcrel`, `bodysel` | exe facts against object facts | L1 | required with the first native root |
 | 9 | Non-deterministic build | `determinism` | two cold builds of every recipe in the sandbox, compared bit for bit | L4 | required |
 | 10 | Test that can pass on a wrong body: the expected value comes from the code under test | `oracle` | provenance of every expected value (exe, Wine dump, contract, independent model) | L4 | required |
+| 14 | Memory fault in a hand-written native body: null or wild pointer, access out of bounds, stack exhaustion | `memsafe` | a static proof per native function; the means is not chosen yet (L4 with L5, L6, L1) | L4 | required, no means yet |
+| 15 | Hang or deadlock | `nodeadlock` | a static rule; none is known yet | L4 | required, no rule yet |
 | 11 | Tool that is not a pure function of its declared inputs | `pure` | AST of every stage tool | L4 | runs |
 | 12 | Tool defect covered by its own tests | `selftests` | every test file, in the declared environment | L4 | runs |
 | 13 | Code in the trunk that no gate judges | `admit` | tracked files against `admit.json` | L4 | runs |
@@ -40,18 +42,35 @@ below, not written yet, so no product root can be admitted; **no rule** = report
 Gate rules decide on what the program is (machine code, symbol tables, syntax trees, content hashes). No gate decides
 on a word in a name, a comment or a string.
 
+## State of the product gates
+
+- `objstub` is written and tested (`objstub.py`, `gate_objstub.py`), and is NOT in `gates.json` yet.
+  - Class 1 decides on instruction encodings and relocations. The set of terminating routines is derived by a GCC
+    plugin from the declarations the compiler itself sees (8 names from the C headers of the cross toolchain).
+  - Class 2 flags a function unless the analysis proves a call, an access outside its own frame, or an input
+    register live at entry. Its register read and write sets come from the capstone decoder, and three encodings
+    were found where those sets are wrong (`cmp`, `fmov` with an immediate, `ldadd`). A spurious read lets a
+    vacuous function pass, so the gate is not sound until the sets are derived from Arm's machine-readable
+    specification. Until then it is not accepted as a gate.
+  - Measured cost: about 3 s per MB of code, so about 6 minutes for a 120 MB text. This is over the 5 minute
+    budget and needs sharding by object with a content-keyed cache.
+- `build`, `determinism`, `oracle`, `linkstrict`, `memsafe`, `nodeadlock`: not written.
+
 ## Where no closing rule is known
 
 Reported to the orchestrator; none of these is patched around.
 
-- **Memory faults in hand-written native code** (null or wild pointer, overflow, misalignment, stack exhaustion).
-  Lifted code faults exactly where the exe faults (simulation argument of R2). For native C and C++ of the platform,
-  the renderer and the loader no static proof of memory safety is known here.
-- **A body that is not vacuous but implements its contract only in part.** Class 2 closes the bodies that do nothing.
-  A body that does something wrong is closed only by conformance evidence per function (class 10 makes that
-  evidence honest; it does not make it complete). Win32 and D3D9 have no formal model (assumption A8).
-- **Hangs and deadlocks.** No static rule; the boot stage reports them, it does not decide.
-- **Failures of the console itself** (Horizon behaviour, memory limits on hardware) until a run on the console.
+- **Classes 14 and 15** are required gates without a means. Until one exists no product root can be admitted.
+  Sanitizers, boots and tests verify these classes; by the owner's rule a run never decides, so they are not
+  accepted in place of a proof. Lifted code faults exactly where the exe faults (simulation argument of R2), so
+  class 14 concerns the hand-written native code of the platform, the renderer, the loader and the lift runtime.
+
+Accepted assumptions that cannot be removed (MASTER_PLAN4 section 4):
+
+- **A8: Win32 and D3D9 are given by documentation, not by a formal model.** A body that is not vacuous but
+  implements its contract only in part is therefore closed by conformance evidence per function. Class 10 makes
+  that evidence honest; it does not make it complete.
+- **Behaviour of the console** (Horizon, memory limits on hardware) stays an assumption until a run on the console.
 
 ## Assumptions
 

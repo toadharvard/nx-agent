@@ -11,7 +11,8 @@ Host slots whose effect is not modelled (the observable contract is kept; see HO
  wall_time_us (fixed epoch + virtual ns), tz_offset_minutes (0), random64 (deterministic splitmix64, seed 0),
  memory_info (4 GiB / 3 GiB), cpu_count (3), audio_open / audio_submit / audio_close (frames counted, samples
  dropped, submit sleeps the period in virtual time), pad_read (never connected, zeros), pad_vibrate, input_poll
- (no events), ext_11 CPU_BOOST (recorded in .boosts, returns 0).
+ (no events), module 11 CPU_BOOST (recorded in .boosts, returns 0: no platform config), MESSAGE (caption and text recorded in
+ .messages, returns 0: the dialog is closed at once). The rest of module 11 (thread_activity, vm_*) is the machine's.
 """
 import os
 import stat as S
@@ -21,11 +22,9 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import bootpath  # noqa: E402
-from bootmachine import ExtMissing  # noqa: E402
 
 U64 = (1 << 64) - 1
 WALL_EPOCH_US = 1_700_000_000_000_000
-FNVNX_PLAT_CPU_BOOST = 1
 
 
 def neg(e):
@@ -37,7 +36,7 @@ class Services:
         self.m = None
         self.dp = bootpath.BootPath(root, game)
         self.debug, self.fds, self.dirs, self.next_dir = [], {}, {}, 1
-        self.audio_period, self.audio_frames, self.boosts, self.placement = 0, 0, [], {}
+        self.audio_period, self.audio_frames, self.boosts, self.placement, self.messages = 0, 0, [], {}, []
         self.rng = 0
 
     def bind(self, machine):
@@ -302,9 +301,12 @@ class Services:
     def h_ext_call(self, module, fn, args, nargs, *_):
         return self.m.ext_call(module, fn, args, nargs)
 
-    def ext_11(self, fn, args):
-        """FNVNX_EXT_PLATFORM: only CPU_BOOST(mode) is served here (VM_PROTECT is the machine's); any other fn is not"""
-        if fn == FNVNX_PLAT_CPU_BOOST:
-            self.boosts.append(args[0] if args else 0)
-            return 0
-        raise ExtMissing(11, fn)
+    def plat_cpu_boost(self, args):
+        """FNVNX_PLAT_CPU_BOOST(mode) -> 0 set"""
+        self.boosts.append(args[0])
+        return 0
+
+    def plat_message(self, args):
+        """FNVNX_PLAT_MESSAGE(caption, text) -> 0 after the dialog closed"""
+        self.messages.append((self.cstr(args[0]), self.cstr(args[1])))
+        return 0

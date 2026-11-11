@@ -12,7 +12,8 @@ Rules:
    slice while another thread is ready: no wall clock, no instruction counts, so switch points repeat. Nothing ready:
    the virtual tick jumps to the earliest deadline; none: reason "deadlock" with a per-thread wait report.
 4. Any invalid access (unmapped or protection violation), Unicorn error, or host call on an unmapped guest pointer
-   ends the run, reason "fault", record {kind, addr, size, pc, lr, tid}. There is no continue path.
+   ends the run, reason "fault", record {kind, addr, size, pc, lr, tid}. There is no continue path, except the thread's own
+   FNVNX_PLAT_ACCESS_FAULT_HANDLER (5c).
 5. map_fixed(addr, size, src) follows svcMapMemory (hostapi.h): src is a page-aligned block of the heap region, wholly
    inside it and not given away before; addr gets RW memory holding the CONTENT of src, and [src, src+size) becomes
    unmapped for good (a later access ends the run with "fault"). addr: exactly there, wholly inside a plan["free"]
@@ -22,6 +23,33 @@ Rules:
    (image, host page, stacks, given-away blocks, unmapped: 0xD401). Other modules go to services.ext_<module>
    (fn, args) found at construction; an unregistered module, or a handler raising ExtMissing, ends the run with reason
    "ext-module-missing": a configuration error, never answered with a value.
+5b. Platform service (module 11, the header's FNVNX_PLAT_* list 1..8; always on). Totality at construction: every fn of PLATFORM_FNS
+   resolves to services.plat_<name>(args) or the machine's own _plat_<name>(args), else MachineError (the machine serves
+   thread_activity and vm_*; the services serve cpu_boost and message). A fn the header does not define is
+   "ext-module-missing". VM service: reserve(hint, size) -> address or 0; size rounds up to 64 KiB, size 0 and every failure
+   give 0. Without a hint the arena is the lowest 64 KiB multiple >= 0x10000 clear of the plan's regions, every plan["free"]
+   range, map_fixed mappings and earlier reservations (one pass over the intervals sorted by lo: c only grows, and an
+   interval that overlapped c is cleared by the move, an earlier one cannot overlap the new c because it ends below
+   the old c + size or was cleared), end <= 4 GiB. A hint (rounded down to 64 KiB) is taken exactly or refused: it must not be 0, end
+   above 4 GiB, or overlap anything listed above (the plan's free ranges are the module and key ranges: data, no fixed no-go). commit(addr, size): the page-rounded
+   range must lie inside one reservation (else 0xCC01); uncommitted pages become RW and zero, already committed pages keep their
+   content and become RW. Each commit call maps its uncommitted gaps as extents (host_vm.inc). decommit follows host_vm.inc: an extent
+   wholly inside the range is unmapped (an access ends the run with "fault"), a partly covered extent has the covered part zeroed and
+   stays accessible RW. A reserved page never committed is unmapped (a reservation is address space only): an access faults. release(base): unmaps the reservation's committed pages and frees it (not a base: 0xCC01). Pages committed here are
+   owned: VM_PROTECT works on them. map_fixed over a reservation is refused (0xD401). thread_activity(tid, paused): a paused thread is
+   never picked (a pause of the running thread takes effect at once); unknown tid 0xE401, not started or ended 0xFA01.
+5c. ACCESS_FAULT_HANDLER (module 11 fn 10, args {handler, stack_top}, result 0; handler 0 unregisters; stack_top must be 16-byte
+   aligned, >= 816 and <= 4 GiB, else 0xCC01 and an event). Per calling thread. A data or instruction access fault (Unicorn's
+   UC_HOOK_MEM_INVALID: unmapped or protection, read/write/fetch) of a thread with a handler, not already inside it, is
+   delivered at once: the frame (FnvnxFaultFrame, 816 bytes) is written at stack_top - 816 from the exact register state at the
+   faulting instruction (pc = that instruction; pstate = NZCV only, bits 31..28), then x0 = frame, sp = frame, lr = a return stub
+   on the host page, pc = handler. reason is 0 (unmapped) or 1 (protection); 2 (alignment) is never produced: Unicorn raises no
+   alignment fault through the hook (an alignment trap ends the run as "uc-error"), so the machine cannot tell it. When the
+   handler returns to the stub: x0 == 0 loads x0..x30, sp, pc, NZCV, fpcr, fpsr, v0..v31 from the frame in guest memory and
+   resumes; x0 != 0 ends the run, reason "exit", exit_code x0. A fault of a thread inside its handler ends the run: reason
+   "fault", record with in_handler. A frame range that is not wholly guest memory the guest can write (not host page) ends the
+   run, reason "fault", kind "frame-unwritable". Each delivery is an event {kind "fault-handler", tid, access, reason, addr, pc}.
+   Faults of host calls on bad guest pointers ("host-access") are not thread faults and are not delivered.
 6. Bound and count: one UC_HOOK_BLOCK over the image region (installed only with limit_instructions or attach_icount)
    adds size/4 per block, feeds the Icount if attached, and stops at the first block boundary where the total >=
    limit_instructions: reason "limit", the same stop point on every run (the stopping block is counted).
@@ -31,10 +59,12 @@ Rules:
 """
 import struct
 
+from unicorn import arm64_const
+
 from unicorn import UC_ARCH_ARM64, UC_HOOK_BLOCK, UC_HOOK_CODE, UC_HOOK_MEM_INVALID, UC_HOOK_MEM_WRITE, UC_MODE_ARM, UC_PROT_ALL, \
     UC_PROT_EXEC, UC_PROT_READ, UC_PROT_WRITE, Uc, UcError
 from unicorn import unicorn_const as UCC
-from unicorn.arm64_const import UC_ARM64_REG_CPACR_EL1, UC_ARM64_REG_LR, UC_ARM64_REG_PC, UC_ARM64_REG_SP, \
+from unicorn.arm64_const import UC_ARM64_REG_CPACR_EL1, UC_ARM64_REG_FPCR, UC_ARM64_REG_FPSR, UC_ARM64_REG_LR, UC_ARM64_REG_NZCV, UC_ARM64_REG_PC, UC_ARM64_REG_SP, \
     UC_ARM64_REG_TPIDR_EL0, UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3, UC_ARM64_REG_X4
 
 import bootlayout
@@ -52,11 +82,20 @@ SLOTS = ["output_debug_string", "sleep_ns", "exit", "console_write", "console_fl
          "audio_open", "audio_submit", "audio_close", "pad_read", "pad_vibrate", "input_poll", "map_fixed",
          "ext_call"]
 API_SIZE = 0x30 + 8 * len(SLOTS)
-FNVNX_EXT_PLATFORM, FNVNX_PLAT_VM_PROTECT = 11, 8
+FNVNX_EXT_PLATFORM = 11
+# hostapi.h FNVNX_PLAT_* of module 11 (the header defines 1..7; VM_PROTECT = 8 is the loader's addition): fn -> (name, min args)
+FAULT_FRAME = 816
+PLATFORM_FNS = {1: ("cpu_boost", 1), 2: ("thread_activity", 2), 3: ("message", 2), 4: ("vm_reserve", 2), 5: ("vm_commit", 2),
+                6: ("vm_decommit", 2), 7: ("vm_release", 1), 8: ("vm_protect", 3),
+                10: ("access_fault_handler", 2)}
+VM_ALIGN, VM_FLOOR = 0x10000, 0x10000   # host_vm.inc FNVNX_VM_ALIGN; the guest's low 64 KiB stay unmapped. Forbidden ranges are plan data.
 ERR_INVALID_SIZE, ERR_INVALID_ADDRESS, ERR_INVALID_CURRENT_MEMORY = 0xCA01, 0xCC01, 0xD401
+ERR_INVALID_NEW_MEMORY_PERMISSION, ERR_INVALID_HANDLE, ERR_INVALID_STATE = 0xD801, 0xE401, 0xFA01
 ACCESS_KINDS = {UCC.UC_MEM_READ_UNMAPPED: "read-unmapped", UCC.UC_MEM_WRITE_UNMAPPED: "write-unmapped",
                 UCC.UC_MEM_FETCH_UNMAPPED: "fetch-unmapped", UCC.UC_MEM_WRITE_PROT: "write-protected",
                 UCC.UC_MEM_READ_PROT: "read-protected", UCC.UC_MEM_FETCH_PROT: "fetch-protected"}
+X_REGS = tuple(getattr(arm64_const, "UC_ARM64_REG_X%d" % i) for i in range(31))
+V_REGS = tuple(getattr(arm64_const, "UC_ARM64_REG_V%d" % i) for i in range(32))
 REGS = (UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3, UC_ARM64_REG_X4)
 
 
@@ -93,6 +132,8 @@ class VirtualClock:
 class Thread:
     def __init__(self, tid):
         self.tid, self.ctx, self.state, self.wait, self.result, self.resume_pc = tid, None, "new", None, 0, None
+        self.paused = False
+        self.fh, self.in_handler, self.frame = None, False, 0   # fault handler (handler, stack_top); inside it; its frame address
         self.entry = self.arg = 0   # new: new, ready, running, blocked, done; wait: ("addr", a, dl) / ("join", t) / ("sleep", dl)
 
 
@@ -115,6 +156,9 @@ class Machine:
             raise MachineError("stacks region 0x%x..0x%x is not %d x 0x%x" % (slo, shi, n_stacks, stack_size))
         self.stacks_top, self.stack_size, self.max_threads = shi, stack_size, n_stacks
         self.handlers = self._resolve(services)
+        self.plat = self._resolve_platform(services)
+        self.regions = sorted(reg.values())
+        self.vm_resv, self.vm_pages, self.vm_ext = {}, set(), []   # base -> size; committed page addresses; extents [lo, hi): one per commit gap (host_vm.inc)
         self.ext = {int(n[4:]): getattr(services, n) for n in dir(services) if n.startswith("ext_") and n[4:].isdigit()}
         uc = self.uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
         uc.reg_write(UC_ARM64_REG_CPACR_EL1, 3 << 20)   # FP/SIMD on
@@ -136,6 +180,7 @@ class Machine:
         self.host_page = hp = reg["host_page"][0]
         uc.mem_map(hp, PAGE, UC_PROT_ALL)
         self.stub_base, self.return_addr, self.thread_end = hp + 0x800, hp + 0xFF0, hp + 0xFF8
+        self.fault_ret, self.pending = hp + 0xFE0, None
         self.stubs = {self.stub_base + 4 * i: n for i, n in enumerate(SLOTS)}
         api = struct.pack("<IIII", 0x48584E46, 3, API_SIZE, 0)
         api += struct.pack("<QQQQ", ilo, ihi - ilo, reg["heap"][0], reg["heap"][1] - reg["heap"][0])
@@ -169,6 +214,16 @@ class Machine:
             h[n] = f
         if not callable(getattr(services, "bind", None)):
             raise MachineError("services has no bind(machine)")
+        return h
+
+    def _resolve_platform(self, services):
+        h = {}
+        for fn, (name, _n) in sorted(PLATFORM_FNS.items()):
+            f = getattr(services, "plat_" + name, None) or getattr(self, "_plat_" + name, None)
+            if not callable(f):
+                raise MachineError("module 11 fn %d (%s) is defined by the header but neither the machine nor services has "
+                                   "plat_%s" % (fn, name, name))
+            h[fn] = f
         return h
 
     # -- instruction bound and count
@@ -265,13 +320,18 @@ class Machine:
         """wholly guest-owned: inside the heap region and clear of given-away blocks, or inside map_fixed mappings"""
         if self.heap[0] <= lo and hi <= self.heap[1]:
             return not any(a < hi and lo < b for a, b in self.given)
-        return self._covered(lo, hi)
+        return self._covered(lo, hi) or self._vm_committed(lo, hi)
+
+    def _vm_committed(self, lo, hi):
+        return lo in self.vm_pages and all(p in self.vm_pages for p in range(lo, hi, PAGE))
 
     def map_fixed(self, addr, size, src):
         if size == 0 or size % PAGE:
             return self._refuse("map_fixed", addr, size, "size", ERR_INVALID_SIZE)
         if addr % PAGE or addr + size > 1 << 32:
             return self._refuse("map_fixed", addr, size, "address", ERR_INVALID_ADDRESS)
+        if any(addr < r + n and r < addr + size for r, n in self.vm_resv.items()):
+            return self._refuse("map_fixed", addr, size, "overlaps a VM reservation", ERR_INVALID_CURRENT_MEMORY)
         if not any(n != "keys" and lo <= addr and addr + size <= hi for n, lo, hi in self.free):
             return self._refuse("map_fixed", addr, size, "not wholly inside a mappable reserved range", ERR_INVALID_ADDRESS)
         if any(b > addr and addr + size > a for a, b, _p in self.uc.mem_regions()):
@@ -302,21 +362,207 @@ class Machine:
 
     def ext_call(self, module, fn, args, nargs):
         a = [struct.unpack("<Q", self.uc.mem_read(args + 8 * i, 8))[0] for i in range(nargs)] if nargs else []
-        if module == FNVNX_EXT_PLATFORM and fn == FNVNX_PLAT_VM_PROTECT:
-            if len(a) != 3:
-                raise MachineError("VM_PROTECT needs 3 arguments, the guest passed %d" % len(a))
-            addr, size, prot = a
-            if size == 0 or size % PAGE:
-                return self._refuse("vm_protect", addr, size, "size", ERR_INVALID_SIZE)
-            if addr % PAGE or addr + size > 1 << 32:
-                return self._refuse("vm_protect", addr, size, "address", ERR_INVALID_ADDRESS)
-            if not self._owned(addr, addr + size):
-                return self._refuse("vm_protect", addr, size, "pages the guest does not own", ERR_INVALID_CURRENT_MEMORY)
-            self.uc.mem_protect(addr, size, (UC_PROT_READ if prot & 1 else 0) | (UC_PROT_WRITE if prot & 2 else 0))
-            return 0
+        if module == FNVNX_EXT_PLATFORM and fn in PLATFORM_FNS:
+            name, need = PLATFORM_FNS[fn]
+            if len(a) < need:
+                raise MachineError("module 11 fn %d (%s) needs %d arguments, the guest passed %d" % (fn, name, need, len(a)))
+            return self.plat[fn](a)
         if module not in self.ext:
             raise ExtMissing(module, fn)
         return self.ext[module](fn, a)
+
+    # -- platform service, module 11 (rule 5b)
+    def _vm_blocked(self):
+        """sorted (lo, hi) of everything a reservation must not overlap"""
+        return sorted(self.regions + [(lo, hi) for _n, lo, hi in self.free] + self.mapped
+                      + [(b, b + n) for b, n in self.vm_resv.items()])
+
+    def _vm_resv_of(self, lo, hi):
+        return next((b for b, n in self.vm_resv.items() if b <= lo and hi <= b + n), None)
+
+    def _plat_vm_reserve(self, a):
+        hint, want = a[0], a[1]
+        if want == 0:
+            return self._refuse("vm_reserve", hint, want, "size 0", 0)
+        size = _up(want, VM_ALIGN)
+        blocked = self._vm_blocked()
+        if hint:
+            lo = hint & ~(VM_ALIGN - 1)
+            if lo == 0 or lo + size > 1 << 32:
+                return self._refuse("vm_reserve", hint, want, "address", 0)
+            if any(b > lo and lo + size > x for x, b in blocked):
+                return self._refuse("vm_reserve", hint, want, "overlaps a mapping, a free range or a reservation", 0)
+        else:
+            lo = VM_FLOOR
+            for x, b in blocked:
+                if lo < b and x < lo + size:
+                    lo = _up(b, VM_ALIGN)
+            if lo + size > 1 << 32:
+                return self._refuse("vm_reserve", hint, want, "no address space", 0)
+        self.vm_resv[lo] = size
+        return lo
+
+    def _vm_range(self, what, a):
+        addr, size = a[0], a[1]
+        if size == 0 or addr + size >= 1 << 64:
+            return None, self._refuse(what, addr, size, "size", ERR_INVALID_SIZE)
+        lo, hi = addr // PAGE * PAGE, _up(addr + size)
+        if self._vm_resv_of(lo, hi) is None:
+            return None, self._refuse(what, addr, size, "not inside one reservation", ERR_INVALID_ADDRESS)
+        return (lo, hi), 0
+
+    def _vm_runs(self, lo, hi, committed):
+        """maximal runs [x, y) of pages of [lo, hi) that are (not) committed"""
+        runs, p = [], lo
+        while p < hi:
+            if (p in self.vm_pages) == committed:
+                q = p
+                while q < hi and (q in self.vm_pages) == committed:
+                    q += PAGE
+                runs.append((p, q))
+                p = q
+            else:
+                p += PAGE
+        return runs
+
+    def _plat_vm_commit(self, a):
+        rng, res = self._vm_range("vm_commit", a)
+        if rng is None:
+            return res
+        lo, hi = rng
+        for x, y in self._vm_runs(lo, hi, True):
+            self.uc.mem_protect(x, y - x, UC_PROT_READ | UC_PROT_WRITE)
+        for x, y in self._vm_runs(lo, hi, False):
+            self.uc.mem_map(x, y - x, UC_PROT_READ | UC_PROT_WRITE)
+            self.vm_pages.update(range(x, y, PAGE))
+            self.vm_ext.append([x, y])
+        return 0
+
+    def _vm_decommit(self, lo, hi):
+        """host_vm.inc: an extent wholly inside [lo, hi) is unmapped (an access faults), a partly covered one has the covered part
+        zeroed and stays accessible RW"""
+        keep = []
+        for e in self.vm_ext:
+            x, y = e
+            if y <= lo or x >= hi:
+                keep.append(e)
+            elif lo <= x and y <= hi:
+                self.uc.mem_unmap(x, y - x)
+                self.vm_pages.difference_update(range(x, y, PAGE))
+            else:
+                s, t = max(x, lo), min(y, hi)
+                self.uc.mem_protect(s, t - s, UC_PROT_READ | UC_PROT_WRITE)
+                self.uc.mem_write(s, bytes(t - s))
+                keep.append(e)
+        self.vm_ext = keep
+
+    def _plat_vm_decommit(self, a):
+        rng, res = self._vm_range("vm_decommit", a)
+        if rng is None:
+            return res
+        self._vm_decommit(*rng)
+        return 0
+
+    def _plat_vm_release(self, a):
+        base = a[0]
+        if base not in self.vm_resv:
+            return self._refuse("vm_release", base, 0, "not the base of a reservation", ERR_INVALID_ADDRESS)
+        self._vm_decommit(base, base + self.vm_resv.pop(base))
+        return 0
+
+    def _plat_vm_protect(self, a):
+        addr, size, prot = a[:3]
+        if size == 0 or size % PAGE:
+            return self._refuse("vm_protect", addr, size, "size", ERR_INVALID_SIZE)
+        if addr % PAGE or addr + size > 1 << 32:
+            return self._refuse("vm_protect", addr, size, "address", ERR_INVALID_ADDRESS)
+        if prot & ~3:
+            return self._refuse("vm_protect", addr, size, "prot 0x%x has bits other than R and W" % prot,
+                                ERR_INVALID_NEW_MEMORY_PERMISSION)
+        if not self._owned(addr, addr + size):
+            return self._refuse("vm_protect", addr, size, "pages the guest does not own", ERR_INVALID_CURRENT_MEMORY)
+        self.uc.mem_protect(addr, size, (UC_PROT_READ if prot & 1 else 0) | (UC_PROT_WRITE if prot & 2 else 0))
+        return 0
+
+    def _plat_access_fault_handler(self, a):
+        handler, top = a[:2]
+        t = self.cur
+        if handler == 0:
+            t.fh = None
+            return 0
+        if top % 16 or top < FAULT_FRAME or top > 1 << 32:
+            return self._refuse("access_fault_handler", handler, top, "stack_top not 16-byte aligned or outside 816..4 GiB",
+                                ERR_INVALID_ADDRESS)
+        t.fh = (handler, top)
+        return 0
+
+    def _writable(self, lo, hi):
+        """[lo, hi) is wholly mapped writable guest memory, not the host page"""
+        if lo < self.host_page + PAGE and self.host_page < hi:
+            return False
+        while lo < hi:
+            r = next(((b, e) for b, e, pr in self.uc.mem_regions() if b <= lo <= e and pr & UC_PROT_WRITE), None)
+            if r is None:
+                return False
+            lo = r[1] + 1
+        return True
+
+    def _deliver_fault(self, t):
+        """rule 5c: build the frame from the thread's registers at the faulting instruction and enter its handler"""
+        uc, (access, addr, size) = self.uc, self.pending
+        self.pending = None
+        handler, top = t.fh
+        pc, fa = uc.reg_read(UC_ARM64_REG_PC), top - FAULT_FRAME
+        kind = 1 if access in (UCC.UC_MEM_WRITE_UNMAPPED, UCC.UC_MEM_WRITE_PROT) else 2 if access in (
+            UCC.UC_MEM_FETCH_UNMAPPED, UCC.UC_MEM_FETCH_PROT) else 0
+        reason = 0 if access in (UCC.UC_MEM_READ_UNMAPPED, UCC.UC_MEM_WRITE_UNMAPPED, UCC.UC_MEM_FETCH_UNMAPPED) else 1
+        if not self._writable(fa, top):
+            self.fault = dict(kind="frame-unwritable", addr=fa, size=FAULT_FRAME, pc=pc, lr=uc.reg_read(UC_ARM64_REG_LR), tid=t.tid)
+            return
+        f = struct.pack("<IIQQQQ", kind, reason, pc if kind == 2 else addr, pc, uc.reg_read(UC_ARM64_REG_SP),
+                        uc.reg_read(UC_ARM64_REG_NZCV) & 0xF0000000)
+        f += b"".join(struct.pack("<Q", uc.reg_read(r)) for r in X_REGS)
+        f += struct.pack("<II", uc.reg_read(UC_ARM64_REG_FPCR), uc.reg_read(UC_ARM64_REG_FPSR))
+        f += b"".join(struct.pack("<QQ", v & U64, v >> 64) for v in (uc.reg_read(r) for r in V_REGS))
+        uc.mem_write(fa, f.ljust(FAULT_FRAME, b"\0"))
+        self._event("fault-handler", access=ACCESS_KINDS.get(access), reason=reason, addr=addr, pc=pc)
+        uc.reg_write(UC_ARM64_REG_X0, fa)
+        uc.reg_write(UC_ARM64_REG_SP, fa & ~15)
+        uc.reg_write(UC_ARM64_REG_LR, self.fault_ret)
+        t.ctx, t.resume_pc, t.result, t.state = uc.context_save(), handler, fa, "ready"
+        t.in_handler, t.frame = True, fa
+
+    def _fault_return(self):
+        """the handler returned to the stub: 0 resumes from the frame, else the process ends with that value"""
+        uc, t = self.uc, self.cur
+        rv = uc.reg_read(UC_ARM64_REG_X0)
+        if rv:
+            self.exit(rv)
+            return
+        f = bytes(uc.mem_read(t.frame, FAULT_FRAME))
+        _k, _r, _a, pc, sp, pstate = struct.unpack_from("<IIQQQQ", f, 0)
+        for i, r in enumerate(X_REGS):
+            uc.reg_write(r, struct.unpack_from("<Q", f, 40 + 8 * i)[0])
+        fpcr, fpsr = struct.unpack_from("<II", f, 288)
+        uc.reg_write(UC_ARM64_REG_FPCR, fpcr)
+        uc.reg_write(UC_ARM64_REG_FPSR, fpsr)
+        for i, r in enumerate(V_REGS):
+            lo, hi = struct.unpack_from("<QQ", f, 296 + 16 * i)
+            uc.reg_write(r, lo | hi << 64)
+        uc.reg_write(UC_ARM64_REG_NZCV, pstate & 0xF0000000)
+        uc.reg_write(UC_ARM64_REG_SP, sp)
+        uc.reg_write(UC_ARM64_REG_PC, pc)
+        t.in_handler = False
+
+    def _plat_thread_activity(self, a):
+        tid, paused = a[0], a[1]
+        t = self.threads.get(tid)
+        if t is None:
+            return self._refuse("thread_activity", tid, paused, "no such thread", ERR_INVALID_HANDLE)
+        if t.state in ("new", "done"):
+            return self._refuse("thread_activity", tid, paused, "thread is %s" % t.state, ERR_INVALID_STATE)
+        t.paused = bool(paused)
+        return (("yield",), 0) if t is self.cur and t.paused else 0
 
     # -- threads and blocking
     def thread_create(self, entry, arg):
@@ -380,7 +626,7 @@ class Machine:
             start = (self.order.index(self.last) + 1) if self.last in self.order else 0
             for i in range(len(live)):
                 t = live[(start + i) % len(live)]
-                if t.state == "ready":
+                if t.state == "ready" and not t.paused:
                     return t
             dl = [(t.wait[-1], t) for t in live if t.state == "blocked" and t.wait[0] in ("sleep", "addr")
                   and t.wait[-1] is not None]
@@ -395,9 +641,14 @@ class Machine:
 
     # -- host-call dispatch
     def _on_bad(self, uc, access, addr, size, value, _):
+        t = self.cur
+        if self.fault is None and t is not None and t.fh and not t.in_handler:
+            self.pending = (access, addr, size)   # delivered by run() once Unicorn has stopped with the error
+            return False
         if self.fault is None:
             self.fault = dict(kind=ACCESS_KINDS.get(access, "access-%d" % access), addr=addr, size=size,
-                              pc=uc.reg_read(UC_ARM64_REG_PC), lr=uc.reg_read(UC_ARM64_REG_LR), tid=self.tid())
+                              pc=uc.reg_read(UC_ARM64_REG_PC), lr=uc.reg_read(UC_ARM64_REG_LR), tid=self.tid(),
+                              **({"in_handler": True} if t is not None and t.in_handler else {}))
         return False
 
     def _stop_fault(self, kind, addr=None, size=None):
@@ -407,6 +658,12 @@ class Machine:
         self.uc.emu_stop()
 
     def _on_code(self, uc, addr, size, _):
+        if addr == self.fault_ret:
+            try:
+                self._fault_return()
+            except UcError as e:
+                self._stop_fault("host-access")
+            return
         if addr == self.thread_end:
             self._block(("done",), 0)
             return
@@ -433,11 +690,11 @@ class Machine:
         uc.reg_write(UC_ARM64_REG_X0, res & U64)
         uc.reg_write(UC_ARM64_REG_PC, uc.reg_read(UC_ARM64_REG_LR))
         if self.exit_code is None and self.calls - self.slice_calls0 >= self.hc_slice \
-                and any(x is not self.cur and x.state == "ready" for x in self.threads.values()):
+                and any(x is not self.cur and x.state == "ready" and not x.paused for x in self.threads.values()):
             self._block(("yield",), res & U64)
 
     def _waits(self):
-        return [dict(tid=t.tid, state=t.state, wait=list(t.wait) if t.wait else None)
+        return [dict(tid=t.tid, state=t.state, wait=list(t.wait) if t.wait else None, **({"paused": True} if t.paused else {}))
                 for t in sorted(self.threads.values(), key=lambda x: x.tid) if t.state != "done"]
 
     def run(self):
@@ -478,7 +735,10 @@ class Machine:
             try:
                 uc.emu_start(t.resume_pc, self.return_addr)
             except UcError as e:
-                self._stop_fault("uc-error: %s" % e)
+                if self.pending is not None:
+                    self._deliver_fault(t)
+                else:
+                    self._stop_fault("uc-error: %s" % e)
                 continue
             if self.cur is t and self.fault is None and not self.limit_hit and self.exit_code is None \
                     and not self.ext_missing:
