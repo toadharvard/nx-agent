@@ -513,21 +513,16 @@ static int acquire(struct w32_obj *o, DWORD me)
 static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32_t pc);
 
 /* The pseudo handles GetCurrentProcess() / GetCurrentThread() are waitable (SYNCHRONIZE) and not signaled while
- * they run; the standard handles are file handles (always signaled). One static, never-freed object stands for the
+ * they run; there are no standard handles (F5). One static, never-freed object stands for the
  * unsignaled pseudo handles; the others are rejected by type (W32_FIND, W32_HEAP carry no SYNCHRONIZE access). */
 #define W32_PSEUDO_RUNNING 100
 static struct w32_obj g_running_obj = { W32_MAGIC, W32_PSEUDO_RUNNING, 1 << 30, { &g_running_obj.waiters, &g_running_obj.waiters, NULL }, NULL };
-static struct w32_obj g_std_obj = { W32_MAGIC, W32_FILE, 1 << 30, { &g_std_obj.waiters, &g_std_obj.waiters, NULL }, NULL };
 
 static struct w32_obj *wait_target(HANDLE h)
 {
     if (h == W32_PSEUDO_PROCESS || h == W32_PSEUDO_THREAD) {
         w32_obj_ref(&g_running_obj);
         return &g_running_obj;
-    }
-    if (w32_is_std_handle && w32_is_std_handle(h)) {
-        w32_obj_ref(&g_std_obj);
-        return &g_std_obj;
     }
     struct w32_obj *o = w32_obj_get_ref(h, 0);
     if (o && o->type != W32_EVENT && o->type != W32_MUTEX && o->type != W32_SEMAPHORE && o->type != W32_THREAD &&

@@ -443,6 +443,7 @@ TEST(fc_misc_size_flush)
     CHECK(GetLastError() != 0);
     CloseHandle(h);
     rm_host(D "big.bin");
-    CHECK(FlushFileBuffers(GetStdHandle(STD_OUTPUT_HANDLE)));
-    CHECK(FlushFileBuffers(GetStdHandle(STD_ERROR_HANDLE)));
+    SetLastError(0);
+    CHECK(!FlushFileBuffers(GetStdHandle(STD_OUTPUT_HANDLE)));   /* no standard handles (F5): NULL is no handle */
+    CHECK_EQ(GetLastError(), ERROR_INVALID_HANDLE);
 }

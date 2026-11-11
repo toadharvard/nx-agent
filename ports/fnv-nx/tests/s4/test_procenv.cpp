@@ -303,28 +303,19 @@ TEST(procenv_thread_stack)
     CHECK(thread_stack(4096) >= 256 * 1024);  /* small requests are raised: the engine's task threads recurse */
 }
 
-/* 8. standard handles: a GUI process has no console, the CRT's _ioinit asks and writes with WriteFile */
+/* 8. standard handles: a GUI process has no console and no standard handles (ENV_TRUTH F5) */
 TEST(procenv_std_handles)
 {
     DWORD ids[] = { STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE };
     for (DWORD id : ids) {
-        HANDLE h = GetStdHandle(id);
-        CHECK(h != INVALID_HANDLE_VALUE);   /* _ioinit treats NULL / INVALID as "no handle" and skips the stream */
-        CHECK(h != NULL);
-        CHECK_EQ(GetFileType(h), FILE_TYPE_CHAR);
+        CHECK(GetStdHandle(id) == NULL);   /* _ioinit treats NULL as "no handle" and skips the stream */
         DWORD mode = 0;
-        CHECK(!GetConsoleMode(h, &mode));   /* not a console */
+        CHECK(!GetConsoleMode(GetStdHandle(id), &mode));
     }
-    CHECK(GetStdHandle(STD_INPUT_HANDLE) != GetStdHandle(STD_OUTPUT_HANDLE));
     DWORD put = 99;
-    CHECK(WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "stdout line\r\n", 13, &put, NULL));
-    CHECK_EQ(put, 13);
-    put = 99;
-    CHECK(WriteFile(GetStdHandle(STD_ERROR_HANDLE), "partial", 7, &put, NULL));
-    CHECK_EQ(put, 7);
-    CHECK(WriteFile(GetStdHandle(STD_ERROR_HANDLE), "", 0, &put, NULL));
-    char c;
-    CHECK(ReadFile(GetStdHandle(STD_INPUT_HANDLE), &c, 1, &put, NULL) && put == 0);   /* end of file */
+    SetLastError(0);
+    CHECK(!WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "stdout line\r\n", 13, &put, NULL));
+    CHECK_EQ(GetLastError(), ERROR_INVALID_HANDLE);
     SetLastError(0);
     CHECK_EQ(GetFileType((HANDLE)(uintptr_t)0x7777), FILE_TYPE_UNKNOWN);
     CHECK(GetLastError() != ERROR_SUCCESS);

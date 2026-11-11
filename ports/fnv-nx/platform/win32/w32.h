@@ -285,11 +285,19 @@ BOOL EnumSystemLocalesA(LOCALE_ENUMPROCA, DWORD);
 LCID GetUserDefaultLCID(void);
 BOOL GetUserNameA(LPSTR, LPDWORD);           /* advapi32 */
 DWORD GetClassLongA(HWND, int);              /* user32 */
+BOOL GetVersionExA(void *);                  /* sysinfo.cpp */
+DWORD GetVersion(void);
+UINT GetSystemDirectoryA(LPSTR, UINT);
+UINT GetWindowsDirectoryA(LPSTR, UINT);
+BOOL IsProcessorFeaturePresent(DWORD);
+UINT SetErrorMode(UINT);
+BOOL IsDBCSLeadByte(BYTE);
+DWORD ExpandEnvironmentStringsA(LPCSTR, LPSTR, DWORD);
+BOOL SetConsoleCtrlHandler(BOOL (*)(DWORD), BOOL);   /* crt_kernel32.cpp */
+LSTATUS RegOpenKeyA(HKEY, LPCSTR, PHKEY);            /* advapi32 (registry.cpp) */
 }
-/* the standard handles (GetStdHandle): fixed pseudo values outside the handle table. ReadFile/WriteFile/CloseHandle
- * route them here: -1 = not a standard handle, else the BOOL result */
-/* crt_kernel32.cpp; weak so harnesses that link part of platform/win32 (tests/s15/mtqemu) need not take it */
-int w32_std_io(HANDLE h, int write, void *buf, DWORD n, LPDWORD done) __attribute__((weak));
-int w32_is_std_handle(HANDLE h) __attribute__((weak));
+/* the platform's fixed Windows directories (sysinfo.cpp, ENV_TRUTH P5) */
+const char *w32_system_dir(void);            /* "C:\\Windows\\system32" */
+const char *w32_windows_dir(void);           /* "C:\\Windows" */
 
 #endif

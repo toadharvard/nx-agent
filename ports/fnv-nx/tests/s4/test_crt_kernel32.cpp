@@ -111,8 +111,12 @@ TEST(crt_k32_code_pages)
 {
     CHECK_EQ(GetACP(), 1252);
     CHECK_EQ(GetOEMCP(), 437);   /* the environment: OEM code page 437 */
-    CHECK_EQ(GetConsoleCP(), 1252);
-    CHECK_EQ(GetConsoleOutputCP(), 1252);
+    SetLastError(0);
+    CHECK_EQ(GetConsoleCP(), 0);   /* no console (F5) */
+    CHECK_EQ(GetLastError(), ERROR_INVALID_HANDLE);
+    SetLastError(0);
+    CHECK_EQ(GetConsoleOutputCP(), 0);
+    CHECK_EQ(GetLastError(), ERROR_INVALID_HANDLE);
     CHECK(IsValidCodePage(1252));
     CHECK(IsValidCodePage(CP_UTF8));
     CHECK(!IsValidCodePage(932));
@@ -303,33 +307,38 @@ TEST(crt_k32_time_zone)
     CHECK_EQ(tz.DaylightDate.wMonth, 0);
 }
 
+static unsigned _wtou(const WCHAR *w)
+{
+    unsigned v = 0;
+    for (; *w >= '0' && *w <= '9'; w++)
+        v = v * 10 + (unsigned)(*w - '0');
+    return v;
+}
+
 TEST(crt_k32_std_handles)
 {
-    HANDLE in = GetStdHandle(STD_INPUT_HANDLE), out = GetStdHandle(STD_OUTPUT_HANDLE),
-           err = GetStdHandle(STD_ERROR_HANDLE);
-    CHECK(in && out && err && in != INVALID_HANDLE_VALUE && out != in && err != out);
-    CHECK_EQ(GetFileType(out), FILE_TYPE_CHAR);
-    CHECK_EQ(GetFileType(in), FILE_TYPE_CHAR);
-    DWORD mode = 7;
+    /* F5: a process without a console has no standard handles; the old pseudo handles are plain invalid values */
+    DWORD ids[] = { STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE };
+    for (DWORD id : ids)
+        CHECK(GetStdHandle(id) == NULL);
+    HANDLE out = NULL, in = NULL, err = NULL;
+    DWORD mode = 7, put = 0;
     SetLastError(0);
     CHECK(!GetConsoleMode(out, &mode));
     CHECK_EQ(GetLastError(), ERROR_INVALID_HANDLE);
-    DWORD put = 0;
-    CHECK(WriteFile(out, "s4 crt_k32: stdout line\r\n", 25, &put, NULL));
-    CHECK_EQ(put, 25);
-    CHECK(WriteFile(err, "s4 crt_k32: ", 12, &put, NULL));
-    CHECK(WriteConsoleA(err, "stderr ", 7, &put, NULL));
-    CHECK_EQ(put, 7);
-    CHECK(WriteConsoleW(err, L"line \u00e9\n", 7, &put, NULL));
-    CHECK_EQ(put, 7);
-    char buf[4];
-    DWORD got = 9;
-    CHECK(ReadFile(in, buf, 4, &got, NULL));   /* end of file */
-    CHECK_EQ(got, 0);
-    CHECK(!WriteFile(in, "x", 1, &put, NULL));
-    CHECK(!WriteConsoleA(in, "x", 1, &put, NULL));
-    CHECK(CloseHandle(out));   /* a no-op */
-    CHECK_EQ(GetFileType(out), FILE_TYPE_CHAR);
+    for (unsigned v = 3; v <= 0xB; v += 4) {   /* the former pseudo values */
+        HANDLE h = (HANDLE)(uintptr_t)v;
+        SetLastError(0);
+        CHECK(!WriteFile(h, "x", 1, &put, NULL));
+        CHECK_EQ(GetLastError(), ERROR_INVALID_HANDLE);
+        CHECK(!ReadFile(h, &mode, 1, &put, NULL));
+        CHECK(!CloseHandle(h));
+        CHECK(!FlushFileBuffers(h));
+        CHECK_EQ(WaitForSingleObject(h, 0), WAIT_FAILED);
+        CHECK_EQ(GetFileType(h), FILE_TYPE_UNKNOWN);
+    }
+    CHECK(!WriteConsoleA(err, "stderr ", 7, &put, NULL));
+    CHECK(!WriteConsoleW(in, L"line \u00e9\n", 7, &put, NULL));
     SetLastError(0);
     CHECK(GetStdHandle(5) == INVALID_HANDLE_VALUE);
     CHECK_EQ(GetLastError(), ERROR_INVALID_HANDLE);
@@ -341,7 +350,7 @@ TEST(crt_k32_std_handles)
     CHECK(SetStdHandle(STD_OUTPUT_HANDLE, f));
     CHECK(GetStdHandle(STD_OUTPUT_HANDLE) == f);
     CHECK(SetStdHandle(STD_OUTPUT_HANDLE, out));
-    CHECK(GetStdHandle(STD_OUTPUT_HANDLE) == out);
+    CHECK(GetStdHandle(STD_OUTPUT_HANDLE) == NULL);
     CHECK(!SetStdHandle(0, out));
     CloseHandle(f);
     SetLastError(0);
@@ -474,26 +483,50 @@ TEST(crt_k32_environment)
     CHECK_EQ(count, base_count + 2);
     CHECK_EQ(total, base_total + strlen("FNVNX_K32=on\xe9") + 1 + strlen("OTHER=2") + 1);
     FreeEnvironmentStringsA(e);
+    CHECK(SetEnvironmentVariableA("=FNVNX_Z", "1"));   /* a name starting with '=' sorts first */
     WCHAR *w = GetEnvironmentStringsW();
     CHECK(w != NULL);
     if (w) {
-        const WCHAR *last = w, *prev = w;   /* the two set above are the last two, in the order set */
+        CHECK_EQ(w[0], '=');
+        /* the block is sorted case-insensitively by name; the variables set above are found by name */
+        const WCHAR *prev = NULL, *mine = NULL;
+        bool sorted = true, nproc = false;
         for (const WCHAR *q = w; *q; q += w16len(q) + 1) {
-            prev = last;
-            last = q;
+            if (prev) {
+                size_t i = 0;
+                auto up = [](WCHAR c) { return c >= 'a' && c <= 'z' ? c - 32 : (int)c; };
+                while (prev[i] && prev[i] != '=' && up(prev[i]) == up(q[i]))
+                    i++;
+                int x = prev[i] == '=' ? 0 : up(prev[i]), y = q[i] == '=' ? 0 : up(q[i]);
+                if (x > y)
+                    sorted = false;
+            }
+            if (!memcmp(q, L"FNVNX_K32=on", 12 * sizeof(WCHAR)) && q[12] == 0xE9)
+                mine = q;
+            if (!memcmp(q, L"NUMBER_OF_PROCESSORS=", 21 * sizeof(WCHAR))) {
+                SYSTEM_INFO si;
+                GetSystemInfo(&si);
+                nproc = (unsigned)_wtou(q + 21) == (unsigned)si.dwNumberOfProcessors;   /* the one source: GetSystemInfo */
+            }
+            prev = q;
         }
-        CHECK_EQ(w16len(prev), 13);
-        CHECK_EQ(prev[12], 0xE9);
-        CHECK_EQ(w16len(last), 7);
+        CHECK(sorted);
+        CHECK(nproc);
+        CHECK(mine != NULL);
+        CHECK(GetEnvironmentVariableA("NUMBER_OF_PROCESSORS", buf, 16) > 0);
+        SYSTEM_INFO si2;
+        GetSystemInfo(&si2);
+        CHECK_EQ(atoi(buf), (int)si2.dwNumberOfProcessors);
         /* the CRT sizes the block by WideCharToMultiByte up to the double NUL */
         const WCHAR *q = w;
         while (*q)
             q += w16len(q) + 1;
-        CHECK_EQ(WideCharToMultiByte(CP_ACP, 0, w, (int)(q - w + 1), NULL, 0, NULL, NULL), (int)total + 1);
+        CHECK_EQ(WideCharToMultiByte(CP_ACP, 0, w, (int)(q - w + 1), NULL, 0, NULL, NULL), (int)total + 1 + 11);   /* + "=FNVNX_Z=1" */
     }
     CHECK(FreeEnvironmentStringsW(w));
     CHECK(SetEnvironmentVariableA("FNVNX_K32", NULL));
     CHECK(SetEnvironmentVariableA("OTHER", NULL));
+    CHECK(SetEnvironmentVariableA("=FNVNX_Z", NULL));
     CHECK(!SetEnvironmentVariableA("NEVER_SET", NULL));   /* deleting what is not there fails */
     CHECK_EQ(GetLastError(), ERROR_ENVVAR_NOT_FOUND);
     CHECK_EQ(GetEnvironmentVariableA("FNVNX_K32", buf, 16), 0);

@@ -408,9 +408,6 @@ static struct w32_file *io_file(HANDLE h, LPDWORD count, LPOVERLAPPED ov, DWORD 
 
 extern "C" BOOL ReadFile(HANDLE h, LPVOID buf, DWORD n, LPDWORD got, LPOVERLAPPED ov)
 {
-    int std = w32_std_io ? w32_std_io(h, 0, buf, n, got) : -1;   /* GetStdHandle's pseudo handles (crt_kernel32.cpp) */
-    if (std >= 0)
-        return std;
     struct w32_file *f = io_file(h, got, ov, ACC_READ);
     if (!f)
         return FALSE;
@@ -451,9 +448,6 @@ extern "C" BOOL ReadFile(HANDLE h, LPVOID buf, DWORD n, LPDWORD got, LPOVERLAPPE
 
 extern "C" BOOL WriteFile(HANDLE h, LPCVOID buf, DWORD n, LPDWORD put, LPOVERLAPPED ov)
 {
-    int std = w32_std_io ? w32_std_io(h, 1, (void *)buf, n, put) : -1;
-    if (std >= 0)
-        return std;
     struct w32_file *f = io_file(h, put, ov, ACC_WRITE);
     if (!f)
         return FALSE;
@@ -568,8 +562,6 @@ extern "C" DWORD GetFileSize(HANDLE h, LPDWORD hi)
 
 extern "C" BOOL FlushFileBuffers(HANDLE h)
 {
-    if (w32_is_std_handle && w32_is_std_handle(h)) /* console/pipe pseudo handles: nothing buffered here */
-        return TRUE;
     struct w32_file *f = file_of(h);
     if (!f)
         return FALSE;

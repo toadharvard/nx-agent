@@ -332,6 +332,18 @@ extern "C" LSTATUS RegOpenKeyExA(HKEY k, LPCSTR sub, DWORD o, REGSAM s, PHKEY ou
     try { return do_open(k, sub, s, out, false, 0, NULL); } catch (const std::bad_alloc &) { return ERROR_NOT_ENOUGH_MEMORY; }
 }
 
+/* the 16-bit-era wrapper: no subkey (NULL or empty) hands back the same key handle, else RegOpenKeyExA with
+ * MAXIMUM_ALLOWED access */
+extern "C" LSTATUS RegOpenKeyA(HKEY k, LPCSTR sub, PHKEY out)
+{
+    if (!out) return ERROR_INVALID_PARAMETER;
+    if (!sub || !*sub) {
+        *out = k;
+        return ERROR_SUCCESS;
+    }
+    return RegOpenKeyExA(k, sub, 0, 0x02000000u, out);
+}
+
 extern "C" LSTATUS RegCreateKeyExA(HKEY k, LPCSTR sub, DWORD r, LPSTR c, DWORD o, REGSAM s, void *sa, PHKEY out, LPDWORD disp)
 {
     W32_UNUSED(r); W32_UNUSED(c); W32_UNUSED(sa);

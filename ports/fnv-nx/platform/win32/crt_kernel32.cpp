@@ -11,12 +11,11 @@
  * CompareString orders by case-folded code unit, lower case before upper case on a tie (as Windows' "a" < "A"),
  * and LCMAP_SORTKEY produces keys whose memcmp order is that of CompareString.
  *
- * The standard handles are three pseudo values outside the handle table (not multiples of 4): output and error
- * go to the debug log line by line, input reads as end of file. They are character devices without a console
- * (GetFileType FILE_TYPE_CHAR, GetConsoleMode fails), so the CRT writes them with WriteFile. A Windows GUI process
- * without a console would have NULL standard handles and lose stdout; here printf reaches the log. */
+ * There is no console and no standard handle (ENV_TRUTH F5): as in a Windows GUI process GetStdHandle gives NULL until
+ * SetStdHandle sets one, and every console call fails with ERROR_INVALID_HANDLE. */
 #include "w32.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -29,8 +28,19 @@ static const uint16_t k1252_hi[32] = {
 
 static inline unsigned w1252(unsigned char b) { return b >= 0x80 && b < 0xA0 ? k1252_hi[b - 0x80] : b; }
 
-extern "C" UINT GetConsoleCP(void) { return 1252; }
-extern "C" UINT GetConsoleOutputCP(void) { return 1252; }
+/* no console object exists in this process: the console code pages are those of the attached console, of which
+ * there is none */
+extern "C" UINT GetConsoleCP(void)
+{
+    SetLastError(ERROR_INVALID_HANDLE);
+    return 0;
+}
+
+extern "C" UINT GetConsoleOutputCP(void)
+{
+    SetLastError(ERROR_INVALID_HANDLE);
+    return 0;
+}
 
 extern "C" DWORD GetTimeZoneInformation(LPTIME_ZONE_INFORMATION tz)
 {
@@ -44,73 +54,17 @@ extern "C" DWORD GetTimeZoneInformation(LPTIME_ZONE_INFORMATION tz)
     return TIME_ZONE_ID_UNKNOWN;
 }
 
-/* ---- standard handles */
-#define STD_IN ((HANDLE)(uintptr_t)0x3)
-#define STD_OUT ((HANDLE)(uintptr_t)0x7)
-#define STD_ERR ((HANDLE)(uintptr_t)0xB)
-static HANDLE g_std[3] = { STD_IN, STD_OUT, STD_ERR };
-struct std_line { char buf[512]; size_t n; };
-static std_line g_lines[2];
-static os_lock_t g_std_lock;
-
-int w32_is_std_handle(HANDLE h) { return h == STD_IN || h == STD_OUT || h == STD_ERR; }
+/* ---- standard handles: NULL (none) until SetStdHandle sets one; the value is not checked, as on Windows */
+static HANDLE g_std[3];
 
 static int std_index(DWORD which)
 {
     switch ((uint32_t)W32_DW(which)) {
-    case 0xFFFFFFF6u: return 0;
-    case 0xFFFFFFF5u: return 1;
-    case 0xFFFFFFF4u: return 2;
+    case 0xFFFFFFF6u: return 0;   /* STD_INPUT_HANDLE */
+    case 0xFFFFFFF5u: return 1;   /* STD_OUTPUT_HANDLE */
+    case 0xFFFFFFF4u: return 2;   /* STD_ERROR_HANDLE */
     default: return -1;
     }
-}
-
-static void std_emit(std_line *l)
-{
-    if (l->n && l->buf[l->n - 1] == '\r')
-        l->n--;
-    l->buf[l->n] = 0;
-    os_debug_print(l->buf);
-    l->n = 0;
-}
-
-static void std_write(HANDLE h, const char *p, size_t n)
-{
-    std_line *l = &g_lines[h == STD_ERR];
-    os_lock(&g_std_lock);
-    for (size_t i = 0; i < n; i++) {
-        if (p[i] == '\n') {
-            std_emit(l);
-            continue;
-        }
-        l->buf[l->n++] = p[i];
-        if (l->n == sizeof l->buf - 1)
-            std_emit(l);
-    }
-    os_unlock(&g_std_lock);
-}
-
-int w32_std_io(HANDLE h, int write, void *buf, DWORD n, LPDWORD done)
-{
-    if (!w32_is_std_handle(h))
-        return -1;
-    if (done)
-        *done = 0;
-    if (h == STD_IN) {
-        if (write) {
-            SetLastError(ERROR_ACCESS_DENIED);
-            return FALSE;
-        }
-        return TRUE;   /* end of file */
-    }
-    if (!write) {
-        SetLastError(ERROR_ACCESS_DENIED);
-        return FALSE;
-    }
-    std_write(h, (const char *)buf, W32_DW(n));
-    if (done)
-        *done = W32_DW(n);
-    return TRUE;
 }
 
 extern "C" HANDLE GetStdHandle(DWORD which)
@@ -120,7 +74,7 @@ extern "C" HANDLE GetStdHandle(DWORD which)
         SetLastError(ERROR_INVALID_HANDLE);
         return INVALID_HANDLE_VALUE;
     }
-    return g_std[i];
+    return __atomic_load_n(&g_std[i], __ATOMIC_SEQ_CST);
 }
 
 extern "C" BOOL SetStdHandle(DWORD which, HANDLE h)
@@ -130,15 +84,13 @@ extern "C" BOOL SetStdHandle(DWORD which, HANDLE h)
         SetLastError(ERROR_INVALID_HANDLE);
         return FALSE;
     }
-    g_std[i] = h;
+    __atomic_store_n(&g_std[i], h, __ATOMIC_SEQ_CST);
     return TRUE;
 }
 
 extern "C" DWORD GetFileType(HANDLE h)
 {
-    if (w32_is_std_handle(h))
-        return FILE_TYPE_CHAR;
-    struct w32_obj *o = w32_obj_get(h, 0);   /* ERROR_INVALID_HANDLE when bad */
+    struct w32_obj *o = w32_obj_get(h, 0);   /* ERROR_INVALID_HANDLE when bad (NULL included) */
     if (!o)
         return FILE_TYPE_UNKNOWN;
     if (o->type == W32_FILE)
@@ -147,49 +99,64 @@ extern "C" DWORD GetFileType(HANDLE h)
     return FILE_TYPE_UNKNOWN;
 }
 
+/* the console functions act on console handles; the process has no console object, so no handle is one */
 extern "C" BOOL GetConsoleMode(HANDLE h, LPDWORD mode)
 {
     W32_UNUSED(mode);
     W32_UNUSED(h);
-    SetLastError(ERROR_INVALID_HANDLE);   /* no console: the standard handles are plain character devices */
+    SetLastError(ERROR_INVALID_HANDLE);
     return FALSE;
 }
 
 extern "C" BOOL WriteConsoleA(HANDLE h, const void *buf, DWORD n, LPDWORD put, LPVOID reserved)
 {
-    W32_UNUSED(reserved);
-    if (put)
-        *put = 0;
-    if (h != STD_OUT && h != STD_ERR) {
-        SetLastError(ERROR_INVALID_HANDLE);
-        return FALSE;
-    }
-    std_write(h, (const char *)buf, W32_DW(n));
-    if (put)
-        *put = W32_DW(n);
-    return TRUE;
+    W32_UNUSED(h); W32_UNUSED(buf); W32_UNUSED(n); W32_UNUSED(put); W32_UNUSED(reserved);
+    SetLastError(ERROR_INVALID_HANDLE);
+    return FALSE;
 }
 
 extern "C" BOOL WriteConsoleW(HANDLE h, const void *buf, DWORD n, LPDWORD put, LPVOID reserved)
 {
-    W32_UNUSED(reserved);
-    if (put)
-        *put = 0;
-    if (h != STD_OUT && h != STD_ERR) {
-        SetLastError(ERROR_INVALID_HANDLE);
-        return FALSE;
+    W32_UNUSED(h); W32_UNUSED(buf); W32_UNUSED(n); W32_UNUSED(put); W32_UNUSED(reserved);
+    SetLastError(ERROR_INVALID_HANDLE);
+    return FALSE;
+}
+
+typedef BOOL (*ctrl_handler_fn)(DWORD);
+static ctrl_handler_fn *g_ctrl;   /* the handler list; most recently added first on delivery (none is delivered) */
+static size_t g_nctrl;
+static bool g_ctrl_ignore;        /* SetConsoleCtrlHandler(NULL, TRUE) */
+static os_lock_t g_ctrl_lock;
+
+extern "C" BOOL SetConsoleCtrlHandler(ctrl_handler_fn fn, BOOL add)
+{
+    BOOL r = TRUE;
+    os_lock(&g_ctrl_lock);
+    if (!fn) {
+        g_ctrl_ignore = add != 0;
+    } else if (add) {
+        ctrl_handler_fn *n = (ctrl_handler_fn *)realloc(g_ctrl, (g_nctrl + 1) * sizeof *n);
+        if (n) {
+            g_ctrl = n;
+            g_ctrl[g_nctrl++] = fn;
+        } else {
+            SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+            r = FALSE;
+        }
+    } else {
+        size_t i = g_nctrl;
+        while (i && g_ctrl[i - 1] != fn)
+            i--;
+        if (!i) {
+            SetLastError(ERROR_INVALID_PARAMETER);
+            r = FALSE;
+        } else {
+            memmove(g_ctrl + i - 1, g_ctrl + i, (g_nctrl - i) * sizeof *g_ctrl);
+            g_nctrl--;
+        }
     }
-    const WCHAR *w = (const WCHAR *)buf;
-    for (DWORD i = 0, cnt = W32_DW(n); i < cnt;) {   /* in chunks, as the log's code page (1252) */
-        char tmp[256];
-        int k = (int)(cnt - i < sizeof tmp ? cnt - i : sizeof tmp);
-        WideCharToMultiByte(CP_ACP, 0, w + i, k, tmp, k, NULL, NULL);
-        std_write(h, tmp, (size_t)k);
-        i += (DWORD)k;
-    }
-    if (put)
-        *put = W32_DW(n);
-    return TRUE;
+    os_unlock(&g_ctrl_lock);
+    return r;
 }
 
 extern "C" UINT SetHandleCount(UINT n) { return n; }
@@ -334,32 +301,81 @@ static size_t g_nenv;
 static os_lock_t g_env_lock;
 static bool g_env_seeded;
 
-static const char *const ENV_DEFAULTS[] = {
-    "ALLUSERSPROFILE=C:\\ProgramData", "APPDATA=C:\\Users\\Player\\AppData\\Roaming",
-    "COMPUTERNAME=FNVNX", "ComSpec=C:\\Windows\\System32\\cmd.exe",
-    "HOMEDRIVE=C:", "HOMEPATH=\\Users\\Player",
-    "LOCALAPPDATA=C:\\Users\\Player\\AppData\\Local", "NUMBER_OF_PROCESSORS=4", "OS=Windows_NT",
-    "PATH=C:\\Windows\\System32;C:\\Windows", "PATHEXT=.COM;.EXE;.BAT;.CMD",
-    "PROCESSOR_ARCHITECTURE=x86", "ProgramData=C:\\ProgramData", "ProgramFiles=C:\\Program Files",
-    "SystemDrive=C:", "SystemRoot=C:\\Windows", "TEMP=C:\\Users\\Player\\AppData\\Local\\Temp",
-    "TMP=C:\\Users\\Player\\AppData\\Local\\Temp", "USERNAME=Player", "USERPROFILE=C:\\Users\\Player",
-    "windir=C:\\Windows",
-};
+/* a variable's name for ordering: up to its '=', searched after the first character so that the "=C:=..." drive
+ * variables keep their leading '='; compared by upper-case 1252 letters, as the Windows environment block is kept */
+static unsigned env_up(unsigned char c)
+{
+    if (c >= 'a' && c <= 'z')
+        return c - 32u;
+    if (c >= 0xE0 && c != 0xF7 && c != 0xFF)
+        return c - 32u;   /* Latin-1 small letters */
+    return c;
+}
 
-/* caller holds the lock */
+static int env_cmp(const char *a, const char *b)
+{
+    int ea = a[0] == '=', eb = b[0] == '=';
+    if (ea != eb)
+        return eb - ea;   /* variables whose name starts with '=' come first */
+    for (size_t i = (size_t)ea;; i++) {
+        unsigned x = a[i] == '=' ? 0 : env_up((unsigned char)a[i]), y = b[i] == '=' ? 0 : env_up((unsigned char)b[i]);
+        if (x != y)
+            return x < y ? -1 : 1;
+        if (!x)
+            return 0;
+    }
+}
+
+static int env_qsort_cmp(const void *a, const void *b) { return env_cmp(*(const char *const *)a, *(const char *const *)b); }
+
+/* the session's own variables, every value derived from the platform's one source for it: the processor count
+ * from GetSystemInfo (P1), the directories from the path layer (F1/F2/P5). Caller holds the lock. */
+static void env_add(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void env_add(const char *fmt, ...)
+{
+    char tmp[W32_PATH_MAX * 2];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(tmp, sizeof tmp, fmt, ap);
+    va_end(ap);
+    char **v = (char **)realloc(g_env, (g_nenv + 2) * sizeof *v);
+    if (!v)
+        return;
+    g_env = v;
+    if ((v[g_nenv] = strdup(tmp)))
+        g_nenv++;
+}
+
 static void env_seed(void)
 {
     if (g_env_seeded)
         return;
     g_env_seeded = true;
-    size_t n = sizeof ENV_DEFAULTS / sizeof *ENV_DEFAULTS;
-    char **v = (char **)malloc((n + 1) * sizeof *v);
-    if (!v)
-        return;
-    g_env = v;
-    for (size_t i = 0; i < n; i++)
-        if ((v[g_nenv] = strdup(ENV_DEFAULTS[i])))
-            g_nenv++;
+    const char *user = w32_user_dir(), *win = w32_windows_dir(), *sys = w32_system_dir();
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    char drive[3] = { win[0], ':', 0 };
+    env_add("ALLUSERSPROFILE=%s\\ProgramData", drive);
+    env_add("APPDATA=%s\\AppData\\Roaming", user);
+    env_add("COMPUTERNAME=FNVNX");
+    env_add("ComSpec=%s\\cmd.exe", sys);
+    env_add("HOMEDRIVE=%s", drive);
+    env_add("HOMEPATH=%s", user + 2);
+    env_add("LOCALAPPDATA=%s\\AppData\\Local", user);
+    env_add("NUMBER_OF_PROCESSORS=%u", (unsigned)W32_DW(si.dwNumberOfProcessors));
+    env_add("OS=Windows_NT");
+    env_add("PATH=%s;%s", sys, win);
+    env_add("PATHEXT=.COM;.EXE;.BAT;.CMD");
+    env_add("PROCESSOR_ARCHITECTURE=%s", si.wProcessorArchitecture == 0 ? "x86" : "AMD64");
+    env_add("ProgramData=%s\\ProgramData", drive);
+    env_add("ProgramFiles=%s\\Program Files", drive);
+    env_add("SystemDrive=%s", drive);
+    env_add("SystemRoot=%s", win);
+    env_add("TEMP=%s\\AppData\\Local\\Temp", user);
+    env_add("TMP=%s\\AppData\\Local\\Temp", user);
+    env_add("USERNAME=Player");
+    env_add("USERPROFILE=%s", user);
+    env_add("windir=%s", win);
 }
 
 /* index of name, or -1; caller holds the lock */
@@ -457,15 +473,24 @@ extern "C" char *GetEnvironmentStrings(void)
     size_t total = 2;
     for (size_t i = 0; i < g_nenv; i++)
         total += strlen(g_env[i]) + 1;
-    char *b = (char *)malloc(total), *p = b;
-    if (b) {
+    char *b = (char *)malloc(total);
+    const char **order = (const char **)malloc((g_nenv + 1) * sizeof *order);
+    if (b && order) {
+        for (size_t i = 0; i < g_nenv; i++)
+            order[i] = g_env[i];
+        qsort(order, g_nenv, sizeof *order, env_qsort_cmp);   /* the block is sorted by name, as Windows keeps it */
+        char *p = b;
         for (size_t i = 0; i < g_nenv; i++) {
-            size_t l = strlen(g_env[i]) + 1;
-            memcpy(p, g_env[i], l);
+            size_t l = strlen(order[i]) + 1;
+            memcpy(p, order[i], l);
             p += l;
         }
         p[0] = p[1] = 0;   /* an empty block is two NULs */
+    } else {
+        free(b);
+        b = NULL;
     }
+    free(order);
     os_unlock(&g_env_lock);
     if (!b)
         SetLastError(ERROR_NOT_ENOUGH_MEMORY);
