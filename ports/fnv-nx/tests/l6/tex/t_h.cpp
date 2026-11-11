@@ -1,0 +1,19 @@
+// part h: format table completeness PER ROLE (resource type x usage; buffers are not image types and are not asked). Every format the env table (python oracle from the tsv) allows in an image role has
+// a memory layout (res_fmt.cpp) and, unless it is a target without storage (NXFMT_NULL: the pass has no attachment), a native format (nx_d3d9_format) with the render / depth capability the role needs;
+// the zero-size classes (capability probes: INST, RESZ, ATOC, NVDB, unknown) have no layout, so no role can create them. A hole is a TEST ERROR (not a run-time failure).
+#include "t_common.h"
+void t_h() {
+    t_part('h'); FILE* f = t_open("fmts.txt"); char line[256];       // F rtype usage fmt | Z fmt
+    while (f && fgets(line, sizeof line, f)) {
+        unsigned rt, us, fmt; NxTexFmt tf;
+        if (line[0] == 'Z') { sscanf(line, "Z %u", &fmt); CHECK(!nx_texfmt(fmt, &tf)); continue; }
+        if (sscanf(line + 1, " %u %u %u", &rt, &us, &fmt) != 3) { CHECK(false); continue; }
+        if (line[0] == 'L') { if (!CHECK(nx_texfmt(fmt, &tf))) printf("  no layout: fmt %u\n", fmt); continue; }       // plain offscreen surface: memory layout only
+        bool lay = nx_texfmt(fmt, &tf); NxFormatInfo ni = nx_d3d9_format(fmt);
+        if (!CHECK(lay)) printf("  no layout: fmt %u\n", fmt);
+        if (ni.format == NxFmt_None && (ni.flags & NXFMT_NULL)) { CHECK(!(ni.flags & ~NXFMT_NULL)); continue; }   // rule (ii): NULL = no storage
+        if (!CHECK(ni.format != NxFmt_None)) printf("  no NxFormat: resource %u usage %u fmt %#x\n", rt, us, fmt);
+        else if (us == 1) CHECK(ni.flags & NXFMT_RENDER); else if (us == 2) CHECK(ni.flags & NXFMT_DEPTH);
+    }
+    if (f) fclose(f);
+}
