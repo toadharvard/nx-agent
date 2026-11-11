@@ -2,6 +2,10 @@
  * resources (DIB, PNG-compressed icons), every DIB encoding, .ico/.cur files, comctl32 image lists. The test lays out a synthetic mapped PE32 image (DOS header, NT headers, one
  * section, a resource directory) and installs it through fnvnx_resource_set_image_for_test. */
 #include "s4_test.h"
+#include "host_boundary.h"
+
+#include <setjmp.h>
+#include <thread>
 
 #include <stdint.h>
 #include <map>
@@ -684,5 +688,32 @@ TEST(resource_icon_files_and_invert)
     CHECK(FindResourceA(M2, "DATA", MI(10)) != NULL);
     fnvnx_resource_register_image(M2, NULL, 0);
     CHECK(FindResourceA(M2, "DATA", MI(10)) == NULL); CHECK_EQ(GetLastError(), 1812);
+    fnvnx_resource_set_image_for_test(MOD, NULL, 0);
+}
+
+/* the rule "no platform lock is held across a call into the game" (tests/s4/test_nolock.cpp): the enumeration callback never returns */
+static jmp_buf g_nlk_jb;
+TEST(nlk_escape_resource_enumeration)
+{
+    bytes img = build_image(make_tree());
+    fnvnx_resource_set_image_for_test(MOD, img.data(), img.size());
+    struct E {
+        static BOOL esc(HMODULE, LPCSTR, LPSTR, LONG_PTR) { longjmp(g_nlk_jb, 1); }
+        static BOOL ok(HMODULE, LPCSTR, LPSTR, LONG_PTR l) { (*(int *)l)++; return TRUE; }
+    };
+    volatile bool escaped = false;
+    if (setjmp(g_nlk_jb) == 0)
+        EnumResourceNamesA(MOD, MI(10), E::esc, 0);
+    else
+        escaped = true;
+    CHECK(escaped);
+    CHECK_EQ(fnvnx_bnd_locks_held(), 0);
+    static int n;
+    n = 0;
+    CHECK(EnumResourceNamesA(MOD, MI(10), E::ok, (LONG_PTR)&n));
+    CHECK(n > 0);
+    int n0 = n;
+    std::thread([&] { n = 0; CHECK(EnumResourceNamesA(MOD, MI(10), E::ok, (LONG_PTR)&n)); CHECK_EQ(n, n0); }).join();
+    CHECK(FindResourceA(MOD, MI(180), MI(2)) != NULL);
     fnvnx_resource_set_image_for_test(MOD, NULL, 0);
 }

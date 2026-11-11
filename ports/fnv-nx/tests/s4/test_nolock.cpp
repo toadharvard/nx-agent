@@ -9,6 +9,7 @@
 
 #include "fnvnx_boundary.h"
 #include "fnvnx_guestfn.h"
+#include "fnvnx_mmio.h"
 #include "fnvnx_msvcrt.h"
 #include "fnvnx_win32_ext.h"
 #include "host_boundary.h"
@@ -31,7 +32,6 @@ jmp_buf g_jb;
 /* runs the statements; true when a callback escaped out of them */
 #define ESCAPES(...) ([&]() -> bool { if (setjmp(g_jb)) return true; __VA_ARGS__; return false; }())
 
-int g_viol0;
 /* the state a "does not return" case must leave: no lock held here, none counted in the run */
 bool clean() { return fnvnx_bnd_locks_held() == 0; }
 void nop() {}
@@ -347,6 +347,82 @@ TEST(nlk_escape_crt_callbacks)
     CHECK_EQ(g_exits, 2);
     on_other_thread([] { fnvnx_atexit(okexit); fnvnx_cexit(); });
     CHECK_EQ(g_exits, 3);
+}
+
+/* ---- threads: the start routine of a game thread (and its thread-detach notification) is called with no platform lock held,
+ * and one that ends without returning (ExitThread) leaves the thread table usable */
+int g_th_held = -1;
+DWORD tstart_exit(void *) { g_th_held = (int)fnvnx_bnd_locks_held(); ExitThread(7); return 0; }
+DWORD tstart_ret(void *) { return 3; }
+
+TEST(nlk_thread_start_and_exit_without_return)
+{
+    DWORD id = 0;
+    HANDLE t = CreateThread(NULL, 0, tstart_exit, NULL, 0, &id);
+    CHECK(t != NULL);
+    CHECK_EQ(WaitForSingleObject(t, 5000), 0);
+    DWORD code = 0;
+    CHECK(GetExitCodeThread(t, &code));
+    CHECK_EQ(code, 7);
+    CHECK_EQ(g_th_held, 0);
+    CloseHandle(t);
+    HANDLE u = CreateThread(NULL, 0, tstart_ret, NULL, 0, &id);   /* the table still serves threads */
+    CHECK(u != NULL);
+    CHECK_EQ(WaitForSingleObject(u, 5000), 0);
+    CHECK(GetExitCodeThread(u, &code));
+    CHECK_EQ(code, 3);
+    CloseHandle(u);
+    CHECK(clean());
+}
+
+/* ---- mmio: the I/O procedure of the game (MMIOM_OPEN / READ / SEEK / CLOSE are calls into the game) */
+int g_mm_mode;   /* 0 normal, 1 READ never returns */
+LRESULT mmproc(LPSTR p, UINT msg, LPARAM l1, LPARAM l2)
+{
+    MMIOINFO *i = (MMIOINFO *)p;
+    switch (msg) {
+    case MMIOM_OPEN: i->lDiskOffset = 0; return 0;
+    case MMIOM_CLOSE: return 0;
+    case MMIOM_READ:
+        if (g_mm_mode == 1) escape();
+        memset((void *)l1, 'x', (size_t)l2);
+        i->lDiskOffset += (LONG)l2;
+        return (LRESULT)l2;
+    case MMIOM_SEEK: i->lDiskOffset = (LONG)l1; return i->lDiskOffset;
+    }
+    return 0;
+}
+HMMIO mm_open()
+{
+    MMIOINFO in = {};
+    in.fccIOProc = FNVNX_FOURCC('N', 'L', 'K', ' ');
+    in.pIOProc = mmproc;
+    return mmioOpenA((LPSTR) "nlk.bin", &in, MMIO_READ);
+}
+
+TEST(nlk_escape_mmio_procedure)
+{
+    HMMIO h = mm_open();
+    CHECK(h != NULL);
+    char b[8];
+    g_mm_mode = 1;
+    CHECK(ESCAPES(mmioRead(h, b, 8)));
+    CHECK(clean());
+    g_mm_mode = 0;
+    CHECK_EQ(mmioRead(h, b, 8), 8);              /* the same handle, and a new one, still work */
+    HMMIO h2 = mm_open();
+    CHECK(h2 != NULL);
+    CHECK_EQ(mmioRead(h2, b, 4), 4);
+    on_other_thread([] {
+        HMMIO h3 = mm_open();
+        char c[4];
+        CHECK(h3 != NULL);
+        CHECK_EQ(mmioRead(h3, c, 4), 4);
+        CHECK_EQ(mmioClose(h3, 0), 0);
+    });
+    CHECK_EQ(mmioClose(h2, 0), 0);
+    CHECK_EQ(mmioClose(h, 0), 0);
+    CHECK(clean());
 }
 
 /* ---- process end: DllMain(PROCESS_DETACH) of the modules is a call into the game too; observed in a child process, whose
