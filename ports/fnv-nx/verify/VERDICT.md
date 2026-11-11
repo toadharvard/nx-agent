@@ -57,7 +57,12 @@ Wine 9.0 does, with one log line at the call. The source of the behaviour is Win
   are findings.
 - Result kinds: `void`, `u32`, `u64`, `addr` (the address of an ELF symbol, as in the constants table) and `u32nz<N>` (the result depends only on whether the pointer argument x<N> is zero, `this`
   being 0; value `<result when zero>,<result otherwise>`). The first rows are the two real ones from the Wine 9.0 source,
-  `SetClipStatus` and `GetClipStatus` (`0x8876086C,0`); `ProcessVertices` is implemented for real in Wine, so it is not under this rule.
+  `SetClipStatus` and `GetClipStatus` (`0x8876086C,0`). `ProcessVertices` is implemented for real in Wine;
+  only its branch FIXMEs are under kind `branch`.
+- Kind `branch` (value `-`): a FIXME on one branch inside a real implementation, as Wine 9.0 has. The `id` is a constant naming
+  a row; the function must not be vacuous (class 2, call transparent; else `wine-fixme-branch-in-vacuous-body`); several `branch`
+  ids in one function are fine; `branch` with another kind in one function is `wine-fixme-branch-mixed`; the result is
+  unconstrained. It proves the log exists only in real code; that the branch behaves as Wine's is conformance evidence (class 10).
 - The gate checks the form of the reference only. Checking it against a pinned Wine 9.0 source tree is the oracle class (10), not done.
 - The gate result reports the call sites per `id` (`wine_fixme`), so growth is visible. The renderer's owner fills the
   table from the Wine 9.0 source.

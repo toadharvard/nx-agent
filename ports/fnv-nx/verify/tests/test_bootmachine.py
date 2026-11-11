@@ -392,7 +392,9 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("mod9-unreg", EC(9, 1, FNVNX_ADDR(v), 1));
     num("mod12-fn-huge", EC(12, 0x100000001ull, 0, 0));
     num("fn0", EC(11, 0, FNVNX_ADDR(v), 4));
-    num("fn36", EC(11, 36, FNVNX_ADDR(v), 4));
+    num("fn37", EC(11, 37, FNVNX_ADDR(v), 4));
+    num("te-n4", EC(11, 36, FNVNX_ADDR(v), 4));
+    num("te-null-array", EC(11, 36, 0, 5));
     num("self-n0-null", EC(11, 35, 0, 0));
     num("self-n1-null", EC(11, 35, 0, 1));
     num("sock-null-array-wrongn", EC(11, 17, 0, 2));
@@ -750,6 +752,41 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     fnvnx_hcall1(H->exit, 0x5200002A);   /* fnvnx_reach_violation(42) */
 #elif MODE == 36
     fnvnx_hcall1(H->exit, 0x5100002A);   /* an ordinary non-zero code */
+#elif MODE == 57
+    /* TEXT_ENTRY (36): argument checks, entered, entered with init, cancelled (scenario texts: "Ab" + U+1F600, "x", then none) */
+    static uint16_t ou[8]; static uint32_t nn;
+    for (int i = 0; i < 8; i++) ou[i] = 0x7777;
+    nn = 0x55555555;
+    uint64_t B = NEG(0x1759);
+    num("te-max0", sk(36, 5, 0, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)) == B);
+    num("te-max501", sk(36, 5, 501, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)) == B);
+    num("te-maxhuge", sk(36, 5, 0x100000001ull, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)) == B);
+    num("te-out-null", sk(36, 5, 8, 0, 0, 0, FNVNX_ADDR(&nn)) == B);
+    num("te-n-null", sk(36, 5, 8, 0, 0, FNVNX_ADDR(ou), 0) == B);
+    num("te-bad-untouched", ou[0] == 0x7777 && nn == 0x55555555);
+    static const uint16_t in[2] = {'q', 'r'};
+    num("te-entered", sk(36, 5, 8, FNVNX_ADDR(in), 2, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)));
+    num("te-n", nn);
+    num("te-u0", ou[0]); num("te-u1", ou[1]); num("te-u2", ou[2]); num("te-u3", ou[3]); num("te-nul", ou[4]); num("te-rest", ou[5]);
+    for (int i = 0; i < 8; i++) ou[i] = 0x7777;
+    nn = 0x55555555;
+    num("te-entered2", sk(36, 5, 500, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)));
+    num("te-n2", nn); num("te-2u0", ou[0]); num("te-2nul", ou[1]); num("te-2rest", ou[2]);
+    for (int i = 0; i < 8; i++) ou[i] = 0x7777;
+    nn = 0x55555555;
+    num("te-cancel", sk(36, 5, 8, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)));
+    num("te-cancel-untouched", ou[0] == 0x7777 && nn == 0x55555555);
+    num("te-cancel-again", sk(36, 5, 8, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)));
+#elif MODE == 58
+    /* TEXT_ENTRY: one call, max_len 3; the scenario text is longer (4 units): a scenario error */
+    static uint16_t ou[8]; static uint32_t nn;
+    num("te-long", sk(36, 5, 3, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)));
+    num("te-after-long", 1);
+#elif MODE == 59
+    /* TEXT_ENTRY: a text of exactly max_len units fits (2 units: one scalar above U+FFFF), out has room for max_len + 1 */
+    static uint16_t ou[3] = {0x7777, 0x7777, 0x7777}; static uint32_t nn;
+    num("te-fit", sk(36, 5, 2, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)));
+    num("te-fit-n", nn); num("te-fit-u0", ou[0]); num("te-fit-u1", ou[1]); num("te-fit-nul", ou[2]);
 #elif MODE >= 12
     volatile uint32_t *pg = (volatile uint32_t *)(uintptr_t)PG(H);
     plat(8, PG(H), 0x1000, 3, 3);
@@ -983,7 +1020,7 @@ def main():
     root = os.path.join(TMP, "sd")
     os.makedirs(root)
     open(os.path.join(root, "data.bin"), "wb").write(b"01ABCDEFGH23")
-    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, *range(12, 22), *range(30, 42), 44, 45, 46, 47, 48, *range(49, 57))}   # MODE 6 (boot CLI guest) is built by test_boot.py
+    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, *range(12, 22), *range(30, 42), 44, 45, 46, 47, 48, *range(49, 57), 57, 58, 59)}   # MODE 6 (boot CLI guest) is built by test_boot.py
     elf0, path0 = built[0]
     plan0 = make_plan(elf0)
     base = plan0["image"]["base"]
@@ -1248,7 +1285,7 @@ def main():
     except bootmachine.MachineError as e:
         ok, msg = "message" in str(e), str(e)
     case("a header-defined platform fn nobody implements raises at construction", ok, msg)
-    case("every served non-socket fn of module 11 (1..15, 34, 35) resolves", sorted(bootmachine.Machine(elf0, plan0, boothost.Services(root)).plat) == [*range(1, 16), 34, 35])
+    case("every served non-socket fn of module 11 (1..15, 34, 35, 36) resolves", sorted(bootmachine.Machine(elf0, plan0, boothost.Services(root)).plat) == [*range(1, 16), 34, 35, 36])
 
     class NoSec(boothost.Services):
         plat_section_map = None
@@ -1408,7 +1445,7 @@ def main():
     # ---- the header's TOTALITY TABLE (parsed from the fixture) against the machine
     rows, hslots = parse_totality(os.path.join(GUEST_DIR, "hostapi.h"))
     mach0 = bootmachine.Machine(elf0, plan0, boothost.Services(root))
-    case("header: 35 services of module 11 and 50 slots parsed", len(rows) == 35 and sorted(rows) == list(range(1, 36))
+    case("header: 36 services of module 11 and 50 slots parsed", len(rows) == 36 and sorted(rows) == list(range(1, 37))
          and len(hslots) == 50, (len(rows), len(hslots)))
     case("slots: the header's struct order is bootmachine.SLOTS, each has an h_<slot> and a handler", hslots == bootmachine.SLOTS
          and all(callable(getattr(boothost.Services, "h_" + n, None)) and n in mach0.handlers for n in hslots), hslots)
@@ -1416,12 +1453,12 @@ def main():
     case("services: every declared service is served by the machine (the sockets by Machine._sock), none extra",
          served_decl == set(rows) and set(mach0.plat) | set(bootmachine.SOCK_SERVICES) == set(rows) and not set(mach0.plat) & set(bootmachine.SOCK_SERVICES),
          (sorted(set(rows) - served_decl), sorted(set(mach0.plat) & set(bootmachine.SOCK_SERVICES))))
-    case("services: served = 1..35 (35 of 35)", sorted(served_decl) == list(range(1, 36)) and not hasattr(bootmachine, "UNSERVED"),
+    case("services: served = 1..36 (36 of 36)", sorted(served_decl) == list(range(1, 37)) and not hasattr(bootmachine, "UNSERVED"),
          sorted(served_decl))
     names_ok = all(rows[f][0].lower() == n and rows[f][1] in (None, need) for f, (n, need) in
                    {**bootmachine.PLATFORM_FNS, **bootmachine.SOCK_SERVICES}.items())
-    case("services: machine names and least nargs equal the header's rows (fn 10 is the NOT SERVED row, kept: recorded difference)",
-         names_ok and rows[10][1] is None and "10" in bootmachine.__doc__ and "console host answers NO_SERVICE" in bootmachine.__doc__,
+    case("services: machine names and least nargs equal the header's rows (every row has its n; fn 10 is served by the console host too)",
+         names_ok and all(r[1] is not None for r in rows.values()) and "recorded difference" not in bootmachine.__doc__,
          [(f, rows[f]) for f in rows if rows[f][0].lower() != {**bootmachine.PLATFORM_FNS, **bootmachine.SOCK_SERVICES}[f][0]])
     # mechanical argument rules for every declared service, through Machine.ext_call on the host page
     args_at = mach0.host_page + 0x100
@@ -1447,8 +1484,8 @@ def main():
             bad[nm] = "null array with nargs > 0"
     case("services: every declared service answers BAD_NARGS below its n and for a null array, sockets -EINVAL on a wrong nargs, BAD_NARGS on a null array and a value for zero arguments",
          not bad, bad)
-    case("services: fn 0 and 36.. are NO_SERVICE, unknown module NO_MODULE, fn > UINT32_MAX NO_SERVICE (before the platform table)",
-         all(mach0.ext_call(11, f, args_at, 4) == bootmachine.EXT_NO_SERVICE for f in (0, 36, 37, 0xFFFFFFFF, 1 << 32, (1 << 32) + 4))
+    case("services: fn 0 and 37.. are NO_SERVICE, unknown module NO_MODULE, fn > UINT32_MAX NO_SERVICE (before the platform table)",
+         all(mach0.ext_call(11, f, args_at, 4) == bootmachine.EXT_NO_SERVICE for f in (0, 37, 38, 0xFFFFFFFF, 1 << 32, (1 << 32) + 4))
          and mach0.ext_call(63, 1, args_at, 1) == bootmachine.EXT_NO_MODULE and mach0.ext_call(64, 1 << 33, 0, 0) == bootmachine.EXT_NO_MODULE
          and mach0.ext_call(11, 4, args_at, 1 << 40) == 0, "")
     try:
@@ -1461,7 +1498,7 @@ def main():
     r40, l40 = run(built[40][0], root)[:2]
     k = kv(l40)
     NOMOD, NOSVC, BADN, EINVAL = "ffffffffffffff01", "ffffffffffffff02", "ffffffffffffff03", "ffffffffffffffea"
-    want40 = {"mod64": NOMOD, "mod-huge": NOMOD, "mod9-unreg": NOMOD, "mod12-fn-huge": NOMOD, "fn0": NOSVC, "fn36": NOSVC, "self-n1-null": BADN, "sock-null-array-wrongn": EINVAL,
+    want40 = {"mod64": NOMOD, "mod-huge": NOMOD, "mod9-unreg": NOMOD, "mod12-fn-huge": NOMOD, "fn0": NOSVC, "fn37": NOSVC, "te-n4": BADN, "te-null-array": BADN, "self-n1-null": BADN, "sock-null-array-wrongn": EINVAL,
               "sock-null-array-n0": EINVAL, "sock-null-array-exact": BADN, "fn0-null-array": NOSVC,
               "fn-u32max": NOSVC, "fn-above-u32": NOSVC, "fn10-nargs1": BADN, "vm-reserve-n1": BADN, "null-array": BADN,
               "docked-n0-null": "0", "docked-n1-null": BADN, "docked-n3": "0", "docked-ncap": "0", "boost-extra-args": "0",
@@ -1470,6 +1507,34 @@ def main():
     bad = {n: (k.get(n), v) for n, v in want40.items() if k.get(n) != v}
     case("ext_call (guest): NO_MODULE / NO_SERVICE / BAD_NARGS are returned to the guest, nargs above UINT32_MAX counts as UINT32_MAX, "
          "extra arguments ignored, sockets dispatch first: -EINVAL on wrong nargs (null array or not), BAD_NARGS on the exact count with a null array (%d values)" % len(want40), r40["reason"] == "exit" and not bad, (bad, r40))
+    # TEXT_ENTRY (36): scenario texts, in order; none left -> cancelled; a text longer than max_len is a scenario error (not truncated)
+    r57, l57, _, _ = run(built[57][0], root, text_entries=["Ab\U0001F600", "x"])
+    k = kv(l57)
+    want57 = {"te-max0": "1", "te-max501": "1", "te-maxhuge": "1", "te-out-null": "1", "te-n-null": "1", "te-bad-untouched": "1",
+              "te-entered": "1", "te-n": "4", "te-u0": "41", "te-u1": "62", "te-u2": "d83d", "te-u3": "de00", "te-nul": "0", "te-rest": "7777",
+              "te-entered2": "1", "te-n2": "1", "te-2u0": "78", "te-2nul": "0", "te-2rest": "7777",
+              "te-cancel": "0", "te-cancel-untouched": "1", "te-cancel-again": "0"}
+    bad = {n: (k.get(n), v) for n, v in want57.items() if k.get(n) != v}
+    case("TEXT_ENTRY (guest): max_len 0 / 501 / huge, out null, n null -> -FNVNX_HE_BADINPUT without consuming a text; the texts come in order as UTF-16 "
+         "with a NUL and *n; none left -> 0 with out and *n untouched", r57["reason"] == "exit" and not bad, (bad, r57["reason"]))
+    ev = [(e["kind"], e["result"]) for e in r57["events"] if e["kind"] == "text-entry"]
+    case("TEXT_ENTRY: one host event per call with its signed result (5 refused calls -0x1759, then 1, 1, 0, 0)", ev == [("text-entry", -0x1759)] * 5 + [("text-entry", 1)] * 2 + [("text-entry", 0)] * 2, ev)
+    r57b = run(built[57][0], root)[0]
+    case("TEXT_ENTRY with no scenario: every well-formed call is 0 (cancelled)", r57b["reason"] == "exit"
+         and [e["result"] for e in r57b["events"] if e["kind"] == "text-entry"] == [-0x1759] * 5 + [0] * 4, r57b["reason"])
+    r58, l58 = run(built[58][0], root, text_entries=["abcd"])[:2]
+    case("TEXT_ENTRY: a scenario text longer than max_len ends the run as scenario-error (never truncated, the guest gets no result)",
+         r58["reason"] == "scenario-error" and "te-long" not in kv(l58) and "max_len 3" in r58["scenario"] and "4 UTF-16 units" in r58["scenario"], (r58["reason"], r58.get("scenario")))
+    r59, l59 = run(built[59][0], root, text_entries=["\U0001F600"])[:2]
+    k = kv(l59)
+    case("TEXT_ENTRY: a text of exactly max_len units fits", r59["reason"] == "exit" and k == {"te-fit": "1", "te-fit-n": "2", "te-fit-u0": "d83d", "te-fit-u1": "de00", "te-fit-nul": "0"}, (r59["reason"], k))
+    for bad_scn in (["\ud800"], "abc", [b"x"]):
+        try:
+            bootmachine.Machine(elf0, plan0, boothost.Services(root), text_entries=bad_scn)
+            ok = False
+        except bootmachine.MachineError:
+            ok = True
+        case("TEXT_ENTRY: a scenario that is not a list of strings of Unicode scalars is a construction error: %r" % (bad_scn,), ok)
     # DISPLAY_DOCKED: the profile
     for prof, want in (("handheld", "0"), ("docked", "1")):
         rp, lp = run(built[40][0], root, profile=prof)[:2]

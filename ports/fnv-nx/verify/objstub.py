@@ -919,8 +919,13 @@ def judge(results, rows, facts, wine=None):
     WINE (rows of wine_fixme.tsv, {id: (contract name, wine_ref, kind, value)}, None = empty): a function that calls it and is
     otherwise V (kind WINE-V) is certified iff it passes exactly one id on every path, the id has a row and the result matches it."""
     items, out, vflag, exited, used = [], [], set(), set(), set()
+    wine = wine or {}
     for oid, r in results.items():
         funcs = set(r["items"])
+        wids = {}   # function -> constant ids it passes to WINE (all call sites)
+        for n_, _, c_ in r["wine"]:
+            if c_ is not None:
+                wids.setdefault(n_, set()).add(c_)
         items += [(oid, i) for i in r["items"]]
         exit_ok = set(r["exit_ok"])
         for name, kind, detail, v in r["finds"]:
@@ -930,6 +935,14 @@ def judge(results, rows, facts, wine=None):
                 if row and row[0] != "exit" and matches(row, v):
                     continue
                 kind, detail = ("constants-mismatch", "row %s %s, analysis: %s" % (row[0], row[1], detail)) if row else (kind, detail + "; no constants row")
+            elif kind in ("WINE-V", "wine-fixme-in-real-body") and any(wine.get(i, (0, 0, ""))[2] == "branch" for i in wids.get(name, ())):
+                # kind branch: a log on one branch of a real implementation (conformance of the branch is class 10, not this gate)
+                if any(wine.get(i, (0, 0, ""))[2] != "branch" for i in wids[name]):
+                    kind, detail = "wine-fixme-branch-mixed", "ids of kind branch and of another kind in one function: %s" % sorted(wids[name])
+                elif kind == "WINE-V":
+                    kind, detail = "wine-fixme-branch-in-vacuous-body", "a branch log cannot make a no-op acceptable; " + detail
+                else:
+                    continue
             elif kind == "WINE-V":
                 wid, row_ = r["wine_id"].get(name), None
                 if wid is None:
@@ -1019,7 +1032,7 @@ def wine_matches(row, v, nz):
 def read_wine_table(path):
     """wine_fixme.tsv: `id<TAB>contract_name<TAB>wine_ref<TAB>kind<TAB>value`; lines starting with # are comments. id decimal < 2**32,
     wine_ref `wine-9.0:<path in the Wine source tree>:<function name>` (the FORM is validated; checking it against a pinned Wine 9.0 tree
-    is the oracle class, not done here), kind void|u32|u64|addr|u32nz<N> (value empty for void, an ELF symbol name or `SYMBOL+OFFSET` for addr as in the constants table, else an integer; for u32nz<N>, N the index of the argument register x<N>, `this` being 0: `<result when it is zero>,<result otherwise>`), no duplicate id.
+    is the oracle class, not done here), kind void|u32|u64|addr|u32nz<N>|branch (branch: value `-`, a branch-level FIXME in a real body, see judge; value empty for void, an ELF symbol name or `SYMBOL+OFFSET` for addr as in the constants table, else an integer; for u32nz<N>, N the index of the argument register x<N>, `this` being 0: `<result when it is zero>,<result otherwise>`), no duplicate id.
     -> {id: (contract name, wine_ref, kind, value)}. ValueError when missing or malformed."""
     if not os.path.exists(path):
         raise ValueError("wine fixme table %s does not exist" % path)
@@ -1029,8 +1042,8 @@ def read_wine_table(path):
             continue
         f = l.split("\t")
         ok = len(f) == 5 and re.fullmatch(r"[0-9]+", f[0]) and int(f[0]) < 2 ** 32 and f[1].strip() and \
-            re.fullmatch(r"wine-9\.0:[A-Za-z0-9_./+-]+:[A-Za-z_][A-Za-z0-9_@]*", f[2]) and re.fullmatch(r"void|u32|u64|addr|u32nz[0-7]", f[3]) and \
-            (f[4] == "" if f[3] == "void" else re.fullmatch(r"[A-Za-z_.$][A-Za-z0-9_.$@]*(\+(0[xX][0-9a-fA-F]+|[0-9]+))?", f[4]) if f[3] == "addr" else re.fullmatch(r"(-?[0-9]+|0x[0-9a-fA-F]+),(-?[0-9]+|0x[0-9a-fA-F]+)" if f[3][3:5] == "nz" else r"-?[0-9]+|0x[0-9a-fA-F]+", f[4]))
+            re.fullmatch(r"wine-9\.0:[A-Za-z0-9_./+-]+:[A-Za-z_][A-Za-z0-9_@]*", f[2]) and re.fullmatch(r"void|u32|u64|addr|u32nz[0-7]|branch", f[3]) and \
+            (f[4] == "" if f[3] == "void" else f[4] == "-" if f[3] == "branch" else re.fullmatch(r"[A-Za-z_.$][A-Za-z0-9_.$@]*(\+(0[xX][0-9a-fA-F]+|[0-9]+))?", f[4]) if f[3] == "addr" else re.fullmatch(r"(-?[0-9]+|0x[0-9a-fA-F]+),(-?[0-9]+|0x[0-9a-fA-F]+)" if f[3][3:5] == "nz" else r"-?[0-9]+|0x[0-9a-fA-F]+", f[4]))
         if not ok or int(f[0]) in out:
             raise ValueError("bad or duplicate wine fixme row in %s: %r" % (path, l[:80]))
         out[int(f[0])] = tuple(f[1:])
