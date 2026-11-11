@@ -254,6 +254,7 @@ class Machine:
         self.ext = {int(n[4:]): getattr(services, n) for n in dir(services) if n.startswith("ext_") and n[4:].isdigit()}
         uc = self.uc = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
         uc.reg_write(UC_ARM64_REG_CPACR_EL1, 3 << 20)   # FP/SIMD on
+        self.backs = []   # [lo, hi, host address, keepalive]: every host-backed mapping, sorted by lo (host_ptr)
         used = []
         for s in elf["loads"]:
             lo, hi = (base + s["vaddr"]) // PAGE * PAGE, _up(base + s["vaddr"] + s["memsz"])
@@ -264,14 +265,14 @@ class Machine:
             used.append((lo, hi))
             prot = (UC_PROT_READ if s["flags"] & 4 else 0) | (UC_PROT_WRITE if s["flags"] & 2 else 0) | \
                    (UC_PROT_EXEC if s["flags"] & 1 else 0)
-            uc.mem_map(lo, hi - lo, UC_PROT_ALL)
+            self._map(lo, hi - lo, UC_PROT_ALL)
             uc.mem_write(base + s["vaddr"], bytes(elf_bytes[s["offset"]:s["offset"] + s["filesz"]]))
             uc.mem_protect(lo, hi - lo, prot)
         for n in ("stacks", "heap"):
-            uc.mem_map(reg[n][0], reg[n][1] - reg[n][0], UC_PROT_READ | UC_PROT_WRITE)
-        uc.mem_map(WINDOW[0], WINDOW[1] - WINDOW[0], UC_PROT_READ | UC_PROT_WRITE)   # the host's window: RW zero from the start
+            self._map(reg[n][0], reg[n][1] - reg[n][0])
+        self._map(WINDOW[0], WINDOW[1] - WINDOW[0])   # the host's window: RW zero from the start
         self.host_page = hp = reg["host_page"][0]
-        uc.mem_map(hp, PAGE, UC_PROT_ALL)
+        self._map(hp, PAGE, UC_PROT_ALL, track=False)   # the host page is never handed out as a host pointer
         self.stub_base, self.return_addr, self.thread_end = hp + 0x800, hp + 0xFF0, hp + 0xFF8
         self.fault_ret, self.pending = hp + 0xFE0, None
         self.stubs = {self.stub_base + 4 * i: n for i, n in enumerate(SLOTS)}
@@ -403,6 +404,47 @@ class Machine:
         return len(data)
 
     # -- guest memory services
+    def _map(self, addr, size, prot=UC_PROT_READ | UC_PROT_WRITE, ptr=None, track=True):
+        """every guest mapping is backed by a host buffer the machine owns (anonymous mmap, zero) or, for a section view, by the
+        section's buffer; mem_map_ptr hands that address to Unicorn, so host_ptr can return a stable host address"""
+        keep = None
+        if ptr is None:
+            mm = mmap.mmap(-1, size)
+            buf = ctypes.c_char.from_buffer(mm)
+            ptr, keep = ctypes.addressof(buf), (mm, buf)
+        self.uc.mem_map_ptr(addr, size, prot, ptr)
+        if track:
+            self.backs.append([addr, addr + size, ptr, keep])
+            self.backs.sort(key=lambda b: b[0])
+        else:
+            self.untracked = keep   # the host page lives as long as the machine
+
+    def _unmap(self, addr, size):
+        """unmap [addr, addr + size) and drop it from the backing table; a backing it only partly covers keeps its remaining pieces"""
+        self.uc.mem_unmap(addr, size)
+        end, out = addr + size, []
+        for b in self.backs:
+            lo, hi, ptr, keep = b
+            if hi <= addr or lo >= end:
+                out.append(b)
+                continue
+            if lo < addr:
+                out.append([lo, addr, ptr, keep])
+            if end < hi:
+                out.append([end, hi, ptr + (end - lo), keep])
+        self.backs = out
+
+    def host_ptr(self, addr, size):
+        """host address of [addr, addr + size) when it lies wholly inside ONE mapping (one host buffer) that is now readable and
+        writable for the guest (never the host page; none-protected, unmapped and empty ranges: None)"""
+        if size <= 0 or addr < 0 or addr + size > 1 << 64:
+            return None
+        for lo, hi, ptr, _k in self.backs:
+            if lo <= addr and addr + size <= hi:
+                ok = self.accessible(addr, addr + size, UC_PROT_READ) and self.accessible(addr, addr + size, UC_PROT_WRITE)
+                return ptr + (addr - lo) if ok else None
+        return None
+
     def stack_for(self, tid):
         return self.stacks_top - self.stack_size * (tid - 1) - 0x100
 
@@ -461,9 +503,9 @@ class Machine:
             return self._refuse("map_fixed", addr, size, "src block 0x%x is not ordinary heap (outside it or given away)" % src,
                                 ERR_INVALID_CURRENT_MEMORY)
         content = bytes(self.uc.mem_read(src, size))
-        self.uc.mem_unmap(src, size)
+        self._unmap(src, size)
         self.given.append((src, src + size))
-        self.uc.mem_map(addr, size, UC_PROT_READ | UC_PROT_WRITE)
+        self._map(addr, size)
         self.uc.mem_write(addr, content)
         self.mf_live[addr] = (size, src)
         self._merge_mapped()
@@ -494,10 +536,10 @@ class Machine:
             return self._refuse("unmap_fixed", addr, size, "not the mapping of that src (kernel: InvalidCurrentMemory)",
                                 ERR_INVALID_CURRENT_MEMORY)
         content = bytes(self.uc.mem_read(addr, size))   # Unicorn's host-side read ignores the page protection
-        self.uc.mem_unmap(addr, size)
+        self._unmap(addr, size)
         del self.mf_live[addr]
         self.given.remove((src, src + size))
-        self.uc.mem_map(src, size, UC_PROT_READ | UC_PROT_WRITE)   # the heap block is ordinary accessible heap again
+        self._map(src, size)   # the heap block is ordinary accessible heap again
         self.uc.mem_write(src, content)
         self._merge_mapped()
         return 0
@@ -610,7 +652,7 @@ class Machine:
         for x, y in self._vm_runs(lo, hi, True):
             self.uc.mem_protect(x, y - x, UC_PROT_READ | UC_PROT_WRITE)
         for x, y in self._vm_runs(lo, hi, False):
-            self.uc.mem_map(x, y - x, UC_PROT_READ | UC_PROT_WRITE)
+            self._map(x, y - x)
             self.vm_pages.update(range(x, y, PAGE))
             self.vm_ext.append([x, y])
         return 0
@@ -624,7 +666,7 @@ class Machine:
             if y <= lo or x >= hi:
                 keep.append(e)
             elif lo <= x and y <= hi:
-                self.uc.mem_unmap(x, y - x)
+                self._unmap(x, y - x)
                 self.vm_pages.difference_update(range(x, y, PAGE))
             else:
                 s, t = max(x, lo), min(y, hi)
@@ -719,7 +761,7 @@ class Machine:
             if addr is None:
                 return self._sec_refuse("section_map", 0, size, "no address space", SEC_E_NOMEM)
             own = True
-        self.uc.mem_map_ptr(addr, size, UC_PROT_READ | UC_PROT_WRITE, sec["ptr"] + off)
+        self._map(addr, size, ptr=sec["ptr"] + off)
         self.views[addr] = dict(size=size, off=off, sid=sid, own=own)
         sec["views"] += 1
         return addr
@@ -734,7 +776,7 @@ class Machine:
         v = self.views.get(addr)
         if v is None or v["size"] != size:
             return self._sec_refuse("section_unmap", addr, size, "not exactly a view", SEC_E_RANGE)
-        self.uc.mem_unmap(addr, size)
+        self._unmap(addr, size)
         del self.views[addr]
         sec = self.sections[v["sid"]]
         sec["views"] -= 1
