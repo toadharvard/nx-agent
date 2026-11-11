@@ -247,6 +247,15 @@
     "ports/fnv-nx/verify/gate_argorder.py"
    ],
    "result": "argordergate.json"
+  },
+  {
+   "name": "datamodel",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_datamodel.py"
+   ],
+   "result": "datamodel.json"
   }
  ]
 }

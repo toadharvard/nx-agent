@@ -222,6 +222,19 @@
     "ports/fnv-nx/verify/coffnorm.py"
    ]
   },
+  "test_datamodel.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_datamodel.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_datamodel.py",
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_envcheck.py": {
    "references": [
     {
