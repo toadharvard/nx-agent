@@ -9,9 +9,9 @@ Per module (file located by name, sha256 and size checked against modules.tsv; t
   - (d) every export address of the PE export directory that lies in executable bytes is an entry (exports in data sections cannot be code: counted), the export address set equals
     L1's exports/<name>.tsv, the entry point (entry_rva) is an entry, and so is every TLS callback.
 Globally: no address is an entry of two images. Prints counts only. Exit 0 iff all hold."""
-import os, sys, types
+import os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
-sys.path.insert(0, os.path.join(LIFT, 'tools')); sys.path.insert(0, LIFT)
+sys.path.insert(0, os.path.join(LIFT, 'tools')); sys.path.insert(0, LIFT); sys.path.insert(0, HERE)
 import pemod
 MODS = ['d3dx9_38.dll', 'binkw32.dll', 'libvorbis.dll', 'libvorbisfile.dll', 'd3dx9_31.dll', 'atimgpud.dll']
 FACTS = os.environ.get('FNVNX_FACTS_OUT', '/home/user/l3facts2')
@@ -23,11 +23,8 @@ def universe(fd):
 
 
 def load_r3():
-    """universe_r3_check.py as a module (its source runs sys.exit(main()) at import: the call is made to wait for the explicit main() below); not copied."""
-    p = os.path.join(HERE, 'universe_r3_check.py'); src = open(p).read().replace('\nsys.exit(main())', '\nif __name__ == "__main__": sys.exit(main())')
-    m = types.ModuleType('universe_r3_check'); m.__file__ = p; sys.modules['universe_r3_check'] = m
-    exec(compile(src, p, 'exec'), m.__dict__)
-    return m
+    import universe_r3_check
+    return universe_r3_check
 
 
 def one(name, ent_all, noc):
@@ -43,7 +40,7 @@ def one(name, ent_all, noc):
     print('entries %d, outside the executable sections: %d' % (len(ent), sum(1 for a in ent if not ix(a))))
     if any(not ix(a) for a in ent): bad.append('entries outside executable sections')
     # (a)(b)(c): the exe's gate
-    r3 = load_r3(); sys.argv = ['universe_r3_check.py', fd] + (['--no-c'] if noc else [])
+    sys.modules.pop('universe_r3_check', None); r3 = load_r3(); sys.argv = ['universe_r3_check.py', fd] + (['--no-c'] if noc else [])
     try: rc = r3.main()
     except SystemExit as e: rc = e.code
     if rc: bad.append('universe_r3_check (a)(b)(c) failed')

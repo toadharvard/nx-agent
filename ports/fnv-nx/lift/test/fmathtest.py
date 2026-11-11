@@ -23,7 +23,7 @@ gmpy2.get_context().emin = -(1 << 40)
 DRIVER = r'''
 #include "fmath.h"
 typedef unsigned long long u64;
-enum { O_SIN, O_COS, O_TAN, O_ATAN2, O_2XM1, O_YL2X, O_YL2XP1, O_SCALE, O_XTRACT, O_FPREM, O_FPREM1, O_SINCOS };
+enum { O_SIN, O_COS, O_TAN, O_ATAN2, O_2XM1, O_YL2X, O_YL2XP1, O_SCALE, O_XTRACT, O_FPREM, O_FPREM1, O_SINCOS, O_ACOS, O_ASIN, O_ATAN, O_COSH, O_SINH, O_TANH, O_EXP, O_LOG, O_POW, O_FMOD, O_SQRT };
 void run_m(int op, unsigned n, const double *a, const double *b, double *o1, double *o2, unsigned *fl, unsigned *cf) {
   for (unsigned i = 0; i < n; i++) { unsigned f = 0, c = 0; double r = 0, r2 = 0;
     switch (op) {
@@ -39,6 +39,17 @@ void run_m(int op, unsigned n, const double *a, const double *b, double *o1, dou
     case O_FPREM: r = fnvl_m_fprem(a[i], b[i], 0, &c, &f); break;
     case O_FPREM1: r = fnvl_m_fprem(a[i], b[i], 1, &c, &f); break;
     case O_SINCOS: fnvl_m_sincos(a[i], &r2, &r, &f); break;       /* o1 = cos (ST0), o2 = sin (ST1) like the x87 */
+    case O_ACOS: r = fnvl_m_acos(a[i], &f); break;
+    case O_ASIN: r = fnvl_m_asin(a[i], &f); break;
+    case O_ATAN: r = fnvl_m_atan(a[i], &f); break;
+    case O_COSH: r = fnvl_m_cosh(a[i], &f); break;
+    case O_SINH: r = fnvl_m_sinh(a[i], &f); break;
+    case O_TANH: r = fnvl_m_tanh(a[i], &f); break;
+    case O_EXP: r = fnvl_m_exp(a[i], &f); break;
+    case O_LOG: r = fnvl_m_log(a[i], &f); break;
+    case O_POW: r = fnvl_m_pow(a[i], b[i], &f); break;
+    case O_FMOD: r = fnvl_m_fmod(a[i], b[i], &f); break;
+    case O_SQRT: r = fnvl_m_sqrt(a[i], &f); break;
     }
     o1[i] = r; o2[i] = r2; fl[i] = f; cf[i] = c | ((op <= O_TAN || op == O_SINCOS) ? (fnvl_m_trig_big(a[i]) ? 0x400 : 0) : 0); } }
 unsigned bigflag(double x) { return fnvl_m_trig_big(x); }
@@ -55,7 +66,10 @@ int dbg_eval(int op, double a, double b, int nstart, unsigned *m, int *info) {
   switch (op) {
   case O_SIN: r1 = fnvl_m_sin(a, &f); break; case O_COS: r1 = fnvl_m_cos(a, &f); break; case O_TAN: r1 = fnvl_m_tan(a, &f); break;
   case O_ATAN2: r1 = fnvl_m_atan2(a, b, &f); break; case O_2XM1: r1 = fnvl_m_2xm1(a, &f); break;
-  case O_YL2X: r1 = fnvl_m_yl2x(a, b, &f); break; case O_YL2XP1: r1 = fnvl_m_yl2xp1(a, b, &f); break; default: break; }
+  case O_YL2X: r1 = fnvl_m_yl2x(a, b, &f); break; case O_YL2XP1: r1 = fnvl_m_yl2xp1(a, b, &f); break;
+  case O_ACOS: r1 = fnvl_m_acos(a, &f); break; case O_ASIN: r1 = fnvl_m_asin(a, &f); break; case O_ATAN: r1 = fnvl_m_atan(a, &f); break;
+  case O_COSH: r1 = fnvl_m_cosh(a, &f); break; case O_SINH: r1 = fnvl_m_sinh(a, &f); break; case O_TANH: r1 = fnvl_m_tanh(a, &f); break;
+  case O_EXP: r1 = fnvl_m_exp(a, &f); break; case O_LOG: r1 = fnvl_m_log(a, &f); break; case O_POW: r1 = fnvl_m_pow(a, b, &f); break; default: break; }
   (void)r1; (void)r2; (void)c; fm_hook = 0;
   if (!h_cnt) return 0;
   for (int i = 0; i < h_n; i++) m[i] = h_m[i];
@@ -77,10 +91,12 @@ void run_h(int op, unsigned n, const double *a, const double *b, double *o1, dou
     case O_FPREM: __asm__ volatile("fninit; fldl %4; fldl %3; fprem; fnstsw %2; fstpl %0; fstpl %1" : "=m"(r1), "=m"(r2), "=m"(s) : "m"(x), "m"(y) : "st", "st(1)"); break;
     case O_SINCOS: __asm__ volatile("fninit; fldl %3; fsincos; fnstsw %2; fstpl %0; fstpl %1" : "=m"(r1), "=m"(r2), "=m"(s) : "m"(x) : "st", "st(1)"); break;
     case O_FPREM1: __asm__ volatile("fninit; fldl %4; fldl %3; fprem1; fnstsw %2; fstpl %0; fstpl %1" : "=m"(r1), "=m"(r2), "=m"(s) : "m"(x), "m"(y) : "st", "st(1)"); break;
+    case O_FMOD: __asm__ volatile("fninit; fldl %4; fldl %3; 1: fprem; fnstsw %%ax; testw $0x400, %%ax; jnz 1b; fnstsw %2; fstpl %0; fstpl %1" : "=m"(r1), "=m"(r2), "=m"(s) : "m"(x), "m"(y) : "st", "st(1)", "ax", "cc"); break;
+    case O_SQRT: __asm__ volatile("sqrtsd %1, %0" : "=x"(r1) : "x"(x)); break;
     }
     o1[i] = r1; o2[i] = r2; sw[i] = s; } }
 '''
-OPS = {n: i for i, n in enumerate('sin cos tan atan2 2xm1 yl2x yl2xp1 scale xtract fprem fprem1 sincos'.split())}
+OPS = {n: i for i, n in enumerate('sin cos tan atan2 2xm1 yl2x yl2xp1 scale xtract fprem fprem1 sincos acos asin atan cosh sinh tanh exp log pow fmod sqrt'.split())}
 LIB = None
 
 

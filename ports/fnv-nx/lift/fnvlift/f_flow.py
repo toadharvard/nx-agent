@@ -25,6 +25,7 @@ def jump_out(cx, t, cond=None):
         cx.em('%s{ SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; goto after_tail; }' % (pre, hexs(t)))
     else:
         cx.kinds.add('jmp-direct-noentry')
+        cx.noentry.add(t)
         cx.em('%s{ c->ra=0x%xu; goto nonlocal; }' % (pre, t))
 
 
@@ -43,6 +44,7 @@ def h_call(cx, ins):
             cx.em('{ esp-=4; M32(esp)=0x%xu; SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal; }' % (cx.nxt, hexs(t), cx.nxt))
         else:       # not an entry (see jump_out): through the dispatcher
             cx.kinds.add('call-direct-noentry')
+            cx.noentry.add(t)
             cx.em('{ esp-=4; M32(esp)=0x%xu; SYNC_OUT; REGS(); fnvl_dispatch(0x%xu)(); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal; }' % (cx.nxt, t, cx.nxt))
     else:
         cx.kinds.add('import' if is_import(cx, o) else 'indcall')

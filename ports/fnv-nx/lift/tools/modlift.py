@@ -149,7 +149,7 @@ def run(arg):
     def lc_targets(e, ext):
         k = (e, ext)
         if k not in lcache:
-            lo, hi = e, e + ext; fh = hi + 0x1000; ins, tabs, tk, bad = LCore.explore(limg, lo, hi, limg.bytes(lo, fh - lo), e, (), fh); cs = {}; ts = {}; jx = set()
+            lo, hi = e, e + ext; fh = hi + 0x1000; ins, tabs, tk, bad = LCore.explore(limg, lo, hi, limg.bytes(lo, fh - lo), e, (), fh); cs = {}; ts = {}; jx = set(); ft = set()
             for a_, g in sorted(ins.items()):
                 m = g.mnemonic; o = g.operands
                 if m == 'call' and o[0].type == X.X86_OP_IMM: cs.setdefault(o[0].imm & M32, a_)
@@ -157,7 +157,9 @@ def run(arg):
                     t = o[0].imm & M32
                     if not lo <= t < hi: ts.setdefault(t, a_)
                 elif m == 'jecxz' and not lo <= (o[0].imm & M32) < hi: jx.add(a_)
-            lcache[k] = (cs, ts, jx)
+                if m not in ('jmp', 'ret', 'retf', 'hlt', 'ud2') and not (m == 'int3' and a_ + g.size >= hi) and a_ + g.size not in ins and a_ + g.size not in bad:      # explore's own stop rule: the path falls out of what was decoded
+                    ts.setdefault(a_ + g.size, a_); ft.add(a_ + g.size)         # a fall-through is a control transfer to its successor, like `jmp nxt` (f_flow.jump_out)
+            lcache[k] = (cs, ts, jx, ft)
         return lcache[k]
     while True:
         while True:
@@ -165,9 +167,9 @@ def run(arg):
             ch = tail_pass() + eh.scan()
             if not queue and not ch: break
         E = es(); NR, res = codemap.noreturn_lfp(E, trav, {eh.thrower} & set(ent)); exts = {e: res[e][0] for e in E}; edges = {e: res[e][1] for e in E}
-        rounds += 1; n_before = n_before or len(E); viol = {}; outside = {}; jxs = set()
+        rounds += 1; n_before = n_before or len(E); viol = {}; outside = {}; jxs = set(); ftall = set()
         for e in E:
-            cs, ts, jx = lc_targets(e, sum(dec[a][0] for a in exts[e])); jxs |= {(e, x) for x in jx}
+            cs, ts, jx, ft = lc_targets(e, sum(dec[a][0] for a in exts[e])); jxs |= {(e, x) for x in jx}; ftall |= ft
             for kd, T in (('call', cs), ('tail', ts)):
                 for t, a_ in T.items():
                     if t in ent: continue
@@ -175,7 +177,7 @@ def run(arg):
                     else: outside[e, a_, t] = kd
         if not viol or rounds > 300: break
         for t, k in sorted(viol.items()):
-            closure_new['first-ud' if t in ud or t in xf else 'mid-instruction' if cov[t - T0] == 2 else 'other'] += 1; clos[t] = k; add(t, k)
+            closure_new['fall-through' if t in ftall else 'first-ud' if t in ud or t in xf else 'mid-instruction' if cov[t - T0] == 2 else 'other'] += 1; clos[t] = k; add(t, k)
     seedn = {eh.thrower} & set(ent)
     outside = sorted(outside)
     # ---- provenance: proven roots + control-transfer consumers (jump tables, vptr-store runs) found in proven code

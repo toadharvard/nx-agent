@@ -73,6 +73,7 @@ class Ctx:
         self.usesfs = False
         self.kinds = set()
         self.selfcalls = {}
+        self.noentry = set()                     # direct targets (calls, jumps, fall-throughs) routed to the dispatcher because they are not entries (meta; check (c): all outside the executable sections)
         self.calls, self.tails = set(), set()    # direct call targets / jumps to entries outside the function (meta, closure of the bench)
         self.nonlocal_ = False                   # a `goto nonlocal` / `goto after_tail` was emitted: the function needs the loop
         self.imports = False
@@ -341,8 +342,9 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
                 em('goto %s;' % cx.lab(nxt))
             elif not strict:
                 em('SYNC_OUT; fnvl_raise(2,0x%xu); return;' % nxt)
-            else:
-                raise Unsupported('falls into undecoded bytes at %x' % nxt)
+            else:       # the successor is neither decoded here nor undecodable: control passes to it exactly like `jmp nxt` (one rule, f_flow.jump_out)
+                from . import f_flow
+                f_flow.jump_out(cx, nxt)
         if cx.xm == 's':
             xc.fix_lines(cx, a, n0)
     for a in sorted(bad):      # bytes that do not decode: the CPU raises #UD there
@@ -365,7 +367,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     if cx.usesfs:
         kinds.add('fs')
     meta = dict(addr=start, size=size, selfcalls=cx.selfcalls, callrets=cx.callrets, kinds=sorted(kinds), n=len(order), tables=len(tables),
-                calls=sorted(cx.calls), tails=sorted(cx.tails), tabtails=tab_tails(img, insns, lo, hi))
+                calls=sorted(cx.calls), tails=sorted(cx.tails), noentry=sorted(cx.noentry), tabtails=tab_tails(img, insns, lo, hi))
     return txt, meta
 
 
