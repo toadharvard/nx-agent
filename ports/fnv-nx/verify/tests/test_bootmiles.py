@@ -172,9 +172,12 @@ def progress_cases():
     case("11 unknown part id is an error", raises(KeyError, pr.event, "nope", 1) is not None)
 
 
-def build_elf(path, syms):
+def build_elf(path, syms, local=()):
     names = b"\0"
     ents = [b"\0" * 16]
+    for n, a in local:   # STB_LOCAL symbols (info 0x02): the same name may repeat at other values (compiler clones .isra.0)
+        ents.append(struct.pack("<IIIBBH", len(names), a, 4, 0x02, 0, 1))
+        names += n.encode() + b"\0"
     for n, a in syms.items():
         ents.append(struct.pack("<IIIBBH", len(names), a, 4, 0x12, 0, 1))
         names += n.encode() + b"\0"
@@ -217,8 +220,40 @@ def cli_cases():
         case("14 CLI -h", h.returncode == 0 and "resolve" in h.stdout)
 
 
+def entries_cases():
+    tid = "ab" * 32
+    txt = ("0000fff0\tfnvl_rt_a\timport\n00401000\tL_401000\tcode\n00402000\tL_402000\n# note\n# table_id " + tid + "\n")
+    m = bm.load_manifest(txt)
+    case("E1 3-column entries: code map, import map, table id", dict(m) == {0x401000: "L_401000", 0x402000: "L_402000"}
+         and m.imports == {0xfff0: "fnvl_rt_a"} and m.table_id == tid, (dict(m), m.imports, m.table_id))
+    case("E2 2-column manifest has no imports and no id", bm.load_manifest("1000\tx\n").imports == {} and bm.load_manifest("1000\tx\n").table_id is None)
+    for k, t in (("unknown kind", "1000\tx\tweird\n"), ("4 columns", "1000\tx\tcode\textra\n"),
+                 ("addr in both kinds", "1000\tx\tcode\n1000\ty\timport\n"), ("symbol in both kinds", "1000\tx\tcode\n2000\tx\timport\n"),
+                 ("bad table id", "1000\tx\tcode\n# table_id zz\n"), ("two table ids", "# table_id " + tid + "\n# table_id " + tid + "\n")):
+        msg = raises(bm.ManifestError, bm.load_manifest, t)
+        case("E3 ManifestError: " + k, msg is not None and not msg.startswith("WRONG"), msg)
+    w = bm.resolve(bm.load_table("keycall any call 0xfff0\nexe any call 0x401000\n"), m, {"fnvl_rt_a": 0x100, "L_401000": 0x200}, 0x1000)
+    case("E4 call on an import key resolves through the same table", w["pc"] == {0x1100: ["keycall#0"], 0x1200: ["exe#0"]}, w["pc"])
+    msg = raises(bm.ResolveError, bm.resolve, bm.load_table("k any call 0xfff8\n"), m, {}, 0)
+    case("E5 an address in neither map is unresolved", msg is not None and "0xfff8" in msg, msg)
+
+
+def local_cases():
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "l.elf")
+        build_elf(p, {"L_1": 0x100}, local=[("f.isra.0", 0x10), ("f.isra.0", 0x20), ("only", 0x30), ("only", 0x30)])
+        s = bm.read_symtab(p)
+        case("L1 read_symtab: local names at two values are ambiguous, a repeated local at one value is kept",
+             dict(s) == {"L_1": 0x100, "only": 0x30} and s.ambiguous == {"f.isra.0": [0x10, 0x20]}, (dict(s), s.ambiguous))
+        build_elf(p, {"L_1": 0x100}, local=[("L_1", 0x10)])
+        case("L2 a global symbol wins over a local of the same name", dict(bm.read_symtab(p)) == {"L_1": 0x100})
+        build_elf(p, {"L_1": 0x100}, local=[("f.isra.0", 0x10), ("f.isra.0", 0x20)])
+        msg = raises(bm.ResolveError, bm.resolve, bm.load_table("k any sym f.isra.0\n"), {}, bm.read_symtab(p), 0)
+        case("L3 a table row that needs an ambiguous name is reported as ambiguous with the values", msg is not None and "ambiguous" in msg and "0x20" in msg, msg)
+
+
 def main():
-    for f in (table_cases, resolve_cases, progress_cases, cli_cases):
+    for f in (table_cases, resolve_cases, progress_cases, cli_cases, entries_cases, local_cases):
         f()
     print(f"{'FAIL' if FAILS else 'PASS'}: {len(FAILS)} failed")
     return 1 if FAILS else 0

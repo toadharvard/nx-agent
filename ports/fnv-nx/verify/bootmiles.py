@@ -18,7 +18,11 @@ carrying the file line number):  <name> <group> <kind> <target> [main-thread]
 Milestone order is the order of first appearance of the names. Part ids are "<name>#<k>", k counting the name's lines.
 A duplicate identical part, a group id used with both all and seq under one name, or an empty table is a TableError.
 
-Entry manifest: `exe_addr_hex<TAB>symbol` per row; a duplicated address or symbol is a ManifestError.
+Entry manifest: `addr_hex<TAB>symbol[<TAB>kind]` per row, kind `code` (default; an exe code address) or `import` (an
+import key, never exe code); a duplicated address or symbol over both kinds, an unknown kind, or any other column count is
+a ManifestError. The result is a Manifest: the dict of the code rows, plus .imports (the import rows, a separate map) and
+.table_id (from the one optional `# table_id <64 hex>` comment line; None when absent). call/ret/sym targets resolve in the
+code map first, then in the import map, so a milestone on an import key is possible.
 
 resolve() turns the table into {"pc", "ret", "store", "host"}: name -> part ids in table order (guest addresses are the
 ELF symbol value + bias; call and sym parts go to "pc", the three return kinds to "ret"). Every exe address missing from
@@ -58,6 +62,13 @@ class ResolveError(ValueError):
 
 class ElfError(ValueError):
     pass
+
+
+class Symbols(dict):
+    """{name: value} of the unambiguous symbols; .ambiguous {name: sorted values} of the local-only names at several values"""
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.ambiguous = {}
 
 
 class Table:
@@ -121,24 +132,43 @@ def load_table(text):
     return Table([{"name": n, "parts": parts[n]} for n in order])
 
 
+class Manifest(dict):
+    """the code rows {exe_addr: symbol}; .imports {key: symbol}; .table_id str or None"""
+    imports = {}
+    table_id = None
+
+
 def load_manifest(text):
-    out, syms = {}, {}
+    out, syms = Manifest(), {}
+    out.imports, out.table_id = {}, None
     for no, line in enumerate(text.split("\n"), 1):
+        if line.startswith("# table_id "):
+            tid = line[len("# table_id "):].strip()
+            if out.table_id is not None or len(tid) != 64 or any(c not in "0123456789abcdef" for c in tid):
+                raise ManifestError(f"manifest line {no}: bad or repeated table_id {tid!r} (one 64-digit lowercase hex)")
+            out.table_id = tid
+            continue
         if not line.strip() or line.startswith("#"):
             continue
         f = line.rstrip("\r").split("\t")
-        if len(f) != 2 or not f[1]:
-            raise ManifestError(f"manifest line {no}: expected '<exe_addr_hex><TAB><symbol>'")
+        if len(f) not in (2, 3) or not f[1] or (len(f) == 3 and f[2] not in ("code", "import")):
+            raise ManifestError(f"manifest line {no}: expected '<addr_hex><TAB><symbol>[<TAB>code|import]'")
+        target = out.imports if len(f) == 3 and f[2] == "import" else out
         try:
             a = int(f[0], 16)
         except ValueError:
             raise ManifestError(f"manifest line {no}: bad hex address {f[0]!r}") from None
-        if a in out:
+        if a in out or a in out.imports:
             raise ManifestError(f"manifest line {no}: duplicate address 0x{a:x}")
         if f[1] in syms:
             raise ManifestError(f"manifest line {no}: duplicate symbol {f[1]!r} (also 0x{syms[f[1]]:x})")
-        out[a], syms[f[1]] = f[1], a
+        target[a], syms[f[1]] = f[1], a
     return out
+
+
+def _why(symbols, name):
+    amb = getattr(symbols, "ambiguous", {}).get(name)
+    return "not in the ELF" if amb is None else "is ambiguous in the ELF (local symbols at %s)" % ", ".join("0x%x" % v for v in amb)
 
 
 def resolve(table, manifest, symbols, bias=0):
@@ -153,17 +183,18 @@ def resolve(table, manifest, symbols, bias=0):
         for p in m["parts"]:
             k, t = p["kind"], p["target"]
             if k in ("call", "ret", "retzero", "rettrue"):
-                if t not in manifest:
+                imports = getattr(manifest, "imports", {})
+                if t not in manifest and t not in imports:
                     need(f"exe address 0x{t:x} not in the manifest")
                     continue
-                sym = manifest[t]
+                sym = manifest[t] if t in manifest else imports[t]
                 if sym not in symbols:
-                    need(f"symbol {sym} (manifest entry of 0x{t:x}) not in the ELF")
+                    need(f"symbol {sym} (manifest entry of 0x{t:x}) " + _why(symbols, sym))
                     continue
                 watch["pc" if k == "call" else "ret"].setdefault(symbols[sym] + bias, []).append(p["id"])
             elif k == "sym":
                 if t not in symbols:
-                    need(f"symbol {t} not in the ELF")
+                    need(f"symbol {t} " + _why(symbols, t))
                     continue
                 watch["pc"].setdefault(symbols[t] + bias, []).append(p["id"])
             else:
@@ -217,7 +248,10 @@ class Progress:
 
 
 def read_symtab(path):
-    """ELF32 little-endian .symtab -> {name: value} (defined, named symbols; the same name at two values is an error).
+    """ELF32 little-endian .symtab -> Symbols {name: value} (defined, named symbols). Rule: a GLOBAL/WEAK name at two values is
+    an ElfError (the linker forbids it); a name defined only by STB_LOCAL symbols may repeat at several values (compiler clones
+    such as `f.isra.0`, one per translation unit): it is AMBIGUOUS, left out of the map and listed in .ambiguous, and resolve()
+    reports it only if a table row needs it; a global name wins over local symbols of the same name (as in a link).
     AArch64 mapping symbols ($x, $d, $x.<any>, $d.<any>: AAELF64 "Mapping symbols") mark code/data runs, name nothing
     and repeat by design: they are left out."""
     with open(path, "rb") as f:
@@ -232,18 +266,27 @@ def read_symtab(path):
         raise ElfError(f"{path}: expected exactly one .symtab section, found {len(tabs)}")
     _, _, _, _, off, size, link, _, _, ent = tabs[0]
     stroff, strsize = secs[link][4], secs[link][5]
-    out = {}
+    out, loc = {}, {}
     for o in range(off, off + size, ent or 16):
-        nm, val, _, _, _, shndx = struct.unpack_from("<IIIBBH", d, o)
+        nm, val, _, info, _, shndx = struct.unpack_from("<IIIBBH", d, o)
         if nm == 0 or shndx == 0:
             continue
         e = d.index(b"\0", stroff + nm, stroff + strsize)
         name = d[stroff + nm:e].decode("ascii")
         if name in ("$x", "$d") or name[:3] in ("$x.", "$d."):
             continue
-        if out.setdefault(name, val) != val:
+        if info >> 4 == 0:
+            loc.setdefault(name, set()).add(val)
+        elif out.setdefault(name, val) != val:
             raise ElfError(f"{path}: symbol {name} defined at two values (0x{out[name]:x}, 0x{val:x})")
-    return out
+    res = Symbols(out)
+    for name, vals in loc.items():
+        if name not in out:
+            if len(vals) == 1:
+                res[name] = next(iter(vals))
+            else:
+                res.ambiguous[name] = sorted(vals)
+    return res
 
 
 def main(argv):
@@ -262,7 +305,7 @@ def main(argv):
         with open(a.manifest) as f:
             manifest = load_manifest(f.read())
         w = resolve(table, manifest, read_symtab(a.elf), a.bias)
-        doc = {"format": FORMAT, "bias": a.bias,
+        doc = {"format": FORMAT, "bias": a.bias, "manifest_id": manifest.table_id,
                "milestones": [{"name": m["name"], "parts": [{k: (f"0x{p[k]:x}" if k == "target" and isinstance(p[k], int) else p[k])
                                                               for k in ("id", "group", "kind", "target", "main")}
                                                              for p in m["parts"]]} for m in table.milestones]}
