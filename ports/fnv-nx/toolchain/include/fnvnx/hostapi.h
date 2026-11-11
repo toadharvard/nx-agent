@@ -299,7 +299,7 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
  *
  * ext_call (slot): module >= 64 or not registered -> NO_MODULE (-255); fn > UINT32_MAX -> NO_SERVICE (-254); nargs > UINT32_MAX counts as
  *   UINT32_MAX; host_ext.inc:h_ext_call, fnvnx_host_register_ext (a null handler or a taken module: -1)      test:total_ext test:test_ext_and_map
- * module 11, platform_ext (host_platform.inc, one row per service); fn 0 and fn >= 16 and fn 10 (not served) -> NO_SERVICE (-254):
+ * module 11, platform_ext (host_platform.inc, one row per service); fn 0, fn 10 (not served) and fn >= 35 -> NO_SERVICE (-254):
  *   test:total_unknown test:total_nargs test:total_declared
  *  1 CPU_BOOST          n=1  0 set / already that mode | 1 boost_loading=0 | the Horizon result of appletSetCpuBoostMode, mode unchanged
  *                            host_platform.inc:pf_cpu_boost,set_cpu_boost                                    test:cpu_boost
@@ -329,6 +329,13 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
  *                            host_section.inc:host_section_create,_map,_unmap,_free                           test:host_section_test test:via_dispatch_section
  * 15 UNMAP_FIXED        n=3  0 | 0xCC01 | 0xCA01 | 0xD401 (wraps, not exactly one live map_fixed) | kernel
  *                            host_vm.inc:h_unmap_fixed                                                        test:unmapfixed_args test:via_dispatch_unmap_fixed
+ * 16..33 SOCK_SOCKET SOCK_CLOSE SOCK_BIND SOCK_LISTEN SOCK_ACCEPT SOCK_CONNECT SOCK_SENDTO SOCK_RECVFROM SOCK_SETSOCKOPT SOCK_GETSOCKOPT
+ *         SOCK_POLL SOCK_SHUTDOWN SOCK_GETSOCKNAME SOCK_GETPEERNAME SOCK_GETFL SOCK_SETFL SOCK_GAI_OPEN SOCK_GAI_FETCH   n = the count each service states (SOCK_SOCKET 3, CLOSE 1, BIND 2, LISTEN 2, ACCEPT 2, CONNECT 2, SENDTO 5, RECVFROM 5,
+ *                            SETSOCKOPT 5, GETSOCKOPT 5, POLL 3, SHUTDOWN 2, GETSOCKNAME 2, GETPEERNAME 2, GETFL 1, SETFL 2, GAI_OPEN 4, GAI_FETCH 3)
+ *                            value >= 0 | -(wire errno, sockwire.h); a wrong nargs -> -FNVNX_WE_INVAL (host_sock_call's own check, not BAD_NARGS)
+ *                            host_sock.inc:host_sock_call (the platform lead's, verbatim)                      test:via_dispatch_sock test:total_declared
+ * 34 TZ_AT              n=2  0 | 1 (the time service has no zone data for that instant)
+ *                            host_platform.inc:pf_tz_at (the platform lead's code)                           test:tz_at
  * VM services and the sections through the dispatch (argument mapping): test:via_dispatch_vm.
  *
  * FnvnxHostApi slots: the results are stated at each slot above. Host function (file) and tests; "-" = a direct libnx / newlib call
