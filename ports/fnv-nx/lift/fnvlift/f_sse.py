@@ -2,7 +2,7 @@
 (and no earlier handler took the insn); mnemonics without such an operand (prefetch, ldmxcsr, movnti, emms) register with @op.
 Integer SIMD and MMX are in f_simd_int.py and register in the same SSE table.  The semantics are in rt/fnvl.h (sse_* helpers).
 Vector ops are emitted as `{ [u32 mx=c->mxcsr;] xmm_t d_=DEST, s_=SOURCE, r_=d_; <lane statements> WRITEBACK }`: d_/s_ are copies, so
-aliasing operands are safe; an mm operand is an xmm_t whose low half is c->mm[k]."""
+aliasing operands are safe; an mm operand is an xmm_t whose low half is the significand of the physical x87 register k (MMR / MMW, rt/fnvl_x87.h: MMX aliases the x87 file)."""
 import re
 from capstone import x86 as X
 from .core import op, fallback, Unsupported, SKIP
@@ -38,7 +38,7 @@ def vsrc(cx, ins, o):
     if isx(ins, o):
         return 'x%d' % vreg(ins, o)
     if ismm(ins, o):
-        return 'mmx_x(c->mm[%d])' % vreg(ins, o)
+        return 'mmx_x(MMR(%d))' % vreg(ins, o)
     if o.type != MEM:
         raise Unsupported('vector source operand')
     return 'MX(%s)' % cx.ea(ins, o) if o.size == 16 else 'mmx_x(M%d(%s))' % (o.size * 8, cx.ea(ins, o))
@@ -49,7 +49,7 @@ def vec(cx, ins, d0, s1, body):
     if isx(ins, d0):
         dr, dw = 'x%d' % vreg(ins, d0), 'x%d=r_;' % vreg(ins, d0)
     else:
-        dr, dw = 'mmx_x(c->mm[%d])' % vreg(ins, d0), 'c->mm[%d]=r_.q[0];' % vreg(ins, d0)
+        dr, dw = 'mmx_x(MMR(%d))' % vreg(ins, d0), 'MMW(%d,r_.q[0]);' % vreg(ins, d0)
     cx.em('{ %sxmm_t d_=%s, s_=%s, r_=d_; %s %s }' % ('u32 mx=c->mxcsr; ' if re.search(r'\bmx\b', body) else '', dr,
                                                       vsrc(cx, ins, s1) if s1 is not None else 'd_', body, dw))
 
@@ -75,7 +75,8 @@ def h_sse(cx, ins):
         cx.kinds.add('sse')
     if any(ismm(ins, o) for o in cx.ops):
         cx.kinds.add('mmx')
-        cx.em('MMX_TOUCH();')
+        if cx.a not in cx.mmx_ok:               # f_x87_ctl.mmx_prepass: not proven canonical on every path to here
+            cx.em('MMX_ENTER();')
     h = SSE.get(cx.m)
     if h is None:
         raise Unsupported('sse ' + cx.m)
@@ -121,7 +122,7 @@ def scal(cx, ins, o, bits):
     if isx(ins, o):
         return 'x%d.%s[0]' % (vreg(ins, o), 'u' if bits == 32 else 'q')
     if ismm(ins, o):
-        return ('(u32)c->mm[%d]' if bits == 32 else 'c->mm[%d]') % vreg(ins, o)
+        return ('(u32)MMR(%d)' if bits == 32 else 'MMR(%d)') % vreg(ins, o)
     return cx.rd(ins, o, bits // 8) if o.type == MEM else cx.rd(ins, o)
 
 
@@ -132,14 +133,14 @@ def h_movdq(cx, ins, d0, s1):
     if isx(ins, d0):
         cx.em('x%d=mmx_x(%s);' % (vreg(ins, d0), v))
     elif ismm(ins, d0):
-        cx.em('c->mm[%d]=%s;' % (vreg(ins, d0), v))
+        cx.em('MMW(%d,%s);' % (vreg(ins, d0), v))
     else:
         cx.em(cx.wr(ins, d0, v) if bits == 32 else 'M64(%s)=%s;' % (cx.ea(ins, d0), v))
 
 
 @sse_op('movdq2q', 'movq2dq')
 def h_movdq2(cx, ins, d0, s1):
-    cx.em('x%d=mmx_x(c->mm[%d]);' % (vreg(ins, d0), vreg(ins, s1)) if cx.m == 'movq2dq' else 'c->mm[%d]=x%d.q[0];' % (vreg(ins, d0), vreg(ins, s1)))
+    cx.em('x%d=mmx_x(MMR(%d));' % (vreg(ins, d0), vreg(ins, s1)) if cx.m == 'movq2dq' else 'MMW(%d,x%d.q[0]);' % (vreg(ins, d0), vreg(ins, s1)))
 
 
 @op('movnti')

@@ -102,8 +102,9 @@ extern "C" u32 fnvl_trace_sw(u32 fsw);   /* test stand: reports the FSW delivere
    sets invalid + stack fault and gives the real indefinite. */
 static inline fv dyn_rd(u32 i){ fv *p=&c->fx[(c->ftop+i)&7]; if(__builtin_expect(!p->k,0)){ c->fex|=0x41; return FV_INDEF; } return *p; }
 static inline void dyn_push(fv v){ u32 t=(c->ftop-1)&7; if(__builtin_expect(c->fx[t].k!=0,0)){ c->fex|=0x41; v=FV_INDEF; } c->ftop=t; c->fx[t]=v; }
-static inline void dyn_pop(void){ fv *p=&c->fx[c->ftop&7]; if(__builtin_expect(!p->k,0)) c->fex|=0x41; p->k=0; c->ftop=(c->ftop+1)&7; }
-static inline void fnvl_x87_init(void){ for(int i=0;i<8;i++) c->fx[i].k=0; c->ftop=0; c->fcw=0x37f; c->fex=0; c->fip=c->fdp=0; fnvl_fp_set_rc_x87(0); fnvl_fp_x87_clear(); }
+static inline void fv_free(fv *p){ if(p->k){ if(p->k!=FK_M80){ fnvl_f80 x=fv_x(*p); p->v=x.m; p->e=x.se; } p->k=0; } }   /* tag := empty; the register KEEPS its 80-bit image (MMX reads it, SDM 9.2) */
+static inline void dyn_pop(void){ fv *p=&c->fx[c->ftop&7]; if(__builtin_expect(!p->k,0)) c->fex|=0x41; fv_free(p); c->ftop=(c->ftop+1)&7; }
+static inline void fnvl_x87_init(void){ for(int i=0;i<8;i++) fv_free(&c->fx[i]); c->ftop=0; c->fcw=0x37f; c->fex=0; c->fip=c->fdp=0; fnvl_fp_set_rc_x87(0); fnvl_fp_x87_clear(); }
 /* fbld / fbstp: packed BCD (rt/x87.c; A-BCD: digits above 9 follow the arithmetic formula d*10^k). The value of an 18-digit number is an integer below 10^18: exact in the M80 carrier. */
 static inline fv fv_ldbcd(u64 lo,u32 hi){ u8 b[10]; u16 h=(u16)hi; __builtin_memcpy(b,&lo,8); __builtin_memcpy(b+8,&h,2); fnvl_f80 r=fnvl_x_from_bcd(b); return fvmk(FK_M80,r.m,r.se); }
 static inline void fv_stbcd(fv a,u64 *lo,u64 *hi){ u8 b[10]; u32 f=0; u16 h; fnvl_x_to_bcd(fv_x(a),c->fcw,b,&f); __builtin_memcpy(lo,b,8); __builtin_memcpy(&h,b+8,2); *hi=h; FM_FL(f); }
@@ -141,3 +142,17 @@ static inline u32 fx_env_ld(u32 a,u32 w,u32 *ftw){ u32 fsw=M16(a+w); *ftw=M16(a+
   for(u32 p_=0;p_<8;p_++){ if(((ftw_>>(2*p_))&3)==3) c->fx[p_].k=0; else if(!c->fx[p_].k) c->fx[p_]=FV_INDEF; } }while(0)
 #define FRSTOR(A,D32) do{ u32 ftw_, a_=(A), r_=a_+((D32)?28u:14u), fsw_=fx_env_ld(a_,(D32)?4u:2u,&ftw_); c0=(fsw_>>8)&1; c2=(fsw_>>10)&1; c3=(fsw_>>14)&1; \
   for(u32 i_=0;i_<8;i_++){ u32 p_=(c->ftop+i_)&7; if(((ftw_>>(2*p_))&3)==3) c->fx[p_].k=0; else c->fx[p_]=fv_ld80(M64(r_+10*i_),M16(r_+10*i_+8u)); } }while(0)
+
+/* MMX aliasing (SDM Vol 1 9.2 "MMX state and the x87 FPU", 12.2): MM0-MM7 are the 64-bit significands of the PHYSICAL x87 registers R0-R7 (c->fx[0..7]), there is no second register file.
+   Any MMX instruction except EMMS sets TOP = 0 and the whole tag word to valid (00); a write of MMi sets the exponent and sign field of Ri (bits 64-79) to all ones; a read sees the significand.
+   MMX_ENTER makes every carrier an M80 image (a carrier of another kind is converted exactly, an empty register contributes the 80-bit image it kept, see fv_free) and TOP = 0; after it
+   MMR(i) = c->fx[i].v and MMW(i,v) are the whole of the architectural effect. EMMS: all tags empty, contents and TOP unchanged. The lifter emits MMX_ENTER before an MMX instruction unless a
+   static dataflow proves the registers are already canonical on every path (f_x87_ctl.mmx_prepass). A-RESUME: a guest exception handler that resumes (ContinueExecution) into an MMX region does not
+   leave the interrupted x87/MMX register file in another carrier format (a program that did would read clobbered MMX registers on the real CPU too). A-STALE: the bits of a register popped by a
+   static-stack function are not written back (the static slot is a C local), so an MMX read of such a register that no MMX write and no dynamic-stack pop produced reads older bits (undefined
+   data on the real CPU as well: no correct program's result depends on it). */
+static inline void mmx_canon(void){ for(int i=0;i<8;i++){ fv *p=&c->fx[i]; if(p->k!=FK_M80){ if(p->k){ fnvl_f80 x=fv_x(*p); p->v=x.m; p->e=x.se; } p->k=FK_M80; } } }
+#define MMX_ENTER() do{ c->ftop=0; mmx_canon(); }while(0)
+#define MMX_EMMS() do{ for(int i_=0;i_<8;i_++) fv_free(&c->fx[i_]); }while(0)
+#define MMR(i) (c->fx[(i)].v)
+#define MMW(i,val) do{ u64 v_=(val); c->fx[(i)].v=v_; c->fx[(i)].e=0xffffu; }while(0)

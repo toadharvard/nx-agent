@@ -27,10 +27,7 @@ def espd(i):
         return 4
     if m in ('add', 'sub') and o[0].type == X.X86_OP_REG and i.reg_name(o[0].reg) == 'esp':
         return None if o[1].type != X.X86_OP_IMM else (o[1].imm if m == 'add' else -o[1].imm)
-    try:
-        return None if 'esp' in [i.reg_name(r) for r in i.regs_access()[1]] else 0
-    except Exception:
-        return None
+    return None if 'esp' in [i.reg_name(r) for r in i.regs_access()[1]] else 0      # regs_access raises capstone.CsError only without detail (never here): a failure propagates
 
 
 def apply(vs, A, O):
@@ -110,10 +107,7 @@ def step(F, p, loc, dep):
         return {('?', 'call')}
     if k == 'b' and m == 'mov' and o[0].type == X.X86_OP_REG and i.reg_name(o[0].reg) == 'ebp' and o[1].type == X.X86_OP_REG and i.reg_name(o[1].reg) == 'esp':
         return ('go', p, ('s',) + loc[1:])
-    try:
-        W = {SUB[i.reg_name(r)][0] for r in i.regs_access()[1] if i.reg_name(r) in SUB}
-    except Exception:
-        return {('?', 'regs')}
+    W = {SUB[i.reg_name(r)][0] for r in i.regs_access()[1] if i.reg_name(r) in SUB}
     if k == 'r':
         if loc[1] not in W:
             return ('go', p, loc)
@@ -269,10 +263,7 @@ def statclass(F, x):
             return 'status-escapes', 'walk-limit'
         i = F.ins[a]; m = mn(i); o = i.operands; lo, ah, fl = st
         nm = [i.reg_name(op.reg) if op.type == X.X86_OP_REG else None for op in o]
-        try:
-            rd = {SUB[i.reg_name(r)][0] for r in i.regs_access()[0] if i.reg_name(r) in SUB}
-        except Exception:
-            return 'status-escapes', 'regs'
+        rd = {SUB[i.reg_name(r)][0] for r in i.regs_access()[0] if i.reg_name(r) in SUB}
         if m == 'call':
             if (lo or ah == 1) and o[0].type == X.X86_OP_IMM and ((o[0].imm & M32) in EAXLIVE or (o[0].imm & M32) not in KNOWN):
                 return 'status-escapes', 'call-reads-eax'
@@ -311,10 +302,7 @@ def statclass(F, x):
                 pass
             else:
                 return 'status-escapes', 'use-' + m
-        try:
-            wr = [i.reg_name(r) for r in i.regs_access()[1]]
-        except Exception:
-            return 'status-escapes', 'regs'
+        wr = [i.reg_name(r) for r in i.regs_access()[1]]
         for w in wr:
             if w in ('eax', 'ax'):
                 lo = ah = 0
@@ -356,10 +344,7 @@ def eaxscan(F):
         if m in ('ret', 'retf'):
             continue
         if m in IMPL or 'ax' in i.op_str or 'al' in i.op_str or 'ah' in i.op_str:
-            try:
-                r, w = [{i.reg_name(x) for x in g} for g in i.regs_access()[:2]]
-            except Exception:
-                rd = True; break
+            r, w = [{i.reg_name(x) for x in g} for g in i.regs_access()[:2]]
             if r & {'eax', 'ax', 'al', 'ah'} and not (m in ('xor', 'sub') and len(o) == 2 and o[0].type == o[1].type == X.X86_OP_REG and o[0].reg == o[1].reg):
                 rd = True; break
             if 'eax' in w or 'ax' in w and 0:

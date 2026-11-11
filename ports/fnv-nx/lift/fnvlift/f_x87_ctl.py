@@ -84,7 +84,13 @@ def succs(cx, a, ins, m):
 def prepass(cx, img, force, entry):
     """sets cx.xm ('s' static / 'd' dynamic / None: no x87), cx.xd (depth before each instruction), cx.xa (after), cx.xmax, cx.xe (entry depth)"""
     cx.xm, cx.xd, cx.xa, cx.xmax, cx.xe, cx.xwhy = None, {}, {}, 0, entry or 0, ''
-    if not any(0xd8 <= i.opcode[0] <= 0xdf for i in cx.insns.values()):
+    cx.mmx_ok = set()
+    has_x87 = any(0xd8 <= i.opcode[0] <= 0xdf for i in cx.insns.values())
+    if any(is_mmx(i) for i in cx.insns.values()):
+        mmx_prepass(cx)
+        if has_x87:
+            force = 'dyn'            # MMX aliases the physical x87 registers: the static stack keeps them in C locals, so a function with both uses the dynamic stack
+    if not has_x87:
         return
     cx.kinds.add('x87')
     cx.xm = 'd'
@@ -97,6 +103,43 @@ def prepass(cx, img, force, entry):
     cx.kinds.add('x87why:' + cx.xwhy) if cx.xwhy else None
     if not ok:
         cx.xd, cx.xa = {}, {}
+
+
+def is_mmx(ins):
+    """an MMX instruction: EMMS or any instruction with an mm register operand (SDM Vol 1 9.2: the instructions that use or set the MMX state)"""
+    return ins.mnemonic.split()[-1] == 'emms' or any(o.type == X.X86_OP_REG and ins.reg_name(o.reg).startswith('mm') for o in ins.operands)
+
+
+def mmx_prepass(cx):
+    """cx.mmx_ok = the addresses where the x87 register file is provably CANONICAL for MMX (every carrier an M80 image, TOP = 0, all tags valid: rt/fnvl_x87.h MMX_ENTER) on EVERY path.
+    Forward must-dataflow, optimistic start, AND at joins. A non-EMMS MMX instruction establishes the state; EMMS (tags empty), any x87 instruction (changes carriers, TOP, tags), any call
+    (the callee may run x87 code) and any entry from outside the straight flow (function start, address-taken labels, jump-table targets, other universe entries, instructions after a call)
+    leave or start it unknown. Proof: the state is established only by MMX_ENTER, and every instruction that can change the registers or enters from outside kills it (A-RESUME in rt/fnvl_x87.h
+    covers an exception handler that resumes inside the region)."""
+    I = cx.insns
+    from . import universe
+    uent = universe.load()[0]
+    roots = {cx.start} | {t for ts in cx.tables.values() for t in ts} | set(cx.taken) | {a for a in I if a in uent}
+    preds = {a: [] for a in I}
+    for a in I:
+        ins = I[a]; m = ins.mnemonic.split()[-1]
+        for t in succs(cx, a, ins, m):
+            if t in preds:
+                preds[t].append(a)
+    kills = lambda ins, m: m == 'emms' or 0xd8 <= ins.opcode[0] <= 0xdf or m == 'call'
+    after = {a: True for a in I}
+    before = {a: a not in roots for a in I}
+    changed = True
+    while changed:
+        changed = False
+        for a in sorted(I):
+            ins = I[a]; m = ins.mnemonic.split()[-1]
+            b = a not in roots and all(after[p] for p in preds[a]) and bool(preds[a])
+            r = False if kills(ins, m) else True if is_mmx(ins) else b
+            if b != before[a] or r != after[a]:
+                before[a], after[a] = b, r
+                changed = True
+    cx.mmx_ok = {a for a in I if before[a]}      # an instruction after a call: its predecessor's `after` is False (a call kills), so the AND is False
 
 
 def no(cx, why):
@@ -231,7 +274,7 @@ def ctl(cx, ins, b0, mr, g):
         elif mr == 0xf7:
             em('c->ftop=(c->ftop+1)&7;')                         # fincstp
         else:
-            em('c->fx[(c->ftop+%d)&7].k=0;' % i + (' c->ftop=(c->ftop+1)&7;' if b0 == 0xdf else ''))     # ffree / ffreep
+            em('fv_free(&c->fx[(c->ftop+%d)&7]);' % i + (' c->ftop=(c->ftop+1)&7;' if b0 == 0xdf else ''))     # ffree / ffreep
     else:
         return False
     return True

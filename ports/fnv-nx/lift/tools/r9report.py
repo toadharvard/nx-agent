@@ -106,7 +106,7 @@ def scan(fn):
         elif x.id in LDAX: r['ldaxr'] += 1
         elif x.id in STLX:
             r['stlxr'] += 1
-            r['xchg_uncovered'] += 0 if any(dmb(y) == 'ish' for y in fn[i + 1:i + 4]) else 1      # stlxr; cbnz; dmb ish
+            r['xchg_uncovered'] += 0 if any(dmb(y) == 'ish' for y in fn[i + 1:i + 6]) else 1      # stlxr; cbnz [; b.ne of a CAS retry]; dmb ish
         elif k: r[k] += 1
         elif x.id == K.ARM64_INS_BL and i in fn.ext: r['calls'].append(fn.ext[i])
         if x.id == K.ARM64_INS_TST and i + 1 < n and fn[i + 1].id == K.ARM64_INS_B and fn[i + 1].cc != K.ARM64_CC_INVALID:

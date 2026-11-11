@@ -10,9 +10,11 @@
      width 16 (xmm): plain load then `dmb ishld`; `dmb ishst` then plain store (no single-copy-atomic 16-byte access without LSE2)
    Compound assignment, address-of and reference binding do not compile in class 1 (x86 non-locked RMW is read, modify, write as separate accesses,
    which the lifter already emits as separate statements).
-   XCHG8/16/32(addr, v): x86 xchg with a memory operand (implicitly locked, a full barrier): aligned -> __atomic_exchange_n (ldaxr/stlxr loop) followed
-   by `dmb ish` (lead decision: the loop alone does not order an earlier `dmb ishst; str` before a later plain `ldr; dmb ishld`). Unaligned: no rule
-   exists yet; fnvl_xchg_unaligned{8,16,32} are declared here and DEFINED NOWHERE (open item: a link error until the orchestrator decides). */
+   Class 2 (a LOCK-prefixed RMW or xchg on a non-plain location, fnvlift/memclass.py): the lifter emits ONE __atomic_* operation (seq_cst, `dmb ish`) whose old
+   value is FNVL_LK, then the plain handler text with `enum { FNVL_R9 = 2 }`: its read of the operand is FNVL_LK, its store was done by the atomic operation.
+   XCHG8A/16A/32A(addr, v): x86 xchg with a memory operand (implicitly locked, a full barrier) on an address PROVED naturally aligned (const_address in
+   fnvlift/memclass.py): __atomic_exchange_n (ldaxr/stlxr loop) followed by `dmb ish` (lead decision: the loop alone does not order an earlier
+   `dmb ishst; str` before a later plain `ldr; dmb ishld`). No run-time alignment test: an address not proved aligned is a lift error. */
 #ifndef FNVL_MEM_H
 #define FNVL_MEM_H
 #define FNVL_AI __attribute__((always_inline)) inline
@@ -62,8 +64,16 @@ template<class G> struct fnvl_mem<G, false> {         /* width 16 */
   FNVL_AI V operator=(V v) const { FNVL_DMB(ishst); *(A*)p = v; return v; }
   FNVL_AI V operator=(const fnvl_mem& o) const { return *this = (V)o; }
 };
-template<class G, int C> FNVL_AI decltype(auto) fnvl_m(unsigned long p) {
+template<class G> struct fnvl_lk {                    /* class 2: the old value an atomic RMW already returned; its store is done by that operation */
+  typedef typename G::V V; u64 v;
+  FNVL_AI operator V() const { return (V)v; }
+  FNVL_AI V operator=(V x) const { return x; }
+  FNVL_AI V operator=(const fnvl_lk& o) const { return (V)o.v; }
+};
+static constexpr u64 FNVL_LK = 0;                      /* namespace default; a locked instruction declares its own FNVL_LK next to `enum { FNVL_R9 = 2 }` */
+template<class G, int C> FNVL_AI decltype(auto) fnvl_m(unsigned long p, u64 lk) {
   if constexpr (C == 0) return (*(typename G::A*)p);
+  else if constexpr (C == 2) return fnvl_lk<G>{lk};
   else return fnvl_mem<G>{p};
 }
 #undef M8
@@ -73,19 +83,14 @@ template<class G, int C> FNVL_AI decltype(auto) fnvl_m(unsigned long p) {
 #undef MF32
 #undef MF64
 #undef MX
-#define M8(a) fnvl_m<FNVL_T8, FNVL_R9>(P(a))
-#define M16(a) fnvl_m<FNVL_T16, FNVL_R9>(P(a))
-#define M32(a) fnvl_m<FNVL_T32, FNVL_R9>(P(a))
-#define M64(a) fnvl_m<FNVL_T64, FNVL_R9>(P(a))
-#define MF32(a) fnvl_m<FNVL_TF32, FNVL_R9>(P(a))
-#define MF64(a) fnvl_m<FNVL_TF64, FNVL_R9>(P(a))
-#define MX(a) fnvl_m<FNVL_TX, FNVL_R9>(P(a))
-extern "C" { u32 fnvl_xchg_unaligned8(u32 addr, u32 v); u32 fnvl_xchg_unaligned16(u32 addr, u32 v); u32 fnvl_xchg_unaligned32(u32 addr, u32 v); }
-static FNVL_AI u32 XCHG8(u32 a, u32 v) { u8 r = __atomic_exchange_n((u8*)P(a), (u8)v, __ATOMIC_SEQ_CST); FNVL_DMB(ish); return r; }
-static FNVL_AI u32 XCHG16(u32 a, u32 v) {
-  if (__builtin_expect((P(a) & 1) == 0, 1)) { u16 r = __atomic_exchange_n((u16*)P(a), (u16)v, __ATOMIC_SEQ_CST); FNVL_DMB(ish); return r; }
-  return fnvl_xchg_unaligned16(a, v); }
-static FNVL_AI u32 XCHG32(u32 a, u32 v) {
-  if (__builtin_expect((P(a) & 3) == 0, 1)) { u32 r = __atomic_exchange_n((u32*)P(a), v, __ATOMIC_SEQ_CST); FNVL_DMB(ish); return r; }
-  return fnvl_xchg_unaligned32(a, v); }
+#define M8(a) fnvl_m<FNVL_T8, FNVL_R9>(P(a), FNVL_LK)
+#define M16(a) fnvl_m<FNVL_T16, FNVL_R9>(P(a), FNVL_LK)
+#define M32(a) fnvl_m<FNVL_T32, FNVL_R9>(P(a), FNVL_LK)
+#define M64(a) fnvl_m<FNVL_T64, FNVL_R9>(P(a), FNVL_LK)
+#define MF32(a) fnvl_m<FNVL_TF32, FNVL_R9>(P(a), FNVL_LK)
+#define MF64(a) fnvl_m<FNVL_TF64, FNVL_R9>(P(a), FNVL_LK)
+#define MX(a) fnvl_m<FNVL_TX, FNVL_R9>(P(a), FNVL_LK)
+static FNVL_AI u32 XCHG8A(u32 a, u32 v) { u8 r = __atomic_exchange_n((u8*)P(a), (u8)v, __ATOMIC_SEQ_CST); FNVL_DMB(ish); return r; }
+static FNVL_AI u32 XCHG16A(u32 a, u32 v) { u16 r = __atomic_exchange_n((u16*)P(a), (u16)v, __ATOMIC_SEQ_CST); FNVL_DMB(ish); return r; }
+static FNVL_AI u32 XCHG32A(u32 a, u32 v) { u32 r = __atomic_exchange_n((u32*)P(a), v, __ATOMIC_SEQ_CST); FNVL_DMB(ish); return r; }
 #endif

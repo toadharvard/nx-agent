@@ -445,10 +445,7 @@ def worker(args):
     fams = args
     out = []
     for root, members in fams:
-        try:
-            ev, fp = analyse_family(root, members, RANGES)
-        except Exception as ex:
-            ev, fp = [(1, 'EXC:' + type(ex).__name__, 0, 'R', root)], False
+        ev, fp = analyse_family(root, members, RANGES)      # an analysis failure is a bug of the analysis: it propagates (no EXC event, no verdict from a crash)
         out.append((root, members, ev, fp))
     return out
 
