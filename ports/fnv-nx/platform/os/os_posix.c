@@ -328,6 +328,10 @@ int os_thread_resume(os_thread *t)
 void os_thread_exit(void) { pthread_exit(NULL); }
 void os_cpu_boost(int fast_load) { (void)fast_load; }   /* no CPU boost on a PC */
 void os_show_message(const char *caption, const char *text) { (void)caption; (void)text; }   /* logged by the caller */
+/* the console's dock state of the host tests: handheld until a test says otherwise */
+static volatile int g_posix_docked;
+int os_display_docked(void) { return __atomic_load_n(&g_posix_docked, __ATOMIC_ACQUIRE); }
+void os_posix_set_docked(int docked) { __atomic_store_n(&g_posix_docked, docked != 0, __ATOMIC_RELEASE); }
 void os_yield(void) { sched_yield(); }
 
 void os_sleep_ns(uint64_t ns)

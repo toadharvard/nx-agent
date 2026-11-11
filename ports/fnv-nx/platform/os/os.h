@@ -72,6 +72,10 @@ void os_cpu_boost(int fast_load);
 /* A system dialog with the caption, the text and an OK button, blocking until it is closed (MessageBoxA): the
  * Switch's error applet; a no-op where the platform has none (the caller logs the text). */
 void os_show_message(const char *caption, const char *text);
+/* The console's output mode: 1 = docked (the TV output, 1920x1080), 0 = handheld (the built-in panel, 1280x720).
+ * Switch: appletGetOperationMode() == AppletOperationMode_Console. Host tests (os_posix.c): the state set by
+ * os_posix_set_docked, handheld at start. */
+int os_display_docked(void);
 int os_thread_start(os_thread *t);
 int os_thread_join(os_thread *t);           /* waits for exit; does not free */
 void os_thread_free(os_thread *t);          /* after join, or to detach a running thread */

@@ -145,6 +145,16 @@ void os_show_message(const char *caption, const char *text) {
     uint64_t arg[2] = {FNVNX_ADDR(caption ? caption : ""), FNVNX_ADDR(text ? text : "")};
     fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_MESSAGE, FNVNX_ADDR(arg), 2);
 }
+/* the console's operation mode: host service FNVNX_PLAT_DISPLAY_DOCKED, which the host does not implement yet
+ * (hostapi.h + toolchain/host/host.c platform_ext: appletGetOperationMode() == AppletOperationMode_Console ->
+ * 1 docked, 0 handheld). A host without it answers FNVNX_EXT_NO_MODULE, which reads as "not docked". */
+#ifndef FNVNX_PLAT_DISPLAY_DOCKED
+#define FNVNX_PLAT_DISPLAY_DOCKED 9u
+#endif
+int os_display_docked(void) {
+    if (!fnvnx_host->ext_call) return 0;
+    return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_DISPLAY_DOCKED, 0, 0) == 1;
+}
 void os_yield(void) { fnvnx_yield(); }
 void os_sleep_ns(uint64_t ns) { fnvnx_hcall1(fnvnx_host->sleep_ns, ns); }
 

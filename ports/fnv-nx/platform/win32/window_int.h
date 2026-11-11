@@ -31,6 +31,8 @@ void fnvnx_app_suspend(void);
 void fnvnx_app_resume(void);
 void fnvnx_app_exit_request(void);
 void fnvnx_app_display_change(int w, int h);
+int fnvnx_display_w(void);                           /* the display mode (display.cpp): the one source of the screen size */
+int fnvnx_display_h(void);
 BOOL SetDoubleClickTime(UINT ms);
 HCURSOR SetCursor(HCURSOR c);
 }

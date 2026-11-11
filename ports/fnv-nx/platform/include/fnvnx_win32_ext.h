@@ -147,7 +147,10 @@ int fnvnx_steam_callback_count(void);
 const char *fnvnx_win32_system_module(unsigned i);
 /* window/input plumbing for S6/S7 */
 HWND fnvnx_main_window(void);
-void fnvnx_set_display_size(int w, int h);
+void fnvnx_set_display_size(int w, int h);   /* the output size (display.cpp): 1920x1080 is docked, any smaller one handheld */
+/* the console was docked or undocked (the lifecycle code calls it): re-reads os_display_docked, sets the display
+ * mode, the desktop window and GetSystemMetrics, and sends WM_DISPLAYCHANGE to the top-level windows */
+void fnvnx_display_mode_changed(void);
 void fnvnx_post_message(HWND, UINT, WPARAM, LPARAM);
 void fnvnx_set_key_state(int vk, int down);
 void fnvnx_set_cursor_pos(int x, int y);
@@ -235,5 +238,8 @@ void fnvnx_set_msgbox_hook(fnvnx_msgbox_hook);
 
 #ifdef __cplusplus
 }
+/* the display mode for the renderer (display.cpp), C++ linkage as render/d3d9/dev/d3d9_adapter.h declares
+ * `NxEnvProfile nx_env_profile();`: 1 docked (1080p), 0 handheld (720p); NxEnvProfile is an enum of that int */
+int nx_env_profile(void);
 #endif
 #endif

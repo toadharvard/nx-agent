@@ -274,6 +274,8 @@ void os_show_message(const char *caption, const char *text)
         errorApplicationShow(&c);
 }
 
+int os_display_docked(void) { return appletGetOperationMode() == AppletOperationMode_Console; }
+
 void os_yield(void) { svcSleepThread(0); } /* 0 = yield to threads of the same priority */
 
 void os_sleep_ns(uint64_t ns) { svcSleepThread(ns ? (s64)ns : 0); }

@@ -96,6 +96,8 @@ void *SteamUserStats(void);
 int GetWindowTextA(HWND, LPSTR, int);
 int GetClassNameA(HWND, LPSTR, int);
 BOOL EnumDisplayDevicesA(LPCSTR, DWORD, void *, DWORD);
+/* display.cpp */
+LONG ChangeDisplaySettingsA(void *, DWORD);
 /* resource.cpp */
 BOOL InitCommonControlsEx(const void *);
 void *ImageList_LoadImageA(HINSTANCE, LPCSTR, int, int, DWORD, UINT, UINT);
@@ -218,7 +220,7 @@ const exp g_exports[] = {
     U(SetForegroundWindow), U(SetWindowLongA), U(SetWindowPos), U(SetWindowTextA), U(SetWindowsHookExA),
     U(ShowCursor), U(ShowWindow), U(SwapMouseButton), U(TranslateMessage), U(UnhookWindowsHookEx),
     U(GetTopWindow), U(IsWindowVisible), U(GetWindowThreadProcessId), U(UnregisterClassA), U(SetClassLongA),
-    U(UpdateWindow), U(GetWindowTextA), U(GetClassNameA), U(EnumDisplayDevicesA), U(GetClassLongA),
+    U(UpdateWindow), U(GetWindowTextA), U(GetClassNameA), U(EnumDisplayDevicesA), U(ChangeDisplaySettingsA), U(GetClassLongA),
     U(SetCursor), U(SetDoubleClickTime),
     E("comctl32", InitCommonControlsEx), E("comctl32", ImageList_LoadImageA), E("comctl32", ImageList_Destroy),
     E("comctl32", ImageList_GetImageCount), E("comctl32", ImageList_GetIconSize),

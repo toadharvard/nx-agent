@@ -96,7 +96,6 @@ struct window {
 static wclass *g_classes;
 static unsigned g_next_atom = 0xC000;
 static window g_desk, *g_all, *g_all_tail, *g_active;
-static int g_w = 1280, g_h = 720;
 static os_lock_t g_ui_lock;
 
 static char *dup_str(const char *s)
@@ -155,8 +154,8 @@ static void ui_init_l(void)
         dc = new_class_l(e.name, NULL, 0, 0, e.cbwnd, NULL, 1);   /* the last one is the desktop's */
     g_desk.cls = dc;
     g_desk.style = S_POPUP | S_VISIBLE;
-    g_desk.wr.right = g_desk.rr.right = g_w;
-    g_desk.wr.bottom = g_desk.rr.bottom = g_h;
+    g_desk.wr.right = g_desk.rr.right = fnvnx_display_w();
+    g_desk.wr.bottom = g_desk.rr.bottom = fnvnx_display_h();
     g_desk.magic = WND_MAGIC;
 }
 static window *wnd_l(HWND h)
@@ -195,12 +194,11 @@ extern "C" HWND fnvnx_main_window(void)
     return h;
 }
 extern "C" HWND fnvnx_desktop_window(void) { os_lock(&g_ui_lock); ui_init_l(); os_unlock(&g_ui_lock); return (HWND)&g_desk; }
-extern "C" void fnvnx_set_display_size(int w, int h)
+extern "C" void fnwin_desktop_resize(void)   /* the display's size is display.cpp's; the desktop window follows it */
 {
     os_lock(&g_ui_lock);
-    g_w = w; g_h = h;
-    g_desk.wr.right = g_desk.rr.right = w;
-    g_desk.wr.bottom = g_desk.rr.bottom = h;
+    g_desk.wr.right = g_desk.rr.right = fnvnx_display_w();
+    g_desk.wr.bottom = g_desk.rr.bottom = fnvnx_display_h();
     os_unlock(&g_ui_lock);
 }
 extern "C" void fnvnx_window_validate(HWND h)   /* BeginPaint/ValidateRect: the update region becomes empty */
@@ -680,8 +678,8 @@ extern "C" HWND CreateWindowExA(DWORD ex, LPCSTR cls, LPCSTR title, DWORD style,
         bool ovl = !(style & (S_CHILD | S_POPUP));
         if (x == FN_CW_USEDEFAULT) x = 0;
         if (y == FN_CW_USEDEFAULT) y = 0;
-        if (w == FN_CW_USEDEFAULT) w = ovl ? g_w : 0;
-        if (h == FN_CW_USEDEFAULT) h = ovl ? g_h : 0;
+        if (w == FN_CW_USEDEFAULT) w = ovl ? fnvnx_display_w() : 0;
+        if (h == FN_CW_USEDEFAULT) h = ovl ? fnvnx_display_h() : 0;
         if (w < 0) w = 0;
         if (h < 0) h = 0;
         window *p = child ? par : &g_desk;
@@ -1383,30 +1381,7 @@ extern "C" BOOL ScreenToClient(HWND h, LPPOINT p) { return map_point(h, p, -1); 
 
 static int g_swap_buttons;
 
-extern "C" int GetSystemMetrics(int i)
-{
-    switch (i) {
-    case SM_CXSCREEN: case 16 /* CXFULLSCREEN */: case 78 /* CXVIRTUALSCREEN */: return g_w;
-    case SM_CYSCREEN: case 17 /* CYFULLSCREEN */: case 79 /* CYVIRTUALSCREEN */: return g_h;
-    case 4: return 23;                    /* SM_CYCAPTION */
-    case 5: case 6: return 1;             /* SM_CXBORDER, SM_CYBORDER */
-    case 7: case 8: return 3;             /* SM_CXDLGFRAME, SM_CYDLGFRAME */
-    case 11: case 12: return 32;          /* SM_CXICON, SM_CYICON */
-    case 13: case 14: return 32;          /* SM_CXCURSOR, SM_CYCURSOR */
-    case 15: return 20;                   /* SM_CYMENU */
-    case 19: return 1;                    /* SM_MOUSEPRESENT */
-    case 23: return g_swap_buttons;       /* SM_SWAPBUTTON */
-    case 32: case 33: return 4;           /* SM_CXSIZEFRAME, SM_CYSIZEFRAME */
-    case 36: case 37: return 4;           /* SM_CXDOUBLECLK, SM_CYDOUBLECLK */
-    case 43: return 3;                    /* SM_CMOUSEBUTTONS */
-    case 45: case 46: return 2;           /* SM_CXEDGE, SM_CYEDGE */
-    case 49: case 50: return 16;          /* SM_CXSMICON, SM_CYSMICON */
-    case 57: return 160;                  /* SM_CXMINIMIZED */
-    case 58: return 28;                   /* SM_CYMINIMIZED */
-    case 80: case 81: return 1;           /* SM_CMONITORS, SM_SAMEDISPLAYFORMAT */
-    default: return 0;
-    }
-}
+extern "C" int fnvnx_swap_buttons(void) { return g_swap_buttons; }   /* SM_SWAPBUTTON (display.cpp) */
 
 /* ---- cursor and keys */
 static volatile uint8_t g_keys[256];
@@ -1456,20 +1431,7 @@ extern "C" short GetKeyState(int vk)
 }
 extern "C" BOOL SwapMouseButton(BOOL s) { BOOL old = g_swap_buttons != 0; g_swap_buttons = s != 0; return old; }
 
-/* IAT slots named in round 5 of S5 (imports.tsv): the display device list, common controls */
-/* DISPLAY_DEVICEA: one primary display attached to the desktop */
-struct fnvnx_display_device { DWORD cb; char name[32], string[128]; DWORD flags; char id[128], key[128]; };
-extern "C" BOOL EnumDisplayDevicesA(LPCSTR dev, DWORD i, void *out, DWORD flags)
-{
-    struct fnvnx_display_device *d = (struct fnvnx_display_device *)out;
-    W32_UNUSED(flags);
-    if (dev || i != 0 || !d || d->cb < sizeof *d) return FALSE;
-    memset((char *)d + sizeof d->cb, 0, sizeof *d - sizeof d->cb);
-    snprintf(d->name, sizeof d->name, "\\\\.\\DISPLAY1");
-    snprintf(d->string, sizeof d->string, "fnv-nx display");
-    d->flags = 0x1 /* ATTACHED_TO_DESKTOP */ | 0x4 /* PRIMARY_DEVICE */;
-    return TRUE;
-}
+/* GetSystemMetrics, EnumDisplayDevicesA, ChangeDisplaySettingsA: platform/win32/display.cpp */
 /* InitCommonControlsEx, ImageList_*: platform/win32/resource.cpp */
 
 /* ---- message boxes: logged; the answer is the default button */
