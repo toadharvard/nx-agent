@@ -30,7 +30,7 @@ def judge_root(root, repo, cache):
     roots, files = recipe.load_admit(repo), recipe.tracked(repo)
     rec = recipe.load_recipe(repo, roots, root)
     cxx = sorted(root + "/" + u for u in recipe.units_of(rec, root, files) if u.endswith(recipe.CXX_EXT)) if isinstance(rec, dict) else []
-    errs = recipe.check(rec, root, files, roots, recipe.load_pin(repo))
+    errs = recipe.check(rec, root, files, roots, recipe.load_pin(repo), repo)
     if errs:
         return len(cxx), 0, cxx, "invalid recipe: %s" % "; ".join(errs)[:300]
     names = [p["name"] for p in rec.get("plugins", [])]
