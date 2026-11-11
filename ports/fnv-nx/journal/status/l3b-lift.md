@@ -20,7 +20,7 @@ on 2026-11-11 22:35 UTC. Handoff read: `journal/inbox/l3b-lift-handoff-opus.md` 
 | 4f | Tests needing a link (instest_extra, x87dyn, mmxtest, sehcodes, chain, ehtest) | - | - | blocked by: two-root link root (L1 w15, doing; + library-input key for newlib libc.a asked). All symbol gaps have real bodies: G1/G2/G3 in platform root (L5 claude/fnv-l5-platform-w10 f872bcd2, merge pending), G5 = newlib libc.a (tools/fnvnx-a64-msvcmodel 00e3d42a), G4 dispgen.py (L3a w4, doing), G7 exists (fnvnx_lift_attach + fnvnx_guest_invoke, rt/enter), G6 (L4 w4, doing), G8 closed |
 | 4g | EH oracle independent of rt/seh (Wine 9.0 trace or cited ReactOS rules) for ehtest (G9) | - | - | open, L3b (with item 5) |
 | 4h | test_fpexact onto recipe fixtures | - | - | blocked by: fixtures key in build.json (L1 w16, doing), w2g |
-| 5 | EH/SEH through lifted frames against the exe's EH tables (gate `eh`, class D) | - | - | open |
+| 5 | Gate eh (class D, missing from the trunk gates.json). Proposed split: L3a = coverage (every table target is a lifted entry) with enumeration by dataflow facts (lift/tools/gate_eh.py today uses byte windows and sanity stops: not class-closing, reported); L3b = runtime dispatch conformance against Wine 9.0 / cited ReactOS (replaces bench/ehtest.py) | lead | - | proposal sent to L3a, waiting |
 | 6 | Open assumption records (12 of 41 open; A-FPMASK 55/830 unproven; fpm bundle WIP: libvorbis 15 -> 12) | - | - | open |
 | 7 | A-CTX: seh.c restores only integer regs + eip from CONTEXT after ContinueExecution; Windows also restores FP/SSE | - | - | open, reported to the orchestrator |
 | 8 | Split lock: A4 deleted, LKA world-stop decided (L3a w3 batch, host side fnvl_host_world_stop/resume by L5) | L3a | claude/fnv-l3a-lift-w3 | doing (L3a, L5) |
