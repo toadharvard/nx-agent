@@ -28,7 +28,6 @@ extern struct fnvnx_ioinfo *__pioinfo[64];   /* iob.c */
 extern struct fnvnx_ioinfo __badioinfo;
 void ExitProcess(UINT);
 void GetLocalTime(LPSYSTEMTIME);
-int fnvnx_msvc_format(char *buf, size_t n, const char *fmt, va_list ap);
 }
 
 namespace {
@@ -234,323 +233,7 @@ int c_wctomb(char *d, u16 wc)
     return 1;
 }
 
-/* ---------------------------------------------------------------- printf */
-struct Out {
-    char *b;
-    size_t n, len;
-    void put(char c) { if (b && len < n) b[len] = c; len++; }
-    void put(const char *s, size_t k) { while (k--) put(*s++); }
-    void fill(char c, long k) { while (k-- > 0) put(c); }
-};
-/* prefix, zeros, body, padded to width */
-void field(Out &o, const char *pre, size_t pl, long zeros, const char *body, size_t bl, long width, bool left, bool zpad)
-{
-    long total = (long)(pl + bl) + (zeros > 0 ? zeros : 0), padn = width > total ? width - total : 0;
-    if (!left && !zpad)
-        o.fill(' ', padn);
-    o.put(pre, pl);
-    if (!left && zpad)
-        o.fill('0', padn);
-    o.fill('0', zeros);
-    o.put(body, bl);
-    if (left)
-        o.fill(' ', padn);
-}
-int to_narrow(const u16 *w, size_t maxn, char *out, size_t cap)
-{   /* wide string -> narrow in the current code page, '?' for what does not convert */
-    size_t k = 0;
-    for (; k < maxn && w[k] && k < cap; k++) {
-        unsigned char b;
-        out[k] = wc_to_byte(w[k], &b) ? (char)b : '?';
-    }
-    return (int)k;
-}
-void put_float(Out &o, double v, char conv, bool plus, bool space, bool alt, int prec, long width, bool left, bool zero)
-{
-    char sign[2] = {0, 0};
-    char tmp[400], *buf = tmp, *heap = NULL;
-    if (std::signbit(v) && !std::isnan(v))
-        sign[0] = '-';
-    else if (plus)
-        sign[0] = '+';
-    else if (space)
-        sign[0] = ' ';
-    size_t bl;
-    if (!std::isfinite(v)) {
-        const char *word = std::isinf(v) ? "1.#INF" : "1.#QNAN";
-        uint64_t bits;
-        memcpy(&bits, &v, 8);
-        if (std::isnan(v)) {
-            if (bits >> 63) { /* the indefinite: sign set, empty payload */
-                sign[0] = '-';
-                word = (bits & 0x7FFFFFFFFFFFFull) ? "1.#QNAN" : "1.#IND";
-            } else if (!(bits & 0x8000000000000ull))
-                word = "1.#SNAN";
-            else if (plus)
-                sign[0] = '+';
-        }
-        bl = (size_t)snprintf(tmp, sizeof tmp, "%s", word);
-        int digits = prec < 0 ? 6 : prec;   /* %f / %e: the digits after the point, padded with zeros */
-        if (conv != 'g' && conv != 'G') {
-            size_t keep = 2 + (size_t)digits, have = bl;
-            if (keep < have)
-                bl = keep > 2 ? keep : 1;
-            for (; have < keep && bl < sizeof tmp - 8; have++)
-                tmp[bl++] = '0';
-            if (conv == 'e' || conv == 'E')
-                bl += (size_t)snprintf(tmp + bl, 8, "%c+000", conv);
-        }
-        zero = false;
-    } else {
-        /* MSVCRT.DLL rounds the exact decimal expansion half UP (away from zero) at the requested digit; the
-         * reference implementation compares twice the dropped part with the unit (>=). The exact expansion comes
-         * from the C library's %.800e (a double has at most 767 significant decimal digits; glibc and gdtoa print
-         * them exactly), the rounding and the layout are done here. */
-        char ex[832];
-        snprintf(ex, sizeof ex, "%.800e", std::fabs(v));
-        char dg[804];                       /* dg[0..800]: significant digits, value = 0.d0d1... * 10^(x10+1) */
-        dg[0] = ex[0];
-        memcpy(dg + 1, ex + 2, 800);
-        int x10 = atoi(strchr(ex, 'e') + 1);
-        bool is0 = v == 0;
-        auto round_at = [&](char *d, int n, int &x) { /* keep n digits (n >= 0) of d, half up; may carry into x */
-            if (n > 800) n = 800;
-            bool up = n < 801 && d[n < 0 ? 0 : n] >= '5' && n >= 0;
-            if (n < 0) up = false;
-            for (int i = (n < 0 ? 0 : n); i < 801; i++) d[i] = '0';
-            for (int i = n - 1; up && i >= 0; i--) {
-                if (d[i] == '9') d[i] = '0';
-                else { d[i]++; up = false; }
-            }
-            if (up) { memmove(d + 1, d, 800); d[0] = '1'; x++; }
-        };
-        int P = prec < 0 ? 6 : prec;
-        char c = conv;
-        bool strip = false;
-        if (conv == 'g' || conv == 'G') {
-            if (P == 0) P = 1;
-            char t[804];
-            memcpy(t, dg, 801);
-            int x = x10;
-            round_at(t, P, x);
-            if (is0) x = 0;
-            strip = !alt;
-            if (x < -4 || x >= P) { c = conv == 'g' ? 'e' : 'E'; P = P - 1; }
-            else { c = 'f'; P = P - 1 - x; }
-        }
-        size_t cap = (size_t)P + (x10 > 0 ? (size_t)x10 : 0) + 32;
-        if (cap > sizeof tmp)
-            buf = heap = (char *)malloc(cap);
-        if (!buf) {
-            o.len = (size_t)-1;
-            return;
-        }
-        bl = 0;
-        if (c == 'f') {
-            int x = x10, keep = x10 + 1 + P;          /* digits kept: integer part plus P fraction digits */
-            if (keep < 0) { for (int i = 0; i < 801; i++) dg[i] = '0'; x = -P - 1; keep = 0; }
-            else round_at(dg, keep, x);
-            if (x < 0) buf[bl++] = '0';
-            for (int i = 0; i <= x; i++) buf[bl++] = i < 801 ? dg[i] : '0';
-            if (P > 0 || alt) buf[bl++] = '.';
-            for (int i = 1; i <= P; i++) { int k = x + i; buf[bl++] = k < 0 || k > 800 ? '0' : dg[k]; }
-        } else {
-            int x = x10;
-            round_at(dg, P + 1, x);
-            if (is0) x = 0;
-            buf[bl++] = dg[0];
-            if (P > 0 || alt) buf[bl++] = '.';
-            for (int i = 1; i <= P; i++) buf[bl++] = i < 801 ? dg[i] : '0';
-            if (strip) { while (bl && buf[bl - 1] == '0') bl--; if (bl && buf[bl - 1] == '.') bl--; }
-            bl += (size_t)snprintf(buf + bl, 12, "%c%c%02d", c, x < 0 ? '-' : '+', x < 0 ? -x : x);
-            strip = false;
-        }
-        if (strip && memchr(buf, '.', bl)) { while (bl && buf[bl - 1] == '0') bl--; if (bl && buf[bl - 1] == '.') bl--; }
-        buf[bl] = 0;
-        if (buf[0] == '-') /* the sign is a field prefix, written ahead of the zero padding */
-            memmove(buf, buf + 1, bl--);
-        if (conv != 'f') { /* MSVCRT prints at least three exponent digits */
-            char *e = (char *)memchr(buf, conv == 'e' || conv == 'g' ? 'e' : 'E', bl);
-            if (e && e + 1 < buf + bl && (e[1] == '+' || e[1] == '-')) {
-                size_t nd = (size_t)(buf + bl - (e + 2));
-                if (nd < 3) {
-                    memmove(e + 2 + (3 - nd), e + 2, nd + 1);
-                    for (size_t i = 0; i < 3 - nd; i++)
-                        e[2 + i] = '0';
-                    bl += 3 - nd;
-                }
-            }
-        }
-    }
-    field(o, sign, sign[0] ? 1 : 0, 0, buf, bl, width, left, zero && !left);
-    free(heap);
-}
-void put_int(Out &o, unsigned long long mag, bool neg, int base, bool upper, bool plus, bool space, bool alt, int prec,
-             long width, bool left, bool zero)
-{
-    char dig[72], pre[3];
-    size_t nd = 0, pl = 0;
-    const char *D = upper ? "0123456789ABCDEF" : "0123456789abcdef";
-    for (unsigned long long m = mag; m; m /= (unsigned)base)
-        dig[nd++] = D[m % (unsigned)base];
-    if (prec == 0 && !mag)
-        nd = 0;
-    if (neg)
-        pre[pl++] = '-';
-    else if (base == 10 && plus)
-        pre[pl++] = '+';
-    else if (base == 10 && space)
-        pre[pl++] = ' ';
-    if (alt && base == 16 && mag)
-        pre[pl++] = '0', pre[pl++] = upper ? 'X' : 'x';
-    long zeros = prec > (long)nd ? prec - (long)nd : 0;
-    if (alt && base == 8 && zeros == 0 && (nd == 0 || dig[nd - 1] != '0'))
-        zeros = 1;
-    if (!nd && !zeros && prec < 0)
-        dig[nd++] = '0';
-    for (size_t i = 0; i < nd / 2; i++)
-        std::swap(dig[i], dig[nd - 1 - i]);
-    bool zp = zero && prec < 0 && !left;
-    long total = (long)(pl + nd) + zeros;
-    if (zp && width > total)
-        zeros += width - total;
-    field(o, pre, pl, zeros, dig, nd, width, left, false);
-}
-}   // namespace
-
-extern "C" int fnvnx_msvc_format(char *buf, size_t n, const char *fmt, va_list ap)
-{
-    Out o = {buf, n, 0};
-    for (const char *p = fmt; *p;) {
-        if (*p != '%') {
-            o.put(*p++);
-            continue;
-        }
-        p++;
-        bool left = false, plus = false, space = false, alt = false, zero = false;
-        for (;; p++) {
-            if (*p == '-') left = true;
-            else if (*p == '+') plus = true;
-            else if (*p == ' ') space = true;
-            else if (*p == '#') alt = true;
-            else if (*p == '0') zero = true;
-            else break;
-        }
-        long width = 0;
-        int prec = -1;
-        if (*p == '*') {
-            int w = va_arg(ap, int);
-            if (w < 0)
-                left = true, w = -w;
-            width = w, p++;
-        } else
-            for (; *p >= '0' && *p <= '9'; p++)
-                width = width * 10 + (*p - '0');
-        if (*p == '.') {
-            p++;
-            prec = 0;
-            if (*p == '*') {
-                prec = va_arg(ap, int);
-                p++;
-            } else
-                for (; *p >= '0' && *p <= '9'; p++)
-                    prec = prec * 10 + (*p - '0');
-        }
-        enum { S_INT, S_SHORT, S_LONG, S_I64, S_WIDE, S_PTR } sz = S_INT;
-        for (;; ) {
-            if (*p == 'h') sz = S_SHORT, p++;
-            else if (*p == 'l') { if (p[1] == 'l') sz = S_I64, p += 2; else sz = S_LONG, p++; }
-            else if (*p == 'L') p++;
-            else if (*p == 'w') sz = S_WIDE, p++;
-            else if (p[0] == 'I' && p[1] == '6' && p[2] == '4') sz = S_I64, p += 3;
-            else if (p[0] == 'I' && p[1] == '3' && p[2] == '2') sz = S_INT, p += 3;
-            else if (*p == 'I') sz = S_PTR, p++;
-            else break;
-        }
-        char c = *p;
-        if (!c)
-            break;
-        p++;
-        switch (c) {
-        case 'd': case 'i': {
-            long long v = sz == S_I64 ? va_arg(ap, long long) : sz == S_PTR ? (long long)va_arg(ap, intptr_t)
-                        : sz == S_SHORT ? (short)va_arg(ap, int) : (int)va_arg(ap, int);
-            put_int(o, v < 0 ? 0ull - (unsigned long long)v : (unsigned long long)v, v < 0, 10, false, plus, space, alt, prec, width, left, zero);
-            break;
-        }
-        case 'u': case 'o': case 'x': case 'X': {
-            unsigned long long v = sz == S_I64 ? va_arg(ap, unsigned long long) : sz == S_PTR ? (unsigned long long)va_arg(ap, uintptr_t)
-                                 : sz == S_SHORT ? (unsigned short)va_arg(ap, unsigned) : (unsigned)va_arg(ap, unsigned);
-            put_int(o, v, false, c == 'u' ? 10 : c == 'o' ? 8 : 16, c == 'X', false, false, alt, prec, width, left, zero);
-            break;
-        }
-        case 'p': {
-            unsigned v = (unsigned)(uintptr_t)va_arg(ap, void *);
-            put_int(o, v, false, 16, true, false, false, false, 8, width, left, false);
-            break;
-        }
-        case 'c': case 'C': {
-            bool wide = c == 'c' ? (sz == S_LONG || sz == S_WIDE) : sz != S_SHORT;
-            int v = va_arg(ap, int);
-            char b = (char)v;
-            if (wide) {
-                u16 w = (u16)v;
-                to_narrow(&w, 1, &b, 1);
-                if (!w)
-                    b = 0;
-            }
-            field(o, "", 0, 0, &b, 1, width, left, zero && !left);
-            break;
-        }
-        case 's': case 'S': {
-            bool wide = c == 's' ? (sz == S_LONG || sz == S_WIDE) : sz != S_SHORT;
-            const void *a = va_arg(ap, const void *);
-            char *nbuf = NULL;
-            const char *s = "(null)";
-            size_t l = 6;
-            if (a && !wide) {
-                s = (const char *)a;
-                for (l = 0; s[l] && (prec < 0 || (int)l < prec); l++) {}
-            } else if (a) {
-                const u16 *w = (const u16 *)a;
-                size_t wl = 0;
-                for (; w[wl] && (prec < 0 || (int)wl < prec); wl++) {}
-                nbuf = (char *)malloc(wl + 1);
-                if (!nbuf) {
-                    errno = ENOMEM;
-                    return -1;
-                }
-                l = (size_t)to_narrow(w, wl, nbuf, wl);
-                s = nbuf;
-            } else if (prec >= 0 && prec < 6)
-                l = (size_t)prec;
-            field(o, "", 0, 0, s, l, width, left, zero && !left);
-            free(nbuf);
-            break;
-        }
-        case 'n': {
-            void *a = va_arg(ap, void *);
-            if (a) {
-                if (sz == S_SHORT) *(short *)a = (short)o.len; else *(int *)a = (int)o.len;
-            }
-            break;
-        }
-        case 'e': case 'E': case 'f': case 'g': case 'G':
-            put_float(o, va_arg(ap, double), c, plus, space, alt, prec, width, left, zero);
-            break;
-        case '%':
-            o.put('%');
-            break;
-        default: /* z j t F a ...: not MSVCRT conversions: the letter is printed, no argument is used */
-            o.put(c);
-        }
-        if (o.len == (size_t)-1 || o.len > 0x7FFFFFFFu)
-            return -1;
-    }
-    return (int)o.len;
-}
-
-namespace {
+/* ---------------------------------------------------------------- printf and scanf: the engine is msvcrt_format.cpp */
 int c_sprintf(char *buf, const char *fmt, ...)
 {
     if (!buf || !fmt) {
@@ -565,81 +248,17 @@ int c_sprintf(char *buf, const char *fmt, ...)
         buf[r] = 0;
     return r;
 }
-
-/* ---------------------------------------------------------------- numbers */
-bool is_sp(int c) { return c == ' ' || (c >= 9 && c <= 13); }
-/* length of the longest prefix of s (at most maxw) that is a decimal float: sign, digits with an optional point, and
- * an exponent (e E d D) only when digits follow it; 0 when there is no digit in the mantissa */
-size_t scan_float(const char *s, size_t maxw)
+int c_sscanf(const char *in, const char *fmt, ...)
 {
-    size_t i = 0, digits = 0;
-    if (i < maxw && (s[i] == '+' || s[i] == '-'))
-        i++;
-    for (; i < maxw && s[i] >= '0' && s[i] <= '9'; i++)
-        digits++;
-    if (i < maxw && s[i] == '.') {
-        size_t j = i + 1, fd = 0;
-        for (; j < maxw && s[j] >= '0' && s[j] <= '9'; j++)
-            fd++;
-        if (digits + fd)
-            i = j, digits += fd;
-    }
-    if (!digits)
-        return 0;
-    if (i < maxw && (s[i] == 'e' || s[i] == 'E' || s[i] == 'd' || s[i] == 'D')) {
-        size_t j = i + 1;
-        if (j < maxw && (s[j] == '+' || s[j] == '-'))
-            j++;
-        size_t k = j;
-        for (; k < maxw && s[k] >= '0' && s[k] <= '9'; k++) {}
-        if (k > j)
-            i = k;
-    }
-    return i;
-}
-double c_strtod(const char *s, char **end)
-{
-    const char *p = s;
-    while (is_sp((unsigned char)*p))
-        p++;
-    size_t l = scan_float(p, (size_t)-1);
-    if (!l) {
-        if (end)
-            *end = (char *)s;
-        return 0.0;
-    }
-    char small[128], *t = l < sizeof small ? small : (char *)malloc(l + 1);
-    if (!t) { /* no memory for the copy: the token cannot be converted */
-        errno = ENOMEM;
-        if (end)
-            *end = (char *)s;
-        return 0.0;
-    }
-    bool nonzero = false;
-    bool in_mant = true;
-    for (size_t i = 0; i < l; i++) {
-        char c = p[i];
-        if (c == 'd' || c == 'D')
-            c = 'e';
-        if (c == 'e')
-            in_mant = false;
-        if (in_mant && c >= '1' && c <= '9')
-            nonzero = true;
-        t[i] = c;
-    }
-    t[l] = 0;
-    int saved = errno;
-    double r = strtod(t, NULL);
-    errno = saved;
-    if (std::isinf(r) || (r == 0.0 && nonzero))
-        errno = ERANGE;
-    if (t != small)
-        free(t);
-    if (end)
-        *end = (char *)p + l;
+    va_list ap;
+    va_start(ap, fmt);
+    int r = fnvnx_msvc_scan(in, fmt, ap);
+    va_end(ap);
     return r;
 }
-double c_atof(const char *s) { return c_strtod(s, NULL); }
+
+/* ---------------------------------------------------------------- numbers */
+double c_atof(const char *s) { return fnvnx_msvc_strtod(s, NULL); }
 /* atox.c: a 32-bit long accumulates c - '0' unchecked: values past the range wrap, as in MSVCRT.DLL */
 int32_t atox(const char *s)
 {
@@ -655,179 +274,6 @@ int32_t atox(const char *s)
 }
 int c_atoi(const char *s) { return atox(s); }
 long c_atol(const char *s) { return (long)atox(s); }
-
-/* ---------------------------------------------------------------- sscanf */
-int c_vsscanf(const char *in, const char *fmt, va_list ap)
-{
-    if (!in || !fmt) {
-        errno = EINVAL;
-        return EOF;
-    }
-    const char *s = in;
-    int n = 0;
-    bool input_fail = false;
-    for (const char *p = fmt; *p && !input_fail;) {
-        if (is_sp((unsigned char)*p)) {
-            while (is_sp((unsigned char)*s))
-                s++;
-            p++;
-            continue;
-        }
-        if (*p != '%') {
-            if (!*s) { input_fail = true; break; }
-            if (*s != *p) break;
-            s++, p++;
-            continue;
-        }
-        p++;
-        if (*p == '%') {
-            while (is_sp((unsigned char)*s))
-                s++;
-            if (*s != '%') { if (!*s) input_fail = true; break; }
-            s++, p++;
-            continue;
-        }
-        bool suppress = *p == '*';
-        p += suppress;
-        size_t width = 0;
-        for (; *p >= '0' && *p <= '9'; p++)
-            width = width * 10 + (size_t)(*p - '0');
-        int sz = 0; /* 1 h, 2 l/w (32-bit ints, double, wide chars), 3 64-bit */
-        for (;;) {
-            if (*p == 'h') sz = 1, p++;
-            else if (*p == 'l') { if (p[1] == 'l') sz = 3, p += 2; else sz = 2, p++; }
-            else if (*p == 'L') sz = 2, p++;
-            else if (*p == 'w') sz = 2, p++;
-            else if (p[0] == 'I' && p[1] == '6' && p[2] == '4') sz = 3, p += 3;
-            else if (p[0] == 'I' && p[1] == '3' && p[2] == '2') sz = 0, p += 3;
-            else break;
-        }
-        char c = *p++;
-        size_t w = width ? width : (size_t)-1;
-        if (c == 'n') {
-            if (!suppress) {
-                void *a = va_arg(ap, void *);
-                if (sz == 1) *(short *)a = (short)(s - in); else *(int *)a = (int)(s - in);
-            }
-            continue;
-        }
-        if (c != 'c' && c != '[')
-            while (is_sp((unsigned char)*s))
-                s++;
-        if (!*s) {
-            if (!c)
-                break;
-            input_fail = true;
-            break;
-        }
-        if (c == 'd' || c == 'i' || c == 'u' || c == 'o' || c == 'x' || c == 'X' || c == 'p') {
-            size_t i = 0;
-            bool neg = false;
-            if (i < w && (s[i] == '+' || s[i] == '-'))
-                neg = s[i++] == '-';
-            int base = c == 'o' ? 8 : (c == 'x' || c == 'X' || c == 'p') ? 16 : c == 'i' ? 0 : 10;
-            if ((base == 0 || base == 16) && i + 1 < w && s[i] == '0' && (s[i + 1] == 'x' || s[i + 1] == 'X')
-                && isxdigit((unsigned char)s[i + 2]))
-                i += 2, base = 16;
-            else if (base == 0)
-                base = s[i] == '0' ? 8 : 10;
-            unsigned long long v = 0;
-            size_t nd = 0;
-            for (; i < w; i++, nd++) {
-                int d = s[i] >= '0' && s[i] <= '9' ? s[i] - '0' : s[i] >= 'a' && s[i] <= 'f' ? s[i] - 'a' + 10
-                      : s[i] >= 'A' && s[i] <= 'F' ? s[i] - 'A' + 10 : 99;
-                if (d >= base)
-                    break;
-                v = v * (unsigned)base + (unsigned)d;
-            }
-            if (!nd)
-                break;
-            s += i;
-            if (neg)
-                v = 0ull - v;
-            if (!suppress) {
-                void *a = va_arg(ap, void *);
-                if (c == 'p') *(uintptr_t *)a = (uintptr_t)v;
-                else if (sz == 3) *(long long *)a = (long long)v;
-                else if (sz == 1) *(short *)a = (short)v;
-                else *(int *)a = (int)v;
-                n++;
-            }
-        } else if (c == 'e' || c == 'f' || c == 'g' || c == 'E' || c == 'G') {
-            size_t l = scan_float(s, w);
-            if (!l)
-                break;
-            char tmp[400];
-            size_t cl = l < sizeof tmp - 1 ? l : sizeof tmp - 1;
-            memcpy(tmp, s, cl);
-            tmp[cl] = 0;
-            double v = c_strtod(tmp, NULL);
-            s += l;
-            if (!suppress) {
-                void *a = va_arg(ap, void *);
-                if (sz == 2) *(double *)a = v; else *(float *)a = (float)v;
-                n++;
-            }
-        } else if (c == 's' || c == 'c' || c == '[') {
-            unsigned char set[256];
-            memset(set, 0, sizeof set);
-            if (c == '[') {
-                bool inv = *p == '^';
-                p += inv;
-                const unsigned char *q = (const unsigned char *)p;
-                for (bool first = true; *q && (*q != ']' || first); first = false, q++) {
-                    if (q[1] == '-' && q[2] && q[2] != ']') {
-                        for (int ch = q[0]; ch <= q[2]; ch++)
-                            set[ch] = 1;
-                        q += 2;
-                    } else
-                        set[*q] = 1;
-                }
-                p = (const char *)q + (*q == ']');
-                if (inv)
-                    for (int i = 0; i < 256; i++)
-                        set[i] ^= 1;
-                set[0] = 0;
-            } else if (c == 's')
-                for (int i = 1; i < 256; i++)
-                    set[i] = !is_sp(i);
-            size_t cnt = c == 'c' ? (width ? width : 1) : w, i = 0;
-            if (c == 'c') {
-                for (; i < cnt && s[i]; i++) {}
-                if (i < cnt)
-                    break;
-            } else {
-                for (; i < cnt && s[i] && set[(unsigned char)s[i]]; i++) {}
-                if (!i)
-                    break;
-            }
-            if (!suppress) {
-                void *a = va_arg(ap, void *);
-                if (sz == 2) {
-                    u16 *d = (u16 *)a;
-                    for (size_t k = 0; k < i; k++)
-                        d[k] = (unsigned char)s[k];
-                    if (c != 'c') d[i] = 0;
-                } else {
-                    memcpy(a, s, i);
-                    if (c != 'c') ((char *)a)[i] = 0;
-                }
-                n++;
-            }
-            s += i;
-        } else
-            break;
-    }
-    return n == 0 && input_fail ? EOF : n;
-}
-int c_sscanf(const char *in, const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    int r = c_vsscanf(in, fmt, ap);
-    va_end(ap);
-    return r;
-}
 
 /* ---------------------------------------------------------------- strings, sort, misc */
 char *w_strchr(const char *s, int c) { return (char *)strchr(s, c); }
@@ -1099,8 +545,8 @@ const row g_rows[] = {
     R("isxdigit", c_isxdigit), R("isleadbyte", c_isleadbyte), R("iswalpha", c_iswalpha), R("iswdigit", c_iswdigit),
     R("iswpunct", c_iswpunct), R("iswspace", c_iswspace), R("tolower", c_tolower), R("toupper", c_toupper),
     R("setlocale", c_setlocale),
-    R("sprintf", c_sprintf), R("_snprintf", _snprintf), R("_vsnprintf", _vsnprintf), R("sscanf", c_sscanf),
-    R("atof", c_atof), R("atoi", c_atoi), R("atol", c_atol), R("strtod", c_strtod), R("_itoa", _itoa), R("_ultoa", _ultoa),
+    R("sprintf", c_sprintf), R("_snprintf", _snprintf), R("_vsnprintf", fnvnx_msvcrt_va_vsnprintf), R("sscanf", c_sscanf),
+    R("atof", c_atof), R("atoi", c_atoi), R("atol", c_atol), R("strtod", fnvnx_msvc_strtod), R("_itoa", _itoa), R("_ultoa", _ultoa),
     R("qsort", c_qsort), R("rand", fnvnx_rand), R("srand", fnvnx_srand), R("_strdate", c_strdate), R("_strtime", c_strtime),
     R("_initterm", c_initterm), R("__dllonexit", c_dllonexit), R("_onexit", c_onexit), R("exit", c_exit),
     R("abort", c_abort), R("_amsg_exit", c_amsg_exit), R("_purecall", c_purecall),
@@ -1117,4 +563,19 @@ extern "C" void *fnvnx_msvcrt_lookup(const char *name)
         if (!strcmp(r.name, name))
             return r.fn;
     return NULL;
+}
+
+/* the code-page conversions of the formatter and scanner (msvcrt_format.cpp): the current locale's narrow <-> UTF-16 */
+extern "C" int fnvnx_msvcrt_wc_to_byte(unsigned short wc, unsigned char *out) { return wc_to_byte(wc, out); }
+extern "C" int fnvnx_msvcrt_byte_to_wc(unsigned char b, unsigned short *out)
+{
+    if (cur()->cp == 0) {
+        *out = b;
+        return 1;
+    }
+    char c = (char)b;
+    WCHAR w = 0;
+    int r = MultiByteToWideChar(1252, 0, &c, 1, &w, 1);
+    *out = (unsigned short)w;
+    return r == 1;
 }

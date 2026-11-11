@@ -246,15 +246,10 @@ TEST(msvcrt_printf)
     CHECK(memcmp(t, "abcd\0zzz", 8) == 0);
     CHECK_EQ(sn(t, 0, "abc"), -1);
     CHECK_EQ(sn(NULL, 0, "abc"), -1);
-    auto vs = fn<int (*)(char *, size_t, const char *, va_list)>("_vsnprintf");
-    auto call_v = [&](char *buf, size_t sz, const char *f, ...) {
-        va_list ap;
-        va_start(ap, f);
-        int r = vs(buf, sz, f, ap);
-        va_end(ap);
-        return r;
-    };
-    CHECK_EQ(call_v(t, 8, "%d-%s", 12, "ab"), 5);
+    /* the name-table _vsnprintf serves translated callers: its va_list is a pointer to x86 stack words */
+    auto vs = fn<int (*)(char *, size_t, const char *, const uint32_t *)>("_vsnprintf");
+    const uint32_t words[2] = {12, 0xab};
+    CHECK_EQ(vs(t, 8, "%d-%x", words), 5);
     CHECK_STR(t, "12-ab");
     char big[600];
     SP(big, "%s", std::string(500, 'q').c_str());

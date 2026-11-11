@@ -75,6 +75,25 @@ int _vsnprintf_s(char *, size_t, size_t, const char *, va_list);
 int _scprintf(const char *, ...);
 int _vscprintf(const char *, va_list);
 
+/* ---- the one formatter and the one scanner (msvcrt_format.cpp), parameterised by an argument source.
+ * *_format / *_scan read a native va_list; *_words / fnvnx_msvcrt_va_* read the x86 stack words a translated
+ * caller passes (32-bit words in memory order: int and pointers one word, long long and double two words, low
+ * first; a "va_list" coming from x86 code is a pointer to such words). *_format writes at most n characters and
+ * returns the full length (-1: a %S/%ls string that does not convert); fnvnx_msvc_bound applies the _snprintf
+ * rules to that. */
+int fnvnx_msvc_format(char *buf, size_t n, const char *fmt, va_list ap);
+int fnvnx_msvc_format_words(char *buf, size_t n, const char *fmt, const uint32_t *args);
+int fnvnx_msvc_bound(char *buf, size_t n, int len);
+int fnvnx_msvc_scan(const char *in, const char *fmt, va_list ap);
+int fnvnx_msvc_scan_words(const char *in, const char *fmt, const uint32_t *args);
+double fnvnx_msvc_strtod(const char *s, char **end);
+int fnvnx_msvcrt_va_sprintf(char *dst, const char *fmt, const uint32_t *args);
+int fnvnx_msvcrt_va_snprintf(char *dst, size_t count, const char *fmt, const uint32_t *args);
+int fnvnx_msvcrt_va_vsnprintf(char *dst, size_t count, const char *fmt, const uint32_t *args);
+int fnvnx_msvcrt_va_sscanf(const char *src, const char *fmt, const uint32_t *args);
+int fnvnx_msvcrt_wc_to_byte(unsigned short wc, unsigned char *out);   /* current code page; 1 when it converts */
+int fnvnx_msvcrt_byte_to_wc(unsigned char b, unsigned short *out);
+
 /* ---- files: Windows paths through the runtime's path mapper. _access/_mkdir/_rmdir/_unlink/_getcwd/_chdir
  * carry an fnvnx_ name: newlib uses some underscore names (_unlink, _stat) for its system-call layer. */
 FILE *fnvnx_fopen(const char *path, const char *mode);

@@ -491,22 +491,15 @@ errno_t _makepath_s(char *out, size_t n, const char *drive, const char *dir, con
     return 0;
 }
 
-/* ---- formatting: MSVCRT.DLL's format language, one engine (msvcrt_exports.cpp): writes at most n characters (no
+/* ---- formatting: MSVCRT.DLL's format language, one engine (msvcrt_format.cpp): writes at most n characters (no
  * terminator), returns the full length; buf may be NULL when n is 0. */
-int fnvnx_msvc_format(char *buf, size_t n, const char *fmt, va_list ap);
-
 int _vsnprintf(char *buf, size_t n, const char *fmt, va_list ap)
 {
     if (!fmt || (!buf && n)) {
         errno = FNVNX_EINVAL;
         return -1;
     }
-    int len = fnvnx_msvc_format(buf, n, fmt, ap);
-    if (len < 0)
-        return -1;
-    if ((size_t)len < n)
-        buf[len] = 0;
-    return (size_t)len <= n ? len : -1; /* len == n: no terminator; longer: truncated, -1 */
+    return fnvnx_msvc_bound(buf, n, fnvnx_msvc_format(buf, n, fmt, ap));
 }
 
 int _snprintf(char *buf, size_t n, const char *fmt, ...)
