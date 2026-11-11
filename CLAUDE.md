@@ -279,3 +279,20 @@ The owner's words: "Агенты вызывают соннетов которы�
     boundary (the dk* functions, the libnx calls it uses and the command buffers).
   - Shaders run in that model from the DKSH that the build produced. An instruction that the model does not cover makes
     the build red.
+
+## Owner order of 2026-11-11, night: the first frame in this budget, correct by construction (binding)
+
+The owner's words: "Трекай прогресс послойно и прогрессируй всегда. Задача понятная. Осталось 50% недельного лимита. За
+это время можно закрыть первый кадр точно. Что говорить об остальном. Опять же все должно быть корректно по
+построению."
+
+- **Target:** the first frame in the L4 emulator within the remaining half of the weekly usage limit. Everything a
+  session does is measured against that path: product roots → lifted packs as roots → ELF → boot → WinMain → menu →
+  first frame.
+- **Spend only on the path.** Work that does not move a layer toward the first frame waits until after it. Workers are
+  Sonnet; long or mechanical runs go to farms or workers, not to a lead's own context. No repeated censuses of numbers
+  that did not change; a gate reads cached facts.
+- **Correct by construction.** Each step is closed by its rule and gate, never by a run that happened to pass. A shortcut
+  that breaks a rule (a stub, a double, a second build path, a new assumption, a heuristic) is not progress: it is red.
+- **Progress is tracked per layer** in `ports/fnv-nx/journal/status/<layer>.md` (see "late night"); the orchestrator
+  collects them into `ports/fnv-nx/journal/status/ALL.md` on the integration branch every hour.
