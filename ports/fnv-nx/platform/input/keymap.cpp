@@ -74,6 +74,19 @@ extern "C" uint8_t fnvnx_hid_usage_to_dik(uint8_t u)
     case 99: return DIK_DECIMAL;
     case 100: return DIK_OEM_102;
     case 101: return DIK_APPS;
+    case 102: return 0xDE;   /* DIK_POWER */
+    case 103: return 0x8D;   /* DIK_NUMPADEQUALS */
+    case 104: return 0x64;   /* DIK_F13 */
+    case 105: return 0x65;   /* DIK_F14 */
+    case 106: return 0x66;   /* DIK_F15 */
+    case 127: return 0xA0;   /* DIK_MUTE */
+    case 128: return 0xB0;   /* DIK_VOLUMEUP */
+    case 129: return 0xAE;   /* DIK_VOLUMEDOWN */
+    case 135: return 0x73;   /* DIK_ABNT_C1 (international 1, "ro") */
+    case 136: return 0x70;   /* DIK_KANA */
+    case 137: return 0x7D;   /* DIK_YEN */
+    case 138: return 0x79;   /* DIK_CONVERT */
+    case 139: return 0x7B;   /* DIK_NOCONVERT */
     case 224: return DIK_LCONTROL;
     case 225: return DIK_LSHIFT;
     case 226: return DIK_LMENU;

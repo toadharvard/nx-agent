@@ -333,6 +333,7 @@ class Emu(SanitizeMixin):
         self.threads: dict[int, Thread] = {}
         self.order: list[int] = []
         self.cur: Thread | None = None
+        self.icount = None   # verify/icount.py (--icount)
         self.exit_code = None
         self.fds, self.dirs, self.next_dir = {}, {}, 1
         self.dp = datapath.DataPath(root, game)
@@ -2373,6 +2374,8 @@ class Emu(SanitizeMixin):
         if name in self.miles:
             return
         missing = self.mile_missing(name)
+        if self.icount and not (missing and name in self.mile_ooo):   # a repeated out-of-order hit is no new mark
+            self.icount.mark(name, bool(missing))
         lr = self.uc.reg_read(UC_ARM64_REG_LR)
         where = self.sym(self.uc.reg_read(UC_ARM64_REG_PC) if at is None else at).split(" ", 1)[-1]
         rec = {"how": how, "where": where, "caller": self.sym(lr).split(" ", 1)[-1], "host_calls": self.calls,
@@ -2507,6 +2510,7 @@ class Emu(SanitizeMixin):
         return {
             "schema": "fnvnx-boot-summary/1",
             **mile,
+            **({"icount": self.icount.summary()} if self.icount else {}),
             "winmain": "calling WinMain" in self.console.decode(errors="replace"),
             "stop": {"reason": stop, "exit_code": rc, "trace": tr, "messages": msgs[:20]},
             "initializers_skipped": len(getattr(self, "skipped", None) or []),
@@ -2679,6 +2683,8 @@ class Emu(SanitizeMixin):
             if self.last is not None and self.last != t.tid:
                 self.ctx_switches += 1
             self.last, self.cur = t.tid, t
+            if self.icount:
+                self.icount.thread(t.tid)
             uc.context_restore(t.ctx)
             uc.reg_write(UC_ARM64_REG_X0, t.result & U64)
             t.state = "running"
@@ -2802,6 +2808,9 @@ def main(argv):
                     help="fill the trap slots of native vtables from the exe's vftables (needs --elf, --addrmap and "
                     "the exe as --file switch/fnv/FalloutNV.exe=PATH or in --game); also the line 'exe-vtables' of --stub-faults")
     ap.add_argument("--summary-json", metavar="FILE", help="write the machine-readable boot summary here")
+    ap.add_argument("--icount", metavar="OUT.json", help="exact executed-instruction counts per thread and milestone "
+                    "interval (verify/icount.py), written at exit")
+    ap.add_argument("--icount-classes", metavar="SPEC.json", help="--icount: range and entry classes (icount.py spec)")
     ap.add_argument("--inject", action="append", default=[], metavar="OBJ",
                     help="map an ILP32 object (a guest-side stand-in) after the guest; trap stubs of the functions it "
                     "defines branch to it (needs --elf)")
@@ -2931,6 +2940,9 @@ def main(argv):
                            deref=a.trace_deref)
 
     def write_summary(stop, rc=None):
+        if emu.icount:
+            emu.icount.stop(stop, stubbed_faults=len(getattr(emu, 'stubbed', ())), budget_slices=getattr(emu, 'budget_slices', 0))
+            emu.icount.write(a.icount)
         if a.summary_json:
             import json
             with open(a.summary_json, "w") as f:
@@ -3021,6 +3033,12 @@ def main(argv):
             hn["h"] = emu.uc.hook_add(UC_HOOK_CODE, nulldev_on, begin=ia, end=ia)
             print("   stub-nulldev: on (fnvnx_stub_nulldev at %#x): CreateDevice succeeds headless without a GPU backend"
                   % na)
+    if a.icount:
+        sys.path.insert(0, os.path.join(HERE, "..", "..", "verify"))
+        import atexit
+        import icount
+        emu.icount = icount.attach(emu.uc, emu.base, emu.base + emu.size, a.icount_classes, emu.base - emu.link_base)
+        atexit.register(lambda: emu.icount.stopped or (emu.icount.stop('exception'), emu.icount.write(a.icount)))
     try:
         rc = emu.run()
     except SystemExit as e:

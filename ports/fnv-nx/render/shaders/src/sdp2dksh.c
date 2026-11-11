@@ -17,6 +17,7 @@
 #include <string.h>
 #include "fnvnx_sdp.h"
 #include "fnvnx_shaders.h"
+#include "fnvnx_dk_layout.h"
 
 static uint8_t *slurp(const char *path, size_t *len)
 {
@@ -74,9 +75,11 @@ static void variants(ctx_t *c, uint64_t h, const void *bc, size_t n)
     }
 }
 
+static unsigned char g_link[224]; static uint32_t g_nlink;   /* --link USAGE:INDEX,... (the draw's varying link set) */
+
 static void one(ctx_t *c, const char *pkg, const char *name, const void *bc, size_t n)
 {
-    fnvnx_shader_opts o = { c->flags, NULL };
+    fnvnx_shader_opts o = { c->flags, NULL, g_nlink ? g_link : NULL, g_nlink };
     fnvnx_shader_result r;
     c->total++;
     uint64_t h = fnvnx_shader_hash(bc, n);
@@ -157,6 +160,13 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--list")) list = 1;
         else if (!strcmp(argv[i], "--ctab")) list = ctab = 1;
         else if (!strcmp(argv[i], "--pack")) return do_pack(argc - i - 1, argv + i + 1);
+        else if (!strcmp(argv[i], "--link") && i + 1 < argc) {
+            for (const char *q = argv[++i]; *q && g_nlink < 224; ) {
+                int u, x, k;
+                if (sscanf(q, "%d:%d%n", &u, &x, &k) != 2 || u < 0 || u > 13 || x < 0 || x > 15) { fprintf(stderr, "bad --link\n"); return 2; }
+                g_link[g_nlink++] = FNVNX_DK_PAIR(u, x); q += k; if (*q == ',') q++;
+            }
+        }
         else if (!strcmp(argv[i], "--numerics") && i + 1 < argc) {
             const char *m = argv[++i];
             if (!strcmp(m, "nine")) c.flags |= FNVNX_SHADER_NUMERICS_NINE;

@@ -11,7 +11,9 @@
 #define FNVNX_W32_IMPL 1   /* the out-of-line Interlocked* (fnvnx_win32.h has inline copies for everyone else) */
 #include "w32.h"
 
+#include <stdio.h>
 #include <stdlib.h>
+#include <strings.h>
 
 os_lock_t w32_wait_lock;
 
@@ -57,7 +59,7 @@ static bool cs_spin_acquire(LPCRITICAL_SECTION cs)
         spin = W32_CS_SPIN_MAX;
     os_lock_t *l = cs_lock(cs);
     for (DWORD i = 0; i < spin; i++) {
-        if (__atomic_load_n(&l->word, __ATOMIC_RELAXED) == 0 && os_trylock(l))   /* 0: unlocked */
+        if (__atomic_load_n(&l->word, __ATOMIC_SEQ_CST) == 0 && os_trylock(l))   /* 0: unlocked */
             return true;
         cpu_relax();
     }
@@ -68,7 +70,7 @@ extern "C" void EnterCriticalSection(LPCRITICAL_SECTION cs)
 {
     struct w32_thread *self = w32_self();
     DWORD me = self->tid;
-    if (__atomic_load_n(&cs->OwningThread, __ATOMIC_RELAXED) == tid_handle(me)) {
+    if (__atomic_load_n(&cs->OwningThread, __ATOMIC_SEQ_CST) == tid_handle(me)) {
         cs->RecursionCount++;
         return;
     }
@@ -81,7 +83,7 @@ extern "C" void EnterCriticalSection(LPCRITICAL_SECTION cs)
             os_lock(cs_lock(cs));
         }
     }
-    __atomic_store_n(&cs->OwningThread, tid_handle(me), __ATOMIC_RELAXED);
+    __atomic_store_n(&cs->OwningThread, tid_handle(me), __ATOMIC_SEQ_CST);
     cs->RecursionCount = 1;
     cs->LockCount = 0;
 }
@@ -89,13 +91,13 @@ extern "C" void EnterCriticalSection(LPCRITICAL_SECTION cs)
 extern "C" BOOL TryEnterCriticalSection(LPCRITICAL_SECTION cs)
 {
     DWORD me = w32_self()->tid;
-    if (__atomic_load_n(&cs->OwningThread, __ATOMIC_RELAXED) == tid_handle(me)) {
+    if (__atomic_load_n(&cs->OwningThread, __ATOMIC_SEQ_CST) == tid_handle(me)) {
         cs->RecursionCount++;
         return TRUE;
     }
     if (!os_trylock(cs_lock(cs)))
         return FALSE;
-    __atomic_store_n(&cs->OwningThread, tid_handle(me), __ATOMIC_RELAXED);
+    __atomic_store_n(&cs->OwningThread, tid_handle(me), __ATOMIC_SEQ_CST);
     cs->RecursionCount = 1;
     cs->LockCount = 0;
     return TRUE;
@@ -108,7 +110,7 @@ extern "C" void LeaveCriticalSection(LPCRITICAL_SECTION cs)
         return;
     }
     if (--cs->RecursionCount == 0) {
-        __atomic_store_n(&cs->OwningThread, (HANDLE)0, __ATOMIC_RELAXED);
+        __atomic_store_n(&cs->OwningThread, (HANDLE)0, __ATOMIC_SEQ_CST);
         cs->LockCount = -1;
         os_unlock(cs_lock(cs));
     }
@@ -127,12 +129,12 @@ extern "C" void DeleteCriticalSection(LPCRITICAL_SECTION cs) { memset(cs, 0, siz
 static unsigned char g_split_lock;
 template <class T, class F> static T w32_split(volatile T *p, F f)
 {
-    while (__atomic_exchange_n(&g_split_lock, 1, __ATOMIC_ACQUIRE)) {}
+    while (__atomic_exchange_n(&g_split_lock, 1, __ATOMIC_SEQ_CST)) {}
     T old;
     memcpy(&old, (const void *)p, sizeof old);
     T nv = f(old);
     memcpy((void *)p, &nv, sizeof nv);
-    __atomic_store_n(&g_split_lock, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_split_lock, 0, __ATOMIC_SEQ_CST);
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
     return old;
 }
@@ -266,6 +268,39 @@ static struct w32_obj *find_named(const char *name, int type)
     return NULL;
 }
 
+#ifndef ERROR_FILENAME_EXCED_RANGE
+#define ERROR_FILENAME_EXCED_RANGE 206
+#endif
+#ifndef ERROR_PATH_NOT_FOUND
+#define ERROR_PATH_NOT_FOUND 3
+#endif
+
+/* Namespace key: a name is at most MAX_PATH-1 characters; "Local\\x" is the same object as "x" (the session
+ * namespace), "Global\\x" is another; after the prefix a backslash is not allowed. */
+static bool key_of(const char *name, char *key /* MAX_PATH + 8 */)
+{
+    size_t n = strlen(name);
+    if (n >= MAX_PATH) {
+        SetLastError(ERROR_FILENAME_EXCED_RANGE);
+        return false;
+    }
+    const char *rest = name;
+    bool global = false;
+    if (!strncasecmp(name, "Local\\", 6))
+        rest = name + 6;
+    else if (!strncasecmp(name, "Global\\", 7)) {
+        rest = name + 7;
+        global = true;
+    }
+    if (!*rest || strchr(rest, '\\')) {
+        SetLastError(ERROR_PATH_NOT_FOUND);
+        return false;
+    }
+    snprintf(key, MAX_PATH + 8, "%s%s", global ? "Global\\" : "", rest);   /* Local\x is x; Global\x stays distinct */
+    return true;
+}
+
+/* takes over the caller's reference to fresh; on failure it is dropped */
 static HANDLE create_named(const char *name, int type, struct w32_obj *fresh)
 {
     if (!name || !*name) {
@@ -274,18 +309,33 @@ static HANDLE create_named(const char *name, int type, struct w32_obj *fresh)
             SetLastError(ERROR_SUCCESS);
         return h;
     }
+    char key[MAX_PATH + 8];
+    if (!key_of(name, key)) {
+        w32_obj_unref(fresh);
+        return NULL;
+    }
+    struct named *n = (struct named *)malloc(sizeof *n);   /* before taking the lock: a failure leaves no half state */
+    char *copy = strdup(key);
+    if (!n || !copy) {
+        free(n);
+        free(copy);
+        w32_obj_unref(fresh);
+        SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+        return NULL;
+    }
     os_lock(&w32_wait_lock);
-    struct w32_obj *ex = find_named(name, type);
+    struct w32_obj *ex = find_named(key, type);
     if (!ex) {
-        struct named *n = (struct named *)malloc(sizeof *n);
-        if (n) {
-            n->name = strdup(name);
-            n->o = fresh;
-            n->next = g_named;
-            g_named = n;
-        }
+        n->name = copy;
+        n->o = fresh;
+        n->next = g_named;
+        g_named = n;
     }
     os_unlock(&w32_wait_lock);
+    if (ex) {
+        free(n);
+        free(copy);
+    }
     if (ex == (struct w32_obj *)-1) {
         w32_obj_unref(fresh);
         SetLastError(ERROR_INVALID_HANDLE);
@@ -437,7 +487,7 @@ static int signaled(struct w32_obj *o, DWORD me)
     case W32_SEMAPHORE: return ((struct w32_sem *)o)->count > 0;
     case W32_THREAD: return w32_thread_signaled(o);
     case W32_FILE: return 1; /* I/O is synchronous: a file handle is always signaled */
-    default: return 0;
+    default: return 0;      /* W32_PSEUDO: the running process / thread; never signaled */
     }
 }
 
@@ -461,6 +511,33 @@ static int acquire(struct w32_obj *o, DWORD me)
 }
 
 static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32_t pc);
+
+/* The pseudo handles GetCurrentProcess() / GetCurrentThread() are waitable (SYNCHRONIZE) and not signaled while
+ * they run; the standard handles are file handles (always signaled). One static, never-freed object stands for the
+ * unsignaled pseudo handles; the others are rejected by type (W32_FIND, W32_HEAP carry no SYNCHRONIZE access). */
+#define W32_PSEUDO_RUNNING 100
+static struct w32_obj g_running_obj = { W32_MAGIC, W32_PSEUDO_RUNNING, 1 << 30, { &g_running_obj.waiters, &g_running_obj.waiters, NULL }, NULL };
+static struct w32_obj g_std_obj = { W32_MAGIC, W32_FILE, 1 << 30, { &g_std_obj.waiters, &g_std_obj.waiters, NULL }, NULL };
+
+static struct w32_obj *wait_target(HANDLE h)
+{
+    if (h == W32_PSEUDO_PROCESS || h == W32_PSEUDO_THREAD) {
+        w32_obj_ref(&g_running_obj);
+        return &g_running_obj;
+    }
+    if (w32_is_std_handle && w32_is_std_handle(h)) {
+        w32_obj_ref(&g_std_obj);
+        return &g_std_obj;
+    }
+    struct w32_obj *o = w32_obj_get_ref(h, 0);
+    if (o && o->type != W32_EVENT && o->type != W32_MUTEX && o->type != W32_SEMAPHORE && o->type != W32_THREAD &&
+        o->type != W32_FILE) {
+        w32_obj_unref(o);
+        SetLastError(ERROR_INVALID_HANDLE);
+        return NULL;
+    }
+    return o;
+}
 
 /* The loading-screen thread (OS_THREAD_BOOST) waits without a timeout only when the loading screen is done
  * (LoadingMenuThread::ThreadProc parks on its semaphore): the CPU boost is off for such a wait.
@@ -501,7 +578,7 @@ static DWORD wait_multiple(DWORD n, const HANDLE *hs, BOOL all, DWORD ms, uint32
     struct w32_obj *objs[MAXIMUM_WAIT_OBJECTS];
     struct w32_link links[MAXIMUM_WAIT_OBJECTS];
     for (DWORD i = 0; i < n; i++) {
-        objs[i] = w32_obj_get_ref(hs[i], 0);   /* referenced under the handle lock: a CloseHandle cannot free it */
+        objs[i] = wait_target(hs[i]);   /* referenced under the handle lock: a CloseHandle cannot free it */
         if (!objs[i]) {
             for (DWORD j = 0; j < i; j++)
                 w32_obj_unref(objs[j]);

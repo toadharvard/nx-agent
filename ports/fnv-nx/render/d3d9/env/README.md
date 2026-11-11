@@ -1,0 +1,38 @@
+# render/d3d9/env: the ENV table (task E1)
+**Rule (QUEUE.md "ENV profile")**: ONE reference environment = Wine 9.0 + Mesa llvmpipe + a fixed screen (ENV_PIN.txt). Every environment question of IDirect3D9/9Ex is answered from the table
+`env_<profile>.tsv` (our measurement: `tests/l6/env/make_env.py` runs `envprobe2.exe` under Wine with the recorder, twice, rows must be identical). Profiles: `handheld` screen 1280x720, `docked` 1920x1080,
+ONE adapter with ONE mode each, VideoMemorySize 960 MiB. `gen_env.py` derives `env_table.gen.cpp/.h` (not checked in) and asserts every closing rule below on all rows; `dev/d3d9_adapter.cpp` maps D3D types onto it.
+Query list = `tests/l6/env/envq.py` (one source for the Wine probe and for our replay). Wine source = wine-9.0, `dlls/d3d9/directx.c` (d3d9_*) and `dlls/wined3d/directx.c` (wined3d_*).
+## Closing rules (a domain that is infinite or huge is closed by the code path of the Wine function, then every rule is VERIFIED by probe rows over the whole finite part)
+- **Adapter ordinal** (UINT): first statement of every d3d9_* method: `ordinal >= wined3d_output_count` -> INVALIDCALL (GetAdapterModeCount(Ex): 0, GetAdapterMonitor: NULL). Rows: ordinals 1, 2, 0x7fffffff, 0xffffffff on every method.
+- **D3DFORMAT** (open FOURCC space) -> format class: `d3d9/device.c wined3dformat_from_d3dformat` (four printable bytes: passed through as FOURCC; else the 48 enum values with a case; else UNKNOWN) then
+  `wined3d/utils.c get_format_idx` (24 known FOURCCs; any other id is looked up as the UNKNOWN format). 74 classes = 24 FOURCC + 48 switch + UNK0 (wined3d id UNKNOWN) + UNKF (unknown printable FOURCC);
+  they differ only where the id itself is read (MSAA: UNKNOWN id -> INVALIDCALL, else NOTAVAILABLE; conversion: raw-equal -> S_OK). Probed: all 62 enum values, 27 FOURCCs (all 24 wined3d ones), 3 unknown FOURCCs, 5 unmapped numbers.
+- **D3DDEVTYPE**: never read by CheckDeviceType/Format/DepthStencilMatch/MultiSampleType/FormatConversion (`wined3d_device_type_from_d3d` is a cast); GetDeviceCaps: `wined3d_get_device_caps` sets DeviceType = HAL ? HAL : REF
+  and succeeds for every value. Rows: HAL, REF, SW, NULLREF, 0, 5, 0x7fffffff on every method.
+- **CheckDeviceFormat** `d3d9_CheckDeviceFormat` + `wined3d_check_device_format`: adapter format gate (X8R8G8B8 / R5G6B5 / X1R5G5B5 else NOTAVAILABLE, UNKNOWN INVALIDCALL; `adapter_gl_check_format` is TRUE, so nothing else reads it);
+  resource type -> 5 classes (SURFACE, TEXTURE, CUBE, VOLUME(=VOLUMETEXTURE), BUFFER(=VB=IB); others INVALIDCALL); `usage & 0x103ffff0` (WINED3DUSAGE_MASK|QUERY_MASK) is the usage word, RT/DS become bind flags,
+  bits 2, 3 (WRITEONLY) and all above the mask are ignored. Result = conjunction: `(usage & ~allowed(resource, bind)) || (bind & ~allowed_bind)` -> NOTAVAILABLE; each remaining bit adds a format requirement
+  (RT, DS, FILTER, POSTPS, SRGBREAD, SRGBWRITE, VTF, BUMP, GENMIPMAP; DYNAMIC/SOFTWAREPROCESSING/WRAPANDMIP add none) and all must hold (`(caps & format_caps) == format_caps`); the only soft result is D3DOK_NOMIPGEN
+  (GENMIPMAP allowed but not generatable). So per (resource class, format class) 11 bits derived from single-usage probes (0, each of the 32 bits) cover the function; interacting pairs are SRGBWRITE with RT (SURFACE) and
+  every bit with RT/DS (bind), and ALL 210 pairs of unmasked bits x 5 resource classes x every format are probed to verify the conjunction.
+- **CheckDepthStencilMatch** `wined3d_check_depth_stencil_match`: RT-capable(rt) and DS-capable(ds); adapter format and device type unread (probed: all). **CheckDeviceMultiSampleType**: d3d9: type > 16 -> INVALIDCALL (also 17, 0x7fffffff);
+  `wined3d_check_device_multisample_type`: per-format mask; NONMASKABLE answers OK with popcount(mask) levels when any type exists; NOTAVAILABLE sets levels = 1.
+  **CheckDeviceFormatConversion** `wined3d_check_device_format_conversion`: SRC(src) and DST(dst) bits, raw-equal S_OK. **CheckDeviceType** `wined3d_check_device_type`: 4 display formats (X8, R5, X1, A2R10G10B10), windowed x backbuffer class.
+- **Modes**: GetAdapterModeCount/EnumAdapterModes: formats X8R8G8B8 / R5G6B5 only (`d3d9_*` gate), one mode; index >= count -> INVALIDCALL; Ex: `mode_matches_filter` (scan 0 matches, else must equal the mode's ordering PROGRESSIVE);
+  GetAdapterDisplayModeEx: `mode->Size == 24` else INVALIDCALL. Out structures are written iff the call succeeds (asserted on every failing row). Identifier: WHQLLevel = flags & D3DENUM_WHQL_LEVEL ? 1 : 0 (all 32 flag bits probed).
+- **Factory**: Direct3DCreate9(Ex) accept every SDK version (`d3d9_main.c` only traces it); QueryInterface lattice: Ex answers IDirect3D9Ex only on an object made by Direct3DCreate9Ex. RegisterSoftwareDevice: `wined3d_register_software_device` is a stub returning OK; that is the reference answer.
+## Device level (recorded, replayed by the later CreateDevice task)
+GetAvailableTextureMem (`wined3d_device_get_available_texture_mem`) = VideoMemorySize(960 MiB = 0x3c000000) - sum of accounted resources; accounted = non-Ex device; textures DEFAULT+MANAGED, vertex buffers DEFAULT+SYSTEMMEM (buffer.c re-creates a SYSTEMMEM buffer GPU-side), index buffers and offscreen surfaces DEFAULT only,
+size = 16-aligned sum over levels of row_pitch (4-aligned; block bytes x blocks for DXT) x rows; render targets / depth surfaces from CreateRenderTarget/CreateDepthStencilSurface and everything on an Ex device are not accounted. gen_env.py checks all 151 rows per profile against this.
+Present-parameter rewrites, device caps (= adapter caps), display mode, creation parameters, cooperative level, CheckDeviceState: rows `DEV.*` in the tsv.
+## Profile differences
+`handheld` (1280x720) vs `docked` (1920x1080) differ ONLY in the mode: GetAdapterDisplayMode, EnumAdapterModes(Ex) (both formats), GetAdapterDisplayModeEx, and the device-phase rows that echo it (124 rows). Every other table is shared.
+Observed, not chosen: RefreshRate is **0** in every mode answer (Wine on Xvfb has no refresh rate), not 60; the single mode is listed for X8R8G8B8 and R5G6B5; adapter "NVIDIA GeForce GTX 470" (Wine's fallback card), VendorId 0x10de, DeviceId 0x6cd, WHQL 0/1 by flag.
+## What the table PROMISES (the implementation must deliver exactly this; counts over the 74 format classes; read them with `gen_env.py` which prints them, cells in `env_table.gen.cpp` `T_CDF`)
+- CheckDeviceFormat bits per resource class (formats usable for): TEXTURE: plain 49, render target 25, depth-stencil 7, filtering 43, post-pixel-shader blending 38, sRGB read 10, sRGB write 10, vertex texture 45, bump map 5, mip generation 21 (28 more answer D3DOK_NOAUTOGEN);
+  CUBETEXTURE: 49 / 25 / 0 / 43 / 38 / 10 / 10 / 45 / 0 / 21; VOLUME: 40 / 0 / 0 / 34 / 36 / 10 / 10 / 36; SURFACE: 57 plain, 26 render target, 7 depth-stencil, 46 POSTPS, 4 sRGB write; BUFFER: 74 (all but typeless).
+- CheckDepthStencilMatch: 26 render-target classes x 7 depth classes = 182 OK pairs. CheckDeviceFormatConversion: 74 source x 74 destination classes (product rule). CheckDeviceType: 84 OK cells of 2 x 4 x 74.
+- Multisampling: 31 format classes support exactly ONE type, D3DMULTISAMPLE_4_SAMPLES (mask 0x8), NONMASKABLE reports 1 quality level for them; every other (format, type) is NOTAVAILABLE; 31 (format, type) combinations in all.
+- D3DCAPS9: one 304-byte image per device-type class (HAL / other), 402 set bits; video memory 960 MiB; one adapter; Ex interfaces exist (Direct3DCreate9Ex succeeds).
+Sizes: env_*.tsv are 232832 rows (11 MB) each: 232268 IDirect3D9 answer rows + 564 device-phase rows. Tests: `python3 -I tests/l6/env/test_env.py`; record: `python3 -I tests/l6/env/make_env.py` (needs Wine 9.0, mingw, Xvfb).

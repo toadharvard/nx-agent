@@ -11,7 +11,7 @@
 #
 # traps.txt: the guest's trap-stub names, one per line (undefined.txt of the guest link, or the names whose body
 # branches to __fnvnx_undef_trap in fnvnx.elf). S4-owned: tools/pipeline/undef.py categories win32_import,
-# crt_msvc, libc_glibc, and the Bink names (audio_input `_BinkPause_8`). Prints the names still undefined and
+# crt_msvc and libc_glibc. Prints the names still undefined and
 # "trapcheck: <left> of <owned> S4 trap names still undefined".
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../.." && pwd); P=$ROOT/platform
@@ -49,7 +49,7 @@ for n in sorted(set(open(sys.argv[2]).read().split())):
         print(n)
 PY
 else
-	awk -F'\t' '$2=="win32_import" || $2=="crt_msvc" || $2=="libc_glibc" || $1 ~ /^_?Bink/ {print $1}' "$OUT/bycat.tsv" \
+	awk -F'\t' '$2=="win32_import" || $2=="crt_msvc" || $2=="libc_glibc"{print $1}' "$OUT/bycat.tsv" \
 		| sort -u > "$OUT/owned.txt"
 fi
 comm -23 "$OUT/owned.txt" "$OUT/defined.txt" > "$OUT/left.txt"

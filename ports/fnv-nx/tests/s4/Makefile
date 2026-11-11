@@ -35,6 +35,14 @@ $(OUT)/%.c.o: $(ROOT)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_) -c $< -o $@
 
+# platform/win32/nls_tables.inc is generated from the reference NLS data (Wine 9.0 nls/*.nls, LGPL; mirrored in the
+# private fnv-nx-build branch tools/nls) and is not part of this repository: NLS_DIR=<directory with the .nls files>.
+NLS_DIR ?= /home/user/gd/nls
+$(P)/win32/nls_tables.inc: $(P)/win32/tools/gen_nls.py
+	@test -f $(NLS_DIR)/locale.nls || { echo "nls_tables.inc: set NLS_DIR to the Wine 9.0 nls directory (fnv-nx-build tools/nls)"; exit 1; }
+	python3 $< $(NLS_DIR) $@
+$(OUT)/platform/win32/nls.cpp.o: $(P)/win32/nls_tables.inc
+
 $(OUT)/%.cpp.o: $(ROOT)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_) -c $< -o $@

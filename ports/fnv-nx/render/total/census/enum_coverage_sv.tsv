@@ -1,0 +1,251 @@
+state	enum	value	status	why	dynamic_probe
+D3DRS_ZFUNC	D3DCMPFUNC	1	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DRS_ALPHAFUNC	D3DCMPFUNC	1	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DRS_STENCILFUNC	D3DCMPFUNC	1	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DRS_CCW_STENCILFUNC	D3DCMPFUNC	1	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DRS_ZFUNC	D3DCMPFUNC	2	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_ALPHAFUNC	D3DCMPFUNC	2	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILFUNC	D3DCMPFUNC	2	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILFUNC	D3DCMPFUNC	2	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_ZFUNC	D3DCMPFUNC	3	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_ALPHAFUNC	D3DCMPFUNC	3	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILFUNC	D3DCMPFUNC	3	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILFUNC	D3DCMPFUNC	3	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_ZFUNC	D3DCMPFUNC	4	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DRS_ALPHAFUNC	D3DCMPFUNC	4	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILFUNC	D3DCMPFUNC	4	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILFUNC	D3DCMPFUNC	4	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_ZFUNC	D3DCMPFUNC	5	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_ALPHAFUNC	D3DCMPFUNC	5	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILFUNC	D3DCMPFUNC	5	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILFUNC	D3DCMPFUNC	5	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_ZFUNC	D3DCMPFUNC	6	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_ALPHAFUNC	D3DCMPFUNC	6	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILFUNC	D3DCMPFUNC	6	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILFUNC	D3DCMPFUNC	6	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_ZFUNC	D3DCMPFUNC	7	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_ALPHAFUNC	D3DCMPFUNC	7	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILFUNC	D3DCMPFUNC	7	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILFUNC	D3DCMPFUNC	7	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_ZFUNC	D3DCMPFUNC	8	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_ALPHAFUNC	D3DCMPFUNC	8	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DRS_STENCILFUNC	D3DCMPFUNC	8	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DRS_CCW_STENCILFUNC	D3DCMPFUNC	8	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DRS_STENCILFAIL	D3DSTENCILOP	1	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DRS_STENCILZFAIL	D3DSTENCILOP	1	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DRS_STENCILPASS	D3DSTENCILOP	1	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DRS_CCW_STENCILFAIL	D3DSTENCILOP	1	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DRS_CCW_STENCILZFAIL	D3DSTENCILOP	1	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DRS_CCW_STENCILPASS	D3DSTENCILOP	1	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DRS_STENCILFAIL	D3DSTENCILOP	2	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DRS_STENCILZFAIL	D3DSTENCILOP	2	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DRS_STENCILPASS	D3DSTENCILOP	2	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DRS_CCW_STENCILFAIL	D3DSTENCILOP	2	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DRS_CCW_STENCILZFAIL	D3DSTENCILOP	2	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DRS_CCW_STENCILPASS	D3DSTENCILOP	2	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DRS_STENCILFAIL	D3DSTENCILOP	3	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILZFAIL	D3DSTENCILOP	3	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILPASS	D3DSTENCILOP	3	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILFAIL	D3DSTENCILOP	3	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILZFAIL	D3DSTENCILOP	3	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILPASS	D3DSTENCILOP	3	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILFAIL	D3DSTENCILOP	4	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILZFAIL	D3DSTENCILOP	4	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILPASS	D3DSTENCILOP	4	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILFAIL	D3DSTENCILOP	4	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILZFAIL	D3DSTENCILOP	4	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILPASS	D3DSTENCILOP	4	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILFAIL	D3DSTENCILOP	5	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILZFAIL	D3DSTENCILOP	5	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILPASS	D3DSTENCILOP	5	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILFAIL	D3DSTENCILOP	5	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILZFAIL	D3DSTENCILOP	5	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILPASS	D3DSTENCILOP	5	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILFAIL	D3DSTENCILOP	6	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILZFAIL	D3DSTENCILOP	6	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILPASS	D3DSTENCILOP	6	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILFAIL	D3DSTENCILOP	6	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILZFAIL	D3DSTENCILOP	6	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILPASS	D3DSTENCILOP	6	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILFAIL	D3DSTENCILOP	7	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILZFAIL	D3DSTENCILOP	7	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILPASS	D3DSTENCILOP	7	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILFAIL	D3DSTENCILOP	7	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILZFAIL	D3DSTENCILOP	7	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILPASS	D3DSTENCILOP	7	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILFAIL	D3DSTENCILOP	8	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILZFAIL	D3DSTENCILOP	8	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_STENCILPASS	D3DSTENCILOP	8	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILFAIL	D3DSTENCILOP	8	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILZFAIL	D3DSTENCILOP	8	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CCW_STENCILPASS	D3DSTENCILOP	8	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_BLENDOP	D3DBLENDOP	1	covered	explicit arm	marks=0 changed=0 eq_fallback=1
+D3DRS_BLENDOPALPHA	D3DBLENDOP	1	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DRS_BLENDOP	D3DBLENDOP	2	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_BLENDOPALPHA	D3DBLENDOP	2	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DRS_BLENDOP	D3DBLENDOP	3	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_BLENDOPALPHA	D3DBLENDOP	3	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_BLENDOP	D3DBLENDOP	4	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_BLENDOPALPHA	D3DBLENDOP	4	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_BLENDOP	D3DBLENDOP	5	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_BLENDOPALPHA	D3DBLENDOP	5	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLEND	D3DBLEND	1	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DRS_DESTBLEND	D3DBLEND	1	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DRS_SRCBLENDALPHA	D3DBLEND	1	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DRS_DESTBLENDALPHA	D3DBLEND	1	covered	explicit arm	marks=0 changed=0 eq_fallback=1
+D3DRS_SRCBLEND	D3DBLEND	2	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLEND	D3DBLEND	2	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLENDALPHA	D3DBLEND	2	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DRS_DESTBLENDALPHA	D3DBLEND	2	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLEND	D3DBLEND	3	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLEND	D3DBLEND	3	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLENDALPHA	D3DBLEND	3	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLENDALPHA	D3DBLEND	3	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLEND	D3DBLEND	4	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLEND	D3DBLEND	4	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLENDALPHA	D3DBLEND	4	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLENDALPHA	D3DBLEND	4	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLEND	D3DBLEND	5	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DRS_DESTBLEND	D3DBLEND	5	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLENDALPHA	D3DBLEND	5	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLENDALPHA	D3DBLEND	5	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLEND	D3DBLEND	6	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLEND	D3DBLEND	6	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DRS_SRCBLENDALPHA	D3DBLEND	6	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLENDALPHA	D3DBLEND	6	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLEND	D3DBLEND	7	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLEND	D3DBLEND	7	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLENDALPHA	D3DBLEND	7	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLENDALPHA	D3DBLEND	7	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLEND	D3DBLEND	8	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLEND	D3DBLEND	8	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLENDALPHA	D3DBLEND	8	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLENDALPHA	D3DBLEND	8	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLEND	D3DBLEND	9	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLEND	D3DBLEND	9	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLENDALPHA	D3DBLEND	9	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLENDALPHA	D3DBLEND	9	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLEND	D3DBLEND	10	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLEND	D3DBLEND	10	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLENDALPHA	D3DBLEND	10	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLENDALPHA	D3DBLEND	10	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLEND	D3DBLEND	11	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLEND	D3DBLEND	11	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLENDALPHA	D3DBLEND	11	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLENDALPHA	D3DBLEND	11	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLEND	D3DBLEND	12	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DRS_DESTBLEND	D3DBLEND	12	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLENDALPHA	D3DBLEND	12	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLENDALPHA	D3DBLEND	12	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLEND	D3DBLEND	13	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLEND	D3DBLEND	13	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DRS_SRCBLENDALPHA	D3DBLEND	13	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLENDALPHA	D3DBLEND	13	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLEND	D3DBLEND	14	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLEND	D3DBLEND	14	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLENDALPHA	D3DBLEND	14	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLENDALPHA	D3DBLEND	14	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLEND	D3DBLEND	15	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLEND	D3DBLEND	15	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLENDALPHA	D3DBLEND	15	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLENDALPHA	D3DBLEND	15	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLEND	D3DBLEND	16	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLEND	D3DBLEND	16	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLENDALPHA	D3DBLEND	16	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DRS_DESTBLENDALPHA	D3DBLEND	16	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLEND	D3DBLEND	17	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_DESTBLEND	D3DBLEND	17	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_SRCBLENDALPHA	D3DBLEND	17	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DRS_DESTBLENDALPHA	D3DBLEND	17	covered	explicit arm	marks=0 changed=0 eq_fallback=1
+D3DRS_CULLMODE	D3DCULL	1	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DRS_CULLMODE	D3DCULL	2	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_CULLMODE	D3DCULL	3	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DRS_FILLMODE	D3DFILLMODE	1	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_FILLMODE	D3DFILLMODE	2	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_FILLMODE	D3DFILLMODE	3	covered	explicit arm	marks=0 changed=0 eq_fallback=1
+D3DRS_SHADEMODE	D3DSHADEMODE	1	ignored	translated but unconsumed downstream	marks=0 changed=1 eq_fallback=0
+D3DRS_SHADEMODE	D3DSHADEMODE	2	covered	explicit arm	marks=0 changed=0 eq_fallback=1
+D3DRS_SHADEMODE	D3DSHADEMODE	3	fallback_default	PHONG -> smooth (D3D9 itself has no Phong)	marks=0 changed=0 eq_fallback=1
+D3DRS_ZENABLE	D3DZBUFFERTYPE	0	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_ZENABLE	D3DZBUFFERTYPE	1	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DRS_ZENABLE	D3DZBUFFERTYPE	2	fallback_default	USEW: depth test on Z, no W-buffer semantics	marks=0 changed=1 eq_fallback=1
+D3DRS_FOGTABLEMODE	D3DFOGMODE	0	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DRS_FOGVERTEXMODE	D3DFOGMODE	0	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_FOGTABLEMODE	D3DFOGMODE	1	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_FOGVERTEXMODE	D3DFOGMODE	1	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_FOGTABLEMODE	D3DFOGMODE	2	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DRS_FOGVERTEXMODE	D3DFOGMODE	2	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_FOGTABLEMODE	D3DFOGMODE	3	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DRS_FOGVERTEXMODE	D3DFOGMODE	3	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_DIFFUSEMATERIALSOURCE	D3DMATERIALCOLORSOURCE	0	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_SPECULARMATERIALSOURCE	D3DMATERIALCOLORSOURCE	0	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_AMBIENTMATERIALSOURCE	D3DMATERIALCOLORSOURCE	0	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_EMISSIVEMATERIALSOURCE	D3DMATERIALCOLORSOURCE	0	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_DIFFUSEMATERIALSOURCE	D3DMATERIALCOLORSOURCE	1	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_SPECULARMATERIALSOURCE	D3DMATERIALCOLORSOURCE	1	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_AMBIENTMATERIALSOURCE	D3DMATERIALCOLORSOURCE	1	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_EMISSIVEMATERIALSOURCE	D3DMATERIALCOLORSOURCE	1	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_DIFFUSEMATERIALSOURCE	D3DMATERIALCOLORSOURCE	2	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_SPECULARMATERIALSOURCE	D3DMATERIALCOLORSOURCE	2	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_AMBIENTMATERIALSOURCE	D3DMATERIALCOLORSOURCE	2	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_EMISSIVEMATERIALSOURCE	D3DMATERIALCOLORSOURCE	2	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_VERTEXBLEND	D3DVERTEXBLENDFLAGS	0	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_VERTEXBLEND	D3DVERTEXBLENDFLAGS	1	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_VERTEXBLEND	D3DVERTEXBLENDFLAGS	2	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_VERTEXBLEND	D3DVERTEXBLENDFLAGS	3	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_VERTEXBLEND	D3DVERTEXBLENDFLAGS	255	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_VERTEXBLEND	D3DVERTEXBLENDFLAGS	256	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_PATCHEDGESTYLE	D3DPATCHEDGESTYLE	0	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_PATCHEDGESTYLE	D3DPATCHEDGESTYLE	1	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_POSITIONDEGREE	D3DDEGREETYPE	1	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_NORMALDEGREE	D3DDEGREETYPE	1	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_POSITIONDEGREE	D3DDEGREETYPE	2	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_NORMALDEGREE	D3DDEGREETYPE	2	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_POSITIONDEGREE	D3DDEGREETYPE	3	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_NORMALDEGREE	D3DDEGREETYPE	3	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_POSITIONDEGREE	D3DDEGREETYPE	5	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_NORMALDEGREE	D3DDEGREETYPE	5	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_DEBUGMONITORTOKEN	D3DDEBUGMONITORTOKENS	0	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DRS_DEBUGMONITORTOKEN	D3DDEBUGMONITORTOKENS	1	ignored	state never read	marks=0 changed=0 eq_fallback=1
+D3DSAMP_ADDRESSU	D3DTEXTUREADDRESS	1	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DSAMP_ADDRESSV	D3DTEXTUREADDRESS	1	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DSAMP_ADDRESSW	D3DTEXTUREADDRESS	1	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DSAMP_ADDRESSU	D3DTEXTUREADDRESS	2	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DSAMP_ADDRESSV	D3DTEXTUREADDRESS	2	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DSAMP_ADDRESSW	D3DTEXTUREADDRESS	2	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DSAMP_ADDRESSU	D3DTEXTUREADDRESS	3	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DSAMP_ADDRESSV	D3DTEXTUREADDRESS	3	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DSAMP_ADDRESSW	D3DTEXTUREADDRESS	3	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DSAMP_ADDRESSU	D3DTEXTUREADDRESS	4	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DSAMP_ADDRESSV	D3DTEXTUREADDRESS	4	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DSAMP_ADDRESSW	D3DTEXTUREADDRESS	4	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DSAMP_ADDRESSU	D3DTEXTUREADDRESS	5	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DSAMP_ADDRESSV	D3DTEXTUREADDRESS	5	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DSAMP_ADDRESSW	D3DTEXTUREADDRESS	5	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DSAMP_MAGFILTER [invalid use per caps bits]	D3DTEXTUREFILTERTYPE	0	fallback_default	default arm (treated as linear / linear mip)	marks=0 changed=1 eq_fallback=1
+D3DSAMP_MINFILTER [invalid use per caps bits]	D3DTEXTUREFILTERTYPE	0	fallback_default	default arm (treated as linear / linear mip)	marks=0 changed=1 eq_fallback=1
+D3DSAMP_MIPFILTER	D3DTEXTUREFILTERTYPE	0	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DSAMP_MAGFILTER	D3DTEXTUREFILTERTYPE	1	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DSAMP_MINFILTER	D3DTEXTUREFILTERTYPE	1	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DSAMP_MIPFILTER	D3DTEXTUREFILTERTYPE	1	covered	explicit arm	marks=0 changed=1 eq_fallback=0
+D3DSAMP_MAGFILTER	D3DTEXTUREFILTERTYPE	2	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DSAMP_MINFILTER	D3DTEXTUREFILTERTYPE	2	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DSAMP_MIPFILTER	D3DTEXTUREFILTERTYPE	2	covered	explicit arm	marks=0 changed=0 eq_fallback=1
+D3DSAMP_MAGFILTER	D3DTEXTUREFILTERTYPE	3	covered	explicit arm	marks=0 changed=1 eq_fallback=1
+D3DSAMP_MINFILTER	D3DTEXTUREFILTERTYPE	3	covered	explicit arm	marks=0 changed=0 eq_fallback=0
+D3DSAMP_MIPFILTER [invalid use per caps bits]	D3DTEXTUREFILTERTYPE	3	fallback_default	default arm (treated as linear / linear mip)	marks=0 changed=0 eq_fallback=1
+D3DSAMP_MAGFILTER	D3DTEXTUREFILTERTYPE	4	fallback_default	default arm (treated as linear / linear mip)	marks=0 changed=1 eq_fallback=1
+D3DSAMP_MINFILTER [invalid use per caps bits]	D3DTEXTUREFILTERTYPE	4	fallback_default	default arm (treated as linear / linear mip)	marks=0 changed=1 eq_fallback=1
+D3DSAMP_MIPFILTER [invalid use per caps bits]	D3DTEXTUREFILTERTYPE	4	fallback_default	default arm (treated as linear / linear mip)	marks=0 changed=0 eq_fallback=1
+D3DSAMP_MAGFILTER	D3DTEXTUREFILTERTYPE	5	fallback_default	default arm (treated as linear / linear mip)	marks=0 changed=1 eq_fallback=1
+D3DSAMP_MINFILTER [invalid use per caps bits]	D3DTEXTUREFILTERTYPE	5	fallback_default	default arm (treated as linear / linear mip)	marks=0 changed=1 eq_fallback=1
+D3DSAMP_MIPFILTER [invalid use per caps bits]	D3DTEXTUREFILTERTYPE	5	fallback_default	default arm (treated as linear / linear mip)	marks=0 changed=0 eq_fallback=1
+D3DSAMP_MAGFILTER	D3DTEXTUREFILTERTYPE	6	fallback_default	default arm (treated as linear / linear mip)	marks=0 changed=1 eq_fallback=1
+D3DSAMP_MINFILTER	D3DTEXTUREFILTERTYPE	6	fallback_default	default arm (treated as linear / linear mip)	marks=0 changed=1 eq_fallback=1
+D3DSAMP_MIPFILTER [invalid use per caps bits]	D3DTEXTUREFILTERTYPE	6	fallback_default	default arm (treated as linear / linear mip)	marks=0 changed=0 eq_fallback=1
+D3DSAMP_MAGFILTER	D3DTEXTUREFILTERTYPE	7	fallback_default	default arm (treated as linear / linear mip)	marks=0 changed=1 eq_fallback=1
+D3DSAMP_MINFILTER	D3DTEXTUREFILTERTYPE	7	fallback_default	default arm (treated as linear / linear mip)	marks=0 changed=1 eq_fallback=1
+D3DSAMP_MIPFILTER [invalid use per caps bits]	D3DTEXTUREFILTERTYPE	7	fallback_default	default arm (treated as linear / linear mip)	marks=0 changed=0 eq_fallback=1
+D3DSAMP_MAGFILTER [invalid use per caps bits]	D3DTEXTUREFILTERTYPE	8	fallback_default	default arm (treated as linear / linear mip); validity of CONVOLUTIONMONO for this state unknown (9Ex video filter)	marks=0 changed=1 eq_fallback=1
+D3DSAMP_MINFILTER [invalid use per caps bits]	D3DTEXTUREFILTERTYPE	8	fallback_default	default arm (treated as linear / linear mip); validity of CONVOLUTIONMONO for this state unknown (9Ex video filter)	marks=0 changed=1 eq_fallback=1
+D3DSAMP_MIPFILTER [invalid use per caps bits]	D3DTEXTUREFILTERTYPE	8	fallback_default	default arm (treated as linear / linear mip); validity of CONVOLUTIONMONO for this state unknown (9Ex video filter)	marks=0 changed=0 eq_fallback=1
