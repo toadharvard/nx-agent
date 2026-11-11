@@ -598,3 +598,13 @@ def lock_ok(ins, m):
     if m == 'xchg':
         return any(o.type == X.X86_OP_MEM for o in ins.operands)
     return bool(ins.operands) and ins.operands[0].type == X.X86_OP_MEM
+
+
+def locked(ins, m, prefixed):
+    """The instructions that are one atomic read-modify-write of their memory operand: a valid LOCK prefix (lock_ok), and XCHG with a memory operand, which locks without the prefix (SDM Vol 2 "XCHG")."""
+    return prefixed or (m == 'xchg' and any(o.type == X.X86_OP_MEM for o in ins.operands))
+
+
+def lock_size(ins):
+    """Bits of the memory operand of a locked instruction (every instruction of LOCKABLE has exactly one)."""
+    return [o.size for o in ins.operands if o.type == X.X86_OP_MEM][0] * 8
