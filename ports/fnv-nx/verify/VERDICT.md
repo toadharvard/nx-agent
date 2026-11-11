@@ -152,6 +152,8 @@ Accepted assumptions that cannot be removed (MASTER_PLAN4 section 4):
 
 ## Assumptions
 
+The rules cited by the gates (N1-N4, R1, R3, R5, R6, R12, R13, K16 and others) are defined in `RULES.md`.
+
 - A2: the compiler is correct. The gates judge its output, not its internals.
 - The set of terminating routines for class 1 is derived from the toolchain's own headers (the `noreturn`
   attribute); a terminating routine without that attribute would be missed.

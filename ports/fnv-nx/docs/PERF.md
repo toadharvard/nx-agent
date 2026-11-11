@@ -1303,7 +1303,7 @@ ran in the emulator, and no fuzzing was run. [M] = measured on that ELF or repor
 
 **Where the 22.9 M of 11.2 comes from.** It is the model total of 11.2's table, not a measurement. Every row is [E]
 except the native renderer's main side (2.34-5.64 M [M], render machine, `render/native/perf/emu_count.py` on the P6n
-streams). `docs/X86_FALLBACK.md` 5 quotes the total against 13.6 M (17.0 M cycles × IPC 0.8). No game frame has been
+streams). The same total is set against a budget of 13.6 M (17.0 M cycles × IPC 0.8). No game frame has been
 instruction-counted.
 
 **Why no frame profile yet.** The deepest milestone in the reports is `archive-list`, 3/10 (full1 97deacd38aec,
