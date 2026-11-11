@@ -43,15 +43,8 @@ template <> struct fnvnx_int_of_align<16> { typedef unsigned __int64 type; };
 #define FNVNX_GLOBAL_DELETE
 #define FNVNX_NEW5_TAG
 #define FNVNX_EBO2
-#define FNVNX_IDTOR1(cls)
-#define FNVNX_HKRO1
 #define FNVNX_VSLOT(k) (k)
 #define FNVNX_D26_SLOT(k) (k)
-/* EMPTY1: MSVC keeps the name */
-#define FNVNX_EMPTY1(T, name) name
-/* DTORB1: MSVC keeps the original body */
-#define FNVNX_DTORB_BEGIN(a)
-#define FNVNX_DTORB_END
 
 /* FTOL1 (S1b): fnvnx_ftol2(x) is the x87 _ftol2_sse of x; under MSVC the cast compiles to exactly that call */
 #ifndef fnvnx_ftol2

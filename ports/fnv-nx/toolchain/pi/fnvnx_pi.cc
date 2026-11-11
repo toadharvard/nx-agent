@@ -116,16 +116,27 @@ static tree root_origin(tree d)
    inl_direct: asmname of the receiving function as GCC names it at that point (a clone keeps its own name) ->
    origin names of the bodies inlined into it. */
 static std::map<std::string, std::set<std::string> > inl_direct;
+/* inl_walk: the same records with the callee under its own name. A callee that is a clone (a constructor's C2, a
+   constprop copy) had its own inlinings recorded under that name while the list names its origin, so the chain must
+   continue by the own name or the clone's inlinees are lost. */
+static std::map<std::string, std::set<std::string> > inl_walk;
+/* Soundness of the column: every record must reach a written row, or its receiver must be dead.
+   inl_used: receivers whose record inlined_book() read into some function's list (a row's own chain or a callee reached
+   from it). inl_dead: functions whose node the callgraph removed as a node of its own (inlined_to == NULL) - the
+   removal of a function whose every caller took its body, or of one nobody reaches. */
+static std::set<std::string> inl_used, inl_dead;
 
 static void note_inlined(tree into, tree callee)
 {
   if (!DECL_ASSEMBLER_NAME_SET_P(into) || !DECL_ASSEMBLER_NAME_SET_P(callee)) return;
   inl_direct[asmname(into)].insert(asmname(root_origin(callee)));
+  inl_walk[asmname(into)].insert(asmname(callee));
 }
 
 static void inline_clone_removed(cgraph_node *n, void *)
 {
   if (n->inlined_to) note_inlined(n->inlined_to->decl, n->decl);
+  else if (DECL_ASSEMBLER_NAME_SET_P(n->decl)) inl_dead.insert(asmname(n->decl));
 }
 
 /* inline clones still attached to a function that is about to be expanded: its callee edges with inline_failed ==
@@ -156,10 +167,14 @@ static void inlined_book(tree d, std::set<std::string> &out)
     if (!seen.insert(f).second) continue;
     std::map<std::string, std::set<std::string> >::iterator m = inl_direct.find(f);
     if (m == inl_direct.end()) continue;
+    inl_used.insert(f);
     for (std::set<std::string>::iterator c = m->second.begin(); c != m->second.end(); ++c) {
       out.insert(*c);
       work.push_back(*c);
     }
+    std::map<std::string, std::set<std::string> >::iterator w = inl_walk.find(f);
+    if (w != inl_walk.end())
+      for (std::set<std::string>::iterator c = w->second.begin(); c != w->second.end(); ++c) work.push_back(*c);
   }
 }
 
@@ -537,8 +552,23 @@ static void ipa_start(void *, void *)
     if (n->thunk && n->definition) all_thunks.insert(asmname(n->decl));
 }
 
+/* A record (receiver R, callee C) that no written row read means C's body may sit in emitted code under a name this
+   file does not list. Decided by callgraph facts: R is dead when its node was removed as a node of its own (inl_dead)
+   and no row was written for it (it is not in inl_used and, being a receiver of a record no chain reached, is neither
+   emitted nor inlined into an emitted function: both would have put it in a chain). Code inlined into a dead R is in
+   no emitted code. Anything else is an error. */
+static void check_records()
+{
+  for (std::map<std::string, std::set<std::string> >::iterator m = inl_direct.begin(); m != inl_direct.end(); ++m) {
+    if (inl_used.count(m->first) || inl_dead.count(m->first)) continue;
+    for (std::set<std::string>::iterator c = m->second.begin(); c != m->second.end(); ++c)
+      error("N3: %qs inlined into %qs, which reached no row and was not removed from the callgraph", c->c_str(), m->first.c_str());
+  }
+}
+
 static void finish_unit(void *, void *)
 {
+  check_records();
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.n3,\"\",%%progbits\n");
   for (size_t i = 0; i < lines.size(); i++) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", lines[i].c_str());
   /* another symbol of the same body (the complete-object constructor / destructor of a class without virtual

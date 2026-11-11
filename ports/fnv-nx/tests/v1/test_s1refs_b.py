@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """test_s1refs_b.py - V1 (D14) against S1-refs 5e8816f (NEW5, NEW1), 56e41cc (TPL1, RCAST1), e39da35 (NSCALL1,
-DUPINT1-RET), e3465bd + 5279bb5 (COND1, RSTR1, STD2 shared renames), 0a0c0cc (STD2) and S1-fuzzB 57fe267 (STAND2),
+DUPINT1-RET), e3465bd + 5279bb5 (COND1, RSTR1, STD2 shared renames) and 0a0c0cc (STD2),
 all claimed neutral / equivalent to MSVC.
 
     python3 -I tests/v1/test_s1refs_b.py    -> one line per case, exit 1 when any case shows a defect
@@ -26,8 +26,6 @@ defect when the rewritten code does not compile where the input did, or computes
   A1  STD2  rename, recipe symbol via POST hook, two module copies share it  ?fnvnx_std_abs@@YANM@Z in units.json
   A2  STD2  a float-declared caller of the double definition                 link bridge converts d0 -> s0
   A3  STD2  a same-unit caller of std::abs(float)                            the same value
-  P1  STAND2 /Od stand-in bound to another unit's address                    the other unit's body runs
-  P2  STAND2 /O2 unit, inline stand-in                                       untouched
 """
 import importlib.util
 import json
@@ -290,19 +288,6 @@ def main():
             'float use(float x) { return (float)msvc_std_abs(x); }\n'
         main = 'int main() { std::printf("%g %g\\n", use(-2.5f), use(3.0f)); }\n'
         pair('A3', 'STD2 a same-unit std::abs(float) caller', ref3, a3, main)
-
-        # ---------------------------------------------------------------- STAND2
-        p1 = ('struct G\n{\n    int* p;\n    int n;\n    void Clear(bool);\n    void Reset();\n};\n'
-              'void G::Clear(bool b)\n{\n    n = 111;\n}\n'
-              '// @fnv 0x00644000\nvoid G::Reset()\n{\n    Clear(true);\n}\n')
-        other = '\nvoid G::Clear(bool b) { n = 222; } /* the other unit\'s 0x00845000 */\n'
-        out = rule(s1.r_stand_in_definitions_elsewhere, p1, os.path.join(src, 'u.cpp'))
-        got, err = build_run(work, 'P1', out + other + 'int main() { G g; g.Reset(); std::printf("%d\\n", g.n); }\n')
-        case('P1', 'STAND2 /Od stand-in: the call reaches the other unit\'s function', got, '222', err)
-        o2 = rule(s1.r_stand_in_definitions_elsewhere, p1, os.path.join(src, 'o2.cpp'))
-        inl = rule(s1.r_stand_in_definitions_elsewhere, p1.replace('void G::Clear(bool b)\n{', 'inline void G::Clear(bool b)\n{'),
-                   os.path.join(src, 'u.cpp'))
-        case('P2', 'STAND2 /O2 unit and inline stand-in untouched', '%s %s' % (o2 == p1, 'STAND2' not in inl), 'True True')
     finally:
         shutil.rmtree(work, ignore_errors=True)
     return 1 if bad else 0

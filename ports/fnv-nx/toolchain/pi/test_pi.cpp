@@ -76,3 +76,11 @@ int f8(int a) { return z8(a) + plain(a + 8); }                        // 7: all 
 static int ip9(int (*f)(int), int a) { return f(a) * 9; }
 static int t9(int a) { return plain(a + 9) ^ 5; }
 int f9(int a) { return ip9(t9, a) + ip9(t9, a + 1); }             // 8: indirect call made direct
+// INL3: every record of the removal hook reaches a row (a receiver that is itself inlined: its record is read through the callee)
+static inline int g10(int a) { return plain(a) + 10; }
+static inline int h10(int a) { return g10(a) * plain(a + 1); }
+int f10(int a) { return h10(a); }
+// INL3: a callee that is a clone (a constructor's C2): its own inlinings are recorded under the clone's name
+AI int i11(int a) { return plain(a + 11); }
+struct Z { int z; Z(int a) : z(i11(a)) {} };
+int f11(int a) { Z z(a); return z.z; }

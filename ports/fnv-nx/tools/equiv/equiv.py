@@ -57,7 +57,7 @@ CLASSES = {
     'DECL2': 'neutral', 'EXC1': 'neutral', 'NEW2': 'neutral', 'CTOR1': 'neutral', 'LINK1': 'neutral',
     'GOTO1': 'neutral', 'SDK1': 'layout', 'STR1': 'neutral', 'INTL1': 'platform', 'CALL1': 'neutral',
     'RCAST1': 'neutral', 'NEW3': 'neutral', 'TYPEID1': 'neutral', 'TAIL1': 'layout', 'EBO1': 'layout',
-    'ASM1': 'platform', 'ASM2': 'platform', 'ASM4': 'platform',
+    'ASM': 'platform',          # s8_asm.py (docstring id "ASM-Pi"): __asm spans kept for cl, one empty GNU asm for GCC
     'NATIVE1': 'platform',      # drop_native_units in prepare.py (not a text rule)
     # classified by the orchestrator (J-0051) from each rule's docstring; the S11 gate confirms or refutes:
     'GAME1': 'neutral',         # renames a unit's own declaration + call sites; binding by address unchanged
@@ -80,21 +80,11 @@ CLASSES = {
     'COPY1': 'neutral',         # B(o) -> B(static_cast<const B&>(o)) in a copy ctor: the copy ctor MSVC chose
     'DECL3': 'neutral',         # a unit's own `typedef _iobuf FILE` / `typedef __int64 fpos_t`: the MSVC types themselves
     'MATH1': 'neutral',         # drops the decomp's copies of MSVC <math.h> C++ overloads (the SDK header has them)
-    'DTOR1': 'neutral',         # declares NiPointer<T>::~NiPointer() specializations for pointees the unit never completes
-    'VTBL1': 'platform',        # full MSVC-order virtual interface for listed stand-ins (BSNiAllocator), slots forward
     'ALIGN1': 'neutral',       # __declspec(align(n)) moved behind the class key: the type's alignment on both compilers
     'ENUM2': 'neutral',        # enum with enumerators >= 2^31: MSVC's int base written out, (int) on those literals
     'VA2': 'neutral',          # va_arg(ap, Enum) -> (Enum)va_arg(ap, int): the int MSVC read
     'VLIT1': 'platform',       # a vptr store printed as a string literal -> the vftable address the recipe binds it to
     'VLIT2': 'platform',       # VLIT1 by the exe's vftables (private vlit.json): slot 0 at the store's COL offset, the class of the function's other vptrs
-    'CSX2': 'neutral',          # the decomp's 28-byte critical sections keep their 28 bytes (D15 reopened, J-0067)
-    'STAND1': 'platform',       # drops untagged stand-ins bound to a tagged definition's address (one function per address)
-    'STAND2': 'platform',       # STAND1 for an address another unit defines, in units MSVC compiled without auto-inlining
-    'STAND3': 'platform',       # STAND2 for in-class / inline stand-ins, in /Od units without /Ob1 (MSVC inlines nothing)
-    'STAND5': 'platform',       # STAND2 for an in-class member body whose MSVC name the unit binds to another unit's address
-    'STAND4': 'platform',       # STAND1/2 for a static free stand-in: the definition becomes an extern declaration of the bound name
-    'PHSLOT1': 'platform',      # an empty `virtual void vNNN() {}` placeholder becomes declared-only (the exe slot fill binds it)
-    'STAND6': 'platform',       # STAND2 for a __declspec(noinline) stand-in, in any unit (MSVC never inlined it)
     'ADDRFN1': 'platform',     # a code address cast to void* takes the address symbol __fnv_<a> (a GCC asm label)
     'POP2': 'neutral',          # POST hook: pop-mismatch chains, the words a getter leaves move to the call that pops them
     'THIS2': 'neutral',         # POST hook: a caller that hands its ecx to a thiscall callee calls it on its object
@@ -117,9 +107,7 @@ CLASSES = {
     'NEW4': 'neutral',          # adds <new> where placement new is used
     'ALLOC1': 'platform',       # drops untagged TU-local replacements of the global operator new/delete
     'FTOL1': 'platform',        # fnvnx_ftol2(expr): neutral with #define fnvnx_ftol2(x) ((__int64)(x)) under MSVC
-    'BIND1': 'neutral',         # POST hook: units.json binds a stand-in member the unit uses to the exe's address
     'FRIEND1': 'neutral',       # `class X;` in front of a class whose `friend class X;` MSVC made visible
-    'INIT1': 'platform',        # a static object whose initializer the exe has and the decomp lacks (NiMainSDM)
     'GOTO2': 'neutral',         # forward gotos across class / reference initializations: scope closed, copy or tail clone
     'QUAD1': 'neutral',         # `return q;` -> `return (__m128)q;`: the first of MSVC's two chained conversions spelled out
     'ANON3': 'platform',        # a function-local anonymous union with an anonymous struct -> local struct + member references
@@ -142,20 +130,15 @@ CLASSES = {
     'XC2': 'platform',         # XC1's extern + __fnvnx_dyninit_<addr> form for a hand-written dynamic initializer (site table)
     'EBO3': 'layout',           # FNVNX_EBO2 (empty under MSVC) in an empty base after a base with data: after it, as MSVC
     'VORDER1': 'layout',        # R2: same-name virtual overloads in exe slot order (GCC lays them in declaration order, MSVC reversed)
-    'IDTOR1': 'neutral',        # FNVNX_IDTOR1(C) (empty under MSVC): `~C();` declared where the recipe binds C's implicit dtor
-    'HKRO1': 'neutral',        # FNVNX_HKRO1 (empty under MSVC): hkReferencedObject's getClassType / calcContentStatistics under GCC
     'VSPLIT1': 'neutral',      # one declaration per virtual declarator (`virtual T a(), b();` -> two): the same declarations
-    'EMPTY1': 'neutral',       # FNVNX_EMPTY1(T, name) (name under MSVC): a declared-only empty-string object -> T("") under GCC
-    'DTORB1': 'neutral',       # FNVNX_DTORB_BEGIN/END (empty under MSVC): a destructor stand-in calls the address its ??1 is bound to
     'STAND7': 'neutral',       # #ifdef _MSC_VER around an inline out-of-class template member stand-in bound elsewhere (MSVC keeps it)
 }
 # rules that are not rule functions: prepare's NATIVE1 step and the stream modules' POST hooks that have a rule id
-PSEUDO = {'NATIVE1': 'drop_native_units', 'BIND1': 'bind_stand_in_names', 'POP2': 'pop_chains',
-          'THIS2': 'this_members'}
+PSEUDO = {'NATIVE1': 'drop_native_units', 'POP2': 'pop_chains', 'THIS2': 'this_members'}
 # POST hooks (prepare.STREAM_POST, by function name) -> the rule (or 's1b': S1b's units.json renames, which belong to
 # its patches XINC1 / FTOL1 / RET1 / DBUG1) that must be allowed for the hook to run; other hooks always run (their
 # stats then fail the allow-list check until they are classified here)
-POST_RULES = {'bind_stand_in_names': 'BIND1', 'fix_units_json': 's1b', 'rename_std_definitions': 'STD2', 'add_recon_definitions': 'REC1',
+POST_RULES = {'fix_units_json': 's1b', 'rename_std_definitions': 'STD2', 'add_recon_definitions': 'REC1',
               'pop_chains': 'POP2', 'this_members': 'THIS2',
               'vorder_post_check': 'VORDER1'}
 S1B = {'XINC1', 'FTOL1', 'RET1', 'DBUG1'}
@@ -167,13 +150,13 @@ DEFAULT_GROUPS = {
     'sdk': 'DECL1 DECL2 CALL1 GAME1 DUPINT1 MATH1 ELAB1 STD2 NSCALL1',
     'newdel': 'NEW1 NEW2 NEW3 NEW4 NEW5 CTOR1',
     'EXC1': 'EXC1',
-    'link': 'LINK1 STATIC1 VFTBL1 BIND1',
+    'link': 'LINK1 STATIC1 VFTBL1',
     's1b': 'XINC1 RET1 FTOL1 DBUG1',
-    'tpl': 'TPL1 TPL2 SPEC1 SPEC2 SPEC3 DTOR1',
+    'tpl': 'TPL1 TPL2 SPEC1 SPEC2 SPEC3',
     'lex': 'LEX1 PTR1 INC1 ENUM1 RREF1 RREF2 ADDR1 COND1 RSTR1 FINL1 RCAST1 GOTO1 GOTO2 QUAD1 MSCV1 STR1 IFX1 SAL1 TYPEID1 UNIT1 CSX1',
     'plat': 'STL1 STD1 ANON1 ANON2 ANON3',
 }
-RULE_ID = re.compile(r'\s*([A-Z]+[0-9]+)\b')
+RULE_ID = re.compile(r'\s*([A-Z]+[0-9]+|[A-Z]+(?=-[A-Z][a-z]+:))\b')
 
 
 def load_prepare():
@@ -260,8 +243,8 @@ def cmd_prepare(a):
     (out / 'equiv_rules.txt').write_text(','.join(sorted(allow)) + '\n')
     stats = (out / 'prepare_stats.tsv').read_text().split('\n')
     edited = {l.split('\t')[0] for l in stats if l.strip() and not l.split('\t')[2].startswith('0 ')}
-    # counters that belong to a rule (ASM3 to ASM2/ASM4, <RULE>-MISS / -LEFT, S1b's units.json renames)
-    own = {k for k in edited if k.split('-')[0] in allow or k == 'ASM3' and allow & {'ASM2', 'ASM4'}
+    # counters that belong to a rule (<RULE>-MISS / -LEFT, S1b's units.json renames)
+    own = {k for k in edited if k.split('-')[0] in allow
            or k.startswith('UNITS-') and allow & S1B}
     stray = sorted(edited - allow - own)
     if stray:

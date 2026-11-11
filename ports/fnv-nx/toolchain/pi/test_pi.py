@@ -100,6 +100,12 @@ def main():
         ('_Z2f8i', ''): ['ok', '_ZL2z8i', ''],
         ('_Z2f9i', ''): ['ok', '_ZL2t9i,_ZL3ip9PFiiEi', ''],
         ('_ZL2h5i', ''): ['ok', '', ''],
+        ('_Z3f10i', ''): ['ok', '_ZL3g10i,_ZL3h10i', ''],         # INL3
+        ('_ZL3g10i', 'inline'): ['ok', '', ''],
+        ('_Z3f11i', ''): ['uninit-mem', '_ZL3i11i,_ZN1ZC4Ei', '1Z'],           # INL3: the clone's own inlining is in the caller's list
+        ('_ZL3i11i', 'inline'): ['ok', '', ''],
+        ('_ZN1ZC2Ei', 'inline'): ['ok', '', '1Z'],
+        ('_ZL3h10i', 'inline'): ['ok', '', ''],
         ('_ZL3cp6ii', 'constprop.0'): ['ok', '_ZL2g6i', ''],     # into a clone: the line is the origin's
         ('_ZL2g3i', 'inline'): ['ok', '', ''],
         ('_ZL2g4i', 'inline'): ['ok', '', ''],

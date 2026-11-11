@@ -32,7 +32,7 @@ clang_env_setup() {
       -E -e 's/^inline __attribute__\(\(always_inline\)\) void (_ReadWriteBarrier|_ReadBarrier|_WriteBarrier)\(void\) \{.*\}$/void \1(void); \/* clang: MS builtin *\//' \
       "$shim/fnvnx_compat.h" |
     # definitions of functions clang knows as MS builtins (-fms-extensions) become declarations, as the barriers above
-    perl -0777 -pe 's/inline __attribute__\(\(always_inline\)\) ([^;{}]*?\b(?:__debugbreak|_rotl|_rotr|_exception_code)\([^)]*\))\s*\{[^{}]*\}/$1; \/* clang: MS builtin *\//g' \
+    perl -0777 -pe 's/inline __attribute__\(\(always_inline\)\) ([^;{}]*?\b(?:_rotl|_rotr)\([^)]*\))\s*\{[^{}]*\}/$1; \/* clang: MS builtin *\//g' \
     > "$out/clang/gnu/fnvnx_compat.h"
   CLANG_COMMON=(-std=gnu++17 -fsyntax-only -ferror-limit=0 -fno-color-diagnostics -fno-caret-diagnostics
                 -fshort-wchar -fsigned-char -I"$out/clang/inc" -I"$shim")

@@ -28,6 +28,11 @@ fi
 if grep -q 'toolchain/order' "$HERE/tools/link/compile.sh"; then
   FLAGS+=(-fplugin="$(bash "$HERE/toolchain/order/build.sh" "$OUT/gcc/plugin" | tail -1)")
 fi
+# the pi plugin registers the fnvnx_lifted attribute the shim's declarations carry (a unit compiled without it warns
+# "unknown attribute"); at -c it also writes the N3 section, which -o /dev/null discards
+if grep -q 'toolchain/pi' "$HERE/tools/link/compile.sh"; then
+  FLAGS+=(-fplugin="$(bash "$HERE/toolchain/pi/build.sh" "$OUT/gcc/plugin" | tail -1)")
+fi
 export CXX TREE OUT FLAGS_STR="${FLAGS[*]}" FORCE=${FORCE:-0} NICE=${NICE:-19}
 if [ -z "$LIST" ]; then LIST="$OUT/gcc/units.list"; jq -r '.units[].source' "$TREE/build/units.json" | sort -u > "$LIST"; fi
 

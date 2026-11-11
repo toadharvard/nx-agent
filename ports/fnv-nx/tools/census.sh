@@ -18,13 +18,16 @@ mkdir -p "$OUT/logs"
 FLAGS=(-mabi=ilp32 -std=gnu++17 -fsyntax-only -fms-extensions -fshort-wchar -fpermissive -frounding-math -fsigned-char -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks -fcheck-new -fno-sized-deallocation -fno-lifetime-dse -ffp-contract=off -U_FORTIFY_SOURCE
        -Werror=return-type -Wno-narrowing -fmax-errors=200 -include "$HERE/shim/include/fnvnx_compat.h"
        -I"$HERE/shim/include" -I"$SSE2NEON" -I"$DECOMP/include")
+# the pi plugin registers the fnvnx_lifted attribute the shim's declarations carry (without it: "unknown attribute")
+PI_SO=$(bash "$HERE/toolchain/pi/build.sh" "$OUT/.pi") || { echo "census.sh: the fnvnx_pi plugin does not build" >&2; exit 2; }
+FLAGS+=(-fplugin="$PI_SO")
 export FLAGS_STR="${FLAGS[*]}"
 # C units (third_party/zlib-1.2.1/*.c: MSVC compiled them as C; K&R definitions, C names `_adler32`) build with the C
 # compiler: the same flags with C's -std and without the C++-only ones. Every unit gets its units.json /D defines
 # (only the zlib units have any: memcpy=fnv_zlib_memcpy, memset=fnv_zlib_memset).
 CFLAGS=()
 for f in "${FLAGS[@]}"; do
-  case $f in -std=gnu++17) CFLAGS+=(-std=gnu99) ;; -fpermissive|-Wno-narrowing) ;; *) CFLAGS+=("$f") ;; esac
+  case $f in -std=gnu++17) CFLAGS+=(-std=gnu99) ;; -fpermissive|-Wno-narrowing|-fplugin=*) ;; *) CFLAGS+=("$f") ;; esac
 done
 export CFLAGS_STR="${CFLAGS[*]}"
 

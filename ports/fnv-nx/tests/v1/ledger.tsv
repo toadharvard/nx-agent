@@ -74,7 +74,6 @@ S1REFS-COND1RSTR1	S1-refs	e3465bd	e3465bd	confirmed	-	test_s1refs_b.py	RSTR1 bin
 S1REFS-COND1-C2	S1-refs	5279bb5	5279bb5	refuted	-	test_s1refs_b.py	COND1: an explicit G(bool) still passes the gate, ?: becomes G and h(G) is called where MSVC calls h(bool)
 S1REFS-COND1-C3	S1-refs	5279bb5	5279bb5	refuted	-	test_s1refs_b.py	COND1: c ? false : !x.f(1) gets G(false) against bool, a GCC error on input that compiled
 S1REFS-STD2	S1-refs	0a0c0cc	0a0c0cc	confirmed	-	test_s1refs_b.py	std::abs(float) rename: units.json symbol, link double-to-float bridge for float callers, same-unit caller value
-S1FUZZB-STAND2	S1-fuzzB	57fe267	57fe267	confirmed	-	test_s1refs_b.py	STAND2: the /Od stand-in call reaches the other unit's body; /O2 and inline stand-ins untouched
 S13B-UNLOADED-FIX	S13b	97f8af8	97f8af8	confirmed	-	test_s13b_callee_unloaded.py	oracle-callee-unloaded only when the native trace shows the native ran X: U1/U2 native-early-exit, U3 control kept
 S15T-J0148	S15-threads	258d777	258d777	confirmed	-	test_weak_interlocked.py	J-0148 hand-merge: no conflict markers (W3), litmus 0 bad, refcount inc relaxed / dec release + dmb
 S15T-WEAK	S15-threads	35fe02d	35fe02d	confirmed	-	test_weak_interlocked.py	guest.elf takes sync.cpp's strong fnvnx_interlocked_slow, litmus calls it by relocation (W1, W2 at the subagent's base, before 79481ab)
