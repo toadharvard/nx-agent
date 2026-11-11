@@ -147,11 +147,17 @@ int fnvnx_loaded_protect(fnvnx_proc *p, fnvnx_loaded *L) {
     return FNVNX_OK;
 }
 
+/* The reserved address set: [FNVNX_START_RESERVED_LO, HI), the exe image and the range of every row of the module table
+ * (mapped or not). 1 when [va, va+size) intersects it or does not lie in the 32-bit address space. */
+int fnvnx_address_reserved(const fnvnx_proc *p, uint32_t va, uint32_t size) {
+    return (uint64_t)va + size > 0x100000000ull || (va < FNVNX_START_RESERVED_HI && (uint64_t)va + size > FNVNX_START_RESERVED_LO) ||
+           fnvnx_images_overlap(p, va, size, -1);
+}
+
 /* guest memory from the platform; its answer is checked against the rules the platform promised */
 static uint32_t alloc_checked(fnvnx_proc *p, uint32_t size) {
     uint32_t va = p->os->alloc_va(p->os->ctx, size, FNVNX_PROT_R | FNVNX_PROT_W);
-    if (!va || (va & (PAGE - 1)) || (uint64_t)va + size > 0x100000000ull ||
-        (va < FNVNX_START_RESERVED_HI && va + size > FNVNX_START_RESERVED_LO) || fnvnx_images_overlap(p, va, size, -1)) {
+    if (!va || (va & (PAGE - 1)) || fnvnx_address_reserved(p, va, size)) {
         fnvnx_logf(p->os, "fnvnx-start: guest memory request of 0x%x bytes failed", (unsigned)size);
         return 0;
     }

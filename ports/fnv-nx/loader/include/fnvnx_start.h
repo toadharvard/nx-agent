@@ -163,6 +163,12 @@ int fnvnx_images_get(const fnvnx_proc *p, uint32_t i, fnvnx_image_info *out);   
  * main thread's block. Defined by the glue; valid from the start of main, filled by a successful prepare. */
 const fnvnx_proc *fnvnx_start_proc(void);
 
+/* The reserved address set of the process: [FNVNX_START_RESERVED_LO, HI), the exe image and [base, base + size_of_image)
+ * of EVERY row of the module table, mapped or not. 1 when [va, va+size) intersects it or leaves the 32-bit address
+ * space. alloc_va results, the VM arena and thread blocks are checked against it (no constant stands for it). Valid
+ * once fnvnx_start_prepare has opened the exe (the exe's range is then known). */
+int fnvnx_address_reserved(const fnvnx_proc *p, uint32_t va, uint32_t size);
+
 /* The lifter runtime (another team): runs the lifted function for guest address exe_eip on the guest stack esp with
  * TEB teb and returns guest eax when the function returns to FNVNX_START_SENTINEL stored at [esp]. */
 uint32_t fnvnx_lift_enter(uint32_t exe_eip, uint32_t esp, uint32_t teb);
