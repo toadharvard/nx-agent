@@ -350,6 +350,52 @@ def uni(I):
         if o and a <= o[-1][1]: o[-1][1] = max(o[-1][1], e)
         else: o.append([a, e])
     return o
+# ---- closure under direct targets (rule C): the entry set is the least fixed point of R3 and of "every direct call target, and every direct jmp/jcc/loop target that leaves
+# the lifter's range [lo,hi), of the body of every entry is an entry". The body and the range are the lifter's own (fnvlift.core.explore from the entry over the range
+# entry_args gives: [parent, parent+size) for an entry with parent=, else [entry, entry+extent)); a call target is an entry even inside the range (the lifter emits
+# L_<target>() for every direct call). A target inside a decomp function gets parent= (kind inner), like every inner entry. Added entries are R3-style entries: their bodies
+# are kept in scx (not in insns/cov), so byte accounting is unchanged. A target outside every executable section is not an entry (counted: lifter needs a rule there).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from fnvlift import Image as LImage; from fnvlift import core as LCore
+limg = LImage(EXE); cl_cache = {}; cl_out = Counter(); cl_outex = {}; cl_add = Counter(); cl_jx = set(); cl_rounds = 0
+def cl_range(a):
+    p = parent.get(a)
+    if p is not None and p in entries: return p, p + fsize[p]
+    I = scx.get(a)
+    return a, a + (sum(y - x for x, y in uni(I)) if I is not None else sum(insns[x][0] for x in extent_insns(a)))
+def cl_targets(a, kids):
+    lo, hi = cl_range(a); own = tuple(x for x in kids.get(lo, ()) if lo <= x < hi)
+    key = (lo, hi, a, own)
+    if key not in cl_cache:
+        fh = hi + 0x1000; ins, tabs, tk, bad = LCore.explore(limg, lo, hi, limg.bytes(lo, fh - lo), a, own if a == lo else (), fh); cs = set(); ts = set(); jx = set()
+        for x, g in ins.items():
+            m = g.mnemonic; o = g.operands
+            if m == 'call' and o[0].type == X.X86_OP_IMM: cs.add(o[0].imm & 0xffffffff)
+            elif (m == 'jmp' or (m[0] == 'j' and m != 'jecxz') or m in ('loop', 'loope', 'loopne')) and o[0].type == X.X86_OP_IMM:
+                t = o[0].imm & 0xffffffff
+                if not lo <= t < hi: ts.add(t)
+            elif m == 'jecxz' and not lo <= (o[0].imm & 0xffffffff) < hi: jx.add(x)
+        cl_cache[key] = (cs, ts, jx)
+    return cl_cache[key]
+while True:
+    kids = {}
+    for x, q in parent.items(): kids.setdefault(q, []).append(x)
+    miss = {}
+    for a in sorted(entries):
+        cs, ts, jx = cl_targets(a, kids); cl_jx |= {(a, x) for x in jx}
+        for kd, T in (('call', cs), ('tail', ts)):
+            for t in T:
+                if t in entries: continue
+                if not intext(t): cl_out[kd, sec(t)] += 1; cl_outex.setdefault((kd, sec(t)), t); continue
+                miss.setdefault(t, (set(), a))[0].add(kd)
+    if not miss: break
+    cl_rounds += 1
+    for t in sorted(miss):
+        kds, a = miss[t]; f = indec(t); entries[t] = None; kinds[t] = set(kds); esite[t] = a; r3set.add(t); cl_add['+'.join(sorted(kds)), 'inner' if f else 'free'] += 1
+        if f: parent[t] = f[0]; kinds[t].add('inner')
+        if cov[t - T0] == 1: continue
+        ok, out, refs, tabs = walk(t, f[0] if f else T0, f[0] + f[1] if f else T1, bool(f), True); scx[t] = out
+        if not ok: udset.add(t)
 rows = []; rgs = []; rbad = rdec = eclo = 0; kc = Counter(); kany = Counter(); fe = Counter(); extsum = 0
 for a in sorted(entries):
     pk = next(k for k in PRI if k in kinds[a]); isd = a in fsize; I = scx.get(a, insns); xs = sorted(I) if a in scx else extent_insns(a); ft = 0
@@ -368,7 +414,9 @@ open(OUTD + '/ranges.tsv', 'w').write(HD + '; columns: entry, half-open ranges s
 open(OUTD + '/noreturn.tsv', 'w').write(HD + '; columns: entry, reason\n' + ''.join('%08x\t%s\n' % kv for kv in NRR))
 print('R3 pointer entries: %d new (%d insn-start of decoded code, %d bodies re-read from their first byte, %d of them hit undecodable bytes #UD, %d inside decomp functions); direct targets of those bodies: %s' % (
     len(r3set), len(r3set) - len(scx), len(scx), len(udset), sum(1 for a in r3set if a in parent), dict(sorted(r3call.items()))))
-print('closure check: direct jmp/jcc targets of non-decomp entries inside the span that are neither entries nor in the entry\'s own extent: %d' % eclo)
+print('closure check (old, report only): direct jmp/jcc targets of non-decomp entries inside the span that are neither entries nor in the entry\'s own extent: %d' % eclo)
+print('closure under direct targets: %d rounds, entries added %s; targets outside executable sections (not entries) %d refs / %d targets, by kind and section %s; jecxz leaving range %d' % (
+    cl_rounds, dict(sorted(cl_add.items())), sum(cl_out.values()), len(cl_outex), {'%s %s' % k: '%d e.g. %08x' % (v, cl_outex[k]) for k, v in sorted(cl_out.items(), key=str)}, len(cl_jx)))
 print('ranges.tsv %d rows, noreturn.tsv %d rows; range-sum vs extent mismatches %d (non-decomp rows: equality; %d decomp rows: sum <= declared size)' % (len(rgs), len(NRR), rbad, rdec))
 def gate(green, TNu, why):
     open(OUTD + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap' + ('.' + NAME if STRICT else ''), 'status': 'green' if green else 'red', 'universe': TNu, 'certified': TNu - unexpl, 'uncertified': unexpl}) + '\n')
