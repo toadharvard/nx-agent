@@ -25,6 +25,23 @@
     "ports/fnv-nx/contract/bodysel.py"
    ]
   },
+  "test_gate_call_decl.py": {
+   "references": [
+    {
+     "anchor": "## contract/gate_call.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## N2 prepare rules",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RULES.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/gate_call.py"
+   ]
+  },
   "test_gate_reach.py": {
    "references": [
     {

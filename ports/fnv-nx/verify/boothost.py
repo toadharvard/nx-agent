@@ -165,9 +165,8 @@ class Services:
         return WALL_EPOCH_US + self.m.clock.now_ns() // 1000
 
     def h_tz_offset_minutes(self, *_):
-        """hostapi.h: off_s / 60 (C division) of TZ_AT at this call's instant; 0 when TZ_AT does not answer"""
-        z = self.m.tz_at(self.h_wall_time_us() // 1_000_000)
-        return 0 if z is None else int(z[0] / 60) & U64
+        """hostapi.h: off_s / 60 (C division) of TZ_AT at this call's instant"""
+        return int(self.m.tz_at(self.h_wall_time_us() // 1_000_000)[0] / 60) & U64
 
     def h_random64(self, *_):
         """splitmix64 from seed 0 (the old driver used os.urandom, which no deterministic run can use)"""

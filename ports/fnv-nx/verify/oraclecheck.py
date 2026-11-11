@@ -12,6 +12,9 @@ ALLOWED = CLOSURE + the reference paths + the test file + the tracked files unde
   unopened     subject files the run never opened: the test does not exercise what it declares;
   refs_in_run  reference paths the run opened (information: a reference read by the test is compared by the machine,
                one that is not is a text for the reader).
+Limit of the method: Linux allows one tracer per process, so a test that itself runs strace (through opentrace.py or the
+`kernel ptrace` item of envcheck.py) exits non-zero under this checker and is reported as not passing; its declaration
+is not checked by this tool (at 0b9ad57: test_envcheck.py, test_gates.py, test_opentrace.py, 3 of 47).
 A test passes iff it exits 0, undeclared and unopened are empty. The report states these facts per test; it ranks
 nothing and excuses nothing. Exit 0 iff every test passes, 2 otherwise, 1 on a usage or tool error.
 This is a verifier (after-merge, farm/runner.sh job `oraclecheck`), not a gate: it needs strace and runs every test."""

@@ -109,6 +109,19 @@ The owner's words: "Транк никогда красный. Всегда зе�
   - The address space stays as decided: 32-bit, ILP32.
     - A wild guest access into host pages is a stated assumption: the exe does not make wild accesses in normal operation.
   - Priority: the game boots first. New proof work that does not block booting waits until after the first frame.
+- **Wine 9.0 as an acceptable implementation (owner decision, 2026-11-11).**
+  - The owner's words: "Если он ничего не считает, давай мы тоже будем ничего считать... можно залогировать... Там, где похуй Вайну. А Вайн, блядь, не первый день делается."
+  - Where Wine 9.0 implements an API in a simplified way (it does nothing, or returns success), we may do exactly what Wine 9.0 does, with one log line per call.
+  - The source of the behaviour is Wine 9.0's code for that function, cited per function. The stub gate accepts such a body when the citation is present.
+  - First cases: d3d9 `ProcessVertices`, `SetClipStatus` and `GetClipStatus`, both device classes.
+- **The declared machine (owner decision, 2026-11-11).** The game runs on a declared Windows machine, and every
+  environment query gets the full answer that a real Windows (or Wine 9.0) gives on that machine. This is not a stub.
+  - **No network.** The machine has no network connection. Every network call returns the documented Windows/Wine
+    error for that state (for example network down, host not found), with no fake success.
+  - **Fixed time zone.** UTC in the emulator; the system time zone of the console on the Switch.
+  - **Registry.** The hive holds exactly the keys that the exe and modules read, found statically from their call
+    sites. Values come from the declared machine (for example `Installed Path` = the game directory). A key with no
+    declared value is absent, the same as on a machine where nothing wrote it. No installer script is needed.
 - Merges stop while anything is red. That is intended. Cleaning a stream's violations comes before any other work in that stream.
 
 ## Owner decisions of 2026-11-10 (do not re-ask)
@@ -163,3 +176,130 @@ The owner's words: "Я буквально сказал, что я использ
 - **Private sources** (lifted C++, decomp trees) enter a recipe only as an `external`: a fnv-nx-build commit plus `tree_sha256`.
 - **Lifter:** `liftall.py` generates C++. Its objects are built by `recipe.py` in that store, as a product root with the pack as an external.
 - Missing something in this machinery? Extend it and say so in the inbox. A parallel path is a rule violation.
+
+## Owner orders of 2026-11-11, evening (binding for every session; an order sent only by message is not enough)
+
+The owner's words: "Ты когда пишешь че-то агентом они проебываются. Потому что это не в глобальных правилах."
+
+- **Standing orders live here.** An order that binds more than one session is written into this file by the
+  orchestrator and pushed to the trunk and the integration branch. A message only points to it.
+  - Every lead merges the trunk's `CLAUDE.md` into its branch when told, and re-reads this file after every compaction.
+  - If an orchestrator message and this file disagree, this file wins; report the conflict.
+- **Assumptions: one registry, nine accepted.** The owner asked "Сколько допущений?", and no one could answer.
+  - Every assumption has an id in `verify/ASSUMPTIONS.json`. The `assumptions` gate makes the trunk red for:
+    - an "Assumption"/"допущение" in code or docs without an id;
+    - an id without a record;
+    - a new OWNER record without the owner's decision.
+  - OWNER, the only accepted ones:
+    1. the compiler is correct;
+    2. SHA-256;
+    3. Win32 and D3D9 as documented;
+    4. the console's behaviour until a run on it;
+    5. native code is tested by ASan/UBSan, not proven;
+    6. the exe makes no wild accesses (array indices in bounds);
+    7. ILP32;
+    8. IEEE floating point;
+    9. the pinned formal tools and published theorems are correct: the Sail CPU model at its pinned patch, isla and z3,
+       the published proof of the x86-TSO to Arm memory mapping (owner decision, 2026-11-11).
+  - Every other assumption is REMOVE. Its record names the fact or gate that removes it and the owner of that work.
+    Examples: callee-saved registers, `ret n`, no PIC and complete code ranges are checked from the exe's code; kernel
+    result codes come from the pinned libnx headers; guard zones are a fact of the loader's layout.
+  - A session never introduces a new assumption to get a gate green. It reports it to the orchestrator.
+- **Real global numbers.** Every status, note and report gives totals over the whole set (all units, all sites, all
+  tests) with the commit they were measured at. Sample counts ("on a sample of 232 units") never stand for a result.
+- **The goal comes first.** The goal is a fully lifted ELF, then exe entry, WinMain, the main menu, the first frame in
+  the emulator, then the Switch.
+  - The next steps are:
+    1. the first product root on the trunk (platform, built by the recipe with the msvcmodel compiler and all plugins);
+    2. the lifted packs as product roots;
+    3. the ELF;
+    4. the boot.
+  - A new gate or proof is written now only if it blocks one of these steps. Everything else waits until after the
+    first frame.
+- **Sanitizer builds** are a flags variant of the same product root in `verify/recipe.py`, with the msvcmodel compiler and
+  plugins, in `GATE_CACHE`. The boot machine holds the shadow memory and the `__asan_*` callbacks; UBSan traps report
+  the pc.
+
+## Owner order of 2026-11-11, night: no doubles in tests (binding)
+
+The owner's words, on a render defect that unit tests missed because the sibling modules were replaced in them:
+"Это что за бред, заглушки?"
+
+- A replaced module in a test is a stub. It counts in the stub gate, which stays an absolute 0.
+- A test links the real product files of its root: the same unit set and flags that `verify/recipe.py` builds.
+  - A test never defines a symbol that a product root defines. This includes recording doubles, fakes, mocks and
+    hand-written stand-ins of sibling files.
+  - The check is mechanical, per test binary: (symbols the test defines) ∩ (symbols the product roots define) = ∅.
+    There is no allow-list. The owner is L1, as part of the stub gate.
+- Below the product there is one boundary: the GL library (for the OpenGL backend), deko3d, libnx and the kernel. A test that runs on the host meets it in one
+  shared model, the L4 boot machine (its GPU and kernel model, checked against its references). There is no
+  per-test double of it.
+- Failure injection is allowed only as an input of that shared model, such as a kernel or allocator result that
+  Windows, Wine 9.0 or the console documents. A test never injects it by replacing a function.
+- Existing tests with doubles are rewritten onto the real files and the shared model, or deleted. Each lead gives the
+  global count of its tests with doubles (files and symbols, with the commit) and takes it to 0.
+
+## Owner orders of 2026-11-11, late night: leads, workers, one fast build (binding)
+
+The owner's words: "Агенты вызывают соннетов которые делают задачи. Задачи соннетов механические. Опусы чекают
+корректность в рамках своей области. Обязательно трекать текущие задачи, статусы и общий прогресс." and "Заниматься
+остальным можно только когда сборка идет и нет более приоритетных задач. Сборка с гейтами должна оставаться почти
+моментальной. Сборка должна быть универсальной. И всегда быстрой. Единой."
+
+- **Leads are Opus 5.5** (`claude-opus-5-5`), one per layer: L1 contract and verdict, L2 source, rules and plugins,
+  L3a lift, L3b lift certification, L4 verify and boot machine, L5 platform, L6 render (D3D9 front end), L6A deko3d.
+  - The lead gives mechanical tasks to **Sonnet 5.5 workers** (`claude-sonnet-5-5`): edits by a stated rule, builds
+    and runs through the recipe or a farm, censuses, moving tests onto the real files.
+    - A worker task names the files, the rule, the check that proves it and the branch.
+    - Farms are Sonnet sessions too.
+  - The lead checks every worker result for correctness within its layer before it takes it into the lead branch:
+    - the rule closes the whole class;
+    - the numbers are global, with the commit;
+    - the build used the prepared machinery.
+  - The lead does not do mechanical work itself.
+- **The build comes first.** The one build is `verify/recipe.py` plus the L1 gates, in `GATE_CACHE`.
+  - Any other work is done only while that build is running and nothing of higher priority is open.
+  - The build with gates stays almost instant: content-keyed, so an unchanged unit is never rebuilt and a gate reads
+    cached facts.
+  - It is universal: every product root (platform, lifted packs, render, deko, loader, tests, sanitizer variant) is
+    built by this one build. There is no per-layer build script, no second cache and no direct compiler call.
+  - It is always fast. A change that makes the incremental verdict slower than its budget is red like any failing gate.
+- **No idling.** Each lead always has its layer's next step on the goal path in progress.
+  - Waiting on another layer is a reason to take the next item, not to stop.
+  - A blocked item names its blocker and the layer that owns it.
+- **Status, always current.** Each lead keeps `ports/fnv-nx/journal/status/<layer>.md` on its branch and pushes it after
+  every finished item. It holds:
+  - every current task, with its worker session id and status: doing, done (commit) or blocked (by what, owner);
+  - the layer's global progress numbers, with the commit they were measured at.
+  - The orchestrator collects these files into the overall progress.
+- **Two render backends: OpenGL and deko3d (owner correction, 2026-11-11 22:45; it replaces the earlier
+  "one backend" line, which was the orchestrator's mistake).** The owner's words: "их два. Один опенгл другой деко"
+  and "Нахуя ты гл удалил. Ты же рендерил с помощью него."
+  - The OpenGL backend (`gl4`, `nxgl`, the renderer pair and `verify/bootgpu.py` with its GL library) is product and
+    stays. It is the backend that already rendered frames, and it renders in the emulator. Nothing of it is deleted.
+  - The deko3d backend (L6A, `render/backend`) is the second backend, built beside it, for the console.
+  - **OpenGL is the reference for deko3d** (owner, 22:50: "Опенгл должен был быть эталоном для деко"). The same
+    nxgpu command stream (the same D3D9 front end, the same scenes and game frames) is rendered by both backends, and
+    the deko3d frames are checked against the GL frames. A difference is a deko3d defect until it is explained by
+    rule. GL frames are produced on the boot machine with the GL library. This check verifies deko3d; it never
+    selects code.
+  - The D3D9 front end (L6) serves both through the same nxgpu ABI.
+  - The worker branches that deleted GL (`claude/fnv-l6-render-w1` 89fa6a889, `claude/fnv-l4-verify-w1` 68e37dab7)
+    are not merged, ever. No session deletes or disables GL, Mesa in the boot machine, or their tests.
+
+## Owner order of 2026-11-11, night: the first frame in this budget, correct by construction (binding)
+
+The owner's words: "Трекай прогресс послойно и прогрессируй всегда. Задача понятная. Осталось 50% недельного лимита. За
+это время можно закрыть первый кадр точно. Что говорить об остальном. Опять же все должно быть корректно по
+построению."
+
+- **Target:** the first frame in the L4 emulator within the remaining half of the weekly usage limit. Everything a
+  session does is measured against that path: product roots → lifted packs as roots → ELF → boot → WinMain → menu →
+  first frame.
+- **Spend only on the path.** Work that does not move a layer toward the first frame waits until after it. Workers are
+  Sonnet; long or mechanical runs go to farms or workers, not to a lead's own context. No repeated censuses of numbers
+  that did not change; a gate reads cached facts.
+- **Correct by construction.** Each step is closed by its rule and gate, never by a run that happened to pass. A shortcut
+  that breaks a rule (a stub, a double, a second build path, a new assumption, a heuristic) is not progress: it is red.
+- **Progress is tracked per layer** in `ports/fnv-nx/journal/status/<layer>.md` (see "late night"); the orchestrator
+  collects them into `ports/fnv-nx/journal/status/ALL.md` on the integration branch every hour.

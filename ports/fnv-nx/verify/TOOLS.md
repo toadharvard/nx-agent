@@ -78,10 +78,30 @@ A name missing from its spec, a stub in the spec, a forward that cannot be follo
 ## contract/gate_call.py
 
 ```text
-gate_call - direct call/tail targets of the exe function versus each native copy (L1 CONTRACT).
+gate_call - call targets of the exe function versus each native copy, and the declaration of every edge (L1 CONTRACT).
 
-Native targets are `calls` plus any 8-hex-digit address inside an `other` symbol name that the exe function also
-calls (bridges).  Several native copies of one address: each is judged, the worst verdict stands.
+Two conditions; a function with a row of either is not N2 (bodysel takes LIFTED).
+
+1. Address sets (verdicts none/equal/subset/superset/different; red row only for `different`).  Native targets are `calls`
+   plus any 8-hex-digit address inside an `other` symbol name that the exe function also calls (bridges).
+2. Declaration equality (verdict `undeclared`).  Rule: for EVERY cross-boundary edge of a native copy - a call/tail target
+   (`calls`, bridge addresses) or a data reference (`data`; the /GS cookie is the compiler's own, dropped as in gate_data) to
+   an exe address Y - the copy's object has a `.fnvnx.sympair` row of direction `ref` whose MSVC name is byte-equal to the COFF
+   symbol name of Y in the pristine MSVC objects (facts['pristine'], built from the N1 certificate by `pristine_names`), and
+   that name is decorated (starts with `?`).  Not provable, by rule and with no name table: no sympair section in the object;
+   Y has no pristine COFF symbol; the pristine symbol is undecorated (extern "C", every asm/x87/register CRT helper such as
+   _ftol2 or _CI*: `_f` carries no types); no `ref` row of a named kind (not `unnamed:*`) has the pristine name; a covering
+   row with an undecorated name.  Edge and row are matched by the exe address (objfacts keeps no ELF symbol of an edge): the
+   rows that "cover" Y are the ref rows whose name is a pristine name of Y; all of them must be decorated and one must exist.
+   Proof argument: proto.py (R5) derives cc, stack words, varargs, sret and the argument classes of a boundary only from the
+   decorated name.  The caller's declaration was written by the `names` plugin as `msvc_name`; byte-equality of the full
+   decorated names implies equality of every one of these (and of the scope and the data type), so the call convention and the
+   by-value/sret shape the caller compiled against are the callee's exe contract.  A name that carries no types gives no such
+   equality: the edge is not provable and the caller is LIFTED, never guessed.  Several native copies of one address: each is
+   judged, the worst verdict stands.
+Assumptions: the `names` plugin ran on every native unit (the recipe's guest-compiler/plugin rule); the pristine cl symbol
+names are the exe's contract (N1: byte-equal, one symbol map); an external decorated name denotes one entity link-wide.
+Zero edges: provable.  An object with no sympair section: every function of it with an edge is not N2.
 ```
 
 ## contract/gate_data.py
@@ -510,6 +530,36 @@ passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render
 Exit 0 iff the result was published and boot.py exited 0 or 2; 1 otherwise (one-line reason on stderr).
 ```
 
+## farm/runner.sh
+
+```text
+runner.sh - L4 farm job: the after-merge verification of one commit of the trunk. It reports facts; it decides nothing
+and blocks nothing (a commit that a report shows broke something is reverted by the merger).
+
+  [ARTIFACTS=...] bash <checkout>/ports/fnv-nx/farm/runner.sh <commit> <job>[=<arg>[,<arg>...]] ...
+
+Steps:
+ 1 <commit> (40 hex) of the checkout's repository is fetched from its origin when the object is absent, and checked out
+   detached into a fresh directory $FARM_HOME/runner/<commit12>/src. Every job runs there, from the repository root: the
+   code that verifies is the code of the verified commit, never of the checkout that holds this script
+ 2 verify/envcheck.py check of that tree. A mismatch ends the job with exit 1 and nothing is published: a verification
+   outside the declared environment is not a result
+ 3 the jobs, in the order given, each with its arguments. A job name outside the table below is a usage error (exit 1,
+   before step 1). Jobs:
+     oraclecheck[=TEST,...]   python3 -I verify/oraclecheck.py --jobs $RUNNER_JOBS (default: nproc) --out oraclecheck.json
+                              [TEST...]: the declaration of every test file (or of the TESTs named, repo-relative)
+                              against the files its run opens. Result file oraclecheck.json. Exit 0 = every declaration
+                              holds, 2 = at least one does not; any other exit ends the runner with exit 1
+ 4 publish the orphan commit {report.json, one result file and one <job>.log per job} to branch
+   l4-verify/after-merge/<commit12> of the artifacts repository (forced: the newest run of a commit replaces the older)
+   report.json ("fnvnx-aftermerge/1"): commit, env_id, host_cpu_model, jobs [{name, args, rc, seconds, result}]
+ 5 final line: AFTERMERGE commit=<commit12> jobs=<n> violated=<names joined by ","|none> published=<branch>@<commit12>
+   exit 0 = every job exited 0; 2 = at least one job reports a violation (the result is published either way);
+   1 = usage, environment, tool or publishing error
+Env: FARM_HOME (~/fnvnx-farm), ARTIFACTS (/home/user/fnv-nx-build; a checkout whose origin is the artifacts repository),
+     ARTIFACTS_URL (default: that checkout's origin), RUNNER_JOBS.
+```
+
 ## farm/setup_verdict_env.sh
 
 ```text
@@ -800,7 +850,7 @@ Rules:
    served and every NOT answered (service, case); the latter end the run as "ext-module-missing" naming the service, with an event
    "sock-undetermined" saying why): the nargs rule (sockets dispatch before the general check: nargs != the exact count, null array or not, is -EINVAL;
    the exact count with a null array is BAD_NARGS). TZ_AT 34: UTC, offset 0, no DST, abbr "UTC",
-   for every instant of the years 1970..2100 inclusive (0 <= utc_seconds < 4133980800; stated assumption of the stage), else -EOVERFLOW (-75), nothing written;
+   for every instant (utc_seconds is any int64: the declared machine's zone in the emulator is fixed UTC, CLAUDE.md "The declared machine", and UTC has one rule at every instant, so the stage's time service refuses nothing and -EOVERFLOW (-75) never comes from the stage);
    tz_offset_minutes is the same zone's off_s / 60. THREAD_SELF 35: a record of the calling thread under a new id
    (never a second thread): started, so thread_start and thread_join answer BadInput; thread_free ends the record only.
    ACCESS_FAULT_HANDLER (10) is the machine's own (rule 5c); the console host serves it too (host_fault.inc).
@@ -821,8 +871,8 @@ Rules:
    stays accessible RW. A reserved page never committed is unmapped (a reservation is address space only): an access faults. release(base): unmaps the reservation's committed pages and frees it (not a base: BadInput 0x1759). decommit has no size or reservation check (host_vm.inc): view page -> 0xD401 first, else the extents inside the range are handled, a range holding none is 0. Pages committed here are
    owned: VM_PROTECT works on them. map_fixed over a reservation is refused (0xD401). thread_activity(tid, paused): tid 0 (the calling thread) BadInput 0x1759; a paused thread is
    never picked; unknown tid NotFound 0x1359, a thread not started or ended BadInput 0x1759 (no kernel call, also for a THREAD_SELF record of such a thread); a thread (or the
-   record of a thread) that is the CALLING thread: ResultBusy 0xF201, pause or resume; another live thread: pause of a paused one or resume of one that is not paused
-   ResultInvalidState 0xFA01, else 0 (the two kernel codes are the header owner's statement from memory; assumption of the stage).
+   record of a thread) that is the CALLING thread: ResultBusy 0xF401, pause or resume; another live thread: pause of a paused one or resume of one that is not paused
+   ResultInvalidState 0xFA01, else 0 (svcSetThreadActivity as Atmosphere's libmesosphere states it, source/svc/kern_svc_activity.cpp and KThread::SetActivity: svc::ResultBusy for the current thread, svc::ResultInvalidState for a pause of a paused or a resume of a not paused thread; a result is module | description << 9, module Kernel = 1, descriptions Busy 122, InvalidState 125 - libnx b156b4774fb2 nx/include/switch/result.h MAKERESULT, where 122 is spelled KernelError_AlreadyExists).
 5e. UNMAP_FIXED (fn 15, addr, size, src): the undo of exactly one earlier map_fixed. addr or src unaligned 0xCC01; size 0 / unaligned 0xCA01; (addr, size,
    src) not exactly a live map_fixed mapping 0xD401 (so a second unmap refuses). Success: the range is unmapped (an access faults), the src heap block
    is accessible RW again with the content the mapping had, and addr may be mapped again. A page of the range that is not RW is the header's
@@ -938,10 +988,15 @@ needs real traffic, or an OS's own choice, is NOT answered: the model raises Not
 precondition of the header; the machine ends the run as a host-call fault). Never an invented value.
 
 Stated assumptions (each is a fact of the stage's model, not of the header):
-  A1 handle numbers: the header says only that a handle is the descriptor number the bsd service returned and that the host keeps just the
-     set of open ones (no numbering of its own, no "lowest free"). The stage's model chooses: the lowest number >= 3 that is not open (0..2
-     are stdio); a number is reused after its close. Guest programs must not depend on it. SOCKET never fails for lack of room.
-  A2 the host's loopback has the addresses 127.0.0.0/8 and ::1; "any" is 0.0.0.0 / ::; every other unicast address is not local.
+  A1 handle numbers (a rule of the model, deterministic): a new handle is the lowest number >= 3 that is not open (0..2 are stdio); a
+     number is free again after its close. This is the descriptor rule of POSIX.1-2017 2.14 "File Descriptor Allocation" (the lowest
+     number not open), which the bsd service's descriptors follow. Nothing above the host may depend on the number: the header says only
+     that a handle is the descriptor number the service returned, and on the Windows side a SOCKET is an opaque handle whose only
+     special value is INVALID_SOCKET (Winsock "Socket Data Type"), so a program correct on Windows reads no meaning from it. SOCKET
+     never fails for lack of room.
+  A2 addresses (facts, cited): loopback is 127.0.0.0/8 (RFC 1122 3.2.1.3 (g)) and ::1 (RFC 4291 2.5.3); "any" is 0.0.0.0 (RFC 1122
+     3.2.1.3 (a)) and :: (RFC 4291 2.5.2); the declared machine has no network connection (CLAUDE.md "The declared machine"), so it has
+     no interface but loopback and every other unicast address is not local.
   A3 getaddrinfo with no network: a numeric node is parsed (strict dotted quad, or an RFC 4291 text without a scope) and a null hints
      argument is a hints record of zeros (POSIX); the list of a numeric node is one record per socket type STREAM/TCP 6, DGRAM/UDP 17,
      RAW/0 (the type given in the hints keeps one; the protocol given keeps those with that protocol), in this order, ai_flags = hints flags.
@@ -1358,7 +1413,9 @@ sorted by name; items are repo-relative paths. Each file runs as `python3 -I FIL
 (default 300 s; a timeout kills the process group and is a failure). Certified: exit status 0. No skip logic: a test that
 cannot run in this environment (root, namespaces, strace) is uncertified. Zero files: green, universe 0. Exit 0 iff green.
 --jobs N (default 1): N test files run at once, each in its own process; results are reported in sorted universe order.
-  A test must therefore keep its scratch under its own tempfile.mkdtemp directory (no fixed path). No test needs a serial
+  A test must therefore keep its scratch under its own tempfile.mkdtemp directory (no fixed path). Each file runs with
+  TMPDIR set to a fresh directory of its own, and the gate removes that directory (and kills what is left of the file's
+  process group) when the file ends, passed, failed or timed out: no test leaves anything in the temporary directory. No test needs a serial
   group: sandbox namespaces are per process and every store/work directory is per run.
 --cache DIR (default $GATE_CACHE, see verdict.py; none = no caching): a test file's result is a function of the content of the
   directories the gate declares and of the declared environment. KEY = sha256 over: cas.tree_hash of every key dir
@@ -1618,6 +1675,9 @@ ALLOWED = CLOSURE + the reference paths + the test file + the tracked files unde
   unopened     subject files the run never opened: the test does not exercise what it declares;
   refs_in_run  reference paths the run opened (information: a reference read by the test is compared by the machine,
                one that is not is a text for the reader).
+Limit of the method: Linux allows one tracer per process, so a test that itself runs strace (through opentrace.py or the
+`kernel ptrace` item of envcheck.py) exits non-zero under this checker and is reported as not passing; its declaration
+is not checked by this tool (at 0b9ad57: test_envcheck.py, test_gates.py, test_opentrace.py, 3 of 47).
 A test passes iff it exits 0, undeclared and unopened are empty. The report states these facts per test; it ranks
 nothing and excuses nothing. Exit 0 iff every test passes, 2 otherwise, 1 on a usage or tool error.
 This is a verifier (after-merge, farm/runner.sh job `oraclecheck`), not a gate: it needs strace and runs every test.

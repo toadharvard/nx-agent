@@ -57,8 +57,11 @@ check('data fail list', gate_data.run(F, O, tmp)['fail'], ['superset', 'differen
 F = {'fn': {0x10: fn(), 0x20: fn(calls=[0x400100]), 0x30: fn(calls=[0x400100], tails=[0x400200]),
             0x40: fn(calls=[0x400100]), 0x50: fn(calls=[0x400100]), 0x60: fn(calls=[0x400100, 0x60 + 8]),
             0x70: fn(calls=[0x400100]), 0x80: fn(calls=[0x400100])},
-     'secs': secs, 'xc': []}
-O = {('a', 0x10): ob(), ('a', 0x20): ob(calls=[0x400100]), ('a', 0x30): ob(calls=[0x400100]),
+     'secs': secs, 'xc': [],
+     'pristine': {0x400100: frozenset(['?f@@YAXXZ']), 0x400200: frozenset(['?g@@YAXXZ']), 0x400300: frozenset(['?h@@YAXXZ'])}}
+SP = [('_Z1fv', '?f@@YAXXZ', 'func', 'ref'), ('_Z1gv', '?g@@YAXXZ', 'func', 'ref'), ('_Z1hv', '?h@@YAXXZ', 'func', 'ref')]
+O = {('a', 'sympair'): SP, ('b', 'sympair'): SP,
+     ('a', 0x10): ob(), ('a', 0x20): ob(calls=[0x400100]), ('a', 0x30): ob(calls=[0x400100]),
      ('a', 0x40): ob(calls=[0x400100, 0x400300]), ('a', 0x50): ob(calls=[0x400300]),
      ('a', 0x60): ob(other=['__fnvnx_br_00400100_21af1be5']), ('a', 0x70): ob(other=['memset']),
      ('a', 0x80): ob(calls=[0x400100]), ('b', 0x80): ob(calls=[0x400300]), ('a', 0x11): ob()}
@@ -66,7 +69,8 @@ v, c = verdicts(gate_call.run(F, O, tmp))
 for k, n in (('none', 1), ('equal', 2), ('subset', 2), ('superset', 1), ('different', 2)):
     check('call ' + k, c.get(k, 0), n)
 check('call fail', sorted(v.items()), [(0x50, 'different'), (0x80, 'different')])
-check('call fail list', gate_call.run(F, O, tmp)['fail'], ['different'])
+check('call fail list', gate_call.run(F, O, tmp)['fail'], ['different', 'undeclared'])
+check('call declared', (c.get('declared'), c.get('undeclared', 0)), (8, 0))
 
 # ---- vcall
 F = {'fn': {0x10: fn(icalls=[(0, 'mem', 'eax', 8), (0, 'mem', 'eax', 0x10)]),
