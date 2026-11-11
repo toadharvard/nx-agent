@@ -45,8 +45,8 @@ TEST(first_run_profile)
     const char *def = "[General]\r\nsTestKey=synthetic\r\n[Display]\r\nbFull Screen=1\r\niAdapter=0\r\n[Controls]\r\nfX=1\r\n";
     put("C:\\FalloutNV\\Fallout_default.ini", def);
     put("C:\\FalloutNV\\Medium.ini", "[Display]\r\nfSynth=2\r\n");   /* a preset: the launcher's first run ignores it */
-    CHECK(fnvnx_first_run_profile() == (FNVNX_PROFILE_INI | FNVNX_PROFILE_PREFS | FNVNX_PROFILE_PLUGINS));
-    CHECK(get(PROF "Fallout.ini") == def);                                       /* a byte copy */
+    CHECK(fnvnx_first_run_profile() == (FNVNX_PROFILE_PREFS | FNVNX_PROFILE_PLUGINS));
+    CHECK(get(PROF "Fallout.ini") == "(missing)");                               /* the exe makes it, not this layer */
     char v[256];
     GetPrivateProfileStringA("Display", "sD3DDevice", "", v, sizeof v, PROF "FalloutPrefs.ini");
     CHECK(strstr(v, "fnv-nx null D3D9 device") != NULL);                         /* no d3d9 module here: the null name */
@@ -62,7 +62,7 @@ TEST(first_run_profile)
     CHECK(get(LOCAL "plugins.txt") == "");                                       /* empty, as the launcher's */
     CHECK(get(LOCAL "NVDLCList.txt") == "");
 
-    /* the player's own files win: a second run makes nothing */
+    /* the player's own files win: a second run makes nothing and leaves a Fallout.ini that exists alone */
     put(PROF "Fallout.ini", "[General]\r\nmine=1\r\n");
     CHECK(fnvnx_first_run_profile() == 0);
     CHECK(get(PROF "Fallout.ini") == "[General]\r\nmine=1\r\n");
@@ -70,5 +70,32 @@ TEST(first_run_profile)
     clean();
     CHECK(fnvnx_first_run_profile() == FNVNX_PROFILE_PLUGINS);
     CHECK(get(PROF "FalloutPrefs.ini") == "(missing)");
+    clean();
+}
+
+/* The exe's own Fallout.ini creation (a fresh install has Fallout_default.ini and no Fallout.ini): its calls, in its order, on this
+ * layer: SHGetFolderPathA(CSIDL_PERSONAL) + "\\My Games\\", CreateDirectoryA, + "FalloutNV\\", CreateDirectoryA, GetFileAttributesA of
+ * the .ini (the CRT's _access), CopyFileA("Fallout_default.ini", ini, TRUE) with the name relative to the current directory
+ * (the install). The result is a byte copy, and a second copy onto the existing file fails (bFailIfExists). */
+TEST(exe_creates_fallout_ini)
+{
+    clean();
+    const char *def = "[General]\r\nsTestKey=exe\r\n";
+    put("C:\\FalloutNV\\Fallout_default.ini", def);
+    SetCurrentDirectoryA("C:\\FalloutNV");
+    char dir[MAX_PATH];
+    CHECK_EQ(SHGetFolderPathA(NULL, 5, NULL, 0, dir), S_OK);
+    strcat(dir, "\\My Games\\");
+    CreateDirectoryA(dir, NULL);
+    strcat(dir, "FalloutNV\\");
+    CreateDirectoryA(dir, NULL);
+    char ini[MAX_PATH];
+    snprintf(ini, sizeof ini, "%sFallout.ini", dir);
+    CHECK_EQ(GetFileAttributesA(ini), INVALID_FILE_ATTRIBUTES);
+    CHECK(CopyFileA("Fallout_default.ini", ini, TRUE));
+    CHECK(get(ini) == def);
+    SetLastError(0);
+    CHECK(!CopyFileA("Fallout_default.ini", ini, TRUE));
+    CHECK_EQ(GetLastError(), ERROR_FILE_EXISTS);
     clean();
 }
