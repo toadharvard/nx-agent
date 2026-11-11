@@ -213,7 +213,8 @@ uint64_t nx_d3d9_raster_word(const uint32_t* rs, NxD3D9Latch* latch) {
     if (NXF_RS(rs, SCISSORTESTENABLE)) w |= 1ull << NXRS_R_SCISSOR;
     if (NXF_RS(rs, SRGBWRITEENABLE)) w |= 1ull << NXRS_R_SRGB;
     if (latch->flat) w |= 1ull << NXRS_R_FLAT;
-    w |= (uint64_t)(NXF_RS(rs, CLIPPLANEENABLE) & 0xFF) << NXRS_R_CLIP;
+    // WineD3D 9.0 state.c state_clipping: the enabled planes are CLIPPLANEENABLE when CLIPPING is set, none otherwise
+    if (NXF_RS(rs, CLIPPING)) w |= (uint64_t)(NXF_RS(rs, CLIPPLANEENABLE) & 0xFF) << NXRS_R_CLIP;
     if (NXF_RS(rs, POINTSPRITEENABLE)) w |= 1ull << NXRS_R_POINTSPRITE;
     return w;
 }

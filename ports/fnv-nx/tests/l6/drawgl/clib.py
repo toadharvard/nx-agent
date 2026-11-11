@@ -11,7 +11,7 @@ Z = 0.5
 FLOAT1, FLOAT2, FLOAT3, FLOAT4, D3DCOLOR = 0, 1, 2, 3, 4
 POSITION, NORMAL, TEXCOORD, COLOR = 0, 3, 5, 10
 RS = dict(ZENABLE=7, FILLMODE=8, SHADEMODE=9, ALPHATESTENABLE=15, ALPHAREF=24, ALPHAFUNC=25, ALPHABLENDENABLE=27, FOGENABLE=28, FOGCOLOR=34, FOGTABLEMODE=35, FOGSTART=36, FOGEND=37, FOGDENSITY=38,
-          LIGHTING=137, CULLMODE=22, FOGVERTEXMODE=140, SRGBWRITEENABLE=194)
+          LIGHTING=137, CLIPPING=136, CLIPPLANEENABLE=152, POINTSIZE=154, POINTSIZE_MIN=155, POINTSIZE_MAX=166, CULLMODE=22, FOGVERTEXMODE=140, SRGBWRITEENABLE=194)
 SAMP = dict(ADDRESSU=1, ADDRESSV=2, ADDRESSW=3, BORDERCOLOR=4, MAGFILTER=5, MINFILTER=6, MIPFILTER=7, SRGBTEXTURE=11)
 D3DFMT_A8R8G8B8 = 21
 
@@ -46,6 +46,7 @@ class Case:
         """texels: list of dwords (A8R8G8B8) in memory order (cube: six faces)"""
         i = self._id("x"); self.add("x", i, kind, w, h, d, fmt, bpp, *texels); return i
     def bind(self, stage, tid): self.add("e", stage, tid)
+    def plane(self, idx, p): self.lines.append("l %x %s" % (idx, " ".join(hx(fb(x)) for x in p)))
     def clear(self): self.add("c", CLEAR)
     def rt(self, idx): self.add("m", idx)
     def out(self): self.add("o", self.nrt)
@@ -58,6 +59,9 @@ class Case:
             b = self._id("w"); self.add("w", b, stride, *(dec + flat)); self.add("q", 0, b, 0, stride)
             if mode == "vb": self.add("g", 1, 2)
             else: a = self._id("a"); self.add("a", a, 0, 1, 2); self.add("j", a); self.add("h", 2, 0, 3, 0, 1)
+    def run_prim(self, prim, n, stride, verts):
+        """a DrawPrimitiveUP of n primitives of type prim (D3DPT_*), verts: list of vertices (lists of words)"""
+        self.clear(); self.add("U", prim, n, stride, *[x for v in verts for x in v]); self.out()
     def run(self, mode="up", stride=0, verts=()):
         self.clear(); self.draw(mode, stride, verts); self.out()
 

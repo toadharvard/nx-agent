@@ -12,6 +12,7 @@
 //  q stream vb offset stride   SetStreamSource            j ib   SetIndices
 //  g nprim first   DrawPrimitive(TRIANGLELIST)            h base minidx nverts startidx nprim   DrawIndexedPrimitive(TRIANGLELIST)
 //  z kind id    release the vertex (0) / pixel (1) shader object id (the device destroys its backend shaders)
+//  l idx a b c d  SetClipPlane (plane words are float bit patterns)   U prim n stride W..  DrawPrimitiveUP(prim = D3DPRIMITIVETYPE, n primitives)
 //  o nrt        read back render targets 0..nrt-1 (GetRenderTargetData) into <data>/o<case>_<rt>.bin (BGRA bytes, 32 x 32)
 #include "t_common.h"
 #include <string.h>
@@ -94,6 +95,8 @@ void line(char tag, const std::vector<uint32_t>& v) {
     case 'm': CHECK_HR(i9->CreateRenderTarget(SZ, SZ, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &g.rt[v[0]], nullptr), D3D_OK); CHECK_HR(i9->SetRenderTarget(v[0], g.rt[v[0]]), D3D_OK); break;
     case 'c': CHECK_HR(i9->Clear(0, nullptr, D3DCLEAR_TARGET, v[0], 1.0f, 0), D3D_OK); break;
     case 'u': CHECK_HR(i9->DrawPrimitiveUP(D3DPT_TRIANGLELIST, v[1], &v[2], v[0]), D3D_OK); break;
+    case 'l': CHECK_HR(i9->SetClipPlane(v[0], (const float*)&v[1]), D3D_OK); break;
+    case 'U': CHECK_HR(i9->DrawPrimitiveUP((D3DPRIMITIVETYPE)v[0], v[1], &v[3], v[2]), D3D_OK); break;
     case 'w': { uint32_t bytes = (uint32_t)(v.size() - 2) * 4; IDirect3DVertexBuffer9*& b = g.vb[v[0]];
         if (!CHECK_HR(i9->CreateVertexBuffer(bytes, 0, 0, D3DPOOL_MANAGED, &b, nullptr), D3D_OK)) break;
         void* p = nullptr; if (CHECK_HR(b->Lock(0, bytes, &p, 0), D3D_OK)) { memcpy(p, &v[2], bytes); b->Unlock(); } break; }
