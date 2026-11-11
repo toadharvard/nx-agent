@@ -411,7 +411,11 @@ TEST(crt_k32_process_and_startup)
     CHECK(SetUnhandledExceptionFilter(filter) == NULL);
     CHECK(SetUnhandledExceptionFilter(filter2) == filter);
     CHECK(SetUnhandledExceptionFilter(filter) == filter2);
-    char fake[16];
+    /* a valid EXCEPTION_POINTERS: the filter reads the record (code, address) for its console line */
+    struct { DWORD code, flags; void *next; void *address; DWORD nparams; ULONG_PTR info[15]; } rec = {};
+    rec.code = 0xC0000005u; rec.address = (void *)(uintptr_t)0x00401000u; rec.nparams = 2; rec.info[1] = 0x10;
+    struct { void *rec; void *ctx; } fake_ep = { &rec, NULL };
+    void *fake = &fake_ep;
     g_filter_calls = 0;
     CHECK_EQ(UnhandledExceptionFilter((struct _EXCEPTION_POINTERS *)fake), EXCEPTION_EXECUTE_HANDLER);
     CHECK_EQ(g_filter_calls, 1);

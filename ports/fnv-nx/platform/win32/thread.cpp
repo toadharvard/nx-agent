@@ -615,6 +615,25 @@ struct w32_exception_record {
 };
 struct w32_exception_pointers { struct w32_exception_record *rec; void *ctx; };
 
+/* one console line per unhandled exception: what was raised, where (the address in the exe or a module) and on which
+ * thread - the exit code alone does not say */
+void w32_log_unhandled(const void *ep_, const char *tail)
+{
+    const struct w32_exception_pointers *ep = (const struct w32_exception_pointers *)ep_;
+    W32Log log;
+    log.s("UnhandledExceptionFilter: thread ").u((unsigned)GetCurrentThreadId());
+    if (ep && ep->rec) {
+        const struct w32_exception_record *r = ep->rec;
+        log.s(" code ").h(W32_DW(r->ExceptionCode)).s(" flags ").h(W32_DW(r->ExceptionFlags)).s(" address ").p(r->ExceptionAddress);
+        DWORD np = W32_DW(r->NumberParameters) < W32_EXCEPTION_MAXIMUM_PARAMETERS ? W32_DW(r->NumberParameters) : W32_EXCEPTION_MAXIMUM_PARAMETERS;
+        for (DWORD i = 0; i < np; i++)
+            log.s(i ? ", " : " info ").h((uintptr_t)r->ExceptionInformation[i]);
+    } else {
+        log.s(" (no exception record)");
+    }
+    log.s(tail).emit();
+}
+
 extern "C" void w32_raise(DWORD code, DWORD flags, DWORD nargs, const ULONG_PTR *args)
 {
     flags = W32_DW(flags) & W32_EXCEPTION_NONCONTINUABLE;

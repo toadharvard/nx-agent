@@ -241,6 +241,8 @@ extern "C" BOOL TerminateProcess(HANDLE h, UINT code)
     return FALSE;
 }
 
+void w32_log_unhandled(const void *ep, const char *tail);   /* thread.cpp: next to the record layout */
+
 static uintptr_t g_top_filter;   /* the game's filter (LPTOP_LEVEL_EXCEPTION_FILTER value) */
 
 extern "C" LPTOP_LEVEL_EXCEPTION_FILTER SetUnhandledExceptionFilter(LPTOP_LEVEL_EXCEPTION_FILTER f)
@@ -253,7 +255,7 @@ extern "C" LPTOP_LEVEL_EXCEPTION_FILTER SetUnhandledExceptionFilter(LPTOP_LEVEL_
 extern "C" LONG UnhandledExceptionFilter(struct _EXCEPTION_POINTERS *ep)
 {
     LPTOP_LEVEL_EXCEPTION_FILTER f(__atomic_load_n(&g_top_filter, __ATOMIC_SEQ_CST));   /* no lock is held across the call */
-    W32Log().s("UnhandledExceptionFilter(").p(ep).s(")").s(f ? ": calling the top-level filter" : "").emit();
+    w32_log_unhandled(ep, f ? ": calling the top-level filter" : ": no top-level filter");
     if (f && ep) {
         LONG r = f(ep);
         if (r != EXCEPTION_CONTINUE_SEARCH)
