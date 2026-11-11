@@ -279,6 +279,7 @@ void nxdk_target_bind(DkCmdBuf cmd, const NxDkSub* dst);
 /* ---- dk_scale.c: point-filtered scaling by rule (source texel floor((d + 0.5) * sw / dw); reference gl4_scale.c), internal DKSH programs */
 uint32_t nxdk_scale_init(void);                   /* 0 = ok; called by nxdk_stream_init */
 void nxdk_scale_shutdown(void);
+void nxdk_query_shutdown(void);    /* dk_query.c: frees the query tables; nxdk_destroy calls it while the device lives */
 void nxdk_scale_point(DkCmdBuf cmd, const NxDkSub* s, const NxDkSub* d, const uint16_t* ramp);   /* ramp: 3 x 256 u16 or NULL */
 /* ---- dk_present.c: the compose passes of PRESENT: writes the source rect of `src` into the destination rect of nxdk.front (gamma ramp: 3 x 256 u16 or
  * NULL), then blends the cursor (cw x ch BGRA or NULL), all queued on nxdk.q ahead of the flip (rule P1: it consumes the memory it reads before it returns) */

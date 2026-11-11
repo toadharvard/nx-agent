@@ -146,6 +146,8 @@ void nxdk_destroy(void) {
     nxdk_stream_shutdown();
     nxdk_swap_destroy();
     nxdk_img_shutdown();
+    nxdk_query_shutdown();
+    nxdk_shader_release_all();
     for (uint32_t id = 1; id <= NXDK_MAX_MEM; id++)
         if (nxdk.mem[id].used) dkMemBlockDestroy(nxdk.mem[id].blk);
     if (nxdk.q) dkQueueDestroy(nxdk.q);

@@ -96,8 +96,7 @@ void nxdk_query_collect(void) {   /* after the queue went idle: every closed sli
     nChunk = 0; nRec = 0;   /* the blocks go with nxdk_stage_free */
 }
 
-/* CONTRACT-REQUEST: declare in dk.h and call from nxdk_stream_shutdown: frees this file's tables and forgets every query */
-void nxdk_query_shutdown(void);
+/* frees this file's tables and forgets every query (nxdk_destroy) */
 void nxdk_query_shutdown(void) {
     for (uint32_t k = 0; k < nSl; k++) free(sl[k].ids);
     free(sl); free(chunk);

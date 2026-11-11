@@ -25,41 +25,13 @@ MUST_NAMES = ["create_ok", "device_flags", "swap_layout", "front_layout", "swap_
               "interval_4", "interval_5_bad", "depth_image_bad", "src_overflow_bad", "cursor_big_bad", "present_null_struct_bad", "wait_vblank_ok",
               "wait_vblank_bad_output", "destroy_order", "destroy_balanced", "noswap_present_bad", "noswap_balanced", "device_fail_reported",
               "vi_fail_reported"]
-# symbols of the backend files not merged yet (dk_draw, dk_vtx, dk_query, dk_blit, dk_scale, dk_present); empty once the backend is whole
-PENDING = {
-    "nxdk_op_bind_idx",
-    "nxdk_op_bind_state",
-    "nxdk_op_bind_textures",
-    "nxdk_op_bind_ubo",
-    "nxdk_op_bind_vtx",
-    "nxdk_op_bind_vtxn",
-    "nxdk_op_blend_const",
-    "nxdk_op_blit",
-    "nxdk_op_define_layout",
-    "nxdk_op_define_layout4",
-    "nxdk_op_define_state",
-    "nxdk_op_depth_bias",
-    "nxdk_op_draw",
-    "nxdk_op_draw_indexed",
-    "nxdk_op_gen_mips",
-    "nxdk_op_query_begin",
-    "nxdk_op_query_end",
-    "nxdk_op_scissor",
-    "nxdk_op_stencil_ref",
-    "nxdk_op_viewport",
-    "nxdk_present_compose",
-    "nxdk_query_collect",
-    "nxdk_query_result",
-    "nxdk_query_submit_begin",
-    "nxdk_query_submit_end",
-    "nxdk_scale_init",
-    "nxdk_scale_shutdown",
-}
+# symbols of the backend files not merged yet (dk_scale, dk_present); empty once the backend is whole
+PENDING = {"nxdk_scale_init", "nxdk_scale_shutdown", "nxdk_scale_point", "nxdk_present_compose"}
 EMBEDDER = {"nxdk_guest_ptr", "nxdk_on_present", "nxdk_shader_pack"}
 HANDLERS = {"nxdk_mem_create", "nxdk_mem_gpu_addr", "nxdk_mem_destroy", "nxdk_present", "nxdk_wait_vblank", "nxdk_shutdown", "nxdk_image_create", "nxdk_image_create4",
             "nxdk_image_destroy", "nxdk_image_read", "nxdk_readback", "nxdk_sampler_create", "nxdk_sampler_update", "nxdk_img", "nxdk_mem",
             "nxdk_shader_create", "nxdk_shader_destroy", "nxdk_shader_create_d3d"}
-LIBC = {"memset", "memcpy", "snprintf", "vsnprintf", "malloc", "free", "calloc", "memcmp", "memmove", "strncmp", "strcmp", "clock_gettime"}
+LIBC = {"memset", "memcpy", "snprintf", "vsnprintf", "malloc", "free", "calloc", "memcmp", "memmove", "strncmp", "strcmp", "clock_gettime", "realloc"}
 LIBCALL = re.compile(r"^(dk|nwindow|vi|event)[A-Z]\w*$")
 FORBID = re.compile(r"stub|todo|not implemented|placeholder|fallback|no-op|noop|weak", re.I)
 
