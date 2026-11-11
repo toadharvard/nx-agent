@@ -9,6 +9,8 @@ its flags and every header the unit really includes (a function of the compiler 
 key). The set is cached per unit under GATE_CACHE/objstub. No product root: universe 0, green.
 Wine rows: verify/wine_fixme.tsv of the tree under test (objstub.read_wine_table; missing or malformed is a gate error, red); the result
 holds "wine_fixme": {id: call sites} so growth of the simplified bodies is visible.
+Declared-machine rows: verify/declared_machine.tsv of the tree under test (objstub.read_declared_table; missing or malformed is a gate error, red),
+judged by the same rule as the Wine rows through `fnvnx_declared_machine(id)`; the result holds "declared_machine": {id: call sites}.
 Reach facts: GATE_CACHE/reach/<git tree>/reach.facts.tsv (rows fact_id<TAB>sha256, written by the gate `reach`, which does not exist yet).
 While the file is absent, every call of fnvnx_reach_violation is the finding `reach-uncertified`.
 Universe: every function of every object of every product root, every uncovered gap, and a root whose recipe is invalid or whose build is
@@ -57,6 +59,7 @@ def main(argv):
     items, finds, why, results, rows, roots = [], [], "", {}, {}, gate_build.product_roots(repo)
     try:
         wine = objstub.read_wine_table(os.path.join(repo, "ports/fnv-nx/verify/wine_fixme.tsv"))   # the table of the tree under test
+        declared = objstub.read_declared_table(os.path.join(repo, "ports/fnv-nx/verify/declared_machine.tsv"))   # the table of the tree under test
         facts = objstub.read_facts(os.path.join(cache, "reach", gate_build.tree_of(repo), "reach.facts.tsv")) if roots else None
         for root in roots:
             r, w, _, fs = root_check(root, repo, cache, jobs)
@@ -64,7 +67,7 @@ def main(argv):
             rows.update(w)
             finds += fs
             items += [(i, n) for i, n, _, _ in fs]
-        its, fs = objstub.judge(results, rows, facts, wine)
+        its, fs = objstub.judge(results, rows, facts, wine, declared)
         items, finds = items + its, finds + fs
     except (ValueError, KeyError, OSError) as e:
         why = "input error: %s" % (str(e)[:300] or type(e).__name__)
@@ -86,7 +89,8 @@ def main(argv):
     else:
         status, detail = "green", "%d functions in %d objects of %d roots, no trap path, no vacuous body" % (len(items), len(results), len(roots))
     res = {"format": "fnvnx-gate/1", "name": "objstub", "status": status, "universe": len(items), "certified": cert,
-           "uncertified": bad[:50], "detail": detail, "wine_fixme": {str(k): v for k, v in objstub.wine_counts(results).items()}}
+           "uncertified": bad[:50], "detail": detail, "wine_fixme": {str(k): v for k, v in objstub.wine_counts(results).items()},
+           "declared_machine": {str(k): v for k, v in objstub.declared_counts(results).items()}}
     with open(os.path.join(os.environ["GATE_OUT"], "objstub.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     print("objstub: %s %d/%d %s" % (status, cert, len(items), detail[:200]))

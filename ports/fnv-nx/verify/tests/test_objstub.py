@@ -378,6 +378,79 @@ try:
 except ValueError:
     check("wine table: missing file is an error", True)
 
+# --- declared machine (CLAUDE.md "The declared machine"): fnvnx_declared_machine(id) + declared_machine.tsv, the same rule as wine_fixme
+DT = {31: ("RegOpenKeyExA", "registry", "win-doc:sysinfo/regopenkeyex:RegOpenKeyExA", "u32", "2"),
+      32: ("connect", "no-network", "win-doc:winsock/connect:connect", "u32", "0xFFFFFFFF"),
+      33: ("WSACleanup", "no-network", "wine-9.0:dlls/ws2_32/socket.c:WSACleanup", "void", "")}
+DH = "void fnvnx_declared_machine(unsigned);\nvoid fnvnx_wine_fixme(unsigned);\n"
+for abi in ("ilp32", "lp64"):
+    T = lambda n: "%s/%s" % (abi, n)
+    def dk(src, tbl=DT, extra=(), wt=WT):
+        o = build(DH + src, abi, extra=extra)
+        items, finds = objstub.run_check([(o, o)], set(), {}, set(), None, None, 1, wt, tbl)
+        return {(n, k) for _, n, k, _ in finds}, finds
+    k, f = dk("unsigned f(void) { return 2; }")
+    check(T("declared: the bare constant body (a registry read of an undeclared key) is V today, no citation: flagged V"), k == {("f", "V")}, f)
+    k, f = dk("unsigned f(void) { fnvnx_declared_machine(31); return 2; }")
+    check(T("declared: citation id 31 and the row's value (ERROR_FILE_NOT_FOUND): certified"), not k, f)
+    k, f = dk("unsigned f(void) { fnvnx_declared_machine(32); return 0xFFFFFFFFu; }")
+    check(T("declared: no-network row, SOCKET_ERROR-like value: certified"), not k, f)
+    k, f = dk("unsigned f(void) { fnvnx_declared_machine(32); return 0; }")
+    check(T("declared: no-network row, the body returns 0 (success): declared-machine-mismatch"), k == {("f", "declared-machine-mismatch")}, f)
+    k, f = dk("void f(void) { fnvnx_declared_machine(33); }", extra=["-fno-optimize-sibling-calls"])
+    check(T("declared: void row (WSACleanup, Wine 9.0 source): certified"), not k, f)
+    k, f = dk("unsigned f(void) { fnvnx_declared_machine(40); return 2; }")
+    check(T("declared: id not in declared_machine.tsv: declared-machine-unknown-id"), k == {("f", "declared-machine-unknown-id")}, f)
+    k, f = dk("unsigned f(void) { fnvnx_declared_machine(31); return 2; }", tbl={})
+    check(T("declared: empty table: declared-machine-unknown-id"), k == {("f", "declared-machine-unknown-id")}, f)
+    k, f = dk("void f(unsigned a) { fnvnx_declared_machine(a); }", extra=["-fno-optimize-sibling-calls"])
+    check(T("declared: non-constant id: declared-machine-nonconstant"), ("f", "declared-machine-nonconstant") in k, f)
+    k, f = dk("int g;\nunsigned f(void) { fnvnx_declared_machine(31); g = 1; return 2; }")
+    check(T("declared: citation in a body that also stores to a global: declared-machine-in-real-body"), k == {("f", "declared-machine-in-real-body")}, f)
+    k, f = dk("unsigned f(void) { fnvnx_declared_machine(31); fnvnx_declared_machine(31); return 2; }")
+    check(T("declared: two citations on one path: declared-machine-mismatch"), k == {("f", "declared-machine-mismatch")}, f)
+    k, f = dk("unsigned f(int a) { if (a) { fnvnx_declared_machine(31); } else { fnvnx_wine_fixme(31); } return 2; }")
+    check(T("declared: declared and wine citation on different paths: no single table, declared-machine-mismatch"),
+          ("f", "declared-machine-mismatch") in k or ("f", "wine-fixme-mismatch") in k, f)
+    k, f = dk("unsigned f(void) { fnvnx_wine_fixme(31); return 2; }")
+    check(T("declared: a wine citation does not read the declared table (id 31 only in declared_machine.tsv): wine-fixme-unknown-id"),
+          k == {("f", "wine-fixme-unknown-id")}, f)
+    k, f = dk("unsigned f(void) { fnvnx_wine_fixme(5); return 7; }")
+    check(T("declared: the wine citation is unchanged next to it (row 5 of the wine table): certified"), not k, f)
+    k, f = dk("void *h(void) { return (void *)fnvnx_declared_machine; }")
+    check(T("declared: address taken in code: declared-machine-address-taken"), ("h", "declared-machine-address-taken") in k, f)
+    k, f = dk("void (*volatile ptr)(unsigned) = fnvnx_declared_machine;")
+    check(T("declared: address taken in data: declared-machine-address-taken"), any(kk == "declared-machine-address-taken" for _, kk in k), f)
+    k, f = dk("extern void set_last_error(unsigned);\nint f(void) { set_last_error(10050); return -1; }")
+    check(T("declared: a body that calls set_last_error and returns -1 is no V, no citation needed (not flagged today)"), not k, f)
+    k, f = dk("int e[4];\nint f(void) { e[0] = 10050; return -1; }")
+    check(T("declared: a body that stores the error code (time-zone / last-error store) is no V (not flagged today)"), not k, f)
+    cnt = objstub.declared_counts(objstub.analyse_all([("x", build(DH + "unsigned f(void) { fnvnx_declared_machine(31); return 2; }\nunsigned g(void) { fnvnx_declared_machine(31); return 2; }", abi))], set(), set()))
+    check(T("declared: call sites per id are counted"), cnt == {31: 2}, cnt)
+    check(T("declared: a call of the wine citation is not counted as declared"), objstub.declared_counts(objstub.analyse_all([("x", build(DH + "unsigned f(void) { fnvnx_wine_fixme(5); return 7; }", abi))], set(), set())) == {})
+GOODS = ("31\tRegOpenKeyExA\tregistry\twin-doc:sysinfo/regopenkeyex:RegOpenKeyExA\tu32\t2",
+         "32\tconnect\tno-network\twine-9.0:dlls/ws2_32/socket.c:connect\tu32\t0xFFFFFFFF",
+         "33\tGetTimeZoneInformation\ttime-zone\twin-doc:timezoneapi/gettimezoneinformation:GetTimeZoneInformation\tu32nz0\t0,1")
+for bad in ("31\tx\tnetwork\twin-doc:a/b:f\tu32\t1", "31\tx\tno-network\thttp://example.com\tu32\t1", "31\tx\tno-network\twin-doc:a/b:f\tu32",
+            "31\tx\tno-network\twin-doc:a/b:f\tvoid\t1", "x\tx\tregistry\twin-doc:a/b:f\tu32\t1", "31\tx\tregistry\twine:a.c:f\tu32\t1",
+            "31\tx\tregistry\twin-doc:a/b:f\tu32\t1\n31\ty\tregistry\twin-doc:a/b:g\tu32\t1", "31\tx\tregistry\tu32\t1"):
+    tf_ = os.path.join(ROOT, "d.tsv")
+    open(tf_, "w").write(bad + "\n")
+    try:
+        objstub.read_declared_table(tf_)
+        check("declared table: malformed row rejected: %r" % bad[:36], False)
+    except ValueError:
+        check("declared table: malformed row rejected: %r" % bad[:36], True)
+open(tf_, "w").write("# header\n" + "\n".join(GOODS) + "\n")
+got = objstub.read_declared_table(tf_)
+check("declared table: header comment and three valid rows (win-doc and wine-9.0 sources, three facts)",
+      set(got) == {31, 32, 33} and got[32][1:3] == ("no-network", "wine-9.0:dlls/ws2_32/socket.c:connect"), got)
+try:
+    objstub.read_declared_table(os.path.join(ROOT, "nonexistent.tsv"))
+    check("declared table: missing file is an error", False)
+except ValueError:
+    check("declared table: missing file is an error", True)
+
 # gate on the toy product root of test_recipe.py
 sys.path.insert(0, HERE)
 import test_recipe as TR  # noqa: E402

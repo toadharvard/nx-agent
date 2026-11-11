@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """objstub: decide on MACHINE CODE whether built AArch64 objects contain (T) a trap/abort path or (V) a vacuous function.
-    objstub.py check --terminators FILE [--constants FILE] [--facts FILE] [--os-layer OBJ]... [--wine-fixme FILE] [--cache DIR] [--jobs N] [--json OUT] OBJ...
+    objstub.py check --terminators FILE [--constants FILE] [--facts FILE] [--os-layer OBJ]... [--wine-fixme FILE] [--declared-machine FILE] [--cache DIR] [--jobs N] [--json OUT] OBJ...
         (the object id and the `unit` of a constants row are the path as given)
     objstub.py terminators --cc CC [--cflag F]... [--lang c|c++] --header H... -o FILE
 Inputs: ELF relocatable objects, ELF32 (ILP32; SHT_RELA with Elf32_Rela, R_AARCH64_P32_* kinds) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
@@ -68,6 +68,14 @@ is not otherwise V is `wine-fixme-in-real-body`. A reference that is not a BL (a
 `wine-fixme-address-taken` / a real body. Table rows `id<TAB>contract_name<TAB>wine_ref<TAB>kind<TAB>value`, `wine_ref` =
 `wine-9.0:<path in the Wine source tree>:<function name>`: only the FORM is validated here; checking the reference against a pinned
 Wine 9.0 tree is the oracle class, not done. A row without a call site is no finding; the gate result counts call sites per id.
+
+(D) DECLARED MACHINE. `fnvnx_declared_machine(uint32_t id)` (C linkage, writes nothing, RETURNS) is the second citation function: every rule of (W)
+applies unchanged (BL transparent for V, constant id, exactly one id of ONE citation function on every path, result equals the row, otherwise
+V, no address taken), with the table verify/declared_machine.tsv (`--declared-machine`; read_declared_table): rows
+`id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`, fact in DECL_FACTS (no-network, time-zone, registry), source `win-doc:<page>:<function>` or
+`wine-9.0:<path>:<function>` (the form only), kind/value as in (W). Findings carry the prefix `declared-machine-`. Stated limit: V cannot know which
+result is "success" of a network call, so a row saying success is not rejected; only a body that differs from its row is. A body that calls or
+stores is not V and needs no citation. The gate result counts call sites per id ("declared_machine").
 
 (R) REACH. A call (BL, or B as a tail call, with a CALL26/JUMP26 relocation) of the symbol `fnvnx_reach_violation` is not a T2 and not a
 T2-noreturn-tail; it is judged by the reach rule: w0 at the call must be a constant of objstub's own forward constant propagation (the
@@ -250,8 +258,8 @@ def access(inf):
 
 
 def is_wine(w, rel, obj):
-    """True iff word w, with relocation rel (or None), is a BL of WINE."""
-    return bool(rel) and w >> 26 == 0b100101 and obj.syms[rel[0]][0] == WINE
+    """True iff word w, with relocation rel (or None), is a BL of a citation function (WINE or DECL)."""
+    return bool(rel) and w >> 26 == 0b100101 and obj.syms[rel[0]][0] in CITE
 
 
 def cfg(words, a, b, rels, obj):
@@ -375,6 +383,8 @@ def vanalyse(words, a, b, rels, obj, dec, wine=False):
 
 
 WINE = "fnvnx_wine_fixme"   # the one log function of the Wine-9.0-simplified bodies (wine_fixme.tsv): writes one line and RETURNS
+DECL = "fnvnx_declared_machine"   # the citation function of the declared-machine bodies (declared_machine.tsv): writes no line, RETURNS
+CITE = (WINE, DECL)   # the citation functions: a body that calls one is judged against that one's table by the same rule (W)
 REACH = "fnvnx_reach_violation"   # the one contract symbol of the proven-unreachable assertion (owner decision 2026-11-11, option iii)
 # Branch relocations of both ABIs. LP64 (ELF64): R_AARCH64_JUMP26 = 282, CALL26 = 283 (elf.h). ILP32 (ELF32, r_info = sym << 8 | type):
 # R_AARCH64_P32_JUMP26 = 20, P32_CALL26 = 21 (AAELF64 ILP32 tables; checked against the names binutils' readelf prints for objects the
@@ -713,9 +723,9 @@ def check_obj(path, terms, os_layer):
     """-> (items [name], findings [(name, KIND, detail, V result as JSON or None)], extra {"reach": [[function, offset, constant|None]],
     "exit_ok": [function whose every path ends in a BLR tail]}). OS_LAYER: the object may contain SVC (a fact of the recipe)."""
     o = Obj(path)
-    items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "wine_id": {}, "wine_nz": {}}
+    items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "declared": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}}
     unw = {t[1:] for t in terms if t[:1] == "~"}   # unwinders: calls that continue an exception already in flight
-    tid = {i for i, s in enumerate(o.syms) if s[0] in terms and s[4] != 0 and s[0] not in (REACH, WINE)}   # REACH is judged by the reach rule
+    tid = {i for i, s in enumerate(o.syms) if s[0] in terms and s[4] != 0 and s[0] not in (REACH,) + CITE}   # REACH is judged by the reach rule
     for si, (sname, stype, sflags, soff, ssize, _, _) in enumerate(o.secs):
         if not sflags & 4 or stype != 1:
             continue
@@ -727,7 +737,7 @@ def check_obj(path, terms, os_layer):
         cuts0 = [0] + [m for m in mkeys if 0 < m < ssize] + [ssize]   # one decoder run over every code island of the section
         dec = decode(o.data, [(soff + x, soff + y) for x, y in zip(cuts0, cuts0[1:]) if kind(x) != "d"])
         thits = sorted((off, sidx) for off, (sidx, t, ad) in rel.items() if sidx in tid)
-        rch = {sym: sorted(off for off, (sidx, t, ad) in rel.items() if o.syms[sidx][0] == sym) for sym in (REACH, WINE)}
+        rch = {sym: sorted(off for off, (sidx, t, ad) in rel.items() if o.syms[sidx][0] == sym) for sym in (REACH,) + CITE}
         tk, cover, last = [t[0] for t in thits], [], None
         for a, sz, name in funcs:
             items.append(name)
@@ -739,6 +749,7 @@ def check_obj(path, terms, os_layer):
                 if last[3] in extra["wine_id"]:
                     extra["wine_id"][name] = extra["wine_id"][last[3]]
                     extra["wine_nz"][name] = extra["wine_nz"].get(last[3], {})
+                    extra["cite_sym"][name] = extra["cite_sym"].get(last[3])
                 exit_ok |= {name} if last[3] in exit_ok else set()
                 continue
             b, fnd, words, lastm = a + sz, [], {}, None
@@ -762,7 +773,9 @@ def check_obj(path, terms, os_layer):
             for k in range(bisect.bisect_left(tk, a), bisect.bisect_left(tk, b)):
                 fnd.append((name, "T2", "reference to %s at +0x%x" % (o.syms[thits[k][1]][0], thits[k][0] - a), None))
             wsites = {}
-            for sym, key, fkind in ((REACH, "reach", "reach-address-taken"), (WINE, "wine", "wine-fixme-address-taken")):
+            csyms = set()
+            for sym, key, fkind in ((REACH, "reach", "reach-address-taken"), (WINE, "wine", "wine-fixme-address-taken"),
+                                    (DECL, "declared", "declared-machine-address-taken")):
                 sites, offs = [], rch[sym]
                 for k in range(bisect.bisect_left(offs, a), bisect.bisect_left(offs, b)):   # references: only a BL/B call is a call site
                     off = offs[k]
@@ -773,8 +786,9 @@ def check_obj(path, terms, os_layer):
                 if sites:
                     cp = constprop(words, a, b, rel, o, {x: dec.get(soff + x) for x in words}, sites)
                     extra[key] += [[name, x - a, cp[x]] for x in sites]
-                    if sym == WINE:
-                        wsites = {x: cp[x] for x in sites}
+                    if sym in CITE:
+                        wsites.update({x: cp[x] for x in sites})
+                        csyms.add(sym)
             lk = lastkind(lastm[1]) if lastm and lastm[2] else "end"  # an undecodable last word is judged by its own finding
             lm = lastm[2] if lastm else "ret"
             if lk == "call" and isblr(lastm[1]):
@@ -795,10 +809,11 @@ def check_obj(path, terms, os_layer):
                     fnd.append((name, "unanalysable", str(e), None))
                 if wsites:   # a function that calls WINE: transparent for V; V => WINE-V (judged against wine_fixme.tsv), else a real body
                     extra["wine_id"][name] = wine_path_id(words, a, b, wsites)
+                    extra["cite_sym"][name] = next(iter(csyms)) if len(csyms) == 1 else None   # both functions in one body: no single table
                     if v is not None:
                         extra["wine_nz"][name] = {str(n): [wine_sim(words, a, b, rel, o, n, z) for z in (True, False)] for n in range(8)}
                     fnd.append((name, "WINE-V", "result " + " ".join("%s=%s" % kv for kv in sorted(v.items())), vjson(v, o)) if v is not None else
-                               (name, "wine-fixme-in-real-body", "the function calls %s and does more than a simplified body" % WINE, None))
+                               (name, "declared-machine-in-real-body" if csyms == {DECL} else "wine-fixme-in-real-body", "the function calls %s and does more than a simplified body" % "/".join(sorted(csyms)), None))
                 elif v is not None:
                     fnd.append((name, "V", "result " + " ".join("%s=%s" % kv for kv in sorted(v.items())), vjson(v, o)))
             finds += fnd
@@ -817,7 +832,7 @@ def check_obj(path, terms, os_layer):
     for tsec, rs in o.rela.items():   # a reference to REACH or WINE from a non-code section can be called with any argument
         if not o.secs[tsec][2] & 4:
             for off, (sidx, t, ad) in sorted(rs.items()):
-                for sym, fkind in ((REACH, "reach-address-taken"), (WINE, "wine-fixme-address-taken")):
+                for sym, fkind in ((REACH, "reach-address-taken"), (WINE, "wine-fixme-address-taken"), (DECL, "declared-machine-address-taken")):
                     if o.syms[sidx][0] == sym:
                         nm = "%s+0x%x" % (o.secs[tsec][0], off)
                         items.append(nm)
@@ -911,7 +926,7 @@ def analyse_all(objs, terms, os_layer_ids, cache=None, jobs=1):
     return res
 
 
-def judge(results, rows, facts, wine=None):
+def judge(results, rows, facts, wine=None, declared=None):
     """RESULTS {id: analysis}, ROWS {(id, symbol): (kind, value, ref)}, FACTS None (no reach facts file) or a set of fact ids
     -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). Pure function.
     V: certified iff its row equals the result. indirect-noreturn-tail: certified iff every path ends in the tail and the function is
@@ -944,15 +959,16 @@ def judge(results, rows, facts, wine=None):
                 else:
                     continue
             elif kind == "WINE-V":
-                wid, row_ = r["wine_id"].get(name), None
-                if wid is None:
-                    kind, detail = "wine-fixme-mismatch", "the function does not pass exactly one id on every path"
-                elif wid not in (wine or {}):
-                    kind, detail = "wine-fixme-unknown-id", "id %d is not a row of wine_fixme.tsv" % wid
-                elif wine_matches(wine[wid][2:], v, r["wine_nz"].get(name, {})):
+                wid, csym = r["wine_id"].get(name), r["cite_sym"].get(name, WINE)
+                tab, pre, tname = (declared, "declared-machine", "declared_machine.tsv") if csym == DECL else (wine, "wine-fixme", "wine_fixme.tsv")
+                if wid is None or csym is None:
+                    kind, detail = pre + "-mismatch", "the function does not pass exactly one id of one citation function on every path"
+                elif wid not in (tab or {}):
+                    kind, detail = pre + "-unknown-id", "id %d is not a row of %s" % (wid, tname)
+                elif wine_matches(tab[wid][-2:], v, r["wine_nz"].get(name, {})):
                     continue
                 else:
-                    kind, detail = "wine-fixme-mismatch", "row %s %s, analysis: %s" % (wine[wid][2], wine[wid][3], detail)
+                    kind, detail = pre + "-mismatch", "row %s %s, analysis: %s" % (tab[wid][-2], tab[wid][-1], detail)
             elif kind == "indirect-noreturn-tail":
                 if name in exit_ok and (name == REACH or (row and row[0] == "exit")):
                     exited.add((oid, name))
@@ -961,9 +977,10 @@ def judge(results, rows, facts, wine=None):
             out.append((oid, name, kind, detail))
         if REACH in funcs and REACH not in exit_ok:
             out.append((oid, REACH, "reach-not-exit", "the definition does not end in a call through a pointer on every path"))
-        for name, off, c in r["wine"]:
-            if c is None:
-                out.append((oid, name, "wine-fixme-nonconstant", "w0 is not a constant at the call of %s at +0x%x" % (WINE, off)))
+        for key, sym, pre in (("wine", WINE, "wine-fixme"), ("declared", DECL, "declared-machine")):
+            for name, off, c in r.get(key, []):
+                if c is None:
+                    out.append((oid, name, pre + "-nonconstant", "w0 is not a constant at the call of %s at +0x%x" % (sym, off)))
         for name, off, c in r["reach"]:
             if c is None:
                 out.append((oid, name, "reach-nonconstant", "w0 is not a constant at the call of %s at +0x%x" % (REACH, off)))
@@ -983,9 +1000,9 @@ def judge(results, rows, facts, wine=None):
     return items, sorted(set(out))
 
 
-def run_check(objs, terms, rows, os_layer_ids, facts=None, cache=None, jobs=1, wine=None):
+def run_check(objs, terms, rows, os_layer_ids, facts=None, cache=None, jobs=1, wine=None, declared=None):
     """OBJS [(id, path)] -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted)."""
-    return judge(analyse_all(objs, set(terms), set(os_layer_ids), cache, jobs), rows, facts, wine)
+    return judge(analyse_all(objs, set(terms), set(os_layer_ids), cache, jobs), rows, facts, wine, declared)
 
 
 read_list = lambda path: [l.rstrip("\n") for l in open(path) if l.strip()]
@@ -1002,6 +1019,16 @@ def read_rows(path, base=""):
             raise ValueError("duplicate constants row (%s, %s) in %s" % (f[0], f[1], path))
         rows[(base + f[0], f[1])] = tuple(f[2:])
     return rows
+
+
+def declared_counts(results):
+    """{id: number of call sites of DECL with a constant w0 in all RESULTS}: reported in the gate result ("declared_machine")."""
+    out = {}
+    for r in results.values():
+        for _, _, c in r.get("declared", []):
+            if c is not None:
+                out[c] = out.get(c, 0) + 1
+    return dict(sorted(out.items()))
 
 
 def wine_counts(results):
@@ -1041,11 +1068,42 @@ def read_wine_table(path):
         if l.startswith("#"):
             continue
         f = l.split("\t")
-        ok = len(f) == 5 and re.fullmatch(r"[0-9]+", f[0]) and int(f[0]) < 2 ** 32 and f[1].strip() and \
-            re.fullmatch(r"wine-9\.0:[A-Za-z0-9_./+-]+:[A-Za-z_][A-Za-z0-9_@]*", f[2]) and re.fullmatch(r"void|u32|u64|addr|u32nz[0-7]|branch", f[3]) and \
-            (f[4] == "" if f[3] == "void" else f[4] == "-" if f[3] == "branch" else re.fullmatch(r"[A-Za-z_.$][A-Za-z0-9_.$@]*(\+(0[xX][0-9a-fA-F]+|[0-9]+))?", f[4]) if f[3] == "addr" else re.fullmatch(r"(-?[0-9]+|0x[0-9a-fA-F]+),(-?[0-9]+|0x[0-9a-fA-F]+)" if f[3][3:5] == "nz" else r"-?[0-9]+|0x[0-9a-fA-F]+", f[4]))
+        ok = _wine_row(f)
         if not ok or int(f[0]) in out:
             raise ValueError("bad or duplicate wine fixme row in %s: %r" % (path, l[:80]))
+        out[int(f[0])] = tuple(f[1:])
+    return out
+
+
+def _wine_row(f):
+    """True iff the five fields f (id, name, wine_ref, kind, value) are a well-formed row."""
+    return bool(len(f) == 5 and re.fullmatch(r"[0-9]+", f[0]) and int(f[0]) < 2 ** 32 and f[1].strip() and
+                re.fullmatch(r"wine-9\.0:[A-Za-z0-9_./+-]+:[A-Za-z_][A-Za-z0-9_@]*", f[2]) and re.fullmatch(r"void|u32|u64|addr|u32nz[0-7]|branch", f[3]) and
+                (f[4] == "" if f[3] == "void" else f[4] == "-" if f[3] == "branch" else re.fullmatch(r"[A-Za-z_.$][A-Za-z0-9_.$@]*(\+(0[xX][0-9a-fA-F]+|[0-9]+))?", f[4]) if f[3] == "addr" else
+                 re.fullmatch(r"(-?[0-9]+|0x[0-9a-fA-F]+),(-?[0-9]+|0x[0-9a-fA-F]+)" if f[3][3:5] == "nz" else r"-?[0-9]+|0x[0-9a-fA-F]+", f[4])))
+
+
+DECL_FACTS = ("no-network", "time-zone", "registry")   # the declared-machine facts of CLAUDE.md ("The declared machine"); a fourth fact is a new owner decision
+DECL_SOURCE = r"(win-doc:[A-Za-z0-9_./#+-]+:[A-Za-z_][A-Za-z0-9_@]*|wine-9\.0:[A-Za-z0-9_./+-]+:[A-Za-z_][A-Za-z0-9_@]*)"
+
+
+def read_declared_table(path):
+    """declared_machine.tsv: `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`; lines starting with # are comments. fact is one of
+    DECL_FACTS. source is the documented origin of the returned value, `win-doc:<Windows documentation page or header path>:<function>` or
+    `wine-9.0:<path in the Wine source tree>:<function name>` (the FORM is validated; checking it against the documentation or a pinned Wine 9.0
+    tree is the oracle class, not done here). id, kind and value as in the wine table (shared checks: wine_matches). Ids are a space of their
+    own. -> {id: (contract name, fact, source, kind, value)}. ValueError when missing or malformed."""
+    if not os.path.exists(path):
+        raise ValueError("declared machine table %s does not exist" % path)
+    out = {}
+    for l in read_list(path):
+        if l.startswith("#"):
+            continue
+        f = l.split("\t")
+        ok = len(f) == 6 and f[4] != "branch" and f[2] in DECL_FACTS and re.fullmatch(DECL_SOURCE, f[3]) and \
+            _wine_row(f[:2] + ["wine-9.0:x:x"] + f[4:])   # id, name, kind and value: the rules of the wine table, same columns
+        if not ok or int(f[0]) in out:
+            raise ValueError("bad or duplicate declared machine row in %s: %r" % (path, l[:80]))
         out[int(f[0])] = tuple(f[1:])
     return out
 
@@ -1139,7 +1197,8 @@ def main(argv):
                                  read_rows(opt["--constants"][0]) if "--constants" in opt else {}, set(opt.get("--os-layer", [])),
                                  read_facts(opt["--facts"][0]) if "--facts" in opt else None, opt.get("--cache", [None])[0],
                                  int(opt.get("--jobs", [os.cpu_count() or 1])[0]),
-                                 read_wine_table(opt["--wine-fixme"][0]) if "--wine-fixme" in opt else None)
+                                 read_wine_table(opt["--wine-fixme"][0]) if "--wine-fixme" in opt else None,
+                                 read_declared_table(opt["--declared-machine"][0]) if "--declared-machine" in opt else None)
         if "--json" in opt:
             json.dump({"functions": len(items), "findings": finds}, open(opt["--json"][0], "w"), sort_keys=True)
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as e:
