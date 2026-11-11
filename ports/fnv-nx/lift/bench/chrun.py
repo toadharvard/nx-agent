@@ -85,6 +85,8 @@ class X86(T.World):
         uc.hook_add(UC_HOOK_MEM_WRITE, lambda uc, ac, a, n, v, ud: s.writes.add((a & 0xffffffff, n)))
         uc.hook_add(UC_HOOK_CODE, s.code); uc.hook_add(UC_HOOK_MEM_WRITE, s.wr_fsw); uc.hook_add(UC_HOOK_MEM_READ, s.rd_rcp)
         sp = st['regs'][4]; s.ensure(sp, 4, False); uc.mem_write(sp, struct.pack('<I', SENT)); s.writes.clear()
+        for a_, v_ in st.get('init', ()): s.ensure(a_, 4, False); uc.mem_write(a_, struct.pack('<I', v_))     # extra initial memory words (same as the lifted side)
+        s.writes.clear()
         for k, v in zip(T.X86R, st['regs']): uc.reg_write(k, v)
         uc.reg_write(UC_X86_REG_EFLAGS, 0x202); uc.reg_write(UC_X86_REG_FPCW, 0x27f)
         status = 'ok'

@@ -500,7 +500,7 @@ LEGAL_UNIMPLEMENTED = {
     'fxrstor': 'FXSR is in the model; the 512-byte image is x87 + SSE state (x87 owner)',
     'sysenter': 'SEP is in the model: the fast system-call gate; a lifted process has no kernel behind it (lead decision, like int 0x2e)',
 }
-SSE3_SSE4A = ('addsubpd', 'addsubps', 'haddpd', 'haddps', 'hsubpd', 'hsubps', 'movddup', 'movshdup', 'movsldup', 'fisttp', 'monitor', 'mwait', 'extrq', 'insertq', 'movntss', 'movntsd')
+SSE3_SSE4A = ('addsubpd', 'addsubps', 'haddpd', 'haddps', 'hsubpd', 'hsubps', 'movddup', 'movshdup', 'movsldup', 'monitor', 'mwait', 'extrq', 'insertq', 'movntss', 'movntsd')    # fisttp (SSE3, x87 encoding) is the x87 owner's
 
 
 def encoding(ins):
@@ -544,3 +544,41 @@ def h_default(cx, ins):
     if kind == '0f' and (b[1] == 0x0d or 0x18 <= b[1] <= 0x1f):
         return      # SDM Vol 2 Table A-6 / A.4: reserved-NOP, no architectural effect (a memory operand is not accessed)
     ud_site(cx)
+
+
+# ---- decoder completeness for reserved-NOP space ---------------------------------------------------------------------------------------------------------------
+class NopIns:
+    """a decoded-by-rule `nop`: what core.explore needs of an instruction object (capstone's decoder refuses some reserved-NOP ModRM values that every CPU executes as NOP)"""
+    mnemonic = 'nop'
+    operands = ()
+    op_str = ''
+
+    def __init__(self, raw, pfx, opc, modrm):
+        self.bytes, self.size = bytes(raw), len(raw)
+        self.opcode = [0x0f, opc, 0, 0]
+        self.modrm = modrm
+        self.prefix = [0, 0, 0x66 if 0x66 in pfx else 0, 0x67 if 0x67 in pfx else 0]
+
+    def reg_name(self, r):
+        return 'r%d' % r
+
+
+def nop_gap(b):
+    """reserved-NOP instruction `[prefixes] 0F 0D|18..1F /r` that capstone does not decode, as a NopIns, else None (SDM Vol 2, Table A-6 "reserved-NOP": 0F 0D and 0F 18..1F take a ModRM and
+    execute as NOP Ev for every ModRM value; LOCK makes them #UD, so a LOCK prefix is not claimed). Length = prefixes + 0F + opcode + ModRM + SIB + displacement by the addressing form."""
+    b = bytes(b)
+    i = 0
+    while i < len(b) and b[i] in TRAP0D_PREFIX:
+        i += 1
+    if i + 2 >= len(b) or b[i] != 0x0f or not (b[i + 1] == 0x0d or 0x18 <= b[i + 1] <= 0x1f) or 0xf0 in b[:i]:
+        return None
+    pfx, m = b[:i], b[i + 2]
+    n = i + 3
+    mod, rm = m >> 6, m & 7
+    if 0x67 in pfx:     # 16-bit addressing: no SIB; disp16 for mod 0 rm 6 and mod 2
+        n += 2 if (mod == 0 and rm == 6) or mod == 2 else 1 if mod == 1 else 0
+    elif mod != 3:
+        if rm == 4:
+            n += 1
+        n += 1 if mod == 1 else 4 if mod == 2 or (mod == 0 and (rm == 5 or (rm == 4 and (b[i + 3] & 7) == 5))) else 0
+    return NopIns(b[:n], pfx, b[i + 1], m)

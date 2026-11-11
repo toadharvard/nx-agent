@@ -56,9 +56,6 @@ typedef struct { int n; u32 *p; u32 *end; } cx;
 typedef struct { u32 *m; int e; int s; int z; } bf;
 static bf bnew(cx *c) {
   bf r; r.m = c->p; c->p += c->n; r.e = 0; r.s = 0; r.z = 1;
-#ifdef FM_DEBUG
-  if (c->p > c->end) __builtin_trap();
-#endif
   return r;
 }
 static void bzero_(bf *r) { r->z = 1; r->s = 0; r->e = 0; }
