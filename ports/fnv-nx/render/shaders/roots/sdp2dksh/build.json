@@ -1,0 +1,24 @@
+{
+ "_draft": "W1b draft. Product: ELF `sdp2dksh` (D3D9 bytecode -> GLSL -> uam -> DKSH). Needs THREE source sets in one root (see inbox l6-render-w1b.md, question Q1).",
+ "name": "fnvnx-sdp2dksh",
+ "host": "x86_64-linux-gnu",
+ "sources": [
+  {"external": "mojoshader", "dir": ".",
+   "patches": ["render/shaders/mojoshader.patch", "render/shaders/patches/mojoshader_units.patch"],
+   "include": ["."],
+   "generated": [{"python": "render/shaders/total/gen_sm_rows.py", "inputs": ["render/shaders/total/sm_table.json"], "output": "fnvnx_sm_rows.h"}],
+   "flags": {"common": ["-O3", "-DNDEBUG", "-fPIC", "-Wall",
+                        "-DSUPPORT_PROFILE_ARB1=0", "-DSUPPORT_PROFILE_ARB1_NV=0", "-DSUPPORT_PROFILE_D3D=0", "-DSUPPORT_PROFILE_GLSL120=0",
+                        "-DSUPPORT_PROFILE_GLSPIRV=0", "-DSUPPORT_PROFILE_HLSL=0", "-DSUPPORT_PROFILE_METAL=0", "-DSUPPORT_PROFILE_SPIRV=0"]}},
+  {"external": "uam", "dir": ".",
+   "patches": ["render/shaders/uam.patch", "render/shaders/patches/uam_gen.patch", "render/shaders/patches/uam_nomain.patch"],
+   "include": [".", "mesa-imported", "mesa-imported/glsl", "mesa-imported/glsl/glcpp"],
+   "flags": {"common": ["-O3", "-DNDEBUG", "-fPIC", "-Wall", "-D_FILE_OFFSET_BITS=64", "-DDESKTOP", "-D_USE_MATH_DEFINES", "-D_GNU_SOURCE", "-DHAVE_POSIX_MEMALIGN", "-ffunction-sections"],
+             "c": ["-std=c99", "-Werror=implicit-function-declaration"],
+             "cxx": ["-std=c++11", "-Wno-class-memaccess", "-Wno-non-virtual-dtor"]}},
+  {"tree": "render/shaders", "units": ["src/sdp.c", "src/frontend.c", "src/backend_mojoshader.c", "src/translate.c", "src/dk.cpp", "src/sdp2dksh.c"],
+   "include": ["include", "src", "@mojoshader", "@uam/source"],
+   "flags": {"common": ["-O3", "-DNDEBUG"], "c": ["-std=gnu99"], "cxx": ["-std=gnu++17"]}}
+ ],
+ "link": {"output": "sdp2dksh", "flags": ["-Wl,--gc-sections"], "libs": ["-lm", "-lpthread"]}
+}

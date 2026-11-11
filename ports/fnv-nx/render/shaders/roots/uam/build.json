@@ -1,0 +1,17 @@
+{
+ "_draft": "W1b draft; keys as in the lead's brief (RECIPE.md of w16 not available). Product: ELF `uam` (GLSL -> DKSH).",
+ "name": "fnvnx-uam",
+ "host": "x86_64-linux-gnu",
+ "sources": {
+  "external": "uam",
+  "dir": ".",
+  "patches": ["render/shaders/uam.patch", "render/shaders/patches/uam_gen.patch"],
+  "include": [".", "mesa-imported", "mesa-imported/glsl", "mesa-imported/glsl/glcpp"]
+ },
+ "flags": {
+  "common": ["-O3", "-DNDEBUG", "-fPIC", "-Wall", "-D_FILE_OFFSET_BITS=64", "-DDESKTOP", "-D_USE_MATH_DEFINES", "-D_GNU_SOURCE", "-DHAVE_POSIX_MEMALIGN", "-ffunction-sections"],
+  "c": ["-std=c99", "-Werror=implicit-function-declaration"],
+  "cxx": ["-std=c++11", "-Wno-class-memaccess", "-Wno-non-virtual-dtor"]
+ },
+ "link": {"output": "uam", "flags": ["-Wl,--gc-sections"]}
+}
