@@ -70,6 +70,7 @@ fi
 QUEUE="$W/queue.tsv"
 QLINE=$(python3 -I "$HERE/certs_build.py" --queue "$SHAPES" --shards "$PUBD" --out "$QUEUE")
 QID=$(echo "$QLINE" | awk '{print $2}'); echo "queue $QLINE (from $(find "$PUBD" -name 'shapeprove_*.jsonl' | wc -l) published shard files)"
+[ "$(awk '{print $3}' <<< "$QLINE")" != 0 ] || { echo "SHAPEPROVE shard=$K/$N: queue empty, every encoding with a Form has a valid certificate"; exit 0; }
 ID="$(python3 -I "$HERE/certs_build.py" --id)-$QID"
 OUT="$W/out/$ID"; mkdir -p "$OUT"
 BR="$PREFIX/$ID/${K}of${N}"
