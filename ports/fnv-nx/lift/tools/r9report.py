@@ -1,29 +1,145 @@
 #!/usr/bin/env python3
 """R9 report: A64 instruction counts of lifted objects, and the shape checks the R9 tests use. Every instruction is classified by DECODING the object's
 .text with capstone (CS_ARCH_ARM64: instruction ids, operands, registers read/written, relocations); nothing is decided by text.
-    r9report.py <dir | .o | .a>...  [--facts DIR]
+    r9report.py <dir | .o | .a>...  [--facts DIR] [--work DIR]
+  --work DIR: the directory archives (.a) are extracted below (a declared input, required when an .a is given; no default)
 Prints: total instructions, ldar*, stlr*, ldaxr/stlxr, dmb ishld / ishst / ish, alignment-check overhead (a `tst` + conditional branch pair that
 guards an ldar/stlr/ldaxr/stlxr), plain loads/stores through guest pointers and how many of them lack their dmb; and from memclass' class_totals.tsv
 the static accesses per class (default DIR = /home/user/l3facts/memclass).
 As a module (test/r9test.py): functions(path) -> {name: [capstone insn]}, scan(fn) -> dict."""
-import io, os, sys, tempfile
+import hashlib, io, os, sys
 import capstone
 from capstone import arm64_const as K
 from elftools.elf.elffile import ELFFile
 
 md = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
 md.detail = True
-ids = lambda *ns: frozenset(getattr(K, 'ARM64_INS_' + n) for n in ns if hasattr(K, 'ARM64_INS_' + n))
+INS = {  # the instruction ids this module classifies by; ids(name...) selects from this table
+    'LDAR': K.ARM64_INS_LDAR,
+    'LDARB': K.ARM64_INS_LDARB,
+    'LDARH': K.ARM64_INS_LDARH,
+    'LDAPR': K.ARM64_INS_LDAPR,
+    'LDAPRB': K.ARM64_INS_LDAPRB,
+    'LDAPRH': K.ARM64_INS_LDAPRH,
+    'STLR': K.ARM64_INS_STLR,
+    'STLRB': K.ARM64_INS_STLRB,
+    'STLRH': K.ARM64_INS_STLRH,
+    'LDAXR': K.ARM64_INS_LDAXR,
+    'LDAXRB': K.ARM64_INS_LDAXRB,
+    'LDAXRH': K.ARM64_INS_LDAXRH,
+    'LDAXP': K.ARM64_INS_LDAXP,
+    'STLXR': K.ARM64_INS_STLXR,
+    'STLXRB': K.ARM64_INS_STLXRB,
+    'STLXRH': K.ARM64_INS_STLXRH,
+    'STLXP': K.ARM64_INS_STLXP,
+    'LDR': K.ARM64_INS_LDR,
+    'LDRB': K.ARM64_INS_LDRB,
+    'LDRH': K.ARM64_INS_LDRH,
+    'LDRSB': K.ARM64_INS_LDRSB,
+    'LDRSH': K.ARM64_INS_LDRSH,
+    'LDRSW': K.ARM64_INS_LDRSW,
+    'LDUR': K.ARM64_INS_LDUR,
+    'LDURB': K.ARM64_INS_LDURB,
+    'LDURH': K.ARM64_INS_LDURH,
+    'LDURSB': K.ARM64_INS_LDURSB,
+    'LDURSH': K.ARM64_INS_LDURSH,
+    'LDURSW': K.ARM64_INS_LDURSW,
+    'LDP': K.ARM64_INS_LDP,
+    'LDNP': K.ARM64_INS_LDNP,
+    'LDPSW': K.ARM64_INS_LDPSW,
+    'STR': K.ARM64_INS_STR,
+    'STRB': K.ARM64_INS_STRB,
+    'STRH': K.ARM64_INS_STRH,
+    'STUR': K.ARM64_INS_STUR,
+    'STURB': K.ARM64_INS_STURB,
+    'STURH': K.ARM64_INS_STURH,
+    'STP': K.ARM64_INS_STP,
+    'STNP': K.ARM64_INS_STNP,
+    'B': K.ARM64_INS_B,
+    'CBZ': K.ARM64_INS_CBZ,
+    'CBNZ': K.ARM64_INS_CBNZ,
+    'TBZ': K.ARM64_INS_TBZ,
+    'TBNZ': K.ARM64_INS_TBNZ,
+    'BL': K.ARM64_INS_BL,
+    'BLR': K.ARM64_INS_BLR,
+    'RET': K.ARM64_INS_RET,
+    'BR': K.ARM64_INS_BR,
+    'MOV': K.ARM64_INS_MOV,
+    'ADD': K.ARM64_INS_ADD,
+    'SUB': K.ARM64_INS_SUB,
+    'ORR': K.ARM64_INS_ORR,
+}
+ids = lambda *ns: frozenset(INS[n] for n in ns)
 LDAR, STLR = ids('LDAR', 'LDARB', 'LDARH', 'LDAPR', 'LDAPRB', 'LDAPRH'), ids('STLR', 'STLRB', 'STLRH')
 LDAX, STLX = ids('LDAXR', 'LDAXRB', 'LDAXRH', 'LDAXP'), ids('STLXR', 'STLXRB', 'STLXRH', 'STLXP')
 ACQREL = LDAR | STLR | LDAX | STLX
 LDS = ids('LDR', 'LDRB', 'LDRH', 'LDRSB', 'LDRSH', 'LDRSW', 'LDUR', 'LDURB', 'LDURH', 'LDURSB', 'LDURSH', 'LDURSW', 'LDP', 'LDNP', 'LDPSW')
 STS = ids('STR', 'STRB', 'STRH', 'STUR', 'STURB', 'STURH', 'STP', 'STNP')
 BRANCH = ids('B', 'CBZ', 'CBNZ', 'TBZ', 'TBNZ')
-GPR = {}
-for _n in range(31):
-    for _p in 'XW':
-        GPR[getattr(K, 'ARM64_REG_%s%d' % (_p, _n))] = _n
+GPR = {  # capstone register id -> register number, for X0..X30 and W0..W30
+    K.ARM64_REG_X0: 0,
+    K.ARM64_REG_W0: 0,
+    K.ARM64_REG_X1: 1,
+    K.ARM64_REG_W1: 1,
+    K.ARM64_REG_X2: 2,
+    K.ARM64_REG_W2: 2,
+    K.ARM64_REG_X3: 3,
+    K.ARM64_REG_W3: 3,
+    K.ARM64_REG_X4: 4,
+    K.ARM64_REG_W4: 4,
+    K.ARM64_REG_X5: 5,
+    K.ARM64_REG_W5: 5,
+    K.ARM64_REG_X6: 6,
+    K.ARM64_REG_W6: 6,
+    K.ARM64_REG_X7: 7,
+    K.ARM64_REG_W7: 7,
+    K.ARM64_REG_X8: 8,
+    K.ARM64_REG_W8: 8,
+    K.ARM64_REG_X9: 9,
+    K.ARM64_REG_W9: 9,
+    K.ARM64_REG_X10: 10,
+    K.ARM64_REG_W10: 10,
+    K.ARM64_REG_X11: 11,
+    K.ARM64_REG_W11: 11,
+    K.ARM64_REG_X12: 12,
+    K.ARM64_REG_W12: 12,
+    K.ARM64_REG_X13: 13,
+    K.ARM64_REG_W13: 13,
+    K.ARM64_REG_X14: 14,
+    K.ARM64_REG_W14: 14,
+    K.ARM64_REG_X15: 15,
+    K.ARM64_REG_W15: 15,
+    K.ARM64_REG_X16: 16,
+    K.ARM64_REG_W16: 16,
+    K.ARM64_REG_X17: 17,
+    K.ARM64_REG_W17: 17,
+    K.ARM64_REG_X18: 18,
+    K.ARM64_REG_W18: 18,
+    K.ARM64_REG_X19: 19,
+    K.ARM64_REG_W19: 19,
+    K.ARM64_REG_X20: 20,
+    K.ARM64_REG_W20: 20,
+    K.ARM64_REG_X21: 21,
+    K.ARM64_REG_W21: 21,
+    K.ARM64_REG_X22: 22,
+    K.ARM64_REG_W22: 22,
+    K.ARM64_REG_X23: 23,
+    K.ARM64_REG_W23: 23,
+    K.ARM64_REG_X24: 24,
+    K.ARM64_REG_W24: 24,
+    K.ARM64_REG_X25: 25,
+    K.ARM64_REG_W25: 25,
+    K.ARM64_REG_X26: 26,
+    K.ARM64_REG_W26: 26,
+    K.ARM64_REG_X27: 27,
+    K.ARM64_REG_W27: 27,
+    K.ARM64_REG_X28: 28,
+    K.ARM64_REG_W28: 28,
+    K.ARM64_REG_X29: 29,
+    K.ARM64_REG_W29: 29,
+    K.ARM64_REG_X30: 30,
+    K.ARM64_REG_W30: 30,
+}
 CPU = 27                        # struct cpu pointer register (README)
 DMB = {'ish': K.ARM64_BARRIER_ISH, 'ishld': K.ARM64_BARRIER_ISHLD, 'ishst': K.ARM64_BARRIER_ISHST}
 
@@ -165,13 +281,15 @@ def scan(fn):
     return r
 
 
-def members(p):
-    """paths of the object files at p: a file, a directory (recursively), an ar archive (extracted to a temp dir)"""
+def members(p, work):
+    """paths of the object files at p: a file, a directory (recursively, sorted), an ar archive (extracted below the declared directory `work`, in a subdirectory named by the hash of the archive's path)"""
     if os.path.isdir(p):
-        for d, _, fs in sorted(os.walk(p)):
-            for f in sorted(fs):
-                if f.endswith(('.o', '.a')): yield from members(os.path.join(d, f))
+        for d, ds, fs in os.walk(p):
+            ds.sort(); fs.sort()
+            for f in fs:
+                if f.endswith(('.o', '.a')): yield from members(os.path.join(d, f), work)
     elif p.endswith('.a'):
+        assert work is not None, 'an archive needs --work DIR'
         b = open(p, 'rb').read(); assert b[:8] == b'!<arch>\n'; pos, names, td = 8, b'', tempfile.mkdtemp(prefix='r9ar')
         while pos + 60 <= len(b):
             h = b[pos:pos + 60]; nm = h[:16].decode().strip(); sz = int(h[48:58]); body = b[pos + 60:pos + 60 + sz]; pos += 60 + sz + (sz & 1)
@@ -186,9 +304,11 @@ def members(p):
 def main():
     a = [x for x in sys.argv[1:] if not x.startswith('--')]; facts = sys.argv[sys.argv.index('--facts') + 1] if '--facts' in sys.argv else '/home/user/l3facts/memclass'
     if '--facts' in sys.argv: a = [x for x in a if x != facts]
+    work = sys.argv[sys.argv.index('--work') + 1] if '--work' in sys.argv else None
+    if work is not None: a = [x for x in a if x != work]
     T = dict(files=0, total=0, ldar=0, stlr=0, ldaxr=0, stlxr=0, ishld=0, ishst=0, ish=0, aligncheck=0, plain_ld=0, plain_st=0, unc=0, xchg_unc=0)
     for p in a:
-        for o in members(p):
+        for o in members(p, work):
             T['files'] += 1; T['total'] += text_count(o)
             for fn in functions(o).values():
                 s = scan(fn)

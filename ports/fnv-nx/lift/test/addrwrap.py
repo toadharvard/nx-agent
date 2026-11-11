@@ -3,8 +3,8 @@
 
 Compiles probes through rt/fnvl.h's M8..MF64 with the game's ILP32 flags and checks the generated code: every load or
 store must use a base register with offset 0 that was produced by a 32-bit (w-register) computation.
-    addrwrap.py            prints probes checked / bad; exit 1 when bad != 0"""
-import os, re, subprocess, sys, tempfile
+    addrwrap.py [WORKDIR]  (WORKDIR: declared input, default /home/user/l3work/addrwrap)  prints probes checked / bad; exit 1 when bad != 0"""
+import os, re, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); RT = os.path.join(HERE, '..', 'rt')
 PROBES = [('M%d' % w, off, idx) for w in (8, 16, 32, 64) for off in ('0x40u', '0xfffffffcu', '0x1183000u', '0u') for idx in ('', '+ecx*4u', '+ecx')]
 PROBES += [(m, off, '') for m in ('MF32', 'MF64') for off in ('0x40u', '0x1183000u')]
@@ -13,10 +13,10 @@ def main():
     for i, (m, off, idx) in enumerate(PROBES):
         src += 'u32 r%d(u32 esi,u32 ecx){ return (u32)%s((u32)(esi%s+%s)); }\n' % (i, m, idx, off)
         src += 'void w%d(u32 esi,u32 ecx,u32 v){ %s((u32)(esi%s+%s))=v; }\n' % (i, m, idx, off)
-    with tempfile.TemporaryDirectory() as d:
-        open(d + '/p.cpp', 'w').write(src)
-        asm = subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-O2', '-fwrapv', '-fno-strict-aliasing', '-fpermissive', '-w', '-I', RT,
-                              '-S', d + '/p.cpp', '-o', '-'], capture_output=True, text=True, check=True).stdout
+    d = sys.argv[1] if len(sys.argv) > 1 else '/home/user/l3work/addrwrap'; os.makedirs(d, exist_ok=True)
+    open(d + '/p.cpp', 'w').write(src)
+    asm = subprocess.run(['aarch64-linux-gnu-g++', '-mabi=ilp32', '-O2', '-fwrapv', '-fno-strict-aliasing', '-fpermissive', '-w', '-I', RT,
+                          '-S', d + '/p.cpp', '-o', '-'], capture_output=True, text=True, check=True).stdout
     bad = 0; n = 0
     for fn, body in re.findall(r'^(_Z\w+|[rw]\d+):\n(.*?)\n\tret', asm, re.S | re.M):
         n += 1

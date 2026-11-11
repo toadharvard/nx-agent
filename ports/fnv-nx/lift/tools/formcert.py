@@ -7,13 +7,13 @@ A form is certified when it has at least one certificate and EVERY certificate o
 status counts). Anything else (no file, a failed, gap or timed-out encoding) is `none`; an unreadable file stops the build. A missing directory certifies nothing (`present` False)."""
 import collections, json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'test'))
+sys.path.insert(0, os.path.dirname(HERE))   # LIFT first: `test` is the package lift/test (gate project rule: import below a checked directory)
 PROOF = os.environ.get('FNVNX_PROOF', '/home/user/l3work/proof')
 
 
 def form_key(ins):
     from capstone import x86 as X
-    import instest
+    from test import instest
     return instest.form_key(ins, X)[0]
 
 

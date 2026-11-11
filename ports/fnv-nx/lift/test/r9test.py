@@ -15,12 +15,11 @@
 (iii) the three known xchg sites of the exe (0xedf814, 0xedf979, 0xedfa00: constant 0x0127073C) are proven aligned; 0xec3cda (`xchg [esp],..`) is plain by class and gets the run-time choice otherwise.
     r9test.py [--work DIR] [--entries N]
 Prints one summary line; exit 1 on any failure."""
-import argparse, hashlib, os, random, re, struct, subprocess, sys, tempfile
+import argparse, hashlib, os, random, re, struct, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
 sys.path.insert(0, LIFT); sys.path.insert(0, HERE)
 import instest as T
-sys.path.insert(0, os.path.join(LIFT, 'tools'))
-import r9report as RR
+from tools import r9report as RR
 import fnvlift as L
 from fnvlift import core, memclass as MC
 from unicorn.arm64_const import UC_ARM64_REG_X0, UC_ARM64_REG_X1
@@ -203,7 +202,8 @@ def main():
         tot['split'] = tot.get('split', 0) + 1
     # ---- memclass hook: PlainSet from a file, partial and empty
     ad = SYN
-    with tempfile.NamedTemporaryFile(suffix='.bin', delete=False) as f: f.write(struct.pack('<II', SYN + 0x100 * 5, SYN + 0x100 * 6)); pf = f.name
+    pf = work + '/plainset.bin'
+    with open(pf, 'wb') as f: f.write(struct.pack('<II', SYN + 0x100 * 5, SYN + 0x100 * 6))
     try:
         core.MEMCLASS = MC.PlainSet(pf)
         for k in (0, 5, 6):

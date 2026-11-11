@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """x87 core gate: rt/x87.c vs Unicorn/QEMU softfloat (bit-exact results, C0/C2/C3), plus SDM flag vectors.
-usage: x87test.py [--n N] [--op NAME] [--seed S] [--disasm]"""
+usage: x87test.py [--n N] [--op NAME] [--seed S] [--disasm] [--work DIR]   (DIR: build directory, a declared input)"""
 import argparse, ctypes, math, os, subprocess, sys
 import numpy as np
 from unicorn import Uc, UC_ARCH_X86, UC_MODE_32
 from unicorn.x86_const import UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_ECX
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SCR = "/tmp/claude-0/-home-user-nx-agent/d0ed04ce-b39a-5f80-b67c-dff8c50b1e18/scratchpad/w4/"
 U = np.uint64
 DRIVER = r'''
 #include "x87.h"
@@ -84,7 +83,7 @@ int nat_run(const unsigned char *code, int len, unsigned n, const unsigned char 
 }
 """
 
-def build():
+def build(SCR):
     os.makedirs(SCR, exist_ok=True)
     open(SCR + "driver.c", "w").write(DRIVER); open(SCR + "native.c", "w").write(NATIVE)
     subprocess.check_call(["gcc", "-O2", "-shared", "-fPIC", "-I", HERE + "/../rt", HERE + "/../rt/x87.c",
@@ -123,14 +122,6 @@ def disasm():
     from capstone import Cs, CS_ARCH_X86, CS_MODE_32
     for n in OPS:
         print(n, '; '.join(f"{i.mnemonic} {i.op_str}" for i in Cs(CS_ARCH_X86, CS_MODE_32).disasm(b'\xDB\xE3\xD9\x2E' + body(n), 0)))
-
-def cpu_id():
-    d = {}
-    for l in open('/proc/cpuinfo'):
-        if ':' in l:
-            k, v = [x.strip() for x in l.split(':', 1)]
-            if k in ('vendor_id', 'cpu family', 'model', 'stepping', 'microcode', 'model name'): d.setdefault(k, v)
-    return f"cpu {d.get('vendor_id')} family {d.get('cpu family')} model {d.get('model')} stepping {d.get('stepping')} microcode {d.get('microcode')} ({d.get('model name')})"
 
 # ---------------------------------------------------------------- operand generator
 def norm(v):                       # uint64 array -> (normalized m, shift)
@@ -331,7 +322,9 @@ def vectors(lib):
     f = lambda t: F80(*t)
     bad = n = 0; fsw = ctypes.c_uint32()
     for op, args, fcw, flags, want in VECT:
-        fsw.value = 0; fn = getattr(lib, 'fnvl_x_' + op)
+        fsw.value = 0; fn = {'add': lib.fnvl_x_add, 'sub': lib.fnvl_x_sub, 'mul': lib.fnvl_x_mul, 'div': lib.fnvl_x_div, 'sqrt': lib.fnvl_x_sqrt, 'rndint': lib.fnvl_x_rndint,
+                                'from_f32': lib.fnvl_x_from_f32, 'from_f64': lib.fnvl_x_from_f64, 'from_i64': lib.fnvl_x_from_i64, 'to_f32': lib.fnvl_x_to_f32,
+                                'to_f64': lib.fnvl_x_to_f64, 'to_i64': lib.fnvl_x_to_i64, 'cmp': lib.fnvl_x_cmp, 'xam': lib.fnvl_x_xam}[op]
         fn.restype = {'to_f32': ctypes.c_uint32, 'to_f64': ctypes.c_uint64, 'to_i64': ctypes.c_longlong, 'cmp': ctypes.c_uint32, 'xam': ctypes.c_uint32}.get(op, F80)
         a = [f(x) if isinstance(x, tuple) else x for x in args]
         fn.argtypes = [F80 if isinstance(x, tuple) else ctypes.c_longlong if op == 'from_i64' else ctypes.c_uint64 if op == 'from_f64' else ctypes.c_uint32 for x in args] \
@@ -364,12 +357,12 @@ def eqmask(op, want, got, full):
     return eq
 
 def main():
-    ap = argparse.ArgumentParser(); ap.add_argument('--n', type=int, default=20000); ap.add_argument('--op')
+    ap = argparse.ArgumentParser(); ap.add_argument('--n', type=int, default=20000); ap.add_argument('--op'); ap.add_argument('--work', default='/home/user/l3work/x87test')
     ap.add_argument('--seed', type=int, default=1); ap.add_argument('--disasm', action='store_true')
     ap.add_argument('--oracle', choices=['native', 'unicorn'], default='native'); a = ap.parse_args()
     if a.disasm: return disasm()
-    lib, nat = build(); lib.run.argtypes = [ctypes.c_int, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
-    print(cpu_id()); print(f"oracle {a.oracle} seed {a.seed} n {a.n}")
+    lib, nat = build(a.work.rstrip('/') + '/'); lib.run.argtypes = [ctypes.c_int, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+    print(f"oracle {a.oracle} seed {a.seed} n {a.n}")
     tot = [0, 0, 0]; bad = vectors(lib); full = a.oracle == 'native'
     for oi, op in enumerate(NAMES):
         if a.op and a.op != op: continue
