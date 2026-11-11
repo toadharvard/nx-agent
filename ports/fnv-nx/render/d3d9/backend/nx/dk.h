@@ -216,7 +216,7 @@ const NxDkImage* nxdk_img(uint32_t id);
  *     tables (layouts, queries, internal programs) are static in their file and reached through the functions below.
  *  S5 Memory blocks are caller backed: the GPU reads guest bytes in place. The file that binds a range (ubo, vertex, index, upload source)
  *     flushes it first with dkMemBlockFlushCpuCache(blk, offset, size) and checks the range against NxDkMem.size.
- *  S6 Pass state is reset by EndPass and at the start of every SUBMIT: inPass = 0, boundState = 0, the index binding stays (reference).
+ *  S6 Pass state is reset by EndPass at the start of every SUBMIT and after its queue wait: inPass = 0, boundState = 0, the index binding stays (reference).
  *  S7 A render-state property that dk_state.h reports as derived (NxDkDerived) is applied by the file named there; a combination this
  *     backend has no rule for yet is rejected with nxdk_err naming the property (never dropped) and listed in the worker's report. */
 enum { NXDK_MAX_STATES = 4096, NXDK_MAX_LAYOUTS = 256, NXDK_MAX_QUERIES = 4096, NXDK_STREAM_CHUNK = 0x40000 };
