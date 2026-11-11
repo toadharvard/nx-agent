@@ -227,7 +227,9 @@ STATE NOT CARRIED TO THE BACKEND (each is a correctness gap of drawn pixels, non
 1. D3DRS_LASTPIXEL = TRUE (the D3D9 DEFAULT) on line draws: GL 4.5 cannot express it, the backend makes the submit BAD_CALL. Every line draw with default state fails. Needs a rule (extra last-pixel point per segment, as the semantics say) in the backend or the front.
 2. User clip plane equations and point size / point scale of programmable vertex shaders: no field in the VS driver block (translator task S2).
 3. Depth surface larger than the colour targets: the backend's pass rule rejects it.
-4. Flat-shading variants of translated programs: only the raster bit is set.
+4. CLOSED (817a0abd, merged): D3DRS_SHADEMODE = FLAT for translated programs: variant bit 1 = FNVNX_SHADER_FLAT_COLOR on both stages (COLOR0 interpolants flat, every other interpolant unchanged), chosen per draw pair from the state by nx_ffp_flat; drawgl part j.
+   (The L8 red replication / bump sample fixup item of the earlier numbering is closed by 8b6eff64: storage rule, nx_d3d9_sample_fixup deleted.)
+   OPEN: vertex-side flat qualifier unobservable on llvmpipe; deko3d must honour variant bit 1.
 5. PreLoad of a managed buffer bypasses the draw path's buffer hazard table.
 Decisions to recheck: posfix = (0, 0, 1, 0) because the backend viewport already carries the half pixel (contradicts the shaders README wording: reconcile the two texts); missing VS input = (0,0,0,0) (Wine; Nine uses w = 1); NULL index buffer = D3D_OK (Windows row of Wine's test, Wine itself differs); shadow-sampler flag by format class; null-format colour target below a real one = scratch attachment.
 

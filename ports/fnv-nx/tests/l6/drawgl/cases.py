@@ -1,5 +1,5 @@
 """cases.py: the cases of tests/l6/drawgl (synthetic hand-assembled shaders, render/shaders/total/sm_hand.py) and their CPU references.  Each case: Case(name, part, tol) + script + c.ref(ix, iy) -> [rgba per render
-target] (a value or None = the pixel keeps the clear colour).  Parts: a constants, b textures, c vertex colour + the unwritten-input rule + non-canonical links, d fog, e alpha test, f MRT / sRGB / vertex+index buffers, g fixed function, h user clip planes and point size with a programmable VS, i D3DRS_SHADEMODE FLAT with every pair kind."""
+target] (a value or None = the pixel keeps the clear colour).  Parts: a constants, b textures, c vertex colour + the unwritten-input rule + non-canonical links, d fog, e alpha test, f MRT / sRGB / vertex+index buffers, g fixed function, h user clip planes and point size with a programmable VS, j D3DRS_SHADEMODE FLAT with every pair kind, k SM1 texture-address opcodes reading tN as data (texcoord t0 / texcrd)."""
 import math
 from clib import *
 
@@ -317,4 +317,18 @@ def make(asm_fn):
             shade_case("shade_flat_texcoord_ft_" + psk, "ft", psk, [FLAT], tex=True)
     shade_case("shade_gouraud_then_flat_ft_ps2", "ft", "ps2", [GOURAUD, FLAT]); shade_case("shade_flat_then_gouraud_ft_ps2", "ft", "ps2", [FLAT, GOURAUD])
     shade_case("shade_flat_tf", "tf", "ps2", [FLAT]); shade_case("shade_gouraud_then_flat_tf", "tf", "ps2", [GOURAUD, FLAT]); shade_case("shade_flat_then_gouraud_tf", "tf", "ps2", [FLAT, GOURAUD])
+    # ---------------------------------------------------------------- k: the SM1 texture-address opcodes that read tN as DATA (texcoord t0 of ps_1_1..1_3, texcrd r0, t0 of ps_1_4): the register holds the interpolated texture coordinate of stage 0 clamped to [0, 1], w = 1.  mov_d2 halves it, so both the clamp and w are observable on the 8-bit target
+    tc2 = lambda sx, sy: (2 * tcf(sx, sy)[0] - 0.5, 2 * tcf(sx, sy)[1] - 0.5)           # [-0.5, 1.5]: both clamp edges are inside the triangle
+    cl = lambda v: min(1.0, max(0.0, v))
+    PSK = {"ps11": "ps_1_1\ntexcoord t0\nmov_d2 r0, t0\n", "ps12": "ps_1_2\ntexcoord t0\nmov_d2 r0, t0\n", "ps13": "ps_1_3\ntexcoord t0\nmov_d2 r0, t0\n", "ps14": "ps_1_4\ntexcrd r0, t0\nmov_d2 r0, r0\n"}
+    for psk, src in PSK.items():
+        for kind in ("tt", "ft"):
+            c = mk("texdata_%s_%s" % (kind, psk), "k", tol=2); ps = c.ps(A(src))
+            if kind == "ft":
+                c.use(0, ps, 0); c.fvf(FVF_XYZ | FVF_DIFFUSE | FVF_TEX1); c.rs("LIGHTING", 0)
+                vv = [[fb(x) for x in (*ndc(p), Z)] + [pk(V3[V3I[p]])] + [fb(v) for v in tc2(*p)] for p in SCR]; stride = 24
+            else:
+                vs = c.vs(A("vs_1_1\ndcl_position v0\ndcl_color0 v1\ndcl_texcoord0 v2\nmov oPos, v0\nmov oD0, v1\nmov oT0, v2\n")); c.use(vs, ps, c.decl(elems([(FLOAT4, POSITION, 0), (FLOAT4, COLOR, 0), (FLOAT2, TEXCOORD, 0)])))
+                stride, vv = tri([("pos", None), ("f4", lambda sx, sy: V3[V3I[(sx, sy)]]), ("f2", tc2)])
+            c.run("up", stride, vv); c.ref = full(lambda ix, iy: (cl(tc2(ix, iy)[0]) / 2, cl(tc2(ix, iy)[1]) / 2, 0.0, 0.5))
     return out
