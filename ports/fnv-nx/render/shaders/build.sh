@@ -44,6 +44,8 @@ fetch() { # name url pin [patch]
 
 mkdir -p "$DEPS"
 fetch mojoshader "$MOJO_URL" "$MOJO_PIN" "$HERE/mojoshader.patch"
+# the totality rows of the SM1-3 proof (total/gen_sm_rows.py from total/sm_table.json), checked by fnvnx_sm_check.h of the patch: missing = build error
+cmp -s "$HERE/total/fnvnx_sm_rows.h" "$DEPS/mojoshader/fnvnx_sm_rows.h" || cp "$HERE/total/fnvnx_sm_rows.h" "$DEPS/mojoshader/fnvnx_sm_rows.h"
 fetch uam "$UAM_URL" "$UAM_PIN" "$HERE/uam.patch"
 # test-only patch: predication prefix and SM1 relative addressing (both missing upstream)
 [[ $TESTS == ON ]] && fetch mojoshader_assembler "$ASM_URL" "$ASM_PIN" "$HERE/../../tests/s6b/mojoshader_assembler.patch"
