@@ -4,3 +4,4 @@ render/native/vftables.tsv
 platform/win32/nls_tables.inc
 platform/**/env_const.gen.inc
 platform/**/*.env_const.gen.inc
+platform/**/env_const*.gen.inc
