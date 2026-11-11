@@ -15,8 +15,9 @@ tests/test_graph,test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linu
 aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount; ar,clang test_coffnorm;
 git verdict.py,l1.py,test_gates; ldd,true test_runtime; g++,llvm-config-18 build a64access.cc (objstub.py, test_a64access).
 The a64access build set is derived the same way: every header `g++ -M` reports for a64access.cc under `llvm-config-18 --cxxflags`,
-and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules: capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts); numpy (lift/test/instest.py packer)."""
+and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules (version in python.modules, installed content sha256 in python.wheels, see wheel_digest): capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts); numpy (lift/test/instest.py packer); z3-solver, keystone-engine, gmpy2 (lift/proof, lift/bench, lift/test)."""
 import argparse
+import csv
 import ctypes
 import hashlib
 import json
@@ -41,7 +42,8 @@ A64ACCESS = (os.path.join(HERE, "a64access.cc"), ["aarch64", "mc", "mcdisassembl
 CLANG_API = ["clang/AST/RecursiveASTVisitor.h", "clang/Frontend/FrontendPluginRegistry.h", "clang/Basic/Version.h"]  # the plugin API vtnames (clang-18 MSVC-ABI facts plugin) includes: headers under `llvm-config-18 --includedir`
 CLANG_LIBS = ["libclang-cpp.so.18.1", "libclang.so"]   # under `llvm-config-18 --libdir`: what a clang plugin links / dlopens
 M32_PROBE = "#include <stdint.h>\n#include <stdlib.h>\nint main(){return 0;}\n"   # clang -m32 -M: every header a 32-bit compile of the C library reads (gnu/stubs-32.h: libc6-dev-i386)
-PY_MODULES = {"capstone": "capstone", "numpy": "numpy", "unicorn": "unicorn", "pyelftools": "elftools"}   # distribution -> import name
+PY_MODULES = {"capstone": "capstone", "gmpy2": "gmpy2", "keystone-engine": "keystone", "numpy": "numpy", "unicorn": "unicorn",
+              "pyelftools": "elftools", "z3-solver": "z3"}   # distribution -> import name
 KERNEL = ["unshare mount+pid+net+uts+ipc namespaces as root", "seccomp filter", "ptrace (strace)"]
 
 def env_id(doc):
@@ -103,6 +105,17 @@ def _ptrace():
 
 PROBES = {KERNEL[0]: lambda: os.geteuid() == 0 and _children(_unshare), KERNEL[1]: lambda: _children(_seccomp), KERNEL[2]: _ptrace}
 
+def wheel_digest(dist):
+    """sha256 of the installed content of distribution DIST: the sorted `path,hash` rows of its RECORD that carry a content hash (the
+    wheel's own file hashes, as the installer wrote them; unhashed rows such as __pycache__ are not content). A different wheel, a
+    modified or a missing file is a different digest; the version alone does not pin the bytes."""
+    rows = []
+    for line in (metadata.distribution(dist).read_text("RECORD") or "").splitlines():
+        f = next(csv.reader([line]), [])
+        if len(f) >= 2 and f[1]:
+            rows.append(f[0] + "," + f[1])
+    return hashlib.sha256("\n".join(sorted(rows)).encode()).hexdigest()
+
 def check(doc):
     """List of mismatch lines (empty = the machine is the declared environment)."""
     bad = []
@@ -121,6 +134,14 @@ def check(doc):
         except metadata.PackageNotFoundError:
             have = "not installed"
         cmp("python module " + m, ver, have)
+    for m, dg in sorted(doc["python"].get("wheels", {}).items()):
+        try:
+            have = wheel_digest(m)
+        except metadata.PackageNotFoundError:
+            have = "not installed"
+        cmp("python module %s content sha256" % m, dg[:12], have[:12])
+    for m in sorted(set(doc["python"]["modules"]) - set(doc["python"].get("wheels", {}))):
+        bad.append("env: python module %s: no content sha256 in python.wheels" % m)
     for t, dg in sorted(doc["trees"].items()):
         cmp("tree " + t, dg[:12], (tree_digest(t) if os.path.isdir(t) else "missing")[:12])
     own = None
@@ -193,7 +214,8 @@ def snapshot():
             add(subprocess.run([gcc, flag + n], capture_output=True, text=True).stdout.strip())
     return {"format": FORMAT, "os": _os(), "arch": platform.machine(),
             "uid": os.geteuid(), "trees": {t: tree_digest(t) for t in trees}, "packages": {p: _dpkg(p) for p in sorted(pk)},
-            "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in sorted(PY_MODULES)}},
+            "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in sorted(PY_MODULES)},
+                       "wheels": {m: wheel_digest(m) for m in sorted(PY_MODULES)}},
             "programs": sorted(PROGRAMS), "kernel": {"needs": KERNEL}}
 
 def main(argv):

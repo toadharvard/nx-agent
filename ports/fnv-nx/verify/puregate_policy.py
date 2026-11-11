@@ -45,7 +45,7 @@ MODECALLS = "gzip.open gzip.GzipFile gzip.compress zipfile.ZipFile tarfile.open 
 PURE = set(("ast json hashlib re struct collections itertools functools dataclasses typing enum abc math bisect heapq "
             "array binascii base64 zlib io string textwrap shlex fnmatch posixpath copy contextlib types argparse errno "
             "stat csv difflib bz2 lzma codecs unicodedata decimal fractions traceback warnings keyword "
-            "tokenize token __future__ ntpath genericpath").split())
+            "tokenize token __future__ ntpath genericpath unittest").split())
 # (b) RESTRICTED: module -> allowed members ("*" all, "P_*" prefix, dotted "a.b" entries); rules above apply first
 RESTRICTED = {
     "os": "path sep linesep pathsep environ getenv makedirs mkdir remove unlink rename replace rmdir link symlink readlink "
@@ -73,5 +73,5 @@ RESTRICTED = {
 # modules every member of which is ruled: importing is harmless, any use is reported by its rule
 BANNED = set("random secrets tempfile platform socket getpass pwd grp importlib builtins".split())
 # (d) EXTERNAL-PURE: third-party modules assumed pure (assumption A-ext)
-EXTERNAL = set("capstone elftools unicorn mako".split())
+EXTERNAL = set("capstone elftools unicorn mako z3 keystone gmpy2".split())  # the pinned python.modules of env.json (envcheck.PY_MODULES) that the tools import, plus mako
 LISTED = PURE | set(RESTRICTED) | BANNED | EXTERNAL

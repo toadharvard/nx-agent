@@ -312,10 +312,13 @@ for m in "os os.path sys time datetime glob shutil subprocess pathlib concurrent
          "gzip zipfile tarfile".split():
     case("import restricted " + m, "import %s\n" % m, [])
 case("import restricted: from concurrent import futures", "from concurrent import futures\n", [])
-for m in ("capstone", "elftools", "unicorn", "mako"):
+for m in ("capstone", "elftools", "unicorn", "mako", "z3", "keystone", "gmpy2"):
     case("import external " + m, "import %s\nfrom %s.x import y\n" % (m, m), [])
 check("external modules reported", V("import capstone\n") == [] and not isinstance(U("import capstone\n"), str) and
       pg.scan("import capstone\nimport mako.x\nimport json\n", "t.py")[2] == ["capstone", "mako"], "")
+case("import unittest (stdlib harness, pure table)", "import unittest\nfrom unittest import TestCase\n", [])
+for m in ("ctypes", "pickle", "numpy", "requests"):  # not in any table: red, whatever the machine has installed
+    case("import outside the tables: " + m, "import %s\n" % m, [(1, "import-unlisted")])
 case("import project: from-import sibling", "from helper import f\n", [], PJ("helper.py"))
 case("import project: import sibling", "import helper\nx = helper.f()\n", [], PJ("helper.py"))
 case("import project: package", "import pkg.mod\n", [], PJ("pkg/__init__.py", "pkg/mod.py"))
