@@ -7,7 +7,10 @@
  *           and the types come from here; locals in registers are read once more as soon as SSA exists (an
  *           optimizer may delete a use of an unassigned local, which is exactly what the verdict is about).
  *   late    just before RTL expansion: what is emitted. The inlined bodies come from here: GCC keeps the scope of
- *           every inlined function in the block tree of the function it was inlined into, also without debug info.
+ *           every inlined function in the block tree of the function it was inlined into - but drops the scope of a
+ *           body with nothing left in it, so the list is the union of three sources: the block tree, the callgraph
+ *           removal hook (every inline clone, einline included, is removed with inlined_to set) and the inline
+ *           edges still present at expansion; closed transitively over the unit.
  *
  * One text line per function body, in the object's own section .fnvnx.n3 (not loaded):
  *
@@ -95,6 +98,69 @@ static const char *asmname(tree d)
 {
   const char *n = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
   return *n == '*' ? n + 1 : n;
+}
+
+/* The ultimate source function of a declaration: through DECL_ABSTRACT_ORIGIN, the function a clone (constprop, isra,
+   part, an inline clone) was copied from. Its assembler name is the name the other tables of this file use. */
+static tree root_origin(tree d)
+{
+  while (DECL_ABSTRACT_ORIGIN(d) && DECL_ABSTRACT_ORIGIN(d) != d && TREE_CODE(DECL_ABSTRACT_ORIGIN(d)) == FUNCTION_DECL
+         && DECL_ASSEMBLER_NAME_SET_P(DECL_ABSTRACT_ORIGIN(d)))
+    d = DECL_ABSTRACT_ORIGIN(d);
+  return d;
+}
+
+/* GCC's own inlining bookkeeping. Every inlining (early inliner, IPA inliner, always_inline, into a clone) makes
+   the callee's node an inline clone with inlined_to = the function it goes into, and removes that node once the
+   body is copied in. The removal hook sees every one of them, whatever the block tree later looks like.
+   inl_direct: asmname of the receiving function as GCC names it at that point (a clone keeps its own name) ->
+   origin names of the bodies inlined into it. */
+static std::map<std::string, std::set<std::string> > inl_direct;
+
+static void note_inlined(tree into, tree callee)
+{
+  if (!DECL_ASSEMBLER_NAME_SET_P(into) || !DECL_ASSEMBLER_NAME_SET_P(callee)) return;
+  inl_direct[asmname(into)].insert(asmname(root_origin(callee)));
+}
+
+static void inline_clone_removed(cgraph_node *n, void *)
+{
+  if (n->inlined_to) note_inlined(n->inlined_to->decl, n->decl);
+}
+
+/* inline clones still attached to a function that is about to be expanded: its callee edges with inline_failed ==
+   CIF_OK, recursively */
+static void inlined_edges(cgraph_node *n, tree into, std::set<cgraph_node *> &seen)
+{
+  if (!seen.insert(n).second) return;
+  for (cgraph_edge *e = n->callees; e; e = e->next_callee)
+    if (e->inline_failed == CIF_OK) {
+      note_inlined(into, e->callee->decl);
+      inlined_edges(e->callee, into, seen);
+    }
+}
+
+/* `out` (block tree, edges) plus everything the hook saw inlined into the function `d`, into the copies it descends
+   from, or into any body in the set: closed transitively over the unit */
+static void inlined_book(tree d, std::set<std::string> &out)
+{
+  std::vector<std::string> work;
+  for (tree o = d;; o = DECL_ABSTRACT_ORIGIN(o)) {
+    if (DECL_ASSEMBLER_NAME_SET_P(o)) work.push_back(asmname(o));
+    if (!DECL_ABSTRACT_ORIGIN(o) || DECL_ABSTRACT_ORIGIN(o) == o || TREE_CODE(DECL_ABSTRACT_ORIGIN(o)) != FUNCTION_DECL) break;
+  }
+  work.insert(work.end(), out.begin(), out.end());   /* the block tree's and the edges' callees: what went into them */
+  std::set<std::string> seen;
+  while (!work.empty()) {
+    std::string f = work.back(); work.pop_back();
+    if (!seen.insert(f).second) continue;
+    std::map<std::string, std::set<std::string> >::iterator m = inl_direct.find(f);
+    if (m == inl_direct.end()) continue;
+    for (std::set<std::string>::iterator c = m->second.begin(); c != m->second.end(); ++c) {
+      out.insert(*c);
+      work.push_back(*c);
+    }
+  }
 }
 
 static void inlined_blocks(tree block, std::set<std::string> &out)
@@ -422,6 +488,11 @@ struct late_pass : gimple_opt_pass {
   {
     std::set<std::string> inl;
     inlined_blocks(DECL_INITIAL(fun->decl), inl);
+    if (cgraph_node *cn = cgraph_node::get(fun->decl)) {
+      std::set<cgraph_node *> seen;
+      inlined_edges(cn, fun->decl, seen);
+    }
+    inlined_book(fun->decl, inl);
     /* the function itself, or - for a copy the optimizer made of one (constprop, isra, part, ...) - the function
        it was copied from: by the declaration's origin, never by the spelling of the symbol (a static
        initializer's own symbol has the file name in it, dots and all) */
@@ -452,6 +523,11 @@ struct late_pass : gimple_opt_pass {
     return 0;
   }
 };
+}
+
+static void start_unit(void *, void *)
+{
+  symtab->add_cgraph_removal_hook(inline_clone_removed, NULL);
 }
 
 static void ipa_start(void *, void *)
@@ -516,6 +592,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
   register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pl);
   register_callback(info->base_name, PLUGIN_ATTRIBUTES, register_attrs, NULL);
   register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, pre_genericize, NULL);
+  register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);
   register_callback(info->base_name, PLUGIN_ALL_IPA_PASSES_START, ipa_start, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
   return 0;

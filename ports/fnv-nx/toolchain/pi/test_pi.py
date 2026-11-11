@@ -60,7 +60,7 @@ def main():
         ('_Z2m1v', ''): ['ok', '', '1Q'],
         ('_Z2m2v', ''): ['uninit-mem', '', '1Q'],
         ('_Z2m3v', ''): ['uninit-mem', '', '1Q'],
-        ('_Z2m4i', ''): ['uninit-mem', '', '1Q'],
+        ('_Z2m4i', ''): ['uninit-mem', '_Z2uni', '1Q'],        # ICF made its body one with un's: GCC inlined un (the scope blocks never showed it)
         ('_Z2m5v', ''): ['ok', '', '1Q'],
         ('_Z2o1v', ''): ['ok', '', ''],
         ('_Z2o2v', ''): ['argorder', '', ''],
@@ -68,7 +68,7 @@ def main():
         ('_Z2o4v', ''): ['ok', '', ''],
         ('_Z2o5R1W', ''): ['ok', '', '1W'],
         ('_Z3fo1i', ''): ['falloff', '', ''],                          # FALL2
-        ('_Z3fo2i', ''): ['ok', '', ''],
+        ('_Z3fo2i', ''): ['ok', '_Z2uni', ''],                         # the same: ICF
         ('_Z3fo3i', ''): ['ok', '', ''],
         ('_Z3fo4i', ''): ['ok', '', ''],
         ('_Z3fo5i', ''): ['falloff', '', ''],
@@ -87,6 +87,31 @@ def main():
         ('_Z3ao1i', ''): ['argorder', '', '2S1'],
         ('_ZN1KC1Ev', 'alias'): ['ok', '', '1K'],                      # the same body under its other symbol
         ('_ZN1KD1Ev', 'alias'): ['ok', '', '1K'],
+        # INL2: the inlined set from GCC's inlining bookkeeping (removal hook, inline-clone edges), not only the scope blocks
+        ('_Z2f2i', ''): ['ok', '_ZL2h2i', ''],
+        ('_Z3f2bi', ''): ['ok', '_ZL2i2i', ''],
+        ('_Z2f3i', ''): ['ok', '_ZL2g3i,_ZL2h3i', ''],
+        ('_Z2f4i', ''): ['ok', '_ZL2g4i,_ZL2h4i', ''],
+        ('_Z2e5i', ''): ['ok', '_ZL2h5i', ''],
+        ('_Z2f5i', ''): ['ok', '_ZL2h5i', ''],
+        ('_Z2f6i', ''): ['ok', '', ''],
+        ('_Z2f7i', ''): ['ok', '_ZL2r7i', ''],
+        ('_Z3f7bi', ''): ['ok', '_ZL2r7i', ''],
+        ('_Z2f8i', ''): ['ok', '_ZL2z8i', ''],
+        ('_Z2f9i', ''): ['ok', '_ZL2t9i,_ZL3ip9PFiiEi', ''],
+        ('_ZL2h5i', ''): ['ok', '', ''],
+        ('_ZL3cp6ii', 'constprop.0'): ['ok', '_ZL2g6i', ''],     # into a clone: the line is the origin's
+        ('_ZL2g3i', 'inline'): ['ok', '', ''],
+        ('_ZL2g4i', 'inline'): ['ok', '', ''],
+        ('_ZL2g6i', 'inline'): ['ok', '', ''],
+        ('_ZL2h2i', 'inline'): ['ok', '', ''],
+        ('_ZL2h3i', 'inline'): ['ok', '', ''],
+        ('_ZL2h4i', 'inline'): ['ok', '', ''],
+        ('_ZL2i2i', 'inline'): ['ok', '', ''],
+        ('_ZL2t9i', 'inline'): ['ok', '', ''],
+        ('_ZL2z8i', 'inline'): ['ok', '', ''],
+        ('_ZL3ip9PFiiEi', 'inline'): ['ok', '', ''],
+        ('_ZL2r7i', 'inline'): ['ok', '', ''],
     }
     fails = 0
     for k, w in want.items():

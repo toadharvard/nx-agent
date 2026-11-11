@@ -49,3 +49,30 @@ int db(int a) { if (a) __debugbreak(); return a; }
 // ARG2: a side-effecting non-scalar argument and one that reads what it writes: the order plugin leaves GCC's order
 struct S1 { int a; }; S1 mk(int&); void fs(S1, int);
 void ao1(int x0) { int x = x0; fs(mk(x), x); }
+// INL2: the inlined set follows GCC's inlining bookkeeping, not the scope blocks (which the optimizer may drop)
+#define AI static inline __attribute__((always_inline))
+AI int h2(int a) { int r = plain(a); return r + 2; }
+int f2(int a) { return h2(a); }                                   // 1: a body with a variable
+AI int i2(int a) { return a; }
+int f2b(int a) { return i2(plain(a + 21)); }                           // 1: no statement of the body is left: no scope block
+AI int g3(int a) { return plain(a + 3); }
+AI int h3(int a) { return g3(a); }
+int f3(int a) { return h3(a); }                                   // 2: always_inline chain
+static inline int g4(int a) { return plain(a) + 1; }
+static inline int h4(int a) { return g4(a) + plain(a + 1); }
+int f4(int a) { return h4(a); }                                   // 3: h4 early-inlines g4, then goes into f4
+static inline int h5(int a) { return plain(a) + plain(a + 2); }
+int e5(int a) { return h5(a); }
+int f5(int a) { return h5(a + 1) + plain(1); }
+int (*p5)(int) = (int(*)(int))h5;                                 // 4: inlined into two callers and also emitted
+AI int g6(int a) { return a * 0; }
+__attribute__((noinline)) static int cp6(int a, int b) { return g6(a) + b * plain(b); }
+int f6(int a) { return cp6(a, 3) + cp6(a + 1, 3); }               // 5: into a constprop clone
+static int r7(int n) { return n ? plain(n) + r7(n - 1) : plain(7); }   // 6: recursion, inlined once into its callers
+int f7(int n) { return r7(n); }
+int f7b(int n) { return r7(n + 1) * 5; }
+AI int z8(int a) { return a * 0; }
+int f8(int a) { return z8(a) + plain(a + 8); }                        // 7: all of the code optimised away
+static int ip9(int (*f)(int), int a) { return f(a) * 9; }
+static int t9(int a) { return plain(a + 9) ^ 5; }
+int f9(int a) { return ip9(t9, a) + ip9(t9, a + 1); }             // 8: indirect call made direct
