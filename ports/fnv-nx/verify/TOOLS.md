@@ -932,7 +932,9 @@ Stated assumptions (each is a fact of the stage's model, not of the header):
      that a handle is the descriptor number the service returned, and on the Windows side a SOCKET is an opaque handle whose only
      special value is INVALID_SOCKET (Winsock "Socket Data Type"), so a program correct on Windows reads no meaning from it. SOCKET
      never fails for lack of room.
-  A2 the host's loopback has the addresses 127.0.0.0/8 and ::1; "any" is 0.0.0.0 / ::; every other unicast address is not local.
+  A2 addresses (facts, cited): loopback is 127.0.0.0/8 (RFC 1122 3.2.1.3 (g)) and ::1 (RFC 4291 2.5.3); "any" is 0.0.0.0 (RFC 1122
+     3.2.1.3 (a)) and :: (RFC 4291 2.5.2); the declared machine has no network connection (CLAUDE.md "The declared machine"), so it has
+     no interface but loopback and every other unicast address is not local.
   A3 getaddrinfo with no network: a numeric node is parsed (strict dotted quad, or an RFC 4291 text without a scope) and a null hints
      argument is a hints record of zeros (POSIX); the list of a numeric node is one record per socket type STREAM/TCP 6, DGRAM/UDP 17,
      RAW/0 (the type given in the hints keeps one; the protocol given keeps those with that protocol), in this order, ai_flags = hints flags.
