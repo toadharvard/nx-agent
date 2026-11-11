@@ -24,6 +24,7 @@ static_assert(__builtin_offsetof(MMIOINFO, lDiskOffset) == 44 && __builtin_offse
 #endif
 
 namespace {
+const DWORD MMIO_NAMEBUF = 128;   /* the least room the documentation promises szFilename for a name written back */
 const uint32_t MMIO_MAGIC = 0x4F494D4Du;   /* "MMIO" */
 
 struct mmio {
@@ -163,14 +164,58 @@ extern "C" {
 HMMIO mmioOpenA(LPSTR name, LPMMIOINFO in, DWORD flags)
 {
     flags = W32_DW(flags);
-    if (flags & MMIO_EXIST)
-        return name && GetFileAttributesA(name) != INVALID_FILE_ATTRIBUTES ? (HMMIO)1 : NULL;
-    if (flags & MMIO_DELETE)
-        return name && DeleteFileA(name) ? (HMMIO)1 : NULL;
-    if (flags & (MMIO_PARSE | MMIO_GETTEMP)) {
+    /* the name-only operations. Their results are TRUE (a non-NULL value that is no handle) or NULL; a name they produce is
+     * written back into szFilename, which the documentation requires to hold at least 128 bytes */
+    if (flags & MMIO_PARSE) {                  /* the fully qualified file name; all other flags are ignored */
+        char full[MAX_PATH];
+        DWORD n = name ? GetFullPathNameA(name, sizeof full, full, NULL) : 0;
+        if (!n || n >= MMIO_NAMEBUF) {
+            if (in)
+                in->wErrorRet = MMIOERR_CANNOTOPEN;
+            return NULL;
+        }
+        memcpy(name, full, n + 1);
         if (in)
-            in->wErrorRet = MMIOERR_CANNOTOPEN;
-        return NULL;
+            in->wErrorRet = 0;
+        return (HMMIO)1;
+    }
+    if (flags & MMIO_EXIST) {                  /* does the file exist (a directory is no file)? */
+        /* MSDN also has the fully qualified name written back into szFilename; tests/s4/test_mmio.cpp passes a string
+         * literal here, which no write can survive, so EXIST only answers the question (reported to the lead). */
+        DWORD a = name ? GetFileAttributesA(name) : INVALID_FILE_ATTRIBUTES;
+        if (a == INVALID_FILE_ATTRIBUTES || (a & FILE_ATTRIBUTE_DIRECTORY)) {
+            if (in)
+                in->wErrorRet = MMIOERR_FILENOTFOUND;
+            return NULL;
+        }
+        if (in)
+            in->wErrorRet = 0;
+        return (HMMIO)1;
+    }
+    if (flags & MMIO_GETTEMP) {                /* "X:" and/or a prefix of up to three characters: a temporary file name */
+        char dir[MAX_PATH], tmp[MAX_PATH];
+        const char *prefix = name ? name : "";
+        if (prefix[0] && prefix[1] == ':') {
+            snprintf(dir, sizeof dir, "%c:\\", prefix[0]);
+            prefix += 2;
+        } else if (!GetTempPathA(sizeof dir, dir)) {
+            dir[0] = 0;
+        }
+        if (!name || !dir[0] || !GetTempFileNameA(dir, prefix, 0, tmp) || strlen(tmp) >= MMIO_NAMEBUF) {
+            if (in)
+                in->wErrorRet = MMIOERR_FILENOTFOUND;
+            return NULL;
+        }
+        memcpy(name, tmp, strlen(tmp) + 1);
+        if (in)
+            in->wErrorRet = 0;
+        return (HMMIO)1;
+    }
+    if (flags & MMIO_DELETE) {
+        BOOL ok = name && DeleteFileA(name);
+        if (in)
+            in->wErrorRet = ok ? 0 : MMIOERR_FILENOTFOUND;
+        return ok ? (HMMIO)1 : NULL;
     }
     mmio *m = (mmio *)calloc(1, sizeof *m);
     if (!m) {
@@ -294,6 +339,21 @@ LONG mmioWrite(HMMIO h, const char *src, LONG n)
     LONG total = 0;
     while (n > 0) {
         LONG room = (LONG)(m->info.pchEndWrite - m->info.pchNext);
+        if (room <= 0 && m->mem && m->own_buffer && (LONG)m->info.adwInfo[0] > 0) {
+            /* an expandable memory file (adwInfo[0] = the growth increment) grows by whole increments to hold the write */
+            LONG inc = (LONG)m->info.adwInfo[0], want = ((n + inc - 1) / inc) * inc;
+            LONG at = (LONG)(m->info.pchNext - m->info.pchBuffer), end = (LONG)(m->info.pchEndRead - m->info.pchBuffer);
+            char *nb = (char *)realloc(m->info.pchBuffer, (size_t)(m->info.cchBuffer + want) + 1);
+            if (!nb)
+                return total ? total : -1;
+            memset(nb + m->info.cchBuffer, 0, (size_t)want + 1);
+            m->info.cchBuffer += want;
+            m->info.pchBuffer = nb;
+            m->info.pchNext = nb + at;
+            m->info.pchEndRead = nb + end;
+            m->info.pchEndWrite = nb + m->info.cchBuffer;
+            continue;
+        }
         if (room <= 0) {
             if (m->mem || !flush(m))
                 return total ? total : -1;
