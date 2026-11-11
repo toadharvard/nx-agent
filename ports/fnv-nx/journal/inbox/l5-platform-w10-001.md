@@ -5,7 +5,7 @@ Branch claude/fnv-l5-platform-w10 (trunk a2453fe9 + L5 gates w4r 0533f920). Root
 Not done on this branch: FreeType (needs L1's `sources` key), the host product root (platform_host/ is not admitted), tools (platform_tools/ not admitted).
 
 ## Numbers (global, whole root)
-- Units in the root: 73 (all tracked sources + 15 generated: combridge x2, msvcrt table; nls/winerr/env_const are .inc, not units).
+- Units in the root: 73 (tracked sources plus 3 generated: combridge.gen.cpp, combridge_exports.gen.cpp, msvcrt_table.gen.cpp; the .inc outputs are includes, not units).
 - Build as committed (no shim/loader include dirs, they have no admitted root): 13 green / 60 red. Causes: fnvnx_win32.h missing 42, fnvnx_callback.h 8,
   dsound.h 3, dinput.h 3, fnvnx_importkey.h 1, xinput.h 1 (all shim/loader headers: 55 units), libstdc++ 15 under GCC 13: 1 (swkbd.cpp),
   netdb.h 1 (fixed since: libnx external/bsd/include added).
