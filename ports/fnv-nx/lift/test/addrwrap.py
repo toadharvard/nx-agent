@@ -237,7 +237,7 @@ CONTROLS = (
 
 
 def build(d, name, defs):
-    src = T.test_prelude(L) + 'typedef u32 u32x4 __attribute__((vector_size(16)));\n' + '\n'.join(t.replace('@', 'f%d' % k) for k, t in enumerate(defs)) + '\n'
+    src = L.PRELUDE + T.STUBX + 'typedef u32 u32x4 __attribute__((vector_size(16)));\n' + '\n'.join(t.replace('@', 'f%d' % k) for k, t in enumerate(defs)) + '\n'
     with open(d + '/' + name + '.cpp', 'w') as f:
         f.write(src)
     r = subprocess.run(['aarch64-linux-gnu-g++'] + T.FLAGS + [name + '.cpp', '-o', name + '.o'], capture_output=True, text=True, env=dict(os.environ, LC_ALL='C'), cwd=d)
