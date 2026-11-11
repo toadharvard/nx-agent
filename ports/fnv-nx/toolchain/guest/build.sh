@@ -11,12 +11,14 @@ OUT=$(mkdir -p "$1" && realpath "$1")
 G=$(cd "$(dirname "$0")" && pwd)
 export PATH=$DEVKITPRO/devkitA64/bin:$PATH
 ARCH="-mabi=ilp32 -march=armv8-a+crc+crypto -mtune=cortex-a57 -fPIE -ftls-model=local-exec"   # PIC: links into fixed and relocatable guests
-CFLAGS="-O2 -g -Wall -Wextra -ffunction-sections -fdata-sections -I$G/../include"
+# determinism: no build path in the debug info (the ELF bytes do not depend on where the tree or the cwd is)
+MAP="-ffile-prefix-map=$PWD=. -ffile-prefix-map=$(cd "$G/.." && pwd)=."
+CFLAGS="-O2 -g -Wall -Wextra -ffunction-sections -fdata-sections -I$G/../include $MAP"
 aarch64-none-elf-gcc $ARCH -c "$G/crt0.s" -o "$OUT/crt0.o"
 for f in runtime threads fs section_guest; do
 	aarch64-none-elf-gcc $ARCH $CFLAGS -c "$G/$f.c" -o "$OUT/$f.o"
 done
-aarch64-none-elf-g++ $ARCH -O2 -g -Wall -Wextra -ffunction-sections -fdata-sections -c "$G/tm.cpp" -o "$OUT/tm.o"
+aarch64-none-elf-g++ $ARCH -O2 -g -Wall -Wextra -ffunction-sections -fdata-sections $MAP -c "$G/tm.cpp" -o "$OUT/tm.o"
 rm -f "$OUT/libfnvnx-guest.a"
 aarch64-none-elf-ar rcs "$OUT/libfnvnx-guest.a" "$OUT/runtime.o" "$OUT/threads.o" "$OUT/fs.o" "$OUT/section_guest.o" "$OUT/tm.o"
 echo "guest runtime: $OUT/crt0.o $OUT/libfnvnx-guest.a"

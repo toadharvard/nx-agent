@@ -351,6 +351,7 @@ static uint64_t host_sock_call(uint32_t fn, const uint64_t *a, uint32_t n) {
     static const uint8_t want[] = {3, 1, 2, 2, 2, 2, 5, 5, 5, 5, 3, 2, 2, 2, 1, 2, 4, 3};   /* fn 16..33 */
     if (fn < FNVNX_PLAT_SOCK_FIRST || fn > FNVNX_PLAT_SOCK_LAST || n != want[fn - FNVNX_PLAT_SOCK_FIRST])
         return sk_e(FNVNX_WE_INVAL);
+    if (!a) return FNVNX_EXT_BAD_NARGS;   /* every service here takes >= 1 word: a null array would be read at a[0] (hostapi.h: nargs > 0 with a null array) */
     if (fn == FNVNX_PLAT_SOCK_GAI_OPEN) return sk_gai_open(a);
     if (fn == FNVNX_PLAT_SOCK_GAI_FETCH) return sk_gai_fetch(a);
     if (fn == FNVNX_PLAT_SOCK_POLL) {
