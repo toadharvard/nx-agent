@@ -3,7 +3,20 @@
  * `RESULT PASS` or `RESULT FAIL <reason>`) and sdmc:/switch/fnv/firstframe.bmp (the presented frame). Then it waits for +.
  * The screen belongs to the GPU backend, so nothing is printed on a console: the log file is the only output.
  * Build: build_nro.sh (the DKSH blobs ff_vs_dksh / ff_fs_dksh come from build_dksh.sh as a generated C array).
- * Assumption (nxgpu4.h): nxdk_ext creates the device, queue and swapchain itself on the first call (INFO). */
+ *
+ * Embedder contract (nx/dk.h, "Embedder obligations"):
+ *  - Before nxdk_create the program must have libnx's vi service and default native window initialised. In an NRO nothing is left to do:
+ *    libnx's default (weak) __appInit (nx/source/runtime/init.c, libnx.a init.o) calls the weak __nx_win_init when it is linked in, after
+ *    fsdevMountSdmc and before userAppInit; __nx_win_init (nx/source/display/default_window.c) does viInitialize, viOpenDisplay,
+ *    viCreateLayer and nwindowCreateFromLayer for the default window, which nwindowGetDefault() returns. dk_swap.c reaches the window only
+ *    through nwindowGetDefault(), so it is the same window; its reference pulls default_window.o into the link. This program defines no
+ *    __appInit, so the default runs, and it calls neither viInitialize nor nwindowCreate itself (the facts are checked in tests/l6/dknro:
+ *    objdump of the pinned libnx.a).
+ *  - nxdk_create(width, height) comes first, with the size of the declared product decision: docked 1920x1080, handheld 1280x720.
+ *  - Shutdown: the selftest's SHUTDOWN stage calls nxdk_ext(NXGPU_FN_SHUTDOWN), which only waits for the queue to become idle (nxdk_shutdown).
+ *    The resources go with nxdk_destroy, which main calls exactly once, after the +-wait (the presented frame stays on screen until then);
+ *    after a failed nxdk_create it is NOT called (nxdk_create already released everything: "NULL = failed, nothing stays allocated").
+ *  - The three embedder symbols are defined below: nxdk_guest_ptr, nxdk_on_present, nxdk_shader_pack. */
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -11,6 +24,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <switch.h>
+#include "nx/dk.h"
 #include "nxgpu4_selftest.h"
 #include "selftest_expect.h"
 
@@ -21,13 +35,17 @@
 
 extern const uint8_t ff_vs_dksh[], ff_fs_dksh[];
 extern const uint32_t ff_vs_dksh_len, ff_fs_dksh_len;
-uint64_t nxdk_ext(uint32_t fn, const uint64_t* args, uint32_t nargs);   /* libnxdk.a */
 
 typedef struct { uint64_t a, n; } Blk;
 static Blk g_blk[64];
 static int g_nblk;
 static FILE* g_log;
 static uint8_t* g_bmp;   /* the sink's copy; written once */
+static volatile uint32_t g_presents, g_last_frame;   /* nxdk_on_present: completed presents and the number of the last one */
+
+/* no shader pack is installed: the selftest hands DKSH images to shader_create directly (dk.h: NULL when none is installed) */
+const void* nxdk_shader_pack(uint64_t* size) { *size = 0; return NULL; }
+void nxdk_on_present(uint32_t frame) { g_presents++; g_last_frame = frame; }
 
 static void die(const char* what) { if (g_log) { fprintf(g_log, "RESULT FAIL %s\n", what); fflush(g_log); } diagAbortWithResult(MAKERESULT(Module_Libnx, LibnxError_IoError)); }
 
@@ -72,15 +90,10 @@ static void h_frame(void* ctx, uint32_t w, uint32_t h, const uint8_t* rgba) {
     h_log(NULL, "BMP %ux%u written to " DIR "/firstframe.bmp", w, h);
 }
 
-int main(void) {
+/* runs the stages over the created backend; returns the selftest status (0 = pass) and logs PRESENTS and RESULT */
+static int run_selftest(void) {
     static const NxSelftestExpect ex[] = { NXST_EXPECT_ROWS };
     char reason[256];
-    mkdir(DIR, 0777);   /* exists after the first run: the open below is the check */
-    g_log = fopen(DIR "/firstframe.log", "w");
-    if (!g_log) diagAbortWithResult(MAKERESULT(Module_Libnx, LibnxError_IoError));
-    AppletOperationMode mode = appletGetOperationMode();
-    h_log(NULL, "firstframe build %s operation mode %s (expected backbuffer %s)", FNV_BUILD_ID,
-          mode == AppletOperationMode_Console ? "docked" : "handheld", mode == AppletOperationMode_Console ? "1920x1080" : "1280x720");
     NxSelftestHost host;
     memset(&host, 0, sizeof host);
     host.ext = nxdk_ext; host.alloc = h_alloc; host.log = h_log; host.frame = h_frame;
@@ -91,7 +104,24 @@ int main(void) {
     host.present_frames = 120;   /* two seconds at 60 Hz */
     host.reason = reason; host.reason_cap = sizeof reason;
     int st = nxgpu4_selftest(&host);
+    h_log(NULL, "PRESENTS %u last_frame %u", (unsigned)g_presents, (unsigned)g_last_frame);
     if (st) h_log(NULL, "RESULT FAIL %s", reason); else h_log(NULL, "RESULT PASS");
+    return st;
+}
+
+int main(void) {
+    mkdir(DIR, 0777);   /* exists after the first run: the open below is the check */
+    g_log = fopen(DIR "/firstframe.log", "w");
+    if (!g_log) diagAbortWithResult(MAKERESULT(Module_Libnx, LibnxError_IoError));
+    AppletOperationMode mode = appletGetOperationMode();
+    int docked = mode == AppletOperationMode_Console;
+    h_log(NULL, "firstframe build %s operation mode %s (expected backbuffer %s)", FNV_BUILD_ID, docked ? "docked" : "handheld",
+          docked ? "1920x1080" : "1280x720");
+    char cerr[200];
+    int created = nxdk_create(docked ? 1920 : 1280, docked ? 1080 : 720, cerr, sizeof cerr) != NULL;
+    int st = 1;
+    if (created) st = run_selftest();
+    else h_log(NULL, "RESULT FAIL nxdk_create: %s", cerr);
     fclose(g_log); g_log = NULL;
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
     PadState pad;
@@ -101,5 +131,6 @@ int main(void) {
         if (padGetButtonsDown(&pad) & HidNpadButton_Plus) break;
         svcSleepThread(16000000ll);
     }
+    if (created) nxdk_destroy();
     return st ? 1 : 0;
 }
