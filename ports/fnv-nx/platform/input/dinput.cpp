@@ -53,7 +53,7 @@ struct DIACTIONFORMAT_ {
     LONG lAxisMin, lAxisMax; HINSTANCE hInstString; DWORD ftLo, ftHi, dwCRC; CHAR tszActionMap[MAX_PATH];
 };
 struct DIIMAGEHDR_ { DWORD dwSize, dwSizeImageInfo, dwcViews, dwcButtons, dwcAxes, dwcPOVs, dwBufferSize, dwBufferUsed; void *img; };
-typedef BOOL (*SEMCB)(LPCDIDEVICEINSTANCEA, IDirectInputDevice8A *, DWORD, DWORD, LPVOID);
+FNVNX_CALLBACK_T(SEMCB, BOOL, (LPCDIDEVICEINSTANCEA, IDirectInputDevice8A *, DWORD, DWORD, LPVOID));
 enum { DIAH_UNMAPPED = 0, DIAH_DEFAULT = 0x20, DIAH_USERCONFIG = 1, DIDBAM_MASK = 7, DIEDBS_MAPPEDPRI1 = 1,
        DIEDBSFL_VALID = 0x7110 };
 #define DIGENRE_ANY_ 0xFFFFFF00u

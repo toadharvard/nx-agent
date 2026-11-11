@@ -130,7 +130,7 @@ compile_one() {                                                     # kind src o
     # shellcheck disable=SC2086
     case $kind in
         c)   "$GCC" $COMMON_S -std=gnu11 $PINC_S -c "$src" -o "$obj" ;;
-        cxx) "$GXX" $COMMON_S -std=gnu++17 -DSTDMETHODCALLTYPE= $PINC_S -c "$src" -o "$obj" ;;
+        cxx) "$GXX" $COMMON_S -std=gnu++17 -DSTDMETHODCALLTYPE= -DFNVNX_PLATFORM_BUILD $PINC_S -c "$src" -o "$obj" ;;
         ft)  "$GCC" $ARCH_S -ffunction-sections -fdata-sections $FT_CFLAGS_S -c "$src" -o "$obj" ;;
     esac >"$log" 2>&1 || { echo "$kind $src" >"$log.fail"; return 1; }
 }

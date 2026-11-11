@@ -30,6 +30,7 @@ struct mmio {
     MMIOINFO info;       /* first: the I/O procedure's LPSTR argument is &info */
     uint32_t magic;
     int mem;             /* memory file: the buffer is the whole file */
+    int native_dos;      /* the built-in DOS procedure (a platform function, never a game address: not stored in pIOProc) */
     int own_buffer;
     char *wend;          /* buffered writes: end of the data written into the buffer */
     HANDLE dos;          /* the DOS procedure's file */
@@ -90,6 +91,8 @@ LRESULT dos_proc(LPSTR p, UINT msg, LPARAM l1, LPARAM l2)
 
 LRESULT send(mmio *m, UINT msg, LPARAM l1, LPARAM l2)
 {
+    if (m->native_dos)
+        return dos_proc((LPSTR)&m->info, msg, l1, l2);
     return m->info.pIOProc ? m->info.pIOProc((LPSTR)&m->info, msg, l1, l2) : (msg == MMIOM_SEEK ? -1 : 0);
 }
 
@@ -194,7 +197,7 @@ HMMIO mmioOpenA(LPSTR name, LPMMIOINFO in, DWORD flags)
             m->mem = 1;
         } else if (f == 0 || f == FOURCC_DOS) {
             m->info.fccIOProc = FOURCC_DOS;
-            m->info.pIOProc = dos_proc;
+            m->native_dos = 1;
         } else {
             err = MMIOERR_INVALIDFILE;   /* no installable I/O procedures (mmioInstallIOProc is not imported) */
         }

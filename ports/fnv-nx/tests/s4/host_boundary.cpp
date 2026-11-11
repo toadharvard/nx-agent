@@ -13,6 +13,8 @@ extern "C" {
 int g_bnd_exports, g_bnd_invokes, g_bnd_threads_created, g_bnd_threads_run, g_bnd_threads_freed,
     g_bnd_threads_freed_unrun, g_bnd_process_detaches;
 uint32_t (*g_bnd_loader)(const char *name, uint32_t *base);
+int (*g_bnd_invoke_hook)(fnvnx_gaddr addr, uint32_t ecx, uint32_t nargs, const fnvnx_gword *args, uint32_t kind,
+                         struct fnvnx_bnd_ret *out);
 
 fnvnx_gaddr fnvnx_bnd_export_value(const char *, const char *, uint32_t, const void *native)
 {
@@ -21,10 +23,12 @@ fnvnx_gaddr fnvnx_bnd_export_value(const char *, const char *, uint32_t, const v
 }
 
 typedef uintptr_t W;
-void fnvnx_bnd_guest_invoke(fnvnx_gaddr addr, uint32_t, uint32_t nargs, const uint32_t *args, uint32_t kind,
+void fnvnx_bnd_guest_invoke(fnvnx_gaddr addr, uint32_t ecx, uint32_t nargs, const fnvnx_gword *args, uint32_t kind,
                             struct fnvnx_bnd_ret *out)
 {
     __atomic_fetch_add(&g_bnd_invokes, 1, __ATOMIC_RELAXED);
+    if (g_bnd_invoke_hook && g_bnd_invoke_hook(addr, ecx, nargs, args, kind, out))
+        return;
     W a[16] = {0};
     for (uint32_t i = 0; i < nargs && i < 16; i++)
         a[i] = args[i];
@@ -35,7 +39,8 @@ void fnvnx_bnd_guest_invoke(fnvnx_gaddr addr, uint32_t, uint32_t nargs, const ui
         r.st0 = ((double (*)(W, W, W, W, W, W, W, W, W, W, W, W, W, W, W, W))addr)(ARGS);
     } else {
         uint64_t v = ((uint64_t(*)(W, W, W, W, W, W, W, W, W, W, W, W, W, W, W, W))addr)(ARGS);
-        r.eax = (uint32_t)v;
+        /* a pointer / LONG_PTR result is pointer-wide here; edx:eax of an int64 result are its two halves */
+        r.eax = kind == FNVNX_BND_RET_I64 ? (uint32_t)v : (fnvnx_gword)v;
         r.edx = kind == FNVNX_BND_RET_I64 ? (uint32_t)(v >> 32) : 0;
     }
 #undef ARGS

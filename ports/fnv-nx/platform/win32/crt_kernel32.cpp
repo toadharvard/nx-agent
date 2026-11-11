@@ -122,7 +122,7 @@ extern "C" BOOL WriteConsoleW(HANDLE h, const void *buf, DWORD n, LPDWORD put, L
     return FALSE;
 }
 
-typedef BOOL (*ctrl_handler_fn)(DWORD);
+typedef PHANDLER_ROUTINE ctrl_handler_fn;
 static ctrl_handler_fn *g_ctrl;   /* the handler list; most recently added first on delivery (none is delivered) */
 static size_t g_nctrl;
 static bool g_ctrl_ignore;        /* SetConsoleCtrlHandler(NULL, TRUE) */
@@ -250,18 +250,18 @@ extern "C" BOOL TerminateProcess(HANDLE h, UINT code)
     return FALSE;
 }
 
-static LPTOP_LEVEL_EXCEPTION_FILTER g_top_filter;
+static uintptr_t g_top_filter;   /* the game's filter (LPTOP_LEVEL_EXCEPTION_FILTER value) */
 
 extern "C" LPTOP_LEVEL_EXCEPTION_FILTER SetUnhandledExceptionFilter(LPTOP_LEVEL_EXCEPTION_FILTER f)
 {
-    return __atomic_exchange_n(&g_top_filter, f, __ATOMIC_SEQ_CST);
+    return LPTOP_LEVEL_EXCEPTION_FILTER(__atomic_exchange_n(&g_top_filter, f.value(), __ATOMIC_SEQ_CST));
 }
 
 /* as on Windows: the top-level filter decides; without one (or when it continues the search) the process is to
  * be terminated by the caller (EXCEPTION_EXECUTE_HANDLER) - there is no error reporting dialog */
 extern "C" LONG UnhandledExceptionFilter(struct _EXCEPTION_POINTERS *ep)
 {
-    LPTOP_LEVEL_EXCEPTION_FILTER f = __atomic_load_n(&g_top_filter, __ATOMIC_SEQ_CST);
+    LPTOP_LEVEL_EXCEPTION_FILTER f(__atomic_load_n(&g_top_filter, __ATOMIC_SEQ_CST));   /* no lock is held across the call */
     w32_log("UnhandledExceptionFilter(%p)%s", (void *)ep, f ? ": calling the top-level filter" : "");
     if (f && ep) {
         LONG r = f(ep);

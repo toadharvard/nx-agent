@@ -12,7 +12,7 @@ extern "C" {
 
 typedef DWORD FOURCC;
 typedef void *HMMIO;
-typedef LRESULT (*LPMMIOPROC)(LPSTR lpmmioinfo, UINT uMsg, LPARAM lParam1, LPARAM lParam2);
+FNVNX_CALLBACK_T(LPMMIOPROC, LRESULT, (LPSTR lpmmioinfo, UINT uMsg, LPARAM lParam1, LPARAM lParam2));
 
 typedef struct _MMIOINFO {
     DWORD dwFlags;

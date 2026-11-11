@@ -44,7 +44,11 @@ TEST_CXX := $(wildcard $(HERE)/*.cpp)
 
 OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
 
-.PHONY: all test ilp32 m32 iat device qemu clean
+# The platform's own sources see the game's callbacks (WNDPROC, ...) as fnvnx_guestfn (shim/include/fnvnx_callback.h:
+# a call goes through the boundary, a direct call does not compile); the tests are "the game" and keep plain pointers.
+$(filter $(OUT)/platform/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
+
+.PHONY: all test ilp32 m32 iat device qemu clean gfn-nocompile
 all: test
 
 $(OUT)/%.c.o: $(ROOT)/%.c
@@ -104,6 +108,7 @@ M32_CXX := $(PLAT_CXX) $(wildcard $(P)/audio/*.cpp) $(filter-out %/input_horizon
 M32_D3D := $(wildcard $(ROOT)/render/nine/d3dx/*.cpp) $(ROOT)/toolchain/game/null_d3d9.cpp
 M32_TEST := $(wildcard $(HERE)/m32/*.cpp) $(HERE)/host_boundary.cpp
 M32_OBJS := $(patsubst $(ROOT)/%,$(M32OUT)/%.o,$(PLAT_C) $(M32_CXX) $(M32_D3D) $(M32_TEST))
+$(filter $(M32OUT)/platform/%.cpp.o,$(M32_OBJS)): M32FLAGS += -DFNVNX_PLATFORM_BUILD
 M32_D3DFLAGS := -std=gnu++17 -m32 -idirafter /usr/include/x86_64-linux-gnu -g -O1 -frounding-math -Wall -fshort-wchar \
 	-include $(HERE)/m32/compat_m32.h -I$(ROOT)/shim/include -I$(ROOT)/toolchain/include -I$(P)/include
 $(M32OUT)/render/nine/d3dx/%.cpp.o: $(ROOT)/render/nine/d3dx/%.cpp
@@ -155,11 +160,23 @@ device:
 	else python3 -I $(HERE)/backends/check_backends.py --list; fi
 	$(HERE)/backends/run_qemu.sh $(OUT)-device
 
+# ---- the compiler enforces the boundary rule: a game code pointer (WNDPROC ...) is a fnvnx_guestfn under the platform macro,
+# with no conversion to a native function pointer. nocompile/gfn_nocompile.cpp: CASE 0 (the call through the wrapper)
+# must compile, CASE 1..4 (raw casts, implicit conversion, a native function stored as a game address) must be rejected.
+# Not part of the default target: `make -C tests/s4 gfn-nocompile`.
+gfn-nocompile:
+	@$(CXX) $(CXXFLAGS_) -DFNVNX_PLATFORM_BUILD -DCASE=0 -fsyntax-only $(HERE)/nocompile/gfn_nocompile.cpp \
+		|| { echo "gfn-nocompile: the control (CASE 0) does not compile"; exit 1; }
+	@for c in 1 2 3 4; do \
+		if $(CXX) $(CXXFLAGS_) -DFNVNX_PLATFORM_BUILD -DCASE=$$c -fsyntax-only $(HERE)/nocompile/gfn_nocompile.cpp >/dev/null 2>&1; \
+		then echo "gfn-nocompile: CASE $$c COMPILED: a game code pointer can be called natively"; exit 1; fi; done; \
+	echo "gfn-nocompile: ok (control compiles, 4 native-call forms rejected)"
+
 # ---- AArch64 ILP32 syntax check (the game's data model)
 XCC ?= aarch64-linux-gnu-gcc
 XCXX ?= aarch64-linux-gnu-g++
 LIBNX ?= $(ROOT)/ext/libnx
-XFLAGS := -mabi=ilp32 -fsyntax-only -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wchar \
+XFLAGS := -DFNVNX_PLATFORM_BUILD -mabi=ilp32 -fsyntax-only -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wchar \
           -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(FT)/include
 ilp32: $(ENV_GEN)
 	@set -e; for f in $(PLAT_C); do echo "ilp32 cc  $${f#$(ROOT)/}"; $(XCC) -std=gnu11 $(XFLAGS) $$f; done

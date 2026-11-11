@@ -40,6 +40,7 @@ enum { WOM_OPEN = 0x3BB, WOM_CLOSE = 0x3BC, WOM_DONE = 0x3BD };
 struct node {
     node *next; nx_wavehdr *h; uint32_t frames, off, flags, loops; bool fed;
 };
+FNVNX_CALLBACK_T(waveout_proc, void, (void *, UINT, uintptr_t, uintptr_t, uintptr_t));   /* waveOutProc */
 struct cbinfo { unsigned kind; uintptr_t target, inst; };
 struct wo {
     wo *next; uintptr_t id; mix_format fmt; uint32_t vol;
@@ -74,9 +75,13 @@ void post(const cbinfo &cb, uintptr_t hwo, UINT m, uintptr_t p1)   /* g_lock hel
 void deliver(const msg *q)
 {
     switch (q->cb.kind) {
-    case CB_FUNC:
-        ((void (*)(void *, UINT, uintptr_t, uintptr_t, uintptr_t))q->cb.target)((void *)q->hwo, q->m, q->cb.inst, q->p1, 0);
+    case CB_FUNC: {
+        /* CALLBACK_FUNCTION: dwCallback is a game address (an integer in the waveOutOpen call): converted here, where it is
+         * interpreted as a function; g_qlock is not held (deliver_loop released it) */
+        waveout_proc f((uintptr_t)q->cb.target);
+        f((void *)q->hwo, q->m, q->cb.inst, q->p1, 0);
         break;
+    }
     case CB_EVENT: SetEvent((HANDLE)q->cb.target); break;
     case CB_WINDOW: PostMessageA((HWND)q->cb.target, q->m, (WPARAM)q->hwo, (LPARAM)q->p1); break;
     case CB_THREAD: fnvnx_post_thread_message((DWORD)q->cb.target, q->m, (WPARAM)q->hwo, (LPARAM)q->p1); break;

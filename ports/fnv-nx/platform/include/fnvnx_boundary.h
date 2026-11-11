@@ -24,6 +24,9 @@ extern "C" {
 #endif
 
 typedef uintptr_t fnvnx_gaddr;
+/* One x86 stack word / register of a boundary call: uintptr_t -- 32 bits in the product (a stack word), pointer-wide on
+ * the host, where the game's pointers are native and the "words" are the integer arguments of a native call. */
+typedef uintptr_t fnvnx_gword;
 
 /* ---- exports ------------------------------------------------------------------------------------------------ */
 
@@ -34,16 +37,18 @@ typedef uintptr_t fnvnx_gaddr;
 #define FNVNX_BOUNDARY_BY_NAME 0xffffffffu
 fnvnx_gaddr fnvnx_bnd_export_value(const char *dll, const char *name, uint32_t ordinal, const void *native);
 
-/* ---- calling game code (declared now; the platform's callback call sites are converted by a later task) --------- */
+/* ---- calling game code (platform code calls through fnvnx_guestfn / fnvnx_guest_com_call of fnvnx_guestfn.h, never directly) --------- */
 
-struct fnvnx_bnd_ret { uint32_t eax, edx; double st0; };
+/* the most words one boundary call carries (the host implementation's limit; fnvnx_guestfn.h static_asserts it) */
+#define FNVNX_BND_MAX_WORDS 16
+struct fnvnx_bnd_ret { fnvnx_gword eax, edx; double st0; };
 enum { FNVNX_BND_RET_INT = 0 /* int / void / pointer: eax */, FNVNX_BND_RET_I64 = 1 /* edx:eax */, FNVNX_BND_RET_ST0 = 2 /* float/double */ };
 
 /* Calls the game function at `addr` on the calling thread with the x86 stack words args[0..nargs) (args[0] is the
  * first argument, the one nearest the return address) and `ecx` as the this-pointer of a thiscall. Works for cdecl
  * and stdcall alike. `out` receives the results of the requested `kind`. Host: calls the native function with the
  * words as integer arguments (nargs <= 16; the native callee reads the ones it declares). */
-void fnvnx_bnd_guest_invoke(fnvnx_gaddr addr, uint32_t ecx, uint32_t nargs, const uint32_t *args, uint32_t kind,
+void fnvnx_bnd_guest_invoke(fnvnx_gaddr addr, uint32_t ecx, uint32_t nargs, const fnvnx_gword *args, uint32_t kind,
                             struct fnvnx_bnd_ret *out);
 
 /* ---- game threads -------------------------------------------------------------------------------------------- */

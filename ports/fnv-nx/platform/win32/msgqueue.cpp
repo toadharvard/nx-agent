@@ -358,7 +358,8 @@ extern "C" LRESULT DispatchMessageA(const MSG *m)
 {
     if (!m) { SetLastError(998); return 0; }
     if (m->message == 0x113 && m->lParam) {   /* WM_TIMER with a TIMERPROC */
-        ((void (*)(HWND, UINT, WPARAM, DWORD))(uintptr_t)m->lParam)(m->hwnd, 0x113, m->wParam, GetTickCount());
+        TIMERPROC tp((uintptr_t)m->lParam);   /* SetTimer's procedure: a game address, called through the boundary */
+        tp(m->hwnd, 0x113, m->wParam, GetTickCount());
         return 0;
     }
     fnwin_info wi;

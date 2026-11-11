@@ -24,6 +24,10 @@ TEST_CXX := $(wildcard $(HERE)/*.cpp) $(ROOT)/tests/s4/host_boundary.cpp
 
 OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(S4_C) $(S4_CXX) $(S7_CXX) $(TEST_CXX))
 
+# The platform's own sources see the game's callbacks (WNDPROC, ...) as fnvnx_guestfn (shim/include/fnvnx_callback.h:
+# a call goes through the boundary, a direct call does not compile); the tests are "the game" and keep plain pointers.
+$(filter $(OUT)/platform/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
+
 .PHONY: all test ilp32 qemu clean
 all: test
 
@@ -77,7 +81,7 @@ qemu:
 XCC ?= aarch64-linux-gnu-gcc
 XCXX ?= aarch64-linux-gnu-g++
 LIBNX ?= $(ROOT)/ext/libnx
-XFLAGS := -mabi=ilp32 -fsyntax-only -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wchar \
+XFLAGS := -DFNVNX_PLATFORM_BUILD -mabi=ilp32 -fsyntax-only -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wchar \
           -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(ROOT)/ext/freetype/include
 ilp32: $(ENVC_INC)
 	@set -e; for f in $(S7_CXX); do echo "ilp32 c++ $${f#$(ROOT)/}"; $(XCXX) -std=gnu++17 $(XFLAGS) $$f; done

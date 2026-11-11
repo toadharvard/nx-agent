@@ -12,6 +12,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "fnvnx_callback.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -159,8 +161,9 @@ void _purecall(void);
 /* atexit / _onexit / doexit / exit / _cexit / _c_exit: the exit-handler list of exitlist.cpp (handlers are game function
  * pointers, run through the boundary's guest_invoke). fnvnx_exit_register: 0, or -1 for a NULL handler / no memory. */
 int fnvnx_exit_register(uintptr_t handler);
-int fnvnx_atexit(void (*)(void));
-typedef int (*_onexit_t)(void);
+FNVNX_CALLBACK_T(fnvnx_atexit_fn, void, (void));
+int fnvnx_atexit(fnvnx_atexit_fn);
+FNVNX_CALLBACK_T(_onexit_t, int, (void));
 _onexit_t _onexit(_onexit_t);
 void fnvnx_doexit(int code, int quick, int retcaller);
 void fnvnx_exit(int code) __attribute__((noreturn));

@@ -833,7 +833,8 @@ int c_sscanf(const char *in, const char *fmt, ...)
 char *w_strchr(const char *s, int c) { return (char *)strchr(s, c); }
 char *w_strrchr(const char *s, int c) { return (char *)strrchr(s, c); }
 
-typedef int (*cmp_t)(const void *, const void *);
+/* the comparator is the game's: a guest address, called through the boundary */
+FNVNX_CALLBACK_T(cmp_t, int, (const void *, const void *));
 void swp(char *a, char *b, size_t w)
 {
     char t[256];
@@ -924,13 +925,13 @@ char *c_tempnam(const char *dir, const char *prefix)
 }
 
 /* ---------------------------------------------------------------- process: init/exit, locks, environment */
-typedef void (*pvfv)(void);
-typedef int (*onexit_fn)(void);
+FNVNX_CALLBACK_T(pvfv, void, (void));       /* _initterm's table entries: guest addresses (one word each in the game) */
+FNVNX_CALLBACK_T(onexit_fn, int, (void));
 void c_initterm(pvfv *first, pvfv *last)
 {
     for (; first < last; first++)
         if (*first)
-            (*first)();
+            (*first)();   /* through the boundary */
 }
 
 /* _onexit: the handler (a game function pointer) goes into the exit-handler list (exitlist.cpp) */

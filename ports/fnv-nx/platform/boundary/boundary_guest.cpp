@@ -23,11 +23,24 @@ fnvnx_gaddr fnvnx_bnd_export_value(const char *dll, const char *name, uint32_t o
     return fnvnx_import_key(dll, name, ordinal);
 }
 
-void fnvnx_bnd_guest_invoke(fnvnx_gaddr addr, uint32_t ecx, uint32_t nargs, const uint32_t *args, uint32_t kind,
+void fnvnx_bnd_guest_invoke(fnvnx_gaddr addr, uint32_t ecx, uint32_t nargs, const fnvnx_gword *args, uint32_t kind,
                             struct fnvnx_bnd_ret *out)
 {
+    static_assert(sizeof(fnvnx_gword) == 4, "the product is ILP32: a boundary word is one x86 stack word");
     static_assert(sizeof(struct fnvnx_bnd_ret) == sizeof(struct fnvnx_guest_ret), "one layout");
-    fnvnx_guest_invoke((uint32_t)addr, ecx, nargs, args, kind, (struct fnvnx_guest_ret *)out);
+    /* the runtime's word array is uint32_t: copy, so no pointer type is reinterpreted (uintptr_t is not uint32_t on every ILP32 libc) */
+    uint32_t w[FNVNX_BND_MAX_WORDS];
+    if (nargs > FNVNX_BND_MAX_WORDS)
+        nargs = FNVNX_BND_MAX_WORDS;   /* unreachable: fnvnx_guestfn.h static_asserts the word count of every call */
+    for (uint32_t i = 0; i < nargs; i++)
+        w[i] = (uint32_t)args[i];
+    struct fnvnx_guest_ret r = {0, 0, 0.0};
+    fnvnx_guest_invoke((uint32_t)addr, ecx, nargs, w, kind, &r);
+    if (out) {
+        out->eax = r.eax;
+        out->edx = r.edx;
+        out->st0 = r.st0;
+    }
 }
 
 struct fnvnx_bnd_thread {

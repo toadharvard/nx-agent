@@ -109,7 +109,7 @@ void *LoadResource(HMODULE, void *);
 void *LockResource(void *);
 DWORD SizeofResource(HMODULE, void *);
 BOOL FreeResource(void *);
-BOOL EnumResourceNamesA(HMODULE, LPCSTR, BOOL (*)(HMODULE, LPCSTR, LPSTR, LONG_PTR), LONG_PTR);
+BOOL EnumResourceNamesA(HMODULE, LPCSTR, ENUMRESNAMEPROCA, LONG_PTR);
 /* winmm waveOut (platform/audio/waveout.cpp) */
 #define FNVNX_WAVEOUT_EXPORTS(X)                                                                            \
     X(waveOutOpen) X(waveOutClose) X(waveOutPrepareHeader) X(waveOutUnprepareHeader) X(waveOutWrite)         \

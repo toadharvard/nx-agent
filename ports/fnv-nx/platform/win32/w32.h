@@ -257,8 +257,8 @@ typedef struct _STARTUPINFOA {
     HANDLE hStdInput, hStdOutput, hStdError;
 } STARTUPINFOA, *LPSTARTUPINFOA;
 struct _EXCEPTION_POINTERS;
-typedef LONG (*LPTOP_LEVEL_EXCEPTION_FILTER)(struct _EXCEPTION_POINTERS *);
-typedef BOOL (*LOCALE_ENUMPROCA)(LPSTR);
+FNVNX_CALLBACK_T(LPTOP_LEVEL_EXCEPTION_FILTER, LONG, (struct _EXCEPTION_POINTERS *));
+FNVNX_CALLBACK_T(LOCALE_ENUMPROCA, BOOL, (LPSTR));
 
 extern "C" {
 UINT GetDriveTypeA(LPCSTR);
@@ -323,7 +323,10 @@ BOOL IsProcessorFeaturePresent(DWORD);
 UINT SetErrorMode(UINT);
 BOOL IsDBCSLeadByte(BYTE);
 DWORD ExpandEnvironmentStringsA(LPCSTR, LPSTR, DWORD);
-BOOL SetConsoleCtrlHandler(BOOL (*)(DWORD), BOOL);   /* crt_kernel32.cpp */
+FNVNX_CALLBACK_T(PHANDLER_ROUTINE, BOOL, (DWORD));
+FNVNX_CALLBACK_T(ENUMRESNAMEPROCA, BOOL, (HMODULE, LPCSTR, LPSTR, LONG_PTR));
+FNVNX_CALLBACK_T(TIMERPROC, void, (HWND, UINT, UINT_PTR, DWORD));
+BOOL SetConsoleCtrlHandler(PHANDLER_ROUTINE, BOOL);   /* crt_kernel32.cpp */
 LSTATUS RegOpenKeyA(HKEY, LPCSTR, PHKEY);            /* advapi32 (registry.cpp) */
 }
 /* the platform's fixed Windows directories (sysinfo.cpp, ENV_TRUTH P5) */

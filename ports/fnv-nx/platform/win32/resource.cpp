@@ -488,7 +488,7 @@ extern "C" DWORD SizeofResource(HMODULE m, void *r)
     if (!entry_ptr(im, r)) { SetLastError(ERROR_INVALID_PARAMETER); return 0; }
     return entry_data(im, (const uint8_t *)r, &d, &n) ? (DWORD)n : 0;
 }
-extern "C" BOOL EnumResourceNamesA(HMODULE m, LPCSTR type, BOOL (*cb)(HMODULE, LPCSTR, LPSTR, LONG_PTR), LONG_PTR param)
+extern "C" BOOL EnumResourceNamesA(HMODULE m, LPCSTR type, ENUMRESNAMEPROCA cb, LONG_PTR param)
 {
     Img im; Dir d; uint32_t off;
     if (!cb || !open_image(m, &im) || !open_dir(im, 0, &d)) return FALSE;
