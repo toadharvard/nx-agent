@@ -15,7 +15,8 @@ HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.pat
 BACK = os.path.join(ROOT, "render", "d3d9", "backend"); NXD = os.path.join(BACK, "nx")
 DK = os.environ.get("FNVNX_DK", "/home/user/work/l6/dk")
 NM = os.path.join(DK, "dkp", "devkitA64", "bin", "aarch64-none-elf-nm")
-FILES = ["dk_core.c", "dk_swap.c"]
+FILES = ["dk_core.c", "dk_swap.c"]   # linked into the host harness; the other objects have their own test (tests/l6/dkimage)
+ALLC = FILES + ["dk_image.c", "dk_xfer.c", "dk_sampler.c", "dk_read.c"]
 EXPECT_CHECKS = 114
 MUST_NAMES = ["create_ok", "device_flags", "swap_layout", "front_layout", "swap_no_hwcompression", "swapchain_made", "front_zero_filled", "api_slots",
               "info_ok", "shutdown_waits_idle", "mem_ids_dense", "mem_flags_generic", "mem_flags_code", "mem_flags_image", "mem_gpu_addr",
@@ -24,12 +25,11 @@ MUST_NAMES = ["create_ok", "device_flags", "swap_layout", "front_layout", "swap_
               "interval_4", "interval_5_bad", "depth_image_bad", "src_overflow_bad", "cursor_big_bad", "present_null_struct_bad", "wait_vblank_ok",
               "wait_vblank_bad_output", "destroy_order", "destroy_balanced", "noswap_present_bad", "noswap_balanced", "device_fail_reported",
               "vi_fail_reported"]
-PENDING = {"nxdk_image_create", "nxdk_image_create4", "nxdk_image_destroy", "nxdk_image_read", "nxdk_readback", "nxdk_sampler_create",
-           "nxdk_sampler_update", "nxdk_shader_create", "nxdk_shader_destroy", "nxdk_shader_create_d3d", "nxdk_submit", "nxdk_wait_frame",
-           "nxdk_query_result", "nxdk_img", "nxdk_present_compose"}
+PENDING = {"nxdk_shader_create", "nxdk_shader_destroy", "nxdk_shader_create_d3d", "nxdk_submit", "nxdk_wait_frame", "nxdk_query_result", "nxdk_present_compose"}
 EMBEDDER = {"nxdk_guest_ptr", "nxdk_on_present"}
-HANDLERS = {"nxdk_mem_create", "nxdk_mem_gpu_addr", "nxdk_mem_destroy", "nxdk_present", "nxdk_wait_vblank", "nxdk_shutdown"}
-LIBC = {"memset", "memcpy", "snprintf", "vsnprintf"}
+HANDLERS = {"nxdk_mem_create", "nxdk_mem_gpu_addr", "nxdk_mem_destroy", "nxdk_present", "nxdk_wait_vblank", "nxdk_shutdown", "nxdk_image_create", "nxdk_image_create4",
+            "nxdk_image_destroy", "nxdk_image_read", "nxdk_readback", "nxdk_sampler_create", "nxdk_sampler_update", "nxdk_img"}
+LIBC = {"memset", "memcpy", "snprintf", "vsnprintf", "malloc", "free", "calloc", "memcmp", "memmove"}
 LIBCALL = re.compile(r"^(dk|nwindow|vi|event)[A-Z]\w*$")
 FORBID = re.compile(r"stub|todo|not implemented|placeholder|fallback|no-op|noop|weak", re.I)
 
@@ -40,7 +40,7 @@ def check(ok, msg):
 def tail(s, n=12): return "\n".join(s.strip().splitlines()[-n:])
 
 # ---- a ------------------------------------------------------------------------------------------------------------------------------------------
-for f in FILES + ["dk.h"]:
+for f in ALLC + ["dk.h"]:
     p = os.path.join(NXD, f)
     if not os.path.exists(p): check(False, "missing product file " + f); continue
     txt = open(p).read()

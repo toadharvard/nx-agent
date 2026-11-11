@@ -50,7 +50,9 @@ uint32_t nxdk_swap_create(uint32_t width, uint32_t height) {
     nxdk.cmd = dkCmdBufCreate(&cb);
     if (!nxdk.cmd) return swap_fail("present command buffer");
     dkImageInitialize(&nxdk.front.dk, &frontLay, nxdk.frontMem, 0);
-    nxdk.front.w = width; nxdk.front.h = height; nxdk.front.fmt = NxFmt_RGBA8; nxdk.front.flags = NxImg_RenderTarget;
+    nxdk.front.w = width; nxdk.front.h = height; nxdk.front.d = 1; nxdk.front.fmt = NxFmt_RGBA8; nxdk.front.flags = NxImg_RenderTarget;
+    nxdk.front.type = NxImgType_2D; nxdk.front.mips = 1; nxdk.front.samples = 1; nxdk.front.layers = 1; nxdk.front.used = 1;
+    nxdk_img_describe(0, &nxdk.front, 0);   /* descriptor slot 0 samples the front image (dk.h, Descriptor sets) */
     DkImage const* images[NXDK_FRAMES];
     for (uint32_t i = 0; i < NXDK_FRAMES; i++) {
         dkImageInitialize(&nxdk.swap[i], &swapLay, nxdk.swapMem, (uint32_t)(i * swapSize));
