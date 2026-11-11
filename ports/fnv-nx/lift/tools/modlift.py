@@ -143,7 +143,7 @@ def run(arg):
         cnt[e] = (n_ud, n_xf, n_mf); udinfo[e] = uds
         return ext, deps, ends
     # ---- rule C: the entry set is closed under the direct control transfers of EVERY entry (proven or candidate), computed with the lifter's own explore: the body of entry e is
-    # the descent from e over the range [e, e + extent(e)) (extent = the universe.tsv column), a direct call target is an entry (the lifter emits L_<target>() for every
+    # the descent from e over the range [e, e + span(e)) (span = the universe.tsv extent column: up to the end of the last instruction e reaches), a direct call target is an entry (the lifter emits L_<target>() for every
     # direct call), a direct jmp/jcc/loop target outside the range is an entry; a target outside every executable section is no entry (the lifter sends it through the dispatcher).
     TRACE = os.environ.get('FNVNX_CLOSURE_TRACE')
     limg = LImage(path, M.base); lcache = {}; clos = {}; closure_new = Counter(); rounds = 0; n_before = 0; JMP = ('loop', 'loope', 'loopne')
@@ -162,6 +162,8 @@ def run(arg):
                     ts.setdefault(a_ + g.size, a_); ft.add(a_ + g.size)         # a fall-through is a control transfer to its successor, like `jmp nxt` (f_flow.jump_out)
             lcache[k] = (cs, ts, jx, ft)
         return lcache[k]
+    def span(e, xs):        # the lifter range of entry e is [e, e + span): the smallest interval from e that holds every instruction e reaches (a reached instruction below e is outside: a jump to it leaves the range)
+        return max([a + dec[a][0] - e for a in xs if a >= e] or [0])
     while True:
         while True:
             while queue: descend(queue.popleft())
@@ -170,13 +172,13 @@ def run(arg):
         E = es(); NR, res = codemap.noreturn_lfp(E, trav, {eh.thrower} & set(ent)); exts = {e: res[e][0] for e in E}; edges = {e: res[e][1] for e in E}
         rounds += 1; n_before = n_before or len(E); viol = {}; outside = {}; jxs = set(); ftall = set()
         for e in E:
-            cs, ts, jx, ft = lc_targets(e, sum(dec[a][0] for a in exts[e])); jxs |= {(e, x) for x in jx}; ftall |= ft
+            cs, ts, jx, ft = lc_targets(e, span(e, exts[e])); jxs |= {(e, x) for x in jx}; ftall |= ft
             for kd, T in (('call', cs), ('tail', ts)):
                 for t, a_ in T.items():
                     if t in ent: continue
                     if intext(t):
                         viol.setdefault(t, kd)
-                        if TRACE: print('closure-trace round %d: %08x %s from entry %08x ext %d at %08x' % (rounds, t, kd, e, sum(dec[x][0] for x in exts[e]), a_), file=sys.stderr, flush=True)
+                        if TRACE: print('closure-trace round %d: %08x %s from entry %08x ext %d at %08x' % (rounds, t, kd, e, span(e, exts[e]), a_), file=sys.stderr, flush=True)
                     else: outside[e, a_, t] = kd
         if not viol: break      # terminates: every round adds at least one entry and entries are addresses of the executable sections
         for t, k in sorted(viol.items()):
@@ -309,11 +311,11 @@ def run(arg):
     for e in E:
         pk = next(k for k in PRI if k in ent[e]); n_ud, n_xf, n_mf = cnt[e]; kc[pk] += 1
         fl = ['proven' if e in proven else 'candidate'] + sorted(ent[e] - {pk}) + (['first-ud'] if e in ud else []) + ['%s=%d' % kv for kv in (('ud', n_ud), ('xf', n_xf), ('reloc-misfit', n_mf)) if kv[1]]
-        out.append('%08x\t%s\t%d\t%s' % (e, pk, sum(dec[a][0] for a in exts[e]), ','.join(fl)))
-    open(outd + '/universe.tsv', 'w').write('# base=0x%08x: addresses are absolute VAs at the assigned load base (not RVAs; preferred base 0x%08x); columns: entry, kind, extent, flags; extent is the SUM of the bytes the entry reaches (not a contiguous span), see ranges.tsv\n' % (M.base, M.pref) + '\n'.join(out) + '\n')
+        out.append('%08x\t%s\t%d\t%s' % (e, pk, span(e, exts[e]), ','.join(fl)))
+    open(outd + '/universe.tsv', 'w').write('# base=0x%08x: addresses are absolute VAs at the assigned load base (not RVAs; preferred base 0x%08x); columns: entry, kind, extent, flags; extent is the SPAN [entry, entry + extent) that holds every instruction the entry reaches at or above it (the range the lifter takes; the bytes reached: ranges.tsv)\n' % (M.base, M.pref) + '\n'.join(out) + '\n')
     hd = '# base=0x%08x: absolute VAs at the assigned load base (not RVAs)\n' % M.base; bad = 0; rg = []
     for e, row in zip(E, out):
-        r = codemap.ranges(exts[e], lambda a: dec[a][0]); bad += sum(b - a for a, b in r) != int(row.split('\t')[2]); rg.append('%08x\t%s' % (e, codemap.rng_str(r)))
+        r = codemap.ranges(exts[e], lambda a: dec[a][0]); bad += max([b - e for a, b in r if b > e] or [0]) != int(row.split('\t')[2]); rg.append('%08x\t%s' % (e, codemap.rng_str(r)))
     open(outd + '/ranges.tsv', 'w').write(hd.rstrip() + '; columns: entry, half-open ranges start-end (hex) of the instruction bytes reached\n' + '\n'.join(rg) + '\n')
     nrr = codemap.nr_rows(NR, res, nrname, seedn)
     open(outd + '/noreturn.tsv', 'w').write(hd.rstrip() + '; columns: entry, reason\n' + ''.join('%08x\t%s\n' % kv for kv in nrr))
@@ -323,7 +325,7 @@ def run(arg):
     print('rule 1: relocated in-span values: %d sites, %d distinct, not entries %d (before = after = %d entries from pointers); reloc sites lying in the span: %d (inside reached ranges %d, outside every range %d)' % (
         len(rvals), len({v for r, v in rvals}), len(unent), len({v for r, v in rvals}), len(ins_), len(ins_) - outr, outr))
     print('closure (rule C, lifter explore): entries %d -> %d in %d rounds; new by cause %s; direct targets outside the executable sections (via the dispatcher, no entry) %d refs / %d distinct targets (outside.tsv); jecxz leaving its range %d' % (n_before, len(E), rounds, dict(sorted(closure_new.items())), len(outside), len({t for e, a, t in outside}), len(jxs)))
-    print('ranges.tsv %d rows, noreturn.tsv %d rows, range-sum vs extent mismatches %d' % (len(rg), len(nrr), bad))
+    print('ranges.tsv %d rows, noreturn.tsv %d rows, range-span vs extent mismatches %d' % (len(rg), len(nrr), bad))
     # ---- totality gate
     targets = {v for r, v in rvals} | set(XC) | ({M.base + M.entry} if M.entry else set()) | {t for t in callers if intext(t)} | set(tailsrc) | set(clos) | {t for t, ks in ent.items() if ks & {'tls', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw'}}
     cert = sum(1 for t in targets if t in ent and (t in dec or t in ud or t in xf))
