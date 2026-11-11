@@ -529,10 +529,17 @@ static int ev_piq(cx *c, cx *cw, const za *a, bf *A, int *B) {
   return 1;
 }
 
+#ifdef FM_DEBUG                  /* test/fmathtest.py: start limb count and a hook that reports every evaluation (A, B) so the error bounds can be checked against MPFR */
+int fm_nstart = 6;
+void (*fm_hook)(int n, const u32 *m, int e, int s, int z, int B, int r);
+#define FM_NSTART fm_nstart
+#else
+#define FM_NSTART 6
+#endif
 static double ziv(int w, double x, double y, int q, u32 *fl) {
   u64 ux = d2u(x);
   int ex = (int)((ux >> 52) & 0x7ff) - 1022, exx = ex > 0 ? ex : 0;
-  for (int n = 6;; n *= 2) {
+  for (int n = FM_NSTART;; n *= 2) {
     int nw = (w <= W_TAN) ? n + (exx >> 5) + 5 : 72;
     u32 arena[48 * n + 24 * nw];
 #ifdef FM_DEBUG
@@ -548,6 +555,9 @@ static double ziv(int w, double x, double y, int q, u32 *fl) {
     case W_ATAN2: r = ev_atan(&c, &cw, &a, &A, &B); break;
     default: r = ev_piq(&c, &cw, &a, &A, &B); break;
     }
+#ifdef FM_DEBUG
+    if (fm_hook) fm_hook(n, A.m, A.e, A.s, A.z, B, r);
+#endif
     if (r) { u64 out; if (bf_pack(&c, &A, B, r == 2, &out, fl)) return u2d(out); }
   }
 }

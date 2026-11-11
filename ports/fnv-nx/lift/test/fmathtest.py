@@ -40,6 +40,23 @@ void run_m(int op, unsigned n, const double *a, const double *b, double *o1, dou
     }
     o1[i] = r; o2[i] = r2; fl[i] = f; cf[i] = c | (op <= O_TAN ? (fnvl_m_trig_big(a[i]) ? 0x400 : 0) : 0); } }
 unsigned bigflag(double x) { return fnvl_m_trig_big(x); }
+/* error-bound check: record the first evaluation (n limbs, A, B) of a call */
+extern int fm_nstart; extern void (*fm_hook)(int, const unsigned *, int, int, int, int, int);
+static int h_n, h_e, h_s, h_z, h_B, h_r, h_cnt; static unsigned h_m[4096];
+static void hook(int n, const unsigned *m, int e, int s, int z, int B, int r) {
+  if (h_cnt++) return;
+  h_n = n; h_e = e; h_s = s; h_z = z; h_B = B; h_r = r; for (int i = 0; i < n && i < 4096; i++) h_m[i] = m[i]; }
+int dbg_eval(int op, double a, double b, int nstart, unsigned *m, int *info) {
+  unsigned f = 0, c = 0; double r1, r2; fm_nstart = nstart; fm_hook = hook; h_cnt = 0;
+  switch (op) {
+  case O_SIN: r1 = fnvl_m_sin(a, &f); break; case O_COS: r1 = fnvl_m_cos(a, &f); break; case O_TAN: r1 = fnvl_m_tan(a, &f); break;
+  case O_ATAN2: r1 = fnvl_m_atan2(a, b, &f); break; case O_2XM1: r1 = fnvl_m_2xm1(a, &f); break;
+  case O_YL2X: r1 = fnvl_m_yl2x(a, b, &f); break; case O_YL2XP1: r1 = fnvl_m_yl2xp1(a, b, &f); break; default: break; }
+  (void)r1; (void)r2; (void)c; fm_hook = 0;
+  if (!h_cnt) return 0;
+  for (int i = 0; i < h_n; i++) m[i] = h_m[i];
+  info[0] = h_n; info[1] = h_e; info[2] = h_s; info[3] = h_z; info[4] = h_B; info[5] = h_r;
+  return 1; }
 /* the real x87 (fninit: extended precision, round to nearest). o1 = ST0 after (popped first), o2 = ST1; sw captured right after the instruction */
 void run_h(int op, unsigned n, const double *a, const double *b, double *o1, double *o2, unsigned *sw) {
   for (unsigned i = 0; i < n; i++) { double x = a[i], y = b[i], r1 = 0, r2 = 0; unsigned short s = 0;
@@ -368,6 +385,39 @@ def gen_log(r, N, plus):
     return [(y, x) for y, x in ps if math.isfinite(x) and math.isfinite(y) and y != 0 and x != 0 and (x > 0 if not plus else x > -1) and x != (1.0 if not plus else 0.0)]
 
 
+def bound_check(args):
+    """the claim |A - v| <= 2^-B |v| of every evaluator (the proof obligation of rt/fmath.c), against MPFR, for the first evaluation at n = nstart limbs"""
+    which, pts = args
+    if LIB is None:
+        build()
+    two = which in ('atan2', 'yl2x', 'yl2xp1')
+    opn = OPS[which]
+    m = (ctypes.c_uint * 4096)(); info = (ctypes.c_int * 8)()
+    LIB.dbg_eval.argtypes = [ctypes.c_int, ctypes.c_double, ctypes.c_double, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p]
+    bad = []; used = 0
+    for i, p in enumerate(pts):
+        a, b = (p if two else (p, 0.0))
+        for ns in (6, 7, 9):
+            if not LIB.dbg_eval(opn, a, b, ns, ctypes.addressof(m), ctypes.addressof(info)):
+                continue
+            n, e, sg, z, B, r = info[0], info[1], info[2], info[3], info[4], info[5]
+            if r != 1 or z:
+                continue
+            v = ORACLE[which](*p) if two else ORACLE[which](p)
+            if isinstance(v, Fraction):
+                continue
+            used += 1
+            mi = 0
+            for k in range(n - 1, -1, -1):
+                mi = (mi << 32) | m[k]
+            with prec(32 * n):
+                A = gmpy2.mpfr(mi) * gmpy2.mpfr(2) ** (e - 32 * n) * (-1 if sg else 1)
+                err = abs(A - v) * gmpy2.mpfr(2) ** B
+                if err > abs(v):
+                    bad.append((p, ns, B, float(err / abs(v))))
+    return used, bad
+
+
 def split(lst, k):
     return [lst[i::k] for i in range(k)]
 
@@ -585,6 +635,16 @@ def main():
         print('%-7s inputs %7d  equal %7d  different %d' % (f, len(pts), len(pts) - len(bad), len(bad)), flush=True)
         for b in bad[:5]:
             print('   DIFF', fmt(b[0]) if isinstance(b[0], tuple) else float.hex(b[0]), 'got', float.hex(b[1]), 'want', float.hex(b[2]), *b[3:])
+        fail += len(bad)
+    # the error bounds claimed by the evaluators (the proof obligation), checked on a deterministic sample at n = 6, 7, 9 limbs
+    for f in fns:
+        pts = gens[f]()
+        r2 = random.Random(o.seed + 1); smp = r2.sample(pts, min(len(pts), 3000))
+        res = pool.map(bound_check, [(f, smp[i::4]) for i in range(4)])
+        used = sum(x[0] for x in res); bad = [b for x in res for b in x[1]]
+        print('%-7s claimed error bound 2^-B vs MPFR: %6d evaluations, violated %d' % (f, used, len(bad)))
+        for b in bad[:5]:
+            print('   BOUND', b)
         fail += len(bad)
     pool.close()
     tot, bad, out = host_specials()

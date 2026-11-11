@@ -269,7 +269,9 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     em = cx.em
     kinds = cx.kinds
     from . import universe
-    uent = universe.load()[0]
+    uent = getattr(img, 'entries', None)          # a synthetic image of the unit tests names its entries itself
+    uent = universe.load()[0] if uent is None else uent
+    cx.uent = uent
     for idx, a in enumerate(order):
         ins = insns[a]
         m = ins.mnemonic

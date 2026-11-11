@@ -125,10 +125,7 @@ def cond_jump(cx, cond, t):
     if cx.lo <= t < cx.hi:
         cx.em('if(%s) goto %s;' % (cond, cx.lab(t)))
     else:
-        cx.nonlocal_ = True
-        cx.tails.add(t)
-        cx.kinds.add('tailjmp')
-        cx.em('if(%s){ SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; goto after_tail; }' % (cond, f_flow.hexs(t)))
+        f_flow.jump_out(cx, t, cond)
 
 
 @op('loop', 'loope', 'loopne')

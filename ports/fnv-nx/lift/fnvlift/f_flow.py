@@ -13,6 +13,21 @@ def is_import(cx, o):
     return o.type == X.X86_OP_MEM and not o.mem.base and not o.mem.index and not o.mem.segment
 
 
+def jump_out(cx, t, cond=None):
+    """a direct jump (cond None) or conditional jump to address t outside the function's range. t is an entry of the universe: the C call of its
+    body, then the tail rule. t is not an entry (the universe is closed under direct targets inside executable sections, so t lies in no executable
+    section): the transfer goes to the dispatcher like any computed one: one rule for every address that has no body (rt/rt.c)."""
+    cx.nonlocal_ = True
+    pre = 'if(%s)' % cond if cond else ''
+    if t in cx.uent:
+        cx.tails.add(t)
+        cx.kinds.add('tailjmp')
+        cx.em('%s{ SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; goto after_tail; }' % (pre, hexs(t)))
+    else:
+        cx.kinds.add('jmp-direct-noentry')
+        cx.em('%s{ c->ra=0x%xu; goto nonlocal; }' % (pre, t))
+
+
 @op('call')
 def h_call(cx, ins):
     o = cx.ops[0]
@@ -23,8 +38,12 @@ def h_call(cx, ins):
         if cx.lo <= t < cx.hi:
             cx.selfcalls[cx.a] = (t, cx.nxt)
             cx.kinds.add('selfcall')
-        cx.calls.add(t)
-        cx.em('{ esp-=4; M32(esp)=0x%xu; SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal; }' % (cx.nxt, hexs(t), cx.nxt))
+        if t in cx.uent:
+            cx.calls.add(t)
+            cx.em('{ esp-=4; M32(esp)=0x%xu; SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal; }' % (cx.nxt, hexs(t), cx.nxt))
+        else:       # not an entry (see jump_out): through the dispatcher
+            cx.kinds.add('call-direct-noentry')
+            cx.em('{ esp-=4; M32(esp)=0x%xu; SYNC_OUT; REGS(); fnvl_dispatch(0x%xu)(); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal; }' % (cx.nxt, t, cx.nxt))
     else:
         cx.kinds.add('import' if is_import(cx, o) else 'indcall')
         cx.em('{ u32 t=%s; esp-=4; M32(esp)=0x%xu; SYNC_OUT; REGS(); fnvl_dispatch(t)(); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal; }' % (cx.rd(ins, o), cx.nxt, cx.nxt))
@@ -40,10 +59,7 @@ def h_jmp(cx, ins):
         if cx.lo <= t < cx.hi:
             em('goto %s;' % lab(t))
         else:
-            cx.nonlocal_ = True
-            cx.tails.add(t)
-            em('{ SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; goto after_tail; }' % hexs(t))
-            kinds.add('tailjmp')
+            jump_out(cx, t)
     else:
         cx.nonlocal_ = True
         cands = cx.tables.get(cx.a)
@@ -65,15 +81,16 @@ def h_jcc(cx, ins):
     if cx.lo <= t < cx.hi:
         cx.em('if(%s) goto %s;' % (c, cx.lab(t)))
     else:
-        cx.nonlocal_ = True
-        cx.tails.add(t)
-        cx.kinds.add('tailjmp')
-        cx.em('if(%s){ SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; goto after_tail; }' % (c, hexs(t)))
+        jump_out(cx, t, c)
 
 
 @op('jecxz')
 def h_jecxz(cx, ins):
-    cx.em('if(!ecx) goto %s;' % cx.lab(cx.ops[0].imm & 0xffffffff))
+    t = cx.ops[0].imm & 0xffffffff
+    if cx.lo <= t < cx.hi:
+        cx.em('if(!ecx) goto %s;' % cx.lab(t))
+    else:
+        jump_out(cx, t, '!ecx')
 
 
 @op('ret')

@@ -57,7 +57,7 @@ def main():
     os.makedirs(a.work, exist_ok=True); a.lifter = LIFT; os.makedirs(a.work, exist_ok=True); code = bytearray(0x40 * len(F) + 0x40); texts, ents = {}, {}
     for n, (parts, owns) in SRC.items():
         b = asm(parts, F[n]); code[F[n] - BASE:F[n] - BASE + len(b)] = b; ents[n] = (F[n], len(b), owns)
-    img = Fake(bytes(code)); chrun.T.G['img'] = img
+    img = Fake(bytes(code)); img.entries = set(F.values()); chrun.T.G['img'] = img
     for n, (ad, sz, owns) in ents.items(): texts[ad] = L.lift(img, ad, sz, owns=owns)[0]
     flags = [f for f in chrun.T.FLAGS if f not in ('-DFNVL_FLAGS_IO', '-DFNVL_STUBX')] + ['-DFNVL_TRACE', '-I', LIFT + '/rt']
     o, err = chain.comp_chunk((L.PRELUDE + '\n'.join(texts.values()), flags, a.work))
