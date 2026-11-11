@@ -88,7 +88,7 @@ TEST(display_enum_adapter)
     memset(&d, 0xCC, sizeof d); d.cb = sizeof d;
     CHECK(EnumDisplayDevicesA(NULL, 0, &d, 0));
     CHECK_STR(d.name, "\\\\.\\DISPLAY1");
-    CHECK_EQ(d.flags, 0x1 | 0x4);                    /* ATTACHED_TO_DESKTOP | PRIMARY_DEVICE */
+    CHECK_EQ(d.flags, 0x1 | 0x4 | 0x10);              /* ATTACHED_TO_DESKTOP | PRIMARY_DEVICE | VGA_COMPATIBLE (the reference's adapter flags) */
     CHECK(d.str[0] && d.id[0] && d.key[0]);
     CHECK(!strncmp(d.id, "PCI\\VEN_", 8));
     CHECK(!strncmp(d.key, "\\Registry\\Machine\\System\\CurrentControlSet\\Control\\Video\\{", 58));

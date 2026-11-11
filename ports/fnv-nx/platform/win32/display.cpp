@@ -249,17 +249,17 @@ extern "C" BOOL EnumDisplayDevicesA(LPCSTR dev, DWORD i, void *out, DWORD flags)
     if (!dev) {
         strcpy(d->name, ADAPTER_NAME);
         strcpy(d->string, "NVIDIA Tegra X1");
-        d->flags = 0x1 /* ATTACHED_TO_DESKTOP */ | 0x4 /* PRIMARY_DEVICE */;
+        d->flags = 0x1 /* ATTACHED_TO_DESKTOP */ | 0x4 /* PRIMARY_DEVICE */ | 0x10 /* VGA_COMPATIBLE: ref default adapter flags */;
         strcpy(d->id, "PCI\\VEN_10DE&DEV_0391&SUBSYS_00000000&REV_00");
         strcpy(d->key, "\\Registry\\Machine\\" VIDEO_KEY);
         return TRUE;
     }
     if (w32_stricmp(dev, ADAPTER_NAME)) return FALSE;
     strcpy(d->name, ADAPTER_NAME "\\Monitor0");
-    strcpy(d->string, "Generic PnP Monitor");
+    strcpy(d->string, "Generic Non-PnP Monitor"   /* ref: device_desc of a monitor without EDID */);
     d->flags = 0x1 /* ACTIVE */ | 0x2 /* ATTACHED */;
     if (flags & 0x1)   /* EDD_GET_DEVICE_INTERFACE_NAME: GUID_DEVINTERFACE_MONITOR */
-        strcpy(d->id, "\\\\?\\DISPLAY#Default_Monitor#4&fnvnx&0&UID0#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}");
+        strcpy(d->id, "\\\\?\\DISPLAY#Default_Monitor#0000&0000#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}");
     else
         strcpy(d->id, "MONITOR\\Default_Monitor\\" MONITOR_CLASS "\\0000");
     strcpy(d->key, "\\Registry\\Machine\\System\\CurrentControlSet\\Control\\Class\\" MONITOR_CLASS "\\0000");
