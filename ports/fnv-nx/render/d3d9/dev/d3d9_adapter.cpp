@@ -70,8 +70,8 @@ HRESULT STDMETHODCALLTYPE NxDirect3D9Ex::GetAdapterLUID(UINT adapter_idx, LUID* 
 
 // ---- creation (d3d9_main.c Direct3DCreate9 / Direct3DCreate9Ex -> d3d9_init: refcount 1, the answers are those of the profile)
 template <class C> static C* make() {
-    void* mem = nxd3d_alloc(sizeof(C)); if (!mem) return nullptr;
-    C* c = ::new (mem) C; NxObj* o = c; o->asRoot(1); uint32_t p = (uint32_t)nx_env_profile();
+    C* c = new C; if (!c) return nullptr;   // NxObj::operator new: the object sits behind its guest face (face.h)
+    NxObj* o = c; o->asRoot(1); uint32_t p = (uint32_t)nx_env_profile();
     if (FAILED(o->setPrivateData(G_NXENV_PROFILE, &p, sizeof p, 0))) { o->release(); return nullptr; }
     return c;
 }

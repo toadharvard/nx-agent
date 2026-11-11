@@ -11,6 +11,7 @@
 #endif
 void* nxd3d_alloc(size_t n);  // the only allocator the layer uses (obj.cpp: malloc/free); replaceable per platform
 void nxd3d_free(void* p);
+enum { NX_FACE_SIZE = 8 };  // face.h
 
 struct NxObj;
 struct NxClassInfo {  // generated (gen_impl.py): IID lattice = this interface then its bases up to IUnknown
@@ -33,8 +34,9 @@ struct NxObj {
     uint8_t owned = 0;           // lifetime belongs to owner/container (implicit back buffer, auto depth, implicit swap chain): never destroyed by counts
     uint8_t pool = 0xFF;         // D3DPOOL of a resource (0xFF = not a pool resource); MANAGED: SetPriority takes effect
     NxPriv* priv = nullptr;
-    void* operator new(size_t n) { return nxd3d_alloc(n); }
-    void operator delete(void* p) { nxd3d_free(p); }
+    // every object is allocated behind its guest face (face.h): NX_FACE_SIZE bytes in front of the complete object
+    void* operator new(size_t n) noexcept { uint8_t* r = (uint8_t*)nxd3d_alloc(n + NX_FACE_SIZE); if (!r) return nullptr; for (int i = 0; i < NX_FACE_SIZE; i++) r[i] = 0; return r + NX_FACE_SIZE; }
+    void operator delete(void* p) { if (p) nxd3d_free((uint8_t*)p - NX_FACE_SIZE); }
     ~NxObj();                    // frees private data (Releases D3DSPD_IUNKNOWN entries)
     // ---- construction (the creating code calls exactly one of these after `new`)
     void asRoot(uint32_t refs = 1);                                                  // IDirect3D9: public count `refs`
