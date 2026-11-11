@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Per-instruction differential test: lifted C (AArch64 ILP32 under Unicorn) vs Unicorn x86, over the instruction forms
-FalloutNV.exe really contains (recursive descent, never a linear sweep).  Reports lifter bugs, fixes nothing.
+the lifted pack contains (--pack / FNVNX_PACK: forms.tsv and encs.tsv of tools/liftgen.py, the lifter's own decoding).  Reports lifter bugs, fixes nothing.
     instest.py [--n 8] [--k 4] [--jobs 3] [--only mn,mn] [--limit-forms N] [--work DIR] [--lifter DIR]
-Inputs FNVNX_EXE / FNVNX_FUNCS.  Everything exe-derived goes to --work (default /home/user/l3work/instest), never the repo.
+Inputs FNVNX_EXE / FNVNX_PACK.  Everything exe-derived goes to --work (default /home/user/l3work/instest), never the repo.
 Outcomes per case: equal, diff, unlifted, nocompile, fault (the ORACLE cannot run it: #DE, #GP, undecodable, x87 stack fault
 which no correct program executes, or the case collides with the harness region), x87-prec (W13, R8: an x87 arithmetic result that is
 not comparable bit for bit: oracle PC=24/64, or the result is not a normal double, or an operand is not exactly a double, or two NaNs picked differently).
@@ -12,7 +12,7 @@ only when the oracle ran PC=53 and its result is a normal double.  Even-numbered
 static stack (entry depth XD, a state of that depth).  fnstsw: exception bits, C1, ES, B are not compared.  Compared since W6: mm0-7 (struct cpu mm[8]) and the MXCSR control bits (RC, FTZ, DAZ, masks; the exception status bits 0-5 are not modelled, so
 not compared).  Not compared: C1/exception flags.  SSE/MMX cases run with a random MXCSR (FPCR mirrors RC on the ARM side, as ldmxcsr does).
 A one-instruction function makes in-function branch targets (jecxz) fall outside the label set: that shows as nocompile."""
-import argparse, functools, hashlib, json, math, multiprocessing as mp, os, pickle, random, re, struct, subprocess, sys, time
+import argparse, functools, hashlib, json, math, multiprocessing as mp, os, random, re, struct, subprocess, sys, time
 import numpy as np
 from unicorn import *
 from unicorn.x86_const import *
@@ -53,41 +53,15 @@ def form_key(ins, X):
         elif o.type == X.X86_OP_IMM: ks.append('imm')
         else: ks.append('m%d' % (o.size * 8) + {X.X86_REG_FS: ':fs', X.X86_REG_GS: ':gs'}.get(o.mem.segment, ''))
     return '%s|%s|%s' % (ins.mnemonic, ','.join(ks), opc.hex()), opc
-def census(rng):
-    from fnvlift.core import explore
-    from capstone import x86 as X
-    forms, mnf, bad = {}, {}, 0
-    for fi in range(*rng):
-        a, s = G['rows'][fi]
-        try: insns = explore(G['img'], a, a + s, G['img'].bytes(a, s))[0]
-        except Exception: bad += 1; continue
-        for ia in sorted(insns):
-            ins = insns[ia]; key = form_key(ins, X)[0]
-            f = forms.setdefault(key, [0, set(), {}]); f[0] += 1; f[1].add(fi)
-            raw = bytes(ins.bytes)
-            if len(f[2]) < G['k'] and raw not in f[2]: f[2][raw] = ia      # ascending addresses: the first K distinct are the lowest
-            mnf.setdefault(key.split('|')[0], set()).add(fi)
-    return forms, mnf, bad
 def load_forms(a, rows):
-    sig = [os.path.getsize(a.exe), os.stat(a.exe).st_mtime, os.path.getsize(a.funcs), os.stat(a.funcs).st_mtime, a.k,
-           os.stat(os.path.join(a.lifter, 'fnvlift', 'core.py')).st_mtime]
-    pk = os.path.join(a.work, 'forms.pkl')
-    try:
-        d = pickle.load(open(pk, 'rb'))
-        if d['sig'] == sig: return d
-    except Exception: pass
-    G['k'] = a.k; cuts = list(range(0, len(rows), 400)) + [len(rows)]
-    forms, mnf, bad = {}, {}, 0
-    with mp.get_context('fork').Pool(a.jobs) as p:
-        for f2, m2, b2 in p.imap(census, list(zip(cuts, cuts[1:]))):
-            bad += b2
-            for k, (c, fs, encs) in f2.items():
-                f = forms.setdefault(k, [0, 0, {}]); f[0] += c; f[1] += len(fs)
-                for r, ia in encs.items():
-                    if r not in f[2] and len(f[2]) < a.k: f[2][r] = ia
-            for k, fs in m2.items(): mnf.setdefault(k, set()).update(fs)
-    d = dict(sig=sig, forms=forms, mnf={k: len(v) for k, v in mnf.items()}, undecodable=bad, nfuncs=len(set().union(*mnf.values())))
-    pickle.dump(d, open(pk, 'wb')); return d
+    """The universe is the lifter's own: the forms and encodings of the pack (tools/liftgen.py forms.tsv, encs.tsv), i.e. the instructions of the
+    lifted entries as the lifter decoded them. No second decoder decides what is an instruction."""
+    tsv = lambda n: [l.rstrip('\n').split('\t') for l in open(os.path.join(a.pack, n))]
+    forms = {f: [int(n), 0, {}] for f, n, _ in tsv('forms.tsv')}
+    for f, r, x in tsv('encs.tsv'):
+        if len(forms[f][2]) < a.k: forms[f][2][bytes.fromhex(r)] = int(x, 16)
+    mnf = {}
+    return dict(forms=forms, mnf=mnf, undecodable=0, nfuncs=0)
 DP = [0.0, -0.0, 1.0, -1.0, 0.5, 2.0, 3.0, 10.0, 100.0, 255.0, 65535.0, 2.0 ** 31, -2.0 ** 31, 2.0 ** 32, 2.0 ** 52, 2.0 ** 63, -2.0 ** 63, 1e300,
       -1e300, 1e-300, 5e-324, 2.2250738585072014e-308, math.inf, -math.inf, 1.5, 0.1, 3.14159, 1234.5678, 1e10, -7.25]
 FP = [0.0, -0.0, 1.0, -1.0, 0.5, 2.0, 3.0, 100.0, 1e30, 1e-30, 1e-45, 3.4e38, math.inf, -math.inf, 7.5, -0.25]
@@ -104,6 +78,9 @@ def imgpage(p):
         if va < p + 4096 and p < va + ((vs + 4095) & ~4095):
             buf = bytearray(4096) if buf is None else buf; lo, hi = max(va, p), min(va + min(vs, rs), p + 4096)
             if hi > lo: buf[lo - p:hi - p] = img.d[ro + lo - va:ro + hi - va]
+    if buf is None:                                   # no page of the exe: the encodings of the other images of the pack, at their addresses
+        for a, r in G.get('other', {}).items():
+            if a & ~0xfff == p: buf = bytearray(4096) if buf is None else buf; buf[a - p:a - p + len(r)] = r[:4096 - (a - p)]
     return bytes(buf) if buf is not None else None
 @functools.lru_cache(maxsize=4096)
 def genpage(seed, mode, p):
@@ -526,10 +503,14 @@ def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
     A('--n', type=int, default=8); A('--k', type=int, default=4); A('--jobs', type=int, default=3); A('--only'); A('--limit-forms', type=int)
     A('--work', default='/home/user/l3work/instest'); A('--lifter', default=os.path.dirname(HERE))
-    A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')); A('--funcs', default=os.environ.get('FNVNX_FUNCS', '/home/user/l3facts/funcs.tsv'))
+    A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')); A('--pack', default=os.environ.get('FNVNX_PACK', '/home/user/l3work/pack'))
     a = ap.parse_args(); t0 = time.time(); os.makedirs(a.work, exist_ok=True); sys.path.insert(0, a.lifter)
     import fnvlift as L, fnvlift.core
-    G.update(L=L, img=L.Image(a.exe), work=a.work, rows=sorted((int(x.split('\t')[0], 16), int(x.split('\t')[1])) for x in open(a.funcs) if x[0] != '#'))
+    class TImage(L.Image):                             # an encoding outside the exe (a module of the pack): its bytes come from encs.tsv
+        def bytes(self, x, n):
+            r = G['other'].get(x)
+            return r[:n] + b'\x90' * max(0, n - len(r)) if r is not None else super().bytes(x, n)
+    G.update(L=L, img=TImage(a.exe), work=a.work, other={})
     open(a.work + '/rt.S', 'w').write('.text\n' + ''.join('.globl %s\n%s: ret\n' % (k, k) for k in ('fnvl_call', 'fnvl_dispatch', 'fnvl_raise', 'fnvl_raise_av', 'fnvl_trace')) +   # fnvl_rcp32/rsqrt32: runtime-owner hooks, a bare `ret` here (their rows are 'hook', not gate failures)
         '.globl memcpy\nmemcpy: mov x3,x0\n1: cbz x2,2f\n ldrb w4,[x1],#1\n strb w4,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
         '.globl memset\nmemset: mov x3,x0\n1: cbz x2,2f\n strb w1,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
@@ -548,10 +529,11 @@ def main():
     import ctypes; G['cpum'] = ctypes.CDLL(a.work + '/cpumodel_host.so')
     open(a.work + '/off.cpp', 'w').write(L.PRELUDE + '\n#include <stddef.h>\nstatic_assert(offsetof(cpu,fs)==32&&offsetof(cpu,ftop)==36&&offsetof(cpu,st)==56&&offsetof(cpu,x)==120&&offsetof(cpu,fl)==248&&offsetof(cpu,mxcsr)==252&&offsetof(cpu,mm)==256&&offsetof(cpu,ra)==320&&offsetof(cpu,fx)==328&&offsetof(cpu,eflx)==456&&offsetof(cpu,sel)==472&&offsetof(cpu,teb)==496&&offsetof(cpu,fip)==500&&offsetof(cpu,fdp)==504&&sizeof(cpu)==536,"cpu layout");\n')
     subprocess.check_call(['aarch64-linux-gnu-g++'] + FLAGS + ['-fsyntax-only', a.work + '/off.cpp'])
-    d = load_forms(a, G['rows']); forms = d['forms']; print('decoded: %d forms, %d functions (%d undecodable) in %.0fs' % (len(forms), d['nfuncs'], d['undecodable'], time.time() - t0), file=sys.stderr)
+    d = load_forms(a, None); forms = d['forms']; print('pack: %d forms' % len(forms), file=sys.stderr)
     keys = sorted(k for k in forms if not a.only or k.split('|')[0] in a.only.split(','))
     if a.limit_forms and len(keys) > a.limit_forms: keys = [keys[i * len(keys) // a.limit_forms] for i in range(a.limit_forms)]
     encs = [(k, ia, raw) for k in keys for raw, ia in sorted(forms[k][2].items(), key=lambda t: t[1])]
+    G['other'].update({ia: raw for k, ia, raw in encs if not any(va <= ia < va + vs for n_, va, vs, ro, rs in G['img'].secs)})
     jobs = [(b, [(i,) + encs[i] for i in range(s, min(s + 60, len(encs)))], a.n) for b, s in enumerate(range(0, len(encs), 60))]
     res = {}
     with mp.get_context('fork').Pool(a.jobs) as p:

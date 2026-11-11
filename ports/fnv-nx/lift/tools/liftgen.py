@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """The generator of the lifted pack: the lifter's output for the whole code universe as C++ SOURCE. No compiler runs here: the objects are built
 only by verify/recipe.py from the product root lift/pack (build.json), whose `generated` stage copies the units out of the published pack tree.
-    liftgen.py --shard K/N --out DIR [--jobs J]   lift the entries whose index (address order) mod N == K -> texts_K.txt, missing_K.tsv, forms_K.tsv
+    liftgen.py --shard K/N --out DIR [--jobs J]   lift the entries whose index (address order) mod N == K -> texts_K.txt, missing_K.tsv, forms_K.tsv, encs_K.tsv
     liftgen.py --finish --out DIR [--also MODDIR=UNIVERSE.tsv ...] --bridge bridge.tsv [--need iat.tsv ...]
         merge the shards of every image of the process -> DIR/pack/: u/000.cpp .. u/fff.cpp, disp.S, imp.cpp, inc/fnvl_prelude.h, inc/imp.h,
-        entries.tsv, forms.tsv, imp_entries.tsv, imp_blocked.tsv, gate_liftgen.json
+        entries.tsv, forms.tsv, encs.tsv, imp_entries.tsv, imp_blocked.tsv, gate_liftgen.json
     liftgen.py --recipe REF COMMIT TREE_SHA256    write lift/pack/build.json for the published pack tree (fnv-nx-build branch, commit, cas.py ingest hash)
     liftgen.py --module NAME ...                  (shard mode) a module of modules.tsv, lifted at its assigned base with its universe
 RULE units: entry A lives in unit u/<(A >> 4) & 0xfff as 3 hex digits>.cpp, for every image. The 4096 unit names are fixed, so the recipe's
@@ -20,6 +20,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
 for p in ('bench', 'tools', 'test', ''):
     sys.path.insert(0, os.path.join(LIFT, p))
 BATCH = 60
+ENCS = 4            # encodings listed per form (encs.tsv): the distinct byte strings at the lowest addresses; the universe of test/instest.py
 NBUCKET = 4096
 ROOT = 'ports/fnv-nx/lift/pack'
 EH_KEYS = ((0x000fffd0, 'fnvl_msvcrt_eh_nested_catch'), (0x000fffe0, 'fnvl_msvcrt_eh_nested_collide'))    # rt/msvcrt.h FNVL_EH_KEY_*: the two handlers the msvcrt EH runtime registers on fs:[0]
@@ -43,16 +44,27 @@ def lift_one(a):
         return None, str(e)
     t = re.sub(r'extern "C" void (L_%08x\(void\)\n\{)' % a, r'extern "C" __attribute__((section(".text.fnvl"))) void \1', t, count=1)
     assert '.text.fnvl' in t
-    return t, formcert.census(G['cap'][-1][0])
+    ins = G['cap'][-1][0]
+    return t, (formcert.census(ins), [(formcert.form_key(i), bytes(i.bytes), x) for x, i in ins.items()])
+
+
+def enc_add(encs, rows):
+    """encs: form -> {encoding bytes: lowest address}, cut to the ENCS distinct encodings of the lowest addresses. The cut commutes with the
+    union: the ENCS lowest of a union are among the ENCS lowest of each part."""
+    for f, r, x in rows:
+        e = encs.setdefault(f, {}); e[r] = min(x, e.get(r, x))
+    for f, e in encs.items():
+        if len(e) > ENCS: encs[f] = dict(sorted(e.items(), key=lambda t: (t[1], t[0]))[:ENCS])
+    return encs
 
 
 def work(addrs):
-    ent = G['ent']; texts, forms, missing = [], collections.Counter(), []
+    ent = G['ent']; texts, forms, missing, encs = [], collections.Counter(), [], {}
     for a in addrs:
         t, x = lift_one(a)
         if t is None: missing.append((a, ent[a][0], x))
-        else: texts.append((a, t)); forms.update(x)
-    return texts, dict(forms), missing
+        else: texts.append((a, t)); forms.update(x[0]); enc_add(encs, x[1])
+    return texts, dict(forms), missing, [(f, r, x) for f, e in encs.items() for r, x in e.items()]
 
 
 def write_texts(path, texts):
@@ -88,11 +100,14 @@ def shard(a):
     texts = [t for g in got for t in g[0]]; miss = sorted(m for g in got for m in g[2])
     forms = collections.Counter()
     for g in got: forms.update(g[1])
+    encs = {}
+    for g in got: enc_add(encs, g[3])
     certs = formcert.Certs()
     write_texts('%s/texts_%d.txt' % (out, K), texts)
     w = lambda n, rows: open('%s/%s_%d.tsv' % (out, n, K), 'w').write(''.join('\t'.join(map(str, x)) + '\n' for x in rows))
     w('missing', [('%08x' % ad, k, why) for ad, k, why in miss])
     w('forms', [(f, n, certs.status(f)) for f, n in sorted(forms.items())])
+    w('encs', [(f, r.hex(), '%08x' % x) for f, e in sorted(encs.items()) for r, x in sorted(e.items(), key=lambda t: (t[1], t[0]))])
     print('shard %d/%d: entries %d lifted %d missing %d; text bytes %d; forms %d' % (K, N, len(mine), len(texts), len(miss), sum(len(t) for _, t in texts), len(forms)))
 
 
@@ -117,13 +132,17 @@ def finish(a):
     out = a.out; pk = out + '/pack'
     for d in (pk + '/u', pk + '/inc'): os.makedirs(d, exist_ok=True)
     images = [(out, L.universe.load()[0])] + [(s.split('=', 1)[0], L.universe.load(s.split('=', 1)[1])[0]) for s in a.also]
-    texts, forms = {}, collections.defaultdict(lambda: [0, 'none'])
+    texts, forms, encs = {}, collections.defaultdict(lambda: [0, 'none']), {}
     for d, ent in images:
         t = image(d, ent)
         if set(t) & set(texts): sys.exit('finish: %s shares entry addresses with another image' % d)
         texts.update(t)
         for f in sorted(glob.glob(d + '/forms_*.tsv')):
             for form, n, s in tsv(f): forms[form][0] += int(n); forms[form][1] = s
+            e = f.replace('/forms_', '/encs_')
+            if not os.path.isfile(e): sys.exit('finish: %s: no encodings list beside %s' % (d, os.path.basename(f)))
+            enc_add(encs, [(form, bytes.fromhex(r), int(x, 16)) for form, r, x in tsv(e)])
+    if set(encs) != set(forms): sys.exit('finish: the encodings lists and the form lists name different forms')
     units = collections.defaultdict(list)
     for x in sorted(texts): units[bucket(x)].append(texts[x])
     for i in range(NBUCKET):
@@ -146,6 +165,7 @@ def finish(a):
     w('entries', [('%08x' % x, s, 'code' if x in code else 'import' if s.startswith('I_') or x >= 0x00100000 else 'runtime') for x, s in sorted(syms.items())])
     open(pk + '/entries.tsv', 'a').write(open(pk + '/imp_entries.tsv').readline())      # `# table_id <sha256 of bridge.tsv>` (last line)
     w('forms', [(f, v[0], v[1]) for f, v in sorted(forms.items())])
+    w('encs', [(f, r.hex(), '%08x' % x) for f, e in sorted(encs.items()) for r, x in sorted(e.items(), key=lambda t: (t[1], t[0]))])
     nc = sum(1 for v in forms.values() if v[1] == 'sail')
     res = dict(schema='fnvnx-gate/1', name='l3.liftgen', status='green', images=len(images), universe=[len(e) for _, e in images], entries=len(texts), imports=len(imp), units=NBUCKET + 2,
                text_bytes=sum(len(t) for t in texts.values()), forms=len(forms), forms_certified=nc, build='measurement: forms without a certificate %d of %d' % (len(forms) - nc, len(forms)))
