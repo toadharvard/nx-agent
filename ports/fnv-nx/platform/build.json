@@ -199,6 +199,19 @@
    ]
   },
   {
+   "tool": "ports/fnv-nx/platform/crt/gen_msvcrt_table.py",
+   "args": [
+    "/in/ports/fnv-nx/platform/crt/msvcrt_names.tsv",
+    "/out/crt/msvcrt_table.gen.cpp"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/crt/msvcrt_names.tsv"
+   ],
+   "outputs": [
+    "crt/msvcrt_table.gen.cpp"
+   ]
+  },
+  {
    "tool": "ports/fnv-nx/platform/com/gen_combridge.py",
    "args": [
     "/in/ports/fnv-nx/platform/com/com_spec.json",
@@ -316,6 +329,22 @@
    "commit": "f82dd1107b1730b7864a2f0697add335af2c4fa4",
    "tree_sha256": "92291602b3ad527759224609f52320bb278998265a2504eda51d272a98a851d8",
    "at": "/ext/mc"
+  },
+  {
+   "name": "manifest",
+   "repo": "fnv-nx-build",
+   "ref": "l5-platform/manifest",
+   "commit": "3f220e95b7b13947e2a321cab9d38c2ece631da8",
+   "tree_sha256": "ed7e35492083ead77a6781959ccb8dd7a351fb429f970ccd567f46b08d12e7bc",
+   "at": "/ext/manifest"
+  },
+  {
+   "name": "wine-specs",
+   "repo": "fnv-nx-build",
+   "ref": "tools/wine-specs",
+   "commit": "678c780eb7cd295e714fd01a3d35623f4d76d840",
+   "tree_sha256": "d21bd71296e96a391fcf9349cb63205d58a830422cdc9e42bd0bc3fde4b9d796",
+   "at": "/ext/wine-specs"
   },
   {
    "name": "freetype",

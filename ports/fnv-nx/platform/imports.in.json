@@ -1,7 +1,8 @@
 {
  "format": "fnvnx-imports-in/1",
  "external": "manifest",
- "names": "sys_names.tsv",
+ "names": "manifest/sys_names.tsv",
+ "specs_external": "wine-specs",
  "specs": "specs",
  "extra": [],
  "extra_other": [],

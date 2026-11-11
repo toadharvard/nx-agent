@@ -9,7 +9,7 @@ symbol = the ELF symbol of the function in the archive; kind u32 | u64 (by the s
 (a pointer constant that is a link-time address; value = the symbol it names); value = the constant as a number (the
 result register's low 32 / all 64 bits, unsigned); contract_ref = the row's source reference (`ENV:<id>` / `MSDN:<name>`).
 Facts, no text evaluation: for every source file named in env_const.tsv whose object is in the archive, the file is compiled
-once more with its own flags (compile_cmds.txt, written by build_guest.sh: `c|cxx<TAB>command`) and with its generated
+once more with its own flags (compile_cmds.txt, written by the recipe: `c|cxx<TAB>command`) and with its generated
 bodies replaced by the probe form of gen_env_const.py --probe. The compiler then (1) evaluates each row's constant in
 the includer's own scope (`const <ret> fnvnx_probe_<line> = (<value>)`: the value is read from the object's data,
 a relocation there makes it an address), and (2) names each function: an asm marker in the body is a relocation from the

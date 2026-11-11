@@ -5,7 +5,7 @@ Roots come only from verify/admit.json (class product); for each the gate calls 
 tables the recipe wrote (objects.json: defined {symbol, bind, type}, undefined). No nm, no ELF parsing, no probe run.
 A product root DECLARES its imports in `<root>/imports.in.json` ("fnvnx-imports-in/1"):
   {"format", "external": NAME of an entry of the root's recipe `external` (the private manifest: fnv-nx-build commit + tree_sha256),
-   "names": path of sys_names.tsv inside it, "specs": directory of the reference environment's .spec files inside it,
+   "names": path of sys_names.tsv inside it, "specs": directory of the reference environment's .spec files inside it (or, with the optional "specs_external": NAME of another external, inside that one),
    "extra": [row files inside it, judged against this root], "extra_other": [row files of another owner's build, judged against the other roots],
    "name_table": path inside the root of the msvcrt name table `name TAB symbol TAB func|data` (the same file the root generates its lookup table from)}
 The external is checked out from the build's own fetch (GATE_CACHE/external/<commit>) and its tree hash must equal tree_sha256.
@@ -70,13 +70,13 @@ def read(path):
         return f.read()
 
 
-def root_rows(root, rec, res, decl, ext, repo, others):
+def root_rows(root, rec, res, decl, ext, repo, others, specs_ext=None):
     """-> [(id, class)] of one root that declares imports"""
-    if set(decl) != IN_KEYS or decl["format"] != "fnvnx-imports-in/1":
+    if set(decl) - {"specs_external"} != IN_KEYS or decl["format"] != "fnvnx-imports-in/1":
         raise ValueError("%s/imports.in.json: need exactly the keys %s and format fnvnx-imports-in/1" % (root, sorted(IN_KEYS)))
     syms = symbols(res)
     table = bridgetable.read_name_table(read(os.path.join(repo, root, decl["name_table"])))
-    specs = os.path.join(ext, decl["specs"])
+    specs = os.path.join(specs_ext or ext, decl["specs"])
     rows, errors, extra_of = bridgetable.derive(
         read(os.path.join(ext, decl["names"])), lambda d: read(os.path.join(specs, d + ".spec")), set(syms), table,
         [read(os.path.join(ext, p)) for p in decl["extra"] + decl["extra_other"]])
@@ -106,7 +106,8 @@ def judge_root(root, repo, cache, admit, roots, bad):
             if r2 != root:
                 for k, v in symbols(built[r2]).items():
                     others.setdefault(k, []).extend(v)
-        rows = root_rows(root, rec, built[root], decl, ext_tree(rec, decl["external"], cache), repo, others)
+        rows = root_rows(root, rec, built[root], decl, ext_tree(rec, decl["external"], cache), repo, others,
+                        ext_tree(rec, decl["specs_external"], cache) if "specs_external" in decl else None)
     except recipe.RecipeError as e:
         return 1, 0, [root + ":recipe"], "recipe invalid: %s" % "; ".join(e.errors)[:200]
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError, cas.CasError) as e:

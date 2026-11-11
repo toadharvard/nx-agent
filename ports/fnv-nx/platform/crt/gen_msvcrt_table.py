@@ -6,6 +6,7 @@
 The generated translation unit holds fnvnx_msvcrt_lookup, the hook fnvnx_win32_lookup_export calls for the dll "msvcrt". Every symbol is declared
 opaquely (func: void f(void); data: char s[]) so that only the link ties a row to a body: the gate `imports` proves that body in the symbol tables
 of the product objects. A name twice, a symbol that is not a C identifier or a kind other than func|data is an error (exit 2)."""
+import os
 import re
 import sys
 
@@ -54,4 +55,5 @@ if __name__ == "__main__":
     except (ValueError, OSError, IndexError) as e:
         print("gen_msvcrt_table: %s" % e, file=sys.stderr)
         sys.exit(2)
+    os.makedirs(os.path.dirname(os.path.abspath(sys.argv[2])), exist_ok=True)
     open(sys.argv[2], "w").write(txt)

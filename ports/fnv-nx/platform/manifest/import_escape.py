@@ -184,14 +184,14 @@ def make_var(root, name):
 
 
 def guest_product(root, tc, libnx_inc, triple):
-    """The PRODUCT source set and flags of the guest (platform/build_guest.sh + toolchain/guest/build.sh), as clang jobs.
+    """The PRODUCT source set and flags of the guest (platform/build.json (verify/recipe.py) + toolchain/guest/build.sh), as clang jobs.
     -> (jobs [(source, full flag list)], triple description).
-    Source set (exactly build_guest.sh): every .c/.cpp (maxdepth 1) of platform/{win32,crt,audio,input,boundary,com,os}
+    Source set (exactly the recipe): every .c/.cpp (maxdepth 1) of platform/{win32,crt,audio,input,boundary,com,os}
     minus HOST_SIDE, platform/clock/{clock_rt,clock_real}.cpp (the product clock), toolchain/guest/{os_guest.c,platform_glue.cpp}, the FreeType sources of tests/s4/Makefile (FT_SRCS),
     plus the guest runtime libfnvnx-guest.a (toolchain/guest: runtime.c threads.c fs.c section_guest.c tm.cpp): the guest
     image links all of them, so they are product code, not an unknown callee. Generated .inc/.gen files must exist
-    (platform/build_guest.sh generates them; `make -C tests/s4 <ENV_GEN, ENVC_SRC .env_const.gen.inc, combridge.gen.cpp>`).
-    Flags: build_guest.sh COMMON/PINC/ARCH with the differences the clang front end forces, all of them IR-neutral for
+    (platform/build.json (verify/recipe.py) generates them; `make -C tests/s4 <ENV_GEN, ENVC_SRC .env_const.gen.inc, combridge.gen.cpp>`).
+    Flags: the recipe COMMON/PINC/ARCH with the differences the clang front end forces, all of them IR-neutral for
     the facts: -O1 per file (the full -O2 pipeline runs on the linked module), no -g, no -ffunction-sections /
     -fdata-sections / -fPIE / -ftls-model (section / relocation choices, no effect on IR attributes).
     Target: clang-18 cannot target AArch64 ILP32 ELF (aarch64-linux-gnu_ilp32 stops with "backend data layout ... does
@@ -236,7 +236,7 @@ def guest_product(root, tc, libnx_inc, triple):
             s = os.path.join(d, n)
             if n.endswith(('.c', '.cpp')) and os.path.isfile(s) and os.path.relpath(s, root) not in HOST_SIDE:
                 jobs.append((s, fl(s)))
-    # the clock of the product (FNVNX_CLOCK=real, build_guest.sh default): clock_rt.cpp + clock_real.cpp, never virtual
+    # the clock of the product (FNVNX_CLOCK=real, the recipe default): clock_rt.cpp + clock_real.cpp, never virtual
     for n in ('clock_rt.cpp', 'clock_real.cpp'):
         jobs.append((P + '/clock/' + n, fl(n)))
     for n in ('os_guest.c', 'platform_glue.cpp'):
@@ -731,7 +731,7 @@ def main():
     if not bcs:
         die('nothing compiled: ' + str(failed[:1]))
     if failed and a.backend == 'guest' and not a.src:
-        # the product set is compiled as a whole (build_guest.sh: no source is left out); a partial module would turn
+        # the product set is compiled as a whole (the recipe: no source is left out); a partial module would turn
         # defined callees into unknown ones (sound but useless) and drop rows, so it is an error, not a report
         die('%d product sources failed to compile, first: %s: %s' % (len(failed), failed[0][0], failed[0][1]))
 
@@ -869,7 +869,7 @@ def main():
     with open(a.out, 'w') as f:
         f.write(HEADER)
         f.write('# backend: %s%s\n' % (a.backend, {'horizon': ' (platform/os/os_horizon.c + libnx %s, target aarch64-none-elf LP64, newlib 4.6.0.20260123 headers)' % libnx_commit,
-                                                 'guest': ' (product source set of platform/build_guest.sh + the guest runtime toolchain/guest/{runtime,threads,fs,section_guest}.c, tm.cpp; target %s; libnx only through FnvnxHostApi)' % (target_desc if a.backend == 'guest' and not a.src else ''),
+                                                 'guest': ' (product source set of platform/build.json (verify/recipe.py) + the guest runtime toolchain/guest/{runtime,threads,fs,section_guest}.c, tm.cpp; target %s; libnx only through FnvnxHostApi)' % (target_desc if a.backend == 'guest' and not a.src else ''),
                                                  'posix': ' (platform/os/os_posix.c, host x86-64)'}[a.backend] if not a.src else ' (explicit sources)'))
         f.write('# libnx commit: %s\n' % libnx_commit)
         f.write('# pipeline: clang-18 -O1 per file, llvm-link, volatile-clear, null-test-hide (%d tests), opt-18 -passes=\'%s\'\n' % (n_null, pipeline))

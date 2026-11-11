@@ -1,7 +1,7 @@
 # Declared hooks of the guest link: symbols the platform archive references that are defined by another
 # component of the guest image (agreed contracts). One symbol per line; the comment names the provider.
 # A hook is listed only while the archive really references it. Do not add a symbol here to make the gate of
-# platform/build_guest.sh pass: an undefined symbol with no provider is reported to the orchestrator.
+# platform/build.json (verify/recipe.py) pass: an undefined symbol with no provider is reported to the orchestrator.
 #
 # Agreed contracts, not referenced by the platform archive yet (add the line when a platform source starts
 # to reference the symbol):
