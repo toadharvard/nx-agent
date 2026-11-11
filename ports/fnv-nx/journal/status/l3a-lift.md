@@ -17,7 +17,7 @@ Lead: Opus 5.5, branch `claude/fnv-l3a-lift`. Handoff read: 422c3d39 (`journal/i
 | 10 | gate_order: rows() for L1; per-object check of no write to x19..x27 outside the guest-register rule and no jump tables; .S callee-saved check; ORDERING.md A1/A3/A4 | w5 session_01KmtZKTakZKNZHndJajh1Qf, branch claude/fnv-l3a-lift-w5 | doing |
 | 11 | pure-gate violations in L3a files (104 in lift, by L3b's count) and test doubles (instest/mmxtest rt.S, sehcodes, imptest/msvcrttest native.c) to 0 | - | queued |
 | 6 | Gate order host classes (orchestrator 22:41Z): CPU = x27 never written + offset inside sizeof(struct cpu); IMAGE only into read-only sections (no SHF_WRITE), else guest | w5 | doing |
-| 12 | shapes.tsv in the pack (liftgen shard + finish, shape_key of lift/proof), for L3b's formgate; then relift + repack | w1 | doing (in parallel with the first build at 7b2faae2) |
+| 12 | shapes.tsv in the pack (liftgen shard + finish, shape_key of lift/proof), for L3b's formgate; then relift + repack | w1 | merged 8d6de5c9 (review: shape_key/family imported, finish fails on a missing shapes_K or a key with two families); relift + repack at the merge commit next |
 | 13 | rt/seh.c: continue from a CONTEXT restores FloatSave and the FXSAVE image under ContextFlags (exact inverse of capture) | w3 | queued after its build |
 | 14 | Undefined symbols of lift/rt (16 by L3b's census): owner per symbol by contract (OS/kernel service = L5, guest state only = rt), agreed with L5 | lead + w3 (the exact set from objects.json) | doing |
 
