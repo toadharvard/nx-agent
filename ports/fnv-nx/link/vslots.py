@@ -18,8 +18,11 @@ nothing in the facts relates the native symbol to it.
 PROOF.  S3 is an equality of two addresses, the exe's by following only thunks whose bytes decode to `this -= n; jmp` (so the call
 reaches T with the same arguments), the native one pinned by N1 (the pristine MSVC body of c equals the exe bytes at a).  Hence calling slot
 j of the native vtable runs the code of the function at exe slot k, up to the this-adjustment, which gate `thisadj` certifies.
-ASSUMPTIONS.  A-kinds, A-N1 (abi_native); A-d0: the symbol of kind dtor.d0 carries the MSVC name of the scalar deleting destructor `??_G`
-(the sdd contract of the plugin), so its N1 address is the address MSVC stores in the destructor slot.  Dropped from the legacy tool:
+Open (REMOVE, owner L2): the plugin's kinds are right; removed by gate names against cl objects and gate vslots against the exe's vftables.
+Input fact: the N1 pins (n1 certificate) certify the bind addresses.  What the code checks for a destructor: the slot's symbol of kind dtor.d0
+(the slot after the one of kind dtor.d1, abi_native.exe_index) is judged by S1-S3 with the address the bind gives for its callee, and the
+kind dtor.d1 slot is certified iff that partner is.  The code does not read the MSVC name of the symbol: which MSVC function (the sdd rule of
+toolchain/sdd/fnvnx_sdd.cc puts `??_E`, the vector deleting destructor, in the one slot) that address is, is the bind's.  Dropped from the legacy tool:
 pairing by "signature" with overloads in reverse declaration order, the position rule for the rest, the decomp-unit joins
 (`units.json`), the pristine-object slot ranking, and the stubs that call through the image slot (all heuristics or repairs).
 """

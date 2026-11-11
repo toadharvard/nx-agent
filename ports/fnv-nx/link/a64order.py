@@ -47,18 +47,24 @@ instruction no other edge reaches (a landing pad). A branch with a relocation or
 what all paths agree on; two different frame addresses join to the tag X with both origins. Unreached instructions have an unknown
 stack pointer.
 
-ASSUMPTIONS.
- R1      the `.fnvnx.frame` record is produced by the same compiler run from the final frame layout and names every variable whose
-         address the compiler takes where the machine code does not show the address leaving the function. The gate trusts the plugin
-         for WHICH variables are address-taken (TREE_ADDRESSABLE after the optimizers) and for their extents; it checks the machine
-         code for everything else (offsets, access sizes, escapes, ordering).
- A-BOUNDS pointer arithmetic on an address stays inside the object the address points into (the executable makes no wild accesses);
-         this is what lets a derived frame address (tag X) be judged by its origins.
- A-STACK an sp/x29-relative access with an immediate offset stays in the thread's own stack.
- A-ROBND a load through a read-only base register plus an index stays inside the object.
- A-RUN   the loads of one run (one source statement: an aggregate copy) are not ordered among themselves; R9 gives no order for them.
- A-GOT   GOT and TLS-descriptor slots are written only by the linker/runtime before the code that reads them runs.
- A-RWX   no code writes a section that was placed without SHF_WRITE.
+INPUT FACTS AND RULES.
+ R1      input fact: the `.fnvnx.frame` record is produced by the pinned compiler's plugin (ASM-001) from the final frame layout and
+         names every variable whose address the compiler takes where the machine code does not show the address leaving the function.
+         The gate reads the plugin's record for WHICH variables are address-taken (TREE_ADDRESSABLE after the optimizers) and for their
+         extents; it checks the machine code for everything else (offsets, access sizes, escapes, ordering).
+ BOUNDS  Assumption ASM-006 (the exe makes no wild accesses; array indices in bounds): pointer arithmetic on an address stays inside
+         the object the address points into; this is what lets a derived frame address (tag X) be judged by its origins.
+ STACK   input fact: an sp/x29-relative access with an immediate offset lies in the thread's own stack frame; the frame size is
+         the CFA-relative sp that this gate computes from the instructions (FRAME FACTS above).
+ ROBND   input fact: a load through a read-only base register plus an index stays inside the object; the read-only sections and
+         their objects are those of objects.json (the object's section table, flags without SHF_WRITE and PT_GNU_RELRO).
+ RUN     part of rule R9 (docs/ORDERING.md, "Everything else is ordered", aggregates on the dmb fence path): the loads of one run
+         (one source statement: an aggregate copy) are ordered as a whole against everything outside the run, and R9 gives no order
+         among the loads of the run itself.
+ GOT     input fact: GOT and TLS-descriptor slots are written only by the linker/runtime before the code that reads them runs;
+         provided by layout.json (fnvnx-layout/1, prot) and PT_GNU_RELRO of the link.
+ RWX     input fact: no code writes a section that was placed without SHF_WRITE; provided by objects.json (section flags) and
+         layout.json (prot).
 Pure: a function of the object bytes."""
 import bisect
 import collections
@@ -338,7 +344,7 @@ class Func:
     # from sp or the frame pointer), ('FP', c) (the frame pointer: x29 = CFA+c), ('X', origins) (a value derived from frame
     # addresses in a way the rules do not follow: pointer arithmetic, a join; ORIGINS are the CFA offsets of the frame
     # addresses it comes from, or None when one is not known; the derivation stays inside the object the origin points
-    # into, assumption A-BOUNDS).  A register without a tag holds no frame address (a frame address stored anywhere is
+    # into, Assumption ASM-006: the exe makes no wild accesses; array indices in bounds).  A register without a tag holds no frame address (a frame address stored anywhere is
     # an escape, judged where it is stored, and a value loaded back is untracked).
     @staticmethod
     def _imm(i, k):

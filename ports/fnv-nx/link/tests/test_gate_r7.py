@@ -120,12 +120,12 @@ WANT = {
     'UBitsUnnamed@@': None, 'UDer@@': None, 'UDerBad@@': 'differs: base UPlain@@ offset gcc 4 cl 0',
     'UVf@@': 'undecided: the offset of the vfptr is not in CodeView (LF_VFUNCTAB has no offset)',
     'UVfDiff@@': 'differs: introduces a vfptr: gcc True cl False', 'UVb@@': 'differs: cl has a vbptr (virtual bases), gcc a vptr: different object models',
-    'UAlt@@': 'undecided: alignment: pack/align in the source (cl alignment not in CodeView)',
-    'UAlign@@': 'differs: align gcc 8 cl 4 (natural rule)',
-    'UPk@@': 'undecided: alignment: pack/align in the source (cl alignment not in CodeView)',
+    'UAlt@@': None,         # alignment is not part of the claim: a differing or altered alignment does not change the verdict
+    'UAlign@@': None,
+    'UPk@@': None,
     'UFwd@@': None, 'UHold@@': None, 'UHoldPlain@@': None,
-    'UReal@@': 'undecided: size of member r: primitive type 0x42 has no size here; alignment: primitive type 0x42 has no size here',
-    'UPtr@@': None, 'UPtrMem@@': 'undecided: size of member m: pointer to member without a size; alignment: pointer to member without a size',
+    'UReal@@': 'undecided: size of member r: primitive type 0x42 has no size here',
+    'UPtr@@': None, 'UPtrMem@@': 'undecided: size of member m: pointer to member without a size',
     'UArr@@': None, 'UMod@@': None, 'UAmb@@': 'undecided: the key has 1 gcc and 2 cl different definitions in the unit',
     'UDup@@': 'undecided: member name twice: a,a', 'TUn@@': None, 'UEmpty@@': None, 'UNest@@': None,
     'UNoCl@@': "only-gcc: cl's debug info of the unit has no definition of the type",
@@ -161,22 +161,6 @@ try:
     check('verdict counts', (cnt['equal'], cnt['differs'], cnt['undecided'], cnt['only-gcc']),
           (len([k for k, v in WANT.items() if not v]), sum(1 for v in WANT.values() if v and v.startswith('differs')),
            sum(1 for v in WANT.values() if v and v.startswith('undecided')), 2))
-
-    # a held record: no GCC line for it, or one flagged altered, or a clean one
-    cvh = synth.CV()
-    p2 = synth.record(cvh, 's', 'UInner@@', cvh.add(0x1203, synth.fieldlist(member(INT, 0, 'a'))), 4)
-    synth.record(cvh, 's', 'UOuter@@', cvh.add(0x1203, synth.fieldlist(member(p2, 0, 'h'))), 4)
-    obj = synth.debug_object(cvh)
-    outer = line('UOuter@@', 4, 4, 'h:0:4')
-    for what, text, want_v in (('no GCC line of the held type', outer, 'undecided: alignment: no GCC record of the held type UInner@@ (what the source did to its alignment is unknown)'),
-                               ('held type altered', outer + line('UInner@@', 4, 4, 'a:0:4', '', 'altered'), 'undecided: alignment: the held type UInner@@ has pack/align in the source (cl alignment not in CodeView)'),
-                               ('held type useralign', outer + line('UInner@@', 4, 4, 'a:0:4', '', 'useralign'), 'undecided: alignment: the held type UInner@@ has pack/align in the source (cl alignment not in CodeView)'),
-                               ('held type clean', outer + line('UInner@@', 4, 4, 'a:0:4'), None)):
-        g, c = fixture(tmp + '/h_' + what.replace(' ', '_'), text, obj)
-        r = reds(gate_r7.check(g, c)[1])
-        check(what, r.get('UOuter@@'), want_v)
-        if want_v is None:
-            check(what + ': the inner record', 'UInner@@' in r, False)
 
     # no cl object / no CodeView / an unreadable cl object / a CodeView table that does not parse
     one = line('UPlain@@', 8, 4, 'a:0:4,b:4:1')

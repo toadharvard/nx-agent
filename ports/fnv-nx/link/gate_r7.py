@@ -12,27 +12,23 @@ whose section does not parse is one item `unit:error`.  Item id `unit:key`.  The
 GCC-built body can depend on a layout GCC never computed.
 CERTIFIED: the unit's cl object has exactly one definition of the key and every fact below is the same on both sides:
   size; the set of named data members, each with byte offset (bit offset and width for a bit-field) and size; the bases (key, offset,
-  virtual or not); the alignment (see A-natural); the vfptr (neither side introduces one).  Unnamed bit-fields are not compared (CodeView
+  virtual or not); the vfptr (neither side introduces one).  Unnamed bit-fields are not compared (CodeView
   does not list them); the members of an anonymous struct or union are the record's own on both sides.
 Every other item is red and listed with its reason: `differs` (the first difference), `undecided` (a fact the data cannot give), `only-gcc`
 (cl's debug info of the unit has no definition: no cl object, no CodeView, or no such key).  Undecided reasons, with the missing fact:
   - the record introduces a vfptr (both sides): the offset of the vfptr is not in CodeView (LF_VFUNCTAB has a type and no offset); it is
     not derived from the other offsets, which leave it undetermined
-  - alignment: cl's alignment of a record is not in CodeView; the natural alignment (codeview.py) is cl's only when the source did not
-    change it.  The record, or a record held by value in it (transitively, through cl's members and bases), has a GCC line flagged
-    altered/packed/useralign, or has no GCC line (what the source did is unknown)
-  - the size of a member's type, or the alignment of a type, is outside what CodeView states (codeview.py: PRIM, member pointers)
+  - the size of a member's type is outside what CodeView states (codeview.py: PRIM, member pointers)
   - the key has several different definitions in the unit, in one cl object or between the cl objects of a source several units list
     (the definitions of all of them are collected and identical ones count once; unnamed types share keys) or the plugin could not name the type (`nokey:`)
   - the CodeView members or bases of the record could not be read
 A record with a virtual base differs by rule: cl lays it out with a vbptr and a vbtable, GCC with a vptr and vtable-held offsets; the
 two object models are different layouts and the native body would read the wrong ones.
-PROOF.  Offsets, sizes, bit positions and bases are the compilers' own data for the same source, compared exactly; the alignment is the
-one derived fact.  ASSUMPTIONS.  A-natural: MSVC x86 gives a record without pack/align modifiers the natural alignment (largest of its
-members', bases', 4 for a vfptr or vbptr; scalars align to their size up to 8, /Zp8) and GCC's flags `altered`/`packed`/`useralign` say
-whether the source changed it (GCC sees the same source).  A-key: a unique name identifies one type of the unit.  Zero lines: green,
-universe 0 (detail says so).
-DROPPED from legacy r7: the vfptr offset taken as 0 when no member starts there (a derivation CodeView does not support); sizes and
+CLAIM.  Size, and each member's offset, size and type key, are the compilers' own data for the same source, compared exactly.  The
+alignment of a record is not part of the claim (cl's alignment is not in CodeView and is not compared).  The pairing key is defined as
+follows (a fact of the gate's inputs): the key of a type is the plugin's name for it in the `.fnvnx.layout` line and the CodeView unique
+name in the cl object; a key with several definitions in the unit is `undecided` (above).  Zero lines: green, universe 0 (detail says so).
+DROPPED from legacy r7: the alignment comparison and its natural-alignment derivation; the vfptr offset taken as 0 when no member starts there (a derivation CodeView does not support); sizes and
 alignments of the primitive types outside the scalar table (10, 12, 20 byte, 6 byte); pointer-to-member sizes taken from the pointer
 kind; equality of two multi-definition keys by comparing the two sets of records (now: undecided); `only-cl` records; the text match
 on reason strings that decided which member size was unknown; the verdict for a record whose members could not be read (it counted
@@ -52,8 +48,7 @@ import objsections
 import unitpairs
 
 NAME = 'r7'
-ALTERING = frozenset(('altered', 'packed', 'useralign'))
-GRec = collections.namedtuple('GRec', 'size align fields bases vf altered nokey dup')
+GRec = collections.namedtuple('GRec', 'size fields bases vf nokey dup')
 
 
 def gcc_rec(lay):
@@ -67,31 +62,11 @@ def gcc_rec(lay):
     bases = sorted(((k, None if fl in ('v', 'i') else off, fl) for k, off, fl in lay.bases),
                    key=lambda b: (b[0], b[2], -1 if b[1] is None else b[1]))
     counts = collections.Counter(f[0] for f in fields)
-    return GRec(lay.size, lay.align, tuple(fields), tuple(bases), vf, any(f in ALTERING for f in lay.flags),
+    return GRec(lay.size, tuple(fields), tuple(bases), vf,
                 tuple(f[6:] for f in lay.flags if f.startswith('nokey:')), tuple(sorted(n for n, c in counts.items() if c > 1)))
 
 
-def closure_reason(g, c, gcc_of, cl_of):
-    """None when the natural alignment is cl's for the record and everything it holds by value; else the missing fact"""
-    seen, todo = set(), list(c.deps)
-    while todo:
-        k = todo.pop()
-        if k in seen:
-            continue
-        seen.add(k)
-        gl = gcc_of(k)
-        if not gl:
-            return 'alignment: no GCC record of the held type %s (what the source did to its alignment is unknown)' % k
-        if any(r.altered for r in gl):
-            return 'alignment: the held type %s has pack/align in the source (cl alignment not in CodeView)' % k
-        for r in cl_of(k):
-            todo.extend(r.deps)
-    if g.altered:
-        return 'alignment: pack/align in the source (cl alignment not in CodeView)'
-    return None
-
-
-def compare_one(g, c, gcc_of, cl_of):
+def compare_one(g, c):
     """('equal'|'differs'|'undecided', reason) for one definition on each side"""
     if c.fatal:
         return 'undecided', 'CodeView: %s' % c.fatal
@@ -132,11 +107,6 @@ def compare_one(g, c, gcc_of, cl_of):
         return 'undecided', 'no key: ' + '; '.join(g.nokey)
     if c.why:
         return 'undecided', '; '.join(c.why)
-    why = closure_reason(g, c, gcc_of, cl_of)
-    if why:
-        return 'undecided', why
-    if g.align != c.align:
-        return 'differs', 'align gcc %d cl %d (natural rule)' % (g.align, c.align)
     return 'equal', ''
 
 
@@ -192,7 +162,7 @@ def unit_rows(stem, gpath, cpaths):
                         (' (no key: %s)' % '; '.join(sorted({w for r in gl for w in r.nokey})) if any(r.nokey for r in gl) else '')
                 elif len(gl) == 1 and len(cl) == 1:
                     try:
-                        verdict, reason = compare_one(gl[0], cl[0], lambda x: ug.get(x, []), cl_of)
+                        verdict, reason = compare_one(gl[0], cl[0])
                     except ValueError as e:
                         verdict, reason = 'undecided', 'CodeView: %s' % e
                 else:

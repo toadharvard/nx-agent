@@ -277,8 +277,10 @@ static tree callee_of(tree t)
        body was already judged free by this same rule (its summary, memoized by DECL_UID, is made when its definition
        is finished, so a callee defined later, an indirect or virtual callee, or a recursive one has no summary and is an
        effect). Names are never looked at.
-   Assumption: the contract GCC itself relies on for const and pure (no store, no throw, termination); the arguments of
-   a free call are walked by the same rule.
+   The const and pure flags of a built-in and the flags GCC derives itself are covered by Assumption ASM-001 (the pinned compiler is
+   correct: the contract GCC relies on for const and pure: no store, no throw, termination).  The rule does not tell a user-declared
+   `__attribute__((const/pure))` from those: that flag is a claim of the source, not of the compiler (open, reported to the orchestrator).
+   The arguments of a free call are walked by the same rule.
    What the rule decides: two arguments without an effect commute with each other (each only reads); the verdict
    `argorder` is for a call with two or more arguments that have one, whose relative order the exe's code fixes and no
    rule here proves. An argument with an effect against one that only reads is the case of the order plugin's

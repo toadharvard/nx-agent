@@ -23,11 +23,12 @@ PROOF.  A strong GCC definition is emitted from the unit's own source text, not 
 unit merely uses; so the entity has a definition in the unit's cl object, and that object's symbol table names it with the one decorated
 name.  If the table holds the plugin's name as a definition, the name is that of a definition of the same unit; if it does not, the
 naming rule is refuted for this item.  Classes 2 and 3 are decided by the rule's own totality: every extern symbol must be named.
-ASSUMPTIONS.  A-strong: a strong definition of a GCC object has a definition in the cl object of the same unit (no GCC-only strong
-symbol is given a naming kind; GCC-only ones are the nameless kinds below).  A-wide: the check shows that the plugin's name is a
-definition of the same unit's cl object, not that it is the name of this very declaration (two definitions of one unit swapped
-would pass); the plugin's rules are what is verified, by the object that cl wrote.  The sections are the plugin's own output
-(contract/l2sections.py documents their format).
+RULES AND INPUTS.  Rule (checked, class 1): a strong definition of a GCC object that has a naming kind is certified only when the cl
+object of the same unit defines the name; a GCC-only strong symbol with a naming kind is red, and the plugin gives GCC-only symbols the
+nameless kinds below (classes 2 and 3, red).  Scope of the check (a statement of what is read, not a claim beyond it): the check shows
+that the plugin's name is a definition of the same unit's cl object, not that it is the name of this very declaration (two definitions of
+one unit with swapped names would pass); the plugin's rules are verified by the object that cl wrote.  Input: the sections are the
+plugin's own output (contract/l2sections.py documents their format).
 NOT IN THE UNIVERSE (no class-closing rule is known, reported to the orchestrator; legacy namegate counted them only): rows of
 kind `thunk`, `vtable`, `gcc`, `internal` (no cl twin by the plugin's classification); `ref` rows and weak or COMDAT definitions of
 named kinds (cl emits an inline function, a vftable or a reference only where it chose to use it, so a name its object lacks proves

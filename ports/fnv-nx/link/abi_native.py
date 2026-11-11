@@ -20,7 +20,7 @@ Inputs (all L1 fact bases, read through contract/store.py; nothing is parsed a s
 RULE for the slot correspondence (the minus-one rule, ARCHITECTURE D22/D26, made a function of compiler facts): MSVC has one deleting
 destructor slot where the Itanium vtable has D1 then D0.  A slot whose symbol (the thunk's callee for a thunk) has sympair kind `dtor.d0` shares
 the exe slot of the slot before it, which must have kind `dtor.d1`; so k(j) = j - #(d0 slots at or before j).  The kinds are the
-plugin's own statements about the symbols, not names.  ASSUMPTION A-kinds: the plugin's kinds are right (A2: the compiler is correct).
+plugin's own statements about the symbols, not names.  Open (REMOVE, owner L2): the plugin's kinds are right; removed by gate names against cl objects and gate vslots against the exe's vftables.
 """
 import collections
 import os

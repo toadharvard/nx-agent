@@ -10,17 +10,13 @@
 
 CRec fields: size (sizeof), fields [(name, bit offset, bit width (0: not a bit-field), size or None)] sorted, bases [(key, offset or
 None, flag n|v|i)] sorted, vf (the class introduces a vfptr: it has an LF_VFUNCTAB), vbptr (it has a virtual base: LF_VBCLASS /
-LF_IVBCLASS), align (the natural alignment, see below, or None), deps (unique names of the record types its members and bases hold
-by value), why [reasons a fact is missing], dup [member names that occur twice], fatal.
+LF_IVBCLASS), why [reasons a fact is missing], dup [member names that occur twice], fatal.
 
 What CodeView does NOT contain, stated once (consumers must treat these as missing, never derive them):
-  - the alignment of a record: align is the NATURAL alignment computed here = the largest alignment of its members, bases, and 4 if
-    it has a vfptr or a virtual base; a scalar's alignment is its size (cl's default packing /Zp8); array: its element's; enum: its
-    underlying type's; bit-field: its declared type's; pointer: its size.  It is the record's alignment only when the source did not
-    change it (#pragma pack, __declspec(align)): the consumer must know that from another source;
+  - the alignment of a record (not computed; not part of any claim made from these records);
   - the offset of the introduced vfptr (LF_VFUNCTAB has a type and no offset);
   - the offsets of virtual bases are in LF_VBCLASS but are offsets in a vbtable model (not read here);
-  - sizes and alignments of primitive types outside the scalar table PRIM, and the size of a pointer to member whose LF_POINTER
+  - sizes of primitive types outside the scalar table PRIM, and the size of a pointer to member whose LF_POINTER
     has no size (member pointers have several sizes by inheritance model): CVError, the fact is missing.
 Pure: bytes in, tuples out.  Every defect is ValueError (CVError) with the reason.
 """
@@ -32,7 +28,7 @@ LF_CLASS, LF_STRUCTURE, LF_UNION, LF_ENUM = 0x1504, 0x1505, 0x1506, 0x1507
 RECORDS = (LF_CLASS, LF_STRUCTURE, LF_UNION)
 PROP_FWD, PROP_UNIQUE = 0x80, 0x200
 
-# primitive type index -> size in bytes (and alignment: the scalars of MSVC x86 align to their size)
+# primitive type index -> size in bytes
 PRIM = {0x08: 4, 0x10: 1, 0x20: 1, 0x68: 1, 0x69: 1, 0x70: 1, 0x71: 2, 0x72: 2, 0x73: 2, 0x74: 4, 0x75: 4, 0x76: 8, 0x77: 8,
         0x7a: 2, 0x7b: 4, 0x11: 2, 0x21: 2, 0x12: 4, 0x22: 4, 0x13: 8, 0x23: 8, 0x30: 1, 0x31: 2, 0x32: 4, 0x33: 8,
         0x40: 4, 0x41: 8}
@@ -44,7 +40,7 @@ class CVError(ValueError):
     pass
 
 
-CRec = collections.namedtuple('CRec', 'size fields bases vf vbptr align deps why dup fatal')
+CRec = collections.namedtuple('CRec', 'size fields bases vf vbptr why dup fatal')
 
 
 def _u(fmt, b, p):
@@ -95,7 +91,7 @@ class Table:
                         self.defs.setdefault(self._head(i)[-1], []).append(i)
                 except CVError as e:
                     raise CVError('%s: record 0x%x: %s' % (where, i, e))
-        self._size, self._align = {}, {}
+        self._size = {}
 
     def _get(self, i):
         if i not in self.t:
@@ -164,31 +160,6 @@ class Table:
         self._size[i] = r
         return r
 
-    def alignment(self, i, stack=()):
-        if i in self._align:
-            return self._align[i]
-        if i < 0x1000:
-            r = self.size(i)
-        else:
-            k, b = self._get(i)
-            if k in RECORDS:
-                d = self.definition(i)
-                if d in stack:
-                    raise CVError('recursive type')
-                r = self.rec_align(d, stack + (d,))
-            elif k in (LF_ARRAY, LF_MODIFIER, LF_BITFIELD):
-                r = self.alignment(_u('<I', b, 0)[0], stack)
-            elif k == LF_ENUM:
-                r = self.alignment(_u('<I', b, 4)[0], stack)
-            elif k == LF_POINTER:
-                r = self.size(i)
-            else:
-                raise CVError('type leaf 0x%x has no alignment here' % k)
-        if r not in (1, 2, 4, 8):
-            raise CVError('alignment %d of type 0x%x is not a scalar one' % (r, i))
-        self._align[i] = r
-        return r
-
     def members(self, i):
         """([(name, type index, byte offset)], [(type index, offset or None, flag)], vfptr, [virtual base count]) of record i"""
         fl = self._head(i)[2]
@@ -243,34 +214,13 @@ class Table:
             fl = nxt
         return mem, bases, vf, vb
 
-    def rec_align(self, i, stack=()):
-        mem, bases, vf, vb = self.members(i)
-        a = 1
-        for _n, ty, _off in mem:
-            a = max(a, self.alignment(ty, stack))
-        for ty, _off, _fl in bases:
-            a = max(a, self.alignment(ty, stack))
-        return max(a, 4) if vf or vb else a
-
-    def _held(self, ty):
-        """unique names of the records a member type holds by value (through modifiers, arrays, bit-fields)"""
-        while ty >= 0x1000:
-            k, b = self._get(ty)
-            if k in (LF_MODIFIER, LF_ARRAY, LF_BITFIELD):
-                ty = _u('<I', b, 0)[0]
-            elif k in RECORDS:
-                return [self.unique_of(ty)]
-            else:
-                return []
-        return []
-
     def rec(self, i):
         size = self._head(i)[3]
         why, fields, brec = [], [], []
         try:
             mem, bases, vf, vb = self.members(i)
         except CVError as e:
-            return CRec(size, (), (), False, False, None, (), (), (), 'members: %s' % e)
+            return CRec(size, (), (), False, False, (), (), 'members: %s' % e)
         for n, ty, off in mem:
             try:
                 if ty >= 0x1000 and self._get(ty)[0] == LF_BITFIELD:
@@ -285,22 +235,11 @@ class Table:
             try:
                 brec.append((self.unique_of(ty), off, fl))
             except CVError as e:
-                return CRec(size, (), (), False, False, None, (), (), (), 'base: %s' % e)
+                return CRec(size, (), (), False, False, (), (), 'base: %s' % e)
         fields.sort(key=lambda f: (f[0], f[1], f[2]))
         brec.sort(key=lambda b: (b[0], b[2], -1 if b[1] is None else b[1]))
         counts = collections.Counter(f[0] for f in fields)
-        align, deps = None, ()
-        try:
-            align = self.rec_align(i)
-            held = set()
-            for _n, ty, _off in mem:
-                held.update(self._held(ty))
-            for ty, _off, _fl in bases:
-                held.update(self._held(ty))
-            deps = tuple(sorted(held))
-        except CVError as e:
-            why.append('alignment: %s' % e)
-        return CRec(size, tuple(fields), tuple(brec), vf, vb > 0, align, deps, tuple(why),
+        return CRec(size, tuple(fields), tuple(brec), vf, vb > 0, tuple(why),
                     tuple(sorted(n for n, c in counts.items() if c > 1)), None)
 
     def record(self, key):

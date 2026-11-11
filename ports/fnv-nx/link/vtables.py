@@ -16,14 +16,16 @@ iff, for the group of an object O and its address points (ap, d):
       bound by the named address points of the group - no exe vftable of the class is left unbound, none is bound twice.
 UNIVERSE.  Every address point of every `_ZTV` of every object of obj.json whose claim is `named` or `missing` (a `missing` one is
 uncertified: the plugin must state a twin or its absence for every address point).  Address points whose row says `unnamed:<reason>`
-are outside the universe: the compiler asserts the class has no MSVC vftable (A-plugin), they are counted in `detail`.
+are outside the universe: the compiler asserts the class has no MSVC vftable (Open, REMOVE, owner L2: the plugin's kinds), they are counted in `detail`.
 PROOF.  V1-V5 are equalities between structures read from the PE (RTTI, COL, slot run), from the object (`_ZTV` words and relocations) and
 from the plugin's rows; each is decided on those structures alone.  If all five hold for every named point of a group, the group has
 the primary and every secondary vftable of the class once, each at the exe's subobject offset and slot count; V5 turns "all named
 points are consistent" into "no vftable is missing" without a list.
-ASSUMPTIONS.  A-plugin (unnamed means twinless; kinds are right), A-N1 (bind addresses are certified), A-layout (exefacts's RTTI scan finds
-every vftable: a vftable it cannot see is not in V5's set), A-vbase (a class with virtual bases has COL offsets that are not subobject
-offsets: such groups are uncertified by V3 or V5 unless the structure agrees as written, never passed).
+Open (REMOVE, owner L2): unnamed means twinless and the plugin's kinds are right; removed by gate names against cl objects and gate vslots
+against the exe's vftables.  Input fact: the bind addresses are certified by the N1 certificate (n1).  Open (REMOVE, owner L1 exefacts):
+completeness of the RTTI scan is not yet a checked fact (a vftable exefacts's RTTI scan cannot see is not in V5's set).  Classes with
+virtual bases: their COL offsets are not subobject offsets, so such groups are uncertified by V3 or V5 unless the structure agrees as
+written, never passed.
 """
 import argparse
 import collections
@@ -102,7 +104,7 @@ def main(argv=None):
         print('vtables: %s' % e, file=sys.stderr)
         return 2
     uni, red, un = check(obj, bind, vfts)
-    return N.finish(NAME, uni, red, '%d address points claim no twin (unnamed rows, A-plugin)' % un)
+    return N.finish(NAME, uni, red, '%d address points claim no twin (unnamed rows)' % un)
 
 
 if __name__ == '__main__':

@@ -21,8 +21,10 @@ PROOF.  Both sides compute "this_callee - this_vtable_subobject" for the same ca
 in the exe it is the decoded thunk adjustments, plus the displacement of the subobject T expects relative to the vftable-class subobject, which is
 d' when T is entered at its only secondary vftable and 0 when it also stands in a primary one.  Equal numbers mean the same pointer reaches
 the same body.
-ASSUMPTIONS.  A-msvc-entry: a function has one entry convention, visible as the vftables that hold it directly (MSVC's secondary-entry
-scheme); A-kinds, A-N1 as in vslots.  Dropped from the legacy tool: `secondary_entries` taking min() of several offsets, the `_ZThn` name
+Open (no owner assigned, reported to the orchestrator): that a function has one entry convention, read from the vftables that hold it
+directly (MSVC's secondary-entry scheme), is not derivable from the COL offsets alone; the gate decides only the cases above and leaves the
+rest uncertified.  Open (REMOVE, owner L2): the plugin's kinds (abi_native), removed by gate names against cl objects and gate vslots against the exe's
+vftables.  Input fact: N1 pins (the n1 certificate) certify the bind addresses.  Dropped from the legacy tool: `secondary_entries` taking min() of several offsets, the `_ZThn` name
 construction by string splicing (`thunk_name`), the symbol-to-vtable search by parsing the object a second time (`slot_otts`).
 """
 import argparse

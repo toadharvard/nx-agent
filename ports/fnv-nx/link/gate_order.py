@@ -20,11 +20,12 @@ and overlaps no variable whose address the compiler took, and the gate itself ch
 unless it points into such a variable, so no other thread has an address of the slot.  L: the loaded word never changes after link
 or load.  R: the plain access is bracketed by `dmb` on every path, so the barrier orders it against everything the statement does
 not itself contain.
-ASSUMPTIONS (the full text is in a64order.py).  R1: the `.fnvnx.frame` record names every variable whose address the compiler
-computes for a purpose the machine code does not show (the record is produced by the same compiler run: the gate trusts the
-plugin for WHICH variables are address-taken, and checks the machine code for everything else: offsets, sizes of accesses, escapes of
-computed frame addresses).  A-BOUNDS: pointer arithmetic stays inside the object it starts in.  A-STACK, A-ROBND, A-RUN, A-GOT,
-A-RWX.
+INPUT FACTS AND RULES (the full text is in a64order.py).  R1: the `.fnvnx.frame` record names every variable whose address the compiler
+computes for a purpose the machine code does not show (the record is produced by the pinned compiler's plugin, ASM-001: the gate reads
+it for WHICH variables are address-taken, and checks the machine code for everything else: offsets, sizes of accesses, escapes of
+computed frame addresses).  Assumption ASM-006 (the exe makes no wild accesses; array indices in bounds): pointer arithmetic stays inside
+the object it starts in.  STACK, ROBND, GOT, RWX are input facts (objects.json; layout.json fnvnx-layout/1 prot and PT_GNU_RELRO); RUN is
+part of rule R9 (docs/ORDERING.md).
 Pure: a function of the object bytes."""
 import os
 import sys

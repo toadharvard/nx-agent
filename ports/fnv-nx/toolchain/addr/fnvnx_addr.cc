@@ -42,8 +42,8 @@
  * CONV or PLUS or has a constant operand; any other form that makes a pointer from a non-pointer value
  * (a TARGET_MEM_REF with an index, a result that cannot be rewritten) is a compile error. Memory operands that
  * go through a pointer are covered by the displacement rule above; a variable index into a declared array (the base is
- * a declaration: a global, a local) is in bounds by C++ semantics (assumption A-BOUNDS: the executable makes no wild
- * accesses).
+ * a declaration: a global, a local) is in bounds by C++ semantics (Assumption ASM-006: the exe makes no wild accesses;
+ * array indices in bounds).
  *
  * Verification (last GIMPLE point). After the rewrite the pass scans the function again: every statement of class
  * CONV must have an operand defined by an asm statement (or a constant), every statement of class PLUS must have a

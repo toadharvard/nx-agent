@@ -22,7 +22,7 @@ CERTIFIED.  A function with exactly one record in its object and seen == routed.
 routed, and every function of an object whose section is missing or malformed (the reason names the first error).  An object that
 is not readable ILP32 AArch64 ELF is an uncertified item.  Records of symbols the object does not define as functions are ignored
 (they cannot certify a function).  The layout item is certified iff the layout file passes LAYOUT below.
-LAYOUT (the fact that replaces the old assumption A-EDGE; `--layout FILE`, emitted by L1 at link time).  A JSON object with exactly
+LAYOUT (the checked fact that gives the address-space edges; `--layout FILE`, emitted by L1 at link time).  A JSON object with exactly
 the keys `schema` (the string "fnvnx-layout/1") and `regions` (a list); each region is an object with exactly the keys `name` (a
 non-empty string), `lo` and `hi` (integers, not booleans, `0 <= lo < hi <= 2^32`, **hi exclusive**: the region holds the
 addresses lo .. hi-1), `prot` (one of "---", "r--", "rw-", "r-x") and `kind` (one of "image", "heap", "stack", "tls", "host",
@@ -36,13 +36,13 @@ where no object lives and no access is allowed, and faults on x86 as it does her
 2^32: an address above it is unmapped).  Everything larger is routed and wraps exactly as x86 does.
 PROOF.  seen == routed in a function means every conversion at the last GIMPLE point had an opaque (asm) operand, so the
 expander and the RTL passes that follow see a finished 32-bit register: no sum exists that an addressing mode could absorb.
-ASSUMPTIONS.  (1) The record is written by the plugin built from the tracked source and loaded into every compile of the
-object (the build gate `build` checks that the recipe loads it).  (2) A-BOUNDS: the executable makes no wild accesses: a
-variable index into a declared array (a global or a local, whose address is a link-time or frame constant) stays inside it.
-(3) After the barrier no later pass of GCC folds through an `asm` (it cannot look inside one).  (4) `.cold` parts of functions
-(-freorder-blocks-and-partition) are function symbols without a record: they are uncertified, so the recipe must not enable that
-partitioning.  (5) The layout file describes the layout the linked image is run with (L1 emits it from the link, the runtime
-maps exactly it).
+INPUT FACTS AND RULES.  (1) Input fact: the record is written by the plugin built from the tracked source and loaded into every compile
+of the object (the build gate `build` checks that the recipe loads it).  (2) Assumption ASM-006 (the exe makes no wild accesses; array
+indices in bounds): a variable index into a declared array (a global or a local, whose address is a link-time or frame constant) stays
+inside it.  (3) Assumption ASM-001 (the pinned compiler is correct): after the barrier no later pass of GCC folds through an `asm` (the
+documented semantics of an asm statement).  (4) Rule: `.cold` parts of functions (-freorder-blocks-and-partition) are function symbols
+without a record and are uncertified, so the recipe must not enable that partitioning.  (5) Input fact: the layout file describes the
+layout the linked image is run with (L1 emits it from the link as layout.json, fnvnx-layout/1; this gate checks its form, not the run).
 Pure: a function of the object bytes and the layout file."""
 import json
 import os

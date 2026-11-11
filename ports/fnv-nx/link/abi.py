@@ -24,9 +24,10 @@ definition has no MSVC name, is uncertified (no contract can be compared).  Symb
 thunk/vtable/gcc/internal/data are outside (no function contract of the exe).
 PROOF.  Parameters are placed by the calling convention as a function of the ordered class list, so equal class lists under equal conventions
 give equal locations; the classes are read from the MSVC grammar (abi_msvcname), where equal types have equal text.  A by-value aggregate is
-the same type iff its qualified name is equal (ODR), so equal names pass the same bytes whatever the size.  A pair with differing aggregates,
+the same type iff its qualified name is equal (provided by gate odr: equal `.fnvnx.layout` across all units per qualified name), so equal names pass the same bytes whatever the size.  A pair with differing aggregates,
 a variadic side, a bool/char result difference (GCC reads bit 0 of a bool) or an unparsable name is not proven and is uncertified.
-ASSUMPTIONS.  A-names: the plugin's MSVC names are the declarations the two units were compiled against; A-ODR as above; MSVC returns every
+INPUT FACTS.  The MSVC names are the plugin's `.fnvnx.sympair` names, verified against cl's symbol tables by gate names; the same
+aggregate name is the same type in two units: provided by gate odr (equal `.fnvnx.layout` across all units per name).  Rule: MSVC returns every
 aggregate through a hidden pointer (small POD returned in eax:edx is not modelled: equal aggregate names make that irrelevant, differing ones
 are uncertified anyway).  Dropped from the legacy tool: the bridge generator (`emit_bridge`, `sequentialize`: a repair), `bool_from_int`,
 `ret_carry`, narrow-extension moves, `varargs_check` with `va_reads` from a run (`vacall`), `ecx_unused` from the pristine object, the

@@ -90,8 +90,9 @@ static std::map<UidKey, int> scope_no;    /* a function-local static or class ->
  * (test_names.expect: Fwd1..Fwd9). GCC's flag holds the key seen last. The two differ only where a declaration's
  * key differs from that reference, which is exactly what -Wmismatched-tags reports, with the same reference; the
  * plugin turns the warning on and reads the class and the offending key off each report as it is formatted (the
- * reference key is the other one). The assumption: the warning is not suppressed for a declaration (system
- * header, #pragma GCC diagnostic); tools/link/namegate.py compares every name with cl's.
+ * reference key is the other one). Not checked by the plugin: that the warning is reported for every declaration
+ * (it can be suppressed by a system header or #pragma GCC diagnostic); a wrong key gives a wrong name, which gate names refutes
+ * against cl's symbol tables.
  */
 static std::map<UidKey, bool> ref_class_key;      /* class (type uid) -> the reference key is `class` */
 static std::map<UidKey, bool> def_class_key;      /* class (type uid) -> its definition had the key `class` */

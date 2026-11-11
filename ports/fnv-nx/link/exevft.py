@@ -22,8 +22,9 @@ UNIVERSE of the CLI: every vftable the exe's RTTI yields; each is emitted with n
 address, its thunk chain (or null).  Output is canonical JSON (sorted keys, LF), a function of the exe bytes only.
 PROOF.  The hierarchy and thunk statements are decodes of bytes by the documented layouts and by instruction semantics;
 no name, string or count decides anything.
-ASSUMPTIONS.  A-layout: the exe is a PE32 built by MSVC with COLs in .rdata and TypeDescriptors in .data (exefacts's
-precondition); A-capstone: the decoder is correct.  Dropped from the legacy tool (heuristic or per-item): the D1/D0 slot-name
+INPUT FACT: the exe is a PE32 with COLs in .rdata and TypeDescriptors in .data (exefacts's precondition, read from the PE section table).
+Open (REMOVE, owner L1 exefacts): completeness of the RTTI scan is not yet a checked fact.  Open (REMOVE, owner L2): agreement of two
+independent decoders on every instruction of the set; after first frame.  Dropped from the legacy tool (heuristic or per-item): the D1/D0 slot-name
 regexes, the deleting-destructor byte patterns (`_FLAGS_TEST`), `delete_this`, `leaf_constant`, `string_at`, the vftable
 getter walker (GETTER_MAX), the constructor "last store wins" rule (exefacts records every vptr store in order), hard-coded
 TEXT/DATA ranges (the section table is used), the JSON cache keyed on mtime.

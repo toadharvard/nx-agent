@@ -20,7 +20,7 @@ A signature in one object only has nothing to be compared with and is not in the
 PROOF.  Green means all copies of every signature have equal identity and no copy has an opaque relocation; the identity includes every byte and every relocation of
 every member, so two copies with equal identity assemble to the same bytes with the same symbol references in any link.  A red item names the
 signature, the objects and the first difference.
-ASSUMPTIONS.  A-ELF: the objects are ELF relocatable objects of one target; A-names: equal symbol names mean equal symbols (the linker's own rule).
+INPUT FACTS.  The objects are ELF relocatable objects of one target (the objects the verdict's link takes; a member or group the gate cannot parse is a red item with the reason, ValueError below); equal symbol names mean equal symbols (the linker's own rule for one link, which is what the verdict's link performs).
 """
 import argparse
 import hashlib
