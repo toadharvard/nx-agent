@@ -2,6 +2,7 @@
 #include "mixer.h"
 #include "reverb.h"
 #include "../os/os.h"
+#include "fnvnx_lockcount.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -33,6 +34,9 @@ struct mix_voice {
 };
 
 static os_lock_t g_lock;
+/* the mixer lock counts as a platform lock held (fnvnx_lockcount.h): nothing under it may call the game */
+static inline void mx_lock() { os_lock(&g_lock); fnvnx_bnd_lock_note(1); }
+static inline void mx_unlock() { fnvnx_bnd_lock_note(-1); os_unlock(&g_lock); }
 static mix_voice *g_voices;
 static uint32_t g_rate = 48000, g_chunk = 256;
 static float g_master = 1.0f;
@@ -43,16 +47,16 @@ static uint32_t g_fxbuf_frames;
 
 void mixer_init(uint32_t out_rate, uint32_t chunk_frames)
 {
-    os_lock(&g_lock);
+    mx_lock();
     g_rate = out_rate ? out_rate : 48000;
     g_chunk = chunk_frames ? chunk_frames : 256;
     g_master = 1.0f;
-    os_unlock(&g_lock);
+    mx_unlock();
 }
 
 void mixer_shutdown(void)
 {
-    os_lock(&g_lock);
+    mx_lock();
     for (mix_voice *v = g_voices; v; v = v->next)
         v->playing = 0;
     free(g_scratch);
@@ -61,16 +65,16 @@ void mixer_shutdown(void)
     free(g_fxbuf);
     g_fxbuf = NULL;
     g_fxbuf_frames = 0;
-    os_unlock(&g_lock);
+    mx_unlock();
 }
 
 uint32_t mixer_out_rate(void) { return g_rate; }
 
 void mixer_set_master_gain(float g)
 {
-    os_lock(&g_lock);
+    mx_lock();
     g_master = g;
-    os_unlock(&g_lock);
+    mx_unlock();
 }
 
 float mixer_mb_to_gain(int32_t mb)
@@ -102,12 +106,12 @@ mix_voice *mixer_voice_create(const mix_format *fmt, uint8_t *data, uint32_t siz
     v->freq = fmt->rate;
     v->doppler = 1.0f;
     v->gl = v->gr = 1.0f;
-    os_lock(&g_lock);
+    mx_lock();
     v->next = g_voices;
     if (g_voices)
         g_voices->prev = v;
     g_voices = v;
-    os_unlock(&g_lock);
+    mx_unlock();
     return v;
 }
 
@@ -118,11 +122,11 @@ mix_voice *mixer_voice_create_stream(const mix_format *fmt, mix_stream_fn fn, vo
     mix_voice *v = mixer_voice_create(fmt, NULL, 0);
     if (!v)
         return NULL;
-    os_lock(&g_lock);
+    mx_lock();
     v->stream = fn;
     v->stream_user = user;
     v->frames = 0xFFFFFFFFu;
-    os_unlock(&g_lock);
+    mx_unlock();
     return v;
 }
 
@@ -130,10 +134,10 @@ void mixer_voice_destroy(mix_voice *v)
 {
     if (!v)
         return;
-    os_lock(&g_lock);
+    mx_lock();
     if (v->prev) v->prev->next = v->next; else g_voices = v->next;
     if (v->next) v->next->prev = v->prev;
-    os_unlock(&g_lock);
+    mx_unlock();
     fnvnx_reverb_destroy(v->reverb);
     free(v->notify);
     free(v->sbuf);
@@ -142,43 +146,43 @@ void mixer_voice_destroy(mix_voice *v)
 
 void mixer_voice_set_format(mix_voice *v, const mix_format *fmt)
 {
-    os_lock(&g_lock);
+    mx_lock();
     v->fmt = *fmt;
     v->frames = v->stream ? 0xFFFFFFFFu : fmt->block ? v->size / fmt->block : 0;
     v->freq = fmt->rate;
     v->pos = 0;
     v->sbase = v->scount = 0;
-    os_unlock(&g_lock);
+    mx_unlock();
 }
 
 void mixer_voice_set_gain(mix_voice *v, float l, float r)
 {
-    os_lock(&g_lock);
+    mx_lock();
     v->gl = l;
     v->gr = r;
-    os_unlock(&g_lock);
+    mx_unlock();
 }
 
 void mixer_voice_set_freq(mix_voice *v, uint32_t f)
 {
-    os_lock(&g_lock);
+    mx_lock();
     v->freq = f ? f : v->fmt.rate;
-    os_unlock(&g_lock);
+    mx_unlock();
 }
 
 void mixer_voice_set_doppler(mix_voice *v, float ratio)
 {
-    os_lock(&g_lock);
+    mx_lock();
     v->doppler = ratio > 0.0f ? ratio : 1.0f;
-    os_unlock(&g_lock);
+    mx_unlock();
 }
 
 void mixer_voice_play(mix_voice *v, int looping)
 {
-    os_lock(&g_lock);
+    mx_lock();
     v->looping = looping ? 1 : 0;
     v->playing = v->frames ? 1 : 0;
-    os_unlock(&g_lock);
+    mx_unlock();
 }
 
 static void fire_stop(mix_voice *v)
@@ -190,12 +194,12 @@ static void fire_stop(mix_voice *v)
 
 void mixer_voice_stop(mix_voice *v)
 {
-    os_lock(&g_lock);
+    mx_lock();
     if (v->playing) {
         v->playing = 0;
         fire_stop(v);
     }
-    os_unlock(&g_lock);
+    mx_unlock();
 }
 
 int mixer_voice_playing(const mix_voice *v) { return v->playing; }
@@ -211,35 +215,35 @@ static uint32_t play_bytes(const mix_voice *v)
 
 uint32_t mixer_voice_play_cursor(const mix_voice *v)
 {
-    os_lock(&g_lock);
+    mx_lock();
     uint32_t b = play_bytes(v);
-    os_unlock(&g_lock);
+    mx_unlock();
     return b;
 }
 
 uint32_t mixer_voice_write_cursor(const mix_voice *v)
 {
-    os_lock(&g_lock);
+    mx_lock();
     uint32_t b = play_bytes(v);
     if (v->playing && v->size) {
         /* one output period of lead, in source frames */
         uint64_t lead = ((uint64_t)g_chunk * v->freq + g_rate - 1) / g_rate;
         b = (uint32_t)((b + lead * v->fmt.block) % v->size);
     }
-    os_unlock(&g_lock);
+    mx_unlock();
     return b;
 }
 
 void mixer_voice_set_cursor(mix_voice *v, uint32_t off)
 {
-    os_lock(&g_lock);
+    mx_lock();
     uint32_t f = v->fmt.block ? off / v->fmt.block : 0;
     if (f >= v->frames)
         f = 0;
     if (v->stream)
         f = 0, v->sbase = v->scount = 0;   /* a stream restarts: the window is dropped */
     v->pos = (uint64_t)f << 32;
-    os_unlock(&g_lock);
+    mx_unlock();
 }
 
 void mixer_voice_set_notify(mix_voice *v, const mix_notify *n, uint32_t count, mix_notify_fn fn, void *ctx)
@@ -251,13 +255,13 @@ void mixer_voice_set_notify(mix_voice *v, const mix_notify *n, uint32_t count, m
             return;
         memcpy(copy, n, count * sizeof *copy);
     }
-    os_lock(&g_lock);
+    mx_lock();
     mix_notify *old = v->notify;
     v->notify = copy;
     v->nnotify = count;
     v->notify_fn = fn;
     v->notify_ctx = ctx;
-    os_unlock(&g_lock);
+    mx_unlock();
     free(old);
 }
 
@@ -392,7 +396,7 @@ static void mix_voice_into(mix_voice *v, float *out, uint32_t frames, float gl, 
 void mixer_render_f32(float *out, uint32_t frames)
 {
     memset(out, 0, (size_t)frames * MIX_OUT_CHANNELS * sizeof(float));
-    os_lock(&g_lock);
+    mx_lock();
     for (mix_voice *v = g_voices; v; v = v->next) {
         if (!(v->playing && (v->data || v->stream) && v->frames && v->freq))
             continue;
@@ -420,12 +424,12 @@ void mixer_render_f32(float *out, uint32_t frames)
             out[2 * i + 1] += g_fxbuf[2 * i + 1] * gr;
         }
     }
-    os_unlock(&g_lock);
+    mx_unlock();
 }
 
 int mixer_voice_set_reverb(mix_voice *v, const fnvnx_i3dl2 *p)
 {
-    os_lock(&g_lock);
+    mx_lock();
     int rc = 0;
     if (!p) {
         fnvnx_reverb_destroy(v->reverb);
@@ -438,17 +442,17 @@ int mixer_voice_set_reverb(mix_voice *v, const fnvnx_i3dl2 *p)
         else
             rc = -1;
     }
-    os_unlock(&g_lock);
+    mx_unlock();
     return rc;
 }
 
 void mixer_render_s16(int16_t *out, uint32_t frames)
 {
-    os_lock(&g_lock);
+    mx_lock();
     if (g_scratch_frames < frames) {
         float *n = (float *)realloc(g_scratch, (size_t)frames * MIX_OUT_CHANNELS * sizeof(float));
         if (!n) {
-            os_unlock(&g_lock);
+            mx_unlock();
             memset(out, 0, (size_t)frames * MIX_OUT_CHANNELS * 2);
             return;
         }
@@ -456,7 +460,7 @@ void mixer_render_s16(int16_t *out, uint32_t frames)
         g_scratch_frames = frames;
     }
     float *buf = g_scratch;
-    os_unlock(&g_lock);
+    mx_unlock();
     /* the scratch buffer belongs to the (single) backend thread */
     mixer_render_f32(buf, frames);
     for (uint32_t i = 0; i < frames * MIX_OUT_CHANNELS; i++) {

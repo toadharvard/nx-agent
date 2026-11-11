@@ -2,6 +2,7 @@
  * call mixer_render_* themselves, so cursors and notifications are deterministic. */
 #include "s7_test.h"
 #include "../../platform/audio/backend.h"
+#include "../s4/host_boundary.h"
 
 #include <stdlib.h>
 
@@ -30,6 +31,12 @@ int main(int argc, char **argv)
         v[i]->fn();
         run++;
         printf("%-40s %s\n", v[i]->name, s7_failures == before ? "ok" : "FAILED");
+    }
+    /* the rule "no platform lock is held across a call into the game" (platform/include/fnvnx_lockcount.h) over the whole run */
+    s7_checks++;
+    if (g_bnd_lock_violations) {
+        s7_failures++;
+        printf("lock-held guest calls over the run: %d (must be 0)\n", g_bnd_lock_violations);
     }
     printf("s7: %d tests, %d checks, %d failures\n", run, s7_checks, s7_failures);
     free(v);

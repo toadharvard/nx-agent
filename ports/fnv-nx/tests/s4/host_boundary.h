@@ -6,6 +6,9 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+/* guest calls made while the calling thread held a platform lock that is in scope of the rule (platform/include/fnvnx_lockcount.h):
+   the test mains require it to stay 0. The check is test-side only; the product boundary does not make it. */
+extern int g_bnd_lock_violations;
 extern int g_bnd_exports, g_bnd_invokes, g_bnd_threads_created, g_bnd_threads_run, g_bnd_threads_freed,
     g_bnd_threads_freed_unrun, g_bnd_process_detaches;
 /* the modules (bases) DisableThreadLibraryCalls told the boundary about */

@@ -5,6 +5,7 @@
  * counted (host_boundary.h) so the tests can see what the platform sent through the boundary. */
 #include "fnvnx_boundary.h"
 #include "host_boundary.h"
+#include "fnvnx_lockcount.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +20,7 @@ extern "C" void fnvnx_reach_violation(uint32_t fact_id)
 }
 
 extern "C" {
+int g_bnd_lock_violations;   /* guest calls made while the thread held an in-scope platform lock (fnvnx_lockcount.h) */
 int g_bnd_exports, g_bnd_invokes, g_bnd_threads_created, g_bnd_threads_run, g_bnd_threads_freed,
     g_bnd_threads_freed_unrun, g_bnd_process_detaches;
 uint32_t (*g_bnd_loader)(const char *name, uint32_t *base);
@@ -36,6 +38,8 @@ void fnvnx_bnd_guest_invoke(fnvnx_gaddr addr, uint32_t ecx, uint32_t nargs, cons
                             struct fnvnx_bnd_ret *out)
 {
     __atomic_fetch_add(&g_bnd_invokes, 1, __ATOMIC_RELAXED);
+    if (fnvnx_bnd_locks_held())
+        __atomic_fetch_add(&g_bnd_lock_violations, 1, __ATOMIC_RELAXED);
     if (g_bnd_invoke_hook && g_bnd_invoke_hook(addr, ecx, nargs, args, kind, out))
         return;
     W a[16] = {0};

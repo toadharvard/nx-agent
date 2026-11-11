@@ -8,8 +8,9 @@
  * game's reader is not touched while audio plays). The renderer feeds a looping mixer voice through a ring that the
  * graph's pump thread keeps filled.
  *
- * Lock order: Graph::lock (GraphCore::lock) > mixer lock. Renderer state and the decoders are used with the graph
- * lock held; the mixer never calls back. Connection and loading code runs without it. */
+ * Lock order: Graph::lock (GraphCore::lock) > mixer lock. Renderer state and the decoders (the platform's own types) are
+ * used with the graph lock held; the mixer never calls back. Connection and loading code runs without it, and nothing
+ * here calls an interface method of a foreign object (a peer pin, the source's reader, the sync clock) under either lock. */
 #define DSH_IMPL
 #include "dshow_int.h"
 
@@ -896,11 +897,7 @@ struct DSoundRender final : Renderer {
         in->add_type(MEDIATYPE_Audio_, MEDIASUBTYPE_PCM_);
     }
     ~DSoundRender() override { detach(); }
-    struct Lk {   /* the graph lock, when the filter is in a graph */
-        GraphCore *g;
-        explicit Lk(GraphCore *c) : g(c) { if (g) os_lock(&g->lock); }
-        ~Lk() { if (g) os_unlock(&g->lock); }
-    };
+    typedef GraphLock Lk;   /* the graph lock, when the filter is in a graph */
     bool accepts(BPin *p, const MT *mt) override
     {
         if (!geq(mt->major, MEDIATYPE_Audio_) || !geq(mt->sub, MEDIASUBTYPE_PCM_) || !geq(mt->format, FORMAT_WaveFormatEx_)) return false;

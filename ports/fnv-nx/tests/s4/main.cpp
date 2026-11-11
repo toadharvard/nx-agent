@@ -1,5 +1,6 @@
 /* main.cpp - runs every TEST in reverse registration order of the files, prints a summary. */
 #include "s4_test.h"
+#include "host_boundary.h"
 
 #include <stdlib.h>
 
@@ -53,6 +54,13 @@ int main(int argc, char **argv)
         int bad = s4_failures - before;
         failed_cases += bad != 0;
         printf("%-34s %s\n", v[i]->name, bad ? "FAIL" : "ok");
+    }
+    /* the rule "no platform lock is held across a call into the game" (platform/include/fnvnx_lockcount.h) over the whole run */
+    s4_checks++;
+    if (g_bnd_lock_violations) {
+        s4_failures++;
+        failed_cases++;
+        printf("lock-held guest calls over the run: %d (must be 0)\n", g_bnd_lock_violations);
     }
     printf("\n%d tests, %d checks, %d failed checks, %d failed tests\n", n, s4_checks, s4_failures, failed_cases);
     free(v);

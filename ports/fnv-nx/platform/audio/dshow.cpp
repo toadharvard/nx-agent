@@ -16,10 +16,24 @@
  * E_NOINTERFACE for every method, as a graph with no video renderer does.
  *
  * Lock order (outer to inner): Graph::lock (GraphCore::lock) > mixer lock (g_lock in mixer.cpp). The graph lock
- * guards the filter list, the state, the event queue and the renderers' streams; foreign (game) code is never
- * called with it held; the mixer never calls back into the graph. */
+ * guards the filter list, the state, the clock and site slots, the event queue and the renderers' streams.
+ *
+ * THE RULE (whole class, structural): an interface method of an object that is not provably the platform's own concrete
+ * type -- a filter, pin, enumerator, clock or site a GAME may have implemented (then the pointer is a combridge proxy and
+ * every method is a call into the game) -- is called with NO platform lock held, AddRef and Release included. A call into
+ * the game may not return and the game may re-enter the graph from inside it. Every graph operation is therefore
+ *     snapshot under the lock  ->  release it  ->  call out  ->  (re-acquire, validate, commit).
+ * The references the graph holds (a filter added, the clock, the site) are taken OUTSIDE the lock when they are acquired
+ * and are long-lived (Hold). A snapshot copies raw pointers; what keeps them alive is the Hold's in-use count (taken under
+ * the lock, a plain integer -- no call), not an AddRef: removing a Hold from its slot only RETIRES it, and the reference
+ * is released, outside the lock, by whoever ends the last use. Nothing holds a lock or a half-updated table across a call:
+ * a call that never returns leaves, at worst, one in-use count that keeps one removed filter's reference unreleased.
+ * The test boundary checks it (fnvnx_bnd_locks_held(), platform/include/fnvnx_lockcount.h). The renderer's methods and
+ * decoders (as_renderer, as_pcm: the platform's own classes, known by the kind the graph gave them) run under the lock;
+ * they call the mixer only. */
 #define DSH_IMPL
 #include "dshow_int.h"
+#include "../com/combridge.h"
 
 #include <math.h>
 #include <new>
@@ -37,11 +51,7 @@ BOOL CloseHandle(HANDLE);
 namespace dsh {
 namespace {
 
-struct GL {   /* the graph lock */
-    os_lock_t *l;
-    explicit GL(GraphCore *g) : l(&g->lock) { os_lock(l); }
-    ~GL() { os_unlock(l); }
-};
+typedef GraphLock GL;   /* the graph lock (dshow_int.h): counted for fnvnx_bnd_locks_held() */
 
 /* ---- the registry: what the mapper registers and the graph's intelligent connect searches */
 struct RegType { Guid maj, sub; };
@@ -378,8 +388,14 @@ HR disp_invoke(const DM *tbl, unsigned n, void *self, InvFn fn, long id, uint16_
 
 /* ---- the graph and its sub-objects */
 struct Graph;
-struct Entry { Unk *u; IBaseFilter_ *f; BFilter *bf; WCH name[128]; };
-struct Ev { long code; intptr_t p1, p2; };
+/* a reference the graph holds of an object it did not make: released outside the lock, when retired and no call is in flight */
+struct Hold {
+    Unk *u = nullptr;        /* the long-lived reference (acquired outside the lock) */
+    int use = 0;             /* calls in flight on a raw pointer taken from this hold (graph lock) */
+    bool retired = false;    /* unlinked from its slot: the last use ends releases u */
+};
+struct Entry : Hold { IBaseFilter_ *f = nullptr; BFilter *bf = nullptr; WCH name[128] = {}; };
+struct Ev { long code; intptr_t p1, p2; Unk *keep; };   /* keep: the platform's reference of the IUnknown an EC_DEVICE_LOST carries in p1 (a proxy of the game's object) */
 
 #define SUB_UNK                                                                                               \
     Graph *g;                                                                                                 \
@@ -595,10 +611,10 @@ struct Graph final : IFilterGraph2_, GraphCore {
     Version version_if;
     VideoWindow vwin;
     BasicVideo bvid;
-    Vec<Entry> filters;
+    Vec<Entry *> filters;
     int state = State_Stopped;
     /* clock */
-    IReferenceClock_ *clock = nullptr;
+    Hold *clock = nullptr;   /* the sync source (a Hold of an IReferenceClock_) */
     bool clock_explicit = false;
     /* seeking engine */
     bool fmt_sample = false;
@@ -606,6 +622,7 @@ struct Graph final : IFilterGraph2_, GraphCore {
     double play_rate = 1.0;
     /* events */
     Vec<Ev> queue;
+    Vec<Ev> lent;   /* events GetEvent handed out whose parameters are not freed yet (FreeEventParams) */
     HANDLE evt = nullptr;
     long notify_flags = 0, notify_msg = 0;
     uintptr_t notify_hwnd = 0;
@@ -614,7 +631,7 @@ struct Graph final : IFilterGraph2_, GraphCore {
     bool cancel_complete = false, latch = false;
     long latch_code = 0;
     Vec<intptr_t> done;   /* filters that reported EC_COMPLETE since the stream started */
-    Unk *site = nullptr;
+    Hold *site = nullptr;    /* IObjectWithSite */
     uintptr_t logh = 0;
     os_thread *pump = nullptr;
     volatile int quit = 0;
@@ -653,7 +670,8 @@ struct Graph final : IFilterGraph2_, GraphCore {
     HR ReconnectEx(IPin_ *p, const MT *mt) override { return reconnect(p, mt); }
     HR RenderEx(IPin_ *, uint32_t, uint32_t *) override;
     /* GraphCore */
-    bool event_locked(long code, intptr_t p1, intptr_t p2) override;
+    bool event_locked(long code, intptr_t p1, intptr_t p2) override { return post_locked(Ev{code, p1, p2, nullptr}); }
+    bool post_locked(const Ev &ev);
     void completion_locked(BFilter *r) override;
     void start_pump() override;
     void flush_window() override;
@@ -668,7 +686,12 @@ struct Graph final : IFilterGraph2_, GraphCore {
     HR build(IPin_ *out, IPin_ *target, bool existing_only, int depth);
     HR downstream(BFilter *f, IPin_ *target, bool existing_only, int depth);
     void disconnect_all(IBaseFilter_ *f);
-    void snapshot(Vec<IBaseFilter_ *> &v);   /* AddRef'd, sources first */
+    void snapshot(Vec<Entry *> &v);   /* most recently added first; each entry in use until snap_free (no AddRef) */
+    void snap_free(Vec<Entry *> &v);
+    template <class H> void put(H *h);            /* one use less; the last use of a retired hold releases it (outside the lock) */
+    template <class H> void finish(H *h) { h->u->Release(); delete h; }
+    IReferenceClock_ *clock_use(Hold **h);      /* the clock, in use until put(*h); null if none */
+    Hold *set_clock(Unk *ck, bool is_explicit);   /* takes the caller's reference of ck (AddRef'd outside the lock); the new hold, in use */
     int depth_of(IBaseFilter_ *f, int limit);
     HR run_all(LL start);
     HR pause_all();
@@ -760,10 +783,60 @@ bool Graph::pin_in_graph(IPin_ *p)
     {
         GL l(this);
         for (size_t i = 0; i < filters.n; i++)
-            if (filters[i].f == (IBaseFilter_ *)pi.filter) in = true;
+            if (filters[i]->f == (IBaseFilter_ *)pi.filter) in = true;
     }
     ((Unk *)pi.filter)->Release();
     return in;
+}
+
+/* ---- holds: the references the graph keeps, released outside the lock */
+template <class H> void Graph::put(H *h)
+{
+    bool fin;
+    {
+        GL l(this);
+        fin = --h->use == 0 && h->retired;
+    }
+    if (fin) finish(h);
+}
+void Graph::snapshot(Vec<Entry *> &v)
+{
+    GL l(this);
+    for (size_t i = filters.n; i-- > 0;)   /* most recently added first, as EnumFilters does */
+        if (filters[i]->f) { filters[i]->use++; v.push(filters[i]); }
+}
+void Graph::snap_free(Vec<Entry *> &v)
+{
+    for (size_t i = 0; i < v.n; i++) put(v[i]);
+    v.n = 0;
+}
+IReferenceClock_ *Graph::clock_use(Hold **h)
+{
+    GL l(this);
+    *h = clock;
+    if (!clock) return nullptr;
+    clock->use++;
+    return static_cast<IReferenceClock_ *>(clock->u);
+}
+Hold *Graph::set_clock(Unk *ck, bool is_explicit)   /* the new clock's hold, in use by the caller (null: no clock) */
+{
+    Hold *h = nullptr;
+    if (ck) {
+        h = new (std::nothrow) Hold();
+        if (!h) ck->Release();
+        else { h->u = ck; h->use = 1; }
+    }
+    Hold *old;
+    bool fin = false;
+    {
+        GL l(this);
+        old = clock;
+        clock = h;
+        clock_explicit = is_explicit;
+        if (old) { old->retired = true; fin = old->use == 0; }
+    }
+    if (fin) finish(old);
+    return h;
 }
 
 /* ---- filters in the graph */
@@ -772,43 +845,58 @@ HR Graph::add_filter(Unk *u, const WCH *name, bool)
     IBaseFilter_ *bf = nullptr;
     if (u->QueryInterface(&IID_IBaseFilter_, (void **)&bf) < 0) bf = nullptr;
     else bf->Release();   /* the graph's own reference below keeps it */
-    Entry e = {u, bf, bf ? internal_filter(u) : nullptr, {}};
+    Entry *e = new (std::nothrow) Entry();
+    if (!e) return E_OUTOFMEMORY_;
+    e->u = u;
+    e->f = bf;
+    e->bf = bf ? internal_filter(u) : nullptr;
+    e->use = 1;   /* this call's own: the name it passes to JoinFilterGraph must outlive a re-entrant RemoveFilter */
     WCH base[128];
     wcopy(base, 120, name && *name ? name : (const WCH *)u"Filter");
-    HR hr = S_OK_;
+    u->AddRef();   /* the graph's long-lived reference: taken before the lock, a call into the filter */
+    HR hr = S_OK_, fail = S_OK_;
     {
         GL l(this);
         for (size_t i = 0; i < filters.n; i++)
-            if (filters[i].u == u) return E_FAIL_;   /* already in this graph */
-        wcopy(e.name, 128, base);
-        for (unsigned n = 1;; n++) {   /* names are unique: "name 0001" and VFW_S_DUPLICATE_NAME */
-            bool dup = false;
-            for (size_t i = 0; i < filters.n; i++)
-                if (weq_nocase(filters[i].name, e.name)) dup = true;
-            if (!dup || n > 9999) break;
-            hr = VFW_S_DUPLICATE_NAME_;
-            wcopy(e.name, 128, base);
-            char sfx[12];
-            snprintf(sfx, sizeof sfx, " %04u", n);
-            size_t l0 = wlen(e.name);
-            for (size_t k = 0; sfx[k] && l0 + k < 127; k++) e.name[l0 + k] = (uint8_t)sfx[k], e.name[l0 + k + 1] = 0;
+            if (filters[i]->u == u) fail = E_FAIL_;   /* already in this graph */
+        if (fail >= 0) {
+            wcopy(e->name, 128, base);
+            for (unsigned n = 1;; n++) {   /* names are unique: "name 0001" and VFW_S_DUPLICATE_NAME */
+                bool dup = false;
+                for (size_t i = 0; i < filters.n; i++)
+                    if (weq_nocase(filters[i]->name, e->name)) dup = true;
+                if (!dup || n > 9999) break;
+                hr = VFW_S_DUPLICATE_NAME_;
+                wcopy(e->name, 128, base);
+                char sfx[12];
+                snprintf(sfx, sizeof sfx, " %04u", n);
+                size_t l0 = wlen(e->name);
+                for (size_t k = 0; sfx[k] && l0 + k < 127; k++) e->name[l0 + k] = (uint8_t)sfx[k], e->name[l0 + k + 1] = 0;
+            }
+            if (filters.push(e)) bump_version();
+            else fail = E_OUTOFMEMORY_;
         }
-        u->AddRef();
-        filters.push(e);
-        bump_version();
+    }
+    if (fail < 0) {
+        u->Release();
+        delete e;
+        return fail;
     }
     if (bf) {
-        HR j = bf->JoinFilterGraph(static_cast<IFilterGraph2_ *>(this), e.name);
-        if (j < 0) {
-            GL l(this);
-            for (size_t i = 0; i < filters.n; i++)
-                if (filters[i].u == u) { filters.erase(i); break; }
-            u->Release();
+        HR j = bf->JoinFilterGraph(static_cast<IFilterGraph2_ *>(this), e->name);
+        if (j < 0) {   /* it may already be gone again (the filter removed itself from inside the call): then its remover owns the release */
+            {
+                GL l(this);
+                for (size_t i = 0; i < filters.n; i++)
+                    if (filters[i] == e) { filters.erase(i); e->retired = true; bump_version(); break; }
+            }
+            put(e);
             return j;
         }
     }
     char nm[128];
-    ascii(e.name, nm, sizeof nm);
+    ascii(e->name, nm, sizeof nm);
+    put(e);
     logf("AddFilter '%s'%s", nm, hr == VFW_S_DUPLICATE_NAME_ ? " (renamed)" : "");
     return hr;
 }
@@ -838,55 +926,61 @@ void Graph::disconnect_all(IBaseFilter_ *f)
 HR Graph::RemoveFilter(IBaseFilter_ *f)
 {
     if (!f) return E_POINTER_;
-    Entry e = {};
-    bool found = false;
+    Entry *e = nullptr;
     {
         GL l(this);
         for (size_t i = 0; i < filters.n; i++)
-            if (filters[i].u == (Unk *)f) { e = filters[i]; filters.erase(i); found = true; break; }
-        if (found) { stop_req = -1; done.n = 0; bump_version(); }
+            if (filters[i]->u == (Unk *)f) { e = filters[i]; filters.erase(i); break; }
+        if (e) {   /* retired: unlinked at once; the reference goes back when the last call using it ends (put below) */
+            e->retired = true;
+            e->use++;
+            stop_req = -1;
+            done.n = 0;
+            bump_version();
+        }
     }
-    if (!found) return VFW_E_NOT_FOUND_;
+    if (!e) return VFW_E_NOT_FOUND_;
     char nm[128];
-    ascii(e.name, nm, sizeof nm);
+    ascii(e->name, nm, sizeof nm);
     logf("RemoveFilter '%s'", nm);
-    if (e.f) {
+    if (e->f) {
         int st = 0;
-        if (e.f->GetState(0, &st) >= 0 && st != State_Stopped) e.f->Stop();
-        disconnect_all(e.f);
+        if (e->f->GetState(0, &st) >= 0 && st != State_Stopped) e->f->Stop();
+        disconnect_all(e->f);
+        Hold *ch = nullptr;
+        IReferenceClock_ *cur = clock_use(&ch);
         IReferenceClock_ *ck = nullptr;
-        if (clock && e.f->QueryInterface(&IID_IReferenceClock_, (void **)&ck) >= 0) {   /* its clock goes with it */
-            if (ck == clock) {
-                IReferenceClock_ *old = clock;
-                clock = nullptr;
-                clock_explicit = false;
-                Vec<IBaseFilter_ *> v;
-                snapshot(v);
-                for (size_t i = 0; i < v.n; i++) { v[i]->SetSyncSource(nullptr); v[i]->Release(); }
-                if (old) old->Release();
+        if (cur && e->f->QueryInterface(&IID_IReferenceClock_, (void **)&ck) >= 0) {   /* its clock goes with it */
+            if (ck == cur) {
+                bool mine = false;
+                {
+                    GL l(this);
+                    if (clock == ch) { clock = nullptr; clock_explicit = false; ch->retired = true; mine = true; }
+                }
+                if (mine) {
+                    Vec<Entry *> v;
+                    snapshot(v);
+                    for (size_t i = 0; i < v.n; i++) v[i]->f->SetSyncSource(nullptr);
+                    snap_free(v);
+                }
             }
             ck->Release();
         }
-        e.f->JoinFilterGraph(nullptr, nullptr);
+        if (ch) put(ch);
+        e->f->JoinFilterGraph(nullptr, nullptr);
     }
-    e.u->Release();
+    put(e);   /* the graph's own reference of the filter goes back here unless another call still uses it */
     return S_OK_;
-}
-void Graph::snapshot(Vec<IBaseFilter_ *> &v)
-{
-    {
-        GL l(this);
-        for (size_t i = filters.n; i-- > 0;)   /* most recently added first, as EnumFilters does */
-            if (filters[i].f) { filters[i].f->AddRef(); v.push(filters[i].f); }
-    }
 }
 HR Graph::EnumFilters(void **out)
 {
     if (!out) return E_POINTER_;
-    Vec<IBaseFilter_ *> v;
+    Vec<Entry *> v;
     snapshot(v);
-    IEnum_ *e = make_enum(EK_UNK, (void **)v.p, v.n);
-    for (size_t i = 0; i < v.n; i++) v[i]->Release();
+    Vec<void *> items;
+    for (size_t i = 0; i < v.n; i++) items.push(v[i]->f);
+    IEnum_ *e = make_enum(EK_UNK, items.p, items.n);   /* AddRefs each item, outside the lock */
+    snap_free(v);
     *out = e;
     return e ? S_OK_ : E_OUTOFMEMORY_;
 }
@@ -894,14 +988,17 @@ HR Graph::FindFilterByName(const WCH *name, IBaseFilter_ **out)
 {
     if (!name || !out) return E_POINTER_;
     *out = nullptr;
-    GL l(this);
-    for (size_t i = 0; i < filters.n; i++)
-        if (filters[i].f && weq_nocase(filters[i].name, name)) {
-            *out = filters[i].f;
-            (*out)->AddRef();
-            return S_OK_;
-        }
-    return VFW_E_NOT_FOUND_;
+    Entry *hit = nullptr;
+    {
+        GL l(this);
+        for (size_t i = 0; i < filters.n && !hit; i++)
+            if (filters[i]->f && weq_nocase(filters[i]->name, name)) { hit = filters[i]; hit->use++; }
+    }
+    if (!hit) return VFW_E_NOT_FOUND_;
+    hit->f->AddRef();
+    *out = hit->f;
+    put(hit);
+    return S_OK_;
 }
 
 /* ---- connections */
@@ -1011,12 +1108,12 @@ HR Graph::build(IPin_ *out, IPin_ *target, bool existing_only, int depth)
     }
     HR result = fail;
     /* (a) filters already in the graph with a free input pin */
-    Vec<IBaseFilter_ *> snap;
+    Vec<Entry *> snap;
     snapshot(snap);
     PinInfo opi = {};
     out->QueryPinInfo(&opi);
     for (size_t i = 0; i < snap.n && result < 0; i++) {
-        BFilter *bf = internal_filter(snap[i]);
+        BFilter *bf = snap[i]->bf;
         if (!bf || (void *)static_cast<IBaseFilter_ *>(bf) == opi.filter) continue;
         for (size_t k = 0; k < bf->pins.n && result < 0; k++) {
             BPin *p = bf->pins[k];
@@ -1028,7 +1125,7 @@ HR Graph::build(IPin_ *out, IPin_ *target, bool existing_only, int depth)
             else Disconnect(out);
         }
     }
-    for (size_t i = 0; i < snap.n; i++) snap[i]->Release();
+    snap_free(snap);
     if (opi.filter) ((Unk *)opi.filter)->Release();
     /* (b) installed filters, best merit first, whose input takes one of the types */
     struct Cand { Guid clsid; WCH name[64]; uint32_t merit; };
@@ -1176,40 +1273,40 @@ HR Graph::AddSourceFilterForMoniker(void *moniker, void *ctx, const WCH *name, I
 /* ---- sync source, state */
 HR Graph::SetDefaultSyncSource()
 {
-    Vec<IBaseFilter_ *> v;
+    Vec<Entry *> v;
     snapshot(v);
     IReferenceClock_ *ck = nullptr;
     for (size_t i = v.n; i-- > 0 && !ck;)   /* oldest first */
-        if (v[i]->QueryInterface(&IID_IReferenceClock_, (void **)&ck) < 0) ck = nullptr;
-    IReferenceClock_ *old = clock;
-    clock = ck;
-    clock_explicit = false;
-    for (size_t i = 0; i < v.n; i++) { v[i]->SetSyncSource(ck); v[i]->Release(); }
-    if (old) old->Release();
+        if (v[i]->f->QueryInterface(&IID_IReferenceClock_, (void **)&ck) < 0) ck = nullptr;
+    Hold *h = set_clock(ck, false);   /* the QueryInterface reference becomes the graph's */
+    for (size_t i = 0; i < v.n; i++) v[i]->f->SetSyncSource(h ? static_cast<IReferenceClock_ *>(h->u) : nullptr);
+    if (h) put(h);
+    snap_free(v);
     return S_OK_;
 }
 HR MFilter::SetSyncSource(IReferenceClock_ *c)
 {
-    if (c) c->AddRef();
-    IReferenceClock_ *old = g->clock;
-    g->clock = c;
-    g->clock_explicit = true;
-    Vec<IBaseFilter_ *> v;
+    if (c) c->AddRef();   /* the graph's reference, taken outside the lock */
+    Hold *h = g->set_clock(c, true);
+    if (c && !h) return E_OUTOFMEMORY_;
+    Vec<Entry *> v;
     g->snapshot(v);
     HR hr = S_OK_;
     for (size_t i = 0; i < v.n; i++) {
-        HR h = v[i]->SetSyncSource(c);
-        if (h < 0) hr = h;
-        v[i]->Release();
+        HR x = v[i]->f->SetSyncSource(c);
+        if (x < 0) hr = x;
     }
-    if (old) old->Release();
+    g->snap_free(v);
+    if (h) g->put(h);   /* c stays alive until here: the hold is in use */
     return hr;
 }
 HR MFilter::GetSyncSource(IReferenceClock_ **c)
 {
     if (!c) return E_POINTER_;
-    *c = g->clock;
+    Hold *h = nullptr;
+    *c = g->clock_use(&h);
     if (*c) (*c)->AddRef();
+    if (h) g->put(h);
     return S_OK_;
 }
 int Graph::depth_of(IBaseFilter_ *f, int limit)
@@ -1238,22 +1335,29 @@ int Graph::depth_of(IBaseFilter_ *f, int limit)
     return best;
 }
 /* order of a state change: Run and Pause start at the renderers and go upstream, Stop starts at the sources */
-static void order_by_depth(Vec<IBaseFilter_ *> &v, Vec<int> &dp)
+static void order_by_depth(Vec<Entry *> &v, Vec<int> &dp)
 {
     for (size_t i = 1; i < v.n; i++)
         for (size_t k = i; k > 0 && dp[k - 1] > dp[k]; k--) {
-            IBaseFilter_ *t = v[k]; v[k] = v[k - 1]; v[k - 1] = t;
+            Entry *t = v[k]; v[k] = v[k - 1]; v[k - 1] = t;
             int d = dp[k]; dp[k] = dp[k - 1]; dp[k - 1] = d;
         }
 }
 HR Graph::run_all(LL start)
 {
-    if (state == State_Running) return S_OK_;
-    if (!clock_explicit && !clock) SetDefaultSyncSource();
-    Vec<IBaseFilter_ *> v;
+    int st0;
+    bool need_clock;
+    {
+        GL l(this);
+        st0 = state;
+        need_clock = !clock_explicit && !clock;
+    }
+    if (st0 == State_Running) return S_OK_;
+    if (need_clock) SetDefaultSyncSource();
+    Vec<Entry *> v;
     snapshot(v);
     Vec<int> dp;
-    for (size_t i = 0; i < v.n; i++) dp.push(depth_of(v[i], 16));
+    for (size_t i = 0; i < v.n; i++) dp.push(depth_of(v[i]->f, 16));
     order_by_depth(v, dp);
     HR hr = S_OK_;
     {
@@ -1261,41 +1365,46 @@ HR Graph::run_all(LL start)
         clear_completion_locked();
     }
     LL t = start;
-    if (t < 0) { t = 0; if (clock) clock->GetTime(&t); }
-    if (state == State_Stopped)
-        for (size_t i = v.n; i-- > 0;) { HR h = v[i]->Pause(); if (h < 0 && hr >= 0) hr = h; }
-    for (size_t i = v.n; i-- > 0 && hr >= 0;) hr = v[i]->Run(t);
-    if (hr < 0) for (size_t i = 0; i < v.n; i++) v[i]->Stop();
+    if (t < 0) {
+        t = 0;
+        Hold *h = nullptr;
+        if (IReferenceClock_ *c = clock_use(&h)) { c->GetTime(&t); put(h); }
+    }
+    if (st0 == State_Stopped)
+        for (size_t i = v.n; i-- > 0;) { HR h = v[i]->f->Pause(); if (h < 0 && hr >= 0) hr = h; }
+    for (size_t i = v.n; i-- > 0 && hr >= 0;) hr = v[i]->f->Run(t);
+    if (hr < 0) for (size_t i = 0; i < v.n; i++) v[i]->f->Stop();
     {
         GL l(this);
         state = hr >= 0 ? State_Running : State_Stopped;
     }
-    for (size_t i = 0; i < v.n; i++) v[i]->Release();
+    snap_free(v);
     return hr;
 }
 HR Graph::pause_all()
 {
-    Vec<IBaseFilter_ *> v;
+    Vec<Entry *> v;
     snapshot(v);
     Vec<int> dp;
-    for (size_t i = 0; i < v.n; i++) dp.push(depth_of(v[i], 16));
+    for (size_t i = 0; i < v.n; i++) dp.push(depth_of(v[i]->f, 16));
     order_by_depth(v, dp);
     HR hr = S_OK_;
-    for (size_t i = v.n; i-- > 0;) { HR h = v[i]->Pause(); if (h < 0 && hr >= 0) hr = h; }
-    for (size_t i = 0; i < v.n; i++) v[i]->Release();
+    for (size_t i = v.n; i-- > 0;) { HR h = v[i]->f->Pause(); if (h < 0 && hr >= 0) hr = h; }
+    snap_free(v);
     GL l(this);
     state = State_Paused;
     return hr;
 }
 HR Graph::stop_all()
 {
-    Vec<IBaseFilter_ *> v;
+    Vec<Entry *> v;
     snapshot(v);
     Vec<int> dp;
-    for (size_t i = 0; i < v.n; i++) dp.push(depth_of(v[i], 16));
+    for (size_t i = 0; i < v.n; i++) dp.push(depth_of(v[i]->f, 16));
     order_by_depth(v, dp);
     HR hr = S_OK_;
-    for (size_t i = 0; i < v.n; i++) { HR h = v[i]->Stop(); if (h < 0 && hr >= 0) hr = h; v[i]->Release(); }
+    for (size_t i = 0; i < v.n; i++) { HR h = v[i]->f->Stop(); if (h < 0 && hr >= 0) hr = h; }
+    snap_free(v);
     GL l(this);
     state = State_Stopped;
     clear_completion_locked();
@@ -1315,17 +1424,17 @@ HR Control::StopWhenReady()
 HR Control::GetState(long ms, long *st)
 {
     if (!st) return E_POINTER_;
-    Vec<IBaseFilter_ *> v;
+    Vec<Entry *> v;
     g->snapshot(v);
     HR hr = S_OK_;
     for (size_t i = 0; i < v.n; i++) {
         int s = 0;
-        HR h = v[i]->GetState(ms < 0 ? 0xFFFFFFFFu : (uint32_t)ms, &s);
+        HR h = v[i]->f->GetState(ms < 0 ? 0xFFFFFFFFu : (uint32_t)ms, &s);
         if (h < 0) hr = h;
         else if (h == VFW_S_STATE_INTERMEDIATE_ && hr >= 0) hr = h;
         else if (h == VFW_S_CANT_CUE_ && hr == S_OK_) hr = h;
-        v[i]->Release();
     }
+    g->snap_free(v);
     GL l(g);
     *st = g->state;
     return hr;
@@ -1351,7 +1460,7 @@ HR MFilter::GetState(uint32_t ms, int *st)
 void Graph::renderers_locked(Vec<Renderer *> &v)
 {
     for (size_t i = 0; i < filters.n; i++)
-        if (Renderer *r = as_renderer(filters[i].bf))
+        if (Renderer *r = as_renderer(filters[i]->bf))
             if (r->connected()) v.push(r);
 }
 bool Graph::dur_locked(LL *d)
@@ -1609,7 +1718,7 @@ HR Graph::audio_target(Renderer **r)
     *r = nullptr;
     GL l(this);
     for (size_t i = 0; i < filters.n; i++)
-        if (Renderer *x = as_renderer(filters[i].bf)) {
+        if (Renderer *x = as_renderer(filters[i]->bf)) {
             if (x->connected()) { *r = x; return S_OK_; }
         }
     return E_NOINTERFACE_;   /* no audio renderer: the interface has nothing to forward to */
@@ -1654,10 +1763,10 @@ HR Audio::get_Balance(long *b)
 }
 
 /* ---- events */
-bool Graph::event_locked(long code, intptr_t p1, intptr_t p2)
+bool Graph::post_locked(const Ev &ev)
 {
-    if (code == EC_DEVICE_LOST_ && p1) ((Unk *)p1)->AddRef();   /* its parameters are owned by the queue until FreeEventParams */
-    queue.push(Ev{code, p1, p2});
+    long code = ev.code;
+    queue.push(ev);
     if (evt) SetEvent(evt);
     if (code == EC_ERRORABORT_ || code == EC_USERABORT_) { latch = true; latch_code = code; }
     if (notify_hwnd && !(notify_flags & 1)) { win_pending++; return true; }
@@ -1702,6 +1811,15 @@ void Graph::completion_locked(BFilter *r)
 }
 HR Sink::Notify(long code, intptr_t p1, intptr_t p2)
 {
+    /* EC_DEVICE_LOST carries an IUnknown in p1 that the queue owns until FreeEventParams. It is an interface pointer of the
+     * sender: a face of ours or the game's own object, reached only through its proxy (combridge: the pointer alone decides which),
+     * and its AddRef is a call into the game, so it is made before the lock. The game gets p1 back unchanged from GetEvent. */
+    Unk *keep = nullptr;
+    if (code == EC_DEVICE_LOST_ && p1) {
+        int ix = nxcom::iface_for_iid((const uint8_t *)&IID_IUnknown_, 2);
+        if (ix >= 0) keep = (Unk *)nxcom::from_game((const void *)p1, (unsigned)ix);
+        if (keep) keep->AddRef();
+    }
     {
         GL l(g);
         if (code == EC_COMPLETE_ && !g->cancel_complete) {   /* default handling: counted per reporting filter */
@@ -1714,7 +1832,7 @@ HR Sink::Notify(long code, intptr_t p1, intptr_t p2)
             g->latch = true;
             g->latch_code = EC_COMPLETE_;
         }
-        g->event_locked(code, p1, p2);
+        g->post_locked(Ev{code, p1, p2, keep});
     }
     g->flush_window();
     return S_OK_;
@@ -1735,6 +1853,7 @@ HR Event::GetEvent(long *code, intptr_t *p1, intptr_t *p2, long ms)
             if (g->queue.n) {
                 Ev e = g->queue[0];
                 g->queue.erase(0);
+                if (e.keep) g->lent.push(e);
                 if (!g->queue.n && g->evt) ResetEvent(g->evt);
                 *code = e.code;
                 *p1 = e.p1;
@@ -1777,7 +1896,13 @@ HR Event::RestoreDefaultHandling(long c)
 }
 HR Event::FreeEventParams(long code, intptr_t p1, intptr_t)
 {
-    if (code == EC_DEVICE_LOST_ && p1) ((Unk *)p1)->Release();
+    Unk *keep = nullptr;
+    {
+        GL l(g);
+        for (size_t i = 0; i < g->lent.n; i++)
+            if (g->lent[i].code == code && g->lent[i].p1 == p1) { keep = g->lent[i].keep; g->lent.erase(i); break; }
+    }
+    if (keep) keep->Release();   /* a call into the game: outside the lock */
     return S_OK_;
 }
 HR Event::SetNotifyWindow(uintptr_t hwnd, long msg, intptr_t inst)
@@ -1806,17 +1931,38 @@ HR Event::GetNotifyFlags(long *f)
 /* ---- site */
 HR Site::SetSite(Unk *s)
 {
-    if (s) s->AddRef();
-    Unk *old = g->site;
-    g->site = s;
-    if (old) old->Release();
+    Hold *h = nullptr;
+    if (s) {
+        s->AddRef();   /* outside the lock */
+        h = new (std::nothrow) Hold();
+        if (!h) { s->Release(); return E_OUTOFMEMORY_; }
+        h->u = s;
+    }
+    Hold *old;
+    bool fin = false;
+    {
+        GL l(g);
+        old = g->site;
+        g->site = h;
+        if (old) { old->retired = true; fin = old->use == 0; }
+    }
+    if (fin) g->finish(old);
     return S_OK_;
 }
 HR Site::GetSite(const void *iid, void **out)
 {
     if (!out) return E_POINTER_;
     *out = nullptr;
-    return g->site ? g->site->QueryInterface(iid, out) : E_FAIL_;
+    Hold *h;
+    {
+        GL l(g);
+        h = g->site;
+        if (h) h->use++;
+    }
+    if (!h) return E_FAIL_;
+    HR hr = h->u->QueryInterface(iid, out);
+    g->put(h);
+    return hr;
 }
 
 /* ---- the pump: keeps the renderers' rings filled, reports the end of the stream */
@@ -1827,7 +1973,7 @@ void pump_main(void *p)
         {
             GL l(g);
             for (size_t i = 0; i < g->filters.n; i++)
-                if (Renderer *r = as_renderer(g->filters[i].bf)) r->tick_locked();
+                if (Renderer *r = as_renderer(g->filters[i]->bf)) r->tick_locked();
         }
         g->flush_window();
         os_sleep_ns(10 * 1000000ull);
@@ -1851,19 +1997,22 @@ Graph::~Graph()
         os_thread_free(pump);
     }
     stop_all();
-    while (filters.n) {
-        Entry e = filters[filters.n - 1];
+    while (filters.n) {   /* (no other thread uses a graph that is being destroyed) */
+        Entry *e = filters[filters.n - 1];
         filters.erase(filters.n - 1);
-        if (e.f) {
-            disconnect_all(e.f);
-            e.f->JoinFilterGraph(nullptr, nullptr);
+        if (e->f) {
+            disconnect_all(e->f);
+            e->f->JoinFilterGraph(nullptr, nullptr);
         }
-        e.u->Release();
+        e->u->Release();
+        delete e;
     }
-    if (clock) clock->Release();
-    if (site) site->Release();
+    if (clock) finish(clock);
+    if (site) finish(site);
     for (size_t i = 0; i < queue.n; i++)
-        if (queue[i].code == EC_DEVICE_LOST_ && queue[i].p1) ((Unk *)queue[i].p1)->Release();
+        if (queue[i].keep) queue[i].keep->Release();
+    for (size_t i = 0; i < lent.n; i++)
+        if (lent[i].keep) lent[i].keep->Release();
     if (evt) CloseHandle(evt);
 }
 

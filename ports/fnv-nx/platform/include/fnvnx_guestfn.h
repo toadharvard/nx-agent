@@ -30,7 +30,9 @@
  * tests/s4/test_guestfn.cpp through the recording test double of guest_invoke).
  *
  * Locks: the runtime may not return from a guest call (a game exception unwinding past the import discards the native
- * frames without cleanup), so no platform lock may be held across a call through this type. */
+ * frames without cleanup), so no platform lock may be held across a call through this type. The platform locks in scope of
+ * the rule count themselves (fnvnx_lockcount.h: fnvnx_bnd_locks_held()); the host test boundary records a violation whenever a
+ * call arrives here with a count other than 0, and the test mains require it to stay 0 (the product's boundary does not check). */
 #ifndef FNVNX_GUESTFN_H
 #define FNVNX_GUESTFN_H
 
