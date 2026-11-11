@@ -79,7 +79,8 @@ def table(title, rows):
         e = Env()
         got = res(lambda: fn(e))
         if got != want:
-            bad.append((name, got if isinstance(got, str) else hex(got), want if isinstance(want, str) else hex(want)))
+            fmt = lambda v: v if isinstance(v, str) else hex(v) if isinstance(v, int) else repr(v)
+            bad.append((name, fmt(got), fmt(want)))
     case("%s (%d cases)" % (title, len(rows)), not bad, bad)
 
 
@@ -182,7 +183,9 @@ def main():
     table("GETFL / SETFL / SETSOCKOPT / GETSOCKOPT", [
         ("getfl", lambda e: (e.s(), e.m.call(30, [3]))[1], 2), ("setfl-nb", lambda e: (e.s(), e.m.call(31, [3, 0x800]), e.m.call(30, [3]))[2], 0x802),
         ("setfl-clear", lambda e: (e.s(), e.m.call(31, [3, 0x800]), e.m.call(31, [3, 0]), e.m.call(30, [3]))[3], 2),
-        ("setfl-other-bit", lambda e: (e.s(), e.m.call(31, [3, 0x802]))[1], "ND"),
+        ("setfl-other-bit", lambda e: (e.s(), e.m.call(31, [3, 0x402]), e.m.call(30, [3]))[2], 2),
+        ("setfl-other-bit-nb", lambda e: (e.s(), e.m.call(31, [3, 0x1802]), e.m.call(30, [3]))[2], 0x802),
+        ("setfl-other-bit-result", lambda e: (e.s(), e.m.call(31, [3, 0x802]))[1], 0),
         ("set-unknown-level", lambda e: (e.s(), e.m.call(24, [3, 5, 1, VAL, 4]))[1], neg(92)),
         ("set-unknown-opt", lambda e: (e.s(), e.m.call(24, [3, 1, 99, VAL, 4]))[1], neg(92)),
         ("set-wide-opt", lambda e: (e.s(), e.m.call(24, [3, 1, 1 << 32 | 2, VAL, 4]))[1], neg(92)),
@@ -200,14 +203,22 @@ def main():
         ("get-unknown", lambda e: (e.s(), e.m.call(25, [3, 1, 99, VAL, LEN]))[1], neg(92)),
         ("get-null-vallen", lambda e: (e.s(), e.m.call(25, [3, 1, 3, VAL, 0]))[1], neg(14)),
         ("get-null-val-cap", lambda e: (e.s(), e.mem.write(LEN, struct.pack("<I", 4)), e.m.call(25, [3, 1, 3, 0, LEN]))[2], neg(14)),
-        ("get-null-val-cap0", lambda e: (e.s(), e.mem.write(LEN, struct.pack("<I", 0)), e.m.call(25, [3, 1, 3, 0, LEN]))[2], "ND"),
+        ("get-null-val-cap0", lambda e: (e.s(), e.mem.write(LEN, struct.pack("<I", 0)), e.m.call(25, [3, 1, 3, 0, LEN]))[2], neg(14)),
+        ("get-null-val-null-vallen", lambda e: (e.s(), e.m.call(25, [3, 1, 3, 0, 0]))[1], neg(14)),
+        ("get-null-val-unknown-opt", lambda e: (e.s(), e.m.call(25, [3, 1, 99, 0, 0]))[1], neg(92)),
+        ("get-cap0", lambda e: (e.s(), e.mem.write(VAL, b"\xAA" * 4), e.mem.write(LEN, struct.pack("<I", 0)), e.m.call(25, [3, 1, 3, VAL, LEN]),
+                               e.mem.read(VAL, 4) + e.mem.read(LEN, 4))[4], b"\xAA" * 4 + struct.pack("<I", 4)),
+        ("get-cap-big", lambda e: (e.s(), e.mem.write(LEN, struct.pack("<I", 100)), e.m.call(25, [3, 1, 4, VAL, LEN]), e.mem.read(LEN, 4))[3], struct.pack("<I", 4)),
         ("get-type", lambda e: (e.s(V4, 2), e.mem.write(LEN, struct.pack("<I", 4)), e.m.call(25, [3, 1, 3, VAL, LEN]), e.mem.read(VAL, 4) + e.mem.read(LEN, 4))[3],
          struct.pack("<ii", 2, 4)),
         ("get-error", lambda e: (e.s(), e.mem.write(LEN, struct.pack("<I", 4)), e.m.call(25, [3, 1, 4, VAL, LEN]), e.mem.read(VAL, 4))[3], bytes(4)),
         ("get-reuse-unset", lambda e: (e.s(), e.mem.write(LEN, struct.pack("<I", 8)), e.m.call(25, [3, 1, 2, VAL, LEN]), e.mem.read(LEN, 4))[3], struct.pack("<I", 4)),
         ("get-linger-unset", lambda e: (e.s(), e.mem.write(LEN, struct.pack("<I", 8)), e.m.call(25, [3, 1, 13, VAL, LEN]), e.mem.read(VAL, 8))[3], bytes(8)),
         ("get-timeo-unset", lambda e: (e.s(), e.mem.write(LEN, struct.pack("<I", 16)), e.m.call(25, [3, 1, 20, VAL, LEN]), e.mem.read(LEN, 4))[3], struct.pack("<I", 16)),
-        ("get-cap-small", lambda e: (e.s(), e.mem.write(LEN, struct.pack("<I", 2)), e.m.call(25, [3, 1, 3, VAL, LEN]))[2], "ND"),
+        ("get-cap-small", lambda e: (e.s(), e.mem.write(VAL, b"\xAA" * 4), e.mem.write(LEN, struct.pack("<I", 2)), e.m.call(25, [3, 1, 3, VAL, LEN]),
+                                    e.mem.read(VAL, 4) + e.mem.read(LEN, 4))[4], b"\x01\x00\xAA\xAA" + struct.pack("<I", 4)),
+        ("get-cap-small-result", lambda e: (e.s(), e.mem.write(LEN, struct.pack("<I", 2)), e.m.call(25, [3, 1, 3, VAL, LEN]))[2], 0),
+        ("get-cap-small-linger", lambda e: (e.s(), e.mem.write(LEN, struct.pack("<I", 3)), e.m.call(25, [3, 1, 13, VAL, LEN]), e.mem.read(LEN, 4))[3], struct.pack("<I", 8)),
         ("get-after-set", lambda e: (e.s(), e.m.call(24, [3, 1, 2, e.val(struct.pack("<i", 1)), 4]), e.mem.write(LEN, struct.pack("<I", 4)), e.m.call(25, [3, 1, 2, VAL, LEN]))[3], "ND"),
         ("get-sndbuf", lambda e: (e.s(), e.mem.write(LEN, struct.pack("<I", 4)), e.m.call(25, [3, 1, 7, VAL, LEN]))[2], "ND"),
         ("get-acceptconn", lambda e: (e.s(), e.mem.write(LEN, struct.pack("<I", 4)), e.m.call(25, [3, 1, 30, VAL, LEN]))[2], "ND"),
@@ -221,7 +232,17 @@ def main():
         ("nval", lambda e: (pf(e, [-1, 5, 7]), e.m.call(26, [FD, 3, 0]))[1], 2),
         ("nval-revents", lambda e: (pf(e, [-1, 5, 7]), e.m.call(26, [FD, 3, 0]), e.mem.read(FD + 6, 2) + e.mem.read(FD + 14, 2) + e.mem.read(FD + 22, 2))[2],
          struct.pack("<HHH", 0, 0x20, 0x20)),
-        ("open-socket", lambda e: (e.s(), pf(e, [3]), e.m.call(26, [FD, 1, 0]))[2], "ND"),
+        ("open-socket", lambda e: (e.s(), pf(e, [3]), e.m.call(26, [FD, 1, 0]))[2], 0),
+        ("open-socket-revents", lambda e: (e.s(), pf(e, [3]), e.m.call(26, [FD, 1, 0]), e.mem.read(FD + 6, 2))[3], bytes(2)),
+        ("open-socket-wait", lambda e: (e.s(), pf(e, [3]), e.m.call(26, [FD, 1, 9]))[2], (("sleep", 9000000), 0)),
+        ("open-socket-forever", lambda e: (e.s(), pf(e, [3]), e.m.call(26, [FD, 1, 0xFFFFFFFF]))[2], (("sleep", None), 0)),
+        ("open-socket-unknown-events", lambda e: (e.s(), e.mem.write(FD, struct.pack("<iHH", 3, 0x8000, 0xFFFF)), e.m.call(26, [FD, 1, 0]), e.mem.read(FD + 6, 2))[3], bytes(2)),
+        ("open-and-nval", lambda e: (e.s(), pf(e, [3, 9]), e.m.call(26, [FD, 2, 50]), e.mem.read(FD + 6, 2) + e.mem.read(FD + 14, 2))[3],
+         struct.pack("<HH", 0, 0x20)),
+        ("open-and-nval-nowait", lambda e: (e.s(), pf(e, [3, 9]), e.m.call(26, [FD, 2, 50]))[2], 1),
+        ("bound-socket", lambda e: (e.s(), e.m.call(18, [3, e.sa(V4, 8080, LO4)]), pf(e, [3]), e.m.call(26, [FD, 1, 0]))[3], "ND"),
+        ("listening-socket", lambda e: (e.s(), e.m.call(18, [3, e.sa(V4, 8080, LO4)]), e.m.call(19, [3, 1]), pf(e, [3]), e.m.call(26, [FD, 1, 0]))[4], "ND"),
+        ("peer-socket", lambda e: (e.s(V4, 2), e.m.call(21, [3, e.sa(V4, 9, LO4)]), pf(e, [3]), e.m.call(26, [FD, 1, 0]))[3], "ND"),
         ("closed-socket", lambda e: (e.s(), e.m.call(17, [3]), pf(e, [3]), e.m.call(26, [FD, 1, 0]))[3], 1),
     ])
     rec = lambda fl, fam, t, p, port, addr: struct.pack("<iiiiII", fl, fam, t, p, 0, 0) + struct.pack("<HH16sIII", fam, port, addr.ljust(16, b"\0"), 0, 0, 0)
