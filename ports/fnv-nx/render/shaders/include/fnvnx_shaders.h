@@ -43,7 +43,13 @@ enum {
      * leaves out, the link set L, FOG0) every varying slot 0..30 that is still unwritten gets the default of its canonical pair, so any
      * pixel stage whose inputs are canonical links. The device picks this variant of the VS iff fnvnx_dk_vs_needs_complete(). Ignored for
      * pixel shaders. Part of the variant key. */
-    FNVNX_SHADER_VS_COMPLETE = 1u << 6
+    FNVNX_SHADER_VS_COMPLETE = 1u << 6,
+    /* D3DRS_SHADEMODE = D3DSHADE_FLAT (both stages of a draw take the same bit, so they agree on the qualifier): every varying of usage COLOR
+     * (oD0 / oD1 and v0 / v1 below SM3, the registers declared with COLOR usage in SM3) is declared `flat`, i.e. takes the value of the
+     * primitive's provoking (first) vertex; every other varying stays interpolated. Wine 9.0 wined3d state_shademode (state.c): glShadeModel(GL_FLAT)
+     * flat-shades exactly the colour varyings (gl_Color / gl_SecondaryColor = oD0 / oD1) of a GLSL program and nothing else; PHONG is GOURAUD.
+     * Part of the variant key. */
+    FNVNX_SHADER_FLAT_COLOR = 1u << 7
 };
 
 typedef struct fnvnx_shader_opts {

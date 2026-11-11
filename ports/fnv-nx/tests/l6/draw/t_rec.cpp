@@ -62,6 +62,13 @@ uint32_t nx_ffp_ps_program(NxDeviceCore*, NxFfpPsBind* o) {
     memset((void*)o, 0, sizeof *o); o->n_in = 3; o->in_pair[0] = FNVNX_DK_PAIR(10, 0); o->in_pair[1] = FNVNX_DK_PAIR(5, 0); o->in_pair[2] = FNVNX_DK_PAIR(11, 0); o->tex_mask = 1;
     o->n_ubo = 1; o->ubo[0] = {3, sizeof g_ffp_ubo_p, g_ffp_ubo_p}; return g_ffp_ps_id;
 }
+// nx_ffp_flat (ffp_prog.cpp, the shared shade-mode latch rule) is linked as a double here: the same rule over the same latch, so part e sees the variant bit the device would carry
+bool nx_ffp_flat(NxDeviceCore* d, uint32_t* flat) {
+    NxDrawDev* dd = nx_draw_dev(d); if (!dd) return false;
+    uint32_t r = dd->latch.flat;
+    switch (d->cur.rs[D3DRS_SHADEMODE]) { case D3DSHADE_FLAT: r = 1; break; case D3DSHADE_GOURAUD: case D3DSHADE_PHONG: r = 0; break; }
+    *flat = r; return true;
+}
 int nx_env_profile_of(NxObj*) { return 0; }
 // ---- device helpers
 TDev t_dev(bool ex, uint32_t w, uint32_t h) {
