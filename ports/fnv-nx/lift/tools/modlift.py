@@ -175,7 +175,7 @@ def run(arg):
                     if t in ent: continue
                     if intext(t): viol.setdefault(t, kd)
                     else: outside[e, a_, t] = kd
-        if not viol or rounds > 300: break
+        if not viol: break      # terminates: every round adds at least one entry and entries are addresses of the executable sections
         for t, k in sorted(viol.items()):
             closure_new['fall-through' if t in ftall else 'first-ud' if t in ud or t in xf else 'mid-instruction' if cov[t - T0] == 2 else 'other'] += 1; clos[t] = k; add(t, k)
     seedn = {eh.thrower} & set(ent)
