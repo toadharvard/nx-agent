@@ -24,7 +24,8 @@ fail=0; check() { if [ "$2" = ok ]; then echo "ok   $1"; else echo "FAIL $1"; fa
 t() { if eval "$2"; then check "$1" ok; else check "$1" no; fi; }
 
 "$R/toolchain/guest/build.sh" "$W/rt" >/dev/null
-python3 -I "$R/contract/iat.py" --facts "$FACTS" --bridge "$BRIDGE" --out "$W/iat.tsv" --keys-out "$W/keys.tsv" --c-out "$W/import_keys.c" > "$W/iat.log" || true
+iat_rc=0   # iat.py exits 1 while slots have no value (the lifted PE modules' slots): the count is checked below
+python3 -I "$R/contract/iat.py" --facts "$FACTS" --bridge "$BRIDGE" --out "$W/iat.tsv" --keys-out "$W/keys.tsv" --c-out "$W/import_keys.c" > "$W/iat.log" || iat_rc=$?
 python3 -I "$L/tools/mkidentity.py" --exe "$EXE" --out "$W/identity.c"
 # the native objects the table's data rows name (as loader/tools/iat_check.py): only so the link resolves them
 python3 -I - "$R" "$BRIDGE" > "$W/objs.c" <<'PY'
@@ -49,15 +50,16 @@ t "every RELA entry is R_AARCH64_P32_RELATIVE without a symbol" "! grep -E '^[0-
 echo "relocations: RELR relocates $(grep -oE 'relocate [0-9]+' "$W/relocs.txt" | head -1 | cut -d' ' -f2) locations, RELA entries $(grep -cE '^[0-9a-f]{8} +[0-9a-f]+ ' "$W/relocs.txt")"
 
 mkdir -p "$W/game" "$W/root"; ln -sf "$EXE" "$W/game/FalloutNV.exe"
-set +e
-E2E_EXE=$EXE python3 -I "$G/e2e_host.py" "$W/guest.nso" --root "$W/root" --game "$W/game" --elf "$W/guest.elf" --expect "fnvnx-start: identity ok" > "$W/run.$MODE.log" 2>&1
-set -e
+host_rc=0
+E2E_EXE=$EXE python3 -I "$G/e2e_host.py" "$W/guest.nso" --root "$W/root" --game "$W/game" --elf "$W/guest.elf" --expect "fnvnx-start: identity ok" > "$W/run.$MODE.log" 2>&1 || host_rc=$?
 LOG="$W/run.$MODE.log"
+echo "e2e_host exit: $host_rc"
+t "iat.py reports the slots without a value (exit 1)" "[ $iat_rc = 1 ]"
 echo "guest: $(grep -o 'rc=0x[0-9a-f]*' "$LOG" | head -1)"
 t "identity ok" "grep -q 'fnvnx-start: identity ok' '$LOG'"
 t "image mapped" "grep -q 'fnvnx-start: image mapped' '$LOG'"
 if [ $MODE = refuse ]; then
-  NP=$(grep 'fnvnx-start: no provider for ' "$LOG" | grep -vc '\[debug\]' || true)
+  NP=$(awk '/fnvnx-start: no provider for / && !/\[debug\]/ {n++} END {print n + 0}' "$LOG")
   echo "slots listed without provider: $NP; modules: $(grep -v '\[debug\]' "$LOG" | grep -o 'no provider for [a-z0-9_]*' | sort | uniq -c | tr '\n' ' ')"
   t "40 slots listed" "[ $NP = 40 ]"
   t "start refused (failed -41, rc 0xf0000100)" "grep -q 'fnvnx-start: failed -41' '$LOG' && grep -q 'rc=0xf0000100' '$LOG'"

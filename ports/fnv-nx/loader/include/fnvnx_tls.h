@@ -20,8 +20,8 @@ typedef struct fnvnx_tls_layout {
 /* Read and validate the TLS directory. FNVNX_OK with present = 0 when there is no directory. Errors:
  * FNVNX_E_ARG (NULL argument), FNVNX_E_FORMAT (directory size 1..23, End < Start, template_size + zero_fill
  * overflows 32 bits), FNVNX_E_RANGE (directory, template or index word not wholly inside one mapped section).
- * A directory holding preferred-base VAs in an image at another base is handled as in fnvnx_image_tls_index_reset:
- * the index word's address decides (as stored if mapped, else + img->delta) and every VA gets the same shift. */
+ * A directory holding preferred-base VAs in an image at another base (not yet relocated) is handled by shifting:
+ * every VA gets + img->delta until img->relocated is set. */
 int fnvnx_tls_layout_read(const fnvnx_image *img, fnvnx_tls_layout *out);
 
 /* Initialise one thread's block (block_size bytes at `block`): the template bytes from the image, then zero_fill

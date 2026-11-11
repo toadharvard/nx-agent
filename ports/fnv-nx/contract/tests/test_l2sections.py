@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
 """Synthetic check of l2sections.py: every parser branch and error, and the ELF read when the cross tools exist."""
-import os, shutil, subprocess, sys, tempfile
+import contextlib, os, shutil, subprocess, sys, tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import l2sections as L
+
+
+@contextlib.contextmanager
+def scratch_dir():
+    d = tempfile.mkdtemp()
+    try:
+        yield d
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
 fails = []
 
@@ -62,7 +71,7 @@ how = 'parsers only (no aarch64-linux-gnu-gcc / objcopy)'
 gcc, oc = shutil.which('aarch64-linux-gnu-gcc'), shutil.which('aarch64-linux-gnu-objcopy')
 if gcc and oc:
     how = 'parsers and ELF read'
-    with tempfile.TemporaryDirectory() as td:
+    with scratch_dir() as td:
         c, o, o2 = (os.path.join(td, x) for x in ('t.c', 't.o', 't2.o'))
         open(c, 'w').write('int f(void){return 1;}\n')
         subprocess.run([gcc, '-c', '-o', o, c], check=True)

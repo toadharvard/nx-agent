@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
 """Synthetic check of the import-key table: keys.tsv, import_keys.c + loader/src/importkey.c through a C driver."""
-import hashlib, os, shutil, subprocess, sys, tempfile
+import contextlib, hashlib, os, shutil, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
 import iat
+
+
+@contextlib.contextmanager
+def scratch_dir():
+    d = tempfile.mkdtemp()
+    try:
+        yield d
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
 LOADER = os.path.join(HERE, '..', '..', 'loader')
 fails = []
@@ -40,7 +49,7 @@ def stage_error(d, rows):
     return False
 
 
-with tempfile.TemporaryDirectory() as d:
+with scratch_dir() as d:
     bp = write_bridge(d, ROWS)
     rows, tid = iat.bridge_rows(bp)
     check('table id', tid, hashlib.sha256(open(bp, 'rb').read()).hexdigest())

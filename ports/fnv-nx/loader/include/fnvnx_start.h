@@ -7,7 +7,7 @@
  * fills the import slots, protects the sections, builds the main thread's TLS/TEB/stack and enters the exe's own
  * entry point through the lifter runtime (fnvnx_lift_enter). No word of the image is rewritten except the import
  * slots (S4) and the TLS index word (S5). Every step fails the start with a logged message and a non-zero code
- * when its precondition does not hold; nothing has a fallback value. A failed start leaves the process in an
+ * when its precondition does not hold; no step substitutes a value. A failed start leaves the process in an
  * undefined state: the caller exits (nothing is unmapped).
  *
  * Hook contract: fnvnx_os.read/map_fixed/protect/alloc/free/log/alloc_va/free_va are all required. map_fixed returns

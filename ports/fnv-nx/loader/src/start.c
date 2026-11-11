@@ -54,7 +54,7 @@ static int s3_map(fnvnx_proc *p) {
         fnvnx_logf(p->os, "fnvnx-start: image range 0x%08x+0x%x not usable", (unsigned)base, (unsigned)pe->size_of_image);
         return FNVNX_E_RANGE;
     }
-    r = fnvnx_image_map(&p->img, pe, p->os, base, p->cfg.bias, base, end, FNVNX_MAP_HEADERS | FNVNX_MAP_ALL);
+    r = fnvnx_image_map(&p->img, pe, p->os, base, p->cfg.bias, base, end);
     if (r) { fnvnx_logf(p->os, "fnvnx-start: mapping the image failed: %s", fnvnx_strerror(r)); return r; }
     for (i = 0; i < p->img.nmapped; i++) {   /* ascending: headers, then sections in rva order (pe_open) */
         const fnvnx_mapping *m = &p->img.map[i];
