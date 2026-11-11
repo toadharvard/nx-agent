@@ -68,9 +68,10 @@ SEMANTICS_FLAGS = ("-mabi=ilp32", "-fms-extensions", "-fshort-wchar", "-froundin
 # The options of every link, fixed by the rule (RECIPE.md "Link"): the specs of the gcc driver for the ILP32 PIE multilib, no gc-sections, no id.
 LD_FIXED = ["--build-id=none", "-pie", "--no-dynamic-linker", "-z", "text", "-z", "now", "-z", "pack-relative-relocs", "-z", "max-page-size=0x1000",
             "-z", "common-page-size=0x1000"]
+LD_KIND = {"pie": LD_FIXED, "exe": ["--build-id=none", "-pie", "-z", "text", "-z", "now"], "shared": ["--build-id=none", "-shared", "-z", "text", "-z", "now"]}
 LD_TOOLS = (TREE + "/link", TREE + "/contract")   # tool roots of the ldcheck stage: link/ldcheck.py, and gatefile.py at /contract
 EXT_KEYS = {"name", "repo", "ref", "commit", "tree_sha256", "at"}
-SANDBOX_PATHS = ("/src", "/inc", "/in", "/out", "/tool", "/objs", "/ld", "/linked", "/contract", "/work", "/proc", "/dev", "/tmp", "/oldroot")
+SANDBOX_PATHS = ("/src", "/inc", "/in", "/out", "/tool", "/objs", "/ld", "/syslib", "/linked", "/contract", "/work", "/proc", "/dev", "/tmp", "/oldroot")
 STYPE = {0: "NOTYPE", 1: "OBJECT", 2: "FUNC", 5: "COMMON", 6: "TLS", 10: "IFUNC"}
 SBIND = {1: "GLOBAL", 2: "WEAK", 10: "UNIQUE"}
 ARTIFACTS_URL = "https://github.com/toadharvard/fnv-nx-build"
@@ -179,15 +180,18 @@ def guest_errors(rec, root, roots, pin):
     return ["guest root %s: %s" % (root, b) for b in bad]
 
 
-LINK_KEYS = {"script", "output", "flags"}
-LINK_OPT = {"roots", "libs"}
+LINK_KEYS = {"output", "flags"}
+LINK_OPT = {"script", "kind", "version_script", "roots", "libs"}
 LIBS_KEYS = {"external", "dirs", "names", "startfiles", "endfiles"}
-EMULATION = "aarch64linux32"      # the ILP32 guest: the emulation `gcc -mabi=ilp32 -###` passes to ld
+KINDS = ("pie", "exe", "shared")
+# The emulation names a link may carry, and the target each one is: (ELF class, e_machine). `pie` is the ILP32 guest; `exe` and `shared` are host images.
+TARGETS = {"aarch64linux32": (1, 183), "aarch64linux": (2, 183), "elf_x86_64": (2, 62)}
+KIND_EMU = {"pie": ("aarch64linux32",), "exe": ("aarch64linux", "elf_x86_64"), "shared": ("aarch64linux", "elf_x86_64")}
 
 
-def emulation_flags(toks):
+def emulation_flags(toks, kind="pie"):
     """Problems of the link flags: the options of a link are fixed by the rule (RECIPE.md "Link"), the recipe names the emulation only:
-    `-m aarch64linux32` (or `-maarch64linux32`), and `-EL`, `-X`."""
+    `-m <emulation>` (or `-m<emulation>`) exactly once, and `-EL`, `-X`. The emulation is the target of the link (TARGETS); a `pie` is the ILP32 guest."""
     err, prev, emu = [], None, []
     for t in toks:
         if prev == "-m":
@@ -198,11 +202,11 @@ def emulation_flags(toks):
         elif t.startswith("-m") and len(t) > 2 and t[2] != "-":
             emu.append(t[2:])
         elif t not in ("-EL", "-X"):
-            err.append("link.flags: %s is not an emulation option (-m aarch64linux32, -EL, -X); the other options are fixed by the rule" % t)
+            err.append("link.flags: %s is not an emulation option (-m <emulation>, -EL, -X); the other options are fixed by the rule" % t)
     if prev:
         err.append("link.flags: -m has no emulation name")
-    if emu != [EMULATION]:
-        err.append("link.flags must name the emulation %s exactly once (the ILP32 guest), has %s" % (EMULATION, emu))
+    if len(emu) != 1 or emu[0] not in KIND_EMU[kind]:
+        err.append("link.flags must name one emulation of a %s link %s exactly once, has %s" % (kind, KIND_EMU[kind], emu))
     return err
 
 
@@ -227,11 +231,15 @@ def link_roots_cycle(root, roots, repo, seen=()):
 def link_errors(lk, root, mine, roots, ext_names, repo):
     """Problems of the `link` key: {script, output, flags} and optionally `roots` (admitted product roots whose objects are link inputs after
     the root's own, in list order) and `libs` ({external, dirs, names, startfiles, endfiles}: the guest libraries inside an external)."""
-    if not (isinstance(lk, dict) and set(lk) - LINK_OPT == LINK_KEYS and isinstance(lk["flags"], list)
-            and all(isinstance(t, str) for t in lk["flags"]) and isinstance(lk["output"], str)
-            and re.fullmatch(r"[A-Za-z0-9._-]+\.elf", lk["output"]) and rel_ok(lk["script"]) and lk["script"] in mine):
-        return ["link must be {script: tracked file of the root, output: NAME.elf, flags: [..]} and optionally roots, libs"]
-    err = ["link.flags: %s is in the refusal set R" % t for t in refused(lk["flags"])] + emulation_flags(lk["flags"])
+    kind = lk.get("kind", "pie") if isinstance(lk, dict) else None
+    if not (isinstance(lk, dict) and LINK_KEYS <= set(lk) <= LINK_KEYS | LINK_OPT and isinstance(lk["flags"], list)
+            and all(isinstance(t, str) for t in lk["flags"]) and isinstance(lk["output"], str) and kind in KINDS
+            and re.fullmatch(r"[A-Za-z0-9._-]+\.(elf|so|exe)", lk["output"])
+            and all(k not in lk or (rel_ok(lk[k]) and lk[k] in mine) for k in ("script", "version_script"))
+            and ("script" in lk or kind != "pie") and ("version_script" in lk) == (kind == "shared")):
+        return ["link must be {output: NAME.elf|.so|.exe, flags: [..]} with `script` (a tracked file of the root; required for kind pie, the default), kind pie|exe|shared, "
+                "`version_script` (a tracked file of the root: required for, and only for, kind shared), optionally roots, libs"]
+    err = ["link.flags: %s is in the refusal set R" % t for t in refused(lk["flags"])] + emulation_flags(lk["flags"], kind)
     deps = lk.get("roots", [])
     if not (isinstance(deps, list) and all(isinstance(d, str) for d in deps)):
         err.append("link.roots must be a list of repo paths of admitted product roots")
@@ -255,8 +263,14 @@ def link_errors(lk, root, mine, roots, ext_names, repo):
     cyc = link_roots_cycle(root, roots, repo) if deps else None
     if cyc:
         err.append("link.roots: cycle %s" % " -> ".join(cyc))
-    if "libs" in lk:
-        lb = lk["libs"]
+    lb = lk.get("libs")
+    if isinstance(lb, dict) and set(lb) == {"system"}:
+        sysl = lb["system"]
+        if not (isinstance(sysl, list) and sysl and all(isinstance(p, str) and p.startswith("/") and posixpath.normpath(p) == p for p in sysl)):
+            err.append("link.libs.system must be a non-empty list of absolute normalised paths of the shared libraries of env.json packages")
+        elif kind == "pie":
+            err.append("link.libs.system: a pie is the guest: its libraries are those of an external")
+    elif "libs" in lk:
         paths = lambda k: isinstance(lb.get(k), list) and all(rel_ok(p) for p in lb[k])  # noqa: E731
         if not (isinstance(lb, dict) and set(lb) == LIBS_KEYS and paths("dirs") and paths("startfiles") and paths("endfiles")
                 and isinstance(lb.get("names"), list) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9._+-]+", n) for n in lb["names"])):
@@ -762,36 +776,65 @@ class Job:
                 shutil.copyfile(p, dest)
                 args.append("/objs/%s/%s.o" % (label, u))
         os.makedirs(sd)
-        shutil.copyfile(os.path.join(self.repo, self.root, lk["script"]), os.path.join(sd, os.path.basename(lk["script"])))
-        lb, pre, post, search, libs = lk.get("libs"), [], [], [], []
-        if lb:
+        kind = lk.get("kind", "pie")
+        for k in ("script", "version_script"):
+            if k in lk:
+                shutil.copyfile(os.path.join(self.repo, self.root, lk[k]), os.path.join(sd, os.path.basename(lk[k])))
+        lb, pre, post, search, libs, sysin = lk.get("libs"), [], [], [], [], []
+        if lb and "system" in lb:
+            # the shared libraries of env.json packages: their content is the input, mounted at /syslib under their own file names
+            yd = os.path.join(ws, "syslib")
+            os.makedirs(yd)
+            for p in lb["system"]:
+                if not os.path.isfile(p):
+                    raise BuildRed({"stage": "ld:" + self.root, "exit": None, "stderr": ["link.libs.system: %s is not a file of this machine (env.json packages)" % p]})
+                shutil.copyfile(os.path.realpath(p), os.path.join(yd, os.path.basename(p)))
+            sysin = [{"at": "/syslib", "tree": cas.ingest(yd, self.store)}]
+            search, post = ["-L/syslib"], ["/syslib/" + os.path.basename(p) for p in lb["system"]]
+        elif lb:
             at = self.ext[lb["external"]]["at"]
             pre, post = [at + "/" + p for p in lb["startfiles"]], [at + "/" + p for p in lb["endfiles"]]
             search, libs = ["-L" + at + "/" + d for d in lb["dirs"]], ["-l" + n for n in lb["names"]]
-        argv = [ld] + LD_FIXED + lk["flags"] + ["-T", "/ld/" + os.path.basename(lk["script"]), "-o", "/out/" + lk["output"]] + pre + search + [
+        vs = ["--version-script=/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else []
+        sc = ["-T", "/ld/" + os.path.basename(lk["script"])] if "script" in lk else []
+        argv = [ld] + LD_KIND[kind] + lk["flags"] + sc + vs + ["-o", "/out/" + lk["output"]] + pre + search + [
             "--whole-archive"] + args + ["--no-whole-archive"] + (["--start-group"] + libs + ["--end-group"] if libs else []) + post
-        objs_tree = cas.ingest(od, self.store)
+        objs_tree, ld_tree = cas.ingest(od, self.store), cas.ingest(sd, self.store)
         doc = {"format": "fnvnx-stage/1", "stage": "ld:" + self.root, "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
                "env": dict(unitstage.ENV, PATH=os.path.dirname(ld)), "outputs": ["/out"],
-               "inputs": sorted(rt["inputs"] + [{"at": "/objs", "tree": objs_tree}, {"at": "/ld", "tree": cas.ingest(sd, self.store)}], key=lambda i: i["at"])}
-        return self.stage(doc)[1]["outputs"]["/out"], objs_tree
+               "inputs": sorted(rt["inputs"] + [{"at": "/objs", "tree": objs_tree}, {"at": "/ld", "tree": ld_tree}] + sysin, key=lambda i: i["at"])}
+        return self.stage(doc)[1]["outputs"]["/out"], objs_tree, [{"at": "/ld", "tree": ld_tree}] + sysin
 
-    def ldcheck(self, ws, elf_tree, objs_tree):
+    def ldcheck(self, ws, elf_tree, objs_tree, extra):
         """Stage `ldcheck:<root>`: link/ldcheck.py (python of the python runtime, a pure tool like `generated`) judges the linked ELF from ELF
         symbol tables, writes the crt0 header words and the gate file `ld`. -> tree of /out (the final ELF, ld.json, ld.ids)."""
-        name = self.rec["link"]["output"]
+        lk = self.rec["link"]
+        name = lk["output"]
         _, py = self.cached_rt("python", lambda: runtime.build(self.store, sys.executable, []))
         tmp = tempfile.mkdtemp(dir=ws)
         ins = []
         for at, owner in (("/tool", LD_TOOLS[0]), ("/contract", LD_TOOLS[1])):
             ins.append({"at": at, "tree": self.ingest_files(tmp, at[1:], [f for f in self.files if under(f, owner)], owner)})
-        ins += [{"at": "/linked", "tree": elf_tree}, {"at": "/objs", "tree": objs_tree}] + [{"at": e["at"], "tree": e["tree"]} for e in self.ext.values()]
+        ins += [{"at": "/linked", "tree": elf_tree}, {"at": "/objs", "tree": objs_tree}] + extra + [{"at": e["at"], "tree": e["tree"]} for e in self.ext.values()]
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
         env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"])})
         doc = {"format": "fnvnx-stage/1", "stage": "ldcheck:" + self.root, "class": "build", "tool": "python", "cwd": "/work",
-               "argv": [py["python"], "-s", "-B", "/tool/ldcheck.py", "--elf", "/linked/" + name, "--objs", "/objs", "--out", "/out", "--name", name],
+               "argv": [py["python"], "-s", "-B", "/tool/ldcheck.py", "--elf", "/linked/" + name, "--objs", "/objs", "--out", "/out", "--name", name, "--kind", lk.get("kind", "pie")]
+               + (["--version-script", "/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else [])
+               + ["--lib=/syslib/" + os.path.basename(p) for p in lk.get("libs", {}).get("system", [])],
                "env": env, "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"]}
         return self.stage(doc)[1]["outputs"]["/out"]
+
+
+def emulation_of(flags):
+    return next(t[2:] if t != "-m" else flags[i + 1] for i, t in enumerate(flags) if t == "-m" or (t.startswith("-m") and len(t) > 2))
+
+
+def object_target(path):
+    """(ELF class, e_machine) of an object file, from its header."""
+    with open(path, "rb") as f:
+        d = f.read(20)
+    return d[4], int.from_bytes(d[18:20], "little")
 
 
 def objects_digest(res):
@@ -887,8 +930,13 @@ def build(repo, root, store, out, jobs=4, ext=None):
                     kept.append({"unit": o["unit"], "object": os.path.abspath(dest), "sha256": o["sha256"]})
                 res["link_roots"].append({"root": d, "sha256": objects_digest(r), "objects": kept})
                 groups.append(("%02d-%s" % (n + 1, d.replace("/", "__")), [(o["unit"], o["object"]) for o in kept]))
-            elf_tree, objs_tree = j.link(ws, groups)
-            fin = j.ldcheck(ws, elf_tree, objs_tree)
+            for lab, objs in groups:      # every linked object has the target of the link (ELF class, e_machine), read from its header
+                bad = [u for u, p in objs if object_target(p) != TARGETS[emulation_of(lk["flags"])]]
+                if bad:
+                    raise BuildRed({"stage": "ld:" + root, "exit": None, "stderr": ["%s: object %s has target (class, e_machine) %s, the link %s is %s" % (
+                        lab, u, object_target(dict(objs)[u]), emulation_of(lk["flags"]), TARGETS[emulation_of(lk["flags"])]) for u in bad[:20]]})
+            elf_tree, objs_tree, extra = j.link(ws, groups)
+            fin = j.ldcheck(ws, elf_tree, objs_tree, extra)
             ent = cas.manifest(fin, store)["entries"]
             shutil.copyfile(cas._obj(store, ent[name]), os.path.join(out, name))
             res["elf"] = {"path": os.path.abspath(os.path.join(out, name)), "sha256": ent[name]["h"]}

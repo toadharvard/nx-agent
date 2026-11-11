@@ -163,6 +163,41 @@ def main():
     rl3 = build(mk("libs-none", main_rec(), L), SS)
     check("without the library the same undefined reference is red (ld)", rl3["status"] == "red" and rl3["failure"]["stage"] == "ld:" + ROOT, err_text(rl3))
 
+
+    # (k) kinds: exe and shared host images (LP64), and the target of the link
+    def host_rec(kind, **kw):
+        r = TR.mut(os_layer=[], constants=None, include=[ROOT + "/inc"], flags={"c": ["-O1", "-ffreestanding", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"],
+                                                                       "cxx": [], "asm": []})
+        r.pop("generated")
+        r["link"] = dict({"output": "x.exe" if kind == "exe" else "x.so", "kind": kind, "flags": ["-m", "aarch64linux"]}, **kw)
+        return r
+    NONE = {"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/link.ld": None}
+    re_ = build(mk("exe", host_rec("exe"), dict(NONE, **{"toy/e.c": "void _start(void) { for (;;) ; }\n"})), SS)
+    check("kind exe: a host executable (ELF64, no script, entry set) links green; no crt0 header rule", re_["status"] == "green"
+          and TR.elf_class(re_["elf"]["path"]) == 64 and json.load(open(re_["ld_gate"]["ld.json"]["path"]))["status"] == "green", err_text(re_))
+    SH = {"toy/s.c": "int f_a(void) { return 1; }\nint f_hidden(void) { return 2; }\n", "toy/exp.map": "{ global: f_a; local: *; };\n"}
+    rs = build(mk("shared", host_rec("shared", version_script="exp.map"), dict(NONE, **SH)), SS)
+    d = syms(rs["elf"]["path"]) if rs["status"] == "green" else {}
+    check("kind shared: a shared object with a version script links green; the exported name is defined", rs["status"] == "green" and "f_a" in d, err_text(rs))
+    rs2 = build(mk("shared-bad", host_rec("shared", version_script="exp.map"), dict(NONE, **dict(SH, **{"toy/exp.map": "{ global: f_a; nothere; local: *; };\n"}))), SS)
+    check("kind shared: a name the version script exports that is not defined is red at ldcheck:<root>", rs2["status"] == "red"
+          and rs2["failure"]["stage"] == "ldcheck:" + ROOT and any("export:nothere" in x for x in rs2["failure"]["stderr"]), err_text(rs2))
+    UND = dict(NONE, **{"toy/s.c": "int so_fn(void);\nint f_a(void) { return so_fn(); }\n", "toy/exp.map": "{ global: f_a; local: *; };\n"})
+    rs3 = build(mk("shared-und", host_rec("shared", version_script="exp.map"), UND), SS)
+    check("kind shared: an undefined symbol no library defines is red at ldcheck:<root>", rs3["status"] == "red" and rs3["failure"]["stage"] == "ldcheck:" + ROOT
+          and any("so_fn" in x for x in rs3["failure"]["stderr"]), err_text(rs3))
+    so = BASE + "/libtoyso.so"
+    open(BASE + "/so.c", "w").write("int so_fn(void) { return 5; }\n")
+    subprocess.run([CC, "-shared", "-nostdlib", "-fPIC", "-o", so, BASE + "/so.c"], check=True)
+    rs4 = build(mk("shared-lib", host_rec("shared", version_script="exp.map", libs={"system": [so]}), UND), SS)
+    check("kind shared: link.libs.system defines the name through its .dynsym: green", rs4["status"] == "green", err_text(rs4))
+    e7 = errs(host_rec("shared"), [], "novs")
+    check("kind shared needs a version_script, a pie needs a script, a pie takes aarch64linux32 only", any("version_script" in e for e in e7)
+          and any("a pie" in e or "pie" in e for e in errs(main_rec(flags=["-m", "aarch64linux"]), [], "piemu")), e7)
+    rt = build(mk("target", dict(main_rec(), flags=TR.RECIPE["flags"] and {"c": ["-O1", "-ffreestanding", "-fPIE"], "cxx": [], "asm": []}), {"toy/b.c": "int f_b(void) { return 1; }\n"}), SS)
+    check("a link whose objects have another target (LP64 objects, ILP32 emulation): red, naming the object", rt["status"] == "red"
+          and rt["failure"]["stage"] == "ld:" + ROOT and any("a.c" in x and "target" in x for x in rt["failure"]["stderr"]), err_text(rt))
+
     # (f) determinism: two cold builds, two stores, the same bytes
     c1 = recipe.build(repo, ROOT, BASE + "/cold1", BASE + "/oc1")
     c2 = recipe.build(repo, ROOT, BASE + "/cold2", BASE + "/oc2")

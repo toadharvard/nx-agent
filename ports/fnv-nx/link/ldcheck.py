@@ -245,6 +245,151 @@ def object_files(top):
         out += [os.path.join(cur, f) for f in sorted(files)]
     return out
 
+# ---- host images (kind exe, shared): any ELF class and machine
+def elf_any(d):
+    """(class, e_type, e_entry, sections, program headers) of an ELF little-endian file of class 32 or 64; sections as dicts."""
+    if d[:4] != b'\x7fELF' or d[5] != 1 or d[4] not in (1, 2):
+        raise ValueError('not an ELF32/ELF64 little-endian file')
+    w = d[4] == 2
+    etype, = struct.unpack_from('<H', d, 16)
+    entry, phoff, shoff = struct.unpack_from('<QQQ', d, 24) if w else struct.unpack_from('<III', d, 24)
+    phentsize, phnum, shentsize, shnum = struct.unpack_from('<HHHH', d, 54 if w else 42)
+    secs = []
+    for i in range(shnum):
+        v = struct.unpack_from('<IIQQQQIIQQ' if w else '<IIIIIIIIII', d, shoff + i * shentsize)
+        secs.append(dict(type=v[1], addr=v[3], off=v[4], size=v[5], link=v[6], entsize=v[9]))
+    ph = []
+    for i in range(phnum):
+        v = struct.unpack_from('<IIQQQQQQ' if w else '<IIIIIIII', d, phoff + i * phentsize)
+        ph.append((v[0], v[2], v[5]) if w else (v[0], v[1], v[4]))      # type, offset, filesz
+    return d[4], etype, entry, secs, ph
+
+
+def syms_any(d, want):
+    """[(name, bind, visibility, shndx, type)] of the section type `want` (2 symtab, 11 dynsym) of an ELF file of either class."""
+    cls, _, _, secs, _ = elf_any(d)
+    out = []
+    for s in secs:
+        if s['type'] != want:
+            continue
+        stroff = secs[s['link']]['off']
+        for o in range(s['off'] + s['entsize'], s['off'] + s['size'], s['entsize']):
+            if cls == 2:
+                name, info, other, shndx = struct.unpack_from('<IBBH', d, o)
+            else:
+                name, _, _, info, other, shndx = struct.unpack_from('<IIIBBH', d, o)
+            if name:
+                out.append((d[stroff + name:d.index(b'\0', stroff + name)].decode(), info >> 4, other & 3, shndx, info & 15))
+    return out
+
+
+def dyn_tags(d):
+    cls, _, _, secs, ph = elf_any(d)
+    out = {}
+    for typ, off, filesz in ph:
+        if typ == PT_DYNAMIC:
+            step = 16 if cls == 2 else 8
+            for o in range(off, off + filesz, step):
+                tag, val = struct.unpack_from('<QQ' if cls == 2 else '<II', d, o)
+                if tag == 0:
+                    break
+                out[tag] = val
+    return out
+
+
+def version_globals(text):
+    """The names a GNU ld version script exports as global: ([exact names], [wildcard patterns]).  Grammar modelled: version nodes
+    `[TAG] { [global: | local:] names; ... } [DEP];`, `#` and `/* */` comments, quoted or bare names.  `extern` blocks and any other
+    syntax raise ValueError (not modelled: no guess)."""
+    import re
+    text = re.sub(r'/\*.*?\*/', ' ', re.sub(r'#[^\n]*', ' ', text), flags=re.S)
+    exact, pats = [], []
+    pos = 0
+    while True:
+        m = re.compile(r'\s*([A-Za-z0-9_.]*)\s*\{').match(text, pos)
+        if not m:
+            break
+        end = text.index('}', m.end())
+        body, mode = text[m.end():end], 'global'
+        for item in body.split(';'):
+            item = item.strip()
+            while re.match(r'(global|local)\s*:', item):
+                mode = item[:item.index(':')].strip()
+                item = item[item.index(':') + 1:].strip()
+            if not item:
+                continue
+            if 'extern' in item or '{' in item or not re.fullmatch(r'"?[A-Za-z0-9_.$*?\[\]!-]+"?', item):
+                raise ValueError('version script syntax not modelled: %r' % item)
+            if mode == 'global':
+                item = item.strip('"')
+                (pats if re.search(r'[*?\[]', item) else exact).append(item)
+        rest = re.compile(r'\s*[A-Za-z0-9_.]*\s*;').match(text, end + 1)
+        pos = rest.end() if rest else end + 1
+    if text[pos:].strip():
+        raise ValueError('version script: unparsed text %r' % text[pos:pos + 40].strip())
+    return exact, pats
+
+
+def host_main(a):
+    """Rules for a host image (exe, shared): no undefined name except those the link's shared libraries define (their .dynsym); every name the
+    inputs reference or define is defined in the output or by a library; no text relocation; for `shared`, every name the version script exports as
+    global is defined, global and default-visible in the output's .dynsym (a wildcard must match one)."""
+    import fnmatch
+    os.environ['GATE_OUT'] = a.out
+    os.makedirs(a.out, exist_ok=True)
+    final = os.path.join(a.out, a.name)
+    with open(a.elf, 'rb') as fh:
+        dd = fh.read()
+    cls, etype, entry, _, _ = elf_any(dd)
+    defs, strong, weak, targets = set(), set(), set(), set()
+    for p in object_files(a.objs):
+        with open(p, 'rb') as fh:
+            d = fh.read()
+        targets.add((elf_any(d)[0], struct.unpack_from('<H', d, 18)[0]))
+        for n, bind, vis, shndx, typ in syms_any(d, 2):
+            if typ in (STT_SECTION, STT_FILE) or bind not in (1, 2):
+                continue
+            (defs if shndx != SHN_UNDEF else strong if bind == 1 else weak).add(n)
+    libdef = set()
+    for p in a.lib:
+        with open(p, 'rb') as fh:
+            libdef |= {n for n, _, _, shndx, _ in syms_any(fh.read(), 11) if shndx != SHN_UNDEF}
+    dyn = syms_any(dd, 11)
+    out_def = {n for n, bind, _, shndx, _ in dyn + syms_any(dd, 2) if shndx != SHN_UNDEF}
+    ids = ['cover:' + n for n in sorted((defs | strong | weak) - out_def - libdef)]
+    ids += ['output-undefined:' + n for n in sorted({n for n, _, _, shndx, _ in dyn if shndx == SHN_UNDEF} - libdef)]
+    tags = dyn_tags(dd)
+    if 22 in tags or tags.get(30, 0) & 4:
+        ids.append('textrel')
+    if a.kind == 'exe' and entry == 0:
+        ids.append('entry:none')
+    nexp = 0
+    if a.kind == 'shared':
+        try:
+            exact, pats = version_globals(open(a.version_script).read())
+        except ValueError as e:
+            exact, pats = [], []
+            ids.append('version-script:%s' % e)
+        exported = {n for n, bind, vis, shndx, _ in dyn if shndx != SHN_UNDEF and bind in (1, 2) and vis == 0}
+        for n in exact:
+            nexp += 1
+            if n not in exported:
+                ids.append('export:%s' % n)
+        for pt in pats:
+            nexp += 1
+            if not any(fnmatch.fnmatchcase(n, pt) for n in exported):
+                ids.append('export-pattern:%s' % pt)
+    universe = len(defs | strong | weak) + nexp + 2
+    detail = '%s image, %d input names, %d library definitions, %d exports' % (a.kind, len(defs | strong | weak), len(libdef), nexp)
+    gatefile.write('ld', universe, universe - len(ids), ids, detail)
+    gateids.write_ids('ld', ids)
+    for i in ids:
+        print('ldcheck: %s' % i, file=sys.stderr)
+    print('ldcheck: %s' % detail, file=sys.stderr)
+    if ids:
+        sys.exit(1)
+    shutil.copyfile(a.elf, final)
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -252,7 +397,12 @@ def main():
     ap.add_argument('--objs', required=True)
     ap.add_argument('--out', required=True)
     ap.add_argument('--name', required=True)
+    ap.add_argument('--kind', default='pie', choices=('pie', 'exe', 'shared'))
+    ap.add_argument('--version-script', default=None)
+    ap.add_argument('--lib', action='append', default=[], help='a shared library of the link (its .dynsym defines names the image may leave undefined)')
     a = ap.parse_args()
+    if a.kind != 'pie':
+        return host_main(a)
     os.environ['GATE_OUT'] = a.out
     os.makedirs(a.out, exist_ok=True)
     final = os.path.join(a.out, a.name)
