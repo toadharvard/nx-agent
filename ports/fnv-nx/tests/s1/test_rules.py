@@ -598,9 +598,8 @@ got = run(s1.r_local_anonymous_unions, 'void f(E* e)\n{\n    for (;;)\n    {\n  
           '            struct\n            {\n                Body *a, *b;\n                float w[2];\n            };\n'
           '        };\n        st.read(e); g(a, b, w[1]);\n    }\n}\nstruct K { union { int i; struct { short lo, hi; }; }; };\n')
 check('ANON3 puts a local anonymous union with an anonymous struct in a struct, same lines', got,
-      ['        struct fnvnx_anon_u0 { union\n', '        }; } fnvnx_anon_v0; decltype(fnvnx_anon_v0.a)& a = fnvnx_anon_v0.a; '
-       'decltype(fnvnx_anon_v0.b)& b = fnvnx_anon_v0.b; decltype(fnvnx_anon_v0.w)& w = fnvnx_anon_v0.w; '
-       'decltype(fnvnx_anon_v0.st)& st = fnvnx_anon_v0.st;\n        st.read(e);',
+      ['        FNVNX_ANON3_BEGIN(0) union\n', '        }; FNVNX_ANON3_END(0) FNVNX_ANON3_REF(0, a) FNVNX_ANON3_REF(0, b) '
+       'FNVNX_ANON3_REF(0, w) FNVNX_ANON3_REF(0, st)\n        st.read(e);',
        'struct K { union { int i; struct { short lo, hi; }; }; };'])
 check('ANON3 leaves a local anonymous union without an anonymous struct',
       run(s1.r_local_anonymous_unions, 'void f() { union { int i; float x; }; i = 1; }\n'), ['void f() { union { int i;'],
@@ -807,6 +806,11 @@ check('STATIC1 gives namespace statics bound by their plain name C linkage (imag
       ['extern "C" { extern float s_fSpinTime; }', 'extern "C" { int s_iLastState = 4; }',
        'extern "C" { extern const char s_szName[] = "x"; }', 'extern "C" { extern H* g_pInst; }',
        'extern "C" { L s_kList; }', 'H* g_pInst;\nnamespace fnv_1', 'void f() { s_fSpinTime = 1; }'])
+
+# ---- VA1 hand-built va_list: a macro both compilers define (the decomp's text on cl), only the parenthesised `(&f + 1)`
+got = run(s1.r_va_list, 'void f(const char* fmt, ...) {\n    char* args = (char*)(&fmt + 1);\n    char* b = (char*)&fmt + 1;\n}\n')
+check('VA1 hand-built list becomes FNVNX_VA_HAND, the unparenthesised byte offset stays', got,
+      ['FNVNX_VA_HAND(args, fmt);', 'char* b = (char*)&fmt + 1;'], ['va_start('])
 
 # ---- VA2
 got = run(s1.r_va_enum_args, 'enum Index : int { A };\nvoid f(va_list args) {\n    Index d = va_arg(args, Index);\n'

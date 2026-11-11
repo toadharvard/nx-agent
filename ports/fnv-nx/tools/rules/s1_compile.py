@@ -1178,13 +1178,14 @@ def r_typeid_include(path, text, stats):
 # `char* args` (or void*), and variadic functions build one by hand (`char* args = (char*)(&format + 1);`). On
 # AArch64 va_list is a structure, and the same function is declared with char* in one file and va_list in another.
 # VA1 makes every such char* hold the address of a real va_list, whatever each declaration says:
-#   - a hand-built one becomes `va_list fnvnx_va_args; va_start(fnvnx_va_args, format); char* args = (char*)&...;`;
+#   - a hand-built one becomes `FNVNX_VA_HAND(args, format);` (fnvnx_compat.h: `va_list fnvnx_va_args; va_start(...);
+#     char* args = (char*)&fnvnx_va_args`; tools/equiv/msvc: the decomp's `char* args = (char*)(&format + 1)`);
 #   - a va_list variable passed to a function is passed as fnvnx_va(x), and so is the argument at the va_list
 #     position of a call to a function declared (in this file, or the platform's vprintf family) with a va_list
 #     parameter. fnvnx_va (fnvnx_compat.h) gives the address of the va_list to a char* / void* parameter, the
 #     va_list itself to a va_list parameter, and hands an ordinary char* back unchanged to a char* parameter.
 
-VA_HANDMADE = re.compile(r'\bchar\s*\*\s*(\w+)\s*=\s*\(\s*char\s*\*\s*\)\s*\(?\s*&\s*(\w+)\s*\+\s*1\s*\)?\s*;')
+VA_HANDMADE = re.compile(r'\bchar\s*\*\s*(\w+)\s*=\s*\(\s*char\s*\*\s*\)\s*\(\s*&\s*(\w+)\s*\+\s*1\s*\)\s*;')
 VA_VAR = re.compile(r'\bva_list\s+(\w+)\s*(?=[;,)=\[])')
 VA_MACROS = {'va_start', 'va_end', 'va_arg', 'va_copy', '__builtin_va_start', '__builtin_va_end', 'fnvnx_va'}
 VA_PLATFORM_LAST = {'vsprintf', 'vsnprintf', 'vprintf', 'vfprintf', 'vsscanf', '_vsnprintf', 'vsprintf_s',
@@ -1206,8 +1207,7 @@ def r_va_list(path, text, stats):
     if 'va_list' not in text and not VA_HANDMADE.search(text): return text
     def handmade(m):
         stats['VA1'] += 1
-        v = 'fnvnx_va_' + m.group(1)
-        return 'va_list %s; va_start(%s, %s); char* %s = (char*)&%s;' % (v, v, m.group(2), m.group(1), v)
+        return 'FNVNX_VA_HAND(%s, %s);' % (m.group(1), m.group(2))
     text = VA_HANDMADE.sub(handmade, text)
     va_vars = set(VA_VAR.findall(text))
     targets = _va_positions(text)
@@ -2722,8 +2722,10 @@ def _anon3_members(masked, o, c, spans):
     return names
 
 def r_local_anonymous_unions(path, text, stats):
-    """ANON3: `union { ... struct { ... }; ... };` in a function body -> `struct fnvnx_anon_uN { union ... }; }
-    fnvnx_anon_vN; decltype(fnvnx_anon_vN.m)& m = fnvnx_anon_vN.m; ...` (same line count)."""
+    """ANON3: `union { ... struct { ... }; ... };` in a function body -> `FNVNX_ANON3_BEGIN(N) union ... };
+    FNVNX_ANON3_END(N) FNVNX_ANON3_REF(N, m) ...` (same line count). fnvnx_compat.h: `struct fnvnx_anon_uN { union ...
+    }; } fnvnx_anon_vN; decltype(fnvnx_anon_vN.m)& m = fnvnx_anon_vN.m; ...`; tools/equiv/msvc: nothing, the decomp's own
+    anonymous union (MSVC 2008 has no decltype)."""
     if 'union' not in text or 'struct' not in text: return text
     masked = FRIEND_MASK.sub(lambda x: re.sub(r'[^\n]', ' ', x.group()), text)
     spans = prepare.scope_spans(masked)
@@ -2739,9 +2741,9 @@ def r_local_anonymous_unions(path, text, stats):
         if not names: continue
         u = masked.rfind('union', 0, o)
         v = 'fnvnx_anon_v%d' % n
-        refs = ' '.join('decltype(%s.%s)& %s = %s.%s;' % (v, m, m, v, m) for m in names)
-        edits.append((u, 'struct fnvnx_anon_u%d { ' % n))
-        edits.append((c + 1 + tail.end(), ' } %s; %s' % (v, refs)))
+        refs = ' '.join('FNVNX_ANON3_REF(%d, %s)' % (n, m) for m in names)
+        edits.append((u, 'FNVNX_ANON3_BEGIN(%d) ' % n))
+        edits.append((c + 1 + tail.end(), ' FNVNX_ANON3_END(%d) %s' % (n, refs)))
         n += 1
         stats['ANON3'] += 1
     for at, s in sorted(edits, reverse=True):

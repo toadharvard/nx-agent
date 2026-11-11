@@ -906,8 +906,9 @@ def pop_chains(out_root, stats, files=None):
 # BSFile::SetEndianSwap and the archive's handler pairs): natively the raw exe address is stored and later called -
 # the stub boot's first WinMain-path fault (link d1ed15e7: the BSA archive constructor 0x00af7eb0 calls 0x00aff9d0).
 # When some unit defines the address (units.json `functions`), the cast takes the address symbol instead, which the
-# link binds to the native definition: a GCC block-scope asm label in a statement expression, so line numbers stay
-# and nothing at file scope changes. Only .text addresses (0x00401000 .. 0x00fdf000) cast to `void*`.
+# link binds to the native definition: FNVNX_ADDRFN(<a>) (fnvnx_compat.h: a GCC block-scope asm label in a
+# statement expression, so line numbers stay and nothing at file scope changes; tools/equiv/msvc: the decomp's own
+# `reinterpret_cast<void*>(0x<a>)`). Only .text addresses (0x00401000 .. 0x00fdf000) cast to `void*`.
 ADDRFN_CAST = re.compile(r'reinterpret_cast<\s*void\s*\*\s*>\(\s*0x(00[0-9a-fA-F]{6})\s*\)')
 
 
@@ -922,9 +923,7 @@ def r_code_address_casts(path, text, stats):
         if not (0x00401000 <= a < 0x00fdf000) or a not in defined:
             return m.group(0)
         stats['ADDRFN1'] += 1
-        sym = '__fnv_%08x' % a
-        return ('({ extern char fnvnx_addrfn_%08x[] __asm__("%s"); (void*)fnvnx_addrfn_%08x; })'
-                ' /* fnv-nx ADDRFN1 */' % (a, sym, a))
+        return 'FNVNX_ADDRFN(%08x) /* fnv-nx ADDRFN1 */' % a
     return ADDRFN_CAST.sub(sub, text)
 
 

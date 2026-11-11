@@ -154,6 +154,16 @@ template <class T> inline T *&fnvnx_unrestrict(T *__restrict &p) { return *(T **
 template <class T> inline T *const &fnvnx_unrestrict(T *__restrict const &p) { return *(T *const *)&p; }
 #endif
 
+/* ADDRFN1 (tools/rules/s2_bodies.py): FNVNX_ADDRFN(00401230), the decomp's `reinterpret_cast<void*>(0x00401230)` of a
+ * code address, is the address of the symbol __fnv_00401230 that the link binds to the native definition. */
+#define FNVNX_ADDRFN(a) ({ extern char fnvnx_addrfn_##a[] __asm__("__fnv_" #a); (void *)fnvnx_addrfn_##a; })
+
+/* ANON3 (tools/rules/s1_compile.py): a local anonymous union with an anonymous struct, which GCC refuses, is the
+ * members of a named union type's object, each name a reference to its member. */
+#define FNVNX_ANON3_BEGIN(n) struct fnvnx_anon_u##n {
+#define FNVNX_ANON3_END(n) } fnvnx_anon_v##n;
+#define FNVNX_ANON3_REF(n, m) decltype(fnvnx_anon_v##n.m)& m = fnvnx_anon_v##n.m;
+
 /* MSVC's va_list is a char*; the decomp passes va_lists through char* / void* parameters. prepare.py VA1 wraps
  * each such argument in fnvnx_va: a char* / void* parameter receives the address of the real va_list, a va_list
  * parameter the va_list itself (from a va_list or from such an address), and an ordinary char* passed to a char*
@@ -169,6 +179,9 @@ struct fnvnx_va_ref {
 };
 static inline fnvnx_va_ref fnvnx_va(va_list &v) { return fnvnx_va_ref{&v}; }
 static inline fnvnx_va_ref fnvnx_va(const void *p) { return fnvnx_va_ref{(va_list *)p}; }
+/* VA1 hand-built va_list (`char* args = (char*)(&format + 1);` under MSVC): a real va_list started after `format`,
+ * `args` its address. */
+#define FNVNX_VA_HAND(args, format) va_list fnvnx_va_##args; va_start(fnvnx_va_##args, format); char* args = (char*)&fnvnx_va_##args
 #endif
 
 /* MSVC class layout: derived members start at sizeof(base), never in its tail padding (prepare.py rule TAIL1

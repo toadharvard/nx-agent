@@ -20,6 +20,10 @@
 #ifndef _CRT_SECURE_CPP_OVERLOAD_SECURE_NAMES
 #define _CRT_SECURE_CPP_OVERLOAD_SECURE_NAMES 0
 #endif
+/* SSE1: fnvnx_compat.h gives every unit sse2neon's __m128/__m128i/__m128d/__m64 and _mm_* (SSE1 and SSE2 drop the
+ * decomp's local copies of those types and prototypes); MSVC's own <emmintrin.h> is the same set. Its __m128 is
+ * `union __declspec(intrin_type) _CRT_ALIGN(16) __m128` as the decomp's copies are. */
+#include <emmintrin.h>
 #ifdef __cplusplus
 extern "C" {
 #endif

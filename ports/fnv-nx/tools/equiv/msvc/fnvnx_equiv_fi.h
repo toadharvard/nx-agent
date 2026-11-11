@@ -22,17 +22,13 @@
 /* RSTR1: fnvnx_unrestrict(v) is the restrict-qualified local v itself (fnvnx_compat.h); MSVC bound the reference to v */
 #define fnvnx_unrestrict(x) (x)
 
-/* TAIL1 (layout rule, only in layout runs): a zero-width bit-field of an integer type aligned like the last base,
- * as in fnvnx_compat.h. MSVC never reuses tail padding, so under MSVC it must change no layout. */
+/* TAIL1: a zero-width bit-field of an integer type aligned like the last base (fnvnx_compat.h) makes GCC start the
+ * derived members at sizeof(base), as MSVC always did; MSVC never reuses tail padding, so the decomp's own class is
+ * what the rule emulates and the macro is empty (a bit-field in a local class or of an over-aligned base is not even
+ * accepted by MSVC 2008). */
 #ifdef __cplusplus
-template <unsigned A> struct fnvnx_int_of_align;
-template <> struct fnvnx_int_of_align<1> { typedef unsigned char type; };
-template <> struct fnvnx_int_of_align<2> { typedef unsigned short type; };
-template <> struct fnvnx_int_of_align<4> { typedef unsigned int type; };
-template <> struct fnvnx_int_of_align<8> { typedef unsigned __int64 type; };
-template <> struct fnvnx_int_of_align<16> { typedef unsigned __int64 type; };
-#define FNVNX_MSVC_BASE_END(...) fnvnx_int_of_align<__alignof(__VA_ARGS__)>::type : 0;
-#define FNVNX_MSVC_BASE_END_PACK(N, ...) fnvnx_int_of_align<(__alignof(__VA_ARGS__) < (N) ? __alignof(__VA_ARGS__) : (N))>::type : 0;
+#define FNVNX_MSVC_BASE_END(...)
+#define FNVNX_MSVC_BASE_END_PACK(N, ...)
 /* VFPAD1: MSVC pads its own vfptr already */
 #define FNVNX_VFPAD(...)
 #define FNVNX_VFPAD_PACK(N, ...)
@@ -45,6 +41,21 @@ template <> struct fnvnx_int_of_align<16> { typedef unsigned __int64 type; };
 #define FNVNX_EBO2
 #define FNVNX_VSLOT(k) (k)
 #define FNVNX_D26_SLOT(k) (k)
+
+/* ANON3: the decomp's own local anonymous union (the GCC side wraps it in a named struct and refers to its members) */
+#define FNVNX_ANON3_BEGIN(n)
+#define FNVNX_ANON3_END(n)
+#define FNVNX_ANON3_REF(n, m)
+
+/* VA1: MSVC's va_list is a char*: fnvnx_va(x) (the address of a real va_list on the target; fnvnx_compat.h) is x
+ * itself, and a hand-built list is the decomp's `char* args = (char*)(&format + 1)` (what FNVNX_VA_HAND replaced) */
+#define fnvnx_va(x) (x)
+#define FNVNX_VA_HAND(args, format) char* args = (char*)(&format + 1)
+
+/* ADDRFN1: FNVNX_ADDRFN(00401230) is the decomp's `reinterpret_cast<void*>(0x00401230)` (the GCC side takes the address of
+ * the symbol the link binds there; MSVC code keeps the integer) */
+#define FNVNX_ADDRFN_HEX(a) 0x##a
+#define FNVNX_ADDRFN(a) reinterpret_cast<void*>(FNVNX_ADDRFN_HEX(a))
 
 /* FTOL1 (S1b): fnvnx_ftol2(x) is the x87 _ftol2_sse of x; under MSVC the cast compiles to exactly that call */
 #ifndef fnvnx_ftol2

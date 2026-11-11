@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """tests/s2d - ADDRFN1 (tools/rules/s2_bodies.py) on a hand-written unit: `reinterpret_cast<void*>(0x00<a>)` of a
-.text address some unit defines becomes the address symbol __fnv_<a> (a GCC asm label); an undefined address, a data
+.text address some unit defines becomes FNVNX_ADDRFN(<a>) (GCC: the address symbol __fnv_<a>; cl: the cast itself); an undefined address, a data
 address and other casts stay; line numbers stay.
 
     python3 -I tests/s2d/test_addrfn1.py
@@ -44,8 +44,9 @@ class AddrFn1(unittest.TestCase):
             st = collections.Counter()
             out = s2_bodies.r_code_address_casts(path, SRC, st)
         self.assertEqual(st['ADDRFN1'], 2)
-        self.assertIn('__asm__("__fnv_00401230")', out)
-        self.assertIn('__asm__("__fnv_00401260")', out)
+        self.assertIn('FNVNX_ADDRFN(00401230)', out)
+        self.assertIn('FNVNX_ADDRFN(00401260)', out)
+        self.assertNotIn('__asm__', out)            # the asm label is the GCC macro's (fnvnx_compat.h)
         self.assertIn('reinterpret_cast<void*>(0x01010000)', out)   # data address
         self.assertIn('reinterpret_cast<void*>(0x00409990)', out)   # no unit defines it
         self.assertIn('reinterpret_cast<char*>(0x00401230)', out)   # not a void* cast
