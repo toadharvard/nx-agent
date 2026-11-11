@@ -1,4 +1,4 @@
-/* PE32 header parsing and validation, content probes. The executable is untrusted input: every offset and size is
+/* PE32 header parsing and validation. The executable is untrusted input: every offset and size is
  * checked before use and all arithmetic is overflow-safe. */
 #include "internal.h"
 #include <stdarg.h>
@@ -10,12 +10,10 @@ const char *fnvnx_strerror(int err) {
     case FNVNX_E_IO: return "read error";
     case FNVNX_E_FORMAT: return "not a well-formed PE32 executable";
     case FNVNX_E_UNSUPPORTED: return "unsupported executable";
-    case FNVNX_E_DRM: return "the data sections are not plain (encrypted or packed); nothing is decrypted";
-    case FNVNX_E_PROBES: return "content does not match FNV PC 1.4.0.525";
     case FNVNX_E_MAP: return "memory mapping failed";
     case FNVNX_E_RANGE: return "section outside the mapping window";
     case FNVNX_E_NOMEM: return "out of memory or buffer too small";
-    case FNVNX_E_MISMATCH: return "list or map does not fit this image";
+    case FNVNX_E_MISMATCH: return "an import slot has no provider";
     case FNVNX_E_ARG: return "bad argument";
     default: return "unknown error";
     }
@@ -24,7 +22,6 @@ const char *fnvnx_strerror(int err) {
 void fnvnx_logf(const fnvnx_os *os, const char *fmt, ...) {
     char buf[256];
     va_list ap;
-    if (!os || !os->log) return;
     va_start(ap, fmt);
     vsnprintf(buf, sizeof buf, fmt, ap);
     va_end(ap);
@@ -38,7 +35,7 @@ int fnvnx_pe_open(fnvnx_pe *pe, const fnvnx_os *os, uint32_t file_size) {
     uint32_t lfanew, optsize, shoff, i, nrva;
     uint64_t end;
 
-    if (!pe || !os || !os->read) return FNVNX_E_ARG;
+    if (!pe || !fnvnx_os_complete(os)) return FNVNX_E_ARG;
     memset(pe, 0, sizeof *pe);
     pe->file_size = file_size;
     if (file_size < sizeof dos) return FNVNX_E_FORMAT;
@@ -71,6 +68,7 @@ int fnvnx_pe_open(fnvnx_pe *pe, const fnvnx_os *os, uint32_t file_size) {
     pe->checksum = fnvnx_rd32(opt + 64);
     pe->dll_characteristics = fnvnx_rd16(opt + 70);
     nrva = fnvnx_rd32(opt + 92);
+    /* precondition of the mapping rule: a section's rva is a host page address (map_fixed works in 4 KiB pages) */
     if (pe->section_align != 0x1000) return FNVNX_E_UNSUPPORTED;
     if (pe->file_align < 0x200 || pe->file_align > 0x10000 || (pe->file_align & (pe->file_align - 1)))
         return FNVNX_E_FORMAT;
@@ -94,7 +92,6 @@ int fnvnx_pe_open(fnvnx_pe *pe, const fnvnx_os *os, uint32_t file_size) {
     shoff = lfanew + 24 + optsize;
     if ((uint64_t)shoff + 40ull * pe->nsections > file_size) return FNVNX_E_FORMAT;
     if (pe->size_of_headers < shoff + 40u * pe->nsections || pe->size_of_headers > file_size) return FNVNX_E_FORMAT;
-    pe->text_lo_rva = 0xffffffffu;
     for (i = 0; i < pe->nsections; i++) {
         fnvnx_section *s = &pe->sec[i];
         if (os->read(os->ctx, shoff + 40 * i, sh, sizeof sh)) return FNVNX_E_IO;
@@ -111,19 +108,6 @@ int fnvnx_pe_open(fnvnx_pe *pe, const fnvnx_os *os, uint32_t file_size) {
         if (i && s->rva < ((uint64_t)pe->sec[i - 1].rva + vsize_eff(&pe->sec[i - 1]) + 0xfff) / 0x1000 * 0x1000)
             return FNVNX_E_FORMAT;                                    /* sorted, non-overlapping */
         if (s->raw_size && (uint64_t)s->raw_off + s->raw_size > file_size) return FNVNX_E_FORMAT;
-        if (!strcmp(s->name, ".bind")) { pe->wrapped = 1; continue; }   /* SteamStub: its own code, not ours */
-        if (s->characteristics & (FNVNX_SCN_CNT_CODE | FNVNX_SCN_MEM_EXECUTE)) {
-            if (s->rva < pe->text_lo_rva) pe->text_lo_rva = s->rva;
-            if (end > pe->text_hi_rva) pe->text_hi_rva = (uint32_t)end;
-        }
-    }
-    if (pe->text_lo_rva == 0xffffffffu) return FNVNX_E_UNSUPPORTED;  /* no code at all */
-    /* the code span must not cover data: the scanner takes every value in it for a code address */
-    for (i = 0; i < pe->nsections; i++) {
-        const fnvnx_section *s = &pe->sec[i];
-        if (!(s->characteristics & (FNVNX_SCN_CNT_CODE | FNVNX_SCN_MEM_EXECUTE)) &&
-            s->rva < pe->text_hi_rva && s->rva + vsize_eff(s) > pe->text_lo_rva)
-            return FNVNX_E_UNSUPPORTED;
     }
     return FNVNX_OK;
 }
@@ -144,45 +128,4 @@ int fnvnx_pe_read_rva(const fnvnx_pe *pe, const fnvnx_os *os, uint32_t rva, void
     int r = fnvnx_pe_rva_to_off(pe, rva, size, &off);
     if (r) return r;
     return os->read(os->ctx, off, dst, size) ? FNVNX_E_IO : FNVNX_OK;
-}
-
-int fnvnx_pe_check_probes(const fnvnx_pe *pe, const fnvnx_os *os, const fnvnx_probe *probes, unsigned n,
-                          unsigned need, unsigned *matched) {
-    unsigned i, ok = 0;
-    uint8_t buf[4096], digest[32];
-    if (!need) need = n < 12 ? n : 12;
-    for (i = 0; i < n; i++) {
-        const fnvnx_probe *p = &probes[i];
-        if (p->size > sizeof buf || p->va < pe->image_base) continue;
-        if (fnvnx_pe_read_rva(pe, os, p->va - pe->image_base, buf, p->size)) continue;
-        fnvnx_sha256(buf, p->size, digest);
-        ok += !memcmp(digest, p->sha256, 32);
-    }
-    if (matched) *matched = ok;
-    return (n && ok >= need) ? FNVNX_OK : FNVNX_E_PROBES;
-}
-
-int fnvnx_pe_section_stats(const fnvnx_pe *pe, const fnvnx_os *os, unsigned sec, fnvnx_section_stats *st) {
-    uint32_t hist[256], off, left, i;
-    uint8_t buf[4096];
-    uint64_t sq = 0;
-    memset(st, 0, sizeof *st);
-    if (sec >= pe->nsections) return FNVNX_E_ARG;
-    memset(hist, 0, sizeof hist);
-    off = pe->sec[sec].raw_off;
-    left = pe->sec[sec].raw_size < vsize_eff(&pe->sec[sec]) ? pe->sec[sec].raw_size : vsize_eff(&pe->sec[sec]);
-    st->bytes = left;
-    while (left) {
-        uint32_t n = left < sizeof buf ? left : (uint32_t)sizeof buf;
-        if (os->read(os->ctx, off, buf, n)) return FNVNX_E_IO;
-        for (i = 0; i < n; i++) hist[buf[i]]++;
-        off += n;
-        left -= n;
-    }
-    for (i = 0; i < 256; i++) sq += (uint64_t)hist[i] * hist[i];
-    st->zeros = hist[0];
-    /* chi2 = sum (c - N/256)^2 / (N/256) = 256 * sum c^2 / N - N */
-    st->chi2 = st->bytes ? sq * 256 / st->bytes - st->bytes : 0;
-    st->plain = !st->bytes || (st->chi2 > 2000 && (uint64_t)st->zeros * 100 >= st->bytes);
-    return FNVNX_OK;
 }

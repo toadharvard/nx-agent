@@ -22,11 +22,14 @@ static inline int fnvnx_in(uint32_t a, uint32_t n, uint32_t lo, uint32_t hi) {
     return a >= lo && a <= hi && n <= hi - a;
 }
 
+/* every hook is required (fnvnx_os) */
+static inline int fnvnx_os_complete(const fnvnx_os *os) {
+    return os && os->read && os->map_fixed && os->protect && os->alloc && os->free && os->log && os->alloc_va &&
+           os->free_va;
+}
+
 void fnvnx_logf(const fnvnx_os *os, const char *fmt, ...);
 
-/* VA ranges the scanner must not look at (loader structures that hold RVAs or names) */
-typedef struct fnvnx_range { uint32_t lo, hi; } fnvnx_range;
-int fnvnx_collect_exclusions(const fnvnx_image *img, const fnvnx_os *os, fnvnx_range **out, uint32_t *n);
 /* current VA of the NUL-terminated string at va, length into *len (bounded by max), or NULL */
 const char *fnvnx_image_str(const fnvnx_image *img, uint32_t va, uint32_t max, uint32_t *len);
 
