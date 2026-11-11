@@ -27,7 +27,7 @@ Rules:
 5a. TOTAL against the header (hostapi.h TOTALITY TABLE, checked mechanically by tests/test_bootmachine.py against the parsed table): ext_call returns
    NO_MODULE (module >= 64 or not registered), NO_SERVICE (fn > UINT32_MAX, or a module-11 fn without a row: 0, 37 and up), BAD_NARGS
    (fewer arguments than the row, or nargs > 0 with a null array); nargs above UINT32_MAX counts as UINT32_MAX; only a handler raising
-   ExtMissing ends the run. Module 11 serves fn 1..36 here. The stage has no network interface and a fixed UTC zone (VC1). Sockets 16..33 are bootsock.py's model (a host with no network interface; its docstring lists every
+   ExtMissing ends the run. Module 11 serves fn 1..36 here. The stage has no network interface and a fixed UTC zone (VC1). Sockets 16..26, 30, 31 are bootsock.py's model (a host with no network interface; its docstring lists every
    served and every NOT answered (service, case); the latter end the run as "ext-module-missing" naming the service, with an event
    "sock-undetermined" saying why): the nargs rule (sockets dispatch before the general check: nargs != the exact count, null array or not, is -EINVAL;
    the exact count with a null array is BAD_NARGS). TZ_AT 34: UTC, offset 0, no DST, abbr "UTC",
@@ -618,9 +618,9 @@ class Machine:
         return self.ext[module](fn, self._words(args, nargs) if nargs else [])
 
     def _platform_ext(self, fn, args, nargs):
-        """host_platform.inc: sockets 16..33 check nargs themselves (exactly the count, else -WE_INVAL); a fn without a row is
+        """host_platform.inc: sockets 16..26, 30, 31 check nargs themselves (exactly the count, else -WE_INVAL); a fn without a row is
         NO_SERVICE; fewer arguments than the row, or nargs > 0 with a null array, is BAD_NARGS; extra arguments are ignored"""
-        if fn in SOCK_SERVICES:   # host_platform.inc: 16..31 dispatch BEFORE the general nargs / null-array check
+        if fn in SOCK_SERVICES:   # host_platform.inc: 16..26, 30, 31 dispatch BEFORE the general nargs / null-array check
             if nargs != SOCK_SERVICES[fn][1]:
                 return -WE_INVAL & U64
             if not args:
