@@ -123,3 +123,21 @@ One Sonnet task = one owner file group, <= 300 lines per file, failing test firs
   with the proposed rule "virtual clock driven by the Present count" for check runs on both sides (owner: L4 for
   Wine, L5 for the guest). G-STREAM is blocked on it.
 - Farm notes: the report's "checkout is not 783ec078" line compares a short id with a full one (fix in the job).
+
+## Resume 2026-11-11 (new lead session; brief: first fully lifted ELF, then menu and first frame)
+
+- The files of the stopped B2 / I1 / V1a workers were never committed (commit 1d583def holds only the note): the tree
+  is bb5e5ec8 + note 004. Baseline rerun here: test_spec 0 failures, wrap PASS, cmp PASS (75), dev ALL OK, res ALL OK.
+- G-METHOD by `nm` over dev-only objects: 272 of 497 defined (225 missing).
+
+| id | task | state |
+|---|---|---|
+| A10 | d3d9.dll export surface: D3DPERF_* (7) + factory exports, resolver `nx_d3d9_export`; told L1, L5 | done c3c113ad: 9/9 spec exports, 37 checks |
+| B2a | GL 4.5 backend v4 in `render/d3d9/backend/gl4_*`: v3 port + images (create4, destroy, ImageUpdate, image_read, Blit, GenMips); guest addresses only through `nxgl4_guest_ptr` | running |
+| B2b | GL backend v4: BeginPass4, layout4, BindVtxN, queries, sampler_update, present + gamma, w[3] | after B2a |
+| D4 | dev: textures, surfaces, volumes, Create* (legality from the env table) | running |
+| R1c | shader cache from the recordings (`render/shaders/cache/`): extractor, format, loader, link-key rule; build on the 765 recorded bytecodes | running |
+| D5-D7 | draw path; copies and Clear; Present, Reset, CreateDevice, swap chains | after D4 + B2 |
+| L4-IF | off-console render interface for L4's boot stage: `nxgl4_ext(fn, args, n)` + `nxgl4_guest_ptr`, frames to NXGL4_FRAMES, `nxgl4_on_present` | proposed to L4, waiting |
+| B5 | virtual clocks in check mode (Wine side L4, guest side L5): menu run1 vs run2 equal 163 927 of 1 345 369, first mismatch seq 12198 SetPixelShaderConstantF | asked L4 |
+| X1 | the 5 exports without a spec signature (DebugSetLevel, DebugSetMute, Direct3DShaderValidatorCreate9, PSGPError, PSGPSampleTexture): the exe names none of them; not exported by us yet | open, does not block the first ELF |
