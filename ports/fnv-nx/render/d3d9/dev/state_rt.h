@@ -59,6 +59,7 @@ struct NxDevLifeBase {  // owner of the lifecycle state of a device (dev_core.h 
 };
 struct NxDeviceCore : NxObj {
     NxDevLifeBase* life = nullptr;
+    NxDevLifeBase* draw = nullptr;   // draw_state.cpp: the per-device draw state (latch of the render state translation, bound-state tracking); destroyed with the device
     NxDeviceState cur; NxStateBlockCore* rec = nullptr; uint64_t dirty = 0; NxCreateParams cp = {};
     NxSparse<NxLightEnt> lights; NxSparse<NxPalEnt> pals; uint32_t swvp = 0;
     NxDeviceCore() { memset((void*)&cur, 0, sizeof cur); }

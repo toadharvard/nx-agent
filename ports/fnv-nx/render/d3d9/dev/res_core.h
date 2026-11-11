@@ -42,9 +42,13 @@ bool nx_env_decltype_supported(uint32_t type);             // ENV (caps DeclType
 
 // ---- shaders: bytecode copy, hash, parsed interface (res_sm.h)
 uint64_t nx_shader_hash(const void* bytecode, size_t n);   // == fnvnx_shader_hash (FNV-1a 64), see res_shader.cpp
+struct NxShaderCore;
+void nxd3d_shader_ids_destroy(NxShaderCore* s);            // draw_prog.cpp: the object dies: the backend shader ids made for it (NXGPU_FN_SHADER_DESTROY after a flush of the stream that may use them); only called when `nprogs` > 0
+struct NxShaderProg { uint8_t variant, n_l, l[31]; uint32_t id; };   // a backend shader of this shader object: (variant bit0 = VS complete, link set L = FNVNX_DK_PAIR codes ascending) -> id (>= 1), made at the first draw that needs it
 struct NxShaderCore : NxObj {
     uint32_t* code = nullptr; uint32_t nbytes = 0; uint64_t hash = 0; NxSmIface iface;
-    ~NxShaderCore() { nxd3d_free(code); }
+    NxShaderProg* progs = nullptr; uint32_t nprogs = 0, cprogs = 0;
+    ~NxShaderCore() { if (nprogs) nxd3d_shader_ids_destroy(this); nxd3d_free(progs); nxd3d_free(code); }
     HRESULT getFunction(void* pData, UINT* pSize);
 };
 

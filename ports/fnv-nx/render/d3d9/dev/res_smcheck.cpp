@@ -46,6 +46,8 @@ static int cls_of(int stage, uint32_t major, uint32_t type, uint32_t idx, uint32
     }
     return -1;
 }
+static void add_pair(NxSmIface* a, uint32_t usage, uint32_t idx) { uint32_t k = usage * 16 + idx; if (usage <= 13 && idx <= 15) a->pair_set[k >> 5] |= 1u << (k & 31); }
+uint32_t nx_sm_pairs(const NxSmIface* a, uint8_t* out) { uint32_t n = 0; for (uint32_t k = 0; k < 224; k++) if (a->pair_set[k >> 5] >> (k & 31) & 1) out[n++] = (uint8_t)k; return n; }
 struct Ctx { const NxSmModel* M; int stage, major; NxSmIface* acc; uint32_t mbit; };
 static uint32_t ptype(uint32_t t) { return ((t >> 28) & 7) | ((t >> 8) & 0x18); }
 static bool plain(uint32_t w) { return ((w >> 16) & 0xFF) == 0xE4 && ((w >> 24) & 15) == 0; }   // identity swizzle, no source modifier
@@ -88,6 +90,11 @@ static int param(const Ctx& c, const uint32_t* t, uint32_t n, uint32_t* i, int d
         if (!dst && cl == NXC_b && ci < 32) a->cb_mask |= 1u << ci;
         if (!dst && cl == NXC_v && !c.stage && ci < 16) a->in_mask |= 1u << ci;
         if (!dst && cl == NXC_s && ci < 16) a->sampler_mask |= 1u << ci;
+        if (!c.stage && dst) {   // vertex outputs of sm < 3 are the registers written (sm3: declared, see declare())
+            if (cl == NXC_oPos) add_pair(a, 0, 0); else if (cl == NXC_oFog) add_pair(a, 11, 0); else if (cl == NXC_oPts) add_pair(a, 4, 0);
+            else if (cl == NXC_oD) add_pair(a, 10, ci); else if (cl == NXC_oT) add_pair(a, 5, ci);
+        }
+        if (c.stage && c.major < 3) { if (cl == NXC_t) add_pair(a, 5, ci); else if (cl == NXC_v) add_pair(a, 10, ci); }   // pixel inputs of sm < 3: t# TEXCOORD#, v# COLOR#
     }
     return 0;
 }
@@ -99,6 +106,9 @@ static int declare(const Ctx& c, uint32_t op, const uint32_t* t, uint32_t n) {
         if (cl < 0 || !((M.dcl_cls >> cl) & 1) || ci >= M.n[cl]) return NX_SM_E_DCL;
         if (cl == NXC_s) { if (st < 2 || st > 4) return NX_SM_E_DCL; if (c.acc) { c.acc->sampler_mask |= 1u << ci; c.acc->sampler_type[ci & 15] = (uint8_t)st; } }
         else if (usage > 13) return NX_SM_E_DCL;
+        else if (c.acc && c.stage && cl == NXC_v && c.major >= 3) add_pair(c.acc, usage, uidx);
+        else if (c.acc && c.stage && c.major < 3 && (cl == NXC_t || cl == NXC_v)) add_pair(c.acc, cl == NXC_t ? 5 : 10, ci);
+        else if (c.acc && !c.stage && cl == NXC_o) add_pair(c.acc, usage, uidx);
         else if (c.acc && cl == NXC_v && !c.stage) { c.acc->in_mask |= 1u << ci; c.acc->in_usage[ci & 15] = (uint8_t)usage; c.acc->in_index[ci & 15] = (uint8_t)uidx; }
         return 0;
     }

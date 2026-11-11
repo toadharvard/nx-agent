@@ -203,3 +203,12 @@ Lead's run: copy ALL OK (a 189 533, b 3 767, c 72, d 75 checks by the worker's c
 - Lossy by construction: L6V5U5 / X8L8V8U8 at the most negative code and the x byte.
 - Owed by the draw path: nx_d3d9_rt_rule (write mask, red replication), nx_d3d9_sample_fixup, flush before rewriting a bound buffer mirror, rebind on nxs_pass_epoch change; occlusion queries with real draws are untested.
 - Platform hooks (undefined in the product): nxd3d_gpu_call, nxd3d_gpu_alloc / free, nxd3d_dc_create / release.
+
+## D7 delivered 2026-11-11 (device lifecycle, swap chains, Present): worker's verdict green, lead's rerun pending
+
+`dev/dev_*.cpp|h` (584 lines), `tests/l6/devlife`. Worker's run: a 179 125, b 64, c 73, d 221, e 487, f 61 checks, 0 failed; 21/21 mutations. Lead's rerun failed to BUILD only because the test compiles dev/*.cpp by listing and the draw worker's files are mid-edit (draw_prim.cpp without draw_core.h): rerun when D5a lands.
+- Left without body (no contract): Device9Ex::SetConvolutionMonoKernel, ComposeRects (Wine does not implement them, MS gives no result rules), SwapChain9Ex::GetPresentStats (needs vblank / sync timestamps the backend ABI does not report).
+- TO RECHECK against the reference (worker deviated from Wine or invented): Reset changes the back buffer count (Wine keeps it); GetLastPresentCount = present counter (Wine 0); Present on a chain with a NULL-format back buffer succeeds without a backend call (own rule); GetFrontBufferData accepts X8R8G8B8 too; GPU thread priority range; fullscreen rules. Nothing was checked against Windows.
+- ABI question: nxd3d_frontbuffer_read assumes NxImageRead with image 0 = the swapchain image: write it into nxgpu4.h and implement in gl4, or add a function.
+- Hooks owed: backend nxd3d_present, nxd3d_present_cursor, nxd3d_wait_idle, nxd3d_frontbuffer_read, nxd3d_wait_vblank (product definitions = glue task); platform nxd3d_window_client, nxd3d_perf_counter, nxd3d_os_cursor_pos (ask L5).
+- contract_consts.tsv: + SetDialogBoxMode (both classes) = D3D_OK.
