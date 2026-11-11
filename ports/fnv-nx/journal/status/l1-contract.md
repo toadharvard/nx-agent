@@ -17,6 +17,9 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` a2453fe9 (w4 @39c4
 | 3b | recipe build judges every unit, failed_units listed (L3a lift/rt, pack 4098 units) | session_01KmtZKS82vxSbxtKufqbp4i (w14 item 2) | claude/fnv-l1-contract-w14 | queued after census |
 | 3k | link kinds pie/exe/shared (+version_script) for GL backend render/gl4; shared roots via link.roots; target "variants" (root@NAME; also the sanitizer variant) (L6A) | session_01KmtZKRyNHyAGWeTxKmbdfZ (w15) | claude/fnv-l1-contract-w15 | doing |
 | 3e | env.json pins: patch, libegl-dev, libgl-dev | session_01KmtZKRpuoHrhZqwnLDyQ8L (w16) | claude/fnv-l1-contract-w16 | doing |
+| 1g | BLOCKER goal step 1: 13 REQUIRED_PRODUCT gates absent from gates.json. L1: datamodel + fpexact (native) | session_01KmtZKQzN38LhJYh6sixhL1 (w17) | claude/fnv-l1-contract-w17 | doing |
+| 1h | the other 11: exepin (L1, w8), imports+machine (L5), forms (L3b), d3d9total (L6), r7/namegate/abi/order (L2), eh (L3a+L3b), addr32 (L2+L3a) | owners | - | reported to orchestrator |
+| 3i | recipe key isystem (paths inside externals only) for libnx/newlib headers (L6A) | w16 | claude/fnv-l1-contract-w16 | doing |
 | 2b | budget in VERDICT.md, budget gate, delete second build paths | lead | - | blocked by 2 (numbers) |
 | 4a | assumptions gate over verify/ASSUMPTIONS.json (OWNER = 9; field `pending` removed) | session_01KmtZKQZb21XFPG5GMjmjUp | claude/fnv-l1-contract-w10 (from b9f7cf14) | doing: rebase on trunk, drop `pending` + 47 pending records, add L6A, selftests in pinned env |
 | 4b | w11 test-defined symbols ∩ product-root symbols = ∅ in objstub | predecessor's local agent -> moving to a cloud worker | claude/fnv-l1-contract-w11 001306f0 | doing: stage 2 (COMDAT, python AST rule, six L1 names to 0) |
@@ -30,3 +33,8 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` a2453fe9 (w4 @39c4
 - assumptions (w10 b9f7cf14, before cleanup, not global): 100 records = 9 OWNER + 91 REMOVE; 47 of them pending -> removed; L6 not entered (enters with L6's merge).
 - hostapi (w12 6766d18a): 5 services removed (27, 28, 29, 32, 33; 0 call sites in platform 2951f7ae); gate hostapi 0 of 0, no roots.
 - handoff read: c1431c5d.
+
+## Deferred past the first frame
+
+- Rule B (generated runs a root's ELF; uam, sdp2dksh).
+- TLS gate: 0 R_AARCH64_TLS* / STT_TLS in roots without the console TLS ABI (L6A measured 0 in render/backend 87323b02).
