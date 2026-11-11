@@ -3,8 +3,8 @@
 
     toolchain/order/measure.py <name>=<obj dir> [<name>=<obj dir> ...] [--hot <units.list>] [--json out.json]
 
-Each obj dir is a tools/link/compile.sh output of the same unit list in another configuration (ORDER_MODE /
-ORDER_ARGS). Counts, over the objects every configuration compiled: instructions in executable sections, ordered
+Each obj dir is a tools/link/compile.sh output of the same unit list in another configuration (ORDER_ARGS,
+ORDER_OBJECT ...). Counts, over the objects every configuration compiled: instructions in executable sections, ordered
 loads (ldar*), ordered stores (stlr*), barriers (dmb ish / ishld / ishst), exclusives, and the change against the
 first configuration. --hot restricts a second table to the listed units (sources as in objects.tsv).
 """
