@@ -1,7 +1,7 @@
 // FVF <-> vertex declaration rules, the device's implicit FVF declarations, and the fixed-function view of a declaration.
 // Sources: Wine 9.0 d3d9 vertexdeclaration.c vdecl_convert_fvf (the layout rule, checked against the Windows-validated table fvf_to_decl_tests of d3d9/tests/device.c test_fvf_decl_conversion)
 // and device.c device_get_fvf_declaration / d3d9_device_SetFVF / GetFVF; MS D3DFVF page for the bit groups. Wine's d3d9 never converts a declaration back to an FVF (its GetFVF reads the
-// `fvf` field set only for implicit declarations); the Windows results recorded in decl_to_fvf_tests (todo_wine rows) are: POSITION FLOAT3 alone -> D3DFVF_XYZ, POSITIONT FLOAT4 alone ->
+// `fvf` field set only for implicit declarations); the Windows results recorded in decl_to_fvf_tests (the rows Wine itself does not meet) are: POSITION FLOAT3 alone -> D3DFVF_XYZ, POSITIONT FLOAT4 alone ->
 // D3DFVF_XYZRHW, every other element declaration -> 0. nx_decl_to_fvf is exactly that rule (it is NOT "the exact inverse of nx_fvf_to_decl": TEXCOORD / NORMAL ... declarations read 0 on Windows).
 // FVF grammar (total decision): position field (fvf & 0x400E) in {0, XYZ 2, XYZRHW 4, XYZB1..5 6..0xE, XYZW 0x4002}; bit 0 (RESERVED0) and bits 13-14 (RESERVED2) clear; texture count (bits 8-11) <= 8.
 // Everything else is "invalid": no layout is documented (Wine would convert it to garbage). Texture-size bits (16-31) of textures >= the count are ignored (Wine). The 4 two-bit size codes are all defined.

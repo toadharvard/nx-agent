@@ -3,7 +3,7 @@
 // MS IDirect3DVertexBuffer9::Lock / D3DLOCK / D3DUSAGE pages; Wine tests device.c test_vb_lock_flags (Windows XP: Lock never fails on odd flag combinations).
 // Creation (HRESULTs are the documented ones; Wine's E_INVALIDARG for Length 0 is mapped to D3DERR_INVALIDCALL): Length 0, pool SCRATCH or > SYSTEMMEM,
 //  D3DUSAGE_RENDERTARGET / DEPTHSTENCIL, MANAGED on an Ex device, an index format other than INDEX16 / INDEX32, an FVF outside the grammar (nx_fvf_to_decl) = D3DERR_INVALIDCALL;
-//  Length > NX_MAX_BUFFER_BYTES = D3DERR_OUTOFVIDEOMEMORY; a shared handle: non-Ex = E_NOTIMPL, pool != DEFAULT = D3DERR_NOTAVAILABLE, else ignored (Wine: FIXME, no sharing).
+//  Length > NX_MAX_BUFFER_BYTES = D3DERR_OUTOFVIDEOMEMORY; a shared handle: non-Ex = E_NOTIMPL, pool != DEFAULT = D3DERR_NOTAVAILABLE, else ignored (Wine shares nothing).
 //  NOT validated (no source): FVF vs Length (vertex size), INDEX32 vs caps MaxVertexIndex.
 // Lock: (0,0) = whole buffer; size 0 = to the end (spec lock.bytes rule); offset + size > Length, offset >= Length, null ppbData = D3DERR_INVALIDCALL (Wine continues for an out-of-range box: it
 //  would hand out memory outside the buffer). Flags: never an error (XP behaviour). Wine mapping: READ unless WRITEONLY usage or DISCARD/NOOVERWRITE; WRITE unless READONLY, or when neither would be set.

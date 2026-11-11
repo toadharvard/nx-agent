@@ -40,7 +40,7 @@ static HRESULT a_disp_ex(int p, UINT ad, D3DDISPLAYMODEEX* o, D3DDISPLAYROTATION
 }
 static HRESULT a_luid(int p, UINT ad, LUID* o) { uint32_t lo; int32_t hi; if (!o) return D3DERR_INVALIDCALL; HRESULT hr = (HRESULT)nxenv_luid(p, ad, &lo, &hi); if (SUCCEEDED(hr)) { o->LowPart = lo; o->HighPart = hi; } return hr; }
 
-// d3d9_RegisterSoftwareDevice: wined3d_register_software_device is a stub that returns WINED3D_OK (wined3d/directx.c); the answer is D3D_OK. A registered software device
+// d3d9_RegisterSoftwareDevice: wined3d_register_software_device registers nothing and returns WINED3D_OK (wined3d/directx.c); the answer is D3D_OK. A registered software device
 // changes nothing in the table: CheckDeviceType / GetDeviceCaps for D3DDEVTYPE_SW answer as recorded (the recording calls it before the first query).
 #define ENV_METHODS(C)                                                                                                                                                  \
     HRESULT STDMETHODCALLTYPE C::RegisterSoftwareDevice(void*) { return D3D_OK; }                                                                                       \

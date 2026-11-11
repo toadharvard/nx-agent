@@ -58,7 +58,7 @@ FLOW_LIM = {V1: None, V2: dict(static=16, dynamic=0, loop_rep=1, call=1, labels=
 CAPS = {"VS20Caps.Predication": dict(models=[V2X], feats=["setp", "if_pred", "callnz_pred", "breakp", "pred_prefix", "p0"], src=MS + "vs-2-x (Predication)"),
         "VS20Caps.DynamicFlowControlDepth": dict(models=[V2X], feats=["if_cmp", "break", "break_cmp"], src=MS + "vs-2-x (Dynamic Flow Control)"),
         "VS20Caps.StaticFlowControlDepth": dict(models=[V2X], feats=["loop_rep_nest", "call_nest"], src=MS + "vs-2-x"),
-        "VS20Caps.NumTemps": dict(models=[V2X], feats=["r_index>=12"], src=MS + "vs-2-x (Number of Temporary Registers)"),
+        "VS20Caps.NumTemps": dict(models=[V2X], feats=["r_index>=12"], src=MS + "vs-2-x (section on the number of temp registers)"),
         "PS20Caps.Predication": dict(models=[P2X], feats=["setp", "if_pred", "callnz_pred", "breakp", "pred_prefix", "p0"], src=MS + "ps-2-x (Predication)"),
         "PS20Caps.DynamicFlowControlDepth": dict(models=[P2X], feats=["if_cmp", "break", "break_cmp", "if_bool"], src=MS + "ps-2-x"),
         "PS20Caps.StaticFlowControlDepth": dict(models=[P2X], feats=["rep", "call", "callnz_bool", "label", "ret", "else", "endif"], src=MS + "ps-2-x"),

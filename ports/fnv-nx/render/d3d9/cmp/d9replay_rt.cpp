@@ -19,14 +19,11 @@ static unsigned psize(const D9SDesc *s) { unsigned n = 0; for (unsigned i = 0; i
 
 // ---- object / token state
 static std::map<unsigned, std::vector<std::pair<int, void *>>> g_obj;      // recorded id -> live wrapper pointers by interface
-static std::map<unsigned, uintptr_t> g_tok; static std::map<unsigned, void *> g_unk;
-struct DUnk final : IUnknown { unsigned rc = 1;           // replay-owned IUnknown behind every token of a canon-as-ohandle buffer (SetPrivateData IUNKNOWN)
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void **) override { return (HRESULT)0x80004002; }
-    ULONG STDMETHODCALLTYPE AddRef() override { return ++rc; } ULONG STDMETHODCALLTYPE Release() override { return --rc; } };
-static uintptr_t tokval(unsigned t) { if (!t) return 0; auto i = g_tok.find(t); return i != g_tok.end() ? i->second : d9impl_ohandle ? d9impl_ohandle(t) : 0x70000000u + t * 16; }
-static void *unk(unsigned t) { if (!t) return 0; if (d9impl_ohandle) return (void *)d9impl_ohandle(t); void *&p = g_unk[t]; if (!p) p = (void *)(IUnknown *)new DUnk; return p; }
+static std::map<unsigned, uintptr_t> g_tok;
+static uintptr_t tokval(unsigned t) { if (!t) return 0; auto i = g_tok.find(t); return i != g_tok.end() ? i->second : d9impl_ohandle(t); }
+static void *unk(unsigned t) { return t ? (void *)d9impl_ohandle(t) : 0; }
 static void bind(unsigned id, int iface, void *p) { if (!id || !p) return; for (auto &e : g_obj[id]) if (e.first == iface) { e.second = p; goto done; } g_obj[id].push_back({iface, p});
-    done: if (d9impl_bind) d9impl_bind(id, p); }
+    done: d9impl_bind(id, p); }
 static void *ptr_for(unsigned id, int iface) {
     if (!id) return 0; auto &v = g_obj[id];
     for (auto &e : v) if (e.first == iface) return e.second;
@@ -70,7 +67,7 @@ static void issue(Rd &r, unsigned this_id, const D9RM &m, void *fn, unsigned ord
     if (m.iface >= 0) { self = ptr_for(this_id, m.iface); o = d9s_obj(self); }
     for (int ph = 0; ph < 2; ph++) for (unsigned i = 0; i < m.np; i++) { const D9RP &p = m.p[i]; const Pv &v = x.in[i]; const Po &out = x.out[i];
         bool ptr = p.byref || p.kind == K_STRUCT || p.kind == K_BUFFER || p.kind == K_LOCKED, buf = p.kind == K_BUFFER;
-        if ((ph == 1) != buf) { if (ph == 0 && buf && v.present) a[i].p = zero; continue; }       // buffers last (their rules read other params); placeholder until then
+        if ((ph == 1) != buf) { if (ph == 0 && buf && v.present) a[i].p = zero; continue; }       // buffers last (their rules read other params); zero until then
         if (!ptr) {
             if (p.kind == K_HANDLE) a[i].p = ptr_for(*(const uint32_t *)v.d, p.iface); else if (p.kind == K_OHANDLE) a[i].u = tokval(*(const uint32_t *)v.d);
             else { uint32_t u; memcpy(&u, v.d, 4); a[i].u = u; } continue; }
@@ -87,7 +84,7 @@ static void issue(Rd &r, unsigned this_id, const D9RM &m, void *fn, unsigned ord
         auto t = g_tok.find(x.ctok.word()); D9Obj *so = self ? d9s_obj(self) : 0;
         for (D9Lk *l = so ? so->locks : 0; t != g_tok.end() && l; l = l->next) if (l->base == t->second) { if (!l->dc)
             for (size_t d = 0; d < l->depth; d++) for (size_t rw = 0; rw < l->rows; rw++) { size_t src = (d * l->rows + rw) * l->rowbytes; if (src + l->rowbytes <= x.cdata.n) memcpy((char *)l->base + d * l->spitch + rw * l->pitch, x.cdata.d + src, l->rowbytes); } break; } }
-    if (d9impl_before_call) d9impl_before_call(ordinal, seq);
+    d9impl_before_call(ordinal, seq);
     uintptr_t ret = m.inv(self, fn, a.data());
     int riid = -1; if (m.riid_param >= 0 && a[m.riid_param].p) riid = d9s_iid_iface(a[m.riid_param].p);
     for (unsigned i = 0; i < m.np; i++) { const D9RP &p = m.p[i]; if (p.dir == DIR_IN || !a[i].p) continue;

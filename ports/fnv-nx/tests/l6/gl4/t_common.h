@@ -34,6 +34,7 @@ void t_op(Stream* s, uint32_t opcode, int argc, ...);   /* argc uint32_t args */
 uint64_t t_submit(Stream* s);                      /* NXGPU_FN_SUBMIT, resets the stream; returns its result */
 int t_setup(uint32_t swapW, uint32_t swapH);       /* nxgl4_create + scratch memory block; 0 ok */
 void t_teardown(void);
+extern NxFrameStats g_stats;                       /* stats of the last submit */
 extern uint32_t g_mem;                             /* scratch block (id) */
 extern uint8_t* g_scratch;                         /* its storage, 8 MiB */
 #define SCRATCH_SIZE (8u << 20)

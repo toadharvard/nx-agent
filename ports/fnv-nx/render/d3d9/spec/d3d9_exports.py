@@ -30,7 +30,7 @@ def exports():
         _fn("D3DPERF_SetMarker", "void", [col, ev], "void"),
         _fn("D3DPERF_SetOptions", "void", [_v("dwOptions", "DWORD")], "void"),
         _fn("D3DPERF_SetRegion", "void", [col, ev], "void"),
-        _undoc("DebugSetLevel", "export of the debug runtime; not in the SDK headers and not implemented by Wine; signature unknown"),
+        _undoc("DebugSetLevel", "export of the debug runtime; not in the SDK headers and absent from Wine; signature unknown"),
         _undoc("DebugSetMute", "export of the debug runtime; Wine declares void DebugSetMute(void); not in the SDK headers"),
         _undoc("Direct3DShaderValidatorCreate9", "returns an IDirect3DShaderValidator9*; reverse engineered by Wine (no params), not in the SDK"),
         _undoc("PSGPError", "internal processor-specific-geometry-pipeline hook; not in the SDK; signature unknown"),

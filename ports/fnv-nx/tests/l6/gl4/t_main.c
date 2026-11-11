@@ -6,6 +6,7 @@ int g_checks, g_fail;
 uint32_t g_mem;
 uint8_t* g_scratch;
 static uint32_t g_frame;
+NxFrameStats g_stats;
 
 void* nxgl4_guest_ptr(uint64_t addr, uint64_t size) { (void)size; return (void*)(uintptr_t)addr; }   /* identity embedder */
 
@@ -80,8 +81,7 @@ void t_op(Stream* s, uint32_t opcode, int argc, ...) {
 
 uint64_t t_submit(Stream* s) {
     s->w[s->n++] = NxOp_End;
-    NxFrameStats st;
-    NxSubmit sub = {(uint64_t)(uintptr_t)s->w, s->n, g_frame++, (uint64_t)(uintptr_t)&st, 0, 0};
+    NxSubmit sub = {(uint64_t)(uintptr_t)s->w, s->n, g_frame++, (uint64_t)(uintptr_t)&g_stats, 0, 0};
     uint64_t r = t_ext(NXGPU_FN_SUBMIT, 1, (uint64_t)(uintptr_t)&sub);
     s->n = 0;
     return r;

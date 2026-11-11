@@ -11,7 +11,7 @@
  *     NxRenderState st; NxDynamicState dyn; uint32_t sb;
  *     nx_d3d9_translate(&in, &st, &dyn, &sb);
  *     NxSamplerState ss; nx_d3d9_sampler(samp[i], &tex, &ss);   // samp: DWORD[14] by D3DSAMPLERSTATETYPE
- *     NxFormatInfo fi = nx_d3d9_format(D3DFMT_xxx);
+ *     NxFormatInfo fi = nx_d3d9_format(fmt);
  * Floats held in DWORD render states (FOGSTART, DEPTHBIAS, POINTSIZE, ...) are IEEE bit patterns, as in D3D9.
  *
  * ---- Rules (each is a claim in render/native/CLAIMS.md and has a unit test in tests/s6n/) --------------------

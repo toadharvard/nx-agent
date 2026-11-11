@@ -75,7 +75,7 @@ static uint32_t bf_color(uint32_t b) {
     return bf_common(b);
 }
 static uint32_t bf_alpha(uint32_t b) {
-    if (b == 16) return NxBf_One;     /* Nine: SRCCOLOR2 -> ONE (XXX in Nine) */
+    if (b == 16) return NxBf_One;     /* Nine: SRCCOLOR2 -> ONE (as Nine does) */
     if (b == 17) return NxBf_Zero;    /* INVSRCCOLOR2 -> ZERO */
     return bf_common(b);
 }

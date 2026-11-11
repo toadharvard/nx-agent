@@ -14,8 +14,8 @@ struct D9RM { const char *name; int iface; unsigned slot, np; const D9RP *p; uin
 struct D9Entry { const char *name; void *fn; };         /* the implementation's export entry table (null name ends it) */
 extern const D9RM d9r_methods[], d9r_exports[]; extern const unsigned d9r_ibase[], d9r_niface, d9r_nexports;
 extern "C" const D9Entry d9impl_entries[];
-extern "C" void d9impl_before_call(unsigned ordinal, unsigned seq) __attribute__((weak));   /* optional: called before each re-issued call (ordinal = index among depth-0 records) */
-extern "C" void d9impl_bind(unsigned id, void *p) __attribute__((weak));                   /* optional: called whenever a recorded object id is bound to a live pointer */
-extern "C" uintptr_t d9impl_ohandle(unsigned token) __attribute__((weak));                  /* optional: the raw value (HWND, IUnknown*, ...) the integrator wants for an ohandle token; default: a stable fake value / a replay-owned IUnknown */
+extern "C" void d9impl_before_call(unsigned ordinal, unsigned seq);   /* the integrator defines all three hooks. Called before each re-issued call (ordinal = index among depth-0 records) */
+extern "C" void d9impl_bind(unsigned id, void *p);                   /* called whenever a recorded object id is bound to a live pointer */
+extern "C" uintptr_t d9impl_ohandle(unsigned token);                  /* the raw value (HWND, IUnknown*, ...) of an ohandle token; the same token always gives the same value */
 static inline float d9r_f(uint64_t u) { uint32_t b = (uint32_t)u; float f; memcpy(&f, &b, 4); return f; }
 #endif
