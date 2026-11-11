@@ -70,13 +70,40 @@ def guest_flags(fn):
         if x.id in BRANCH and i not in fn.ext and x.operands and x.operands[-1].type == K.ARM64_OP_IMM and x.operands[-1].imm in idx: succ[i].append(idx[x.operands[-1].imm])
         uncond = (x.id == K.ARM64_INS_B and x.cc in (K.ARM64_CC_INVALID, K.ARM64_CC_AL)) or x.id in ids('RET', 'BR')
         if i + 1 < n and not uncond: succ[i].append(i + 1)
-    inn = [None] * n; inn[0] = frozenset([CPU]); work = [0]
+    # Spill slots: a host register spilled to [sp, #k] and reloaded keeps its status (host or not) when no instruction can have written the slot in between. State = registers
+    # (ints) and slots (('s', k)). A slot dies when a store overlaps it or sp changes (writeback / sub / add sp). The address of the frame is taken by any other read of sp
+    # (add x, sp, #t: the callee may write [t, ...), so slots >= t are not tracked at all; `mov x29, sp` followed by a use of x29 other than stp/ldp x29,x30: every slot).
+    SPR = (K.ARM64_REG_SP, K.ARM64_REG_WSP); taken = 1 << 30
+    fpuse = any(x.id not in (ids('STP', 'LDP')) and K.ARM64_REG_X29 in x.regs_access()[0] for x in fn)
+    for x in fn:
+        if x.id in LDS | STS: continue
+        rd, wr = x.regs_access()
+        if any(r in SPR for r in rd):
+            if any(r in SPR for r in wr) or (x.id == K.ARM64_INS_MOV and x.operands and x.operands[0].type == K.ARM64_OP_REG and x.operands[0].reg == K.ARM64_REG_X29 and not fpuse): continue
+            taken = min(taken, x.operands[-1].imm if x.id == K.ARM64_INS_ADD and x.operands[-1].type == K.ARM64_OP_IMM else 0)
+    def slots(x):
+        """-> (list of [offset, size] of an sp-based memory access of x, the data registers) or None"""
+        m = [o.mem for o in x.operands if o.type == K.ARM64_OP_MEM]
+        if not m or m[0].base not in SPR: return None
+        rg = [o.reg for o in x.operands if o.type == K.ARM64_OP_REG]
+        sz = 8 if x.reg_name(rg[0])[0] == 'x' else 4
+        return [(m[0].disp + sz * k, sz) for k in range(len(rg))], [GPR.get(r) for r in rg]
     def tf(i, st):
         x = fn[i]
-        if x.id in ids('BL', 'BLR'): return st & {CPU}
+        if x.id in ids('BL', 'BLR'): return frozenset(e for e in st if isinstance(e, tuple) or 19 <= e <= 28)      # AAPCS: a call preserves x19..x28 (x27 = cpu pointer), spill slots are the caller's
         rd, wr = x.regs_access(); wr = {GPR[r] for r in wr if r in GPR}; out = set(st) - wr
+        sl = slots(x) if x.id in LDS | STS else None
+        if x.writeback or any(r in SPR for r in x.regs_access()[1]): out = {e for e in out if not isinstance(e, tuple)}
+        elif sl and x.id in STS:
+            out = {e for e in out if not (isinstance(e, tuple) and any(e[1] < o + z and o < e[1] + e[2] for o, z in sl[0]))}
+            for (o, z), r in zip(sl[0], sl[1]):
+                if r in st and o < taken: out.add(('s', o, z))
+        elif sl and x.id in LDS:
+            for (o, z), r in zip(sl[0], sl[1]):
+                if ('s', o, z) in st and r is not None: out.add(r)
         if x.id == K.ARM64_INS_ADRP or (x.id in ids('MOV', 'ADD', 'SUB', 'ORR') and any(GPR.get(r) in st for r in rd)): out |= wr
         return frozenset(out)
+    inn = [None] * n; inn[0] = frozenset([CPU]); work = [0]
     while work:
         i = work.pop(); o = tf(i, inn[i])
         for j in succ[i]:
@@ -98,7 +125,17 @@ def scan(fn):
     `dmb ishld` (or ish) after it, a store `dmb ishst` (or ish) before it, with no other guest access and no branch between), xchg loops without `dmb ish` right
     after their stlxr, alignment checks (tst + conditional branch guarding an acquire/release access), calls to external symbols by name"""
     g = guest_flags(fn); n = len(fn)
-    r = dict(total=n, ldar=0, stlr=0, ldaxr=0, stlxr=0, ishld=0, ishst=0, ish=0, plain_ld=0, plain_st=0, uncovered=[], xchg_uncovered=0, aligncheck=0, calls=[])
+    # split-lock windows: `bl fnvl_world_stop` ... `bl fnvl_world_resume`, straight-line (no branch, call, return, acquire/release access or exclusive between) with `dmb ish`
+    # as the last barrier before the resume call; windows = [(stop index, resume index, guest loads, guest stores)]. Every guest access inside a window is covered by the world stop (all other threads are stopped; rt/fnvl_mem.h contract).
+    win = []; bad_win = 0; inwin = [False] * n
+    for i, x in enumerate(fn):
+        if x.id == K.ARM64_INS_BL and fn.ext.get(i) == 'fnvl_world_stop':
+            j = next((j for j in range(i + 1, n) if fn[j].id in BRANCH | ids('RET', 'BR', 'BL', 'BLR') or fn[j].id in ACQREL), None)
+            ok = j is not None and fn[j].id == K.ARM64_INS_BL and fn.ext.get(j) == 'fnvl_world_resume' and dmb(fn[j - 1]) == 'ish' and any(g[k] for k in range(i + 1, j))
+            win.append((i, j, sum(1 for k in range(i + 1, j) if g[k] and fn[k].id in LDS), sum(1 for k in range(i + 1, j) if g[k] and fn[k].id in STS)) if ok else None); bad_win += not ok
+            if ok:
+                for k in range(i + 1, j): inwin[k] = True
+    r = dict(total=n, windows=[w for w in win if w], bad_windows=bad_win, stops=sum(1 for i in fn.ext if fn.ext[i] == 'fnvl_world_stop'), resumes=sum(1 for i in fn.ext if fn.ext[i] == 'fnvl_world_resume'), ldar=0, stlr=0, ldaxr=0, stlxr=0, ishld=0, ishst=0, ish=0, plain_ld=0, plain_st=0, uncovered=[], xchg_uncovered=0, aligncheck=0, calls=[])
     for i, x in enumerate(fn):
         k = dmb(x)
         if x.id in LDAR: r['ldar'] += 1
@@ -109,11 +146,16 @@ def scan(fn):
             r['xchg_uncovered'] += 0 if any(dmb(y) == 'ish' for y in fn[i + 1:i + 6]) else 1      # stlxr; cbnz [; b.ne of a CAS retry]; dmb ish
         elif k: r[k] += 1
         elif x.id == K.ARM64_INS_BL and i in fn.ext: r['calls'].append(fn.ext[i])
-        if x.id == K.ARM64_INS_TST and i + 1 < n and fn[i + 1].id == K.ARM64_INS_B and fn[i + 1].cc != K.ARM64_CC_INVALID:
-            tgt = fn[i + 1].operands[-1].imm
-            near = fn[i + 2:i + 5] + [y for y in fn if tgt <= y.address < tgt + 12]     # the fall-through side or the branch target side
+        if x.id in ids('TBZ', 'TBNZ'):                  # a one-bit test (width 2) is a single tbnz
+            tgt = x.operands[-1].imm; near = fn[i + 1:i + 4] + [y for y in fn if tgt <= y.address < tgt + 12]
             r['aligncheck'] += any(y.id in ACQREL for y in near)
-        if g[i]:
+        if x.id == K.ARM64_INS_TST:                    # the conditional branch of the test may be scheduled a few instructions after it
+            j = next((j for j in range(i + 1, min(n, i + 12)) if fn[j].id == K.ARM64_INS_B and fn[j].cc != K.ARM64_CC_INVALID), None)
+            if j is not None:
+                tgt = fn[j].operands[-1].imm
+                near = fn[j + 1:j + 4] + [y for y in fn if tgt <= y.address < tgt + 12]     # the fall-through side or the branch target side
+                r['aligncheck'] += any(y.id in ACQREL for y in near)
+        if g[i] and not inwin[i]:
             ld = x.id in LDS; r['plain_ld' if ld else 'plain_st'] += 1; cov = False
             for j in (range(i + 1, n) if ld else range(i - 1, -1, -1)):
                 y = fn[j]

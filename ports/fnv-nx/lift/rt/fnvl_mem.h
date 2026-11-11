@@ -12,9 +12,21 @@
    which the lifter already emits as separate statements).
    Class 2 (a LOCK-prefixed RMW or xchg on a non-plain location, fnvlift/memclass.py): the lifter emits ONE __atomic_* operation (seq_cst, `dmb ish`) whose old
    value is FNVL_LK, then the plain handler text with `enum { FNVL_R9 = 2 }`: its read of the operand is FNVL_LK, its store was done by the atomic operation.
-   XCHG8A/16A/32A(addr, v): x86 xchg with a memory operand (implicitly locked, a full barrier) on an address PROVED naturally aligned (const_address in
-   fnvlift/memclass.py): __atomic_exchange_n (ldaxr/stlxr loop) followed by `dmb ish` (lead decision: the loop alone does not order an earlier
-   `dmb ishst; str` before a later plain `ldr; dmb ishld`). No run-time alignment test: an address not proved aligned is a lift error. */
+   LOCK RMW / xchg-mem on ANY address (x86: atomic with respect to every other memory access of every thread, aligned or split), rule decided with L1:
+     (i)  address = 0 mod width (width 1: always; statically PROVED by const_address in fnvlift/memclass.py: no run-time test, else one `tst; b.ne`):
+          one __atomic_* operation (seq_cst: ldaxr/stlxr loop, build with -mno-outline-atomics) followed by `dmb ish`;
+     (ii) otherwise the SPLIT-LOCK PATH, a full second path selected by machine state (not a fallback after a failure):
+          fnvl_world_stop(); plain unaligned load, modify, plain unaligned store; `dmb ish`; fnvl_world_resume().
+     (i) and (ii) compose: while every other guest thread is suspended no other guest access interleaves with (ii); a suspended thread that was inside its own
+     ldaxr/stlxr loop loses its exclusive reservation through the store of (ii) and retries.
+   CONTRACT of fnvl_world_stop / fnvl_world_resume (implemented by the guest-thread runtime: rt + platform layer, e.g. Horizon svcSetThreadActivity, emulator service):
+     - stop: on return, every OTHER guest thread is either outside any guest memory access or suspended at an instruction boundary of host code, and the stores
+       it performed before are visible to the caller (the callee ends with `dmb ish`). Host threads that never touch guest memory need not stop.
+       Reentrancy: ONE global lock is taken in stop and released in resume; a second thread that wants to stop blocks inside stop (and may itself be suspended there
+       by the first); the lock is not recursive and the caller never nests stop calls.
+     - resume: makes the caller's stores visible (`dmb ish` first), releases the global lock, resumes the suspended threads.
+     - the caller makes no call and takes no lock between stop and resume (the window is the plain RMW and one `dmb ish`).
+     - a single-thread world (the test harnesses) implements both as an empty body. */
 #ifndef FNVL_MEM_H
 #define FNVL_MEM_H
 #define FNVL_AI __attribute__((always_inline)) inline
@@ -90,7 +102,56 @@ template<class G, int C> FNVL_AI decltype(auto) fnvl_m(unsigned long p, u64 lk) 
 #define MF32(a) fnvl_m<FNVL_TF32, FNVL_R9>(P(a), FNVL_LK)
 #define MF64(a) fnvl_m<FNVL_TF64, FNVL_R9>(P(a), FNVL_LK)
 #define MX(a) fnvl_m<FNVL_TX, FNVL_R9>(P(a), FNVL_LK)
-static FNVL_AI u32 XCHG8A(u32 a, u32 v) { u8 r = __atomic_exchange_n((u8*)P(a), (u8)v, __ATOMIC_SEQ_CST); FNVL_DMB(ish); return r; }
-static FNVL_AI u32 XCHG16A(u32 a, u32 v) { u16 r = __atomic_exchange_n((u16*)P(a), (u16)v, __ATOMIC_SEQ_CST); FNVL_DMB(ish); return r; }
-static FNVL_AI u32 XCHG32A(u32 a, u32 v) { u32 r = __atomic_exchange_n((u32*)P(a), v, __ATOMIC_SEQ_CST); FNVL_DMB(ish); return r; }
+extern "C" void fnvl_world_stop(void);
+extern "C" void fnvl_world_resume(void);
+enum { FNVL_ADD, FNVL_SUB, FNVL_AND, FNVL_OR, FNVL_XOR, FNVL_XCHG };
+/* a: guest address; PROVEN: statically proved = 0 mod sizeof(U) (the run-time test and path (ii) are compiled out). -> old value */
+template<class U> FNVL_AI bool fnvl_al(u32 a) { return sizeof(U) == 1 || (a & (sizeof(U) - 1)) == 0; }
+template<class U, int OP, bool PROVEN> FNVL_AI U fnvl_rmw(u32 a, U v) {
+  typedef U __attribute__((may_alias)) N; typedef typename FNVL_UA<U>::A A; U o;
+  if (PROVEN || __builtin_expect(fnvl_al<U>(a), 1)) {
+    N* p = (N*)P(a);
+    if (OP == FNVL_ADD) o = __atomic_fetch_add(p, v, __ATOMIC_SEQ_CST);
+    else if (OP == FNVL_SUB) o = __atomic_fetch_sub(p, v, __ATOMIC_SEQ_CST);
+    else if (OP == FNVL_AND) o = __atomic_fetch_and(p, v, __ATOMIC_SEQ_CST);
+    else if (OP == FNVL_OR) o = __atomic_fetch_or(p, v, __ATOMIC_SEQ_CST);
+    else if (OP == FNVL_XOR) o = __atomic_fetch_xor(p, v, __ATOMIC_SEQ_CST);
+    else o = __atomic_exchange_n(p, v, __ATOMIC_SEQ_CST);
+    FNVL_DMB(ish);
+  } else {
+    fnvl_world_stop();
+    A* p = (A*)P(a); o = *p;
+    *p = (U)(OP == FNVL_ADD ? o + v : OP == FNVL_SUB ? o - v : OP == FNVL_AND ? o & v : OP == FNVL_OR ? o | v : OP == FNVL_XOR ? o ^ v : v);
+    FNVL_DMB(ish);
+    fnvl_world_resume();
+  }
+  return o;
+}
+/* compare-exchange: stores d when the old value equals e, else the old value (x86 always writes); -> old value */
+template<class U, bool PROVEN> FNVL_AI U fnvl_cas(u32 a, U e, U d) {
+  typedef U __attribute__((may_alias)) N; typedef typename FNVL_UA<U>::A A;
+  if (PROVEN || __builtin_expect(fnvl_al<U>(a), 1)) {
+    __atomic_compare_exchange_n((N*)P(a), &e, d, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); FNVL_DMB(ish); return e;
+  }
+  fnvl_world_stop();
+  A* p = (A*)P(a); U o = *p; *p = o == e ? d : o;
+  FNVL_DMB(ish);
+  fnvl_world_resume();
+  return o;
+}
+/* any other RMW (adc sbb neg): f(old) -> new, a pure function of the old value */
+template<class U, bool PROVEN, class F> FNVL_AI U fnvl_rmwf(u32 a, F f) {
+  typedef U __attribute__((may_alias)) N; typedef typename FNVL_UA<U>::A A; U o;
+  if (PROVEN || __builtin_expect(fnvl_al<U>(a), 1)) {
+    N* p = (N*)P(a); o = __atomic_load_n(p, __ATOMIC_SEQ_CST);
+    while (!__atomic_compare_exchange_n(p, &o, f(o), 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST));
+    FNVL_DMB(ish);
+  } else {
+    fnvl_world_stop();
+    A* p = (A*)P(a); o = *p; *p = f(o);
+    FNVL_DMB(ish);
+    fnvl_world_resume();
+  }
+  return o;
+}
 #endif

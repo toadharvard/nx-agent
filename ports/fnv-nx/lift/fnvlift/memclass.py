@@ -123,60 +123,63 @@ def aligned(cx, ins, op):
 
 
 # ---- atomic forms ----
-_FETCH = {'add': 'add', 'sub': 'sub', 'and': 'and', 'or': 'or', 'xor': 'xor', 'xadd': 'add'}
-_CAS = {'adc': '+SRC+cf', 'sbb': '-SRC-cf', 'neg': None}
-_BT = {'bts': ('or', '%s'), 'btr': ('and', '~%s'), 'btc': ('xor', '%s')}
+# Rule (lead decision, closes the class "LOCK / xchg at any address"): x86 makes a LOCKed RMW (xchg with memory locks implicitly) atomic against every other access of
+# every thread, aligned or split. Path (i) address = 0 mod width: one __atomic_* operation + `dmb ish`; path (ii) otherwise: fnvl_world_stop(); plain RMW; `dmb ish`;
+# fnvl_world_resume() (rt/fnvl_mem.h has the contract). The path is chosen at run time by the address unless const_address PROVES it aligned (then (ii) is not emitted).
+# bt/bts/btr/btc with a register bit offset address the dword (word) at ea + (idx >> log2(bits))*bytes: that effective address is computed first, then the same two paths.
+_FETCH = {'add': 'FNVL_ADD', 'sub': 'FNVL_SUB', 'and': 'FNVL_AND', 'or': 'FNVL_OR', 'xor': 'FNVL_XOR', 'xadd': 'FNVL_ADD'}
+_CAS = {'adc': '(u)(o+(u)(SRC)+cf)', 'sbb': '(u)(o-(u)(SRC)-cf)', 'neg': '(u)(0-o)'}
+_BT = {'bts': ('FNVL_OR', '%s'), 'btr': ('FNVL_AND', '~%s'), 'btc': ('FNVL_XOR', '%s')}
+LOCK_FORMS = frozenset(_FETCH) | frozenset(_CAS) | frozenset(_BT) | {'inc', 'dec', 'not', 'cmpxchg', 'cmpxchg8b'}
 
 
 def _xchg(cx, ins):
-    from .core import Unsupported
-    """xchg r, m -> C text, or None when the instruction has no memory operand. The location must be proved aligned."""
+    """xchg r, m -> C text, or None when the instruction has no memory operand"""
     ops = cx.ops
     mi = [i for i, o in enumerate(ops) if o.type == X.X86_OP_MEM]
     if not mi:
         return None
     m, r = ops[mi[0]], ops[1 - mi[0]]
-    if not aligned(cx, ins, m):
-        raise Unsupported('xchg-mem: alignment not proven at 0x%x' % cx.a)
     s = m.size * 8
-    return '{ u32 t1=%s; u32 t0=XCHG%dA(%s,t1); %s }' % (cx.rd(ins, r), s, cx.ea(ins, m), cx.wr(ins, r, 't0'))
+    return '{ u32 t1=%s; u32 t0=fnvl_rmw<u%d,FNVL_XCHG,%s>(%s,(u%d)t1); %s }' % (cx.rd(ins, r), s, 'true' if aligned(cx, ins, m) else 'false', cx.ea(ins, m), s, cx.wr(ins, r, 't0'))
 
 
 def _lock(cx, ins, L):
-    from .core import Unsupported
-    """lock-prefixed RMW (memory destination ops[0]) -> the lines: one atomic operation + dmb ish, then the handler's own text in class 2"""
+    """lock-prefixed RMW (memory destination ops[0]) -> the lines: the operation on both paths (old value = FNVL_LK), then the handler's own text in class 2"""
     ops, mn = cx.ops, cx.m
     m = ops[0]
     n = m.size * 8
-    if mn in _BT and ops[1].type != X.X86_OP_IMM:
-        raise Unsupported('lock %s: bit offset in a register moves the address, alignment not proven at 0x%x' % (mn, cx.a))
-    if not aligned(cx, ins, m):
-        raise Unsupported('lock %s: alignment not proven at 0x%x' % (mn, cx.a))
     ty = 'u%d' % n
-    p = '(%s*)P(%s)' % (ty, cx.ea(ins, m))
-    src = lambda: '(%s)(%s)' % (ty, cx.rd(ins, ops[1], m.size))
-    sc = '__ATOMIC_SEQ_CST'
+    pre = ''                                                  # declarations of the effective address when it is not the operand's own
+    ea = cx.ea(ins, m)
+    pv = aligned(cx, ins, m)
+    if mn in _BT and ops[1].type != X.X86_OP_IMM:             # bit-string addressing (f_int.bitstr): the register index selects the unit
+        sh = {16: 4, 32: 5}[n]
+        pre = 's32 FNVL_I=(s32)(s%d)%s; ' % (n, cx.rd(ins, ops[1]))
+        ea = '(%s+(u32)((FNVL_I>>%d)*%d))' % (ea, sh, n // 8)
+        bit = '((%s)1<<(FNVL_I&%d))' % (ty, n - 1)
+        pv = False
+    elif mn in _BT:
+        bit = '((%s)1<<((%s)(%s)&%d))' % (ty, ty, cx.rd(ins, ops[1], m.size), n - 1)
+    src = '(%s)(%s)' % (ty, cx.rd(ins, ops[1], m.size)) if len(ops) > 1 else None
+    pr = 'true' if pv else 'false'
     if mn in _FETCH:
-        e = '__atomic_fetch_%s(%s,%s,%s)' % (_FETCH[mn], p, src(), sc)
+        e = 'fnvl_rmw<%s,%s,%s>(FNVL_AD,%s)' % (ty, _FETCH[mn], pr, src)
     elif mn in ('inc', 'dec'):
-        e = '__atomic_fetch_%s(%s,1,%s)' % ('add' if mn == 'inc' else 'sub', p, sc)
+        e = 'fnvl_rmw<%s,%s,%s>(FNVL_AD,1)' % (ty, 'FNVL_ADD' if mn == 'inc' else 'FNVL_SUB', pr)
     elif mn == 'not':
-        e = '__atomic_fetch_xor(%s,(%s)~0,%s)' % (p, ty, sc)
+        e = 'fnvl_rmw<%s,FNVL_XOR,%s>(FNVL_AD,(%s)~0)' % (ty, pr, ty)
     elif mn in _BT:
         op, f = _BT[mn]
-        e = '__atomic_fetch_%s(%s,(%s)(%s),%s)' % (op, p, ty, f % ('((%s)1<<(%s&%d))' % (ty, src(), n - 1)), sc)
+        e = 'fnvl_rmw<%s,%s,%s>(FNVL_AD,(%s)(%s))' % (ty, op, pr, ty, f % bit)
     elif mn == 'cmpxchg':
-        a = {8: '(eax&0xffu)', 16: '(eax&0xffffu)', 32: 'eax'}[n]
-        return ['{ enum { FNVL_R9 = 2 }; %s FNVL_LK = (%s)%s; __atomic_compare_exchange_n(%s,&FNVL_LK,%s,0,%s,%s); FNVL_DMB(ish);' % (ty, ty, a, p, src(), sc, sc)] + L + ['}']
+        e = 'fnvl_cas<%s,%s>(FNVL_AD,(%s)eax,%s)' % (ty, pr, ty, src)
     elif mn == 'cmpxchg8b':
-        return ['{ enum { FNVL_R9 = 2 }; u64 FNVL_LK = ((u64)edx<<32)|eax; __atomic_compare_exchange_n((u64*)P(%s),&FNVL_LK,((u64)ecx<<32)|ebx,0,%s,%s); FNVL_DMB(ish);' % (cx.ea(ins, m), sc, sc)] + L + ['}']
-    elif mn in _CAS:
-        x = _CAS[mn]
-        x = '(%s)(0-FNVL_LK)' % ty if x is None else '(%s)(FNVL_LK%s)' % (ty, x.replace('SRC', src()))
-        return ['{ enum { FNVL_R9 = 2 }; %s *lkp = %s; %s FNVL_LK = __atomic_load_n(lkp, __ATOMIC_SEQ_CST); while (!__atomic_compare_exchange_n(lkp,&FNVL_LK,%s,0,%s,%s)); FNVL_DMB(ish);' % (ty, p, ty, x, sc, sc)] + L + ['}']
+        e = 'fnvl_cas<u64,%s>(FNVL_AD,((u64)edx<<32)|eax,((u64)ecx<<32)|ebx)' % pr
+        ty = 'u64'
     else:
-        raise Unsupported('lock %s: no atomic form' % mn)
-    return ['{ enum { FNVL_R9 = 2 }; %s FNVL_LK = %s; FNVL_DMB(ish);' % (ty, e)] + L + ['}']
+        e = 'fnvl_rmwf<%s,%s>(FNVL_AD,[&](%s o){ return %s; })' % (ty, pr, ty, _CAS[mn].replace('(u)', '(%s)' % ty).replace('SRC', cx.rd(ins, ops[1], m.size) if len(ops) > 1 else '0'))
+    return ['{ enum { FNVL_R9 = 2 }; %su32 FNVL_AD = %s; %s FNVL_LK = %s;' % (pre, ea, ty, e)] + L + ['}']
 
 
 def apply(cx, ins, n0, mc=None):
@@ -192,5 +195,6 @@ def apply(cx, ins, n0, mc=None):
         if t is not None:
             return [t]
     elif X.X86_PREFIX_LOCK in ins.prefix and f_sys.lock_ok(ins, cx.m):
+        assert cx.m in LOCK_FORMS, cx.m                  # f_sys.LOCKABLE minus xchg: the table is total
         return _lock(cx, ins, L)
     return L
