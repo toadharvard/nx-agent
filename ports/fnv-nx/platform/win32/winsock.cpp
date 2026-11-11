@@ -367,8 +367,7 @@ extern "C" UINT_PTR fnvnx_ws2_socket(int af, int type, int proto)
     if (proto == 0) hp = 0; else if (proto == 6) hp = IPPROTO_TCP; else if (proto == 17) hp = IPPROTO_UDP;
     else { SetLastError(10043); return ~(UINT_PTR)0; }
     /* type/protocol pairing, decided before the host call: SOCK_STREAM takes 0 or IPPROTO_TCP (6), SOCK_DGRAM takes 0 or
-       IPPROTO_UDP (17); any other pairing is WSAEPROTONOSUPPORT (10043). Sources: Windows documentation of socket()
-       (WSAEPROTONOSUPPORT, "the specified protocol is not supported"); Wine 9.0 dlls/ws2_32/tests/sock.c test_WSASocket
+       IPPROTO_UDP (17); any other pairing is WSAEPROTONOSUPPORT (10043). Sources: Wine 9.0 dlls/ws2_32/tests/sock.c test_WSASocket
        (AF_INET,SOCK_STREAM,IPPROTO_UDP and SOCK_DGRAM,IPPROTO_TCP both expect WSAEPROTONOSUPPORT) and server/sock.c
        init_socket, whose host EPROTONOSUPPORT maps to WSAEPROTONOSUPPORT (server/sock.c sock_get_error). */
     if (!(proto == 0 || (type == 1 && proto == 6) || (type == 2 && proto == 17))) { SetLastError(10043); return ~(UINT_PTR)0; }
