@@ -97,7 +97,7 @@ HRESULT NxChainCore::present(const RECT* s, const RECT* dr, void* ov, DWORD flag
 }
 HRESULT NxChainCore::backbuffer(UINT i, IDirect3DSurface9** out) {   // backbuffer type ignored by native (Wine comment); the out pointer is untouched on failure (test_swapchain)
     if (!out || i >= nbb) return INV;
-    IDirect3DSurface9* s = static_cast<IDirect3DSurface9*>(static_cast<NxSurface9*>(bb[i])); s->AddRef(); *out = s; return D3D_OK;
+    IDirect3DSurface9* s = static_cast<IDirect3DSurface9*>(bb[i]->self); s->AddRef(); *out = s; return D3D_OK;   // `self` = the object's interface (obj.h nx_obj_init): no pointer adjustment, so no null path for the compiler to turn into a trap
 }
 HRESULT NxChainCore::frontbuffer_data(IDirect3DSurface9* dst) {
     NxObj* o = nx_obj_of(dst); if (!o || o->ci->rtype != D3DRTYPE_SURFACE) return INV;

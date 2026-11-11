@@ -164,7 +164,7 @@ MUTS = [
     ("d", "dev/ffp_prog.cpp", "if (!f->ps[flat]) { uint32_t id", "if (true) { uint32_t id"),
     ("d", "dev/ffp_dev.cpp", "nxd3d_gpu_call(NXGPU_FN_SHADER_DESTROY, a, 1); nx_state_forget_shader(id);", "nx_state_forget_shader(id);"),
     ("d", "dev/ffp_dev.cpp", "if (d->getPrivateData(kRec, &c, &sz) == D3D_OK) { c->Release(); return c; }", "if (false) { c->Release(); return c; }"),
-    ("c", "dev/ffp_prog.cpp", "return flat ? Blob{nx_ffp_glsl_vs_flat, nx_ffp_glsl_vs_flat_size} : Blob{nx_ffp_glsl_vs_smooth, nx_ffp_glsl_vs_smooth_size};", "return flat ? Blob{nx_ffp_glsl_vs_smooth, nx_ffp_glsl_vs_smooth_size} : Blob{nx_ffp_glsl_vs_flat, nx_ffp_glsl_vs_flat_size};"),
+    ("c", "dev/ffp_prog.cpp", "return flat ? Blob{nx_ffp_glsl_ps_flat, nx_ffp_glsl_ps_flat_size} : Blob{nx_ffp_glsl_ps_smooth, nx_ffp_glsl_ps_smooth_size};", "return flat ? Blob{nx_ffp_glsl_ps_smooth, nx_ffp_glsl_ps_smooth_size} : Blob{nx_ffp_glsl_ps_flat, nx_ffp_glsl_ps_flat_size};"),   # (the VS qualifier is not observable on GL: the pixel stage's qualifier decides)
     ("c", "ffp/d9_epilogue.glsl", "if (ps_drv_fog.x == 1.0) dk_f = dk_fog_in.x;", "if (ps_drv_fog.x == 1.0) dk_f = 1.0;"),
     ("c", "ffp/ffp.vert.glsl", "gl_Position = vec4(clip.x + posfix.x * clip.w,", "gl_Position = vec4(-clip.x + posfix.x * clip.w,"),
 ]

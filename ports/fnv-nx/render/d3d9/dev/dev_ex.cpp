@@ -1,8 +1,7 @@
 // D7: the Ex-only device methods that have a source. Sources: Wine 9.0 d3d9/device.c d3d9_device_{PresentEx, SetMaximumFrameLatency, GetMaximumFrameLatency, CheckDeviceState, GetDisplayModeEx} +
 // wined3d_device_{set,get}_max_frame_latency (0 = the default 3, > 30 INVALIDCALL at d3d9); Microsoft IDirect3DDevice9Ex pages for what Wine leaves E_NOTIMPL: GetGPUThreadPriority / SetGPUThreadPriority (range -7..7,
 // default 0), WaitForVBlank, CheckResourceResidency (a resource of OURS lives in memory the device manages: always resident). Env rows DEV.GetDisplayModeEx / GetMaximumFrameLatency / CheckDeviceState.
-// LEFT OUT (no source defines a result beyond Wine's E_NOTIMPL stub): SetConvolutionMonoKernel, ComposeRects, CreateOffscreenPlainSurfaceEx (res_create.cpp's decision), IDirect3DSwapChain9Ex::GetPresentStats (needs vblank
-// timestamps the backend ABI does not report). DECISIONS (doubt): GPU thread priority out of range = D3DERR_INVALIDCALL (MS page lists no code); WaitForVBlank on a swap chain index >= 1 = INVALIDCALL.
+// SetConvolutionMonoKernel, ComposeRects, IDirect3DSwapChain9Ex::GetPresentStats: m1_misc.cpp / m1_stats.cpp (M1). DECISIONS (doubt): GPU thread priority out of range = D3DERR_INVALIDCALL (MS page lists no code); WaitForVBlank on a swap chain index >= 1 = INVALIDCALL.
 #include "res_tex.h"
 #include "d9impl.gen.h"
 #include "dev_core.h"
