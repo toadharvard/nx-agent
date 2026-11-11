@@ -1,6 +1,6 @@
 # L1 CONTRACT status (lead: Opus 5.5, session started 2026-11-11 22:34Z)
 
-Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` f1059af7 (L5 w4r @0533f920 merged, tree e74c793f, cold 225 s), 25 gates, 0 product roots. Target: first frame in this budget (CLAUDE.md 08f6ea30).
+Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` 2b7897a5 (w4 @1fa25f8b merged, tree 7b488485, 240 s), 25 gates, 0 product roots. Target: first frame in this budget (CLAUDE.md 08f6ea30).
 
 ## Tasks
 
@@ -25,18 +25,20 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` f1059af7 (L5 w4r @
 | 3f | link root over admitted roots of mixed cxx_origin (L3b product ELF/tests) | w15 | claude/fnv-l1-contract-w15 | doing |
 | 3l | link.libs: archives inside declared externals (newlib libc.a), pulled members judged by linkstrict+objstub (L3b) | w15 | claude/fnv-l1-contract-w15 | doing |
 | 3m | include mounts at root-relative paths in one mirrored tree (`../` works; undeclared = missing) (L2, L5 platform root) | w16 | claude/fnv-l1-contract-w16 | queued (before 3x) |
-| 3g | guest library external fnvnx-a64-msvcmodel + sample platform build.json (L1 green 63511d69, 215.8 s, 51/51 selftests) | w4 | claude/fnv-l1-contract-w4 1fa25f8b | done; tightening: runtime external required, -nostdinc, -std=gnu++20 in guest_compiler.json |
+| 3g | guest library external fnvnx-a64-msvcmodel + sample platform build.json (L1 green 63511d69, 215.8 s, 51/51 selftests) | w4 | claude/fnv-l1-contract-w4 1fa25f8b | done (trunk 2b7897a5); next: runtime manifest == guest compiler (same GCC 13.3+msvcmodel, -fshort-wchar; 00e3d42a = GCC 15.2 libstdc++ red), L5 rebuilds tools/fnvnx-a64-msvcmodel13; runtime external required, -nostdinc |
 | 3h | guest system headers = linked libc's (fnvnx-a64-msvcmodel newlib+libnx, -nostdinc); glibc cross headers refused in guest roots (L2/L5 socket units) | w4 | claude/fnv-l1-contract-w4 | queued (after w8 rebase) |
 | 3x | fixture roots: per-unit gate + expected finding, never linked or in a universe (L3b forms/fpexact tests) | w16 | claude/fnv-l1-contract-w16 | queued |
 | 3w | recipe: -Werror=attributes required in guest roots (L3a); envcheck before any stage, env failures never cached (L2) | w14 | claude/fnv-l1-contract-w14 | queued |
 | 2b | budget in VERDICT.md, budget gate, delete second build paths | lead | - | blocked by 2 (numbers) |
 | 4a | assumptions gate over verify/ASSUMPTIONS.json (OWNER = 9; field `pending` removed) | session_01KmtZKQZb21XFPG5GMjmjUp | claude/fnv-l1-contract-w10 (from b9f7cf14) | doing: rebase on trunk, drop `pending` + 47 pending records, add L6A, selftests in pinned env |
 | 4b | w11 test-defined symbols ∩ product-root symbols = ∅ in objstub | predecessor's local agent -> moving to a cloud worker | claude/fnv-l1-contract-w11 001306f0 | doing: stage 2 (COMDAT, python AST rule, six L1 names to 0) |
-| 4c | w12 hostapi.h = services with a call site in product roots (rule), FNVNX_EXT_DK for L4 | session_01KmtZKUQGJi3gKcTZcB8sr6 | claude/fnv-l1-contract-w12 (from 6766d18a) | doing: L5 took 6766d18a (3bf9c4d6); delete zero-use slots console_flush, tz_offset_minutes, ACCESS_FAULT_HANDLER 10, main_loop/buttons_down (test-only), UNMAP_FIXED unless a loader unit calls it; numbers kept as holes; selftest diagnosis |
+| 4c | w12 (d161674, L1 red only selftests needing fnv-nx-build; next: no inline wrappers expanding FNVNX_PLAT_, delete SOCK 16..26,30 + markers, zero-use slots) hostapi.h = services with a call site in product roots (rule), FNVNX_EXT_DK for L4 | session_01KmtZKUQGJi3gKcTZcB8sr6 | claude/fnv-l1-contract-w12 (from 6766d18a) | doing: L5 took 6766d18a (3bf9c4d6); delete zero-use slots console_flush, tz_offset_minutes, ACCESS_FAULT_HANDLER 10, main_loop/buttons_down (test-only), UNMAP_FIXED unless a loader unit calls it; numbers kept as holes; selftest diagnosis |
+
+Rule (L1+L2): a header-only dir is not a root; its headers are certified as PP inputs of admitted units (shim/include L2, loader include).
 
 ## Missing REQUIRED_PRODUCT gates (blocker of goal step 1)
 
-Global count: 11 missing of 32 required at trunk f1059af7 (gates.json has 25; imports, machine merged). No product root can be admitted until 0.
+Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; imports, machine merged). No product root can be admitted until 0.
 
 | Gate | Owner | Branch | Commit | MERGER |
 |---|---|---|---|---|
