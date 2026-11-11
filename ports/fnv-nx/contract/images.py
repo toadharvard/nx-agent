@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
 """images - the guest image set of the contract gates (L1 CONTRACT): one pure function, no hand list.
 
-RULE: the set is the transitive closure of the PE import directories (normal and delay-load) starting from the exe, in modules.PE's
-reading. An imported dll name (iat.norm_dll: ASCII lowercase, ".dll" when it has no '.') is resolved case-insensitively against the
-files of the given directories (first directory in list order that has it; two files of one directory that differ only in case are an
-error). A dll found there is a GUEST IMAGE and is walked further; a dll not found there is a platform import (gate `imports`, owner L5)
-and is not an image. Assumption (stated, VERDICT.md): dynamic LoadLibrary names are facts of the `gpa` gate, not of this rule.
+RULE (dllkind.py, shared with modules.py): the set is the exe and the dlls reached from its import directories (normal and delay-load, in
+modules.PE's reading) through guest images only.  A dll name (iat.norm_dll) is resolved case-insensitively against the files of the
+given directories; it is a GUEST IMAGE iff it is found, has no bridge row, and its whole normal import closure resolves to guest images
+or bridge dlls.  A bridge dll (rows in bridge.tsv) and a found dll the declared machine cannot load are not images and are not walked
+further; a name that is neither found nor bridged is a platform import (gate `imports`, owner L5).  Dynamic LoadLibrary names are facts of
+the `gpa` gate, not of this rule (VERDICT.md).
 Order: the exe, then the images in discovery order (depth first, import directory then delay-load directory)."""
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import dllkind  # noqa: E402
 import iat  # noqa: E402
 import modules  # noqa: E402
 
 
-def image_set(exe_path, dirs):
-    """-> [(name as the file is called in lowercase, path)], the exe first (its name lowercased); raises modules.StageError."""
+def classify(exe_path, dirs, bridge=frozenset()):
+    """-> (order, kind): order = [(name, path)] of the exe's reached dlls that are found (guest images and declared ones, discovery order),
+    kind = {name: image | declared | bridge | platform}; raises modules.StageError.  BRIDGE: iterable of normalised dll names."""
     def read(p):
         with open(p, "rb") as f:
             return f.read()
@@ -30,19 +33,17 @@ def image_set(exe_path, dirs):
                 return os.path.join(d, hits[0])
         return None
 
-    out, seen = [(modules.lower(os.path.basename(exe_path)), exe_path)], set()
+    def imports_of(p):
+        pe = modules.PE(read(p), os.path.basename(p))
+        return [iat.norm_dll(d) for d, _ in pe.import_directory()], [iat.norm_dll(d) for d in pe.delay_dll_names()]
 
-    def walk(path):
-        pe = modules.PE(read(path), os.path.basename(path))
-        for raw in [d for d, _ in pe.import_directory()] + pe.delay_dll_names():
-            name = iat.norm_dll(raw)
-            if name in seen:
-                continue
-            seen.add(name)
-            p = find(name)
-            if p:
-                out.append((name, p))
-                walk(p)
-    seen.add(out[0][0])
-    walk(exe_path)
-    return out
+    n, d = imports_of(exe_path)
+    me = modules.lower(os.path.basename(exe_path))
+    order, kind = dllkind.classify((n, d), imports_of, find, frozenset(bridge), me)
+    return order, kind
+
+
+def image_set(exe_path, dirs, bridge=frozenset()):
+    """-> [(name as the file is called in lowercase, path)], the exe first (its name lowercased): the guest images."""
+    order, kind = classify(exe_path, dirs, bridge)
+    return [(modules.lower(os.path.basename(exe_path)), exe_path)] + [(n, p) for n, p in order if kind[n] == "image"]

@@ -44,6 +44,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "contract"))
 import gate_build  # noqa: E402
+import iat  # noqa: E402
 import images  # noqa: E402
 import gatefile  # noqa: E402
 import recipe  # noqa: E402
@@ -155,7 +156,10 @@ def py(script, *args):
 def images_of(doc, ext):
     """([(name, pe path, ranges path)] of the images that have range facts, [names without]) of contract.images.image_set."""
     have, lack = [], []
-    for name, path in images.image_set(P2(ext, doc["exe"]), [ext[n]["host"] for n in ("exe", "redist")]):
+    bridge = set()          # a bridge dll is never an image (contract/dllkind.py): the dlls with rows in the declared bridge.tsv
+    if doc.get("bridge"):
+        bridge = {r["dll"] for r in iat.bridge_rows(P2(ext, doc["bridge"]))[0]}
+    for name, path in images.image_set(P2(ext, doc["exe"]), [ext[n]["host"] for n in ("exe", "redist")], bridge):
         rel = doc["ranges"]["exe"] if name.endswith(".exe") else doc["ranges"]["module"] % name.rsplit(".", 1)[0]
         rg = P2(ext, rel)
         if os.path.isfile(rg):

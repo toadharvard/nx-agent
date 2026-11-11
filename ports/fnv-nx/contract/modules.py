@@ -35,6 +35,10 @@ Rules (each violated precondition is a stage error that lists everything it foun
             export), address at the assigned base (empty for a forwarder), forwarder (empty otherwise), ordinal; one row per
             (export, name) sorted by ordinal then name.  A named export is also reachable as #ordinal (iat.py).
 
+Kinds (dllkind.py, the one rule shared with images.py): a dll with bridge rows, or a found dll whose normal import closure needs a dll that is neither found nor
+bridged, is DECLARED: it gets no base and no row of modules.tsv, and is listed in modules_declared.tsv (name, kind bridge|unloadable, sha256, size, missing imports);
+its entries are served by bridge rows.  Only images are lifted modules.
+
 Outputs in OUT: modules.tsv (sorted by name: name, sha256, size, preferred base, assigned base, SizeOfImage, has TLS, entry rva, static,
 load index; hex for addresses), modules.c (`fnvnx_modules[]` + `fnvnx_module_count` for loader/src/modules.c), exports/<name>.tsv per module,
 iat.tsv (the exe's import slots through iat.py with these modules), imports/<name>.tsv per module (that module's own
@@ -49,6 +53,7 @@ import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import dllkind
 import gatefile
 import iat
 
@@ -281,7 +286,7 @@ def scan(dirs, system):
     return mods
 
 
-def closure(exe, system, mods):
+def closure(exe, system, mods, declared=frozenset()):
     """-> (static modules in init order, dependencies first; the rest sorted by name).  Every import of a STATIC module that
     is not a system dll must be a module of `mods` (all missing ones are listed); an on-demand module whose dll is
     missing simply has slots without provider (its LoadLibrary fails; listed in the import report)."""
@@ -290,7 +295,7 @@ def closure(exe, system, mods):
     def visit(dll_names):
         for raw in dll_names:
             name = iat.norm_dll(raw)
-            if name in system or name in seen:   # a module still being visited: the cycle edge is not followed
+            if name in system or name in declared or name in seen:   # a module still being visited: the cycle edge is not followed
                 continue
             if name not in mods:
                 missing.add(name)
@@ -345,7 +350,11 @@ def run(exe_path, bridge_path, dirs, out):
     brows, _ = iat.bridge_rows(bridge_path)
     bridge = [(r['dll'], r['name'], r['conv'], r['ordinal']) for r in brows]
     system = {r['dll'] for r in brows}
-    order = closure(exe, system, scan(dirs, system))
+    mods = scan(dirs, system)
+    me = lower(os.path.basename(exe_path))
+    image = dllkind.images_of({n: [iat.norm_dll(d) for d, _ in m.imports] for n, m in mods.items()}, system | {me})
+    declared_mods = {n: m for n, m in mods.items() if n not in image}   # found, no bridge row, the declared machine cannot load them
+    order = closure(exe, system, {n: m for n, m in mods.items() if n in image}, set(declared_mods))
     end = assign_bases(exe, order)
     os.makedirs(os.path.join(out, 'exports'), exist_ok=True)
     os.makedirs(os.path.join(out, 'imports'), exist_ok=True)
@@ -355,6 +364,17 @@ def run(exe_path, bridge_path, dirs, out):
             m.name, m.sha256, m.size, m.pe.base, m.base, m.pe.size_of_image, 1 if m.pe.dirs[9][1] else 0, m.pe.entry_rva,
             int(m.static), load_index.get(m.name, '')) for m in sorted(order, key=lambda m: m.name)))
     tsv(os.path.join(out, 'modules.c'), c_source(order))
+    bridged = []                  # bridge dlls that have a file: the platform serves them, nothing of the file is lifted
+    for n in sorted(system):
+        p = find_file(dirs, n)
+        if p:
+            with open(p, 'rb') as fh:
+                data = fh.read()
+            bridged.append((n, 'bridge', hashlib.sha256(data).hexdigest(), len(data), ''))
+    dec = bridged + [(n, 'unloadable', m.sha256, m.size, ','.join(sorted({iat.norm_dll(d) for d, _ in m.imports
+                                                                    if iat.norm_dll(d) not in system and iat.norm_dll(d) not in image})))
+                     for n, m in sorted(declared_mods.items())]
+    tsv(os.path.join(out, 'modules_declared.tsv'), '# name\tkind\tsha256\tsize\tmissing_imports\n' + ''.join('%s\t%s\t%s\t%d\t%s\n' % r for r in sorted(dec)))
     raw = {}
     for m in order:
         rows = m.pe.exports()
@@ -369,6 +389,7 @@ def run(exe_path, bridge_path, dirs, out):
     summary = ['modules %d: range 0x%08x..0x%08x' % (len(order), order and min(m.base for m in order) or 0, end)]
     summary += ['  %d %s base 0x%08x preferred 0x%08x size 0x%x relocs %d static %d' % (i, m.name, m.base, m.pe.base, m.pe.size_of_image, m.relocs, int(m.static))
                 for i, m in enumerate(order)]
+    summary += ['declared %s (%s) sha256 %s missing imports: %s' % (n, k, h[:12], miss or '-') for n, k, h, _, miss in sorted(dec)]
     summary.append('exe slots with a value %d of %d' % (len(rows), len(rows) + len(bad)))
     for b in bad:
         summary.append('exe slot %08x %s!%s: %s' % b)

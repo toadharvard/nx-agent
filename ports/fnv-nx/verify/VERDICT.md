@@ -151,7 +151,12 @@ The contract gates (class 8, plus the link-side `abs`, `disp`, `reach`, `reachli
 
 ## The guest image set
 
-Used by `gpa`, `reach`, `reachlink` (not an input of `contract_inputs.json`). `contract/images.py` derives it as the transitive closure of the normal and delay-load import directories from the exe, each dll name resolved case-insensitively against the files of the externals `exe` and `redist` (a dll found there is a guest image and is walked further; a dll not found is a platform import of gate `imports`, owner L5, not an image). Stated assumption: dynamic LoadLibrary names are facts of the `gpa` gate, not of this rule.
+Used by `gpa`, `reach`, `reachlink` (not an input of `contract_inputs.json`) and, through the same function, by `contract/modules.py` (the module table of the loader). The rule is `contract/dllkind.py`, one pure function with no named list. A dll name is resolved case-insensitively against the files of the externals `exe` and `redist` and against the rows of `bridge.tsv`:
+- **bridge**: the dll has bridge rows. The platform implements its entries. It is never a guest image, even when a file is found, and the walk does not continue through it.
+- **image** (lifted): found, no bridge row, and its whole normal import closure resolves to images or bridge dlls (the greatest such set; a delay-load import is bound at run time and does not decide it).
+- **declared**: found, no bridge row, not an image: the declared machine cannot load it, because its closure needs a dll that is neither found nor bridged. Its entries must be served by bridge rows, and a reached export without a bridge row is red, owner L5. The walk does not continue through it.
+- **platform**: neither found nor bridged; a platform import of gate `imports`, owner L5.
+The image set is the exe plus the images reached from its normal and delay-load import directories through images only. `modules.py` writes the images to `modules.tsv` (they alone get an address range) and the bridge and declared dlls to `modules_declared.tsv` (name, kind `bridge` or `unloadable`, sha256, size, missing imports). Facts of dynamic LoadLibrary names belong to the `gpa` gate, not to this rule.
 
 ## References of tests (class 10, gate `oracle`)
 
