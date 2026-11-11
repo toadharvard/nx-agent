@@ -48,7 +48,7 @@ def build(tmp, jobs=3):
 
 
 def server(out, backend=BACK):
-    srcs = sorted(os.path.join(backend, f) for f in os.listdir(backend) if f.startswith("gl4_") and f.endswith(".c")) + [os.path.join(ROOT, "tests", "l6", "copy", "server.c")]
+    srcs = sorted(os.path.join(backend, f) for f in os.listdir(backend) if (f.startswith("gl4_") or f == "nxgpu4_check.c") and f.endswith(".c")) + [os.path.join(ROOT, "tests", "l6", "copy", "server.c")]
     r = sh(["gcc", "-std=gnu11", "-O1", "-w", "-I", backend, *srcs, *xl.flags(), "-lEGL", "-lGL", "-lm", "-o", out])
     return r.stderr[-800:] if r.returncode else None
 

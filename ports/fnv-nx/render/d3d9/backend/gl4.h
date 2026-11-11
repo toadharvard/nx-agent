@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <GL/glcorearb.h>
 #include "nxgpu4.h"
+#include "nxgpu4_check.h"
 #include "nxgpu4_shader.h"
 #include "gl4_funcs.h"
 
@@ -39,8 +40,8 @@ size_t nxgl4_shim_glsl(const char* src, size_t n, uint32_t stage, char* out, siz
 /* ---- internal ----------------------------------------------------------------------------------------------- */
 #define GL4_MAX_MEM      4096
 #define GL4_MAX_SHADERS  4096
-#define GL4_MAX_STATES   4096
-#define GL4_MAX_LAYOUTS  256
+#define GL4_MAX_STATES   NXCHK_MAX_STATES
+#define GL4_MAX_LAYOUTS  NXCHK_MAX_LAYOUTS
 #define GL4_MAX_PROGRAMS 1024
 #define GL4_MAX_FBOS     64
 #define GL4_MAX_QUERIES  4096
@@ -65,8 +66,8 @@ typedef struct { GLuint sh; uint8_t stage, used; Gl4D3d* d3d; } Gl4Shader;
 typedef struct { uint16_t vs, ps; GLuint prog; uint8_t used; } Gl4Program;
 typedef struct { NxRenderState rs; uint16_t vs, ps, layout, prog; uint32_t epoch; uint8_t defined; } Gl4State;
 typedef struct { NxVtxLayout l; NxVtxLayout4 l4; GLuint vao; uint32_t gen; uint8_t defined, is4, stale; } Gl4Layout;
-typedef struct { uint32_t image, sub; } Gl4Tgt;               /* sub = level | layer << 16; image 0 = none */
-typedef struct { uint32_t nColor; Gl4Tgt c[4]; Gl4Tgt d; } Gl4Pass;   /* unused entries are zero (memcmp key) */
+typedef NxChkTgt Gl4Tgt;               /* sub = level | layer << 16; image 0 = none */
+typedef NxChkPass Gl4Pass;             /* unused entries are zero (memcmp key) */
 typedef struct { Gl4Pass key; GLuint fbo; } Gl4Fbo;
 typedef struct {   /* one vertex stream: a snapshot of the bound range, staged into buf when a draw needs it */
     uint8_t* data; uint32_t size, cap, stride, bindSeq, stagedSeq; uint64_t stagedSig;
@@ -103,9 +104,10 @@ typedef struct Gl4 {
 } Gl4;
 extern Gl4 g4;
 
-void gl4_err(const char* fmt, ...);
+#define gl4_err nxchk_err   /* the backend-neutral checks (nxgpu4_check.c) report through the same sink */
+const NxChkEnv* gl4_chk_env(void);   /* gl4_check.c: the neutral view of this backend (images, limits) */
 /* number of texels of an edge at a mip level */
-static inline uint32_t gl4_lvl(uint32_t v, uint32_t level) { v >>= level; return v ? v : 1u; }
+static inline uint32_t gl4_lvl(uint32_t v, uint32_t level) { return nxchk_lvl(v, level); }
 
 /* gl4_fmt.c: one entry per NxFormat (zero internal = not an NxFormat) */
 typedef struct {
@@ -144,8 +146,6 @@ void gl4_apply_state(const NxRenderState* rs, int force);
 void gl4_apply_stencil(uint64_t w1, uint32_t ref);   /* stencil funcs of both faces with the given reference */
 void gl4_neutral_state(void);                        /* known state for internal draws and blits; forces a re-apply */
 /* gl4_pass.c: render passes (NxOp_BeginPass v3 and BeginPass4) and clears */
-int gl4_pass_check(const Gl4Pass* p, uint32_t* w, uint32_t* h, uint32_t* samples);   /* 0 ok, else recorded error */
-int gl4_pass_parse4(const uint32_t* a, uint32_t argc, Gl4Pass* p);                     /* 0 ok */
 void gl4_op_begin_pass(const uint32_t* a, uint32_t argc);
 void gl4_op_begin_pass4(const uint32_t* a, uint32_t argc);
 void gl4_op_clear(const uint32_t* a, uint32_t argc);
@@ -153,7 +153,6 @@ void gl4_fbo_forget(uint32_t image);
 /* gl4_vtx.c: vertex layouts (v3 and v4) and vertex streams */
 void gl4_op_define_layout(const uint32_t* a, uint32_t argc);
 void gl4_op_define_layout4(const uint32_t* a, uint32_t argc);
-int gl4_layout4_check(const uint32_t* a, uint32_t argc);
 void gl4_op_bind_vtx(const uint32_t* a, uint32_t argc);      /* v3: stream 0, stride from the v3 layout */
 void gl4_op_bind_vtxn(const uint32_t* a, uint32_t argc);
 void gl4_bind_layout(uint32_t lay);

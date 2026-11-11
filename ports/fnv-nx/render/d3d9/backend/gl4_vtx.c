@@ -28,32 +28,31 @@
 #include <string.h>
 
 #define NEED(n, name) do { if (argc < (n)) { gl4_err(#name ": %u words, need %u", argc, (unsigned)(n)); return; } } while (0)
-#define L4WORDS (sizeof(NxVtxLayout4) / 4)
 
-typedef struct { GLint size; GLenum type; GLboolean norm; uint8_t bytes, fixw; } AttrFmt;
+typedef struct { GLint size; GLenum type; GLboolean norm; uint8_t fixw; } AttrFmt;
 
 static AttrFmt attr_fmt(uint32_t type) {
     switch ((enum NxAttrType4)type) {
-    case NxAttr4_Float1: return (AttrFmt){1, GL_FLOAT, GL_FALSE, 4, 0};
-    case NxAttr4_Float2: return (AttrFmt){2, GL_FLOAT, GL_FALSE, 8, 0};
-    case NxAttr4_Float3: return (AttrFmt){3, GL_FLOAT, GL_FALSE, 12, 0};
-    case NxAttr4_Float4: return (AttrFmt){4, GL_FLOAT, GL_FALSE, 16, 0};
-    case NxAttr4_D3DColor: return (AttrFmt){GL_BGRA, GL_UNSIGNED_BYTE, GL_TRUE, 4, 0};
-    case NxAttr4_UByte4: return (AttrFmt){4, GL_UNSIGNED_BYTE, GL_FALSE, 4, 0};
-    case NxAttr4_Short2: return (AttrFmt){2, GL_SHORT, GL_FALSE, 4, 0};
-    case NxAttr4_Short4: return (AttrFmt){4, GL_SHORT, GL_FALSE, 8, 0};
-    case NxAttr4_UByte4N: return (AttrFmt){4, GL_UNSIGNED_BYTE, GL_TRUE, 4, 0};
-    case NxAttr4_Short2N: return (AttrFmt){2, GL_SHORT, GL_TRUE, 4, 0};
-    case NxAttr4_Short4N: return (AttrFmt){4, GL_SHORT, GL_TRUE, 8, 0};
-    case NxAttr4_UShort2N: return (AttrFmt){2, GL_UNSIGNED_SHORT, GL_TRUE, 4, 0};
-    case NxAttr4_UShort4N: return (AttrFmt){4, GL_UNSIGNED_SHORT, GL_TRUE, 8, 0};
-    case NxAttr4_UDec3: return (AttrFmt){4, GL_UNSIGNED_INT_2_10_10_10_REV, GL_FALSE, 4, 1};
-    case NxAttr4_Dec3N: return (AttrFmt){4, GL_INT_2_10_10_10_REV, GL_TRUE, 4, 1};
-    case NxAttr4_Float16_2: return (AttrFmt){2, GL_HALF_FLOAT, GL_FALSE, 4, 0};
-    case NxAttr4_Float16_4: return (AttrFmt){4, GL_HALF_FLOAT, GL_FALSE, 8, 0};
+    case NxAttr4_Float1: return (AttrFmt){1, GL_FLOAT, GL_FALSE, 0};
+    case NxAttr4_Float2: return (AttrFmt){2, GL_FLOAT, GL_FALSE, 0};
+    case NxAttr4_Float3: return (AttrFmt){3, GL_FLOAT, GL_FALSE, 0};
+    case NxAttr4_Float4: return (AttrFmt){4, GL_FLOAT, GL_FALSE, 0};
+    case NxAttr4_D3DColor: return (AttrFmt){GL_BGRA, GL_UNSIGNED_BYTE, GL_TRUE, 0};
+    case NxAttr4_UByte4: return (AttrFmt){4, GL_UNSIGNED_BYTE, GL_FALSE, 0};
+    case NxAttr4_Short2: return (AttrFmt){2, GL_SHORT, GL_FALSE, 0};
+    case NxAttr4_Short4: return (AttrFmt){4, GL_SHORT, GL_FALSE, 0};
+    case NxAttr4_UByte4N: return (AttrFmt){4, GL_UNSIGNED_BYTE, GL_TRUE, 0};
+    case NxAttr4_Short2N: return (AttrFmt){2, GL_SHORT, GL_TRUE, 0};
+    case NxAttr4_Short4N: return (AttrFmt){4, GL_SHORT, GL_TRUE, 0};
+    case NxAttr4_UShort2N: return (AttrFmt){2, GL_UNSIGNED_SHORT, GL_TRUE, 0};
+    case NxAttr4_UShort4N: return (AttrFmt){4, GL_UNSIGNED_SHORT, GL_TRUE, 0};
+    case NxAttr4_UDec3: return (AttrFmt){4, GL_UNSIGNED_INT_2_10_10_10_REV, GL_FALSE, 1};
+    case NxAttr4_Dec3N: return (AttrFmt){4, GL_INT_2_10_10_10_REV, GL_TRUE, 1};
+    case NxAttr4_Float16_2: return (AttrFmt){2, GL_HALF_FLOAT, GL_FALSE, 0};
+    case NxAttr4_Float16_4: return (AttrFmt){4, GL_HALF_FLOAT, GL_FALSE, 0};
     case NxAttr4_Count: break;
     }
-    return (AttrFmt){0, 0, 0, 0, 0};   /* not a type: gl4_layout4_check refuses it */
+    return (AttrFmt){0, 0, 0, 0};   /* not a type: nxchk_layout4 refuses it */
 }
 
 /* ---- layouts ----------------------------------------------------------------------------------------------- */
@@ -65,30 +64,8 @@ void gl4_op_define_layout(const uint32_t* a, uint32_t argc) {
     l->is4 = 0; l->defined = 1; l->stale = 1; l->gen++;
 }
 
-int gl4_layout4_check(const uint32_t* a, uint32_t argc) {
-    uint32_t errs = g4.errCount;
-    if (argc < 1 + L4WORDS) { gl4_err("DefineLayout4: %u words, need %u", argc, (unsigned)(1 + L4WORDS)); return 1; }
-    if (!a[0] || a[0] > GL4_MAX_LAYOUTS) { gl4_err("DefineLayout4: id %u", a[0]); return 1; }
-    NxVtxLayout4 l;
-    memcpy(&l, a + 1, sizeof l);
-    if (l.attrCount > NX4_MAX_ATTRS || l.instanceStreams >> NX4_MAX_STREAMS) {
-        gl4_err("DefineLayout4 %u: %u attributes, instance streams 0x%x", a[0], l.attrCount, l.instanceStreams);
-        return 1;
-    }
-    uint32_t used = 0;
-    for (uint32_t i = 0; i < l.attrCount; i++) {
-        const NxVtxAttr4* at = &l.attr[i];
-        if (!attr_fmt(at->type).bytes || at->stream >= NX4_MAX_STREAMS || at->location >= NX4_MAX_ATTRS ||
-            (used >> at->location & 1) || at->offset > g4.maxAttrOffset ||
-            ((l.instanceStreams >> at->stream & 1) && !l.divisor[at->stream]))
-            gl4_err("DefineLayout4 %u: attribute %u (type %u stream %u location %u offset %u) is invalid", a[0], i, at->type, at->stream, at->location, at->offset);
-        used |= 1u << (at->location & 31);
-    }
-    return g4.errCount != errs;
-}
-
 void gl4_op_define_layout4(const uint32_t* a, uint32_t argc) {
-    if (gl4_layout4_check(a, argc)) return;
+    if (nxchk_layout4(gl4_chk_env(), a, argc)) return;
     Gl4Layout* l = &g4.lay[a[0]];
     memcpy(&l->l4, a + 1, sizeof l->l4);
     l->is4 = 1; l->defined = 1; l->stale = 1; l->gen++;
@@ -157,8 +134,7 @@ static void bind_stream(uint32_t stream, uint32_t block, uint32_t off, uint32_t 
 
 void gl4_op_bind_vtx(const uint32_t* a, uint32_t argc) { NEED(3, BindVtx); bind_stream(0, a[0], a[1], a[2], 0, 1); }
 void gl4_op_bind_vtxn(const uint32_t* a, uint32_t argc) {
-    NEED(5, BindVtxN);
-    if (a[0] >= NX4_MAX_STREAMS) { gl4_err("BindVtxN: stream %u", a[0]); return; }
+    if (nxchk_bind_vtxn(gl4_chk_env(), a, argc)) return;
     bind_stream(a[0], a[1], a[2], a[3], a[4], 0);
 }
 

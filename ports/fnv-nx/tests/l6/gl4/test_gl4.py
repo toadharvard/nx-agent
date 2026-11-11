@@ -36,7 +36,7 @@ def sh(cmd, **kw): return subprocess.run(cmd, capture_output=True, text=True, **
 
 
 def build(backend, out, defs=()):
-    srcs = sorted(os.path.join(backend, f) for f in os.listdir(backend) if f.startswith("gl4_") and f.endswith(".c"))
+    srcs = sorted(os.path.join(backend, f) for f in os.listdir(backend) if (f.startswith("gl4_") or f == "nxgpu4_check.c") and f.endswith(".c"))
     srcs += [os.path.join(HERE, t) for t in TESTS]
     r = sh(["gcc", "-std=c11", "-Wall", "-Werror", "-Werror=switch-enum", "-O1", *defs, "-I", backend, "-I", NXINC, "-I", HERE, "-I", INCDIR, *srcs, *xl.flags(), "-lEGL", "-lGL", "-lm", "-o", out])
     return r.returncode == 0, r.stderr[-1500:]
@@ -50,7 +50,7 @@ def run(exe, parts=PARTS):
 
 def source_gates():
     n = bad = 0
-    srcs = sorted(glob.glob(os.path.join(BACK, "gl4*.[ch]")) + [os.path.join(BACK, "nxgpu4.h")])
+    srcs = sorted(glob.glob(os.path.join(BACK, "gl4*.[ch]")) + [os.path.join(BACK, "nxgpu4.h")] + glob.glob(os.path.join(BACK, "nxgpu4_check.[ch]")))
     pending = "NXGL4_B2B_" + "PENDING"
     for p in srcs:
         text = open(p).read(); n += 3
@@ -146,14 +146,14 @@ MUTS = [  # (part that must catch it, file, old text (exactly once), replacement
     ("b", "gl4_image.c", "pitch < rb || need > a[10])", "pitch < rb || need > (1ull << 40))"),
     ("a", "gl4_image.c", "(uint64_t)b[0] + b[3] > lw ||", "(uint64_t)b[0] + b[3] >= lw ||"),
     ("j", "gl4_vtx.c", "word = (word & 0x3FFFFFFFu) | 0x40000000u;", "word = (word & 0x3FFFFFFFu);"),
-    ("j", "gl4_vtx.c", "case NxAttr4_D3DColor: return (AttrFmt){GL_BGRA, GL_UNSIGNED_BYTE, GL_TRUE, 4, 0};", "case NxAttr4_D3DColor: return (AttrFmt){4, GL_UNSIGNED_BYTE, GL_TRUE, 4, 0};"),
+    ("j", "gl4_vtx.c", "case NxAttr4_D3DColor: return (AttrFmt){GL_BGRA, GL_UNSIGNED_BYTE, GL_TRUE, 0};", "case NxAttr4_D3DColor: return (AttrFmt){4, GL_UNSIGNED_BYTE, GL_TRUE, 0};"),
     ("j", "gl4_vtx.c", "p_glVertexBindingDivisor(s, (l->l4.instanceStreams >> s & 1) ? l->l4.divisor[s] : 0);", "p_glVertexBindingDivisor(s, (l->l4.instanceStreams >> s & 1) ? 1 : 0);"),
     ("n", "gl4_scale.c", "(ivec2(gl_FragCoord.xy) - dst.xy) + 1) * src.zw)", "(ivec2(gl_FragCoord.xy) - dst.xy)) * src.zw)"),
     ("n", "gl4_scale.c", "p_glClearBufferiv(GL_STENCIL, 0, &zero);", "(void)zero;"),
     ("k", "gl4_query.c", "g4.qry[sl->ids[j]].acc += v;", "g4.qry[sl->ids[j]].acc = v;"),
     ("k", "gl4_query.c", "        if (!wait) return 1;\n", "        if (!wait) return 0;\n"),
     ("k", "gl4_query.c", "        slice_close();\n        q->active = 0; q->issued = 1;", "        q->active = 0; q->issued = 1;"),
-    ("i", "gl4_pass.c", "else if (tw != *w || th != *h || im->samples != *samples) {", "else if (tw != *w || th != *h) {"),
+    ("i", "nxgpu4_check.c", "else if (tw != *w || th != *h || im.samples != *samples) {", "else if (tw != *w || th != *h) {"),
     ("i", "gl4_pass.c", "p_glNamedFramebufferDrawBuffers(f, (GLsizei)p->nColor, bufs);", "p_glNamedFramebufferDrawBuffers(f, 1, bufs);"),
     ("i", "gl4_pass.c", "for (uint32_t i = 0; i < g4.passN; i++) { p_glColorMaski", "for (uint32_t i = 0; i < 1; i++) { p_glColorMaski"),
     ("l", "gl4_scale.c", "c.r = float(texelFetch(ramp, ivec2(i.r, 0), 0).r >> 8) / 255.0;", "c.r = float(texelFetch(ramp, ivec2(i.r, 0), 0).r >> 7) / 255.0;"),
