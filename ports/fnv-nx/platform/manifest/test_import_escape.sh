@@ -3,7 +3,7 @@
 # Exit non-zero on any wrong letter or any missing / unexpected row.
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd)
-FX=$HERE/escape_fixture
+FX=$HERE/../../platform_tools/escape_fixture
 W=${TMPDIR:-/tmp}/import_escape_test.$$
 mkdir -p "$W"
 trap 'rm -rf "$W"' EXIT

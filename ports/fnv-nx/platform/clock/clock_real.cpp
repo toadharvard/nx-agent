@@ -1,3 +1,6 @@
+/* Clock variant of the root (flags variant, not a second file list): this file is compiled in every build of the root; its body is the
+ * clock selected by the define FNVNX_CLOCK_VIRTUAL (absent = the product's real clock, present = the verification mode's virtual clocks). */
+#ifndef FNVNX_CLOCK_VIRTUAL
 /* clock_real.cpp - the product's clock (fnvnx_clock.h): the OS layer's monotonic, wall and zone clocks, unchanged in
  * behaviour from the platform before the clock interface existed. Threads, waits and messages carry no virtual time. */
 #include "../include/fnvnx_clock.h"
@@ -125,3 +128,4 @@ void clk_device_watch(const void *handle, int on) { (void)handle; (void)on; }
 void clk_reset(void) {}
 
 }
+#endif
