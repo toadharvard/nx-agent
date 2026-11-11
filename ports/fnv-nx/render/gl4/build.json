@@ -18,7 +18,8 @@
  },
  "include": [
   "ports/fnv-nx/render/gl4",
-  "ports/fnv-nx/render/backend"
+  "ports/fnv-nx/render/backend",
+  "ports/fnv-nx/render/shaders/translator/include"
  ],
  "units": "all",
  "link": {
@@ -30,7 +31,8 @@
    "libGL.so.1"
   ],
   "roots": [
-   "ports/fnv-nx/render/nxgpu@x86_64"
+   "ports/fnv-nx/render/nxgpu@x86_64",
+   "ports/fnv-nx/render/shaders/translator"
   ],
   "flags": []
  }
