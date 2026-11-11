@@ -3,3 +3,4 @@ synth.exe	0x00401000	RegOpenKeyExA	HKEY_LOCAL_MACHINE	Software\Bethesda Softwork
 synth.exe	0x00401020	RegQueryValueExA	HKEY_LOCAL_MACHINE	Software\Bethesda Softworks\FalloutNV	Installed Path	static	
 synth.exe	0x00401060	RegQueryValueExA	HKEY_CURRENT_USER	Control Panel\Synth	UndeclaredValue	static	
 synth.exe	0x00401090	RegQueryValueExA	dynamic	dynamic	dynamic	dynamic	object field
+synth.exe	0x004010c0	RegQueryValueExA	HKEY_CURRENT_USER	Control Panel\Mouse	MouseSensitivity	static	

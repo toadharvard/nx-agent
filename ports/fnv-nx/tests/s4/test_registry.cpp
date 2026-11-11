@@ -496,6 +496,22 @@ TEST(registry_first_run_declared_value)
     RegCloseKey(k);
 }
 
+TEST(registry_mouse_sensitivity_declared)
+{
+    reg_fresh("seed_mouse.hiv");
+    fnvnx_registry_first_run();
+    fnvnx_registry_reset_for_test();
+    HKEY k = NULL;
+    CHECK_EQ(RegOpenKeyExA(HKEY_CURRENT_USER, "Control Panel\\Mouse", 0, T_KEY_READ, &k), ERROR_SUCCESS);
+    char buf[16];
+    DWORD type = 0, len = sizeof buf;
+    CHECK_EQ(RegQueryValueExA(k, "MouseSensitivity", NULL, &type, (LPBYTE)buf, &len), ERROR_SUCCESS);
+    CHECK_EQ(type, REG_SZ);
+    CHECK_EQ(len, 3);                                    /* "10" and the NUL (Wine 9.0 default) */
+    CHECK_STR(buf, "10");
+    RegCloseKey(k);
+}
+
 TEST(registry_undeclared_key_is_absent)
 {
     reg_fresh("seed2.hiv");
@@ -503,7 +519,7 @@ TEST(registry_undeclared_key_is_absent)
     fnvnx_registry_reset_for_test();
     HKEY k = NULL;
     CHECK_EQ(RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Microsoft\\Direct3D", 0, T_KEY_READ, &k), ERROR_FILE_NOT_FOUND);
-    CHECK_EQ(RegOpenKeyExA(HKEY_CURRENT_USER, "Control Panel\\Mouse", 0, T_KEY_READ, &k), ERROR_FILE_NOT_FOUND);
+    CHECK_EQ(RegOpenKeyExA(HKEY_CURRENT_USER, "Control Panel\\Keyboard", 0, T_KEY_READ, &k), ERROR_FILE_NOT_FOUND);
     CHECK_EQ(RegOpenKeyExA(HKEY_LOCAL_MACHINE, "Software\\Bethesda Softworks\\Other", 0, T_KEY_READ, &k), ERROR_FILE_NOT_FOUND);
 }
 
