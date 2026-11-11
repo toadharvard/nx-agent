@@ -9,6 +9,9 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
+import scratch  # noqa: E402
+
+scratch.install()
 import gate_contract as gc  # noqa: E402
 
 FAILED = []
