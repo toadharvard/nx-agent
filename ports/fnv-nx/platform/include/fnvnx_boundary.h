@@ -62,15 +62,7 @@ uint32_t fnvnx_bnd_thread_run(fnvnx_bnd_thread *t, fnvnx_gaddr param);
  * detach first, on the thread's own stack. notify == 0: it never ran (closed while suspended / failed to start). */
 void fnvnx_bnd_thread_release(fnvnx_bnd_thread *t, int notify);
 
-/* ---- images and modules -------------------------------------------------------------------------------------- */
-
-/* A page range of a mapped image: va/size page-rounded, prot = FNVNX_PROT bits (1 = R, 2 = W, 4 = X; 0 = no access:
- * the gaps the loader maps no-access). */
-struct fnvnx_bnd_range { uint32_t va, size; unsigned prot; };
-
-/* The headers and sections of the image mapped at `base` (headers first, then the sections in rva order, gaps with
- * prot 0 included), at most `max` ranges; returns how many there are (all of them, even beyond max). */
-unsigned fnvnx_bnd_image_ranges(uint32_t base, struct fnvnx_bnd_range *out, unsigned max);
+/* ---- modules ------------------------------------------------------------------------------------------------- */
 
 /* LoadLibrary of a translated module that is not loaded yet: maps and initialises it (and its dependencies), which
  * registers every image with fnvnx_win32_register_image. Returns 0 and the module's base, or the Win32 error

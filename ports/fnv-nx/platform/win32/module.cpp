@@ -395,6 +395,39 @@ static unsigned prot_of(unsigned rwx)
 
 extern "C" void fnvnx_resource_register_image(HMODULE m, const void *base, size_t size);   /* resource.cpp */
 
+/* The ranges of the image mapped at `base`, from its own PE section table -- the rule the loader maps by: the headers
+ * read-only, each section with the protection of its R/W/X characteristics, the gaps between them no-access. Every
+ * range is clipped to the image; a malformed table records nothing beyond the whole image already noted. */
+static void note_sections(uint32_t base, uint32_t size)
+{
+    const uint8_t *b = (const uint8_t *)(uintptr_t)base;
+    if (!in_img(size, 0, 0x40) || rd16(b) != 0x5A4D)
+        return;
+    uint64_t pe = rd32(b + 0x3C), opt = pe + 24;
+    if (!in_img(size, pe, 24) || rd32(b + pe) != 0x4550 || !in_img(size, opt, 64) || rd16(b + opt) != 0x10B)
+        return;
+    uint32_t nsec = rd16(b + pe + 6), soh = rd32(b + opt + 60), cur = 0;
+    uint64_t sh = opt + rd16(b + pe + 20);
+    auto pg = [](uint64_t v) { return (v + 0xFFFu) & ~(uint64_t)0xFFFu; };
+    auto note = [&](uint64_t rva, uint64_t len, unsigned rwx) {
+        if (len && in_img(size, rva, len))
+            fnvnx_win32_vm_note(base + (uintptr_t)rva, (size_t)len, MEM_IMAGE, prot_of(rwx));
+    };
+    cur = (uint32_t)(pg(soh) > size ? size : pg(soh));
+    note(0, cur, 1);
+    for (uint32_t i = 0; i < nsec && in_img(size, sh + 40ull * i, 40); i++) {
+        const uint8_t *h = b + sh + 40ull * i;
+        uint64_t rva = rd32(h + 12), len = pg(rd32(h + 8) > rd32(h + 16) ? rd32(h + 8) : rd32(h + 16)), ch = rd32(h + 36);
+        if (rva > cur)
+            note(cur, rva - cur, 0);
+        note(rva, len, (ch & 0x40000000u ? 1u : 0u) | (ch & 0x80000000u ? 2u : 0u) | (ch & 0x20000000u ? 4u : 0u));
+        if (rva + len > cur)
+            cur = (uint32_t)(rva + len);
+    }
+    if (pg(size) > cur)
+        note(cur, pg(size) - cur, 0);
+}
+
 extern "C" void fnvnx_win32_register_image(const char *name, uint32_t base, uint32_t size)
 {
     char f[64], exe[W32_PATH_MAX];
@@ -427,11 +460,7 @@ extern "C" void fnvnx_win32_register_image(const char *name, uint32_t base, uint
     fnvnx_resource_register_image(h, (const void *)(uintptr_t)base, size);
     /* the page map: the whole image, then each range of it with its protection */
     fnvnx_win32_vm_note(base, size, MEM_IMAGE, PAGE_READONLY);
-    struct fnvnx_bnd_range r[96];
-    unsigned n = fnvnx_bnd_image_ranges(base, r, 96);
-    for (unsigned i = 0; i < n && i < 96; i++)
-        if (r[i].va >= base && r[i].size && r[i].size <= size && r[i].va - base <= size - r[i].size)
-            fnvnx_win32_vm_note(r[i].va, r[i].size, MEM_IMAGE, prot_of(r[i].prot));
+    note_sections(base, size);
 }
 
 extern "C" DWORD GetModuleFileNameA(HMODULE h, LPSTR buf, DWORD n)

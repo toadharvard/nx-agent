@@ -1,7 +1,7 @@
 /* host_boundary.cpp - the host test process's implementation of platform/include/fnvnx_boundary.h.
  * "The game" is the native test code: an export's value is its native address, a game function is called natively, a
  * game thread runs natively on the OS thread the platform made, and there is no loader (images are registered by the
- * tests through fnvnx_win32_register_image; their sections are read from the PE headers in memory). The calls are
+ * tests through fnvnx_win32_register_image). The calls are
  * counted (host_boundary.h) so the tests can see what the platform sent through the boundary. */
 #include "fnvnx_boundary.h"
 #include "host_boundary.h"
@@ -70,37 +70,6 @@ void fnvnx_bnd_thread_release(fnvnx_bnd_thread *t, int notify)
     if (!notify)
         __atomic_fetch_add(&g_bnd_threads_freed_unrun, 1, __ATOMIC_RELAXED);
     free(t);
-}
-
-static uint32_t rd32(const uint8_t *p) { uint32_t v; memcpy(&v, p, 4); return v; }
-static uint16_t rd16(const uint8_t *p) { uint16_t v; memcpy(&v, p, 2); return v; }
-static uint32_t pg(uint32_t v) { return (v + 0xfffu) & ~0xfffu; }
-
-unsigned fnvnx_bnd_image_ranges(uint32_t base, struct fnvnx_bnd_range *out, unsigned max)
-{
-    const uint8_t *b = (const uint8_t *)(uintptr_t)base;
-    const uint8_t *pe = b + rd32(b + 0x3c), *opt = pe + 24;
-    unsigned nsec = rd16(pe + 6), n = 0;
-    uint32_t soi = rd32(opt + 56), soh = rd32(opt + 60), cur = 0;   /* SizeOfImage, SizeOfHeaders */
-    const uint8_t *sh = opt + rd16(pe + 20);
-    auto put = [&](uint32_t va, uint32_t size, unsigned prot) {
-        if (n < max)
-            out[n] = {va, size, prot};
-        n++;
-    };
-    put(base, pg(soh), 1);
-    cur = pg(soh);
-    for (unsigned i = 0; i < nsec; i++, sh += 40) {
-        uint32_t vs = rd32(sh + 8), rva = rd32(sh + 12), raw = rd32(sh + 16), ch = rd32(sh + 36);
-        uint32_t size = pg(vs > raw ? vs : raw);
-        if (rva > cur)
-            put(base + cur, rva - cur, 0);
-        put(base + rva, size, (ch & 0x40000000u ? 1u : 0u) | (ch & 0x80000000u ? 2u : 0u) | (ch & 0x20000000u ? 4u : 0u));
-        cur = rva + size;
-    }
-    if (pg(soi) > cur)
-        put(base + cur, pg(soi) - cur, 0);
-    return n;
 }
 
 uint32_t fnvnx_bnd_module_load(const char *name, uint32_t *base)
