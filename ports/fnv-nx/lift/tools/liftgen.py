@@ -178,12 +178,13 @@ def recipe(ref, commit, tree):
     """lift/pack/build.json: the flags are the lifted-code flags of test/instest.py (one source), the units are the fixed names."""
     import instest
     drop = ('-c', '-DFNVL_FLAGS_IO')
-    rec = {'format': 'fnvnx-recipe/1', 'compiler': {'cc': 'aarch64-linux-gnu-gcc-13', 'cxx': 'aarch64-linux-gnu-g++-13'},
+    gc = json.load(open(os.path.join(LIFT, '..', 'verify', 'guest_compiler.json')))   # the one source of the guest compiler (msvcmodel)
+    rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': gc['external']['name'], 'cc': gc['cc'], 'cxx': gc['cxx']},
            'flags': {'c': ['-mabi=ilp32'], 'cxx': [f for f in instest.FLAGS if f not in drop], 'asm': ['-mabi=ilp32', '-fPIC']},
            'include': ['/ext/liftpack/inc'], 'units': 'all',
            'generated': [{'tool': 'ports/fnv-nx/lift/tools/packcopy.py', 'args': ['/ext/liftpack', '/out'], 'inputs': [], 'outputs': unit_names()}],
            'link': None,
-           'external': [{'name': 'liftpack', 'repo': 'fnv-nx-build', 'ref': ref, 'commit': commit, 'tree_sha256': tree, 'at': '/ext/liftpack'}]}
+           'external': [{'name': 'liftpack', 'repo': 'fnv-nx-build', 'ref': ref, 'commit': commit, 'tree_sha256': tree, 'at': '/ext/liftpack'}, gc['external']]}
     os.makedirs(os.path.join(LIFT, 'pack'), exist_ok=True)
     with open(os.path.join(LIFT, 'pack', 'build.json'), 'w') as f:
         json.dump(rec, f, indent=1); f.write('\n')
