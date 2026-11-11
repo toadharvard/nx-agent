@@ -6,7 +6,7 @@ Universe = ITEMS below (name -> argv, cwd = ports/fnv-nx). Certified = exit stat
 verify/gate_tests.py: an item that cannot run here is uncertified, so only tests that need nothing but gcc/g++,
 python3 and EGL surfaceless (llvmpipe) are listed. Tests that need uam, a translator build directory, Wine or another
 lead's live files enter ITEMS when their environment is a pinned input."""
-import json, os, signal, subprocess, sys, time
+import json, os, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = os.path.normpath(os.path.join(HERE, "..", ".."))
@@ -23,12 +23,11 @@ ITEMS = {
 }
 
 def run(argv, timeout):
-    p = subprocess.Popen(argv, cwd=PORT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
+    p = subprocess.Popen(argv, cwd=PORT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         return p.wait(timeout=timeout) == 0
     except subprocess.TimeoutExpired:
-        os.killpg(p.pid, signal.SIGKILL); p.wait(); return False
+        p.kill(); p.wait(); return False
 
 def main(argv):
     timeout, only = 900.0, []
@@ -37,12 +36,12 @@ def main(argv):
         else: only.append(argv[1])
         argv = argv[2:]
     names = [n for n in ITEMS if not only or n in only]
-    t0 = time.time(); unc = []
+    unc = []
     for n in names:
         if not run(ITEMS[n](OUT()), timeout): unc.append(n)
     ok = len(names) - len(unc); green = not unc
     res = {"format": "fnvnx-gate/1", "name": "l6", "status": "green" if green else "red", "universe": len(names),
-           "certified": ok, "uncertified": unc[:50], "detail": "%d of %d L6 tests pass, %.1f s" % (ok, len(names), time.time() - t0)}
+           "certified": ok, "uncertified": unc[:50], "detail": "%d of %d L6 tests pass (timeout %.0f s each)" % (ok, len(names), timeout)}
     with open(os.path.join(OUT(), "l6.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)
     return 0 if green else 2
