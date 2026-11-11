@@ -26,6 +26,17 @@ int ReleaseDC(HWND, HDC);
 HDC BeginPaint(HWND, void *);
 BOOL EndPaint(HWND, const void *);
 /* platform/win32/gdifont.cpp */
+BOOL ExtTextOutA(HDC, int, int, UINT, const RECT *, LPCSTR, UINT, const INT *);
+BOOL ExtTextOutW(HDC, int, int, UINT, const RECT *, LPCWSTR, UINT, const INT *);
+BOOL GetTextExtentPoint32A(HDC, LPCSTR, int, SIZE *);
+BOOL GetTextExtentPoint32W(HDC, LPCWSTR, int, SIZE *);
+BOOL GetTextExtentExPointA(HDC, LPCSTR, int, int, LPINT, LPINT, SIZE *);
+BOOL GetTextExtentExPointW(HDC, LPCWSTR, int, int, LPINT, LPINT, SIZE *);
+DWORD GetCharacterPlacementA(HDC, LPCSTR, int, int, void *, DWORD);
+DWORD GetCharacterPlacementW(HDC, LPCWSTR, int, int, void *, DWORD);
+UINT GetOutlineTextMetricsA(HDC, UINT, void *);
+HDC CreateDCA(LPCSTR, LPCSTR, LPCSTR, const void *);
+int ExtEscape(HDC, int, int, LPCSTR, int, LPSTR);
 int GetObjectA(HGDIOBJ, int, void *);
 int GetObjectW(HGDIOBJ, int, void *);
 HFONT CreateFontIndirectA(const void *);
@@ -222,6 +233,9 @@ const exp g_exports[] = {
     E("gdi32", TranslateCharsetInfo), E("gdi32", GetGlyphOutlineA), E("gdi32", GetGlyphOutlineW),
     E("gdi32", SetTextColor), E("gdi32", SetBkColor), E("gdi32", SetBkMode), E("gdi32", SetTextAlign),
     E("gdi32", SetMapMode), E("gdi32", MoveToEx), E("gdi32", GetCurrentObject),
+    E("gdi32", ExtTextOutA), E("gdi32", ExtTextOutW), E("gdi32", GetTextExtentPoint32A), E("gdi32", GetTextExtentPoint32W),
+    E("gdi32", GetTextExtentExPointA), E("gdi32", GetTextExtentExPointW), E("gdi32", GetCharacterPlacementA), E("gdi32", GetCharacterPlacementW),
+    E("gdi32", GetOutlineTextMetricsA), E("gdi32", CreateDCA), E("gdi32", ExtEscape),
     E("gdi32", GetDeviceCaps), E("user32", GetDC), E("user32", ReleaseDC), E("user32", BeginPaint), E("user32", EndPaint),
     E("advapi32", RegCloseKey), E("advapi32", RegCreateKeyExA), E("advapi32", RegOpenKeyExA), E("advapi32", RegOpenKeyA),
     E("advapi32", RegQueryValueExA), E("advapi32", RegSetValueExA), E("advapi32", GetUserNameA),

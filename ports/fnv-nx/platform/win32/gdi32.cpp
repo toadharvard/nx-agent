@@ -22,6 +22,8 @@
 #include "w32.h"
 #include "gdi_int.h"
 
+#include <ctype.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -87,7 +89,7 @@ extern "C" __attribute__((weak)) void fnvnx_window_surface_dirty(HWND h, const R
 
 namespace {
 enum { T_DC = 1, T_BMP, T_BRUSH, T_PEN, T_FONT, T_PAL };
-enum { K_MEM, K_WIN, K_SCR, K_PAINT };
+enum { K_MEM, K_WIN, K_SCR, K_PAINT, K_DISP };   /* K_DISP: CreateDC("DISPLAY"), the desktop surface like K_SCR */
 const uint32_t CLRINV = 0xFFFFFFFFu;
 const uint32_t SYSPAL[20] = { 0x000000, 0x800000, 0x008000, 0x808000, 0x000080, 0x800080, 0x008080, 0xC0C0C0, 0xC0DCC0, 0xA6CAF0,
                               0xFFFBF0, 0xA0A0A4, 0x808080, 0xFF0000, 0x00FF00, 0xFFFF00, 0x0000FF, 0xFF00FF, 0x00FFFF, 0xFFFFFF };
@@ -104,7 +106,7 @@ struct obj {
     HWND hwnd;
     uint32_t bmp, brush, pen, font, pal;
     uint32_t own;
-    int32_t ts[7];                           /* DC text state, GDI_TS_* (gdi_int.h) */
+    int32_t ts[GDI_TS_COUNT];                /* DC text state, GDI_TS_* (gdi_int.h) */
     void *fdata;                             /* font: LOGFONTW copy (gdifont.cpp) */
 };
 struct slot { obj *o; uint32_t gen; };
@@ -331,6 +333,7 @@ uint32_t new_dc(int kind, HWND hw)
     if (!hd) return 0;
     d->kind = kind; d->hwnd = hw; d->smode = 1;
     d->ts[GDI_TS_BKCOLOR] = 0xFFFFFF; d->ts[GDI_TS_BKMODE] = 2; d->ts[GDI_TS_MAPMODE] = 1;   /* white, OPAQUE, MM_TEXT */
+    d->ts[GDI_TS_WEXTX] = d->ts[GDI_TS_WEXTY] = d->ts[GDI_TS_VEXTX] = d->ts[GDI_TS_VEXTY] = 1;
     d->brush = stock_h(0); d->pen = stock_h(7); d->font = stock_h(13); d->pal = stock_h(15);
     if (kind == K_MEM) {
         obj *b = NULL;
@@ -398,7 +401,7 @@ extern "C" BOOL DeleteDC(HDC hd)
 {
     Lk l;
     obj *d = get(hd, T_DC);
-    if (!d || d->kind != K_MEM) { SetLastError(ERROR_INVALID_HANDLE); return FALSE; }
+    if (!d || (d->kind != K_MEM && d->kind != K_DISP)) { SetLastError(ERROR_INVALID_HANDLE); return FALSE; }
     free_dc((uint32_t)(uintptr_t)hd, d);
     return TRUE;
 }
@@ -754,7 +757,7 @@ extern "C" int gdi_dc_state(void *hd, int field, int set, int32_t value, int32_t
     Lk l;
     init_stock();
     obj *d = get(hd, T_DC);
-    if (!d || field < 0 || field >= 7) return 0;
+    if (!d || field < 0 || field >= GDI_TS_COUNT) return 0;
     if (prev) *prev = d->ts[field];
     if (set) d->ts[field] = value;
     return 1;
@@ -766,4 +769,116 @@ extern "C" uint32_t gdi_dc_object(void *hd, int kind)
     obj *d = get(hd, T_DC);
     if (!d) return 0;
     return kind == GDIK_BITMAP ? d->bmp : kind == GDIK_BRUSH ? d->brush : kind == GDIK_PEN ? d->pen : kind == GDIK_FONT ? d->font : kind == GDIK_PALETTE ? d->pal : 0;
+}
+
+/* ---- CreateDC / ExtEscape: the set of devices is exactly the display of ENV_TRUTH D1 */
+static bool ieq(const char *a, const char *b) { for (; *a && *b; a++, b++) if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return false; return !*a && !*b; }
+extern "C" HDC CreateDCA(LPCSTR driver, LPCSTR device, LPCSTR output, const void *devmode)
+{
+    W32_UNUSED(output); W32_UNUSED(devmode);   /* a display DC has no output port and always shows the desktop mode */
+    bool disp = driver ? ieq(driver, "DISPLAY") : device != NULL;
+    if (!disp || (device && !ieq(device, "\\\\.\\DISPLAY1"))) { SetLastError(ERROR_INVALID_PARAMETER); return NULL; }
+    Lk l;
+    HDC hd = (HDC)(uintptr_t)new_dc(K_DISP, NULL);
+    if (!hd) SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+    return hd;
+}
+/* The display driver of the environment is not a vendor driver: it implements no escape. QUERYESCSUPPORT therefore
+ * answers 0 ("not supported") for every code and every other escape is "not implemented" (0). Errors are < 0. */
+extern "C" int ExtEscape(HDC hd, int esc, int cb_in, LPCSTR in, int cb_out, LPSTR out)
+{
+    {
+        Lk l;
+        if (!get(hd, T_DC)) { SetLastError(ERROR_INVALID_HANDLE); return -1; }
+    }
+    if (cb_in < 0 || cb_out < 0 || (cb_in > 0 && !in) || (cb_out > 0 && !out) || (esc == 8 /* QUERYESCSUPPORT */ && (!in || cb_in < 2))) {
+        SetLastError(ERROR_INVALID_PARAMETER);
+        return -1;
+    }
+    return 0;
+}
+
+/* ---- text drawing side (gdi_int.h) */
+extern "C" int gdi_dc_depth(void *hd)
+{
+    Lk l;
+    obj *d = get(hd, T_DC);
+    surf s;
+    return d && dc_surf(d, s) ? s.bpp : 0;
+}
+extern "C" int gdi_dc_fill(void *hd, int l, int t, int r, int b, uint32_t c)
+{
+    Lk lk;
+    obj *d = get(hd, T_DC);
+    surf s;
+    if (!d || !dc_surf(d, s)) return 0;
+    if (l < 0) l = 0;
+    if (t < 0) t = 0;
+    if (r > s.w) r = s.w;
+    if (b > s.h) b = s.h;
+    for (int y = t; y < b; y++) for (int x = l; x < r; x++) px_put(s, x, y, swp(c & 0xFFFFFF));
+    if (r > l && b > t) dirty(s, l, t, r, b);
+    return 1;
+}
+namespace {
+/* the 17 glyph levels: intensity of a glyph level drawn with component 0xff on black */
+const uint8_t RAMP[17] = { 0, 0x4d, 0x68, 0x7c, 0x8c, 0x9a, 0xa7, 0xb2, 0xbd, 0xc7, 0xd0, 0xd9, 0xe1, 0xe9, 0xf0, 0xf8, 0xff };
+uint8_t aa_comp(uint8_t dst, uint8_t text, int lvl)
+{
+    if (dst == text) return dst;
+    int mn = RAMP[lvl] * text / 255, mx = RAMP[16 - lvl] + (255 - RAMP[16 - lvl]) * text / 255;
+    if (dst > text) return (uint8_t)(text + (dst - text) * (mx - text) / (255 - text));
+    return (uint8_t)(text - (text - dst) * (text - mn) / text);
+}
+}
+extern "C" int gdi_dc_glyph(void *hd, int x, int y, int w, int h, const uint8_t *cov, int pitch, uint32_t c, const int *clip)
+{
+    Lk lk;
+    obj *d = get(hd, T_DC);
+    surf s;
+    if (!d || !dc_surf(d, s)) return 0;
+    int l = x, t = y, r = x + w, b = y + h;
+    if (clip) { l = l > clip[0] ? l : clip[0]; t = t > clip[1] ? t : clip[1]; r = r < clip[2] ? r : clip[2]; b = b < clip[3] ? b : clip[3]; }
+    l = l > 0 ? l : 0; t = t > 0 ? t : 0; r = r < s.w ? r : s.w; b = b < s.h ? b : s.h;
+    uint32_t text = swp(c & 0xFFFFFF);
+    for (int py = t; py < b; py++)
+        for (int px = l; px < r; px++) {
+            int v = cov[(size_t)(py - y) * pitch + (px - x)];
+            if (v <= 1) continue;
+            if (v >= 16 || s.bpp <= 8) { if (v >= 16) px_put(s, px, py, text); continue; }   /* <= 8 bpp: no antialiasing, 0 or solid */
+            uint32_t o = px_get(s, px, py);
+            px_put(s, px, py, (uint32_t)aa_comp((uint8_t)(o >> 16), (uint8_t)(text >> 16), v) << 16 | (uint32_t)aa_comp((uint8_t)(o >> 8), (uint8_t)(text >> 8), v) << 8 | aa_comp((uint8_t)o, (uint8_t)text, v));
+        }
+    if (r > l && b > t) dirty(s, l, t, r, b);
+    return 1;
+}
+extern "C" int gdi_dc_poly(void *hd, const int32_t *xy, int n, uint32_t c)
+{
+    Lk lk;
+    obj *d = get(hd, T_DC);
+    surf s;
+    if (!d || !dc_surf(d, s)) return 0;
+    if (n < 3) return 1;
+    int ymin = xy[1], ymax = xy[1];
+    for (int i = 1; i < n; i++) { if (xy[2 * i + 1] < ymin) ymin = xy[2 * i + 1]; if (xy[2 * i + 1] > ymax) ymax = xy[2 * i + 1]; }
+    if (ymin < 0) ymin = 0;
+    if (ymax > s.h) ymax = s.h;
+    for (int py = ymin; py < ymax; py++) {
+        double yc = py + 0.5, xs[64];
+        int k = 0;
+        for (int i = 0; i < n && k < 63; i++) {   /* edge i -> i+1, half-open in y so a vertex is counted once */
+            double x0 = xy[2 * i], y0 = xy[2 * i + 1], x1 = xy[2 * ((i + 1) % n)], y1 = xy[2 * ((i + 1) % n) + 1];
+            if ((y0 <= yc) == (y1 <= yc)) continue;
+            xs[k++] = x0 + (yc - y0) * (x1 - x0) / (y1 - y0);
+        }
+        for (int i = 1; i < k; i++) for (int j = i; j > 0 && xs[j] < xs[j - 1]; j--) { double q = xs[j]; xs[j] = xs[j - 1]; xs[j - 1] = q; }
+        for (int i = 0; i + 1 < k; i += 2) {
+            int x0 = (int)ceil(xs[i] - 0.5), x1 = (int)ceil(xs[i + 1] - 0.5);
+            if (x0 < 0) x0 = 0;
+            if (x1 > s.w) x1 = s.w;
+            for (int px = x0; px < x1; px++) px_put(s, px, py, swp(c & 0xFFFFFF));
+            if (x1 > x0) dirty(s, x0, py, x1, py + 1);
+        }
+    }
+    return 1;
 }

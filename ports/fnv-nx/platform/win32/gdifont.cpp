@@ -26,6 +26,7 @@
 #include FT_GLYPH_H
 #include FT_TRIGONOMETRY_H
 #include FT_TRUETYPE_IDS_H
+#include FT_MODULE_H
 
 #include <algorithm>
 #include <map>
@@ -681,15 +682,6 @@ bool stock_lf(int idx, LF *lf)
     }
     return false;
 }
-RF *font_of(void *hf)
-{
-    gdi_objinfo oi;
-    if (!gdi_obj_info(hf, &oi) || oi.kind != GDIK_FONT) return nullptr;
-    LF lf;
-    if (oi.payload) memcpy(&lf, oi.payload, sizeof lf);
-    else if (!stock_lf(oi.stock, &lf)) return nullptr;
-    return realize(lf);
-}
 bool lf_of(void *hf, LF *lf)
 {
     gdi_objinfo oi;
@@ -697,10 +689,13 @@ bool lf_of(void *hf, LF *lf)
     if (oi.payload) { memcpy(lf, oi.payload, sizeof *lf); return true; }
     return stock_lf(oi.stock, lf);
 }
-RF *cur(void *hdc)
+RF *cur(void *hdc)   /* the DC's font as realised in a GM_COMPATIBLE DC: the glyph orientation is the escapement */
 {
     uint32_t h = gdi_dc_font(hdc);
-    return h ? font_of((void *)(uintptr_t)h) : nullptr;
+    LF lf;
+    if (!h || !lf_of((void *)(uintptr_t)h, &lf)) return nullptr;
+    lf.orient = lf.esc;
+    return realize(lf);
 }
 
 /* ---- glyph outlines (freetype_get_glyph_outline) */
@@ -834,7 +829,7 @@ unsigned glyph_index(RF *f, unsigned ch, bool by_index)
     r = lookup(b[0], false, &h);
     return h ? r : b[0];
 }
-uint32_t glyph_outline(RF *f, unsigned ch, unsigned format, uint8_t *gm20, uint32_t buflen, uint8_t *buf, const uint8_t *m2)
+uint32_t glyph_outline(RF *f, unsigned ch, unsigned format, uint8_t *gm20, uint32_t buflen, uint8_t *buf, const uint8_t *m2, int32_t *abc = nullptr)
 {
     FT_Face ft = f->ft;
     bool by_index = format & 0x80;
@@ -881,6 +876,21 @@ uint32_t glyph_outline(RF *f, unsigned ch, unsigned format, uint8_t *gm20, uint3
     FT_Vector adv, org;
     if (!M) { adv = adv_metric(f, met.horiAdvance, nullptr); g.ix = (int16_t)(adv.x >> 6); g.iy = 0; org.x = bb.xMin; org.y = bb.yMax; }
     else { org.x = bb.xMin; org.y = bb.yMax; adv = adv_metric(f, met.horiAdvance, &M[0]); g.ix = (int16_t)(adv.x >> 6); g.iy = (int16_t)(adv.y >> 6); }
+    if (abc) {   /* the ABC widths of compute_metrics: abcA + abcB + abcC is the advance of the unrotated glyph */
+        FT_Pos adv_x;
+        if (!M) { abc[0] = (int32_t)(bb.xMin >> 6); abc[1] = (int32_t)((met.width + 63) >> 6); adv_x = adv.x; }
+        else {
+            FT_Vector u = adv_metric(f, met.horiAdvance, &M[2]), v = { met.horiBearingX, 0 };
+            adv_x = FT_Vector_Length(&u);
+            FT_Vector_Transform(&v, &M[2]);
+            abc[0] = met.horiBearingX > 0 ? (int32_t)(FT_Vector_Length(&v) >> 6) : -(int32_t)((FT_Vector_Length(&v) + 63) >> 6);
+            v.x = met.horiBearingX + met.width; v.y = 0;
+            FT_Vector_Transform(&v, &M[2]);
+            abc[1] = (int32_t)(((FT_Vector_Length(&v) + 63) >> 6) - abc[0]);
+        }
+        if (!abc[1]) abc[1] = 1;
+        abc[2] = (int32_t)(adv_x >> 6) - abc[0] - abc[1];
+    }
     g.ox = (int32_t)(org.x >> 6); g.oy = (int32_t)(org.y >> 6);
     g.bx = (uint32_t)((bb.xMax - bb.xMin) >> 6); g.by = (uint32_t)((bb.yMax - bb.yMin) >> 6);
     if (!g.bx) g.bx = 1;
@@ -1143,6 +1153,7 @@ static DWORD get_outline(HDC hdc, UINT ch, UINT format, void *gm, DWORD size, vo
 extern "C" DWORD GetGlyphOutlineA(HDC hdc, UINT ch, UINT format, void *gm, DWORD size, void *buf, const void *mat) { return get_outline(hdc, ch, format, gm, size, buf, mat, true); }
 extern "C" DWORD GetGlyphOutlineW(HDC hdc, UINT ch, UINT format, void *gm, DWORD size, void *buf, const void *mat) { return get_outline(hdc, ch, format, gm, size, buf, mat, false); }
 
+extern "C" int GetDeviceCaps(HDC, int);
 /* ---- DC text state (stored on the DC object in gdi32.cpp). Each returns the previous value and fails on a bad DC.
  * SetMapMode stores and returns any of the eight modes; coordinate transforms other than MM_TEXT are a later stage. */
 static uint32_t dc_swap(HDC hdc, int field, uint32_t v, uint32_t fail)
@@ -1159,11 +1170,28 @@ extern "C" int SetBkMode(HDC hdc, int mode)
     return (int)dc_swap(hdc, GDI_TS_BKMODE, (uint32_t)mode, 0);
 }
 extern "C" UINT SetTextAlign(HDC hdc, UINT align) { return dc_swap(hdc, GDI_TS_ALIGN, align, GERR); }
-extern "C" int SetMapMode(HDC hdc, int mode)
+extern "C" int SetMapMode(HDC hdc, int mode)   /* MM_TEXT 1 .. MM_ISOTROPIC 7, MM_ANISOTROPIC 8: the extents of each mode (set_map_mode) */
 {
     int32_t prev = 0;
     if (!gdi_dc_state(hdc, GDI_TS_MAPMODE, 0, 0, &prev)) { SetLastError(ERROR_INVALID_HANDLE); return 0; }
-    if (mode < 1 || mode > 8) return 0;   /* MM_TEXT .. MM_ANISOTROPIC */
+    if (mode < 1 || mode > 8) return 0;
+    if (mode == prev && mode >= 7) return prev;   /* the extents of a mode that is already current are kept */
+    if (mode != 8) {
+        int32_t wx = 1, wy = 1, vx = 1, vy = 1;
+        if (mode != 1) {
+            int sx = GetDeviceCaps(hdc, 4), sy = GetDeviceCaps(hdc, 6), rx = GetDeviceCaps(hdc, 8), ry = GetDeviceCaps(hdc, 10);   /* HORZSIZE, VERTSIZE, HORZRES, VERTRES */
+            auto muldiv = [](int a, int b, int c) { int64_t n = (int64_t)a * b; return (int32_t)((n + (n < 0 ? -(c / 2) : c / 2)) / c); };
+            const int num = mode == 4 ? 1000 : mode == 5 ? 10000 : 14400;   /* LOENGLISH, HIENGLISH, TWIPS: units per inch, the size is in mm (254 per 10 inch) */
+            switch (mode) {
+            case 2: case 7: wx = sx * 10; wy = sy * 10; break;
+            case 3: wx = sx * 100; wy = sy * 100; break;
+            default: wx = muldiv(num, sx, 254); wy = muldiv(num, sy, 254); break;   /* LOENGLISH, HIENGLISH, TWIPS */
+            }
+            vx = rx; vy = -ry;
+        }
+        gdi_dc_state(hdc, GDI_TS_WEXTX, 1, wx, NULL); gdi_dc_state(hdc, GDI_TS_WEXTY, 1, wy, NULL);
+        gdi_dc_state(hdc, GDI_TS_VEXTX, 1, vx, NULL); gdi_dc_state(hdc, GDI_TS_VEXTY, 1, vy, NULL);
+    }
     return (int)dc_swap(hdc, GDI_TS_MAPMODE, (uint32_t)mode, 0);
 }
 extern "C" BOOL MoveToEx(HDC hdc, int x, int y, void *prev_point)
@@ -1177,4 +1205,693 @@ extern "C" HGDIOBJ GetCurrentObject(HDC hdc, UINT type)
 {
     int k = type == 1 ? GDIK_PEN : type == 2 ? GDIK_BRUSH : type == 5 ? GDIK_PALETTE : type == 6 ? GDIK_FONT : type == 7 ? GDIK_BITMAP : 0;   /* OBJ_* */
     return (HGDIOBJ)(uintptr_t)(k ? gdi_dc_object(hdc, k) : 0);
+}
+
+/* ======================================================================================================
+ * Stage 2: text output (ExtTextOut), text extents, character placement, outline text metrics, display DC.
+ * Wine 9.0's win32u/gdi32 is the cross-check of what the reference computes; the code below is written from the
+ * documented contracts. Assumptions stated here once: the DC is GM_COMPATIBLE with the identity world transform (no
+ * SetWorldTransform / SetGraphicsMode exists in this DC), window / viewport origins are 0, no inter-character
+ * extra spacing and no justification (SetTextCharacterExtra / SetTextJustification keep their DC defaults, 0),
+ * no layout mirroring, no clip region (drawing is clipped to the DC's surface and ETO_CLIPPED's rectangle).
+ * Antialiasing rule (freetype_get_aa_flags): surfaces of <= 8 bpp and NONANTIALIASED_QUALITY draw monochrome
+ * glyphs; otherwise the glyphs are 17-level (GGO_GRAY4) unless the face is hinted by the TrueType bytecode
+ * interpreter and its gasp table has no GASP_DOGRAY behaviour for the realised ppem; the face default is the
+ * reference's fontconfig default (antialiasing on) and CLEARTYPE qualities fall back to grey levels (no LCD output).
+ * One glyph rasteriser: the glyphs are the GetGlyphOutline bitmaps of stage 1. */
+namespace {
+enum { TX_OPAQUE = 2, TX_CLIPPED = 4, TX_GLYPH_INDEX = 0x10, TX_RTLREADING = 0x80, TX_IGNORELANGUAGE = 0x1000, TX_PDY = 0x2000 };
+enum { TX_UPDATECP = 1, TX_RIGHT = 2, TX_CENTER = 6, TX_BOTTOM = 8, TX_BASELINE = 24, TX_RTL = 0x100 };
+enum { GX_REORDER = 2, GX_USEKERNING = 8, GX_JUSTIFY = 0x10000, GX_CLASSIN = 0x80000, GX_MAXEXTENT = 0x100000, GX_SYMSWAPOFF = 0x800000 };
+enum { HEBREW_CS = 177, ARABIC_CS = 178 };
+
+/* ---- the DC's mapping mode: logical <-> device (set_map_mode extents, zero origins) */
+struct Map { double fx = 1, fy = 1, ix = 1, iy = 1; };
+bool dc_map(HDC hdc, Map *m)
+{
+    int32_t w[4];
+    for (int i = 0; i < 4; i++) if (!gdi_dc_state(hdc, GDI_TS_WEXTX + i, 0, 0, &w[i])) return false;
+    if (w[0] && w[1] && w[2] && w[3]) { m->fx = (double)w[2] / w[0]; m->fy = (double)w[3] / w[1]; m->ix = 1.0 / m->fx; m->iy = 1.0 / m->fy; }
+    return true;
+}
+int d2w_x(const Map &m, int v) { return rnd(v * m.ix); }        /* INTERNAL_XDSTOWS */
+int d2w_y(const Map &m, int v) { return rnd(v * m.iy); }
+int w2d_y(const Map &m, int v) { return rnd(v * m.fy); }        /* INTERNAL_YWSTODS */
+int lp_w(const Map &m, int v) { return rnd(v * fabs(m.ix)); }   /* width_to_LP, height_to_LP: scaled, not mirrored */
+int lp_h(const Map &m, int v) { return rnd(v * fabs(m.iy)); }
+
+/* ---- strings: the DC's font code page */
+ustr mb2w(RF *f, const char *s, int count)
+{
+    if (count < 0) count = (int)strlen(s);
+    UINT cp = f ? (UINT)f->codepage : (UINT)g_acp;
+    ustr r;
+    if (cp == 42) { for (int i = 0; i < count; i++) r += (char16_t)((uint8_t)s[i] >= 0x20 ? 0xf000 + (uint8_t)s[i] : (uint8_t)s[i]); return r; }   /* CP_SYMBOL */
+    int n = MultiByteToWideChar(cp, 0, s, count, NULL, 0);
+    if (n <= 0) return r;
+    r.resize((size_t)n);
+    MultiByteToWideChar(cp, 0, s, count, (LPWSTR)&r[0], n);
+    return r;
+}
+std::vector<int> mb_lens(RF *f, const char *s, int count)   /* bytes of each decoded character: 2 for a DBCS lead byte */
+{
+    std::vector<int> r;
+    UINT cp = f ? (UINT)f->codepage : (UINT)g_acp;
+    for (int i = 0; i < count; i++) {
+        WCHAR w;
+        int len = 1;
+        if (cp != 42 && i + 1 < count && MultiByteToWideChar(cp, 8 /* MB_ERR_INVALID_CHARS */, s + i, 1, &w, 1) == 0) len = 2;
+        r.push_back(len);
+        i += len - 1;
+    }
+    return r;
+}
+
+/* ---- advances: the ABC widths of stage 1's glyph path, summed per character */
+void glyph_abc(RF *f, unsigned ch, bool idx, int32_t abc[3])
+{
+    uint8_t gm[20];
+    abc[0] = abc[1] = abc[2] = 0;
+    glyph_outline(f, ch, idx ? 0x80 : 0, gm, 0, nullptr, nullptr, abc);
+}
+bool positions(RF *f, const char16_t *s, int n, bool idx, std::vector<int> &dx, int *cx, int *cy)   /* get_char_positions, device units */
+{
+    TMW tm;
+    if (!get_tm(f, &tm)) return false;
+    dx.assign((size_t)n, 0);
+    int pos = 0;
+    for (int i = 0; i < n; i++) { int32_t abc[3]; glyph_abc(f, s[i], idx, abc); pos += abc[0] + abc[1] + abc[2]; dx[(size_t)i] = pos; }
+    *cx = n ? dx[(size_t)n - 1] : 0;
+    *cy = n ? tm.h : 0;
+    return true;
+}
+/* NtGdiGetTextExtentExW: logical units; dxs / nfit only up to the first character that does not fit */
+bool extent_core(HDC hdc, RF *f, const char16_t *s, int count, int max_ext, int *nfit, int *dxs, SIZE *size, bool idx)
+{
+    Map m;
+    std::vector<int> pos;
+    int cx = 0, cy = 0;
+    if (!dc_map(hdc, &m) || !positions(f, s, count, idx, pos, &cx, &cy)) return false;
+    int i = 0;
+    for (; i < count; i++) {
+        unsigned dx = (unsigned)abs(d2w_x(m, pos[(size_t)i]));
+        if (nfit && dx > (unsigned)max_ext) break;
+        if (dxs) dxs[i] = (int)dx;
+    }
+    if (nfit) *nfit = i;
+    size->cx = abs(d2w_x(m, cx));
+    size->cy = abs(d2w_y(m, cy));
+    return true;
+}
+BOOL text_extent_w(HDC hdc, const char16_t *s, int count, int max_ext, int *nfit, int *dxs, SIZE *size, bool idx)
+{
+    if (count < 0 || (count && !s) || !size) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+    FL l;
+    if (!gdi_dc_font(hdc)) { SetLastError(ERROR_INVALID_HANDLE); return FALSE; }
+    RF *f = cur(hdc);
+    return f && extent_core(hdc, f, s, count, max_ext, nfit, dxs, size, idx);
+}
+
+/* ---- kerning: the font's 'kern' table, horizontal format-0 subtables, scaled to the realised ppem */
+std::map<RF *, std::vector<uint8_t>> g_kern;
+int kern_pair(RF *f, char16_t a, char16_t b)
+{
+    if (!f->scalable) return 0;
+    auto it = g_kern.find(f);
+    if (it == g_kern.end()) {
+        FT_ULong len = 0;
+        std::vector<uint8_t> t;
+        if (!FT_Load_Sfnt_Table(f->ft, FT_MAKE_TAG('k', 'e', 'r', 'n'), 0, NULL, &len) && len >= 4) { t.resize(len); FT_Load_Sfnt_Table(f->ft, FT_MAKE_TAG('k', 'e', 'r', 'n'), 0, t.data(), &len); }
+        it = g_kern.emplace(f, std::move(t)).first;
+    }
+    const std::vector<uint8_t> &k = it->second;
+    if (k.size() < 4) return 0;
+    unsigned ga = glyph_index(f, a, false), gb = glyph_index(f, b, false), nt = k[2] << 8 | k[3];
+    long total = 0;
+    size_t o = 4;
+    for (unsigned i = 0; i < nt && o + 8 <= k.size(); i++) {
+        unsigned length = k[o + 2] << 8 | k[o + 3], cov = k[o + 4] << 8 | k[o + 5], np = k[o + 6] << 8 | k[o + 7];
+        if ((cov >> 8) == 0 && (cov & 1) && o + 14 + 6 * (size_t)np <= k.size()) {   /* format 0, horizontal */
+            for (unsigned j = 0; j < np; j++) {
+                const uint8_t *p = &k[o + 14 + 6 * (size_t)j];
+                if ((unsigned)(p[0] << 8 | p[1]) == ga && (unsigned)(p[2] << 8 | p[3]) == gb) {
+                    long v = (int16_t)(p[4] << 8 | p[5]);
+                    total = (cov & 8) ? v : total + v;   /* the override bit replaces the earlier tables' value */
+                    break;
+                }
+            }
+        }
+        o += length ? length : k.size();
+    }
+    double v = (double)total * f->ppem / f->ft->units_per_EM;
+    return (int)(v < 0 ? -floor(-v + 0.5) : floor(v + 0.5));
+}
+
+/* ---- bidirectional ordering (UAX #9 without explicit embeddings), for GCP_REORDER and ExtTextOut on RTL fonts.
+ * The class table is by Unicode block range (L, R, AL, numbers, separators, marks, neutrals) and so only as exact
+ * as the blocks it lists: Hebrew, Arabic and its supplements, Syriac, Thaana, N'Ko, the presentation forms. */
+enum { BC_L, BC_R, BC_AL, BC_EN, BC_ES, BC_ET, BC_AN, BC_CS, BC_NSM, BC_BN, BC_B, BC_S, BC_WS, BC_ON };
+int bidi_class(char16_t c)
+{
+    auto in = [&](unsigned a, unsigned b) { return c >= a && c <= b; };
+    if (c == '\n' || c == '\r' || in(0x1c, 0x1e) || c == 0x85 || c == 0x2029) return BC_B;
+    if (c == '\t' || c == 0xb || c == 0x1f) return BC_S;
+    if (c == 0xc || c == ' ' || in(0x2000, 0x200a) || c == 0x2028 || c == 0x205f || c == 0x3000 || c == 0x1680) return BC_WS;
+    if (c < 0x20 || in(0x7f, 0x9f) || c == 0xad || in(0x200b, 0x200d)) return BC_BN;
+    if (in('0', '9') || in(0x6f0, 0x6f9) || c == 0xb2 || c == 0xb3 || c == 0xb9) return BC_EN;
+    if (in(0x660, 0x669) || c == 0x66b || c == 0x66c) return BC_AN;
+    if (c == '+' || c == '-') return BC_ES;
+    if (c == '#' || c == '$' || c == '%' || in(0xa2, 0xa5) || c == 0xb0 || c == 0xb1 || in(0x20a0, 0x20cf) || c == 0x66a) return BC_ET;
+    if (c == ',' || c == '.' || c == '/' || c == ':' || c == 0xa0) return BC_CS;
+    if (in(0x300, 0x36f) || in(0x483, 0x489) || in(0x591, 0x5bd) || c == 0x5bf || c == 0x5c1 || c == 0x5c2 || c == 0x5c4 || c == 0x5c5 || c == 0x5c7 ||
+        in(0x610, 0x61a) || in(0x64b, 0x65f) || c == 0x670 || in(0x6d6, 0x6dc) || in(0x6df, 0x6e4) || c == 0x6e7 || c == 0x6e8 || in(0x6ea, 0x6ed) ||
+        c == 0x711 || in(0x730, 0x74a) || in(0x7a6, 0x7b0) || in(0x7eb, 0x7f3) || in(0x8d4, 0x8ff) || in(0xfe00, 0xfe0f) || in(0xfe20, 0xfe2f)) return BC_NSM;
+    if (c == 0x200f || c == 0x5be || c == 0x5c0 || c == 0x5c3 || c == 0x5c6 || in(0x5d0, 0x5ff) || in(0x7c0, 0x7ea) || in(0x7f4, 0x7ff) || in(0x800, 0x83e) || in(0xfb1d, 0xfb4f)) return BC_R;
+    if (c == 0x61c || in(0x600, 0x60f) || in(0x61b, 0x64a) || in(0x66d, 0x66f) || in(0x671, 0x6d5) || c == 0x6e5 || c == 0x6e6 || c == 0x6ee || c == 0x6ef ||
+        in(0x6fa, 0x710) || in(0x712, 0x72f) || in(0x74d, 0x7a5) || c == 0x7b1 || in(0x840, 0x858) || in(0x860, 0x8d3) || in(0xfb50, 0xfdff) || in(0xfe70, 0xfeff)) return BC_AL;
+    if (in(0x21, 0x2f) || in(0x3a, 0x40) || in(0x5b, 0x60) || in(0x7b, 0x7e) || c == 0xa1 || c == 0xa6 || c == 0xa7 || c == 0xa9 || c == 0xab || c == 0xac || c == 0xae ||
+        c == 0xb4 || c == 0xb6 || c == 0xb7 || c == 0xb8 || c == 0xbb || c == 0xbc || c == 0xbd || c == 0xbe || c == 0xbf || c == 0xd7 || c == 0xf7 ||
+        in(0x2010, 0x2027) || in(0x2030, 0x205e) || in(0x2190, 0x2bff) || in(0x3001, 0x3004) || in(0x3008, 0x3020)) return BC_ON;
+    return BC_L;
+}
+struct Bidi { std::vector<int> order, level, cls; };   /* order: visual position -> logical index */
+void bidi_run(const char16_t *s, int n, int base, const uint8_t *preset, Bidi *out)
+{
+    std::vector<int> t((size_t)n), orig((size_t)n);
+    for (int i = 0; i < n; i++) {
+        int c = bidi_class(s[i]);
+        if (preset) switch (preset[i]) { case 1: c = BC_L; break; case 2: c = BC_R; break; case 3: c = BC_AL; break; case 4: c = BC_ON; break; case 6: c = BC_EN; break; case 5: c = BC_AN; break; default: break; }   /* GCPCLASS_* */
+        t[(size_t)i] = orig[(size_t)i] = c;
+    }
+    int sos = base ? BC_R : BC_L;
+    for (int i = 0; i < n; i++) if (t[(size_t)i] == BC_NSM) t[(size_t)i] = i ? t[(size_t)i - 1] : sos;                         /* W1 */
+    int last = sos;                                                                                                          /* W2, W3 */
+    for (int i = 0; i < n; i++) { int c = t[(size_t)i]; if (c == BC_L || c == BC_R || c == BC_AL) last = c; else if (c == BC_EN && last == BC_AL) t[(size_t)i] = BC_AN; }
+    for (int i = 0; i < n; i++) if (t[(size_t)i] == BC_AL) t[(size_t)i] = BC_R;
+    for (int i = 1; i + 1 < n; i++) {                                                                                        /* W4 */
+        int c = t[(size_t)i], a = t[(size_t)i - 1], b = t[(size_t)i + 1];
+        if (c == BC_ES && a == BC_EN && b == BC_EN) t[(size_t)i] = BC_EN;
+        else if (c == BC_CS && a == b && (a == BC_EN || a == BC_AN)) t[(size_t)i] = a;
+    }
+    for (int i = 0; i < n; i++) if (t[(size_t)i] == BC_ET) {                                                                  /* W5 */
+        int j = i; while (j < n && t[(size_t)j] == BC_ET) j++;
+        if ((i && t[(size_t)i - 1] == BC_EN) || (j < n && t[(size_t)j] == BC_EN)) for (int k = i; k < j; k++) t[(size_t)k] = BC_EN;
+        i = j - 1;
+    }
+    for (int i = 0; i < n; i++) if (t[(size_t)i] == BC_ES || t[(size_t)i] == BC_ET || t[(size_t)i] == BC_CS) t[(size_t)i] = BC_ON;   /* W6 */
+    last = sos;                                                                                                              /* W7 */
+    for (int i = 0; i < n; i++) { int c = t[(size_t)i]; if (c == BC_L || c == BC_R) last = c; else if (c == BC_EN && last == BC_L) t[(size_t)i] = BC_L; }
+    auto neutral = [&](int c) { return c == BC_B || c == BC_S || c == BC_WS || c == BC_ON || c == BC_BN; };
+    auto dir = [&](int c) { return c == BC_L ? (int)BC_L : (c == BC_R || c == BC_EN || c == BC_AN) ? (int)BC_R : -1; };
+    for (int i = 0; i < n; i++) if (neutral(t[(size_t)i])) {                                                                   /* N1, N2 */
+        int j = i; while (j < n && neutral(t[(size_t)j])) j++;
+        int before = i ? dir(t[(size_t)i - 1]) : sos, after = j < n ? dir(t[(size_t)j]) : sos;
+        int d = before == after && before >= 0 ? before : sos;
+        for (int k = i; k < j; k++) t[(size_t)k] = d;
+        i = j - 1;
+    }
+    out->level.assign((size_t)n, base);
+    for (int i = 0; i < n; i++) {                                                                                            /* I1, I2 */
+        int c = t[(size_t)i], &lv = out->level[(size_t)i];
+        if (!(lv & 1)) { if (c == BC_R) lv += 1; else if (c == BC_AN || c == BC_EN) lv += 2; }
+        else if (c == BC_L || c == BC_EN || c == BC_AN) lv += 1;
+    }
+    for (int i = n - 1; i >= 0 && (orig[(size_t)i] == BC_WS || orig[(size_t)i] == BC_BN); i--) out->level[(size_t)i] = base;   /* L1 */
+    for (int i = 0; i < n; i++) if (orig[(size_t)i] == BC_S || orig[(size_t)i] == BC_B) {
+        out->level[(size_t)i] = base;
+        for (int k = i - 1; k >= 0 && (orig[(size_t)k] == BC_WS || orig[(size_t)k] == BC_BN); k--) out->level[(size_t)k] = base;
+    }
+    out->order.resize((size_t)n);
+    for (int i = 0; i < n; i++) out->order[(size_t)i] = i;
+    int hi = 0, lo = 255;
+    for (int v : out->level) { hi = std::max(hi, v); if (v & 1) lo = std::min(lo, v); }
+    for (int lv = hi; lv >= lo && lv > 0; lv--)                                                                              /* L2 */
+        for (int i = 0; i < n; i++) if (out->level[(size_t)out->order[(size_t)i]] >= lv) {
+            int j = i; while (j < n && out->level[(size_t)out->order[(size_t)j]] >= lv) j++;
+            std::reverse(out->order.begin() + i, out->order.begin() + j);
+            i = j;
+        }
+    out->cls = orig;
+}
+char16_t mirror(char16_t c)   /* Bidi_Mirrored pairs of the Basic Latin and Latin-1 blocks */
+{
+    switch (c) { case '(': return ')'; case ')': return '('; case '<': return '>'; case '>': return '<'; case '[': return ']'; case ']': return '['; case '{': return '}'; case '}': return '{';
+                 case 0xab: return 0xbb; case 0xbb: return 0xab; default: return c; }
+}
+
+/* ---- glyph bitmaps for drawing: the GetGlyphOutline bitmap in the DC's antialiasing format */
+unsigned aa_flags_of(RF *f, int bpp)
+{
+    if (bpp <= 8 || f->lf.q == 3 /* NONANTIALIASED_QUALITY */) return 1;   /* GGO_BITMAP */
+    if (!f->fake_bold && !f->fake_italic && FT_Get_TrueType_Engine_Type(g_lib) == FT_TRUETYPE_ENGINE_TYPE_PATENTED) {
+        FT_ULong len = 0;
+        std::vector<uint8_t> t;
+        if (!FT_Load_Sfnt_Table(f->ft, FT_MAKE_TAG('g', 'a', 's', 'p'), 0, NULL, &len) && len >= 8) {
+            t.resize(len);
+            FT_Load_Sfnt_Table(f->ft, FT_MAKE_TAG('g', 'a', 's', 'p'), 0, t.data(), &len);
+            unsigned ver = t[0] << 8 | t[1], nr = t[2] << 8 | t[3];
+            if (ver <= 1 && len >= (nr * 2 + 2) * 2) {
+                unsigned flags = 0;
+                for (unsigned i = 0; i < nr; i++) {
+                    flags = t[4 + 4 * i + 2] << 8 | t[4 + 4 * i + 3];
+                    if ((unsigned)f->ft->size->metrics.y_ppem <= (unsigned)(t[4 + 4 * i] << 8 | t[4 + 4 * i + 1])) break;
+                }
+                if (!(flags & 2 /* GASP_DOGRAY */)) return 1;
+            }
+        }
+    }
+    return 5;   /* GGO_GRAY4_BITMAP */
+}
+struct GBmp { int bx = 0, by = 0, ox = 0, oy = 0, cx = 0, cy = 0, stride = 0; std::vector<uint8_t> cov; };
+bool glyph_bmp(RF *f, unsigned ch, bool idx, unsigned aa, GBmp &g)   /* cache_glyph_bitmap: the glyph, else glyph 0, else the blank */
+{
+    unsigned fmt = aa | (idx ? 0x80 : 0), used = ch, tries[3] = { ch, 0, 0x20 };
+    uint8_t gm[20];
+    uint32_t ret = GERR;
+    for (unsigned t : tries) { used = t; memset(gm, 0, sizeof gm); ret = glyph_outline(f, t, fmt, gm, 0, nullptr, nullptr); if (ret != GERR) break; }
+    if (ret == GERR) return false;
+    auto r32 = [&](int o) { int32_t v; memcpy(&v, gm + o, 4); return v; };
+    g.bx = r32(0); g.by = r32(4); g.ox = r32(8); g.oy = r32(12); g.cx = (int16_t)(gm[16] | gm[17] << 8); g.cy = (int16_t)(gm[18] | gm[19] << 8);
+    if (!ret) g.bx = g.by = 0;
+    g.stride = ((g.bx * 8 + 31) >> 5) << 2;
+    size_t size = (size_t)g.by * (size_t)g.stride;
+    g.cov.assign(size ? size : 1, 0);
+    if (!size) return true;
+    std::vector<uint8_t> raw(size, 0);
+    if (glyph_outline(f, used, fmt, gm, (uint32_t)size, raw.data(), nullptr) == GERR) return false;
+    if (aa == 1) {   /* 1 bpp rows -> 0 / 0x10 bytes */
+        int sstride = ((g.bx + 31) >> 5) << 2;
+        for (int y = 0; y < g.by; y++) for (int x = 0; x < g.bx; x++) g.cov[(size_t)y * (size_t)g.stride + (size_t)x] = (raw[(size_t)y * (size_t)sstride + (size_t)(x >> 3)] >> (7 - (x & 7))) & 1 ? 0x10 : 0;
+    } else g.cov = raw;
+    return true;
+}
+void render_string(HDC hdc, RF *f, unsigned aa, int x, int y, UINT flags, const char16_t *s, UINT count, const int *dx, const int *clip, uint32_t color)
+{
+    for (UINT i = 0; i < count; i++) {
+        GBmp g;
+        if (!glyph_bmp(f, s[i], (flags & TX_GLYPH_INDEX) != 0, aa, g)) continue;
+        if (g.bx > 0 && g.by > 0) gdi_dc_glyph(hdc, x + g.ox, y - g.oy, g.bx, g.by, g.cov.data(), g.stride, color, clip);
+        if (dx) { if (flags & TX_PDY) { x += dx[2 * i]; y += dx[2 * i + 1]; } else x += dx[i]; }
+        else { x += g.cx; y += g.cy; }
+    }
+}
+
+/* ---- outline text metrics (freetype_set_outline_text_metrics + scale_outline_font_metrics), device units */
+struct OTMv {
+    TMW tm; uint8_t panose[10]; uint32_t fsSel, fsType; int32_t rise, run, italic, em, asc, desc, gap, cap, xh, box[4], macA, macD, macGap, minppem,
+        sub[2], suboff[2], sup[2], supoff[2], strikeSize, strikePos, underSize, underPos;
+};
+struct OTMs { std::string family, face, style, full; };   /* 8-bit (the system ANSI code page) */
+bool otm_dev(RF *f, OTMv *o, OTMs *s)
+{
+    if (!f->scalable || !outline_metrics(f)) return false;
+    FT_Face ft = f->ft;
+    TT_OS2 *os2 = (TT_OS2 *)FT_Get_Sfnt_Table(ft, FT_SFNT_OS2);
+    TT_HoriHeader *hh = (TT_HoriHeader *)FT_Get_Sfnt_Table(ft, FT_SFNT_HHEA);
+    TT_Postscript *post = (TT_Postscript *)FT_Get_Sfnt_Table(ft, FT_SFNT_POST);
+    TT_Header *head = (TT_Header *)FT_Get_Sfnt_Table(ft, FT_SFNT_HEAD);
+    TMW dev;
+    if (!os2 || !hh || !get_tm(f, &dev)) return false;
+    FT_Fixed em = (FT_Fixed)FT_MulDiv(f->ppem, 1 << 16, ft->units_per_EM);
+    double sy = f->scale_y, sx = f->aveWidth ? (double)f->aveWidth / f->tm.aw : sy;   /* scale_outline_font_metrics, identity world matrix */
+    auto SX = [&](long v) { return rnd((int)FT_MulFix(v, em) * sx); };
+    auto SY = [&](long v) { return rnd((int)FT_MulFix(v, em) * sy); };
+    memset(o, 0, sizeof *o);
+    o->tm = dev;
+    memcpy(o->panose, os2->panose, 10);
+    o->fsSel = os2->fsSelection | (f->fake_italic ? 1u : 0u) | (f->fake_bold ? 1u << 5 : 0u);
+    o->fsType = os2->fsType & 0x30e;
+    o->rise = hh->caret_Slope_Rise; o->run = hh->caret_Slope_Run;
+    o->italic = post ? rnd((double)post->italicAngle / 65536.0 * 10.0) : 0;   /* tenths of a degree, from the post table */
+    o->em = ft->units_per_EM;
+    o->asc = SY(os2->sTypoAscender); o->desc = SY(os2->sTypoDescender); o->gap = SY(os2->sTypoLineGap);
+    o->cap = SY(os2->sCapHeight); o->xh = SY(os2->sxHeight);
+    o->box[0] = SX(ft->bbox.xMin); o->box[1] = SY(ft->bbox.yMax); o->box[2] = SX(ft->bbox.xMax); o->box[3] = SY(ft->bbox.yMin);   /* left, top, right, bottom */
+    o->macA = rnd(f->tm.asc * sy); o->macD = -rnd(f->tm.desc * sy); o->macGap = SY(hh->Line_Gap);
+    o->minppem = head ? head->Lowest_Rec_PPEM : 0;
+    o->sub[0] = SX(os2->ySubscriptXSize); o->sub[1] = SY(os2->ySubscriptYSize); o->suboff[0] = SX(os2->ySubscriptXOffset); o->suboff[1] = SY(os2->ySubscriptYOffset);
+    o->sup[0] = SX(os2->ySuperscriptXSize); o->sup[1] = SY(os2->ySuperscriptYSize); o->supoff[0] = SX(os2->ySuperscriptXOffset); o->supoff[1] = SY(os2->ySuperscriptYOffset);
+    o->strikeSize = SY(os2->yStrikeoutSize); o->strikePos = SY(os2->yStrikeoutPosition);
+    o->underSize = post ? SY(post->underlineThickness) : 0; o->underPos = post ? SY(post->underlinePosition) : 0;
+    ustr full = sfnt_name(ft, 3);   /* the unique font identifier; a font without one reports its full name */
+    if (full.empty()) full = f->face->full;
+    if (s) { s->family = narrow(f->family); s->face = narrow(f->face->full); s->style = narrow(f->face->style); s->full = narrow(full); }
+    return true;
+}
+void otm_logical(const Map &m, OTMv *o)   /* NtGdiGetOutlineTextMetricsInternalW: device -> logical */
+{
+    TMW &t = o->tm;
+    t.h = lp_h(m, t.h); t.asc = lp_h(m, t.asc); t.desc = lp_h(m, t.desc); t.il = lp_h(m, t.il); t.el = lp_h(m, t.el);
+    t.aw = lp_w(m, t.aw); t.mw = lp_w(m, t.mw); t.oh = lp_w(m, t.oh);
+    o->asc = lp_h(m, o->asc); o->desc = lp_h(m, o->desc); o->gap = d2w_y(m, o->gap); o->cap = d2w_y(m, o->cap); o->xh = d2w_y(m, o->xh);
+    o->box[1] = lp_h(m, o->box[1]); o->box[3] = lp_h(m, o->box[3]); o->box[0] = lp_w(m, o->box[0]); o->box[2] = lp_w(m, o->box[2]);
+    o->macA = lp_h(m, o->macA); o->macD = lp_h(m, o->macD); o->macGap = d2w_y(m, o->macGap);
+    o->sub[0] = lp_w(m, o->sub[0]); o->sub[1] = lp_h(m, o->sub[1]); o->suboff[0] = lp_w(m, o->suboff[0]); o->suboff[1] = lp_h(m, o->suboff[1]);
+    o->sup[0] = lp_w(m, o->sup[0]); o->sup[1] = lp_h(m, o->sup[1]); o->supoff[0] = lp_w(m, o->supoff[0]); o->supoff[1] = lp_h(m, o->supoff[1]);
+    o->strikeSize = d2w_y(m, o->strikeSize); o->strikePos = lp_h(m, o->strikePos); o->underSize = lp_h(m, o->underSize); o->underPos = lp_h(m, o->underPos);
+}
+
+/* ---- ExtTextOut */
+BOOL ext_text_out(HDC hdc, int x, int y, UINT flags, const RECT *rect, const char16_t *str, UINT count, const int *lpdx)
+{
+    if (count > 0x7fffffffu) return FALSE;
+    FL l;
+    if (!gdi_dc_font(hdc)) { SetLastError(ERROR_INVALID_HANDLE); return FALSE; }
+    if (count && !str) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+    RF *f = cur(hdc);
+    Map m;
+    TMW tm;
+    LF lf;
+    if (!f || !dc_map(hdc, &m) || !get_tm(f, &tm) || !lf_of((void *)(uintptr_t)gdi_dc_font(hdc), &lf)) return FALSE;
+    int32_t align = 0, bkmode = 2, bk = 0, tc = 0, cx = 0, cy = 0;
+    gdi_dc_state(hdc, GDI_TS_ALIGN, 0, 0, &align); gdi_dc_state(hdc, GDI_TS_BKMODE, 0, 0, &bkmode); gdi_dc_state(hdc, GDI_TS_BKCOLOR, 0, 0, &bk);
+    gdi_dc_state(hdc, GDI_TS_TEXTCOLOR, 0, 0, &tc); gdi_dc_state(hdc, GDI_TS_POSX, 0, 0, &cx); gdi_dc_state(hdc, GDI_TS_POSY, 0, 0, &cy);
+    if (flags & TX_RTLREADING) align |= TX_RTL;
+    /* RTL fonts: ordering by the bidirectional algorithm (the base direction is the reading order), unless
+     * ETO_GLYPH_INDEX / ETO_IGNORELANGUAGE; for any other font the flag changes only the alignment above */
+    std::vector<char16_t> vis;
+    std::vector<int> dxv;
+    if (!(flags & (TX_GLYPH_INDEX | TX_IGNORELANGUAGE)) && count > 0 && (f->charset == HEBREW_CS || f->charset == ARABIC_CS)) {
+        Bidi b;
+        bidi_run(str, (int)count, (align & TX_RTL) ? 1 : 0, nullptr, &b);
+        vis.resize(count);
+        for (UINT i = 0; i < count; i++) { char16_t c = str[b.order[i]]; vis[i] = (b.level[(size_t)b.order[i]] & 1) ? mirror(c) : c; }
+        if (lpdx) {
+            size_t per = (flags & TX_PDY) ? 2 : 1;
+            dxv.resize(count * per);
+            for (UINT i = 0; i < count; i++) for (size_t k = 0; k < per; k++) dxv[i * per + k] = lpdx[(size_t)b.order[i] * per + k];
+            lpdx = dxv.data();
+        }
+        str = vis.data();
+        flags |= TX_IGNORELANGUAGE;
+    }
+    if (align & TX_UPDATECP) { x = cx; y = cy; }
+    double cosE = 1, sinE = 0;
+    int esc = (tm.pf & 2) ? lf.esc : 0;   /* a bitmap font is never rotated */
+    if (esc) { cosE = cos(esc * M_PI / 1800); sinE = sin(esc * M_PI / 1800); }
+    int rcl = 0, rct = 0, rcr = 0, rcb = 0;
+    uint32_t color = (uint32_t)tc & 0xffffff, bkc = (uint32_t)bk & 0xffffff;
+    if (rect && (flags & (TX_OPAQUE | TX_CLIPPED))) {
+        int a = rnd(rect->left * m.fx), b = rnd(rect->top * m.fy), c = rnd(rect->right * m.fx), d = rnd(rect->bottom * m.fy);
+        rcl = std::min(a, c); rcr = std::max(a, c); rct = std::min(b, d); rcb = std::max(b, d);
+        if (flags & TX_OPAQUE) gdi_dc_fill(hdc, rcl, rct, rcr, rcb, bkc);
+    } else flags &= ~(UINT)TX_CLIPPED;
+    if (!count) return TRUE;
+    x = rnd(x * m.fx); y = rnd(y * m.fy);
+    std::vector<int> deltas;   /* x, y pairs */
+    int wx = 0, wy = 0;
+    SIZE sz;
+    if (lpdx || esc) {
+        deltas.assign(2 * (size_t)count, 0);
+        if (lpdx) for (UINT i = 0; i < count; i++) {
+            deltas[2 * i] = lpdx[(flags & TX_PDY) ? 2 * i : i];
+            deltas[2 * i + 1] = (flags & TX_PDY) ? -lpdx[2 * i + 1] : 0;
+        } else {
+            std::vector<int> dx(count);
+            extent_core(hdc, f, str, (int)count, -1, nullptr, dx.data(), &sz, (flags & TX_GLYPH_INDEX) != 0);
+            for (UINT i = 0; i < count; i++) deltas[2 * i] = dx[i] - (i ? dx[i - 1] : 0);
+        }
+        int totx = 0, toty = 0;
+        for (UINT i = 0; i < count; i++) {
+            totx += deltas[2 * i]; toty += deltas[2 * i + 1];
+            int ex = (int)(cosE * totx + sinE * toty), ey = (int)(-sinE * totx + cosE * toty);
+            ex = rnd(ex * m.fx); ey = rnd(ey * m.fy);   /* lp_to_dp of the vector (origin 0) */
+            deltas[2 * i] = ex - wx; deltas[2 * i + 1] = ey - wy;
+            wx = ex; wy = ey;
+        }
+        flags |= TX_PDY;
+    } else {
+        extent_core(hdc, f, str, (int)count, 0, nullptr, nullptr, &sz, (flags & TX_GLYPH_INDEX) != 0);
+        wx = rnd(sz.cx * m.fx);
+    }
+    int asc = abs(w2d_y(m, lp_h(m, tm.asc))), desc = abs(w2d_y(m, lp_h(m, tm.desc)));
+    switch (align & (TX_RIGHT | TX_CENTER)) {   /* TA_LEFT | TA_RIGHT | TA_CENTER */
+    case 0:
+        if (align & TX_UPDATECP) { gdi_dc_state(hdc, GDI_TS_POSX, 1, rnd((x + wx) * m.ix), NULL); gdi_dc_state(hdc, GDI_TS_POSY, 1, rnd((y + wy) * m.iy), NULL); }
+        break;
+    case TX_CENTER: x -= wx / 2; y -= wy / 2; break;
+    case TX_RIGHT:
+        x -= wx; y -= wy;
+        if (align & TX_UPDATECP) { gdi_dc_state(hdc, GDI_TS_POSX, 1, rnd(x * m.ix), NULL); gdi_dc_state(hdc, GDI_TS_POSY, 1, rnd(y * m.iy), NULL); }
+        break;
+    default: break;
+    }
+    switch (align & TX_BASELINE) {   /* TA_TOP | TA_BOTTOM | TA_BASELINE */
+    case 0: y += (int)(asc * cosE); x += (int)(asc * sinE); break;
+    case TX_BOTTOM: y -= (int)(desc * cosE); x -= (int)(desc * sinE); break;
+    default: break;
+    }
+    int bpp = gdi_dc_depth(hdc);
+    if (bkmode != 1 /* TRANSPARENT */ && !((flags & TX_CLIPPED) && (flags & TX_OPAQUE)) &&
+        (!(flags & TX_OPAQUE) || !rect || x < rcl || x + wx >= rcr || y - asc < rct || y + desc >= rcb)) {
+        int bl = x, bt = y - asc, br = x + wx, bb = y + desc;
+        if (flags & TX_CLIPPED) { bl = std::max(bl, rcl); bt = std::max(bt, rct); br = std::min(br, rcr); bb = std::min(bb, rcb); }
+        if (br > bl && bb > bt) gdi_dc_fill(hdc, bl, bt, br, bb, bkc);
+    }
+    int clip[4] = { rcl, rct, rcr, rcb };
+    render_string(hdc, f, aa_flags_of(f, bpp), x, y, flags & ~(UINT)TX_OPAQUE, str, count, deltas.empty() ? nullptr : deltas.data(), (flags & TX_CLIPPED) ? clip : nullptr, color);
+    if (lf.ul || lf.so) {
+        OTMv o;
+        int upos = 0, uw = asc / 20 + 1, spos = asc / 2, sw = uw;   /* no outline metrics: the fixed rule on the ascent */
+        if (otm_dev(f, &o, nullptr)) {
+            otm_logical(m, &o);
+            auto lw = [&](int v) { int w = abs(w2d_y(m, v)); if (!w) w = 1; return v < 0 ? -w : w; };
+            upos = abs(w2d_y(m, o.underPos)); if (o.underPos < 0) upos = -upos;
+            uw = lw(o.underSize);
+            spos = abs(w2d_y(m, o.strikePos)); if (o.strikePos < 0) spos = -spos;
+            sw = lw(o.strikeSize);
+        }
+        auto line = [&](int pos, int w) {
+            int32_t p[8];
+            p[0] = (int)(x - (pos + w / 2) * sinE); p[1] = (int)(y - (pos + w / 2) * cosE);
+            p[2] = (int)(x + wx - (pos + w / 2) * sinE); p[3] = (int)(y + wy - (pos + w / 2) * cosE);
+            p[4] = (int)(p[2] + w * sinE); p[5] = (int)(p[3] + w * cosE);
+            p[6] = (int)(p[0] + w * sinE); p[7] = (int)(p[1] + w * cosE);
+            if (!esc) gdi_dc_fill(hdc, p[0], std::min(p[1], p[7]), p[2], std::max(p[1], p[7]), color);
+            else gdi_dc_poly(hdc, p, 4, color);
+        };
+        if (lf.ul) line(upos, uw);
+        if (lf.so) line(spos, sw);
+    }
+    return TRUE;
+}
+BOOL ext_text_out_a(HDC hdc, int x, int y, UINT flags, const RECT *rect, const char *str, UINT count, const int *dx)
+{
+    if (count > 0x7fffffffu) return FALSE;
+    if (flags & TX_GLYPH_INDEX) return ext_text_out(hdc, x, y, flags, rect, (const char16_t *)str, count, dx);
+    if (count && !str) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+    RF *f;
+    {
+        FL l;
+        if (!gdi_dc_font(hdc)) { SetLastError(ERROR_INVALID_HANDLE); return FALSE; }
+        f = cur(hdc);
+    }
+    ustr w = mb2w(f, str ? str : "", (int)count);
+    std::vector<int> dxw;
+    if (dx) {
+        std::vector<int> lens = mb_lens(f, str, (int)count);
+        size_t per = (flags & TX_PDY) ? 2 : 1, i = 0;
+        for (int len : lens) {
+            for (size_t k = 0; k < per; k++) { int v = dx[i * per + k]; if (len == 2) v += dx[(i + 1) * per + k]; dxw.push_back(v); }
+            i += (size_t)len;
+        }
+    }
+    return ext_text_out(hdc, x, y, flags, rect, w.data(), (UINT)w.size(), dx ? dxw.data() : nullptr);
+}
+
+/* ---- GetCharacterPlacement */
+struct GCPR { uint32_t lStructSize; char *lpOutString; uint32_t *lpOrder; int *lpDx; int *lpCaretPos; char *lpClass; uint16_t *lpGlyphs; uint32_t nGlyphs; int nMaxFit; };
+DWORD placement_w(HDC hdc, RF *f, const char16_t *str, int count, int max_extent, GCPR *res, DWORD flags, std::vector<char16_t> *outw)
+{
+    Map m;
+    TMW tm;
+    SIZE size;
+    if (!dc_map(hdc, &m) || !get_tm(f, &tm)) return 0;
+    if (!res) return extent_core(hdc, f, str, count, 0, nullptr, nullptr, &size, false) ? (DWORD)MAKELONG(size.cx, size.cy) : 0;
+    unsigned n = std::min<unsigned>((unsigned)count, res->nGlyphs);
+    /* advances in logical units; kern[i] is the kerning between character i and i + 1 */
+    std::vector<int> adv((size_t)count), kern((size_t)count, 0);
+    {
+        std::vector<int> pos;
+        int cx, cy;
+        positions(f, str, count, false, pos, &cx, &cy);
+        for (int i = 0; i < count; i++) adv[(size_t)i] = d2w_x(m, pos[(size_t)i]) - (i ? d2w_x(m, pos[(size_t)i - 1]) : 0);
+    }
+    if (flags & GX_USEKERNING) for (int i = 0; i + 1 < count; i++) kern[(size_t)i] = d2w_x(m, kern_pair(f, str[i], str[i + 1]));
+    int proc = count;   /* the characters processed: the ones that fit into nMaxExtent with GCP_MAXEXTENT */
+    if (flags & GX_MAXEXTENT) {
+        long acc = 0;
+        proc = 0;
+        for (int i = 0; i < count; i++) {
+            if (acc + adv[(size_t)i] > max_extent) break;
+            acc += adv[(size_t)i] + kern[(size_t)i];
+            proc++;
+        }
+        n = std::min<unsigned>(n, (unsigned)proc);
+        res->nMaxFit = proc;
+    }
+    res->nGlyphs = n;
+    int kern_total = 0;
+    for (int i = 0; i + 1 < proc; i++) kern_total += kern[(size_t)i];
+    Bidi b;
+    bool reorder = (flags & GX_REORDER) != 0;
+    if (reorder) bidi_run(str, count, 0, (flags & GX_CLASSIN) && res->lpClass ? (const uint8_t *)res->lpClass : nullptr, &b);
+    else {
+        b.order.resize((size_t)count); b.level.assign((size_t)count, 0); b.cls.resize((size_t)count);
+        for (int i = 0; i < count; i++) { b.order[(size_t)i] = i; b.cls[(size_t)i] = bidi_class(str[i]); }
+    }
+    std::vector<char16_t> outs(n);
+    for (unsigned j = 0; j < n; j++) {
+        int li = b.order[j];
+        char16_t c = str[li];
+        outs[j] = (reorder && !(flags & GX_SYMSWAPOFF) && (b.level[(size_t)li] & 1)) ? mirror(c) : c;
+    }
+    if (res->lpOutString && outw) *outw = outs;
+    if (res->lpOrder) for (unsigned j = 0; j < n; j++) res->lpOrder[j] = (uint32_t)b.order[j];
+    if (res->lpClass && !(flags & GX_CLASSIN)) for (unsigned j = 0; j < n; j++) {
+        switch (b.cls[(size_t)b.order[j]]) {   /* GCPCLASS_* */
+        case BC_L: res->lpClass[j] = 1; break;  case BC_R: res->lpClass[j] = 2; break;  case BC_AL: res->lpClass[j] = 3; break;
+        case BC_EN: res->lpClass[j] = 6; break; case BC_AN: res->lpClass[j] = 5; break; case BC_ET: res->lpClass[j] = 7; break;
+        case BC_ES: case BC_CS: res->lpClass[j] = 8; break;
+        default: res->lpClass[j] = 4; break;
+        }
+    }
+    std::vector<int> dxs(n);
+    for (unsigned j = 0; j < n; j++) { int li = b.order[j]; dxs[j] = adv[(size_t)li] + kern[(size_t)li]; }
+    if ((flags & GX_JUSTIFY) && (flags & GX_MAXEXTENT)) {   /* the spare room goes to the break characters, the remainder to the first ones (SetTextJustification) */
+        long total = 0;
+        unsigned blanks = 0;
+        for (unsigned j = 0; j < n; j++) { total += dxs[j]; if (outs[j] == tm.bc) blanks++; }
+        long extra = (long)max_extent - total;
+        if (extra > 0 && blanks) {
+            long q = extra / (long)blanks, r = extra % (long)blanks;
+            for (unsigned j = 0; j < n; j++) if (outs[j] == tm.bc) { dxs[j] += (int)q + (r > 0 ? 1 : 0); if (r > 0) r--; }
+        }
+    }
+    if (res->lpDx) for (unsigned j = 0; j < n; j++) res->lpDx[j] = dxs[j];
+    if (res->lpCaretPos) {   /* the caret position before each logical character: the leading edge of its glyph */
+        std::vector<int> vpos(n);
+        int acc = 0;
+        for (unsigned j = 0; j < n; j++) { vpos[j] = acc; acc += dxs[j]; }
+        for (unsigned j = 0; j < n; j++) { int li = b.order[j]; if ((unsigned)li < n) res->lpCaretPos[li] = (b.level[(size_t)li] & 1) ? vpos[j] + dxs[j] : vpos[j]; }
+    }
+    if (res->lpGlyphs) {   /* GetGlyphIndices: the cmap glyph, the default character's glyph for an unmapped one */
+        unsigned dflt = glyph_index(f, tm.dc, false);
+        for (unsigned j = 0; j < n; j++) { unsigned g = glyph_index(f, outs[j], false); res->lpGlyphs[j] = (uint16_t)(g ? g : dflt); }
+    }
+    if (!extent_core(hdc, f, str, proc, 0, nullptr, nullptr, &size, false)) return 0;
+    return (DWORD)MAKELONG(size.cx + kern_total, size.cy);
+}
+} // namespace
+
+/* ---- exports */
+extern "C" BOOL ExtTextOutW(HDC hdc, int x, int y, UINT flags, const RECT *rect, LPCWSTR str, UINT count, const INT *dx)
+{
+    return ext_text_out(hdc, x, y, flags, rect, (const char16_t *)str, count, dx);
+}
+extern "C" BOOL ExtTextOutA(HDC hdc, int x, int y, UINT flags, const RECT *rect, LPCSTR str, UINT count, const INT *dx)
+{
+    return ext_text_out_a(hdc, x, y, flags, rect, str, count, dx);
+}
+extern "C" BOOL GetTextExtentExPointW(HDC hdc, LPCWSTR str, int count, int max_ext, LPINT nfit, LPINT dxs, SIZE *size)
+{
+    return text_extent_w(hdc, (const char16_t *)str, count, max_ext, nfit, dxs, size, false);
+}
+extern "C" BOOL GetTextExtentPoint32W(HDC hdc, LPCWSTR str, int count, SIZE *size)
+{
+    return text_extent_w(hdc, (const char16_t *)str, count, 0, nullptr, nullptr, size, false);
+}
+extern "C" BOOL GetTextExtentExPointA(HDC hdc, LPCSTR str, int count, int max_ext, LPINT nfit, LPINT dxs, SIZE *size)
+{
+    if (count < 0 || max_ext < -1 || (count && !str) || !size) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+    RF *f;
+    {
+        FL l;
+        if (!gdi_dc_font(hdc)) { SetLastError(ERROR_INVALID_HANDLE); return FALSE; }
+        f = cur(hdc);
+    }
+    ustr w = mb2w(f, str ? str : "", count);
+    std::vector<int> wd(w.size());
+    int fit = 0;
+    if (!text_extent_w(hdc, w.data(), (int)w.size(), max_ext, nfit ? &fit : nullptr, dxs ? wd.data() : nullptr, size, false)) return FALSE;
+    std::vector<int> lens = mb_lens(f, str ? str : "", count);
+    size_t n = nfit ? (size_t)fit : w.size(), j = 0;
+    if (dxs) for (size_t i = 0; i < n && i < lens.size(); i++) { for (int k = 0; k < lens[i]; k++) dxs[j++] = wd[i]; }   /* both bytes of a DBCS character get its value */
+    if (nfit) { int bytes = 0; for (size_t i = 0; i < (size_t)fit && i < lens.size(); i++) bytes += lens[i]; *nfit = bytes; }
+    return TRUE;
+}
+extern "C" BOOL GetTextExtentPoint32A(HDC hdc, LPCSTR str, int count, SIZE *size) { return GetTextExtentExPointA(hdc, str, count, 0, NULL, NULL, size); }
+
+/* GetCharacterPlacement: GCP_RESULTS in the guest layout, pointers at native width */
+static DWORD placement(HDC hdc, const char *stra, const char16_t *strw, int count, int max_extent, void *results, DWORD flags)
+{
+    if (count == 0) return 0;
+    if (stra && count == -1) count = (int)strlen(stra);   /* the 8-bit entry takes -1 for a terminated string */
+    if (count < 0 || (!stra && !strw)) { SetLastError(ERROR_INVALID_PARAMETER); return 0; }
+    GCPR *res = (GCPR *)results;
+    if (res && res->lStructSize != sizeof(GCPR)) { SetLastError(ERROR_INVALID_PARAMETER); return 0; }
+    FL l;
+    if (!gdi_dc_font(hdc)) { SetLastError(ERROR_INVALID_HANDLE); return 0; }
+    RF *f = cur(hdc);
+    if (!f) return 0;
+    int nbytes = count;
+    ustr w;
+    if (stra) { w = mb2w(f, stra, count); strw = w.data(); count = (int)w.size(); }
+    std::vector<char16_t> outw;
+    DWORD r = placement_w(hdc, f, strw, count, max_extent, res, flags, &outw);
+    if (stra && res && res->lpOutString && !outw.empty())   /* back to 8 bits in the font's code page, at most nCount bytes */
+        WideCharToMultiByte((UINT)f->codepage, 0, (LPCWSTR)outw.data(), (int)outw.size(), res->lpOutString, nbytes, NULL, NULL);
+    return r;
+}
+extern "C" DWORD GetCharacterPlacementW(HDC hdc, LPCWSTR str, int count, int max_extent, void *results, DWORD flags)
+{
+    return placement(hdc, nullptr, (const char16_t *)str, count, max_extent, results, flags);
+}
+extern "C" DWORD GetCharacterPlacementA(HDC hdc, LPCSTR str, int count, int max_extent, void *results, DWORD flags)
+{
+    return placement(hdc, str, nullptr, count, max_extent, results, flags);
+}
+
+/* GetOutlineTextMetricsA: OUTLINETEXTMETRICA, strings (family, face, style, full) appended behind the structure; the
+ * otmp* fields hold their offsets from the start. A font that is not an outline (TrueType / OpenType) font: 0. */
+struct OTMA {
+    uint32_t otmSize; uint8_t tm[56]; uint8_t filler, panose[10]; uint32_t fsSelection, fsType; int32_t rise, run, italic; uint32_t em; int32_t asc, desc;
+    uint32_t gap, cap, xh; int32_t box[4]; int32_t macA, macD; uint32_t macGap, minppem; int32_t sub[2], suboff[2], sup[2], supoff[2];
+    uint32_t strikeSize; int32_t strikePos, underSize, underPos; char *pFamily, *pFace, *pStyle, *pFull;
+};
+extern "C" UINT GetOutlineTextMetricsA(HDC hdc, UINT cb, void *buf)
+{
+    FL l;
+    if (!gdi_dc_font(hdc)) { SetLastError(ERROR_INVALID_HANDLE); return 0; }
+    RF *f = cur(hdc);
+    Map m;
+    OTMv o;
+    OTMs s;
+    if (!f || !dc_map(hdc, &m) || !otm_dev(f, &o, &s)) return 0;
+    otm_logical(m, &o);
+    size_t needed = sizeof(OTMA) + s.family.size() + s.face.size() + s.style.size() + s.full.size() + 4;
+    if (!buf || !cb) return (UINT)needed;
+    std::vector<uint8_t> tmp(needed, 0);
+    OTMA *a = (OTMA *)tmp.data();
+    const TMW &t = o.tm;   /* text_metric_WtoA */
+    memcpy(a->tm, &t, 44);
+    uint8_t first = (uint8_t)std::min<int>(t.fc, 255), last;
+    if (t.cs == SYMBOL_CS) { first = 0x1e; last = 0xff; }
+    else if (t.pf & 4) { first = (uint8_t)(t.dc - 1); last = (uint8_t)std::min<int>(t.lc, 255); }
+    else last = (uint8_t)std::min<int>(t.lc, 255);
+    a->tm[44] = first; a->tm[45] = last; a->tm[46] = (uint8_t)t.dc; a->tm[47] = (uint8_t)t.bc; a->tm[48] = t.it; a->tm[49] = t.ul; a->tm[50] = t.so; a->tm[51] = t.pf; a->tm[52] = t.cs;
+    memcpy(a->panose, o.panose, 10);
+    a->fsSelection = o.fsSel; a->fsType = o.fsType; a->rise = o.rise; a->run = o.run; a->italic = o.italic; a->em = (uint32_t)o.em;
+    a->asc = o.asc; a->desc = o.desc; a->gap = (uint32_t)o.gap; a->cap = (uint32_t)o.cap; a->xh = (uint32_t)o.xh;
+    memcpy(a->box, o.box, sizeof a->box); a->macA = o.macA; a->macD = o.macD; a->macGap = (uint32_t)o.macGap; a->minppem = (uint32_t)o.minppem;
+    memcpy(a->sub, o.sub, 8); memcpy(a->suboff, o.suboff, 8); memcpy(a->sup, o.sup, 8); memcpy(a->supoff, o.supoff, 8);
+    a->strikeSize = (uint32_t)o.strikeSize; a->strikePos = o.strikePos; a->underSize = o.underSize; a->underPos = o.underPos;
+    size_t off = sizeof(OTMA);
+    const std::string *str[4] = { &s.family, &s.face, &s.style, &s.full };
+    char **slot[4] = { &a->pFamily, &a->pFace, &a->pStyle, &a->pFull };
+    for (int i = 0; i < 4; i++) { *slot[i] = (char *)(uintptr_t)off; memcpy(tmp.data() + off, str[i]->c_str(), str[i]->size() + 1); off += str[i]->size() + 1; }
+    size_t n = std::min<size_t>(needed, cb);   /* a short buffer is filled as far as it goes */
+    a->otmSize = (uint32_t)n;
+    memcpy(buf, tmp.data(), n);
+    return (UINT)n;
 }
