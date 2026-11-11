@@ -541,11 +541,17 @@ class Job:
         rtp, _ = self.toolrt(used)
         self.built = self.plugins(ws) if any(k == "cxx" for k in kinds.values()) else []
         builds = {}
+        # RULE: the CC stage (-fpreprocessed, input unit.ii) mounts, and so keys on, only the compiler (its external, if it is one), the
+        # declared plugin .so files and unit.ii. Any other external is not mounted there: what is not mounted cannot be read, so the object
+        # does not depend on it by construction (a new commit of such an external changes the PP keys, not the CC keys).
+        cc = self.rec["compiler"].get("external")
+        drop = {e["at"] for n, e in self.ext.items() if n != cc}
         for k in sorted(set(kinds.values())):
             fp = os.path.join(ws, "flags-%s.json" % k)
             json.dump({"argv": rec["flags"][k]}, open(fp, "w"))
             builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtp, flags_file=fp,
                                                            src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws)))
+            builds[k].cc_drop = drop
             if k == "cxx":   # plugins are loaded by the C++ front end of the CC stage only (not by cc1, not by preprocessing)
                 builds[k].cc_flags = [f for _, _, fl in self.built for f in fl]
                 builds[k].cc_inputs = [("/plug/" + n, t) for n, t, _ in self.built]

@@ -116,6 +116,7 @@ def run_stage(store, doc, cold):
 class Build:
     def __init__(self, a):
         self.store, self.cold, self.cxx, self.cache = a.store, a.cold, a.cxx, {}
+        self.cc_drop = set()   # `at` of tool-runtime inputs the CC stage does not mount (externals other than the compiler's)
         self.cc_flags, self.cc_inputs = [], []   # plugins: flags and declared inputs [(at, tree)] of the CC stage only (a plugin is part of its key)
         self.rt = json.load(open(a.toolrt))
         if self.cxx not in self.rt["exes"]:
@@ -147,7 +148,8 @@ class Build:
         argv += ["-ffile-prefix-map=%s=%s" % (at, at[1:]) for at, _ in self.roots] + tail + [src]
         doc = {"format": "fnvnx-stage/1", "stage": "%s:%s" % (kind, rel), "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
                "env": dict(ENV, PATH=os.path.dirname(self.cxx)), "outputs": ["/out"],
-               "inputs": sorted(self.rt["inputs"] + [{"at": at, "tree": t} for at, t in inputs + (self.cc_inputs if kind == "cc" else [])],
+               "inputs": sorted([i for i in self.rt["inputs"] if kind != "cc" or i["at"] not in self.cc_drop] +
+                                [{"at": at, "tree": t} for at, t in inputs + (self.cc_inputs if kind == "cc" else [])],
                                 key=lambda i: i["at"])}
         v = toolflags.check_doc(doc)
         if v:

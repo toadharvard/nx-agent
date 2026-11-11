@@ -171,6 +171,41 @@ def main():
     check("lifted root without plugins builds green", rl["status"] == "green" and not rl["plugins"], rl.get("failure"))
     if rl["status"] == "green":
         check("without the plugin the conversion is the bare fcvtzs", "#0x80000000" not in disasm(rl, "_Z3f2if", "gen/a.cc") and "fcvtzs" in disasm(rl, "_Z3f2if", "gen/a.cc"))
+    # --- the CC stage mounts no external but the compiler's: a new commit of another external re-runs PP only; CC cannot read it
+    def pack_commit(text):
+        w(ext, "pack.txt", text)
+        git(ext, "add", "-A")
+        git(ext, "commit", "-q", "-m", text)
+        c = git(ext, "rev-parse", "HEAD").strip()
+        d = os.path.join(BASE, "pt-" + c[:8])
+        subprocess.run(["git", "-C", ext, "checkout-index", "-a", "-f", "--prefix=" + d + "/"], check=True)
+        return c, cas.ingest(d, os.path.join(BASE, "ingest-store"))
+
+    def xrec(c, t):
+        r = mut(external=[{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": c, "tree_sha256": t, "at": "/ext/pack"}])
+        return r
+
+    def kinds():
+        ds = [json.load(open(p))["stage"].split(":")[0] for p in glob.glob(os.path.join(BASE, "X", "stage-docs", "*", "*.json"))]
+        return {k: ds.count(k) for k in ("pp", "cc")}
+
+    c1, t1 = pack_commit("one\n")
+    x1 = make_repo("ext1", xrec(c1, t1), "native")
+    r1, _ = build(x1, "X")
+    k1 = kinds()
+    c2, t2 = pack_commit("two\n")
+    x2 = make_repo("ext2", xrec(c2, t2), "native")
+    r2, _ = build(x2, "X", os.path.join(BASE, "out-X2"))
+    k2 = kinds()
+    check("external commit change: PP re-runs, CC runs nothing", r1["status"] == r2["status"] == "green" and k2["pp"] > k1["pp"] and k2["cc"] == k1["cc"]
+          and [o["sha256"] for o in r1["objects"]] == [o["sha256"] for o in r2["objects"]], (k1, k2, r2.get("failure")))
+    ccd = [json.load(open(p)) for p in glob.glob(os.path.join(BASE, "X", "stage-docs", "*", "*.json"))]
+    ccd = [d for d in ccd if d["stage"].startswith("cc:")]
+    check("CC stage document holds no /ext/pack, a PP document does", ccd and not any(i["at"] == "/ext/pack" for d in ccd for i in d["inputs"]) and any(
+        i["at"] == "/ext/pack" for p in glob.glob(os.path.join(BASE, "X", "stage-docs", "*", "*.json")) for i in json.load(open(p))["inputs"]))
+    inc = make_repo("incbin", xrec(c2, t2), "native", {ROOT + "/a.cc": SRC + 'asm(".incbin \\"/ext/pack/pack.txt\\"");\n'})
+    ri, _ = build(inc, "I")
+    check("CC cannot read an external (.incbin of its file fails)", ri["status"] == "red" and ri["failure"]["stage"].startswith("cc:"), ri.get("failure"))
     tracked = make_repo("liftedbad", lrec, {"lifted_by": T + "gen/lift.py", "pack": "pack"}, {T + "gen/lift.py": lift, ROOT + "/b.cc": "int b;\n", ROOT + "/a.cc": None})
     check("lifted root with a tracked C++ unit is red", any("is not an output" in x for x in errs(tracked, lrec)), errs(tracked, lrec))
     nopack = make_repo("nopack", lrec, {"lifted_by": T + "gen/lift.py", "pack": "nope"}, {T + "gen/lift.py": lift, ROOT + "/a.cc": None})
