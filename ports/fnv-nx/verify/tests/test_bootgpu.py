@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""Tests of verify/bootgpu.py, Machine.host_ptr and boot.py --gpu/--frames, WITHOUT the real renderer: a fake libnxgl4 (C, built with the
-host gcc) implements the same exports. fn 1 = sum the bytes of guest buffer (addr, size) through nxgl4_guest_ptr, 2 = write a pattern into
-it, 3 = present (nxgl4_on_present(frame++) after writing a frame file into $NXGL4_FRAMES), 4 = ask for a range (addr, size) and return
-an error code when the pointer is NULL, 5 = the swapchain size given to nxgl4_create (w << 16 | h). Plain script: exit 0 on pass."""
+"""Tests of verify/bootgpu.py, Machine.host_ptr and boot.py --gpu/--frames on the REAL renderer library: the published libnxgl4.so of the
+fnv-nx-build branch l6-render/nxgl4/13c4573c49d7 (commit and tree_sha256 pinned below, fetched through recipe.fetch_externals like a
+recipe external; its sha256 must equal its meta.json and the pin). The guest drives it with the nxgpu v4 calls (INFO, IMAGE_CREATE, IMAGE_READ,
+PRESENT, refusals) and every expected value comes from the library's published contract (render/d3d9/backend/NXGL4_HOST.md section 3 and the
+ABI headers nxgpu4.h, nx/gpu_abi.h, gl4.h it cites) or from the bytes the guest itself wrote - never from a computation of the code under test.
+The host needs the packages of verify/env.json (libegl1, libegl-mesa0 and what they pull); a library that cannot load is a failed test.
+Plain script: exit 0 on pass."""
 import ctypes
 import json
 import os
-import struct
-import subprocess
+import atexit
+import hashlib
+import shutil
+import tempfile
 import sys
 import time
 
@@ -18,56 +23,81 @@ import boot  # noqa: E402
 import bootgpu  # noqa: E402
 import boothost  # noqa: E402
 import bootmachine  # noqa: E402
+import recipe  # noqa: E402
 import test_bootmachine as tb  # noqa: E402
 from test_boot import cli  # noqa: E402
 
-FAKE_C = r"""
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-void *nxgl4_guest_ptr(uint64_t addr, uint64_t size);
-void nxgl4_on_present(uint32_t frame);
-static uint32_t frame, W, H;
-static char err[64];
-const void *nxgl4_create(uint32_t w, uint32_t h, char *e, size_t n) { frame = 0; W = w; H = h; err[0] = 0; return &W; }
-void nxgl4_destroy(void) {}
-const char *nxgl4_last_error(void) { return err; }
-uint64_t nxgl4_ext(uint32_t fn, const uint64_t *a, uint32_t n) {
-    if (fn == 5) return (uint64_t)W << 16 | H;
-    if (fn == 3) {
-        const char *dir = getenv("NXGL4_FRAMES");
-        char path[512];
-        if (!dir) return 0xE3;
-        snprintf(path, sizeof path, "%s/frame_%06u.rgba", dir, frame);
-        FILE *f = fopen(path, "wb"); if (!f) return 0xE3; fwrite(&frame, 4, 1, f); fclose(f);
-        snprintf(path, sizeof path, "%s/frame_%06u.txt", dir, frame);
-        f = fopen(path, "w"); if (!f) return 0xE3; fprintf(f, "%u %u\n", W, H); fclose(f);
-        nxgl4_on_present(frame++);
-        return 0;
-    }
-    if (n < 2) return 0xE0;
-    uint8_t *p = nxgl4_guest_ptr(a[0], a[1]);
-    if (!p) { snprintf(err, sizeof err, "range refused"); return fn == 4 ? 0xE4 : ~0ull; }
-    if (fn == 1) { uint64_t s = 0; for (uint64_t i = 0; i < a[1]; i++) s += p[i]; return s; }
-    if (fn == 2) { for (uint64_t i = 0; i < a[1]; i++) p[i] = (uint8_t)(i * 7 + 3); return 0; }
-    return fn == 4 ? 0 : 0xE0;
-}
-"""
+# The published renderer, pinned exactly as a recipe external (verify/RECIPE.md "External inputs"; NXGL4_HOST.md section 1).
+NXGL4 = {"name": "nxgl4", "repo": "fnv-nx-build", "ref": "l6-render/nxgl4/13c4573c49d7", "commit": "2f0427f556c6a1d5af80d76a313a386abfc6c03a",
+         "tree_sha256": "436df06806ab414a41b426739e18259025a1a4fe7a2dfb412cc75130d8c62b15", "at": "libnxgl4.so"}
+BRIDGE = {"name": "bridge", "repo": "fnv-nx-build", "ref": "l6-render/bridge/13c4573c49d7", "commit": "7c98eb37b7c6ac9bc7c74a131fcd04b892352a13",
+          "tree_sha256": "30a71e185b6c068a3166716ecd579d9bc0f186d44d750d57f6e38518603d415e", "at": "libfnvnx-d3d9.a"}   # the D3D9 bridge of the same nx-agent commit
+NX_AGENT_COMMIT = "13c4573c49d7b5d316ce7aa3df9e6226471c13b7"   # meta.json of the nxgl4 branch and build.json of the bridge branch both record it
+NXGL4_SHA256 = "52d324caabe9322a5a46b745f5af1df73f2046c965a4b442f161cbc47b61a7a0"   # NXGL4_HOST.md section 1 table
+BAD_CALL = 0xFFFFFFFFFFFFFF02                                                         # gpu_abi.h:191
+NXGPU_MAGIC = 0x5550474E                                                              # gpu_abi.h:25 ("NGPU")
+FN_INFO, FN_IMAGE_CREATE, FN_IMAGE_READ, FN_PRESENT = 0, 3, 15, 17                   # gpu_abi.h:186-189, nxgpu4.h:261-266
+
+
+def fetch_renderer(scratch):
+    """-> (directory of the pinned nxgl4 branch commit, directory of the pinned bridge branch commit): fetched by exact commit through
+    recipe.fetch_externals (tree_sha256 checked there); libnxgl4.so's sha256 must equal the pin and its meta.json, the bridge's build.json must
+    name the archive's sha256 and the same nx-agent commit"""
+    store, ws = os.path.join(scratch, "cas"), os.path.join(scratch, "ws")
+    os.makedirs(ws)
+    got = recipe.fetch_externals([NXGL4, BRIDGE], store, os.path.join(scratch, "ext"), ws)
+    g, b = got["nxgl4"]["host"], got["bridge"]["host"]
+    meta, build = json.load(open(os.path.join(g, "meta.json"))), json.load(open(os.path.join(b, "build.json")))
+    sha = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()  # noqa: E731
+    assert sha(os.path.join(g, "libnxgl4.so")) == NXGL4_SHA256 == meta["sha256"], meta
+    assert sha(os.path.join(b, "libfnvnx-d3d9.a")) == build["archive_sha256"], build["archive_sha256"]
+    assert meta["nx_agent_commit"] == build["nx_agent_commit"] == NX_AGENT_COMMIT
+    return g, b
+
+
+def fetch_nxgl4(scratch):
+    """-> path of the pinned libnxgl4.so"""
+    return os.path.join(fetch_renderer(scratch)[0], "libnxgl4.so")
+
+
+# MODE 50: the renderer guest. Layout in the heap block at +0x60000: pixels A +0x000 (256 bytes, 8x8 RGBA8), NxImageDesc +0x100 (32),
+# NxInfo +0x200 (32), readback buffer B +0x300 (256), NxImageRead +0x400 (48), NxPresent +0x500 (80), call argument words +0x600.
+# Field offsets: NXGL4_HOST.md section 3 (NxInfo 8 x u32; NxImageDesc gpu_abi.h:41-53; NxImageRead nxgpu4.h:176-181; NxPresent nxgpu4.h:229-240).
 MODE50 = r"""#if MODE == 50
-    uint8_t *buf = (uint8_t *)(uintptr_t)(H->heap_base + 0x60000);
-    for (uint32_t i = 0; i < 100; i++) buf[i] = (uint8_t)i;
-    uint64_t a2[2] = {H->heap_base + 0x60000, 100}, a3[2] = {H->heap_base + 0x60200, 16};
-    num("dims", EC(10, 5, FNVNX_ADDR(a2), 1));
-    num("sum", EC(10, 1, FNVNX_ADDR(a2), 2));
-    num("pat", EC(10, 2, FNVNX_ADDR(a3), 2));
-    uint32_t ps = 0;
-    for (uint32_t i = 0; i < 16; i++) ps += buf[0x200 + i];
-    num("patsum", ps);
-    for (uint32_t i = 0; i < 4; i++) EC(10, 3, FNVNX_ADDR(a2), 1);
-    uint64_t A = plat(4, 0, 0x8000000, 0, 2);
-    plat(5, A, 0x1000, 0, 2); plat(5, A + 0x1000, 0x1000, 0, 2);
-    uint64_t a4[2] = {A + 0xff0, 0x20};
-    num("straddle", EC(10, 4, FNVNX_ADDR(a4), 2));
+    uint8_t *A = (uint8_t *)(uintptr_t)(H->heap_base + 0x60000);
+    uint8_t *D = A + 0x100, *I = A + 0x200, *B = A + 0x300, *R = A + 0x400, *P = A + 0x500;
+    uint64_t *w = (uint64_t *)(A + 0x600);
+    for (uint32_t i = 0; i < 256; i++) A[i] = (uint8_t)(i * 7 + 3);
+    w[0] = H->heap_base + 0x60200;
+    num("infoRc", EC(10, 0, FNVNX_ADDR(w), 1));
+    num("magic", ((uint32_t *)I)[0]); num("version", ((uint32_t *)I)[1]); num("backend", ((uint32_t *)I)[6]);
+    num("dims", (uint64_t)((uint32_t *)I)[4] << 16 | ((uint32_t *)I)[5]);
+    *(uint16_t *)(D + 0) = 8; *(uint16_t *)(D + 2) = 8; D[4] = 1; D[5] = 1; D[6] = 1;
+    *(uint64_t *)(D + 16) = H->heap_base + 0x60000; *(uint32_t *)(D + 24) = 256;
+    w[0] = H->heap_base + 0x60100;
+    uint64_t id = EC(10, 3, FNVNX_ADDR(w), 1);
+    num("created", id != 0);
+    *(uint32_t *)(R + 0) = (uint32_t)id;
+    *(uint32_t *)(R + 20) = 8; *(uint32_t *)(R + 24) = 8; *(uint32_t *)(R + 28) = 1;
+    *(uint64_t *)(R + 32) = H->heap_base + 0x60300; *(uint32_t *)(R + 40) = 256; *(uint32_t *)(R + 44) = 32;
+    w[0] = H->heap_base + 0x60400;
+    num("readRc", EC(10, 15, FNVNX_ADDR(w), 1));
+    uint32_t same = 0;
+    for (uint32_t i = 0; i < 256; i++) same += B[i] == A[i];
+    num("readSame", same);
+    *(uint32_t *)(P + 0) = (uint32_t)id;
+    *(int32_t *)(P + 12) = 8; *(int32_t *)(P + 16) = 8; *(int32_t *)(P + 28) = 8; *(int32_t *)(P + 32) = 8;
+    w[0] = H->heap_base + 0x60500;
+    uint64_t prc = 0;
+    for (uint32_t f = 0; f < 4; f++) { *(uint32_t *)(P + 48) = f; prc |= EC(10, 17, FNVNX_ADDR(w), 1); }
+    num("presentRc", prc);
+    uint64_t A2 = plat(4, 0, 0x8000000, 0, 2);
+    plat(5, A2, 0x1000, 0, 2); plat(5, A2 + 0x1000, 0x1000, 0, 2);
+    w[0] = 0x30000000;
+    num("outside", EC(10, 15, FNVNX_ADDR(w), 1));
+    w[0] = A2 + 0xff0;
+    num("straddle", EC(10, 17, FNVNX_ADDR(w), 1));
+    num("badfn", EC(10, 99, FNVNX_ADDR(w), 1));
     fnvnx_hcall1(H->exit, 0);
 #elif MODE == 51
     num("mf", fnvnx_hcall3(H->map_fixed, 0x4000000, 0x2000, H->heap_base + 0x20000));
@@ -77,7 +107,6 @@ MODE50 = r"""#if MODE == 50
     plat(8, A + 0x10000, 0x1000, 1, 3);
     fnvnx_hcall1(H->exit, 0);
 #elif MODE == 6"""
-EXPECT = {"dims": 0x500 << 16 | 0x2D0, "sum": 4950, "patsum": sum((i * 7 + 3) & 255 for i in range(16)), "straddle": 0xE4}
 
 
 def parse(lines):
@@ -87,16 +116,17 @@ def parse(lines):
 def main():
     t0 = time.time()
     d = tb.TMP
-    c = os.path.join(d, "fake.c")
-    open(c, "w").write(FAKE_C)
-    lib = os.path.join(d, "libnxgl4.so")
-    subprocess.run(["gcc", "-O2", "-fPIC", "-shared", c, "-o", lib], check=True)
+    scratch = tempfile.mkdtemp(prefix="nxgl4-")
+    atexit.register(shutil.rmtree, scratch, ignore_errors=True)
+    lib = fetch_nxgl4(scratch)
+    tb.case("setup: the pinned libnxgl4.so fetched, tree_sha256 and sha256 verified", os.path.isfile(lib))
     elf50, elf51 = tb.build(50, MODE50)[0], tb.build(51, MODE50)[0]
     root = os.path.join(d, "sd")
     os.makedirs(root)
     frames = os.path.join(d, "frames")
 
-    # --- Machine + Gpu directly
+    # --- Machine + Gpu directly (the environment of the library as boot.py sets it)
+    os.environ.update(boot.GPU_ENV)
     os.environ["NXGL4_FRAMES"] = frames
     os.makedirs(frames)
     m = bootmachine.Machine(elf50, tb.make_plan(elf50), boothost.Services(root))
@@ -106,16 +136,23 @@ def main():
     m.on_console(lines.append)
     r = m.run()
     v = parse(lines)
-    tb.case("guest exits 0", r["reason"] == "exit" and r["exit_code"] == 0, r)
-    tb.case("docked profile: library got 1920x1080", v["dims"] == 1920 << 16 | 1080, v)
-    tb.case("fn 1: sum of the guest buffer through nxgl4_guest_ptr", v["sum"] == 4950, v)
-    tb.case("fn 2: the library's pattern is visible to the guest", v["patsum"] == EXPECT["patsum"], v)
-    tb.case("presents counted, callback saw 0..3", g.presents == 4 and seen == [0, 1, 2, 3], (g.presents, seen))
-    tb.case("frame files written", sorted(os.listdir(frames)) == ["frame_%06u.%s" % (i, e) for i in range(4) for e in ("rgba", "txt")]
-            and open(os.path.join(frames, "frame_000002.txt")).read() == "1920 1080\n", os.listdir(frames))
-    tb.case("straddling range refused (NULL -> error code)", v["straddle"] == 0xE4, v)
+    tb.case("guest exits 0", r["reason"] == "exit" and r["exit_code"] == 0, (r, lines))
+    tb.case("INFO: magic, version 4, backend 2 (NXGL4_HOST.md section 3)", v["infoRc"] == 0 and v["magic"] == NXGPU_MAGIC
+            and v["version"] == 4 and v["backend"] == 2, v)
+    tb.case("INFO: docked profile gives the swapchain 1920x1080 (NxInfo words 4, 5)", v["dims"] == 1920 << 16 | 1080, v)
+    tb.case("IMAGE_CREATE reads the guest descriptor and pixels and returns an id", v["created"] == 1, v)
+    tb.case("IMAGE_READ writes the uploaded pixels back into the guest buffer: all 256 bytes equal", v["readRc"] == 0 and v["readSame"] == 256, v)
+    tb.case("PRESENT x4 returns 0 and calls nxgl4_on_present with NxPresent.frame 0..3", v["presentRc"] == 0
+            and g.presents == 4 and seen == [0, 1, 2, 3], (v["presentRc"], g.presents, seen))
+    rgba = ["frame_%06u.%s" % (i, e) for i in range(4) for e in ("rgba", "txt")]
+    tb.case("frame files: frame_%06u.rgba is the whole swapchain (w*h*4 bytes), .txt is 'w h\\n'", sorted(os.listdir(frames)) == rgba
+            and open(os.path.join(frames, "frame_000002.txt")).read() == "1920 1080\n"
+            and os.path.getsize(os.path.join(frames, "frame_000002.rgba")) == 1920 * 1080 * 4, os.listdir(frames))
+    tb.case("descriptor outside guest memory: BAD_CALL (NXGL4_HOST.md section 3 (d))", v["outside"] == BAD_CALL, v)
+    tb.case("descriptor straddling two extents: BAD_CALL (the range is not wholly in one mapping)", v["straddle"] == BAD_CALL, v)
+    tb.case("unknown fn 99: BAD_CALL (dispatch, NXGL4_HOST.md section 3)", v["badfn"] == BAD_CALL, v)
     rep = g.report()
-    tb.case("report: last_error from the library, first call recorded", rep["last_error"] == "range refused" and rep["presents"] == 4
+    tb.case("report: library sha256 is the pin, presents 4, first call recorded", rep["library_sha256"] == NXGL4_SHA256 and rep["presents"] == 4
             and rep["first_module10_call"]["instructions_total"] >= 0 and rep["first_module10_call"]["virtual_ns"] > 0, rep)
     g.close()
 
@@ -124,7 +161,7 @@ def main():
     lines = []
     m.on_console(lines.append)
     m.run()
-    tb.case("without --gpu: module 10 answers NO_MODULE", parse(lines)["dims"] == bootmachine.EXT_NO_MODULE, lines)
+    tb.case("without --gpu: module 10 answers NO_MODULE", parse(lines)["infoRc"] == bootmachine.EXT_NO_MODULE, lines)
 
     # --- host_ptr
     m = bootmachine.Machine(elf51, tb.make_plan(elf51), boothost.Services(root))
@@ -172,8 +209,7 @@ def main():
     tb.case("CLI --gpu run exits 0", ok, outs[0])
     if ok:
         tb.case("CLI: gpu record in OUT.json", set(doc["gpu"]) == {"library_sha256", "presents", "first_module10_call", "last_error"}
-                and doc["gpu"]["presents"] == 4 and doc["gpu"]["last_error"] == "range refused"
-                and len(doc["gpu"]["library_sha256"]) == 64, doc["gpu"])
+                and doc["gpu"]["presents"] == 4 and doc["gpu"]["library_sha256"] == NXGL4_SHA256, doc["gpu"])
         st = {x["name"]: x["reached"] for x in doc["milestones"]}
         tb.case("CLI: host events gpu-first-call and present reached", st == {"first": True, "pres": True}, st)
         names = [iv["to"] for iv in doc["icount"]["intervals"]]
