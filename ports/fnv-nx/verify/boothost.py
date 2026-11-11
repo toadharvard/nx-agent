@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-"""The host services of the boot stage: the 50 h_<slot> methods of the FnvnxHostApi v3 table, ported from
-tests/s5/emu_guest.py (Emu.h_*). Policy (address space, scheduling, ext modules) lives in bootmachine.Machine; these
+"""The host services of the boot stage: the 50 h_<slot> methods of the FnvnxHostApi v3 table. Policy (address space, scheduling, ext modules) lives in bootmachine.Machine; these
 methods do the argument decoding and the host-side effect. A blocking call returns (wait spec, result when resumed).
 
-Files: guest paths go through tests/s5/datapath.DataPath (its resolve rule: sdmc: prefix, case-folded components, the
---game mounts); only resolve/changed/fault are used, none of its milestone bookkeeping. datapath has no option the
-rules forbid (it is path mapping and counting), so it is imported unchanged. DataPath(root) creates
-<root>/switch/fnv as the old driver's runs did.
+Files: guest paths go through bootpath.BootPath (sdmc: prefix, case-folded components, the game mounts; its rule is
+stated in bootpath.py). BootPath(root) creates <root>/switch/fnv, as the device always has it.
 
 Host slots whose effect is not modelled (the observable contract is kept; see HOST SLOTS in the stage report):
  output_debug_string (kept in .debug, no sink), console_flush, main_loop (always 1), buttons_down (always 0),
@@ -22,8 +19,8 @@ import struct
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "tests", "s5"))
-import datapath  # noqa: E402
+sys.path.insert(0, HERE)
+import bootpath  # noqa: E402
 from bootmachine import ExtMissing  # noqa: E402
 
 U64 = (1 << 64) - 1
@@ -38,7 +35,7 @@ def neg(e):
 class Services:
     def __init__(self, root, game=None):
         self.m = None
-        self.dp = datapath.DataPath(root, game)
+        self.dp = bootpath.BootPath(root, game)
         self.debug, self.fds, self.dirs, self.next_dir = [], {}, {}, 1
         self.audio_period, self.audio_frames, self.boosts, self.placement = 0, 0, [], {}
         self.rng = 0

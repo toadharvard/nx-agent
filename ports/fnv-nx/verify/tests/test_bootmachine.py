@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Tests of verify/bootmachine.py + boothost.py (the boot stage machine). Plain script: exit 0 on pass, one line per case.
-Builds small ILP32 PIE guests with aarch64-linux-gnu-gcc (-mabi=ilp32) from the real toolchain/guest/crt0.s (FNXG header)
-and the real toolchain/guest/guest.ld rebased to 0 (its two base asserts removed); the runtime part is the test's own
+Builds small ILP32 PIE guests with aarch64-linux-gnu-gcc (-mabi=ilp32) from the fixtures in tests/guest/ (crt0.s with the
+FNXG header, guest.ld rebased to 0 with its two base asserts already removed, hostapi.h); the runtime part is the test's own
 freestanding entry (the real runtime.c needs devkitA64's newlib: sys/iosupport.h). The guest relocates itself, as runtime.c
 does. Scratch: tempfile.mkdtemp, removed at exit."""
 import atexit
 import os
-import re
 import shutil
 import struct
 import subprocess
@@ -16,7 +15,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
-TC = os.path.join(VERIFY, "..", "toolchain")
+GUEST_DIR = os.path.join(HERE, "guest")
 sys.path.insert(0, VERIFY)
 import bootlayout  # noqa: E402
 import boothost  # noqa: E402
@@ -28,14 +27,14 @@ FAILED, N = [], [0]
 CC = "aarch64-linux-gnu-gcc"
 CFLAGS = ["-mabi=ilp32", "-march=armv8-a", "-O2", "-fPIE", "-ffreestanding", "-fno-builtin", "-fno-stack-protector", "-fvisibility=hidden",
           "-mno-outline-atomics", "-fno-asynchronous-unwind-tables", "-fno-tree-loop-distribute-patterns", "-Wall",
-          "-I" + os.path.join(TC, "include")]
+          "-I" + GUEST_DIR]
 LDFLAGS = ["-m", "aarch64elf32", "-pie", "--no-dynamic-linker", "-z", "text", "-z", "now", "-z", "pack-relative-relocs",
            "--gc-sections", "-z", "max-page-size=0x1000", "--defsym=FNVNX_GUEST_BASE=0",
            "--require-defined=__fnvnx_guest_start"]
 
 GUEST = r'''
 #include <stdint.h>
-#include "fnvnx/hostapi.h"
+#include "hostapi.h"
 const FnvnxHostApi *fnvnx_host;
 #define H (fnvnx_host)
 typedef struct { int32_t d_tag; uint32_t d_val; } Dyn;
@@ -190,12 +189,9 @@ def build(mode):
     """crt0.s + test C (GUEST with -DMODE) -> (ELF bytes, ELF path); importable: test_boot.py uses it"""
     src, ld = os.path.join(TMP, "g.c"), os.path.join(TMP, "guest.ld")
     if not os.path.exists(ld):
-        txt = open(os.path.join(TC, "guest", "guest.ld")).read()
-        txt = re.sub(r"\tASSERT\( __fnvnx_guest_base >= 0x00200000.*?\)\n", "", txt, flags=re.S)
-        txt = re.sub(r"\tASSERT\( __end__ <= 0x00400000.*?\)\n", "", txt, flags=re.S)
-        open(ld, "w").write(txt)
+        shutil.copy(os.path.join(GUEST_DIR, "guest.ld"), ld)
         open(src, "w").write(GUEST)
-        sh([CC] + CFLAGS[:3] + ["-c", os.path.join(TC, "guest", "crt0.s"), "-o", os.path.join(TMP, "crt0.o")])
+        sh([CC] + CFLAGS[:3] + ["-c", os.path.join(GUEST_DIR, "crt0.s"), "-o", os.path.join(TMP, "crt0.o")])
     # crt0 header: the +20 size and +24 flags are filled as elf2nso does
     obj, elf = os.path.join(TMP, "g%d.o" % mode), os.path.join(TMP, "g%d.elf" % mode)
     sh([CC] + CFLAGS + ["-DMODE=%d" % mode, "-g", "-c", src, "-o", obj])

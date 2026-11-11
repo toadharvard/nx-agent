@@ -6,7 +6,7 @@
 
 A PC-relative relocation (adrp/adr/literal load/branch) whose symbol is absolute in the linked ELF is right
 only at the link base: a relocated guest moves the PC and not the target.  An image address must be reached
-through the GOT (relocated by value) or as an immediate.  toolchain/game/pcrel_abs.py finds such sites.
+through the GOT (relocated by value) or as an immediate.  contract/pcrel_abs.py finds such sites.
 Gate: 0 sites.  A "pinned" guest (one that may only run at its link base) is not a state the clean branch holds.
 Exit status 1 otherwise.  Counts only on stdout.
 --work: a directory for the response file and the site list (nothing is read from TMPDIR or the process id).
@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gatefile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TOOL = os.path.join(HERE, '..', 'toolchain', 'game', 'pcrel_abs.py')
+TOOL = os.path.join(HERE, 'pcrel_abs.py')
 
 
 def main():

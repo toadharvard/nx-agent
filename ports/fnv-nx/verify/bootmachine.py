@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The machine of the emulator boot stage: runs the guest ELF (elf32-littleaarch64 ILP32 PIE, crt0 "FNXG", entry(api)
-with the FnvnxHostApi v3 table) under Unicorn, deterministically. Ported from the sound parts of tests/s5/emu_guest.py;
-none of its fault-tolerating options exist. Library: Machine, VirtualClock, MachineError, ExtMissing.
+with the FnvnxHostApi v3 table) under Unicorn, deterministically. No fault-tolerating options exist.
+Library: Machine, VirtualClock, MachineError, ExtMissing.
 
 Rules:
 1. Layout only from bootlayout.plan(): PT_LOADs at plan base + vaddr with ELF protection (bss = fresh zero pages), stacks /
