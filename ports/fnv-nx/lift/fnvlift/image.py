@@ -3,7 +3,9 @@ import struct
 
 
 class Image:
-    def __init__(self, path):
+    def __init__(self, path, base=None):
+        """base: None = the image as stored (preferred base). Otherwise the image as the Windows loader maps it at `base`: sections at the new
+        addresses and delta = base - preferred added to the dword of every HIGHLOW relocation site (u32/bytes/taken/rset/relocs speak `base` addresses)."""
         d = self.d = open(path, 'rb').read()
         pe = struct.unpack_from('<I', d, 0x3c)[0]
         n = struct.unpack_from('<H', d, pe + 6)[0]
@@ -29,6 +31,16 @@ class Image:
                 if e >> 12 == 3:
                     self.relocs.append(self.base + page + (e & 0xfff))
             p += bs
+        pref = self.base
+        if base is not None and base != pref:
+            delta = (base - pref) & 0xffffffff
+            self.d = d = bytearray(d)
+            for r in self.relocs:
+                o = self.off(r)
+                if o is not None: struct.pack_into('<I', d, o, (struct.unpack_from('<I', d, o)[0] + delta) & 0xffffffff)
+            self.relocs = [r + delta for r in self.relocs]
+            self.secs = [(n, va + delta, vs, ro, rs) for n, va, vs, ro, rs in self.secs]
+            self.base = base
         self.relocs.sort()
         self.rset = set(self.relocs)
         # every reloc'd dword value -> sorted list (address-taken code candidates)
@@ -45,4 +57,4 @@ class Image:
 
     def bytes(self, a, n):
         o = self.off(a)
-        return self.d[o:o + n]
+        return bytes(self.d[o:o + n])
