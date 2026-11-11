@@ -1,7 +1,7 @@
 /* host_platform.inc - ext_call module FNVNX_EXT_PLATFORM (hostapi.h 1..15): ONE table, one row per service number: the
  * least number of arguments and the handler. platform_ext is total: every (fn, nargs) has exactly one answer.
  *   fn 16..33 (sockets): host_sock_call answers (nargs wrong -> -FNVNX_WE_INVAL, its own rule)
- *   fn without a row (0, 10 until the access-fault delivery exists, 35 and up) -> FNVNX_EXT_NO_SERVICE
+ *   fn without a row (0, 10 until the access-fault delivery exists, 36 and up) -> FNVNX_EXT_NO_SERVICE
  *   nargs below the row's number, or nargs > 0 with a null argument array     -> FNVNX_EXT_BAD_NARGS
  *   otherwise the handler's answer, which hostapi.h states per service; more arguments than the row needs are ignored.
  * A service declared in hostapi.h without a row is a test failure (tests/s4/backends/hostapi_total.py).
@@ -18,10 +18,14 @@ static Result set_cpu_boost(int mode) {
 
 static u64 pf_cpu_boost(const u64 *a) { return g_cfg.boost_loading ? set_cpu_boost(a[0] ? 1 : 0) : 1; }
 /* THREAD_ACTIVITY (id, paused): id 0 names the calling thread (refused: BadInput, host_thread_activity.inc), another id a thread of
- * thread_create (an id that names none: NotFound); paused != 0 pauses it, 0 resumes it; else the kernel's result */
+ * thread_create or a THREAD_SELF record (an id that names none: NotFound; a thread not started yet or already finished: BadInput); paused != 0 pauses it, 0 resumes it; else the kernel's result */
 static u64 pf_thread_activity(const u64 *a) {
     HostThread *h = a[0] ? host_id_get(HOST_ID_THREAD, a[0]) : NULL;
     if (a[0] && !h) return FNVNX_HE_NOTFOUND;
+    if (h) {   /* a thread that is not running (not started yet, or its entry returned) has nothing to pause or resume */
+        u32 st = __atomic_load_n(&h->state, __ATOMIC_ACQUIRE);
+        if (!(st & HT_STARTED) || (st & HT_FINISHED)) return FNVNX_HE_BADINPUT;
+    }
     return host_thread_activity(a[0] ? h->t.handle : 0, a[0] == 0, a[1]);
 }
 static u64 pf_message(const u64 *a) { return host_show_message((const char *)a[0], (const char *)a[1]); }
@@ -36,17 +40,20 @@ static u64 pf_section_map(const u64 *a) { return host_section_map(a[0], a[1], a[
 static u64 pf_section_unmap(const u64 *a) { return host_section_unmap(a[0], a[1]); }
 static u64 pf_section_free(const u64 *a) { return host_section_free(a[0]); }
 static u64 pf_unmap_fixed(const u64 *a) { return h_unmap_fixed(a[0], a[1], a[2]); }
-/* TZ_AT (utc_seconds, FnvnxTzAt *): the platform lead's service, verbatim (hostapi.h states: 0, or non-zero without time zone data) */
-static u64 pf_tz_at(const u64 *args) {
-    FnvnxTzAt *o = (FnvnxTzAt *)args[1];
-    TimeCalendarTime cal;
-    TimeCalendarAdditionalInfo info;
-    if (R_FAILED(timeToCalendarTimeWithMyRule(args[0], &cal, &info))) return 1;
-    o->off_s = info.offset;
-    o->dst = info.DST != 0;
-    memcpy(o->abbr, info.timezoneName, sizeof o->abbr);
-    o->abbr[sizeof o->abbr - 1] = 0;
-    return 0;
+/* TZ_AT (utc_seconds, FnvnxTzAt *): host_v2.inc:host_tz_at (the platform lead's service; hostapi.h states its results) */
+static u64 pf_tz_at(const u64 *a) { return host_tz_at(a[0], (FnvnxTzAt *)a[1]); }
+/* THREAD_SELF (): a record for the CALLING thread (the main thread: libnx's threadGetSelf carries its real handle) under a thread id;
+ * the platform lead's code, the id being a host_ids.inc table handle. The record is STARTED, so thread_start refuses it; only
+ * THREAD_ACTIVITY (and set_priority / set_cpu) use its id. 0 when memory or the id table is exhausted. */
+static u64 pf_thread_self(const u64 *a) {
+    (void)a;
+    HostThread *h = calloc(1, sizeof *h);
+    if (!h) return 0;
+    h->t.handle = threadGetSelf()->handle;
+    h->state = HT_STARTED | HT_SELF;
+    u64 id = host_id_new(HOST_ID_THREAD, h);
+    if (!id) free(h);
+    return id;
 }
 
 typedef struct { u32 nargs; u64 (*fn)(const u64 *a); } PlatService;
@@ -66,6 +73,7 @@ static const PlatService g_plat[] = {
     [FNVNX_PLAT_SECTION_FREE] = {1, pf_section_free},
     [FNVNX_PLAT_UNMAP_FIXED] = {3, pf_unmap_fixed},
     [FNVNX_PLAT_TZ_AT] = {2, pf_tz_at},
+    [FNVNX_PLAT_THREAD_SELF] = {0, pf_thread_self},
 };
 static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) {
     /* 16..33: the sockets (host_sock.inc, the platform lead's): it checks nargs itself (exactly the count: else -FNVNX_WE_INVAL) */

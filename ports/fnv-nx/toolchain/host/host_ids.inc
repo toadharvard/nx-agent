@@ -11,6 +11,7 @@ typedef struct HostThread {
 } HostThread;
 #define HT_STARTED 1u
 #define HT_FINISHED 2u               /* the guest entry returned: the thread is in libnx's threadExit */
+#define HT_SELF 8u                   /* THREAD_SELF record: the handle is the kernel's (not owned), the thread is not ours to wait for or close */
 #define HT_DETACHED 4u               /* thread_free came before the end: the thread hands itself to the reaper */
 
 #define FNVNX_ID_MAX 1024

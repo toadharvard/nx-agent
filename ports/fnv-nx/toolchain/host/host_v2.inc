@@ -98,7 +98,9 @@ int __wrap___syscall_thread_create(struct __pthread_t **t, void *(*fn)(void *), 
 static u64 h_thread_start(u64 id) {
     HostThread *h = host_id_get(HOST_ID_THREAD, id);
     if (!h) return FNVNX_HE_NOTFOUND;
-    __atomic_fetch_or(&h->state, HT_STARTED, __ATOMIC_RELEASE);   /* before it runs: its end sees the bit */
+    /* before it runs: its end sees the bit; a thread that is already started (also the main thread's THREAD_SELF record) is refused
+       and left as it is */
+    if (__atomic_fetch_or(&h->state, HT_STARTED, __ATOMIC_ACQ_REL) & HT_STARTED) return FNVNX_HE_BADINPUT;
     Result rc = threadStart(&h->t);
     if (R_FAILED(rc)) __atomic_fetch_and(&h->state, ~HT_STARTED, __ATOMIC_RELEASE);
     return rc;
@@ -106,13 +108,18 @@ static u64 h_thread_start(u64 id) {
 static u64 h_thread_join(u64 id) {
     HostThread *h = host_id_get(HOST_ID_THREAD, id);
     if (!h) return FNVNX_HE_NOTFOUND;
-    if (!(__atomic_load_n(&h->state, __ATOMIC_ACQUIRE) & HT_STARTED)) return FNVNX_HE_BADINPUT;   /* never started: it would wait forever */
+    u32 st = __atomic_load_n(&h->state, __ATOMIC_ACQUIRE);
+    if (!(st & HT_STARTED) || (st & HT_SELF)) return FNVNX_HE_BADINPUT;   /* never started: it would wait forever; a THREAD_SELF record: the caller's own thread or one the host does not own */
     return threadWaitForExit(&h->t);
 }
 static u64 h_thread_free(u64 id) {   /* after join, or a detach: also of a running thread, also by itself; the id dies at once */
     HostThread *h = host_id_del(HOST_ID_THREAD, id);
     if (!h) return FNVNX_HE_NOTFOUND;
     reap_zombies();
+    if (h->state & HT_SELF) {   /* THREAD_SELF record: only the record goes, the thread's handle is the kernel's */
+        free(h);
+        return 0;
+    }
     u32 old = __atomic_fetch_or(&h->state, HT_DETACHED, __ATOMIC_ACQ_REL);
     if ((old & HT_STARTED) && !(old & HT_FINISHED))
         return 0;   /* still running: host_thread_main queues it for reap_zombies */
@@ -162,7 +169,14 @@ static u64 h_wall_time_us(void) {
     gettimeofday(&tv, NULL);
     return (u64)((s64)tv.tv_sec * 1000000 + tv.tv_usec);
 }
-static u64 h_tz_offset_minutes(void) { return 0; }   /* TODO: time:u LocationName / CalendarAdditionalInfo */
+/* tz_offset_minutes: off_s / 60 of TZ_AT at the moment of the call (int64 as u64); 0 when TZ_AT does not answer 0 */
+static u64 h_tz_offset_minutes(void) {
+    FnvnxTzAt z;
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    if (tv.tv_sec < 0 || host_tz_at((u64)tv.tv_sec, &z)) return 0;
+    return (u64)(s64)(z.off_s / 60);
+}
 static u64 h_random64(void) { return randomGet64(); }
 static u64 h_memory_info(u64 out) {
     FnvnxMemInfo *m = (FnvnxMemInfo *)out;

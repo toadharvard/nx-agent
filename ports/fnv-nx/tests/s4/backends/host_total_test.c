@@ -5,7 +5,7 @@
  * (hostapi_total.py generates the list of declared services from the header with the C preprocessor: FNVNX_DECL_H); every service gets
  * its wrong-nargs, invalid-argument and success cases. Test names (hostapi.h table): total_declared, total_unknown, total_nargs,
  * total_ext, cpu_boost, thread_activity, thread_ids, message, display_docked, via_dispatch_vm, via_dispatch_section,
- * via_dispatch_unmap_fixed, tz_at, via_dispatch_sock. */
+ * via_dispatch_unmap_fixed, tz_at, thread_self, via_dispatch_sock. */
 #include "kdouble.h"
 #include "fnvnx/hostapi.h"
 
@@ -21,7 +21,12 @@ static Handle s_act_handle = 0xdead;
 static ThreadActivity s_act = (ThreadActivity)-1;
 static int s_act_calls;
 static Result s_act_rc;
+Result svcGetThreadContext3(ThreadContext *c, Handle h) { (void)c; (void)h; return 0; }
+void svcSleepThread(s64 ns) { (void)ns; }
 Result svcSetThreadActivity(Handle h, ThreadActivity a) { s_act_handle = h; s_act = a; s_act_calls++; return s_act_rc; }
+#define OWN_THREAD 0x5150u
+static Thread s_self_thread = {.handle = OWN_THREAD};
+Thread *threadGetSelf(void) { return &s_self_thread; }
 static char s_dlg[4096], s_full[4096];
 static int s_shown;
 static Result s_create_rc;
@@ -47,6 +52,7 @@ static Handle g_own_process = OWN_HANDLE;
 static struct { int core3, boost_loading; } g_cfg = {1, 1};
 #include "../../../toolchain/host/host_ids.inc"
 #include "../../../toolchain/host/host_thread_activity.inc"
+#include "../../../toolchain/host/host_tz.inc"
 #include "../../../toolchain/host/host_vm.inc"
 #include "../../../toolchain/host/host_section.inc"
 #include "../../../toolchain/host/host_ext.inc"
@@ -67,7 +73,7 @@ static const struct { const char *name; unsigned v; } g_decl[] = {
     {"FNVNX_PLAT_DISPLAY_DOCKED", FNVNX_PLAT_DISPLAY_DOCKED}, {"FNVNX_PLAT_ACCESS_FAULT_HANDLER", FNVNX_PLAT_ACCESS_FAULT_HANDLER},
     {"FNVNX_PLAT_SECTION_CREATE", FNVNX_PLAT_SECTION_CREATE}, {"FNVNX_PLAT_SECTION_MAP", FNVNX_PLAT_SECTION_MAP},
     {"FNVNX_PLAT_SECTION_UNMAP", FNVNX_PLAT_SECTION_UNMAP}, {"FNVNX_PLAT_SECTION_FREE", FNVNX_PLAT_SECTION_FREE},
-    {"FNVNX_PLAT_UNMAP_FIXED", FNVNX_PLAT_UNMAP_FIXED}, {"FNVNX_PLAT_TZ_AT", FNVNX_PLAT_TZ_AT},
+    {"FNVNX_PLAT_UNMAP_FIXED", FNVNX_PLAT_UNMAP_FIXED}, {"FNVNX_PLAT_TZ_AT", FNVNX_PLAT_TZ_AT}, {"FNVNX_PLAT_THREAD_SELF", FNVNX_PLAT_THREAD_SELF},
     {"FNVNX_PLAT_SOCK_SOCKET", FNVNX_PLAT_SOCK_SOCKET}, {"FNVNX_PLAT_SOCK_CLOSE", FNVNX_PLAT_SOCK_CLOSE}, {"FNVNX_PLAT_SOCK_BIND", FNVNX_PLAT_SOCK_BIND}, {"FNVNX_PLAT_SOCK_LISTEN", FNVNX_PLAT_SOCK_LISTEN}, {"FNVNX_PLAT_SOCK_ACCEPT", FNVNX_PLAT_SOCK_ACCEPT}, {"FNVNX_PLAT_SOCK_CONNECT", FNVNX_PLAT_SOCK_CONNECT}, {"FNVNX_PLAT_SOCK_SENDTO", FNVNX_PLAT_SOCK_SENDTO}, {"FNVNX_PLAT_SOCK_RECVFROM", FNVNX_PLAT_SOCK_RECVFROM}, {"FNVNX_PLAT_SOCK_SETSOCKOPT", FNVNX_PLAT_SOCK_SETSOCKOPT}, {"FNVNX_PLAT_SOCK_GETSOCKOPT", FNVNX_PLAT_SOCK_GETSOCKOPT}, {"FNVNX_PLAT_SOCK_POLL", FNVNX_PLAT_SOCK_POLL}, {"FNVNX_PLAT_SOCK_SHUTDOWN", FNVNX_PLAT_SOCK_SHUTDOWN}, {"FNVNX_PLAT_SOCK_GETSOCKNAME", FNVNX_PLAT_SOCK_GETSOCKNAME}, {"FNVNX_PLAT_SOCK_GETPEERNAME", FNVNX_PLAT_SOCK_GETPEERNAME}, {"FNVNX_PLAT_SOCK_GETFL", FNVNX_PLAT_SOCK_GETFL}, {"FNVNX_PLAT_SOCK_SETFL", FNVNX_PLAT_SOCK_SETFL}, {"FNVNX_PLAT_SOCK_GAI_OPEN", FNVNX_PLAT_SOCK_GAI_OPEN}, {"FNVNX_PLAT_SOCK_GAI_FETCH", FNVNX_PLAT_SOCK_GAI_FETCH}, 
 };
 #endif
@@ -81,6 +87,8 @@ static u64 call(u32 fn, u32 nargs, u64 a0, u64 a1, u64 a2, u64 a3)
     u64 a[4] = {a0, a1, a2, a3};
     return h_ext_call(FNVNX_EXT_PLATFORM, fn, (u64)(uintptr_t)a, nargs);
 }
+/* a THREAD_SELF answer is a live thread id: a made-up-proof table handle; the test drops its record (the id table is bounded) */
+static int drop_self(u64 id) { HostThread *p = host_id_get(HOST_ID_THREAD, id); if (!p || !(p->state & HT_SELF)) return 0; host_id_del(HOST_ID_THREAD, id); free(p); return 1; }
 #define B(a) ((volatile uint8_t *)(uintptr_t)(a))
 
 int main(int argc, char **argv)
@@ -99,7 +107,8 @@ int main(int argc, char **argv)
     int unserved = 0;
     for (size_t i = 0; i < NDECL; i++) {
         u64 r = call(g_decl[i].v, 0, 0, 0, 0, 0);
-        if (r == FNVNX_EXT_NO_SERVICE) { unserved++; printf("UNSERVED %s = %u: ext_call answers FNVNX_EXT_NO_SERVICE\n", g_decl[i].name, g_decl[i].v); }
+        if (g_decl[i].v == FNVNX_PLAT_THREAD_SELF) T(drop_self(r));
+        else if (r == FNVNX_EXT_NO_SERVICE) { unserved++; printf("UNSERVED %s = %u: ext_call answers FNVNX_EXT_NO_SERVICE\n", g_decl[i].name, g_decl[i].v); }
         else if (!stated_with_no_args(r)) { g_fail++; printf("FAIL %s with nargs 0 answered %#llx, which the header does not state\n", g_decl[i].name, (unsigned long long)r); }
     }
     if (strict) g_fail += unserved;
@@ -120,7 +129,7 @@ int main(int argc, char **argv)
         {FNVNX_PLAT_CPU_BOOST, 1}, {FNVNX_PLAT_THREAD_ACTIVITY, 2}, {FNVNX_PLAT_MESSAGE, 2}, {FNVNX_PLAT_VM_RESERVE, 2}, {FNVNX_PLAT_VM_COMMIT, 2},
         {FNVNX_PLAT_VM_DECOMMIT, 2}, {FNVNX_PLAT_VM_RELEASE, 1}, {FNVNX_PLAT_VM_PROTECT, 3}, {FNVNX_PLAT_DISPLAY_DOCKED, 0},
         {FNVNX_PLAT_SECTION_CREATE, 1}, {FNVNX_PLAT_SECTION_MAP, 4}, {FNVNX_PLAT_SECTION_UNMAP, 2}, {FNVNX_PLAT_SECTION_FREE, 1},
-        {FNVNX_PLAT_UNMAP_FIXED, 3}, {FNVNX_PLAT_TZ_AT, 2},
+        {FNVNX_PLAT_UNMAP_FIXED, 3}, {FNVNX_PLAT_TZ_AT, 2}, {FNVNX_PLAT_THREAD_SELF, 0},
     };
     int calls0 = s_act_calls + s_boost_calls + s_shown;
     for (size_t i = 0; i < sizeof need / sizeof need[0]; i++) {
@@ -128,6 +137,7 @@ int main(int argc, char **argv)
             T(call(need[i].fn, need[i].n - 1, 0, 0, 0, 0) == FNVNX_EXT_BAD_NARGS);
             T(h_ext_call(FNVNX_EXT_PLATFORM, need[i].fn, 0, need[i].n) == FNVNX_EXT_BAD_NARGS);
         }
+        if (need[i].fn == FNVNX_PLAT_THREAD_SELF) { T(drop_self(platform_ext(need[i].fn, NULL, 0))); continue; }
         T(platform_ext(need[i].fn, NULL, 0) == (need[i].n ? FNVNX_EXT_BAD_NARGS : platform_ext(need[i].fn, NULL, 0)));
     }
     T(s_act_calls + s_boost_calls + s_shown == calls0);   /* no handler ran */
@@ -146,7 +156,7 @@ int main(int argc, char **argv)
 
     /* ---- thread_ids + thread_activity: ids are handles; 0 is the caller; made-up and freed ids name nothing */
     HostThread *th = calloc(1, sizeof *th), *th2 = calloc(1, sizeof *th2);
-    th->t.handle = 0x77; th2->t.handle = 0x88;
+    th->t.handle = 0x77; th2->t.handle = 0x88; th->state = th2->state = HT_STARTED;
     u64 id = host_id_new(HOST_ID_THREAD, th), id2 = host_id_new(HOST_ID_THREAD, th2);
     T(id && id2 && id != id2 && (id & 0xFFFF) && !(id >> 63));
     int c0 = s_act_calls;
@@ -157,6 +167,11 @@ int main(int argc, char **argv)
     s_act_rc = MAKERESULT(1, 59);
     T(call(2, 2, id, 7, 0, 0) == MAKERESULT(1, 59) && s_act == ThreadActivity_Paused);     /* any non-zero pauses; the kernel's result as it is */
     s_act_rc = 0;
+    th->state = 0; c0 = s_act_calls;   /* not started: nothing to pause or resume, the kernel is not asked */
+    T(call(2, 2, id, 1, 0, 0) == FNVNX_HE_BADINPUT && call(2, 2, id, 0, 0, 0) == FNVNX_HE_BADINPUT && s_act_calls == c0);
+    th->state = HT_STARTED | HT_FINISHED;   /* finished */
+    T(call(2, 2, id, 1, 0, 0) == FNVNX_HE_BADINPUT && s_act_calls == c0);
+    th->state = HT_STARTED;
     T(host_id_get(HOST_ID_DIR, id) == NULL && host_id_del(HOST_ID_DIR, id) == NULL && host_id_get(HOST_ID_THREAD, id) == th);   /* kind checked */
     T(host_id_del(HOST_ID_THREAD, id) == th && host_id_del(HOST_ID_THREAD, id) == NULL);     /* a second free of the id */
     c0 = s_act_calls;
@@ -211,12 +226,25 @@ int main(int argc, char **argv)
         T(call(34, 2, 5000, (u64)(uintptr_t)&z, 0, 0) == 0 && z.off_s == (s32)(5000 % 7200) - 3600 && z.dst == 0 && !strcmp(z.abbr, "CESTXYZ"));
         T(call(34, 2, 5001, (u64)(uintptr_t)&z, 0, 0) == 0 && z.dst == 1);
         s_tz_fail = 1;
-        T(call(34, 2, 5000, (u64)(uintptr_t)&z, 0, 0) == 1);
+        T(call(34, 2, 5000, (u64)(uintptr_t)&z, 0, 0) == (u64)-(s64)75);   /* the time service refuses the instant: -EOVERFLOW */
         s_tz_fail = 0;
+        T(call(34, 2, 5000, 0, 0, 0) == (u64)-(s64)14);                   /* out null: -EFAULT */
+        T(call(34, 2, 5000, (u64)(uintptr_t)&z, 0, 0) == 0 && z.abbr[7] == 0 && !strcmp(z.abbr, "CESTXYZ"));   /* the first 7 bytes + NUL */
     }
-    /* ---- sockets 16..33 reach the real handler: a wrong count is -WE_INVAL (the handler's own rule), 35 and up are NO_SERVICE */
+    /* ---- thread_self: a thread id of a record for the caller (STARTED, SELF): THREAD_ACTIVITY reaches the caller's handle, thread_start
+     * and thread_join refuse it, thread_free removes the record and not the thread */
+    {
+        u64 sid2 = call(35, 0, 0, 0, 0, 0);
+        HostThread *sh = host_id_get(HOST_ID_THREAD, sid2);
+        int cc = s_act_calls;
+        T(sid2 && sh && sh->t.handle == OWN_THREAD && (sh->state & HT_STARTED) && (sh->state & HT_SELF));
+        T(call(2, 2, sid2, 1, 0, 0) == 0 && s_act_handle == OWN_THREAD && s_act_calls == cc + 1);
+        T(host_id_del(HOST_ID_THREAD, sid2) == sh);
+        free(sh);
+    }
+    /* ---- sockets 16..33 reach the real handler: a wrong count is -WE_INVAL (the handler's own rule), 35 and up are NO_SERVICE (36 and up) */
     for (u32 fn = FNVNX_PLAT_SOCK_FIRST; fn <= FNVNX_PLAT_SOCK_LAST; fn++) T(call(fn, 0, 0, 0, 0, 0) == (u64)-(s64)FNVNX_WE_INVAL);
-    T(call(35, 0, 0, 0, 0, 0) == FNVNX_EXT_NO_SERVICE);
+    T(call(36, 0, 0, 0, 0, 0) == FNVNX_EXT_NO_SERVICE);
 
     /* ---- via_dispatch_unmap_fixed */
     {

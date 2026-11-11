@@ -12,6 +12,13 @@
 #include "fnvnx/hostapi.h"
 
 static void logf_(const char *fmt, ...) { (void)fmt; }
+static int s_tz_rc;
+Result timeToCalendarTimeWithMyRule(u64 ts, TimeCalendarTime *c, TimeCalendarAdditionalInfo *i)
+{
+    (void)ts; memset(c, 0, sizeof *c); memset(i, 0, sizeof *i);
+    i->offset = -12345; i->DST = 1; memcpy(i->timezoneName, "ABC\0\0\0\0\0", 8);
+    return s_tz_rc;
+}
 static Handle g_own_process = OWN_HANDLE;
 struct __pthread_t;
 int __real___syscall_thread_create(struct __pthread_t **t, void *(*fn)(void *), void *arg, void *stack, size_t size) { (void)t; (void)fn; (void)arg; (void)stack; (void)size; return 1; }
@@ -47,11 +54,17 @@ u64 randomGet64(void) { return 4; }
 #include "../../../toolchain/host/host_vm.inc"
 #undef free
 #undef memalign
+#include "../../../toolchain/host/host_tz.inc"
 #include "../../../toolchain/host/host_v2.inc"
 
 int main(void)
 {
     kdouble_init();
+    /* ---- tz_at: tz_offset_minutes is off_s / 60 of TZ_AT now (C division: -12345 / 60 = -205); 0 when TZ_AT does not answer 0 */
+    T((s64)h_tz_offset_minutes() == -205);
+    s_tz_rc = MAKERESULT(Module_Libnx, LibnxError_NotFound);
+    T(h_tz_offset_minutes() == 0);
+    s_tz_rc = 0;
     /* ---- thread_slots: create hands out a table handle, never the HostThread's address */
     u64 id = h_thread_create(0x1000, 0, 0x10000, 0, (u64)-1);
     T(id && (id & 0xFFFF) && !(id >> 63) && host_id_get(HOST_ID_THREAD, id) != NULL && (u64)(uintptr_t)host_id_get(HOST_ID_THREAD, id) != id);
@@ -66,6 +79,7 @@ int main(void)
     T(h_thread_set_priority(id, 0) == 0 && s_prio_handle == 0x100 && h_thread_set_priority(0, 0) == 0 && s_prio_handle == CUR_THREAD_HANDLE);
     T(h_thread_set_cpu(id, 1) == 0 && s_mask_handle == 0x100 && h_thread_set_cpu(0, ~0ull) == 0);   /* a negative spec: nothing to do, 0 */
     T(h_thread_start(id) == 0 && s_started == 1);
+    T(h_thread_start(id) == FNVNX_HE_BADINPUT && s_started == 1 && (((HostThread *)host_id_get(HOST_ID_THREAD, id))->state & HT_STARTED));   /* already started: refused, still started */
     T(h_thread_join(id) == 0 && s_waited == 1);
     T(h_thread_free(id) == 0 && s_closed == 0);                       /* started, not finished: detached, its own end queues it for the reaper */
     T(h_thread_free(id) == FNVNX_HE_NOTFOUND && h_thread_join(id) == FNVNX_HE_NOTFOUND && h_thread_start(id) == FNVNX_HE_NOTFOUND);   /* the id died */

@@ -180,6 +180,7 @@ static void load_config(void) {
 #include "host_vm.inc"
 #include "host_section.inc"
 #include "host_ext.inc"
+#include "host_tz.inc"
 #include "host_v2.inc"
 #include "host_v3.inc"
 #include "host_message.inc"

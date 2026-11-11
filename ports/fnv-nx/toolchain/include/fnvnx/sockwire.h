@@ -29,6 +29,8 @@
     X(EOWNERDEAD, 130) X(ENOTRECOVERABLE, 131)
 /* An errno outside this list (the socket calls cannot produce one) is reported as FNVNX_WE_IO. */
 #define FNVNX_WE_INVAL 22
+#define FNVNX_WE_FAULT 14
+#define FNVNX_WE_OVERFLOW 75
 #define FNVNX_WE_IO 5
 #define FNVNX_WE_INPROGRESS 115
 #define FNVNX_WE_AGAIN 11
