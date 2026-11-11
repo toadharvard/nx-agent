@@ -206,6 +206,6 @@
 0x00fdf490	steam_api	SteamUserStats	2	SteamUserStatsAccessor	S4 platform/win32
 0x00fdf494	steam_api	SteamApps	1	-	S4 platform/win32
 0x00fdf498	steam_api	SteamAPI_IsSteamRunning	1	-	S4 platform/win32
-0x00fdf49c	steam_api	SteamUtils? / SteamUser? (conflict)	2	SteamUser,SteamUtils	S4 platform/win32
+0x00fdf49c	steam_api	SteamUtils	4	SteamUser,SteamUtils	S4 platform/win32
 0x010b7eb0	(not an IAT slot)	FreeBlockImp	1	-	none: decomp mislabel (data address)
 0x010c4cec	(not an IAT slot)	Free	1	-	none: decomp mislabel (data address)
