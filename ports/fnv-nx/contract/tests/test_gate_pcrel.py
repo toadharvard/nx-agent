@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""Check of contract/gate_pcrel.py over archives (H4): a PC-relative site against an absolute symbol inside an archive member is found
+(id `archive(member):section+offset:symbol`), every member and every object of the response file is examined (the universe counts all
+their PC-relative relocations), and a clean set is green.  Needs the AArch64 cross toolchain."""
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+GATE = os.path.join(HERE, '..', 'gate_pcrel.py')
+X = 'aarch64-linux-gnu-'
+fails = []
+
+
+def check(name, got, want):
+    if got != want:
+        fails.append('%s: got %r, want %r' % (name, got, want))
+
+
+def sh(cmd, **kw):
+    r = subprocess.run(cmd, capture_output=True, text=True, **kw)
+    if r.returncode:
+        raise RuntimeError('%s: %s' % (cmd[0], r.stderr[-800:]))
+    return r
+
+
+d = tempfile.mkdtemp()
+
+
+def obj(name, src):
+    s = os.path.join(d, name + '.s')
+    with open(s, 'w') as fh:
+        fh.write(src)
+    o = os.path.join(d, name + '.o')
+    sh([X + 'gcc', '-mabi=ilp32', '-c', s, '-o', o])
+    return o
+
+
+main = obj('main', '.text\n.globl _start\n_start: bl member_a\n adrp x0, data\n ret\n.data\n.globl data\ndata: .word 1\n')
+ma = obj('ma', '.text\n.globl member_a\nmember_a: bl member_b\n ret\n')
+mb = obj('mb', '.text\n.globl member_b\nmember_b: adrp x0, fnv_abs\n add x0, x0, :lo12:fnv_abs\n ret\n')
+mc = obj('mc', '.text\n.globl member_c\nmember_c: adrp x0, data\n ret\n')
+lib = os.path.join(d, 'lib.a')
+sh([X + 'ar', 'Dcr', lib, ma, mb, mc])
+
+
+def run(name, rsp_files, defsym):
+    elf = os.path.join(d, name + '.elf')
+    sh([X + 'ld', '-m', 'aarch64linux32', '-pie', '--no-dynamic-linker', '--noinhibit-exec', '-e', '_start'] + (['--defsym=fnv_abs=0x400000'] if defsym else []) +
+       [main, '--whole-archive', lib, '--no-whole-archive', '-o', elf])
+    rsp = os.path.join(d, name + '.rsp')
+    with open(rsp, 'w') as fh:
+        fh.write(''.join('"%s"\n' % f for f in rsp_files))
+    go = os.path.join(d, 'go_' + name)
+    os.makedirs(go)
+    r = subprocess.run([sys.executable, '-I', GATE, '--elf', elf, '--inputs', rsp, '--work', os.path.join(d, 'w_' + name), '--readelf', X + 'readelf', '--nm', X + 'nm'],
+                       env=dict(os.environ, GATE_OUT=go), capture_output=True, text=True)
+    with open(os.path.join(go, 'pcrel.json')) as fh:
+        return r.returncode, json.load(fh), os.path.join(go, 'pcrel.ids')
+
+
+rc, j, ids = run('red', [main, lib], True)
+check('red: exit', rc, 1)
+check('red: the site in the archive member is found', j['uncertified'], ['lib.a(mb.o):.rela.text+00000000:fnv_abs'])
+check('red: every member and object is examined (2 + 1 + 1 + 1 pc-relative relocations)', (j['universe'], j['certified']), (5, 4))
+with open(ids) as fh:
+    check('red: ids file', fh.read(), 'lib.a(mb.o):.rela.text+00000000:fnv_abs\n')
+rc, j, _ = run('green', [main, lib], False)
+check('green: exit and counts', (rc, j['status'], j['universe'], j['certified']), (0, 'green', 5, 5))
+if fails:
+    print('\n'.join(fails))
+    sys.exit(1)
+print('ok')

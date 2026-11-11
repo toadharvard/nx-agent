@@ -46,7 +46,7 @@ aarch64-none-elf-readelf -rW "$W/guest.elf" > "$W/relocs.txt"
 t "ELF has DF_1_PIE" "grep -E 'FLAGS_1.*PIE' '$W/dynamic.txt' >/dev/null"
 t "relocation sections are only .relr.dyn / .rela.dyn" "[ -z \"\$(grep 'Relocation section' '$W/relocs.txt' | grep -vE '[.](relr|rela)[.]dyn')\" ]"
 t "every RELA entry is R_AARCH64_P32_RELATIVE without a symbol" "! grep -E '^[0-9a-f]{8} +[0-9a-f]+ ' '$W/relocs.txt' | grep -vE 'R_AARCH64_P32_RELATIVE +[0-9a-f]+$' | grep -q ."
-echo "relocations: RELR relocates $(grep -oE 'which relocate [0-9]+' "$W/relocs.txt" | head -1), RELA entries $(grep -cE '^[0-9a-f]{8} +[0-9a-f]+ ' "$W/relocs.txt")"
+echo "relocations: RELR relocates $(grep -oE 'relocate [0-9]+' "$W/relocs.txt" | head -1 | cut -d' ' -f2) locations, RELA entries $(grep -cE '^[0-9a-f]{8} +[0-9a-f]+ ' "$W/relocs.txt")"
 
 mkdir -p "$W/game" "$W/root"; ln -sf "$EXE" "$W/game/FalloutNV.exe"
 set +e

@@ -1,29 +1,37 @@
 #!/usr/bin/env python3
 """gate_disp - the dispatcher of the lifted guest holds exactly the code entries (part of the L1 verdict).
 
-    gate_disp.py --elf guest.elf --universe universe.tsv --entries entries.tsv [--keys keys.tsv]
+    gate_disp.py --elf guest.elf --universe universe.tsv --entries entries.tsv [--keys keys.tsv] [--missing missing.tsv]
 
 The lifted code reaches every code entry of the exe through `fnvl_dispatch(a)` (lift/rt/rt.c, FNVL_PHF_REL), which looks the
-address up in the table `fnvl_disp_table` (lift/bench/phf.py `table_asm`).  The table has 8-byte slots `{u32 key, s32 offset}`;
-slot `i` holds key `a` and `offset = body - fnvl_disp_table`, an empty slot has key 0xffffffff.  The dispatcher returns
-`(char *)fnvl_disp_table + offset`, a 32-bit sum in the ILP32 guest.  The table ends where `fnvl_g` (the displacement array
-that follows it) begins, so its size is `fnvl_g - fnvl_disp_table` (the symbol's own size when the assembler gave it one).
+address up in the table `fnvl_disp_table` (lift/bench/phf.py `table_asm`):
+    i = ((a ^ fnvl_g[(a * K1) >> (32 - NBITS)]) * K2) >> (32 - TBITS)          (all arithmetic modulo 2^32)
+    slot i = {u32 key, s32 offset}; the entry is found iff key == a and offset != 0; the body is `(char *)fnvl_disp_table + offset`.
+A slot is OCCUPIED iff its offset is not 0 (the key of an empty slot is arbitrary).  {K1, K2, NBITS, TBITS} are the four u32 words of
+`fnvl_phf_params`, stored with the table (disp.o), the one source rt.c reads.  Sizes come from the symbols' st_size: the table has
+8 << TBITS bytes, `fnvl_g` (u16) 2 << NBITS bytes, `fnvl_phf_params` 16; a table whose size or parameters do not fit is red.
 
 Inputs:  --universe  the code entries (universe.tsv: first column the address as hex, `#` lines skipped);
-         --entries   `address<TAB>symbol`, the symbol of the body of each entry (liftall's entries.tsv);
-         --keys      optional, `key<TAB>symbol`: dispatcher keys that are not universe addresses (import keys).
-Rule, for EVERY key k of the universe and of --keys (no sampling), certified when all hold:
+         --entries   `address<TAB>symbol[<TAB>kind]` (liftall's entries.tsv), kind `code` (default) or `import`: an import row is a
+                     dispatcher key that is not a universe address (its symbol is `I_<key>` or a runtime symbol); the last
+                     line may be `# table_id <hex>`;
+         --keys      optional, `key<TAB>symbol`: more such keys; may carry `# table_id <hex>`.  When both files carry a table_id the two
+                     must be equal (else the item `table_id` is red);
+         --missing   optional, `address` rows of universe addresses the lifter reports as without a body.  REPORTING only: it never
+                     certifies anything; a universe address without an entry stays `no-entry` and red.  The detail line says how
+                     the list and the entries agree.
+Rule, for EVERY key k of the universe, of the import rows and of --keys (no sampling), certified when all hold:
   - a symbol is named for k (entries.tsv or keys.tsv; two files naming different symbols for k is a violation);
   - the ELF defines that symbol, at one address (a symbol defined at two addresses is a violation);
-  - the table holds exactly one slot with key k, and `table_address + stored_offset == symbol address` modulo 2^32.
-Every non-empty table key that is neither in the universe nor in --keys is a violation (an extra key).  The key 0xffffffff
-is the empty-slot mark and cannot be a key.
-The rule does not recompute the hash: that rt.c's compiled constants (FNVL_K1/K2/NBITS/TBITS) are those of the table is the
-business of the build that produced both, not of this gate.
+  - the LOOKUP: the slot i the hash computes for k is occupied, holds key k, and `table_address + stored_offset == symbol address`
+    modulo 2^32 (`hash-miss` when slot i is not k's slot, `wrong-target` when it points elsewhere);
+  - no other occupied slot holds k.
+Every occupied slot whose key is neither in the universe nor an import key is a violation (`extra-key`).
+That the parameters in the ELF are those the build chose is not this gate's business: the lookup is proven with them, for every key.
 
-Gate file `disp` ($GATE_OUT/disp.json, gatefile.py): universe = the keys of universe + --keys + the extra table keys,
-certified = those satisfying the rule, uncertified = the first 50 sorted as `<key as 8 hex digits>:<reason>`.
-Counts only on stdout.  Exit status 1 when the gate is red.
+Gate file `disp` ($GATE_OUT/disp.json, gatefile.py; full list in $GATE_OUT/disp.ids): universe = the keys of universe + import keys +
+the extra table keys (+ the item `table_id` when both files carry one), certified = those satisfying the rule, uncertified =
+`<key as 8 hex digits>:<reason>`.  Counts only on stdout.  Exit status 1 when the gate is red.
 """
 import argparse
 import os
