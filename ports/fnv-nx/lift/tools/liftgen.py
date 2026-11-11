@@ -192,7 +192,7 @@ def recipe(ref, commit, tree):
     drop = ('-c', '-DFNVL_FLAGS_IO')
     gc = json.load(open(os.path.join(LIFT, '..', 'verify', 'guest_compiler.json')))   # the one source of the guest compiler (msvcmodel)
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': gc['external']['name'], 'cc': gc['cc'], 'cxx': gc['cxx']},
-           'flags': {'c': ['-mabi=ilp32'], 'cxx': [f for f in instest.FLAGS if f not in drop], 'asm': ['-mabi=ilp32', '-fPIC']},
+           'flags': {'c': ['-mabi=ilp32', '-Werror=attributes'], 'cxx': [f for f in instest.FLAGS if f not in drop] + ['-Werror=attributes'], 'asm': ['-mabi=ilp32', '-fPIC']},
            'include': ['/ext/liftpack/inc'], 'units': 'all',
            'generated': [{'tool': 'ports/fnv-nx/lift/tools/packcopy.py', 'args': ['/ext/liftpack', '/out'], 'inputs': [], 'outputs': unit_names()}],
            'link': None,
