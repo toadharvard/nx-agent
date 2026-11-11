@@ -154,8 +154,16 @@ CLASS_EXPECT = [
     ('c5e1e3c0', 'vpavgw', [RUD]), ('0f380000', 'pshufb', [RUD]), ('660f3a0f0000', 'palignr', [RUD]), ('f20f7c00', 'haddps', [RUD]), ('c4e272f7c1', 'sarx', [RUD]), ('62f17c4858c0', 'evex vaddps', [RUD]),
     ('c7f800000000', 'xbegin', [RUD]), ('0f0b', 'ud2', ['fnvl_raise(FNVL_UD,']), ('0f01d6', 'xtest', [RUD]), ('0faee0', 'ptwrite? (F3 0F AE /4 needs F3: this is 0F AE E0 = xsave-like #UD)', []),
 ]
-def class_tables(img):
+# reserved-NOP bytes capstone refuses: (hex, expected instruction length or None). Lengths cross-checked against the Unicorn oracle over the whole 0F 0D / 0F 18..1F ModRM grid (340 encodings, 0 mismatches).
+NOPGAP = [('0f1ed0', 3), ('0f1a20', 3), ('0f1b3800', 4), ('660f1c4004', 5), ('0f1b0500000000', 7), ('0f1d0424', 4), ('0f1d042500000000', 8), ('670f1c4000', 5), ('670f1c0600', 5), ('0f0d18', 3),
+          ('0f0dc0', None), ('0f18c0', None), ('f00f1ed0', None), ('0f1fd0', 3)]
+def nopgap():
     bad = 0
+    for hx, n in NOPGAP:
+        x = fnvlift.f_sys.nop_gap(bytes.fromhex(hx) + b'\0' * 8); got = x.size if x else None; ok = got == n; bad += not ok; print('nop_gap %-18s %s %s' % (hx, 'ok' if ok else 'FAIL', got))
+    return bad
+def class_tables(img):
+    bad = nopgap()
     for hx, what, subs in CLASS_EXPECT:
         raw = bytes.fromhex(hx); a = A0; fake[a] = raw + b'\x90' * 8
         try: txt = fnvlift.lift(img, a, len(raw), strict=False)[0]

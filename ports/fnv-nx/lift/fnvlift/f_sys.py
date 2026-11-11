@@ -564,8 +564,8 @@ class NopIns:
 
 
 def nop_gap(b):
-    """reserved-NOP instruction `[prefixes] 0F 0D|18..1F /r` that capstone does not decode, as a NopIns, else None (SDM Vol 2, Table A-6 "reserved-NOP": 0F 0D and 0F 18..1F take a ModRM and
-    execute as NOP Ev for every ModRM value; LOCK makes them #UD, so a LOCK prefix is not claimed). Length = prefixes + 0F + opcode + ModRM + SIB + displacement by the addressing form."""
+    """reserved-NOP instruction `[prefixes] 0F 0D|18..1F /r` that capstone does not decode, as a NopIns, else None (SDM Vol 2, Table A-6 "reserved-NOP": 0F 19..1F take a ModRM and
+    execute as NOP Ev for every ModRM value, 0F 0D and 0F 18 for every memory ModRM value; LOCK makes them #UD, so a LOCK prefix is not claimed). Length = prefixes + 0F + opcode + ModRM + SIB + displacement by the addressing form."""
     b = bytes(b)
     i = 0
     while i < len(b) and b[i] in TRAP0D_PREFIX:
@@ -575,6 +575,8 @@ def nop_gap(b):
     pfx, m = b[:i], b[i + 2]
     n = i + 3
     mod, rm = m >> 6, m & 7
+    if mod == 3 and b[i + 1] in (0x0d, 0x18):      # PREFETCH groups take a memory operand only (the register forms are #UD: QEMU agrees)
+        return None
     if 0x67 in pfx:     # 16-bit addressing: no SIB; disp16 for mod 0 rm 6 and mod 2
         n += 2 if (mod == 0 and rm == 6) or mod == 2 else 1 if mod == 1 else 0
     elif mod != 3:
