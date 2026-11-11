@@ -168,5 +168,10 @@ ilp32: $(ENV_GEN)
 	@$(XCC) -std=gnu11 $(XFLAGS) -D__SWITCH__ -I$(HERE)/ilp32-stubs -I$(LIBNX)/nx/include $(P)/os/os_horizon.c
 	@echo "ilp32: all platform sources parse"
 
+# BSD socket services, guest side <-> host side over loopback (sockwire/Makefile; not part of the default target)
+sockwire:
+	$(MAKE) -C $(HERE)/sockwire
+.PHONY: sockwire
+
 clean:
 	rm -rf $(OUT) $(M32OUT) $(OUT)-device $(OUT)-a64
