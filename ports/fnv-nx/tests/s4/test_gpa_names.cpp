@@ -475,3 +475,225 @@ TEST(gpa_window_station_and_user_object)
     CHECK(GetUserObjectInformationA(ws2, 2, name, sizeof name, &need));
     CHECK_STR(name, "WinSta0");
 }
+
+/* ---- group 3: gdi32 font queries by glyph index.
+ * Reference: the Wine 9.0 dump /home/user/gd/fontref/fontdump.txt: its `glyph <font> U+XXXX metrics ... incx=N` lines are the
+ * advance of a character; through the cmap (GetCharacterPlacementW's lpGlyphs) the same advance must come out by glyph index.
+ * GetFontUnicodeRanges has no reference line: it is compared with FreeType's own cmap walk of the face file. */
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include <stdlib.h>
+#include <string>
+#include <vector>
+
+extern "C" {
+void fnvnx_gdi_set_font_dirs(const char *wine_fonts_dir, const char *host_fonts_dir, const char *registry_dir);
+HDC CreateCompatibleDC(HDC);
+BOOL DeleteDC(HDC);
+HGDIOBJ GetStockObject(int);
+HGDIOBJ SelectObject(HDC, HGDIOBJ);
+DWORD GetCharacterPlacementW(HDC, LPCWSTR, int, int, void *, DWORD);
+DWORD GetGlyphOutlineW(HDC, UINT, UINT, void *, DWORD, void *, const void *);
+BOOL GetCharABCWidthsI(HDC, UINT, UINT, unsigned short *, void *);
+BOOL GetCharWidthI(HDC, UINT, UINT, unsigned short *, int *);
+DWORD GetFontUnicodeRanges(HDC, void *);
+}
+
+namespace {
+struct GcpW { uint32_t lStructSize; char *lpOutString; uint32_t *lpOrder; int *lpDx; int *lpCaretPos; char *lpClass; uint16_t *lpGlyphs; uint32_t nGlyphs; int nMaxFit; };
+int stock_id(const std::string &n)
+{
+    static const struct { const char *n; int id; } t[] = { { "OEM_FIXED_FONT", 10 }, { "ANSI_FIXED_FONT", 11 }, { "ANSI_VAR_FONT", 12 },
+        { "SYSTEM_FONT", 13 }, { "DEVICE_DEFAULT_FONT", 14 }, { "SYSTEM_FIXED_FONT", 16 }, { "DEFAULT_GUI_FONT", 17 } };
+    for (auto &e : t) if (n == e.n) return e.id;
+    return -1;
+}
+uint16_t glyph_of(HDC dc, unsigned ch)
+{
+    uint16_t g = 0xFFFF;
+    GcpW gcp;
+    memset(&gcp, 0, sizeof gcp);
+    gcp.lStructSize = sizeof gcp; gcp.lpGlyphs = &g; gcp.nGlyphs = 1;
+    WCHAR w = (WCHAR)ch;
+    GetCharacterPlacementW(dc, &w, 1, 0, &gcp, 0x10 /* GCP_GLYPHSHAPE */);
+    return g;
+}
+void set_dirs(void)
+{
+    std::string r = getenv("FNVNX_FONT_REF") ? getenv("FNVNX_FONT_REF") : "";
+    fnvnx_gdi_set_font_dirs((r + "/wine-fonts/usr/share/wine/fonts").c_str(), getenv("FNVNX_FONT_HOST") ? getenv("FNVNX_FONT_HOST") : "", (r + "/reg").c_str());
+}
+}
+
+TEST(gpa_gdi32_exports_by_name)
+{
+    CHECK(export_of("gdi32", "GetCharWidthI") == (void *)&GetCharWidthI);
+    CHECK(export_of("gdi32", "GetCharABCWidthsI") == (void *)&GetCharABCWidthsI);
+    CHECK(export_of("gdi32", "GetFontUnicodeRanges") == (void *)&GetFontUnicodeRanges);
+}
+
+TEST(gpa_char_width_by_index_reference)
+{
+    set_dirs();
+    FILE *f = fopen((std::string(getenv("FNVNX_FONT_REF") ? getenv("FNVNX_FONT_REF") : "") + "/fontdump.txt").c_str(), "r");
+    CHECK(f != NULL);
+    if (!f) return;
+    char *buf = (char *)malloc(1 << 20);
+    int lines = 0, abc_ok = 0, abc_refused = 0;
+    while (fgets(buf, 1 << 20, f)) {
+        if (strncmp(buf, "glyph ", 6)) continue;
+        char name[64], kind[16];
+        unsigned ch = 0;
+        if (sscanf(buf, "glyph %63s U+%x %15s", name, &ch, kind) != 3 || strcmp(kind, "metrics")) continue;
+        const char *p = strstr(buf, " incx=");
+        int incx = p ? atoi(p + 6) : -1, sid = stock_id(name);
+        CHECK(sid >= 0 && incx >= 0);
+        if (sid < 0 || incx < 0) continue;
+        HDC dc = CreateCompatibleDC(NULL);
+        HGDIOBJ old = SelectObject(dc, GetStockObject(sid));
+        (void)old;
+        uint16_t g = glyph_of(dc, ch);
+        int w = -1;
+        CHECK(GetCharWidthI(dc, 0, 1, &g, &w));
+        /* the one source of an advance by glyph index: GetGlyphOutline(GGO_GLYPH_INDEX), cellinc.x */
+        static const uint8_t ident[16] = { 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0 };
+        uint8_t gm[20] = { 0 };
+        CHECK(GetGlyphOutlineW(dc, g, 0x80 | 0, gm, 0, NULL, ident) != 0xFFFFFFFFu);
+        int16_t cellx;
+        memcpy(&cellx, gm + 16, 2);
+        CHECK_EQ(w, cellx);
+        const bool truetype = !strcmp(name, "OEM_FIXED_FONT");   /* a bitmap font's glyph index is its cmap charcode: the reference dump is by character */
+        if (truetype) CHECK_EQ(w, incx);
+        w = -1;
+        CHECK(GetCharWidthI(dc, g, 1, NULL, &w));               /* NULL indices: consecutive from giFirst */
+        CHECK_EQ(w, cellx);
+        int three[3] = { -1, -1, -1 };
+        uint16_t gs[3] = { g, g, g };
+        CHECK(GetCharWidthI(dc, 0, 3, gs, three));
+        CHECK(three[0] == cellx && three[1] == cellx && three[2] == cellx);
+        int consecutive[2] = { -1, -1 };
+        CHECK(GetCharWidthI(dc, g, 2, NULL, consecutive));
+        CHECK_EQ(consecutive[0], cellx);
+        int32_t abc[3] = { -99, -99, -99 };
+        if (GetCharABCWidthsI(dc, 0, 1, &g, abc)) {
+            abc_ok++;
+            CHECK_EQ(abc[0] + abc[1] + abc[2], cellx);
+            CHECK(abc[1] >= 1);
+            int32_t abc2[6] = { 0 };
+            CHECK(GetCharABCWidthsI(dc, g, 2, NULL, abc2));
+            CHECK(abc2[0] == abc[0] && abc2[1] == abc[1] && abc2[2] == abc[2]);
+        } else {
+            abc_refused++;
+            CHECK(strstr(name, "FIXED") == NULL || strcmp(name, "OEM_FIXED_FONT") != 0);   /* the TrueType stock font must answer */
+        }
+        DeleteDC(dc);
+        lines++;
+    }
+    free(buf);
+    fclose(f);
+    CHECK_EQ(lines, 49);
+    CHECK(abc_ok >= 7);          /* the TrueType stock font's lines */
+    CHECK(abc_refused >= 1);     /* the bitmap ("System", "Courier") fonts: ABC is documented for TrueType only */
+}
+
+TEST(gpa_char_width_by_index_errors)
+{
+    set_dirs();
+    HDC dc = CreateCompatibleDC(NULL);
+    SelectObject(dc, GetStockObject(10));   /* OEM_FIXED_FONT: Liberation Mono */
+    int w[4] = { 5, 5, 5, 5 };
+    int32_t abc[12];
+    uint16_t g = 36;
+    SetLastError(0);
+    CHECK(!GetCharWidthI(dc, 0, 1, &g, NULL));
+    CHECK_EQ(GetLastError(), ERROR_INVALID_PARAMETER);
+    SetLastError(0);
+    CHECK(!GetCharABCWidthsI(dc, 0, 1, &g, NULL));
+    CHECK_EQ(GetLastError(), ERROR_INVALID_PARAMETER);
+    CHECK(GetCharWidthI(dc, 0, 0, NULL, w));            /* nothing asked */
+    CHECK(w[0] == 5);
+    CHECK(GetCharABCWidthsI(dc, 0, 0, NULL, abc));
+    /* an index the face does not have: zero widths, success */
+    uint16_t beyond = 0xFFFF;
+    CHECK(GetCharWidthI(dc, 0, 1, &beyond, w));
+    CHECK_EQ(w[0], 0);
+    CHECK(GetCharABCWidthsI(dc, 0xFFFF, 1, NULL, abc));
+    CHECK(abc[0] == 0 && abc[1] == 0 && abc[2] == 0);
+    /* invalid DCs */
+    SetLastError(0);
+    CHECK(!GetCharWidthI(NULL, 0, 1, &g, w));
+    CHECK_EQ(GetLastError(), ERROR_INVALID_HANDLE);
+    SetLastError(0);
+    CHECK(!GetCharABCWidthsI((HDC)(uintptr_t)0x7ee4, 0, 1, &g, abc));
+    CHECK_EQ(GetLastError(), ERROR_INVALID_HANDLE);
+    /* a bitmap font: no ABC widths, plain widths work */
+    SelectObject(dc, GetStockObject(13));               /* SYSTEM_FONT */
+    CHECK(!GetCharABCWidthsI(dc, 0, 1, &g, abc));
+    CHECK(GetCharWidthI(dc, 0, 1, &g, w));
+    DeleteDC(dc);
+}
+
+TEST(gpa_font_unicode_ranges)
+{
+    set_dirs();
+    HDC dc = CreateCompatibleDC(NULL);
+    SelectObject(dc, GetStockObject(10));               /* OEM_FIXED_FONT: Liberation Mono */
+    DWORD size = GetFontUnicodeRanges(dc, NULL);
+    CHECK(size > 16 && (size - 16) % 4 == 0);
+    std::vector<uint8_t> buf(size + 16, 0xEE);
+    CHECK_EQ(GetFontUnicodeRanges(dc, buf.data()), size);
+    uint32_t hdr[4];
+    memcpy(hdr, buf.data(), 16);
+    CHECK_EQ(hdr[0], size);
+    CHECK_EQ(hdr[1], 0);                                 /* flAccel */
+    CHECK_EQ(hdr[3], (size - 16) / 4);
+    CHECK(buf[size] == 0xEE);                            /* nothing past the size */
+    /* the same walk with FreeType on the face file */
+    std::string path = std::string(getenv("FNVNX_FONT_HOST") ? getenv("FNVNX_FONT_HOST") : "") + "/truetype/liberation/LiberationMono-Regular.ttf";
+    FT_Library lib;
+    CHECK_EQ(FT_Init_FreeType(&lib), 0);
+    FT_Face face;
+    CHECK_EQ(FT_New_Face(lib, path.c_str(), 0, &face), 0);
+    CHECK_EQ(FT_Select_Charmap(face, FT_ENCODING_UNICODE), 0);
+    std::vector<std::pair<unsigned, unsigned>> want;
+    unsigned total = 0;
+    FT_UInt gi = 0;
+    FT_ULong c = FT_Get_First_Char(face, &gi), prev = 0;
+    while (gi && c <= 0xFFFF) {
+        if (want.empty() || c != prev + 1) want.push_back({ (unsigned)c, 1 }); else want.back().second++;
+        total++;
+        prev = c;
+        c = FT_Get_Next_Char(face, c, &gi);
+    }
+    FT_Done_Face(face);
+    FT_Done_FreeType(lib);
+    CHECK_EQ(hdr[2], total);
+    CHECK_EQ(hdr[3], want.size());
+    CHECK(want.size() > 10);
+    if (hdr[3] == want.size()) {
+        uint32_t sum = 0;
+        for (size_t i = 0; i < want.size(); i++) {
+            uint16_t lo, n;
+            memcpy(&lo, &buf[16 + 4 * i], 2);
+            memcpy(&n, &buf[18 + 4 * i], 2);
+            CHECK(lo == want[i].first && n == want[i].second);
+            sum += n;
+            if (i) CHECK(want[i].first > want[i - 1].first + want[i - 1].second);   /* ascending, runs are maximal */
+        }
+        CHECK_EQ(sum, hdr[2]);
+    }
+    CHECK(want[0].first == 0x20 || want[0].first < 0x21);   /* the basic Latin run starts at the front */
+    /* a bitmap font has no Unicode cmap: the empty set */
+    SelectObject(dc, GetStockObject(13));
+    DWORD s2 = GetFontUnicodeRanges(dc, NULL);
+    uint8_t small[16];
+    memset(small, 0xEE, sizeof small);
+    CHECK_EQ(GetFontUnicodeRanges(dc, small), s2);
+    uint32_t h2[4];
+    memcpy(h2, small, 16);
+    CHECK(h2[0] == s2 && h2[1] == 0 && h2[3] == (s2 - 16) / 4 && h2[2] <= 0xFFFF);
+    DeleteDC(dc);
+    SetLastError(0);
+    CHECK_EQ(GetFontUnicodeRanges(NULL, NULL), 0);
+    CHECK_EQ(GetLastError(), ERROR_INVALID_HANDLE);
+}

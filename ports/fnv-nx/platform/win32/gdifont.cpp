@@ -1895,3 +1895,73 @@ extern "C" UINT GetOutlineTextMetricsA(HDC hdc, UINT cb, void *buf)
     memcpy(buf, tmp.data(), n);
     return (UINT)n;
 }
+
+/* ---- by glyph index (d3dx9's font code): the same glyph path as GetGlyphOutline / GetTextExtentPoint (glyph_abc), the
+ * logical conversion of NtGdiGetCharABCWidthsW with NTGDI_GETCHARABCWIDTHS_INT (each of A, B, C scaled on its own and
+ * not mirrored: lp_w), the width of GetCharWidthI their sum (NtGdiGetCharWidthW with NTGDI_GETCHARWIDTH_INDICES).
+ * gi NULL: consecutive indices from first. cgi == 0 succeeds. A NULL output buffer fails with ERROR_INVALID_PARAMETER;
+ * ABC of a font that is not an outline (TrueType / OpenType) font fails (MSDN: only for TrueType fonts); an index the
+ * face does not have yields 0, 0, 0. */
+template <class Sink> static bool glyph_widths_i(HDC hdc, UINT first, UINT cgi, const uint16_t *gi, bool need_outline, Sink sink)
+{
+    FL l;
+    if (!gdi_dc_font(hdc)) { SetLastError(ERROR_INVALID_HANDLE); return false; }
+    RF *f = cur(hdc);
+    Map m;
+    if (!f || !dc_map(hdc, &m)) return false;
+    if (need_outline && !f->scalable) return false;
+    for (UINT i = 0; i < cgi; i++) {
+        int32_t abc[3];
+        glyph_abc(f, gi ? gi[i] : (unsigned)(first + i), true, abc);
+        sink(i, lp_w(m, abc[0]), lp_w(m, abc[1]), lp_w(m, abc[2]));
+    }
+    return true;
+}
+extern "C" BOOL GetCharABCWidthsI(HDC hdc, UINT first, UINT cgi, uint16_t *gi, void *abc)
+{
+    if (!abc) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+    int32_t *o = (int32_t *)abc;   /* ABC {int, UINT, int}: 3 x 32 bits */
+    return glyph_widths_i(hdc, first, cgi, gi, true, [&](UINT i, int a, int b, int c) { o[3 * (size_t)i] = a; o[3 * (size_t)i + 1] = b; o[3 * (size_t)i + 2] = c; });
+}
+extern "C" BOOL GetCharWidthI(HDC hdc, UINT first, UINT cgi, uint16_t *gi, int *widths)
+{
+    if (!widths) { SetLastError(ERROR_INVALID_PARAMETER); return FALSE; }
+    return glyph_widths_i(hdc, first, cgi, gi, false, [&](UINT i, int a, int b, int c) { widths[i] = a + b + c; });
+}
+
+/* GetFontUnicodeRanges: GLYPHSET {cbThis, flAccel, cGlyphsSupported, cRanges, WCRANGE ranges[]} from the realised face's
+ * Unicode cmap (BMP only: WCRANGE holds a WCHAR), contiguous runs of characters that have a glyph, ascending (reference:
+ * Wine 9.0 win32u freetype.c freetype_get_unicode_ranges and font.c font_GetFontUnicodeRanges). lpgs NULL: only the
+ * size. flAccel is 0 (the reference); a font whose charmap is not Unicode has no ranges (cRanges 0, size 16: the
+ * reference returns the empty set's size). A run is cut at 65535 characters (WCRANGE.cGlyphs is 16 bits).
+ * Returns the size in bytes; 0 for an invalid DC. The buffer must hold the size (the API has no size argument). */
+extern "C" DWORD GetFontUnicodeRanges(HDC hdc, void *lpgs)
+{
+    FL l;
+    if (!gdi_dc_font(hdc)) { SetLastError(ERROR_INVALID_HANDLE); return 0; }
+    RF *f = cur(hdc);
+    if (!f) return 0;
+    std::vector<std::pair<uint16_t, uint16_t>> runs;   /* wcLow, cGlyphs */
+    uint32_t total = 0;
+    FT_Face ft = f->ft;
+    if (ft->charmap && ft->charmap->encoding == FT_ENCODING_UNICODE) {
+        FT_UInt g = 0;
+        FT_ULong c = FT_Get_First_Char(ft, &g), prev = 0;
+        while (g && c <= 0xFFFF) {
+            if (runs.empty() || c != prev + 1 || runs.back().second == 0xFFFF)
+                runs.push_back({ (uint16_t)c, 1 });
+            else
+                runs.back().second++;
+            total++;
+            prev = c;
+            c = FT_Get_Next_Char(ft, c, &g);
+        }
+    }
+    DWORD size = (DWORD)(16 + 4 * runs.size());
+    if (lpgs) {
+        uint8_t *p = (uint8_t *)lpgs;
+        put32(p, size); put32(p + 4, 0); put32(p + 8, total); put32(p + 12, (uint32_t)runs.size());
+        for (size_t i = 0; i < runs.size(); i++) { put16(p + 16 + 4 * i, runs[i].first); put16(p + 18 + 4 * i, runs[i].second); }
+    }
+    return size;
+}
