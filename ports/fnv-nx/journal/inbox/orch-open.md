@@ -65,3 +65,11 @@ so no game code is built or gated on trunk yet. Frames rendered: 0.
 | 17 | fontstate | tools/fonts fcf99a1 published; 2 runs matched | farm fontstate |
 | 1 | msvcmodel mirror | tools/gcc-ilp32-msvcmodel absent (0 refs); farm still building | fnv-nx-build refs |
 | 13 | oracle caveat (a) | rule: a "spec" reference counts only with a resolving path+anchor outside the subject's import closure; free text = no reference | orch 22:00Z |
+
+## 2026-11-11 22:05Z: R9 gap (class B, lifted)
+
+- Fact (L3a): R9 is not implemented in the lifter. Packs at 16ad274b have 0 ldar/stlr; lock inc/xadd/cmpxchg become plain load+store.
+- Consequence: the 16ad274b packs are not built into objects.
+- L3a's rule: every guest access ordered (ldar/stlr, alignment test, dmb path for unaligned); 18 lockable forms and xchg-with-memory as CAS; unaligned through the ATOMIC-UNALIGNED spin-lock.
+- Gate B/F checks the pack objects. Exempt bases are only host-private frames, with a proof in ORDERING.md; a guest-base register is never exempt.
+- Regenerate after R9 lands.
