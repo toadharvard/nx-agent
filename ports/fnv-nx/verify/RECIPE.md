@@ -21,7 +21,8 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 - `flags`: per language. Refused: `-I*` (use `include`), `-o -c -E -S -x -M*`, and the refusal set R below.
 - `include`: repo-relative directory inside an admitted root (tracked files, or generated outputs of this root), or an absolute path inside an
   external's `at`. Included files are inputs by content; a file the unit reads that is not in them does not exist for it.
-- `units`: must be `"all"`. RULE: every tracked `*.c *.cc *.cpp *.cxx *.s *.S` under the root, and every generated output with such a name, is
+- `units`: must be `"all"`. A `.S` unit is preprocessed as its own stage like a C unit (its key covers exactly the headers it includes);
+  a `.s` unit sees nothing but its own file (`.include` fails: use `.S` and `#include`). RULE: every tracked `*.c *.cc *.cpp *.cxx *.s *.S` under the root, and every generated output with such a name, is
   compiled. A file that must not be compiled does not belong in the root; there is no `exclude`.
 - `generated`: python generators run as sandbox stages before compilation, in list order. `tool` is a tracked `.py` of an admitted tool or product
   root (the whole root is mounted at `/tool`, the script at `/tool/<path in its root>`), `inputs` are tracked files or directories (repo-relative;
@@ -46,9 +47,11 @@ is fetched ONLY by exact `commit` (`git fetch --depth 1 $ARTIFACTS_URL <commit>`
 `cas.py ingest`). A mismatch or an unreachable commit makes the build red with stage `external:<name>`. The tree is a declared input at `at`
 of every stage, so a changed mirror changes every stage key. `ref` is documentation only; the commit decides. Validation: `repo` is `fnv-nx-build`,
 names unique, `at` absolute and normalised, not under `/src /inc /in /out /tool /objs /ld /work /proc /dev /tmp`, not nested in another `at`.
-Limit of the external compiler form: the loader closure of its x86-64 ELF files is resolved on the checked-out copy by `runtime.closure()`
-(libraries inside the tree are its own; others come from the host like `runtime.py tool`); an absolute RPATH into the tree's own prefix is not
-mapped (`runtime.py tool` cannot say "host copy here, sandbox path there"), the build is red naming the missing library.
+An external compiler is a tree at `at` (cc and cxx are paths inside it, e.g. `usr/bin/<driver>` of a copy of a Debian prefix: the driver finds
+cc1, as, ld relative to itself). It is declared `HOST@AT` to `runtime.py tool`: the loader closure of its x86-64 ELF files is resolved as the
+loader resolves it INSIDE the sandbox (paths under `at` are files of the checked-out tree, other paths are host libraries that become declared
+inputs); a library that cannot be resolved is a red build naming the object and the name. `include` may name a directory inside an external:
+it is passed as `-I<that path>` (the external is a declared input of every stage, so keys stay content-addressed).
 
 ## Result (`objects.json`, "fnvnx-objects/1")
 `objects` [{unit, object, sha256, os_layer}], `elf` {path, sha256}|null, `constants`, `defined` [{symbol, bind GLOBAL|WEAK|UNIQUE, type, object}] and

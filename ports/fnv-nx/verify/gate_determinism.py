@@ -11,8 +11,10 @@ between two runs on one host are exposed: wall_clock, entropy by AT_RANDOM; host
 size are equal in both builds and stay open). EXTERNALS (recipe key "external"): fetched once into a bare cache shared by the two cold builds (GATE_CACHE/external or a temp dir), but each
 cold build has its own store and re-checks out, re-ingests and re-verifies tree_sha256. A shared fetch does not weaken "two cold builds":
 an external is a content-pinned INPUT (commit + tree hash verified on every build), not a build output, so nothing a build computes is shared.
-COST: this gate doubles the compile time of the verdict (two cold builds of every root,
-each also ingesting the tool runtimes), see the measured times in the test output."""
+COST: this gate doubles the compile time of the verdict (two cold builds of every root, each also ingesting the tool runtimes into its
+fresh store: measured ~4 s for the python runtime of a root with generators, ~1.5 s for the cross gcc, ~3 s more for an external compiler tree of
+110 MB; a stage itself costs ~0.03 s of sandbox set-up, trees are placed once per store). A 100-unit root: ~12 s per cold build before the real
+compile time, ~0.5 s cached; see the measured times in the test output."""
 import json
 import os
 import shutil

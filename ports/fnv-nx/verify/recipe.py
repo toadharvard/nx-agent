@@ -4,7 +4,7 @@ every step is a sandbox stage (sandbox.py) keyed by its declared inputs, cached 
     python3 -I recipe.py build --root ports/fnv-nx/X --store S --out DIR [--jobs N]     (cwd = checkout root; exit 0 green, 2 red)
     python3 -I recipe.py check --root ports/fnv-nx/X                                    validate only
 Steps: (1) generated stages (python runtime, runtime.py), (2) one unit stage per source: .c/.cc/.cpp/.cxx = unitstage.Build (PP on
-name-complete views, then CC on the preprocessed text), .s/.S = one stage on the whole root and include views, (3) the link stage
+name-complete views, then CC on the preprocessed text), .s/.S = unitstage.Build too (.S: PP then CC; .s: one stage on its own file), (3) the link stage
 (`ld` of the compiler, objects + script as inputs). Tools (compilers, ld) are runtime.py `tool` runtimes: declared inputs, no host /usr.
 RULE units: every tracked *.c *.cc *.cpp *.cxx *.s *.S under the root, and every generated output with such a name, is a unit.
 RULE refusal set R: an option of GNU ld's grammar that lets a link accept missing or substituted symbols. Matched by OPTION SYNTAX:
@@ -15,7 +15,7 @@ EXTERNAL inputs (key "external", RECIPE.md): fetched only by exact commit from A
   builds that must not share stores), checked out, ingested; the CAS tree hash must equal tree_sha256 (else the build is red naming
   the external). The tree is a declared input at "at" of EVERY stage (the tool runtime lists it), so stage keys cover its hash. A tree
   is the content-pinned INPUT, not a build output: sharing the fetch between two cold builds shares nothing that a build computes.
-  compiler {"external": N, cc, cxx}: its loader closure comes from runtime.closure() on the checked-out tree (see RECIPE.md limits).
+  compiler {"external": N, cc, cxx}: the tree is declared to runtime.py tool as HOST@AT (loader closure resolved as inside the sandbox, RECIPE.md).
 Outputs in --out: objects.json ("fnvnx-objects/1": root, objects[{unit,object,sha256,os_layer}], elf, constants, defined [{symbol,bind,type,object}] and undefined [symbol] (ELF .symtab of the objects, struct), stage_keys, stages
   {run,hit}, status green|red, failure {stage,exit,stderr tail 20} / failed_units when red), obj/<unit>.o, <name>.elf, constants.tsv.
 Assumptions: the compiler and ld are deterministic given the flags of unitstage/toolflags (A-env); the sandbox leaves the channels of
@@ -287,9 +287,10 @@ class Job:
     def cached_rt(self, name, make):
         p = os.path.join(self.store, "rt", name + ".json")
         if not os.path.exists(p):
-            with open(p + ".tmp", "w") as f:
+            tmp = "%s.tmp-%d-%s" % (p, os.getpid(), os.urandom(4).hex())   # builds may share a store: the temp name is private
+            with open(tmp, "w") as f:
                 json.dump(make(), f, sort_keys=True)
-            os.replace(p + ".tmp", p)
+            os.replace(tmp, p)
         return p, json.load(open(p))
 
     def externals(self, ws):
@@ -331,28 +332,28 @@ class Job:
         return p
 
     def toolrt(self, paths):
-        """Tool runtime (runtime.py rules) of driver PATHS plus every external as declared input. External compiler: the loader closure
-        of every x86-64 ELF of its tree, by runtime.closure() on the checked-out copy (libraries inside the tree are its own)."""
+        """Tool runtime (runtime.py rules) of driver PATHS plus every external as declared input. An external compiler is a tree
+        mapped HOST@AT: the loader closure of its x86-64 ELF files is resolved as the loader resolves it inside the sandbox."""
         xin = [{"at": e["at"], "tree": e["tree"]} for e in self.ext.values()]
         tag = hashlib.sha256(repr((paths, xin)).encode()).hexdigest()[:16]
-        if "external" in self.rec["compiler"]:
-            e = self.ext[self.rec["compiler"]["external"]]
+        c = self.rec["compiler"]
 
-            def make():
-                libs = runtime.closure(runtime.elf_files(e["host"], runtime.X86_64), [e["host"]])
-                inputs = xin + [{"at": at, "tree": cas.ingest(src, self.store)} for at, src in sorted(libs.items())]
-                return {"format": runtime.FORMAT, "kind": "tool", "exes": sorted(paths), "inputs": sorted(inputs, key=lambda i: i["at"]), "env": {}}
-        else:
-            def make():
+        def make():
+            if "external" in c:
+                x = self.ext[c["external"]]
+                exes, trees = paths, ["%s@%s" % (x["host"], x["at"])]
+            else:
                 exes, trees = [], []
                 for p in paths:
-                    x, t = unitstage.gcc_set(p)
-                    exes, trees = exes + x, trees + t
-                return self.plus(runtime.build_tool(self.store, sorted(set(exes)), sorted(set(trees))))
+                    xs, ts = unitstage.gcc_set(p)
+                    exes, trees = exes + xs, trees + ts
+            return self.plus(runtime.build_tool(self.store, sorted(set(exes)), sorted(set(trees))))
         return self.cached_rt("tool-" + tag, make)
 
     def plus(self, rt):
-        rt["inputs"] = sorted(rt["inputs"] + [{"at": e["at"], "tree": e["tree"]} for e in self.ext.values()], key=lambda i: i["at"])
+        """RT with every external that it does not hold yet as a declared input."""
+        have = {i["at"] for i in rt["inputs"]}
+        rt["inputs"] = sorted(rt["inputs"] + [{"at": e["at"], "tree": e["tree"]} for e in self.ext.values() if e["at"] not in have], key=lambda i: i["at"])
         return rt
 
     def ingest_files(self, tmp, name, files, base):
@@ -388,32 +389,40 @@ class Job:
                 os.makedirs(os.path.dirname(os.path.join(ws, "root", o)), exist_ok=True)
                 shutil.copyfile(os.path.join(tmp, "out", o), os.path.join(ws, "root", o))
 
-    def overlay(self, ws, d):
-        if under(d, self.root):
-            return os.path.join(ws, "root", d[len(self.root) + 1:])
-        if any(under(d, e["at"]) for e in self.ext.values()):
-            return self.hostpath(d)
-        _copy(self.repo, [f for f in self.files if under(f, d)], "", os.path.join(ws, "inc"))
-        return os.path.join(ws, "inc", d)
+    def includes(self, ws):
+        """unitstage --include specs in recipe order: HOST@/inc/N for a directory of this root or the repo, the sandbox path itself
+        for a directory inside an external (a declared input of the tool runtime)."""
+        out, n = [], 0
+        for d in self.rec["include"]:
+            if any(under(d, e["at"]) for e in self.ext.values()):
+                out.append(d)
+                continue
+            if under(d, self.root):
+                host = os.path.join(ws, "root", d[len(self.root) + 1:])
+            else:
+                _copy(self.repo, [f for f in self.files if under(f, d)], "", os.path.join(ws, "inc"))
+                host = os.path.join(ws, "inc", d)
+            out.append("%s@/inc/%d" % (host, n))
+            n += 1
+        return out
 
     def compile(self, ws, units):
         rec, drv = self.rec, dict(zip(("c", "cxx"), self.drivers()))
-        incs = ["%s@/inc/%d" % (self.overlay(ws, d), n) for n, d in enumerate(rec["include"])]
         kinds = {u: ("c" if u.endswith(CC_EXT) else "cxx" if u.endswith(CXX_EXT) else "asm") for u in units}
         used = sorted({drv["c" if k == "asm" else k] for k in kinds.values()})
         if not used:
             return {}
-        rtp, rt = self.toolrt(used)
+        rtp, _ = self.toolrt(used)
         builds = {}
-        for k in sorted(set(kinds.values()) - {"asm"}):
+        for k in sorted(set(kinds.values())):
             fp = os.path.join(ws, "flags-%s.json" % k)
-            json.dump({"argv": (["-x", "c"] if k == "c" else []) + rec["flags"][k]}, open(fp, "w"))
-            builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv[k], toolrt=rtp, flags_file=fp,
-                                                           src_root=os.path.join(ws, "root") + "@/src", include=incs))
+            json.dump({"argv": rec["flags"][k]}, open(fp, "w"))
+            builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtp, flags_file=fp,
+                                                           src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws)))
 
         def one(u):
             try:
-                return u, (self.asm(ws, u, rt, incs, drv["c"]) if kinds[u] == "asm" else builds[kinds[u]].unit(u))
+                return u, builds[kinds[u]].unit(u)
             except (sandbox.SbxError, unitstage.UnitError) as e:
                 return u, {"status": "cc-failed", "failure": {"stage": "cc:" + u, "exit": None, "stderr": [str(e)[-300:]]}}
         res, failed = {}, {}
@@ -421,9 +430,8 @@ class Job:
             for u, e in ex.map(one, units):
                 if e["status"] != "ok":
                     cc = e["status"] == "cc-failed"
-                    key = e.get("cc_key" if cc else "pp_key")
                     failed[u] = e.get("failure") or {"stage": "%s:%s" % ("cc" if cc else "pp", u), "exit": e.get("cc_rc" if cc else "pp_rc"),
-                                                     "stderr": tail(self.store, sandbox._load(self.store, key))}
+                                                     "stderr": e["error"].splitlines()}
                     continue
                 self.keys |= {e[k] for k in ("pp_key", "cc_key") if e.get(k)}
                 self.run += (e.get("pp_status") == "run") + (e.get("cc_status") == "run")
@@ -432,20 +440,6 @@ class Job:
         if failed:
             raise BuildRed(dict(failed[sorted(failed)[0]], units=sorted(failed), done=sorted(res)))
         return res
-
-    def asm(self, ws, u, rt, incs, cc):
-        roots = [("/src", cas.ingest(os.path.join(ws, "root"), self.store))] + [
-            ("/inc/%d" % n, cas.ingest(i.split("@")[0], self.store)) for n, i in enumerate(incs)]
-        argv = [cc] + ["-I/inc/%d" % n for n in range(len(incs))] + self.rec["flags"]["asm"] + [
-            "-frandom-seed=" + hashlib.sha256(u.encode()).hexdigest(), "-Werror=date-time"] + [
-            "-ffile-prefix-map=%s=%s" % (at, at[1:]) for at, _ in roots] + ["-c", "-o", "/out/unit.o", "/src/" + u]
-        doc = {"format": "fnvnx-stage/1", "stage": "as:" + u, "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
-               "env": dict(unitstage.ENV, PATH=os.path.dirname(cc)), "outputs": ["/out"],
-               "inputs": sorted(rt["inputs"] + [{"at": a, "tree": t} for a, t in roots], key=lambda i: i["at"])}
-        try:
-            return {"status": "ok", "object": self.stage(doc)[1]["outputs"]["/out"]}
-        except BuildRed as r:
-            return {"status": "cc-failed", "failure": r.args[0]}
 
     def link(self, ws, objs):
         lk, cc = self.rec["link"], self.drivers()[0]
@@ -456,7 +450,7 @@ class Job:
             ld = e["at"] + ld[len(e["host"]):] if ld.startswith(e["host"] + "/") else ld
             rt = self.toolrt([cc])[1]
         else:
-            rt = self.cached_rt("tool-ld-" + hashlib.sha256(ld.encode()).hexdigest()[:16], lambda: self.plus(runtime.build_tool(self.store, [ld], [])))[1]
+            rt = self.cached_rt("tool-ld-" + hashlib.sha256(repr((ld, sorted((e["at"], e["tree"]) for e in self.ext.values()))).encode()).hexdigest()[:16], lambda: self.plus(runtime.build_tool(self.store, [ld], [])))[1]
         od, sd = os.path.join(ws, "objs"), os.path.join(ws, "ld")
         for u, o in objs.items():
             os.makedirs(os.path.dirname(os.path.join(od, u + ".o")), exist_ok=True)
