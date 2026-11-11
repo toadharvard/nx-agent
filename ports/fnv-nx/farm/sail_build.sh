@@ -15,7 +15,7 @@
 STOCK=0; [ "${1:-}" = "--stock" ] && STOCK=1
 set -euo pipefail
 REMS=${REMS:-/home/user/rems-project}; TOOLS=${TOOLS:-/home/user/l3tools}; WORK=${WORK:-/home/user/l3work/proof}
-HERE=$(cd "$(dirname "$0")" && pwd)
+FARM=$(cd "$(dirname "$0")" && pwd); HERE=$(cd "$FARM/../lift/proof" && pwd)
 Z3=${Z3:-$(python3 -c 'import z3,os;print(os.path.dirname(z3.__file__))')}; CARGO=${CARGO:-cargo}
 MODEL=$REMS/sail-x86-from-acl2/model
 export OPAMROOT=$TOOLS/opam-root
@@ -53,8 +53,8 @@ sha256sum "$OUT.ir" "$HERE/x86.toml"
 # smoke test: add eax, ebx  (01 d8) must give paths ending in (_ unit)
 export LD_LIBRARY_PATH=$Z3/lib SAIL_IR=$OUT.ir SAIL_WORK=$WORK Z3LIB=$Z3/lib ISLA_EXEC=$REMS/isla/target/release/isla-execute-function
 python3 -c "
-import sys; sys.path.insert(0, '$HERE')
-import model_sail
+import sys; sys.path.insert(0, '$HERE/..')
+from proof import model_sail
 out, err = model_sail.run_isla(bytes.fromhex('01d8'))
 assert out.count('Result: (_ unit)') >= 1, out[:300]
 print('smoke test ok:', out.count('Result:'), 'paths')"

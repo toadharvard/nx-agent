@@ -72,11 +72,11 @@ rol agrees with the DSL (lsb of the unchanged result) at count 8/16; ror disagre
 Memory forms rely on the `assume` (no segment-limit #GP: access wrapping past 4 GiB).
 
 ### One-command toolchain build (L3b C2)
-`bash proof/sail_setup.sh` builds everything from a clean Ubuntu 24.04 root shell: apt packages, opam 2.2.1, opam-repository pinned to one commit,
+`bash ports/fnv-nx/farm/sail_setup.sh` builds everything from a clean Ubuntu 24.04 root shell: apt packages, opam 2.2.1, opam-repository pinned to one commit,
 switch `sail` (OCaml 4.14.2, the 52 pinned opam packages incl. sail 0.20.3), isla e9b5d94 (`cargo build --release --locked`) and its isla-sail plugin,
 z3-solver 5.4.0.0 (pip, libz3.so.5.4), sail-x86-from-acl2 0c6c023, then `sail_build.sh` (stock IR, proof IR, smoke test); it prints the sha256 of
 `x86_proof.ir` and exits 1 unless it equals the pin. Every version, commit and sha256 is in `proof/sail_pins.txt`. Env: `REMS` `TOOLS` `WORK` `JOBS`.
-`MIRROR=<dir> bash proof/sail_setup.sh` takes every download from `<dir>`; `bash proof/sail_setup.sh --make-mirror <dir>` fills it from the network.
+`MIRROR=<dir> bash ports/fnv-nx/farm/sail_setup.sh` takes every download from `<dir>`; `bash ports/fnv-nx/farm/sail_setup.sh --make-mirror <dir>` fills it from the network.
 The IR is path independent: isla-sail records source file names in the IR, so `sail_build.sh` runs it in a staging tree with relative names only.
 Cause of 3acf7d99 (README) vs 66cf6d73 (farm): the old script passed the splice files by absolute path (`$HERE`); run from `/home/user/nx-agent/ports/...` it gives
 3acf7d99 (10,389,604 B), from `/home/user/nx-l3/ports/...` 66cf6d73 (10,389,595 B), both reproduced. The staged build gives 55f87ab6 (10,389,242 B) in every directory.
@@ -105,6 +105,6 @@ Gate with the patched IR (forms.py md5 5ba2bb32...): proved 358, FAILED 33 (rol/
   today only `enter` (forms_flow.py: `assert c.ops[1].val == 0`, the nesting level).
 * **Link to the lifter** (it builds concrete Forms): `canon(build(i)) == canon(symbuild(shape(i))[fields := i, eip := addr(i)])`, canon = serialization after constant
   folding; `symcheck.py` checks it for EVERY instance of the image (all unique (address, bytes) of the code ranges), `tests/test_symform.py` on synthetic encodings.
-* **Obligation** = `prove.prove_one` (imported); the field variables are free in the unsat query. `shapeprove.py --shard K/N`, farm: `bash proof/farm_shapeprove.sh K N`.
+* **Obligation** = `prove.prove_one` (imported); the field variables are free in the unsat query. `shapeprove.py --shard K/N`, farm: `bash ports/fnv-nx/farm/farm_shapeprove.sh K N`.
   `dsl_sha` = `symform.shape_sha(key)` (no z3). Assumptions: A-FLAT, A-EIPRANGE | A-EIP, A-SEGLIM (the model's segment-limit faults, now also
   `:OUT-OF-SEGMENT-INSTRUCTION-POINTER`, are excluded; symcheck counts the relative targets of the image that leave [0, 2^32): 0 expected).

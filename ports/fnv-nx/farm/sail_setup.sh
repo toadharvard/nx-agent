@@ -9,7 +9,7 @@
 # Phases: apt -> opam binary -> sources -> opam switch+packages -> z3 -> isla (cargo --locked) -> isla-sail -> sail_build.sh -> check.
 # The result (sha256 of x86_proof.ir) is compared with the pin in sail_pins.txt; a mismatch exits 1.  No step may fail silently.
 set -euo pipefail
-HERE=$(cd "$(dirname "$0")" && pwd); PINS=$HERE/sail_pins.txt
+FARM=$(cd "$(dirname "$0")" && pwd); HERE=$(cd "$FARM/../lift/proof" && pwd); PINS=$HERE/sail_pins.txt
 REMS=${REMS:-/home/user/rems-project}; TOOLS=${TOOLS:-/home/user/l3tools}; WORK=${WORK:-/home/user/l3work/proof}
 JOBS=${JOBS:-2}; MIRROR=${MIRROR:-}; MAKE_MIRROR=""
 if [ "${1:-}" = "--make-mirror" ]; then MAKE_MIRROR=${2:?usage: --make-mirror <dir>}; MIRROR=""; mkdir -p "$MAKE_MIRROR"; MAKE_MIRROR=$(cd "$MAKE_MIRROR" && pwd); fi
@@ -133,7 +133,7 @@ phase "isla-sail (make)"
 if [ ! -x "$REMS/isla/isla-sail/plugin.cmxs" ]; then eval "$($OPAM env --switch=sail)"; make -C "$REMS/isla/isla-sail"; fi
 
 phase "sail_build.sh (stock IR, proof IR, smoke test)"
-REMS=$REMS TOOLS=$TOOLS WORK=$WORK CARGO=$CARGO bash "$HERE/sail_build.sh"
+REMS=$REMS TOOLS=$TOOLS WORK=$WORK CARGO=$CARGO bash "$FARM/sail_build.sh"
 
 phase "check"
 GOT=$(sha256sum "$WORK/sail/x86_proof.ir" | cut -d' ' -f1); WANT=$(pin x86_proof.ir 4)
