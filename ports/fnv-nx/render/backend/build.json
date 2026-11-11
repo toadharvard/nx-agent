@@ -41,8 +41,8 @@
   ]
  },
  "include": [
-  "ports/fnv-nx/render/d3d9/backend",
-  "ports/fnv-nx/render/d3d9/backend/nx",
+  "ports/fnv-nx/render/backend",
+  "ports/fnv-nx/render/backend/nx",
   "/ext/libnx/nx/include",
   "/ext/deko3d/include"
  ],
