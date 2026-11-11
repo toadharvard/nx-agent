@@ -129,3 +129,17 @@ from `ports/fnv-nx/verify` (sibling of lift/; a lift-only branch has no verify/,
   estimate instruction, float->int conversions only in marked helpers (plugin `toolchain/f2i_check/fnvnx_f2i_check.cc`, result file `obj/<unit>.o.f2i.json`), and the item
   `<root>:forms` = the gate forms is green (the helpers' correctness is the form certificates'; evaluated by calling `formgate.judge`, since each gate has its own GATE_OUT).
   Tests: `tests/test_fpexact.py`.
+
+### Why the first 340-shape measurement timed out, and the rules that closed it (L3b)
+Measured causes (12 shapes: `mov m32,r32` x5, `mov m16,r16` x2, `mov m32,imm`, `imul r32,m32`, `imul r32,r32,imm`, `div m32`, `div r32`): not the isla path count (1-3 paths) but the queries.
+* Fetch offsets: the model reads displacement / immediate bytes of the instruction window with 128-bit `lshr` by `8 * ((code_base + K) - (rip + K))`, the sums formed at 48 or 64 bits.
+  `model_sail.zext_add_pairs`: `Z_V(c + Z_W(e)) = c + Z_V(e)` for a constant `c < 2^W - 2^n` (the sum cannot wrap), unconditional; with the existing eip rule, applied to a fixpoint (each exposes the other),
+  the shift amount becomes a constant and the window read a plain extract. Closed: every `mov`/`imul` timeout.
+* One query per output: `prove.check` solves `assume AND ci` for each differing output (one register, one flag, the memory, eip) instead of one query over the disjunction (a complete split: unsat iff all are).
+* SIB scale: the DSL has `index * 8`, the model a shift; `rewrite.pow2_mul` turns `x * 2^k` into the wiring `concat(x[w-1-k:0], 0^k)` on both sides.
+* Division: the model computes the remainder as `a - b * floor(a / b)`, the DSL as `bvurem`; z3 cannot relate them (the identity is `unknown` after 60 s even at 16 bits).
+  `rewrite.div_norm`: `bvurem(a, b) = If(b = 0, a, a - b * bvudiv(a, b))`, the SMT-LIB definition, and truncation of `+ - *` distributes (`Extract(h, 0, a op b) = Extract(h, 0, a) op Extract(h, 0, b)`).
+* The fault-equivalence check ("no DSL fault implies the model does not fault") negated the full `assume`, which also holds closed constraints on the model's free values (`0 <= v` of an Int that stands for an
+  undefined result), so it was satisfiable by choosing `v < 0`. The model now returns `side` (those closed constraints) and `nofault` (the pre-state condition); the check negates `nofault` and requires
+  `side` satisfiable once (a closed formula over free values is satisfiable for every pre-state iff it is satisfiable).
+All rewrites are identities of the bit-vector semantics (tests/test_rewrite.py checks each on 8/16-bit instances for all inputs); none changes what is proved.
