@@ -30,9 +30,9 @@ SCRATCH = tempfile.mkdtemp(prefix="bootjob-")
 atexit.register(shutil.rmtree, SCRATCH, ignore_errors=True)
 LINE = "fnvnx-start: identity ok"
 TID = "ef" * 32
-# the contract's own formats (see verify/bootinputs.py): milestones.tsv has the entry address only; the loader console lines
+# the contract's own formats (see verify/bootinputs.py): milestones.tsv has the exe_entry row only (the contract's row grammar); the loader console lines
 # come from run.txt
-MILESTONES = "# table_id %s\nexe_entry_va\t0x3000\n" % TID
+MILESTONES = "exe_entry\texe_entry\t00003000\texe PE ImageBase+AddressOfEntryPoint\n# table_id %s\n" % TID
 RUN = "emulator run: header\n   %s\n   [fnvnx] not a loader line\n" % LINE
 MANIFEST = "00001000\tfnvboot_a\tcode\n00002000\tfnvboot_b\tcode\n00003000\tfnvboot_c\tcode\n000ff000\tI_rt\timport\n# table_id %s\n" % TID
 MODULES = ("# name\tsha256\tsize\tpreferred_base\tassigned_base\tsize_of_image\thas_tls\tentry_rva\tstatic\tload_index\n"

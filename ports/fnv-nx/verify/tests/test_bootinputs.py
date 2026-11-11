@@ -80,7 +80,10 @@ def main():
     case("keys error: 7 columns", good(raises(bi.key_range, ent, kt.replace("\tsym", ""))))
     case("keys error: unaligned key", good(raises(bi.key_range, ent.replace("00100000", "00100004"), kt)))
     # milestones
-    mt = "# table_id " + TID + "\nexe_entry_va\t0x00ecc4db"
+    ROW = lambda name, kind, v, src, extra=None: "\t".join([name, kind, v, src] + ([extra] if extra is not None else [])) + "\n"
+    EXE = ROW("exe_entry", "exe_entry", "00ecc4db", "exe PE ImageBase+AddressOfEntryPoint")
+    TRAIL = "# table_id " + TID + "\n"
+    mt = EXE + TRAIL
     run = "header\n   fnvnx-start: identity ok\n   fnvnx-start: image mapped\n   [fnvnx] other\n"
     t = bi.milestone_table(mt, run, TID)
     tab = bi.bootmiles.load_table(t)
@@ -88,31 +91,53 @@ def main():
          and tab.milestones[0]["parts"][0]["target"] == boot.console_part("fnvnx-start: identity ok")
          and tab.milestones[2]["parts"][0]["target"] == 0xecc4db, t)
     case("milestones: no run.txt -> exe-entry only", [m["name"] for m in bi.bootmiles.load_table(bi.milestone_table(mt, "", TID)).milestones] == ["exe-entry"])
-    case("milestones: a file without table_id is accepted (the contract's own form)",
-         "exe-entry" in bi.milestone_table("exe_entry_va\t0x00ecc4db", run, TID))
-    for k, a in (("other row", (mt + "\nfoo\t1", run)), ("id differs", (mt, run, "11" * 32)), ("duplicate console line", (mt, run + run)),
-                 ("entry without 0x", (mt.replace("0x", ""), run)), ("row with 3 fields", (mt + "\nx\ty\tz", run))):
+    OLD = "# table_id " + TID + "\nexe_entry_va\t0x00ecc4db\n"
+    mu = lambda name, v="00001000", extra="1": ROW("module_entry:" + name, "module_entry", v, "modules.tsv assigned_base+entry_rva", extra)
+    PR = lambda dll, v: ROW("import:%s!Present" % dll, "import", v, "keys.tsv import key")
+    WM = ROW("WinMain", "winmain", "00001000", "n1.json N1 function ?WinMain@@YGHPAUHINSTANCE__@@0PADH@Z")
+    for k, a in (("old exe_entry_va file", (OLD, run)), ("table_id missing", (EXE, run)), ("table_id not last", (TRAIL + EXE, run)),
+                 ("table_id twice", (mt + TRAIL, run)), ("table_id short", (EXE + "# table_id abcd\n", run)),
+                 ("id differs", (mt, run, "11" * 32)), ("other comment", ("# x\n" + mt, run)), ("blank line", (EXE + "\n" + TRAIL, run)),
+                 ("duplicate console line", (mt, run + run)), ("value with 0x", (mt.replace("00ecc4db", "0x0ecc4db"), run)),
+                 ("value uppercase", (mt.replace("00ecc4db", "00ECC4DB"), run)), ("value 7 digits", (mt.replace("00ecc4db", "0ecc4db"), run)),
+                 ("3 fields", (EXE.replace("\texe PE ImageBase+AddressOfEntryPoint", "") + TRAIL, run)),
+                 ("6 fields", (EXE.rstrip("\n") + "\t1\t2\n" + TRAIL, run)),
+                 ("exe_entry fifth field", (EXE.rstrip("\n") + "\t1\n" + TRAIL, run)),
+                 ("exe_entry wrong source", (EXE.replace("exe PE", "the exe PE") + TRAIL, run)),
+                 ("exe_entry wrong name", (EXE.replace("exe_entry\texe_entry", "main\texe_entry") + TRAIL, run)),
+                 ("exe_entry twice", (EXE.replace("exe_entry\texe_entry", "exe_entry2\texe_entry") + EXE + TRAIL, run)),
+                 ("unknown kind", (EXE + ROW("x", "data", "00000001", "s") + TRAIL, run)), ("no exe_entry", (mu("a.dll") + TRAIL, run))):
         case("milestones error: " + k, good(raises(bi.milestone_table, *a)))
-    # contract row kinds: module_entry (static flag), present_key
+    # the contract's row kinds: module_entry (static flag = the fifth field), winmain, import
     man = bi.bootmiles.load_manifest("00001000\tf1\tcode\n00002000\tf2\tcode\n00003000\tf3\tcode\n00100e40\tI_p\timport\n00100e50\tI_q\timport\n# table_id " + TID + "\n")
-    mt2 = ("# table_id " + TID + "\nmodule_entry\ta.dll\t0x00001000\t1\nmodule_entry\tb.dll\t0x00002000\t0\n"
-           "exe_entry_va\t0x00003000\npresent_key\t0x00100e40\npresent_key\t0x00100e50\n")
+    EXE3 = ROW("exe_entry", "exe_entry", "00003000", "exe PE ImageBase+AddressOfEntryPoint")
+    mt2 = EXE3 + mu("a.dll") + mu("b.dll", "00002000", "0") + PR("d3d9.dll", "00100e40") + PR("idirect3ddevice9.dll", "00100e50") + TRAIL
     t2 = bi.milestone_table(mt2, "", TID, None, man)
     tab2 = bi.bootmiles.load_table(t2)
-    case("contract kinds: static module -> module-entry-<name> in file order, dynamic skipped, Present keys -> first-present any",
-         [m["name"] for m in tab2.milestones] == ["module-entry-a.dll", "exe-entry", "first-present"]
+    case("contract kinds: exe-entry, static module -> module-entry-<name> in file order, dynamic skipped, import rows -> ONE first-present any",
+         [m["name"] for m in tab2.milestones] == ["exe-entry", "module-entry-a.dll", "first-present"]
          and [(p["group"], p["kind"], p["target"]) for p in tab2.milestones[2]["parts"]] == [("any", "call", 0x100e40), ("any", "call", 0x100e50)], t2)
-    for k, a in (("module flag 2", (mt2.replace("0x00001000\t1", "0x00001000\t2"),)), ("module twice", (mt2 + "module_entry\ta.dll\t0x00001000\t1\n",)),
-                 ("module 3 fields", (mt2 + "module_entry\tc.dll\t0x1\n",)), ("no exe entry", ("module_entry\ta.dll\t0x00001000\t1\n",)),
-                 ("exe entry twice", (mt2 + "exe_entry_va\t0x00003000\n",)), ("bad module name", (mt2 + "module_entry\tx y\t0x1\t0\n",))):
-        case("contract error: " + k, good(raises(bi.milestone_table, a[0], "", TID, None, man)))
-    case("contract error: present key not an import row", good(raises(bi.milestone_table, mt2.replace("0x00100e50", "0x00001000"), "", TID, None, man)))
+    mt2w = EXE3 + mu("a.dll") + WM + PR("d3d9.dll", "00100e40") + TRAIL
+    tw = bi.bootmiles.load_table(bi.milestone_table(mt2w, "", TID, None, man))
+    case("contract kinds: winmain row -> milestone winmain (call) in file order", [m["name"] for m in tw.milestones] == ["exe-entry", "module-entry-a.dll", "winmain", "first-present"]
+         and tw.milestones[2]["parts"][0]["target"] == 0x1000)
+    for k, a in (("module flag 2", mt2.replace("assigned_base+entry_rva\t1", "assigned_base+entry_rva\t2")), ("module without flag", EXE3 + mu("a.dll", extra=None) + TRAIL),
+                 ("module twice", mt2.replace(TRAIL, "") + mu("a.dll") + TRAIL), ("bad module name", EXE3 + mu("x y") + TRAIL),
+                 ("module wrong source", mt2.replace("modules.tsv assigned_base+entry_rva", "modules.tsv base")), ("module empty name", EXE3 + mu("") + TRAIL),
+                 ("winmain twice", mt2w.replace(TRAIL, "") + WM + TRAIL), ("winmain wrong name", mt2w.replace("WinMain\t", "Main\t")),
+                 ("winmain bare source", mt2w.replace("n1.json N1 function ?WinMain@@YGHPAUHINSTANCE__@@0PADH@Z", "n1.json N1 function ")),
+                 ("import not Present", mt2.replace("d3d9.dll!Present", "d3d9.dll!Reset")), ("import dll twice", mt2.replace("idirect3ddevice9.dll", "d3d9.dll")),
+                 ("import key twice", mt2.replace("00100e50", "00100e40")), ("import wrong source", mt2.replace("keys.tsv import key", "keys.tsv key")),
+                 ("import not an import row", mt2.replace("00100e50", "00001000"))):
+        case("contract error: " + k, good(raises(bi.milestone_table, a, "", TID, None, man)))
     # stage table
     st = "winmain any call 0x1000\nloaded all:x ret 0x2000\nloaded all:x retzero 0x3000 main-thread\n"
     t3 = bi.milestone_table(mt2, "", TID, st, man)
     case("stage table: appended after the contract rows", [m["name"] for m in bi.bootmiles.load_table(t3).milestones][-2:] == ["winmain", "loaded"], t3)
     sterr = lambda txt: raises(bi.milestone_table, mt2, "", TID, txt, man)
     case("stage error: name also from the contract", good(sterr("exe-entry any call 0x1000\n")))
+    case("stage error: a stage winmain next to the contract's winmain row (the contract does not win silently)",
+         good(raises(bi.milestone_table, mt2w, "", TID, st, man)))
     case("stage error: address without a code entry", good(sterr("w any call 0x4000\n")))
     case("stage error: address of an import row is not code", good(sterr("w any call 0x100e40\n")))
     case("stage error: bootmiles rejects the table", good(sterr("w any bogus 0x1000\n")))

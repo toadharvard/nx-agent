@@ -108,6 +108,8 @@ static uint64_t self_worker(uint64_t self) {   /* pauses and resumes the thread 
     tcount = 100 + (uint32_t)rp + 10 * ran + 1000 * (uint32_t)rr;
     return 0;
 }
+static volatile uint64_t wrec;
+static uint64_t rec_worker(uint64_t arg) { wrec = plat(35, 0, 0, 0, 0); return arg; }   /* a record of a thread that then ends */
 static uint64_t count_worker(uint64_t arg) { fnvnx_hcall2(H->sleep_ns, 1000000, 0); tcount++; return arg; }
 /* ACCESS_FAULT_HANDLER tests (MODE 12..22) */
 #define PG(h) ((h)->heap_base + 0x40000)
@@ -252,7 +254,7 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("touch-decommitted", pa[0]);
     say("after the fault\n");
 #else
-    sk(16, 3, 2, 1, 0, 0, 0);   /* a known domain and type: the host's socket() decides, the header does not */
+    sk(16, 3, 2, 3, 0, 0, 0);   /* a RAW socket: whether the host allows it is the OS's decision, the header does not say */
 #endif
 #elif MODE == 30
     uint64_t R = plat(4, 0, 0x10000, 0, 2);
@@ -636,6 +638,13 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("tz-abbr", zw[2]);   /* "UTC\0" little endian */
     num("tz-abbr-rest", zw[3]);
     num("tz-max", plat(34, 0x7FFFFFFFFFFFFFFFull, FNVNX_ADDR(zw), 0, 2));
+    zw[0] = 0xAAAAAAAA;
+    num("tz-1970", plat(34, 0, FNVNX_ADDR(zw), 0, 2)); num("tz-1970-off", zw[0]);
+    num("tz-2100-last", plat(34, 4133980799ull, FNVNX_ADDR(zw), 0, 2));
+    zw[0] = 0xAAAAAAAA;
+    num("tz-2101", plat(34, 4133980800ull, FNVNX_ADDR(zw), 0, 2)); num("tz-2101-untouched", zw[0]);
+    num("tz-u64max", plat(34, ~0ull, FNVNX_ADDR(zw), 0, 2));
+    num("tz-negative-main", plat(34, 0x8000000000000000ull, FNVNX_ADDR(zw), 0, 2));
     num("tz-null-out", plat(34, 5, 0, 0, 2));
     num("tz-slot", fnvnx_hcall0(H->tz_offset_minutes));
 #elif MODE == 50
@@ -668,14 +677,72 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     sk(26, 3, FNVNX_ADDR(&pf), 1, ~0ull, 0, 0);   /* nothing can become ready and the timeout is forever */
     say("after the poll\n");
 #elif MODE == 52
-    sk(32, 4, FNVNX_ADDR("host"), 0, 0, 0, 0);   /* the host network's resolver */
+    sk(32, 4, FNVNX_ADDR("0x7f.1"), 0, 0, 0, 0);   /* numeric for inet_aton, not strict: the resolver's reading is not in the header */
 #elif MODE == 53
     uint32_t zo[4];
     num("tz-below", plat(34, 0x7FFFFFFFFFFFFFFFull, FNVNX_ADDR(zo), 0, 2));
-    plat(34, 1ull << 63, FNVNX_ADDR(zo), 0, 2);
+    num("tz-above", plat(34, 1ull << 63, FNVNX_ADDR(zo), 0, 2));
 #elif MODE == 54
-    plat(2, plat(35, 0, 0, 0, 0), 1, 0, 2);   /* the kernel's answer to pausing the calling thread is not in the header */
+    uint64_t me = plat(35, 0, 0, 0, 0);
+    num("self-pause", plat(2, me, 1, 0, 2));   /* the kernel: a thread is not paused through its own handle */
+    num("self-resume", plat(2, me, 0, 0, 2));
     say("after the pause\n");
+#elif MODE == 55
+    uint64_t me = plat(35, 0, 0, 0, 0);
+    uint64_t w = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(rec_worker), 0, 0x10000, 0, ~0ull);
+    uint64_t c = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(count_worker), 0, 0x10000, 0, ~0ull);
+    num("not-started-pause", plat(2, c, 1, 0, 2));
+    fnvnx_hcall1(H->thread_start, c);
+    num("resume-running", plat(2, c, 0, 0, 2));       /* not paused */
+    num("pause", plat(2, c, 1, 0, 2));
+    num("pause-paused", plat(2, c, 1, 0, 2));         /* already paused */
+    num("resume", plat(2, c, 0, 0, 2));
+    num("resume-again", plat(2, c, 0, 0, 2));
+    fnvnx_hcall1(H->thread_join, c);
+    num("finished", plat(2, c, 1, 0, 2));
+    num("me-pause", plat(2, me, 1, 0, 2));
+    num("me-resume", plat(2, me, 0, 0, 2));
+    num("me-zero", plat(2, 0, 1, 0, 2));
+    fnvnx_hcall1(H->thread_start, w);
+    fnvnx_hcall1(H->thread_join, w);
+    num("rec-finished", plat(2, wrec, 1, 0, 2));      /* the record of a thread that has ended */
+    num("rec-finished-resume", plat(2, wrec, 0, 0, 2));
+    num("no-record", plat(2, 0x7777, 1, 0, 2));
+#elif MODE == 56
+    static FnvnxWireSockaddr to, lo, got;
+    static FnvnxWireAddrinfo recs[3];
+    static char buf[4];
+    uint32_t ec = 0x77;
+    uint64_t h1 = sk(16, 3, 2, 1, 0, 0, 0), h2 = sk(16, 3, 2, 2, 17, 0, 0);
+    num("h1", h1); num("h2", h2);
+    num("close1", sk(17, 1, h1, 0, 0, 0, 0));
+    uint64_t h3 = sk(16, 3, 2, 1, 6, 0, 0);
+    num("h3", h3);                                    /* the lowest free number again */
+    num("getfl", sk(30, 1, h2, 0, 0, 0, 0));
+    num("setfl", sk(31, 2, h2, 0x800, 0, 0, 0));
+    num("getfl-nb", sk(30, 1, h2, 0, 0, 0, 0));
+    to.family = 2; to.port = 80; to.addr[0] = 8; to.addr[1] = 8; to.addr[2] = 8; to.addr[3] = 8;
+    num("connect-ext", sk(21, 2, h3, FNVNX_ADDR(&to), 0, 0, 0));
+    num("sendto-ext", sk(22, 5, h2, FNVNX_ADDR(buf), 1, 0, FNVNX_ADDR(&to)));
+    num("recv-nb", sk(23, 5, h2, FNVNX_ADDR(buf), 1, 0, 0));
+    lo.family = 2; lo.port = 8080; lo.addr[0] = 127; lo.addr[3] = 1;
+    num("bind-lo", sk(18, 2, h3, FNVNX_ADDR(&lo), 0, 0, 0));
+    num("getsockname", sk(28, 2, h3, FNVNX_ADDR(&got), 0, 0, 0));
+    num("name-port", got.port); num("name-fam", got.family); num("name-a0", got.addr[0]); num("name-a3", got.addr[3]);
+    num("close3", sk(17, 1, h3, 0, 0, 0, 0));
+    num("closed-getfl", sk(30, 1, h3, 0, 0, 0, 0));
+    uint64_t tk = sk(32, 4, FNVNX_ADDR("10.1.2.3"), FNVNX_ADDR("443"), 0, 0, 0);
+    num("ticket", tk);
+    num("fetch-size", sk(33, 3, tk, 0, 0, 0, 0));      /* cap 0: the total, the ticket stays */
+    num("fetch", sk(33, 3, tk, FNVNX_ADDR(recs), sizeof recs, 0, 0));
+    num("rec0", recs[0].family | recs[0].socktype << 8 | recs[0].protocol << 16);
+    num("rec1", recs[1].family | recs[1].socktype << 8 | recs[1].protocol << 16);
+    num("rec2", recs[2].family | recs[2].socktype << 8 | recs[2].protocol << 16);
+    num("rec-port", recs[1].addr.port); num("rec-a", recs[1].addr.addr[0] | recs[1].addr.addr[3] << 8);
+    num("fetch-again", sk(33, 3, tk, 0, 0, 0, 0));
+    num("gai-name", sk(32, 4, FNVNX_ADDR("example.org"), 0, 0, FNVNX_ADDR(&ec), 0));
+    num("gai-errno-kept", ec);
+    num("tz-last", plat(34, 4133980799ull, FNVNX_ADDR(recs), 0, 2));
 #elif MODE == 35
     fnvnx_hcall1(H->exit, 0x5200002A);   /* fnvnx_reach_violation(42) */
 #elif MODE == 36
@@ -913,7 +980,7 @@ def main():
     root = os.path.join(TMP, "sd")
     os.makedirs(root)
     open(os.path.join(root, "data.bin"), "wb").write(b"01ABCDEFGH23")
-    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, *range(12, 22), *range(30, 42), 44, 45, 46, 47, 48, *range(49, 55))}   # MODE 6 (boot CLI guest) is built by test_boot.py
+    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, *range(12, 22), *range(30, 42), 44, 45, 46, 47, 48, *range(49, 57))}   # MODE 6 (boot CLI guest) is built by test_boot.py
     elf0, path0 = built[0]
     plan0 = make_plan(elf0)
     base = plan0["image"]["base"]
@@ -1110,7 +1177,8 @@ def main():
               "gai-both-null": ne(2002), "gai-both-null-errno": ne(2002), "gai-badflags": ne(2001), "gai-badfamily": ne(2005),
               "gai-badtype": ne(2006), "gai-order": ne(2001), "gai-hints-ok-both-null": ne(2002), "gai-errno-kept": "77",
               "fetch-1": ne(22), "fetch-0": ne(22), "fetch-wide": ne(22),
-              "tz-0": "0", "tz-off": "0", "tz-dst": "0", "tz-abbr": "435455", "tz-abbr-rest": "0", "tz-max": "0",
+              "tz-0": "0", "tz-off": "0", "tz-dst": "0", "tz-abbr": "435455", "tz-abbr-rest": "0", "tz-max": ne(75), "tz-1970": "0", "tz-1970-off": "0", "tz-2100-last": "0", "tz-2101": ne(75), "tz-2101-untouched": "aaaaaaaa",
+              "tz-u64max": ne(75), "tz-negative-main": ne(75),
               "tz-null-out": ne(14), "tz-slot": "0"}
     bad49 = {n: (k49.get(n), v) for n, v in want49.items() if k49.get(n) != v}
     case("sockets and TZ_AT (guest): every result the arguments fix with no socket open: errno classes, -EBADF for each handle-first service, "
@@ -1119,7 +1187,7 @@ def main():
     r50, l50 = run(built[50][0], root)[:2]
     k50 = kv(l50)
     BI, NF = "1759", "1359"
-    want50 = {"self-id": "1", "self-distinct": "1", "self-start": BI, "self-join": BI, "self-prio": "0", "self-resume": "0",
+    want50 = {"self-id": "1", "self-distinct": "1", "self-start": BI, "self-join": BI, "self-prio": "0", "self-resume": "f201",
               "self-free": "0", "self-free-again": NF, "self-use-freed": NF, "pause-by-worker": "64", "act-new": BI, "start": "0",
               "start-again": BI, "start-finished": BI, "act-finished": BI, "count": "65"}
     bad50 = {n: (k50.get(n), v) for n, v in want50.items() if k50.get(n) != v}
@@ -1129,14 +1197,31 @@ def main():
     r51 = run(built[51][0], root)[:2]
     case("POLL with nothing to wait for and timeout -1: the run ends as deadlock, never returns", r51[0]["reason"] == "deadlock"
          and "after the poll" not in r51[1], r51[0])
-    r52 = run(built[52][0], root)[0]
-    case("GAI_OPEN with a node ends the run naming service 32", r52["reason"] == "ext-module-missing" and r52["ext"] == {"module": 11, "fn": 32}, r52)
+    r52, l52 = run(built[52][0], root)[:2]
+    case("an undetermined socket case (GAI_OPEN with a node numeric by inet_aton only) ends the run naming service 32, with the reason as an event",
+         r52["reason"] == "ext-module-missing" and r52["ext"] == {"module": 11, "fn": 32}
+         and [e["kind"] for e in r52["events"]] == ["sock-undetermined"], r52)
     r53, l53 = run(built[53][0], root)[:2]
-    case("TZ_AT above INT64_MAX (the virtual time service's range is not stated) ends the run naming service 34",
-         r53["reason"] == "ext-module-missing" and r53["ext"] == {"module": 11, "fn": 34} and kv(l53).get("tz-below") == "0", r53)
+    case("TZ_AT beyond year 2100 is -EOVERFLOW and the run goes on", r53["reason"] == "exit"
+         and kv(l53) == {"tz-below": "%x" % (M - 75), "tz-above": "%x" % (M - 75)}, (r53, l53))
     r54, l54 = run(built[54][0], root)[:2]
-    case("THREAD_ACTIVITY pausing the calling thread through its own THREAD_SELF record ends the run (the kernel's result is not defined)",
-         r54["reason"] == "fault" and r54["fault"]["kind"].startswith("host-call: thread_activity") and "after the pause" not in l54, r54)
+    case("THREAD_ACTIVITY on the calling thread's own THREAD_SELF record: ResultBusy 0xF201 for pause and resume, the run goes on",
+         r54["reason"] == "exit" and kv(l54) == {"self-pause": "f201", "self-resume": "f201"} and "after the pause" in l54, (r54, l54))
+    r55, l55 = run(built[55][0], root)[:2]
+    k55 = kv(l55)
+    want55 = {"not-started-pause": "1759", "resume-running": "fa01", "pause": "0", "pause-paused": "fa01", "resume": "0", "resume-again": "fa01",
+              "finished": "1759", "me-pause": "f201", "me-resume": "f201", "me-zero": "1759", "rec-finished": "1759", "rec-finished-resume": "1759",
+              "no-record": "1359"}
+    case("THREAD_ACTIVITY: new / finished thread or record BadInput, resume of a running and pause of a paused thread 0xFA01, own record 0xF201, "
+         "unknown id NotFound (%d values)" % len(want55), r55["reason"] == "exit" and k55 == want55, (k55, r55))
+    r56, l56 = run(built[56][0], root)[:2]
+    k56 = kv(l56)
+    want56 = {"h1": "3", "h2": "4", "close1": "0", "h3": "3", "getfl": "2", "setfl": "0", "getfl-nb": "802", "connect-ext": ne(101),
+              "sendto-ext": ne(101), "recv-nb": ne(11), "bind-lo": "0", "getsockname": "0", "name-port": "1f90", "name-fam": "2", "name-a0": "7f",
+              "name-a3": "1", "close3": "0", "closed-getfl": ne(9), "ticket": "1", "fetch-size": "a8", "fetch": "a8", "rec0": "60102", "rec1": "110202",
+              "rec2": "302", "rec-port": "1bb", "rec-a": "30a", "fetch-again": ne(22), "gai-name": ne(2003), "gai-errno-kept": "77", "tz-last": "0"}
+    case("sockets and getaddrinfo (guest): handles, flag state, ENETUNREACH, loopback bind and name, numeric getaddrinfo records, name -> EAI_AGAIN "
+         "(%d values)" % len(want56), r56["reason"] == "exit" and k56 == want56, ({n: (k56.get(n), v) for n, v in want56.items() if k56.get(n) != v}, r56))
     sw = open(os.path.join(GUEST_DIR, "fnvnx", "sockwire.h")).read()
     lst = lambda name: [int(v, 0) for v in re.findall(r"X\(\w+, (\w+)\)", re.search(r"#define " + name + r"\(X\)((?:[^\n]*\\\n)*[^\n]*)", sw).group(1))]
     nums = dict(re.findall(r"#define FNVNX_(WE_\w+|WEAI_\w+) (\d+)", sw))
@@ -1344,6 +1429,8 @@ def main():
             r = [mach0.ext_call(11, f, args_at, k) for k in sorted({0, need - 1, need + 1} - {need, -1})]
             if r != [-22 & bootmachine.U64] * len(r):
                 bad[nm] = ("sock wrong nargs", r)
+            if mach0.ext_call(11, f, 0, need) != bootmachine.EXT_BAD_NARGS:
+                bad[nm + "-null"] = "sock null array with nargs > 0 is not BAD_NARGS"
             mach0.uc.mem_write(args_at, bytes(48))   # all-zero arguments: every service answers, none is the network's
             try:
                 if not isinstance(mach0.ext_call(11, f, args_at, need), int):
@@ -1355,7 +1442,7 @@ def main():
             bad[nm] = "nargs below the row"
         if mach0.ext_call(11, f, 0, need + 1) != bootmachine.EXT_BAD_NARGS:
             bad[nm] = "null array with nargs > 0"
-    case("services: every declared service answers BAD_NARGS below its n and for a null array, sockets -EINVAL on a wrong nargs and a value for zero arguments",
+    case("services: every declared service answers BAD_NARGS below its n and for a null array, sockets -EINVAL on a wrong nargs, BAD_NARGS on a null array and a value for zero arguments",
          not bad, bad)
     case("services: fn 0 and 36.. are NO_SERVICE, unknown module NO_MODULE, fn > UINT32_MAX NO_SERVICE (before the platform table)",
          all(mach0.ext_call(11, f, args_at, 4) == bootmachine.EXT_NO_SERVICE for f in (0, 36, 37, 0xFFFFFFFF, 1 << 32, (1 << 32) + 4))
@@ -1371,14 +1458,14 @@ def main():
     r40, l40 = run(built[40][0], root)[:2]
     k = kv(l40)
     NOMOD, NOSVC, BADN, EINVAL = "ffffffffffffff01", "ffffffffffffff02", "ffffffffffffff03", "ffffffffffffffea"
-    want40 = {"mod64": NOMOD, "mod-huge": NOMOD, "mod9-unreg": NOMOD, "mod12-fn-huge": NOMOD, "fn0": NOSVC, "fn36": NOSVC, "self-n1-null": BADN, "sock-null-array-wrongn": EINVAL,
+    want40 = {"mod64": NOMOD, "mod-huge": NOMOD, "mod9-unreg": NOMOD, "mod12-fn-huge": NOMOD, "fn0": NOSVC, "fn36": NOSVC, "self-n1-null": BADN, "sock-null-array-wrongn": BADN,
               "fn-u32max": NOSVC, "fn-above-u32": NOSVC, "fn10-nargs1": BADN, "vm-reserve-n1": BADN, "null-array": BADN,
               "docked-n0-null": "0", "docked-n1-null": BADN, "docked-n3": "0", "docked-ncap": "0", "boost-extra-args": "0",
               "sock-wrong-n": EINVAL, "sock-wrong-n0": EINVAL, "sock-too-many": EINVAL, "tz-n1": BADN, "tz-null": BADN,
               "reserve-above-4g": "0", "reserve-4g": "0"}
     bad = {n: (k.get(n), v) for n, v in want40.items() if k.get(n) != v}
     case("ext_call (guest): NO_MODULE / NO_SERVICE / BAD_NARGS are returned to the guest, nargs above UINT32_MAX counts as UINT32_MAX, "
-         "extra arguments ignored, sockets -EINVAL on wrong nargs (%d values)" % len(want40), r40["reason"] == "exit" and not bad, (bad, r40))
+         "extra arguments ignored, sockets -EINVAL on wrong nargs, BAD_NARGS first on a null array (%d values)" % len(want40), r40["reason"] == "exit" and not bad, (bad, r40))
     # DISPLAY_DOCKED: the profile
     for prof, want in (("handheld", "0"), ("docked", "1")):
         rp, lp = run(built[40][0], root, profile=prof)[:2]
