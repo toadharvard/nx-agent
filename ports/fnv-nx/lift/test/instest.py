@@ -20,7 +20,7 @@ from unicorn.arm64_const import *
 from elftools.elf.elffile import ELFFile
 HERE = os.path.dirname(os.path.abspath(__file__))
 # a one-instruction test has no callee: a call/tail to another entry is an event of the test harness (fnvl_call), set here and nowhere in the prelude
-STUBX = '#undef CALLX\n#define CALLX(h) fnvl_call(c,0x##h)\n'
+STUBX = 'extern "C" void fnvl_call(struct cpu*, u32 target);\n#undef CALLX\n#define CALLX(h) fnvl_call(c,0x##h)\n'
 FLAGS = ('-mabi=ilp32 -std=gnu++17 -c -O2 -fms-extensions -fshort-wchar -frounding-math -fsigned-char -fno-strict-aliasing '
          '-fwrapv -fno-delete-null-pointer-checks -fcheck-new -fno-sized-deallocation -fno-lifetime-dse -ffp-contract=off '
          '-fPIC -fpermissive -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack-protector -fno-stack-clash-protection '
