@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # T1: the real tools/link/compile.sh on a tiny tree whose LAST unit has no object (it does not compile), in every
-# mode: no list, an explicit list, a flags-stamp change with a list (the wiped units), the computed order keys,
-# KEYS_ONLY, --print-flags. Each exits 0 and leaves no "line N: exit" message (set -E: the ERR trap names any
+# mode: no list, an explicit list, a flags-stamp change with a list (the wiped units), --print-flags. Each exits 0 and leaves no "line N: exit" message (set -E: the ERR trap names any
 # failure). Needs aarch64-linux-gnu-g++ and the gcc plugin headers (skipped without the compiler).
 set -uo pipefail
 P=$(cd "$(dirname "$0")/../.." && pwd)
@@ -16,16 +15,12 @@ printf 'src/a.cpp\nsrc/z.cpp\n' > "$T/both"; printf 'src/z.cpp\n' > "$T/last"; p
 C=$P/tools/link/compile.sh
 run() { local name=$1; shift; ( "$@" ) > "$T/$name.log" 2>&1; echo $? > "$T/$name.rc"; }
 quiet() { [ "$(cat "$T/$1.rc")" = 0 ] && ! grep -q "compile.sh: line [0-9]*: exit" "$T/$1.log"; }
-run nolist env ORDER_KEYS=unit bash "$C" "$T/tree" "$T/o1" "" 2
+run nolist bash "$C" "$T/tree" "$T/o1" "" 2
 ok "no list: exit 0, the last unit failed with a reason" 'quiet nolist && grep -q "src/z.cpp.*fail" "$T/o1/objects.tsv" && grep -q "compile.sh: src/z.cpp: exit" "$T/o1/src_z.cpp.log"'
-run list env ORDER_KEYS=unit bash "$C" "$T/tree" "$T/o1" "$T/last" 2
+run list bash "$C" "$T/tree" "$T/o1" "$T/last" 2
 ok "a list of the last unit only: exit 0" 'quiet list && [ "$(cat "$T/o1/objects.tsv")" = "src/z.cpp	$T/o1/src_z.cpp.o	fail" ]'
-run stamp env OPT=-O1 ORDER_KEYS=unit bash "$C" "$T/tree" "$T/o1" "$T/first" 2
+run stamp env OPT=-O1 bash "$C" "$T/tree" "$T/o1" "$T/first" 2
 ok "stamp change with a list, the last unit without an object: exit 0, the wiped unit rebuilt" 'quiet stamp && grep -q "1 had one, 1 were asked for" "$T/stamp.log" && grep -q "src/a.cpp.*ok" "$T/o1/objects.tsv"'
-run keys bash "$C" "$T/tree" "$T/o2" "$T/both" 2
-ok "computed order keys: exit 0" 'quiet keys && grep -q "^order keys:" "$T/keys.log" && grep -q "src/z.cpp.*fail" "$T/o2/objects.tsv"'
-run keysonly env KEYS_ONLY=1 bash "$C" "$T/tree" "$T/o3" "" 2
-ok "KEYS_ONLY: exit 0, the keys file" 'quiet keysonly && [ -f "$T/o3/order.keys" ]'
 run flags bash "$C" --print-flags "$T/tree" "$T/o4"
 ok "--print-flags: exit 0, flags only on stdout" 'quiet flags && grep -q "^-c$" "$T/flags.log"'
 [ $fails = 0 ] && echo "test_compile_lastunit: all ok" || { echo "test_compile_lastunit: $fails failed"; exit 1; }

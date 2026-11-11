@@ -69,15 +69,14 @@ def write(path, text):
 def compile_sh_defaults():
     t = open(os.path.join(PORT, 'tools', 'link', 'compile.sh')).read()
     d = {}
-    for k in ('ORDER_MODE', 'ORDER_ARGS', 'ORDER_REFCOUNT', 'ORDER_OBJECT', 'ORDER_OPERATOR'):
+    for k in ('ORDER_ARGS', 'ORDER_OBJECT', 'ORDER_OPERATOR'):
         m = re.search(r'^%s=\$\{%s:-([^}]*)\}' % (k, k), t, re.M)
         d[k] = m.group(1) if m else None
     return d
 
 
 CS = compile_sh_defaults()
-CS_PLUG = ['-fplugin-arg-fnvnx_order-mode=%s' % CS['ORDER_MODE'], '-fplugin-arg-fnvnx_order-args=%s' % CS['ORDER_ARGS'],
-           '-fplugin-arg-fnvnx_order-refcount=%s' % CS['ORDER_REFCOUNT'],
+CS_PLUG = ['-fplugin-arg-fnvnx_order-args=%s' % CS['ORDER_ARGS'],
            '-fplugin-arg-fnvnx_order-object=%s' % CS['ORDER_OBJECT'],
            '-fplugin-arg-fnvnx_order-operator=%s' % CS['ORDER_OPERATOR']]
 oc = load('order_check', os.path.join(PORT, 'tools', 'equiv', 'order_check.py'))
@@ -259,7 +258,6 @@ else:
     json.dump({'units': [{'source': 'c4.cpp'}]}, open(os.path.join(tree, 'build', 'units.json'), 'w'))
     cs = os.path.join(PORT, 'tools', 'link', 'compile.sh')
     env = dict(os.environ, SSE2NEON=s2n, CXX=CXX, ORDER_OBJECT='first', ORDER_OPERATOR='cpp17')
-    env.pop('ORDER_KEYS', None)
     r1 = subprocess.run(['bash', cs, tree, obj, '', '1'], capture_output=True, text=True, env=env)
     o = os.path.join(obj, 'c4.cpp.o')
     b1 = open(o, 'rb').read() if os.path.exists(o) else None

@@ -1,20 +1,13 @@
 #!/usr/bin/env bash
-# run.sh - S8 tests: host build + run of test_asm.cpp, and an AArch64 ILP32 compile of the same file (no run).
-#   tests/s8/run.sh [build dir]
+# run.sh - S8 tests: rule ASM-Pi (tools/rules/s8_asm.py) on synthetic inputs and, when a decomp checkout is there,
+# totality over every file of it that holds __asm; plus the header as GCC for AArch64 ILP32 sees it.
+#   tests/s8/run.sh [decomp dir]
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../.." && pwd)
-OUT=${1:-$ROOT/build/tests/s8}; mkdir -p "$OUT"
-${CXX_HOST:-g++} -std=gnu++17 -O2 -frounding-math -Wall -Wextra -Wno-unused-function -I"$ROOT/shim/include" \
-    "$HERE/test_asm.cpp" -o "$OUT/test_asm" -lm
-"$OUT/test_asm"
+python3 "$HERE/test_asm_rule.py" ${1:+"$1"}
 if command -v aarch64-linux-gnu-g++ > /dev/null; then
-    aarch64-linux-gnu-g++ -mabi=ilp32 -std=gnu++17 -O2 -frounding-math -Wall -Wno-unused-function \
-        -I"$ROOT/shim/include" -fsyntax-only "$HERE/test_asm.cpp"
-    # the header alone as decomp units see it (force-include dialect header, no std headers)
-    printf '#include "fnvnx_asm.h"\nvoid f(unsigned* t, int* i, float x, float* s, float* c) {\n'\
-'  { fnvnx_asm_store32(&(*t), fnvnx_rdtsc32()); } { fnvnx_asm_fistp(&(*i), x); } { fnvnx_fsincos(x, &(*c), &(*s)); }\n}\n' \
-        > "$OUT/units_like.cpp"
-    aarch64-linux-gnu-g++ -mabi=ilp32 -std=gnu++17 -O2 -fms-extensions -Wall -Wno-unused-function -I"$ROOT/shim/include" \
-        -c "$OUT/units_like.cpp" -o "$OUT/units_like.o"
-    echo "aarch64 ilp32: ok"
+    T=$(mktemp -d)
+    printf '#define __int64 long long\n#include "fnvnx_asm.h"\nextern "C" unsigned __int64 __rdtsc(void);\nunsigned __int64 f(void) { return __rdtsc(); }\n' > "$T/r.cpp"
+    aarch64-linux-gnu-g++ -mabi=ilp32 -std=gnu++17 -O2 -Wall -I"$ROOT/shim/include" -c "$T/r.cpp" -o "$T/r.o"
+    rm -rf "$T"; echo "aarch64 ilp32: ok"
 fi

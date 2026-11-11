@@ -70,12 +70,12 @@ check('| cand | 0 |' in md2, 'markdown: per-variant line')
 args = oc.compile_sh_order_args()
 cs = oc.COMPILE_SH.read_text()
 import re as _re
-want = [k for v, k in oc.ORDER_KEYS if _re.search(r'^%s=' % v, cs, _re.M) and ('fnvnx_order-%s=' % k) in cs]
+want = [k for v, k in oc.ORDER_VARS if _re.search(r'^%s=' % v, cs, _re.M) and ('fnvnx_order-%s=' % k) in cs]
 check(sorted(a.split('-')[-1].split('=')[0] for a in args) == sorted(want) and len(want) >= 4,
       "build variant = compile.sh's plugin arguments (%s)" % ' '.join(args))
-fake = 'ORDER_MODE=${ORDER_MODE:-volatile}\nORDER_OBJECT=${ORDER_OBJECT:-msvc}\n-fplugin-arg-fnvnx_order-mode=x ' \
+fake = 'ORDER_ARGS=${ORDER_ARGS:-rtl}\nORDER_OBJECT=${ORDER_OBJECT:-msvc}\n-fplugin-arg-fnvnx_order-args=x ' \
        '-fplugin-arg-fnvnx_order-object=y\n'
-check(oc.compile_sh_order_args(fake) == ['-fplugin-arg-fnvnx_order-mode=volatile',
+check(oc.compile_sh_order_args(fake) == ['-fplugin-arg-fnvnx_order-args=rtl',
                                          '-fplugin-arg-fnvnx_order-object=msvc'], 'compile.sh defaults parsed')
 # V1 T2: no MSVC log, or a log from only some configurations, is not agreement
 none = {cfg: dict(v, results={k: x for k, x in v['results'].items() if k != 'obj-arrow'}) for cfg, v in msvc.items()}

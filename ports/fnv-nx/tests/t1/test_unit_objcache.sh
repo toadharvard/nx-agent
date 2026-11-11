@@ -17,7 +17,7 @@ int a() { return K + 1; }' > "$T/tree/src/a.cpp"
 echo 'int b(int x) { return x * 3; }' > "$T/tree/src/b.cpp"
 echo 'int z() { return nosuch; }' > "$T/tree/src/z.cpp"
 C=$P/tools/link/compile.sh
-cc() { ( env ORDER_KEYS=unit "$@" bash "$C" "$T/tree" "$T/out" "" 2 ) > "$T/cc.log" 2>&1; }
+cc() { ( env "$@" bash "$C" "$T/tree" "$T/out" "" 2 ) > "$T/cc.log" 2>&1; }
 cc; cp -a "$T/out" "$T/plain"                                                     # no cache: the reference
 rm -rf "$T/out"; cc FNVNX_UNIT_OBJCACHE=$T/cache
 ok "with the cache: the same objects as without" 'cmp -s "$T/plain/src_a.cpp.o" "$T/out/src_a.cpp.o" && cmp -s "$T/plain/src_b.cpp.o" "$T/out/src_b.cpp.o" && [ ! -f "$T/out/src_z.cpp.o" ]'

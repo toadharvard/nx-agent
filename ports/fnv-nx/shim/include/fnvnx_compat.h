@@ -30,7 +30,6 @@
 
 /* Calling conventions: AArch64 has one. Argument-order mismatches that x86 hid (fastcall with a
  * dummy EDX parameter called as thiscall, ...) are fixed by generated bridges, not here. */
-#ifdef FNVNX_SDD
 /* CC1: the x86 calling convention of a declaration is a fact of the exe's contract (the MSVC name encodes it, a
  * bridge to a lifted body needs it). It changes no AArch64 code, so it is kept as an attribute that the
  * fnvnx_dispatch plugin registers, on the function type, where MSVC's keyword stood. */
@@ -38,12 +37,6 @@
 #define __stdcall __attribute__((fnvnx_cc("std")))
 #define __fastcall __attribute__((fnvnx_cc("fast")))
 #define __thiscall __attribute__((fnvnx_cc("this")))
-#else
-#define __cdecl
-#define __stdcall
-#define __fastcall
-#define __thiscall
-#endif
 #define __clrcall
 #define _cdecl
 #define _stdcall
@@ -84,18 +77,11 @@ extern "C" {
  * a real barrier for the same order (S12-ordering, docs/ORDERING.md): _ReadWriteBarrier dmb ish (store -> load is
  * ordered too, which x86 does not do - the cheapest single barrier that covers TSO), _ReadBarrier dmb ishld (load ->
  * load and load -> store), _WriteBarrier dmb ishst (store -> store). Volatile accesses get acquire/release from the
- * fnvnx_order plugin (toolchain/order). FNVNX_COMPILER_BARRIERS=1 keeps the compiler-only barriers (A/B
- * measurement only: not a valid multicore build). */
+ * fnvnx_order plugin (toolchain/order). */
 #ifndef FNVNX_MSVC_NAMES   /* the name pass (toolchain/vtnames: clang with the MSVC ABI) has these as builtins */
-#if defined(FNVNX_COMPILER_BARRIERS) && FNVNX_COMPILER_BARRIERS
-inline __attribute__((always_inline)) void _ReadWriteBarrier(void) { __asm__ __volatile__("" ::: "memory"); }
-inline __attribute__((always_inline)) void _ReadBarrier(void) { __asm__ __volatile__("" ::: "memory"); }
-inline __attribute__((always_inline)) void _WriteBarrier(void) { __asm__ __volatile__("" ::: "memory"); }
-#else
 inline __attribute__((always_inline)) void _ReadWriteBarrier(void) { __asm__ __volatile__("dmb ish" ::: "memory"); }
 inline __attribute__((always_inline)) void _ReadBarrier(void) { __asm__ __volatile__("dmb ishld" ::: "memory"); }
 inline __attribute__((always_inline)) void _WriteBarrier(void) { __asm__ __volatile__("dmb ishst" ::: "memory"); }
-#endif
 #endif
 /* winnt.h MemoryBarrier (x86: a locked or, a full barrier) and YieldProcessor (pause) */
 inline __attribute__((always_inline)) void MemoryBarrier(void) { __asm__ __volatile__("dmb ish" ::: "memory"); }
@@ -297,7 +283,6 @@ extern "C"
 #endif
 void fnvnx_mt1_wait_cell_update(void);
 
-#define FNVNX_ASM_FNV_HELPERS
 #include "fnvnx_asm.h"
 
 

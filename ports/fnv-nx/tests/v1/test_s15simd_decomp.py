@@ -95,9 +95,7 @@ def build_c_flags():
 
 def plugins(work):
     out = []
-    for name, extra in (('ftoi', []), ('order', ['-fplugin-arg-fnvnx_order-mode=volatile',
-                                                  '-fplugin-arg-fnvnx_order-args=rtl',
-                                                  '-fplugin-arg-fnvnx_order-refcount=weak',
+    for name, extra in (('ftoi', []), ('order', ['-fplugin-arg-fnvnx_order-args=rtl',
                                                   '-fplugin-arg-fnvnx_order-object=first',
                                                   '-fplugin-arg-fnvnx_order-operator=cpp17'])):
         r = sh(['bash', os.path.join(PORT, 'toolchain', name, 'build.sh'), os.path.join(work, '.' + name)],
@@ -106,7 +104,7 @@ def plugins(work):
         if not so or not os.path.isfile(so):
             return [], 'plugins: %s does not build, decomp compiled without them' % name
         out += ['-fplugin=' + so] + extra
-    return out, 'plugins: ftoi + order (volatile, rtl) as compile.sh'
+    return out, 'plugins: ftoi + order (R9, rtl) as compile.sh'
 
 
 def build(work):

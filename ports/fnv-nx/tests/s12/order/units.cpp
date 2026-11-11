@@ -122,3 +122,39 @@ void wb() { _WriteBarrier(); }
 void mb() { MemoryBarrier(); }
 // expect: yield
 void yp() { YieldProcessor(); }
+// R9 totality: every memory operand of every statement is classified. An aggregate passed by value reads shared
+// memory in the caller (acquire fence after the copy); a block builtin touches memory through its pointer
+// arguments (release fence before a write, acquire fence after a read); a return slot is a store.
+struct Big { int a[8]; };
+Big g_big;
+extern void take(Big);
+extern Big make_big();
+// expect: dmb\tishld
+void pass_global() { take(g_big); }
+// expect: dmb\tishld
+void pass_deref(Big *p) { take(*p); }
+// block builtin on constants the compiler keeps read-only: no shared memory, no fence (aggregate locals are
+// addressable for the C++ front end, so they count as shared by the existing local rule)
+// reject: dmb
+// reject: ldar
+static const char g_ro[16] = "abcdefghijklmno";
+int blk_ro(unsigned n) { return __builtin_memcmp(g_ro, "abcdefgh", n); }
+// expect: dmb\tish\n
+// expect: dmb\tishld
+void blk_copy(void *p, const void *q, unsigned n) { __builtin_memcpy(p, q, n); }
+// expect: dmb\tish\n
+// expect: dmb\tishld
+void blk_move(void *p, const void *q, unsigned n) { __builtin_memmove(p, q, n); }
+// expect: dmb\tishld
+int blk_global() { Big l; __builtin_memcpy(&l, &g_big, sizeof l); return l.a[3]; }
+// expect: dmb\tish\n
+void blk_set(void *p) { __builtin_memset(p, 0, 64); }
+// a pure read through pointer arguments: only the acquire fence (fnspec says read-only)
+// expect: dmb\tishld
+// reject: dmb\tish\n
+int blk_cmp(const void *a, const void *b) { return __builtin_memcmp(a, b, 16); }
+// expect: dmb\tish\n
+void ret_slot(Big *p) { *p = make_big(); }
+// the atomic builtins carry their own ordering: no extra fence from the block rule
+// reject: dmb\tishld
+unsigned atomic_add(unsigned *p) { return __atomic_fetch_add(p, 1, __ATOMIC_RELAXED); }

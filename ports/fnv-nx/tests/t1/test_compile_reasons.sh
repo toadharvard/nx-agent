@@ -20,7 +20,7 @@ case $src in
 esac
 SH
 chmod +x "$T/cc"
-export TREE OUT CXX=$T/cc CC=$T/cc FLAGS_STR="" CFLAGS_STR="" ORDER_KEYS=unit
+export TREE OUT CXX=$T/cc CC=$T/cc FLAGS_STR="" CFLAGS_STR=""
 : >"$OUT/defines.tsv"
 eval "$(sed -n '/^compile_one() {/,/^}/p' "$P/tools/link/compile.sh")"
 for u in a b c d e; do ( compile_one "src/$u.cpp" ); echo "$?" >>"$T/rcs"; done

@@ -279,13 +279,10 @@ def build_closures():
     if 'toolchain/ftoi' in comp:
         for c in ('F2U', 'F2U64', 'F2S', 'F2S64'):
             out[c] = 'compiler: fnvnx_ftoi plugin (FTOI2)'
-    if 'toolchain/order' in comp and 'ORDER_MODE=${ORDER_MODE:-volatile}' in comp:
-        for c in ('VOLATILE-DECL', 'POLL-VOLATILE'):
-            out[c] = 'compiler: fnvnx_order plugin (volatile = ldar/stlr, docs/ORDERING.md)'
-        # in-unit discovery covers a plain store only where the same unit calls Interlocked on the operand; the
-        # gate's sites are cross-unit, so the class is closed only when the build passes the gate's key list
-        if re.search(r'^ORDER_KEYS=\$\{ORDER_KEYS:-[^}]', comp, re.M):
-            out['ATOMIC-PLAIN-STORE'] = 'compiler: fnvnx_order keys (the gate\'s atomic.keys)'
+    if 'toolchain/order' in comp:
+        # R9 TSO-MAP: every access that is not a proven local is ordered (docs/ORDERING.md)
+        for c in ('VOLATILE-DECL', 'POLL-VOLATILE', 'POLL-PLAIN', 'ATOMIC-PLAIN-STORE'):
+            out[c] = 'compiler: fnvnx_order R9 TSO-MAP (ldar/stlr, docs/ORDERING.md)'
         if 'ORDER_ARGS=${ORDER_ARGS:-rtl}' in comp:
             out['ORDER-ARGS'] = 'compiler: fnvnx_order args=rtl (arguments right to left, as MSVC)'
     if re.search(r'_ReadWriteBarrier\(void\) \{ __asm__ __volatile__\("dmb ish"', compat):

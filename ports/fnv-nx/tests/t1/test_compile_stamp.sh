@@ -16,7 +16,7 @@ printf '#include "k.h"\nint a() { return K; }\n' > "$B/tree/src/a.cpp"; echo 'in
 git -C "$P" rev-parse HEAD > "$B/prepared_from.txt"
 mk() {   # mk <n>: one `make compile`; its compile line in $T/c<n>
 	timeout 600 env FNVNX_UNIT_OBJCACHE="$T/uc" make -C "$P" compile BUILD_DIR="$T/build" PREPARED="$B/tree" FORCE_STALE=1 TESTS=none \
-		EXT="$P/ext" JOBS=2 ORDER_KEYS=unit TC_DL=none > "$T/m$1.log" 2>&1
+		EXT="$P/ext" JOBS=2 TC_DL=none > "$T/m$1.log" 2>&1
 	grep -h '] compile  ' "$T/m$1.log" > "$T/c$1"
 }
 obj=$T/build/compile/obj

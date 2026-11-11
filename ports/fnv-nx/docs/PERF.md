@@ -581,7 +581,7 @@ Instruction mix of fresh8 (2.43 M static instructions) **[M]**: loads 22.2 %, st
 | `fs:[0x2c]` TLS unification | correctness first, enables MT rendering | **done** (S5 `31cdca3`) | S4 |
 | release stores for the RecursiveSpinLock (6.5) | correctness on AArch64 | out-of-line Unlock **done** (override); 43 inline sites need an S1 rule | S15, S1 |
 | inline Interlocked* in game units (6.7) | the call/return and 1-2 instructions per operation; +8.8 static instructions per site | **done** (fnvnx_win32.h) | S15 |
-| no barrier on refcount increments (6.7) | about half of the 0.25-3.2 M barrier stalls on main **[E]** | **done** (S12 `52cb478`, `ORDER_REFCOUNT=weak` by default; mtqemu litmus `ref` race-checks it); B9 confirms on an A57 | S12, S15 |
+| no barrier on refcount increments (6.7) | about half of the 0.25-3.2 M barrier stalls on main **[E]** | **done** (S12 `52cb478`, `ORDER_REFCOUNT=weak`, since removed: R9 orders every access; mtqemu litmus `ref` race-checks it); B9 confirms on an A57 | S12, S15 |
 
 ## 9. What needs hardware, and the first on-device benchmark set
 
@@ -721,7 +721,7 @@ measurement (its main side is 2.3x the modelled 0.75-2.5 M) and the Interlocked 
 | 3 | render machine F2-F4 (`render_f2f4`) | 1.4 M | proposed (RENDER_PERF.md 10) | no |
 | 4 | Havok worker pool (`havok_workers`) | 1.4 M | not traced whether bhkWorld uses the MT simulation | yes |
 | 5 | threaded morpher/particles/blood (`threaded_anim`) | 0.9 M | PC defaults on (hearsay names) | no (PC path) |
-| 6 | no barrier on refcount increments (`barrier_relax`) | 0.8 M | **in the build** (S12 `52cb478`, ORDER_REFCOUNT=weak) | B9 |
+| 6 | no barrier on refcount increments (`barrier_relax`) | 0.8 M | **in the build** (S12 `52cb478`, ORDER_REFCOUNT=weak, since removed: R9) | B9 |
 | 7 | NEON per-object math (`neon_math`) | 0.9 M | proposed (S15) | no |
 | 8 | instancing / sorted packets in the native renderer | 1.0 M main, 1.3 M worker | S6n plan | no (the render machine measures) |
 | 9 | core 3 for background roles | frees 1-3 M on cores 1-2 | S5 opt-in, off by default | yes: what the system runs on core 3 |
@@ -1271,13 +1271,13 @@ on the chained one, with no code change. The worst frame at the exe's defaults (
 GHz, with the render report and perf1) is 26.5 ms, against 27.5 before.
 
 **Per-class A/B on three hot units** (`unit_ab.sh`, each unit compiled alone, relinked by S2's resolve + apply, the
-same harness cases; A64 instructions per call summed over the unit's clean functions; ORDER_KEYS=unit on both sides;
+same harness cases; A64 instructions per call summed over the unit's clean functions;
 AB_FLAGS for the flags compile.sh would otherwise override):
 
 | variant | niquaternion | nimatrix3 | hkpgsk | oracle agreement |
 |---|---|---|---|---|
 | base (compile.sh) | 1,285 | 1,421 | 961 | 181/205, 168/176, 98/151 |
-| ordering plugin off (ORDER_MODE=off) | 1,274 (-0.9 %) | 1,421 | 960 | same |
+| ordering plugin off (plugin off, an old option since removed) | 1,274 (-0.9 %) | 1,421 | 960 | same |
 | -fstrict-aliasing | 1,213 (-5.6 %) | 1,421 | 961 | same |
 | parity set reversed (strict aliasing, no -frounding-math, no -fwrapv, null checks deleted) | 1,209 (-5.9 %) | 1,421 | 961 | same |
 | -O3 | 1,285 | 1,124 (-21 %) | 892 (-7.2 %) | same |

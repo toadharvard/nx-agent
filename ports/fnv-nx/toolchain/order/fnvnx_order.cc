@@ -65,6 +65,8 @@
 #include "ssa.h"
 #include "varasm.h"
 #include "output.h"
+#include "attr-fnspec.h"
+#include "gimple-walk.h"
 #include <set>
 #include <string>
 #include <vector>
@@ -167,82 +169,192 @@ static tree to_bits(tree v, tree ity, gimple_seq *seq) {
 }
 
 
+static counts *cur;   // the counters of the function being ordered
+
+// totality (R9): `ref = ...` / `... = ref` forms ordered scalar-wise where expressible, fenced otherwise
+static void order_single(gimple_stmt_iterator *gsi);
+
+// a fence after a statement; one that ends its block (a trapping load) gets it on the fall-through edge
+static void fence_after(gimple_stmt_iterator *gsi, enum memmodel m) {
+  gimple *stmt = gsi_stmt(*gsi);
+  if (stmt_ends_bb_p(stmt)) {
+    edge e = find_fallthru_edge(gimple_bb(stmt)->succs);
+    if (!e) { error_at(gimple_location(stmt), "%<fnvnx_order%>: cannot fence after a block-ending statement"); return; }
+    gsi_insert_on_edge_immediate(e, fence(m));
+  } else {
+    gsi_insert_after(gsi, fence(m), GSI_SAME_STMT);
+  }
+  (m == MEMMODEL_ACQUIRE ? cur->fence_ld : cur->fence_st)++;
+}
+
+// an operand that is a shared memory reference but sits where only a value can (a call argument, a return value, a
+// condition, an arithmetic operand): read it into a local first with an ordinary assignment, ordered as any other
+// load, and use the local
+static void hoist_read(gimple_stmt_iterator *gsi, gimple *stmt, unsigned i) {
+  tree op = gimple_op(stmt, i);
+  tree tmp = create_tmp_var(TREE_TYPE(op), "order_a");
+  gimple *as = gimple_build_assign(tmp, op);
+  gimple_set_location(as, gimple_location(stmt));
+  gsi_insert_before(gsi, as, GSI_SAME_STMT);
+  gimple_stmt_iterator g2 = gsi_for_stmt(as);
+  order_single(&g2);
+  gimple_set_op(stmt, i, tmp);
+}
+
+static bool operand_shared(gimple *, tree, tree op, void *) { return shared_ordered(op); }
+
+// a pointer argument that cannot be shared memory: the address of a constant the compiler keeps read-only
+static bool pointer_to_constant(tree a) {
+  if (TREE_CODE(a) != ADDR_EXPR) return false;
+  tree base = get_base_address(TREE_OPERAND(a, 0));
+  return base && (TREE_CODE(base) == STRING_CST || readonly_object(base));
+}
+
+// a call GCC may expand inline that reads or writes memory through its pointer arguments (memcpy, memset, memcmp,
+// strlen, ...): the memory is no GIMPLE operand. GCC's own fnspec of the callee says which pointer arguments it may
+// read or write (unknown spec: all, both ways). A write gets a release fence before, a read an acquire fence after.
+// The atomic and sync builtins carry their own ordering and are not touched.
+static void order_builtin_call(gimple_stmt_iterator *gsi, gcall *call) {
+  tree fn = gimple_call_fndecl(call);
+  if (!fn || !fndecl_built_in_p(fn, BUILT_IN_NORMAL)) return;
+  built_in_function code = DECL_FUNCTION_CODE(fn);
+  if (code >= BUILT_IN_SYNC_FETCH_AND_ADD_N && code <= BUILT_IN_ATOMIC_FERAISEEXCEPT) return;
+  if (gimple_call_flags(call) & ECF_CONST) return;
+  attr_fnspec spec = gimple_call_fnspec(call);
+  bool rd = false, wr = false;
+  for (unsigned i = 0; i < gimple_call_num_args(call); i++) {
+    tree a = gimple_call_arg(call, i);
+    if (!POINTER_TYPE_P(TREE_TYPE(a)) || pointer_to_constant(a)) continue;
+    bool known = spec.known_p() && spec.arg_specified_p(i);
+    if (!known || spec.arg_maybe_read_p(i)) rd = true;
+    if (!known || spec.arg_maybe_written_p(i)) wr = true;
+  }
+  if (wr) { gsi_insert_before(gsi, fence(MEMMODEL_RELEASE), GSI_SAME_STMT); cur->fence_st++; }
+  if (rd) fence_after(gsi, MEMMODEL_ACQUIRE);
+}
+
+// one statement. Every memory operand is classified (local or read-only: plain; else ordered or fenced); a statement
+// kind with a memory operand that no rule here covers is a compile error, never a silent plain access.
+static void order_stmt(gimple_stmt_iterator *gsi) {
+  gimple *stmt = gsi_stmt(*gsi);
+  switch (gimple_code(stmt)) {
+    case GIMPLE_ASSIGN:
+      if (gimple_assign_single_p(stmt)) { order_single(gsi); return; }
+      // unary/binary/ternary operations: value operands in GIMPLE, but any memory one is read first
+      for (unsigned i = 1; i < gimple_num_ops(stmt); i++)
+        if (gimple_op(stmt, i) && shared_ordered(gimple_op(stmt, i))) hoist_read(gsi, stmt, i);
+      if (shared_ordered(gimple_assign_lhs(stmt))) {
+        tree lhs = gimple_assign_lhs(stmt);
+        if (!stmt_ends_bb_p(stmt) && is_gimple_reg_type(TREE_TYPE(lhs))) {
+          tree tmp = create_tmp_var(TREE_TYPE(lhs), "order_r");
+          gimple_assign_set_lhs(stmt, tmp);
+          gsi_insert_after(gsi, gimple_build_assign(lhs, tmp), GSI_SAME_STMT);   // visited next
+        } else {
+          gsi_insert_before(gsi, fence(MEMMODEL_RELEASE), GSI_SAME_STMT);
+          cur->fence_st++;
+        }
+      }
+      return;
+    case GIMPLE_CALL: {
+      // arguments that are memory (an aggregate passed by value, the static chain): read first
+      for (unsigned i = 1; i < gimple_num_ops(stmt); i++)
+        if (gimple_op(stmt, i) && shared_ordered(gimple_op(stmt, i))) hoist_read(gsi, stmt, i);
+      order_builtin_call(gsi, as_a<gcall *>(stmt));
+      // `ref = f()` storing into an ordered object: route the result through a temporary, and order that store
+      tree lhs = gimple_call_lhs(stmt);
+      if (lhs && shared_ordered(lhs) && !stmt_ends_bb_p(stmt) && is_gimple_reg_type(TREE_TYPE(lhs))) {
+        tree tmp = create_tmp_var(TREE_TYPE(lhs), "order_r");
+        gimple_call_set_lhs(stmt, tmp);
+        gsi_insert_after(gsi, gimple_build_assign(lhs, tmp), GSI_SAME_STMT);   // visited next
+      } else if (lhs && shared_ordered(lhs)) {
+        // a return slot (aggregate): release fence before the call that stores into it
+        gsi_insert_before(gsi, fence(MEMMODEL_RELEASE), GSI_SAME_STMT);
+        cur->fence_st++;
+      }
+      return;
+    }
+    case GIMPLE_RETURN: case GIMPLE_COND: case GIMPLE_SWITCH:
+      // the value operands: read a memory one first
+      for (unsigned i = 0; i < gimple_num_ops(stmt); i++)
+        if (gimple_op(stmt, i) && shared_ordered(gimple_op(stmt, i))) hoist_read(gsi, stmt, i);
+      return;
+    case GIMPLE_ASM:
+      // the memory operands of an asm are the asm's own business: a function with asm is never a native body
+      return;
+    case GIMPLE_DEBUG:
+      return;
+    default:
+      // every other kind: no memory operand allowed to escape
+      if (walk_stmt_load_store_addr_ops(stmt, NULL, operand_shared, operand_shared, NULL))
+        error_at(gimple_location(stmt), "%<fnvnx_order%>: cannot order a memory operand of a %s statement",
+                 gimple_code_name[gimple_code(stmt)]);
+      return;
+  }
+}
+
+static void order_single(gimple_stmt_iterator *gsi) {
+  counts &c = *cur;
+  gimple *stmt = gsi_stmt(*gsi);
+  tree lhs = gimple_assign_lhs(stmt), rhs = gimple_assign_rhs1(stmt);
+  bool st = shared_ordered(lhs), ld = shared_ordered(rhs);
+  if (!st && !ld) return;
+  if (gimple_clobber_p(stmt)) return;
+  int li = ld ? atomic_index(rhs) : -1, si = st ? atomic_index(lhs) : -1;
+  if (ld && !st && li >= 0 && is_gimple_reg_type(TREE_TYPE(rhs))) {
+    // lhs = ref  ->  bits = __atomic_load_N(&ref, ACQUIRE); lhs = (T) bits
+    gimple_seq seq = NULL;
+    tree p = address_of(rhs, &seq);
+    tree ity = uint_type(li);
+    tree bits = create_tmp_var(ity, "order_ld");
+    gcall *call = gimple_build_call(builtin_decl_explicit((built_in_function)(BUILT_IN_ATOMIC_LOAD_1 + li)), 2, p,
+                                    build_int_cst(integer_type_node, MEMMODEL_ACQUIRE));
+    gimple_call_set_lhs(call, bits);
+    gimple_seq_add_stmt(&seq, call);
+    gsi_insert_seq_before(gsi, seq, GSI_SAME_STMT);
+    tree ty = TREE_TYPE(rhs);
+    tree v = SCALAR_FLOAT_TYPE_P(ty) ? build1(VIEW_CONVERT_EXPR, ty, bits) : build1(NOP_EXPR, ty, bits);
+    if (!useless_type_conversion_p(TREE_TYPE(lhs), ty)) {
+      tree t2 = create_tmp_var(ty, "order_v");
+      gsi_insert_before(gsi, gimple_build_assign(t2, v), GSI_SAME_STMT);
+      v = build1(NOP_EXPR, TREE_TYPE(lhs), t2);
+    }
+    gimple_assign_set_rhs_from_tree(gsi, v);
+    c.ldar++;
+    return;
+  }
+  if (st && !ld && si >= 0 && is_gimple_val(rhs)) {
+    // ref = v  ->  __atomic_store_N(&ref, (uintN) v, RELEASE)
+    gimple_seq seq = NULL;
+    tree p = address_of(lhs, &seq);
+    tree bits = to_bits(rhs, uint_type(si), &seq);
+    gcall *call = gimple_build_call(builtin_decl_explicit((built_in_function)(BUILT_IN_ATOMIC_STORE_1 + si)), 3, p,
+                                    bits, build_int_cst(integer_type_node, MEMMODEL_RELEASE));
+    gimple_set_location(call, gimple_location(stmt));
+    gsi_insert_seq_before(gsi, seq, GSI_SAME_STMT);
+    gsi_replace(gsi, call, false);
+    c.stlr++;
+    return;
+  }
+  // everything else keeps its (volatile) access, fenced: dmb ish before a store, dmb ishld after a load
+  if (st) { gsi_insert_before(gsi, fence(MEMMODEL_RELEASE), GSI_SAME_STMT); c.fence_st++; }
+  if (ld) fence_after(gsi, MEMMODEL_ACQUIRE);
+}
+
 struct order_pass : gimple_opt_pass {
   order_pass(gcc::context *ctx, const pass_data &d) : gimple_opt_pass(d, ctx) {}
 
   unsigned int execute(function *fun) final override {
     counts c = {0, 0, 0, 0};
+    cur = &c;
     basic_block bb;
-    FOR_EACH_BB_FN(bb, fun) {
-      for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
-        gimple *stmt = gsi_stmt(gsi);
-        if (gimple_code(stmt) == GIMPLE_CALL) {
-          // `ref = f()` storing into an ordered object: route the result through a temporary, and order that store
-          tree lhs = gimple_call_lhs(stmt);
-          if (lhs && shared_ordered(lhs) && !stmt_ends_bb_p(stmt) && is_gimple_reg_type(TREE_TYPE(lhs))) {
-            tree tmp = create_tmp_var(TREE_TYPE(lhs), "order_r");
-            gimple_call_set_lhs(stmt, tmp);
-            gsi_insert_after(&gsi, gimple_build_assign(lhs, tmp), GSI_SAME_STMT);   // visited next
-          } else if (lhs && shared_ordered(lhs)) {
-            gsi_insert_before(&gsi, fence(MEMMODEL_RELEASE), GSI_SAME_STMT);
-            c.fence_st++;
-          }
-          continue;
-        }
-        if (!gimple_assign_single_p(stmt)) continue;
-        tree lhs = gimple_assign_lhs(stmt), rhs = gimple_assign_rhs1(stmt);
-        bool st = shared_ordered(lhs), ld = shared_ordered(rhs);
-        if (!st && !ld) continue;
-        if (gimple_clobber_p(stmt)) continue;
-        int li = ld ? atomic_index(rhs) : -1, si = st ? atomic_index(lhs) : -1;
-        if (ld && !st && li >= 0 && is_gimple_reg_type(TREE_TYPE(rhs))) {
-          // lhs = ref  ->  bits = __atomic_load_N(&ref, ACQUIRE); lhs = (T) bits
-          gimple_seq seq = NULL;
-          tree p = address_of(rhs, &seq);
-          tree ity = uint_type(li);
-          tree bits = create_tmp_var(ity, "order_ld");
-          gcall *call = gimple_build_call(builtin_decl_explicit((built_in_function)(BUILT_IN_ATOMIC_LOAD_1 + li)), 2, p,
-                                          build_int_cst(integer_type_node, MEMMODEL_ACQUIRE));
-          gimple_call_set_lhs(call, bits);
-          gimple_seq_add_stmt(&seq, call);
-          gsi_insert_seq_before(&gsi, seq, GSI_SAME_STMT);
-          tree ty = TREE_TYPE(rhs);
-          tree v = SCALAR_FLOAT_TYPE_P(ty) ? build1(VIEW_CONVERT_EXPR, ty, bits) : build1(NOP_EXPR, ty, bits);
-          if (!useless_type_conversion_p(TREE_TYPE(lhs), ty)) {
-            tree t2 = create_tmp_var(ty, "order_v");
-            gsi_insert_before(&gsi, gimple_build_assign(t2, v), GSI_SAME_STMT);
-            v = build1(NOP_EXPR, TREE_TYPE(lhs), t2);
-          }
-          gimple_assign_set_rhs_from_tree(&gsi, v);
-          c.ldar++;
-          continue;
-        }
-        if (st && !ld && si >= 0 && is_gimple_val(rhs)) {
-          // ref = v  ->  __atomic_store_N(&ref, (uintN) v, RELEASE)
-          gimple_seq seq = NULL;
-          tree p = address_of(lhs, &seq);
-          tree bits = to_bits(rhs, uint_type(si), &seq);
-          gcall *call = gimple_build_call(builtin_decl_explicit((built_in_function)(BUILT_IN_ATOMIC_STORE_1 + si)), 3, p,
-                                          bits, build_int_cst(integer_type_node, MEMMODEL_RELEASE));
-          gimple_set_location(call, gimple_location(stmt));
-          gsi_insert_seq_before(&gsi, seq, GSI_SAME_STMT);
-          gsi_replace(&gsi, call, false);
-          c.stlr++;
-          continue;
-        }
-        // everything else keeps its (volatile) access, fenced: dmb ish before a store, dmb ishld after a load
-        if (st) { gsi_insert_before(&gsi, fence(MEMMODEL_RELEASE), GSI_SAME_STMT); c.fence_st++; }
-        if (ld && !stmt_ends_bb_p(stmt)) {
-          gsi_insert_after(&gsi, fence(MEMMODEL_ACQUIRE), GSI_SAME_STMT);   // gsi now on the fence
-          c.fence_ld++;
-        }
-      }
-    }
+    FOR_EACH_BB_FN(bb, fun)
+      for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) order_stmt(&gsi);
     unit_total.ldar += c.ldar; unit_total.stlr += c.stlr;
     unit_total.fence_ld += c.fence_ld; unit_total.fence_st += c.fence_st;
     if (verbose && (c.ldar || c.stlr || c.fence_ld || c.fence_st))
       inform(DECL_SOURCE_LOCATION(fun->decl), "%<fnvnx_order%>: %lu acquire loads, %lu release stores, %lu+%lu fenced",
              c.ldar, c.stlr, c.fence_ld, c.fence_st);
+    cur = NULL;
     return 0;
   }
 };

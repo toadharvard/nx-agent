@@ -74,6 +74,5 @@ extern "C" void _operator_delete_sized(void *, __SIZE_TYPE__);
 #endif
 
 #include "fnvnx_crt.h"
-#define FNVNX_ASM_FNV_HELPERS
 #include "fnvnx_asm.h"
 #endif

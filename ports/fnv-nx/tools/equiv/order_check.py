@@ -117,7 +117,7 @@ def agreed_stdout(outputs):
 
 
 COMPILE_SH = PORT / 'tools/link/compile.sh'
-ORDER_KEYS = (('ORDER_MODE', 'mode'), ('ORDER_ARGS', 'args'), ('ORDER_REFCOUNT', 'refcount'),
+ORDER_VARS = (('ORDER_ARGS', 'args'),
               ('ORDER_OBJECT', 'object'), ('ORDER_OPERATOR', 'operator'), ('ORDER_ASSIGN', 'assign'))
 
 
@@ -126,11 +126,11 @@ def compile_sh_order_args(text=None, need=()):
     hands to `-fplugin-arg-fnvnx_order-<key>`); the environment overrides them as it does for compile.sh"""
     text = COMPILE_SH.read_text() if text is None else text
     out = []
-    for var, key in ORDER_KEYS:
+    for var, key in ORDER_VARS:
         m = re.search(r'^%s=\$\{%s:-([^}]*)\}' % (var, var), text, re.M)
         if m and ('fnvnx_order-%s=' % key) in text:
             out.append('-fplugin-arg-fnvnx_order-%s=%s' % (key, os.environ.get(var, m.group(1))))
-    for key in ('mode=',) + tuple(need):
+    for key in tuple(need):
         if not any(a.startswith('-fplugin-arg-fnvnx_order-' + key) for a in out):
             raise SystemExit('order_check: compile.sh passes no fnvnx_order %s switch (%s)' % (key.rstrip('='),
                                                                                               COMPILE_SH))

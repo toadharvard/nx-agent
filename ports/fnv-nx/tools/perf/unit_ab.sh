@@ -8,8 +8,6 @@
 # <targets file>: <source>:<0xaddr> lines (dyncount.py --targets-file). Run once per variant with a new tag (e.g.
 # before on a checkout without the change, after with it); the one-unit relink gives the same counts and oracle
 # agreement as the farms' full link for the unit's own functions (checked on hkpgsk.cpp, link 0bd144db1464).
-# ORDER_KEYS defaults to unit (compile.sh: in-unit key discovery, its mode for A/B runs) so a one-unit compile
-# does not run the whole-program key pass over every unit; both sides of an A/B must use the same mode.
 # Needs the harness profile (FNVNX_DFPROFILE). Outputs (objects, links) stay in <work dir>: decomp-derived, local.
 set -euo pipefail
 TREE=$1; UNIT=$2; TARGETS=$3; WORK=$(mkdir -p "$4" && cd "$4" && pwd); TAG=$5
@@ -17,7 +15,7 @@ HERE=$(cd "$(dirname "$0")/../.." && pwd)
 OBJ=$WORK/obj_$TAG; L=$WORK/link_$TAG
 rm -rf "$OBJ" "$L" "$WORK/a64_$TAG" "$WORK/df_$TAG"
 echo "$UNIT" > "$WORK/unit.list"
-ORDER_KEYS=${ORDER_KEYS:-unit} bash "$HERE/tools/link/compile.sh" "$TREE" "$OBJ" "$WORK/unit.list" 1 >/dev/null
+bash "$HERE/tools/link/compile.sh" "$TREE" "$OBJ" "$WORK/unit.list" 1 >/dev/null
 O=$OBJ/$(echo "$UNIT" | tr / _).o
 [ -f "$O" ] || { echo "unit_ab: $UNIT does not compile (see $OBJ)" >&2; exit 2; }
 mkdir -p "$L"

@@ -38,15 +38,18 @@ HERE=$(cd "$(dirname "$0")/../.." && pwd)
 # name with its last g++ replaced by gcc; an explicit CC is accepted only when it reports the same version line and
 # the same target.
 CXX=${CXX:-aarch64-linux-gnu-g++}
-case $CXX in *g++*) CC_DERIVED=${CXX%g++*}gcc${CXX##*g++} ;;
+# CXX may carry arguments (CXX="g++ -MD"): the program is its first word, the arguments go to CC unchanged.
+CXX_PROG=${CXX%% *}; CXX_ARGS=${CXX#"$CXX_PROG"}
+case $CXX_PROG in *g++*) CC_DERIVED=${CXX_PROG%g++*}gcc${CXX_PROG##*g++} ;;
   *) echo "compile.sh: CXX=$CXX: no g++ in its name to derive the C compiler from" >&2; exit 2 ;; esac
 if ! command -v "$CC_DERIVED" > /dev/null; then echo "compile.sh: the C compiler $CC_DERIVED (derived from CXX=$CXX) does not exist" >&2; exit 2; fi
+CC_DERIVED=$CC_DERIVED$CXX_ARGS
 CC=${CC:-$CC_DERIVED}
 if [ "$CC" != "$CC_DERIVED" ]; then
   # --version's first line is "<program> (<pkgversion>) <version>": equal after the program name, and the same
   # -dumpmachine (a distro's host and cross gcc print the same line), = the same build
-  cc_v=$("$CC" --version 2>&1 | head -n 1); cc_v="${cc_v#* } $("$CC" -dumpmachine 2>&1)"
-  cxx_v=$("$CXX" --version 2>&1 | head -n 1); cxx_v="${cxx_v#* } $("$CXX" -dumpmachine 2>&1)"
+  cc_v=$("${CC%% *}" --version 2>&1 | head -n 1); cc_v="${cc_v#* } $("${CC%% *}" -dumpmachine 2>&1)"
+  cxx_v=$("$CXX_PROG" --version 2>&1 | head -n 1); cxx_v="${cxx_v#* } $("$CXX_PROG" -dumpmachine 2>&1)"
   if [ "$cc_v" != "$cxx_v" ]; then
     echo "compile.sh: CC=$CC ($cc_v) is not the same build as CXX=$CXX ($cxx_v)" >&2; exit 2
   fi
