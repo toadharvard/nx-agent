@@ -19,6 +19,10 @@
 #          <out>/defined.txt           nm --defined-only -g names of the archive, sorted
 #                                      (4th argument of platform/manifest/bridgetable.py)
 #          <out>/undef.txt             undefined symbols of the archive as a whole, sorted
+#          <out>/env_const.objstub.tsv constants table of the objstub gate, from the built objects (manifest/env_const_export.py)
+#          <out>/objects.list          the objects of the archive, one path per line (objstub --objects-list)
+#          <out>/svc.txt               `<count> <object>` for every object with an svc instruction (build.json: os_layer)
+#          <out>/compile_cmds.txt      the compile commands of the C and C++ sources (the probe compiles reuse them)
 # Gate: every name of undef.txt must be defined by the toolchain libraries of the guest link (libstdc++, libm,
 # libgcc, libc, libsysbase for ILP32), by libfnvnx-guest.a, or by platform/guest_hooks.txt. Anything else is printed
 # as UNRESOLVED and the script exits 1. ANY compile failure fails the script; no source is ever left out.
@@ -38,8 +42,9 @@ TC=$(realpath "$TC")
 GCC=$TC/bin/aarch64-none-elf-gcc
 GXX=$TC/bin/aarch64-none-elf-g++
 AR=$TC/bin/aarch64-none-elf-ar
+OBJDUMP=$TC/bin/aarch64-none-elf-objdump
 NM=$TC/bin/aarch64-none-elf-nm
-for t in "$GCC" "$GXX" "$AR" "$NM"; do [ -x "$t" ] || { echo "build_guest: missing $t"; exit 2; }; done
+for t in "$GCC" "$GXX" "$AR" "$NM" "$OBJDUMP" "$TC/bin/aarch64-none-elf-c++filt"; do [ -x "$t" ] || { echo "build_guest: missing $t"; exit 2; }; done
 EXT=${EXT:-$ROOT/ext}
 NLS_DIR=${NLS_DIR:-/home/user/gd/nls}
 JOBS=${JOBS:-$(nproc)}
@@ -160,6 +165,9 @@ compile_one() {                                                     # kind src o
     esac >"$log" 2>&1 || { echo "$kind $src" >"$log.fail"; return 1; }
 }
 export -f compile_one
+# the compile commands as run above (env_const_export.py compiles probe forms of the constant-result sources with them)
+printf 'c\t%s %s -std=gnu11 %s\ncxx\t%s %s -std=gnu++17 -DSTDMETHODCALLTYPE= -DFNVNX_PLATFORM_BUILD %s\n' \
+    "$GCC" "$COMMON_S" "$PINC_S" "$GXX" "$COMMON_S" "$PINC_S" >"$OUT/compile_cmds.txt"
 case "$ROOT$OUT$EXT$TC" in *" "*) echo "build_guest: paths with spaces are not supported"; exit 2;; esac
 
 echo "build_guest: compiling $NALL sources ($NPLAT platform, $((NALL-NPLAT)) FreeType) with $(basename "$GCC") $("$GCC" -dumpfullversion), -j$JOBS"
@@ -188,6 +196,24 @@ nm_undef()   { "$NM" -g -u -P "$@" 2>/dev/null | awk 'NF>=2 && $1 !~ /:$/ && $2=
 nm_defined "$OUT/libfnvnx-platform.a" >"$OUT/defined.txt"
 # undefined as a whole: referenced by some member and defined by none (weak undefined references need no provider)
 nm_undef "$OUT/libfnvnx-platform.a" | comm -23 - "$OUT/defined.txt" >"$OUT/undef.txt"
+
+# ---- tables of the verify gates (written before the unresolved-symbol gate below, so they exist whenever the archive does)
+printf '%s\n' "${OBJS[@]}" >"$OUT/objects.list"
+python3 -I "$HERE/manifest/env_const_export.py" --tsv "$HERE/manifest/env_const.tsv" --archive "$OUT/libfnvnx-platform.a" \
+    --cmds "$OUT/compile_cmds.txt" --root "$ROOT" --tc "$TC" --out "$OUT/env_const.objstub.tsv" --work "$OUT/probe" \
+    || { echo "build_guest: env_const.objstub.tsv cannot be produced"; exit 1; }
+: >"$OUT/svc.txt"
+for o in "${OBJS[@]}"; do
+    n=$("$OBJDUMP" -d "$o" | awk '$3=="svc"{n++} END{print n+0}')
+    [ "$n" -eq 0 ] || echo "$n $(basename "$o")" >>"$OUT/svc.txt"
+done
+# the OS layer is declared in build.json: an svc instruction in any other object is an error
+python3 -I - "$HERE/build.json" "$OUT/svc.txt" <<'PY' || { echo "build_guest: svc instruction outside the declared OS layer"; exit 1; }
+import json, sys
+decl = set(json.load(open(sys.argv[1]))["os_layer"])
+bad = [l.split()[1] for l in open(sys.argv[2]) if l.split()[1] not in decl]
+sys.exit(1 if bad else 0)
+PY
 
 # ---- gate: providers of the undefined names
 LIBDIR=$("$GCC" -mabi=ilp32 -print-file-name=libc.a); LIBDIR=$(dirname "$(realpath "$LIBDIR")")

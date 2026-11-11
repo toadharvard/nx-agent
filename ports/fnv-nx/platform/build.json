@@ -1,0 +1,60 @@
+{
+ "format": "fnvnx-recipe/0",
+ "note": "Declarative recipe of the platform archive. The schema of verify/VERDICT.md is not defined yet for recipes (admit.json names a directory, its class and gates only); this is the simplest form: inputs, command, outputs, gates. Paths are relative to ports/fnv-nx unless stated.",
+ "directory": "ports/fnv-nx/platform",
+ "env": "verify/env.json",
+ "command": ["platform/build_guest.sh", "<out>"],
+ "command_env": {
+  "FNVNX_TC": "<toolchain prefix: the unpacked hostcache/toolchain-1fc1f7b1ef44>",
+  "NLS_DIR": "<tools/nls>",
+  "EXT": "<directory holding freetype/ and minimp3/>",
+  "LIBNX_INC": "<libnx include directory, inside the toolchain mirror>"
+ },
+ "network": false,
+ "inputs": {
+  "tree": [
+   "platform/win32", "platform/crt", "platform/audio", "platform/input", "platform/boundary", "platform/com",
+   "platform/os", "platform/include", "platform/manifest/env_const.tsv", "platform/manifest/gen_env_const.py",
+   "platform/manifest/env_const_export.py", "platform/guest_hooks.txt", "platform/build.json",
+   "toolchain/guest", "toolchain/include", "shim/include", "loader/include", "tests/s4/Makefile"
+  ],
+  "external": [
+   {"name": "toolchain", "mirror": "toadharvard/fnv-nx-build:hostcache/toolchain-1fc1f7b1ef44", "use": "aarch64-none-elf gcc/g++/ar/nm/objdump/c++filt, newlib, libstdc++"},
+   {"name": "libnx headers", "mirror": "toadharvard/fnv-nx-build:hostcache/toolchain-1fc1f7b1ef44", "use": "sockets declarations of win32/winsock.cpp (-idirafter), headers only"},
+   {"name": "nls", "mirror": "toadharvard/fnv-nx-build:tools/nls", "use": "Wine 9.0 nls files of win32/tools/gen_nls.py"},
+   {"name": "freetype", "mirror": "toadharvard/fnv-nx-build:tools/freetype", "use": "sources of the FreeType modules named by tests/s4/Makefile"},
+   {"name": "minimp3", "mirror": "toadharvard/fnv-nx-build:tools/minimp3", "use": "minimp3.h, minimp3_ex.h (pinned ea99364f61c14656440e8d77e9c233ccf3124633, checked by content)"}
+  ]
+ },
+ "outputs": {
+  "archive": "libfnvnx-platform.a",
+  "defined": "defined.txt",
+  "undefined": "undef.txt",
+  "objstub_constants": "env_const.objstub.tsv",
+  "objects_list": "objects.list",
+  "svc_counts": "svc.txt",
+  "compile_commands": "compile_cmds.txt"
+ },
+ "os_layer": [],
+ "os_layer_note": "Objects allowed to contain svc instructions (objstub --os-layer). The guest archive issues no SVC (it calls the host); the build fails if svc.txt names an object that is not listed here.",
+ "gates": {
+  "objstub": {
+   "argv": ["--objects-list", "<out>/objects.list", "--terminators", "<derived by the gate>", "--constants", "<out>/env_const.objstub.tsv"],
+   "os_layer": "os_layer"
+  },
+  "imports": {
+   "argv": ["platform/manifest/gate_imports.sh", "<GATE_OUT>"],
+   "env": {
+    "FNVNX_MANIFEST": "<fnv-nx-build l5-platform/manifest checkout>",
+    "FNVNX_SPECS": "<tools/wine-specs checkout>/specs",
+    "FNVNX_PLATFORM_OUT": "<out>",
+    "FNVNX_TC": "<toolchain prefix>",
+    "FNVNX_PROVIDED": "<symbol lists of the lifter runtime and d3d9 builds>"
+   },
+   "result": "imports.json"
+  },
+  "linkstrict": {"archive": "libfnvnx-platform.a"},
+  "determinism": {"outputs": ["libfnvnx-platform.a", "defined.txt", "undef.txt", "env_const.objstub.tsv"]},
+  "oracle": {"tests": "tests/s4"}
+ }
+}
