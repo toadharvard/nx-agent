@@ -144,8 +144,8 @@ for d in libdirs:
 def owner(s):
     d = dem[s]; base = d.split("(")[0]
     if base in methods: return "L6 method without body"
-    if s in L1L3: return L1L3[s]
-    if s in hooks: return "L6 backend glue"
+    if base in L1L3: return L1L3[base]
+    if base in hooks: return "L6 backend glue"
     if s in libdefs: return "toolchain library"
     return "unknown"
 lines = ["symbol\tdemangled\towner\tmembers"]; counts = {}

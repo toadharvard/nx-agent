@@ -23,7 +23,7 @@ def build(dev, tmp, with_ext=True, jobs=8):
     for cmd in ([sys.executable, "-I", os.path.join(GEN, "gen_impl.py"), tmp, SPEC], [sys.executable, "-I", os.path.join(dev, "state_model.py"), tmp, SPEC]):
         r = sh(cmd)
         if r.returncode: return None, r.stderr[-800:]
-    fl = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O0", "-w", "-I", INC, "-I", tmp, "-I", dev, "-I", HERE]
+    fl = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O0", "-w", "-I", INC, "-I", tmp, "-I", HERE, "-I", dev]
     jobs_ = [(os.path.join(dev, s), s) for s in LIB] + [(os.path.join(tmp, s), s) for s in GENS] + [(os.path.join(HERE, s), s) for s in TESTS]
     cmds = [fl + ["-c", src, "-o", os.path.join(tmp, n + ".o")] for src, n in jobs_]
     cmds += [["gcc", "-m32", "-std=c11", "-w", "-I", BACKEND, "-I", FRONT, "-c", os.path.join(FRONT, c), "-o", os.path.join(tmp, "nxfront_" + c[:-2] + ".o")] for c in FRONT_C]
