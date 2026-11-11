@@ -167,3 +167,14 @@ ABI points the lead must close in nxgpu4.h (no rule yet; the backend refuses, it
 - Left out, no rule: Surface9::GetDC / ReleaseDC (needs L5's GDI DIB), CreateOffscreenPlainSurfaceEx (no source for the Windows result).
 - Decided with doubt (worker): invalid lock rect = INVALIDCALL (Windows 7 column of Wine's test); lockable MSAA target = INVALIDCALL (MS doc, Wine accepts); Levels > 32 = INVALIDCALL (NO source: recheck); standalone surface GetContainer returns INVALIDCALL where Wine returns E_NOINTERFACE (recheck in obj.cpp).
 - Wiring owed to D5: product `nxd3d_preload` -> nx_tex_preload; backend hooks nxd3d_image_* have test definitions only; draw path calls nx_img_gpu_wrote / NxImg::sync.
+
+## R1c accepted 2026-11-11 (shader cache from the recordings)
+
+`render/shaders/cache/` (extractor, format, loader LP64 + ILP32, link-key rule, builder), `tests/l6/shcache` (lead's run: parts a-e, g green, 14/14 mutations; part f needs a translator build).
+Numbers on the four recordings (worker's run, artifacts in the container only, /home/user/work/l6/shcache/out):
+- 960 Create calls (467 VS + 493 PS), all in frame 0; 765 distinct bytecodes (325 VS, 440 PS), the same set in all four; fixed-function draws 0; state blocks 0.
+- distinct bound (VS, PS) pairs: menu 1, cell 33 (same in both profiles); pairs with non-canonical link set: 0.
+- translated to GLSL and DKSH 765/765; determinism forward vs reversed order 2298/2298 files byte-equal; cache 5 112 608 bytes; 0.13 s per translation, slowest shader 23.6 s.
+- FOUND and fixed by rule: uam read an uninitialised `sched` field (nv50_ir Instruction::init), 245 of 765 DKSH differed between repeats in one process; the fix is now part of `uam.patch` (applies to the pin).
+- OPEN (rule missing in the translator): on GL the 33 recorded pairs do not link - a ps_2_x shader reads the fog factor at location 18 and the paired VS does not write it (deko3d accepts, GL rejects). Needed: the VS epilogue always writes the fog varying with the value the reference (wined3d) defines for a VS without oFog. Task S2a.
+- OWED: rebuild the cache with the build id of the new uam.patch (farm job, about 7 min of translation) and publish to fnv-nx-build `l6-render/shcache/<build id>`; part f of the test has skip logic when no translator build is given - make the translator build a declared input of the gate instead.

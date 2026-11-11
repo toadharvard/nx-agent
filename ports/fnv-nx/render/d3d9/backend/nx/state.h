@@ -1,7 +1,7 @@
 /* fnv-nx native renderer: backend-neutral render-state encoding (stream S6n).
  *
  * Pure C99, no dependencies, identical layout in ILP32 and LP64. Used by
- *   - the D3D9 state translator (front/d3d9_state.h), which produces these values from D3D9 render/sampler states;
+ *   - the D3D9 state translator (render/d3d9/front/d3d9_state.h), which produces these values from D3D9 render/sampler states;
  *   - the front end (nx/front.h), which carries NxRenderState in DefineState ops;
  *   - both backends (host/nxgpu.c on deko3d, gl/nxgl.c on desktop GL 4.5), which consume them.
  *

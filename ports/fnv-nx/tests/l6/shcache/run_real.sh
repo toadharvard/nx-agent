@@ -3,7 +3,7 @@
 #   run_real.sh WORK            WORK: scratch dir (default /home/user/work/l6/shcache) holding build/ (render/shaders/build.sh output, see below) and
 #                               rec/<profile>/<scene>.d9s (decompressed D9S1 streams); results in WORK/out/.
 # Needs: FNVNX_SHADERS_DEPS=WORK/build/deps FNVNX_SHADERS_BUILD=WORK/build/host render/shaders/build.sh done, and the uam determinism patch applied to deps/uam
-# (render/shaders/cache/uam_sched_init.patch) and libuam.a rebuilt. Never writes into the repository.
+# (part of render/shaders/uam.patch since 2026-11-11) and libuam.a rebuilt. Never writes into the repository.
 set -euo pipefail
 W="${1:-/home/user/work/l6/shcache}"; R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"; C="$R/render/shaders/cache"; N="$R/render/native"
 B="$W/build"; O="$W/out"; D="$B/deps"; mkdir -p "$O"

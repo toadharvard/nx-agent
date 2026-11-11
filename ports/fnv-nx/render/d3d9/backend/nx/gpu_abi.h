@@ -6,8 +6,8 @@
  *
  * Calls: a backend fills an NxGpuApi (LP64 function addresses). The front reaches it
  *   - in the ILP32 guest through S5's ext_call slot: ext_call(NXGPU_EXT_MODULE, NXGPU_FN_x, args, n), handled on
- *     the host by nxgpu_dispatch() (front/gpu_dispatch.c) over the registered NxGpuApi;
- *   - in LP64 host programs (GL tests) by calling nxgpu_dispatch() directly.
+ *     the host by the backend's own dispatch (render/d3d9/backend/gl4_core.c for the GL backend);
+ *   - in LP64 host programs (GL tests) by calling the backend's dispatch directly.
  * Every struct here has fixed-width fields only and identical layout in ILP32 and LP64 (asserted below). Guest
  * addresses travel as uint64_t (zero-extended); the host dereferences them directly (one address space).
  */
@@ -189,9 +189,6 @@ enum NxGpuFn {
     NXGPU_FN_COUNT
 };
 #define NXGPU_BAD_CALL 0xFFFFFFFFFFFFFF02ull
-
-/* Host side: dispatches one call to api (front/gpu_dispatch.c). */
-uint64_t nxgpu_dispatch(const NxGpuApi* api, uint32_t fn, const uint64_t* args, uint32_t nargs);
 
 #ifdef __cplusplus
 }
