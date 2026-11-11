@@ -69,8 +69,10 @@
  "include": [
   "ports/fnv-nx/platform",
   "ports/fnv-nx/platform/include",
+  "ports/fnv-nx/shim/include",
   "ports/fnv-nx/platform/crt",
   "ports/fnv-nx/toolchain/include",
+  "ports/fnv-nx/loader/include",
   "/ext/minimp3",
   "/ext/freetype/include",
   "/ext/a64/aarch64-none-elf/include/c++/15.2.0",
