@@ -49,6 +49,7 @@ import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import exepin
 import gatefile
 import iat
 
@@ -340,8 +341,7 @@ def exe_slots(exe):
 
 
 def run(exe_path, bridge_path, dirs, out):
-    with open(exe_path, 'rb') as fh:
-        exe = PE(fh.read(), os.path.basename(exe_path))
+    exe = PE(exepin.load_exe(exe_path), os.path.basename(exe_path))
     brows, _ = iat.bridge_rows(bridge_path)
     bridge = [(r['dll'], r['name'], r['conv'], r['ordinal']) for r in brows]
     system = {r['dll'] for r in brows}
@@ -396,7 +396,7 @@ def main():
     a = ap.parse_args()
     try:
         text, bad = run(a.exe, a.bridge, a.dir, a.out_dir)
-    except (StageError, ValueError, OSError) as e:
+    except (StageError, ValueError, OSError, exepin.ExePinError) as e:
         sys.exit('modules: %s' % e)
     print(text)
     sys.exit(1 if bad else 0)

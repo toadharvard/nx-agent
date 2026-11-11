@@ -42,7 +42,7 @@ below, not written yet, so no product root can be admitted; **no rule** = report
 | B | Memory ordering (R9): x86 TSO or MSVC volatile compiled without acquire/release | `order` | native and decomp C++ through `fnvnx_order`; lifted C++ against the memory-ordering the lifter emits | L2, L3a | required |
 | C | Floating point not exact where the rule demands it: `_ftol`/`fistp`, NaN comparisons, the rcp/rsqrt table, cpuid | `fpexact` | every float-to-int site through `fnvnx_ftoi`; the table against the pinned reference CPU | L1, L3a | required |
 | D | C++ EH or SEH through lifted frames that does not match the exe's EH tables | `eh` | lifted frames against the exe's own EH tables | L3a, L3b | required |
-| E | The exe that was analysed is not the exe that is declared | `exepin` | exe hash against the declared identity (`contract/exepin.py` on the w8 branch) | L1 | required |
+| E | The exe that was analysed is not the exe that is declared | `exepin` | exe size, SHA-256 and PE fields against the pin: the exe is read only through `exepin.load_exe` (`contract/exepin.py`, rule E1) | L1 | wired |
 | F | A guest address that does not fit the 32-bit guest address space | `addr32` | every address constant and pointer width of a product root | L2, L3a | required |
 | G | Registry key read by the exe or a module with no value in the declared machine, or a value with no reading site | `machine` | the hive against the registry call sites found statically | L1, L5 | required |
 | 11 | Tool that is not a pure function of its declared inputs | `pure` | AST of every stage tool | L4 | runs |

@@ -23,6 +23,19 @@ at its address, up to relocations, and the relocation targets are consistent ove
 `symbol -> address`). The address map is a certificate: how it was found does not matter, it is checked as a whole.
 Gate: `n1` (`contract/n1.py`, gate file `n1.json`); condition for per-unit symbol scope: `xunit` (`contract/gate_xunit.py`).
 
+## E1 EXE-PIN
+
+The tools analyse one build of FalloutNV.exe: GOG 1.4.0.525(a), identified by size, SHA-256 and the PE header fields machine,
+optional-header magic and image base (`contract/exepin.py`, `PIN`). Every tool that reads the exe gets its bytes from
+`exepin.load_exe`, which compares the whole fingerprint before it returns a byte and fails loudly with `expected` and `actual` for every
+field that differs; no fact is produced from another exe.
+Proof argument: the exe path enters a tool only through its `--exe` option (or the file name `FalloutNV.exe`); gate `exepin` follows that
+value through the call structure of every tracked tool and refuses any file-reading call it reaches except through `load_exe`.
+So every fact, certificate and table derived from the exe is derived from bytes that matched the pin.
+Assumptions: SHA-256 is collision resistant; the tools name the exe by the two ways above; a stdlib file-reading API missing from the
+gate's sink list does not occur (the list is the class of ways Python opens a path). Another build is a new pin and a new address remap,
+never a looser check. Gate: `exepin` (`verify/gate_exepin.py`); selftests `contract/tests/test_exepin.py`, `verify/tests/test_gate_exepin.py`.
+
 ## N2 prepare rules
 
 Every prepare rule has a lemma of one of two kinds. Neutral: the tree's MSVC object after the neutral rules is byte-equal to
