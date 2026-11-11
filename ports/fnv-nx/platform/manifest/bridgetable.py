@@ -36,6 +36,7 @@ RET.update({(d, n): "v" for d, n in [
     "GetLocalTime GetStartupInfoA GetSystemInfo GetSystemTime GetSystemTimeAsFileTime GlobalMemoryStatus "
     "InitializeCriticalSection LeaveCriticalSection OutputDebugStringA RaiseException RtlUnwind SetLastError "
     "Sleep".split()] + [("ole32.dll", n) for n in "CoFreeUnusedLibraries CoTaskMemFree CoUninitialize".split()] +
+    [("d3d9.dll", "D3DPERF_SetOptions")] +
     [("msvcrt.dll", n) for n in "_amsg_exit _initterm _lock _purecall _unlock abort exit free qsort srand "
      "??3@YAXPAX@Z".split()]})
 SPEC_OF = {"xinput1_3.dll": "xinput1_3", "wsock32.dll": "wsock32"}
