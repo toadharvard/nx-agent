@@ -112,6 +112,7 @@ class Image:
         self._ins, self._funcs, self._ctx = {}, {}, None
         self.flat = sorted((a, b, e) for e, rs in ranges.items() for a, b in rs)
         self._callers = None
+        self._relvals = None
         self.mx = None              # memfx.Memfx: the may-write rule (None = writable memory is never constant)
         self.import_stack = {}      # (dll lower with .dll, name) -> bytes the callee removes (stack_bytes of bridge.tsv)
 
@@ -196,6 +197,19 @@ class Image:
                         self._callers.setdefault(i.operands[0].imm, set()).add((i.address, i.mnemonic))
         return sorted(self._callers.get(target, ()))
 
+    def reloc_values(self):
+        """Sorted values of the relocated words of the image that point into it (code addresses, A3), computed once."""
+        if self._relvals is None:
+            hi = self.base + self.pe.size_of_image if hasattr(self.pe, 'size_of_image') else 1 << 32
+            vs = set()
+            for r in self.relocs:
+                if self.in_raw(r, 4):
+                    v = self.word(r)
+                    if self.base <= v < hi:
+                        vs.add(v)
+            self._relvals = sorted(vs)
+        return self._relvals
+
     def address_taken(self, va):
         """Relocated words whose value is va (A3: the only way code gets a code address)."""
         out = []
@@ -235,7 +249,14 @@ class Func:
                     break
                 self.nodes[v] = i
                 v += i.size
-        taken = {r for r in (img.word(r) for r in img.relocs if img.base <= r) if r in self.nodes}
+        vals = img.reloc_values()
+        taken = set()
+        for a, b in img.ranges[entry]:        # relocated words whose value is an instruction of this function
+            lo = bisect.bisect_left(vals, a)
+            while lo < len(vals) and vals[lo] < b:
+                if vals[lo] in self.nodes:
+                    taken.add(vals[lo])
+                lo += 1
         self.pred = {v: set() for v in self.nodes}
         self.succ = {v: set() for v in self.nodes}
         for v, i in self.nodes.items():
