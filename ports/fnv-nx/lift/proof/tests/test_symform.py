@@ -47,6 +47,12 @@ CASES = [
     ('0x67 loop', '67e2fb'),
     ('0x67 xlat', '67d7'),
     ('0x67 mov moffs16', '67a12211'),
+    ('push r16', '6650'),
+    ('push imm16', '66683412'),
+    ('pop r16', '6659'),
+    ('pop m16', '668f00'),
+    ('bound r32,m64', '6200'),
+    ('bound r16,m32', '666200'),
     ('add r16,imm16', '6681c03412'),
     ('rep movsd', 'f3a5'),
 ]
@@ -184,6 +190,53 @@ class AddressSize16(unittest.TestCase):
             return [(r, dsl.to_smt(v).sexpr()) for r, v, _ in f.regs] + [(fl, dsl.to_smt(v).sexpr()) for fl, v, _ in f.flags]
         self.assertEqual(effects('6783c001'), effects('83c001'))          # register-only: the prefix is ignored
         self.assertNotEqual(effects('678b00'), effects('8b00'))           # a memory operand: 16-bit addressing
+
+
+class Stack16AndBound(unittest.TestCase):
+    def setUp(self):
+        import z3
+        self.z3 = z3
+
+    def form(self, h):
+        return forms.build(symform.decode(bytes.fromhex(h), 0), dsl.C(0, 32))
+
+    def valid(self, a, b):
+        s = self.z3.Solver()
+        s.add(dsl.to_smt(a) != b)
+        return s.check() == self.z3.unsat
+
+    def test_push_r16(self):
+        z3 = self.z3
+        f = self.form('6650')                    # push ax: ESP - 2, 16-bit store of the pre-state AX
+        esp, eax = z3.BitVec('esp', 32), z3.BitVec('eax', 32)
+        regs = dict((r, v) for r, v, _ in f.regs)
+        self.assertTrue(self.valid(regs['esp'], esp - 2))
+        (addr, val), = f.stores
+        self.assertTrue(self.valid(addr, esp - 2))
+        self.assertEqual(val.w, 16)
+        self.assertTrue(self.valid(val, z3.Extract(15, 0, eax)))
+
+    def test_pop_r16_keeps_the_upper_half(self):
+        z3 = self.z3
+        f = self.form('6659')                    # pop cx
+        regs = dict((r, v) for r, v, _ in f.regs)
+        esp = z3.BitVec('esp', 32); ecx = z3.BitVec('ecx', 32)
+        self.assertTrue(self.valid(regs['esp'], esp + 2))
+        self.assertEqual(regs['ecx'].w, 32)
+        self.assertEqual(regs['ecx'].op, 'concat')
+        self.assertTrue(self.valid(regs['ecx'].a[0], z3.Extract(31, 16, ecx)))
+
+    def test_bound_is_signed_and_faults_with_the_bounds_exception(self):
+        z3 = self.z3
+        f = self.form('6200')                    # bound eax, [eax]
+        (code, cond), = f.faults
+        self.assertEqual(code, 4)
+        self.assertEqual((f.regs, f.flags, f.stores), ([], [], []))
+        eax = z3.BitVec('eax', 32)
+        mem = z3.Array('mem', z3.BitVecSort(32), z3.BitVecSort(8))
+        rd = lambda a: z3.Concat(*[z3.Select(mem, a + i) for i in (3, 2, 1, 0)])
+        want = z3.Or(eax < rd(eax), rd(eax + 4) < eax)       # signed comparisons
+        self.assertTrue(self.valid(cond, z3.If(want, z3.BitVecVal(1, 1), z3.BitVecVal(0, 1))))
 
 
 if __name__ == '__main__':
