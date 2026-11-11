@@ -1,7 +1,8 @@
 /* fnv-nx ILP32 guest: BSD sockets through the host's FNVNX_PLAT_SOCK_* services (hostapi.h, wire: fnvnx/sockwire.h).
  *
- * Mechanism (the one libnx uses for its own "soc" device): a devoptab named "soc" is registered at start-up
- * (fnvnx_guest_sock_init, called by runtime.c next to the file system's). socket()/accept() ask the host for a handle
+ * Mechanism (the one libnx uses for its own "soc" device): a devoptab named "soc" is registered once, by the
+ * first socket()/accept() (sock_dev: a compare-and-swap once, so nothing depends on which start-up code runs first, or
+ * at all; fnvnx_guest_sock_init is the same once, callable at any time). socket()/accept() ask the host for a handle
  * and allocate a newlib descriptor for it with libsysbase's __alloc_handle(dev); the handle number lives in the
  * descriptor's fileStruct (SockObj). From there close/read/write/dup/dup2 are the library's own and reach close_r /
  * read_r / write_r below, which call CLOSE / RECVFROM / SENDTO. fcntl is defined here (newlib's is an ENOSYS stub):
@@ -21,6 +22,7 @@
 #include <netinet/tcp.h>
 #include <poll.h>
 #include <reent.h>
+#include <sched.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -186,11 +188,23 @@ static socklen_t from_wire_sa(const FnvnxWireSockaddr *w, struct sockaddr *out, 
 }
 
 /* ---- descriptors */
-void fnvnx_guest_sock_init(void) {
-    g_dev = AddDevice(&dotab_soc);
+/* The registration happens exactly once whatever the interleaving: the thread that moves g_dev_state 0 -> 1 registers
+ * and publishes 2 (release); every other caller waits (yielding) for 2 before it reads g_dev. */
+static int g_dev_state;
+static int sock_dev(void) {
+    int st = __atomic_load_n(&g_dev_state, __ATOMIC_ACQUIRE);
+    if (st == 0 && __atomic_compare_exchange_n(&g_dev_state, &st, 1, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        g_dev = AddDevice(&dotab_soc);
+        __atomic_store_n(&g_dev_state, 2, __ATOMIC_RELEASE);
+        return g_dev;
+    }
+    while (__atomic_load_n(&g_dev_state, __ATOMIC_ACQUIRE) != 2) sched_yield();
+    return g_dev;
 }
+void fnvnx_guest_sock_init(void) { (void)sock_dev(); }
 static int sock_fd(int h) {   /* a descriptor for host handle h (closes h on failure) */
-    int fd = g_dev < 0 ? -1 : __alloc_handle(g_dev);
+    int dev = sock_dev();
+    int fd = dev < 0 ? -1 : __alloc_handle(dev);
     if (fd < 0) {
         sc(FNVNX_PLAT_SOCK_CLOSE, 1, (uint64_t)h, 0, 0, 0, 0);
         return fail_e(EMFILE);

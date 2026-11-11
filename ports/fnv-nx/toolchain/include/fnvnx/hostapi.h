@@ -116,15 +116,38 @@ typedef struct FnvnxHostApi {
 #define FNVNX_PLAT_VM_COMMIT 5u
 #define FNVNX_PLAT_VM_DECOMMIT 6u
 #define FNVNX_PLAT_VM_RELEASE 7u
-/* protect (address, size, OS_VM_* bits of platform/os/os.h) -> 0, or nonzero when the range is not inside one
- * reservation or the permission cannot be applied */
+/* VM_PROTECT (address, size, prot) -> 0 or a result. prot: bit 0 readable, bit 1 writable, 0 = no access; never
+ * executable. Works on whole pages the guest owns: map_fixed memory and committed pages of a VM reservation.
+ * DECOMMIT is as the host implements it (host_vm.inc): an extent wholly inside the range is unmapped, a partly covered
+ * one is zeroed and stays mapped; the protection of a page that stays mapped is NOT reset, so a caller restores
+ * read-write with VM_PROTECT before it decommits. Results: 0xD401 a page of the range
+ * is not the guest's (the guest module, host pages, unmapped), 0xD801 prot has other bits, 0xCA01 size is 0 or not
+ * page aligned, 0xCC01 address not page aligned. The loader sets the PE section protection and the stack guard
+ * pages with it; the platform's VirtualProtect uses the same call. */
 #define FNVNX_PLAT_VM_PROTECT 8u
-/* The console's operation mode: () -> 1 docked (AppletOperationMode_Console), 0 handheld. The host always
- * implements it (toolchain/host/host.c platform_ext); a host without it is a contract defect, not a state. */
+#define FNVNX_VM_PROT_R 1u
+#define FNVNX_VM_PROT_W 2u
+/* DISPLAY_DOCKED () -> 1 docked (1080p output), 0 handheld (720p) */
 #define FNVNX_PLAT_DISPLAY_DOCKED 9u
-/* 10..15 are left free for the VM family. */
-
-/* ---- BSD sockets (FNVNX_PLAT_SOCK_*, services 16..33; guest: toolchain/guest/sock_guest.c, host:
+/* ACCESS_FAULT_HANDLER {handler, stack_top} -> 0. Registers, for the CALLING thread, the guest function
+ * `uint64_t handler(FnvnxFaultFrame *frame)` and the top of a separate stack it runs on (16-byte aligned, guest memory).
+ * On a data or instruction access fault of that thread the host fills a frame at stack_top - sizeof(frame), switches to
+ * that stack and calls handler with faults of the same kind masked (a fault inside the handler ends the process).
+ * Return 0: the host loads every register from the frame (the handler may have changed any of them, pc included) and
+ * resumes. Return non-zero: the process ends with that value as exit code. A thread without a handler: the fault ends
+ * the process. handler == 0 unregisters. */
+#define FNVNX_PLAT_ACCESS_FAULT_HANDLER 10u
+typedef struct FnvnxFaultFrame {
+    uint32_t kind;        /* 0 read, 1 write, 2 execute */
+    uint32_t reason;      /* 0 unmapped, 1 protection, 2 alignment */
+    uint64_t addr;        /* faulting data address (kind 0, 1) or pc (kind 2) */
+    uint64_t pc, sp, pstate;
+    uint64_t x[31];       /* x0..x30 */
+    uint32_t fpcr, fpsr;
+    uint64_t v[32][2];    /* v0..v31, low then high 64 bits */
+} __attribute__((aligned(16))) FnvnxFaultFrame;
+typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 : -1];   /* both sides of the host boundary */
+/* ---- BSD sockets (FNVNX_PLAT_SOCK_*, services 16..33; guest: platform/os/sock_guest.c, host:
  * toolchain/host/host_sock.inc; the wire constants and structs: fnvnx/sockwire.h). The rule: EVERY BSD-socket
  * operation of the guest is one of these services; the guest's C library has no network device of its own.
  *  - Arguments are the uint64 words of ext_call's args array; nargs must be exactly the count shown, else the

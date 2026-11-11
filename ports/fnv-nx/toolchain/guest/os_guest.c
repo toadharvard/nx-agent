@@ -271,10 +271,13 @@ int os_vm_decommit(void *addr, size_t size) {
     return 0;
 }
 /* FNVNX_PLAT_VM_PROTECT (hostapi.h): without the VM service the memalign fallback has no page permissions to
- * change, and the answer is an error */
+ * change, and the answer is an error. The host's pages are never executable (the game's code is native, lifted code
+ * that no page of the guest's data supplies): OS_VM_EXEC is the one os_prot bit with no counterpart there and is
+ * dropped; readable and writable map 1:1 onto FNVNX_VM_PROT_R / _W. */
 int os_vm_protect(void *addr, size_t size, int os_prot) {
     if (!vm_host()) return -1;
-    uint64_t arg[3] = {FNVNX_ADDR(addr), size, (uint64_t)os_prot};
+    uint64_t arg[3] = {FNVNX_ADDR(addr), size,
+                       (uint64_t)(((os_prot & OS_VM_READ) ? FNVNX_VM_PROT_R : 0) | ((os_prot & OS_VM_WRITE) ? FNVNX_VM_PROT_W : 0))};
     return fnvnx_hcall4(fnvnx_host->ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_VM_PROTECT, FNVNX_ADDR(arg), 3) ? -1 : 0;
 }
 int os_vm_release(void *addr, size_t size) {

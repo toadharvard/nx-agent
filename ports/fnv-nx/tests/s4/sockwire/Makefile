@@ -1,5 +1,5 @@
 # Round trip of the BSD socket services (hostapi.h FNVNX_PLAT_SOCK_*) on the Linux host:
-#   guest side  toolchain/guest/sock_guest.c, compiled against the toolchain's newlib + libnx headers (-nostdinc, the
+#   guest side  platform/os/sock_guest.c, compiled against the toolchain's newlib + libnx headers (-nostdinc, the
 #               guest's view of the types and constants), its functions renamed gt_* so they do not clash with glibc
 #   host side   toolchain/host/host_sock.inc, compiled against glibc (host_glue.c)
 #   between     ext_call is a plain function call into the host's dispatcher (host_glue.c); guest_shim.c models
@@ -28,7 +28,7 @@ sockwire: $(OUT)/sockwire_test
 $(OUT)/sockwire_test: $(OUT)/sock_guest.o $(OUT)/guest_shim.o $(OUT)/sockwire_test.o $(OUT)/host_glue.o
 	$(CC) -pthread $^ -o $@
 
-$(OUT)/sock_guest.o: $(ROOT)/toolchain/guest/sock_guest.c $(INCS)
+$(OUT)/sock_guest.o: $(ROOT)/platform/os/sock_guest.c $(INCS)
 	@mkdir -p $(OUT) && $(CC) $(GUESTCF) -c $< -o $@
 $(OUT)/guest_shim.o: $(HERE)/guest_shim.c $(INCS)
 	@mkdir -p $(OUT) && $(CC) $(GUESTCF) -c $< -o $@

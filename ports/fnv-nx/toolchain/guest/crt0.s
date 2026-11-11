@@ -22,11 +22,10 @@ __fnvnx_guest_start:
 	.size   __fnvnx_guest_start, . - __fnvnx_guest_start
 
 	.align  2
-	.weak   _DYNAMIC                            // absent in the fixed-address (non-PIE) build
 	.global __fnvnx_mod0
 __fnvnx_mod0:
 	.ascii  "MOD0"
-	.word   _DYNAMIC             - __fnvnx_mod0
+	.word   __fnvnx_dynamic       - __fnvnx_mod0
 	.word   __bss_start__        - __fnvnx_mod0
 	.word   __bss_end__          - __fnvnx_mod0
 	.word   __eh_frame_hdr_start - __fnvnx_mod0

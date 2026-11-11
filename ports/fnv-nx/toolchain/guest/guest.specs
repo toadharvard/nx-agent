@@ -1,7 +1,0 @@
-%rename link                old_link
-
-*link:
-%(old_link) -T %:getenv(FNVNX_TOOLCHAIN /guest/guest.ld) -static -no-pie --gc-sections -z max-page-size=0x1000 --build-id=sha1 --require-defined=__fnvnx_guest_start --require-defined=main
-
-*startfile:
-crti%O%s crtbegin%O%s
