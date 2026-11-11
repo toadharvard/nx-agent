@@ -16,7 +16,7 @@ BACK = os.path.join(ROOT, "render", "d3d9", "backend"); NXD = os.path.join(BACK,
 DK = os.environ.get("FNVNX_DK", "/home/user/work/l6/dk")
 NM = os.path.join(DK, "dkp", "devkitA64", "bin", "aarch64-none-elf-nm")
 FILES = ["dk_core.c", "dk_swap.c"]   # linked into the host harness; the other objects have their own test (tests/l6/dkimage)
-ALLC = FILES + ["dk_image.c", "dk_xfer.c", "dk_sampler.c", "dk_read.c"]
+ALLC = FILES + ["dk_image.c", "dk_xfer.c", "dk_sampler.c", "dk_read.c", "dk_fmt.c"]
 EXPECT_CHECKS = 114
 MUST_NAMES = ["create_ok", "device_flags", "swap_layout", "front_layout", "swap_no_hwcompression", "swapchain_made", "front_zero_filled", "api_slots",
               "info_ok", "shutdown_waits_idle", "mem_ids_dense", "mem_flags_generic", "mem_flags_code", "mem_flags_image", "mem_gpu_addr",
