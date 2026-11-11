@@ -165,6 +165,11 @@ The owner's words: "Транк никогда красный. Всегда зе�
 The owner's words: "Я буквально сказал, что я использую только конкретный компилятор... Мы нахуя инструменты подготавливали? Чтобы потом просто игнорить?"
 
 - **Compiler:** only the one pinned in `verify/env.json` (g++-13-aarch64-linux-gnu 13.3.0-6ubuntu2~24.04.1cross1, binutils 2.42-4ubuntu2.10), installed by `farm/setup_verdict_env.sh` and checked by `envcheck.py`. No unpinned apt, no other gcc.
+- **Our own compiler** is that pinned g++-13 together with our GCC plugins: `fnvnx_order` (x86 TSO and MSVC volatile become `ldar`/`stlr`; MSVC argument order) and `fnvnx_ftoi` (MSVC `_ftol` semantics), with the semantics flags of `tools/link/compile.sh`. `env.json` also pins `gcc-13-plugin-dev-aarch64-linux-gnu`, the plugins' build base.
+  - Every native and decomp C++ body is compiled with both plugins (plan R9 (в), `ORDER_MODE=tso`).
+  - Lifted C++ needs no plugins: the lifter emits the ordering itself (R9 (б)).
+  - On the trunk, the plugins enter a recipe as a hermetic stage. The `.so` is a declared input, so it is part of every key; `toolflags.py` accepts `-fplugin=P` only under a declared input.
+  - fnvnx-a64 (gcc 15 + newlib ILP32) is the Switch and libnx toolchain. It is not the compiler of the game units.
 - **Build:** `verify/recipe.py` (`verify/RECIPE.md`). A product root has `build.json` and is admitted in `verify/admit.json`. Each unit is two hermetic stages (`unitstage.py`: PP, then CC), keyed by the content of what they read plus compiler and flags.
 - **Cache:** the verdict's own store, `GATE_CACHE` (`l1.py` gives `VDIR/cache`; objects in `GATE_CACHE/store`). An unchanged unit is never compiled again. Do not add another cache or call the compiler directly.
 - **Private sources** (lifted C++, decomp trees) enter a recipe only as an `external`: a fnv-nx-build commit plus `tree_sha256`.
