@@ -8,7 +8,8 @@ typedef union { u32 u[4]; float f[4]; double d[2]; u64 q[2]; u8 b[16]; s8 sb[16]
 /* x87 stack slot (R8): a value with its source format until the first arithmetic use. k: 0 empty, 1 F64 (v = double bits), 2 F32 (v = raw pattern),
    3/4/5 I16/I32/I64 (v = the integer sign-extended to 64 bits), 6 M80 (v = significand, e = sign<<15|exp). rt/fnvl_x87.h */
 struct fv { u64 v; u32 e; u32 k; };
-struct cpu { u32 r[8]; u32 fs; u32 ftop, ftag, fcw, fc; double st[8]; xmm_t x[8]; u32 fl; u32 mxcsr; u64 mm[8]; u32 ra; u32 fex; fv fx[8]; u32 eflx; };   /* mxcsr (reset 0x1f80) and mm0-7 are appended: SSE family (W6). r[] is only the save area of the
+struct fnvl_nframe;   /* rt/imp.h: one per live import entry of the thread (native frames between lifted frames) */
+struct cpu { u32 r[8]; u32 fs; u32 ftop, ftag, fcw, fc; double st[8]; xmm_t x[8]; u32 fl; u32 mxcsr; u64 mm[8]; u32 ra; u32 fex; fv fx[8]; u32 eflx; struct fnvl_nframe *nf; u32 hfpcr, hfpsr; };   /* mxcsr (reset 0x1f80) and mm0-7 are appended: SSE family (W6). r[] is only the save area of the
    entry/exit bridges (fnvl_enter): while lifted code runs the eight guest registers live in w19..w26. ra: the address the last `ret` popped (control-transfer rule, README).
    x87 (W13): fx[8] are the PHYSICAL registers (carriers; k==0 is the empty tag), ftop the TOP, fcw the control word, fex the exception status bits that the host FPSR cannot
    hold (invalid + stack fault of an overflow/underflow). eflx (W14): the EFLAGS bits AC (18) and ID (21), the only non-arithmetic bits pushfd/popfd keep (reset 0; see EFL_PUSH). `st` and `ftag` are the pre-R8 double stack and tag word: unused, kept so the offsets of the other fields hold. */
