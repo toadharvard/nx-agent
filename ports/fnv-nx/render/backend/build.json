@@ -37,11 +37,7 @@
  },
  "include": [
   "ports/fnv-nx/render/backend",
-  "ports/fnv-nx/render/backend/nx",
-  "/ext/libnx/nx/include",
-  "/ext/deko3d/include",
-  "/ext/a64/aarch64-none-elf/include",
-  "/ext/a64/lib/gcc/aarch64-none-elf/15.2.0/include"
+  "ports/fnv-nx/render/backend/nx"
  ],
  "units": "all",
  "link": null,
@@ -70,5 +66,11 @@
    "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
    "at": "/ext/a64"
   }
+ ],
+ "isystem": [
+  "/ext/libnx/nx/include",
+  "/ext/deko3d/include",
+  "/ext/a64/aarch64-none-elf/include",
+  "/ext/a64/lib/gcc/aarch64-none-elf/15.2.0/include"
  ]
 }
