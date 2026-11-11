@@ -10,7 +10,7 @@
     refused with its own text, boundary images accepted, descriptor errors, pack hit / miss / damaged packs, memo and refcounts, ids, release
  e  mutations of a copy of the product file: every one must be caught
 Output: the check count, mutations caught, ALL OK."""
-import os, re, shutil, struct, subprocess, sys, tempfile, zlib
+import os, re, threading, shutil, struct, subprocess, sys, tempfile, zlib
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 BACK = os.path.join(ROOT, "render", "d3d9", "backend"); NXD = os.path.join(BACK, "nx")
@@ -108,6 +108,7 @@ CORRUPT = [   # (name, image, stage, text of the refusal)
     ("two programs", patch(VS, 20, 2), 0, "exactly one program"),
     ("program table past the control section", patch(VS, 16, CS), 0, "program header outside"),
     ("program table unaligned", patch(VS, 16, PO + 2), 0, "program header outside"),
+    ("program table ends 4 bytes past", patch(VS, 16, CS - 60), 0, "program header outside"),
     ("program table inside the header", patch(VS, 16, 8), 0, "program header outside"),
     ("vertex image as fragment", VS, 1, "program type is not the requested stage"),
     ("fragment image as vertex", FS, 0, "program type is not the requested stage"),
@@ -118,13 +119,17 @@ CORRUPT = [   # (name, image, stage, text of the refusal)
     ("constbuf1 end outside", patch(patch(VS, PO + 12, KS - 4), PO + 16, 8), 0, "constant buffer 1"),
     ("constbuf1 wraps 32 bits", patch(patch(VS, PO + 12, 0xFFFFFFF0), PO + 16, 0x20), 0, "constant buffer 1"),
 ]
-ACCEPT = [("constbuf1 ends at the code end", patch(patch(VS, PO + 12, KS - 4), PO + 16, 4), 0),
+ACCEPT = [("program header ends at the control end", patch(VS, 16, CS - 64), 0), ("constbuf1 ends at the code end", patch(patch(VS, PO + 12, KS - 4), PO + 16, 4), 0),
           ("entry at the last instruction", patch(VS, PO + 4, KS - 8), 0)]
+
+BIGK = 0xD00   # code that fits 4 KiB alone but not with the 0x400 unusable tail
+BIG = struct.pack("<6I", MAGIC, 24, 256, BIGK, 24, 1) + struct.pack("<2I", 0, 48) + bytes(256 - 32) + bytes(range(256)) * (BIGK // 256)
 
 class Host:
     def __init__(self, exe):
         self.p = subprocess.Popen([exe], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                   env=dict(os.environ, ASAN_OPTIONS="detect_leaks=1", UBSAN_OPTIONS="print_stacktrace=1"))
+        self.dog = threading.Timer(120, self.p.kill); self.dog.daemon = True; self.dog.start()   # a hung mutant is a caught mutant
     def cmd(self, line):
         self.p.stdin.write(line + "\n"); self.p.stdin.flush()
         out = self.p.stdout.readline()
@@ -137,7 +142,7 @@ class Host:
     def state(self):
         m = re.match(r"S blocks (\d+) made (\d+) inits (\d+) oob (\d+)", self.cmd("state")); return tuple(map(int, m.groups()))
     def close(self):
-        self.p.stdin.close(); rc = self.p.wait(timeout=60); return rc, self.p.stderr.read()
+        self.dog.cancel(); self.p.stdin.close(); rc = self.p.wait(timeout=60); return rc, self.p.stderr.read()
 
 def scenarios(exe):
     """Every scenario of the product against the double: returns (checks, failures)."""
@@ -172,6 +177,12 @@ def scenarios(exe):
     for name, img, stage in ACCEPT:
         load("c", img); r = h.call("create dksh=@c size=%d stage=%d" % (len(img), stage)); ck(r[0] != 0 and r[1] == 0, "boundary '%s' accepted: %s" % (name, r))
         h.call("destroy %d" % r[0]); h.cmd("unload c")
+    load("big", BIG); r = h.call("create dksh=@big size=%d stage=0" % len(BIG)); ck(r[0] != 0 and r[1] == 0, "big image accepted: %s" % (r,))
+    mb = re.match(r"B size (\d+) flags (\d+) live 1", h.cmd("block %d 0" % (h.state()[1] - 1)))
+    ck(mb and int(mb.group(1)) == 0x2000, "code + the 0x400 unusable tail decide the block size: %s" % (mb and mb.group(0),)); h.call("destroy %d" % r[0])
+    h.cmd("failinit 1"); b0 = h.state(); r = h.call("create dksh=@vs size=%d stage=0" % len(VS)); h.cmd("failinit 0")
+    ck(r[0] == 0 and r[1] == 1 and "did not produce a valid shader" in r[3] and h.state()[0] == b0[0], "an invalid dkShaderInitialize result frees the block: %s" % (r,))
+    r = h.call("create dksh=@vs size=%d stage=0" % len(VS)); ck(r[0] == 1, "the id of a failed create is free again: %s" % (r,)); h.call("destroy 1")
     # descriptor errors
     ck(h.call("create dksh=@vs size=%d stage=2" % len(VS))[3].startswith("shader_create: stage 2"), "stage 2")
     ck("reserved" in h.call("create dksh=@vs size=%d stage=0 pad=1" % len(VS))[3], "pad")
@@ -191,7 +202,12 @@ def scenarios(exe):
     def d3d(s, t, **kw):
         a = {"bc": "@bc%d_%d" % (s, t), "size": len(bcs[(s, t)]), "stage": s, "hash": "0x%x" % hh[(s, t)]}; a.update({k: str(v) for k, v in kw.items()})
         return h.call("d3d " + " ".join("%s=%s" % kv for kv in a.items()))
-    pk = build_pack([(hh[(0, 0)], 0, VS), (hh[(1, 0)], 1, FS), (hh[(0, 1)], 0, VS), (hh[(1, 2)], 1, FS)]); load("pk", pk); h.cmd("pack pk")
+    zc = 0
+    while True:   # bytecode whose hash has a zero top nibble: the pack name keeps its leading zero
+        zc += 1; zbc = struct.pack("<II", 0xFFFE0300, zc) + b"fnv\0"
+        if fnv(zbc) >> 60 == 0: break
+    load("zbc", zbc)
+    pk = build_pack([(hh[(0, 0)], 0, VS), (hh[(1, 0)], 1, FS), (hh[(0, 1)], 0, VS), (hh[(1, 2)], 1, FS), (hh[(0, 0)], 1, FS), (fnv(zbc), 0, VS)]); load("pk", pk); h.cmd("pack pk")
     s0 = h.state(); r = d3d(0, 0); ck(r[0] == 1 and r[1] == 0 and r[2] == 0, "pack hit (vertex): %s" % (r,))
     r = d3d(1, 0); ck(r[0] == 2 and r[1] == 0, "pack hit (pixel): %s" % (r,))
     mb = re.match(r"B size \d+ flags (\d+) live 1 dev \w+ data (\w*)", h.cmd("block %d %d" % (s0[1], KS))); ck(mb and bytes.fromhex(mb.group(2)) == VS[CS:], "pack hit: the pack's code section is in the block: %s" % (mb and mb.group(0)[:60],))
@@ -214,9 +230,9 @@ def scenarios(exe):
     dam("p1", b"NXSX" + pk[4:], "not an NXSP v1"); dam("p2", pk[:4] + struct.pack("<I", 2) + pk[8:], "not an NXSP v1")
     dam("p3", patch(pk, 8, 100000), "not an NXSP v1"); dam("p4", pk[:16], "no shader pack"); dam("p5", patch(pk, 16, len(pk) + 256), "not an NXSP v1")
     dam("p6", patch(pk, 12, 8), "not an NXSP v1")
-    rows = [struct.unpack_from("<48s24s16sIIII", pk, 32 + i * 104) for i in range(4)]; i01 = [i for i, r_ in enumerate(rows) if r_[0].rstrip(b"\0").decode() == "%016x" % hh[(0, 1)]][0]
+    rows = [struct.unpack_from("<48s24s16sIIII", pk, 32 + i * 104) for i in range(6)]; i01 = [i for i, r_ in enumerate(rows) if r_[0].rstrip(b"\0").decode() == "%016x" % hh[(0, 1)]][0]
     ro = 32 + i01 * 104
-    dam("p7", patch(pk, ro + 92, 1 << 30), "outside the pack"); dam("p8", patch(pk, ro + 92, rows[i01][4] + 1), "outside the pack")
+    dam("p9b", patch(pk, ro + 92, 0), "outside the pack"); dam("p7", patch(pk, ro + 92, 1 << 30), "outside the pack"); dam("p8", patch(pk, ro + 92, rows[i01][4] - 1), "outside the pack")
     dam("p9", patch(pk, ro + 96, 0), "outside the pack"); dam("p10", patch(pk, ro + 100, rows[i01][6] ^ 1), "checksum")
     dam("p11", patch(pk, rows[i01][4] + 5, pk[rows[i01][4] + 5] ^ 1, "<B"), "checksum")
     dam("p12", build_pack([(hh[(0, 1)], 0, VS), (hh[(0, 1)], 0, VS)]), "holds the key twice")
@@ -226,6 +242,8 @@ def scenarios(exe):
     dam("p16", build_pack([(hh[(0, 1)], 0, patch(VS, 0, MAGIC ^ 1))]), "bad DKSH: bad magic")
     dam("p17", build_pack([(hh[(0, 1)], 0, FS)]), "bad DKSH: program type")
     ck(h.state()[0] == 2, "damaged packs create nothing")
+    r = d3d(0, 0, stage=1); ck(r[0] == 3 and r[1] == 0 and h.cmd("lookup 3") == "L 1 4", "the stage is part of the memo key: %s" % (r,)); h.call("destroy 3")
+    r = h.call("d3d bc=@zbc size=%d stage=0 hash=0x%x" % (len(zbc), fnv(zbc))); ck(r[0] == 3 and r[1] == 0, "a hash with a leading zero nibble is found under its %%016x name: %s" % (r,)); h.call("destroy 3")
     # D3D: descriptor errors
     r = d3d(0, 1, hash="0x1"); ck(r[0] == 0 and "FNV-1a 64" in r[3] and r[1] == 1, "wrong hash: %s" % (r,))
     for kw, text in ((dict(stage=2), "stage is neither"), (dict(pad0=1), "reserved"), (dict(pad2=1), "reserved"), (dict(size=0), "bytecode size"), (dict(size=6), "bytecode size"),
@@ -272,7 +290,7 @@ MUT = [
     ("code_sz limit", "if (ks > MAX_CODE)", "if (0)"),
     ("sizes need not add up", "if ((uint64_t)cs + ks != n)", "if (0)"),
     ("program count", "if (np != 1)", "if (np > 1)"),
-    ("program table bound", "(uint64_t)po + PROG_SZ > cs", "(uint64_t)po + PROG_SZ > cs + 1"),
+    ("program table bound", "(uint64_t)po + PROG_SZ > cs", "(uint64_t)po + PROG_SZ >= cs"),
     ("stage not compared", "if (rd32(p) != stage)", "if (0)"),
     ("entry bound off by one", "if (entry >= ks ||", "if (entry > ks ||"),
     ("constbuf bound off by one", "if ((uint64_t)cb + cbsz > ks)", "if ((uint64_t)cb + cbsz >= ks)"),
@@ -280,7 +298,7 @@ MUT = [
     ("code block without the unusable tail", "ks + DK_SHADER_CODE_UNUSABLE_SIZE +", "ks +"),
     ("code copied from the image start", "memcpy(dkMemBlockGetCpuAddr(blk), d + cs, ks)", "memcpy(dkMemBlockGetCpuAddr(blk), d, ks)"),
     ("Code flag dropped", " | DkMemBlockFlags_Code;", ";"),
-    ("id search not lowest free", "uint32_t id = 1;", "uint32_t id = 2;"),
+    ("id search not lowest free", "uint32_t id = 1;\n    while (id <= NXDK_MAX_SHADERS && g_sh[id].used) id++;", "uint32_t id = 2;\n    while (id <= NXDK_MAX_SHADERS && g_sh[id].used) id++;"),
     ("destroy of a dead id", "!g_sh[id].used) {", "0) {"),
     ("destroy frees at the first owner", "if (--g_sh[id].refs) return 0;", "if (g_sh[id].refs--, 0) return 0;"),
     ("memo ignores the stage", " && g_sh[i].stage == d.stage", ""),
