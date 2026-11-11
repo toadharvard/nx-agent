@@ -12,7 +12,7 @@ OUT ?= $(HERE)/build
 CC ?= gcc
 CXX ?= g++
 FLAGS := -MMD -MP -g -O1 -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wchar -pthread \
-         -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3
+         -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(ROOT)/ext/freetype/include
 CFLAGS_ := -std=gnu11 $(FLAGS)
 CXXFLAGS_ := -std=gnu++17 $(FLAGS)
 
@@ -36,7 +36,11 @@ $(OUT)/%.cpp.o: $(ROOT)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_) -c $< -o $@
 
-$(OUT)/s7_tests: $(OBJS)
+# platform/win32/gdifont.cpp needs the reference FreeType: the archive tests/s4 builds from ext/freetype
+FTLIB := $(HERE)/../s4/build/libfreetype.a
+$(FTLIB):
+	$(MAKE) -C $(HERE)/../s4 $(FTLIB)
+$(OUT)/s7_tests: $(OBJS) $(FTLIB)
 	$(CXX) $(CXXFLAGS_) $^ -o $@ -lm
 
 test: $(OUT)/s7_tests
@@ -52,7 +56,7 @@ XCC ?= aarch64-linux-gnu-gcc
 XCXX ?= aarch64-linux-gnu-g++
 LIBNX ?= $(ROOT)/ext/libnx
 XFLAGS := -mabi=ilp32 -fsyntax-only -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wchar \
-          -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3
+          -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(ROOT)/ext/freetype/include
 ilp32:
 	@set -e; for f in $(S7_CXX); do echo "ilp32 c++ $${f#$(ROOT)/}"; $(XCXX) -std=gnu++17 $(XFLAGS) $$f; done
 	@echo "ilp32 (libnx) platform/audio/backend_audren.c platform/input/input_horizon.cpp"
