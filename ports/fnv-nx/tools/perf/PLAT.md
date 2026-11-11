@@ -11,7 +11,7 @@ Recording is off by default: each report site pays one load. It starts with `fnv
 
 | class | reported by | detail |
 |---|---|---|
-| unimpl | `FNVNX_UNIMPL()` in a stand-in whose function is missing: the 15 E_NOTIMPL methods of the DirectShow graph (platform/audio/dshow.cpp), BinkOpen (no movie player), an unsupported TEB offset (`__readfsdword`) | - |
+| unimpl | `fnvnx_plat_note(FNVNX_PLAT_UNIMPL, ...)` for an entry whose function is missing and `fnvnx_wine_fixme(id)` for a body that does what Wine 9.0 does (name `wine-fixme`, detail `id N`): BinkOpen (no movie player), an unsupported TEB offset (`__readfsdword`) | - |
 | noop | `FNVNX_NOOP()` in a documented Switch no-op: SteamAPI_Init and the Steam / GOG Galaxy interface accessors, winsock offline (WSAStartup, socket, gethostbyname), DebugBreak | - |
 | open | a failed CreateFileA, the CRT's fopen (fnvnx_fopen) and _open (fnvnx_open) | path class (bsa, esm, save, ini, other), the Win32 error or errno, `ci yes/no/nodir` (see below), and an FNV hash of the Windows path |
 | decode | `ov_open_callbacks` failing (or a build without libvorbis), an MP3 that minimp3 cannot open | the libvorbisfile code, or the decoder |

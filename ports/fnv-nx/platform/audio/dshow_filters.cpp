@@ -28,6 +28,10 @@
 extern "C" {
 HANDLE CreateEventA(void *, BOOL, BOOL, LPCSTR);
 BOOL SetEvent(HANDLE);
+BOOL ResetEvent(HANDLE);
+DWORD WaitForSingleObject(HANDLE, DWORD);
+HANDLE CreateSemaphoreA(void *, LONG, LONG, LPCSTR);
+BOOL ReleaseSemaphore(HANDLE, LONG, LPLONG);
 BOOL CloseHandle(HANDLE);
 }
 
@@ -286,6 +290,7 @@ BPin::~BPin()
     mt_free(&cur);
     for (size_t i = 0; i < types.n; i++) mt_free(&types[i]);
     if (file) CloseHandle((HANDLE)file);
+    if (flush_evt) CloseHandle((HANDLE)flush_evt);
 }
 void BPin::add_type(const Guid &major, const Guid &sub)
 {
@@ -506,7 +511,15 @@ HR BPin::EndOfStream()
 }
 HR BPin::BeginFlush()
 {
-    if (serves) return S_OK_;   /* IAsyncReader::BeginFlush of a file reader: no request is outstanding */
+    if (serves) {   /* IAsyncReader::BeginFlush (filesource.c FileAsyncReader_BeginFlush): drop the requests, wake WaitForNext */
+        os_lock(&rlock);
+        flushing = true;
+        reqs.n = 0;
+        if (!flush_evt) flush_evt = (uintptr_t)CreateEventA(nullptr, 1, 0, nullptr);
+        if (flush_evt) SetEvent((HANDLE)flush_evt);
+        os_unlock(&rlock);
+        return S_OK_;
+    }
     if (dir != PINDIR_INPUT) return E_UNEXPECTED_;
     if (Renderer *r = as_renderer(owner)) return r->stream_event(1, 0);
     HR hr = S_OK_;
@@ -516,7 +529,13 @@ HR BPin::BeginFlush()
 }
 HR BPin::EndFlush()
 {
-    if (serves) return S_OK_;
+    if (serves) {   /* FileAsyncReader_EndFlush */
+        os_lock(&rlock);
+        flushing = false;
+        if (flush_evt) ResetEvent((HANDLE)flush_evt);
+        os_unlock(&rlock);
+        return S_OK_;
+    }
     if (dir != PINDIR_INPUT) return E_UNEXPECTED_;
     if (Renderer *r = as_renderer(owner)) return r->stream_event(2, 0);
     HR hr = S_OK_;
@@ -537,13 +556,109 @@ HR BPin::NewSegment(LL start, LL stop, double rate)
         if (owner->pins[i]->dir == PINDIR_OUTPUT && owner->pins[i]->peer) hr = owner->pins[i]->peer->NewSegment(start, stop, rate);
     return hr;
 }
-/* a file source's IAsyncReader: SyncRead / Length over the layer's file handle. The overlapped half (Request,
- * WaitForNext, SyncReadAligned, RequestAllocator) needs IMediaSample allocators; the installed filters read through
- * SyncRead only, so those four report E_NOTIMPL, the documented answer of a reader that is not asynchronous. */
-HR BPin::RequestAllocator(void *, void *, void **) { return FNVNX_UNIMPL(), E_NOTIMPL_; }
-HR BPin::Request(void *, uintptr_t) { return FNVNX_UNIMPL(), E_NOTIMPL_; }
-HR BPin::WaitForNext(uint32_t, void **, uintptr_t *) { return FNVNX_UNIMPL(), E_NOTIMPL_; }
-HR BPin::SyncReadAligned(void *) { return FNVNX_UNIMPL(), E_NOTIMPL_; }
+/* a file source's IAsyncReader (wine-9.0:dlls/quartz/filesource.c, FileAsyncReader_*). The layer's file read is
+ * complete when it returns, so a request is read when it is made (ReadFile on an overlapped handle may complete at once:
+ * FileAsyncReader_Request takes that branch) and WaitForNext hands completed requests back; the request list grows with
+ * the samples the caller has outstanding. Calls into the caller's samples are made with no platform lock held. */
+#define BYTES_FROM_MEDIATIME_(t) ((t) / 10000000)
+#define MEDIATIME_FROM_BYTES_(b) ((LL)(b) * 10000000)
+bool BPin::rd_at(LL pos, long len, uint8_t *buf, uint32_t *got, uint32_t *err)
+{
+    *got = 0;
+    if (!file) { *err = 6; return false; }                      /* ERROR_INVALID_HANDLE */
+    if (len > 0 && pos >= fsize) { *err = 38; return false; }   /* ERROR_HANDLE_EOF: an overlapped read at or past the end */
+    LARGE_INTEGER li;
+    li.QuadPart = pos;
+    if (!SetFilePointerEx((HANDLE)file, li, nullptr, 0)) { *err = GetLastError(); return false; }
+    DWORD n = 0;
+    if (!ReadFile((HANDLE)file, buf, (DWORD)len, &n, nullptr)) { *err = GetLastError(); return false; }
+    *got = n;
+    return true;
+}
+HR BPin::RequestAllocator(void *preferred_, void *props_, void **ret)
+{
+    IMemAllocator_ *preferred = (IMemAllocator_ *)preferred_;
+    AllocProps *props = (AllocProps *)props_;
+    if (!props || !ret) return E_POINTER_;
+    if (!props->cbAlign) props->cbAlign = 1;
+    *ret = nullptr;
+    IMemAllocator_ *a;
+    if (preferred) { preferred->AddRef(); a = preferred; }
+    else if (!(a = make_mem_allocator())) return E_OUTOFMEMORY_;
+    HR hr = a->SetProperties(props, props);
+    if (hr < 0) { a->Release(); return hr; }
+    *ret = a;
+    return S_OK_;
+}
+HR BPin::Request(void *sample_, uintptr_t cookie)
+{
+    IMediaSample_ *sample = (IMediaSample_ *)sample_;
+    if (!sample) return E_POINTER_;
+    LL start, end;
+    HR hr = sample->GetTime(&start, &end);
+    if (hr < 0) return hr;
+    if (BYTES_FROM_MEDIATIME_(start) >= fsize) return HR_ERROR_HANDLE_EOF_;
+    uint8_t *data;
+    hr = sample->GetPointer(&data);
+    if (hr < 0) return hr;
+    os_lock(&rlock);
+    if (flushing) { os_unlock(&rlock); return VFW_E_WRONG_STATE_; }
+    uint32_t got = 0, err = 0;
+    if (!rd_at(BYTES_FROM_MEDIATIME_(start), (long)BYTES_FROM_MEDIATIME_(end - start), data, &got, &err)) {
+        os_unlock(&rlock);
+        return (HR)(0x80070000u | (err & 0xFFFF));   /* HRESULT_FROM_WIN32 */
+    }
+    Req r = {sample, cookie, BYTES_FROM_MEDIATIME_(start), got};
+    hr = reqs.push(r) ? S_OK_ : E_OUTOFMEMORY_;
+    os_unlock(&rlock);
+    return hr;
+}
+HR BPin::WaitForNext(uint32_t timeout, void **sample, uintptr_t *cookie)
+{
+    if (!sample || !cookie) return E_POINTER_;
+    *sample = nullptr;
+    *cookie = 0;
+    for (;;) {
+        os_lock(&rlock);
+        if (flushing) { os_unlock(&rlock); return VFW_E_WRONG_STATE_; }
+        if (reqs.n) {
+            Req r = reqs.p[0];
+            for (size_t i = 1; i < reqs.n; i++) reqs.p[i - 1] = reqs.p[i];
+            reqs.n--;
+            os_unlock(&rlock);
+            IMediaSample_ *s = (IMediaSample_ *)r.sample;
+            s->SetActualDataLength((int32_t)r.size);
+            LL st = MEDIATIME_FROM_BYTES_(r.pos), en = st + MEDIATIME_FROM_BYTES_(r.size);
+            s->SetTime(&st, &en);
+            *sample = s;
+            *cookie = r.cookie;
+            return S_OK_;
+        }
+        if (!flush_evt) flush_evt = (uintptr_t)CreateEventA(nullptr, 1, 0, nullptr);
+        HANDLE ev = (HANDLE)flush_evt;
+        os_unlock(&rlock);
+        if (!ev) return E_OUTOFMEMORY_;
+        if (WaitForSingleObject(ev, timeout) != 0) return VFW_E_TIMEOUT_;   /* WAIT_OBJECT_0: a flush began */
+    }
+}
+HR BPin::SyncReadAligned(void *sample_)
+{
+    IMediaSample_ *sample = (IMediaSample_ *)sample_;
+    if (!sample) return E_POINTER_;
+    LL st, en;
+    HR hr = sample->GetTime(&st, &en);
+    if (hr < 0) return hr;
+    uint8_t *buf;
+    hr = sample->GetPointer(&buf);
+    if (hr < 0) return hr;
+    long length = (long)BYTES_FROM_MEDIATIME_(en - st);
+    uint32_t got = 0, err = 0;
+    if (rd_at(BYTES_FROM_MEDIATIME_(st), length, buf, &got, &err)) hr = ((long)got == length) ? S_OK_ : S_FALSE_;
+    else if (err == 38) hr = S_OK_;
+    else return (HR)(0x80070000u | (err & 0xFFFF));
+    sample->SetActualDataLength((int32_t)got);   /* filesource.c ignores its result */
+    return hr;
+}
 HR BPin::SyncRead(LL pos, long len, uint8_t *buf)
 {
     if (!file || pos < 0 || len < 0 || pos + len > fsize) return E_FAIL_;
@@ -560,6 +675,331 @@ HR BPin::Length(LL *t, LL *a)
     *t = *a = fsize;
     return file ? S_OK_ : E_FAIL_;
 }
+
+/* ---- the memory allocator and its samples (wine-9.0:dlls/quartz/memallocator.c: BaseMemAllocator_*, StdMediaSample2_*,
+ * StdMemAllocator_Alloc / _Free; the buffer layout is the SDK allocator's: each sample takes cbBuffer + cbPrefix rounded up
+ * to cbAlign, the buffer starts after the prefix). One lock guards the lists; no call leaves the object under it. */
+namespace {
+const uint32_t AM_SAMPLE_SPLICEPOINT_ = 1, AM_SAMPLE_PREROLL_ = 2, AM_SAMPLE_DATADISCONTINUITY_ = 4, AM_SAMPLE_TYPECHANGED_ = 8,
+               AM_SAMPLE_TIMEVALID_ = 0x10, AM_SAMPLE_STOPVALID_ = 0x100, AM_GBF_NOWAIT_ = 4;
+struct SampleProps {   /* AM_SAMPLE2_PROPERTIES */
+    uint32_t cbData, dwTypeSpecificFlags, dwSampleFlags;
+    int32_t lActual;
+    LL tStart, tStop;
+    uint32_t dwStreamId;
+    MT *pMediaType;
+    uint8_t *pbBuffer;
+    int32_t cbBuffer;
+};
+const size_t PROP_WRITABLE_ = offsetof(SampleProps, pbBuffer);
+struct MemAlloc;
+struct MemSample final : IMediaSample_ {
+    int refs = 0;
+    SampleProps props = {};
+    MemAlloc *parent;
+    LL media_start = 0, media_end = 0;
+    bool media_valid = false;
+    explicit MemSample(MemAlloc *p) : parent(p) {}
+    HR QueryInterface(const void *iid, void **out) override
+    {
+        if (!out) return E_POINTER_;
+        *out = nullptr;
+        if (!geq(iid, IID_IUnknown_) && !geq(iid, IID_IMediaSample_) && !geq(iid, IID_IMediaSample2_)) return E_NOINTERFACE_;
+        *out = static_cast<IMediaSample_ *>(this);
+        AddRef();
+        return S_OK_;
+    }
+    unsigned long AddRef() override { return (unsigned long)__atomic_add_fetch(&refs, 1, __ATOMIC_ACQ_REL); }
+    unsigned long Release() override;
+    void drop_type()
+    {
+        if (props.pMediaType) { mt_free(props.pMediaType); CoTaskMemFree(props.pMediaType); props.pMediaType = nullptr; }
+    }
+    HR GetPointer(uint8_t **b) override { if (!b) return E_POINTER_; *b = props.pbBuffer; return *b ? S_OK_ : E_FAIL_; }
+    int32_t GetSize() override { return props.cbBuffer; }
+    HR GetTime(LL *s, LL *e) override
+    {
+        if (!(props.dwSampleFlags & AM_SAMPLE_TIMEVALID_)) return VFW_E_SAMPLE_TIME_NOT_SET_;
+        if (!s || !e) return E_POINTER_;
+        if (!(props.dwSampleFlags & AM_SAMPLE_STOPVALID_)) { *s = props.tStart; *e = props.tStart + 1; return VFW_S_NO_STOP_TIME_; }
+        *s = props.tStart;
+        *e = props.tStop;
+        return S_OK_;
+    }
+    HR SetTime(LL *s, LL *e) override
+    {
+        if (s) {
+            props.tStart = *s;
+            props.dwSampleFlags |= AM_SAMPLE_TIMEVALID_;
+            if (e) { props.tStop = *e; props.dwSampleFlags |= AM_SAMPLE_STOPVALID_; }
+            else props.dwSampleFlags &= ~AM_SAMPLE_STOPVALID_;
+        } else
+            props.dwSampleFlags &= ~(AM_SAMPLE_TIMEVALID_ | AM_SAMPLE_STOPVALID_);
+        return S_OK_;
+    }
+    HR flag_get(uint32_t f) { return (props.dwSampleFlags & f) ? S_OK_ : S_FALSE_; }
+    void flag_set(uint32_t f, int on) { if (on) props.dwSampleFlags |= f; else props.dwSampleFlags &= ~f; }
+    HR IsSyncPoint() override { return flag_get(AM_SAMPLE_SPLICEPOINT_); }
+    HR SetSyncPoint(int on) override { flag_set(AM_SAMPLE_SPLICEPOINT_, on); return S_OK_; }
+    HR IsPreroll() override { return flag_get(AM_SAMPLE_PREROLL_); }
+    HR SetPreroll(int on) override { flag_set(AM_SAMPLE_PREROLL_, on); return S_OK_; }
+    int32_t GetActualDataLength() override { return props.lActual; }
+    HR SetActualDataLength(int32_t n) override
+    {
+        if (n > props.cbBuffer || n < 0) return VFW_E_BUFFER_OVERFLOW_;
+        props.lActual = n;
+        return S_OK_;
+    }
+    HR GetMediaType(MT **pp) override
+    {
+        if (!props.pMediaType) { if (pp) *pp = nullptr; return S_FALSE_; }
+        if (!pp) return E_POINTER_;
+        MT *m = (MT *)CoTaskMemAlloc(sizeof(MT));
+        if (!m) return E_OUTOFMEMORY_;
+        HR hr = mt_copy(m, props.pMediaType);
+        if (hr < 0) { CoTaskMemFree(m); return hr; }
+        *pp = m;
+        return S_OK_;
+    }
+    HR SetMediaType(MT *m) override
+    {
+        drop_type();
+        if (!m) { props.dwSampleFlags &= ~AM_SAMPLE_TYPECHANGED_; return S_OK_; }
+        props.dwSampleFlags |= AM_SAMPLE_TYPECHANGED_;
+        MT *c = (MT *)CoTaskMemAlloc(sizeof(MT));
+        if (!c) return E_OUTOFMEMORY_;
+        HR hr = mt_copy(c, m);
+        if (hr < 0) { CoTaskMemFree(c); return hr; }
+        props.pMediaType = c;
+        return S_OK_;
+    }
+    HR IsDiscontinuity() override { return flag_get(AM_SAMPLE_DATADISCONTINUITY_); }
+    HR SetDiscontinuity(int on) override { flag_set(AM_SAMPLE_DATADISCONTINUITY_, on); return S_OK_; }
+    HR GetMediaTime(LL *s, LL *e) override
+    {
+        if (!media_valid) return VFW_E_MEDIA_TIME_NOT_SET_;
+        if (!s || !e) return E_POINTER_;
+        *s = media_start;
+        *e = media_end;
+        return S_OK_;
+    }
+    HR SetMediaTime(LL *s, LL *e) override
+    {
+        if (s) {
+            if (!e) return E_POINTER_;
+            media_start = *s;
+            media_end = *e;
+            media_valid = true;
+        } else
+            media_valid = false;
+        return S_OK_;
+    }
+    HR GetProperties(uint32_t cb, uint8_t *pb) override
+    {
+        if (!pb) return E_POINTER_;
+        memcpy(pb, &props, cb < sizeof props ? cb : sizeof props);
+        return S_OK_;
+    }
+    HR SetProperties(uint32_t cb, const uint8_t *pb) override
+    {
+        if (!pb) return E_POINTER_;
+        memcpy(&props, pb, cb < PROP_WRITABLE_ ? cb : PROP_WRITABLE_);   /* pbBuffer and cbBuffer are read-only */
+        return S_OK_;
+    }
+};
+struct MemAlloc final : IMemAllocator_ {
+    int refs = 1;
+    AllocProps props = {};
+    Vec<MemSample *> free_list, used_list;
+    uint8_t *memory = nullptr, *base = nullptr;
+    bool committed = false, decommit_queued = false;
+    int waiting = 0;
+    uintptr_t sem = 0;
+    os_lock_t lk = {0};
+    ~MemAlloc() { if (sem) CloseHandle((HANDLE)sem); }
+    HR QueryInterface(const void *iid, void **out) override
+    {
+        if (!out) return E_POINTER_;
+        *out = nullptr;
+        if (!geq(iid, IID_IUnknown_) && !geq(iid, IID_IMemAllocator_)) return E_NOINTERFACE_;
+        *out = static_cast<IMemAllocator_ *>(this);
+        AddRef();
+        return S_OK_;
+    }
+    unsigned long AddRef() override { return (unsigned long)__atomic_add_fetch(&refs, 1, __ATOMIC_ACQ_REL); }
+    unsigned long Release() override
+    {
+        int r = __atomic_sub_fetch(&refs, 1, __ATOMIC_ACQ_REL);
+        if (!r) {
+            if (committed) free_buffers();
+            delete this;
+        }
+        return (unsigned long)r;
+    }
+    void remove_used(MemSample *s)
+    {
+        for (size_t i = 0; i < used_list.n; i++)
+            if (used_list.p[i] == s) { used_list.p[i] = used_list.p[--used_list.n]; return; }
+    }
+    int32_t stride() const
+    {
+        int64_t sz = (int64_t)props.cbBuffer + props.cbPrefix;
+        int64_t r = sz % props.cbAlign;
+        return (int32_t)(r ? sz + props.cbAlign - r : sz);
+    }
+    HR alloc_buffers()
+    {
+        if (4096 % props.cbAlign != 0) return VFW_E_BADALIGN_;   /* no coarser alignment than the page size */
+        int64_t total = (int64_t)stride() * props.cBuffers;
+        if (total <= 0 || total + props.cbAlign > 0x7fffffff) return E_OUTOFMEMORY_;
+        memory = (uint8_t *)malloc((size_t)total + (size_t)props.cbAlign);
+        if (!memory) return E_OUTOFMEMORY_;
+        uintptr_t a = ((uintptr_t)memory + (uintptr_t)props.cbAlign - 1) / (uintptr_t)props.cbAlign * (uintptr_t)props.cbAlign;
+        base = (uint8_t *)a;
+        for (int32_t i = props.cBuffers - 1; i >= 0; i--) {
+            MemSample *s = new (std::nothrow) MemSample(this);
+            if (!s || !free_list.push(s)) {
+                delete s;
+                free_buffers_locked();
+                return E_OUTOFMEMORY_;
+            }
+            s->props.cbData = sizeof(SampleProps);
+            s->props.cbBuffer = s->props.lActual = props.cbBuffer;
+            s->props.pbBuffer = base + (size_t)i * (size_t)stride() + (size_t)props.cbPrefix;
+        }
+        return S_OK_;
+    }
+    void free_buffers_locked()
+    {
+        for (size_t i = 0; i < used_list.n; i++) used_list.p[i]->parent = nullptr;   /* outstanding samples outlive the buffers' owner list */
+        used_list.n = 0;
+        for (size_t i = 0; i < free_list.n; i++) { free_list.p[i]->drop_type(); delete free_list.p[i]; }
+        free_list.n = 0;
+        free(memory);
+        memory = base = nullptr;
+    }
+    void free_buffers() { free_buffers_locked(); }
+    HR SetProperties(AllocProps *req, AllocProps *act) override
+    {
+        if (!req || !act) return E_POINTER_;
+        os_lock(&lk);
+        HR hr;
+        if (used_list.n) hr = VFW_E_BUFFERS_OUTSTANDING_;
+        else if (committed) hr = VFW_E_ALREADY_COMMITTED_;
+        else if (req->cbAlign == 0) hr = VFW_E_BADALIGN_;
+        else { props = *req; *act = props; hr = S_OK_; }
+        os_unlock(&lk);
+        return hr;
+    }
+    HR GetProperties(AllocProps *p) override
+    {
+        if (!p) return E_POINTER_;
+        os_lock(&lk);
+        *p = props;
+        os_unlock(&lk);
+        return S_OK_;
+    }
+    HR Commit() override
+    {
+        os_lock(&lk);
+        HR hr;
+        if (props.cbAlign <= 0) hr = VFW_E_BADALIGN_;
+        else if (props.cbBuffer <= 0) hr = VFW_E_SIZENOTSET_;
+        else if (props.cBuffers <= 0) hr = VFW_E_BUFFER_NOTSET_;
+        else if (decommit_queued && committed) { decommit_queued = false; hr = S_OK_; }
+        else if (committed) hr = S_OK_;
+        else {
+            sem = (uintptr_t)CreateSemaphoreA(nullptr, props.cBuffers, props.cBuffers, nullptr);
+            if (!sem) hr = E_OUTOFMEMORY_;
+            else {
+                hr = alloc_buffers();
+                if (hr >= 0) committed = true;
+                else { CloseHandle((HANDLE)sem); sem = 0; }
+            }
+        }
+        os_unlock(&lk);
+        return hr;
+    }
+    HR Decommit() override
+    {
+        os_lock(&lk);
+        HR hr = S_OK_;
+        if (committed) {
+            if (used_list.n) {
+                decommit_queued = true;
+                ReleaseSemaphore((HANDLE)sem, waiting, nullptr);   /* every waiting GetBuffer learns that none will come */
+            } else {
+                committed = false;
+                CloseHandle((HANDLE)sem);
+                sem = 0;
+                free_buffers_locked();
+            }
+        }
+        os_unlock(&lk);
+        return hr;
+    }
+    HR GetBuffer(IMediaSample_ **out, LL *, LL *, uint32_t flags) override
+    {
+        if (!out) return E_POINTER_;
+        *out = nullptr;
+        os_lock(&lk);
+        if (!committed || decommit_queued) { os_unlock(&lk); return VFW_E_NOT_COMMITTED_; }
+        waiting++;
+        HANDLE h = (HANDLE)sem;
+        os_unlock(&lk);
+        if (WaitForSingleObject(h, (flags & AM_GBF_NOWAIT_) ? 0 : 0xFFFFFFFFu) != 0) {
+            os_lock(&lk);
+            waiting--;
+            os_unlock(&lk);
+            return VFW_E_TIMEOUT_;
+        }
+        os_lock(&lk);
+        waiting--;
+        HR hr = S_OK_;
+        if (!committed) hr = VFW_E_NOT_COMMITTED_;
+        else if (decommit_queued) hr = VFW_E_TIMEOUT_;
+        else {
+            MemSample *s = free_list.p[--free_list.n];
+            used_list.push(s);
+            s->AddRef();
+            *out = s;
+        }
+        os_unlock(&lk);
+        return hr;
+    }
+    HR ReleaseBuffer(IMediaSample_ *sample) override
+    {
+        if (!sample) return E_POINTER_;
+        MemSample *s = static_cast<MemSample *>(sample);
+        os_lock(&lk);
+        remove_used(s);
+        free_list.push(s);
+        if (!used_list.n && decommit_queued && committed) {
+            committed = decommit_queued = false;
+            CloseHandle((HANDLE)sem);
+            sem = 0;
+            free_buffers_locked();
+        }
+        HANDLE h = (HANDLE)sem;
+        if (h) ReleaseSemaphore(h, 1, nullptr);
+        os_unlock(&lk);
+        return S_OK_;
+    }
+};
+unsigned long MemSample::Release()
+{
+    int r = __atomic_sub_fetch(&refs, 1, __ATOMIC_ACQ_REL);
+    if (!r) {
+        drop_type();
+        props.dwSampleFlags = 0;
+        media_valid = false;
+        if (parent) parent->ReleaseBuffer(this);
+        else delete this;
+    }
+    return (unsigned long)r;
+}
+}   // namespace
+IMemAllocator_ *make_mem_allocator() { return new (std::nothrow) MemAlloc(); }
 
 /* ---- the base filter */
 BFilter::~BFilter()
@@ -1213,7 +1653,9 @@ struct ReaderPin final : IPin_ {
     int refs = 1;
     AsyncReader *rd;
     IPin_ *peer = nullptr;
+    MT cur = {};   /* the connection type (valid while peer) */
     explicit ReaderPin(AsyncReader *r) : rd(r) {}
+    ~ReaderPin() { mt_free(&cur); }
     HR QueryInterface(const void *iid, void **o) override
     {
         if (!o) return E_POINTER_;
@@ -1237,8 +1679,18 @@ struct ReaderPin final : IPin_ {
         MT t = {};
         t.major = MEDIATYPE_Stream_;
         t.format = FORMAT_None_;
-        HR hr = r->ReceiveConnection(this, mt ? mt : &t);
-        if (hr >= 0) { peer = r; r->AddRef(); }
+        const MT *use = mt ? mt : &t;
+        MT c;
+        HR hr = mt_copy(&c, use);
+        if (hr < 0) return hr;
+        hr = r->ReceiveConnection(this, use);
+        if (hr >= 0) {
+            mt_free(&cur);
+            cur = c;
+            peer = r;
+            r->AddRef();
+        } else
+            mt_free(&c);
         return hr;
     }
     HR ReceiveConnection(IPin_ *, const MT *) override;
@@ -1247,11 +1699,17 @@ struct ReaderPin final : IPin_ {
         if (!peer) return S_FALSE_;
         IPin_ *p = peer;
         peer = nullptr;
+        mt_free(&cur);
         p->Release();
         return S_OK_;
     }
     HR ConnectedTo(IPin_ **p) override { if (!peer) return VFW_E_NOT_CONNECTED_; *p = peer; peer->AddRef(); return S_OK_; }
-    HR ConnectionMediaType(MT *) override { return peer ? E_NOTIMPL_ : VFW_E_NOT_CONNECTED_; }
+    HR ConnectionMediaType(MT *m) override   /* strmbase pin.c pin_ConnectionMediaType */
+    {
+        if (!m) return E_POINTER_;
+        if (!peer) { memset(m, 0, sizeof *m); return VFW_E_NOT_CONNECTED_; }
+        return mt_copy(m, &cur);
+    }
     HR QueryPinInfo(PinInfo *pi) override { pi->filter = nullptr; pi->dir = PINDIR_OUTPUT; pi->name[0] = 0; return S_OK_; }
     HR QueryDirection(int *d) override { *d = PINDIR_OUTPUT; return S_OK_; }
     HR QueryId(WCH **id) override { *id = wdup_co((const WCH *)u"Output"); return S_OK_; }

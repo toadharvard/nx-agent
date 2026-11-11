@@ -1,5 +1,5 @@
 symbol	linkage	ret	params	value	source	quals	file
-BFilter::QueryVendorInfo	C++	HR	WCH **	E_NOTIMPL_	MSDN:IBaseFilter::QueryVendorInfo optional; a filter without vendor information returns E_NOTIMPL (CBaseFilter does)		audio/dshow_filters.cpp
+BFilter::QueryVendorInfo	C++	HR	WCH **	(HR)0x80004001	MSDN:IBaseFilter::QueryVendorInfo optional; a filter without vendor information returns E_NOTIMPL (wine-9.0:libs/strmbase/filter.c:filter_QueryVendorInfo does, without a log line)		audio/dshow_filters.cpp
 ReaderPin::ReceiveConnection	C++	HR	IPin_ *, const MT *	VFW_E_INVALID_DIRECTION_	MSDN:IPin::ReceiveConnection a pin of output direction cannot receive a connection: VFW_E_INVALID_DIRECTION		audio/dshow_filters.cpp
 ReaderPin::EndOfStream	C++	HR	void	E_UNEXPECTED_	MSDN:IPin::EndOfStream the call is made to an input pin; an output pin returns E_UNEXPECTED (CBaseOutputPin)		audio/dshow_filters.cpp
 ReaderPin::BeginFlush	C++	HR	void	E_UNEXPECTED_	MSDN:IPin::BeginFlush the call is made to an input pin; an output pin returns E_UNEXPECTED (CBaseOutputPin)		audio/dshow_filters.cpp

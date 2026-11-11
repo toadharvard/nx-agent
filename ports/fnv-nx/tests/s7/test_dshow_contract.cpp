@@ -21,6 +21,7 @@
 using namespace dsh;
 
 namespace {
+const HR kNotImpl = (HR)0x80004001;   /* E_NOTIMPL, as the game's own objects answer */
 const GUID *G_(const Guid &g) { return (const GUID *)&g; }
 const GUID CLSID_Mapper_ = {0xe436ebb2, 0x524f, 0x11ce, {0x9f, 0x53, 0x00, 0x20, 0xaf, 0x0b, 0xa7, 0x70}};
 const GUID CLSID_Graph_ = {0xe436ebb3, 0x524f, 0x11ce, {0x9f, 0x53, 0x00, 0x20, 0xaf, 0x0b, 0xa7, 0x70}};
@@ -79,18 +80,18 @@ struct SrcPin final : IPin_, AsyncReader {   /* the game's output pin: IPin and 
     HR ConnectionMediaType(MT *m) override { *m = type; return peer ? 0 : VFW_E_NOT_CONNECTED_; }
     HR QueryPinInfo(PinInfo *) override;
     HR QueryDirection(int *d) override { *d = PINDIR_OUTPUT; return 0; }
-    HR QueryId(WCH **) override { return E_NOTIMPL_; }
+    HR QueryId(WCH **) override { return kNotImpl; }
     HR QueryAccept(const MT *m) override { return geq(m->major, type.major) && (geq(m->sub, type.sub) || geq(m->sub, GUID_NULL_)) ? 0 : 1; }
     HR EnumMediaTypes(void **o) override { TEnum *e = new TEnum; e->media = true; e->it.push_back(&type); *o = e; return 0; }
-    HR QueryInternalConnections(IPin_ **, uint32_t *) override { return E_NOTIMPL_; }
+    HR QueryInternalConnections(IPin_ **, uint32_t *) override { return kNotImpl; }
     HR EndOfStream() override { return 0; }
     HR BeginFlush() override { return 0; }
     HR EndFlush() override { return 0; }
     HR NewSegment(LL, LL, double) override { return 0; }
-    HR RequestAllocator(void *, void *, void **) override { return E_NOTIMPL_; }
-    HR Request(void *, uintptr_t) override { return E_NOTIMPL_; }
-    HR WaitForNext(uint32_t, void **, uintptr_t *) override { return E_NOTIMPL_; }
-    HR SyncReadAligned(void *) override { return E_NOTIMPL_; }
+    HR RequestAllocator(void *, void *, void **) override { return kNotImpl; }
+    HR Request(void *, uintptr_t) override { return kNotImpl; }
+    HR WaitForNext(uint32_t, void **, uintptr_t *) override { return kNotImpl; }
+    HR SyncReadAligned(void *) override { return kNotImpl; }
     HR SyncRead(LL pos, long len, uint8_t *buf) override
     {
         reads++;
@@ -122,7 +123,7 @@ struct SrcFilter final : IBaseFilter_ {
     }
     unsigned long AddRef() override { return ++refs; }
     unsigned long Release() override { return --refs; }
-    HR GetClassID(Guid *) override { return E_NOTIMPL_; }
+    HR GetClassID(Guid *) override { return kNotImpl; }
     HR Stop() override { st = 0; return 0; }
     HR Pause() override { st = 1; return 0; }
     HR Run(LL) override { st = 2; return 0; }
@@ -130,15 +131,15 @@ struct SrcFilter final : IBaseFilter_ {
     HR SetSyncSource(IReferenceClock_ *) override { return 0; }
     HR GetSyncSource(IReferenceClock_ **c) override { *c = nullptr; return 0; }
     HR EnumPins(void **o) override { TEnum *e = new TEnum; e->it.push_back(static_cast<IPin_ *>(&pin)); *o = e; return 0; }
-    HR FindPin(const WCH *, IPin_ **) override { return E_NOTIMPL_; }
-    HR QueryFilterInfo(FilterInfo *) override { return E_NOTIMPL_; }
+    HR FindPin(const WCH *, IPin_ **) override { return kNotImpl; }
+    HR QueryFilterInfo(FilterInfo *) override { return kNotImpl; }
     HR JoinFilterGraph(IFilterGraph_ *g, const WCH *n) override
     {
         graph = g;
         if (g) { joins++; name = A(n); } else leaves++;
         return 0;
     }
-    HR QueryVendorInfo(WCH **) override { return E_NOTIMPL_; }
+    HR QueryVendorInfo(WCH **) override { return kNotImpl; }
 };
 HR SrcPin::QueryInterface(const void *iid, void **o)
 {
@@ -371,7 +372,7 @@ TEST(dshow_contract_graph_building)
     CHECK_EQ(rend->QueryFilterInfo(&fi), 0);
     CHECK(A(fi.name) == "DirectSound Device");
     WCH *vend = nullptr;
-    CHECK_EQ(rend->QueryVendorInfo(&vend), E_NOTIMPL_);   /* the SDK's answer for a filter without vendor info */
+    CHECK_EQ(rend->QueryVendorInfo(&vend), kNotImpl);   /* the SDK's answer for a filter without vendor info */
     uint32_t nint = 4;
     IPin_ *ints[4];
     CHECK_EQ(din->QueryInternalConnections(ints, &nint), 0);

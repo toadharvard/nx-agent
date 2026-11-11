@@ -119,8 +119,6 @@ void fnvnx_plat_note(int cls, const char *name, unsigned caller, const char *det
 /* win: the Windows path as the game gave it; host: what the mapper made of it (NULL if it failed); api: the entry */
 void fnvnx_plat_open_failed(const char *win, const char *host, unsigned err, unsigned caller, const char *api);
 #define FNVNX_PLAT_RA ((unsigned)(unsigned long)__builtin_return_address(0))
-/* in a body that answers for a missing function (named by the enclosing function) */
-#define FNVNX_UNIMPL() (fnvnx_plat_on ? fnvnx_plat_note(FNVNX_PLAT_UNIMPL, __PRETTY_FUNCTION__, FNVNX_PLAT_RA, 0) : (void)0)
 /* builtin modules for LoadLibraryA/GetProcAddress (xinput1_3.dll, ... registered by S6/S7) */
 typedef FARPROC (*fnvnx_module_resolver)(const char *proc);
 void fnvnx_register_module(const char *dll_name, fnvnx_module_resolver resolve);
