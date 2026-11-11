@@ -15,7 +15,7 @@
 - 66e2f971: render/ASSUMPTIONS.md, 129 допущений: OWNER-класс 13, снято гейтом 16, фактом 8, устаревший
   текст 5, REMOVE без гейта 87 (d3d9 57, shaders 15, tests 8, MojoShader/uam 4, total 3). L1 принял, id даёт L1.
 - 7be9b62d: render/d3d9/backend/NXGL4_HOST.md (ответ L4 по настоящей libnxgl4; теперь неактуально из-за приказа).
-- CLAUDE.md взят с транка c9765781; новый — транк 58a79b3e («late night») — НЕ влит, влей.
+- CLAUDE.md: транк 58a79b3e влит (f5d2519d, новым лидом).
 
 ## Очередь
 1. НЕ влито: FLAT. Ветка claude/fnv-l6-w-int @ 19c96209 = f8545efa-предок 3fa8b8f1 + слияние
