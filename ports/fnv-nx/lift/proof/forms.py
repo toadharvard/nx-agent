@@ -5,11 +5,9 @@ Families: forms_alu.py (arithmetic, shifts, bit ops, mul/div), forms_move.py (mo
 Form-level conventions: fault(code, cond) = the instruction raises DE/BP/UD when cond holds (state unchanged, eip = its address);
 `when` on a register/flag write = the SDM defines the value only when `when` holds; df / flo (other EFLAGS bits) are state the
 model driver does not expose, so a form that writes them can only be certified on its observable fields."""
-import sys, os
-LIFT = os.environ.get('FNVLIFT_ROOT') or os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'); sys.path.insert(0, LIFT)
-if 'fnvlift' not in sys.modules:       # only fnvlift/dsl.py is needed: a stub package keeps the proofs independent of the lifter's f_*.py (fnvlift/__init__ imports them all)
-    import types; _pkg = types.ModuleType('fnvlift'); _pkg.__path__ = [os.path.join(LIFT, 'fnvlift')]; sys.modules['fnvlift'] = _pkg
-from fnvlift.dsl import *
+import os, sys
+sys.path.insert(0, os.environ.get('FNVLIFT_ROOT') or os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+from fnvlift.dsl import C, Form, V, bit, concat, eq, extract, load, msb, trunc
 from capstone import x86 as X
 
 R8 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh']; R16 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di']
@@ -87,7 +85,7 @@ def handler(*names):
 
 def build(ins, addr):
     """Form for a decoded instruction at addr; key = form_key(ins).  Raises KeyError for mnemonics outside the covered set."""
-    import forms_alu, forms_move, forms_flow                 # noqa: F401  (register their handlers)
+    from proof import forms_alu, forms_move, forms_flow      # noqa: F401  (register their handlers)
     c = Ctx(); c.ins, c.addr = ins, addr; c.F = Form(form_key(ins), addr, ins.size)
     words = ins.mnemonic.split(); c.rep = words[0] if len(words) > 1 else ''; c.m = words[-1]
     c.ops = [Op(ins, o) for o in ins.operands]

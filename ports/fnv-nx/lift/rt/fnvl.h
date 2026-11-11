@@ -9,7 +9,7 @@ typedef union { u32 u[4]; float f[4]; double d[2]; u64 q[2]; u8 b[16]; s8 sb[16]
    3/4/5 I16/I32/I64 (v = the integer sign-extended to 64 bits), 6 M80 (v = significand, e = sign<<15|exp). rt/fnvl_x87.h */
 struct fv { u64 v; u32 e; u32 k; };
 struct fnvl_nframe;   /* rt/imp.h: one per live import entry of the thread (native frames between lifted frames) */
-struct cpu { u32 r[8]; u32 fs; u32 ftop, ftag, fcw, fc; double st[8]; xmm_t x[8]; u32 fl; u32 mxcsr; u64 mm[8]; u32 ra; u32 fex; fv fx[8]; u32 eflx; struct fnvl_nframe *nf; u32 hfpcr, hfpsr; u32 sel[6]; u32 teb; u32 fip, fdp; u32 msvcrt[6]; };   /* mxcsr (reset 0x1f80) and mm0-7 are appended: SSE family (W6). r[] is only the save area of the
+struct cpu { u32 r[8]; u32 fs; u32 ftop, ftag, fcw, fc; double st[8]; xmm_t x[8]; u32 fl; u32 mxcsr; u64 mm_unused[8]; u32 ra; u32 fex; fv fx[8]; u32 eflx; struct fnvl_nframe *nf; u32 hfpcr, hfpsr; u32 sel[6]; u32 teb; u32 fip, fdp; u32 msvcrt[6]; };   /* mxcsr (reset 0x1f80) is appended: SSE family (W6); mm_unused is the former separate MM register file, kept only so the offsets hold: mm0-7 ARE the significands of fx[0..7] (rt/fnvl_x87.h, MMX aliasing). r[] is only the save area of the
    entry/exit bridges (fnvl_enter): while lifted code runs the eight guest registers live in w19..w26. ra: the address the last `ret` popped (control-transfer rule, README).
    x87 (W13): fx[8] are the PHYSICAL registers (carriers; k==0 is the empty tag), ftop the TOP, fcw the control word, fex the exception status bits that the host FPSR cannot
    hold (invalid + stack fault of an overflow/underflow). eflx (W14): the EFLAGS bits AC (18) and ID (21), the only non-arithmetic bits pushfd/popfd keep (reset 0; see EFL_PUSH). `st` and `ftag` are the pre-R8 double stack and tag word: unused, kept so the offsets of the other fields hold. */
@@ -38,7 +38,7 @@ register struct cpu *c asm("x27");
 #define FNVL_DEOVF 5
 #define FNVL_BP 3
 #define FNVL_UD 4
-extern "C" { void fnvl_call(struct cpu*, u32 target); void fnvl_tail(struct cpu*, u32 target); void (*fnvl_dispatch(u32 image_addr))(void); void fnvl_raise(u32 code, u32 at);
+extern "C" { void (*fnvl_dispatch(u32 image_addr))(void); void fnvl_raise(u32 code, u32 at);
              void fnvl_trace(u32 entry, u32 esp); }
 #define CALLX(h) L_##h()
 #ifdef FNVL_TRACE
@@ -106,9 +106,8 @@ template<class T> static inline __attribute__((always_inline)) bool lk_commit(LK
 #define SYNC_X_OUT do{ c->x[0]=x0;c->x[1]=x1;c->x[2]=x2;c->x[3]=x3;c->x[4]=x4;c->x[5]=x5;c->x[6]=x6;c->x[7]=x7; }while(0)
 #include "fnvl_x87.h"
 /* ---- SSE / SSE2 / MMX runtime (W6). MXCSR: RC, FTZ, DAZ are honoured; the exception status bits and the exception masks are not
-   modelled (no SIMD exception is ever raised). ldmxcsr mirrors RC into FPCR so that host arithmetic rounds like the guest. mm0-7 live in
-   c->mm and are NOT aliased to the x87 stack: MMX_TOUCH() is the hook the x87 owner fills in (tag word / top-of-stack on MMX use, emms). ---- */
-#define MMX_TOUCH() do{}while(0)
+   modelled (no SIMD exception is ever raised). ldmxcsr mirrors RC into FPCR so that host arithmetic rounds like the guest. mm0-7 are the significands of the physical
+   x87 registers (MMR / MMW / MMX_ENTER / MMX_EMMS in rt/fnvl_x87.h). ---- */
 extern "C" { u32 fnvl_rcp32(u32 bits); u32 fnvl_rsqrt32(u32 bits); }   /* reference-CPU tables, supplied by the runtime owner */
 typedef xmm_t __attribute__((aligned(1))) xmm_ua;
 struct GMX { unsigned long p;        /* a 16-byte cell: two 8-byte accesses under the rule above */

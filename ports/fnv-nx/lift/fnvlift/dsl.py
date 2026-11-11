@@ -10,15 +10,17 @@ memory); effects commit in order, so for two writes to one target the later wins
 A flag the SDM leaves undefined is declared with undefined(name, sdm_sentence) and is excluded from any obligation;
 flag(name, e, when=c) is a flag defined only when c holds (e.g. OF of a shift only for count 1)."""
 import hashlib
+import itertools
 
 REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi')
 FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
 _I = {}
+_SERIAL = itertools.count()      # node serial numbers: assigned at construction, in construction order (a deterministic key for per-node tables)
 def mask(w): return (1 << w) - 1
 
 class N:
-    __slots__ = ('op', 'w', 'a', 'x')
-    def __init__(s, op, w, a, x): s.op, s.w, s.a, s.x = op, w, a, x
+    __slots__ = ('op', 'w', 'a', 'x', 'u')
+    def __init__(s, op, w, a, x): s.op, s.w, s.a, s.x, s.u = op, w, a, x, next(_SERIAL)
     def __add__(s, o): return bin_('add', s, o)
     def __radd__(s, o): return bin_('add', o, s)
     def __sub__(s, o): return bin_('sub', s, o)
@@ -33,13 +35,25 @@ class N:
     def __neg__(s): return mk('neg', s.w, (s,))
 
 def mk(op, w, a=(), x=None):
-    k = (op, w, tuple(id(i) for i in a), x)
+    k = (op, w, tuple(i.u for i in a), x)
     n = _I.get(k)
     if n is None: n = _I[k] = N(op, w, tuple(a), x)
     return n
-def C(v, w): return mk('const', w, (), v & mask(w))
+def _unwrap(v):
+    """an object that stands for a DSL node (attribute `_node`, e.g. the symbolic instruction field of proof/symform.py) -> that node"""
+    n = getattr(v, '_node', None)
+    return v if n is None else n
+def C(v, w):
+    """constant of width w; a DSL node (an instruction field computed by a decode adapter) is resized to w instead (truncate / zero-extend)"""
+    v = _unwrap(v)
+    if isinstance(v, N): return v if v.w == w else (extract(v, w - 1, 0) if v.w > w else mk('zext', w, (v,)))
+    return mk('const', w, (), v & mask(w))
 def V(name, w): return mk('var', w, (), name)
+def F(name, w):
+    """instruction FIELD variable (the immediate / displacement bytes of an encoding shape): free in a proof, a constant per concrete instruction"""
+    return mk('fld', w, (), name)
 def bin_(op, x, y):
+    x, y = _unwrap(x), _unwrap(y)
     if not isinstance(x, N): x = C(x, y.w)
     if not isinstance(y, N): y = C(y, x.w)
     assert x.w == y.w, (op, x.w, y.w)
@@ -73,11 +87,12 @@ def mem_array():
     return z3.Array('mem', z3.BitVecSort(32), z3.BitVecSort(8))
 def to_smt(n):
     import z3
-    r = _M.get(id(n))
+    r = _M.get(n.u)
     if r is not None: return r
     A = [to_smt(c) for c in n.a]; o = n.op; one = z3.BitVecVal(1, 1); zero = z3.BitVecVal(0, 1)
     if o == 'const': r = z3.BitVecVal(n.x, n.w)
     elif o == 'var': r = z3.BitVec(n.x, n.w)
+    elif o == 'fld': r = z3.BitVec('fld_' + n.x, n.w)
     elif o in ('add', 'sub', 'mul', 'and', 'or', 'xor', 'shl'):
         r = {'add': lambda a, b: a + b, 'sub': lambda a, b: a - b, 'mul': lambda a, b: a * b, 'and': lambda a, b: a & b,
              'or': lambda a, b: a | b, 'xor': lambda a, b: a ^ b, 'shl': lambda a, b: a << b}[o](*A)
@@ -99,7 +114,7 @@ def to_smt(n):
         m = mem_array(); bs = [z3.Select(m, A[0] + i) for i in range(n.w // 8)]
         r = z3.Concat(*reversed(bs)) if len(bs) > 1 else bs[0]
     else: raise ValueError(o)
-    _M[id(n)] = r
+    _M[n.u] = r
     return r
 
 # ---------------------------------------------------------------- C backend
@@ -110,15 +125,15 @@ class Emit:
         s.cnt, s.order, s.names, s.used = {}, [], {}, set()
         for r in roots: s.walk(r)
         for n in s.order:
-            if n.op == 'load' or (s.cnt[id(n)] > 1 and n.op not in ('const', 'var')): s.names[id(n)] = 't%d' % len(s.names)
+            if n.op == 'load' or (s.cnt[n.u] > 1 and n.op not in ('const', 'var')): s.names[n.u] = 't%d' % len(s.names)
     def walk(s, n):
-        s.cnt[id(n)] = s.cnt.get(id(n), 0) + 1
-        if s.cnt[id(n)] > 1: return
+        s.cnt[n.u] = s.cnt.get(n.u, 0) + 1
+        if s.cnt[n.u] > 1: return
         for c in n.a: s.walk(c)
         if n.op == 'var': s.used.add(n.x)
         s.order.append(n)
     def ref(s, n):
-        if id(n) in s.names: return s.names[id(n)]
+        if n.u in s.names: return s.names[n.u]
         return s.ex(n)
     def ex(s, n):
         o, w = n.op, n.w; M = K(mask(w), w); t = T(w)
@@ -153,6 +168,22 @@ class Emit:
         if o == 'load': return '((u32)M%d(%s))' % (w, a[0])
         raise ValueError(o)
 
+class InlineEmit(Emit):
+    """Emit for code inlined into a lifted function (Form.to_c_inline): the shifts are expanded in place (the lifter's runtime has no shl_/lshr_/ashr_
+    templates), so the count (and the shifted value of ashr) is named once, as a temporary, when it is not a constant or a variable."""
+    def __init__(s, roots, force=()):
+        super().__init__(roots)
+        pick = [n.a[1] for n in s.order if n.op in ('shl', 'lshr', 'ashr')] + [n.a[0] for n in s.order if n.op == 'ashr'] + list(force)
+        for n in pick:
+            if n.op not in ('const', 'var') and n.u not in s.names: s.names[n.u] = 't%d' % len(s.names)
+    def ex(s, n):
+        if n.op not in ('shl', 'lshr', 'ashr'): return super().ex(n)
+        w = n.w; M = K(mask(w), w); t = T(w); a, c = s.ref(n.a[0]), s.ref(n.a[1]); Z = '(%s)0' % t
+        if n.op == 'shl': e = '(%s >= %du ? %s : (%s)(%s << %s))' % (c, w, Z, t, a, c); return e if w in (32, 64) else '(%s & %s)' % (e, M)
+        if n.op == 'lshr': return '(%s >= %du ? %s : (%s)(%s >> %s))' % (c, w, Z, t, a, c)
+        sg = '(((%s >> %d) & 1) != 0)' % (a, w - 1)
+        return '(%s >= %du ? (%s ? %s : %s) : (%s)((%s >> %s) | (%s ? (%s ^ (%s >> %s)) : %s)))' % (c, w, sg, M, Z, t, a, c, sg, M, M, c, Z)
+
 PRELUDE = '''typedef unsigned char u8; typedef unsigned short u16; typedef unsigned int u32; typedef unsigned long long u64;
 template<class T> static inline T shl_(T a, T c, unsigned w) { return c >= w ? (T)0 : (T)(a << c); }
 template<class T> static inline T lshr_(T a, T c, unsigned w) { return c >= w ? (T)0 : (T)(a >> c); }
@@ -165,7 +196,7 @@ INW = {'df': 1, 'flo': 32, 'fs_base': 32, 'gs_base': 32}
 
 class Form:
     def __init__(s, key, addr, size):
-        s.key, s.regs, s.flags, s.undef, s.stores, s.faults, s.addr = key, [], [], {}, [], [], addr
+        s.key, s.regs, s.flags, s.undef, s.stores, s.faults, s.addr = key, [], [], {}, [], [], addr     # addr: int, or a node (V('eip', 32)) for a form of a whole shape
         s.eip = C(addr + size, 32); s.pend = {}; s.flo = None
     def cur(s, name): return s.pend.get(name, V(name, 32))      # pending value, only for composing partial-register writes
     def reg(s, name, v, when=None): assert v.w == 32; s.regs.append((name, v, when)); s.pend[name] = v
@@ -182,8 +213,8 @@ class Form:
         """canonical DAG text (hash input of the certificates)"""
         ids, out = {}, []
         def go(n):
-            if id(n) in ids: return ids[id(n)]
-            a = [go(c) for c in n.a]; ids[id(n)] = i = len(ids)
+            if n.u in ids: return ids[n.u]
+            a = [go(c) for c in n.a]; ids[n.u] = i = len(ids)
             out.append('n%d=%s/%d %s %s' % (i, n.op, n.w, ','.join('n%d' % j for j in a), n.x if n.x is not None else ''))
             return i
         nw = lambda w: 'n%d' % go(w) if w is not None else '-'
@@ -193,7 +224,7 @@ class Form:
         for a, v in s.stores: out.append('store n%d n%d' % (go(a), go(v)))
         for k, c in s.faults: out.append('fault %d n%d' % (k, go(c)))
         if s.flo is not None: out.append('flo n%d' % go(s.flo))
-        out.append('eip n%d @%x' % (go(s.eip), s.addr))
+        out.append('eip n%d @%s' % (go(s.eip), '%x' % s.addr if isinstance(s.addr, int) else 'n%d' % go(s.addr)))
         return '\n'.join(out)
     def sha(s): return hashlib.sha256(s.serialize().encode()).hexdigest()
     def fault_term(s):
@@ -221,15 +252,32 @@ class Form:
         if s.faults:
             nf = ft == 0; g = lambda new, old: z3.If(nf, new, old)
             regs = {r: g(regs[r], z3.BitVec(r, 32)) for r in regs}; flags = {f: g(flags[f], z3.BitVec(f, 1)) for f in flags}
-            flo = g(flo, z3.BitVec('flo', 32)); mem = g(mem, mem_array()); eip = g(eip, z3.BitVecVal(s.addr, 32))
+            flo = g(flo, z3.BitVec('flo', 32)); mem = g(mem, mem_array()); eip = g(eip, z3.BitVecVal(s.addr, 32) if isinstance(s.addr, int) else to_smt(s.addr))
         return {'regs': regs, 'flags': flags, 'flo': flo, 'mem': mem, 'eip': eip, 'defined': defined, 'rdefined': rdef, 'fault': ft}
     def writes_unobserved(s): return s.flo is not None or any(f == 'df' for f, _, _ in s.flags)
+    def to_c_inline(s, varc, fault_fn, flo_fn, force=()):
+        """C lines of ONE instruction to be placed inside a block of a lifted function: -> (lines, ref) where ref(node) is the C text of a node
+        usable AFTER the lines (a named temporary or an expression over the `in_` snapshots).  Order = the Form's: snapshots of the used pre-state
+        (varc(name) -> the C expression of a pre-state variable), temporaries for loads and shared sub-expressions (and the `force`d nodes), faults
+        (fault_fn(code, cond_node, ref) -> C line), register writes, flag writes (unconditional, also with `when`; an undefined flag gets none),
+        the other-EFLAGS write (flo_fn(ref of the value) -> C line), stores.  The eip node is not emitted: the caller derives the control transfer from it."""
+        e = InlineEmit(s.roots(), force); L = []
+        for u in sorted(e.used): L.append('const u32 in_%s = %s;' % (u, varc(u)))
+        for n in e.order:
+            if n.u in e.names: L.append('const %s %s = %s;' % (T(n.w), e.names[n.u], e.ex(n)))
+        for k, c in s.faults: L.append(fault_fn(k, c, e.ref))
+        cw = lambda w: '' if w is None else 'if (%s) ' % e.ref(w)
+        for r, v, w in s.regs: L.append('%s%s = %s;' % (cw(w), r, e.ref(v)))
+        for f, v, w in s.flags: L.append('%s = %s;' % (f, e.ref(v)))     # `when` only bounds the proof obligation: v is a deterministic value (e.g. SHL CF for count >= size)
+        if s.flo is not None: L.append(flo_fn(e.ref(s.flo)))
+        for a, v in s.stores: L.append('M%d(%s) = %s;' % (v.w, e.ref(a), e.ref(v)))
+        return L, e.ref
     def to_c(s, fname):
         e = Emit(s.roots()); L = []
         L.append('static u32 %s(%s) {' % (fname, SIG))
         for u in sorted(e.used): L.append('  const u32 in_%s = %s;' % (u, u))
         for n in e.order:
-            if id(n) in e.names: L.append('  const %s %s = %s;' % (T(n.w), e.names[id(n)], e.ex(n)))
+            if n.u in e.names: L.append('  const %s %s = %s;' % (T(n.w), e.names[n.u], e.ex(n)))
         for k, c in s.faults: L.append('  if (%s) { eip = %s; return %d; }' % (e.ref(c), K(s.addr, 32), k))
         for r, v, _ in s.regs: L.append('  %s = %s;' % (r, e.ref(v)))
         for f, v, _ in s.flags: L.append('  %s = %s;' % (f, e.ref(v)))

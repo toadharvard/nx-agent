@@ -12,10 +12,8 @@ def find(img, funcs, pred):
             if pred(ins): return ins
 def main():
     os.makedirs(WORK, exist_ok=True); img = L.Image(EXE); T.G.update(L=L, img=img, work=WORK)
-    funcs = sorted((int(x.split('\t')[0], 16), int(x.split('\t')[1])) for x in open(os.environ.get('FNVNX_FUNCS', '/home/user/l3facts/funcs.tsv')) if x[0] != '#')
-    open(WORK + '/rt.S', 'w').write('.text\n' + ''.join('.globl %s\n%s: ret\n' % (k, k) for k in ('fnvl_call', 'fnvl_dispatch', 'fnvl_raise', 'fnvl_trace', 'fnvl_rcp32', 'fnvl_rsqrt32', 'memcpy', 'memset', 'memmove')))
-    subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-c', WORK + '/rt.S', '-o', WORK + '/rt.o'])
-    subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-I', RT, '-c', RT + '/x87.c', '-o', WORK + '/x87.o'])
+    funcs = sorted((int(x.split('\t')[0], 16), int(x.split('\t')[1])) for x in open(os.environ.get('FNVNX_FUNCS', '/home/user/l3facts2/funcs.tsv')) if x[0] != '#')
+    T.runtime_objects(WORK, os.path.dirname(HERE))      # rt.o fmath.o rcptab.o x87.o hostticks.o cpumodel.o: the one build of the runtime objects every test link needs (instest.py)
     mem = lambda b0, g: lambda i: i.opcode[0] == b0 and i.modrm < 0xc0 and i.modrm >> 3 & 7 == g
     # (name, instruction, depth, TOP, expected TOP after, expected ST0 carrier or None, expected 8 stored bytes or None)
     cases = [('fld m32, full stack', mem(0xd9, 0), 8, 0, 7, IND, None), ('fstp m64, empty stack', mem(0xdd, 3), 0, 0, 1, None, 0xFFF8000000000000),

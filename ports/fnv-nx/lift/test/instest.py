@@ -20,7 +20,7 @@ from unicorn.arm64_const import *
 from elftools.elf.elffile import ELFFile
 HERE = os.path.dirname(os.path.abspath(__file__))
 # a one-instruction test has no callee: a call/tail to another entry is an event of the test harness (fnvl_call), set here and nowhere in the prelude
-STUBX = '#undef CALLX\n#define CALLX(h) fnvl_call(c,0x##h)\n'
+STUBX = 'extern "C" void fnvl_call(struct cpu*, u32 target);\n#undef CALLX\n#define CALLX(h) fnvl_call(c,0x##h)\n'
 FLAGS = ('-mabi=ilp32 -std=gnu++17 -c -O2 -fms-extensions -fshort-wchar -frounding-math -fsigned-char -fno-strict-aliasing '
          '-fwrapv -fno-delete-null-pointer-checks -fcheck-new -fno-sized-deallocation -fno-lifetime-dse -ffp-contract=off '
          '-fPIC -fpermissive -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack-protector -fno-stack-clash-protection '
@@ -212,7 +212,7 @@ class Oracle(World):
             uc.reg_write(UC_X86_REG_EFLAGS, 0x202 | st['fl'] | st['eflx'])
             if E['base'] in ('popf', 'popfd'): s.ensure(st['regs'][4], 4, False); uc.mem_write(st['regs'][4], struct.pack('<I', st['stk']))     # W14: the popped EFLAGS image (no TF/RF/VM/VIF/VIP)
             if E['mmx']:      # Unicorn cannot access MM0-7 directly: they are the x87 registers' mantissas (TOP=0, all tags valid, as after any MMX insn)
-                uc.mem_write(HX + 0x100, struct.pack('<7I', 0x37f, 0, 0, 0, 0, 0, 0) + b''.join(struct.pack('<QH', v, 0xffff) for v in st['mm']))
+                uc.mem_write(HX + 0x100, struct.pack('<7I', 0x37f, 0, 0, 0, 0, 0, 0) + b''.join(struct.pack('<QH', v, e) for v, e in zip(st['mm'], st['mme'])))
                 s.mode = 'pro'; uc.emu_start(HX, HX + 6)
             elif E['x87']:
                 top = st['ftop']; ftw = sum((0 if st['valid'] >> p & 1 else 3) << 2 * p for p in range(8))
@@ -228,6 +228,8 @@ class Oracle(World):
             if E['sse']: o['xmm'] = [uc.reg_read(UC_X86_REG_XMM0 + i) for i in range(8)]
             if E['mmx']:
                 uc.emu_start(HX + 6, HX + 12); b = bytes(uc.mem_read(HX + 0x200, 108)); o['mm'] = [struct.unpack('<Q', b[28 + 10 * i:36 + 10 * i])[0] for i in range(8)]
+                o['mme'] = [struct.unpack('<H', b[36 + 10 * i:38 + 10 * i])[0] for i in range(8)]; o['mme'] = [0xffff if i == mm_written(E) else st['mme'][i] for i in range(8)]      # SDM Vol 1 9.2: a WRITE of MMi sets bits 64-79 of Ri to all ones, nothing else changes them. Unicorn (QEMU) keeps the old exponent on an MMX write, so the expectation is the SDM's, not the oracle's
+                fsw, ftw = struct.unpack('<2I', b[4:12]); o['mtop'] = fsw >> 11 & 7; o['mvalid'] = sum(1 << p for p in range(8) if ftw >> 2 * p & 3 != 3)      # MMX aliasing: the whole x87 image, not only the significands
             elif E['x87']:
                 uc.emu_start(HX + 6, HX + 12); b = bytes(uc.mem_read(HX + 0x200, 108)); fcw, fsw, ftw = struct.unpack('<3I', b[:12]); top = fsw >> 11 & 7
                 if fsw & 0x40: return dict(fault='x87 stack fault')
@@ -236,6 +238,11 @@ class Oracle(World):
             return o
         except UcError as e: return dict(fault='%s' % e, collide=s.collide)
         finally: s.mode = 'epi'
+def mm_written(E):
+    """index of the MM register the instruction writes (its first operand when that is an mm register and the form is not a store-like read of it), else None"""
+    from capstone import x86 as X
+    ops = E['ins'].operands
+    return int(E['ins'].reg_name(ops[0].reg)[2:]) if ops and ops[0].type == X.X86_OP_REG and E['ins'].reg_name(ops[0].reg).startswith('mm') and E['base'] not in ('maskmovq', 'emms') else None
 class Arm(World):
     def __init__(s, elf):
         with open(elf, 'rb') as fh:
@@ -272,7 +279,7 @@ class Arm(World):
         ftop, ftag, fcw, fc = struct.unpack_from('<4I', b, 36); fxv = [struct.unpack_from('<QII', b, 328 + 16 * i) for i in range(8)]
         return dict(regs=list(v), eip=eip, fl=struct.unpack_from('<I', b, 248)[0] & 0xcd5, eflx=struct.unpack_from('<I', b, 456)[0] & 0x240000, mem=s.written(), xmm=[int.from_bytes(b[120 + 16 * i:136 + 16 * i], 'little') for i in range(8)],
                     fp=dict(top=ftop & 7, fcw=fcw, cc=fc & 0x4500, valid=sum(1 << i for i in range(8) if fxv[i][2]), st=dict(enumerate(fxv)), wr=sorted(s.writes)),
-                    mxcsr=struct.unpack_from('<I', b, 252)[0], mm=list(struct.unpack_from('<8Q', b, 256)))
+                    mxcsr=struct.unpack_from('<I', b, 252)[0], mm=[img80(k, v, e)[0] for v, e, k in fxv], mme=[img80(k, v, e)[1] & 0xffff for v, e, k in fxv], mtop=ftop & 7, mvalid=sum(1 << i for i in range(8) if fxv[i][2]))
 def gen_state(E, i, att, xd=None):
     r = random.Random('%x:%d:%d' % (E['addr'], i, att)); regs = []
     for _ in range(8):
@@ -322,9 +329,11 @@ def gen_state(E, i, att, xd=None):
     stk = r3.getrandbits(32) & ~(0x100 | 0x10000 | 0x20000 | 0x80000 | 0x100000)
     r2x = random.Random('x87:%x:%d:%d' % (E['addr'], i, att)); fx = gen_x87(r2x, d, top)      # its own generator: the other families' seeds are unchanged
     mm = [r2.getrandbits(64) if r2.random() < .5 else int.from_bytes(bytes(r2.choice((0, 1, 0x7f, 0x80, 0xff, r2.getrandbits(8))) for _ in range(8)), 'little') for _ in range(8)]
+    mme = [0xffff if r2.random() < .5 else r2.getrandbits(16) for _ in range(8)]     # exponent|sign of each physical register before an MMX instruction (random: only a WRITE of mm_i sets it to all ones)
+    if E['mmx']: top, d, fx = 0, 8, [(6, m_, e_) for m_, e_ in zip(mm, mme)]           # MMX pre-state = the aliased x87 file: TOP 0, all valid, mm_i = significand of R_i (carrier kind M80)
     # RC and DAZ are generated; FTZ is not: Unicorn never flushes a tiny SSE result to zero (checked: mulss 1e-30*1e-10 with MXCSR.FTZ), so it cannot judge it
     mxcsr = 0x1f80 if r2.random() < .5 else 0x1f80 | r2.getrandbits(2) << 13 | r2.getrandbits(1) << 6
-    return dict(eflx=eflx, stk=stk, mm=mm, mxcsr=mxcsr, regs=regs, fl=r.getrandbits(32) & 0xcd5, ftop=top, valid=sum(1 << ((top + k) & 7) for k in range(d)), st=[dv() for _ in range(8)], fx=fx,
+    return dict(eflx=eflx, stk=stk, mm=mm, mme=mme, mxcsr=mxcsr, regs=regs, fl=r.getrandbits(32) & 0xcd5, ftop=top, valid=sum(1 << ((top + k) & 7) for k in range(d)), st=[dv() for _ in range(8)], fx=fx,
                 fcw=r.choice((0x27f, 0x7f, 0xa7f, 0xe7f, 0x37f)) if not E['x87'] else r2x.choice((0x27f, 0x7f, 0xa7f, 0xe7f, 0x37f, 0x67f, 0x47f, 0x87f, 0xf7f, 0x27f, 0xa7f, 0xe7f, 0x67f)), fc=r.getrandbits(1) << 8 | r.getrandbits(1) << 10 | r.getrandbits(1) << 14,
                 xmm=xm, wk=((E['addr'] * 31 + i + 1000003 * att) & 0x7fffffff, 3 if E['x87'] and i % 3 else i % 3))
 CF, PF, AF, ZF, SF, OF = 1, 4, 16, 64, 128, 0x800
@@ -441,8 +450,11 @@ def compare(E, st, o, c, X):
             if prec is None: return ('diff',) + det
         dcc = (f['cc'] ^ g['cc']) & CC_DEF.get(E['base'], 0) if E['base'].startswith('f') else 0
         if dcc: return 'diff', 'x87 cc', '%x' % g['cc'], '%x' % f['cc']
-    if o['mm'] and o['mm'] != c['mm']:
-        i = next(i for i in range(8) if o['mm'][i] != c['mm'][i]); return 'diff', 'mm%d' % i, '%016x' % c['mm'][i], '%016x' % o['mm'][i]
+    if o['mm']:      # MMX = the x87 file (SDM Vol 1 9.2): significands, exponent|sign fields, TOP and the tag word are all compared
+        for key, nm, fm in (('mm', 'mm%d', '%016x'), ('mme', 'mm%d.exp', '%04x')):
+            if o[key] != c[key]: i = next(i for i in range(8) if o[key][i] != c[key][i]); return 'diff', nm % i, fm % c[key][i], fm % o[key][i]
+        if o['mtop'] != c['mtop']: return 'diff', 'mmx top', '%d' % c['mtop'], '%d' % o['mtop']
+        if o['mvalid'] != c['mvalid']: return 'diff', 'mmx tags', '%02x' % c['mvalid'], '%02x' % o['mvalid']
     if (o['mxcsr'] ^ c['mxcsr']) & 0xffc0: return 'diff', 'mxcsr', '%x' % c['mxcsr'], '%x' % o['mxcsr']
     if o['xmm'] and o['xmm'] != c['xmm']:
         i = next(i for i in range(8) if o['xmm'][i] != c['xmm'][i]); return 'diff', 'xmm%d' % i, '%032x' % c['xmm'][i], '%032x' % o['xmm'][i]
@@ -499,6 +511,21 @@ def run_batch(job):
         out[eid] = res
     import shutil; shutil.rmtree('%s/b%d' % (work, bid), ignore_errors=True); shutil.rmtree('%s/b%d' % (work, bid + 100000), ignore_errors=True)
     return out
+def runtime_objects(work, lifter):
+    """the ARM-side runtime objects every test link needs, built into `work`: rt.o (test link symbols, libc string stubs), fmath.o, rcptab.o, x87.o, hostticks.o, cpumodel.o"""
+    open(work + '/rt.S', 'w').write('.text\n' + ''.join('.globl %s\n%s: ret\n' % (k, k) for k in ('fnvl_call', 'fnvl_dispatch', 'fnvl_raise', 'fnvl_raise_av', 'fnvl_trace', 'fnvl_world_stop', 'fnvl_world_resume')) +   # fnvl_world_stop/resume (rt/fnvl_mem.h): a single guest thread has nothing to suspend, so empty bodies are the definition here; fnvl_rcp32/rsqrt32: runtime-owner hooks, a bare `ret` here (their rows are 'hook', not gate failures)
+        '.globl memcpy\nmemcpy: mov x3,x0\n1: cbz x2,2f\n ldrb w4,[x1],#1\n strb w4,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
+        '.globl memset\nmemset: mov x3,x0\n1: cbz x2,2f\n strb w1,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
+        '.globl memmove\nmemmove: cmp x0,x1\n b.ls 3f\n add x3,x0,x2\n add x1,x1,x2\n1: cbz x2,2f\n ldrb w4,[x1,#-1]!\n strb w4,[x3,#-1]!\n sub x2,x2,#1\n b 1b\n2: ret\n'
+        '3: mov x3,x0\n4: cbz x2,2b\n ldrb w4,[x1],#1\n strb w4,[x3],#1\n sub x2,x2,#1\n b 4b\n')
+    subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-c', work + '/rt.S', '-o', work + '/rt.o'])
+    for f in ('fmath', 'rcptab'): subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-builtin', '-c', os.path.join(lifter, 'rt', f + '.c'), '-o', work + '/' + f + '.o'])
+    subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-I', os.path.join(lifter, 'rt'), '-c', os.path.join(lifter, 'rt', 'x87.c'), '-o', work + '/x87.o'])
+    # W14: the reference CPU model (rt/cpumodel.c) linked into the ARM side with a counter as the host clock (+1000 ns per call), and built for the host
+    # (ctypes) as the expected values of cpuid. fnvl_rdtsc is checked against its definition, ticks = ns * 21 / 10, through the counter.
+    open(work + '/hostticks.c', 'w').write('volatile unsigned fnvnx_split_lock;\nunsigned long long fnvl_host_ticks_ns(void){ static unsigned long long n; return n += 1000; }\n')
+    subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-c', work + '/hostticks.c', '-o', work + '/hostticks.o'])
+    subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-c', os.path.join(lifter, 'rt', 'cpumodel.c'), '-o', work + '/cpumodel.o'])
 def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
     A('--n', type=int, default=8); A('--k', type=int, default=4); A('--jobs', type=int, default=3); A('--only'); A('--limit-forms', type=int)
@@ -506,28 +533,17 @@ def main():
     A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')); A('--pack', default=os.environ.get('FNVNX_PACK', '/home/user/l3work/pack'))
     a = ap.parse_args(); t0 = time.time(); os.makedirs(a.work, exist_ok=True); sys.path.insert(0, a.lifter)
     import fnvlift as L, fnvlift.core
+    from fnvlift import fpfacts; fpfacts.ASSUME.update(('I-FPMASK', 'I-FPSTICKY'))      # the generated states have every exception masked and nothing reads sticky flags: the invariants hold by construction of the test states (fnvlift/fpfacts.py)
     class TImage(L.Image):                             # an encoding outside the exe (a module of the pack): its bytes come from encs.tsv
         def bytes(self, x, n):
             r = G['other'].get(x)
             return r[:n] + b'\x90' * max(0, n - len(r)) if r is not None else super().bytes(x, n)
     G.update(L=L, img=TImage(a.exe), work=a.work, other={})
-    open(a.work + '/rt.S', 'w').write('.text\n' + ''.join('.globl %s\n%s: ret\n' % (k, k) for k in ('fnvl_call', 'fnvl_dispatch', 'fnvl_raise', 'fnvl_raise_av', 'fnvl_trace')) +   # fnvl_rcp32/rsqrt32: runtime-owner hooks, a bare `ret` here (their rows are 'hook', not gate failures)
-        '.globl memcpy\nmemcpy: mov x3,x0\n1: cbz x2,2f\n ldrb w4,[x1],#1\n strb w4,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
-        '.globl memset\nmemset: mov x3,x0\n1: cbz x2,2f\n strb w1,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
-        '.globl memmove\nmemmove: cmp x0,x1\n b.ls 3f\n add x3,x0,x2\n add x1,x1,x2\n1: cbz x2,2f\n ldrb w4,[x1,#-1]!\n strb w4,[x3,#-1]!\n sub x2,x2,#1\n b 1b\n2: ret\n'
-        '3: mov x3,x0\n4: cbz x2,2b\n ldrb w4,[x1],#1\n strb w4,[x3],#1\n sub x2,x2,#1\n b 4b\n')
-    subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-c', a.work + '/rt.S', '-o', a.work + '/rt.o'])
-    for f in ('fmath', 'rcptab'): subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-builtin', '-c', os.path.join(a.lifter, 'rt', f + '.c'), '-o', a.work + '/' + f + '.o'])
-    subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-I', os.path.join(a.lifter, 'rt'), '-c', os.path.join(a.lifter, 'rt', 'x87.c'), '-o', a.work + '/x87.o'])
-    # W14: the reference CPU model (rt/cpumodel.c) linked into the ARM side with a counter as the host clock (+1000 ns per call), and built for the host
-    # (ctypes) as the expected values of cpuid. fnvl_rdtsc is checked against its definition, ticks = ns * 21 / 10, through the counter.
-    open(a.work + '/hostticks.c', 'w').write('volatile unsigned fnvnx_split_lock;\nunsigned long long fnvl_host_ticks_ns(void){ static unsigned long long n; return n += 1000; }\n')
-    subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-c', a.work + '/hostticks.c', '-o', a.work + '/hostticks.o'])
-    subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-c', os.path.join(a.lifter, 'rt', 'cpumodel.c'), '-o', a.work + '/cpumodel.o'])
+    runtime_objects(a.work, a.lifter)
     open(a.work + '/hostshim.c', 'w').write('unsigned long long fnvl_host_ticks_ns(void){ return 0; }\n')
     subprocess.check_call(['gcc', '-shared', '-fPIC', '-O1', '-o', a.work + '/cpumodel_host.so', os.path.join(a.lifter, 'rt', 'cpumodel.c'), a.work + '/hostshim.c'])
     import ctypes; G['cpum'] = ctypes.CDLL(a.work + '/cpumodel_host.so')
-    open(a.work + '/off.cpp', 'w').write(L.PRELUDE + '\n#include <stddef.h>\nstatic_assert(offsetof(cpu,fs)==32&&offsetof(cpu,ftop)==36&&offsetof(cpu,st)==56&&offsetof(cpu,x)==120&&offsetof(cpu,fl)==248&&offsetof(cpu,mxcsr)==252&&offsetof(cpu,mm)==256&&offsetof(cpu,ra)==320&&offsetof(cpu,fx)==328&&offsetof(cpu,eflx)==456&&offsetof(cpu,sel)==472&&offsetof(cpu,teb)==496&&offsetof(cpu,fip)==500&&offsetof(cpu,fdp)==504&&sizeof(cpu)==536,"cpu layout");\n')
+    open(a.work + '/off.cpp', 'w').write(L.PRELUDE + '\n#include <stddef.h>\nstatic_assert(offsetof(cpu,fs)==32&&offsetof(cpu,ftop)==36&&offsetof(cpu,st)==56&&offsetof(cpu,x)==120&&offsetof(cpu,fl)==248&&offsetof(cpu,mxcsr)==252&&offsetof(cpu,mm_unused)==256&&offsetof(cpu,ra)==320&&offsetof(cpu,fx)==328&&offsetof(cpu,eflx)==456&&offsetof(cpu,sel)==472&&offsetof(cpu,teb)==496&&offsetof(cpu,fip)==500&&offsetof(cpu,fdp)==504&&sizeof(cpu)==536,"cpu layout");\n')
     subprocess.check_call(['aarch64-linux-gnu-g++'] + FLAGS + ['-fsyntax-only', a.work + '/off.cpp'])
     d = load_forms(a, None); forms = d['forms']; print('pack: %d forms' % len(forms), file=sys.stderr)
     keys = sorted(k for k in forms if not a.only or k.split('|')[0] in a.only.split(','))

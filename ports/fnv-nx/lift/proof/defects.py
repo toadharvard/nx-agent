@@ -10,13 +10,13 @@ def prefix_skip(code):
     while code[i] in (0x66, 0x67, 0xf0, 0xf2, 0xf3, 0x2e, 0x36, 0x3e, 0x26, 0x64, 0x65): i += 1
     return i
 class Ctx:
-    def __init__(s, code, pre, key):
+    def __init__(s, code, pre, key, fields=None):
         s.code, s.pre, s.key = code, pre, key
         t = key.split('|')[1].split(',')[0]; s.w = int(re.sub(r'\D', '', t.split(':')[0])) if re.search(r'\d', t) else 32
         i = prefix_skip(code); op = code[i]; ecx = pre['regs']['ecx']
         if op in (0xd0, 0xd1): s.n = z3.BitVecVal(1, 32)
         elif op in (0xd2, 0xd3): s.n = z3.ZeroExt(24, z3.Extract(7, 0, ecx)) & 31
-        elif op in (0xc0, 0xc1): s.n = z3.BitVecVal(code[-1] & 31, 32)
+        elif op in (0xc0, 0xc1): s.n = z3.BitVecVal(code[-1] & 31, 32) if not fields else z3.ZeroExt(24, z3.Extract(7, 0, z3.BitVec('fld_imm', 8 * fields['imm'][1]))) & 31      # shape proof: the count byte is the free field
         else: s.n = z3.BitVecVal(0, 32)
         s.ecx0 = ecx == 0
 DEFECTS = [
@@ -31,12 +31,12 @@ DEFECTS = [
  dict(id='rep-prefix-ignored', keys=r'^rep', parts=[({'ecx', 'eip'}, lambda c: z3.BoolVal(True)), (ALL, lambda c: c.ecx0)],
       sdm='REP/REPE/REPNE: repeat the string instruction ECX times (nothing when ECX = 0), decrementing ECX; the model executes the body once, ignores the prefix, leaves ECX and sets EIP to the next instruction'),
 ]
-def regions(key, ctx_args):
+def regions(key, ctx_args, fields=None):
     """[(id, sdm, {field: region})] for the entries whose key regex matches; region None for fields not listed under ALL"""
     out = []
     for d in DEFECTS:
         if not re.search(d['keys'], key): continue
-        c = Ctx(*ctx_args, key); fr = {}; other = None
+        c = Ctx(*ctx_args, key, fields); fr = {}; other = None
         for fields, fn in d['parts']:
             if fields is ALL: other = fn(c)
             else:

@@ -1,5 +1,6 @@
 """Arithmetic / logic / shift / bit / multiply / divide families (see forms.py)."""
-from forms import *
+from fnvlift.dsl import C, V, ashr, bit, concat, eq, extract, ite, load, lshr, msb, sext, shl, trunc, udiv, ult, urem, zext
+from proof.forms import Op, af, ea, handler, pzs, rd, undef, wr
 
 UNDEF_LOGIC = 'AND/OR/XOR/TEST: "The state of the AF flag is undefined."'
 UNDEF_MUL = 'MUL/IMUL: "The SF, ZF, AF, and PF flags are undefined."'

@@ -71,10 +71,40 @@ rol agrees with the DSL (lsb of the unchanged result) at count 8/16; ror disagre
 (3) `lea r16`: proved, low 16 bits of the 32-bit address, upper half of the destination kept. (4) 16-bit cmovcc (all 16 conditions, reg-reg): proved, the upper half is unchanged whether or not the move happens.
 Memory forms rely on the `assume` (no segment-limit #GP: access wrapping past 4 GiB).
 
+### One-command toolchain build (L3b C2)
+`bash ports/fnv-nx/farm/sail_setup.sh` builds everything from a clean Ubuntu 24.04 root shell: apt packages, opam 2.2.1, opam-repository pinned to one commit,
+switch `sail` (OCaml 4.14.2, the 52 pinned opam packages incl. sail 0.20.3), isla e9b5d94 (`cargo build --release --locked`) and its isla-sail plugin,
+z3-solver 5.4.0.0 (pip, libz3.so.5.4), sail-x86-from-acl2 0c6c023, then `sail_build.sh` (stock IR, proof IR, smoke test); it prints the sha256 of
+`x86_proof.ir` and exits 1 unless it equals the pin. Every version, commit and sha256 is in `proof/sail_pins.txt`. Env: `REMS` `TOOLS` `WORK` `JOBS`.
+`MIRROR=<dir> bash ports/fnv-nx/farm/sail_setup.sh` takes every download from `<dir>`; `bash ports/fnv-nx/farm/sail_setup.sh --make-mirror <dir>` fills it from the network.
+The IR is path independent: isla-sail records source file names in the IR, so `sail_build.sh` runs it in a staging tree with relative names only.
+Cause of 3acf7d99 (README) vs 66cf6d73 (farm): the old script passed the splice files by absolute path (`$HERE`); run from `/home/user/nx-agent/ports/...` it gives
+3acf7d99 (10,389,604 B), from `/home/user/nx-l3/ports/...` 66cf6d73 (10,389,595 B), both reproduced. The staged build gives 55f87ab6 (10,389,242 B) in every directory.
+
 ### Sail model patches (W9b)
 `proof/sail_patches/rotate_count.sail` (rotate_left_bits/rotate_right_bits reduce the count mod width) and `ror_cf.sail` (ROR CF = msb of the result for masked
-count >= 2) are spliced in by `sail_build.sh` (default, `x86_proof.ir` sha256 3acf7d99...); `sail_build.sh --stock` builds the unpatched `x86_proof_stock.ir`
+count >= 2) are spliced in by `sail_build.sh` (default; `x86_proof.ir` sha256 55f87ab6... since the path-independent build, was 3acf7d99... / 66cf6d73... with absolute paths); `sail_build.sh --stock` builds the unpatched `x86_proof_stock.ir`
 (sha256 1de1cdc6...). `test/rothost.py` compares the patched model with the native host exhaustively (8/16-bit rol ror rcl rcr shl shr sar, all values x counts 0..255 x
 CF-in, cl and imm8 forms, second pre-flag pattern too): 488,112,128 cases, diff 0 on every SDM-defined output; `mfree` = model leaves a defined output
 undefined (shl/shr/sar CF beyond the width), `undef-info` = host value of an SDM-undefined output differing from the model's.
 Gate with the patched IR (forms.py md5 5ba2bb32...): proved 358, FAILED 33 (rol/ror OF at masked count 0, shl/shr/sar CF beyond the width), model-gap 2.
+
+### Shape proofs (L3b C1c): the unit is the encoding SHAPE, not one encoding
+`shape.py` (canonical key `<hex, imm/disp/rel bytes zeroed>/<imm_off>.<imm_size>.<disp_off>.<disp_size>`), `symform.py`, `shapeprove.py`, `symcheck.py`, `farm_shapeprove.sh`.
+* **Model side.** `model_sail.model_post_shape`: isla runs with `code_bytes` as an unconstrained register and `--reset-constraint` fixing every instruction byte
+  outside the symbolic ranges (and the 16 - len window bytes to 0); the field bytes stay free. The traces' `read-reg code_bytes` is bound to
+  `Concat(concrete bytes, fld_imm / fld_disp bytes)`. isla forks only on the sign bit / value ranges of the field (e.g. imm8 sign extension, shift-count
+  masks): the paths come back with their path conditions and are merged as before, so the case split is exhaustive by construction (isla enumerates every
+  feasible branch); no field is split by hand (certificate `split: none`). eip: `code_base = rip` stay symbolic with `rip < 2^32 - 16` (assumption A-EIPRANGE; cost
+  about 10 s per shape instead of 1-2 s); `--eip fixed` keeps 0x401000 (assumption A-EIP "semantics is translation-invariant in eip") and the certificate gives
+  `eip_dependence` per shape by the structure of the Form (`none`: eip only in eip + size; `target`: relative transfer; `data`: eip stored, i.e. call).
+* **DSL side.** `fnvlift/dsl.py` has a field-variable node `F(name, w)` (z3 name `fld_<name>`) and nodes may stand in `C(...)`. `symform.symbuild` presents to the
+  unchanged `forms.build` an adapter instruction whose immediate / displacement operand values are 32-bit DSL nodes (`ext32(slice of F('imm'))`, plus `eip + size`
+  for a relative target) and whose address is `V('eip')`. The slice, the zero/sign extension and the relative flag are read from capstone by probing (closed
+  hypothesis set, else `field-decode`). A builder that compares / branches on the field raises `SymbolicBranch` (class `builder-branches-on-field`):
+  today only `enter` (forms_flow.py: `assert c.ops[1].val == 0`, the nesting level).
+* **Link to the lifter** (it builds concrete Forms): `canon(build(i)) == canon(symbuild(shape(i))[fields := i, eip := addr(i)])`, canon = serialization after constant
+  folding; `symcheck.py` checks it for EVERY instance of the image (all unique (address, bytes) of the code ranges), `tests/test_symform.py` on synthetic encodings.
+* **Obligation** = `prove.prove_one` (imported); the field variables are free in the unsat query. `shapeprove.py --shard K/N`, farm: `bash ports/fnv-nx/farm/farm_shapeprove.sh K N`.
+  `dsl_sha` = `symform.shape_sha(key)` (no z3). Assumptions: A-FLAT, A-EIPRANGE | A-EIP, A-SEGLIM (the model's segment-limit faults, now also
+  `:OUT-OF-SEGMENT-INSTRUCTION-POINTER`, are excluded; symcheck counts the relative targets of the image that leave [0, 2^32): 0 expected).

@@ -1,3 +1,6 @@
+/* INVARIANT I-FPMASK (fnvlift/fpfacts.py, certified per program by tools/fpstate.py): no x87 or SSE exception is ever unmasked. Everywhere this runtime answers an operation with its MASKED
+   response (indefinite, infinity, denormal, rounded result) and never raises an FP exception, and `fwait` has no effect, it relies on that invariant; the lifter refuses `fwait` where the fact
+   file does not say `holds`. */
 /* x87 runtime of lifted code (R8, W13). Included from fnvl.h; the lifter's PRELUDE inlines it (and x87.h) textually.
    Arithmetic is binary64, native, rounding mode from the host FPCR; the precision control is ignored. A stack slot is a CARRIER (struct fv): the value
    in its source format until the first arithmetic use, so copies are exact and a conversion rounds once. Exact classes (bit for bit like the x87):
@@ -23,6 +26,26 @@ static inline fv fv_ld80(u64 m,u32 se){ return fvmk(FK_M80,m,se&0xffffu); }
 static inline void fnvl_fp_set_rc_x87(u32 rc){ static const unsigned char m[4]={0,2,1,3}; u64 f; __asm__ volatile("mrs %0, fpcr":"=r"(f)); f=(f&~(3ull<<22))|((u64)m[rc&3]<<22); __asm__ volatile("msr fpcr, %0"::"r"(f)); }
 static inline u32 fnvl_fp_x87_flags(void){ u64 f; __asm__ volatile("mrs %0, fpsr":"=r"(f)); return (u32)((f&1)|((f>>1&1)<<2)|((f>>2&1)<<3)|((f>>3&1)<<4)|((f>>4&1)<<5)|((f>>7&1)<<1)); }
 static inline void fnvl_fp_x87_clear(void){ u64 f; __asm__ volatile("mrs %0, fpsr":"=r"(f)); f&=~0x9full; __asm__ volatile("msr fpsr, %0"::"r"(f)); }
+/* STICKY EXCEPTION FLAGS: two shadow sets, one host FPSR (task C4a / B2; the flags are observable: tools/fpstate.py A2, I-FPSTICKY unproven). x86 keeps the x87 flags (FSW IE DE ZE OE UE PE
+   = bits 0-5) and the SSE flags (MXCSR bits 0-5, the same order) in SEPARATE sticky sets; the host has one FPSR. RULE: the live FPSR holds the flags of exactly ONE family, its OWNER
+   (c->fex bits 24-25: 0 nobody, 1 x87, 2 SSE). The x87 set is c->fex bits 0-5 (SF bit 6 and C1 bit 9 beside it), the SSE set is c->mxcsr bits 0-5. Every instruction that can raise a host
+   flag first makes its family the owner (FOWN_X87 / FOWN_SSE): a change of owner folds the live FPSR into the LEAVING family's set and clears it (fown_set). A reader of a set adds the live
+   FPSR only while its family is the owner; FNCLEX / FNINIT / FLDENV / FRSTOR / LDMXCSR replace their own set and clear the FPSR only while their family is the owner. Proof: invariant
+   "FPSR flags = flags raised by the owner's instructions since the last fold" holds initially (owner 0, FPSR clear at thread start), every flag-raising instruction of family F runs with owner F
+   (the macro, or the lifter's must-dataflow f_x87_ctl.fown_prepass proves it: kills = call, entry from outside, the other family), and fown_set preserves it; so each set equals the union of
+   the flags its own family's instructions raised since the last clear, which is the x86 definition of a sticky set. Flags come from the host IEEE operations of the SOURCE types (R8): the x87
+   flags are those of binary64/binary32 arithmetic, not of 80-bit arithmetic. Assumptions: A-RESUME (rt/fnvl_x87.h MMX_ENTER: a resumed handler does not change the owner), A-ORDER (the host
+   compiler keeps an FP operation before the FPSR read that follows it in program order: no FENV_ACCESS in GCC, same assumption as the old FSWV), A-NATIVE (host code between guest
+   instructions, imports and native bodies, runs with the guest's FPSR parked or raises nothing the guest can see: rt/imp.h parks FPSR on imports). ES (bit 7) and B (bit 15) of FSW are 0:
+   they need an unmasked flag, which I-FPMASK (fnvlift/fpfacts.py) excludes. */
+#define FEX_X87 0x27fu
+static inline u32 fown(void){ return (c->fex>>24)&3u; }
+static __attribute__((noinline)) void fown_set(u32 f){ u32 o=fown(), fl=fnvl_fp_x87_flags()&0x3fu; if(o==1u) c->fex|=fl; else if(o==2u) c->mxcsr|=fl; fnvl_fp_x87_clear(); c->fex=(c->fex&~(3u<<24))|(f<<24); }
+#define FOWN_X87() do{ if(__builtin_expect(fown()!=1u,0)) fown_set(1u); }while(0)
+#define FOWN_SSE() do{ if(__builtin_expect(fown()!=2u,0)) fown_set(2u); }while(0)
+static inline u32 fx_live(void){ return fown()==1u?fnvl_fp_x87_flags():0; }          /* the x87 flags still in the FPSR */
+static inline u32 sse_live(void){ return fown()==2u?(fnvl_fp_x87_flags()&0x3fu):0; }   /* the SSE flags still in the FPSR: MXCSR image = c->mxcsr | sse_live() */
+static inline void fx_flags_clear(void){ c->fex&=~FEX_X87; if(fown()==1u) fnvl_fp_x87_clear(); }   /* FNCLEX / FNINIT: the x87 set := 0 */
 /* exact 80-bit image of a carrier */
 static inline fnvl_f80 fv_x(fv a){ u32 f=0; fnvl_f80 r;
   switch(a.k){ case FK_F64: return fnvl_x_from_f64(a.v,&f); case FK_F32: return fnvl_x_from_f32((u32)a.v,&f);
@@ -74,7 +97,7 @@ static inline u32 fv_cmp(fv a,fv b){ u32 f=0;
 #define FCMP(A,B) do{ u32 r_=fv_cmp((A),(B)); c0=(r_>>8)&1; c2=(r_>>10)&1; c3=(r_>>14)&1; c->fex&=~0x200u; }while(0)
 #define FCMPI(A,B) do{ u32 r_=fv_cmp((A),(B)); zf=(r_>>14)&1; pf=(r_>>10)&1; cf=(r_>>8)&1; of=sf=af=0; }while(0)
 #define FXAM(F) do{ fv f_=(F); u32 r_=fnvl_x_xam(fv_x(f_),f_.k==0); c0=(r_>>8)&1; c2=(r_>>10)&1; c3=(r_>>14)&1; c->fex=(c->fex&~0x200u)|(r_&0x200u); }while(0)
-#define FSWV_(TOP) ((u32)(TOP)<<11|(c3<<14)|(c2<<10)|(c0<<8)|fnvl_fp_x87_flags()|c->fex)
+#define FSWV_(TOP) ((u32)(TOP)<<11|(c3<<14)|(c2<<10)|(c0<<8)|fx_live()|(c->fex&FEX_X87))
 #ifdef FNVL_TRACE
 extern "C" u32 fnvl_trace_sw(u32 fsw);   /* test stand: reports the FSW delivered to the guest (sticky exception bits are not compared with the x86 oracle) */
 #define FSWV(TOP) fnvl_trace_sw(FSWV_(TOP))
@@ -93,16 +116,18 @@ extern "C" u32 fnvl_trace_sw(u32 fsw);   /* test stand: reports the FSW delivere
 #define FM_TAN(D,S) do{ u32 f_=0; double x_=fv_d(S); if(fnvl_m_trig_big(x_)) c2=1; else{ c2=0; D=fv_f64(fnvl_m_tan(x_,&f_)); dyn_push(fvmk(FK_F64,0x3ff0000000000000ull,0)); FM_FL(f_); } }while(0)
 #define FM_SINCOS(D,S) do{ u32 f_=0; double x_=fv_d(S), s_, k_; if(fnvl_m_trig_big(x_)) c2=1; else{ c2=0; fnvl_m_sincos(x_,&s_,&k_,&f_); D=fv_f64(s_); dyn_push(fv_f64(k_)); FM_FL(f_); } }while(0)
 #define FM_PREM(D,A,B,NEAR) do{ double a_=fv_d(A), b_=fv_d(B); u32 f_=0, k_=0; D=fv_f64(fnvl_m_fprem(a_,b_,(NEAR),&k_,&f_)); c0=(k_>>8)&1; c2=(k_>>10)&1; c3=(k_>>14)&1; FM_FL(f_|(k_&0x200u)); }while(0)
-/* control: fldcw keeps the word and synchronises the host rounding mode; the MSVC bracket fnstcw/fldcw/fistp/fldcw needs no special case.
-   TODO(R8 fold): fold the bracket (`fnstcw [a]; or ah,0xc; fldcw [b]; fistp; fldcw [a]`) into one truncating fistp (host rounding mode left alone). */
+/* control: fldcw keeps the word and synchronises the host rounding mode. The MSVC bracket `fnstcw [a]; or ah,0xc; fldcw [b]; fistp; fldcw [a]` is exact without any special case:
+   FIST reads the rounding control from c->fcw at the fistp, FLDCW loads it and sets the host mode, the second FLDCW restores both. Folding it into one truncating store is a pure
+   optimisation (it would save two control-word stores and two host-FPCR read-modify-writes per site), not a semantic requirement. */
 #define FLDCW(W) do{ c->fcw=(W)&0xffffu; fnvl_fp_set_rc_x87((c->fcw>>10)&3); }while(0)
-#define FNCLEX() do{ c->fex=0; fnvl_fp_x87_clear(); }while(0)
+#define FNCLEX() do{ fx_flags_clear(); }while(0)
 /* dynamic stack: every x87 instruction of a function whose depth is not static goes through c->fx / c->ftop. An empty operand or a push on a full stack
    sets invalid + stack fault and gives the real indefinite. */
 static inline fv dyn_rd(u32 i){ fv *p=&c->fx[(c->ftop+i)&7]; if(__builtin_expect(!p->k,0)){ c->fex|=0x41; return FV_INDEF; } return *p; }
 static inline void dyn_push(fv v){ u32 t=(c->ftop-1)&7; if(__builtin_expect(c->fx[t].k!=0,0)){ c->fex|=0x41; v=FV_INDEF; } c->ftop=t; c->fx[t]=v; }
-static inline void dyn_pop(void){ fv *p=&c->fx[c->ftop&7]; if(__builtin_expect(!p->k,0)) c->fex|=0x41; p->k=0; c->ftop=(c->ftop+1)&7; }
-static inline void fnvl_x87_init(void){ for(int i=0;i<8;i++) c->fx[i].k=0; c->ftop=0; c->fcw=0x37f; c->fex=0; c->fip=c->fdp=0; fnvl_fp_set_rc_x87(0); fnvl_fp_x87_clear(); }
+static inline void fv_free(fv *p){ if(p->k){ if(p->k!=FK_M80){ fnvl_f80 x=fv_x(*p); p->v=x.m; p->e=x.se; } p->k=0; } }   /* tag := empty; the register KEEPS its 80-bit image (MMX reads it, SDM 9.2) */
+static inline void dyn_pop(void){ fv *p=&c->fx[c->ftop&7]; if(__builtin_expect(!p->k,0)) c->fex|=0x41; fv_free(p); c->ftop=(c->ftop+1)&7; }
+static inline void fnvl_x87_init(void){ for(int i=0;i<8;i++) fv_free(&c->fx[i]); c->ftop=0; c->fcw=0x37f; fx_flags_clear(); c->fip=c->fdp=0; fnvl_fp_set_rc_x87(0); }
 /* fbld / fbstp: packed BCD (rt/x87.c; A-BCD: digits above 9 follow the arithmetic formula d*10^k). The value of an 18-digit number is an integer below 10^18: exact in the M80 carrier. */
 static inline fv fv_ldbcd(u64 lo,u32 hi){ u8 b[10]; u16 h=(u16)hi; __builtin_memcpy(b,&lo,8); __builtin_memcpy(b+8,&h,2); fnvl_f80 r=fnvl_x_from_bcd(b); return fvmk(FK_M80,r.m,r.se); }
 static inline void fv_stbcd(fv a,u64 *lo,u64 *hi){ u8 b[10]; u32 f=0; u16 h; fnvl_x_to_bcd(fv_x(a),c->fcw,b,&f); __builtin_memcpy(lo,b,8); __builtin_memcpy(&h,b+8,2); *hi=h; FM_FL(f); }
@@ -134,9 +159,23 @@ static inline void fx_env_st(u32 a,u32 d32,u32 fsw,u32 cs,u32 ds){ u32 ftw=0, ip
 /* fldenv / frstor (SDM Vol 1 8.1.10, 32-bit layout fig 8-9, 16-bit layout fig 8-11; assumptions A-EMPTY and A-ES: see f_x87_ctl.py env()). Dynamic stack only. The image words: FCW at 0,
    FSW at w, FTW at 2w with w = 4 (32-bit operand size) or 2; FIP at 12 / 6, FDP at 20 / 10; frstor's ST(i) images follow the 7 dwords (28 bytes) / 7 words (14 bytes) of the environment,
    10 bytes each in ST order. FIP and FDP are loaded; FCS, FOP, FDS are derived (A-FOP, A-FDS). */
-static inline u32 fx_env_ld(u32 a,u32 w,u32 *ftw){ u32 fsw=M16(a+w); *ftw=M16(a+2*w); FLDCW(M16(a)); c->ftop=(fsw>>11)&7; c->fex=fsw&0x27fu; fnvl_fp_x87_clear();
+static inline u32 fx_env_ld(u32 a,u32 w,u32 *ftw){ u32 fsw=M16(a+w); *ftw=M16(a+2*w); FLDCW(M16(a)); c->ftop=(fsw>>11)&7; c->fex=(c->fex&~FEX_X87)|(fsw&FEX_X87); if(fown()==1u) fnvl_fp_x87_clear();
   c->fip=w==4?M32(a+12u):M16(a+6u); c->fdp=w==4?M32(a+20u):M16(a+10u); return fsw; }
 #define FLDENV(A,D32) do{ u32 ftw_, a_=(A), fsw_=fx_env_ld(a_,(D32)?4u:2u,&ftw_); c0=(fsw_>>8)&1; c2=(fsw_>>10)&1; c3=(fsw_>>14)&1; \
   for(u32 p_=0;p_<8;p_++){ if(((ftw_>>(2*p_))&3)==3) c->fx[p_].k=0; else if(!c->fx[p_].k) c->fx[p_]=FV_INDEF; } }while(0)
 #define FRSTOR(A,D32) do{ u32 ftw_, a_=(A), r_=a_+((D32)?28u:14u), fsw_=fx_env_ld(a_,(D32)?4u:2u,&ftw_); c0=(fsw_>>8)&1; c2=(fsw_>>10)&1; c3=(fsw_>>14)&1; \
   for(u32 i_=0;i_<8;i_++){ u32 p_=(c->ftop+i_)&7; if(((ftw_>>(2*p_))&3)==3) c->fx[p_].k=0; else c->fx[p_]=fv_ld80(M64(r_+10*i_),M16(r_+10*i_+8u)); } }while(0)
+
+/* MMX aliasing (SDM Vol 1 9.2 "MMX state and the x87 FPU", 12.2): MM0-MM7 are the 64-bit significands of the PHYSICAL x87 registers R0-R7 (c->fx[0..7]), there is no second register file.
+   Any MMX instruction except EMMS sets TOP = 0 and the whole tag word to valid (00); a write of MMi sets the exponent and sign field of Ri (bits 64-79) to all ones; a read sees the significand.
+   MMX_ENTER makes every carrier an M80 image (a carrier of another kind is converted exactly, an empty register contributes the 80-bit image it kept, see fv_free) and TOP = 0; after it
+   MMR(i) = c->fx[i].v and MMW(i,v) are the whole of the architectural effect. EMMS: all tags empty, contents and TOP unchanged. The lifter emits MMX_ENTER before an MMX instruction unless a
+   static dataflow proves the registers are already canonical on every path (f_x87_ctl.mmx_prepass). A-RESUME: a guest exception handler that resumes (ContinueExecution) into an MMX region does not
+   leave the interrupted x87/MMX register file in another carrier format (a program that did would read clobbered MMX registers on the real CPU too). A-STALE: the bits of a register popped by a
+   static-stack function are not written back (the static slot is a C local), so an MMX read of such a register that no MMX write and no dynamic-stack pop produced reads older bits (undefined
+   data on the real CPU as well: no correct program's result depends on it). */
+static inline void mmx_canon(void){ for(int i=0;i<8;i++){ fv *p=&c->fx[i]; if(p->k!=FK_M80){ if(p->k){ fnvl_f80 x=fv_x(*p); p->v=x.m; p->e=x.se; } p->k=FK_M80; } } }
+#define MMX_ENTER() do{ c->ftop=0; mmx_canon(); }while(0)
+#define MMX_EMMS() do{ for(int i_=0;i_<8;i_++) fv_free(&c->fx[i_]); }while(0)
+#define MMR(i) (c->fx[(i)].v)
+#define MMW(i,val) do{ u64 v_=(val); c->fx[(i)].v=v_; c->fx[(i)].e=0xffffu; }while(0)

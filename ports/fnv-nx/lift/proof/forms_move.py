@@ -1,5 +1,6 @@
 """Moves, conversions, stack, EFLAGS and string families (see forms.py)."""
-from forms import *
+from fnvlift.dsl import REGS, C, V, ashr, bit, concat, eq, extract, ite, load, msb, sext, trunc, ult, zext
+from proof.forms import Op, cond, ea, handler, pzs, rd, wr
 
 LAHF_SDM = 'LAHF/SAHF: AH = SF:ZF:0:AF:0:PF:1:CF'
 MODIFIABLE = 0x00240100 | 0x4000      # EFLAGS bits (besides the six, DF) POPFD may change in user mode: TF, NT, AC, ID (IF/IOPL need privilege)

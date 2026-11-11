@@ -1,5 +1,6 @@
 """Control-flow and fault forms (see forms.py): the eip effect carries the branch; the target of a relative branch is the capstone absolute target."""
-from forms import *
+from fnvlift.dsl import C, V, eq, ite, load
+from proof.forms import cond, handler, rd
 
 def target(c):
     o = c.ops[0]

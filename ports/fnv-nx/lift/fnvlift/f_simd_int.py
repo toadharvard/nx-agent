@@ -1,4 +1,4 @@
-"""Integer SIMD, SSE2 (xmm) and MMX (mm0-7, c->mm[]) (W6).  One lane-statement table serves both register files: an mm operand is
+"""Integer SIMD, SSE2 (xmm) and MMX (mm0-7 = the x87 physical registers, rt/fnvl_x87.h) (W6).  One lane-statement table serves both register files: an mm operand is
 an xmm_t whose upper half is zero and only its low 64 bits are written back (see f_sse.vec); handlers register in f_sse.SSE.
 Lane-wise semantics are identical for 64- and 128-bit operands; the ops where they differ (unpack high, pack, shuffles) are explicit."""
 from .core import op, Unsupported
@@ -113,7 +113,7 @@ def h_pmovmskb(cx, ins, d0, s1):
 
 @sse_op('movntq')
 def h_movntq(cx, ins, d0, s1):
-    cx.em('M64(%s)=c->mm[%d];' % (cx.ea(ins, d0), vreg(ins, s1)))
+    cx.em('M64(%s)=MMR(%d);' % (cx.ea(ins, d0), vreg(ins, s1)))
 
 
 @sse_op('maskmovq', 'maskmovdqu')
@@ -125,4 +125,4 @@ def h_maskmov(cx, ins, d0, s1):      # byte store to [edi] where the mask byte's
 @op('emms')
 def h_emms(cx, ins):
     cx.kinds.add('mmx')
-    cx.em('MMX_TOUCH();')
+    cx.em('MMX_EMMS();')
