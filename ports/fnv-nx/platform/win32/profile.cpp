@@ -5,7 +5,7 @@
  *
  * What the launcher writes on a first run, observed on the owner's install (GOG 1.4.0.525(a)) under Wine with the full
  * Data/ (S5-data, journal inbox s5-data-001):
- *   My Games\FalloutNV\Fallout.ini       a copy of C:\FalloutNV\Fallout_default.ini
+ *   (My Games\FalloutNV\Fallout.ini is not made here: the exe's own start-up code creates it, see below)
  *   My Games\FalloutNV\FalloutPrefs.ini  Fallout_default.ini plus [Display] sD3DDevice="<adapter 0's Description>"
  *                                        (no preset: Low/Medium/High/VeryHigh.ini are only the Options dialog's)
  *   AppData\Local\FalloutNV\plugins.txt  empty (the add-ons load through their Data\*.nam files)
@@ -13,6 +13,11 @@
  * The adapter's Description comes from d3d9.dll's Direct3DCreate9()->GetAdapterIdentifier(0), as the launcher gets it
  * (the null device: "fnv-nx null D3D9 device"); when no d3d9 module answers, the null device's name is written.
  * Machine-specific keys the launcher's Options dialog would set for this screen: [Display] iSize W/H 1280x720.
+ *
+ * Fallout.ini is the exe's own file: when My Games\FalloutNV\Fallout.ini is missing, the exe (its profile-path function:
+ * SHGetFolderPathA(CSIDL_PERSONAL), CreateDirectoryA "My Games" and "FalloutNV", GetFileAttributesA through the CRT's
+ * _access, then CopyFileA(Fallout_default.ini, Fallout.ini, bFailIfExists=1)) copies it from Fallout_default.ini itself; every call
+ * on that path is a function of this layer, so the declared machine has no Fallout.ini on a fresh install, as a real one.
  *
  * Returns a mask of FNVNX_PROFILE_* for the files it made (0: all were there or nothing could be made). */
 #include "w32.h"
@@ -61,9 +66,6 @@ static void adapter_description(char *out, size_t n)
 extern "C" unsigned fnvnx_first_run_profile(void)
 {
     unsigned made = 0;
-    if (!exists(PROFILE "Fallout.ini") && exists(INSTALL "Fallout_default.ini") &&
-        CopyFileA(INSTALL "Fallout_default.ini", PROFILE "Fallout.ini", TRUE))
-        made |= FNVNX_PROFILE_INI;
     if (!exists(PROFILE "FalloutPrefs.ini") && exists(INSTALL "Fallout_default.ini") &&
         CopyFileA(INSTALL "Fallout_default.ini", PROFILE "FalloutPrefs.ini", TRUE)) {
         char dev[600], quoted[620];
@@ -79,8 +81,7 @@ extern "C" unsigned fnvnx_first_run_profile(void)
     if (!exists(LOCAL "NVDLCList.txt"))
         make_empty(LOCAL "NVDLCList.txt");
     if (made)
-        W32Log().s("first-run profile: made").s(made & FNVNX_PROFILE_INI ? " Fallout.ini" : "")
-                .s(made & FNVNX_PROFILE_PREFS ? " FalloutPrefs.ini" : "")
+        W32Log().s("first-run profile: made").s(made & FNVNX_PROFILE_PREFS ? " FalloutPrefs.ini" : "")
                 .s(made & FNVNX_PROFILE_PLUGINS ? " plugins.txt" : "").s("\n").emit();
     return made;
 }

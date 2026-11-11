@@ -55,7 +55,7 @@ void fnvnx_path_reset(const char *root);        /* default mounts under root (NU
 DWORD fnvnx_path_map(const char *win_path, char *host, size_t host_size);
 void fnvnx_set_command_line(int argc, char **argv);
 /* the first run's profile files, as the PC launcher writes them (platform/win32/profile.cpp); a mask of what it made */
-#define FNVNX_PROFILE_INI 1u      /* My Games\FalloutNV\Fallout.ini: a copy of Fallout_default.ini */
+/* bit 1 is retired: Fallout.ini is made by the exe itself, not by this layer */
 #define FNVNX_PROFILE_PREFS 2u    /* My Games\FalloutNV\FalloutPrefs.ini: Fallout_default.ini + [Display] sD3DDevice */
 #define FNVNX_PROFILE_PLUGINS 4u  /* AppData\Local\FalloutNV\plugins.txt: empty, as the launcher leaves it */
 unsigned fnvnx_first_run_profile(void);
