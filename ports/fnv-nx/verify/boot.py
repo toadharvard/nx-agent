@@ -62,7 +62,7 @@ def _plan(a, raw):
     if not lo < hi or lo < bootlayout.MIN_ADDR:
         raise bootlayout.LayoutError("--keys: need %x <= lo < hi, got 0x%x..0x%x" % (bootlayout.MIN_ADDR, lo, hi))
     rows.append(("keys", lo // 4096 * 4096, (hi + 4095) // 4096 * 4096))
-    return bootlayout.plan(bootlayout.parse_elf(raw), sorted(rows, key=lambda r: r[1]), a.heap_size)
+    return bootlayout.plan(bootlayout.parse_elf(raw), sorted(rows, key=lambda r: r[1]), a.heap_size, n_stacks=a.threads)
 
 
 def run(a):
@@ -78,7 +78,8 @@ def run(a):
     watch = bootmiles.resolve(table, manifest, bootmiles.read_symtab(a.elf), base)
     host = _host_lines(watch["host"])
     kw = {"hc_slice": a.hc_slice} if a.hc_slice else {}
-    m = bootmachine.Machine(raw, plan, boothost.Services(a.root, a.game), limit_instructions=a.limit_instructions, profile=a.profile, **kw)
+    m = bootmachine.Machine(raw, plan, boothost.Services(a.root, a.game), limit_instructions=a.limit_instructions, profile=a.profile,
+                            n_stacks=a.threads, **kw)
     ic = m.attach_icount(a.icount_spec if a.icount_spec else {}, base)
     prog, log = bootmiles.Progress(table), []
 
@@ -134,6 +135,9 @@ def main(argv=None):
     sp.add_argument("--icount-spec")
     sp.add_argument("--limit-instructions", type=lambda s: int(s, 0))
     sp.add_argument("--hc-slice", type=lambda s: int(s, 0))
+    sp.add_argument("--threads", type=int, default=256,
+                    help="guest thread stacks the stage provides (a number of the run, not of the contract; beyond it "
+                         "thread_create returns 0 as the header says for exhaustion); default 256")
     sp.add_argument("--profile", choices=("handheld", "docked"), default="handheld",
                     help="what FNVNX_PLAT_DISPLAY_DOCKED answers: docked 1, handheld 0 (default handheld)")
     a = ap.parse_args(argv)
