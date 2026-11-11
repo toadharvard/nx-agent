@@ -174,12 +174,6 @@ def fix_lines(cx, a, n0):
         L[i] = t
 
 
-def fold_fcw_bracket(cx, ins):
-    """TODO(R8, E1 fold): recognise the MSVC bracket `fnstcw [a]; ...; or ah,0xc; fldcw [b]; fistp m; fldcw [a]` inside the function and emit one truncating
-    store (fisttp semantics) without touching the host rounding mode. Not implemented: the control word is honoured dynamically, which is correct without the fold."""
-    return False
-
-
 def env(cx, ins, b0, g):
     """fldenv (D9 /4), fnstenv (D9 /6), frstor (DD /4), fnsave (DD /6). The image is the protected-mode layout of SDM Vol 1 8.1.10 figures 8-9 (32-bit operand size: m28 / m108)
     and 8-11 (66 prefix: m14 / m94), selected by the operand-size prefix; the whole x87 state lives in c->fx / c->ftop, so a function with one of these is lifted with the
@@ -210,8 +204,6 @@ def ctl(cx, ins, b0, mr, g):
     top = '((ft0-%d)&7)' % cx.xdp if cx.xm == 's' else 'c->ftop'
     if mr < 0xc0:
         if b0 == 0xd9 and g == 5:
-            if fold_fcw_bracket(cx, ins):
-                return True
             em('FLDCW(M16(%s));' % cx.ea(ins, cx.ops[0]))
         elif b0 == 0xd9 and g == 7:
             em('M16(%s)=c->fcw;' % cx.ea(ins, cx.ops[0]))

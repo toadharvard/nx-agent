@@ -93,8 +93,9 @@ extern "C" u32 fnvl_trace_sw(u32 fsw);   /* test stand: reports the FSW delivere
 #define FM_TAN(D,S) do{ u32 f_=0; double x_=fv_d(S); if(fnvl_m_trig_big(x_)) c2=1; else{ c2=0; D=fv_f64(fnvl_m_tan(x_,&f_)); dyn_push(fvmk(FK_F64,0x3ff0000000000000ull,0)); FM_FL(f_); } }while(0)
 #define FM_SINCOS(D,S) do{ u32 f_=0; double x_=fv_d(S), s_, k_; if(fnvl_m_trig_big(x_)) c2=1; else{ c2=0; fnvl_m_sincos(x_,&s_,&k_,&f_); D=fv_f64(s_); dyn_push(fv_f64(k_)); FM_FL(f_); } }while(0)
 #define FM_PREM(D,A,B,NEAR) do{ double a_=fv_d(A), b_=fv_d(B); u32 f_=0, k_=0; D=fv_f64(fnvl_m_fprem(a_,b_,(NEAR),&k_,&f_)); c0=(k_>>8)&1; c2=(k_>>10)&1; c3=(k_>>14)&1; FM_FL(f_|(k_&0x200u)); }while(0)
-/* control: fldcw keeps the word and synchronises the host rounding mode; the MSVC bracket fnstcw/fldcw/fistp/fldcw needs no special case.
-   TODO(R8 fold): fold the bracket (`fnstcw [a]; or ah,0xc; fldcw [b]; fistp; fldcw [a]`) into one truncating fistp (host rounding mode left alone). */
+/* control: fldcw keeps the word and synchronises the host rounding mode. The MSVC bracket `fnstcw [a]; or ah,0xc; fldcw [b]; fistp; fldcw [a]` is exact without any special case:
+   FIST reads the rounding control from c->fcw at the fistp, FLDCW loads it and sets the host mode, the second FLDCW restores both. Folding it into one truncating store is a pure
+   optimisation (it would save two control-word stores and two host-FPCR read-modify-writes per site), not a semantic requirement. */
 #define FLDCW(W) do{ c->fcw=(W)&0xffffu; fnvl_fp_set_rc_x87((c->fcw>>10)&3); }while(0)
 #define FNCLEX() do{ c->fex=0; fnvl_fp_x87_clear(); }while(0)
 /* dynamic stack: every x87 instruction of a function whose depth is not static goes through c->fx / c->ftop. An empty operand or a push on a full stack
