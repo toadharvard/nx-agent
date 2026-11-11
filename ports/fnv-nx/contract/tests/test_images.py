@@ -100,5 +100,22 @@ img = dllkind.images_of({n: [images.iat.norm_dll(x) for x, _ in m.imports] for n
 check("modules uses the same function: x is an image, y and its dependent z are declared", img == {"x.dll"}, img)
 check("modules.closure treats a declared dll as satisfied, not as a missing module",
       [m.name for m in modules.closure(modules.PE(pe(["x.dll", "y.dll"]), "e"), {"kernel32.dll"}, {"x.dll": mods["x.dll"]}, {"y.dll", "z.dll"})] == ["x.dll"])
+import types  # noqa: E402
+
+
+def fake(name, size):
+    return types.SimpleNamespace(name=name, base=None, relocs=0, pe=types.SimpleNamespace(size_of_image=size, base=0x10000000, check_relocations=lambda: 0))
+
+
+exe = types.SimpleNamespace(base=0x400000, size_of_image=0x1000000)
+a = [fake("binkw32.dll", 0x68000), fake("libvorbis.dll", 0x133000), fake("libvorbisfile.dll", 0x1e000)]
+modules.assign_bases(exe, a)
+before = {m.name: m.base for m in a}
+b = [fake("binkw32.dll", 0x68000), fake("libvorbis.dll", 0x133000), fake("libvorbisfile.dll", 0x1e000), fake("ssce5432.dll", 0x39000)]
+modules.assign_bases(exe, b)
+check("adding an image whose name sorts last moves no base", {m.name: m.base for m in b if m.name in before} == before)
+c = [fake("atimgpud.dll", 0x29000)] + [fake(m.name, m.pe.size_of_image) for m in a]
+modules.assign_bases(exe, c)
+check("adding an image whose name sorts first moves the later ones (bases are a function of the name order)", c[1].base != before["binkw32.dll"])
 print("FAILED: %d" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)

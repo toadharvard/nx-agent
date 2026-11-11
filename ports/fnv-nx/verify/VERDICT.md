@@ -157,6 +157,7 @@ Used by `gpa`, `reach`, `reachlink` (not an input of `contract_inputs.json`) and
 - **declared**: found, no bridge row, not an image: the declared machine cannot load it, because its closure needs a dll that is neither found nor bridged. Its entries must be served by bridge rows, and a reached export without a bridge row is red, owner L5. The walk does not continue through it.
 - **platform**: neither found nor bridged; a platform import of gate `imports`, owner L5.
 The image set is the exe plus the images reached from its normal and delay-load import directories through images only. `modules.py` writes the images to `modules.tsv` (they alone get an address range) and the bridge and declared dlls to `modules_declared.tsv` (name, kind `bridge` or `unloadable`, sha256, size, missing imports). Facts of dynamic LoadLibrary names belong to the `gpa` gate, not to this rule.
+Bases are a pure function of the image set in name order: the images are sorted by lowercase name and packed from the end of the exe image, each aligned up to 64 KiB (`modules.assign_bases`), so an image moves only when an image with a smaller name is added or removed. `ssce5432.dll` sorts after `libvorbis.dll` and `libvorbisfile.dll`, so if L5 bridges `comdlg32.dll` and `ssce5432` becomes an image, no existing base moves (`test_images.py` checks this property).
 
 ## References of tests (class 10, gate `oracle`)
 
