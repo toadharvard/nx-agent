@@ -118,6 +118,7 @@ struct window {
     DWORD style, exstyle, tid;
     LONG userdata, id;
     HINSTANCE inst;
+    window *lastpop;                                             /* top-level unowned window: its most recently active popup (NULL: itself) */
     window *parent, *owner, *first, *last, *next, *prev, *all;   /* first = top of the z-order, next = below */
     RECT wr, rr;                                                 /* window rectangle in screen coordinates; normal-state rectangle */
     int restore_max, paint, destroying, hasmenu;
@@ -134,6 +135,15 @@ static wclass *g_classes;
 static unsigned g_next_atom = 0xC000;
 static window g_desk, *g_all, *g_all_tail, *g_active, *g_capture, *g_focus, *g_focus_saved;   /* g_capture: the window that has the mouse (SetCapture) */
 static os_lock_t g_ui_lock;
+/* w became the active window: it is the last active popup of the unowned top-level window at the end of its owner chain */
+static void note_active_l(window *w)
+{
+    window *r = w;
+    while (r->owner && r->owner != &g_desk)
+        r = r->owner;
+    if (r != w && !(r->style & S_CHILD))
+        r->lastpop = w;
+}
 
 static char *dup_str(const char *s)
 {
@@ -725,6 +735,7 @@ extern "C" void fnwin_set_active(HWND h)
 {
     os_lock(&g_ui_lock);
     g_active = wnd_l(h) && h != (HWND)&g_desk ? (window *)h : NULL;
+    if (g_active) note_active_l(g_active);
     os_unlock(&g_ui_lock);
 }
 extern "C" int fnwin_toplevels(HWND *out, int max)
@@ -828,6 +839,7 @@ static void activate(window *w)   /* w is a top-level window */
         return;   /* the hook refuses the activation */
     os_lock(&g_ui_lock);
     g_active = w;
+    note_active_l(w);
     os_unlock(&g_ui_lock);
     HWND hw = (HWND)w, ho = (HWND)old;
     if (old) {
@@ -1136,6 +1148,7 @@ static void destroy_rec(window *w, bool skip_destroy)
     g_all_tail = NULL;
     for (window *p = g_all; p; p = p->all) g_all_tail = p;
     if (g_active == w) g_active = NULL;
+    for (window *p = g_all; p; p = p->all) if (p->lastpop == w) p->lastpop = NULL;   /* it is its own last popup again */
     if (g_focus == w) g_focus = NULL;
     if (g_focus_saved == w) g_focus_saved = NULL;
     if (g_capture == w) g_capture = NULL;   /* a destroyed window loses the capture */
@@ -2152,6 +2165,19 @@ extern "C" BOOL SetForegroundWindow(HWND h)
 }
 extern "C" HWND GetForegroundWindow(void) { os_lock(&g_ui_lock); HWND h = (HWND)g_active; os_unlock(&g_ui_lock); return h; }
 extern "C" HWND GetActiveWindow(void) { return GetForegroundWindow(); }
+/* MSDN GetLastActivePopup: for an unowned top-level window the owned popup that was most recently active (activation is
+ * recorded in note_active_l); hwnd itself when it was the last active, owns no popup, is a child or is owned. A window
+ * that is not one: NULL with ERROR_INVALID_WINDOW_HANDLE. */
+extern "C" HWND GetLastActivePopup(HWND h)
+{
+    window *w = wnd_e(h);
+    if (!w)
+        return NULL;
+    os_lock(&g_ui_lock);
+    window *r = (w->style & S_CHILD) || w->owner ? w : (w->lastpop ? w->lastpop : w);
+    os_unlock(&g_ui_lock);
+    return (HWND)r;
+}
 
 extern "C" BOOL SetWindowTextA(HWND h, LPCSTR t)
 {

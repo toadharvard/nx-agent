@@ -332,3 +332,146 @@ TEST(gpa_fls_callback_reentrancy)
     CHECK_EQ(cb_count(), 1);
     CHECK_EQ(g_bnd_lock_violations, 0);
 }
+
+/* ---- group 2: user32 GetLastActivePopup, GetProcessWindowStation, GetUserObjectInformationA */
+extern "C" {
+HWND GetLastActivePopup(HWND);
+HANDLE GetProcessWindowStation(void);
+BOOL GetUserObjectInformationA(HANDLE, int, void *, DWORD, LPDWORD);
+HANDLE fnvnx_default_desktop(void);
+}
+#ifndef ERROR_INVALID_HANDLE
+#define ERROR_INVALID_HANDLE 6L
+#endif
+#define ERROR_INSUFF 122L
+
+static LRESULT gpa_proc(HWND h, UINT m, WPARAM w, LPARAM l) { return DefWindowProcA(h, m, w, l); }
+static HWND gpa_win(DWORD style, HWND parent)
+{
+    static bool reg;
+    if (!reg) {
+        WNDCLASSA wc;
+        memset(&wc, 0, sizeof wc);
+        wc.lpfnWndProc = gpa_proc;
+        wc.lpszClassName = "GpaWin";
+        RegisterClassA(&wc);
+        reg = true;
+    }
+    return CreateWindowExA(0, "GpaWin", "g", style, 10, 10, 200, 150, parent, NULL, NULL, NULL);
+}
+
+TEST(gpa_user32_exports_by_name)
+{
+    CHECK(export_of("user32", "GetLastActivePopup") == (void *)&GetLastActivePopup);
+    CHECK(export_of("user32", "GetProcessWindowStation") == (void *)&GetProcessWindowStation);
+    CHECK(export_of("user32", "GetUserObjectInformationA") == (void *)&GetUserObjectInformationA);
+    HMODULE u = LoadLibraryA("USER32.DLL");
+    CHECK(GetProcAddress(u, "GetLastActivePopup") != NULL);
+}
+
+TEST(gpa_get_last_active_popup)
+{
+    const DWORD OVL = 0x00CF0000, POPUP = 0x80000000u, VIS = 0x10000000, CHILD = 0x40000000;
+    SetLastError(0);
+    CHECK(GetLastActivePopup(NULL) == NULL);
+    CHECK_EQ(GetLastError(), 1400);
+    CHECK(GetLastActivePopup((HWND)(uintptr_t)0x7ee4) == NULL);
+    HWND o = gpa_win(OVL | VIS, NULL);
+    CHECK(GetLastActivePopup(o) == o);                     /* no popup owned */
+    HWND p1 = gpa_win(POPUP | VIS, o);
+    HWND p2 = gpa_win(POPUP | VIS, o);
+    HWND c = gpa_win(CHILD | VIS, o);
+    SetForegroundWindow(p1);
+    CHECK(GetActiveWindow() == p1);
+    CHECK(GetLastActivePopup(o) == p1);
+    SetForegroundWindow(p2);
+    CHECK(GetLastActivePopup(o) == p2);
+    SetForegroundWindow(o);
+    CHECK(GetLastActivePopup(o) == p2);                    /* the popup remains the last active one while the owner is active */
+    SetForegroundWindow(p1);
+    CHECK(GetLastActivePopup(o) == p1);
+    /* a popup, a child, an owned window: itself */
+    CHECK(GetLastActivePopup(p1) == p1);
+    CHECK(GetLastActivePopup(p2) == p2);
+    CHECK(GetLastActivePopup(c) == c);
+    HWND o2 = gpa_win(OVL | VIS, NULL);                    /* an unrelated top-level window has no popups */
+    CHECK(GetLastActivePopup(o2) == o2);
+    DestroyWindow(p1);                                     /* the popup goes: the owner is its own last active popup */
+    CHECK(GetLastActivePopup(o) == o);
+    DestroyWindow(p2);
+    DestroyWindow(o2);
+    DestroyWindow(o);
+    CHECK(GetLastActivePopup(o) == NULL);
+}
+
+TEST(gpa_window_station_and_user_object)
+{
+    HANDLE ws = GetProcessWindowStation();
+    CHECK(ws != NULL && ws != INVALID_HANDLE_VALUE);
+    CHECK(GetProcessWindowStation() == ws);               /* stable */
+    HANDLE dk = fnvnx_default_desktop();
+    CHECK(dk != NULL && dk != ws);
+    DWORD need = 0;
+    uint32_t fl[3] = { 9, 9, 9 };
+    CHECK(GetUserObjectInformationA(ws, 1, fl, sizeof fl, &need));
+    CHECK_EQ(need, 12);
+    CHECK(fl[0] == 0 && fl[1] == 0 && fl[2] == 1);        /* WSF_VISIBLE */
+    CHECK(GetUserObjectInformationA(dk, 1, fl, sizeof fl, NULL));
+    CHECK(fl[2] == 0);
+    char name[32];
+    CHECK(GetUserObjectInformationA(ws, 2, name, sizeof name, &need));
+    CHECK_STR(name, "WinSta0");
+    CHECK_EQ(need, 8);
+    CHECK(GetUserObjectInformationA(dk, 2, name, sizeof name, &need));
+    CHECK_STR(name, "Default");
+    CHECK(GetUserObjectInformationA(ws, 3, name, sizeof name, &need));
+    CHECK_STR(name, "WindowStation");
+    CHECK_EQ(need, 14);
+    CHECK(GetUserObjectInformationA(dk, 3, name, sizeof name, &need));
+    CHECK_STR(name, "Desktop");
+    need = 77;
+    CHECK(GetUserObjectInformationA(ws, 4, name, sizeof name, &need));   /* no SID */
+    CHECK_EQ(need, 0);
+    memset(name, 'x', sizeof name);
+    need = 0;
+    SetLastError(0);
+    CHECK(!GetUserObjectInformationA(ws, 2, name, 7, &need));
+    CHECK_EQ(GetLastError(), ERROR_INSUFF);
+    CHECK_EQ(need, 8);
+    CHECK(name[0] == 'x');
+    need = 0;
+    SetLastError(0);
+    CHECK(!GetUserObjectInformationA(ws, 3, NULL, 0, &need));
+    CHECK_EQ(GetLastError(), ERROR_INSUFF);
+    CHECK_EQ(need, 14);
+    SetLastError(0);
+    CHECK(!GetUserObjectInformationA(ws, 1, fl, 11, &need));
+    CHECK_EQ(GetLastError(), ERROR_INSUFF);
+    CHECK_EQ(need, 12);
+    SetLastError(0);
+    CHECK(!GetUserObjectInformationA(ws, 1, NULL, 12, &need));
+    CHECK_EQ(GetLastError(), 998);
+    CHECK(GetUserObjectInformationA(ws, 2, name, 8, &need));   /* exactly enough */
+    SetLastError(0);
+    CHECK(!GetUserObjectInformationA((HANDLE)(uintptr_t)0x7ee4, 1, fl, sizeof fl, &need));
+    CHECK_EQ(GetLastError(), ERROR_INVALID_HANDLE);
+    SetLastError(0);
+    CHECK(!GetUserObjectInformationA(NULL, 1, fl, sizeof fl, &need));
+    CHECK_EQ(GetLastError(), ERROR_INVALID_HANDLE);
+    HANDLE ev = CreateEventA(NULL, TRUE, FALSE, NULL);   /* a handle of another object type */
+    SetLastError(0);
+    CHECK(!GetUserObjectInformationA(ev, 1, fl, sizeof fl, &need));
+    CHECK_EQ(GetLastError(), ERROR_INVALID_HANDLE);
+    CloseHandle(ev);
+    int badidx[] = { 0, 5, 6, 7, -1, 100 };
+    for (int i : badidx) {
+        SetLastError(0);
+        CHECK(!GetUserObjectInformationA(ws, i, fl, sizeof fl, &need));
+        CHECK_EQ(GetLastError(), ERROR_INVALID_PARAMETER);
+    }
+    CHECK(CloseHandle(ws));                               /* a closed handle is replaced by a fresh one */
+    HANDLE ws2 = GetProcessWindowStation();
+    CHECK(ws2 != NULL);
+    CHECK(GetUserObjectInformationA(ws2, 2, name, sizeof name, &need));
+    CHECK_STR(name, "WinSta0");
+}

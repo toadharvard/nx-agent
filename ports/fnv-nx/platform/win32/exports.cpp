@@ -139,6 +139,9 @@ BOOL UnregisterClassA(LPCSTR, HINSTANCE);
 HCURSOR SetCursor(HCURSOR);
 BOOL SetDoubleClickTime(UINT);
 DWORD SetClassLongA(HWND, int, LONG);
+HWND GetLastActivePopup(HWND);                                 /* window.cpp */
+HANDLE GetProcessWindowStation(void);                           /* winsta.cpp */
+BOOL GetUserObjectInformationA(HANDLE, int, void *, DWORD, LPDWORD);
 }
 
 namespace {
@@ -203,7 +206,7 @@ const exp g_exports[] = {
     U(ShowCursor), U(ShowWindow), U(SwapMouseButton), U(TranslateMessage), U(UnhookWindowsHookEx),
     U(GetTopWindow), U(IsWindowVisible), U(GetWindowThreadProcessId), U(UnregisterClassA), U(SetClassLongA),
     U(UpdateWindow), U(GetWindowTextA), U(GetClassNameA), U(EnumDisplayDevicesA), U(ChangeDisplaySettingsA), U(GetClassLongA),
-    U(SetCursor), U(SetDoubleClickTime),
+    U(SetCursor), U(SetDoubleClickTime), U(GetLastActivePopup), U(GetProcessWindowStation), U(GetUserObjectInformationA),
     E("comctl32", InitCommonControlsEx), E("comctl32", ImageList_LoadImageA), E("comctl32", ImageList_Destroy),
     E("comctl32", ImageList_GetImageCount), E("comctl32", ImageList_GetIconSize),
     K(FindResourceA), K(FindResourceExA), K(FindResourceW), K(FindResourceExW), K(LoadResource), K(LockResource), K(SizeofResource), K(FreeResource),

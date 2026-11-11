@@ -390,7 +390,7 @@ TEST(crt_k32_create_file_w_and_modules)
     HMODULE u = LoadLibraryA("USER32.DLL");
     CHECK(u != NULL);
     CHECK((void *)GetProcAddress(u, "MessageBoxA") == (void *)&MessageBoxA);
-    CHECK(GetProcAddress(u, "GetProcessWindowStation") == NULL);
+    CHECK((void *)GetProcAddress(u, "GetProcessWindowStation") != NULL);   /* W27 */
     CHECK(GetModuleHandleW(L"mscoree.dll") == NULL);
 }
 
