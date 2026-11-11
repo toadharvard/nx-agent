@@ -339,6 +339,7 @@ def analyze(args):
                 offs.append((x, td))
         if i.prefix[0] == 0xf0:
             misc.append((x, 'lock'))
+            misc.append((x, 'lockm:' + m + (':mem' if any(p.type == X.X86_OP_MEM for p in o) else ':reg')))
         if m in ('xchg', 'cmpxchg', 'xadd') and any(p.type == X.X86_OP_MEM for p in o):
             misc.append((x, m))
         if m == 'call':
@@ -596,9 +597,16 @@ def main():
         return any(pick(e, mode) for e in frame[g][1])
     tot, ent, imp, fl = Counter(), defaultdict(Counter), Counter(), Counter()
     pending = []
+    # R9 export: per instruction address x, over EVERY entry whose extent contains x (not only its owner): the class of each access seen;
+    # x is all-plain only if it has >= 1 recorded access and all of them, in all entries, are in PLAIN
+    seen, nonplain = set(), set()
+    atom = []
     for a in order:
         r = R[a]; mine = lambda x: owner[x] == a
         for x, ls, w, cls in r['nf']:
+            seen.add(x)
+            if cls not in PLAIN:
+                nonplain.add(x)
             if mine(x):
                 k = 'tls' if cls.startswith('tls:') else cls
                 if cls.startswith('tls:'):
@@ -607,12 +615,13 @@ def main():
         for x, kd in r['misc']:
             if mine(x):
                 fl[kd] += 1
+                if kd in ('lock', 'xchg', 'cmpxchg', 'xadd'):
+                    atom.append((x, kd))
         for x, ls, w, role, c in r['fr']:
-            if not mine(x):
-                continue
+            cnt = mine(x)            # counters below only for the owner; the class is computed for every entry containing x
             ps = [p for p in (par.get(a, []) if kind[a] in FUNK else [a]) if p in R and kind[p] not in FUNK]
             if not ps:
-                cls = 'stack-unk'; res_t['funclet-parent-unknown'] += 1
+                cls = 'stack-unk'; res_t['funclet-parent-unknown'] += cnt
             else:
                 cl = {}
                 for g in ps:
@@ -627,20 +636,26 @@ def main():
                 if any(c3[0] for c3 in cl.values()):
                     cls = 'stack-escaped'
                     rs_ = sorted({t for c3 in cl.values() for t in c3[0]})
-                    for t in rs_:
+                    for t in rs_ if cnt else ():
                         if t.startswith('import:'):
                             lost[t[7:]] += 1
-                    if len(rs_) == 1 and rs_[0].startswith('import:'):
+                    if cnt and len(rs_) == 1 and rs_[0].startswith('import:'):
                         whatif[rs_[0][7:]] += 1
                 else:
                     cls = 'stack-funclet' if kind[a] in FUNK else 'stack-args-in' if role == 'a' else 'stack-args-out' if role == 'o' else 'stack-local'
-                    if any(c3[1] for c3 in cl.values()):
+                    if not cnt:
+                        pass
+                    elif any(c3[1] for c3 in cl.values()):
                         retrule[role] += 1                       # contaminated under the previous rules, plain with conditional return flow
                     elif any(c3[2] for c3 in cl.values()):
                         rule2[role] += 1
                     elif role in 'up' and not kind[a] in FUNK:
                         rulef['unresolved-offset'] += 1
-            tot[(cls, 'S' if ls else 'L', w if w in WID else 'o')] += 1; ent[a][(cls, ls)] += 1
+            seen.add(x)
+            if cls not in PLAIN:
+                nonplain.add(x)
+            if cnt:
+                tot[(cls, 'S' if ls else 'L', w if w in WID else 'o')] += 1; ent[a][(cls, ls)] += 1
     nacc = sum(tot.values())
     pc = {c: sum(v for k, v in tot.items() if k[0] == c) for c in ORDER}
     print('entries decoded %d (undecodable %d); instructions %d (each counted once); memory accesses %d (loads %d, stores %d)' % (
@@ -667,10 +682,27 @@ def main():
     print('returned rule: %d accesses plain that the previous rules (returned = escape) contaminated (by role %s); import table: %d imports read from %s' % (sum(retrule.values()), dict(sorted(retrule.items())), len(IMPESC), IMPTAB))
     print('top imports by accesses lost: ' + ' '.join('%s=%d' % kv for kv in sorted(lost.items(), key=lambda kv: (-kv[1], kv[0]))[:20]))
     print('HYPOTHETICAL what-if (not measured with a table): accesses recovered if the pointer parameters of this import alone were n: ' + ' '.join('%s=%d' % kv for kv in sorted(whatif.items(), key=lambda kv: (-kv[1], kv[0]))[:20]))
+    print('lock-prefixed by mnemonic: ' + ' '.join('%s=%d' % (k[6:], v) for k, v in sorted(fl.items()) if k.startswith('lockm:')))
     print('atomics: lock %d xchg-mem %d cmpxchg %d xadd %d; tls displacements: %s' % (fl['lock'], fl['xchg'], fl['cmpxchg'], fl['xadd'], ' '.join('%s=%d' % kv for kv in sorted(fl.items()) if kv[0].startswith('tls:'))[:150]))
     ck = lambda n: n.startswith('Interlocked') or n.endswith('CriticalSection') or n in ('TlsGetValue', 'TlsSetValue', 'TlsAlloc', 'CreateThread')
     print('import call sites: ' + ' '.join('%s=%d' % (k[4:], v) for k, v in sorted(fl.items()) if k.startswith('imp:') and ck(k[4:])))
     os.makedirs(OUT, exist_ok=True)
+    # R9 export (consumed by fnvlift/memclass.py): instructions ALL of whose recorded memory accesses (explicit operands and implicit ones:
+    # push/pop/call/ret/leave stack accesses, string esi/edi accesses) are PLAIN in every entry that contains them. An instruction memclass does
+    # not see, or sees with any non-plain access, is not in the set (unknown = ORDERED). Format: sorted little-endian u32 addresses.
+    pl = sorted(seen - nonplain)
+    with open(OUT + '/plain_insns.bin', 'wb') as f:
+        f.write(array('I', pl).tobytes())
+    with open(OUT + '/class_totals.tsv', 'w') as f:
+        f.write('class\tloads\tstores\tplain\n')
+        for c in ORDER:
+            f.write('%s\t%d\t%d\t%d\n' % (c, sum(v for k, v in tot.items() if k[0] == c and k[1] == 'L'), sum(v for k, v in tot.items() if k[0] == c and k[1] == 'S'), int(c in PLAIN)))
+    plset = set(pl)
+    with open(OUT + '/atomic_sites.tsv', 'w') as f:      # xchg-mem / lock sites with their class (plain = proven thread-local: no atomic needed)
+        f.write('insn\tkind\tclass\n')
+        for x, kd in sorted(atom):
+            f.write('%08x\t%s\t%s\n' % (x, kd, 'plain' if x in plset else 'ordered'))
+    print('R9 instructions: all-plain %d of %d with a recorded memory access (%.1f %%); export %s/plain_insns.bin' % (len(pl), len(seen), 100.0 * len(pl) / max(len(seen), 1), OUT))
     with open(OUT + '/entries.tsv', 'w') as f:
         f.write('entry\tkind\tevents_escaping\twhole\tawhy\t' + '\t'.join(c.replace('/', '_') + '.L\t' + c.replace('/', '_') + '.S' for c in ORDER) + '\n')
         for a in sorted(R):
