@@ -13,62 +13,79 @@ def is_import(cx, o):
     return o.type == X.X86_OP_MEM and not o.mem.base and not o.mem.index and not o.mem.segment
 
 
-@op('call')
-def h_call(cx, ins):
-    o = cx.ops[0]
+def call_xfer(cx, o, t):
+    """transfer half of the call at cx.a (the state effect, esp-=4 and the return address store, is the caller's): `t` is a constant target (int) or
+    the name of a C u32 holding it; operand `o` only classifies an indirect call (import or not). -> C text"""
     cx.callrets.append(cx.nxt)
     cx.nonlocal_ = True
-    if o.type == X.X86_OP_IMM:
-        t = o.imm & 0xffffffff
+    if isinstance(t, int):
         if cx.lo <= t < cx.hi:
             cx.selfcalls[cx.a] = (t, cx.nxt)
             cx.kinds.add('selfcall')
         cx.calls.add(t)
-        cx.em('{ esp-=4; M32(esp)=0x%xu; SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal; }' % (cx.nxt, hexs(t), cx.nxt))
+        return 'SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal;' % (hexs(t), cx.nxt)
+    cx.kinds.add('import' if is_import(cx, o) else 'indcall')
+    return 'SYNC_OUT; REGS(); fnvl_dispatch(%s)(); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal;' % (t, cx.nxt)
+
+
+def jump_to(cx, t):
+    """control transfer to the constant address t (jmp, jcc, loop, jecxz, rep step): a label of this function, else a tail call. -> C statement"""
+    if cx.lo <= t < cx.hi:
+        return 'goto %s;' % cx.lab(t)
+    cx.nonlocal_ = True
+    cx.tails.add(t)
+    cx.kinds.add('tailjmp')
+    return '{ SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; goto after_tail; }' % hexs(t)
+
+
+def jmp_indirect(cx, o, t):
+    """jmp to the C u32 expression t: through the instruction's jump table when it has one, else the non-local loop. -> list of C lines"""
+    cx.nonlocal_ = True
+    cands = cx.tables.get(cx.a)
+    if cands is None:
+        cx.kinds.add('import' if is_import(cx, o) else 'jmp-indirect-untabled')
+        return ['{ c->ra=%s; goto nonlocal; }' % t]
+    cx.kinds.add('jumptable')
+    return (['{ u32 t=%s; switch(t){' % t] + ['case 0x%xu: goto %s;' % (x, cx.lab(x)) for x in sorted(set(cands))] +
+            ['default: c->ra=t; goto nonlocal; } }'])
+
+
+def ret_xfer(cx, ra):
+    """return to the C u32 expression ra (esp already popped) -> C text"""
+    if cx.ops and cx.ops[0].imm:
+        cx.kinds.add('retn')
+    return 'c->ra=%s; SYNC_OUT; return;' % ra
+
+
+@op('call')
+def h_call(cx, ins):
+    o = cx.ops[0]
+    if o.type == X.X86_OP_IMM:
+        x = call_xfer(cx, o, o.imm & 0xffffffff)
+        cx.em('{ esp-=4; M32(esp)=0x%xu; %s }' % (cx.nxt, x))
     else:
-        cx.kinds.add('import' if is_import(cx, o) else 'indcall')
-        cx.em('{ u32 t=%s; esp-=4; M32(esp)=0x%xu; SYNC_OUT; REGS(); fnvl_dispatch(t)(); REGS(); SYNC_IN; if(c->ra!=0x%xu) goto nonlocal; }' % (cx.rd(ins, o), cx.nxt, cx.nxt))
+        tv = cx.rd(ins, o)
+        x = call_xfer(cx, o, 't')
+        cx.em('{ u32 t=%s; esp-=4; M32(esp)=0x%xu; %s }' % (tv, cx.nxt, x))
 
 
 @op('jmp')
 def h_jmp(cx, ins):
     o = cx.ops[0]
-    em, lab, kinds = cx.em, cx.lab, cx.kinds
     cx.term = True
     if o.type == X.X86_OP_IMM:
-        t = o.imm & 0xffffffff
-        if cx.lo <= t < cx.hi:
-            em('goto %s;' % lab(t))
-        else:
-            cx.nonlocal_ = True
-            cx.tails.add(t)
-            em('{ SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; goto after_tail; }' % hexs(t))
-            kinds.add('tailjmp')
+        cx.em(jump_to(cx, o.imm & 0xffffffff))
     else:
-        cx.nonlocal_ = True
-        cands = cx.tables.get(cx.a)
-        if cands is None:
-            kinds.add('import' if is_import(cx, o) else 'jmp-indirect-untabled')
-            em('{ c->ra=%s; goto nonlocal; }' % cx.rd(ins, o))
-            return
-        kinds.add('jumptable')
-        em('{ u32 t=%s; switch(t){' % cx.rd(ins, o))
-        for x in sorted(set(cands)):
-            em('case 0x%xu: goto %s;' % (x, lab(x)))
-        em('default: c->ra=t; goto nonlocal; } }')
+        for l in jmp_indirect(cx, o, cx.rd(ins, o)):
+            cx.em(l)
 
 
 @op(*['j' + c for c in CC])
 def h_jcc(cx, ins):
     t = cx.ops[0].imm & 0xffffffff
     c = CC[cx.m[1:]]
-    if cx.lo <= t < cx.hi:
-        cx.em('if(%s) goto %s;' % (c, cx.lab(t)))
-    else:
-        cx.nonlocal_ = True
-        cx.tails.add(t)
-        cx.kinds.add('tailjmp')
-        cx.em('if(%s){ SYNC_OUT; REGS(); CALLX(%s); REGS(); SYNC_IN; goto after_tail; }' % (c, hexs(t)))
+    st = jump_to(cx, t)
+    cx.em('if(%s)%s' % (c, st if st[0] == '{' else ' ' + st))
 
 
 @op('jecxz')
@@ -85,12 +102,13 @@ def h_ret(cx, ins):
     cx.term = True
 
 
-def raise_site(cx, code):
+def raise_site(cx, code, trap=True):
     """a hardware exception at this instruction (R4): fnvl_raise runs the OS dispatch on the guest state and leaves the resume address in c->ra
     (ContinueExecution) with esp restored; the loop then continues there. The instruction's own address is a label of the loop (retry)."""
     cx.nonlocal_ = True
     cx.raises.add(cx.a)
-    cx.raises.add(cx.nxt)       # #BP reports the address after the int3 as Context.Eip
+    if trap:
+        cx.raises.add(cx.nxt)       # #BP reports the address after the int3 as Context.Eip
     return 'SYNC_OUT; REGS(); fnvl_raise(%s,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (code, cx.a)
 
 

@@ -4,6 +4,7 @@ Dispatch order per instruction (same as the PoC): mnemonic handler (@op); a hand
 through; then the fallbacks in registration order (@fallback(pred): x87 by opcode byte, SSE by xmm operand);
 then Unsupported('insn ...')."""
 import bisect
+import os
 import capstone
 from capstone import x86 as X
 from . import memclass as _r9
@@ -189,7 +190,16 @@ def explore(img, lo, hi, code, start=None, extra=(), fall_hi=None):
     return insns, tables, taken, bad
 
 
+EMIT = os.environ.get('FNVL_EMIT', '')      # 'dsl': integer instructions are emitted from the proven DSL forms (f_dsl.py) before the hand handlers; '' = the hand handlers only
+if EMIT not in ('', 'dsl'):
+    raise ValueError('FNVL_EMIT=%s (want dsl or unset)' % EMIT)
+
+
 def dispatch(cx, ins):
+    if EMIT == 'dsl':
+        from . import f_dsl
+        if f_dsl.emit_form(cx, ins) is not SKIP:
+            return
     h = OPS.get(cx.m)
     if h is not None and h(cx, ins) is not SKIP:
         return
