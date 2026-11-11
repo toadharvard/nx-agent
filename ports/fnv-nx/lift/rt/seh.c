@@ -14,6 +14,7 @@
 extern "C" {
 u32 fnvl_os_unhandled(u32 record, u32 context);
 void fnvl_raise(u32 code, u32 at);
+void fnvl_raise_ud(u32 at);
 void fnvl_raise_av(u32 access, u32 addr, u32 at);
 void fnvl_os_RtlUnwind(void);
 void fnvl_os_RaiseException(void);
@@ -99,6 +100,9 @@ extern "C" void fnvl_raise(u32 code, u32 at) {
     if (code == FNVL_BP) eip = at + 1;                      /* Windows: ExceptionAddress is the int3, Context.Eip the byte after it */
     raise_rec(nt, 0, at, code == FNVL_BP ? 1 : 0, info, eip, sp);
 }
+
+/* a transfer to an address without a body (the dispatcher's miss, rt/rt.c): #UD at that address */
+extern "C" void fnvl_raise_ud(u32 at) { fnvl_raise(FNVL_UD, at); }
 
 extern "C" void fnvl_raise_av(u32 access, u32 addr, u32 at) {
     u32 info[2] = { access, addr };
