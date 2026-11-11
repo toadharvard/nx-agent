@@ -91,15 +91,25 @@ headers pinned by env.json). The CC stage mounts the compiler external, the plug
 Assumption: the declaration `lifted_by` names the lifter is the owner's (admit.json is reviewed); the gate proves that no hand-written C++ sits in a lifted root.
 
 ## Sources and patches (rule A)
-`"sources": {"external": NAME, "dir": PATH, "patches": [P...], "include": [D...]}`: the root's units come from the tree of external NAME.
-- `dir` is a directory of the external's tree (or `.`), `patches` are tracked `.patch` files of the root (root-relative, distinct), `include` are
-  directories inside `dir` of the PATCHED tree, passed as `-I` after the recipe's `include`.
-- Stage `patch:<root>` (sandbox, python runtime + `patchtree.py`, GNU `patch` of env.json as a declared input at `/ptool`) copies the
-  external's tree and applies the patches in list order with `patch -p1 -F0 --no-backup-if-mismatch`. Its output tree is the root's source view,
-  materialized at `ext/<NAME>/`. A patch that does not apply cleanly makes the build red with stage `patch:<root>`.
-- Unit rule stays `all`: every `*.c *.cc *.cpp *.cxx *.s *.S` of the patched tree under `dir`, named `ext/<NAME>/<path in the tree>`, plus the root's own
-  tracked units. There is no exclude list: a file of upstream that must not be built is deleted by the patch (reviewed content).
+`"sources": [{"external": NAME, "dir": PATH, "patches": [P...], "include": [D...]}]`: the root's units come from the trees of externals. Any class of
+root with a recipe (guest product roots included: the same compiler, flags and plugins as for the root's own units).
+- One entry per external. `dir` is a directory of the external's tree (or `.`), `patches` are tracked `.patch` files of the root (root-relative,
+  distinct, may be empty), `include` are directories inside `dir` of the patched tree, passed as `-I/src/ext/<NAME>/<dir>` (the tree is mounted once, at
+  `/src/ext/<NAME>/`: a header has one path, so `#pragma once` identity holds).
+- Stage `patch:<root>` (`patch:<root>:<NAME>` with several entries; sandbox, python runtime + `patchtree.py`, GNU `patch` of env.json as a declared input
+  at `/ptool`) copies the external's tree and applies the patches in list order with `patch -p1 -F0 --no-backup-if-mismatch`. Its output tree is the
+  root's source view. A patch that does not apply cleanly makes the build red with that stage.
+- Unit rule stays `all`: every `*.c *.cc *.cpp *.cxx *.s *.S` of the patched tree under `dir` is a unit, named `<NAME>:<path in the tree>` in
+  `objects.json`, `units` and the gates (own units and external units never collide), plus the root's own tracked units. Keys are by content. There is no
+  exclude list: a file of upstream that must not be built is deleted by a patch (reviewed content).
 - A non-tool root with C++ units from a patched tree takes the plugin rule of `cxx_origin` after the stage (RecipeError otherwise).
+- `"isystem": [ABS...]`: absolute paths inside an external's `at` only (a tracked path is refused, so warnings stay on for every file of ours), passed as
+  `-isystem <path>` to the preprocessor stage (part of its key like `include`): GCC's treatment of third-party headers.
+- `include` never names a directory inside the root itself ("include <dir> is inside the root; use a quoted relative include"): the root's files are
+  mounted at `/src`, and a second path to the same file breaks `#pragma once` identity.
+- Programs the driver names bare (`-print-prog-name=as` of the host x86_64 driver prints `as`) are resolved as the driver does: the `programs:` list of
+  `-print-search-dirs` in order, then PATH of the stage (the driver's directory); the first executable file wins, none = red naming the program
+  (`unitstage.prog`, used for `as`, `ld`, `collect2` everywhere).
 ### Tool roots (class "tool" with a recipe)
 A `tool` root of admit.json may name `"recipe"` and `"target": "host"`. Its compiler is the host driver pair `x86_64-linux-gnu-gcc-13` / `-g++-13`
 (env.json); no plugins, `cxx_origin`, `os_layer`, `game`, `constants`, `contract_names`. `link` is `{"output": NAME, "flags": [..]}` (no script):

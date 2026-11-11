@@ -77,6 +77,27 @@ def write_hint(store, rel, paths):
     os.replace(tmp, p)
 
 
+def prog(cxx, name, path=None):
+    """Absolute path of program NAME as the gcc driver CXX finds it: an absolute `-print-prog-name` answer is taken as it is; a bare name
+    (the driver found no file of that name itself) is searched the way the driver searches, in the `programs:` list of `-print-search-dirs`
+    in order, then in PATH (default: the directory of the driver, the PATH of the stage environment). The first executable regular file
+    wins; none -> UnitError naming the program."""
+    env = dict(os.environ, LC_ALL="C")
+    q = lambda *a: subprocess.run([cxx] + list(a), env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout  # noqa: E731
+    got = q("-print-prog-name=" + name).strip()
+    if os.path.isabs(got):
+        return posixpath.normpath(got)
+    dirs = []
+    for ln in q("-print-search-dirs").splitlines():
+        if ln.startswith("programs:"):
+            dirs += [d[1:] if d.startswith("=") else d for d in ln[len("programs:"):].strip().lstrip("=").split(":") if d]
+    dirs += [os.path.dirname(os.path.abspath(cxx))] if path is None else path
+    for d in dirs:
+        p = os.path.join(d, name)
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return posixpath.normpath(p)
+    raise UnitError("%s: program %s is in no `programs:` directory of -print-search-dirs and not in PATH (%s)" % (cxx, name, ":".join(dirs)))
+
 def gcc_set(cxx):
     """(exes, trees) for runtime.py tool, defined by the compiler's own answers: -print-prog-name=cc1plus (libexec dir),
     -print-prog-name=as, -print-search-dirs (`install:` dir = headers/specs) and `echo | g++ -x c++ -E -v -` (built-in include
@@ -94,7 +115,7 @@ def gcc_set(cxx):
     cands += [norm(ln) for ln in inc.splitlines() if ln.startswith(" /")]
     trees = sorted({t for t in cands if os.path.isdir(t)})
     trees = [t for t in trees if not any(u != t and (t + "/").startswith(u.rstrip("/") + "/") for u in trees)]
-    return [norm(cxx), norm(q("-print-prog-name=as"))], trees
+    return [norm(cxx), prog(cxx, "as")], trees
 
 def run_stage(store, doc, cold):
     sandbox.check_doc(doc)
@@ -128,6 +149,9 @@ class Build:
         self.roots, self.iargs = [], []
         for spec in [a.src_root] + a.include:
             host, sep, at = spec.rpartition("@")
+            if not sep and spec is not a.src_root and spec.startswith("/src/"):   # -I of a directory of the root's own view: one path, so #pragma once identity holds
+                self.iargs.append("-I" + spec)
+                continue
             if not sep and spec is not a.src_root:   # -I of a sandbox path inside a declared input of the tool runtime (an external)
                 if not any(spec == i["at"] or spec.startswith(i["at"].rstrip("/") + "/") for i in self.rt["inputs"]):
                     raise UnitError("--include %s: not HOST@/inc/N and inside no input of the tool runtime" % spec)
