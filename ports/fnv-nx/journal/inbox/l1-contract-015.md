@@ -73,3 +73,10 @@ test_guest fetches by the pin and is red with the reason when the fetch or tree 
 - (D) a626984: unit_flags/unit_facts (fpfast of pi iff the unit's /fp:fast fact in units.json), test_unitflags.py. Needs a units.json in the root (source = root-relative unit path).
 - The lead session (01KmtZ...) was inactive when I tried to report (D); heads are in this note. A verdict run was red once only because /tmp/objstub-* filled the disk.
 - Open: (E) facts stage / vtnames.
+
+## (E) facts stage / vtnames: NOT started, blocked on inputs (reported, nothing invented)
+- env.json now pins clang-18 + libclang-18-dev (B), so the plugin (toolchain/vtnames/fnvnx_vtnames.cc, only on claude/port-nsw-un6t9s) can be built as a hermetic stage.
+- The per-unit MSVC-ABI command line must come by rule from units.json; in the L1 tree there is no units.json of a root and no source for the clang
+  flags except tools/link/layoutgate.py msvc_flags, which reads private shim headers (shim/include, layoutgate_msvc/*.h) that are not in this tree.
+  A facts stage written now would hand-copy those flags. Needs from the orchestrator: where units.json and those headers enter a root (external or tracked), and the rule for the flags.
+- The orchestrator session (01KmtZKUSQnbJKPPsvtTQXf7) was inactive, so this could not be asked.
