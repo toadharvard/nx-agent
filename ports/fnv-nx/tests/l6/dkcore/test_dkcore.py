@@ -30,7 +30,7 @@ PENDING = {"nxdk_image_create", "nxdk_image_create4", "nxdk_image_destroy", "nxd
 EMBEDDER = {"nxdk_guest_ptr", "nxdk_on_present", "nxdk_shader_pack"}
 HANDLERS = {"nxdk_mem_create", "nxdk_mem_gpu_addr", "nxdk_mem_destroy", "nxdk_present", "nxdk_wait_vblank", "nxdk_shutdown",
             "nxdk_shader_create", "nxdk_shader_destroy", "nxdk_shader_create_d3d"}   # the last three: dk_shader.c, linked by build_dk.sh
-LIBC = {"memset", "memcpy", "memcmp", "snprintf", "vsnprintf", "strncmp", "malloc", "free"}
+LIBC = {"memset", "memcpy", "memcmp", "snprintf", "vsnprintf", "strncmp", "strcmp", "malloc", "free"}
 LIBCALL = re.compile(r"^(dk|nwindow|vi|event)[A-Z]\w*$")
 FORBID = re.compile(r"stub|todo|not implemented|placeholder|fallback|no-op|noop|weak", re.I)
 

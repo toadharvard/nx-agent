@@ -25,7 +25,7 @@ void nxdk_on_present(uint32_t f) { (void)f; }
 
 /* ---- deko3d double ------------------------------------------------------------------------------------------------------------------------ */
 typedef struct Blk { uint8_t* mem; DkMemBlockMaker mk; int live; } Blk;
-static Blk blks[8192]; static int nblk, live_blk, fail_blk, inits;
+static Blk blks[8192]; static int nblk, live_blk, fail_blk, fail_init, inits;
 DkMemBlock dkMemBlockCreate(DkMemBlockMaker const* m) {
     if (fail_blk || nblk >= 8192) return NULL;
     Blk* b = &blks[nblk++]; b->mk = *m; b->mem = calloc(1, m->size); b->live = 1; live_blk++; return (DkMemBlock)b;
@@ -34,7 +34,7 @@ void* dkMemBlockGetCpuAddr(DkMemBlock h) { return ((Blk*)h)->mem; }
 void dkMemBlockDestroy(DkMemBlock h) { Blk* b = (Blk*)h; if (!b->live) { puts("DOUBLE-DESTROY"); exit(3); } b->live = 0; free(b->mem); live_blk--; }
 static uint32_t rd32(const uint8_t* p) { uint32_t v; memcpy(&v, p, 4); return v; }
 void dkShaderInitialize(DkShader* o, DkShaderMaker const* m) {
-    const uint8_t* c = (const uint8_t*)m->control; memset(o, 0, sizeof *o); inits++;
+    const uint8_t* c = (const uint8_t*)m->control; memset(o, 0, sizeof *o); inits++; if (fail_init) return;
     if (rd32(c) != 0x48534B44u || m->programId >= rd32(c + 20)) return;
     const uint8_t* p = c + rd32(c + 16) + 64 * m->programId;
     uint32_t ty = rd32(p); if (ty > 1) return;
@@ -77,6 +77,7 @@ int main(void) {
         else if (!strcmp(c, "pack") && na == 1) {
             struct Buf* b = find(a[0]); pack_p = b ? b->p : NULL; pack_n = b ? b->n : 0; puts("OK");
         } else if (!strcmp(c, "failblock") && na == 1) { fail_blk = atoi(a[0]); puts("OK"); }
+        else if (!strcmp(c, "failinit") && na == 1) { fail_init = atoi(a[0]); puts("OK"); }
         else if (!strcmp(c, "create")) {   /* dksh= size= stage= pad= desc=bad */
             begin(); NxShaderDesc d; memset(&d, 0, sizeof d);
             d.stage = (uint32_t)get(a, na, "stage", 0); d.dksh_size = (uint32_t)get(a, na, "size", 0); d.dksh = get(a, na, "dksh", 0); d.pad = (uint32_t)get(a, na, "pad", 0);
@@ -98,7 +99,7 @@ int main(void) {
         else if (!strcmp(c, "lookup") && na == 1) { const DkShader* s = nxdk_shader((uint32_t)strtoul(a[0], NULL, 0)); printf("L %d %d\n", s != NULL, s ? (int)dkShaderGetStage(s) : -1); }
         else if (!strcmp(c, "block") && na == 2) {   /* the idx-th code block: size, flags, crc-free dump of its first LEN bytes as hex */
             int i = atoi(a[0]); size_t n = (size_t)atoi(a[1]);
-            if (i >= nblk) { puts("NOBLOCK"); continue; }
+            if (i >= nblk) { puts("NOBLOCK"); fflush(stdout); continue; }
             printf("B size %u flags %u live %d dev %llx data ", blks[i].mk.size, blks[i].mk.flags, blks[i].live, (unsigned long long)(uintptr_t)blks[i].mk.device);
             if (blks[i].live) for (size_t k = 0; k < n && k < blks[i].mk.size; k++) printf("%02x", blks[i].mem[k]);
             puts("");
