@@ -309,3 +309,85 @@ __attribute__((unused)) static void kdouble_init(void)
     T(g_arena != MAP_FAILED && g_heap != MAP_FAILED);
     g_alo = (u64)(uintptr_t)g_arena;
 }
+
+#ifdef KD_EXCEPTION
+/* ---- the user-exception model (Mesosphere, same commit; libnx nx/source/runtime/exception.s, nx/include/switch/arm/thread_context.h) ----
+ * Premises proven in journal/inbox/l1-contract-w1-001.md (kern = libraries/libmesosphere/source):
+ *   - a user fault of a thread whose process enables exception handlers sends the thread to the PROCESS ENTRY with x0 = ExceptionType,
+ *     x1 = &ExceptionInfo (the PLR's ThreadExceptionFrameA64: x0..x8, lr, sp, pc, pstate, afsr0, afsr1, esr, far), sp = the PLR stack top,
+ *     psr = 0; x9..x29 and the FP registers are the faulting code's (kern_exception... UserException path, svc_handlers: kern_k_thread.cpp
+ *     SetUserException / arch/arm64/kern_exception_handlers.cpp HandleException)
+ *   - ExceptionType: 0x100 instruction abort, 0x101 data abort, 0x102 pc alignment, 0x103 data / SP alignment, 0x104 undefined,
+ *     0x301 invalid system call (svc number >= 0xC0: kern_svc_handlers_asm.s)
+ *   - the thread is then in EXCEPTION STATE until svcReturnFromException (0x28): a fault in that state ends the process
+ *     (kern_exception_handlers.cpp: "if (cur_process.IsInExceptionHandler...) terminate"); svc 0x28 with 0 copies x0..x8, lr, sp, pc and NZCV
+ *     from ExceptionInfo, x9..x29 / FP stay; non-zero ends the process (kern_svc_exception.cpp: ReturnFromException)
+ * The double runs on Linux signals under qemu-aarch64: SIGSEGV / SIGBUS give the ESR of the fault (EC 0x20 when the fault address is the pc,
+ * else 0x24 with WnR from the instruction; FSC 0x07 translation, 0x0F permission, 0x21 alignment), SIGILL is type 0x104, `brk #0xFF` is the
+ * invalid svc and `brk #0x28` is svcReturnFromException (qemu-user's svc ignores the immediate and the signal frame has no ESR: the host
+ * code is built with HOST_FAULT_DOUBLE, which swaps only those). A process end is recorded and the run unwinds to kd_run. */
+#include <pthread.h>
+#include <ucontext.h>
+enum { KD_RETURNED, KD_EXIT, KD_CRASH, KD_TERMINATE };
+typedef struct { int how; u64 code; } KdEnd;
+static __thread sigjmp_buf kd_jb;
+static __thread int kd_in_exc;                 /* the thread is in exception state */
+static __thread ThreadExceptionFrameA64 kd_info;
+static __thread KdEnd kd_end;
+static u64 kd_plr_top;                         /* the PLR stack the exception state runs on (a real mapping) */
+extern void __libnx_exception_entry(void);
+static __attribute__((noreturn)) void kd_terminate(int how, u64 code) { kd_end.how = how; kd_end.code = code; siglongjmp(kd_jb, 1); }
+static u32 kd_wnr(const u32 *pc) { u32 i = *pc; return ((i & 0x3B000000) == 0x39000000 || (i & 0x3F000000) == 0x08000000 || (i & 0x3B000000) == 0x38000000) ? !((i >> 22) & 1) : 0; }
+static void kd_enter(ucontext_t *uc, u64 type, u64 esr, u64 far) {
+    mcontext_t *m = &uc->uc_mcontext;
+    if (kd_in_exc) kd_terminate(KD_TERMINATE, 0xE0);           /* a fault inside exception state: the process ends */
+    for (int i = 0; i < 9; i++) kd_info.cpu_gprs[i] = m->regs[i];
+    kd_info.lr = m->regs[30]; kd_info.sp = m->sp; kd_info.elr_el1 = m->pc; kd_info.pstate = (u32)m->pstate;
+    kd_info.afsr0 = kd_info.afsr1 = 0; kd_info.esr = (u32)esr; kd_info.far = far;
+    m->regs[0] = type; m->regs[1] = (u64)(uintptr_t)&kd_info; m->sp = kd_plr_top; m->pc = (u64)(uintptr_t)__libnx_exception_entry;
+    m->pstate &= ~0xF0000000ull;
+    kd_in_exc = 1;
+}
+static void kd_on_fault(int sig, siginfo_t *si, void *ctx) {
+    ucontext_t *uc = ctx; u64 pc = uc->uc_mcontext.pc, a = (u64)(uintptr_t)si->si_addr;
+    if (sig == SIGILL) { kd_enter(uc, 0x104, 0, 0); return; }
+    u64 fsc = si->si_code == BUS_ADRALN && sig == SIGBUS ? 0x21 : si->si_code == SEGV_ACCERR ? 0x0F : 0x07;
+    u64 type = fsc == 0x21 ? 0x103 : a == pc ? 0x100 : 0x101;
+    u64 ec = a == pc ? 0x20 : 0x24;
+    u64 esr = ec << 26 | (ec == 0x24 ? (u64)kd_wnr((const u32 *)(uintptr_t)pc) << 6 : 0) | fsc;
+    kd_enter(uc, type, esr, a);
+}
+static void kd_on_brk(int sig, siginfo_t *si, void *ctx) {
+    (void)sig; (void)si; ucontext_t *uc = ctx; mcontext_t *m = &uc->uc_mcontext;
+    u32 imm = (*(const u32 *)(uintptr_t)m->pc >> 5) & 0xFFFF;
+    if (imm == 0x28) {                                          /* svcReturnFromException */
+        if (!kd_in_exc) kd_terminate(KD_TERMINATE, 0xE1);
+        if (m->regs[0]) kd_terminate(KD_TERMINATE, 0xE2);       /* non-zero: unhandled, the process ends */
+        for (int i = 0; i < 9; i++) m->regs[i] = kd_info.cpu_gprs[i];
+        m->regs[30] = kd_info.lr; m->sp = kd_info.sp; m->pc = kd_info.elr_el1;
+        m->pstate = (m->pstate & ~0xF0000000ull) | (kd_info.pstate & 0xF0000000u);
+        kd_in_exc = 0;
+    } else if (imm == 0xFF) {                                   /* an svc number >= 0xC0: invalid system call */
+        kd_enter(uc, 0x301, 0, 0);
+    } else kd_terminate(KD_TERMINATE, 0xE3);
+}
+/* the kernel's signal frame is ~4.5 KB: the double's handlers run on their own stack, never on the code under test's (a 4 KB host stack would be overrun) */
+static void kd_altstack(void) {
+    static __thread int done; if (done) return; done = 1;
+    stack_t ss; ss.ss_size = 0x10000; ss.ss_flags = 0; ss.ss_sp = malloc(ss.ss_size); T(ss.ss_sp && !sigaltstack(&ss, 0));
+}
+static void kd_exc_init(void) {
+    kd_altstack();
+    struct sigaction sa; memset(&sa, 0, sizeof sa); sa.sa_flags = SA_SIGINFO | SA_NODEFER | SA_ONSTACK;
+    sa.sa_sigaction = kd_on_fault; T(!sigaction(SIGSEGV, &sa, 0) && !sigaction(SIGBUS, &sa, 0) && !sigaction(SIGILL, &sa, 0));
+    sa.sa_sigaction = kd_on_brk; T(!sigaction(SIGTRAP, &sa, 0));
+    void *p = mmap((void *)0x48000000, 0x10000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    T(p != MAP_FAILED); kd_plr_top = (u64)(uintptr_t)p + 0x10000;
+}
+/* run fn on this thread; the result says how the process ended (KD_RETURNED: fn returned) */
+static KdEnd kd_run(void (*fn)(void)) { kd_altstack();
+    memset(&kd_end, 0, sizeof kd_end); kd_in_exc = 0;
+    if (!sigsetjmp(kd_jb, 1)) { fn(); kd_end.how = KD_RETURNED; }
+    return kd_end;
+}
+#endif

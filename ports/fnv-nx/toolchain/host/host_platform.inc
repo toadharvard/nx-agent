@@ -2,12 +2,12 @@
  * least number of arguments and the handler. platform_ext is total: every (fn, nargs) has exactly one answer.
  *   fn 16..33 (sockets): host_sock_call answers, BEFORE the two checks below: nargs != the service's exact count -> -FNVNX_WE_INVAL
  *                        (even for a null array); the exact count with a null array -> FNVNX_EXT_BAD_NARGS; else the service's answer
- *   fn without a row (0, 10 until the access-fault delivery exists, 36 and up) -> FNVNX_EXT_NO_SERVICE
+ *   fn without a row (0, 36 and up) -> FNVNX_EXT_NO_SERVICE
  *   nargs below the row's number, or nargs > 0 with a null argument array     -> FNVNX_EXT_BAD_NARGS
  *   otherwise the handler's answer, which hostapi.h states per service; more arguments than the row needs are ignored.
  * A service declared in hostapi.h without a row is a test failure (tests/s4/backends/hostapi_total.py).
  * Standalone like the other .inc files: needs the handlers' files included first (host_vm.inc, host_section.inc,
- * host_message.inc, host_ids.inc, host_thread_activity.inc), logf_, g_cfg {core3, boost_loading} and libnx's applet. */
+ * host_message.inc, host_ids.inc, host_thread_activity.inc, host_fault.inc), logf_, g_cfg {core3, boost_loading} and libnx's applet. */
 static int g_boost;   /* the CPU boost mode set last */
 static Result set_cpu_boost(int mode) {
     if (mode == g_boost) return 0;
@@ -29,6 +29,8 @@ static u64 pf_thread_activity(const u64 *a) {
     }
     return host_thread_activity(a[0] ? h->t.handle : 0, a[0] == 0, a[1]);
 }
+/* ACCESS_FAULT_HANDLER (handler, stack_top): host_fault.inc:host_fault_register */
+static u64 pf_access_fault_handler(const u64 *a) { return host_fault_register(a[0], a[1]); }
 static u64 pf_message(const u64 *a) { return host_show_message((const char *)a[0], (const char *)a[1]); }
 static u64 pf_vm_reserve(const u64 *a) { return host_vm_reserve(a[0], a[1]); }
 static u64 pf_vm_commit(const u64 *a) { return host_vm_commit(a[0], a[1]); }
@@ -75,6 +77,7 @@ static const PlatService g_plat[] = {
     [FNVNX_PLAT_UNMAP_FIXED] = {3, pf_unmap_fixed},
     [FNVNX_PLAT_TZ_AT] = {2, pf_tz_at},
     [FNVNX_PLAT_THREAD_SELF] = {0, pf_thread_self},
+    [FNVNX_PLAT_ACCESS_FAULT_HANDLER] = {2, pf_access_fault_handler},
 };
 static uint64_t platform_ext(uint32_t fn, const uint64_t *args, uint32_t nargs) {
     /* 16..33: the sockets (host_sock.inc, the platform lead's): it checks nargs itself (exactly the count: else -FNVNX_WE_INVAL) */

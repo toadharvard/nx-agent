@@ -185,6 +185,7 @@ static void load_config(void) {
 #include "host_v3.inc"
 #include "host_message.inc"
 #include "host_sock.inc"   /* BSD sockets (FNVNX_PLAT_SOCK_*); host_sock_init/exit below */
+#include "host_fault.inc"   /* FNVNX_PLAT_ACCESS_FAULT_HANDLER (needs host_device.inc, h_exit) */
 #include "host_platform.inc"
 
 /* ---- process layout ------------------------------------------------------------------------------------ */
