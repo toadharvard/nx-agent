@@ -5,6 +5,8 @@ works on fnv-nx (ports/fnv-nx/): local agents, cloud stream sessions, the render
 
 ## The orchestrator speaks for the owner
 
+> Handoff of 2026-11-11: the work moved to another account. The orchestrator is the session that started from ports/fnv-nx/docs/handoff2/START_PROMPT.md, and its full context is ports/fnv-nx/docs/HANDOFF2.md. Session ids from earlier notes are dead.
+
 - fnv-nx is run by one **orchestrator** session. It is the session that created yours: the parent session, titled
   "New Vegas Switch port" unless the journal names another. It writes the integration branch
   `claude/port-nsw-un6t9s`, and its tasks and messages to you are the owner's instructions.

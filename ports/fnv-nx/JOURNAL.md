@@ -3859,3 +3859,12 @@ The project resumed in a new account. Done along docs/HANDOFF.md.
   - L2 puts certs.json into the tree, then the unified recompile.
   - L3 first fixes the 13 DSL mismatches and makes the Sail build reproducible.
   - Then follow docs/PLAN_FIRST_ELF.md.
+
+### J-0172 | 2026-11-11 | stream: orchestration (HANDOFF2) | status: handoff | parent: J-0171
+
+* **decided (owner)** - The work continues in another Claude account.
+* **did**
+  - Wrote docs/HANDOFF2.md: intent, rules, architecture, numbers, artifacts, plan, resume steps, pitfalls.
+  - Wrote docs/handoff2/: LEAD_BRIEF_COMMON.md, MERGER.md, START_PROMPT.md, the prompt to paste.
+  - Added a CLAUDE.md pointer to the new orchestrator.
+* **next** - The new orchestrator follows HANDOFF2 §7.
