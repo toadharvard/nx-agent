@@ -36,9 +36,7 @@ Global count: 11 missing of 32 required at trunk f1059af7 (gates.json has 25; im
 | Gate | Owner | Branch | Commit | MERGER |
 |---|---|---|---|---|
 | datamodel | L1 | claude/fnv-l1-contract-w17 (session_01KmtZKQzN38LhJYh6sixhL1) | - | doing |
-| exepin | L1 | claude/fnv-l1-contract-w8 (w4 rebasing) | a6753733 | blocked: conflict, rebase |
-| imports | L5 | claude/fnv-l5-platform-w4r | 0533f920 | queued (priority) |
-| machine | L5 | claude/fnv-l5-platform-w4r | 0533f920 | queued (priority) |
+| exepin | L1 | claude/fnv-l1-contract-w8 (w4 rebasing) | a6753733 | rebasing on f1059af7 |
 | r7 | L2 | claude/fnv-l2-source-w5 (session_01KmtZKUHWWEEBqzMR6cAtAZ) | - | doing |
 | namegate | L2 | claude/fnv-l2-source-w5 | - | doing |
 | abi | L2 | claude/fnv-l2-source-w5 | - | doing |
