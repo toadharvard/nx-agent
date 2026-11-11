@@ -193,7 +193,7 @@ void t_layout4(Stream* s, uint32_t id, const NxVtxLayout4* l) {
 }
 
 int main(int argc, char** argv) {
-    const char* which = argc > 1 ? argv[1] : "abcdefijklmno";
+    const char* which = argc > 1 ? argv[1] : "abcdefijklmnoq";
     int bad = 0;
     for (const char* c = which; *c; c++) {
         g_checks = g_fail = 0;
@@ -207,6 +207,7 @@ int main(int argc, char** argv) {
         else if (*c == 'l') part_l();
         else if (*c == 'm') part_m();
         else if (*c == 'n') part_n();
+        else if (*c == 'q') part_q();
         else part_o();
         t_teardown();
         printf("PART %c: %d checks, %d failed\n", *c, g_checks, g_fail);

@@ -12,16 +12,21 @@ static uint64_t create(const uint32_t* w, uint32_t bytes, uint32_t stage, uint32
     d.link_pairs = (uint64_t)(uintptr_t)l; d.n_link_pairs = nl;
     return t_ext(NXGPU_FN_SHADER_CREATE_D3D, 1, (uint64_t)(uintptr_t)&d);
 }
+static uint64_t raw(uint64_t code, uint32_t bytes) {   /* a descriptor that never hashed the bytes (they may not exist) */
+    NxShaderD3D d; memset(&d, 0, sizeof d); d.bytecode = code; d.size = bytes;
+    return t_ext(NXGPU_FN_SHADER_CREATE_D3D, 1, (uint64_t)(uintptr_t)&d);
+}
 static uint64_t make(const char* name, uint32_t variant) { const TD3d* s = find(name); return create(s->w, s->n * 4, s->stage, variant, NULL, 0, 0); }
 static uint32_t live_shaders(void) { uint32_t n = 0; for (uint32_t i = 1; i <= GL4_MAX_SHADERS; i++) n += g4.sh[i].used; return n; }
 
 static uint8_t g_px[16 * 16 * 4];
 /* one draw of the big triangle with (vs, ps) into the swapchain image, c0 = k; returns 1 when the read-back worked */
-static int draw(uint32_t vs, uint32_t ps, const float k[4]) {
+static int draw_vc(uint32_t vs, uint32_t ps, const float k[4], const float* vc) {
     Stream* s = (Stream*)calloc(1, sizeof *s);
-    float tri[12] = {-1, -1, 0, 1, 3, -1, 0, 1, -1, 3, 0, 1}, drv_vs[16] = {0, 0, 1, 0};
+    float tri[12] = {-1, -1, 0, 1, 3, -1, 0, 1, -1, 3, 0, 1}, drv_vs[16] = {0, 0, 1, 0, 1, 0, 0, 0};   /* posfix z = 1; the diffuse default 1.0 (ps < 3.0) */
     memset(g_scratch, 0, 32768);
-    memcpy(g_scratch + 8192, k, 16); memcpy(g_scratch + 12288, tri, sizeof tri); memcpy(g_scratch + 1024, drv_vs, 64);
+    memcpy(g_scratch + 8192, k, 16); memcpy(g_scratch + 12288, tri, sizeof tri); if (vc) memcpy(g_scratch, vc, 48);   /* VS c0..c2 */
+    memcpy(g_scratch + 1024, drv_vs, 64);
     NxVtxLayout lay; memset(&lay, 0, sizeof lay);
     lay.count = 1; lay.stride = 16; lay.attr[0].type = NxAttr_Float32; lay.attr[0].components = 4;
     uint32_t lw[9]; memcpy(lw, &lay, sizeof lay);
@@ -41,6 +46,7 @@ static int draw(uint32_t vs, uint32_t ps, const float k[4]) {
     uint64_t r = t_submit(s); free(s);
     return r == 0 && t_readback(0, NxRb_RGBA8, 16, 16, g_px, sizeof g_px);
 }
+static int draw(uint32_t vs, uint32_t ps, const float k[4]) { return draw_vc(vs, ps, k, NULL); }
 static int is_px(const uint8_t* p, const float k[4]) { for (int c = 0; c < 4; c++) if (abs((int)p[c] - (int)lroundf(k[c] * 255.0f)) > 1) return 0; return 1; }
 static int whole(const float k[4]) { for (int i = 0; i < 256; i++) if (!is_px(g_px + 4 * i, k)) return 0; return 1; }
 
@@ -95,9 +101,9 @@ void part_q(void) {
         {create(v20->w, v20->n * 4, 0, 0, dup, 2, 0), "L with a duplicate"},
         {create(v20->w, v20->n * 4, 0, 0, hi, 1, 0), "L usage 14"},
         {create(v20->w, v20->n * 4, 0, 0, many, 32, 0), "L of 32 pairs"},
-        {create(v20->w, 2u << 20, 0, 0, NULL, 0, 0), "size above 1 MiB"},
+        {raw((uint64_t)(uintptr_t)v20->w, 2u << 20), "size above 1 MiB"},
         {t_ext(NXGPU_FN_SHADER_CREATE_D3D, 1, (uint64_t)0), "descriptor address 0"},
-        {create(NULL, 8, 0, 0, NULL, 0, 0), "bytecode address 0"},
+        {raw(0, 8), "bytecode address 0"},
     };
     for (uint32_t i = 0; i < sizeof bad / sizeof bad[0]; i++) CHECKM(bad[i].r == 0, "%s returned %llu", bad[i].what, (unsigned long long)bad[i].r);
     d.pad[1] = 1; CHECK(t_ext(NXGPU_FN_SHADER_CREATE_D3D, 1, (uint64_t)(uintptr_t)&d) == 0); d.pad[1] = 0; d.pad2 = 1; CHECK(t_ext(NXGPU_FN_SHADER_CREATE_D3D, 1, (uint64_t)(uintptr_t)&d) == 0);
@@ -117,4 +123,10 @@ void part_q(void) {
     /* the pixel shader that reads COLOR0 (ps_2_0: the rule's default 1.0 for an unwritten diffuse) */
     uint64_t pc = make("ps_c0", 0); const float one[4] = {1, 1, 1, 1};
     CHECK(pc && draw((uint32_t)vc, (uint32_t)pc, k) && whole(one));
+    /* a link set with non-canonical pairs (COLOR2 = 0xA2, COLOR3 = 0xA3): both stages translated with it agree on the varying locations; the PS reads COLOR3 = the VS's c2 */
+    const TD3d *vl = find("vs_col23"), *pl = find("ps_col3"); const uint8_t lc[2] = {0xA2, 0xA3};
+    uint64_t vlid = create(vl->w, vl->n * 4, 0, 0, lc, 2, 0), plid = create(pl->w, pl->n * 4, 1, 0, lc, 2, 0);
+    const float vcs[12] = {0, 0, 0, 0, 0.1f, 0.2f, 0.3f, 0.4f, 0.6f, 0.5f, 0.4f, 0.3f}, want[4] = {0.6f, 0.5f, 0.4f, 0.3f};
+    CHECKM(vlid && plid, "L pair: %s", nxgl4_last_error());
+    CHECK(vlid && plid && draw_vc((uint32_t)vlid, (uint32_t)plid, k, vcs) && whole(want));
 }

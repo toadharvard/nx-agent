@@ -14,16 +14,20 @@
  l  present: rects, gamma ramp vs CPU, frame files, on_present, refused presents
  m  w[3] bits: MSAA, AALINE, NOCLIP, SAMPLEMASK (multisampled targets) change the output; LASTPIXEL + line refused; reserved bits
  n  the point rule floor((d + 0.5) * sw / dw) exactly: colour formats, depth-stencil, multisampled source
+ q  NXGPU_FN_SHADER_CREATE_D3D: ids of every model class, refusals (hash, size, stage, variant, reserved, L, descriptor, garbage), memo + owners, variants / link sets, every VS x PS pair draws
  p  libnxgl4.so: built by build_gl4.sh, exports nxgl4_ext, leaves nxgl4_guest_ptr / nxgl4_on_present undefined; loaded
     with ctypes next to a preload embedder: clear + present, frame file, hook
 Oracle = CPU code in tests/l6/gl4 (patterns, filters, format table, vertex expansion); LP64 host build, identity guest addresses."""
 import ctypes, glob, os, re, shutil, subprocess, sys, tempfile
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
+sys.path.insert(0, HERE)
+import xl, d3dsyn  # noqa: E402  (the translator build: FNVNX_SHADERS_BUILD is a required input)
 BACK = os.path.join(ROOT, "render", "d3d9", "backend"); NXINC = BACK
 ENV = dict(os.environ, LIBGL_ALWAYS_SOFTWARE="1", GALLIUM_DRIVER="llvmpipe", EGL_PLATFORM="surfaceless")
-TESTS = ["t_main.c", "t_parts_ab.c", "t_parts_cd.c", "t_parts_ef.c", "t_parts_i.c", "t_parts_j.c", "t_parts_k.c", "t_parts_l.c", "t_parts_m.c", "t_parts_n.c", "t_parts_o.c"]
-PARTS = "abcdefijklmno"
+TESTS = ["t_main.c", "t_parts_ab.c", "t_parts_cd.c", "t_parts_ef.c", "t_parts_i.c", "t_parts_j.c", "t_parts_k.c", "t_parts_l.c", "t_parts_m.c", "t_parts_n.c", "t_parts_o.c", "t_parts_q.c"]
+PARTS = "abcdefijklmnoq"
+INCDIR = None   # the generated t_d3d.h
 fails = []
 
 
@@ -33,7 +37,7 @@ def sh(cmd, **kw): return subprocess.run(cmd, capture_output=True, text=True, **
 def build(backend, out, defs=()):
     srcs = sorted(os.path.join(backend, f) for f in os.listdir(backend) if f.startswith("gl4_") and f.endswith(".c"))
     srcs += [os.path.join(HERE, t) for t in TESTS]
-    r = sh(["gcc", "-std=c11", "-Wall", "-Werror", "-Werror=switch-enum", "-O1", *defs, "-I", backend, "-I", NXINC, "-I", HERE, *srcs, "-lEGL", "-lGL", "-lm", "-o", out])
+    r = sh(["gcc", "-std=c11", "-Wall", "-Werror", "-Werror=switch-enum", "-O1", *defs, "-I", backend, "-I", NXINC, "-I", HERE, "-I", INCDIR, *srcs, *xl.flags(), "-lEGL", "-lGL", "-lm", "-o", out])
     return r.returncode == 0, r.stderr[-1500:]
 
 
@@ -53,7 +57,7 @@ def source_gates():
         if re.search(r"\bdefault\s*:", text): bad += 1; print("gate: %s has a default: label" % os.path.basename(p))
         if text.count("\n") > 300: bad += 1; print("gate: %s is longer than 300 lines" % os.path.basename(p))
     core = open(os.path.join(BACK, "gl4_core.c")).read(); n += 2
-    if "(int)N_OPS == (int)NxOp_Count4 && (int)N_FNS == (int)NXGPU_FN_COUNT4" not in core: bad += 1; print("gate: tables are not asserted total")
+    if "(int)N_OPS == (int)NxOp_Count4 && (int)N_FNS == (int)NXGPU_FN_SHADER_CREATE_D3D + 1 && (int)NXGPU_FN_SHADER_CREATE_D3D == (int)NXGPU_FN_COUNT4" not in core: bad += 1; print("gate: tables are not asserted total")
     if "NXGL4_VERSION NXGPU_VERSION4" not in core: bad += 1; print("gate: version is not 4")
     print("PART g (source gates): %d checks, %d failed" % (n, bad))
     if bad: fails.append("source gates")
@@ -109,12 +113,18 @@ def lib_test(tmp):
     so = os.path.join(tmp, "libnxgl4.so"); pre = os.path.join(tmp, "preload.so")
     r = sh(["sh", os.path.join(BACK, "build_gl4.sh"), so]); checks += 1
     if r.returncode: bad += 1; print(r.stderr[-1500:])
+    env = {k: v for k, v in os.environ.items() if k != "FNVNX_SHADERS_BUILD"}; no = os.path.join(tmp, "libnone.so"); checks += 3   # the required input: without it nothing is built, exit 2, a message naming it
+    r2 = sh(["sh", os.path.join(BACK, "build_gl4.sh"), no], env=env)
+    for ok, what in ((r2.returncode == 2, "exit status 2"), ("FNVNX_SHADERS_BUILD" in r2.stderr, "message names FNVNX_SHADERS_BUILD"), (not os.path.exists(no), "no library written")):
+        if not ok: bad += 1; print("lib: build without the translator build: not " + what)
+    r3 = sh(["sh", os.path.join(BACK, "build_gl4.sh"), "--shaders-build", os.path.join(tmp, "nothing"), no], env=env); checks += 1
+    if r3.returncode != 2: bad += 1; print("lib: an unusable --shaders-build directory did not stop the build")
     r = sh(["gcc", "-std=c11", "-Wall", "-Werror", "-fPIC", "-shared", os.path.join(HERE, "t_preload.c"), "-o", pre]); checks += 1
     if r.returncode: bad += 1; print(r.stderr[-800:])
     if not bad:
         d = sh(["nm", "-D", "--defined-only", so]).stdout; u = sh(["nm", "-D", "--undefined-only", so]).stdout
         checks += 3
-        exp = " T nxgl4_ext" in d and " T nxgl4_create" in d
+        exp = " T nxgl4_ext" in d and " T nxgl4_create" in d and " T nxgl4_shim_glsl" in d and " T nxgl4_last_error" in d and len(re.findall(r" T ", d)) == 5
         und = re.search(r" U nxgl4_guest_ptr", u) and re.search(r" U nxgl4_on_present", u)
         loc = " gl4_" not in d and " p_gl" not in d
         for ok, what in ((exp, "exports nxgl4_ext / nxgl4_create"), (und, "leaves nxgl4_guest_ptr and nxgl4_on_present undefined"), (loc, "exports nothing internal")):
@@ -185,8 +195,11 @@ def mutations(tmp):
 
 
 def main():
+    global INCDIR
     tmp = tempfile.mkdtemp(prefix="gl4t_")
     try:
+        INCDIR = os.path.join(tmp, "inc"); os.makedirs(INCDIR)
+        sm, ops = xl.hand(); open(os.path.join(INCDIR, "t_d3d.h"), "w").write(d3dsyn.header(sm, ops))
         exe = os.path.join(tmp, "t_gl4")
         ok, err = build(BACK, exe)
         if not ok:

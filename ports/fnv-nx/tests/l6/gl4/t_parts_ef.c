@@ -87,7 +87,7 @@ static void part_e(void) {
     CHECK(t_ext(NXGPU_FN_SAMPLER_UPDATE, 2, (uint64_t)1, (uint64_t)0) == NXGPU_BAD_CALL);
     CHECK(t_ext(NXGPU_FN_QUERY_RESULT, 3, (uint64_t)1, (uint64_t)0, (uint64_t)0) == NXGPU_BAD_CALL);
     CHECK(t_ext(NXGPU_FN_PRESENT, 1, (uint64_t)0) == NXGPU_BAD_CALL);
-    CHECK(t_ext(NXGPU_FN_COUNT4, 1, (uint64_t)0) == NXGPU_BAD_CALL);
+    CHECK(t_ext(NXGPU_FN_COUNT4 + 1, 1, (uint64_t)0) == NXGPU_BAD_CALL);   /* NXGPU_FN_COUNT4 itself is SHADER_CREATE_D3D (part q) */
     /* a stream with a malformed v4 op (BeginPass4 without its target words) is refused as a whole: nothing before it executes */
     t_op(s, NxOp_BeginPass, 8, b, 0, 1, 0xFFFF0000u, 0, 0, 8, 8);
     t_op(s, NxOp_BeginPass4, 1, 0);

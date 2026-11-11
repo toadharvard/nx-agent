@@ -15,6 +15,8 @@ EXTRA = {  # variants / link sets: a PS reading TEXCOORD0 (canonical) and POSITI
     "vs_t0": "vs_2_0\ndcl_position v0\nmov oPos, v0\nmov oT0, c0\n",
     "ps_t0": "ps_2_0\ndcl t0\nmov oC0, t0\n",
     "ps_c0": "ps_2_0\ndcl v0\nmov oC0, v0\n",
+    "vs_col23": "vs_3_0\ndcl_position v0\ndcl_position o0\ndcl_color2 o1\ndcl_color3 o2\nmov o0, v0\nmov o1, c1\nmov o2, c2\n",
+    "ps_col3": "ps_3_0\ndcl_color3 v0\nmov oC0, v0\n",
 }
 
 

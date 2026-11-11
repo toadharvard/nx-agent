@@ -77,5 +77,6 @@ void part_k(void);   /* queries, sampler_update */
 void part_l(void);   /* present */
 void part_m(void);   /* w[3] bits */
 void part_n(void);   /* the point rule */
+void part_q(void);   /* NXGPU_FN_SHADER_CREATE_D3D */
 void part_o(void);   /* presentation rules P2-P5: cursor, front buffer, vblank */
 #endif
