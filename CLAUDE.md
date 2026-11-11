@@ -219,3 +219,22 @@ The owner's words: "Ты когда пишешь че-то агентом они
 - **Sanitizer builds** are a flags variant of the same product root in `verify/recipe.py`, with the msvcmodel compiler and
   plugins, in `GATE_CACHE`. The boot machine holds the shadow memory and the `__asan_*` callbacks; UBSan traps report
   the pc.
+
+## Owner order of 2026-11-11, night: no doubles in tests (binding)
+
+The owner's words, on a render defect that unit tests missed because the sibling modules were replaced in them:
+"Это что за бред, заглушки?"
+
+- A replaced module in a test is a stub. It counts in the stub gate, which stays an absolute 0.
+- A test links the real product files of its root: the same unit set and flags that `verify/recipe.py` builds.
+  - A test never defines a symbol that a product root defines. This includes recording doubles, fakes, mocks and
+    hand-written stand-ins of sibling files.
+  - The check is mechanical, per test binary: (symbols the test defines) ∩ (symbols the product roots define) = ∅.
+    There is no allow-list. The owner is L1, as part of the stub gate.
+- Below the product there is one boundary: deko3d, libnx and the kernel. A test that runs on the host meets it in one
+  shared model, the L4 boot machine (its GPU and kernel model, checked against its references). There is no
+  per-test double of it.
+- Failure injection is allowed only as an input of that shared model, such as a kernel or allocator result that
+  Windows, Wine 9.0 or the console documents. A test never injects it by replacing a function.
+- Existing tests with doubles are rewritten onto the real files and the shared model, or deleted. Each lead gives the
+  global count of its tests with doubles (files and symbols, with the commit) and takes it to 0.
