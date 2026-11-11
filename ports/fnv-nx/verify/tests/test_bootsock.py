@@ -255,7 +255,7 @@ def main():
         ("hints-family", lambda e: open_(e, "1.2.3.4", None, e.hints(0, 3)), neg(2005)),
         ("hints-type", lambda e: open_(e, "1.2.3.4", None, e.hints(0, 0, 9)), neg(2006)),
         ("hints-before-null", lambda e: open_(e, None, None, e.hints(0x8000)), neg(2001)),
-        ("name", lambda e: open_(e, "example.org", "80"), neg(2003)),
+        ("name", lambda e: open_(e, "example.org", "80"), neg(2002)),
         ("name-errno-kept", lambda e: (e.mem.write(LEN, struct.pack("<i", 77)), open_(e, "example.org", None, 0, LEN), e.mem.read(LEN, 4))[2], struct.pack("<i", 77)),
         ("name-numerichost", lambda e: open_(e, "example.org", None, e.hints(4)), neg(2002)),
         ("v4", lambda e: (open_(e, "1.2.3.4", "80"),)[0], 1),

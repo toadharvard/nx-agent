@@ -62,7 +62,7 @@ Served per service (everything else listed here as NOT answered):
              socket with no local peer has no traffic ever (no network): revents 0, and after the timeout (virtual time; for ever for -1)
              the result is 0. NOT answered: an open socket that has a local peer or could get one: a recorded peer, a bound or a listening
              socket (a local sender could produce traffic; the model never produces it, so the case is left to the OS).
-  GAI_OPEN   hints checked first (BADFLAGS, FAMILY, SOCKTYPE), both nodes null NONAME; node a name: AI_NUMERICHOST NONAME, else -EAI_AGAIN
+  GAI_OPEN   hints checked first (BADFLAGS, FAMILY, SOCKTYPE), both nodes null NONAME; node a name: NONAME (the name "localhost" without AI_NUMERICHOST is not answered)
              (*sys_errno not written); node null with a family INET / INET6 in the hints, or numeric of that family or of AF_UNSPEC hints
              (A3), service null or decimal 0..65535 (no leading zero): a ticket; a non-numeric service with AI_NUMERICSERV NONAME.
              NOT answered: node null with family AF_UNSPEC, a numeric node of the other family, flags CANONNAME V4MAPPED ALL ADDRCONFIG,
@@ -448,7 +448,11 @@ class SockModel:
         node = self._cstr(node_p).decode("latin-1") if node_p else None
         kind = self._node_kind(node)
         if kind == "name":
-            return neg(WEAI_NONAME if flags & AI_NUMERICHOST else WEAI_AGAIN)
+            # declared machine (hostapi.h): a node that is not a numeric address and not the local host -> NONAME. The stage knows
+            # one name of the local host, "localhost"; the list an OS returns for it is the OS's own, so that case is not answered.
+            if node.rstrip(".").lower() == "localhost" and not flags & AI_NUMERICHOST:
+                raise NotDetermined("gai_open: the local host name (the address list is the host's)")
+            return neg(WEAI_NONAME)
         svc = self._cstr(svc_p).decode("latin-1") if svc_p else None
         if svc is None:
             port = 0

@@ -1259,7 +1259,7 @@ def main():
     want56 = {"h1": "3", "h2": "4", "close1": "0", "h3": "3", "getfl": "2", "setfl": "0", "getfl-nb": "802", "connect-ext": ne(101),
               "sendto-ext": ne(101), "recv-nb": ne(11), "bind-lo": "0", "getsockname": "0", "name-port": "1f90", "name-fam": "2", "name-a0": "7f",
               "name-a3": "1", "close3": "0", "closed-getfl": ne(9), "ticket": "1", "fetch-size": "a8", "fetch": "a8", "rec0": "60102", "rec1": "110202",
-              "rec2": "302", "rec-port": "1bb", "rec-a": "30a", "fetch-again": ne(22), "gai-name": ne(2003), "gai-errno-kept": "77", "tz-last": "0"}
+              "rec2": "302", "rec-port": "1bb", "rec-a": "30a", "fetch-again": ne(22), "gai-name": ne(2002), "gai-errno-kept": "77", "tz-last": "0"}
     case("sockets and getaddrinfo (guest): handles, flag state, ENETUNREACH, loopback bind and name, numeric getaddrinfo records, name -> EAI_AGAIN "
          "(%d values)" % len(want56), r56["reason"] == "exit" and k56 == want56, ({n: (k56.get(n), v) for n, v in want56.items() if k56.get(n) != v}, r56))
     sw = open(os.path.join(GUEST_DIR, "fnvnx", "sockwire.h")).read()
