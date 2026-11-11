@@ -102,6 +102,14 @@ def win_to_posix(p):
     return _ci_path(q) or q
 
 
+
+def _atomic(path, data):
+    import tempfile
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix='.' + path.name + '.', suffix='.tmp')
+    with os.fdopen(fd, 'wb') as h: h.write(data)
+    os.chmod(tmp, 0o644); os.replace(tmp, path)
+
+
 class Cache:
     def __init__(self, root, anchors, compiler_files):
         """anchors: [(token, absolute dir)], longest first; compiler_files: the binaries to put in the salt"""
@@ -184,12 +192,11 @@ class Cache:
                     pass
             return text
         od = self.root / 'o'; od.mkdir(parents=True, exist_ok=True)
-        tmp = od / ('%s.obj.tmp%d' % (k, os.getpid()))
-        shutil.copyfile(obj, tmp); os.replace(tmp, od / ('%s.obj' % k))
-        (od / ('%s.txt' % k)).write_text(text)
+        # every file under a name unique per writer (threads of one process too), then renamed whole
+        _atomic(od / ('%s.obj' % k), Path(obj).read_bytes())
+        _atomic(od / ('%s.txt' % k), text.encode('utf-8', 'surrogateescape'))
         m = self._manifest(source, cmd, variant); m.parent.mkdir(parents=True, exist_ok=True)
-        tmp = m.with_suffix('.tmp%d' % os.getpid())
-        tmp.write_text(json.dumps({'key': k, 'source': source, 'deps': deps}) + '\n'); os.replace(tmp, m)
+        _atomic(m, (json.dumps({'key': k, 'source': source, 'deps': deps}) + '\n').encode())
         return text
 
 

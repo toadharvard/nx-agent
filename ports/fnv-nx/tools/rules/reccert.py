@@ -4,7 +4,8 @@
     python3 tools/rules/reccert.py hash
     python3 tools/rules/reccert.py pristine-overlay <decomp checkout> <recon dir> <out dir>
     python3 tools/rules/reccert.py stamp <recon dir> --stats <tree>/prepare_stats.tsv --objects <objects.tsv>
-                                         --match <build_and_match report.json | dir of them> [--report out.tsv]
+                                         --match <build_and_match report.json | dir of them>
+                                         --overlay <the pristine-overlay out dir the reports were made in> [--report out.tsv]
     python3 tools/rules/reccert.py stamp-patches --stats <tree>/prepare_stats.tsv --objects <objects.tsv>
                                                  --msvc <msvc_check report.jsonl> [--out patches/certs.json]
 
@@ -24,7 +25,9 @@ Certifying (a farm job, whenever the rule set changes). A certificate has two ha
     its append, its recipe entries) to the bytes of the exe, as the recon was accepted (D20, the decomp's
     tools/build_and_match.py). This half does not depend on the rules. `pristine-overlay` writes the checkout to
     run build_and_match in: the decomp with every recon applied to its unit and build/units.json cut to those
-    units;
+    units; its tools/ is a real copy (build_and_match finds its checkout through Path(__file__).resolve()).
+    `stamp` takes the overlay too and certifies nothing unless the units of the reports are exactly the units of
+    the overlay's build/units.json (the reports were made from the overlay, not from the pristine checkout);
   - the recon fits the text the rules produce: prepare with FNVNX_RECON=<recon dir> FNVNX_RECON_CERTIFY=1 (every
     recon is tried; the ones REC1 applies are named `REC-SITE/<recon>/applied` in the tree's prepare_stats.tsv) and
     the same FNVNX_PREPARE_SKIP, then tools/link/compile.sh over the units that have recons.
@@ -43,6 +46,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 
 TOOLS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -104,7 +108,24 @@ def _recons(recon_dir):
             yield os.path.relpath(dp, recon_dir).replace(os.sep, '/'), f, r
 
 
-def stamp(recon_dir, stats_tsv, objects, match, report=None):
+class OverlayMismatch(Exception):
+    pass
+
+
+def _check_overlay(reports, overlay):
+    """The reports were made from the overlay iff the set of their unit sources is the set of the overlay's units
+    (a report of the pristine checkout names every unit of the decomp, the overlay's has only the recons' units)."""
+    want = {u['source'] for u in json.load(open(os.path.join(overlay, 'build', 'units.json')))['units']}
+    got = {u.get('source') for rep in reports for u in rep.get('units', [])}
+    if got != want:
+        raise OverlayMismatch('match reports hold %d units, the overlay %s holds %d (%d only in the reports, %d only in the overlay):'
+                              ' they were not made from it; nothing certified' % (
+                                  len(got), overlay, len(want), len(got - want), len(want - got)))
+
+
+def stamp(recon_dir, stats_tsv, objects, match, overlay, report=None):
+    reports = _load_reports(match)
+    _check_overlay(reports, overlay)
     cur = rules_hash()
     applied = set()
     for l in open(stats_tsv):
@@ -114,7 +135,6 @@ def stamp(recon_dir, stats_tsv, objects, match, report=None):
     for l in open(objects):
         p = l.rstrip('\n').split('\t')
         if len(p) >= 3: built[p[0]] = p[2]
-    reports = _load_reports(match)
     rows, n = [], {'certified': 0, 'not certified': 0}
     for name, f, r in _recons(recon_dir):
         unit, why, m = r['unit'], '', None
@@ -149,14 +169,23 @@ def stamp(recon_dir, stats_tsv, objects, match, report=None):
 def pristine_overlay(decomp, recon_dir, out):
     """<out>: the decomp checkout with every recon applied to the pristine text of its unit (replace pairs, each
     exactly once, then the append) and build/units.json cut to the units that have recons, with the recons' recipe
-    entries. Everything else is a link to the checkout. A recon whose pairs do not fit the pristine text is left
+    entries. tools/ is a real copy: build_and_match resolves its checkout root through Path(__file__).resolve(), so a
+    link to the decomp's tools/ would run it on the pristine checkout (an assert fails if a link remains under it).
+    Every other top-level entry is data read by path, never a root a tool resolves (code is only under tools/), so
+    it is a link to the checkout. A recon whose pairs do not fit the pristine text is left
     out and listed (<out>/overlay_rejected.tsv): its unit is then compared without it, so its functions mismatch."""
     decomp, out = os.path.abspath(decomp), os.path.abspath(out)
     os.makedirs(out, exist_ok=True)
     for name in os.listdir(decomp):
         if name in ('src', 'build', '.git'): continue
         dst = os.path.join(out, name)
-        if not os.path.lexists(dst): os.symlink(os.path.join(decomp, name), dst)
+        if name == 'tools':
+            if os.path.islink(dst) or os.path.isfile(dst): os.unlink(dst)
+            elif os.path.isdir(dst): shutil.rmtree(dst)
+            shutil.copytree(os.path.join(decomp, name), dst, symlinks=False, ignore=shutil.ignore_patterns('__pycache__'))
+            links = [os.path.join(dp, n) for dp, dns, fns in os.walk(dst) for n in dns + fns if os.path.islink(os.path.join(dp, n))]
+            assert not links, 'link in the overlay tools/: %s' % links[:3]
+        elif not os.path.lexists(dst): os.symlink(os.path.join(decomp, name), dst)
     data = json.load(open(os.path.join(decomp, 'build', 'units.json')))
     by_unit, rejected = {}, []
     for name, f, r in _recons(recon_dir):
@@ -276,7 +305,8 @@ def main(argv):
     sub.add_parser('hash')
     p = sub.add_parser('pristine-overlay'); p.add_argument('decomp'); p.add_argument('recon'); p.add_argument('out')
     p = sub.add_parser('stamp'); p.add_argument('recon'); p.add_argument('--stats', required=True)
-    p.add_argument('--objects', required=True); p.add_argument('--match', required=True); p.add_argument('--report')
+    p.add_argument('--objects', required=True); p.add_argument('--match', required=True)
+    p.add_argument('--overlay', required=True); p.add_argument('--report')
     p = sub.add_parser('stamp-patches'); p.add_argument('--stats', required=True); p.add_argument('--objects', required=True)
     p.add_argument('--msvc', required=True); p.add_argument('--out'); p.add_argument('--report')
     a = ap.parse_args(argv)
@@ -294,7 +324,10 @@ def main(argv):
         n, rejected = pristine_overlay(a.decomp, a.recon, a.out)
         print('reccert: %d units with recons written to %s; %d recons do not fit the pristine text' % (n, a.out, len(rejected)))
         return 0
-    cur, n, rows = stamp(a.recon, a.stats, a.objects, a.match, a.report)
+    try:
+        cur, n, rows = stamp(a.recon, a.stats, a.objects, a.match, a.overlay, a.report)
+    except OverlayMismatch as e:
+        print('reccert: %s' % e, file=sys.stderr); return 1
     print('reccert: rule set %s: %d certified, %d not certified' % (cur, n['certified'], n['not certified']))
     by = {}
     for _, _, res, why in rows:

@@ -146,7 +146,10 @@ def main():
                               'status': status or ('mismatch' if mismatches else 'ok'), 'mismatches': mismatches}]},
                   open(os.path.join(mdir, 'm.json'), 'w'))
     def cert(): return json.load(open(os.path.join(rdir, 'recon.json'))).get('cert')
-    def stamp(): return rc.stamp(os.path.join(root, 'recon'), stats, objs, mdir)
+    ov = os.path.join(root, 'ov')
+    os.makedirs(os.path.join(ov, 'build'))
+    json.dump({'units': [{'source': 'src/h.cpp'}]}, open(os.path.join(ov, 'build', 'units.json'), 'w'))
+    def stamp(): return rc.stamp(os.path.join(root, 'recon'), stats, objs, mdir, ov)
     open(stats, 'w').write('REC-SITE/r1/applied\t1 files\t1 edits\n')
     open(objs, 'w').write('src/h.cpp\t/x/h.o\tfail\n'); report([])
     stamp()
@@ -170,12 +173,25 @@ def main():
     check('stamp: prepare did not apply the recon -> no certificate', cert() is None, cert())
     open(stats, 'w').write('REC-SITE/r1/applied\t1 files\t1 edits\n')
     os.remove(os.path.join(mdir, 'm.json'))
-    stamp()
-    check('stamp: no match report -> no certificate, also for a recon that places no function', cert() is None, cert())
+    try: stamp(); err = None
+    except rc.OverlayMismatch as e: err = str(e)
+    check('stamp: no match report -> the overlay set differs, fails and certifies nothing', err and cert() is None, (err, cert()))
     write(dict(recon, functions=[])); report([])
     stamp()
     check('stamp: a recon that places no function is certified when its unit was compared',
           cert() and cert()['match'].startswith('no placed function'), cert())
+    # stamp: the reports must be of the overlay's units (same set of sources), else nothing is certified
+    write(dict(recon, cert={'rules': 'old', 'compiles': True})); report([])
+    json.dump({'units': [{'source': 'src/h.cpp'}, {'source': 'src/pristine_only.cpp'}]},
+              open(os.path.join(ov, 'build', 'units.json'), 'w'))
+    before = open(os.path.join(rdir, 'recon.json')).read()
+    try: stamp(); err = None
+    except rc.OverlayMismatch as e: err = str(e)
+    check('stamp: reports of another unit set than the overlay: refused with counts, recon.json untouched',
+          err and 'hold 1 units' in err and 'holds 2' in err and open(os.path.join(rdir, 'recon.json')).read() == before, err)
+    cli = rc.main(['stamp', os.path.join(root, 'recon'), '--stats', stats, '--objects', objs, '--match', mdir, '--overlay', ov])
+    check('stamp CLI: the mismatch is a non-zero exit', cli != 0, cli)
+    write(recon)
     # pristine-overlay: the recon on the pristine unit, units.json cut to the recon's unit with its recipe entry
     write(recon)
     open(os.path.join(root, 'dec', 'src', 'h.cpp'), 'w').write('// @fnv 0x00401000\nvoid f() {}\n')
@@ -187,6 +203,16 @@ def main():
           n_units == 1 and not rej and 'H::H() {}' in open(os.path.join(ov, 'src', 'h.cpp')).read()
           and any(f['address'] == '0x00401010' for f in uj[0]['functions']) and os.path.islink(os.path.join(ov, 'src', 'o.cpp')),
           (n_units, rej, uj))
+    # no entry between <out> and build_and_match.py is a link out of the overlay (it resolves its root through them)
+    os.makedirs(os.path.join(root, 'dec', 'tools'))
+    open(os.path.join(root, 'dec', 'tools', 'build_and_match.py'), 'w').write('# x\n')
+    ov2 = os.path.join(root, 'ov2')
+    os.makedirs(ov2); os.symlink(os.path.join(root, 'dec', 'tools'), os.path.join(ov2, 'tools'))   # a stale link from an old run
+    rc.pristine_overlay(os.path.join(root, 'dec'), os.path.join(root, 'recon'), ov2)
+    bm = os.path.join(ov2, 'tools', 'build_and_match.py')
+    check('pristine-overlay: tools is a real copy; build_and_match.py resolves inside the overlay',
+          not os.path.islink(os.path.join(ov2, 'tools')) and os.path.realpath(bm) == os.path.join(os.path.realpath(ov2), 'tools', 'build_and_match.py'),
+          os.path.realpath(bm))
     patch_cert(root)
     print('test_reccert: %s' % ('FAILED %d' % len(FAILS) if FAILS else 'ok'))
     return 1 if FAILS else 0
