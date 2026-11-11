@@ -6,6 +6,7 @@ fldenv / frstor / fnstenv / fnsave (dynamic stack only) are in f_x87_ctl.py. h_x
 from capstone import x86 as X
 from .core import fallback, op, Unsupported, X87Dyn
 from .f_x87_ctl import ctl
+from . import fpfacts
 
 AR = {0: '+', 1: '*', 4: '-', 5: '-r', 6: '/', 7: '/r'}                    # d8 /g: st0 = st0 o src (r: src o st0)
 ARD = {0: '+', 1: '*', 4: '-r', 5: '-', 6: '/r', 7: '/'}                   # dc/de reg forms: sti = sti o st0 (encodings E0/E8 and F0/F8 are swapped)
@@ -82,7 +83,11 @@ def h_x87(cx, ins):
 
 @op('fwait', 'wait')
 def h_fwait(cx, ins):
-    pass
+    """FWAIT (9B): raises #MF iff an UNMASKED x87 exception is pending (SDM Vol 1 8.6, Vol 2 FWAIT). Invariant I-FPMASK (fnvlift/fpfacts.py, certified by tools/fpstate.py over every module): no
+    exception is ever unmasked, so none is ever pending and the instruction has no effect. The lifter READS the fact file: where I-FPMASK is not proven for the program being lifted, the
+    form is Unsupported (a lift error), not a silent no-op."""
+    inv = fpfacts.require('I-FPMASK', 'fwait')
+    cx.kinds.add('fwait:' + inv)
 
 
 def x87_reg(cx, ins, b0, mr, g):
