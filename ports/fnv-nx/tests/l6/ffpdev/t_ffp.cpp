@@ -119,8 +119,8 @@ static void draw_and_check(TDev& d, IDirect3DSurface9* rt, IDirect3DSurface9* sy
     float fogc[4]; color_of(rs_fog[2], fogc); bool flat = rs_fog[3] == D3DSHADE_FLAT; int tested = 0;
     for (auto& cd : cand) {
         float l1 = cd[0], l2 = cd[1], l0 = 1 - l1 - l2, px = l0 * sx[0] + l1 * sx[1] + l2 * sx[2], py = l0 * sy[0] + l1 * sy[1] + l2 * sy[2];
-        int ix = (int)floorf(px), iy = (int)floorf(py); if (ix < 0 || iy < 0 || ix > 63 || iy > 63) continue;
-        float cx = ix + 0.5f, cy = iy + 0.5f, b[3];
+        int ix = (int)floorf(px + 0.5f), iy = (int)floorf(py + 0.5f);   // D3D9: pixel centres at integer window coordinates (the backend's viewport carries the half pixel, draw_state.cpp S4) if (ix < 0 || iy < 0 || ix > 63 || iy > 63) continue;
+        float cx = (float)ix, cy = (float)iy, b[3];
         b[1] = ((cx - sx[0]) * (sy[2] - sy[0]) - (cy - sy[0]) * (sx[2] - sx[0])) / area; b[2] = ((sx[1] - sx[0]) * (cy - sy[0]) - (sy[1] - sy[0]) * (cx - sx[0])) / area; b[0] = 1 - b[1] - b[2];
         if (b[0] < 0.03f || b[1] < 0.03f || b[2] < 0.03f) continue;                                    // too close to an edge: the coverage rule is not what is tested
         float iw[3], sw = 0; for (int k = 0; k < 3; k++) { iw[k] = b[k] / o[k].position[3]; sw += iw[k]; }

@@ -16,6 +16,7 @@ static IDirect3DBaseTexture9* mktex(IDirect3DDevice9* d, int id) {
     case 6: hr = d->CreateTexture(16, 16, 1, 0, (D3DFORMAT)FB, D3DPOOL_DEFAULT, (IDirect3DTexture9**)&t, nullptr); break;
     case 7: hr = d->CreateVolumeTexture(8, 8, 8, 1, 0, (D3DFORMAT)FA, D3DPOOL_DEFAULT, (IDirect3DVolumeTexture9**)&t, nullptr); break;
     }
+    if (hr != D3D_OK) printf("mktex id %d fmt %u/%u hr %08x\n", id, FA, FB, (unsigned)hr);
     CHECK_HR(hr, D3D_OK); return t;
 }
 static IDirect3DSurface9* mkrt(IDirect3DDevice9* d, int id) {   // 1 64x64, 2 32x32, 3 64x64 4 samples
@@ -39,7 +40,7 @@ static void run_case(IDirect3D9* d3d[2], const char* line) {
     for (auto& t : tok) {
         size_t e = t.find('='); if (e == std::string::npos) continue; std::string k = t.substr(0, e), v = t.substr(e + 1);
         if (k == "s") for (auto& it : split(v, ';')) { if (it.empty()) continue; auto a = split(it, ':'); auto f = split(a[1], ','); int sl = atoi(a[0].c_str()); d->SetSamplerState(sid(sl), D3DSAMP_MINFILTER, atoi(f[0].c_str())); d->SetSamplerState(sid(sl), D3DSAMP_MAGFILTER, atoi(f[1].c_str())); d->SetSamplerState(sid(sl), D3DSAMP_MIPFILTER, atoi(f[2].c_str())); }
-        else if (k == "t") for (auto& it : split(v, ';')) { if (it.empty()) continue; auto a = split(it, ':'); int id = atoi(a[1].c_str()); IDirect3DBaseTexture9* b = mktex(d, id); if (b) { d->SetTexture(sid(atoi(a[0].c_str())), b); tx[id] = b; } }
+        else if (k == "t") for (auto& it : split(v, ';')) { if (it.empty()) continue; auto a = split(it, ':'); int id = atoi(a[1].c_str()); if (!id) continue; IDirect3DBaseTexture9* b = mktex(d, id); if (b) { d->SetTexture(sid(atoi(a[0].c_str())), b); tx[id] = b; } }
         else if (k == "g") for (auto& it : split(v, ';')) { if (it.empty()) continue; auto a = split(it, ':'); auto f = split(a[1], ','); uint32_t s = atoi(a[0].c_str()); static const D3DTEXTURESTAGESTATETYPE ty[9] = {D3DTSS_COLOROP, D3DTSS_COLORARG1, D3DTSS_COLORARG2, D3DTSS_COLORARG0, D3DTSS_ALPHAOP, D3DTSS_ALPHAARG1, D3DTSS_ALPHAARG2, D3DTSS_ALPHAARG0, D3DTSS_RESULTARG};
             for (int i = 0; i < 9; i++) d->SetTextureStageState(s, ty[i], (DWORD)strtoul(f[i].c_str(), nullptr, 10)); }
     }

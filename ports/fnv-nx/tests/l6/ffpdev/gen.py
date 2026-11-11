@@ -10,6 +10,7 @@ SRC = [0, 1, 2, 3, 0x7FFFFFFF]; MODE = [0, 1, 2, 3, 4, 0xFFFFFFFF]; BLEND = [0, 
 RS_DOM = {RS["FOGENABLE"]: [0, 1, 2], RS["SPECULARENABLE"]: [0, 1, 5], RS["FOGTABLEMODE"]: MODE, RS["FOGVERTEXMODE"]: MODE, RS["RANGEFOGENABLE"]: [0, 1], RS["CLIPPING"]: [0, 1], RS["LIGHTING"]: [0, 1],
           RS["COLORVERTEX"]: [0, 1], RS["LOCALVIEWER"]: [0, 1], RS["NORMALIZENORMALS"]: [0, 1], RS["DIFFUSEMATERIALSOURCE"]: SRC, RS["SPECULARMATERIALSOURCE"]: SRC, RS["AMBIENTMATERIALSOURCE"]: SRC,
           RS["EMISSIVEMATERIALSOURCE"]: SRC, RS["VERTEXBLEND"]: BLEND, RS["CLIPPLANEENABLE"]: [0, 1, 3, 0x3F, 0xFFFF, 0x2A], RS["POINTSCALEENABLE"]: [0, 1], RS["INDEXEDVERTEXBLENDENABLE"]: [0, 1]}
+DECL_TYPES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 16]   # the types the device's caps report (DeclTypes = 0x30f: UBYTE4, UBYTE4N, SHORT2N, SHORT4N, FLOAT16_2/4) + the always supported ones
 OPS = list(range(0, 28)) + [0xFFFFFFFF, 0x100]
 ARGS = [0, 1, 2, 3, 4, 5, 6, 7, 0x12, 0x22, 0x35, 0x3F, 0x40, 0xFFFFFFFF]
 TCI = [s | (g << 16) for g in range(0, 6) for s in (0, 1, 7, 8)] + [3, 5 | (2 << 16), 0xFFFF]
@@ -116,7 +117,7 @@ def gen_a(seed=1):
     for k in range(400):                                                    # declarations: random element lists (first wins, methods, streams, usages)
         els, off = [], 0
         for _ in range(r.randrange(0, 12)):
-            t = r.randrange(0, 17); u = r.choice([0, 1, 2, 3, 4, 5, 5, 5, 6, 7, 9, 10, 10, 11, 0, 3]); i = r.choice([0, 0, 0, 1, 2, 7, 8]) if u in (0, 3, 5, 10) else r.choice([0, 0, 1])
+            t = r.choice(DECL_TYPES); u = r.choice([0, 1, 2, 3, 4, 5, 5, 5, 6, 7, 9, 10, 10, 11, 0, 3]); i = r.choice([0, 0, 0, 1, 2, 7, 8]) if u in (0, 3, 5, 10) else r.choice([0, 0, 1])
             els.append((r.choice([0, 0, 0, 1, 2]), off, t, r.choice([0, 0, 0, 0, 1, 2]), u, i)); off += BYTES[t]
         d.set_decl(els); d.set_rs(RS["VERTEXBLEND"], r.choice(BLEND)); d.set_rs(RS["INDEXEDVERTEXBLENDENABLE"], r.choice([0, 1]))
         for s in range(8): d.set_tss(s, TSS["TEXCOORDINDEX"], r.choice(TCI))

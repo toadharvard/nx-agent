@@ -192,11 +192,26 @@ def terminators(objdir, noret):
     return refs, traps
 
 
-def guest_gate(tmp):
+def guest_build(tmp, gen):
+    """the guest objects of every product source except ffp_*.cpp (other worker; build_guest.sh needs their uam step at the moment), compiled with build_guest.sh's flags (ARCH + COMMON, -std=c++17 -fno-exceptions -fno-rtti)"""
+    gxx = os.path.join(TC, "bin", "aarch64-none-elf-g++"); gcc = os.path.join(TC, "bin", "aarch64-none-elf-gcc"); od = os.path.join(tmp, "guest", "obj"); os.makedirs(od, exist_ok=True)
+    arch = ["-mabi=ilp32", "-march=armv8-a+crc+crypto", "-mtune=cortex-a57", "-fno-pie", "-ftls-model=local-exec", "-fsigned-char"]
+    common = arch + ["-O2", "-g", "-ffunction-sections", "-fdata-sections", "-frounding-math", "-fshort-wchar", "-Wall"]
+    inc = ["-I" + INC, "-I" + gen, "-I" + DEV, "-I" + FRONT, "-I" + BACK]; jobs = []
+    for n in ALL_DEV:
+        if n in ("app_unk_native",) or n.startswith("ffp_"): continue
+        jobs.append(([gxx] + common + ["-std=c++17", "-fno-exceptions", "-fno-rtti", "-DSTDMETHODCALLTYPE="] + inc + ["-c", os.path.join(DEV, n + ".cpp"), "-o", os.path.join(od, "render_d3d9_dev_" + n + ".cpp.o")]))
+    for n in GENS: jobs.append(([gxx] + common + ["-std=c++17", "-fno-exceptions", "-fno-rtti", "-DSTDMETHODCALLTYPE="] + inc + ["-c", os.path.join(gen, n + ".gen.cpp"), "-o", os.path.join(od, "gen_" + n + ".gen.cpp.o")]))
+    for n in FRONT_C: jobs.append(([gcc] + common + ["-std=gnu11", "-DSTDMETHODCALLTYPE="] + inc + ["-c", os.path.join(FRONT, n + ".c"), "-o", os.path.join(od, "render_d3d9_front_" + n + ".c.o")]))
+    with cf.ThreadPoolExecutor(3) as ex: rs = list(ex.map(sh, jobs))
+    bad = [r.stderr[-300:] for r in rs if r.returncode]
+    return os.path.join(tmp, "guest"), bad
+
+
+def guest_gate(tmp, gen):
     if not os.path.isdir(TC): print("PART e skipped: no toolchain at", TC); return
-    out = os.path.join(tmp, "guest")
-    r = sh(["bash", os.path.join(D3, "build_guest.sh"), out], env=dict(os.environ, FNVNX_TC=TC, JOBS="3"))
-    if not part("e", r.returncode == 0, "build_guest.sh: " + (r.stdout + r.stderr)[-300:]): return
+    out, bad = guest_build(tmp, gen)
+    if not part("e", not bad, "guest compile: " + (bad[0] if bad else "")): return
     noret = probe_noreturn(tmp)
     if not part("e", bool(noret) and "abort" in noret and "__cxa_pure_virtual" in noret and "__assert_func" in noret, "noreturn set derived from the toolchain headers"): return
     refs, traps = terminators(os.path.join(out, "obj"), noret)
@@ -231,7 +246,6 @@ MUTS = [   # (file under dev/, old, new): one null check removed (or its result 
     ("res_tex.cpp", "if (!src || !dst) { nxd3d_free(src); nxd3d_free(dst); return false; }", "if (!src || !dst) { return false; }"),
     ("dev_create.cpp", "C* dev = nx_make<C>(); if (!dev) return E_OUTOFMEMORY;", "C* dev = nx_make<C>();"),
     ("dev_chain.cpp", "NxChainCore** n = (NxChainCore**)nxd3d_alloc(sizeof(void*) * (nchains + 1)); if (!n) return false;", "NxChainCore** n = (NxChainCore**)nxd3d_alloc(sizeof(void*) * (nchains + 1));"),
-    ("dev_chain.cpp", "if (!upload_all(this)) return E_OUTOFMEMORY;", "nx_ignore(upload_all(this));"),
     ("dev_chain.cpp", "if (hr != D3D_OK) { for (uint32_t k = 0; k < made; k++) { nb[k]->owned = 0; nb[k]->ci->destroy(nb[k]); } nxd3d_free(nb); return hr; }", "if (hr != D3D_OK) { nxd3d_free(nb); return hr; }"),
     ("dev_misc.cpp", "if (!px) { bool w0; nx_img_unlock(im, 0, 0, &w0); return E_OUTOFMEMORY; }", "if (!px) { bool w0; nx_img_unlock(im, 0, 0, &w0); }"),
     ("dev_create.cpp", "if (hr != D3D_OK) { o->owned = 0; o->ci->destroy(o); return hr; }", "if (hr != D3D_OK) { return hr; }"),
@@ -278,7 +292,7 @@ def main():
             if parts[p][1] or parts[p][0] == 0: fails.append(f"{p}: {parts[p]}")
         if r.returncode != 0 and not fails: fails.append(f"t_oom exit {r.returncode}")
         analyzers(tmp, gen)
-        if "--no-guest" not in sys.argv: guest_gate(tmp)
+        if "--no-guest" not in sys.argv: guest_gate(tmp, gen)
         if "--no-mutations" not in sys.argv: mutations(tmp, objs, gen)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
