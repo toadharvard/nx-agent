@@ -3,13 +3,14 @@
 
     read(path)           -> Elf       (reads the file; every defect is ValueError('<where>: <what>'))
     parse(data, where)   -> Elf
-    Elf.section(name)    -> bytes or None   the contents of the section of that name (None: no such section; NOBITS: b'')
+    Elf.section(name)    -> bytes or None   the contents of the section of that name (None: no such section; NOBITS: b'');
+                            ValueError when several sections carry the asked name (names are not unique: one `.group` per COMDAT)
     Elf.symbols()        -> [(name, bind, type, shndx, value, size, other)] of the one SHT_SYMTAB (ValueError: none)
     Elf.section_flags(i) -> sh_flags of section number i
 
 Format: ELF32 or ELF64, little endian, e_type ET_REL.  Pure: bytes in, tuples out.  A defect is an error, never a guess:
 bad magic/class/data/type, a header or table outside the file, a section outside the file (except NOBITS), a name outside
-its string table or without NUL, a section name twice, a compressed section (SHF_COMPRESSED), a second symbol table, a
+its string table or without NUL, a compressed section (SHF_COMPRESSED), a second symbol table, a
 symbol whose section index is SHN_XINDEX or names no section (other than SHN_UNDEF, SHN_ABS, SHN_COMMON), a symbol table
 whose size is not a multiple of its entry size.
 """
@@ -82,16 +83,19 @@ class Elf:
         so, ss = self._sec[shstrndx][3], self._sec[shstrndx][4]
         strtab = data[so:so + ss]
         self.names = [_cstr(strtab, s[0], where, 'section %d name' % i) for i, s in enumerate(self._sec)]
+        # section names are not unique in an ELF object (one `.group` per COMDAT, `.text.*` per function): the index
+        # keeps every section of a name, and only asking for a name that several sections carry is an error
         self.by_name = {}
         for i, n in enumerate(self.names):
-            if n in self.by_name:
-                raise ValueError('%s: section name %r occurs twice' % (where, n))
-            self.by_name[n] = i
+            self.by_name.setdefault(n, []).append(i)
 
     def section(self, name):
-        i = self.by_name.get(name)
-        if i is None:
+        ids = self.by_name.get(name)
+        if ids is None:
             return None
+        if len(ids) != 1:
+            raise ValueError('%s: %d sections are named %s' % (self.where, len(ids), name))
+        i = ids[0]
         _n, typ, flags, off, size, _l, _i, _e = self._sec[i]
         if flags & SHF_COMPRESSED:
             raise ValueError('%s: section %s is compressed' % (self.where, name))

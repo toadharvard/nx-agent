@@ -137,11 +137,37 @@ try:
     units = synth.write(tmp, 'units.json', json.dumps({'units': [{'source': 'a/u.cpp'}]}).encode())
     check('units pairing', gate_names.check([gu], [cu], units), (3, []))
     check('no units: stems differ', gate_names.check([gu], [cu])[1][0].endswith('no cl object for the unit'), True)
-    try:
-        gate_names.check([gu], [cu], synth.write(tmp, 'u2.json', b'{"units": [{"source": "a"}, {"source": "a"}]}'))
-        fails.append('two units with one stem: no error')
-    except unitpairs.GateInputError:
-        pass
+    # a source listed by two units: the cl side is the set u0.obj, u1.obj; one cl object that defines the name proves it
+    units2 = synth.write(tmp, 'units2.json', json.dumps({'units': [{'source': 'a/u.cpp'}, {'source': 'a/u.cpp'}]}).encode())
+    cm = os.path.join(tmp, 'cm')
+    synth.write(cm, 'u0.obj', cl_obj(defined=(), data=(), undef=()))
+    synth.write(cm, 'u1.obj', cl_obj())
+    check('two cl objects, the second defines', gate_names.check([gu], [cm], units2), (3, []))
+    cm2 = os.path.join(tmp, 'cm2')
+    synth.write(cm2, 'u0.obj', cl_obj(defined=(), data=(), undef=()))
+    synth.write(cm2, 'u1.obj', cl_obj(defined=('??0A@@QAE@XZ',)))
+    check('two cl objects, none defines f (reason)', gate_names.check([gu], [cm2], units2)[1][0], 'a_u.cpp:_Z1fv: ?f@@YAXXZ is not a definition of the cl object')
+    cm3 = os.path.join(tmp, 'cm3')
+    synth.write(cm3, 'u0.obj', b'junk')
+    synth.write(cm3, 'u1.obj', cl_obj())
+    check('an unreadable one does not hide a proof', gate_names.check([gu], [cm3], units2), (3, []))
+    cm4 = os.path.join(tmp, 'cm4')
+    synth.write(cm4, 'u0.obj', b'junk')
+    synth.write(cm4, 'u1.obj', cl_obj(defined=('??0A@@QAE@XZ',)))
+    check('unreadable and no proof', gate_names.check([gu], [cm4], units2)[1],
+          ['a_u.cpp:_Z1fv: ?f@@YAXXZ is not a definition of the cl object (a cl object of the unit is unreadable)'])
+    check('pairs: the set, sorted by N', [os.path.basename(p) for p in unitpairs.pairs([gu], [cm], units2)[0][2]], ['u0.obj', 'u1.obj'])
+    # ELF section names are not unique: two .group sections and one .fnvnx.sympair read fine; a doubly present asked section is an error
+    two = synth.elf([('.group', b'\0' * 8, 0), ('.group', b'\0' * 8, 0), ('.fnvnx.sympair', ok_rows, 0), ('.text', b'\0' * 4, 6),
+                     ('.data', b'\0' * 4, 3)], [('_Z1fv', 1, 2, 4, 0), ('_ZN1AC1Ev', 1, 2, 4, 0), ('_ZN1AC2Ev', 1, 2, 4, 0)])
+    d2 = os.path.join(tmp, 'g2')
+    synth.write(d2, 'u.o', two)
+    check('two .group sections', gate_names.check([d2], [c]), (3, []))
+    dd = os.path.join(tmp, 'gdd')
+    synth.write(dd, 'u.o', synth.elf([('.fnvnx.sympair', ok_rows, 0), ('.fnvnx.sympair', ok_rows, 0), ('.text', b'\0', 6)], [('_Z1fv', 1, 2, 3, 0)]))
+    u, r = gate_names.check([dd], [c])
+    check('doubly present .fnvnx.sympair', (u, len(r), r[0].startswith('u:error: ') and '2 sections are named .fnvnx.sympair' in r[0]), (1, 1, True))
+
     cu2 = os.path.join(tmp, 'cu2')
     synth.write(cu2, 'u7.obj', cl_obj())
     try:

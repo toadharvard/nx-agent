@@ -185,17 +185,17 @@ try:
     g, c = fixture(tmp + '/n2', one, synth.coff([dict(name=b'.text', chars=0x60500020, data=b'\xc3')], []))
     check('no CodeView', gate_r7.check(g, c)[:2], (1, ['u:UPlain@@: only-gcc: the cl object has no CodeView types (.debug$T)']))
     g, c = fixture(tmp + '/n3', one, b'junk junk junk')
-    check('unreadable cl object', (gate_r7.check(g, c)[0], gate_r7.check(g, c)[1][0].startswith('u:UPlain@@: undecided: the cl object is unreadable')), (1, True))
+    check('unreadable cl object', (gate_r7.check(g, c)[0], gate_r7.check(g, c)[1][0].startswith('u:UPlain@@: undecided: a cl object of the unit is unreadable')), (1, True))
     g, c = fixture(tmp + '/n4', one, synth.coff([dict(name=b'.debug$T', chars=0x40000040, data=struct.pack('<I', 3) + b'xxxx')], []))
-    check('bad signature', gate_r7.check(g, c)[1][0].startswith('u:UPlain@@: undecided: the cl object is unreadable'), True)
+    check('bad signature', gate_r7.check(g, c)[1][0].startswith('u:UPlain@@: undecided: a cl object of the unit is unreadable'), True)
     bad = synth.CV()
     bad.add(0x1505, b'\0\0')
     g, c = fixture(tmp + '/n5', one, synth.debug_object(bad))
-    check('truncated record', gate_r7.check(g, c)[1][0].startswith('u:UPlain@@: undecided: the cl object is unreadable'), True)
+    check('truncated record', gate_r7.check(g, c)[1][0].startswith('u:UPlain@@: undecided: a cl object of the unit is unreadable'), True)
     blob = synth.CV()
     blob.add(0x1505, b'\0' * 4)
     g, c = fixture(tmp + '/n6', one, synth.coff([dict(name=b'.debug$T', chars=0x40000040, data=blob.blob()[:-1])], []))
-    check('table cut inside a record', gate_r7.check(g, c)[1][0].startswith('u:UPlain@@: undecided: the cl object is unreadable'), True)
+    check('table cut inside a record', gate_r7.check(g, c)[1][0].startswith('u:UPlain@@: undecided: a cl object of the unit is unreadable'), True)
     # members that cannot be read: undecided, not "every member only in gcc"
     brk = synth.CV()
     fl = brk.add(0x1203, struct.pack('<H', 0x1fff) + b'\0' * 6)
@@ -228,6 +228,30 @@ try:
     synth.write(cu, 'u1.obj', synth.debug_object(SERIES))
     units = synth.write(tmp, 'units.json', json.dumps({'units': [{'source': 'q.cpp'}, {'source': 'd/x.cpp'}]}).encode())
     check('units pairing', gate_r7.check([gu], [cu], units)[:2], (1, []))
+
+    # a source listed by two units: the definitions of all its cl objects are collected
+    def run_set(objs, text=one):
+        t = tempfile.mkdtemp(dir=tmp)
+        synth.write(t + '/g', 'x.cpp.o', synth.elf([('.fnvnx.layout', text.encode(), 0)], None))
+        for i, o in enumerate(objs):
+            synth.write(t + '/c', 'u%d.obj' % i, o)
+        us = synth.write(t, 'units.json', json.dumps({'units': [{'source': 'x.cpp'}] * len(objs)}).encode())
+        return gate_r7.check([t + '/g'], [t + '/c'], us)[:2]
+
+    def one_rec(size, extra=()):
+        k = synth.CV()
+        synth.record(k, 's', 'UPlain@@', k.add(0x1203, synth.fieldlist(member(INT, 0, 'a'), member(CHAR, 4, 'b'), *extra)), size)
+        return synth.debug_object(k)
+    good, nocv = one_rec(8), synth.coff([dict(name=b'.text', chars=0x60500020, data=b'\xc3')], [])
+    other = synth.CV()
+    synth.record(other, 's', 'UOther@@', other.add(0x1203, synth.fieldlist(member(INT, 0, 'a'))), 4)
+    check('set: identical definitions count once', run_set([good, good]), (1, []))
+    check('set: one object lacks the key, the other has it', run_set([synth.debug_object(other), good]), (1, []))
+    check('set: one object without CodeView', run_set([nocv, good]), (1, []))
+    check('set: no CodeView in any', run_set([nocv, nocv]), (1, ['x.cpp:UPlain@@: only-gcc: the cl object has no CodeView types (.debug$T)']))
+    check('set: differing definitions are undecided', run_set([good, one_rec(12)]),
+          (1, ['x.cpp:UPlain@@: undecided: the key has 1 gcc and 2 cl different definitions in the unit']))
+    check('set: an unreadable object is red', run_set([good, b'junk'])[1][0].startswith('x.cpp:UPlain@@: undecided: a cl object of the unit is unreadable'), True)
 
     # the gate file and the exit status
     def go(g, c, out, extra=()):

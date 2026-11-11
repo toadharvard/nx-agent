@@ -22,7 +22,8 @@ Every other item is red and listed with its reason: `differs` (the first differe
     change it.  The record, or a record held by value in it (transitively, through cl's members and bases), has a GCC line flagged
     altered/packed/useralign, or has no GCC line (what the source did is unknown)
   - the size of a member's type, or the alignment of a type, is outside what CodeView states (codeview.py: PRIM, member pointers)
-  - the key has several different definitions in the unit (unnamed types share keys) or the plugin could not name the type (`nokey:`)
+  - the key has several different definitions in the unit, in one cl object or between the cl objects of a source several units list
+    (the definitions of all of them are collected and identical ones count once; unnamed types share keys) or the plugin could not name the type (`nokey:`)
   - the CodeView members or bases of the record could not be read
 A record with a virtual base differs by rule: cl lays it out with a vbptr and a vbtable, GCC with a vptr and vtable-held offsets; the
 two object models are different layouts and the native body would read the wrong ones.
@@ -139,7 +140,7 @@ def compare_one(g, c, gcc_of, cl_of):
     return 'equal', ''
 
 
-def unit_items(stem, gpath, cpath):
+def unit_items(stem, gpath, cpaths):
     """(universe, [red ids], Counter of verdicts) of one unit"""
     try:
         lays = objsections.parse_layout(objsections.section(elfobj.read(gpath), '.fnvnx.layout'), stem + ':.fnvnx.layout')
@@ -152,15 +153,17 @@ def unit_items(stem, gpath, cpath):
             ug[lay.key].append(r)
     keys = sorted(ug)
     table, why = None, 'only-gcc: no cl object for the unit'
-    if cpath is not None and keys:
-        try:
-            blobs = coffobj.read(cpath).blobs(b'.debug$T')
-            if not blobs:
-                why = 'only-gcc: the cl object has no CodeView types (.debug$T)'
-            else:
-                table = [codeview.Table(b, stem + ':.debug$T') for b in blobs]
-        except ValueError as e:
-            why = 'undecided: the cl object is unreadable: %s' % e
+    if cpaths and keys:
+        table = []
+        why = 'only-gcc: the cl object has no CodeView types (.debug$T)'
+        for cpath in cpaths:
+            try:
+                table += [codeview.Table(b, stem + ':.debug$T') for b in coffobj.read(cpath).blobs(b'.debug$T')]
+            except ValueError as e:
+                table, why = None, 'undecided: a cl object of the unit is unreadable: %s' % e
+                break
+        if table is not None and not table:
+            table = None
     cache = {}
 
     def cl_of(k):

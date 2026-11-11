@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""unitpairs - the declared inputs shared by the L2 object gates (gate_names, gate_argorder, gate_r7) and their result files.
+"""unitpairs - the declared inputs shared by the L2 object gates (gate_names, gate_r7) and their result files.
 
     gate_X.py --gcc PATH [--gcc PATH ...] --cl PATH [--cl PATH ...] [--units units.json]
 
@@ -8,10 +8,12 @@ of that suffix.  The unit of an object is its stem (the name without the suffix)
 object `S.obj`.  With --units (the prepared tree's build/units.json, {"units": [{"source": "dir/file.cpp", ...}, ...]}) a cl
 object `u<N>.obj` (N canonical decimal) stands for the unit N of that list, whose stem is its source path with `/` replaced by `_` (`a/b.cpp` -> `a_b.cpp`, GCC object `a_b.cpp.o`).
 Errors (GateInputError): a path that does not exist or is a file of the wrong suffix, two objects with one stem on a side,
-a `u<N>` with N outside the list, two units with one stem, a units file that is not that JSON shape.  A cl object without
+a `u<N>` with N outside the list, a units file that is not that JSON shape.  A cl object without
 a GCC twin is not a unit of the gate (nothing of it is certified).
 
-  pairs(gcc, cl, units)  -> [(stem, gcc path, cl path or None)] sorted by stem, one per GCC object
+  pairs(gcc, cl, units)  -> [(stem, gcc path, [cl paths])] sorted by stem, one per GCC object; the list is empty when no cl object
+      belongs to the stem.  A source may be listed by several units: the cl side of a stem is then the SET of all `u<N>.obj` of
+      those units, sorted by N (a plain `<stem>.obj` first); each gate says how it judges against the set
   finish(name, universe, red, detail) -> exit status; writes $GATE_OUT/<name>.json (contract/gatefile.py) and the full
       sorted list of the uncertified ids to $GATE_OUT/<name>.ids (one per line; the gate file keeps the first 50); prints detail
   fail(name, message) -> exit status: the gate file of a gate that could not read its inputs: red, universe 1, certified 0,
@@ -59,8 +61,6 @@ def _units(path):
             raise TypeError('source')
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as e:
         raise GateInputError('units %s: not {"units": [{"source": ...}, ...]} (%s)' % (path, e))
-    if len(set(stems)) != len(stems):
-        raise GateInputError('units %s: two units with one stem' % path)
     return stems
 
 
@@ -70,16 +70,16 @@ def pairs(gcc, cl, units=None):
     if units is not None:
         stems = _units(units)
         renamed = {}
-        for stem, path in c.items():
+        for stem, path in sorted(c.items(), key=lambda kv: (int(kv[0][1:]) if kv[0][:1] == 'u' and kv[0][1:].isascii() and kv[0][1:].isdigit() else -1, kv[0])):
             if stem[:1] == 'u' and stem[1:].isascii() and stem[1:].isdigit() and str(int(stem[1:])) == stem[1:]:
                 if int(stem[1:]) >= len(stems):
                     raise GateInputError('cl: %s names unit %s, the units list has %d' % (path, stem[1:], len(stems)))
                 stem = stems[int(stem[1:])]
-            if stem in renamed:
-                raise GateInputError('cl: two objects with the unit name %s' % stem)
-            renamed[stem] = path
+            renamed.setdefault(stem, []).append(path)
         c = renamed
-    return [(s, g[s], c.get(s)) for s in sorted(g)]
+    else:
+        c = {s: [p] for s, p in c.items()}
+    return [(s, g[s], c.get(s, [])) for s in sorted(g)]
 
 
 def parse_args(argv, prog, doc):

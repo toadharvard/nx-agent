@@ -15,7 +15,8 @@ UNIVERSE (nothing sampled, nothing skipped), per unit with a GCC object, in the 
   2. every row of .fnvnx.sympair whose kind is `unnamed:<reason>` (no rule names it), `ref` or `def`.  Item id `unit:symbol:unnamed`.
   3. every row of .fnvnx.vtpair whose MSVC name is `unnamed:<reason>`.  Item id `unit:ztv-symbol:vftable-unnamed`.
   4. a GCC object that cannot be read (ELF, symbol table, a plugin section): one item `unit:error`.
-CERTIFIED: an item of class 1 whose MSVC name is `def`, `comdat` or `common` among the external symbols of the unit's cl object.
+CERTIFIED: an item of class 1 whose MSVC name is `def`, `comdat` or `common` among the external symbols of at least one cl object of the
+unit (an unreadable one among them does not hide a proof in another; if none proves it, the item is red and says so).
 Red (listed): class 1 with no cl object for the unit, with an unreadable cl object, or with a name cl does not define; every item of
 classes 2, 3, 4.  The result is a function of the objects and the units list; ids sorted; zero items: green, universe 0 (detail says so).
 PROOF.  A strong GCC definition is emitted from the unit's own source text, not from an inline or template instantiation that the
@@ -60,7 +61,7 @@ def strong_defs(elf):
     return out
 
 
-def unit_items(stem, gpath, cpath):
+def unit_items(stem, gpath, cpaths):
     """(universe, [red ids]) of one unit"""
     try:
         elf = elfobj.read(gpath)
@@ -69,12 +70,13 @@ def unit_items(stem, gpath, cpath):
         strong = strong_defs(elf)
     except ValueError as e:
         return 1, ['%s:error: %s' % (stem, e)]
-    cl, why = None, 'no cl object for the unit'
-    if cpath is not None:
+    cls, bad = [], []
+    for cpath in cpaths:
         try:
-            cl = coffobj.read(cpath).externals()
+            cls.append(coffobj.read(cpath).externals())
         except ValueError as e:
-            why = 'the cl object is unreadable: %s' % e
+            bad.append(str(e))
+    why = 'no cl object for the unit' if not cpaths else ('the cl object is unreadable: %s' % bad[0] if bad else '')
     uni, red = 0, []
     for sym, ms, kind, df in sp:
         if kind.startswith('unnamed:'):
@@ -82,10 +84,12 @@ def unit_items(stem, gpath, cpath):
             red.append('%s:%s:unnamed' % (stem, sym))
         elif kind in NAMED and df == 'def' and sym in strong:
             uni += 1
-            if cl is None:
+            if any(cl.get(ms.encode('utf-8')) in DEFINED_BY_CL for cl in cls):
+                continue
+            if not cls:
                 red.append('%s:%s: %s' % (stem, sym, why))
-            elif cl.get(ms.encode('utf-8')) not in DEFINED_BY_CL:
-                red.append('%s:%s: %s is not a definition of the cl object' % (stem, sym, ms))
+            else:
+                red.append('%s:%s: %s is not a definition of the cl object' % (stem, sym, ms) + (' (a cl object of the unit is unreadable)' if bad else ''))
     for z, _ap, ms, _off in vt:
         if ms.startswith('unnamed:'):
             uni += 1
