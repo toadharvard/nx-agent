@@ -34,6 +34,7 @@ typedef long long s64;
 #define OE 8u
 #define UE 0x10u
 #define PE 0x20u
+#define C1 0x200u                  /* x87 C1 = the result was rounded up in magnitude (set with PE) */
 static inline u64 d2u(double d) { union { double d; u64 u; } v; v.d = d; return v.u; }
 static inline double u2d(u64 u) { union { double d; u64 u; } v; v.u = u; return v.d; }
 
@@ -310,8 +311,10 @@ static int bf_pack(cx *c, const bf *A, int B, int exact, u64 *out, u32 *fl) {
   cell(&lo, n, &ql, &ul, &rl); cell(&hi, n, &qh, &uh, &rh);
   c->p = mk;
   if (ul != uh || ql != qh) return 0;
+  int tiny = lo.e - 1 < -1022;
+  if (tiny != (hi.e - 1 < -1022)) return 0;                  /* the interval straddles 2^-1022: the underflow flag is not decided yet */
   u64 M; u32 f = 0; u64 bits;
-  if (ul == 0x7fffffff) { bits = EXPM; f = OE | PE; }
+  if (ul == 0x7fffffff) { bits = EXPM; f = OE | PE | C1; }
   else {
     int inexact = !exact || !(((ql & 1) == 0) && !rl);
     if (ql & 1) {
@@ -319,8 +322,8 @@ static int bf_pack(cx *c, const bf *A, int B, int exact, u64 *out, u32 *fl) {
       else M = (ql + 1) >> 1;
     } else M = ql >> 1;
     bits = ((u64)(ul + 1074) << 52) + M;
-    if (bits >= EXPM) { bits = EXPM; f = OE | PE; }
-    else if (inexact) { f = PE; if (A->e - 1 < -1022) f |= UE; }
+    if (bits >= EXPM) { bits = EXPM; f = OE | PE | C1; }
+    else if (inexact) { f = PE | (((ql & 1) && M == ((ql + 1) >> 1)) ? C1 : 0); if (tiny) f |= UE; }
   }
   *fl |= f;
   *out = bits | (A->s ? SGNM : 0);
@@ -553,13 +556,13 @@ static double ziv(int w, double x, double y, int q, u32 *fl) {
 u32 fnvl_m_trig_big(double x) { u64 f = (d2u(x) >> 52) & 0x7ff; return f >= 1023 + 63 && f != 0x7ff; }
 /* sin x, tan x for |x| < 2^-27 round to x: sin x in (x(1 - x^2/6), x), tan x in (x, x(1 + x^2/3)), and x^2/3 < 2^-55 < the half spacing/x of the neighbour
    on that side (>= 2^-54 relative); cos x in (1 - 2^-55, 1) rounds to 1 (spacing below 1 is 2^-53). */
-static double small_arg(double x, u64 a, u32 *fl) { *fl |= PE | (a < 0x0010000000000000ull ? UE : 0); return x; }
+static double small_arg(double x, u64 a, u32 up, u32 *fl) { *fl |= PE | (up ? C1 : 0) | (a < 0x0010000000000000ull + up ? UE : 0); return x; }   /* sin: |true| < |x| (rounded up, tiny up to 2^-1022 itself); tan: |true| > |x| */
 double fnvl_m_sin(double x, u32 *fl) {
   u64 a = d2u(x) & ~SGNM;
   if (a > EXPM) return nan1(x, fl);
   if (a == EXPM) return invalid(fl);
   if (!a) return x;
-  if (a < 0x3e40000000000000ull) return small_arg(x, a, fl);
+  if (a < 0x3e40000000000000ull) return small_arg(x, a, 1, fl);
   return ziv(W_SIN, x, 0.0, 0, fl);
 }
 double fnvl_m_tan(double x, u32 *fl) {
@@ -567,7 +570,7 @@ double fnvl_m_tan(double x, u32 *fl) {
   if (a > EXPM) return nan1(x, fl);
   if (a == EXPM) return invalid(fl);
   if (!a) return x;
-  if (a < 0x3e40000000000000ull) return small_arg(x, a, fl);
+  if (a < 0x3e40000000000000ull) return small_arg(x, a, 0, fl);
   return ziv(W_TAN, x, 0.0, 0, fl);
 }
 double fnvl_m_cos(double x, u32 *fl) {
@@ -575,7 +578,7 @@ double fnvl_m_cos(double x, u32 *fl) {
   if (a > EXPM) return nan1(x, fl);
   if (a == EXPM) return invalid(fl);
   if (!a) return 1.0;
-  if (a < 0x3e40000000000000ull) { *fl |= PE; return u2d(0x3ff0000000000000ull); }
+  if (a < 0x3e40000000000000ull) { *fl |= PE | C1; return u2d(0x3ff0000000000000ull); }
   return ziv(W_COS, x, 0.0, 0, fl);
 }
 void fnvl_m_sincos(double x, double *s, double *cs, u32 *fl) { *s = fnvl_m_sin(x, fl); *cs = fnvl_m_cos(x, fl); }
@@ -602,12 +605,12 @@ double fnvl_m_2xm1(double x, u32 *fl) {
   if (a > EXPM) return nan1(x, fl);
   if (!a) return x;
   if (a == EXPM) return (u >> 63) ? u2d(0xBFF0000000000000ull) : x;     /* 2^-inf - 1 = -1, 2^inf - 1 = +inf */
-  if (!(u >> 63) && a >= 0x4090000000000000ull) { *fl |= OE | PE; return u2d(EXPM); }                /* x >= 1024: >= 2^1024 - 1, past the half-way point to infinity */
+  if (!(u >> 63) && a >= 0x4090000000000000ull) { *fl |= OE | PE | C1; return u2d(EXPM); }                /* x >= 1024: >= 2^1024 - 1, past the half-way point to infinity */
   if (!(u >> 63) && a >= 0x4050000000000000ull) {                      /* x >= 64: integer: 2^x - 1 rounds to 2^x (1 < half the spacing 2^(x-54)); else the engine */
     u64 mant; int e2; unpack(a, &mant, &e2);
-    if (e2 >= 0 || !(mant & ((1ull << -e2) - 1))) { int k = (int)(e2 >= 0 ? (mant << e2) : (mant >> -e2)); *fl |= PE; return u2d((u64)(k + 1023) << 52); }
+    if (e2 >= 0 || !(mant & ((1ull << -e2) - 1))) { int k = (int)(e2 >= 0 ? (mant << e2) : (mant >> -e2)); *fl |= PE | C1; return u2d((u64)(k + 1023) << 52); }
   }
-  if ((u >> 63) && a > 0x404e000000000000ull) { *fl |= PE; return u2d(0xBFF0000000000000ull); }   /* x < -60: -1 + 2^x rounds to -1 (2^x < 2^-60 < 2^-54) */
+  if ((u >> 63) && a > 0x404e000000000000ull) { *fl |= PE | C1; return u2d(0xBFF0000000000000ull); }   /* x < -60: -1 + 2^x rounds to -1 (2^x < 2^-60 < 2^-54) */
   return ziv(W_2XM1, x, 0.0, 0, fl);
 }
 

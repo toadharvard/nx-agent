@@ -125,32 +125,62 @@ def log2_exact(fr):
     return fr.numerator.bit_length() - fr.denominator.bit_length()
 
 
-def o_sin(x, y=0): return float(gmpy2.sin(mf(x)))
-def o_cos(x, y=0): return float(gmpy2.cos(mf(x)))
-def o_tan(x, y=0): return float(gmpy2.tan(mf(x)))
-def o_atan2(y, x): return float(gmpy2.atan2(mf(y), mf(x)))
+# each oracle returns the true value (an mpfr of 400 bits, or an exact Fraction where the value is exactly known)
+def o_sin(x, y=0): return gmpy2.sin(mf(x))
+def o_cos(x, y=0): return gmpy2.cos(mf(x))
+def o_tan(x, y=0): return gmpy2.tan(mf(x))
+def o_atan2(y, x): return gmpy2.atan2(mf(y), mf(x))
 
 
 def o_2xm1(x, y=0):
     fx = Fraction(x)
     if fx.denominator == 1 and abs(x) < 1100:
-        return exact_float(Fraction(2) ** int(fx) - 1)
-    return float(gmpy2.expm1(mf(x) * gmpy2.log(mf(2))))
+        return Fraction(2) ** int(fx) - 1
+    return gmpy2.expm1(mf(x) * gmpy2.log(mf(2)))
 
 
 def o_yl2x(y, x):
     k = log2_exact(Fraction(x))
     if k is not None:
-        return exact_float(Fraction(y) * k)
-    return float(mf(y) * gmpy2.log2(mf(x)))
+        return Fraction(y) * k
+    return mf(y) * gmpy2.log2(mf(x))
 
 
 def o_yl2xp1(y, x):
     u = Fraction(x) + 1
     k = log2_exact(u)
     if k is not None:
-        return exact_float(Fraction(y) * k)
-    return float(mf(y) * gmpy2.log1p(mf(x)) / gmpy2.log(mf(2)))
+        return Fraction(y) * k
+    return mf(y) * gmpy2.log1p(mf(x)) / gmpy2.log(mf(2))
+
+
+def rnd(v):
+    """correctly rounded binary64 of the true value v"""
+    if isinstance(v, Fraction):
+        return exact_float(v)
+    try:
+        return float(v)
+    except OverflowError:
+        return math.inf if v > 0 else -math.inf
+
+
+def expect_flags(v, res):
+    """PE, OE, UE and C1 (rounded up in magnitude) the instruction must report for true value v and result res"""
+    if math.isinf(res):
+        return 0x8 | 0x20 | 0x200
+    if isinstance(v, Fraction):
+        r = Fraction(res); av = abs(v)
+    else:
+        r = mf(res); av = abs(v)
+    inexact = r != v
+    f = 0
+    if inexact:
+        f |= 0x20
+        if abs(r) > av:
+            f |= 0x200
+        if av < gmpy2.mpfr(2) ** -1022 if not isinstance(v, Fraction) else av < Fraction(1, 2 ** 1022):
+            f |= 0x10
+    return f
 
 
 ORACLE = {'sin': o_sin, 'cos': o_cos, 'tan': o_tan, 'atan2': o_atan2, '2xm1': o_2xm1, 'yl2x': o_yl2x, 'yl2xp1': o_yl2xp1}
@@ -336,10 +366,13 @@ def check_chunk(args):
     orc = ORACLE[which]
     bad = []
     for i, p in enumerate(pts):
-        want = orc(*p) if two else orc(p)
+        v = orc(*p) if two else orc(p)
+        want = rnd(v)
         got = float(o1[i])
         if u64_(got) != u64_(want):
             bad.append((p, got, want))
+        elif int(fl[i]) & 0x23c != expect_flags(v, want):
+            bad.append((p, got, want, 'flags %x want %x' % (int(fl[i]) & 0x23c, expect_flags(v, want))))
     return bad
 
 
@@ -353,15 +386,11 @@ def host_cmp(which, pairs, what, mask_sw=0x4700, flmask=0x5, check_res=True):
     for i, p in enumerate(pairs):
         hs = int(hsw[i]) & 0xffff
         hc = hs & mask_sw
-        mc = int(mcf[i]) & mask_sw
+        mc = (int(mcf[i]) | (int(mfl[i]) & 0x200 if which == 'scale' else 0)) & mask_sw
         mx = int(mfl[i]) & flmask
         hx = hs & flmask
         r1m, r1h = float(m1[i]), float(h1[i])
-        ok = True
-        if which in ('fprem', 'fprem1', 'scale'):
-            ok = (u64_(r1m) == u64_(r1h) or (r1m != r1m and r1h != r1h and (u64_(r1m) == u64_(r1h)))) and mc == hc and mx == hx
-        elif which == 'xtract':
-            ok = u64_(r1m) == u64_(h2[i] if False else h1[i]) if False else True
+        ok = u64_(r1m) == u64_(r1h) and mc == hc and mx == hx
         bad.append((p, r1m, r1h, mc, hc, mx, hx)) if not ok else None
     return bad
 
@@ -486,7 +515,7 @@ def host_exact(r, nper):
     for x in SPEC:
         for e in SPEC + [-1074.0, -1075.0, 1024.0, 1023.0, -1022.5, 17.9, -17.9, 0.9999, -0.9999]:
             pts.append((x, e))
-    res['scale'] = (len(pts), host_cmp('scale', pts, 'scale', mask_sw=0x4500))
+    res['scale'] = (len(pts), host_cmp('scale', pts, 'scale', mask_sw=0x4700, flmask=0x1 | 0x8 | 0x10 | 0x20))
     # fxtract
     xs = [rnd_double(rr, -1074, 1023) for _ in range(100000)] + SPEC
     m1, m2, mfl, mcf = run('m', 'xtract', xs)
@@ -524,7 +553,7 @@ def main():
         bad = [b for part in pool.map(check_chunk, chunks) for b in part]
         print('%-7s inputs %7d  equal %7d  different %d' % (f, len(pts), len(pts) - len(bad), len(bad)), flush=True)
         for b in bad[:5]:
-            print('   DIFF', fmt(b[0]) if isinstance(b[0], tuple) else float.hex(b[0]), 'got', float.hex(b[1]), 'want', float.hex(b[2]))
+            print('   DIFF', fmt(b[0]) if isinstance(b[0], tuple) else float.hex(b[0]), 'got', float.hex(b[1]), 'want', float.hex(b[2]), *b[3:])
         fail += len(bad)
     pool.close()
     tot, bad, out = host_specials()

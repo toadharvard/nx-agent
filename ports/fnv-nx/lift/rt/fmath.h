@@ -2,7 +2,8 @@
    Every function takes and returns binary64 values and uses INTEGER arithmetic only (no FPU instruction, so the host rounding mode and FPSR are not
    involved). The results of sin cos tan(fptan) atan2(fpatan) 2^x-1(f2xm1) y*log2(x)(fyl2x) y*log2(x+1)(fyl2xp1) are the CORRECTLY ROUNDED
    (nearest-even) values of the true mathematical function; fscale, fxtract and fprem/fprem1 are exact. Rule and proof: rt/fmath.c.
-   *fl (every function): the x87 exception bits IE 1, ZE 4, OE 8, UE 0x10, PE 0x20 are ORed in (FSW positions; the caller ORs them into c->fex). */
+   *fl (every function): the x87 exception bits IE 1, ZE 4, OE 8, UE 0x10, PE 0x20 are ORed in, and C1 0x200 (FSW positions): C1 = the inexact result was rounded
+   up in magnitude. The caller ORs the exception bits into c->fex and assigns C1 (fnvl_x87.h FM_FL). */
 #ifndef FNVL_FMATH_H
 #define FNVL_FMATH_H
 #ifndef FNVL_TYPES
