@@ -1,58 +1,12 @@
 """synth - byte builders for the synthetic fixtures of the link gate tests (own invented names, no game data).
 
-    elf(sections, symbols, is64=False)  -> bytes of an ELF relocatable object
-          sections: [(name, data bytes, sh_flags)]  (numbers 1..n); symbols: [(name, bind, type, shndx, value)] or None (no symtab)
+    (ELF objects are never hand-built: link/tests/realobj.py builds them with the one build and mutate.py edits them.)
     coff(sections, symbols)             -> bytes of an i386 COFF object
           sections: [dict(name=bytes, chars=int, data=bytes, relocs=[(offset, symbol name, type)])]  (numbers 1..n)
           symbols: [dict(name=bytes, value=int, sec=int, type=int, cls=int, naux=int)]  (aux records are zero bytes)
     CV()                                -> builder of a `.debug$T` blob: add(kind, payload) -> type index, blob()
 """
 import struct
-
-
-def elf(sections, symbols, is64=False):
-    names = b'\0'
-    name_off = {}
-    for n in [s[0] for s in sections] + ['.shstrtab', '.strtab', '.symtab']:
-        name_off[n] = len(names)
-        names += n.encode() + b'\0'
-    ehsize = 64 if is64 else 52
-    body, pos = [], ehsize
-    hdrs = [(0, 0, 0, 0, 0, 0, 0, 0, 0)]       # name type flags offset size link info align entsize
-    for n, data, fl in sections:
-        body.append(data)
-        hdrs.append((name_off[n], 1, fl, pos, len(data), 0, 0, 1, 0))
-        pos += len(data)
-    body.append(names)
-    hdrs.append((name_off['.shstrtab'], 3, 0, pos, len(names), 0, 0, 1, 0))
-    pos += len(names)
-    shstr = len(hdrs) - 1
-    if symbols is not None:
-        strt, sym = b'\0', b''
-        ent = 24 if is64 else 16
-        sym += b'\0' * ent
-        for name, bind, typ, shndx, value in symbols:
-            off = len(strt)
-            strt += name.encode() + b'\0'
-            info = (bind << 4) | typ
-            sym += struct.pack('<IBBHQQ', off, info, 0, shndx, value, 0) if is64 else struct.pack('<IIIBBH', off, value, 0, info, 0, shndx)
-        body.append(strt)
-        hdrs.append((name_off['.strtab'], 3, 0, pos, len(strt), 0, 0, 1, 0))
-        pos += len(strt)
-        body.append(sym)
-        hdrs.append((name_off['.symtab'], 2, 0, pos, len(sym), len(hdrs) - 1, 1, 4, ent))
-        pos += len(sym)
-    shoff = pos
-    out = b''.join(body)
-    sh = b''
-    for n, t, fl, off, size, link, info, al, es in hdrs:
-        sh += struct.pack('<IIQQQQIIQQ', n, t, fl, 0, off, size, link, info, al, es) if is64 else \
-            struct.pack('<IIIIIIIIII', n, t, fl, 0, off, size, link, info, al, es)
-    if is64:
-        head = b'\x7fELF\x02\x01\x01' + b'\0' * 9 + struct.pack('<HHIQQQIHHHHHH', 1, 183, 1, 0, 0, shoff, 0, 64, 0, 0, 64, len(hdrs), shstr)
-    else:
-        head = b'\x7fELF\x01\x01\x01' + b'\0' * 9 + struct.pack('<HHIIIIIHHHHHH', 1, 183, 1, 0, 0, shoff, 0, 52, 0, 0, 40, len(hdrs), shstr)
-    return head + out + sh
 
 
 def coff(sections, symbols):
