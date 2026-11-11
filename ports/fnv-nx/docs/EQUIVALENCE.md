@@ -336,7 +336,7 @@ above (round 8).
 | `XC1` | platform | dynamic initializers become extern + `__fnvnx_dyninit_<addr>` run by S10 | target only |
 | `VA1` | platform | MSVC `char*` va_lists -> real `va_list` | target only |
 | `FALL1` | platform | `__builtin_trap()` at fall-off ends of non-void functions | GCC only |
-| `ASM1` `ASM2` `ASM4` | platform | x87 / rdtsc / cpuid asm -> portable helpers (docs/ASM.md has their own checks) | - |
+| `ASM1` `ASM2` `ASM4` | platform | rule ASM-Π: every `__asm` construct stays verbatim for cl and is empty for GCC, whose N3 verdict `asm` makes the function lifted | - |
 | `NATIVE1` | platform | units leave the build (native renderer, D6) | - |
 
 ## Gate of the rules after `0685791` (local, single units)
