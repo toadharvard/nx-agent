@@ -45,7 +45,7 @@ OPT=${OPT:--O2}
 # one); GCC under gnu++17 would bind every delete-expression to the sized `operator delete(void*, size_t)` (0x00aa1460).
 # -fno-lifetime-dse (EQ 588863, 00d979f0): decomp code calls a destructor explicitly and reuses the object (ResetFields'
 # `this->SpawnedBase::~SpawnedBase()`); MSVC never elides the destructor's vptr store, GCC drops it as dead.
-FLAGS=(-mabi=ilp32 -std=gnu++17 -c $OPT -fms-extensions -fshort-wchar -frounding-math -fsigned-char -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks -fcheck-new -fno-sized-deallocation -fno-lifetime-dse -ffp-contract=off -fPIC -fpermissive -Werror=return-type -Wno-narrowing -fmax-errors=20
+FLAGS=(-mabi=ilp32 -std=gnu++17 -c $OPT -fms-extensions -fshort-wchar -frounding-math -fsigned-char -fno-strict-aliasing -fwrapv -fno-delete-null-pointer-checks -fcheck-new -fno-sized-deallocation -fno-lifetime-dse -ffp-contract=off -fPIC -fpermissive -Wno-narrowing -fmax-errors=20
        -march=armv8-a+crc+crypto -mtune=cortex-a57 -fno-stack-protector -fno-stack-clash-protection -mno-outline-atomics -U_FORTIFY_SOURCE
        -ffile-prefix-map="$TREE"/= -ffile-prefix-map="$HERE"/=fnv-nx/ -ffile-prefix-map="$SSE2NEON"/=sse2neon/
        -include "$HERE/shim/include/fnvnx_compat.h" -I"$HERE/shim/include" -I"$SSE2NEON" -I"$TREE/include")
@@ -81,6 +81,52 @@ FLAGS+=(-fplugin="$ORDER_SO" -fplugin-arg-fnvnx_order-mode="$ORDER_MODE" -fplugi
         -fplugin-arg-fnvnx_order-refcount="$ORDER_REFCOUNT" -fplugin-arg-fnvnx_order-object="$ORDER_OBJECT"
         -fplugin-arg-fnvnx_order-operator="$ORDER_OPERATOR" -fplugin-arg-fnvnx_order-assign="$ORDER_ASSIGN")
 if [ "$ORDER_MODE" = off ]; then FLAGS+=(-DFNVNX_COMPILER_BARRIERS=1); fi
+# SDD2 and the semantics set (toolchain/sdd, pi, dispatch, addr, names): one vtable slot per virtual destructor, as
+# MSVC's ??_G, and one symbol per vtable address point. The fnvnx_sdd plugin makes the deleting destructor non-virtual
+# inside the front end, so GCC itself builds every table, index and member pointer with one slot. -fno-devirtualize:
+# MSVC 2008 kept every virtual call of an object of unknown dynamic type virtual, so the exe's functions have those
+# calls and the vcall gate pairs them one to one; a speculative direct call would also go to a unit-local alias,
+# past the link's by-address binding. This is the only way the tree compiles to the exe's tables: the source rules
+# that rewrote slot numbers are gone. FNVNX_SDD=0 remains only to read old objects' flags; such objects never mix
+# with these.
+SDD_SO=""; PI_SO=""; DISPATCH_SO=""; ADDR_SO=""; NAMES_SO=""
+if [ "${FNVNX_SDD:-1}" = 1 ]; then
+  SDD_SO=$(CXX=$CXX bash "$HERE/toolchain/sdd/build.sh" "$OUT/.sdd") \
+    || { echo "compile.sh: the fnvnx_sdd plugin does not build (install gcc-13-plugin-dev-aarch64-linux-gnu and g++)" >&2; exit 2; }
+  FLAGS+=(-DFNVNX_SDD=1 -fno-devirtualize -fplugin="$SDD_SO")
+  # FTOI: a direct float -> enum conversion is an error, as for cl (C2440): the source names the integer type
+  FLAGS+=(-fplugin-arg-fnvnx_ftoi-enum=error)
+  # uninit=keep: the order plugin's default reads an unassigned local as 0, a stand-in (forbidden, MASTER_PLAN4) that
+  # also hides the read from the N3 verdict below. With keep, a function that reads an unassigned local gets the
+  # verdict `uninit` / `uninit-mem` and is not a native body; nothing is invented for it.
+  FLAGS+=(-fplugin-arg-fnvnx_order-uninit=keep)
+  # R9 TSO-MAP (MASTER_PLAN4): every access to memory that is not a proven local of the function is ordered
+  # (acquire load / release store), in every unit: mode=tso. The earlier contract (volatile as the mark, the
+  # whole-program key list, wait-loop polls, relaxed refcounts) guessed which accesses are shared and is not used:
+  # refcount=full, and no key list is read or discovered (ORDER_KEYS=unit below).
+  FLAGS+=(-fplugin-arg-fnvnx_order-mode=tso -fplugin-arg-fnvnx_order-refcount=full)
+  ORDER_KEYS=unit
+  # N3 (toolchain/pi, MASTER_PLAN4 R1): each object carries, per function, the verdict "inside the portable subset",
+  # its inline tree and the record types it touches (section .fnvnx.n3). It changes no code.
+  PI_SO=$(CXX=$CXX bash "$HERE/toolchain/pi/build.sh" "$OUT/.pi") \
+    || { echo "compile.sh: the fnvnx_pi plugin does not build" >&2; exit 2; }
+  FLAGS+=(-fplugin="$PI_SO")
+  # DISPATCH1 (toolchain/dispatch): code pointer values stay the exe's addresses, so every indirect call checks its
+  # own two-word site and otherwise asks the runtime's fnvnx_dispatch(exe address, site) for the entry to call.
+  DISPATCH_SO=$(CXX=$CXX bash "$HERE/toolchain/dispatch/build.sh" "$OUT/.dispatch") \
+    || { echo "compile.sh: the fnvnx_dispatch plugin does not build" >&2; exit 2; }
+  FLAGS+=(-fplugin="$DISPATCH_SO")
+  # ADDR32 (toolchain/addr): an address the game computes as a 32-bit integer sum is finished in 32 bits (x86 wraps
+  # it) before it is used; GCC ILP32 alone folds the constant into a 64-bit addressing mode.
+  ADDR_SO=$(CXX=$CXX bash "$HERE/toolchain/addr/build.sh" "$OUT/.addr") \
+    || { echo "compile.sh: the fnvnx_addr plugin does not build" >&2; exit 2; }
+  FLAGS+=(-fplugin="$ADDR_SO")
+  # NAMES1 (toolchain/names): the MSVC name of every external symbol (.fnvnx.sympair), of every vftable
+  # (.fnvnx.vtpair); it registers the CC1 convention attribute the dispatcher's descriptors read.
+  NAMES_SO=$(CXX=$CXX bash "$HERE/toolchain/names/build.sh" "$OUT/.names") \
+    || { echo "compile.sh: the fnvnx_names plugin does not build" >&2; exit 2; }
+  FLAGS+=(-fplugin="$NAMES_SO")
+fi
 # AB_FLAGS: extra flags appended after all of the above, so they win (e.g. -fstrict-aliasing against the parity set).
 # For A/B measurements only (tools/perf/unit_ab.sh, docs/PERF.md 11.8), never for a build that runs; unset = no
 # change.
@@ -163,11 +209,15 @@ for f in "${FLAGS[@]}"; do
   case $f in -std=gnu++17) CFLAGS+=(-std=gnu99) ;; -fpermissive|-Wno-narrowing|-fplugin=*|-fplugin-arg-*) ;; *) CFLAGS+=("$f") ;; esac
 done
 export CC CFLAGS_STR="${CFLAGS[*]}"
-jq -r '.units[] | [.source, ([.flags[]? | select(startswith("/D")) | "-D" + .[2:]] | join(" "))] | @tsv' \
+# A unit the recipe builds with /fp:fast tells the N3 plugin so (FNVNX_SDD=1): there the source does not fix the
+# exe's floating-point semantics, and the plugin puts its functions that use floating point outside the subset.
+FPFAST_ARG=""; [ "${FNVNX_SDD:-1}" = 1 ] && FPFAST_ARG="-fplugin-arg-fnvnx_pi-fpfast"
+jq -r --arg fpfast "$FPFAST_ARG" '.units[] | [.source, (([.flags[]? | select(startswith("/D")) | "-D" + .[2:]]
+    + (if $fpfast != "" and ([.flags[]? | select(. == "/fp:fast")] | length) > 0 then [$fpfast] else [] end)) | join(" "))] | @tsv' \
   "$TREE/build/units.json" | awk -F'\t' '$2 != ""' > "$OUT/defines.tsv"
 # Objects are kept only while the flags (the order options included), the plugins and the shim headers stay the
 # same: a change of any of them rebuilds every object of <obj dir> (V1's C4: an ORDER_OBJECT change kept old objects).
-objstamp=$( (echo "$FLAGS_STR"; cat "$ORDER_SO" "$FTOI_SO"; find "$HERE/shim/include" -type f -print0 | LC_ALL=C sort -z |
+objstamp=$( (echo "$FLAGS_STR"; cat "$ORDER_SO" "$FTOI_SO" $SDD_SO $PI_SO $DISPATCH_SO $ADDR_SO $NAMES_SO; find "$HERE/shim/include" -type f -print0 | LC_ALL=C sort -z |
             xargs -0 cat) | sha256sum | cut -c1-16)
 # One compile.sh at a time per object directory: a second run with other flags would delete the first one's objects
 # here (the stamp above) while it works (try1of1, D26: 2,499 units "failed (no error line)", 1,716 logs of 0 bytes,

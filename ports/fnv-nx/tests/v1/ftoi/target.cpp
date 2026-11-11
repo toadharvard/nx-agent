@@ -13,8 +13,10 @@ enum EF : unsigned int { EF0, EF1 };  // a fixed unsigned base: unsigned int on 
 struct BF { int a : 5; unsigned b : 20; unsigned long long c : 40; };
 #define NI __attribute__((noinline))
 #define CONV(name, T) NI unsigned long long name##_d(double x) { return (T)x; } NI unsigned long long name##_f(float x) { return (T)x; }
+// a floating value becomes an enum through the integer type the source names (MSVC rejects the direct cast, C2440)
+#define CONV2(name, T, I) NI unsigned long long name##_d(double x) { return (T)(I)x; } NI unsigned long long name##_f(float x) { return (T)(I)x; }
 CONV(i8, signed char) CONV(ch, char) CONV(u8, unsigned char) CONV(i16, short) CONV(u16, unsigned short)
-CONV(wc, wchar_t) CONV(i32, int) CONV(en, E) CONV(ens, ES) CONV(enf, EF) CONV(u32, unsigned int) CONV(ul, unsigned long) CONV(i64, long long)
+CONV(wc, wchar_t) CONV(i32, int) CONV2(en, E, int) CONV2(ens, ES, int) CONV2(enf, EF, unsigned int) CONV(u32, unsigned int) CONV(ul, unsigned long) CONV(i64, long long)
 CONV(u64, unsigned long long)
 template <class X> NI unsigned long long bf5(X x) { BF s{}; s.a = x; return (unsigned long long)s.a; }
 template <class X> NI unsigned long long bfu20(X x) { BF s{}; s.b = x; return s.b; }

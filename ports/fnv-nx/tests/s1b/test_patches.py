@@ -4,6 +4,7 @@ pristine decomp text and to the text after all other prepare rules (as prepare r
 well-formed. No compiler needed (tests/s1b/msvc_check.py and gcc_check.py do the MSVC / GCC checks)."""
 from collections import Counter
 import os
+os.environ['FNVNX_PATCH_CERTIFY'] = '1'     # this tool tries every site: it is what certifies them (PATCH-CERT)
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))

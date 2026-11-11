@@ -23,9 +23,9 @@ static void one(const char *s, unsigned long long b, double x, double c7, double
   printf("u16 %s %llx %llx\n", s, b, M(16, x87_32(x)));
   printf("wc %s %llx %llx\n", s, b, M(16, x87_32(x)));
   printf("i32 %s %llx %llx\n", s, b, M(32, sse32(x)));
-  printf("en %s %llx %llx\n", s, b, M(32, sse32(x)));     /* enum E { 0, 5, 1000 }: int under MSVC */
-  printf("ens %s %llx %llx\n", s, b, M(32, sse32(x)));    /* enum ES { -1, 1 } */
-  printf("enf %s %llx %llx\n", s, b, M(32, x87_64(x)));   /* enum EF : unsigned int: fistp QWORD */
+  printf("en %s %llx %llx\n", s, b, M(32, sse32(x)));     /* (E)(int)x */
+  printf("ens %s %llx %llx\n", s, b, M(32, sse32(x)));    /* (ES)(int)x */
+  printf("enf %s %llx %llx\n", s, b, M(32, x87_64(x)));   /* (EF)(unsigned)x: fistp QWORD */
   printf("u32 %s %llx %llx\n", s, b, M(32, x87_64(x)));
   printf("ul %s %llx %llx\n", s, b, M(32, x87_64(x)));
   printf("i64 %s %llx %llx\n", s, b, M(64, x87_64(x)));

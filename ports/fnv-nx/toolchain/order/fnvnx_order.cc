@@ -82,6 +82,8 @@
 #include "cfghooks.h"
 #include "tree-cfg.h"
 #include "ssa.h"
+#include "varasm.h"
+#include "output.h"
 #include <set>
 #include <string>
 #include <vector>
@@ -132,6 +134,15 @@ static bool local_unshared(tree base) {
     return !TREE_STATIC(base) && !DECL_EXTERNAL(base) && !TREE_ADDRESSABLE(base) && !DECL_THREAD_LOCAL_P(base);
   if (TREE_CODE(base) == CONST_DECL || TREE_CODE(base) == STRING_CST) return true;
   return false;
+}
+
+// L-RO (MASTER_PLAN4 R9): an object this unit defines and the compiler itself places in a read-only section
+// (a constant with a constant initializer and no relocation; varasm's own decision). Nothing ever writes it, so a
+// load of it has no store to be ordered against.
+static bool readonly_object(tree base) {
+  return base && TREE_CODE(base) == VAR_DECL && TREE_STATIC(base) && !DECL_EXTERNAL(base) && TREE_READONLY(base) &&
+         !TREE_THIS_VOLATILE(base) && DECL_INITIAL(base) && DECL_INITIAL(base) != error_mark_node &&
+         decl_readonly_section(base, 0);
 }
 
 static bool is_memory_ref(tree t) {
@@ -268,7 +279,7 @@ static bool type_keyed(tree ty, int depth = 0) {
 static bool shared_ordered(tree t) {
   if (!t || !is_memory_ref(t)) return false;
   if (local_unshared(get_base_address(t))) return false;
-  if (mode == MODE_TSO) return true;
+  if (mode == MODE_TSO) return !readonly_object(get_base_address(t));
   if (TREE_THIS_VOLATILE(t) || TYPE_VOLATILE(TREE_TYPE(t)) || keyed(t)) return true;
   if (!AGGREGATE_TYPE_P(TREE_TYPE(t)) || (key_fields.empty() && interlocked_decls.empty() && poll_decls.empty()))
     return false;
