@@ -28,6 +28,7 @@ Old workers w1, w2, w3 (session_01KmtZKSjF1rc6JAiuz1rvJg, _01KmtZKU6xzxGuGdkrtzw
 - tc-repro session_01KmtZKSzcic61GPMwx3wqug (fnvnx-a64-msvcmodel bit-for-bit rebuild; reports to L4 and L5): running.
 
 ## Open cross-layer items
+- msvcmodel13 is now the platform root's blocker, on the critical path (CLAUDE.md trunk 6481968). The pack is built with the whole semantics set from guest_compiler.json (L1 schema: per-language flags ⊇ semantics, the full sizeof/alignof map, version and sha). Farms: tc-repro plus one more requested from the orchestrator. Waiting on L1 w5's toolchain-build profile. recipe keep-going is coming from L1 w14.
 - Redist (w13 ee2a53f8, from trunk e39caa5a): DECLARED_ROOTS (exe, redist) in contract/dllkind.py; module table 7 = 4 static + 3 on demand, 0 overlaps; d3dx9_31 has a row (0x014b0000, 177 slots, 0 without provider). 1 collision, galaxywrp (resolved by the owner's Galaxy order); conflicts() is to name the rule per collision. Then MERGER.
 - TLS dispatch word: thread.cpp.o defines fnvnx_call_fp as TLS GLOBAL 4 in .tbss with 0 TLS relocations (definition only). The TLSIE check moves to the first lifted-pack object (asked of L3a).
 - msvcmodel13: L1 gave the toolchain-build profile to L1 w5 as top priority; the commit goes to L5 and w14.
