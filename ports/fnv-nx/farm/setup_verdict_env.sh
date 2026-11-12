@@ -16,12 +16,14 @@ ENV_JSON=$(readlink -f "${ENV_JSON:-$VERIFY/env.json}")
 MODE=${1:-run}; case $MODE in run|--print) ;; *) echo "usage: $0 [--print]" >&2; exit 1 ;; esac
 J() { python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); exec(sys.argv[2])' "$ENV_JSON" "$1"; }
 PKGS=$(J 'print(*[p + "=" + v for p, v in sorted(d["packages"].items())])')
-PIPS=$(J 'print(*[m + "==" + v for m, v in sorted(d["python"]["modules"].items())])')
+PIPS=$(J 'print(*[m + "==" + v for m, v in sorted(d["python"]["modules"].items()) if m not in d["python"].get("wheels", {})])')
+PIPW=$(J 'print(*[m + "==" + d["python"]["modules"][m] + " --hash=sha256:" + w["sha256"] for m, w in sorted(d["python"].get("wheels", {}).items())], sep="\n")')   # wheels pinned by sha256 (pip --require-hashes)
 CHECK="python3 -I $VERIFY/envcheck.py check --env $ENV_JSON"
 APT="apt-get install -y --no-install-recommends $PKGS"
 PIP="python3 -m pip install --break-system-packages $PIPS"
+PIPH="python3 -m pip install --break-system-packages --require-hashes -r -"
 if [ "$MODE" = --print ]; then
-  printf '%s\n' "apt-get update" "$APT" "$PIP" "$CHECK"
+  printf '%s\n' "apt-get update" "$APT" "$PIP" "printf '%s\\n' '$PIPW' | $PIPH" "$CHECK"
   exit 0
 fi
 export DEBIAN_FRONTEND=noninteractive
@@ -35,4 +37,5 @@ done
 [ "$missing" = 0 ] || { echo "setup: FAILED, take a new env.json snapshot deliberately" >&2; exit 1; }
 $APT
 $PIP
+[ -z "$PIPW" ] || printf '%s\n' "$PIPW" | $PIPH
 exec $CHECK
