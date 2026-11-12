@@ -115,6 +115,7 @@ def build(sources, plugins=None, lifted=False, flags=(), link_script=None, asm_f
         _w(repo, ROOT + '/link.ld', link_script)
     _w(repo, ROOT + '/build.json', json.dumps(rec, indent=1))
     _w(repo, T + 'verify/guest_compiler.json', json.dumps(pin))
+    shutil.copyfile(os.path.join(REAL, T + 'verify/env.json'), os.path.join(repo, T + 'verify/env.json'))   # the declared machine (recipe.env_blocked)
     _w(repo, T + 'verify/admit.json', json.dumps({'format': 'fnvnx-admit/1', 'roots': [
         root, {'path': T + 'toolchain', 'class': 'tool', 'gates': []}, {'path': T + 'verify', 'class': 'tool', 'gates': []},
         {'path': T + 'gen', 'class': 'tool', 'gates': []}]}))
