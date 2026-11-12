@@ -1,0 +1,43 @@
+{
+ "format": "fnvnx-oracle/1",
+ "tests": {
+  "test_gate_eh.py": {
+   "references": [
+    {
+     "anchor": "## State of the product gates",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/gates/gate_eh.py"
+   ]
+  },
+  "test_gate_lift.py": {
+   "references": [
+    {
+     "anchor": "## State of the product gates",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_lift.py",
+    "ports/fnv-nx/lift/gates/gate_order.py",
+    "ports/fnv-nx/lift/gates/gate_eh.py"
+   ]
+  },
+  "test_gate_order.py": {
+   "references": [
+    {
+     "anchor": "## State of the product gates",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/gates/gate_order.py"
+   ]
+  }
+ }
+}
