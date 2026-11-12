@@ -85,6 +85,27 @@ check("snapshot --from-code reproduces the committed env.json on this machine", 
       == open(ENVF).read(), (rc, err[-300:]))
 check("snapshot needs --from-code and -o", ec("snapshot")[0] != 0)
 
+# the plugin headers of the distro compilers of admitted roots (objstub builds its terminator plugin against them)
+sys.path.insert(0, VERIFY)
+import envcheck  # noqa: E402
+fr = os.path.join(TD, "fakerepo")
+os.makedirs(os.path.join(fr, "ports/fnv-nx/verify"))
+os.makedirs(os.path.join(fr, "ports/fnv-nx/hroot"))
+json.dump({"roots": [{"path": "ports/fnv-nx/hroot", "class": "product", "target": "host", "recipe": "ports/fnv-nx/hroot/build.json"},
+                     {"path": "ports/fnv-nx/gext", "class": "product", "target": "guest", "recipe": "ports/fnv-nx/gext/build.json"}]},
+          open(os.path.join(fr, "ports/fnv-nx/verify/admit.json"), "w"))
+json.dump({"compiler": {"cc": "x86_64-linux-gnu-gcc-13", "cxx": "x86_64-linux-gnu-g++-13"}}, open(os.path.join(fr, "ports/fnv-nx/hroot/build.json"), "w"))
+os.makedirs(os.path.join(fr, "ports/fnv-nx/gext"))
+json.dump({"compiler": {"external": "x", "cc": "bin/cc", "cxx": "bin/c++"}}, open(os.path.join(fr, "ports/fnv-nx/gext/build.json"), "w"))
+check("root compilers: the distro drivers of admitted roots, an external compiler is none",
+      envcheck._root_compilers(fr) == ["x86_64-linux-gnu-g++-13", "x86_64-linux-gnu-gcc-13"], envcheck._root_compilers(fr))
+good = [l for l in envcheck.check(doc(), fr) if "plugin headers" in l]
+d1 = doc()
+del d1["packages"]["gcc-13-plugin-dev"]
+bad = [l for l in envcheck.check(d1, fr) if "plugin headers" in l]
+check("a root's distro compiler whose plugin headers are in no listed package is a mismatch; the committed env has none",
+      good == [] and len(bad) == 2 and all("gcc-13-plugin-dev" in l for l in bad), (good, bad))
+
 # the setup script
 check("setup script: bash -n", subprocess.run(["bash", "-n", SETUP]).returncode == 0)
 p = subprocess.run(["bash", SETUP, "--print"], capture_output=True, text=True)
