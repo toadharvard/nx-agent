@@ -27,6 +27,27 @@ all3  all:g call    0x3000
 MANIFEST = "1000\tfnvboot_a\n2000\tfnvboot_b\n3000\tfnvboot_c\n"
 
 
+WL_GUEST = r'''
+#if MODE == 70
+    /* watch-log guest: fnvwl_f(n) recurses once per n, fnvwl_g is a leaf; each records its SP at its first instruction */
+    __asm__(".pushsection .bss\n.balign 4\nwl_sp: .space 64\nwl_n: .space 4\n.popsection\n"
+            ".macro WLREC\n adrp x9, wl_n\n add x9, x9, :lo12:wl_n\n ldr w10, [x9]\n add w11, w10, #1\n str w11, [x9]\n"
+            " adrp x12, wl_sp\n add x12, x12, :lo12:wl_sp\n mov x13, sp\n str w13, [x12, x10, lsl #2]\n.endm\n"
+            ".pushsection .text.wl,\"ax\",%progbits\n"
+            ".globl fnvwl_f\n.type fnvwl_f,%function\nfnvwl_f:\n WLREC\n cbz x0, 1f\n stp x29, x30, [sp, #-16]!\n"
+            " sub x0, x0, #1\n bl fnvwl_f\n ldp x29, x30, [sp], #16\n1: ret\n.size fnvwl_f, .-fnvwl_f\n"
+            ".globl fnvwl_g\n.type fnvwl_g,%function\nfnvwl_g:\n WLREC\n ret\n.size fnvwl_g, .-fnvwl_g\n"
+            ".popsection\n");
+    {
+        extern void fnvwl_f(uint32_t), fnvwl_g(void);
+        extern uint32_t wl_sp[];
+        fnvwl_f(1); fnvwl_g(); fnvwl_f(0);
+        for (uint32_t i = 0; i < 4; i++) num("wlsp", wl_sp[i]);
+    }
+    fnvnx_hcall1(H->exit, 0);
+#elif'''
+
+
 def cli(argv):
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -140,6 +161,34 @@ def main():
     rc, o, e = cli(args(elf59, "t3.json", table, manifest, "--text-entry", "x", "--text-entry", "yz"))
     td = json.load(open(os.path.join(d, "t3.json")))
     tb.case("--text-entry repeated: order kept", td["inputs"] == {"text_entry": ["x", "yz"]}, td["inputs"])
+    # --watch-log: the guest MODE 70 calls f(1) (recursing once into f(0)), g, f(0); the guest prints the SP of each entry
+    elfw = os.path.join(d, "hw.elf")
+    open(elfw, "wb").write(tb.build(70, WL_GUEST)[0])
+    rc, o, e = cli(args(elfw, "w0.json"))
+    w0 = json.load(open(os.path.join(d, "w0.json")))
+    tb.case("without --watch-log the key is absent", rc == 0 and "watch_log" not in w0, (rc, e, list(w0)))
+    syms = w("syms.txt", "# watched\nfnvwl_f   # comment\nfnvwl_g\n")
+    rc, o, e = cli(args(elfw, "w1.json", table, manifest, "--watch-log", syms))
+    w1 = json.load(open(os.path.join(d, "w1.json")))
+    wl = w1.get("watch_log", [])
+    guest_sp = [int(x.split("=")[1], 16) for x in open(os.path.join(d, "w1.console.txt")).read().split("\n") if x.startswith("wlsp=")]
+    tb.case("watch_log: f, f, g, f in machine order, seq from 0", rc == 0 and [x["sym"] for x in wl] == ["fnvwl_f", "fnvwl_f", "fnvwl_g", "fnvwl_f"]
+            and [x["seq"] for x in wl] == [0, 1, 2, 3] and all(set(x) == {"seq", "tid", "sym", "pc", "sp"} for x in wl), (rc, e, wl))
+    tb.case("watch_log: sp equals what the guest printed at each entry; the recursive entry is 16 below", len(guest_sp) == 4
+            and [x["sp"] for x in wl] == guest_sp and guest_sp[1] == guest_sp[0] - 16 and guest_sp[2] == guest_sp[0], (guest_sp, wl))
+    pcs = {x["sym"]: x["pc"] for x in wl}
+    tb.case("watch_log: pc is guest-relative and the same per symbol", len(set(x["pc"] for x in wl if x["sym"] == "fnvwl_f")) == 1
+            and pcs["fnvwl_f"] != pcs["fnvwl_g"] and all(0 <= x["pc"] < 0x100000 for x in wl), pcs)
+    both = w("syms2.txt", "fnvwl_g\nfnvwl_g\n")
+    rc, o, e = cli(args(elfw, "w2.json", table, manifest, "--watch-log", both))
+    w2 = json.load(open(os.path.join(d, "w2.json")))["watch_log"]
+    tb.case("watch_log: two names at one address give one entry per name, file order",
+            [x["sym"] for x in w2] == ["fnvwl_g", "fnvwl_g"] and w2[0]["pc"] == w2[1]["pc"], w2)
+    rc, o, e = cli(args(elfw, "w3.json", table, manifest, "--watch-log", w("syms3.txt", "fnvwl_f\nno_such_fn\n")))
+    tb.case("watch_log: unknown name fails the run before it starts, naming it", rc == 1 and "no_such_fn" in e
+            and not os.path.exists(os.path.join(d, "w3.json")), (rc, e))
+    rc, o, e = cli(args(elfw, "w4.json", table, manifest, "--watch-log", w("syms4.txt", "wl_n\n")))
+    tb.case("watch_log: a non-function symbol (data) fails, naming it", rc == 1 and "wl_n" in e, (rc, e))
     print("%d cases, %.1f s" % (tb.N[0], time.time() - t0))
     return 1 if tb.FAILED else 0
 
