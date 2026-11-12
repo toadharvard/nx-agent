@@ -339,3 +339,13 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - 04:12Z: **w14 09b509e4 (warm ensure) measured by L4** (w7 57228c44, test_bootmachine with 54 variants).
   - Cold: 90.7 s → 37.2 s. Warm: 62.3 s → 6.2 s. 145 cases, 0 fail.
   - Accepted.
+
+## 2026-11-12 03:50Z
+- w4 item 2 + B2, head 2cb48877 (merged with clean 8cfbcdbf): 28/28 gates green, 359.9 s; w4 to say whether that run was warm on the pinned host or a cold/container run.
+  - New closure stage: a PP read outside /src, /inc or a declared external is red. Guest roots build with -nostdinc/-nostdinc++.
+  - Runtime MANIFEST is compared with the guest compiler before any unit runs.
+  - Accepted as a rule. Held from MERGER: guest roots are red on runtime 00e3d42a, which has no MANIFEST.json.
+  - Blocked by L5 (tools/fnvnx-a64-msvcmodel13). Asked L5 for it. w4 continues with G.
+- w20: z3 envcheck cause found (local .whl path install writes direct_url.json, which changes installed_files_sha256).
+  - Rule: install by --require-hashes -r FILE from the index. Sent to w5.
+  - w20 is on the descs item now.
