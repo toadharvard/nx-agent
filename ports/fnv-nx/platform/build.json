@@ -74,7 +74,6 @@
   "ports/fnv-nx/toolchain/include",
   "ports/fnv-nx/loader/include",
   "/ext/minimp3",
-  "/ext/freetype/include",
   "/ext/a64/aarch64-none-elf/include/c++/15.2.0",
   "/ext/a64/aarch64-none-elf/include/c++/15.2.0/aarch64-none-elf/ilp32/pic",
   "/ext/a64/aarch64-none-elf/include/c++/15.2.0/backward",
@@ -377,10 +376,26 @@
   {
    "name": "freetype",
    "repo": "fnv-nx-build",
-   "ref": "tools/freetype",
-   "commit": "269e23eb8a336cce3e2a48461f7b99f67ac5603d",
-   "tree_sha256": "a38b092645bbcdf8b59c5368f09a177f53dfa2f6896ce9b274a80ea933318bfa",
+   "ref": "mirror/freetype-src",
+   "commit": "81a07888ce98832af73dd66e7685f08b0161be43",
+   "tree_sha256": "65fa395b59dd0e023cea0c42cfb8802f4bc90f48f09d5ad98ff1def6d7206ea1",
    "at": "/ext/freetype"
+  }
+ ],
+ "sources": [
+  {
+   "external": "freetype",
+   "dir": ".",
+   "patches": [
+    "freetype/patches/01-enable-gxvalid-otvalid.patch",
+    "freetype/patches/02-ftoption.patch",
+    "freetype/patches/03-CVE-2026-23865.patch",
+    "freetype/patches/04-CVE-2026-95512.patch",
+    "freetype/patches/05-delete-unbuilt-units.patch"
+   ],
+   "include": [
+    "include"
+   ]
   }
  ]
 }
