@@ -63,9 +63,14 @@ TEST(vm_alloc_flags)
     CHECK(VirtualAlloc((void *)(uintptr_t)0x1000, 4096, MEM_RESERVE, PAGE_READWRITE) == NULL && SYSERR == ERROR_INVALID_PARAMETER);
     CHECK(VirtualAlloc((void *)(uintptr_t)0x80000000u, 4096, MEM_RESERVE, PAGE_READWRITE) == NULL && SYSERR == ERROR_INVALID_PARAMETER);
     CHECK(VirtualAlloc((void *)(uintptr_t)(TOP - 0x1000), 0x2000, MEM_RESERVE, PAGE_READWRITE) == NULL && SYSERR == ERROR_INVALID_PARAMETER);
-    /* exhaustion */
+    /* exhaustion: the user range [0x10000, 0x7FFEFFFF] is 0x7FFE0000 bytes, so a request for all of it is satisfiable only
+     * on an empty map (it succeeds in a process where nothing is reserved yet, as when this case runs alone), and a real
+     * process always has reservations (image, stacks). The case declares its own state: one granule held for the check. */
+    void *hold = VirtualAlloc(NULL, 0x10000, MEM_RESERVE, PAGE_READWRITE);
+    CHECK(hold != NULL);
     CHECK(VirtualAlloc(NULL, 0x7FFE0000u, MEM_RESERVE, PAGE_READWRITE) == NULL && SYSERR == ERROR_NOT_ENOUGH_MEMORY);
     CHECK(VirtualAlloc(NULL, (SIZE_T)0xFFFFFFFFu, MEM_RESERVE, PAGE_READWRITE) == NULL && SYSERR == ERROR_NOT_ENOUGH_MEMORY);
+    CHECK(VirtualFree(hold, 0, MEM_RELEASE));
 
     unsigned char *r = (unsigned char *)VirtualAlloc(NULL, 0x100000, MEM_RESERVE, PAGE_READWRITE);
     CHECK(r && (U(r) & 0xFFFF) == 0 && U(r) >= 0x10000 && U(r) + 0x100000 <= TOP);
