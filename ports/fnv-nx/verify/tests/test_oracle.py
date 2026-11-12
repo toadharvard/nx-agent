@@ -218,8 +218,8 @@ check("malformed json is not a declaration", G.load(p) is None)
 root = os.path.join(tmp, "repo")
 T = "ports/fnv-nx"
 tree = {T + "/verify/gates.d/selftests.json": json.dumps({"format": "fnvnx-gatefile/1", "name": "selftests", "result": "selftests.json",
-                                                         "argv": ["python3", "-I", T + "/verify/gate_tests.py", T + "/x"], "covers": ["tool"]}),
-        T + "/verify/admit.json": json.dumps({"roots": [{"path": T + "/x", "class": "tool", "gates": []}]}),
+                                                         "argv": ["python3", "-I", T + "/verify/gate_tests.py"], "covers": ["tool"]}),
+        T + "/verify/admit.json": json.dumps({"roots": [{"path": T + "/x", "class": "tool", "gates": ["selftests"]}]}),
         T + "/verify/oracle_pins.json": "{}",
         T + "/x/a.py": "def f():\n    return 1\n",
         T + "/x/RULE.md": "# rule\nf returns 1\n",

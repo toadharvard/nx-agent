@@ -116,12 +116,10 @@ def main(argv):
     root = os.getcwd()
     ls = subprocess.run(["git", "ls-files", "-z", "--", gate_oracle.TREE], capture_output=True, check=True).stdout
     tracked = set(p for p in ls.decode("utf-8", "surrogateescape").split("\0") if p)
-    gates = gate_oracle.gatesdir.load_dir_or_empty()
-    argv_t = next((g["argv"] for g in gates.get("gates", []) if g.get("name") == "selftests"), None)
-    if argv_t is None:
-        print("oraclecheck: verify/gates.d has no selftests gate", file=sys.stderr)
+    universe, _, uerr = gate_tests.admit_universe(gate_tests.ADMIT)
+    if uerr:
+        print("oraclecheck: selftests universe: " + uerr, file=sys.stderr)
         return 1
-    universe = gate_tests.universe(gate_tests.parse(argv_t[argv_t.index(gate_oracle.TREE + "/verify/gate_tests.py") + 1:])[1])
     unknown = [t for t in tests if t not in universe]
     if unknown:
         print("oraclecheck: not a test of the universe: " + ", ".join(unknown), file=sys.stderr)

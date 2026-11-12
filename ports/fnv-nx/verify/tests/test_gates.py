@@ -64,7 +64,7 @@ V = "ports/fnv-nx/"
 def adm(*entries, extra=()):
     """admit.json of a toy tree: tool roots link and rules naming gate pure; ENTRIES are repo-relative stage entry points (of link/)."""
     roots = [{"path": V + "link", "class": "tool", "gates": ["pure", "selftests"], "entry": [V + "link/" + e for e in entries]},
-             {"path": V + "rules", "class": "tool", "gates": ["pure", "selftests"], "entry": [V + "rules/" + e for e in extra]}]
+             {"path": V + "rules", "class": "tool", "gates": ["pure"], "entry": [V + "rules/" + e for e in extra]}]
     return json.dumps({"format": "fnvnx-admit/1", "roots": roots})
 
 def pure(d, *entries, extra=()):
@@ -127,13 +127,37 @@ check("pure: uncertified capped at 50, sorted", r["universe"] == 60 and len(r["u
       and r["uncertified"] == sorted(r["uncertified"]) and r["uncertified"][0] == V + "link/m00.py", r)
 
 # ---- gate_tests
+def declare(d, dirs=("verify",)):
+    """verify/admit.json of the toy checkout D: one tool root per DIR, each declaring selftests (the universe of gate_tests.py is derived from it)."""
+    put(d, "ports/fnv-nx/verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
+        {"path": x, "class": "tool", "gates": ["selftests"], "entry": []} for x in dirs]}))
+
 def tests(d, dirs=("verify",), extra=()):
-    return gate("gate_tests.py", d, list(extra) + list(dirs))
+    declare(d, dirs)
+    return gate("gate_tests.py", d, list(extra))
 
 d = tmp("tests-none")
 rc, r, e = tests(d)
-check("tests: no test files -> green, universe 0", rc == 0 and r["name"] == "selftests" and r["status"] == "green"
-      and r["universe"] == 0, (rc, r, e))
+check("tests: a root that declares selftests and has no test file is red and named (the universe is derived from admit.json)",
+      rc != 0 and r["status"] == "red" and r["name"] == "selftests" and r["universe"] == 1 and r["certified"] == 0
+      and r["uncertified"] == ["verify (declares selftests, no tests/test_*.py)"], (rc, r, e))
+
+# the universe is the admit.json derivation: roots that declare selftests, all of their trees, in admit order; other roots do not count
+d = tmp("tests-admit")
+for x, n in (("a", "test_a1"), ("a", "test_a2"), ("b", "test_b"), ("c", "test_c"), ("t2", "test_t")):
+    put(d, "%s/tests/%s.py" % (x, n), "pass\n")
+put(d, "ports/fnv-nx/verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
+    {"path": "b", "class": "tool", "gates": ["selftests"], "entry": []},
+    {"path": "c", "class": "tool", "gates": ["pure"], "entry": []},
+    {"path": "a", "class": "tool", "gates": ["selftests"], "entry": [], "trees": ["a", "t2"]}]}))
+rc, r, e = gate("gate_tests.py", d, [])
+check("tests: the universe is derived from admit.json: selftests roots only, each tree of a root, in admit order", rc == 0
+      and [f["name"] for f in r["files"]] == ["b/tests/test_b.py", "a/tests/test_a1.py", "a/tests/test_a2.py", "t2/tests/test_t.py"], (rc, r, e))
+rc, r, e = gate("gate_tests.py", d, ["a"])
+check("tests: a directory argument is refused (no list in argv)", rc == 1, (rc, r, e))
+put(d, "ports/fnv-nx/verify/admit.json", "{")
+rc, r, e = gate("gate_tests.py", d, [])
+check("tests: a malformed admit.json is red", rc != 0 and r["status"] == "red" and r["certified"] == 0, (rc, r, e))
 
 d = tmp("tests-mix")
 put(d, "verify/tests/test_b.py", "import sys\nsys.exit(0)\n")
@@ -201,7 +225,7 @@ check("gates.d: format and the gates", spec["format"] == "fnvnx-gates/1" and {"p
       and byname["datamodel"]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_datamodel.py"] and byname["datamodel"]["result"] == "datamodel.json"
       and byname["d3d9total"]["argv"] == ["python3", "-I", "ports/fnv-nx/render/total/gate_d3d9total.py"] and byname["d3d9total"]["result"] == "d3d9total.json"
       and byname["pure"]["result"] == "pure.json" and byname["selftests"]["result"] == "selftests.json"
-      and dirs_pure == [] and dirs_tests == ["verify", "farm", "contract", "link", "rules", "lift", "gates", "total"]
+      and dirs_pure == [] and dirs_tests == [] and byname["selftests"]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_tests.py", "--jobs", "2", "--timeout-s", "900"]
       and all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_lift.py", "--gate", n] and byname[n]["result"] == n + ".json" for n in ("order", "addr32", "eh"))
       and byname["pure"]["argv"][:3] == ["python3", "-I", "ports/fnv-nx/verify/gate_pure.py"]
       and byname["selftests"]["argv"][:7] == ["python3", "-I", "ports/fnv-nx/verify/gate_tests.py", "--jobs", "2", "--timeout-s", "900"], spec)
@@ -235,7 +259,7 @@ def two_gates():
     v = "ports/fnv-nx/verify/"
     return {"format": "fnvnx-gates/1", "gates": [
         {"name": "pure", "argv": ["python3", "-I", v + "gate_pure.py"], "result": "pure.json", "covers": ["tool"]},
-        {"name": "selftests", "argv": ["python3", "-I", v + "gate_tests.py", "ports/fnv-nx/link"], "result": "selftests.json", "covers": ["tool"]}]}
+        {"name": "selftests", "argv": ["python3", "-I", v + "gate_tests.py"], "result": "selftests.json", "covers": ["tool"]}]}
 
 def branch(r, name, files, base="main", delete=()):
     git(r, "checkout", "-b", name, base)
@@ -375,14 +399,16 @@ def mk(d, **files):
         put(d, "verify/tests/%s.py" % n, body)
 
 def tests_c(d, cache, extra=(), dirs=("verify",)):
-    return gate("gate_tests.py", d, ["--cache", cache] + list(extra) + list(dirs))
+    declare(d, dirs)
+    return gate("gate_tests.py", d, ["--cache", cache] + list(extra))
 
 # TMPDIR rule: private TMPDIR per test file, removed whatever the outcome; leftovers are red; the reason is in the result
 def gate_tmp(d, extra=()):
     """gate_tests.py over verify/ in D with the gate's TMPDIR in a fresh directory; -> (rc, result, entries left there afterwards)"""
     gt = tempfile.mkdtemp(dir=ROOT, prefix="gt-")
     out = tempfile.mkdtemp(dir=ROOT, prefix="out-")
-    p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_tests.py")] + list(extra) + ["verify"], cwd=d,
+    declare(d)
+    p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_tests.py")] + list(extra), cwd=d,
                        env=dict(os.environ, GATE_OUT=out, TMPDIR=gt), capture_output=True, text=True)
     return p.returncode, json.load(open(os.path.join(out, "selftests.json"))), sorted(os.listdir(gt)), p.stderr
 
@@ -417,7 +443,8 @@ check("tests: --jobs 3 runs files concurrently, reported in sorted order", rc ==
 d = tmp("tests-times")
 mk(d, test_a="pass\n", test_b="import sys\nsys.exit(1)\n")
 out = tempfile.mkdtemp(dir=ROOT, prefix="out-")
-subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_tests.py"), "verify"], cwd=d, env=dict(os.environ, GATE_OUT=out))
+declare(d)
+subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_tests.py")], cwd=d, env=dict(os.environ, GATE_OUT=out))
 times = json.load(open(os.path.join(out, "selftests.times.json")))
 check("tests: per-file seconds in selftests.times.json", [(t["name"], t["status"]) for t in times]
       == [("verify/tests/test_a.py", "passed"), ("verify/tests/test_b.py", "failed")] and all(isinstance(t["seconds"], float) for t in times), times)
@@ -438,7 +465,8 @@ rc, r, e = tests_c(d, cache)
 check("tests cache: unchanged inputs -> certified without running, same result (two runs agree)", rc == 0 and len(ran()) == 2
       and r["certified"] == 2 and r["recomputed"] == 0 and all(f["cached"] for f in r["files"])
       and [(f["name"], f["status"]) for f in r["files"]] == rows1 and "2 cached" in r["detail"], (rc, r, e, ran()))
-rc, r, e = gate("gate_tests.py", d, ["verify"])
+declare(d)
+rc, r, e = gate("gate_tests.py", d, [])
 check("tests cache: no --cache and no GATE_CACHE -> always runs", rc == 0 and len(ran()) == 4 and r["recomputed"] == 2, (r, ran()))
 os.utime(os.path.join(d, "verify/tests/test_a.py"), (5, 5))
 rc, r, e = tests_c(d, cache)
@@ -498,11 +526,12 @@ check("tests: a test runs without network, with the fixed environment and the fi
 e1 = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "env.json")
 d2 = tmp("tests-cache-env")
 mk(d2, test_a="pass\n")
-for n in ("gate_tests.py", "cas.py", "envcheck.py"):
+declare(d2)
+for n in ("gate_tests.py", "cas.py", "envcheck.py", "gate_admit.py", "gatesdir.py"):
     shutil.copy(os.path.join(VERIFY, n), os.path.join(d2, n))
 def gate_in(dirpath, cache):
     out = tempfile.mkdtemp(dir=ROOT, prefix="out-")
-    subprocess.run([sys.executable, "-I", os.path.join(dirpath, "gate_tests.py"), "--cache", cache, "verify"], cwd=d2,
+    subprocess.run([sys.executable, "-I", os.path.join(dirpath, "gate_tests.py"), "--cache", cache], cwd=d2,
                    env=dict(os.environ, GATE_OUT=out), capture_output=True)
     return json.load(open(os.path.join(out, "selftests.json")))
 shutil.copy(e1, os.path.join(d2, "env.json"))

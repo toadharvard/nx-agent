@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Gate "selftests" (fnvnx-gate/1): every test file of the given directories passes.
-    python3 -I gate_tests.py [--timeout-s N] [--jobs N] [--cache DIR] [--key-dirs D...] [--] DIR...
+    python3 -I gate_tests.py [--timeout-s N] [--jobs N] [--cache DIR]
 Run in the checkout root with env GATE_OUT; writes GATE_OUT/selftests.json (+ GATE_OUT/selftests.times.json).
-Universe: DIR/tests/test_*.py for each DIR given (a missing DIR contributes nothing), in argument order, each DIR's files
-sorted by name; items are repo-relative paths. Each file runs as `python3 -I FILE` in the checkout with a per-file timeout
+Universe: DERIVED from verify/admit.json, no list in argv: DIR/tests/test_*.py for every tree DIR (gate_admit.trees) of every admitted root whose
+gates include "selftests", in admit order, each DIR's files sorted by name; items are repo-relative paths. A root that declares selftests and has no
+test file under any of its trees is an uncertified item (named `ROOT (declares selftests, no tests/test_*.py)`): the gate is red. A missing or
+malformed admit.json is red. Each file runs as `python3 -I FILE` in the checkout with a per-file timeout
 (default 300 s; a timeout kills the process group and is a failure). Certified: exit status 0. No skip logic: a test that
 cannot run in this environment (root, namespaces, strace) is uncertified. Zero files: green, universe 0. Exit 0 iff green.
 --jobs N (default 1): N test files run at once, each in its own process; results are reported in sorted universe order.
@@ -102,6 +104,26 @@ def tree_files(root, exclude, skipdir=None):
                     out.append((rel, "x" if os.access(p, os.X_OK) else "-", hashlib.sha256(fh.read()).hexdigest()))
     return sorted(out)
 
+def declared_reads(files):
+    """{test file: (set of files, set of dirs) of its declared reads} from DIR/tests/reads.json ("fnvnx-selftest-reads/1": {"tests": {"test_x.py":
+    ["path", "dir/", ...]}}: a path without a trailing slash is a file of the view, with one an (at least empty) directory); a test without a record is
+    absent from the result and gets the whole checkout view. The record is written by tracereads.py and ENFORCED by the view: a file the test
+    reads and the record does not list is not there."""
+    out, docs = {}, {}
+    for f in files:
+        d = os.path.dirname(f)
+        if d not in docs:
+            try:
+                doc = json.load(open(os.path.join(d, "reads.json")))
+                docs[d] = doc["tests"] if doc["format"] == "fnvnx-selftest-reads/1" else {}
+            except (OSError, ValueError, KeyError, TypeError):
+                docs[d] = {}
+        rec = docs[d].get(os.path.basename(f))
+        if isinstance(rec, list):
+            rec = [os.path.normpath(x) for x in rec if isinstance(x, str)]
+            out[f] = ({x for x in rec if x not in ("", ".")}, {os.path.normpath(x) for x in map(str, docs[d][os.path.basename(f)]) if x.endswith("/")})
+    return out
+
 def declared(files):
     """{test file: (set of test files in its view, itself included, net flag)} from DIR/tests/oracle.json "uses" / "net".
     A record without them means: no other test file, no network."""
@@ -120,9 +142,9 @@ def declared(files):
         out[f] = ({f} | {os.path.normpath(u) for u in uses}, rec.get("net") is True)
     return out
 
-def view_hash(files, own):
-    """files: tree_files(root, {}) minus the other tests; OWN: the test's rel path (it is in files)."""
-    return hashlib.sha256(cas.canon({"view": files, "own": own})).hexdigest()
+def view_hash(files, own, dirs=()):
+    """files: tree_files(root, {}) minus the other tests (or only the declared reads); OWN: the test's rel path (it is in files); DIRS: the declared directories."""
+    return hashlib.sha256(cas.canon({"view": files, "own": own, "dirs": sorted(dirs)})).hexdigest()
 
 GITENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@invalid", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@invalid",
           "GIT_AUTHOR_DATE": "2000-01-01T00:00:00Z", "GIT_COMMITTER_DATE": "2000-01-01T00:00:00Z", "GIT_CONFIG_GLOBAL": "/dev/null",
@@ -133,8 +155,21 @@ def git_view(view):
     for a in (["init", "-q", "-b", "main"], ["add", "-A", "-f"], ["commit", "-q", "-m", "view"]):
         subprocess.run(["git", "-C", view] + a, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
 
-def make_view(root, dst, exclude, skipdir=None):
-    """Private copy of the checkout without .git, __pycache__ and the EXCLUDE files: exactly the files tree_files hashes."""
+def make_view(root, dst, exclude, skipdir=None, keep=None):
+    """Private copy of the checkout without .git, __pycache__ and the EXCLUDE files: exactly the files tree_files hashes. KEEP = (files, dirs):
+    only those files, plus the (empty at least) directories."""
+    if keep is not None:
+        for rel in sorted(keep[0]):
+            p = os.path.join(root, rel)
+            if os.path.isfile(p) or os.path.islink(p):
+                os.makedirs(os.path.join(dst, os.path.dirname(rel)), exist_ok=True)
+                if os.path.islink(p):
+                    os.symlink(os.readlink(p), os.path.join(dst, rel))
+                else:
+                    shutil.copy2(p, os.path.join(dst, rel))
+        for rel in sorted(keep[1]):
+            os.makedirs(os.path.join(dst, rel), exist_ok=True)
+        return
     for d, dirs, names in os.walk(root):
         dirs[:] = sorted(x for x in dirs if x not in (".git", "__pycache__") and os.path.abspath(os.path.join(d, x)) != skipdir)
         os.makedirs(os.path.join(dst, os.path.relpath(d, root)), exist_ok=True)
@@ -149,13 +184,13 @@ def make_view(root, dst, exclude, skipdir=None):
             else:
                 shutil.copy2(p, q)
 
-def key_of(rel, files, timeout, net):
+def key_of(rel, files, timeout, net, dirs=()):
     env_json = os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.json")
     try:
         env = envcheck.env_id(json.load(open(env_json)))
     except (OSError, ValueError):
         env = "none"
-    return hashlib.sha256(cas.canon({"format": CACHE_FORMAT, "test": rel, "view": view_hash(files, rel), "env": env,
+    return hashlib.sha256(cas.canon({"format": CACHE_FORMAT, "test": rel, "view": view_hash(files, rel, dirs), "env": env,
                                      "python": sys.version, "timeout": timeout, "net": net, "run": RUN_ENV})).hexdigest()
 
 # The fixed machine of a test run (part of every key): the test sees the view at VIEWDIR (fixed cwd) and a scratch at SCRATCH, in new
@@ -172,6 +207,7 @@ NET_PASS = ("HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "ALL_PROXY", "SSL_CERT_FILE
 LAUNCH = r"""
 import ctypes, fcntl, os, socket, struct, sys
 view, scratch, rel, net = sys.argv[1:5]
+trace = sys.argv[5] if len(sys.argv) > 5 else ""
 libc = ctypes.CDLL(None, use_errno=True)
 os.makedirs("%s", exist_ok=True)
 if not os.path.ismount("%s") and libc.mount(b"tmpfs", b"%s", b"tmpfs", ctypes.c_ulong(0), None):   # nested in a run: its tmpfs is there
@@ -184,6 +220,8 @@ if net == "0":
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     fcntl.ioctl(s, 0x8914, struct.pack("16sH14x", b"lo", 0) )  # placeholder replaced below
 os.chdir("%s")
+if trace:   # tracereads.py: the same run under strace
+    os.execv("/usr/bin/strace", ["strace", "-f", "-y", "-qq", "-s", "400", "-o", trace, "-e", "trace=openat,open,stat,lstat,newfstatat,statx,access,faccessat,faccessat2,readlink,readlinkat,execve,chdir", sys.executable, "-I", rel])
 os.execv(sys.executable, [sys.executable, "-I", rel])
 """ % (ROOTDIR, ROOTDIR, ROOTDIR, VIEWDIR, SCRATCH, VIEWDIR)
 LAUNCH = LAUNCH.replace('fcntl.ioctl(s, 0x8914, struct.pack("16sH14x", b"lo", 0) )  # placeholder replaced below',
@@ -200,7 +238,7 @@ def record_digest(data):
             lines.append(ln.split("  ")[0] if ln.startswith("FAIL ") else ln)
     return hashlib.sha256("\n".join(sorted(lines)).encode()).hexdigest()   # a multiset: parallel cases print in any order
 
-def run_one(root, rel, exclude, timeout, skipdir=None, net=False, extra=None):
+def run_one(root, rel, exclude, timeout, skipdir=None, net=False, extra=None, keep=None, trace=None):
     """(status, seconds, tail, ended, digest): status passed|failed, TAIL the last bytes of output, DIGEST sha256 of its record (record_digest), ENDED
     False for a timeout."""
     t0 = time.time()
@@ -214,9 +252,9 @@ def run_one(root, rel, exclude, timeout, skipdir=None, net=False, extra=None):
     view, scratch, out = os.path.join(tmp, "view"), os.path.join(tmp, "scratch"), os.path.join(tmp, "out.txt")
     os.mkdir(scratch)
     cmd = ["unshare", "-m", "-p", "-u", "-i", "-f", "--kill-child"] + ([] if net else ["-n"]) + [
-        "--", sys.executable, "-I", "-c", LAUNCH, view, scratch, rel, "1" if net else "0"]
+        "--", sys.executable, "-I", "-c", LAUNCH, view, scratch, rel, "1" if net else "0"] + ([os.path.join(tmp, "trace.log")] if trace else [])
     try:
-        make_view(root, view, exclude, skipdir)
+        make_view(root, view, exclude, skipdir, keep)
         git_view(view)
         with open(out, "wb") as ofh:
             p = subprocess.Popen(cmd, cwd=view, stdin=subprocess.DEVNULL, stdout=ofh, stderr=subprocess.STDOUT,
@@ -243,6 +281,8 @@ def run_one(root, rel, exclude, timeout, skipdir=None, net=False, extra=None):
         fails = "\n".join(ln[:300] for ln in text.splitlines() if ln.startswith("FAIL "))[:TAIL // 2]
         tail = (fails + "\n--- end of output ---\n" if fails else "") + text[-(TAIL - len(fails)) :] if fails else text[-TAIL:]
     finally:
+        if trace:
+            shutil.copy(os.path.join(tmp, "trace.log"), trace)
         shutil.rmtree(tmp, ignore_errors=True)
     return ("passed" if ok else "failed"), round(time.time() - t0, 3), tail, ended, record_digest(data)
 
@@ -281,6 +321,26 @@ def store(path, key, status, seconds, tail):
         json.dump({"format": CACHE_FORMAT, "key": key, "status": status, "seconds": seconds, "tail": tail}, fh, sort_keys=True)
     os.replace(tmp, path)
 
+ADMIT = "ports/fnv-nx/verify/admit.json"
+
+def admit_universe(path=ADMIT):
+    """(files, empty roots, error): the test files of the admitted selftests roots (the gate's universe, one definition for gates selftests and oracle)."""
+    import gate_admit
+    try:
+        roots = json.load(open(path))["roots"]
+        sel = [r for r in roots if isinstance(r, dict) and "selftests" in (r.get("gates") or [])]
+        files, empty = [], []
+        for r in sel:
+            mine = []
+            for t in gate_admit.trees(r):
+                mine += [f for f in universe([t]) if f not in files and f not in mine]
+            files += mine
+            if not mine:
+                empty.append(r["path"])
+        return files, empty, None
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        return [], [], "%s: %s" % (path, e)
+
 def universe(dirs):
     """the test files of the doc comment's universe (gate "oracle" judges the same list)"""
     files = []
@@ -289,9 +349,14 @@ def universe(dirs):
     return files
 
 def main(argv):
+    keep_of = lambda f: ({f} | dec[f][0] | rds[f][0], rds[f][1])   # noqa: E731  the view of a test with declared reads: those, its own file and its `uses`
     o, dirs = parse(argv)
-    files = universe(dirs)
+    if dirs:
+        print("gate_tests.py takes no directory: the universe is the admitted selftests roots (verify/admit.json)", file=sys.stderr)
+        return 1
+    files, empty, err = admit_universe()
     dec = declared(files)
+    rds = declared_reads(files)
     t0 = time.time()
     root = os.getcwd()
     keys, cdir = {}, None
@@ -300,7 +365,8 @@ def main(argv):
         cdir = os.path.join(o["cache"], "selftests")
         allf = tree_files(root, set(), skip)
         for f in files:
-            keys[f] = key_of(f, [r for r in allf if r[0] not in files or r[0] in dec[f][0]], o["timeout"], dec[f][1])
+            keys[f] = key_of(f, [r for r in allf if (r[0] in keep_of(f)[0] if f in rds else r[0] not in files or r[0] in dec[f][0])],
+                             o["timeout"], dec[f][1], keep_of(f)[1] if f in rds else ())
 
     base = tempfile.mkdtemp(prefix="selftests-")   # in the gate's own TMPDIR; removed below whatever happens
     ws = os.path.join(base, "inputs")
@@ -321,7 +387,7 @@ def main(argv):
                 return {"name": f, "seconds": 0.0, "status": "blocked-env", "cached": False, "tail": got, "det": False}
             extra = got
         # testdet: a cold test is executed twice, at once, in fresh views; a difference in end status or record digest (PASS/FAIL case lines) is red
-        args = (root, f, set(files) - dec[f][0], o["timeout"], skip, dec[f][1], extra)
+        args = (root, f, set(files) - dec[f][0], o["timeout"], skip, dec[f][1], extra, keep_of(f) if f in rds else None)
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pair:
             r1, r2 = list(pair.map(lambda _: run_one(*args), (0, 1)))
         (st, secs, tail, ended, dg), (st2, _, tail2, ended2, dg2) = r1, r2
@@ -342,18 +408,22 @@ def main(argv):
     nondet = [r["name"] for r in full if r["det"]]
     secs = time.time() - t0
     unc = [r["name"] for r in rows if r["status"] in ("failed", "blocked-env")]
+    noroot = ["%s (declares selftests, no tests/test_*.py)" % r for r in empty] + (["admit.json: " + err] if err else [])
     n = len(files) - len(unc)
-    status = "green" if not unc else "red"
+    status = "green" if not unc and not noroot else "red"
+    unc = unc + noroot
     note = ", %d run, %d cached" % (ran, len(rows) - ran)
     detail = ("%d of %d test files pass%s, %.1f s" % (n, len(files), note, secs)) if files else "no test files at this commit (nothing to certify yet)"
+    if noroot:
+        detail += "; red: " + "; ".join(noroot)
     blocked = [r["name"] for r in rows if r["status"] == "blocked-env"]
     if blocked:
         detail += "; blocked: env (declared input not available) for " + ", ".join(blocked)
     if nondet:
         detail += "; nondeterministic: " + ",".join(nondet[:5])
     if unc:
-        detail += "; first failure %s: %s" % (unc[0], next(r["tail"] for r in full if r["name"] == unc[0]).strip()[-300:])
-    res = {"format": "fnvnx-gate/1", "name": "selftests", "status": status, "universe": len(files), "certified": n,
+        detail += "; first failure %s: %s" % (unc[0], next((r["tail"] for r in full if r["name"] == unc[0]), "").strip()[-300:])
+    res = {"format": "fnvnx-gate/1", "name": "selftests", "status": status, "universe": len(files) + len(noroot), "certified": n,
            "uncertified": unc[:50], "detail": detail, "files": rows, "recomputed": ran,
            "reasons": {r["name"]: r["reason"][-1500:] for r in rows if r["name"] in unc[:50] and r.get("reason")},
            "testdet": {"executed_twice": ran, "nondeterministic": nondet}}

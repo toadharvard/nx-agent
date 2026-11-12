@@ -3,8 +3,8 @@
 code under test (verify/VERDICT.md class 10).
     python3 -I gate_oracle.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/oracle.json
 
-Universe: the test files of gate "selftests" (the DIRs of its argv in verify/gates.d/selftests.json, DIR/tests/test_*.py, found by
-gate_tests.universe: one list for both gates). An item is a repo-relative path.
+Universe: the test files of gate "selftests" (DIR/tests/test_*.py of the trees of every admitted root that declares selftests, derived by
+gate_tests.admit_universe from verify/admit.json: one list for both gates). An item is a repo-relative path.
 Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
   {"format": "fnvnx-oracle/1", "tests": {"test_x.py": {"subject": [PATH...], "references": [REF...]}}}
   subject     the files under test (repo-relative).
@@ -376,13 +376,10 @@ def main():
     ls = subprocess.run(["git", "ls-files", "-z", "--", TREE], capture_output=True, check=True).stdout
     tracked = set(p for p in ls.decode("utf-8", "surrogateescape").split("\0") if p)
     gates = gatesdir.load_dir_or_empty()
-    argv = next((g["argv"] for g in gates.get("gates", []) if g.get("name") == "selftests"), None)
     errors = []
-    files = []
-    if argv is None:
-        errors.append("verify/gates.d has no selftests gate: the universe is not defined")
-    else:
-        files = gate_tests.universe(gate_tests.parse(argv[argv.index(TREE + "/verify/gate_tests.py") + 1:])[1])
+    files, _, err = gate_tests.admit_universe(ADMIT)   # the universe of gate selftests: the admitted selftests roots, one definition
+    if err:
+        errors.append("selftests universe: " + err)
     admit = load(ADMIT) or {}
     roots = [r for r in admit.get("roots", []) if isinstance(r, dict) and isinstance(r.get("path"), str)]
     pins = load(PINS)
