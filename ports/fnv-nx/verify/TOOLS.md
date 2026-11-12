@@ -334,11 +334,12 @@ Rules fixed here (all three consumers use them through this file and importkey.c
 ```text
 images - the guest image set of the contract gates (L1 CONTRACT): one pure function, no hand list.
 
-RULE: the set is the transitive closure of the PE import directories (normal and delay-load) starting from the exe, in modules.PE's
-reading. An imported dll name (iat.norm_dll: ASCII lowercase, ".dll" when it has no '.') is resolved case-insensitively against the
-files of the given directories (first directory in list order that has it; two files of one directory that differ only in case are an
-error). A dll found there is a GUEST IMAGE and is walked further; a dll not found there is a platform import (gate `imports`, owner L5)
-and is not an image. Assumption (stated, VERDICT.md): dynamic LoadLibrary names are facts of the `gpa` gate, not of this rule.
+RULE (dllkind.py, shared with modules.py): the set is the exe and the dlls reached from its import directories (normal and delay-load, in
+modules.PE's reading) through guest images only.  A dll name (iat.norm_dll) is resolved case-insensitively against the files of the
+given directories; it is a GUEST IMAGE iff it is found, has no bridge row, and its whole normal import closure resolves to guest images
+or bridge dlls.  A bridge dll (rows in bridge.tsv) and a found dll the declared machine cannot load are not images and are not walked
+further; a name that is neither found nor bridged is a platform import (gate `imports`, owner L5).  Dynamic LoadLibrary names are facts of
+the `gpa` gate, not of this rule (VERDICT.md).
 Order: the exe, then the images in discovery order (depth first, import directory then delay-load directory).
 ```
 

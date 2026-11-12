@@ -43,7 +43,9 @@ A64ACCESS = (os.path.join(HERE, "a64access.cc"), ["aarch64", "mc", "mcdisassembl
 CLANG_API = ["clang/AST/RecursiveASTVisitor.h", "clang/Frontend/FrontendPluginRegistry.h", "clang/Basic/Version.h"]  # the plugin API vtnames (clang-18 MSVC-ABI facts plugin) includes: headers under `llvm-config-18 --includedir`
 CLANG_LIBS = ["libclang-cpp.so.18.1", "libclang.so"]   # under `llvm-config-18 --libdir`: what a clang plugin links / dlopens
 M32_PROBE = "#include <stdint.h>\n#include <stdlib.h>\nint main(){return 0;}\n"   # clang -m32 -M: every header a 32-bit compile of the C library reads (gnu/stubs-32.h: libc6-dev-i386)
-PY_MODULES = {"capstone": "capstone", "numpy": "numpy", "unicorn": "unicorn", "pyelftools": "elftools"}   # distribution -> import name
+PY_MODULES = {"capstone": "capstone", "numpy": "numpy", "unicorn": "unicorn", "pyelftools": "elftools", "z3-solver": "z3"}   # distribution -> import name
+WHEEL_SHA256 = {"z3-solver": "e680ce083683abca5d07c3e55c2f620ff9a29cb91c548eeeea27ae29e8060522"}   # sha256 of the .whl (z3_solver-5.4.1.0-py3-none-manylinux_2_27_x86_64)
+PY_WHEELS = ["z3-solver"]   # pinned by the sha256 of the wheel (env.json python.wheels) and installed with --require-hashes; the installed files are checked too
 RENDER_LIBS = ["libEGL.so.1", "libEGL_mesa.so.0"]   # ldconfig names: the EGL loader the published libnxgl4.so links, and the Mesa vendor it dispatches to (NXGL4_HOST.md section 2); their loader closure (mesa-libgallium, libllvm, ...) is derived
 RENDER_FILES = ["/usr/share/glvnd/egl_vendor.d/50_mesa.json"]   # read by libEGL.so.1 to find that vendor
 def HOST_GCC_PLUGIN_DIRS(gcc):
@@ -55,6 +57,28 @@ KERNEL = ["unshare mount+pid+net+uts+ipc namespaces as root", "seccomp filter", 
 
 def env_id(doc):
     return hashlib.sha256(json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+def wheel_files(dist):
+    """{path: sha256 hex} of the installed files of distribution DIST that its RECORD hashes (no .pyc, no installer-written files), read from
+    the disk: a file that differs from its RECORD entry makes the digest differ (the entry is not trusted, the content is hashed)."""
+    import base64
+    import csv
+    d, out = metadata.distribution(dist), {}
+    for row in csv.reader(d.read_text("RECORD").splitlines()):
+        path, h = row[0], row[1] if len(row) > 1 else ""
+        if not h.startswith("sha256=") or path.endswith(".pyc") or "__pycache__" in path.split("/"):
+            continue
+        f = d.locate_file(path)
+        have = hashlib.sha256(open(f, "rb").read()).hexdigest() if os.path.isfile(f) else "missing"
+        want = base64.urlsafe_b64decode(h[7:] + "=" * (-len(h[7:]) % 4)).hex()
+        out[path] = have if have == want else "differs-from-record:" + have
+    return out
+
+
+def wheel_digest(dist):
+    """sha256 over the sorted (path, content hash) lines of wheel_files(DIST): names the installed wheel by its content."""
+    return hashlib.sha256("".join("%s %s\n" % kv for kv in sorted(wheel_files(dist).items())).encode()).hexdigest()
+
 
 def tree_digest(d):
     """sha256 of the sorted (relative path, size) listing of tree D."""
@@ -148,6 +172,12 @@ def check(doc, repo=None):
         except metadata.PackageNotFoundError:
             have = "not installed"
         cmp("python module " + m, ver, have)
+    for m, w in sorted(doc["python"].get("wheels", {}).items()):
+        try:
+            have = wheel_digest(m)
+        except (metadata.PackageNotFoundError, OSError, ValueError):
+            have = "not installed"
+        cmp("python wheel files " + m, w["files_sha256"], have)
     for t, dg in sorted(doc["trees"].items()):
         cmp("tree " + t, dg[:12], (tree_digest(t) if os.path.isdir(t) else "missing")[:12])
     own = None
@@ -236,7 +266,8 @@ def snapshot():
         add(f)
     return {"format": FORMAT, "os": _os(), "arch": platform.machine(),
             "uid": os.geteuid(), "trees": {t: tree_digest(t) for t in trees}, "packages": {p: _dpkg(p) for p in sorted(pk)},
-            "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in sorted(PY_MODULES)}},
+            "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in sorted(PY_MODULES)},
+                       "wheels": {m: {"sha256": WHEEL_SHA256[m], "files_sha256": wheel_digest(m)} for m in sorted(PY_WHEELS)}},
             "programs": sorted(PROGRAMS), "kernel": {"needs": KERNEL}}
 
 def main(argv):
