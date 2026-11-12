@@ -17,7 +17,7 @@
  * no entry does not return. The hit path is a load, a compare, a branch and a shift.
  *
  * A bridge is one function per descriptor, so it is not told which exe address it stands for. The call sequence
- * therefore stores the address in the thread-local word `fnvnx_call_fp` (rt/dispatch.c) just before the call, on
+ * therefore stores the address in the thread-local word `fnvnx_call_fp` (shim/include/fnvl_host.h) just before the call, on
  * the hit path and the miss path alike; a bridge reads it first thing, a native body ignores it.
  *
  * The descriptor is the call's shape for a bridge, a string `conv:ret:arg,arg,...`:
@@ -68,6 +68,7 @@
 #include "builtins.h"
 #include "rtl.h"
 #include "target.h"
+#include "tm_p.h"            /* the backend's own prototypes (aarch64_init_cumulative_args, behind INIT_CUMULATIVE_ARGS) */
 #include "calls.h"
 #include "output.h"
 #include "langhooks.h"
@@ -95,7 +96,7 @@ static tree get_dispatch()
 
 /* The exe address of the call in progress, for a bridge: a bridge is one function per descriptor and gets only the
  * call's own arguments, so the target travels in this thread-local word, which the call sequence stores
- * immediately before the call (rt/dispatch.c defines it). */
+ * immediately before the call (the platform defines it, platform/win32/thread.cpp; declared by shim/include/fnvl_host.h). */
 static tree fp_var;
 static tree get_fp_var()
 {
@@ -122,9 +123,6 @@ static tree new_site()
 }
 
 /* ---- the call's shape */
-
-/* the backend's own initialiser of the cumulative state (config/aarch64/aarch64.cc, INIT_CUMULATIVE_ARGS expands to it; cc1 exports it to plugins) */
-extern void aarch64_init_cumulative_args(CUMULATIVE_ARGS *, const_tree, rtx, const_tree, unsigned, bool = false);
 
 /* Is `t` a POD type in the sense of the x86 convention's documentation (learn.microsoft.com, "Argument Passing and Naming Conventions": "Structures that are
  * not PODs will not be returned in registers"; Agner Fog, Calling conventions, table 7: a constructor, a copy constructor, a destructor, virtual functions or
