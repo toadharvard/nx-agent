@@ -38,6 +38,7 @@
  * whenever a thread's state is observable: a thread suspended before a stop is not touched and stays suspended after
  * resume (ResumeThread during a stop cannot run: caller's obligation, and it would only block on the lock). */
 #include "os_world.h"
+#include "fnvl_host.h"
 
 static os_lock_t g_world;
 /* FIFO order of the world lock (a ticket gate in front of g_world). os_lock is a barging mutex: a stopper that runs

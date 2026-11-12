@@ -111,10 +111,9 @@ int os_thread_resume(os_thread *t);
 void os_thread_exit(void) __attribute__((noreturn));
 void os_yield(void);
 
-/* ---- the world (platform/os/os_world.c has the contract and the proof). Lifter hooks (rule R9): stop / resume every other
- * thread of the process, synchronously, under one global lock; the caller calls nothing of the platform in between. */
-void fnvl_host_world_stop(void);
-void fnvl_host_world_resume(void);
+/* ---- the world (platform/os/os_world.c has the contract and the proof). Lifter hooks (rule R9): fnvl_host_world_stop /
+ * fnvl_host_world_resume, declared once in shim/include/fnvl_host.h. */
+#include "fnvl_host.h"
 
 /* ---- time: the clock primitives are in os_clock.h, which only the clock implementations (platform/clock/clock_*.cpp)
  * and the OS backends include; the platform above reads time through fnvnx_clock.h */
