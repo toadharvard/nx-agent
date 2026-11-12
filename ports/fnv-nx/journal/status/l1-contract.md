@@ -405,3 +405,9 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - LE only for TLS defined in the same output, IE for host TLS;
   - a declared initial-exec symbol reached by any other kind is red.
 - gmpy2 pin added to w17's env.json python item (L3a w8 names the importer).
+
+## 2026-11-12 04:15Z
+- GL dev headers stay pinned (orchestrator): w5 pins them by the owner set of the gl4/bootgpu PP read sets, after the toolchain-build profile.
+  - w16 lands only together with or after that commit, and shows the GL backend and bootgpu roots green.
+- Test classification: gate_pure.py:33's `tests` directory-name rule is a heuristic. w17 replaces it with the longest-prefix admit class (test code = admitted root of class `test`).
+  - L3a admits lift/test as class test.
