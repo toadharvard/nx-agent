@@ -200,14 +200,9 @@ def explore(img, lo, hi, code, start=None, extra=(), fall_hi=None):
     return insns, tables, taken, bad
 
 
-EMIT = ''      # 'dsl': integer instructions are emitted from the proven DSL forms (f_dsl.py) before the hand handlers; '' = the hand handlers only. Set by the caller with set_emit (an argument of the generator, no environment)
-
-
-def set_emit(mode):
-    global EMIT
-    if mode not in ('', 'dsl'):
-        raise ValueError('emit mode %r (want "dsl" or "")' % (mode,))
-    EMIT = mode
+EMIT = os.environ.get('FNVL_EMIT', '')      # 'dsl': integer instructions are emitted from the proven DSL forms (f_dsl.py) before the hand handlers; '' = the hand handlers only
+if EMIT not in ('', 'dsl'):
+    raise ValueError('FNVL_EMIT=%s (want dsl or unset)' % EMIT)
 
 
 TAB_BIAS = 16     # assumption: the lowest index of a table is below 16 (the table starts at most 16 dwords above the displacement)

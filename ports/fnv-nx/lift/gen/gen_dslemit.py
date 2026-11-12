@@ -5,7 +5,7 @@ declared shapes external, as fixed-name bucket units.
 DIR/<image>/shapes.tsv   the shape census of every image (proof/census.py; column 1 = the shape key `hexbytes/...`); the union of the keys is the universe.
 --lifter DIR             the directory holding the packages fnvlift/ and proof/ and rt/fnvl.h, rt/fnvl_x87.h (declared inputs of the stage, tracked files)
 --emit                   the lifter's emission mode (fnvlift.core.EMIT): '' = the hand handlers are the baseline for undef.tsv, 'dsl' = no baseline
-Outputs under --out (the declared list, fixed): u/00.cpp .. u/7f.cpp, inc/fnvl_prelude.h, emitted.tsv, bad.tsv, undef.tsv.
+Outputs under --out (the declared list, fixed, outputs()): u/000.cpp .. u/fff.cpp, inc/fnvl_prelude.h, emitted.tsv, bad.tsv, undef.tsv.
 RULE units: a shape key lives in bucket sha256(key)[0:8 hex digits] mod 4096 (4096 fixed names, an empty bucket is the include alone). Inside a bucket the shapes are
 sorted by key and the n-th function sits at the fake address 0x400000 + 0x100*n, so a changed or added shape changes exactly its bucket's unit and no other.
 RULE every shape is in exactly one of emitted.tsv / bad.tsv: bad.tsv gives the class `uncovered` (no DSL form covers the mnemonic, or the bytes do not decode to
@@ -31,6 +31,10 @@ def unit_names():
     return ['u/%03x.cpp' % i for i in range(NB)]
 
 
+def outputs():
+    return unit_names() + ['inc/fnvl_prelude.h', 'emitted.tsv', 'bad.tsv', 'undef.tsv']
+
+
 def load_shapes(root):
     keys = set()
     for d in sorted(os.listdir(root)):
@@ -49,11 +53,13 @@ def main():
     ap.add_argument('--out', required=True)
     a = ap.parse_args()
     sys.path.insert(0, a.lifter)
+    # the lifter of L3a 8ec81459 reads the emit mode from FNVL_EMIT when core is imported: it is set here, from the argument, before the import
+    os.environ['FNVL_EMIT'] = a.emit
     import capstone
     from capstone import x86 as X
     import fnvlift
     from fnvlift import core, f_dsl
-    core.set_emit(a.emit)
+    assert core.EMIT == a.emit
 
     def mkctx(ins, ad):
         cx = core.Ctx(ad, ins.size, {ad: ins}, {}, [])

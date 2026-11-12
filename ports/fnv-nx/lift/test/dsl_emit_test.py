@@ -4,7 +4,19 @@ No compiler is called here: the units were compiled by verify/recipe.py.
 Usage: dsl_emit_test.py OBJECTS_JSON GEN_DIR   (GEN_DIR is the generator stage's output directory:
 emitted.tsv bad.tsv undef.tsv).
 Exit 1 (red) if any unit is missing from objects.json."""
-import json, os, sys
+import importlib.util, json, os, sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def recipe_outputs_match():
+    """build.json's declared outputs are exactly gen_dslemit.outputs() (the unit list is derived from the generator, never hand-edited)"""
+    sp = importlib.util.spec_from_file_location('gen_dslemit', os.path.join(HERE, '..', 'gen', 'gen_dslemit.py'))
+    m = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(m)
+    g = json.load(open(os.path.join(HERE, 'dslemit', 'build.json')))['generated']
+    g = g[0] if isinstance(g, list) else g
+    return g['outputs'] == m.outputs()
 
 def one(root, name):
     p = os.path.join(root, name)
@@ -17,6 +29,9 @@ def rows(p):
 
 def main():
     obj, gen = sys.argv[1], sys.argv[2]
+    if not recipe_outputs_match():
+        print('red: build.json outputs differ from gen_dslemit.outputs()')
+        return 1
     units = {os.path.basename(o['object']) for o in json.load(open(obj))['objects']}
     want = {'%03x.cpp.o' % i for i in range(4096)}
     missing = sorted(want - units)
@@ -28,4 +43,5 @@ def main():
         return 1
     return 0
 
-sys.exit(main())
+if __name__ == "__main__":
+    sys.exit(main())
