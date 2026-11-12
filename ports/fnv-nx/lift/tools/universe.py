@@ -420,6 +420,7 @@ print('closure under direct targets: %d rounds, entries added %s; targets outsid
 print('fall-through successors of lifter bodies (entry, successor) %d, distinct successors %d' % (len(cl_ft), len({t for e, t in cl_ft})))
 print('ranges.tsv %d rows, noreturn.tsv %d rows; range-sum vs extent mismatches %d (non-decomp rows: equality; %d decomp rows: sum <= declared size)' % (len(rgs), len(NRR), rbad, rdec))
 def gate(green, TNu, why):
+    import pcsrc; pc_red, pc_res = pcsrc.run_facts(OUTD, NAME if STRICT else 'exe', text, T0); print('gate %s red=%d sources=%d rows=%d' % (pc_res['name'], pc_red, pc_res['sources'], pc_res['rows']))
     open(OUTD + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap' + ('.' + NAME if STRICT else ''), 'status': 'green' if green else 'red', 'universe': TNu, 'certified': TNu - unexpl, 'uncertified': unexpl}) + '\n')
     print('gate l3.codemap%s: %s (certified %d of %d, uncertified %d, rejected pointers %d, bad-decode entries %d)%s' % ('.' + NAME if STRICT else '', 'green' if green else 'red', TNu - unexpl, TNu, unexpl, len(rejects), len(bad_entries), ''.join('; RED: ' + w for w in why)))
     sys.exit(0 if green else 1)
