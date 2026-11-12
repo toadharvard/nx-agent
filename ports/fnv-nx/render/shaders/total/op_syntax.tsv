@@ -1,0 +1,172 @@
+key	opnum	models	n_dst	n_src	n_other	syntax	page	page_sha256	status
+ps:abs	35	ps_2_0,ps_2_x,ps_3_0	1	1	0	abs dst, src	abs---ps.txt	1ff684c52240de3928f5162fd1e1081903630f60e300c841583797f069deb0f5	ok
+ps:add	2	ps_1_1,ps_1_2,ps_1_3,ps_1_4,ps_2_0,ps_2_x,ps_3_0	1	2	0	add dst, src0, src1 |	add---ps.txt	4551baab5a74f27a5ba9bccca260c471c9801edbfd6fae258714dc28aeef101d	ok
+ps:bem	89	ps_1_4	1	2	0	bem dst.rg, src0, src1 |	bem---ps.txt	238eb1d3491efde1c75edd0c3ae72a46a80df1e59fb6cef09baeb2e4581314d6	ok
+ps:break	44	ps_2_x,ps_3_0	0	0	0	break |	break---ps.txt	1a7c497970680db99dcaf99bb62063c19bb136a990b8f91642bd2208b4e0c979	ok
+ps:break_eq	45	ps_2_x,ps_3_0	0	2	0	break_comp src0, src1 |	break-comp---ps.txt	4603cb03c0adb574ce23af78a3c74ac2e99aa0d8ea81b570cd3e7a54b461645e	ok
+ps:break_ge	45	ps_2_x,ps_3_0	0	2	0	break_comp src0, src1 |	break-comp---ps.txt	4603cb03c0adb574ce23af78a3c74ac2e99aa0d8ea81b570cd3e7a54b461645e	ok
+ps:break_gt	45	ps_2_x,ps_3_0	0	2	0	break_comp src0, src1 |	break-comp---ps.txt	4603cb03c0adb574ce23af78a3c74ac2e99aa0d8ea81b570cd3e7a54b461645e	ok
+ps:break_le	45	ps_2_x,ps_3_0	0	2	0	break_comp src0, src1 |	break-comp---ps.txt	4603cb03c0adb574ce23af78a3c74ac2e99aa0d8ea81b570cd3e7a54b461645e	ok
+ps:break_lt	45	ps_2_x,ps_3_0	0	2	0	break_comp src0, src1 |	break-comp---ps.txt	4603cb03c0adb574ce23af78a3c74ac2e99aa0d8ea81b570cd3e7a54b461645e	ok
+ps:break_ne	45	ps_2_x,ps_3_0	0	2	0	break_comp src0, src1 |	break-comp---ps.txt	4603cb03c0adb574ce23af78a3c74ac2e99aa0d8ea81b570cd3e7a54b461645e	ok
+ps:breakp	96	ps_2_x,ps_3_0	0	0	1	breakp [!]p0.{x|y|z|w} |	break-p---ps.txt	34044cad77fd866e7b75fb597763df1b88aa4eb4961434896cacbb7dcd5a852d	ok
+ps:call	25	ps_2_x,ps_3_0	0	0	1	call l# |	call---ps.txt	f54413575ce5f42eee3c9a1e727c8964e9b9eaf4e544e56bcae25538d1420b13	ok
+ps:callnz_bool	26	ps_2_x,ps_3_0	0	0	2	callnz l#, [!]b# |	callnz-bool---ps.txt	1e5932625b4a9ac5eaecb64ddc04aaafa35b1a4a4ed14acbcadb33b37506e64e	ok
+ps:callnz_pred	26	ps_2_x,ps_3_0	0	0	2	callnz l#, [!]p0.{x|y|z|w} |	callnz-pred---ps.txt	ddadb3866b467d93aa1ec5392061e26349eb407b11e8695b3285667f6d244abc	ok
+ps:cmp	88	ps_1_2,ps_1_3,ps_1_4,ps_2_0,ps_2_x,ps_3_0	1	3	0	cmp dst, src0, src1, src2 |	cmp---ps.txt	7fc38aa38ec1edc1bf9d6dd69f35d2aa9569d7ed93e6760309eaf80bc2d52e00	ok
+ps:cnd	80	ps_1_1,ps_1_2,ps_1_3,ps_1_4	1	3	0	cnd dst, src0, src1, src2 |	cnd---ps.txt	da40f83de41ca6ec5c3e91b260cdcd29fe882553961a324ae8a443e8e0158f50	ok
+ps:crs	33	ps_2_0,ps_2_x,ps_3_0	1	2	0	crs dst, src0, src1 |	crs---ps.txt	d4ba413ed7d03b62e63723245a5bf03a58804790c1e95574d7eb8875293b52c8	ok
+ps:dcl	31	ps_2_0,ps_2_x,ps_3_0	1	0	0	dcl[_pp] dest[.mask]	dcl---ps.txt	59c7c2ff6e42e6929a6e6381b26abf7ac730f581593af37ac973cb73757491ba	ok
+ps:dcl_samplertype	31	ps_2_0,ps_2_x,ps_3_0	0	0	1	dcl_samplerType s#	dcl-samplertype---ps.txt	f27aaf57ac7d8df62a45176d7a27f34b8287d9b73390a4a0413ed32bc1a7b9fe	ok
+ps:dcl_usage	31	ps_3_0	1	0	0	dcl_semantics [_centroid] dst[.write_mask]	dcl-usage---ps.txt	f4edf069a2c46735656949973b826ac40adba77c479481e114770ae516b0334c	ok
+ps:def	81	ps_1_1,ps_1_2,ps_1_3,ps_1_4,ps_2_0,ps_2_x,ps_3_0	1	0	4	def dst, fVvalue1, fValue2, fValue3, fValue4 |	def---ps.txt	faa4871e793a9e9c4d2da3483dbba1c0b9fdb87d9cc7d5ffa3cfe19ec596b19a	ok
+ps:defb	47	ps_2_x,ps_3_0	1	0	1	defb dest, booleanValue |	defb---ps.txt	78faad58e3ee233f00ea36ce554bb9d5e470e8867045a4c44be390bdbc5554a2	ok
+ps:defi	48	ps_2_x,ps_3_0	1	0	1	defi dst, integerValue |	defi---ps.txt	b5e0de11778239f40ff26b51771a3c918bd3c346c8a0ce8336d6c3c0e086a5ab	ok
+ps:dp2add	90	ps_2_0,ps_2_x,ps_3_0	1	3	0	dp2add dst, src0, src1, src2.{x|y|z|w}	dp2add---ps.txt	090947f4d262c4a1ff129c844985f95aa51fdabdc8a4899029db14c118895a29	ok
+ps:dp3	8	ps_1_1,ps_1_2,ps_1_3,ps_1_4,ps_2_0,ps_2_x,ps_3_0	1	2	0	dp3 dst, src0, src1 |	dp3---ps.txt	51bdf2fc2ed2c039755d64d3e8cab7cca8f5688fac8ea18c09a74749427198a3	ok
+ps:dp4	9	ps_1_2,ps_1_3,ps_1_4,ps_2_0,ps_2_x,ps_3_0	1	2	0	dp4 dst, src0, src1 |	dp4---ps.txt	07f6d429fcd1ce036a2a0ac429f3411bc92420c8a4230a9a1ea72c3ab1c2a73e	ok
+ps:dsx	91	ps_2_x,ps_3_0	1	1	0	dsx dst, src |	dsx---ps.txt	9d7a86eca98db439abe5e1a852ac57a6fd198d14f5c715c8c3ff2a51ca3c3bcf	ok
+ps:dsy	92	ps_2_x,ps_3_0	1	1	0	dsy dst, src |	dsy---ps.txt	5b8f3642306d18801b2468b824a6a148a0b9c1eb424cfb13accfb90a857ecde5	ok
+ps:else	42	ps_2_x,ps_3_0	0	0	0	else |	else---ps.txt	89f0fd28e944639755eb31d94b40cdf2c84615afe9ca4fe43ee7b11bc996e31f	ok
+ps:endif	43	ps_2_x,ps_3_0	0	0	0	endif |	endif---ps.txt	5bc2254972d8c270c2602731be1ede675392a883027df546e14ebb134b02a0bc	ok
+ps:endloop	29	ps_3_0					endloop---ps.txt	69e21e9827606a57aa323b6b09e5c72bdb1d58f3de1609a56f6e5b9a0222030a	unparsed:no Syntax line
+ps:endrep	39	ps_2_x,ps_3_0	0	0	0	endrep |	endrep---ps.txt	6ed413758328023615439717d7f557c81c8a3af52c83fdf96fd90d6f6bf74cb7	ok
+ps:exp	14	ps_2_0,ps_2_x,ps_3_0	1	1	0	exp dst, src |	exp---ps.txt	ae2d3b9fc325e890434547e64b47a131adeb8654bbce6b80015e936a91142503	ok
+ps:frc	19	ps_2_0,ps_2_x,ps_3_0	1	1	0	frc dst, src |	frc---ps.txt	3c23809e87e1c5c9ea29bc68a33a342f252f83dc9da0f3076a96ab7a33673774	ok
+ps:if_bool	40	ps_2_x,ps_3_0	0	0	1	if bool |	if-bool---ps.txt	559600204583e2d3e336e478d2efbeb07dfec4551afff93a4330d1617abd8f9d	ok
+ps:if_eq	41	ps_2_x,ps_3_0	0	2	0	if_comp src0, src1 |	if-comp---ps.txt	377fff3bf9b00d71f821c1a1a6b4dbea08fa8d6287aecca7d5e8513f8c223fce	ok
+ps:if_ge	41	ps_2_x,ps_3_0	0	2	0	if_comp src0, src1 |	if-comp---ps.txt	377fff3bf9b00d71f821c1a1a6b4dbea08fa8d6287aecca7d5e8513f8c223fce	ok
+ps:if_gt	41	ps_2_x,ps_3_0	0	2	0	if_comp src0, src1 |	if-comp---ps.txt	377fff3bf9b00d71f821c1a1a6b4dbea08fa8d6287aecca7d5e8513f8c223fce	ok
+ps:if_le	41	ps_2_x,ps_3_0	0	2	0	if_comp src0, src1 |	if-comp---ps.txt	377fff3bf9b00d71f821c1a1a6b4dbea08fa8d6287aecca7d5e8513f8c223fce	ok
+ps:if_lt	41	ps_2_x,ps_3_0	0	2	0	if_comp src0, src1 |	if-comp---ps.txt	377fff3bf9b00d71f821c1a1a6b4dbea08fa8d6287aecca7d5e8513f8c223fce	ok
+ps:if_ne	41	ps_2_x,ps_3_0	0	2	0	if_comp src0, src1 |	if-comp---ps.txt	377fff3bf9b00d71f821c1a1a6b4dbea08fa8d6287aecca7d5e8513f8c223fce	ok
+ps:if_pred	40	ps_2_x,ps_3_0	0	0	1	if [!]pred.replicateSwizzle |	if-pred---ps.txt	6334a7c8259d846cfc5f0a1aa3489a3cd31363ecaa80f75591a73e0a8a035091	ok
+ps:label	30	ps_2_x,ps_3_0	0	0	1	label l# |	label---ps.txt	9c8d2c1f9c0be8b90a8da16a2bf827b3d25248209527808bae91a887a4339e36	ok
+ps:log	15	ps_2_0,ps_2_x,ps_3_0	1	1	0	log dst, src |	log---ps.txt	5a57eec03a873749a6560245ea0649ec6ebe76ad0b5fdc88a1ef4ebc47690512	ok
+ps:loop	27	ps_3_0	0	0	2	loop aL, i# |	loop---ps.txt	41e0f1fed4bd72a33709ade3b9d0db8c09d6b0a71c69d76bc6d508636184fa50	ok
+ps:lrp	18	ps_1_1,ps_1_2,ps_1_3,ps_1_4,ps_2_0,ps_2_x,ps_3_0	1	3	0	lrp dst, src0, src1, src2 |	lrp---ps.txt	13b0c73537828a96e3d7043a75ce22fa8d1590bcb518bde7ef4d2dce8e8a2e88	ok
+ps:m3x2	24	ps_2_0,ps_2_x,ps_3_0	1	2	0	m3x2 dst, src0, src1 |	m3x2---ps.txt	1ec3644df2c023f318f19389231b22e9b42941c4e766882ae7d6062ec8f45ebf	ok
+ps:m3x3	23	ps_2_0,ps_2_x,ps_3_0	1	2	0	m3x3 dst, src0, src1 |	m3x3---ps.txt	c93286a9ad57d1d19e541fc3ed932a57210e309a6b6fc4484163ea83ae8fd177	ok
+ps:m3x4	22	ps_2_0,ps_2_x,ps_3_0	1	2	0	m3x4 dst, src0, src1 |	m3x4---ps.txt	35b536e140f2d462aa0ad8e70523e9b54939cbaee73e537693be88d09d836deb	ok
+ps:m4x3	21	ps_2_0,ps_2_x,ps_3_0	1	2	0	m4x3 dst, src0, src1 |	m4x3---ps.txt	3f25844418bf51b506859b0de0449e86b60b5b45160687654c6b7b5564467b7e	ok
+ps:m4x4	20	ps_2_0,ps_2_x,ps_3_0	1	2	0	m4x4 dst, src0, src1 |	m4x4---ps.txt	d790ced1c39de44f3fd4a6b5c86e7f7418ce4fdf54aea07784918f78db3f157f	ok
+ps:mad	4	ps_1_1,ps_1_2,ps_1_3,ps_1_4,ps_2_0,ps_2_x,ps_3_0	1	3	0	mad dst, src0, src1, src2 |	mad---ps.txt	793c0cb4c13438424b3b8e0032dd9ef31c3e29ef5c4824fd4c4c15c6b345ce32	ok
+ps:max	11	ps_2_0,ps_2_x,ps_3_0	1	2	0	max dst, src0, src1 |	max---ps.txt	008f689292d22a61bef720d27b7fc0fd5f157cec4d906e9909cbc4ec3a933325	ok
+ps:min	10	ps_2_0,ps_2_x,ps_3_0	1	2	0	min dst, src0, src1 |	min---ps.txt	8cbbd05839080cee860c23cb9d6cc373019b664e57de6cf8ef414d33686caa63	ok
+ps:mov	1	ps_1_1,ps_1_2,ps_1_3,ps_1_4,ps_2_0,ps_2_x,ps_3_0	1	1	0	mov dst, src |	mov---ps.txt	257ba8411b10badd086301651ef4ad4791ba17683ec918a03d0736a2e005c829	ok
+ps:mul	5	ps_1_1,ps_1_2,ps_1_3,ps_1_4,ps_2_0,ps_2_x,ps_3_0	1	2	0	mul dst, src0, src1 |	mul---ps.txt	8bdf83ec843f8389a43996e149d603c99af7f67c6a1dd2bf8a88fd4439874858	ok
+ps:nop	0	ps_1_1,ps_1_2,ps_1_3,ps_1_4,ps_2_0,ps_2_x,ps_3_0	0	0	0	nop |	nop---ps.txt	fec19d1f884dd4e7d314f8eb24063358d39bac1c4d8a282944552c9b07df101c	ok
+ps:nrm	36	ps_2_0,ps_2_x,ps_3_0	1	1	0	nrm dst, src |	nrm---ps.txt	3defd790b808a88ea8e06879e1bebaf65bc0e0aaf552dd1f835304f812ab21dc	ok
+ps:phase	65533	ps_1_4	0	0	0	phase	phase---ps.txt	b3d9f332f9d6589f43571282812058d935bdb47c26a93e39194ebcc80fb63562	ok
+ps:pow	32	ps_2_0,ps_2_x,ps_3_0	1	2	0	pow dst, src0, src1 |	pow---ps.txt	eef44800741515f83f61a8a844f98771b45aac086c2f505db8b3d7b6aaf75c05	ok
+ps:rcp	6	ps_2_0,ps_2_x,ps_3_0	1	1	0	rcp dst, src |	rcp---ps.txt	fe4aaff68d57d8f583e850ede621498107430620b320d223ff1b3ac2459634d9	ok
+ps:rep	38	ps_2_x,ps_3_0	0	0	1	rep i# |	rep---ps.txt	1b82c9ed86998c40c179530cede47ac300bc05f9c03d16b1373119cc33ab61c4	ok
+ps:ret	28	ps_2_x,ps_3_0	0	0	0	ret |	ret---ps.txt	eaecb746749c5acef1ad692956319b96de715e00014a2442415cc0213c470826	ok
+ps:rsq	7	ps_2_0,ps_2_x,ps_3_0	1	1	0	rsq dst, src |	rsq---ps.txt	a2fb56b2aae5a5147639316f657907d53a2e9b40965eb0685b9ecfa339186f2c	ok
+ps:setp_eq	94	ps_2_x,ps_3_0	1	2	0	setp_comp dst, src0, src1 |	setp-comp---ps.txt	fb0244fed9de05c25c00f40567253ea6fdc7ba004802b806c23c1edac9ef123f	ok
+ps:setp_ge	94	ps_2_x,ps_3_0	1	2	0	setp_comp dst, src0, src1 |	setp-comp---ps.txt	fb0244fed9de05c25c00f40567253ea6fdc7ba004802b806c23c1edac9ef123f	ok
+ps:setp_gt	94	ps_2_x,ps_3_0	1	2	0	setp_comp dst, src0, src1 |	setp-comp---ps.txt	fb0244fed9de05c25c00f40567253ea6fdc7ba004802b806c23c1edac9ef123f	ok
+ps:setp_le	94	ps_2_x,ps_3_0	1	2	0	setp_comp dst, src0, src1 |	setp-comp---ps.txt	fb0244fed9de05c25c00f40567253ea6fdc7ba004802b806c23c1edac9ef123f	ok
+ps:setp_lt	94	ps_2_x,ps_3_0	1	2	0	setp_comp dst, src0, src1 |	setp-comp---ps.txt	fb0244fed9de05c25c00f40567253ea6fdc7ba004802b806c23c1edac9ef123f	ok
+ps:setp_ne	94	ps_2_x,ps_3_0	1	2	0	setp_comp dst, src0, src1 |	setp-comp---ps.txt	fb0244fed9de05c25c00f40567253ea6fdc7ba004802b806c23c1edac9ef123f	ok
+ps:sincos	37	ps_2_0,ps_2_x,ps_3_0	0	0	1	ps_2_0 and ps_2_x	sincos---ps.txt	b35e1fe75c34f79a370e550d9857c6419b69424424e7560216df338de75a21f0	ok
+ps:sub	3	ps_1_1,ps_1_2,ps_1_3,ps_1_4,ps_2_0,ps_2_x,ps_3_0	1	2	0	sub dst, src0, src1 |	sub---ps.txt	1a8d5d034004b8f9b0b1e7add10c883e9dacc0082ff99054edfb2c8e0d2ffc99	ok
+ps:tex	66	ps_1_1,ps_1_2,ps_1_3	1	0	0	tex dst |	tex---ps.txt	06dab95f5764ce9b315b3111154f454f818cbe5cfc2c12ae8065ab78d11a80e0	ok
+ps:texbem	67	ps_1_1,ps_1_2,ps_1_3	1	1	0	texbem dst, src |	texbem---ps.txt	2d9b3b34f09e482a80ce3ded0c55921197548b037c145642208be9771527ada7	ok
+ps:texbeml	68	ps_1_1,ps_1_2,ps_1_3	1	1	0	texbeml dst, src |	texbeml---ps.txt	af50b14f5a9e7c1701ebed3f87440e930a1bbdfa47bb83a59908cb5e6cf87703	ok
+ps:texcoord	64	ps_1_1,ps_1_2,ps_1_3	1	0	0	texcoord dst |	texcoord---ps.txt	bb746b67509c411020413635b4092eb635c6d790a338a1f87d4611bcdad79bb2	ok
+ps:texcrd	64	ps_1_4	1	1	0	texcrd dst, src |	texcrd---ps.txt	6d7443fc1e684f8becdade59748255c94d132241ff8740af90b94dad78f63156	ok
+ps:texdepth	87	ps_1_4	1	0	0	texdepth dst |	texdepth---ps.txt	aef08a6bcfa11361c6d70d0dbaf4d1330fe25068255feb3e23e642e76ef662dd	ok
+ps:texdp3	85	ps_1_2,ps_1_3	1	1	0	texdp3 dst, src |	texdp3---ps.txt	93e2f2f651fd011256e13d2f1924c58d4a7c68f24be2a6f7637a85bf59f0860d	ok
+ps:texdp3tex	83	ps_1_2,ps_1_3	1	1	0	texdp3tex dst, src |	texdp3tex---ps.txt	47417ff45f3179aab49b7495787a0e41325e68bc547c4c20811fbebe068c2454	ok
+ps:texkill	65	ps_1_1,ps_1_2,ps_1_3,ps_1_4,ps_2_0,ps_2_x,ps_3_0	1	0	0	texkill dst |	texkill---ps.txt	c9ade71b2eb0ec320b7699acfa2bbdb5412e56c4b6bc566b5a83d6326c884278	ok
+ps:texld	66	ps_2_0,ps_2_x,ps_3_0	1	2	0	texld dst, src0, src1 |	texld---ps-2-0.txt	5a3748c93636ba0202a4da1c936df2fe78b3e5729b361ad81cd877eae0c0b361	ok
+ps:texld14	66	ps_1_4					texld---ps-1-4.txt	b06bcee64f83ee093e389e3e30f5015f4f8914af2a516145dbb4fbc33b9a0cdf	unparsed:no Syntax line
+ps:texldb	66	ps_2_0,ps_2_x,ps_3_0	1	2	0	texldb dst, src0, src1 |	texldb---ps.txt	7877af2dbe40aa25769747d14ff842d48d2d8e75efa5e497ac4a197bbf3357c7	ok
+ps:texldd	93	ps_2_x,ps_3_0							unparsed:no page in source
+ps:texldl	95	ps_3_0	1	2	0	texldl dst, src0, src1 |	texldl---ps.txt	b877be002f0cddf145770f3a8c2519926c867d3d8403a494c1b6148717394a77	ok
+ps:texldp	66	ps_2_0,ps_2_x,ps_3_0	1	2	0	texldp dst, src0, src1 |	texldp---ps.txt	d345411700713ada096afe1a2ee2c6a4788ce46850d46ef8bb130f7ea20eaa05	ok
+ps:texm3x2depth	84	ps_1_3	1	1	0	texm3x2depth dst, src |	texm3x2depth---ps.txt	8f59517e421022f96b13509fb361559ccbb8cec33b4333019881bdc103aa37ef	ok
+ps:texm3x2pad	71	ps_1_1,ps_1_2,ps_1_3	1	1	0	tex3x2pad dst, src |	texm3x2pad---ps.txt	626b9b01f44ca3427657dc7d20e3a66d00f59c1dc079a641c18e3e50344f47fd	ok
+ps:texm3x2tex	72	ps_1_1,ps_1_2,ps_1_3	1	1	0	texm3x2tex dst, src |	texm3x2tex---ps.txt	1681275c0160f8f7d620878012bc0b71879e88755d4be0e8250352462e568ece	ok
+ps:texm3x3	86	ps_1_2,ps_1_3	1	1	0	texm3x3 dst, src |	texm3x3---ps.txt	0612f9186d30f48a3ddf07180e8f3d04b0bd25ee678a8a6b201c7fa26cfcdcea	ok
+ps:texm3x3pad	73	ps_1_1,ps_1_2,ps_1_3	1	1	0	texm3x3pad dst, src |	texm3x3pad---ps.txt	f6c4f6d56775ff57819d797e862075bbc6b1af95f83e4f40203919856054a5ae	ok
+ps:texm3x3spec	76	ps_1_1,ps_1_2,ps_1_3	1	2	0	texm3x3spec dst, src0, src1 |	texm3x3spec---ps.txt	d584f85224eb1f917fa89c39877191fad2bbde32c6688cba4715af3ee3dd483c	ok
+ps:texm3x3tex	74	ps_1_1,ps_1_2,ps_1_3	1	1	0	texm3x3tex dst, src |	texm3x3tex---ps.txt	3e89e8f4d9978c19c792d3a210d4e64fb97845463b5d23a380772c47b0aaa284	ok
+ps:texm3x3vspec	77	ps_1_1,ps_1_2,ps_1_3	1	1	0	texm3x3vspec dst, src |	texm3x3vspec---ps.txt	b28c47bfcc4677e2ff7c128c5b00eda7874eba7ff73103339105addf712de432	ok
+ps:texreg2ar	69	ps_1_1,ps_1_2,ps_1_3	1	1	0	texreg2ar dst, src |	texreg2ar---ps.txt	6051277dd14d8f194c49a28d27424e0cab7e099fef65133aaf32d4fa78d3c4a7	ok
+ps:texreg2gb	70	ps_1_2,ps_1_3	1	1	0	texreg2gb dst, src |	texreg2gb---ps.txt	fda17b7fe836610803a0d5dc8b772510ea718fe01f89c2fdf96ef4e467826c78	ok
+ps:texreg2rgb	82	ps_1_2,ps_1_3	1	1	0	texreg2rgb dst, src |	texreg2rgb---ps.txt	d97bcb0b06706b6b10c63c609d9226f9ead336c1459006c1808ae805dcb43b0f	ok
+vs:abs	35	vs_2_0,vs_2_x,vs_3_0	1	1	0	abs dst, src	abs---vs.txt	fb0d9e3154b4ba7839095ff8424fe47879fef81137ac221805d13b61da7ce29d	ok
+vs:add	2	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	2	0	add dst, src0, src1 |	add---vs.txt	fd643e6518a6b33edf05ef18bd71cfef13d5047cdbf3106460eb5f8ad546b04f	ok
+vs:break	44	vs_2_x,vs_3_0	0	0	0	break |	break---vs.txt	5172b8a82fb6c0db869ddef65a3ce576f1cb7dde26adc5b166a1b5b21cc591ef	ok
+vs:break_eq	45	vs_2_x,vs_3_0	0	2	0	break_comp src0, src1 |	break-comp---vs.txt	22654b9667b62870a717383bf66f92c0afdd37fce57b891ddee03c01b5f25ecd	ok
+vs:break_ge	45	vs_2_x,vs_3_0	0	2	0	break_comp src0, src1 |	break-comp---vs.txt	22654b9667b62870a717383bf66f92c0afdd37fce57b891ddee03c01b5f25ecd	ok
+vs:break_gt	45	vs_2_x,vs_3_0	0	2	0	break_comp src0, src1 |	break-comp---vs.txt	22654b9667b62870a717383bf66f92c0afdd37fce57b891ddee03c01b5f25ecd	ok
+vs:break_le	45	vs_2_x,vs_3_0	0	2	0	break_comp src0, src1 |	break-comp---vs.txt	22654b9667b62870a717383bf66f92c0afdd37fce57b891ddee03c01b5f25ecd	ok
+vs:break_lt	45	vs_2_x,vs_3_0	0	2	0	break_comp src0, src1 |	break-comp---vs.txt	22654b9667b62870a717383bf66f92c0afdd37fce57b891ddee03c01b5f25ecd	ok
+vs:break_ne	45	vs_2_x,vs_3_0	0	2	0	break_comp src0, src1 |	break-comp---vs.txt	22654b9667b62870a717383bf66f92c0afdd37fce57b891ddee03c01b5f25ecd	ok
+vs:breakp	96	vs_2_x,vs_3_0	0	0	1	breakp [!]p0.{x|y|z|w} |	breakp---vs.txt	15c38ad6325ab1d027f8b52480075ae093e2a2a7b6cdc4bcb0ce0fc850f6e730	ok
+vs:call	25	vs_2_0,vs_2_x,vs_3_0	0	0	1	call l# |	call---vs.txt	d9875088a8addfe2d4a94c057bc3b8c747e8382073d28ef10c916bdffb1bc14d	ok
+vs:callnz_bool	26	vs_2_0,vs_2_x,vs_3_0	0	0	2	callnz l#, [!]b# |	callnz-bool---vs.txt	69b90210a4e9f5103c18fb773a5f91a2642bc59d7769686811ee36a59a81f051	ok
+vs:callnz_pred	26	vs_2_x,vs_3_0	0	0	2	callnz l#, [!]p0.{x|y|z|w} |	callnz-pred---vs.txt	099775b39bd8d8ddffcf9bd9fcecd967e396970b98de9e29a078f7bd16ca2794	ok
+vs:crs	33	vs_2_0,vs_2_x,vs_3_0	1	2	0	crs dst, src0, src1 |	crs---vs.txt	c41ebb6742f10dfe29707e11f9834a8b60724116ac46686eb8204067797c0ddc	ok
+vs:dcl_samplertype	31	vs_3_0	0	0	1	dcl_samplerType s#	dcl-samplertype---vs.txt	da83a27e42a481906404a28accee0f2c74535966deb8268ad215ff247b10ab77	ok
+vs:dcl_usage	31	vs_1_1,vs_2_0,vs_2_x,vs_3_0	0	0	1	dcl_usage[usage_index] v#	dcl-usage-input-register---vs.txt	13ab004d116bc7fbbedca82f1c48598594fffe17bcc73f21c931f4bc1b8a5a72	ok
+vs:def	81	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	0	4	def dst, float1, float2, float3, float4 |	def---vs.txt	20e72503853dfb0ca0637628d2e5b3fab74d44d6cca646e964cc151408dcaea3	ok
+vs:defb	47	vs_2_0,vs_2_x,vs_3_0	1	0	1	defb dest, booleanValue |	defb---vs.txt	7f6c34eba3e3de34ed25b882a1211b6bb117fadf8c08e8daaf08b5b66b7902e4	ok
+vs:defi	48	vs_2_0,vs_2_x,vs_3_0	1	0	4	defi dst, integerValue0, integerValue1, integerValue2, integerValue3 |	defi---vs.txt	56b20983394141c078545a4f72b2cfb1ac6d830333d75bd6c0a00141b19d8fef	ok
+vs:dp3	8	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	2	0	dp3 dst, src0, src1 |	dp3---vs.txt	37f515aee535e78de3a77f9f98ab1769e03194fab16ae918264f428db81678b4	ok
+vs:dp4	9	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	2	0	dp4 dst, src0, src1 |	dp4---vs.txt	a422f2290508e6b505206323f80ff07f5b8057fb09995c56bcd56d984220353c	ok
+vs:dst	17	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	2	0	dst dest, src0, src1 |	dst---vs.txt	bc3805853ee5ee3dcad928a72bae2b95153caa22727c98caf0beef8683085023	ok
+vs:else	42	vs_2_0,vs_2_x,vs_3_0	0	0	0	else |	else---vs.txt	1fede8e085d950390c1adc8058f93a0b5e786695583ce8a596fb4d343fcbc69b	ok
+vs:endif	43	vs_2_0,vs_2_x,vs_3_0	0	0	0	endif |	endif---vs.txt	51fbee8444eb5a6eab43b45e33f24380aee3d7eb7df07c283e175dbcedb38fb5	ok
+vs:endloop	29	vs_2_0,vs_2_x,vs_3_0	0	0	0	endloop |	endloop---vs.txt	50cbed401e67615fe20bd9a1c787f4177dfaa39ad5702deb0aefcd49412b2015	ok
+vs:endrep	39	vs_2_0,vs_2_x,vs_3_0	0	0	0	endrep |	endrep---vs.txt	b0fe0bd4531297344950e137bdea3ca8db0b9737e4e678ffa4d56edfc01cf6d5	ok
+vs:exp	14	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	1	0	exp dst, src |	exp---vs.txt	4f1942380a9aa7dcd63d4c0a95e5268b4394613937c27977c22b9edd382cf2da	ok
+vs:expp	78	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	1	0	expp dst, src.{x|y|z|w} |	expp---vs.txt	66cc0d91e052032fd4b7ca53b6de79cb9532aeffbd516b458a5b0c0b1581e1d8	ok
+vs:frc	19	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	1	0	frc dst, src |	frc---vs.txt	bd49bb125b7dc6e0597f0adb7672acbbca01a96c7725587427cff3e904519c5a	ok
+vs:if_bool	40	vs_2_0,vs_2_x,vs_3_0	0	0	1	if bool |	if-bool---vs.txt	6af8f44f35efddfb424f14ae481ddf2378f5a948d34293359912a076282505e3	ok
+vs:if_eq	41	vs_2_x,vs_3_0	0	2	0	if_comp src0, src1 |	if-comp---vs.txt	e1804af5d6937318283c713232dacd49b904bcca9fa0424d88a3459dacc18884	ok
+vs:if_ge	41	vs_2_x,vs_3_0	0	2	0	if_comp src0, src1 |	if-comp---vs.txt	e1804af5d6937318283c713232dacd49b904bcca9fa0424d88a3459dacc18884	ok
+vs:if_gt	41	vs_2_x,vs_3_0	0	2	0	if_comp src0, src1 |	if-comp---vs.txt	e1804af5d6937318283c713232dacd49b904bcca9fa0424d88a3459dacc18884	ok
+vs:if_le	41	vs_2_x,vs_3_0	0	2	0	if_comp src0, src1 |	if-comp---vs.txt	e1804af5d6937318283c713232dacd49b904bcca9fa0424d88a3459dacc18884	ok
+vs:if_lt	41	vs_2_x,vs_3_0	0	2	0	if_comp src0, src1 |	if-comp---vs.txt	e1804af5d6937318283c713232dacd49b904bcca9fa0424d88a3459dacc18884	ok
+vs:if_ne	41	vs_2_x,vs_3_0	0	2	0	if_comp src0, src1 |	if-comp---vs.txt	e1804af5d6937318283c713232dacd49b904bcca9fa0424d88a3459dacc18884	ok
+vs:if_pred	40	vs_2_x,vs_3_0	0	0	1	if [!]pred.replicateSwizzle |	if-pred---vs.txt	b8fbf99e3d42af8969cea4122fee00ff7ab0f68e1284314282e0157cfccab05d	ok
+vs:label	30	vs_2_0,vs_2_x,vs_3_0	0	0	1	label l# |	label---vs.txt	96264b2a13a71b652d03d356c143421b09adc22c904ac6e77405bacdaefdceb3	ok
+vs:lit	16	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	1	0	lit dst, src |	lit---vs.txt	1a3473f0ffc73edd9ab3a11711bb348aa139d38063fab34739a448d06ec8cc14	ok
+vs:log	15	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	1	0	log dst, src |	log---vs.txt	88c8c53359c0263154159c54191ebcc3131f224d102ba088d7af7ca49cc7ac5e	ok
+vs:logp	79	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	1	0	logp dst, src |	logp---vs.txt	2b9007d8ca5960bfc53a3321697fa6d27199ac088dc611467c78f02b3ae31dac	ok
+vs:loop	27	vs_2_0,vs_2_x,vs_3_0	0	0	2	loop aL, i# |	loop---vs.txt	f3a650337652ec8353a26135c8f735cf894d79df25af60a19b021e6893a544cd	ok
+vs:lrp	18	vs_2_0,vs_2_x,vs_3_0	1	3	0	lrp dst, src0, src1, src2 |	lrp---vs.txt	a2301599df0443c2577a206eaddf86b681248ea2a3ec0c38660213130a35ccbc	ok
+vs:m3x2	24	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	2	0	m3x2 dst, src0, src1 |	m3x2---vs.txt	b8cd474484ea31966b079de0fc6c66bdf63da307598636e1587c06a4f866c6a5	ok
+vs:m3x3	23	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	2	0	m3x3 dst, src0, src1 |	m3x3---vs.txt	f55cad2e9f92d65942d23c51703a4fa93920ed8c74c024e7ef01f813a1c8403f	ok
+vs:m3x4	22	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	2	0	m3x4 dst, src0, src1 |	m3x4---vs.txt	8316c40ec11ef39934de6edc82c266162369b90df4114afc3cf41d7d2e755d09	ok
+vs:m4x3	21	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	2	0	m4x3 dst, src0, src1 |	m4x3---vs.txt	ccbed8c3f6a37ac1d20a4cb13a02d9c85bc16b0b94354858a73f352d844f42c6	ok
+vs:m4x4	20	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	2	0	m4x4 dst, src0, src1 |	m4x4---vs.txt	2b22cf05972f165ca4319bc1977a9cd8883096d831220a438fac42a3edc5c7dc	ok
+vs:mad	4	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	3	0	mad dst, src0, src1, src2 |	mad---vs.txt	99b0a563d93e3d480caf9e03c6b5bda7adedaf8d0e8c1be30129ee202860e3e5	ok
+vs:max	11	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	2	0	max dst, src0, src1 |	max---vs.txt	3c3730ad0408369c8eb0a86b2e5923fcf3249a7ef60a3d154b11ff7192ecc2cf	ok
+vs:min	10	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	2	0	min dst, src0, src1 |	min---vs.txt	a461d4c8e3739263b4835c9b2eb19663447890496a55a0cb9261abb8d45b0179	ok
+vs:mov	1	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	1	0	mov dst, src |	mov---vs.txt	f74b16e962270cd2409c04d76fce39e04413ee6a9ad9ddd9a61700d14e21b653	ok
+vs:mova	46	vs_2_0,vs_2_x,vs_3_0	1	1	0	mova dst, src |	mova---vs.txt	574b9506681946a4da30a80f1baefb408a95950ba72f492db473dba4c5e4fdb1	ok
+vs:mul	5	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	2	0	mul dst, src0, src1 |	mul---vs.txt	a27a9930c1c203d561b98665706129131fd7c17aeb7eb57ca8027ca59b341ffb	ok
+vs:nop	0	vs_1_1,vs_2_0,vs_2_x,vs_3_0	0	0	0	nop |	nop---vs.txt	8aa88388c50530b60584ff40c031740c0a9950632b266d1f2d1460c65be1673c	ok
+vs:nrm	36	vs_2_0,vs_2_x,vs_3_0	1	1	0	nrm dst, src |	nrm---vs.txt	a1603e419d32d20e4b4ea520c5a83d90f7c6c65ebd820da279b78c5b996410dc	ok
+vs:pow	32	vs_2_0,vs_2_x,vs_3_0	1	2	0	pow dst, src0, src1 |	pow---vs.txt	8f67f4b4545cd81d21ea23c158d39508bf39351a2bd7161c1af1cd0a307dc7fd	ok
+vs:rcp	6	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	1	0	rcp dst, src |	rcp---vs.txt	daadba12dadd9f8f54c12af4a119458439fdd8a869d46a94638fe536da44cce6	ok
+vs:rep	38	vs_2_0,vs_2_x,vs_3_0	0	0	1	rep i# |	rep---vs.txt	0204c4dbcfc96ae0a0517b9e6dd8374b7154a0cfd49a6881bb392c9497f6ac3c	ok
+vs:ret	28	vs_2_0,vs_2_x,vs_3_0	0	0	0	ret |	ret---vs.txt	7140fc8499251db119ec98bdd6e4e95f0116cfc72694127948699984a620152b	ok
+vs:rsq	7	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	1	0	rsq dst, src |	rsq---vs.txt	07a49337a61cc92015f259b3b7fb2a7fb192341cb36dfdeb87eb0234ee366a79	ok
+vs:setp_eq	94	vs_2_x,vs_3_0	1	2	0	setp_comp dst, src0, src1 |	setp-comp---vs.txt	1422b230f3454ab01541c78bf60cc9c73be9c068617ac5411952398d05080ca4	ok
+vs:setp_ge	94	vs_2_x,vs_3_0	1	2	0	setp_comp dst, src0, src1 |	setp-comp---vs.txt	1422b230f3454ab01541c78bf60cc9c73be9c068617ac5411952398d05080ca4	ok
+vs:setp_gt	94	vs_2_x,vs_3_0	1	2	0	setp_comp dst, src0, src1 |	setp-comp---vs.txt	1422b230f3454ab01541c78bf60cc9c73be9c068617ac5411952398d05080ca4	ok
+vs:setp_le	94	vs_2_x,vs_3_0	1	2	0	setp_comp dst, src0, src1 |	setp-comp---vs.txt	1422b230f3454ab01541c78bf60cc9c73be9c068617ac5411952398d05080ca4	ok
+vs:setp_lt	94	vs_2_x,vs_3_0	1	2	0	setp_comp dst, src0, src1 |	setp-comp---vs.txt	1422b230f3454ab01541c78bf60cc9c73be9c068617ac5411952398d05080ca4	ok
+vs:setp_ne	94	vs_2_x,vs_3_0	1	2	0	setp_comp dst, src0, src1 |	setp-comp---vs.txt	1422b230f3454ab01541c78bf60cc9c73be9c068617ac5411952398d05080ca4	ok
+vs:sge	13	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	2	0	sge dst, src0, src1 |	sge---vs.txt	7f035ae088f652f44d3b9320cfa1b50b0f3d48ca43e3e003070930d5e147091c	ok
+vs:sgn	34	vs_2_0,vs_2_x,vs_3_0	1	3	0	sgn dst, src0, src1, src2 |	sgn---vs.txt	b8d5f1e49a9449f1284d5f72316e5111af3ef7f1e41cb6e65392c916a2a39aa0	ok
+vs:sincos	37	vs_2_0,vs_2_x,vs_3_0	0	0	1	vs_2_0 and vs_2_x	sincos---vs.txt	3ba87373a48f6d637e3cce3112adb1da781db3f016baa5a375b6adc9250ae598	ok
+vs:slt	12	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	2	0	slt dst, src0, src1 |	slt---vs.txt	665251874f7998beeb9fd9aa61add7890a5b0a219a5dab035f6704bc8fe6c6c5	ok
+vs:sub	3	vs_1_1,vs_2_0,vs_2_x,vs_3_0	1	2	0	sub dst, src0, src1 |	sub---vs.txt	67926183ba76ba2b1ce4e7d1529e784e39cd96694a709c6eb5a90c39e4ca6843	ok
+vs:texldl	95	vs_3_0	1	2	0	texldl dst, src0, src1 |	texldl---vs.txt	9c1932c6863057d3474034c195c1810c5e206532230dab1e1f56b036f780527e	ok
