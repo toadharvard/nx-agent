@@ -45,30 +45,29 @@
    "path": "ports/fnv-nx/lift/fnvlift",
    "class": "tool",
    "gates": [
-    "pure",
     "selftests"
-   ],
-   "trees": [
-    "ports/fnv-nx/lift/fnvlift",
-    "ports/fnv-nx/lift/proof"
-   ],
-   "entry": []
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/lift/proof",
+   "class": "tool",
+   "gates": [
+    "selftests"
+   ]
   },
   {
    "path": "ports/fnv-nx/lift/test",
    "class": "tool",
    "gates": [
     "selftests"
-   ],
-   "entry": []
+   ]
   },
   {
    "path": "ports/fnv-nx/lift/tools",
    "class": "tool",
    "gates": [
     "selftests"
-   ],
-   "entry": []
+   ]
   },
   {
    "path": "ports/fnv-nx/link",

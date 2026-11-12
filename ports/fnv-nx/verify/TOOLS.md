@@ -1158,16 +1158,7 @@ Infinities/NaN from memory or from exact operands are exact. Division by an inte
 Gate "admit" (fnvnx-gate/1): nothing is in the trunk without the gates that close its classes of failure.
     python3 -I gate_admit.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/admit.json
 
-Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"path", "class", "gates", ["recipe"], ["imports"], ["trees"], ["entry"]}.
-`entry` (class tool: required, may be empty): the stage entry points of the root, .py files inside its trees. gate_pure's universe is the
-import closure of these and of the `generated` tools of the recipes; a script only a gate driver runs is not an entry point.
-`trees` (optional): the list of the directories (or exact files) of one root, at least two, the first equal to "path"; the root's
-universe is their union, and its python is judged in one puregate run, so trees that import each other form ONE root with no
-file moved. Two roots never share or nest a tree. The root is named by "path" in `imports`.
-`imports` (a root's python cross-root imports): a list of paths of other admitted roots; "pure" (gate_pure.py) judges the root
-with its own directory and the parent directory of each imported root as import bases, so a root's python may import another
-root's modules only when it declares it. Each entry must be an admitted root other than the root itself, without repeats; the
-declared imports form no cycle (an error of the table: every file is uncertified).
+Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"path", "class", "gates", ["recipe"]}.
 Universe: every file git tracks below ports/fnv-nx (`git ls-files -z`), an item is its repo-relative path.
 A file is certified iff ALL hold:
   1. exactly one root contains it (a root is a directory prefix or one exact file path; roots do not nest);
@@ -1434,23 +1425,17 @@ and compares the tracked files it opened with subject + references (verify/oracl
 ## verify/gate_pure.py
 
 ```text
-Gate "pure" (fnvnx-gate/1): every Python file a build stage can run is accepted by puregate.
-    python3 -I gate_pure.py        run in the checkout root, env GATE_OUT (result dir); writes GATE_OUT/pure.json
-Universe: the import closure, by puregate's own project-import resolution, of the STAGE ENTRY POINTS: (i) the `tool` scripts of the
-`generated` steps of every recipe (build.json) of an admitted root, and (ii) the `entry` list of every admitted tool root
-(verify/admit.json; required for class tool, may be empty). An item is a repo-relative .py path. A file reachable only from gate
-drivers (scripts the verdict runs on the host) is outside the universe: it is not a stage, and it may read the host. Files below a
-directory named `tests` are outside it unless a stage imports them.
-Certified: items with zero puregate violations that import no HOST-READER module. Each admitted root that names gate "pure" is
-checked in its own puregate run: project imports resolve below the importing file's directory, the root's directories (`trees`) or their
-parents, or the parent directory of a root it DECLARES in admit.json `imports`. An import of a module of another root that is not declared is
-`import-unlisted` (red); a declared-import cycle, an unknown or repeated import is an error of admit.json (red). HOST-READER modules:
-every file below ports/fnv-nx/verify or ports/fnv-nx/farm (the sandbox, the recipe, the gate drivers, the farm scripts legitimately read
-the host: clock, processes, directory listings; their correctness is the business of the "selftests" gate); a universe file that
-imports one is uncertified, and so is a file that imports one that imports it (those are in the universe, so each is judged itself:
-a module that imports recipe or gate_build lies in verify/ or is red). An entry point or a reached file that is not in a root
-naming gate "pure" is uncertified (nothing judged it).
-uncertified: the first 50 uncertified paths, sorted. Zero items: green, universe 0, said in "detail". Exit 0 iff the result is green.
+Gate "pure" (fnvnx-gate/1): every Python file of the stage-tool directories is accepted by puregate.
+    python3 -I gate_pure.py DIR...        run in the checkout root, env GATE_OUT (result dir); writes GATE_OUT/pure.json
+Universe: the items puregate checks below the existing DIRs given (a missing DIR contributes nothing): every .py file, and
+every shell file (a shell file is an item and is never certified: `shell-unanalysable`). An item is a repo-relative path.
+Certified: items with zero puregate violations. All DIRs are checked in ONE puregate run, so project imports resolve across them.
+uncertified: the first 50 uncertified paths, sorted. Zero items: green, universe 0 (nothing to certify yet), said in "detail".
+The universe is the STAGE-TOOL directories only (contract link rules lift). verify/ and farm/ are NOT stage tools: the
+sandbox, the tracer and the farm scripts legitimately read the host (clock, processes, directory listings), so they are
+outside this gate; their correctness is the business of the "selftests" gate. Files below a directory named `tests` are test
+code, not stage tools: they are outside the universe too (the "selftests" gate runs them; they may use temp directories).
+Exit 0 iff the result is green.
 ```
 
 ## verify/gate_tests.py
@@ -1739,11 +1724,11 @@ This is a verifier (after-merge, farm/runner.sh job `oraclecheck`), not a gate: 
 ```text
 puregate: DEFAULT-DENY static gate for rule R12-T (a build stage's output is a function of its declared inputs).
 
-    python3 -I puregate.py check PATH... [--base DIR]... [--lib PATH]... [--json OUT.json]      exit 0 clean, 2 violations, 1 usage error
+    python3 -I puregate.py check PATH... [--json OUT.json]      exit 0 clean, 2 violations, 1 usage error
     python3 -I puregate.py audit-stdlib                          check the PURE table (A-stdlib): a report, not a gate
 
 PATH: .py file or directory (sorted walk); shell files (suffix .sh/.bash or shell shebang): `shell-unanalysable`. Output
-`file:line: RULE symbol`, at most 200 lines (JSON: all, and `imports`: file -> project files). Policy tables: puregate_policy.py (data only; rule classes there).
+`file:line: RULE symbol`, at most 200 lines (JSON: all). Policy tables: puregate_policy.py (data only; rule classes there).
 "Accepted" means: no Python code in the checked files can read an undeclared channel (clock, entropy, host identity,
 directory/set order, file times/inodes), UNDER THE ASSUMPTIONS below. Anything not analysable is a violation, never a pass.
 Names resolve through import bindings with Python scoping; a name bound by an import and by anything else in one scope is
@@ -1752,8 +1737,7 @@ Rules: the class rules of POLICY/ATTR (clock inode entropy unsorted-listing host
   import-unlisted  every import must be (a) PURE stdlib, (b) RESTRICTED stdlib (only allow-listed members, else the rule
                    of the member or `member-unlisted`), (c) PROJECT, (d) EXTERNAL (A-ext), or a banned module whose uses
                    are ruled. Project rule: `import a.b` / `from a.b import x` resolves a/b.py or a/b/__init__.py below
-                   the importing file's directory, a directory PATH or a `--base` DIR (`--lib` PATHs add files that may be
-                   resolved without checking them); `from .m import x` below the importing file's
+                   the importing file's directory or a directory PATH; `from .m import x` below the importing file's
                    directory (one level up per extra dot); `x` must be a submodule or (module a real file) a name in it.
                    The file must be among the checked files (a namespace directory counts only for submodules); a
                    checked file with the name of a listed module is ambiguous. Project modules are checked in the same

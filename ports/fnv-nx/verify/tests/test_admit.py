@@ -21,7 +21,7 @@ def adm(*roots):
     return {"format": "fnvnx-admit/1", "roots": [dict(r) for r in roots]}
 
 
-tool = {"path": T + "/verify", "class": "tool", "gates": ["selftests"], "entry": []}
+tool = {"path": T + "/verify", "class": "tool", "gates": ["selftests"]}
 doc = {"path": T + "/docs", "class": "doc", "gates": []}
 files = [T + "/verify/a.py", T + "/docs/x.md"]
 yes = lambda p: True  # noqa: E731

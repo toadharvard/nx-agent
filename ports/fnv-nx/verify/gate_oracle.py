@@ -49,7 +49,6 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
-import gate_admit  # noqa: E402
 import gate_tests  # noqa: E402
 
 TREE = "ports/fnv-nx"
@@ -116,7 +115,7 @@ def closure(subject, tracked, read):
 
 def root_of(path, roots):
     for r in roots:
-        if any(path == t or path.startswith(t + "/") for t in gate_admit.trees(r)):
+        if path == r["path"] or path.startswith(r["path"] + "/"):
             return r
     return None
 
