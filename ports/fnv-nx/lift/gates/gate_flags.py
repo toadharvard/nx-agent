@@ -274,6 +274,19 @@ def _tstep(i, row, regs, stack, ft):
     return regs, stack, (0 if keep == 0 else ft), False
 
 
+# LEMMA (equal-bit invariance; the identity rule is exactly its premises, nothing else).
+#   Let a = A | (v<<k) and b = B | (v<<k) with bit k of A and of B equal to 0 and v in {0,1} the SAME symbol. Then a - b = A - B (mod 2^n), and CF, ZF, SF, OF,
+#   PF and AF of `cmp a, b` / `sub a, b` do not depend on v.
+#   Proof. Subtract bitwise with borrow. Below bit k the two runs agree (the same A, B bits). At bit k the difference bit is v - v - bin = bin (mod 2) and the
+#   borrow out is bin for v = 0 (0-0-bin) and for v = 1 (1-1-bin): both equal bin, the borrow in, so neither value nor borrow out of bit k depends on v. Above
+#   bit k the operands are A's and B's own bits, so the rest of the subtraction is that of A - B. Hence the n result bits, the final borrow (CF), and from them
+#   ZF, SF, OF, PF (low byte), AF (borrow out of bit 3, or bin of bit 4 when k = 3, covered by the same two-case argument) are functions of A and B only. QED.
+#   Premises, checked from the flow and not from mnemonics: (1) one source definition of v (the tainted-bit set holds one source site; the source re-executing
+#   with the taint alive is `dirty`); (2) every transfer between the source and the compare is bit-preserving at k (copy / push / pop / pushf / popf of whole
+#   words, mov at equal bit offset, and/or/xor with an immediate that does not flip a masked bit: _is_copy); (3) both compared registers carry the bit at the
+#   same offset (equal nonzero masks). Anything outside (shifts, not, reg-reg ops, a flag computed from the masked value, a second execution of the source) is
+#   `dirty`: the compare then reads the bit and stays red until the product-program proof (z3 over the Forms' to_smt) replaces this lemma, of which it is a
+#   special case.
 COPY_ID = (X.X86_INS_PUSH, X.X86_INS_POP, X.X86_INS_PUSHF, X.X86_INS_PUSHFD, X.X86_INS_POPF, X.X86_INS_POPFD)
 
 
