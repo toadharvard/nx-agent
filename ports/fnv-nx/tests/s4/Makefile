@@ -52,7 +52,7 @@ OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
 # a call goes through the boundary, a direct call does not compile); the tests are "the game" and keep plain pointers.
 $(filter $(OUT)/platform/%.cpp.o $(OUT)/platform_host/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 
-.PHONY: regsites-check all test vclock probe private ilp32 m32 iat device qemu clean gfn-nocompile hostapi-check dynsites-check
+.PHONY: fontnames-check regsites-check all test vclock probe private ilp32 m32 iat device qemu clean gfn-nocompile hostapi-check dynsites-check
 all: test
 
 $(OUT)/%.c.o: $(ROOT)/%.c
@@ -182,9 +182,14 @@ dynsites-check: probe
 	python3 -I $(ROOT)/platform/manifest/check_dynsites.py $(DYNSITES) --root $(ROOT)
 
 # the registry-site extractor and the seed generator on synthetic input (no exe-derived file needed)
+# every font file the declared registry export names exists in the declared set (platform/manifest/check_fontnames.py); run on the declared externals
+fontnames-check:
+	python3 -I $(ROOT)/platform/manifest/check_fontnames.py $(FNVNX_FONT_REF)/wine-fonts/usr/share/wine/fonts $(FNVNX_FONT_HOST) $(FNVNX_FONT_REF)/reg
+
 regsites-check:
 	python3 -I $(ROOT)/platform/manifest/check_regsites.py
 	python3 -I $(ROOT)/platform/manifest/check_filesites.py
+	python3 -I $(ROOT)/platform/manifest/check_fontnames.py --selftest
 	python3 -I $(ROOT)/platform/manifest/check_macrodefs.py
 	python3 -I $(ROOT)/platform/manifest/check_gen_registry.py
 	python3 -I $(ROOT)/platform/manifest/check_gen_prefs.py

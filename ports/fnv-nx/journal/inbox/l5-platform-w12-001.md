@@ -61,3 +61,15 @@ constant writer, unbound writer, unaccounted pointer, multiple-inheritance offse
 - Open: gdifont.cpp add_font_file(.., listed=false): files NAMED by the declared registry export (vgasys.fon, vgafix.fon, coure.fon, ...) that the wine dir lacks are skipped (Wine 9.0
   load_registry_fonts / load_system_bitmap_fonts skip them). My local reference lacks them. Class-closing proposal: a build-time check that every .fon the exported hive names exists in the
   declared set (w10's reference), instead of a run-time exit.
+
+## fontnames gate (branch claude/fnv-l5-platform-w12-fongate)
+- platform/manifest/check_fontnames.py: every font file named by the declared registry export (NT\CurrentVersion\Fonts, CurrentVersion\Fonts, hardware-profile Fonts, FontSubstitutes data
+  that is a font file) must exist in the declared wine/host font dirs (Z:\usr\share\wine\fonts -> wine dir, Z:\usr\share\fonts -> host dir, other paths unplaceable). Selftest on synthetic
+  input in `make regsites-check`; the real run is `make fontnames-check` (FNVNX_FONT_REF/HOST). The product skips nothing.
+- Result on tools/fonts fcf99a12 (prefix/wine-fonts, prefix/reg) with the host dir = the mirror's liberation set: 118 files named, 95 missing.
+  * wine dir, 2: serife.fon, vgaoem.fon (the Ubuntu fonts-wine 9.0~repack-4build3 package of the reference, 63 files, does not have them; so on the reference itself Wine skips them).
+  * host dir, 93: opentype/inter 36, truetype/jetbrains-mono 16, freefont 12, dejavu 8, crosextra 8, unifont 5, tlwg 4, ipafont-gothic 2, wqy 1, libreoffice 1.
+    The reference prefix was exported on a machine with those font packages (fc-list.txt lists them); the mirror holds only fonts-liberation under the host set.
+  The gap to close in the mirror: either add those host font files (from the Ubuntu 24.04 packages fonts-inter, fonts-jetbrains-mono, fonts-freefont-ttf, fonts-dejavu-core,
+  fonts-crosextra-caladea/carlito, fonts-unifont, fonts-tlwg-*, fonts-ipafont-gothic, fonts-wqy-zenhei, fonts-opensymbol) or export the registry from a prefix whose machine has only the declared host set.
+  Full list: the script's output on those inputs.
