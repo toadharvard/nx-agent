@@ -14,8 +14,10 @@ a line marker (`# N "path"`) whose file name is hostapi.h. A used FNVNX_PLAT_ ma
 the header's, is a red item as well (the unit saw another header).
 Universe: one item per declared service number of each root that includes hostapi.h, plus one per undeclared use. Certified: declared and
 used. No product root, or none that includes hostapi.h: universe 0, green, no exception list (gate_build.quantify).
-Wrapper rule: a PREFIX identifier in the header outside a `#define PREFIX_X <integer>` directive (wrapper function, macro-defined function) is a red
-item, so that "expanded by a unit" means a call site of the unit and nothing the header itself expands.
+Wrapper rule (class): a PREFIX identifier may appear only in the `#define PREFIX_X <integer>` lines of hostapi.h and in unit files (.c/.cc/.cpp/.S)
+of the root; any other file that can be #included (non-unit files under the root, the recipe's include directories, external include trees) that names
+one is a red item ("wrapper use"), and so is a non-define use in hostapi.h. So "expanded by a unit" means a call site of a unit and nothing a header
+expands, and the -dU position of a define does not matter.
 Limit (stated, not hidden): a use inside a function that no code reaches still counts; reachability is the job of the gates reach / reachlink.
 The module ids (FNVNX_EXT_*) are not services and are not items: a module id names a host module, a service number names an entry of module 11,
 which is the only table of the header. Models of machines below the product boundary (deko3d, libnx, kernel) are modules, not services."""
@@ -28,6 +30,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gate_build  # noqa: E402
 import recipe  # noqa: E402
+import cas  # noqa: E402
 import unitstage  # noqa: E402
 
 PREFIX = "FNVNX_PLAT_"
@@ -83,6 +86,31 @@ def wrapper_uses(text):
     return out
 
 
+def foreign_uses(repo, rec, root, store):
+    """-> [str] of files of an admitted root that may be #included and name a PREFIX service. RULE (class closed): a PREFIX identifier may appear
+    only (a) in the `#define PREFIX_X <integer>` lines of hostapi.h and (b) in unit files (recipe.is_unit) of the root. Scanned: every tracked
+    non-unit file under the root and under each repo include directory of the recipe, and every non-unit file of an external tree that
+    holds an include directory of the recipe (cas listing of its tree_sha256 in the store). A header that expands a service macro in a body
+    (shim, static inline wrapper) is red, so the -dU evidence is exactly the call sites of units."""
+    bad, key = [], PREFIX.encode()
+    dirs = [d for d in rec.get("include", [])]
+    for f in recipe.tracked(repo):
+        if recipe.is_unit(f) or not (recipe.under(f, root) or any(recipe.under(f, d) for d in dirs)):
+            continue
+        t = open(os.path.join(repo, f), "rb").read()
+        if key in t and (os.path.basename(f) != HEADER or wrapper_uses(t.decode("utf-8", "replace"))):
+            bad.append("wrapper use in %s" % f)
+    for e in rec.get("external", []):
+        if not any(recipe.under(d, e["at"]) for d in dirs):
+            continue
+        for rel, ent in cas.listing(e["tree_sha256"], store):
+            if ent["t"] == "f" and not recipe.is_unit(rel):
+                t = open(cas._obj(store, ent), "rb").read()
+                if key in t and (os.path.basename(rel) != HEADER or wrapper_uses(t.decode("utf-8", "replace"))):
+                    bad.append("wrapper use in %s:%s" % (e["name"], rel))
+    return sorted(set(bad))
+
+
 def includes_header(ii_text):
     """True iff the preprocessed text has a line marker for a file named hostapi.h"""
     for line in ii_text.splitlines():
@@ -129,6 +157,7 @@ def root_judge(root, repo, cache, header):
         return 0, 0, [], "does not include %s" % HEADER
     u, c, ids = judge(declared(header), used(iis))
     w = ["wrapper use %s line %d" % (n, l) for l, n in wrapper_uses(header)]
+    w += foreign_uses(repo, recipe.load_recipe(repo, recipe.load_admit(repo), root), root, store)
     u, ids = u + len(w), ids + w
     return u, c, [root + ":" + i for i in ids], "; ".join(ids)[:300]
 

@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import shutil
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -88,6 +89,24 @@ for p_ in g.DEFAULT_HEADERS:
         real = open(q).read()
         break
 check("(i) the real header has no wrapper use", real is not None and g.wrapper_uses(real) == [], g.wrapper_uses(real or ""))
+# (i) class rule: a FNVNX_PLAT_ identifier only in hostapi.h's #define lines and in unit files of the root; a shim-style header is red
+import subprocess as _sp
+_repo = tempfile.mkdtemp(prefix="gh-repo-")
+_r = "ports/fnv-nx/root"
+for rel, txt in {_r + "/main.cc": "int f(){return FNVNX_PLAT_A;}\n", _r + "/inc/hostapi.h": "#define FNVNX_PLAT_A 1u\n",
+                 _r + "/inc/shim.h": "static inline int w(void){return FNVNX_PLAT_A;}\n", _r + "/inc/ok.h": "int ok(void);\n"}.items():
+    os.makedirs(os.path.dirname(os.path.join(_repo, rel)), exist_ok=True)
+    open(os.path.join(_repo, rel), "w").write(txt)
+_sp.run(["git", "init", "-q", _repo], check=True)
+_sp.run(["git", "-C", _repo, "add", "-A"], check=True)
+_rec = {"include": [_r + "/inc"]}
+check("(i) a shim-style header with an inline wrapper is red; the unit's own use, hostapi.h's define and an unrelated header are not",
+      g.foreign_uses(_repo, _rec, _r, "/nonexistent") == ["wrapper use in %s/inc/shim.h" % _r], g.foreign_uses(_repo, _rec, _r, "/nonexistent"))
+open(os.path.join(_repo, _r, "inc/hostapi.h"), "w").write("#define FNVNX_PLAT_A 1u\nstatic inline int h(void){return FNVNX_PLAT_A;}\n")
+_sp.run(["git", "-C", _repo, "add", "-A"], check=True)
+check("(i) a body in hostapi.h itself is red", "wrapper use in %s/inc/hostapi.h" % _r in g.foreign_uses(_repo, _rec, _r, "/nonexistent"))
+shutil.rmtree(_repo, ignore_errors=True)
+
 # (ii) no range marker aliases a service; the 13 socket services are declared (the platform's sock_guest.c calls each of them)
 if real is not None:
     dr = g.declared(real)
