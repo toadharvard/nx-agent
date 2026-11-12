@@ -56,6 +56,13 @@ def main():
     noabi = copy.deepcopy(doc)
     noabi["argv"] = [a for a in noabi["argv"] if a != "-mabi=ilp32"]
     check("unit without -mabi=ilp32 is red", gd.unit_why("a.cc", noabi, True, pin) == ["argv lacks -mabi=ilp32"], gd.unit_why("a.cc", noabi, True, pin))
+    noo = copy.deepcopy(doc)
+    noo["argv"] = [x for x in noo["argv"] if x not in pin["flags"]["required"]]
+    check("unit without -mno-outline-atomics is red", gd.unit_why("a.cc", noo, True, pin) == ["argv lacks -mno-outline-atomics"], gd.unit_why("a.cc", noo, True, pin))
+    check("a C unit without it is red too", gd.unit_why("a.c", noo, True, pin) == ["argv lacks -mno-outline-atomics"], gd.unit_why("a.c", noo, True, pin))
+    yes = copy.deepcopy(doc)
+    yes["argv"].append("-moutline-atomics")
+    check("unit with -moutline-atomics is red", gd.unit_why("a.cc", yes, True, pin) == ["argv holds -moutline-atomics"], gd.unit_why("a.cc", yes, True, pin))
     check("unit without a CC document is red", gd.unit_why("a.cc", None, True, pin) == ["no CC stage document"])
     # the real compiler: green
     g = tg.guest_repo("d4", rec, pin, files={ROOT + "/b.cc": "int b() { return 2; }\n"})

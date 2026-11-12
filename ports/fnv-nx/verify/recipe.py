@@ -206,6 +206,13 @@ def guest_errors(rec, root, roots, pin):
     fl = rec.get("flags") if isinstance(rec.get("flags"), dict) else {}
     # an attribute that neither the compiler nor a loaded plugin registers is otherwise dropped with a warning: a marker a rule relies on vanishes
     bad += ["flags.%s lacks %s" % (k, WERROR_ATTR) for k in ("c", "cxx") if WERROR_ATTR not in (fl.get(k) if isinstance(fl.get(k), list) else [])]
+    # flags.required of the pin (-mno-outline-atomics: the declared CPU has no LSE and the outline helpers need getauxval, which Horizon lacks) are in flags.c and
+    # flags.cxx of every guest root, and a flag of flags.forbidden (-moutline-atomics) is in none of c, cxx, asm
+    pf = pin.get("flags") if isinstance(pin.get("flags"), dict) else {}
+    bad += ["flags.%s lacks %s (required by the guest compiler pin)" % (k, r) for k in ("c", "cxx") for r in pf.get("required", [])
+            if r not in (fl.get(k) if isinstance(fl.get(k), list) else [])]
+    bad += ["flags.%s holds %s (forbidden by the guest compiler pin)" % (k, f) for k in ("c", "cxx", "asm") for f in pf.get("forbidden", [])
+            if f in (fl.get(k) if isinstance(fl.get(k), list) else [])]
     # a flag that downgrades an error to a warning (or silences it) lets a diagnostic a rule relies on vanish
     bad += ["flags.%s: %s downgrades an error (forbidden)" % (k, f) for k in ("c", "cxx", "asm") for f in (fl.get(k) if isinstance(fl.get(k), list) else [])
             if isinstance(f, str) and (f in ("-fpermissive", "-w", "-Wno-error") or f.startswith("-Wno-error="))]

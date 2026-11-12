@@ -16,10 +16,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import test_plugins as tp
 from test_plugins import BASE, ROOT, T, REC, PLUGS, SRC, check, git, w, make_repo, errs, build, disasm, mut, recipe, cas, REAL, VERIFY
 
+# the flags the guest compiler pin requires of every guest root (its own file, the one source)
+REQ = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))["flags"]["required"]
+
+
 def guest_rec(ext, **kw):
     r = mut(compiler={"external": "gcc-msvcmodel", "cc": "bin/aarch64-linux-gnu-gcc", "cxx": "bin/aarch64-linux-gnu-g++"}, external=[ext], **kw)
     if "flags" not in kw:   # every guest root carries -Werror=attributes in flags.c and flags.cxx
-        r["flags"] = dict(r["flags"], **{k: list(r["flags"][k]) + [recipe.WERROR_ATTR] for k in ("c", "cxx")})
+        r["flags"] = dict(r["flags"], **{k: list(r["flags"][k]) + [recipe.WERROR_ATTR] + REQ for k in ("c", "cxx")})
     return r
 
 
@@ -101,6 +105,16 @@ def main():
     src = SRC + "void sz(decltype(sizeof 0) n) { (void)n; }\n"
     gr = guest_repo("gb", rec, pin, files={ROOT + "/a.cc": src})
     check("guest root with the real pin is valid", errs(gr, rec) == [], errs(gr, rec))
+    check("the pin requires -mno-outline-atomics", "-mno-outline-atomics" in REQ, REQ)
+    for k in ("c", "cxx"):
+        nr = guest_rec(ext)
+        nr["flags"][k] = [f for f in nr["flags"][k] if f not in REQ]
+        check("guest root without %s in flags.%s is invalid" % (REQ, k), any("flags.%s lacks -mno-outline-atomics" % k in x for x in errs(gr, nr)), errs(gr, nr))
+    for k in ("c", "cxx", "asm"):
+        ov = guest_rec(ext)
+        ov["flags"][k] = ov["flags"][k] + ["-moutline-atomics"]
+        check("guest root with -moutline-atomics in flags.%s is invalid (overrides the required flag)" % k, any("flags.%s holds -moutline-atomics" % k in x for x in errs(gr, ov)), errs(gr, ov))
+
     ra, ta = build(gr, "GA")
     check("guest root builds on the external compiler", ra["status"] == "green", ra.get("failure"))
     if ra["status"] != "green":

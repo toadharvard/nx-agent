@@ -28,6 +28,9 @@ its objects (relocatable) and of its linked ELF, never a name's text. Rules:
       the root links no ELF), and two listed symbols with DIFFERENT body ids may not share one address (`contract-alias`: an alias stub
       that serves two contracts with one body). Two names with the same body id on one address are fine. A symbol listed twice with
       two body ids is `contract-duplicate`. Without the key rule (c) has universe 0 for that root.
+  (e) No guest object references a libgcc outline-atomics helper (__aarch64_{cas,swp,ldadd,ldclr,ldeor,ldset}<bytes>_<memory model>): the helpers
+      choose LSE or LL/SC through getauxval, which Horizon lacks, and the declared CPU (Cortex-A57) has no LSE, so guest roots build with
+      -mno-outline-atomics (guest_compiler.json "flags"."required", checked by recipe and gate datamodel). Finding `outline-atomic`, per reference.
   (d) The host boundary (a root with "target": "host" in admit.json). A reference no object defines is certified iff its object belongs to
       a host root and its name is EXPORTED by the pinned host runtime: the defined GLOBAL/WEAK `.dynsym` names of the shared objects that
       dpkg lists for libc6, libgcc-s1 and libstdc++6 (verify/env.json pins their versions; envcheck checks them), a fact computed by
@@ -43,6 +46,7 @@ Rule (c) groups by address: a body reached through two names of one address with
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import sys
@@ -150,6 +154,7 @@ def elf_comdat(path):
     return member, groups
 
 
+OUTLINE = re.compile(r"__aarch64_(cas|swp|ldadd|ldclr|ldeor|ldset)[0-9]+_(relax|acq|rel|acq_rel|sync)")   # libgcc's outline-atomics ABI: __aarch64_<op><bytes>_<memory model>
 HOST_RUNTIME_PKGS = ("libc6", "libgcc-s1", "libstdc++6")   # packages of verify/env.json whose shared objects are the host boundary (envcheck pins them)
 
 
@@ -194,9 +199,10 @@ def host_exports(cache):
     return names, key
 
 
-def judge(objs, elfs, tables, comdat=None, host=None):
+def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
     """OBJS {object id: [symbol tuples]}; ELFS {elf id: symbols or None}; TABLES {(root id, elf id or None): [(symbol, body id)]};
     COMDAT {object id: (member, groups)} as elf_comdat (an object missing from it has no COMDAT group)
+    GUEST ["<root>/"] prefixes of guest roots: rule (e)
     HOST (host root prefixes ["<root>/"], exports {name}) or None: rule (d), the host boundary
     -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). Pure function of its arguments."""
     items, out, comdat = [], set(), comdat or {}
@@ -233,6 +239,9 @@ def judge(objs, elfs, tables, comdat=None, host=None):
                 out.add(("<defs>", name, kind, "defined in %s" % ", ".join(sorted({d[0] for d in ds}))[:200]))
     for oid, name in refs:
         items.append((oid, name))
+        if OUTLINE.fullmatch(name) and any(oid.startswith(p) for p in guest):
+            out.add((oid, name, "outline-atomic", "a guest object references a libgcc outline-atomics helper (needs getauxval; build with -mno-outline-atomics)"))
+            continue
         if name not in defs:
             if host and name in host[1] and any(oid.startswith(p) for p in host[0]):
                 pass   # (d): an import of a host-target root, exported by the pinned host runtime
@@ -281,10 +290,11 @@ def main():
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-linkstrict-")
     cache, repo = os.environ.get("GATE_CACHE") or tmp, "."
     items, finds, why, objs, elfs, tables, roots, comdat = [], [], "", {}, {}, {}, gate_build.product_roots(repo), {}
-    host = None
+    host, guest = None, []
     try:
         hroots = [r + "/" for r, e in recipe.load_admit(repo).items() if e.get("class") == "product" and e.get("target") == "host"]
         host = (hroots, set(host_exports(cache)[0])) if hroots else None
+        guest = [r + "/" for r, e in recipe.load_admit(repo).items() if e.get("class") == "product" and e.get("target") == "guest"]
         for root in roots:
             res, _ = gate_build.ensure(root, cache, repo)
             if res["status"] == "red":
@@ -309,7 +319,7 @@ def main():
     finally:
         if tmp and not os.environ.get("GATE_KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)
-    its, fs = judge(objs, elfs, tables, comdat, host)
+    its, fs = judge(objs, elfs, tables, comdat, host, guest)
     items, finds = items + its, finds + fs
     bad = {(o, s) for o, s, _, _ in finds}
     cert = len([it for it in items if it not in bad])

@@ -27,6 +27,12 @@
       "-ffp-contract=off",
       "-DFNVNX_SDD=1",
       "-fno-devirtualize"
+    ],
+    "required": [
+      "-mno-outline-atomics"
+    ],
+    "forbidden": [
+      "-moutline-atomics"
     ]
   },
   "provenance": {

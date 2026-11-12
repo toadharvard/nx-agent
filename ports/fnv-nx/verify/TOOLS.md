@@ -1347,7 +1347,8 @@ found by the keys objects.json lists, the document whose "stage" is `cc:<unit>`)
   compiler item: the build is green, the root's recipe compiler is the external of verify/guest_compiler.json (recipe.guest_errors: name,
     repo, ref, commit, tree_sha256, at, driver paths), and every CC document mounts at the pin's `at` the pin's tree_sha256 and starts
     with the pin's driver (the object was built by that tree, not by a name).
-  unit item, all of: a CC stage document exists for the unit; its argv holds -mabi=ilp32; for a C++ unit of a native root also every flag of
+  unit item, all of: a CC stage document exists for the unit; its argv holds -mabi=ilp32; a C or C++ unit's argv holds every flag of the pin's
+    "flags"."required" (-mno-outline-atomics) and none of "flags"."forbidden" (-moutline-atomics); for a C++ unit of a native root also
     every flag of the pin's "flags"."semantics" (guest_compiler.json, the one source recipe.SEMANTICS_FLAGS reads) and, for every plugin of recipe.GUEST_CXX_PLUGINS, the declared input /plug/<name> (a tree holding <name>.so) and the
     argv flag -fplugin=/plug/<name>/<name>.so. A C++ unit of a lifted root needs no plugin (RECIPE.md: the lifter emits the order itself).
     The documents are the stage keys, so the object is the one these flags and inputs built.
