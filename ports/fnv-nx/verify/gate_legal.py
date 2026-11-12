@@ -77,6 +77,21 @@ def with_decoration_cut(names):
     return {n for n in out if n}
 
 
+def qualified(name):
+    """A demangled C++ name without its parameter list and trailing qualifiers: the last top-level balanced `(...)` group is cut."""
+    n = name.strip()
+    while n.endswith((" const", " volatile")):
+        n = n.rsplit(" ", 1)[0]
+    if not n.endswith(")"):
+        return n
+    depth = 0
+    for i in range(len(n) - 1, -1, -1):
+        depth += (n[i] == ")") - (n[i] == "(")
+        if depth == 0:
+            return n[:i].strip()
+    return n
+
+
 def public_sources(ext, doc):
     """-> ({source id: set of names}) : 1 = exports of the redist dlls, 2 = dynamic symbols of the pinned toolchain libraries."""
     s1, s2 = set(), set()
@@ -89,14 +104,23 @@ def public_sources(ext, doc):
                     s1 |= {k for k, *_ in pe.exports() if not k.startswith("#")}
                 except (modules.StageError, struct.error, ValueError):
                     pass
-    lib = "/usr/aarch64-linux-gnu/lib"
-    for f in sorted(os.listdir(lib)) if os.path.isdir(lib) else []:
-        if ".so" in f and os.path.isfile(os.path.join(lib, f)) and not os.path.islink(os.path.join(lib, f)):
-            r = subprocess.run(["aarch64-linux-gnu-nm", "-D", "--defined-only", os.path.join(lib, f)], capture_output=True, text=True)
-            raw = {ln.split()[-1].split("@")[0] for ln in r.stdout.splitlines() if ln.split()}
-            s2 |= raw
-            if raw:
-                s2 |= {x for x in subprocess.run(["c++filt"], input="\n".join(sorted(raw)), capture_output=True, text=True).stdout.splitlines()}
+    files = []
+    for lib in ("/usr/aarch64-linux-gnu/lib", "/usr/lib/gcc-cross/aarch64-linux-gnu/13"):
+        for f in sorted(os.listdir(lib)) if os.path.isdir(lib) else []:
+            fp = os.path.join(lib, f)
+            if os.path.isfile(fp) and not os.path.islink(fp) and (".so" in f or f.endswith((".a", ".o"))):
+                files.append(fp)
+    raw = set()
+    for fp in files:          # every symbol the pinned toolchain objects define or reference (archives, crt*.o, shared libraries)
+        dyn = ["-D"] if ".so" in os.path.basename(fp) else []
+        r = subprocess.run(["aarch64-linux-gnu-nm"] + dyn + [fp], capture_output=True, text=True)
+        for ln in r.stdout.splitlines():
+            w = ln.split()
+            if w and not ln.rstrip().endswith(":") and len(w) >= 2:
+                raw.add(w[-1].split("@")[0])
+    s2 |= raw
+    dem = subprocess.run(["c++filt"], input="\n".join(sorted(raw)), capture_output=True, text=True).stdout.splitlines()
+    s2 |= {qualified(x) for x in dem}
     return {1: s1, 2: s2}
 
 
@@ -108,7 +132,7 @@ def source_of(tok, pub):
     cands = [tok, re.sub(r"@\d+$", "", tok[1:] if tok.startswith("_") else tok)]
     if tok.startswith("?"):
         r = subprocess.run(UNDNAME + [tok], capture_output=True, text=True)
-        cands += [ln.strip() for ln in r.stdout.splitlines() if ln.strip() and ln.strip() != tok]
+        cands += [qualified(ln) for ln in r.stdout.splitlines() if ln.strip() and ln.strip() != tok]
     for sid in (1, 2):
         if any(c in pub[sid] for c in cands):
             return sid
