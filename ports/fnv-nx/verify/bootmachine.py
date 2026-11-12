@@ -764,7 +764,7 @@ class Machine:
 
     def _plat_display_docked(self, a):
         """FNVNX_PLAT_DISPLAY_DOCKED: 1 docked, 0 handheld, from the machine's profile"""
-        return 1 if self.profile == "docked" else 0
+        return self.services.input.docked(self, self.profile == "docked")
 
     # -- memory sections, module 11 fn 11..14 (rule 5d)
     def _sec_refuse(self, what, addr, size, why, code):

@@ -123,6 +123,55 @@ static uint64_t sec_worker(uint64_t arg) {
 __attribute__((noinline, used, section(".text.fnvl"))) uint32_t fnvboot_a(uint32_t x) { __asm__ volatile("" ::: "memory"); return x - x; }
 __attribute__((noinline, used, section(".text.fnvl"))) uint32_t fnvboot_b(uint32_t x) { __asm__ volatile("" ::: "memory"); return (x | 1) & 1; }
 __attribute__((noinline, used, section(".text.fnvl"))) uint32_t fnvboot_c(uint32_t x) { __asm__ volatile("" ::: "memory"); return x ^ x; }
+/* R-INPUT guests (MODE 90/91): the host input slots called through hostapi.h; the declared device states come from the run's scenario. */
+typedef struct { uint32_t connected, pad_; uint64_t buttons; int32_t lx, ly, rx, ry; } PadRaw;
+static void until_ms(uint64_t ms) {   /* sleep so that the virtual clock is at ms (the clock only moves by sleeps and tick reads) */
+    uint64_t now = fnvnx_hcall0(H->system_tick) * 1000000000ull / fnvnx_hcall0(H->system_tick_freq);
+    if (now < ms * 1000000ull) H2(H->sleep_ns, ms * 1000000ull - now, 0);
+}
+static char *hx(char *p, uint32_t v) {
+    char t[8]; uint32_t k = 0;
+    do { t[k++] = "0123456789abcdef"[v & 15]; v >>= 4; } while (v);
+    while (k) *p++ = t[--k];
+    return p;
+}
+static void evs(const char *name, const FnvnxInputEvent *e, uint64_t n) {   /* name=count, then name.i=type.code.a.b.c */
+    num(name, n);
+    for (uint64_t i = 0; i < n && i < 20; i++) {
+        char b[96], *p = b;
+        for (const char *q = name; *q; q++) *p++ = *q;
+        *p++ = '.'; p = hx(p, (uint32_t)i); *p++ = '=';
+        p = hx(p, e[i].type); *p++ = '.'; p = hx(p, e[i].code); *p++ = '.'; p = hx(p, (uint32_t)e[i].a); *p++ = '.';
+        p = hx(p, (uint32_t)e[i].b); *p++ = '.'; p = hx(p, (uint32_t)e[i].c); *p++ = '\n'; *p = 0;
+        say(b);
+    }
+}
+static FnvnxInputEvent evb[20];
+static void poll(const char *name, uint64_t cap) {
+    for (uint32_t i = 0; i < sizeof evb; i++) ((volatile uint8_t *)evb)[i] = 0xAA;
+    uint64_t n = fnvnx_hcall2(H->input_poll, FNVNX_ADDR(evb), cap);
+    evs(name, evb, n);
+    char b[48], *p = b;
+    for (const char *q = name; *q; q++) *p++ = *q;
+    *p++ = '.'; *p++ = 't'; *p = 0;
+    num(b, ((volatile uint8_t *)evb)[n * 24]);   /* the first byte after the n events is untouched: aa */
+}
+static void padr(const char *name, uint64_t i) {
+    static PadRaw p;
+    for (uint32_t k = 0; k < sizeof p; k++) ((volatile uint8_t *)&p)[k] = 0xAA;
+    char b[32], *q = b;
+    for (const char *s = name; *s; s++) *q++ = *s;
+    *q = 0;
+    num(name, fnvnx_hcall2(H->pad_read, i, FNVNX_ADDR(&p)));
+    *q++ = '.'; *q++ = 'c'; *q = 0; num(b, p.connected);
+    b[q - b - 1] = 'p'; num(b, p.pad_);
+    b[q - b - 1] = 'l'; num(b, (uint32_t)p.buttons);
+    b[q - b - 1] = 'h'; num(b, (uint32_t)(p.buttons >> 32));
+    b[q - b - 1] = 'x'; num(b, (uint32_t)p.lx);
+    b[q - b - 1] = 'y'; num(b, (uint32_t)p.ly);
+    b[q - b - 1] = 'X'; num(b, (uint32_t)p.rx);
+    b[q - b - 1] = 'Y'; num(b, (uint32_t)p.ry);
+}
 uint64_t __fnvnx_guest_entry(uint64_t api) {
     relocate((uint32_t)(uintptr_t)__fnvnx_guest_start);
     fnvnx_host = (const FnvnxHostApi *)(uintptr_t)api;
@@ -186,6 +235,29 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("A", A);
     plat(5, A, 0x1000, 0, 2); plat(5, A + 0x1000, 0x1000, 0, 2); plat(5, A + 0x10000, 0x1000, 0, 2);
     plat(8, A + 0x10000, 0x1000, 1, 3);
+    fnvnx_hcall1(H->exit, 0);
+#elif MODE == 90
+    /* input_poll / pad_read / DISPLAY_DOCKED over the declared states; the scenario of test_bootmachine fixes the states, this fixes the read times */
+    until_ms(60);  padr("a-pad0", 0); poll("a-e60", 16); num("a-d60", plat(9, 0, 0, 0, 0));
+    until_ms(150); padr("b-pad0", 0); padr("b-pad1", 1); padr("b-pad3", 3); padr("b-pad4", 4); poll("b-e150", 16); poll("b-e151", 16);
+    until_ms(250); poll("c-e250", 16);
+    until_ms(290); poll("d-e290", 16);
+    until_ms(350); poll("d-e350", 16);
+    until_ms(450); poll("e-e450", 16); poll("e-e451", 16);
+    until_ms(550); poll("f-e550", 16);
+    until_ms(650); poll("g-e650", 16); poll("g-e651", 16);
+    until_ms(750); poll("h-e750", 16);
+    until_ms(850); num("j-d850", plat(9, 0, 0, 0, 0)); poll("j-e850", 2); poll("j-e851", 16); poll("j-e852", 0);
+    until_ms(950); num("k-d950", plat(9, 0, 0, 0, 0));
+    until_ms(1050); num("k-d1050", plat(9, 0, 0, 0, 0));
+    fnvnx_hcall1(H->exit, 0);
+#elif MODE == 91
+    /* pad_vibrate: recorded as events (index <= 3), index > 3 records nothing; pad_read with index > 3 writes nothing */
+    until_ms(100); num("v0", fnvnx_hcall3(H->pad_vibrate, 0, 0xdead00003f000000ull, 0xbeef000000000000ull));
+    until_ms(200); num("v2", fnvnx_hcall3(H->pad_vibrate, 2, 0x3f800000, 0x3e800000));
+    until_ms(300); num("v4", fnvnx_hcall3(H->pad_vibrate, 4, 0x3f800000, 0x3e800000));
+    num("vbig", fnvnx_hcall3(H->pad_vibrate, 0x100000000ull, 1, 2));
+    num("v3", fnvnx_hcall3(H->pad_vibrate, 3, 0x80000000, 0x7fc00000));
     fnvnx_hcall1(H->exit, 0);
 #elif MODE == 6
     uint32_t acc = fnvboot_a(3);
