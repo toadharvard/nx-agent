@@ -43,6 +43,23 @@
     "ports/fnv-nx/contract/bodysel.py"
    ]
   },
+  "test_callcensus.py": {
+   "references": [
+    {
+     "anchor": "### Call-site census of a platform function",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
+    },
+    {
+     "anchor": "## contract/callcensus.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/callcensus.py"
+   ]
+  },
   "test_gate_call_decl.py": {
    "references": [
     {

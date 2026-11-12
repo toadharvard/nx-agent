@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """callcensus - every call site of chosen functions over the image set, with reach from the exe entry and the value set of one argument (L1 CONTRACT).
 
-    callcensus.py --exe-facts facts.json --exe-entry 0xVA --images-file images.tsv --bridge bridge.tsv --modules-dir M
+    callcensus.py --exe-facts facts.json --exe-entry 0xVA --images-file images.tsv --bridge bridge.tsv --module name.dll=path
                   --fn dll!name:argc:srcarg ... [--gpa gpa_names.tsv] --out DIR
 
 For each --fn (an export of an image of the set, for example d3dx9_38.dll!D3DXAssembleShader:7:0): the uses of its slots in every image
@@ -11,8 +11,8 @@ GetProcAddress rows of --gpa that name it.  Per site: image, va, the function co
 reach  (the exe's own sites) `yes` iff the containing function is in the forward closure from the exe entry over the exe facts: direct
        calls, tail jumps, relocated code pointers of the function, the slots of the RTTI vftables it references, and the pointer
        tables it references (every code pointer of the same contiguous run of the pointer table).  This over-approximates the call
-       graph (an indirect call can only reach a function whose address is taken somewhere in the facts), so `no` is a proof of
-       unreachability and `yes` means "not excluded".  A site in another image: `inner` (reach decided by the calls into that image).
+       graph (an indirect call can only reach a function whose address is taken somewhere in the facts); the range entry that starts at the exe's entry point is a seed too, so `no` means unreachable over the facts (their
+       completeness is the facts' own gate) and `yes` means "not excluded".  A site in another image: `inner` (reach decided by the calls into that image).
 source the derived value set of argument srcarg (argflow.derive_arg): `const-string "text"`, `imm 0x..`, `pointer-from-flow` (a call result
        or a value of the caller's parameters: the leaf kinds are listed), `open` (a break: the reason).
 Output callcensus.tsv: image, va, call, function, reach, kind, source, note.  Exe-derived: container and fnv-nx-build only."""
@@ -27,6 +27,27 @@ import argflow
 import gpa_names
 import iat
 import modules
+
+
+def stabber(flat):
+    """va -> sorted entries whose ranges contain va: the same answer as argflow.Image.entries_containing, by bisect over the starts
+    (a range is scanned back at most the longest range length)."""
+    rs = sorted(flat)
+    starts = [r[0] for r in rs]
+    longest = max((b - a for a, b, e in rs), default=0)
+
+    def stab(va):
+        i = bisect.bisect_right(starts, va)
+        out = set()
+        while i > 0:
+            i -= 1
+            a, b, e = rs[i]
+            if a < va - longest:
+                break
+            if a <= va < b:
+                out.add(e)
+        return sorted(out)
+    return stab
 
 
 def closure(facts, entry, img=None):
@@ -47,15 +68,19 @@ def closure(facts, entry, img=None):
             run_of[s + 4 * k] = s
     tgt = {int(a): int(t) for a, t in facts['ptrs']}
     starts = sorted(fn)
+    entry_va = entry
     entry = starts[bisect.bisect_right(starts, entry) - 1]          # the function containing the exe's entry point
     out = {}
     if img is not None:
         img.callers(0)
+        stab = stabber(img.flat)
         for target, sites in sorted(img._callers.items()):
             for site, how in sorted(sites):
-                for e in img.entries_containing(site):
+                for e in stab(site):
                     out.setdefault(e, set()).add(target)
     seen, work = set(), [entry]
+    if img is not None:
+        work += stab(entry_va)                 # the range entry that starts at the entry point itself
     while work:
         f = work.pop()
         if f in seen or (f not in fn and f not in out):
@@ -145,8 +170,8 @@ def main(argv=None):
                 if how.startswith('open'):
                     rows.append((nm, va, name, '-', 'unknown', 'open', how, ''))
                     continue
-                fe = function_of(starts, va) if nm == me else (sorted(img.entries_containing(va)) or [0])[0]
-                reach = ('yes' if fe in reached or any(e in reached for e in img.entries_containing(va)) else 'no') if nm == me else 'inner'
+                fe = function_of(starts, va) if nm == me else (stabber(img.flat)(va) or [0])[0]
+                reach = ('yes' if fe in reached or any(e in reached for e in stabber(img.flat)(va)) else 'no') if nm == me else 'inner'
                 kind, text = describe(argflow.derive_arg(img, va, int(src)))
                 rows.append((nm, va, name, '%x' % (fe or 0), reach, kind, text, how))
     if a.gpa:

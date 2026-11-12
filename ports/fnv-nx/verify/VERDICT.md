@@ -223,3 +223,7 @@ The rules cited by the gates (N1-N4, R1, R3, R5, R6, R12, R13, K16 and others) a
 A product root with native or decomp C++ is compiled with `fnvnx_order` and `fnvnx_ftoi` (RECIPE.md, "Plugins"); a root whose C++ is all lifted
 (declared `cxx_origin` of its admit.json entry, consistency checked against the recipe) needs none. A missing plugin, a changed source or argument, or
 an undeclared origin makes the recipe invalid and the `build` gate red. Tests: `verify/tests/test_plugins.py`.
+
+### Call-site census of a platform function
+
+`contract/callcensus.py` lists every call site of chosen exports (for example the D3DX shader entries) over the image set, with the reach of the containing exe function from the exe entry (forward closure over the exe facts) and the value set of one argument. It is a census, not a gate. See TOOLS.md.

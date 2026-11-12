@@ -2011,3 +2011,25 @@ Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 
               (transitively), is tainted. Exit 2 lists chains. Stage results: S/keys/<key>/result.json (sandbox.py).
   defect / defects   rule-defect queue: content-addressed JSON entries, verification-class data only.
 ```
+
+## contract/callcensus.py
+
+```text
+callcensus - every call site of chosen functions over the image set, with reach from the exe entry and the value set of one argument (L1 CONTRACT).
+
+    callcensus.py --exe-facts facts.json --exe-entry 0xVA --images-file images.tsv --bridge bridge.tsv --module name.dll=path
+                  --fn dll!name:argc:srcarg ... [--gpa gpa_names.tsv] --out DIR
+
+For each --fn (an export of an image of the set, for example d3dx9_38.dll!D3DXAssembleShader:7:0): the uses of its slots in every image
+(argflow.uses_of_slot_ref: call [slot], thunk, register-loaded call; an import by name or by the ordinal the module's export table gives
+it), the direct calls to its entry inside the providing image (argflow Image.callers, entry = preferred base + export rva), and the
+GetProcAddress rows of --gpa that name it.  Per site: image, va, the function containing it, REACH and the SOURCE argument.
+reach  (the exe's own sites) `yes` iff the containing function is in the forward closure from the exe entry over the exe facts: direct
+       calls, tail jumps, relocated code pointers of the function, the slots of the RTTI vftables it references, and the pointer
+       tables it references (every code pointer of the same contiguous run of the pointer table).  This over-approximates the call
+       graph (an indirect call can only reach a function whose address is taken somewhere in the facts); the range entry that starts at the exe's entry point is a seed too, so `no` means unreachable over the facts (their
+       completeness is the facts' own gate) and `yes` means "not excluded".  A site in another image: `inner` (reach decided by the calls into that image).
+source the derived value set of argument srcarg (argflow.derive_arg): `const-string "text"`, `imm 0x..`, `pointer-from-flow` (a call result
+       or a value of the caller's parameters: the leaf kinds are listed), `open` (a break: the reason).
+Output callcensus.tsv: image, va, call, function, reach, kind, source, note.  Exe-derived: container and fnv-nx-build only.
+```
