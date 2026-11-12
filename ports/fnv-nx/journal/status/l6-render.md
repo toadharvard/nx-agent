@@ -384,3 +384,12 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
 - 09:09Z Defect in 7e598a5a (found by L6A): fnvnx_shader_hash is defined only at w1b 85dc017f, not at the w1b head 24b76f32, so the declaration has no body.
     - Resolution: the L6A A2-gl4 pair reverts 7e598a5a, and gl4:51 moves to fnvnx_sha256 against key[32]. lib/sha256 is on w6 57051038.
     - The orchestrator is told not to take 7e598a5a into a candidate on its own.
+- 09:12Z Orchestrator: candidate claude/fnv-next3b (base 8f4790a2, the platform root); 7e598a5a is out of it.
+    - A2-gl4 lands as one pair (L6A).
+    - L6 item, next on the gl4 path: the translator source root, green on next3b.
+        - Worker: w1b (session_01KmtZKSPYqkKJ24Q6D7aBcE), resumed, on branch claude/fnv-l6-render-w1b-root.
+        - Source: 24b76f32 (3 units) with MojoShader as an external (tools/mojoshader ad5dff84).
+        - The header stays byte-equal to 2f1bac09; the sources conform to it.
+        - FLAT_COLOR is ported from the lead's render/shaders/src (817a0abd); 24b76f32 lacks it.
+        - lib/sha256 comes from w6 57051038; the census tools move to render/total.
+        - Status: doing.
