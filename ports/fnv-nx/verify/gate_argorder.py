@@ -22,7 +22,7 @@ ORDER = "fnvnx_order"
 
 def native_guest(repo):
     roots = recipe.load_admit(repo)
-    return [r for r in gate_build.product_roots(repo) if roots[recipe.split_spec(r)[0]].get("target") == "guest" and roots[recipe.split_spec(r)[0]].get("cxx_origin") == "native"]
+    return [r for r in gate_build.product_roots(repo) if recipe.entry_of(roots, r).get("target") == "guest" and recipe.entry_of(roots, r).get("cxx_origin") == "native"]
 
 
 def judge_root(root, repo, cache, plugin=ORDER):

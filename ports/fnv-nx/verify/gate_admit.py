@@ -50,7 +50,7 @@ CLASSES = ("doc", "tool", "product", "ref", "test")
 # A product root names a gate for every run-time failure class of VERDICT.md. Wired on the trunk: objstub .. oracle,
 # the contract and link gates. Owned by other leads: imports, forms, d3d9total. L2's r7, namegate, argordergate, abi are wired.
 # Classes A-G of the owner's rule: datamodel, order, fpexact, eh, exepin, addr32, machine.
-REQUIRED_PRODUCT = ("objstub", "linkstrict", "determinism", "oracle",
+REQUIRED_PRODUCT = ("objstub", "linkstrict", "onedef", "determinism", "oracle",
                     "n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcrel", "bodysel",
                     "abs", "disp", "reach", "reachlink", "gpa",
                     "imports", "forms", "d3d9total", "r7", "namegate", "argordergate", "abi",
@@ -58,7 +58,7 @@ REQUIRED_PRODUCT = ("objstub", "linkstrict", "determinism", "oracle",
 # A test root (class test) is a root that links the tests of the product against the product roots' real files (CLAUDE.md "no doubles in
 # tests"): it is judged by its own set, never by REQUIRED_PRODUCT. Its gates: the build gates, the doubles gate (symbols the test defines
 # intersect symbols of the product roots it links = empty), an oracle record for every test, stub, the registry gate, Legal and pure.
-REQUIRED_TEST = ("build", "determinism", "linkstrict", "objstub", "doubles", "oracle", "stub", "assumptions", "legal", "pure")
+REQUIRED_TEST = ("build", "determinism", "linkstrict", "onedef", "objstub", "doubles", "oracle", "stub", "assumptions", "legal", "pure")
 REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT, "ref": (), "test": REQUIRED_TEST}
 
 
