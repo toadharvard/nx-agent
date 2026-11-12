@@ -81,3 +81,14 @@ d3dx9_31 42 / 312, d3dx9_38 66 / 930 (shapes are shared between modules, so 75 i
 NUL bytes only (62 65 00 = "be\0", 62 6c 65 00 = "ble\0"): the byte pattern of text decoded as code inside the census ranges. Reachability of each site is NOT decided here: that is the closure / call-graph rule's (sites per module are
 in the census rows: first_address is in shapes.tsv, the full site list needs census.py with the facts, which are private). Model fact: x86isa does not implement BOUND ('Opcode Unimplemented in x86isa!'), so no certificate is possible; DSL builder: forms_flow `bound`
 (fault kind 4, state unchanged otherwise), certificate-free until the orchestrator decides. Same class: 67ac (lodsb under 16-bit addressing) 1 shape: model 'Opcode Unimplemented'.
+
+## 8. forms_sys intake (w4, from L3a's e9124b30; measured at shapes @77524556)
+Taken byte for byte from L3a's commit: fnvlift/dsl.py (uf, swhen, FAULTS 1..11), fnvlift/f_sys.py (trap0d_privileged), proof/forms_sys.py. Hooks applied by hand (same hunks as bab6030): forms.build imports forms_sys,
+forms_move.mov routes CRn/DRn to forms_sys.privileged, symform.eip_dependence and normalize carry swhen. Builders: 11 handler functions in forms_sys (arpl, privileged [25 mnemonics + mov cr/dr], int, into, int1, sldt, str, smsw,
+sgdt/sidt, cpuid, rdtsc): 11 taken, 0 rewritten; bound stays mine, in forms_flow.
+shape_sha over the 19,817 int keys (before = 20422a8d, after = this tree): 19,494 same, 166 error in both, 157 new Form (arpl, keys 63xx), 0 changed. The sys-family shapes (139) are not in the int key list and had no Form before.
+Model answer, one representative encoding per class (27 encodings, prove_one on the 70c8dc39 IR): ALL 27 are model-gap. 'Opcode Unimplemented in x86isa!': arpl, int n, into, int1, cli, sti, in, out, ins, cpuid, rdtsc.
+'(:GP)' (the model dispatches these as a #GP fault): sldt, str, sgdt, sidt, smsw, mov cr, hlt, lldt/lgdt-class (0f00d0, 0f0130). So nothing in forms_sys is certifiable against the pinned model; the uf nodes
+(cpuid, rdtsc) have no model counterpart at all (the model does not implement either), so "uf matched to the model" has no answer: the declared machine's cpuid / platform timer are not a model fact.
+Fault kinds 4-11 in the model-faults table (prove.MODEL_FAULT): none. Kinds 4,5,6,8,9,10,11 correspond to no model message; kind 7 = :NON-WRITABLE-SEGMENT (CS store) only; 1 = DE. The Windows reporting of
+kinds 2-11 is the platform's (KiTrap0D / Wine 9.0), not the model's. A certificate for them needs another reference: L3b/orchestrator decision (no hand-written model hunk).

@@ -5,7 +5,11 @@ from proof.forms import AReg, Op, cond, ea, handler, pzs, rd, store_op, wr
 LAHF_SDM = 'LAHF/SAHF: AH = SF:ZF:0:AF:0:PF:1:CF'
 MODIFIABLE = 0x00240100 | 0x4000      # EFLAGS bits (besides the six, DF) POPFD may change in user mode: TF, NT, AC, ID (IF/IOPL need privilege)
 @handler('mov')
-def mov(c): wr(c.F, c.ops[0], rd(c.ops[1], c.ops[0].w))
+def mov(c):
+    if any(o.k == 'r' and o.name[:2] in ('cr', 'dr') for o in c.ops):      # MOV to/from CRn / DRn: CPL 0 only (0F 20..23), KiTrap0D's table decides the status
+        from proof import forms_sys
+        return forms_sys.privileged(c)
+    wr(c.F, c.ops[0], rd(c.ops[1], c.ops[0].w))
 @handler('movzx', 'movsx')
 def movx(c): wr(c.F, c.ops[0], (zext if c.m == 'movzx' else sext)(rd(c.ops[1]), c.ops[0].w))
 @handler('setcc')
