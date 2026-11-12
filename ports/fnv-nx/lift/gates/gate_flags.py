@@ -176,6 +176,7 @@ GPR = {'eax': (0, 0, 0xffffffff), 'ecx': (1, 0, 0xffffffff), 'edx': (2, 0, 0xfff
        'cl': (1, 0, 0xff), 'dl': (2, 0, 0xff), 'bl': (3, 0, 0xff), 'ah': (0, 8, 0xff), 'ch': (1, 8, 0xff), 'dh': (2, 8, 0xff), 'bh': (3, 8, 0xff)}
 WORDBIT = {'cf': 0, 'pf': 2, 'af': 4, 'zf': 6, 'sf': 7, 'of': 11}
 FLAGWORD = sum(1 << b for b in WORDBIT.values())
+DERIV = 1 << 20          # in a flag-word mask: the masked flags were COMPUTED from a masked value (their bits are functions of it, not copies of one bit)
 ESP = 4
 
 
@@ -205,8 +206,8 @@ def _addr_taint(i, regs, stack, op):
     return False
 
 
-def tstep(i, row, regs, stack, ft):
-    """one instruction on the abstract state -> (regs, stack, ft, observed)"""
+def _tstep(i, row, regs, stack, ft):
+    """one instruction on the abstract mask state -> (regs, stack, ft, observed)"""
     rd, keep = row[4], row[5]
     ops, ID = i.operands, i.id
     if ID in (X.X86_INS_PUSHF, X.X86_INS_PUSHFD): return regs, stack + (ft,), ft, False                   # the flag word carries the masked flags
@@ -222,7 +223,7 @@ def tstep(i, row, regs, stack, ft):
         return regs, stack + (v,), ft, False
     if ID in (X.X86_INS_POP, X.X86_INS_POPF, X.X86_INS_POPFD):
         v, stack = (stack[-1], stack[:-1]) if stack else (0, stack)
-        if ID != X.X86_INS_POP: return regs, stack, v & FLAGWORD, False                      # popf: the masked bits of the word are the masked flags
+        if ID != X.X86_INS_POP: return regs, stack, v & (FLAGWORD | DERIV), False                      # popf: the masked bits of the word are the masked flags
         if ops[0].type == X.X86_OP_REG:
             loc = GPR.get(i.reg_name(ops[0].reg))
             if loc is not None: return _w(regs, loc, v), stack, ft, False
@@ -247,7 +248,7 @@ def tstep(i, row, regs, stack, ft):
         elif s.type == X.X86_OP_REG and s.reg == d.reg: nv = 0 if ID == X.X86_INS_XOR else td
         else: nv = td | (ts or 0)
         regs = regs if ID == X.X86_INS_TEST else _w(regs, dl, nv)
-        return regs, stack, FLAGWORD if nv else 0, False
+        return regs, stack, (FLAGWORD | DERIV) if nv else 0, False
     if ID in (X.X86_INS_SHL, X.X86_INS_SHR, X.X86_INS_ROL, X.X86_INS_ROR) and len(ops) == 2 and ops[0].type == X.X86_OP_REG and ops[1].type == X.X86_OP_IMM:
         dl = GPR.get(i.reg_name(ops[0].reg))
         td = _tv(i, regs, ops[0])
@@ -259,7 +260,7 @@ def tstep(i, row, regs, stack, ft):
         elif ID == X.X86_INS_SHR: nv = td >> c
         elif ID == X.X86_INS_ROL: c %= nb; nv = ((td << c) | (td >> (nb - c))) & m
         else: c %= nb; nv = ((td >> c) | (td << (nb - c))) & m
-        return _w(regs, dl, nv), stack, (FLAGWORD if nv else 0) if ID in (X.X86_INS_SHL, X.X86_INS_SHR) else ft, False
+        return _w(regs, dl, nv), stack, ((FLAGWORD | DERIV) if nv else 0) if ID in (X.X86_INS_SHL, X.X86_INS_SHR) else ft, False
     if ID == X.X86_INS_NOT and ops and ops[0].type == X.X86_OP_REG: return regs, stack, ft, False
     # any other instruction: a masked register that it reads is an observation; the registers it writes are unmasked
     rr, ww = i.regs_access()
@@ -273,19 +274,67 @@ def tstep(i, row, regs, stack, ft):
     return regs, stack, (0 if keep == 0 else ft), False
 
 
+COPY_ID = (X.X86_INS_PUSH, X.X86_INS_POP, X.X86_INS_PUSHF, X.X86_INS_PUSHFD, X.X86_INS_POPF, X.X86_INS_POPFD)
+
+
+def _tainted(regs, stack, ft):
+    return bool(any(regs) or any(stack) or ft)
+
+
+def _is_copy(i, regs, stack, ft, ft2):
+    """True when the instruction only COPIES tainted bits (bit b of a masked value stays bit b of the same source value): push/pop/pushf/popf of whole words,
+    mov between operands at the same bit offset, and/or/xor with an immediate that does not flip a masked bit, none of which computes flags from a masked value.
+    Everything else that sees a mask (shifts, not, reg-reg and/or/xor, a flag recomputed from masked data) makes the walk `dirty`: no bit is a copy of the source any more."""
+    ID, ops = i.id, i.operands
+    if ID in (X.X86_INS_POPF, X.X86_INS_POPFD): return True
+    if ID in (X.X86_INS_PUSHF, X.X86_INS_PUSHFD) and ft & DERIV: return False       # a word of flags computed from a masked value: its bits are not copies
+    if ID in COPY_ID or ID == X.X86_INS_LAHF: return ID != X.X86_INS_LAHF and all(o.type != X.X86_OP_REG or GPR.get(i.reg_name(o.reg), (0, 1))[1] == 0 for o in ops)
+    if ID in (X.X86_INS_MOV, X.X86_INS_MOVZX) and len(ops) == 2:
+        if ops[0].type != X.X86_OP_REG or ops[1].type != X.X86_OP_REG: return True
+        d, sr = GPR.get(i.reg_name(ops[0].reg)), GPR.get(i.reg_name(ops[1].reg))
+        return d is not None and sr is not None and d[1] == sr[1]
+    if ID in (X.X86_INS_AND, X.X86_INS_OR, X.X86_INS_XOR) and len(ops) == 2 and ops[0].type == X.X86_OP_REG and ops[1].type == X.X86_OP_IMM:
+        dl = GPR.get(i.reg_name(ops[0].reg))
+        if dl is None: return False
+        td = (regs[dl[0]] >> dl[1]) & dl[2]
+        return ID != X.X86_INS_XOR or not (td & ops[1].imm & dl[2])
+    if ID == X.X86_INS_XOR and len(ops) == 2 and ops[0].type == ops[1].type == X.X86_OP_REG and ops[0].reg == ops[1].reg: return True
+    return False
+
+
+def tstep(i, row, regs, stack, ft, dirty):
+    """one instruction on the state (masks, and `dirty`) -> (regs, stack, ft, observed, dirty). Added to the mask walk: IDENTITY of the undefined value. All masked
+    bits come from ONE flag word of ONE execution of the copying instruction, and while the walk is not dirty every masked bit b of every value is a copy of that
+    word's bit b. `cmp r1, r2` of two registers with the same mask then reads the same value at each masked position in both operands: the common bits cancel, so
+    its flags are a function of the defined bits only (the unsigned and signed order of two numbers and their difference do not depend on a bit they share). It is
+    not an observation and its flags are defined. Not clean (dirty) walks, and any other reader of a masked register, are observations as before."""
+    ID, ops = i.id, i.operands
+    if (not dirty and ID == X.X86_INS_CMP and len(ops) == 2 and ops[0].type == ops[1].type == X.X86_OP_REG
+            and ops[0].size == ops[1].size):
+        a, b = GPR.get(i.reg_name(ops[0].reg)), GPR.get(i.reg_name(ops[1].reg))
+        if a is not None and b is not None and a[1] == b[1] == 0:
+            ta, tb = (regs[a[0]] >> a[1]) & a[2], (regs[b[0]] >> b[1]) & b[2]
+            if ta and ta == tb: return regs, stack, 0, False, dirty
+    seen = _tainted(regs, stack, ft)
+    r2, st2, ft2, obs = _tstep(i, row, regs, stack, ft)
+    if obs or dirty or not seen: return r2, st2, ft2, obs, dirty
+    return r2, st2, ft2, obs, 0 if _is_copy(i, regs, stack, ft, ft2) else 1
+
+
 def taint_observed(ins, objs, site, mask, lahf):
     """True when the may-undefined bits of the flag word copied at `site` reach an observing consumer"""
     r0 = ins[site]
     if lahf: regs, stack = (mask << 8, 0, 0, 0, 0, 0, 0, 0), ()
     else: regs, stack = (0,) * 8, (mask,)
-    state = {site + r0[1]: (regs, stack, 0)}
+    state = {site + r0[1]: (regs, stack, 0, 0)}
     work = [site + r0[1]]
     while work:
         a = work.pop()
-        regs, stack, ft = state[a]
+        regs, stack, ft, dirty = state[a]
+        if a == site and _tainted(regs, stack, ft): dirty = 1          # the copying instruction runs again: its new word is another value than the copies that are alive
         if a not in ins: continue
         row = ins[a]
-        regs, stack, ft, obs = tstep(objs[a], row, regs, stack, ft)
+        regs, stack, ft, obs, dirty = tstep(objs[a], row, regs, stack, ft, dirty)
         if obs: return True
         kind, tgt = row[2], row[3]
         if kind == KEND: succ = ()
@@ -301,10 +350,10 @@ def taint_observed(ins, objs, site, mask, lahf):
                 if any(regs) or any(stack): return True          # falls into, or jumps to, another entry
                 continue
             n = state.get(s)
-            if n is None: state[s] = (regs, stack, ft); work.append(s)
+            if n is None: state[s] = (regs, stack, ft, dirty); work.append(s)
             else:
                 if len(n[1]) != len(stack): return True
-                j = (tuple(x | y for x, y in zip(n[0], regs)), tuple(x | y for x, y in zip(n[1], stack)), n[2] or ft)
+                j = (tuple(x | y for x, y in zip(n[0], regs)), tuple(x | y for x, y in zip(n[1], stack)), n[2] or ft, n[3] or dirty)
                 if j != n: state[s] = j; work.append(s)
     return False
 
