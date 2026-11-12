@@ -759,3 +759,15 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - w9 f3fa1ee0: the code-read guard.
   - The two are being unified into one reader on 6d3a2800.
   - ASM-501 enters with the L5 manifest.
+
+## 2026-11-12 09:40 UTC
+- w17 7ecf2e25 on 6d3a2800 is accepted in content: origin-keyed semantics, the EH sentence, PLUGIN_CXX from env.json.
+  - A `plugin_cxx` key is now red.
+  - Its verdict is pending.
+- w18 b92b9085 on 6d3a2800: one pinned image set, gate_lift test added. Its verdict is pending.
+- w12 (session_01KmtZKUQGJi3gKcTZcB8sr6) is un-held for branch w12g: one guest link profile.
+  - link/guest.json holds the script and libs, with libs from the env-pinned fnvnx-a64 external.
+  - It applies to every guest-linking root. A per-root script or libs entry is red.
+  - This unblocks L4 bootguest.
+- ASM-233 (REMOVE, L3a w7) is minted for ehtables.py:268. The next free id is 234.
+  - Its removing fact, data_in_code.tsv, is also the data input of contract/imagerec, so it closes the L5 census too.
