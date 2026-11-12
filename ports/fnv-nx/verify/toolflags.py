@@ -180,6 +180,9 @@ def chk_python(c, a):
     elif not bad:
         c.v("flag-missing", "script path", "python.script")
 
+def chk_built(c, a):
+    c.need_under(c.doc["argv"][0], "built executable", "built.exe")
+
 def chk_msvc(c, kind, a):
     o = opts(a, kind != "msvc-cl")
     d = c.doc
@@ -237,7 +240,7 @@ def check_doc(doc, root=None):
     if kind in MSVC:
         chk_msvc(c, kind, a)
     else:
-        {"gcc": chk_gcc, "as": chk_as, "ld": chk_ld, "ar": chk_ar, "objcopy": chk_objcopy, "python": chk_python}[kind](c, a)
+        {"gcc": chk_gcc, "as": chk_as, "ld": chk_ld, "ar": chk_ar, "objcopy": chk_objcopy, "python": chk_python, "built": chk_built}[kind](c, a)
     return c.out
 
 def load(path):

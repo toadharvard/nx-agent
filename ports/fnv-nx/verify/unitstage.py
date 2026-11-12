@@ -42,6 +42,7 @@ import hashlib
 import json
 import os
 import posixpath
+import shutil
 import subprocess
 import sys
 import time
@@ -77,6 +78,27 @@ def write_hint(store, rel, paths):
     os.replace(tmp, p)
 
 
+def prog(cxx, name, path=None):
+    """Absolute path of program NAME as the gcc driver CXX finds it: an absolute `-print-prog-name` answer is taken as it is; a bare name
+    (the driver found no file of that name itself) is searched the way the driver searches, in the `programs:` list of `-print-search-dirs`
+    in order, then in PATH (default: the directory of the driver, the PATH of the stage environment). The first executable regular file
+    wins; none -> UnitError naming the program."""
+    env = dict(os.environ, LC_ALL="C")
+    q = lambda *a: subprocess.run([cxx] + list(a), env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout  # noqa: E731
+    got = q("-print-prog-name=" + name).strip()
+    if os.path.isabs(got):
+        return posixpath.normpath(got)
+    dirs = []
+    for ln in q("-print-search-dirs").splitlines():
+        if ln.startswith("programs:"):
+            dirs += [d[1:] if d.startswith("=") else d for d in ln[len("programs:"):].strip().lstrip("=").split(":") if d]
+    dirs += [os.path.dirname(os.path.abspath(cxx))] if path is None else path
+    for d in dirs:
+        p = os.path.join(d, name)
+        if os.path.isfile(p) and os.access(p, os.X_OK):
+            return posixpath.normpath(p)
+    raise UnitError("%s: program %s is in no `programs:` directory of -print-search-dirs and not in PATH (%s)" % (cxx, name, ":".join(dirs)))
+
 def gcc_set(cxx):
     """(exes, trees) for runtime.py tool, defined by the compiler's own answers: -print-prog-name=cc1plus (libexec dir),
     -print-prog-name=as, -print-search-dirs (`install:` dir = headers/specs) and `echo | g++ -x c++ -E -v -` (built-in include
@@ -94,7 +116,7 @@ def gcc_set(cxx):
     cands += [norm(ln) for ln in inc.splitlines() if ln.startswith(" /")]
     trees = sorted({t for t in cands if os.path.isdir(t)})
     trees = [t for t in trees if not any(u != t and (t + "/").startswith(u.rstrip("/") + "/") for u in trees)]
-    return [norm(cxx), norm(q("-print-prog-name=as"))], trees
+    return [norm(cxx), prog(cxx, "as")], trees
 
 def run_stage(store, doc, cold):
     sandbox.check_doc(doc)
@@ -116,6 +138,8 @@ def run_stage(store, doc, cold):
 class Build:
     def __init__(self, a):
         self.store, self.cold, self.cxx, self.cache = a.store, a.cold, a.cxx, {}
+        self.prefix = getattr(a, "prefix", "") or ""   # repo path of the root inside the mirrored /src tree (units live at /src/PREFIX/UNIT)
+        self.variant = ""   # recipe variant: its name is in the env, so in every stage key ("" adds nothing)
         self.cc_drop = set()   # `at` of tool-runtime inputs the CC stage does not mount (externals other than the compiler's)
         self.cc_flags, self.cc_inputs = [], []   # plugins: flags and declared inputs [(at, tree)] of the CC stage only (a plugin is part of its key)
         self.rt = json.load(open(a.toolrt))
@@ -128,6 +152,9 @@ class Build:
         self.roots, self.iargs = [], []
         for spec in [a.src_root] + a.include:
             host, sep, at = spec.rpartition("@")
+            if not sep and spec is not a.src_root and spec.startswith("/src/"):   # -I of a directory of the root's own view: one path, so #pragma once identity holds
+                self.iargs.append("-I" + spec)
+                continue
             if not sep and spec is not a.src_root:   # -I of a sandbox path inside a declared input of the tool runtime (an external)
                 if not any(spec == i["at"] or spec.startswith(i["at"].rstrip("/") + "/") for i in self.rt["inputs"]):
                     raise UnitError("--include %s: not HOST@/inc/N and inside no input of the tool runtime" % spec)
@@ -142,12 +169,15 @@ class Build:
         names = [(at, unitview.view(self.store, t, (), self.cache)) for at, t in self.roots]
         self.name_tree_id = hashlib.sha256(cas.canon(names)).hexdigest()
 
+    def sp(self, rel):
+        return "/src/" + (self.prefix + "/" if self.prefix else "") + rel
+
     def doc(self, kind, rel, inputs, tail, src, inc=True):
         seed = hashlib.sha256(rel.encode()).hexdigest()
         argv = [self.cxx] + (self.iargs if inc else []) + self.flags + (self.cc_flags if kind == "cc" else []) + ["-frandom-seed=" + seed, "-Werror=date-time"]
         argv += ["-ffile-prefix-map=%s=%s" % (at, at[1:]) for at, _ in self.roots] + tail + [src]
         doc = {"format": "fnvnx-stage/1", "stage": "%s:%s" % (kind, rel), "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
-               "env": dict(ENV, PATH=os.path.dirname(self.cxx)), "outputs": ["/out"],
+               "env": dict(ENV, PATH=os.path.dirname(self.cxx), **({"FNVNX_VARIANT": self.variant} if self.variant else {})), "outputs": ["/out"],
                "inputs": sorted([i for i in self.rt["inputs"] if kind != "cc" or i["at"] not in self.cc_drop] +
                                 [{"at": at, "tree": t} for at, t in inputs + (self.cc_inputs if kind == "cc" else [])],
                                 key=lambda i: i["at"])}
@@ -171,7 +201,7 @@ class Build:
         """One PP run on the views of FILES (set of sandbox paths of real files; None = the real trees)."""
         ins = [(at, t if files is None else unitview.view(self.store, t, [p[len(at) + 1:] for p in files if p.startswith(at + "/")],
                                                           self.cache)) for at, t in self.roots]
-        return run_stage(self.store, self.doc("pp", rel, ins, self.lang(rel)[0] + PP_TAIL, "/src/" + rel), self.cold)
+        return run_stage(self.store, self.doc("pp", rel, ins, self.lang(rel)[0] + PP_TAIL, self.sp(rel)), self.cold)
 
     def stderr(self, res):
         return open(cas._obj(self.store, cas.manifest(res["stderr"], self.store)), errors="replace").read()
@@ -198,7 +228,7 @@ class Build:
         files, expect, ran = None, None, False
         try:
             hint = json.load(open(hint_path(self.store, rel)))
-            files = {r for r in (self.real(p, False) for p in hint) if r} | {"/src/" + rel}
+            files = {r for r in (self.real(p, False) for p in hint) if r} | {self.sp(rel)}
         except (OSError, ValueError, TypeError):
             pass
         while True:
@@ -248,10 +278,10 @@ class Build:
 
     def assemble(self, e, rel):
         """A .s unit: no preprocessing, one stage on the /src view that holds this file alone (every other name is a placeholder)."""
-        real = unitview.resolve(self.store, self.roots[0][1], rel, self.cache)
+        real = unitview.resolve(self.store, self.roots[0][1], self.sp(rel)[5:], self.cache)
         v = unitview.view(self.store, self.roots[0][1], [real], self.cache)
         e["closure"], e["files"] = ["/src/" + real], 1
-        return self.compile(e, rel, self.doc("cc", rel, [("/src", v)], self.lang(rel)[1] + ["-c", "-o", "/out/unit.o"], "/src/" + rel, inc=False), set())
+        return self.compile(e, rel, self.doc("cc", rel, [("/src", v)], self.lang(rel)[1] + ["-c", "-o", "/out/unit.o"], self.sp(rel), inc=False), set())
 
 
 def build_cmd(a):
@@ -277,6 +307,7 @@ def main(argv):
         p.add_argument("--cxx")
         if argv[:1] == ["build"]:
             [p.add_argument("--" + n, required=True) for n in ("store", "toolrt", "src-root", "flags-file", "report")]
+            p.add_argument("--prefix", default="")
             p.add_argument("--include", action="append", default=[])
             p.add_argument("--unit", action="append", required=True)
             p.add_argument("--jobs", type=int, default=1)

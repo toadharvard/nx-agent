@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Tests of verify/bootmachine.py + boothost.py (the boot stage machine). Plain script: exit 0 on pass, one line per case.
-Builds small ILP32 PIE guests with aarch64-linux-gnu-gcc (-mabi=ilp32) from the fixtures in tests/guest/ (crt0.s with the
-FNXG header, guest.ld rebased to 0 with its two base asserts already removed, hostapi.h); the runtime part is the test's own
+Runs small ILP32 PIE guests built by verify/recipe.py (root ports/fnv-nx/tests/bootguest, one variant per MODE: crt0.s with the
+FNXG header, guest.ld rebased to 0, hostapi.h, guest.c); the runtime part is the test's own
 freestanding entry (the real runtime.c needs devkitA64's newlib: sys/iosupport.h). The guest relocates itself, as runtime.c
 does. Scratch: tempfile.mkdtemp, removed at exit."""
 import atexit
 import functools
+import json
 import os
 import re
 import shutil
@@ -17,880 +18,20 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
-GUEST_DIR = os.path.join(HERE, "guest")
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))
+GUEST_ROOT = "ports/fnv-nx/tests/bootguest"   # the recipe root of the guest images (class test); its files are the fixtures
+GUEST_DIR = os.path.join(REPO, GUEST_ROOT)
 sys.path.insert(0, VERIFY)
+import bootinput  # noqa: E402
 import bootlayout  # noqa: E402
 import boothost  # noqa: E402
 import bootmachine  # noqa: E402
+import gate_build  # noqa: E402
 
 TMP = tempfile.mkdtemp(prefix="bm-")
 atexit.register(shutil.rmtree, TMP, ignore_errors=True)
+GATE_CACHE = os.environ.get("GATE_CACHE") or os.path.join(TMP, "gate-cache")
 FAILED, N = [], [0]
-CC = "aarch64-linux-gnu-gcc"
-CFLAGS = ["-mabi=ilp32", "-march=armv8-a", "-O2", "-fPIE", "-ffreestanding", "-fno-builtin", "-fno-stack-protector", "-fvisibility=hidden",
-          "-mno-outline-atomics", "-fno-asynchronous-unwind-tables", "-fno-tree-loop-distribute-patterns", "-Wall",
-          "-I" + GUEST_DIR]
-LDFLAGS = ["-m", "aarch64elf32", "-pie", "--no-dynamic-linker", "-z", "text", "-z", "now", "-z", "pack-relative-relocs",
-           "--gc-sections", "-z", "max-page-size=0x1000", "--defsym=FNVNX_GUEST_BASE=0",
-           "--require-defined=__fnvnx_guest_start"]
-
-GUEST = r'''
-#include <stdint.h>
-#include "hostapi.h"
-const FnvnxHostApi *fnvnx_host;
-#define H (fnvnx_host)
-typedef struct { int32_t d_tag; uint32_t d_val; } Dyn;
-typedef struct { uint32_t o, i; int32_t a; } Rela;
-extern char __fnvnx_guest_start[] __attribute__((visibility("hidden")));   /* no GOT before relocation */
-static const char *const MSG[] = {"hello from the guest\n", "second line\n"};   /* needs RELATIVE relocations */
-static volatile uint32_t flag;
-static uint64_t H2(uint64_t f, uint64_t a, uint64_t b) { return fnvnx_hcall2(f, a, b); }
-static uint32_t slen(const char *s) { uint32_t n = 0; while (s[n]) n++; return n; }
-static void say(const char *s) { H2(H->console_write, FNVNX_ADDR(s), slen(s)); }
-static uint32_t mv(uint32_t v, uint32_t slide, uint32_t size) { return v < size ? v + slide : v; }
-static void relocate(uint32_t base) {
-    const uint32_t *hdr = (const uint32_t *)(uintptr_t)base;
-    const char *mod0 = (const char *)(uintptr_t)base + hdr[1];
-    const Dyn *d = (const Dyn *)(mod0 + ((const int32_t *)mod0)[1]);
-    uint32_t rela = 0, relasz = 0, relr = 0, relrsz = 0, size = hdr[5];
-    for (; d->d_tag; d++) {
-        if (d->d_tag == 7) rela = d->d_val + base; else if (d->d_tag == 8) relasz = d->d_val;
-        else if (d->d_tag == 36) relr = d->d_val + base; else if (d->d_tag == 35) relrsz = d->d_val;
-    }
-    for (uint32_t i = 0; i < relasz / 12; i++) {
-        const Rela *r = (const Rela *)(uintptr_t)rela + i;
-        if ((r->i & 0xFF) == 183) *(uint32_t *)(uintptr_t)(r->o + base) = mv((uint32_t)r->a, base, size);
-    }
-    uint32_t *w = 0;
-    for (uint32_t i = 0; i < relrsz / 4; i++) {
-        uint32_t e = ((const uint32_t *)(uintptr_t)relr)[i];
-        if (!(e & 1)) { w = (uint32_t *)(uintptr_t)(e + base); *w += base; w++; }
-        else { for (uint32_t b = e >> 1, k = 0; b; b >>= 1, k++) if (b & 1) w[k] += base; w += 31; }
-    }
-}
-__attribute__((noinline)) uint32_t marker(uint32_t x) { __asm__ volatile("" ::: "memory"); return x + 1; }
-static uint64_t worker(uint64_t arg) {
-    H2(H->sleep_ns, 5000000, 0);
-    flag = (uint32_t)arg;
-    H2(H->wake_address, FNVNX_ADDR(&flag), 1);
-    return 0;
-}
-#define EC(m, f, p, n) fnvnx_hcall4(H->ext_call, m, f, p, n)
-static volatile uint32_t wf, wdone;
-static uint64_t waiter(uint64_t arg) { fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&wf), 0, ~0ull); wdone++; return arg; }
-static void num(const char *what, uint64_t v) {
-    char b[64]; uint32_t n = 0, k = 0; char t[24];
-    while (what[k]) b[n++] = what[k++];
-    b[n++] = '=';
-    k = 0; do { t[k++] = "0123456789abcdef"[v & 15]; v >>= 4; } while (v);
-    while (k) b[n++] = t[--k];
-    b[n++] = '\n'; b[n] = 0;
-    say(b);
-}
-static uint64_t plat(uint32_t fn, uint64_t a, uint64_t b, uint64_t c, uint32_t n) {
-    uint64_t v[3] = {a, b, c};
-    return fnvnx_hcall4(H->ext_call, 11, fn, FNVNX_ADDR(v), n);
-}
-static uint64_t sk(uint32_t fn, uint32_t n, uint64_t a, uint64_t b, uint64_t c, uint64_t d, uint64_t e) {
-    uint64_t v[5] = {a, b, c, d, e};
-    return fnvnx_hcall4(H->ext_call, 11, fn, FNVNX_ADDR(v), n);
-}
-#define NEG(e) ((uint64_t)-(int64_t)(e))
-static volatile uint32_t sflag2, mainran, tcount;
-static uint64_t self_worker(uint64_t self) {   /* pauses and resumes the thread that called THREAD_SELF */
-    fnvnx_hcall2(H->sleep_ns, 1000000, 0);
-    uint64_t rp = plat(2, self, 1, 0, 2);
-    sflag2 = 1;
-    fnvnx_hcall2(H->wake_address, FNVNX_ADDR(&sflag2), 1);
-    fnvnx_hcall2(H->sleep_ns, 2000000, 0);
-    uint32_t ran = mainran;   /* main is woken but paused: it has not run */
-    uint64_t rr = plat(2, self, 0, 0, 2);
-    tcount = 100 + (uint32_t)rp + 10 * ran + 1000 * (uint32_t)rr;
-    return 0;
-}
-static volatile uint64_t wrec;
-static uint64_t rec_worker(uint64_t arg) { wrec = plat(35, 0, 0, 0, 0); return arg; }   /* a record of a thread that then ends */
-static uint64_t count_worker(uint64_t arg) { fnvnx_hcall2(H->sleep_ns, 1000000, 0); tcount++; return arg; }
-/* ACCESS_FAULT_HANDLER tests (MODE 12..22) */
-#define PG(h) ((h)->heap_base + 0x40000)
-#define STK(h) ((h)->heap_base + 0x51000)
-static volatile uint64_t gk, gr, ga, gpc, gsp, gps, gv0, gv1, gcnt;
-static void note(FnvnxFaultFrame *f) { gk = f->kind; gr = f->reason; ga = f->addr; gpc = f->pc; gsp = (uint64_t)(uintptr_t)__builtin_frame_address(0);   /* the handler's own stack */ gps = f->pstate; gv0 = f->v[8][0]; gv1 = f->v[8][1]; gcnt++; }
-static uint64_t fh_fix(FnvnxFaultFrame *f) {   /* make the page RW again and retry the store */
-    note(f);
-    if (f->kind == 1 && f->reason == 1 && f->addr == PG(fnvnx_host)) plat(8, PG(fnvnx_host), 0x1000, 3, 3);
-    return 0;
-}
-static uint64_t fh_skip(FnvnxFaultFrame *f) {   /* continue after the faulting instruction with a marker in x5 */
-    note(f);
-    f->pc += 4; f->x[5] = 0xABCD;
-    return 0;
-}
-static uint64_t fh_five(FnvnxFaultFrame *f) { note(f); return 5; }
-static uint64_t fh_nested(FnvnxFaultFrame *f) { note(f); return *(volatile uint32_t *)0x30000000; }
-static uint64_t fh_regs(FnvnxFaultFrame *f) {
-    note(f);
-    __asm__ volatile("movi v8.2d, #0\n cmp xzr, xzr" ::: "v8", "cc");   /* dirty what the frame must restore */
-    plat(8, PG(fnvnx_host), 0x1000, 3, 3);
-    return 0;
-}
-static uint64_t fault_thread(uint64_t arg) { *(volatile uint32_t *)(uintptr_t)PG(fnvnx_host) = (uint32_t)arg; return 0; }
-/* SECTION tests (MODE 30..34) */
-static uint64_t plat4(uint32_t fn, uint64_t a, uint64_t b, uint64_t c, uint64_t d) {
-    uint64_t v[4] = {a, b, c, d};
-    return fnvnx_hcall4(H->ext_call, 11, fn, FNVNX_ADDR(v), 4);
-}
-#define SC(size) plat(FNVNX_PLAT_SECTION_CREATE, size, 0, 0, 1)
-#define SM(id, addr, off, size) plat4(FNVNX_PLAT_SECTION_MAP, id, addr, off, size)
-#define SU(addr, size) plat(FNVNX_PLAT_SECTION_UNMAP, addr, size, 0, 2)
-#define SF(id) plat(FNVNX_PLAT_SECTION_FREE, id, 0, 0, 1)
-#define W32(a) (*(volatile uint32_t *)(uintptr_t)(a))
-static volatile uint64_t g_v1, g_v2, sflag;
-static uint64_t sec_worker(uint64_t arg) {
-    if (arg == 1) W32(g_v2 + 4) = W32(g_v2) + 1;   /* reads what main wrote through the other view */
-    else W32(g_v2 + 8) = 0x77;                     /* writes for main to read through its view */
-    sflag = arg;
-    H2(H->wake_address, FNVNX_ADDR(&sflag), 1);
-    return 0;
-}
-/* boot-stage CLI test (MODE 6): three functions called in order; results 0, 1, 0 */
-__attribute__((noinline, used)) uint32_t fnvboot_a(uint32_t x) { __asm__ volatile("" ::: "memory"); return x - x; }
-__attribute__((noinline, used)) uint32_t fnvboot_b(uint32_t x) { __asm__ volatile("" ::: "memory"); return (x | 1) & 1; }
-__attribute__((noinline, used)) uint32_t fnvboot_c(uint32_t x) { __asm__ volatile("" ::: "memory"); return x ^ x; }
-uint64_t __fnvnx_guest_entry(uint64_t api) {
-    relocate((uint32_t)(uintptr_t)__fnvnx_guest_start);
-    fnvnx_host = (const FnvnxHostApi *)(uintptr_t)api;
-    say(MSG[0]); say(MSG[1]);
-#if MODE == 6
-    uint32_t acc = fnvboot_a(3);
-    acc += fnvboot_b(acc);
-    say("fnvnx-start: identity ok\n");
-    acc += fnvboot_c(acc);
-    fnvnx_hcall1(H->exit, acc - 1);
-#elif MODE == 1
-    uint64_t a3[3] = {0x500000, 0x1000, 1};   /* a 3-argument call to module 9: not registered */
-    fnvnx_hcall4(H->ext_call, 9, 99, FNVNX_ADDR(a3), 3);
-#elif MODE == 2
-    fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&flag), 0, ~0ull);   /* nobody wakes it, no deadline */
-#elif MODE >= 7 && MODE <= 11
-    uint64_t A = plat(4, 0, 0x8000000, 0, 2);
-    volatile uint32_t *pa = (volatile uint32_t *)(uintptr_t)A;
-    num("resA", A);
-#if MODE == 7
-    num("resB", plat(4, 0, 0x10000, 0, 2));
-    num("commit", plat(5, A, 0x2000, 0, 2));
-    pa[0] = 0x11; pa[0x400] = 0x22;
-    num("rb", pa[0] + pa[0x400]);
-    num("decommit", plat(6, A, 0x2000, 0, 2));
-    num("recommit", plat(5, A, 0x2000, 0, 2));
-    num("zero", pa[0] | pa[0x400]);
-    pa[0] = 0x33;
-    num("recommit-keeps", plat(5, A, 0x1000, 0, 2) + pa[0]);
-    num("commit-outside", plat(5, 0x30000000, 0x1000, 0, 2));
-    num("commit-past-end", plat(5, A + 0x8000000 - 0x1000, 0x2000, 0, 2));
-    num("commit-size0", plat(5, A, 0, 0, 2));
-    num("protect-uncommitted", plat(8, A + 0x10000, 0x1000, 1, 3));
-    num("protect-committed", plat(8, A, 0x1000, 1, 3));
-    num("ro-read", pa[0]);
-    num("protect-rw", plat(8, A, 0x1000, 3, 3));
-    pa[0] = 0x44;
-    num("rw-write", pa[0]);
-    num("protect-x", plat(8, A, 0x1000, 4, 3));
-    plat(8, A + 0x1000, 0x1000, 0, 3);
-    num("decommit-protected", plat(6, A, 0x2000, 0, 2));
-    num("recommit-protected", plat(5, A, 0x2000, 0, 2));
-    pa[0x400] = 0x55;
-    num("zero-rw-after-protect", pa[0] | (pa[0x400] - 0x55));
-    plat(5, A + 0x10000, 0x2000, 0, 2);
-    pa[0x4000] = 0x66; pa[0x4400] = 0x77;
-    num("partial-decommit", plat(6, A + 0x10000, 0x1000, 0, 2));
-    num("partial-zero-writable", pa[0x4000] | (pa[0x4400] - 0x77));
-    pa[0x4000] = 0x88;
-    num("partial-write", pa[0x4000]);
-    num("mapfixed-over-resv", fnvnx_hcall3(H->map_fixed, A, 0x1000, H->heap_base + 0x20000));   /* a committed page: occupied */
-    num("mapfixed-over-resv-free", fnvnx_hcall3(H->map_fixed, A + 0x20000, 0x1000, H->heap_base + 0x20000));   /* reserved, uncommitted */
-    num("release", plat(7, A, 0, 0, 1));
-    num("release-again", plat(7, A, 0, 0, 1));
-    num("release-inner", plat(7, A + 0x10000, 0, 0, 1));
-    num("resA2", plat(4, 0, 0x8000000, 0, 2));
-    num("hint-overlap", plat(4, A + 0x10000, 0x10000, 0, 2));
-    num("hint-exe", plat(4, 0x500000, 0x10000, 0, 2));
-    num("hint-module", plat(4, 0x1420000, 0x10000, 0, 2));
-    num("hint-gap", plat(4, 0x3000000, 0x10000, 0, 2));
-    num("hint-above-4g", plat(4, 0xFFFF0000u, 0x20000, 0, 2));
-    num("hint-in-image", plat(4, H->guest_base, 0x10000, 0, 2));
-    num("hint-size0", plat(4, 0x20000000, 0, 0, 2));
-    num("hint-ok", plat(4, 0x20001234, 0x10001, 0, 2));
-    num("hint-ok-overlap", plat(4, 0x20010000, 0x10000, 0, 2));
-    num("tact-nothread", plat(2, 99, 1, 0, 2));
-    num("tact-tid0", plat(2, 0, 1, 0, 2));
-    uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 77, 0x10000, 0, ~0ull);
-    num("tact-new", plat(2, id, 1, 0, 2));
-    fnvnx_hcall1(H->thread_start, id);
-    num("tact-pause", plat(2, id, 1, 0, 2));
-    fnvnx_hcall1(H->sleep_ns, 2000000);
-    num("paused-flag", flag);
-    num("tact-resume", plat(2, id, 0, 0, 2));
-    while (flag == 0) fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&flag), 0, ~0ull);
-    num("resumed-flag", flag);
-    fnvnx_hcall1(H->thread_join, id);
-    num("boost", plat(1, 1, 0, 0, 1));
-    num("message", plat(3, FNVNX_ADDR("cap"), FNVNX_ADDR("body"), 0, 2));
-#elif MODE == 8
-    plat(5, A, 0x1000, 0, 2);
-    pa[0] = 1;
-    num("committed-ok", pa[0]);
-    num("touch-uncommitted", pa[0x400]);   /* reserved, not committed: the run must end here */
-    say("after the fault\n");
-#elif MODE == 9
-    plat(5, A, 0x1000, 0, 2);
-    plat(8, A, 0x1000, 1, 3);
-    pa[0] = 1;   /* write to a read-only committed page */
-    say("after the fault\n");
-#elif MODE == 10
-    plat(5, A, 0x1000, 0, 2);
-    pa[0] = 1;
-    plat(6, A, 0x1000, 0, 2);
-    num("touch-decommitted", pa[0]);
-    say("after the fault\n");
-#else
-    sk(16, 3, 2, 3, 0, 0, 0);   /* a RAW socket: whether the host allows it is the OS's decision, the header does not say */
-#endif
-#elif MODE == 30
-    uint64_t R = plat(4, 0, 0x10000, 0, 2);
-    num("resv", R != 0);
-    num("c0", SC(0)); num("c-unal", SC(0x800)); num("c-big", SC(0x80001000ull));
-    uint64_t s = SC(0x4000);
-    num("id", s);
-    uint64_t A = SM(s, R, 0, 0x2000);
-    num("A", A == R);
-    uint64_t B = SM(s, 0, 0x1000, 0x2000);
-    num("B-own", B && !(B & 0xFFFF) && (B < R || B >= R + 0x10000));
-    uint64_t C = SM(s, R + 0x4000, 0, 0x4000);
-    num("C", C == R + 0x4000);
-    num("zero", W32(A) | W32(A + 0x1FFC) | W32(B) | W32(C + 0x3FFC));
-    W32(A) = 0x11; W32(A + 0x1000) = 0x22;      /* section page 0, page 1 */
-    num("share1", W32(B));                       /* B page 0 = section page 1 */
-    W32(B + 4) = 0x33; num("share2", W32(A + 0x1004));
-    W32(B + 0x1000) = 0x44;                      /* section page 2: only B and C reach it */
-    num("share3", W32(C + 0x2000));
-    num("C-sees", W32(C) == 0x11 && W32(C + 0x1000) == 0x22 && W32(C + 0x1004) == 0x33);
-    num("m-size0", SM(s, 0, 0, 0)); num("m-size-unal", SM(s, 0, 0, 0x800)); num("m-size-over", SM(s, 0, 0, 0x80001000ull));
-    num("m-addr-unal", SM(s, R + 0x8001, 0, 0x1000)); num("m-off-unal", SM(s, 0, 0x800, 0x1000));
-    num("m-id", SM(999, 0, 0, 0x1000)); num("m-id0", SM(0, 0, 0, 0x1000));
-    num("m-range", SM(s, 0, 0x3000, 0x2000)); num("m-range-wrap", SM(s, 0, 0xFFFFFFFFFFFFF000ull, 0x2000));
-    num("h-outside", SM(s, 0x30000000, 0, 0x1000)); num("h-keys", SM(s, 0xf0000, 0, 0x1000));
-    num("h-image", SM(s, H->guest_base, 0, 0x1000)); num("h-heap", SM(s, H->heap_base, 0, 0x1000));
-    num("h-straddle", SM(s, R + 0xF000, 0, 0x2000));
-    num("h-over-view", SM(s, R + 0x1000, 0, 0x1000));
-    num("commit-gap", plat(5, R + 0x8000, 0x1000, 0, 2));
-    num("h-over-committed", SM(s, R + 0x8000, 0, 0x1000));
-    num("vm-commit", plat(5, A, 0x1000, 0, 2)); num("vm-commit-wide", plat(5, R, 0x10000, 0, 2));
-    num("vm-commit-B", plat(5, B, 0x1000, 0, 2)); num("vm-decommit-B", plat(6, B, 0x1000, 0, 2));
-    num("vm-decommit", plat(6, A, 0x1000, 0, 2)); num("vm-protect", plat(8, A, 0x1000, 1, 3));
-    num("vm-protect-B", plat(8, B, 0x1000, 1, 3)); num("vm-release", plat(7, R, 0, 0, 1));
-    num("view-intact", W32(A) == 0x11 && W32(C + 0x1000) == 0x22);
-    num("mf-B", fnvnx_hcall3(H->map_fixed, B, 0x1000, H->heap_base + 0x20000));   /* a host-placed view */
-    num("mf-A", fnvnx_hcall3(H->map_fixed, A, 0x1000, H->heap_base + 0x20000));   /* a view inside a reservation */
-    uint64_t r2 = plat(4, 0, 0x1000, 0, 2);
-    num("resv2-clear", r2 && (r2 + 0x10000 <= B || r2 >= B + 0x2000));
-    num("resv-hint-B", plat(4, B, 0x10000, 0, 2));
-    num("u-wrong-size", SU(A, 0x1000)); num("u-wrong-addr", SU(A + 0x1000, 0x1000)); num("u-nonview", SU(0x30000000, 0x1000));
-    num("free", SF(s)); num("map-after-free", SM(s, 0, 0, 0x1000)); num("free-twice", SF(s)); num("free-unknown", SF(555));
-    num("alive-A", W32(A) == 0x11);
-    W32(B) = 0x55; num("alive-B", W32(A + 0x1000));
-    num("u-A", SU(A, 0x2000)); num("u-B-still", W32(B)); num("u-C", SU(C, 0x4000));
-    num("u-B", SU(B, 0x2000)); num("u-B-twice", SU(B, 0x2000));
-    num("release-R", plat(7, R, 0, 0, 1));
-    uint64_t s2 = SC(0x1000), B2 = SM(s2, 0, 0, 0x1000);
-    num("B2-lowest", B2 == R); num("s2-id", s2);
-#elif MODE == 31
-    uint64_t s = SC(0x2000), A = SM(s, 0, 0, 0x2000), B = SM(s, 0, 0, 0x2000);
-    W32(A) = 7; num("A-addr", A); num("B-addr", B);
-    num("unmap-A", SU(A, 0x2000));
-    num("B-works", W32(B));
-    W32(B + 4) = 9; num("B-writes", W32(B + 4));
-    num("touch-A", W32(A));   /* the unmapped view: the run must end here */
-    say("after the fault\n");
-#elif MODE == 32
-    uint64_t s = SC(0x2000);
-    g_v1 = SM(s, 0, 0, 0x2000); g_v2 = SM(s, 0, 0, 0x2000);
-    W32(g_v1) = 0xA5A5;
-    for (uint64_t k = 1; k <= 2; k++) {
-        uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(sec_worker), k, 0x10000, 0, ~0ull);
-        fnvnx_hcall1(H->thread_start, id);
-        while (sflag != k) fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&sflag), k - 1, ~0ull);
-        fnvnx_hcall1(H->thread_join, id);
-    }
-    num("thread-read", W32(g_v1 + 4)); num("thread-write", W32(g_v1 + 8));
-#elif MODE == 33
-    uint64_t s = SC(0x4000), v = SM(s, 0, 0, 0x4000), top = v + 0x4000;
-    num("reg", plat(10, FNVNX_ADDR(fh_skip), top, 0, 2));
-    uint64_t out, val = 9;
-    __asm__ volatile("mov x5, #0\n str %w1, [%2]\n mov %0, x5" : "=r"(out) : "r"(val), "r"(0x30000000ull) : "x5", "memory");
-    num("marker", out); num("kind", gk); num("reason", gr); num("addr", ga);
-    num("frame-in-view", W32(top - 816) == 1 && W32(top - 808) == 0x30000000);
-    num("same-pages", W32(top - 816) == W32(SM(s, 0, 0x3000, 0x1000) + 0x1000 - 816));
-#elif MODE == 34
-    uint64_t first = SC(0x1000), n = 1, last = first, r;
-    for (; n < 128 && (r = SC(0x1000)) < 0x80000000ull; n++) last = r;
-    num("sections-ok", n); num("last-id", last);
-    num("c-full", SC(0x1000));
-    uint64_t v = SM(first, 0, 0, 0x1000);
-    num("free-first-deferred", SF(first));
-    num("c-full-deferred", SC(0x1000));
-    num("unmap-last-view", SU(v, 0x1000));
-    uint64_t id129 = SC(0x1000);
-    num("id129", id129);
-    num("free-last", SF(last)); num("id130", SC(0x1000));
-    uint64_t cnt = 0, asc = 1, prev = 0, a;
-    for (; cnt < 512 && (a = SM(id129, 0, 0, 0x1000)) < 0x100000000ull; cnt++) { if (a <= prev || (a & 0xFFFF)) asc = 0; prev = a; }
-    num("views-ok", cnt); num("views-ascending", asc);
-    num("v-full", SM(id129, 0, 0, 0x1000));
-    num("unmap-one", SU(prev, 0x1000)); num("v-after", SM(id129, 0, 0, 0x1000) == prev);
-#elif MODE >= 37 && MODE <= 39
-    /* UNMAP_FIXED (fn 15) */
-    #define UF(a, s, z) plat(FNVNX_PLAT_UNMAP_FIXED, a, s, z, 3)
-    #define MF(a, z, s) fnvnx_hcall3(H->map_fixed, a, z, s)
-    uint64_t src = H->heap_base + 0x30000, dst = 0x4000000;
-    W32(src) = 0x1234;
-    num("map", MF(dst, 0x2000, src));
-    num("carried", W32(dst));
-    W32(dst) = 0xAAAA; W32(dst + 0x1004) = 0xBBBB;   /* written through the mapping */
-#if MODE == 37
-    num("u-wrong-src", UF(dst, 0x2000, src + 0x1000));
-    num("u-wrong-addr", UF(dst + 0x1000, 0x1000, src));
-    num("u-wrong-size", UF(dst, 0x1000, src));
-    num("u-addr-unal", UF(dst + 4, 0x2000, src));
-    num("u-src-unal", UF(dst, 0x2000, src + 4));
-    num("u-size0", UF(dst, 0, src)); num("u-size-unal", UF(dst, 0x1800, src));
-    num("still-mapped", W32(dst) == 0xAAAA);
-    num("ok", UF(dst, 0x2000, src));
-    num("src-bytes", W32(src) == 0xAAAA && W32(src + 0x1004) == 0xBBBB);
-    W32(src + 8) = 0x77; num("src-writable", W32(src + 8));
-    num("twice", UF(dst, 0x2000, src));
-    num("map-again", MF(dst, 0x2000, src));
-    num("again-bytes", W32(dst) == 0xAAAA && W32(dst + 0x1004) == 0xBBBB && W32(dst + 8) == 0x77);
-    num("src-given-again", MF(0x4020000, 0x1000, src));
-    num("ok-again", UF(dst, 0x2000, src));
-#elif MODE == 38
-    num("ok", UF(dst, 0x2000, src));
-    num("touch-dst", W32(dst));   /* unmapped: the run must end here */
-    say("after the fault\n");
-#else
-    plat(8, dst, 0x1000, 1, 3);   /* read-only and no access: UNMAP_FIXED needs no restore */
-    plat(8, dst + 0x1000, 0x1000, 0, 3);
-    num("ok", UF(dst, 0x2000, src));
-    num("src-bytes", W32(src) == 0xAAAA && W32(src + 0x1004) == 0xBBBB);
-    W32(src + 0x1004) = 5; num("src-rw", W32(src + 0x1004));
-#endif
-#elif MODE == 40
-    /* ext_call and module 11 totality */
-    uint64_t v[4] = {1, 2, 3, 4};
-    num("mod64", EC(64, 1, FNVNX_ADDR(v), 1));
-    num("mod-huge", EC(0xFFFFFFFFFFFFFFFFull, 1, 0, 0));
-    num("mod9-unreg", EC(9, 1, FNVNX_ADDR(v), 1));
-    num("mod12-fn-huge", EC(12, 0x100000001ull, 0, 0));
-    num("fn0", EC(11, 0, FNVNX_ADDR(v), 4));
-    num("fn37", EC(11, 37, FNVNX_ADDR(v), 4));
-    num("te-n4", EC(11, 36, FNVNX_ADDR(v), 4));
-    num("te-null-array", EC(11, 36, 0, 5));
-    num("self-n0-null", EC(11, 35, 0, 0));
-    num("self-n1-null", EC(11, 35, 0, 1));
-    num("sock-null-array-wrongn", EC(11, 17, 0, 2));
-    num("sock-null-array-n0", EC(11, 17, 0, 0));
-    num("sock-null-array-exact", EC(11, 17, 0, 1));
-    num("fn0-null-array", EC(11, 0, 0, 2));
-    num("fn-u32max", EC(11, 0xFFFFFFFFull, FNVNX_ADDR(v), 4));
-    num("fn-above-u32", EC(11, 0x100000004ull, FNVNX_ADDR(v), 4));
-    num("fn10-nargs1", EC(11, 10, FNVNX_ADDR(v), 1));
-    num("vm-reserve-n1", EC(11, 4, FNVNX_ADDR(v), 1));
-    num("null-array", EC(11, 4, 0, 2));
-    num("docked-n0-null", EC(11, 9, 0, 0));
-    num("docked-n1-null", EC(11, 9, 0, 1));
-    num("docked-n3", EC(11, 9, FNVNX_ADDR(v), 3));
-    num("docked-ncap", EC(11, 9, FNVNX_ADDR(v), 0x100000005ull));
-    num("boost-extra-args", EC(11, 1, FNVNX_ADDR(v), 4));
-    num("sock-wrong-n", EC(11, 16, FNVNX_ADDR(v), 2));
-    num("sock-wrong-n0", EC(11, 17, 0, 0));
-    num("sock-too-many", EC(11, 31, FNVNX_ADDR(v), 4));
-    num("tz-n1", EC(11, 34, FNVNX_ADDR(v), 1));
-    num("tz-null", EC(11, 34, 0, 2));
-    num("reserve-above-4g", plat(4, 0, 0x100000001ull, 0, 2));
-    num("reserve-4g", plat(4, 0, 0x100000000ull, 0, 2));
-#elif MODE == 41
-    uint64_t v[4] = {1, 2, 3, 4};
-    num("m9-fn1", EC(9, 1, FNVNX_ADDR(v), 3));
-    num("m9-fn-huge", EC(9, 0x100000001ull, FNVNX_ADDR(v), 1));
-    num("m9-nargs0", EC(9, 2, 0, 0));
-    num("m9-missing", EC(9, 99, FNVNX_ADDR(v), 1));
-    say("after the missing service\n");
-#elif MODE == 44
-    /* VM_PROTECT: check order, spans, windows; UNMAP_FIXED of protected pages */
-#define MF(a, z, s) fnvnx_hcall3(H->map_fixed, a, z, s)
-#define UF(a, s, z) plat(FNVNX_PLAT_UNMAP_FIXED, a, s, z, 3)
-    uint64_t R = plat(4, 0, 0x10000, 0, 2);
-    plat(5, R, 0x1000, 0, 2); plat(5, R + 0x1000, 0x1000, 0, 2);   /* two extents */
-    volatile uint32_t *pa = (volatile uint32_t *)(uintptr_t)R;
-    pa[0] = 1; pa[0x400] = 2;
-    num("p-addr-unal", plat(8, R + 4, 0x1000, 3, 3));
-    num("p-addr-unal-size0", plat(8, R + 4, 0, 3, 3));
-    num("p-size0", plat(8, R, 0, 3, 3));
-    num("p-size-unal", plat(8, R, 0x800, 3, 3));
-    num("p-wrap", plat(8, 0xFFFFFFFFFFFFF000ull, 0x2000, 3, 3));
-    num("p-wrap-beats-perm", plat(8, 0xFFFFFFFFFFFFF000ull, 0x2000, 2, 3));
-    num("p-wo", plat(8, R, 0x1000, 2, 3));
-    num("p-x", plat(8, R, 0x1000, 4, 3));
-    num("p-7", plat(8, R, 0x1000, 7, 3));
-    num("p-big", plat(8, R, 0x1000, 0x100000003ull, 3));
-    num("p-perm-beats-owned", plat(8, 0x3000000, 0x1000, 2, 3));
-    num("p-unowned", plat(8, 0x3000000, 0x1000, 3, 3));
-    num("p-still-rw", pa[0] + pa[0x400]);
-    num("p-span", plat(8, R, 0x2000, 1, 3));
-    num("p-span-ro", pa[0] + pa[0x400]);
-    num("p-none", plat(8, R + 0x1000, 0x1000, 0, 3));
-    num("p-rw", plat(8, R, 0x2000, 3, 3));
-    pa[0] = 5; pa[0x400] = 6; num("p-rw-write", pa[0] + pa[0x400]);
-    plat(8, R, 0x1000, 1, 3);
-    num("decommit-ro-none", plat(6, R, 0x2000, 0, 2));
-    num("decommit-wrap", plat(6, 0xFFFFFFFFFFFFF000ull, 0x2000, 0, 2));
-    num("decommit-size0", plat(6, R, 0, 0, 2));
-    num("recommit", plat(5, R, 0x2000, 0, 2));
-    num("recommit-zero", pa[0] | pa[0x400]);
-    volatile uint32_t *w = (volatile uint32_t *)0x500000;
-    w[0] = 0x77;
-    num("w-ro", plat(8, 0x500000, 0x1000, 1, 3)); num("w-ro-read", w[0]);
-    num("w-none", plat(8, 0x500000, 0x1000, 0, 3));
-    num("w-rw", plat(8, 0x500000, 0x1000, 3, 3)); w[1] = 9; num("w-rw-keeps", w[0] + w[1]);
-    uint64_t src = H->heap_base + 0x310000, dst = 0x4000000;
-    W32(src) = 0x1234;
-    num("mf", MF(dst, 0x2000, src));
-    W32(dst) = 0xAAAA; W32(dst + 0x1004) = 0xBBBB;
-    plat(8, dst, 0x1000, 1, 3); plat(8, dst + 0x1000, 0x1000, 0, 3);
-    num("uf-protected", UF(dst, 0x2000, src));
-    num("uf-bytes", W32(src) == 0xAAAA && W32(src + 0x1004) == 0xBBBB);
-    W32(src + 8) = 7; num("uf-src-rw", W32(src + 8));
-#elif MODE == 45
-    /* map_fixed: check order, the window, the 512 limit; UNMAP_FIXED in the window */
-#define MF(a, z, s) fnvnx_hcall3(H->map_fixed, a, z, s)
-#define UF(a, s, z) plat(FNVNX_PLAT_UNMAP_FIXED, a, s, z, 3)
-    volatile uint32_t *w = (volatile uint32_t *)0x500000;
-    uint64_t src = H->heap_base + 0x310000;
-    num("size0", MF(0x4000000, 0, src));
-    num("wrap", MF(0xFFFFFFFFFFFFF000ull, 0x2000, src));
-    num("addr-unal", MF(0x4000004, 0x1000, src));
-    num("size-unal", MF(0x4000000, 0x800, src));
-    num("size0-in-window", MF(0x500000, 0, 0));
-    num("past-4g", MF(0xFFFFF000ull, 0x2000, src));
-    num("src0", MF(0x4000000, 0x1000, 0));
-    num("src-unal", MF(0x4000000, 0x1000, src + 4));
-    num("outside-region", MF(0x3000000, 0x1000, src));
-    num("keys", MF(0xf0000, 0x1000, src));
-    num("src-not-heap", MF(0x4000000, 0x1000, 0x500000));
-    w[0] = 0x55; w[0x3FF] = 0x66;
-    num("win", MF(0x500000, 0x1000, 0));
-    num("win-zeroed", w[0] | w[0x3FF]);
-    num("win-src-ignored", MF(0x500000, 0x2000, 0x10001));
-    w[0] = 0x55; plat(8, 0x500000, 0x1000, 0, 3);
-    num("win-none-to-rw", MF(0x500000, 0x1000, 0));
-    w[1] = 9; num("win-rw-again", w[0] + w[1]);
-    num("win-first", MF(0x400000, 0x1000, 0));
-    num("win-last", MF(0x20FF000, 0x1000, 0));
-    num("win-straddle-end", MF(0x20FF000, 0x2000, src));
-    num("win-straddle-start", MF(0x3FF000, 0x2000, src));
-    uint64_t n = 0;
-    for (; n < 512 && MF(0x4000000 + n * 0x1000, 0x1000, H->heap_base + 0x100000 + n * 0x1000) == 0; n++) ;
-    num("live", n);
-    num("limit", MF(0x4200000, 0x1000, src));
-    num("limit-occupied", MF(0x4000000, 0x1000, src));
-    num("unmap-one", UF(0x4000000, 0x1000, H->heap_base + 0x100000));
-    num("again", MF(0x4000000, 0x1000, H->heap_base + 0x100000));
-    w[2] = 3;
-    num("uf-win", UF(0x500000, 0x1000, 0)); num("uf-win-zeroed", w[2]);
-    num("uf-win-src-unal", UF(0x500000, 0x1000, 4));
-    num("uf-win-size-unal", UF(0x500000, 0x800, 0));
-    num("uf-wrap", UF(0x1000, 0xFFFFFFFFFFFFF000ull, 0));
-    num("uf-win-straddle", UF(0x20FF000, 0x2000, 0));
-#elif MODE == 46
-    /* thread and directory ids, wait/wake */
-#define THR(f, a) fnvnx_hcall1(H->f, a)
-    uint64_t h1 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 77, 0x10000, 0, ~0ull);
-    uint64_t h2 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 78, 0x10000, 0, ~0ull);
-    num("h1-id", h1 != 0 && (h1 >> 16) != 0); num("h-distinct", h1 != h2);
-    num("start-unknown", THR(thread_start, 0x12345)); num("start-zero", THR(thread_start, 0));
-    num("join-unknown", THR(thread_join, 0x12345)); num("join-never-started", THR(thread_join, h2));
-    num("prio-unknown", fnvnx_hcall2(H->thread_set_priority, 0x12345, 1)); num("prio-self", fnvnx_hcall2(H->thread_set_priority, 0, 3));
-    num("cpu-unknown", fnvnx_hcall2(H->thread_set_cpu, 0x12345, 1)); num("cpu-self", fnvnx_hcall2(H->thread_set_cpu, 0, 2));
-    num("cpu-negative", fnvnx_hcall2(H->thread_set_cpu, 0, ~0ull));
-    num("cpu-bits40-62", fnvnx_hcall2(H->thread_set_cpu, 0, 0x7FFFFF0000000000ull));
-    num("start", THR(thread_start, h1)); num("join", THR(thread_join, h1)); num("flag", flag);
-    num("free", THR(thread_free, h1)); num("free-twice", THR(thread_free, h1));
-    num("join-freed", THR(thread_join, h1)); num("start-freed", THR(thread_start, h1));
-    num("prio-freed", fnvnx_hcall2(H->thread_set_priority, h1, 1)); num("act-freed", plat(2, h1, 1, 0, 2));
-    num("free-unknown", THR(thread_free, 0x12345));
-    uint64_t h3 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 79, 0x10000, 0, ~0ull);
-    num("h3-new-generation", h3 != h1 && h3 != h2 && (h3 >> 16) != (h1 >> 16));
-    THR(thread_start, h3);
-    num("free-running", THR(thread_free, h3));
-    while (flag != 79) fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&flag), 77, ~0ull);
-    num("detached-ran", flag);
-    uint64_t d = fnvnx_hcall1(H->fs_dir_open, FNVNX_ADDR("sdmc:/"));
-    char buf[16];
-    num("dir-id", d != 0);
-    num("dir-next-cap0", fnvnx_hcall3(H->fs_dir_next, d, FNVNX_ADDR(buf), 0));
-    num("dir-next-cut", fnvnx_hcall3(H->fs_dir_next, d, FNVNX_ADDR(buf), 4)); num("dir-cut-bytes", buf[0] * 0x10000 + buf[2] * 0x100 + buf[3]);
-    num("dir-next-2", fnvnx_hcall3(H->fs_dir_next, d, FNVNX_ADDR(buf), 16));
-    num("dir-end", fnvnx_hcall3(H->fs_dir_next, d, FNVNX_ADDR(buf), 16));
-    num("dir-unknown", fnvnx_hcall3(H->fs_dir_next, 0x12345, FNVNX_ADDR(buf), 16));
-    num("dir-as-thread", THR(thread_join, d)); num("thread-as-dir", fnvnx_hcall3(H->fs_dir_next, h2, FNVNX_ADDR(buf), 16));
-    num("dir-close", THR(fs_dir_close, d)); num("dir-next-closed", fnvnx_hcall3(H->fs_dir_next, d, FNVNX_ADDR(buf), 16));
-    num("dir-close-again", THR(fs_dir_close, d)); num("dir-close-unknown", THR(fs_dir_close, 0x12345));
-    num("dir-notdir", THR(fs_dir_open, FNVNX_ADDR("sdmc:/data.bin"))); num("dir-missing", THR(fs_dir_open, FNVNX_ADDR("sdmc:/nope")));
-    num("wait-unal", fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&flag) + 1, 0, 0));
-    num("wait-unmapped", fnvnx_hcall3(H->wait_on_address, 0x30000000, 0, 0));
-    plat(8, H->heap_base + 0x320000, 0x1000, 0, 3);
-    num("wait-prot-none", fnvnx_hcall3(H->wait_on_address, H->heap_base + 0x320000, 0, 0));
-    num("wake-unal", fnvnx_hcall2(H->wake_address, FNVNX_ADDR(&flag) + 2, 1));
-    num("wake-unmapped", fnvnx_hcall2(H->wake_address, 0x30000000, 1));
-    num("wake-prot-none", fnvnx_hcall2(H->wake_address, H->heap_base + 0x320000, 1));
-    uint64_t w1 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(waiter), 1, 0x10000, 0, ~0ull);
-    uint64_t w2 = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(waiter), 2, 0x10000, 0, ~0ull);
-    THR(thread_start, w1); THR(thread_start, w2);
-    fnvnx_hcall1(H->sleep_ns, 1000000);
-    num("wake-all", fnvnx_hcall2(H->wake_address, FNVNX_ADDR(&wf), 0x80000000ull));
-    THR(thread_join, w1); THR(thread_join, w2);
-    num("woken-all", wdone);
-    uint64_t cnt = 0, last = 0, x;
-    while ((x = THR(fs_dir_open, FNVNX_ADDR("sdmc:/"))) != 0) { cnt++; last = x; }
-    num("dirs-until-full", cnt);
-    num("thread-when-full", fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 1, 0x10000, 0, ~0ull));
-    num("close-one", THR(fs_dir_close, last));
-    num("thread-after-close", fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 1, 0x10000, 0, ~0ull) != 0);
-#elif MODE == 47
-    uint64_t b[8];
-    for (int i = 0; i < 8; i++) b[i] = 0xABABABABABABABABull;
-    num("a-submit-closed", fnvnx_hcall2(H->audio_submit, FNVNX_ADDR(b), 480));
-    num("a-rate", fnvnx_hcall2(H->audio_open, 44100, 480));
-    num("a-period0", fnvnx_hcall2(H->audio_open, 48000, 0)); num("a-period-big", fnvnx_hcall2(H->audio_open, 48000, 8193));
-    num("a-open", fnvnx_hcall2(H->audio_open, 48000, 480));
-    num("a-open-again", fnvnx_hcall2(H->audio_open, 44100, 1));
-    num("a-submit-wrong", fnvnx_hcall2(H->audio_submit, FNVNX_ADDR(b), 481)); num("a-submit", fnvnx_hcall2(H->audio_submit, FNVNX_ADDR(b), 480));
-    num("a-close", fnvnx_hcall0(H->audio_close)); num("a-close-again", fnvnx_hcall0(H->audio_close));
-    num("a-submit-after", fnvnx_hcall2(H->audio_submit, FNVNX_ADDR(b), 480));
-    num("a-reopen", fnvnx_hcall2(H->audio_open, 48000, 8192)); num("a-submit-8192", fnvnx_hcall2(H->audio_submit, FNVNX_ADDR(b), 8192));
-    num("pad4", fnvnx_hcall2(H->pad_read, 4, FNVNX_ADDR(b)));
-    num("pad-untouched", b[0] == 0xABABABABABABABABull && b[3] == 0xABABABABABABABABull);
-    num("pad0", fnvnx_hcall2(H->pad_read, 0, FNVNX_ADDR(b))); num("pad0-zeroed", b[0] | b[1] | b[2] | b[3]);
-    num("sleep-max", fnvnx_hcall1(H->sleep_ns, ~0ull));
-#elif MODE == 48
-    uint64_t v[1] = {0};
-    fnvnx_hcall1(H->exit, plat(9, 0, 0, 0, 0) + v[0]);   /* DISPLAY_DOCKED: the exit code is the answer */
-#elif MODE == 49
-    /* sockets 16..33 with no network (every result the arguments alone fix), TZ_AT, the tz slot */
-    num("sock-afnosupport", sk(16, 3, 1, 1, 0, 0, 0));
-    num("sock-af-wide", sk(16, 3, 0x100000002ull, 1, 0, 0, 0));
-    num("sock-af-neg", sk(16, 3, ~0ull, 1, 0, 0, 0));
-    num("sock-type-4", sk(16, 3, 2, 4, 0, 0, 0));
-    num("sock-type-0", sk(16, 3, 10, 0, 0, 0, 0));
-    static const uint8_t SN[34] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 1, 2, 2, 2, 2, 5, 5, 5, 5, 3, 2, 2, 2, 1, 2, 4, 3};
-    uint64_t mask = 0, hs[4] = {0, 3, 0x7FFFFFFFull, 1ull << 32};
-    for (uint32_t fn = 17; fn <= 31; fn++) {
-        if (fn == 26 || (fn >= 27 && fn <= 29)) continue;   /* 26 POLL has no handle first; 27..29 are not services */
-        for (uint32_t i = 0; i < 4; i++) {
-            uint64_t r = sk(fn, SN[fn], hs[i], 0, 0, 0, 0);
-            if (r == NEG(9)) mask |= 1ull << fn; else { mask |= 1ull << 40; num("ebadf-bad", fn); }
-        }
-    }
-    num("ebadf-mask", mask);
-    FnvnxWirePollfd pf[3] = {{-1, 1, 0xFFFF}, {5, 1, 0xFFFF}, {7, 5, 0xFFFF}};
-    num("poll-big", sk(26, 3, FNVNX_ADDR(pf), 0x1000001, 0, 0, 0));
-    num("poll-null", sk(26, 3, 0, 1, 0, 0, 0));
-    uint64_t t0 = fnvnx_hcall0(H->wall_time_us);
-    num("poll-nfds0-t0", sk(26, 3, 0, 0, 0, 0, 0));
-    num("poll-nfds0-null-t7", sk(26, 3, 0, 0, 7, 0, 0));
-    num("poll-wait-us", fnvnx_hcall0(H->wall_time_us) - t0);
-    num("poll-nval", sk(26, 3, FNVNX_ADDR(pf), 3, 0xFFFFFFFFull - 1000, 0, 0));
-    num("poll-rev0", pf[0].revents); num("poll-rev1", pf[1].revents); num("poll-rev2", pf[2].revents);
-    num("poll-ev2", pf[2].events);
-    FnvnxWirePollfd pn[2] = {{-1, 1, 0xFFFF}, {-5, 4, 0xFFFF}};
-    t0 = fnvnx_hcall0(H->wall_time_us);
-    num("poll-neg-t0", sk(26, 3, FNVNX_ADDR(pn), 2, 0, 0, 0));
-    num("poll-neg-t10", sk(26, 3, FNVNX_ADDR(pn), 2, 10, 0, 0));
-    num("poll-neg-us", fnvnx_hcall0(H->wall_time_us) - t0);
-    num("poll-neg-rev", pn[0].revents | pn[1].revents);
-    uint32_t zw[4] = {0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA};
-    num("tz-0", plat(34, 0, FNVNX_ADDR(zw), 0, 2));
-    num("tz-off", zw[0]); num("tz-dst", zw[1]);
-    num("tz-abbr", zw[2]);   /* "UTC\0" little endian */
-    num("tz-abbr-rest", zw[3]);
-    num("tz-max", plat(34, 0x7FFFFFFFFFFFFFFFull, FNVNX_ADDR(zw), 0, 2));
-    zw[0] = 0xAAAAAAAA;
-    num("tz-1970", plat(34, 0, FNVNX_ADDR(zw), 0, 2)); num("tz-1970-off", zw[0]);
-    num("tz-2100-last", plat(34, 4133980799ull, FNVNX_ADDR(zw), 0, 2));
-    zw[0] = 0xAAAAAAAA;
-    num("tz-2101", plat(34, 4133980800ull, FNVNX_ADDR(zw), 0, 2)); num("tz-2101-untouched", zw[0]);   /* the label is historic: the offset 0 is written */
-    num("tz-u64max", plat(34, ~0ull, FNVNX_ADDR(zw), 0, 2));
-    num("tz-negative-main", plat(34, 0x8000000000000000ull, FNVNX_ADDR(zw), 0, 2));
-    num("tz-null-out", plat(34, 5, 0, 0, 2));
-    num("tz-slot", fnvnx_hcall0(H->tz_offset_minutes));
-#elif MODE == 50
-    /* THREAD_SELF and the thread_start / thread_join / thread_activity edge cases */
-    uint64_t s1 = plat(35, 0, 0, 0, 0), s2 = plat(35, 0, 0, 0, 0);
-    num("self-id", s1 != 0); num("self-distinct", s1 != s2);
-    num("self-start", fnvnx_hcall1(H->thread_start, s1));
-    num("self-join", fnvnx_hcall1(H->thread_join, s1));
-    num("self-prio", fnvnx_hcall3(H->thread_set_priority, s1, 5, 0));
-    num("self-resume", plat(2, s1, 0, 0, 2));
-    num("self-free", fnvnx_hcall1(H->thread_free, s2));
-    num("self-free-again", fnvnx_hcall1(H->thread_free, s2));
-    num("self-use-freed", plat(2, s2, 0, 0, 2));
-    uint64_t w = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(self_worker), s1, 0x10000, 0, ~0ull);
-    fnvnx_hcall1(H->thread_start, w);
-    while (sflag2 == 0) fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&sflag2), 0, ~0ull);
-    mainran = 1;
-    fnvnx_hcall1(H->thread_join, w);
-    num("pause-by-worker", tcount);   /* 100 + pause result 0 + 10 * main-ran-while-paused 0 + 1000 * resume result 0 */
-    uint64_t c = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(count_worker), 0, 0x10000, 0, ~0ull);
-    num("act-new", plat(2, c, 1, 0, 2));
-    num("start", fnvnx_hcall1(H->thread_start, c));
-    num("start-again", fnvnx_hcall1(H->thread_start, c));
-    fnvnx_hcall1(H->thread_join, c);
-    num("start-finished", fnvnx_hcall1(H->thread_start, c));
-    num("act-finished", plat(2, c, 1, 0, 2));
-    num("count", tcount);   /* the entry ran once: 100 + 1 */
-#elif MODE == 51
-    FnvnxWirePollfd pf = {-1, 1, 0};
-    sk(26, 3, FNVNX_ADDR(&pf), 1, ~0ull, 0, 0);   /* nothing can become ready and the timeout is forever */
-    say("after the poll\n");
-#elif MODE == 52
-    /* the numbers that hostapi.h no longer declares (SHUTDOWN, GETSOCKNAME, GETPEERNAME, GAI_OPEN, GAI_FETCH) answer NO_SERVICE for any nargs */
-    num("fn27", plat(27, 0, 0, 0, 2)); num("fn28", plat(28, 0, 0, 0, 2)); num("fn29", plat(29, 0, 0, 0, 0));
-    num("fn32", plat(32, 0, 0, 0, 4)); num("fn33", plat(33, 0, 0, 0, 3));
-#elif MODE == 53
-    uint32_t zo[4];
-    num("tz-below", plat(34, 0x7FFFFFFFFFFFFFFFull, FNVNX_ADDR(zo), 0, 2));
-    num("tz-above", plat(34, 1ull << 63, FNVNX_ADDR(zo), 0, 2));
-#elif MODE == 54
-    uint64_t me = plat(35, 0, 0, 0, 0);
-    num("self-pause", plat(2, me, 1, 0, 2));   /* the kernel: a thread is not paused through its own handle */
-    num("self-resume", plat(2, me, 0, 0, 2));
-    say("after the pause\n");
-#elif MODE == 55
-    uint64_t me = plat(35, 0, 0, 0, 0);
-    uint64_t w = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(rec_worker), 0, 0x10000, 0, ~0ull);
-    uint64_t c = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(count_worker), 0, 0x10000, 0, ~0ull);
-    num("not-started-pause", plat(2, c, 1, 0, 2));
-    fnvnx_hcall1(H->thread_start, c);
-    num("resume-running", plat(2, c, 0, 0, 2));       /* not paused */
-    num("pause", plat(2, c, 1, 0, 2));
-    num("pause-paused", plat(2, c, 1, 0, 2));         /* already paused */
-    num("resume", plat(2, c, 0, 0, 2));
-    num("resume-again", plat(2, c, 0, 0, 2));
-    fnvnx_hcall1(H->thread_join, c);
-    num("finished", plat(2, c, 1, 0, 2));
-    num("me-pause", plat(2, me, 1, 0, 2));
-    num("me-resume", plat(2, me, 0, 0, 2));
-    num("me-zero", plat(2, 0, 1, 0, 2));
-    fnvnx_hcall1(H->thread_start, w);
-    fnvnx_hcall1(H->thread_join, w);
-    num("rec-finished", plat(2, wrec, 1, 0, 2));      /* the record of a thread that has ended */
-    num("rec-finished-resume", plat(2, wrec, 0, 0, 2));
-    num("no-record", plat(2, 0x7777, 1, 0, 2));
-#elif MODE == 56
-    static FnvnxWireSockaddr to, lo;
-    static FnvnxWireAddrinfo recs[3];
-    static char buf[4];
-    uint32_t ec = 0x77;
-    uint64_t h1 = sk(16, 3, 2, 1, 0, 0, 0), h2 = sk(16, 3, 2, 2, 17, 0, 0);
-    num("h1", h1); num("h2", h2);
-    num("close1", sk(17, 1, h1, 0, 0, 0, 0));
-    uint64_t h3 = sk(16, 3, 2, 1, 6, 0, 0);
-    num("h3", h3);                                    /* the lowest free number again */
-    num("getfl", sk(30, 1, h2, 0, 0, 0, 0));
-    num("setfl", sk(31, 2, h2, 0x800, 0, 0, 0));
-    num("getfl-nb", sk(30, 1, h2, 0, 0, 0, 0));
-    to.family = 2; to.port = 80; to.addr[0] = 8; to.addr[1] = 8; to.addr[2] = 8; to.addr[3] = 8;
-    num("connect-ext", sk(21, 2, h3, FNVNX_ADDR(&to), 0, 0, 0));
-    num("sendto-ext", sk(22, 5, h2, FNVNX_ADDR(buf), 1, 0, FNVNX_ADDR(&to)));
-    num("recv-nb", sk(23, 5, h2, FNVNX_ADDR(buf), 1, 0, 0));
-    lo.family = 2; lo.port = 8080; lo.addr[0] = 127; lo.addr[3] = 1;
-    num("bind-lo", sk(18, 2, h3, FNVNX_ADDR(&lo), 0, 0, 0));
-    num("close3", sk(17, 1, h3, 0, 0, 0, 0));
-    num("closed-getfl", sk(30, 1, h3, 0, 0, 0, 0));
-    num("tz-last", plat(34, 4133980799ull, FNVNX_ADDR(recs), 0, 2));
-#elif MODE == 35
-    fnvnx_hcall1(H->exit, 0x5200002A);   /* fnvnx_reach_violation(42) */
-#elif MODE == 36
-    fnvnx_hcall1(H->exit, 0x5100002A);   /* an ordinary non-zero code */
-#elif MODE == 57
-    /* TEXT_ENTRY (36): argument checks, entered, entered with init, cancelled (scenario texts: "Ab" + U+1F600, "x", then none) */
-    static uint16_t ou[8]; static uint32_t nn;
-    for (int i = 0; i < 8; i++) ou[i] = 0x7777;
-    nn = 0x55555555;
-    uint64_t B = NEG(0x1759);
-    num("te-max0", sk(36, 5, 0, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)) == B);
-    num("te-max501", sk(36, 5, 501, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)) == B);
-    num("te-maxhuge", sk(36, 5, 0x100000001ull, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)) == B);
-    num("te-out-null", sk(36, 5, 8, 0, 0, 0, FNVNX_ADDR(&nn)) == B);
-    num("te-n-null", sk(36, 5, 8, 0, 0, FNVNX_ADDR(ou), 0) == B);
-    num("te-bad-untouched", ou[0] == 0x7777 && nn == 0x55555555);
-    static const uint16_t in[2] = {'q', 'r'};
-    num("te-entered", sk(36, 5, 8, FNVNX_ADDR(in), 2, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)));
-    num("te-n", nn);
-    num("te-u0", ou[0]); num("te-u1", ou[1]); num("te-u2", ou[2]); num("te-u3", ou[3]); num("te-nul", ou[4]); num("te-rest", ou[5]);
-    for (int i = 0; i < 8; i++) ou[i] = 0x7777;
-    nn = 0x55555555;
-    num("te-entered2", sk(36, 5, 500, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)));
-    num("te-n2", nn); num("te-2u0", ou[0]); num("te-2nul", ou[1]); num("te-2rest", ou[2]);
-    for (int i = 0; i < 8; i++) ou[i] = 0x7777;
-    nn = 0x55555555;
-    num("te-cancel", sk(36, 5, 8, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)));
-    num("te-cancel-untouched", ou[0] == 0x7777 && nn == 0x55555555);
-    num("te-cancel-again", sk(36, 5, 8, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)));
-#elif MODE == 58
-    /* TEXT_ENTRY: one call, max_len 3; the scenario text is longer (4 units): a scenario error */
-    static uint16_t ou[8]; static uint32_t nn;
-    num("te-long", sk(36, 5, 3, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)));
-    num("te-after-long", 1);
-#elif MODE == 59
-    /* TEXT_ENTRY: a text of exactly max_len units fits (2 units: one scalar above U+FFFF), out has room for max_len + 1 */
-    static uint16_t ou[3] = {0x7777, 0x7777, 0x7777}; static uint32_t nn;
-    num("te-fit", sk(36, 5, 2, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)));
-    num("te-fit-n", nn); num("te-fit-u0", ou[0]); num("te-fit-u1", ou[1]); num("te-fit-nul", ou[2]);
-#elif MODE >= 12
-    volatile uint32_t *pg = (volatile uint32_t *)(uintptr_t)PG(H);
-    plat(8, PG(H), 0x1000, 3, 3);
-    pg[0] = 1;
-#if MODE == 12 || MODE == 20
-    plat(8, PG(H), 0x1000, 1, 3);
-#if MODE == 12
-    num("reg", plat(10, FNVNX_ADDR(fh_fix), STK(H), 0, 2));
-    pg[0] = 0x77;
-    num("val", pg[0]); num("kind", gk); num("reason", gr); num("addr-ok", ga == PG(H)); num("count", gcnt);
-    num("sp-in-stack", gsp < PG(H) + 0x20000 && gsp > PG(H));
-#else
-    plat(8, PG(H), 0x1000, 1, 3);
-    uint64_t lo = 0x1122334455667788ull, hi = 0x99aabbccddeeff00ull, olo, ohi, nz;
-    plat(10, FNVNX_ADDR(fh_regs), STK(H), 0, 2);
-    __asm__ volatile("fmov d8, %[lo]\n ins v8.d[1], %[hi]\n mov x9, #5\n cmp x9, #7\n str w9, [%[p]]\n"
-                     "mrs %[nz], nzcv\n fmov %[olo], d8\n mov %[ohi], v8.d[1]\n"
-                     : [olo] "=&r"(olo), [ohi] "=&r"(ohi), [nz] "=&r"(nz)
-                     : [lo] "r"(lo), [hi] "r"(hi), [p] "r"(pg) : "x9", "v8", "cc", "memory");
-    num("v8lo", olo == lo); num("v8hi", ohi == hi); num("nzcv", nz >> 28);
-    num("frame-pstate", gps >> 28); num("frame-v8", gv0 == lo && gv1 == hi); num("store", pg[0]);
-#endif
-#elif MODE == 13
-    plat(8, PG(H), 0x1000, 1, 3);
-    plat(10, FNVNX_ADDR(fh_skip), STK(H), 0, 2);
-    uint64_t out, v = 9;
-    __asm__ volatile("mov x5, #0\n str %w1, [%2]\n mov %0, x5" : "=r"(out) : "r"(v), "r"(pg) : "x5", "memory");
-    num("marker", out); num("ins", *(volatile uint32_t *)(uintptr_t)gpc >> 22); num("still-ro", pg[0]);
-#elif MODE == 14
-    plat(10, FNVNX_ADDR(fh_skip), STK(H), 0, 2);
-    uint64_t out;
-    __asm__ volatile("mov x5, #0\n ldr w6, [%1]\n mov %0, x5" : "=r"(out) : "r"(0x30000000ull) : "x5", "x6", "memory");
-    num("marker", out); num("kind", gk); num("reason", gr); num("addr", ga);
-#elif MODE == 15
-    plat(10, FNVNX_ADDR(fh_five), STK(H), 0, 2);
-    plat(8, PG(H), 0x1000, 1, 3);
-    pg[0] = 2;
-    say("after the fault\n");
-#elif MODE == 16
-    plat(10, FNVNX_ADDR(fh_nested), STK(H), 0, 2);
-    plat(8, PG(H), 0x1000, 1, 3);
-    pg[0] = 2;
-    say("after the fault\n");
-#elif MODE == 17 || MODE == 18
-    plat(8, PG(H), 0x1000, 1, 3);
-#if MODE == 18
-    num("reg", plat(10, FNVNX_ADDR(fh_fix), STK(H), 0, 2));
-    num("unreg", plat(10, 0, 0, 0, 2));
-#endif
-    pg[0] = 2;
-    say("after the fault\n");
-#elif MODE == 19
-    plat(8, PG(H), 0x1000, 1, 3);
-    plat(10, FNVNX_ADDR(fh_fix), STK(H), 0, 2);   /* main's handler; the fault below is thread 2's */
-    uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(fault_thread), 3, 0x10000, 0, ~0ull);
-    fnvnx_hcall1(H->thread_start, id);
-    fnvnx_hcall1(H->thread_join, id);
-    say("after the fault\n");
-#elif MODE == 21
-    plat(8, PG(H), 0x1000, 1, 3);
-    num("misaligned", plat(10, FNVNX_ADDR(fh_fix), STK(H) + 8, 0, 2));
-    plat(10, FNVNX_ADDR(fh_fix), STK(H), 0, 2);
-    plat(8, STK(H) - 0x1000, 0x1000, 1, 3);   /* the frame page is read-only */
-    pg[0] = 2;
-    say("after the fault\n");
-#endif
-#else
-    num("marker", marker(41));
-    volatile uint32_t *hp = (volatile uint32_t *)(uintptr_t)H->heap_base;
-    hp[0] = 0xabcd0001; hp[0x3FFF] = 0xabcd0002;
-    num("map", fnvnx_hcall3(H->map_fixed, 0x4000000, 0x10000, H->heap_base));
-    volatile uint32_t *p = (volatile uint32_t *)0x4000000;
-    num("carried", p[0] ^ p[0x3FFF]);
-    num("zeroed-rest", p[1] | p[0x3FFE]);
-#if MODE == 4
-    num("touch-src", hp[0]);   /* the given-away block: the run must end here */
-    say("after the fault\n");
-#endif
-    p[0] = 0x1234; p[0x3FFF] = 0x5678;
-    num("readback", p[0] + p[0x3FFF]);
-    num("overlap", fnvnx_hcall3(H->map_fixed, 0x4000000, 0x1000, H->heap_base + 0x20000));
-    num("keys", fnvnx_hcall3(H->map_fixed, 0xf0000, 0x1000, H->heap_base + 0x20000));
-    num("src-unaligned", fnvnx_hcall3(H->map_fixed, 0x4010000, 0x1000, H->heap_base + 0x20001));
-    num("src-given", fnvnx_hcall3(H->map_fixed, 0x4010000, 0x1000, H->heap_base));
-    num("src-outside", fnvnx_hcall3(H->map_fixed, 0x4010000, 0x1000, 0x10000));
-    num("src-past-end", fnvnx_hcall3(H->map_fixed, 0x4010000, 0x2000, H->heap_base + H->heap_size - 0x1000));
-    uint64_t a[3] = {0x4000000, 0x10000, 1};
-    num("protect", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(a), 3));
-    uint64_t u[3] = {0x3000000, 0x1000, 1};
-    num("protect-unmapped", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(u), 3));
-    uint64_t im[3] = {H->guest_base, 0x1000, 0};
-    num("protect-image", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(im), 3));
-    uint64_t hg[3] = {H->heap_base, 0x1000, 0};
-    num("protect-given-src", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(hg), 3));
-    uint64_t hp0[3] = {H->heap_base + 0x30000, 0x1000, 0}, hp1[3] = {H->heap_base + 0x30000, 0x1000, 3};
-    num("protect-heap-none", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(hp0), 3));
-#if MODE == 5
-    num("touch-guard", *(volatile uint32_t *)(uintptr_t)(H->heap_base + 0x30000));
-    say("after the fault\n");
-#endif
-    num("protect-heap-rw", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(hp1), 3));
-    *(volatile uint32_t *)(uintptr_t)(H->heap_base + 0x30000) = 5;
-    num("heap-rw-works", *(volatile uint32_t *)(uintptr_t)(H->heap_base + 0x30000));
-    uint64_t hu[3] = {H->heap_base + 0x30000, 0x800, 3};
-    num("protect-bad-size", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(hu), 3));
-    hu[0]++; hu[1] = 0x1000;
-    num("protect-bad-addr", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(hu), 3));
-#if MODE == 3
-    p[0] = 9;   /* a write to the read-only page: the run must end here */
-    say("after the fault\n");
-#endif
-    uint64_t w[3] = {0x4000000, 0x10000, 3};
-    num("unprotect", fnvnx_hcall4(H->ext_call, 11, 8, FNVNX_ADDR(w), 3));
-    p[0] = 9;
-    uint64_t t1 = fnvnx_hcall0(H->system_tick), t2 = fnvnx_hcall0(H->system_tick);
-    num("tickdiff", t2 - t1);
-    uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(worker), 77, 0x10000, 0, ~0ull);
-    num("thread", id);
-    fnvnx_hcall1(H->thread_start, id);
-    uint64_t r = 0;
-    while (flag == 0) r = fnvnx_hcall3(H->wait_on_address, FNVNX_ADDR(&flag), 0, ~0ull);
-    num("woken", r); num("flag", flag);
-    fnvnx_hcall1(H->thread_join, id);
-    uint64_t fd = fnvnx_hcall2(H->fs_open, FNVNX_ADDR("sdmc:/Data.BIN"), FNVNX_O_READ);
-    char buf[9]; buf[8] = 0;
-    uint64_t n = fnvnx_hcall4(H->fs_pread, fd, FNVNX_ADDR(buf), 8, 2);
-    num("pread", n); say(buf); say("\n");
-    fnvnx_hcall1(H->fs_close, fd);
-    num("rand-calls-equal", fnvnx_hcall0(H->random64) != fnvnx_hcall0(H->random64));
-#endif
-    fnvnx_hcall1(H->exit, 7);
-    return 0;
-}
-'''
 
 
 def parse_totality(path):
@@ -936,34 +77,16 @@ def sh(cmd):
     return r.stdout
 
 
-def build(mode, more=""):
-    """crt0.s + test C (GUEST with -DMODE) -> (ELF bytes, ELF path); importable: test_boot.py uses it. `more`: C text of further
-    `#if MODE == n ... #elif` branches of another test file, placed before the MODE 6 branch (the guest source is this argument's
-    function; the module's GUEST is never changed)"""
-    tag = "x" if more else ""
-    src, ld = os.path.join(TMP, "g%s.c" % tag), os.path.join(TMP, "guest.ld")
-    if not os.path.exists(ld):
-        shutil.copy(os.path.join(GUEST_DIR, "guest.ld"), ld)
-        sh([CC] + CFLAGS[:3] + ["-c", os.path.join(GUEST_DIR, "crt0.s"), "-o", os.path.join(TMP, "crt0.o")])
-    if not os.path.exists(src):
-        text = GUEST
-        if more:
-            assert text.count("#if MODE == 6") == 1
-            text = text.replace("#if MODE == 6", more, 1)
-        open(src, "w").write(text)
-    # crt0 header: the +20 size and +24 flags are filled as elf2nso does
-    obj, elf = os.path.join(TMP, "g%s%d.o" % (tag, mode)), os.path.join(TMP, "g%s%d.elf" % (tag, mode))
-    sh([CC] + CFLAGS + ["-DMODE=%d" % mode, "-g", "-c", src, "-o", obj])
-    sh(["aarch64-linux-gnu-ld"] + LDFLAGS + ["-T", ld, os.path.join(TMP, "crt0.o"), obj, "-o", elf])
-    data = bytearray(open(elf, "rb").read())
-    phoff, phnum = struct.unpack_from("<I", data, 28)[0], struct.unpack_from("<H", data, 44)[0]
-    loads = [struct.unpack_from("<8I", data, phoff + 32 * i) for i in range(phnum)]
-    loads = [p for p in loads if p[0] == 1]
-    lo = min(p[3] for p in loads) // 4096 * 4096
-    hi = (max(p[3] + p[5] for p in loads) + 4095) // 4096 * 4096
-    first_x = next(p for p in loads if p[6] & 1)
-    struct.pack_into("<III", data, first_x[1] + 16, lo, hi - lo, 1)
-    return bytes(data), elf
+def build(mode):
+    """the guest image of MODE -> (ELF bytes, ELF path); importable: test_boot.py, test_bootgpu.py, test_boot_job.py use it. The image is the
+    output of verify/recipe.py for the root tests/bootguest, variant m<MODE> (RECIPE.md "Variants"), built through gate_build.ensure in
+    GATE_CACHE (the verdict's own store; a standalone run without GATE_CACHE builds cold into the scratch directory). The crt0 header
+    words (+16 link address, +20 span, +24 relocatable) are written by the recipe's ldcheck stage."""
+    res, out = gate_build.ensure("%s@m%d" % (GUEST_ROOT, mode), GATE_CACHE, REPO)
+    if res["status"] != "green":
+        raise RuntimeError("guest image of MODE %d: recipe %s: %s" % (mode, res["status"], res.get("failure")))
+    path = res["elf"]["path"]
+    return open(path, "rb").read(), path
 
 
 def symbol(elf, name):
@@ -998,7 +121,7 @@ def main():
     root = os.path.join(TMP, "sd")
     os.makedirs(root)
     open(os.path.join(root, "data.bin"), "wb").write(b"01ABCDEFGH23")
-    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, *range(12, 22), *range(30, 42), 44, 45, 46, 47, 48, *range(49, 57), 57, 58, 59)}   # MODE 6 (boot CLI guest) is built by test_boot.py
+    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, *range(12, 22), *range(30, 42), 44, 45, 46, 47, 48, *range(49, 57), 57, 58, 59, 90, 91)}   # MODE 6 (boot CLI guest) is built by test_boot.py
     elf0, path0 = built[0]
     plan0 = make_plan(elf0)
     base = plan0["image"]["base"]
@@ -1566,6 +689,155 @@ def main():
          r47["reason"] == "exit" and not bad and (1 << 63) - 1 <= r47["virtual_ns"] <= (1 << 63) - 1 + 10**9, (bad, r47))
     case("new modes: two identical runs give identical run() dicts", r44 == run(built[44][0], root)[0]
          and r45 == run(built[45][0], root)[0] and r46 == run(built[46][0], root)[0] and r40 == run(built[40][0], root)[0], "")
+
+    # R-INPUT (journal/inbox/l4-verify-011.md): the declared device states, read as host_v3.inc does (expected values derived by hand from it)
+    ms = lambda n: n * 1_000_000   # noqa: E731
+    S1 = {"schema": "fnvnx-scenario/1", "states": [
+        {"t_ns": ms(100), "dev": "pad", "index": 0, "connected": 1, "buttons": 16, "lx": -5, "ly": 6, "rx": 7, "ry": -8},
+        {"t_ns": ms(100), "dev": "pad", "index": 3, "connected": 1, "buttons": 0x8000000000000001},
+        {"t_ns": ms(100), "dev": "kbd", "keys": [4, 225]},
+        {"t_ns": ms(200), "dev": "kbd", "keys": [4]},
+        {"t_ns": ms(300), "dev": "kbd", "keys": [30]},
+        {"t_ns": ms(310), "dev": "kbd", "keys": []},
+        {"t_ns": ms(400), "dev": "mouse", "connected": 1, "buttons": 1, "dx": 3, "dy": -2, "wheel": 1},
+        {"t_ns": ms(500), "dev": "mouse", "connected": 1, "buttons": 0},
+        {"t_ns": ms(600), "dev": "touch", "points": [{"id": 7, "x": 640, "y": 360}, {"id": 9, "x": -1, "y": 2}]},
+        {"t_ns": ms(700), "dev": "touch", "points": []},
+        {"t_ns": ms(800), "dev": "kbd", "keys": [4, 5, 6]},
+        {"t_ns": ms(900), "dev": "docked", "value": 1},
+        {"t_ns": ms(1000), "dev": "docked", "value": 0}]}
+    sc1 = bootinput.Scenario(json.dumps(S1))
+    r90, l90 = run(built[90][0], root, svc=boothost.Services(root, None, sc1))[:2]
+    k = kv(l90)
+    Z = {"c": "0", "p": "0", "l": "0", "h": "0", "x": "0", "y": "0", "X": "0", "Y": "0"}
+    A = {f: "aaaaaaaa" for f in Z}
+    pad = lambda n, rc, f: {n: rc, **{"%s.%s" % (n, a): v for a, v in f.items()}}   # noqa: E731
+    END0 = ["5.0.0.0.0"]
+
+    def evl(n, evs, tail="aa"):
+        d = {n: str(len(evs)), n + ".t": tail}
+        d.update({"%s.%x" % (n, i): e for i, e in enumerate(evs)})
+        return d
+    want = {}
+    want.update(pad("a-pad0", "0", Z)); want.update(evl("a-e60", END0)); want["a-d60"] = "0"
+    want.update(pad("b-pad0", "1", {"c": "1", "p": "0", "l": "10", "h": "0", "x": "fffffffb", "y": "6", "X": "7", "Y": "fffffff8"}))
+    want.update(pad("b-pad1", "0", Z)); want.update(pad("b-pad3", "1", dict(Z, c="1", l="1", h="80000000"))); want.update(pad("b-pad4", "0", A))
+    want.update(evl("b-e150", ["1.4.1.0.0", "1.e1.1.0.0"] + END0)); want.update(evl("b-e151", END0))
+    want.update(evl("c-e250", ["1.e1.0.0.0"] + END0))
+    want.update(evl("d-e290", END0)); want.update(evl("d-e350", ["1.4.0.0.0"] + END0))
+    want.update(evl("e-e450", ["2.0.3.fffffffe.1", "3.0.1.0.0"] + END0)); want.update(evl("e-e451", ["2.0.3.fffffffe.1"] + END0))
+    want.update(evl("f-e550", ["3.0.0.0.0"] + END0))
+    T2 = ["4.7.280.168.0", "4.9.ffffffff.2.0", "5.2.0.0.0"]
+    want.update(evl("g-e650", T2)); want.update(evl("g-e651", T2)); want.update(evl("h-e750", END0))
+    want["j-d850"] = "0"; want.update(evl("j-e850", ["1.4.1.0.0", "1.5.1.0.0"])); want.update(evl("j-e851", END0)); want.update(evl("j-e852", []))
+    want["k-d950"] = "1"; want["k-d1050"] = "0"
+    bad = {n: (k.get(n), v) for n, v in want.items() if k.get(n) != v}
+    case("R-INPUT before the first state: pad_read 0 and zeros, input_poll only TOUCH_END(0), docked = the profile (0) (%d values)" % len(want),
+         r90["reason"] == "exit" and not [n for n in bad if n.startswith("a-")], {n: x for n, x in bad.items() if n.startswith("a-")})
+    case("R-INPUT pad_read: a connected pad's buttons (u64) and sticks (s32); a pad never declared is zeros; index 4 writes nothing and returns 0",
+         not [n for n in bad if n.startswith("b-pad")], {n: x for n, x in bad.items() if n.startswith("b-pad")})
+    case("R-INPUT key edges: down for each new key in usage order, up when released; a second poll with the same state gives none",
+         not [n for n in bad if n[:2] in ("b-", "c-") and "pad" not in n], {n: x for n, x in bad.items() if n[:2] in ("b-", "c-")})
+    case("R-INPUT a short stroke between two polls is not seen (key 30 down at 300 ms, up at 310 ms, polls at 290 and 350 ms)",
+         not [n for n in bad if n.startswith("d-")] and "1.1e.1.0.0" not in str(k), {n: x for n, x in bad.items() if n.startswith("d-")})
+    case("R-INPUT mouse: the sample's delta is delivered by every poll that reads it (twice), the button edge once; zero delta gives no move",
+         not [n for n in bad if n[:2] in ("e-", "f-")], {n: x for n, x in bad.items() if n[:2] in ("e-", "f-")})
+    case("R-INPUT touch: every current point and TOUCH_END(count) on every poll, also with no point",
+         not [n for n in bad if n[:2] in ("g-", "h-")], {n: x for n, x in bad.items() if n[:2] in ("g-", "h-")})
+    case("R-INPUT cap: events beyond cap are lost, the key state still advances (KEY 6 never comes), cap 0 writes nothing",
+         not [n for n in bad if n.startswith("j-e")], {n: x for n, x in bad.items() if n.startswith("j-e")})
+    case("R-INPUT DISPLAY_DOCKED follows state(docked, T): 0 before, 1 after 900 ms, 0 after 1000 ms",
+         not [n for n in bad if n[:2] in ("j-", "k-") and "-d" in n], {n: x for n, x in bad.items() if "-d" in n})
+    case("R-INPUT run: all %d values of the scenario guest as derived from host_v3.inc" % len(want), r90["reason"] == "exit" and not bad, bad)
+    r90b = run(built[90][0], root, svc=boothost.Services(root, None, sc1))[0]
+    case("R-INPUT run: two identical runs give identical run() dicts", r90 == r90b, "")
+    rp = run(built[90][0], root, profile="docked", svc=boothost.Services(root, None, sc1))[1]
+    case("R-INPUT docked default is the profile until the scenario declares it (--profile docked: 1 before, 0 after 1000 ms)",
+         kv(rp).get("a-d60") == "1" and kv(rp).get("j-d850") == "1" and kv(rp).get("k-d1050") == "0", kv(rp))
+    rn = run(built[90][0], root)[1]
+    kn = kv(rn)
+    case("R-INPUT no scenario: nothing attached on every read (the declared machine's default), as before",
+         kn.get("b-pad0") == "0" and kn.get("e-e450") == "1" and kn.get("g-e650") == "1" and kn.get("j-e850") == "1" and kn.get("k-d950") == "0", kn)
+    # watch reads
+    sw = boothost.Services(root, None, sc1, watch_reads=True)
+    rw = run(built[90][0], root, svc=sw)[0]
+    rd = [e for e in rw["events"] if e["kind"] == "input-read"]
+    case("R-INPUT input-read events only under the watch switch: one per device read (pad 1 per pad_read, kbd/mouse/touch per poll, docked)",
+         not [e for e in r90["events"] if e["kind"] == "input-read"] and len(rd) > 0
+         and {e["dev"] for e in rd} == {"pad", "kbd", "mouse", "touch", "docked"}
+         and sum(e["dev"] == "pad" for e in rd) == 4 and sum(e["dev"] == "kbd" for e in rd) == 15 and sum(e["dev"] == "docked" for e in rd) == 4
+         and all(e["t_ns"] > 0 and e["tid"] == 1 for e in rd), rd[:3])
+    # pad_vibrate
+    pd = lambda t, i, c: {"t_ns": ms(t), "dev": "pad", "index": i, "connected": c}   # noqa: E731
+    SV = bootinput.Scenario(json.dumps({"schema": "fnvnx-scenario/1", "states": [pd(50, 0, 1), pd(120, 1, 1), pd(150, 2, 1), pd(250, 3, 1), pd(350, 3, 0)]}))
+    r91, l91 = run(built[91][0], root, svc=boothost.Services(root, None, SV))[:2]
+    k = kv(l91)
+    vib = [e for e in r91["events"] if e["kind"] == "pad-vibrate"]
+    case("R-INPUT pad_vibrate returns 0 for every call; the event is what a connected pad received: float bits as the low 32 bits given",
+         r91["reason"] == "exit" and all(k.get(n) == "0" for n in ("v1pre", "v0", "v1", "v2", "v4", "vbig", "v3", "v3off"))
+         and [(e["index"], e["lo"], e["hi"]) for e in vib] == [(0, "0x3f000000", "0x0"), (1, "0x3f000000", "0x3f000000"),
+                                                               (2, "0x3f800000", "0x3e800000"), (3, "0x80000000", "0x7fc00000")], (k, vib))
+    case("R-INPUT pad_vibrate: before the pad's first state no event (index 1 at 60 ms), connected at 120 ms: one event (130 ms); index > 3 (also 2^32) none; "
+         "disconnected at 350 ms: none (index 3 at 400 ms)", len(vib) == 4 and [e["index"] for e in vib] == [0, 1, 2, 3], vib)
+    case("R-INPUT pad_vibrate events carry tid and the virtual time of the call",
+         all(e["tid"] == 1 for e in vib) and [ms(t) <= e["t_ns"] < ms(t + 1) for e, t in zip(vib, (100, 130, 200, 300))] == [True] * 4, vib)
+    rv0 = run(built[91][0], root)[0]
+    case("R-INPUT pad_vibrate with no scenario (no pad attached): no event, returns 0", not [e for e in rv0["events"] if e["kind"] == "pad-vibrate"]
+         and rv0["reason"] == "exit", rv0["events"])
+    exs = lambda ev: bootinput.Scenario(json.dumps({"schema": "fnvnx-scenario/1", "expect_events": ev}))   # noqa: E731
+    P = lambda i, **kw: dict(kind="pad-vibrate", index=i, **kw)   # noqa: E731
+    ex_ok = exs([P(0, lo="0x3f000000", hi="0x0"), P(1), P(2), P(3, lo="0x80000000")])
+    case("R-INPUT expect_events: compared in order, with the keys given; equal -> no difference", ex_ok.check_expect(r91["events"]) == [], ex_ok.check_expect(r91["events"]))
+    ex_bad, ex_short = exs([P(2), P(0)]), exs([P(0)])
+    ex_val = exs([P(0, lo="0x3f800000"), P(1), P(2), P(3)])
+    ex_off = exs([P(0), P(1), P(2), P(3), P(3)])
+    case("R-INPUT expect_events: another order, a different count or a different value is a difference",
+         len(ex_bad.check_expect(r91["events"])) == 3 and ex_short.check_expect(r91["events"]) == ["expected 1 pad-vibrate events, recorded 4"]
+         and ex_val.check_expect(r91["events"]) == ["event 0: lo expected '0x3f800000', recorded '0x3f000000'"],
+         (ex_bad.check_expect(r91["events"]), ex_short.check_expect(r91["events"]), ex_val.check_expect(r91["events"])))
+    case("R-INPUT expect_events: an event expected from a disconnected pad (index 3 after 350 ms) is a count mismatch",
+         ex_off.check_expect(r91["events"]) == ["expected 5 pad-vibrate events, recorded 4"], ex_off.check_expect(r91["events"]))
+    # state(dev, T): stable sort, last state with t_ns <= T
+    sc = bootinput.Scenario(json.dumps({"schema": "fnvnx-scenario/1", "states": [
+        {"t_ns": 20, "dev": "docked", "value": 0}, {"t_ns": 10, "dev": "docked", "value": 1}, {"t_ns": 10, "dev": "docked", "value": 0},
+        {"t_ns": 10, "dev": "docked", "value": 1}]}))
+    st = lambda t: sc.state("docked", 0, t, {"value": 7})["value"]   # noqa: E731
+    case("R-INPUT state(dev, T): the default before the first state, equal t_ns keep the file order (last wins), the state holds until the next",
+         [st(0), st(9), st(10), st(19), st(20), st(10**12)] == [7, 7, 1, 1, 0, 0], [st(t) for t in (0, 9, 10, 19, 20)])
+
+    def err(doc):
+        try:
+            bootinput.Scenario(doc if isinstance(doc, str) else json.dumps(doc))
+        except bootinput.ScenarioError as e:
+            return str(e)
+        return None
+
+    def one(dev, **kw):
+        return {"schema": "fnvnx-scenario/1", "states": [dict(t_ns=0, dev=dev, **kw)]}
+    I = "fnvnx-scenario/1"   # noqa: E741
+    ranges = [
+        ("not JSON", "{", "not JSON"), ("schema", {"schema": "x"}, "schema must be"), ("top-level key", {"schema": I, "foo": 1}, "unknown key 'foo'"),
+        ("state key", one("kbd", keyz=[]), "unknown key 'keyz'"), ("dev", one("gamepad"), "dev must be"),
+        ("missing index", one("pad"), "missing key 'index'"), ("pad index 4", one("pad", index=4), "outside 0..3"),
+        ("pad connected 2", one("pad", index=0, connected=2), "outside 0..1"),
+        ("pad buttons 2^64", one("pad", index=0, buttons=1 << 64), "outside 0..18446744073709551615"),
+        ("stick 2^31", one("pad", index=0, lx=1 << 31), "outside -2147483648..2147483647"),
+        ("stick -2^31-1", one("pad", index=0, ry=-(1 << 31) - 1), "outside"), ("stick a bool", one("pad", index=0, lx=True), "must be an integer"),
+        ("stick a float", one("pad", index=0, lx=1.5), "must be an integer"), ("key 3", one("kbd", keys=[3]), "outside 4..231"),
+        ("key 232", one("kbd", keys=[232]), "outside 4..231"), ("mouse button 5", one("mouse", buttons=0x20), "outside 0..31"),
+        ("mouse dx", one("mouse", dx=1 << 31), "outside"), ("17 points", one("touch", points=[{"id": i, "x": 0, "y": 0} for i in range(17)]), "at most 16"),
+        ("point x", one("touch", points=[{"id": 0, "x": 1 << 31, "y": 0}]), "outside"), ("point key", one("touch", points=[{"id": 0, "x": 0, "y": 0, "z": 1}]), "unknown key 'z'"),
+        ("point id", one("touch", points=[{"id": -1, "x": 0, "y": 0}]), "outside 0..4294967295"), ("docked 2", one("docked", value=2), "outside 0..1"),
+        ("t_ns negative", {"schema": I, "states": [{"t_ns": -1, "dev": "docked", "value": 0}]}, "outside"),
+        ("t_ns missing", {"schema": I, "states": [{"dev": "docked", "value": 0}]}, "missing key 't_ns'"),
+        ("expect kind", {"schema": I, "expect_events": [{"kind": "other"}]}, "kind 'pad-vibrate'"),
+        ("expect key", {"schema": I, "expect_events": [{"kind": "pad-vibrate", "x": 1}]}, "unknown key 'x'"),
+        ("text_entries", {"schema": I, "text_entries": [1]}, "list of strings")]
+    badr = [(n, err(d)) for n, d, why in ranges if not (err(d) or "").count(why)]
+    case("R-INPUT scenario errors: %d malformed or out-of-range inputs are each rejected with its reason, none is clamped" % len(ranges), not badr, badr)
+    good = err(one("pad", index=3, buttons=(1 << 64) - 1, lx=-(1 << 31), ry=(1 << 31) - 1)) or err(one("kbd", keys=[4, 231])) or \
+        err(one("mouse", buttons=0x1F, dx=-(1 << 31))) or err(one("touch", points=[{"id": i, "x": -(1 << 31), "y": (1 << 31) - 1} for i in range(16)]))
+    case("R-INPUT the range limits themselves are accepted", good is None, good)
     print("%d cases, %.1f s" % (N[0], time.time() - t0))
     return 1 if FAILED else 0
 
