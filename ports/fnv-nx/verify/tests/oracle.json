@@ -285,6 +285,48 @@
     "ports/fnv-nx/verify/gate_contract.py"
    ]
   },
+  "test_gate_imports.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_imports.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/imports.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/bridgetable.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_imports.py",
+    "ports/fnv-nx/contract/imports.py",
+    "ports/fnv-nx/contract/bridgetable.py"
+   ]
+  },
+  "test_gate_machine.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_machine.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/hive.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_machine.py",
+    "ports/fnv-nx/contract/hive.py"
+   ]
+  },
   "test_gates.py": {
    "references": [
     {
@@ -364,6 +406,29 @@
     "ports/fnv-nx/verify/runtime.py",
     "ports/fnv-nx/verify/toolflags.py",
     "ports/fnv-nx/verify/toolflags_policy.py"
+   ]
+  },
+  "test_link.py": {
+   "references": [
+    {
+     "anchor": "## Link: the guest ELF",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    },
+    {
+     "anchor": "## link/ldcheck.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/recipe.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/link/ldcheck.py"
    ]
   },
   "test_linkstrict.py": {

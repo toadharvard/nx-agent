@@ -1,0 +1,111 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "external": "gcc-msvcmodel",
+  "cc": "bin/aarch64-linux-gnu-gcc",
+  "cxx": "bin/aarch64-linux-gnu-g++"
+ },
+ "flags": {
+  "c": [
+   "-O2",
+   "-mabi=ilp32"
+  ],
+  "cxx": [
+   "-O2",
+   "-mabi=ilp32",
+   "-fms-extensions",
+   "-fshort-wchar",
+   "-frounding-math",
+   "-fsigned-char",
+   "-fno-strict-aliasing",
+   "-fwrapv",
+   "-fno-delete-null-pointer-checks",
+   "-fcheck-new",
+   "-fno-sized-deallocation",
+   "-fno-lifetime-dse",
+   "-ffp-contract=off",
+   "-DFNVNX_SDD=1",
+   "-fno-devirtualize",
+   "-fno-reorder-blocks-and-partition",
+   "-std=gnu++20"
+  ],
+  "asm": [
+   "-mabi=ilp32"
+  ]
+ },
+ "include": [
+  "/ext/a64/aarch64-none-elf/include/c++/15.2.0",
+  "/ext/a64/aarch64-none-elf/include/c++/15.2.0/aarch64-none-elf/ilp32",
+  "/ext/a64/aarch64-none-elf/include"
+ ],
+ "units": "all",
+ "plugin_cxx": "x86_64-linux-gnu-g++-13",
+ "plugins": [
+  {
+   "name": "fnvnx_ftoi",
+   "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_order",
+   "source": "ports/fnv-nx/toolchain/order/fnvnx_order.cc",
+   "args": {
+    "args": "rtl",
+    "object": "msvc",
+    "operator": "rtl",
+    "assign": "msvc"
+   }
+  },
+  {
+   "name": "fnvnx_sdd",
+   "source": "ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_pi",
+   "source": "ports/fnv-nx/toolchain/pi/fnvnx_pi.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_dispatch",
+   "source": "ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_addr",
+   "source": "ports/fnv-nx/toolchain/addr/fnvnx_addr.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_names",
+   "source": "ports/fnv-nx/toolchain/names/fnvnx_names.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_layout",
+   "source": "ports/fnv-nx/toolchain/layout/fnvnx_layout.cc",
+   "args": {},
+   "inputs": [
+    "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
+   ]
+  }
+ ],
+ "external": [
+  {
+   "name": "gcc-msvcmodel",
+   "repo": "fnv-nx-build",
+   "ref": "tools/gcc-ilp32-msvcmodel",
+   "commit": "b4057704c0babd012e466cc89181132e02542289",
+   "tree_sha256": "b60eafe7a5b0ae3dc679f9bf21e20d3363e3bac2af7379e34127ea5cf8455116",
+   "at": "/ext/gcc"
+  },
+  {
+   "name": "fnvnx-a64-msvcmodel",
+   "repo": "fnv-nx-build",
+   "ref": "tools/fnvnx-a64-msvcmodel",
+   "commit": "00e3d42acd10593d534b9a70bb8940cee7991436",
+   "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
+   "at": "/ext/a64"
+  }
+ ]
+}

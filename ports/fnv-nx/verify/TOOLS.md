@@ -56,6 +56,25 @@ Gate `bodysel` ($GATE_OUT/bodysel.json, gatefile.py): universe = the code addres
 with a verdict (totality).  The result is a function of the argument files only; rows are written sorted.
 ```
 
+## contract/bridgetable.py
+
+```text
+Bridge table of the import guest entries, pure derivation (rows: dll, name, ordinal, conv, ret, args, native_symbol, bind).
+
+A pure function of its arguments (no file, no process): the driver verify/gate_imports.py reads the declared inputs and calls derive().
+  names       text of sys_names.tsv (dll TAB name per line) from the private manifest
+  spec_text   function dll -> text of the export specification of the reference environment (Wine 9.0 dlls/<dll>/<dll>.spec)
+  syms        the set of symbol names that the product objects define or reference (objects.json defined + undefined)
+  name_table  {msvcrt name: (symbol, kind)} of the name table the product serves msvcrt names from (read_name_table)
+  extra       texts of rows in this 8-column format (other owners' rows: COM interfaces); a row of the same (dll, name) replaces the derived one
+bind  sym    native_symbol is a symbol of the product objects     lookup  msvcrt name served by the name table (native_symbol `-`)
+      l3     provided by the lifter runtime under native_symbol   data    the slot holds the address of the object native_symbol
+      none   no implementation: the gate `imports` is red for the row
+conv  stdcall | cdecl | vararg | thiscall | fastcall | data;  ret v|i|q|f|d;  args: x86 stack slots i|q|f|d.
+A name missing from its spec, a stub in the spec, a forward that cannot be followed or an unknown argument type is an error: total or failing.
+`lookup` is decided by the name table, a declared input (a name is in it or not), not by a run.
+```
+
 ## contract/gate_call.py
 
 ```text
@@ -159,7 +178,7 @@ fact status, sites examined and reasons.  --facts-h: the C header (FNVNX_REACH_<
 the requests of the same dll!name in canonical order; FNVNX_<request id> for the platform's own names; FNVNX_REACH_TABLE_ID).
 
 Mode --objects (gate `reachlink`, the link side).  The universe is every reference to the ELF symbol fnvnx_reach_violation in the
-objects and archive members of the response file (one quoted path per line, ld.py's inputs.rsp), read from the relocation
+objects and archive members of the response file (one quoted path per line, a response file of the link, inputs.rsp), read from the relocation
 tables (sh_info of a SHT_RELA / SHT_REL names the section; no text).  A reference is green iff
   - it is a R_AARCH64_P32_CALL26 / JUMP26 in an executable section (any other reference, e.g. a pointer in data, lets w0 be
     anything: `reference-not-call`);
@@ -233,6 +252,30 @@ too and compared with the platform's constant.  Check (--bridge): pairs the plat
 Exe-derived: container and fnv-nx-build only.
 ```
 
+## contract/hive.py
+
+```text
+Gate `registry` (class G of verify/VERDICT.md, the declared machine's registry), pure rules: the product's hive holds exactly the keys that
+the exe and the modules read, found statically from their call sites, with the values of the declared machine.
+
+Values (no file, no process): `sites` text of regsites.tsv (module, site, api, root, subkey, value, status static|dynamic, reason: the registry-API
+call sites of the exe and its modules, exe-derived and private), `declared` text of declared_registry.tsv (root, key, name, type, data, source:
+public), `seed` text of the include the product is built from, `refs` {unit: set of referenced symbol names} of the product objects.
+Items of the universe and their certification:
+  declared:<root>\<key>:<name>   every declared row; certified iff a static read site (role read, status static) reads it (root, key and
+                                  name equal, case-insensitive as the registry compares)
+  site:<module>:<site>:<api>      every site of role open, create or read whose root, key or value is not statically resolved; never certified
+                                  (class dynamic). While one exists the verdict is a MEASUREMENT build, as for a dynamic-name GetProcAddress
+                                  site in the reach gate (VERDICT.md): a declared row cannot be proven complete against an unresolved site
+  seed                            certified iff `seed` equals, byte for byte, the include generate() makes from (sites, declared)
+  writer:<unit>                   every product object that references a hive-writing API (role create or write); certified iff it is the
+                                  declared seed unit: no other code of the product makes a hive key
+generate() is the port of platform/manifest/gen_registry_seed.py (L5): it refuses a declared row that no static read site reads, a malformed or
+duplicate row, a value not valid for its type, and a `{` that is not `{game_dir}`. Assumptions: regsites.tsv is complete over the exe and the
+modules (the registry-site pass reports what it cannot bind as dynamic, never skips); the seed unit and the registry implementation are the only
+code that reaches the hive, and the implementation creates no key by itself (the writers rule closes the entry points, not the internals).
+```
+
 ## contract/iat.py
 
 ```text
@@ -297,6 +340,25 @@ files of the given directories (first directory in list order that has it; two f
 error). A dll found there is a GUEST IMAGE and is walked further; a dll not found there is a platform import (gate `imports`, owner L5)
 and is not an image. Assumption (stated, VERDICT.md): dynamic LoadLibrary names are facts of the `gpa` gate, not of this rule.
 Order: the exe, then the images in discovery order (depth first, import directory then delay-load directory).
+```
+
+## contract/imports.py
+
+```text
+Gate `imports` (class 4 of verify/VERDICT.md), pure judgement: every row of the bridge table has a body proven by the build products.
+
+Inputs (all values, no file): rows from bridgetable.derive; `syms` {symbol: [(bind, type)]} of the product objects (objects.json `defined`);
+`table` the msvcrt name table {name: (symbol, kind)}; `others` the same kind of map over every product root that is not the one the rows belong
+to; `owner_of` {(dll, name): index} of rows taken from files that belong to another owner's build (the `external` rows).
+A row is certified iff its body is proven by the symbol table of a build product:
+  sym/data  a GLOBAL (or UNIQUE) symbol of type FUNC (sym) or OBJECT (data) is defined in the row's root
+  lookup    the name table entry of the name names a symbol defined GLOBAL of type FUNC (kind func) or OBJECT (kind data) in the root
+  l3        and rows of another owner's file: such a symbol is defined in another product root (the lifter runtime's build); else `external`
+Classes of an uncertified row: none (no symbol of that name is defined or referenced), unresolved-symbol (referenced only), weak (defined weak
+only), not-a-function (defined global of the wrong type), lookup-miss (an msvcrt name that the name table does not carry, or whose entry names
+no proven symbol), external (l3 or another owner's row that no other root defines).
+The decision reads symbol tables and tables, never a source text, a run or a name pattern. Assumption: objects.json lists every global, weak
+and unique symbol of every object of the root (recipe.symbols); locals are not symbols a row can bind to.
 ```
 
 ## contract/l2sections.py
@@ -514,6 +576,36 @@ script FAIL naming the package; another version is never installed: the fix is a
 Env: ENV_JSON (default verify/env.json next to this script's tree).
 ```
 
+## link/ldcheck.py
+
+```text
+ldcheck - the post stage of the guest ELF link (L1 CONTRACT); the sandbox stage `ldcheck:<root>` of verify/recipe.py runs it.
+
+    ldcheck.py --elf LINKED.elf --objs DIR --out DIR --name NAME.elf [--kind pie|exe|shared] [--version-script FILE] [--lib=SO ..]
+
+Kinds exe and shared (host images, RECIPE.md "Link") are judged by host mode: rules 1-2 on the symbol tables, no TEXTREL, an entry for exe, exported names
+of a shared object defined and global, undefined names only if a --lib shared library defines them (its .dynsym); no crt0 header words.
+
+verify/recipe.py links the guest ELF as the stage `ld:<root>` (fixed options, RECIPE.md "Link"): the root's objects and the objects of
+its `link.roots` whole, the compiler external's guest libraries searched as the gcc driver searches them.  This tool judges the result
+from ELF symbol tables only (no linker message, no map file, no name or text pattern), the rules of the former link/ld.py:
+  1. no undefined symbol in the output's `.symtab`;
+  2. every name the input objects reference or define (the symbol tables of every `*.o` below --objs, weak references included) is defined in the output;
+  3. no dynamic relocation but R_AARCH64_P32_RELATIVE (RELA entries without a symbol) or RELR words; no REL, JMPREL, TEXTREL table;
+  4. the PIE mark: DF_1_PIE in DT_FLAGS_1;
+  5. the crt0 header: the magic "FNXG" at the first PT_LOAD + 8 and the entry at the first PT_LOAD.
+The pull-in closure that ld.py modelled before the link is gone: the linker's own output symbol table is the witness, and a name the
+linker took or dropped differently from a model cannot make the output pass with an undefined reference.
+On success it writes the three words of the crt0 header into the ELF (the same rule as elf2nso.py `patch_guest_header`): +16 the link
+address of the first PT_LOAD, +20 the bytes from there to the end of the last PT_LOAD (memsz), page aligned, +24 bit 0 = relocatable (DF_1_PIE).
+Outputs in --out: NAME.elf (the final ELF; none when a rule fails) and the gate file `ld` ($GATE_OUT/ld.json, full id list in $GATE_OUT/ld.ids,
+GATE_OUT = --out): universe = the input names + the dynamic relocation entries (RELA entries, RELR words) + 2 (the PIE mark, the crt0 header);
+certified = those that hold.  Ids: `cover:<name>` (an input name the output does not define; `weak:<name>` when the inputs only reference it
+weakly: the linker resolves such a reference to 0 and drops it from the symbol table, so only the inputs' tables show it), `output-undefined:<name>`, `dynreloc:..`, `pie`,
+`header:..`.  Exit 1 on any id; the ids are printed on stderr, the summary line last.
+The ELF is exe-derived (lifted code): container and fnv-nx-build only.
+```
+
 ## link/gate_abs.py
 
 ```text
@@ -524,10 +616,10 @@ gate_abs - no input of the link refers to an absolute symbol (part of the L1 ver
 The guest is linked at base 0 and moved by the loader: a value that the linker takes for absolute (SHN_ABS) is not moved, and binutils turns such
 values into R_AARCH64_P32_RELATIVE entries with the absolute value as addend (a plain "add the slide" would corrupt them).  No absolute symbol
 may take part in the link: then every dynamic relocation is an image address and the guest's self-relocation moves all of them.
-The linker's command line carries no symbol definition (ld.py accepts only the emulation options), so an absolute symbol can come only from an
+The linker's command line carries no symbol definition (the recipe's link accepts only the emulation options), so an absolute symbol can come only from an
 input object or from the script, and both are in the universe below.
 Universe (no sampling): every relocation of every object and of every member of every archive named by --inputs (response files, one quoted
-path per line, as ld.py writes them) or --object, and every symbol DEFINED by those files.  Read from the section headers and symbol tables
+path per line, as the link's response file lists them) or --object, and every symbol DEFINED by those files.  Read from the section headers and symbol tables
 (relocs.py): no tool output, no text.
 Red items:
   - a relocation whose symbol is SHN_ABS in its own object                                  id `member:section+offset:symbol`
@@ -1169,6 +1261,24 @@ legal outcome); the invariant that closes the class is that EVERY row is turned 
 judged, certified = judged minus the rows whose address bodysel does not give LIFTED (the function would run a native body that fails its contract).
 ```
 
+## verify/gate_imports.py
+
+```text
+Gate "imports" (fnvnx-gate/1, class 4 of VERDICT.md): every import of the manifest has a body, proven by the build products (rules: contract/imports.py).
+    python3 -I gate_imports.py      cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/imports.json and GATE_OUT/imports.ids
+Roots come only from verify/admit.json (class product); for each the gate calls gate_build.ensure (build or cache hits) and reads the symbol
+tables the recipe wrote (objects.json: defined {symbol, bind, type}, undefined). No nm, no ELF parsing, no probe run.
+A product root DECLARES its imports in `<root>/imports.in.json` ("fnvnx-imports-in/1"):
+  {"format", "external": NAME of an entry of the root's recipe `external` (the private manifest: fnv-nx-build commit + tree_sha256),
+   "names": path of sys_names.tsv inside it, "specs": directory of the reference environment's .spec files inside it,
+   "extra": [row files inside it, judged against this root], "extra_other": [row files of another owner's build, judged against the other roots],
+   "name_table": path inside the root of the msvcrt name table `name TAB symbol TAB func|data` (the same file the root generates its lookup table from)}
+The external is checked out from the build's own fetch (GATE_CACHE/external/<commit>) and its tree hash must equal tree_sha256.
+Universe (gate_build.quantify, the convention of build/objstub): the admitted product roots; per root every row of the bridge table (contract/bridgetable.derive). A root without imports.in.json is one red item. Certified: rows with no class
+(contract/imports.py). uncertified: the first 50 ids `dll!name`; imports.ids lists `id TAB class`, sorted. No product root: universe 0, green. Bad input, a red build, an invalid recipe or an
+external that fails its hash is red with the reason in detail. Exit 0 iff green.
+```
+
 ## verify/gate_linkstrict.py
 
 ```text
@@ -1222,6 +1332,22 @@ the rule's list in the rule's load order (recipe.PLUGIN_SOURCES order, the order
 (recipe.PLUGIN_ARGS); (3) the build is green and its result holds the fnvnx_order .so (the file built by the hermetic plugin stage); (4) the unit's object
 was built. The .so is a declared input of every CC stage of a C++ unit (recipe.Job.compile: cc_inputs), so it is in the CC stage key; an
 object compiled without it, or with another .so, has another key and is not this object. A red build or invalid recipe certifies no unit of the root.
+```
+
+## verify/gate_machine.py
+
+```text
+Gate "machine" (fnvnx-gate/1, class G of VERDICT.md): the product's registry hive holds exactly the keys that the exe and the modules read
+(rules: contract/hive.py).
+    python3 -I gate_machine.py     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/machine.json and machine.ids
+Roots come only from verify/admit.json (class product). A root DECLARES its hive in `<root>/registry.in.json` ("fnvnx-registry-in/1"):
+  {"format", "external": NAME of an entry of the root's recipe `external` (private: fnv-nx-build commit + tree_sha256),
+   "sites": path of regsites.tsv inside it (the registry-API call sites of the exe and the modules),
+   "declared": path inside the root of declared_registry.tsv, "seed": path inside the root of the tracked seed include the product is built from,
+   "seed_unit": the recipe unit that applies the seed (the only unit allowed to reference a hive-writing API)}
+Universe, classes and certification: contract/hive.py. Writers are read from the objects of the build (recipe.symbols per object: undefined
+names). A dynamic site (root, key or value not statically resolved) is class `dynamic`: the gate is red and its detail says MEASUREMENT, as the reach
+gate treats a dynamic-name GetProcAddress site; there is no allow-list. Universe: gate_build.quantify (the admitted product roots; a root without registry.in.json is one red item). No product root: universe 0, green. Bad input, a red build, an invalid recipe or an external that fails its hash is red. Exit 0 iff green.
 ```
 
 ## verify/gate_objstub.py
@@ -1666,8 +1792,8 @@ every step is a sandbox stage (sandbox.py) keyed by its declared inputs, cached 
     python3 -I recipe.py build --root ports/fnv-nx/X --store S --out DIR [--jobs N]     (cwd = checkout root; exit 0 green, 2 red)
     python3 -I recipe.py check --root ports/fnv-nx/X                                    validate only
 Steps: (1) generated stages (python runtime, runtime.py), (2) one unit stage per source: .c/.cc/.cpp/.cxx = unitstage.Build (PP on
-name-complete views, then CC on the preprocessed text), .s/.S = unitstage.Build too (.S: PP then CC; .s: one stage on its own file), (3) the link stage
-(`ld` of the compiler, objects + script as inputs). Tools (compilers, ld) are runtime.py `tool` runtimes: declared inputs, no host /usr.
+name-complete views, then CC on the preprocessed text), .s/.S = unitstage.Build too (.S: PP then CC; .s: one stage on its own file), (3) the link: stage `ld:<root>` (the fixed options of RECIPE.md "Link", the objects of the root and of its
+`link.roots` whole, `link.libs` searched) and the post stage `ldcheck:<root>` (link/ldcheck.py). Tools (compilers, ld) are runtime.py `tool` runtimes: declared inputs, no host /usr.
 RULE units: every tracked *.c *.cc *.cpp *.cxx *.s *.S under the root, and every generated output with such a name, is a unit.
 RULE refusal set R: an option of GNU ld's grammar that lets a link accept missing or substituted symbols. Matched by OPTION SYNTAX:
   strip one or two leading dashes, cut at `=`; a name that is a prefix (getopt_long abbreviation) of a refused long name is refused (a
