@@ -60,7 +60,7 @@ def _plugin(name, args):
     return p
 
 
-def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=False):
+def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=False, variant=''):
     """build the toy guest root: plugins [(name, {key: value})] in load order, fixtures {unit file name: text}; -> (objects.json dict, out dir)"""
     _N[0] += 1
     repo = os.path.join(tmp, 'toy%d' % _N[0])
@@ -95,6 +95,9 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': pin['cc'], 'cxx': pin['cxx']},
            'flags': {'c': [f for f in flags if f not in CXX_ONLY_FLAGS], 'cxx': list(flags), 'asm': []}, 'include': [], 'units': 'all', 'external': [ext],
            }
+    if variant:   # the recipe's declared variant: the root's flags plus its own parameters (verify/recipe.py GCSTRESS_*), built as ROOT@VARIANT
+        assert variant == recipe.GCSTRESS_VARIANT, variant
+        rec['variants'] = {variant: {'flags': {k: v + recipe.GCSTRESS_FLAGS for k, v in rec['flags'].items()}}}
     if not native:
         rec['generated'] = [{'tool': T + 'gen/lift.py', 'args': [], 'inputs': [], 'outputs': ['gen/' + k for k in fixtures]}]
     if plugins:
@@ -111,7 +114,7 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
     _git(repo, 'commit', '-q', '-m', 'toy')
     out = os.path.join(tmp, 'out%d' % _N[0])
     os.makedirs(STORE, exist_ok=True)
-    res = recipe.build(repo, ROOT, STORE, out)
+    res = recipe.build(repo, ROOT + ('@' + variant if variant else ''), STORE, out)
     STATS['run'] += res['stages']['run']
     STATS['hit'] += res['stages']['hit']
     return res, out
@@ -130,7 +133,7 @@ def build(name, tmp, source=None):
     return next(p['path'] for p in res['plugins'] if p['name'] == 'fnvnx_' + name)
 
 
-def compile(src, out, plugins, flags=None, args=(), keep=None, files=None, native=False):
+def compile(src, out, plugins, flags=None, args=(), keep=None, files=None, native=False, variant=''):
     """compile src to out (an object) through the recipe with the product flags and the plugins (paths of .so made by build()), in that
     order; `args` holds extra compiler flags and -fplugin-arg-<plugin>-<key>[=<value>] plugin arguments; -> CompletedProcess (the caller
     checks returncode: some tests expect an error, and then stderr is the recipe's failure diagnostics)"""
@@ -146,7 +149,7 @@ def compile(src, out, plugins, flags=None, args=(), keep=None, files=None, nativ
     tmp = tempfile.mkdtemp(prefix='plugbuild-')
     try:
         try:   # the plugin list of a root is the recipe's full set; PLUGINS only names the ones a test gives arguments to
-            res, odir = _recipe(tmp, [(n, pa[n]) for n in names if pa[n]], {os.path.basename(src): open(src).read()}, (PRODUCT_FLAGS if flags is None else flags) + extra, native)
+            res, odir = _recipe(tmp, [(n, pa[n]) for n in names if pa[n]], {os.path.basename(src): open(src).read()}, (PRODUCT_FLAGS if flags is None else flags) + extra, native, variant=variant)
         except recipe.RecipeError as e:
             return subprocess.CompletedProcess([], 2, '', '\n'.join(e.errors))
         if res['status'] != 'green':

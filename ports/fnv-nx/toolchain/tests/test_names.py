@@ -31,6 +31,9 @@ HOLES = {
     # a static in a block below the function's outermost one
     '?b@?2??m@LS@@QAEHXZ@4HA': 'scope', '?e@?4??ls1@@YAHH@Z@4HA': 'scope', '?g@?7??ls1@@YAHH@Z@4HA': 'scope',
     '?h@?9??ls1@@YAHH@Z@4HA': 'scope',
+    # the implicit constructor of a local class whose only work is the vptr store: the front end expands it in place, there is no
+    # function (no symbol, no attribute to put on it), while cl writes ??0 for it
+    '??0L@?1??ls1@@YAHH@Z@QAE@XZ': 'implicit constructor expanded in place',
 }
 
 
@@ -96,12 +99,12 @@ def main():
     try:
         so = [pb.build(n, td) for n in ('sdd', 'names')]
         obj = os.path.join(td, 't.o')
-        r = pb.compile(FIX, obj, so, flags=pb.PRODUCT_FLAGS + ['-O0', '-fkeep-inline-functions'])
+        r = pb.compile(FIX, obj, so, flags=pb.PRODUCT_FLAGS + ['-O0'])
         check('compiles', r.returncode == 0, r.stderr[-3000:])
         if r.returncode == 0:
             checks(obj)
         r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_names-mode=1'])
-        check('an unknown plugin argument is an error', r.returncode != 0 and 'unknown plugin argument' in r.stderr, r.stderr[:500])
+        check('a plugin argument is an error: the recipe fixes them', r.returncode != 0 and 'arguments must be' in r.stderr and 'fnvnx_names' in r.stderr, r.stderr[:500])
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()

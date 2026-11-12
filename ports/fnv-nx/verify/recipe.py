@@ -89,6 +89,10 @@ with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "guest_compil
 SDD_DEFINE = "-DFNVNX_SDD=1"   # per root: the plugin fnvnx_sdd needs it (and -fno-devirtualize, which is in the semantic set of a guest root)
 SDD_FLAGS = (SDD_DEFINE, "-fno-devirtualize")   # what a NATIVE C++ root of a host target holds itself
 LANG_X = {"c": "c", "cxx": "c++", "asm": "assembler-with-cpp"}   # the driver's -x language of each kind of unit
+# The one variant that changes the compiler's own behaviour but no code: a garbage collection after every function (the plugins' GC-rooting stress).
+# Its flags are the root's flags plus exactly these parameters, so its objects are the same bytes as the root's (a test asserts that).
+GCSTRESS_VARIANT = "gcstress"
+GCSTRESS_FLAGS = ["--param", "ggc-min-expand=0", "--param", "ggc-min-heapsize=0"]
 # What a guest build.json may carry (per-root classes); every other -f/-m/... token comes from flags.semantics and is refused here. Warnings and
 # diagnostics, defines, the language standard, the optimisation level (-O0..-O3, -Os, -Og: not -Ofast, which switches FP semantics), debug info,
 # section splitting. -Wa, -Wl, -Wp are driver pass-throughs, not warnings.
@@ -241,7 +245,7 @@ def load_pin(repo="."):
     return json.load(open(p)) if os.path.exists(p) else None
 
 
-def guest_errors(rec, root, roots, pin):
+def guest_errors(rec, root, roots, pin, variant="", base=None):
     """The admit.json entry of a product root declares "target": "guest" (the game's code: compiled by the game's compiler) or "host".
     A guest root's compiler is the external of verify/guest_compiler.json, exactly (name, commit, tree, mount point, driver paths): the
     distribution's g++-13 is not the compiler of guest code, for C and C++ alike (one compiler key serves both)."""
@@ -262,6 +266,11 @@ def guest_errors(rec, root, roots, pin):
         bad += ["external %r is not the pinned runtime (%s)" % (e["name"], rt) for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == rt["name"] and e != rt]
     bad += ["compiler.%s is %r, pinned %r" % (k, c[k], pin.get(k)) for k in ("cc", "cxx") if c[k] != pin.get(k)]
     fl = rec.get("flags") if isinstance(rec.get("flags"), dict) else {}
+    if variant == GCSTRESS_VARIANT:   # the variant is the root's flags plus GCSTRESS_FLAGS: nothing else may differ; the per-root rules below then see the root's flags
+        bf = base.get("flags") if isinstance(base, dict) and isinstance(base.get("flags"), dict) else {}
+        bad += ["variant %s: flags.%s must be the root's flags followed by %s" % (variant, k, " ".join(GCSTRESS_FLAGS)) for k in ("c", "cxx", "asm")
+                if not (isinstance(fl.get(k), list) and fl[k] == (bf.get(k) if isinstance(bf.get(k), list) else []) + GCSTRESS_FLAGS)]
+        fl = {k: (v[:-len(GCSTRESS_FLAGS)] if isinstance(v, list) and v[-len(GCSTRESS_FLAGS):] == GCSTRESS_FLAGS else v) for k, v in fl.items()}
     # an attribute that neither the compiler nor a loaded plugin registers is otherwise dropped with a warning: a marker a rule relies on vanishes
     bad += ["flags.%s lacks %s" % (k, WERROR_ATTR) for k in ("c", "cxx") if WERROR_ATTR not in (fl.get(k) if isinstance(fl.get(k), list) else [])]
     # every semantic flag comes from the pin's flags.semantics (the recipe appends it to each compile stage), so a guest build.json holds only the
@@ -435,7 +444,7 @@ def link_errors(lk, root, mine, roots, ext_names, repo):
     return err
 
 
-def check(rec, root, files, roots, pin=None, repo="."):
+def check(rec, root, files, roots, pin=None, repo=".", variant="", base=None):
     """Every problem of recipe REC of product root ROOT; roots {path: root entry}; PIN = load_pin(); REPO: where the recipes of the
     roots of `link.roots` are read (their link null, no cycle). -> [str] (empty = valid)."""
     if not isinstance(rec, dict):
@@ -447,7 +456,7 @@ def check(rec, root, files, roots, pin=None, repo="."):
                                               for n, v in vs.items())):
             return err + ["variants must be {NAME: {compiler and/or flags}}: NAME letters, digits, _ . -; a variant replaces only the keys it names (%s)" % sorted(VARIANT_KEYS)]
         for n in sorted(vs):    # every variant is a recipe of its own: all the rules apply to its effective form
-            err += ["variant %s: %s" % (n, e) for e in check(effective(rec, n), root, files, roots, pin, repo)]
+            err += ["variant %s: %s" % (n, e) for e in check(effective(rec, n), root, files, roots, pin, repo, n, rec)]
     err += ["missing key %r" % k for k in ("format", "compiler", "flags", "include", "units") if k not in rec]
     if rec.get("format") != FORMAT:
         err.append("format is not " + FORMAT)
@@ -549,7 +558,7 @@ def check(rec, root, files, roots, pin=None, repo="."):
         err += ["link: the ldcheck stage needs %s (a tracked file of an admitted tool root)" % p for p in (
             LD_TOOLS[0] + "/ldcheck.py", LD_TOOLS[0] + "/gateids.py", LD_TOOLS[1] + "/gatefile.py")
             if p not in files or not any(under(p, r) for r in roots)]
-    err += guest_errors(rec, root, roots, pin)
+    err += guest_errors(rec, root, roots, pin, variant, base)
     err += plugin_errors(rec, root, files, roots, units, names)
     return err
 
