@@ -227,3 +227,7 @@ an undeclared origin makes the recipe invalid and the `build` gate red. Tests: `
 ### Call-site census of a platform function
 
 `contract/callcensus.py` lists every call site of chosen exports (for example the D3DX shader entries) over the image set, with the reach of the containing exe function from the exe entry (forward closure over the exe facts) and the value set of one argument. It is a census, not a gate. See TOOLS.md.
+
+### Allocation sites by return flow
+
+`contract/allocsites.py` lists the allocation sites of the image set: calls of the allocator imports and, by return-flow closure over the call graph, calls of every function that returns one (pure or mixed, address-taken ones listed). It is a fact producer for the points-to analysis, not a gate. See TOOLS.md.

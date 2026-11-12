@@ -2035,3 +2035,25 @@ source the derived value set of argument srcarg (argflow.derive_arg): `const-str
        or a value of the caller's parameters: the leaf kinds are listed), `open` (a break: the reason).
 Output callcensus.tsv: image, va, call, function, reach, kind, source, note.  Exe-derived: container and fnv-nx-build only.
 ```
+
+## contract/allocsites.py
+
+```text
+allocsites - the allocation sites of the image set: calls of an allocator import and, by return flow, of every function that returns one (L1 CONTRACT).
+
+    allocsites.py --images-file images.tsv --bridge bridge.tsv --out allocsites.tsv
+
+Allocator imports (Win32 as documented, size argument index): kernel32 HeapAlloc 2, HeapReAlloc 3, VirtualAlloc 1, LocalAlloc 1, GlobalAlloc 1.
+Rule (closure).  A function is an ALLOCATOR if the value in eax at one of its `ret` instructions flows (argflow.Flow, backward over the
+function) from the result of a call of an allocator import or of an allocator, or it tail-jumps to an allocator.  It is `pure` when every
+leaf of every returned value is such a call result, `mixed` when other leaves (NULL, a parameter, ...) or a break are present (listed, not
+dropped).  Allocators are found by a fixpoint over the call graph from the import call sites; nothing is identified by name or signature.
+Every direct call of an allocator is an allocation site.  A function whose address is taken is listed `address-taken`: its indirect
+callers are not sites (a stated gap, counted).
+The size of a site: for a call of an import, the value set of its size argument (argflow.derive_arg); for a call of an allocator whose
+inner size argument is exactly its own parameter i (every leaf is param (itself, i)), the value set of argument i at that call site.  A
+single immediate is `const_size`, anything else `-` (open).
+Output (fnvnx-allocsites/1, sorted): `image site_va allocator_import const_size field_inits`, allocator_import = the import the flow starts
+from (`HeapAlloc`) or `via <allocator entry>`, field_inits `-` (not derived).  Header lines `#` list the closure: allocators (pure/mixed),
+address-taken allocators and the gap (callers through function pointers).  Exe-derived: container and fnv-nx-build only.
+```

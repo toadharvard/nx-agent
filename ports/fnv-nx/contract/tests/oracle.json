@@ -1,6 +1,23 @@
 {
  "format": "fnvnx-oracle/1",
  "tests": {
+  "test_allocsites.py": {
+   "references": [
+    {
+     "anchor": "### Allocation sites by return flow",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
+    },
+    {
+     "anchor": "## contract/allocsites.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/allocsites.py"
+   ]
+  },
   "test_argcensus.py": {
    "references": [
     {
