@@ -93,6 +93,8 @@ def lifted_repo(name, body, pack, ehfacts=None, rts=(RT,), image=True):
         doc = inputs_doc(ehfacts["ext"])
         if ehfacts["key"]:
             doc["ehfacts"] = ehfacts["key"]
+        if ehfacts.get("sites"):
+            doc["locksites"] = ehfacts["sites"]
         w(repo, T + "verify/contract_inputs.json", json.dumps(doc))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "tools")
@@ -129,18 +131,27 @@ def main():
     # --- lifted roots: order (order + align rows) and addr32 (addrwrap rows) by the rule of gate_order.py over every object of the root
     pk = publish("pack0", lambda d: open(d + "/pack.txt", "w").write("pack\n"))
     pack = ext("pack", pk, "/ext/pack")
+    def facts_pub(d, sites=""):
+        json.dump(eh_facts(0x400000), open(d + "/ehtables.json", "w")); open(d + "/locksites.tsv", "w").write(sites)
+    fx = publish("facts0", facts_pub)
+    efact = {"ext": ext("facts", fx, "/ext/facts"), "key": "facts", "sites": "facts/locksites.tsv"}      # no locked instruction in the toy objects: no sites
     for case, (body, want_o, want_a) in sorted(BODIES.items()):
-        repo = lifted_repo("l-" + case, body, pack)
+        repo = lifted_repo("l-" + case, body, pack, efact)
         for n, want in (("order", want_o), ("addr32", want_a)):
             rc, r, o = gate(repo, n, cache)
             check("lifted %s: gate %s is %s" % (case, n, want), r.get("status") == want and (rc == 0) == (want == G) and r.get("universe", 0) >= 1
                   and (want != G or r["certified"] == r["universe"]) and (want == G or r["uncertified"]), (rc, r, o))
-    rc, r, o = gate(lifted_repo("l-rt", BODIES["ordered"][0], pack, rts=()), "order", cache)
+    rc, r, o = gate(lifted_repo("l-rt", BODIES["ordered"][0], pack, efact, rts=()), "order", cache)
     check("image without a runtime definer: red, input missing", rc == 2 and r.get("status") == R and "input missing" in r["detail"], (rc, r))
-    rc, r, o = gate(lifted_repo("l-rt2", BODIES["ordered"][0], pack, rts=(RT, RT)), "order", cache)
+    rc, r, o = gate(lifted_repo("l-rt2", BODIES["ordered"][0], pack, efact, rts=(RT, RT)), "order", cache)
     check("image with two runtime definers: red", rc == 2 and r.get("status") == R and "2 objects" in r["detail"], (rc, r))
+    rc, r, o = gate(lifted_repo("l-nosites", BODIES["ordered"][0], pack, dict(efact, sites=None)), "order", cache)
+    check("lifted root, contract_inputs.json declares no locksites: red, input missing", rc == 2 and r.get("status") == R and "no locksites" in r["detail"], (rc, r))
+    fx2 = publish("facts1", lambda d: facts_pub(d, "00401000\tlock add\n"))
+    rc, r, o = gate(lifted_repo("l-lockmiss", BODIES["ordered"][0], pack, {"ext": ext("facts", fx2, "/ext/facts"), "key": "facts", "sites": "facts/locksites.tsv"}), "order", cache)
+    check("lifted root: a locked instruction of the facts with no .fnvl.lk record: red", rc == 2 and r.get("status") == R and "no .fnvl.lk record" in json.dumps(r), (rc, r))
     for n in ("order", "addr32"):
-        rc, r, o = gate(lifted_repo("l-noimg-" + n, BODIES["plain_store"][0], pack, image=False), n, cache)
+        rc, r, o = gate(lifted_repo("l-noimg-" + n, BODIES["plain_store"][0], pack, efact, image=False), n, cache)
         check("lifted root that no image names: gate %s has universe 0, green" % n, rc == 0 and r.get("status") == G and r["universe"] == 0, (rc, r, o))
     # --- eh: the pack (external of the recipe) against the EH facts external named by contract_inputs.json `ehfacts`
     def pack_pub(name, drop=()):
@@ -149,8 +160,6 @@ def main():
             open(d + "/entries.tsv", "w").write("".join("\t".join(r) + "\n" for r in rows) + "# table_id 00\n")
             json.dump({"images": 1}, open(d + "/gate_liftgen.json", "w"))
         return ext("pack", publish(name, pop), "/ext/pack")
-    fx = publish("facts0", lambda d: json.dump(eh_facts(0x400000), open(d + "/ehtables.json", "w")))
-    efact = {"ext": ext("facts", fx, "/ext/facts"), "key": "facts"}
     rc, r, o = gate(lifted_repo("e-none", BODIES["ordered"][0], pack_pub("pack1"), dict(efact, key=None)), "eh", cache)
     check("eh: contract_inputs.json declares no ehfacts: red, input missing", rc == 2 and r.get("status") == R and "input missing" in r["detail"], (rc, r))
     rc, r, o = gate(lifted_repo("e-green", BODIES["ordered"][0], pack_pub("pack2"), efact), "eh", cache)

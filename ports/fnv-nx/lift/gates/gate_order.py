@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Gates "order", "addrwrap" and "align" (fnvnx-gate/1) on the compiled objects of the lifted pack: classes B and F of the
 owner orders (docs/ORDERING.md "Lifted code") and the alignment fault of the ordered instructions.
-    python3 -I gate_order.py RTOBJ OBJ... [--asm OBJ]...        env GATE_OUT (result dir), JOBS
+    python3 -I gate_order.py RTOBJ OBJ... [--asm OBJ]... [--locksites FILE]        env GATE_OUT (result dir), JOBS
 RTOBJ  the runtime object of rt/enter.c: read only for its 4-byte object symbol fnvnx_lift_cpu_bytes (sizeof(struct cpu)); it is not judged.
 OBJ    an ELF32 AArch64 object (no directory argument): the objects of the roots whose admit cxx_origin is lifted (ASM-202: L1's build
        manifest lists them). The universe is these objects only; native objects (rt's C/C++ units) are closed by fnvnx_order.
@@ -96,13 +96,16 @@ lifted roots is given) and ASM-007 (ILP32). Rule (a) does not rest on the decode
 decided from the encoding's destination fields, and the decoder's operand view only adds writes (the union decides); the corpus
 test compares the two over every instruction class.
 
-Lock ranges (class B, docs/ORDERING.md "Locked instructions"). The lifter emits per object an ELF32 section `.fnvl.lk`: 8-byte records
-(start, end), each a 32-bit word with an R_AARCH64_P32_ABS32 relocation against an executable section (the host pcs of the code of one
+Lock ranges (class B, docs/ORDERING.md "Locked instructions"). The lifter emits per object an ELF32 section `.fnvl.lk`: 12-byte records
+(x86 address, start, end): start and end are 32-bit words with an R_AARCH64_P32_ABS32 relocation against an executable section (the host pcs of the code of one
 locked x86 instruction, [start, end)). Every record is an item of the order result and is red when it cannot be read, is empty, reversed,
 unaligned, outside the section or its $d ranges, overlaps the previous one, contains a call, or holds no load-exclusive and store-exclusive
 pair. Every guest access inside a range must be ldaxr/ldaxp or stlxr/stlxp of any size (the A57 has no LSE): a plain access, ldar or stlr
-there is red, whichever emitter wrote it. The universe of guest accesses is unchanged: every access of every object. Whether every locked
-instruction of the exe has a record is a fact of the lifter against the exe's code, not of this gate.
+there is red, whichever emitter wrote it. The universe of guest accesses is unchanged: every access of every object. Records are 12 bytes (three
+32-bit words): the x86 address of the locked instruction (a plain word), then the host start and end (relocated as above). Completeness
+(--locksites FILE, one hex x86 address per line: every LOCK-prefixed instruction of the lifted universe and every xchg with a memory
+operand, from the facts' shapes): the x86 addresses of all the records of all the objects must equal the set of the file. One row per
+address of either set; a missing record, a record of another address, or two records for one address is red.
 
 Exit 0 iff all three results are green."""
 import json
@@ -165,21 +168,22 @@ def elf(path):
                 drel.setdefault(s[7], {})[off] = (info & 0xff, bool(y and y[5]))
                 if s[7] not in out: continue         # the target: (section, offset, bytes from the target to the section end, the section is SHF_WRITE, section alignment)
                 out[s[7]][2][off] = (info & 0xff, (y[0], y[1] + add, y[2] - y[1] - add, y[3], y[4]) if y and 0 <= y[1] + add < y[2] else None, symname.get(info >> 8))
-    lock, lkerr = {}, []                     # {executable section index: [(lo, hi, record number)]}; the records that cannot be read
+    lock, lkerr, lkall = {}, [], []          # {executable section index: [(lo, hi, record number, x86 address)]}; the records that cannot be read; every x86 address of a readable record
     for i, h in enumerate(sh):
         if names[i] != LOCKSEC: continue
-        if h[1] != 1 or h[5] % 8: lkerr.append('%s: not a PROGBITS section of 8-byte records' % LOCKSEC); continue
+        if h[1] != 1 or h[5] % 12: lkerr.append('%s: not a PROGBITS section of 12-byte records' % LOCKSEC); continue
         rel = {off: (info, add) for off, info, add in lkrel}
-        for r in range(h[5] // 8):
-            ends = []
-            for w in (0, 4):
-                got = rel.get(8 * r + w)
+        for r in range(h[5] // 12):
+            x86, = struct.unpack_from('<I', b, h[4] + 12 * r); ends = []
+            for w in (4, 8):
+                got = rel.get(12 * r + w)
                 y = syms.get(got[0] >> 8) if got else None
                 if not got or got[0] & 0xff != R_P32_ABS32 or not y or not y[5]: ends.append(None)
                 else: ends.append((y[0], y[1] + got[1]))
-            if None in ends or ends[0][0] != ends[1][0]: lkerr.append('%s record %d: a pc of the record is not an R_AARCH64_P32_ABS32 against an executable section, or the two are in different sections' % (LOCKSEC, r))
-            else: lock.setdefault(ends[0][0], []).append((ends[0][1], ends[1][1], r))
-    return [tuple(v) + (drel, deffunc, i, lock.get(i, []), lkerr if k == 0 else []) for k, (i, v) in enumerate(sorted(out.items()))] or [(None,) * 7 + (None, None, None, [], lkerr)]
+            if 12 * r in rel: lkerr.append('%s record %d: the x86 address must be a plain word' % (LOCKSEC, r)); continue
+            if None in ends or ends[0][0] != ends[1][0]: lkerr.append('%s record %d: a host pc of the record is not an R_AARCH64_P32_ABS32 against an executable section, or the two are in different sections' % (LOCKSEC, r))
+            else: lock.setdefault(ends[0][0], []).append((ends[0][1], ends[1][1], r, x86)); lkall.append(x86)
+    return [tuple(v) + (drel, deffunc, i, lock.get(i, []), lkerr if k == 0 else [], lkall if k == 0 else []) for k, (i, v) in enumerate(sorted(out.items()))] or [(None,) * 7 + (None, None, None, [], lkerr, lkall)]
 
 
 def regno(name):
@@ -501,7 +505,7 @@ def analyse(path):
     """-> {'rows': {gate: [(object stem, 'FUNC+0xOFF', reason)]}, 'n': {counter: n}}: one row per universe item of each gate."""
     md = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM); md.detail = True
     tab = {g: {} for g in GATES}; res = {'n': {}}
-    cnt = res['n']; stem = os.path.splitext(os.path.basename(path))[0]; cur = ['', []]
+    cnt = res['n']; stem = os.path.splitext(os.path.basename(path))[0]; cur = ['', []]; recs = []
 
     def tick(k, n=1): cnt[k] = cnt.get(k, 0) + n
 
@@ -519,7 +523,8 @@ def analyse(path):
 
     def glob(why, ins): tick('rule_violations'); red('order', ins, why, 'rule')
 
-    for sname, code, relocs, funcs, data, fsyms, drel, _deff, sidx, lkr, lkerr in elf(path):
+    for sname, code, relocs, funcs, data, fsyms, drel, _deff, sidx, lkr, lkerr, lkall in elf(path):
+        recs += lkall
         for e in lkerr: tick('rule_violations'); tab['order'].setdefault((LOCKSEC, 0, e), [LOCKSEC, e])
         if sname is None: continue
         cur[0] = sname; cur[1] = fsyms
@@ -850,7 +855,7 @@ def analyse(path):
             for w in wait: red('order', w, 'a plain guest load without dmb ishld before the block end')
         # lock ranges (.fnvl.lk, docs/ORDERING.md "Locked instructions"): the host-pc ranges of the code of the locked x86 instructions
         iset = set(at); prev = 0
-        for lo, hi, rec in sorted(lkr):
+        for lo, hi, rec, _x in sorted(lkr):
             tick('lock_ranges'); ri = type('R', (), {'a': lo})()
             tab['order'].setdefault((cur[0], lo, 'lock'), [label(lo), ''])
             def lockred(why, ri=ri): rr = tab['order'][(cur[0], ri.a, 'lock')]; rr[1] = rr[1] + '; ' + why if rr[1] else why
@@ -866,10 +871,11 @@ def analyse(path):
             ld = [x for x in inr if x.a in gacc and x.txt.split()[0].startswith('ldax')]; stx = [x for x in inr if x.a in gacc and x.txt.split()[0].startswith('stlx')]
             if not (ld and stx): lockred('a range with no exclusive load and exclusive store pair')
     res['rows'] = {g: sorted((stem, lab, why) for lab, why in tab[g].values()) for g in GATES}
+    res['locks'] = recs
     return res
 
 
-def run(rtobj, lifted, asm=()):
+def run(rtobj, lifted, asm=(), locksites=None):
     """-> ({gate: [(object stem, 'FUNC+0xOFF', reason)]}, {counter: n}, number of objects). Every row is one universe item, sorted;
     a certified row has reason ''. The verdict is computed from these rows only (verdict)."""
     files = []; asm = frozenset(os.path.abspath(a) for a in asm)
@@ -883,16 +889,25 @@ def run(rtobj, lifted, asm=()):
     init(cpusize(rtobj), asm, frozenset(funcs))
     rows = {g: [] for g in GATES}; n = {k: 0 for k in ('x27_writes', 'cpu_outside_struct', 'cpu_accesses_inside_struct', 'rule_violations')}     # the global counts of the two CPU-class checks are always reported
     with multiprocessing.Pool(int(os.environ.get('JOBS', '4')), init, (CPUSIZE, asm, FUNCS)) as pool:
+        recs = []
         for r in pool.imap(analyse, files, chunksize=4):
+            recs += r['locks']
             for g in GATES: rows[g] += r['rows'][g]
             for k, v in r['n'].items(): n[k] = n.get(k, 0) + v
+    if locksites is not None:      # completeness: one record per locked instruction of the lifted universe, no record of another instruction
+        have = {}
+        for x in recs: have[x] = have.get(x, 0) + 1
+        for x in sorted(set(locksites) | set(have)):
+            why = '' if x in locksites and have.get(x) == 1 else 'a locked instruction of the lifted universe with no .fnvl.lk record' if x not in have else 'a .fnvl.lk record of an address that is no locked instruction of the lifted universe' if x not in locksites else '%d records for one locked instruction' % have[x]
+            rows['order'].append(('lock', '%08x' % x, why))
+        n['lock_sites'] = len(locksites); n['lock_records'] = len(recs)
     return {g: sorted(v) for g, v in rows.items()}, n, len(files)
 
 
-def rows(rtobj, lifted, asm=()):
+def rows(rtobj, lifted, asm=(), locksites=None):
     """-> {'order': [...], 'addrwrap': [...], 'align': [...]}: for each gate, the sorted (object stem, 'FUNC+0xOFF', reason) of every
     universe item; reason '' is a certified item. FUNC is the containing STT_FUNC symbol, a label of the report and no input of a decision."""
-    return run(rtobj, lifted, asm)[0]
+    return run(rtobj, lifted, asm, locksites)[0]
 
 
 def verdict(g, rws, n):
@@ -902,11 +917,13 @@ def verdict(g, rws, n):
 
 
 def main(argv):
-    objs, asm, k = [], [], 1
+    objs, asm, k, locks = [], [], 1, None
     while k < len(argv):
         if argv[k] == '--asm': asm.append(argv[k + 1]); k += 2
+        elif argv[k] == '--locksites':
+            locks = {int(l.split()[0], 16) for l in open(argv[k + 1]) if l.strip() and l[0] != '#'}; k += 2
         else: objs.append(argv[k]); k += 1
-    rws, n, nfiles = run(argv[0], objs + asm, asm); rc = 0
+    rws, n, nfiles = run(argv[0], objs + asm, asm, locks); rc = 0
     for g in GATES:
         green, u, c, bad = verdict(g, rws[g], n)
         counts = ', '.join('%s %d' % kv for kv in sorted(n.items()))

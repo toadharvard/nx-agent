@@ -43,6 +43,7 @@
   }
  ],
  "ehfacts": "facts",
+ "locksites": "facts/locksites.tsv",
  "exe": "exe/FalloutNV.exe",
  "msvc": "msvc/obj",
  "universe": "facts/universe.tsv",

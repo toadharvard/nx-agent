@@ -314,24 +314,24 @@ ASMCASES = {
 }
 
 # the lock ranges (.fnvl.lk): body of f (labels s0/e0 bound a range), the records, the colour of `order`
-def LK(body, recs='.word s0, e0'):
+def LK(body, recs='.word 0x401000, s0, e0'):
     return '.text\n.globl f\n.type f,%function\nf:\n' + body + '\n.size f,.-f\n.section .fnvl.lk,"a"\n.balign 4\n' + recs + '\n'
 PAIR = 's0:\n1: ldaxr w0,[x19]\n add w0,w0,#1\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\n ret'
 PLAIN = 's0:\n dmb ishld\n ldr w0,[x19]\n dmb ishld\n add w0,w0,#1\n dmb ishst\n str w0,[x19]\ne0:\n ret'
 LOCKCASES = {
-    'lock_exclusive_pair':    (PAIR, '.word s0, e0', G),
-    'lock_plain_m32':         (PLAIN, '.word s0, e0', R),                 # the old emitter: a plain RMW with the right barriers: certified by the ordering rules, not atomic
+    'lock_exclusive_pair':    (PAIR, '.word 0x401000, s0, e0', G),
+    'lock_plain_m32':         (PLAIN, '.word 0x401000, s0, e0', R),                 # the old emitter: a plain RMW with the right barriers: certified by the ordering rules, not atomic
     'lock_plain_no_record':   (PLAIN, '', G),                              # without a record the gate cannot know the instruction is locked (completeness: the exe's lock sites against the records)
-    'lock_ldar_stlr':         ('s0:\n ldar w0,[x19]\n add w0,w0,#1\n stlr w0,[x19]\ne0:\n ret', '.word s0, e0', R),
-    'lock_load_only':         ('s0:\n ldaxr w0,[x19]\ne0:\n ret', '.word s0, e0', R),
-    'lock_store_only':        ('s0:\n stlxr w1,w0,[x19]\ne0:\n ret', '.word s0, e0', R),
-    'lock_call_inside':       ('s0:\n1: ldaxr w0,[x19]\n bl f\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\n ret', '.word s0, e0', R),
-    'lock_empty_range':       (PAIR, '.word s0, s0', R),
-    'lock_reversed_range':    (PAIR, '.word e0, s0', R),
-    'lock_overlap':           (PAIR, '.word s0, e0\n.word s0, e0', R),
-    'lock_record_unrelocated': (PAIR, '.word 0, 0', R),
-    'lock_two_ranges_ok':     ('s0:\n1: ldaxr w0,[x19]\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\ns1:\n2: ldaxr w0,[x20]\n stlxr w1,w0,[x20]\n cbnz w1,2b\ne1:\n ret', '.word s0, e0\n.word s1, e1', G),
-    'lock_host_access_inside': ('s0:\n ldr w2,[x27,#4]\n1: ldaxr w0,[x19]\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\n ret', '.word s0, e0', G),
+    'lock_ldar_stlr':         ('s0:\n ldar w0,[x19]\n add w0,w0,#1\n stlr w0,[x19]\ne0:\n ret', '.word 0x401000, s0, e0', R),
+    'lock_load_only':         ('s0:\n ldaxr w0,[x19]\ne0:\n ret', '.word 0x401000, s0, e0', R),
+    'lock_store_only':        ('s0:\n stlxr w1,w0,[x19]\ne0:\n ret', '.word 0x401000, s0, e0', R),
+    'lock_call_inside':       ('s0:\n1: ldaxr w0,[x19]\n bl f\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\n ret', '.word 0x401000, s0, e0', R),
+    'lock_empty_range':       (PAIR, '.word 0x401000, s0, s0', R),
+    'lock_reversed_range':    (PAIR, '.word 0x401000, e0, s0', R),
+    'lock_overlap':           (PAIR, '.word 0x401000, s0, e0\n.word 0x401004, s0, e0', R),
+    'lock_record_unrelocated': (PAIR, '.word 0x401000, 0, 0', R),
+    'lock_two_ranges_ok':     ('s0:\n1: ldaxr w0,[x19]\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\ns1:\n2: ldaxr w0,[x20]\n stlxr w1,w0,[x20]\n cbnz w1,2b\ne1:\n ret', '.word 0x401000, s0, e0\n.word 0x401010, s1, e1', G),
+    'lock_host_access_inside': ('s0:\n ldr w2,[x27,#4]\n1: ldaxr w0,[x19]\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\n ret', '.word 0x401000, s0, e0', G),
 }
 
 
@@ -395,6 +395,26 @@ class T(unittest.TestCase):
         self.assertTrue(any('no exclusive load and exclusive store pair' in r[2] for r in rw), rw)   # and the range row
         o = self.asm('lkok', LK(PAIR)); ok = go.rows(self.rt, [o])['order']
         self.assertEqual([r for r in ok if r[2]], []); self.assertGreaterEqual(len(ok), 3)   # one row per access and one for the range
+    def test_lock_completeness(self):
+        spec = importlib.util.spec_from_file_location('gate_order', GATE); go = importlib.util.module_from_spec(spec); sys.modules['gate_order'] = go; spec.loader.exec_module(go)
+        os.environ['JOBS'] = '1'
+        o = self.asm('lkc', LK(PAIR)); rt = self.rt
+        bad = lambda sites, ob=o: [(r[1], r[2]) for r in go.rows(rt, [ob], locksites=sites)['order'] if r[0] == 'lock' and r[2]]
+        self.assertEqual(bad({0x401000}), [])                                              # one record for the one locked instruction: green
+        self.assertEqual([a for a, _ in bad({0x401000, 0x401008})], ['00401008'])         # a lock-prefixed (or xchg mem) instruction without a record: red
+        self.assertIn('no .fnvl.lk record', bad({0x401000, 0x401008})[0][1])
+        self.assertEqual([a for a, _ in bad(set())], ['00401000'])                         # a record of an address that is no locked instruction: red
+        two = self.asm('lk2', LK('s0:\n1: ldaxr w0,[x19]\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\ns1:\n2: ldaxr w0,[x20]\n stlxr w1,w0,[x20]\n cbnz w1,2b\ne1:\n ret', '.word 0x401000, s0, e0\n.word 0x401000, s1, e1'))
+        self.assertIn('2 records for one', bad({0x401000}, two)[0][1])                     # two records for one instruction: red
+        plain = self.asm('lkp', LK('ldr w0,[x19]\n ret', ''))
+        self.assertEqual(bad({0x401000}, plain)[0][0], '00401000')                         # a locked instruction emitted without any section: red
+        sites = os.path.join(self.root, 'sites.txt'); open(sites, 'w').write('# x\n00401000\tlock add\n')
+        out = tempfile.mkdtemp(dir=self.root)
+        r = subprocess.run([sys.executable, '-I', GATE, rt, o, '--locksites', sites], env=dict(os.environ, GATE_OUT=out, JOBS='1'), capture_output=True, text=True)
+        self.assertEqual(json.load(open(os.path.join(out, 'order.json')))['status'], G, r.stderr)
+        open(sites, 'w').write('00401000\n00401008\n')
+        r = subprocess.run([sys.executable, '-I', GATE, rt, o, '--locksites', sites], env=dict(os.environ, GATE_OUT=out, JOBS='1'), capture_output=True, text=True)
+        self.assertEqual(json.load(open(os.path.join(out, 'order.json')))['status'], R, r.stderr)
     def test_counts(self):
         res = self.gate([self.asm('c1', FN.format(CASES['ordered_aligned'][0])), self.asm('c2', FN.format(CASES['plain_store'][0]))])
         self.assertEqual((res['order']['universe'], res['order']['certified'], len(res['order']['uncertified'])), (2, 1, 1))
