@@ -261,7 +261,7 @@ if ! step merge; then
 	find "$PREFIX/$TARGET/include/c++/$GCC13_VER/$TARGET" -mindepth 1 -maxdepth 1 ! -name "$V" -exec rm -rf {} +
 	# the mirror is the guest runtime and the guest is ILP32 only (ASM-007): stage 1's LP64 libraries (default and pic variants of
 	# newlib, libgcc, crt*.o) were only the scaffolding of stage 1 and go; check_mirror.py C7 proves no non-ILP32 object is left
-	rm -rf "$PREFIX/$TARGET/lib/pic"
+	find "$PREFIX/$TARGET/lib" -mindepth 1 -maxdepth 1 -type d ! -name "$V" -exec rm -rf {} +   # pic/, cpu-init/ (stage 1's LP64 objects)
 	find "$PREFIX/$TARGET/lib" -maxdepth 1 -type f \( -name '*.a' -o -name '*.o' \) -delete
 	rm -rf "$PREFIX/lib/gcc/$TARGET/$GCC_VER/pic"
 	find "$PREFIX/lib/gcc/$TARGET/$GCC_VER" -maxdepth 1 -type f \( -name '*.a' -o -name '*.o' \) -delete
