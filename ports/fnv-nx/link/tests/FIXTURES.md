@@ -104,3 +104,8 @@ builds a toy guest root (native: all 8 plugins; lifted-origin: any subset, incl.
   table (fnvl_disp_table, fnvl_g, fnvl_phf_params), which no tracked source or recipe stage in this repository generates (the producer is private); blocked on the
   lifted runtime product root. 25 checks stay hand-built until then.
 - test_abi.py: no compiler call (checked); unchanged.
+
+### Correction (L2 lead review of 436ca748): test_gate_order assembler cases are back
+The 30 cases listed above as "not covered" are covered again: `assemble()` writes each as a `.S` unit and builds it through realobj.build(asm_flags=
+['-mabi=ilp32', '-march=armv8.1-a']); the recipe preprocesses and assembles it with the pinned msvcmodel driver (an asm-only root has no cxx_origin and no
+plugins). No `as`/`ld`/`ar` call. The recipe did not refuse .S units.
