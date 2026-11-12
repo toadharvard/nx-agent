@@ -22,15 +22,14 @@
         A handler that continues execution resumes at fp, the faulting address, so the exception is raised again (a #UD at fp is not skipped).
         This function does not return.
    The site word is written with one 64-bit store, so a reader (the hit path: one 64-bit load) sees the key of one target with the entry of that
-   target. The tables are read-only. fnvnx_call_fp is thread-local: each host thread has its own. */
+   target. The tables are read-only. fnvnx_call_fp is thread-local: each host thread has its own (defined by the platform). */
+#include "fnvl_host.h"          /* fnvnx_call_fp: one definition, the platform's (platform/win32/thread.cpp); one declaration, this header */
 typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned long long u64;
 struct fnvnx_guest_ret { u32 eax, edx; double st0; };
 void fnvnx_guest_invoke(u32 addr, u32 ecx, u32 nargs, const u32 *args, u32 kind, struct fnvnx_guest_ret *out);
 int fnvl_has_entry(u32 a);
-
-__thread u32 fnvnx_call_fp;
 
 extern const u32 fnvnx_native_disp_table[];
 extern const u16 fnvnx_native_g[];

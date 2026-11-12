@@ -154,10 +154,8 @@ typedef unsigned long long u64;
 typedef float v8f __attribute__((vector_size(8)));
 typedef float v16f __attribute__((vector_size(16)));
 struct fnvnx_guest_ret { u32 eax, edx; double st0; };
-extern "C" {
-void fnvnx_guest_invoke_regs(u32 addr, u32 ecx, u32 edx, u32 nargs, const u32 *args, u32 kind, struct fnvnx_guest_ret *out);
-extern __thread u32 fnvnx_call_fp;
-}
+#include "fnvl_host.h"      /* the one declaration of fnvnx_call_fp (initial-exec TLS), the platform defines it */
+extern "C" void fnvnx_guest_invoke_regs(u32 addr, u32 ecx, u32 edx, u32 nargs, const u32 *args, u32 kind, struct fnvnx_guest_ret *out);
 /* byte copies the optimizer must not turn into calls of memcpy (the bridges are freestanding): the empty asm is in the loop */
 static inline void cp(void *d, const void *s, u32 n) { u8 *a = (u8 *)d; const u8 *b = (const u8 *)s; for (u32 i = 0; i < n; i++) { a[i] = b[i]; __asm__ volatile("" ::: "memory"); } }
 /* n bytes into the stack words at w, the last word's unused bytes 0 */

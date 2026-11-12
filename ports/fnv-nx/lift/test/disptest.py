@@ -74,6 +74,8 @@ extern "C" {
 struct fnvnx_guest_ret { u32 eax, edx; double st0; };
 u32 fnvnx_lift_enter(u32 eip, u32 esp, u32 teb); int fnvnx_lift_imports_init(void);
 void fnvnx_guest_current(u32 *esp, u32 *teb);
+/* the platform defines fnvnx_call_fp (platform/win32/thread.cpp, not linkable here yet): the one remaining double of this test, removed when the root links it */
+__thread unsigned int fnvnx_call_fp __attribute__((tls_model("initial-exec")));
 static void *slot; void **fnvl_host_tls_slot(void) { return &slot; }
 unsigned long long fnvl_host_ticks_ns(void) { return 0; }
 void *memcpy(void *d, const void *s, unsigned long n) { char *a = (char *)d; const char *b = (const char *)s; while (n--) *a++ = *b++; return d; }
@@ -182,7 +184,7 @@ def main():
     print('gen   %s entries %d' % ('equal' if ok else 'DIFF', len(ent))); bad = not ok
     texts = [L.lift(img, ad, sz, owns=owns)[0] for ad, sz, owns in ents.values()]
     flags = [f for f in instest.FLAGS if f not in ('-DFNVL_FLAGS_IO', '-Werror=attributes')] + ['-Wno-attributes', '-I', LIFT + '/rt']
-    CF = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-w', '-c']
+    CF = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-w', '-c', '-I', FNV + '/shim/include']
     syms = {ad: 'L_%08x' % ad for ad, sz, owns in ents.values()}; syms.update({k: s for k, s, *_ in ent})
     h = phf.build(list(syms)); open(w + '/tab.S', 'w').write(phf.table_asm(syms, h))
     open(w + '/guest.cpp', 'w').write(L.PRELUDE + '\n'.join(texts)); open(w + '/native.cc', 'w').write(NATIVE)
@@ -196,7 +198,7 @@ def main():
         r = subprocess.run(['x86_64-linux-gnu-g++-13', '-shared', '-fPIC', '-fno-rtti', '-fno-exceptions', '-O2', '-w', '-I' + pdir, '%s/toolchain/%s' % (FNV, src), '-o', so], capture_output=True, text=True)
         if r.returncode: sys.exit('plugin %s: %s' % (n, r.stderr[:600]))
         plug.append('-fplugin=' + so)
-    NF = ['-mabi=ilp32', '-std=gnu++17', '-O2', '-fPIC', '-ffreestanding', '-fno-exceptions', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-c']
+    NF = ['-mabi=ilp32', '-std=gnu++17', '-O2', '-fPIC', '-ffreestanding', '-fno-exceptions', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-c', '-I', FNV + '/shim/include']
     def build(cmd, src, o):
         r = subprocess.run(cmd + [src, '-o', o], capture_output=True, text=True)
         if r.returncode: sys.exit('compile %s: %s' % (src, r.stderr[:800]))
