@@ -73,7 +73,7 @@ class Cert(unittest.TestCase):
     def fake_lift(self, d, cert):
         rt = os.path.join(d, 'lift', 'rt')
         os.makedirs(rt)
-        put(rt + '/rcpref.h', '#define FNVL_RCP_REF_SYMBOLS "fnvl_rcp32 fnvl_rsqrt32"\n#define FNVL_RCP_REF_VENDOR "GenuineIntel"\n#define FNVL_RCP_REF_FAMILY 6\n#define FNVL_RCP_REF_MODEL 207\n#define FNVL_RCP_REF_STEPPING 2\n')
+        put(rt + '/rcpref.h', '#define FNVL_RCP_REF_VENDOR "GenuineIntel"\n#define FNVL_RCP_REF_FAMILY 6\n#define FNVL_RCP_REF_MODEL 207\n#define FNVL_RCP_REF_STEPPING 2\n')
         put(rt + '/rcptab.c', '/* synthetic table */\n')
         if cert is not None:
             c = {'cpu': {'family': 6, 'model': 207, 'stepping': 2, 'vendor': 'GenuineIntel'}, 'format': 'fnvnx-rcpcert/1',
@@ -196,22 +196,21 @@ class Recip(unittest.TestCase):
             self.assertEqual(sorted(k for k, v in items.items() if v), ['rcp:R/sub/bad.o'])
             self.assertEqual(sorted(items), ['R:forms', 'f2i:R/ok.o', 'f2i:R/sub/bad.o', 'rcp:R/ok.o', 'rcp:R/sub/bad.o'])
             rt = self.fake_rt(d)
-            self.assertEqual(sorted(G.judge_objects('R', [], rt, None)), ['R:forms'])      # a table declared, no symbol used: no item
-            for body, items in (('.global fnvl_rcp32\nfnvl_rcp32:\nret', ['R:rcpcert']), ('bl fnvl_rsqrt32', ['R:rcpcert']), ('.global other\nother:\nbl fnvl_rcp32x', [])):
-                o2 = asm_object(d, 'sym', body)
-                put(o2 + '.f2i.json', nosites('s.o'))
-                got = G.judge_objects('R', [('s.o', o2)], rt, None)
-                self.assertEqual([k for k in got if k.endswith('rcpcert')], items, body)
-                if items:
-                    self.assertEqual(got['R:rcpcert'], [])
+            tab = asm_object(d, 'tab', '.global fnvl_rcp32\nfnvl_rcp32:\nret')
+            use = asm_object(d, 'use', 'bl fnvl_rcp32')
+            other = asm_object(d, 'other', 'bl unrelated')
+            for o_ in (tab, use, other):
+                put(o_ + '.f2i.json', nosites('x'))
+            T, U, O = ('rcptab.c', tab), ('use.c', use), ('other.c', other)
+            keys = lambda objs, image: [k for k in G.judge_objects('R', objs, image, None) if k.endswith('rcpcert')]
+            self.assertEqual(keys([T, U], rt), ['R:rcpcert'])              # an image whose object references the table's symbol
+            self.assertEqual(G.judge_objects('R', [T, U], rt, None)['R:rcpcert'], [])
+            self.assertEqual(keys([T, O], rt), [])                         # table linked, never referenced
+            self.assertEqual(keys([U], rt), [])                            # no table unit in the image
+            self.assertEqual(keys([T, U], None), [])                       # the root links no image
             os.remove(rt + '/rcptab.cert.json')
-            o2 = asm_object(d, 'sym2', 'bl fnvl_rcp32')
-            self.assertIn('missing', G.judge_objects('R', [('s.o', o2)], rt, None)['R:rcpcert'][0])
-            os.remove(rt + '/rcptab.c')
-            self.assertIn('no table', G.judge_objects('R', [('s.o', o2)], rt, None)['R:rcpcert'][0])
-            put(rt + '/rcpref.h', '#define FNVL_RCP_REF_FAMILY 6\n')
-            self.assertIn('FNVL_RCP_REF_SYMBOLS', G.judge_objects('R', [('s.o', o2)], rt, None)['R:rcpcert'][0])
-            self.assertEqual(G.judge_objects('R', [('s.o', o2)], None, None).get('R:rcpcert'), None)
+            self.assertIn('missing', G.judge_objects('R', [T, U], rt, None)['R:rcpcert'][0])
+            self.assertEqual(sorted(G.judge_objects('R', [], rt, None)), ['R:forms'])
 
 
 class F2I(unittest.TestCase):
@@ -358,19 +357,24 @@ class Roots(unittest.TestCase):
             r = self.judge(d, {'status': 'green', 'objects': objs}, forms='forms: not green: y')
             self.assertEqual(r[:3], (5, 0, ['X:forms', 'f2i:X/a.o', 'f2i:X/z/b.o', 'rcp:X/a.o', 'rcp:X/z/b.o']))
 
-    def test_root_using_the_table_gets_the_certificate_item(self):
-        """the item exists iff an object uses a declared table symbol; the table files are the root's own"""
+    def test_linked_image_using_the_table_gets_the_certificate_item(self):
+        """the item exists per image iff an object references a symbol the table unit defines; the table files are the root's own"""
         with workdir() as d:
-            o = asm_object(d, 'a', 'bl fnvl_rcp32')
-            put(o + '.f2i.json', nosites('a.o'))
-            res = {'status': 'green', 'objects': [{'unit': 'a.o', 'object': o}]}
+            tab = asm_object(d, 'tab', '.global fnvl_rcp32\nfnvl_rcp32:\nret')
+            use = asm_object(d, 'use', 'bl fnvl_rcp32')
+            for o in (tab, use):
+                put(o + '.f2i.json', nosites('x'))
+                put(o + '.f2i.json', f2i('rcptab.c' if o == tab else 'use.c'))
+            objs = [{'unit': 'rcptab.c', 'object': tab}, {'unit': 'use.c', 'object': use}]
             os.makedirs(d + '/repo')
             rt = Cert().fake_lift(d + '/repo', {})
             os.rename(rt, d + '/repo/X')
-            self.assertEqual(self.judge(d, res, repo=d + '/repo'), (4, 4, [], ''))
+            res = {'status': 'green', 'objects': objs, 'elf': 'x.elf'}
+            self.assertEqual(self.judge(d, res, repo=d + '/repo'), (6, 6, [], ''))
+            self.assertEqual(self.judge(d, dict(res, elf=None), repo=d + '/repo'), (5, 5, [], ''))      # no link stage: no image, no item
             os.remove(d + '/repo/X/rcptab.cert.json')
             r = self.judge(d, res, repo=d + '/repo')
-            self.assertEqual(r[:3], (4, 3, ['X:rcpcert']))
+            self.assertEqual(r[:3], (6, 5, ['X:rcpcert']))
 
     def test_build_red_is_one_input_item(self):
         with workdir() as d:

@@ -8,7 +8,7 @@ objects (objects.json "objects") are judged; no product root: universe 0, green.
 ports/fnv-nx/verify, sibling of lift/, the way verify/gate_contract.py imports its own; a checkout without verify/ cannot run the gate (no result file: red).
 All object input handling is in `read_inputs` (objects.json -> [(unit, object path)]) and `read_f2i` (the plugin's file of one object).
 The table files are files of the admitted root that holds them (L3a's guest root lift/rt: rcpref.h, rcptab.c, rcptab.cert.json): the item
-`<root>:rcpcert` exists iff an object of the root defines or references a table symbol that the root's rcpref.h declares (`#define FNVL_RCP_REF_SYMBOLS "a b"`, parsed; the names are read from the objects' symbol tables); a root with no such object has no item (universe 0 for check 1).
+`<image>:rcpcert` exists per linked image (a root with a link stage) iff another object of the image references a symbol that the object compiled from the unit rcptab.c defines (symbol tables of the objects: the link resolves exactly those references); no image, or no such reference: no item (universe 0 for check 1).
 
 Check 0, dependency (item `<root>:forms`): the correctness of the helpers sse_f2i / fv_i, whose conversions this gate lets through, is
 established by the form certificates, not here. The item is certified iff the gate `forms` (formgate.py, the one copy) is green on its own
@@ -71,7 +71,7 @@ object-level necessary condition:
   clobber does no conversion; 3b backs it up for units with no site), A-F2ICONST (no conversion of a C literal occurs in lifted code), A-F2INATIVE
   (native bodies compiled with the fnvnx_ftoi plugin are judged by the L2 rules, not here).
 
-Universe: per product root: `<root>:rcpcert` (when the table symbols occur), `<root>:forms`, and for every object `rcp:<root>/<unit>` and `f2i:<root>/<unit>`; a root that does not
+Universe: per product root: `<root>:rcpcert` (per image, when it uses the table), `<root>:forms`, and for every object `rcp:<root>/<unit>` and `f2i:<root>/<unit>`; a root that does not
 build or whose recipe is invalid is the one item `<root>:inputs` (uncertified, reason in detail: never skipped). Certified: items with no finding.
 uncertified: the first 50 ids sorted. Exit 0 iff green."""
 import hashlib
@@ -251,19 +251,6 @@ def symbols_of(path):
     return dfn, ref
 
 
-def read_symbols(rt):
-    """the table symbols rcpref.h of the directory RT declares: the one line `#define FNVL_RCP_REF_SYMBOLS "name name ..."` -> sorted list; None when
-    the directory holds no rcpref.h (no table is declared there); ValueError when rcpref.h declares no or a malformed list"""
-    path = os.path.join(rt, "rcpref.h")
-    if not os.path.isfile(path):
-        return None
-    with open(path) as fh:
-        found = [m[1] for m in (re.match(r'#define FNVL_RCP_REF_SYMBOLS "([A-Za-z_][A-Za-z_0-9]*(?: [A-Za-z_][A-Za-z_0-9]*)*)"\s*$', l) for l in fh) if m]
-    if len(found) != 1:
-        raise ValueError("rcpref.h does not declare exactly one FNVL_RCP_REF_SYMBOLS list of identifiers")
-    return sorted(set(found[0].split()))
-
-
 def read_f2i(obj_path):
     """-> (result dict or None, problem string or None) of the plugin's file next to the object"""
     p = obj_path + ".f2i.json"
@@ -317,22 +304,35 @@ def ftoi_why(doc):
         (["argv lacks -fplugin for " + FTOI] if "-fplugin=/plug/%s/%s.so" % (FTOI, FTOI) not in doc.get("argv", []) else [])
 
 
-def judge_objects(root, objs, rt, forms_ok, docs=None):
-    """-> {item id: [findings]} of one root: OBJS [(unit, path)], RT (the root's own directory: its rcpref.h declares the table symbols; None when the root has
-    no directory), FORMS_OK (reason string or None: the dependency on the gate forms), DOCS ({unit: CC document} of a native root; None: lifted root).
-    Item `<root>:rcpcert` exists iff an object of the root defines or references a table symbol that rcpref.h declares (read from the objects' symbol
-    tables, the names from the declaration, no list in this gate); a root with no rcpref.h declares no table, so no symbol is known to be one."""
+TABLE_UNIT = "rcptab.c"
+
+
+def table_item(objs, image_dir):
+    """-> None (no item) or [findings] of the item `<image>:rcpcert`. IMAGE_DIR: the directory of the root that is linked into one image, or None when
+    the root links nothing. The table object is the object of the unit rcptab.c of the image; the symbols it defines come from its symbol table. The image
+    needs the item iff another object of the image references one of those symbols (the link resolves the reference to the table). The certificate is
+    judged on the directory that holds the unit rcptab.c (rcpref.h, rcptab.c, rcptab.cert.json there)."""
+    if image_dir is None:
+        return None
+    tabs = [(u, p) for u, p in objs if os.path.basename(u) == TABLE_UNIT]
+    if not tabs:
+        return None
+    defined = set()
+    for _, p in tabs:
+        defined |= symbols_of(p)[0]
+    used = sorted({n for u, p in objs if os.path.basename(u) != TABLE_UNIT for n in symbols_of(p)[1] & defined})
+    if not used:
+        return None
+    return check_cert(os.path.join(image_dir, os.path.dirname(tabs[0][0])))
+
+
+def judge_objects(root, objs, image_dir, forms_ok, docs=None):
+    """-> {item id: [findings]} of one root: OBJS [(unit, path)], IMAGE_DIR (see table_item), FORMS_OK (reason string or None: the dependency on the gate
+    forms), DOCS ({unit: CC document} of a native root; None: lifted root)."""
     items = {root + ":forms": [forms_ok] if forms_ok else []}
-    try:
-        names = read_symbols(rt) if rt is not None else None
-    except ValueError as e:
-        names, why = [], str(e)
-        items[root + ":rcpcert"] = [why]
-    if names:
-        used = sorted({n for _, path in objs for n in (lambda d, r: (d | r) & set(names))(*symbols_of(path))})
-        if used:
-            items[root + ":rcpcert"] = check_cert(rt) if os.path.isfile(os.path.join(rt, "rcptab.c")) else \
-                ["%s used but the root holds no table (rcptab.c) to certify" % ", ".join(used)]
+    cert = table_item(objs, image_dir)
+    if cert is not None:
+        items[root + ":rcpcert"] = cert
     for unit, path in objs:
         r = judge_object(root + "/" + unit, path, unit.endswith(recipe.ASM_EXT), unit)
         if docs is not None and unit.endswith(recipe.CXX_EXT):
@@ -359,10 +359,10 @@ def judge_root(root, repo, cache, forms):
     if res["status"] == "red":
         return 1, 0, [root + ":inputs"], "root does not build (stage %s)" % res["failure"]["stage"]
     try:
-        rt = os.path.join(repo, root)
+        image = os.path.join(repo, root) if res.get("elf") else None
         native = recipe.load_admit(repo).get(root, {}).get("cxx_origin") == "native"
         docs = gate_datamodel.cc_docs(os.path.join(cache, "store"), res) if native else None
-        items = judge_objects(root, read_inputs(res), rt, forms(), docs)
+        items = judge_objects(root, read_inputs(res), image, forms(), docs)
     except (OSError, ValueError, ELFError) as e:
         return 1, 0, [root + ":inputs"], "input error: %s" % (str(e)[:300] or type(e).__name__)
     bad = sorted(k for k, v in items.items() if v)
