@@ -104,3 +104,18 @@ Source: `objects.json` of the root build (defined set of the 69 objects subtract
 
 Counts: of the 80, **0** are defined by another admitted root today (the only admitted root with a recipe is render/d3d9 itself); 2 resolve inside the same root once w2b's ffp_prog lands (`nx_ffp_ps_program`, `nx_ffp_vs_program`); 16 are guest libc/libm/libstdc++/crt, outside every product root by design (12 libc/libm: memcpy, memmove, memset, memcmp, strcmp, malloc, free, cos, cosf, expf, powf, sqrtf; 4 C++ runtime: operator delete, __cxa_atexit, __dso_handle, __cxa_pure_virtual) ⇒ 16; 48 are vtables (L2); the remaining 14 are product gaps with an owner: `nxd3d_gpu_call/alloc/free`, `nxd3d_dc_create/release`, `nxd3d_perf_counter`, `nxd3d_os_cursor_pos`, `nxd3d_window_client`, `nx_env_profile` (L5/L6A: 9), `fnvnx_wine_fixme`, `fnvnx_import_key` (L1: 2), `fnvnx_guest_invoke`, `fnvnx_dispatch` (L3a: 2), `__aarch64_ldadd4_relax` (L2/L1: 1). Total 2 + 16 + 48 + 14 = 80.
 The platform root (platform/input, os, ...) exists only on the integration branch, not on the clean trunk, so against the trunk every one of these gaps is also "the platform root is not admitted yet".
+
+## Test-root form (answer of the L1 lead) and the closure map as symbol → root | blocked(owner)
+
+- A test is an admitted root of class `test` with its own build.json, built by recipe.py in GATE_CACHE, and gets every product gate plus `oracle` (a record per test in tests/oracle.json naming its reference). The doubles check: (symbols the test root defines) ∩ (symbols of its `link.roots` roots) = ∅, no allow-list.
+- It links through `link.roots` (link kind exe, w15 fea3d99), with the stored guest ILP32 aarch64 objects of the product root, the same msvcmodel compiler and flags. A test of guest code is a guest ELF run in the L4 boot machine (tests/boot, boot.py), the one shared model below the product. Host x86 -m32 programs linking d3d9 code are retired: to move a test means to rebuild it as a guest test. A host variant of render/d3d9 does not count.
+- Undefined closure: each symbol comes from the product root that defines it, listed in `link.roots`; below the boundary (GL, deko3d, libnx, kernel) the boot machine's model answers; a symbol no root defines is a linkstrict red naming the missing root and its owner, and that test is blocked by that owner, never given a double.
+
+Map for the render/d3d9 closure at base 24f18cdb (80 undefined names; details in the table above), totals at this commit: symbol → defining root | blocked(owner):
+- defined by a root in link.roots today: **0** (only render/d3d9 itself has a recipe).
+- → render/d3d9 (same root) once w2b's ffp_prog lands: **2** (`nx_ffp_ps_program`, `nx_ffp_vs_program`).
+- → guest libc/libstdc++/crt (fnvnx-a64, a root the test links): **16**, blocked(L5 / toolchain) until that root exists.
+- → blocked(L5): **7** (`nxd3d_gpu_alloc`, `nxd3d_gpu_free`, `nxd3d_dc_create`, `nxd3d_dc_release`, `nxd3d_perf_counter`, `nxd3d_os_cursor_pos`, `nxd3d_window_client`); `nx_env_profile` blocked(L5, and L6: add to platform_hooks.tsv) = **1**; `nxd3d_gpu_call` blocked(L5 for the ext_call glue, L6A for the render/gl4 backend root) = **1**.
+- → blocked(L1): **2** (`fnvnx_wine_fixme`, `fnvnx_import_key`); blocked(L3a): **2** (`fnvnx_guest_invoke`, `fnvnx_dispatch`); blocked(L2/L1): **1** (`__aarch64_ldadd4_relax`).
+- → vtables: **48**, blocked(L2) (confirm which root emits them).
+Total 0 + 2 + 16 + 9 + 5 + 48 = 80. Doubles census at this commit: 17 tests, 14 files, 30 distinct symbols, 173 summed (unchanged: no test has been rewritten, because each is blocked as above).
