@@ -658,3 +658,8 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - L3a write-set census (w4 a3fcd7fc, 7 images): 1,893,456 stores = 38,925 exact + 1,227,422 stack + 627,109 open/ranged (+8,240 import calls). The 56b717 and 9fea3c/58 facts stay OPEN until points-to over abstract objects lands. w18 re-pins once, on w7's next facts commit (jtab_tables).
 - Inbox note fix: claude/fnv-l1-contract-note018 a1c125606 (ASM-029 cited, no retired ASM-800) → the orchestrator's candidate.
 - MERGER told: L1 heads go to the trunk via the orchestrator's candidate.
+
+## 11:00Z
+- w19 08476c3 (on trunk 4fb048e): green dad36adf, 593.9 s cold (every new test is twinned), warm no-change run 2.0 s with 0 recomputed in 29 gates. MERGER's 10 failures fixed by rule: twin-run determinism in private namespaces, declared `uses`/`net` checked by hermetic views, cache keyed by tree+env+gate+argv. Open: a per-test key (one edit → only its dependents rerun), the determinism fact keyed per test, rebase onto 83f7504f, timeout/scratch rules, acceptance runs.
+- L5 decision: w15 rebases onto w9's funcfacts line (6de8e166), so there is one image reader. contract/argflow.py takes a funcfacts.Image record and has no file path; w15 writes the diff for L1 review → claude/fnv-l5-platform-w15-argflow.
+- w9 d3e88a52: G1/G2 accepted. G3 (names) dropped. Image byte readers refuse code-range addresses, so code is reachable only as decoded facts.
