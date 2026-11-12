@@ -194,6 +194,7 @@ regsites-check:
 	python3 -I $(ROOT)/platform/manifest/check_test_threads.py
 	python3 -I $(ROOT)/platform/manifest/check_regsites.py
 	python3 -I $(ROOT)/platform/manifest/check_filesites.py
+	python3 -I $(ROOT)/platform/manifest/check_funcfacts.py
 	python3 -I $(ROOT)/platform/manifest/check_macrodefs.py
 	python3 -I $(ROOT)/platform/manifest/check_gen_registry.py
 	python3 -I $(ROOT)/platform/manifest/check_gen_fontmachine.py
