@@ -39,6 +39,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = os.path.normpath(os.path.join(HERE, '..', '..'))
 MODEL = os.path.join(PORT, 'tools', 'perf', 'a57model')
 sys.path[:0] = [MODEL, os.path.join(PORT, 'tools', 'perf'), HERE]
+sys.path.insert(0, os.path.join(PORT, 'tools'))
+import tables  # noqa: E402
 os.environ.setdefault('FNV_DECOMP', os.path.join(PORT, 'ext', 'fnv_decomp'))
 OVR = os.path.join(PORT, 'tools', 'link', 'overrides')
 CPI_126 = {'fn_pass_bucket': (82, 0.83, 2.01), 'fn_gsk': (571, 1.11, 1.45)}   # PERF.md 12.6: insn, CPI steady - once
@@ -114,7 +116,7 @@ def main():
     except ImportError as e:
         print('skip: %s' % e)
         return 0
-    model = json.load(open(os.path.join(PORT, 'tools', 'perf', 'budget_model.json')))
+    model = json.load(open(tables.path('budget_model.json')))
     p1(model)
     # T1 (no toolchain needed)
     sl = next(h for h in model['hotspot_functions'] if h['id'] == 'fn_slerp')
