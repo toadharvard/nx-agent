@@ -7,16 +7,6 @@
  },
  "flags": {
   "c": [
-   "-mabi=ilp32",
-   "-fms-extensions",
-   "-fshort-wchar",
-   "-frounding-math",
-   "-fsigned-char",
-   "-fno-strict-aliasing",
-   "-fwrapv",
-   "-fno-delete-null-pointer-checks",
-   "-fno-lifetime-dse",
-   "-ffp-contract=off",
    "-O2",
    "-Werror=attributes",
    "-Wall",
@@ -39,36 +29,14 @@
    "-DSUPPORT_PROFILE_METAL=0",
    "-DSUPPORT_PROFILE_SPIRV=0"
   ],
-  "cxx": [
-   "-O2",
-   "-mabi=ilp32",
-   "-fms-extensions",
-   "-fshort-wchar",
-   "-frounding-math",
-   "-fsigned-char",
-   "-fno-strict-aliasing",
-   "-fwrapv",
-   "-fno-delete-null-pointer-checks",
-   "-fcheck-new",
-   "-fno-sized-deallocation",
-   "-fno-lifetime-dse",
-   "-ffp-contract=off",
-   "-DFNVNX_SDD=1",
-   "-fno-devirtualize",
-   "-Werror=attributes",
-   "-Wall",
-   "-DSTDMETHODCALLTYPE=",
-   "-std=gnu++20",
-   "-DNDEBUG",
-   "-ffunction-sections",
-   "-fdata-sections"
-  ],
-  "asm": [
-   "-mabi=ilp32"
-  ]
+  "cxx": [],
+  "asm": []
  },
  "include": [
-  "ports/fnv-nx/lib/sha256/include"
+  "ports/fnv-nx/lib/sha256/include",
+  "ports/fnv-nx/render/shaders/translator/gen",
+  "/ext/mojoshader",
+  "/ext/mojoshader/profiles"
  ],
  "units": "all",
  "generated": [
@@ -76,39 +44,35 @@
    "tool": "ports/fnv-nx/render/shaders/total/gen_sm_rows.py",
    "args": [
     "/in/ports/fnv-nx/render/shaders/total/sm_table.json",
-    "/out/ext/mojoshader/fnvnx_sm_rows.h"
+    "/out/gen/fnvnx_sm_rows.h"
    ],
    "inputs": [
     "ports/fnv-nx/render/shaders/total/sm_table.json"
    ],
    "outputs": [
-    "ext/mojoshader/fnvnx_sm_rows.h"
+    "gen/fnvnx_sm_rows.h"
    ]
-  }
- ],
- "sources": [
+  },
   {
-   "external": "mojoshader",
-   "dir": ".",
-   "patches": [
-    "mojoshader.patch",
-    "mojoshader_units.patch",
-    "mojoshader_prune.patch",
-    "mojoshader_sm.patch"
+   "tool": "ports/fnv-nx/render/total/translator_gen/gen_sources.py",
+   "args": [
+    "/ext/mojoshader",
+    "/out/gen/sources.txt"
    ],
-   "include": [
-    "."
+   "inputs": [],
+   "outputs": [
+    "gen/sources.txt"
    ]
   }
  ],
- "link": null,
+ "sources": "gen/sources.txt",
  "external": [
   {
    "name": "mojoshader",
    "repo": "fnv-nx-build",
-   "ref": "tools/mojoshader",
-   "commit": "ad5dff84830c2863c841f4b1f4e3df78c705b383",
-   "tree_sha256": "e49a1b65e09c86647fd8c0b26c7a8e16e4a16e6ad1290a1e7ada85047306f361",
+   "ref": "tools/mojoshader-glsldk",
+   "commit": "9e6b092854b71a745925b2f309c8f1b89e93f8e9",
+   "tree_sha256": "98017403c029196ec3f2d2cd681d443c35fd1ff60eefeebb3bfe586a889ae978",
    "at": "/ext/mojoshader"
   },
   {
@@ -172,5 +136,6 @@
     "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
    ]
   }
- ]
+ ],
+ "link": null
 }
