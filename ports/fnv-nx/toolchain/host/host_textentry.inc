@@ -2,9 +2,14 @@
  * host_textconv.h. The contract is the one in hostapi.h; this file adds nothing to it.
  *   max_len outside 1..FNVNX_TEXT_ENTRY_MAX, out or n null -> -FNVNX_HE_BADINPUT, nothing shown
  *   the keyboard starts with init cut to max_len units (te_cut16); the applet returns UTF-8 (te_utf8_to_16)
- *   swkbdShow LibnxError_LibAppletBadExit -> 0 (cancelled, out and *n untouched); any other failure -> -(Result)
+ *   swkbdShow MAKERESULT(Module_Libnx, LibnxError_LibAppletBadExit) -> 0 (cancelled, out and *n untouched); any other failure -> -(Result)
  *   a text of more than max_len units (characters above U+FFFF, which swkbd counts as one) is not returned: the keyboard opens again with
  *   that text cut to max_len units, until the text fits or the player cancels
+ * libnx (tools/libnx, upstream tree b156b4774fb2df7b93402169509266da7547fc4c): swkbdCreate nx/include/switch/applets/swkbd.h:349,
+ * swkbdClose :355, swkbdConfigMakePresetDefault :363, swkbdConfigSetInitialText :439, swkbdConfigSetStringLenMax :505 (inline),
+ * swkbdShow :587 (out string UTF-8, size includes the NUL). The applet's cancel is a Result, not a bare error code: nx/source/applets/
+ * libapplet.c:138 returns MAKERESULT(Module_Libnx, LibnxError_LibAppletBadExit) (error code enumerated at nx/include/switch/result.h:125)
+ * when the exit reason is Canceled, Abnormal or Unexpected; libnx's own callers compare it that way (nx/source/services/hidbus.c:326).
  * One keyboard exists: concurrent callers are served one after the other. */
 #include "host_textconv.h"
 #define TE_BYTES (4 * FNVNX_TEXT_ENTRY_MAX + 1)
@@ -33,7 +38,7 @@ static u64 host_text_entry(const u64 *a) {
             swkbdClose(&kbd);
         }
         if (R_FAILED(rc)) {
-            r = rc == LibnxError_LibAppletBadExit ? 0 : (u64)-(s64)rc;
+            r = rc == MAKERESULT(Module_Libnx, LibnxError_LibAppletBadExit) ? 0 : (u64)-(s64)rc;
             break;
         }
         size_t units = te_utf8_to_16(g_te_utf8, strnlen((const char *)g_te_utf8, sizeof g_te_utf8), g_te_units);
