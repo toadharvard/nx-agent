@@ -252,6 +252,21 @@
    "outputs": [
     "win32/registry_seed.gen.inc"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/manifest/gen_prefs_ini.py",
+   "args": [
+    "/ext/manifest/manifest/prefs_required.tsv",
+    "/out/win32/declared_files.gen.inc",
+    "--ident",
+    "/uses/ports/fnv-nx/render/d3d9/ident_handheld.bin",
+    "--ident",
+    "/uses/ports/fnv-nx/render/d3d9/ident_docked.bin"
+   ],
+   "inputs": [],
+   "outputs": [
+    "win32/declared_files.gen.inc"
+   ]
   }
  ],
  "os_layer": [],
@@ -379,6 +394,16 @@
    "commit": "269e23eb8a336cce3e2a48461f7b99f67ac5603d",
    "tree_sha256": "a38b092645bbcdf8b59c5368f09a177f53dfa2f6896ce9b274a80ea933318bfa",
    "at": "/ext/freetype"
+  }
+ ],
+ "uses": [
+  {
+   "root": "ports/fnv-nx/render/d3d9",
+   "output": "ident_handheld.bin"
+  },
+  {
+   "root": "ports/fnv-nx/render/d3d9",
+   "output": "ident_docked.bin"
   }
  ]
 }
