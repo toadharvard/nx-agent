@@ -51,9 +51,10 @@ Measured per test, in the s4_tests binary (the s7 binaries are not measured): `-
 boundary (os_posix.c, host_boundary.cpp, host_gpu.cpp, m32/host_input.cpp), hooks.cpp counts the calls of each entry point,
 one run per test (the case alone, exact name) minus a run of no test (the start-up cost), doubles_needs.py groups the entry
 points by the sections of os.h (and its headers). Raw table: platform/manifest/doubles_needs.tsv (480 tests, calls per need).
-Global totals, 480 of the 481 cases measured (one case cannot be named alone by the harness; 5 of the 480 are not
-independent of the run order and their counts are partial: file_attributes_move_copy_dirs, file_create_dispositions_and_errors,
-file_read_write_seek, procenv_current_directory exit 1 alone, vm_alloc_flags crashes alone):
+Global totals, 480 of the 481 cases measured: vm_alloc_flags crashes when run alone (no counts were written), so it is not
+in the table. 4 more cases fail alone and their counts stop at the failing check, so they are partial:
+file_attributes_move_copy_dirs, file_create_dispositions_and_errors, file_read_write_seek, procenv_current_directory.
+These five depend on the state an earlier case leaves; making them independent is part of moving them to the model.
 
 | need | tests | calls | entry points used |
 |---|---|---|---|
