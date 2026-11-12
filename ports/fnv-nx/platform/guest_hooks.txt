@@ -21,8 +21,6 @@ fnvnx_modules_thread_attach    # loader L1: fnvnx_start.h
 fnvnx_modules_thread_detach    # loader L1: fnvnx_start.h
 fnvnx_modules_process_detach   # loader L1: fnvnx_start.h
 fnvnx_modules_disable_thread_calls  # loader L1: fnvnx_start.h
-# Loader (L1), loader/include/fnvnx_reach.h: the exit of the branches the reachability gate proves unreachable (win32/reach.h; requests: manifest/reach_requests.tsv)
-fnvnx_reach_violation          # loader L1: fnvnx_reach.h
 # Lifter runtime (L3a), branch claude/fnv-l3a-lift, ports/fnv-nx/lift/rt/enter.c:
 fnvnx_lift_enter               # lifter runtime L3a (also declared by the loader's fnvnx_start.h)
 fnvnx_guest_invoke             # lifter runtime L3a
