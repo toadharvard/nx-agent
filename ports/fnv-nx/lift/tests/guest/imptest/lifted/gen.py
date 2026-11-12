@@ -8,7 +8,7 @@ Expected values are computed from the x86 semantics by hand, stated at each case
 usage: gen.py <out dir>"""
 import os, struct, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.join(HERE, '..', '..', '..')
-for p in ('', 'tools'): sys.path.insert(0, os.path.join(LIFT, p))
+sys.path.insert(0, sys.argv[2])  # lift/tools, mounted input (argv[2])
 import fnvlift as L, phf, impgen
 from keystone import Ks, KS_ARCH_X86, KS_MODE_32
 

@@ -10,3 +10,9 @@ Each driver is a directory with:
 Done (generator + main, syntax-checked only, never built or run here): `citest/`, `imptest/`, `msvcrttest/` (its three cases that end the process, terminal.json, run as `main` with the case index and are checked by the boot machine: stop, exit code, memory words). Not built here: the root's `build.json`, its admission and the stage's `py_modules` form wait for the merged base
 (claude/fnv-l3a-lift-int2) and L1's pinned-module stage; disptest follows with the lift/bridges wiring on int2; instest is parked (its reference becomes the pinned Sail model through isla, not Unicorn).
 The lifted units and the native main/natives are two roots (the origin rule): the generated stage lives in the lifted sub-root (LIFTED_ARGS); the native test root links it.
+
+## Roots (build.json pair per test; admit rows pending L1's stage form)
+Each test is two roots: `<t>/lifted` (class `lifted`: `gen.py` only, no tracked C++; one generated stage with `py_modules`
+keystone-engine/capstone/gmpy2, input `lift/tools` mounted and passed as argv[2]; outputs under `gen/`; lifted arguments by origin)
+and `<t>/native` (class `test`: `main.cc`, native arguments and plugins, `uses` the lifted root's `gen` output, `link.roots`
+rt/guest and platform). Forms `uses`, `link.roots` and `py_modules` follow w20/w14/L1 and are unchecked by recipe.py on int2 until they land.

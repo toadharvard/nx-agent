@@ -6,7 +6,7 @@ guest exit code names).
 usage: gen.py <out dir>"""
 import math, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
-for p in (os.path.join(HERE, '..', '..', '..', 'tools'),): sys.path.insert(0, p)
+sys.path.insert(0, sys.argv[2])  # lift/tools, mounted input (argv[2])
 import mpfr_oracle as O_
 import gmpy2
 from fractions import Fraction

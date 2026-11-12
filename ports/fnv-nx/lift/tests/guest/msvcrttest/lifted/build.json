@@ -1,0 +1,107 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "external": "gcc-msvcmodel",
+  "cc": "bin/aarch64-linux-gnu-gcc",
+  "cxx": "bin/aarch64-linux-gnu-g++"
+ },
+ "flags": {
+  "c": [
+   "-mabi=ilp32",
+   "-Werror=attributes"
+  ],
+  "cxx": [
+   "-mabi=ilp32",
+   "-std=gnu++17",
+   "-O2",
+   "-fms-extensions",
+   "-fshort-wchar",
+   "-frounding-math",
+   "-fsigned-char",
+   "-fno-strict-aliasing",
+   "-fwrapv",
+   "-fno-delete-null-pointer-checks",
+   "-fcheck-new",
+   "-fno-sized-deallocation",
+   "-fno-lifetime-dse",
+   "-ffp-contract=off",
+   "-fPIC",
+   "-march=armv8-a+crc+crypto",
+   "-mtune=cortex-a57",
+   "-fno-stack-protector",
+   "-fno-stack-clash-protection",
+   "-mno-outline-atomics",
+   "-U_FORTIFY_SOURCE",
+   "-ffreestanding",
+   "-fno-exceptions",
+   "-fno-asynchronous-unwind-tables",
+   "-fno-math-errno",
+   "-fno-jump-tables",
+   "-fno-ipa-ra",
+   "-ffixed-x19",
+   "-ffixed-x20",
+   "-ffixed-x21",
+   "-ffixed-x22",
+   "-ffixed-x23",
+   "-ffixed-x24",
+   "-ffixed-x25",
+   "-ffixed-x26",
+   "-ffixed-x27",
+   "-Werror=attributes"
+  ],
+  "asm": [
+   "-mabi=ilp32",
+   "-fPIC"
+  ]
+ },
+ "include": [
+  "ports/fnv-nx/lift/rt",
+  "ports/fnv-nx/shim/include",
+  "/ext/liftpack/inc"
+ ],
+ "units": "all",
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/lift/tests/guest/msvcrttest/lifted/gen.py",
+   "args": [
+    "/out/gen",
+    "/in/ports/fnv-nx/lift/tools"
+   ],
+   "inputs": [
+    "ports/fnv-nx/lift/tools"
+   ],
+   "py_modules": [
+    "keystone-engine",
+    "capstone",
+    "gmpy2"
+   ],
+   "outputs": [
+    "gen/guest.cc",
+    "gen/imp.cc",
+    "gen/tab.S",
+    "gen/image.inc",
+    "gen/labels.txt",
+    "gen/terminal.json"
+   ]
+  }
+ ],
+ "link": null,
+ "external": [
+  {
+   "name": "liftpack",
+   "repo": "fnv-nx-build",
+   "ref": "l3a-lift/pack/7b2faae276b2",
+   "commit": "7ef692b5b8532e22e66d4a70fd5cb75fc06722f3",
+   "tree_sha256": "728f43035dbcc949d05aa17e76a35298b01d2d41e9467a50d288f9ae29e6d59c",
+   "at": "/ext/liftpack"
+  },
+  {
+   "name": "gcc-msvcmodel",
+   "repo": "fnv-nx-build",
+   "ref": "tools/gcc-ilp32-msvcmodel",
+   "commit": "b4057704c0babd012e466cc89181132e02542289",
+   "tree_sha256": "b60eafe7a5b0ae3dc679f9bf21e20d3363e3bac2af7379e34127ea5cf8455116",
+   "at": "/ext/gcc"
+  }
+ ]
+}
