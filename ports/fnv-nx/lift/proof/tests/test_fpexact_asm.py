@@ -43,7 +43,7 @@ POSITIVE = [   # (instruction text, group of the Arm ARM it belongs to)
 NEGATIVE = ['fmov w0, s1', 'fmov x0, d1', 'fmov x0, v1.d[1]', 'fmov s0, w1', 'scvtf s0, w1', 'ucvtf d0, x1', 'scvtf s0, s1', 'scvtf v0.4s, v1.4s',
             'ucvtf v0.2d, v1.2d', 'scvtf s0, s1, #3', 'fcvt d0, s1', 'fcvt s0, d1', 'fcvtl v0.2d, v1.2s', 'fcvtn v0.2s, v1.2d', 'fcvtxn s0, d1', 'frintn s0, s1',
             'frintz v0.4s, v1.4s', 'fadd s0, s1, s2', 'fmul v0.4s, v1.4s, v2.4s', 'add w0, w1, w2', 'ldar w0, [x1]', 'stlr w0, [x1]', 'msr fpcr, x0',
-            'mrs x0, fpcr', 'fcmp s0, s1', 'fabs v0.4s, v1.4s', 'frecpe s0, s1', 'sqxtn v0.4h, v1.4s', 'addp v0.4s, v1.4s, v2.4s']
+            'mrs x0, fpcr', 'fmov v0.4h, #1.0', 'fmov v0.8h, #2.0', 'fcmp s0, s1', 'fabs v0.4s, v1.4s', 'frecpe s0, s1', 'sqxtn v0.4h, v1.4s', 'addp v0.4s, v1.4s, v2.4s']
 
 
 def judge(path, unit=None):
@@ -143,7 +143,7 @@ class Real(unittest.TestCase):
         for o in (self.enter, self.mem):
             N, M, D, U = G.asm_totals(self.report(o)['asm'], G.scan_asmranges(o)['entries'])
             self.assertEqual(U, 0)
-            self.assertEqual(M, G.scan_asmranges(o)['entries'])
+            self.assertEqual(M + self.report(o)['asm']['toplevel'], G.scan_asmranges(o)['entries'])
             self.assertGreaterEqual(N, 1)
 
     def test_every_asm_insn_has_a_range_over_its_own_bytes(self):
@@ -151,9 +151,12 @@ class Real(unittest.TestCase):
         r = G.scan_asmranges(self.mem)
         self.assertEqual(r['entries'], sum(v[3] for v in self.report(self.mem)['asm']['functions'].values()))
 
-    def test_judge_reports_only_the_top_level_asm_of_enter(self):
-        f = judge(self.enter)
-        self.assertEqual([x for x in f if 'asm range' in x or 'asm insn' in x], [])
+    def test_enter_top_level_asms_all_lie_in_ranges(self):
+        r = G.scan_asmranges(self.enter)
+        self.assertEqual(r['toplevel'], self.report(self.enter)['asm']['toplevel'])
+        self.assertGreater(r['toplevel'], 0)
+        self.assertEqual(r['findings'], [])
+        self.assertEqual(judge(self.enter), [])
 
 
 class Negative(unittest.TestCase):
@@ -166,6 +169,8 @@ class Negative(unittest.TestCase):
             'modif': 'extern "C" int g(unsigned b){ int r; __asm__ volatile("fcvtzs %w0, %s1" : "=r"(r) : "w"(b)); return r; }\n',
             'clean': 'extern "C" unsigned h(unsigned a){ unsigned r; __asm__ volatile("add %w0, %w1, #1" : "=r"(r) : "r"(a)); return r; }\n',
             'top': '__asm__(".text\\n.globl topf\\n.type topf,%function\\ntopf:\\n ret\\n.size topf,.-topf\\n");\n',
+            'top2': '__asm__(".text\\n.globl t1\\n.type t1,%function\\nt1:\\n add w0, w0, #1\\n ret\\n.size t1,.-t1\\n");\n'
+                    '__asm__(".text\\n.globl t2\\n.type t2,%function\\nt2:\\n nop\\n fcvtzs w0, s0\\n ret\\n.size t2,.-t2\\n");\n',
             'bad': 'extern "C" void u(void){ __asm__ volatile(".inst 0xffffffff"); }\n',
             'cbare.c': 'int cf(void){ int r; __asm__ volatile("fcvtzu %w0, s2" : "=r"(r)); return r; }\n',
             'none': 'extern "C" int n(int a){ return a + 1; }\n',
@@ -225,9 +230,28 @@ class Negative(unittest.TestCase):
         open(os.path.join(d, 'mut_bytes.f2i.json'), 'w').write(open(o[:-2] + '.f2i.json').read())
         self.assertTrue(any('asm range' in x and 'fcvtzs' in x for x in judge(p, 'clean.cc')), judge(p, 'clean.cc'))
 
-    def test_top_level_asm_is_a_finding(self):
+    def test_a_clean_top_level_asm_has_a_range_and_no_finding(self):
         f = judge(self.o['top'])
-        self.assertTrue(any('top-level asm' in x for x in f), f)
+        self.assertEqual(f, [])
+        r = G.scan_asmranges(self.o['top'])
+        self.assertEqual((r['entries'], r['toplevel']), (1, 1))
+
+    def test_a_conversion_inside_a_top_level_asm_is_a_finding(self):
+        f = judge(self.o['top2'])
+        self.assertTrue(any('<toplevel>' in x and 'fcvtzs' in x for x in f), f)
+        self.assertEqual(G.scan_asmranges(self.o['top2'])['toplevel'], 2)
+
+    def test_toplevel_counter_must_equal_the_toplevel_ranges(self):
+        # the report says 2 top-level asm statements, the section holds 1 range of <toplevel>: a finding
+        import json
+        o = self.o['top']
+        d = os.path.dirname(o)
+        rep = json.load(open(o[:-2] + '.f2i.json'))
+        rep['asm']['toplevel'] = 2
+        p = os.path.join(d, 'mut_tl.o')
+        open(p, 'wb').write(open(o, 'rb').read())
+        json.dump(rep, open(os.path.join(d, 'mut_tl.f2i.json'), 'w'))
+        self.assertTrue(any('top-level asm statement' in x for x in judge(p, 'top.cc')))
 
     def test_unrecorded_asm_arithmetic(self):
         a = {'functions': {'f': [1, 1, 1, 1, 0], 'g': [0, 2, 3, 1, 1]}, 'toplevel': 0}
@@ -239,7 +263,9 @@ class Equal(unittest.TestCase):
     """The marker pass changes no byte: the same units built with the product plugin and with the same plugin minus the pass (the recipe builds both) are
     byte-equal in every section except the asm-range pair, relocations included."""
     SRC = {
-        'a': ('extern "C" unsigned h(unsigned a){ unsigned r; __asm__ volatile("add %w0, %w1, #1" : "=r"(r) : "r"(a)); return r; }\n'
+        'a': ('__asm__(".text\\n.globl tl\\n.type tl,%function\\ntl:\\n ret\\n.size tl,.-tl\\n");\n'
+              '__asm__(".pushsection .rodata.x\\n.word 5\\n.popsection\\n");\n'
+              'extern "C" unsigned h(unsigned a){ unsigned r; __asm__ volatile("add %w0, %w1, #1" : "=r"(r) : "r"(a)); return r; }\n'
               'extern "C" int k(int a, int b){ if (a) { __asm__ volatile("nop"); return b; } __asm__ volatile("nop\\nnop"); return a * b; }\n'
               'extern "C" __attribute__((noreturn)) void z(void){ for (;;) __asm__ volatile("wfe"); }\n'
               'extern "C" void m(int *p, int n){ for (int i = 0; i < n; i++) { __asm__ volatile("" ::: "memory"); p[i] += 1; } }\n'),
@@ -250,7 +276,9 @@ class Equal(unittest.TestCase):
         needle = 'register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pm);'
         self.assertEqual(full.count(needle), 1)
         a = build_cxx(self.SRC)['a']
-        b = build_cxx(self.SRC, plugin_text={'fnvnx_ftoi': full.replace(needle, '')})['a']
+        tl = 'register_callback(info->base_name, PLUGIN_ALL_IPA_PASSES_START, count_toplevel, NULL);'
+        self.assertEqual(full.count(tl), 1)
+        b = build_cxx(self.SRC, plugin_text={'fnvnx_ftoi': full.replace(needle, '').replace(tl, '')})['a']   # without the markers and without the top-level rewrite
         sa, sb = sections(a), sections(b)
         skip = ('.fnvnx.asmrange', '.rela.fnvnx.asmrange', '.symtab', '.strtab', '.shstrtab')   # the symbol tables are compared symbol by symbol below
         self.assertEqual(sorted(k for k in sa if k not in skip), sorted(k for k in sb if k not in skip))

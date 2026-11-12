@@ -40,7 +40,7 @@
 // helpers), findings [{function, file, line, kind}] (what is outside a helper and is not rewritten: in lifted mode the errors, in native
 // mode the builtin and asm kinds, and a conv the rewrite does not cover), both sorted; asm (accounting for check 3c: functions
 // {assembler name: [GIMPLE asm at the first pass, GIMPLE asm given to the expander, asm insns right after expand, asm insns marked before
-// final, asm insns after final without markers]}, toplevel (top-level asm statements of the unit)).
+// final, asm insns after final without markers]}, toplevel (top-level asm statements of the unit; each has a range with function "<toplevel>")).
 // Besides the report the plugin writes the section .fnvnx.asmrange into the object (see asm_mark_pass).
 #include "gcc-plugin.h"
 #include "plugin-version.h"
@@ -361,9 +361,18 @@ static void js(FILE *f, const std::string &s) {
   fputc('"', f);
 }
 
-static unsigned toplevel;   // top-level asm statements of the unit, counted before the compiler outputs (and drops) them
+static unsigned toplevel;   // top-level asm statements of the unit
+// Every top-level asm statement is bracketed like an asm insn: its text becomes `begin label, original text, end label` (assembler-local labels in the section
+// the text starts and ends in; a text that ends in another section than it began leaves a range the gate cannot resolve: a finding), and the range is recorded in
+// .fnvnx.asmrange with the function name "<toplevel>". Done at ALL_IPA_PASSES_START: the nodes are dropped when the unit is finished, but not yet output.
 static void count_toplevel(void *, void *) {
-  for (asm_node *a = symtab->first_asm_symbol(); a; a = a->next) toplevel++;
+  for (asm_node *a = symtab->first_asm_symbol(); a; a = a->next) {
+    std::string b = ".Lfnvnx_tl" + std::to_string(toplevel) + "b", e = ".Lfnvnx_tl" + std::to_string(toplevel) + "e";
+    std::string text = b + ":\n" + TREE_STRING_POINTER(a->asm_str) + "\n" + e + ":";
+    a->asm_str = build_string(text.size(), text.c_str());
+    asm_rows.push_back({"<toplevel>", b, e, std::make_tuple(std::string(main_input_filename ? main_input_filename : ""), 0, 0)});
+    toplevel++;
+  }
 }
 
 static void finish(void *, void *) {

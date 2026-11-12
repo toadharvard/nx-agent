@@ -66,7 +66,7 @@ object-level necessary condition:
       by comparing every section except the asm-range pair with and without the pass) and records the pair in the non-alloc section .fnvnx.asmrange (two relocated addresses, line, column,
       function, file). The gate resolves each entry's relocations to the byte range [BEGIN, END) of the executable section and decodes exactly those bytes with capstone, by
       instruction id like check 2: any word in a range that the table fp_to_int selects (FCVT{N,P,M,Z,A}{S,U}, scalar and vector, fixed-point forms, FJCVTZS: the Arm ARM encoding groups cited there) is a finding, as is a range that does not resolve, a word capstone cannot decode, a missing
-      section, an asm insn found after `final` without markers (a second pass walks the insn stream), a top-level asm statement (its bytes lie in no range) and an entry count that
+      section, an asm insn found after `final` without markers (a second pass walks the insn stream), a top-level asm statement without its own range (the plugin rewrites each top-level asm text to `begin label, text, end label` and records the range with function <toplevel>; their number must equal the plugin's toplevel counter) and an entry count that
       differs from the plugin's count. The report carries the compiler's own per-function counts [GIMPLE at the first pass, GIMPLE given to the expander, asm insns right after expand,
       asm insns at the marker pass, unrecorded]; totals over the objects judged are N (GIMPLE asm given to the expander), M (emitted with a range), D (deleted before final: the
       expander dropping unreachable blocks and the RTL passes deleting dead insns, per function N - rtl0 and rtl0 - M, never negative), U (unrecorded). It replaces the earlier
@@ -124,7 +124,8 @@ def _bits(w, hi, lo):
 #   "Advanced SIMD scalar two-register miscellaneous" and its FP16 form, "Advanced SIMD two-register miscellaneous" and its FP16 form
 #                                                          opcode 11010 (a 0: FCVTN, a 1: FCVTP), 11011 (a 0: FCVTM, a 1: FCVTZ), 11100 (a 0: FCVTA), U 0: signed, 1: unsigned
 #   "Advanced SIMD scalar shift by immediate" and "Advanced SIMD shift by immediate"
-#                                                          opcode 11111: FCVTZ{S,U} (fixed-point)
+#                                                          opcode 11111: FCVTZ{S,U} (fixed-point), with immh (bits 22:19) != 0000: immh = 0000 is the "Advanced SIMD modified immediate" group
+#                                                          (cmode 1111, o2 1 is FMOV vector immediate, half precision) and unallocated in the scalar group, neither a conversion
 # Not conversions to an integer and so not listed: FMOV between the general and the FP registers (a bit move), SCVTF / UCVTF (integer to FP), FCVT / FCVTL / FCVTN / FCVTXN
 # (FP to FP), FRINT* (FP to FP). SVE conversions are not in the guest's architecture (-march armv8.1-a): check 3d makes any SVE-class word (bits 28:25 = 0010) in an asm range a finding.
 def fp_to_int(w):
@@ -132,6 +133,8 @@ def fp_to_int(w):
     if _bits(w, 30, 30) == 0 and _bits(w, 28, 24) == 0b11110 and _bits(w, 29, 29) == 0:
         if _bits(w, 21, 21) == 1 and _bits(w, 15, 10) == 0:
             rmode, opc, ptype, sf = _bits(w, 20, 19), _bits(w, 18, 16), _bits(w, 23, 22), _bits(w, 31, 31)
+            if ptype == 2:   # unallocated in this group: not a conversion word; capstone does not decode it, so inside an asm range it is the finding "undecodable word"
+                return None
             if opc in (0, 1):
                 return "fcvt" + {0: "n", 1: "p", 2: "m", 3: "z"}[rmode] + "su"[opc]
             if opc in (4, 5) and rmode == 0:
@@ -153,7 +156,7 @@ def fp_to_int(w):
         if opc == 0b11100 and a == 0:
             return "fcvta" + u
         return None
-    if _bits(w, 15, 11) == 0b11111 and _bits(w, 10, 10) == 1 and (
+    if _bits(w, 15, 11) == 0b11111 and _bits(w, 10, 10) == 1 and _bits(w, 22, 19) != 0 and (
             (_bits(w, 31, 30) == 0b01 and _bits(w, 28, 23) == 0b111110) or (_bits(w, 31, 31) == 0 and _bits(w, 28, 23) == 0b011110)):
         return "fcvtz" + "su"[_bits(w, 29, 29)]
     return None
@@ -398,7 +401,7 @@ def scan_asmranges(path):
     finding, a word capstone (CS_ARCH_ARM64) cannot decode is a finding (nothing is skipped, mapping symbols included), and so is a range that cannot be resolved, lies in no executable section, is empty-and-reversed, or holds undecodable code
     bytes. A missing section is a finding (the plugin always writes it)."""
     md = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
-    out = {"entries": 0, "findings": [], "fcvt": 0}
+    out = {"entries": 0, "findings": [], "fcvt": 0, "toplevel": 0}
     with open(path, "rb") as fh:
         elf = ELFFile(fh)
         sec = elf.get_section_by_name(".fnvnx.asmrange")
@@ -425,6 +428,7 @@ def scan_asmranges(path):
                 out["findings"].append("entry at 0x%x of .fnvnx.asmrange has an unterminated string" % pos)
                 break
             where = "%s:%d in %s" % (file, line, func)
+            out["toplevel"] += func == "<toplevel>"
             out["entries"] += 1
             b, e = relocs.get(pos), relocs.get(pos + 4)
             if b is None or e is None or not isinstance(b[0], int) or b[0] != e[0] or not 0 < b[0] < elf.num_sections():
@@ -503,7 +507,7 @@ def asm_totals(a, ranges):
         M += m
         D += max(x - r0, 0) + max(r0 - m, 0)
         U += u
-    return N, M, D, U + abs(ranges - M)
+    return N, M, D, U + abs(ranges - M - a["toplevel"])
 
 
 def check_3d(path, a):
@@ -515,8 +519,8 @@ def check_3d(path, a):
     out = list(r["findings"])
     if U:
         out.append("%d asm insn(s) reached final without a range (N=%d M=%d D=%d, entries in .fnvnx.asmrange %d)" % (U, N, M, D, r["entries"]))
-    if a["toplevel"]:
-        out.append("%d top-level asm statement(s): their bytes lie in no range" % a["toplevel"])
+    if r["toplevel"] != a["toplevel"]:
+        out.append("%d top-level asm statement(s) but %d range(s) of <toplevel> in .fnvnx.asmrange" % (a["toplevel"], r["toplevel"]))
     return out
 
 
