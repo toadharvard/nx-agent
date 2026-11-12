@@ -422,3 +422,8 @@ Update 2026-11-12, at 698adefb:
   - test_fpexact_asm 20/20 on real recipe-built units.
 - Declined: "convert top-level asm to function-level". It is not semantics-preserving for the enter.cc WRAP entry wrappers (it adds a compiler prologue, and aarch64 gcc 13 has no naked functions). L2 is asked to have the plugin bracket toplevel asm nodes as recorded ranges (L3b's class rule), or report an open class.
 - The gmpy2 mount defect goes to L1 w18: the module file set = the wheel RECORD, which drives the mount, the key and the digest.
+
+## 2026-11-12 09:56
+- int3 262f4d060 (w6): one flag source. liftgen.resolved_flags = recipe semantics + pack root flags. PACK_CXX/C_FLAGS are deleted, 13 test files moved, and 0 private lists remain.
+- BLOCKED, owner L1 w17: lift/pack codegen. The pin's flags.semantics lacks -ffreestanding, -fno-exceptions and -fno-asynchronous-unwind-tables (and -fno-unwind-tables), which are semantic for lifted code (L3's own EH). lift/pack is held: recipe-valid, but not to be merged as a product root until w17's origin-keyed semantics are on the base. L1 is asked to land w17 now.
+- w3: the -I proof moves to libvorbisfile (fast); the binkw32 runs continue in the background.
