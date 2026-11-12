@@ -6,9 +6,8 @@
 (2) the section is ASCII, sorted, unique, ends in LF (L1's descs parser reads the same form);
 (3) for every aggregate type of descclasstest.TYPES the definitions a_<n> (argument) and r_<n> (result) get a descriptor whose register class is the one the
     callee's own compiled body uses (descclasstest.ref_arg / ref_ret: the compiler as reference);
-(4) the C++03 POD rule on results (msvc_pod): base class, user ctor / dtor / copy ctor / copy assign, virtual function, member of non-POD class type, array of it
-    are not PODs (hidden pointer: `m<N>` or the `x` mark); a plain aggregate with private members and a member of POD class type are PODs.
-    The expectations are the convention's documents' rule; the cl (VC9) reference run of the same cases is BLOCKED here (no cl in this container).
+(4) the hidden-pointer rule on results (msvc_pod): every case of podmatrix.py (9 features x depth 0/1/array x sizes 1,2,4,8,12) against the reference table
+    cl_pod_table.tsv (cl 15.00.30729.01 /FAs output with its toolchain commit); exit 3 (BLOCKED) while the table is absent.
 Run: python3 -B lift/test/defdisptest.py [--cc <dir of aarch64-linux-gnu-g++>] [--work dir]   exit 0 on pass."""
 import argparse, os, re, subprocess, sys
 
@@ -17,6 +16,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
 import descclasstest as dc
 import bridgegen
+import podmatrix
 
 UNIT = r'''
 struct VB { int v; };
@@ -48,20 +48,6 @@ WANT = {
     '_ZN2NVC1Ei': 'this:v:i,i', '_ZN2NVC2Ei': 'this:v:i,i', '_ZN2NVD1Ev': 'this:v:i', '_ZN2NVD2Ev': 'this:v:i',   # alias pairs
     '_ZThn8_N2MI1gEv': 'this:i:i',
 }
-POD_DECLS = r'''
-struct P1 { int a; int b; };
-struct P2 { private: int a; public: int b; };                   // a private data member: not an aggregate (cl: hidden pointer)
-struct N1 { int a; };  struct Nb : N1 { int b; };                // a base class
-struct Nc { Nc(int x) : a(x) {} int a; int b; };                 // a user constructor
-struct Nd { ~Nd() {} int a; int b; };                            // a user destructor
-struct Na { Na &operator=(const Na &o) { a = o.a; return *this; } int a; int b; };   // a user copy assignment
-struct Nv { virtual void f(); int a; };                          // a virtual function
-struct Nm { Nc c; };                                             // a member of class type with a ctor: cl returns it in registers, the member's type does not count
-struct Nr { Nc c[1]; };                                          // an array of such a member: same
-struct Nk { Nk(const Nk &o) : a(o.a), b(o.b) {} int a; int b; }; // a user copy constructor
-struct Pm { P1 p; };                                             // a member of POD class type: a POD
-'''
-POD = [('P1', True), ('P2', False), ('Pm', True), ('Nb', False), ('Nc', False), ('Nd', False), ('Na', False), ('Nv', False), ('Nm', True), ('Nr', True), ('Nk', False)]
 
 
 def main():
@@ -102,14 +88,22 @@ def main():
         check('defined function symbols == rows', defined == set(got), 'only in the object %s, only in the rows %s' % (sorted(defined - set(got)), sorted(set(got) - defined)))
         check('a covariant thunk is a defined symbol with a row', any(k.startswith('_ZTch') or k.startswith('_ZTc') for k in got), str(sorted(got)))
         for k, v in WANT.items(): check('descriptor of ' + k, got.get(k) == v, 'got %s, want %s' % (got.get(k), v))
-    # (4) the C++03 POD rule on results: each type's function is called through a pointer, so the call site's descriptor is the unit's only one
-    for ty, ispod in POD:
-        open('%s/podone.cc' % w, 'w').write(POD_DECLS + 'void c(%s (*f)()) { f(); }\n' % ty)
-        dc.run([cc('g++')] + F + plug + ['-c', '%s/podone.cc' % w, '-o', '%s/podone.o' % w])
-        ds = bridgegen.read_obj('%s/podone.o' % w)
-        rt = ds[0].split(':')[1] if len(ds) == 1 else None
-        ok = rt is not None and ((rt[0] == 'a' and not rt.endswith('x')) if ispod else (rt[0] == 'm' or rt.endswith('x')))
-        check('result %s is %s' % (ty, 'a POD' if ispod else 'not a POD'), ok, 'descriptors %s' % ds)
+    # (4) the hidden-pointer rule on results, every row of the reference table (podmatrix.py; cl_pod_table.tsv = the cl output, a committed fact)
+    tp = os.path.join(HERE, 'cl_pod_table.tsv')
+    if not os.path.exists(tp):
+        print('defdisptest: BLOCKED: cl_pod_table.tsv is absent (the cl reference run of podmatrix.py --cl)'); sys.exit(3)
+    table = dict(l.split('\t') for l in open(tp).read().split('\n') if l and not l.startswith('#'))
+    cs = [c[0] for c in podmatrix.cases()]
+    check('table rows == matrix cases', set(table) == set(cs), 'only in the table %s, only in the matrix %s' % (sorted(set(table) - set(cs))[:5], sorted(set(cs) - set(table))[:5]))
+    src = podmatrix.decls() + ''.join('extern %s g_%s;\nextern "C" %s r_%s() { return g_%s; }\n' % (n, n, n, n, n) for n in cs)
+    got = rows(build(src, 'pod') or b'')
+    for n in cs:
+        d1 = got.get('r_' + n)
+        if d1 is None or n not in table: check('result %s' % n, False, 'row %s, table %s' % (d1, table.get(n))); continue
+        rt = d1.split(':')[1]
+        size = int(re.match(r'[am](\d+)', rt).group(1))
+        hidden = rt[0] == 'm' or rt.endswith('x') or size not in (1, 2, 4, 8)   # sizes that are no x86 register size: bridgegen's rule
+        check('result %s: cl %s' % (n, table[n]), hidden == (table[n] == 'hidden'), 'plugin row %s' % d1)
     # (3)
     decls = '\n'.join(t[1] for t in dc.TYPES)
     ref = ''.join('%s g_%s;\nextern "C" void __attribute__((noinline)) a_%s(%s x) { g_%s = x; }\nextern "C" %s __attribute__((noinline)) r_%s(void) { return g_%s; }\n' % (T, n, n, T, n, T, n, n) for n, d, T in dc.TYPES)
