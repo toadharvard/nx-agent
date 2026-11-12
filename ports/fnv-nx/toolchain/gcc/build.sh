@@ -17,7 +17,9 @@
 #
 # Tarballs (toolchain/sources.sh fetches them, SHA-256 checked): binutils-2.45.1, gcc-15.2.0, gcc-13.3.0, newlib-4.6.0.20260123.
 # Patches: git clone https://github.com/devkitPro/buildscripts (patches/*.patch).
-# Host packages: libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex zlib1g-dev python3 (+ a host g++).
+# Build host: the pinned profile `toolchain-build` of verify/env.json (g++-13, make, libgmp/mpfr/mpc-dev, zlib1g-dev,
+# texinfo, bison, flex, python3, pyelftools), installed in a debootstrap chroot by toolchain/gcc/chroot_build.sh, never in
+# the verdict root. Two chroots at different paths must give the same tree_sha256.
 #
 # Reproducibility (the same tree_sha256 from two build directories on two hosts):
 #   - one canonical prefix (checked), SOURCE_DATE_EPOCH = the date of the newest pinned tarball (newlib 2026-01-23),
