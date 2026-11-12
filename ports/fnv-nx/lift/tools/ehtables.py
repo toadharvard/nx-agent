@@ -552,6 +552,7 @@ class EH(Flow):
         J['conts'] = {h(k): h(v) for k, v in sorted(s.conts.items())}
         J['registrations'] = [{'site': h(a), 'handlers': [h(x) for x in r['handlers']], 'kind': r['kind'], 'frame_disp': r['disp']} for a, r in sorted(s.regsites.items())]
         J['helpers'] = [{'addr': h(R), 'arg': d['k'], 'handlers': [h(x) for x in sorted(d['handlers'])], 'frame_disp': d['disp'], 'err': d.get('err')} for R, d in sorted(s.hlp.items())]
+        J['jtab_red'] = [{'site': h(a), 'why': w} for a, w in sorted(getattr(X, 'jtab_red', {}).items())]; J['jtab_sites'] = len(getattr(X, 'jtab', ()))
         J['seh_red'] = [{'site': h(a), 'why': w} for a, w in s.seh_red]; J['fs0_restores'] = s.fs0_other
         pres = {}; MASK = {'ebx': 1, 'esi': 2, 'edi': 4, 'ebp': 8}
         for e in es:

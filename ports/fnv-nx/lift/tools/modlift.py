@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import capstone
 from capstone import x86 as X
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import pemod, ehtables, codemap
+import pemod, ehtables, codemap, jtab as JT
 from fnvlift import Image as LImage; from fnvlift import core as LCore
 TERM = {'ret', 'retf', 'int3', 'hlt', 'ud2', 'iret', 'iretd'}
 PRI = ['entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw', 'ptr']
@@ -110,7 +110,29 @@ def run(arg):
         p = u32(M.base + tls[0] + 12)
         while intext(u32(p)): add(u32(p), 'tls', True); p += 4
     for r, v in rvals: add(v, 'ptr')
-    tailsrc = {}
+    tailsrc = {}; jt_red = {}; jt_ok = {}
+    X_.jtab = jtab; X_.jtab_red = jt_red
+    def jt_pass():
+        """jump-table edges (tools/jtab.py): every `jmp [T + r*4]` site is evaluated on the CURRENT decode (a guard chain needs unique predecessors, so the evaluation is repeated until the entry set is closed);
+        a site that resolves gets its table words as edges (the descent follows them), a site that does not is red with the reason."""
+        pm = {}
+        for a, (sz, mn, ft, fall, tg) in dec.items():
+            for t in tg: pm.setdefault(t, set()).add(a)
+            if fall: pm.setdefault(a + sz, set()).add(a)
+        def ins_at(a): return next(md.disasm(text[a - T0:a - T0 + 15], a, 1), None) if T0 <= a < T1 else None
+        def pred1(x): p = pm.get(x); return next(iter(p)) if p and len(p) == 1 else None
+        def u8(a):
+            try: return u32(a) & 0xff
+            except Exception: return None
+        n = 0
+        for a in sorted(jtab):
+            tg, why = JT.resolve(a, ins_at(a), ins_at, pred1, lambda x: x in ent or x in callers, rset, u32, u8, intext, lambda v: intext(v))
+            if tg is None: jt_red[a] = why; continue
+            jt_red.pop(a, None)
+            if a not in jt_ok or jt_ok[a] != tg:
+                jt_ok[a] = tg; sz, mn, ft, fall, old = dec[a]; dec[a] = (sz, mn, ft, False, tuple(tg)); jins.append(a); n += 1
+                for t in tg: descend(t)
+        return n
     def tail_pass():
         L = es(); n = 0
         for a in sorted(jins):
@@ -167,7 +189,7 @@ def run(arg):
     while True:
         while True:
             while queue: descend(queue.popleft())
-            ch = tail_pass() + eh.scan()
+            ch = tail_pass() + jt_pass() + eh.scan()
             if not queue and not ch: break
         E = es(); NR, res = codemap.noreturn_lfp(E, trav, {eh.thrower} & set(ent)); exts = {e: res[e][0] for e in E}; edges = {e: res[e][1] for e in E}
         rounds += 1; n_before = n_before or len(E); viol = {}; outside = {}; jxs = set(); ftall = set()
