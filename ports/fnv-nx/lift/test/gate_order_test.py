@@ -287,6 +287,16 @@ ASMCASES = {
     'asm_frame_pointer':  ('stp x29,x30,[sp,#-32]!\n mov x29,sp\n str x28,[x29,#16]\n mov x28,x0\n ldr x28,[x29,#16]\n mov sp,x29\n ldp x29,x30,[sp],#32\n ret', G),
     'asm_one_path_saved': ('cbz x0,1f\n str x28,[sp,#-16]!\n mov x28,x0\n ldr x28,[sp],#16\n1: ret', G),
     'asm_tail_call':      ('b g', G),
+    'asm_xform_pair':     ('stp x19,x20,[sp,#-16]!\n mov w19,w0\n mov w20,w1\n ldp x19,x20,[sp],#16\n ret', G),
+    'asm_xform_single':   ('str x19,[sp,#-16]!\n mov w19,w0\n ldr x19,[sp],#16\n ret', G),
+    'asm_xform_x27_pair': ('stp x26,x27,[sp,#-16]!\n ldp x26,x27,[sp],#16\n ret', R),
+    'asm_xform_then_base': ('stp x19,x20,[sp,#-16]!\n ldp x19,x20,[sp],#16\n ldarb w0,[x19]\n ret', G),
+    'asm_xform_one_path': ('stp x19,x20,[sp,#-16]!\n cbz w0,1f\n ldp x19,x20,[sp],#16\n ret\n1: add sp,sp,#16\n ret', G),
+    'asm_xform_wrong_slot': ('stp x19,x20,[sp,#-16]!\n ldp x20,x19,[sp],#16\n ret', R),
+    'asm_xform_unsaved':  ('ldr x19,[sp]\n ret', R),
+    'asm_xform_write':    ('mov x19,x0\n ret', R),
+    'asm_xform_overwritten_slot': ('str x19,[sp,#-16]!\n str x0,[sp]\n ldr x19,[sp],#16\n ret', R),
+    'asm_xform_one_path_bad': ('str x19,[sp,#-16]!\n cbz w0,1f\n ldr x19,[sp],#16\n ret\n1: ldr x19,[sp,#8]\n add sp,sp,#16\n ret', R),
     'asm_clobber':        ('mov w19,w0\n ret', R),
     'asm_clobber_x28':    ('mov x28,x0\n ret', R),
     'asm_clobber_x30':    ('bl g\n ret', R),
@@ -336,6 +346,9 @@ class T(unittest.TestCase):
         self.assertEqual(self.gate([o])['order']['status'], G)                     # a compiler-output object is not held to rule (c)
         self.assertEqual(self.gate([o], asm=[o])['order']['status'], R)
         self.assertEqual(self.gate([self.asm('ok', FN.format(ASMCASES['asm_frame'][0]))], asm=[])['order']['certified'], 0)
+        x = self.asm('xf', FN.format(ASMCASES['asm_xform_pair'][0]))
+        self.assertEqual(self.gate([x])['order']['status'], R)                     # compiler objects keep rule (a): an X-form reload of x19-x26 is red
+        self.assertEqual(self.gate([x], asm=[x])['order']['status'], G)
     def test_asm_code_outside_func(self):
         o = self.asm('outside', '.text\n.globl f\n.type f,%function\nf: ret\n.size f,.-f\nh: mov x28,x0\n ret\n')
         res = self.gate([o], asm=[o])['order']

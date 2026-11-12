@@ -58,6 +58,8 @@ Writes of x19-x27 (rule (a), docs/ORDERING.md): the destination registers of eve
 and from the destination fields of the encoding (gprwrites: Rd, Rt, Rt2, the status register of exclusives, the base register of a
 writeback, mrs/umov/smov/fcvt-to-integer destinations); the union decides. A write capstone does not report is a rule violation of its own.
 x27 is never written; x19-x26 are written only by results proven below 2^32.
+In an --asm object a write of x19-x26 that rule (c) proves takes back the register's entry value (a reload of the frame slot its entry value was
+stored to) is not a guest-register write: an X-form ldr/ldp restore is legal there. Compiler objects keep (a) as stated.
 
 Assembler objects (rule (c)): an object given with --asm is also held to this: every STT_FUNC preserves x19-x30 and sp on every path to every
 exit (ret, br, a relocated or out-of-range b, falling into the next symbol). The proof is a forward dataflow per function (asmcheck): a
@@ -345,13 +347,13 @@ def deffuncs(path):
 
 def asmcheck(L, fsyms, code):
     """Rule (c), for an object whose source is assembler: every STT_FUNC preserves x19-x30 and sp on every path to every exit (ret, br, a
-    relocated or out-of-range b, falling into the next symbol). -> [(Ins, reason or '')], one row per exit instruction, and rows for code that no
-    STT_FUNC covers. Forward dataflow over each function: a register holds INIT(r) (its value at entry), a frame address (sp, offset) or nothing
+    relocated or out-of-range b, falling into the next symbol). -> ([(Ins, reason or '')], restores): one row per exit instruction, and rows for code that no
+    STT_FUNC covers; restores are the addresses of the instructions all of whose writes to x19-x26 take back the register's entry value. Forward dataflow over each function: a register holds INIT(r) (its value at entry), a frame address (sp, offset) or nothing
     known; the frame slots hold the INIT value stored by an 8-byte `str`/`stp` through sp or a frame address, at a constant offset; a store that
     may overlap a slot, an index register on a frame base, a store through a register that is not a frame address once a frame address was
     handed out (copied to a register outside x19-x30, stored, or used in other arithmetic), and a call after that, forget the slots. sp changes only by a
     constant, by a writeback of a frame base, or by a copy from a frame address. At an exit: sp offset 0 and every register INIT(r)."""
-    rows = []; starts = sorted(set(v for v, _, _ in fsyms)); rng = []
+    rows = []; cand = {}; starts = sorted(set(v for v, _, _ in fsyms)); rng = []
     for fi, f in enumerate(starts):
         nxt = starts[fi + 1] if fi + 1 < len(starts) else 1 << 62
         sz = max(z for v, _, z in fsyms if v == f)
@@ -425,6 +427,8 @@ def asmcheck(L, fsyms, code):
                 if not (ins.term and ins.txt.startswith('ret')): esc = True
             if ins.call:
                 if esc: slots.clear()
+            gw = [r for r in wr if 19 <= r <= 26]          # a write of x19-x26 is a restore iff every such write takes back the entry value of that register
+            if gw: cand[ins.a] = cand.get(ins.a, True) and all(assign.get(r) == INIT(r) for r in gw)
             for r in wr: regs[r - 19] = None
             for r, t in assign.items():
                 if 19 <= r <= 30: regs[r - 19] = t
@@ -463,7 +467,7 @@ def asmcheck(L, fsyms, code):
             cur = sts[0]
             for x in sts[1:]: cur = join(cur, x)
             rows.append((ins, exitcheck(cur)))
-    return rows
+    return rows, frozenset(a for a, ok in cand.items() if ok)
 
 
 def analyse(path):
@@ -494,8 +498,10 @@ def analyse(path):
         if L is None:
             i = Ins(); i.a = badoff; i.txt = '(undecodable)'; glob('undecodable word in ' + sname, i); continue
         tick('instructions', len(L))
+        restores = frozenset()
         if os.path.abspath(path) in ASM:
-            for ins, why in asmcheck(L, fsyms, code):
+            arows, restores = asmcheck(L, fsyms, code)
+            for ins, why in arows:
                 tick('asm_exits'); item('order', ins, 'asm')
                 if why: tick('rule_violations'); red('order', ins, why, 'asm')
         at = {ins.a: k for k, ins in enumerate(L)}
@@ -708,6 +714,7 @@ def analyse(path):
                 if spill is not None and (r, w) == ins.wr[0] and len(ins.wr) == 1: cls[r] = CPU; off[r] = spill; ub[r] = None
                 if ioff is not None and cls[r] == IMAGE and ins.wr == [(r, w)]: off[r] = ioff
                 if ub[r] is not None and ub[r] <= W32 and cls[r] == GUEST: wc[r] = True
+                if ins.a in restores and 19 <= r <= 26: wc[r] = True; ub[r] = W32       # rule (c) proved the entry value is back: below 2^32 like at entry
                 if check and 19 <= r <= 26 and not w and not wc[r]: glob('X-form write of a guest register not proven below 2^32', ins)
                 fo[r] = None
                 if cls[r] == FRAME: fo[r] = nfo
