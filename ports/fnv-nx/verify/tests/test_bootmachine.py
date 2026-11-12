@@ -413,7 +413,7 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("boost-extra-args", EC(11, 1, FNVNX_ADDR(v), 4));
     num("sock-wrong-n", EC(11, 16, FNVNX_ADDR(v), 2));
     num("sock-wrong-n0", EC(11, 17, 0, 0));
-    num("sock-too-many", EC(11, 33, FNVNX_ADDR(v), 4));
+    num("sock-too-many", EC(11, 31, FNVNX_ADDR(v), 4));
     num("tz-n1", EC(11, 34, FNVNX_ADDR(v), 1));
     num("tz-null", EC(11, 34, 0, 2));
     num("reserve-above-4g", plat(4, 0, 0x100000001ull, 0, 2));
@@ -595,7 +595,7 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     static const uint8_t SN[34] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 1, 2, 2, 2, 2, 5, 5, 5, 5, 3, 2, 2, 2, 1, 2, 4, 3};
     uint64_t mask = 0, hs[4] = {0, 3, 0x7FFFFFFFull, 1ull << 32};
     for (uint32_t fn = 17; fn <= 31; fn++) {
-        if (fn == 26) continue;
+        if (fn == 26 || (fn >= 27 && fn <= 29)) continue;   /* 26 POLL has no handle first; 27..29 are not services */
         for (uint32_t i = 0; i < 4; i++) {
             uint64_t r = sk(fn, SN[fn], hs[i], 0, 0, 0, 0);
             if (r == NEG(9)) mask |= 1ull << fn; else { mask |= 1ull << 40; num("ebadf-bad", fn); }
@@ -618,25 +618,6 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("poll-neg-t10", sk(26, 3, FNVNX_ADDR(pn), 2, 10, 0, 0));
     num("poll-neg-us", fnvnx_hcall0(H->wall_time_us) - t0);
     num("poll-neg-rev", pn[0].revents | pn[1].revents);
-    FnvnxWireAddrinfo hi;
-    for (uint32_t i = 0; i < sizeof hi; i++) ((char *)&hi)[i] = 0;
-    uint32_t ec = 0x77;
-    num("gai-both-null", sk(32, 4, 0, 0, 0, 0, 0));
-    num("gai-both-null-errno", sk(32, 4, 0, 0, 0, FNVNX_ADDR(&ec), 0));
-    hi.flags = 0x8000;
-    num("gai-badflags", sk(32, 4, 0, 0, FNVNX_ADDR(&hi), 0, 0));
-    hi.flags = 0x3F; hi.family = 3;
-    num("gai-badfamily", sk(32, 4, 0, 0, FNVNX_ADDR(&hi), 0, 0));
-    hi.family = 10; hi.socktype = 9;
-    num("gai-badtype", sk(32, 4, 0, 0, FNVNX_ADDR(&hi), 0, 0));
-    hi.flags = 0x8000;
-    num("gai-order", sk(32, 4, 1, 1, FNVNX_ADDR(&hi), 0, 0));
-    hi.flags = 0x400; hi.family = 0; hi.socktype = 3;
-    num("gai-hints-ok-both-null", sk(32, 4, 0, 0, FNVNX_ADDR(&hi), 0, 0));
-    num("gai-errno-kept", ec);
-    num("fetch-1", sk(33, 3, 1, 0, 0, 0, 0));
-    num("fetch-0", sk(33, 3, 0, 0, 0, 0, 0));
-    num("fetch-wide", sk(33, 3, (1ull << 32) + 1, 0, 0, 0, 0));
     uint32_t zw[4] = {0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA};
     num("tz-0", plat(34, 0, FNVNX_ADDR(zw), 0, 2));
     num("tz-off", zw[0]); num("tz-dst", zw[1]);
@@ -682,7 +663,9 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     sk(26, 3, FNVNX_ADDR(&pf), 1, ~0ull, 0, 0);   /* nothing can become ready and the timeout is forever */
     say("after the poll\n");
 #elif MODE == 52
-    sk(32, 4, FNVNX_ADDR("0x7f.1"), 0, 0, 0, 0);   /* numeric for inet_aton, not strict: the resolver's reading is not in the header */
+    /* the numbers that hostapi.h no longer declares (SHUTDOWN, GETSOCKNAME, GETPEERNAME, GAI_OPEN, GAI_FETCH) answer NO_SERVICE for any nargs */
+    num("fn27", plat(27, 0, 0, 0, 2)); num("fn28", plat(28, 0, 0, 0, 2)); num("fn29", plat(29, 0, 0, 0, 0));
+    num("fn32", plat(32, 0, 0, 0, 4)); num("fn33", plat(33, 0, 0, 0, 3));
 #elif MODE == 53
     uint32_t zo[4];
     num("tz-below", plat(34, 0x7FFFFFFFFFFFFFFFull, FNVNX_ADDR(zo), 0, 2));
@@ -714,7 +697,7 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("rec-finished-resume", plat(2, wrec, 0, 0, 2));
     num("no-record", plat(2, 0x7777, 1, 0, 2));
 #elif MODE == 56
-    static FnvnxWireSockaddr to, lo, got;
+    static FnvnxWireSockaddr to, lo;
     static FnvnxWireAddrinfo recs[3];
     static char buf[4];
     uint32_t ec = 0x77;
@@ -732,21 +715,8 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("recv-nb", sk(23, 5, h2, FNVNX_ADDR(buf), 1, 0, 0));
     lo.family = 2; lo.port = 8080; lo.addr[0] = 127; lo.addr[3] = 1;
     num("bind-lo", sk(18, 2, h3, FNVNX_ADDR(&lo), 0, 0, 0));
-    num("getsockname", sk(28, 2, h3, FNVNX_ADDR(&got), 0, 0, 0));
-    num("name-port", got.port); num("name-fam", got.family); num("name-a0", got.addr[0]); num("name-a3", got.addr[3]);
     num("close3", sk(17, 1, h3, 0, 0, 0, 0));
     num("closed-getfl", sk(30, 1, h3, 0, 0, 0, 0));
-    uint64_t tk = sk(32, 4, FNVNX_ADDR("10.1.2.3"), FNVNX_ADDR("443"), 0, 0, 0);
-    num("ticket", tk);
-    num("fetch-size", sk(33, 3, tk, 0, 0, 0, 0));      /* cap 0: the total, the ticket stays */
-    num("fetch", sk(33, 3, tk, FNVNX_ADDR(recs), sizeof recs, 0, 0));
-    num("rec0", recs[0].family | recs[0].socktype << 8 | recs[0].protocol << 16);
-    num("rec1", recs[1].family | recs[1].socktype << 8 | recs[1].protocol << 16);
-    num("rec2", recs[2].family | recs[2].socktype << 8 | recs[2].protocol << 16);
-    num("rec-port", recs[1].addr.port); num("rec-a", recs[1].addr.addr[0] | recs[1].addr.addr[3] << 8);
-    num("fetch-again", sk(33, 3, tk, 0, 0, 0, 0));
-    num("gai-name", sk(32, 4, FNVNX_ADDR("example.org"), 0, 0, FNVNX_ADDR(&ec), 0));
-    num("gai-errno-kept", ec);
     num("tz-last", plat(34, 4133980799ull, FNVNX_ADDR(recs), 0, 2));
 #elif MODE == 35
     fnvnx_hcall1(H->exit, 0x5200002A);   /* fnvnx_reach_violation(42) */
@@ -939,12 +909,12 @@ def parse_totality(path):
         if m:
             rows[int(m.group(1))] = (m.group(2), None)
     body = "\n".join(lines)
-    m = re.search(r"16\.\.33 (.*?)\bn = the count[^(]*\((.*?)\)\s*\n", body, re.S)
+    m = re.search(r"16\.\.26 30 31 (.*?)\bn = the count[^(]*\((.*?)\)\s*\n", body, re.S)
     names = re.findall(r"\bSOCK_[A-Z_]+", m.group(1))
     counts = {("SOCK_" + a if not a.startswith("SOCK_") else a): int(b) for a, b in re.findall(r"([A-Z_]+) (\d+)", m.group(2))}
-    assert len(names) == 18 and set(counts) == set(names), (names, counts)
-    for i, n in enumerate(names):
-        rows[16 + i] = (n, counts[n])
+    assert len(names) == 13 and set(counts) == set(names), (names, counts)
+    for f, n in zip(list(range(16, 27)) + [30, 31], names):
+        rows[f] = (n, counts[n])
     defs = {int(v): n for n, v in re.findall(r"#define FNVNX_PLAT_([A-Z_0-9]+) (\d+)u", txt) if n not in ("SOCK_FIRST", "SOCK_LAST")}
     assert {f: r[0] for f, r in rows.items()} == defs, "table rows and #define FNVNX_PLAT_* differ"
     st = txt[txt.index("typedef struct FnvnxHostApi {"):txt.index("} FnvnxHostApi;")]
@@ -1216,15 +1186,12 @@ def main():
     k49 = kv(l49)
     M = bootmachine.U64 + 1
     ne = lambda e: "%x" % (M - e)
-    ebadf_fns = [f for f in range(17, 32) if f != 26]
+    ebadf_fns = [f for f in range(17, 32) if f != 26 and not 27 <= f <= 29]
     want49 = {"sock-afnosupport": ne(97), "sock-af-wide": ne(97), "sock-af-neg": ne(97), "sock-type-4": ne(22), "sock-type-0": ne(22),
               "ebadf-mask": "%x" % sum(1 << f for f in ebadf_fns),
               "poll-big": ne(22), "poll-null": ne(14), "poll-nfds0-t0": "0", "poll-nfds0-null-t7": "0", "poll-wait-us": "1b58",
               "poll-nval": "2", "poll-rev0": "0", "poll-rev1": "20", "poll-rev2": "20", "poll-ev2": "5",
               "poll-neg-t0": "0", "poll-neg-t10": "0", "poll-neg-us": "2710", "poll-neg-rev": "0",
-              "gai-both-null": ne(2002), "gai-both-null-errno": ne(2002), "gai-badflags": ne(2001), "gai-badfamily": ne(2005),
-              "gai-badtype": ne(2006), "gai-order": ne(2001), "gai-hints-ok-both-null": ne(2002), "gai-errno-kept": "77",
-              "fetch-1": ne(22), "fetch-0": ne(22), "fetch-wide": ne(22),
               "tz-0": "0", "tz-off": "0", "tz-dst": "0", "tz-abbr": "435455", "tz-abbr-rest": "0", "tz-max": "0", "tz-1970": "0", "tz-1970-off": "0", "tz-2100-last": "0", "tz-2101": "0", "tz-2101-untouched": "0",
               "tz-u64max": "0", "tz-negative-main": "0",
               "tz-null-out": ne(14), "tz-slot": "0"}
@@ -1246,9 +1213,8 @@ def main():
     case("POLL with nothing to wait for and timeout -1: the run ends as deadlock, never returns", r51[0]["reason"] == "deadlock"
          and "after the poll" not in r51[1], r51[0])
     r52, l52 = run(built[52][0], root)[:2]
-    case("an undetermined socket case (GAI_OPEN with a node numeric by inet_aton only) ends the run naming service 32, with the reason as an event",
-         r52["reason"] == "ext-module-missing" and r52["ext"] == {"module": 11, "fn": 32}
-         and [e["kind"] for e in r52["events"]] == ["sock-undetermined"], r52)
+    case("the numbers 27, 28, 29, 32 and 33, which hostapi.h no longer declares, answer NO_SERVICE (guest, any nargs)",
+         r52["reason"] == "exit" and kv(l52) == {n: "ffffffffffffff02" for n in ("fn27", "fn28", "fn29", "fn32", "fn33")}, (r52, l52))
     r53, l53 = run(built[53][0], root)[:2]
     case("TZ_AT at INT64_MAX and INT64_MIN: the fixed UTC zone answers every instant", r53["reason"] == "exit"
          and kv(l53) == {"tz-below": "0", "tz-above": "0"}, (r53, l53))
@@ -1265,10 +1231,8 @@ def main():
     r56, l56 = run(built[56][0], root)[:2]
     k56 = kv(l56)
     want56 = {"h1": "3", "h2": "4", "close1": "0", "h3": "3", "getfl": "2", "setfl": "0", "getfl-nb": "802", "connect-ext": ne(101),
-              "sendto-ext": ne(101), "recv-nb": ne(11), "bind-lo": "0", "getsockname": "0", "name-port": "1f90", "name-fam": "2", "name-a0": "7f",
-              "name-a3": "1", "close3": "0", "closed-getfl": ne(9), "ticket": "1", "fetch-size": "a8", "fetch": "a8", "rec0": "60102", "rec1": "110202",
-              "rec2": "302", "rec-port": "1bb", "rec-a": "30a", "fetch-again": ne(22), "gai-name": ne(2002), "gai-errno-kept": "77", "tz-last": "0"}
-    case("sockets and getaddrinfo (guest): handles, flag state, ENETUNREACH, loopback bind and name, numeric getaddrinfo records, name -> EAI_AGAIN "
+              "sendto-ext": ne(101), "recv-nb": ne(11), "bind-lo": "0", "close3": "0", "closed-getfl": ne(9), "tz-last": "0"}
+    case("sockets (guest): handles, flag state, ENETUNREACH, loopback bind "
          "(%d values)" % len(want56), r56["reason"] == "exit" and k56 == want56, ({n: (k56.get(n), v) for n, v in want56.items() if k56.get(n) != v}, r56))
     sw = open(os.path.join(GUEST_DIR, "fnvnx", "sockwire.h")).read()
     lst = lambda name: [int(v, 0) for v in re.findall(r"X\(\w+, (\w+)\)", re.search(r"#define " + name + r"\(X\)((?:[^\n]*\\\n)*[^\n]*)", sw).group(1))]
@@ -1435,8 +1399,9 @@ def main():
 
     # ---- the header's TOTALITY TABLE (parsed from the fixture) against the machine
     rows, hslots = parse_totality(os.path.join(GUEST_DIR, "hostapi.h"))
+    SERVED = list(range(1, 27)) + [30, 31, 34, 35, 36]
     mach0 = bootmachine.Machine(elf0, plan0, boothost.Services(root))
-    case("header: 36 services of module 11 and 50 slots parsed", len(rows) == 36 and sorted(rows) == list(range(1, 37))
+    case("header: 31 services of module 11 and 50 slots parsed", len(rows) == 31 and sorted(rows) == SERVED
          and len(hslots) == 50, (len(rows), len(hslots)))
     case("slots: the header's struct order is bootmachine.SLOTS, each has an h_<slot> and a handler", hslots == bootmachine.SLOTS
          and all(callable(getattr(boothost.Services, "h_" + n, None)) and n in mach0.handlers for n in hslots), hslots)
@@ -1444,7 +1409,7 @@ def main():
     case("services: every declared service is served by the machine (the sockets by Machine._sock), none extra",
          served_decl == set(rows) and set(mach0.plat) | set(bootmachine.SOCK_SERVICES) == set(rows) and not set(mach0.plat) & set(bootmachine.SOCK_SERVICES),
          (sorted(set(rows) - served_decl), sorted(set(mach0.plat) & set(bootmachine.SOCK_SERVICES))))
-    case("services: served = 1..36 (36 of 36)", sorted(served_decl) == list(range(1, 37)) and not hasattr(bootmachine, "UNSERVED"),
+    case("services: served = 1..26, 30, 31, 34..36 (31 of 31)", sorted(served_decl) == SERVED and not hasattr(bootmachine, "UNSERVED"),
          sorted(served_decl))
     names_ok = all(rows[f][0].lower() == n and rows[f][1] in (None, need) for f, (n, need) in
                    {**bootmachine.PLATFORM_FNS, **bootmachine.SOCK_SERVICES}.items())
@@ -1475,8 +1440,8 @@ def main():
             bad[nm] = "null array with nargs > 0"
     case("services: every declared service answers BAD_NARGS below its n and for a null array, sockets -EINVAL on a wrong nargs, BAD_NARGS on a null array and a value for zero arguments",
          not bad, bad)
-    case("services: fn 0 and 37.. are NO_SERVICE, unknown module NO_MODULE, fn > UINT32_MAX NO_SERVICE (before the platform table)",
-         all(mach0.ext_call(11, f, args_at, 4) == bootmachine.EXT_NO_SERVICE for f in (0, 37, 38, 0xFFFFFFFF, 1 << 32, (1 << 32) + 4))
+    case("services: fn 0, 27..29, 32, 33 and 37.. are NO_SERVICE, unknown module NO_MODULE, fn > UINT32_MAX NO_SERVICE (before the platform table)",
+         all(mach0.ext_call(11, f, args_at, 4) == bootmachine.EXT_NO_SERVICE for f in (0, 27, 28, 29, 32, 33, 37, 38, 0xFFFFFFFF, 1 << 32, (1 << 32) + 4))
          and mach0.ext_call(63, 1, args_at, 1) == bootmachine.EXT_NO_MODULE and mach0.ext_call(64, 1 << 33, 0, 0) == bootmachine.EXT_NO_MODULE
          and mach0.ext_call(11, 4, args_at, 1 << 40) == 0, "")
     try:
