@@ -82,7 +82,7 @@ typedef struct fnvnx_shader_stats {
 typedef struct fnvnx_shader_result {
     int ok;                            /* 1 = dksh valid (or glsl valid with NO_DKSH) */
     char error[1024];
-    uint64_t hash;                     /* fnvnx_shader_hash of the input */
+    uint8_t key[32];                   /* SHA-256 of the input bytecode (fnvnx_sha256, lib/sha256) */
     fnvnx_shader_stage stage;
     int major, minor;                  /* shader model */
     uint8_t *dksh; size_t dksh_size;   /* malloc'd */
@@ -91,8 +91,14 @@ typedef struct fnvnx_shader_result {
     fnvnx_shader_stats stats;
 } fnvnx_shader_result;
 
-/* Cache key: FNV-1a 64 of the bytecode. */
-uint64_t fnvnx_shader_hash(const void *bytecode, size_t n);
+/* Cache key: SHA-256 of the bytecode, fnvnx_sha256 (lib/sha256, fnvnx_sha256.h): 32 bytes. Lowercase hex, 64 characters + NUL, for file names and reports. */
+#define FNVNX_SHADER_KEY_HEX 65
+static inline void fnvnx_shader_key_hex(const uint8_t key[32], char out[FNVNX_SHADER_KEY_HEX])
+{
+    static const char d[] = "0123456789abcdef";
+    for (int i = 0; i < 32; i++) { out[2 * i] = d[key[i] >> 4]; out[2 * i + 1] = d[key[i] & 15]; }
+    out[64] = 0;
+}
 
 /* Returns result->ok. Never throws; result must be freed with fnvnx_shader_result_free. */
 int fnvnx_shader_translate(const void *d3d_bytecode, size_t n, const fnvnx_shader_opts *opts,
