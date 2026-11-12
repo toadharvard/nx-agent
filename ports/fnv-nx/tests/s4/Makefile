@@ -276,17 +276,19 @@ FNVNX_TC ?= /home/user/gd/toolchain/prefix
 NEWLIB_INC ?= $(FNVNX_TC)/aarch64-none-elf/include
 LIBNX_INC ?= $(ROOT)/ext/libnx/nx/include
 PRODUCT_UNITS := $(shell python3 -I $(P)/manifest/check_doubles.py --root $(ROOT) --list-units)
+# the units that include libsysbase / libnx headers (guest runtime, guest sockets): built only where the guest toolchain's headers exist
+NEWLIB_UNITS := platform/os/sock_guest.c $(filter toolchain/guest/%,$(PRODUCT_UNITS))
 GUESTF := -DFNVNX_PLATFORM_BUILD -mabi=ilp32 -frounding-math -fshort-wchar -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(FT)/include -I$(ROOT)/loader/include -I$(ROOT)/toolchain/include
 # a guest object is named like build_guest.sh names it: the root-relative path with '/' -> '_'
 define GUEST_RULE
 $(GOBJ)/$(subst /,_,$(1)).o: $(ROOT)/$(1) | $(ENV_GEN) $(COMOUT)
 	@mkdir -p $(GOBJ)
-	$$(if $$(filter %.c,$(1)),$$(XCC) -std=gnu11,$$(XCXX) -std=gnu++17) $(GUESTF) $$(if $$(filter %/sock_guest.c,$(1)),-D__SWITCH__ -I$(NEWLIB_INC) -I$(LIBNX_INC),) -c $$< -o $$@
+	$$(if $$(filter %.c,$(1)),$$(XCC) -std=gnu11,$$(XCXX) -std=gnu++17) $(GUESTF) $$(if $$(filter $(1),$(NEWLIB_UNITS)),-D__SWITCH__ -I$(NEWLIB_INC) -I$(LIBNX_INC),) -c $$< -o $$@
 endef
 $(foreach u,$(PRODUCT_UNITS),$(eval $(call GUEST_RULE,$(u))))
 GUEST_OBJS := $(foreach u,$(PRODUCT_UNITS),$(GOBJ)/$(subst /,_,$(u)).o)
 # units that need the guest toolchain's newlib headers are skipped when it is absent (their symbols are then reported UNKNOWN)
-GUEST_OK := $(filter-out $(if $(wildcard $(NEWLIB_INC)/reent.h),,$(GOBJ)/platform_os_sock_guest.c.o),$(GUEST_OBJS))
+GUEST_OK := $(filter-out $(if $(wildcard $(NEWLIB_INC)/sys/iosupport.h),,$(foreach u,$(NEWLIB_UNITS),$(GOBJ)/$(subst /,_,$(u)).o)),$(GUEST_OBJS))
 $(OUT)/linkmaps.tsv: $(OUT)/mtq/linkmap.tsv $(OBJS) $(VC_OBJS) $(PRIV_OBJS) $(DYN_OBJS) $(M32_OBJS)
 	@mkdir -p $(OUT)
 	@{ printf 's4_tests$(TAB)%s\n' "$(subst $(space),$(TAB),$(OBJS))"; \

@@ -4,20 +4,29 @@ Owner order of 2026-11-11 (night): a test links the real product files of its ro
 root defines; below the product there is one boundary (GL library, deko3d, libnx, the kernel), met in one shared model, the
 L4 boot machine. `check_doubles.py` is the gate. This file is the plan of record for L5's tests (accepted by the L5 lead).
 
-## Census (check_doubles.py through `make -o hostapi-check doubles` in tests/s4, commit 3950cd01)
+## Census (check_doubles.py through `make -o hostapi-check doubles` in tests/s4, head 79f639ac + this change)
 
-Measured outside the pinned env for the m32 binaries (`libc6-dev-i386`, `g++-13-multilib` are not in verify/env.json yet).
-9 binaries, 69 product units, 9 binaries with findings, exit 1.
+Scope: every object of every test binary that is not a product unit. Product units = the units of platform/build_guest.sh plus the
+guest runtime units of toolchain/guest/build.sh (runtime, threads, fs, section_guest, tm: libfnvnx-guest.a), 75 units; the set is read
+from the two scripts. 9 binaries, 9 with findings, exit 1. Measured outside the pinned env for the m32 binaries.
 
-| finding | rows | what |
-|---|---|---|
-| double | 596 | 6 double files, 88 symbols: platform/os/os_posix.c 67, tests/s4/host_boundary.cpp 9, platform/win32/filemap_shared.cpp 9, tests/s4/host_gpu.cpp 1, tests/s7/host_input.cpp 1, tests/s4/m32/host_input.cpp 1 |
-| replaced unit | 30 | os_guest.c (7 binaries), filemap_private.cpp (6), boundary_guest.cpp (7), platform_glue.cpp (7 + probe/m32) |
-| boundary double | 11 | host_boundary.cpp (fnvnx_reach_violation, 7), host_section.cpp (4 symbols), and the mtqemu files of the s15 stream |
-| unlinked unit | 3 | boundary_guest.cpp, platform_glue.cpp, platform/boundary/host_hooks.cpp |
-| unbuilt object | 4 | platform/os/sock_guest.c; tests/s4/sockwire/*.c (3) |
+| finding | what |
+|---|---|
+| double | 5 files, 87 symbols: platform_host/os/os_posix.c 67, tests/s4/host_boundary.cpp 9, platform_host/win32/filemap_shared.cpp 9, tests/s7/host_input.cpp 1, tests/s4/m32/host_input.cpp 1 |
+| boundary double (test file defines a symbol the product references and no product unit defines) | 3 files, 33 symbols: tests/s15/mtqemu/mlibc.c 24 (a libc), tests/s15/mtqemu/gstart.c 1 (fnvnx_host; the real runtime.c is the product), tests/s4/host_section.cpp 4 (fnvnx_section_*; stands for section_guest.c, whose symbols are unknown until it is built) |
+| all test-side definitions | 8 files, 120 symbols |
+| replaced unit | 4: boundary_guest.cpp, os_guest.c, platform_glue.cpp, filemap_private.cpp |
+| unlinked unit | 6: boundary_guest.cpp, platform_glue.cpp, toolchain/guest/{fs,runtime,section_guest}.c, tm.cpp |
+| unbuilt object | 8: platform/os/sock_guest.c, toolchain/guest/{fs,runtime,section_guest}.c, tm.cpp (they include libsysbase headers: sys/iosupport.h, absent in this container, FNVNX_TC missing) and tests/s4/sockwire/*.c (3, same reason) |
 
-Not complete: tests/s15/mtqemu/build.sh fails (its link map is missing), sockwire_test is not built.
+Decisions by rule (this change):
+- toolchain/guest/threads.c (and the other four runtime files) is the product's guest runtime, not a double. There is no rt/guest copy to
+  deduplicate. The mtqemu guest links the real threads.c: it is now a product unit of the census, and no longer a "boundary double".
+- sock_guest.c is not dead: platform/win32/winsock.cpp calls socket/bind/connect/... (the declared network is loopback only), and
+  hostapi.h still declares the services 16..26, 30, 31 that host_sock.inc serves. It stays a product unit. sockwire_test is its round trip
+  with the real host_sock.inc; its guest_shim.c models libsysbase (descriptor table, errno), a boundary below the product: it moves to
+  the L4 guest-image rule (R-A) together with the other doubles. Not deleted: it is the only test of sock_guest.c.
+- Strong definitions by tests/s15/mtqemu/mlibc.c stand for the ILP32 libc: same rule (guest image with the real newlib on the L4 machine).
 
 Why: the tests run natively on x86-64 Linux, and the guest units that need the target's boundary (FnvnxHostApi, the loader,
 libnx) are swapped for native twins. `HOST_SIDE` of platform/build_guest.sh (input_horizon.cpp, backend_audren.c,
