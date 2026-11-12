@@ -377,3 +377,6 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - The one home is the union of what its includers use. The declaration leaves with the A2 pair.
     - Checks: gate_admit green 662/662; recipe check valid.
     - Candidate 33c443b5 holds 2f1bac09, and v7 is running on it.
+- 09:01Z w6 dd1103d3 accepted: render/shaders/total is a unit-less guest product root; recipe check valid on 5 roots; render/d3d9 is red only at recipe.py:517.
+    - L1 w16 is implementing the input rule on 33c443b5 (doing).
+    - w6 merges 7e598a5a and re-counts gate_admit on a clean tree.
