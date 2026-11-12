@@ -208,6 +208,97 @@ check("install_mirror: a mirror with another wheels tree hash -> exit 2", rc3 ==
 check("install_mirror: a mirror with another tree hash -> exit 2", rc == 2 and "tree_sha256 is" in err, (rc, out, err))
 check("install_mirror: it leaves nothing in its TMPDIR, on success and on every failure", left == [], left)
 
+# ---- build profiles (env.json profiles.toolchain-build): structure is checked everywhere, the package set only in its own chroot
+PN = "toolchain-build"
+d0 = doc()
+check("profile %s: 162-package whole set with deb pins, programs, mirror tools/toolchain-debs" % PN,
+      len(d0["profiles"][PN]["packages"]) == len(d0["profiles"][PN]["debs"]["packages"]) >= 100 and d0["profiles"][PN]["programs"]
+      and d0["profiles"][PN]["debs"]["mirror"]["branch"] == "tools/toolchain-debs", None)
+def prof(f):
+    d = doc()
+    f(d["profiles"][PN])
+    return write(d, "prof.json")
+for name, f, msg in (
+        ("deb pin missing", lambda p: p["debs"]["packages"].pop("make"), "env: profile %s: debs.packages: make has no deb pin" % PN),
+        ("deb pin sha256 not 64 hex", lambda p: p["debs"]["packages"]["make"].__setitem__("sha256", "abc"), "env: profile %s: debs.packages.make: needs version" % PN),
+        ("mirror commit not 40 hex", lambda p: p["debs"]["mirror"].__setitem__("commit", "x"), "env: profile %s: debs.mirror needs repo" % PN),
+        ("no programs", lambda p: p.__setitem__("programs", []), "env: profile %s: programs: the programs the build invokes" % PN)):
+    rc, out, err = ec("check", "--env", prof(f))
+    check("verdict check refuses a broken profile: " + name, rc == 2 and msg in out, (rc, out[-300:]))
+rc, out, err = ec("check", "--profile", PN)
+check("check --profile on the verdict root is a mismatch (a profile is installed only in its own chroot)",
+      rc == 2 and "env: profile %s: package texinfo: want " % PN in out and "program makeinfo: want in PATH" in out, (rc, out[-200:]))
+rc, out, err = ec("check", "--profile", "no-such-profile")
+check("check --profile of an unknown profile", rc == 2 and "env: no profile no-such-profile" in out, (rc, out))
+rc, out, err = ec("id", "--profile", PN)
+check("id --profile: sha256 of the profile alone", rc == 0 and len(out.strip()) == 64 and out.strip() != ec("id")[1].strip(), out)
+MK = os.path.join(os.path.dirname(VERIFY), "farm", "make_chroot.py")
+rc = subprocess.run([sys.executable, "-I", MK, "--profile", PN, "--chroot", "/"], capture_output=True, text=True)
+check("make_chroot refuses the root /", rc.returncode == 2 and "not an empty directory" in rc.stderr, rc)
+ne = os.path.join(TD, "notempty")
+os.makedirs(ne)
+open(os.path.join(ne, "x"), "w").close()
+rc = subprocess.run([sys.executable, "-I", MK, "--profile", PN, "--chroot", ne], capture_output=True, text=True)
+check("make_chroot refuses a directory that is not empty", rc.returncode == 2 and "not an empty directory" in rc.stderr, rc)
+rc = subprocess.run(["bash", SETUP, "--profile", PN], capture_output=True, text=True)
+check("setup --profile needs NAME and CHROOT", rc.returncode == 1 and "usage" in rc.stderr, rc)
+
+# script_programs: the programs a build script invokes, from a real parse (shfmt)
+SP = os.path.join(os.path.dirname(VERIFY), "farm", "script_programs.py")
+sh = os.path.join(TD, "b.sh")
+open(sh, "w").write("""#!/bin/bash
+f() { :; }
+CONF=(--target=x --prefix=y)
+FOO=1 make -j4 && tar -xf a.tar.xz   # a comment: rm -rf /
+if ! patch -p1 -i x; then sed -i s/a/b/ y; fi
+python3 - "$1" <<'EOF2'
+import os
+EOF2
+echo "$(realpath .)" | tee out; f; ./local.sh; ../gcc-$V/configure
+x=`dirname "$0"`; (cd d && ls); for i in 1; do cat $i; done
+find . -name x -exec chmod +x {} +; exec env A=1 nice -n 5 gzip
+bash -c 'grep -q x y; unzip z'; timeout 5 chroot "$CH" apt-get update
+""")
+rc = subprocess.run([sys.executable, "-I", SP, sh], capture_output=True, text=True)
+check("script_programs: every command node (nesting, backticks, subshells, runners, bash -c), no builtins/functions/paths/options/heredoc text",
+      rc.returncode == 0 and rc.stdout.split() == ["apt-get", "bash", "cat", "chmod", "chroot", "dirname", "env", "find", "grep", "gzip", "ls", "make", "nice", "patch",
+                                                    "python3", "realpath", "sed", "tar", "tee", "timeout", "unzip"], (rc.returncode, rc.stdout, rc.stderr))
+open(sh, "w").write('$CC -c a.c\n"${TOOL}" x\nok=1; true\n')
+rc = subprocess.run([sys.executable, "-I", SP, sh], capture_output=True, text=True)
+check("script_programs: a command name that is not literal is reported and exits 1", rc.returncode == 1 and rc.stderr.count("dynamic:") == 2, (rc.returncode, rc.stderr))
+open(sh, "w").write("make\nzzz-not-a-program\n$CC x\n")
+rc, out, err = ec("scripts", "--profile", PN, sh)
+check("envcheck scripts: a program outside the profile and a non-literal name are mismatches",
+      rc == 2 and "runs zzz-not-a-program, not in the profile's programs" in out and "command name is not literal: $CC" in out and "runs make" not in out, (rc, out))
+open(sh, "w").write("make\ngcc\n")
+rc, out, err = ec("scripts", "--profile", PN, sh)
+check("envcheck scripts: programs of the profile pass", rc == 0 and out.strip() == "envcheck: OK", (rc, out))
+d = doc()
+d["profiles"][PN]["prerequisites"].append("not-in-programs")
+rc, out, err = ec("check", "--env", write(d, "pre.json"))
+check("a prerequisite that is not among the profile's programs is a mismatch", rc == 2 and "programs lack prerequisites ['not-in-programs']" in out, (rc, out))
+
+# read roots: the system headers a host root reads must belong to pinned packages
+rr = os.path.join(TD, "rrepo")
+os.makedirs(os.path.join(rr, "src"))
+open(os.path.join(rr, "src", "a.c"), "w").write("#include <stdio.h>\n#include <GL/gl.h>\nint main(void){return 0;}\n")
+rf = os.path.join(TD, "readroots.json")
+json.dump({"format": "fnvnx-readroots/1", "roots": [{"name": "t", "cwd": "src", "flags": ["-std=c11"], "sources": ["a.c"]},
+                                                  {"name": "absent", "cwd": "nosrc", "flags": [], "sources": ["x.c"]}]}, open(rf, "w"))
+envcheck.READROOTS = rf
+d = doc()
+bad = [b for b in envcheck.check(d, rr) if "read root" in b]
+check("read root: headers of pinned packages (stdio.h, GL/gl.h) pass; a root whose sources are absent is skipped", bad == [], bad)
+for pn in ("libgl-dev", "libglx-dev", "libegl-dev"):
+    d["packages"].pop(pn, None)
+bad = [b for b in envcheck.check(d, rr) if "read root" in b]
+check("read root: a header owned by a package that is not pinned is a mismatch naming root, file and package",
+      any("env: read root t reads /usr/include/GL/gl.h, owned by libgl-dev (not a package of env.json)" in b for b in bad), bad)
+open(os.path.join(rr, "src", "a.c"), "w").write("#include <no/such/header.h>\n")
+bad = [b for b in envcheck.check(doc(), rr) if "read root" in b]
+check("read root: a missing header is a mismatch", any("env: read root t:" in b and "no/such/header.h" in b for b in bad), bad)
+envcheck.READROOTS = os.path.join(VERIFY, "readroots.json")
+
 shutil.rmtree(TD, ignore_errors=True)
 print("%d failed: %s" % (len(FAILED), FAILED) if FAILED else "ALL PASS")
 sys.exit(1 if FAILED else 0)
