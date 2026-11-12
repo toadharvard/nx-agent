@@ -67,3 +67,8 @@ constant writer, unbound writer, unaccounted pointer, multiple-inheritance offse
 - platform/manifest/platform_faces.py: census over the compiled platform objects (relocations to w32_face_name / GetStockObject with immediate arg). At this commit: 37 objects, 18 face requests, 14 distinct faces, 2 stock-font sites, 0 unresolved.
 - platform/manifest/wine_fontmap.tsv + fontgate.py: gate declared files == mapped Wine files. Against fonts-wine 9.0~repack-4build3 (63 files): mapped 43, extra 20, missing 0, 10 faces have no file in Wine's own set (Arial, Courier New, Times New Roman, MS Shell Dlg, Liberation x3, Vera x3).
 - Open for the lead: the 10 no-file faces; literal-face bypass in a function that also memcpy's a literal is not excluded by relocations; weights are family-wide.
+
+## fongate2 rulings applied
+- platform/manifest/fontgate.py derives face -> files from Wine 9.0 data (wine.inf.in FontSubstitutes, font.c default lists + shelldlg row 1252/437, fontconfig 30-metric-aliases accept lists), files = fonts-wine + fonts-liberation (libwine Depends/Recommends closure). Declared == mapped (fnv-nx-build tools/fonts-wine9 099942c, 56 files, SHA256SUMS + inputs + per-face README citations).
+- Literal gate: no face-name constant (bytes or UTF-16, case-folded) in any platform object other than font_faces.cpp.o; selftested.
+- RED by design: Bitstream Vera Sans/Sans Mono/Serif are named by Wine's default lists but no package of the closure ships them.
