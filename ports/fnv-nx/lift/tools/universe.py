@@ -301,7 +301,7 @@ cont = {}                                 # strict mode: relocated-dword runs st
 for t in sorted(cref) if STRICT else ():
     q = t
     while q in rset: cont[q] = t; q += 4
-U = SimpleNamespace(insns=insns, PRI=PRI, T0=T0, T1=T1, TN=TN, X=X, V=V, bad_entries=bad_entries, callers=callers, classify=classify, cov=cov, cref=cref, datarec=datarec, dmap=dmap,
+U = SimpleNamespace(M=M, insns=insns, PRI=PRI, T0=T0, T1=T1, TN=TN, X=X, V=V, bad_entries=bad_entries, callers=callers, classify=classify, cov=cov, cref=cref, datarec=datarec, dmap=dmap,
                     entries=entries, fsize=fsize, funcs=funcs, indec=indec, intext=intext, kinds=kinds, md=md, pad_split=pad_split, parent=parent, psites=psites,
                     rejects=rejects, relocs=relocs, rset=rset, rvals=rvals, sec=sec, tcons=tcons, text=text, tref=tref, tslots=tslots, tbl=tbl, pedat=pedat, mark=mark,
                     dinfo=dinfo, settled=settled, site_kind=site_kind, disp_ref=disp_ref, ptr_target=ptr_target, deadops=deadops, u32=u32, imports=imports, cont=cont,

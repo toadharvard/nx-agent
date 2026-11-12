@@ -248,6 +248,28 @@ def run(arg):
         if g.mnemonic == 'nop' or (g.mnemonic == 'lea' and len(o) == 2 and o[1].mem.index == 0 and o[1].mem.base == o[0].reg and o[1].mem.disp == 0) or (
                 g.mnemonic == 'mov' and len(o) == 2 and o[0].type == o[1].type == X.X86_OP_REG and o[0].reg == o[1].reg): return g.size
         return 0
+    # ---- universe.tsv
+    out = []; kc = Counter()
+    for e in E:
+        pk = next(k for k in PRI if k in ent[e]); n_ud, n_xf, n_mf = cnt[e]; kc[pk] += 1
+        fl = ['proven' if e in proven else 'candidate'] + sorted(ent[e] - {pk}) + (['first-ud'] if e in ud else []) + ['%s=%d' % kv for kv in (('ud', n_ud), ('xf', n_xf), ('reloc-misfit', n_mf)) if kv[1]]
+        out.append('%08x\t%s\t%d\t%s' % (e, pk, span(e, exts[e]), ','.join(fl)))
+    open(outd + '/universe.tsv', 'w').write('# base=0x%08x: addresses are absolute VAs at the assigned load base (not RVAs; preferred base 0x%08x); columns: entry, kind, extent, flags; extent is the SPAN [entry, entry + extent) that holds every instruction the entry reaches at or above it (the range the lifter takes; the bytes reached: ranges.tsv)\n' % (M.base, M.pref) + '\n'.join(out) + '\n')
+    hd = '# base=0x%08x: absolute VAs at the assigned load base (not RVAs)\n' % M.base; bad = 0; rg = []
+    for e, row in zip(E, out):
+        r = codemap.ranges(exts[e], lambda a: dec[a][0]); bad += max([b - e for a, b in r if b > e] or [0]) != int(row.split('\t')[2]); rg.append('%08x\t%s' % (e, codemap.rng_str(r)))
+    open(outd + '/ranges.tsv', 'w').write(hd.rstrip() + '; columns: entry, half-open ranges start-end (hex) of the instruction bytes reached\n' + '\n'.join(rg) + '\n')
+    nrr = codemap.nr_rows(NR, res, nrname, seedn)
+    open(outd + '/noreturn.tsv', 'w').write(hd.rstrip() + '; columns: entry, reason\n' + ''.join('%08x\t%s\n' % kv for kv in nrr))
+    open(outd + '/outside.tsv', 'w').write(hd.rstrip() + '; columns: entry, instruction, target outside the executable spans (the lifted jump faults)\n' + ''.join('%08x\t%08x\t%08x\n' % x for x in outside))
+    unent = sorted({v for r, v in rvals if v not in ent})        # rule R3 check: every relocated in-span value is an entry
+    ins_ = [r for r, v in rvals if intext(r)]; outr = sum(1 for r in ins_ if not (covP[r - T0] or covC[r - T0]))
+    print('rule 1: relocated in-span values: %d sites, %d distinct, not entries %d (before = after = %d entries from pointers); reloc sites lying in the span: %d (inside reached ranges %d, outside every range %d)' % (
+        len(rvals), len({v for r, v in rvals}), len(unent), len({v for r, v in rvals}), len(ins_), len(ins_) - outr, outr))
+    print('closure (rule C, lifter explore): entries %d -> %d in %d rounds; new by cause %s; direct targets outside the executable sections (via the dispatcher, no entry) %d refs / %d distinct targets (outside.tsv); jecxz leaving its range %d' % (n_before, len(E), rounds, dict(sorted(closure_new.items())), len(outside), len({t for e, a, t in outside}), len(jxs)))
+    print('ranges.tsv %d rows, noreturn.tsv %d rows, range-span vs extent mismatches %d' % (len(rg), len(nrr), bad))
+    # ---- the residue is settled HERE, after universe.tsv / ranges.tsv exist and after the pcsrc facts of this run (pcsrc_s4.json) have been written: residue.closure reads them (tools/residue.py)
+    # (the call that runs pcsrc.run_facts(outd, ...) must come before this point)
     # residue (valid executable bytes no entry body reaches and no PE directory names), cut by rule into: padding (nop / int3 instructions at the run's ends), dead gap (the run decodes
     # completely from its first byte, ends at a terminator or at the next reached instruction, and has relocated dwords only at operand fields), relocation slots (the bytes of a
     # HIGHLOW fixup site: a relocated pointer slot, e.g. a jump table), UNEXPLAINED (reason named). Nothing else is ever called data or dead.
@@ -288,29 +310,12 @@ def run(arg):
                     if y == e or rslot[y] != rslot[x]: rows.append((x, y - x, c, 'reloc:%08x' % rslot[x])); x = y
             else: rows.append((s, e - s, c, '-' if c != 3 else 'pe-header'))
     rows.sort(); open(outd + '/codemap.tsv', 'w').write(''.join('%08x\t%d\t%s\t%s\n' % (T0 + s, n, CN[c], o) for s, n, c, o in rows))
+    XCs, ENs, TLs = residue.pe_sources(M, u32, intext)
+    residue.write_sources(os.path.dirname(outd) + '/' + name, residue.source_rows(CLO, outd, set(ent), XCs, ENs, TLs, {t for t, ks in ent.items() if ks & residue.EH_KINDS}))
+    residue.combine(os.path.dirname(outd))
     nunx = cc[8]; unxr = Counter()
     print('UNEXPLAINED runs %d, bytes %d; first: %s' % (len(unx), cc[8], ' '.join('%08x+%d:%s:%s' % (x, n, r, text[x - T0:x - T0 + 6].hex()) for x, n, r in unx[:8])))
     for a_, n_, r_ in unx: unxr[r_] += n_
-    # ---- universe.tsv
-    out = []; kc = Counter()
-    for e in E:
-        pk = next(k for k in PRI if k in ent[e]); n_ud, n_xf, n_mf = cnt[e]; kc[pk] += 1
-        fl = ['proven' if e in proven else 'candidate'] + sorted(ent[e] - {pk}) + (['first-ud'] if e in ud else []) + ['%s=%d' % kv for kv in (('ud', n_ud), ('xf', n_xf), ('reloc-misfit', n_mf)) if kv[1]]
-        out.append('%08x\t%s\t%d\t%s' % (e, pk, span(e, exts[e]), ','.join(fl)))
-    open(outd + '/universe.tsv', 'w').write('# base=0x%08x: addresses are absolute VAs at the assigned load base (not RVAs; preferred base 0x%08x); columns: entry, kind, extent, flags; extent is the SPAN [entry, entry + extent) that holds every instruction the entry reaches at or above it (the range the lifter takes; the bytes reached: ranges.tsv)\n' % (M.base, M.pref) + '\n'.join(out) + '\n')
-    hd = '# base=0x%08x: absolute VAs at the assigned load base (not RVAs)\n' % M.base; bad = 0; rg = []
-    for e, row in zip(E, out):
-        r = codemap.ranges(exts[e], lambda a: dec[a][0]); bad += max([b - e for a, b in r if b > e] or [0]) != int(row.split('\t')[2]); rg.append('%08x\t%s' % (e, codemap.rng_str(r)))
-    open(outd + '/ranges.tsv', 'w').write(hd.rstrip() + '; columns: entry, half-open ranges start-end (hex) of the instruction bytes reached\n' + '\n'.join(rg) + '\n')
-    nrr = codemap.nr_rows(NR, res, nrname, seedn)
-    open(outd + '/noreturn.tsv', 'w').write(hd.rstrip() + '; columns: entry, reason\n' + ''.join('%08x\t%s\n' % kv for kv in nrr))
-    open(outd + '/outside.tsv', 'w').write(hd.rstrip() + '; columns: entry, instruction, target outside the executable spans (the lifted jump faults)\n' + ''.join('%08x\t%08x\t%08x\n' % x for x in outside))
-    unent = sorted({v for r, v in rvals if v not in ent})        # rule R3 check: every relocated in-span value is an entry
-    ins_ = [r for r, v in rvals if intext(r)]; outr = sum(1 for r in ins_ if not (covP[r - T0] or covC[r - T0]))
-    print('rule 1: relocated in-span values: %d sites, %d distinct, not entries %d (before = after = %d entries from pointers); reloc sites lying in the span: %d (inside reached ranges %d, outside every range %d)' % (
-        len(rvals), len({v for r, v in rvals}), len(unent), len({v for r, v in rvals}), len(ins_), len(ins_) - outr, outr))
-    print('closure (rule C, lifter explore): entries %d -> %d in %d rounds; new by cause %s; direct targets outside the executable sections (via the dispatcher, no entry) %d refs / %d distinct targets (outside.tsv); jecxz leaving its range %d' % (n_before, len(E), rounds, dict(sorted(closure_new.items())), len(outside), len({t for e, a, t in outside}), len(jxs)))
-    print('ranges.tsv %d rows, noreturn.tsv %d rows, range-span vs extent mismatches %d' % (len(rg), len(nrr), bad))
     # ---- totality gate
     targets = {v for r, v in rvals} | set(XC) | ({M.base + M.entry} if M.entry else set()) | {t for t in callers if intext(t)} | set(tailsrc) | set(clos) | {t for t, ks in ent.items() if ks & {'tls', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw'}}
     cert = sum(1 for t in targets if t in ent and (t in dec or t in ud or t in xf))

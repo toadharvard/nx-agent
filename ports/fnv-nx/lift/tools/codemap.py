@@ -10,7 +10,7 @@ from bytes that are already classified exactly once here; they add no class of t
 data named by a relocation (class 3) or instructions of another entry, the byte keeps its class (instruction of a committed entry, else relocation-named
 data): class precedence is for accounting only, the entry still exists and its undecodable bytes raise #UD at run time.
 Output: <outdir>/codemap.tsv (start, length, class, owner entry or referencing relocation)."""
-import re, bisect
+import os, re, bisect
 from collections import Counter
 CLS = {7: 'hole', 8: 'data-pe-header', 1: 'entry-decomp', 2: 'entry-nondecomp', 3: 'data-reloc', 4: 'padding', 9: 'data-unreached', 0: 'UNEXPLAINED'}
 TERM = {'ret', 'retf', 'jmp', 'int3', 'ud2', 'iret', 'iretd'}
@@ -71,6 +71,9 @@ def finish(U):
         brk[st if st != 'dead' else 'decodes-and-ends'] += e - s
         if CLO.complete: cls[s:e] = bytes([residue.DATA]) * (e - s)
         else: bad.append((s, e, CLO.reason))
+    XCs, ENs, TLs = residue.pe_sources(U.M, U.u32, U.intext)
+    residue.write_sources(os.path.join(U.outdir, 'FalloutNV'), residue.source_rows(CLO, U.outdir, set(U.entries), XCs, ENs, TLs, {t for t, ks in U.kinds.items() if ks & residue.EH_KINDS}))
+    residue.combine(U.outdir)
     cc = Counter(cls); L = []
     L.append('R3 bytes of executable sections %d: entry-decomp %d, entry-nondecomp %d, data-by-reloc %d, data-pe-header %d, padding %d, data-unreached %d, UNEXPLAINED %d' % (
         U.TN - cc[7], cc[1], cc[2], cc[3], cc[8], cc[4], cc[9], cc[0]))

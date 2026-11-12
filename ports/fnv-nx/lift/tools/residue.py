@@ -54,3 +54,50 @@ def sweep(md, text, T0, TN, relocs, rsl, cov, p, q):
         if sg[2] == 6 and not (sg[3] in TERMS or (i + 1 == len(segs) and not why and q < TN and cov[q] == 1)):
             last = i + 1 == len(segs); segs = segs[:i]; why = why if (last and why) else 'no-end'; break
     return ('decodes' if not why else why) + ('/first-byte-undecodable' if not segs and why == 'undecodable' else '')
+
+
+# ---- sources.tsv: the closure of the code-address SOURCES of an image, one `source<TAB>closed|open` row each (the fact file of L1's closure_key certificate)
+SOURCES = ('r3_reloc', 'pcsrc', 'export', 'tls', 'entry', 'eh', 'no_s4_arith')
+EH_KINDS = {'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw'}
+
+
+def pe_sources(M, u32, intext):
+    """the PE's own lists of code addresses, read independently of the entry set: -> (exports in the executable span, [entry point], TLS callbacks)"""
+    import pemod
+    XC = [a for a in pemod.exports(M)[0] if intext(a)]
+    entry = [M.base + M.entry] if M.entry else []
+    tls = []
+    d = M.dirent(9)
+    if d[0]:
+        p = u32(M.base + d[0] + 12)
+        while intext(u32(p)): tls.append(u32(p)); p += 4
+    return XC, entry, tls
+
+
+def source_rows(cl, facts_dir, universe, exports, entry, tls, eh_addrs):
+    """-> [(source, closed)] in SOURCES order. r3_reloc: every relocated in-span value is an entry; pcsrc: the pcsrc result of the image (gate_pcsrc.json) has no red row other than s4 (return-address / FIP /
+    FDP sources typed); export / tls / entry / eh: every such address is an entry of the universe (checked here, not assumed); no_s4_arith: pcsrc_s4.json exists and says 0 violations. A missing file is open."""
+    f = os.path.join(facts_dir, 'gate_pcsrc.json'); pc = False
+    if os.path.exists(f):
+        r = json.load(open(f)); pc = r['red'] - r['s4_red'] == 0
+    inu = lambda xs: all(a in universe for a in xs)
+    closed = {'r3_reloc': not cl.unent, 'pcsrc': pc, 'export': inu(exports), 'tls': inu(tls), 'entry': inu(entry), 'eh': inu(eh_addrs), 'no_s4_arith': cl.s4_status == 'green'}
+    return [(k, closed[k]) for k in SOURCES]
+
+
+def write_sources(image_dir, rows):
+    os.makedirs(image_dir, exist_ok=True)
+    open(os.path.join(image_dir, 'sources.tsv'), 'w').write(''.join('%s\t%s\n' % (k, 'closed' if c else 'open') for k, c in rows))
+
+
+def combine(root):
+    """<root>/sources.tsv over every image directory <root>/<image>/sources.tsv: a source is closed iff it is closed in every image (the lifted dispatcher is one table for all images)"""
+    tot = {k: True for k in SOURCES}; n = 0
+    for d in sorted(os.listdir(root)):
+        f = os.path.join(root, d, 'sources.tsv')
+        if not os.path.isfile(f): continue
+        n += 1
+        got = dict(l.rstrip('\n').split('\t') for l in open(f) if l.strip())
+        for k in SOURCES: tot[k] = tot[k] and got.get(k) == 'closed'
+    open(os.path.join(root, 'sources.tsv'), 'w').write(''.join('%s\t%s\n' % (k, 'closed' if tot[k] else 'open') for k in SOURCES))
+    return n, tot
