@@ -89,3 +89,8 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - draw_ids.cpp:14, a bucket index where every hit is confirmed by memcmp;
     - the integrity checksums: the shcache body hash and rec_chk.
   - Blocked: loader/ is not a recipe root. The owner of the shared sha256 root is asked of the orchestrator. The ABI change goes to L6A.
+- 03:20Z Orchestrator accepted the sha256 key rule (OWNER assumption 2).
+  - Shared root lib/sha256: owner L4, admitted by L1, class product, guest + host.
+  - w5 does phase 1: move fnvnx_sha256 there unchanged; the loader keeps building by path; NIST vectors pass. L4 reviews before it enters their branch.
+  - Phase 2 follows: the 8 key sites become calls into it, the 5 copies are deleted, and NxShaderD3D.hash becomes key[32] in one ABI commit with L6A.
+  - Asked L1: one root for two targets, and the gate clause for a renamed second copy.
