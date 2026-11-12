@@ -13,8 +13,6 @@ Only the identity is published here (size, hash, standard PE fields); no content
 exercise the acceptance path on a synthetic file; no tool passes it.
 """
 import hashlib
-import os
-import stat
 import struct
 import sys
 
@@ -62,16 +60,10 @@ def check_bytes(d, path, pin=PIN):
 def load_exe(path, pin=PIN):
     """The bytes of the exe at `path`, after the fingerprint matched `pin`; ExePinError otherwise."""
     try:
-        st = os.stat(path)
+        with open(path, 'rb') as fh:
+            d = fh.read()
     except OSError as e:
-        raise ExePinError('%s: cannot stat: %s' % (path, e))
-    if not stat.S_ISREG(st.st_mode):
-        raise ExePinError('%s: expected a regular file, actual mode %o' % (path, st.st_mode))
-    if st.st_size != pin['size']:
-        raise ExePinError('%s is not the supported FalloutNV.exe (GOG 1.4.0.525(a)):\n  size: expected %d, actual %d'
-                          % (path, pin['size'], st.st_size))
-    with open(path, 'rb') as fh:
-        d = fh.read()
+        raise ExePinError('%s: cannot read: %s' % (path, e))
     check_bytes(d, path, pin)
     return d
 
