@@ -202,3 +202,6 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - lift/bridges' own objects must have no `.fnvnx.disp`; that rule breaks the cycle.
 - The closure question goes to w14's closure_key. Its premises are open = 0 (w18) and dispgen --closure green.
 - gate_assumptions will write its full findings list to its detail file (w10).
+- 03:30Z:
+  - env gap found by L2. On 8cfbcdbf, the python modules capstone, pyelftools and unicorn are pinned by version only, with no hash. This is added to w5's scope: every module gets a wheel sha256 plus a RECORD hash, and envcheck refuses an unhashed one.
+  - The id range rule is keyed by `minted_by`, not by owner. L3a-owned ASM-3xx ids keep their numbers, and ASM-200..202 are minted by L3a (w10).
