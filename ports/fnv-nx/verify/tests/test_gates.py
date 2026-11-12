@@ -167,9 +167,10 @@ put(d, "verify/tests/test_leaves.py", "import tempfile\nd = tempfile.mkdtemp(pre
 put(d, "verify/tests/test_leaves_fails.py", "import sys, tempfile\nopen(%r, 'a').write(tempfile.mkdtemp(prefix='left-') + '\\n')\nsys.exit(3)\n" % log)
 rc, r, e = tests(d)
 left = open(log).read().split()
-check("tests: the scratch a file leaves in its temporary directory is removed, passed or failed", rc != 0 and r["certified"] == 1
-      and len(left) == 2 and not any(os.path.exists(x) or os.path.exists(os.path.dirname(x)) for x in left)
-      and all(os.path.basename(os.path.dirname(x)).startswith("selftest-") for x in left), (rc, r, left))
+rows = {x["name"].rsplit("/", 1)[-1]: x for x in r["files"]}
+check("tests: the scratch a file leaves in its temporary directory is removed, passed or failed; the leak is uncertified and named",
+      rc != 0 and r["certified"] == 0 and len(left) == 2 and not any(os.path.exists(x) or os.path.exists(os.path.dirname(x)) for x in left)
+      and "leaked in TMPDIR: left-" in rows["test_leaves.py"]["reason"] and "exit 3" in rows["test_leaves_fails.py"]["reason"], (rc, r, left))
 
 d = tmp("tests-env")
 put(d, "verify/tests/test_env.py", "import os, sys\nsys.exit(1 if [k for k in os.environ if k.startswith('GATE_')] else 0)\n")
