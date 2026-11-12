@@ -40,3 +40,8 @@ does not exist and the documented validator result is an invalid shader, not a m
 `fail(Context*, const char*)` (profiles/mojoshader_profile_common.c:144, line numbers of the tree after all patches) calls `failf` (:131), whose first statement,
 before every branch, is `ctx->isfail = 1;` (:133); `out_of_memory` (:20) also stores `ctx->isfail = ctx->out_of_memory = 1;`. So every path of `fail` stores to one
 field: `Context::isfail`. Declaration: `"error_abi": {"fail": "fail", "kind": "flag", "flag": "isfail"}`. The reader is `isfail()` (:125).
+
+## tools/fail_census.py (failure call sites)
+Enumerates every `fail`/`failf` call (and wrappers: functions whose whole body is one such call, to a fixpoint) in the root's sources after all patches, with the
+enclosing function and guards, and classifies by a fixed rule, default (o): (v) site in emit_<PROFILE>_<OP> for a ps_1_x-only opcode row of sm_table.json (the
+row is cited), (r) allocation / out-of-memory guard, (o) everything else. (v) sites are certificate input for L1, (o) sites are listed, none is edited.
