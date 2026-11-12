@@ -104,7 +104,7 @@ def main(argv):
         role = regsites.ROLES.get(f[2])
         if role is None:
             die("%s: api %s has no registry role" % (sites_path, f[2]))
-        if role[5] == "read" and f[6] == "static":
+        if role[5] == "read" and f[6] == "static" and f[7] != regsites.NO_VALUES:
             reads.setdefault((f[3].lower(), f[4].lower(), f[5].lower()), []).append(f)
     decl, seen, body = table(decl_path, "root key name type data source".split(), "declared table"), set(), []
     for n, (root, key, name, typ, data, source) in decl:

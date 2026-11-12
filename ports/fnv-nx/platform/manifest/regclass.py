@@ -55,7 +55,6 @@ class Closure:
         self.vcalls = collections.defaultdict(list)  # slot function -> [(site, class, offset, pushes)] reached through typed receivers
         self.origin = collections.defaultdict(set)  # job key -> {(caller job key, call site)} for jobs entered through a typed call
         self.seeded = set()
-        self.recv_calls = collections.defaultdict(list)  # (class, offset) of a receiver -> [(site, deref'd pushed values, pushes)]
 
     # ---- seeds -------------------------------------------------------------------------------------------------------------
     def ensure(self, td):
@@ -120,9 +119,7 @@ class Closure:
         if ctor is not None and not stored:
             self.leaks[ctor[1]].append((ctor[0], "vtable stored through a base that is not this"))
 
-    def call(self, key, site, tv, ecx, pushes, derefs=()):
-        if ecx[0] == "o":  # container rule: a call on this receiver; its pushed pointer arguments are element candidates
-            self.recv_calls[(ecx[1], ecx[2])].append((site, list(derefs), list(pushes)))
+    def call(self, key, site, tv, ecx, pushes):
         args = {k: pushes[-1 - k] for k in range(len(pushes)) if pushes[-1 - k][0] == "o"}
         t = None
         if tv[0] == "imm":
