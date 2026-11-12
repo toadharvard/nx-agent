@@ -26,7 +26,7 @@ Request kinds (the TSV `values` column; `note` is free text and is not read):
              (argflow.result_predicate: cmp / test / inc idioms, flags not redefined; anything else is `ret-predicate` open).
   closure_key  `dispatcher=NAME`  (dll `-`, name = the dispatcher symbol, arg_index 0): every value that reaches the dispatcher NAME (native
              fnvnx_dispatch, lifted fnvl_dispatch) is a key of its table.  Inputs: --dispatcher NAME=ENTRIES,CLOSURE,SOURCES (ENTRIES: dispgen's
-             rows `addr<TAB>sym`; CLOSURE: dispgen --closure's rows, the first column a hex address; SOURCES: the code-address source closure fact
+             rows `addr<TAB>sym`; with `dispatcher=NAME;miss=fallthrough` (a miss goes on to the next dispatcher) the check (ii) is the other way: every key is a closure address; CLOSURE: dispgen --closure's rows, the first column a hex address; SOURCES: the code-address source closure fact
              of the lift, rows `source<TAB>closed|open` for every source of CLOSURE_SOURCES) and --loadlib loadlib.tsv.  CERTIFIED iff (i) every
              source is present and closed, (ii) every closure address is a key, (iii) no dynamic GetProcAddress / LoadLibrary site is open (the gpa
              rows and loadlib.tsv).  While (iii) fails the fact is `measurement`: the verdict says so and it never counts as valid.
@@ -144,9 +144,10 @@ def parse_values(kind, text):
     if kind == 'imm_mask':
         return {'mask': num(text)}
     if kind == 'closure_key':
-        if not text.startswith('dispatcher=') or not text[11:].strip().isidentifier():
-            raise FormatError('closure_key values must be `dispatcher=NAME`')
-        return {'dispatcher': text[11:].strip()}
+        head, _, tail = text.partition(';')
+        if not head.startswith('dispatcher=') or not head[11:].strip().isidentifier() or tail.strip() not in ('', 'miss=fallthrough'):
+            raise FormatError('closure_key values must be `dispatcher=NAME` or `dispatcher=NAME;miss=fallthrough`')
+        return {'dispatcher': head[11:].strip(), 'fallthrough': bool(tail.strip())}
     parts = [p.strip() for p in text.split(';') if p.strip()]
     if not parts or not parts[0].startswith('callee='):
         raise FormatError('result_of values must start with callee=')
@@ -391,6 +392,16 @@ def check_closure_key(f, gpa_global, ctx):
         n += 1
         if a not in keys:
             miss.append(a)
+    if f.req['spec'].get('fallthrough'):  # a miss falls through to the next dispatcher: every key must be a closure address (the closure is judged there)
+        cl = set()
+        for r in read_rows(closure):
+            try:
+                cl.add(int(r[0], 16))
+            except ValueError:
+                pass
+        for a in sorted(keys - cl):
+            f.fail('key-outside-closure', name, '0x%x' % a, 'table key is not a closure address')
+        miss = []
     for a in sorted(set(miss)):
         f.fail('closure-missing', name, '0x%x' % a, 'closure address has no key')
     if ctx.get('loadlib') is None:
