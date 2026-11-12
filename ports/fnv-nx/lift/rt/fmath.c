@@ -17,7 +17,7 @@
      Every primitive truncates (toward zero) and its absolute error is <= 2^(emax-32n+1), emax = the larger operand exponent (bf_mul, bf_div, bf_*_u32:
      relative error <= 2^(2-32n)); bf_add of numbers whose bits fit the window is exact.
      Series (Taylor, Euler, atanh, Machin) are summed term by term until the term is below 2^-(32n+4) of the sum (tail <= 2 terms): error bound GUARD(n) below.
-     The constants pi and ln 2 come from a generated table (n <= 40 limbs, truncated: relative error < 2^(2-32n)) or from the series (n > 40). ASM-230
+     The constants pi and ln 2 come from a generated table (n <= 40 limbs, truncated: relative error < 2^(2-32n): ASM-230) or from the series (n > 40). ASM-232
      recorded: n <= 2^15 limbs (4 MiB of mantissa), which no double input approaches (hard cases need ~ 200 bits).
    WIDE ARGUMENT STEPS are done in a second context cw with more limbs so that they are exact or carry an explicit absolute bound.
    PER FUNCTION (exact cases handled before the loop / evaluator and its error budget):

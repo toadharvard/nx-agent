@@ -48,6 +48,10 @@
    ]
   },
   {
+   "id": "ASM-231",
+   "aliases": []
+  },
+  {
    "id": "ASM-302",
    "aliases": []
   },
@@ -1397,17 +1401,14 @@
    "owner": "L3a"
   },
   {
-   "id": "ASM-231",
-   "text": "A locked memory operand never splits across a cache line or an alignment boundary (LOCK-SPLIT).",
+   "id": "ASM-232",
+   "text": "The precision of Ziv's strategy in rt/fmath.c never exceeds 2^15 limbs (4 MiB of mantissa).",
    "used_by": [
-    "ports/fnv-nx/docs/ORDERING.md",
-    "ports/fnv-nx/lift/tools/locksites.py"
+    "ports/fnv-nx/lift/rt/fmath.c"
    ],
-   "aliases": [
-    "ORDERING:LOCK-SPLIT"
-   ],
+   "aliases": [],
    "status": "REMOVE",
-   "removed_by": "planned: an alignment fact for every locked memory operand (locksites census + points-to offsets, L3a w4), with 0 unknown",
+   "removed_by": "planned: a static bound on the precision schedule from the published worst cases for correct rounding of each function at binary32/binary64 (OWNER 9, published theorems), checked by the generator",
    "owner": "L3a"
   },
   {
