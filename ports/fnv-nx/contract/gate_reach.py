@@ -516,6 +516,11 @@ def report_tsv(facts, certs):
     return '\n'.join(lines) + '\n'
 
 
+def write_facts_h(path, reqs):
+    """The one emitter of reach_facts.h: both modes (full, and `--requests T --facts-h OUT` alone) write through it."""
+    write(path, header(reqs))
+
+
 def write(path, text):
     d = os.path.dirname(path)
     if d:
@@ -738,10 +743,16 @@ def main(argv=None):
             if not a.certified:
                 ap.error('--objects needs --certified')
             return main_objects(a)
-        if not a.gpa or not a.image:
-            ap.error('--gpa and --image are required')
+        table_only = a.facts_h and not a.gpa and not a.image
+        if not table_only and (not a.gpa or not a.image):
+            ap.error('--gpa and --image are required (only `--requests T --facts-h OUT` alone is the table-only mode)')
+        if table_only and (a.out or a.facts_tsv or a.facts or a.bridge):
+            ap.error('the table-only mode (--requests T --facts-h OUT) takes no other output or input option')
         with open(a.requests) as fh:
             reqs = parse_requests(fh.read())
+        if table_only:   # the header is a function of the request table alone (ids, table id): no image, no facts
+            write_facts_h(a.facts_h, reqs)
+            return 0
     except FormatError as e:
         print('error: %s' % e, file=sys.stderr)
         return 2
@@ -769,7 +780,7 @@ def main(argv=None):
     if a.out:
         write(a.out, report_tsv(facts, certs))
     if a.facts_h:
-        write(a.facts_h, header(reqs))
+        write_facts_h(a.facts_h, reqs)
     if a.facts_tsv:
         write(a.facts_tsv, ''.join('%d\t%s\n' % (i, certs[i]) for i in sorted(certs)))
     uf, detail = gate(facts, certs, g, len(images))

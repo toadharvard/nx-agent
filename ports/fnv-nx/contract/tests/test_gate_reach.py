@@ -452,6 +452,21 @@ for bad in (('X', 'k.dll', 'f', '0', 'closure_key', 'dispatcher=a', ''), ('X', '
     except gate_reach.FormatError:
         pass
 
+# table-only mode: `--requests T --facts-h OUT` alone writes the header that the full mode writes (one emitter, write_facts_h), from the table alone
+tdir = tempfile.mkdtemp(prefix='reach-h-')
+for nm, rows_ in (('one', (CK,)), ('two', (CK, CK2))):
+    tsv = os.path.join(tdir, nm + '.tsv')
+    open(tsv, 'w').write('request\tdll\tname\targ_index\tkind\tvalues\tnote\n' + ''.join('\t'.join(r) + '\n' for r in rows_))
+    outh = os.path.join(tdir, nm + '.h')
+    rc_ = gate_reach.main(['--requests', tsv, '--facts-h', outh])
+    check('table-only mode %s: exit 0 and the header equals header(parse_requests(table))' % nm,
+          (rc_, open(outh).read()), (0, gate_reach.header(gate_reach.parse_requests(open(tsv).read()))))
+rc_ = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'gate_reach.py'), '--requests', tsv, '--facts-h', outh, '--out', tdir], capture_output=True).returncode
+check('table-only mode takes no other output option', rc_ != 0, True)
+rc_ = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'gate_reach.py'), '--requests', os.path.join(tdir, 'nope.tsv'), '--facts-h', outh], capture_output=True).returncode
+check('table-only mode on a missing table is an error', rc_ != 0, True)
+shutil.rmtree(tdir, ignore_errors=True)
+
 if fails:
     print('FAIL\n' + '\n'.join(fails))
     sys.exit(1)
