@@ -259,6 +259,12 @@ if ! step merge; then
 	cp -a "$S2/$TARGET/include/c++/$GCC13_VER" "$PREFIX/$TARGET/include/c++/$GCC13_VER"
 	# only the ILP32 target-specific headers of 13.3 (the default variant's are LP64: stage 1 owns LP64)
 	find "$PREFIX/$TARGET/include/c++/$GCC13_VER/$TARGET" -mindepth 1 -maxdepth 1 ! -name "$V" -exec rm -rf {} +
+	# the mirror is the guest runtime and the guest is ILP32 only (ASM-007): stage 1's LP64 libraries (default and pic variants of
+	# newlib, libgcc, crt*.o) were only the scaffolding of stage 1 and go; check_mirror.py C7 proves no non-ILP32 object is left
+	rm -rf "$PREFIX/$TARGET/lib/pic"
+	find "$PREFIX/$TARGET/lib" -maxdepth 1 -type f \( -name '*.a' -o -name '*.o' \) -delete
+	rm -rf "$PREFIX/lib/gcc/$TARGET/$GCC_VER/pic"
+	find "$PREFIX/lib/gcc/$TARGET/$GCC_VER" -maxdepth 1 -type f \( -name '*.a' -o -name '*.o' \) -delete
 	done_ merge
 fi
 python3 "$HERE/check_mirror.py" "$PREFIX" --s2 "$S2" --gcc13 "$GCC13_VER" --manifest --flags-dir "$GUEST_FLAGS_DIR" --flags-commit "$GUEST_FLAGS_COMMIT"

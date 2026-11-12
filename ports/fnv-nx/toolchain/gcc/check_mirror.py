@@ -7,15 +7,19 @@ The rule: every ILP32 runtime library a game unit links comes from the unit's ow
 with the unit's data-model flags -mabi=ilp32 -fshort-wchar -fsigned-char. Checks (any failure exits 1):
   C1  every multilib entry of the shipped driver (and of stage 2's) with -mabi=ilp32 carries -fshort-wchar and -fsigned-char;
       the only ILP32 library directories in the mirror are ilp32/wchar16/schar and ilp32/wchar16/schar/pic.
-  C2  selection: -mabi=ilp32 alone resolves to the LP64 directory and a link with it fails; the full flag set resolves
-      to ilp32/wchar16/schar.
+  C2  selection: the directory is the driver's answer under the pack's own flags (no directory is named): it holds libc, libstdc++,
+      libsupc++ and libgcc and a link with those flags succeeds; -mabi=ilp32 alone resolves elsewhere, holds no library, and
+      its link fails.
   C3  wide characters: for every ILP32 variant the target preprocessor says __SIZEOF_WCHAR_T__ 2, __WCHAR_MAX__ 0xffff and
-      no __CHAR_UNSIGNED__; wcslen and the other wide functions of the ILP32 libc.a use 2-byte accesses (ldrh/strh), the
-      LP64 ones 4-byte accesses.
+      no __CHAR_UNSIGNED__; wcslen and the other wide functions of the libc.a that driver selects use 2-byte accesses
+      (ldrh/strh).
   C4  the libstdc++ headers of the ILP32 variant are 13.3 (_GLIBCXX_RELEASE 13, 20240xxx); no c++/15.2.0 ILP32 headers exist.
+  C6  no sized deallocation: no object of the pack has an undefined reference to a sized or aligned-sized operator delete
+      (the four mangled names come from the built compiler, not a list); their definitions, if built, call the unsized forms.
+  C7  one C++ library, one ABI: exactly one C++ include version (13.3.0), every ELF object of the library trees is ELF32 AArch64.
   C5  (--manifest) MANIFEST.json: gcc version, msvcmodel.patch sha256, flags, sizeof/alignof of wchar_t, size_t, long,
       long double, pointer, read from the game compiler's object code (no run).
-  C6  (--libnx) libnx is built by stage 1 (flags without -fshort-wchar/-fsigned-char). Its interface carries no type whose
+  C8  (--libnx) libnx is built by stage 1 (flags without -fshort-wchar/-fsigned-char). Its interface carries no type whose
       size or layout depends on them: every named type of the libnx headers has the same layout under both flag sets, no
       libnx declaration (type, member, function prototype) names wchar_t. Reports the numbers checked.
 """
@@ -77,10 +81,15 @@ def c2(prefix, s2=None, gcc13='13.3.0'):
     mir = ['--sysroot=%s/%s' % (prefix, TARGET), '-B%s/lib/gcc/%s/%s/' % (prefix, TARGET, gcc13)]
     d1 = run([gcc, '-mabi=ilp32', '-print-multi-directory']).stdout.strip()
     d2 = run([gcc] + FLAGS + ['-print-multi-directory']).stdout.strip()
-    if d1 != '.':
-        fail('C2 -mabi=ilp32 alone resolves to "%s", not the LP64 directory' % d1)
-    if d2 != 'ilp32/wchar16/schar':
-        fail('C2 full ILP32 flags resolve to "%s"' % d2)
+    # the directory is the driver's answer under the pack's own flags; no directory is named here. The mirror is ILP32 only:
+    # the directory of the incomplete flag set (-mabi=ilp32 alone) holds no library, so that link must fail
+    if d1 == d2:
+        fail('C2 -mabi=ilp32 alone resolves to the same directory "%s" as the full ILP32 flags' % d2)
+    for lib in ('libc.a', 'libstdc++.a', 'libsupc++.a', 'libgcc.a'):
+        if not (os.path.exists('%s/%s/lib/%s/%s' % (prefix, TARGET, d2, lib)) or os.path.exists('%s/lib/gcc/%s/%s/%s/%s' % (prefix, TARGET, gcc13, d2, lib))):
+            fail('C2 the selected directory "%s" has no %s' % (d2, lib))
+    if os.path.exists('%s/%s/lib/%s/libc.a' % (prefix, TARGET, d1)):
+        fail('C2 -mabi=ilp32 alone resolves to "%s", which holds a libc.a' % d1)
     with tempfile.TemporaryDirectory() as t:
         open(t + '/m.c', 'w').write('int main(void){return 0;}\n')
         r = run([gcc] + mir + ['-mabi=ilp32', t + '/m.c', '-o', t + '/m.elf'])
@@ -89,7 +98,7 @@ def c2(prefix, s2=None, gcc13='13.3.0'):
         r = run([gcc] + mir + FLAGS + [t + '/m.c', '-o', t + '/m.elf', '-nostartfiles', '-Wl,-e,main'])
         if r.returncode != 0:
             fail('C2 a link with the full ILP32 flags failed: ' + r.stderr.strip()[-300:])
-    print('C2 ok: -mabi=ilp32 -> "%s" (link fails), full flags -> "%s"' % (d1, d2))
+    print('C2 ok: -mabi=ilp32 -> "%s" (no library, link fails), pack flags -> "%s" (link ok)' % (d1, d2))
 
 
 WIDE = ['wcslen', 'wcscpy', 'wcscmp', 'wmemcmp', 'wcschr']   # functions that read or write single wchar_t elements
@@ -118,18 +127,17 @@ def c3(prefix, s2=None):
         if not re.search(r'#define __SIZEOF_WCHAR_T__ 2$', macros, re.M) or not re.search(r'#define __WCHAR_MAX__ 0xffff', macros) \
                 or '__CHAR_UNSIGNED__' in macros:
             fail('C3 variant %s: the target preprocessor does not say 2-byte wchar_t / signed char' % d)
+    # the pack's libraries are the ones the driver selects under the pack's own flags
+    sel = run([gcc] + FLAGS + ['-print-multi-directory']).stdout.strip()
     n = 0
     for m in WIDE:
         member = m
-        a32 = member_asm(prefix, prefix + '/%s/lib/ilp32/wchar16/schar/libc.a' % TARGET, member)
-        a64 = member_asm(prefix, prefix + '/%s/lib/libc.a' % TARGET, member)
-        if a32 is None or a64 is None:
-            fail('C3 %s: not exactly one member (lib|libc)_a-%s.o in the ILP32 and LP64 libc.a' % (m, m))
+        a32 = member_asm(prefix, '%s/%s/lib/%s/libc.a' % (prefix, TARGET, sel), member)
+        if a32 is None:
+            fail('C3 %s: not exactly one member (lib|libc)_a-%s.o in the selected libc.a' % (m, m))
             continue
         if not re.search(r'\b(ldrh|strh)\b', a32):
-            fail('C3 %s: the ILP32 object has no 2-byte access' % m)
-        if re.search(r'\b(ldrh|strh)\b', a64):
-            fail('C3 %s: the LP64 object has a 2-byte access' % m)
+            fail('C3 %s: the selected object has no 2-byte access' % m)
         n += 1
     print('C3 ok: ILP32 variants preprocess to 2-byte wchar_t; %d wide functions use 2-byte accesses' % n)
 
@@ -275,7 +283,7 @@ def dwarf_layout(obj, libnx_inc):
     return out, uses_wchar
 
 
-def c6(prefix, libnx):
+def c8(prefix, libnx):
     inc = os.path.join(libnx, 'nx', 'include')
     gcc = prefix + '/bin/%s-gcc' % TARGET
     base = ['-mabi=ilp32', '-march=armv8-a+crc+crypto', '-mtune=cortex-a57', '-fPIE', '-ftls-model=local-exec', '-D__SWITCH__',
@@ -306,6 +314,90 @@ def c6(prefix, libnx):
           % (len(la), funcs, len(bad), len(wa | wb)))
 
 
+SIZED = '''#include <new>
+void f(void *p, std::size_t n, std::align_val_t a) {
+    ::operator delete(p, n); ::operator delete[](p, n); ::operator delete(p, n, a); ::operator delete[](p, n, a);
+}
+'''
+UNSIZED = '''#include <new>
+void f(void *p, std::align_val_t a) { ::operator delete(p); ::operator delete[](p); ::operator delete(p, a); ::operator delete[](p, a); }
+'''
+
+
+def derive(prefix, s2, src):
+    """The deallocation functions a call set refers to, mangled by the built compiler (undefined symbols of the probe)."""
+    gxx = (s2 or prefix) + '/bin/%s-g++' % TARGET
+    with tempfile.TemporaryDirectory() as t:
+        open(t + '/p.cc', 'w').write(src)
+        r = run([gxx] + FLAGS + ['-fsized-deallocation', '-O0', '-c', t + '/p.cc', '-o', t + '/p.o'])
+        if r.returncode != 0:
+            fail('C6 the probe does not compile: ' + r.stderr.strip()[-300:])
+            return []
+        nm = run([prefix + '/bin/%s-nm' % TARGET, '-u', '--format=posix', t + '/p.o']).stdout
+        return sorted(l.split()[0] for l in nm.splitlines() if l.split() and l.split()[0].startswith(('_Zdl', '_Zda')))
+
+
+def libs(prefix):
+    for d in (prefix + '/%s/lib' % TARGET, prefix + '/lib/gcc/%s' % TARGET):
+        for root, _, files in os.walk(d):
+            for f in sorted(files):
+                if f.endswith(('.a', '.o')):
+                    yield os.path.join(root, f)
+
+
+def c6(prefix, s2):
+    sized, unsized = derive(prefix, s2, SIZED), derive(prefix, s2, UNSIZED)
+    if len(sized) != 4 or len(unsized) != 4:
+        fail('C6 derived %d sized and %d unsized deallocation symbols, expected 4 and 4: %s %s' % (len(sized), len(unsized), sized, unsized))
+        return
+    fwd = {z: z.replace('Pvj', 'Pv') for z in sized}    # ILP32 size_t is 'j': the sized form minus its size parameter
+    if sorted(fwd.values()) != unsized:
+        fail('C6 sized %s do not map onto unsized %s' % (sized, unsized))
+        return
+    nm, od, ar = (prefix + '/bin/%s-%s' % (TARGET, x) for x in ('nm', 'objdump', 'ar'))
+    nlibs = nref = ndef = 0
+    for lib in libs(prefix):
+        nlibs += 1
+        for ln in run([nm, '-A', '--format=posix', lib]).stdout.splitlines():
+            f = ln.split()
+            if len(f) < 3 or f[1] not in fwd:
+                continue
+            if f[2] in 'Uu':
+                nref += 1
+                fail('C6 %s refers to the sized deallocation function %s' % (f[0].rstrip(':'), f[1]))
+            else:
+                ndef += 1
+                m = re.match(r'(.*)\[(.*)\]:$', f[0])
+                with tempfile.TemporaryDirectory() as t:
+                    obj = lib if not m else t + '/' + m.group(2)
+                    if m:
+                        run([ar, 'x', lib, m.group(2)], cwd=t)
+                    rel = run([od, '-dr', obj]).stdout
+                if not re.search(r'R_AARCH64_\w+\s+%s\b' % re.escape(fwd[f[1]]), rel):
+                    fail('C6 the definition of %s in %s does not call %s' % (f[1], f[0].rstrip(':'), fwd[f[1]]))
+    print('C6 ok: %d library files scanned, %d references to the %d sized deallocation functions (%s), %d definitions, all forwarding'
+          % (nlibs, nref, len(sized), ' '.join(sized), ndef))
+
+
+def c7(prefix, gcc13):
+    base = prefix + '/%s/include/c++' % TARGET
+    if sorted(os.listdir(base)) != [gcc13]:
+        fail('C7 c++ include versions %s, expected [%s]' % (sorted(os.listdir(base)), gcc13))
+    re_ = prefix + '/bin/%s-readelf' % TARGET
+    nlibs = nobj = 0
+    for lib in libs(prefix):
+        nlibs += 1
+        out = run([re_, '-h', lib]).stdout
+        classes = re.findall(r'^\s*Class:\s+(\S+)', out, re.M)
+        machs = re.findall(r'^\s*Machine:\s+(.+?)\s*$', out, re.M)
+        flags = re.findall(r'^\s*Flags:\s+(.+?)\s*$', out, re.M)
+        nobj += len(classes)
+        bad = sorted({c for c in classes if c != 'ELF32'}) + sorted({m for m in machs if 'AArch64' not in m})
+        if bad:
+            fail('C7 %s: ELF objects that are not ILP32 AArch64: %s' % (lib, bad))
+    print('C7 ok: c++ include version %s only; %d library files, %d ELF objects, all ELF32 AArch64' % (gcc13, nlibs, nobj))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('prefix')
@@ -322,10 +414,12 @@ def main():
     c2(prefix, a.s2, a.gcc13)
     c3(prefix, a.s2)
     c4(prefix, a.gcc13)
+    c6(prefix, a.s2)
+    c7(prefix, a.gcc13)
     if a.manifest:
         c5(prefix, a.s2, a.gcc13, here, a.flags_dir, a.flags_commit)
     if a.libnx:
-        c6(prefix, a.libnx)
+        c8(prefix, a.libnx)
     sys.exit(1 if fails else 0)
 
 
