@@ -280,3 +280,59 @@ What is needed to avoid the product (not asserted, needs a proof):
 - One global coupling: `num_consts = (cur + 1) >> 1` where cur counts the np2-flagged 2D samplers (7734-7749). It declares `ps_samplerNP2Fixup[num_consts]`, which is zero-sized when no flagged sampler resolves to 2D.
 - Factorisation would be: enumerate each sampler's args independently, plus the np2 pattern class (flagged count and whether it is 0), with a proof that compile status is the conjunction over regions.
 I did not prove it. NFIX itself is a context constant (the format-table fixups: complex YUY2, UYVY, YUV, YV12, NV12, P8 = 6 descs, plus scaling fixups, whose set depends on the GL extensions, utils.c:3530-3666); the farm should state it from its run.
+
+## Domain restrictions by context facts (answer to the lead's (a)(b)(c)); sm_domain.py updated
+
+(a) np2 bit: domain {0}.
+- shader.c:2952-2954 sets np2_fixup[i] only if `!(texture->flags & WINED3D_TEXTURE_POW2_MAT_IDENT)`.
+- texture.c:3931 sets POW2_MAT_IDENT on every texture; it is cleared only for gl_type TEX_RECT (3962-3966) or WINED3D_TEXTURE_COND_NP2_EMULATED (3968-3972).
+- Both are set only when the dimensions are not powers of two and `!d3d_info->texture_npot` (texture.c:3814-3815, 3831-3847).
+- texture_npot = supported[ARB_TEXTURE_NON_POWER_OF_TWO] (adapter_gl.c:5198); a GL >= 2.0 context sets it by version (adapter_gl.c:3287). The R500/NV FX removal (adapter_gl.c:900-931) is vendor-gated.
+- Mesa 25.2.8: lp_screen.c:214 `caps->npot_textures = true;`. I did not read the st_extensions.c mapping from that cap to the GL extension; the version rule above applies to a 4.5 context in any case.
+- So the bit is never set, ps_samplerNP2Fixup is never declared, and the num_consts coupling disappears.
+
+(b) colour fixup: NFIX = 2 = {identity, "xyZW"}.
+- In the args only a non-swizzle fixup survives (shader.c:2932; wined3d_private.h:4663-4666: texture_swizzle and not complex and not scaling).
+  - texture_swizzle = ARB_TEXTURE_SWIZZLE, GL 3.3 (adapter_gl.c:3340).
+- d3d9 sets WINED3D_LEGACY_UNBOUND_RESOURCE_COLOR (d3d9/directx.c:686), so the legacy fixup rows apply (utils.c:3594-3604).
+- Core-context caps (WINED3D_GL_LEGACY_CONTEXT false, EXT_TEXTURE_SNORM from GL 3.1: adapter_gl.c:3319; NV_TEXTURE_SHADER absent). Rows applied in table order, last one wins:
+  - R8G8_SNORM, R16G16_SNORM, R8G8B8A8_SNORM, R5G5_SNORM_L6_UNORM end as XY11 / XYZW: not scaling.
+  - R8G8_SNORM_L8X8_UNORM ("xyZW") has no EXT_TEXTURE_SNORM row (utils.c:3550-3553): scaling fixup, stays.
+  - All other table fixups are swizzles (X11W, XY1W, XXXX, YX11, 000X, XXXY, XXX1): they become identity in the args.
+- Complex fixups (YUY2, UYVY, YV12, NV12, P8: utils.c:3610-3666) do not occur: env_handheld.tsv / env_docked.tsv CheckDeviceFormat (restype 3, 4, 5) accepts none of their formats (FOURCC YUY2/UYVY/YV12/NV12, P8 = 0x29). The accepted texture set (hex): 0x15-0x1a 0x1c 0x1e-0x24 0x32 0x33 0x3c-0x3f 0x40 0x46 0x4b 0x4d 0x50-0x54 0x65 0x66 0x6e-0x74 plus FOURCC DXT1-5, ATI1/ATI2, ATOC, INTZ, RESZ, NULL.
+- Of the accepted formats only D3DFMT_X8L8V8U8 (0x3e) maps to R8G8_SNORM_L8X8_UNORM. NFIX = 2.
+
+(c) texture type per declared 2d/volume sampler: NOT fixed by the dcl in wine 9.0.
+- shader.c:2899-2927 starts from the declared type (3D to 3D, CUBE to CUBE, else 2D), and then overrides with the bound texture:
+  - bound 3D texture with a declared 2D sampler gives 3D;
+  - bound 2D texture (not a legacy cubemap) with a declared 3D sampler gives 2D.
+- pixelshader_get_resource_type reads it for every declared sampler (shader.c:3107-3128).
+- Domain per declared 2d/volume sampler = 2 (2D, 3D); cube = 1; ps_1_x keeps the full product.
+- The "dcl only" domain of 1 holds only if the D3D9 front end guarantees that the bound texture type equals the declared type. D3D9 allows SetTexture with any texture type, so I cannot cite such a guarantee. The script takes both (--tex2 2, --tex2 1).
+
+Also (new): srgb_correction has 1 value. Condition: shader.c:2775-2778, only if `!d3d_info->srgb_write_control`; srgb_write_control = ARB_FRAMEBUFFER_SRGB (adapter_gl.c:5206, GL 3.0), and d3d9 sets WINED3D_SRGB_READ_WRITE_CONTROL (directx.c:686). ffp_alpha_test is false on a core context (adapter_gl.c:5192), so alpha_test_func keeps 8 values.
+
+Totals (sm_domain.py --nfix 2 --np2 1; at my branch head, 15791 shaders, distinct bytecodes):
+| tex2 | |ps compile set| | vs | |R| | total |
+|---|---|---|---|---|
+| 2 (Wine override) | 4,985,192,486,272 | 342,344 | 69,642 | 4.985e12 |
+| 1 (dcl only) | 118,694,016 | 342,344 | 69,642 | 119,036,360 + 69,642 = 119,106,002 |
+At 10 ms per item, 119.1 million items need 1.19 million core-seconds = about 83 h on 4 cores. Neither row fits the 12 h budget (about 17 million items).
+
+## Mesa citations re-based on the Ubuntu source package (lead addition)
+
+Package: mesa_25.2.8-0ubuntu0.24.04.4 (env.json:66,164), from archive.ubuntu.com pool/main/m/mesa.
+- mesa_25.2.8-0ubuntu0.24.04.4.dsc sha256 8703280401d59a28abc6503461e1cb167bffcd967c7cf8309f00749d125f406f
+- mesa_25.2.8.orig.tar.xz sha256 097842f3e49d996868b38688db87b006f7d4541e93ce86d2f341d8b3e7be7c93 (matches the .dsc Checksums-Sha256)
+- mesa_25.2.8-0ubuntu0.24.04.4.debian.tar.xz sha256 b2fe9e714f7824fb763b693ffd170ba9af3982a970273bc8bae6edf380f51af3 (matches the .dsc)
+debian/patches/series lists 7 patches (path_max, src_glx_dri_common.h, disable_ppc64el_assembly, anv mmap offset, CVE-2026-40393 pre1/1/2). The files they touch are: meson.build, src/compiler/nir/nir_functions.c, src/compiler/spirv/spirv_to_nir.c, src/glx/dri_common.h, src/intel/vulkan/anv_*, src/util/{meson.build,stack_array.h,tests/*}, src/vulkan/util/vk_util.h.
+No patch touches any cited file, so the orig tarball text is the shipped text. Files and sha256 in mesa-25.2.8/src (orig tarball):
+| file | sha256 | cited line |
+|---|---|---|
+| gallium/auxiliary/gallivm/lp_bld_limits.h | c7186c2a5346b7fb1fea67db0402744eb8fe20c320cc9a992c3d929c73e92f70 | 100 `caps->max_inputs = 32;` |
+| gallium/drivers/llvmpipe/lp_screen.c | a31224221b4eb4265f51daedd162bd832f882b03b16de319cd04f13c717bf9f8 | 124-134 (fragment uses gallivm_init_shader_caps), 214 `caps->npot_textures = true;` |
+| mesa/state_tracker/st_extensions.c | 846c964b685467570e466bc351074dd69166a4f205c40b2e7c3e4a8ee8c8a5cd | 266-267 MaxInputComponents = max_inputs * 4; 1078 `EXT_CAP(ARB_texture_non_power_of_two, npot_textures);` |
+| mesa/main/extensions_table.h | 45633c67aef600e268dc34e5b3f446d491df600b0438a391fac6fdb9ab35c020 | 174 ARB_texture_non_power_of_two, GLL + GLC |
+| mesa/main/get_hash_params.py | fbfe1229fe867e314885cf0a50935121048580f78b7707de0b4101583ec1824a | 428 MAX_FRAGMENT_INPUT_COMPONENTS |
+This also completes the np2 item (a): the llvmpipe cap npot_textures (lp_screen.c:214) is mapped to the GL extension at st_extensions.c:1078, and the extension table exposes it in both the legacy and core contexts (extensions_table.h:174).
+The earlier gitlab tag read is superseded; the two hashes I had computed (lp_bld_limits.h, st_extensions.c) are equal to these.
