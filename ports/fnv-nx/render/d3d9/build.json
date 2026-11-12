@@ -125,6 +125,16 @@
     "gen/env_table.gen.cpp",
     "gen/env_table.gen.h"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/render/d3d9/ffp/gen_glsl.py",
+   "args": [
+    "/out/gen"
+   ],
+   "inputs": [],
+   "outputs": [
+    "gen/ffp_glsl.gen.h"
+   ]
   }
  ],
  "plugin_cxx": "x86_64-linux-gnu-g++-13",
