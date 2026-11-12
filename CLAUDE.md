@@ -122,6 +122,12 @@ The owner's words: "Транк никогда красный. Всегда зе�
   - **Registry.** The hive holds exactly the keys that the exe and modules read, found statically from their call
     sites. Values come from the declared machine (for example `Installed Path` = the game directory). A key with no
     declared value is absent, the same as on a machine where nothing wrote it. No installer script is needed.
+  - **Installed, launcher run once (orchestrator decision, 2026-11-12).** The declared machine is a finished install
+    on which FalloutNVLauncher.exe has been run once for the declared adapter. `FalloutPrefs.ini` (and any other file
+    the launcher writes) is exactly what the launcher's own code writes from its preset files in gamedata for that
+    adapter, derived statically from the launcher's code and presets; no hand-written values. WinMain's launcher
+    gate therefore takes the "prefs present" path. Owner: platform (L5); the emulator (L4) mounts the result. If the
+    launcher or its presets are missing from gamedata, report it to the orchestrator.
 - Merges stop while anything is red. That is intended. Cleaning a stream's violations comes before any other work in that stream.
 
 ## Owner decisions of 2026-11-10 (do not re-ask)
