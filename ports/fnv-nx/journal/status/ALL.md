@@ -89,6 +89,14 @@ The first product root is L5 w10's platform root (6516d0d is red: 58 of 74 units
 - **FalloutPrefs inputs:** render/d3d9 becomes a product root (L6). Its `generated` stage declares ident_handheld.bin and ident_docked.bin as `outputs`. L5 w13 consumes them through `uses`, and declared_files.cpp stays off the platform root until then.
 - **MERGER order (L1):** w16 -> w10 6bcd7d2 (29/29) -> w14 c0f23a3f -> w15 afa6b301 (27/27, 291 s).
 
+- **d3dx9_31.dll (L1 w18):** d3dx9_38 calls LoadLibraryA on it at 0x56b708. The superset rule is accepted, and the branch taken depends on what gamedata holds:
+  - (A) present: it joins the image set as a may-load image (6 -> 7, pinned by exepin) and is lifted like d3dx9_38;
+  - (B) absent: the declared machine has no such module, and LoadLibrary returns NULL with ERROR_MOD_NOT_FOUND. The rule covers every name outside the declared file set and is owned by L5.
+  - L6 checks gamedata for all d3dx9_*/d3dcompiler_* files.
+  - The site stays open until the object extents exist.
+- **Forms certificates:** certs.tsv has 0 rows, so every lifted root is red on forms. L3b w4's queue (19,494 shapes, about 60 CPU-h) takes the first farm priority, on the path to goal step 2.
+- **lib/sha256:** it goes in as L4's own root (w7 20724246) in the same verdict as L6 w6's render/d3d9 root (session_01KmtZKQbpDKvc9qzXT9bLHX).
+
 ## Sessions (03:36Z)
 
 - All 8 leads and MERGER are active (each messaged within the last 10 min). Nothing was stopped by limits this hour.
