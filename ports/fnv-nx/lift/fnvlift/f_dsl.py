@@ -113,7 +113,7 @@ def emit_form(cx, ins):
         return SKIP
     F = forms.build(ins, cx.a)
     force, xfer = transfer(cx, ins, F)
-    L, ref = F.to_c_inline(varc(cx), fault_fn(cx), flo_fn, force)
+    L, ref = F.to_c_inline(varc(cx), fault_fn(cx), flo_fn, force, cx.macc)
     L += xfer(ref)
     if L:
         cx.em('{')

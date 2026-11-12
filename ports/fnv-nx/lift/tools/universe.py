@@ -4,7 +4,6 @@ pointers (rule R3: EVERY relocated value into an executable section is an entry;
 for the accounting and never exclude an entry); jump tables; R3 byte accounting of .text (codemap.py), entry-set
 comparison (reconcile.py). Output: $FNVNX_FACTS_OUT (default /home/user/l3facts)/{universe,codemap}.tsv + count-only stdout; exit 1 if any byte is unexplained."""
 import os, re, sys, json, struct, bisect, capstone
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))     # the sibling tools, by this file's own directory (runs under python3 -I)
 from types import SimpleNamespace
 import ehtables, codemap, reconcile, pemod
 from array import array
@@ -226,7 +225,6 @@ def ptr_pass(data, final, eh):
         k, ins = site_kind(r)
         if k == 'slot' and not final: continue
         if k == 'slot':
-            if r in deadops: dinfo['slot_in_dead_operand'] += 1; settled.add(r); continue   # operand field of dead code: not a reference
             dinfo['slot_table'] += 1; mark(r, 4, r)                                          # otherwise a relocated pointer slot in unreached bytes
         if k in ('data', 'imm', 'slot'): new += ptr_target(v, r); settled.add(r)
         elif k == 'tbl': settled.add(r)
@@ -303,7 +301,7 @@ cont = {}                                 # strict mode: relocated-dword runs st
 for t in sorted(cref) if STRICT else ():
     q = t
     while q in rset: cont[q] = t; q += 4
-U = SimpleNamespace(insns=insns, PRI=PRI, T0=T0, T1=T1, TN=TN, X=X, V=V, bad_entries=bad_entries, callers=callers, classify=classify, cov=cov, cref=cref, datarec=datarec, dmap=dmap,
+U = SimpleNamespace(M=M, insns=insns, PRI=PRI, T0=T0, T1=T1, TN=TN, X=X, V=V, bad_entries=bad_entries, callers=callers, classify=classify, cov=cov, cref=cref, datarec=datarec, dmap=dmap,
                     entries=entries, fsize=fsize, funcs=funcs, indec=indec, intext=intext, kinds=kinds, md=md, pad_split=pad_split, parent=parent, psites=psites,
                     rejects=rejects, relocs=relocs, rset=rset, rvals=rvals, sec=sec, tcons=tcons, text=text, tref=tref, tslots=tslots, tbl=tbl, pedat=pedat, mark=mark,
                     dinfo=dinfo, settled=settled, site_kind=site_kind, disp_ref=disp_ref, ptr_target=ptr_target, deadops=deadops, u32=u32, imports=imports, cont=cont,
@@ -311,7 +309,6 @@ U = SimpleNamespace(insns=insns, PRI=PRI, T0=T0, T1=T1, TN=TN, X=X, V=V, bad_ent
 fin = False
 for rnd in range(30):
     OWN[:] = sorted(entries); n0 = (len(entries), len(insns), len(tslots), len(tstarts))
-    if fin: deadops.clear(); deadops.update(codemap.analyse(U, codemap.split_runs(U, pad_split(classify())))[1])   # relocated operands of dead code are no references
     ch = 0 if STRICT else ptr_pass(False, fin, eh); drain()
     OWN[:] = sorted(entries); ch += eh.scan(); drain()
     ch += codemap.strict_pass(U, fin, eh) if STRICT else ptr_pass(True, fin, eh); drain()

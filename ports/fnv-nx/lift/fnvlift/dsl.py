@@ -121,6 +121,7 @@ def to_smt(n):
 def T(w): return 'u32' if w <= 32 else 'u64'
 def K(v, w): return '%#x%s' % (v, 'u' if w <= 32 else 'ull')
 class Emit:
+    macc = 'M'      # memory accessor prefix: M, or LK inside a locked instruction (core.Ctx.macc: the R9 atomic rule works on the private copy LK_BEGIN makes)
     def __init__(s, roots):
         s.cnt, s.order, s.names, s.used = {}, [], {}, set()
         for r in roots: s.walk(r)
@@ -165,7 +166,7 @@ class Emit:
             hi, lo = n.x; e = a[0] if lo == 0 else '(%s >> %d)' % (a[0], lo)
             return '((%s)%s)' % (t, e) if hi == sw - 1 else '((%s)(%s & %s))' % (t, e, M)
         if o == 'concat': return '((((%s)%s) << %d) | %s)' % (t, a[0], n.a[1].w, a[1])
-        if o == 'load': return '((u32)M%d(%s))' % (w, a[0])
+        if o == 'load': return '((u32)%s%d(%s))' % (s.macc, w, a[0])
         raise ValueError(o)
 
 class InlineEmit(Emit):
@@ -255,13 +256,13 @@ class Form:
             flo = g(flo, z3.BitVec('flo', 32)); mem = g(mem, mem_array()); eip = g(eip, z3.BitVecVal(s.addr, 32) if isinstance(s.addr, int) else to_smt(s.addr))
         return {'regs': regs, 'flags': flags, 'flo': flo, 'mem': mem, 'eip': eip, 'defined': defined, 'rdefined': rdef, 'fault': ft}
     def writes_unobserved(s): return s.flo is not None or any(f == 'df' for f, _, _ in s.flags)
-    def to_c_inline(s, varc, fault_fn, flo_fn, force=()):
+    def to_c_inline(s, varc, fault_fn, flo_fn, force=(), macc='M'):
         """C lines of ONE instruction to be placed inside a block of a lifted function: -> (lines, ref) where ref(node) is the C text of a node
         usable AFTER the lines (a named temporary or an expression over the `in_` snapshots).  Order = the Form's: snapshots of the used pre-state
         (varc(name) -> the C expression of a pre-state variable), temporaries for loads and shared sub-expressions (and the `force`d nodes), faults
         (fault_fn(code, cond_node, ref) -> C line), register writes, flag writes (unconditional, also with `when`; an undefined flag gets none),
         the other-EFLAGS write (flo_fn(ref of the value) -> C line), stores.  The eip node is not emitted: the caller derives the control transfer from it."""
-        e = InlineEmit(s.roots(), force); L = []
+        e = InlineEmit(s.roots(), force); e.macc = macc; L = []
         for u in sorted(e.used): L.append('const u32 in_%s = %s;' % (u, varc(u)))
         for n in e.order:
             if n.u in e.names: L.append('const %s %s = %s;' % (T(n.w), e.names[n.u], e.ex(n)))
@@ -270,7 +271,7 @@ class Form:
         for r, v, w in s.regs: L.append('%s%s = %s;' % (cw(w), r, e.ref(v)))
         for f, v, w in s.flags: L.append('%s = %s;' % (f, e.ref(v)))     # `when` only bounds the proof obligation: v is a deterministic value (e.g. SHL CF for count >= size)
         if s.flo is not None: L.append(flo_fn(e.ref(s.flo)))
-        for a, v in s.stores: L.append('M%d(%s) = %s;' % (v.w, e.ref(a), e.ref(v)))
+        for a, v in s.stores: L.append('%s%d(%s) = %s;' % (macc, v.w, e.ref(a), e.ref(v)))
         return L, e.ref
     def to_c(s, fname):
         e = Emit(s.roots()); L = []

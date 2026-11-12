@@ -18,12 +18,11 @@ from types import SimpleNamespace
 import capstone
 from capstone import x86 as X
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))     # the sibling tools, by this file's own directory (runs under python3 -I)
-import pemod, ehtables, codemap
+import pemod, ehtables, codemap, residue
 from fnvlift import Image as LImage; from fnvlift import core as LCore
 TERM = {'ret', 'retf', 'int3', 'hlt', 'ud2', 'iret', 'iretd'}
 PRI = ['entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw', 'ptr']
-CN = {1: 'entry-nondecomp', 2: 'entry-nondecomp', 3: 'data-pe-header', 4: 'padding', 5: 'data-reloc', 6: 'dead-gap', 8: 'UNEXPLAINED'}      # the exe's class names (codemap.py CLS)
+CN = {1: 'entry-nondecomp', 2: 'entry-nondecomp', 3: 'data-pe-header', 4: 'padding', 5: 'data-reloc', 6: 'dead-gap', 9: 'data-unreached', 8: 'UNEXPLAINED'}      # the exe's class names (codemap.py CLS)
 M32 = 0xffffffff
 
 def run(arg):
@@ -249,64 +248,6 @@ def run(arg):
         if g.mnemonic == 'nop' or (g.mnemonic == 'lea' and len(o) == 2 and o[1].mem.index == 0 and o[1].mem.base == o[0].reg and o[1].mem.disp == 0) or (
                 g.mnemonic == 'mov' and len(o) == 2 and o[0].type == o[1].type == X.X86_OP_REG and o[0].reg == o[1].reg): return g.size
         return 0
-    # residue (valid executable bytes no entry body reaches and no PE directory names), cut by rule into: padding (nop / int3 instructions at the run's ends), dead gap (the run decodes
-    # completely from its first byte, ends at a terminator or at the next reached instruction, and has relocated dwords only at operand fields), relocation slots (the bytes of a
-    # HIGHLOW fixup site: a relocated pointer slot, e.g. a jump table), UNEXPLAINED (reason named). Nothing else is ever called data or dead.
-    TERMS = {'ret', 'retf', 'jmp', 'int3', 'ud2', 'iret', 'iretd'}; rsl = bytearray(TN); unx = []; rslot = array('I', bytes(4 * TN))
-    for r in relocs:
-        if T0 <= r < T1:
-            for k in range(max(r, T0), min(r + 4, T1)): rsl[k - T0] = 1; rslot[k - T0] = r
-    def residual(p, q):
-        """[p, q) offsets of one residue run: swept from its first byte. At a boundary k that is a byte of a relocation site the bytes are slots (data named by the fixup; an instruction that
-        starts at k would have the fixup in its operand field, at an offset >= 1); else the instruction at k must decode inside the run, with relocation sites only at its disp / imm
-        fields. Each maximal stretch of instructions is a dead gap iff it ends at a terminator, at a slot or at the next reached instruction. The first violation ends the sweep: the
-        rest of the run is UNEXPLAINED with that reason."""
-        k = p; segs = []; why = None
-        while k < q:
-            if rsl[k]:
-                j = k
-                while j < q and rsl[j]: j += 1
-                segs.append((k, j, 5)); k = j; continue
-            g = next(md.disasm(text[k:min(k + 15, q)], T0 + k, 1), None)
-            if g is None: why = 'undecodable'; break
-            f = {g.address + g.disp_offset if g.disp_size == 4 else -1, g.address + g.imm_offset if g.imm_size == 4 else -1}
-            if any(x not in f for x in relocs[bisect.bisect_left(relocs, T0 + k):bisect.bisect_left(relocs, T0 + k + g.size)]): why = 'reloc-not-operand'; break
-            if segs and segs[-1][2] == 6: segs[-1] = (segs[-1][0], k + g.size, 6, g.mnemonic)
-            else: segs.append((k, k + g.size, 6, g.mnemonic))
-            k += g.size
-        for i, sg in enumerate(segs):                                     # a stretch of instructions is a dead gap iff it ends at a terminator or (at the run's end) at the next reached instruction
-            if sg[2] == 6 and not (sg[3] in TERMS or (i + 1 == len(segs) and not why and q < TN and cov[q] == 1)):
-                last = i + 1 == len(segs); k = sg[0]; segs = segs[:i]; why = why if (last and why) else 'no-end'; break
-        for sg in segs: cl[sg[0]:sg[1]] = bytes([sg[2]]) * (sg[1] - sg[0])
-        if why: cl[k:q] = b'\x08' * (q - k); unx.append((T0 + k, q - k, why))
-    for m in re.finditer(rb'\x00+', bytes(cl)):
-        s, e = m.span(); p = s
-        while p < e and padlen(p, e): p += padlen(p, e)
-        q = e
-        while q > p and text[q - 1] in (0xCC, 0x90): q -= 1
-        for k in range(max(p, q - 15), q):
-            x = k
-            while x < q and padlen(x, q): x += padlen(x, q)
-            if x == q: q = k; break
-        cl[s:p] = b'\4' * (p - s); cl[q:e] = b'\4' * (e - q)
-        if p < q: residual(p, q)
-    cc = Counter(cl); rows = []
-    for c in (1, 2, 3, 4, 5, 6, 8):
-        for m in re.finditer(bytes([c]) + b'+', bytes(cl)):
-            s, e = m.span()
-            if c in (1, 2):
-                x = s
-                for k, g in groupby(own[s:e]):
-                    n = len(list(g)); rows.append((x, n, 1, 'entry:%08x' % k)); x += n
-            elif c == 5:
-                x = s
-                for y in range(s + 1, e + 1):
-                    if y == e or rslot[y] != rslot[x]: rows.append((x, y - x, c, 'reloc:%08x' % rslot[x])); x = y
-            else: rows.append((s, e - s, c, '-' if c != 3 else 'pe-header'))
-    rows.sort(); open(outd + '/codemap.tsv', 'w').write(''.join('%08x\t%d\t%s\t%s\n' % (T0 + s, n, CN[c], o) for s, n, c, o in rows))
-    nunx = cc[8]; unxr = Counter()
-    print('UNEXPLAINED runs %d, bytes %d; first: %s' % (len(unx), cc[8], ' '.join('%08x+%d:%s:%s' % (x, n, r, text[x - T0:x - T0 + 6].hex()) for x, n, r in unx[:8])))
-    for a_, n_, r_ in unx: unxr[r_] += n_
     # ---- universe.tsv
     out = []; kc = Counter()
     for e in E:
@@ -327,6 +268,54 @@ def run(arg):
         len(rvals), len({v for r, v in rvals}), len(unent), len({v for r, v in rvals}), len(ins_), len(ins_) - outr, outr))
     print('closure (rule C, lifter explore): entries %d -> %d in %d rounds; new by cause %s; direct targets outside the executable sections (via the dispatcher, no entry) %d refs / %d distinct targets (outside.tsv); jecxz leaving its range %d' % (n_before, len(E), rounds, dict(sorted(closure_new.items())), len(outside), len({t for e, a, t in outside}), len(jxs)))
     print('ranges.tsv %d rows, noreturn.tsv %d rows, range-span vs extent mismatches %d' % (len(rg), len(nrr), bad))
+    # ---- the residue is settled HERE, after universe.tsv / ranges.tsv exist and after the pcsrc facts of this run (pcsrc_s4.json) have been written: residue.closure reads them (tools/residue.py)
+    # (the call that runs pcsrc.run_facts(outd, ...) must come before this point)
+    # residue (valid executable bytes no entry body reaches and no PE directory names), cut by rule into: padding (nop / int3 instructions at the run's ends), dead gap (the run decodes
+    # completely from its first byte, ends at a terminator or at the next reached instruction, and has relocated dwords only at operand fields), relocation slots (the bytes of a
+    # HIGHLOW fixup site: a relocated pointer slot, e.g. a jump table), UNEXPLAINED (reason named). Nothing else is ever called data or dead.
+    # residual rule: tools/residue.py (one implementation for modules and the exe)
+    CLO = residue.closure(rvals, ent, outd); unent0, s4_status, s4_viol = CLO.unent, CLO.s4_status, CLO.s4_viol; closure_reason, closure_complete = CLO.reason, CLO.complete
+    brk = Counter()
+    TERMS = {'ret', 'retf', 'jmp', 'int3', 'ud2', 'iret', 'iretd'}; rsl = bytearray(TN); unx = []; rslot = array('I', bytes(4 * TN))
+    for r in relocs:
+        if T0 <= r < T1:
+            for k in range(max(r, T0), min(r + 4, T1)): rsl[k - T0] = 1; rslot[k - T0] = r
+    def residual(p, q):
+        """[p, q) offsets of one residue run: tools/residue.py (closure complete -> data, else UNEXPLAINED with the closure reason); the sweep is a breakdown, it decides nothing"""
+        brk[residue.sweep(md, text, T0, TN, relocs, rsl, cov, p, q)] += q - p
+        if closure_complete: cl[p:q] = bytes([residue.DATA]) * (q - p)
+        else: cl[p:q] = b'\x08' * (q - p); unx.append((T0 + p, q - p, closure_reason))
+    for m in re.finditer(rb'\x00+', bytes(cl)):
+        s, e = m.span(); p = s
+        while p < e and padlen(p, e): p += padlen(p, e)
+        q = e
+        while q > p and text[q - 1] in (0xCC, 0x90): q -= 1
+        for k in range(max(p, q - 15), q):
+            x = k
+            while x < q and padlen(x, q): x += padlen(x, q)
+            if x == q: q = k; break
+        cl[s:p] = b'\4' * (p - s); cl[q:e] = b'\4' * (e - q)
+        if p < q: residual(p, q)
+    cc = Counter(cl); rows = []
+    for c in (1, 2, 3, 4, 5, 6, 8, 9):
+        for m in re.finditer(bytes([c]) + b'+', bytes(cl)):
+            s, e = m.span()
+            if c in (1, 2):
+                x = s
+                for k, g in groupby(own[s:e]):
+                    n = len(list(g)); rows.append((x, n, 1, 'entry:%08x' % k)); x += n
+            elif c == 5:
+                x = s
+                for y in range(s + 1, e + 1):
+                    if y == e or rslot[y] != rslot[x]: rows.append((x, y - x, c, 'reloc:%08x' % rslot[x])); x = y
+            else: rows.append((s, e - s, c, '-' if c != 3 else 'pe-header'))
+    rows.sort(); open(outd + '/codemap.tsv', 'w').write(''.join('%08x\t%d\t%s\t%s\n' % (T0 + s, n, CN[c], o) for s, n, c, o in rows))
+    XCs, ENs, TLs = residue.pe_sources(M, u32, intext)
+    residue.write_sources(os.path.dirname(outd) + '/' + name, residue.source_rows(CLO, outd, set(ent), XCs, ENs, TLs, {t for t, ks in ent.items() if ks & residue.EH_KINDS}))
+    residue.combine(os.path.dirname(outd))
+    nunx = cc[8]; unxr = Counter()
+    print('UNEXPLAINED runs %d, bytes %d; first: %s' % (len(unx), cc[8], ' '.join('%08x+%d:%s:%s' % (x, n, r, text[x - T0:x - T0 + 6].hex()) for x, n, r in unx[:8])))
+    for a_, n_, r_ in unx: unxr[r_] += n_
     # ---- totality gate
     targets = {v for r, v in rvals} | set(XC) | ({M.base + M.entry} if M.entry else set()) | {t for t in callers if intext(t)} | set(tailsrc) | set(clos) | {t for t, ks in ent.items() if ks & {'tls', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw'}}
     cert = sum(1 for t in targets if t in ent and (t in dec or t in ud or t in xf))
@@ -337,6 +326,8 @@ def run(arg):
     if cert != len(targets): why.append('%d targets without a completed descent' % (len(targets) - cert))
     if unent: why.append('%d relocated in-span values are not entries' % len(unent))
     if nunx: why.append('%d unexplained bytes (%s)' % (nunx, ', '.join('%s %d' % kv for kv in sorted(unxr.items()))))
+    print('residual rule: closure %s (relocated in-span values not entries %d, s4 %s%s); data-unreached runs %d, bytes %d; informational breakdown (decides nothing): %s' % (
+        'complete' if closure_complete else 'OPEN: ' + closure_reason, len(unent0), s4_status, '' if s4_viol is None else ' (%d violations)' % s4_viol, sum(1 for m in re.finditer(rb'\x09+', bytes(cl))), cc[9], ', '.join('%s %d' % kv for kv in sorted(brk.items()))))
     if mrow.size != len(M.d) or mrow.sizeimg != M.sizeimg or mrow.pref != M.pref or mrow.entry != M.entry or mrow.tls != (1 if M.dirent(9)[0] else 0): why.append('modules.tsv row disagrees with the PE header')
     if len(targets) != len(E): why.append('gate universe %d != universe.tsv rows %d' % (len(targets), len(E)))
     if viol: why.append('%d in-span direct targets are not entries (closure not reached)' % len(viol))
