@@ -25,6 +25,7 @@ extern "C" {
 void fnvnx_guest_platform_init(void);
 void fnvnx_set_command_line(int argc, char **argv);
 void fnvnx_registry_first_run(void);
+void fnvnx_declared_files_first_run(void);
 void fnvnx_audio_input_register(void);
 void fnvnx_d3d9_register(void) __attribute__((weak));   /* D3D9=external: d3d9.dll module (render/nine) */
 void *fnvnx_win32_lookup_export(const char *dll, const char *name);
@@ -361,6 +362,7 @@ extern "C" int fnvnx_guest_main(int argc, char **argv) {   /* runtime.c prefers 
     }
     memory_manager_state("before WinMain");
     fnvnx_registry_first_run();   /* the declared machine's registry rows, before WinMain reads them */
+    fnvnx_declared_files_first_run();   /* the declared FalloutPrefs.ini (launcher gate), before WinMain reads it */
     printf("fnvnx boot: calling WinMain\n");
     g_trap_phase = 1;
     int r = __fnv_0086a850(0x00400000u, 0, (unsigned)(uintptr_t)winmain_cmdline(), 1 /* SW_SHOWNORMAL */);
