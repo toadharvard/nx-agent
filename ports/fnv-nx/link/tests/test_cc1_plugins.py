@@ -7,8 +7,9 @@ build is the load proof for every plugin in both front ends. Per plugin, on the 
   addr      a 32-bit address sum is finished before the access             (applies its rule)
   dispatch  an indirect call goes through fnvnx_dispatch                   (applies its rule)
   pi        .fnvnx.n3 has the verdict line of every emitted function        (applies its rule)
-  names, layout, sdd   C has none of their trees (C++ names, class layouts, vtables): no rows, no sections; the fnvnx_cc attribute that names
-            registers is accepted by cc1 (a C unit may carry a calling convention)
+  names     C names of the unit's external symbols in .fnvnx.sympair: _name, _name@N (stdcall), @name@N (fastcall)
+  layout    .fnvnx.layout rows of C structs and unions: UP@@ (struct P), TU1@@ (union U1), fields, closure under members
+  sdd       C has no vtables: no vtable map (the plugin loads and registers nothing)
 Plain script: exit 0 on pass. Run: python3 -I <this file>  (needs the pinned compiler: ARTIFACTS_URL)."""
 import os
 import subprocess
@@ -34,7 +35,14 @@ int rd(int *p) { return *p + g; }
 void wr(int *p, int v) { *p = v; }
 int addr(unsigned x) { return *(int *)(x + 0x40u); }
 void call(void (*f)(int)) { f(1); }
-int __attribute__((fnvnx_cc("stdcall"))) cc_fn(int a) { return a; }
+struct P { char c; int i; short s[3]; };
+struct P gp;
+union U1 { int a; char b; };
+union U1 gu;
+struct Nest { struct P p; unsigned bits : 3; };
+int use_nest(struct Nest *n) { return n->bits + n->p.i; }
+int __attribute__((fnvnx_cc("std"))) std_fn(int a, struct P *p) { return a + p->i; }
+int __attribute__((fnvnx_cc("fast"))) fast_fn(int a, int b, int c) { return a + b + c; }
 struct S { int a; int b; };
 int fs(struct S *s) { return s->a + s->b; }
 '''
@@ -78,8 +86,14 @@ def main():
     n3 = tool('aarch64-linux-gnu-readelf', '-p', '.fnvnx.n3', o)
     check('pi: .fnvnx.n3 of a C unit has a verdict line for rd, wr and fs', all(f + '^Iok' in n3 for f in ('rd', 'wr', 'fs')), n3)   # readelf -p prints a tab as ^I
     sec = tool('aarch64-linux-gnu-readelf', '-SW', o)
-    check('names: no C++ name rows in a C unit', '.fnvnx.sympair' not in sec)
-    check('layout: no layout rows in a C unit', '.fnvnx.layout' not in sec)
+    sp = tool('aarch64-linux-gnu-readelf', '-p', '.fnvnx.sympair', o)
+    want = ['rd^I_rd^Ifunc^Idef', 'g^I_g^Idata^Idef', 'std_fn^I_std_fn@8^Ifunc^Idef', 'fast_fn^I@fast_fn@12^Ifunc^Idef', 'call^I_call^Ifunc^Idef']
+    check('names: C names in .fnvnx.sympair: cdecl _rd, data _g, stdcall _std_fn@8, fastcall @fast_fn@12', all(w in sp for w in want), sp)
+    check('names: a C unit has no vtable pairs', '.fnvnx.vtpair' not in sec or 'vtable' not in sp)
+    ly = tool('aarch64-linux-gnu-readelf', '-p', '.fnvnx.layout', o)
+    check('layout: struct P (char, int, short[3]) is UP@@ size 16 align 4 with its fields', 'UP@@^I16^I4^Ic:0:1,i:4:4,s:8:6^I^I^I1P' in ly, ly)
+    check('layout: union U1 is TU1@@ size 4', 'TU1@@^I4^I4^Ia:0:4,b:0:1' in ly, ly)
+    check('layout: struct Nest has the bit-field and the member struct (closure under members)', 'UNest@@^I' in ly and 'bits:' in ly and 'UP@@' in ly, ly)
     check('sdd: no vtable map in a C unit', '.fnvnx.vtmap' not in sec)
     k = objs['cxxu']
     ksec = tool('aarch64-linux-gnu-readelf', '-SW', k)

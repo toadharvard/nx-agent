@@ -66,7 +66,7 @@ static void add_type(tree t)
   if (!t || !TYPE_P(t) || !RECORD_OR_UNION_TYPE_P(t)) return;
   t = TYPE_MAIN_VARIANT(t);
   /* a pointer to member function is a record of the compiler's own making: a member's size, no layout to compare */
-  if (!CLASS_TYPE_P(t) && TREE_CODE(t) != UNION_TYPE) return;
+  if (fnvnx_cxx_fe() && !CLASS_TYPE_P(t) && TREE_CODE(t) != UNION_TYPE) return;   /* (cc1: every C struct and union) */
   if (found_set.insert(t).second) {
     found.push_back(t);
     keep = tree_cons(NULL_TREE, t, keep);
@@ -80,7 +80,7 @@ static void finish_decl_cb(void *gcc_data, void *)
   tree d = (tree)gcc_data;
   /* a compiler-made object (typeinfo, vtable, guard) carries compiler-made record types: not the source's */
   if (d && DECL_P(d) && !DECL_ARTIFICIAL(d)) add_type(TREE_TYPE(d));
-  if (d) { finish_decl(gcc_data, NULL); }
+  if (d && fnvnx_cxx_fe()) { finish_decl(gcc_data, NULL); }   /* the C++ scope numbers of names */
 }
 
 static tree walk_body(tree *tp, int *, void *)
@@ -101,12 +101,28 @@ static void pre_genericize_cb(void *gcc_data, void *)
   if (!fn || TREE_CODE(fn) != FUNCTION_DECL) return;
   add_type(TREE_TYPE(TREE_TYPE(fn)));
   for (tree p = DECL_ARGUMENTS(fn); p; p = DECL_CHAIN(p)) add_type(TREE_TYPE(p));
-  if (DECL_SAVED_TREE(fn)) cp_walk_tree_without_duplicates(&DECL_SAVED_TREE(fn), walk_body, NULL);
+  if (DECL_SAVED_TREE(fn)) {
+    if (fnvnx_cxx_fe()) cp_walk_tree_without_duplicates(&DECL_SAVED_TREE(fn), walk_body, NULL);
+    else walk_tree_without_duplicates(&DECL_SAVED_TREE(fn), walk_body, NULL);
+  }
+}
+
+/* the name of a C record (the tag, or the typedef name of an anonymous one), else null */
+static const char *c_record_name(tree t)
+{
+  tree n = TYPE_NAME(t);
+  if (n && TREE_CODE(n) == TYPE_DECL) n = DECL_NAME(n);
+  return n && TREE_CODE(n) == IDENTIFIER_NODE ? IDENTIFIER_POINTER(n) : NULL;
 }
 
 /* the record's decorated name; empty and *why set when no rule names it */
 static std::string record_key(tree t, std::string &why)
 {
+  if (!fnvnx_cxx_fe()) {   /* cc1: a C record has file scope and a name or none: `UP@@`, `TU@@` */
+    const char *n = c_record_name(t);
+    if (!n) { why = "unnamed C record"; return std::string(); }
+    return std::string(1, TREE_CODE(t) == UNION_TYPE ? 'T' : 'U') + n + "@@";
+  }
   M m;
   m.type_name(t);
   if (!m.why.empty()) { why = m.why; return std::string(); }
@@ -114,7 +130,12 @@ static std::string record_key(tree t, std::string &why)
   return std::string(1, c) + m.out;
 }
 
-static std::string itanium(tree t) { return mangle_type_string(t); }
+static std::string itanium(tree t)
+{
+  if (fnvnx_cxx_fe()) return mangle_type_string(t);
+  const char *n = c_record_name(t);   /* a C record is a file-scope class: <length><name> */
+  return n ? std::to_string(strlen(n)) + n : std::string("<unnamed>");
+}
 
 static std::string key_of(tree t, std::string &why)
 {
@@ -138,7 +159,7 @@ static void fields_of(tree t, HOST_WIDE_INT base_bits, std::vector<std::string> 
 {
   for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f)) {
     if (TREE_CODE(f) != FIELD_DECL) continue;
-    if (DECL_FIELD_IS_BASE(f)) continue;
+    if (fnvnx_cxx_fe() && DECL_FIELD_IS_BASE(f)) continue;
     if (!tree_fits_shwi_p(bit_position(f))) { flags.insert("nokey:variable field offset"); continue; }
     HOST_WIDE_INT bp = base_bits + tree_to_shwi(bit_position(f));
     if (DECL_PACKED(f)) flags.insert("packed");
@@ -148,7 +169,7 @@ static void fields_of(tree t, HOST_WIDE_INT base_bits, std::vector<std::string> 
       if (is_vptr(f)) out.push_back("<vptr>:" + std::to_string(bp / 8) + ":" + std::to_string(size_unit(TREE_TYPE(f))));
       continue;
     }
-    if (!DECL_NAME(f) && RECORD_OR_UNION_TYPE_P(TREE_TYPE(f)) && ANON_AGGR_TYPE_P(TREE_TYPE(f)) && !DECL_C_BIT_FIELD(f)) {
+    if (!DECL_NAME(f) && RECORD_OR_UNION_TYPE_P(TREE_TYPE(f)) && (!fnvnx_cxx_fe() || ANON_AGGR_TYPE_P(TREE_TYPE(f))) && !DECL_C_BIT_FIELD(f)) {
       fields_of(TYPE_MAIN_VARIANT(TREE_TYPE(f)), bp, out, flags, index);
       continue;
     }
@@ -175,7 +196,7 @@ static bool alignment_altered(tree t)
     tree ft = DECL_C_BIT_FIELD(f) && DECL_BIT_FIELD_TYPE(f) ? DECL_BIT_FIELD_TYPE(f) : TREE_TYPE(f);
     nat = MAX(nat, TYPE_ALIGN(ft));
   }
-  vec<tree, va_gc> *vbs = CLASS_TYPE_P(t) ? CLASSTYPE_VBASECLASSES(t) : NULL;
+  vec<tree, va_gc> *vbs = fnvnx_cxx_fe() && CLASS_TYPE_P(t) ? CLASSTYPE_VBASECLASSES(t) : NULL;
   unsigned ix; tree vb;
   FOR_EACH_VEC_SAFE_ELT(vbs, ix, vb) nat = MAX(nat, TYPE_ALIGN(BINFO_TYPE(vb)));
   return TYPE_ALIGN(t) != nat;
@@ -210,7 +231,7 @@ static void close_over(tree t)
       add_type(ft);
       (void)before;
     }
-  if (TYPE_BINFO(t)) {
+  if (fnvnx_cxx_fe() && TYPE_BINFO(t)) {
     tree b; int i;
     for (i = 0; BINFO_BASE_ITERATE(TYPE_BINFO(t), i, b); i++) add_type(BINFO_TYPE(b));
   }
@@ -223,7 +244,7 @@ static void finish_unit_cb(void *, void *)
   for (size_t i = 0; i < found.size(); i++) {
     tree t = found[i];
     if (!COMPLETE_TYPE_P(t) || !RECORD_OR_UNION_TYPE_P(t)) continue;
-    if (CLASS_TYPE_P(t) && uses_template_parms(t)) continue;
+    if (fnvnx_cxx_fe() && CLASS_TYPE_P(t) && uses_template_parms(t)) continue;
     if (!tree_fits_uhwi_p(TYPE_SIZE_UNIT(t))) continue;
     std::string why;
     std::string key = key_of(t, why);
@@ -235,7 +256,7 @@ static void finish_unit_cb(void *, void *)
     std::vector<std::string> fields, bases;
     int index = 0;
     fields_of(t, 0, fields, flags, index);
-    if (CLASS_TYPE_P(t) && TYPE_BINFO(t)) {
+    if (fnvnx_cxx_fe() && CLASS_TYPE_P(t) && TYPE_BINFO(t)) {
       std::set<tree> direct;
       tree b; int k;
       for (k = 0; BINFO_BASE_ITERATE(TYPE_BINFO(t), k, b); k++) {
@@ -277,7 +298,14 @@ extern "C" int plugin_init(struct plugin_name_args *info, struct plugin_gcc_vers
     error("%<fnvnx_layout%>: built for GCC %s, loaded by %s", gcc_version.basever, version->basever);
     return 1;
   }
-  if (!fnvnx_cxx_fe()) return 0;   /* cc1 (C): the key is MSVC's name of a C++ record; C has none of its trees (cpweak.h) */
+  if (!fnvnx_cxx_fe()) {   /* cc1 (C): the layout of every C struct and union; no C++ trees, no class-key reports (cpweak.h) */
+    register_callback(info->base_name, PLUGIN_REGISTER_GGC_ROOTS, NULL, (void *)keep_roots);
+    register_callback(info->base_name, PLUGIN_FINISH_DECL, finish_decl_cb, NULL);
+    register_callback(info->base_name, PLUGIN_FINISH_TYPE, finish_type_cb, NULL);
+    register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, pre_genericize_cb, NULL);
+    register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit_cb, NULL);
+    return 0;
+  }
   /* the name rules need the class-key reports and the scope numbers of toolchain/names */
   register_callback(info->base_name, PLUGIN_REGISTER_GGC_ROOTS, NULL, (void *)keep_roots);
   register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);
