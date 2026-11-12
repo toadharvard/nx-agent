@@ -93,7 +93,7 @@ static void fpu_to_fpux(u8 *g, const u8 *f) {
     g[X_FTW] = (u8)tag;
 }
 /* load the x87 part of the image (always) and the SSE part (sse): the exact inverse of fx_capture. FCW goes through FLDCW (the host rounding mode follows), the sticky flags REPLACE the x87 set like
-   FRSTOR (fx_env_ld) and the SSE set like LDMXCSR; FOP, FCS and FDS are derived values (ASM-315, ASM-314 of rt/fnvl_x87.h), not stored. */
+   FRSTOR (fx_env_ld) and the SSE set like LDMXCSR; FOP, FCS and FDS are derived values (ASM-214, ASM-213 of rt/fnvl_x87.h), not stored. */
 static void fx_restore(const u8 *g, int sse) {
     u32 fsw = g16(g, X_FSW), top = (fsw >> 11) & 7, tag = g[X_FTW];
     FLDCW(g16(g, X_FCW)); c->ftop = top; c->fex = (c->fex & ~FEX_X87) | (fsw & FEX_X87); if (fown() == 1u) fnvl_fp_x87_clear();

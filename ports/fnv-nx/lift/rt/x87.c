@@ -297,7 +297,7 @@ u32 fnvl_x_xam(fnvl_f80 a, u32 empty)
 }
 
 /* ---- packed BCD (fbld / fbstp): 18 digits, nibble i = digit 10^i, bit 79 = sign ----
-   ASM-317 (assumption): a nibble above 9 in fbld is not an error on the hardware (SDM: "undefined"); the value is the arithmetic sum of nibble * 10^i, which is what the loop below
+   ASM-216 (assumption): a nibble above 9 in fbld is not an error on the hardware (SDM: "undefined"); the value is the arithmetic sum of nibble * 10^i, which is what the loop below
    computes (at most 15 * (10^18 - 1) / 9 < 2^63, so the integer is exact). Bits 78:72 of the sign byte are ignored. fbstp: round per RC, NaN / infinity / unsupported / |x| >= 10^18 store the
    packed-BCD indefinite FFFF C000 0000 0000 0000 and set IE. */
 fnvl_f80 fnvl_x_from_bcd(const u8 *p)

@@ -56,7 +56,7 @@ def run(cases, work=WORK, tag=1000):
     os.makedirs(work, exist_ok=True)
     img = XE.FImage('/home/user/game/FalloutNV.exe')
     from fnvlift import fpfacts
-    fpfacts.ASSUME.update(('ASM-305', 'ASM-306'))
+    fpfacts.ASSUME.update(('ASM-204', 'ASM-205'))
     T.G.update(L=fnvlift, img=img, work=work)
     T.runtime_objects(work, os.path.dirname(HERE))
     bad = 0
