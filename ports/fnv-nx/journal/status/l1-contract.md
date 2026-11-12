@@ -398,3 +398,10 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - w18 allocsites 841d1b5 accepted: 70 sites over 6 images, 5 const size. 02911752: escape/writes tables were never passed to memfx before.
   - w18 bumps contract_inputs to manifest 07d79c5 and adds the CRT allocators by interprocedural return-flow.
   - Forwarded to the L3a lead.
+
+## 2026-11-12 04:12Z
+- New L1 link gate `tlsmodel` (w10, after link.kind/roots), from L3a:
+  - 0 TLSGD and 0 TLSDESC;
+  - LE only for TLS defined in the same output, IE for host TLS;
+  - a declared initial-exec symbol reached by any other kind is red.
+- gmpy2 pin added to w17's env.json python item (L3a w8 names the importer).
