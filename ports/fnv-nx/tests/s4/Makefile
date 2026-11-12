@@ -185,6 +185,7 @@ dynsites-check: probe
 regsites-check:
 	python3 -I $(ROOT)/platform/manifest/check_regsites.py
 	python3 -I $(ROOT)/platform/manifest/check_filesites.py
+	python3 -I $(ROOT)/platform/manifest/check_macrodefs.py
 	python3 -I $(ROOT)/platform/manifest/check_gen_registry.py
 	python3 -I $(ROOT)/platform/manifest/check_gen_prefs.py
 
