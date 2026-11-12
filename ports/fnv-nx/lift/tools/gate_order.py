@@ -2,9 +2,11 @@
 """Gates "order", "addrwrap" and "align" (fnvnx-gate/1) on the compiled objects of the lifted pack: classes B and F of the
 owner orders (docs/ORDERING.md "Lifted code") and the alignment fault of the ordered instructions.
     python3 -I gate_order.py RTOBJ OBJ... [--asm OBJ]...        env GATE_OUT (result dir), JOBS
-RTOBJ  the runtime object of rt/enter.c: its 4-byte object symbol fnvnx_lift_cpu_bytes holds sizeof(struct cpu).
-OBJ    an ELF32 AArch64 object or a directory of *.o. Every object linked into the lifted image is given, the runtime ones too.
+RTOBJ  the runtime object of rt/enter.c: read only for its 4-byte object symbol fnvnx_lift_cpu_bytes (sizeof(struct cpu)); it is not judged.
+OBJ    an ELF32 AArch64 object or a directory of *.o: the objects of the roots whose admit cxx_origin is lifted (ASM-202: L1's build
+       manifest lists them). The universe is these objects only; native objects (rt's C/C++ units) are closed by fnvnx_order.
 --asm  an object whose source is assembler (the build manifest says which); it is gated like the others and also by rule (c) below.
+rows(rtobj, lifted, asm) / run(...) take the same split: the lifted objects (judged) and the runtime object (read only for the size).
 Every instruction of every executable section of every object is decoded (capstone). The gate decides from the decoded
 operands, the encodings and the relocation records only; no symbol name (other than fnvnx_lift_cpu_bytes of RTOBJ) and no
 source text is read.
@@ -19,8 +21,8 @@ Base classes. A forward dataflow over the control-flow graph of each section giv
   FRAME  sp, and a register copied from sp or sp plus a constant. sp may only change by a constant, by a copy from a FRAME
          register, or by its own writeback (checked).
   IMAGE  the result of adrp / adr, a constant added to it, or a load that carries a GOT relocation: an address of the
-         linked image. adrp followed by add :lo12: of the same symbol of a non-executable PROGBITS section of the object
-         is the address of that datum, and the number of bytes from it to the end of its section is known.
+         linked image. adrp followed by add :lo12: of the same symbol is the address of that datum, and the section of the
+         relocation target (its flags: SHF_WRITE, its alignment, the number of bytes from the datum to its end) is known.
   GUEST  everything else, and every join of different classes. At a function entry (STT_FUNC) only x27 is CPU; a call
          leaves x0-x18 and x30 GUEST and the other registers as they were (AAPCS64; the objects are compiled with
          -fno-ipa-ra). A block no entry reaches starts with x27 = CPU and everything else GUEST.
@@ -35,11 +37,18 @@ it is
   - an ordered instruction (ldar* / stlr* / ldaxr* / stlxr* / ldaxp / stlxp), or
   - a plain store with `dmb ishst` or `dmb ish` earlier in its basic block and no guest access or call between, or
   - a plain load with `dmb ishld` or `dmb ish` later in its basic block and no guest access, call or block end between.
-Host accesses that pass (not in the universe): FRAME base plus constant; IMAGE base plus constant, loads and ordered
-stores only; an IMAGE load with an index register when the base is the address of a datum and bound(index) << shift plus
-the access size fits before the end of its section; CPU base plus constant when [lo + disp, hi + disp + size] lies inside
-struct cpu. Every other host access is red: an index on a CPU or FRAME base, an IMAGE store, a CPU access not proven
-inside struct cpu, a writeback on a CPU base.
+Host accesses that pass (not in the universe): FRAME base plus constant; an IMAGE load whose target section is read-only (no
+SHF_WRITE in the section header of the relocation target) and which lies inside it: a constant displacement within the bytes
+from the datum to the end of the section, an index register when bound(index) << shift plus the access size fits there, or an
+`ldr :lo12:` of the page's symbol; the load of a GOT entry; CPU base plus constant when [lo + disp, hi + disp + size] lies
+inside struct cpu. A W-form copy of x27, and a W-form add of a CPU value and a bounded value, are CPU with the same interval
+(an ILP32 object: x27 is a 32-bit pointer, ASM-007, and struct cpu lies below 2^32, ASM-201, so the sum cannot wrap; an
+interval that exceeds sizeof(struct cpu) is GUEST). An IMAGE access into a writable section, an unknown target, a store, a
+writeback, or a read-only access not proven inside its section is a guest access: it must be ordered like any other (its address
+is a 32-bit link-time address of an ILP32 object, ASM-007; it is aligned iff the datum's offset and the section's alignment are
+multiples of the access size). Every other host access is red: an index on a CPU or FRAME base, a CPU access not proven inside
+struct cpu, a writeback on a CPU base. The two checks that make the CPU class a host class are counted globally and always
+reported: x27_writes (must be 0) and cpu_outside_struct (must be 0), with cpu_accesses_inside_struct.
 Rule violations (red, counted as rule_violations): a write of x27; a write of sp other than the three forms above; an
 X-form write of a guest register x19-x26 whose result is not proven below 2^32; a writeback of a guest register;
 `dc`/`ic`/`sys` and LSE instructions; a memory operand without a general base register; a branch out of its section other
@@ -54,7 +63,17 @@ Assembler objects (rule (c)): an object given with --asm is also held to this: e
 exit (ret, br, a relocated or out-of-range b, falling into the next symbol). The proof is a forward dataflow per function (asmcheck): a
 register holds its value at entry again only by a reload of the 8-byte slot (4-byte for x19-x26) that an `str`/`stp` through sp or a frame
 address filled with it, at the same constant offset from the entry sp, and sp comes back to its entry value. Code that no STT_FUNC range
-covers is red. Jump-table or loaded-code-pointer `br` (rule (b)) is not checked here: ORDERING.md has no rule for which `br` forms are legal.
+covers is red. The rule discharges the assumption of AAPCS64 for hand-written assembler (ASM-200); for compiler output it stays ASM-001.
+
+Indirect branches (rule (b)): a forward dataflow gives every register the set of load classes its value derives from on some
+path (a load gives its class, any other instruction the union of the registers it reads, a call clears x0-x18 and x30). A
+`br`/`blr` whose target register derives from a load is in the universe (one row, tag br). It is certified iff every load
+it derives from is an IMAGE load from a read-only section with a proven bound whose every word of the bounded range carries a
+relocation to an executable section (so the targets are statically the relocated code addresses). Red: a target loaded from a
+writable or unknown section, from CPU, FRAME or GUEST memory, from a range not proven inside the section, or with a word without
+a relocation to code. A target with no load in the function (an argument, a call result) is not in the universe: it is the
+dispatcher's and the caller's business. Counted globally by class: br_target_from_a_load, br_table_target, br_from_cpu,
+br_from_frame, br_from_guest, br_from_image_writable_or_unknown, br_from_image_unbounded_or_unrelocated.
 
 addrwrap (F). Universe: as order. A guest access is certified iff the operand is the base register alone (no displacement,
 no index, no writeback) and the base holds a 32-bit value: on every path its last writer is a W-form instruction, a copy
@@ -65,8 +84,11 @@ align. Universe: the ordered guest accesses wider than a byte (they fault on a m
 path to the access a branch on `tst base, #(size-1)` (or tbz bit 0 for size 2) took the zero edge and the base value did
 not change since, or the base is a constant that is a multiple of the size.
 
-Assumptions (docs/ORDERING.md "Lifted code" states them with their sources): AAPCS64 call clobbers; x27 points at a
-struct cpu of fnvnx_lift_cpu_bytes bytes; every object of the image passes this gate.
+The assumptions it rests on are registered (verify/ASSUMPTIONS.json): ASM-001 (the compiler: AAPCS64 call clobbers of compiler
+output, -fno-ipa-ra), ASM-200 (AAPCS64 of hand-written assembler, discharged by rule (c)), ASM-201 (layout: x27 points at a
+struct cpu of fnvnx_lift_cpu_bytes bytes below 2^32, host mappings disjoint from guest ones), ASM-202 (every object of the
+lifted roots is given), ASM-007 (ILP32), ASM-043 (the decoder, capstone) and ASM-045 (its write sets; rule (a) adds the
+encoding's destination fields).
 
 Exit 0 iff all three results are green."""
 import json
@@ -101,13 +123,13 @@ def elf(path):
     cstr = lambda tab, o: b[tab + o:b.index(b'\0', tab + o)].decode()
     names = [cstr(sh[shstr][4], s[0]) for s in sh]
     out = {i: [names[i], b[s[4]:s[4] + s[5]], {}, [], [], []] for i, s in enumerate(sh) if s[1] == 1 and s[2] & 4}
-    syms = {}
+    syms = {}; drel = {}        # drel: {section: {offset: (reloc type, the target is in an executable section)}} for every section
     for s in sorted(sh, key=lambda s: s[1] != 2):
         if s[1] == 2:                                                   # SHT_SYMTAB
             marks = {}
             for k in range(s[5] // 16):
                 nm, val, _sz, info, _o, shndx = struct.unpack_from('<IIIBBH', b, s[4] + 16 * k)
-                if 0 < shndx < shnum and sh[shndx][1] == 1 and not sh[shndx][2] & 4: syms[k] = (shndx, val, sh[shndx][5])   # defined in a PROGBITS data section
+                if 0 < shndx < shnum: syms[k] = (shndx, val, sh[shndx][5], bool(sh[shndx][2] & 1), sh[shndx][8], bool(sh[shndx][2] & 4))   # defined in a section: (section, offset, size, SHF_WRITE, alignment, SHF_EXECINSTR)
                 if shndx not in out: continue
                 n = cstr(sh[s[6]][4], nm)
                 if info & 15 == 2: out[shndx][3].append(val); out[shndx][5].append((val, n, _sz))
@@ -116,12 +138,14 @@ def elf(path):
                 m.sort(); end = len(out[i][1])
                 for (v, k), nx in zip(m, m[1:] + [(end, 'x')]):
                     if k == 'd' and nx[0] > v: out[i][4].append((v, nx[0]))
-        if s[1] == 4 and s[7] in out:                                   # SHT_RELA
+        if s[1] == 4:                                                   # SHT_RELA
             for k in range(s[5] // 12):
                 off, info, add = struct.unpack_from('<IIi', b, s[4] + 12 * k)
-                y = syms.get(info >> 8)         # the target: (section, offset, bytes from the target to the section end)
-                out[s[7]][2][off] = (info & 0xff, (y[0], y[1] + add, y[2] - y[1] - add) if y and 0 <= y[1] + add < y[2] else None)
-    return [tuple(v) for _, v in sorted(out.items())]
+                y = syms.get(info >> 8)
+                drel.setdefault(s[7], {})[off] = (info & 0xff, bool(y and y[5]))
+                if s[7] not in out: continue         # the target: (section, offset, bytes from the target to the section end, the section is SHF_WRITE, section alignment)
+                out[s[7]][2][off] = (info & 0xff, (y[0], y[1] + add, y[2] - y[1] - add, y[3], y[4]) if y and 0 <= y[1] + add < y[2] else None)
+    return [tuple(v) + (drel,) for _, v in sorted(out.items())]
 
 
 def regno(name):
@@ -179,7 +203,7 @@ def gprwrites(w):
 
 
 class Ins:
-    __slots__ = ('a', 'txt', 'wr', 'fl', 'kind', 'arg', 'mem', 'term', 'bar', 'call', 'bad', 'wbbase', 'x', 'asz', 'sreg', 'srcs', 'img', 'ix', 'post', 'rd')
+    __slots__ = ('a', 'txt', 'wr', 'fl', 'kind', 'arg', 'mem', 'term', 'bar', 'call', 'bad', 'wbbase', 'x', 'asz', 'sreg', 'srcs', 'img', 'ix', 'post', 'rd', 'own')
 
 
 def decode(md, code, relocs, data):
@@ -193,7 +217,7 @@ def decode(md, code, relocs, data):
             if isdata(ci.address): break
             got = True; pos = ci.address + 4
             i = Ins(); i.a = ci.address; m = ci.mnemonic; i.txt = m + ' ' + ci.op_str
-            i.kind = i.arg = i.mem = i.term = i.bar = i.bad = i.wbbase = i.x = i.asz = i.sreg = i.img = i.ix = i.post = None; i.srcs = (); i.call = False
+            i.kind = i.arg = i.mem = i.term = i.bar = i.bad = i.wbbase = i.x = i.asz = i.sreg = i.img = i.ix = i.post = i.own = None; i.srcs = (); i.call = False
             ops = ci.operands
             _rd, wrs = ci.regs_access()
             i.rd = frozenset(g[0] for g in (regno(ci.reg_name(r)) for r in _rd) if g)
@@ -207,6 +231,7 @@ def decode(md, code, relocs, data):
             imm = lambda k: ops[k].imm if len(ops) > k and ops[k].type == A.ARM64_OP_IMM else None
             rel, rtgt = relocs.get(ci.address, (None, None))
             if rel in (R_PG_HI21, R_ADD_LO12): i.img = (rel, rtgt)
+            elif rel is not None: i.own = (rel, rtgt)
             if m in ('dc', 'ic', 'sys', 'sysl'): i.bad = 'system instruction'
             if m.startswith(LSE): i.bad = 'LSE instruction'
             if m == 'dmb': i.bar = ci.op_str.strip()
@@ -440,7 +465,7 @@ def analyse(path):
 
     def glob(why, ins): tick('rule_violations'); red('order', ins, why, 'rule')
 
-    for sname, code, relocs, funcs, data, fsyms in elf(path):
+    for sname, code, relocs, funcs, data, fsyms, drel in elf(path):
         cur[0] = sname; cur[1] = fsyms
         L, badoff = decode(md, code, relocs, data)
         if L is None:
@@ -465,7 +490,7 @@ def analyse(path):
         blocks = [(at[a], at[starts[n + 1]] if n + 1 < len(starts) else len(L)) for n, a in enumerate(starts)]
 
         def top(n):         # the most conservative state: valid at any program point
-            return [[GUEST] * 31, [False] * 19 + [True] * 8 + [False] * 4, [1] * 31, [(3 << 40) | (n << 5) | r for r in range(31)], None, [None] * 31, [None] * 31, [None] * 31, [None] * 31, {}, NEG]
+            return [[GUEST] * 31, [False] * 19 + [True] * 8 + [False] * 4, [1] * 31, [(3 << 40) | (n << 5) | r for r in range(31)], None, [None] * 31, [None] * 31, [None] * 31, [None] * 31, {}, NEG, [0] * 31]
 
         def entry(n):
             s = top(n); s[0][27] = CPU; s[7][27] = (0, 0); s[10] = None; return s
@@ -493,20 +518,73 @@ def analyse(path):
                 a, b = cur[9][k], inc[9].get(k)
                 if b is None: del cur[9][k]; ch = True
                 elif a != b: cur[9][k] = (min(a[0], b[0]), max(a[1], b[1])); ch = True
+            for r in range(31):
+                if cur[11][r] | inc[11][r] != cur[11][r]: cur[11][r] |= inc[11][r]; ch = True
             e = inc[10] if cur[10] is None else cur[10] if inc[10] is None else min(cur[10], inc[10])
             if e != cur[10]: cur[10] = e; ch = True
             return ch
+
+        def imgro(s, ins):
+            """an IMAGE load -> ('ro', (section, offset, stride, count)): the words it can read, in a read-only section and inside it;
+            ('bound', None): read-only section, not proven inside it; ('other', None): writable or unknown target, a store, a writeback"""
+            base, idx, disp, wb, store, _sz = ins.mem; st = s[7][base]
+            if store or wb or not ins.asz or not st: return 'other', None
+            if st[0] == 'at':
+                if st[2]: return 'other', None
+                if not idx:
+                    return ('ro', (st[5], st[3] + disp, 1, 1)) if 0 <= disp and disp + ins.asz <= st[1] else ('bound', None)
+                if ins.ix:
+                    rm, eb, sgn, sh = ins.ix; v = s[6][rm]; v = (1 << eb) - 1 if v is None else min(v, (1 << eb) - 1)
+                    if not (sgn and v >= 1 << (eb - 1)) and (v << sh) + ins.asz <= st[1]: return 'ro', (st[5], st[3], 1 << sh, v + 1)
+                    return 'bound', None
+                return 'other', None
+            if st[0] == 'pg' and ins.own and not idx and ins.own[1] and ins.own[1][:2] == st[1][:2]:          # ldr :lo12: of the page's symbol
+                t = ins.own[1]
+                if t[3]: return 'other', None
+                return ('ro', (t[0], t[1], 1, 1)) if ins.asz <= t[2] else ('bound', None)
+            return 'other', None
+
+        BR = {'br', 'blr', 'braa', 'braaz', 'brab', 'brabz', 'blraa', 'blraaz', 'blrab', 'blrabz'}
+        BRCLS = ((2, 'cpu'), (4, 'frame'), (8, 'guest'), (16, 'image_writable_or_unknown'), (32, 'image_unbounded_or_unrelocated'))
+
+        def loadmask(s, ins):
+            """provenance bit of a loaded value: 1 a word of a bounded read-only image table, all relocated to executable sections; 2 cpu; 4 frame; 8 guest;
+            16 image, writable or unknown target; 32 image, read-only but not proven inside the table or a word without a relocation to code"""
+            base = ins.mem[0]; c = FRAME if base == SP else s[0][base]
+            if c == CPU: return 2
+            if c == FRAME: return 4
+            if c == GUEST: return 8
+            if ins.kind == 'image': return 16
+            k, pos = imgro(s, ins)
+            if k == 'other': return 16
+            if k == 'bound' or ins.asz not in (4, 8): return 32
+            sec, off, stride, count = pos
+            return 1 if all(drel.get(sec, {}).get(off + i * stride, (0, False))[1] for i in range(count)) else 32
+
+        def brcheck(ins, m):
+            tick('br_indirect')
+            if not m: tick('br_target_not_from_a_load'); return          # an argument or a call result: the dispatcher's and the caller's business
+            item('order', ins, 'br'); tick('br_target_from_a_load')
+            if m == 1: tick('br_table_target'); return
+            names = [nm for bit, nm in BRCLS if m & bit]
+            for nm in names: tick('br_from_' + nm)
+            tick('rule_violations'); red('order', ins, 'the target of an indirect branch is loaded from ' + ', '.join(names), 'br')
 
         def step(s, ins, check):
             cls, wc, al, vn, kc, ub, off = s[0], s[1], s[2], s[3], s[5], s[6], s[7]
             fo, slots = s[8], s[9]
             if check and ins.mem: checkmem(s, ins)
+            pv = s[11]; ld = loadmask(s, ins) if ins.mem and not ins.mem[4] else 0
+            pin = 0
+            for r in ins.rd:
+                if r < 31: pin |= pv[r]
+            if ins.txt.split()[0] in BR and check: brcheck(ins, pin)
             if ins.call:
                 for r in range(19):          # a frame address in a call-clobbered register is handed to the callee
                     if cls[r] == FRAME: s[10] = NEG if fo[r] is None else fo[r] if s[10] is None else min(s[10], fo[r])
                 if s[10] is not None:        # a callee may write at and above every frame address that escaped
                     for k in [k for k in slots if k + 8 > s[10]]: del slots[k]
-                for r in list(range(19)) + [30]: cls[r] = GUEST; wc[r] = False; al[r] = 1; vn[r] = (1 << 40) | (ins.a << 5) | r; kc[r] = None; ub[r] = None; off[r] = None
+                for r in list(range(19)) + [30]: pv[r] = 0; cls[r] = GUEST; wc[r] = False; al[r] = 1; vn[r] = (1 << 40) | (ins.a << 5) | r; kc[r] = None; ub[r] = None; off[r] = None
                 s[4] = None; return
             # unsigned bound of the result (nub) and, for a struct cpu address, its offset interval (noff), from the state before the instruction
             W32 = 0xffffffff
@@ -518,7 +596,7 @@ def analyse(path):
             elif x and x[0] == 'ub': nub = x[1]
             if ins.img and ins.img[1]:      # adrp then add :lo12: of the same target: the register holds the target address
                 if ins.kind == 'image' and ins.img[0] == R_PG_HI21: ioff = ('pg', ins.img[1])
-                elif ins.kind == 'addi' and ins.img[0] == R_ADD_LO12 and ins.arg != SP and cls[ins.arg] == IMAGE and off[ins.arg] == ('pg', ins.img[1]): ioff = ('at', ins.img[1][2])
+                elif ins.kind == 'addi' and ins.img[0] == R_ADD_LO12 and ins.arg != SP and cls[ins.arg] == IMAGE and off[ins.arg] == ('pg', ins.img[1]): ioff = ('at', ins.img[1][2], ins.img[1][3], ins.img[1][1], ins.img[1][4], ins.img[1][0])
             elif x and x[0] == 'andi': nub = x[2] if val(x[1], bits) is None else min(x[2], val(x[1], bits))
             elif x and x[0] == 'ubfm':
                 _, sf, immr, imms, rn = x; rs = 64 if sf else 32; v = val(rn, rs); v = (1 << rs) - 1 if v is None else v
@@ -570,7 +648,7 @@ def analyse(path):
                     slots.clear(); s[8] = fo = [None] * 31
                     if s[10] is not None: s[10] = NEG
                     continue
-                if check and r == 27: glob('x27 written', ins)
+                if check and r == 27: tick('x27_writes'); glob('x27 written', ins)
                 fresh = (1 << 40) | (ins.a << 5) | r
                 if ins.wbbase == r:           # writeback of a guest base (a host base with writeback is red in checkmem, sp apart)
                     if check and 19 <= r <= 26: glob('writeback of a guest register', ins)
@@ -604,35 +682,42 @@ def analyse(path):
                 if check and 19 <= r <= 26 and not w and not wc[r]: glob('X-form write of a guest register not proven below 2^32', ins)
                 fo[r] = None
                 if cls[r] == FRAME: fo[r] = nfo
+            for r, w in ins.wr:                 # provenance of the written registers: a load gives its class, anything else the union of the registers it reads
+                if r != SP and r != ins.wbbase: pv[r] = ld if ld else pin
             if ins.kind == 'tst' and ins.arg[0] != SP: s[4] = (vn[ins.arg[0]], ins.arg[1])
             elif ins.fl: s[4] = None
 
         def checkmem(s, ins):
             base, idx, disp, wb, store, sz = ins.mem
             c = FRAME if base == SP else s[0][base]
-            if c != GUEST:
+            img = None                       # an IMAGE access: None for a proven read-only load (host); else a guest access, with the alignment proof
+            if c == IMAGE:
+                if ins.kind == 'image': tick('host_image_got'); return          # the load of a GOT entry: the linker's word, not data
+                k, pos = imgro(s, ins)
+                if k == 'ro': tick('host_image_table' if idx else 'host_image_ro'); return
+                st = s[7][base]
+                img = bool(st and st[0] == 'at' and not (idx or disp or wb) and sz > 1 and st[3] % sz == 0 and st[4] % sz == 0)
+            if c != GUEST and c != IMAGE:
                 tick('host_' + CLS[c])
-                if c == CPU and not idx and not (wb or ins.asz is None or s[7][base][0] + disp < 0 or s[7][base][1] + disp + ins.asz > CPUSIZE): return
+                if c == CPU and not idx and not (wb or ins.asz is None or s[7][base][0] + disp < 0 or s[7][base][1] + disp + ins.asz > CPUSIZE): tick('cpu_accesses_inside_struct'); return
                 if c == CPU and not idx:
-                    item('order', ins); item('addrwrap', ins)
+                    tick('cpu_outside_struct'); item('order', ins); item('addrwrap', ins)
                     red('order', ins, 'an access through the cpu pointer not proven inside struct cpu'); red('addrwrap', ins, 'an access through the cpu pointer not proven inside struct cpu'); return
-                if c == IMAGE and idx and not store and ins.ix and ins.asz and s[7][base] and s[7][base][0] == 'at':
-                    rm, eb, sgn, sh = ins.ix; v = s[6][rm]; v = (1 << eb) - 1 if v is None else min(v, (1 << eb) - 1)
-                    if not (sgn and v >= 1 << (eb - 1)) and (v << sh) + ins.asz <= s[7][base][1]: tick('host_image_table'); return
-                if idx or (c == IMAGE and store and not sz):
+                if idx:
                     item('order', ins); item('addrwrap', ins)
-                    red('order', ins, 'a %s base with %s' % (CLS[c], 'an index register' if idx else 'a plain store'))
-                    red('addrwrap', ins, 'a %s base with an index register' % CLS[c] if idx else 'a plain store through an image base')
+                    red('order', ins, 'a %s base with an index register' % CLS[c])
+                    red('addrwrap', ins, 'a %s base with an index register' % CLS[c])
                 return
             tick('guest_store' if store else 'guest_load')
+            if c == IMAGE: tick('guest_image')       # an IMAGE access that is not a proven read-only load is a guest access
             item('order', ins); item('addrwrap', ins)
             if sz: tick('guest_ordered')
             gacc[id(ins)] = not sz
             if idx or disp or wb: red('addrwrap', ins, 'the operand is not the base register alone')
-            elif not s[1][base]: red('addrwrap', ins, 'the base is not proven a 32-bit value')
+            elif not s[1][base] and c != IMAGE: red('addrwrap', ins, 'the base is not proven a 32-bit value')       # an IMAGE address of an ILP32 object is a 32-bit link-time address (ASM-007)
             if sz > 1:
                 item('align', ins)
-                if not (s[2][base] >= sz and not (idx or disp or wb)): red('align', ins, 'no alignment test of %d bytes dominates the access' % sz)
+                if not (not (idx or disp or wb) and (img if c == IMAGE else s[2][base] >= sz)): red('align', ins, 'no alignment test of %d bytes dominates the access' % sz)
 
         def edges(n, s):
             """successor states of block n whose exit state is s"""
@@ -659,7 +744,7 @@ def analyse(path):
                 if s[3][r] == z[0] and s[2][r] < z[1]: s[2][r] = z[1]
             return s
 
-        copy = lambda s: [list(s[0]), list(s[1]), list(s[2]), list(s[3]), s[4], list(s[5]), list(s[6]), list(s[7]), list(s[8]), dict(s[9]), s[10]]
+        copy = lambda s: [list(s[0]), list(s[1]), list(s[2]), list(s[3]), s[4], list(s[5]), list(s[6]), list(s[7]), list(s[8]), dict(s[9]), s[10], list(s[11])]
         state = [None] * len(blocks); work = []
         for f in sorted(lead & set(funcs)) or starts[:1]:
             n = bidx[f]; e = entry(n)
@@ -702,14 +787,14 @@ def analyse(path):
     return res
 
 
-def run(rtobj, objs, asm=()):
+def run(rtobj, lifted, asm=()):
     """-> ({gate: [(object stem, 'FUNC+0xOFF', reason)]}, {counter: n}, number of objects). Every row is one universe item, sorted;
     a certified row has reason ''. The verdict is computed from these rows only (verdict)."""
     files = []; asm = frozenset(os.path.abspath(a) for a in asm); init(cpusize(rtobj), asm)
-    for a in objs:
+    for a in lifted:
         files += sorted(os.path.join(a, f) for f in os.listdir(a) if f.endswith('.o')) if os.path.isdir(a) else [a]
     files = list(dict.fromkeys(files))
-    rows = {g: [] for g in GATES}; n = {}
+    rows = {g: [] for g in GATES}; n = {k: 0 for k in ('x27_writes', 'cpu_outside_struct', 'cpu_accesses_inside_struct', 'rule_violations')}     # the global counts of the two CPU-class checks are always reported
     with multiprocessing.Pool(int(os.environ.get('JOBS', '0')) or os.cpu_count(), init, (CPUSIZE, asm)) as pool:
         for r in pool.imap(analyse, files, chunksize=4):
             for g in GATES: rows[g] += r['rows'][g]
@@ -717,10 +802,10 @@ def run(rtobj, objs, asm=()):
     return {g: sorted(v) for g, v in rows.items()}, n, len(files)
 
 
-def rows(rtobj, objs, asm=()):
+def rows(rtobj, lifted, asm=()):
     """-> {'order': [...], 'addrwrap': [...], 'align': [...]}: for each gate, the sorted (object stem, 'FUNC+0xOFF', reason) of every
     universe item; reason '' is a certified item. FUNC is the containing STT_FUNC symbol, a label of the report and no input of a decision."""
-    return run(rtobj, objs, asm)[0]
+    return run(rtobj, lifted, asm)[0]
 
 
 def verdict(g, rws, n):
@@ -739,7 +824,7 @@ def main(argv):
         green, u, c, bad = verdict(g, rws[g], n)
         counts = ', '.join('%s %d' % kv for kv in sorted(n.items()))
         res = {'format': 'fnvnx-gate/1', 'name': g, 'status': 'green' if green else 'red', 'universe': u, 'certified': c,
-               'uncertified': ['%s %s: %s' % r for r in bad[:50]],
+               'uncertified': ['%s %s: %s' % r for r in bad[:50]], 'counts': n,
                'detail': '%d objects; struct cpu %d bytes; %d of %d certified; %s' % (nfiles, CPUSIZE, c, u, counts) if nfiles else 'no object given'}
         with open(os.path.join(os.environ['GATE_OUT'], g + '.json'), 'w') as fh: json.dump(res, fh, sort_keys=True)
         print('%s %s %d/%d' % (g, res['status'], c, u), file=sys.stderr)

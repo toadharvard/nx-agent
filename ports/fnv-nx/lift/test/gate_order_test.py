@@ -5,7 +5,7 @@ import importlib.util, json, os, subprocess, sys, tempfile, unittest
 HERE = os.path.dirname(os.path.abspath(__file__)); GATE = os.path.join(os.path.dirname(HERE), 'tools', 'gate_order.py')
 AS = ['aarch64-linux-gnu-gcc', '-march=armv8.1-a', '-mabi=ilp32', '-c', '-x', 'assembler']
 RT = '.data\n.globl fnvnx_lift_cpu_bytes\n.type fnvnx_lift_cpu_bytes,%object\n.size fnvnx_lift_cpu_bytes,4\nfnvnx_lift_cpu_bytes: .word 536\n'
-FN = '.text\n.globl f\n.type f,%function\nf:\n{}\n.size f,.-f\n.section .rodata\ntab: .word 1,2,3,4\n'
+FN = '.text\n.globl f\n.type f,%function\nf:\n{}\n.size f,.-f\n.section .rodata\ntab: .word 1,2,3,4\n.data\n.balign 4\nwtab: .word 1,2,3,4\n.byte 0\nwodd: .word 5\n.lcomm bsym,4\n.section .rodata.c,"a"\nctab: .word f,f,f,f\n.section .rodata.u,"a"\nutab: .word f,5,f,f\n.data\n.balign 4\nwctab: .word f,f,f,f\n'
 G, R = 'green', 'red'
 # name: (body, order, addrwrap, align)
 CASES = {
@@ -50,16 +50,62 @@ CASES = {
     'spill_across_call':    ('stp x29,x30,[sp,#-32]!\n add x1,x27,#8\n str x1,[sp,#24]\n bl g\n ldr x1,[sp,#24]\n ldr w0,[x1]\n ldp x29,x30,[sp],#32\n ret', G, G, G),
     'spill_escaped_call':   ('stp x29,x30,[sp,#-32]!\n add x1,x27,#8\n str x1,[sp,#24]\n add x0,sp,#16\n bl g\n ldr x1,[sp,#24]\n ldr w0,[x1]\n ldp x29,x30,[sp],#32\n ret', R, R, G),
     'image_load':           ('adrp x0,tab\n add x0,x0,:lo12:tab\n ldr w0,[x0,#4]\n ret', G, G, G),
-    'image_store':          ('adrp x0,tab\n add x0,x0,:lo12:tab\n str w1,[x0]\n ret', R, R, G),
+    'image_store':          ('adrp x0,tab\n add x0,x0,:lo12:tab\n str w1,[x0]\n ret', R, G, G),       # a store is a guest access: no dmb ishst
     'image_table':          ('adrp x0,tab\n add x0,x0,:lo12:tab\n and w1,w1,#3\n ldr w0,[x0,x1,lsl #2]\n ret', G, G, G),
     'image_table_too_far':  ('adrp x0,tab\n add x0,x0,:lo12:tab\n and w1,w1,#7\n ldr w0,[x0,x1,lsl #2]\n ret', R, R, G),
     'image_table_unbound':  ('adrp x0,tab\n add x0,x0,:lo12:tab\n ldr w0,[x0,x1,lsl #2]\n ret', R, R, G),
+    'image_ro_lo12':        ('adrp x0,tab\n ldr w0,[x0,:lo12:tab]\n ret', G, G, G),
+    'image_ro_const_past_end': ('adrp x0,tab\n add x0,x0,:lo12:tab\n ldr w0,[x0,#16]\n ret', R, R, G),
+    'image_w_plain_load':   ('adrp x0,wtab\n add x0,x0,:lo12:wtab\n ldr w0,[x0]\n ret', R, G, G),
+    'image_w_load_dmb':     ('adrp x0,wtab\n add x0,x0,:lo12:wtab\n ldr w0,[x0]\n dmb ishld\n ret', G, G, G),
+    'image_w_lo12_load':    ('adrp x0,wtab\n ldr w0,[x0,:lo12:wtab]\n ret', R, G, G),
+    'image_w_ordered_load': ('adrp x0,wtab\n add x0,x0,:lo12:wtab\n ldar w0,[x0]\n ret', G, G, G),
+    'image_w_ordered_store': ('adrp x0,wtab\n add x0,x0,:lo12:wtab\n stlr w1,[x0]\n ret', G, G, G),
+    'image_w_ordered_misaligned': ('adrp x0,wodd\n add x0,x0,:lo12:wodd\n ldar w0,[x0]\n ret', G, G, R),
+    'image_w_ordered_byte': ('adrp x0,wodd\n add x0,x0,:lo12:wodd\n ldarb w0,[x0]\n ret', G, G, G),
+    'image_w_table':        ('adrp x0,wtab\n add x0,x0,:lo12:wtab\n and w1,w1,#3\n ldr w0,[x0,x1,lsl #2]\n ret', R, R, G),
+    'image_bss_load':       ('adrp x0,bsym\n add x0,x0,:lo12:bsym\n ldr w0,[x0]\n ret', R, G, G),
+    'image_bss_ordered':    ('adrp x0,bsym\n add x0,x0,:lo12:bsym\n ldaxr w0,[x0]\n ret', G, G, G),
+    'image_unknown_target': ('adrp x0,tab\n add x0,x0,#8\n ldr w0,[x0]\n ret', R, G, G),
+    'got_load':             ('adrp x0,:got:ext\n ldr w0,[x0,:got_lo12:ext]\n ldarb w1,[x0]\n ret', G, G, G),
     'join_cpu_guest':       ('mov x1,x27\n cbz w0,1f\n mov w1,w19\n1: ldr w0,[x1]\n ret', R, R, G),
     'lse':                  ('casal w0,w1,[x19]\n ret', R, G, G),
     'sys':                  ('dc zva,x19\n ret', R, G, G),
     'exclusive_pair':       ('tst w19,#3\n b.ne 2f\n1: ldaxr w0,[x19]\n stlxr w2,w1,[x19]\n cbnz w2,1b\n dmb ish\n2: ret', G, G, G),
 }
 
+# rule (b): an indirect branch whose target derives from a load is legal only from a bounded read-only image table of relocated code addresses
+CASES.update({
+    'br_table':            ('adrp x1,ctab\n add x1,x1,:lo12:ctab\n and w0,w0,#3\n ldr w1,[x1,x0,lsl #2]\n br x1', G, G, G),
+    'blr_table':           ('stp x29,x30,[sp,#-16]!\n adrp x1,ctab\n add x1,x1,:lo12:ctab\n and w0,w0,#3\n ldr w1,[x1,x0,lsl #2]\n blr x1\n ldp x29,x30,[sp],#16\n ret', G, G, G),
+    'br_table_const':      ('adrp x1,ctab\n add x1,x1,:lo12:ctab\n ldr w1,[x1,#8]\n br x1', G, G, G),
+    'br_table_lo12':       ('adrp x1,ctab\n ldr w1,[x1,:lo12:ctab]\n br x1', G, G, G),
+    'br_table_too_long':   ('adrp x1,ctab\n add x1,x1,:lo12:ctab\n and w0,w0,#7\n ldr w1,[x1,x0,lsl #2]\n br x1', R, R, G),
+    'br_table_unbound':    ('adrp x1,ctab\n add x1,x1,:lo12:ctab\n ldr w1,[x1,x0,lsl #2]\n br x1', R, R, G),
+    'br_table_unrelocated': ('adrp x1,utab\n add x1,x1,:lo12:utab\n and w0,w0,#3\n ldr w1,[x1,x0,lsl #2]\n br x1', R, G, G),
+    'br_table_unrelocated_const': ('adrp x1,utab\n add x1,x1,:lo12:utab\n ldr w1,[x1,#4]\n br x1', R, G, G),
+    'br_table_unrelocated_byte': ('adrp x1,ctab\n add x1,x1,:lo12:ctab\n and w0,w0,#3\n ldrb w1,[x1,x0]\n br x1', R, G, G),
+    'br_writable_table':   ('adrp x1,wctab\n add x1,x1,:lo12:wctab\n ldar w1,[x1]\n br x1', R, G, G),
+    'br_from_guest':       ('ldarb w1,[x19]\n br x1', R, G, G),
+    'blr_from_guest':      ('stp x29,x30,[sp,#-16]!\n ldarb w1,[x19]\n blr x1\n ldp x29,x30,[sp],#16\n ret', R, G, G),
+    'br_from_cpu':         ('ldr w1,[x27,#16]\n br x1', R, G, G),
+    'br_from_frame':       ('sub sp,sp,#16\n str x0,[sp]\n ldr x1,[sp]\n add sp,sp,#16\n br x1', R, G, G),
+    'br_derived':          ('ldarb w1,[x19]\n add x2,x1,#4\n br x2', R, G, G),
+    'br_one_path':         ('cbz w0,1f\n ldarb w1,[x19]\n1: br x1', R, G, G),
+    'br_mixed_table_guest': ('cbz w0,1f\n adrp x1,ctab\n add x1,x1,:lo12:ctab\n ldr w1,[x1,#4]\n b 2f\n1: ldarb w1,[x19]\n2: br x1', R, G, G),
+    'br_argument':         ('br x0', G, G, G),
+    'br_call_result':      ('stp x29,x30,[sp,#-16]!\n bl g\n ldp x29,x30,[sp],#16\n br x0', G, G, G),
+    'br_overwritten':      ('ldarb w1,[x19]\n mov x1,x0\n br x1', G, G, G),
+})
+# the CPU class through a W-form copy: x27 is a 32-bit pointer zero-extended (ILP32 object, ASM-007; struct cpu lies below 2^32, ASM-201)
+CASES.update({
+    'cpu_wform_copy':      ('mov w1,w27\n ldr w0,[x1,#16]\n ret', G, G, G),
+    'cpu_wform_add':       ('mov w1,w27\n ubfiz w2,w0,#4,#3\n add w2,w2,w1\n str wzr,[x2,#340]\n ret', G, G, G),
+    'cpu_wform_add_swapped': ('mov w1,w27\n ubfiz w2,w0,#4,#3\n add w2,w1,w2\n str wzr,[x2,#340]\n ret', G, G, G),
+    'cpu_wform_add_past_end': ('mov w1,w27\n ubfiz w2,w0,#4,#3\n add w2,w2,w1\n str wzr,[x2,#424]\n ret', R, R, G),
+    'cpu_wform_add_unbound': ('mov w1,w27\n add w2,w0,w1\n str wzr,[x2]\n ret', R, G, G),
+    'cpu_wform_copy_past_end': ('mov w1,w27\n str wzr,[x1,#536]\n ret', R, R, G),
+})
 CASES.update({     # rule (a): no write of x19-x27 but a guest-register write proven below 2^32; decided from the encoding's destination fields
     'wr_ldp_x_guest':      ('ldp x19,x20,[sp]\n ret', R, G, G),
     'wr_ldp_w_guest':      ('ldp w19,w20,[sp]\n ret', G, G, G),
@@ -321,6 +367,23 @@ class T(unittest.TestCase):
             if ci.mnemonic.startswith(LSE_FP_UNREPORTED): self.assertTrue(enc >= cap, ln)
             elif ci.mnemonic == 'stlur': self.assertEqual(enc, set(), ln)
             else: self.assertEqual(enc, cap, ln)
+    def test_global_counts_reported(self):
+        out = tempfile.mkdtemp(dir=self.root); o = self.asm('cnt', FN.format('ldr w0,[x27,#16]\n str w0,[x27,#532]\n ldr w0,[x27,#536]\n mov x27,x0\n ret'))
+        subprocess.run([sys.executable, '-I', GATE, self.rt, o], env=dict(os.environ, GATE_OUT=out, JOBS='1'), capture_output=True)
+        c = json.load(open(os.path.join(out, 'order.json')))['counts']
+        self.assertEqual((c['x27_writes'], c['cpu_outside_struct'], c['cpu_accesses_inside_struct']), (1, 1, 2))
+        o2 = self.asm('cnt0', FN.format('ldr w0,[x27,#16]\n ret')); out = tempfile.mkdtemp(dir=self.root)
+        subprocess.run([sys.executable, '-I', GATE, self.rt, o2], env=dict(os.environ, GATE_OUT=out, JOBS='1'), capture_output=True)
+        c = json.load(open(os.path.join(out, 'order.json')))['counts']
+        self.assertEqual((c['x27_writes'], c['cpu_outside_struct']), (0, 0))
+    def test_runtime_object_is_not_judged(self):      # the runtime object only gives sizeof(struct cpu); only the objects named as lifted are judged
+        bad = self.asm('judged', FN.format('mov x27,x0\n ret'))
+        self.assertEqual(self.gate([bad])['order']['status'], R)
+        self.assertEqual(self.gate([])['order']['status'], R)           # nothing judged: red (no universe)
+        rt_bad = self.asm('rt2', RT + '.text\n.globl h\n.type h,%function\nh: mov x27,x0\n ret\n.size h,.-h\n')
+        out = tempfile.mkdtemp(dir=self.root); ok = self.asm('okobj', FN.format('ret'))
+        r = subprocess.run([sys.executable, '-I', GATE, rt_bad, ok], env=dict(os.environ, GATE_OUT=out, JOBS='1'), capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
     def test_no_object_red(self):
         self.assertEqual([j['status'] for j in self.gate([]).values()], [R, R, R])
     def test_data_in_text_skipped_and_garbage_red(self):
