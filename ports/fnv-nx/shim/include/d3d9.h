@@ -479,6 +479,18 @@ struct IDirect3DDevice9Ex : public IDirect3DDevice9
     /* 133 */ FNVNX_D3D_METHOD(HRESULT, GetDisplayModeEx)(UINT swapchain_idx, D3DDISPLAYMODEEX *mode, D3DDISPLAYROTATION *rotation) = 0;
 };
 
+/* ---- IDirect3DShaderValidator9: undocumented (not in the SDK); the contract is read off its callers, d3dx9_31.dll / d3dx9_38.dll of the DirectX redist (the three call sites of each: render/d3d9/dev/x1_validator.h)
+ * and Wine 9.0 dlls/d3d9/d3d9_main.c (names, slot order). No IID is known from either source (D3DX never calls QueryInterface, Wine's QueryInterface answers E_NOINTERFACE to every iid): the table has `iid: null`.
+ * The callback is a stdcall function of the CALLER (a guest code address when the caller is the lifted game): file / line = the pair given to Instruction (NULL / -1: no source position), arg3 = message class
+ * (every D3DX callback: 1, 5 warning; 2, 6 error; others ignored), message_id (D3DX prints message_id + 5000), message text, context = the value given to Begin. Every D3DX callback returns 0. */
+typedef HRESULT (STDMETHODCALLTYPE *D3DSHADERVALIDATORCALLBACK)(const char *file, int line, DWORD_PTR arg3, DWORD_PTR message_id, const char *message, void *context);
+struct IDirect3DShaderValidator9 : public IUnknown
+{
+    /*   3 */ FNVNX_D3D_METHOD(HRESULT, Begin)(D3DSHADERVALIDATORCALLBACK callback, void *context, DWORD_PTR arg3) = 0;
+    /*   4 */ FNVNX_D3D_METHOD(HRESULT, Instruction)(const char *file, int line, const DWORD *tokens, unsigned int token_count) = 0;
+    /*   5 */ FNVNX_D3D_METHOD(HRESULT, End)() = 0;
+};
+
 /* ---- d3d9.dll exports (the engine resolves Direct3DCreate9/Ex through GetProcAddress; S4 maps them here) */
 extern "C" {
 FNVNX_D3D_TRACED IDirect3D9 *WINAPI Direct3DCreate9(UINT SDKVersion);
@@ -490,6 +502,8 @@ FNVNX_D3D_TRACED void WINAPI D3DPERF_SetRegion(D3DCOLOR col, LPCWSTR wszName);
 FNVNX_D3D_TRACED BOOL WINAPI D3DPERF_QueryRepeatFrame(void);
 FNVNX_D3D_TRACED void WINAPI D3DPERF_SetOptions(DWORD dwOptions);
 FNVNX_D3D_TRACED DWORD WINAPI D3DPERF_GetStatus(void);
+FNVNX_D3D_TRACED void WINAPI DebugSetMute(void);   /* D3DX calls it with one pushed word and removes it itself (caller-cleaned): the machine code of a 0-argument stdcall function is identical */
+FNVNX_D3D_TRACED IDirect3DShaderValidator9 *WINAPI Direct3DShaderValidatorCreate9(void);
 }
 
 #endif

@@ -5,7 +5,9 @@
 Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"path", "class", "gates", ["recipe"]}.
 Universe: every file git tracks below ports/fnv-nx (`git ls-files -z`), an item is its repo-relative path.
 A file is certified iff ALL hold:
-  1. exactly one root contains it (a root is a directory prefix or one exact file path; roots do not nest);
+  1. exactly one root owns it: the innermost root that contains it (a root is a directory prefix or one exact file path; roots do not
+     nest, with one exception: a headers tree may sit inside a root of another class and then owns its files, so that a layer
+     keeps its shared headers in its own directory);
   2. the root's class is one of CLASSES and the root names every gate REQUIRED for that class;
   3. every gate the root names is a gate of verify/gates.json of this same tree;
   4. a product root (and a tool root that names one) names a "recipe": a file inside the root that the build gates read (how its code is compiled in the
@@ -68,14 +70,21 @@ def judge(files, admit, gate_names, exists):
             why += ["%s is a unit file in a headers tree" % f for f in files if f.startswith(path + "/") and f.endswith(UNIT_EXT)]
         why += ["gate %s is not in gates.json" % g for g in gates if g not in gate_names]
         roots.append((path, why))
+    kind = {r.get("path", ""): r.get("class") for r in admit.get("roots", [])}
     paths = [p for p, _ in roots]
     for i, a in enumerate(paths):
         for b in paths[i + 1:]:
-            if a == b or a.startswith(b + "/") or b.startswith(a + "/"):
+            if a == b:
                 errors.append("roots %s and %s overlap" % (a, b))
+            elif a.startswith(b + "/") or b.startswith(a + "/"):
+                inner, outer = (a, b) if a.startswith(b + "/") else (b, a)
+                if kind.get(inner) != "headers" or kind.get(outer) == "headers":
+                    errors.append("roots %s and %s overlap" % (a, b))
     bad = {}
     for f in files:
         hit = [(p, why) for p, why in roots if f == p or f.startswith(p + "/")]
+        if len(hit) > 1:   # nested roots (only a headers tree inside another root passed the check above): the innermost owns the file
+            hit = [max(hit, key=lambda h: len(h[0]))]
         if len(hit) != 1:
             bad[f] = "in %d roots" % len(hit)
         elif hit[0][1]:

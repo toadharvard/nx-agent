@@ -6,7 +6,7 @@
     gate_reach.py --objects <ld out>/inputs.rsp --requests reach_requests.tsv --certified reach.facts.tsv [--out reach.link.tsv]
 
 Why.  A request that a Win32 import accepts by its documentation but the target cannot express leads, in the body of the platform
-import, to `fnvnx_reach_violation(fact_id)` (loader/include/fnvnx_reach.h).  The build is valid only if that call is unreachable
+import, to `fnvnx_reach_violation(fact_id)` (contract/include/fnvnx/reach.h).  The build is valid only if that call is unreachable
 for exactly the linked set of images.  Every fact_id has a certificate from this gate, produced from the machine code of the
 images; a referenced fact without a certificate makes the build red.  No hand-written list: the requests are data of the platform
 manifest (manifest/reach_requests.tsv, columns request dll name arg_index kind values note) and the images are an explicit --image

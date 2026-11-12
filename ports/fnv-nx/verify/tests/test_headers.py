@@ -71,6 +71,33 @@ def main():
     rs = mk("h-stub", {"hdr/h.h": STUB, "hdr/unused.h": None})
     rc, g, txt = gate(rs, "objstub", "g4")
     check("a stub-like function in a header (abort path) is judged by objstub through the unit that includes it: red", rc == 2 and "T2" in g["detail"], (g, txt))
+    # one declaration per symbol (gate_headers.twice): the compiler's own list of declarations, per header
+    two = {"hdr/unused.h": None, "hdr/h.h": "#define HV 3\nint dup_sym(void);\n", "hdr/h2.h": "int dup_sym(void);\nint only_h2(void);\n",
+           "toy/a.c": '#include "h.h"\n#include "h2.h"\nint f_a(void) { return HV + dup_sym(); }\n'}
+    rc, g, txt = gate(mk("h-twice", two), "headers", "g5")
+    check("gate headers: the same extern declared in two header files is red declared-twice, naming both places", rc == 2 and
+          [f["code"] for f in g["findings"]] == ["declared-twice"] and "dup_sym" in g["findings"][0]["id"] and "h2.h" in g["findings"][0]["id"], (g, txt))
+    rc, g, txt = gate(mk("h-once", {"hdr/unused.h": None, "hdr/h.h": "#define HV 3\nint one_sym(void);\n",
+                                    "toy/a.c": '#include "h.h"\nint f_a(void) { return HV; }\n'}), "headers", "g6")
+    check("gate headers: every symbol declared once (and in the include of every consumer): green", rc == 0 and g["findings"] == [], (g, txt))
+    rc, g, txt = gate(mk("h-nonself", {"hdr/unused.h": None, "hdr/h.h": "#define HV 3\nuint32_t from_nowhere(void);\n",
+                                       "toy/a.c": '#include <stdint.h>\n#include "h.h"\nint f_a(void) { return HV; }\n'}), "headers", "g7")
+    check("gate headers: a header that does not parse alone (not self-contained) is red", rc == 2 and "does not parse alone" in g["detail"], (g, txt))
+    # nested roots: a headers tree may sit inside a root of another class and owns its files; any other nesting overlaps
+    outer = {"path": T + "lay", "class": "tool", "gates": ["selftests"]}
+    inner = {"path": T + "lay/include", "class": "headers", "gates": ["headers"]}
+    bad, errs_ = gate_admit.judge([T + "lay/x.py", T + "lay/include/a.h"], {"format": "fnvnx-admit/1", "roots": [outer, inner]}, ["headers", "selftests"], lambda p: True)
+    check("admit: a headers tree inside a tool root owns its files; the tool root keeps the others", not bad and not errs_, (bad, errs_))
+    bad, errs_ = gate_admit.judge([T + "lay/x.py"], {"format": "fnvnx-admit/1", "roots": [outer, dict(inner, **{"class": "tool", "gates": []})]}, [], lambda p: True)
+    check("admit: a tool root inside a tool root overlaps", any("overlap" in x for x in errs_), (bad, errs_))
+    bad, errs_ = gate_admit.judge([T + "lay/include/a.h"], {"format": "fnvnx-admit/1", "roots": [dict(outer, **{"class": "headers", "gates": ["headers"]}), inner]}, ["headers"], lambda p: True)
+    check("admit: a headers tree inside a headers tree overlaps", any("overlap" in x for x in errs_), (bad, errs_))
+    bad, errs_ = gate_admit.judge([T + "lay/include/a.h"], {"format": "fnvnx-admit/1", "roots": [outer, dict(inner, gates=[])]}, ["headers"], lambda p: True)
+    check("admit: the nested headers tree is judged by its own gates (none named: its file is uncertified)", T + "lay/include/a.h" in bad, (bad, errs_))
+    # the include rule resolves the innermost root
+    nest = {"path": T + "lay", "class": "tool", "gates": []}
+    ne = recipe.check(REC(include=[T + "lay/include"]), TR.ROOT, [T + "lay/include/a.h", T + "lay/x.py"], {TR.ROOT: {"class": "product", "path": TR.ROOT}, T + "lay": nest, T + "lay/include": inner})
+    check("recipe check: an include of a headers tree nested in a tool root is accepted (innermost root decides)", not any("not a headers tree" in x for x in ne), ne)
     print("%d failed, wall %.1f s" % (len(FAILED), time.time() - T0))
     return 1 if FAILED else 0
 
