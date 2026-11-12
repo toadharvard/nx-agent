@@ -125,11 +125,10 @@ static tree new_site()
 
 /* ---- the call's shape */
 
-/* Is `t` returned through the hidden pointer by the x86 callee? The rule is the one the convention's documents state, not GCC's POD notion
- * (learn.microsoft.com, "Argument Passing and Naming Conventions": "Structures that are not PODs will not be returned in registers"; the C++03 POD of
- * ISO/IEC 14882:2003 9/4 that VC9 uses: Agner Fog, Calling conventions, table 7). A class is NOT a POD if it has: a user-declared constructor, copy
- * constructor, copy assignment operator or destructor; a virtual function; a base class (a direct base, virtual or not); or a non-static member whose
- * type (array elements included) is a class that is not a POD. Read from the C++ front end's own declarations of the class, recursively; every C++ front-end
+/* Is `t` returned through the hidden pointer by the x86 callee? The rule is the one measured on the game's compiler (cl 15.00.30729.01, VC 2008 SP1,
+ * /FAs on 11 types, w4): the returned class itself is judged, never its members' types. It is NOT returned in registers if it has: a user-declared
+ * constructor, copy constructor, copy assignment operator or destructor; a virtual function; a base class; or a private or protected non-static data
+ * member (C++03 8.5.1: not an aggregate). Read from the C++ front end's own declarations of the class; every C++ front-end
  * symbol used is on toolchain/cpweak.h and sits behind fnvnx_cxx_fe(). A C unit has no such type: its aggregate is a POD by the language. */
 static bool user_declared_special(tree t)
 {
@@ -155,11 +154,13 @@ static bool msvc_pod(tree t)
   if (!fnvnx_cxx_fe()) return true;
   while (TREE_CODE(t) == ARRAY_TYPE) t = TREE_TYPE(t);
   if (!CLASS_TYPE_P(t)) return true;
+  /* cl 15.00.30729.01 (VC 2008 SP1, measured by w4 on 11 types) looks at the returned class itself: a member's own type does not matter */
   if (TYPE_HAS_USER_CONSTRUCTOR(t) || TYPE_POLYMORPHIC_P(t)) return false;
   if (TYPE_BINFO(t) && BINFO_N_BASE_BINFOS(TYPE_BINFO(t)) > 0) return false;
   if (user_declared_special(t)) return false;
+  /* C++03 8.5.1: a class with a private or protected non-static data member is not an aggregate */
   for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f))
-    if (TREE_CODE(f) == FIELD_DECL && !msvc_pod(TREE_TYPE(f))) return false;
+    if (TREE_CODE(f) == FIELD_DECL && (TREE_PRIVATE(f) || TREE_PROTECTED(f))) return false;
   return true;
 }
 

@@ -50,18 +50,18 @@ WANT = {
 }
 POD_DECLS = r'''
 struct P1 { int a; int b; };
-struct P2 { private: int a; public: int b; };                   // a plain aggregate with private members: a POD
+struct P2 { private: int a; public: int b; };                   // a private data member: not an aggregate (cl: hidden pointer)
 struct N1 { int a; };  struct Nb : N1 { int b; };                // a base class
 struct Nc { Nc(int x) : a(x) {} int a; int b; };                 // a user constructor
 struct Nd { ~Nd() {} int a; int b; };                            // a user destructor
 struct Na { Na &operator=(const Na &o) { a = o.a; return *this; } int a; int b; };   // a user copy assignment
 struct Nv { virtual void f(); int a; };                          // a virtual function
-struct Nm { Nc c; };                                             // a member of non-POD class type
-struct Nr { Nc c[1]; };                                          // an array of such a member
+struct Nm { Nc c; };                                             // a member of class type with a ctor: cl returns it in registers, the member's type does not count
+struct Nr { Nc c[1]; };                                          // an array of such a member: same
 struct Nk { Nk(const Nk &o) : a(o.a), b(o.b) {} int a; int b; }; // a user copy constructor
 struct Pm { P1 p; };                                             // a member of POD class type: a POD
 '''
-POD = [('P1', True), ('P2', True), ('Pm', True), ('Nb', False), ('Nc', False), ('Nd', False), ('Na', False), ('Nv', False), ('Nm', False), ('Nr', False), ('Nk', False)]
+POD = [('P1', True), ('P2', False), ('Pm', True), ('Nb', False), ('Nc', False), ('Nd', False), ('Na', False), ('Nv', False), ('Nm', True), ('Nr', True), ('Nk', False)]
 
 
 def main():
