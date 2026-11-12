@@ -130,6 +130,13 @@ The owner's words: "Транк никогда красный. Всегда зе�
     adapter's Description, as our D3D9 returns it>` and nothing else. The platform (L5) checks statically that every
     FalloutPrefs setting the exe reads has a default in the exe's settings table; the emulator (L4) mounts the file.
     If the owner's launcher or installed FalloutPrefs.ini later enters gamedata, the file is derived from it instead.
+  - **DirectX redist installed (orchestrator decision, 2026-11-12).** The declared machine is the finished install, and
+    the game installer runs the DirectX redistributable it ships. Rule: every DLL that gamedata/redist holds (extracted
+    from the install's `__redist/DirectX` cabs) is in the declared system32. The loader's module table
+    (contract/modules.py) covers it as a class, with no name list. The image set is the may-load closure from the exe
+    over that declared file set, a sound superset. That is why d3dx9_31.dll (OCT2006 cab, loaded by d3dx9_38 at 0x56b708)
+    joins the set as a may-load image, 6 -> 7, pinned by exepin and lifted like d3dx9_38. A name outside the declared
+    file set gets NULL / ERROR_MOD_NOT_FOUND (126), as Windows and Wine 9.0 return it.
 - Merges stop while anything is red. That is intended. Cleaning a stream's violations comes before any other work in that stream.
 
 ## Owner decisions of 2026-11-10 (do not re-ask)
@@ -178,7 +185,7 @@ The owner's words: "Я буквально сказал, что я использ
   - Native and decomp C++ load them all.
   - Lifted C++ is compiled by the same compiler; the lifter emits the memory ordering itself (R9 (б)).
   - The stock `g++-13` of `env.json` is the base the compiler is built from. It is not the game's compiler.
-  - fnvnx-a64 (gcc 15 + newlib) provides the guest's libc/libstdc++ and libnx.
+  - The guest runtime is built by the game's own compiler: `tools/fnvnx-a64-msvcmodel13` (L5 w14, with a MANIFEST.json the recipe compares against the compiler before any unit runs). Its libstdc++ (headers and library) is GCC 13.3's own, the same version as the compiler. newlib and libnx come from the fnvnx-a64 devkit sources, rebuilt with msvcmodel. The gcc 15 libstdc++ headers of fnvnx-a64 are not used for guest code: they do not parse under gcc 13 (orchestrator decision, 2026-11-12).
 - **Build:** `verify/recipe.py` (`verify/RECIPE.md`). A product root has `build.json` and is admitted in `verify/admit.json`. Each unit is two hermetic stages (`unitstage.py`: PP, then CC), keyed by the content of what they read plus compiler and flags.
 - **Cache:** the verdict's own store, `GATE_CACHE` (`l1.py` gives `VDIR/cache`; objects in `GATE_CACHE/store`). An unchanged unit is never compiled again. Do not add another cache or call the compiler directly.
 - **Private sources** (lifted C++, decomp trees) enter a recipe only as an `external`: a fnv-nx-build commit plus `tree_sha256`.

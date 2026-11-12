@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Install the packages and python modules of verify/env.json from the pinned mirror. Run as `python3 -I install_mirror.py [--env F] [--dry]`, as root.
 The mirror (env.json "debs.mirror": repo, commit, tree_sha256; the private fnv-nx-build branch tools/verdict-debs) is fetched by its exact
-commit; the checkout's CAS tree hash of debs/ must equal tree_sha256 and of wheels/ wheels_tree_sha256; every deb must have the sha256 of env.json "debs.packages" (the same
+commit; the checkout's CAS tree hash of debs/ must equal tree_sha256 and of wheels/ wheels_tree_sha256; every deb of the closure must have the sha256 and the version of env.json "debs.packages" (the one version source; "packages", the declared top set, must be a subset with equal versions, else exit 2) (the same
 sha256 as the upstream's own index where it has one: see farm/mirror_debs.py). Any mismatch exits 2 before dpkg runs.
 Then ONE `dpkg -i` over every pinned deb whose package is not installed at its pinned version (dpkg orders the unpack and configure
 steps). A package already installed at the pinned version is not touched: that dpkg's installed files are not derivable back to the
@@ -58,6 +58,10 @@ def run(a, work):
     if tree != m["tree_sha256"]:
         print("install_mirror: mirror tree_sha256 is %s, env.json says %s" % (tree, m["tree_sha256"]), file=sys.stderr)
         return 2
+    for name, v in sorted(doc["packages"].items()):    # the declared top set must agree with the one version source, debs.packages
+        if name not in pk or pk[name].get("version") != v:
+            print("install_mirror: packages.%s is %s, debs.packages says %s" % (name, v, pk.get(name, {}).get("version", "no pin")), file=sys.stderr)
+            return 2
     todo = []
     for name, e in sorted(pk.items()):
         f = os.path.join(dest, "debs", e["file"])
@@ -65,7 +69,7 @@ def run(a, work):
         if h != e["sha256"]:
             print("install_mirror: %s: sha256 is %s, env.json says %s" % (name, h, e["sha256"]), file=sys.stderr)
             return 2
-        if installed(name) != doc["packages"][name]:
+        if installed(name) != e["version"]:     # one version source per deb: debs.packages, for the declared set and its closure alike
             todo.append(f)
     if todo and "--dry" not in a:
         subprocess.run(["dpkg", "-i"] + todo, check=True)

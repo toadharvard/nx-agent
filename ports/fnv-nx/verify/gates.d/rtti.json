@@ -1,0 +1,15 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "rtti",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_contract.py",
+  "--gate",
+  "rtti"
+ ],
+ "result": "rtti.json",
+ "covers": [
+  "linked"
+ ]
+}

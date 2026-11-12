@@ -1,0 +1,16 @@
+{
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_lift.py",
+  "--gate",
+  "order"
+ ],
+ "covers": [
+  "lifted",
+  "product-guest"
+ ],
+ "format": "fnvnx-gatefile/1",
+ "name": "order",
+ "result": "order.json"
+}

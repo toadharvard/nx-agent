@@ -7,7 +7,7 @@ recompiled when nothing it reads changed.
     unitstage.py gcc-set --cxx /abs/g++       print the --exe/--tree arguments of `runtime.py tool` for that compiler
 RULE: what a preprocessor run reads is exactly (1) the CONTENT of the files it opens and (2) the EXISTENCE answers for the paths it
   probes (#include search, __has_include, __has_include_next). A stage is given both, exactly.
-  PP stage  `g++ FLAGS -E -dU -MD -MT x -MF /out/deps.d -o /out/unit.ii /src/UNIT`, inputs: the tool runtime (runtime.py tool) and VIEWS
+  PP stage  `g++ FLAGS -E -MD -MT x -MF /out/deps.d -o /out/unit.ii /src/UNIT`, inputs: the tool runtime (runtime.py tool) and VIEWS
             of the source root (/src) and the include roots (/inc/0..), see unitview.py: every name of the real tree, real content
             only for the files of a set C (the closure), every other file a placeholder `#error fnvnx: file outside the declared
             closure`. The key is f(name trees, content of C, compiler, flags).
@@ -22,7 +22,7 @@ Closure discovery (this runner, outside the sandbox, a pure function of stage re
   hashes); the accepted result is the run on the view of D. ARGUMENT that the hint never changes the result: the accepted run opened
   only files of D, all real, and saw the true name tree, so every include search and probe got the answer it gets on the real tree and
   every opened file had its real content; its output equals the output on the real trees. A different hint only changes how many runs
-  lead to D. ASSUMED about GCC: it reads the content of a file only by lexing it (then the file is in deps.d) or it fails; (a
+  lead to D. ASSUMED about GCC: it reads the content of a file only by lexing it (then the file is in deps.d) or it fails; (a (ASM-040)
   #pragma-once identity check on a file that is not included would not be caught by the placeholder, only by the equality assert).
 Languages by suffix (LANG): .c gets `-x c` (PP) and `-x c -fpreprocessed` (CC); .S gets `-x assembler-with-cpp` and `-x assembler` (CC on the
   preprocessed text, the same two stages); .s has no PP stage (its CC stage reads the unit alone, a `.include` fails). `--include` may also be
@@ -42,6 +42,7 @@ import hashlib
 import json
 import os
 import posixpath
+import shutil
 import subprocess
 import sys
 import time
@@ -58,7 +59,10 @@ ENV = {"TZ": "UTC", "LC_ALL": "C", "PYTHONHASHSEED": "0", "SOURCE_DATE_EPOCH": "
 # (PP stage, CC stage). .s has no preprocessing: its CC stage reads the unit alone (a `.include` there fails: use .S and #include).
 LANG = {".c": (["-x", "c"], ["-x", "c", "-fpreprocessed"]), ".S": (["-x", "assembler-with-cpp"], ["-x", "assembler"]),
         ".s": ([], ["-x", "assembler"])}
-PP_TAIL = ["-E", "-dU", "-MD", "-MT", "x", "-MF", "/out/deps.d", "-o", "/out/unit.ii"]
+PP_TAIL = ["-E", "-MD", "-MT", "x", "-MF", "/out/deps.d", "-o", "/out/unit.ii"]
+# The macro-use fact is a stage of its own (same inputs, `-dU`: GCC writes `#define NAME VALUE` for exactly the macros the unit expands or tests):
+# its output is never an input of CC, so an object does not depend on a fact-collection flag.
+DU_TAIL = ["-E", "-dU", "-o", "/out/unit.du"]
 
 
 def result_file(store, key, name):
@@ -94,7 +98,13 @@ def gcc_set(cxx):
     cands += [norm(ln) for ln in inc.splitlines() if ln.startswith(" /")]
     trees = sorted({t for t in cands if os.path.isdir(t)})
     trees = [t for t in trees if not any(u != t and (t + "/").startswith(u.rstrip("/") + "/") for u in trees)]
-    return [norm(cxx), norm(q("-print-prog-name=as"))], trees
+    return [norm(cxx), prog(norm(q("-print-prog-name=as")))], trees
+
+
+def prog(p):
+    """A program name the compiler answered with: the answer of a native compiler for a tool it finds on PATH is the bare name, which is
+    resolved on the host PATH the way the compiler would exec it (a cross compiler answers its absolute path)."""
+    return p if os.path.isabs(p) else (shutil.which(p) or p)
 
 def run_stage(store, doc, cold):
     sandbox.check_doc(doc)
@@ -121,6 +131,7 @@ def run_stage(store, doc, cold):
 class Build:
     def __init__(self, a):
         self.store, self.cold, self.cxx, self.cache = a.store, a.cold, a.cxx, {}
+        self.variant = ""   # recipe variant: its name is in the env, so in every stage key ("" adds nothing)
         self.cc_drop = set()   # `at` of tool-runtime inputs the CC stage does not mount (externals other than the compiler's)
         self.cc_flags, self.cc_inputs = [], []   # plugins: flags and declared inputs [(at, tree)] of the CC stage only (a plugin is part of its key)
         self.rt = json.load(open(a.toolrt))
@@ -152,7 +163,7 @@ class Build:
         argv = [self.cxx] + (self.iargs if inc else []) + self.flags + (self.cc_flags if kind == "cc" else []) + ["-frandom-seed=" + seed, "-Werror=date-time"]
         argv += ["-ffile-prefix-map=%s=%s" % (at, at[1:]) for at, _ in self.roots] + tail + [src]
         doc = {"format": "fnvnx-stage/1", "stage": "%s:%s" % (kind, rel), "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
-               "env": dict(ENV, PATH=os.path.dirname(self.cxx)), "outputs": ["/out"],
+               "env": dict(ENV, PATH=os.path.dirname(self.cxx), **({"FNVNX_VARIANT": self.variant} if self.variant else {})), "outputs": ["/out"],
                "inputs": sorted([i for i in self.rt["inputs"] if kind != "cc" or i["at"] not in self.cc_drop] +
                                 [{"at": at, "tree": t} for at, t in inputs + (self.cc_inputs if kind == "cc" else [])],
                                 key=lambda i: i["at"])}
@@ -177,6 +188,12 @@ class Build:
         ins = [(at, t if files is None else unitview.view(self.store, t, [p[len(at) + 1:] for p in files if p.startswith(at + "/")],
                                                           self.cache)) for at, t in self.roots]
         return run_stage(self.store, self.doc("pp", rel, ins, self.lang(rel)[0] + PP_TAIL, "/src/" + rel), self.cold)
+
+    def du(self, rel, files):
+        """The macro-use fact of the unit: a `-dU` run on the same minimal view as the last PP run -> (key, result)."""
+        ins = [(at, unitview.view(self.store, t, [p[len(at) + 1:] for p in files if p.startswith(at + "/")], self.cache)) for at, t in self.roots]
+        key, res, _, _ = run_stage(self.store, self.doc("pu", rel, ins, self.lang(rel)[0] + DU_TAIL, "/src/" + rel), self.cold)
+        return key, res
 
     def stderr(self, res):
         return open(cas._obj(self.store, cas.manifest(res["stderr"], self.store)), errors="replace").read()
@@ -229,6 +246,10 @@ class Build:
                 break
             expect, files = (d, h), d
         e["closure"], e["files"] = sorted(files), len(files)
+        e["du_key"], dres = self.du(rel, files)
+        if dres["rc"]:
+            e["status"], e["error"] = "pp-failed", "macro-fact stage: " + self.last(dres)
+            return e
         ii = cas.manifest(res["outputs"]["/out"], self.store)["entries"]["unit.ii"]
         e["ii_bytes"] = os.path.getsize(cas._obj(self.store, ii))
         tdata = cas.canon({"format": cas.FORMAT, "entries": {"unit.ii": dict(ii, x=0)}})

@@ -324,6 +324,46 @@ for abi in ("ilp32", "lp64"):
     cnt = objstub.wine_counts(objstub.analyse_all([("x", build(HDR + "int f(void) { fnvnx_wine_fixme(5); return 7; }\nint g(void) { fnvnx_wine_fixme(5); return 7; }", abi))], set(), set()))
     check(T("wine: call sites per id are counted"), cnt == {5: 2}, cnt)
 # u32nz<N>: `p ? 0 : E_INVALIDCALL` style bodies at every optimisation level
+# tail B of the log function = BL then RET (the compiler's sibling call); several names at one address are one body
+def asmf(names, body):
+    return ".text\n" + "".join(".global %s\n.type %s,%%function\n" % (n, n) for n in names) + "".join("%s:\n" % n for n in names) + body + \
+        "".join(".size %s,.-%s\n" % (n, names[0]) for n in names)
+for abi in ("ilp32", "lp64"):
+    T = lambda n: "%s/%s" % (abi, n)
+    def wa(names, body, tbl=WT, rows=None):
+        o = build(asmf(names, body), abi, "s")
+        items, finds = objstub.run_check([(o, o)], set(), {(o, k): v for k, v in (rows or {}).items()}, set(), None, None, 1, tbl)
+        return {(n, k) for _, n, k, _ in finds}, finds
+    k, f = wk("void f(void) { fnvnx_wine_fixme(6); }")
+    check(T("wine tail: compiler-made `b fnvnx_wine_fixme` (void row): certified like bl + ret"), not k, f)
+    k, f = wa(["f"], " mov w0, 6\n b fnvnx_wine_fixme\n")
+    check(T("wine tail: assembled `mov w0,6; b fnvnx_wine_fixme`: certified"), not k, f)
+    k, f = wa(["f"], " mov w0, 9\n b fnvnx_wine_fixme\n")
+    check(T("wine tail: id not in the table: wine-fixme-unknown-id"), k == {("f", "wine-fixme-unknown-id")}, f)
+    k, f = wa(["f"], " mov w0, 5\n b fnvnx_wine_fixme\n")
+    check(T("wine tail: a u32 row needs the result the tail call leaves in x0 (the callee's): wine-fixme-mismatch"), k == {("f", "wine-fixme-mismatch")}, f)
+    k, f = wa(["f"], " cbz w1, 1f\n mov w0, 6\n b fnvnx_wine_fixme\n1: mov w0, 5\n b fnvnx_wine_fixme\n")
+    check(T("wine tail: two ids on two paths: wine-fixme-mismatch"), k == {("f", "wine-fixme-mismatch")}, f)
+    k, f = wa(["f"], " mov w0, 6\n b fnvnx_other\n")
+    check(T("wine tail: a tail b of a function that is not cited is no wine body (a real body, no wine-* finding), as before"), not {x for x in k if x[1].startswith("wine")}, f)
+    k, f = wa(["f"], " adrp x1, g\n mov w2, 1\n str w2, [x1, :lo12:g]\n mov w0, 6\n b fnvnx_wine_fixme\n.bss\ng: .word 0\n.text\n")
+    check(T("wine tail: a store before the tail call: wine-fixme-in-real-body"), k == {("f", "wine-fixme-in-real-body")}, f)
+    k, f = wa(["f", "g"], " mov w0, 6\n b fnvnx_wine_fixme\n")
+    check(T("alias pair (ICF) of a tail-b wine body, one id: both names certified"), not k, f)
+    k, f = wa(["f", "g"], " stp x29, x30, [sp, -16]!\n mov w0, 6\n bl fnvnx_wine_fixme\n ldp x29, x30, [sp], 16\n ret\n")
+    check(T("alias pair of a bl wine body: both names certified"), not k, f)
+    k, f = wa(["f", "g"], " mov w0, 9\n b fnvnx_wine_fixme\n")
+    check(T("alias pair with an id that is not a row: both names wine-fixme-unknown-id"), k == {("f", "wine-fixme-unknown-id"), ("g", "wine-fixme-unknown-id")}, f)
+    k, f = wa(["f", "g"], " mov w0, 3\n ret\n", rows={"f": ("u32", "3", "r"), "g": ("u32", "3", "r")})
+    check(T("alias pair of a V body, a constants row for each name: both certified"), not k, f)
+    k, f = wa(["f", "g"], " mov w0, 3\n ret\n", rows={"f": ("u32", "3", "r")})
+    check(T("alias pair of a V body, a row for one name only: the other name is red (V, no constants row)"), k == {("g", "V")}, f)
+    k, f = wa(["f", "g"], " stp x29, x30, [sp, -16]!\n mov w0, w1\n bl fnvnx_wine_fixme\n ldp x29, x30, [sp], 16\n ret\n")
+    check(T("alias pair, a log call whose id is not a constant: the finding is on both names"), {("f", "wine-fixme-nonconstant"), ("g", "wine-fixme-nonconstant")} <= k, f)
+    o = build(asmf(["f", "g"], " mov w0, 6\n b fnvnx_wine_fixme\n"), abi, "s")
+    cnt = objstub.wine_counts(objstub.analyse_all([("x", o)], set(), set()))
+    check(T("alias pair: the log call is counted once (one body)"), cnt == {6: 1}, cnt)
+
 NZ = {2: ("IDirect3DDevice9::SetClipStatus", "wine-9.0:dlls/wined3d/device.c:wined3d_device_set_clip_status", "u32nz1", "0x8876086C,0")}
 SWAP = {2: NZ[2][:3] + ("0,0x8876086C",)}
 for abi in ("ilp32", "lp64"):
@@ -431,6 +471,7 @@ for abi in ("ilp32", "lp64"):
     cnt = objstub.declared_counts(objstub.analyse_all([("x", build(DH + "unsigned f(void) { fnvnx_declared_machine(31); return 2; }\nunsigned g(void) { fnvnx_declared_machine(31); return 2; }", abi))], set(), set()))
     check(T("declared: call sites per id are counted"), cnt == {31: 2}, cnt)
     check(T("declared: a call of the wine citation is not counted as declared"), objstub.declared_counts(objstub.analyse_all([("x", build(DH + "unsigned f(void) { fnvnx_wine_fixme(5); return 7; }", abi))], set(), set())) == {})
+HDR_REAL = [l for l in open(os.path.join(os.path.dirname(os.path.abspath(objstub.__file__)), "declared_machine.tsv")).read().split("\n") if l.startswith("# fact:")][0]
 GOODS = ("31\tRegOpenKeyExA\tregistry\twin-doc:sysinfo/regopenkeyex:RegOpenKeyExA\tu32\t2",
          "32\tconnect\tno-network\twine-9.0:dlls/ws2_32/socket.c:connect\tu32\t0xFFFFFFFF",
          "33\tGetTimeZoneInformation\ttime-zone\twin-doc:timezoneapi/gettimezoneinformation:GetTimeZoneInformation\tu32nz0\t0,1")
@@ -438,16 +479,40 @@ for bad in ("31\tx\tnetwork\twin-doc:a/b:f\tu32\t1", "31\tx\tno-network\thttp://
             "31\tx\tno-network\twin-doc:a/b:f\tvoid\t1", "x\tx\tregistry\twin-doc:a/b:f\tu32\t1", "31\tx\tregistry\twine:a.c:f\tu32\t1",
             "31\tx\tregistry\twin-doc:a/b:f\tu32\t1\n31\ty\tregistry\twin-doc:a/b:g\tu32\t1", "31\tx\tregistry\tu32\t1"):
     tf_ = os.path.join(ROOT, "d.tsv")
-    open(tf_, "w").write(bad + "\n")
+    open(tf_, "w").write(HDR_REAL + "\n" + bad + "\n")
     try:
         objstub.read_declared_table(tf_)
         check("declared table: malformed row rejected: %r" % bad[:36], False)
     except ValueError:
         check("declared table: malformed row rejected: %r" % bad[:36], True)
-open(tf_, "w").write("# header\n" + "\n".join(GOODS) + "\n")
+open(tf_, "w").write(HDR_REAL + "\n" + "\n".join(GOODS) + "\n")
 got = objstub.read_declared_table(tf_)
 check("declared table: header comment and three valid rows (win-doc and wine-9.0 sources, three facts)",
       set(got) == {31, 32, 33} and got[32][1:3] == ("no-network", "wine-9.0:dlls/ws2_32/socket.c:connect"), got)
+# the facts and sources come from the header line of the table itself
+GAL = "34\tGalaxyInit\tno-galaxy\tgalaxy-sdk:IGalaxy/Init:Init\tu32\t1"
+open(tf_, "w").write(HDR_REAL + "\n" + GAL + "\n")
+check("declared table: a galaxy-sdk row with fact no-galaxy is accepted", objstub.read_declared_table(tf_).get(34, ("",))[1:3] == ("no-galaxy", "galaxy-sdk:IGalaxy/Init:Init"), "")
+for what, row in (("an undeclared fact", "35\tx\tno-wifi\twin-doc:a/b:f\tu32\t1"), ("an undeclared source prefix", "35\tx\tno-galaxy\tgog-sdk:a/b:f\tu32\t1")):
+    open(tf_, "w").write(HDR_REAL + "\n" + row + "\n")
+    try:
+        objstub.read_declared_table(tf_)
+        check("declared table: a row with " + what + " is red", False)
+    except ValueError:
+        check("declared table: a row with " + what + " is red", True)
+slim = HDR_REAL.replace(" | no-galaxy", "").replace(" | galaxy-sdk:<page>:<function>", "")
+open(tf_, "w").write(slim + "\n" + GAL + "\n")
+try:
+    objstub.read_declared_table(tf_)
+    check("declared table: without no-galaxy in its header a galaxy row is red (table and check agree)", False)
+except ValueError:
+    check("declared table: without no-galaxy in its header a galaxy row is red (table and check agree)", True)
+open(tf_, "w").write("# header\n" + "\n".join(GOODS) + "\n")
+try:
+    objstub.read_declared_table(tf_)
+    check("declared table: no header line is an error", False)
+except ValueError:
+    check("declared table: no header line is an error", True)
 try:
     objstub.read_declared_table(os.path.join(ROOT, "nonexistent.tsv"))
     check("declared table: missing file is an error", False)

@@ -80,6 +80,8 @@ for ABI[0] in ("lp64", "ilp32"):
     k, _, _ = kinds([], elf, {("r", "x.elf"): [("nope", "B1"), ("z", "B2")], ("q", None): [("a", "B1")]})
     check("(c) a name missing from the ELF, a name of size 0, a table with no ELF -> not certified",
           {("contract:nope", "contract-undefined"), ("contract:z", "contract-undefined"), ("contract:a", "contract-no-elf")} <= k, k)
+    k, _, _ = kinds([], {"l.elf": [("loc", 0, 0, 0, 0, 0)]})
+    check("(a) a LOCAL undefined symbol (a target a relocation could name) is red", ("<elf>", "elf-undefined") in k, k)
     k, _, _ = kinds([], {"u.elf": [("g", 0, 0, 0, 1, 0), ("h", 0, 0, 0, 2, 0), ("i", 0x10, 4, 10, 1, 1)]})
     check("(a) ELF with an undefined, a weak undefined and an IFUNC symbol; and one without .symtab", {("<elf>", "elf-undefined"), ("<elf>", "elf-weak-undefined"),
           ("<elf>", "elf-ifunc")} <= k and ("<elf>", "elf-no-symtab") in kinds([], {"n.elf": None})[0], k)
@@ -142,16 +144,19 @@ check("no product root: universe 0, green, accepted by the verdict", rc == 0 and
 repo = TR.make_repo("ls-toy")
 t0 = time.time()
 (rc, g, _, txt), st = LS(repo, "t1", GC)
-check("toy root: every reference resolved, ELF closed: green, accepted (1 reference + 4 definitions + the ELF)", rc == 0 and g["universe"] == 6 == g["certified"]
+check("toy root: every reference resolved, ELF closed: green, accepted (2 references + 5 definitions + the ELF)", rc == 0 and g["universe"] == 8 == g["certified"]
       and st[0] == "green", (g, txt))
 print("INFO toy gate (incl. build) %.1f s" % (time.time() - t0))
 t0 = time.time()
 (rc, g, _, txt), st = LS(repo, "t2", GC)
 print("INFO toy gate warm %.1f s" % (time.time() - t0))
 WK = '#include "toy.h"\nint wk(void) __attribute__((weak));\nint f_c(int x) { return wk ? wk() : x + TOY; }\n'
-(rc, g, _, txt), st = LS(TR.make_repo("ls-weak", files={"toy/c.c": WK}), "t3", GC)
-check("weak undefined symbol: ld links (and drops it from the static ELF, so rule (a) cannot see it) but rule (b) on the object is red",
+(rc, g, _, txt), st = LS(TR.make_repo("ls-weak", rec=TR.mut(link=None), files={"toy/c.c": WK}), "t3", GC)
+check("weak undefined symbol, root without a link: rule (b) on the object is red",
       rc == 2 and st[0] == "red" and g["uncertified"] == [TR.ROOT + "/c.c:wk"] and "undefined 1" in g["detail"], (g, txt))
+(rc, g, _, txt), st = LS(TR.make_repo("ls-weak-link", files={"toy/c.c": WK}), "t3b", GC)
+check("weak undefined symbol, root with a link: the link's ldcheck stage is red (the build), so is the gate",
+      rc == 2 and st[0] == "red" and g["uncertified"] == [TR.ROOT + ":<build>"], (g, txt))
 (rc, g, _, txt), st = LS(TR.make_repo("ls-nolink", rec=TR.mut(link=None), files={"toy/b.c": None}), "t4", GC)
 check("root without a link: an undefined reference (f_b, no definition anywhere) is red", rc == 2 and g["uncertified"] == [TR.ROOT + "/a.c:f_b"], (g, txt))
 ALIAS = '#include "toy.h"\nint f_b(void) { return TOY * 2; }\nint f_b2(void) __attribute__((alias("f_b")));\n'
@@ -166,12 +171,14 @@ for abi in ("ilp32", "lp64"):
     ABI[0] = abi
     t0 = time.time()
     (rc, g, _, txt), st = LS(TR.make_repo("ls-toy-" + abi, rec=TR.abi_rec(abi)), "ta" + abi, GC)
-    check("toy root: green 6/6 and accepted", rc == 0 and g["universe"] == 6 == g["certified"] and st[0] == "green", (g, txt))
+    n = 8 if abi == "ilp32" else 7      # LP64: no ELF (a link is the ILP32 guest ELF)
+    check("toy root: green %d/%d and accepted" % (n, n), rc == 0 and g["universe"] == n == g["certified"] and st[0] == "green", (g, txt))
     print("INFO %s toy gate %.1f s" % (abi, time.time() - t0))
     IE = {"toy/a.c": TR.FILES["toy/a.c"].replace("int f_a(void) {", "extern char __image_end[];\nint f_a(void) { (void)*(volatile char *)__image_end;"),
           "toy/link.ld": TR.FILES["toy/link.ld"].replace("/DISCARD/", "__image_end = .; /DISCARD/")}
-    (rc, g, _, txt), st = LS(TR.make_repo("ls-ie-" + abi, rec=TR.abi_rec(abi), files=IE), "ie" + abi, GC)
-    check("link script defines __image_end, the root links an ELF: the reference is certified", rc == 0 and g["certified"] == g["universe"] and st[0] == "green", (g, txt))
+    if abi == "ilp32":
+        (rc, g, _, txt), st = LS(TR.make_repo("ls-ie-" + abi, rec=TR.abi_rec(abi), files=IE), "ie" + abi, GC)
+        check("link script defines __image_end, the root links an ELF: the reference is certified", rc == 0 and g["certified"] == g["universe"] and st[0] == "green", (g, txt))
     (rc, g, _, txt), st = LS(TR.make_repo("ls-ie0-" + abi, rec=TR.abi_rec(abi, TR.mut(link=None, os_layer=["os.S"])), files=IE), "ie0" + abi, GC)
     check("the same objects, the recipe links no ELF: __image_end is undefined", rc == 2 and g["uncertified"] == [TR.ROOT + "/a.c:__image_end"], (g, txt))
 # (d) the host boundary: the exports of the pinned host runtime (libc6, libgcc-s1, libstdc++6)
@@ -192,6 +199,16 @@ check("gate on a host-target root without a link: a reference to printf is certi
 HW = HB.replace("printf", "nothere_zz")
 (rc, g, _, txt), st = LS(TR.make_repo("ls-host2", rec=TR.mut(link=None), files={"toy/b.c": HW}), "t7", GC)
 check("gate on a host-target root: a name the host runtime does not export is red", rc == 2 and g["uncertified"] == [TR.ROOT + "/b.c:nothere_zz"], (g, txt))
+# (e) outline atomics in guest objects
+AT = "int v;\nint f(void) { return __atomic_fetch_add(&v, 1, __ATOMIC_RELAXED); }\n"
+ao = build(AT, "c", ["-moutline-atomics"])
+an = build(AT, "c", ["-mno-outline-atomics"])
+items, finds = L.judge({"g/o.o": L.elf_symbols(ao)}, {}, {}, {}, None, ["g/"])
+check("(e) a guest object compiled with -moutline-atomics references __aarch64_ldadd*: finding outline-atomic", [(n, k) for _, n, k, _ in finds if k == "outline-atomic"] == [("__aarch64_ldadd4_relax", "outline-atomic")], finds)
+items, finds = L.judge({"g/o.o": L.elf_symbols(an)}, {}, {}, {}, None, ["g/"])
+check("(e) the same code with -mno-outline-atomics: no reference, no finding", not finds, finds)
+items, finds = L.judge({"h/o.o": L.elf_symbols(ao)}, {}, {}, {}, None, ["g/"])
+check("(e) outside a guest root the clause does not apply (an undefined name only)", [k for _, _, k, _ in finds] == ["undefined"], finds)
 ABI[0] = "lp64"
 print("%d failed, wall %.1f s" % (len(FAILED), time.time() - T0))
 sys.exit(1 if FAILED else 0)

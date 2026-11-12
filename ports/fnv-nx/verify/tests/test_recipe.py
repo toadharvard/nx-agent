@@ -34,23 +34,30 @@ n = len([l for l in open("/in/ports/fnv-nx/toy/constants.tsv") if l.strip()])
 os.makedirs("/out/gen")
 open("/out/gen/gen.h", "w").write("#define NCONST %d\\n#define STAMP %dL\\n" % (n, @EXTRA@))
 '''
+# The toy root is a guest ELF in the sense of RECIPE.md "Link": ILP32, position independent, linked with the product's own link/guest.ld, with
+# the FNXG header of crt0 at the first segment + 8 and the entry at the first segment. The header is OS-layer code (os.S, an os_layer unit);
+# HDR is the same as one assembler statement for the roots that have no os.S (MINI).
+CRT0 = ".section .crt0,\"a\",%progbits\n.global __fnvnx_guest_start\n.align 2\n__fnvnx_guest_start:\n b f_a\n .word 0, 0x47584e46, 3, 0, 0, 0, 0\n"
+HDR = "__asm__(%s);\n" % json.dumps(CRT0 + ".text\n")
 RECIPE = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
-          "flags": {"c": ["-O1", "-ffreestanding", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"], "cxx": [], "asm": []},
+          "flags": {"c": ["-mabi=ilp32", "-fPIE", "-O1", "-ffreestanding", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"],
+                    "cxx": ["-mabi=ilp32"], "asm": ["-mabi=ilp32"]},
           "include": [ROOT + "/inc", ROOT + "/gen"], "units": "all",
           "generated": [{"tool": T + "gen/gen.py", "args": [], "inputs": [ROOT + "/constants.tsv"], "outputs": ["gen/gen.h"]}],
           "os_layer": ["os.S"], "constants": "constants.tsv",
-          "link": {"script": "link.ld", "output": "toy.elf", "flags": ["-e", "f_a"]}}
+          "link": {"script": "link.ld", "output": "toy.elf", "flags": ["-m", "aarch64linux32"]}}
 FILES = {
     "toy/a.c": '#include "toy.h"\n#include "gen.h"\nint f_b(void);\nint f_a(void) { return NCONST + f_b() + TOY + (int)(STAMP % 1000003L); }\n',
     "toy/b.c": '#include "toy.h"\nint f_b(void) { return TOY * 2; }\n',
     "toy/c.c": '#include "toy.h"\nint f_c(int x) { return x + TOY; }\n',
-    "toy/os.S": ".text\n.globl os_svc\n.type os_svc,%function\nos_svc:\n svc #0\n ret\n.size os_svc,.-os_svc\n",
+    "toy/os.S": CRT0 + ".text\n.globl os_svc\n.type os_svc,%function\nos_svc:\n svc #0\n ret\n.size os_svc,.-os_svc\n",
     "toy/inc/toy.h": "#define TOY 7\n",
     "toy/constants.tsv": "f_c\t1\nf_b\t2\n",
     "verify/wine_fixme.tsv": "# id\tcontract_name\twine_ref\tkind\tvalue\n",
-    "verify/declared_machine.tsv": "# id\tcontract_name\tfact\tsource\tkind\tvalue\n",
-    "toy/link.ld": "SECTIONS { . = 0x10000; .text : { *(.text*) } .data : { *(.data*) *(.bss*) } /DISCARD/ : { *(.note*) *(.comment*) *(.eh_frame*) } }\n",
+    "verify/declared_machine.tsv": "# id\tcontract_name\tfact\tsource\tkind\tvalue\n# fact: no-network | time-zone | registry | no-galaxy (fixture); source: win-doc:<page>:<function> | wine-9.0:<path>:<function> | galaxy-sdk:<page>:<function>; kind void|u32\n",
+    "toy/link.ld": open(os.path.join(VERIFY, "..", "link", "guest.ld")).read(),
 }
+LINK_TOOLS = ("link/ldcheck.py", "link/gateids.py", "contract/gatefile.py")   # the real files of the tree: the ldcheck stage mounts them
 
 
 def check(name, ok, detail=""):
@@ -78,13 +85,16 @@ def make_repo(name, gen_extra="", rec=None, files=None):
     for k, v in dict(FILES, **(files or {})).items():
         if v is not None:
             w(repo, k, v)
+    for f in LINK_TOOLS:
+        w(repo, f, open(os.path.join(VERIFY, "..", f)).read())
     imp, _, ex = gen_extra.partition("|")
     w(repo, "gen/gen.py", GEN.replace("@IMPORT@", imp).replace("@EXTRA@", ex or "0"))
     w(repo, "toy/build.json", json.dumps(rec or RECIPE, indent=1))
     w(repo, "verify/env.json", open(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(VERIFY))), recipe.ENV_JSON)).read())   # the declared environment
     w(repo, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
         {"path": ROOT, "class": "product", "target": "host", "gates": [], "recipe": ROOT + "/build.json"},
-        {"path": T + "gen", "class": "tool", "gates": []}, {"path": T + "verify", "class": "tool", "gates": []}]}))
+        {"path": T + "gen", "class": "tool", "gates": []}, {"path": T + "verify", "class": "tool", "gates": []},
+        {"path": T + "link", "class": "tool", "gates": []}, {"path": T + "contract", "class": "tool", "gates": []}]}))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "toy")
     return repo
@@ -111,7 +121,7 @@ def errs(rec, **kw):
     shutil.rmtree(repo, ignore_errors=True)
     r = make_repo("ck", rec=rec)
     roots, files = recipe.load_admit(r), recipe.tracked(r)
-    return recipe.check(rec, ROOT, files, roots)
+    return recipe.check(rec, ROOT, files, roots, None, r)
 
 
 def mut(**kw):
@@ -121,13 +131,12 @@ def mut(**kw):
 
 
 def abi_rec(abi, rec=None):
-    """Recipe REC (default RECIPE) for ABI "lp64" (unchanged) or "ilp32": -mabi=ilp32 for every compile and assemble flag list, and the
-    linker emulation the cross gcc driver itself passes for it (-maarch64linux32, see `gcc -mabi=ilp32 -###`) first among the link flags."""
+    """Recipe REC (default RECIPE) for ABI "ilp32" (the toy's own ABI: unchanged) or "lp64": no -mabi=ilp32 and no ELF (a link is the
+    ILP32 guest ELF, RECIPE.md "Link"; the LP64 objects exist to compare symbol tables)."""
     r = json.loads(json.dumps(rec or RECIPE))
-    if abi == "ilp32":
-        r["flags"] = {k: ["-mabi=ilp32"] + v for k, v in r["flags"].items()}
-        if r.get("link"):
-            r["link"]["flags"] = ["-m", "aarch64linux32"] + r["link"]["flags"]
+    if abi == "lp64":
+        r["flags"] = {k: [t for t in v if t != "-mabi=ilp32"] for k, v in r["flags"].items()}
+        r["link"] = None
     return r
 
 
@@ -137,7 +146,7 @@ def elf_class(path):
 
 
 MINI = {"toy/b.c": None, "toy/c.c": None, "toy/os.S": None,
-        "toy/a.c": '#include "toy.h"\n#include "gen.h"\nint f_a(void) { return NCONST + TOY + (int)(STAMP % 1000003L); }\n'}
+        "toy/a.c": HDR + '#include "toy.h"\n#include "gen.h"\nint f_a(void) { return NCONST + TOY + (int)(STAMP % 1000003L); }\n'}
 MINI_ITEMS = {ROOT + "/a.c", ROOT + "/toy.elf"}
 CC_DRV, CXX_DRV = "/usr/bin/aarch64-linux-gnu-gcc-13", "/usr/bin/aarch64-linux-gnu-g++-13"
 
@@ -226,7 +235,20 @@ def main():
               r1["status"] == "red" and [f["unit"] for f in fu] == ["b.c", "c.c"] and fu[0]["stage"] == "cc:b.c" and fu[1]["stage"] == "pp:c.c"
               and all(f["exit"] and 0 < len(f["stderr"]) <= 20 and set(f) == {"unit", "stage", "exit", "stderr"} for f in fu)
               and any("undeclared_b" in l for l in fu[0]["stderr"]) and any("missing_c.h" in l for l in fu[1]["stderr"])
-              and r1["failure"]["stage"] == "cc:b.c" and r1["elf"] is None and r1["objects"] == [], (fu, r1.get("failure")))
+              and r1["failure"]["stage"] == "cc:b.c" and r1["elf"] is None and [o["unit"] for o in r1["objects"]] == ["a.c"], (fu, r1.get("failure")))
+        # KEEP GOING: a red generator does not stop the other stages. Its output unit is blocked by it (never built), every other unit is
+        # built, the ELF is blocked, and the root is red naming the red stage.
+        kg = make_repo("kg", rec=dict(RECIPE, os_layer=[], generated=RECIPE["generated"] + [
+            {"tool": T + "gen/bad.py", "args": [], "inputs": [ROOT + "/constants.tsv"], "outputs": ["bad.c"]}]),
+            files={"toy/os.S": None, "gen/bad.py": "import sys\nsys.stderr.write('generator went wrong\\n')\nsys.exit(3)\n"})
+        rk = recipe.build(kg, ROOT, BASE + "/kg-store", BASE + "/kg-out")
+        check("red generator: the other units are built, its output unit and the ELF are blocked by its stage, root red",
+              rk["status"] == "red" and rk["failure"]["stage"] == "gen:%s:1" % ROOT and any("generator went wrong" in l for l in rk["failure"]["stderr"])
+              and [o["unit"] for o in rk["objects"]] == ["a.c", "b.c", "c.c"] and rk["elf"] is None and rk["red_stages"] == ["gen:%s:1" % ROOT]
+              and rk["blocked"] == [{"unit": "bad.c", "blocked_by": "gen:%s:1" % ROOT}, {"unit": "toy.elf", "blocked_by": "gen:%s:1" % ROOT}]
+              and "bad.c" in rk["units"], (rk.get("failure"), rk.get("blocked"), [o["unit"] for o in rk["objects"]]))
+        ok_ = recipe.build(kg, ROOT, BASE + "/kg-store", BASE + "/kg-out2")
+        check("red generator: a second run is deterministic and the built objects are cache hits", ok_["blocked"] == rk["blocked"] and ok_["stages"]["run"] == 0, ok_["stages"])
         norm = lambda r: json.dumps({k: v for k, v in r.items() if k not in ("stages", "stage_keys")}, sort_keys=True).replace(BASE + "/two-out1", "O").replace(BASE + "/two-out2", "O")
         check("two cold runs of the failing root give the same objects.json", norm(r1) == norm(r2))
 
@@ -267,20 +289,6 @@ def main():
         check("determinism gate green on the toy root, accepted by verdict", rc == 0 and g["universe"] == 5 == g["certified"]
               and accepted("determinism", BASE + "/gd")[0] == "green", (g, txt))
 
-    def gate_toy32():
-        r32repo = make_repo("toy32g", rec=abi_rec("ilp32"))
-        og = BASE + "/gg32"
-        rc, g, tb, txt = gate(r32repo, "build", og, GC)
-        print("INFO ILP32 gate build cold-store %.1f s" % tb)
-        check("ILP32 toy root: build gate green 5/5, accepted by verdict", rc == 0 and g["universe"] == 5 == g["certified"]
-              and accepted("build", og) == ("green", 5, 5, ""), (g, txt))
-        rc, g, tw, txt = gate(r32repo, "build", BASE + "/gg32w", GC)
-        print("INFO ILP32 gate build warm %.1f s" % tw)
-        rc, g, td, txt = gate(r32repo, "determinism", BASE + "/gd32", GC)
-        print("INFO ILP32 gate determinism (2 cold builds + warm check) %.1f s: %s" % (td, g and g["detail"]))
-        check("ILP32 toy root: determinism gate green 5/5, accepted by verdict", rc == 0 and g["universe"] == 5 == g["certified"]
-              and accepted("determinism", BASE + "/gd32")[0] == "green", (g, txt))
-
     def gate_nd():
         for label, extra, red in (("wall clock (time.time_ns)", "import time|time.time_ns()", True),
                                   ("os.urandom and os.getpid", "import os|int.from_bytes(os.urandom(7), 'big') + os.getpid()", False)):
@@ -293,7 +301,7 @@ def main():
                 check("generator embedding %s: sandbox makes it constant, so two cold builds are equal (closed channel); without GATE_CACHE there is no warm build" % label,
                       rc == 0 and "no warm" in g["detail"] and g["universe"] == 2, (g, txt))
 
-    for fn in (gate_toy, gate_toy32, gate_bad, gate_nd, gate_cases):
+    for fn in (gate_toy, gate_bad, gate_nd, gate_cases):
         later(fn)
 
     # --- toy root, shared store: cold, then cached
@@ -314,7 +322,7 @@ def main():
           and r1["elf"]["sha256"] == r2["elf"]["sha256"] and r1["stage_keys"] == r2["stage_keys"])
     d, u = r1["defined"], r1["undefined"]
     check("objects.json: defined symbols from .symtab (struct), undefined list", {"symbol": "f_a", "bind": "GLOBAL", "type": "FUNC", "object": "a.c"} in d
-          and any(x["symbol"] == "os_svc" and x["object"] == "os.S" for x in d) and "f_b" in u and "f_a" not in u
+          and any(x["symbol"] == "os_svc" and x["object"] == "os.S" for x in d) and {"f_a", "f_b"} <= set(u) and "f_c" not in u
           and d == sorted(d, key=lambda x: (x["symbol"], x["object"])) and u == sorted(u), (d, u))
 
     print("INFO +%.1f s: toy builds done" % (time.time() - t_start))
@@ -322,7 +330,7 @@ def main():
     tcx = {"name": "tc", "repo": "fnv-nx-build", "ref": "tc", "commit": tcc, "tree_sha256": tct, "at": "/opt/tc"}
     crec = mut(external=[tcx], compiler={"external": "tc", "cc": CC_DRV[1:], "cxx": CXX_DRV[1:]})   # cxx names a path of the tree; no C++ unit uses it
     both = dict(crec, external=[tcx, ex], include=RECIPE["include"] + ["/ext/tiny/inc"], os_layer=[])
-    mini_a = '#include "toy.h"\n#include "ext.h"\n#include "gen.h"\nint f_a(void) { return NCONST + TOY + EXTV + (int)(STAMP % 1000003L); }\n'
+    mini_a = HDR + '#include "toy.h"\n#include "ext.h"\n#include "gen.h"\nint f_a(void) { return NCONST + TOY + EXTV + (int)(STAMP % 1000003L); }\n'
     later(check_tc_gate, make_repo("tc-mini", rec=both, files=dict(MINI, **{"toy/a.c": mini_a})), tcc, commit)
 
     # --- externals (fetched by commit from the bare repo)
@@ -335,10 +343,31 @@ def main():
     check("external: second build is all cache hits with identical objects and stage keys (cross-store equality: the determinism gate below)",
           ry["status"] == "green" and ry["stages"]["run"] == 0 and rx["stage_keys"] == ry["stage_keys"]
           and [o["sha256"] for o in rx["objects"]] == [o["sha256"] for o in ry["objects"]], ry.get("failure"))
+    # the verified (commit, tree_sha256) is a stored fact: a warm build ingests, walks and checks out nothing
+    fdir = SS + "/external-facts"
+    facts = sorted(os.listdir(fdir)) if os.path.isdir(fdir) else []
+    check("external: one fact per (commit, tree_sha256) in the store, one checkout per commit in the external cache",
+          facts == ["%s-%s.json" % (commit, thash)] and os.path.isdir(ec + "/" + commit + ".co"), (facts, os.listdir(ec)))
+    ingests, runs = [], []
+    real_ingest, real_run = recipe.cas.ingest, recipe.subprocess.run
+    recipe.cas.ingest = lambda p, st, exclude=(): ingests.append(p) or real_ingest(p, st, exclude)
+    recipe.subprocess.run = lambda cmd, *a_, **k: runs.append(cmd) or real_run(cmd, *a_, **k)
+    try:
+        # the build's own non-external work uses cas.ingest too; count only ingests of an external path
+        rw = recipe.build(xrepo, ROOT, SS, BASE + "/xo2w", ext=ec)
+    finally:
+        recipe.cas.ingest, recipe.subprocess.run = real_ingest, real_run
+    check("external: a warm build makes 0 ingests of the external and runs no git read-tree/checkout/fetch",
+          rw["status"] == "green" and not [i for i in ingests if ec in i] and not [c for c in runs if c[:1] == ["git"] and ("checkout-index" in c or "read-tree" in c or "fetch" in c)],
+          (rw.get("failure"), [i for i in ingests if ec in i]))
+    rv = recipe.build(xrepo, ROOT, BASE + "/store-v", BASE + "/xo2v", ext=ec)   # another store, same external cache: ingests once, no checkout
+    check("external: a new store with the same cache ingests the checkout once and stores its own fact", rv["status"] == "green"
+          and os.path.isfile(BASE + "/store-v/external-facts/%s-%s.json" % (commit, thash)), rv.get("failure"))
     bad_t = mut(external=[dict(ex, tree_sha256="0" * 64)], include=erec["include"])
     rt = recipe.build(make_repo("ext-t", rec=bad_t, files=ef), ROOT, SS, BASE + "/xo3", ext=ec)
     check("wrong tree_sha256: red naming the external", rt["status"] == "red" and rt["failure"]["stage"] == "external:tiny"
           and thash in " ".join(rt["failure"]["stderr"]), rt.get("failure"))
+    check("wrong tree_sha256: no fact is stored for it", not os.path.exists(SS + "/external-facts/%s-%s.json" % (commit, "0" * 64)))
     bad_c = mut(external=[dict(ex, commit="1" * 40)], include=erec["include"])
     rc_ = recipe.build(make_repo("ext-c", rec=bad_c, files=ef), ROOT, SS, BASE + "/xo4", ext=BASE + "/ec2")
     check("commit not in the repository: red naming the external", rc_["status"] == "red" and rc_["failure"]["stage"] == "external:tiny", rc_.get("failure"))
@@ -363,21 +392,18 @@ def main():
     rc_y = recipe.build(crepo, ROOT, SS, BASE + "/tco2", ext=ec)
     check("external compiler: second build is all cache hits", rc_y["stages"]["run"] == 0 and rc_y["stage_keys"] == rc_x["stage_keys"], rc_y["stages"])
     print("INFO +%.1f s: external compiler builds done" % (time.time() - t_start))
-    # --- the same toy root in the ILP32 ABI: ELF32 objects and ELF, symbol tables, determinism
+    # --- the toy root in the LP64 ABI: ELF64 objects, no ELF (the link is the ILP32 guest ELF); the ILP32 toy (r1) has ELF32 objects and ELF
     t0 = time.time()
-    r32 = recipe.build(make_repo("toy32", rec=abi_rec("ilp32")), ROOT, SS, BASE + "/out32")
-    print("INFO toy ILP32 build %.1f s, stages %s" % (time.time() - t0, r32.get("stages")))
-    check("ILP32 toy root builds green: 4 objects and the ELF are ELF32, the LP64 ones are ELF64",
-          r32["status"] == "green" and len(r32["objects"]) == 4 and r32["elf"]
-          and {elf_class(o["object"]) for o in r32["objects"]} | {elf_class(r32["elf"]["path"])} == {32}
-          and {elf_class(o["object"]) for o in r1["objects"]} | {elf_class(r1["elf"]["path"])} == {64}, r32.get("failure"))
-    d32 = r32["defined"]
-    check("ILP32 objects.json: the same defined and undefined symbols as LP64 (ELF32 .symtab read by struct)",
-          [(x["symbol"], x["bind"], x["type"], x["object"]) for x in d32] == [(x["symbol"], x["bind"], x["type"], x["object"]) for x in d]
-          and r32["undefined"] == u and [o["sha256"] for o in r32["objects"]] != [o["sha256"] for o in r1["objects"]], (d32, r32["undefined"]))
-    r32b = recipe.build(make_repo("toy32b", rec=abi_rec("ilp32")), ROOT, SS, BASE + "/out32b")
-    check("ILP32: a second build is all cache hits with identical objects and ELF", r32b["stages"]["run"] == 0
-          and r32b["elf"]["sha256"] == r32["elf"]["sha256"] and r32b["stage_keys"] == r32["stage_keys"], r32b.get("stages"))
+    r64 = recipe.build(make_repo("toy64", rec=abi_rec("lp64")), ROOT, SS, BASE + "/out64")
+    print("INFO toy LP64 build %.1f s, stages %s" % (time.time() - t0, r64.get("stages")))
+    check("toy root builds green: ILP32 objects and ELF are ELF32, the LP64 objects are ELF64 (and no ELF)",
+          r64["status"] == "green" and len(r64["objects"]) == 4 and r64["elf"] is None
+          and {elf_class(o["object"]) for o in r1["objects"]} | {elf_class(r1["elf"]["path"])} == {32}
+          and {elf_class(o["object"]) for o in r64["objects"]} == {64}, r64.get("failure"))
+    d64 = r64["defined"]
+    check("objects.json: the same defined and undefined symbols for LP64 and ILP32 (ELF32/ELF64 .symtab read by struct)",
+          [(x["symbol"], x["bind"], x["type"], x["object"]) for x in d64] == [(x["symbol"], x["bind"], x["type"], x["object"]) for x in d]
+          and r64["undefined"] == u and [o["sha256"] for o in r64["objects"]] != [o["sha256"] for o in r1["objects"]], (d64, r64["undefined"]))
 
     # --- validation
     check("unknown key 'exclude' is a RecipeError", any("unknown key 'exclude'" in e for e in errs(mut(exclude=["a.c"]))))
@@ -393,6 +419,44 @@ def main():
     check("refusal set also through compile flags -Wl,", any("refusal set" in e for e in errs(m)))
     check("legit ld options are not refused", not recipe.refused(["-e", "f_a", "--gc-sections", "-z", "noexecstack", "-Map=x", "--entry=x", "-Ttext=0"]))
     check("include dir outside admitted roots rejected", any("include" in e for e in errs(mut(include=["/etc", "../x"]))))
+    # one home per header: the include dir lies in an admitted product root of the recipe root's own target
+    rk = os.path.join(BASE, "ck")
+    base_roots = recipe.load_admit(rk)
+    own = base_roots[ROOT].get("target")
+    other = "host" if own != "host" else "guest"
+    extra = {T + "hdr_prod": {"path": T + "hdr_prod", "class": "product", "target": own},
+             T + "hdr_other": {"path": T + "hdr_other", "class": "product", "target": other},
+             T + "hdr_tool": {"path": T + "hdr_tool", "class": "tool"}, T + "hdr_doc": {"path": T + "hdr_doc", "class": "doc"}}
+    rr = dict(base_roots, **extra)
+    rfiles = list(recipe.tracked(rk)) + [T + n + "/h.h" for n in ("hdr_prod", "hdr_other", "hdr_tool", "hdr_doc")]
+
+    def home(d):
+        return [e for e in recipe.check(mut(include=RECIPE["include"] + [T + d]), ROOT, rfiles, rr, None, rk) if "lies in no admitted product root" in e]
+    check("include dir in a product root of the same target accepted", not home("hdr_prod"), home("hdr_prod"))
+    check("include dir in a product root of the other target rejected", len(home("hdr_other")) == 1, home("hdr_other"))
+    check("include dir in a tool root rejected", len(home("hdr_tool")) == 1, home("hdr_tool"))
+    check("include dir in a doc root rejected", len(home("hdr_doc")) == 1, home("hdr_doc"))
+    # one name, one file: two include dirs of one recipe holding a header of the same include-relative path are red
+    rr2 = dict(rr, **{T + "hdr_prod2": {"path": T + "hdr_prod2", "class": "product", "target": own}})
+    rf2 = rfiles + [T + "hdr_prod2/h.h", T + "hdr_prod2/g.h"]
+
+    def dups(dirs, files_):
+        return [e for e in recipe.check(mut(include=RECIPE["include"] + dirs), ROOT, files_, rr2, None, rk) if "one home per header" in e]
+    check("one header in one include dir accepted", not dups([T + "hdr_prod"], rf2), dups([T + "hdr_prod"], rf2))
+    check("two include dirs holding the same include-relative header rejected, naming both files",
+          len(dups([T + "hdr_prod", T + "hdr_prod2"], rf2)) == 1 and T + "hdr_prod/h.h" in dups([T + "hdr_prod", T + "hdr_prod2"], rf2)[0]
+          and T + "hdr_prod2/h.h" in dups([T + "hdr_prod", T + "hdr_prod2"], rf2)[0])
+    check("two include dirs with different headers accepted", not dups([T + "hdr_prod", T + "hdr_prod2"], rfiles + [T + "hdr_prod2/g.h"]))
+    # across the whole target: two admitted guest roots with their own include/ dirs holding fnvnx/x.h, neither in this recipe's include
+    cr = dict(rr, **{T + "cr1": {"path": T + "cr1", "class": "product", "target": own}, T + "cr2": {"path": T + "cr2", "class": "product", "target": own},
+                     T + "cr3": {"path": T + "cr3", "class": "product", "target": other}})
+    crf = rfiles + [T + "cr1/include/fnvnx/x.h", T + "cr2/include/fnvnx/x.h", T + "cr3/include/fnvnx/x.h"]
+
+    def cross(roots_, files_):
+        return [e for e in recipe.check(mut(), ROOT, files_, roots_, None, rk) if "one home per header" in e]
+    check("two admitted roots of one target with fnvnx/x.h in include/ are red (naming both)", len(cross(cr, crf)) == 1 and T + "cr1/include/fnvnx/x.h" in cross(cr, crf)[0]
+          and T + "cr2/include/fnvnx/x.h" in cross(cr, crf)[0] and T + "cr3/include/fnvnx/x.h" not in cross(cr, crf)[0], cross(cr, crf))
+    check("the same header in a root of the other target, or only once, is accepted", not cross(cr, [f for f in crf if "cr2" not in f]), cross(cr, [f for f in crf if "cr2" not in f]))
     m = mut()
     m["generated"][0]["outputs"] = ["a.c"]
     check("generated output colliding with a tracked file rejected", any("also a tracked file" in e for e in errs(m)))
@@ -417,7 +481,7 @@ def check_tc_gate(repo, tcc, tiny):
     print("INFO gate determinism, external compiler + external include tree (2 cold + warm) %.1f s: %s" % (td, g and g["detail"]))
     check("determinism gate with the compiler as an external tree at /opt/tc and a second external: green, accepted by verdict, each fetched once",
           rc == 0 and g["universe"] == 2 == g["certified"] and accepted("determinism", BASE + "/gtc")[0] == "green"
-          and sorted(os.listdir(BASE + "/tccache/external")) == sorted([tcc, tiny]), (g, txt))
+          and sorted(os.listdir(BASE + "/tccache/external")) == sorted([tcc, tiny, tcc + ".co", tiny + ".co"]), (g, txt))
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ Rules (each violated precondition is a stage error that lists everything it foun
             its slots are reported as without provider and its LoadLibrary fails).  `static` = in the exe's closure; the others
             are loadable on demand (loader: fnvnx_module_load).
   order     The Windows rule for static imports: depth first over the import directories in directory order, a module is
-            initialised after all modules it imports from.  Assumption (documented Windows behaviour): in a dependency
+            initialised after all modules it imports from.  Assumption (documented Windows behaviour): in a dependency (ASM-003)
             cycle the module visited first is initialised last, i.e. an edge back to a module still being visited is not
             followed.  The table order is this order for the static modules, followed by the on-demand ones sorted by name; it is the mapping order, the init order and the TLS-index order (the
             Windows loader numbers TLS indices in map order, which differs; the number is private to the loader and the
@@ -56,6 +56,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import declareddlls
 import dllkind
+import exepin
 import gatefile
 import iat
 
@@ -347,14 +348,13 @@ def exe_slots(exe):
 
 
 def run(exe_path, bridge_path, dirs, out, declared_path):
-    with open(exe_path, 'rb') as fh:
-        exe = PE(fh.read(), os.path.basename(exe_path))
+    exe = PE(exepin.load_exe(exe_path), exepin.NAME)
     brows, _ = iat.bridge_rows(bridge_path)
     bridge = [(r['dll'], r['name'], r['conv'], r['ordinal']) for r in brows]
     system = {r['dll'] for r in brows}
     wine = declareddlls.read(declared_path)         # the dlls of the declared machine (Wine 9.0)
     mods = scan(dirs, system)
-    me = lower(os.path.basename(exe_path))
+    me = lower(exepin.NAME)
     image = dllkind.images_of({n: [iat.norm_dll(d) for d, _ in m.imports] for n, m in mods.items()}, system | {me})
     declared_mods = {n: m for n, m in mods.items() if n not in image}   # found, no bridge row, the declared machine cannot load them
     order = closure(exe, system, {n: m for n, m in mods.items() if n in image}, set(declared_mods))
@@ -421,7 +421,7 @@ def main():
     a = ap.parse_args()
     try:
         text, bad = run(a.exe, a.bridge, a.dir, a.out_dir, a.declared)
-    except (StageError, ValueError, OSError) as e:
+    except (StageError, ValueError, OSError, exepin.ExePinError) as e:
         sys.exit('modules: %s' % e)
     print(text)
     sys.exit(1 if bad else 0)

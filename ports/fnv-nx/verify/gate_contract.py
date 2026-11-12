@@ -2,8 +2,9 @@
 """Gate "contract" family (fnvnx-gate/1, class 8 of VERDICT.md): the whole-binary gates of contract/ judged on the link of the product root.
     python3 -I gate_contract.py --gate NAME     NAME: n1 n2_data n2_call n2_vcall xc xunit rtti pcrel bodysel
     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/NAME.json (gatefile.py shape).
-One entry per gate in gates.json, so each is its own line of the verdict; the stages are the ones of contract/verdict.py (exefacts, n1,
+One entry per gate file in gates.d, so each is its own line of the verdict; the stages are the ones of contract/verdict.py (exefacts, n1,
 objfacts, registry, xunit, rtti, pcrel, bodysel), run with the same arguments, in the order of their dependencies, each once per input set:
+N3 (the static native-body criterion of the pi plugin's `.fnvnx.n3`) reaches bodysel through the `bind` stage (contract/bind.py: exe addresses of the objects' N3 rows through the N1 certificate, written as n3.tsv) and bodysel's `--n3`; a function without an `ok` N3 row is LIFTED.
 their outputs are kept in GATE_CACHE/contract/<key>/ (key = sha256 of contract_inputs.json, the git tree under test and the content of
 the objects and ELF of the root), so the nine gates cost one run of the chain and a cold run gives the same files.
 
@@ -31,6 +32,7 @@ not match its hash, a root that has no link, no "game" (only an image root needs
 n2_data n2_call n2_vcall xc (registry.py counts, rows = functions that are not N2): not failures in themselves (the function becomes LIFTED, a
 legal outcome); the invariant that closes the class is that EVERY row is turned into LIFTED by bodysel. Universe = the functions the gate
 judged, certified = judged minus the rows whose address bodysel does not give LIFTED (the function would run a native body that fails its contract)."""
+import contextlib
 import hashlib
 import json
 import os
@@ -43,6 +45,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "contract"))
+import exepin  # noqa: E402
 import gate_build  # noqa: E402
 import iat  # noqa: E402
 import images  # noqa: E402
@@ -56,7 +59,9 @@ PATHS = ("exe", "msvc", "universe")
 RESULTS = {"units": "the root's link stage", "addrmap": "the root's link stage", "aliases": "the root's link stage"}
 # inputs of the link-side gates; a key is required only by the gates that read it (a gate without its key is red, naming it and its owner)
 OPT_PATHS = {"reach_requests": ("reach, reachlink", "L5: platform manifest reach_requests.tsv"),
-             "dynsites": ("gpa", "L5: dynsites.tsv")}
+             "dynsites": ("gpa", "L5: dynsites.tsv"),
+             "ehfacts": ("eh (gate_lift.py)", "L3a: NAME[/path] of the external that holds ehtables.json of the exe and <module>/ehtables.json"),
+             "sites": ("order (gate_lift.py)", "L3a: NAME/path of the file of the sites of the lifted universe: \"1 HEXADDR\" for every locked instruction (every LOCK-prefixed instruction and every xchg with a memory operand), \"2 HEXADDR mem|ax\" for every FPU status instruction (FSTSW, FNSTENV, FNSAVE)")}
 OPT_KEYS = set(OPT_PATHS) | {"keys", "bridge"}
 CONTRACT_GATES = ("n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcrel", "bodysel")
 LINK_GATES = ("abs", "disp", "reach", "reachlink", "gpa")
@@ -96,9 +101,9 @@ def load_inputs(path):
         names = [e.get("name") for e in exts if isinstance(e, dict)]
         if len(set(names)) != len(names):
             err.append("external names are not unique")
-        for k in PATHS + tuple(k for k in ("reach_requests", "dynsites", "keys", "bridge") if k in doc):
+        for k in PATHS + tuple(k for k in ("reach_requests", "dynsites", "keys", "bridge", "ehfacts", "sites") if k in doc):
             v = doc.get(k)
-            if not isinstance(v, str) or "/" not in v or v.split("/", 1)[0] not in names or ".." in v.split("/"):
+            if not isinstance(v, str) or ("/" not in v and k != "ehfacts") or v.split("/", 1)[0] not in names or ".." in v.split("/"):
                 err.append("%s must be NAME/path inside a declared external" % k)
     rg = doc.get("ranges")
     if not (isinstance(rg, dict) and set(rg) == {"exe", "module"} and all(isinstance(v, str) and "/" in v and ".." not in v.split("/")
@@ -138,8 +143,8 @@ def assemble(link, res, game, out, rr):
         if is_game:
             os.symlink(o["object"], os.path.join(link, "game", name))
     os.symlink(res["elf"]["path"], os.path.join(link, "guest", "fnvnx.elf"))
-    with open(os.path.join(os.path.dirname(link), "inputs.rsp"), "w") as f:      # ld.py's response file: one quoted path per object of the link
-        f.write("".join('"%s"\n' % o["object"] for o in res["objects"]))
+    with open(os.path.join(os.path.dirname(link), "inputs.rsp"), "w") as f:      # the link's response file: one quoted path per object of the link
+        f.write("".join('"%s"\n' % o["object"] for o in res["objects"] + [x for lr in res.get("link_roots", []) for x in lr["objects"]]))   # in link order
     for k, dst in (("addrmap", "out/addrmap.tsv"), ("aliases", "out/aliases.ld")):
         os.symlink(os.path.join(out, rr[k]), os.path.join(link, dst))
 
@@ -153,13 +158,19 @@ def py(script, *args):
     return [sys.executable, "-I", os.path.join(CONTRACT, script)] + list(args)
 
 
-def images_of(doc, ext):
+def images_of(doc, ext, pinned=True):
     """([(name, pe path, ranges path)] of the images that have range facts, [names without]) of contract.images.image_set."""
     have, lack = [], []
     bridge = set()          # a bridge dll is never an image (contract/dllkind.py): the dlls with rows in the declared bridge.tsv
     if doc.get("bridge"):
         bridge = {r["dll"] for r in iat.bridge_rows(P2(ext, doc["bridge"]))[0]}
-    for name, path in images.image_set(P2(ext, doc["exe"]), [ext[n]["host"] for n in ("exe", "redist")], bridge):
+    found = images.image_set(P2(ext, doc["exe"]), [ext[n]["host"] for n in ("exe", "redist")], bridge)
+    try:   # the declared machine's image set is the pinned one (PINNED=False: a judge that only reads the images the facts name; the pin is the contract gate's) (contract/exepin.py IMAGES): digests of every guest image DLL
+        if pinned:
+            exepin.check_images([(n, os.path.getsize(p), hashlib.sha256(open(p, "rb").read()).hexdigest()) for n, p in found if not n.endswith(".exe")])
+    except exepin.ExePinError as e:
+        raise Red(str(e))
+    for name, path in found:
         rel = doc["ranges"]["exe"] if name.endswith(".exe") else doc["ranges"]["module"] % name.rsplit(".", 1)[0]
         rg = P2(ext, rel)
         if os.path.isfile(rg):
@@ -169,13 +180,15 @@ def images_of(doc, ext):
     return have, lack
 
 
-def stages(w, doc, ext, rp):
-    """{stage: (argv, [files it writes])} with paths inside the work dir W (contract/verdict.py's arguments)."""
+def stages(w, doc, ext, rp, only=None):
+    """{stage: (argv, [files it writes])} with paths inside the work dir W (contract/verdict.py's arguments). ONLY: a stage name; the image set (it
+    reads the exe) is derived only for the stages that take it (gpa, reach, reachlink), so the other stages can be built without it."""
     P = lambda k: rp[k] if k in rp else P2(ext, doc[k])
     link = w + "/link"
     imgs = []
-    for name, pe, rg in images_of(doc, ext)[0]:
-        imgs += ["--image", "%s=%s,%s" % (name, pe, rg)]
+    if only is None or only in IMAGE_GATES:
+        for name, pe, rg in images_of(doc, ext)[0]:
+            imgs += ["--image", "%s=%s,%s" % (name, pe, rg)]
     bridge = ["--bridge", P2(ext, doc["bridge"])] if doc.get("bridge") else []
     opt = lambda k: P2(ext, doc[k]) if k in doc else None
     st = {
@@ -188,7 +201,10 @@ def stages(w, doc, ext, rp):
         "rtti": (py("gate_rtti.py", "--objects", link + "/game", "--readelf", READELF), ["gate/rtti.json"]),
         "pcrel": (py("gate_pcrel.py", "--elf", link + "/guest/fnvnx.elf", "--objects", link + "/fixed", "--work", w + "/pcrel",
                      "--readelf", READELF, "--nm", NM), ["gate/pcrel.json"]),
-        "bodysel": (py("bodysel.py", "--universe", P("universe"), "--n1", w + "/n1.json", "--gates", w + "/gates", "--out", w + "/bodysel.tsv"),
+        "bind": (py("bind.py", "--obj", w + "/obj.json", "--n1", w + "/n1.json", "--units", rp["units"], "--out", w + "/bind.json", "--n3-out", w + "/n3.tsv"),
+                 ["bind.json", "n3.tsv"]),
+        "bodysel": (py("bodysel.py", "--universe", P("universe"), "--n1", w + "/n1.json", "--gates", w + "/gates", "--n3", w + "/n3.tsv",
+                       "--out", w + "/bodysel.tsv"),
                     ["bodysel.tsv", "gate/bodysel.json"]),
         "abs": (py("../link/gate_abs.py", "--inputs", w + "/inputs.rsp", "--elf", link + "/guest/fnvnx.elf"), ["gate/abs.json"]),
         "gpa": (py("gpa_names.py", "--sites", opt("dynsites") or "", *imgs, *bridge, "--out", w + "/gpa"), ["gpa/gpa_names.tsv", "gate/gpa.json"]),
@@ -203,13 +219,13 @@ def stages(w, doc, ext, rp):
     return st
 
 
-NEEDS = {"n1": ["n1"], "xunit": ["xunit"], "rtti": ["rtti"], "pcrel": ["pcrel"], "bodysel": ["exefacts", "n1", "objfacts", "registry", "bodysel"]}
+NEEDS = {"n1": ["n1"], "xunit": ["xunit"], "rtti": ["rtti"], "pcrel": ["pcrel"], "bodysel": ["exefacts", "n1", "objfacts", "registry", "bind", "bodysel"]}
 NEEDS.update({g: NEEDS["bodysel"] for g in REGISTRY})
 NEEDS.update({"abs": ["abs"], "disp": ["disp"], "gpa": ["gpa"], "reach": ["gpa", "reach"], "reachlink": ["gpa", "reach", "reachlink"]})
 
 
 def run_stage(name, w, doc, ext, rp):
-    argv, outs = stages(w, doc, ext, rp)[name]
+    argv, outs = stages(w, doc, ext, rp, name)[name]
     if all(os.path.isfile(os.path.join(w, o)) for o in outs):
         return
     gdir = os.path.join(w, "gate")
@@ -251,17 +267,24 @@ def judge_root(gate, repo, cache, root):
         return 1, 0, [root + ":inputs"], "input error: %s" % (str(e)[:300] or type(e).__name__)
 
 
-def judge(gate, repo, cache, root):
-    """-> (universe, certified, ids, detail) of the gate on ROOT; raises Red."""
+class Skip(Exception):
+    """The root has no universe for this gate (VERDICT.md "Universe rule of the per-root gates"): not red; args[0] is the detail."""
+
+
+@contextlib.contextmanager
+def chain(gate, repo, cache, root):
+    """The preamble of judge(), shared with the L2 gates (gate_l2native.py): the universe rule, the root's build, its result files, the stages GATE needs
+    run (cached), the externals fetched. Yields (doc, rec, objs, out, rp, ext, w): w holds the stage outputs (bodysel.tsv, gates/ ...); ext {name: {host}}
+    is valid inside the with block only. Raises Red, or Skip when the root has no universe."""
     rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
     image = bool(rec.get("link"))
     game = rec.get("game")
-    if not image:         # universe rule (VERDICT.md "Universe rule of the per-root gates"): the link gates' items come from the root's linked guest ELF
+    if not image:         # universe rule: the link gates' items come from the root's linked guest ELF
         if gate in LINK_GATES:
-            return 0, 0, [], "root links no guest image: its objects are judged on the image root that links it (link.roots)"
+            raise Skip("root links no guest image: its objects are judged on the image root that links it (link.roots)")
         if game:
             raise Red("root %s declares \"game\" but links no ELF: the game's units are judged on the image that links them" % root)
-        return 0, 0, [], "root declares no game directory: no game functions"
+        raise Skip("root declares no game directory: no game functions")
     if not isinstance(game, str) or not game:
         raise Red("root %s: build.json declares no \"game\" (the root-relative directory of the game's units; no default)" % root)
     doc = load_inputs(os.path.join(repo, INPUTS))
@@ -295,29 +318,43 @@ def judge(gate, repo, cache, root):
             os.rename(tmpl, w + "/link")
         for st in NEEDS[gate]:
             run_stage(st, w, doc, ext, rp)
-        if gate == "reach":       # the facts file the objstub gate reads (gate_objstub.py): written only from a reach run of this tree
-            d = os.path.join(cache, "reach", tree)
-            os.makedirs(d, exist_ok=True)
-            shutil.copyfile(w + "/reach/reach.facts.tsv", d + "/reach.facts.tsv")
-        if gate not in REGISTRY:
-            r = json.load(open(os.path.join(w, "gate", gate + ".json")))
-            u, c, ids, detail = r["universe"], r["certified"], [root + ":" + i for i in r["uncertified"]], r["detail"]
-            if gate in IMAGE_GATES:                 # an image of the closure without range facts: a reported red item (the stage judged the rest)
-                lack = images_of(doc, ext)[1]
-                u, ids = u + len(lack), ids + [root + ":" + n for n in lack]
-                detail += "".join("; %s has no range facts (owner L3a/L5)" % n for n in lack)
-            return u, c, ids, detail
-        verd = {}
-        for ln in open(w + "/bodysel.tsv"):
-            p = ln.rstrip("\n").split("\t")
-            verd[int(p[0], 16)] = p[1]
-        g = REGISTRY[gate]
-        rows = [int(ln.split("\t")[0], 16) for ln in open(w + "/gates/bodysel.tsv") if ln.split("\t")[1] == g]
-        counts = json.load(open(w + "/gates/gates.json"))[g]["counts"]
-        u, c, ids = n2_item(None, counts, rows, verd)
-        return u, c, [root + ":" + i for i in ids], "judged %d, rows %d, every row must be LIFTED by bodysel" % (u, len(rows))
+        yield doc, rec, objs, out, rp, ext, w
     finally:
         shutil.rmtree(ws, ignore_errors=True)
+
+
+def judge(gate, repo, cache, root):
+    """-> (universe, certified, ids, detail) of the gate on ROOT; raises Red."""
+    try:
+        with chain(gate, repo, cache, root) as (doc, rec, objs, out, rp, ext, w):
+            return _judge(gate, repo, cache, root, doc, rp, ext, w)
+    except Skip as e:
+        return 0, 0, [], str(e)
+
+
+def _judge(gate, repo, cache, root, doc, rp, ext, w):
+    tree = gate_build.tree_of(repo)
+    if gate == "reach":       # the facts file the objstub gate reads (gate_objstub.py): written only from a reach run of this tree
+        d = os.path.join(cache, "reach", tree)
+        os.makedirs(d, exist_ok=True)
+        shutil.copyfile(w + "/reach/reach.facts.tsv", d + "/reach.facts.tsv")
+    if gate not in REGISTRY:
+        r = json.load(open(os.path.join(w, "gate", gate + ".json")))
+        u, c, ids, detail = r["universe"], r["certified"], [root + ":" + i for i in r["uncertified"]], r["detail"]
+        if gate in IMAGE_GATES:                 # an image of the closure without range facts: a reported red item (the stage judged the rest)
+            lack = images_of(doc, ext)[1]
+            u, ids = u + len(lack), ids + [root + ":" + n for n in lack]
+            detail += "".join("; %s has no range facts (owner L3a/L5)" % n for n in lack)
+        return u, c, ids, detail
+    verd = {}
+    for ln in open(w + "/bodysel.tsv"):
+        p = ln.rstrip("\n").split("\t")
+        verd[int(p[0], 16)] = p[1]
+    g = REGISTRY[gate]
+    rows = [int(ln.split("\t")[0], 16) for ln in open(w + "/gates/bodysel.tsv") if ln.split("\t")[1] == g]
+    counts = json.load(open(w + "/gates/gates.json"))[g]["counts"]
+    u, c, ids = n2_item(None, counts, rows, verd)
+    return u, c, [root + ":" + i for i in ids], "judged %d, rows %d, every row must be LIFTED by bodysel" % (u, len(rows))
 
 
 if __name__ == "__main__":
