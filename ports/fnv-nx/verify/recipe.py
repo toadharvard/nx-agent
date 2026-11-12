@@ -1263,7 +1263,8 @@ def main(argv):
         if argv[:1] == ["check"]:
             roots = load_admit(repo)
             root, _ = split_spec(opt["--root"])   # the one place the spec is split: nothing below sees root@NAME
-            errs = check(load_recipe(repo, roots, opt["--root"]), root, tracked(repo), roots, load_pin(repo), repo, _)
+            rec = load_recipe(repo, roots, opt["--root"]) if _ else json.load(open(os.path.join(repo, roots[root]["recipe"])))   # a base is checked whole: with its variants
+            errs = check(rec, root, tracked(repo), roots, load_pin(repo), repo, _)
             print("\n".join(errs) or "recipe valid")
             return 2 if errs else 0
         res = build(repo, opt["--root"], opt["--store"], opt["--out"], int(opt.get("--jobs", 4)), opt.get("--ext"))
