@@ -15,6 +15,8 @@
           and returns eax, edx and, for kind 2, the popped ST0. It works for stdcall and cdecl alike: the activation is over when a `ret` pops the
           sentinel with esp above the pushed frame, and the guest esp is then reset to its value before the call.
           kind: 0 integer / void / pointer result, 1 64-bit integer (edx:eax), 2 float or double in ST0.
+     void fnvnx_guest_invoke_regs(u32 addr, u32 ecx, u32 edx, u32 nargs, const u32 *args, u32 kind, struct fnvnx_guest_ret *out)
+          The same with edx set as well (the __fastcall bridges of rt/dispatch.c, tools/bridgegen.py); fnvnx_guest_invoke leaves edx as the guest state had it.
      void fnvnx_guest_current(u32 *esp, u32 *teb)
           The guest esp and TEB of the calling host thread's guest state (inside an import call: the esp of that call).
    Host hooks the runtime needs (provided by the loader / platform):
@@ -34,6 +36,7 @@ void fnvl_attach_main(void *mem, u32 sp, u32 teb) __attribute__((noinline));
 void fnvl_detach_main(void) __attribute__((noinline));
 void fnvl_current_main(u32 *sp, u32 *teb) __attribute__((noinline));
 void fnvl_invoke_main(u32 addr, u32 ecxv, u32 nargs, const u32 *args, u32 kind, struct fnvnx_guest_ret *out) __attribute__((noinline));
+void fnvl_invoke_regs_main(u32 addr, u32 ecxv, u32 edxv, u32 nargs, const u32 *args, u32 kind, struct fnvnx_guest_ret *out) __attribute__((noinline));
 void fnvl_nobody(void);
 extern const u32 fnvnx_lift_cpu_bytes;
 }
@@ -84,9 +87,14 @@ extern "C" void fnvl_current_main(u32 *sp, u32 *teb) { struct cpu *p = *fnvl_hos
 
 extern "C" void fnvl_invoke_main(u32 addr, u32 ecxv, u32 nargs, const u32 *args, u32 kind, struct fnvnx_guest_ret *out)
 {
+    fnvl_invoke_regs_main(addr, ecxv, (*fnvl_host_tls_slot())->r[2], nargs, args, kind, out);
+}
+
+extern "C" void fnvl_invoke_regs_main(u32 addr, u32 ecxv, u32 edxv, u32 nargs, const u32 *args, u32 kind, struct fnvnx_guest_ret *out)
+{
     c = *fnvl_host_tls_slot();
     u32 base = c->r[4];
-    eax = c->r[0]; ecx = ecxv; edx = c->r[2]; ebx = c->r[3]; esp = base; ebp = c->r[5]; esi = c->r[6]; edi = c->r[7];
+    eax = c->r[0]; ecx = ecxv; edx = edxv; ebx = c->r[3]; esp = base; ebp = c->r[5]; esi = c->r[6]; edi = c->r[7];
     fp_set(c->hfpcr, c->hfpsr);
     for (u32 i = nargs; i--; ) { esp -= 4; M32(esp) = args[i]; }
     esp -= 4; M32(esp) = FNVL_SENT;
@@ -115,6 +123,7 @@ WRAP(fnvnx_lift_enter, fnvl_thread_main)
 WRAP(fnvnx_lift_attach, fnvl_attach_main)
 WRAP(fnvnx_lift_detach, fnvl_detach_main)
 WRAP(fnvnx_guest_invoke, fnvl_invoke_main)
+WRAP(fnvnx_guest_invoke_regs, fnvl_invoke_regs_main)
 WRAP(fnvnx_guest_current, fnvl_current_main)
 
 /* The routine an address that is not a key of the dispatcher table resolves to (rt/rt.c): #UD at that address, through the SEH runtime (rt/seh.cc).

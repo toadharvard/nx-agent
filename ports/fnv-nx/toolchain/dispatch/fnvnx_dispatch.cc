@@ -16,15 +16,25 @@
  * in one 64-bit store, so a reader never sees the key of one target with the entry of another. An address that is
  * no entry does not return. The hit path is a load, a compare, a branch and a shift.
  *
+ * A bridge is one function per descriptor, so it is not told which exe address it stands for. The call sequence
+ * therefore stores the address in the thread-local word `fnvnx_call_fp` (rt/dispatch.c) just before the call, on
+ * the hit path and the miss path alike; a bridge reads it first thing, a native body ignores it.
+ *
  * The descriptor is the call's shape for a bridge, a string `conv:ret:arg,arg,...`:
  *   conv   this   the first argument is the object, in ecx on x86 (a member function, MSVC's default)
  *                 (the object is listed among the arguments, first)
  *          fast   __fastcall: the first two integer arguments in ecx, edx
  *          stack  everything on the stack (__cdecl and __stdcall alike: the callee's own `ret N` tells them apart)
  *   ret    v | i (32-bit integer or pointer) | q (64-bit integer) | f | d | a<N> (an N-byte aggregate returned in
- *          registers) | m<N> (returned in memory the caller provides)
- *   arg    i | q | f | d | s<N>g (an N-byte aggregate in general registers or on the stack) | s<N>h (a homogeneous
- *          floating-point aggregate) | s<N>r (passed as a reference to a copy)
+ *          general registers) | a<N>hf, a<N>hd (a homogeneous aggregate of floats, of doubles, returned in
+ *          floating-point registers) | m<N> (returned in memory the caller provides)
+ *   arg    i | q | f | d | s<N>g (an N-byte aggregate in general registers or on the stack) | s<N>hf, s<N>hd (a
+ *          homogeneous aggregate of floats, of doubles) | s<N>r (passed as a reference to a copy)
+ * (A homogeneous aggregate names its element type: {float, float} and {double} are both 8 bytes and travel in
+ * different registers, so the size alone does not say how a bridge receives or returns it.)
+ *
+ * The descriptors of a unit are the objects' own fact: section .fnvnx.disp (not loaded), one text line per distinct
+ * descriptor of the unit. lift/tools/bridgegen.py reads it from every object of every admitted root.
  * The convention is the declaration's own: CC1 keeps MSVC's __cdecl / __stdcall / __fastcall / __thiscall as the
  * type attribute fnvnx_cc (shim/include/fnvnx_compat.h), which the fnvnx_names plugin registers.
  *
@@ -56,6 +66,8 @@
 #include "attribs.h"
 #include "builtins.h"
 #include "calls.h"
+#include "output.h"
+#include <set>
 #include <string>
 #include <vector>
 
@@ -73,6 +85,21 @@ static tree get_dispatch()
     TREE_NOTHROW(dispatch_decl) = 1;
   }
   return dispatch_decl;
+}
+
+/* The exe address of the call in progress, for a bridge: a bridge is one function per descriptor and gets only the
+ * call's own arguments, so the target travels in this thread-local word, which the call sequence stores
+ * immediately before the call (rt/dispatch.c defines it). */
+static tree fp_var;
+static tree get_fp_var()
+{
+  if (!fp_var) {
+    fp_var = build_decl(UNKNOWN_LOCATION, VAR_DECL, get_identifier("fnvnx_call_fp"), unsigned_type_node);
+    DECL_EXTERNAL(fp_var) = 1; TREE_PUBLIC(fp_var) = 1; DECL_ARTIFICIAL(fp_var) = 1; TREE_USED(fp_var) = 1;
+    set_decl_tls_model(fp_var, TLS_MODEL_INITIAL_EXEC);
+    varpool_node::get_create(fp_var);
+  }
+  return fp_var;
 }
 
 static tree new_site()
@@ -107,6 +134,8 @@ static bool hfa(tree t, tree *elt, int *n)
   return true;
 }
 
+static std::set<std::string> descs;                  /* every descriptor this unit uses: .fnvnx.disp */
+
 static bool shape(tree t, bool ret, tree fntype, std::string &out, location_t loc)
 {
   if (VOID_TYPE_P(t)) { out += "v"; return ret; }
@@ -123,9 +152,13 @@ static bool shape(tree t, bool ret, tree fntype, std::string &out, location_t lo
     { error_at(loc, "DISPATCH1: type %qT in an indirect call has no shape", t); return false; }
   if (!TYPE_SIZE_UNIT(t) || !tree_fits_uhwi_p(TYPE_SIZE_UNIT(t))) { error_at(loc, "DISPATCH1: type %qT has no constant size", t); return false; }
   std::string n = std::to_string((unsigned long)tree_to_uhwi(TYPE_SIZE_UNIT(t)));
-  if (ret) { out += (aggregate_value_p(t, fntype) ? "m" : "a") + n; return true; }
   tree elt = NULL_TREE; int cnt = 0;
-  out += "s" + n + (TREE_ADDRESSABLE(t) || tree_to_uhwi(TYPE_SIZE_UNIT(t)) > 16 ? "r" : AGGREGATE_TYPE_P(t) && hfa(t, &elt, &cnt) && cnt ? "h" : "g");
+  bool h = AGGREGATE_TYPE_P(t) && hfa(t, &elt, &cnt) && cnt;
+  std::string he = h ? (TYPE_PRECISION(elt) == 32 ? "hf" : "hd") : "";
+  if (ret) { out += aggregate_value_p(t, fntype) ? "m" + n : "a" + n + he; return true; }
+  /* AAPCS64: a class that is not trivially copyable is passed as a reference to a copy; a homogeneous aggregate of up to four elements travels in
+     floating-point registers whatever its size (4 doubles are 32 bytes); any other aggregate of more than 16 bytes is passed as a reference to a copy */
+  out += "s" + n + (TREE_ADDRESSABLE(t) ? "r" : h ? he : tree_to_uhwi(TYPE_SIZE_UNIT(t)) > 16 ? "r" : "g");
   return true;
 }
 
@@ -158,7 +191,16 @@ static tree descriptor(gcall *call)
     if (parm && parm != void_list_node) parm = TREE_CHAIN(parm);
     if (!shape(t, false, ft, d, loc)) return NULL_TREE;
   }
+  descs.insert(d);
   return build_string_literal(d.size() + 1, d.c_str());
+}
+
+static void finish_unit(void *, void *)
+{
+  if (descs.empty()) return;
+  fprintf(asm_out_file, "\t.pushsection\t.fnvnx.disp,\"\",%%progbits\n");
+  for (auto &d : descs) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", d.c_str());
+  fprintf(asm_out_file, "\t.popsection\n");
 }
 
 static bool indirect_call(gimple *st)
@@ -226,6 +268,7 @@ static void rewrite(function *fun, gimple *st)
   add_phi_arg(phi, e1, hit_tail, loc); add_phi_arg(phi, e2, miss_tail, loc);
   tree target = make_ssa_name(TREE_TYPE(fp));
   gsi = gsi_for_stmt(st);
+  before(gimple_build_assign(get_fp_var(), k));
   before(gimple_build_assign(target, NOP_EXPR, e));
   gimple_call_set_fn(call, target);
   update_stmt(call);
@@ -261,5 +304,6 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
   p.ref_pass_instance_number = 1;
   p.pos_op = PASS_POS_INSERT_AFTER;
   register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &p);
+  register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
   return 0;
 }
