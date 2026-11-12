@@ -61,6 +61,9 @@ CASES = {
     'pf_pop_test_other':  ('21d8 9c 58 a900002000 7400 31c0 c3', []),                    # test eax,0x200000: the masked bit is not observed
     'pf_pop_store':       ('21d8 9c 58 a300200000 31c0 c3', [('af', 4, 'pushf')]),       # mov [0x2000],eax stores the masked value
     'pf_pop_mov_xor_and': ('21d8 9c 58 89c1 3500002000 31c8 2500002000 31c9 c3', []),        # cpuid id-bit idiom
+    'pf_id_idiom_cmp':    ('21d8 9c 58 89c3 3500002000 50 9d 9c 58 53 9d 39d8 7400 31c0 31db c3', []),      # the cpuid ID-bit idiom after an `and`: the copies in eax and ebx are the same value, cmp cancels them
+    'pf_id_idiom_dirty':  ('21d8 9c 58 89c3 c1e801 c1e001 50 9d 9c 58 53 9d 39d8 7400 31c0 31db c3', [('af', 4, 'pushf')]),      # shifted out and back: not a copy any more, cmp reads it
+    'pf_id_idiom_test':   ('21d8 9c 58 89c3 3500002000 50 9d 9c 58 53 9d 85d8 7400 31c0 31db c3', [('af', 4, 'pushf')]),      # test reads the shared bit: its flags depend on it
     'pf_popf_pushf_pop':  ('21d8 9c 9d 9c 58 2500002000 31c0 c3', []),                   # push, popf, push again, pop, mask: the mask moves through popf
     'pf_popf_jz':         ('21d8 9c 9d 7400 c3', []),                                    # popf of a masked word masks AF only; jz reads ZF
     'cmc_at_entry':       ('f5 c3', [('cf', 1, 'other')]),
