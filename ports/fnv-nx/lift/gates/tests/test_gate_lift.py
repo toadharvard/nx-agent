@@ -160,7 +160,7 @@ def flags_repo(name, code, cache, extra_entries=()):
     doc = {"format": "fnvnx-contract-inputs/1", "external": [exe, redist, facts], "exe": "exe/a.exe", "msvc": "facts/msvc", "universe": "facts/universe.tsv",
            "root_results": {"units": "units.json", "addrmap": "addrmap.tsv", "aliases": "aliases.ld"}, "ranges": {"exe": "facts/ranges.tsv", "module": "facts/%s/ranges.tsv"}}
     repo = lifted_repo(name, BODIES["ordered"][0], pk)
-    for f in ("gate_flags.py",):
+    for f in ("gate_flags.py", "invariance.py"):
         shutil.copyfile(os.path.join(REAL, LIFT, f), os.path.join(repo, LIFT, f))
     os.makedirs(os.path.join(repo, T + "lift/tools"), exist_ok=True)
     shutil.copyfile(os.path.join(REAL, T + "lift/tools/cli.py"), os.path.join(repo, T + "lift/tools/cli.py"))

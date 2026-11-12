@@ -63,6 +63,12 @@ CASES = {
     'pf_pop_mov_xor_and': ('21d8 9c 58 89c1 3500002000 31c8 2500002000 31c9 c3', []),        # cpuid id-bit idiom
     'pf_popf_pushf_pop':  ('21d8 9c 9d 9c 58 2500002000 31c0 c3', []),                   # push, popf, push again, pop, mask: the mask moves through popf
     'pf_popf_jz':         ('21d8 9c 9d 7400 c3', []),                                    # popf of a masked word masks AF only; jz reads ZF
+    # the product-program proof (invariance.py) for what the taint walk cannot show unobserved: both runs reach identical observable states
+    'pf_prove_idiom':     ('21d8 53 9c 58 89c3 3500002000 50 9d 9c 58 53 9d 39d8 7407 b801000000 31db 31c0 5b c3', []),    # cpuid ID-bit probe shape: the bit cancels in cmp, ebx is restored
+    'pf_prove_ret_eax':   ('21d8 53 9c 58 89c3 3500002000 50 9d 9c 58 53 9d 39d8 7402 31db 5b c3', [('af', 4, 'pushf')]),   # eax still holds the bit at the ret
+    'pf_prove_no_form':   ('21d8 9c 58 89c1 0fa2 c3', [('af', 4, 'pushf'), ('-', 0, 'no-form')]),                                            # cpuid has no Form: red, never assumed
+    'pf_prove_dead_slot': ('21d8 9c 83c404 c3', []),                                                                  # the pushed word lies below ESP again: dead
+    'pf_prove_shift':     ('21d8 9c 58 c1e804 83e001 c3', [('af', 4, 'pushf')]),                                        # shr moves the bit to bit 0: observed
     'cmc_at_entry':       ('f5 c3', [('cf', 1, 'other')]),
     'cmc_after_clc':      ('f8 f5 c3', []),
     'adc_at_entry':       ('11c0 c3', [('cf', 1, 'carry')]),
