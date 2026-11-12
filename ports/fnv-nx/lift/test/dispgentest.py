@@ -71,6 +71,15 @@ def main():
         try: dispgen.table(rows); ok = False
         except SystemExit: ok = True
         check(name, ok)
+    # COMPLETENESS: a closure target with no entry makes the generator fail (build red); a complete closure passes
+    a0 = ROWS[0].split('\t')[0] if isinstance(ROWS[0], str) else '%08x' % ROWS[0][0]
+    allc = ['%s\n' % (r.split('\t')[0] if isinstance(r, str) else '%08x' % r[0]) for r in ROWS]
+    try: dispgen.table(ROWS, closure=allc); ok = True
+    except SystemExit: ok = False
+    check('closure: every target has an entry, the table is generated', ok)
+    try: dispgen.table(ROWS, closure=allc + ['deadbee0\n']); ok = False
+    except SystemExit as e: ok = 'deadbee0' in str(e) and 'no dispatch entry' in str(e)
+    check('closure: a target with no entry exits naming it', ok)
     print('dispgentest: %d failed' % bad); sys.exit(1 if bad else 0)
 
 
