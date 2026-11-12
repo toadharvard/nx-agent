@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
-"""Exception-handling tables of FalloutNV.exe, parsed by structure from code the descent reaches (no heuristics):
-C++ FuncInfo (found via `mov eax, offset FuncInfo; jmp handler` stubs), SEH scope tables (v3/v4, inline push or
-__SEH_prolog-style helper), ThrowInfo (second argument of every call of _CxxThrowException, resolved to a constant by in-block constant propagation). Used by universe.py, which supplies
-the descent state (tools/modlift.py supplies it for a module image read through pemod: the same parser, the module's rebased
-addresses); running this file runs the whole pipeline. Output: <facts>/ehtables.json (exe) and <facts>/<module>/ehtables.json, which
-tools/gate_eh.py reads. The JSON also carries the image's executable span `text` and the FuncInfo stubs that failed to parse
-`failed_funcinfo`."""
+"""Exception-handling facts of an image, all by dataflow over the decoded code (no byte windows, no name heuristics); the flow engine is tools/ehflow.py.
+  C++ FuncInfo   every decoded `mov eax, imm32; jmp rel32` whose imm32 is a relocated FuncInfo (magic 0x1993052x), parsed with every bound checked.
+  ThrowInfo (R1) the 2nd argument of each call of the thrower (the noreturn seed): a constant or set of constants by the backward cone, or 0 with object 0 (a rethrow);
+                 an incoming argument k of the caller is the union over EVERY direct call site (recursive, memoised; a cycle without a constant is red);
+                 a caller whose address is taken or that is entered other than by a direct call is red (`throw_sites[].kind == 'red'`, `thrower_escapes`).
+  Callee-saved (R2) ebx/esi/edi/ebp survive a call only where the callee is proven to restore them on every path to each ret (`preserves`), or is an import
+                 (Win32 as documented, ASSUMPTIONS.json 3); otherwise unknown.
+  SEH (R3)       registrations are the decoded stores of an esp-derived address to fs:[0]; the record is {next, handler, field, trylevel}. The handler is a constant; the scope
+                 table is the constant `field` (plain, or xor-ed with a value independent of every argument), or, in a helper whose field is its incoming argument k,
+                 the constant of argument k at every direct call site. A field that is neither (cookie, computed) yields no scope table.
+  Table length (R4) 1 + the largest constant trylevel stored to the frame's trylevel slot (ebp + frame_disp derived from the registration); a non-constant store is
+                 `nonconst_stores` (red); an empty table is valid iff no level >= 0 is stored.
+  Also: the catch continuations (`mov eax, imm32; ret` of a catch funclet) and the frame-handler stubs (`live` iff the stub address is a relocated constant of the universe).
+Used by universe.py, which supplies the descent state (tools/modlift.py supplies it for a module image read through pemod: the same code, rebased addresses; running this
+file runs the whole pipeline). Output: <facts>/ehtables.json (exe) and <facts>/<module>/ehtables.json, which tools/gate_eh.py reads (schema: its docstring). Environment:
+FNVNX_KEYS (L1 keys.tsv with the import conventions; default keys.tsv beside the directory of FNVNX_MODULES)."""
 import os, re, sys, json, bisect
 from collections import Counter, defaultdict, deque
 from itertools import islice
