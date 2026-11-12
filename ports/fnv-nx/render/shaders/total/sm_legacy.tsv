@@ -1,0 +1,169 @@
+model	kind	feature	status	source
+vs_2_0	srcmod	abs@mov	illegal	MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees
+vs_2_0	srcmod	abs@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees
+vs_2_0	srcmod	absneg@mov	illegal	MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees
+vs_2_0	srcmod	absneg@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees
+vs_2_0	srcmod	not	illegal	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register
+vs_2_0	dstmod	sat@mov	illegal	MS:dx9-graphics-reference-asm-vs-instructions-modifiers (_sat: 3_0/3_sw only)
+vs_2_0	dstmod	pp@mov	illegal	MS:dx9-graphics-reference-asm-vs-instructions-modifiers (vs: only _sat); wine check_ps_dstmod agrees
+vs_2_0	opcode	if@temp-written-in-branch-only	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
+vs_2_0	opcode	rep@temp-written-in-loop	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
+vs_2_0	opcode	call@label-used-in-and-out-of-loop	legal	MS:dx9-graphics-reference-asm-vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)
+vs_2_0	addr	c[a0.x+n]@aL-loop	legal	MS:dx9-graphics-reference-asm-vs-registers-vs-2-0/2-x/3-0 (c# RelAddr a0/aL)
+vs_2_x	opcode	breakc	legal	MS:dx9-graphics-reference-asm-instructions/break-comp---vs (instruction page 'break_comp', version table) (breakc = break_comp)
+vs_2_x	srcmod	abs@mov	illegal	MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees
+vs_2_x	srcmod	abs@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees
+vs_2_x	srcmod	absneg@mov	illegal	MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees
+vs_2_x	srcmod	absneg@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees
+vs_2_x	srcmod	not	illegal	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register
+vs_2_x	dstmod	sat@mov	illegal	MS:dx9-graphics-reference-asm-vs-instructions-modifiers (_sat: 3_0/3_sw only)
+vs_2_x	dstmod	pp@mov	illegal	MS:dx9-graphics-reference-asm-vs-instructions-modifiers (vs: only _sat); wine check_ps_dstmod agrees
+vs_2_x	opcode	callnz@p0	legal	MS:dx9-graphics-reference-asm-instructions/callnz-pred---vs (instruction page 'callnz_pred', version table)
+vs_2_x	opcode	if@p0	legal	MS:dx9-graphics-reference-asm-instructions/if-pred---vs (instruction page 'if_pred', version table)
+vs_2_x	srcmod	not@if.p0	illegal	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register
+vs_2_x	opcode	if@temp-written-in-branch-only	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
+vs_2_x	opcode	rep@temp-written-in-loop	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
+vs_2_x	opcode	call@label-used-in-and-out-of-loop	legal	MS:dx9-graphics-reference-asm-vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)
+vs_2_x	addr	c[a0.x+n]@aL-loop	legal	MS:dx9-graphics-reference-asm-vs-registers-vs-2-0/2-x/3-0 (c# RelAddr a0/aL)
+vs_3_0	srcmod	not	illegal	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register
+vs_3_0	dstmod	sat@mov	legal	MS:dx9-graphics-reference-asm-vs-instructions-modifiers (_sat: 3_0/3_sw)
+vs_3_0	dstmod	pp@mov	illegal	MS:dx9-graphics-reference-asm-vs-instructions-modifiers (vs: only _sat); wine check_ps_dstmod agrees
+vs_3_0	usage	1:blendweight0@output	legal	MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15
+vs_3_0	usage	2:blendindices0@output	legal	MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15
+vs_3_0	usage	3:normal0@output	legal	MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15
+vs_3_0	usage	6:tangent0@output	legal	MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15
+vs_3_0	usage	7:binormal0@output	legal	MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15
+vs_3_0	usage	9:positiont0@output	legal	MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15
+vs_3_0	opcode	callnz@p0	legal	MS:dx9-graphics-reference-asm-instructions/callnz-pred---vs (instruction page 'callnz_pred', version table)
+vs_3_0	opcode	if@p0	legal	MS:dx9-graphics-reference-asm-instructions/if-pred---vs (instruction page 'if_pred', version table)
+vs_3_0	srcmod	not@if.p0	illegal	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register
+vs_3_0	opcode	if@temp-written-in-branch-only	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
+vs_3_0	opcode	rep@temp-written-in-loop	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
+vs_3_0	opcode	call@label-used-in-and-out-of-loop	legal	MS:dx9-graphics-reference-asm-vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)
+vs_3_0	addr	c[a0.x+n]@aL-loop	legal	MS:dx9-graphics-reference-asm-vs-registers-vs-2-0/2-x/3-0 (c# RelAddr a0/aL)
+vs_3_0	addr	v[a0.x]	conflict	MS vs-registers-vs-3-0 table: v# RelAddr 'a0/aL'; MS vs-3-0 page 'Indexing Registers': v# indexed 'using the loop counter register (aL)'
+vs_3_0	addr	o[a0.x]	illegal	MS:dx9-graphics-reference-asm-vs-registers-vs-3-0 (o# RelAddr aL only)
+ps_1_1	dstmod	shift_x8	illegal	MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)
+ps_1_1	dstmod	shift_d8	illegal	MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)
+ps_1_2	dstmod	shift_x8	illegal	MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)
+ps_1_2	dstmod	shift_d8	illegal	MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)
+ps_1_3	dstmod	shift_x8	illegal	MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)
+ps_1_3	dstmod	shift_d8	illegal	MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)
+ps_2_0	opcode	lit	illegal	MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no lit in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)
+ps_2_0	opcode	dst	illegal	MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no dst in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)
+ps_2_0	opcode	expp	illegal	MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no expp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)
+ps_2_0	opcode	logp	illegal	MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no logp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)
+ps_2_0	opcode	sgn	illegal	MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no sgn in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)
+ps_2_0	opcode	m4x4	legal	MS:dx9-graphics-reference-asm-instructions/m4x4---ps (instruction page 'm4x4', version table)
+ps_2_0	opcode	m4x3	legal	MS:dx9-graphics-reference-asm-instructions/m4x3---ps (instruction page 'm4x3', version table)
+ps_2_0	opcode	m3x4	legal	MS:dx9-graphics-reference-asm-instructions/m3x4---ps (instruction page 'm3x4', version table)
+ps_2_0	opcode	m3x3	legal	MS:dx9-graphics-reference-asm-instructions/m3x3---ps (instruction page 'm3x3', version table)
+ps_2_0	opcode	m3x2	legal	MS:dx9-graphics-reference-asm-instructions/m3x2---ps (instruction page 'm3x2', version table)
+ps_2_0	srcmod	abs@mov	illegal	MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees
+ps_2_0	srcmod	abs@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees
+ps_2_0	srcmod	absneg@mov	illegal	MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees
+ps_2_0	srcmod	absneg@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees
+ps_2_0	srcmod	bias@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_0	srcmod	bias@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_0	srcmod	biasneg@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_0	srcmod	biasneg@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_0	srcmod	sign@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_0	srcmod	sign@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_0	srcmod	signneg@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_0	srcmod	signneg@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_0	srcmod	comp@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_0	srcmod	comp@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_0	srcmod	x2@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_0	srcmod	x2@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_0	srcmod	x2neg@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_0	srcmod	x2neg@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_0	dstmod	centroid@dcl_texcoord	legal	MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-2-0 (_centroid: 2_0..3_0)
+ps_2_0	srcmod	neg@texld.coord	illegal	MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')
+ps_2_0	srcmod	abs@texld.coord	illegal	MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')
+ps_2_0	srcmod	swizzle@texld.coord	illegal	MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')
+ps_2_0	srcmod	swizzle@texld.sampler-src	illegal	MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_x: src1 no modifier or swizzle)
+ps_2_x	opcode	lit	illegal	MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no lit in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)
+ps_2_x	opcode	dst	illegal	MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no dst in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)
+ps_2_x	opcode	expp	illegal	MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no expp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)
+ps_2_x	opcode	logp	illegal	MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no logp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)
+ps_2_x	opcode	sgn	illegal	MS:dx9-graphics-reference-asm-ps-instructions-ps-x (no sgn in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)
+ps_2_x	opcode	m4x4	legal	MS:dx9-graphics-reference-asm-instructions/m4x4---ps (instruction page 'm4x4', version table)
+ps_2_x	opcode	m4x3	legal	MS:dx9-graphics-reference-asm-instructions/m4x3---ps (instruction page 'm4x3', version table)
+ps_2_x	opcode	m3x4	legal	MS:dx9-graphics-reference-asm-instructions/m3x4---ps (instruction page 'm3x4', version table)
+ps_2_x	opcode	m3x3	legal	MS:dx9-graphics-reference-asm-instructions/m3x3---ps (instruction page 'm3x3', version table)
+ps_2_x	opcode	m3x2	legal	MS:dx9-graphics-reference-asm-instructions/m3x2---ps (instruction page 'm3x2', version table)
+ps_2_x	srcmod	abs@mov	illegal	MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees
+ps_2_x	srcmod	abs@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees
+ps_2_x	srcmod	absneg@mov	illegal	MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees
+ps_2_x	srcmod	absneg@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps/vs-registers-modifiers-source (abs: 3_0/3_sw only); wine asmparser.c check_abs_srcmod agrees
+ps_2_x	srcmod	not	illegal	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register
+ps_2_x	srcmod	bias@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_x	srcmod	bias@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_x	srcmod	biasneg@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_x	srcmod	biasneg@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_x	srcmod	sign@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_x	srcmod	sign@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_x	srcmod	signneg@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_x	srcmod	signneg@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_x	srcmod	comp@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_x	srcmod	comp@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_x	srcmod	x2@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_x	srcmod	x2@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_x	srcmod	x2neg@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_x	srcmod	x2neg@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_2_x	dstmod	centroid@dcl_texcoord	legal	MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-2-0 (_centroid: 2_0..3_0)
+ps_2_x	opcode	callnz@p0	legal	MS:dx9-graphics-reference-asm-instructions/callnz-pred---ps (instruction page 'callnz_pred', version table)
+ps_2_x	opcode	if@p0	legal	MS:dx9-graphics-reference-asm-instructions/if-pred---ps (instruction page 'if_pred', version table)
+ps_2_x	srcmod	not@if.p0	illegal	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register
+ps_2_x	srcmod	neg@texld.coord	illegal	MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')
+ps_2_x	srcmod	abs@texld.coord	illegal	MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')
+ps_2_x	srcmod	swizzle@texld.coord	illegal	MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')
+ps_2_x	srcmod	swizzle@texld.sampler-src	illegal	MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_x: src1 no modifier or swizzle)
+ps_2_x	opcode	if@temp-written-in-branch-only	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
+ps_2_x	opcode	rep@temp-written-in-loop	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
+ps_2_x	opcode	call@label-used-in-and-out-of-loop	legal	MS:dx9-graphics-reference-asm-vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)
+ps_2_x	addr	c[aL+n]	illegal	MS:dx9-graphics-reference-asm-ps-registers-ps-2-x (c# RelAddr N); wine ps_2_x_reg_allowed CONST reladdr FALSE agrees
+ps_3_0	opcode	lit	illegal	MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no lit in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)
+ps_3_0	opcode	dst	illegal	MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no dst in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)
+ps_3_0	opcode	expp	illegal	MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no expp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)
+ps_3_0	opcode	logp	illegal	MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no logp in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)
+ps_3_0	opcode	sgn	illegal	MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no sgn in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)
+ps_3_0	opcode	m4x4	legal	MS:dx9-graphics-reference-asm-instructions/m4x4---ps (instruction page 'm4x4', version table)
+ps_3_0	opcode	m4x3	legal	MS:dx9-graphics-reference-asm-instructions/m4x3---ps (instruction page 'm4x3', version table)
+ps_3_0	opcode	m3x4	legal	MS:dx9-graphics-reference-asm-instructions/m3x4---ps (instruction page 'm3x4', version table)
+ps_3_0	opcode	m3x3	legal	MS:dx9-graphics-reference-asm-instructions/m3x3---ps (instruction page 'm3x3', version table)
+ps_3_0	opcode	m3x2	legal	MS:dx9-graphics-reference-asm-instructions/m3x2---ps (instruction page 'm3x2', version table)
+ps_3_0	srcmod	not	illegal	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register
+ps_3_0	srcmod	bias@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_3_0	srcmod	bias@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_3_0	srcmod	biasneg@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_3_0	srcmod	biasneg@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_3_0	srcmod	sign@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_3_0	srcmod	sign@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_3_0	srcmod	signneg@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_3_0	srcmod	signneg@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_3_0	srcmod	comp@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_3_0	srcmod	comp@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_3_0	srcmod	x2@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_3_0	srcmod	x2@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_3_0	srcmod	x2neg@mov	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_3_0	srcmod	x2neg@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees
+ps_3_0	usage	0:position0@input	legal	MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15
+ps_3_0	usage	1:blendweight0@input	legal	MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15
+ps_3_0	usage	2:blendindices0@input	legal	MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15
+ps_3_0	usage	3:normal0@input	legal	MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15
+ps_3_0	usage	4:psize0@input	legal	MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15
+ps_3_0	usage	6:tangent0@input	legal	MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15
+ps_3_0	usage	7:binormal0@input	legal	MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15
+ps_3_0	usage	8:tessfactor0@input	legal	MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15
+ps_3_0	usage	9:positiont0@input	legal	MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15
+ps_3_0	usage	12:depth0@input	legal	MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15
+ps_3_0	usage	13:sample0@input	legal	MS:dx9-graphics-reference-asm-dcl-usage---ps / dcl-usage-input-register---vs: usage may be any D3DDECLUSAGE value, index 0..15
+ps_3_0	opcode	callnz@p0	legal	MS:dx9-graphics-reference-asm-instructions/callnz-pred---ps (instruction page 'callnz_pred', version table)
+ps_3_0	opcode	if@p0	legal	MS:dx9-graphics-reference-asm-instructions/if-pred---ps (instruction page 'if_pred', version table)
+ps_3_0	srcmod	not@if.p0	illegal	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register
+ps_3_0	srcmod	abs@texld.coord	legal	MS:dx9-graphics-reference-asm-texld---ps-2-0 ps_3_0: only src1 forbids modifiers; swizzle allowed on src0
+ps_3_0	srcmod	swizzle@texld.sampler-src	legal	MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_3_0: swizzle allowed on src1)
+ps_3_0	opcode	if@temp-written-in-branch-only	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
+ps_3_0	opcode	rep@temp-written-in-loop	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
+ps_3_0	opcode	call@label-used-in-and-out-of-loop	legal	MS:dx9-graphics-reference-asm-vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)

@@ -1,0 +1,238 @@
+diff --git a/mesa-imported/codegen/nv50_ir.cpp b/mesa-imported/codegen/nv50_ir.cpp
+index a7adec0..7403511 100644
+--- a/mesa-imported/codegen/nv50_ir.cpp
++++ b/mesa-imported/codegen/nv50_ir.cpp
+@@ -583,6 +583,12 @@ void Instruction::init()
+    mask = 0;
+    precise = 0;
+ 
++   /* fnv-nx: the scheduler (SchedDataCalculatorGM107::visit) assigns sched = 0x7e0 to the instructions of a block when it VISITS the block,
++    * but setDelay() of the last instruction of block i reads next->sched (getWtDepBar) of the entry of block i+1, not visited yet: it read
++    * uninitialised heap memory, so the stall counts of that instruction depended on what the allocator returned (history of the process).
++    * Same value as the visit's default, so a first visit changes nothing. */
++   sched = 0x7e0;
++
+    lanes = 0xf;
+ 
+    postFactor = 0;
+diff --git a/meson.build b/meson.build
+index 1486cbc..b452e09 100644
+--- a/meson.build
++++ b/meson.build
+@@ -84,3 +84,17 @@ uam = executable(
+ 	include_directories: uam_incs,
+ 	install: true,
+ )
++
++# fnv-nx: static library of the compiler (everything but main.cpp)
++uam_lib_files = []
++foreach f : uam_files
++	if not f.full_path().endswith('/source/main.cpp')
++		uam_lib_files += f
++	endif
++endforeach
++uam_lib = static_library(
++	'uam',
++	uam_lib_files,
++	include_directories: uam_incs,
++	install: false,
++)
+diff --git a/source/compiler_iface.cpp b/source/compiler_iface.cpp
+index 7ce5809..c75d009 100644
+--- a/source/compiler_iface.cpp
++++ b/source/compiler_iface.cpp
+@@ -281,6 +281,15 @@ DekoCompiler::DekoCompiler(pipeline_stage stage, int optLevel) :
+ 	glsl_frontend_init();
+ }
+ 
++void DekoCompiler::ReleaseLibraryState()
++{
++	free(m_info.bin.code); m_info.bin.code = NULL; m_code = NULL;
++	free(m_info.bin.syms); m_info.bin.syms = NULL;
++	free(m_info.bin.relocData); m_info.bin.relocData = NULL;
++	free(m_info.bin.fixupData); m_info.bin.fixupData = NULL;
++	if (m_glsl) glsl_program_release_library_state(m_glsl);
++}
++
+ DekoCompiler::~DekoCompiler()
+ {
+ 	if (m_glsl)
+@@ -659,6 +668,37 @@ void DekoCompiler::OutputDksh(const char* dkshFile)
+ 	}
+ }
+ 
++void DekoCompiler::OutputDkshToMemory(std::vector<uint8_t>& out)
++{
++	DkshHeader hdr = {};
++	hdr.magic        = DKSH_MAGIC;
++	hdr.header_sz    = sizeof(DkshHeader);
++	hdr.control_sz   = Align256(sizeof(DkshHeader) + sizeof(DkshProgramHeader));
++	hdr.code_sz      = Align256((m_stage != pipeline_stage_compute ? 0x80 : 0x00) + m_codeSize) + Align256(m_dataSize);
++	hdr.programs_off = sizeof(DkshHeader);
++	hdr.num_programs = 1;
++
++	auto put = [&](const void* p, size_t n) { const uint8_t* b = (const uint8_t*)p; out.insert(out.end(), b, b + n); };
++	auto align = [&]() { out.resize(Align256(out.size()), 0); };
++	out.clear();
++	put(&hdr, sizeof(hdr));
++	put(&m_dkph, sizeof(m_dkph));
++	align();
++	if (m_stage != pipeline_stage_compute)
++	{
++		static const char s_padding[s_shaderStartOffset] = "lol nvidia why did you make us waste space here";
++		put(s_padding, sizeof(s_padding));
++		put(&m_nvsh, sizeof(m_nvsh));
++	}
++	put(m_code, m_codeSize);
++	align();
++	if (m_dataSize)
++	{
++		put(m_data, m_dataSize);
++		align();
++	}
++}
++
+ void DekoCompiler::OutputRawCode(const char* rawFile)
+ {
+ 	FILE* f = fopen(rawFile, "wb");
+diff --git a/source/compiler_iface.h b/source/compiler_iface.h
+index 63e1042..451e6db 100644
+--- a/source/compiler_iface.h
++++ b/source/compiler_iface.h
+@@ -3,6 +3,8 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <vector>
++#include <stdint.h>
+ 
+ #include "tgsi/tgsi_text.h"
+ #include "tgsi/tgsi_dump.h"
+@@ -39,6 +41,14 @@ public:
+ 
+ 	bool CompileGlsl(const char* glsl);
+ 	void OutputDksh(const char* dkshFile);
++	// fnv-nx: in-memory DKSH + stats for library use
++	void OutputDkshToMemory(std::vector<uint8_t>& out);
++	// fnv-nx: library use: frees the code generator's binary and symbol table and the GLSL front end state the CLI leaves to process exit; call after the outputs were taken
++	void ReleaseLibraryState();
++	uint32_t GetNumGprs() const { return m_dkph.num_gprs; }
++	uint32_t GetNumInstructions() const { return m_info.bin.instructions; }
++	uint32_t GetCodeSize() const { return m_codeSize; }
++	uint32_t GetConstbuf1Size() const { return m_dataSize; }
+ 	void OutputRawCode(const char* rawFile);
+ 	void OutputTgsi(const char* tgsiFile);
+ };
+diff --git a/source/glsl_frontend.cpp b/source/glsl_frontend.cpp
+index 5e940ca..238a450 100644
+--- a/source/glsl_frontend.cpp
++++ b/source/glsl_frontend.cpp
+@@ -576,6 +576,27 @@ unsigned glsl_program_compute_get_shared_size(glsl_program prg)
+ 	return linked_shader->Program->info.cs.shared_size;
+ }
+ 
++// fnv-nx: library use. The uam CLI compiles one shader per process and leaves these to process exit; a library caller compiles many.
++// Frees the parameter list the state tracker attaches to each linked program (get_mesa_program_tgsi), the linked programs and shaders
++// themselves and the uniform name map the linker creates (link_assign_uniform_locations); all are owned by the gl_shader_program being compiled.
++// Call only after the outputs were taken (the _LinkedShaders are gone afterwards). Idempotent.
++void glsl_program_release_library_state(glsl_program prg)
++{
++	for (unsigned i = 0; i < MESA_SHADER_STAGES; i++) {
++		struct gl_linked_shader* ls = prg->_LinkedShaders[i];
++		if (!ls) continue;
++		if (ls->Program) {
++			if (ls->Program->Parameters) _mesa_free_parameter_list(ls->Program->Parameters);
++			ralloc_free(ls->Program);   // glsl_program_free frees the program only; the linked shader (and what the linker hung on it) is a ralloc tree of its own
++			ls->Program = NULL;
++		}
++		ralloc_free(ls);
++		prg->_LinkedShaders[i] = NULL;
++	}
++	delete prg->UniformHash;
++	prg->UniformHash = NULL;
++}
++
+ void glsl_program_free(glsl_program prg)
+ {
+ 	for (unsigned i = 0; i < MESA_SHADER_STAGES; i++) {
+diff --git a/source/glsl_frontend.h b/source/glsl_frontend.h
+index a63e24a..4205ce3 100644
+--- a/source/glsl_frontend.h
++++ b/source/glsl_frontend.h
+@@ -25,3 +25,4 @@ void* glsl_program_get_constant_buffer(glsl_program prg, unsigned int& out_size)
+ int8_t const* glsl_program_vertex_get_in_locations(glsl_program prg);
+ unsigned glsl_program_compute_get_shared_size(glsl_program prg);
+ void glsl_program_free(glsl_program prg);
++void glsl_program_release_library_state(glsl_program prg); // fnv-nx: frees what the one-shot CLI leaves to process exit (see glsl_frontend.cpp)
+diff --git a/source/meson.build b/source/meson.build
+index ea60677..53b6eef 100644
+--- a/source/meson.build
++++ b/source/meson.build
+@@ -5,4 +5,5 @@ uam_files += files(
+ 	'main.cpp',
+ 	'mini-os.c',
+ 	'tgsi_support.cpp',
++	'uam_api.cpp',
+ )
+diff --git a/source/uam_api.cpp b/source/uam_api.cpp
+new file mode 100644
+index 0000000..3c71302
+--- /dev/null
++++ b/source/uam_api.cpp
+@@ -0,0 +1,29 @@
++#include "compiler_iface.h"
++#include "uam_api.h"
++extern "C" int uam_compile_dksh(int stage, const char* glsl, uam_result* out)
++{
++	memset(out, 0, sizeof(*out));
++	DekoCompiler c{(pipeline_stage)stage};
++	if (!c.CompileGlsl(glsl))
++	{
++		c.ReleaseLibraryState();
++		return 0;
++	}
++	std::vector<uint8_t> v;
++	c.OutputDkshToMemory(v);
++	out->dksh = (uint8_t*)malloc(v.size());
++	if (!out->dksh)
++	{
++		c.ReleaseLibraryState();
++		return 0;
++	}
++	memcpy(out->dksh, v.data(), v.size());
++	out->dksh_size = v.size();
++	out->num_gprs = c.GetNumGprs();
++	out->num_instructions = c.GetNumInstructions();
++	out->code_size = c.GetCodeSize();
++	out->constbuf1_size = c.GetConstbuf1Size();
++	c.ReleaseLibraryState();
++	return 1;
++}
++extern "C" void uam_free(uam_result* r) { free(r->dksh); r->dksh = NULL; }
+diff --git a/source/uam_api.h b/source/uam_api.h
+new file mode 100644
+index 0000000..a4e5a98
+--- /dev/null
++++ b/source/uam_api.h
+@@ -0,0 +1,21 @@
++// fnv-nx: minimal C API over DekoCompiler (library build of uam)
++#pragma once
++#include <stddef.h>
++#include <stdint.h>
++#ifdef __cplusplus
++extern "C" {
++#endif
++typedef struct uam_result {
++	uint8_t* dksh;       /* malloc'd, free with uam_free */
++	size_t dksh_size;
++	uint32_t num_gprs;
++	uint32_t num_instructions;
++	uint32_t code_size;
++	uint32_t constbuf1_size;
++} uam_result;
++/* stage: 0 vert, 1 tess_ctrl, 2 tess_eval, 3 geom, 4 frag, 5 comp (pipeline_stage order) */
++int uam_compile_dksh(int stage, const char* glsl, uam_result* out);
++void uam_free(uam_result* r);
++#ifdef __cplusplus
++}
++#endif
