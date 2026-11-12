@@ -1,5 +1,6 @@
 // copy_util.h: shared helpers of the D6 methods (copy_*.cpp): surface objects, sub-resource views, rect rules, CPU rectangle copies. Rules and sources are stated at each function.
 #pragma once
+#include <fnvnx_render_hooks.h>
 #include "res_tex.h"
 #include "state_rt.h"
 #include "glue_stream.h"
@@ -21,5 +22,3 @@ inline D3DBOX nx_box_of(const NxRc& r) { D3DBOX b = {(UINT)r.l, (UINT)r.t, (UINT
 void nx_cpu_copy_rect(const NxImg* si, const NxSub* ss, const NxRc& sr, const NxImg* di, NxSub* ds, int dx, int dy);
 // platform: a GDI memory device context over the pixels of a surface (Win32 D3DKMTCreateDCFromMemory with a compatible DC: the bitmap IS `mem`, rows `pitch` bytes apart, top row first,
 // d3dfmt one of A8R8G8B8, X8R8G8B8, R5G6B5, X1R5G5B5, A1R5G5B5, R8G8B8, width x height pixels); null = the platform cannot make one. nxd3d_dc_release: DeleteDC. Writes through the DC land in `mem`.
-void* nxd3d_dc_create(void* mem, uint32_t d3dfmt, uint32_t width, uint32_t height, uint32_t pitch);
-void nxd3d_dc_release(void* dc);

@@ -2,9 +2,8 @@
 // Every answer comes from the generated lookup functions of env_table.gen.h (render/d3d9/env/gen_env.py); this file only maps D3D types onto them.
 #pragma once
 #include "obj.h"
-enum NxEnvProfile { NX_ENV_HANDHELD = 0, NX_ENV_DOCKED = 1 };
+#include <fnvnx_render_hooks.h>
 // Provided by the platform (the dock state of the console); tests provide their own. Called once per Direct3DCreate9 / Direct3DCreate9Ex.
-NxEnvProfile nx_env_profile();
 // Direct3DCreate9 / Direct3DCreate9Ex of the reference d3d9.dll (Wine 9.0 dlls/d3d9/d3d9_main.c): the SDK version is only traced, every value is accepted;
 // Direct3DCreate9 returns NULL only when the allocation fails, Direct3DCreate9Ex returns D3DERR_NOTAVAILABLE then (E_OUTOFMEMORY for the allocation of the object itself).
 IDirect3D9* nx_Direct3DCreate9(UINT sdk);

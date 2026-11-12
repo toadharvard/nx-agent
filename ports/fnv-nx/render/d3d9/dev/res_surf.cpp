@@ -8,6 +8,7 @@
 // GPU readback: a read lock of a sub-resource the GPU wrote (nx_img_gpu_wrote) first refreshes the CPU copy through nxd3d_image_read, unless the lock is an effective DISCARD. MS: Lockable RT + MSAA is refused at creation.
 // GetDC / ReleaseDC are left out: they need a GDI DIB section, which the backend ABI cannot express (README of dev/: open point).
 #include "res_tex.h"
+#include <fnvnx_render_hooks.h>
 #include "../gen/d9impl.gen.h"
 #include <string.h>
 static const uint32_t USAGE_MASK = 0x10007bf0u | 3u;   // WINED3DUSAGE_MASK | RENDERTARGET | DEPTHSTENCIL (d3dusage_from_wined3dusage)
@@ -44,7 +45,6 @@ HRESULT nx_img_unlock(NxImg* im, uint32_t level, uint32_t face, bool* was) {
     return D3D_OK;
 }
 // ---- surfaces
-void nxd3d_dc_release(void* dc);   // platform (copy_util.h)
 NxSurfCore::~NxSurfCore() { if (dc) nxd3d_dc_release(dc); delete own; }   // a DC still handed out (GetDC without ReleaseDC) goes with the surface (wined3d_texture_destroy_dc)
 HRESULT NxSurfCore::desc(D3DSURFACE_DESC* d) {
     if (!d) return D3DERR_INVALIDCALL;

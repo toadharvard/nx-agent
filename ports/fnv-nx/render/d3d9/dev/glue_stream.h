@@ -28,10 +28,8 @@
 #pragma once
 #include "obj.h"
 #include "nxgpu4.h"
+#include <fnvnx_render_hooks.h>
 
-uint64_t nxd3d_gpu_call(uint32_t fn, const uint64_t* args, uint32_t nargs);
-void nxd3d_gpu_free(void* p);
-void* nxd3d_gpu_alloc(size_t bytes) NX_ALLOCATOR(nxd3d_gpu_free);
 
 enum { NXS_SEGMENT = 1 << 20, NXS_RING = 3 };
 inline bool nxs_ok(uint64_t r) { return r != NXGPU_BAD_CALL; }

@@ -3,6 +3,7 @@
 #pragma once
 #include "obj.h"
 #include "nxgpu4.h"
+#include <fnvnx_render_hooks.h>
 
 // ---- backend, 1:1 onto nxgpu4.h; product definitions in glue_present.cpp. Result of the int hooks: 0 = done, NXD3D_HOOK_NOMEM = nxd3d_gpu_alloc returned null (the device reports D3DERR_OUTOFVIDEOMEMORY),
 // anything else = the backend refused the call (a defect: the device validated everything first; D3DERR_DRIVERINTERNALERROR).
@@ -23,8 +24,5 @@ int nxd3d_wait_vblank(NxObj* chain);
 // Win32: GetClientRect(w) mapped to screen coordinates with MapWindowPoints; false iff w is not a window (IsWindow(w) == FALSE, including NULL); r may be null. *r = {left, top, right, bottom} of the client area in
 // SCREEN coordinates (left / top = the client origin on the screen). Used for: 0-sized back buffers (width = right - left, 8 when 0), the default Present destination, GetFrontBufferData windowed
 // offset, and the validity of the focus window of a full-screen device.
-bool nxd3d_window_client(void* hwnd, RECT* r);
 // Win32: QueryPerformanceCounter / QueryPerformanceFrequency; returns the counter, *freq = ticks per second (> 0). Used by GetRasterStatus (Wine wined3d_output_get_raster_status).
-uint64_t nxd3d_perf_counter(uint64_t* freq);
 // Win32: GetCursorPos (the OS cursor position in screen coordinates). Used by ShowCursor when the cursor becomes visible (wined3d_device_show_cursor).
-void nxd3d_os_cursor_pos(int32_t* x, int32_t* y);
