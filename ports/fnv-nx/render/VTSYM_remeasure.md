@@ -8,7 +8,7 @@ objstub: green 1784/1784, 0 findings, 70 objects.
 
 ## (1) undefined `*.fnvnx_ap*` over all 70 objects
 Was 48. Now 22 occurrences in 15 objects, 19 distinct names (`_ZTV<C>.fnvnx_ap8`). Every one of the 19 is defined in some other object of the 70 (undefined-not-defined: 0).
-(The 48 that were counted before are the distinct defined names, 48 now too; the "was 48" figure and this 22 are not the same unit, so the like-for-like occurrence count of the old build was not measured here.)
+(I did not re-run the old build, so whether the earlier 48 counted occurrences or distinct names is not known to me; 22 occurrences / 19 distinct is the measurement now.)
 
 ## (2) defined `*.fnvnx_ap*`
 48 distinct names, 131 definitions over the 70 objects. For each definition (readelf -sW, -SW, -gW): same section, same COMDAT group and same binding as the `_ZTV<C>` of its class. Violations: 0 of 131. Example: `_ZTV13NxDevLifeBase.fnvnx_ap8` is WEAK in `.rodata._ZTV13NxDevLifeBase`, group `.group`, the vtable's own section and binding, in every object that defines it.
