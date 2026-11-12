@@ -119,3 +119,9 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - w6 aligns render/d3d9 to platform's set and measures (doing);
     - w5 aligns lib/sha256 to platform's set;
     - lib/sha256 phase 1 is not yet accepted (flags, committed NIST/Monte drivers, base-green build.json).
+- 03:27Z lib/sha256 phase 1 accepted by the lead and merged (w5 869b056a). L4 intake follows.
+  - lib/sha256 is 1 object. Its flags are the trunk platform set, derived by script. Recipe check is valid; cold build green; warm build 0 stages run.
+  - 233 NIST vectors, 0 mismatches (ASan/UBSan).
+  - The tests are in lib/sha256_tests; it becomes a class-test root when w10 lands.
+  - Host build: the loader Makefile is a known, unwidened gap until w15 lib/sha256@host.
+  - Phase 2 (the 8 key sites, NxShaderD3D key[32]): w5 on claude/fnv-l6-render-w5-key, doing.
