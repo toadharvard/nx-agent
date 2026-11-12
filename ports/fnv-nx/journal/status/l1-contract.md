@@ -713,3 +713,13 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
     - onedef also goes into REQUIRED_TEST;
     - both verdicts are due, cold and warm, with warm inside the budget.
 - L5 w15 adds dynsites rows for d3dx9_31 and gdffalloutnv, pinned to facts a0f3d8e and loaded through imagerec.load.
+
+## 2026-11-12 09:20 UTC
+- L3a w6 e6c29df27 is accepted (ASM-232 minted, ASM-231 retired).
+  - gate_assumptions at e6c29df27 is red: 89 entries, 25 retired, 132/142 mentions, 10 findings.
+  - The 10 findings are 7 solver-term, ehtables.py:268, and f2i_check.
+  - Their full text is requested from w6. I decide their owners once I have it.
+- L2 gcstress variant: agreed as a declared flags variant in recipe.py.
+  - Its only flags are the two ggc params.
+  - Every gcstress unit must produce an object byte-equal to the normal build's.
+  - It is a test variant only, and it lands with w19's selftests universe and L2 w4's plugbuild.
