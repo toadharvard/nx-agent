@@ -650,3 +650,5 @@ Rebasing onto 83f7504f, in delivery order:
 6. w15: link remainder + onedef — doing
 7. w18: re-pin to facts a0f3d8e + manifest e15d385 — doing
 Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (blocked on L2's tls note).
+- Candidate 83f7504f defect: recipe.py:539-542 checks ldcheck tool membership against root paths, while link/ is a tree of the contract tool root, so a root with `link` is red at load (L4 tests/bootguest). w14 fixes it first in -src. L4 adds its own admit line (class test).
+- L3a facts a0f3d8e (rule lift-facts/2; exe entries 101590→96839, ud 155→0, retn.tsv 154898 entries). w18 re-pins.
