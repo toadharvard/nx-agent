@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import sys
 import time
 
@@ -95,22 +96,25 @@ def main():
     gi = copy_rec(rec)
     gi["include"] = gi["include"] + ["/usr/aarch64-linux-gnu/include"]
     check("guest root with a glibc include dir is red", any("neither inside a declared external" in x for x in errs(g, gi)), errs(g, gi))
+    # --- closure: a read outside the root and the externals names its owner; a file of a package outside env.json is foreign
+    ce = recipe.closure_errors(["u.cc"], {"u.cc": ["/src/a.h", "/ext/gcc/x.h", "/usr/include/a.h", "/usr/include/b.h", "/opt/c.h"]}, ["/ext/gcc"],
+                               {"/usr/include/a.h": {"libc6-dev"}, "/usr/include/b.h": {"imgpkg"}}, {"libc6-dev"})
+    check("closure: reads in /src and externals pass; others are named with their owner", len(ce) == 3 and "owned by libc6-dev" in ce[0] and "foreign" not in ce[0]
+          and "owned by imgpkg (foreign: not in env.json)" in ce[1] and "owned by no package" in ce[2], ce)
     # --- the manifest of the runtime against the guest compiler's own (pure rule)
-    good = good_manifest(pin_real)
     pr = PROBE
+    good = manifest_of(pin_real, pr)
     check("manifest equal to the guest compiler's: no error", recipe.runtime_errors(json.dumps(good), pin_real, pr) == [])
-    sz = dict(good["layout"]["sizeof"], __WCHAR_TYPE__=4)
-    for name, mut_ in (("compiler 15.2.0", {"compiler_version": "15.2.0"}), ("4-byte wchar_t", {"layout": dict(good["layout"], sizeof=sz)}),
+    for name, mut_ in (("compiler 15.2.0", {"compiler_version": "15.2.0"}), ("4-byte wchar_t", {"layout": dict(good["layout"], __SIZEOF_WCHAR_T__="4")}),
                        ("another patch", {"msvcmodel_patch_sha256": "0" * 64}), ("format /1", {"format": "fnvnx-runtime-manifest/1"}),
                        ("no -fshort-wchar in C", {"flags_c": [f for f in pr["flags_c"] if f != "-fshort-wchar"]}),
-                       ("no -fcheck-new in C++", {"flags_cxx": [f for f in pr["flags_cxx"] if f != "-fcheck-new"]}),
-                       ("another alignof", {"layout": dict(good["layout"], alignof=dict(good["layout"]["alignof"], double=4))})):
+                       ("no -ffixed-x19 in C++", {"flags_cxx": [f for f in pr["flags_cxx"] if f != "-ffixed-x19"]}),
+                       ("an extra layout macro", {"layout": dict(good["layout"], __SIZEOF_X__="1")})):
         e = recipe.runtime_errors(json.dumps(dict(good, **mut_)), pin_real, pr)
         check("manifest with %s is red" % name, bool(e), e)
-    check("a flag the driver does not apply to C is not required of the C pack", "-fno-sized-deallocation" not in pr["flags_c"] and recipe.runtime_errors(json.dumps(good), pin_real, pr) == [])
-    check("probe_flags reads the driver's own warning", recipe.probe_flags("cc1: warning: command-line option '-fno-sized-deallocation' is valid for C++/ObjC++ but not for C [enabled by default]\n")
-          == [f for f in recipe.SEMANTICS_FLAGS if f != "-fno-sized-deallocation"])
-    check("probe_layout reads the labels", recipe.probe_layout("fnvnx_sz_2:\n\t.word\t4\nfnvnx_al_2:\n\t.word\t4\n")["sizeof"]["int"] == 4)
+    check("a C pack need not hold what the driver does not apply to C", "-fno-sized-deallocation" not in pr["flags_c"] and recipe.runtime_errors(json.dumps(good), pin_real, pr) == [])
+    check("layout_of keeps sizes, types, alignment, signedness only", recipe.layout_of({"__SIZEOF_INT__": "4", "__SIZE_TYPE__": "unsigned int", "__GNUC__": "13", "__BIGGEST_ALIGNMENT__": "16"})
+          == {"__BIGGEST_ALIGNMENT__": "16", "__SIZEOF_INT__": "4", "__SIZE_TYPE__": "unsigned int"})
     check("manifest that is not JSON is red", bool(recipe.runtime_errors("x", pin_real, pr)))
     # --- the real compiler, by the pin of the checkout (no environment switch, no skip)
     ext = pin_real["external"]
@@ -132,7 +136,7 @@ def main():
     check("the pinned runtime is judged by its manifest: green only if it states the guest compiler's version, patch, flags and data model",
           (rr["status"] == "green") == (f.get("stage") != "runtime_manifest") and (rr["status"] == "green" or f.get("stage") == "runtime_manifest"), f)
     print("INFO pinned runtime %s: %s %s" % (rt["commit"][:8], rr["status"], "; ".join(f.get("stderr", []))[:300]))
-    rt2, pin2, work, art = valid_runtime(ext, pin_real, good)
+    rt2, pin2, work, art = valid_runtime(ext, pin_real, good_manifest(pin_real))
     rec = guest_rec(ext, rt2)
     src = SRC + "void sz(decltype(sizeof 0) n) { (void)n; }\n"
     gr = guest_repo("gb", rec, pin2, files={ROOT + "/a.cc": src})
@@ -204,16 +208,21 @@ def main():
 
 
 PROBE = {"flags_c": [f for f in recipe.SEMANTICS_FLAGS if f != "-fno-sized-deallocation"], "flags_cxx": list(recipe.SEMANTICS_FLAGS),
-         "layout": {"sizeof": {"char": 1, "short": 2, "int": 4, "long": 4, "long long": 8, "void *": 4, "float": 4, "double": 8, "long double": 16,
-                               "__WCHAR_TYPE__": 2, "__SIZE_TYPE__": 4, "__PTRDIFF_TYPE__": 4},
-                    "alignof": {"char": 1, "short": 2, "int": 4, "long": 4, "long long": 8, "void *": 4, "float": 4, "double": 8, "long double": 16,
-                                "__WCHAR_TYPE__": 2, "__SIZE_TYPE__": 4, "__PTRDIFF_TYPE__": 4}}}
+         "layout": {"__SIZEOF_WCHAR_T__": "2", "__SIZEOF_LONG__": "4", "__SIZE_TYPE__": "unsigned int", "__PTRDIFF_TYPE__": "int", "__BIGGEST_ALIGNMENT__": "16"}}
+
+
+def manifest_of(pin_real, ans):
+    """a manifest (schema /2) stating the guest compiler's version and patch and the answers ANS (recipe.guest_answers)"""
+    return {"format": recipe.RUNTIME_FORMAT, "compiler_version": "13.3.0", "msvcmodel_patch_sha256": pin_real["runtime_manifest"]["msvcmodel_patch_sha256"],
+            "flags_c": list(ans["flags_c"]), "flags_cxx": list(ans["flags_cxx"]), "layout": dict(ans["layout"])}
 
 
 def good_manifest(pin_real):
-    """the manifest a runtime pack must carry (schema /2): the guest compiler's version and patch, the flags it applies per language, its sizeof/alignof"""
-    return {"format": "fnvnx-runtime-manifest/2", "compiler_version": "13.3.0", "msvcmodel_patch_sha256": pin_real["runtime_manifest"]["msvcmodel_patch_sha256"],
-            "flags_c": list(PROBE["flags_c"]), "flags_cxx": list(PROBE["flags_cxx"]), "layout": json.loads(json.dumps(PROBE["layout"]))}
+    """the manifest a runtime pack must carry for the REAL pinned compiler: its own answers (flags per language, data-model macros)"""
+    ext = pin_real["external"]
+    got = recipe.fetch_externals([ext], os.path.join(BASE, "ingest-store"), os.path.join(BASE, "extcache"), tempfile.mkdtemp(dir=BASE))
+    d = lambda n: os.path.join(got[ext["name"]]["host"], "bin/aarch64-linux-gnu-" + n)  # noqa: E731
+    return manifest_of(pin_real, recipe.guest_answers(d("gcc"), d("g++")))
 
 
 def valid_runtime(ext, pin_real, good):

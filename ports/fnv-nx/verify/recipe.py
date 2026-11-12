@@ -72,8 +72,8 @@ SDD_FLAGS = (SDD_DEFINE, "-fno-devirtualize")   # what a NATIVE C++ root of a ho
 LANG_X = {"c": "c", "cxx": "c++", "asm": "assembler-with-cpp"}   # the driver's -x language of each kind of unit
 # What a guest build.json may carry (per-root classes); every other -f/-m/... token comes from flags.semantics and is refused here. Warnings and
 # diagnostics, defines, the language standard, the optimisation level (-O0..-O3, -Os, -Og: not -Ofast, which switches FP semantics), debug info,
-# section splitting. -Wa, -Wl, -Wp are driver pass-throughs, not warnings.
-PER_ROOT = re.compile(r"-W(?![alp],)[^\s]*|-D[^\s]+|-std=[^\s]+|-O[0-3sg]|-g[^\s]*|-ffunction-sections|-fdata-sections")
+# section splitting, and -nostdinc/-nostdinc++ (required below: a guest root reads no distribution header). -Wa, -Wl, -Wp are driver pass-throughs, not warnings.
+PER_ROOT = re.compile(r"-nostdinc(?:\+\+)?|-W(?![alp],)[^\s]*|-D[^\s]+|-std=[^\s]+|-O[0-3sg]|-g[^\s]*|-ffunction-sections|-fdata-sections")
 WERROR_ATTR = "-Werror=attributes"   # required in flags.c and flags.cxx of every guest root
 SANDBOX_PATHS = ("/src", "/inc", "/in", "/out", "/tool", "/objs", "/ld", "/work", "/proc", "/dev", "/tmp", "/oldroot")
 STYPE = {0: "NOTYPE", 1: "OBJECT", 2: "FUNC", 5: "COMMON", 6: "TLS", 10: "IFUNC"}
@@ -813,11 +813,21 @@ def runtime_errors(text, pin, probe):
     return err
 
 
-def closure_errors(units, closures, ext_ats):
+def closure_errors(units, closures, ext_ats, owners=None, pinned=None):
     """A unit of a guest root reads only its own tree (/src, /inc) and declared externals: any other file (a distribution glibc/cross header
-    under /usr, ...) is an error naming unit and file. closures {unit: [sandbox path]}, EXT_ATS the `at` of every external."""
+    under /usr, a file of the container image, ...) is an error naming unit, file and its owner. closures {unit: [sandbox path]}, EXT_ATS the `at`
+    of every external, OWNERS {real path: {dpkg packages}} (envcheck._owners), PINNED the packages of env.json and their closure: a file owned only
+    by packages outside it is FOREIGN (it comes from the container image, not from the declared environment)."""
     ok = ("/src/", "/inc/") + tuple(a.rstrip("/") + "/" for a in ext_ats)
-    return ["unit %s reads %s, outside the root and the declared externals" % (u, p) for u in units for p in closures.get(u, []) if not p.startswith(ok)]
+    out = []
+    for u in units:
+        for p in closures.get(u, []):
+            if p.startswith(ok):
+                continue
+            o = (owners or {}).get(os.path.realpath(p)) or (owners or {}).get(p)
+            why = "" if owners is None else ("; owned by no package" if not o else "; owned by %s%s" % (",".join(sorted(o)), "" if pinned is None or o & pinned else " (foreign: not in env.json)"))
+            out.append("unit %s reads %s, outside the root and the declared externals%s" % (u, p, why))
+    return out
 
 
 def build(repo, root, store, out, jobs=4, ext=None):
@@ -846,7 +856,8 @@ def build(repo, root, store, out, jobs=4, ext=None):
         j.generate(ws)
         objs, und = j.compile(ws, units), set()
         if roots_target(j.roots, root) == "guest":
-            ce = closure_errors(units, j.closures, [e["at"] for e in j.ext.values()])
+            ev = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.json")))
+            ce = closure_errors(units, j.closures, [e["at"] for e in j.ext.values()], envcheck._owners(), set(ev["packages"]))
             if ce:
                 raise BuildRed({"stage": "closure", "exit": None, "stderr": ce[:20]})
         for n, t, _ in j.built:
