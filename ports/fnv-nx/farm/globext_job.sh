@@ -4,7 +4,8 @@
 #   farm/globext_job.sh <out dir> [--range LO HI] [--probe VA...]
 #
 # Fetches from the private artifacts repository, by the commits of verify/contract_inputs.json (exe, msvc) and the head of
-# l1-contract/inputs/e1ca6b02d60d (units.json, the root_results of that input set; its commit is written to OUT/inputs.txt),
+# l1-contract/inputs/e1ca6b02d60d (units.json, the root_results of that input set) and the /Z7 tree msvc/z7/8f324ecde2a7/{1..4}of4 (heads at
+# the time of the run; every commit is written to OUT/inputs.txt),
 # runs contract/n1.py (the same stage the contract gate runs), then link/globext_cv.py. Everything exe-derived stays in <out>
 # and the scratch directory: outside any git checkout, never committed.  Output: OUT/n1.json, OUT/globext.{txt,audit,json},
 # OUT/inputs.txt (the commits and tree hashes used).  Run it on a farm: n1 takes more than 10 minutes.
@@ -27,6 +28,7 @@ read -r EC ET <<<"$(pin exe)"; read -r MC MT <<<"$(pin msvc)"
 echo "exe $EC tree_sha256 $ET" >> "$OUT/inputs.txt"; echo "msvc $MC tree_sha256 $MT" >> "$OUT/inputs.txt"
 get exe "$EC" "$W/exe" >/dev/null; get msvc "$MC" "$W/msvc" >/dev/null
 IC=$(get inputs refs/heads/l1-contract/inputs/e1ca6b02d60d "$W/inputs"); echo "inputs $IC" >> "$OUT/inputs.txt"
+for k in 1of4 2of4 3of4 4of4; do ZC=$(get "z7-$k" "refs/heads/msvc/z7/8f324ecde2a7/$k" "$W/z7/$k"); echo "z7 $k $ZC" >> "$OUT/inputs.txt"; done
 EXE=$W/exe/FalloutNV.exe; [ -f "$EXE" ] || { echo "globext_job: no FalloutNV.exe in the exe external" >&2; exit 1; }
 python3 -I "$HERE/contract/n1.py" --exe "$EXE" --units "$W/inputs/units.json" --msvc "$W/msvc" --out "$OUT/n1.json"
-python3 -I "$HERE/link/globext_cv.py" --cl "$W/msvc/obj" --n1 "$OUT/n1.json" --exe "$EXE" --out "$OUT" "$@"
+python3 -I "$HERE/link/globext_cv.py" --pristine "$W/msvc/obj" --z7 "$W/z7/1of4" --z7 "$W/z7/2of4" --z7 "$W/z7/3of4" --z7 "$W/z7/4of4" --units "$W/inputs/units.json" --n1 "$OUT/n1.json" --exe "$EXE" --out "$OUT" "$@"

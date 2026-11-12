@@ -2285,25 +2285,29 @@ Pure core: certify_all(); the CLI only reads files.
 ## link/globext_cv.py
 
 ```text
-globext_cv - the extents of the exe's global data objects, from the pristine MSVC objects' own CodeView (L2 SOURCE; library core + CLI).
+globext_cv - the extents of the exe's global data objects, from the /Z7 MSVC objects' own CodeView (L2 SOURCE; library core + CLI).
 
-    globext_cv.py --cl PATH... --n1 n1.json --exe FalloutNV.exe --out DIR [--range LO HI] [--probe VA ...]
+    globext_cv.py --pristine DIR --z7 DIR... --units units.json --n1 n1.json --exe FalloutNV.exe --out DIR [--range LO HI] [--probe VA ...]
 
-RULE.  A data symbol of cl object u<N>.obj (the compiler that built the exe) is in the fact only if ALL hold:
-  1. VA     N1 pins it: n1['sym'][(N, name)] (an external symbol) or n1['sym'][(N, symbol index, name)] (a static one), not an
-            absolute-value pin (bit 32).  A symbol N1 does not pin is not in the fact.
-  2. Size   the object's `.debug$S` (CV_SIGNATURE_C13) holds an S_GDATA32 or S_LDATA32 record for it, which names the symbol by its
-            relocation (the SECREL/SECTION pair at the record's offset/segment fields: the COFF symbol itself, not a name), and the size of
-            its type index comes from the object's own `.debug$T` (link/codeview.Table.size: LF_CLASS/LF_STRUCTURE/LF_UNION size, LF_ARRAY
-            size, LF_POINTER size, LF_MODIFIER/LF_ENUM/LF_BITFIELD by the underlying type, primitive types by the CodeView table).  A type
-            whose size CodeView does not give (a forward reference with no definition in that object, a leaf with no size, a pointer to
-            member) leaves the object out, and the audit lists it by that reason.
-  3. certified_by is `n1+cv`.
-UNIVERSE  every data symbol (class external or static, defined in a section that is not code, not a section symbol) of the cl objects that N1
-          pins to an address inside a non-code section of the exe (contract/exefacts.Image), counted per distinct address.  Certified is
-          counted against it.  Two certified objects that overlap in the exe are an error naming both (contract/globext.build); the same
-          object seen in several cl objects with one size is one object.
-Outputs OUT/globext.txt (`exe 0xva size n1+cv`, sorted by va), OUT/globext.audit (`exe 0xva size type symbol unit`), OUT/globext.json (counts,
-uncertified by reason, probes).  Probe: the containing certified object, else the universe symbols at the address with their reason, else
-`none certified`.  Pure core: unit_objects(), certify_all().  Exe addresses go only to fnv-nx-build.
+The pristine objects (msvc/pristine/87eb9373a0bb, u<N>.obj) carry no CodeView; the /Z7 tree (msvc/z7/8f324ecde2a7, one object per unit named
+<source with / as _>.obj) does.  A data symbol of unit N is in the fact only if ALL hold:
+  1. BINDING  the z7 object and the pristine object of the unit are one object, proved per object (bind_unit): every non-debug section (name,
+              characteristics with COMDAT, size, contents, relocations by symbol position) and the symbol table without debug symbols (name, value,
+              section ordinal, type, class, aux with the COMDAT selection and associated section) are equal.  Else the unit is absent: `z7!=pristine`.
+              A unit with no z7 object (cl failed) is absent: `no z7 object`.
+  2. VA       N1 pins the pristine symbol: n1['sym'][(N, name)] (external) or n1['sym'][(N, pristine symbol index, name)] (static), not an
+              absolute-value pin (bit 32).  A symbol N1 does not pin is not in the fact.
+  3. Size     the z7 object's `.debug$S` holds an S_GDATA32 or S_LDATA32 record for the symbol, which names it by its relocation (the SECREL at
+              the record's offset field: the COFF symbol itself, not a name), and the size of its type index comes from the object's own `.debug$T`
+              (link/codeview.Table.size: LF_CLASS/LF_STRUCTURE/LF_UNION size, LF_ARRAY size, LF_POINTER size, LF_MODIFIER/LF_ENUM/LF_BITFIELD by
+              the underlying type, primitive types by the CodeView table).  No record (compiler-made data such as `__real@`), or a type whose size
+              CodeView does not give (an incomplete type, a pointer to member), leaves the object out, listed by that reason.
+  4. certified_by is `n1+cv+z7eq`.
+UNIVERSE  every data symbol (class external or static, defined in a section that is not code, not a section symbol) of the pristine objects that
+          N1 pins to an address inside a non-code section of the exe (contract/exefacts.Image), counted per distinct address.  Certified is counted
+          against it, the reasons of absence globally.  Two certified objects that overlap in the exe are an error naming both (contract/globext.build);
+          the same object seen in several units with one size is one object.
+Outputs OUT/globext.txt (`exe 0xva size n1+cv+z7eq`, sorted by va), OUT/globext.audit (`exe 0xva size type symbol unit`), OUT/globext.json (counts with
+the per-object equality totals equal / unequal / missing, uncertified by reason, probes).  Probe: the containing certified object, else the universe
+symbols at the address with their reason, else `none certified`.  Exe addresses go only to fnv-nx-build.
 ```
