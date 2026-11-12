@@ -27,6 +27,7 @@ import tempfile
 TARGETS = ("sys/socket.h", "netinet/in.h", "netinet/tcp.h", "sys/errno.h", "sys/_sockaddr_storage.h")
 ERRNO_TARGET = "sys/errno.h"
 INCLUDES = ("sys/types.h", "sys/socket.h", "netinet/in.h", "netinet/tcp.h", "sys/errno.h", "sys/_timeval.h")
+OPTIONAL_INCLUDES = ("netinet6/in6.h",)   # FreeBSD splits netinet/in.h over it; libnx's merged header has no such file
 STRUCTS = {
     "sockaddr": ("sa_len", "sa_family", "sa_data"),
     "sockaddr_in": ("sin_len", "sin_family", "sin_port", "sin_addr", "sin_zero"),
@@ -59,11 +60,17 @@ def target_of(path):
     return next((t for t in TARGETS if path.endswith("/" + t) or path == t), None)
 
 
-def macros(cc, incs, abi, tmp):
-    """{name: target header} of the object-like macros defined in a TARGET header (after #undef)"""
+def source_text():
+    return "".join("#include <%s>\n" % h for h in INCLUDES) + "".join(
+        "#if __has_include(<%s>)\n#include <%s>\n#endif\n" % (h, h) for h in OPTIONAL_INCLUDES)
+
+
+def macros(cc, incs, abi, tmp, any_file=False):
+    """{name: file} of the object-like macros defined in a TARGET header (after #undef); any_file: in any header of the include closure
+    (the side that is checked for a definition may keep it in another file than the reference does)"""
     src = os.path.join(tmp, "m.c")
     with open(src, "w") as f:
-        f.write("".join("#include <%s>\n" % h for h in INCLUDES))
+        f.write(source_text())
     r = run(flags(cc, incs, abi) + ["-E", "-dD", src])
     if r.returncode:
         raise RuntimeError("preprocess failed:\n" + r.stderr[-3000:])
@@ -72,7 +79,7 @@ def macros(cc, incs, abi, tmp):
         if line.startswith("# "):
             parts = line.split('"')
             if len(parts) >= 2:
-                cur = target_of(parts[1])
+                cur = (target_of(parts[1]) or parts[1]) if any_file else target_of(parts[1])
         elif line.startswith("#define ") and cur:
             name = line[8:].split(None, 1)[0]
             if "(" not in name:   # a function-like macro has "(" right after its name
@@ -88,7 +95,7 @@ def evaluate(cc, incs, abi, tmp, entries):
     vals = {}
     while True:
         src = os.path.join(tmp, "v.c")
-        lines = ["#include <%s>" % h for h in INCLUDES]
+        lines = source_text().splitlines()
         lines.append("const long long V[] = {")
         first = len(lines) + 1
         live = [k for k in keys if k not in vals]
@@ -121,11 +128,11 @@ def evaluate(cc, incs, abi, tmp, entries):
     return vals
 
 
-def extract(cc, incs, abi="lp64"):
+def extract(cc, incs, abi="lp64", any_file=False):
     """the set of definitions of the headers found through incs (list of include dirs, in order)"""
     with tempfile.TemporaryDirectory() as tmp:
         ent = {}
-        for name in macros(cc, incs, abi, tmp):
+        for name in macros(cc, incs, abi, tmp, any_file):
             ent[("macro", name)] = name
         out = {k: v for k, v in evaluate(cc, incs, abi, tmp, ent).items()} if ent else {}
         ent = {}
@@ -245,7 +252,7 @@ def main():
             arch = stage_tag(a.git_dir, a.ref, d)
             res = {"arch": arch}
             try:
-                res["defs"] = to_json(extract(a.cc, [d], a.abi))
+                res["defs"] = to_json(extract(a.cc, [d], a.abi, any_file=True))
             except RuntimeError as e:
                 res["error"] = str(e)[-1500:]
             json.dump(res, open(a.out, "w"), sort_keys=True)
