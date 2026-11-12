@@ -652,3 +652,9 @@ Rebasing onto 83f7504f, in delivery order:
 Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (blocked on L2's tls note).
 - Candidate 83f7504f defect: recipe.py:539-542 checks ldcheck tool membership against root paths, while link/ is a tree of the contract tool root, so a root with `link` is red at load (L4 tests/bootguest). w14 fixes it first in -src. L4 adds its own admit line (class test).
 - L3a facts a0f3d8e (rule lift-facts/2; exe entries 101590→96839, ud 155→0, retn.tsv 154898 entries). w18 re-pins.
+
+## 10:50Z
+- w4: G split alone = claude/fnv-l1-contract-w4-g 47b4b7bc (trunk 4fb048ec + e62cabf0; green 28/28, 340 s cold). It is queued after the wave, on the candidate, to avoid recipe.py conflicts. MANIFEST /2 (format, compiler_version, patch sha, flags_c/cxx ⊇ semantic flags, layout = the compiler's own -dM macros) is accepted. The held stack (92d7e71a) is red only on link/tests/realobj.py, which has no runtime external. It waits for L5's pack.
+- L3a write-set census (w4 a3fcd7fc, 7 images): 1,893,456 stores = 38,925 exact + 1,227,422 stack + 627,109 open/ranged (+8,240 import calls). The 56b717 and 9fea3c/58 facts stay OPEN until points-to over abstract objects lands. w18 re-pins once, on w7's next facts commit (jtab_tables).
+- Inbox note fix: claude/fnv-l1-contract-note018 a1c125606 (ASM-029 cited, no retired ASM-800) → the orchestrator's candidate.
+- MERGER told: L1 heads go to the trunk via the orchestrator's candidate.
