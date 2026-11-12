@@ -250,3 +250,8 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
         - The farm is paused for job 3, which waits on w3b's L1/L2 lemmas.
     - L1 accepted the empty-handler class through three generated justifications: (a) op_syntax from docs-d3d9 syntax lines, (b) op_cover emitter coverage (one table with w4's), (c) RESERVED as fnvnx_reach_violation with a certificate.
         - w5 is generating them on claude/fnv-l6-render-w5-ops: doing.
+- 04:25Z
+    - w1b e48d97b2: the backend list is a const array symbol (objstub class V closed). Measurement: 268/276, 8 findings, which are the 7 MojoShader handlers under L1's rule plus the borrowed lib/sha256. At the roots' merge, lead render/shaders/src is deleted for render/shaders/translator, and s6b_unit.c:74 moves to the array.
+    - w3b 57e2ce8 merged: L1 (link iff the 3 compiles, under C1-C3) and L2 (arg domains, with formulas).
+        - Open: C1 for the FFP fragment partner; C2 cited from the pinned Mesa source instead of the GL minimum.
+        - Next: sm_domain.py writes the job 3 enumeration list.
