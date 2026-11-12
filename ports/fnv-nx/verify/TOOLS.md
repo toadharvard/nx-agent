@@ -1239,7 +1239,9 @@ Universe: every unit of every product root of verify/admit.json (tracked sources
 of a root with a link. Certified: units whose object was built (+ the ELF). uncertified: repo-relative unit paths (<= 50, sorted).
 No product root: universe 0, green. A recipe that fails validation certifies nothing (units = tracked source files).
 Stages are cached by key in GATE_CACHE/store (a temp dir without GATE_CACHE); the result must not depend on the cache (determinism.py
-compares a warm and a cold build). Hand-over to later gates: verdict.py gives EVERY gate its own GATE_OUT, so a later gate cannot
+compares a warm and a cold build).
+Keep going (RECIPE.md): a red root lists every red unit and stage and every blocked unit; all that was buildable is built and kept.
+Hand-over to later gates: verdict.py gives EVERY gate its own GATE_OUT, so a later gate cannot
 read this gate's GATE_OUT. objects.json of a root is therefore also kept at GATE_CACHE/objects/<tree>/<root name>/objects.json (with
 obj/, the ELF and constants.tsv beside it; <tree> = git tree of the commit under test, <root name> = path with / as __), and later
 gates call ensure() (build or cache hits, same result). Without GATE_CACHE nothing outlives the gate except GATE_OUT/objects/<root name>.json.
