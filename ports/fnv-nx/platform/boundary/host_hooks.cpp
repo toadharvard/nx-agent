@@ -1,5 +1,5 @@
 /* host_hooks.cpp - the two host-side hooks of the lifter runtime (lead L3a), provided by the platform for the
- * product only (platform/build_guest.sh compiles platform/boundary/*.cpp; the host test build does not).
+ * product only (platform/build_guest.sh compiles the .cpp files of platform/boundary; the host test build links this one too, for its own test).
  *
  *  fnvl_host_tls_slot: one pointer-sized slot per host thread, zero in every new thread (a __thread object is
  *    zero-initialised for each thread of the guest runtime's TLS, toolchain/guest/threads.c); the runtime keeps the
