@@ -27,3 +27,19 @@ step 2.
 
 Asked: the orchestrator's decision on 1 and 2 (and the release for 2, if it is taken); L1, the call-graph gate's facts
 for module-11 fn 16..26, 30, 31 arguments.
+
+## Decided by the orchestrator (02:42Z)
+
+1. Yes. L1's call-graph gate produces the census of the arguments that reach bootsock (module 11 fn 16..26, 30, 31) from
+   the exe's 21 wsock32 sites through L5's Winsock body. Every case it proves unreached becomes
+   `fnvnx_reach_violation(fact_id)` with that gate's certificate. Requested from L1 directly.
+2. Yes, for the reached residue. The release is derived by rule, not chosen: it is the FreeBSD release whose socket
+   headers (sys/socket.h, netinet/in.h, errno values) match the socket headers of the pinned libnx/newlib (devkitPro).
+   It is mirrored to fnv-nx-build `tools/freebsd-<rel>` (commit plus tree_sha256) and cited per case. If no single
+   release matches, report it; do not pick one.
+   - L4 reading, sent back to the orchestrator: newlib does not ship FreeBSD's files verbatim, so a literal
+     byte-for-byte match would almost surely find none. The check compares the DEFINITIONS: the set of (macro name,
+     value) and (struct, field, offset, size) that both header sets define after preprocessing for the aarch64 target.
+     A release matches when it agrees on every definition that both sets contain and newlib defines nothing it lacks.
+     The candidates are every FreeBSD release tag. Exactly one match is a result. Zero matches, or more than one, are
+     reported with the differing definitions, and nothing is picked.
