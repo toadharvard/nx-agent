@@ -19,3 +19,14 @@ Root under test: render/shaders/translator (product, host, link null; 16 objects
 Not run: 13 gates named in the translator's admit entry but not in gates.json: imports, forms, d3d9total, r7, namegate, abi, datamodel, order, fpexact, eh, exepin, addr32, machine.
 Count of red gates: 18 of 23 (ours or both: objstub, linkstrict, admit, 14 contract gates = 17; base only: selftests = 1).
 Expected after w17: selftests, objstub, linkstrict green or judged. After the link-null rule: the 14 contract gates. admit stays red until the 13 gates are in gates.json.
+
+## Findings on request (lead): admit entry and the contract-gate rule
+### admit: the 13 gates cannot be dropped from the entry (measured)
+gates.json has 23 gates, no scope field. The 19 REQUIRED_PRODUCT gates that exist in gates.json: objstub, linkstrict, determinism, oracle, n1, n2_data, n2_call, n2_vcall, xc, xunit, rtti, pcrel, bodysel, abs, disp, reach, reachlink, gpa, argordergate.
+The 13 names not in gates.json: imports, forms, d3d9total, r7, namegate, abi, datamodel, order, fpexact, eh, exepin, addr32, machine.
+Dropping them from the entry was tried (gate_admit at this tree): `admit: red 0/459 ... root translator: required gate imports not named; required gate forms not named; ... (all 13)`. gate_admit.judge adds "required gate X not named" for every REQUIRED_PRODUCT name
+absent from a product root's entry. So the entry has no green form while the 13 are in REQUIRED_PRODUCT and not in gates.json: naming them gives "not in gates.json", dropping them gives "required gate not named".
+MISSING GATES (for L1, not invented in admit): the 13 above, and the admit.json of the committed branch keeps all 32 names (so the only red is "gate X is not in gates.json"). Not a defect of our entry.
+### contract gates and link-null roots: the covers rule is in neither w16 nor w17
+gate_contract.py at b57061c8, w16 and w17 has `if not rec.get("link"): raise Red("root %s links no ELF (recipe has no link)")` (line ~256) and a `game` requirement, with no predicate that skips a root without a link. The word "covers" is not in gate_contract.py of w16, w17 or of origin/claude/fnv-l1-contract-w10 (w10 has the same `links no ELF` Red at line 257).
+w10 is an ancestor of none of w16, w17 and claude/fnv-nx-clean. So the covers rule is not in any of them; the 14 contract gates stay red for a link-null root until L1 delivers it (w18 universe-0 rule, per the lead).
