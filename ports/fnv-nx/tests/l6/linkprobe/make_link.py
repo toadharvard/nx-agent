@@ -73,10 +73,11 @@ def classify(lines, hc, hd):
     cf = "GL_COMPILE_STATUS: 0" in txt; lf = "link status invalid" in txt
     errs = [re.sub(r"0x[0-9a-fA-F]+|\b[0-9]+\b|\b[0-9A-F]{8}\b", "N", re.sub(r"^\S+:err:d3d:\S+ ", "", l)).strip() for l in lines if ":err:d3d:" in l]
     ge = errs[0] if errs else "none"
-    if hc != 0: return "na", "na", ge
+    up = "not_linked" if re.search(r"glUseProgram\(program \d+ not linked\)", txt) else "none"      # Mesa's GL error after wined3d's glUseProgram (debug callback, err:d3d)
+    if hc != 0: return "na", "na", ge, "na"
     comp = "failed" if cf else "ok" if compiled else "none"
     link = "failed" if (lf or cf) else "ok" if compiled else "none"
-    return comp, link, ge
+    return comp, link, ge, up
 
 
 def one_run(k, exe, pin):
@@ -105,14 +106,14 @@ def items_of(work):
         hc, hp, hd = res[n]
         if hc == 0 and hp != 0: print("FAIL: partner shader refused, item", n, hex(hp)); sys.exit(1)
         L = win[n]; rl = roles(L); nlink += sum("Linking GLSL shader program" in x for x in L)
-        comp, link, ge = classify(L, hc, hd)
+        comp, link, ge, up = classify(L, hc, hd)
         vs, ro, ps = rl[0] if len(rl) == 1 else ("-", "-", "-") if not rl else ("?", "?", "?")
-        out[n] = "\t".join(["%08x" % hc, comp, link, ge, "na" if hc else "%08x" % hd, vs, ps, ro])
+        out[n] = "\t".join(["%08x" % hc, comp, link, ge, "na" if hc else "%08x" % hd, vs, ps, ro, up])
     return out, nlink
 
 
 def table(rows, items):
-    out = ["row\tmodel\tset\tcreate_hr\t" + "\t".join(f"{g}_{c}" for g in ("min", "ffp") for c in ("compile", "link", "gl_error", "draw_hr", "vs_sha", "ps_sha", "reorder_sha"))]
+    out = ["row\tmodel\tset\tcreate_hr\t" + "\t".join(f"{g}_{c}" for g in ("min", "ffp") for c in ("compile", "link", "gl_error", "draw_hr", "vs_sha", "ps_sha", "reorder_sha", "use_program"))]
     for rid, st, m, n, nf, _ in rows:
         a, b = items[int(n)].split("\t"), items[int(nf)].split("\t")
         out.append("\t".join([rid, m, st, a[0]] + a[1:] + b[1:]))
