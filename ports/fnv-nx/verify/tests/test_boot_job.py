@@ -302,7 +302,7 @@ def main():
     # nothing is installed: a host that does not match the declared environment is an input error before anything is fetched or published
     bad = os.path.join(SCRATCH, "badenv")
     os.makedirs(bad)
-    for tag, edit in (("a pinned program missing", lambda d: d["programs"].__setitem__("fnvnx-no-such-program", {"path": "/nonexistent/fnvnx-no-such-program"})),
+    for tag, edit in (("a pinned program missing", lambda d: d["programs"].append("fnvnx-no-such-program")),
                       ("a pinned python module missing", lambda d: d["python"]["modules"].__setitem__("fnvnx-no-such-module", "1.0"))):
         doc = json.load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "env.json")))
         edit(doc)
