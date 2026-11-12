@@ -49,7 +49,35 @@
    ]
   },
   {
+   "path": "ports/fnv-nx/lift/gen",
+   "class": "tool",
+   "gates": [
+    "pure"
+   ]
+  },
+  {
    "path": "ports/fnv-nx/lift/proof",
+   "class": "tool",
+   "gates": [
+    "selftests"
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/lift/rt/fmath.h",
+   "class": "tool",
+   "gates": [
+    "selftests"
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/lift/rt/fnvl.h",
+   "class": "tool",
+   "gates": [
+    "selftests"
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/lift/rt/fnvl_x87.h",
    "class": "tool",
    "gates": [
     "selftests"
@@ -75,6 +103,31 @@
    "gates": [
     "selftests"
    ]
+  },
+  {
+   "path": "ports/fnv-nx/lift/rt/x87.h",
+   "class": "tool",
+   "gates": [
+    "selftests"
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/lift/test/dsl_emit_test.py",
+   "class": "tool",
+   "gates": [
+    "selftests"
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/lift/test/dslemit",
+   "class": "product",
+   "target": "guest",
+   "cxx_origin": {
+    "lifted_by": "ports/fnv-nx/lift/gen/gen_dslemit.py",
+    "pack": "shapes"
+   },
+   "recipe": "ports/fnv-nx/lift/test/dslemit/build.json",
+   "gates": []
   },
   {
    "path": "ports/fnv-nx/lift/tools",
