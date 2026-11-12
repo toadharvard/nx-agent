@@ -88,9 +88,9 @@ def read_texts(path):
             if not h: return out
             m = re.fullmatch(rb'//@ ([0-9a-f]{8}) (\d+)\n', h)
             if not m: sys.exit('%s: bad record header %r' % (path, h[:40]))
-            a = int(m.group(1), 16)
+            a = int(m[1], 16)
             if a in out: sys.exit('%s: entry %08x twice' % (path, a))
-            out[a] = f.read(int(m.group(2)))
+            out[a] = f.read(int(m[2]))
 
 
 def shard(a):
@@ -101,7 +101,7 @@ def shard(a):
     orig = core.explore
     def cap(*x, **k): r = orig(*x, **k); G['cap'].append(r); return r
     core.explore = cap
-    with mp.get_context('fork').Pool(a.jobs) as p: got = list(p.imap(work, [mine[j:j + BATCH] for j in range(0, len(mine), BATCH)], 1))
+    with mp.Pool(a.jobs) as p: got = list(p.imap(work, [mine[j:j + BATCH] for j in range(0, len(mine), BATCH)], 1))
     texts = [t for g in got for t in g[0]]; miss = sorted(m for g in got for m in g[2])
     forms = collections.Counter()
     for g in got: forms.update(g[1])

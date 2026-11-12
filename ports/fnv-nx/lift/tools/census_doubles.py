@@ -74,7 +74,8 @@ def scan_text(path, rel):
 def sites(root):
     rows, other, lit = [], [], []
     for d, ds, fs in os.walk(root):
-        ds[:] = sorted(x for x in ds if x not in SKIP)
+        ds.sort()
+        if any(x in SKIP for x in os.path.relpath(d, root).split(os.sep)): continue          # a directory of SKIP and everything below it
         for f in sorted(fs):
             p = os.path.join(d, f); rel = os.path.relpath(p, root)
             if f.endswith('.py'):
@@ -89,7 +90,7 @@ def syms(objs):
     for o in objs:
         for l in subprocess.run(['llvm-nm', '--defined-only', '--extern-only', o], capture_output=True, text=True).stdout.splitlines():
             m = DEF.match(l.strip())
-            if m: out.add(m.group(2))
+            if m: out.add(m[2])
     return sorted(out)
 
 
