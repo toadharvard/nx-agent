@@ -155,3 +155,52 @@ def drop_symtab(data):
 
 def truncate(data, n):
     return bytes(data[:n])
+
+
+def _func(e, name):
+    hit = [s for s in e.symbols() if s[0] == name and s[3] not in (0, 0xfff1, 0xfff2)]
+    if len(hit) != 1:
+        raise ValueError('%d defined symbols named %s' % (len(hit), name))
+    return hit[0]
+
+
+def function_words(data, name):
+    """[(file offset, 32-bit word)] of the function symbol `name` (size from st_size), located through the symbol table and its section"""
+    e = elfobj.parse(data, 'mutate')
+    s = _func(e, name)
+    base = e._sec[s[3]][3] + s[4]
+    return [(base + i, struct.unpack_from('<I', data, base + i)[0]) for i in range(0, s[5], 4)]
+
+
+def patch_word(data, name, index, word):
+    """the `index`-th instruction word of function `name` becomes `word`"""
+    ws = function_words(data, name)
+    if not 0 <= index < len(ws):
+        raise ValueError('%s has %d words' % (name, len(ws)))
+    out = bytearray(data)
+    struct.pack_into('<I', out, ws[index][0], word)
+    return bytes(out)
+
+
+def stlr_to_str(data, name, nth=0):
+    """the `nth` store-release (STLR w, [xn]) of function `name` becomes the plain STR w, [xn] with the same registers (a stated edit of the
+    instruction word: 0x889ffc00|Rn<<5|Rt -> 0xb9000000|Rn<<5|Rt)"""
+    hits = [i for i, (_o, w) in enumerate(function_words(data, name)) if w & 0xfffffc00 == 0x889ffc00]
+    if nth >= len(hits):
+        raise ValueError('%s has %d STLR words' % (name, len(hits)))
+    w = function_words(data, name)[hits[nth]][1]
+    return patch_word(data, name, hits[nth], 0xb9000000 | (w & 0x3ff))
+
+
+def set_symbol_size(data, name, size):
+    e = elfobj.parse(data, 'mutate')
+    s = _func(e, name)
+    sy = [i for i, x in enumerate(e._sec) if x[1] == elfobj.SHT_SYMTAB][0]
+    f = _fields(e, sy)
+    ent = 24 if e.is64 else 16
+    for k, x in enumerate(e.symbols()):
+        if x == s:
+            out = bytearray(data)
+            struct.pack_into('<I' if not e.is64 else '<Q', out, f[4] + k * ent + (8 if not e.is64 else 16), size)
+            return bytes(out)
+    raise ValueError('symbol vanished')

@@ -71,3 +71,23 @@ The fixtures use pointers instead; the ICE is reported to the L2 lead, not worke
 
 Direct compiler calls still present in link/tests (outside the six files): test_gate_abs.py, test_gate_addr.py, test_gate_disp.py, test_gate_order.py,
 test_odr.py, test_abi.py (they call aarch64-linux-gnu-gcc/g++/as/ld themselves).
+
+## Step 2 (L2 lead order): the remaining tests with compiler / assembler / linker calls
+Mutation helpers added to mutate.py: function_words, patch_word, stlr_to_str, set_symbol_size. realobj.build(sources, plugins=subset|None, lifted, flags)
+builds a toy guest root (native: all 8 plugins; lifted-origin: any subset, incl. none).
+
+- test_odr.py: moved whole (real objects at -O0 and -Os through realobj.build; malformed = byte edits). No direct compiler call left.
+- test_abi.py: has no compiler, assembler or linker call (it was listed by mistake; its inputs are MSVC name strings and in-memory obj stores). Unchanged.
+- test_gate_order.py: moved. The OK object (fixtures/order_ok.cc, all plugins) certifies and covers the rules ordered, frame, frame-escape, fenced-load,
+  fenced-store, readonly; the BAD objects (fixtures/order_bad.cc, no plugin; -march=armv8.1-a for the LSE atomic) give the plain-store, plain-load,
+  frame-escape-unknown, weak-atomic, no-frame-record/section rows; frame-record cases and undecodable / size-0 / plain-store-with-same-registers cases are
+  byte mutations of the OK object. Assembler-only cases that are NOT covered any more (the property is an instruction sequence no C++ fixture
+  compiled by the pinned compiler and no single mutation of the real object gives; the old test hand-assembled them):
+  ok_literal (literal-pool `ldr w0, lit`: rule `literal`), ok_ro's `linker` rule (`adrp :got:` load: PIC code, the guest is not PIC), ok_ordered's
+  exclusive forms (`ldaxr/stlxr` pair accepted as ordered), ok_fenced_branch (fence on both paths of a branch), ok_local_base; bad_one_path and
+  bad_one_path2 (a fence on one path only), bad_call (load, call, fence), bad_store_late (store then fence), bad_store_ro (store to a read-only table via adrp),
+  bad_ro_written (read-only base register overwritten), bad_excl (plain `ldxr/stxr`), bad_load_only_ishst (`dmb ishst` after a load), bad_x29 (x29
+  overwritten, then used as a base), bad_escape_plain_x29 (x29-based plain store to an escaped slot); record cases rec_overlap, rec_above, rec_pair (hand-set
+  frame ranges against hand-written stores); alias cases alias_ok / alias_bad (`.set fb, fa` with two records: C++ ctor C1/C2 aliases exist in
+  fixtures/order_doc.cc but their records are written by the plugin from one function; no mutation gives two different records on aliased symbols
+  without editing the symbol table, which mutate.py does not do yet). 25 hand-assembled functions + 3 record cases + 2 alias cases = 30 cases listed.
