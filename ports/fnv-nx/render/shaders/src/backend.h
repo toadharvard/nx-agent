@@ -31,6 +31,7 @@ typedef struct fnvnx_reflection {
     signed char attrib_loc[224], varying_loc[224];
     unsigned char copy[224];
     int vs_complete;                      /* FNVNX_SHADER_VS_COMPLETE (vertex shaders) */
+    int flat_color;                       /* FNVNX_SHADER_FLAT_COLOR (both stages): the COLOR varyings are declared flat */
 } fnvnx_reflection;
 
 typedef struct fnvnx_glsl_backend {

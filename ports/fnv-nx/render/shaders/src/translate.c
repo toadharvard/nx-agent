@@ -68,6 +68,7 @@ int fnvnx_shader_translate(const void *bc, size_t n, const fnvnx_shader_opts *op
     if (fnvnx_frontend_parse(bc, n, opts->link_pairs, opts->n_link_pairs, &refl, &r->reflection_json, r->error, sizeof r->error)) return 0;
     r->stage = refl.stage; r->major = refl.major; r->minor = refl.minor;
     refl.vs_complete = refl.stage == FNVNX_STAGE_VERTEX && (opts->flags & FNVNX_SHADER_VS_COMPLETE) != 0;
+    refl.flat_color = (opts->flags & FNVNX_SHADER_FLAT_COLOR) != 0;
     r->stats.d3d_instructions = refl.d3d_instructions;
 
     char *glsl = be->emit(bc, n, &refl, r->error, sizeof r->error);

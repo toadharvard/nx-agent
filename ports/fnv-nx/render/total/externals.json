@@ -8,6 +8,46 @@
    "commit": "ad5dff84830c2863c841f4b1f4e3df78c705b383",
    "tree_sha256": "e49a1b65e09c86647fd8c0b26c7a8e16e4a16e6ad1290a1e7ada85047306f361",
    "at": "/mojoshader"
+  },
+  {
+   "name": "vkd3d",
+   "repo": "fnv-nx-build",
+   "ref": "tools/vkd3d",
+   "commit": "fd97ca35ae29a3f79b7a3467fe99d1a3b4e94643",
+   "tree_sha256": "8ea2fb820f32b38bdb360b63d87f2802e3a9705bc39403b5837441a5a87382d9",
+   "at": "/vkd3d",
+   "upstream": "https://gitlab.winehq.org/wine/vkd3d.git 0afe7d0aad6eabca21c208be609d3a5670e8ab41 (libs/vkd3d-shader/d3dbc.c only: the file sm_xref.py reads)",
+   "use": "render/shaders/total/sm_table.py (sm_xref vkd3d opcode tables), not a build input"
+  },
+  {
+   "name": "wine-sm1",
+   "repo": "fnv-nx-build",
+   "ref": "tools/wine-sm1",
+   "commit": "0a52e82db01433f1b0363c52cf68920ba059a1b1",
+   "tree_sha256": "70046f62058eb7c7addb664ce1e8438dacb68273abd4b23863e048e28addd530",
+   "at": "/wine",
+   "upstream": "https://gitlab.winehq.org/wine/wine.git tag wine-9.0 fd1153552d779e1ac14b0b1c48fbd1cde894eb0a (dlls/wined3d/shader_sm1.c, dlls/d3dcompiler_43/asmparser.c: the files sm_xref.py reads)",
+   "use": "render/shaders/total/sm_table.py, not a build input"
+  },
+  {
+   "name": "msdocs-sm",
+   "repo": "fnv-nx-build",
+   "ref": "tools/msdocs-sm",
+   "commit": "e18183f8c5536262d44677ab77398e320e970cfc",
+   "tree_sha256": "6bfddc8df0a32bd305edb2d486cd63df918775a0de4293b1f769c1130efad166",
+   "at": "/ms",
+   "upstream": "text rendering (learn.microsoft.com) of 172 pages of MicrosoftDocs/win32 desktop-src/direct3dhlsl, the D3D9 shader assembly reference; fetched 2026-11 by the L6 worker",
+   "use": "render/shaders/total/sm_table.py, not a build input"
+  },
+  {
+   "name": "wine-wined3d",
+   "repo": "fnv-nx-build",
+   "ref": "tools/wine-wined3d",
+   "commit": "9fa10f835a288b72b28da6ea70bcb233793ef0fc",
+   "tree_sha256": "d5c1d2a96a627fadda5f3c162c0121d391d3562e78931b9017b2f74cb397ec29",
+   "at": "/wine-wined3d",
+   "upstream": "https://gitlab.winehq.org/wine/wine.git tag wine-9.0 fd1153552d779e1ac14b0b1c48fbd1cde894eb0a (dlls/wined3d/glsl_shader.c, shader.c, shader_sm1.c, wined3d_private.h)",
+   "use": "reference implementation for translator semantics (owner decision: Wine 9.0 is the accepted reference), not a build input"
   }
  ]
 }
