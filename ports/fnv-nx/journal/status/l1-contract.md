@@ -939,3 +939,12 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - L5 hostapi union rule: accepted. contract/treehash.py as the single home of the tree hash: accepted, with conditions; cas.py review pending.
   - L5 w9 verdict at 5834ee9b1 (stale head): red, 852 s, 19/39 red. The selftests HOSTABI_DIR fix is already in 1932833cd.
   - w17: flags merged onto 224af83e = 646e1bb7, verdict running.
+
+- 09:42 Candidate verdict v8 (next3b 224af83e, tree 636d4a02): red, 39 gates, 27 green / 12 red, 985 s cold.
+  - L1 owners:
+    - linkstrict 4888/5783 + abi odr (libstdc++ comdats across 114 platform TUs): w23 comdat_identity.
+    - namegate 0/0 and r7 0/0 (vacuous): w20u.
+    - objstub exit 2: w20 (faithful run, crash becomes a finding).
+    - fpexact 118/232: w22f (reader).
+  - w17 builds the merged branch w17m = 224af83e + flags 7ecf2e25 + w22b 6b122a79, with one verdict; it reports to the orchestrator directly.
+  - L3a accepted the closed test-placement rule and sent it to w6. Their t16g f0c65c004 has 7/7 test roots recipe-valid; its lib/sha256 row is to be replaced by w15c's.
