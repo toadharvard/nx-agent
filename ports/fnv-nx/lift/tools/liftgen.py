@@ -161,8 +161,8 @@ def finish(a):
     for x in sorted(texts): units[bucket(x)].append(texts[x])
     for i in range(NBUCKET):
         with open('%s/u/%03x.cpp' % (pk, i), 'wb') as f: f.write(b'#include "fnvl_prelude.h"\n' + b''.join(units[i]))
-    open(pk + '/inc/fnvl_prelude.h', 'w', newline='').write('#ifndef FNVL_PRELUDE_H\n#define FNVL_PRELUDE_H\n' + L.PRELUDE + '\n#endif\n')
-    open(pk + '/inc/imp.h', 'w', newline='').write(L._inline('imp.h'))
+    open(pk + '/inc/fnvl_prelude.h', 'w', newline='').write('#ifndef FNVL_PRELUDE_H\n#define FNVL_PRELUDE_H\n' + L.prelude(os.path.join(LIFT, 'rt')) + '\n#endif\n')
+    open(pk + '/inc/imp.h', 'w', newline='').write(L.inline(os.path.join(LIFT, 'rt'), 'imp.h'))
     syms = {x: 'L_%08x' % x for x in texts}; code = set(syms)
     imp, blocked, hit, absent = impgen.generate(a.bridge, pk, a.need, a.l3, None)
     if hit or absent: sys.exit('finish: an import row a loaded image needs has no entry (imp_blocked.tsv)')

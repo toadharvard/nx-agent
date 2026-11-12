@@ -117,12 +117,12 @@ def compile_all(a, funcs):
     texts = {}
     for f in funcs: texts[f] = G['L'].lift(G['img'], **lift_args(f))[0]
     chunks = [funcs[i:i + 40] for i in range(0, len(funcs), 40)]
-    with mp.get_context('fork').Pool(a.jobs) as p: outs = p.map(comp_chunk, [(G['L'].PRELUDE + '\n'.join(texts[f] for f in c), flags, od) for c in chunks])
+    with mp.get_context('fork').Pool(a.jobs) as p: outs = p.map(comp_chunk, [(G['L'].prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt')) + '\n'.join(texts[f] for f in c), flags, od) for c in chunks])
     bad, objs = {}, []
     for c, (o, err) in zip(chunks, outs):
         if o: objs.append(o); continue
         for f in c:     # a chunk failed: find the functions that do not compile
-            o2, e2 = comp_chunk((G['L'].PRELUDE + texts[f], flags, od))
+            o2, e2 = comp_chunk((G['L'].prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt')) + texts[f], flags, od))
             if o2: objs.append(o2)
             else: bad[f] = e2[:70]
     good = [f for f in funcs if f not in bad]
