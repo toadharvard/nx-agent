@@ -60,4 +60,5 @@ tab("kHwFonts", [("OEMFONT.FON", oem), ("FIXEDFON.FON", fixed), ("FONTS.FON", sy
 tab("kFontsKey", [("Courier", courier), ("MS Serif", serif), ("MS Sans Serif", sserif96), ("Small Fonts", small)])
 tab("kSubst", subs)
 tab("kReplace", rep)
+os.makedirs(os.path.dirname(out), exist_ok=True)
 open(out, "w").write("\n".join(o) + "\n")
