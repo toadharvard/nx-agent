@@ -1466,9 +1466,15 @@ The registry is certified iff ALL hold:
      gate file of verify/gates.d), `fact:PATH` (PATH is a tracked file: the fact table that decides it), `planned: TEXT`
      (the gate or fact is named and does not exist yet), `no gate yet: TEXT` (the fact that is needed) or `OPEN: TEXT`
      (nobody has a discharge yet). planned, no gate yet and OPEN are reported by count; they are the debt of the owner named in the entry.
-  7. id blocks: an id below 200 is free (the records that predate the blocks; L1 takes the free numbers below 200); an id from
-     200 lies in the block of the entry's owner lead (the first lead of a joint owner): L3a 2xx, L3b 3xx, L4 4xx, L5 5xx,
-     L6 6xx, L6A 7xx, L2 8xx. A record of a layer branch enters with the branch's merge under its block, so ids never collide.
+  7. id ranges: the registry's `ranges` is {lead: [first, last]} for exactly L1, L3a, L3b, L4, L5, L6, L6A, L2, integers from 100,
+     pairwise disjoint (L1 100..199, L3a 200..299, L3b 300..399, L4 400..499, L5 500..599, L6 600..699, L6A 700..799, L2 800..899).
+     An id below 100 is a legacy id and exempt; an id from 100 lies in the range of the first lead named in its owner. An id
+     defined by two records and an alias claimed by two records are red. A record of a layer branch enters with the branch's merge
+     under its range, so ids never collide.
+  8. findings: every red item is a finding with a code (entry-form, id-form, id-repeated, id-range, alias-claimed, used-by-*,
+     decision-*, owner-*, removed-by-form, ranges-form, mention-no-id, mention-unknown-id, stray-id, ...). stdout shows the first
+     20; the FULL list (every id and code, sorted, with the total per code) is written as JSON to GATE_DETAIL/assumptions.findings.json
+     (the verdict gives GATE_DETAIL = <verdict file>.detail/<gate>, kept beside the stored verdict), and the summary line names the path.
 And no id outside the registry occurs in any tracked text file of the tree (a .json file included): an id that is
 not in the registry is red wherever it is written.
 Argument: an assumption is introduced by writing it down; every writing with the word in the universe is a mention, and a

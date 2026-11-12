@@ -39,8 +39,12 @@ def read(p):
     return FILES[p]
 
 
+RANGES = {"L1": [100, 199], "L3a": [200, 299], "L3b": [300, 399], "L4": [400, 499], "L5": [500, 599], "L6": [600, 699],
+          "L6A": [700, 799], "L2": [800, 899]}
+
+
 def base():
-    return {"format": G.FORMAT, "entries": [
+    return {"format": G.FORMAT, "ranges": RANGES, "entries": [
         {"id": asm(1), "text": "t", "used_by": [T + "docs/a.md"], "aliases": ["c"], "status": "OWNER",
          "decision": {"file": "CLAUDE.md", "quote": "1. the compiler is correct;"}},
         {"id": asm(2), "text": "t", "used_by": [T + "docs/a.md"], "aliases": [], "status": "OWNER",
@@ -55,6 +59,10 @@ def run(doc, gates=("g",), tracked=TRACKED):
 
 def has(errs, word):
     return any(word in e for e in errs)
+
+
+def codes(errs):
+    return {getattr(e, "code", None) for e in errs}
 
 
 e, c = run(base())
@@ -144,13 +152,26 @@ d["entries"][2]["owner"] = "L6A"
 check("owner L6A is green", run(d)[0] == [], run(d)[0])
 
 for i, ow, ok in ((250, "L3a", True), (250, "L3b", False), (700, "L6A", True), (350, "L3b+L4", True), (350, "L4+L3b", False),
-                  (850, "L2", True), (250, "L1", False), (199, "L1", True)):
+                  (850, "L2", True), (250, "L1", False), (199, "L1", True), (200, "L1", False), (99, "L5", True), (900, "L2", False)):
     d = base()
     d["entries"][2]["id"] = asm(i)
     d["entries"][2]["owner"] = ow
     d["entries"][2]["used_by"] = [T + "docs/a.md"]
     e = run(d)[0]
-    check("id %d owner %s block %s" % (i, ow, "green" if ok else "red"), (not has(e, "block")) == ok, e)
+    check("id %d owner %s range %s" % (i, ow, "green" if ok else "red"), ("id-range" not in codes(e)) == ok, e)
+d = base()
+d["entries"][2]["id"] = asm(1)
+check("an id defined by two records is red", "id-repeated" in codes(run(d)[0]), run(d)[0])
+d = base()
+d["entries"][2]["aliases"] = ["c"]
+check("an alias claimed by two records is red", "alias-claimed" in codes(run(d)[0]), run(d)[0])
+check("ranges missing is red", "registry-form" in codes(run({"format": G.FORMAT, "entries": base()["entries"]})[0]) or
+      "ranges-form" in codes(run({"format": G.FORMAT, "entries": base()["entries"]})[0]), run({"format": G.FORMAT, "entries": []})[0])
+for name, rg in (("a lead missing", {k: v for k, v in RANGES.items() if k != "L2"}), ("overlapping", dict(RANGES, L2=[150, 899])),
+                 ("below the first ranged id", dict(RANGES, L1=[1, 199])), ("not integers", dict(RANGES, L1=["a", "b"]))):
+    d = base()
+    d["ranges"] = rg
+    check("ranges with %s is red" % name, "ranges-form" in codes(run(d)[0]), run(d)[0])
 
 d = base()
 d["entries"][2]["extra"] = 1
@@ -257,6 +278,26 @@ rc, res = gate(tree({T + "docs/c.py": "# assumed\nx = 1\n"}))
 check("gate: a python comment is a mention", rc == 2 and res["universe"] == 1, (rc, res))
 rc, res = gate(tree({T + "docs/c.py": "assumed = 1\nname = 'assumption'\n"}))
 check("gate: python code is not a mention", rc == 0, (rc, res))
+
+# the full findings file: uncapped, sorted, counted per code, named in the summary line
+d = base()
+for i in range(60):
+    d["entries"].append({"id": asm(100 + i), "text": "", "used_by": [T + "docs/a.md"], "aliases": [], "status": "REMOVE",
+                         "removed_by": "planned: a gate", "owner": "L5"})
+out = tempfile.mkdtemp()
+td = tree(None, d)
+env = dict(os.environ, GATE_OUT=out, GATE_DETAIL=os.path.join(out, "detail"))
+r = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(HERE), "gate_assumptions.py")], cwd=td, env=env,
+                   capture_output=True, text=True)
+fp = os.path.join(out, "detail", "assumptions.findings.json")
+ok = os.path.exists(fp)
+doc = json.load(open(fp)) if ok else {}
+ids = {f["id"] for f in doc.get("findings", [])}
+check("findings file holds every finding, not a capped list", ok and doc["total"] == len(doc["findings"]) >= 120 and
+      len(ids) >= 60 and sum(doc["counts"].values()) == doc["total"], doc.get("counts"))
+check("findings file is sorted by code", ok and [f["code"] for f in doc["findings"]] == sorted(f["code"] for f in doc["findings"]), "")
+check("stdout prints at most 20 findings and the summary names the file", r.returncode == 2 and fp in r.stdout and
+      r.stdout.count("\n  ") <= 22, r.stdout[-300:])
 
 print("fails: %d" % fails)
 sys.exit(1 if fails else 0)
