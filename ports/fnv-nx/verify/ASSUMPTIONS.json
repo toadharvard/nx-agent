@@ -1240,6 +1240,17 @@
    "owner": "L3a+L3b"
   },
   {
+   "id": "ASM-225",
+   "text": "Fresh stack space (premise F): when esp is loaded from a register that is not a known stack address (chkstk/alloca: esp = esp - size), the fresh space is disjoint from every tracked slot of the old frame: its accesses are below the new esp or inside the allocated block, and the new esp does not lie above a live tracked old slot (size >= 0, no wraparound, no access past the allocated size). A red-free pcsrc result of an entry that creates a fresh space holds under it (cond:fresh, listed as cond_fresh_list in gate_pcsrc.json).",
+   "used_by": [
+    "ports/fnv-nx/lift/tools/pcsrc.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: the affine esp-minus-size domain plus the probe-loop relation (L3a w4)",
+   "owner": "L3a"
+  },
+  {
    "id": "ASM-320",
    "text": "rt/rcptab.cert.json was produced by farm/rcpcert.sh on a CPU with the reference identity.",
    "used_by": [],
