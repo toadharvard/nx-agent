@@ -27,20 +27,27 @@ R32 = {X.X86_REG_EAX: 'eax', X.X86_REG_EBX: 'ebx', X.X86_REG_ECX: 'ecx', X.X86_R
 for _n, _g in (('eax', ('AX', 'AL', 'AH')), ('ebx', ('BX', 'BL', 'BH')), ('ecx', ('CX', 'CL', 'CH')), ('edx', ('DX', 'DL', 'DH')), ('esi', ('SI',)), ('edi', ('DI',)), ('ebp', ('BP',))):
     for _x in _g: R32[getattr(X, 'X86_REG_' + _x)] = _n
 CALLER_SAVED = ('eax', 'ecx', 'edx')
+CALLER_SAVED_NEVER = ()
+BLOCK_KINDS = {'tail', 'inner', 'eh-unwind', 'eh-catch', 'eh-cont', 'eh-throw'}
 FP_ENV = {'fnstenv': 28, 'fstenv': 28, 'fnsave': 108, 'fsave': 108}      # 32-bit protected mode image: FIP at +12, FDP at +20
 FP_FXSAVE = ('fxsave',)                                                   # FIP at +8, FDP at +16
 FPU_CONTROL = {'fnstenv', 'fstenv', 'fnsave', 'fsave', 'fldenv', 'frstor', 'fnstcw', 'fstcw', 'fldcw', 'fnstsw', 'fstsw', 'fnclex', 'fclex', 'fninit', 'finit', 'fwait', 'wait', 'fxsave', 'fxrstor'}
-DIRECT_KINDS = {'call', 'tail', 'decomp', 'inner'}
+CALL_KINDS = {'call', 'ptr', 'export', 'entry', 'decomp', 'tls', 'seh-handler', 'seh-filter'}   # entered by a call (or by the runtime through one): owns a return-address slot
+INDIRECT_KINDS = {'ptr', 'export', 'entry', 'tls', 'seh-handler', 'seh-filter'}                  # callers the facts do not enumerate
 RETS = ('ret', 'retf', 'iret', 'iretd')
 
 
+def tr(v): return v == 'mix' or (isinstance(v, tuple) and v[0] in ('ra', 'fip', 'fdp', 'abs'))
+
+
 def j(a, b):
+    """join of two values at a merge: equal stays; a pc-derived value on one path and anything else on the other is 'mix' (possibly pc-derived); two different stack pointers or data are untracked."""
     if a == b: return a
-    return 'mix' if (a is not None or b is not None) else None
+    return 'mix' if (tr(a) or tr(b)) else None
 
 
 class Img:
-    def __init__(self, text, T0, entries, ranges):
+    def __init__(self, text, T0, entries, ranges, rd=None, rset=None):
         """text: bytes of the executable span at T0; entries: {addr: set(kinds)}; ranges: sorted list of reached [start, end) byte ranges (any overlap)."""
         self.text, self.T0, self.T1 = text, T0, T0 + len(text); self.entries = entries
         self.md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); self.md.detail = True
@@ -49,7 +56,7 @@ class Img:
             if mer and a <= mer[-1][1]: mer[-1][1] = max(mer[-1][1], b)
             else: mer.append([a, b])
         self.mer = mer; self.ms = [a for a, b in mer]; self.cache = {}
-        self.calltg = {}; self.retsites = set(); self.callers = {}; self.summ = {}; self.busy = set(); self.rows = []; self.info = Counter()
+        self.rd = rd; self.rset = rset or set(); self.refs = None; self.tabslots = set(); self.visited = set(); self.jtargets = set(); self.pk = {}; self.wmemo = {}; self.calltg = {}; self.retsites = set(); self.callers = {}; self.summ = {}; self.busy = set(); self.rows = []; self.info = Counter()
     def reached(self, a):
         i = bisect.bisect_right(self.ms, a) - 1
         return i >= 0 and a < self.mer[i][1]
@@ -72,6 +79,13 @@ def scan_calls(img):
             if not g: a += 1; continue
             if a not in seen:
                 seen.add(a)
+                if g.mnemonic == 'jmp' and g.operands[0].type == X.X86_OP_MEM and g.operands[0].mem.index and not g.operands[0].mem.base and img.rd is not None:
+                    t = g.operands[0].mem.disp & M32; n_ = 0
+                    while t in img.rset and n_ < 4096:
+                        try: w = img.rd(t)
+                        except Exception: break
+                        if not (img.T0 <= w < img.T1 and img.reached(w)): break
+                        img.tabslots.add(t); t += 4; n_ += 1
                 if g.mnemonic == 'call':
                     img.retsites.add(a + g.size)
                     o = g.operands[0]
@@ -107,22 +121,39 @@ def memkey(img, g, op, esp, regs):
     return ('reg', b, m.disp)
 
 
-def analyse_entry(img, e):
+def owner(img, e):
+    """an entry entered by a call (or by the runtime through one) owns a return-address slot; every other kind is a block entered by a jump in its predecessors' context."""
+    k = img.entries.get(e) or set()
+    if not k or (k & CALL_KINDS) - {'ptr'}: return True
+    if 'ptr' not in k: return False
+    # a relocated pointer: a call-entered entry, unless every relocated word that holds it is a slot of a jump table (the entry is a case block of its parent)
+    if img.refs is None:
+        img.refs = {}
+        for w in img.rset:
+            try: img.refs.setdefault(img.rd(w), []).append(w)
+            except Exception: pass
+    sl = img.refs.get(e, [])
+    return not (sl and all(w in img.tabslots for w in sl))
+
+
+def analyse_entry(img, e, mode='owner'):
     """forward dataflow over the instructions of entry e. -> (events, summary). events: [(site, source, consumer, detail, red)];
     summary: {'regs': {reg: ('ra', k)}, 'pop': esp offset after return relative to the caller's esp before the call, or None}."""
-    if e in img.summ: return img.summ[e]
-    if e in img.busy: return ([], {'regs': {}, 'pop': None})
-    img.busy.add(e)
-    ev = []; rets = []; seen_ev = set()
+    anyra = mode == 'possibly'      # a block with a predecessor we cannot see: every stack slot is possibly the return address
+    if not anyra:
+        if e in img.summ: return img.summ[e]
+        if e in img.busy: return ([], {'regs': {}, 'pop': None})
+        img.busy.add(e)
+    ev = []; rets = []; seen_ev = set(); retscratch = []
     def emit(site, src, cons, detail, red):
         k = (site, src, cons, detail)
         if k not in seen_ev: seen_ev.add(k); ev.append((site, src, cons, detail, red))
-    states = {e: ({}, {0: ('ra', 0)}, 0, frozenset(), {})}      # regs, stack slots, esp offset, last x87 instructions, fpu env images {key: kind}
+    states = {e: ({}, {} if anyra else {0: ('ra', 0)}, 0, frozenset(), {})}      # regs, stack slots, esp offset, last x87 instructions, fpu env images {key: kind}
     work = [e]; steps = 0
     while work:
         a = work.pop(); steps += 1
         if steps > 20000: emit(a, '-', 'incomplete', 'dataflow step cap', True); break
-        regs0, st0, esp0, fpl, fpe0 = states[a]
+        regs0, st0, esp0, fpl, fpe0 = states[a]; img.visited.add(a)
         if not img.reached(a): continue
         g = img.dec(a)
         if not g: continue
@@ -136,7 +167,7 @@ def analyse_entry(img, e):
             if op.type != X.X86_OP_REG: return None
             n = R32.get(op.reg)
             if n is None: return None
-            v = regs.get(n)
+            v = ('sp', esp) if n == 'esp' and esp is not None else regs.get(n)
             if v is not None and op.size != 4: return 'mix'
             return v
         def load(key, a=a):
@@ -145,7 +176,10 @@ def analyse_entry(img, e):
             if key[0] == 'lost':
                 if any(isinstance(v, tuple) and v[0] == 'ra' for v in st.values()): emit(a, 'ra', 'esp-lost-read', 'stack read through an esp whose offset is unknown while the return slot is live', True)
                 return None
-            if key[0] == 'stk': return st.get(key[1])
+            if key[0] == 'stk':
+                v = st.get(key[1])
+                if v is None and anyra and key[1] not in st: emit(a, 'ra', 'read-possible-ra', 'stack read in a block whose predecessors are not all visible', True); return ('ra', 0)
+                return v
             return None
         def fpu_read(key, a=a):
             """a load from the FIP / FDP offset of an FPU environment image we stored."""
@@ -211,19 +245,15 @@ def analyse_entry(img, e):
             if tg is not None and tg in img.entries and tg != e: sm = analyse_entry(img, tg)[1]
             for off, v in sorted(st.items()):
                 if esp is not None and off >= esp and tracked(v) and not (off == 0 and v == ('ra', 0)): emit(a, vsrc(v), 'passed', 'argument slot live at call', True)
-            callee_w = writes_of(img, tg) if sm is not None else None
+            keep = {}
             for n in sorted(regs):
                 v = regs[n]
                 if v is None: continue
-                if tracked(v) or v == 'mix':
-                    if callee_w is not None and n not in callee_w: continue
-                    if n in CALLER_SAVED and sm is not None: continue
-                    emit(a, vsrc(v) if v != 'mix' else 'pc', 'passed', 'register %s live across a call (callee %s)' % (n, 'writes it' if sm is not None else 'unknown'), True)
-            keep = {n: v for n, v in regs.items() if n not in CALLER_SAVED and callee_w is not None and n not in callee_w}
-            for n in list(regs):
-                if n in keep: continue
-                regs.pop(n)
-            for n in list(keep): regs[n] = keep[n]
+                # the callee's code decides: it reads the register first (a pass), overwrites it on every path (the value dies), or leaves it (the value survives)
+                fate = path_kill(img, tg, n) if (tg is not None and tg in img.entries) else 'read'
+                if (tracked(v) or v == 'mix') and fate == 'read': emit(a, vsrc(v) if v != 'mix' else 'pc', 'passed', 'register %s read by the callee%s' % (n, '' if tg is not None and tg in img.entries else ' (callee unknown)'), True)
+                if fate == 'live' and n not in CALLER_SAVED_NEVER: keep[n] = v
+            regs.clear(); regs.update(keep)
             if sm is not None and sm['regs']:
                 for n, k in sm['regs'].items():
                     regs[n] = ('abs', frozenset({nxt + k[1]}))
@@ -242,8 +272,9 @@ def analyse_entry(img, e):
             elif esp is None: emit(a, '-', 'esp-lost-ret', 'ret with an unknown esp offset', False)
             rr = {n_: regs[n_] for n_ in sorted(regs) if isinstance(regs[n_], tuple) and regs[n_][0] == 'ra'}
             for n_, v_ in sorted(regs.items()):
-                if v_ is not None and tracked(v_) and v_[0] != 'ra': emit(a, vsrc(v_), 'passed', 'returned in %s' % n_, True)
-                elif v_ == 'mix': pass
+                if v_ is not None and tracked(v_) and v_[0] != 'ra':
+                    if n_ in CALLER_SAVED and not anyra: retscratch.append((a, n_, vsrc(v_)))      # dead iff every caller overwrites it first: decided in resolve()
+                    else: emit(a, vsrc(v_), 'passed', 'returned in %s' % n_, True)
             rets.append((esp, n, rr)); term = True
         elif mn == 'jmp':
             o = ops[0]
@@ -256,14 +287,25 @@ def analyse_entry(img, e):
                             if t not in img.entries and t not in img.retsites: emit(a, vsrc(v), 'target-not-entry', '%08x' % t, True)
                     else: emit(a, vsrc(v), 'unresolved-target', 'jmp through a relative value', True)
                 term = True
-            elif o.type == X.X86_OP_MEM: read_mem(o); term = True
+            elif o.type == X.X86_OP_MEM:
+                read_mem(o); term = True
+                m = o.mem
+                if m.index and not m.base and img.rd is not None:       # jmp [tbl + r*4]: the relocated words of the table are the successors
+                    t = m.disp & M32; n_ = 0
+                    while t in img.rset and n_ < 4096:
+                        try: w = img.rd(t)
+                        except Exception: break
+                        if not (img.T0 <= w < img.T1 and img.reached(w)): break
+                        succ.append(w); t += 4; n_ += 1
+                    term = False
+                    for w in succ: img.jtargets.add(w)
             else:
                 t = o.imm & M32
-                if t != e and t in img.entries:
+                if t != e and t in img.entries and owner(img, t):
                     for n in sorted(regs):
                         if tracked(regs[n]): emit(a, vsrc(regs[n]), 'passed', 'tail jump with %s live' % n, True)
                     term = True
-                else: succ = [t]
+                else: succ = [t]; img.jtargets.add(t)
         elif mn in ('hlt', 'ud2', 'int3', 'iret', 'iretd', 'retf'): term = True
         elif mn[0] == 'j' or mn in ('loop', 'loope', 'loopne', 'jecxz'):
             succ = [nxt, ops[0].imm & M32] if ops and ops[0].type == X.X86_OP_IMM else [nxt]
@@ -280,6 +322,7 @@ def analyse_entry(img, e):
             o = ops[0]
             if esp is not None:
                 v = st.pop(esp, None)
+                if v is None and anyra: emit(a, 'ra', 'read-possible-ra', 'pop in a block whose predecessors are not all visible', True); v = ('ra', 0)
                 if o.type == X.X86_OP_REG: write_reg(o, v)
                 elif o.type == X.X86_OP_MEM and tracked(v): emit(a, vsrc(v), 'store', 'pop to memory', True)
                 if tracked(v) and v[0] == 'ra': emit(a, 'ra', 'read', 'return-address slot read as data', False)
@@ -385,13 +428,13 @@ def analyse_entry(img, e):
                 else: img.info['fpu-env-unknown-destination'] += 1
             succ = [nxt]
         elif mn.startswith('f') and mn not in FPU_CONTROL:
-            fpl = frozenset({a});
+            fpl = frozenset({a})
             for o in ops:
-                if o.type == X.X86_OP_MEM: read_mem(o)
+                if o.type == X.X86_OP_MEM and o.access & capstone.CS_AC_READ: read_mem(o)
             succ = [nxt]
         else:
             for o in ops:
-                if o.type == X.X86_OP_MEM: read_mem(o)
+                if o.type == X.X86_OP_MEM and o.access & capstone.CS_AC_READ: read_mem(o)
             rd, wr = g.regs_access(); written = set()
             for r in wr:
                 n = R32.get(r)
@@ -428,7 +471,7 @@ def analyse_entry(img, e):
                         if isinstance(x, tuple) and isinstance(y, tuple) and x[0] == y[0] == 'abs': dct[k] = ('abs', x[1] | y[1])
                         elif isinstance(x, tuple) and isinstance(y, tuple) and x[0] == y[0] and x[0] in ('fip', 'fdp') and x[1] == y[1]: dct[k] = x
                 if (r2, s2, e2, f2, fe2) != o: states[t] = (r2, s2, e2, f2, fe2); work.append(t)
-    img.busy.discard(e)
+    if not anyra: img.busy.discard(e)
     # resolve fip / fdp symbolic values: concretise through the x87 instructions that executed before (recorded in fpl at the load)
     pops = [r[0] for r in rets]; ns_ = {r[1] for r in rets}
     pop = None
@@ -440,11 +483,12 @@ def analyse_entry(img, e):
             if all(n in r[2] and r[2][n] == rets[0][2].get(n) for r in rets) and n in rets[0][2]: reg_ret[n] = rets[0][2][n]
     # a symbolic ra value consumed inside this entry: resolve against the callers (concrete consumer checks)
     summ = (ev, {'regs': reg_ret, 'pop': (pop - 4 if pop is not None else None)})
-    img.summ[e] = summ
+    img.pk[(e, mode)] = retscratch
+    if not anyra: img.summ[e] = summ
     return summ
 
 
-def writes_of(img, e, _memo={}):
+def writes_of_unused(img, e, _memo={}):
     """registers written by the entry e and by everything it calls directly (a pop that restores a register still counts as a write: callee-saved behaviour is not assumed).
     None = a callee is unknown (an indirect call, a call outside the entries)."""
     key = (id(img), e)
@@ -485,53 +529,147 @@ def writes_of(img, e, _memo={}):
     return _memo[key]
 
 
-def resolve(img, e, ev, kinds):
-    """expand the return-address events of entry e against its callers: concrete addresses of control targets, indirect-callers red."""
-    rows = []
+FULL32 = {X.X86_REG_EAX: 'eax', X.X86_REG_EBX: 'ebx', X.X86_REG_ECX: 'ecx', X.X86_REG_EDX: 'edx', X.X86_REG_ESI: 'esi', X.X86_REG_EDI: 'edi', X.X86_REG_EBP: 'ebp'}
+
+
+def access(g):
+    """(registers read at all, registers fully overwritten) by one instruction; a partial write or a conditional write does not kill."""
+    rd, wr = g.regs_access(); mn = g.mnemonic
+    rn = {R32[r] for r in rd if r in R32}; wn = {FULL32[r] for r in wr if r in FULL32}
+    o = g.operands
+    if mn in ('xor', 'sub') and len(o) == 2 and o[0].type == o[1].type == X.X86_OP_REG and o[0].reg == o[1].reg: rn -= wn
+    if mn.startswith('cmov') or mn in ('xchg', 'cmpxchg', 'xadd'): rn |= wn
+    return rn, wn
+
+
+def path_kill(img, e, reg):
+    """the fate of a register value at the entry of function e, by e's own code: 'read' (read before overwritten on some path, or a path leaves our knowledge: an indirect
+    transfer, an unknown callee), 'live' (survives to a return on some path, never read), 'killed' (overwritten on every path before any return)."""
+    k = (e, reg)
+    if k in img.wmemo: return img.wmemo[k]
+    img.wmemo[k] = 'killed'            # a cycle adds no read and no return of its own
+    r = scan_kill(img, e, reg)
+    img.wmemo[k] = r
+    return r
+
+
+def scan_kill(img, a0, reg, root=None):
+    live = False; stack = [a0]; vis = set(); root = a0 if root is None else root
+    while stack:
+        a = stack.pop()
+        while a not in vis:
+            vis.add(a)
+            if not img.reached(a): return 'read'
+            g = img.dec(a)
+            if not g: return 'read'
+            mn = g.mnemonic; nxt = a + g.size; rn, wn = access(g)
+            if reg in rn: return 'read'
+            if reg in wn: break
+            if mn == 'call':
+                t = img.calltg.get(a)
+                if t == nxt: a = nxt; continue
+                if t is None or t not in img.entries: return 'read'
+                r = path_kill(img, t, reg)
+                if r == 'read': return 'read'
+                if r == 'killed': break
+                a = nxt; continue
+            if mn in RETS: live = True; break
+            if mn in ('hlt', 'ud2', 'int3'): break
+            if mn == 'jmp':
+                o = g.operands[0]
+                if o.type == X.X86_OP_IMM:
+                    t = o.imm & M32
+                    if t != root and t in img.entries and owner(img, t):
+                        r = path_kill(img, t, reg)
+                        if r == 'read': return 'read'
+                        if r == 'live': live = True
+                        break
+                    a = t; continue
+                if o.type == X.X86_OP_MEM and o.mem.index and not o.mem.base and img.rd is not None:
+                    t = o.mem.disp & M32; n_ = 0; any_ = False
+                    while t in img.rset and n_ < 4096:
+                        try: w = img.rd(t)
+                        except Exception: break
+                        if not (img.T0 <= w < img.T1 and img.reached(w)): break
+                        stack.append(w); any_ = True; t += 4; n_ += 1
+                    if any_: break
+                return 'read'
+            if mn[0] == 'j' and g.operands and g.operands[0].type == X.X86_OP_IMM: stack.append(g.operands[0].imm & M32)
+            a = nxt
+    return 'live' if live else 'killed'
+
+
+def resolve(img, e, ev, kinds, mode, retscratch):
+    """rows of one root: its events, the indirect-callers rule for a return address read as data, and the scratch-at-ret rule."""
+    rows = [(e, site, src, cons, d, red) for site, src, cons, d, red in ev]
     callers = img.callers.get(e, [])
-    indirect = bool(kinds - DIRECT_KINDS)      # an entry with any kind other than a direct call/jump target is reached by a call site the facts do not enumerate
-    uses_ra = any(src == 'ra' and cons == 'read' for site, src, cons, d, red in ev)
-    for site, src, cons, d, red in ev: rows.append((e, site, src, cons, d, red))
-    if uses_ra:
-        if indirect: rows.append((e, e, 'ra', 'indirect-callers', 'return address read as data in an entry that is also reached indirectly (call sites unknown)', True))
-        if not callers and not indirect: rows.append((e, e, 'ra', 'no-callers', 'return address read as data, no direct caller in the reached code', False))
+    indirect = bool(kinds & INDIRECT_KINDS)
+    if mode == 'owner' and any(src == 'ra' and cons == 'read' for site, src, cons, d, red in ev):
+        if indirect: rows.append((e, e, 'ra', 'indirect-callers', 'return address read as data in an entry reached by callers the facts do not enumerate', True))
+        elif not callers: rows.append((e, e, 'ra', 'no-callers', 'return address read as data, no direct caller in the reached code', True))
+    for site, n, src in retscratch:
+        why = None
+        if indirect: why = 'entry has indirect callers'
+        elif e in img.jtargets: why = 'entry is also a jump target (tail callers)'
+        elif not callers: why = 'no direct caller in the reached code'
+        else:
+            for c in callers:
+                g = img.dec(c)
+                if not g or scan_kill(img, c + g.size, n, root=-1) != 'killed': why = 'caller %08x does not overwrite %s first' % (c, n); break
+        if why: rows.append((e, site, src, 'passed', 'returned in %s (%s)' % (n, why), True))
+        else: rows.append((e, site, src, 'scratch-dead', 'returned in %s, every caller overwrites it first' % n, False))
     return rows
 
 
-def analyse(img, kinds_of):
+def analyse(img, kinds_of, parent=None):
     scan_calls(img)
-    rows = []; summaries = 0
+    rows = []; parent = parent or {}
+    isdec = lambda a: 'decomp' in (img.entries.get(a) or ())
     for e in sorted(img.entries):
-        if not img.reached(e): continue
+        if not img.reached(e) or not owner(img, e): continue
+        if isdec(e): img.info['decomp-owner-skipped'] += 1; continue
         ev, sm = analyse_entry(img, e)
-        rows.extend(resolve(img, e, ev, kinds_of.get(e, set())))
+        rows.extend(resolve(img, e, ev, kinds_of.get(e, set()), 'owner', img.pk.get((e, 'owner'), [])))
+    for e in sorted(img.entries):
+        if not img.reached(e) or owner(img, e) or e in img.visited: continue
+        p = parent.get(e)
+        if p is not None and isdec(p): img.info['decomp-block-skipped'] += 1; continue
+        img.info['blocks-without-visible-predecessor'] += 1
+        ev, sm = analyse_entry(img, e, 'possibly')
+        rows.extend(resolve(img, e, ev, kinds_of.get(e, set()), 'possibly', img.pk.get((e, 'possibly'), [])))
     return rows
 
 
-def run(text, T0, entries, ranges, outdir, name):
+def run(text, T0, entries, ranges, outdir, name, rd=None, rset=None, parent=None, cand=None):
     """-> (red count, summary dict); writes outdir/pcsources.tsv and gate_pcsrc.json."""
-    img = Img(text, T0, entries, ranges)
-    rows = analyse(img, entries)
+    img = Img(text, T0, entries, ranges, rd, rset)
+    rows = analyse(img, entries, parent)
     red = [r for r in rows if r[5]]
     with open(outdir + '/pcsources.tsv', 'w') as f:
         f.write('# entry, site, source (ra|fip|fdp|abs|pc), consumer, detail; RED rows make the closure red for the image\n')
-        for e, site, src, cons, d, rd in sorted(rows, key=lambda r: (r[1], r[0], r[2], r[3], r[4])): f.write('%08x\t%08x\t%s\t%s\t%s%s\n' % (e, site, src, cons, d, '\tRED' if rd else ''))
-    byc = Counter((r[2], r[3]) for r in rows)
+        for e, site, src, cons, d, rd_ in sorted(set(rows), key=lambda r: (r[1], r[0], r[2], r[3], r[4])): f.write('%08x\t%08x\t%s\t%s\t%s%s\n' % (e, site, src, cons, d, '\tRED' if rd_ else ''))
+    rows = sorted(set(rows)); red = [r for r in rows if r[5]]
+    cand = cand or set(); redcand = sum(1 for r in red if r[0] in cand)
+    byc = Counter((r[2], r[3]) for r in rows); redc = Counter((r[2], r[3]) for r in red)
     sources = len({(r[1], r[2]) for r in rows if r[3] == 'read'})
-    res = dict(schema='fnvnx-gate/1', name='l3.pcsrc.' + name, status='red' if red else 'green', sources=sources, rows=len(rows), red=len(red), by_class={'%s/%s' % k: n for k, n in sorted(byc.items())}, esp_lost=img.info['esp-lost'], entries=len(entries))
+    res = dict(schema='fnvnx-gate/1', name='l3.pcsrc.' + name, status='red' if red else 'green', sources=sources, rows=len(rows), red=len(red), by_class={'%s/%s' % k: n for k, n in sorted(byc.items())},
+               red_by_class={'%s/%s' % k: n for k, n in sorted(redc.items())}, red_candidate_entries=redcand, red_proven_entries=len(red) - redcand, esp_lost=img.info['esp-lost'], entries=len(entries), info=dict(img.info))
     json.dump(res, open(outdir + '/gate_pcsrc.json', 'w'), sort_keys=True)
     return len(red), res
 
 
-def run_facts(facts, name, text, T0):
-    """facts: directory holding universe.tsv and ranges.tsv of the image; text/T0 the executable span. Same outputs as run()."""
-    ent = {}
+def run_facts(facts, name, text, T0, rd=None, rset=None):
+    """facts: directory holding universe.tsv and ranges.tsv of the image; text/T0 the executable span; rd(va) reads a 32-bit word of the image, rset the relocated words. Same outputs as run()."""
+    ent = {}; parent = {}; cand = set()
     for l in open(facts + '/universe.tsv'):
         if l[0] == '#' or not l.strip(): continue
         f = l.rstrip('\n').split('\t'); ent[int(f[0], 16)] = set(f[1].split(','))
+        for x in (f[3].split(',') if len(f) > 3 else ()):
+            if x.startswith('parent='): parent[int(f[0], 16)] = int(x[7:], 16)
+            if x == 'candidate': cand.add(int(f[0], 16))
     rg = []
     for l in open(facts + '/ranges.tsv'):
         if l[0] == '#' or not l.strip(): continue
         for r in l.rstrip('\n').split('\t')[1].split(','):
             if '-' in r: a, b = r.split('-'); rg.append((int(a, 16), int(b, 16)))
-    return run(text, T0, ent, rg, facts, name)
+    return run(text, T0, ent, rg, facts, name, rd, rset, parent, cand)
