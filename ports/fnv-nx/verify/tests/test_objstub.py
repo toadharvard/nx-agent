@@ -14,6 +14,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 sys.path.insert(0, VERIFY)
 import objstub  # noqa: E402
+import scratch  # noqa: E402
+
+scratch.install()
 
 CC = "aarch64-linux-gnu-gcc"
 ROOT = tempfile.mkdtemp(prefix="objstub-")

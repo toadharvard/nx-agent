@@ -18,8 +18,14 @@ cannot run in this environment (root, namespaces, strace) is uncertified. Zero f
   records every file of the universe as passed, they are certified WITHOUT running (detail: `N of M pass, cached key <12 hex>`).
   Otherwise all files run and the per-file results are stored under KEY only when the run completed. All-or-nothing per key:
   no per-file dependency guessing; a failed file is never recorded as passed, a key with a failure re-runs everything.
-Result extra key "files": [{"name","seconds","status"}] (status passed|failed|cached); same list in selftests.times.json."""
+Result extra key "files": [{"name","seconds","status"[,"reason"]}] (status passed|failed|cached; reason of a failed file: exit status or
+timeout, names left in its TMPDIR, the exception/errno text and the tail of its output); same list in selftests.times.json.
+TMPDIR rule: each test file runs with TMPDIR = a fresh directory of its own under the gate's temporary directory. The gate removes it
+(and the log) after the test whatever the outcome, including a timeout kill, so no test can leave scratch behind; a test that
+leaves entries in its TMPDIR at exit is uncertified ("leaked in TMPDIR"), so a test cleans up after itself. Scratch a test makes
+outside TMPDIR (a fixed path) is not covered: tests use tempfile."""
 import concurrent.futures
+import contextlib
 import glob
 import hashlib
 import json
@@ -37,30 +43,56 @@ import envcheck  # noqa: E402
 
 CACHE_FORMAT = "fnvnx-selftests-cache/1"
 
-def run_one(path, timeout):
-    """(passed, seconds)"""
+def run_one(path, timeout, base, idx):
+    """(passed, seconds, reason). The test runs with TMPDIR = its own directory BASE/tIDX, made here and removed here whatever the
+    outcome (exit, failure, timeout kill, exception): scratch cannot outlive a test. A test that leaves entries in it at exit is
+    uncertified ("leaked"). reason: "" when passed, else the exit status, the leaked names and the tail of the test's output."""
     t0 = time.time()
+    tdir, logp = os.path.join(base, "t%d" % idx), os.path.join(base, "t%d.log" % idx)
+    os.mkdir(tdir)
     # a test file is not a gate: it does not see GATE_OUT / GATE_COMMIT / GATE_CACHE (a test that runs gates of its own
     # would otherwise share this gate's result cache and outputs)
     env = {k: v for k, v in os.environ.items() if not k.startswith("GATE_")}
-    # the file's scratch: TMPDIR is a directory of its own, removed when the file ends, however it ends (see the doc comment)
-    tmp = tempfile.mkdtemp(prefix="selftest-")
-    env["TMPDIR"] = tmp
+    env["TMPDIR"] = tdir
+    why = []
     try:
-        p = subprocess.Popen([sys.executable, "-I", path], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL, start_new_session=True, env=env)
+        with open(logp, "wb") as log:
+            p = subprocess.Popen([sys.executable, "-I", path], stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                                 start_new_session=True, env=env)
+            try:
+                rc = p.wait(timeout=timeout)
+                if rc:
+                    why.append("exit %d" % rc)
+            except subprocess.TimeoutExpired:
+                why.append("timeout %gs" % timeout)
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(p.pid, signal.SIGKILL)   # whatever the file left running in its process group
+            p.wait()
         try:
-            ok = p.wait(timeout=timeout) == 0
-        except subprocess.TimeoutExpired:
-            ok = False
-        try:
-            os.killpg(p.pid, signal.SIGKILL)   # whatever the file left running in its process group
-        except ProcessLookupError:
-            pass
-        p.wait()
+            left = sorted(os.listdir(tdir))
+        except OSError as e:
+            left = []
+            why.append("TMPDIR unreadable: %s" % e)
+        if left:
+            why.append("leaked in TMPDIR: %s" % ", ".join(left[:8]) + (" ..." if len(left) > 8 else ""))
+    except OSError as e:  # e.g. ENOSPC while starting the test: the cause is the reason
+        why.append("%s: %s" % (type(e).__name__, e))
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-    return ok, round(time.time() - t0, 3)
+        shutil.rmtree(tdir, ignore_errors=True)
+        if os.path.exists(tdir):
+            why.append("cannot remove its TMPDIR %s" % tdir)
+    if why:
+        try:
+            with open(logp, "rb") as fh:
+                fh.seek(0, 2)
+                fh.seek(max(0, fh.tell() - 1500))
+                tail = fh.read().decode("utf-8", "replace")
+        except OSError:
+            tail = ""
+        why.append("output tail: " + tail)
+    with contextlib.suppress(OSError):
+        os.unlink(logp)
+    return not why, round(time.time() - t0, 3), "; ".join(why)
 
 def parse(argv):
     o = {"timeout": 300.0, "jobs": 1, "cache": os.environ.get("GATE_CACHE") or None, "key_dirs": None}
@@ -144,9 +176,14 @@ def main(argv):
         rows = [{"name": f, "seconds": 0.0, "status": "cached"} for f in files]
         note = ", cached key %s" % key[:12]
     else:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=o["jobs"]) as ex:
-            res = list(ex.map(lambda f: run_one(f, o["timeout"]), files))
-        rows = [{"name": f, "seconds": s, "status": "passed" if ok else "failed"} for f, (ok, s) in zip(files, res)]
+        base = tempfile.mkdtemp(prefix="selftests-")  # in the gate's own TMPDIR; removed below whatever happens
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=o["jobs"]) as ex:
+                res = list(ex.map(lambda a: run_one(a[1], o["timeout"], base, a[0]), enumerate(files)))
+        finally:
+            shutil.rmtree(base, ignore_errors=True)
+        rows = [dict({"name": f, "seconds": s, "status": "passed" if ok else "failed"}, **({} if ok else {"reason": why}))
+                for f, (ok, s, why) in zip(files, res)]
         note = ""
         if cpath:
             store(cpath, key, rows)
@@ -156,7 +193,8 @@ def main(argv):
     status = "green" if not unc else "red"
     detail = ("%d of %d test files pass%s, %.1f s" % (n, len(files), note, secs)) if files else "no test files at this commit (nothing to certify yet)"
     res = {"format": "fnvnx-gate/1", "name": "selftests", "status": status, "universe": len(files), "certified": n,
-           "uncertified": unc[:50], "detail": detail, "files": rows}
+           "uncertified": unc[:50], "detail": detail, "files": rows,
+           "reasons": {r["name"]: r["reason"] for r in rows if r["status"] == "failed" and r.get("reason") and r["name"] in unc[:50]}}
     out = os.environ["GATE_OUT"]
     with open(os.path.join(out, "selftests.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)

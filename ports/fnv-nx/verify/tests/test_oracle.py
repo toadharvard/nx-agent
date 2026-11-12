@@ -10,6 +10,9 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import gate_oracle as G  # noqa: E402
+import scratch  # noqa: E402
+
+scratch.install()
 
 fails = 0
 

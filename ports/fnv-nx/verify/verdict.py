@@ -7,7 +7,10 @@ Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 
               given, GATE_CACHE (absolute path of a caller-owned directory that outlives the run). A gate may store results in
               GATE_CACHE only under a key that covers everything it reads (its inputs' content, the declared environment, its own
               arguments); it must work, and give the same verdict, without GATE_CACHE. A gate writes
-              {"format":"fnvnx-gate/1","name","status","universe","certified","uncertified":[<=50 ids],"detail"} at GATE_OUT/<result>.
+              {"format":"fnvnx-gate/1","name","status","universe","certified","uncertified":[<=50 ids],"detail"[,"reasons":{id: text}]} at GATE_OUT/<result>
+              (reasons: why an uncertified id is uncertified; the first 10, each cut to its last 400 characters, join the gate's red reason).
+              TMPDIR: each gate gets a private empty directory inside the run's work dir, removed after the gate on any outcome. A gate
+              that leaves entries in it, or any untracked or ignored file in its worktree (but Python's __pycache__/*.pyc), is red with the names.
               Gate green iff exit 0, valid result, name equal, status green and certified == universe (completeness of
               certificates, not a run counter; certified > universe is invalid). Verdict green iff >=1 gate and all gates green.
               over_budget is reported only; it never changes the verdict.
@@ -97,7 +100,9 @@ def _gate_result(g, out_dir, rc):
     if c > u:
         return "red", u, c, "certified %d > universe %d" % (c, u)
     if c < u:
-        return "red", u, c, "certified %d < universe %d; uncertified: %s" % (c, u, ",".join(r["uncertified"][:50]))
+        why = r.get("reasons") if isinstance(r.get("reasons"), dict) else {}   # optional {id: text}: why a test/item is uncertified
+        more = "".join("\n  %s: %s" % (x, str(why[x]).replace("\n", " ")[-400:]) for x in r["uncertified"][:10] if isinstance(why.get(x), str))
+        return "red", u, c, "certified %d < universe %d; uncertified: %s%s" % (c, u, ",".join(r["uncertified"][:50]), more)
     if rc != 0:
         return "red", u, c, "exit %d" % rc
     if r["status"] != "green":
@@ -127,14 +132,27 @@ def cmd_run(a):
     try:
         for g in gates:
             out = os.path.join(work, "gate-%d" % len(res))
+            tmp = os.path.join(work, "tmp-%d" % len(res))
             os.makedirs(out)
+            os.makedirs(tmp)
             t0 = time.time()
             try:
-                rc = subprocess.run(g["argv"], cwd=wt, env=dict(genv, GATE_OUT=out),
+                rc = subprocess.run(g["argv"], cwd=wt, env=dict(genv, GATE_OUT=out, TMPDIR=tmp),
                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
                 st, u, c, why = _gate_result(g, out, rc)
             except OSError as e:
                 st, u, c, why = "red", 0, 0, "cannot run: %s" % e
+            left = sorted(os.listdir(tmp))
+            shutil.rmtree(tmp, ignore_errors=True)   # removed on every outcome
+            # interpreter bytecode caches (`python -I` ignores PYTHONDONTWRITEBYTECODE) are source-validated, not gate output
+            dirty = [x for x in (l[3:] for l in _git(wt, "status", "--porcelain", "--ignored", "--untracked-files=all")[1].splitlines())
+                     if not (x.endswith(".pyc") and "/__pycache__/" in "/" + x)]
+            if left or dirty:
+                st = "red"
+                why = (why + "; " if why else "") + "gate left " + "; ".join(
+                    x for x in ("in its TMPDIR: " + ",".join(left[:20]) if left else "",
+                                "in the worktree: " + ",".join(dirty[:20]) if dirty else "") if x)
+                _git(wt, "clean", "-fdxq")
             res.append({"name": g["name"], "status": st, "universe": u, "certified": c,
                         "seconds": round(time.time() - t0, 3), "reason": why})
     finally:
@@ -148,7 +166,7 @@ def cmd_run(a):
         v["env_id"] = o["--env-id"]  # sha256 of the env.json the verdict was computed in (envcheck.py id)
     open(o["--out"], "wb").write(cas.canon(v) + b"\n")
     for r in res:
-        print("%-5s %-24s %d/%d %s" % (r["status"], r["name"], r["certified"], r["universe"], r["reason"][:120]))
+        print("%-5s %-24s %d/%d %s" % (r["status"], r["name"], r["certified"], r["universe"], r["reason"][:1500]))
     print("verdict %s (%.1fs%s)" % (v["verdict"], total, ", over budget" if v["over_budget"] else ""))
     return 0 if v["verdict"] == "green" else 2
 
