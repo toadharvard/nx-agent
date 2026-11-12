@@ -352,7 +352,8 @@ static const char *winmain_cmdline(void) {
 }
 
 /* The declared fonts (platform/include/fnvnx_win32_ext.h): the player's card holds the reference font set beside the game, so a font is
- * never missing at run time. Layout: sdmc:/switch/fnv/fonts/{wine,host,reg} = Wine 9.0 data directory, host fonts, registry exports. */
+ * never missing at run time. Layout: sdmc:/switch/fnv/fonts/{wine,host,reg} = Wine 9.0 data directory, host fonts, registry exports.
+ * This is the development layout (Atmosphere exefs override, sdmc); the declared files' place on the console is decided again at packaging. */
 struct fnvnx_font_dirs { const char *wine, *host, *reg; };
 extern "C" const fnvnx_font_dirs *fnvnx_declared_fonts(void) {
     static const fnvnx_font_dirs d = { FNVNX_SD_DIR "/fonts/wine", FNVNX_SD_DIR "/fonts/host", FNVNX_SD_DIR "/fonts/reg" };
