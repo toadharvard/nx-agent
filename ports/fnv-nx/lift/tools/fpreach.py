@@ -134,7 +134,8 @@ def main():
     for a in thunks:
         i = next(iter(W.md.disasm(W.IMG.bytes(a, 16), a, 1)))
         thname[a] = iat_name(i)
-    atk = {a for a in ent if a in set(W.IMG.taken)} | {a for a, e, k in rows if k in ('export', 'tls', 'entry')}
+    tk = set(W.IMG.taken)
+    atk = {a for a in ent if a in tk} | {a for a, e, k in rows if k in ('export', 'tls', 'entry')}
     # address-taken closure for indirect calls; return edges of g
     for k in [k for k in list(adj) if k[0] == 'P']:
         pass
@@ -215,7 +216,7 @@ def main():
         for s in sorted(use):
             f.write('%08x\t%s\t%s\n' % (s[1], use[s], 'reaches-reader' if s in back else '-'))
     print('%s: image %s: starts %d (import call sites %d, calls to import thunks %d); readers (escapes) %d; starts that reach a reader without a clear: %d; distinct readers reachable: %d' % (
-        tag, os.path.basename(exe), len(use), len(impsites), len(starts) - len(impsites), len(RD), len(bad), len(hits)))
+        tag, os.path.basename(exe), len(use), len({x for x, _ in impsites}), len(starts) - len({x for x, _ in impsites}), len(RD), len(bad), len(hits)))
 
 
 if __name__ == '__main__':
