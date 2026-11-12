@@ -225,7 +225,6 @@ def ptr_pass(data, final, eh):
         k, ins = site_kind(r)
         if k == 'slot' and not final: continue
         if k == 'slot':
-            if r in deadops: dinfo['slot_in_dead_operand'] += 1; settled.add(r); continue   # operand field of dead code: not a reference
             dinfo['slot_table'] += 1; mark(r, 4, r)                                          # otherwise a relocated pointer slot in unreached bytes
         if k in ('data', 'imm', 'slot'): new += ptr_target(v, r); settled.add(r)
         elif k == 'tbl': settled.add(r)
@@ -310,7 +309,6 @@ U = SimpleNamespace(insns=insns, PRI=PRI, T0=T0, T1=T1, TN=TN, X=X, V=V, bad_ent
 fin = False
 for rnd in range(30):
     OWN[:] = sorted(entries); n0 = (len(entries), len(insns), len(tslots), len(tstarts))
-    if fin: deadops.clear(); deadops.update(codemap.analyse(U, codemap.split_runs(U, pad_split(classify())))[1])   # relocated operands of dead code are no references
     ch = 0 if STRICT else ptr_pass(False, fin, eh); drain()
     OWN[:] = sorted(entries); ch += eh.scan(); drain()
     ch += codemap.strict_pass(U, fin, eh) if STRICT else ptr_pass(True, fin, eh); drain()

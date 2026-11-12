@@ -18,7 +18,7 @@ from types import SimpleNamespace
 import capstone
 from capstone import x86 as X
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import pemod, ehtables, codemap
+import pemod, ehtables, codemap, residue
 from fnvlift import Image as LImage; from fnvlift import core as LCore
 TERM = {'ret', 'retf', 'int3', 'hlt', 'ud2', 'iret', 'iretd'}
 PRI = ['entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-cont', 'seh-filter', 'seh-handler', 'seh-frame', 'eh-throw', 'ptr']
@@ -251,46 +251,17 @@ def run(arg):
     # residue (valid executable bytes no entry body reaches and no PE directory names), cut by rule into: padding (nop / int3 instructions at the run's ends), dead gap (the run decodes
     # completely from its first byte, ends at a terminator or at the next reached instruction, and has relocated dwords only at operand fields), relocation slots (the bytes of a
     # HIGHLOW fixup site: a relocated pointer slot, e.g. a jump table), UNEXPLAINED (reason named). Nothing else is ever called data or dead.
-    # CLOSURE (precondition of the residual rule below). In a non-PIC image every code address a program can hold has one of these sources: (s1) a relocated in-span value (R3: every one is an
-    # entry), (s2) a call-pushed return address or an FPU FIP/FDP (typed by pcsrc), (s3) exports, TLS, the PE entry and EH handlers from the tables (entries by construction), (s4) arithmetic on a value of
-    # s1..s3. Every indirect transfer lands in s1..s3 unless s4 happens. The closure is complete iff every s1..s3 value is an entry (unent == 0) AND no s4 value reaches a control transfer. The s4 check is
-    # pcsrc's (the typed-source rule extended from return addresses to relocated code values); its result is read from <facts>/<module>/pcsrc_s4.json {"s4_violations": n}. No file: s4 is UNCHECKED, never
-    # assumed green. A byte no entry body reaches is then data (class 9) only when the closure is complete; otherwise the residue is UNEXPLAINED with the reason.
-    unent0 = sorted({v for r, v in rvals if v not in ent})
-    s4f = outd + '/pcsrc_s4.json'
-    if os.path.exists(s4f): s4_viol = int(json.load(open(s4f))['s4_violations']); s4_status = 'green' if s4_viol == 0 else 's4-violation'
-    else: s4_viol, s4_status = None, 's4-unchecked'
-    open_sites = []
-    closure_reason = 'unent' if unent0 else (None if s4_status == 'green' else s4_status)
-    closure_complete = closure_reason is None
+    # residual rule: tools/residue.py (one implementation for modules and the exe)
+    CLO = residue.closure(rvals, ent, outd); unent0, s4_status, s4_viol = CLO.unent, CLO.s4_status, CLO.s4_viol; closure_reason, closure_complete = CLO.reason, CLO.complete
     brk = Counter()
     TERMS = {'ret', 'retf', 'jmp', 'int3', 'ud2', 'iret', 'iretd'}; rsl = bytearray(TN); unx = []; rslot = array('I', bytes(4 * TN))
     for r in relocs:
         if T0 <= r < T1:
             for k in range(max(r, T0), min(r + 4, T1)): rsl[k - T0] = 1; rslot[k - T0] = r
     def residual(p, q):
-        """[p, q) offsets of one residue run: swept from its first byte. At a boundary k that is a byte of a relocation site the bytes are slots (data named by the fixup; an instruction that
-        starts at k would have the fixup in its operand field, at an offset >= 1); else the instruction at k must decode inside the run, with relocation sites only at its disp / imm
-        fields. Each maximal stretch of instructions is a dead gap iff it ends at a terminator, at a slot or at the next reached instruction. The first violation ends the sweep: the
-        rest of the run is UNEXPLAINED with that reason."""
-        k = p; segs = []; why = None
-        while k < q:
-            if rsl[k]:
-                j = k
-                while j < q and rsl[j]: j += 1
-                segs.append((k, j, 5)); k = j; continue
-            g = next(md.disasm(text[k:min(k + 15, q)], T0 + k, 1), None)
-            if g is None: why = 'undecodable'; break
-            f = {g.address + g.disp_offset if g.disp_size == 4 else -1, g.address + g.imm_offset if g.imm_size == 4 else -1}
-            if any(x not in f for x in relocs[bisect.bisect_left(relocs, T0 + k):bisect.bisect_left(relocs, T0 + k + g.size)]): why = 'reloc-not-operand'; break
-            if segs and segs[-1][2] == 6: segs[-1] = (segs[-1][0], k + g.size, 6, g.mnemonic)
-            else: segs.append((k, k + g.size, 6, g.mnemonic))
-            k += g.size
-        for i, sg in enumerate(segs):                                     # a stretch of instructions is a dead gap iff it ends at a terminator or (at the run's end) at the next reached instruction
-            if sg[2] == 6 and not (sg[3] in TERMS or (i + 1 == len(segs) and not why and q < TN and cov[q] == 1)):
-                last = i + 1 == len(segs); k = sg[0]; segs = segs[:i]; why = why if (last and why) else 'no-end'; break
-        brk[('decodes' if not why else why) + ('/first-byte-undecodable' if not segs and why == 'undecodable' else '')] += q - p       # information only: decides nothing
-        if closure_complete: cl[p:q] = b'\x09' * (q - p)                  # RULE: closure complete -> every byte no proven flow reaches is data
+        """[p, q) offsets of one residue run: tools/residue.py (closure complete -> data, else UNEXPLAINED with the closure reason); the sweep is a breakdown, it decides nothing"""
+        brk[residue.sweep(md, text, T0, TN, relocs, rsl, cov, p, q)] += q - p
+        if closure_complete: cl[p:q] = bytes([residue.DATA]) * (q - p)
         else: cl[p:q] = b'\x08' * (q - p); unx.append((T0 + p, q - p, closure_reason))
     for m in re.finditer(rb'\x00+', bytes(cl)):
         s, e = m.span(); p = s
