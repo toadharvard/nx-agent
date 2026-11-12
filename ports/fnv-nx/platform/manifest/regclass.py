@@ -38,9 +38,13 @@ String rule: the string at D is "" when every store that covers byte D writes th
 writer (a copy of a longer string, a call that receives the address) leaves it unresolved, so no extent of the array is assumed.
 """
 import collections
+import os
 import struct
+import sys
 
-from capstone import x86_const as X
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import funcfacts
+X = funcfacts.X
 
 MAXJOBS = 6000
 

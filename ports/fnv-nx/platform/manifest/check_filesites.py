@@ -69,12 +69,8 @@ def build():
     asm(0x4011d0, pro + [b"\x68", ("abs", s["nvapi.dll"])] + call("LoadLibraryA") + [b"\x5d\xc3"])
     asm(0x401210, pro + [b"\x68", ("abs", s["user32.dll"])] + call("LoadLibraryA") + [b"\x5d\xc3"])
     asm(0x401250, pro + cf([b"\x68", ("abs", s["CONOUT$"])]) + ret)
-    m = pemanifest.Mod.__new__(pemanifest.Mod)
-    m.name, m.base, m.img, m.relocs = "synth.exe", BASE, bytes(img), sorted(rel)
-    m.path = None
-    funcfacts.declare(m.name, m.img, m.base, runs)
-    m.code = [(0x401000, 0x400)]
-    m.imports = [("kernel32.dll", n, a) for n, a in IMP.items()]
+    m = pemanifest.Mod.synthetic("synth.exe", BASE, img, rel, [("kernel32.dll", n, a) for n, a in IMP.items()], [(0x401000, 0x400)])
+    funcfacts.declare(m, runs)
     return m
 
 

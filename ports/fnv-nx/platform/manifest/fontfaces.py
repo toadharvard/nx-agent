@@ -19,7 +19,7 @@ Image set: the root and the dlls of dllkind role `image` (pemanifest.closure); n
 import os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import funcfacts, pemanifest, regsites, pefile, capstone
+import funcfacts, pemanifest, regsites
 
 FONT_API = {"CreateFontA", "CreateFontW", "CreateFontIndirectA", "CreateFontIndirectW", "CreateFontIndirectExA", "CreateFontIndirectExW",
             "AddFontResourceA", "AddFontResourceW", "AddFontResourceExA", "AddFontResourceExW", "AddFontMemResourceEx",
@@ -36,19 +36,13 @@ def stock_arg(m, site, entry):
     if k is None or k == 0 or ins[k].mnemonic != "call":
         return None
     p = ins[k - 1]
-    if p.address + p.size == ins[k].address and p.mnemonic == "push" and p.operands[0].type == capstone.x86.X86_OP_IMM:
+    if p.address + p.size == ins[k].address and p.mnemonic == "push" and p.operands[0].type == funcfacts.X.X86_OP_IMM:
         return p.operands[0].imm & 0xffffffff
     return None
 
 
-def exports_of(path, base):
-    pe = pefile.PE(path)
-    return {base + s.address: (s.name or b"#%d" % s.ordinal).decode() for s in pe.DIRECTORY_ENTRY_EXPORT.symbols} if hasattr(pe, "DIRECTORY_ENTRY_EXPORT") else {}
-
-
 def main(d, root, out, argv=()):
     mods = pemanifest.closure_from_argv(list(argv), d, root)[0]
-    files = {f.lower(): os.path.join(d, f) for f in os.listdir(d) if f.lower().endswith((".exe", ".dll"))}
     rootmod = mods[root.lower()]
     imported = {}   # module -> {export names the closure imports from it}
     for m in mods.values():
@@ -62,7 +56,7 @@ def main(d, root, out, argv=()):
             continue
         code, _ = m.refs()
         an = regsites.Analyzer(m, {})
-        ex = exports_of(files[name], m.base)
+        ex = m.export_names
         for slot, api in sorted(slots.items()):
             for site in sorted(code.get(slot, [])):
                 fs = m.entries_of(site)   # the site is analysed in every entry that contains it: one row per entry

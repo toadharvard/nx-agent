@@ -32,7 +32,10 @@ Usage: import_escape.py --winmd Windows.Win32.winmd --sha256 HEX --commit ID --b
                         --report report.tsv [--check]          (--check: regenerate and compare with --out; exit 1 on diff)
        import_escape.py --winmd W --sha256 HEX --selftest
 """
-import argparse, collections, hashlib, re, sys
+import argparse, collections, os, re, sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import funcfacts
 
 # ECMA-335 II.23.1.16 element types
 E_VOID, E_BOOL, E_CHAR, E_I1, E_U1, E_I2, E_U2, E_I4, E_U4, E_I8, E_U8, E_R4, E_R8, E_STRING = range(1, 15)
@@ -71,9 +74,7 @@ def Blob_of_field(row):
 
 class Meta:
     def __init__(self, path):
-        import dnfile
-        self.pe = dnfile.dnPE(path)
-        t = self.pe.net.mdtables
+        t = funcfacts.open_dotnet(path).net.mdtables
         self.t = t
         self.typedef = t.TypeDef.rows
         self.typeref = t.TypeRef.rows
@@ -488,11 +489,7 @@ def generate(meta, bridge, commit, sha, writes=False):
 
 
 def sha_of(path):
-    h = hashlib.sha256()
-    with open(path, 'rb') as f:
-        for ch in iter(lambda: f.read(1 << 20), b''):
-            h.update(ch)
-    return h.hexdigest()
+    return funcfacts.sha256_file(path)
 
 
 def selftest(meta):
