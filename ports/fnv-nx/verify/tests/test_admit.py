@@ -79,8 +79,8 @@ troot = {"path": T + "/tests", "class": "test", "target": "guest", "gates": TG, 
 tf = [T + "/tests/t.cc"]
 bad, err = ga.judge(tf, adm(tool, doc, troot), GATES + TG, yes)
 check("a test root with its REQUIRED_TEST gates, a recipe and a target is certified (REQUIRED_PRODUCT is not asked of it)", not bad and not err)
-check("REQUIRED_TEST is the build family, doubles, oracle, stub, assumptions, legal, pure",
-      set(ga.REQUIRED_TEST) == {"build", "determinism", "linkstrict", "objstub", "doubles", "oracle", "stub", "assumptions", "legal", "pure"}
+check("REQUIRED_TEST is the build family, onedef, doubles, oracle, stub, assumptions, legal, pure",
+      set(ga.REQUIRED_TEST) == {"build", "determinism", "linkstrict", "onedef", "objstub", "doubles", "oracle", "stub", "assumptions", "legal", "pure"}
       and not set(ga.REQUIRED_TEST) >= set(ga.REQUIRED_PRODUCT))
 for g in TG:
     bad, err = ga.judge(tf, adm(tool, doc, dict(troot, gates=[x for x in TG if x != g])), GATES + TG, yes)
