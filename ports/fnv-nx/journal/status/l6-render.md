@@ -50,3 +50,13 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - forms, fpexact: L3b;
     - d3d9total: our w4, at its MERGER turn.
   - translator admit is blocked until all 13 land. Owners: L1, L2, L3a, L3b, MERGER.
+- 03:08Z w6 measured render/d3d9 at 26c606eb:
+  - cold build: 70 objects, 155 stages run, 32.3 s;
+  - warm build: 155/155 hit, 2.9 s;
+  - objstub: 1784/1784, 0 findings.
+- w2b 4f740818 moves render/d3d9 onto L5's fnvnx_render_hooks.h and deletes every local declaration of the nine hooks (including glue_stream.h 32-34). In a scratch tree: two cold builds give identical objects, the warm build hits 154/154, and all nine hooks are unmangled undefined names.
+  - It is HELD (not merged) until L5 moves the header to shim/include with two fixes: the C++ static_assert guard, and hostapi.h reachable or dropped.
+  - Blocker: L5 w10.
+- w5 4391ce62 merged: NONE is 6/42 (it was 10).
+  - Classes: W-rec 3, W-src 11, MS 9, SPEC 2, MODEL 10, library-doc 1, NONE 6.
+  - Open for L1: a library-doc REF kind (deko3d.h).
