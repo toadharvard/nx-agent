@@ -165,7 +165,7 @@ Reference-like files found: 2 probe dumps + ENV_PIN.txt + 6 probe sources (condi
 
 ## Decisions for the 6 tests without a reference (proposal, tests unchanged, for the lead's review)
 
-Each ends in one of: (i) a static check of our own tables, becomes a gate in the root's gate list; (ii) rewritten against a named external reference; (iii) deleted, covered by a named test or gate. `test_dkcore` is set to `external`: the pinned deko3d tree (`tools/deko3d`, commit + tree_sha256, not yet pinned) + path `deko3d.h`, the call contracts quoted in section "reference by rule". Argument form: what the test computes, where its expected value comes from today, why that is not a reference, what replaces it. Whether a part is really static was read from the docstrings and file names; items marked "verify" are checked before the change is made.
+Each ends in one of: (i) a static check of our own tables, becomes a gate in the root's gate list; (ii) rewritten against a named external reference; (iii) deleted, covered by a named test or gate. `test_dkcore` is set to `external`: the pinned deko3d tree (`tools/deko3d-373bfd43d8b2` efc48589, tree_sha256 5a51dcc3...) + path `deko3d.h`, the call contracts quoted in section "reference by rule". Argument form: what the test computes, where its expected value comes from today, why that is not a reference, what replaces it. Whether a part is really static was read from the docstrings and file names; items marked "verify" are checked before the change is made.
 
 | test | decision | argument |
 |---|---|---|
