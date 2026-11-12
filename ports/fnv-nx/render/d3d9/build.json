@@ -123,7 +123,9 @@
    ],
    "outputs": [
     "gen/env_table.gen.cpp",
-    "gen/env_table.gen.h"
+    "gen/env_table.gen.h",
+    "gen/ident_docked.bin",
+    "gen/ident_handheld.bin"
    ]
   },
   {
