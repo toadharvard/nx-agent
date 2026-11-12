@@ -84,7 +84,7 @@ With an external reference as primary (W-rec + W-src + MS + SPEC): **22 of 42**.
 
 1. **Universe.** The gate certifies the `DIR/tests/test_*.py` of the DIRs in the `selftests` argv of `verify/gates.json`. `tests/l6/**` is not an admitted root, `render/d3d9`'s gate list has no `selftests`, and `render/total` is not admitted. So no render test is in the universe: the 42 are uncertified because they are not seen. L1 owns the form (class `test` root, as in DOUBLES.md).
 2. **Rule 5 (product subject needs `wine-exe` or `spec`, and no REF path in a product root).** The only reference files the render tests use today are `render/d3d9/spec/d3d9_spec.json`, `render/d3d9/env/env_*.tsv` and `ENV_PIN.txt`, all inside the product root `render/d3d9`: illegal REF paths. Tests whose reference is an independent model (MODEL) fail rule 5 by themselves: they have no `wine-exe` and no `spec`.
-3. **No tracked file outside the product roots holds Wine 9.0 or MS text.** `docs/RENDER.md` and `docs/RENDER_VERIFY.md` hold none (checked their headings). So W-src (9 primary, 18 in all) and MS (8 primary, 12 in all) have no legal `spec` REF.
+3. **No tracked file outside the product roots holds Wine 9.0 or MS text.** `docs/RENDER.md` and `docs/RENDER_VERIFY.md` hold none (checked their headings). So W-src (9 primary, 18 in all) and MS (8 primary, 12 in all; 23 tests use one or both) have no legal `spec` REF.
 4. **`wine-exe` does not fit the Wine recordings.** The kind means a dump the game's exe produced under Wine (`exe_sha256` = `oracle_pins.json`). `env_*.tsv` is recorded from `envprobe2.exe` (ENV_PIN.txt: sha256 6f64a3af...), a probe, not the game's exe, and the artifact is not in fnv-nx-build.
 5. Class NONE (10 tests) has no record by definition.
 
@@ -97,5 +97,5 @@ Asks to L1 (the form), in one rule: (a) a REF kind for Wine 9.0 source = {wine 9
 ## Ranking of the work (what closes the most reds, by rule)
 
 1. The 10 NONE: for the tool self-tests (d3d9total, cmp, wrap, shcache, sm_total, layout, nxcheck) the rule is a documented tool rule: write it as a `spec` anchor in `docs/` and cite it; for env_ident, oom, dkcore a real external value is needed (declared-machine record, Windows/Wine failure codes, deko3d documented results).
-2. The 18 tests that cite Wine or MS text: store the citation (file, function, quoted lines) in one tracked doc outside the product roots, then every row names an anchor.
+2. The 23 tests that cite Wine 9.0 source or an MS page (as primary or also): store the citation (file, function, quoted lines) in one tracked doc outside the product roots, then every row names an anchor.
 3. The 3 W-rec tests: put the Wine recordings (probe and game exe) in fnv-nx-build with commit and tree_sha256.
