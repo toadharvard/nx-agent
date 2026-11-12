@@ -28,12 +28,18 @@ its objects (relocatable) and of its linked ELF, never a name's text. Rules:
       the root links no ELF), and two listed symbols with DIFFERENT body ids may not share one address (`contract-alias`: an alias stub
       that serves two contracts with one body). Two names with the same body id on one address are fine. A symbol listed twice with
       two body ids is `contract-duplicate`. Without the key rule (c) has universe 0 for that root.
+  (e) No guest object references a libgcc outline-atomics helper (__aarch64_{cas,swp,ldadd,ldclr,ldeor,ldset}<bytes>_<memory model>): the helpers
+      choose LSE or LL/SC through getauxval, which Horizon lacks, and the declared CPU (Cortex-A57) has no LSE, so guest roots build with
+      -mno-outline-atomics (a member of guest_compiler.json "flags"."semantics", appended by the recipe and read back by gate datamodel). Finding `outline-atomic`, per reference.
   (d) The host boundary (a root with "target": "host" in admit.json). A reference no object defines is certified iff its object belongs to
       a host root and its name is EXPORTED by the pinned host runtime: the defined GLOBAL/WEAK `.dynsym` names of the shared objects that
       dpkg lists for libc6, libgcc-s1 and libstdc++6 (verify/env.json pins their versions; envcheck checks them), a fact computed by
       gate_linkstrict.host_exports and cached by the content of those files (CACHE/hostexports). It mirrors newlib/libnx on the guest
       side: a guest root has no such set, and any other undefined name of a host root stays `undefined`. Not covered (stated): the
       fact is a cached read of the installed packages, not a sandbox stage; a symbol version is not compared, only the name.
+  (f) Flags of foreign objects (a guest root that links an ELF): what the link stage takes from externals (explicit paths, -l through -L) shows in its
+      DW_AT_producer the option set the pinned driver writes for the recipe's semantic set (producers.py): findings `flags-differ`, `no-producer`,
+      `asm-unproven`, `shared-input`, `no-link-stage`. Items: one per foreign object or archive member. Details and limits: producers.py.
 Universe = undefined references + defined global names + contract names + one `<elf>` per linked root (+ a root whose recipe is invalid or
 whose build is red, one uncertified item). Certified = the items with no finding. No product root: universe 0, green.
 NOT EXACT (stated): rule (b) is by name over the objects. A script symbol with hidden visibility (PROVIDE_HIDDEN) is LOCAL in the
@@ -43,6 +49,7 @@ Rule (c) groups by address: a body reached through two names of one address with
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import sys
@@ -50,6 +57,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gate_build  # noqa: E402
+import producers  # noqa: E402
 import recipe  # noqa: E402
 
 COMMON, GLOBAL, WEAK, UNIQUE, IFUNC = 0xFFF2, 1, 2, 10, 10
@@ -150,6 +158,7 @@ def elf_comdat(path):
     return member, groups
 
 
+OUTLINE = re.compile(r"__aarch64_(cas|swp|ldadd|ldclr|ldeor|ldset)[0-9]+_(relax|acq|rel|acq_rel|sync)")   # libgcc's outline-atomics ABI: __aarch64_<op><bytes>_<memory model>
 HOST_RUNTIME_PKGS = ("libc6", "libgcc-s1", "libstdc++6")   # packages of verify/env.json whose shared objects are the host boundary (envcheck pins them)
 
 
@@ -194,9 +203,10 @@ def host_exports(cache):
     return names, key
 
 
-def judge(objs, elfs, tables, comdat=None, host=None):
+def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
     """OBJS {object id: [symbol tuples]}; ELFS {elf id: symbols or None}; TABLES {(root id, elf id or None): [(symbol, body id)]};
     COMDAT {object id: (member, groups)} as elf_comdat (an object missing from it has no COMDAT group)
+    GUEST ["<root>/"] prefixes of guest roots: rule (e)
     HOST (host root prefixes ["<root>/"], exports {name}) or None: rule (d), the host boundary
     -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). Pure function of its arguments."""
     items, out, comdat = [], set(), comdat or {}
@@ -233,6 +243,9 @@ def judge(objs, elfs, tables, comdat=None, host=None):
                 out.add(("<defs>", name, kind, "defined in %s" % ", ".join(sorted({d[0] for d in ds}))[:200]))
     for oid, name in refs:
         items.append((oid, name))
+        if OUTLINE.fullmatch(name) and any(oid.startswith(p) for p in guest):
+            out.add((oid, name, "outline-atomic", "a guest object references a libgcc outline-atomics helper (needs getauxval; build with -mno-outline-atomics)"))
+            continue
         if name not in defs:
             if host and name in host[1] and any(oid.startswith(p) for p in host[0]):
                 pass   # (d): an import of a host-target root, exported by the pinned host runtime
@@ -277,14 +290,34 @@ def judge(objs, elfs, tables, comdat=None, host=None):
     return items, sorted(out)
 
 
+def foreign_flags(root, res, cache, repo):
+    """Rule (f) of ROOT (a guest root that links an ELF): the objects its link stage takes from externals (producers.link_inputs) each show, in their
+    DW_AT_producer, the option set the pinned driver writes for the recipe's semantic set. -> (items [(id, name)], findings)."""
+    roots = recipe.load_admit(repo)
+    rec = recipe.load_recipe(repo, roots, root)
+    doc = None
+    for k in res.get("stage_keys", []):
+        p = os.path.join(cache, "store", "stage-docs", k[:2], k + ".json")
+        if os.path.isfile(p):
+            d = json.load(open(p))
+            if d.get("stage") == "ld:" + root:
+                doc = d
+    if doc is None:
+        return [(root, "<link-stage>")], [(root, "<link-stage>", "no-link-stage", "no ld stage document for the root's link")]
+    at = {e["at"]: recipe.exttree(e, cache) for e in rec.get("external", [])}
+    cc, cxx = recipe.host_compilers(rec, cache)
+    return producers.foreign_items(root, doc, at, {"c": producers.expected(cc, "c"), "cxx": producers.expected(cxx, "cxx")})
+
+
 def main():
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-linkstrict-")
     cache, repo = os.environ.get("GATE_CACHE") or tmp, "."
     items, finds, why, objs, elfs, tables, roots, comdat = [], [], "", {}, {}, {}, gate_build.product_roots(repo), {}
-    host = None
+    host, guest = None, []
     try:
         hroots = [r + "/" for r, e in recipe.load_admit(repo).items() if e.get("class") == "product" and e.get("target") == "host"]
         host = (hroots, set(host_exports(cache)[0])) if hroots else None
+        guest = [r + "/" for r, e in recipe.load_admit(repo).items() if e.get("class") == "product" and e.get("target") == "guest"]
         for root in roots:
             res, _ = gate_build.ensure(root, cache, repo)
             if res["status"] == "red":
@@ -297,6 +330,10 @@ def main():
             eid = root + "/" + os.path.basename(res["elf"]["path"]) if res["elf"] else None
             if eid:
                 elfs[eid] = elf_symbols(res["elf"]["path"])
+            if eid and root + "/" in guest:   # rule (f): what an external contributes to the link was built with the one semantic set
+                fitems, ffinds = foreign_flags(root, res, cache, repo)
+                items += fitems
+                finds += ffinds
             if res.get("contract_names"):
                 rows = [l.rstrip("\n").split("\t") for l in open(res["contract_names"]) if l.strip()]
                 if any(len(r) != 2 or not r[0] or not r[1] for r in rows):
@@ -309,7 +346,7 @@ def main():
     finally:
         if tmp and not os.environ.get("GATE_KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)
-    its, fs = judge(objs, elfs, tables, comdat, host)
+    its, fs = judge(objs, elfs, tables, comdat, host, guest)
     items, finds = items + its, finds + fs
     bad = {(o, s) for o, s, _, _ in finds}
     cert = len([it for it in items if it not in bad])
