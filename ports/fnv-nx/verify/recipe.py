@@ -49,9 +49,10 @@ TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
 ENV_JSON = TREE + "/verify/env.json"   # the declared environment of the checkout (l1.py checks the same file)
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
-        "plugins", "plugin_cxx", "variants", "outputs", "uses", "sources"}
+        "plugins", "plugin_cxx", "variants", "outputs", "uses", "sources", "fixtures"}
 VARIANT_KEYS = {"compiler", "flags"}   # the keys a variant may replace
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
+GATES = TREE + "/verify/gates.json"
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
 GUEST_TARGETS = ("guest", "host")
 # The plugins every product root with native or decomp C++ loads, their only admitted sources and their fixed arguments (RECIPE.md,
@@ -212,7 +213,45 @@ def generated_outputs(rec):
 def units_of(rec, root, files):
     """Sorted root-relative unit paths: tracked source files + generated outputs with a source name."""
     mine = {f[len(root) + 1:] for f in files if under(f, root)}
-    return sorted(u for u in mine | set(generated_outputs(rec)) if is_unit(u))
+    return sorted(u for u in mine | set(generated_outputs(rec)) if is_unit(u) and u not in fixtures_of(rec))
+
+
+def fixtures_of(rec):
+    """The fixture units of a recipe: root-relative names (a fixture is a unit that is built but is no unit of the product: see RECIPE.md)."""
+    fx = rec.get("fixtures") if isinstance(rec, dict) else None
+    return set(fx) if isinstance(fx, dict) else set()
+
+
+FIXTURE_KEYS = {"gate", "expect", "finding"}
+
+
+def fixture_errors(rec, root, mine, gen, repo):
+    """RULE (fixtures): `"fixtures": {UNIT: {"gate": G, "expect": "red", "finding": CODE}}`. UNIT is a tracked source file of the root (not a
+    generated output); G is a gate of verify/gates.json; the fixture is built like a unit but is never a unit of the product: it is in no link,
+    no os_layer, no generated input, no gate's universe (the gate `fixtures` judges it)."""
+    fx = rec.get("fixtures", {})
+    if not isinstance(fx, dict):
+        return ["fixtures must be an object {unit: {gate, expect, finding}}"]
+    err, gates = [], None
+    if repo is not None and os.path.exists(os.path.join(repo, GATES)):
+        gates = {g["name"] for g in json.load(open(os.path.join(repo, GATES)))["gates"]}
+    lk = rec.get("link") if isinstance(rec.get("link"), dict) else {}
+    named = set(rec.get("os_layer", []) if isinstance(rec.get("os_layer", []), list) else [])
+    named |= {t for t in lk.get("flags", []) if isinstance(t, str)} | {lk.get("script")}
+    for g in rec.get("generated", []) if isinstance(rec.get("generated", []), list) else []:
+        if isinstance(g, dict) and isinstance(g.get("inputs"), list):
+            named |= {i[len(root) + 1:] for i in g["inputs"] if isinstance(i, str) and i.startswith(root + "/")}
+    for u, f in fx.items():
+        if not (isinstance(u, str) and u in mine and is_unit(u) and u not in gen):
+            err.append("fixture %r is not a tracked source file of the root" % (u,))
+        elif u in named:
+            err.append("fixture %s is named in os_layer, the link or a generated input: a fixture never enters the product" % u)
+        if not (isinstance(f, dict) and set(f) == FIXTURE_KEYS and f["expect"] == "red" and all(isinstance(f[k], str) and f[k] for k in FIXTURE_KEYS)
+                and re.fullmatch(r"[a-z0-9_]+", f["gate"]) and re.fullmatch(r"[A-Za-z0-9_-]+", f["finding"])):
+            err.append("fixture %r needs exactly gate, expect (\"red\") and finding (a code)" % (u,))
+        elif gates is not None and f["gate"] not in gates:
+            err.append("fixture %s: %r is not a gate of %s" % (u, f["gate"], GATES))
+    return err
 
 
 def load_pin(repo="."):
@@ -509,6 +548,7 @@ def check(rec, root, files, roots, pin=None, repo="."):
     sr = rec.get("sources")
     if sr is not None and not (isinstance(sr, str) and sr in generated_outputs(rec)):
         err.append("sources must name a path in generated[].outputs of this root (a file of <external>:<path> lines)")
+    err += fixture_errors(rec, root, mine, seen, repo)
     units = set(units_of(rec, root, files))
     ol = rec.get("os_layer", [])
     for u in ol if isinstance(ol, list) else err.append("os_layer must be a list") or []:
@@ -1195,7 +1235,7 @@ def build(repo, root, store, out, jobs=4, ext=None):
         raise RecipeError(errs)
     units = units_of(j.rec, root, j.files)
     res = {"format": OBJ_FORMAT, "root": spec, "objects": [], "elf": None, "link_roots": [], "constants": None, "contract_names": None, "defined": [], "undefined": [], "plugins": [],
-           "link_archives": [], "stage_keys": [], "status": "green"}
+           "link_archives": [], "stage_keys": [], "status": "green", "fixtures": []}
     ws = tempfile.mkdtemp(prefix="recipe-")
     os.makedirs(out, exist_ok=True)
     all_units = units
@@ -1203,7 +1243,7 @@ def build(repo, root, store, out, jobs=4, ext=None):
         _copy(repo, [f for f in j.files if under(f, root)], root, os.path.join(ws, "root"))
         # KEEP GOING (RECIPE.md "Keep going"): every unit whose declared inputs are produced is built; a red stage is recorded with its
         # diagnostics, what needs its output is blocked by it and not run; the root is red if anything is red or blocked.
-        und, objs = set(), {}
+        und, objs, fx, allo = set(), {}, [], {}
         try:
             j.externals(ws)
             try:
@@ -1211,7 +1251,9 @@ def build(repo, root, store, out, jobs=4, ext=None):
                 units = sorted(set(units) | set(j.generated_sources(ws)))
             except BuildRed as r:   # the list of externally sourced units is itself not produced
                 j.red.append(dict(r.args[0]))
-            objs = j.compile(ws, units)
+            fx = sorted(fixtures_of(j.rec))
+            allo = j.compile(ws, units + fx)
+            objs = {u: allo[u] for u in units if u in allo}   # fixture objects never reach the link, the objects list or any gate's universe
         except BuildRed as r:   # an external is not available: no stage of the root has its inputs
             j.red.append(dict(r.args[0]))
             j.blocked.update({u: r.args[0]["stage"] for u in units})
@@ -1232,6 +1274,14 @@ def build(repo, root, store, out, jobs=4, ext=None):
             res["defined"] += d
             und |= x
             res["objects"].append({"unit": u, "object": os.path.abspath(dest), "sha256": ent["h"], "os_layer": u in j.rec.get("os_layer", [])})
+        for u in fx:
+            if u not in allo:
+                continue
+            dest = os.path.join(out, "fixtures", u + ".o")
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            ent = cas.manifest(allo[u], store)["entries"]["unit.o"]
+            shutil.copyfile(cas._obj(store, ent), dest)
+            res["fixtures"].append(dict(j.rec["fixtures"][u], unit=u, object=os.path.abspath(dest), sha256=ent["h"], pp_key=j.ppkeys.pop(u, None)))
         res.update(defined=sorted(res["defined"], key=lambda d: (d["symbol"], d["object"])), undefined=sorted(und))
         if j.rec.get("link") and (j.red or j.blocked or j.failed):
             j.blocked[j.rec["link"]["output"]] = (j.red or j.failed)[0]["stage"]
