@@ -16,7 +16,7 @@ on 2026-11-11 22:35 UTC. Handoff read: `journal/inbox/l3b-lift-handoff-opus.md` 
 | 4b | Full shape-prover farm run over 19 481 encodings, certs.tsv | farms (to start) | fnv-nx-build l3b-lift/shapeprove | next, after w4 (cert keys must survive DSL edits) |
 | 4c | gate forms red: liftpack external (shapes.tsv) not declared | - | - | blocked by the pack coordinates, L3a (liftgen writes shapes.tsv at L3a 3461ebb3; pack l3a-lift/pack/3461ebb3… being published) |
 | 4d | Test migration plan (8 tests, 10 gaps) | w3 session_01KmtZKSe6CHsWxfNeCn25nG | claude/fnv-l3b-lift-w3 | done ca4bcfe4 |
-| 4e | dsl_emit_test onto the recipe: generated lifted root lift/test/dslemit, FNVL_EMIT as generator argument, no direct g++ | w3 | claude/fnv-l3b-lift-w3 | doing: 76763619 — 128/128 units compiled, cold A = B, warm 257/257 hits; of 26 500 shapes 18 939 emitted, 7 136 not covered by the DSL, 425 emit errors; undef.tsv 17 rows. Next: w3t from the trunk, admit.json, puregate, undef and per-family split. The 128-bucket split is dropped (orchestrator); the full build waits for L1 w14 (EMLINK fix in recipe.py, claude/fnv-l1-contract-w14) |
+| 4e | dsl_emit_test onto the recipe: generated lifted root lift/test/dslemit, FNVL_EMIT as generator argument, no direct g++ | w3 | claude/fnv-l3b-lift-w3 | doing: w3t cbe0b8b3 (on w2g), 4096 units, full build waits for L1 w14. Bad shapes 7 561 at shapes 77524556: uncovered 7 136 (int 262, x87 2 145, simd 4 344, sys 385), emit errors 425 (segment 232, 16-bit registers 190, assertion 3). undef 17 = (mnemonic, flag) pairs where DSL and hand handler disagree on undefined flags. puregate 47 violations (fnvlift: L3a; proof: w2g; gen→fnvlift import: L1 rule asked). Review: revert fnvlift edits (set_emit sent to L3a), drop the duplicate rt roots, build.json regen check |
 | 4f | Tests needing a link (instest_extra, x87dyn, mmxtest, sehcodes, chain, ehtest) | - | - | blocked by: two-root link root (L1 w15, doing; + library-input key for newlib libc.a asked). All symbol gaps have real bodies: G1/G2/G3 in platform root (L5 claude/fnv-l5-platform-w10 f872bcd2, merge pending), G5 = newlib libc.a (tools/fnvnx-a64-msvcmodel 00e3d42a), G4 dispgen.py (L3a w4, doing), G7 exists (fnvnx_lift_attach + fnvnx_guest_invoke, rt/enter), G6 done (boot.py --watch-log, claude/fnv-l4-verify eeed354, L4 w4 a5868b88; reaches the trunk with the next L4 merge), G8 closed |
 | 4g | EH oracle independent of rt/seh (Wine 9.0 trace or cited ReactOS rules) for ehtest (G9) | - | - | open, L3b (with item 5) |
 | 4h | test_fpexact onto recipe fixtures | - | - | blocked by: fixtures key in build.json (L1 w16, doing), w2g |
@@ -29,6 +29,16 @@ on 2026-11-11 22:35 UTC. Handoff read: `journal/inbox/l3b-lift-handoff-opus.md` 
 
 - Contract gates n1 n2_* xc xunit rtti pcrel bodysel abs disp reach reachlink gpa are red `inputs` for lift/rt: the root is a non-game product root. L1 to define their universe for such roots.
 - fnvl.h:99 and fnvl_x87.h:77 carry the attribute `fnvnx_f2i`, which no plugin of the compiler knows (the plugin is `fnvnx_ftoi`). The compiler ignores it with a warning, so float-to-int sites in the rt headers may not be under the ftoi rule (class C). L3a owns these headers.
+- L3a (fnvlift @8ec81459):
+  - FNVL_EMIT is an undeclared environment input; set_emit is proposed.
+  - puregate dynamic globals, __init__.py:21-22.
+  - TAB_BIAS has an assumption with no ASSUMPTIONS.json id.
+  - DSL does not cover 7 136 shapes; 425 emit errors.
+  - undef-flag disagreement in 17 (mnemonic, flag) pairs; a flag-liveness rule is proposed.
+- L1:
+  - gate_pure cross-root imports (`imports:` in admit.json proposed);
+  - z3 on the EXTERNAL list;
+  - EMLINK in the unit view (w14, doing).
 
 ## Global numbers (as handed over; re-measured by the tasks above)
 
