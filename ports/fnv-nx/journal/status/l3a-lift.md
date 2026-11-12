@@ -414,3 +414,11 @@ Update 2026-11-12, at 698adefb:
   - citest/lifted red at its generate stage, because the gmpy2.libs mount is missing (an L1 class defect: the mount must cover the wheel's whole RECORD). Routed to L1.
 - ILP32 for lift/pack: flags.semantics on int3's base starts with -mabi=ilp32. w8 builds one pack unit for the readelf proof.
 - ASM-234: the record lands in w6's merge of w7-merge into int3, together with dic.py, its citing file. used_by is re-derived per id (ASM-233's status per L1's rule).
+
+## 2026-11-12 09:53
+- L2 asmfp 029d6bb9 is rebased onto int3 901c3c54e.
+  - Check 3d (asm ranges) sits beside the trunk's 3c, and ASM-218 is removed by gate:fpexact.
+  - Two gate_fpexact fixes: the /src/ unit prefix and the f2i.json path.
+  - test_fpexact_asm 20/20 on real recipe-built units.
+- Declined: "convert top-level asm to function-level". It is not semantics-preserving for the enter.cc WRAP entry wrappers (it adds a compiler prologue, and aarch64 gcc 13 has no naked functions). L2 is asked to have the plugin bracket toplevel asm nodes as recorded ranges (L3b's class rule), or report an open class.
+- The gmpy2 mount defect goes to L1 w18: the module file set = the wheel RECORD, which drives the mount, the key and the digest.
