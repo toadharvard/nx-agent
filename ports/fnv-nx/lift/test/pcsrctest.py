@@ -128,4 +128,16 @@ check('and esp,-8: a read that can reach the return slot is red', red >= 1 and a
 # 11 determinism
 a = run([(0x1000, call(0x1000, THUNK) + b'\xc3'), (THUNK, t)])[2]; b = run([(0x1000, call(0x1000, THUNK) + b'\xc3'), (THUNK, t)])[2]
 check('deterministic', a == b)
+# ---- fresh stack space: esp loaded from a register (the chkstk / alloca idiom, from the code of the function)
+CK = b'\xf7\xd8\x01\xe0\x83\xc0\x04\x94\x8b\x00\x50\xc3'      # neg eax; add eax,esp; add eax,4; xchg esp,eax; mov eax,[eax]; push eax; ret
+red, res, rows = run2([(0x1000, CK), (0x1010, b'\x31\xc0' + call(0x1012, 0x1000) + b'\xc3')], {0x1000: {'call'}, 0x1010: {'call'}})
+rows = [r for r in rows if r[0] == '00001000']; red = sum(1 for r in rows if r[-1] == 'RED')
+check('chkstk idiom: esp from a register, ra re-pushed in the fresh space, ret pops it: no red, no esp-lost-ret', red == 0 and not any(r[3] == 'esp-lost-ret' for r in rows), rows)
+red, res, rows = run2([(0x1000, b'\x89\xcc\x8b\x44\x24\x04\xc3')], {0x1000: {'call'}})
+check('mov esp,ecx then a read of a slot not written in the fresh space is red while the return slot is live', red >= 1 and any(r[3] == 'esp-lost-read' for r in rows), rows)
+red, res, rows = run2([(0x1000, b'\x89\xcc\xc3')], {0x1000: {'call'}})
+check('mov esp,ecx; ret: the target is unknown (esp-lost-ret, not typed)', any(r[3] == 'esp-lost-ret' for r in rows), rows)
+red, res, rows = run2([(0x1000, CK[:-1] + b'\x9b'), (0x1010, call(0x1010, 0x1000) + b'\xc3')], {0x1000: {'call'}, 0x1010: {'call'}})
+check('callee leaves esp in a fresh space: the caller esp is unknown after the call (pop None)', not any(r[3] == 'esp-lost-use' for r in rows), rows)
+
 sys.exit(0 if ok else 1)

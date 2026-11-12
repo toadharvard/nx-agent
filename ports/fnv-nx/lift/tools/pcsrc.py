@@ -134,6 +134,22 @@ def memkey(img, g, op, esp, regs):
     return ('reg', b, m.disp)
 
 
+HALF = 1 << 23
+
+
+def is_fresh(k):
+    """an esp / stack key in a FRESH SPACE: coordinates of a stack whose position relative to the entry esp is unknown (esp loaded from a register that is not a known stack address: mov/xchg esp, r; add/sub esp, r).
+    Inside a fresh space pushes, pops and esp-relative accesses are exact relative to each other; a slot never written there is read as an unknown stack read (the old frame may or may not alias it), never as data."""
+    return k is not None and abs(k) >= HALF
+
+
+def new_fresh(esp, st):
+    """-> the esp of a fresh space (the base of the current fresh space if esp is already in one, else 1<<24); the stale slots of that space are dropped. Finite: one base per nesting, no growth in loops."""
+    base = ((esp + HALF) // (1 << 24)) * (1 << 24) if is_fresh(esp) else 1 << 24
+    for k in [k for k in st if abs(k - base) < HALF]: st.pop(k)
+    return base
+
+
 ALLREGS = ('eax', 'ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp')
 ALLCODE_INPUT = ({n: T_CODE for n in ALLREGS}, {}, True)      # an unknown input is possibly a code address: the sound value, not a fallback
 
@@ -215,6 +231,10 @@ def analyse_entry(img, e, mode='owner', force=False):
             if key[0] == 'lost':
                 if any(isinstance(v, tuple) and v[0] == 'ra' for v in st.values()): emit(a, 'ra', 'esp-lost-read', 'stack read through an esp whose offset is unknown while the return slot is live', True)
                 return None
+            if key[0] == 'stk' and is_fresh(key[1]):
+                v = st.get(key[1])
+                if v is None and any(isinstance(w, tuple) and w[0] == 'ra' for w in st.values()): emit(a, 'ra', 'esp-lost-read', 'stack read in a fresh stack space (esp loaded from a register) of a slot not written there, while the return slot is live', True)
+                return v
             if key[0] == 'stk' and al is not None and key[1] >= al[0]:
                 # a read of the old frame through an aligned esp: its address is known up to the slack
                 lo = key[1] - al[1]; hit = [k for k in st if lo <= k <= key[1] + 3]
@@ -345,7 +365,7 @@ def analyse_entry(img, e, mode='owner', force=False):
             else:
                 if esp is not None: img.info['esp-lost'] += 1
                 esp = None
-            for k in [k for k in st if esp is None or k < esp]: st.pop(k)
+            for k in [k for k in st if esp is None or (k < esp and is_fresh(k) == is_fresh(esp))]: st.pop(k)
             succ = [nxt]
         elif mn == 'ret':
             n = 0
@@ -354,7 +374,7 @@ def analyse_entry(img, e, mode='owner', force=False):
             if esp is not None and v is not None and tracked(v) and v != ('ra', 0): consume(v, 'ret-transfer', 'ret to %s+%d' % (v[0], v[1] if v[0] != 'abs' else 0), False); emit(a, vsrc(v), 'ret-transfer', 'ret through a moved return address', False)
             elif esp is not None and v == T_S4: emit(a, 's4', 'target-s4', 'ret through a stack slot holding arithmetic on a code address', True)
             elif esp is not None and v == ('ra', 0): pass
-            elif esp is None: emit(a, '-', 'esp-lost-ret', 'ret with an unknown esp offset', False)
+            elif esp is None or is_fresh(esp): emit(a, '-', 'esp-lost-ret', 'ret with an unknown esp offset', False)
             rr = {n_: regs[n_] for n_ in sorted(regs) if isinstance(regs[n_], tuple) and regs[n_][0] == 'ra'}
             for n_, v_ in sorted(regs.items()):
                 if v_ == T_S4: emit(a, 's4', 'escape-returned', 'returned in %s' % n_, True)
@@ -362,6 +382,13 @@ def analyse_entry(img, e, mode='owner', force=False):
                     if n_ in CALLER_SAVED and not anyra: retscratch.append((a, n_, vsrc(v_)))      # dead iff every caller overwrites it first: decided in resolve()
                     else: emit(a, vsrc(v_), 'passed', 'returned in %s' % n_, True)
             rets.append((esp, n, rr)); term = True
+        elif mn == 'xchg' and len(ops) == 2 and ops[0].type == ops[1].type == X.X86_OP_REG and ops[0].size == 4 and 'esp' in (R32.get(ops[0].reg), R32.get(ops[1].reg)) and R32.get(ops[0].reg) != R32.get(ops[1].reg):
+            n = R32[(ops[1] if R32.get(ops[0].reg) == 'esp' else ops[0]).reg]; v = regs.get(n); old = esp; al = None
+            if tracked(v) or v == 'mix': consume(v, 'unknown-use', 'xchg esp', True)
+            esp = v[1] if isinstance(v, tuple) and v[0] == 'sp' else new_fresh(esp, st)
+            if old is not None: regs[n] = ('sp', old)
+            else: regs.pop(n, None)
+            succ = [nxt]
         elif mn == 'jmp':
             o = ops[0]
             if o.type == X.X86_OP_REG:
@@ -435,9 +462,10 @@ def analyse_entry(img, e, mode='owner', force=False):
                     if d.size == 4: write_reg(d, v)
                     else: write_reg(d, 'mix' if tracked(v) else None)
                 else: write_reg(d, T_CODE if (d.size == 4 and reloc_imm()) else None)
-                if d.type == X.X86_OP_REG and R32.get(d.reg) == 'esp' and s.type == X.X86_OP_REG:
-                    v = regs.get(R32.get(s.reg)); esp = v[1] if isinstance(v, tuple) and v[0] == 'sp' else None; al = None
-                    if esp is None: img.info['esp-lost'] += 1
+                if R32.get(d.reg) == 'esp' and d.size == 4:
+                    v = regval(s) if s.type == X.X86_OP_REG else None; al = None
+                    if tracked(v) or v == 'mix': consume(v, 'unknown-use', 'mov esp', True)
+                    esp = v[1] if isinstance(v, tuple) and v[0] == 'sp' else new_fresh(esp, st)
             elif d.type == X.X86_OP_MEM:
                 v = regval(s) if s.type == X.X86_OP_REG else None
                 key = memkey(img, g, d, esp, regs)
@@ -468,11 +496,11 @@ def analyse_entry(img, e, mode='owner', force=False):
         elif mn in ('add', 'sub') and ops[0].type == X.X86_OP_REG and R32.get(ops[0].reg):
             n = R32[ops[0].reg]; s = ops[1]
             if n == 'esp':
+                fr = False
                 if esp is not None and s.type == X.X86_OP_IMM: esp += s.imm if mn == 'add' else -s.imm
-                else:
-                    if esp is not None: img.info['esp-lost'] += 1
-                    esp = None
-                for k in [k for k in st if esp is None or k < esp]: st.pop(k)
+                else: esp = new_fresh(esp, st); al = None; fr = True
+                if not fr:
+                    for k in [k for k in st if k < esp and is_fresh(k) == is_fresh(esp)]: st.pop(k)
             else:
                 v = regs.get(n)
                 if v is not None and s.type == X.X86_OP_IMM and isinstance(v, tuple) and v[0] != 'abs':
@@ -518,7 +546,7 @@ def analyse_entry(img, e, mode='owner', force=False):
             if esp is None: img.info['esp-lost'] += 1
             else:
                 pv = st.pop(esp - 4, None); regs.pop('ebp', None)
-            for k in [k for k in st if esp is None or k < esp]: st.pop(k)
+            for k in [k for k in st if esp is None or (k < esp and is_fresh(k) == is_fresh(esp))]: st.pop(k)
             succ = [nxt]
         elif mn in FP_ENV or mn in FP_FXSAVE or (mn.startswith('fxsave')):
             o = ops[0]
@@ -576,7 +604,7 @@ def analyse_entry(img, e, mode='owner', force=False):
                 if (r2, s2, e2, f2, fe2) != o: states[t] = (r2, s2, e2, f2, fe2); work.append(t)
     if not anyra: img.busy.discard(e)
     # resolve fip / fdp symbolic values: concretise through the x87 instructions that executed before (recorded in fpl at the load)
-    pops = [r[0] for r in rets]; ns_ = {r[1] for r in rets}
+    pops = [None if is_fresh(r[0]) else r[0] for r in rets]; ns_ = {r[1] for r in rets}
     pop = None
     if rets and all(p is not None for p in pops) and len(set(pops)) == 1 and len(ns_) == 1: pop = pops[0] + 4 + next(iter(ns_))
     reg_ret = {}
