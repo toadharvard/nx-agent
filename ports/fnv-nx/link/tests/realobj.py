@@ -41,11 +41,12 @@ def _store():
     return d
 
 
-def build(sources, plugins=None, lifted=False, flags=()):
+def build(sources, plugins=None, lifted=False, flags=(), link_script=None):
     """Build C++ SOURCES ({unit file name: text}) as a toy guest root of a temp git repo -> the recipe's result dict (status green or red, with
     'failure' holding the stage, exit and the compiler's stderr tail).  PLUGINS: None = all of recipe.PLUGIN_SOURCES, else the names to load (any subset
     needs LIFTED: a native root must load them all, RECIPE.md gate rule).  LIFTED: the toy root is a lifted-origin root (RECIPE.md): its C++ units are
     outputs of a `generated` step (gen/lift.py writes them) whose pack is an external served from a local git repo through ARTIFACTS_URL; the guest
+    LINK_SCRIPT: text of the root's link.ld (the recipe's `link` stage links the objects into an ELF32 image, entry symbol `entry`).
     FLAGS: extra C++ flags of the recipe (subject to the recipe's flag policy).  The guest compiler external is taken from the store's external cache (fetched by pin on the first native build)."""
     base = tempfile.mkdtemp(prefix='realobj-')
     pin = json.load(open(os.path.join(REAL, T + 'verify/guest_compiler.json')))
@@ -61,6 +62,8 @@ def build(sources, plugins=None, lifted=False, flags=()):
     if not plugs:
         rec.pop('plugin_cxx')
         rec.pop('plugins')
+    if link_script is not None:
+        rec['link'] = {'script': 'link.ld', 'output': 'x.elf', 'flags': ['-m', 'aarch64linux32', '-pie', '-e', 'entry']}
     repo = os.path.join(base, 'repo')
     os.makedirs(repo)
     _git(repo, 'init', '-q')
@@ -95,6 +98,8 @@ def build(sources, plugins=None, lifted=False, flags=()):
         for n, text in sources.items():
             _w(repo, ROOT + '/%s.cc' % n, text)
         root['cxx_origin'] = 'native'
+    if link_script is not None:
+        _w(repo, ROOT + '/link.ld', link_script)
     _w(repo, ROOT + '/build.json', json.dumps(rec, indent=1))
     _w(repo, T + 'verify/guest_compiler.json', json.dumps(pin))
     _w(repo, T + 'verify/admit.json', json.dumps({'format': 'fnvnx-admit/1', 'roots': [

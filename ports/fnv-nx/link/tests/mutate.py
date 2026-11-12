@@ -204,3 +204,48 @@ def set_symbol_size(data, name, size):
             struct.pack_into('<I' if not e.is64 else '<Q', out, f[4] + k * ent + (8 if not e.is64 else 16), size)
             return bytes(out)
     raise ValueError('symbol vanished')
+
+
+def _symoff(e, name):
+    sy = [i for i, x in enumerate(e._sec) if x[1] == elfobj.SHT_SYMTAB][0]
+    f = _fields(e, sy)
+    ent = 24 if e.is64 else 16
+    hit = [x for x in e.symbols() if x[0] == name]
+    if len(hit) != 1:
+        raise ValueError('%d symbols named %s' % (len(hit), name))
+    s = hit[0]
+    for k, x in enumerate(e.symbols()):
+        if x == s:
+            return f[4] + k * ent
+    raise ValueError('symbol vanished')
+
+
+def set_symbol_shndx(data, name, shndx):
+    """the symbol `name` (defined or undefined) gets st_shndx = SHNDX (0xfff1 = SHN_ABS: the symbol turns into an absolute one, its value kept)"""
+    e = elfobj.parse(data, 'mutate')
+    out = bytearray(data)
+    struct.pack_into('<H', out, _symoff(e, name) + (6 if e.is64 else 14), shndx)
+    return bytes(out)
+
+
+def zero_reloc_symbol(data, nth=0):
+    """the `nth` relocation entry (SHT_RELA sections in order) gets symbol index 0 (the assembler's folded absolute value: no symbol, a type)"""
+    e = elfobj.parse(data, 'mutate')
+    ent = 24 if e.is64 else 12
+    k = 0
+    for i in range(len(e._sec)):
+        f = _fields(e, i)
+        if f[1] != 4:
+            continue
+        for a in range(f[4], f[4] + f[5], ent):
+            if k == nth:
+                out = bytearray(data)
+                if e.is64:
+                    typ, = struct.unpack_from('<I', out, a + 8)
+                    struct.pack_into('<Q', out, a + 8, typ)
+                else:
+                    info, = struct.unpack_from('<I', out, a + 4)
+                    struct.pack_into('<I', out, a + 4, info & 0xff)
+                return bytes(out)
+            k += 1
+    raise ValueError('no relocation %d' % nth)
