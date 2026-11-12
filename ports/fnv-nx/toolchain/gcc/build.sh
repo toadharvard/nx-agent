@@ -124,7 +124,6 @@ if ! step binutils; then
 	../binutils-$BINUTILS_VER/configure --prefix="$PREFIX" --target=$TARGET --disable-nls --disable-werror \
 		--disable-shared --disable-debug --enable-lto --enable-plugins --enable-poison-system-directories \
 		--enable-deterministic-archives --with-sysroot="$PREFIX/$TARGET"
-	make -j1 configure-host   # sub-configures share config.cache: serial, then the parallel build
 	make -j"$JOBS"
 	make install
 	cd ..; done_ binutils
@@ -146,7 +145,6 @@ if ! step gcc1; then
 		CXXFLAGS_FOR_TARGET="$TFLAGS -Wno-deprecated" LDFLAGS_FOR_TARGET="" \
 			../gcc-$GCC_VER/configure "${GCC_CONF[@]}"
 	fi
-	make -j1 $(sed -n 's/^\(configure-build-[a-z0-9-]*\):.*/\1/p' Makefile) configure-host   # sub-configures share config.cache: serial, then the parallel build
 	make -j"$JOBS" all-gcc
 	make install-gcc
 	cd ..; done_ gcc1
@@ -174,7 +172,6 @@ fi
 
 if ! step gcc2; then
 	cd b-gcc
-	make -j1 configure-target
 	make -j"$JOBS"
 	make install-strip
 	cd ..; done_ gcc2
@@ -194,7 +191,6 @@ if ! step s2gcc1; then
 	rm -rf b-gcc13; mkdir -p b-gcc13; cd b-gcc13
 	CFLAGS_FOR_TARGET="$S2FLAGS" CXXFLAGS_FOR_TARGET="$S2FLAGS" LDFLAGS_FOR_TARGET="" \
 		../gcc-$GCC13_VER/configure "${GCC13_CONF[@]}"
-	make -j1 $(sed -n 's/^\(configure-build-[a-z0-9-]*\):.*/\1/p' Makefile) configure-host
 	make -j"$JOBS" all-gcc
 	make install-gcc
 	cd ..; done_ s2gcc1
@@ -217,7 +213,6 @@ if ! step s2limits; then
 fi
 if ! step s2gcc2; then
 	cd b-gcc13
-	PATH=$S2PATH make -j1 configure-target
 	PATH=$S2PATH make -j"$JOBS"
 	PATH=$S2PATH make install
 	cd ..; done_ s2gcc2
