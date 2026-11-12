@@ -29,19 +29,3 @@ Profile set (rule): every `SUPPORT_PROFILE_*` macro that `mojoshader_internal.h`
 checks this against the header, so a new upstream profile cannot default to 1 unseen). It is 1 exactly for the profiles the ABI produces and what they need to
 compile: GLSLDK (the profile `backend_mojoshader.c` requests) and its dependency chain GLSLES3, GLSLES, GLSL; 0 for all others (D3D, BYTECODE, HLSL, GLSL120,
 ARB1, ARB1_NV, METAL, SPIRV, GLSPIRV). Census after the prune (7 objects): 493 non-empty sections, 12 collected (inlined-only helpers, see above).
-
-## mojoshader_sm.patch
-Applied last. Deletes `EMIT_GLSL_OPCODE_UNIMPLEMENTED_FUNC` (0 uses) and rewrites the ten `<OP> unimplemented in this profile` failures of the GLSL emitters
-of the ps_1_x opcodes (TEXREG2AR/GB/RGB, TEXDP3, TEXDP3TEX, TEXM3X2DEPTH, TEXDEPTH, BEM, TEXM3X3SPEC, TEXM3X3VSPEC) to "<OP> is not an instruction of this shader
-model (<models> only)". Rule: each opcode has a body for every shader model whose table row (sm_table.json `models`) contains it; outside those models the instruction
-does not exist and the documented validator result is an invalid shader, not a missing implementation.
-
-## Failure ABI (for build.json `error_abi`, once L1 w20's recipe accepts the field)
-`fail(Context*, const char*)` (profiles/mojoshader_profile_common.c:144, line numbers of the tree after all patches) calls `failf` (:131), whose first statement,
-before every branch, is `ctx->isfail = 1;` (:133); `out_of_memory` (:20) also stores `ctx->isfail = ctx->out_of_memory = 1;`. So every path of `fail` stores to one
-field: `Context::isfail`. Declaration: `"error_abi": {"fail": "fail", "kind": "flag", "flag": "isfail"}`. The reader is `isfail()` (:125).
-
-## tools/fail_census.py (failure call sites)
-Enumerates every `fail`/`failf` call (and wrappers: functions whose whole body is one such call, to a fixpoint) in the root's sources after all patches, with the
-enclosing function and guards, and classifies by a fixed rule, default (o): (v) site in emit_<PROFILE>_<OP> for a ps_1_x-only opcode row of sm_table.json (the
-row is cited), (r) allocation / out-of-memory guard, (o) everything else. (v) sites are certificate input for L1, (o) sites are listed, none is edited.
