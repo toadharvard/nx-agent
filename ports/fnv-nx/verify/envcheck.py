@@ -150,6 +150,7 @@ def check(doc):
         h = doc["python"].get("wheel_sha256", {}).get(m)
         if not (isinstance(h, str) and len(h) == 64 and all(c in "0123456789abcdef" for c in h)):
             bad.append("env: python module %s: no wheel sha256 in python.wheel_sha256 (setup installs by hash)" % m)
+    bad += deb_pins(doc)
     for t, dg in sorted(doc["trees"].items()):
         cmp("tree " + t, dg[:12], (tree_digest(t) if os.path.isdir(t) else "missing")[:12])
     own = None
@@ -167,6 +168,28 @@ def check(doc):
         ok = need in PROBES and PROBES[need]()
         cmp("kernel " + need, "available", "available" if ok else ("unavailable" if need in PROBES else "unknown capability"))
     return bad
+
+HEX64 = "0123456789abcdef"
+
+def deb_pins(doc):
+    """Mismatch lines of doc["debs"], the mirror pin of the packages (installed by farm/install_debs.py, no package index): the
+    mirror commit and tree_sha256, and for EVERY package of doc["packages"] exactly one entry with the same version, a file name and
+    a 64-hex sha256 (and no entry of another package). The installed content is not compared with the deb (not derivable)."""
+    out, dp = [], doc.get("debs")
+    def hx(h, n):
+        return isinstance(h, str) and len(h) == n and all(c in HEX64 for c in h)
+    if not isinstance(dp, dict) or not isinstance(dp.get("mirror"), dict) or not isinstance(dp.get("packages"), dict):
+        return ["env: debs: missing (the deb mirror pin: debs.mirror and debs.packages)"]
+    m = dp["mirror"]
+    if not (isinstance(m.get("repo"), str) and hx(m.get("commit"), 40) and hx(m.get("tree_sha256"), 64)):
+        out.append("env: debs.mirror: needs repo, a 40-hex commit and a 64-hex tree_sha256")
+    for p in sorted(set(doc["packages"]) ^ set(dp["packages"])):
+        out.append("env: debs.packages: %s %s" % (p, "has no deb pin" if p in doc["packages"] else "is not in packages"))
+    for p, e in sorted(dp["packages"].items()):
+        if p in doc["packages"] and not (isinstance(e, dict) and e.get("version") == doc["packages"][p] and isinstance(e.get("file"), str)
+                                         and hx(e.get("sha256"), 64) and isinstance(e.get("url"), str)):
+            out.append("env: debs.packages.%s: needs version %s, file, sha256 (64 hex) and url" % (p, doc["packages"][p]))
+    return out
 
 def wheel_pins(prev):
     """python.wheel_sha256 of the new snapshot: the sha256 of each module's wheel FILE (what setup_verdict_env.sh installs with
@@ -239,7 +262,7 @@ def snapshot(prev=None):
             "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in sorted(PY_MODULES)},
                        "wheels": {m: wheel_digest(m) for m in sorted(PY_MODULES)},
                        "wheel_sha256": wheel_pins(prev)},
-            "programs": sorted(PROGRAMS), "kernel": {"needs": KERNEL}}
+            "programs": sorted(PROGRAMS), "kernel": {"needs": KERNEL}, "debs": (prev or {}).get("debs")}
 
 def main(argv):
     ap = argparse.ArgumentParser(prog="envcheck.py")

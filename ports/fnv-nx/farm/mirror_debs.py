@@ -2,7 +2,7 @@
 """Fetch every package=version of verify/env.json as a .deb into a directory and write its manifest (stdlib + curl).
     python3 -I mirror_debs.py --env verify/env.json --out DIR [--snapshot YYYYMMDDTHHMMSSZ]
 DIR gets <name>_<version>_<arch>.deb for every entry of env.json "packages" and DIR/debs.json:
-    {"format":"fnvnx-debs/1","packages":{name:{"version","file","sha256","origin"}}}
+    {"format":"fnvnx-debs/1","packages":{name:{"version","file","sha256","origin","url"}}}
 Origin of each file (the upstream that the pin documents; the mirror is what setup installs from):
   snapshot  the version is in the Ubuntu snapshot at --snapshot; its Packages index (SHA256 field) must equal the file's sha256
   launchpad Ubuntu pool file of a version that a later update superseded (launchpad.net +files); not in the dated index
@@ -82,7 +82,7 @@ def main(a):
         if want and h != want:
             bad.append("%s=%s: sha256 %s differs from the index %s" % (name, ver, h, want))
             continue
-        man[name] = {"version": ver, "file": base, "sha256": h, "origin": origin}
+        man[name] = {"version": ver, "file": base, "sha256": h, "origin": origin, "url": url}
     if bad:
         sys.exit("mirror_debs: %d of %d failed:\n  " % (len(bad), len(env["packages"])) + "\n  ".join(bad))
     json.dump({"format": "fnvnx-debs/1", "snapshot": snap, "packages": man}, open(os.path.join(out, "debs.json"), "w"), indent=1, sort_keys=True)

@@ -50,10 +50,27 @@ def mutate(f):
     f(d)
     return d
 
+def pkgs(f):
+    """A change of the package list with the deb pins kept in step: the case then shows only the package mismatch."""
+    d = doc()
+    f(d["packages"])
+    base = doc()["debs"]["packages"]
+    d["debs"]["packages"] = {p: dict(base.get(p, next(iter(base.values()))), version=v) for p, v in d["packages"].items()}
+    return d
+
 CASES = [
-    ("package version", mutate(lambda d: d["packages"].__setitem__("strace", "0.0")), "env: package strace: want 0.0, have "),
-    ("missing package", mutate(lambda d: d["packages"].__setitem__("no-such-package-xyz", "1")),
+    ("package version", pkgs(lambda p: p.__setitem__("strace", "0.0")), "env: package strace: want 0.0, have "),
+    ("missing package", pkgs(lambda p: p.__setitem__("no-such-package-xyz", "1")),
      "env: package no-such-package-xyz: want 1, have not installed"),
+    ("deb pin missing for a package", mutate(lambda d: d["debs"]["packages"].pop("strace")), "env: debs.packages: strace has no deb pin"),
+    ("deb pin of another version", mutate(lambda d: d["debs"]["packages"]["strace"].__setitem__("version", "0.0")),
+     "env: debs.packages.strace: needs version "),
+    ("deb pin sha256 not 64 hex", mutate(lambda d: d["debs"]["packages"]["strace"].__setitem__("sha256", "abc")),
+     "env: debs.packages.strace: needs version "),
+    ("deb pin of a package not in packages", mutate(lambda d: d["debs"]["packages"].__setitem__("zzz", d["debs"]["packages"]["strace"])),
+     "env: debs.packages: zzz is not in packages"),
+    ("deb mirror commit not 40 hex", mutate(lambda d: d["debs"]["mirror"].__setitem__("commit", "x")), "env: debs.mirror: needs repo"),
+    ("no debs section", mutate(lambda d: d.pop("debs")), "env: debs: missing"),
     ("python module version", mutate(lambda d: d["python"]["modules"].__setitem__("capstone", "0.0")),
      "env: python module capstone: want 0.0, have "),
     ("python module content sha256 (same version, other bytes)", mutate(lambda d: d["python"]["wheels"].__setitem__("z3-solver", "0" * 64)),
@@ -64,7 +81,7 @@ CASES = [
      "env: python module numpy: no wheel sha256 in python.wheel_sha256"),
     ("python version", mutate(lambda d: d["python"].__setitem__("version", "2.7.0")), "env: python.version: want 2.7.0, have "),
     ("missing program", mutate(lambda d: d["programs"].append("no-such-program-xyz")), "env: program no-such-program-xyz: want in PATH, have missing"),
-    ("program not owned by a listed package", mutate(lambda d: d["packages"].pop("busybox-static")), "env: program busybox: want owned by a listed package"),
+    ("program not owned by a listed package", pkgs(lambda p: p.pop("busybox-static")), "env: program busybox: want owned by a listed package"),
     ("os version", mutate(lambda d: d["os"].__setitem__("version_id", "99.04")), "env: os.version_id: want 99.04, have "),
     ("arch", mutate(lambda d: d.__setitem__("arch", "aarch64")), "env: arch: want aarch64, have "),
     ("uid", mutate(lambda d: d.__setitem__("uid", 1000)), "env: uid: want 1000, have "),
@@ -95,16 +112,39 @@ check("snapshot needs --from-code and -o", ec("snapshot")[0] != 0)
 check("setup script: bash -n", subprocess.run(["bash", "-n", SETUP]).returncode == 0)
 p = subprocess.run(["bash", SETUP, "--print"], capture_output=True, text=True)
 lines = p.stdout.splitlines()
-apt = [ln for ln in lines if ln.startswith("apt-get install")]
+debs = [ln for ln in lines if "install_debs.py" in ln]
 pip = [ln for ln in lines if " pip install " in ln]
-check("setup --print: apt-get update, one install line with every package=version, pip with every module==version, then envcheck check",
-      p.returncode == 0 and lines[0] == "apt-get update" and len(apt) == 1 and len(pip) == 1 and "--break-system-packages" in pip[0]
-      and all(("%s=%s" % kv) in apt[0].split() for kv in d0["packages"].items())
+check("setup --print: install_debs.py from the mirror (no apt), pip with every module==version by hash, then envcheck check",
+      p.returncode == 0 and len(debs) == 1 and lines[0] == debs[0] and debs[0].endswith("--env " + ENVF) and "apt" not in p.stdout.replace("--break-system-packages", "")
+      and len(pip) == 1 and "--break-system-packages" in pip[0]
       and "--require-hashes" in pip[0].split() and "--no-deps" in pip[0].split()
       and lines[lines.index("REQUIREMENTS:") + 1:-1] == ["%s==%s --hash=sha256:%s" % (m, v, d0["python"]["wheel_sha256"][m])
                                                          for m, v in sorted(d0["python"]["modules"].items())]
       and lines[-1].endswith("envcheck.py check --env " + ENVF), p.stdout[:300] + p.stderr)
-# the run mode (real apt-get, real pip) is not run here: it changes the machine. Every farm runs it for real and ends with envcheck.
+# the run mode (real dpkg, real pip) is not run here: it changes the machine. Every farm runs it for real and ends with envcheck.
+
+# install_debs.py against a local mirror repo (ARTIFACTS_URL): checks tree hash and every sha256 BEFORE dpkg (--dry: dpkg never runs)
+sys.path.insert(0, VERIFY)
+import cas  # noqa: E402
+MR = os.path.join(TD, "mirror")
+os.makedirs(os.path.join(MR, "debs"))
+open(os.path.join(MR, "debs", "x_1_amd64.deb"), "wb").write(b"not a real deb\n")
+gi = lambda *a: subprocess.run(["git", "-C", MR] + list(a), capture_output=True, text=True, check=True).stdout.strip()
+gi("init", "-q", "-b", "m"); gi("add", "-A"); gi("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "m")
+MC, MT = gi("rev-parse", "HEAD"), cas.tree_hash(os.path.join(MR, "debs"))
+def mirror_doc(tree=MT, sha=hashlib.sha256(b"not a real deb\n").hexdigest()):
+    return write({"packages": {"no-such-pkg-x": "1"}, "debs": {"mirror": {"repo": "r", "commit": MC, "tree_sha256": tree},
+                  "packages": {"no-such-pkg-x": {"version": "1", "file": "x_1_amd64.deb", "sha256": sha, "url": "u"}}}}, "m.json")
+def inst(path):
+    p = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(VERIFY), "farm", "install_debs.py"), "--env", path, "--dry"],
+                       capture_output=True, text=True, env=dict(os.environ, ARTIFACTS_URL="file://" + MR))
+    return p.returncode, p.stdout, p.stderr
+rc, out, err = inst(mirror_doc())
+check("install_debs: right tree and sha256 -> 1 package from the mirror (dry)", rc == 0 and "1 packages, 1 installed from the mirror, 0 already present" in out, (rc, out, err))
+rc, out, err = inst(mirror_doc(sha="0" * 64))
+check("install_debs: a deb with another sha256 -> exit 2 naming the package, nothing installed", rc == 2 and "no-such-pkg-x: sha256 is" in err, (rc, out, err))
+rc, out, err = inst(mirror_doc(tree="0" * 64))
+check("install_debs: a mirror with another tree hash -> exit 2", rc == 2 and "tree_sha256 is" in err, (rc, out, err))
 
 shutil.rmtree(TD, ignore_errors=True)
 print("%d failed: %s" % (len(FAILED), FAILED) if FAILED else "ALL PASS")
