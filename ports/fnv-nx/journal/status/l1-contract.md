@@ -543,3 +543,8 @@ Trunk claude/fnv-nx-clean 4fb048ec (28 gates, 322 s). All L1 workers were stoppe
 - w15 session_01KmtZKRyNHyAGWeTxKmbdfZ: onedef on w16-int — blocked (w16-int, L1)
 - w10 session_01KmtZKQZb21XFPG5GMjmjUp: tlsmodel reads .fnvnx.tls — blocked (L2 note)
 Answered: L3a w8 (py_modules in stage entry, pinned in env.json; lift/tools = one `tool` root); L6 (error_abi {fail} spec, objstub B, join on op_cover id exactly).
+
+## 08:45Z
+- w22 71d8cafb: done, green 28/28, 286.9 s, envcheck OK on a fresh container. Next is MERGER. `patch` stays out of the verdict env; it is pinned in the toolchain-build profile.
+- w5 1f088b42: toolchain-build profile, 162 packages, all with sha256 (Ubuntu snapshot 20261110T000000Z), mirror tools/toolchain-debs 63d8ca65, profile id 11289d4f…. Accepted, except that the hand-added `dirname id ls cat` is red. It must be replaced by a full shell AST parse that covers $(..) and backticks, where a non-literal command name is red. Doing.
+- L3a item 16: merge order sent (w22 → w16-int with w14's py_modules → w17 pins).
