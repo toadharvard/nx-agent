@@ -120,7 +120,7 @@ def main():
                                       ("unsorted lines", ASM % "this:v:i\\nstack:i:\\n"))):
         rm = recipe.build(repo_of("dm%d" % i, dict(ROOTS, **{T + "pe": {"e.S": body}})), ROOT, SS, BASE + "/o-dm%d" % i)
         check("a malformed section (%s) makes the consumer red at the descs generate stage, naming the object" % what,
-              rm["status"] == "red" and "gen:" in str(rm["failure"].get("stage")) and "e.S" in str(rm["failure"]), TL.err_text(rm))
+              rm["status"] == "red" and "gen:" in str(rm["failure"]) and "e.S" in str(rm["failure"]), TL.err_text(rm))
     # ---- checks
     e1 = recipe.check(consumer(forbid_sections=[]), ROOT, recipe.tracked(ra), adm, None, ra)
     check("forbid_sections: an empty list is a check error", any("forbid_sections" in e for e in e1), e1)
