@@ -9,15 +9,18 @@ DESCS.tsv: one descriptor per line (`#` lines and blank lines ignored). With --o
 over every admitted product root's objects.  Output is a pure function of the SET of descriptors (sorted; no clock, no path).
 
 THE DESCRIPTOR (contract: toolchain/dispatch/fnvnx_dispatch.cc)  `conv:ret:arg,arg,...`
-  conv   this | fast | stack          ret  v | i | q | f | d | a<N> | a<N>hf | a<N>hd | m<N>
+  conv   this | fast | stack          ret  v | i | q | f | d | a<N><X><Y>  (X = R | H, Y = g | m | h<elt>)
   arg    i | q | f | d | s<N>g | s<N>hf | s<N>hd | s<N>r
 A BRIDGE has the call site's AAPCS signature (the C++ types below) and runs the guest function at the exe address the call sequence stored in the
 thread-local fnvnx_call_fp (the descriptor does not say which function; one bridge serves every target of its shape):
   AAPCS side:   i = u32 (an integer of 32 bits or less, or a pointer: ILP32)   q = u64   f = float   d = double
                 s<N>g = struct of N bytes by value (general registers or stack)   s<N>hf / s<N>hd = struct of N/4 floats / N/8 doubles by value
-                s<N>r = u32, the address of the copy the caller made   a<N> / a<N>hf / a<N>hd = the same struct types returned by value
-                m<N> = a struct of N bytes with a user-provided copy constructor, returned by value: GCC's C++ ABI returns it through the hidden pointer (x8),
-                       as it does for every class that is returned in memory, whatever its size (the plugin says m iff aggregate_value_p)
+                s<N>r = u32, the address of the copy the caller made
+                a<N><X><Y> = the struct returned by value: Y is the NATIVE side, g = general registers, h<elt> = a homogeneous aggregate in vector registers,
+                       m = in memory through the hidden pointer (x8; the plugin says m iff aggregate_value_p); X is the x86 side, R = registers (eax / edx:eax;
+                       the plugin says R iff the type is a POD in the MSVC sense and N is 1, 2, 4 or 8), H = the hidden pointer on the x86 stack.
+                       The two sides are independent: R/g,h copy the registers, H/m pass the pointer through, H/g,h store the registers through the
+                       x86 pointer, R/m pass a temporary through x8 and load eax:edx from it.
   x86 side (the MSVC x86 conventions the exe was built with; every value is the memory image of its AAPCS-side value):
     stack words, in this order: [the hidden result pointer, for a result in memory] then the arguments left to right at the lowest address first:
         i 1 word, f 1 word (the bits), q and d 2 words (low first), s<N>g / s<N>h* N bytes rounded up to words (the struct's memory image; the HFA
@@ -25,7 +28,7 @@ thread-local fnvnx_call_fp (the descriptor does not say which function; one brid
     this:  ecx = the first argument (the object; it must be `i`) and it is not on the stack. fast: the first two arguments of class `i` (a 32-bit or smaller
         integer or pointer, left to right; everything else, whatever its size, is on the stack) go in ecx, edx and are not on the stack. stack: all on the stack.
     result: v nothing; i eax; q edx:eax; f, d ST0 (kind 2: fnvnx_guest_invoke_regs pops it); an aggregate of 1, 2, 4 or 8 bytes in eax / edx:eax (the struct is the
-        bytes of eax, edx), any other size through the hidden pointer the bridge passes (address of the local that becomes the AAPCS-side result).
+        bytes of eax, edx) when X = R, through the hidden pointer the bridge passes (address of the local that becomes the AAPCS-side result) when X = H.
     `ret N`, cdecl or stdcall, needs no information: fnvnx_guest_invoke_regs resets the guest esp itself (rt/enter.cc).
   Not defined, so a BUILD ERROR (the descriptor is listed, nothing is generated): any form outside the grammar; `this` whose first argument is not `i`; a
   hidden result pointer under `fast` (which register MSVC gives it is not a fact this tool has: no guess); sizes the classes cannot hold (s<N>g with N > 16, an
@@ -34,7 +37,7 @@ THE TABLE: key = FNV-1a (32 bit) of the descriptor's bytes; all keys must differ
 of rt/dispatch.c: slot = ((k ^ g[(k*K1) >> (32-NBITS)]) * K2) >> (32-TBITS).  Every slot of a non-empty set is a bridge; the hash is exact over the set, and a
 string outside it cannot reach the lookup (see rt/dispatch.c).
 """
-import os, sys
+import os, re, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))      # the hash lives in this tool root: a tool imports only from its own root
 import phf
 
@@ -76,17 +79,21 @@ def parse(desc):
     p = desc.split(':')
     if len(p) != 3 or p[0] not in ('this', 'fast', 'stack'): raise ValueError('not conv:ret:args with conv this, fast or stack')
     conv, r, a = p
-    xmem = r[-1:] == 'x'                  # the x86 callee returns through the hidden pointer whatever the size (a type that is not a POD): the AAPCS side is in registers
-    if xmem: r = r[:-1]
-    if r in ('v', 'i', 'q', 'f', 'd'): ret = (r, 0, 0, 0)
-    elif r[:1] == 'm': ret = ('m', _size(r, 1), 0, 0)
-    elif r[:1] == 'a' and _hsuf(r)[0]:
-        c, rest = _hsuf(r); n = _size(rest, 1); ret = ('h', n, _hfa(n, ELEM[c][0], r), c)
-    elif r[:1] == 'a':
-        n = _size(r, 1)
-        if n > 16: raise ValueError('%r: a register aggregate of more than 16 bytes' % r)
-        ret = ('a', n, 0, 0)
-    else: raise ValueError('bad return class %r' % r)
+    if r in ('v', 'i', 'q', 'f', 'd'): ret = (r, 0, 0, 0); x86reg = True
+    else:
+        m = re.fullmatch(r'a([0-9]+)([RH])(g|m|h[a-z0-9]+)', r)
+        if not m or not m.group(1).isascii(): raise ValueError('bad return class %r' % r)
+        n = int(m.group(1)); x86reg = m.group(2) == 'R'
+        if n == 0: raise ValueError('bad size in %r' % r)
+        if x86reg and n not in (1, 2, 4, 8): raise ValueError('%r: the x86 side returns %d bytes in registers (only 1, 2, 4 or 8 are)' % (r, n))
+        y = m.group(3)
+        if y == 'm': ret = ('m', n, 0, 0)
+        elif y == 'g':
+            if n > 16: raise ValueError('%r: a register aggregate of more than 16 bytes' % r)
+            ret = ('a', n, 0, 0)
+        else:
+            if y not in ELEM: raise ValueError('%r: unknown element code' % r)
+            ret = ('h', n, _hfa(n, ELEM[y][0], r), y)
     args = []
     for t in (a.split(',') if a else []):
         if t in ('i', 'q', 'f', 'd'): args.append((t, 0, 0, 0))
@@ -99,11 +106,12 @@ def parse(desc):
             args.append(('g', n, 0, 0))
         else: raise ValueError('bad argument class %r' % t)
     if conv == 'this' and (not args or args[0][0] != 'i'): raise ValueError('this-call whose first argument is not `i`')
-    if xmem and ret[0] not in ('a', 'h'): raise ValueError('%r: x on a result that is not an aggregate in registers' % desc)
-    reg_ret = ret[0] in ('v', 'i', 'q', 'f', 'd') or (ret[0] in ('a', 'h') and ret[1] in (1, 2, 4, 8) and not xmem)
-    # documented (Agner Fog, Calling conventions, table 7, Microsoft 32 bit): a result too big or of a size that is no power of two (PS) has its hidden pointer on the stack
-    # even under __fastcall; a non-POD result (P) has it "in a register if fastcall", which register the document does not say: that case has no proof yet
-    if not reg_ret and conv == 'fast' and (xmem or ret[0] == 'm'): raise ValueError('a non-POD result under fast: the register of the hidden pointer is not documented')
+    reg_ret = ret[0] in ('v', 'i', 'q', 'f', 'd') or x86reg
+    # documented (Agner Fog, Calling conventions, table 7, Microsoft 32 bit): a result of a size that is no register size (PS) has its hidden pointer on the stack
+    # even under __fastcall; a non-POD result (P) has it "in a register if fastcall", which register the document does not say. A hidden pointer for a
+    # size of 1, 2, 4 or 8 is necessarily a non-POD (the plugin says R for every POD of those sizes), so it has no proof: error; the plugin refuses the other
+    # non-POD sizes under fast itself.
+    if not reg_ret and conv == 'fast' and ret[1] in (1, 2, 4, 8): raise ValueError('a non-POD result under fast: the register of the hidden pointer is not documented')
     return conv, ret, args, reg_ret
 
 
@@ -136,8 +144,8 @@ def emit(desc, name):
         elif c == 'd': body.append('{ u64 b = dbits(%s); args[%d] = (u32)b; args[%d] = (u32)(b >> 32); }' % (a, w, w + 1)); w += 2
         elif c in ('g', 'h'): body.append('put(args + %d, &%s, %d);' % (w, a, n)); w += (n + 3) // 4
         elif c == 'r': body.append('put(args + %d, (const void *)%s, %d);' % (w, a, n)); w += (n + 3) // 4
-    kind = 2 if cls in ('f', 'd') else 1 if (cls == 'q' or (cls in ('a', 'h') and rn == 8)) else 0
-    pre = ['%s res;' % rt] if cls == 'm' or (cls in ('a', 'h') and not reg_ret) else []
+    kind = 2 if cls in ('f', 'd') else 1 if (cls == 'q' or (cls in ('a', 'h', 'm') and reg_ret and rn == 8)) else 0
+    pre = ['%s res;' % rt] if cls == 'm' or (cls in ('a', 'h') and not reg_ret) else []   # m: the native side is in memory (x8), whatever the x86 side
     post = {'v': '', 'i': 'return out.eax;', 'q': 'return (u64)out.eax | ((u64)out.edx << 32);', 'f': 'return (float)out.st0;', 'd': 'return out.st0;'}.get(cls)
     if post is None:
         if reg_ret: pre, post = ['%s res;' % rt], 'u32 rw[2] = { out.eax, out.edx }; cp(&res, rw, %d); return res;' % rn

@@ -106,8 +106,8 @@ def main():
         d1 = got.get('r_%d' % i)
         if d1 is None: check('result %s %s %s' % tuple(r[:3]), False, 'no row'); mism += 1; continue
         rt = d1.split(':')[1]
-        size = int(re.match(r'[am](\d+)', rt).group(1))
-        hidden = rt[0] == 'm' or rt.endswith('x') or size not in (1, 2, 4, 8)   # sizes that are no x86 register size: bridgegen's rule
+        rm = re.fullmatch(r'a([0-9]+)([RH])(g|m|h[a-z0-9]+)', rt)
+        hidden = rm is not None and rm.group(2) == 'H'   # the x86 side of the descriptor: X
         ok = hidden == (r[4] == 'HIDDEN'); mism += not ok
         check('result %s %s %s: cl %s' % (r[0], r[1], r[2], r[4]), ok, 'plugin %s (%s)' % ('hidden' if hidden else 'regs', d1))
     print('POD matrix: %d cases, %d mismatches plugin vs cl' % (len(trows), mism))
@@ -123,12 +123,13 @@ def main():
             d1 = got.get(fn)
             if d1 is None: check('%s %s: a row' % (kind, n), False, str(sorted(got))); continue
             conv, rt, args = d1.split(':')
-            g = args if kind == 'argument' else rt
+            rm = re.fullmatch(r'a([0-9]+)([RH])(g|m|h[a-z0-9]+)', rt) if kind == 'result' else None
+            g = args if kind == 'argument' else (rm.group(3) if rm else rt)
             h = re.search(r'(h(?:f|d|q|h|v8|v16))$', g)
             cls = ('m',) if g[:1] == 'm' else ('h',) if h else ('g',)
             want = dc.ref_arg(asm, fn) if kind == 'argument' else dc.ref_ret(asm, fn)
             ok = cls == want or (cls == ('m',) and want == ('g',) and kind == 'result') or (g.endswith('r') and kind == 'argument' and want == ('g',))
-            if kind == 'result' and g[:1] == 'a': ok = ok and g.endswith('x') == (n in ('ct', 'in', 'vf'))
+            if kind == 'result' and rm: ok = ok and (rm.group(2) == 'R') == (n not in ('ct', 'in', 'vf') and int(rm.group(1)) in (1, 2, 4, 8))
             check('%s %s' % (kind, n), ok, 'row %s %s, the compiler uses %s' % (fn, d1, want))
     print('defdisptest: %d failed' % bad); sys.exit(1 if bad else 0)
 

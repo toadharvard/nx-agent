@@ -133,6 +133,8 @@ def main():
             if d1 is None: check('%s %s: one descriptor' % (kind, n), False, str(ds)); continue
             conv, rt, args = d1.split(':')
             got = args if kind == 'a' else rt
+            rm = re.fullmatch(r'a([0-9]+)([RH])(g|m|h[a-z0-9]+)', rt) if kind == 'r' else None
+            if kind == 'r': got = rm.group(3) if rm else rt
             h = re.search(r'(h(?:f|d|q|h|v8|v16))$', got)
             if got[:1] == 'm': cls = ('m',)
             elif h: cls = ('h',)
@@ -140,7 +142,7 @@ def main():
             ok = cls == want or (cls == ('m',) and want == ('g',) and kind == 'r') or (got.endswith('r') and kind == 'a' and want == ('g',))
             # MSVC: a type that is not a POD is not returned in registers (documents cited in the plugin): x on the result, never on an argument
             nonpod = n in ('ct', 'in', 'vf')
-            if kind == 'r' and got[:1] == 'a': ok = ok and got.endswith('x') == nonpod
+            if kind == 'r' and rm: ok = ok and (rm.group(2) == 'R') == (not nonpod and int(rm.group(1)) in (1, 2, 4, 8))   # X: the x86 side, from the POD rule and the size
             check('%s %s' % ('argument' if kind == 'a' else 'result', n), ok, 'descriptor %s, the compiler uses %s' % (d1, want))
     print('descclasstest: %d failed' % bad); sys.exit(1 if bad else 0)
 

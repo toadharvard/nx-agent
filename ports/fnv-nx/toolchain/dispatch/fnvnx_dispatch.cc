@@ -25,10 +25,17 @@
  *                 (the object is listed among the arguments, first)
  *          fast   __fastcall: the first two integer arguments in ecx, edx
  *          stack  everything on the stack (__cdecl and __stdcall alike: the callee's own `ret N` tells them apart)
- *   ret    v | i (32-bit integer or pointer) | q (64-bit integer) | f | d | a<N> (an N-byte aggregate returned in
- *          general registers) | a<N>h<elt> (a homogeneous aggregate, elt = f d q h v8 v16 as the backend's part mode says, returned in
- *          floating-point registers) | m<N> (returned in memory the caller provides); a trailing x on an `a` result: the AAPCS side
- *          returns it in registers but the x86 callee returns it through the hidden pointer (a type that is not a POD, see msvc_pod)
+ *   ret    v | i (32-bit integer or pointer) | q (64-bit integer) | f | d | an aggregate  a<N><X><Y>
+ *            the x86 callee and the native (AAPCS64) body choose how they pass the result independently, and the descriptor carries both choices:
+ *          X  R  the x86 callee returns it in registers (eax / edx:eax): msvc_pod holds and N is 1, 2, 4 or 8 (Microsoft x86 convention; Agner Fog,
+ *                Calling conventions, table 7)
+ *             H  the x86 callee returns it through the hidden pointer on the stack
+ *          Y  g  the native body returns it in general registers (x0, x1)
+ *             h<elt>  in floating-point registers, a homogeneous aggregate, elt = f d q h v8 v16 as the backend's part mode says
+ *             m  in memory the caller provides (x8): targetm.calls.function_value / aggregate_value_p of the pinned compiler
+ *          The four combinations are the four bridge actions: R/g,h copy the registers; H/m pass the pointer through; H/g,h store the native registers
+ *          through the x86 pointer; R/m pass a temporary through x8 and load eax:edx from it.
+ *   BNF    ret := "v" | "i" | "q" | "f" | "d" | "a" N X Y ;  X := "R" | "H" ;  Y := "g" | "m" | "h" elt ;  N := digit+
  *   arg    i | q | f | d | s<N>g (an N-byte aggregate in general registers or on the stack) | s<N>h<elt> (a
  *          homogeneous aggregate) | s<N>r (passed as a reference to a copy)
  * (A homogeneous aggregate names its element type: {float, float} and {double} are both 8 bytes and travel in
@@ -183,6 +190,8 @@ static bool reg_class(rtx r, std::string &c, location_t loc)
 
 static std::set<std::string> descs;                  /* every descriptor this unit uses: .fnvnx.disp */
 
+static const char *conv_of(tree ft);
+
 static bool shape(tree t, bool ret, tree fntype, std::string &out, location_t loc)
 {
   if (VOID_TYPE_P(t)) { out += "v"; return ret; }
@@ -202,10 +211,14 @@ static bool shape(tree t, bool ret, tree fntype, std::string &out, location_t lo
   machine_mode mode = TYPE_MODE(t);
   std::string he;
   if (ret) {
-    if (aggregate_value_p(t, fntype)) { out += "m" + n; return true; }
-    if (!reg_class(targetm.calls.function_value(t, fntype, false), he, loc)) return false;
-    /* "x": the x86 callee returns it through the hidden pointer although the AAPCS side returns it in registers (a type that is not a POD) */
-    out += "a" + n + he + ((TREE_CODE(t) == RECORD_TYPE || TREE_CODE(t) == UNION_TYPE) && !msvc_pod(t) ? "x" : ""); return true;
+    bool nat_mem = aggregate_value_p(t, fntype);
+    if (!nat_mem && !reg_class(targetm.calls.function_value(t, fntype, false), he, loc)) return false;
+    unsigned long sz = (unsigned long)tree_to_uhwi(TYPE_SIZE_UNIT(t));
+    bool pod = !(TREE_CODE(t) == RECORD_TYPE || TREE_CODE(t) == UNION_TYPE) || msvc_pod(t);
+    bool x86_reg = pod && (sz == 1 || sz == 2 || sz == 4 || sz == 8);
+    /* a hidden pointer for a non-POD under __fastcall is in a register that no document names (Agner Fog, table 7): no descriptor, no guess */
+    if (!x86_reg && !pod && !strcmp(conv_of(fntype), "fast")) { error_at(loc, "DISPATCH1: type %qT is a non-POD result under __fastcall: the register of the hidden pointer is not documented", t); return false; }
+    out += "a" + n + (x86_reg ? "R" : "H") + (nat_mem ? "m" : he.empty() ? "g" : he); return true;
   }
   CUMULATIVE_ARGS cum;
   INIT_CUMULATIVE_ARGS(cum, fntype, NULL_RTX, NULL_TREE, 0);
