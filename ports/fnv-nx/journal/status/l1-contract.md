@@ -40,6 +40,7 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` 29b41938 (07862d5a
 | 3q | one file per gate (verify/gates.d/<name>.json, gates.json deleted, test_gates expected set from dir) + no vacuous green (gate declares `covers`; universe 0 with a covered admitted root = red) | w10 | claude/fnv-l1-contract-w10 | queued after DECL_FACTS |
 | 3j | gate_pure cross-root imports (admit.json `imports`), z3 on EXTERNAL list pinned (ASM-009) (L3b) | w14 | claude/fnv-l1-contract-w14 | queued |
 | 3t | tests needing game data declare the pinned gamedata external; absent = blocked: env (never green); test_boot_job dummy exe deleted | w4 (w8) | claude/fnv-l1-contract-w8 25977efc | doing |
+| 3o | host-root product gates: objstub plugin built per root compiler (env pins gcc-13-plugin-dev); linkstrict host boundary = dynamic exports of pinned libc6/libgcc-s1/libstdc++6 .so + link.roots (L6 translator: 69 of 688 uncertified) | w17 | claude/fnv-l1-contract-w17 | queued before guest flags |
 | 3x | fixture roots: per-unit gate + expected finding, never linked or in a universe (L3b forms/fpexact tests) | w16 | claude/fnv-l1-contract-w16 | queued |
 | 3w | recipe: failed_units 054d65c, -Werror=attributes 5171fae, envcheck before any stage 892c248 (L3a, L2) | w14 | claude/fnv-l1-contract-w14 b7df218 | done; L1 line pending |
 | 2b | budget in VERDICT.md, budget gate, delete second build paths | lead | - | blocked by 2 (numbers) |
@@ -51,7 +52,7 @@ Rule (L1+L2): a header-only dir is not a root; its headers are certified as PP i
 
 Assumptions (w10 a2bd503, code 2f1bbe2 on e35b870): gate GREEN, mentions 96/96; 52 records = 9 OWNER + 43 REMOVE (removed_by: gate 3, planned 18, no gate yet 22, OPEN 0); queued at MERGER. Next w10: objstub DECL_FACTS/DECL_SOURCE from declared_machine.tsv header (no-galaxy).
 
-MERGER serial queue: w16 885852ac (green 4043444, 171 s) → L2 w4 5380477 (fnvnx_order, no gate files) → w14 2d8176a (EMLINK) → w17 cdc0041 → L2 w5 77836bf → w10 a2bd503 → L6 w4 (d3d9total) → w5 → w8 25977efc. Gate-file conflicts resolved by union until gates.d lands (orchestrator).
+MERGER serial queue: w16 885852ac (green 4043444, 171 s) → L2 w4 5380477 (fnvnx_order, no gate files) → w14 2d8176a (EMLINK) → w18 (contract universe, dllkind; head with green line) → w17 cdc0041 → L2 w5 77836bf → w10 a2bd503 → L6 w4 (d3d9total) → w5 → w8 25977efc. Gate-file conflicts resolved by union until gates.d lands (orchestrator).
 
 ## Missing REQUIRED_PRODUCT gates (blocker of goal step 1)
 
