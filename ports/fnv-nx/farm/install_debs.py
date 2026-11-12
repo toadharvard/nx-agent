@@ -9,6 +9,7 @@ deb's hash, so this is counted as "present", not as "verified". Output: `install
 already present at the pinned version`. Nothing is fetched from a package index: the mirror is the only source."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -24,11 +25,17 @@ def installed(pkg):
     return v[0] if p.returncode == 0 and len(v) == 2 and v[1].endswith("installed") else None
 
 def main(a):
+    work = tempfile.mkdtemp(prefix="debs-")
+    try:
+        return run(a, work)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)   # on every outcome
+
+def run(a, work):
     env = a[a.index("--env") + 1] if "--env" in a else os.path.join(os.path.dirname(HERE), "verify", "env.json")
     doc = json.load(open(env))
     m, pk = doc["debs"]["mirror"], doc["debs"]["packages"]
     url = os.environ.get("ARTIFACTS_URL", "https://github.com/toadharvard/fnv-nx-build")
-    work = tempfile.mkdtemp(prefix="debs-")
     genv = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     bare = os.path.join(work, "bare")
     os.makedirs(bare)
@@ -55,8 +62,6 @@ def main(a):
     if todo and "--dry" not in a:
         subprocess.run(["dpkg", "-i"] + todo, check=True)
     print("install_debs: %d packages, %d installed from the mirror, %d already present at the pinned version" % (len(pk), len(todo), len(pk) - len(todo)))
-    import shutil
-    shutil.rmtree(work, ignore_errors=True)
     return 0
 
 if __name__ == "__main__":

@@ -135,16 +135,20 @@ MC, MT = gi("rev-parse", "HEAD"), cas.tree_hash(os.path.join(MR, "debs"))
 def mirror_doc(tree=MT, sha=hashlib.sha256(b"not a real deb\n").hexdigest()):
     return write({"packages": {"no-such-pkg-x": "1"}, "debs": {"mirror": {"repo": "r", "commit": MC, "tree_sha256": tree},
                   "packages": {"no-such-pkg-x": {"version": "1", "file": "x_1_amd64.deb", "sha256": sha, "url": "u"}}}}, "m.json")
+IT = os.path.join(TD, "inst-tmp")
+os.makedirs(IT)
 def inst(path):
     p = subprocess.run([sys.executable, "-I", os.path.join(os.path.dirname(VERIFY), "farm", "install_debs.py"), "--env", path, "--dry"],
-                       capture_output=True, text=True, env=dict(os.environ, ARTIFACTS_URL="file://" + MR))
+                       capture_output=True, text=True, env=dict(os.environ, ARTIFACTS_URL="file://" + MR, TMPDIR=IT))
     return p.returncode, p.stdout, p.stderr
 rc, out, err = inst(mirror_doc())
 check("install_debs: right tree and sha256 -> 1 package from the mirror (dry)", rc == 0 and "1 packages, 1 installed from the mirror, 0 already present" in out, (rc, out, err))
 rc, out, err = inst(mirror_doc(sha="0" * 64))
 check("install_debs: a deb with another sha256 -> exit 2 naming the package, nothing installed", rc == 2 and "no-such-pkg-x: sha256 is" in err, (rc, out, err))
 rc, out, err = inst(mirror_doc(tree="0" * 64))
+left = os.listdir(IT)
 check("install_debs: a mirror with another tree hash -> exit 2", rc == 2 and "tree_sha256 is" in err, (rc, out, err))
+check("install_debs: it leaves nothing in its TMPDIR, on success and on every failure", left == [], left)
 
 shutil.rmtree(TD, ignore_errors=True)
 print("%d failed: %s" % (len(FAILED), FAILED) if FAILED else "ALL PASS")
