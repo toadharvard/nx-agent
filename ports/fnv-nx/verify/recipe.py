@@ -473,6 +473,9 @@ def check(rec, root, files, roots, pin=None, repo="."):
             continue
         if not rel_ok(d) or not any(under(d, r) for r in roots):
             err.append("include %r is not a path inside an admitted root or an external's at" % (d,))
+        elif max((r for r in roots if under(d, r)), key=len) not in (root,) and roots[max((r for r in roots if under(d, r)), key=len)]["class"] != "headers":
+            err.append("include %s is inside the tree of root %s, which is not a headers tree (a root includes its own tree, a headers tree, or an external's path)" % (
+                d, max((r for r in roots if under(d, r)), key=len)))
         elif not (any(under(f, d) for f in files) or any(under(root + "/" + o, d) for o in gen)):
             err.append("include %r holds no tracked or generated file" % d)
     seen = set()

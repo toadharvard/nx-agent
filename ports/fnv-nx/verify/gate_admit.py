@@ -28,6 +28,11 @@ Classes:
   test     tests linked against the real files of the product roots: REQUIRED_TEST gates (build, determinism, linkstrict, objstub, doubles,
            oracle, stub, assumptions, legal, pure), a "recipe" like a product root and a "target"; never REQUIRED_PRODUCT. The gates of
            REQUIRED_TEST that cover roots (build, determinism, linkstrict, objstub: gates.d `covers`) include class test.
+  headers  a tree of headers that product roots include (no recipe, no unit, no link, no outputs): "headers" required (gate_headers.py:
+           every header is certified by the deps.d of admitted units, one declaration per symbol). A headers tree may nest in another
+           root and owns its files (the innermost root decides); no other roots nest.
+  fixture  a root that is built only to be judged red (RECIPE.md "Fixtures"): a "recipe" like a product root and "expect": a non-empty list of
+           {"gate", "code"}; it is not a product root, and gates run on it alone (gate_fixtures.py, env GATE_ONLY_ROOT).
   ref      reference files that tests/oracle.json records point at (spec, contract, model): no gate named, no recipe, no units, no link,
            no outputs. Every file of a ref root is the `path` of a reference of some tests/oracle.json, and none is a build.json or a
            test (is_test_file): a product or test root is never a ref root. The gates that cover class ref (gates.d `covers`) are the
@@ -46,7 +51,8 @@ import gatesdir  # noqa: E402
 
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
-CLASSES = ("doc", "tool", "product", "ref", "test")
+CLASSES = ("doc", "tool", "product", "ref", "test", "headers", "fixture")
+UNIT_EXT = (".c", ".cc", ".cpp", ".cxx", ".S", ".s")   # recipe.is_unit: a headers tree holds none
 # A product root names a gate for every run-time failure class of VERDICT.md. Wired on the trunk: objstub .. oracle,
 # the contract and link gates. Owned by other leads: imports, forms, d3d9total, r7, namegate, argordergate, abi.
 # Classes A-G of the owner's rule: datamodel, order, fpexact, eh, exepin, addr32, machine.
@@ -59,7 +65,7 @@ REQUIRED_PRODUCT = ("objstub", "linkstrict", "determinism", "oracle",
 # tests"): it is judged by its own set, never by REQUIRED_PRODUCT. Its gates: the build gates, the doubles gate (symbols the test defines
 # intersect symbols of the product roots it links = empty), an oracle record for every test, stub, assumptions, Legal and pure.
 REQUIRED_TEST = ("build", "determinism", "linkstrict", "objstub", "doubles", "oracle", "stub", "assumptions", "legal", "pure")
-REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT, "ref": (), "test": REQUIRED_TEST}
+REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT, "ref": (), "test": REQUIRED_TEST, "headers": ("headers",), "fixture": ()}
 
 
 def trees(r):
@@ -135,7 +141,16 @@ def judge(files, admit, gate_names, exists, ref_paths=frozenset()):
                 why.append("a ref root has no recipe and names no gate (it has no units, no link and no outputs)")
             if cls == "test" and r.get("target") not in ("guest", "host"):
                 why.append('a test root declares "target": "guest" or "host"')
-            if cls in ("product", "test"):
+            if cls == "headers":
+                if "recipe" in r or "target" in r:
+                    why.append("a headers root has no recipe (no units, no link, no outputs)")
+                why += ["%s is a unit file in a headers tree" % f for f in files if any(f.startswith(t + "/") for t in trees(r)) and f.endswith(UNIT_EXT)]
+            if cls == "fixture":
+                ex = r.get("expect")
+                if not (isinstance(ex, list) and ex and all(isinstance(e, dict) and set(e) == {"gate", "code"} and e["gate"] in gate_names
+                                                          and isinstance(e["code"], str) and e["code"] for e in ex)):
+                    why.append('a fixture root declares "expect": a non-empty list of {"gate": a gate of gates.d, "code": a finding code}')
+            if cls in ("product", "test", "fixture"):
                 rec = r.get("recipe", "")
                 if not any(rec.startswith(t + "/") for t in trees(r)) or not exists(rec):
                     why.append("recipe %r is not an existing file inside the root" % rec)
@@ -143,14 +158,21 @@ def judge(files, admit, gate_names, exists, ref_paths=frozenset()):
         roots.append((trees(r) if not why else [path], why))
     errors += imports_errors(admit.get("roots", []))
     paths = [(t, i) for i, (ts, _) in enumerate(roots) for t in ts]
+    cls_of_tree = {t: admit["roots"][i].get("class") for t, i in paths}
     for n, (a, i) in enumerate(paths):
         for b, j in paths[n + 1:]:
             if a == b or a.startswith(b + "/") or b.startswith(a + "/"):
-                errors.append("trees %s and %s overlap" % (a, b))
+                inner = a if a.startswith(b + "/") else b if b.startswith(a + "/") else None
+                if not (inner is not None and cls_of_tree[inner] == "headers"):   # a headers tree may nest in another root and owns its files
+                    errors.append("trees %s and %s overlap" % (a, b))
     cls_of = {r.get("path", ""): r.get("class") for r in admit.get("roots", [])}
     bad = {}
     for f in files:
-        hit = [(ts[0], why) for ts, why in roots if any(f == p or f.startswith(p + "/") for p in ts)]
+        hit = [(p, ts[0], why) for ts, why in roots for p in ts if f == p or f.startswith(p + "/")]
+        if len(hit) > 1:   # the innermost root decides (a headers tree nested in another root)
+            top = max(len(p) for p, _, _ in hit)
+            hit = [h for h in hit if len(h[0]) == top]
+        hit = [(a, w) for _, a, w in hit]
         if len(hit) != 1:
             bad[f] = "in %d roots" % len(hit)
         elif hit[0][1]:

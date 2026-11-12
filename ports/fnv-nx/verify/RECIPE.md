@@ -23,7 +23,7 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 ## Keys (any other key is an error; all problems are listed at once)
 - `compiler`: driver names under `/usr/bin` that env.json provides, or `{"external": NAME, "cc": PATH, "cxx": PATH}` (paths inside the external).
 - `flags`: per language. Refused: `-I*` (use `include`), `-o -c -E -S -x -M*`, and the refusal set R below.
-- `include`: repo-relative directory inside an admitted root (tracked files, or generated outputs of this root), or an absolute path inside an
+- `include`: repo-relative directory inside the root itself (tracked files, or generated outputs of this root), inside an admitted `headers` tree (Headers trees; another root's tree is refused), or an absolute path inside an
   external's `at`. Included files are inputs by content; a file the unit reads that is not in them does not exist for it.
 - `units`: must be `"all"`. A `.S` unit is preprocessed as its own stage like a C unit (its key covers exactly the headers it includes);
   a `.s` unit sees nothing but its own file (`.include` fails: use `.S` and `#include`). RULE: every tracked `*.c *.cc *.cpp *.cxx *.s *.S` under the root, and every generated output with such a name, is
@@ -141,6 +141,20 @@ variant is `root`). It is its own set of content-keyed stages: the variant name 
 a root without variants keeps its keys), its objects are stored at `GATE_CACHE/objects/<tree>/<root>@<NAME>/objects.json` and its `objects.json` has
 `root: "root@NAME"`. `link.roots` entries may be `root@NAME` (the variant must exist). The gates that quantify over product roots (`gate_build.product_roots`)
 quantify over the pairs: build, determinism, objstub, linkstrict, argorder, contract's per-root gates.
+
+## Headers trees (admit class `headers`)
+
+`verify/admit.json` entry `{"path": P, "class": "headers", "gates": ["headers"]}`: a tracked tree of header files shared by roots (for example the
+declarations of the platform's host API). It has no `recipe`/`target`, no unit file (`.c .cc .cpp .cxx .S .s`: admit refuses it), no link and no outputs.
+- A root uses it only by listing a directory of it in its recipe `include` (`-I` of its path): there are no ambient `-I`
+  paths, and a root that does not list the tree does not see it (a quoted `../` into it is a missing file). `check()` refuses an `include` that is
+  in no admitted root and no external, or inside a root that is not a headers tree.
+- The PP key stays the content of every header the stage actually reads (nothing about the tree as a whole).
+- Certificates: admit counts every file of the tree as covered by the entry. The gate `headers` (gate_headers.py) certifies a header only through
+  the admitted units whose PP stage read it (the stage's deps), and a header no unit reads is not certified (the detail gives the count). The code in a
+  header is built into the objects of the units that include it, so objstub and the object gates judge it through those units.
+
+## Fixtures (`"fixtures"`)
 
 ## Outputs and uses
 `outputs: {NAME: a path in generated[].outputs of this root}` declares what other roots may take. `uses: [{"root": R, "output": NAME}]` (R any admitted
