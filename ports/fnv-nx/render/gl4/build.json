@@ -17,7 +17,6 @@
   "asm": []
  },
  "include": [
-  "ports/fnv-nx/render/gl4",
   "ports/fnv-nx/render/backend",
   "ports/fnv-nx/render/shaders/translator/include"
  ],

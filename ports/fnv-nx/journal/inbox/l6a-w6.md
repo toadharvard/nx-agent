@@ -32,3 +32,10 @@ Key names beyond kind/version_script are my reading of the lead's text; w15's sc
 - Undefined-symbols subset check: after the build, not done.
 
 link.libs = ["libEGL.so.1"] only (lead: every GL entry point loads through eglGetProcAddress; L4's pinned run-time set has no libGL). L1 ldcheck proves it; a direct gl* call would be reported by unit and symbol, not fixed with libGL.
+
+## Compile result with L1 w16 b57061c8 (scratch merge, link null; head of the real branch is not changed by w16)
+- recipe check: valid after dropping the in-root include (w16 rule: "include inside the root: use a quoted relative include"; the sources already use quoted includes). Same drop applied on this branch.
+- Two fresh-store builds: green both, 17/17 units compiled, 0 red, stages 34 run / 0 hit. Object sha256 of all 17 units equal between the two builds: deterministic.
+- Undefined set of the root: fnvnx_shader_hash, fnvnx_shader_result_free, fnvnx_shader_translate_glsl; fnvnx_shader_translate is absent. egl: eglBindAPI eglCreateContext eglDestroyContext eglGetError eglGetProcAddress eglInitialize eglMakeCurrent eglTerminate; no direct gl* (non-gl4) symbol. So libGL is not needed.
+- Not yet done: link (waits for w15), "defined by the translator root" (translator root not built here), L1 verdict.
+- Fix: my earlier merge of w1b left conflict markers in CLAUDE.md (I only resolved admit.json). Removed in e7f28e6. Those markers were only on my branch.
