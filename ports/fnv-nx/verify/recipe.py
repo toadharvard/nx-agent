@@ -710,7 +710,7 @@ class Job:
             try:
                 return u, builds[kinds[u]].unit(u)
             except (sandbox.SbxError, unitstage.UnitError) as e:
-                return u, {"status": "cc-failed", "failure": {"stage": "cc:" + u, "exit": None, "stderr": [str(e)[-300:]]}}
+                return u, {"status": "cc-failed", "failure": {"stage": getattr(e, "stage", "cc:" + u), "exit": None, "stderr": [str(e)[-300:]]}}
         res, failed = {}, {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.jobs) as ex:
             for u, e in ex.map(one, units):   # every unit is judged, PP and CC alike: a failed unit never stops another
@@ -829,6 +829,9 @@ def build(repo, root, store, out, jobs=4, ext=None):
     except BuildRed as r:
         fl = r.args[0].get("failed_units", [])
         res.update(status="red", failure={k: v for k, v in r.args[0].items() if k in ("stage", "exit", "stderr", "done")}, failed_units=fl)
+    except (sandbox.SbxError, OSError, cas.CasError, runtime.RtError, unitstage.UnitError) as e:
+        # a store or sandbox failure (EMLINK, ENOSPC, EXDEV ...) is a red build naming its stage: objects.json is always written
+        res.update(status="red", failed_units=[], failure={"stage": getattr(e, "stage", "store"), "exit": None, "stderr": [str(e)[-300:]]})
     finally:
         shutil.rmtree(ws, ignore_errors=True)
     res.update(stage_keys=sorted(j.keys), stages={"run": j.run, "hit": j.hit}, units=units, pp_keys=dict(sorted(j.ppkeys.items())))
