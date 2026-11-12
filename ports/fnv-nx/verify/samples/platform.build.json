@@ -8,7 +8,8 @@
  "flags": {
   "c": [
    "-O2",
-   "-mabi=ilp32"
+   "-mabi=ilp32",
+   "-Werror=attributes"
   ],
   "cxx": [
    "-O2",
@@ -27,7 +28,8 @@
    "-DFNVNX_SDD=1",
    "-fno-devirtualize",
    "-fno-reorder-blocks-and-partition",
-   "-std=gnu++20"
+   "-std=gnu++20",
+   "-Werror=attributes"
   ],
   "asm": [
    "-mabi=ilp32"

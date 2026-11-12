@@ -247,8 +247,8 @@
     "ports/fnv-nx/verify/gate_argorder.py"
    ],
    "result": "argordergate.json"
-   },
-   {
+  },
+  {
    "name": "imports",
    "argv": [
     "python3",
@@ -265,6 +265,24 @@
     "ports/fnv-nx/verify/gate_machine.py"
    ],
    "result": "machine.json"
+  },
+  {
+   "name": "hostapi",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_hostapi.py"
+   ],
+   "result": "hostapi.json"
+  },
+  {
+   "name": "datamodel",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_datamodel.py"
+   ],
+   "result": "datamodel.json"
   }
  ]
 }

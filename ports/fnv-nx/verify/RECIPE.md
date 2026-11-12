@@ -182,7 +182,7 @@ it is passed as `-I<that path>` (the external is a declared input of every stage
 `pp_keys` {unit: stage key of its preprocessor stage; its result `unit.ii` is in the store GATE_CACHE/store, read by objstub to derive the
 terminator set}, `units`, `defined` [{symbol, bind GLOBAL|WEAK|UNIQUE, type, object}] and
 `undefined` [symbol] from the ELF `.symtab` of every object, `stage_keys`, `stages` {run, hit}, `status`; red adds `failure` {stage, exit, stderr
-(last 20 lines)} and `failed_units`. Later gates read it at `GATE_CACHE/objects/<tree>/<root with / as __>/objects.json` (every gate has its own `GATE_OUT`).
+(last 20 lines), `done` (units that built)} (the first failed unit in unit order) and `failed_units` [{unit, stage, exit, stderr (last 20 lines)}] (EVERY unit whose PP or CC stage failed, in unit order; every unit is judged, so one failure never hides another; the link stage and the constants copy do not run after a failed unit; generators run before the units, their outputs being unit inputs). Later gates read it at `GATE_CACHE/objects/<tree>/<root with / as __>/objects.json` (every gate has its own `GATE_OUT`).
 
 ## What the lead does
 1. Put the recipe in the root, name it in `admit.json`. 2. `python3 -I verify/recipe.py check --root R` (validation). 3.
