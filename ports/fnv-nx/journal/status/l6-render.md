@@ -102,3 +102,11 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - L6A w6: gl4_d3dshader.c:51 becomes fnvnx_sha256 + memcmp.
   - Each side merges the other's.
   - Blockers: lib/sha256 (L4 intake of w5 phase 1) and the L1 w15 variants/link.roots. onedef (L1 w15) catches renamed copies by exact equality of normalized bytes.
+- 03:24Z w5 lib/sha256 phase 1 (cc188cf9) reviewed by the lead. The move is right: the body is unchanged and the loader Makefile takes the file by path. Recipe: 1 object, cold 2 stages run, warm 2/2 hit. 133 NIST vectors pass (Short 65, Long 64, FIPS examples 4), 0 mismatches.
+  - Before L4 intake, w5 must:
+    - take render/d3d9's guest ABI flags exactly (missing: -ftls-model, -frounding-math, -fshort-wchar);
+    - run the CAVP Monte vectors;
+    - commit the NIST driver to lib/sha256/tests.
+  - The host variant needs L1 w15.
+  - Asked L1 for one shared guest ABI flag set, plus a gate that all objects of an image have the same ABI flags (DW_AT_producer).
+  - onedef (L1, revised): copies are caught by source provenance; body equality was dropped as a heuristic.
