@@ -41,11 +41,18 @@ def _store():
     return d
 
 
-def build(sources, plugins=None, lifted=False, flags=(), csources=None, cflags=()):
+def _unitfile(n):
+    """a source key with an extension .S or .s is an assembler unit (kept as named); any other key is a C++ unit `key.cc`"""
+    return n if n.endswith(('.S', '.s')) else n + '.cc'
+
+
+def build(sources, plugins=None, lifted=False, flags=(), link_script=None, asm_flags=()):
     """Build C++ SOURCES ({unit file name: text}) as a toy guest root of a temp git repo -> the recipe's result dict (status green or red, with
     'failure' holding the stage, exit and the compiler's stderr tail).  PLUGINS: None = all of recipe.PLUGIN_SOURCES, else the names to load (any subset
     needs LIFTED: a native root must load them all, RECIPE.md gate rule).  LIFTED: the toy root is a lifted-origin root (RECIPE.md): its C++ units are
     outputs of a `generated` step (gen/lift.py writes them) whose pack is an external served from a local git repo through ARTIFACTS_URL; the guest
+    ASM_FLAGS: flags of the recipe's `asm` list (.S/.s units: key `name.S`).
+    LINK_SCRIPT: text of the root's link.ld (the recipe's `link` stage links the objects into an ELF32 image, entry symbol `entry`).
     FLAGS: extra C++ flags of the recipe (subject to the recipe's flag policy).  The guest compiler external is taken from the store's external cache (fetched by pin on the first native build)."""
     base = tempfile.mkdtemp(prefix='realobj-')
     pin = json.load(open(os.path.join(REAL, T + 'verify/guest_compiler.json')))
@@ -56,11 +63,18 @@ def build(sources, plugins=None, lifted=False, flags=(), csources=None, cflags=(
     plugs = [dict({'name': n, 'source': recipe.PLUGIN_SOURCES[n], 'args': dict(recipe.PLUGIN_ARGS[n])},
                   **({'inputs': recipe.PLUGIN_INPUTS[n]} if n in recipe.PLUGIN_INPUTS else {})) for n in recipe.PLUGIN_SOURCES if n in names]
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': pin['cc'], 'cxx': pin['cxx']}, 'external': [ext],
-           'flags': {'c': ['-O2', '-mabi=ilp32', '-fms-extensions', '-fshort-wchar', '-fsigned-char', '-fno-strict-aliasing', '-fwrapv', '-ffp-contract=off'] + list(cflags) + [recipe.WERROR_ATTR], 'cxx': ['-O2'] + list(recipe.SEMANTICS_FLAGS) + list(flags) + [recipe.WERROR_ATTR], 'asm': []}, 'include': [], 'units': 'all',
+           'flags': {'c': [recipe.WERROR_ATTR], 'cxx': ['-O2', recipe.WERROR_ATTR] + list(recipe.SEMANTICS_FLAGS) + list(flags), 'asm': list(asm_flags)}, 'include': [], 'units': 'all',
            'plugin_cxx': 'x86_64-linux-gnu-g++-13', 'plugins': plugs}
-    if not plugs:
+    asm_only = all(n.endswith(('.S', '.s')) for n in sources)
+    if asm_only:
+        plugs = []
         rec.pop('plugin_cxx')
         rec.pop('plugins')
+    elif not plugs:
+        rec.pop('plugin_cxx')
+        rec.pop('plugins')
+    if link_script is not None:
+        rec['link'] = {'script': 'link.ld', 'output': 'x.elf', 'flags': ['-m', 'aarch64linux32', '-pie', '-e', 'entry']}
     repo = os.path.join(base, 'repo')
     os.makedirs(repo)
     _git(repo, 'init', '-q')
@@ -84,8 +98,9 @@ def build(sources, plugins=None, lifted=False, flags=(), csources=None, cflags=(
         outs = []
         lift = 'import os\nos.makedirs("/out/gen")\n'
         for n, text in sources.items():
-            outs.append('gen/%s.cc' % n)
-            lift += 'open("/out/gen/%s.cc", "w").write(%r)\n' % (n, text)
+            fn = _unitfile(n)
+            outs.append('gen/' + fn)
+            lift += 'open("/out/gen/%s", "w").write(%r)\n' % (fn, text)
         rec['generated'] = [{'tool': T + 'gen/lift.py', 'args': [], 'inputs': [], 'outputs': outs}]
         rec['external'] = [ext, {'name': 'pack', 'repo': 'fnv-nx-build', 'ref': 't', 'commit': commit, 'tree_sha256': tree, 'at': '/ext/pack'}]
         _w(repo, T + 'gen/lift.py', lift)
@@ -93,13 +108,14 @@ def build(sources, plugins=None, lifted=False, flags=(), csources=None, cflags=(
         os.environ['ARTIFACTS_URL'] = pack
     else:
         for n, text in sources.items():
-            _w(repo, ROOT + '/%s.cc' % n, text)
-        root['cxx_origin'] = 'native'
-    for n, text in (csources or {}).items():   # C units: the CC stage of cc1 loads all plugins too
-        _w(repo, ROOT + '/%s.c' % n, text)
+            _w(repo, ROOT + '/' + _unitfile(n), text)
+        if not asm_only:
+            root['cxx_origin'] = 'native'
+    if link_script is not None:
+        _w(repo, ROOT + '/link.ld', link_script)
     _w(repo, ROOT + '/build.json', json.dumps(rec, indent=1))
     _w(repo, T + 'verify/guest_compiler.json', json.dumps(pin))
-    _w(repo, T + 'verify/env.json', open(os.path.join(REAL, T + 'verify/env.json')).read())   # the declared machine: recipe.build checks it before any stage
+    shutil.copyfile(os.path.join(REAL, T + 'verify/env.json'), os.path.join(repo, T + 'verify/env.json'))   # the declared machine (recipe.env_blocked)
     _w(repo, T + 'verify/admit.json', json.dumps({'format': 'fnvnx-admit/1', 'roots': [
         root, {'path': T + 'toolchain', 'class': 'tool', 'gates': []}, {'path': T + 'verify', 'class': 'tool', 'gates': []},
         {'path': T + 'gen', 'class': 'tool', 'gates': []}]}))

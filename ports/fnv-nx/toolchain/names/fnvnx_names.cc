@@ -791,6 +791,44 @@ static void ipa_start(void *, void *)
   }
 }
 
+/* ---- .fnvnx.tls: the TLS model of every thread-local variable the unit emits.  A tls_model declaration (the attribute, -ftls-model, the
+ * default for a defined or external variable) is recorded in neither ELF nor DWARF: only the relocation family shows it.  Rule (class: every
+ * thread-local VAR_DECL that varpool holds and the object has a symbol for): one line `<asm name> <model>` per symbol, model = DECL_TLS_MODEL at
+ * the end of the unit (the model the unit's relocations were generated for): global-dynamic, local-dynamic, initial-exec or local-exec.  A
+ * symbol is in the object when the unit defines it and the assembler wrote it, or when an emitted reference names it (the test the names
+ * rows use).  Non-alloc ASCII section, rows sorted and unique, final LF; no section for a unit without a TLS symbol. */
+static const char *tls_model_name(enum tls_model m)
+{
+  switch (m) {
+  case TLS_MODEL_GLOBAL_DYNAMIC: return "global-dynamic";
+  case TLS_MODEL_LOCAL_DYNAMIC: return "local-dynamic";
+  case TLS_MODEL_INITIAL_EXEC: return "initial-exec";
+  case TLS_MODEL_LOCAL_EXEC: return "local-exec";
+  default: return nullptr;   /* emulated TLS and the real-time model do not exist on the AArch64 target */
+  }
+}
+
+static void emit_tls()
+{
+  std::set<std::string> lines;
+  varpool_node *v;
+  FOR_EACH_VARIABLE(v) {
+    tree d = v->decl;
+    if (!VAR_P(d) || !DECL_THREAD_LOCAL_P(d)) continue;
+    bool def = v->definition && !DECL_EXTERNAL(d) && TREE_ASM_WRITTEN(d);
+    bool ref = TREE_SYMBOL_REFERENCED(DECL_ASSEMBLER_NAME(d));
+    if (!def && !ref) continue;
+    const char *m = tls_model_name(DECL_TLS_MODEL(d));
+    if (!m) { error_at(DECL_SOURCE_LOCATION(d), "%<fnvnx_names%>: a thread-local variable with a TLS model the target does not have"); continue; }
+    const char *nm = targetm.strip_name_encoding(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d)));
+    lines.insert(std::string(nm) + " " + m);
+  }
+  if (lines.empty()) return;
+  fprintf(asm_out_file, "\t.pushsection\t.fnvnx.tls,\"\",%%progbits\n");
+  for (auto &l : lines) fprintf(asm_out_file, "\t.ascii\t\"%s\\n\"\n", l.c_str());
+  fprintf(asm_out_file, "\t.popsection\n");
+}
+
 static void finish_unit(void *, void *)
 {
   symtab_node *n;
@@ -824,6 +862,7 @@ static void finish_unit(void *, void *)
       emitted.insert(rows.back().sym);
     }
   }
+  emit_tls();
   if (rows.empty() && vtrows.empty()) return;
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.sympair,\"\",%%progbits\n");
   for (auto &r : rows)
