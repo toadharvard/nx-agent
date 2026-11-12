@@ -37,6 +37,7 @@ missing gate, or a product root without its gates makes every merge red. The tab
 holds no exception for a file, a function or a finding.
 Assumption: `git ls-files` lists the tree under test (the verdict runs gates in a clean worktree of the commit). (ASM-041)"""
 import json
+import re
 import os
 import subprocess
 import sys
@@ -57,7 +58,7 @@ REQUIRED_PRODUCT = ("objstub", "linkstrict", "determinism", "oracle",
                     "datamodel", "order", "fpexact", "eh", "exepin", "addr32", "machine", "hostapi")
 # A test root (class test) is a root that links the tests of the product against the product roots' real files (CLAUDE.md "no doubles in
 # tests"): it is judged by its own set, never by REQUIRED_PRODUCT. Its gates: the build gates, the doubles gate (symbols the test defines
-# intersect symbols of the product roots it links = empty), an oracle record for every test, stub, assumptions, Legal and pure.
+# intersect symbols of the product roots it links = empty), an oracle record for every test, stub, the registry gate, Legal and pure.
 REQUIRED_TEST = ("build", "determinism", "linkstrict", "objstub", "doubles", "oracle", "stub", "assumptions", "legal", "pure")
 REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT, "ref": (), "test": REQUIRED_TEST}
 
@@ -113,6 +114,7 @@ def judge(files, admit, gate_names, exists, ref_paths=frozenset()):
     roots, errors = [], []
     if admit.get("format") != "fnvnx-admit/1":
         errors.append("admit.json: format is not fnvnx-admit/1")
+    by_path = {r.get("path"): r for r in admit.get("roots", []) if isinstance(r, dict)}
     for r in admit.get("roots", []):
         path, cls, gates = r.get("path", ""), r.get("class"), r.get("gates", [])
         why = []
@@ -135,6 +137,11 @@ def judge(files, admit, gate_names, exists, ref_paths=frozenset()):
                 why.append("a ref root has no recipe and names no gate (it has no units, no link and no outputs)")
             if cls == "test" and r.get("target") not in ("guest", "host"):
                 why.append('a test root declares "target": "guest" or "host"')
+            if "variants" in r:   # the variants of a product root: {NAME: {"target": "guest"|"host"}}, addressed as root@NAME (recipe.entry_of); the recipe holds their flags
+                vs = r["variants"]
+                if cls != "product" or not (isinstance(vs, dict) and vs and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", n) and isinstance(e, dict)
+                                                                                   and set(e) <= {"target"} and e.get("target", "guest") in ("guest", "host") for n, e in vs.items())):
+                    why.append('"variants" is allowed on a product root only: {NAME: {"target": "guest"|"host"}}')
             if cls in ("product", "test"):
                 rec = r.get("recipe", "")
                 if not any(rec.startswith(t + "/") for t in trees(r)) or not exists(rec):

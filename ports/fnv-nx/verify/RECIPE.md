@@ -48,6 +48,12 @@ the hash of the stage document + tool code. All paths are root-relative unless m
   nonzero size, and two names with different body ids never share an address.
 - `link`: the guest ELF, null = no ELF. A link is the stage `ld:<root>` and the post stage `ldcheck:<root>` of the section "Link: the guest ELF"
   below; `flags` carries the emulation only, `roots` and `libs` are optional.
+  `kind` is `pie` (the ILP32 guest image, the default) or `exe`; a root of target guest cannot link an `exe`. `roots` lists distinct admitted `product`
+  roots of the same target, never the root itself; their stored objects are declared inputs of the link stage (so their content is in its key) and a
+  listed root is built without its own link. A root of class `product` lists base roots only; a root of class `test` lists any root, variants included
+  (`root@NAME`). A variant is one concept: `variants: {NAME: {"target"?}}` in the root's admit.json entry, its flags in the recipe's `variants`,
+  addressed as `root@NAME` (a sanitizer build is a flags variant of the same root). Whatever the flags, `linkstrict` judges the linked output: no
+  undefined symbol of any binding.
 - ABIs: the recipe names the ABI in its flags, and the build reads ELF32 and ELF64 AArch64 objects alike. ILP32 (the product): `-mabi=ilp32`
   in `flags.c`, `flags.cxx` and `flags.asm`, and `-m aarch64linux32` in `link.flags` (the emulation `gcc -mabi=ilp32 -###` passes to
   `ld`; it is required: a link is the ILP32 guest ELF). The objects are ELF32 (`SHT_RELA` with `Elf32_Rela`, relocations `R_AARCH64_P32_*`),
@@ -183,7 +189,7 @@ if any unit or stage is red or blocked. `objects.json` of a red root: `objects` 
 
 ## Refusal set R (GNU ld option syntax, not a text guess)
 Options that let a link accept missing or substituted symbols: `--unresolved-symbols`, `--allow-shlib-undefined`, `--noinhibit-exec`,
-`--defsym`, `--wrap`, `--allow-multiple-definition`, `--warn-unresolved-symbols`, `-z undefs`, `-z muldefs`. A token is refused when, with one or two
+`--defsym`, `--wrap`, `--allow-multiple-definition`, `--warn-unresolved-symbols`, `-z undefs`, `-z muldefs`, `-z lazy` (the class "resolution-relaxing ld options"). A token is refused when, with one or two
 leading dashes and the part after `=` cut, its name is a prefix of such a long name (getopt_long abbreviation; one-dash names need 2 chars),
 as `-z X` or `-zX`, inside `-Wl,a,b` or after `-Xlinker`, or when it is an `@file`. Checked in every flag list, `link.flags` included.
 

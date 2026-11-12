@@ -7,9 +7,10 @@ Steps: (1) generated stages (python runtime, runtime.py), (2) one unit stage per
 name-complete views, then CC on the preprocessed text), .s/.S = unitstage.Build too (.S: PP then CC; .s: one stage on its own file), (3) the link stage
 (`ld` of the compiler, objects + script as inputs). Tools (compilers, ld) are runtime.py `tool` runtimes: declared inputs, no host /usr.
 RULE units: every tracked *.c *.cc *.cpp *.cxx *.s *.S under the root, and every generated output with such a name, is a unit.
-RULE refusal set R: an option of GNU ld's grammar that lets a link accept missing or substituted symbols. Matched by OPTION SYNTAX:
+RULE refusal set R, the class of "resolution-relaxing ld options": an option of GNU ld's grammar (the pinned ld manual's list) that lets a link accept
+  missing or substituted symbols or defers their resolution to run time (`-z lazy`). Matched by OPTION SYNTAX:
   strip one or two leading dashes, cut at `=`; a name that is a prefix (getopt_long abbreviation) of a refused long name is refused (a
-  single-dash name needs >= 2 chars); `-z undefs|muldefs` as `-z X` or `-zX`; `-Wl,a,b` and `-Xlinker a` are split into the options
+  single-dash name needs >= 2 chars); `-z undefs|muldefs|lazy` as `-z X` or `-zX`; `-Wl,a,b` and `-Xlinker a` are split into the options
   they pass; `@file` is refused (cannot be analysed). An ambiguous abbreviation is refused too (ld would reject it anyway).
 EXTERNAL inputs (key "external", RECIPE.md): fetched only by exact commit from ARTIFACTS_URL into a bare cache (--ext DIR, shared by
   builds that must not share stores), checked out, ingested; the CAS tree hash must equal tree_sha256 (else the build is red naming
@@ -160,7 +161,7 @@ def refused(tokens):
         name = t.lstrip("-").split("=", 1)[0] if t.startswith("-") else ""
         long_ = t.startswith("--") or len(name) >= 2
         hit = t.startswith("@") or (name and long_ and any(r.startswith(name) for r in LONG_R)) or (
-            t == "-z" and toks[i + 1:i + 2] in (["undefs"], ["muldefs"])) or t in ("-zundefs", "-zmuldefs")
+            t == "-z" and toks[i + 1:i + 2] in (["undefs"], ["muldefs"], ["lazy"])) or t in ("-zundefs", "-zmuldefs", "-zlazy")
         if hit:
             bad.append(t)
     return bad
@@ -417,6 +418,8 @@ def link_errors(lk, root, mine, roots, ext_names, repo, variant=""):
             err.append("link.roots: %s is a %s root: a root reached through link.roots runs at its target, so it is a product root (a tool root's outputs run at build time only)" % (d, ent.get("class")))
         elif not ent:
             err.append("link.roots: %s is not an admitted product root" % d)
+        elif entry_of(roots, d).get("target") != rent.get("target"):
+            err.append("link.roots: %s has target %r, the linking root %r" % (d, entry_of(roots, d).get("target"), rent.get("target")))
         else:
             try:
                 drec = json.load(open(os.path.join(repo, ent["recipe"])))
@@ -1228,7 +1231,7 @@ def host_compilers(rec, cache):
     return os.path.join(dest, c["cc"]), os.path.join(dest, c["cxx"])
 
 
-def build(repo, root, store, out, jobs=4, ext=None):
+def build(repo, root, store, out, jobs=4, ext=None, link=True):
     """Build product ROOT of the checkout REPO into STORE; write OUT/objects.json and the files it names. EXT: bare cache dir of
     externals (default STORE/external). -> the objects dict; raises RecipeError for an invalid recipe."""
     env_blocked(repo)   # BEFORE any stage: nothing below runs or stores on a machine that is not the declared one
@@ -1282,9 +1285,9 @@ def build(repo, root, store, out, jobs=4, ext=None):
             und |= x
             res["objects"].append({"unit": u, "object": os.path.abspath(dest), "sha256": ent["h"], "os_layer": u in j.rec.get("os_layer", [])})
         res.update(defined=sorted(res["defined"], key=lambda d: (d["symbol"], d["object"])), undefined=sorted(und))
-        if j.rec.get("link") and (j.red or j.blocked or j.failed):
+        if j.rec.get("link") and link and (j.red or j.blocked or j.failed):
             j.blocked[j.rec["link"]["output"]] = (j.red or j.failed)[0]["stage"]
-        elif j.rec.get("link"):
+        elif j.rec.get("link") and link:
           try:
               lk = j.rec["link"]
               name = lk["output"]
@@ -1292,7 +1295,7 @@ def build(repo, root, store, out, jobs=4, ext=None):
               res["link_roots"], defs = [], {}
               for n, d in enumerate(lk.get("roots", [])):
                   try:
-                      r = build(repo, d, store, os.path.join(ws, "in", d.replace("/", "__")), jobs, j.extcache)
+                      r = build(repo, d, store, os.path.join(ws, "in", d.replace("/", "__")), jobs, j.extcache, link=False)   # its objects only: its own link (if any) is not built here
                   except RecipeError as x:
                       raise BuildRed({"stage": "ld:" + root, "exit": None, "stderr": ["input root %s: invalid recipe: %s" % (d, x)][:20]})
                   j.keys |= set(r["stage_keys"])

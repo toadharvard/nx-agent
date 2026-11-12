@@ -77,6 +77,8 @@ for ABI[0] in ("lp64", "ilp32"):
     k, _, _ = kinds([], elf, {("r", "x.elf"): [("nope", "B1"), ("z", "B2")], ("q", None): [("a", "B1")]})
     check("(c) a name missing from the ELF, a name of size 0, a table with no ELF -> not certified",
           {("contract:nope", "contract-undefined"), ("contract:z", "contract-undefined"), ("contract:a", "contract-no-elf")} <= k, k)
+    k, _, _ = kinds([], {"l.elf": [("loc", 0, 0, 0, 0, 0)]})
+    check("(a) a LOCAL undefined symbol (a target a relocation could name) is red", ("<elf>", "elf-undefined") in k, k)
     k, _, _ = kinds([], {"u.elf": [("g", 0, 0, 0, 1, 0), ("h", 0, 0, 0, 2, 0), ("i", 0x10, 4, 10, 1, 1)]})
     check("(a) ELF with an undefined, a weak undefined and an IFUNC symbol; and one without .symtab", {("<elf>", "elf-undefined"), ("<elf>", "elf-weak-undefined"),
           ("<elf>", "elf-ifunc")} <= k and ("<elf>", "elf-no-symtab") in kinds([], {"n.elf": None})[0], k)

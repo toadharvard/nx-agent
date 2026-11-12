@@ -64,7 +64,20 @@ FORMAT = "fnvnx-assumptions/1"
 OWNER_FILE = "CLAUDE.md"
 OWNER_HEAD = "OWNER, the only accepted ones:"
 NUMBERED = re.compile(r"(\s*)\d+\.\s")
-BLOCKS = {"L3a": 200, "L3b": 300, "L4": 400, "L5": 500, "L6": 600, "L6A": 700, "L2": 800}   # first id of the lead's block of 100
+FIRST_RANGED = 100      # ids below it are the legacy ids ASM-001..054 and the free numbers of L1: exempt from the ranges
+GATE = "assumptions"
+
+
+class F(str):
+    """One finding: a str (its text, so a finding reads as a message) with a stable CODE and the SUBJECT (an ASM id, or path:line) it is about."""
+    def __new__(cls, code, subject, text):
+        o = str.__new__(cls, text)
+        o.code, o.subject = code, subject
+        return o
+
+
+def finding(code, subject, text):
+    return F(code, subject, text)
 LEADS = ("L1", "L2", "L3a", "L3b", "L4", "L5", "L6", "L6A")
 STATUSES = ("OWNER", "REMOVE")
 WORD = re.compile(r"(?<!\w)assum|(?<!\w)допущени", re.I)
@@ -142,11 +155,11 @@ def judge_mentions(files, ids, read):
             mentions.append((f, line))
             found = ["ASM-" + n for n in ID.findall(text)]
             if not found:
-                bad[(f, line)] = "the block mentions an assumption and cites no ASM-NNN id"
+                bad[(f, line)] = finding("mention-no-id", "%s:%d" % (f, line), "the block mentions an assumption and cites no ASM-NNN id")
             else:
                 unknown = sorted(set(x for x in found if x not in ids))
                 if unknown:
-                    bad[(f, line)] = "id not in the registry: " + ", ".join(unknown)
+                    bad[(f, line)] = finding("mention-unknown-id", "%s:%d" % (f, line), "id not in the registry: " + ", ".join(unknown))
     return mentions, bad
 
 
@@ -171,89 +184,170 @@ def owner_items(text):
     return items
 
 
+def ranges_errors(rg):
+    """`ranges` is {LEAD: [first, last]} for exactly the LEADS, integers with FIRST_RANGED <= first <= last, pairwise disjoint -> [message]"""
+    if not isinstance(rg, dict) or set(rg) != set(LEADS):
+        return ["ranges is not an object with exactly the keys %s" % ", ".join(LEADS)]
+    out = []
+    for k in LEADS:
+        v = rg[k]
+        if not (isinstance(v, list) and len(v) == 2 and all(type(x) is int for x in v) and FIRST_RANGED <= v[0] <= v[1]):
+            out.append("ranges[%s] is not [first, last] with %d <= first <= last" % (k, FIRST_RANGED))
+    if not out:
+        for a in LEADS:
+            for b in LEADS:
+                if a < b and rg[a][0] <= rg[b][1] and rg[b][0] <= rg[a][1]:
+                    out.append("ranges of %s and %s overlap" % (a, b))
+    return out
+
+
+def retired_of(rl):
+    """`retired` is a list of {"id": ASM-NNN, "aliases": [str]}: records that are no longer entries, with every alias they had. -> ({id: [aliases]}, [finding])"""
+    out, err = {}, []
+    if not isinstance(rl, list):
+        return {}, [finding("retired-form", "retired", "retired is not a list")]
+    for r in rl:
+        if not (isinstance(r, dict) and set(r) == {"id", "aliases"} and isinstance(r["id"], str) and ID_FORM.match(r["id"])
+                and isinstance(r["aliases"], list) and all(isinstance(a, str) and a.strip() for a in r["aliases"])):
+            err.append(finding("retired-form", "retired", "a retired item is not {id ASM-NNN, aliases [str]}: %r" % (r,)))
+        elif r["id"] in out:
+            err.append(finding("retired-form", r["id"], "id is retired twice"))
+        else:
+            out[r["id"]] = list(r["aliases"])
+    return out, err
+
+
+def judge_retired(files, retired, read):
+    """A retired id or alias occurring in any scanned file is red: the citation moves to the live record, and a record cannot be removed
+    while anything cites it. -> [finding]"""
+    out = []
+    for f in files:
+        t = read(f)
+        for i, al in sorted(retired.items()):
+            for tok in [i] + al:
+                if tok in t:
+                    out.append(finding("retired-cited", f, "%s cites %r of the retired record %s" % (f, tok, i)))
+    return out
+
+
+def ratchet_errors(base, new):
+    """The merge ratchet: every id and alias that the BASE registry held (entry or retired) is in the new registry, live or retired. A record
+    or an alias cannot vanish; to remove one it is listed in `retired`, and then the tree may not cite it. -> [finding]"""
+    out = []
+    def held(d):
+        ids, als = set(), set()
+        if isinstance(d, dict):
+            for e in d.get("entries", []):
+                if isinstance(e, dict):
+                    ids.add(e.get("id"))
+                    als.update(a for a in e.get("aliases", []) if isinstance(a, str))
+            for r in d.get("retired", []):
+                if isinstance(r, dict):
+                    ids.add(r.get("id"))
+                    als.update(a for a in r.get("aliases", []) if isinstance(a, str))
+        return ids, als
+    bi, ba = held(base)
+    ni, na = held(new)
+    for i in sorted(x for x in bi - ni if isinstance(x, str)):
+        out.append(finding("ratchet-id", i, "%s was held by the base registry and is neither an entry nor retired now" % i))
+    for a in sorted(ba - na):
+        out.append(finding("ratchet-alias", a, "alias %r was held by the base registry and is neither an alias nor retired now" % a))
+    return out
+
+
 def judge_registry(doc, tracked, read, gate_names):
     """-> ([error str], counts); pure function of its arguments"""
     err = []
-    if not isinstance(doc, dict) or set(doc) != {"format", "entries"} or doc["format"] != FORMAT \
+    if not isinstance(doc, dict) or set(doc) != {"format", "ranges", "retired", "entries"} or doc["format"] != FORMAT \
             or not isinstance(doc["entries"], list):
-        return ["registry is missing or is not %s with keys format, entries" % FORMAT], {}
+        return [finding("registry-form", "registry", "registry is missing or is not %s with keys format, ranges, retired, entries" % FORMAT)], {}
+    rg = doc["ranges"]
+    rerr = ranges_errors(rg)
+    if rerr:
+        return [finding("ranges-form", "ranges", m) for m in rerr], {}
     ids, aliases = set(), {}
+    retired, rerr2 = retired_of(doc["retired"])
+    err += rerr2
     count = {"OWNER": 0, "REMOVE": {}, "no gate yet": 0, "planned": 0, "OPEN": 0,
              "entries": len(doc["entries"])}
     items = owner_items(read(OWNER_FILE)) if OWNER_FILE in tracked else []
     taken = {}
     for e in doc["entries"]:
         if not isinstance(e, dict):
-            err.append("an entry is not an object")
+            err.append(finding("entry-form", "registry", "an entry is not an object"))
             continue
         i = e.get("id")
         if not isinstance(i, str) or not ID_FORM.match(i):
-            err.append("entry id %r is not ASM-NNN" % (i,))
+            err.append(finding("id-form", str(i), "entry id %r is not ASM-NNN" % (i,)))
             continue
         w = "%s: " % i
+        if i in retired:
+            err.append(finding("id-retired-reused", i, w + "id is retired: an id is never reused"))
         if i in ids:
-            err.append(w + "id is repeated")
+            err.append(finding("id-repeated", i, w + "id is repeated"))
         ids.add(i)
         st = e.get("status")
         if st not in STATUSES:
-            err.append(w + "status is not one of %s" % ", ".join(STATUSES))
+            err.append(finding("status", i, w + "status is not one of %s" % ", ".join(STATUSES)))
             continue
         want = {"id", "text", "used_by", "aliases", "status"} | ({"decision"} if st == "OWNER" else {"removed_by", "owner"})
         extra = set(e) - want
         extra.discard("note")
         if set(want) - set(e) or extra:
-            err.append(w + "keys are not %s (optional: note)" % ", ".join(sorted(want)))
+            err.append(finding("keys", i, w + "keys are not %s (optional: note)" % ", ".join(sorted(want))))
             continue
         if "note" in e and (not isinstance(e["note"], str) or not e["note"].strip()):
-            err.append(w + "note is empty")
+            err.append(finding("note-empty", i, w + "note is empty"))
         if not isinstance(e["text"], str) or not e["text"].strip():
-            err.append(w + "text is empty")
+            err.append(finding("text-empty", i, w + "text is empty"))
         al = e["aliases"]
         if not isinstance(al, list) or not all(isinstance(a, str) and a.strip() for a in al):
-            err.append(w + "aliases is not a list of strings")
+            err.append(finding("aliases-form", i, w + "aliases is not a list of strings"))
         else:
             for a in al:
+                if a in {x for r in retired.values() for x in r}:
+                    err.append(finding("alias-retired-reused", i, w + "alias %r is retired" % a))
                 if a in aliases:
-                    err.append(w + "alias %r is also an alias of %s" % (a, aliases[a]))
+                    err.append(finding("alias-claimed", i, w + "alias %r is also an alias of %s" % (a, aliases[a])))
                 aliases[a] = i
         ub = e["used_by"]
         if not isinstance(ub, list) or not ub or not all(isinstance(p, str) for p in ub):
-            err.append(w + "used_by is empty (a dead entry)")
+            err.append(finding("used-by-empty", i, w + "used_by is empty (a dead entry)"))
         else:
             for p in ub:
                 if p in tracked:
                     if i not in set("ASM-" + n for n in ID.findall(read(p))):
-                        err.append(w + "used_by %s does not cite %s" % (p, i))
+                        err.append(finding("used-by-cites", i, w + "used_by %s does not cite %s" % (p, i)))
                 else:
-                    err.append(w + "used_by %r is not a tracked file" % (p,))
+                    err.append(finding("used-by-untracked", i, w + "used_by %r is not a tracked file" % (p,)))
         if st == "OWNER":
             count["OWNER"] += 1
             d = e["decision"]
             if not isinstance(d, dict) or set(d) != {"file", "quote"} or d["file"] != OWNER_FILE \
                     or not isinstance(d["quote"], str) or not d["quote"].strip():
-                err.append(w + "decision is not {file %s, quote}" % OWNER_FILE)
+                err.append(finding("decision-form", i, w + "decision is not {file %s, quote}" % OWNER_FILE))
             elif d["file"] not in tracked or d["quote"] not in read(d["file"]):
-                err.append(w + "decision.quote does not occur verbatim in %s" % d["file"])
+                err.append(finding("decision-quote", i, w + "decision.quote does not occur verbatim in %s" % d["file"]))
             else:
                 hit = [k for k, it in enumerate(items) if d["quote"] in it]
                 if len(hit) != 1:
-                    err.append(w + "decision.quote is not inside exactly one numbered item under %r" % OWNER_HEAD)
+                    err.append(finding("decision-item", i, w + "decision.quote is not inside exactly one numbered item under %r" % OWNER_HEAD))
                 elif hit[0] in taken:
-                    err.append(w + "item %d of the owner's list is already the decision of %s" % (hit[0] + 1, taken[hit[0]]))
+                    err.append(finding("decision-taken", i, w + "item %d of the owner's list is already the decision of %s" % (hit[0] + 1, taken[hit[0]])))
                 else:
                     taken[hit[0]] = i
         else:
             ow = e["owner"]
             parts = ow.split("+") if isinstance(ow, str) else []
             if not parts or len(set(parts)) != len(parts) or any(x not in LEADS for x in parts):
-                err.append(w + "owner %r is not LEAD or LEAD+LEAD of %s" % (ow, ", ".join(LEADS)))
+                err.append(finding("owner-form", i, w + "owner %r is not LEAD or LEAD+LEAD of %s" % (ow, ", ".join(LEADS))))
             else:
                 count["REMOVE"][ow] = count["REMOVE"].get(ow, 0) + 1
                 n = int(i[4:])
-                lead = parts[0]
-                if n >= 200 and not (lead in BLOCKS and BLOCKS[lead] <= n < BLOCKS[lead] + 100):
-                    err.append(w + "id is not in the block of its owner %s (%s)" % (
-                        lead, "%d..%d" % (BLOCKS[lead], BLOCKS[lead] + 99) if lead in BLOCKS else "L1 has only ids below 200"))
+                lead = parts[0]          # a jointly owned record is in the range of its first-named owner
+                lo, hi = rg[lead]
+                if n >= FIRST_RANGED and not lo <= n <= hi:
+                    err.append(finding("id-range", i, w + "id is not in the range of its owner %s (%d..%d)" % (lead, lo, hi)))
             rb = e["removed_by"]
             ok = False
             if isinstance(rb, str):
@@ -266,12 +360,12 @@ def judge_registry(doc, tracked, read, gate_names):
                             ok = True
                             count[form[:-1]] += 1
             if not ok:
-                err.append(w + "removed_by %r is not gate:NAME of a verify/gates.d file, fact:PATH, planned: TEXT, no gate yet: TEXT or OPEN: TEXT" % (rb,))
+                err.append(finding("removed-by-form", i, w + "removed_by %r is not gate:NAME of a verify/gates.d file, fact:PATH, planned: TEXT, no gate yet: TEXT or OPEN: TEXT" % (rb,)))
     for k in range(len(items)):
         if k not in taken:
-            err.append("item %d of the owner's list has no OWNER entry" % (k + 1))
+            err.append(finding("owner-item-missing", "CLAUDE.md:%d" % (k + 1), "item %d of the owner's list has no OWNER entry" % (k + 1)))
     if count["OWNER"] != len(items):
-        err.append("OWNER entries are %d, the owner's list has %d items" % (count["OWNER"], len(items)))
+        err.append(finding("owner-count", "registry", "OWNER entries are %d, the owner's list has %d items" % (count["OWNER"], len(items))))
     return err, count
 
 
@@ -302,6 +396,25 @@ def load(path):
         return None
 
 
+PRINT_FINDINGS = 20
+
+
+def write_findings(allf):
+    """Every finding, uncapped and sorted by (code, subject, text), with the total per code, as JSON in the gate's detail directory: GATE_DETAIL
+    when the verdict gives one (it outlives the gate's temporary GATE_OUT and is kept beside the stored verdict), else GATE_OUT. Returns the path."""
+    d = os.environ.get("GATE_DETAIL") or os.environ["GATE_OUT"]
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, GATE + ".findings.json")
+    counts = {}
+    for x in allf:
+        counts[x.code] = counts.get(x.code, 0) + 1
+    with open(path, "w") as fh:
+        json.dump({"format": "fnvnx-findings/1", "gate": GATE, "total": len(allf), "counts": counts,
+                   "findings": [{"code": x.code, "id": x.subject, "text": str(x)} for x in allf]}, fh, indent=1, sort_keys=True)
+        fh.write("\n")
+    return path
+
+
 def main():
     out = os.environ["GATE_OUT"]
     ls = subprocess.run(["git", "ls-files", "-z", "--", TREE], capture_output=True, check=True).stdout
@@ -323,6 +436,7 @@ def main():
                 text_files.append(p)
     # the owner's file is outside the tree: it is read, not scanned (it holds the owner's words)
     tracked_all = set(tracked) | {"CLAUDE.md"}
+    scanned_all = [p for p in text_files if not any(p == r or p.startswith(r + "/") for r in records)]
     scanned = [p for p in text_files if not p.endswith(".json")
                and not any(p == r or p.startswith(r + "/") for r in records)]
     doc = load(REGISTRY)
@@ -331,10 +445,12 @@ def main():
     errors, count = judge_registry(doc, tracked_all, read, gate_names)
     ids = set(e["id"] for e in doc["entries"] if isinstance(e, dict) and isinstance(e.get("id"), str)) \
         if isinstance(doc, dict) and isinstance(doc.get("entries"), list) else set()
+    retired = retired_of(doc.get("retired"))[0] if isinstance(doc, dict) else {}
+    errors += judge_retired([p for p in scanned_all if p != REGISTRY], retired, read)
     mentions, bad = judge_mentions(scanned, ids, read)
-    stray = judge_stray(text_files, ids, read)
+    stray = judge_stray(text_files, ids | set(retired), read)
     for f, x in sorted(stray.items()):
-        errors.append("%s: ids not in the registry: %s" % (f, ", ".join(x)))
+        errors.append(finding("stray-id", f, "%s: ids not in the registry: %s" % (f, ", ".join(x))))
     n = len(mentions) - len(bad)
     status = "green" if not bad and not errors else "red"
     rem = count.get("REMOVE", {})
@@ -344,6 +460,9 @@ def main():
             n, len(mentions), count.get("entries", 0), count.get("OWNER", 0), sum(rem.values()),
             ", ".join("%s %d" % kv for kv in sorted(rem.items())), nogate,
             count.get("planned", 0), count.get("no gate yet", 0), count.get("OPEN", 0))
+    allf = sorted([e for e in errors] + [bad[k] for k in sorted(bad)], key=lambda x: (x.code, x.subject, str(x)))
+    where = write_findings(allf)
+    detail += "; %d findings, full list: %s" % (len(allf), where)
     res = {"format": "fnvnx-gate/1", "name": "assumptions", "status": status, "universe": len(mentions), "certified": n,
            "uncertified": ["%s:%d" % k for k in sorted(bad)][:50], "detail": "; ".join(errors[:20] + [detail])[:2000],
            "reasons": {"%s:%d" % k: bad[k] for k in sorted(bad)[:50]}, "errors": errors[:50],
@@ -351,6 +470,10 @@ def main():
     with open(os.path.join(out, "assumptions.json"), "w") as fh:
         json.dump(res, fh, indent=1, sort_keys=True)
         fh.write("\n")
+    for x in allf[:PRINT_FINDINGS]:
+        print("  %s %s: %s" % (x.code, x.subject, str(x)[:200]))
+    if len(allf) > PRINT_FINDINGS:
+        print("  ... %d more in %s" % (len(allf) - PRINT_FINDINGS, where))
     print("assumptions: %s %d/%d %s" % (status, n, len(mentions), detail))
     return 0 if status == "green" else 2
 
