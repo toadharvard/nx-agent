@@ -877,3 +877,9 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - L3a e6c29df27: 6 real findings.
   - 6d3a2800: 24 findings under both the old and new gate, all L5/hostabi prose. Sent to L5.
 - L5 is told w22v does fnvnx_assume_violation, with w9's errno site as the acceptance case.
+- w18m 6e1c77df: accepted, and L3a w8 has it.
+  - record_files() takes a module's file list from its wheel RECORD and drives the mount, the key and envcheck.
+  - All 8 pinned modules import inside a stage.
+  - Still to come: the exact per-module counts, and verdict lines v15 and v16.
+- L5 679eb04c: accepted, replacing 1e868c13.
+  - The reach request parser and emitter live in contract/reachreq.py, with identity tests showing gate_reach uses the same functions.
