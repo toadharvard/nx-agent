@@ -1,0 +1,13 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "argordergate",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_argorder.py"
+ ],
+ "result": "argordergate.json",
+ "covers": [
+  "product-guest"
+ ]
+}

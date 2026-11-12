@@ -1,4 +1,4 @@
-"""toolflags policy table (data only): key -> (kind, requirement, citation). The reviewable statement of assumption A-env.
+"""toolflags policy table (data only): key -> (kind, requirement, citation). The reviewable statement of assumption A-env. (ASM-038)
 Rows citing VC9 are UNVERIFIED (no VC9 here); GCC 13.3 / binutils 2.42 rows were checked against the installed --help."""
 RB = "reproducible-builds.org"
 GCCENV = "GCC manual, Environment Variables"

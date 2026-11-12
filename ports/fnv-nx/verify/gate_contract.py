@@ -2,7 +2,7 @@
 """Gate "contract" family (fnvnx-gate/1, class 8 of VERDICT.md): the whole-binary gates of contract/ judged on the link of the product root.
     python3 -I gate_contract.py --gate NAME     NAME: n1 n2_data n2_call n2_vcall xc xunit rtti pcrel bodysel
     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/NAME.json (gatefile.py shape).
-One entry per gate in gates.json, so each is its own line of the verdict; the stages are the ones of contract/verdict.py (exefacts, n1,
+One entry per gate file in gates.d, so each is its own line of the verdict; the stages are the ones of contract/verdict.py (exefacts, n1,
 objfacts, registry, xunit, rtti, pcrel, bodysel), run with the same arguments, in the order of their dependencies, each once per input set:
 their outputs are kept in GATE_CACHE/contract/<key>/ (key = sha256 of contract_inputs.json, the git tree under test and the content of
 the objects and ELF of the root), so the nine gates cost one run of the chain and a cold run gives the same files.
@@ -138,8 +138,8 @@ def assemble(link, res, game, out, rr):
         if is_game:
             os.symlink(o["object"], os.path.join(link, "game", name))
     os.symlink(res["elf"]["path"], os.path.join(link, "guest", "fnvnx.elf"))
-    with open(os.path.join(os.path.dirname(link), "inputs.rsp"), "w") as f:      # ld.py's response file: one quoted path per object of the link
-        f.write("".join('"%s"\n' % o["object"] for o in res["objects"]))
+    with open(os.path.join(os.path.dirname(link), "inputs.rsp"), "w") as f:      # the link's response file: one quoted path per object of the link
+        f.write("".join('"%s"\n' % o["object"] for o in res["objects"] + [x for lr in res.get("link_roots", []) for x in lr["objects"]]))   # in link order
     for k, dst in (("addrmap", "out/addrmap.tsv"), ("aliases", "out/aliases.ld")):
         os.symlink(os.path.join(out, rr[k]), os.path.join(link, dst))
 

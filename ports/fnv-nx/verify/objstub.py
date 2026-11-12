@@ -6,8 +6,8 @@
 Inputs: ELF relocatable objects, ELF32 (ILP32; SHT_RELA with Elf32_Rela, R_AARCH64_P32_* kinds) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
 the host g++ against LLVM 18's MC layer; env var A64ACCESS names a prebuilt binary): per word the registers read and written
 (MCInstrDesc defs/uses/implicit, tied operands), the memory operand and the kind. Everything the T and V classes need beyond that
-is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64
-instruction descriptions and disassembler are correct; the test cross-checks the decoded word set against objdump. Output: one line `obj:symbol: KIND detail`, sorted; exit 0 iff no finding.
+is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. The decoder is LLVM's AArch64
+instruction descriptions and disassembler; the test cross-checks the decoded word set against objdump. Output: one line `obj:symbol: KIND detail`, sorted; exit 0 iff no finding.
 
 FUNCTION UNIVERSE. Every STT_FUNC symbol defined in an SHF_EXECINSTR section, range [value, value+size); equal ranges are aliases of
 one body. `uncovered`: size 0, a partial overlap or a range leaving the section, a code run of odd length, and executable bytes
@@ -22,7 +22,7 @@ whose symbol is global/weak and in the TERMINATOR SET (calls, tail calls, GOT/AD
 can be incomplete; a local symbol cannot be the library routine). `T2-noreturn-tail`: the last instruction is a direct BL (callee a symbol; control
 runs off the end after a call the compiler knew not to return), except a BL of `fnvnx_reach_violation` (reach rule below); another last instruction that can fall through (not RET, B, BR*, T1) is
 `fallthrough`. Reachability of a trap is NOT computed: presence anywhere in a function is a finding; every function is judged, so
-a caller of a flagged function is not flagged for it. Assumption: every terminating routine of the toolchain is declared noreturn
+a caller of a flagged function is not flagged for it. Assumption: every terminating routine of the toolchain is declared noreturn (ASM-044)
 in the headers given. TERMINATOR RULE (what is a terminator): a routine that ENDS THE PROCESS. Resuming or starting the propagation of
 an exception is not process end: it transfers control to a handler (or on to the caller), and whether a handler exists is the EH
 class, not class 1. The plugin applies GCC's own flags (TREE_THIS_VOLATILE = noreturn, TREE_NOTHROW) and its own EH lowering: (1) the
@@ -72,8 +72,7 @@ Wine 9.0 tree is the oracle class, not done. A row without a call site is no fin
 (D) DECLARED MACHINE. `fnvnx_declared_machine(uint32_t id)` (C linkage, writes nothing, RETURNS) is the second citation function: every rule of (W)
 applies unchanged (BL transparent for V, constant id, exactly one id of ONE citation function on every path, result equals the row, otherwise
 V, no address taken), with the table verify/declared_machine.tsv (`--declared-machine`; read_declared_table): rows
-`id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`, fact in DECL_FACTS (no-network, time-zone, registry), source `win-doc:<page>:<function>` or
-`wine-9.0:<path>:<function>` (the form only), kind/value as in (W). Findings carry the prefix `declared-machine-`. Stated limit: V cannot know which
+`id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`, fact and the source prefixes are read from the table's own header line (`# fact: ...; source: ...`: no-network, time-zone, registry, no-galaxy; win-doc, wine-9.0, galaxy-sdk), source `PREFIX:<page or path>:<function>` (the form only), kind/value as in (W). Findings carry the prefix `declared-machine-`. Stated limit: V cannot know which
 result is "success" of a network call, so a row saying success is not rejected; only a body that differs from its row is. A body that calls or
 stores is not V and needs no citation. The gate result counts call sites per id ("declared_machine").
 
@@ -82,8 +81,8 @@ T2-noreturn-tail; it is judged by the reach rule: w0 at the call must be a const
 V dataflow over a CFG where a call returns and clobbers the AAPCS64 caller-saved registers), else `reach-nonconstant`; the constant must be a
 fact of GATE_CACHE/reach/<git tree>/reach.facts.tsv (`fact_id<TAB>sha256`, written by the gate `reach`), else `reach-uncertified` (also
 when the file does not exist); a fact with no call site in the universe is `reach-stale`; any other reference to the symbol (address
-taken, in code or in data) is `reach-address-taken`. Assumption: the decoder's write sets (LLVM defs) name every register an instruction
-writes (a missed write of x0 would make a constant wrong).
+taken, in code or in data) is `reach-address-taken`. The write sets are the decoder's (LLVM defs); a register an instruction
+writes that they miss (x0, say) would make a constant wrong, and the Form-writes fact of L3a w5 is what replaces this reliance.
 
 CACHE. Per object, CACHE/objstub/<key>.json, key = sha256 of (analysis version = objstub.py + a64access.cc, object sha256, os_layer
 flag, the terminators the object's own symbols mention): the analysis reads the terminator set only through the object's symbol names, so
@@ -500,7 +499,7 @@ def wine_sim(words, a, b, rels, obj, argn, zero):
     zero: that is the whole permitted use), ("S", k) (own-frame address), None (unknown: every other input, the registers clobbered by the call
     of WINE). Flags are four bits, each 0, 1 or None: comparing ARG with zero gives Z (and C, V) and leaves N unknown when ARG is non-zero; a
     branch or select that needs an unknown bit, any other instruction, any other use of ARG, a step budget of 4000: None (the function is
-    then not a simple body). The argument is a pointer: its low 32 bits (ILP32) or full register are tested alike (stated assumption)."""
+    then not a simple body). The argument is a pointer: its low 32 bits (ILP32) or full register are tested alike (stated assumption). (ASM-046)"""
     R, mem, fl, sp, o = [None] * 31, {}, [None] * 4, ("S", 0), a
     R[argn] = 0 if zero else ARG
     zarg = zero
@@ -1104,24 +1103,40 @@ def _wine_row(f):
                  re.fullmatch(r"(-?[0-9]+|0x[0-9a-fA-F]+),(-?[0-9]+|0x[0-9a-fA-F]+)" if f[3][3:5] == "nz" else r"-?[0-9]+|0x[0-9a-fA-F]+", f[4])))
 
 
-DECL_FACTS = ("no-network", "time-zone", "registry")   # the declared-machine facts of CLAUDE.md ("The declared machine"); a fourth fact is a new owner decision
-DECL_SOURCE = r"(win-doc:[A-Za-z0-9_./#+-]+:[A-Za-z_][A-Za-z0-9_@]*|wine-9\.0:[A-Za-z0-9_./+-]+:[A-Za-z_][A-Za-z0-9_@]*)"
+DECL_HEADER_FACT = re.compile(r"# fact: ([a-z][a-z0-9-]*(?: \| [a-z][a-z0-9-]*)*)")
+DECL_HEADER_SOURCE = re.compile(r"# fact: .*?source: (.*?); kind")
+
+
+def declared_header(lines):
+    """The accepted facts and source prefixes are read from the table's own header line (`# fact: A | B ...; source: P1:<..>:<function> | P2:...;
+    kind ...`), so the table and the check cannot disagree. -> (set of facts, regex of a source). ValueError when there is no such line."""
+    for l in lines:
+        m, s = DECL_HEADER_FACT.match(l), DECL_HEADER_SOURCE.match(l)
+        if m and s:
+            prefixes = [re.match(r"([a-z][a-z0-9.-]*):<", x.strip()) for x in s.group(1).split(" | ")]
+            if not all(prefixes):
+                raise ValueError("declared machine table header: a source form is not PREFIX:<..>:<function>: %r" % s.group(1)[:80])
+            body = r":[A-Za-z0-9_./#+-]+:[A-Za-z_][A-Za-z0-9_@]*"
+            return set(m.group(1).split(" | ")), "(" + "|".join(re.escape(x.group(1)) + body for x in prefixes) + ")"
+    raise ValueError("declared machine table has no header line `# fact: ...; source: ...; kind ...`")
 
 
 def read_declared_table(path):
     """declared_machine.tsv: `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`; lines starting with # are comments. fact is one of
-    DECL_FACTS. source is the documented origin of the returned value, `win-doc:<Windows documentation page or header path>:<function>` or
+    the facts of the table's header line. source is the documented origin of the returned value, `win-doc:<Windows documentation page or header path>:<function>` or
     `wine-9.0:<path in the Wine source tree>:<function name>` (the FORM is validated; checking it against the documentation or a pinned Wine 9.0
     tree is the oracle class, not done here). id, kind and value as in the wine table (shared checks: wine_matches). Ids are a space of their
     own. -> {id: (contract name, fact, source, kind, value)}. ValueError when missing or malformed."""
     if not os.path.exists(path):
         raise ValueError("declared machine table %s does not exist" % path)
     out = {}
-    for l in read_list(path):
+    lines = read_list(path)
+    facts, source = declared_header(lines)
+    for l in lines:
         if l.startswith("#"):
             continue
         f = l.split("\t")
-        ok = len(f) == 6 and f[4] != "branch" and f[2] in DECL_FACTS and re.fullmatch(DECL_SOURCE, f[3]) and \
+        ok = len(f) == 6 and f[4] != "branch" and f[2] in facts and re.fullmatch(source, f[3]) and \
             _wine_row(f[:2] + ["wine-9.0:x:x"] + f[4:])   # id, name, kind and value: the rules of the wine table, same columns
         if not ok or int(f[0]) in out:
             raise ValueError("bad or duplicate declared machine row in %s: %r" % (path, l[:80]))

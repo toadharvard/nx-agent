@@ -312,10 +312,10 @@ def foreign_flags(root, res, cache, repo):
 def main():
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-linkstrict-")
     cache, repo = os.environ.get("GATE_CACHE") or tmp, "."
-    items, finds, why, objs, elfs, tables, roots, comdat = [], [], "", {}, {}, {}, gate_build.product_roots(repo), {}
+    items, finds, why, objs, elfs, tables, roots, comdat = [], [], "", {}, {}, {}, gate_build.buildable_roots(repo), {}
     host, guest = None, []
     try:
-        hroots = [r + "/" for r, e in recipe.load_admit(repo).items() if e.get("class") == "product" and e.get("target") == "host"]
+        hroots = [r + "/" for r, e in recipe.load_admit(repo).items() if e.get("class") in ("product", "test") and e.get("target") == "host"]
         host = (hroots, set(host_exports(cache)[0])) if hroots else None
         guest = [r + "/" for r, e in recipe.load_admit(repo).items() if e.get("class") == "product" and e.get("target") == "guest"]
         for root in roots:
@@ -327,6 +327,10 @@ def main():
             for o in res["objects"]:
                 objs[root + "/" + o["unit"]] = elf_symbols(o["object"]) or []
                 comdat[root + "/" + o["unit"]] = elf_comdat(o["object"])
+            for m in res.get("link_archives", []):     # the members ld pulled from an archive are objects of the link, judged like every other
+                mid = "%s/%s(%s)" % (root, m["archive"].lstrip("/"), m["member"])
+                objs[mid] = elf_symbols(m["object"]) or []
+                comdat[mid] = elf_comdat(m["object"])
             eid = root + "/" + os.path.basename(res["elf"]["path"]) if res["elf"] else None
             if eid:
                 elfs[eid] = elf_symbols(res["elf"]["path"])

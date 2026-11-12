@@ -139,6 +139,10 @@ def main():
     secs = subprocess.run(["aarch64-linux-gnu-readelf", "-SW", o], capture_output=True, text=True).stdout
     have = set(x for x in secs.split() if ".fnvnx" in x)
     check("pi, names and layout plugins wrote their sections", {".fnvnx.n3", ".fnvnx.sympair", ".fnvnx.layout"} <= have, sorted(have))
+    check("addr plugin wrote .fnvnx.addr (symbol, seen, routed; seen == routed), no .cold section", ".fnvnx.addr" in have and not any(".cold" in x for x in secs.split()), sorted(have))
+    rows = subprocess.run(["aarch64-linux-gnu-objcopy", "-O", "binary", "--set-section-flags=.fnvnx.addr=alloc,load", "--only-section=.fnvnx.addr", o, "/dev/stdout"], capture_output=True, text=True).stdout.splitlines()
+    ok = bool(rows) and all(len(r.split("\t")) == 3 and r.split("\t")[1] == r.split("\t")[2] and r.split("\t")[1].isdigit() for r in rows) and "_Z2rdv" in [r.split("\t")[0] for r in rows]
+    check(".fnvnx.addr lines are <symbol>\\t<seen>\\t<routed> and name the unit's functions", ok, rows[:4])
     und = subprocess.run(["aarch64-linux-gnu-nm", "-u", o], capture_output=True, text=True).stdout
     check("dispatch plugin routes an indirect call through fnvnx_dispatch", "fnvnx_dispatch" in und, und)
     rd, wr_, f2i = disasm(ra, "_Z2rdv"), disasm(ra, "_Z2wri"), disasm(ra, "_Z3f2if")
@@ -227,6 +231,10 @@ def main():
     check("lifted root with a tracked C++ unit is red", any("is not an output" in x for x in errs(tracked, lrec)), errs(tracked, lrec))
     nopack = make_repo("nopack", lrec, {"lifted_by": T + "gen/lift.py", "pack": "nope"}, {T + "gen/lift.py": lift, ROOT + "/a.cc": None})
     check("lifted root naming no external is red", any("names no external" in x for x in errs(nopack, lrec)), errs(nopack, lrec))
+    for what, tool in (("an untracked file", T + "gen/none.py"), ("a file that is not a .py", T + "gen/lift.txt"),
+                       ("a file of the product root", ROOT + "/lift.py")):
+        bad = make_repo("liftby_" + what.replace(" ", "_"), lrec, {"lifted_by": tool, "pack": "pack"}, {T + "gen/lift.py": lift, T + "gen/lift.txt": lift, ROOT + "/lift.py": lift, ROOT + "/a.cc": None})
+        check("lifted_by naming %s is red" % what, any("is not a tracked .py of an admitted tool root" in x for x in errs(bad, lrec)), errs(bad, lrec))
 
 
 if __name__ == "__main__":

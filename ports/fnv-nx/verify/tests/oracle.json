@@ -267,6 +267,18 @@
     "ports/fnv-nx/verify/fpbound.py"
    ]
   },
+  "test_gate_assumptions.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_assumptions.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_assumptions.py"
+   ]
+  },
   "test_gate_contract.py": {
    "references": [
     {
@@ -333,6 +345,25 @@
     "ports/fnv-nx/contract/hive.py"
    ]
   },
+  "test_gate_pure.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_pure.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/gate_admit.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_pure.py",
+    "ports/fnv-nx/verify/gate_admit.py",
+    "ports/fnv-nx/verify/puregate.py"
+   ]
+  },
   "test_gates.py": {
    "references": [
     {
@@ -354,7 +385,8 @@
    "subject": [
     "ports/fnv-nx/verify/gate_pure.py",
     "ports/fnv-nx/verify/gate_tests.py",
-    "ports/fnv-nx/verify/gates.json",
+    "ports/fnv-nx/verify/gates.d/selftests.json",
+    "ports/fnv-nx/verify/gatesdir.py",
     "ports/fnv-nx/verify/l1.py",
     "ports/fnv-nx/verify/env.json",
     "ports/fnv-nx/verify/puregate.py",
@@ -412,6 +444,29 @@
     "ports/fnv-nx/verify/runtime.py",
     "ports/fnv-nx/verify/toolflags.py",
     "ports/fnv-nx/verify/toolflags_policy.py"
+   ]
+  },
+  "test_link.py": {
+   "references": [
+    {
+     "anchor": "## Link: the guest ELF",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    },
+    {
+     "anchor": "## link/ldcheck.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/recipe.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/link/ldcheck.py"
    ]
   },
   "test_linkstrict.py": {
@@ -645,6 +700,18 @@
    "subject": [
     "ports/fnv-nx/verify/unitstage.py",
     "ports/fnv-nx/verify/runtime.py"
+   ]
+  },
+  "test_uses.py": {
+   "references": [
+    {
+     "anchor": "## Outputs and uses",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
    ]
   },
   "test_verdict.py": {
