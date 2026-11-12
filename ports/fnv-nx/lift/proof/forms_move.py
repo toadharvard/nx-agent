@@ -50,17 +50,20 @@ def pop(c):
     F, o = c.F, c.ops[0]; esp = V('esp', 32); w = 16 if c.o16 else 32; F.reg('esp', esp + w // 8)
     if o.k == 'm': store_op(F, o, ea(o, esp + w // 8), load(esp, w))      # SDM POP: ESP as base of the destination is incremented before the address is computed
     else: wr(F, o, load(esp, w))
-@handler('pushal', 'pushad')
+@handler('pushal', 'pushad', 'pushaw')
 def pushad(c):
-    F, esp = c.F, V('esp', 32)
-    for i, r in enumerate(REGS): F.store(esp - 4 * (i + 1), esp if r == 'esp' else V(r, 32))      # SDM: the pre-PUSHAD ESP is pushed
-    F.reg('esp', esp - 32)
-@handler('popal', 'popad')
+    """SDM PUSHA/PUSHAD: the eight registers in the order EAX ECX EDX EBX ESP EBP ESI EDI, the pre-instruction ESP as the ESP slot; 16-bit words under the 0x66 prefix (PUSHA), ESP -= 8 * size"""
+    F, esp = c.F, V('esp', 32); w = 16 if c.o16 else 32; n = w // 8
+    for i, r in enumerate(REGS): F.store(esp - n * (i + 1), trunc(V(r, 32), w))
+    F.reg('esp', esp - 8 * n)
+@handler('popal', 'popad', 'popaw')
 def popad(c):
-    F, esp = c.F, V('esp', 32)
+    """SDM POPA/POPAD: the ESP slot is skipped; under the 0x66 prefix only the low words are written (bits 31:16 are kept)"""
+    F, esp = c.F, V('esp', 32); w = 16 if c.o16 else 32; n = w // 8
     for i, r in enumerate(reversed(REGS)):
-        if r != 'esp': F.reg(r, load(esp + 4 * i, 32))                                             # the ESP slot is skipped
-    F.reg('esp', esp + 32)
+        if r == 'esp': continue
+        v = load(esp + n * i, w); F.reg(r, v if w == 32 else concat(extract(V(r, 32), 31, 16), v))
+    F.reg('esp', esp + 8 * n)
 
 def eflags_word():
     f = lambda n, b: zext(V(n, 1), 32) << b

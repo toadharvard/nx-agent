@@ -24,4 +24,8 @@ class ModelPatches(unittest.TestCase):
         for h in ('2e006900', '2e0108', '2e890a', '2ec60100'):
             self.proved(h)
 
+    def test_pusha_popa_by_size(self):                  # SDM PUSHA/POPA (0x66): 16-bit words, ESP -+ 16; the 32-bit forms are unchanged
+        for h in ('60', '61', '6660', '6661'):
+            self.proved(h)
+
 if __name__ == '__main__': unittest.main()
