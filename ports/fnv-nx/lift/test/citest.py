@@ -10,7 +10,7 @@ Checks per entry: operand order of _CIatan2 / _CIpow / _CIfmod (ST1 first), stac
 Prints one line per entry; exit status 1 on any difference."""
 import argparse, math, os, struct, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
-for p in ('tools', 'test', 'bench', ''): sys.path.insert(0, os.path.join(LIFT, p))
+for p in ('tools', 'test', ''): sys.path.insert(0, os.path.join(LIFT, p))
 import instest, fmathtest as FT
 import gmpy2
 from fractions import Fraction

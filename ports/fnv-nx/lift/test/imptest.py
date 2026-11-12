@@ -6,7 +6,7 @@ The whole thing (lifted guest code + generated import entries + rt) is linked as
 Expected values are computed from the x86 semantics by hand (stated at each case). Prints one line per case; exit status 1 on any difference."""
 import argparse, os, struct, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
-for p in ('bench', 'tools', 'test', ''): sys.path.insert(0, os.path.join(LIFT, p))
+for p in ('tools', 'test', ''): sys.path.insert(0, os.path.join(LIFT, p))
 import fnvlift as L, instest, phf, impgen
 from keystone import Ks, KS_ARCH_X86, KS_MODE_32
 from unicorn import Uc, UcError, UC_ARCH_ARM64, UC_MODE_ARM
