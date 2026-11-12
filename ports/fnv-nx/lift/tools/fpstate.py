@@ -129,7 +129,7 @@ def scan1(args):
     F = Fn(a, ext, kind)
     if not F.ok:
         return a, None
-    r = dict(a3=[], fcw=[], mx=[], rd=[], x87=0)
+    r = dict(a3=[], fcw=[], mx=[], rd=[], imp=[], x87=0)
     r['eax'] = FP.eaxscan(F)
     for x in sorted(F.ins):
         i = F.ins[x]; m = mn(i); o = i.operands
@@ -153,6 +153,8 @@ def scan1(args):
                 r['fcw'].append((x, m, [('u', 'env-load')]))
         elif m == 'call' and o[0].type == X.X86_OP_MEM and not o[0].mem.base and not o[0].mem.index and not o[0].mem.segment:
             nm = W.IATADDR.get(o[0].mem.disp & M32)
+            if nm is not None:
+                r['imp'].append((x, nm))
             if nm in IMP_CTL:
                 a1, a2 = push_consts(F, x, 2)
                 if nm == '_fpreset':
@@ -164,6 +166,8 @@ def scan1(args):
                 r['fcw'].append((x, 'imp:' + nm, e1)); r['mx'].append((x, 'imp:' + nm, e2))
             elif nm in IMP_STAT:
                 r['rd'].append((x, 'imp:' + nm, 'escapes', 'import-result'))
+        elif m == 'jmp' and o[0].type == X.X86_OP_MEM and not o[0].mem.base and not o[0].mem.index and not o[0].mem.segment and W.IATADDR.get(o[0].mem.disp & M32) is not None:
+            r['imp'].append((x, W.IATADDR[o[0].mem.disp & M32]))      # an import thunk (`jmp [slot]`) transfers to the import as well
         elif m in ('fnstsw', 'fstsw'):
             r['rd'].append((x, m, 'pending', ''))
         elif m in ('fnstenv', 'fstenv', 'fnsave', 'fsave', 'fxsave', 'stmxcsr', 'fnclex', 'fclex'):
@@ -238,7 +242,7 @@ def do_scan(exe, facts):
             res[a] = r
     bad = sorted(a for a in res if res[a] is None)
     # distinct instruction addresses: entries overlap (inner entries and tails share code); the owner is the lowest entry containing it
-    fcw, mx, rd, a3 = {}, {}, {}, {}
+    fcw, mx, rd, a3, imp = {}, {}, {}, {}, {}
     ents3 = defaultdict(set)
     for a in sorted(res):
         r = res[a]
@@ -252,6 +256,8 @@ def do_scan(exe, facts):
             rd.setdefault((x, m), (c, why, a))
         for x, t in r['a3']:
             a3.setdefault((x, t), a); ents3[t].add(a)
+        for x, nm in r['imp']:
+            imp.setdefault(x, (nm, a))
     # status readers: forward value walk for fnstsw ax
     # callee-reads-eax facts (as fpmodes.main): a call with the status word live in eax is an escape only if the callee may read eax at entry (LTCG register arguments)
     FP.KNOWN.clear(); FP.EAXLIVE.clear()
@@ -285,6 +291,9 @@ def do_scan(exe, facts):
     with open(out + '/readers.tsv', 'w') as f:
         for (x, m), (c, why, a) in sorted(rd.items()):
             f.write('%08x\t%s\t%s\t%s\tentry=%08x\n' % (x, m, c, why, a))
+    with open(out + '/impcalls.tsv', 'w') as f:      # every direct call through an import slot (address, import name, owner entry)
+        for x, (nm, a) in sorted(imp.items()):
+            f.write('%08x\t%s\tentry=%08x\n' % (x, nm, a))
     with open(out + '/a3.tsv', 'w') as f:
         for (x, t), a in sorted(a3.items()):
             f.write('%08x\t%s\tentry=%08x\n' % (x, t, a))
@@ -315,10 +324,15 @@ def do_scan(exe, facts):
     mask_ok = unk_f == 0 and unk_m == 0 and not cleared
     nobs = sum(1 for (x, m), (c, why, a) in rd.items() if c == 'escapes')
     stat_ok = nobs == 0
+    def rcclass(A):      # rounding control reachable at ANY point (R is the program-wide set of control words): unproven when a control-word load is unknown, else read off the field set
+        if A['unk']: return 'unproven'
+        v = set(A['fields'].get('RC', []))
+        return 'proven-nearest' if v == {0} else ('proven-other:%s' % ','.join('%x' % x for x in sorted(v))) if 0 not in v else 'mixed:%s' % ','.join('%x' % x for x in sorted(v))
+    rc_x87, rc_sse = rcclass(A1), rcclass(A1m)
     with open(out + '/scan.tsv', 'w') as f:
-        f.write('module\t%s\nexe_sha256\t%s\nuniverse_md5\t%s\nI-FPMASK\t%s\tunknown_fcw=%d unknown_mxcsr=%d cleared_mask_bits=%s\nI-FPSTICKY\t%s\tobservers=%d\n' % (
+        f.write('module\t%s\nexe_sha256\t%s\nuniverse_md5\t%s\nI-FPMASK\t%s\tunknown_fcw=%d unknown_mxcsr=%d cleared_mask_bits=%s\nI-FPSTICKY\t%s\tobservers=%d\nRC_X87\t%s\nRC_SSE\t%s\n' % (
             os.path.basename(exe), hashlib.sha256(open(exe, 'rb').read()).hexdigest(), hashlib.md5(raw).hexdigest(), 'holds' if mask_ok else 'unproven', unk_f, unk_m,
-            ','.join(map(str, cleared)) or '-', 'holds' if stat_ok else 'unproven', nobs))
+            ','.join(map(str, cleared)) or '-', 'holds' if stat_ok else 'unproven', nobs, rc_x87, rc_sse))
     L.append('module invariants: I-FPMASK %s (unknown loads fcw %d mxcsr %d, mask bits clearable %s)  I-FPSTICKY %s (observers %d)' % ('holds' if mask_ok else 'unproven', unk_f, unk_m, cleared or '-', 'holds' if stat_ok else 'unproven', nobs))
     print('\n'.join(L))
 
