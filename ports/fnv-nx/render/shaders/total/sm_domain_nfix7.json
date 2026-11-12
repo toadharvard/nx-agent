@@ -1,0 +1,66 @@
+{
+ "R": 69642,
+ "commit": "b575bb94",
+ "compile_set_all": {
+  "ps": 2344532921995152376284717440,
+  "vs": 5461848
+ },
+ "compile_set_distinct": {
+  "ps": 293066615249949958598763776,
+  "total": 293066615249949958599106120,
+  "vs": 342344
+ },
+ "nfix": 7,
+ "per_model": {
+  "ps_2_x": {
+   "all_shaders": 7604,
+   "distinct_args": 293066615249907511433030144,
+   "distinct_shaders": 1190
+  },
+  "ps_3_0": {
+   "all_shaders": 556,
+   "distinct_args": 42447165733632,
+   "distinct_shaders": 176
+  },
+  "vs_1_1": {
+   "all_shaders": 1808,
+   "distinct_args": 12384,
+   "distinct_shaders": 39
+  },
+  "vs_2_0": {
+   "all_shaders": 5354,
+   "distinct_args": 318496,
+   "distinct_shaders": 309
+  },
+  "vs_3_0": {
+   "all_shaders": 469,
+   "distinct_args": 11464,
+   "distinct_shaders": 95
+  }
+ },
+ "ps_classes": 258,
+ "ps_distinct_by_declared_samplers": {
+  "0": 57,
+  "1": 237,
+  "10": 8,
+  "12": 8,
+  "14": 8,
+  "16": 4,
+  "2": 277,
+  "3": 242,
+  "4": 187,
+  "5": 182,
+  "6": 88,
+  "7": 48,
+  "8": 16,
+  "9": 4
+ },
+ "ps_distinct_without_sampler_dims": 677888,
+ "shaders": {
+  "ps_all": 8160,
+  "ps_distinct": 1366,
+  "vs_all": 7631,
+  "vs_distinct": 443
+ },
+ "vs_classes": 146
+}
