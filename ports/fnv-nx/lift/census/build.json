@@ -4193,7 +4193,7 @@
    "name": "fnvnx_ftoi",
    "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc",
    "args": {
-    "mode": "native"
+    "mode": "lifted"
    }
   },
   {
