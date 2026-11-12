@@ -5,7 +5,7 @@
 #                                [--gpu-branch <artifacts branch>]
 #
 # Steps:
-#  1 setup: nothing is installed. verify/envcheck.py check (the verdict farms' own check of verify/env.json, or BOOT_ENV) runs first;
+#  1 setup: nothing is installed. verify/envcheck.py check (the verdict farms' own check of verify/env.json) runs first;
 #    a mismatch is an input error (rc 1, "set the host up with farm/setup_verdict_env.sh") before anything is fetched or published
 #  2 branch l1-contract/elf/<elf_id> of the artifacts repository (the contract's own file formats; verify/bootinputs.py converts
 #    them, and fails on any row or line it does not understand): guest.elf, or manifest.json + part.NNN (joined in manifest
@@ -43,7 +43,8 @@
 # Stage table: env BOOT_STAGE_TABLE_BRANCH (default l4-verify/milestones), file stage.milestones (bootmiles format), appended after the
 #    contract's rows (bootinputs.py milestones --stage-table: names unique, every exe address a lifted code entry). A missing branch: the
 #    job runs with the contract rows only and the final line says stage_table=absent; a present branch without the file fails the job.
-# Env: BOOT_INPUTS (the declared-inputs pin file, default verify/boot_inputs.json), ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
+# The declared inputs (verify/env.json, verify/boot_inputs.json) are read only from the tree the job runs from; no variable redirects them.
+# Env: ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
 # when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (default $HOME/fnvnx-farm),
 # WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
 # passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it).
@@ -85,7 +86,7 @@ mkdir -p "$FARM_HOME" "$WORK"
 NX_COMMIT=$(git -C "$SELF_DIR" rev-parse HEAD) || die "$SELF_DIR is not inside a git checkout (meta.json records its commit)"
 
 # 1. setup
-ENVF=${BOOT_ENV:-$NX/verify/env.json}
+ENVF=$NX/verify/env.json   # the declared inputs are read only from the tree the job runs from: verify/env.json, verify/boot_inputs.json (no variable redirects them)
 python3 -I "$NX/verify/envcheck.py" check --env "$ENVF" > "$WORK/envcheck.txt" 2>&1 || { sed 's/^/boot_job: /' "$WORK/envcheck.txt" >&2; die "input-error: the host does not match the declared environment ($ENVF); set the host up with farm/setup_verdict_env.sh"; }
 if [ -n "$GPU_BRANCH" ]; then   # the renderer's host packages are part of the declared environment (verify/env.json): required, never installed here
   for p in gcc libegl1 libegl-mesa0; do
@@ -181,7 +182,7 @@ SD=$WORK/sd; chmod -R u+w "$SD" 2> /dev/null || true; rm -rf "$SD"; mkdir -p "$S
 # the declared port inputs (verify/boot_inputs.json: the font set): the pinned commit is fetched through the same artifacts clone, then
 # verify/bootdecl.py verifies (early, the job's input-error; boot.py --declared-inputs verifies again and mounts) sha256(sums file) == the pin, the file set against the sums list (an extra or a missing file is an error)
 # and every file, and boot.py mounts it read-only under the card (--declared-inputs). Any mismatch ends the job as input-error before the boot.
-PINS=${BOOT_INPUTS:-$NX/verify/boot_inputs.json}   # BOOT_INPUTS: another pin file (the job test points it at a fixture)
+PINS=$NX/verify/boot_inputs.json
 DECL=$WORK/declared; rm -rf "$DECL"; mkdir -p "$DECL"
 DSRC=(); DECL_SRC=(); DERR=$WORK/declared.err
 while IFS=$'\t' read -r dname dcommit dpath dsums; do
