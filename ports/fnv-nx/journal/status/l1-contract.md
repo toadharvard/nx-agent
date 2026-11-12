@@ -600,3 +600,10 @@ Ids: gate_eh uses the orchestrator's ASM-222/223/224. L1's 225..227 are withdraw
 - w12 0fc0b167: the doubles gate is built and green, but vacuously: 0 test roots are admitted yet (14 unit checks pass). The legal gate is built and red, not for merge: 73 VA-with-name pairs in 20 files under ports/fnv-nx, measured at w12's head 0fc0b167.
   The public-name rule is set: public iff a pinned public artifact defines it (system exports, env.json toolchain libraries, pinned third-party sources such as zlib). Anything else is decomp, and red. The census is written only to fnv-nx-build. Reported to the orchestrator as a Legal finding.
 - w8 (L3a item 16): the lift-test pair (a `lifted` sub-root + a native `test` root) is accepted. Its arguments come from plugin_args.
+
+## 09:50Z
+- L3a w1 (lift pack flags strip d6235c0f): decided.
+  - flags.semantics is origin-keyed. lifted = common + -ffreestanding -fno-exceptions -fno-asynchronous-unwind-tables -fno-unwind-tables, by construction: there is no host EH (-fno-exceptions makes it a compile error), and no host libc call by name.
+  - The plugin compiler becomes a recipe constant derived from env.json; a hand name is red.
+  - w17 is resumed for this one path item (base 58c113f0 + 9762e823).
+- A new gate, owned by L1 after the first-root merge: every lifted→native edge targets a callee proven not to throw (-fno-exceptions, or noexcept from L2's dispatch facts); otherwise red. Until it exists, the lifted pack is a measurement build on that edge.
