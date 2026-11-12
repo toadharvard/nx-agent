@@ -134,38 +134,24 @@ static tree new_site()
  * returned in registers", learn.microsoft.com, Argument Passing and Naming Conventions; the C++03 aggregate of ISO/IEC 14882:2003 8.5.1 and 9/4 that
  * VC9 uses; Agner Fog, Calling conventions, table 7), and the VC 2008 reading of it that cl 15.00.30729.01 shows on all 245 cases of
  * lift/test/clpod (table.tsv, a MEASUREMENT; the table verifies the rule, it does not define it) splits the properties in two:
- *   own (judged on the returned class only):  a user-declared constructor (copy constructor included), a base class, a private or protected
- *                                             non-static data member (the class is not an aggregate);
- *   deep (judged on the class and, recursively, on every non-static member's class, array elements included): a user copy assignment operator,
- *                                             a user destructor, a virtual function, a reference member (the class is not trivially copyable).
+ *   own (the returned class only): a user-declared constructor (copy constructor included), a base class, a private or protected non-static
+ *                                             data member (the class is not an aggregate);
+ *   propagated through members (the front end's own class flags, named at the use): a non-trivial copy assignment, a non-trivial destructor,
+ *                                             a vptr, a reference member.
  * Read from the C++ front end's own declarations of the class; every C++ front-end symbol used is declared weak at the top of this file and sits
  * behind fnvnx_cxx_fe(). A C unit has no such type: its aggregate is a POD by the language. */
-static bool deep_nontrivial(tree t)
-{
-  while (TREE_CODE(t) == ARRAY_TYPE) t = TREE_TYPE(t);
-  if (!CLASS_TYPE_P(t)) return false;
-  if (TYPE_POLYMORPHIC_P(t)) return true;
-  for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f)) {
-    if (TREE_CODE(f) == FUNCTION_DECL && !DECL_ARTIFICIAL(f)) {
-      if (DECL_DESTRUCTOR_P(f)) return true;
-      if (DECL_OVERLOADED_OPERATOR_IS(f, NOP_EXPR)) { tree p = TYPE_ARG_TYPES(TREE_TYPE(f)); if (p && TREE_CODE(TREE_TYPE(f)) == METHOD_TYPE) p = TREE_CHAIN(p);
-        if (p && p != void_list_node && TYPE_MAIN_VARIANT(TYPE_REF_P(TREE_VALUE(p)) ? TREE_TYPE(TREE_VALUE(p)) : TREE_VALUE(p)) == TYPE_MAIN_VARIANT(t)) return true; }
-    }
-    if (TREE_CODE(f) == FIELD_DECL && (TYPE_REF_P(TREE_TYPE(f)) || deep_nontrivial(TREE_TYPE(f)))) return true;
-  }
-  return false;
-}
-
 static bool msvc_pod(tree t)
 {
   if (!fnvnx_cxx_fe()) return true;
   while (TREE_CODE(t) == ARRAY_TYPE) t = TREE_TYPE(t);
   if (!CLASS_TYPE_P(t)) return true;
-  if (TYPE_HAS_USER_CONSTRUCTOR(t)) return false;
-  if (TYPE_BINFO(t) && BINFO_N_BASE_BINFOS(TYPE_BINFO(t)) > 0) return false;
+  if (TYPE_HAS_USER_CONSTRUCTOR(t)) return false;                                      /* a user constructor, copy constructor included */
+  if (TYPE_BINFO(t) && BINFO_N_BASE_BINFOS(TYPE_BINFO(t)) > 0) return false;           /* a base class */
   for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f))
-    if (TREE_CODE(f) == FIELD_DECL && (TREE_PRIVATE(f) || TREE_PROTECTED(f))) return false;
-  return !deep_nontrivial(t);
+    if (TREE_CODE(f) == FIELD_DECL && (TREE_PRIVATE(f) || TREE_PROTECTED(f))) return false;   /* not an aggregate */
+  /* the front end propagates these through the members itself (finish_struct): TYPE_HAS_COMPLEX_COPY_ASSIGN (a user or non-trivial copy assignment,
+   * also implied by a member), TYPE_HAS_NONTRIVIAL_DESTRUCTOR, TYPE_POLYMORPHIC_P (a vptr), CLASSTYPE_REF_FIELDS_NEED_INIT (a reference member) */
+  return !(TYPE_HAS_COMPLEX_COPY_ASSIGN(t) || TYPE_HAS_NONTRIVIAL_DESTRUCTOR(t) || TYPE_POLYMORPHIC_P(t) || CLASSTYPE_REF_FIELDS_NEED_INIT(t));
 }
 
 /* How the target passes a value is asked of the pinned compiler's own backend, never classified here (ASM-001): pass_by_reference, then
