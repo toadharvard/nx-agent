@@ -39,7 +39,7 @@ TEST(host_hooks_tls_slot_per_thread)
 
     Probe p = {};
     pthread_t t;
-    CHECK_EQ(pthread_create(&t, NULL, probe_thread, &p), 0);
+    CHECK_EQ(test_pthread_create(&t, NULL, probe_thread, &p), 0);
     CHECK_EQ(pthread_join(t, NULL), 0);
     CHECK(p.first != NULL && p.first != mine);   /* another thread, another slot */
     CHECK(p.initial == NULL);                    /* zero although this thread had stored 0x1000 */
@@ -48,7 +48,7 @@ TEST(host_hooks_tls_slot_per_thread)
     CHECK(*mine == (struct cpu *)(uintptr_t)0x1000);   /* the other thread's store did not reach this slot */
 
     Probe q = {};
-    CHECK_EQ(pthread_create(&t, NULL, probe_thread, &q), 0);
+    CHECK_EQ(test_pthread_create(&t, NULL, probe_thread, &q), 0);
     CHECK_EQ(pthread_join(t, NULL), 0);
     CHECK(q.initial == NULL);                    /* a second thread starts at zero too: no value carries over */
     *mine = NULL;

@@ -89,4 +89,7 @@ struct s4_reg { s4_reg(s4_case *c) { c->next = s4_cases; s4_cases = c; } };
 void s4_write_file(const char *win_path, const char *data);   /* through CreateFileA */
 const char *s4_root(void);                                     /* host root of this run */
 
+#define TT_GUARD s4_thread_guard
+#include "../test_threads.h"   /* the thread start helpers: test_CreateThread, test_pthread_create, test_thread */
+
 #endif

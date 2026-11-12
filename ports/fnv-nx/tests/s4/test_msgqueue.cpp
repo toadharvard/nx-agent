@@ -180,7 +180,7 @@ TEST(mq_cross_thread)
     RegisterClassA(&wc);
     g_wa = mk("MqA", 0, 0, 40, 40);
     g_bready = g_bstop = g_bdone = g_got503 = 0;
-    std::thread th([] {
+    test_thread th([] {
         g_wb = CreateWindowExA(0, "MqB", "b", 0x90000000u, 50, 0, 40, 40, NULL, NULL, NULL, NULL);
         g_bready = 1;
         DWORD t0 = GetTickCount();
@@ -200,7 +200,7 @@ TEST(mq_cross_thread)
     /* lifecycle from a third thread: the sends cross to both windows' threads */
     g_n = 0;
     volatile int done = 0;
-    std::thread lc([&] { fnvnx_app_suspend(); done = 1; });
+    test_thread lc([&] { fnvnx_app_suspend(); done = 1; });
     CHECK(wait_for(done));
     lc.join();
     CHECK(seqs({ 0x218 }, g_wa));
@@ -603,7 +603,7 @@ TEST(mq_defwindowproc)
 
 TEST(mq_cursor_and_resources)
 {
-    std::thread t([] {
+    test_thread t([] {
         CHECK_EQ(ShowCursor(TRUE), 1); CHECK_EQ(ShowCursor(FALSE), 0); CHECK_EQ(ShowCursor(FALSE), -1);   /* the counter of this thread */
         HCURSOR arrow = LoadCursorA(NULL, MINT(32512)), ibeam = LoadCursorA(NULL, MINT(32513));
         CHECK(SetCursor(ibeam) == arrow); CHECK(SetCursor(NULL) == ibeam);

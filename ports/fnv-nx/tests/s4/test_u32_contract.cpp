@@ -908,7 +908,7 @@ void click(int x, int y)
 template <class F> int run_box(UINT type, const char *text, const char *cap, Driver &d, F act, HWND owner = NULL)
 {
     d.owner = owner;
-    std::thread t([&] { if (wait_dialog(d)) act(d); });
+    test_thread t([&] { if (wait_dialog(d)) act(d); });
     int r = MessageBoxA(owner, text, cap, type);
     t.join();
     return r;

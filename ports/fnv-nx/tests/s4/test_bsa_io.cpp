@@ -340,9 +340,9 @@ TEST(bsa_two_threads_two_handles)
     build_bsa();
     host_write("Data/Fallout - Test.bsa", g_bsa.data(), g_bsa.size());
     DWORD tid;
-    HANDLE t1 = CreateThread(NULL, 0, reader_thread, (LPVOID)(uintptr_t)0, 0, &tid);
-    HANDLE t2 = CreateThread(NULL, 0, reader_thread, (LPVOID)(uintptr_t)FILE_FLAG_RANDOM_ACCESS, 0, &tid);
-    HANDLE t3 = CreateThread(NULL, 0, reader_thread, (LPVOID)(uintptr_t)FILE_FLAG_SEQUENTIAL_SCAN, 0, &tid);
+    HANDLE t1 = test_CreateThread(NULL, 0, reader_thread, (LPVOID)(uintptr_t)0, 0, &tid);
+    HANDLE t2 = test_CreateThread(NULL, 0, reader_thread, (LPVOID)(uintptr_t)FILE_FLAG_RANDOM_ACCESS, 0, &tid);
+    HANDLE t3 = test_CreateThread(NULL, 0, reader_thread, (LPVOID)(uintptr_t)FILE_FLAG_SEQUENTIAL_SCAN, 0, &tid);
     CHECK(t1 && t2 && t3);
     HANDLE all[3] = { t1, t2, t3 };
     CHECK_EQ(WaitForMultipleObjects(3, all, TRUE, 60000), WAIT_OBJECT_0);

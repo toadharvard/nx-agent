@@ -27,7 +27,7 @@ TEST(thread_suspend_running)
 {
     g_counter = 0;
     g_stop = 0;
-    HANDLE h = CreateThread(NULL, 0, spin, NULL, 0, NULL);
+    HANDLE h = test_CreateThread(NULL, 0, spin, NULL, 0, NULL);
     CHECK(h != NULL);
     while (g_counter < 1000)
         Sleep(0);
@@ -55,7 +55,7 @@ TEST(thread_suspend_running)
 TEST(thread_suspend_self_and_created_suspended)
 {
     g_self_state = 0;
-    HANDLE h = CreateThread(NULL, 0, self_suspender, NULL, 0, NULL);
+    HANDLE h = test_CreateThread(NULL, 0, self_suspender, NULL, 0, NULL);
     while (g_self_state == 0)
         Sleep(1);
     Sleep(20);
@@ -67,7 +67,7 @@ TEST(thread_suspend_self_and_created_suspended)
 
     g_counter = 0;
     g_stop = 0;
-    HANDLE s = CreateThread(NULL, 0, spin, NULL, CREATE_SUSPENDED, NULL);
+    HANDLE s = test_CreateThread(NULL, 0, spin, NULL, CREATE_SUSPENDED, NULL);
     Sleep(10);
     CHECK_EQ(g_counter, 0);
     CHECK_EQ(SuspendThread(s), 1);    /* created suspended: count 1 -> 2 */

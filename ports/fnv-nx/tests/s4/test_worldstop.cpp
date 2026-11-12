@@ -40,7 +40,7 @@ TEST(ws2_counters_frozen_in_window)
     g_quit = 0;
     for (int i = 0; i < NW; i++) {
         g_cnt[i].v = 0;
-        h[i] = CreateThread(NULL, 0, counter_thread, &g_cnt[i], 0, NULL);
+        h[i] = test_CreateThread(NULL, 0, counter_thread, &g_cnt[i], 0, NULL);
     }
     int moved_in_window = 0, stuck_after = 0;
     for (int round = 0; round < 1000; round++) {
@@ -93,7 +93,7 @@ static void concurrent_stoppers(int others)
 {
     g_shared = 0; g_in_window = 0; g_overlap = 0;
     HANDLE h[3];
-    for (int i = 0; i < others; i++) h[i] = CreateThread(NULL, 0, stopper_thread, NULL, 0, NULL);
+    for (int i = 0; i < others; i++) h[i] = test_CreateThread(NULL, 0, stopper_thread, NULL, 0, NULL);
     stopper_loop();
     join_all(h, others);
     CHECK_EQ(g_shared, (unsigned long)(others + 1) * ROUNDS);
@@ -109,7 +109,7 @@ TEST(ws2_suspendthread_survives_stop)
     g_quit = 0;
     for (int i = 0; i < NW; i++) {
         g_cnt[i].v = 0;
-        h[i] = CreateThread(NULL, 0, counter_thread, &g_cnt[i], 0, NULL);
+        h[i] = test_CreateThread(NULL, 0, counter_thread, &g_cnt[i], 0, NULL);
     }
     while (g_cnt[0].v < 1000) Sleep(0);
     CHECK_EQ(SuspendThread(h[0]), 0);
@@ -142,7 +142,7 @@ static DWORD creator_thread(LPVOID)
 {
     while (g_creating) {
         HANDLE t[3];
-        for (int i = 0; i < 3; i++) t[i] = CreateThread(NULL, 0, short_thread, NULL, 0, NULL);
+        for (int i = 0; i < 3; i++) t[i] = test_CreateThread(NULL, 0, short_thread, NULL, 0, NULL);
         for (int i = 0; i < 3; i++) {
             WaitForSingleObject(t[i], INFINITE);
             CloseHandle(t[i]);
@@ -154,7 +154,7 @@ TEST(ws2_create_exit_during_stops)
 {
     g_ran = 0; g_creating = 1;
     HANDLE c[2];
-    for (int i = 0; i < 2; i++) c[i] = CreateThread(NULL, 0, creator_thread, NULL, 0, NULL);
+    for (int i = 0; i < 2; i++) c[i] = test_CreateThread(NULL, 0, creator_thread, NULL, 0, NULL);
     int moved = 0;
     /* The invariant is checked only against stops that overlap thread creation and exit, so the run is progress-bound,
      * not a fixed round count: a fixed count can finish before the creators have started a single thread (stop and
@@ -207,9 +207,9 @@ TEST(ws2_blocked_threads_continue)
     g_ev = CreateEventA(NULL, TRUE, FALSE, NULL);
     g_waiter_done = g_sleeps = g_cs_held = g_cs_released = 0;
     HANDLE h[3];
-    h[0] = CreateThread(NULL, 0, waiter_thread, NULL, 0, NULL);
-    h[1] = CreateThread(NULL, 0, sleeper_thread, NULL, 0, NULL);
-    h[2] = CreateThread(NULL, 0, holder_thread, NULL, 0, NULL);
+    h[0] = test_CreateThread(NULL, 0, waiter_thread, NULL, 0, NULL);
+    h[1] = test_CreateThread(NULL, 0, sleeper_thread, NULL, 0, NULL);
+    h[2] = test_CreateThread(NULL, 0, holder_thread, NULL, 0, NULL);
     while (!g_cs_held) Sleep(0);
     for (int round = 0; round < 300; round++) {
         fnvl_host_world_stop();

@@ -259,7 +259,7 @@ TEST(bnd_threads_through_the_boundary)
 {
     int c0 = g_bnd_threads_created, r0 = g_bnd_threads_run, f0 = g_bnd_threads_freed, u0 = g_bnd_threads_freed_unrun;
     DWORD tid = 0;
-    HANDLE t = CreateThread(NULL, 0, t_return, (LPVOID)(uintptr_t)1234, 0, &tid);
+    HANDLE t = test_CreateThread(NULL, 0, t_return, (LPVOID)(uintptr_t)1234, 0, &tid);
     CHECK(t != NULL);
     CHECK_EQ(WaitForSingleObject(t, 5000), 0);
     DWORD code = 0;
@@ -269,7 +269,7 @@ TEST(bnd_threads_through_the_boundary)
     CHECK_EQ(g_bnd_threads_run, r0 + 1);
     CHECK_EQ(g_bnd_threads_freed, f0 + 1);   /* the context was given back when the start routine returned */
     /* ExitThread from inside: the same path, the exit code is the argument */
-    t = CreateThread(NULL, 0, t_exit, NULL, 0, &tid);
+    t = test_CreateThread(NULL, 0, t_exit, NULL, 0, &tid);
     CHECK(t != NULL);
     CHECK_EQ(WaitForSingleObject(t, 5000), 0);
     CHECK(GetExitCodeThread(t, &code) && code == 55);
@@ -278,7 +278,7 @@ TEST(bnd_threads_through_the_boundary)
     CHECK_EQ(g_bnd_threads_freed, f0 + 2);
     CHECK_EQ(g_bnd_threads_freed_unrun, u0);
     /* created suspended: the context exists, nothing runs until ResumeThread */
-    t = CreateThread(NULL, 0, t_return, (LPVOID)(uintptr_t)9, CREATE_SUSPENDED, &tid);
+    t = test_CreateThread(NULL, 0, t_return, (LPVOID)(uintptr_t)9, CREATE_SUSPENDED, &tid);
     CHECK(t != NULL);
     CHECK_EQ(g_bnd_threads_created, c0 + 3);
     CHECK_EQ(g_bnd_threads_run, r0 + 2);

@@ -77,7 +77,7 @@ TEST(gpa_encode_pointer)
         same += EncodePointer((LPVOID)p) == (LPVOID)p;
     CHECK(same < 8);
     /* a value encoded in another thread decodes here: the cookie is per process */
-    HANDLE h = CreateThread(NULL, 0, enc_worker, (LPVOID)0x12345678, 0, NULL);
+    HANDLE h = test_CreateThread(NULL, 0, enc_worker, (LPVOID)0x12345678, 0, NULL);
     CHECK(h != NULL);
     WaitForSingleObject(h, 5000);
     CloseHandle(h);
@@ -206,7 +206,7 @@ TEST(gpa_fls_slot_limit)
 static DWORD g_slot_a, g_slot_b;
 static volatile int g_phase, g_ready;
 
-static DWORD fls_thread_body(LPVOID p)
+static DWORD fls_thread(LPVOID p)
 {
     uintptr_t n = (uintptr_t)p;
     SetLastError(0xdead);
@@ -222,11 +222,6 @@ static DWORD fls_thread_body(LPVOID p)
         ExitThread(0);   /* the explicit exit runs the callbacks too */
     return 0;
 }
-/* the CHECKs of this procedure end it, not the process: the harness guard (s4_test.h), the case fails at its join */
-static DWORD fls_thread(LPVOID p)
-{
-    return s4_thread_guard([&]() -> DWORD { return fls_thread_body(p); }, (DWORD)0xFA11);
-}
 
 TEST(gpa_fls_threads)
 {
@@ -240,7 +235,7 @@ TEST(gpa_fls_threads)
     HANDLE h[3];
     DWORD tid[3];
     for (int i = 0; i < 3; i++)
-        h[i] = CreateThread(NULL, 0, fls_thread, (LPVOID)(uintptr_t)(i + 1), 0, &tid[i]);
+        h[i] = test_CreateThread(NULL, 0, fls_thread, (LPVOID)(uintptr_t)(i + 1), 0, &tid[i]);
     while (g_ready < 3)
         Sleep(1);
     CHECK(FlsGetValue(g_slot_b) == NULL);          /* this thread never set slot b */
@@ -303,11 +298,11 @@ TEST(gpa_fls_thread_exit_order)
     g_order_a = FlsAlloc(rec_cb);
     g_order_b = FlsAlloc(rec_cb);
     g_order_c = FlsAlloc(rec_cb);
-    HANDLE h = CreateThread(NULL, 0, empty_thread, NULL, 0, NULL);
+    HANDLE h = test_CreateThread(NULL, 0, empty_thread, NULL, 0, NULL);
     WaitForSingleObject(h, 5000);
     CloseHandle(h);
     CHECK_EQ(cb_count(), 0);
-    h = CreateThread(NULL, 0, order_thread, NULL, 0, NULL);
+    h = test_CreateThread(NULL, 0, order_thread, NULL, 0, NULL);
     WaitForSingleObject(h, 5000);
     CloseHandle(h);
     CHECK_EQ(cb_count(), 3);

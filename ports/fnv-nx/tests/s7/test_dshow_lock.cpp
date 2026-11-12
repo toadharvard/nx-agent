@@ -16,6 +16,7 @@
 #include "s7_test.h"
 
 #include "fnvnx_win32_ext.h"
+#include "../test_threads.h"
 #define DSH_IMPL
 #include "../../platform/audio/dshow_int.h"
 #include "../../platform/audio/mixer.h"
@@ -596,7 +597,7 @@ bool usable(World &w)
     g_sc.reenter = nullptr;
     auto ok = std::make_shared<std::promise<bool>>();
     std::future<bool> fut = ok->get_future();
-    std::thread([&w, ok] {
+    test_thread([&w, ok] {
         GFilt extra;
         const uint16_t nm[] = {'U', 0};
         bool good = w.enum_filters(nullptr, nullptr) >= 0;
@@ -690,7 +691,7 @@ TEST(dsl_other_thread_during_callout)
         auto ok = std::make_shared<std::promise<bool>>();
         std::future<bool> fut = ok->get_future();
         tried++;
-        std::thread([&w, ok] {
+        test_thread([&w, ok] {
             GFilt extra;
             const uint16_t nm[] = {'T', 0};
             uint32_t st = 0;
