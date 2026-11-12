@@ -191,3 +191,11 @@ Defining unit of `_ZTV<C>` (first), count: dev/copy_clear.cpp 1, dev/d3d9_adapte
 | NxVolume9 | `_ZTV9NxVolume9` | gen/d9impl_unk.gen.cpp | dev/res_create.cpp; gen/d9impl_unk.gen.cpp | yes |
 
 Class for L2: (a) for all 48: an sdd defect (the clone symbol is not defined in the object that defines `_ZTV<C>`); counts (a) 48, (b) 0. Since each vtable is weak and emitted in every unit that uses it, the clone must be emitted as a weak companion in each of them, or the reference must not be created.
+
+## Class: test links with `--unresolved-symbols=ignore-all` (w5, found while adding lib/sha256 to the test builds)
+
+A symbol with no body links as a null address and fails only when called, so a missing body is a silent null at run time (the stub class). Count by `grep -rn unresolved-symbols tests/l6 render`, measured at the head of `claude/fnv-l6-render-w5-key`: **22 link commands in 16 test scripts under tests/l6, 0 in render/ code** (2 further mentions are prose: `tests/l6/dev/test_dev.py:6` docstring, `render/d3d9/dev/README.md:3`). Outside this scope: `tests/v1/test_a57_perf_prices.py:178,185` (2).
+
+file:line: draw/test_draw.py:53 ffpdev/test_ffpdev.py:90 ffpdev/test_ffpdev.py:192 present/test_present.py:64 dev/test_dev.py:38 pvw/test_pvw.py:57 devlife/test_devlife.py:218 devlife/test_devlife.py:269 res/test_res.py:36 env/test_env.py:43 tex/test_tex.py:166 oom/test_oom.py:73 m1/test_m1.py:217 m1/test_m1.py:298 x1/test_x1.py:29 const/test_const.py:37 bridge/test_bridge.py:37 bridge/test_bridge.py:47 drawgl/test_drawgl.py:47 drawgl/test_drawgl.py:141 copy/test_copy.py:66 copy/test_copy.py:126 
+
+Not changed (host tests, retired into the test-root rewrite; the class goes to L1 through the lead).

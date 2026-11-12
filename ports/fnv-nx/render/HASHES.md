@@ -63,3 +63,5 @@ Content-key rows #1-#8 and #12 are converted to `fnvnx_sha256` (`lib/sha256`) / 
 | 12 | `gl4_d3dshader.c` verifies `memcmp(SHA-256(code), d.key)`; tests use `fnvnx_sha256` |
 
 Not content keys, unchanged: #9 (bucket, memcmp-verified), #10 (scene readback checksum), #11 (test palette/program checksums). Outside render/tests/l6 and unchanged: row #13 and the `tools/compare`, `toolchain/nro`, `tests/nx1`, `tests/s6b/census.py`, `tests/s16` users of `nxd9io.fnv1a64` / `shaders_nx.fnv1a64`, which name recorded files, not cache keys.
+
+Open: `lib/sha256` is not yet a link root of `render/d3d9` (its `link` is null; `link.roots` is L1 w15). Until then d3d9 reaches `fnvnx_sha256` through the include only; the body comes from the root that links d3d9.
