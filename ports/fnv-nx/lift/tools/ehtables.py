@@ -233,7 +233,7 @@ class EH(Flow):
 
     def relocvals(s):
         """s.rv: the values of the relocated dwords that can be control-flow targets. A dword of the IP column of a parsed FuncInfo IP-to-state map is excluded: the table is a sorted
-        key list read only by the C++ frame handler (assumption), and its keys lie mid-block."""
+        key list read only by the C++ frame handler (ASM-227), and its keys lie mid-block."""
         k = sum(1 for r in s.fi.values() if r.get('ipt'))
         if s.rv is None or k != s.rvk:
             ip = {r['ipt'] + 8 * i for r in s.fi.values() if r.get('ipt') for i in range(len(r['ipmap']))}

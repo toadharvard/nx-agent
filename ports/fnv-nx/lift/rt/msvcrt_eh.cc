@@ -458,7 +458,7 @@ static int xcpt_filter(u32 ptrs, u32 *res)
     *res = XCPT_CONTINUE_EXECUTION;
     return 1;
 }
-/* _XcptFilter(ex, ptrs), cdecl: Wine _XcptFilter (ex is assumed equal to the record's code) */
+/* _XcptFilter(ex, ptrs), cdecl: Wine _XcptFilter (ex equals the record's code: ASM-229) */
 extern "C" void fnvl_msvcrt_XcptFilter(void)
 {
     u32 sp0 = esp, res;

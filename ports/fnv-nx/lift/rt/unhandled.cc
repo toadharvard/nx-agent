@@ -34,8 +34,8 @@ extern "C" u32 fnvl_os_unhandled(u32 record, u32 context)
 
 /* An exception raised by a native body of the platform (its w32_raise), i.e. inside an import call of this thread: the same dispatch on the guest
    chain, with the guest state of the import call (c->r, rt/imp.h): ExceptionAddress and Context.Eip = the import's return address, Context.Esp =
-   the esp of the call. ContinueExecution returns to the native body (changes a handler made to that CONTEXT do not reach native state: assumption
-   A8, the CONTEXT of a system DLL frame has no counterpart here). A handler that leaves by a non-local transfer discards the native frames
+   the esp of the call. ContinueExecution returns to the native body (changes a handler made to that CONTEXT do not reach native state: ASM-226;
+   the CONTEXT of a system DLL frame has no counterpart here). A handler that leaves by a non-local transfer discards the native frames
    (imp.h); on a thread with no import frame the guest code simply goes on from the address it jumped to.
    fnvnx_lift_raise_backend is the AAPCS function the platform is given (fnvl_runtime_install, called from fnvnx_lift_imports_init). */
 extern "C" void fnvl_backend_main(u32 code, u32 flags, u32 nargs, const u32 *args) {

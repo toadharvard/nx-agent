@@ -1341,6 +1341,76 @@
    "owner": "L3a"
   },
   {
+   "id": "ASM-226",
+   "text": "A handler's change to the CONTEXT of an exception raised inside an import does not reach the native body.",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/unhandled.cc"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: a static fact from the EH tables and flow that no reachable filter returning EXCEPTION_CONTINUE_EXECUTION for an import-raised exception writes CONTEXT",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-227",
+   "text": "Only the C++ frame handler reads the FuncInfo IP-to-state key list.",
+   "used_by": [
+    "ports/fnv-nx/lift/tools/ehtables.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: the consumer fact of the IP-to-state list from the points-to (L3a w4)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-228",
+   "text": "A callee does not read eax at a call.",
+   "used_by": [
+    "ports/fnv-nx/lift/tools/fpmodes.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: the callee read set from the code (pcsrc)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-229",
+   "text": "The ex argument of _XcptFilter equals the exception record's code.",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/msvcrt_eh.cc"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: a call-site fact that every caller of _XcptFilter passes GetExceptionCode() of the same record",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-230",
+   "text": "The truncation error of the generated pi/ln2 table is within its stated bound.",
+   "used_by": [
+    "ports/fnv-nx/lift/rt/fmath.c",
+    "ports/fnv-nx/lift/test/fmathtest.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: the table generator checks the bound in exact rational arithmetic",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-231",
+   "text": "A locked memory operand never splits across a cache line or an alignment boundary (LOCK-SPLIT).",
+   "used_by": [
+    "ports/fnv-nx/docs/ORDERING.md",
+    "ports/fnv-nx/lift/tools/locksites.py"
+   ],
+   "aliases": [
+    "ORDERING:LOCK-SPLIT"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: an alignment fact for every locked memory operand (locksites census + points-to offsets, L3a w4), with 0 unknown",
+   "owner": "L3a"
+  },
+  {
    "id": "ASM-320",
    "text": "rt/rcptab.cert.json was produced by farm/rcpcert.sh on a CPU with the reference identity.",
    "used_by": [

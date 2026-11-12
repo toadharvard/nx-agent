@@ -388,7 +388,7 @@ an X-form result with a proven bound below 2^32; so a guest register used as a b
   given every object of that list. The runtime object is read only for `fnvnx_lift_cpu_bytes` and the dispatcher's name; it is not judged here. It is not assumed of the flags: rules (a) and (b) are checked on the code of each object, so
   an object cannot write x27 or a guest register out of range whatever it was compiled with.
 
-### LOCK-SPLIT: a misaligned locked operation stops the world
+### LOCK-SPLIT (ASM-231): a misaligned locked operation stops the world
 
 A misaligned locked operation (`lock` forms and `xchg r, m` whose operand is not aligned to its size) is not atomic against a plain
 store to the same bytes if it only takes a global lock word: the plain store can land between its load and its store. x86 excludes that,

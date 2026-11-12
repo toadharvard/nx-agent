@@ -267,7 +267,7 @@ def statclass(F, x):
         if m == 'call':
             if (lo or ah == 1) and o[0].type == X.X86_OP_IMM and ((o[0].imm & M32) in EAXLIVE or (o[0].imm & M32) not in KNOWN):
                 return 'status-escapes', 'call-reads-eax'
-            lo = ah = 0                               # ABI assumption: a call clobbers eax (callee does not read it)
+            lo = ah = 0                               # ASM-228: a call clobbers eax (callee does not read it)
         elif m in ('ret', 'retf') or a in F.tails:
             if lo or ah == 1:
                 return 'status-escapes', 'ret/tail'

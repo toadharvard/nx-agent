@@ -453,7 +453,7 @@ def gen_consts(N=40):
 
 def const_check():
     """the pi / ln 2 table of rt/fmath.c equals MPFR's, and both the table path and the series path (Machin, atanh) give the constant at every limb count
-    n = 6..60 within the relative error the proofs assume (table: < 2^(1-32n); series: <= 2^(64-32n))"""
+    n = 6..60 within the relative error the proofs assume (ASM-230; table: < 2^(1-32n); series: <= 2^(64-32n))"""
     import re
     src = open(RT + '/fmath.c').read()
     bad = []; n_ok = 0

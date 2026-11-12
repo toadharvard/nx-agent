@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Count the locked instructions of an image's universe by what is statically known of the operand's alignment
-(docs/ORDERING.md "Lifted code", assumption LOCK-SPLIT).
+(docs/ORDERING.md "Lifted code", ASM-231 LOCK-SPLIT).
     python3 -I locksites.py --sites SETFILE OUT       the `sites` facts of gate_order (docs/ORDERING.md): SETFILE lines IMAGE<TAB>RANGES<TAB>BASE, one per image; OUT lines `1 HEXADDR` (locked
                                                     instruction), `2 HEXADDR mem|ax` (FSTSW FNSTENV FNSAVE); the decoder predicate is fnvlift/sites.py, the lifter's own
     python3 -I locksites.py IMAGE RANGES [BASE]      RANGES: ranges.tsv of tools/universe.py (entry, half-open instruction ranges);
@@ -10,7 +10,7 @@ A locked instruction: a valid LOCK prefix (fnvlift/f_sys.py lock_ok) or XCHG wit
   byte      1-byte operand: aligned by construction
   const     the operand is an absolute address (no base, no index): aligned iff address mod size == 0 (const-misaligned otherwise)
   unproven  the address has a register: its alignment is a run-time fact (rt/fnvl.h LKA tests it at every execution)
-Prints one line of counts. Nothing is decided from this count; it states the size of the assumption's domain."""
+Prints one line of counts. Nothing is decided from this count; it states the size of the domain of ASM-231."""
 import os
 import sys
 
