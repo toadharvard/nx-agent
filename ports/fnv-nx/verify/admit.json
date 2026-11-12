@@ -8,7 +8,7 @@
   {"path": "ports/fnv-nx/docs", "class": "doc", "gates": []},
   {"path": "ports/fnv-nx/farm", "class": "tool", "gates": ["selftests"], "entry": []},
   {"path": "ports/fnv-nx/journal", "class": "doc", "gates": [], "record": true},
-  {"path": "ports/fnv-nx/manifest", "class": "tool", "gates": ["selftests"], "imports": ["ports/fnv-nx/contract"], "entry": []},
+  {"path": "ports/fnv-nx/manifest", "class": "tool", "gates": ["pure", "selftests"], "imports": ["ports/fnv-nx/contract"], "entry": []},
   {"path": "ports/fnv-nx/lift/fnvlift", "class": "tool", "gates": ["selftests"], "entry": []},
   {"path": "ports/fnv-nx/lift/proof", "class": "tool", "gates": ["selftests"], "entry": []},
   {"path": "ports/fnv-nx/lift/test", "class": "tool", "gates": ["selftests"], "entry": []},

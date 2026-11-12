@@ -1,60 +1,44 @@
 #!/usr/bin/env python3
-"""gen_wire_errno.py - the wire errno list of hostabi/include/fnvnx/sockwire_errno.h, generated.
+"""gen_wire_errno.py - the wire errno list of hostabi/include/fnvnx/sockwire_errno.h, generated; pure Python over two pinned externals.
 
-    gen_wire_errno.py --newlib-include DIR --glibc-cpp CPP --out sockwire_errno.h [--check]
+    gen_wire_errno.py --libnx-convert convert_errno.c --newlib-errno sys/errno.h --committed sockwire_errno.h --out STAMP
 
 Rule (class-closing, no hand-written name or number):
-  domain  D = every errno name that the guest libc's sys/errno.h defines (with __LINUX_ERRNO_EXTENSIONS__, as libnx's
-          convert_errno.c builds it). The guest libc is the pinned runtime external's newlib; DIR holds its include tree.
-  wire    the Linux numbering (sockwire.h, libnx: "Nintendo actually used the Linux errno definitions"); the number of a name is
-          the value of the same name in the target's glibc errno.h (CPP preprocesses it with -dM, aliases resolved).
-  list    FNVNX_WIRE_ERRNO_LIST = the names of D that Linux also defines, by number; of several names of one number the one that
-          is a numeric definition in glibc comes first (the wire->local translation picks the first name).
-  rest    FNVNX_WIRE_ERRNO_NO_WIRE = the names of D that Linux does not define: libnx's bsd layer converts Linux numbers, so the
-          service cannot produce them, and the wire has no number for them.
-With --check the output file is compared with the regenerated text instead of written (red on a difference).
-The host translation is total over D by construction: a name of D with a Linux number is in the list; a number outside the list
-cannot come from the service while ASM-004 holds (fnvnx_assume_violation)."""
-import os, re, subprocess, sys, tempfile
+  source of numbers  libnx's runtime/devices/convert_errno.c: `_error_code_map` is the documented table of the bsd service's errno
+                     numbers ("Nintendo actually used the Linux errno definitions"), index = number, entry = the guest libc's name
+                     (0 = the name does not exist in the libc: the number comes out as 10000 + n, outside the domain).
+  domain             D = every errno name the guest libc's sys/errno.h defines (the runtime external's newlib).
+  list               FNVNX_WIRE_ERRNO_LIST = the names of D that the table produces, with the lowest index of the name, by number.
+                     A name that appears under a number whose Linux name differs (EAGAIN at 41, EDEADLK at 58) is listed once, at
+                     its first number.
+  rest               names of D the table never produces: no wire number (the service cannot produce them).
+The generated text is compared with the committed header; a difference makes the stage (and the build) fail, and the stamp output
+is written only on equality. The host translation is total over the list by construction; a number outside it cannot come from
+the service while ASM-004 holds (fnvnx_assume_violation)."""
+import re, sys
 
 
-def macros(cpp, src, incs):
-    with tempfile.TemporaryDirectory() as d:
-        p = os.path.join(d, "e.c")
-        open(p, "w").write(src)
-        cmd = [cpp, "-dM"] + sum([["-I", i] for i in incs], []) + [p]
-        out = subprocess.run(cmd, capture_output=True, text=True)
-        if out.returncode:
-            sys.exit("gen_wire_errno: %s failed: %s" % (" ".join(cmd), out.stderr[-400:]))
-    r = {}
-    for m in re.finditer(r"^#define (E[A-Z0-9]+) (\S+)$", out.stdout, re.M):
-        r[m.group(1)] = m.group(2)
-    return r
+def table(text):
+    zero = set(re.findall(r"^#define\s+(E[A-Z0-9]+)\s+0\s*$", text, re.M))
+    body = text[text.index("_error_code_map[]"):]
+    body = body[body.index("{") + 1:body.index("};")]
+    names = []
+    for tok in re.split(r",", re.sub(r"//[^\n]*", "", body)):
+        tok = tok.strip()
+        if tok:
+            names.append(tok)
+    return [None if t == "0" or t in zero else t for t in names]
 
 
-def resolve(defs):
-    val = {}
-    for k in defs:
-        v, seen = defs[k], {k}
-        while v in defs and v not in seen:
-            seen.add(v)
-            v = defs[v]
-        if re.fullmatch(r"\d+", v):
-            val[k] = int(v)
-    return val
-
-
-def generate(newlib, cpp):
-    nl = macros(cpp, "#define __LINUX_ERRNO_EXTENSIONS__\n#include <sys/errno.h>\n", [newlib])
-    lx = macros(cpp, "#include <errno.h>\n", [])
-    lxv = resolve(lx)
-    if set(lx) != set(lxv):
-        sys.exit("gen_wire_errno: a glibc errno name without a number: %s" % sorted(set(lx) - set(lxv)))
-    dom = sorted(nl)
-    wire = [n for n in dom if n in lxv]
-    none = [n for n in dom if n not in lxv]
-    wire.sort(key=lambda n: (lxv[n], not re.fullmatch(r"\d+", lx[n]), n))
-    rows = ["X(%s, %d)" % (n, lxv[n]) for n in wire]
+def generate(convert_text, newlib_text):
+    dom = sorted(set(re.findall(r"^#\s*define\s+(E[A-Z0-9]+)\b", newlib_text, re.M)))
+    first = {}
+    for n, name in enumerate(table(convert_text)):
+        if name is not None and name in dom and name not in first:
+            first[name] = n
+    wire = sorted(first, key=lambda k: (first[k], k))
+    none = [n for n in dom if n not in first]
+    rows = ["X(%s, %d)" % (n, first[n]) for n in wire]
     lines, cur = [], "   "
     for r in rows:
         if len(cur) + len(r) + 1 > 118:
@@ -62,24 +46,19 @@ def generate(newlib, cpp):
             cur = "   "
         cur += " " + r
     lines.append(cur)
-    nolines = " ".join(none)
-    return ("/* GENERATED by manifest/gen_wire_errno.py from the guest libc's sys/errno.h (%d names) and the glibc errno.h; do not edit.\n"
-            " * FNVNX_WIRE_ERRNO_LIST: %d names, the Linux numbers. Names of the guest libc that Linux does not define (%d, no wire\n"
-            " * number; libnx's bsd layer converts Linux numbers, so the service cannot produce them): %s */\n"
-            "#define FNVNX_WIRE_ERRNO_LIST(X) \\\n%s\n") % (len(dom), len(wire), len(none), nolines, "\n".join(lines))
+    return ("/* GENERATED by manifest/gen_wire_errno.py from libnx's convert_errno.c (the bsd service's errno table) and the guest libc's\n"
+            " * sys/errno.h (%d names); do not edit. FNVNX_WIRE_ERRNO_LIST: %d names, the service's numbers (the Linux numbers).\n"
+            " * Names of the guest libc the service cannot produce (%d, no wire number): %s */\n"
+            "#define FNVNX_WIRE_ERRNO_LIST(X) \\\n%s\n") % (len(dom), len(wire), len(none), " ".join(none), "\n".join(lines))
 
 
 def main(argv):
-    a = dict(zip(argv[::2], argv[1::2])) if "--check" not in argv else None
-    chk = "--check" in argv
-    argv = [x for x in argv if x != "--check"]
     a = dict(zip(argv[::2], argv[1::2]))
-    text = generate(a["--newlib-include"], a.get("--glibc-cpp", "aarch64-linux-gnu-cpp-13"))
-    if chk:
-        if open(a["--out"]).read() != text:
-            sys.exit("gen_wire_errno: %s differs from the regenerated list (a name of the guest libc is missing or extra)" % a["--out"])
-        print("wire errno list ok: %d names" % text.count("X("))
-    else:
+    text = generate(open(a["--libnx-convert"]).read(), open(a["--newlib-errno"]).read())
+    if "--committed" in a:
+        if open(a["--committed"]).read() != text:
+            sys.exit("gen_wire_errno: %s differs from the list regenerated from the pinned externals" % a["--committed"])
+    if "--out" in a:
         open(a["--out"], "w").write(text)
 
 
