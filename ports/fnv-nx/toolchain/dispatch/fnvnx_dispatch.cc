@@ -130,10 +130,12 @@ static tree new_site()
 
 /* ---- the call's shape */
 
-/* Is `t` returned through the hidden pointer by the x86 callee? The rule is the one measured on the game's compiler (cl 15.00.30729.01, VC 2008 SP1,
- * /FAs on 11 types, w4): the returned class itself is judged, never its members' types. It is NOT returned in registers if it has: a user-declared
- * constructor, copy constructor, copy assignment operator or destructor; a virtual function; a base class; or a private or protected non-static data
- * member (C++03 8.5.1: not an aggregate). Read from the C++ front end's own declarations of the class; every C++ front-end
+/* Is `t` returned through the hidden pointer by the x86 callee? The rule is stated from the documents: the Microsoft x86 convention ("Structures that
+ * are not PODs will not be returned in registers", learn.microsoft.com, Argument Passing and Naming Conventions) and the VC 2008 ABI's reading of the
+ * C++03 aggregate (ISO/IEC 14882:2003 8.5.1, 9/4; Agner Fog, Calling conventions, table 7): the returned class itself is judged. It is NOT returned in
+ * registers if it has a user-declared constructor, copy constructor, copy assignment operator or destructor; a virtual function; a base class; or a
+ * private or protected non-static data member (not an aggregate). The types of its members do not count. The cl 15.00.30729.01 runs (lift/test/
+ * podmatrix.py, cl_pod_table.tsv) verify this rule on every case; they never define it. Read from the C++ front end's own declarations of the class; every C++ front-end
  * symbol used is declared weak at the top of this file and sits behind fnvnx_cxx_fe(). A C unit has no such type: its aggregate is a POD by the language. */
 static bool user_declared_special(tree t)
 {
