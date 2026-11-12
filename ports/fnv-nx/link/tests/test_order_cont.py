@@ -53,6 +53,11 @@ Big mkb(int v) { Big r; for (int i = 0; i < 8; i++) r.a[i] = v + i; return r; }
     'str': r'''
 #include <string>
 std::string cp(const std::string &s) { return s; }
+std::string ctor(const char *s) { return std::string(s); }
+std::string cp2(const std::string &s) { return std::string(s); }
+std::string fold(const char *s) { std::string r(s); return r; }
+void sink(std::string *);
+void nosink(const char *s) { std::string r(s); sink(&r); }
 ''',
 }
 
@@ -107,6 +112,8 @@ def main():
     mb = lines('local', '3mkbi')
     check('LOCAL: the store into a result returned through x8 is ordered (stlr through the pointer)', 'stlr' in ops(mb), mb)
     check('a std::string copy builds', bool(lines('str', '2cp')))
+    for f in ('4ctor', '3cp2', '4fold', '6nosink'):   # w3's four cases (ini.cpp:124 shape)
+        check('std::string %s builds' % f, bool(lines('str', f)))
 
 
 if __name__ == '__main__':
