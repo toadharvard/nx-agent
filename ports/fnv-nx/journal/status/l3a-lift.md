@@ -65,3 +65,4 @@ Update 2026-11-12, at 698adefb:
 - w5: the lift and gates suites pass (26 and 52) with envcheck OK at 2f4572b7+a08ef74c. setup_verdict_env.sh `pip -r -` defect → L1.
 - w18 allocsites/1 (l1-contract/mp4 841d1b5; 70 sites, 5 constant) is kept for the s4 heap points-to after boot. idxopen_all.tsv (216) → w2, item 30, now unblocked. w18 is asked to extend both to d3dx9_31.
 - L5 asks: fnvnx_call_fp relocations over all pack objects are IE only (TLSDESC and TLSGD = 0). w1 adds the counts to the pack report; a static gate is proposed to L1.
+- RED, owned by L3a: the facts external has no ranges.tsv for atimgpud or d3dx9_31, so the L1 censuses count them as "image without facts". w7 publishes ranges and universe for all 7 images after the R3 refinement in one facts commit (with tree_sha256) → w18 reruns loadlib, allocsites and idxopen. L1 relayed idxopen_all (4843d9f) to w2.
