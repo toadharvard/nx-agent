@@ -1,7 +1,7 @@
 """Instruction handlers generated from the proven DSL forms (R2: one source for the proof and for the shipped code).
 
 emit_form(cx, ins) builds the Form of the instruction (proof/forms.py: the same object the SMT proofs are about) and emits its C inline through
-Form.to_c_inline (fnvlift/dsl.py).  core.dispatch calls it first for every instruction when env FNVL_EMIT=dsl; it returns SKIP for an instruction the
+Form.to_c_inline (fnvlift/dsl.py).  core.dispatch calls it first for every instruction when core.EMIT is "dsl" (core.set_emit); it returns SKIP for an instruction the
 forms do not cover (their mnemonics, or a register operand that is not a general register: xmm/mm/segment), which then goes to the hand handlers.
 
 One block per instruction:  `{ snapshots of the pre-state; const temporaries (every load, shared sub-expressions); faults; register writes;

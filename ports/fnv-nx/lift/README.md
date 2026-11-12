@@ -185,3 +185,10 @@ A lifted object is keyed by (function bytes, relocation mask inside them, lifter
 | golden (refactors) | `test/golden.py <dir>` | sha256 of all outputs |
 | instruction | `test/instest.py` | forms tested, cases equal / different, per mnemonic |
 | equivalence | `bench/` on farms | functions equal on all usable inputs / no usable input / diverging |
+
+## Jump-table dispatch (rule TAB-GUARD)
+
+The slots a `jmp [reloc disp + idx*4]` can load are `disp + 4*i` for the index values `i` that `fnvlift/tabguard.py` proves for `idx` at that site (interval analysis over the
+entry's own instructions: cmp/test guards on registers and `[ebp+k]`/`[esp+k]` cells, and/shr/add/sub/lea/movzx, byte tables of read-only sections). `core.tab_tails` reports those slots
+outside the range. No guard, a proved slot that is not a relocated dword, or a non-constant base: `Unsupported`; there is no default bias. Test: `test/tabguard_test.py`.
+`liftgen.py --emit dsl` selects the DSL emitter (`core.set_emit`); the lifter reads no environment variable for it.

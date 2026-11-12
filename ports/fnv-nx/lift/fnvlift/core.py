@@ -4,7 +4,6 @@ Dispatch order per instruction (same as the PoC): mnemonic handler (@op); a hand
 through; then the fallbacks in registration order (@fallback(pred): x87 by opcode byte, SSE by xmm operand);
 then Unsupported('insn ...')."""
 import bisect
-import os
 import capstone
 from capstone import x86 as X
 
@@ -200,33 +199,35 @@ def explore(img, lo, hi, code, start=None, extra=(), fall_hi=None):
     return insns, tables, taken, bad
 
 
-EMIT = os.environ.get('FNVL_EMIT', '')      # 'dsl': integer instructions are emitted from the proven DSL forms (f_dsl.py) before the hand handlers; '' = the hand handlers only
-if EMIT not in ('', 'dsl'):
-    raise ValueError('FNVL_EMIT=%s (want dsl or unset)' % EMIT)
+EMIT = ''      # 'dsl': integer instructions are emitted from the proven DSL forms (f_dsl.py) before the hand handlers; '' = the hand handlers only. Set by the caller with set_emit (an argument of the generator, no environment)
 
 
-TAB_BIAS = 16     # assumption: the lowest index of a table is below 16 (the table starts at most 16 dwords above the displacement)
+def set_emit(mode):
+    global EMIT
+    if mode not in ('', 'dsl'):
+        raise ValueError('emit mode %r (want "dsl" or "")' % (mode,))
+    EMIT = mode
 
 
-def tab_tails(img, insns, lo, hi):
-    """Relocated code pointers a `jmp [reloc disp + idx*4]` can hand to the dispatcher (rule R3): the whole run of consecutive .reloc'd dwords from
-    the table address (the first relocated dword at or above the displacement, within TAB_BIAS dwords) (a run ends at the first dword that is not relocated, or at an instruction of this function), outside [lo, hi)."""
+def tab_tails(img, insns, tables, entries, lo, hi):
+    """Relocated code pointers a `jmp [reloc disp + idx*4]` can hand to the dispatcher (rule R3), outside [lo, hi): the slots disp + 4*i of the index values i
+    that fnvlift/tabguard.py proves for the index register at that site from the function's own guards (rule TAB-GUARD).  No guard, a slot in the
+    proved range that is not a relocated dword, or a base register that is not a constant: Unsupported (there is no default and no bias).
+    entries: the addresses entered from outside the function (the start, the owned entries, address-taken labels, return and raise labels)."""
+    sites = [a for a, ins in sorted(insns.items()) if ins.mnemonic.split(' ')[-1] == 'jmp' and ins.operands and ins.operands[0].type == X.X86_OP_MEM
+             and ins.operands[0].mem.scale == 4 and ins.operands[0].mem.index and (a + ins.size - 4) in img.rset]
+    if not sites:
+        return []
+    from . import tabguard
+    an = tabguard.Analysis(img, insns, tables, entries)
+    an.run()
     out = set()
-    for a, ins in insns.items():
-        if ins.mnemonic.split(' ')[-1] != 'jmp' or not ins.operands or ins.operands[0].type != X.X86_OP_MEM:
-            continue
-        m = ins.operands[0].mem
-        if m.scale == 4 and m.index and (a + ins.size - 4) in img.rset:
-            t = m.disp & 0xffffffff
-            for _ in range(TAB_BIAS):       # the index may start above 0 (case range k..n: disp = table - 4*k)
-                if t in img.rset:
-                    break
-                t += 4
-            while t in img.rset and t not in insns:
-                v = img.u32(t)
-                if not lo <= v < hi:
-                    out.add(v)
-                t += 4
+    for a in sites:
+        try:
+            vals = tabguard.table_slots(img, an, a)
+        except tabguard.TableUnbounded as e:
+            raise Unsupported(str(e))
+        out.update(v for v in vals if not lo <= v < hi)
     return sorted(out)
 
 
@@ -393,7 +394,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     if cx.usesfs:
         kinds.add('fs')
     meta = dict(addr=start, size=size, selfcalls=cx.selfcalls, callrets=cx.callrets, kinds=sorted(kinds), n=len(order), tables=len(tables),
-                calls=sorted(cx.calls), tails=sorted(cx.tails), noentry=sorted(cx.noentry), tabtails=tab_tails(img, insns, lo, hi))
+                calls=sorted(cx.calls), tails=sorted(cx.tails), noentry=sorted(cx.noentry), tabtails=tab_tails(img, insns, tables, {start, lo} | set(owns) | set(taken) | set(cx.callrets) | set(cx.raises), lo, hi))
     return txt, meta
 
 
