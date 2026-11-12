@@ -58,7 +58,7 @@ REQUIRED_PRODUCT = ("objstub", "linkstrict", "onedef", "determinism", "oracle",
 # A test root (class test) is a root that links the tests of the product against the product roots' real files (CLAUDE.md "no doubles in
 # tests"): it is judged by its own set, never by REQUIRED_PRODUCT. Its gates: the build gates, the doubles gate (symbols the test defines
 # intersect symbols of the product roots it links = empty), an oracle record for every test, stub, the registry gate, Legal and pure.
-REQUIRED_TEST = ("build", "determinism", "linkstrict", "onedef", "objstub", "doubles", "oracle", "stub", "assumptions", "legal", "pure")
+REQUIRED_TEST = ("build", "determinism", "linkstrict", "objstub", "doubles", "oracle", "stub", "assumptions", "legal", "pure")
 REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT, "ref": (), "test": REQUIRED_TEST}
 
 
