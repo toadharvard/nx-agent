@@ -18,7 +18,7 @@ blank line) cut further at every list item and every table row; in any other fil
 mention is a block whose PROSE matches `assum` or `допущени` at a word start (case-insensitive). PROSE is defined by one lexer per
 file kind, chosen by the extension from the one table LEXER: python = COMMENT tokens and docstring STRING tokens (tokenize + ast); c, c++,
 headers, .ld, .s = // and /* */ comments (string and char literals skipped); markdown = text outside fenced code blocks; shell and toml =
-# comments (quoted strings and heredoc bodies skipped); data (.json .tsv .txt .expect .patch) = never prose. In every prose span the
+# comments (quoted strings and heredoc bodies skipped); asm = ; comments; sail = as c; data (.json .tsv .txt .expect .patch) = never prose. In every prose span the
 backticked spans are dropped. Totality: a text file whose extension is not in the table, or that its lexer cannot read, is red (codes
 ext-unknown, lex-error); nothing is skipped silently. An item of the
 universe is (path, first line of the block). A mention is certified iff ALL hold:
@@ -91,7 +91,7 @@ ITEM = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 ROW = re.compile(r"\s*\|")
 
 
-LEXER = {".py": "python", ".c": "c", ".cc": "c", ".cpp": "c", ".cxx": "c", ".h": "c", ".hh": "c", ".hpp": "c", ".ld": "c", ".s": "c",
+LEXER = {".py": "python", ".c": "c", ".cc": "c", ".cpp": "c", ".cxx": "c", ".h": "c", ".hh": "c", ".hpp": "c", ".ld": "c", ".s": "c", ".sail": "c", ".asm": "semi",
          ".md": "markdown", ".sh": "shell", ".gitignore": "shell", ".toml": "toml",
          ".json": "data", ".tsv": "data", ".txt": "data", ".expect": "data", ".patch": "data"}
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
@@ -185,8 +185,8 @@ def c_spans(body):
     return out
 
 
-def hash_spans(body, toml):
-    """# comments of shell and TOML, with quoted strings (and heredoc bodies of shell) skipped"""
+def hash_spans(body, toml, mark="#"):
+    """# comments of shell and TOML (MARK ";" with TOML rules: assembler), with quoted strings (and heredoc bodies of shell) skipped"""
     n, i, out = len(body), 0, []
     heredocs = []
     bol = True
@@ -207,7 +207,7 @@ def hash_spans(body, toml):
                     raise LexError("shell: unterminated heredoc %s" % tag)
             heredocs = []
             continue
-        if ch == "#" and (toml or bol or body[i - 1] in " \t;|&()"):
+        if ch == mark and (toml or bol or body[i - 1] in " \t;|&()"):
             j = body.find("\n", i)
             j = n if j < 0 else j
             out.append((i, j))
@@ -229,7 +229,9 @@ def hash_spans(body, toml):
             if j >= n or body[j] != ch:
                 raise LexError("%s: unterminated quote" % ("toml" if toml else "shell"))
             i = j + 1
-        elif not toml and body.startswith("<<", i) and not body.startswith("<<<", i):
+        elif not toml and body.startswith("<<<", i):
+            i += 3                                                  # a here-string, not a heredoc
+        elif not toml and body.startswith("<<", i):
             m = re.compile(r"<<(-?)[ \t]*(?:'([^'\n]+)'|\"([^\"\n]+)\"|\\?([A-Za-z_][A-Za-z_0-9]*))").match(body, i)
             if m:
                 heredocs.append((m.group(2) or m.group(3) or m.group(4), m.group(1) == "-"))
@@ -301,7 +303,7 @@ def prose_lines(path, body):
     if kind == "data":
         return [" " * len(ln) for ln in lines]
     spans = {"python": lambda: py_spans(body, lines, off), "c": lambda: c_spans(body), "markdown": lambda: md_spans(body),
-             "shell": lambda: hash_spans(body, False), "toml": lambda: hash_spans(body, True)}[kind]()
+             "shell": lambda: hash_spans(body, False), "toml": lambda: hash_spans(body, True), "semi": lambda: hash_spans(body, True, ";")}[kind]()
     keep = bytearray(len(body))
     for s, e in strip_code(body, spans):
         keep[s:e] = b"\x01" * (e - s)
