@@ -61,7 +61,8 @@
   ]
  },
  "include": [
-  "ports/fnv-nx/lift/rt"
+  "ports/fnv-nx/lift/rt",
+  "ports/fnv-nx/shim/include"
  ],
  "units": "all",
  "link": null,

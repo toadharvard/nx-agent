@@ -43,6 +43,8 @@ class MT19937:
 def build(keys, seed=1, load=0.4):
     keys = sorted(set(keys))
     n = len(keys)
+    if not n:       # an empty key set (a table with nothing to find): every slot empty, any lookup misses
+        return dict(k1=1, k2=0x9E3779B1, nbits=1, tbits=3, g=[0, 0], slots=[None] * 8, attempts=1)
     tbits = max(3, math.ceil(math.log2(n / load)))
     nbits = max(1, math.ceil(math.log2(max(n, 2) / 4)))
     for att in range(200):
@@ -75,15 +77,19 @@ def lookup(h, a):
     return i if h['slots'][i] == a else None
 
 
-def table_asm(syms, phf):
+def table_asm(syms, phf, prefix='fnvl'):
     """position-independent dispatcher table for rt.c (tools/liftgen.py): AArch64 assembly, section .rodata.fnvl_disp.
-    slot i = {u32 key, s32 L_sym - fnvl_disp_table} (empty slot: a key that does not hash to it), then fnvl_g[] (u16). No absolute code address appears."""
-    out = ['.section .rodata.fnvl_disp,"a"', '.balign 8', '.globl fnvl_disp_table', 'fnvl_disp_table:']
+    slot i = {u32 key, s32 L_sym - fnvl_disp_table} (empty slot: a key that does not hash to it), then fnvl_g[] (u16). No absolute code address appears.
+    `prefix` names the table (symbols <prefix>_disp_table, <prefix>_g, <prefix>_phf_params, section .rodata.<prefix>_disp): 'fnvl' is the lifted dispatcher's,
+    rt/dispatch.c's table of native bodies is 'fnvnx_native'."""
+    T = prefix + '_disp_table'
+    out = ['.section .rodata.%s_disp,"a"' % prefix, '.balign 8', '.globl ' + T, T + ':']
     def idx(a): return (((a ^ phf['g'][((a * phf['k1']) & M) >> (32 - phf['nbits'])]) * phf['k2']) & M) >> (32 - phf['tbits'])
     def empty(i):       # the key of an empty slot must not be an address that hashes to this slot, or a lookup of that address would hit it
         return next(k for k in range(M, M - 64, -1) if idx(k) != i)
-    out += [' .long 0x%x, %s - fnvl_disp_table' % (a, syms[a]) if a is not None else ' .long 0x%x, 0' % empty(i) for i, a in enumerate(phf['slots'])]
-    out += ['.size fnvl_disp_table, . - fnvl_disp_table', '.globl fnvl_g', '.balign 2', 'fnvl_g:'] + [' .short %d' % g for g in phf['g']] + ['.size fnvl_g, . - fnvl_g']
+    out += [' .long 0x%x, %s - %s' % (a, syms[a], T) if a is not None else ' .long 0x%x, 0' % empty(i) for i, a in enumerate(phf['slots'])]
+    out += ['.size %s, . - %s' % (T, T), '.globl %s_g' % prefix, '.balign 2', '%s_g:' % prefix] + [' .short %d' % g for g in phf['g']] + ['.size %s_g, . - %s_g' % (prefix, prefix)]
     # the hash parameters live with the table (one source): rt.c reads them from here
-    out += ['.balign 4', '.globl fnvl_phf_params', 'fnvl_phf_params:', ' .long %d, %d, %d, %d' % (phf['k1'], phf['k2'], phf['nbits'], phf['tbits']), '.size fnvl_phf_params, . - fnvl_phf_params']
+    P = prefix + '_phf_params'
+    out += ['.balign 4', '.globl ' + P, P + ':', ' .long %d, %d, %d, %d' % (phf['k1'], phf['k2'], phf['nbits'], phf['tbits']), '.size %s, . - %s' % (P, P)]
     return '\n'.join(out) + '\n'

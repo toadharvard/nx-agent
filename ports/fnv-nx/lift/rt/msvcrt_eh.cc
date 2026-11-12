@@ -411,7 +411,7 @@ extern "C" void fnvl_msvcrt_terminate(void) { do_terminate(); }
 /* ??1type_info@@UAE@XZ (thiscall, this in ecx): Wine type_info_dtor frees the lazily allocated undecorated name */
 extern "C" void fnvl_msvcrt_type_info_dtor(void)
 {
-    ((void (*)(void *))fnvnx_win32_lookup_export("msvcrt.dll", "free"))((void *)P(M32(ecx + 4)));
+    ((void (*)(void *))fnvnx_win32_lookup_export("msvcrt.dll", "free"))((void *)(unsigned long)(u32)M32(ecx + 4));
     c->ra = M32(esp); esp += 4;
 }
 
