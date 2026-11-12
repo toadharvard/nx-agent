@@ -33,7 +33,7 @@ on 2026-11-11 22:35 UTC. Handoff read: `journal/inbox/l3b-lift-handoff-opus.md` 
   - L3a takes set_emit and fnvlift puregate to 0 (its w3).
   - TAB_BIAS becomes a rule: the bias comes from the dispatch's own guard bound, and an unguarded site is red.
   - The undef-flag liveness gate is L3b's rule, built by L3a w5.
-  - DSL coverage order: int, then sys, x87, simd.
+  - DSL coverage order: int, then sys, x87, simd. Split agreed: L3b w4 owns every DSL builder in lift/proof; L3a w7 owns fnvlift (f_dsl\/core) and the CS-store raise through FNVL_RAISE_AV (Wine 9.0 trap 13). w7 rebases its forms.py hunks onto w4 d7c7d612.
   - f2i_check is folded into L2's fnvnx_ftoi (mode native|lifted from cxx_origin, output <unit>.f2i.json, registers attribute fnvnx_f2i) on claude/fnv-l2-source-w1, commit pending. Until then, units that include fnvl.h are red under w14's -Werror=attributes.
   - The ftoi stage-doc reader is on L1 w17 cdc0041 (MERGER #4).
   - L1 w14 adds admit.json `imports:` and z3 in EXTERNAL (ASM-009).
