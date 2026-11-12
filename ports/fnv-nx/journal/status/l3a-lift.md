@@ -277,3 +277,10 @@ Update 2026-11-12, at 698adefb:
     - 2 pushfd AF (the invariance proof).
   - The no-form mnemonics on those paths are next (x87 fnstsw/sahf expected).
 - L1 w14 f4c04b92: lifted roots from a generated stage (cxx_origin {lifted_by, stage}). w8 applies it to the 3 test pairs (doing).
+- int3 bbb12d43c: gate_assumptions has 10 findings: 7 SMT blocks (cleared by L1's prose rule), ehtables:268 (w7's PE table), f2i_check ×2 (L2). vd29 is running (doing).
+  - New L1 record asked for fmath's "n ≤ 2^15 limbs".
+  - ASM-231 is to be retired: LOCK-SPLIT is a rule, not an assumption.
+- w8 6b3cb220 (claude/fnv-l3a-lift-w8-t16c, on w14 f4c04b92): 6 test roots, with no error in the generated stages or plugins. Open errors:
+  - lift/rt not admitted (int3);
+  - link.script outside the root (L1);
+  - ldcheck tool-root check (L1, recipe.py:589).
