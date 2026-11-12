@@ -203,3 +203,5 @@ Update 2026-11-12, at 698adefb:
   - the write set for exe 19345408/19345418: no writer in 7 images;
   - the write set for d3dx9_38 [793b20+4]: only the ctor 56b74b writes it, so d3dx9_31 is reached.
   - The two write-set facts are w4's, from pcsrc address sources, after its totals (queued).
+- w4 7bd3abbd (claude/fnv-l3a-lift-w4-asm225, on 862b0708): pcsrc.py with the ASM-225 record. gate_assumptions is green: 120/120, 80 entries, 9 OWNER, 71 REMOVE. Sent to the orchestrator for the candidate. Done.
+- w8 ffb33e01: one build.json pair per test (lifted/ + native/) for citest, imptest and msvcrttest, with no admit rows. recipe.py check runs on int3.
