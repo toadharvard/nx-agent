@@ -1,0 +1,21 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "selftests",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_tests.py",
+  "--jobs",
+  "3",
+  "ports/fnv-nx/verify",
+  "ports/fnv-nx/farm",
+  "ports/fnv-nx/contract",
+  "ports/fnv-nx/link",
+  "ports/fnv-nx/rules",
+  "ports/fnv-nx/lift"
+ ],
+ "result": "selftests.json",
+ "covers": [
+  "tool"
+ ]
+}

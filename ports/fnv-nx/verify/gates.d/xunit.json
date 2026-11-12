@@ -1,0 +1,17 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "xunit",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_contract.py",
+  "--gate",
+  "xunit"
+ ],
+ "result": "xunit.json",
+ "covers": [
+  "product-guest",
+  "lifted",
+  "host-product"
+ ]
+}

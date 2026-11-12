@@ -1,0 +1,15 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "build",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_build.py"
+ ],
+ "result": "build.json",
+ "covers": [
+  "product-guest",
+  "lifted",
+  "host-product"
+ ]
+}

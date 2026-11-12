@@ -1,0 +1,17 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "n1",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_contract.py",
+  "--gate",
+  "n1"
+ ],
+ "result": "n1.json",
+ "covers": [
+  "product-guest",
+  "lifted",
+  "host-product"
+ ]
+}

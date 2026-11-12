@@ -1,0 +1,15 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "determinism",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_determinism.py"
+ ],
+ "result": "determinism.json",
+ "covers": [
+  "product-guest",
+  "lifted",
+  "host-product"
+ ]
+}

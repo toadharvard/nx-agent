@@ -1,0 +1,17 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "gpa",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_contract.py",
+  "--gate",
+  "gpa"
+ ],
+ "result": "gpa.json",
+ "covers": [
+  "product-guest",
+  "lifted",
+  "host-product"
+ ]
+}

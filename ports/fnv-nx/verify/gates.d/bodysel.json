@@ -1,0 +1,17 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "bodysel",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_contract.py",
+  "--gate",
+  "bodysel"
+ ],
+ "result": "bodysel.json",
+ "covers": [
+  "product-guest",
+  "lifted",
+  "host-product"
+ ]
+}
