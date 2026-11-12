@@ -6,7 +6,12 @@ Rule. A PAIR is a record of a public file that holds (a) a guest VA: a hexadecim
   headers of contract/images.py's image set: the exe and every dll image reached from it, read from the pinned externals), and (b) a decomp-derived
   name: a token equal to a symbol that the decomp's own pristine MSVC objects (contract_inputs.json "msvc": the COFF objects of fnv-nx-build, a
   content-pinned external, read here at gate time and never copied) define as an external, or to that symbol with the C decoration cut (a leading `_`
-  and a trailing `@N`). A token is a maximal run of [A-Za-z0-9_?@$].
+  and a trailing `@N`) and that is not PUBLIC. A token is a maximal run of [A-Za-z0-9_?@$].
+  PUBLIC (owner rule via L1): the name is defined by a pinned public artifact: source 1 = the exports of the declared system images (every dll of the
+  redist external, the declared system32 set), source 2 = the dynamic symbols of the pinned toolchain libraries (the shared libraries of
+  /usr/aarch64-linux-gnu/lib, env.json), source 3 = a pinned public third-party source tree the exe statically links (none is pinned yet: every
+  such name stays decomp-derived and is red, which says to add the pin). Names are compared raw, with the C decoration cut, and as an MSVC
+  name undecorated by llvm-undname (env.json clang-tools-18) against the c++filt of the library symbols. No allow-list.
 Record: the line of a text file; for a .json file every JSON container's own scalar members (keys and values; an object, a row array), so a table
   row or a record is one unit whatever its layout. Every tracked file of the repository is read (bytes decoded with replacement), none is exempt.
 Universe: every tracked file of the repository. Certified: files with no pair. uncertified: the first 50 `path:line` (a record of a .json file is
@@ -72,6 +77,44 @@ def with_decoration_cut(names):
     return {n for n in out if n}
 
 
+def public_sources(ext, doc):
+    """-> ({source id: set of names}) : 1 = exports of the redist dlls, 2 = dynamic symbols of the pinned toolchain libraries."""
+    s1, s2 = set(), set()
+    d = ext["redist"]["host"]
+    for root, _, fs in os.walk(d):
+        for f in sorted(fs):
+            if f.lower().endswith(".dll"):
+                try:
+                    pe = modules.PE(open(os.path.join(root, f), "rb").read(), f)
+                    s1 |= {k for k, *_ in pe.exports() if not k.startswith("#")}
+                except (modules.StageError, struct.error, ValueError):
+                    pass
+    lib = "/usr/aarch64-linux-gnu/lib"
+    for f in sorted(os.listdir(lib)) if os.path.isdir(lib) else []:
+        if ".so" in f and os.path.isfile(os.path.join(lib, f)) and not os.path.islink(os.path.join(lib, f)):
+            r = subprocess.run(["aarch64-linux-gnu-nm", "-D", "--defined-only", os.path.join(lib, f)], capture_output=True, text=True)
+            raw = {ln.split()[-1].split("@")[0] for ln in r.stdout.splitlines() if ln.split()}
+            s2 |= raw
+            if raw:
+                s2 |= {x for x in subprocess.run(["c++filt"], input="\n".join(sorted(raw)), capture_output=True, text=True).stdout.splitlines()}
+    return {1: s1, 2: s2}
+
+
+UNDNAME = ["llvm-undname", "--no-calling-convention", "--no-return-type", "--no-access-specifier", "--no-member-type"]
+
+
+def source_of(tok, pub):
+    """The PUBLIC source id (1, 2) of the decomp token TOK, or 0: decomp-derived (and 3 is not pinned yet)."""
+    cands = [tok, re.sub(r"@\d+$", "", tok[1:] if tok.startswith("_") else tok)]
+    if tok.startswith("?"):
+        r = subprocess.run(UNDNAME + [tok], capture_output=True, text=True)
+        cands += [ln.strip() for ln in r.stdout.splitlines() if ln.strip() and ln.strip() != tok]
+    for sid in (1, 2):
+        if any(c in pub[sid] for c in cands):
+            return sid
+    return 0
+
+
 def in_ranges(v, ranges):
     return any(lo <= v < hi for lo, hi in ranges)
 
@@ -104,8 +147,10 @@ def json_records(doc):
     return out
 
 
-def scan_file(path, data, names, ranges):
-    """-> (records with a VA, [pair ids]) of one file's bytes."""
+def scan_file(path, data, names, ranges, judge=None, tally=None):
+    """-> (records with a VA, [pair ids]) of one file's bytes. JUDGE(token) -> 0 decomp-derived, 1/2 public source (default: every name in NAMES is
+    decomp-derived); TALLY, if given, counts every (class) of a name token that meets a VA in its record."""
+    judge = judge or (lambda t: 0)
     text = data.decode("utf-8", "replace")
     nva, pairs = 0, []
     recs = None
@@ -119,7 +164,11 @@ def scan_file(path, data, names, ranges):
     for rid, r in recs:
         if has_va(r, ranges):
             nva += 1
-            if any(t in names for t in TOKEN.findall(r)):
+            cl = [judge(t) for t in TOKEN.findall(r) if t in names]
+            if tally is not None:
+                for c in cl:
+                    tally[c] = tally.get(c, 0) + 1
+            if 0 in cl:
                 pairs.append("%s:%s" % (path, rid))
     return nva, pairs
 
@@ -145,7 +194,7 @@ def externals_inputs(repo, cache):
     for f in sorted(os.listdir(d)):
         if f.endswith(".obj"):
             names |= coff_externals(open(os.path.join(d, f), "rb").read())
-    return with_decoration_cut(names), ranges, ws
+    return with_decoration_cut(names), ranges, ws, public_sources(ext, doc)
 
 
 def main():
@@ -156,17 +205,22 @@ def main():
     try:
         files = [p for p in subprocess.run(["git", "ls-files", "-z"], capture_output=True, check=True).stdout.decode("utf-8", "surrogateescape").split("\0") if p]
         try:
-            names, ranges, ws = externals_inputs(repo, cache)
+            names, ranges, ws, pub = externals_inputs(repo, cache)
         except (gate_contract.Red, recipe.BuildRed, OSError, ValueError, KeyError, modules.StageError) as e:
             res = {"format": "fnvnx-gate/1", "name": "legal", "status": "red", "universe": len(files), "certified": 0, "uncertified": ["input"],
                    "detail": ("input: %s" % (e.args[0] if e.args else type(e).__name__))[:300]}
             return finish(res)
-        bad, census, nva = [], {}, 0
+        bad, census, nva, tally, memo = [], {}, 0, {}, {}
+
+        def judge(t):
+            if t not in memo:
+                memo[t] = source_of(t, pub)
+            return memo[t]
         for p in files:
             fp = os.path.join(repo, p)
             if not os.path.isfile(fp) or os.path.islink(fp):
                 continue
-            n, pairs = scan_file(p, open(fp, "rb").read(), names, ranges)
+            n, pairs = scan_file(p, open(fp, "rb").read(), names, ranges, judge, tally)
             nva += n
             c = census.setdefault(layer(p), {"files": 0, "records_with_va": 0, "pairs": 0, "files_with_pairs": 0})
             c["files"] += 1
@@ -179,6 +233,7 @@ def main():
             len(files), len(names), len(ranges), nva, len(bad), len(badfiles))
         res = {"format": "fnvnx-gate/1", "name": "legal", "status": "red" if bad else "green", "universe": len(files),
                "certified": len(files) - len(badfiles), "uncertified": sorted(bad)[:50], "detail": detail,
+               "public_sources": {"1": len(pub[1]), "2": len(pub[2]), "3": 0}, "name_hits": {"decomp": tally.get(0, 0), "source1": tally.get(1, 0), "source2": tally.get(2, 0)},
                "pairs": len(bad), "files_with_pairs": len(badfiles), "records_with_va": nva, "census": dict(sorted(census.items()))}
         return finish(res)
     finally:
