@@ -744,3 +744,18 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - It is for L3a lift/bridges and is not a trunk candidate.
   - It is built after w14's head lands.
 - w14: also adds a check that the cross-root include lift/bridges → platform/include/fnvl_host.h is accepted for a guest root.
+
+## 2026-11-12 09:35 UTC
+- **Budget is red on every head.** selftests takes 512 s warm against 506 s cold, as measured by L3b.
+  - w19 is on it as priority 1: push the cache and report cold, warm, and docs-only warm times on 6d3a2800.
+- **Open class, owned by L3a: the facts' code runs contain data.**
+  - L5 w15, facts 2eeea27: 16714 relocated non-operand words in 1452 runs, over 6 images.
+  - L5 w9: R3 entries at strings in .text flip dynsites 96, regsites 13 and filesites 22.
+  - Ruling: runs hold code only, and readers answer inside a declared data range only.
+  - Asked of L3a: a `data` fact, a facts-gate check that every relocation in a run is an operand, and an R3 fix.
+  - Until then, L5's real-image readers stay red by design.
+- **L5 work accepted in content:**
+  - argflow v2 e5596bb60: imagerec.load, CodeRead, malformed-relocation checks.
+  - w9 f3fa1ee0: the code-read guard.
+  - The two are being unified into one reader on 6d3a2800.
+  - ASM-501 enters with the L5 manifest.
