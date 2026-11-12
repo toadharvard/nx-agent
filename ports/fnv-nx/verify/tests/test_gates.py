@@ -336,8 +336,9 @@ check("tests: per-file seconds in selftests.times.json", [(t["name"], t["status"
 
 d = tmp("tests-cache")
 cache = os.path.join(d, "cache")
-mk(d, test_a="open('ran.log', 'a').write('a\\n')\n", test_b="open('ran.log', 'a').write('b\\n')\n")
-ran = lambda: open(os.path.join(d, "ran.log")).read().split() if os.path.exists(os.path.join(d, "ran.log")) else []
+RL = os.path.join(tmp("rl"), "ran.log")
+mk(d, test_a="open(%r, 'a').write('a\\n')\n" % RL, test_b="open(%r, 'a').write('b\\n')\n" % RL)
+ran = lambda: open(RL).read().split() if os.path.exists(RL) else []
 kfiles = lambda: sorted(os.listdir(os.path.join(cache, "selftests"))) if os.path.isdir(os.path.join(cache, "selftests")) else []
 rc, r, e = tests_c(d, cache)
 check("tests cache: first run executes every file and stores one key per file", rc == 0 and sorted(ran()) == ["a", "b"]
@@ -352,7 +353,7 @@ check("tests cache: no --cache and no GATE_CACHE -> always runs", rc == 0 and le
 os.utime(os.path.join(d, "verify/tests/test_a.py"), (5, 5))
 rc, r, e = tests_c(d, cache)
 check("tests cache: an mtime change is not a change of content", r["recomputed"] == 0 and len(ran()) == 4, (r, ran()))
-mk(d, test_a="open('ran.log', 'a').write('a\\n')\n# changed\n")
+mk(d, test_a="open(%r, 'a').write('a\\n')\n# changed\n" % RL)
 rc, r, e = tests_c(d, cache)
 check("tests cache: a changed test file reruns only itself", rc == 0 and ran()[4:] == ["a"] and r["recomputed"] == 1
       and [f["cached"] for f in r["files"]] == [False, True], (r, ran()))
@@ -373,6 +374,17 @@ check("tests cache: another timeout is another key", r["recomputed"] == 2, (r, r
 mk(d, test_c="import os, sys\nsys.exit(1 if os.path.exists('verify/tests/test_a.py') or os.path.exists('verify/tests/test_b.py') else 0)\n")
 rc, r, e = tests_c(d, cache)
 check("tests: a test runs in a view without the other test files", rc == 0 and r["universe"] == 3 and r["certified"] == 3, (rc, r, e))
+d = tmp("tests-cache-closure")
+cache = os.path.join(d, "cache")
+mk(d, test_p="pass\n", test_r="pass\n",
+   test_q="import os, sys\nsys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))\nimport test_p\n")
+rc, r, e = tests_c(d, cache)
+check("tests cache: a test that imports a sibling test runs with it in its view", rc == 0 and r["certified"] == 3 and r["recomputed"] == 3, (rc, r, e))
+mk(d, test_p="pass\n# changed\n")
+rc, r, e = tests_c(d, cache)
+check("tests cache: a changed test reruns itself and the tests that import it, not the others",
+      rc == 0 and [(f["name"][-9:], f["cached"]) for f in r["files"]] == [("test_p.py", False), ("test_q.py", False), ("test_r.py", True)], (r, e))
+
 # env.json of the checkout is part of the key
 e1 = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "env.json")
 d2 = tmp("tests-cache-env")
@@ -395,11 +407,12 @@ r2 = gate_in(d2, c2)
 check("tests cache: another env.json is another key (the file is also in the view)", r["recomputed"] == 0 and r2["recomputed"] == 1, (r, r2))
 
 d = tmp("tests-cache-fail")
+NL = os.path.join(tmp("nl"), "n.log")
 cache = os.path.join(d, "cache")
-mk(d, test_ok="pass\n", test_bad="import sys\nopen('n.log', 'a').write('x')\nprint('boom-text')\nsys.exit(1)\n")
+mk(d, test_ok="pass\n", test_bad="import sys\nopen(%r, 'a').write('x')\nprint('boom-text')\nsys.exit(1)\n" % NL)
 rc1, r1, _ = tests_c(d, cache)
 rc2, r2, _ = tests_c(d, cache)
-nlog = lambda: len(open(os.path.join(d, "n.log")).read())
+nlog = lambda: len(open(NL).read())
 check("tests cache: a failing file stays red from the cache with the same failure text, and is not rerun", rc1 != 0 and rc2 != 0
       and nlog() == 1 and r2["recomputed"] == 0 and r2["uncertified"] == ["verify/tests/test_bad.py"] and r2["certified"] == 1
       and "boom-text" in r1["detail"] and r1["detail"].split("first failure")[1] == r2["detail"].split("first failure")[1], (r1, r2))
@@ -413,7 +426,7 @@ cache = os.path.join(d, "cache")
 mk(d, test_slow="import time\ntime.sleep(3600)\n")
 rc, r, e = tests_c(d, cache, extra=("--timeout-s", "1"))
 rc2, r2, e = tests_c(d, cache, extra=("--timeout-s", "1"))
-check("tests cache: a timeout is never cached", rc != 0 and rc2 != 0 and r2["recomputed"] == 1 and not os.listdir(os.path.join(cache, "selftests")), (r, r2))
+check("tests cache: a timeout is never cached", rc != 0 and rc2 != 0 and r2["recomputed"] == 1 and not os.path.isdir(os.path.join(cache, "selftests")), (r, r2))
 
 # l1 passes VDIR/cache as GATE_CACHE: the second verdict of an unchanged tree finds the selftests keyed result
 r = small_repo()
@@ -423,7 +436,7 @@ cdir = os.path.join(vd, "cache")
 keys1 = sorted(os.listdir(cdir)) if os.path.isdir(cdir) else []
 rc2, line2, out2, err2 = l1("verdict", "--repo", r, "--commit", "main", "--verdicts", vd)
 check("l1 verdict: gates get GATE_CACHE=VDIR/cache; same tree again reuses the keyed selftests result", rc == 0 and rc2 == 0
-      and len(keys1) == 1 and sorted(os.listdir(cdir)) == keys1 and re.match(LINE, line2), (rc, rc2, keys1, out, err, out2, err2))
+      and keys1 == ["gates", "selftests"] and sorted(os.listdir(cdir)) == keys1 and re.match(LINE, line2), (rc, rc2, keys1, out, err, out2, err2))
 
 # ---- gate "warm" (VERDICT.md, budget) and the gate-result cache
 def stored(vd):

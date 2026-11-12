@@ -14,8 +14,14 @@ cannot run in this environment (root, namespaces, strace) is uncertified. Zero f
 --cache DIR (default $GATE_CACHE, see verdict.py; none = no caching): the result of ONE test file is cached under its own key.
   KEY(test) = sha256 over: the test's repo-relative path, the declared environment (envcheck id of the env.json next to this
   script), the python version string, the per-file timeout, and the VIEW HASH. The VIEW of a test is the checkout (the cwd of the gate,
-  .git and __pycache__ left out) WITHOUT every other test file (DIR/tests/test_*.py of the universe): view hash = sha256 over the sorted
-  (relative path, file mode executable bit, sha256 of content) of all files of the view, the test itself included.
+  .git and __pycache__ left out) WITHOUT the other test files (DIR/tests/test_*.py of the universe) that the test does not name: the
+  test itself plus the test files in its closure, where the closure is taken over the AST: an imported module or a string constant
+  that equals the basename (without .py) of a test file puts every test file of that name in, transitively (a superset of what the
+  test can import; dynamic loading by a computed name is not in the view and fails the same way again, never silently).
+  View hash = sha256 over the sorted (relative path, executable bit, sha256 of content) of all files of the view.
+  (The result cache directory, if it lies inside the checkout, is not part of the view.)
+  The view is a git repository of its own (git init, one commit of the view with fixed identity and dates), so what git says in
+  it is a function of the view.
   Completeness by construction, not by guess: the test RUNS in a private copy of exactly that view (the other test files are not in
   the copy, nothing else is left out), so a read of any file is a read of a keyed file or fails the same way again, and its result
   is a function of the key. Inputs the checkout names but does not contain (the pinned externals, e.g. guest_compiler.json) are
@@ -27,6 +33,7 @@ cannot run in this environment (root, namespaces, strace) is uncertified. Zero f
   other file of the view reruns every test (their views differ). Per-file cache path: DIR_CACHE/selftests/<KEY>.json.
 Result extra keys: "files": [{"name","seconds","status","cached"}] (status passed|failed; cached true when not run; the same list in
 selftests.times.json) and "recomputed": the number of test files actually run (0 on an unchanged tree)."""
+import ast
 import concurrent.futures
 import glob
 import hashlib
@@ -46,11 +53,12 @@ import envcheck  # noqa: E402
 CACHE_FORMAT = "fnvnx-selftests-cache/2"
 TAIL = 2000
 
-def tree_files(root, exclude):
-    """(rel, exec bit, sha256) of every file under ROOT (sorted) except .git, __pycache__ and the rel paths in EXCLUDE."""
+def tree_files(root, exclude, skipdir=None):
+    """(rel, exec bit, sha256) of every file under ROOT (sorted) except .git, __pycache__, the directory SKIPDIR (the result cache, when
+    it lies inside the checkout) and the rel paths in EXCLUDE."""
     out = []
     for d, dirs, names in os.walk(root):
-        dirs[:] = sorted(x for x in dirs if x not in (".git", "__pycache__"))
+        dirs[:] = sorted(x for x in dirs if x not in (".git", "__pycache__") and os.path.abspath(os.path.join(d, x)) != skipdir)
         for n in sorted(names):
             p = os.path.join(d, n)
             rel = os.path.relpath(p, root)
@@ -63,14 +71,56 @@ def tree_files(root, exclude):
                     out.append((rel, "x" if os.access(p, os.X_OK) else "-", hashlib.sha256(fh.read()).hexdigest()))
     return sorted(out)
 
+def test_closure(files):
+    """{test file: set of test files (itself included) it names, transitively}: modules imported and string constants equal to a
+    test file's basename, over the AST. Superset by construction: any name that could load a sibling test is a name here."""
+    by = {}
+    for f in files:
+        by.setdefault(os.path.basename(f)[:-3], []).append(f)
+    direct = {}
+    for f in files:
+        names = set()
+        try:
+            tree = ast.parse(open(f, "rb").read())
+        except (OSError, SyntaxError, ValueError):
+            tree = None
+        for n in ast.walk(tree) if tree else ():
+            if isinstance(n, ast.Import):
+                names.update(a.name.split(".")[0] for a in n.names)
+            elif isinstance(n, ast.ImportFrom) and n.module:
+                names.add(n.module.split(".")[0])
+                names.update(a.name for a in n.names)
+            elif isinstance(n, ast.Constant) and isinstance(n.value, str):
+                names.add(n.value[:-3] if n.value.endswith(".py") else n.value)
+        direct[f] = {g for nm in names for g in by.get(nm, ())} | {f}
+    out = {}
+    for f in files:
+        seen, todo = set(), [f]
+        while todo:
+            g = todo.pop()
+            if g not in seen:
+                seen.add(g)
+                todo += list(direct[g])
+        out[f] = seen
+    return out
+
 def view_hash(files, own):
     """files: tree_files(root, {}) minus the other tests; OWN: the test's rel path (it is in files)."""
     return hashlib.sha256(cas.canon({"view": files, "own": own})).hexdigest()
 
-def make_view(root, dst, exclude):
+GITENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@invalid", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@invalid",
+          "GIT_AUTHOR_DATE": "2000-01-01T00:00:00Z", "GIT_COMMITTER_DATE": "2000-01-01T00:00:00Z", "GIT_CONFIG_GLOBAL": "/dev/null",
+          "GIT_CONFIG_SYSTEM": "/dev/null"}
+
+def git_view(view):
+    env = dict(os.environ, **GITENV)
+    for a in (["init", "-q", "-b", "main"], ["add", "-A", "-f"], ["commit", "-q", "-m", "view"]):
+        subprocess.run(["git", "-C", view] + a, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+
+def make_view(root, dst, exclude, skipdir=None):
     """Private copy of the checkout without .git, __pycache__ and the EXCLUDE files: exactly the files tree_files hashes."""
     for d, dirs, names in os.walk(root):
-        dirs[:] = sorted(x for x in dirs if x not in (".git", "__pycache__"))
+        dirs[:] = sorted(x for x in dirs if x not in (".git", "__pycache__") and os.path.abspath(os.path.join(d, x)) != skipdir)
         os.makedirs(os.path.join(dst, os.path.relpath(d, root)), exist_ok=True)
         for n in names:
             p = os.path.join(d, n)
@@ -92,7 +142,7 @@ def key_of(rel, files, timeout):
     return hashlib.sha256(cas.canon({"format": CACHE_FORMAT, "test": rel, "view": view_hash(files, rel), "env": env,
                                      "python": sys.version, "timeout": timeout})).hexdigest()
 
-def run_one(root, rel, exclude, timeout):
+def run_one(root, rel, exclude, timeout, skipdir=None):
     """(status, seconds, tail, ended): status passed|failed, TAIL the last bytes of output, ENDED False for a timeout."""
     t0 = time.time()
     # a test file is not a gate: it does not see GATE_OUT / GATE_COMMIT / GATE_CACHE (a test that runs gates of its own
@@ -104,7 +154,8 @@ def run_one(root, rel, exclude, timeout):
     view = os.path.join(tmp, "view")
     out = os.path.join(tmp, "out.txt")
     try:
-        make_view(root, view, exclude)
+        make_view(root, view, exclude, skipdir)
+        git_view(view)
         with open(out, "wb") as ofh:
             p = subprocess.Popen([sys.executable, "-I", rel], cwd=view, stdin=subprocess.DEVNULL, stdout=ofh,
                                  stderr=subprocess.STDOUT, start_new_session=True, env=env)
@@ -169,21 +220,23 @@ def universe(dirs):
 def main(argv):
     o, dirs = parse(argv)
     files = universe(dirs)
+    clo = test_closure(files)
     t0 = time.time()
     root = os.getcwd()
     keys, cdir = {}, None
+    skip = os.path.abspath(o["cache"]) if o["cache"] else None   # the cache is not an input; it may lie inside the checkout
     if o["cache"] and files:
         cdir = os.path.join(o["cache"], "selftests")
-        allf = tree_files(root, set())
+        allf = tree_files(root, set(), skip)
         for f in files:
-            keys[f] = key_of(f, [r for r in allf if r[0] == f or r[0] not in files], o["timeout"])
+            keys[f] = key_of(f, [r for r in allf if r[0] not in files or r[0] in clo[f]], o["timeout"])
 
     def one(f):
         if cdir:
             hit = load_hit(os.path.join(cdir, keys[f] + ".json"), keys[f])
             if hit:
                 return {"name": f, "seconds": 0.0, "status": hit["status"], "cached": True, "tail": hit["tail"]}
-        st, secs, tail, ended = run_one(root, f, set(files) - {f}, o["timeout"])
+        st, secs, tail, ended = run_one(root, f, set(files) - clo[f], o["timeout"], skip)
         if cdir and ended:
             store(os.path.join(cdir, keys[f] + ".json"), keys[f], st, secs, tail)
         return {"name": f, "seconds": secs, "status": st, "cached": False, "tail": tail}
