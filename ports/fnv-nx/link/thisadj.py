@@ -68,12 +68,14 @@ def check(obj, bind, vfts, img):
     return sorted(universe), red
 
 
-def main(argv=None):
+def main(argv=None, image=None):
+    """IMAGE: the exe as an exefacts.Image when the caller already holds its bytes (a test's byte-built scene); otherwise
+    --exe is read through exepin.load_exe, the one way a file becomes an Image."""
     ap = N.common_args(argparse.ArgumentParser())
     a = ap.parse_args(argv)
     try:
         obj, bind = N.load(a.obj, a.bind)
-        img = exefacts.Image(a.exe)
+        img = image if image is not None else exefacts.Image(a.exe)
         uni, red = check(obj, bind, exevft.scan(img), img)
     except (ValueError, OSError) as e:
         print('thisadj: %s' % e, file=sys.stderr)

@@ -2,6 +2,11 @@
 """Check of link/abi.py: the contract model on pairs of MSVC names (equal, equivalent, and every differing component), the gate over sympair
 rows (universe, canonical definition, unnamed rows, kind mismatch, undecodable names) and the CLI."""
 import os, subprocess, sys, tempfile
+import atexit  # noqa: E402
+import shutil  # noqa: E402
+import tempfile  # noqa: E402
+tempfile.tempdir = tempfile.mkdtemp(prefix="scratch-")  # every scratch dir of this test lives here and is removed at exit
+atexit.register(shutil.rmtree, tempfile.tempdir, True)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'contract')]

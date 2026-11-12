@@ -2,6 +2,11 @@
 """Check of link/thisadj.py on a synthetic two-class scene (byte-built exe, hand-built object and bind facts, invented names): green on the
 consistent scene, red and named on every broken fact, an error on malformed input."""
 import os, sys, tempfile
+import atexit  # noqa: E402
+import shutil  # noqa: E402
+import tempfile  # noqa: E402
+tempfile.tempdir = tempfile.mkdtemp(prefix="scratch-")  # every scratch dir of this test lives here and is removed at exit
+atexit.register(shutil.rmtree, tempfile.tempdir, True)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'contract')]

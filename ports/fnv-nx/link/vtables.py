@@ -94,12 +94,14 @@ def check(obj, bind, vfts):
     return sorted(universe), red, unnamed
 
 
-def main(argv=None):
+def main(argv=None, image=None):
+    """IMAGE: the exe as an exefacts.Image when the caller already holds its bytes (a test's byte-built scene); otherwise
+    --exe is read through exepin.load_exe, the one way a file becomes an Image."""
     ap = N.common_args(argparse.ArgumentParser())
     a = ap.parse_args(argv)
     try:
         obj, bind = N.load(a.obj, a.bind)
-        vfts = exevft.scan(exefacts.Image(a.exe))
+        vfts = exevft.scan(image if image is not None else exefacts.Image(a.exe))
     except (ValueError, OSError) as e:
         print('vtables: %s' % e, file=sys.stderr)
         return 2

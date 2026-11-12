@@ -39,8 +39,9 @@ IMAGES = {
 }
 
 
-class ExePinError(Exception):
-    """The file is not the supported exe; the message lists every difference as `field: expected X, actual Y`."""
+class ExePinError(ValueError):
+    """The file is not the supported exe; the message lists every difference as `field: expected X, actual Y`.  A ValueError, so
+    every tool that refuses a malformed input (exit 2 with the message) refuses an unpinned or unreadable exe the same way."""
 
 
 def pe_fields(d):

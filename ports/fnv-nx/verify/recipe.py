@@ -680,6 +680,7 @@ def fetch_externals(exts, store, extcache, ws):
     out = {}
     url = os.environ.get("ARTIFACTS_URL", ARTIFACTS_URL)
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    os.makedirs(ws, exist_ok=True)   # the index files live in WS: every caller may name a fresh sub-path of its scratch directory
     for e in exts:
         stage, bare, co = "external:" + e["name"], os.path.join(extcache, e["commit"]), os.path.join(extcache, e["commit"] + ".co")
         fact = os.path.join(store, "external-facts", "%s-%s.json" % (e["commit"], e["tree_sha256"]))

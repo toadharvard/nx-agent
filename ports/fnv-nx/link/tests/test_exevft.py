@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Check of link/exevft.py on byte-built PE images (invented names): RTTI vftables with hierarchy, exact adjustor thunks in all encodings,
-chains, entry offsets, the CLI output, and the errors for a malformed hierarchy."""
-import json, os, subprocess, sys, tempfile
+chains, entry offsets, the canonical table, the CLI's refusal of an unpinned exe, and the errors for a malformed hierarchy.
+The images are bytes in hand (exefacts.Image.parse); the CLI reads a file only through exepin.load_exe."""
+import json, os, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path[:0] = [HERE, os.path.join(HERE, '..'), os.path.join(HERE, '..', '..', 'contract')]
@@ -46,7 +47,7 @@ v1 = pe.klass('.?AVDer@@', [leaf, t_chain, t_other], off=0, bases=[('.?AVDer@@',
 v2 = pe.klass('.?AVDer@@', [t_sub8, t_plain], off=8, bases=[('.?AVDer@@', 0, -1), ('.?AVBase@@', 8, -1)])
 exe = os.path.join(d, 'a.exe')
 open(exe, 'wb').write(pe.build())
-img = exefacts.Image(exe)
+img = exefacts.Image.parse(pe.build())
 
 vf = exevft.scan(img)
 check('three vftables', sorted(vf), sorted([v0, v1, v2]))
@@ -70,50 +71,44 @@ pe2 = F.PE()
 loop = F.TEXT
 pe2.code(b'\xe9' + (loop - (loop + 5)).to_bytes(4, 'little', signed=True))
 try:
-    open(os.path.join(d, 'b.exe'), 'wb').write(pe2.build())
-    exevft.chain(exefacts.Image(os.path.join(d, 'b.exe')), loop)
+    exevft.chain(exefacts.Image.parse(pe2.build()), loop)
     fails.append('loop: no error')
 except ValueError as e:
     check('loop message', 'cycle' in str(e), True)
 
-# CLI: canonical output, a function of the exe
+# canonical table, a function of the image's bytes
+t = exevft.table(img)
+check('table format', t['format'], 'fnvnx-exevft/2')
+check('table rows', [x['va'] for x in t['vftables']], sorted([v0, v1, v2]))
+row = [x for x in t['vftables'] if x['va'] == v1][0]
+check('table thunk chain', row['slots'][1]['thunk'], {'adj': 12, 'target': leaf, 'via': [t_chain, t_sub8]})
+check('table plain slot', row['slots'][0]['thunk'], None)
+check('deterministic', json.dumps(t, sort_keys=True), json.dumps(exevft.table(exefacts.Image.parse(pe.build())), sort_keys=True))
+# CLI: an exe that is not the pinned build is refused before any fact is written
 out = os.path.join(d, 'o.json')
 r = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'exevft.py'), '--exe', exe, '--out', out], capture_output=True, text=True)
-check('cli exit', r.returncode, 0)
-j = json.load(open(out))
-check('cli format', j['format'], 'fnvnx-exevft/2')
-check('cli rows', [x['va'] for x in j['vftables']], sorted([v0, v1, v2]))
-row = [x for x in j['vftables'] if x['va'] == v1][0]
-check('cli thunk chain', row['slots'][1]['thunk'], {'adj': 12, 'target': leaf, 'via': [t_chain, t_sub8]})
-check('cli plain slot', row['slots'][0]['thunk'], None)
-r2 = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'exevft.py'), '--exe', exe, '--out', out + '2'], capture_output=True, text=True)
-check('deterministic', open(out).read(), open(out + '2').read())
+check('cli refuses an unpinned exe', (r.returncode != 0, 'not the supported FalloutNV.exe' in r.stderr, os.path.exists(out)), (True, True, False))
 
 # malformed hierarchy: the first base is not the class itself -> error naming the COL, exit 1 in the CLI
 pe3 = F.PE()
 l3 = pe3.code(b'\xc3')
 pe3.klass('.?AVX@@', [l3], bases=[('.?AVY@@', 0, -1)])
-bad = os.path.join(d, 'c.exe')
-open(bad, 'wb').write(pe3.build())
 try:
-    exevft.scan(exefacts.Image(bad))
+    exevft.scan(exefacts.Image.parse(pe3.build()))
     fails.append('bad hierarchy: no error')
 except ValueError as e:
     check('bad hierarchy names the COL', 'COL 0x' in str(e) and 'first base' in str(e), True)
-r = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'exevft.py'), '--exe', bad], capture_output=True, text=True)
-check('cli error exit', r.returncode, 1)
 # a TypeDescriptor name outside the RTTI name grammar is an error
 pe4 = F.PE()
 l4 = pe4.code(b'\xc3')
 pe4.klass('.?AVX', [l4])
-bad4 = os.path.join(d, 'e.exe')
-open(bad4, 'wb').write(pe4.build())
 try:
-    exevft.scan(exefacts.Image(bad4))
+    exevft.scan(exefacts.Image.parse(pe4.build()))
     fails.append('bad name: no error')
 except ValueError:
     pass
 
+shutil.rmtree(d)
 for f in fails:
     print('FAIL', f)
 sys.exit(1 if fails else 0)
