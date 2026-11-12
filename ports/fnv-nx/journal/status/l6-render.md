@@ -396,3 +396,8 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
 - 09:14Z A2-gl4 pair: L6A b83b7309 (claude/fnv-l6a-deko-w6-a2gl4), forwarded to the orchestrator.
     - The guest producer already keys with sha256: res_shader.cpp:28 and draw_prog.cpp:49.
     - docs/RENDER_NATIVE.md fixed in bd2868bb.
+- 09:15Z L1 w16 head 1c59bda9 does not carry the decided visibility rule.
+    - Its generator inputs are own/tool/headers-class roots (recipe.py:596).
+    - It adds a class `headers` beside the candidate's unit-less product header roots: two forms for one class.
+    - Sent to w16 and the L1 lead to reconcile with the orchestrator.
+    - render/d3d9 is still blocked (owner L1).
