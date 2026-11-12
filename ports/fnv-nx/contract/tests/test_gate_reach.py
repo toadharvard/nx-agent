@@ -125,7 +125,8 @@ def gpa_rows(imgs, skip=()):
     for nm, img in sorted(imgs.items()):
         for ref in sorted(r for r in img.relocs if img.word(r) == GPA):
             if (nm, ref) not in skip:
-                res.append(((nm, ref, 'GetProcAddress', 'dynamic'), gpa_names.derive_site(img, ref)))
+                for cva in sorted(argflow.uses_of_slot_ref(img, ref)[0]):
+                    res.append(((nm, cva, 'GetProcAddress', 'dynamic'), gpa_names.derive_site(img, cva)))
     return gate_reach.read_gpa(gpa_names.tsv(res))
 
 

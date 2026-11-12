@@ -220,8 +220,10 @@ def gpa_state(images, rows):
         img = images[nm]
         slots = {s for s, (d, n) in img.imports.items() if n == 'GetProcAddress'}
         for ref in sorted(r for r in img.relocs if img.word(r) in slots):
-            if (nm, ref) not in covered:
-                reasons.append(('gpa-uncovered', nm, '0x%x' % ref))
+            calls, open_ = argflow.uses_of_slot_ref(img, ref)      # the rows are keyed by the call instruction (dynsites convention)
+            for va in sorted(set(calls) | {v for v, _ in open_}):
+                if (nm, va) not in covered:
+                    reasons.append(('gpa-uncovered', nm, '0x%x' % va))
         for s in sorted(img.imports):
             d, n = img.imports[s]
             if n.startswith('#') and iat.norm_dll(d) == 'kernel32.dll':

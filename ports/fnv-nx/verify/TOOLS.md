@@ -354,7 +354,7 @@ loadlib - the image set and the module names every LoadLibrary call of the image
 
 One rule over the facts of the images (the same argflow.Image and may-write rule as gpa_names.py):
   site     every reference of an imported LoadLibraryA/W/ExA/ExW slot (argflow.uses_of_slot_ref: call [slot], call thunk, call reg
-           after mov reg,[slot]); its address is the relocated slot reference, the operand L5's dynsites.tsv names.
+           after mov reg,[slot]); its address is the address of the call instruction, the site L5's dynsites.tsv names (one row per call; a dynsites row whose site is not a call of its API is an item of the gate, `argflow.site_api`; nothing is converted).
   names    the value set of argument 0 of the calls that use the site (argflow.derive_arg): a string constant leaf is a name
            (norm_dll'd); any other leaf, a break, or an escape of the slot reference makes the site open.  A closed site
            loads exactly its names (a name no file answers makes LoadLibrary fail: no module).

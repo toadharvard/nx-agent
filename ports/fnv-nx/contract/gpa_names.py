@@ -3,16 +3,10 @@
 
     gpa_names.py --sites dynsites.tsv --image NAME=pe[,ranges.tsv] ... [--bridge bridge.tsv] [--modules modules.tsv] --out DIR
 
-Input rows (dynsites.tsv of L5: module, site, api, operand): `site` is the address of the relocated 4-byte slot operand (at
-the module's preferred base) of an instruction that reads the IAT slot of the import `api`.  Only api = GetProcAddress rows
-are derived.  One rule for every row (argflow.py): the uses of the slot value are
-
-  call [slot]                          the instruction itself;
-  jmp [slot] (an import thunk)         every direct call of the thunk; the thunk's address taken by a relocated word, or a jump
-                                       to it that is not a call, makes the site open; a thunk no code of the facts reaches
-                                       (the facts are closed under direct targets and relocated code pointers) has no use;
-  mov reg,[slot]                       every `call reg` on the forward paths (copies tracked; any other read of the register,
-                                       a return of it in eax: the value escapes and the site is open).
+Input rows (dynsites.tsv of L5: module, site, api, operand): `site` is the address (at the module's preferred base) of the CALL
+instruction of the import `api`: call [slot], a call of the import thunk (jmp [slot]), or a call through a register that holds the
+slot value (argflow.callee decides).  The consumer converts nothing: a row whose site does not decode to such a call is open,
+naming the reason (a mixed-convention file is therefore red).  Only api = GetProcAddress rows are derived.
 
 At every use, lpProcName (stdcall argument 1) and hModule (argument 0) are derived by argflow.derive_arg: definitions D1 string,
 D2 constant-indexed table, D3 ordinal, D4 own parameter (expanded to every caller, open when the function is address-taken).
@@ -43,13 +37,16 @@ def pair_key(dll):
     return iat.norm_dll(dll)
 
 
-def derive_site(img, site):
-    """-> dict(status, modules, pairs {(dll|'*', name): ...}, uses, proof [str], breaks [str])."""
-    calls, open_ = argflow.uses_of_slot_ref(img, site)
+def derive_site(img, site, api='GetProcAddress'):
+    """-> dict(status, modules, pairs {(dll|'*', name): ...}, uses, proof [str], breaks [str]).  The site is the call instruction
+    (argflow.site_api validates it: a row that is not a call of the import is open, naming the reason)."""
+    why = argflow.site_api(img, site, api)
+    gone = not why and argflow.unreached(img, site)       # a call in bytes no range of the facts covers is never executed (A3)
+    calls = [] if (why or gone) else [site]
     out = dict(uses=calls, pairs=set(), proof=[], breaks=[], mod_unknown=False, note='')
-    for va, why in open_:
-        out['breaks'].append('%x %s' % (va, why))
-    if not calls and not open_:
+    if why:
+        out['breaks'].append(why)
+    elif gone:
         out['note'] = 'unreached'
         out['proof'].append('unreached@%x' % site)
     for u in calls:
@@ -133,7 +130,7 @@ def run(rows, images):
             out.append(((mod, site, api, operand), dict(status='open', uses=[], pairs=set(), proof=[], mod_unknown=True, note='',
                                                          breaks=['%s has no image: no range facts' % mod.lower()])))
             continue
-        out.append(((mod, site, api, operand), derive_site(images[mod.lower()], site)))
+        out.append(((mod, site, api, operand), derive_site(images[mod.lower()], site, api)))
     return out
 
 

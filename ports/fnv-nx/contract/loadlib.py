@@ -5,7 +5,7 @@
 
 One rule over the facts of the images (the same argflow.Image and may-write rule as gpa_names.py):
   site     every reference of an imported LoadLibraryA/W/ExA/ExW slot (argflow.uses_of_slot_ref: call [slot], call thunk, call reg
-           after mov reg,[slot]); its address is the relocated slot reference, the operand L5's dynsites.tsv names.
+           after mov reg,[slot]); its address is the address of the call instruction, the site L5's dynsites.tsv names (one row per call; a dynsites row whose site is not a call of its API is an item of the gate, `argflow.site_api`; nothing is converted).
   names    the value set of argument 0 of the calls that use the site (argflow.derive_arg): a string constant leaf is a name
            (norm_dll'd); any other leaf, a break, or an escape of the slot reference makes the site open.  A closed site
            loads exactly its names (a name no file answers makes LoadLibrary fail: no module).
@@ -33,17 +33,20 @@ def api_list():
 
 
 def derive(img):
-    """[(site, calls, api, status, [names], [breaks])] of the images' LoadLibrary references, sorted by site.  A site is the
-    relocated slot reference (call [slot]: the operand; mov reg,[slot]: the load; jmp [slot]: the thunk's operand); its names are
-    the union over every call that uses it (argflow.uses_of_slot_ref)."""
-    rows = []
+    """[(site, calls, api, status, [names], [breaks])] of the images' LoadLibrary calls, sorted by site.  A site is the address of the
+    call instruction (the convention of dynsites.tsv): one row per call found through the uses of an import slot
+    (argflow.uses_of_slot_ref); an escape of the slot value (a use that is not a call) is a row at the instruction that escapes,
+    open.  calls is the site again (one call per row)."""
+    rows = {}
     for api in api_list():
         slots = sorted(s for s, (d, n) in img.imports.items() if n == api)
         wide = argflow.LOADERS[api] == 'w'
         for ref in sorted(r for r in img.relocs if img.word(r) in slots):
             calls, open_ = argflow.uses_of_slot_ref(img, ref)
-            names, brk = [], sorted(dict.fromkeys('%x %s' % x for x in sorted(open_, key=repr)))
+            for va, why in sorted(set(open_), key=repr):
+                rows.setdefault((va, api), ([], ['%x %s' % (va, why)]))
             for call in sorted(set(calls)):
+                names, brk = rows.setdefault((call, api), ([], []))
                 r = argflow.derive_arg(img, call, 0)
                 brk += sorted('%x %s' % b if isinstance(b, tuple) else str(b) for b in r.breaks)
                 for kind, val, chain in r.sorted_leaves():
@@ -51,9 +54,23 @@ def derive(img):
                         names.append(iat.norm_dll(val[1 if wide else 0]))
                     else:
                         brk.append('%x name argument is %s %r' % (call, kind, val))
-            if calls or open_:
-                rows.append((ref, sorted(set(calls)), api, 'closed' if not brk else 'open', sorted(dict.fromkeys(names)), brk))
-    return sorted(rows, key=lambda x: (x[0], x[2]))
+    out = []
+    for (site, api), (names, brk) in sorted(rows.items()):
+        brk = sorted(dict.fromkeys(brk))
+        out.append((site, [site], api, 'closed' if not brk else 'open', sorted(dict.fromkeys(names)), brk))
+    return out
+
+
+def validate(img, sites_text, module):
+    """[(site, reason)] of the LoadLibrary rows of dynsites.tsv for `module` whose site is not a call of that API."""
+    bad = []
+    for line in sites_text.splitlines():
+        f = line.split('\t')
+        if len(f) >= 3 and f[0] != 'module' and f[0].lower() == module and f[2].startswith('LoadLibrary'):
+            why = argflow.site_api(img, int(f[1], 16), f[2])
+            if why:
+                bad.append((int(f[1], 16), why))
+    return bad
 
 
 def tsv(per):
@@ -122,11 +139,14 @@ def main(argv=None):
         p = a.ranges_exe if name == me else a.ranges_module % name.rsplit('.', 1)[0]
         return p if os.path.isfile(p) else None
 
-    paths = {}
+    paths, invalid = {}, []
+    sites_text = open(a.sites).read() if a.sites else ''
 
     def derive_image(name, pe, rg):
         paths[name] = (pe, rg)
-        return derive(gpa_names.load_images(['%s=%s,%s' % (name, pe, rg)], a.bridge, a.escape, a.writes, False, a.globext)[name])
+        img = gpa_names.load_images(['%s=%s,%s' % (name, pe, rg)], a.bridge, a.escape, a.writes, False, a.globext)[name]
+        invalid.extend((name, va, why) for va, why in validate(img, sites_text, name))
+        return derive(img)
 
     bridge = {iat.norm_dll(r['dll']) for r in iat.bridge_rows(a.bridge)[0]} if a.bridge else set()
     members, per = fixpoint(a.exe, a.dir, bridge, ranges_of, derive_image)
@@ -142,10 +162,10 @@ def main(argv=None):
     sites = [(m, r) for m in sorted(per) for r in per[m]]
     nofacts = [n for n, _ in members if n not in per]
     openr = [(m, r) for m, r in sites if r[3] != 'closed']
-    unc = ['%s@%x' % (m, r[0]) for m, r in openr] + ['%s@%x:%s' % (m, v, w) for m, v, w in diff]
-    gatefile.write('loadlib', len(sites) + len(diff), len(sites) - len(openr), unc,
+    unc = ['%s@%x' % (m, r[0]) for m, r in openr] + ['%s@%x:%s' % (m, v, w) for m, v, w in diff] + ['%s@%x:%s' % x for x in invalid]
+    gatefile.write('loadlib', len(sites) + len(diff) + len(invalid), len(sites) - len(openr), unc,
                    'LoadLibrary sites with a derived module name set; dynsites rows agreeing with them (images without facts: the caller lists them)')
-    print('loadlib: %d images (%d without facts), %d sites, %d open, %d disagree with dynsites' % (len(members), len(nofacts), len(sites), len(openr), len(diff)))
+    print('loadlib: %d images (%d without facts), %d sites, %d open, %d disagree with dynsites, %d dynsites rows are not calls of their API' % (len(members), len(nofacts), len(sites), len(openr), len(diff), len(invalid)))
     return 0
 
 

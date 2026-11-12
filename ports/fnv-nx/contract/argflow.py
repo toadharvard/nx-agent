@@ -397,6 +397,20 @@ def callee(img, call_va, _seen=None):
     return ('import',) + next(iter(imps))
 
 
+def site_api(img, site, api):
+    """None if the instruction at `site` is a call whose callee is the import `api` (call [slot], call thunk, call reg of the slot
+    value: callee()), else the reason it is not.  The convention of dynsites.tsv: a site is the address of the call instruction."""
+    i = img.insn(site)
+    if not i or i.mnemonic != 'call':
+        return 'site %x is not a call instruction' % site
+    c = callee(img, site)
+    if c[0] != 'import':
+        return 'site %x calls %s, not the import %s' % (site, ' '.join(str(x) for x in c), api)
+    if c[2] != api:
+        return 'site %x calls %s!%s, not %s' % (site, c[1], c[2], api)
+    return None
+
+
 def entries_for(img, va):
     return [e for e in img.entries_containing(va) if va in img.func(e).nodes]
 
