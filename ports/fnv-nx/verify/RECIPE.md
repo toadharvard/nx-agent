@@ -15,7 +15,7 @@ the hash of the stage document + tool code. All paths are root-relative unless m
  "link": {"script": "link.ld", "output": "x.elf", "flags": ["-e", "entry"]},
  "plugin_cxx": "x86_64-linux-gnu-g++-13",
  "plugins": [{"name": "fnvnx_order", "source": "ports/fnv-nx/toolchain/order/fnvnx_order.cc", "args": {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}},
-             {"name": "fnvnx_ftoi", "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc", "args": {"enum": "error"}}],
+             {"name": "fnvnx_ftoi", "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc", "args": {"mode": "native"}}],
  "external": [{"name": "ft", "repo": "fnv-nx-build", "ref": "mirror/freetype", "commit": "<40 hex>", "tree_sha256": "<64 hex>", "at": "/ext/ft"}]}
 ```
 
@@ -53,7 +53,12 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 - `external`: content-pinned inputs (see below).
 - `plugins`, `plugin_cxx`: GCC plugins of the C++ front end (see "Plugins"). `flags` may not hold any `-fplugin*` token.
 
-## Plugins (`fnvnx_order`, `fnvnx_ftoi`)
+## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)
+`fnvnx_ftoi` is one plugin, class C (float -> integer), two modes chosen by the root's `cxx_origin` and never declared freely: `PLUGIN_ARGS` has `mode=native`
+(the MSVC `_ftol` rewrite, skipped inside functions with `__attribute__((fnvnx_f2i))`, which the plugin registers), `LIFTED_ARGS` has `mode=lifted` (no rewrite; a
+conversion, conversion builtin or float-reading asm outside an `fnvnx_f2i` function is an error). The recipe adds `-fplugin-arg-fnvnx_ftoi-out=/out/unit.f2i.json` to every
+CC stage (`PLUGIN_OUT`); the report (`fnvnx-f2i/1`: sites, helpers, findings) is kept next to the object and listed in `objects.json` as `f2i` of the unit.
+Rule: a root that uses an attribute declares the plugin that registers it (guest roots compile with `-Werror=attributes`).
 Our compiler is the pinned g++-13 with our two plugins. Their sources are tracked under the tool root `ports/fnv-nx/toolchain` (no build script:
 the recipe is the only way they are built). Each entry of `plugins` is `{"name", "source", "args"}`: `source` is `<dir>/<name>.cc`, a tracked file of an
 admitted tool root; `args` becomes `-fplugin-arg-<name>-<key>[=<value>]`. `plugin_cxx` is the host driver under `/usr/bin` (env.json) that builds
@@ -93,7 +98,7 @@ that includes `<vector>`, `<string>`, `<cstdio>`. The 13.3 compiler reads gcc 15
 - `native`: `plugins` must hold `fnvnx_order` and `fnvnx_ftoi`, with the sources `PLUGIN_SOURCES` and the arguments `PLUGIN_ARGS` of recipe.py (the MSVC
   semantics; `ltr`, `first`, `cpp17` exist for A/B measurements and are no product). Anything missing or different is a finding naming it.
 - lifted (the lifter emits `ldar`/`stlr` itself): consistent only if the root has NO tracked C++ unit, every C++ unit is an output of a `generated`
-  step whose tool is `lifted_by`, and `pack` is an external of the recipe (an input of every generator). Plugins are then not required.
+  step whose tool is `lifted_by`, and `pack` is an external of the recipe (an input of every generator). The one plugin it must load is `fnvnx_ftoi` with `LIFTED_ARGS` (`mode=lifted`): no rewrite, and every float -> integer conversion outside an `fnvnx_f2i` function is a build error.
 Assumption: the declaration `lifted_by` names the lifter is the owner's (admit.json is reviewed); the gate proves that no hand-written C++ sits in a lifted root.
 
 ## Refusal set R (GNU ld option syntax, not a text guess)

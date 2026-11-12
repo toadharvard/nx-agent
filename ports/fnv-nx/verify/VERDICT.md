@@ -195,6 +195,6 @@ The rules cited by the gates (N1-N4, R1, R3, R5, R6, R12, R13, K16 and others) a
 - The verdict runs gates in a clean worktree of the commit, in the environment declared by `env.json`.
 
 ## Compiler plugins (`build` gate)
-A product root with native or decomp C++ is compiled with `fnvnx_order` and `fnvnx_ftoi` (RECIPE.md, "Plugins"); a root whose C++ is all lifted
-(declared `cxx_origin` of its admit.json entry, consistency checked against the recipe) needs none. A missing plugin, a changed source or argument, or
+A product root with native or decomp C++ is compiled with all plugins (RECIPE.md, "Plugins"); a root whose C++ is all lifted
+(declared `cxx_origin` of its admit.json entry, consistency checked against the recipe) loads `fnvnx_ftoi` in mode lifted only. A missing plugin, a changed source or argument, or
 an undeclared origin makes the recipe invalid and the `build` gate red. Tests: `verify/tests/test_plugins.py`.

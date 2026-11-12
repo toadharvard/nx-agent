@@ -60,6 +60,12 @@ PLUGIN_SOURCES = {"fnvnx_ftoi": _T + "ftoi/fnvnx_ftoi.cc", "fnvnx_order": _T + "
                   "fnvnx_names": _T + "names/fnvnx_names.cc", "fnvnx_layout": _T + "layout/fnvnx_layout.cc"}
 PLUGIN_INPUTS = {"fnvnx_layout": [_T + "names/fnvnx_names.cc"]}
 PLUGIN_ARGS = {n: {} for n in PLUGIN_SOURCES}
+PLUGIN_ARGS["fnvnx_ftoi"] = {"mode": "native"}
+# fnvnx_ftoi is one plugin with two modes, chosen by the root's cxx_origin (no free choice): native C++ takes the MSVC rewrite, lifted C++ has
+# no rewrite and every float -> integer conversion outside an fnvnx_f2i function is an error. Both write their report (gate fpexact) to
+# PLUGIN_OUT of the CC stage's own /out; the recipe passes it, a build.json does not declare it.
+LIFTED_ARGS = {"fnvnx_ftoi": {"mode": "lifted"}}
+PLUGIN_OUT = {"fnvnx_ftoi": "/out/unit.f2i.json"}
 PLUGIN_ARGS["fnvnx_order"] = {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}
 # Flags of the game's C++ that fix its semantics (compile.sh); fnvnx_sdd needs -DFNVNX_SDD=1 and -fno-devirtualize.
 SEMANTICS_FLAGS = ("-mabi=ilp32", "-fms-extensions", "-fshort-wchar", "-frounding-math", "-fsigned-char", "-fno-strict-aliasing", "-fwrapv",
@@ -341,6 +347,11 @@ def plugin_errors(rec, root, files, roots, units, ext_names):
         err += ["native C++ root %s: flags.cxx lacks the semantics flag %s" % (root, f) for f in SEMANTICS_FLAGS if f not in fl]
     elif isinstance(origin, dict) and set(origin) == {"lifted_by", "pack"}:
         tool, pack = origin["lifted_by"], origin["pack"]
+        for n, a in LIFTED_ARGS.items():   # lifted C++ does its conversions in helpers: the plugin proves it (and only it is required)
+            if n not in loaded:
+                err.append("lifted C++ root %s does not load plugin %s (mode lifted: every conversion outside an fnvnx_f2i function is an error)" % (root, n))
+            elif loaded[n].get("args") != a:
+                err.append("plugin %s: arguments of a lifted root must be %s, are %s" % (n, a, loaded[n].get("args")))
         mine = {f[len(root) + 1:] for f in files if under(f, root)}
         owner = next((r for r in roots if isinstance(tool, str) and under(tool, r)), None)
         if not (isinstance(tool, str) and tool in files and tool.endswith(".py") and owner and roots[owner]["class"] == "tool"):
@@ -601,7 +612,8 @@ class Job:
                    "env": dict(unitstage.ENV, PATH=os.path.dirname(host)), "outputs": ["/out"],
                    "inputs": sorted(rt["inputs"] + [{"at": "/psrc", "tree": tree}, {"at": "/plugcrt", "tree": crt_tree}], key=lambda i: i["at"])}
             res = self.stage(doc)[1]["outputs"]["/out"]
-            flags = ["-fplugin=/plug/%s/%s.so" % (n, n)] + ["-fplugin-arg-%s-%s%s" % (n, k, "=" + v if v else "") for k, v in p["args"].items()]
+            flags = ["-fplugin=/plug/%s/%s.so" % (n, n)] + ["-fplugin-arg-%s-%s%s" % (n, k, "=" + v if v else "") for k, v in p["args"].items()] + (
+                ["-fplugin-arg-%s-out=%s" % (n, PLUGIN_OUT[n])] if n in PLUGIN_OUT else [])
             out.append((n, res, flags))
         return out
 
@@ -732,7 +744,13 @@ def build(repo, root, store, out, jobs=4, ext=None):
             d, x = symbols(dest, u)
             res["defined"] += d
             und |= x
-            res["objects"].append({"unit": u, "object": os.path.abspath(dest), "sha256": ent["h"], "os_layer": u in j.rec.get("os_layer", [])})
+            row = {"unit": u, "object": os.path.abspath(dest), "sha256": ent["h"], "os_layer": u in j.rec.get("os_layer", [])}
+            rep = cas.manifest(objs[u], store)["entries"].get("unit.f2i.json")   # the fnvnx_ftoi report of the unit, when the plugin is loaded
+            if rep:
+                fd = os.path.join(out, "obj", u + ".f2i.json")
+                shutil.copyfile(cas._obj(store, rep), fd)
+                row["f2i"] = os.path.abspath(fd)
+            res["objects"].append(row)
         res.update(defined=sorted(res["defined"], key=lambda d: (d["symbol"], d["object"])), undefined=sorted(und))
         if j.rec.get("link"):
             name = j.rec["link"]["output"]
