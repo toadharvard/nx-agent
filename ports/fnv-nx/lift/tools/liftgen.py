@@ -93,10 +93,11 @@ def read_texts(path):
             out[a] = f.read(int(m[2]))
 
 
-def init(exe, ent, emit):
+def init(exe, ent, emit, jtab):
     """the state of a lifting process (the parent and every pool worker), built from the arguments: the result does not depend on the start method"""
     import fnvlift as L, fnvlift.core as core
     core.set_emit(emit)
+    core.set_jtab(json.load(open(jtab)) if jtab else None)     # ehtables.json of the module: the only source of jump-table extents
     G.update(ent=ent, img=L.Image(exe), cap=[])
     if 'orig_explore' not in G:         # once per process: the capture wrapper around core.explore
         G['orig_explore'] = orig = core.explore
@@ -109,7 +110,7 @@ def shard(a):
     K, N = map(int, a.shard.split('/')); out = a.out
     ent = L.universe.load()[0]; mine = sorted(ent)[K::N]
     init(a.exe, ent, a.emit)
-    with mp.Pool(a.jobs, initializer=init, initargs=(a.exe, ent, a.emit)) as p: got = list(p.imap(work, [mine[j:j + BATCH] for j in range(0, len(mine), BATCH)], 1))
+    with mp.Pool(a.jobs, initializer=init, initargs=(a.exe, ent, a.emit, a.jtab)) as p: got = list(p.imap(work, [mine[j:j + BATCH] for j in range(0, len(mine), BATCH)], 1))
     texts = [t for g in got for t in g[0]]; miss = sorted(m for g in got for m in g[2])
     forms = collections.Counter()
     for g in got: forms.update(g[1])
@@ -225,7 +226,7 @@ def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
     A('--shard'); A('--finish', action='store_true'); A('--recipe', nargs=3, metavar=('REF', 'COMMIT', 'TREE_SHA256')); A('--out', default='/home/user/l3work/liftgen'); A('--jobs', type=int, default=3)
     A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')); A('--module'); A('--emit', default='', choices=['', 'dsl'], help='dsl: integer instructions from the proven DSL forms (fnvlift/f_dsl.py) before the hand handlers')
-    A('--bridge', default=os.environ.get('FNVNX_BRIDGE')); A('--need', action='append', default=[]); A('--l3', default=None); A('--also', action='append', default=[], metavar='DIR=UNIVERSE.tsv')
+    A('--jtab', default=None, help='ehtables.json of the module (tools/ehtables.py facts, `jtab_tables`)'); A('--bridge', default=os.environ.get('FNVNX_BRIDGE')); A('--need', action='append', default=[]); A('--l3', default=None); A('--also', action='append', default=[], metavar='DIR=UNIVERSE.tsv')
     a = ap.parse_args()
     if a.recipe: return recipe(*a.recipe)
     os.makedirs(a.out, exist_ok=True)

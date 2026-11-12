@@ -209,28 +209,34 @@ def set_emit(mode):
     EMIT = mode
 
 
-TAB_BIAS = 16     # assumption: the lowest index of a table is below 16 (the table starts at most 16 dwords above the displacement)
+JTAB = None      # facts of tools/jtab.py: {site: (lo, hi, targets)} from the `jtab_tables` records of ehtables.json; set by set_jtab()
+JTAB_RED = None  # sites tools/jtab.py could not prove an extent for: {site: why}
+
+
+def set_jtab(facts):
+    """facts: the parsed ehtables.json (a dict) of the module being lifted, or None. The only source of jump-table extents: this module never analyses a table itself."""
+    global JTAB, JTAB_RED
+    if facts is None:
+        JTAB = JTAB_RED = None
+        return
+    JTAB = {int(r['site'], 16): (r['lo'], r['hi'], tuple(int(w, 16) for w in r['targets'])) for r in facts['jtab_tables']}
+    JTAB_RED = {int(r['site'], 16): r['why'] for r in facts.get('jtab_red', ())}
 
 
 def tab_tails(img, insns, lo, hi):
-    """Relocated code pointers a `jmp [reloc disp + idx*4]` can hand to the dispatcher (rule R3): the whole run of consecutive .reloc'd dwords from
-    the table address (the first relocated dword at or above the displacement, within TAB_BIAS dwords) (a run ends at the first dword that is not relocated, or at an instruction of this function), outside [lo, hi)."""
+    """Code pointers a `jmp [reloc disp + idx*4]` can hand to the dispatcher (rule R3): the proved slot values of the site's table (the `jtab_tables` record of
+    its address, extent proved by tools/jtab.py), outside [lo, hi). A site with no record (no proved extent) is Unsupported."""
     out = set()
     for a, ins in insns.items():
         if ins.mnemonic.split(' ')[-1] != 'jmp' or not ins.operands or ins.operands[0].type != X.X86_OP_MEM:
             continue
         m = ins.operands[0].mem
         if m.scale == 4 and m.index and (a + ins.size - 4) in img.rset:
-            t = m.disp & 0xffffffff
-            for _ in range(TAB_BIAS):       # the index may start above 0 (case range k..n: disp = table - 4*k)
-                if t in img.rset:
-                    break
-                t += 4
-            while t in img.rset and t not in insns:
-                v = img.u32(t)
-                if not lo <= v < hi:
-                    out.add(v)
-                t += 4
+            if JTAB is None:
+                raise Unsupported('jump table at %x: no jtab facts loaded' % a)
+            if a not in JTAB:
+                raise Unsupported('jump table at %x: no proved extent (%s)' % (a, (JTAB_RED or {}).get(a, 'no jtab record')))
+            out.update(v for v in JTAB[a][2] if not lo <= v < hi)
     return sorted(out)
 
 
