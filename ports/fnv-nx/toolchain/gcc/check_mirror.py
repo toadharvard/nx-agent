@@ -140,7 +140,7 @@ def c4(prefix, gcc13):
     print('C4 ok: libstdc++ headers %s only, ILP32 c++config.h is 13' % gcc13)
 
 
-def c5(prefix, s2, gcc13, here):
+def c5(prefix, s2, gcc13, here, semantics=None):
     gcc = (s2 or prefix) + '/bin/%s-gcc' % TARGET
     with tempfile.TemporaryDirectory() as t:
         open(t + '/p.c', 'w').write(
@@ -170,7 +170,14 @@ def c5(prefix, s2, gcc13, here):
         fail('C5 the ILP32 data model is not the exe\'s: %s' % man['sizeof'])
     # L1's pack manifest: the same facts under the names the guest roots compare (all from the built compiler's own answers)
     man['version'] = man['compiler'].split()[1]
-    man['SEMANTICS_FLAGS'] = man['ilp32_flags']
+    if semantics:   # the flags as compiled: guest_compiler.json's set + the integration branch's addition; per language
+        full = json.load(open(semantics))['flags']['semantics'] + ['-fno-reorder-blocks-and-partition']
+        man['flags'] = {'c': full, 'c++': full}
+        man['guest_compiler_json_sha256'] = hashlib.sha256(open(semantics, 'rb').read()).hexdigest()
+        r = run([gcc] + full + ['-O0', '-c', '-x', 'c', '/dev/null', '-o', '/dev/null'])
+        if r.returncode != 0:
+            fail('C5 the pack\'s own compiler rejects the semantics set: ' + r.stderr.strip()[-300:])
+    man['SEMANTICS_FLAGS'] = ' '.join(man['flags']['c']) if semantics else man['ilp32_flags']
     man['sizeof_wchar_t'], man['sizeof_size_t'], man['sizeof_long'] = (man['sizeof'][k] for k in ('wchar_t', 'size_t', 'long'))
     open(prefix + '/MANIFEST.json', 'w').write(json.dumps(man, indent=1, sort_keys=True) + '\n')
     print('C5 ok: manifest written: %s' % json.dumps(man, sort_keys=True))
@@ -290,6 +297,7 @@ def main():
     ap.add_argument('--s2')
     ap.add_argument('--gcc13', default='13.3.0')
     ap.add_argument('--manifest', action='store_true')
+    ap.add_argument('--semantics', help='verify/guest_compiler.json: the flag set the pack is compiled with')
     ap.add_argument('--libnx')
     a = ap.parse_args()
     prefix = a.prefix.rstrip('/')
@@ -299,7 +307,7 @@ def main():
     c3(prefix)
     c4(prefix, a.gcc13)
     if a.manifest:
-        c5(prefix, a.s2, a.gcc13, here)
+        c5(prefix, a.s2, a.gcc13, here, a.semantics)
     if a.libnx:
         c6(prefix, a.libnx)
     sys.exit(1 if fails else 0)

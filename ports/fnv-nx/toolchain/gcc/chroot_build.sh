@@ -1,41 +1,44 @@
 #!/bin/bash
-# Build the fnvnx-a64 mirror inside a debootstrap chroot that holds exactly the pinned `toolchain-build` profile
-# of verify/env.json (never in the host's root: the host keeps passing envcheck).
+# Build the fnvnx-a64 mirror inside a chroot made of exactly the pinned `toolchain-build` profile (fnv-nx-build
+# tools/toolchain-debs: profile.json + debs/, the full dependency closure, each deb with its sha256), never in the host root.
 #
-#   toolchain/gcc/chroot_build.sh <chroot dir> <profile file> <mirror url> <repo root> <tarball dir> <devkitPro buildscripts> <out dir>
+#   toolchain/gcc/chroot_build.sh <chroot dir> <toolchain-debs checkout> <repo root> <tarball dir> <devkitPro buildscripts> <out dir>
 #
-#   <chroot dir>    fixed path of the chroot (a different path per build is fine: nothing of it enters the mirror)
-#   <profile file>  one `package=version` per line (the apt packages of the profile), `pip:name==version` for pip ones
-#   <mirror url>    the Ubuntu 24.04 archive/snapshot the verdict env uses
-#   <out dir>       receives the mirror tree (the chroot's /opt/fnvnx-a64) and the build log
-# Inside, build.sh runs with the canonical prefix /opt/fnvnx-a64 and the build dir /build (the same in every chroot),
-# so the paths in the build do not depend on the host's. The chroot's package set is checked against the profile
-# after installation: any package of the profile at another version stops the build.
+# The chroot is made with dpkg only (no network, no apt): every deb of profile.json is checked against its sha256, unpacked
+# into the empty chroot and configured there. Inside, build.sh runs with the canonical prefix /opt/fnvnx-a64 and the build dir
+# /build (the same in every chroot), so no host path enters the build. <out dir> receives the mirror tree, the build log, the
+# chroot's package list and tree_sha256.
 set -euo pipefail
-[ $# -eq 7 ] || { sed -n '2,12p' "$0" >&2; exit 2; }
-CH=$1; PROFILE=$(realpath "$2"); MIRROR=$3; ROOT=$(realpath "$4"); DL=$(realpath "$5"); DKP=$(realpath "$6"); OUT=$(mkdir -p "$7" && realpath "$7")
-[ "$(id -u)" = 0 ] || { echo "chroot_build.sh: needs root (debootstrap)" >&2; exit 2; }
-[ ! -e "$CH" ] || [ -z "$(ls -A "$CH")" ] || { echo "chroot_build.sh: $CH is not empty" >&2; exit 2; }
-APT=$(grep -v '^pip:' "$PROFILE" | grep -v '^#' | grep -v '^$' || true)
-PIP=$(sed -n 's/^pip://p' "$PROFILE")
-
-debootstrap --variant=minbase noble "$CH" "$MIRROR"
-mount --bind /proc "$CH/proc"; trap 'umount "$CH/proc" 2>/dev/null || true' EXIT
-echo "deb $MIRROR noble main universe" > "$CH/etc/apt/sources.list"
-chroot "$CH" apt-get update
-chroot "$CH" apt-get install -y --no-install-recommends $(echo "$APT" | tr '\n' ' ')
-chroot "$CH" apt-get install -y --no-install-recommends python3-pip ca-certificates
-[ -z "$PIP" ] || chroot "$CH" pip3 install --break-system-packages $(echo "$PIP" | tr '\n' ' ')
-# every apt line of the profile must be installed at exactly that version
-echo "$APT" | while IFS='=' read -r p v; do
-	got=$(chroot "$CH" dpkg-query -W -f='${Version}' "$p")
-	[ "$got" = "$v" ] || { echo "chroot_build.sh: $p is $got, profile says $v" >&2; exit 1; }
-done
-chroot "$CH" dpkg-query -W -f='${Package}=${Version}\n' > "$OUT/chroot-packages.txt"
-
-mkdir -p "$CH/src" "$CH/dl" "$CH/dkp" "$CH/build" "$CH/opt/fnvnx-a64"
-mount --bind "$ROOT" "$CH/src";  mount --bind "$DL" "$CH/dl"; mount --bind "$DKP" "$CH/dkp"
+[ $# -eq 6 ] || { sed -n '2,10p' "$0" >&2; exit 2; }
+CH=$1; DEBS=$(realpath "$2"); ROOT=$(realpath "$3"); DL=$(realpath "$4"); DKP=$(realpath "$5"); OUT=$(mkdir -p "$6" && realpath "$6")
+[ "$(id -u)" = 0 ] || { echo "chroot_build.sh: needs root" >&2; exit 2; }
+mkdir -p "$CH"; [ -z "$(ls -A "$CH")" ] || { echo "chroot_build.sh: $CH is not empty" >&2; exit 2; }
+CH=$(realpath "$CH")
+python3 - "$DEBS" <<'PY'
+import json, hashlib, sys, os
+d = sys.argv[1]; p = json.load(open(d + '/profile.json'))
+for n, v in sorted(p['packages'].items()):
+    h = hashlib.sha256(open(d + '/debs/' + v['file'], 'rb').read()).hexdigest()
+    assert h == v['sha256'], '%s: sha256 %s, profile says %s' % (n, h, v['sha256'])
+print('profile: %d debs, sha256 ok' % len(p['packages']))
+PY
+mkdir -p "$CH/var/lib/dpkg" "$CH/proc" "$CH/etc"; : > "$CH/var/lib/dpkg/status"
+dpkg --root="$CH" --force-all --unpack "$DEBS"/debs/*.deb > "$OUT/dpkg-unpack.log" 2>&1 || { tail -20 "$OUT/dpkg-unpack.log"; exit 1; }
+mount --bind /proc "$CH/proc"
 trap 'umount "$CH/src" "$CH/dl" "$CH/dkp" "$CH/proc" 2>/dev/null || true' EXIT
-chroot "$CH" /src/toolchain/gcc/build.sh /dl /build /opt/fnvnx-a64 /dkp 2>&1 | tee "$OUT/build.log"
-cp -a "$CH/opt/fnvnx-a64/." "$OUT/mirror/" 2>/dev/null || { mkdir -p "$OUT/mirror"; cp -a "$CH/opt/fnvnx-a64/." "$OUT/mirror/"; }
+chroot "$CH" /usr/bin/dpkg --force-all --configure -a > "$OUT/dpkg-configure.log" 2>&1 || { tail -20 "$OUT/dpkg-configure.log"; exit 1; }
+chroot "$CH" dpkg-query -W -f='${Package}=${Version}\n' > "$OUT/chroot-packages.txt"
+python3 - "$DEBS" "$OUT/chroot-packages.txt" <<'PY'
+import json, sys
+p = json.load(open(sys.argv[1] + '/profile.json'))['packages']
+got = dict(l.strip().split('=', 1) for l in open(sys.argv[2]) if '=' in l)
+bad = [(n, got.get(n), v['version']) for n, v in p.items() if got.get(n) != v['version']]
+assert not bad and len(got) == len(p), 'chroot != profile: %s' % bad[:5]
+print('chroot packages == profile (%d)' % len(p))
+PY
+mkdir -p "$CH/src" "$CH/dl" "$CH/dkp" "$CH/build" "$CH/opt/fnvnx-a64"
+mount --bind "$ROOT" "$CH/src"; mount --bind "$DL" "$CH/dl"; mount --bind "$DKP" "$CH/dkp"
+chroot "$CH" /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root JOBS="${JOBS:-$(nproc)}" \
+	/src/toolchain/gcc/build.sh /dl /build /opt/fnvnx-a64 /dkp 2>&1 | tee "$OUT/build.log"
+mkdir -p "$OUT/mirror"; cp -a "$CH/opt/fnvnx-a64/." "$OUT/mirror/"
 python3 "$ROOT/verify/cas.py" ingest "$OUT/cas" "$OUT/mirror" | tee "$OUT/tree_sha256.txt"

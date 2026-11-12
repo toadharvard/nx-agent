@@ -45,7 +45,19 @@ S2=$BUILD/s2            # stage 2's scratch prefix: only its ILP32 libraries and
 export SOURCE_DATE_EPOCH=1769126400 TZ=UTC LC_ALL=C
 MAPS="-ffile-prefix-map=$BUILD=/fnvnx/build -ffile-prefix-map=$DL=/fnvnx/dl -ffile-prefix-map=$PREFIX=/fnvnx/prefix"
 export CFLAGS="-O2 -g0 $MAPS" CXXFLAGS="-O2 -g0 $MAPS" LDFLAGS="-Wl,--build-id=none"
+# The guest semantics flag set is read from verify/guest_compiler.json (flags.semantics) at build time, never copied by hand.
+# GUEST_COMPILER_JSON names the file (the trunk's, pinned by the caller); -fno-reorder-blocks-and-partition is the
+# integration branch's addition to that set. The multilib table adds -mabi=ilp32 -fshort-wchar -fsigned-char -fPIC per
+# variant itself, so the target libraries get the rest here; MANIFEST.json records the whole set as compiled.
+GUEST_COMPILER_JSON=${GUEST_COMPILER_JSON:?GUEST_COMPILER_JSON: path of verify/guest_compiler.json}
+SEMANTICS=$(python3 - "$GUEST_COMPILER_JSON" <<'PY'
+import json, sys
+f = json.load(open(sys.argv[1]))["flags"]["semantics"] + ["-fno-reorder-blocks-and-partition"]
+print(" ".join(x for x in f if x not in ("-mabi=ilp32", "-fPIC", "-fshort-wchar", "-fsigned-char")))
+PY
+)
 TFLAGS="-O2 -ffunction-sections -fdata-sections $MAPS"
+S2FLAGS="$TFLAGS $SEMANTICS"
 export PATH=$PREFIX/bin:$PATH
 
 cd "$BUILD"
@@ -177,7 +189,7 @@ GCC13_CONF=(--target=$TARGET --prefix="$S2" --enable-languages=c,c++
 S2PATH=$S2/bin:$PATH
 if ! step s2gcc1; then
 	rm -rf b-gcc13; mkdir -p b-gcc13; cd b-gcc13
-	CFLAGS_FOR_TARGET="$TFLAGS" CXXFLAGS_FOR_TARGET="$TFLAGS" LDFLAGS_FOR_TARGET="" \
+	CFLAGS_FOR_TARGET="$S2FLAGS" CXXFLAGS_FOR_TARGET="$S2FLAGS" LDFLAGS_FOR_TARGET="" \
 		../gcc-$GCC13_VER/configure "${GCC13_CONF[@]}"
 	make -j"$JOBS" all-gcc
 	make install-gcc
@@ -185,7 +197,7 @@ if ! step s2gcc1; then
 fi
 if ! step s2newlib; then
 	rm -rf b-newlib13; mkdir -p b-newlib13; cd b-newlib13
-	PATH=$S2PATH CFLAGS_FOR_TARGET="$TFLAGS" \
+	PATH=$S2PATH CFLAGS_FOR_TARGET="$S2FLAGS" \
 		../newlib-$NEWLIB_VER/configure --disable-newlib-supplied-syscalls --enable-newlib-mb \
 		--disable-newlib-wide-orient --enable-newlib-register-fini --target=$TARGET --prefix="$S2"
 	PATH=$S2PATH make -j"$JOBS"
@@ -221,5 +233,5 @@ if ! step merge; then
 	find "$PREFIX/$TARGET/include/c++/$GCC13_VER/$TARGET" -mindepth 1 -maxdepth 1 ! -name "$V" -exec rm -rf {} +
 	done_ merge
 fi
-python3 "$HERE/check_mirror.py" "$PREFIX" --s2 "$S2" --gcc13 "$GCC13_VER" --manifest
+python3 "$HERE/check_mirror.py" "$PREFIX" --s2 "$S2" --gcc13 "$GCC13_VER" --manifest --semantics "$GUEST_COMPILER_JSON"
 echo "fnvnx-a64 installed in $PREFIX"
