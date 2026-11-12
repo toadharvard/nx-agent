@@ -1,0 +1,19 @@
+{
+ "commit": "b6bb6c3ed7c07f13818eafa658155f50785a9c4d (parent of the commit that holds this file)",
+ "rows": 7553,
+ "rows_by_note": {
+  "model not in shipped set": 2672
+ },
+ "rows_used_by_0": 6417,
+ "rows_used_by_0_in_shipped_models": 3745,
+ "rows_used_by_ge1": 1136,
+ "set_sha256": "7c097d1dbe0ec36469301690fa84975686d3769be4ee5674c1d261562743eebe",
+ "shaders": 15791,
+ "shaders_per_model": {
+  "ps_2_x": 7604,
+  "ps_3_0": 556,
+  "vs_1_1": 1808,
+  "vs_2_0": 5354,
+  "vs_3_0": 469
+ }
+}
