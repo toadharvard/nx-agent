@@ -4,7 +4,8 @@
 The rule, per test binary:  (symbols defined by the test's own files) ∩ (symbols defined by the product) = ∅,
 and a test links the real product files of its root.
 
-Product  = the units platform/build_guest.sh compiles for the guest: depth-1 *.c / *.cpp of platform/{win32,crt,audio,
+Product  = the guest runtime units (toolchain/guest/build.sh: the .c of its `for f in` line and the .cpp it compiles) and the units
+           platform/build_guest.sh compiles for the guest: depth-1 *.c / *.cpp of platform/{win32,crt,audio,
            input,boundary,com,os} platform/clock/clock_rt.cpp, clock_real.cpp (clock_virtual.cpp is
            the verification clock, also a product choice: both clocks are product units), platform/guest/os_guest.c and
            platform_glue.cpp.  The set is read from platform/build_guest.sh itself, so it cannot drift from the build.
@@ -39,6 +40,8 @@ import sys
 
 DIRS_RE = re.compile(r'for\s+sub\s+in\s+([a-z0-9_ ]+);\s*do')
 GUESTFILES_RE = re.compile(r'for\s+n\s+in\s+(os_guest\.c\s+platform_glue\.cpp)\s*;')
+RT_C_RE = re.compile(r'for\s+f\s+in\s+([a-z0-9_ ]+);\s*do')
+RT_CXX_RE = re.compile(r'-c\s+"\$G/([a-z0-9_]+\.cpp)"')
 
 
 def product_units(root):
@@ -55,6 +58,11 @@ def product_units(root):
     units += ['platform/clock/clock_rt.cpp', 'platform/clock/clock_real.cpp', 'platform/clock/clock_virtual.cpp']
     for n in GUESTFILES_RE.search(txt).group(1).split():
         units.append('platform/guest/' + n)
+    # the guest runtime (libfnvnx-guest.a): platform/build_guest.sh builds it with toolchain/guest/build.sh, so its units are
+    # product units too; the set is read from that script
+    rt = open(os.path.join(root, 'toolchain', 'guest', 'build.sh')).read()
+    units += ['toolchain/guest/%s.c' % n for n in RT_C_RE.search(rt).group(1).split()]
+    units += ['toolchain/guest/' + n for n in RT_CXX_RE.findall(rt)]
     return sorted(set(units))
 
 
@@ -230,7 +238,7 @@ def run(a):
         for rel, s in defined_by_test.items():
             bs = s & boundary_syms
             if bs:
-                rows.append(('boundary double', b, rel, ','.join(sorted(bs)[:6]) + ('...' if len(bs) > 6 else ''), '%d symbols' % len(bs)))
+                rows.append(('boundary double', b, rel, ','.join(sorted(bs)), '%d symbols' % len(bs)))
         bin_find[b] = any(r[1] == b for r in rows)
     for u in units:
         if not any(os.path.exists(o) for o in pobjs.get(u, ())):
@@ -287,6 +295,12 @@ def main():
     print('# replaced units: %d (%s)' % (len(repl), ' '.join(sorted(repl))))
     print('# unlinked units: %d (%s)' % (len(unl), ' '.join(unl)))
     print('# boundary-double files (not already double files): %d (%s)' % (len(bfiles), ' '.join(sorted(bfiles))))
+    bsyms = set()
+    for r in rows:
+        if r[0] == 'boundary double':
+            bsyms |= {(r[2], x) for x in r[3].split(',') if x}
+    print('# test-side definitions of product or product-referenced symbols (doubles + boundary doubles): %d files, %d symbols' % (
+        len({f for f, _ in dsyms | bsyms}), len(dsyms | bsyms)))
     print('# weak/weak overlap symbol-instances (informational, not a finding): %d' % weakov)
     unb = {(r[1] or '-', r[2]) for r in rows if r[0] == 'unbuilt object'}
     print('# unbuilt objects (census incomplete): %d (%s)' % (len(unb), ' '.join('%s:%s' % x for x in sorted(unb))))
