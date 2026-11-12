@@ -309,8 +309,8 @@ offsets inside `struct cpu`.
 | class | bases | why no guest address can be formed from it |
 |---|---|---|
 | FRAME | `sp`; a copy of `sp`; `sp + constant`. Only a constant displacement is accepted (an index register is red). | `sp` is the host thread's stack pointer; the gate proves pack code changes it only by constants, by a copy back from a FRAME register, or by its own writeback, so it stays inside the host stack the runtime entered with. The host stack is a host mapping, disjoint from every guest mapping (A2). A guest address would need a guest-derived addend; any non-constant addend makes the result GUEST. |
-| IMAGE | the result of `adrp`/`adr`; a constant added to it; a GOT load. Loads and ordered stores only, constant displacement; an index is accepted only for a load from a datum of the object's own read-only-or-data PROGBITS section when `bound(index) << shift + size` fits before the end of that section. | pc-relative addresses are link-time addresses of the lifted image itself (literal pools, jump data), disjoint from guest mappings (A2). A plain store through IMAGE is red, so no host global is written unordered either. The bounded index cannot leave the section, by the unsigned bound the dataflow proved. |
-| CPU | x27; a copy; `x27 + offset` where the dataflow keeps the offset interval `[lo, hi]` (constants, or registers with a proven unsigned bound). Passes only when `[lo + disp, hi + disp + size]` lies inside `[0, sizeof(struct cpu)]`; no index, no writeback. | x27 is the fixed register holding the host `struct cpu *` (`-ffixed-x27`); the gate proves no instruction of the image writes it (a write is red), so it holds the value the runtime entry set. Every accepted access lies inside that one host object, which is thread-private register state and not guest memory (A2, A3). An offset not proven inside the object makes the access GUEST (then it must be ordered and wrap-clean, and it is not: red). |
+| IMAGE | the result of `adrp`/`adr`; a constant added to it; a GOT load. Loads and ordered stores only, constant displacement; an index is accepted only for a load from a datum of the object's own read-only-or-data PROGBITS section when `bound(index) << shift + size` fits before the end of that section. | pc-relative addresses are link-time addresses of the lifted image itself (literal pools, jump data, `fnvnx_split_lock`), disjoint from guest mappings (A2). A plain store through IMAGE is red, so no host global is written unordered either. The bounded index cannot leave the section, by the unsigned bound the dataflow proved. |
+| CPU | x27; a copy; `x27 + offset` where the dataflow keeps the offset interval `[lo, hi]` (constants, or registers with a proven unsigned bound). Passes only when `[lo + disp, hi + disp + size]` lies inside `[0, sizeof(struct cpu)]`; no index, no writeback. | x27 is the fixed register holding the host `struct cpu *`; the gate proves no instruction of the image writes it (object rule (a): a write is red), so it holds the value the runtime entry set. Every accepted access lies inside that one host object, which is thread-private register state and not guest memory (A2, object rule (a)). An offset not proven inside the object makes the access GUEST (then it must be ordered and wrap-clean, and it is not: red). |
 | spill slot | a CPU-class pointer stored to `[sp, #d]` and reloaded from the same slot keeps its class and interval. | The slot is in the host frame. The gate forgets the slot at any store that overlaps it, any store through a frame pointer of unknown offset, any change of `sp`, and at a call when a frame address at or below the slot has escaped (was in x0-x18 at a call or was stored to memory). A callee that never received a frame address at or below the slot cannot write it (A1). |
 
 This is wider than "host sp/x29 slots and pc literals" in two places, both stated here on purpose: the CPU class
@@ -332,19 +332,45 @@ an X-form result with a proven bound below 2^32; so a guest register used as a b
 * `align`: every ordered access wider than a byte is dominated by the zero edge of `tst base, #size-1` on the unchanged
   base value, or has a constant aligned address. So `ldar`/`stlr`/`ldaxr` never take an alignment fault.
 
+### Object rules (checked on the code, not on the compiler flags)
+
+`gate_order.py` reads every executable section of every object it is given and holds it to these rules, one row per instruction
+(`rows()`; red rows are `rule_violations`):
+
+* **(a) Guest registers.** x27 (the `struct cpu` pointer) is never written. x19-x26 are written only by a result proven below 2^32 (a
+  W-form write, or an X-form result with a proven bound). The destination registers of an instruction are decided from its encoding's
+  destination fields (Rd, Rt, Rt2, the status register of exclusives, the base register of a writeback, mrs/umov/smov and
+  float-to-integer destinations) together with the decoder's operand view, and the union decides; a write the decoder does not report is
+  red. So a load, a `ldp`/`ldr` pair, a writeback, or any data-processing form that writes x19-x27 is judged by the same rule.
+  Source flags (`-ffixed-x19..x27`) are not an input.
+* **(b) Indirect branches.** Not checked yet. An indirect branch target must come from the dispatcher (`fnvl_dispatch`, rt/rt.c); this file
+  has no rule yet for which `br` forms (a jump table, a loaded code pointer) are legal, so none is enforced. Open with the lead.
+* **(c) Assembler objects.** An object whose source is assembler (named to the gate with `--asm OBJ` from L1's build manifest, never by a
+  name pattern) is also checked per STT_FUNC: x19-x30 and `sp` have their entry values on every path to every exit (`ret`, `br`, a
+  relocated or out-of-range `b`, falling into the next symbol). A register gets its entry value back only by a reload, at the same
+  constant offset from the entry `sp`, of a frame slot that a store of that entry value filled; or it is never written. A store that may
+  overlap the slot, a frame address handed out followed by a call, or an unknown `sp` forgets the slot. Code that no STT_FUNC range
+  covers is red.
+
 ### Assumptions
 
-* **A1 (calls).** AAPCS64: a callee preserves x19-x30 and `sp`, and writes the caller's frame only through an address it
-  was given. The objects are compiled with `-fno-ipa-ra`, so no caller relies on more than the ABI. After a call the
-  gate treats x0-x18 and x30 as GUEST.
+* **A1 (calls).** For compiler output this is OWNER 1 (the compiler is correct): AAPCS64, a callee preserves x19-x30 and `sp`, and
+  writes the caller's frame only through an address it was given; the objects are compiled with `-fno-ipa-ra`, so no caller relies on
+  more than the ABI. After a call the gate treats x0-x18 and x30 as GUEST. For hand-written assembler it is not assumed: rule (c) proves it.
 * **A2 (layout).** Guest memory is the mappings below 2^32 the loader made for guest images, heaps and stacks; the host
   stack, `struct cpu` and the lifted image are host mappings disjoint from them. `struct cpu` has
   `fnvnx_lift_cpu_bytes` bytes (read from the runtime object).
-* **A3 (closure).** Every object linked into the lifted image is given to the gate, the runtime objects included, and
-  is compiled with the same `-ffixed-x19..x27`. An object that is not gated could write x27 or a guest register.
-* **A4 (LOCK-SPLIT) is removed.** A misaligned locked operation runs while every other guest thread is suspended (`fnvl_host_world_stop` .. `fnvl_host_world_resume`, the CONTRACT in rt/fnvl_mem.h, implemented by the
-  guest-thread runtime, L5): no other access, locked or plain, interleaves between its load and its store, which is the x86 semantics. The byte write-probe before the stop faults first, with the world running
-  and nothing committed. What remains is the contract of the two functions (the platform's), not an assumption of the lifter.
+* **Closure (was A3).** Every object linked into the lifted image is in L1's build manifest, and the gate is given every object of that
+  list, the runtime objects included. It is not assumed of the flags: rules (a) and (b) are checked on the code of each object, so
+  an object cannot write x27 or a guest register out of range whatever it was compiled with.
+
+### LOCK-SPLIT: a misaligned locked operation stops the world
+
+A misaligned locked operation (`lock` forms and `xchg r, m` whose operand is not aligned to its size) is not atomic against a plain
+store to the same bytes if it only takes a global lock word: the plain store can land between its load and its store. x86 excludes that,
+and no assumption about the program is made. The rule: the misaligned locked path stops the world. It calls `fnvl_host_world_stop`, runs the
+read-modify-write with every other guest thread stopped, and calls `fnvl_host_world_resume`. The aligned and the byte paths are unchanged
+(`ldaxr`/`stlxr` loop, then `dmb ish`). The code is in `rt/fnvl.h` (FNVL_LK_, the window holds one lockable instruction's body: no call, no lock, no raise) and the host functions are L5's (`platform/os/os.h`, `os_world.c`); `fnvnx_split_lock` is deleted.
 
 ### Counts (lift/tools/locksites.py; every locked instruction of the reached universe)
 
