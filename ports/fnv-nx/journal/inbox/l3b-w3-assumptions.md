@@ -13,6 +13,7 @@ registry verify/ASSUMPTIONS.json on claude/fnv-l1-contract-w10 (format fnvnx-ass
 - removed_by: `gate:fpexact` only where fpexact is on the trunk (A-F2IHELPERS, A-RCPHOST); `no gate yet: ...` where the record's disposition is `open`; `planned: ...` where it is a `gate`/`fact` that is not wired yet. The text after the colon is the record's own disposition.
 - owner (layer): by file of the record: lift/proof and lift/README = L3b, else lift/fnvlift, lift/rt, lift/tools = L3a; overrides from the disposition: A-F2INATIVE = L2, A-NATIVE = L2+L3a.
 - used_by: every file of ports/fnv-nx that cites the id (word-boundary grep over the whole tree of claude/fnv-l3b-lift), the handoff file lift/ASSUMPTIONS.l3b.json itself excluded; for A-FPMASK and A-FPSTICKY also the files citing I-FPMASK / I-FPSTICKY.
+- Updated by the lead's decisions since the handoff: ASM-L3B-04 (no SDM reference), -05 (flag-liveness gate, no reference-CPU table), -20 (memclass removed in L3a 82b45c2c), -22 (sampling proves nothing, closing = exhaustive 2^32 sweep; owner L3b).
 - Ids are placeholders ASM-L3B-01..29 until L1 assigns a range. No entry is OWNER.
 
 ## Table
@@ -21,8 +22,8 @@ registry verify/ASSUMPTIONS.json on claude/fnv-l1-contract-w10 (format fnvnx-ass
 | ASM-L3B-01 | A-EIP | REMOVE | planned: mode to delete; A-EIPRANGE (symbolic eip) is the only product | L3b | 4 |
 | ASM-L3B-02 | A-SHAPEFAMILY | REMOVE | planned: same decoder-agreement gate, run on every occurrence (not the | L3b | 1 |
 | ASM-L3B-03 | A-GROUPS | REMOVE | planned: same decoder-agreement gate, extension class compared with XE | L3a | 2 |
-| ASM-L3B-04 | A-SDMREF | REMOVE | no gate yet: no machine reference yet; host comparison is exhaustive o | L3b | 1 |
-| ASM-L3B-05 | A-UNDEFFLAGS | REMOVE | no gate yet: needs the reference-CPU table (same host as rcp), then a  | L3a | 1 |
+| ASM-L3B-04 | A-SDMREF | REMOVE | planned: no SDM transcription is a reference (orchestrator 2026-11-12) | L3b | 1 |
+| ASM-L3B-05 | A-UNDEFFLAGS | REMOVE | planned: flag-liveness gate over every image: an undefined flag carrie | L3b+L3a | 1 |
 | ASM-L3B-06 | A-FPMASK,I-FPMASK | REMOVE | planned: every control-word write (fldcw, ldmxcsr, fninit, frstor, fld | L3a | 10 |
 | ASM-L3B-07 | A-FPSTICKY,I-FPSTICKY | REMOVE | planned: test-only; product path maintains the flags | L3a | 6 |
 | ASM-L3B-08 | A-ORDER | REMOVE | no gate yet: not compiler correctness: GCC is allowed to reorder. Clos | L3a | 3 |
@@ -37,9 +38,9 @@ registry verify/ASSUMPTIONS.json on claude/fnv-l1-contract-w10 (format fnvnx-ass
 | ASM-L3B-17 | A-RES | REMOVE | no gate yet: pin to the reference CPU by host comparison (exhaustive o | L3a | 3 |
 | ASM-L3B-18 | A-BCD | REMOVE | no gate yet: pin to the reference CPU; per-digit-position independence | L3a | 5 |
 | ASM-L3B-19 | A-DECODEFLOW | REMOVE | planned: universe closure gate of L3a | L3a | 2 |
-| ASM-L3B-20 | A-STACKPRIVATE | REMOVE | planned: escape analysis is in memclass; verify_r9 (deferred until fir | L3a | 1 |
+| ASM-L3B-20 | A-STACKPRIVATE | REMOVE | no gate yet: escape analysis to be restated by L3a; memclass removed | L3a | 1 |
 | ASM-L3B-21 | A-RCPHOST | REMOVE | gate:fpexact | L3b | 2 |
-| ASM-L3B-22 | A-RCPPURE | REMOVE | no gate yet: checked on 20e6 inputs x 8 MXCSR values = sampling. Closi | L3a | 2 |
+| ASM-L3B-22 | A-RCPPURE | REMOVE | no gate yet: the 20e6-input check is sampling and proves nothing; the  | L3b | 2 |
 | ASM-L3B-23 | A-F2IHELPERS | REMOVE | gate:fpexact | L3b | 2 |
 | ASM-L3B-24 | A-F2IKEY | REMOVE | planned: recipe cache key binds both once the plugin is a recipe stage | L3b | 2 |
 | ASM-L3B-25 | A-F2IASM | REMOVE | planned: check 3b covers units with no site; closing fully = forbid in | L3a | 2 |
@@ -105,7 +106,7 @@ registry verify/ASSUMPTIONS.json on claude/fnv-l1-contract-w10 (format fnvnx-ass
     "L3b:A-SDMREF"
    ],
    "status": "REMOVE",
-   "removed_by": "no gate yet: no machine reference yet; host comparison is exhaustive only for 16/32-bit input spaces",
+   "removed_by": "planned: no SDM transcription is a reference (orchestrator 2026-11-12). Shapes outside ACL2 x86isa get a census: closure-unreachable shapes drop out, and the orchestrator decides the reachable ones; forms are derived from the pinned model only",
    "owner": "L3b"
   },
   {
@@ -118,8 +119,8 @@ registry verify/ASSUMPTIONS.json on claude/fnv-l1-contract-w10 (format fnvnx-ass
     "L3b:A-UNDEFFLAGS"
    ],
    "status": "REMOVE",
-   "removed_by": "no gate yet: needs the reference-CPU table (same host as rcp), then a fact",
-   "owner": "L3a"
+   "removed_by": "planned: flag-liveness gate over every image: an undefined flag carries no value, and any read reachable from one is red (rule L3b, built by L3a w5)",
+   "owner": "L3b+L3a"
   },
   {
    "id": "ASM-L3B-06",
@@ -356,7 +357,7 @@ registry verify/ASSUMPTIONS.json on claude/fnv-l1-contract-w10 (format fnvnx-ass
     "L3b:A-STACKPRIVATE"
    ],
    "status": "REMOVE",
-   "removed_by": "planned: escape analysis is in memclass; verify_r9 (deferred until first frame) is the independent check",
+   "removed_by": "no gate yet: escape analysis to be restated by L3a; memclass removed",
    "owner": "L3a"
   },
   {
@@ -384,8 +385,8 @@ registry verify/ASSUMPTIONS.json on claude/fnv-l1-contract-w10 (format fnvnx-ass
     "L3b:A-RCPPURE"
    ],
    "status": "REMOVE",
-   "removed_by": "no gate yet: checked on 20e6 inputs x 8 MXCSR values = sampling. Closing: rerun the 2^32 sweep under each MXCSR RC/FTZ/DAZ combination on the farm (8 x 189 s)",
-   "owner": "L3a"
+   "removed_by": "no gate yet: the 20e6-input check is sampling and proves nothing; the closing step is the exhaustive 2^32 sweep under all 8 MXCSR RC/FTZ/DAZ combinations on the farm",
+   "owner": "L3b"
   },
   {
    "id": "ASM-L3B-23",
