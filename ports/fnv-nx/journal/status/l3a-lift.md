@@ -498,3 +498,10 @@ Update 2026-11-12, at 698adefb:
 - Item 16: all 7 test roots are recipe-valid on w8 t16g f0c65c004 (int-l3a + L5 e2152adf5, rt/guest admitted): bridges, the 3 lifted, the 3 native.
 - Next for w8: merge int-l3a 55287b9f4, build lift/rt, build the native test roots plus platform and rt/guest (local or farm 1), then run the 6 guest tests with references.
 - Selftests split: L1's closed rule replaces my hand choice. A multi-root test goes to the top of the root dependency order; a diamond or cycle is red and gets split per root.
+
+## 2026-11-12 10:38
+- Test line t16h 37d4e27df (w8) = next3b 224af83e + int-l3a 55287b9f4 + L5 e2152adf5 + w8's commits.
+  - recipe check: 9/9 valid (the 7 test roots, lift/rt, lift/pack).
+  - lift/rt builds green: 12 objects.
+  - The native test roots are building.
+- Dispatch-plugin def-descriptor fix (no row for a shapeless definition): not accepted as stated, because a native definition whose address escapes would get no row. Tightened rule: no row only when address_taken is false (static); otherwise DISPATCH1 stays an error. w8 adds the 2 cases.
