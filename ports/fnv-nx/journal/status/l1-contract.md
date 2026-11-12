@@ -429,3 +429,6 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   then L3a lift-gates, then L3b. w4 2cb48877 is held on L5's runtime MANIFEST.
 - w5 defect (L3a fresh container): install_mirror.py:63 checks the 203 closure debs against `packages` (KeyError 'autoconf'). Rule: one version source per deb (debs.packages), with packages ⊆ debs.packages at equal versions. Fix first, then the profile.
 - Python pins for w17: keystone-engine, gmpy2, pefile.
+- The w5 queue is split (orchestrator):
+  - w5 does only the toolchain-build profile, then the GL pins.
+  - New worker w22 (session_01KmtZKQg3UUv7uNveDucFNR, claude/fnv-l1-contract-w22) does the setup fix: from w5 c44308c0, plus the install_mirror closure fix, plus the trunk merge, plus a fresh-container green as merge step 1.
