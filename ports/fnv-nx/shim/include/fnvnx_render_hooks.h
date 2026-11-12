@@ -18,9 +18,6 @@
 
 #include "fnvnx_win32.h"
 
-/* the host module of the GPU backend, FNVNX_EXT_GPU, is declared by hostapi.h */
-#include "fnvnx/hostapi.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
