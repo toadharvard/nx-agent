@@ -8,20 +8,33 @@
 #include "fnvnx_win32_ext.h"
 
 #include <pthread.h>
+#include <unistd.h>
 
 /* A failed CHECK ends the case: it throws s4_case_abort, which the runner (main.cpp) catches per case and reports as FAIL, so a failed
  * precondition (a pointer, a handle, an array element used by the next line) is a FAIL line and never a crash, and the destructors of the
  * case's frames run. On a worker thread the check ends the thread's procedure instead, but only for a procedure run through
  * s4_thread_guard (below), which catches the abort and returns a fixed code, so the case fails at its join; on a thread that is neither
- * the case's nor guarded the failure is counted and nothing is thrown (an exception leaving a thread start is a terminate). */
+ * the case's nor guarded the run stops (see s4_end_case_on_failure). */
 struct s4_case_abort {};
 extern pthread_t s4_case_thread;
 extern int s4_case_armed;
 extern __thread int s4_thread_guarded;
+/* the one place that decides what a failed CHECK does: on the case's own thread, or on a thread inside s4_thread_guard (its flag is
+ * thread-local), it throws s4_case_abort; on any other thread (one the platform started: the waveOut delivery thread, a pump) the
+ * harness cannot unwind it, and the next line may use what the check guards, so the run stops there, at once and loudly (exit code 1,
+ * the FAIL line is already printed), never in a later crash. The runner proves both branches before the first case
+ * (s4_harness_selftest, main.cpp). */
+static inline bool s4_abort_here(void)
+{
+    return (s4_case_armed && pthread_equal(pthread_self(), s4_case_thread)) || s4_thread_guarded;
+}
 static inline void s4_end_case_on_failure(void)
 {
-    if ((s4_case_armed && pthread_equal(pthread_self(), s4_case_thread)) || s4_thread_guarded)
+    if (s4_abort_here())
         throw s4_case_abort{};
+    fflush(stdout);
+    fprintf(stderr, "  the run stops: a CHECK failed on a thread outside the harness guard (s4_test.h)\n");
+    _exit(1);
 }
 /* the body of a thread procedure that contains CHECKs: s4_thread_guard([&]() -> DWORD { ... }, 0xFA11) */
 template <class F, class R>
