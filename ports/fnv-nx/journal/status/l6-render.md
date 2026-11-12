@@ -380,3 +380,4 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
 - 09:01Z w6 dd1103d3 accepted: render/shaders/total is a unit-less guest product root; recipe check valid on 5 roots; render/d3d9 is red only at recipe.py:517.
     - L1 w16 is implementing the input rule on 33c443b5 (doing).
     - w6 merges 7e598a5a and re-counts gate_admit on a clean tree.
+- 09:01Z w6 57051038: 7e598a5a merged; gate_admit green 1040/1040, 25 roots, on a clean tree. The earlier 1041 and 1039 were taken on a dirty tree. Next: render/d3d9 build on L1 w16's commit (waiting for it).
