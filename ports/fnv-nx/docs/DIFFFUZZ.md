@@ -349,7 +349,7 @@ mechanisms, each fixed as a class:
 - **d21-holes** (18 + 2 of the 134, all of the live vcall-stub-alias). difffuzz-19 made the unused parts of the stub
   range background memory with a wild-call hook, but the stub hook covers the whole range: a call into a hole was
   traced twice natively (`name:<hex>` or the code stub's original address, then the raw word) and once on x86, so the
-  next call compared against the duplicate (call-flow, native-undefined, native-inlined, dyninit-no-atexit, call-count).
+  next call compared against the duplicate (call-flow, native-undefined, native-inlined, call-count).
   The stub hook leaves holes to the wild hook, and `world.A64_HOLES`, in both hook lists, is hooked once. Rechecks
   cached records whose native trace has such a pair.
 - **d21-vslot** (8 of the 40 vptr-unpaired records). A call through the planted vftable where the native reaches
@@ -534,7 +534,6 @@ the runner and a fault probe rather than a decision, is split too, `causes.HINT_
 | stored / returned word that is one of the planted garbage words (`world.garbage_words`): both / native / oracle | `uninit-both` / `uninit-arm` / `uninit-x86` | artifact / real-bug S1b / by-design |
 | native 0 where the oracle has a value; the native function or a direct callee in its unit is `mov w0, #0; ret` | `native-zero-stub` | real-bug S1 (a placeholder body) |
 | call flow, the native function's own body is `ret` / return-a-constant (or it calls such a decomp-local `..FUN_<X>..` stand-in for an original X another object defines) and the oracle makes calls | `native-empty-body` | real-bug S1 |
-| the oracle's first missing call is CRT `_atexit` (0x00ec658f), the native function names no `fnvnx_xc_atexit` / `atexit` | `dyninit-no-atexit` | real-bug S10 (soft: the destructor is lost at exit only) |
 | `??_G` / `??_E` called with flags bit 0 clear; the native (D0) makes the oracle's calls plus deallocator calls only | `deleting-dtor-flags` | triage S13 (by design, but the call-count difference hides the destructor body; until the harness runs D1 for flags 0) |
 | the function takes a class by value (`AGG:` parameter); the oracle's calls after the native stops are deallocators only | `byvalue-arg-dtor` | triage S13 (by design only for a non-trivial native destructor, and the difference hides the return and writes; until the harness drops the trailing argument frees) |
 | call-target: the native calls an image-window (data) address where the oracle calls a function | `native-calls-data` | real-bug S1 (virtual slot past a decomp class's shorter vtable) |
@@ -575,7 +574,6 @@ Every real-bug cause belongs to exactly one fix class (`causes.FIX_CLASSES`). A 
 | `control-flow` | S1 | `native-trap`, `falloff?`, `stack-protector` | no path the exe takes ends in a trap, a fall-off or a stack-protector abort (no UB GCC exploits: missing returns, unreachable, out-of-bounds locals) |
 | `arithmetic` | S1 | `float`, `ilp32-wrap` | integer and float arithmetic as MSVC x86 computes it: 32-bit address wraparound (ilp32-wrap), float results beyond x87 tolerance |
 | `ownership` | S1 | `native-missing-free` | the native frees exactly what the exe frees |
-| `static-init` | S10 | `dyninit-no-atexit` | every dynamic initializer registers its destructor as the exe does (atexit) |
 | `call-abi` | S1b | `uninit-arm`, `native-garbage-arg`, `native-stale-result`, `callee-saved`, `sret-mismatch` | every call passes and preserves registers by the callee's MSVC convention (argument slots written, results not reused, callee-saved kept, sret as MSVC) |
 | `data-binding` | S2c | `native-stub-data`, `native-address`, `split-global`, `import-slot-called`, `call-args` | every data symbol and import binds to the exe object (no stub as data, no unit copy, no native address where the exe has an image address, bridges deliver the bytes) |
 | `vtable-slots` | S1-rules | `vslot-shift`, `vslot-differs` | every virtual call reaches the exe's slot: each declaration a caller dispatches through numbers its virtuals in D26's one minus-one order (d21-vslot) |
