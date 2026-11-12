@@ -102,6 +102,7 @@ def _recipe(tmp, plugins, fixtures, flags, native=False, lifted_ftoi=True, raw=F
         rec['plugin_cxx'] = 'x86_64-linux-gnu-g++-13'
         rec['plugins'] = [_plugin(n, a) for n, a in plugins]
     _w(repo, ROOT + '/build.json', json.dumps(rec))
+    _w(repo, recipe.ENV_JSON, open(os.path.join(REAL, recipe.ENV_JSON)).read())   # the declared environment: a build runs only on the machine it describes
     _w(repo, T + 'verify/admit.json', json.dumps({'format': 'fnvnx-admit/1', 'roots': [
         {'path': ROOT, 'class': 'product', 'target': 'guest', 'gates': [], 'recipe': ROOT + '/build.json',
          'cxx_origin': 'native' if native else {'lifted_by': T + 'gen/lift.py', 'pack': ext['name']}},
