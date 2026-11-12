@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch every package=version of verify/env.json as a .deb into a directory and write its manifest (stdlib + curl).
+"""Fetch every package of verify/env.json AND its dependency closure (envcheck.dep_closure, on this machine) as a .deb into a directory and write its manifest (stdlib + curl).
     python3 -I mirror_debs.py --env verify/env.json --out DIR [--snapshot YYYYMMDDTHHMMSSZ]
 DIR gets <name>_<version>_<arch>.deb for every entry of env.json "packages" and DIR/debs.json:
     {"format":"fnvnx-debs/1","packages":{name:{"version","file","sha256","origin","url"}}}
@@ -12,8 +12,12 @@ import hashlib
 import json
 import lzma
 import os
+import re
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "verify"))
+import envcheck  # noqa: E402
 
 SUITES = (("noble", "main"), ("noble", "universe"), ("noble-updates", "main"), ("noble-updates", "universe"),
           ("noble-security", "main"), ("noble-security", "universe"))
@@ -46,8 +50,9 @@ def main(a):
     work = os.path.join(out, ".idx")
     os.makedirs(work, exist_ok=True)
     idx = index(snap, work)
+    pins = dict(envcheck.dep_closure(env["packages"]), **env["packages"])   # name -> version
     man, bad = {}, []
-    for name, ver in sorted(env["packages"].items()):
+    for name, ver in sorted(pins.items()):
         want = None
         if (name, ver) in idx:
             fn, want = idx[(name, ver)]
@@ -60,7 +65,7 @@ def main(a):
             src = name
             cands = ["%s_%s_%s.deb" % (name, v, arch) for arch in ("amd64", "all")]
             if "+noble1" in ver:   # deadsnakes: libpython3.N-dev is built from source package python3.N
-                srcname = name.replace("lib", "", 1).replace("-dev", "")
+                srcname = re.match(r"(?:lib)?(python3\.\d+)", name).group(1)
                 url_of = lambda b: "https://ppa.launchpadcontent.net/deadsnakes/ppa/ubuntu/pool/main/p/%s/%s" % (srcname, b)
                 origin = "ppa"
             else:
@@ -84,7 +89,7 @@ def main(a):
             continue
         man[name] = {"version": ver, "file": base, "sha256": h, "origin": origin, "url": url}
     if bad:
-        sys.exit("mirror_debs: %d of %d failed:\n  " % (len(bad), len(env["packages"])) + "\n  ".join(bad))
+        sys.exit("mirror_debs: %d of %d failed:\n  " % (len(bad), len(pins)) + "\n  ".join(bad))
     json.dump({"format": "fnvnx-debs/1", "snapshot": snap, "packages": man}, open(os.path.join(out, "debs.json"), "w"), indent=1, sort_keys=True)
     print("mirror_debs: %d packages, %d snapshot, %d launchpad, %d ppa" % (
         len(man), *(sum(1 for m in man.values() if m["origin"] == k) for k in ("snapshot", "launchpad", "ppa"))))

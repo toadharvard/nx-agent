@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import struct
 import subprocess
@@ -66,6 +67,45 @@ def _os():
 def _dpkg(pkg):
     p = subprocess.run(["dpkg-query", "-W", "-f", "${Version}", pkg], capture_output=True, text=True)
     return p.stdout or None
+
+def dep_closure(names):
+    """{package: installed version}: NAMES and everything their Pre-Depends/Depends need, resolved on THIS machine's dpkg state. A
+    dependency clause `a | b` is satisfied by its first alternative that is installed (itself or through Provides); the walk takes
+    that package, so the result is exactly the set of installed packages that the declared ones rely on. A name that is not installed
+    is left out (check reports it as a missing package). Rule, not a list: this is what dpkg -i of the pins needs to be complete."""
+    recs, prov = {}, {}
+    for blk in open("/var/lib/dpkg/status", encoding="utf-8", errors="replace").read().split("\n\n"):
+        d, k = {}, None
+        for ln in blk.split("\n"):
+            m = re.match(r"^([A-Za-z0-9-]+):\s?(.*)$", ln)
+            if ln[:1] in " \t":
+                if k:
+                    d[k] += "\n" + ln
+            elif m:
+                k = m.group(1)
+                d[k] = m.group(2)
+        if d.get("Package") and d.get("Status", "").endswith(" installed"):
+            recs.setdefault(d["Package"], []).append(d)
+    for n, rs in recs.items():
+        prov.setdefault(n, set()).add(n)
+        for r in rs:
+            for p in re.split(r",\s*", r.get("Provides", "")):
+                if p.split("(")[0].strip():
+                    prov.setdefault(p.split("(")[0].strip(), set()).add(n)
+    seen, todo = {}, [n for n in names if n in recs]
+    while todo:
+        n = todo.pop()
+        if n in seen:
+            continue
+        seen[n] = recs[n][0]["Version"]
+        for r in recs[n]:
+            for f in ("Pre-Depends", "Depends"):
+                for c in re.split(r",\s*", r.get(f, "").replace("\n", " ")):
+                    alts = [re.sub(r"\s*\(.*?\)", "", a).split(":")[0].strip() for a in c.split("|") if c.strip()]
+                    pick = next((sorted(prov[a])[0] for a in alts if a in prov), None)
+                    if pick:
+                        todo.append(pick)
+    return seen
 
 def _owners():
     """{real path: {package}} from dpkg's own file lists (merged-/usr names resolved)."""
@@ -175,9 +215,11 @@ def check(doc):
 HEX64 = "0123456789abcdef"
 
 def deb_pins(doc):
-    """Mismatch lines of doc["debs"], the mirror pin of the packages (installed by farm/install_debs.py, no package index): the
-    mirror commit and tree_sha256, and for EVERY package of doc["packages"] exactly one entry with the same version, a file name and
-    a 64-hex sha256 (and no entry of another package). The installed content is not compared with the deb (not derivable)."""
+    """Mismatch lines of doc["debs"], the mirror pin of the packages (installed by farm/install_mirror.py, no package index): the
+    mirror commit and tree hashes, and an entry for EVERY package of the set S = doc["packages"] plus its dependency closure on this
+    machine (dep_closure: what dpkg -i needs to be complete), each with the version (doc["packages"] for a declared package, else the
+    installed one), a file name, a 64-hex sha256 and a url; no entry outside S. The installed content is not compared with the deb
+    (not derivable)."""
     out, dp = [], doc.get("debs")
     def hx(h, n):
         return isinstance(h, str) and len(h) == n and all(c in HEX64 for c in h)
@@ -187,12 +229,13 @@ def deb_pins(doc):
     if not (isinstance(m.get("repo"), str) and hx(m.get("commit"), 40) and hx(m.get("tree_sha256"), 64)
             and hx(m.get("wheels_tree_sha256"), 64)):
         out.append("env: debs.mirror: needs repo, a 40-hex commit, a 64-hex tree_sha256 (debs/) and wheels_tree_sha256 (wheels/)")
-    for p in sorted(set(doc["packages"]) ^ set(dp["packages"])):
-        out.append("env: debs.packages: %s %s" % (p, "has no deb pin" if p in doc["packages"] else "is not in packages"))
+    want = dict(dep_closure(doc["packages"]), **doc["packages"])
+    for p in sorted(set(want) ^ set(dp["packages"])):
+        out.append("env: debs.packages: %s %s" % (p, "has no deb pin" if p in want else "is not in the packages or their dependency closure"))
     for p, e in sorted(dp["packages"].items()):
-        if p in doc["packages"] and not (isinstance(e, dict) and e.get("version") == doc["packages"][p] and isinstance(e.get("file"), str)
-                                         and hx(e.get("sha256"), 64) and isinstance(e.get("url"), str)):
-            out.append("env: debs.packages.%s: needs version %s, file, sha256 (64 hex) and url" % (p, doc["packages"][p]))
+        if p in want and not (isinstance(e, dict) and e.get("version") == want[p] and isinstance(e.get("file"), str)
+                              and hx(e.get("sha256"), 64) and isinstance(e.get("url"), str)):
+            out.append("env: debs.packages.%s: needs version %s, file, sha256 (64 hex) and url" % (p, want[p]))
     return out
 
 def wheel_pins(prev):
