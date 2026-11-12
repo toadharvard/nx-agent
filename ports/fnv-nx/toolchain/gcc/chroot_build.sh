@@ -25,7 +25,7 @@ PY
 mkdir -p "$CH/var/lib/dpkg" "$CH/proc" "$CH/etc"; : > "$CH/var/lib/dpkg/status"
 dpkg --root="$CH" --force-all --unpack "$DEBS"/debs/*.deb > "$OUT/dpkg-unpack.log" 2>&1 || { tail -20 "$OUT/dpkg-unpack.log"; exit 1; }
 mount --bind /proc "$CH/proc"
-trap 'umount "$CH/src" "$CH/dl" "$CH/dkp" "$CH/proc" 2>/dev/null || true' EXIT
+trap 'umount "$CH/src" "$CH/dl" "$CH/dkp" "$CH/gc" "$CH/proc" 2>/dev/null || true' EXIT
 chroot "$CH" /usr/bin/dpkg --force-all --configure -a > "$OUT/dpkg-configure.log" 2>&1 || { tail -20 "$OUT/dpkg-configure.log"; exit 1; }
 chroot "$CH" dpkg-query -W -f='${Package}=${Version}\n' > "$OUT/chroot-packages.txt"
 python3 - "$DEBS" "$OUT/chroot-packages.txt" <<'PY'
@@ -37,8 +37,10 @@ assert not bad and len(got) == len(p), 'chroot != profile: %s' % bad[:5]
 print('chroot packages == profile (%d)' % len(p))
 PY
 mkdir -p "$CH/src" "$CH/dl" "$CH/dkp" "$CH/build" "$CH/opt/fnvnx-a64"
-mount --bind "$ROOT" "$CH/src"; mount --bind "$DL" "$CH/dl"; mount --bind "$DKP" "$CH/dkp"
-chroot "$CH" /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root JOBS="${JOBS:-$(nproc)}" \
+# GUEST_COMPILER_JSON (host path of verify/guest_compiler.json, the trunk's, pinned by the caller) is seen as /gc/<name>
+GC=$(realpath "${GUEST_COMPILER_JSON:?GUEST_COMPILER_JSON: host path of guest_compiler.json}"); mkdir -p "$CH/gc"
+mount --bind "$ROOT" "$CH/src"; mount --bind "$DL" "$CH/dl"; mount --bind "$DKP" "$CH/dkp"; mount --bind "$(dirname "$GC")" "$CH/gc"
+chroot "$CH" /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root GUEST_COMPILER_JSON="/gc/$(basename "$GC")" JOBS="${JOBS:-$(nproc)}" \
 	/src/toolchain/gcc/build.sh /dl /build /opt/fnvnx-a64 /dkp 2>&1 | tee "$OUT/build.log"
 mkdir -p "$OUT/mirror"; cp -a "$CH/opt/fnvnx-a64/." "$OUT/mirror/"
 python3 "$ROOT/verify/cas.py" ingest "$OUT/cas" "$OUT/mirror" | tee "$OUT/tree_sha256.txt"
