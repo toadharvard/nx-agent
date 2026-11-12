@@ -349,3 +349,22 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - w20: z3 envcheck cause found (local .whl path install writes direct_url.json, which changes installed_files_sha256).
   - Rule: install by --require-hashes -r FILE from the index. Sent to w5.
   - w20 is on the descs item now.
+
+## 2026-11-12 03:55Z
+- Orchestrator decided d3dx9_31 = (A): the declared machine has the DirectX redist installed.
+  - The image set is the may-load closure, 6 → 7.
+  - The exepin pin and the image-set universe go to w4, before G.
+  - Site 0x56b708 stays open until the globext extents close object 0x793b20.
+- Two rules go to w16:
+  - specdefaults: a target family stated in build.json is exempt from forced neutralisation; hardening stays forced. This answers L6A's -fPIE.
+  - A generator stage may read declared inputs from roots of class tool or headers. L6 w6's shim→tool reclass is rejected.
+- w14 head 10c85a41 (w10 + 09b509e4 + 2e71c913 + w15 merged): test_recipe 0 FAIL. Verdict re-running after a disk-full; 100+ stale /tmp objstub/linkstrict dirs were deleted.
+  - Scratch rule to w19: scratch only under VDIR/scratch, removed on exit; a write to /tmp is red.
+- w5 d7cfe2a2 already closes the z3 digest and the `-r -` defect (offline path install, digest excludes direct_url.json); verdict running.
+  - New w5 item: envcheck /usr/include MISMATCH (69 files from 7 packages not in env.json, from the image). Rule:
+    - files of non-pinned packages are `foreign` and excluded from the digest;
+    - the closure stage makes a read of a foreign file red;
+    - a package an admitted root does read gets pinned.
+- w18: rerun on L5 manifest 07d79c5 leaves LoadLibrary at 20/23 closed.
+  - 0x9fea3e/5a are blocked by L5's missing write table (import_writes.tsv); requested from L5 w15.
+  - 38bae062 is void; 556059a6 verdict running.
