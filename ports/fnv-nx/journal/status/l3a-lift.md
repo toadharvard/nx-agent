@@ -105,3 +105,17 @@ Update 2026-11-12, at 698adefb:
   - w4 f1ff8d4a: pcsrc runs before the residue (with a stale-file test); fresh stack space for chkstk/alloca. Its aliasing premise is asked for by record. The 7-image runs are going.
   - L1 item 16 order: w22 (env) → w16-int (py_modules) → w17 (keystone 0.9.2, capstone 5.0.9, gmpy2, pefile pins).
   - Two farms requested from the orchestrator for the long L3a runs.
+- MERGED int1 (w3 03d5b2ca: lead + w2 b58341df + w3-core) as 37a40991.
+  - It brings:
+    - gate_eh on w2's dataflow facts schema;
+    - jtab_tables plus residue.py as one rule;
+    - LK-ONLY as one rule for both paths;
+    - entries.tsv kinds from the producer sets (no address test, fb17b71b).
+  - Green: 15 tests, including universe_r3_check with 67 370 entries, missing 0, codemap 12 440 971/12 440 971 B.
+  - Open:
+    - modlift_closure_test (timed out at 1800 s, not rerun; goes to a farm);
+    - tools fail under python -I (universe.py cannot import ehtables);
+    - facts 2eeea27b has no jtab_tables (w7's commit must carry them);
+    - the liftgen dry run on binkw32.
+- w5 b7b04616: lift/tools/lifted.py, lifted()/is_lifted(), the one lift step shared with liftgen; binkw32 61 774 instructions, 3 104 shapes, equal byte for byte to liftgen's shapes. L3b has the path.
+- L1: gate_eh ids are ASM-225/226/227 (L1 minted). w19 owns the selftests key (ETA 2–3 h).
