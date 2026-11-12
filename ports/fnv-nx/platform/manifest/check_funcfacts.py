@@ -111,6 +111,17 @@ def selftest():
     assert run(dict(base, a="import funcfacts\nx = open(p, mode)\n"))["a"][0][1] == "G2"
     assert run(dict(base, a="import funcfacts\nx = f.get_data(1, 2)\n"))["a"][0][1] == "G2"
     assert run(dict(base, a="import funcfacts\nx = m.img[0]\n"))["a"][0][1] == "G3"
+    # before use_contract nothing of the contract is usable: every reader raises, no module-level fallback
+    sys.path.insert(0, HERE)
+    import funcfacts
+    assert funcfacts._ic is None, "selftest runs before funcfacts.use_contract"
+    for f in (lambda: funcfacts.X.X86_OP_IMM, lambda: funcfacts.FuncFacts("x", funcfacts.Image.synthetic("x", 0x400000, b"\x90", [], [], [(0x400000, 1)]),
+                                                                        {0x400000: [(0x400000, 0x400001)]}).ins(0x400000)):
+        try:
+            f()
+        except SystemExit:
+            continue
+        raise AssertionError("a reader worked before funcfacts.use_contract")
     # a module reaches the graph only through another module: still constrained
     assert run(dict(base, a="import funcfacts\n", b="import a\nx = open(p, 'rb')\n"))["b"][0][1] == "G2"
     # outside the graph: binary files of other tables are not image reads; text opens are fine inside it
