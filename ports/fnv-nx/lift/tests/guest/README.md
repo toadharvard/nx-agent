@@ -7,5 +7,6 @@ Each driver is a directory with:
   also kept in a global array `g_res[]` for the boot machine to dump.
 - no host harness: no Unicorn, no keystone call outside the stage.
 
-Done: `citest/` (generator + main, syntax-checked only). Not built here: the root's `build.json`, its admission and the stage's `py_modules` form wait for the merged base
-(claude/fnv-l3a-lift-int2) and L1's pinned-module stage; the lifted drivers (imptest, msvcrttest, disptest, instest) follow with `.x86` sources assembled in the stage.
+Done (generator + main, syntax-checked only, never built or run here): `citest/`, `imptest/`, `msvcrttest/` (its three cases that end the process, terminal.json, run as `main` with the case index and are checked by the boot machine: stop, exit code, memory words). Not built here: the root's `build.json`, its admission and the stage's `py_modules` form wait for the merged base
+(claude/fnv-l3a-lift-int2) and L1's pinned-module stage; disptest follows with the lift/bridges wiring on int2; instest is parked (its reference becomes the pinned Sail model through isla, not Unicorn).
+The lifted units and the native main/natives are two roots (the origin rule): the generated stage lives in the lifted sub-root (LIFTED_ARGS); the native test root links it.
