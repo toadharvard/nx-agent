@@ -113,5 +113,16 @@ def run(rows, rg, out, image):
         if lo is None: u += 1; lines.append('%08x\t%s\tunknown\tunknown\t%s' % (va, src, why))
         else: k += 1; c += why.startswith('cond:'); lines.append('%08x\t%s\t%08x\t%08x\t%s' % (va, src, lo, hi, why))
     open(out, 'w').write(''.join(l + '\n' for l in lines))
+    ents = {rg.entry_of(a) for a in rg.dec}; app = 0; why = {}
+    for e in ents:
+        r = rg.pure(e)
+        if r is None and not rg.callers_of(e): r = 'no decoded call site'
+        if r is None and rg.esc is not None and rg.esc(e): r = 'escape-open'
+        if r is None: app += 1
+        else:
+            k_ = 'entry kinds' if r.startswith('entry kinds') else ('reached by a jump' if r.startswith('reached by') else r)
+            if k_ == 'entry kinds': k_ += ' ' + r[len('entry kinds '):]
+            why[k_] = why.get(k_, 0) + 1
+    print('IDXENTRIES %s entries=%d direct-call-only(rule applies)=%d refused=%d: %s' % (image or 'exe', len(ents), app, len(ents) - app, '; '.join('%s=%d' % kv for kv in sorted(why.items(), key=lambda kv: -kv[1])[:12])), flush=True)
     print('IDXRANGE %s closed-unconditional=%d closed-cond:no_s4_arith=%d open=%d' % (image or 'exe', k - c, c, u), flush=True)
     return k, u

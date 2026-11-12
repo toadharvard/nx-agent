@@ -8,7 +8,7 @@
 set -e
 OUT=${1:?outdir}; HERE=$(cd "$(dirname "$0")" && pwd); mkdir -p "$OUT"; export PYTHONHASHSEED=0 LC_ALL=C FNVNX_FACTS_OUT=$OUT
 cd "$HERE"
-python3 -s -B universe.py > "$OUT/exe.log" 2>&1; grep -h "IDXRANGE\|JTAB_AFTER\|Traceback" "$OUT/exe.log"
+python3 -s -B universe.py > "$OUT/exe.log" 2>&1; grep -h "IDX\|JTAB_AFTER\|Traceback" "$OUT/exe.log"
 for m in ${MODULES:-d3dx9_38 binkw32 libvorbis libvorbisfile atimgpud d3dx9_31}; do
-  python3 -s -B universe.py --module $m.dll > "$OUT/$m.log" 2>&1 || true; grep -h "IDXRANGE\|Traceback" "$OUT/$m.log"
+  python3 -s -B universe.py --module $m.dll > "$OUT/$m.log" 2>&1 || true; grep -h "IDX\|Traceback" "$OUT/$m.log"
 done
