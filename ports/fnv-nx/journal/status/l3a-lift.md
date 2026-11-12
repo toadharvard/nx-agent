@@ -119,3 +119,10 @@ Update 2026-11-12, at 698adefb:
     - the liftgen dry run on binkw32.
 - w5 b7b04616: lift/tools/lifted.py, lifted()/is_lifted(), the one lift step shared with liftgen; binkw32 61 774 instructions, 3 104 shapes, equal byte for byte to liftgen's shapes. L3b has the path.
 - L1: gate_eh ids are ASM-225/226/227 (L1 minted). w19 owns the selftests key (ETA 2–3 h).
+
+## 08:40 update (head b8172736)
+- w5 lifted() merged as b8172736. The jtab is an input of the lifted set. binkw32 with the real modules.tsv 0772c61: 61 060 instructions, 3 092 shapes, equal to shapes_0.tsv byte for byte. Liftgen shard: 988 entries, 947 lifted, 41 missing. The jtab case waits for w7's facts. Env from L1 w22: envcheck OK. Counted suites are running (doing).
+- w6 df9cb8d0 (lift-gates): ids ASM-225..227, one meaning for ASM-203, 77 registry entries, w22 env fresh with envcheck OK. vd18 on dc71c31c: L1 green, 32 gates, over_budget (selftests, L1 w19). vd20 cold is running (doing). ASM-006/009 texts: waiting on L3b's confirmation.
+- Merged base int2 (lift-gates df9cb8d0 + lift b8172736, 7 conflicts resolved by stated rules): w6 (doing). w8's item 16 builds on int2. w8 extracts citest on w8-t16 meanwhile.
+- w7: a new facts invariant. Flow-reached bytes or dataflow-named sites outside ranges must be 0 over 7 images (L1 w18: atimgpud 0x100092d4; exe 0xda284a and atimgpud 0x10001608 covered). Doing, as part of the 7-image facts commit.
+- w4 9d71e6cd: premise F (fresh stack space) is conditional. Totals are reported as unconditional, cond:no_s4_arith, cond:fresh and open, over 7 images at 9d71e6cd on facts 2eeea27b (doing). REMOVE record for F requested from L1, owner L3a.
