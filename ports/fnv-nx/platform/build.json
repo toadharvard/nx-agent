@@ -71,6 +71,21 @@
  "units": "all",
  "generated": [
   {
+   "tool": "ports/fnv-nx/contract/reachreq.py",
+   "args": [
+    "--requests",
+    "/in/ports/fnv-nx/manifest/reach_requests.tsv",
+    "--facts-h",
+    "/out/win32/reach_facts.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/manifest/reach_requests.tsv"
+   ],
+   "outputs": [
+    "win32/reach_facts.h"
+   ]
+  },
+  {
    "tool": "ports/fnv-nx/platform/win32/tools/gen_nls.py",
    "args": [
     "/ext/nls/nls",
