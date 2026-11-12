@@ -61,7 +61,6 @@
     "ports/fnv-nx/link/gate_disp.py"
    ]
   },
-<<<<<<< HEAD
   "test_gate_names.py": {
    "references": [
     {
@@ -96,7 +95,6 @@
    ],
    "subject": [
     "ports/fnv-nx/link/odr.py"
-=======
   "test_vtsym.py": {
    "references": [
     {
@@ -107,7 +105,6 @@
    ],
    "subject": [
     "ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc"
->>>>>>> fa88efa
    ]
   }
  }
