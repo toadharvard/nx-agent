@@ -1,7 +1,7 @@
 /* dshow.cpp - DirectShow's FilterGraph (CLSID_FilterGraph) and FilterMapper (CLSID_FilterMapper) for the game's music.
  *
- * The exe plays Data/Music (MP3) with its own source filter, an async reader over its archive files (0x00831e20),
- * and a graph (0x00830fd5..): CoCreateInstance(CLSID_FilterGraph, IID_IFilterGraph), AddFilter(source),
+ * The exe plays Data/Music (MP3) with its own source filter, an async reader over its archive files,
+ * and a graph: CoCreateInstance(CLSID_FilterGraph, IID_IFilterGraph), AddFilter(source),
  * QueryInterface(IID_IGraphBuilder), Render(source output pin), then IBasicAudio, IMediaControl, IMediaPosition and
  * IMediaEvent from the graph; it also asks CLSID_FilterMapper for IFilterMapper to list installed filters.
  *

@@ -451,6 +451,65 @@ TEST(msvcrt_qsort_rand_time)
     CHECK(strlen(t) == 8 && t[2] == ':' && t[5] == ':' && isdigit(t[0]) && isdigit(t[7]));
 }
 
+/* The six stdio/low-io exports (fread, fwrite, fflush, _fileno, _lseeki64, _write) through the live msvcrt table.
+ * Fact: the table exports no FILE creator (no fopen, _fdopen, _wfopen, __iob_func, _open, _creat), so the only FILEs
+ * a caller of this table can hold are the streams of the exported `_iob` array (stdin, stdout, stderr). The test
+ * runs on those, on the product files of platform/crt (iob.c), with no replaced function. */
+TEST(msvcrt_stdio_through_iob)
+{
+    auto iob = (struct _iobuf *)X("_iob");
+    auto err = fn<int *(*)()>("_errno");
+    auto fileno_ = fn<int (*)(struct _iobuf *)>("_fileno");
+    auto fwrite_ = fn<size_t (*)(const void *, size_t, size_t, struct _iobuf *)>("fwrite");
+    auto fread_ = fn<size_t (*)(void *, size_t, size_t, struct _iobuf *)>("fread");
+    auto fflush_ = fn<int (*)(struct _iobuf *)>("fflush");
+    auto write_ = fn<int (*)(int, const void *, unsigned)>("_write");
+    auto lseek_ = fn<long long (*)(int, long long, int)>("_lseeki64");
+    CHECK(iob != NULL);
+    CHECK_EQ(fileno_(iob + 0), 0);
+    CHECK_EQ(fileno_(iob + 1), 1);
+    CHECK_EQ(fileno_(iob + 2), 2);
+    CHECK_EQ(fileno_(iob + 5), -1); /* an _iob slot MSVCRT hands to fopen: not a stream here */
+    CHECK_EQ(*err(), EINVAL);
+    CHECK_EQ(fileno_(NULL), -1);
+    /* fwrite: count of complete items; zero size or count writes nothing */
+    CHECK_EQ(fwrite_("abc", 1, 0, iob + 2), 0);
+    CHECK_EQ(fwrite_("abc", 0, 3, iob + 2), 0);
+    CHECK_EQ(fwrite_("", 1, 0, iob + 2), 0);
+    CHECK_EQ(fwrite_("[s4 fwrite]\n", 1, 12, iob + 2), 12);
+    CHECK_EQ(fwrite_("[s4 fwrite]\n", 4, 3, iob + 2), 3);
+    CHECK_EQ(fwrite_(NULL, 1, 4, iob + 2), 0);
+    CHECK_EQ(*err(), EINVAL);
+    CHECK_EQ(fwrite_("x", 1, 1, iob + 5), 0);
+    CHECK_EQ(fwrite_("x", 1, 1, iob + 0), 0); /* stdin is read-only */
+    /* fread: a write-only stream yields nothing; zero sizes read nothing */
+    char b[4] = {0};
+    CHECK_EQ(fread_(b, 1, 0, iob + 0), 0);
+    CHECK_EQ(fread_(b, 0, 1, iob + 0), 0);
+    CHECK_EQ(fread_(b, 1, 1, iob + 2), 0);
+    CHECK_EQ(fread_(NULL, 1, 1, iob + 0), 0);
+    /* fflush: a stream, all streams, a slot that is no stream */
+    CHECK_EQ(fflush_(iob + 2), 0);
+    CHECK_EQ(fflush_(iob + 1), 0);
+    CHECK_EQ(fflush_(NULL), 0);
+    CHECK_EQ(fflush_(iob + 7), EOF);
+    /* _write on the descriptors of the streams, and on descriptors that are not open */
+    CHECK_EQ(write_(2, "[s4 _write]\n", 12), 12);
+    CHECK_EQ(write_(2, "", 0), 0);
+    CHECK_EQ(write_(0, "x", 1), -1); /* stdin is not open for writing */
+    CHECK_EQ(*err(), EBADF);
+    CHECK_EQ(write_(-1, "x", 1), -1);
+    CHECK_EQ(write_(9999, "x", 1), -1);
+    CHECK_EQ(write_(2, NULL, 3), -1);
+    CHECK_EQ(*err(), EINVAL);
+    /* _lseeki64: console descriptors do not seek; bad whence and bad descriptors fail */
+    CHECK_EQ(lseek_(1, 0, 0), -1);
+    CHECK_EQ(*err(), EINVAL);
+    CHECK_EQ(lseek_(2, 0, 7), -1);
+    CHECK_EQ(lseek_(-1, 0, 0), -1);
+    CHECK_EQ(lseek_(9999, 0, 0), -1);
+}
+
 TEST(msvcrt_math)
 {
     auto ce = fn<double (*)(double)>("ceil"), fl = fn<double (*)(double)>("floor");

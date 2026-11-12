@@ -1,4 +1,12 @@
-{"format": "fnvnx-tables-pin/1",
- "repo": "fnv-nx-build", "ref": "l5-platform/manifest", "commit": "3e1a14aa9882f8c8a380cba0ca13642e68af4765",
- "tree_sha256": "cad6c278793104e23dacd6e55178e4b53d5d4ff933f38a2a810516a6989576c4", "dir": "tables",
- "files": {"imports.tsv": "762bf9fb4ab97eb4c02460fe00d5488bb862cd69c96eb69916c62622366d1f2d"}}
+{
+ "format": "fnvnx-tables-pin/1",
+ "repo": "fnv-nx-build",
+ "ref": "l5-platform/manifest",
+ "commit": "348f67b03ead2323fe9bc398423b54b11ece034b",
+ "tree_sha256": "3780fd5ef0a8660609302777f179cb36344c052079e5f76288c58be208aa5e87",
+ "dir": "tables",
+ "files": {
+  "imports.tsv": "762bf9fb4ab97eb4c02460fe00d5488bb862cd69c96eb69916c62622366d1f2d",
+  "runtime_doc_sections.md": "d9a005fefb57e0673c6dfc39f5e9fcc9475800b58619e5e30c3901a09cf8ceec"
+ }
+}
