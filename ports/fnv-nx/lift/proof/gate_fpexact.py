@@ -354,11 +354,12 @@ def judge_objects(root, objs, image_dir, forms_ok, docs=None):
 
 
 def fixture_findings(root, items):
-    """-> [{"id": "<root>/<unit>", "code": CODE}] (RECIPE.md "Fixtures"): one per distinct code of each unit item (`rcp:<root>/<unit>`, `f2i:<root>/<unit>`)"""
+    """-> [{"id", "code"}] (RECIPE.md "Fixtures"): one per distinct code of each item: `rcp:<root>/<unit>` and `f2i:<root>/<unit>` give id `<root>/<unit>`;
+    `<root>:forms` and `<root>:rcpcert` give id `<root>`"""
     out = set()
     for k, v in items.items():
-        if k.split(":", 1)[0] in ("rcp", "f2i"):
-            out |= {(k.split(":", 1)[1], c) for c, _ in v}
+        i = k.split(":", 1)[1] if k.split(":", 1)[0] in ("rcp", "f2i") else root
+        out |= {(i, c) for c, _ in v}
     return [{"id": i, "code": c} for i, c in sorted(out)]
 
 
@@ -368,7 +369,7 @@ def forms_reason(repo, cache):
     return None if u == c else "forms: not green: %s" % detail[:300]
 
 
-FINDINGS = []   # fixture mode (GATE_FIXTURES): every finding of the run as {id, code}
+FINDINGS = []   # every finding of the run as {id, code}, written to fpexact.json (RECIPE.md "Fixtures")
 
 
 def judge_root(root, repo, cache, forms):
@@ -377,10 +378,13 @@ def judge_root(root, repo, cache, forms):
         rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
         res, _ = gate_build.ensure(root, cache, repo)
     except recipe.RecipeError as e:
+        FINDINGS.append({"id": root, "code": "fpexact-inputs"})
         return 1, 0, [root + ":inputs"], "invalid recipe: %s" % "; ".join(e.errors)[:300]
     except (OSError, KeyError, ValueError) as e:
+        FINDINGS.append({"id": root, "code": "fpexact-inputs"})
         return 1, 0, [root + ":inputs"], "input error: %s" % (str(e)[:300] or type(e).__name__)
     if res["status"] == "red":
+        FINDINGS.append({"id": root, "code": "fpexact-build"})
         return 1, 0, [root + ":inputs"], "root does not build (stage %s)" % res["failure"]["stage"]
     try:
         image = os.path.join(repo, root) if res.get("elf") else None
@@ -390,6 +394,7 @@ def judge_root(root, repo, cache, forms):
         FINDINGS.extend(fixture_findings(root, coded))
         items = {k: [t for _, t in v] for k, v in coded.items()}
     except (OSError, ValueError, ELFError) as e:
+        FINDINGS.append({"id": root, "code": "fpexact-inputs"})
         return 1, 0, [root + ":inputs"], "input error: %s" % (str(e)[:300] or type(e).__name__)
     bad = sorted(k for k, v in items.items() if v)
     n = sum(len(items[k]) for k in bad)
@@ -411,7 +416,7 @@ def main(argv):
     u, c, ids, detail = gate_build.quantify(".", lambda root: judge_root(root, ".", cache, forms))
     gatefile.write(NAME, u, c, ids, detail if u != c else ("rcp table certified, no rcp/rsqrt estimate instruction and no uncertified float->int conversion in %d items" % u if u else detail))
     st = "green" if u == c else "red"
-    if os.environ.get("GATE_FIXTURES") and os.environ.get("GATE_OUT"):
+    if os.environ.get("GATE_OUT"):     # also in normal mode: a whole-root fixture is judged in normal mode
         path = os.path.join(os.environ["GATE_OUT"], NAME + ".json")
         with open(path) as fh:
             r = json.load(fh)

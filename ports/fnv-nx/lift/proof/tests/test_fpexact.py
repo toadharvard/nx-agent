@@ -423,7 +423,7 @@ class Cli(unittest.TestCase):
             r, out = self.run_gate(d, self.checkout(d, [{'path': 'ports/fnv-nx/verify', 'class': 'tool', 'gates': []}]))
             self.assertEqual(r.returncode, 0, r.stderr + r.stdout)
             self.assertEqual(fakeext.accepted('fpexact', out, 0)[:3], ('green', 0, 0))
-            self.assertEqual(sorted(json.loads(get(out + '/fpexact.json'))), ['certified', 'detail', 'format', 'name', 'status', 'uncertified', 'universe'])
+            self.assertEqual(sorted(json.loads(get(out + '/fpexact.json'))), ['certified', 'detail', 'findings', 'format', 'name', 'status', 'uncertified', 'universe'])
 
     def test_product_root_with_an_invalid_recipe_is_red_with_the_reason(self):
         with workdir() as d:
