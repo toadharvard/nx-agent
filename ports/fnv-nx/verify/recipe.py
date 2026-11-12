@@ -35,6 +35,9 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "link"))
+import relocs  # noqa: E402
+import ldcheck  # noqa: E402
 import runtime  # noqa: E402
 import sandbox  # noqa: E402
 import toolflags  # noqa: E402
@@ -284,7 +287,9 @@ def link_errors(lk, root, mine, roots, ext_names, repo):
         ent = roots.get(dr)
         if dr == root:
             err.append("link.roots: %s is the root itself" % d)
-        elif not ent or ent.get("class") != "product":
+        elif ent and ent.get("class") != "product":
+            err.append("link.roots: %s is a %s root: a root reached through link.roots runs at its target, so it is a product root (a tool root's outputs run at build time only)" % (d, ent.get("class")))
+        elif not ent:
             err.append("link.roots: %s is not an admitted product root" % d)
         else:
             try:
@@ -846,13 +851,31 @@ class Job:
             search, libs = ["-L" + at + "/" + d for d in lb["dirs"]], ["-l" + n for n in lb["names"]]
         vs = ["--version-script=/ld/" + os.path.basename(lk["version_script"])] if "version_script" in lk else []
         sc = ["-T", "/ld/" + os.path.basename(lk["script"])] if "script" in lk else []
-        argv = [ld] + LD_KIND[kind] + lk["flags"] + sc + vs + ["-o", "/out/" + lk["output"]] + pre + search + [
+        argv = [ld] + LD_KIND[kind] + lk["flags"] + sc + vs + ["-o", "/out/" + lk["output"], "-Map=/out/" + lk["output"] + ".map"] + pre + search + [
             "--whole-archive"] + args + ["--no-whole-archive"] + (["--start-group"] + libs + ["--end-group"] if libs else []) + post
         objs_tree, ld_tree = cas.ingest(od, self.store), cas.ingest(sd, self.store)
         doc = {"format": "fnvnx-stage/1", "stage": "ld:" + self.root, "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
                "env": dict(unitstage.ENV, PATH=os.path.dirname(ld)), "outputs": ["/out"],
                "inputs": sorted(rt["inputs"] + [{"at": "/objs", "tree": objs_tree}, {"at": "/ld", "tree": ld_tree}] + sysin, key=lambda i: i["at"])}
         return self.stage(doc)[1]["outputs"]["/out"], objs_tree, [{"at": "/ld", "tree": ld_tree}] + sysin
+
+    def archive_members(self, ent, name, out):
+        """The archive members the linker pulled (from its map), each with the member's bytes read from the archive (a file of an external or of an
+        env.json package), kept beside the result at out/archive_members/<archive>/<member>: the objects of the link facts, judged like every other
+        object. -> [{archive, archive_sha256, member, object, sha256}]."""
+        text = open(cas._obj(self.store, ent[name + ".map"]), errors="replace").read()
+        res, cache = [], {}
+        for ar, mem in map_members(text):
+            host = self.hostpath(ar)
+            if host not in cache:
+                cache[host] = ({n: b for n, _, b in relocs.ar_members(host)}, hashlib.sha256(open(host, "rb").read()).hexdigest())
+            members, ash = cache[host]
+            dest = os.path.join(out, "archive_members", ar.strip("/").replace("/", "__"), mem)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as f:
+                f.write(members[mem])
+            res.append({"archive": ar, "archive_sha256": ash, "member": mem, "object": os.path.abspath(dest), "sha256": hashlib.sha256(members[mem]).hexdigest()})
+        return res
 
     def ldcheck(self, ws, elf_tree, objs_tree, extra):
         """Stage `ldcheck:<root>`: link/ldcheck.py (python of the python runtime, a pure tool like `generated`) judges the linked ELF from ELF
@@ -886,6 +909,36 @@ def object_target(path):
     return d[4], int.from_bytes(d[18:20], "little")
 
 
+def defined_mismatch(label, defined, objs):
+    """Findings where the `defined` list of an objects.json (the global and weak symbols its build recorded) is not what the objects themselves
+    define: OBJS [(unit, path)] are read again by link/ldcheck.py's own ELF reader (a second implementation of the symbol table walk). -> [str]."""
+    want = {(d["object"], d["symbol"], d["bind"]) for d in defined}
+    got = set()
+    for u, p in objs:
+        with open(p, "rb") as f:
+            for n, bind, _, shndx, _ in ldcheck.syms_any(f.read(), 2):
+                if bind in SBIND and shndx != 0:
+                    got.add((u, n, SBIND[bind]))
+    return ["%s: objects.json says %s defined by %s, the object does not" % (label, n, u) for u, n, _ in sorted(want - got)[:10]] + [
+        "%s: object %s defines %s, objects.json does not list it" % (label, u, n) for u, n, _ in sorted(got - want)[:10]]
+
+
+def map_members(text):
+    """[(archive path, member name)] of the "Archive member included to satisfy reference by file (symbol)" section of a GNU ld map, in link order:
+    the members the linker pulled out of archives (a long entry carries its reference on the next line)."""
+    out, on = [], False
+    for ln in text.splitlines():
+        if ln.startswith("Archive member included"):
+            on = True
+        elif on and ln.startswith(("Discarded input", "Memory Configuration", "Allocating common")):
+            break
+        elif on and ln and not ln[0].isspace():
+            m = re.match(r"(\S+?)\(([^()\s]+)\)(?:\s|$)", ln)
+            if m:
+                out.append((m.group(1), m.group(2)))
+    return out
+
+
 def objects_digest(res):
     """sha256 of the CONTENT of an objects.json dict: its fields without the machine paths (object, plugin, ELF, constants files: their
     sha256 stands for them) and without the cache counters, so two builds of the same sources give the same digest."""
@@ -893,6 +946,7 @@ def objects_digest(res):
     keep["link_roots"] = [{"root": x["root"], "sha256": x["sha256"]} for x in res["link_roots"]]
     keep["objects"] = [{k: o[k] for k in ("unit", "sha256", "os_layer")} for o in res["objects"]]
     keep["plugins"] = [{k: p[k] for k in ("name", "sha256")} for p in res["plugins"]]
+    keep["link_archives"] = [{k: m[k] for k in ("archive", "member", "sha256")} for m in res.get("link_archives", [])]
     keep["elf"] = res["elf"] and res["elf"]["sha256"]
     for k in ("constants", "contract_names"):
         keep[k] = res[k] and hashlib.sha256(open(res[k], "rb").read()).hexdigest()
@@ -938,7 +992,7 @@ def build(repo, root, store, out, jobs=4, ext=None):
         raise RecipeError(errs)
     units = units_of(j.rec, root, j.files)
     res = {"format": OBJ_FORMAT, "root": spec, "objects": [], "elf": None, "link_roots": [], "constants": None, "contract_names": None, "defined": [], "undefined": [], "plugins": [],
-           "stage_keys": [], "status": "green"}
+           "link_archives": [], "stage_keys": [], "status": "green"}
     ws = tempfile.mkdtemp(prefix="recipe-")
     os.makedirs(out, exist_ok=True)
     try:
@@ -966,7 +1020,7 @@ def build(repo, root, store, out, jobs=4, ext=None):
             lk = j.rec["link"]
             name = lk["output"]
             groups = [("00-own", [(u, o["object"]) for u, o in zip(units, res["objects"])])]
-            res["link_roots"] = []
+            res["link_roots"], defs = [], {}
             for n, d in enumerate(lk.get("roots", [])):
                 try:
                     r = build(repo, d, store, os.path.join(ws, "in", d.replace("/", "__")), jobs, j.extcache)
@@ -985,12 +1039,18 @@ def build(repo, root, store, out, jobs=4, ext=None):
                     kept.append({"unit": o["unit"], "object": os.path.abspath(dest), "sha256": o["sha256"]})
                 res["link_roots"].append({"root": d, "sha256": objects_digest(r), "objects": kept})
                 groups.append(("%02d-%s" % (n + 1, d.replace("/", "__")), [(o["unit"], o["object"]) for o in kept]))
+                defs[groups[-1][0]] = r["defined"]
+            for lab, objs in groups:
+                bad = defined_mismatch(lab, res["defined"] if lab == "00-own" else defs[lab], objs)
+                if bad:
+                    raise BuildRed({"stage": "ld:" + root, "exit": None, "stderr": bad})
             for lab, objs in groups:      # every linked object has the target of the link (ELF class, e_machine), read from its header
                 bad = [u for u, p in objs if object_target(p) != TARGETS[emulation_of(lk["flags"])]]
                 if bad:
                     raise BuildRed({"stage": "ld:" + root, "exit": None, "stderr": ["%s: object %s has target (class, e_machine) %s, the link %s is %s" % (
                         lab, u, object_target(dict(objs)[u]), emulation_of(lk["flags"]), TARGETS[emulation_of(lk["flags"])]) for u in bad[:20]]})
             elf_tree, objs_tree, extra = j.link(ws, groups)
+            res["link_archives"] = j.archive_members(cas.manifest(elf_tree, store)["entries"], name, out)
             fin = j.ldcheck(ws, elf_tree, objs_tree, extra)
             ent = cas.manifest(fin, store)["entries"]
             shutil.copyfile(cas._obj(store, ent[name]), os.path.join(out, name))

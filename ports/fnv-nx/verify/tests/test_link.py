@@ -133,7 +133,7 @@ def main():
     check("link.roots: a root that links is no input root", any("has a link of its own" in e for e in cyc), cyc)
     e2 = errs(main_rec(roots=[ROOT, T + "verify", LIB, LIB]), [LB], "badroots")
     check("link.roots: itself, a tool root and a duplicate are errors, all listed at once",
-          any("the root itself" in e for e in e2) and any("not an admitted product root" in e for e in e2) and any("listed twice" in e for e in e2), e2)
+          any("the root itself" in e for e in e2) and any("is a tool root" in e and "product root" in e for e in e2) and any("listed twice" in e for e in e2), e2)
     e3 = errs(main_rec(flags=["-m", "aarch64linux32", "--gc-sections", "-e", "x"]), [], "flags")
     check("link.flags: only the emulation; --gc-sections and -e are errors", sum("not an emulation option" in e for e in e3) == 3 and
           any("--gc-sections" in e for e in e3) and any("-e is" in e or "-e " in e for e in e3), e3)
@@ -197,6 +197,35 @@ def main():
     rt = build(mk("target", dict(main_rec(), flags=TR.RECIPE["flags"] and {"c": ["-O1", "-ffreestanding", "-fPIE"], "cxx": [], "asm": []}), {"toy/b.c": "int f_b(void) { return 1; }\n"}), SS)
     check("a link whose objects have another target (LP64 objects, ILP32 emulation): red, naming the object", rt["status"] == "red"
           and rt["failure"]["stage"] == "ld:" + ROOT and any("a.c" in x and "target" in x for x in rt["failure"]["stderr"]), err_text(rt))
+
+    # (m) link.libs archive of an external: the members the linker pulls are recorded (and kept as objects); an unused member is not
+    def libpop(d):
+        os.makedirs(d + "/lib")
+        for n, body in (("m1", "int f_b(void) { return 21; }\n"), ("m2", "int f_unused(void) { return 1; }\n")):
+            open("%s/%s.c" % (d, n), "w").write(body)
+            subprocess.run([CC, "-mabi=ilp32", "-fPIE", "-O1", "-ffreestanding", "-c", "-o", "%s/%s.o" % (d, n), "%s/%s.c" % (d, n)], check=True)
+            os.remove("%s/%s.c" % (d, n))
+        subprocess.run(["aarch64-linux-gnu-ar", "rcs", d + "/lib/libtoy.a", d + "/m1.o", d + "/m2.o"], check=True)
+        os.remove(d + "/m1.o")
+        os.remove(d + "/m2.o")
+    lc, lh = TR.publish("tlib", libpop)
+    lx = {"name": "tlib", "repo": "fnv-nx-build", "ref": "tlib", "commit": lc, "tree_sha256": lh, "at": "/ext/tlib"}
+    arec = dict(main_rec(libs={"external": "tlib", "dirs": ["lib"], "names": ["toy"], "startfiles": [], "endfiles": []}), external=[lx])
+    rl = build(mk("archive", arec, {"toy/b.c": None}), SS)
+    la = rl.get("link_archives", [])
+    check("link.libs archive: the member the linker pulled (m1.o, for f_b) is recorded with archive path, archive sha256, member bytes sha256 and a kept object; "
+          "the unused member m2.o is not", rl["status"] == "green" and [(m["archive"], m["member"]) for m in la] == [("/ext/tlib/lib/libtoy.a", "m1.o")]
+          and re.fullmatch("[0-9a-f]{64}", la[0]["sha256"]) and os.path.isfile(la[0]["object"]) and "m2.o" not in repr(la), err_text(rl) + repr(la))
+    ea = errs(dict(arec, link=dict(arec["link"], libs={"external": "tlib", "dirs": ["../x"], "names": ["toy"], "startfiles": [], "endfiles": []})), [], "outside")
+    check("link.libs: a directory outside the external is refused (an archive must lie inside a declared external)", any("link.libs" in e for e in ea), ea)
+
+    # (n) the link check that objects.json equals the global and weak symbols read from the objects themselves (a second ELF reader: ldcheck's)
+    o0 = rl["objects"][0]
+    d0 = [d for d in rl["defined"] if d["object"] == o0["unit"]]
+    objs0 = [(o0["unit"], o0["object"])]
+    check("objects.json vs objects: the recorded list equals what the object defines", d0 and recipe.defined_mismatch("t", d0, objs0) == [], d0)
+    check("objects.json vs objects: a symbol listed but not defined, and a defined one not listed, are both findings",
+          len(recipe.defined_mismatch("t", d0 + [dict(d0[0], symbol="ghost")], objs0)) == 1 and len(recipe.defined_mismatch("t", d0[1:], objs0)) == 1 and len(d0) >= 1, d0)
 
     # (l) variants: one root, an aarch64 LP64 variant and an x86_64 variant, linked into two images; a wrong-target link is red
     FL = ["-O1", "-ffreestanding", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"]
