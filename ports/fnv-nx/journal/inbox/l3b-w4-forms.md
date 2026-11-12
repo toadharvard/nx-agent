@@ -73,3 +73,11 @@ union, by construction. It holds only while (1) the lifter's ranges = the census
 shapes of instructions after 00e7c11c in that range are NOT in the universe (census exit status 1) - the ranges owner must resolve it or exclude the range from the lifter; I did not check whether the lift pack
 ranges contain it; (3) 'the family is a function of the shape' (census.py docstring Assumption, checked per shape by re-decoding the representative, not proved; no ASM id for it yet).
 Not certifiable yet (not failed): 75 bound shapes + 67ac (lodsb with 0x67) = model-gap 'Opcode Unimplemented in x86isa!' (model fact, case (b)); 671e (push ds) FAILED(dsl) = the sreg operand has no source variable (stage 2).
+
+## 7. BOUND census (w4; measured at l3b-lift/shapes @77524556, shape rows of proof/census.py; global over the 7 images)
+BOUND (opcode 62, ModRM mod != 11, form_key bound|r32,m64|62, + prefixed variants): 75 distinct shapes, 1 272 sites (an instruction address counted once per shape). Per module: FalloutNV 12 shapes / 30 sites,
+d3dx9_31 42 / 312, d3dx9_38 66 / 930 (shapes are shared between modules, so 75 is the union, not the sum), atimgpud, binkw32, libvorbis, libvorbisfile 0 / 0. Largest: 626500 (be\0) 263 sites d3dx9_38 / 102 d3dx9_31;
+626100 75 / 12; 626900 90 / 28; 626c6500 111 / 44; 6200 46 (d3dx9_38), 18 (FalloutNV). Indicator ONLY (not a rule): 105 of the 117 module-shape rows (FalloutNV 5 of 12, d3dx9_31 39 of 42, d3dx9_38 61 of 66) are made of printable-ASCII or
+NUL bytes only (62 65 00 = "be\0", 62 6c 65 00 = "ble\0"): the byte pattern of text decoded as code inside the census ranges. Reachability of each site is NOT decided here: that is the closure / call-graph rule's (sites per module are
+in the census rows: first_address is in shapes.tsv, the full site list needs census.py with the facts, which are private). Model fact: x86isa does not implement BOUND ('Opcode Unimplemented in x86isa!'), so no certificate is possible; DSL builder: forms_flow `bound`
+(fault kind 4, state unchanged otherwise), certificate-free until the orchestrator decides. Same class: 67ac (lodsb under 16-bit addressing) 1 shape: model 'Opcode Unimplemented'.
