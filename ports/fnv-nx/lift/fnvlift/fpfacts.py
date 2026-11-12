@@ -5,7 +5,7 @@ fact file of the module being lifted, never assumed.
     <facts> = $FNVNX_FPSTATE_DIR, else $FNVNX_FACTS/fpstate, else /home/user/l3facts/fpstate
 
 I-FPMASK    no x87 or SSE exception is ever unmasked at any instruction of any module: every load of the x87 control word / MXCSR (fldcw, ldmxcsr, fninit, frstor, fldenv, fxrstor, the _controlfp family)
-            is a constant or a transform that cannot clear a mask bit, starting from FCW 0x027F / MXCSR 0x1F80 (thread start, rt/enter.c). Consequence: `fwait` never raises #MF, and x87/SSE arithmetic
+            is a constant or a transform that cannot clear a mask bit, starting from FCW 0x027F / MXCSR 0x1F80 (thread start, rt/enter.cc). Consequence: `fwait` never raises #MF, and x87/SSE arithmetic
             never raises: the runtime's masked-response semantics are the whole semantics.
 I-FPSTICKY  no instruction of any module can observe the sticky exception flags (FSW bits 0-7, 15; MXCSR bits 0-5), so they need not be maintained.
 A lifter body that needs an invariant calls require(); if the fact file says `unproven` (or is missing) the form is Unsupported with the reason: a missing semantics is a lift error, never a no-op."""

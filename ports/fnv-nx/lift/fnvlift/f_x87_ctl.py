@@ -286,7 +286,7 @@ def fix_lines(cx, a, n0):
     for i in range(n0, len(L)):
         t = L[i]
         if 'SYNC_OUT;' in t:
-            t = t.replace('SYNC_OUT;', store(cx, da if 'fnvl_raise(2,' in t else d) + 'SYNC_OUT;')
+            t = t.replace('SYNC_OUT;', store(cx, da if 'FNVL_RAISE(2,' in t else d) + 'SYNC_OUT;')
         if 'SYNC_IN;' in t and 'after_tail' not in t:
             t = t.replace('SYNC_IN;', 'SYNC_IN;' + load(da))
         elif 'goto nonlocal;' in t and 'SYNC_IN;' not in t:

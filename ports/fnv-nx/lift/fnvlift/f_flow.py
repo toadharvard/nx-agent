@@ -131,7 +131,7 @@ def raise_site(cx, code, trap=True):
     cx.raises.add(cx.a)
     if trap:
         cx.raises.add(cx.nxt)       # #BP reports the address after the int3 as Context.Eip
-    return 'SYNC_OUT; REGS(); fnvl_raise(%s,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (code, cx.a)
+    return 'SYNC_OUT; REGS(); FNVL_RAISE(%s,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % (code, cx.a)
 
 
 @op('int3')

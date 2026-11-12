@@ -74,6 +74,14 @@
    "entry": []
   },
   {
+   "path": "ports/fnv-nx/lift/test",
+   "class": "tool",
+   "gates": [
+    "selftests"
+   ],
+   "entry": []
+  },
+  {
    "path": "ports/fnv-nx/lift/tools",
    "class": "tool",
    "gates": [

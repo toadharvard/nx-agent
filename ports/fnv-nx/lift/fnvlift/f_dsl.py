@@ -1,7 +1,7 @@
 """Instruction handlers generated from the proven DSL forms (R2: one source for the proof and for the shipped code).
 
 emit_form(cx, ins) builds the Form of the instruction (proof/forms.py: the same object the SMT proofs are about) and emits its C inline through
-Form.to_c_inline (fnvlift/dsl.py).  core.dispatch calls it first for every instruction when env FNVL_EMIT=dsl; it returns SKIP for an instruction the
+Form.to_c_inline (fnvlift/dsl.py).  core.dispatch calls it first for every instruction when core.EMIT is "dsl" (core.set_emit); it returns SKIP for an instruction the
 forms do not cover (their mnemonics, or a register operand that is not a general register: xmm/mm/segment), which then goes to the hand handlers.
 
 One block per instruction:  `{ snapshots of the pre-state; const temporaries (every load, shared sub-expressions); faults; register writes;
@@ -38,8 +38,8 @@ def supported(ins):
 
 def varc(cx):
     def v(name):
-        if name == 'gs_base':
-            raise Unsupported('segment')
+        if name == 'gs_base':      # the GS base is a function of the CURRENT GS selector (core.Ctx.ea); the null / code-selector #GP is the guard core.gs_guard emits before the instruction
+            return 'FNVL_GS_BASE()'
         if name == 'fs_base':
             cx.usesfs = True
         if name in dsl.REGS or name in SIXFLAGS or name in STATE:
