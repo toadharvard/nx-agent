@@ -17,6 +17,7 @@ NEED={'os.h: locks':'threads+futex: locks','os.h: condition':'threads+futex: con
 cat=lambda f: ('gpu: nxd3d_gpu_call' if f=='nxd3d_gpu_call' else
   'input poll: fnvnx_input_pump' if f=='fnvnx_input_pump' else
   'boundary (loader/process/threads of the game): fnvnx_bnd_*' if f.startswith('fnvnx_bnd_') and f not in ('fnvnx_bnd_locks_held','fnvnx_bnd_print_held','fnvnx_bnd_print_lock_violations','fnvnx_bnd_violation_mark','fnvnx_bnd_violation_forget') else
+  'docked mode (a model input): os_posix_set_docked' if f=='os_posix_set_docked' else
   'exit slot: fnvnx_reach_violation' if f=='fnvnx_reach_violation' else
   'test observation (lock counting, violations)' if f.startswith('fnvnx_bnd_') or f=='fnvnx_lockcount_note' else
   NEED.get(sec.get(f), ('UNMAPPED:'+f if f not in sec else sec.get(f))))
