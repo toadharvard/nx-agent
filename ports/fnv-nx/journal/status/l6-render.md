@@ -110,3 +110,12 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
   - The host variant needs L1 w15.
   - Asked L1 for one shared guest ABI flag set, plus a gate that all objects of an image have the same ABI flags (DW_AT_producer).
   - onedef (L1, revised): copies are caught by source provenance; body equality was dropped as a heuristic.
+- 03:26Z Code-generation flag mismatch across guest roots.
+  - render/d3d9's build.json differs from the trunk's platform set:
+    - it lacks -fwrapv, -fno-strict-aliasing, -fno-delete-null-pointer-checks, -ffp-contract=off (OWNER assumption 8, IEEE: no fmadd contraction), -fms-extensions, -fcheck-new, -fno-sized-deallocation and -fno-lifetime-dse;
+    - it has extra -march, -mtune, -fPIE, -ftls-model and -ffunction-sections.
+  - L1 rule (w17, session_01KmtZKQzN38LhJYh6sixhL1): one `flags.abi` in guest_compiler.json; an ABI flag in build.json is refused; a gate checks every object of an image for an identical set (DW_AT_producer). Asked L1 that the set be the whole code-generation semantics set.
+  - Interim:
+    - w6 aligns render/d3d9 to platform's set and measures (doing);
+    - w5 aligns lib/sha256 to platform's set;
+    - lib/sha256 phase 1 is not yet accepted (flags, committed NIST/Monte drivers, base-green build.json).
