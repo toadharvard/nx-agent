@@ -1,0 +1,421 @@
+{
+ "format": "fnvnx-recipe/1",
+ "compiler": {
+  "external": "gcc-msvcmodel",
+  "cc": "bin/aarch64-linux-gnu-gcc",
+  "cxx": "bin/aarch64-linux-gnu-g++"
+ },
+ "flags": {
+  "c": [
+   "-O2",
+   "-g",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-D__LINUX_ERRNO_EXTENSIONS__",
+   "-DFNVNX_PLATFORM_BUILD",
+   "-Werror=attributes",
+   "-DFT2_BUILD_LIBRARY"
+  ],
+  "cxx": [
+   "-O2",
+   "-g",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-std=gnu++20",
+   "-DFNVNX_SDD=1",
+   "-D__LINUX_ERRNO_EXTENSIONS__",
+   "-DSTDMETHODCALLTYPE=",
+   "-DFNVNX_PLATFORM_BUILD",
+   "-Werror=attributes"
+  ],
+  "asm": []
+ },
+ "include": [
+  "ports/fnv-nx/platform/include",
+  "ports/fnv-nx/shim/include",
+  "/ext/a64/aarch64-none-elf/include/c++/15.2.0",
+  "/ext/a64/aarch64-none-elf/include/c++/15.2.0/aarch64-none-elf/ilp32",
+  "/ext/a64/aarch64-none-elf/include",
+  "/ext/minimp3",
+  "/ext/libnx/nx/include",
+  "/ext/libnx/nx/external/bsd/include",
+  "ports/fnv-nx/platform/freetype/gen/include",
+  "/ext/freetype/include",
+  "/ext/freetype/src/autofit",
+  "/ext/freetype/src/base",
+  "/ext/freetype/src/bdf",
+  "/ext/freetype/src/bzip2",
+  "/ext/freetype/src/cache",
+  "/ext/freetype/src/cff",
+  "/ext/freetype/src/cid",
+  "/ext/freetype/src/gxvalid",
+  "/ext/freetype/src/gzip",
+  "/ext/freetype/src/lzw",
+  "/ext/freetype/src/otvalid",
+  "/ext/freetype/src/pcf",
+  "/ext/freetype/src/pfr",
+  "/ext/freetype/src/psaux",
+  "/ext/freetype/src/pshinter",
+  "/ext/freetype/src/psnames",
+  "/ext/freetype/src/raster",
+  "/ext/freetype/src/sdf",
+  "/ext/freetype/src/sfnt",
+  "/ext/freetype/src/smooth",
+  "/ext/freetype/src/svg",
+  "/ext/freetype/src/truetype",
+  "/ext/freetype/src/type1",
+  "/ext/freetype/src/type42",
+  "/ext/freetype/src/winfonts"
+ ],
+ "units": "all",
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/platform/win32/tools/gen_nls.py",
+   "args": [
+    "/ext/nls/nls",
+    "/out/win32/nls_tables.inc"
+   ],
+   "inputs": [],
+   "outputs": [
+    "win32/nls_tables.inc"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/win32/tools/gen_winerr.py",
+   "args": [
+    "/ext/mc/winerror.mc",
+    "/out/win32/winerr_msgs.inc"
+   ],
+   "inputs": [],
+   "outputs": [
+    "win32/winerr_msgs.inc"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/manifest/gen_env_const.py",
+   "args": [
+    "/in/ports/fnv-nx/platform/manifest/env_const.tsv",
+    "/out/win32/env_const.gen.inc",
+    "--only",
+    "win32/"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/manifest/env_const.tsv"
+   ],
+   "outputs": [
+    "win32/env_const.gen.inc"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/manifest/gen_env_const.py",
+   "args": [
+    "/in/ports/fnv-nx/platform/manifest/env_const.tsv",
+    "/out/crt/env_const.gen.inc",
+    "--only",
+    "crt/"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/manifest/env_const.tsv"
+   ],
+   "outputs": [
+    "crt/env_const.gen.inc"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/manifest/gen_env_const.py",
+   "args": [
+    "/in/ports/fnv-nx/platform/manifest/env_const.tsv",
+    "/out/audio/dshow.env_const.gen.inc",
+    "--only",
+    "audio/dshow.cpp"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/manifest/env_const.tsv"
+   ],
+   "outputs": [
+    "audio/dshow.env_const.gen.inc"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/manifest/gen_env_const.py",
+   "args": [
+    "/in/ports/fnv-nx/platform/manifest/env_const.tsv",
+    "/out/audio/dshow_filters.env_const.gen.inc",
+    "--only",
+    "audio/dshow_filters.cpp"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/manifest/env_const.tsv"
+   ],
+   "outputs": [
+    "audio/dshow_filters.env_const.gen.inc"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/manifest/gen_env_const.py",
+   "args": [
+    "/in/ports/fnv-nx/platform/manifest/env_const.tsv",
+    "/out/audio/dsound.env_const.gen.inc",
+    "--only",
+    "audio/dsound.cpp"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/manifest/env_const.tsv"
+   ],
+   "outputs": [
+    "audio/dsound.env_const.gen.inc"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/manifest/gen_env_const.py",
+   "args": [
+    "/in/ports/fnv-nx/platform/manifest/env_const.tsv",
+    "/out/audio/waveout.env_const.gen.inc",
+    "--only",
+    "audio/waveout.cpp"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/manifest/env_const.tsv"
+   ],
+   "outputs": [
+    "audio/waveout.env_const.gen.inc"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/manifest/gen_env_const.py",
+   "args": [
+    "/in/ports/fnv-nx/platform/manifest/env_const.tsv",
+    "/out/input/dinput.env_const.gen.inc",
+    "--only",
+    "input/dinput.cpp"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/manifest/env_const.tsv"
+   ],
+   "outputs": [
+    "input/dinput.env_const.gen.inc"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/crt/gen_msvcrt_table.py",
+   "args": [
+    "/in/ports/fnv-nx/platform/crt/msvcrt_names.tsv",
+    "/out/crt/msvcrt_table.gen.cpp"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/crt/msvcrt_names.tsv"
+   ],
+   "outputs": [
+    "crt/msvcrt_table.gen.cpp"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/com/gen_combridge.py",
+   "args": [
+    "/in/ports/fnv-nx/platform/com/com_spec.json",
+    "/out/com"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/com/com_spec.json"
+   ],
+   "outputs": [
+    "com/combridge.gen.cpp",
+    "com/combridge_exports.gen.cpp",
+    "com/combridge_if.gen.h",
+    "com/combridge_rows.tsv"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/manifest/gen_registry_seed.py",
+   "args": [
+    "/ext/manifest/manifest/regsites.tsv",
+    "/in/ports/fnv-nx/platform/manifest/declared_registry.tsv",
+    "/out/win32/registry_seed.gen.inc"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/manifest/declared_registry.tsv"
+   ],
+   "outputs": [
+    "win32/registry_seed.gen.inc"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/manifest/gen_fontmachine.py",
+   "args": [
+    "/ext/fonts/inputs/wine.inf.in",
+    "/ext/fonts/inputs/font.c",
+    "/ext/fonts/inputs/30-metric-aliases.conf",
+    "/ext/fonts/fonts",
+    "/out/win32/font_machine.gen.inc"
+   ],
+   "inputs": [],
+   "outputs": [
+    "win32/font_machine.gen.inc"
+   ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/freetype/gen_units.py",
+   "args": [
+    "/ext/freetype",
+    "/ext/freetype-debian/debian",
+    "/out/freetype"
+   ],
+   "inputs": [],
+   "outputs": [
+    "freetype/units.list",
+    "freetype/gen/include/freetype/config/ftmodule.h",
+    "freetype/gen/include/freetype/config/ftoption.h",
+    "freetype/gen/src/cid/cidload.fnvnx.inc",
+    "freetype/gen/src/cid/type1cid.c",
+    "freetype/gen/src/truetype/truetype.c",
+    "freetype/gen/src/truetype/ttgxvar.fnvnx.inc"
+   ]
+  }
+ ],
+ "os_layer": [],
+ "link": null,
+ "plugin_cxx": "x86_64-linux-gnu-g++-13",
+ "plugins": [
+  {
+   "name": "fnvnx_ftoi",
+   "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc",
+   "args": {
+    "mode": "native"
+   }
+  },
+  {
+   "name": "fnvnx_order",
+   "source": "ports/fnv-nx/toolchain/order/fnvnx_order.cc",
+   "args": {
+    "args": "rtl",
+    "object": "msvc",
+    "operator": "rtl",
+    "assign": "msvc"
+   }
+  },
+  {
+   "name": "fnvnx_sdd",
+   "source": "ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_pi",
+   "source": "ports/fnv-nx/toolchain/pi/fnvnx_pi.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_dispatch",
+   "source": "ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_addr",
+   "source": "ports/fnv-nx/toolchain/addr/fnvnx_addr.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_names",
+   "source": "ports/fnv-nx/toolchain/names/fnvnx_names.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_layout",
+   "source": "ports/fnv-nx/toolchain/layout/fnvnx_layout.cc",
+   "args": {},
+   "inputs": [
+    "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
+   ]
+  }
+ ],
+ "external": [
+  {
+   "name": "gcc-msvcmodel",
+   "repo": "fnv-nx-build",
+   "ref": "tools/gcc-ilp32-msvcmodel",
+   "commit": "b4057704c0babd012e466cc89181132e02542289",
+   "tree_sha256": "b60eafe7a5b0ae3dc679f9bf21e20d3363e3bac2af7379e34127ea5cf8455116",
+   "at": "/ext/gcc"
+  },
+  {
+   "name": "fnvnx-a64-msvcmodel",
+   "repo": "fnv-nx-build",
+   "ref": "tools/fnvnx-a64-msvcmodel",
+   "commit": "00e3d42acd10593d534b9a70bb8940cee7991436",
+   "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
+   "at": "/ext/a64"
+  },
+  {
+   "name": "libnx",
+   "repo": "fnv-nx-build",
+   "ref": "tools/libnx",
+   "commit": "518bf11ad6a52149e43fbd0fa83b0087a430f446",
+   "tree_sha256": "28642e369e75dfe075aac6ee427a82ee9e0cbbe6941be36b0e977da3c96d9298",
+   "at": "/ext/libnx"
+  },
+  {
+   "name": "minimp3",
+   "repo": "fnv-nx-build",
+   "ref": "tools/minimp3",
+   "commit": "8008c5506d8704a885fbbb84daf9cfb2483e0dcf",
+   "tree_sha256": "6a1b01ebc665d80e720d9b2f6b8cb5e54d06c655df6943ed10cd58d6ce978864",
+   "at": "/ext/minimp3"
+  },
+  {
+   "name": "nls",
+   "repo": "fnv-nx-build",
+   "ref": "tools/nls",
+   "commit": "dc698d028073cc2a2914be202c36c84635bbbb35",
+   "tree_sha256": "eab72b370a04750acc4be667b56440bade7a9b92573189c5e2479e5da1cbd5b4",
+   "at": "/ext/nls"
+  },
+  {
+   "name": "mc",
+   "repo": "fnv-nx-build",
+   "ref": "tools/mc",
+   "commit": "f82dd1107b1730b7864a2f0697add335af2c4fa4",
+   "tree_sha256": "92291602b3ad527759224609f52320bb278998265a2504eda51d272a98a851d8",
+   "at": "/ext/mc"
+  },
+  {
+   "name": "manifest",
+   "repo": "fnv-nx-build",
+   "ref": "l5-platform/manifest",
+   "commit": "09fce9f909b5c5794a4f14af2768ef70cad5c5da",
+   "tree_sha256": "9bd6bbad4e97d71de622501afd24a405bad464402089d7c591789eedbf8165b9",
+   "at": "/ext/manifest"
+  },
+  {
+   "name": "wine-specs",
+   "repo": "fnv-nx-build",
+   "ref": "tools/wine-specs",
+   "commit": "678c780eb7cd295e714fd01a3d35623f4d76d840",
+   "tree_sha256": "d21bd71296e96a391fcf9349cb63205d58a830422cdc9e42bd0bc3fde4b9d796",
+   "at": "/ext/wine-specs"
+  },
+  {
+   "name": "freetype",
+   "repo": "fnv-nx-build",
+   "ref": "mirror/freetype-src",
+   "commit": "81a07888ce98832af73dd66e7685f08b0161be43",
+   "tree_sha256": "65fa395b59dd0e023cea0c42cfb8802f4bc90f48f09d5ad98ff1def6d7206ea1",
+   "at": "/ext/freetype"
+  },
+  {
+   "name": "fonts-wine9",
+   "repo": "fnv-nx-build",
+   "ref": "tools/fonts-wine9",
+   "commit": "099942c35ee21a2ff7ac50e4d13fed12cc173ad3",
+   "tree_sha256": "5af2f2cfc5dea618bd8a1a6952fdfcaec50efa47d68d74bc61758b16aa56953d",
+   "at": "/ext/fonts"
+  },
+  {
+   "name": "freetype-debian",
+   "repo": "fnv-nx-build",
+   "ref": "tools/freetype-debian",
+   "commit": "7a4c65d2754f265193c2817b4d2f4ebd35bf299b",
+   "tree_sha256": "592d5a50c32ded42e580da46f0f6539993b485583efa4392a940ba95fd0134f5",
+   "at": "/ext/freetype-debian"
+  }
+ ],
+ "sources": "freetype/units.list"
+}

@@ -419,6 +419,23 @@ def main():
     check("refusal set also through compile flags -Wl,", any("refusal set" in e for e in errs(m)))
     check("legit ld options are not refused", not recipe.refused(["-e", "f_a", "--gc-sections", "-z", "noexecstack", "-Map=x", "--entry=x", "-Ttext=0"]))
     check("include dir outside admitted roots rejected", any("include" in e for e in errs(mut(include=["/etc", "../x"]))))
+    # one home per header: the include dir lies in an admitted product root of the recipe root's own target
+    rk = os.path.join(BASE, "ck")
+    base_roots = recipe.load_admit(rk)
+    own = base_roots[ROOT].get("target")
+    other = "host" if own != "host" else "guest"
+    extra = {T + "hdr_prod": {"path": T + "hdr_prod", "class": "product", "target": own},
+             T + "hdr_other": {"path": T + "hdr_other", "class": "product", "target": other},
+             T + "hdr_tool": {"path": T + "hdr_tool", "class": "tool"}, T + "hdr_doc": {"path": T + "hdr_doc", "class": "doc"}}
+    rr = dict(base_roots, **extra)
+    rfiles = list(recipe.tracked(rk)) + [T + n + "/h.h" for n in ("hdr_prod", "hdr_other", "hdr_tool", "hdr_doc")]
+
+    def home(d):
+        return [e for e in recipe.check(mut(include=RECIPE["include"] + [T + d]), ROOT, rfiles, rr, None, rk) if "lies in no admitted product root" in e]
+    check("include dir in a product root of the same target accepted", not home("hdr_prod"), home("hdr_prod"))
+    check("include dir in a product root of the other target rejected", len(home("hdr_other")) == 1, home("hdr_other"))
+    check("include dir in a tool root rejected", len(home("hdr_tool")) == 1, home("hdr_tool"))
+    check("include dir in a doc root rejected", len(home("hdr_doc")) == 1, home("hdr_doc"))
     m = mut()
     m["generated"][0]["outputs"] = ["a.c"]
     check("generated output colliding with a tracked file rejected", any("also a tracked file" in e for e in errs(m)))
