@@ -16,7 +16,9 @@ Rule (class-closing, no hand-written name or number):
   decode           a host errno e < 10000 is a name of the list; e >= 10000 is the unknown encoding of n = e - 10000, which must be a
                    number of the list or UNNAMED. Anything else cannot come from the service while ASM-004 holds
                    (fnvnx_assume_violation).
-With --committed, the generated text must equal the committed header (else exit 1). With --unit the C unit of the domain checks is
+Two modes of the same generator, both from the same pinned externals (they cannot diverge): the hostabi root regenerates and checks the
+committed header (--committed with --out STAMP); the platform root emits the C unit from the externals only (--unit). With --committed,
+the generated text must equal the committed header (else exit 1). With --unit the C unit of the domain checks is
 written (fnvnx_dom_errno[], fnvnx_dom_errno_check, fnvnx_wire_from_host_errno): hand code calls the checks only (L1: a direct call of
 fnvnx_assume_violation is red)."""
 import re, sys

@@ -14,10 +14,7 @@
   ],
   "asm": []
  },
- "include": [
-  "ports/fnv-nx/hostabi/include",
-  "/ext/a64/aarch64-none-elf/include"
- ],
+ "include": [],
  "units": "all",
  "generated": [
   {
@@ -33,14 +30,14 @@
     "/ext/linuxerrno/asm-generic/errno.h",
     "--committed",
     "/in/ports/fnv-nx/hostabi/include/fnvnx/sockwire_errno.h",
-    "--unit",
-    "/out/dom_errno.c"
+    "--out",
+    "/out/wire_errno.stamp"
    ],
    "inputs": [
     "ports/fnv-nx/hostabi/include/fnvnx/sockwire_errno.h"
    ],
    "outputs": [
-    "dom_errno.c"
+    "wire_errno.stamp"
    ]
   }
  ],
