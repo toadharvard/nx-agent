@@ -290,7 +290,7 @@ cannot split, merge, hoist or re-address the access.
 | 2, 4, 8 bytes, misaligned (`tst addr, #size-1` at run time, or at compile time for a constant address) | load: `ldr*` then `dmb ishld`; store: `dmb ishst` then `str*` |
 | 16 bytes | two 8-byte accesses, each as above |
 | `lock` op, `xchg r, m`; aligned or 1 byte | `ldaxr*` .. `stlxr*` loop (compare with the value the body computed from, retry on change), then `dmb ish` |
-| the same, misaligned | acquire `fnvnx_split_lock` (one global word, `ldaxr`/`stlxr`), plain load + `dmb ishld`, `dmb ishst` + plain store, release with `stlr`, `dmb ish` |
+| the same, misaligned | byte write-probe of the first and last byte (faults with the world running), `fnvl_host_world_stop()`, plain load + `dmb ishld`, `dmb ishst` + plain store, `dmb ish`, `fnvl_host_world_resume()` |
 
 Why the misaligned pair is TSO-ordered: `ldr; dmb ishld` orders the load before every later load and store;
 `dmb ishst; str` orders every earlier store before this one, and every earlier load is already ordered before it by its
@@ -372,11 +372,10 @@ an X-form result with a proven bound below 2^32; so a guest register used as a b
 ### LOCK-SPLIT: a misaligned locked operation stops the world
 
 A misaligned locked operation (`lock` forms and `xchg r, m` whose operand is not aligned to its size) is not atomic against a plain
-store to the same bytes if it only takes `fnvnx_split_lock`: the plain store can land between its load and its store. x86 excludes that,
+store to the same bytes if it only takes a global lock word: the plain store can land between its load and its store. x86 excludes that,
 and nothing about the program is taken on trust. The rule: the misaligned locked path stops the world. It calls `fnvl_host_world_stop`, runs the
 read-modify-write with every other guest thread stopped, and calls `fnvl_host_world_resume`. The aligned and the byte paths are unchanged
-(`ldaxr`/`stlxr` loop, then `dmb ish`). The code arrives with L3b (`rt/fnvl.h`) and L5 (the host functions); until then
-`fnvnx_split_lock` is the path that this rule replaces, and it is not a certified one.
+(`ldaxr`/`stlxr` loop, then `dmb ish`). The code is in `rt/fnvl.h` (FNVL_LK_, the window holds one lockable instruction's body: no call, no lock, no raise) and the host functions are L5's (`platform/os/os.h`, `os_world.c`); `fnvnx_split_lock` is deleted.
 
 ### Counts (lift/tools/locksites.py; every locked instruction of the reached universe)
 
