@@ -594,12 +594,20 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     return err
 
 
+def lifted_origin(origin):
+    """cxx_origin of a lifted root: {"lifted_by": TOOL.py, "pack": EXTERNAL} (the lifted C++ is made from an external pack) or {"lifted_by": TOOL.py,
+    "stage": "gen:<root>:<i>"} (made by a generated step of this root's own recipe, no pack): exactly one of pack and stage."""
+    return isinstance(origin, dict) and (set(origin) == {"lifted_by", "pack"} or set(origin) == {"lifted_by", "stage"})
+
+
 def plugin_errors(rec, root, files, roots, units, ext_names):
     """Problems of the plugin declaration of recipe REC of ROOT, and the gate rule: a product root with native or decomp C++ loads both
     plugins of PLUGIN_SOURCES with their fixed arguments; a root whose C++ is all lifted needs none. What is lifted is declared in the
-    admit.json entry of the root, "cxx_origin": "native" | {"lifted_by": TOOL.py, "pack": EXTERNAL}, required when the root has a C++ unit.
+    admit.json entry of the root, "cxx_origin": "native" | {"lifted_by": TOOL.py, "pack": EXTERNAL} | {"lifted_by": TOOL.py, "stage": "gen:ROOT:I"} (exactly
+    one of pack and stage; see lifted_origin), required when the root has a C++ unit.
     Consistency of a lifted declaration: no tracked C++ unit in the root, every C++ unit is an output of a `generated` step whose tool is
-    `lifted_by` (a tracked .py of an admitted tool root), `pack` names an external of the recipe (declared inputs of every generator)."""
+    `lifted_by` (a tracked .py of an admitted tool root), `pack` names an external of the recipe (declared inputs of every generator); with `stage` the
+    units are the outputs of that one generated step (gen:ROOT:I, I its index in `generated`), and its tool is `lifted_by`."""
     err, pl = [], rec.get("plugins", [])
     if not isinstance(pl, list):
         return ["plugins must be a list"]
@@ -641,7 +649,7 @@ def plugin_errors(rec, root, files, roots, units, ext_names):
     # PLUGIN_SOURCES with its fixed arguments in the fixed order. No language declarations, no exception list. The arguments are fixed by the
     # origin alone: a lifted root takes LIFTED_ARGS where it names a plugin (fnvnx_ftoi mode lifted), every other root PLUGIN_ARGS.
     if ent.get("target") == "guest" and any(u.endswith(CC_EXT + CXX_EXT) for u in units) and not (origin == "native" and cxx):
-        want = dict(PLUGIN_ARGS, **LIFTED_ARGS) if isinstance(origin, dict) and set(origin) == {"lifted_by", "pack"} else PLUGIN_ARGS
+        want = dict(PLUGIN_ARGS, **LIFTED_ARGS) if lifted_origin(origin) else PLUGIN_ARGS
         for n in sorted(PLUGIN_SOURCES):
             if n not in loaded:
                 err.append("guest root %s does not load plugin %s (every guest C and C++ unit is compiled with the full plugin set)" % (root, n))
@@ -662,8 +670,8 @@ def plugin_errors(rec, root, files, roots, units, ext_names):
         fl = rec.get("flags", {}).get("cxx", []) if isinstance(rec.get("flags"), dict) else []
         # fnvnx_sdd needs the define and -fno-devirtualize; a guest root's -fno-devirtualize comes from flags.semantics, its define is per root
         err += ["native C++ root %s: flags.cxx lacks %s" % (root, f) for f in (SDD_FLAGS if ent.get("target") != "guest" else (SDD_DEFINE,)) if f not in fl]
-    elif isinstance(origin, dict) and set(origin) == {"lifted_by", "pack"}:
-        tool, pack = origin["lifted_by"], origin["pack"]
+    elif lifted_origin(origin):
+        tool, pack, stage = origin["lifted_by"], origin.get("pack"), origin.get("stage")
         for n, a in LIFTED_ARGS.items():   # lifted C++ does its conversions in helpers: the plugin proves it (and only it is required)
             if n not in loaded:
                 err.append("lifted C++ root %s does not load plugin %s (mode lifted: every conversion outside an fnvnx_f2i function is an error)" % (root, n))
@@ -673,13 +681,22 @@ def plugin_errors(rec, root, files, roots, units, ext_names):
         owner = next((r for r in roots if isinstance(tool, str) and under(tool, r)), None)
         if not (isinstance(tool, str) and tool in files and tool.endswith(".py") and owner and roots[owner]["class"] == "tool"):
             err.append("cxx_origin.lifted_by %r is not a tracked .py of an admitted tool root" % (tool,))
-        if pack not in ext_names:
+        steps = rec.get("generated", []) if isinstance(rec.get("generated"), list) else []
+        if "pack" in origin and pack not in ext_names:
             err.append("cxx_origin.pack %r names no external of the recipe" % (pack,))
-        made = {o for g in rec.get("generated", []) if isinstance(g, dict) and g.get("tool") == tool and isinstance(g.get("outputs"), list)
-                for o in g["outputs"] if isinstance(o, str)}
+        if "stage" in origin:
+            m = re.fullmatch(re.escape("gen:%s:" % root) + r"(0|[1-9][0-9]*)", stage) if isinstance(stage, str) else None
+            if not (m and int(m.group(1)) < len(steps) and isinstance(steps[int(m.group(1))], dict) and steps[int(m.group(1))].get("tool") == tool):
+                err.append("cxx_origin.stage %r is not a generated step gen:%s:I of this recipe whose tool is lifted_by" % (stage, root))
+                steps = []
+            else:
+                steps = [steps[int(m.group(1))]]
+        else:
+            steps = [g for g in steps if isinstance(g, dict) and g.get("tool") == tool]
+        made = {o for g in steps if isinstance(g.get("outputs"), list) for o in g["outputs"] if isinstance(o, str)}
         err += ["lifted root %s: C++ unit %s is not an output of a step of %s" % (root, u, tool) for u in cxx if u not in made or u in mine]
     else:
-        err.append('admit.json %s: a root with C++ units needs cxx_origin "native" or {"lifted_by": TOOL.py, "pack": EXTERNAL}' % root)
+        err.append('admit.json %s: a root with C++ units needs cxx_origin "native" or {"lifted_by": TOOL.py, "pack": EXTERNAL} or {"lifted_by": TOOL.py, "stage": "gen:ROOT:I"} (exactly one of pack and stage)' % root)
     return err
 
 
@@ -1328,7 +1345,7 @@ def host_compilers(rec, cache):
     return os.path.join(dest, c["cc"]), os.path.join(dest, c["cxx"])
 
 
-def build(repo, root, store, out, jobs=4, ext=None):
+def build(repo, root, store, out, jobs=4, ext=None, link=True):
     """Build product ROOT of the checkout REPO into STORE; write OUT/objects.json and the files it names. EXT: bare cache dir of
     externals (default STORE/external). -> the objects dict; raises RecipeError for an invalid recipe."""
     env_blocked(repo)   # BEFORE any stage: nothing below runs or stores on a machine that is not the declared one

@@ -111,7 +111,7 @@ that includes `<vector>`, `<string>`, `<cstdio>`. The 13.3 compiler reads gcc 15
 
 ### Gate rule: every guest C and C++ unit is compiled with the full plugin set
 `admit.json` entry of a product root with at least one C++ unit declares `"cxx_origin"`: `"native"` (hand-written or decomp C++), or
-`{"lifted_by": "<tracked .py of a tool root>", "pack": "<external name of the recipe>"}`. Missing declaration = invalid recipe = red `build`.
+`{"lifted_by": "<tracked .py of a tool root>", "pack": "<external name of the recipe>"}`. Alternative to `pack`: `"stage": "gen:<root>:<i>"`, a generated step of this recipe whose tool is `lifted_by` (its outputs are the root's units). Exactly one of `pack` and `stage`; the plugin set and flags are the same. Missing declaration = invalid recipe = red `build`.
 - `native`: `plugins` must hold `fnvnx_order` and `fnvnx_ftoi`, with the sources `PLUGIN_SOURCES` and the arguments `PLUGIN_ARGS` of recipe.py (the MSVC
   semantics; `ltr`, `first`, `cpp17` exist for A/B measurements and are no product). Anything missing or different is a finding naming it.
 - lifted (the lifter emits `ldar`/`stlr` itself): consistent only if the root has NO tracked C++ unit, every C++ unit is an output of a `generated`
