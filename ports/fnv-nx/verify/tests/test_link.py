@@ -211,7 +211,8 @@ def main():
     lc, lh = TR.publish("tlib", libpop)
     lx = {"name": "tlib", "repo": "fnv-nx-build", "ref": "tlib", "commit": lc, "tree_sha256": lh, "at": "/ext/tlib"}
     arec = dict(main_rec(libs={"external": "tlib", "dirs": ["lib"], "names": ["toy"], "startfiles": [], "endfiles": []}), external=[lx])
-    rl = build(mk("archive", arec, {"toy/b.c": None}), SS)
+    arepo = mk("archive", arec, {"toy/b.c": None})
+    rl = build(arepo, SS)
     la = rl.get("link_archives", [])
     check("link.libs archive: the member the linker pulled (m1.o, for f_b) is recorded with archive path, archive sha256, member bytes sha256 and a kept object; "
           "the unused member m2.o is not", rl["status"] == "green" and [(m["archive"], m["member"]) for m in la] == [("/ext/tlib/lib/libtoy.a", "m1.o")]
@@ -219,6 +220,10 @@ def main():
     ea = errs(dict(arec, link=dict(arec["link"], libs={"external": "tlib", "dirs": ["../x"], "names": ["toy"], "startfiles": [], "endfiles": []})), [], "outside")
     check("link.libs: a directory outside the external is refused (an archive must lie inside a declared external)", any("link.libs" in e for e in ea), ea)
 
+    rc_, lsr, _, lso = TR.gate(arepo, "linkstrict", BASE + "/gate-ls", BASE + "/gate-cache")
+    rc2, osr, _, oso = TR.gate(arepo, "objstub", BASE + "/gate-os", BASE + "/gate-cache")
+    check("link.libs archive: linkstrict and objstub judge the pulled member as an object (their universe counts its symbols) and accept the root",
+          rc_ == 0 and lsr and lsr["status"] == "green" and lsr["universe"] >= 3 and osr and osr["universe"] >= 1, (lsr, osr, lso[-300:], oso[-300:]))
     # (n) the link check that objects.json equals the global and weak symbols read from the objects themselves (a second ELF reader: ldcheck's)
     o0 = rl["objects"][0]
     d0 = [d for d in rl["defined"] if d["object"] == o0["unit"]]

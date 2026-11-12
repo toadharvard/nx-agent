@@ -238,6 +238,10 @@ def main():
             for o in res["objects"]:
                 objs[root + "/" + o["unit"]] = elf_symbols(o["object"]) or []
                 comdat[root + "/" + o["unit"]] = elf_comdat(o["object"])
+            for m in res.get("link_archives", []):     # the members ld pulled from an archive are objects of the link, judged like every other
+                mid = "%s/%s(%s)" % (root, m["archive"].lstrip("/"), m["member"])
+                objs[mid] = elf_symbols(m["object"]) or []
+                comdat[mid] = elf_comdat(m["object"])
             eid = root + "/" + os.path.basename(res["elf"]["path"]) if res["elf"] else None
             if eid:
                 elfs[eid] = elf_symbols(res["elf"]["path"])
