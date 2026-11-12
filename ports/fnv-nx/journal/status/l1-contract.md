@@ -197,3 +197,8 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 
   - ASM-300..328 are L3b's. L3a w9 cites them in fnvlift, so there is no collision.
   - w10's gate will be red on a duplicate id, a duplicate alias, or a new id outside its owner's range.
+- 03:29Z: **descs fact** for L3a item 26 (lift/bridges). Assigned to w16, after the iat root.
+  - It is the sorted, unique union of `.fnvnx.disp` over every admitted root except lift/bridges, published as a recipe output and read through `uses`.
+  - lift/bridges' own objects must have no `.fnvnx.disp`; that rule breaks the cycle.
+- The closure question goes to w14's closure_key. Its premises are open = 0 (w18) and dispgen --closure green.
+- gate_assumptions will write its full findings list to its detail file (w10).
