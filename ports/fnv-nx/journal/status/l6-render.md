@@ -145,3 +145,9 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
 - 03:32Z Merged w6 c646a014 (render/d3d9) and f8adf66b (lib/sha256): both on platform's semantics flags, C included. L1 w17 adopted the rule as one flags.semantics set for all languages.
   - render/d3d9: 70 objects; cold 155 stages run, 34.3 s; warm 155/155 hit, 3.1 s; objstub 1784/1784, 0 findings. fmadd/fmsub/fnmadd/fnmsub over all 70 objects: 0 (it was 7).
   - lib/sha256: cold green 1 object, warm 0 stages run; 233/233 NIST vectors pass.
+- 03:33Z b# trace (w3b 7b0fafc).
+  - In Wine 9.0, CreateVertexShader succeeds. At the draw, the GLSL link fails, validate_link only logs, glUseProgram(failed) is called, and the draw proceeds. The result is GL-defined: OpenGL 4.6 §7.3 leaves the previous program current.
+  - The lead proposed option (d) to the orchestrator:
+    - this behaviour, cited;
+    - a farm measures the class (link ok/failed per sm_table row and per sm_illegal form) as a reference fact.
+  - Blocked on: the orchestrator's decision. w3b is checking Wine's program tracking across draws.
