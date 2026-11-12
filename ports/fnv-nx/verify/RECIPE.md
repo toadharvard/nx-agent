@@ -163,6 +163,13 @@ the unit's keys; the units are built with the root's own. Red (stage `sources:<r
 not declare, a path that is no file inside the external (`..` included), a `.` path the root does not track. A changed list adds only the new units:
 the other units keep their objects and compile-stage keys (their preprocessing keys follow the view's file names, the compile keys do not).
 
+## Python of the generated stages
+
+A `generated` step runs in the python runtime of the sandbox (the interpreter and its loader closure, content-addressed: `runtime_id` is in the
+key). Every python module pinned in `verify/env.json` (`python.modules`) is mounted in that runtime, at the content of its installed files, and
+the key of every generated stage also names each of them as `name==version:installed_files_sha256` (envcheck.wheel_digest: the files read from the
+disk, not the RECORD's claim). Changing one module's digest changes the key of every generated stage, and nothing else's.
+
 ## Keep going
 
 A root build does not stop at the first red stage. Every unit whose declared inputs are all produced is built (and its objects land in the

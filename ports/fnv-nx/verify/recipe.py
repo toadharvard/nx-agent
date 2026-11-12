@@ -107,6 +107,26 @@ class EnvBlocked(RecipeError):
 _ENV_OK = set()   # sha256 of the env.json files this process already found matching (an install between processes is seen by the next one)
 
 
+def pinned_modules(repo):
+    """The python modules pinned in repo's env.json (python.modules), each as (distribution, version, installed_files_sha256, [top-level import
+    names]): the digest is envcheck.wheel_digest (the content of the installed files read from the disk, not the RECORD's claim). Every pinned
+    module is mounted in the python runtime of the generated stages and is named, with its digest, in their key (Job.generate)."""
+    doc = json.load(open(os.path.join(repo, ENV_JSON)))
+    out = []
+    for m, ver in sorted(doc["python"]["modules"].items()):
+        d = envcheck.metadata.distribution(m)
+        tops = set()
+        for f in d.files or []:
+            top = f.parts[0] if f.parts else ""
+            if top in ("..", "__pycache__") or top.endswith((".dist-info", ".data", ".libs")):
+                continue
+            n = top.split(".")[0] if len(f.parts) == 1 else top
+            if n.isidentifier():
+                tops.add(n)
+        out.append((m, ver, envcheck.wheel_digest(m), sorted(tops)))
+    return out
+
+
 def env_blocked(repo):
     """Raise EnvBlocked unless this machine matches repo/verify/env.json (envcheck.py check; a missing file is a mismatch, as in l1.py)."""
     p = os.path.join(repo, ENV_JSON)
@@ -869,7 +889,10 @@ class Job:
     def generate(self, ws):
         if not self.rec.get("generated"):
             return
-        _, py = self.cached_rt("python", lambda: runtime.build(self.store, sys.executable, []))
+        mods = pinned_modules(self.repo)
+        sites = sorted({n for _, _, _, tops in mods for n in tops})
+        _, py = self.cached_rt("python-" + hashlib.sha256(repr(sites).encode()).hexdigest()[:16], lambda: runtime.build(self.store, sys.executable, sites))
+        self.pymods = ";".join("%s==%s:%s" % (m, v, d) for m, v, d, _ in mods)   # in the key of every generated stage: the interpreter digest (runtime_id) plus the installed files of every pinned module
         xin = [{"at": e["at"], "tree": e["tree"]} for e in self.ext.values()]
         for i, g in enumerate(self.rec["generated"]):
             try:
@@ -889,7 +912,7 @@ class Job:
             ins.append({"at": "/in/" + p, "tree": cas.ingest(os.path.join(self.repo, p), self.store) if sub == [p] else
                         self.ingest_files(tmp, "in%d" % len(ins), sub, p)})
         env = {k: v for k, v in py["env"].items() if k != "PYTHONNOUSERSITE"}
-        env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"])})
+        env.update({"TZ": "UTC", "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80", "PATH": os.path.dirname(py["python"]), "FNVNX_PYMODS": self.pymods})
         doc = {"format": "fnvnx-stage/1", "stage": "gen:%s:%d" % (self.root, i), "class": "build", "tool": "python", "cwd": "/work",
                "argv": [py["python"], "-s", "-B", "/tool/" + g["tool"][len(owner) + 1:]] + g["args"], "env": env,
                "inputs": sorted(py["inputs"] + ins, key=lambda x: x["at"]), "outputs": ["/out"]}

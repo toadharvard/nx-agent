@@ -235,6 +235,21 @@ def main():
               and all(f["exit"] and 0 < len(f["stderr"]) <= 20 and set(f) == {"unit", "stage", "exit", "stderr"} for f in fu)
               and any("undeclared_b" in l for l in fu[0]["stderr"]) and any("missing_c.h" in l for l in fu[1]["stderr"])
               and r1["failure"]["stage"] == "cc:b.c" and r1["elf"] is None and [o["unit"] for o in r1["objects"]] == ["a.c"], (fu, r1.get("failure")))
+        # the key of a generated stage holds the installed-files digest of EVERY python module pinned in env.json (and mounts them all)
+        pm = recipe.pinned_modules(two)
+        check("every module pinned in env.json is listed with its installed-files digest and top-level names",
+              [m for m, _, _, _ in pm] == sorted(json.load(open(os.path.join(two, recipe.ENV_JSON)))["python"]["modules"])
+              and all(len(d) == 64 and tops for _, _, d, tops in pm), pm)
+        base = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out0")
+        real = recipe.envcheck.wheel_digest
+        for target in [m for m, _, _, _ in pm]:
+            recipe.envcheck.wheel_digest = lambda dist, _t=target: real(dist) + ("x" if dist == _t else "")
+            try:
+                alt = recipe.build(two, ROOT, BASE + "/pm-store", BASE + "/pm-out1")
+            finally:
+                recipe.envcheck.wheel_digest = real
+            d1, d2 = set(base["stage_keys"]) - set(alt["stage_keys"]), set(alt["stage_keys"]) - set(base["stage_keys"])
+            check("changing the pinned digest of %s changes the generated-stage key (and only that stage's)" % target, len(d1) == 1 and len(d2) == 1, (d1, d2))
         # KEEP GOING: a red generator does not stop the other stages. Its output unit is blocked by it (never built), every other unit is
         # built, the ELF is blocked, and the root is red naming the red stage.
         kg = make_repo("kg", rec=dict(RECIPE, os_layer=[], generated=RECIPE["generated"] + [
