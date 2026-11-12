@@ -25,7 +25,7 @@ on 2026-11-11 22:35 UTC. Handoff read: `journal/inbox/l3b-lift-handoff-opus.md` 
 | 7 | A-CTX: seh.c restores only integer regs + eip from CONTEXT after ContinueExecution; Windows also restores FP/SSE | - | - | open, reported to the orchestrator |
 | 8 | Split lock: A4 deleted, LKA world-stop decided (L3a w3 batch, host side fnvl_host_world_stop/resume by L5) | L3a | claude/fnv-l3a-lift-w3 | doing (L3a, L5) |
 
-| 4i | Assumption records: the 28 unmapped of the 41 L3b ids plus I-FPMASK and I-FPSTICKY become aliases or REMOVE records in verify/ASSUMPTIONS.json (L1 w10 format); 13 are already aliased | w3 session_01KmtZKSe6CHsWxfNeCn25nG | claude/fnv-l3b-lift-w3t | doing: w3a e22798f8 adds 29 entries; gate red with 50 errors (not tracked on w10; block rule; files cite A-XXX). Decided: renumber the 19 L3a-owned entries to 2xx and the 1 L2-owned entry to 8xx, keeping the old id as an alias; rebuild on w2g; script the L3b-file citation rewrite from the alias map; L3a rewrites the fnvlift/rt citations; everything lands in one merge with w2g (the trunk stays green) |
+| 4i | Assumption records: the 28 unmapped of the 41 L3b ids plus I-FPMASK and I-FPSTICKY become aliases or REMOVE records in verify/ASSUMPTIONS.json (L1 w10 format); 13 are already aliased | w3 session_01KmtZKSe6CHsWxfNeCn25nG | claude/fnv-l3b-lift-w3t | doing: registry w3a 326f2c8e (77 entries): L3b ASM-300..308 (9), L3a ASM-203..220 (18), L2 ASM-801 (1); A-STACKPRIVATE dropped (no consumer); old names and ids kept as aliases, so the registry is the map. Next: merge w2g onto w10, script the L3b citation rewrite over the aliases (w3); L3a w9 rewrites fnvlift from the same aliases; one merge unit after w10 (L1 agreed) |
 
 ## Reported gaps (owner layer)
 
