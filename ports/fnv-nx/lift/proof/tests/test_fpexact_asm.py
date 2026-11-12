@@ -172,9 +172,10 @@ class Negative(unittest.TestCase):
             'top2': '__asm__(".text\\n.globl t1\\n.type t1,%function\\nt1:\\n add w0, w0, #1\\n ret\\n.size t1,.-t1\\n");\n'
                     '__asm__(".text\\n.globl t2\\n.type t2,%function\\nt2:\\n nop\\n fcvtzs w0, s0\\n ret\\n.size t2,.-t2\\n");\n',
             # an asm that emits into another executable section: its bytes are in no function and in no range
-            'push': 'extern "C" void pp(void){ __asm__ volatile(".pushsection .text.x,\\"ax\\"\\n .word 0x12345678\\n.popsection"); }\n',
+            'push': 'extern "C" void pp(void){ __asm__ volatile(".pushsection .text.x,\\"ax\\"\\n .byte 1,2,3\\n.popsection"); }\n',
+            'pushfmov': 'extern "C" void pf(void){ __asm__ volatile(".pushsection .text.x,\\"ax\\"\\n fmov s0, w1\\n.popsection"); }\n',
             'pushcvt': 'extern "C" int pq(void){ int r = 0; __asm__ volatile(".pushsection .text.x,\\"ax\\"\\n fcvtzs w0, s0\\n.popsection"); return r; }\n',
-            'tlpush': '__asm__(".pushsection .text.y,\\"ax\\"\\n .word 0x12345678\\n.popsection\\n");\n',
+            'tlpush': '__asm__(".pushsection .text.y,\\"ax\\"\\n .byte 7\\n.popsection\\n");\n',
             # alignment filler between functions is a whole NOP word: not a finding
             'pad': 'extern "C" __attribute__((aligned(64))) int pa(int a){ return a + 1; }\n'
                    'extern "C" __attribute__((aligned(256))) int pb(int a){ return a + 2; }\n',
@@ -241,6 +242,11 @@ class Negative(unittest.TestCase):
         for n in ('push', 'pushcvt', 'tlpush'):
             f = judge(self.o[n])
             self.assertTrue(any('in no compiled function and no recorded asm range' in x for x in f), (n, f))
+        self.assertTrue(any('fcvtzs' in x for x in judge(self.o['pushcvt'])))
+        self.assertTrue(any('not whole words' in x for x in judge(self.o['push'])))
+
+    def test_a_non_conversion_word_in_another_section_is_clean(self):
+        self.assertEqual(judge(self.o['pushfmov']), [])
 
     def test_alignment_filler_is_not_a_finding(self):
         self.assertEqual(judge(self.o['pad']), [])

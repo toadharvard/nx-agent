@@ -71,9 +71,10 @@ object-level necessary condition:
       asm insns at the marker pass, unrecorded]; totals over the objects judged are N (GIMPLE asm given to the expander), M (emitted with a range), D (deleted before final: the
       expander dropping unreachable blocks and the RTL passes deleting dead insns, per function N - rtl0 and rtl0 - M, never negative), U (unrecorded). It replaces the earlier
       reliance on an asm without a float operand doing no conversion: no operand or clobber text is trusted for this, the instructions are read.
-      Coverage (same check): every byte of every executable section of a C / C++ object lies in the extent of an STT_FUNC symbol the compiler emitted from a
-      function body (the names the plugin's final-pass hook saw, with `<name>.cold`), or in a recorded asm range, or is a whole A64 NOP word (alignment filler);
-      any other byte is a finding. So an asm that emits into another section (.pushsection .text.x; fcvtzs ...) cannot hide a conversion outside its range.
+      Coverage (same check): the universe is every executable section of a C / C++ object. A byte is the compiler's iff it lies in the extent of an STT_FUNC symbol
+      of a function the plugin recorded (its final-pass hook; a recorded function without a sized symbol is a finding); every other byte not in a recorded asm range is
+      treated as asm bytes and decoded word by word by the same rules (table hit, SVE class, undecodable; padding is decoded like any word, a tail that is not 4-aligned is
+      undecodable). So an asm that emits into another section (.pushsection .text.x; fcvtzs ...) cannot hide a conversion. The detail prints the complement totals.
   Soundness argument: a compiler-generated A64 conversion instruction comes from a GIMPLE conversion (FIX_TRUNC_EXPR, a conversion
   builtin or IFN_VEC_CONVERT) present in the function bodies the plugin saw, or from an asm; the plugin sees every body before the first
   transformation; outside the attributed helpers none exists, so the conversion instructions of the object are copies of the helpers'
@@ -130,7 +131,7 @@ def _bits(w, hi, lo):
 #                                                          opcode 11111: FCVTZ{S,U} (fixed-point), with immh (bits 22:19) != 0000: immh = 0000 is the "Advanced SIMD modified immediate" group
 #                                                          (cmode 1111, o2 1 is FMOV vector immediate, half precision) and unallocated in the scalar group, neither a conversion
 # Not conversions to an integer and so not listed: FMOV between the general and the FP registers (a bit move), SCVTF / UCVTF (integer to FP), FCVT / FCVTL / FCVTN / FCVTXN
-# (FP to FP), FRINT* (FP to FP). SVE conversions are not in the guest's architecture (-march armv8.1-a): check 3d makes any SVE-class word (bits 28:25 = 0010) in an asm range a finding.
+# (FP to FP), FRINT* (FP to FP). SVE conversions are not in the guest's architecture (the -march of the pin verify/guest_compiler.json, read by guest_march(); a pin enabling SVE is a finding of the gate): check 3d makes any SVE-class word (bits 28:25 = 0010) in an asm range a finding.
 def fp_to_int(w):
     """-> the lower-case mnemonic ('fcvtzs', ..., 'fjcvtzs') when the A64 word W is a floating-point -> integer conversion by the table above, else None"""
     if _bits(w, 30, 30) == 0 and _bits(w, 28, 24) == 0b11110 and _bits(w, 29, 29) == 0:
@@ -448,15 +449,10 @@ def scan_asmranges(path):
                         out["findings"].append("asm range at %s: [0x%x, 0x%x) is not a whole number of A64 words" % (where, lo, hi))
                     # every word of the range, whatever the section's mapping symbols say: an asm text may hold any bytes, and none is skipped
                     for p2 in range(lo - lo % 4, hi - (hi % 4), 4):
-                        word = tdata[p2:p2 + 4]
-                        name = fp_to_int(int.from_bytes(word, "little"))
-                        if name:
-                            out["fcvt"] += 1
-                            out["findings"].append("asm range at %s: %s at 0x%x" % (where, name, p2))
-                        elif _bits(int.from_bytes(word, "little"), 28, 25) == 0b0010:   # the SVE encoding class: not in the guest architecture, and its conversions are not in the table
-                            out["findings"].append("asm range at %s: SVE word at 0x%x (not in the guest architecture)" % (where, p2))
-                        elif not any(True for _ in md.disasm(word, p2)):
-                            out["findings"].append("asm range at %s: undecodable word at 0x%x" % (where, p2))
+                        why = decode_word(tdata[p2:p2 + 4], md, p2)
+                        if why:
+                            out["fcvt"] += why.startswith("fcvt") or why.startswith("fjcvt")
+                            out["findings"].append("asm range at %s: %s at 0x%x" % (where, why, p2))
             pos = (q + 3) & ~3
     return out
 
@@ -490,7 +486,7 @@ def read_f2i(obj_path):
             f["function"], f["file"], f["line"], f["kind"]
         d["unit"]
         a = d["asm"]
-        if not isinstance(a["toplevel"], int) or not all(
+        if not isinstance(a["toplevel"], int) or not isinstance(a["emitted"], list) or not all(isinstance(n, str) for n in a["emitted"]) or not all(
                 isinstance(v, list) and len(v) == 5 and all(isinstance(x, int) for x in v) for v in a["functions"].values()):
             raise ValueError("malformed asm accounting")
         return d, None
@@ -514,27 +510,53 @@ def asm_totals(a, ranges):
     return N, M, D, U + abs(ranges - M - a["toplevel"])
 
 
-NOP = 0xd503201f
+def guest_march():
+    """-> the -march flag(s) of the pin verify/guest_compiler.json (flags.semantics): the guest architecture the word decoders below are written for"""
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify", "guest_compiler.json")) as fh:
+        pin = json.load(fh)
+    return [f for f in json.dumps(pin).replace('"', " ").replace(",", " ").split() if f.startswith("-march=")]
+
+
+def decode_word(word, md, p2):
+    """-> None (clean) or the reason string: fp_to_int hit, SVE class, undecodable (check 3d, the one word rule for recorded ranges and for the coverage complement)"""
+    w = int.from_bytes(word, "little")
+    name = fp_to_int(w)
+    if name:
+        return name
+    if _bits(w, 28, 25) == 0b0010:   # the SVE encoding class: the pin's -march (guest_march()) has no SVE, and its conversions are not in the table
+        return "SVE word (not in the guest architecture)"
+    if not any(True for _ in md.disasm(word, p2)):
+        return "undecodable word"
+    return None
+
+
+COVER = {"bytes": 0, "words": 0, "hits": 0}   # check 3d coverage, over every object judged: complement bytes, words decoded, findings among them
 
 
 def scan_coverage(path, emitted, ranges):
-    """Check 3d, coverage: every byte of every executable section (SHF_EXECINSTR, PROGBITS) of a C / C++ object lies in (a) the extent [st_value, st_value + st_size)
-    of an STT_FUNC symbol of that section that the compiler emitted from a function body (EMITTED: the assembler names the plugin's final-pass hook saw, with the
-    compiler's own `<name>.cold` partition), or (b) a recorded asm range (RANGES: [(section index, lo, hi)] from scan_asmranges), or (c) is alignment filler: a whole
-    A64 NOP word (the assembler's fill of .p2align in code). Any other byte is a finding: it is code or data that no compiler pass and no recorded asm statement
-    produced, so it is where an asm that switched section (.pushsection .text.x; fcvtzs ...) would put a conversion. -> [finding strings]"""
+    """Check 3d, coverage: the universe is every SHF_EXECINSTR PROGBITS section of a C / C++ object, whatever its name. A byte is the compiler's iff it lies in
+    [st_value, st_value + st_size) of an STT_FUNC symbol of that section named by a function the plugin recorded (EMITTED: the assembler names its final-pass hook saw,
+    from the compiler's own function list, with the partition `<name>.cold`); a recorded function with no sized STT_FUNC symbol is a finding. Every other byte that
+    no recorded asm range (RANGES: [(section index, lo, hi)]) covers is treated as asm bytes: it is decoded word by word with decode_word (fp_to_int / SVE / undecodable,
+    padding included: the assembler's alignment nop and a zero word udf #0 are defined encodings), and a tail that is not 4-aligned is undecodable. -> [finding strings]"""
     out = []
+    md = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
+    for m in guest_march():
+        if "sve" in m:
+            out.append("the pin's %s enables SVE: the word table does not cover it" % m)
     with open(path, "rb") as fh:
         elf = ELFFile(fh)
-        syms = {}
+        syms, sized = {}, set()
         for sec in elf.iter_sections():
             if sec["sh_type"] != "SHT_SYMTAB":
                 continue
             for sym in sec.iter_symbols():
-                if sym["st_info"]["type"] == "STT_FUNC" and isinstance(sym["st_shndx"], int):
-                    n = sym.name
-                    if n in emitted or (n.endswith(".cold") and n[:-5] in emitted):
-                        syms.setdefault(sym["st_shndx"], []).append((sym["st_value"], sym["st_value"] + sym["st_size"]))
+                n = sym.name
+                if sym["st_info"]["type"] == "STT_FUNC" and isinstance(sym["st_shndx"], int) and sym["st_size"] > 0 and (n in emitted or (n.endswith(".cold") and n[:-5] in emitted)):
+                    syms.setdefault(sym["st_shndx"], []).append((sym["st_value"], sym["st_value"] + sym["st_size"]))
+                    sized.add(n[:-5] if n.endswith(".cold") and n not in emitted else n)
+        for n in sorted(emitted - sized):
+            out.append("function %s was compiled but has no sized STT_FUNC symbol" % n)
         for idx, sec in enumerate(elf.iter_sections()):
             if not sec["sh_flags"] & SHF_EXECINSTR or sec["sh_type"] != "SHT_PROGBITS":
                 continue
@@ -543,12 +565,25 @@ def scan_coverage(path, emitted, ranges):
             for lo, hi in syms.get(idx, []) + [(l, h) for i, l, h in ranges if i == idx]:
                 for k in range(max(lo, 0), min(hi, len(data))):
                     cover[k] = 1
-            for p in range(0, len(data) - len(data) % 4, 4):
-                if not all(cover[p:p + 4]) and int.from_bytes(data[p:p + 4], "little") != NOP:
-                    out.append("section %s: bytes at 0x%x are in no compiled function and no recorded asm range" % (sec.name, p))
-                    break
-            if len(data) % 4 and not all(cover[len(data) - len(data) % 4:]):
-                out.append("section %s: %d trailing byte(s) are in no compiled function and no recorded asm range" % (sec.name, len(data) % 4))
+            p = 0
+            while p < len(data):
+                if cover[p]:
+                    p += 1
+                    continue
+                q = p
+                while q < len(data) and not cover[q]:
+                    q += 1
+                COVER["bytes"] += q - p
+                for w in range(p + (-p) % 4, q - 3, 4):
+                    COVER["words"] += 1
+                    why = decode_word(data[w:w + 4], md, w)
+                    if why:
+                        COVER["hits"] += 1
+                        out.append("section %s: bytes at 0x%x are in no compiled function and no recorded asm range: %s" % (sec.name, w, why))
+                if (q - p) % 4 or p % 4:
+                    COVER["hits"] += 1
+                    out.append("section %s: bytes 0x%x..0x%x are in no compiled function and no recorded asm range and not whole words: undecodable" % (sec.name, p, q))
+                p = q
     return out
 
 
@@ -558,7 +593,7 @@ def check_3d(path, a):
     N, M, D, U = asm_totals(a, r["entries"])
     for k, v in (("N", N), ("M", M), ("D", D), ("U", U), ("units", 1), ("fcvt", r["fcvt"])):
         TOTALS3D[k] += v
-    out = list(r["findings"]) + scan_coverage(path, set(a["functions"]), r["resolved"])
+    out = list(r["findings"]) + scan_coverage(path, set(a["emitted"]), r["resolved"])
     if U:
         out.append("%d asm insn(s) reached final without a range (N=%d M=%d D=%d, entries in .fnvnx.asmrange %d)" % (U, N, M, D, r["entries"]))
     if r["toplevel"] != a["toplevel"]:
@@ -687,6 +722,8 @@ def main(argv):
         TOTALS3D["units"], TOTALS3D["N"], TOTALS3D["M"], TOTALS3D["D"], TOTALS3D["U"], TOTALS3D["fcvt"])) if TOTALS3D["units"] else ""
     msg = detail if u != c else ("rcp table certified, no rcp/rsqrt estimate instruction and no uncertified float->int conversion in %d items" % u if u else detail)
     msg = (msg + "; " + tot) if tot else msg
+    if TOTALS3D["units"]:
+        msg += "; coverage complement: %d bytes, %d words decoded, %d findings" % (COVER["bytes"], COVER["words"], COVER["hits"])
     gatefile.write(NAME, u, c, ids, msg)
     st = "green" if u == c else "red"
     sys.stdout.write("%s: %s %d/%d %s\n" % (NAME, st, c, u, msg[:400]))

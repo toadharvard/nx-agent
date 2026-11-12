@@ -40,7 +40,7 @@
 // helpers), findings [{function, file, line, kind}] (what is outside a helper and is not rewritten: in lifted mode the errors, in native
 // mode the builtin and asm kinds, and a conv the rewrite does not cover), both sorted; asm (accounting for check 3c: functions
 // {assembler name: [GIMPLE asm at the first pass, GIMPLE asm given to the expander, asm insns right after expand, asm insns marked before
-// final, asm insns after final without markers]}, toplevel (top-level asm statements of the unit; each has a range with function "<toplevel>")).
+// final, asm insns after final without markers]}, emitted [assembler names of the functions that reached final], toplevel (top-level asm statements of the unit; each has a range with function "<toplevel>")).
 // Besides the report the plugin writes the section .fnvnx.asmrange into the object (see asm_mark_pass).
 #include "gcc-plugin.h"
 #include "plugin-version.h"
@@ -90,6 +90,7 @@ static std::map<std::string, asm_count> asm_counts;
 typedef std::tuple<std::string, int, int> locus_t;   // file, line, column of the asm statement (GIMPLE location, carried by the insn)
 struct asm_row { std::string func, b, e; locus_t loc; };
 static std::vector<asm_row> asm_rows;
+static std::set<std::string> emitted_fns;   // the functions that reached `final`: the compiler's own list of what it emitted from function bodies
 static std::set<int> marker_names;   // the labels this plugin created: any asm insn at final without them around it is unrecorded
 static std::string fn_asm_name(function *fun) { return IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fun->decl)); }
 static locus_t locus_of(location_t l) { expanded_location x = expand_location(l); return locus_t(x.file ? x.file : "", x.line, x.column); }
@@ -293,6 +294,7 @@ struct asm_rtl0_pass : rtl_opt_pass {
   asm_rtl0_pass(gcc::context *ctx) : rtl_opt_pass(asm_rtl0_data, ctx) {}
   unsigned int execute(function *fun) final override {
     asm_count &c = asm_counts[fn_asm_name(fun)];
+    emitted_fns.insert(fn_asm_name(fun));
     for (rtx_insn *i = get_insns(); i; i = NEXT_INSN(i))
       if (asm_insn_p(i)) c.rtl0++;
     return 0;
@@ -397,7 +399,9 @@ static void finish(void *, void *) {
     fprintf(f, ": [%u, %u, %u, %u, %u]", kv.second.early, kv.second.expand, kv.second.rtl0, kv.second.marked, kv.second.unrecorded);
     af = false;
   }
-  fprintf(f, "}, \"toplevel\": %u}, \"findings\": [", toplevel);
+  fprintf(f, "}, \"emitted\": [");
+  { bool ef = true; for (auto &n : emitted_fns) { if (!ef) fprintf(f, ", "); js(f, n); ef = false; } }
+  fprintf(f, "], \"toplevel\": %u}, \"findings\": [", toplevel);
   bool first = true;
   for (auto &t : findings) {
     fprintf(f, "%s{\"file\": ", first ? "" : ", "); js(f, std::get<1>(t));
