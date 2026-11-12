@@ -168,6 +168,22 @@ def main():
           and [o["unit"] for o in rg["objects"]] == [o["unit"] for o in rh["objects"]], (rg.get("failure"), rh.get("failure")))
     check("per-target recipes: each target has its own keys and objects (compiler, flags and variant are in the key)",
           not set(rg["stage_keys"]) & set(rh["stage_keys"]) and [o["sha256"] for o in rg["objects"]] != [o["sha256"] for o in rh["objects"]], "")
+    # a flags-only variant of a guest root (L2's gcstress): the base's flags plus the GC-stress params, built as ROOT@gcstress with the same target
+    GCS = ["--param", "ggc-min-expand=0", "--param", "ggc-min-heapsize=0"]
+    gcrec = dict(rec, variants={"gcstress": {"flags": dict(rec["flags"], cxx=rec["flags"]["cxx"] + GCS)}})
+    w(pt, ROOT + "/build.json", json.dumps(gcrec))
+    git(pt, "add", "-A")
+    git(pt, "commit", "-q", "-m", "gcstress")
+    adm_gc = recipe.load_admit(pt)
+    egc = recipe.check(gcrec, ROOT, recipe.tracked(pt), adm_gc, recipe.load_pin(pt), pt)
+    check("gcstress: a flags-only variant of a guest root is valid next to the per-target recipe", egc == [], egc)
+    check("gcstress: pairs are root, root@gcstress, root@host; the variant keeps the guest target and has the base's flags plus the params",
+          recipe.pairs_of(gcrec, ROOT, adm_gc[ROOT]) == [ROOT, ROOT + "@gcstress", ROOT + "@host"]
+          and recipe.entry_of(adm_gc, ROOT + "@gcstress")["target"] == "guest"
+          and recipe.load_recipe(pt, adm_gc, ROOT + "@gcstress")["flags"]["cxx"] == rec["flags"]["cxx"] + GCS, recipe.pairs_of(gcrec, ROOT, adm_gc[ROOT]))
+    rgc = recipe.build(pt, ROOT + "@gcstress", os.path.join(BASE, "PTGC"), os.path.join(BASE, "out-PTGC"))
+    check("gcstress: ROOT@gcstress builds green on the guest compiler with keys of its own",
+          rgc["status"] == "green" and not set(rgc["stage_keys"]) & set(rg["stage_keys"]), rgc.get("failure"))
     check("per-target recipes: the guest target is judged by the guest rules, the host target by none of them",
           recipe.guest_errors(rec, ROOT, adm_pt, recipe.load_pin(pt)) == [] and recipe.guest_errors(REC, ROOT + "@host", adm_pt, recipe.load_pin(pt)) == [], "")
     o = next(x["object"] for x in ra["objects"] if x["unit"] == "a.cc")
