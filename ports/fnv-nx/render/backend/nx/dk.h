@@ -131,17 +131,20 @@ extern NxDk nxdk;
 void* nxdk_guest_ptr(uint64_t addr, uint64_t len);
 void nxdk_on_present(uint32_t frame);
 /* the install-time shader pack (translated.nxsp) read into memory: the bytes and their size, NULL when none is installed. No default: a build without the embedder does not link (dk_shader.c).
- * NXSP, all little-endian:
- *   header            v1: 32 bytes "NXSP", u32 ver (1 or 2), u32 count, u32 idx_off, u32 data_off, u8 pack_id[12] (bytes 20..31, not read here).
- *                     v2: the same 32 bytes, pack id included, then u32 gcount at byte 32 and u32 gidx_off at byte 36: 40 bytes. A v1 pack has gcount = 0.
- *                     Producer obligation of a v2 pack: idx_off, gidx_off and every row offset are >= 40 (the header is not part of any table or payload); a pack that breaks it is invalid.
- *   index (v1 rows)   count rows of 104 bytes at idx_off: name[48] family[24] variant[16] (NUL padded), u32 stage, u32 offset, u32 size, u32 crc32 of the DKSH at offset; the
- *                     D3D translation lookup (SHADER_CREATE_D3D: name = %016x of fnv1a64(bytecode), family "translated")
- *   G table (v2)      gcount rows of 52 bytes at gidx_off: u8 key[32]; u32 stage; u32 glsl_off; u32 glsl_size; u32 dksh_off; u32 dksh_size. Offsets are from the start of the pack,
+ * NXSP, all little-endian. Only version 2 is read: a pack of any other version is invalid (v1 has no G or D table).
+ *   header            48 bytes: "NXSP", u32 ver (2), u32 count, u32 idx_off, u32 data_off, u8 pack_id[12] (bytes 20..31), u32 gcount at 32, u32 gidx_off at 36, u32 dcount at 40,
+ *                     u32 didx_off at 44. count / data_off / pack_id are not read here; idx_off is required to be >= 48.
+ *                     Producer obligation: idx_off, gidx_off, didx_off and every row offset are >= 48 (the header is not part of any table or payload); a pack that breaks it is invalid.
+ *   G table           gcount rows of 52 bytes at gidx_off: u8 key[32]; u32 stage; u32 glsl_off; u32 glsl_size; u32 dksh_off; u32 dksh_size. Offsets are from the start of the pack,
  *                     rows are strictly ascending by memcmp of key (so keys are unique), stage is an NxShaderDesc stage, every [off, off + size) is inside the pack. SHADER_CREATE
  *                     (NxShaderDesc: stage, glsl, glsl_size, key) finds the row by key (binary search), requires row.stage and row.glsl_size to equal the descriptor's and the row's
  *                     GLSL bytes to equal the descriptor's, and creates the shader from the row's DKSH.
- * Validity is checked once, when the pack is first read; an invalid pack is reported through nxdk_err and every SHADER_CREATE reports the same error. */
+ *   D table           dcount rows of 64 bytes at didx_off: u8 key[32]; u32 stage; u32 variant; u32 n_link; u32 link_off; u32 bc_off; u32 bc_size; u32 dksh_off; u32 dksh_size, strictly
+ *                     ascending by memcmp of key. key = sha256 of the bytecode. stage <= 1; variant <= 1 and 0 for a pixel shader; n_link <= 31, the n_link bytes at link_off are
+ *                     ascending, unique, usage (byte / 16) <= 13; bc_size nonzero, a multiple of 4, <= 1 MiB; dksh_size nonzero, <= 4 MiB; every range is inside the pack.
+ *                     SHADER_CREATE_D3D (NxShaderD3D) finds the row by key (binary search) and requires stage, variant, n_link, the link bytes, bc_size and the bytecode bytes to equal
+ *                     the descriptor's; a miss or any difference is an error through nxdk_err. One D row is one shader: a second create of it takes one more owner.
+ * Validity is checked once, when the pack is first read; an invalid pack is reported through nxdk_err and every SHADER_CREATE and SHADER_CREATE_D3D reports the same error. */
 const void* nxdk_shader_pack(uint64_t* size);
 
 /* ---- dk_core.c ---------------------------------------------------------------------------------------------------------------- */
