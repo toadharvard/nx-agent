@@ -313,6 +313,27 @@ ASMCASES = {
     'asm_fall_into_next': ('mov x28,x0', R),
 }
 
+# the lock ranges (.fnvl.lk): body of f (labels s0/e0 bound a range), the records, the colour of `order`
+def LK(body, recs='.word s0, e0'):
+    return '.text\n.globl f\n.type f,%function\nf:\n' + body + '\n.size f,.-f\n.section .fnvl.lk,"a"\n.balign 4\n' + recs + '\n'
+PAIR = 's0:\n1: ldaxr w0,[x19]\n add w0,w0,#1\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\n ret'
+PLAIN = 's0:\n dmb ishld\n ldr w0,[x19]\n dmb ishld\n add w0,w0,#1\n dmb ishst\n str w0,[x19]\ne0:\n ret'
+LOCKCASES = {
+    'lock_exclusive_pair':    (PAIR, '.word s0, e0', G),
+    'lock_plain_m32':         (PLAIN, '.word s0, e0', R),                 # the old emitter: a plain RMW with the right barriers: certified by the ordering rules, not atomic
+    'lock_plain_no_record':   (PLAIN, '', G),                              # without a record the gate cannot know the instruction is locked (completeness: the exe's lock sites against the records)
+    'lock_ldar_stlr':         ('s0:\n ldar w0,[x19]\n add w0,w0,#1\n stlr w0,[x19]\ne0:\n ret', '.word s0, e0', R),
+    'lock_load_only':         ('s0:\n ldaxr w0,[x19]\ne0:\n ret', '.word s0, e0', R),
+    'lock_store_only':        ('s0:\n stlxr w1,w0,[x19]\ne0:\n ret', '.word s0, e0', R),
+    'lock_call_inside':       ('s0:\n1: ldaxr w0,[x19]\n bl f\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\n ret', '.word s0, e0', R),
+    'lock_empty_range':       (PAIR, '.word s0, s0', R),
+    'lock_reversed_range':    (PAIR, '.word e0, s0', R),
+    'lock_overlap':           (PAIR, '.word s0, e0\n.word s0, e0', R),
+    'lock_record_unrelocated': (PAIR, '.word 0, 0', R),
+    'lock_two_ranges_ok':     ('s0:\n1: ldaxr w0,[x19]\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\ns1:\n2: ldaxr w0,[x20]\n stlxr w1,w0,[x20]\n cbnz w1,2b\ne1:\n ret', '.word s0, e0\n.word s1, e1', G),
+    'lock_host_access_inside': ('s0:\n ldr w2,[x27,#4]\n1: ldaxr w0,[x19]\n stlxr w1,w0,[x19]\n cbnz w1,1b\ne0:\n ret', '.word s0, e0', G),
+}
+
 
 class T(unittest.TestCase):
     @classmethod
@@ -361,6 +382,19 @@ class T(unittest.TestCase):
         os.environ['JOBS'] = '1'; rw = go.rows(self.rt, [o], asm=[o])['order']
         self.assertEqual([(r[0], r[1], r[2].split(':')[0]) for r in rw], [('arow', 'f+0x8', 'not preserved at the exit')])
         self.assertIn('x28', rw[0][2])
+    def test_lock_ranges(self):
+        for name, (body, recs, want) in sorted(LOCKCASES.items()):
+            with self.subTest(name):
+                res = self.gate([self.asm(name, LK(body, recs))])
+                self.assertEqual(res['order']['status'], want, json.dumps(res['order'], indent=1))
+    def test_lock_rows(self):
+        o = self.asm('lkrows', LK(PLAIN))
+        spec = importlib.util.spec_from_file_location('gate_order', GATE); go = importlib.util.module_from_spec(spec); sys.modules['gate_order'] = go; spec.loader.exec_module(go)
+        os.environ['JOBS'] = '1'; rw = go.rows(self.rt, [o])['order']
+        self.assertTrue(any('not an exclusive' in r[2] for r in rw), rw)             # the access row of the locked instruction
+        self.assertTrue(any('no exclusive load and exclusive store pair' in r[2] for r in rw), rw)   # and the range row
+        o = self.asm('lkok', LK(PAIR)); ok = go.rows(self.rt, [o])['order']
+        self.assertEqual([r for r in ok if r[2]], []); self.assertGreaterEqual(len(ok), 3)   # one row per access and one for the range
     def test_counts(self):
         res = self.gate([self.asm('c1', FN.format(CASES['ordered_aligned'][0])), self.asm('c2', FN.format(CASES['plain_store'][0]))])
         self.assertEqual((res['order']['universe'], res['order']['certified'], len(res['order']['uncertified'])), (2, 1, 1))
