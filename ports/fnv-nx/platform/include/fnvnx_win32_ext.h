@@ -58,6 +58,13 @@ void fnvnx_set_command_line(int argc, char **argv);
  * machine's rows (platform/manifest/declared_registry.tsv, generated into the build); when it exists, touches nothing */
 void fnvnx_registry_first_run(void);
 void fnvnx_declared_files_first_run(void);
+/* The declared fonts: an input of the platform like the registry hive and FalloutPrefs.ini. The root that links the platform defines
+ * this function (the loader: boot.cpp; the host tests: host_boundary.cpp), so a root without declared fonts does not link. The three
+ * directories are the Wine 9.0 data directory (the .fon bitmap fonts and the TrueType files), the host fonts (every sfnt file
+ * below it) and the registry export directory (.reg files: Fonts, FontSubstitutes, hardware-profile Fonts, CodePage\ACP). There is
+ * no setter and no unset state: GDI reads them when the first font is realised. */
+struct fnvnx_font_dirs { const char *wine, *host, *reg; };
+const struct fnvnx_font_dirs *fnvnx_declared_fonts(void);
 /* implicit TLS of the image (.tls section of FalloutNV.exe, from the loader, S3) */
 BOOL fnvnx_tls_set_template(const void *init_data, size_t init_size, size_t total_size);
 void *fnvnx_tls_block(void);                     /* this thread's block; what fs:[0x2c][0] points at */
