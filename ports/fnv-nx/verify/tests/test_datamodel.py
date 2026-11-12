@@ -30,15 +30,16 @@ def gate(repo, cache):
 def main():
     pin = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))
     ext = pin["external"]
+    rt, pin, _, _ = tg.valid_runtime(ext, pin, tg.good_manifest(pin))   # a runtime pack with a valid manifest (the mirror's 00e3d42a has none)
     cache = os.path.join(BASE, "gate-cache-dm")
-    rec = tg.guest_rec(ext)
+    rec = tg.guest_rec(ext, rt)
     host = tg.guest_repo("d1", REC, pin, target="host")
     rc, r, o = gate(host, cache)
     check("no guest root: universe 0, green", rc == 0 and r["status"] == "green" and r["universe"] == 0, o)
     stock = tg.guest_repo("d2", REC, pin)
     rc, r, o = gate(stock, cache)
     check("guest root on the stock g++: red, compiler item uncertified", rc == 2 and r["certified"] == 0 and ROOT + ":compiler" in r["uncertified"], r)
-    other = tg.guest_repo("d3", tg.guest_rec(dict(ext, commit="c" * 40)), pin)
+    other = tg.guest_repo("d3", tg.guest_rec(dict(ext, commit="c" * 40), rt), pin)
     rc, r, o = gate(other, cache)
     check("guest root on another commit of the external: red", rc == 2 and ROOT + ":compiler" in r["uncertified"], r)
     # the certificate of a unit, on a CC stage document (pure function of the document)
