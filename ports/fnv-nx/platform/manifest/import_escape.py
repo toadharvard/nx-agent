@@ -171,9 +171,6 @@ def find_sources(root, backend):
 
 
 GUEST_TRIPLE = 'arm64_32-apple-watchos'
-# platform/build_guest.sh HOST_SIDE: platform files that are on the host (LP64 / libnx), not in the guest archive
-HOST_SIDE = ('platform_host/input/input_horizon.cpp', 'platform_host/audio/backend_audren.c', 'platform_host/os/os_horizon.c',
-             'platform_host/os/os_posix.c', 'platform_host/win32/filemap_shared.cpp')
 
 
 def make_var(root, name):
@@ -187,7 +184,7 @@ def guest_product(root, tc, libnx_inc, triple):
     """The PRODUCT source set and flags of the guest (platform/build_guest.sh + toolchain/guest/build.sh), as clang jobs.
     -> (jobs [(source, full flag list)], triple description).
     Source set (exactly build_guest.sh): every .c/.cpp (maxdepth 1) of platform/{win32,crt,audio,input,boundary,com,os}
-    minus HOST_SIDE, platform/clock/{clock_rt,clock_real}.cpp (the product clock), platform/guest/{os_guest.c,platform_glue.cpp}, the FreeType sources of tests/s4/Makefile (FT_SRCS),
+    platform/clock/{clock_rt,clock_real}.cpp (the product clock), platform/guest/{os_guest.c,platform_glue.cpp}, the FreeType sources of tests/s4/Makefile (FT_SRCS),
     plus the guest runtime libfnvnx-guest.a (toolchain/guest: runtime.c threads.c fs.c section_guest.c tm.cpp): the guest
     image links all of them, so they are product code, not an unknown callee. Generated .inc/.gen files must exist
     (platform/build_guest.sh generates them; `make -C tests/s4 <ENV_GEN, ENVC_SRC .env_const.gen.inc, combridge.gen.cpp>`).
@@ -234,7 +231,7 @@ def guest_product(root, tc, libnx_inc, triple):
             continue
         for n in sorted(os.listdir(d)):
             s = os.path.join(d, n)
-            if n.endswith(('.c', '.cpp')) and os.path.isfile(s) and os.path.relpath(s, root) not in HOST_SIDE:
+            if n.endswith(('.c', '.cpp')) and os.path.isfile(s):
                 jobs.append((s, fl(s)))
     # the clock of the product (FNVNX_CLOCK=real, build_guest.sh default): clock_rt.cpp + clock_real.cpp, never virtual
     for n in ('clock_rt.cpp', 'clock_real.cpp'):

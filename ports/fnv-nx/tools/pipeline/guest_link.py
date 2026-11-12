@@ -35,9 +35,6 @@ COMMON = ARCH + ['-O2', '-g', '-ffunction-sections', '-fdata-sections', '-fround
 P = os.path.join(ROOT, 'platform')
 PINC = ['-I' + os.path.join(P, 'include'), '-iquote', os.path.join(ROOT, 'shim', 'include'),
         '-I' + os.path.join(ROOT, 'shim', 'include'), '-I' + os.path.join(P, 'crt'), '-I' + os.path.join(TCDIR, 'include')]
-# LP64 / libnx side of a platform module (runs in the host), not part of the guest
-HOST_SIDE = {'platform_host/input/input_horizon.cpp', 'platform_host/audio/backend_audren.c', 'platform_host/os/os_horizon.c',
-             'platform_host/os/os_posix.c'}
 
 
 def log(*a):
@@ -99,8 +96,6 @@ def main(argv):
     srcs.append(os.path.join(HERE, 'guest_stub.c'))
     for s in srcs:
         rel = os.path.relpath(s, ROOT)
-        if rel in HOST_SIDE:
-            continue
         o = os.path.join(objd, rel.replace('/', '_') + '.o')
         if s.endswith('.c'):
             fl = [gcc] + COMMON + ['-std=gnu11'] + PINC
