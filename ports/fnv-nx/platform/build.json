@@ -73,6 +73,7 @@
   "ports/fnv-nx/shim/include",
   "ports/fnv-nx/toolchain/include",
   "ports/fnv-nx/loader/include",
+  "ports/fnv-nx/contract/include",
   "/ext/minimp3",
   "/ext/a64/aarch64-none-elf/include/c++/15.2.0",
   "/ext/a64/aarch64-none-elf/include/c++/15.2.0/aarch64-none-elf/ilp32/pic",

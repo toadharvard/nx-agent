@@ -11,7 +11,7 @@
 # Referenced by platform/boundary/boundary_guest.cpp (declarations: the loader's own headers, loader/include, included as they are;
 # the lifter runtime's two are declared in boundary_guest.cpp).
 # Loader (L1), branch claude/fnv-l1-contract, ports/fnv-nx/loader/include:
-fnvnx_import_key               # loader L1: fnvnx_importkey.h
+fnvnx_import_key               # loader L1: fnvnx/import_key.h
 fnvnx_start_proc               # loader L1: fnvnx_start.h
 fnvnx_thread_block_create      # loader L1: fnvnx_start.h
 fnvnx_thread_block_free        # loader L1: fnvnx_start.h

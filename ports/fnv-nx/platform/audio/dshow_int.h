@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern "C" void fnvnx_wine_fixme(uint32_t id);   /* one log line: the body does what wine-9.0 does (verify/wine_fixme.tsv row `id`) */
+#include <fnvnx/declared.h>   /* fnvnx_wine_fixme(id): one log line, the body does what wine-9.0 does (verify/wine_fixme.tsv row `id`) */
 
 namespace dsh {
 

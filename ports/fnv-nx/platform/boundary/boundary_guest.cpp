@@ -8,7 +8,7 @@
  * guest address (host bias 0 on the target). */
 #include "fnvnx_boundary.h"
 extern "C" {
-#include "fnvnx_importkey.h"
+#include <fnvnx/import_key.h>
 #include "fnvnx_start.h"
 }   /* the loader's headers declare C functions without guards */
 
