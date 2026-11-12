@@ -1,81 +1,120 @@
 #!/usr/bin/env python3
-"""check_funcfacts.py - the gate that keeps the removal of ASM-501 (function boundaries) in force.
+"""check_funcfacts.py - the gate that keeps ASM-501 removed: image bytes and code facts enter the manifest passes only through funcfacts.py.
 
     python3 -I check_funcfacts.py            # scans every .py file of this directory; exit 1 and the findings on stderr if any
 
-Rule: the function boundaries of every manifest pass come from funcfacts.py (L3a's function facts) and only from there. By AST, in every
-.py file of platform/manifest other than funcfacts.py, none of these occurs:
-  P1  a bytes or str literal that holds a function-prologue or padding pattern (push ebp; mov ebp,esp in either encoding of the mov,
-      hot-patch mov edi,edi; push ebp, int3 runs) anywhere except as an element of a list or tuple: that is a scan for a function
-      start (a search, a match, a regex, a comparison). An element of a list (the instruction bytes of a synthetic image in a
-      self-test) is data, not a scan.
-  P2  a name, attribute, parameter or function definition called func_start, function_start, funcstart or fend: a boundary computed here.
-  P3  a call of capstone.Cs(...) (the decoder is constructed only by funcfacts.py, which decodes only inside the reached runs).
-No allow-list. The check builds its patterns from hex strings, so this file passes its own rule.
+Structural rule over the import and data graph (no names, no byte patterns):
+  G1  only funcfacts.py imports a reader of an image or of machine code: capstone, pefile, dnfile, mmap, lief, elftools, ctypes.
+  G2  in the image-pass graph (funcfacts.py and every module that imports, directly or through other modules of this directory, funcfacts
+      or a module of the graph: pemanifest, regsites, regclass, rtti, filesites, fontfaces, prefs_settings, ...) a file is opened in
+      binary mode only by funcfacts.py: a call open(...) with a mode that contains `b` or is not a literal, os.open, Path.read_bytes /
+      open_bytes, and any read of the bytes of an image or section through the parser object (`.get_memory_mapped_image`,
+      `.get_data`, `.get_string_at_rva`, `.read_bytes`).
+  G3  in the graph the mapped bytes are not reached by attribute: no access to `.img`, `._img`, `.pe` of any object (the Image record's
+      accessors u8/u32/bytes_at/zstr/cstr/find_bytes and funcfacts' typed code facts are the interface).
+A module outside the graph (the generators of the platform tables, which read their own text inputs) is not constrained by G2/G3; G1
+holds for every module. The graph is computed from the imports, never listed.
+The self-tests build synthetic modules for each of the three rules and for a module that reaches the graph through another module.
 """
-import ast, os, sys
+import ast, os, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PRO = [bytes.fromhex(h) for h in ("558bec", "55 89e5".replace(" ", ""), "8bff55", "cccccc")]
-NAMES = {"func_start", "function_start", "funcstart", "fend"}
+READERS = {"capstone", "pefile", "dnfile", "mmap", "lief", "elftools", "ctypes"}
+IMAGE_ATTRS = {"img", "_img", "pe"}
+PARSER_CALLS = {"get_memory_mapped_image", "get_data", "get_string_at_rva", "read_bytes", "open_bytes"}
 
 
-def prologue(v):
-    if isinstance(v, str):
-        v = v.encode("latin1", "ignore")
-        v = v.replace(b"\\x", b"")  # a regex spelled with \x escapes: compare in the raw hex digits
-        return any(p.hex().encode() in v.lower() for p in PRO)
-    return isinstance(v, bytes) and any(p in v for p in PRO)
+def parse(path):
+    return ast.parse(open(path).read(), path)
 
 
-def findings(path):
-    tree = ast.parse(open(path).read(), path)
-    out = []
+def imports(tree):
+    out = set()
     for n in ast.walk(tree):
-        for c in ast.iter_child_nodes(n):
-            if isinstance(c, ast.Constant) and isinstance(c.value, (bytes, str)) and prologue(c.value):
-                if not isinstance(n, (ast.List, ast.Tuple)):
-                    out.append((c.lineno, "P1 a literal prologue/padding pattern used other than as an element of a list of instruction bytes"))
-        names = [n.id] if isinstance(n, ast.Name) else [n.attr] if isinstance(n, ast.Attribute) else \
-            [n.name] if isinstance(n, (ast.FunctionDef, ast.ClassDef)) else [n.arg] if isinstance(n, ast.arg) else []
-        out += [(n.lineno, "P2 `%s`: a function boundary computed outside funcfacts.py" % x) for x in names if x in NAMES]
-        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "Cs" and isinstance(n.func.value, ast.Name) \
-                and n.func.value.id == "capstone":
-            out.append((n.lineno, "P3 capstone.Cs constructed outside funcfacts.py"))
+        if isinstance(n, ast.Import):
+            out |= {a.name.split(".")[0] for a in n.names}
+        elif isinstance(n, ast.ImportFrom) and n.module and not n.level:
+            out.add(n.module.split(".")[0])
+            out |= {a.name.split(".")[0] for a in n.names}   # `from . import x` / `from pkg import mod`
     return out
 
 
-def scan(files):
-    return {f: findings(f) for f in files}
+def graph(trees):
+    """module -> its tree, for funcfacts and every module that imports a module already in the graph (least fixed point)."""
+    g = {"funcfacts"} & set(trees)
+    changed = True
+    while changed:
+        changed = False
+        for m, t in trees.items():
+            if m not in g and imports(t) & g:
+                g.add(m)
+                changed = True
+    return g
+
+
+def binary_open(n):
+    if not isinstance(n, ast.Call):
+        return False
+    f = n.func
+    if isinstance(f, ast.Name) and f.id == "open":
+        mode = n.args[1] if len(n.args) > 1 else next((k.value for k in n.keywords if k.arg == "mode"), None)
+        return mode is not None and not (isinstance(mode, ast.Constant) and isinstance(mode.value, str) and "b" not in mode.value)
+    return isinstance(f, ast.Attribute) and (f.attr in PARSER_CALLS or f.attr == "open" and isinstance(f.value, ast.Name) and f.value.id == "os")
+
+
+def findings(trees):
+    """{module: [(line, rule, text)]} for the modules of `trees` ({name: ast}) other than funcfacts."""
+    g = graph(trees)
+    out = {}
+    for m, t in trees.items():
+        if m == "funcfacts":
+            continue
+        r = []
+        for n in ast.walk(t):
+            if isinstance(n, (ast.Import, ast.ImportFrom)):
+                bad = [x for x in imports(ast.Module([n], [])) if x in READERS]
+                r += [(n.lineno, "G1", "imports %s" % x) for x in bad]
+            if m in g:
+                if binary_open(n):
+                    r.append((n.lineno, "G2", "opens or reads a file as bytes / through the parser"))
+                if isinstance(n, ast.Attribute) and n.attr in IMAGE_ATTRS:
+                    r.append((n.lineno, "G3", "attribute .%s reaches the mapped image or its parser" % n.attr))
+        if r:
+            out[m] = r
+    return out
 
 
 def main():
-    files = sorted(os.path.join(HERE, f) for f in os.listdir(HERE) if f.endswith(".py") and f not in ("funcfacts.py",))
-    bad = {f: r for f, r in scan(files).items() if r}
-    for f, rs in bad.items():
-        for ln, msg in rs:
-            sys.stderr.write("%s:%d: %s\n" % (os.path.basename(f), ln, msg))
-    # the self-test of the rule: each pattern class is found in a synthetic source
-    import tempfile
-    A, B = (repr(bytes.fromhex(h)) for h in ("558bec", "8bff55"))
-    cases = {"P1": "import re\nre.finditer(bytes.fromhex('00') + %s, s)\n" % A, "P1b": "if x == %s: pass\n" % B,
-             "P1c": "re.search(%s, s)\n" % repr("".join("\\x" + h for h in ("cc", "55", "8b", "ec"))), "P2": "def func_start(a): pass\n", "P3": "import capstone\nmd = capstone.Cs(1, 2)\n"}
-    for k, src in cases.items():
-        with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as t:
-            t.write(src)
-        try:
-            assert findings(t.name), "self-test: %s not found" % k
-        finally:
-            os.unlink(t.name)
-    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as t:
-        t.write("pro = [%s]\n" % A)
-    try:
-        assert not findings(t.name), "self-test: a list element is data"
-    finally:
-        os.unlink(t.name)
+    names = sorted(f for f in os.listdir(HERE) if f.endswith(".py"))
+    trees = {f[:-3]: parse(os.path.join(HERE, f)) for f in names}
+    bad = findings(trees)
+    for m, rs in sorted(bad.items()):
+        for ln, rule, text in sorted(rs):
+            sys.stderr.write("%s.py:%d: %s %s\n" % (m, ln, rule, text))
+    selftest()
     if bad:
         sys.exit(1)
-    print("funcfacts gate ok: %d files, no boundary computed outside funcfacts.py" % len(files))
+    print("funcfacts gate ok: %d modules, %d in the image-pass graph, image bytes only through funcfacts.py"
+          % (len(trees), len(graph(trees))))
+
+
+def selftest():
+    def run(sources):
+        trees = {k: ast.parse(v) for k, v in sources.items()}
+        return findings(trees)
+    base = {"funcfacts": "import capstone, pefile\n"}
+    assert run(dict(base, a="import capstone\n")).get("a", [])[0][1] == "G1"
+    assert run(dict(base, a="from pefile import PE\n"))["a"][0][1] == "G1"
+    assert run(dict(base, a="import funcfacts\nx = open(p, 'rb')\n"))["a"][0][1] == "G2"
+    assert run(dict(base, a="import funcfacts\nx = open(p, mode)\n"))["a"][0][1] == "G2"
+    assert run(dict(base, a="import funcfacts\nx = f.get_data(1, 2)\n"))["a"][0][1] == "G2"
+    assert run(dict(base, a="import funcfacts\nx = m.img[0]\n"))["a"][0][1] == "G3"
+    # a module reaches the graph only through another module: still constrained
+    assert run(dict(base, a="import funcfacts\n", b="import a\nx = open(p, 'rb')\n"))["b"][0][1] == "G2"
+    # outside the graph: binary files of other tables are not image reads; text opens are fine inside it
+    assert "c" not in run(dict(base, c="x = open(p, 'rb')\ny = o.img\n"))
+    assert "a" not in run(dict(base, a="import funcfacts\nx = open(p, encoding='utf-8')\ny = open(p, 'w')\n"))
+    assert "a" not in run(dict(base, a="import funcfacts\nx = [b'\\x55\\x8b\\xec']\n"))   # the rule is the graph, not byte patterns
 
 
 if __name__ == "__main__":

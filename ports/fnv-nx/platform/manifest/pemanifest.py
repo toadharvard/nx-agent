@@ -34,12 +34,10 @@ Output (exe-derived; keep out of the public repository):
   regsites.tsv  module, site, api, root, subkey, value, status, reason  (registry call sites, see regsites.py)
 """
 import bisect, collections, os, re, struct, sys
-import capstone
-import pefile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import funcfacts
-from capstone import x86_const as X
+X = funcfacts.X
 
 DYN = {"LoadLibraryA", "LoadLibraryW", "LoadLibraryExA", "LoadLibraryExW",
        "GetModuleHandleA", "GetModuleHandleW", "GetProcAddress",
@@ -49,65 +47,11 @@ DYN = {"LoadLibraryA", "LoadLibraryW", "LoadLibraryExA", "LoadLibraryExW",
 JOINED = []   # (module, site, api, entries) of every site whose entries disagree (census)
 
 
-def relocs(pe):
-    out = []
-    base = pe.OPTIONAL_HEADER.ImageBase
-    for blk in getattr(pe, "DIRECTORY_ENTRY_BASERELOC", []):
-        for e in blk.entries:
-            if e.type == 3:
-                out.append(base + e.rva)
-    out.sort()
-    return out
+class Mod(funcfacts.Image):
+    """One analysed module: the typed Image record of funcfacts.py (the only reader of image bytes) plus the passes' own queries."""
 
-
-class Mod:
     def __init__(self, path):
-        self.name = os.path.basename(path).lower()
-        self.path = path
-        self.pe = pe = pefile.PE(path, fast_load=True)
-        pe.parse_data_directories(directories=[0, 1, 5, 13])
-        self.base = pe.OPTIONAL_HEADER.ImageBase
-        self.img = pe.get_memory_mapped_image()
-        self.relocs = relocs(pe)
-        self.imports = []  # (dll, name, slot)
-        self.normal, self.delay = [], []   # dll names of the normal and of the delay-load import directory, directory order
-        for kind, names in (("DIRECTORY_ENTRY_IMPORT", self.normal), ("DIRECTORY_ENTRY_DELAY_IMPORT", self.delay)):
-            for e in getattr(pe, kind, []):
-                if e.dll.decode().lower() not in names:
-                    names.append(e.dll.decode().lower())
-                for i in e.imports:
-                    nm = i.name.decode() if i.name else "#%d" % i.ordinal
-                    self.imports.append((e.dll.decode().lower(), nm, i.address))
-        ex = getattr(pe, "DIRECTORY_ENTRY_EXPORT", None)
-        self.exports = len(ex.symbols) if ex else 0
-        self.code = [(self.base + s.VirtualAddress, s.Misc_VirtualSize)
-                     for s in pe.sections if s.Characteristics & 0x20000000]
-
-    def u32(self, va):
-        o = va - self.base
-        return struct.unpack_from("<I", self.img, o)[0] if 0 <= o <= len(self.img) - 4 else None
-
-    def in_code(self, va):
-        return any(a <= va < a + n for a, n in self.code)
-
-    def in_data(self, va):
-        return 0 <= va - self.base < len(self.img) and not self.in_code(va)
-
-    def cstr(self, va):
-        o = va - self.base
-        if not (0 <= o < len(self.img)):
-            return None
-        e = self.img.find(b"\0", o, o + 260)
-        s = self.img[o:e] if e > o else b""
-        if len(s) >= 2 and all(32 <= c < 127 for c in s):
-            return s.decode()
-        w = self.img[o:o + 520]
-        e = next((i for i in range(0, len(w) - 1, 2) if w[i:i + 2] == b"\0\0"), 0)
-        try:
-            t = w[:e].decode("utf-16le")
-        except UnicodeDecodeError:
-            return None
-        return "L:" + t if len(t) >= 2 and all(32 <= ord(c) < 127 for c in t) else None
+        super().__init__(path)
 
     def refs(self):
         """slot -> [code sites], [data sites] from the relocation table."""
@@ -130,7 +74,7 @@ class Mod:
             sys.path.insert(0, contract)
             import argflow, gpa_names, memfx
             self._argflow = argflow
-            im = argflow.Image(open(self.path, "rb").read(), self.name, {e: list(rs) for e, rs in ff.runs.items()})
+            im = argflow.Image(self.file_bytes(), self.name, {e: list(rs) for e, rs in ff.runs.items()})
             im.import_stack = gpa_names.import_stacks(open(bridge_tsv, encoding="utf-8").read())
             memfx.Memfx(im, memfx.ImportInfo(open(bridge_tsv, encoding="utf-8").read(), [open(escape_tsv, encoding="utf-8").read()], ""))
             self._ai = im
@@ -161,7 +105,7 @@ class Mod:
                     for k in (0, 3):
                         r = af.derive_arg(im, c, k)
                         for kind, val, _ in r.sorted_leaves():
-                            g = im.pe.rd(val - im.base, 16) if kind == "imm" and im.in_raw(val, 16) else None
+                            g = self.bytes_at(val, 16) if kind == "imm" and im.in_raw(val, 16) else None
                             if g and len(g) == 16:
                                 a, b2, c2 = struct.unpack_from("<IHH", g)
                                 gs.append("{%08X-%04X-%04X-%s-%s}" % (a, b2, c2, g[8:10].hex().upper(), g[10:].hex().upper()))
@@ -187,7 +131,7 @@ class Mod:
     @property
     def ff(self):
         """the function facts of this image (funcfacts.py): FuncFacts, or NoFacts with the reason"""
-        return funcfacts.for_image(self.name, self.img, self.base, self.path)
+        return funcfacts.for_image(self)
 
     def entries_of(self, site):
         """Every entry of the function facts whose runs contain `site` and decode (a site is analysed in each; see funcfacts.py). [] when
@@ -213,8 +157,8 @@ def uncovered_refs(ff, api, refs):
 
 
 def load_dllkind(path, sha):
-    import hashlib, importlib.util
-    got = hashlib.sha256(open(path, "rb").read()).hexdigest()
+    import importlib.util
+    got = funcfacts.sha256_file(path)
     if got != sha:
         sys.exit("dllkind.py sha256 %s != pinned %s" % (got, sha))
     spec = importlib.util.spec_from_file_location("dllkind", path)

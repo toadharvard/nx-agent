@@ -56,15 +56,14 @@ EXEC = 0x20000000
 def load_image(argflow, spec, exe_name=None):
     """spec NAME=pe-file. The function facts are the pinned L3a ranges loaded by funcfacts.py (`--facts DIR`: tree_sha256 and image sha256
     checked, rebased to the image base); an image without facts has no ranges (its rows stay open with the reason)."""
-    import pefile
     import funcfacts
     nm, pe = spec.split('=', 1)
-    with open(pe, 'rb') as fh:
-        data = fh.read()
-    pf = pefile.PE(data=data, fast_load=True)
-    ff = funcfacts.for_image(nm.lower(), pf.get_memory_mapped_image(), pf.OPTIONAL_HEADER.ImageBase, pe)
+    fi = funcfacts.Image(pe)
+    ff = fi.ff
     ranges = {e: list(rs) for e, rs in ff.runs.items()} if ff.ok else {}
-    return nm.lower(), argflow.Image(data, nm.lower(), ranges, exe_name), data
+    img = argflow.Image(fi.file_bytes(), nm.lower(), ranges, exe_name)
+    img.ff = ff
+    return nm.lower(), img, fi.file_bytes()
 
 
 def derive_loader(argflow, img, site, api):
@@ -118,17 +117,13 @@ def cell_index(img):
     ix = getattr(img, '_cells', None)
     if ix is None:
         ix = img._cells = {}
-        merged = []
-        for a, b in sorted({(a, b) for a, b, e in img.flat}):
-            if merged and a <= merged[-1][1]:
-                merged[-1][1] = max(merged[-1][1], b)
-            else:
-                merged.append([a, b])
-        for a, b in merged:
-            for i in img.cs.disasm(img.pe.rd(a - img.base, b - a), a):
+        for e in (img.ff.entry_list() if img.ff.ok else []):    # the instructions of the reached runs, decoded by funcfacts.py
+            for i in img.ff.ins(e) or []:
                 for op in i.operands:
                     if op.type == 3 and not op.mem.base and not op.mem.index:
                         ix.setdefault(op.mem.disp & 0xffffffff, []).append(i.address)
+        for g in ix:        # an address in the shared tail of several entries is decoded once per entry
+            ix[g] = sorted(set(ix[g]))
     return ix
 
 
