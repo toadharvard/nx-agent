@@ -1,4 +1,5 @@
 # Pins for proof/sail_setup.sh.  Columns: name  url  version-or-commit  sha256   ("-" = not applicable).
+# capstone / keystone-engine: the prover's python wheels (farm/farm_shapeprove.sh installs them ONLY from the mirror branch tools/pywheels-prover, --require-hashes against these sha256; the URLs are the PyPI filenames, informational).
 # sha256 meaning: opam-bin / z3-solver = the downloaded file; isla-cargo-lock = isla/Cargo.lock; opam-repository / isla / sail-x86-from-acl2 = the
 # UNCOMPRESSED tar (prefix = the pin name) made by `git archive --format=tar --prefix=<name>/ <commit>` (the mirror stores it gzip -n'd; the network path
 # checks `git rev-parse HEAD` == commit instead); isla-vendor = the tar made by sail_setup.sh from `cargo vendor` (mirror only);
@@ -8,6 +9,8 @@ opam-repository    https://github.com/ocaml/opam-repository  9521380eabee90f254e
 isla         https://github.com/rems-project/isla  e9b5d945394277656593a0d429466d7fa0a2b4b3  237742fc1a6bf596d3cc688c33413b47f5e939e12c8cf87cdd3033d5ba53d844
 sail-x86-from-acl2     https://github.com/rems-project/sail-x86-from-acl2  0c6c023dccc7c20d8d9dbfc481f01d9bb49d62bf  9f0992c78084343befbcb8bc35cae12d4411b96e499d20b093d9556f6c14255c
 z3-solver    https://files.pythonhosted.org/packages/95/46/f06cc919197faa9f05674e54dc8146cb76b187604a7165682511d0ec2944/z3_solver-5.4.0.0-py3-none-manylinux_2_27_x86_64.whl  5.4.0.0  0549ffad554178a59480ba41b5279cfbb27053ed5a2da269ae1a48214d5db34b
+capstone    https://files.pythonhosted.org/packages/py3/c/capstone/capstone-5.0.9-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl  5.0.9  273fd8d747d2e35c88f91450be51a603ecfaafb00d96d9f315dcb8689c86193e
+keystone-engine    https://files.pythonhosted.org/packages/py2.py3/k/keystone-engine/keystone_engine-0.9.2-py2.py3-none-manylinux1_x86_64.whl  0.9.2  5a5316a34323620b1bba31dcfe9e4b4ca6f0c030e82fc7a151da7c8fbe81a379
 isla-cargo-lock  -  -  45ffde2e5044be0fb230bec1680efd9698896959e707ad6ca4b41c2dbfe2dffa
 isla-vendor  -  -  f096eb66217ac040d81e1e7a70ba8b6f91d92d2278da1fe12f2f10cc4874e3ec
 ocaml-compiler  -  4.14.2  -
