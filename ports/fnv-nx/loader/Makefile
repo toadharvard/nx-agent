@@ -7,16 +7,21 @@ CFLAGS  ?= -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
 WARN     = -std=c99 -Wall -Wextra -Wshadow -Wconversion -Wno-sign-conversion -Werror
 ILP32_CC ?= aarch64-linux-gnu-gcc
 
-SRC  = src/pe.c src/sha256.c src/image.c src/imports.c src/codeptr.c src/deldtor.c src/trap.c
+SRC  = src/pe.c ../lib/sha256/sha256.c src/image.c src/imports.c src/codeptr.c src/deldtor.c src/trap.c
 HOST = host/fnvnx_host.c
-INC  = -Iinclude -Isrc -Ihost
+INC  = -Iinclude -Isrc -Ihost -I../lib/sha256/include
 
 all: $(OUT)/libfnvnx_loader.a $(OUT)/loadcheck
+
+$(OUT)/sha256.o: ../lib/sha256/sha256.c ../lib/sha256/include/fnvnx_sha256.h | $(OUT)
+	$(CC) $(CFLAGS) $(WARN) $(INC) -c $< -o $@
 
 $(OUT)/%.o: src/%.c include/fnvnx_loader.h src/internal.h | $(OUT)
 	$(CC) $(CFLAGS) $(WARN) $(INC) -c $< -o $@
 
-$(OUT)/libfnvnx_loader.a: $(SRC:src/%.c=$(OUT)/%.o)
+OBJ  = $(addprefix $(OUT)/,$(notdir $(SRC:.c=.o)))
+
+$(OUT)/libfnvnx_loader.a: $(OBJ)
 	ar rcs $@ $^
 
 $(OUT)/loadcheck: host/loadcheck.c $(HOST) host/fnvnx_host.h $(OUT)/libfnvnx_loader.a

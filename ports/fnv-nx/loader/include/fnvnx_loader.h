@@ -16,6 +16,7 @@
 #define FNVNX_LOADER_H
 
 #include <stddef.h>
+#include "fnvnx_sha256.h"
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -116,7 +117,6 @@ typedef struct fnvnx_probe {
 int fnvnx_pe_check_probes(const fnvnx_pe *pe, const fnvnx_os *os, const fnvnx_probe *probes, unsigned n,
                           unsigned need, unsigned *matched);
 
-void fnvnx_sha256(const void *data, size_t size, uint8_t out[32]);
 
 /* ---- image mapping ---------------------------------------------------------------------------------------- */
 
