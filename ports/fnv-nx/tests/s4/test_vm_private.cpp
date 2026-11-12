@@ -2,7 +2,7 @@
  * Compiled into both test binaries; each case first asks the backend identity and returns at once unless the binary
  * links the private backend (make -C tests/s4 private: s4_tests_private, with host_section.cpp: the host
  * implementation of the section services with their documented semantics and limits). The branches the reachability
- * gate proves unreachable end in fnvnx_reach_violation, which the test build throws (host_boundary.h REACH_EXPECT), so
+ * gate proves unreachable end the process in the product fnvnx_reach_violation, which the tests observe in a child process (host_boundary.h REACH_EXPECT), so
  * the cases assert exactly which request reaches which fact. */
 #include "s4_test.h"
 
@@ -155,11 +155,11 @@ TEST(vmp_backing_set)
                 bool shared = !rejected && (backing == 0 || (rw && !image));
                 /* private copies over a file that writers can change: the proven-unreachable branch WRITER */
                 bool writer = !rejected && !shared && (backing == 2 || backing == 3);
-                int c0 = g_reach_count, s0 = host_section_live_sections();
+                int s0 = host_section_live_sections();
                 HANDLE m = NULL;
                 SetLastError(0);
                 uint32_t fact = REACH_EXPECT(m = CreateFileMappingA(f, NULL, base | sec, 0, backing == 0 ? 0x10000 : 0, NULL));
-                int hit = g_reach_count - c0;
+                int hit = fact != 0 ? 1 : 0;
                 bool good = writer ? (fact == WRITER && hit == 1 && m == NULL) : rejected ? (fact == 0 && hit == 0 && m == NULL)
                                                                                            : (fact == 0 && hit == 0 && m != NULL);
                 CHECK(good);
@@ -384,8 +384,7 @@ TEST(vmp_image)
     mkdata(VPD "notpe.bin");
     HANDLE f = open_r(VPD "notpe.bin");
     SetLastError(0);
-    int c0 = g_reach_count;
-    CHECK(CreateFileMappingA(f, NULL, PAGE_READONLY | SEC_IMAGE, 0, 0, NULL) == NULL && SYSERR == ERROR_BAD_EXE_FORMAT && g_reach_count == c0);
+    CHECK(CreateFileMappingA(f, NULL, PAGE_READONLY | SEC_IMAGE, 0, 0, NULL) == NULL && SYSERR == ERROR_BAD_EXE_FORMAT);
     CloseHandle(f);
 }
 
