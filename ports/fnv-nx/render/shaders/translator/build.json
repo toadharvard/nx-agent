@@ -29,7 +29,7 @@
    "-DSUPPORT_PROFILE_METAL=0",
    "-DSUPPORT_PROFILE_SPIRV=0"
   ],
-  "cxx": [],
+  "cxx": ["-Werror=attributes"],
   "asm": []
  },
  "include": [
