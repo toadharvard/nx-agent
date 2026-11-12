@@ -272,3 +272,8 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
         - vs compile set 342,344; reorder set 69,642; ps set without sampler args 677,888.
         - With free per-sampler args: 9.97e12, over budget.
         - Order given: restrict the sampler fields by the declared machine's GL caps and texture formats (np2 = {0}, colour fixups from the format table, SM2+ type from dcl), then job 3.
+- 04:40Z render/d3d9 root rebase plan.
+    - w16 dbfaefeb does not merge onto w6 89973e4f: 7 conflicts, all in L1 files. L1 is asked for one head = trunk + w15 + w16.
+    - On it go L2 w6 00576a10 (the shim/include headers admission, the one copy, 68 headers) and then our root files.
+    - w6 drops its own shim copy; any header need goes to L2 w6.
+    - Blocked on L1's head.
