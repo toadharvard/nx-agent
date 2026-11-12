@@ -10,7 +10,8 @@ by this precedence:
   ii   undef     else it has the U bit: a certified instruction leaves the flag architecturally undefined and a read of it follows (ASM-304); counted by
                  (mnemonic, flag) over all producers that reach it
   iii  entry     else it has the E bit: the read is reached by an entry with an unknown predecessor (flag ptr, a kind other than decomp/call/tail, or no
-                 direct transfer); counted by the seed reason of its own entry when that entry is seeded, else `inherited` (through callers)
+                 direct transfer); counted by the seed reason of its own entry when that entry is seeded, else `inherited` (through callers), and by the consumer
+                 of that entry (`jtab` / `call` / `unknown-consumer`, see consumer())
   iv   call      else (only the C bit): the flag is undefined as after a call
 The origin combinations (letters) are reported as well, so a read that fits several causes shows in each combination."""
 import json
@@ -160,10 +161,18 @@ def solve(path, base, rows, uni, jobs):
     return inst, res, seed, pb, W
 
 
-def report(rows, uni, inst, res, seed, pb, W):
+def consumer(e, uni, jt):
+    """the consumer class of an entry that is seeded with unknown flags (iii-entry): `jtab` when the entry is a target of a jump table of the facts (jtab_tables:
+    its incoming flags are the out-state of the dispatching indirect jmp, not a seed), `call` when the facts name it a call target (universe flag `call`; the
+    Win32 ABI leaves the flags undefined at entry, so a read there is a genuine red), else `unknown-consumer` (no fact names how the entry is reached)"""
+    if e in jt: return 'jtab'
+    return 'call' if 'call' in uni.get(e, ('', []))[1] else 'unknown-consumer'
+
+
+def report(rows, uni, inst, res, seed, pb, W, jt=frozenset()):
     names = {i: m for m, i in pb.items()}
     cause = {'i-no-form': 0, 'ii-undef': 0, 'iii-entry': 0, 'iv-call': 0}
-    pairs, own, combos = {}, {}, {}
+    pairs, own, combos, cons = {}, {}, {}, {}
     n = 0
     for e, contrib, red in res:
         for a, k, f, mn in red:
@@ -180,8 +189,10 @@ def report(rows, uni, inst, res, seed, pb, W):
                 cause['iii-entry'] += 1
                 why = seed[e] or 'inherited'
                 own[why] = own.get(why, 0) + 1
+                c = consumer(e, uni, jt)
+                cons[c] = cons.get(c, 0) + 1
             else: cause['iv-call'] += 1
-    return {'red_reads': n, 'cause': cause, 'undef_pairs_by_read': dict(sorted(pairs.items())), 'entry_seed_reason': dict(sorted(own.items())),
+    return {'red_reads': n, 'cause': cause, 'undef_pairs_by_read': dict(sorted(pairs.items())), 'entry_seed_reason': dict(sorted(own.items())), 'entry_consumer': dict(sorted(cons.items())),
             'origin_letters': dict(sorted(combos.items())), 'producer_mnemonics': len(pb)}
 
 
@@ -190,7 +201,8 @@ def main(argv):
     base, rows = g.load_ranges(os.path.join(facts, 'ranges.tsv'))
     uni = g.load_universe(os.path.join(facts, 'universe.tsv'))
     inst, res, seed, pb, W = solve(path, base, rows, uni, int(os.environ.get('JOBS', '4')))
-    out = report(rows, uni, inst, res, seed, pb, W)
+    jt = frozenset(t for r in json.load(open(os.path.join(facts, 'ehtables.json'))).get('jtab_tables', ()) for t in (int(w, 16) for w in r['targets']))
+    out = report(rows, uni, inst, res, seed, pb, W, jt)
     d = os.environ.get('GATE_OUT')
     if d:
         os.makedirs(d, exist_ok=True)
