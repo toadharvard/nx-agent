@@ -7,6 +7,10 @@
 #include "host_boundary.h"
 #include <dlfcn.h>
 #include <execinfo.h>
+#include <string>
+#include <sys/wait.h>
+#include <unistd.h>
+#include "fnvnx_reach.h"
 #include <stdio.h>
 
 #include <stdlib.h>
@@ -33,13 +37,48 @@ extern "C" const struct fnvnx_font_dirs *fnvnx_declared_fonts(void)
     return &d;
 }
 
-uint32_t g_reach_last;
-int g_reach_count;
-extern "C" void fnvnx_reach_violation(uint32_t fact_id)
+/* reach_probe: runs f in a forked child and reports the fact it reached, 0 when it returned. The branch ends the child through
+ * the platform's real fnvnx_reach_violation (platstat.cpp): one log line "reach violation fact N" on stderr, then the process
+ * exit with FNVNX_REACH_EXIT | N; the probe reads both from the child (the exit status carries the low byte). A child that
+ * ends otherwise (signal, another exit) is a test failure: UINT32_MAX. */
+uint32_t reach_probe(const std::function<void()> &f)
 {
-    g_reach_last = fact_id;
-    g_reach_count++;
-    throw ReachHit{fact_id};
+    int fd[2];
+    if (pipe(fd) != 0)
+        return UINT32_MAX;
+    fflush(NULL);
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(fd[0]);
+        close(fd[1]);
+        return UINT32_MAX;
+    }
+    if (pid == 0) {
+        close(fd[0]);
+        dup2(fd[1], 2);
+        f();
+        static const char ret[] = "returned\n";
+        (void)!write(2, ret, sizeof ret - 1);
+        _exit(0);
+    }
+    close(fd[1]);
+    std::string out;
+    char buf[512];
+    ssize_t n;
+    while ((n = read(fd[0], buf, sizeof buf)) > 0)
+        out.append(buf, (size_t)n);
+    close(fd[0]);
+    int st = 0;
+    waitpid(pid, &st, 0);
+    size_t at = out.find("reach violation fact ");
+    if (at != std::string::npos) {
+        uint32_t fact = (uint32_t)strtoul(out.c_str() + at + 21, NULL, 10);
+        bool ok = WIFEXITED(st) && WEXITSTATUS(st) == (int)((FNVNX_REACH_EXIT | fact) & 0xFFu);
+        return ok ? fact : UINT32_MAX;
+    }
+    if (WIFEXITED(st) && WEXITSTATUS(st) == 0 && out.find("returned\n") != std::string::npos)
+        return 0;
+    return UINT32_MAX;
 }
 
 extern "C" int g_bnd_lock_violations;

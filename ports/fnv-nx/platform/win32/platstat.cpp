@@ -17,6 +17,7 @@
  *   plat: summary unimpl <distinct> <calls> open <d> <c> decode <d> <c> input <d> <c> dropped <n>
  * Names are function names of our own stand-ins (Class::method), callers addresses only. */
 #include "w32.h"
+#include "fnvnx_reach.h"
 
 #include <stdio.h>
 
@@ -86,6 +87,17 @@ extern "C" void fnvnx_wine_fixme(uint32_t id)
 extern "C" void fnvnx_declared_machine(uint32_t id)
 {
     (void)id;
+}
+
+/* The one exit of the branches the reachability gate proves unreachable (loader/include/fnvnx_reach.h has the contract). Reached only
+ * when a build invariant is violated: one log line through the same sink as the other lines, then the process ends through the
+ * host's exit (os_exit_process: the hostapi `exit` slot on the console) with FNVNX_REACH_EXIT | fact_id. */
+extern "C" void fnvnx_reach_violation(uint32_t fact_id)
+{
+    char l[48];
+    snprintf(l, sizeof l, "reach violation fact %u", (unsigned)fact_id);
+    emit(l);
+    os_exit_process((int)(FNVNX_REACH_EXIT | fact_id));
 }
 
 extern "C" void fnvnx_plat_note(int cls, const char *name, unsigned caller, const char *detail)

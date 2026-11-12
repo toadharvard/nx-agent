@@ -1,6 +1,7 @@
 /* host_boundary.h - the counters and test hooks of host_boundary.cpp (the host implementation of shim/include/fnvnx_boundary.h) */
 #ifndef FNVNX_TESTS_HOST_BOUNDARY_H
 #define FNVNX_TESTS_HOST_BOUNDARY_H
+#include <functional>
 #include <stdint.h>
 #include "fnvnx_boundary.h"
 #ifdef __cplusplus
@@ -40,12 +41,10 @@ extern int (*g_bnd_invoke_hook)(fnvnx_gaddr addr, uint32_t ecx, uint32_t nargs, 
                                 struct fnvnx_bnd_ret *out);
 #ifdef __cplusplus
 }
-/* the host test definition of fnvnx_reach_violation (loader/include/fnvnx_reach.h; noreturn): it records the fact and
- * throws a ReachHit, so a test can assert "this call reaches fact N" without the process ending. REACH_EXPECT runs
- * stmt and yields the fact it reached, or 0 when it returned. */
-struct ReachHit { uint32_t fact; };
-extern uint32_t g_reach_last;
-extern int g_reach_count;
-#define REACH_EXPECT(stmt) ([&]() -> uint32_t { try { stmt; } catch (const ReachHit &h_) { return h_.fact; } return 0; }())
+/* A branch the reachability gate proves unreachable ends the process (platform/win32/platstat.cpp fnvnx_reach_violation, the product
+ * body): REACH_EXPECT(stmt) runs stmt first in a forked child (reach_probe) and yields the fact the child reached; when the child
+ * returned, stmt runs for real in this process and the result is 0. A reached fact leaves this process untouched. */
+uint32_t reach_probe(const std::function<void()> &f);
+#define REACH_EXPECT(stmt) ([&]() -> uint32_t { uint32_t r_ = reach_probe([&] { stmt; }); if (r_ == 0) { stmt; } return r_; }())
 #endif
 #endif
