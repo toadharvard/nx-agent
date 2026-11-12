@@ -60,3 +60,12 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
 - w5 4391ce62 merged: NONE is 6/42 (it was 10).
   - Classes: W-rec 3, W-src 11, MS 9, SPEC 2, MODEL 10, library-doc 1, NONE 6.
   - Open for L1: a library-doc REF kind (deko3d.h).
+- 03:11Z Oracle census merged (w5 a776ba8f and 7a3b67d6).
+  - Of the 6 tests without a reference: each gets one, or a gate. One part is deleted; no whole test is deleted.
+  - Corrected by the lead: our own headers are never a reference.
+  - Implementation waits for the test-root rewrite after the first frame.
+  - Reference material still pending:
+    - the wine-9.0 and docs-d3d9 mirrors (w5);
+    - the probe mingw pin and archived binaries (w5);
+    - the render/ref class (L1 w10).
+  - deko3d/libnx externals come from L6A: deko3d efc48589, libnx 518bf11a.
