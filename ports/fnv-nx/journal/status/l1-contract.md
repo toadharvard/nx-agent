@@ -175,3 +175,10 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - w5 58bd4c2a: conflicts with 8cfbcdbf. Told to rebase, env.json pins as a union with the trunk winning on a clash. L2 w3 confirmed the `pip -r -` gap. Status: doing.
 - Budget rule decided by L1. The 300 s budget gates only the incremental verdict, with a warm GATE_CACHE, on the pinned farm host. Cold time is reported but not gated. A docs-only change must show 0 recompiled units, else it is a keying defect and red. Owner: w19, doing.
   - Evidence: L2 w3 754a94c1 at 299.961 s; w6 c9bdb4e8 (docs only) at 303.2 s.
+- 03:30Z decisions:
+  - **flags.semantics** (w17, doing). One set of codegen-semantics flags lives in guest_compiler.json. A build.json may carry only -W/-D/-I/-std/-O/-g/-f{function,data}-sections. The DW_AT_producer gate checks that every CU of an image has the same set. Found by L6: render/d3d9 lacked -ffp-contract=off (IEEE, OWNER assumption 8), -fwrapv and others; lib/sha256 lacked the TLS/rounding/wchar flags.
+  - **Variant target** (w15, doing). An admit variant may set its own `target`; its sources stay the base root's, and it is linkable only by tests. lib/sha256@host replaces the loader Makefile host build. w15 also fixes the root@NAME CLI split_spec bug.
+  - **Assumption ids.** L3b gets ASM-300..399. L3b w3t 536b2548 holds 29 new REMOVE records and 14 aliases; they go onto a branch based on w10 and merge right after w10.
+  - **crt0 split** (w20, queued). L5 w12 281c4a33 plus guest.ld KEEP/ASSERT, in one commit.
+  - **Incremental acceptance** (w19). A warm run is timed per gate for three cases: docs-only, one unit changed, one gates.d file changed. A gate that re-runs without a changed declared input is red. Each gate's deps are declared and enforced by the sandbox.
+  - test_gates on 8cfbcdbf: the pure/tests/gates.json cases are all green; the verdict fixtures need the declared env. The w2g failures come from a stale verify/ in its merge.
