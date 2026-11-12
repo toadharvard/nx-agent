@@ -158,11 +158,11 @@ def py(script, *args):
     return [sys.executable, "-I", os.path.join(CONTRACT, script)] + list(args)
 
 
-def images_of(doc, ext, pinned=True):
+def images_of(doc, ext):
     """([(name, pe path, ranges path)] of the images that have range facts, [names without]): the declared machine's image set is the pinned one
     (contract/exepin.py IMAGES: the exe and the guest image DLLs of the declared file set, digests); the `loadlib` stage derives the may-load set
-    and checks it against the same pin, so the two are one fact.  PINNED=False: the digests are not checked here (a judge that only reads the
-    images the facts name; the pin is the contract gate's)."""
+    and checks it against the same pin, so the two are one fact.  There is no unpinned mode: a file that is not the pinned one is Red naming the
+    image."""
     have, lack = [], []
     dirs = [ext[n]["host"] for n in ("exe", "redist")]
     exe = P2(ext, doc["exe"])
@@ -173,8 +173,7 @@ def images_of(doc, ext, pinned=True):
             raise Red("%s: pinned image not in the declared file set" % name)
         found.append((name, hits[0]))
     try:
-        if pinned:
-            exepin.check_images([(n, os.path.getsize(p), hashlib.sha256(open(p, "rb").read()).hexdigest()) for n, p in found if not n.endswith(".exe")])
+        exepin.check_images([(n, os.path.getsize(p), hashlib.sha256(open(p, "rb").read()).hexdigest()) for n, p in found if not n.endswith(".exe")])
     except exepin.ExePinError as e:
         raise Red(str(e))
     for name, path in found:

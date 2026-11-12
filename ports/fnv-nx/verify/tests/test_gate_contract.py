@@ -152,5 +152,21 @@ _d2 = {k: v for k, v in _doc.items() if k not in ("escape", "writes")}
 check("without the keys no table is passed", all("--escape" not in gc.stages("/w", _d2, _ext, _rp)[k][0] for k in ("loadlib", "gpa", "reach")))
 p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_contract.py"), "--gate", "zz"], capture_output=True, text=True)
 check("unknown gate rejected", p.returncode == 1)
+# the one image-set path: gate_lift (the real module) calls images_of(doc, ext) with no mode argument, and images_of has no unpinned mode
+import ast  # noqa: E402
+import gate_lift  # noqa: E402
+_calls = [n for n in ast.walk(ast.parse(open(gate_lift.__file__).read())) if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "images_of"]
+check("gate_lift calls gate_contract.images_of, each call with exactly (doc, ext)",
+      bool(_calls) and all(len(c.args) == 2 and not c.keywords for c in _calls), [ast.dump(c) for c in _calls])
+import inspect  # noqa: E402
+check("images_of takes (doc, ext) only: no pinned flag", list(inspect.signature(gc.images_of).parameters) == ["doc", "ext"])
+_d = tempfile.mkdtemp(prefix="img-pin-")
+open(os.path.join(_d, "FalloutNV.exe"), "wb").write(b"MZ")
+try:
+    gc.images_of({"exe": "exe/FalloutNV.exe", "ranges": {"exe": "x", "module": "%s"}}, {"exe": {"host": _d}, "redist": {"host": _d}})
+    check("images_of: a declared set without the pinned images is Red naming the image", False)
+except gc.Red as e:
+    check("images_of: a declared set without the pinned images is Red naming the image", "pinned image not in the declared file set" in str(e), e)
+
 print("FAILED: %d" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)
