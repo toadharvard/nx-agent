@@ -14,6 +14,7 @@ class's exact size is asserted, so a name that starts or stops matching fails th
 The compiler is the guest compiler msvcmodel: size_t is `unsigned int` as for cl, so there is no size_t hole.
 An unknown plugin argument is an error. No network, no game data.  Run: python3 -I <this file> from the checkout root."""
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -25,11 +26,18 @@ import plugbuild as pb  # noqa: E402
 check = pb.Checks('test_names')
 FIX = os.path.join(HERE, 'names', 'names.cpp')
 
-def cl_only(n):
-    return (n.startswith(('??_8', '??4')) or '@@$4' in n
-            or n in ('??_GMem@@QAEPAXI@Z', '??_EMem@@QAEPAXI@Z', '??_ELC@@QAEPAXI@Z', '??_GLC@@QAEPAXI@Z'))
-
-
+def cl_only(n, obj):
+    """cl's names that have no GCC twin, by structure: vbtables (??_8), the implicit assignment cl writes for an exported class (??4), vtordisp thunks ($4
+    in the encoded function type), and the ??_G / ??_E helpers of a class whose table in the object has no destructor slot (the object's own table:
+    a `.fnvnx_sdd` entry is the slot of the virtual destructor; cl writes the helpers for delete, GCC has no function for such a class)"""
+    if n.startswith(('??_8', '??4')) or '@@$4' in n:
+        return True
+    m = re.match(r'\?\?_[GE]([A-Za-z_0-9]+)@@', n)
+    if not m:
+        return False
+    st = pb.symbols_of(obj)
+    tv = '_ZTV%d%s' % (len(m.group(1)), m.group(1))
+    return tv not in st or not any(w.endswith('.fnvnx_sdd') for w in pb.words(obj, tv))
 
 
 def rows_of(obj, name):
@@ -50,7 +58,7 @@ def checks(obj):
     named = {ms for sym, ms, kind, df in rows if ms and kind not in ('thunk',)}
     names_vt = {r[2] for r in vt if r[2] and not r[2].startswith('unnamed')}
     got = named | names_vt
-    want = {n for n in expect if not cl_only(n)}
+    want = {n for n in expect if not cl_only(n, obj)}
     aps = {'%s.fnvnx_ap%s' % (r[0], r[1]) for r in vt}
     norow = {d for d in defined - {r[0] for r in rows} - aps if not d.startswith('_ZTC')}     # construction tables: no twin
     check('every defined symbol of the object has a row (an address point: a .fnvnx.vtpair row)', not norow, sorted(norow))
