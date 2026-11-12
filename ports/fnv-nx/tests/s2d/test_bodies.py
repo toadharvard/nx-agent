@@ -455,25 +455,22 @@ class Exe(unittest.TestCase):
 
     def test_exe_dtor_as_function(self):
         """A destructor the exe calls out of line at a function the decomp spells FUN_<addr>(T*) binds there
-        (natively both take the object in x0) instead of `= default`, as does one at an S4 provider's address; one with
-        two parameters does not."""
+        (natively both take the object in x0) instead of `= default`; one with two parameters does not."""
         import struct
-        f = b'\xe8\0\0\0\0\xe8\0\0\0\0\xe8\0\0\0\0\xc3'   # call ??1Short; call ??1Long; call ??1Lock; ret
-        obj = coff({'?f@@YAXXZ': (f, {1: '??1Short@@QAE@XZ', 6: '??1Long@@QAE@XZ', 11: '??1Lock@@QAE@XZ'})},
-                   ['??1Short@@QAE@XZ', '??1Long@@QAE@XZ', '??1Lock@@QAE@XZ'])
-        F, G, H, P = 0x401000, 0x401080, 0x4010c0, 0x4010e0
+        f = b'\xe8\0\0\0\0\xe8\0\0\0\0\xc3'   # call ??1Short; call ??1Long; ret
+        obj = coff({'?f@@YAXXZ': (f, {1: '??1Short@@QAE@XZ', 6: '??1Long@@QAE@XZ'})},
+                   ['??1Short@@QAE@XZ', '??1Long@@QAE@XZ'])
+        F, G, H = 0x401000, 0x401080, 0x4010c0
         text = bytearray(0x100)
         text[0:len(f)] = f
         struct.pack_into('<i', text, 1, G - (F + 5))
         struct.pack_into('<i', text, 6, H - (F + 10))
-        struct.pack_into('<i', text, 11, P - (F + 15))                # an S4 provider implements P
         units_j = {'units': [{'source': 'src/a.cpp', 'functions': [
             {'symbol': '?f@@YAXXZ', 'address': '%x' % F},
             {'symbol': '?FUN_00401080@@YIXPAX@Z', 'address': '%x' % G},          # void __fastcall (void*)
             {'symbol': '?FUN_004010c0@@YAXPAXH@Z', 'address': '%x' % H}]}]}     # void __cdecl (void*, int)
         rows = [bodies.Row('_ZN5ShortD1Ev', 'special-default', None, None, 'src/a.cpp', 'dtor', 'src/a.cpp'),
-                bodies.Row('_ZN4LongD1Ev', 'special-default', None, None, 'src/a.cpp', 'dtor', 'src/a.cpp'),
-                bodies.Row('_ZN4LockD1Ev', 'special-default', None, None, 'src/a.cpp', 'dtor', 'src/a.cpp')]
+                bodies.Row('_ZN4LongD1Ev', 'special-default', None, None, 'src/a.cpp', 'dtor', 'src/a.cpp')]
         with tempfile.TemporaryDirectory() as d:
             with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
                 fo.write(obj)
@@ -485,64 +482,12 @@ class Exe(unittest.TestCase):
             ms = fnvlink.DemangleCache(os.path.join(d, 'ms.tsv'), fnvlink.UNDNAME)
             it = fnvlink.DemangleCache(os.path.join(d, 'it.tsv'), fnvlink.CXXFILT)
             it.need([r.name for r in rows])
-            got = bodies.exe_pass(rows, os.path.join(d, 'x.exe'), d, uj, ['src/a.cpp'], {F: 'F', G: 'F', H: 'F', P: 'F'},
-                                  lambda n: sigs.parse_itanium(n, it[n]), lambda n: sigs.parse_msvc(n, ms[n]), ms,
-                                  {P: 'fnvnx_lock_dtor'})
+            got = bodies.exe_pass(rows, os.path.join(d, 'x.exe'), d, uj, ['src/a.cpp'], {F: 'F', G: 'F', H: 'F'},
+                                  lambda n: sigs.parse_itanium(n, it[n]), lambda n: sigs.parse_msvc(n, ms[n]), ms)
         got = {r.name: r for r in got}
         self.assertEqual((got['_ZN5ShortD1Ev'].cls, got['_ZN5ShortD1Ev'].target), ('exe-addr', '__fnv_00401080'))
         self.assertEqual(got['_ZN4LongD1Ev'].cls, 'special-default')
-        self.assertEqual((got['_ZN4LockD1Ev'].cls, got['_ZN4LockD1Ev'].target), ('exe-addr', '__fnv_004010e0'))
 
-
-    def test_load_provider_params(self):
-        """crt_symbols.tsv identifications give S4's providers a parameter count: the object is not counted, a trailing
-        [note] is dropped, a row without a parameter list is not listed."""
-        with tempfile.TemporaryDirectory() as d:
-            p = os.path.join(d, 'crt.tsv')
-            with open(p, 'w') as fo:
-                fo.write('# address\tclass\tidentification\tunits\tsrc\tprovider\n'
-                         '0x00401000\tcpplib\tstd::_Lockit::_Lockit(int)\t2\t3\tfnvnx_lockit_ctor\n'
-                         '0x00401010\tcpplib\tstd::_Locinfo::_Locinfo_ctor(_Locinfo*, const std::string&)\t1\t2\tx\n'
-                         '0x00401020\tcpplib\tstd::locale::_Getgloballocale() [locale::_Getfacet fallback, locale() _Incref]\t2\t2\tx\n'
-                         '0x00401030\tcpplib\tstd::ios_base::_Ios_base_dtor\t4\t4\tx\n'
-                         '0x00401040\tcpplib\tstd::bad_cast::bad_cast(const char*)\t1\t1\tx\n'
-                         '0x00401050\tcpplib\tstd::map<int, int>::find(std::pair<int, int>)\t1\t1\tx\n')
-            got = bodies.load_provider_params(p)
-        self.assertEqual(got, {0x401000: 1, 0x401010: 2, 0x401020: 0, 0x401040: 1, 0x401050: 1})
-
-    def test_exe_provider_shape(self):
-        """A constructor with a parameter the exe calls at an S4 provider's address (no unit defines it, so there is no
-        MSVC definition to compare) binds there when the provider's identification has as many parameters; a
-        reference with more does not."""
-        import struct
-        f = b'\xe8\0\0\0\0\xe8\0\0\0\0\xc3'   # call ??0Lock(int); call ??0Wide(int, int); ret
-        obj = coff({'?f@@YAXXZ': (f, {1: '??0Lock@@QAE@H@Z', 6: '??0Wide@@QAE@HH@Z'})},
-                   ['??0Lock@@QAE@H@Z', '??0Wide@@QAE@HH@Z'])
-        F, P = 0x401000, 0x4010e0
-        text = bytearray(0x100)
-        text[0:len(f)] = f
-        struct.pack_into('<i', text, 1, P - (F + 5))
-        struct.pack_into('<i', text, 6, P - (F + 10))
-        units_j = {'units': [{'source': 'src/a.cpp', 'functions': [{'symbol': '?f@@YAXXZ', 'address': '%x' % F}]}]}
-        rows = [bodies.Row('_ZN4LockC1Ei', 'missing', None, None, 'src/a.cpp', 'no definition', None),
-                bodies.Row('_ZN4WideC1Eii', 'missing', None, None, 'src/a.cpp', 'no definition', None)]
-        with tempfile.TemporaryDirectory() as d:
-            with open(os.path.join(d, 'u0.obj'), 'wb') as fo:
-                fo.write(obj)
-            with open(os.path.join(d, 'x.exe'), 'wb') as fo:
-                fo.write(pe(0x400000, 0x401000, bytes(text)))
-            uj = os.path.join(d, 'units.json')
-            with open(uj, 'w') as fo:
-                json.dump(units_j, fo)
-            ms = fnvlink.DemangleCache(os.path.join(d, 'ms.tsv'), fnvlink.UNDNAME)
-            it = fnvlink.DemangleCache(os.path.join(d, 'it.tsv'), fnvlink.CXXFILT)
-            it.need([r.name for r in rows])
-            got = bodies.exe_pass(rows, os.path.join(d, 'x.exe'), d, uj, ['src/a.cpp'], {F: 'F', P: 'F'},
-                                  lambda n: sigs.parse_itanium(n, it[n]), lambda n: sigs.parse_msvc(n, ms[n]), ms,
-                                  {P: 'fnvnx_lock_ctor'}, {P: 1})
-        got = {r.name: r for r in got}
-        self.assertEqual((got['_ZN4LockC1Ei'].cls, got['_ZN4LockC1Ei'].target), ('exe-addr', '__fnv_004010e0'))
-        self.assertEqual(got['_ZN4WideC1Eii'].cls, 'missing')
 
     def test_align_targets(self):
         """Call-order alignment: P (placed) calls the unplaced helper C, which MSVC inlined in the exe, then K
@@ -792,31 +737,6 @@ class Exe(unittest.TestCase):
                 self.assertEqual(r.returncode, 0, r.stderr)
 
 
-    def test_crt_rule_streambuf_lock(self):
-        """The decomp's basic_streambuf copies never define _Lock / _Unlock: MSVC's are `_Mylock._Lock()` on the
-        _Mutex at +4 (exe: `add ecx, 4; call 0x00ec3277` in the _Sentry_base constructor). The stub adds 4 to
-        `this` and tail-calls S4's mutex function; another class, or a member with parameters, is not the rule."""
-        def k(n, d):
-            return bodies.crt_rule(sigs.parse_itanium(n, d))
-        n = '_ZN12fnv_00ad47f03std15basic_streambufIcNS0_11char_traitsIcEEE5_LockEv'
-        d = 'fnv_00ad47f0::std::basic_streambuf<char, fnv_00ad47f0::std::char_traits<char> >::_Lock()'
-        self.assertEqual(k(n, d), ('mutex', 'fnvnx_mutex_lock', 'this + 4'))
-        n2 = n.replace('5_LockEv', '7_UnlockEv')
-        d2 = d.replace('_Lock()', '_Unlock()')
-        self.assertEqual(k(n2, d2), ('mutex', 'fnvnx_mutex_unlock', 'this + 4'))
-        self.assertIsNone(k('_ZN6Widget5_LockEv', 'Widget::_Lock()'))
-        rows = [bodies.Row(n, 'missing', None, None, 'src/a.cpp', 'no definition', None),
-                bodies.Row(n2, 'missing', None, None, 'src/a.cpp', 'no definition', None)]
-        dem = {n: d, n2: d2}
-
-        def it(x):
-            return sigs.parse_itanium(x, dem[x])
-        got = bodies.crt_pass(rows, it)
-        self.assertEqual([r.cls for r in got], ['crt-rule', 'crt-rule'])
-        asm = bodies.emit_crt(got, it)
-        self.assertIn('    add x0, x0, #4\n    b fnvnx_mutex_lock', asm)
-        self.assertIn('    add x0, x0, #4\n    b fnvnx_mutex_unlock', asm)
-
     def test_msvc_inline_retry(self):
         """W44 (rows 24 / 54): an msvc-inline name its host did not emit goes on to tree-inline; a host that does not
         compile, a refused = default and a name that is no msvc-inline row do not."""
@@ -826,30 +746,6 @@ class Exe(unittest.TestCase):
         failed = {'a': 'synth-failed (not emitted by the host)', 'b': 'host does not compile',
                   'c': 'synth-failed (not emitted by the host)'}
         self.assertEqual(bodies.msvc_inline_retry(rows, failed), {'a'})
-
-    def test_crt_rule_facet_register(self):
-        """W44 (row 22): the decomp's facet copies declare the static `_Register(facet*)` or the member `_Register()`
-        and define neither; MSVC's is _Facet_Register(facet) at 0x00ec3599, S4's fnvnx_facet_register. The stub
-        tail-calls it with the facet in x0; another class, or another parameter, is not the rule."""
-        def k(n, d):
-            return bodies.crt_rule(sigs.parse_itanium(n, d))
-        n = '_ZN12fnv_00acfab05facet9_RegisterEPS0_'
-        d = 'fnv_00acfab0::facet::_Register(fnv_00acfab0::facet*)'
-        self.assertEqual(k(n, d), ('facet', 'fnvnx_facet_register', 'the facet'))
-        n2 = '_ZN5facet9_RegisterEv'
-        d2 = 'facet::_Register()'
-        self.assertEqual(k(n2, d2), ('facet', 'fnvnx_facet_register', 'the facet'))
-        self.assertIsNone(k('_ZN5facet9_RegisterEi', 'facet::_Register(int)'))
-        self.assertIsNone(k('_ZN6Widget9_RegisterEv', 'Widget::_Register()'))
-        dem = {n: d, n2: d2}
-
-        def it(x):
-            return sigs.parse_itanium(x, dem[x])
-        got = bodies.crt_pass([bodies.Row(x, 'missing', None, None, 'src/a.cpp', 'no definition', None)
-                               for x in (n, n2)], it)
-        self.assertEqual([r.cls for r in got], ['crt-rule', 'crt-rule'])
-        asm = bodies.emit_crt(got, it)
-        self.assertEqual(asm.count(':\n    b fnvnx_facet_register\n'), 2)
 
     def test_crt_rule_niptr(self):
         """439a row 51: NiPointer<ProjectileAuxiliaryData>::~NiPointer() (forward-declared T, inlined everywhere in the

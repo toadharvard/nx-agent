@@ -83,9 +83,7 @@ in this order (first that applies):
    throwers `C::_Xlen()` / `C::_Xran()` / `C::_Xinvalid_argument()` of the decomp's string and vector copies (a stub
    that throws std::length_error / out_of_range / invalid_argument through libstdc++, as MSVC's did), and class
    placement deletes `C::operator delete(void*, void*)` (a `ret`: the standard placement delete does nothing), and
-   the decomp's `basic_streambuf` copies' `_Lock()` / `_Unlock()` (CRT_MUTEX: `this + 4` is the std::_Mutex, S4's
-   fnvnx_mutex_lock / unlock), and the facet copies' `_Register()` / static `_Register(facet*)` (CRT_FACET: S4's
-   fnvnx_facet_register, MSVC's _Facet_Register at 0x00ec3599), and NiPointer<T>'s destructor for a T no unit
+   and NiPointer<T>'s destructor for a T no unit
    defines (CRT_NIPTR: a tail call to NiPointer<NiRefObject>'s; the same code on the NiRefObject base at 0).
    After the address classes: a decomp body at an exe address wins.
 6. `missing` - the rest: real decomp gaps, for the real-exe path (S3), with the referencing units.
@@ -121,15 +119,6 @@ VARIANT_KIND = {'C1': 'C', 'C2': 'C', 'D1': 'X', 'D2': 'X'}   # addrmap kind an 
 
 
 # ---------------------------------------------------------------------------------------------------- inputs
-
-def _table(name):
-    """a decomp-derived table of fnv-nx-build (tools/tables.py: FNVNX_TABLES, sha256 against tools/tables.pin.json)"""
-    import importlib.util
-    s = importlib.util.spec_from_file_location('fnvnx_tables', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tables.py'))
-    m = importlib.util.module_from_spec(s)
-    s.loader.exec_module(m)
-    return m.path(name)
-
 
 def load_trapped(refs_tsv, names_txt=None):
     """refs.tsv rows still undefined after resolve -> {Itanium name: set(referencing units)}; names_txt (the guest
@@ -169,47 +158,6 @@ def load_native_names(addrmap_tsv):
             f = line.rstrip('\n').split('\t')
             if not line.startswith('#') and len(f) >= 4 and f[1] == 'F' and f[3].startswith('_Z'):
                 res[int(f[0], 16)] = f[3]
-    return res
-
-
-
-
-def load_provider_params(crt_symbols_tsv=None):
-    """platform/crt/crt_symbols.tsv -> {address: parameter count} of the rows whose identification (S4's reading of the
-    exe function) spells a C++ parameter list: `std::_Lockit::_Lockit(int)` -> 1 (the object is not counted),
-    `std::_Locinfo::_Locinfo_ctor(_Locinfo*, const std::string&)` -> 2, `std::locale::_Getgloballocale() [note]` -> 0.
-    A trailing `[note]` is dropped first; a row with no parameter list is not listed."""
-    res = {}
-    path = crt_symbols_tsv or _table('crt_symbols.tsv')
-    if not os.path.exists(path):
-        return res
-    for line in open(path, encoding='utf-8', errors='surrogateescape'):
-        f = line.rstrip('\n').split('\t')
-        if line.startswith('#') or len(f) < 6 or not f[0].startswith('0x'):
-            continue
-        m = re.search(r'\((.*)\)\s*(?:const)?\s*$', re.sub(r'\s*\[.*\]\s*$', '', f[2]))
-        if not m:
-            continue
-        s, depth, n = m.group(1).strip(), 0, 0
-        if s and s != 'void':
-            n = 1
-            for ch in s:
-                depth += ch in '<('
-                depth -= ch in '>)'
-                n += ch == ',' and depth == 0
-        res[int(f[0], 16)] = n
-    return res
-
-
-def load_providers(addrmap_tsv):
-    """addrmap.tsv -> {address: provider} of the F addresses S4's runtime implements (note `provider: <name>`):
-    the platform's own definition of the exe function at that address (platform/crt/crt_symbols.tsv)."""
-    res = {}
-    if os.path.exists(addrmap_tsv):
-        for line in open(addrmap_tsv, encoding='utf-8', errors='surrogateescape'):
-            f = line.rstrip('\n').split('\t')
-            if not line.startswith('#') and len(f) >= 6 and f[1] == 'F' and f[5].startswith('provider: '):
-                res[int(f[0], 16)] = f[5][len('provider: '):].strip()
     return res
 
 
@@ -636,20 +584,6 @@ CRT_THROW = {'_Xlen': ('_ZSt20__throw_length_errorPKc', '%s too long'),
              '_Xinvalid_argument': ('_ZSt24__throw_invalid_argumentPKc', 'invalid %s argument')}
 
 
-# MSVC's basic_streambuf::_Lock() / _Unlock() are inline: `_Mylock._Lock()`, the std::_Mutex member at +4 (after the
-# vptr) whose first word is the critical section pointer. The exe's _Sentry_base constructor 0x00ad2fa0 and its
-# destructor do `add ecx, 4; call 0x00ec3277` / `0x00ec3280` (crt_symbols.tsv: std::_Mutex::_Lock / _Unlock, S4's
-# fnvnx_mutex_lock / fnvnx_mutex_unlock over `void *self` = the _Mutex). The decomp's streambuf copies declare the
-# two members and never define them (their `void* streamLock` is that first word).
-CRT_MUTEX = {'_Lock': 'fnvnx_mutex_lock', '_Unlock': 'fnvnx_mutex_unlock'}
-
-# MSVC's locale::facet::_Register() is `_Facet_Register(this)`: the facet goes on the list the CRT frees at exit
-# (0x00ec3599, crt_symbols.tsv: std::locale::facet::_Facet_Register, S4's fnvnx_facet_register(void *facet)). The
-# decomp's facet copies declare it as a static `_Register(facet*)` (blk_00ac0000_od_ob1_variant.cpp's
-# `fnv_00acfab0::facet`, called as `facet::_Register(_Pfmod)` in use_facet) or as the member `_Register()`, and define
-# neither. Either way the facet is the first argument (x0): a tail call.
-CRT_FACET = 'fnvnx_facet_register'
-
 # NiPointer<T>::~NiPointer() of a T the decomp only forward-declares (NiPointer<ProjectileAuxiliaryData>, inlined
 # everywhere in the exe): no unit can instantiate it. Every NiPointer<T> destructor is the same code, `if (m_pObject)
 # m_pObject->DecRefCount()` on the NiRefObject base, which Gamebryo classes hold at offset 0 (single inheritance): a
@@ -658,7 +592,7 @@ CRT_NIPTR = '_ZN9NiPointerI11NiRefObjectED1Ev'
 
 
 def crt_rule(isig):
-    """('throw', libstdc++ thrower, message) / ('ret', None, None) / ('mutex', platform function, 'this + 4') for a
+    """('throw', libstdc++ thrower, message) / ('ret', None, None) / ('niptr', ...) for a
     name crt-rule defines, else None."""
     if isig.kind != 'func' or len(isig.qual) < 2 or isig.params is None:
         return None
@@ -670,11 +604,6 @@ def crt_rule(isig):
     if last == 'operator delete' and len(isig.params) == 2 and \
             all(sigs.canon_param(p, 2) == 'void*' for p in isig.params):
         return ('ret', None, None)
-    if last in CRT_MUTEX and not isig.params and re.match(r'basic_streambuf\b', isig.qual[-2]):
-        return ('mutex', CRT_MUTEX[last], 'this + 4')
-    if last == '_Register' and isig.qual[-2] == 'facet' and (
-            not isig.params or (len(isig.params) == 1 and re.fullmatch(r'(?:\w+::)*facet\s*\*', isig.params[0].strip()))):
-        return ('facet', CRT_FACET, 'the facet')
     if isig.qual[-1] == '{dtor}' and isig.variant in ('D1', 'D2') and not isig.params and \
             re.fullmatch(r'NiPointer<.+>', isig.qual[-2]) and isig.qual[-2] != 'NiPointer<NiRefObject>' and \
             len(isig.qual) == 2 and os.environ.get('FNVNX_NIPTR', '1') != '0':
@@ -689,8 +618,6 @@ def crt_pass(rows, itanium):
         k = crt_rule(itanium(r.name)) if r.cls == 'missing' else None
         if k:
             r = r._replace(cls='crt-rule', note='throws %s("%s")' % (k[1], k[2]) if k[0] == 'throw'
-                           else '%s(%s): the _Mutex member at +4' % (k[1], k[2]) if k[0] == 'mutex'
-                           else '%s(%s): MSVC\'s _Facet_Register' % (k[1], k[2]) if k[0] == 'facet'
                            else 'the %s destructor (%s)' % (k[2], k[1]) if k[0] == 'niptr'
                            else 'placement delete: ret')
         out.append(r)
@@ -707,9 +634,7 @@ def emit_crt(rows, itanium):
                 '    .type %s, %%function' % q, q + ':']
         if kind == 'ret':
             out += ['    ret']
-        elif kind == 'mutex':
-            out += ['    add x0, x0, #4', '    b ' + fn]
-        elif kind in ('facet', 'niptr'):
+        elif kind == 'niptr':
             out += ['    b ' + fn]
         else:
             out += ['    adrp x0, .Lcrtmsg%d' % i, '    add x0, x0, :lo12:.Lcrtmsg%d' % i, '    b ' + fn]
@@ -1927,13 +1852,10 @@ def load_synth(out):
     return res
 
 
-def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms, providers=None,
-             provider_params=None):
+def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms):
     """`exe-addr`: a name still missing (or about to get a synthesized special member) whose MSVC counterpart the
     referencing unit's pristine object calls: bound to the address the exe's call at that site reaches, when every
-    site agrees and the native build defines it with the right kind. provider_params: {address: parameter count} of
-    S4's providers (load_provider_params): a provider's address no unit defines has no MSVC definition to compare, so
-    its identification's parameter count stands for the shape (the provider takes the object first, then these)."""
+    site agrees and the native build defines it with the right kind.."""
     exe = Pe(exe_path)
     udata = json.load(open(units_json))['units']
     idx_of = collections.defaultdict(list)
@@ -1971,12 +1893,8 @@ def exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium,
         rs = msvc(ref)
         if rs.kind != 'func' or rs.params is None:
             return False
-        if this_only and a in (providers or {}):
-            return True   # S4's runtime implements the exe's function there, taking the object (void *self)
         member = bool(rs.member)
         rparams = [p_ for p_ in rs.params if p_ != '...']
-        if a in (providers or {}) and a in (provider_params or {}) and not def_names.get(a):
-            return provider_params[a] == len(rparams)
         for n_ in def_names.get(a, ()):
             d_ = msvc(n_) if n_.startswith('?') else None
             if d_ is None or d_.kind != 'func' or d_.params is None:
@@ -2353,8 +2271,7 @@ def run(out, tree, msvc_objs=None, names_txt=None, units_json=None, jobs=4, synt
 
     exe_vars = set()   # variables placed exe code references whose address exe-data did not find
     if msvc_objs and exe_path:
-        rows = exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms,
-                        load_providers(os.path.join(out, 'addrmap.tsv')), load_provider_params())
+        rows = exe_pass(rows, exe_path, msvc_objs, units_json, unit_names, native, itanium, msvc, ms)
         # placeholder variables the exe's code addresses: bound to that image address (before decl-data)
         have_ = {r.name for r in rows}
         # declared-only C++ variables (static data members, unit namespaces' globals) the same way, before decl-data

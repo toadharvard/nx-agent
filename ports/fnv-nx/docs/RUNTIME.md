@@ -2,7 +2,7 @@
 
 What the game expects from the platform that the decomp does not define, how each piece is classified, and how
 `platform/` provides it. Measured on decomp `87eb9373` (`build/units.json`). Machine-readable tables:
-[`platform/crt/crt_symbols.tsv`](../platform/crt/crt_symbols.tsv) (every undefined `.text` address: class,
+`crt_symbols.tsv` (deleted, no name-based table) (every undefined `.text` address: class,
 identification, provider) and [`platform/win32/imports.tsv`](../platform/win32/imports.tsv) (every IAT slot).
 This file lists names and addresses only; it contains no decomp code.
 

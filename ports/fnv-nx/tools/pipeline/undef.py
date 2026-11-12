@@ -6,8 +6,8 @@
 
 undefined.txt: one (mangled) name per line, as the guest link writes it. The other inputs refine the address
 symbols `__fnv_<addr>`: whose unit defines the address (units.json functions) and whether that unit compiled
-(objects.tsv), S4's CRT/helper classification (platform/crt/crt_symbols.tsv) and Win32 imports
-(platform/win32/imports.tsv). Output TSV: name, category, detail. Prints the counts.
+(objects.tsv), Win32 imports
+(imports.tsv, fnv-nx-build). Output TSV: name, category, detail. Prints the counts.
 """
 import collections
 import json
@@ -22,9 +22,6 @@ DATA_START, DATA_END = 0x00fdf000, 0x02100000
 CATEGORIES = collections.OrderedDict([
     ('code_uncompiled', ('image code address: its unit does not compile', 'S1-compile')),
     ('code_notemitted', ('image code address: unit compiled, definition not emitted (inlined/unmatched)', 'S1/S2')),
-    ('code_crt', ('image code address with no unit: CRT/C++ library/helper (crt_symbols.tsv)', 'S4-runtime')),
-    ('code_eh', ('image code address with no unit: EH funclet / atexit dtor (GCC emits its own)', 'S2/S4')),
-    ('code_nobody', ('image code address with no unit: function without a body in the decomp', 'S4/S1')),
     ('code_unknown', ('image code address with no unit, unclassified', 'S2/S4')),
     ('data_addr', ('image data address not absolute (should come from aliases.ld)', 'S2-link')),
     ('bridge', ('ABI bridge symbol not generated', 'S2-link')),
@@ -80,19 +77,6 @@ def _table(name):
     return m.path(name)
 
 
-def load_crt():
-    m = {}
-    p = _table('crt_symbols.tsv')
-    if os.path.isfile(p):
-        for line in open(p, errors='replace'):
-            if line.startswith('#'):
-                continue
-            f = line.rstrip('\n').split('\t')
-            if len(f) > 1 and f[0].startswith('0x'):
-                m[int(f[0], 16)] = f[1]
-    return m
-
-
 def load_imports():
     s = set()
     p = _table('imports.tsv')
@@ -143,7 +127,7 @@ GHIDRA = re.compile(r'^_?(?:FUN|DAT|PTR|UNK|g|LAB|SUB)_[0-9a-fA-F]{8}(?:@\d+)?$'
 
 
 def classify(name, ctx):
-    owner, compiled, crt, imports, amap = ctx
+    owner, compiled, imports, amap = ctx
     m = ADDR.match(name)
     if m:
         a = int(m.group(1), 16)
@@ -154,13 +138,6 @@ def classify(name, ctx):
             if not compiled.get(src, False):
                 return 'code_uncompiled', src
             return 'code_notemitted', src
-        c = crt.get(a, '')
-        if c in ('crt', 'cpplib', 'helper', 'crt_inline', 'thunk'):
-            return 'code_crt', c
-        if c in ('eh', 'atexit_dtor'):
-            return 'code_eh', c
-        if c in ('body_named', 'body_unnamed', 'mid_named', 'data', 'mid_data'):
-            return 'code_nobody', c
         return 'code_unknown', amap.get(a, '')
     if name.startswith('__fnvnx_br_'):
         return 'bridge', ''
@@ -204,7 +181,7 @@ def classify(name, ctx):
 
 def categorize(names, addrmap=None, units_json=None, objects_tsv=None):
     owner, compiled = load_units(units_json, objects_tsv)
-    ctx = (owner, compiled, load_crt(), load_imports(), load_addrmap(addrmap))
+    ctx = (owner, compiled, load_imports(), load_addrmap(addrmap))
     rows = [(n,) + classify(n, ctx) for n in names]
     counts = collections.Counter(r[1] for r in rows)
     examples = collections.defaultdict(list)

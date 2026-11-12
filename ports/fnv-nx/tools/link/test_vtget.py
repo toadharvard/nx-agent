@@ -157,14 +157,12 @@ def e2e():
         json.dump(units, open(os.path.join(t, 'units.json'), 'w'))
         with open(os.path.join(t, 'objects.tsv'), 'w') as f:
             f.write('src/a.cpp\t%s\tok\n' % o)
-        crt = os.path.join(t, 'crt_symbols.tsv')
-        open(crt, 'w').write('')
         res = {}
         for name, env in (('on', {}), ('off', {'FNVNX_VTGET': '0'})):
             out, fixed = os.path.join(t, 'out-' + name), os.path.join(t, name, 'fixed')
             e = dict(os.environ, **env)
             run([sys.executable, FNVLINK, 'resolve', os.path.join(t, 'units.json'), os.path.join(t, 'objects.tsv'),
-                 out, '--crt-symbols', crt, '--imports', 'none', '--exe', exe], env=e)
+                 out, '--imports', 'none', '--exe', exe], env=e)
             run([sys.executable, FNVLINK, 'apply', out, fixed], env=e)
             chk = run([sys.executable, FNVLINK, 'check', out, fixed], env=e)
             res[name] = (out, fixed, chk, nm(os.path.join(out, 'trial.elf')))

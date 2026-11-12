@@ -34,7 +34,6 @@ import re
 import shutil
 import sys
 import tempfile
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'tools'))
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = os.path.normpath(os.path.join(HERE, '..', '..'))
@@ -151,11 +150,7 @@ def main():
                                                                          f60['frame_handheld_720p'],
                                                                          s['targets_rule'][s['targets_rule'].index('covers'):][:30], pl, pl['mid']))
     vt = open(os.path.join(PORT, 'tools', 'perf', 'vtcover.py')).read()
-    sys.path.insert(0, os.path.join(PORT, 'tools'))
-    import tables
-    crt = open(tables.path('crt_symbols.tsv')).read()
-    print('N: vtcover.py accepts kinds %s; a provider F row counts too (crt_symbols.tsv provides _purecall: %s)' % (
-        re.search(r"not in (\([^)]*\))", vt).group(1), '_purecall' in crt and 'platform/crt: _purecall' in crt))
+    print('N: vtcover.py accepts kinds %s' % re.search(r"not in (\([^)]*\))", vt).group(1))
     if not (cost.CS is not None and shutil.which('llvm-mca') and shutil.which('aarch64-linux-gnu-g++')):
         print('skip S1, S2, CE1: capstone, llvm-mca or aarch64-linux-gnu-g++ missing')
         return 1 if bad else 0

@@ -3,9 +3,6 @@
 
     python3 tools/link/test_bindings.py     # needs aarch64-linux-gnu-{g++,ld,objcopy,objdump}, llvm-undname
 
-* CRT/library code (S4's crt_symbols.tsv `provider` column): a call of a referenced .text address no unit defines
-  binds to the provider symbol (`platform/crt: strcpy_s`, the ws2_32 thunk through exports.cpp), and the address is
-  an F entry naming it; a `mid_data` row is no E entry;
 * imports (imports.tsv + exports.cpp): a call through an IAT slot binds to the slot's api, whatever the unit calls
   it; import thunks (6-byte decomp functions whose body only calls an import) bind to the import, not to their
   compiled body (which loses or retypes arguments); a 6-byte getter stays native;
@@ -45,11 +42,6 @@ CXX = os.environ.get('CXX', 'aarch64-linux-gnu-g++')
 READELF = os.environ.get('READELF', 'aarch64-linux-gnu-readelf')
 PIC = ['-O2', '-fPIC']   # compile.sh's addressing of the variables a unit defines
 
-CRT = ('# address\tclass\tidentification\tunits\tsrc_files\tprovider\n'
-       '0x00ec1000\tcrt\tstrcpy_s\t1\t1\tplatform/crt: strcpy_s\n'
-       '0x00ec2000\tthunk\tws2_32 closesocket\t1\t1\tfnvnx_ws2_* (see imports.tsv)\n'
-       '0x00ec3000\tmid_data\t?g_bogus@@3HA\t1\t1\tnone: data symbol / bogus address\n'
-       '0x00ec4000\thelper\t_alloca_probe\t1\t1\timplicit: GCC\n')
 IMPORTS = ('# iat_slot\tdll\tapi\tunits\tother_decomp_names\tprovider\n'
            '0x00fdf004\tadvapi32\tRegCloseKey\t2\tEnterCriticalSection\tS4 platform/win32\n'
            '0x00fdf100\td3dx9_38\tD3DXMatrixRotationYawPitchRoll\t1\t-\tS6\n'
@@ -316,7 +308,7 @@ def main():
                 f.write('%s\t%s\tok\n' % (rel, objs[rel]))
         plat = os.path.join(t, 'platform')
         os.makedirs(plat)
-        for name, text in (('crt_symbols.tsv', CRT), ('imports.tsv', IMPORTS), ('exports.cpp', EXPORTS),
+        for name, text in (('imports.tsv', IMPORTS), ('exports.cpp', EXPORTS),
                            ('units_renames.tsv', RENAMES)):
             open(os.path.join(plat, name), 'w').write(text)
         r_before = local_refs_into(objs['src/r.cpp'], ('ms_kRTTI', 'g_count', 'g_pcount'))
@@ -327,21 +319,15 @@ def main():
         sec = os.path.join(t, 'secondary.tsv')   # what thisadj reads from the exe's vftables: D::fb only in B's
         open(sec, 'w').write('00401580\t8\n')
         os.environ['FNVNX_SECONDARY_ENTRIES'] = sec
-        run([sys.executable, FNVLINK, 'resolve', units, os.path.join(t, 'objects.tsv'), out, '--crt-symbols',
-             os.path.join(plat, 'crt_symbols.tsv'), '--imports', os.path.join(plat, 'imports.tsv'),
+        run([sys.executable, FNVLINK, 'resolve', units, os.path.join(t, 'objects.tsv'), out, '--imports', os.path.join(plat, 'imports.tsv'),
              '--units-renames', os.path.join(plat, 'units_renames.tsv')])
         refs = {(r[0], r[1]): r for r in (l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'refs.tsv'))
                                           if not l.startswith('#'))}
         rows = {int(r[0], 16): r for r in (l.rstrip('\n').split('\t') for l in open(os.path.join(out, 'addrmap.tsv'))
                                           if not l.startswith('#'))}
         a = 'src/a.cpp'
-        check(refs.get((a, 'FUN_00ec1000'), [''] * 6)[5] == 'strcpy_s', 'CRT call -> provider: %s'
-              % refs.get((a, 'FUN_00ec1000')))
-        check(refs.get((a, 'FUN_00ec2000'), [''] * 6)[5] == 'fnvnx_ws2_closesocket', 'ws2 thunk -> fnvnx_ws2_*')
         check(refs.get((a, 'EnterCriticalSection'), [''] * 6)[5] == 'RegCloseKey', 'import -> the slot\'s api: %s'
               % refs.get((a, 'EnterCriticalSection')))
-        check(rows.get(0x00ec1000, [''] * 4)[1:4] == ['F', 'strcpy_s', 'strcpy_s'], 'provider F entry')
-        check(0x00ec3000 not in rows and rows.get(0x00ec4000, [''] * 2)[1] == 'E', 'mid_data dropped, helper E')
         for unit, name in ((a, 'g_tlsA'), ('src/b.cpp', 't_otherName')):
             r = refs.get((unit, name), [''] * 6)
             check(r[2] == 'tls' and r[5] == '__fnvnx_tls_01272010', 'TLS ref %s: %s' % (name, r))
