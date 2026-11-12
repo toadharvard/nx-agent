@@ -110,10 +110,10 @@ template<class F,class T> struct GMF { u32 a;      /* a float / double cell: the
    first and the last byte of the cell back to themselves with a byte compare-and-swap: a cell that is not readable and writable faults there, with the world running, and no
    access can fault while it is stopped. fnvl_host_world_stop / fnvl_host_world_resume are the L5 platform's (platform/os/os.h and os_world.c: stop / resume every other thread of the process, synchronously, under one global lock; resume is called on the thread that stopped). */
 extern "C" { void fnvl_host_world_stop(void); void fnvl_host_world_resume(void); }
-/* `.fnvl.lk` (one 12-byte record per locked instruction: x86 pc as a plain word, host start, host end as R_AARCH64_P32_ABS32 in the same section): the range is the
-   exclusive sequence of the aligned commit below, `ldaxr ... cbnz`, and is emitted by that ONE asm statement. The two labels and the record are text of the same asm, so the compiler
-   cannot place anything but the sequence between them: it treats the statement as one opaque, indivisible block (ASM-001). The `ldar` load, the body on the private copy and the
-   world-stop path lie outside it; the pc is the constant operand lk_commit(lk_, pc) that fnvlift/core.py passes. */
+/* `.fnvl.sites` (16-byte records of four words: kind, x86 pc, host start, host end; kind and pc plain, start and end R_AARCH64_P32_ABS32 in the same executable section). Kind 1, a locked
+   instruction: the range is the exclusive sequence of the aligned commit below, `ldaxr ... cbnz`, emitted by that ONE asm statement. The labels and the record are text of the same asm, so the compiler
+   cannot place anything but the sequence between them: it treats the statement as one opaque, indivisible block (ASM-001). The `ldar` load, the body on the private copy and the world-stop path lie
+   outside it; the pc is the constant operand lk_commit(lk_, pc) that fnvlift/core.py passes. */
 #define FNVL_LK_(T, R, SUF, MASK, LAST, W) \
 template<> struct LKA<T> { \
   static __attribute__((always_inline)) T load(u32 a){ T o; \
@@ -129,7 +129,7 @@ template<> struct LKA<T> { \
   static __attribute__((always_inline)) bool commit(u32 a, T o, T n, u32 pc){ u32 ok, s; T v; \
     if(sizeof(T)==1 || __builtin_expect(!(a & MASK), 1)) { \
       __asm__ volatile(FNVL_A_ "3: ldaxr" SUF " %" R "[v], [%x[a]]\ncmp %" R "[v], %" R "[o]\nb.ne 5f\nstlxr" SUF " %w[s], %" R "[n], [%x[a]]\ncbnz %w[s], 3b\n" \
-        "9:\n.pushsection .fnvl.lk,\"a\",%%progbits\n.balign 4\n.word %c[pc]\n.word 3b\n.word 9b\n.popsection\n" \
+        "9:\n.pushsection .fnvl.sites,\"a\",%%progbits\n.balign 4\n.word 1\n.word %c[pc]\n.word 3b\n.word 9b\n.popsection\n" \
         "dmb ish\nmov %w[ok], 1\nb 2f\n5: mov %w[ok], 0\n2:" \
         : [ok]"=&r"(ok), [a]"+r"(a), [s]"=&r"(s), [v]"=&r"(v) : [o]"r"((W)o), [n]"r"((W)n), [pc]"i"(pc) : "memory", "cc"); \
       return ok; } \
@@ -161,17 +161,14 @@ template<class T> static inline __attribute__((always_inline)) bool lk_commit(LK
 #define SYNC_OUT do{ FL_OUT; }while(0)   /* the general registers need no sync; flags (instest), x87 (per site, f_x87_ctl.py) and xmm state are appended by the lifter */
 #define SYNC_X_IN do{ x0=c->x[0];x1=c->x[1];x2=c->x[2];x3=c->x[3];x4=c->x[4];x5=c->x[5];x6=c->x[6];x7=c->x[7]; }while(0)
 #define SYNC_X_OUT do{ c->x[0]=x0;c->x[1]=x1;c->x[2]=x2;c->x[3]=x3;c->x[4]=x4;c->x[5]=x5;c->x[6]=x6;c->x[7]=x7; }while(0)
-/* `.fnvl.fsw` (same 12-byte record as `.fnvl.lk`: x86 pc plain, host start, host end as R_AARCH64_P32_ABS32): the store of the x87 status word, and nothing else. FSW_ST16 / FSW_ST32 are
-   the store of GM<u16> / GM<u32> with the range around the one store instruction (the aligned stlr, the unaligned str behind its dmb ishst, one asm statement each, so the labels bracket exactly
-   that instruction, ASM-001); FSW_AX is the write of AX, the one instruction `bfxil` on the register of EAX (no guest access). Both paths of an address that is not constant record: one pc
-   may have several records. */
-#define FNVL_FSWREC_ "9:\n.pushsection .fnvl.fsw,\"a\",%%progbits\n.balign 4\n.word %c[pc]\n.word 8b\n.word 9b\n.popsection\n"
+/* Kind 2 of `.fnvl.sites`, an x87 status instruction (FSTSW, FNSTENV, FNSAVE): the range is the store of the status word, one instruction, and nothing else. FSW_ST16 / FSW_ST32 store it as `dmb ishst; str`
+   (a status-word store needs no more than TSO: every earlier guest load is an acquire, so it is ordered before the store, and `dmb ishst` orders the earlier stores; a plain str also takes an unaligned
+   address): one asm statement holds the dmb, the labels and the record, so they bracket exactly that str (ASM-001), and one instruction yields one record. FSW_AX is the write of AX, the one
+   instruction `bfxil` on the register of EAX (no guest access). */
+#define FNVL_FSWREC_ "9:\n.pushsection .fnvl.sites,\"a\",%%progbits\n.balign 4\n.word 2\n.word %c[pc]\n.word 8b\n.word 9b\n.popsection\n"
 #define FNVL_FSW_(T, R, SUF, MASK) \
 static inline __attribute__((always_inline)) void fsw_st(u32 a, T v, u32 pc, T*){ \
-  if(__builtin_constant_p(a)){ \
-    if(a&MASK) __asm__ volatile(FNVL_K_ "dmb ishst\n8: str" SUF " %" R "[v], [%x[a]]\n" FNVL_FSWREC_ : [a]"=&r"(a) : [v]"r"(v), [lo]"i"(a&0xffffu), [hi]"i"(a>>16), [pc]"i"(pc) : "memory"); \
-    else __asm__ volatile(FNVL_K_ "8: stlr" SUF " %" R "[v], [%x[a]]\n" FNVL_FSWREC_ : [a]"=&r"(a) : [v]"r"(v), [lo]"i"(a&0xffffu), [hi]"i"(a>>16), [pc]"i"(pc) : "memory"); } \
-  else if(__builtin_expect(!(a&MASK), 1)) __asm__ volatile(FNVL_A_ "8: stlr" SUF " %" R "[v], [%x[a]]\n" FNVL_FSWREC_ : [a]"+r"(a) : [v]"r"(v), [pc]"i"(pc) : "memory"); \
+  if(__builtin_constant_p(a)) __asm__ volatile(FNVL_K_ "dmb ishst\n8: str" SUF " %" R "[v], [%x[a]]\n" FNVL_FSWREC_ : [a]"=&r"(a) : [v]"r"(v), [lo]"i"(a&0xffffu), [hi]"i"(a>>16), [pc]"i"(pc) : "memory"); \
   else __asm__ volatile(FNVL_A_ "dmb ishst\n8: str" SUF " %" R "[v], [%x[a]]\n" FNVL_FSWREC_ : [a]"+r"(a) : [v]"r"(v), [pc]"i"(pc) : "memory"); }
 FNVL_FSW_(u16, "w", "h", 1)
 FNVL_FSW_(u32, "w", "", 3)
