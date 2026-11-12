@@ -10,6 +10,7 @@
  *     this call: no cache path exists here . */
 #include "gl4.h"
 #include "fnvnx_shaders.h"
+#include "fnvnx_sha256.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -48,7 +49,7 @@ uint64_t gl4_api_shader_create_d3d(uint64_t a) {
     uint8_t* code = (uint8_t*)malloc(d.size);
     if (!code) return refuse("out of memory");
     memcpy(code, bc, d.size);
-    if (fnvnx_shader_hash(code, d.size) != d.hash) { free(code); return refuse("hash is not fnvnx_shader_hash of the bytecode"); }
+    uint8_t k[32]; fnvnx_sha256(code, d.size, k); if (memcmp(k, d.key, 32)) { free(code); return refuse("key is not the sha256 of the bytecode"); }
     uint32_t id = memo_find(&key, code);
     if (id) { free(code); g4.sh[id].d3d->refs++; return id; }
     fnvnx_shader_opts o; memset(&o, 0, sizeof o);
