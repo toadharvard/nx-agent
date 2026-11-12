@@ -54,7 +54,6 @@ static struct fdent g_fd[MAX_FD] = {
     { FD_OPEN | FD_TEXT | FD_DEV | FD_WRITE, -1, NULL, OS_LOCK_INIT },
     { FD_OPEN | FD_TEXT | FD_DEV | FD_WRITE, -1, NULL, OS_LOCK_INIT },
 };
-static os_lock_t g_fd_lock;
 
 /* MSVCRT.DLL's lowio table, which lifted code reads directly: __pioinfo[fd >> 5][fd & 31], 8-byte ioinfo
  * {osfhnd, osfile, pipech}. osfile bits: 0x01 FOPEN, 0x02 FEOFLAG, 0x20 FAPPEND, 0x40 FDEV, 0x80 FTEXT. Every change of
@@ -76,7 +75,6 @@ static void ioinfo_sync(struct fdent *d)
 
 /* _isatty: the descriptor is a character device (the standard streams) */
 int fnvnx_isatty(int fd) { return fd >= 0 && fd < MAX_FD && (g_fd[fd].flags & (FD_OPEN | FD_DEV)) == (FD_OPEN | FD_DEV); }
-int fnvnx_fmode = FNVNX_O_TEXT;
 
 static int fail(int e)
 {
@@ -108,87 +106,8 @@ static struct fdent *fd_get(int fd)
     return &g_fd[fd];
 }
 
-static int is_text_mode(int oflag)
-{
-    if (oflag & FNVNX_O_BINARY)
-        return 0;
-    if (oflag & (FNVNX_O_TEXT | FNVNX_O_WTEXT | FNVNX_O_U16TEXT | FNVNX_O_U8TEXT))
-        return 1;
-    return (fnvnx_fmode & FNVNX_O_BINARY) == 0;
-}
 
-/* opens the host file and claims a descriptor >= 3 */
-static int fd_open(const char *path, int oflag, unsigned caller)
-{
-    int acc = oflag & 3;
-    if (!path || acc == 3)
-        return fail(EINVAL);
-    char host[HOST_MAX];
-    if (fnvnx_path_map(path, host, sizeof host)) {
-        if (fnvnx_plat_on)
-            fnvnx_plat_open_failed(path, NULL, ENOENT, caller, "_open");
-        return fail(ENOENT);
-    }
-    int of = 0;
-    if (acc == FNVNX_O_RDONLY || acc == FNVNX_O_RDWR)
-        of |= OS_O_READ;
-    if (acc == FNVNX_O_WRONLY || acc == FNVNX_O_RDWR)
-        of |= OS_O_WRITE;
-    if (oflag & FNVNX_O_CREAT)
-        of |= OS_O_CREATE | ((oflag & FNVNX_O_EXCL) ? OS_O_EXCL : 0);
-    if (oflag & FNVNX_O_TRUNC) {
-        if (!(of & OS_O_WRITE))
-            return fail(EINVAL);
-        of |= OS_O_TRUNC;
-    }
-    os_stat_t st;
-    if (os_stat(host, &st) == 0 && st.is_dir)
-        return fail(EACCES);
-    int os = os_file_open(host, of);
-    if (os < 0) {
-        if (fnvnx_plat_on)
-            fnvnx_plat_open_failed(path, host, (unsigned)os_errno(os), caller, "_open");
-        return fail(os_errno(os));
-    }
-    os_lock(&g_fd_lock);
-    int fd = 3;
-    while (fd < MAX_FD && (g_fd[fd].flags & FD_OPEN))
-        fd++;
-    if (fd == MAX_FD) {
-        os_unlock(&g_fd_lock);
-        os_file_close(os);
-        return fail(EMFILE);
-    }
-    struct fdent *d = &g_fd[fd];
-    d->os = os;
-    d->tmpname = (oflag & FNVNX_O_TEMPORARY) ? strdup(host) : NULL;
-    d->flags = FD_OPEN | (is_text_mode(oflag) ? FD_TEXT : 0) | ((oflag & FNVNX_O_APPEND) ? FD_APPEND : 0) |
-               ((of & OS_O_READ) ? FD_READ : 0) | ((of & OS_O_WRITE) ? FD_WRITE : 0);
-    ioinfo_sync(d);
-    os_unlock(&g_fd_lock);
-    return fd;
-}
 
-static int fd_close(int fd)
-{
-    struct fdent *d = fd_get(fd);
-    if (!d)
-        return -1;
-    int r = 0;
-    os_lock(&g_fd_lock);
-    if (!(d->flags & FD_DEV) && os_file_close(d->os) < 0)
-        r = fail(EBADF);
-    if (d->tmpname) {
-        os_remove(d->tmpname);
-        free(d->tmpname);
-        d->tmpname = NULL;
-    }
-    d->flags = 0;
-    d->os = -1;
-    ioinfo_sync(d);
-    os_unlock(&g_fd_lock);
-    return r;
-}
 
 /* raw write of the whole buffer (append mode: at the end); devices go to the host's stdout/stderr */
 static int64_t raw_write(struct fdent *d, int fd, const void *p, size_t n)
@@ -223,82 +142,9 @@ static size_t lf_to_crlf(const unsigned char *in, size_t n, unsigned char *out)
     return o;
 }
 
-/* ---- lowio API */
-int fnvnx_open(const char *path, int oflag, int pmode)
-{
-    (void)pmode;
-    return fd_open(path, oflag, PLAT_RA);
-}
 
-int fnvnx_sopen(const char *path, int oflag, int shflag, int pmode)
-{
-    (void)shflag;
-    return fnvnx_open(path, oflag, pmode);
-}
 
-int fnvnx_close(int fd) { return fd_close(fd); }
 
-int fnvnx_read(int fd, void *buf, unsigned int n)
-{
-    struct fdent *d = fd_get(fd);
-    if (!d)
-        return -1;
-    if (!buf && n)
-        return fail(EINVAL);
-    if (!(d->flags & FD_READ))
-        return fail(EBADF);
-    if (d->flags & FD_DEV)
-        return 0;
-    os_lock(&d->lock);
-    unsigned char *out = (unsigned char *)buf;
-    int64_t r;
-    if (!(d->flags & FD_TEXT)) {
-        r = os_file_read(d->os, buf, n);
-        os_unlock(&d->lock);
-        return r < 0 ? fail(os_errno(r)) : (int)r;
-    }
-    size_t o = 0;
-    while (o < n && !(d->flags & FD_CTRLZ)) {
-        unsigned char raw[1024];
-        size_t want = n - o < sizeof raw ? n - o : sizeof raw;
-        r = os_file_read(d->os, raw, want);
-        if (r < 0) {
-            os_unlock(&d->lock);
-            return fail(os_errno(r));
-        }
-        if (r == 0)
-            break;
-        for (size_t i = 0; i < (size_t)r; i++) {
-            unsigned char c = raw[i];
-            if (c == CTRLZ) { /* end of file: leave the descriptor at the Ctrl-Z */
-                d->flags |= FD_CTRLZ, ioinfo_sync(d);
-                os_file_seek(d->os, -(int64_t)((size_t)r - i), OS_SEEK_CUR);
-                break;
-            }
-            if (c == '\r') {
-                unsigned char nx;
-                if (i + 1 < (size_t)r) {
-                    if (raw[i + 1] == '\n') {
-                        out[o++] = '\n';
-                        i++;
-                        continue;
-                    }
-                } else if (os_file_read(d->os, &nx, 1) == 1) { /* CR ends the chunk: look at the next byte */
-                    if (nx == '\n') {
-                        out[o++] = '\n';
-                        continue;
-                    }
-                    os_file_seek(d->os, -1, OS_SEEK_CUR);
-                }
-            }
-            out[o++] = c;
-        }
-        if ((size_t)r < want)
-            break;
-    }
-    os_unlock(&d->lock);
-    return (int)o;
-}
 
 int fnvnx_write(int fd, const void *buf, unsigned int n)
 {
@@ -344,78 +190,12 @@ long long fnvnx_lseeki64(int fd, long long off, int whence)
     return r < 0 ? fail(EINVAL) : r;
 }
 
-long fnvnx_lseek(int fd, long off, int whence) { return (long)fnvnx_lseeki64(fd, off, whence); }
-long long fnvnx_telli64(int fd) { return fnvnx_lseeki64(fd, 0, 1); }
-long fnvnx_tell(int fd) { return (long)fnvnx_telli64(fd); }
 
-long fnvnx_filelength(int fd)
-{
-    struct fdent *d = fd_get(fd);
-    if (!d)
-        return -1;
-    os_stat_t st;
-    if ((d->flags & FD_DEV) || os_file_fstat(d->os, &st) < 0)
-        return fail(EBADF);
-    return (long)st.size;
-}
 
-int fnvnx_eof(int fd)
-{
-    struct fdent *d = fd_get(fd);
-    if (!d)
-        return -1;
-    if (d->flags & FD_DEV)
-        return 1;
-    os_stat_t st;
-    int64_t pos = os_file_seek(d->os, 0, OS_SEEK_CUR);
-    if (pos < 0 || os_file_fstat(d->os, &st) < 0)
-        return fail(EBADF);
-    return (uint64_t)pos >= st.size;
-}
 
-int fnvnx_commit(int fd)
-{
-    struct fdent *d = fd_get(fd);
-    if (!d)
-        return -1;
-    return (d->flags & FD_DEV) || os_file_sync(d->os) == 0 ? 0 : fail(EBADF);
-}
 
-int fnvnx_setmode(int fd, int mode)
-{
-    struct fdent *d = fd_get(fd);
-    if (!d)
-        return -1;
-    int text;
-    if (mode == FNVNX_O_BINARY)
-        text = 0;
-    else if (mode == FNVNX_O_TEXT || mode == FNVNX_O_WTEXT || mode == FNVNX_O_U16TEXT || mode == FNVNX_O_U8TEXT)
-        text = 1;
-    else
-        return fail(EINVAL);
-    os_lock(&d->lock);
-    int old = (d->flags & FD_TEXT) ? FNVNX_O_TEXT : FNVNX_O_BINARY;
-    d->flags = text ? d->flags | FD_TEXT : d->flags & ~FD_TEXT;
-    ioinfo_sync(d);
-    os_unlock(&d->lock);
-    return old;
-}
 
-int fnvnx_set_fmode(int mode)
-{
-    if (mode != FNVNX_O_TEXT && mode != FNVNX_O_BINARY && mode != FNVNX_O_WTEXT)
-        return errno = EINVAL;
-    fnvnx_fmode = mode;
-    return 0;
-}
 
-int fnvnx_get_fmode(int *mode)
-{
-    if (!mode)
-        return errno = EINVAL;
-    *mode = fnvnx_fmode;
-    return 0;
-}
 
 /* ---- streams */
 enum { LAST_NONE, LAST_READ, LAST_WRITE };
@@ -448,7 +228,6 @@ static struct sext g_stdx[3] = { { 0, 0, NULL, 0, 0, NULL, 0, { 0 }, 0, OS_LOCK_
 static struct stream *g_streams;
 static os_lock_t g_streams_lock;
 
-struct _iobuf *__iob_func(void) { return fnvnx_iob; }
 
 static struct sext *ext_of(struct _iobuf *f)
 {
@@ -702,172 +481,15 @@ static int swrite(struct _iobuf *f, struct sext *x, struct fdent *d, const unsig
     return 0;
 }
 
-static long long stell(struct sext *x, struct fdent *d)
-{
-    if (d->flags & FD_DEV)
-        return -1;
-    int64_t pos = os_file_seek(d->os, 0, OS_SEEK_CUR);
-    if (pos < 0)
-        return -1;
-    long long l = (long long)pos - (long long)(x->rlen - x->rpos) - x->nungot + (long long)x->wlen;
-    if (x->wlen && (d->flags & FD_APPEND)) {
-        os_stat_t st;
-        if (os_file_fstat(d->os, &st) == 0)
-            l = (long long)st.size + (long long)x->wlen;
-    }
-    return l < 0 ? 0 : l;
-}
 
-/* ---- opening */
-static int parse_mode(const char *m, int *oflag, int *iobflag)
-{
-    if (!m)
-        return -1;
-    while (*m == ' ')
-        m++;
-    int plus = 0, tb = 0;
-    switch (*m) {
-    case 'r': *oflag = FNVNX_O_RDONLY; *iobflag = FNVNX_IOREAD; break;
-    case 'w': *oflag = FNVNX_O_WRONLY | FNVNX_O_CREAT | FNVNX_O_TRUNC; *iobflag = FNVNX_IOWRT; break;
-    case 'a': *oflag = FNVNX_O_WRONLY | FNVNX_O_CREAT | FNVNX_O_APPEND; *iobflag = FNVNX_IOWRT; break;
-    default: return -1;
-    }
-    for (m++; *m; m++) {
-        switch (*m) {
-        case ' ': break;
-        case '+':
-            if (plus++)
-                return -1;
-            *oflag = (*oflag & ~3) | FNVNX_O_RDWR;
-            *iobflag = FNVNX_IORW;
-            break;
-        case 't':
-        case 'b':
-            if (tb++)
-                return -1;
-            *oflag |= *m == 't' ? FNVNX_O_TEXT : FNVNX_O_BINARY;
-            break;
-        case 'c': case 'n': case 'S': case 'R': case 'T': case 'N': break; /* commit / cache hints */
-        case 'D': *oflag |= FNVNX_O_TEMPORARY; break;
-        case ',': /* ",ccs=UNICODE|UTF-8|UTF-16LE": Unicode text mode, kept as plain text mode here */
-            if (tb)
-                return -1;
-            *oflag |= FNVNX_O_TEXT;
-            return 0;
-        default: return -1;
-        }
-    }
-    return 0;
-}
 
-static struct _iobuf *stream_new(int fd, int iobflag)
-{
-    struct stream *s = (struct stream *)calloc(1, sizeof *s);
-    if (!s) {
-        errno = ENOMEM;
-        return NULL;
-    }
-    s->iob._flag = iobflag;
-    s->iob._file = fd;
-    s->magic = STREAM_MAGIC;
-    s->x.fd = fd;
-    os_lock(&g_streams_lock);
-    s->next = g_streams;
-    g_streams = s;
-    os_unlock(&g_streams_lock);
-    return &s->iob;
-}
 
-struct _iobuf *fnvnx_iob_fsopen(const char *path, const char *mode, int shflag)
-{
-    (void)shflag;
-    int oflag, iobflag;
-    if (!path || parse_mode(mode, &oflag, &iobflag)) {
-        errno = EINVAL;
-        return NULL;
-    }
-    int fd = fd_open(path, oflag, PLAT_RA);
-    if (fd < 0)
-        return NULL;
-    struct _iobuf *f = stream_new(fd, iobflag);
-    if (!f)
-        fd_close(fd);
-    return f;
-}
 
-struct _iobuf *fnvnx_iob_fopen(const char *path, const char *mode) { return fnvnx_iob_fsopen(path, mode, 0); }
 
-int fnvnx_iob_fopen_s(struct _iobuf **pf, const char *path, const char *mode)
-{
-    if (!pf)
-        return EINVAL;
-    *pf = fnvnx_iob_fsopen(path, mode, 0);
-    return *pf ? 0 : errno;
-}
 
-/* _fdopen: the stream follows the descriptor's translation mode ('t' / 'b' are only checked, as in MSVC) */
-struct _iobuf *fnvnx_iob_fdopen(int fd, const char *mode)
-{
-    int oflag, iobflag;
-    if (parse_mode(mode, &oflag, &iobflag)) {
-        errno = EINVAL;
-        return NULL;
-    }
-    struct fdent *d = fd_get(fd);
-    if (!d)
-        return NULL;
-    if (fd < 3) {
-        errno = EINVAL; /* the standard streams already have their _iobuf */
-        return NULL;
-    }
-    if (oflag & FNVNX_O_APPEND)
-        d->flags |= FD_APPEND, ioinfo_sync(d);
-    return stream_new(fd, iobflag);
-}
 
-int fnvnx_iob_fclose_nolock(struct _iobuf *f)
-{
-    struct sext *x = ext_of(f);
-    if (!x)
-        return EOF;
-    os_lock(&x->lock);
-    int r = wflush(f, x);
-    os_unlock(&x->lock);
-    if (f >= fnvnx_iob && f < fnvnx_iob + 3)
-        return r ? EOF : 0; /* the host streams stay open */
-    struct stream *s = (struct stream *)f;
-    os_lock(&g_streams_lock);
-    for (struct stream **pp = &g_streams; *pp; pp = &(*pp)->next)
-        if (*pp == s) {
-            *pp = s->next;
-            break;
-        }
-    os_unlock(&g_streams_lock);
-    if (fd_close(x->fd))
-        r = -1;
-    free(x->rbuf);
-    free(x->wbuf);
-    s->magic = 0;
-    free(s);
-    return r ? EOF : 0;
-}
 
-int fnvnx_iob_fclose(struct _iobuf *f) { return fnvnx_iob_fclose_nolock(f); }
 
-int fnvnx_iob_fcloseall(void)
-{
-    int n = 0;
-    for (;;) {
-        os_lock(&g_streams_lock);
-        struct stream *s = g_streams;
-        os_unlock(&g_streams_lock);
-        if (!s)
-            break;
-        fnvnx_iob_fclose(&s->iob);
-        n++;
-    }
-    return n;
-}
 
 /* ---- reading and writing */
 size_t fnvnx_iob_fread(void *buf, size_t size, size_t count, struct _iobuf *f)
@@ -908,205 +530,19 @@ size_t fnvnx_iob_fwrite(const void *buf, size_t size, size_t count, struct _iobu
     return r;
 }
 
-int fnvnx_iob_fgetc(struct _iobuf *f)
-{
-    struct sext *x = lock_stream(f);
-    if (!x)
-        return EOF;
-    struct fdent *d;
-    int c = begin_read(f, x, &d) == 0 ? getch(f, x, d) : EOF;
-    os_unlock(&x->lock);
-    return c;
-}
 
-int fnvnx_iob_fputc(int c, struct _iobuf *f)
-{
-    struct sext *x = lock_stream(f);
-    if (!x)
-        return EOF;
-    struct fdent *d;
-    unsigned char b = (unsigned char)c;
-    int r = begin_write(f, x, &d) == 0 && swrite(f, x, d, &b, 1) == 0 ? b : EOF;
-    os_unlock(&x->lock);
-    return r;
-}
 
-int fnvnx_iob_ungetc(int c, struct _iobuf *f)
-{
-    if (c == EOF)
-        return EOF;
-    struct sext *x = lock_stream(f);
-    if (!x)
-        return EOF;
-    int r = EOF;
-    struct fdent *d = fd_get(x->fd);
-    if (d && (d->flags & FD_READ) && x->nungot < NUNGET) {
-        if (x->last == LAST_WRITE)
-            wflush(f, x);
-        x->last = LAST_READ;
-        x->ungot[x->nungot++] = (unsigned char)c;
-        f->_flag &= ~FNVNX_IOEOF;
-        r = (unsigned char)c;
-    }
-    os_unlock(&x->lock);
-    return r;
-}
 
-char *fnvnx_iob_fgets(char *buf, int n, struct _iobuf *f)
-{
-    if ((!buf && n) || n < 0) {
-        errno = EINVAL;
-        return NULL;
-    }
-    if (n == 0)
-        return NULL;
-    struct sext *x = lock_stream(f);
-    if (!x)
-        return NULL;
-    struct fdent *d;
-    char *r = NULL;
-    if (begin_read(f, x, &d) == 0) {
-        int i = 0;
-        while (i < n - 1) {
-            int c = getch(f, x, d);
-            if (c == EOF)
-                break;
-            buf[i++] = (char)c;
-            if (c == '\n')
-                break;
-        }
-        if (i > 0 && !(f->_flag & FNVNX_IOERR)) {
-            buf[i] = 0;
-            r = buf;
-        }
-    }
-    os_unlock(&x->lock);
-    return r;
-}
 
-int fnvnx_iob_fputs(const char *s, struct _iobuf *f)
-{
-    if (!s) {
-        errno = EINVAL;
-        return EOF;
-    }
-    size_t l = strlen(s);
-    return fnvnx_iob_fwrite(s, 1, l, f) == l || !l ? 0 : EOF;
-}
 
-int fnvnx_iob_puts(const char *s)
-{
-    if (fnvnx_iob_fputs(s, &fnvnx_iob[1]) == EOF || fnvnx_iob_fputc('\n', &fnvnx_iob[1]) == EOF)
-        return EOF;
-    return 0;
-}
 
-int fnvnx_iob_vfprintf(struct _iobuf *f, const char *fmt, va_list ap)
-{
-    if (!fmt || !ext_of(f)) {
-        errno = EINVAL;
-        return -1;
-    }
-    va_list a2;
-    va_copy(a2, ap);
-    int n = _vscprintf(fmt, a2);
-    va_end(a2);
-    if (n < 0)
-        return -1;
-    char small[512], *b = (size_t)n < sizeof small ? small : (char *)malloc((size_t)n + 1);
-    if (!b) {
-        errno = ENOMEM;
-        return -1;
-    }
-    _vsnprintf(b, (size_t)n + 1, fmt, ap);
-    size_t w = n ? fnvnx_iob_fwrite(b, 1, (size_t)n, f) : 0;
-    if (b != small)
-        free(b);
-    return w == (size_t)n ? n : -1;
-}
 
-/* ---- positioning, state */
-int fnvnx_iob_fseeki64(struct _iobuf *f, long long off, int whence)
-{
-    if (whence < 0 || whence > 2) {
-        errno = EINVAL;
-        return -1;
-    }
-    struct sext *x = lock_stream(f);
-    if (!x)
-        return -1;
-    int r = -1;
-    struct fdent *d = fd_get(x->fd);
-    if (!d || (d->flags & FD_DEV)) {
-        errno = EINVAL;
-    } else if (wflush(f, x) == 0) {
-        int64_t p;
-        if (whence == 2) {
-            p = os_file_seek(d->os, off, OS_SEEK_END);
-        } else {
-            long long target = whence == 1 ? stell(x, d) + off : off;
-            p = target < 0 ? -1 : os_file_seek(d->os, target, OS_SEEK_SET);
-        }
-        if (p < 0) {
-            errno = EINVAL;
-        } else {
-            x->rpos = x->rlen = 0;
-            x->nungot = 0;
-            x->last = LAST_NONE;
-            d->flags &= ~FD_CTRLZ, ioinfo_sync(d);
-            f->_flag &= ~FNVNX_IOEOF;
-            r = 0;
-        }
-    }
-    os_unlock(&x->lock);
-    return r;
-}
 
-int fnvnx_iob_fseek(struct _iobuf *f, long off, int whence) { return fnvnx_iob_fseeki64(f, off, whence); }
 
-long long fnvnx_iob_ftelli64(struct _iobuf *f)
-{
-    struct sext *x = lock_stream(f);
-    if (!x)
-        return -1;
-    struct fdent *d = fd_get(x->fd);
-    long long r = d ? stell(x, d) : -1;
-    if (r < 0)
-        errno = EINVAL;
-    os_unlock(&x->lock);
-    return r;
-}
 
-long fnvnx_iob_ftell(struct _iobuf *f)
-{
-    long long r = fnvnx_iob_ftelli64(f);
-    if (r > 0x7FFFFFFFLL) { /* MSVC long is 32-bit */
-        errno = EINVAL;
-        return -1;
-    }
-    return (long)r;
-}
 
-void fnvnx_iob_rewind(struct _iobuf *f)
-{
-    if (fnvnx_iob_fseeki64(f, 0, 0) == 0)
-        fnvnx_iob_clearerr(f);
-}
 
-int fnvnx_iob_feof(struct _iobuf *f) { return ext_of(f) ? f->_flag & FNVNX_IOEOF : 0; }
-int fnvnx_iob_ferror(struct _iobuf *f) { return ext_of(f) ? f->_flag & FNVNX_IOERR : 0; }
 
-void fnvnx_iob_clearerr(struct _iobuf *f)
-{
-    struct sext *x = lock_stream(f);
-    if (!x)
-        return;
-    f->_flag &= ~(FNVNX_IOERR | FNVNX_IOEOF);
-    struct fdent *d = fd_get(x->fd);
-    if (d)
-        d->flags &= ~FD_CTRLZ, ioinfo_sync(d); /* MSVC clears the descriptor's end-of-file flag too */
-    os_unlock(&x->lock);
-}
 
 /* fflush: writes pending output; on a stream that is reading, keeps the logical position (MSVC 2008 discarded
  * the read buffer, which skipped buffered input - nothing in the game relies on that) */
@@ -1139,13 +575,3 @@ int fnvnx_iob_fflush(struct _iobuf *f)
 
 int fnvnx_iob_fileno(struct _iobuf *f) { return ext_of(f) ? f->_file : -1; }
 
-int fnvnx_iob_setvbuf(struct _iobuf *f, char *buf, int mode, size_t size)
-{
-    (void)buf;
-    /* MSVC: _IOFBF 0x0000, _IOLBF 0x0040, _IONBF 0x0004; size 2..INT_MAX unless unbuffered */
-    if (!ext_of(f) || (mode != 0 && mode != 0x40 && mode != 4) || (mode != 4 && (size < 2 || size > 0x7FFFFFFF))) {
-        errno = EINVAL;
-        return -1;
-    }
-    return 0;
-}

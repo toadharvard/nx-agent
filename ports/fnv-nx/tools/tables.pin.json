@@ -1,0 +1,4 @@
+{"format": "fnvnx-tables-pin/1",
+ "repo": "fnv-nx-build", "ref": "l5-platform/manifest", "commit": "3e1a14aa9882f8c8a380cba0ca13642e68af4765",
+ "tree_sha256": "cad6c278793104e23dacd6e55178e4b53d5d4ff933f38a2a810516a6989576c4", "dir": "tables",
+ "files": {"imports.tsv": "762bf9fb4ab97eb4c02460fe00d5488bb862cd69c96eb69916c62622366d1f2d"}}

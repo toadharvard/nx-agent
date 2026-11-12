@@ -2,7 +2,7 @@
  *
  * Standard C functions (memcpy, strlen, sin, qsort, ...) come from the target libc. Functions whose MSVC
  * behaviour differs from the libc function of the same name, or that would collide with it, have an fnvnx_
- * name here; the link step (S2) maps the original CRT address to that name (platform/crt/crt_symbols.tsv).
+ * name here (the exports of the msvcrt table, msvcrt_names.tsv). No exe address is bound to them by name.
  * Types follow the MSVC x86 ABI where they reach game data (errno_t = int, struct _stat64i32 layout). */
 #ifndef FNVNX_MSVCRT_H
 #define FNVNX_MSVCRT_H
@@ -29,51 +29,14 @@ typedef int errno_t;
 /* ---- strings */
 int _stricmp(const char *, const char *);
 int _strnicmp(const char *, const char *, size_t);
-int _strcmpi(const char *, const char *);
-int _stricoll(const char *, const char *);
-int _mbscmp(const unsigned char *, const unsigned char *);
-int _mbsicmp(const unsigned char *, const unsigned char *);
-int _mbsnicmp(const unsigned char *, const unsigned char *, size_t);
-char *_strlwr(char *);
-char *_strupr(char *);
-errno_t _strlwr_s(char *, size_t);
-errno_t _strupr_s(char *, size_t);
 char *_strdup(const char *);
-errno_t strcpy_s(char *, size_t, const char *);
-errno_t strcat_s(char *, size_t, const char *);
-errno_t strncpy_s(char *, size_t, const char *, size_t);
-errno_t strncat_s(char *, size_t, const char *, size_t);
-char *strtok_s(char *, const char *, char **);
-errno_t memcpy_s(void *, size_t, const void *, size_t);
-errno_t memmove_s(void *, size_t, const void *, size_t);
-errno_t wcstombs_s(size_t *, char *, size_t, const unsigned short *, size_t); /* wchar_t is 16-bit (-fshort-wchar) */
 size_t fnvnx_wcslen16(const unsigned short *);
 char *_itoa(int, char *, int);
-char *_ltoa(long, char *, int);
 char *_ultoa(unsigned long, char *, int);
-char *_i64toa(long long, char *, int);
-char *_ui64toa(unsigned long long, char *, int);
-errno_t _itoa_s(int, char *, size_t, int);
-errno_t _ltoa_s(long, char *, size_t, int);
-errno_t _ultoa_s(unsigned long, char *, size_t, int);
-long long _atoi64(const char *);
-long long _strtoi64(const char *, char **, int);
-unsigned long long _strtoui64(const char *, char **, int);
-char *_gcvt(double, int, char *);
-void _splitpath(const char *, char *, char *, char *, char *);
-errno_t _splitpath_s(const char *, char *, size_t, char *, size_t, char *, size_t, char *, size_t);
-void _makepath(char *, const char *, const char *, const char *, const char *);
-errno_t _makepath_s(char *, size_t, const char *, const char *, const char *, const char *);
 
 /* ---- formatted output: MSVC semantics */
 int _snprintf(char *, size_t, const char *, ...);          /* no terminator when full; -1 on truncation */
 int _vsnprintf(char *, size_t, const char *, va_list);
-int sprintf_s(char *, size_t, const char *, ...);          /* "" and -1 (invalid parameter) on overflow */
-int vsprintf_s(char *, size_t, const char *, va_list);
-int _snprintf_s(char *, size_t, size_t, const char *, ...);
-int _vsnprintf_s(char *, size_t, size_t, const char *, va_list);
-int _scprintf(const char *, ...);
-int _vscprintf(const char *, va_list);
 
 /* ---- the one formatter and the one scanner (msvcrt_format.cpp), parameterised by an argument source.
  * *_format / *_scan read a native va_list; *_words / fnvnx_msvcrt_va_* read the x86 stack words a translated
@@ -82,50 +45,14 @@ int _vscprintf(const char *, va_list);
  * returns the full length (-1: a %S/%ls string that does not convert); fnvnx_msvc_bound applies the _snprintf
  * rules to that. */
 int fnvnx_msvc_format(char *buf, size_t n, const char *fmt, va_list ap);
-int fnvnx_msvc_format_words(char *buf, size_t n, const char *fmt, const uint32_t *args);
 int fnvnx_msvc_bound(char *buf, size_t n, int len);
 int fnvnx_msvc_scan(const char *in, const char *fmt, va_list ap);
-int fnvnx_msvc_scan_words(const char *in, const char *fmt, const uint32_t *args);
 double fnvnx_msvc_strtod(const char *s, char **end);
-int fnvnx_msvcrt_va_sprintf(char *dst, const char *fmt, const uint32_t *args);
-int fnvnx_msvcrt_va_snprintf(char *dst, size_t count, const char *fmt, const uint32_t *args);
 int fnvnx_msvcrt_va_vsnprintf(char *dst, size_t count, const char *fmt, const uint32_t *args);
-int fnvnx_msvcrt_va_sscanf(const char *src, const char *fmt, const uint32_t *args);
 int fnvnx_msvcrt_wc_to_byte(unsigned short wc, unsigned char *out);   /* current code page; 1 when it converts */
 int fnvnx_msvcrt_byte_to_wc(unsigned char b, unsigned short *out);
 
-/* ---- files: Windows paths through the runtime's path mapper. _access/_mkdir/_rmdir/_unlink/_getcwd/_chdir
- * carry an fnvnx_ name: newlib uses some underscore names (_unlink, _stat) for its system-call layer. */
-FILE *fnvnx_fopen(const char *path, const char *mode);
-errno_t fnvnx_fopen_s(FILE **, const char *, const char *);
-FILE *fnvnx_fsopen(const char *, const char *, int);
-int fnvnx_remove(const char *);
 int fnvnx_access(const char *, int);
-errno_t fnvnx_access_s(const char *, int);
-int fnvnx_mkdir(const char *);
-int fnvnx_rmdir(const char *);
-int fnvnx_unlink(const char *);
-int fnvnx_chdir(const char *);
-int _fseeki64(FILE *, long long, int);
-long long _ftelli64(FILE *);
-int fnvnx_fileno(FILE *);
-/* ---- math / floating point */
-int _finite(double);
-int _isnan(double);
-double _chgsign(double);
-double _copysign(double, double);
-double _hypot(double, double);
-float _hypotf(float, float);
-double _logb(double);
-double _nextafter(double, double);
-double _scalb(double, long);
-unsigned int _controlfp(unsigned int newval, unsigned int mask);
-unsigned int _control87(unsigned int newval, unsigned int mask);
-errno_t _controlfp_s(unsigned int *cur, unsigned int newval, unsigned int mask);
-unsigned int _clearfp(void);
-unsigned int _statusfp(void);
-void _fpreset(void);
-long long fnvnx_ftol2(double);                              /* _ftol2/_ftol2_sse with the operand passed */
 #define _MCW_EM 0x0008001F
 #define _MCW_RC 0x00000300
 #define _MCW_PC 0x00030000
@@ -147,78 +74,29 @@ long long fnvnx_ftol2(double);                              /* _ftol2/_ftol2_sse
 #define _DN_FLUSH 0x01000000
 #define _CW_DEFAULT (_RC_NEAR + _PC_53 + _EM_INVALID + _EM_ZERODIVIDE + _EM_OVERFLOW + _EM_UNDERFLOW + _EM_INEXACT + _EM_DENORMAL)
 
-/* ---- heap */
-size_t _msize(void *);
-void *_aligned_malloc(size_t, size_t);
-void *_aligned_realloc(void *, size_t, size_t);
-void _aligned_free(void *);
-size_t _aligned_msize(void *, size_t, size_t);
-void *_aligned_offset_malloc(size_t, size_t, size_t);
-void *_expand(void *, size_t);
-int _heapchk(void);
 #define _HEAPOK (-2)
-void *_recalloc(void *, size_t, size_t);
 
 /* ---- process / runtime support */
 int *_errno(void);
-void _invalid_parameter_noinfo(void);
-void _purecall(void);
 /* atexit / _onexit / doexit / exit / _cexit / _c_exit: the exit-handler list of exitlist.cpp (handlers are game function
  * pointers, run through the boundary's guest_invoke). fnvnx_exit_register: 0, or -1 for a NULL handler / no memory. */
 int fnvnx_exit_register(uintptr_t handler);
 FNVNX_CALLBACK_T(fnvnx_atexit_fn, void, (void));
-int fnvnx_atexit(fnvnx_atexit_fn);
 FNVNX_CALLBACK_T(_onexit_t, int, (void));
-_onexit_t _onexit(_onexit_t);
 void fnvnx_doexit(int code, int quick, int retcaller);
-void fnvnx_exit(int code) __attribute__((noreturn));
-void fnvnx_cexit(void);
-void fnvnx_c_exit(void);
-unsigned int fnvnx_clock(void);             /* clock(): CLOCKS_PER_SEC 1000, wall time since start */
 int fnvnx_rand(void);                        /* MSVC LCG, RAND_MAX 0x7FFF, per thread */
 void fnvnx_srand(unsigned int);
-long long _time64(long long *);
 #define FNVNX_MSVC_RAND_MAX 0x7FFF
 
-/* ---- compiler helpers referenced explicitly by decomp source (crt/helpers.cpp) */
-void fnvnx_security_check_cookie(uintptr_t cookie);         /* __security_check_cookie: no /GS here */
-/* MSVC std::_Lockit(int kind) / ~_Lockit as thiscall-shaped functions (self = 4-byte _Lockit) */
-void fnvnx_lockit_ctor(void *self, int kind);
-void fnvnx_lockit_dtor(void *self);
-void fnvnx_xlength_error(void) __attribute__((noreturn));  /* std::_Xlen: length_error("string too long") */
-void fnvnx_xout_of_range(void) __attribute__((noreturn));  /* std::_Xran: out_of_range("invalid string position") */
 
-/* ---- S4b: CRT functions identified from the decomp's calls (crt_symbols.tsv) */
-unsigned char *_mbsnbcpy(unsigned char *, const unsigned char *, size_t); /* single-byte code page */
-unsigned char *_mbsncpy(unsigned char *, const unsigned char *, size_t);
-int _mbsnbcmp(const unsigned char *, const unsigned char *, size_t);
-int _mbsnbicmp(const unsigned char *, const unsigned char *, size_t);
-int fnvnx_wcscmp16(const unsigned short *, const unsigned short *);
 
-/* ---- S4b: MSVC 2008 C++ library (libcpmt) internals, object as first argument, MSVC object layouts
- * (crt/cpplib.cpp, layouts in crt/fnvnx_msvc_cpp.h). Constructors return the object, as MSVC's do. */
-void *fnvnx_exception_ctor(void *self);                                /* std::exception::exception() */
-void *fnvnx_exception_ctor_str(void *self, const char *const *what);  /* exception(const char *const &) */
-void *fnvnx_exception_ctor_noalloc(void *self, const char *const *what, int);
-void *fnvnx_exception_assign(void *self, const void *other);
-void *fnvnx_bad_cast_ctor(void *self, const char *msg);
-void *fnvnx_bad_alloc_ctor(void *self, const char *msg);              /* std::bad_alloc::bad_alloc(const char *) */               /* std::bad_cast::bad_cast(const char *) */
-void fnvnx_mutex_lock(void *self);
-void fnvnx_mutex_unlock(void *self);
-void fnvnx_facet_register(void *facet);                                /* locale::facet::_Facet_Register */
-void fnvnx_facet_incref(void *facet);                                  /* locale::facet::_Incref */
-size_t fnvnx_cpplib_facet_count(void);
-void fnvnx_cpplib_facet_tidy(void);
+/* std::bad_cast::bad_cast(const char *) */
 typedef struct {                                                       /* _Ctypevec, 16 bytes on ILP32 */
     uint32_t _Hand;
     uint32_t _Page;
     const short *_Table;
     int _Delfl;
 } fnvnx_ctypevec;
-const short *fnvnx_msvc_ctype_table(void);                             /* MSVC "C" locale _pctype[0..255] */
-void fnvnx_ios_base_dtor(void *ios);                                   /* ios_base::_Ios_base_dtor */
-void fnvnx_basic_ios_init(void *self, void *strbuf, int isstd);        /* basic_ios<char>::init */
-void *fnvnx_fiopen(const char *name, int mode, int prot);              /* std::_Fiopen -> struct _iobuf * */
 
 #ifdef __cplusplus
 }

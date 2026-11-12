@@ -15,8 +15,7 @@
  * prototypes). In C++ it includes <cstdio> first, then adds overloads of the standard names that take _iobuf*
  * (C++ linkage, so they coexist with libc's FILE* functions) forwarding to fnvnx_iob_*. fopen cannot be
  * overloaded (same parameters as libc's): define FNVNX_IOBUF_FOPEN before including to map fopen / _fsopen to
- * the _iobuf versions (macro), or call fnvnx_iob_fopen. S2 binds the CRT addresses to the fnvnx_iob_* names
- * (platform/crt/crt_symbols.tsv), so calls that still reach libc names by address land here too. */
+ * the _iobuf versions (macro), or call fnvnx_iob_fopen. */
 #ifndef FNVNX_IOBUF_H
 #define FNVNX_IOBUF_H
 
@@ -90,55 +89,14 @@ typedef struct _iobuf _iobuf;
 #define FNVNX_IOB_COUNT 20 /* MSVCRT.DLL's _iob has 20 entries; [0..2] are the standard streams, the rest stay zero */
 extern struct _iobuf fnvnx_iob[FNVNX_IOB_COUNT];
 int fnvnx_isatty(int fd);
-struct _iobuf *__iob_func(void);
 
-/* ---- stdio on _iobuf (the CRT functions of the same name without the fnvnx_iob_ prefix) */
-struct _iobuf *fnvnx_iob_fopen(const char *path, const char *mode);   /* Windows path, MSVC mode string */
-int fnvnx_iob_fopen_s(struct _iobuf **f, const char *path, const char *mode);
-struct _iobuf *fnvnx_iob_fsopen(const char *path, const char *mode, int shflag);
-struct _iobuf *fnvnx_iob_fdopen(int fd, const char *mode);              /* _fdopen */
-int fnvnx_iob_fclose(struct _iobuf *f);
-int fnvnx_iob_fclose_nolock(struct _iobuf *f);
-int fnvnx_iob_fcloseall(void);
 size_t fnvnx_iob_fread(void *buf, size_t size, size_t count, struct _iobuf *f);
 size_t fnvnx_iob_fwrite(const void *buf, size_t size, size_t count, struct _iobuf *f);
-int fnvnx_iob_fgetc(struct _iobuf *f);                                   /* also getc, _fgetc_nolock */
-int fnvnx_iob_fputc(int c, struct _iobuf *f);                            /* also putc */
-int fnvnx_iob_ungetc(int c, struct _iobuf *f);
-char *fnvnx_iob_fgets(char *buf, int n, struct _iobuf *f);
-int fnvnx_iob_fputs(const char *s, struct _iobuf *f);
-int fnvnx_iob_puts(const char *s);
-int fnvnx_iob_vfprintf(struct _iobuf *f, const char *fmt, va_list ap);
-int fnvnx_iob_fseek(struct _iobuf *f, long off, int whence);
-long fnvnx_iob_ftell(struct _iobuf *f);
-int fnvnx_iob_fseeki64(struct _iobuf *f, long long off, int whence);
-long long fnvnx_iob_ftelli64(struct _iobuf *f);
-void fnvnx_iob_rewind(struct _iobuf *f);
-int fnvnx_iob_feof(struct _iobuf *f);
-int fnvnx_iob_ferror(struct _iobuf *f);
-void fnvnx_iob_clearerr(struct _iobuf *f);
 int fnvnx_iob_fflush(struct _iobuf *f);                                  /* NULL: all streams */
 int fnvnx_iob_fileno(struct _iobuf *f);
-int fnvnx_iob_setvbuf(struct _iobuf *f, char *buf, int mode, size_t size);
 
-/* ---- lowio (the MSVC names are _open, _sopen, _close, _read, _write, _lseek, ...; newlib uses several of
- * those for its system-call layer, hence the prefix) */
-int fnvnx_open(const char *path, int oflag, int pmode);
-int fnvnx_sopen(const char *path, int oflag, int shflag, int pmode);
-int fnvnx_close(int fd);
-int fnvnx_read(int fd, void *buf, unsigned int n);
 int fnvnx_write(int fd, const void *buf, unsigned int n);
-long fnvnx_lseek(int fd, long off, int whence);
 long long fnvnx_lseeki64(int fd, long long off, int whence);
-long fnvnx_tell(int fd);
-long long fnvnx_telli64(int fd);
-long fnvnx_filelength(int fd);
-int fnvnx_eof(int fd);
-int fnvnx_commit(int fd);
-int fnvnx_setmode(int fd, int mode);          /* returns the previous mode (_O_TEXT / _O_BINARY), -1 on error */
-int fnvnx_set_fmode(int mode);                /* _set_fmode: default mode of fopen/_open without t/b */
-int fnvnx_get_fmode(int *mode);
-extern int fnvnx_fmode;                       /* _fmode */
 
 #ifdef __cplusplus
 }
@@ -148,41 +106,10 @@ extern int fnvnx_fmode;                       /* _fmode */
 #ifdef _fileno
 #undef _fileno
 #endif
-inline int fclose(_iobuf *f) { return fnvnx_iob_fclose(f); }
-inline int _fclose_nolock(_iobuf *f) { return fnvnx_iob_fclose_nolock(f); }
-inline int fopen_s(_iobuf **f, const char *p, const char *m) { return fnvnx_iob_fopen_s(f, p, m); }
-inline _iobuf *_fsopen(const char *p, const char *m, int sh) { return fnvnx_iob_fsopen(p, m, sh); }
-inline _iobuf *_fdopen(int fd, const char *m) { return fnvnx_iob_fdopen(fd, m); }
 inline size_t fread(void *b, size_t s, size_t n, _iobuf *f) { return fnvnx_iob_fread(b, s, n, f); }
 inline size_t fwrite(const void *b, size_t s, size_t n, _iobuf *f) { return fnvnx_iob_fwrite(b, s, n, f); }
-inline int fgetc(_iobuf *f) { return fnvnx_iob_fgetc(f); }
-inline int getc(_iobuf *f) { return fnvnx_iob_fgetc(f); }
-inline int fputc(int c, _iobuf *f) { return fnvnx_iob_fputc(c, f); }
-inline int putc(int c, _iobuf *f) { return fnvnx_iob_fputc(c, f); }
-inline int ungetc(int c, _iobuf *f) { return fnvnx_iob_ungetc(c, f); }
-inline char *fgets(char *b, int n, _iobuf *f) { return fnvnx_iob_fgets(b, n, f); }
-inline int fputs(const char *s, _iobuf *f) { return fnvnx_iob_fputs(s, f); }
-inline int vfprintf(_iobuf *f, const char *fmt, va_list ap) { return fnvnx_iob_vfprintf(f, fmt, ap); }
-inline int fprintf(_iobuf *f, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
-inline int fprintf(_iobuf *f, const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    int r = fnvnx_iob_vfprintf(f, fmt, ap);
-    va_end(ap);
-    return r;
-}
-inline int fseek(_iobuf *f, long o, int w) { return fnvnx_iob_fseek(f, o, w); }
-inline long ftell(_iobuf *f) { return fnvnx_iob_ftell(f); }
-inline int _fseeki64(_iobuf *f, long long o, int w) { return fnvnx_iob_fseeki64(f, o, w); }
-inline long long _ftelli64(_iobuf *f) { return fnvnx_iob_ftelli64(f); }
-inline void rewind(_iobuf *f) { fnvnx_iob_rewind(f); }
-inline int feof(_iobuf *f) { return fnvnx_iob_feof(f); }
-inline int ferror(_iobuf *f) { return fnvnx_iob_ferror(f); }
-inline void clearerr(_iobuf *f) { fnvnx_iob_clearerr(f); }
 inline int fflush(_iobuf *f) { return fnvnx_iob_fflush(f); }
 inline int _fileno(_iobuf *f) { return fnvnx_iob_fileno(f); }
-inline int setvbuf(_iobuf *f, char *b, int m, size_t n) { return fnvnx_iob_setvbuf(f, b, m, n); }
 #endif
 #endif
 
