@@ -65,6 +65,7 @@ void clk_file_removed(const char *host) { (void)host; }
 int clk_file_times(const char *host, int64_t ft[3]) { (void)host; (void)ft; return 0; }
 
 /* ---- pumps: a thread paced by the monotonic clock, one render per period */
+namespace {   // TU-local type: internal linkage (the other clock backend defines its own clk_pump)
 struct clk_pump {
     os_thread *thread;
     volatile int run;
@@ -73,6 +74,7 @@ struct clk_pump {
     uint64_t period_ns;
     uint32_t period;
 };
+}   // namespace
 
 static void pump_main(void *p)
 {

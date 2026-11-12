@@ -35,7 +35,7 @@ struct w32_map {
 
 /* ---- named sections: the same name rules as the other named objects (a name is at most MAX_PATH - 1 characters;
  * "Local\x" is "x", "Global\x" is another; no backslash after the prefix) */
-struct named { struct named *next; char *key; struct w32_map *m; };
+namespace { struct named { struct named *next; char *key; struct w32_map *m; }; }   // TU-local type: internal linkage (sync.cpp has its own)
 static struct named *g_named;
 static os_lock_t g_named_lock;
 
