@@ -130,7 +130,17 @@ extern NxDk nxdk;
 /* ---- provided by the embedder ---------------------------------------------------------------------------------------------- */
 void* nxdk_guest_ptr(uint64_t addr, uint64_t len);
 void nxdk_on_present(uint32_t frame);
-/* the install-time shader pack (translated.nxsp, NXSP v1) read into memory: the bytes and their size, NULL when none is installed. No default: a build without the embedder does not link (dk_shader.c). */
+/* the install-time shader pack (translated.nxsp) read into memory: the bytes and their size, NULL when none is installed. No default: a build without the embedder does not link (dk_shader.c).
+ * NXSP, all little-endian:
+ *   header (32 bytes) "NXSP", u32 ver (1 or 2), u32 count, u32 idx_off, u32 data_off; v2 adds u32 gcount at byte 20 and u32 gidx_off at byte 24 (a v1 pack has gcount = 0,
+ *                     bytes 20..31 of a v1 header are its pack id and are not read here)
+ *   index (v1 rows)   count rows of 104 bytes at idx_off: name[48] family[24] variant[16] (NUL padded), u32 stage, u32 offset, u32 size, u32 crc32 of the DKSH at offset; the
+ *                     D3D translation lookup (SHADER_CREATE_D3D: name = %016x of fnv1a64(bytecode), family "translated")
+ *   G table (v2)      gcount rows of 52 bytes at gidx_off: u8 key[32]; u32 stage; u32 glsl_off; u32 glsl_size; u32 dksh_off; u32 dksh_size. Offsets are from the start of the pack,
+ *                     rows are strictly ascending by memcmp of key (so keys are unique), stage is an NxShaderDesc stage, every [off, off + size) is inside the pack. SHADER_CREATE
+ *                     (NxShaderDesc: stage, glsl, glsl_size, key) finds the row by key (binary search), requires row.stage and row.glsl_size to equal the descriptor's and the row's
+ *                     GLSL bytes to equal the descriptor's, and creates the shader from the row's DKSH.
+ * Validity is checked once, when the pack is first read; an invalid pack is reported through nxdk_err and every SHADER_CREATE reports the same error. */
 const void* nxdk_shader_pack(uint64_t* size);
 
 /* ---- dk_core.c ---------------------------------------------------------------------------------------------------------------- */
