@@ -1,0 +1,10 @@
+fact	detail	value
+function	parse_instruction_token	mojoshader.c:2041
+test	instruction->opcode_string == NULL	mojoshader.c:2063
+rejection	fail(ctx, "Unknown opcode.") ; return insttoks + 1	mojoshader.c:2065
+emitter_call	if (!isfail(ctx)) emitter(ctx)	mojoshader.c:2106
+order	test < unconditional return < emitter call, in one function	yes
+emitter_use_sites	instruction emitters are called only in parse_instruction_token (count of `emitter(` / `->emitter[` in mojoshader.c)	1
+rows_opcode_string_0	table rows with opcode_string 0: 16 of 97; all named RESERVED; shader_types UNKNOWN	all
+second_rejection	(ctx->shader_type & instruction->shader_types) == 0 -> failf, MOJOSHADER_TYPE_UNKNOWN	mojoshader.c:2078
+glsl_body	emit_GLSL_RESERVED: empty (comment: fails in the state machine)	mojoshader_profile_glsl.c:2497
