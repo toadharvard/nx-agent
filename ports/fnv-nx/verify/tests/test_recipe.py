@@ -447,6 +447,16 @@ def main():
           len(dups([T + "hdr_prod", T + "hdr_prod2"], rf2)) == 1 and T + "hdr_prod/h.h" in dups([T + "hdr_prod", T + "hdr_prod2"], rf2)[0]
           and T + "hdr_prod2/h.h" in dups([T + "hdr_prod", T + "hdr_prod2"], rf2)[0])
     check("two include dirs with different headers accepted", not dups([T + "hdr_prod", T + "hdr_prod2"], rfiles + [T + "hdr_prod2/g.h"]))
+    # across the whole target: two admitted guest roots with their own include/ dirs holding fnvnx/x.h, neither in this recipe's include
+    cr = dict(rr, **{T + "cr1": {"path": T + "cr1", "class": "product", "target": own}, T + "cr2": {"path": T + "cr2", "class": "product", "target": own},
+                     T + "cr3": {"path": T + "cr3", "class": "product", "target": other}})
+    crf = rfiles + [T + "cr1/include/fnvnx/x.h", T + "cr2/include/fnvnx/x.h", T + "cr3/include/fnvnx/x.h"]
+
+    def cross(roots_, files_):
+        return [e for e in recipe.check(mut(), ROOT, files_, roots_, None, rk) if "one home per header" in e]
+    check("two admitted roots of one target with fnvnx/x.h in include/ are red (naming both)", len(cross(cr, crf)) == 1 and T + "cr1/include/fnvnx/x.h" in cross(cr, crf)[0]
+          and T + "cr2/include/fnvnx/x.h" in cross(cr, crf)[0] and T + "cr3/include/fnvnx/x.h" not in cross(cr, crf)[0], cross(cr, crf))
+    check("the same header in a root of the other target, or only once, is accepted", not cross(cr, [f for f in crf if "cr2" not in f]), cross(cr, [f for f in crf if "cr2" not in f]))
     m = mut()
     m["generated"][0]["outputs"] = ["a.c"]
     check("generated output colliding with a tracked file rejected", any("also a tracked file" in e for e in errs(m)))
