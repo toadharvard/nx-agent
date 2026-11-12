@@ -43,7 +43,7 @@ struct NxChainCore : NxObj {
 enum { NX_DEV_OK = 0, NX_DEV_LOST = 1, NX_DEV_NOTRESET = 2 };   // Wine d3d9_device_state
 struct NxCursorState { uint8_t* bgra = nullptr; uint32_t w = 0, h = 0, hx = 0, hy = 0; int32_t x = 0, y = 0; bool visible = false; ~NxCursorState() { nxd3d_free(bgra); } };
 struct NxDevLife : NxDevLifeBase {
-    NxChainCore** chains = nullptr; uint32_t nchains = 0;   // [0] = the implicit chain, then the additional ones (not owned: each chain removes itself when destroyed)
+    NxChainCore** chains = nullptr; uint32_t nchains = 0, implicit_chains = 0;   // implicit_chains = Wine wined3d device->swapchain_count (the implicit chains; set by nx_chain_create); [0] = the implicit chain, then the additional ones (not owned: each chain removes itself when destroyed)
     NxObj* ds = nullptr;                                    // auto depth stencil surface (implicit), null without EnableAutoDepthStencil
     D3DDEVICE_CREATION_PARAMETERS cp = {};
     uint32_t state = NX_DEV_OK; bool in_scene = false, ex = false, dialog = false; int32_t gpu_prio = 0; uint32_t latency = 3, frame = 0; uint32_t prof = 0;

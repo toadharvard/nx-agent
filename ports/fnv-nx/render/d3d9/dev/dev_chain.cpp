@@ -67,6 +67,7 @@ HRESULT nx_chain_create(NxDeviceCore* d, const D3DPRESENT_PARAMETERS& p, const N
     for (int i = 0; i < 256; i++) c->ramp.red[i] = c->ramp.green[i] = c->ramp.blue[i] = (WORD)(i * 257);   // the identity ramp (the display's initial ramp)
     HRESULT hr = L->add_chain(c) ? c->make_buffers(e, c->pp) : E_OUTOFMEMORY;
     if (FAILED(hr)) { if (implicit) { o->owned = 0; o->ci->destroy(o); } else o->release(); return hr; }
+    if (implicit) L->implicit_chains++;   // wined3d_device_init_3d: device->swapchain_count
     *out = c; return D3D_OK;
 }
 
