@@ -1948,3 +1948,15 @@ Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 
               (transitively), is tainted. Exit 2 lists chains. Stage results: S/keys/<key>/result.json (sandbox.py).
   defect / defects   rule-defect queue: content-addressed JSON entries, verification-class data only.
 ```
+
+## verify/hdrdefs.py
+
+```text
+The DEFINITIONS of a socket header set, extracted by the pinned compiler, and the comparison of two sets (stdlib only; tests/test_hdrdefs.py).
+A set maps ("macro", NAME) to the integer value of an object-like macro defined in sys/socket.h, netinet/in.h, netinet/tcp.h, sys/errno.h or
+sys/_sockaddr_storage.h, and ("field", STRUCT, FIELD) to (offset, size) (FIELD "<struct>": (alignment, sizeof)) for sockaddr, sockaddr_in,
+sockaddr_in6, linger, timeval, msghdr. The preprocessor (`-E -dD`) says which macros those headers define; the compiler (`-S`) evaluates them;
+a definition it rejects is None. compare(ref, tag): the keys that differ and the keys the reference defines that the tag lacks; a tag matches
+when both are empty. Subcommands: extract (include dirs -> json), tag (a FreeBSD git tree -> json: stages sys, netinet, netinet6, net, x86 and
+machine = arm64 else amd64 as an include tree), compare. Used to DERIVE the FreeBSD release of the console's bsd service (inbox l4-verify-010).
+```
