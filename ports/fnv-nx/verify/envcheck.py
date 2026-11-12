@@ -9,7 +9,7 @@ Rule (packages are DERIVED, never listed by hand): a package is in the environme
 or test executes or reads as data: (1) each of PROGRAMS (resolved path + loader closure); (2) python's loader closure (interpreter,
 lib-dynload, PY_MODULES); (3) UNIT_CC through unitstage.gcc_set(): driver, `as`, every ELF file of its trees + closure, and EVERY
 FILE under its trees (the unit stage ingests them whole: /usr/include, GCC install dir with plugin headers, libexec); the host
-gcc's HOST_GCC_PROGS/HOST_GCC_FILES. The trees also get a listing digest (an extra package adding files there is a mismatch).
+gcc's HOST_GCC_PROGS/HOST_GCC_FILES; (4) the renderer's host libraries: RENDER_LIBS (loader cache names, with their loader closure) and RENDER_FILES. The trees also get a listing digest (an extra package adding files there is a mismatch).
 A file without a dpkg owner outside python's prefix is an error. Programs and who executes them: strace opentrace.py; busybox
 tests/test_graph,test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linux-gnu-g++ test_unitstage (unitstage.py);
 aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount; ar,clang test_coffnorm;
@@ -42,6 +42,8 @@ CLANG_API = ["clang/AST/RecursiveASTVisitor.h", "clang/Frontend/FrontendPluginRe
 CLANG_LIBS = ["libclang-cpp.so.18.1", "libclang.so"]   # under `llvm-config-18 --libdir`: what a clang plugin links / dlopens
 M32_PROBE = "#include <stdint.h>\n#include <stdlib.h>\nint main(){return 0;}\n"   # clang -m32 -M: every header a 32-bit compile of the C library reads (gnu/stubs-32.h: libc6-dev-i386)
 PY_MODULES = {"capstone": "capstone", "numpy": "numpy", "unicorn": "unicorn", "pyelftools": "elftools"}   # distribution -> import name
+RENDER_LIBS = ["libEGL.so.1", "libEGL_mesa.so.0"]   # ldconfig names: the EGL loader the published libnxgl4.so links, and the Mesa vendor it dispatches to (NXGL4_HOST.md section 2); their loader closure (mesa-libgallium, libllvm, ...) is derived
+RENDER_FILES = ["/usr/share/glvnd/egl_vendor.d/50_mesa.json"]   # read by libEGL.so.1 to find that vendor
 KERNEL = ["unshare mount+pid+net+uts+ipc namespaces as root", "seccomp filter", "ptrace (strace)"]
 
 def env_id(doc):
@@ -191,6 +193,15 @@ def snapshot():
     for flag, names in (("-print-prog-name=", HOST_GCC_PROGS), ("-print-file-name=", HOST_GCC_FILES)):
         for n in names:
             add(subprocess.run([gcc, flag + n], capture_output=True, text=True).stdout.strip())
+    ld = subprocess.run(["/sbin/ldconfig", "-p"], capture_output=True, text=True, check=True).stdout
+    for n in RENDER_LIBS:   # the renderer's host libraries (verify/bootgpu.py loads libnxgl4.so; test_bootgpu, test_boot_job, boot_job.sh)
+        hit = [l.split("=>")[1].strip() for l in ld.splitlines() if l.strip().startswith(n + " ") and "x86-64" in l]
+        if not hit:
+            raise SystemExit("envcheck: %s is not in the loader cache (the renderer's host library)" % n)
+        add(os.path.realpath(hit[0]))
+        loads([os.path.realpath(hit[0])])
+    for f in RENDER_FILES:
+        add(f)
     return {"format": FORMAT, "os": _os(), "arch": platform.machine(),
             "uid": os.geteuid(), "trees": {t: tree_digest(t) for t in trees}, "packages": {p: _dpkg(p) for p in sorted(pk)},
             "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in sorted(PY_MODULES)}},

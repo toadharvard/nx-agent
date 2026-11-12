@@ -41,6 +41,7 @@ def guest_repo(name, rec, pin, target="guest", files=None):
 
 
 def main():
+    pin_real = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))
     ext = {"name": "gcc-msvcmodel", "repo": "fnv-nx-build", "ref": "tools/gcc-ilp32-msvcmodel", "commit": "a" * 40, "tree_sha256": "b" * 64, "at": "/ext/gcc"}
     pin = {"format": "fnvnx-guest-compiler/1", "external": ext, "cc": "bin/aarch64-linux-gnu-gcc", "cxx": "bin/aarch64-linux-gnu-g++"}
     rec = guest_rec(ext)
@@ -73,6 +74,18 @@ def main():
             check("guest root with %s in flags.%s is invalid" % (f, k), any("flags.%s: %s downgrades" % (k, f) in x for x in errs(g, bad)), errs(g, bad))
     check("host root may carry -fpermissive", not [x for x in errs(host, dict(REC, flags=dict(REC["flags"], cxx=REC["flags"]["cxx"] + ["-fpermissive"]))) if "downgrades" in x])
     check("host root needs no -Werror=attributes", not [x for x in errs(host, REC) if "attributes" in x], errs(host, REC))
+    # --- the runtime external (guest libc/libstdc++) and the sample build.json of the platform root
+    rtp = pin_real["runtime"]
+    sample = json.load(open(os.path.join(REAL, T + "verify/samples/platform.build.json")))
+    gs = guest_repo("gs", sample, pin_real, files={ROOT + "/a.cc": SRC})
+    check("sample platform build.json is accepted by recipe check", errs(gs, sample) == [], errs(gs, sample))
+    bad_rt = json.loads(json.dumps(sample))
+    bad_rt["external"] = [x if x["name"] != rtp["name"] else dict(x, commit="e" * 40) for x in bad_rt["external"]]
+    check("a recipe whose runtime external is not the pinned one is red", any("not the pinned runtime" in x for x in errs(gs, bad_rt)), errs(gs, bad_rt))
+    no_rt = json.loads(json.dumps(sample))
+    no_rt["external"] = [x for x in no_rt["external"] if x["name"] != rtp["name"]]
+    no_rt["include"] = []
+    check("a guest root may leave the runtime out", not [x for x in errs(gs, no_rt) if "runtime" in x], errs(gs, no_rt))
     # --- the real compiler, by the pin of the checkout (no environment switch, no skip)
     pin = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))
     ext = pin["external"]
@@ -106,6 +119,11 @@ def main():
           and "#0x80000000" in disasm(ra, "_Z3f2if"))
     t = os.path.join(os.path.dirname(VERIFY), "toolchain", "msvcmodel", "test_msvcmodel.py")
     p = subprocess.run([sys.executable, "-I", t], env=dict(os.environ, CXX=os.path.join(prefix, "bin/aarch64-linux-gnu-g++")), capture_output=True, text=True)
+    # the sample root builds a unit that includes the guest's libstdc++ and newlib headers (compiler 13.3 reads gcc 15.2 headers: -std=gnu++20)
+    hdr = "#include <vector>\n#include <string>\n#include <cstdio>\nint hv(int n) { std::vector<int> v(n); std::string s(\"x\"); std::printf(\"%d\", (int)v.size()); return (int)s.size(); }\n"
+    gp = guest_repo("gp", sample, pin_real, files={ROOT + "/h.cc": hdr})
+    rp, tpb = build(gp, "GP")
+    check("sample platform root builds a unit using the runtime's libstdc++ and newlib headers", rp["status"] == "green", rp.get("failure"))
     check("test_msvcmodel.py on the external", p.returncode == 0 and "skip" not in p.stdout, p.stdout + p.stderr)
 
 

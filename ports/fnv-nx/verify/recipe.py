@@ -46,7 +46,7 @@ TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
 ENV_JSON = TREE + "/verify/env.json"   # the declared environment of the checkout (l1.py checks the same file)
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
-        "plugins", "plugin_cxx", "unit_flags", "unit_facts"}
+        "plugins", "plugin_cxx"}
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
 GUEST_TARGETS = ("guest", "host")
@@ -63,9 +63,6 @@ PLUGIN_SOURCES = {"fnvnx_ftoi": _T + "ftoi/fnvnx_ftoi.cc", "fnvnx_order": _T + "
 PLUGIN_INPUTS = {"fnvnx_layout": [_T + "names/fnvnx_names.cc"]}
 PLUGIN_ARGS = {n: {} for n in PLUGIN_SOURCES}
 PLUGIN_ARGS["fnvnx_order"] = {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}
-# Per-unit flags (key `unit_flags`): the only one is the pi plugin's fpfast, derived from the unit's /fp:fast fact in `unit_facts` (RECIPE.md).
-FPFAST_FLAG = "-fplugin-arg-fnvnx_pi-fpfast"
-FASTMATH_FACT = "/fp:fast"
 # Flags of the game's C++ that fix its semantics (compile.sh); fnvnx_sdd needs -DFNVNX_SDD=1 and -fno-devirtualize.
 SEMANTICS_FLAGS = ("-mabi=ilp32", "-fms-extensions", "-fshort-wchar", "-frounding-math", "-fsigned-char", "-fno-strict-aliasing", "-fwrapv",
                    "-fno-delete-null-pointer-checks", "-fcheck-new", "-fno-sized-deallocation", "-fno-lifetime-dse", "-ffp-contract=off",
@@ -200,6 +197,9 @@ def guest_errors(rec, root, roots, pin):
         return ["guest root %s: compiler must be the external compiler %r (not a distribution driver)" % (root, pin["external"].get("name"))]
     ex = next((e for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == c["external"]), None)
     bad = [] if ex == pin["external"] else ["external %r is not the pinned one (%s)" % (c["external"], pin["external"])]
+    rt = pin.get("runtime")   # the guest's libc/libstdc++ external: when a recipe declares it (by name), it is the pinned one, exactly
+    if isinstance(rt, dict):
+        bad += ["external %r is not the pinned runtime (%s)" % (e["name"], rt) for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == rt["name"] and e != rt]
     bad += ["compiler.%s is %r, pinned %r" % (k, c[k], pin.get(k)) for k in ("cc", "cxx") if c[k] != pin.get(k)]
     fl = rec.get("flags") if isinstance(rec.get("flags"), dict) else {}
     # an attribute that neither the compiler nor a loaded plugin registers is otherwise dropped with a warning: a marker a rule relies on vanishes
@@ -313,53 +313,6 @@ def check(rec, root, files, roots, pin=None):
             err += ["link.flags: %s is in the refusal set R" % t for t in refused(lk["flags"])]
     err += guest_errors(rec, root, roots, pin)
     err += plugin_errors(rec, root, files, roots, units, names)
-    err += unit_flag_errors(rec, root, roots, units, mine, seen)
-    return err
-
-
-def unit_flag_errors(rec, root, roots, units, mine, gen):
-    """Shape of `unit_flags` ({game C++ unit: [FPFAST_FLAG]}) and `unit_facts` (a tracked file or generated output: units.json, {"units": [{"source",
-    "flags"}]}). The values are checked against the facts by fpfast_errors at build time (the file may be a generated output). A native guest root
-    that declares `game` must declare `unit_facts`: its units' /fp:fast facts are then compared, so no unit can lose or gain the flag silently."""
-    uf, fa, gm = rec.get("unit_flags"), rec.get("unit_facts"), rec.get("game")
-    err = []
-    if fa is not None and not (isinstance(fa, str) and rel_ok(fa) and (fa in mine or fa in gen)):
-        err.append("unit_facts %r is neither a tracked file of the root nor a generated output" % (fa,))
-    if uf is not None:
-        if not (isinstance(uf, dict) and all(isinstance(u, str) and isinstance(v, list) and v and all(isinstance(f, str) for f in v) for u, v in uf.items())):
-            err.append("unit_flags must be {unit: [flag, ...]} (non-empty lists)")
-        else:
-            pre = gm.strip("/") + "/" if isinstance(gm, str) else None
-            for u, v in sorted(uf.items()):
-                if not (u in units and u.endswith(CXX_EXT) and pre and u.startswith(pre)):
-                    err.append("unit_flags: %r is not a C++ unit under game" % u)
-                err += ["unit_flags[%s]: %r is not a unit flag (only %s)" % (u, f, FPFAST_FLAG) for f in v if f != FPFAST_FLAG]
-            if fa is None:
-                err.append("unit_flags without unit_facts: a per-unit flag is judged against the unit's fact")
-            if uf and "fnvnx_pi" not in [x.get("name") for x in rec.get("plugins", []) if isinstance(x, dict)]:
-                err.append("unit_flags need the plugin fnvnx_pi, which interprets %s" % FPFAST_FLAG)
-    ent = roots.get(root, {})
-    if ent.get("target") == "guest" and ent.get("cxx_origin") == "native" and gm is not None and fa is None:
-        err.append("a native guest root with `game` needs unit_facts (the units' /fp:fast facts)")
-    return err
-
-
-def fpfast_errors(rec, facts_text):
-    """The per-unit rule: for every C++ unit under `game`, FPFAST_FLAG is in unit_flags iff the unit's entry in unit_facts (a "source" equal to the
-    root-relative unit path) lists FASTMATH_FACT; a unit with no entry has no such fact (compile.sh: no entry, no flag). A fact for a source that is
-    not a C++ unit under game is an error. -> [str]. Assumption: unit_facts is produced from the exe/decomp facts by the generator, not by hand."""
-    try:
-        ent = json.loads(facts_text)["units"]
-        fast = {e["source"] for e in ent if FASTMATH_FACT in (e.get("flags") or [])}
-    except (ValueError, KeyError, TypeError, AttributeError) as x:
-        return ["unit_facts is not units.json ({\"units\": [{\"source\", \"flags\"}]}): %s" % str(x)[:100]]
-    gm = rec.get("game")
-    if not isinstance(gm, str):
-        return []
-    pre = gm.strip("/") + "/"
-    uf = rec.get("unit_flags", {})
-    err = ["unit %s: /fp:fast fact without %s" % (u, FPFAST_FLAG) for u in sorted(fast) if FPFAST_FLAG not in uf.get(u, [])]
-    err += ["unit %s: %s without a /fp:fast fact" % (u, FPFAST_FLAG) for u in sorted(uf) if FPFAST_FLAG in uf[u] and u not in fast]
     return err
 
 
@@ -704,7 +657,6 @@ class Job:
             builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtp, flags_file=fp,
                                                            src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws)))
             builds[k].cc_drop = drop
-            builds[k].unit_cc_flags = rec.get("unit_flags", {}) if k == "cxx" else {}   # the pi plugin's fpfast, per unit (CC stage argv, so in its key)
             if k == "cxx":   # plugins are loaded by the C++ front end of the CC stage only (not by cc1, not by preprocessing)
                 builds[k].cc_flags = [f for _, _, fl in self.built for f in fl]
                 builds[k].cc_inputs = [("/plug/" + n, t) for n, t, _ in self.built]
@@ -799,10 +751,6 @@ def build(repo, root, store, out, jobs=4, ext=None):
         _copy(repo, [f for f in j.files if under(f, root)], root, os.path.join(ws, "root"))
         j.externals(ws)
         j.generate(ws)
-        if j.rec.get("unit_facts"):
-            fe = fpfast_errors(j.rec, open(os.path.join(ws, "root", j.rec["unit_facts"])).read())
-            if fe:
-                raise BuildRed({"stage": "unit_facts", "exit": None, "stderr": fe[:20]})
         objs, und = j.compile(ws, units), set()
         for n, t, _ in j.built:
             ent = cas.manifest(t, store)["entries"][n + ".so"]
