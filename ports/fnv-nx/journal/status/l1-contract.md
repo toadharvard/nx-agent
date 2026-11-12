@@ -251,3 +251,12 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
     - OWNER-6 alone does not give them: interior references and negative in-bounds indices make "next referenced address" unsound. I withdrew that idea.
     - Candidates: (a) extents from the decomp layout facts (L2), (b) value ranges from L3a, (c) a write-set fact for the cell.
   - w18 now does (iii) 0x56b719 and records the raw fact for (i).
+- 03:48Z: three corrections to my own decisions, from facts measured by w17.
+  - (1) **Plugins per language:** set by a static ELF fact. cc1 cannot load layout, sdd, pi or names (they need cp_global_trees). C units get ftoi, order, dispatch and addr only. This is reported to L2 as an open coverage gap: layout and names must become C-capable.
+  - (2) **-fPIC is kept,** per ARCHITECTURE D16 and D9 (GOT rebinding). I withdrew -fPIE.
+  - (3) **EH stays on:** native guest code has throw in platform/win32, platform/crt and shim/include (L5 db504735: try 8, throw 22, catch 9). Render and loader have 0.
+  - flags.semantics: 36 flags. Only -fno-sized-deallocation is dropped for C.
+- **w18 (iii):** the field rule is retracted as unsound, because it would need object extents. Both (i) and (iii) are open pending extents.
+  - Next for w18: allocation-site objects with a constant size.
+  - L2 is asked whether the decomp layout facts give global extents.
+- **Heads for MERGER:** w16 0b0d08b3 (contract/include headers) and w14 c0f23a3f (rebased onto w10). closure_key is in 58a2984b, which is in w14.
