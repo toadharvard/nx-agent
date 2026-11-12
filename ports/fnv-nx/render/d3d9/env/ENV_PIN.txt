@@ -30,8 +30,8 @@ build toolchain (dpkg):
   i686-w64-mingw32-gcc (GCC) 13-win32
   i686-w64-mingw32-g++ (GCC) 13-win32
   GNU ld (GNU Binutils) 2.41.90.20240122
-recorder d3d9.dll sha256 58d64f557400309b394840f752927c4d36f7eef156798da24f50dfc391186807
-envprobe2.exe sha256 078ff3d53fb18e6730953d86e52ecfcc3f0a517319d452e4c4981bb839e8a4fe
+recorder d3d9.dll sha256 c89a0d1f1de1a245209f52c79eb5c5362f1b46d6528ff25e7617f3316c377eea
+envprobe2.exe sha256 3028e5959f443148d4dfc7f90d6294bddaafad1895b9d840b0302a3084c801a9
 both binaries archived in fnv-nx-build tools/envprobe-bin (the files of D9ENV_BIN: d3d9.dll, envprobe2.exe)
 query list: 232251 queries (envq.py), 95 formats
 profile handheld: screen 1280x720x24, 232832 answer rows, env_handheld.tsv sha256 ff340ae400828835e3ab9c3e076fb483952d15e9d66a18131196e38082597a52, recorded stream 233602 records
