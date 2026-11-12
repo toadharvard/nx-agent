@@ -76,30 +76,6 @@ static uint64_t self_worker(uint64_t self) {   /* pauses and resumes the thread 
 static volatile uint64_t wrec;
 static uint64_t rec_worker(uint64_t arg) { wrec = plat(35, 0, 0, 0, 0); return arg; }   /* a record of a thread that then ends */
 static uint64_t count_worker(uint64_t arg) { fnvnx_hcall2(H->sleep_ns, 1000000, 0); tcount++; return arg; }
-/* ACCESS_FAULT_HANDLER tests (MODE 12..22) */
-#define PG(h) ((h)->heap_base + 0x40000)
-#define STK(h) ((h)->heap_base + 0x51000)
-static volatile uint64_t gk, gr, ga, gpc, gsp, gps, gv0, gv1, gcnt;
-static void note(FnvnxFaultFrame *f) { gk = f->kind; gr = f->reason; ga = f->addr; gpc = f->pc; gsp = (uint64_t)(uintptr_t)__builtin_frame_address(0);   /* the handler's own stack */ gps = f->pstate; gv0 = f->v[8][0]; gv1 = f->v[8][1]; gcnt++; }
-static uint64_t fh_fix(FnvnxFaultFrame *f) {   /* make the page RW again and retry the store */
-    note(f);
-    if (f->kind == 1 && f->reason == 1 && f->addr == PG(fnvnx_host)) plat(8, PG(fnvnx_host), 0x1000, 3, 3);
-    return 0;
-}
-static uint64_t fh_skip(FnvnxFaultFrame *f) {   /* continue after the faulting instruction with a marker in x5 */
-    note(f);
-    f->pc += 4; f->x[5] = 0xABCD;
-    return 0;
-}
-static uint64_t fh_five(FnvnxFaultFrame *f) { note(f); return 5; }
-static uint64_t fh_nested(FnvnxFaultFrame *f) { note(f); return *(volatile uint32_t *)0x30000000; }
-static uint64_t fh_regs(FnvnxFaultFrame *f) {
-    note(f);
-    __asm__ volatile("movi v8.2d, #0\n cmp xzr, xzr" ::: "v8", "cc");   /* dirty what the frame must restore */
-    plat(8, PG(fnvnx_host), 0x1000, 3, 3);
-    return 0;
-}
-static uint64_t fault_thread(uint64_t arg) { *(volatile uint32_t *)(uintptr_t)PG(fnvnx_host) = (uint32_t)arg; return 0; }
 /* SECTION tests (MODE 30..34) */
 static uint64_t plat4(uint32_t fn, uint64_t a, uint64_t b, uint64_t c, uint64_t d) {
     uint64_t v[4] = {a, b, c, d};
@@ -489,14 +465,6 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
         fnvnx_hcall1(H->thread_join, id);
     }
     num("thread-read", W32(g_v1 + 4)); num("thread-write", W32(g_v1 + 8));
-#elif MODE == 33
-    uint64_t s = SC(0x4000), v = SM(s, 0, 0, 0x4000), top = v + 0x4000;
-    num("reg", plat(10, FNVNX_ADDR(fh_skip), top, 0, 2));
-    uint64_t out, val = 9;
-    __asm__ volatile("mov x5, #0\n str %w1, [%2]\n mov %0, x5" : "=r"(out) : "r"(val), "r"(0x30000000ull) : "x5", "memory");
-    num("marker", out); num("kind", gk); num("reason", gr); num("addr", ga);
-    num("frame-in-view", W32(top - 816) == 1 && W32(top - 808) == 0x30000000);
-    num("same-pages", W32(top - 816) == W32(SM(s, 0, 0x3000, 0x1000) + 0x1000 - 816));
 #elif MODE == 34
     uint64_t first = SC(0x1000), n = 1, last = first, r;
     for (; n < 128 && (r = SC(0x1000)) < 0x80000000ull; n++) last = r;
@@ -514,42 +482,6 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("views-ok", cnt); num("views-ascending", asc);
     num("v-full", SM(id129, 0, 0, 0x1000));
     num("unmap-one", SU(prev, 0x1000)); num("v-after", SM(id129, 0, 0, 0x1000) == prev);
-#elif MODE >= 37 && MODE <= 39
-    /* UNMAP_FIXED (fn 15) */
-    #define UF(a, s, z) plat(FNVNX_PLAT_UNMAP_FIXED, a, s, z, 3)
-    #define MF(a, z, s) fnvnx_hcall3(H->map_fixed, a, z, s)
-    uint64_t src = H->heap_base + 0x30000, dst = 0x4000000;
-    W32(src) = 0x1234;
-    num("map", MF(dst, 0x2000, src));
-    num("carried", W32(dst));
-    W32(dst) = 0xAAAA; W32(dst + 0x1004) = 0xBBBB;   /* written through the mapping */
-#if MODE == 37
-    num("u-wrong-src", UF(dst, 0x2000, src + 0x1000));
-    num("u-wrong-addr", UF(dst + 0x1000, 0x1000, src));
-    num("u-wrong-size", UF(dst, 0x1000, src));
-    num("u-addr-unal", UF(dst + 4, 0x2000, src));
-    num("u-src-unal", UF(dst, 0x2000, src + 4));
-    num("u-size0", UF(dst, 0, src)); num("u-size-unal", UF(dst, 0x1800, src));
-    num("still-mapped", W32(dst) == 0xAAAA);
-    num("ok", UF(dst, 0x2000, src));
-    num("src-bytes", W32(src) == 0xAAAA && W32(src + 0x1004) == 0xBBBB);
-    W32(src + 8) = 0x77; num("src-writable", W32(src + 8));
-    num("twice", UF(dst, 0x2000, src));
-    num("map-again", MF(dst, 0x2000, src));
-    num("again-bytes", W32(dst) == 0xAAAA && W32(dst + 0x1004) == 0xBBBB && W32(dst + 8) == 0x77);
-    num("src-given-again", MF(0x4020000, 0x1000, src));
-    num("ok-again", UF(dst, 0x2000, src));
-#elif MODE == 38
-    num("ok", UF(dst, 0x2000, src));
-    num("touch-dst", W32(dst));   /* unmapped: the run must end here */
-    say("after the fault\n");
-#else
-    plat(8, dst, 0x1000, 1, 3);   /* read-only and no access: UNMAP_FIXED needs no restore */
-    plat(8, dst + 0x1000, 0x1000, 0, 3);
-    num("ok", UF(dst, 0x2000, src));
-    num("src-bytes", W32(src) == 0xAAAA && W32(src + 0x1004) == 0xBBBB);
-    W32(src + 0x1004) = 5; num("src-rw", W32(src + 0x1004));
-#endif
 #elif MODE == 40
     /* ext_call and module 11 totality */
     uint64_t v[4] = {1, 2, 3, 4};
@@ -592,9 +524,8 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("m9-missing", EC(9, 99, FNVNX_ADDR(v), 1));
     say("after the missing service\n");
 #elif MODE == 44
-    /* VM_PROTECT: check order, spans, windows; UNMAP_FIXED of protected pages */
+    /* VM_PROTECT: check order, spans, windows */
 #define MF(a, z, s) fnvnx_hcall3(H->map_fixed, a, z, s)
-#define UF(a, s, z) plat(FNVNX_PLAT_UNMAP_FIXED, a, s, z, 3)
     uint64_t R = plat(4, 0, 0x10000, 0, 2);
     plat(5, R, 0x1000, 0, 2); plat(5, R + 0x1000, 0x1000, 0, 2);   /* two extents */
     volatile uint32_t *pa = (volatile uint32_t *)(uintptr_t)R;
@@ -633,13 +564,9 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("mf", MF(dst, 0x2000, src));
     W32(dst) = 0xAAAA; W32(dst + 0x1004) = 0xBBBB;
     plat(8, dst, 0x1000, 1, 3); plat(8, dst + 0x1000, 0x1000, 0, 3);
-    num("uf-protected", UF(dst, 0x2000, src));
-    num("uf-bytes", W32(src) == 0xAAAA && W32(src + 0x1004) == 0xBBBB);
-    W32(src + 8) = 7; num("uf-src-rw", W32(src + 8));
 #elif MODE == 45
-    /* map_fixed: check order, the window, the 512 limit; UNMAP_FIXED in the window */
+    /* map_fixed: check order, the window, the 512 limit */
 #define MF(a, z, s) fnvnx_hcall3(H->map_fixed, a, z, s)
-#define UF(a, s, z) plat(FNVNX_PLAT_UNMAP_FIXED, a, s, z, 3)
     volatile uint32_t *w = (volatile uint32_t *)0x500000;
     uint64_t src = H->heap_base + 0x310000;
     num("size0", MF(0x4000000, 0, src));
@@ -669,14 +596,6 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("live", n);
     num("limit", MF(0x4200000, 0x1000, src));
     num("limit-occupied", MF(0x4000000, 0x1000, src));
-    num("unmap-one", UF(0x4000000, 0x1000, H->heap_base + 0x100000));
-    num("again", MF(0x4000000, 0x1000, H->heap_base + 0x100000));
-    w[2] = 3;
-    num("uf-win", UF(0x500000, 0x1000, 0)); num("uf-win-zeroed", w[2]);
-    num("uf-win-src-unal", UF(0x500000, 0x1000, 4));
-    num("uf-win-size-unal", UF(0x500000, 0x800, 0));
-    num("uf-wrap", UF(0x1000, 0xFFFFFFFFFFFFF000ull, 0));
-    num("uf-win-straddle", UF(0x20FF000, 0x2000, 0));
 #elif MODE == 46
     /* thread and directory ids, wait/wake */
 #define THR(f, a) fnvnx_hcall1(H->f, a)
@@ -798,7 +717,6 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("tz-u64max", plat(34, ~0ull, FNVNX_ADDR(zw), 0, 2));
     num("tz-negative-main", plat(34, 0x8000000000000000ull, FNVNX_ADDR(zw), 0, 2));
     num("tz-null-out", plat(34, 5, 0, 0, 2));
-    num("tz-slot", fnvnx_hcall0(H->tz_offset_minutes));
 #elif MODE == 50
     /* THREAD_SELF and the thread_start / thread_join / thread_activity edge cases */
     uint64_t s1 = plat(35, 0, 0, 0, 0), s2 = plat(35, 0, 0, 0, 0);
@@ -829,7 +747,8 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     sk(26, 3, FNVNX_ADDR(&pf), 1, ~0ull, 0, 0);   /* nothing can become ready and the timeout is forever */
     say("after the poll\n");
 #elif MODE == 52
-    /* the numbers that hostapi.h no longer declares (SHUTDOWN, GETSOCKNAME, GETPEERNAME, GAI_OPEN, GAI_FETCH) answer NO_SERVICE for any nargs */
+    /* the numbers that hostapi.h does not declare (10, 15, SHUTDOWN, GETSOCKNAME, GETPEERNAME, GAI_OPEN, GAI_FETCH) answer NO_SERVICE for any nargs */
+    num("fn10", plat(10, 0, 0, 0, 2)); num("fn15", plat(15, 0, 0, 0, 3));
     num("fn27", plat(27, 0, 0, 0, 2)); num("fn28", plat(28, 0, 0, 0, 2)); num("fn29", plat(29, 0, 0, 0, 0));
     num("fn32", plat(32, 0, 0, 0, 4)); num("fn33", plat(33, 0, 0, 0, 3));
 #elif MODE == 53
@@ -923,72 +842,6 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     static uint16_t ou[3] = {0x7777, 0x7777, 0x7777}; static uint32_t nn;
     num("te-fit", sk(36, 5, 2, 0, 0, FNVNX_ADDR(ou), FNVNX_ADDR(&nn)));
     num("te-fit-n", nn); num("te-fit-u0", ou[0]); num("te-fit-u1", ou[1]); num("te-fit-nul", ou[2]);
-#elif MODE >= 12
-    volatile uint32_t *pg = (volatile uint32_t *)(uintptr_t)PG(H);
-    plat(8, PG(H), 0x1000, 3, 3);
-    pg[0] = 1;
-#if MODE == 12 || MODE == 20
-    plat(8, PG(H), 0x1000, 1, 3);
-#if MODE == 12
-    num("reg", plat(10, FNVNX_ADDR(fh_fix), STK(H), 0, 2));
-    pg[0] = 0x77;
-    num("val", pg[0]); num("kind", gk); num("reason", gr); num("addr-ok", ga == PG(H)); num("count", gcnt);
-    num("sp-in-stack", gsp < PG(H) + 0x20000 && gsp > PG(H));
-#else
-    plat(8, PG(H), 0x1000, 1, 3);
-    uint64_t lo = 0x1122334455667788ull, hi = 0x99aabbccddeeff00ull, olo, ohi, nz;
-    plat(10, FNVNX_ADDR(fh_regs), STK(H), 0, 2);
-    __asm__ volatile("fmov d8, %[lo]\n ins v8.d[1], %[hi]\n mov x9, #5\n cmp x9, #7\n str w9, [%[p]]\n"
-                     "mrs %[nz], nzcv\n fmov %[olo], d8\n mov %[ohi], v8.d[1]\n"
-                     : [olo] "=&r"(olo), [ohi] "=&r"(ohi), [nz] "=&r"(nz)
-                     : [lo] "r"(lo), [hi] "r"(hi), [p] "r"(pg) : "x9", "v8", "cc", "memory");
-    num("v8lo", olo == lo); num("v8hi", ohi == hi); num("nzcv", nz >> 28);
-    num("frame-pstate", gps >> 28); num("frame-v8", gv0 == lo && gv1 == hi); num("store", pg[0]);
-#endif
-#elif MODE == 13
-    plat(8, PG(H), 0x1000, 1, 3);
-    plat(10, FNVNX_ADDR(fh_skip), STK(H), 0, 2);
-    uint64_t out, v = 9;
-    __asm__ volatile("mov x5, #0\n str %w1, [%2]\n mov %0, x5" : "=r"(out) : "r"(v), "r"(pg) : "x5", "memory");
-    num("marker", out); num("ins", *(volatile uint32_t *)(uintptr_t)gpc >> 22); num("still-ro", pg[0]);
-#elif MODE == 14
-    plat(10, FNVNX_ADDR(fh_skip), STK(H), 0, 2);
-    uint64_t out;
-    __asm__ volatile("mov x5, #0\n ldr w6, [%1]\n mov %0, x5" : "=r"(out) : "r"(0x30000000ull) : "x5", "x6", "memory");
-    num("marker", out); num("kind", gk); num("reason", gr); num("addr", ga);
-#elif MODE == 15
-    plat(10, FNVNX_ADDR(fh_five), STK(H), 0, 2);
-    plat(8, PG(H), 0x1000, 1, 3);
-    pg[0] = 2;
-    say("after the fault\n");
-#elif MODE == 16
-    plat(10, FNVNX_ADDR(fh_nested), STK(H), 0, 2);
-    plat(8, PG(H), 0x1000, 1, 3);
-    pg[0] = 2;
-    say("after the fault\n");
-#elif MODE == 17 || MODE == 18
-    plat(8, PG(H), 0x1000, 1, 3);
-#if MODE == 18
-    num("reg", plat(10, FNVNX_ADDR(fh_fix), STK(H), 0, 2));
-    num("unreg", plat(10, 0, 0, 0, 2));
-#endif
-    pg[0] = 2;
-    say("after the fault\n");
-#elif MODE == 19
-    plat(8, PG(H), 0x1000, 1, 3);
-    plat(10, FNVNX_ADDR(fh_fix), STK(H), 0, 2);   /* main's handler; the fault below is thread 2's */
-    uint64_t id = fnvnx_hcall5(H->thread_create, FNVNX_ADDR(fault_thread), 3, 0x10000, 0, ~0ull);
-    fnvnx_hcall1(H->thread_start, id);
-    fnvnx_hcall1(H->thread_join, id);
-    say("after the fault\n");
-#elif MODE == 21
-    plat(8, PG(H), 0x1000, 1, 3);
-    num("misaligned", plat(10, FNVNX_ADDR(fh_fix), STK(H) + 8, 0, 2));
-    plat(10, FNVNX_ADDR(fh_fix), STK(H), 0, 2);
-    plat(8, STK(H) - 0x1000, 0x1000, 1, 3);   /* the frame page is read-only */
-    pg[0] = 2;
-    say("after the fault\n");
-#endif
 #else
     num("marker", marker(41));
     volatile uint32_t *hp = (volatile uint32_t *)(uintptr_t)H->heap_base;
