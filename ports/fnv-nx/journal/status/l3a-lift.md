@@ -167,3 +167,13 @@ Update 2026-11-12, at 698adefb:
   - disptest is done with the lift/bridges wiring on int2. msvcrttest is next.
   - instest is parked: Unicorn is not a reference. Sail through isla is proposed to L3b.
 - L1: farm/ on the trunk bee3dbfc already uses `-r FILE`. Farm 2 re-runs setup from the trunk after its current runs, dropping the hand-installed wheel. The gmpy2, MPFR and GMP pins are queued in w17 after the first-root merge (blocked, L1).
+- L3b's form coverage, global over 7 images (l3b-lift/shapes 77524556): 26 500 shape keys = int 19 817, x87 2 175, simd 4 369, sys 139.
+  - int: 2 370 of 19 494 certificates proved.
+  - x87, simd and sys have no certified builder yet. That is L3b w4's stage 2, paused until the packs are roots (blocked, L3b and the orchestrator).
+- L3b's rule for undefined flags: every reaching definition of a read flag bit must define it. The exceptions are dataflow facts only (dead read, opaque masked propagation). w5 implements it in the flags gate (doing).
+- instest: its reference is the pinned Sail model through isla, as a generated stage (OWNER 9), agreed with L3b.
+- w1 d6235c0f:
+  - Pack flags are stripped to per-root classes, with the full plugin set read from recipe.py. `recipe.py check` gives "recipe valid" on 58c113f0 plus the overlay.
+  - The RUN lines are on farm 1 (doing). There are no local numbers: the local run failed by w1's own error and was cleaned up.
+  - Asked of L1: a LIFTED semantic set with -ffreestanding, -fno-exceptions and -fno-asynchronous-unwind-tables, and a recipe.py constant for plugin_cxx.
+- w6: first-root-next 58c113f0 is queued into int2 after vd23.
