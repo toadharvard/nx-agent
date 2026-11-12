@@ -4,6 +4,7 @@ pointers (rule R3: EVERY relocated value into an executable section is an entry;
 for the accounting and never exclude an entry); jump tables; R3 byte accounting of .text (codemap.py), entry-set
 comparison (reconcile.py). Output: $FNVNX_FACTS_OUT (default /home/user/l3facts)/{universe,codemap}.tsv + count-only stdout; exit 1 if any byte is unexplained."""
 import os, re, sys, json, struct, bisect, capstone
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))      # the tool root: a tool imports its siblings from its own root (the generated stages run it under python3 -I, which has no script directory on the path)
 from types import SimpleNamespace
 import ehtables, codemap, reconcile, pemod, jtab as JT
 from array import array
