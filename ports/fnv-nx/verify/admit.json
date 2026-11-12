@@ -8,6 +8,7 @@
   {"path": "ports/fnv-nx/docs", "class": "doc", "gates": []},
   {"path": "ports/fnv-nx/farm", "class": "tool", "gates": ["selftests"]},
   {"path": "ports/fnv-nx/journal", "class": "doc", "gates": []},
+  {"path": "ports/fnv-nx/lift/descs", "class": "tool", "target": "host", "gates": ["selftests"], "recipe": "ports/fnv-nx/lift/descs/build.json"},
   {"path": "ports/fnv-nx/link", "class": "tool", "gates": ["pure", "selftests"]},
   {"path": "ports/fnv-nx/toolchain", "class": "tool", "gates": ["selftests"]},
   {"path": "ports/fnv-nx/verify", "class": "tool", "gates": ["selftests"]}

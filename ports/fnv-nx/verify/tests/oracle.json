@@ -235,6 +235,19 @@
     "ports/fnv-nx/verify/recipe.py"
    ]
   },
+  "test_descs.py": {
+   "references": [
+    {
+     "anchor": "### Objects of every admitted product root (`objects_of`) and `forbid_sections`",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/lift/descs/descs.py",
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_envcheck.py": {
    "references": [
     {

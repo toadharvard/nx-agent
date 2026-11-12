@@ -49,7 +49,7 @@ TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
 ENV_JSON = TREE + "/verify/env.json"   # the declared environment of the checkout (l1.py checks the same file)
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
-        "plugins", "plugin_cxx", "variants", "outputs", "uses", "sources"}
+        "plugins", "plugin_cxx", "variants", "outputs", "uses", "sources", "forbid_sections"}
 VARIANT_KEYS = {"compiler", "flags"}   # the keys a variant may replace
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
@@ -280,12 +280,26 @@ def emulation_flags(toks, kind="pie"):
     return err
 
 
-def root_edges(rec):
-    """The roots a recipe depends on besides its own files: `link.roots` (objects) and `uses` (outputs), variants cut off."""
+def objects_of_roots(rec, root, roots):
+    """The roots whose objects the generate stages of REC read (`objects_of`): every admitted product root with a recipe, except ROOT itself and
+    the roots a stage's `except` names. Sorted. A rule over the admitted set, not a list: a new product root is read by the next build."""
+    out = set()
+    for g in rec.get("generated", []) if isinstance(rec.get("generated"), list) else []:
+        oo = g.get("objects_of") if isinstance(g, dict) else None
+        if isinstance(oo, dict):
+            ex = set(oo.get("except", [])) if isinstance(oo.get("except"), list) else set()
+            out |= {r for r, e in roots.items() if e.get("class") == "product" and e.get("recipe") and r != root and r not in ex}
+    return sorted(out)
+
+
+def root_edges(rec, root=None, roots=None):
+    """The roots a recipe depends on besides its own files: `link.roots` (objects), `uses` (outputs) and, with ROOTS, the roots `objects_of`
+    reads, variants cut off."""
     lk = rec.get("link") if isinstance(rec, dict) else None
     ds = [split_spec(d)[0] for d in (lk.get("roots", []) if isinstance(lk, dict) and isinstance(lk.get("roots"), list) else []) if isinstance(d, str)]
     us = rec.get("uses") if isinstance(rec, dict) else None
-    return ds + [u["root"] for u in (us if isinstance(us, list) else []) if isinstance(u, dict) and isinstance(u.get("root"), str)]
+    return ds + [u["root"] for u in (us if isinstance(us, list) else []) if isinstance(u, dict) and isinstance(u.get("root"), str)] + (
+        objects_of_roots(rec, root, roots) if isinstance(rec, dict) and roots else [])
 
 
 def link_roots_cycle(root, roots, repo, seen=()):
@@ -297,7 +311,7 @@ def link_roots_cycle(root, roots, repo, seen=()):
         rec = json.load(open(os.path.join(repo, ent["recipe"]))) if ent and ent.get("recipe") else None
     except (OSError, ValueError):
         rec = None
-    for d in root_edges(rec):
+    for d in root_edges(rec, root, roots):
         c = link_roots_cycle(d, roots, repo, tuple(seen) + (root,))
         if c:
             return c
@@ -477,9 +491,13 @@ def check(rec, root, files, roots, pin=None, repo="."):
             err.append("include %r holds no tracked or generated file" % d)
     seen = set()
     for i, g in enumerate(rec.get("generated", []) if isinstance(rec.get("generated", []), list) else err.append("generated is not a list") or []):
-        if not (isinstance(g, dict) and set(g) == {"tool", "args", "inputs", "outputs"}):
-            err.append("generated[%d] needs exactly tool, args, inputs, outputs" % i)
+        if not (isinstance(g, dict) and {"tool", "args", "inputs", "outputs"} <= set(g) <= {"tool", "args", "inputs", "outputs", "objects_of"}):
+            err.append("generated[%d] needs exactly tool, args, inputs, outputs (and optionally objects_of)" % i)
             continue
+        oo = g.get("objects_of")
+        if "objects_of" in g and not (isinstance(oo, dict) and set(oo) <= {"except"} and isinstance(oo.get("except", []), list)
+                                      and all(isinstance(r, str) and r in roots and roots[r].get("class") == "product" for r in oo.get("except", []))):
+            err.append('generated[%d].objects_of must be {"except": [admitted product roots]}' % i)
         t, ins, outs = g["tool"], g["inputs"], g["outputs"]
         owner = next((r for r in roots if isinstance(t, str) and under(t, r)), None)
         if not (isinstance(t, str) and t in files and t.endswith(".py") and owner and roots[owner]["class"] in ("tool", "product")):
@@ -503,6 +521,9 @@ def check(rec, root, files, roots, pin=None, repo="."):
                 err.append("generated output %s is produced twice" % o)
             seen.add(o)
     err += uses_errors(rec, root, roots, repo)
+    fs = rec.get("forbid_sections")
+    if fs is not None and not (isinstance(fs, list) and fs and all(isinstance(n, str) and re.fullmatch(r"\.[A-Za-z0-9._-]+", n) for n in fs)):
+        err.append("forbid_sections must be a non-empty list of section names (.name)")
     sr = rec.get("sources")
     if sr is not None and not (isinstance(sr, str) and sr in generated_outputs(rec)):
         err.append("sources must name a path in generated[].outputs of this root (a file of <external>:<path> lines)")
@@ -809,6 +830,28 @@ class Job:
         self._uses = sorted(out, key=lambda i: i["at"])
         return self._uses
 
+    def objects_input(self, ws, tmp, g):
+        """The tree mounted at /objs of a generate stage with `objects_of`: the objects of every admitted product root (implicit variant) the rule
+        selects (objects_of_roots), as <root with / as __>/<unit>.o. Each root is built by this recipe machinery (content-keyed, cache hits);
+        a red root makes the stage red; the stage key holds the objects' content, not a path."""
+        out = os.path.join(tmp, "objs")
+        os.makedirs(out, exist_ok=True)
+        for d in objects_of_roots({"generated": [g]}, self.root, self.roots):
+            try:
+                r = build(self.repo, d, self.store, os.path.join(ws, "objs-" + d.replace("/", "__")), self.jobs, self.extcache)
+            except RecipeError as x:
+                raise BuildRed({"stage": "objects_of:" + self.root, "exit": None, "stderr": ["root %s: invalid recipe: %s" % (d, x)][:20]})
+            self.keys |= set(r["stage_keys"])
+            self.run, self.hit = self.run + r["stages"]["run"], self.hit + r["stages"]["hit"]
+            if r["status"] == "red":
+                f = r["failure"]
+                raise BuildRed({"stage": "objects_of:" + self.root, "exit": f["exit"], "stderr": ["root %s is red: stage %s" % (d, f["stage"])] + f["stderr"][-18:]})
+            for o in r["objects"]:
+                dest = os.path.join(out, d.replace("/", "__"), o["unit"] + ".o")
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.copyfile(o["object"], dest)
+        return cas.ingest(out, self.store)
+
     def generate(self, ws):
         if not self.rec.get("generated"):
             return
@@ -818,6 +861,8 @@ class Job:
             owner = next(r for r in self.roots if under(g["tool"], r))
             tmp = tempfile.mkdtemp(dir=ws)
             ins = [{"at": "/tool", "tree": self.ingest_files(tmp, "tool", [f for f in self.files if under(f, owner)], owner)}] + xin + self.use_inputs(ws)
+            if "objects_of" in g:
+                ins.append({"at": "/objs", "tree": self.objects_input(ws, tmp, g)})
             for p in g["inputs"]:
                 sub = [f for f in self.files if f == p or under(f, p)]
                 ins.append({"at": "/in/" + p, "tree": cas.ingest(os.path.join(self.repo, p), self.store) if sub == [p] else
@@ -1049,6 +1094,20 @@ def emulation_of(flags):
     return next(t[2:] if t != "-m" else flags[i + 1] for i, t in enumerate(flags) if t == "-m" or (t.startswith("-m") and len(t) > 2))
 
 
+def section_names(path):
+    """The section names of ELF32 or ELF64 little-endian object PATH (from the section header string table)."""
+    d = open(path, "rb").read()
+    if d[:4] != b"\x7fELF" or d[4] not in (1, 2) or d[5] != 1:
+        raise ValueError("%s: not an ELF32/ELF64 little-endian object" % path)
+    w64 = d[4] == 2
+    shoff, = struct.unpack_from("<Q" if w64 else "<I", d, 0x28 if w64 else 0x20)
+    esz, num, stri = struct.unpack_from("<HHH", d, 0x3a if w64 else 0x2e)
+    secs = [struct.unpack_from("<IIQQQQIIQQ" if w64 else "<IIIIIIIIII", d, shoff + i * esz) for i in range(num)]
+    st = secs[stri]
+    strtab = d[st[4]:st[4] + st[5]]
+    return [strtab[x[0]:strtab.index(b"\0", x[0])].decode() for x in secs]
+
+
 def object_target(path):
     """(ELF class, e_machine) of an object file, from its header."""
     with open(path, "rb") as f:
@@ -1164,6 +1223,9 @@ def build(repo, root, store, out, jobs=4, ext=None):
             res["defined"] += d
             und |= x
             res["objects"].append({"unit": u, "object": os.path.abspath(dest), "sha256": ent["h"], "os_layer": u in j.rec.get("os_layer", [])})
+            bad = sorted(set(section_names(dest)) & set(j.rec.get("forbid_sections", [])))
+            if bad:
+                raise BuildRed({"stage": "forbid:" + root, "exit": None, "stderr": ["object %s has the forbidden section(s) %s (recipe forbid_sections)" % (u, bad)]})
         res.update(defined=sorted(res["defined"], key=lambda d: (d["symbol"], d["object"])), undefined=sorted(und))
         if j.rec.get("link"):
             lk = j.rec["link"]
