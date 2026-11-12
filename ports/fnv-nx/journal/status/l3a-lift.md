@@ -245,3 +245,10 @@ Update 2026-11-12, at 698adefb:
 - Facts a0f3d8e lacks jtab_tables (found by w3). w7's next commit (jtab, reloc consistency, unproven candidates, class-3 pointers, ranges invariant) is priority 1. Every consumer re-pins once, on it.
 - int3 84ac7e2be (w6): 35 files lost in the w5 merge were restored. gate_assumptions 51 → 32 findings, 81 entries. A word rule covers the SMT sense of "assume". The remaining blocks are listed for lead decisions. vd26 is running (doing).
 - The identity rule is withdrawn (L3b): 01441246 is red until the invariance proof lands.
+- w4 0f90ce65: the points-to design note (journal/inbox/l3a-lift-w4-001.md) is accepted in structure. Lead correction: TOP comes only from facts that do not bound a value.
+  - OWNER 6: a derived pointer stays in its object.
+  - Relocation completeness: an image address comes only from a relocated word.
+  - OWNER 3: an import writes only through its argument objects within the documented extent; a missing contract is a counted gap.
+  - An unresolved indirect call goes to the escaped universe entries.
+  - TOP stores are reported per source. Coding starts after the pcsrc counts (queued).
+- int3 122ce8e18: 31 findings → 29 after the lead's decisions (status file a6b94e4c; flagcause citation removed). The SMT word rule and the inbox file of the rest are doing (w6).
