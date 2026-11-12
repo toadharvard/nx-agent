@@ -49,7 +49,7 @@ on 2026-11-11 22:35 UTC. Handoff read: `journal/inbox/l3b-lift-handoff-opus.md` 
   - EMLINK in the unit view (w14, doing).
 - Orchestrator: under L1 w14 a product root can't be admitted while any REQUIRED_PRODUCT gate is missing from gates.json. Missing today: d3d9total, r7, namegate, abi, datamodel (L1 w17), order/eh/addr32 (L3a w6), exepin. forms and fpexact are ours, via w2g. This blocks every product root, dslemit included (w3t a1a996b1).
   - Owners per the orchestrator: d3d9total L6 w4; r7, namegate and abi L2 w5; datamodel L1 w17; exepin L1; order, eh and addr32 L3a w6. Merge order: L1 w16, L2 w4, L1 w14, w17, L2 w5, L1 w10, L6 w4, L3a w6, L3b w2g, exepin.
-  - Cycle: the lift/rt admission needs forms and fpexact (w2g), and w2g needs rt/fnvl.h, because fnvlift reads it at import. It is broken by L3a's PRELUDE-as-function commit, now on the critical path.
+  - Cycle: the lift/rt admission needs forms and fpexact (w2g), and w2g needed rt/fnvl.h, because fnvlift read it at import. Broken by L3a 82b45c2c (PRELUDE gone; prelude(rt_dir); import reads no rt file; puregate 0). w2g takes it byte for byte.
 
 ## Global numbers (as handed over; re-measured by the tasks above)
 
