@@ -85,7 +85,7 @@ $(OUT)-m32/platform/win32/module.cpp.o: $(P)/win32/winerr_msgs.inc
 
 # the constant-result functions (platform/manifest/env_const.tsv), generated per source file that includes them
 ENV_GEN := $(P)/win32/env_const.gen.inc $(P)/crt/env_const.gen.inc $(P)/os/env_const_posix.gen.inc $(P)/os/env_const_horizon.gen.inc
-ENV_SRC := $(P)/manifest/env_const.tsv $(P)/manifest/gen_env_const.py
+ENV_SRC := $(P)/manifest/env_const.tsv $(P)/manifest/gen_env_const.py $(ROOT)/verify/declared_machine.tsv
 $(P)/win32/env_const.gen.inc: $(ENV_SRC)
 	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only win32/
 $(P)/crt/env_const.gen.inc: $(ENV_SRC)
