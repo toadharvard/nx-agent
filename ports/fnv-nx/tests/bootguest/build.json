@@ -128,7 +128,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=0"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m1": {
@@ -140,7 +153,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=1"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m2": {
@@ -152,7 +178,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=2"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m3": {
@@ -164,7 +203,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=3"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m4": {
@@ -176,7 +228,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=4"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m5": {
@@ -188,7 +253,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=5"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m6": {
@@ -200,7 +278,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=6"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m7": {
@@ -212,7 +303,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=7"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m8": {
@@ -224,7 +328,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=8"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m9": {
@@ -236,7 +353,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=9"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m10": {
@@ -248,7 +378,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=10"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m11": {
@@ -260,7 +403,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=11"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m30": {
@@ -272,7 +428,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=30"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m31": {
@@ -284,7 +453,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=31"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m32": {
@@ -296,7 +478,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=32"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m34": {
@@ -308,7 +503,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=34"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m35": {
@@ -320,7 +528,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=35"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m36": {
@@ -332,7 +553,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=36"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m40": {
@@ -344,7 +578,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=40"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m41": {
@@ -356,7 +603,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=41"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m42": {
@@ -368,7 +628,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=42"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m44": {
@@ -380,7 +653,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=44"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m45": {
@@ -392,7 +678,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=45"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m46": {
@@ -404,7 +703,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=46"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m47": {
@@ -416,7 +728,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=47"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m48": {
@@ -428,7 +753,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=48"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m49": {
@@ -440,7 +778,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=49"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m50": {
@@ -452,7 +803,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=50"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m51": {
@@ -464,7 +828,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=51"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m52": {
@@ -476,7 +853,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=52"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m53": {
@@ -488,7 +878,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=53"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m54": {
@@ -500,7 +903,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=54"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m55": {
@@ -512,7 +928,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=55"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m56": {
@@ -524,7 +953,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=56"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m57": {
@@ -536,7 +978,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=57"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m58": {
@@ -548,7 +1003,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=58"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m59": {
@@ -560,7 +1028,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=59"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m61": {
@@ -572,7 +1053,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=61"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m70": {
@@ -584,7 +1078,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=70"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m80": {
@@ -596,7 +1103,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=80"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m81": {
@@ -608,7 +1128,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=81"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m90": {
@@ -620,7 +1153,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=90"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m91": {
@@ -632,7 +1178,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=91"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   },
   "m92": {
@@ -644,7 +1203,20 @@
      "-Wextra",
      "-Werror=attributes",
      "-DMODE=92"
-    ]
+    ],
+    "cxx": [
+     "-O2",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-D__LINUX_ERRNO_EXTENSIONS__",
+     "-DFNVNX_SDD=1",
+     "-std=gnu++20",
+     "-Werror=attributes"
+    ],
+    "asm": []
    }
   }
  }
