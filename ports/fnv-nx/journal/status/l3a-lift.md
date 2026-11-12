@@ -177,3 +177,7 @@ Update 2026-11-12, at 698adefb:
   - The RUN lines are on farm 1 (doing). There are no local numbers: the local run failed by w1's own error and was cleaned up.
   - Asked of L1: a LIFTED semantic set with -ffreestanding, -fno-exceptions and -fno-asynchronous-unwind-tables, and a recipe.py constant for plugin_cxx.
 - w6: first-root-next 58c113f0 is queued into int2 after vd23.
+- L1 decided the lifted flag set. flags.semantics becomes origin-keyed: lifted = common + -ffreestanding -fno-exceptions -fno-asynchronous-unwind-tables -fno-unwind-tables.
+  - recipe.py gets a constant for the plugin compiler, derived from env.json, and a hand-typed compiler name becomes red. Both are L1 w17's, after the first-root merge.
+  - New condition, owned by L1 with L2's facts: every lifted→native edge must target a callee proven not to throw. Until that gate exists, the pack is a measurement build on that edge.
+  - w1 rebuilds the pack with the origin set when w17 lands. The current farm 1 run is labelled a measurement.
