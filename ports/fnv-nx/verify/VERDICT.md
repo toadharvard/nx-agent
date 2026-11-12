@@ -207,6 +207,6 @@ A gates file that declares `"warm_budget_s": B` makes `verdict.py run` add the g
 away, on the same cache, which is the no-change rerun. `warm` has two certified parts (universe 2), each red on its own:
 1. **Nothing recomputed.** In that rerun no gate, stage, test or fact is recomputed (`recomputed` of every row is 0; a gate that runs reports
    1 plus the units it recomputed itself). A gate that cannot be found under an unchanged key, or whose key moves with the clock, is named.
-2. **Wall clock.** The rerun takes at most B seconds. warm_budget_s = 10.0 seconds (written here and in `gates.json`; a test keeps the two equal).
-   B is set from the measured warm no-change rerun with a margin (see the inbox note l1-contract-w19-001).
+2. **Wall clock.** The rerun takes at most B seconds. warm_budget_s = 2.0 seconds (written here and in `gates.json`; a test keeps the two equal).
+   B = 2.0 s: the measured warm rerun is 0.0 s (all gate results found under their keys; 26 gates, commit 888a05b), the margin covers a slow disk. Measured at 888a05b: cold verdict 217 s wall, warm l1 verdict command 2.0 s wall (was 204 s and 5.4 s at e35b870).
 The whole-verdict bound of CLAUDE.md (5 min, `--budget-s`) stays and is still reported as `over_budget`. A red run does not evaluate `warm`.

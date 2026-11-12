@@ -1,6 +1,6 @@
 {
  "format": "fnvnx-gates/1",
- "warm_budget_s": 10.0,
+ "warm_budget_s": 2.0,
  "gates": [
   {
    "name": "pure",
