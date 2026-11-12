@@ -559,3 +559,7 @@ Answered: L3a w8 (py_modules in stage entry, pinned in env.json; lift/tools = on
 - w18 ea0cb570: re-pinned (facts 2eeea27b, manifest 880555c with escape and writes; a missing escape row is red). Global counts on 6 images (d3dx9_31's closure row is unresolved): loadlib 25/33 certified, gpa 1/2, reach 0/3, with 11 open sites/refs (was 184). Blocked by L5 (producer rows that are not call VAs; missing dbghelp rows) and L3a (atimgpud 0x100092d4 not in a range; dataflow at exe da284a and atimgpud 0x10001608).
 - w20: objstub (A) binding is layout-derived: the table relocation at k*sizeof+offsetof from DWARF, not a source-macro `handler` column.
 - w6 (L3a): ASM-225/226/227 assigned for gate_eh.
+
+## 09:10Z
+- w14 62623608: generated-stage key done (recipe.pinned_modules; the installed-files digest of each pinned module is in the stage key; the test changes each of the 5 digests in turn, and exactly one key changes). Next: w14 merges w10 7e67961e in the variants form; then w16-int builds on that head.
+- L2 `.fnvnx.tls` is assigned to L2 w2: `<asm> <model>`, model = the final DECL_TLS_MODEL; claude/fnv-l2-source-w2-tls, ETA 3–4 h. w10 prepares the reader and test.
