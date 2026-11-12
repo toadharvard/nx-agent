@@ -371,3 +371,10 @@ Update 2026-11-12, at 698adefb:
   - Withdrawn: "refuse every no-flow ptr candidate". It contradicts DIC (b), so those candidates stay until the points-to.
   - No-flow ptr candidates, per image: atimgpud 292/621, binkw32 429/944, d3dx9_31 10 672/17 879, d3dx9_38 24 765/36 688, libvorbis 333/955, libvorbisfile 159/667, GDF 50/305. This is w4's work list.
 - L1 w17 takes the cache-key defect: a static import closure, with dynamic imports red.
+
+## 2026-11-12 09:35
+- The lift/bridges root is in: w8 t16e 135da9286, recipe-valid. It is a bridgegen stage with `uses` descs, forbid_sections .fnvnx.disp, and an include edge to platform/include (fnvl_host.h, no copy). Root status:
+  - roots valid: lifted 3/3, bridges, descs;
+  - native 0/3, waiting on 445e551d in int-l3a.
+- The bridges build, disptest and global descriptor count are a farm 1 job (RUN from w8).
+- L1 agrees that a site counts only inside the entry ranges. w18 re-pins to rangecheck in the next facts commit; at w18 b9944d38, 0 of 43 dynsites rows lie in unreached bytes.
