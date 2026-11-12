@@ -211,9 +211,10 @@ def cmd_run(a):
             # it takes at most B seconds.
             t_w = time.time()
             wrows = run_pass("warm")
-            wsec = round(time.time() - t_w, 3)
+            wraw = time.time() - t_w
+            wsec = round(wraw, 3)
             work_done = {r["name"]: r["recomputed"] for r in wrows if r["recomputed"]}
-            parts = [not work_done, wsec <= float(budget)]
+            parts = [not work_done, wraw <= float(budget)]
             why = "; ".join(x for x in (
                 "recomputed on a no-change rerun: " + ",".join("%s=%d" % kv for kv in sorted(work_done.items())) if work_done else "",
                 "warm rerun %.1fs > budget %.1fs" % (wsec, float(budget)) if not parts[1] else "") if x)
