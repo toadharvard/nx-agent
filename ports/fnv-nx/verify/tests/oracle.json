@@ -790,6 +790,18 @@
     "ports/fnv-nx/verify/unitview.py",
     "ports/fnv-nx/verify/unitstage.py"
    ]
+  },
+  "test_onedef.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_onedef.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_onedef.py"
+   ]
   }
  }
 }

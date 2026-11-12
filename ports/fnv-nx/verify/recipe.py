@@ -187,6 +187,20 @@ def split_spec(spec):
     return root, name
 
 
+ENTRY_VARIANT_KEYS = {"target"}
+
+
+def entry_of(roots, spec):
+    """The admit.json entry of a root or of a 'root@NAME' pair: the base entry with the keys the variant's own entry (`variants`: {NAME: {"target"}})
+    names replaced. A variant inherits the target of its base unless it declares one; sources stay the base root's."""
+    root, name = split_spec(spec)
+    ent = dict(roots.get(root, {}))
+    own = ent.pop("variants", None)
+    if name and isinstance(own, dict) and isinstance(own.get(name), dict):
+        ent.update({k: v for k, v in own[name].items() if k in ENTRY_VARIANT_KEYS})
+    return ent
+
+
 def effective(rec, name):
     """The recipe of variant NAME of REC: REC without `variants`, the keys the variant names replaced whole. '' is the implicit variant."""
     if not isinstance(rec, dict):
@@ -233,11 +247,12 @@ def load_pin(repo="."):
     return json.load(open(p)) if os.path.exists(p) else None
 
 
-def guest_errors(rec, root, roots, pin):
+def guest_errors(rec, spec, roots, pin):
     """The admit.json entry of a product root declares "target": "guest" (the game's code: compiled by the game's compiler) or "host".
     A guest root's compiler is the external of verify/guest_compiler.json, exactly (name, commit, tree, mount point, driver paths): the
     distribution's g++-13 is not the compiler of guest code, for C and C++ alike (one compiler key serves both)."""
-    t = roots.get(root, {}).get("target")
+    root = split_spec(spec)[0]
+    t = entry_of(roots, spec).get("target")
     if t not in GUEST_TARGETS:
         return ['admit.json %s: a product root declares "target": "guest" or "host"' % root]
     if t == "host":
@@ -369,7 +384,7 @@ def uses_errors(rec, root, roots, repo):
     return err
 
 
-def link_errors(lk, root, mine, roots, ext_names, repo):
+def link_errors(lk, root, mine, roots, ext_names, repo, variant=""):
     """Problems of the `link` key: {script, output, flags} and optionally `roots` (admitted product roots whose objects are link inputs after
     the root's own, in list order) and `libs` ({external, dirs, names, startfiles, endfiles}: the guest libraries inside an external)."""
     kind = lk.get("kind", "pie") if isinstance(lk, dict) else None
@@ -381,6 +396,9 @@ def link_errors(lk, root, mine, roots, ext_names, repo):
         return ["link must be {output: NAME.elf|.so|.exe, flags: [..]} with `script` (a tracked file of the root; required for kind pie, the default), kind pie|exe|shared, "
                 "`version_script` (a tracked file of the root: required for, and only for, kind shared), optionally roots, libs"]
     err = ["link.flags: %s is in the refusal set R" % t for t in refused(lk["flags"])] + emulation_flags(lk["flags"], kind)
+    rent = entry_of(roots, root + "@" + variant if variant else root)
+    if rent.get("target") == "guest" and kind == "exe":
+        err.append("link.kind exe is a host executable: a guest root links a pie (the ILP32 guest image, emulation aarch64linux32)")
     deps = lk.get("roots", [])
     if not (isinstance(deps, list) and all(isinstance(d, str) for d in deps)):
         err.append("link.roots must be a list of repo paths of admitted product roots")
@@ -405,6 +423,8 @@ def link_errors(lk, root, mine, roots, ext_names, repo):
                 continue
             if dv and dv not in variant_names(drec):
                 err.append("link.roots: %s has no variant %r" % (dr, dv))
+            elif dv and rent.get("class") != "test":
+                err.append("link.roots: %s is a variant: only a test root (class test) links a variant; a product image links base roots" % d)
             if dl is not None:
                 err.append("link.roots: %s has a link of its own (an input root links nothing)" % d)
     cyc = link_roots_cycle(root, roots, repo) if deps else None
@@ -450,7 +470,7 @@ def header_dirs(rec, root, roots, repo="."):
     return sorted(dirs)
 
 
-def check(rec, root, files, roots, pin=None, repo="."):
+def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     """Every problem of recipe REC of product root ROOT; roots {path: root entry}; PIN = load_pin(); REPO: where the recipes of the
     roots of `link.roots` are read (their link null, no cycle). -> [str] (empty = valid)."""
     if not isinstance(rec, dict):
@@ -462,7 +482,13 @@ def check(rec, root, files, roots, pin=None, repo="."):
                                               for n, v in vs.items())):
             return err + ["variants must be {NAME: {compiler and/or flags}}: NAME letters, digits, _ . -; a variant replaces only the keys it names (%s)" % sorted(VARIANT_KEYS)]
         for n in sorted(vs):    # every variant is a recipe of its own: all the rules apply to its effective form
-            err += ["variant %s: %s" % (n, e) for e in check(effective(rec, n), root, files, roots, pin, repo)]
+            err += ["variant %s: %s" % (n, e) for e in check(effective(rec, n), root, files, roots, pin, repo, n)]
+    own = roots.get(root, {}).get("variants")
+    if own is not None and not variant:
+        names = variant_names(rec) if isinstance(rec, dict) else []
+        if not (isinstance(own, dict) and all(n in names and isinstance(v, dict) and v and set(v) <= ENTRY_VARIANT_KEYS and v.get("target", "host") in GUEST_TARGETS
+                                              for n, v in own.items())):
+            err.append('admit.json %s: variants must be {NAME: {"target": "guest"|"host"}} for variants the recipe declares' % root)
     err += ["missing key %r" % k for k in ("format", "compiler", "flags", "include", "units") if k not in rec]
     if rec.get("format") != FORMAT:
         err.append("format is not " + FORMAT)
@@ -575,16 +601,16 @@ def check(rec, root, files, roots, pin=None, repo="."):
             err.append("%s %r is neither a tracked file of the root nor a generated output" % (key, c))
     lk = rec.get("link")
     if lk is not None:
-        err += link_errors(lk, root, mine, roots, names, repo)
+        err += link_errors(lk, root, mine, roots, names, repo, variant)
         err += ["link: the ldcheck stage needs %s (a tracked file of an admitted tool root)" % p for p in (
             LD_TOOLS[0] + "/ldcheck.py", LD_TOOLS[0] + "/gateids.py", LD_TOOLS[1] + "/gatefile.py")
             if p not in files or not any(under(p, r) for r in roots)]
-    err += guest_errors(rec, root, roots, pin)
-    err += plugin_errors(rec, root, files, roots, units, names)
+    err += guest_errors(rec, root + "@" + variant if variant else root, roots, pin)
+    err += plugin_errors(rec, root, files, roots, units, names, variant)
     return err
 
 
-def plugin_errors(rec, root, files, roots, units, ext_names):
+def plugin_errors(rec, root, files, roots, units, ext_names, variant=""):
     """Problems of the plugin declaration of recipe REC of ROOT, and the gate rule: a product root with native or decomp C++ loads both
     plugins of PLUGIN_SOURCES with their fixed arguments; a root whose C++ is all lifted needs none. What is lifted is declared in the
     admit.json entry of the root, "cxx_origin": "native" | {"lifted_by": TOOL.py, "pack": EXTERNAL}, required when the root has a C++ unit.
@@ -625,7 +651,7 @@ def plugin_errors(rec, root, files, roots, units, ext_names):
     elif not pl and px is not None:
         err.append("plugin_cxx without plugins")
     cxx = [u for u in units if u.endswith(CXX_EXT)]
-    ent = roots.get(root, {})
+    ent = entry_of(roots, root + "@" + variant if variant else root)
     origin = ent.get("cxx_origin")
     # RULE (orchestrator, 2026-11-12): every guest CC stage, C and C++ alike and whatever the origin of the code, loads the FULL plugin set of
     # PLUGIN_SOURCES with its fixed arguments in the fixed order. No language declarations, no exception list. The arguments are fixed by the
@@ -826,6 +852,9 @@ class Job:
     def stage(self, doc):
         if self.variant:     # the variant name is in every stage key (the implicit variant adds nothing: its keys are those of a root without variants)
             doc["env"] = dict(doc["env"], FNVNX_VARIANT=self.variant)
+            tg = entry_of(self.roots, self.root + "@" + self.variant).get("target")   # the effective target is in the key too
+            if tg != self.roots[self.root].get("target"):
+                doc["env"]["FNVNX_TARGET"] = tg
         v = toolflags.check_doc(doc)
         if v:
             raise BuildRed({"stage": doc["stage"], "exit": None, "stderr": ["toolflags: %s %s" % (r, d) for r, d, _ in v][:20]})
@@ -1074,7 +1103,7 @@ class Job:
         if not used:
             return {}
         rtp, _ = self.toolrt(used)
-        guest = self.roots.get(self.root, {}).get("target") == "guest"
+        guest = entry_of(self.roots, self.root + "@" + self.variant if self.variant else self.root).get("target") == "guest"
         pk = ("c", "cxx") if guest else ("cxx",)   # guest: the plugins are loaded by the C and the C++ front end alike
         try:
             self.use_inputs(ws)
@@ -1455,7 +1484,9 @@ def main(argv):
         repo = "."
         if argv[:1] == ["check"]:
             roots = load_admit(repo)
-            errs = check(load_recipe(repo, roots, opt["--root"]), opt["--root"], tracked(repo), roots, load_pin(repo), repo)
+            root, _ = split_spec(opt["--root"])   # the one place the spec is split: nothing below sees root@NAME
+            rec = load_recipe(repo, roots, opt["--root"]) if _ else json.load(open(os.path.join(repo, roots[root]["recipe"])))   # a base is checked whole: with its variants
+            errs = check(rec, root, tracked(repo), roots, load_pin(repo), repo, _)
             print("\n".join(errs) or "recipe valid")
             return 2 if errs else 0
         res = build(repo, opt["--root"], opt["--store"], opt["--out"], int(opt.get("--jobs", 4)), opt.get("--ext"))
