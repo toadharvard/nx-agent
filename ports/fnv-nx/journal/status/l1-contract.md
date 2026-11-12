@@ -893,3 +893,5 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - unicorn 39 vs 36
   - z3-solver 43 vs 40
   - total 1170 vs 1116: +54 files, which are the dist-info directories, gmpy2.libs/numpy.libs and top-level files
+- L3a w8 cherry-picked w18m onto t16e as 7cece903a. envcheck reports OK, and gen:citest/lifted:0 now imports gmpy2.
+  - All 3 lifted guest-test roots build green: citest, imptest and msvcrttest.
