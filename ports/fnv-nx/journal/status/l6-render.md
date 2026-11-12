@@ -208,3 +208,7 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - lib/sha256 trunk root = L4 20724246.
         - w6 proves an empty diff against it.
         - Open at L4: the trunk recipe refuses an include inside the root; the fix is include [] with a quoted relative include.
+- 03:52Z
+    - w1b merged w5 b622cbf8 by fast-forward. The translator root is red only on the lib/sha256 include until L4's root reaches the trunk through w6.
+    - L4 w7 is moving lib/sha256 to include [] with a quoted relative include, which passes on both recipe lines. w6 retakes it.
+    - The shim doc→tool class change has gone to the orchestrator and L5.
