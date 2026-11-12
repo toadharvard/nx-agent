@@ -156,3 +156,12 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
   - Farm session_01KmtZKSSTwzATWBSyXQRW2Q, second job: Wine 9.0 + pinned Mesa link probe over all 7553 rows plus sm_illegal, run twice and byte-equal, published as fnv-nx-build tools/sm-linkprobe and render/shaders/total/sm_link.tsv. It is queued after its two open fixes.
   - L6A: both backends keep the previously bound program when the program is link-failed; the ABI flag field comes with the table.
   - L1: lib/sha256's admit entry and host test variant go to w15, taken from f8adf66b.
+- 03:36Z Key phase 2 (w5 claude/fnv-l6-render-w5-key 0974595b + 5af0fc9e).
+  - Every content key is sha256 now, and the five hash copies are deleted. NxShaderD3D grows from 40 to 64 bytes. The shader cache moves to format v2.
+  - The lead review is waiting on: the recipe build of render/d3d9 and the translator, and nm proof that the sha256 is single-defined and the deleted functions have no refs.
+  - Shared files (nxgpu4_shader.h, gl4_d3dshader.c) go to L6A to be taken byte-equal.
+  - Open:
+    - link.roots for render/d3d9 (link is null; L1 w15);
+    - the lib/sha256 admit entry (L1 w15).
+  - FINDING: the host test builds link with --unresolved-symbols=ignore-all, a stub class. w5 is counting the sites; the class has gone to L1 for a gate.
+- 03:36Z L2 w4 726ab21 fixed fnvnx_sdd VTSYM1 (L1 green on trunk 8cfbcdb). w6 is re-measuring the 48 vtable clones on render/d3d9.
