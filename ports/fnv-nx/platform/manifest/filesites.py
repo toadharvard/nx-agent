@@ -17,7 +17,8 @@ dynamic with that reason). Nothing is guessed from names or text.
 Domain gate: every import of kernel32/shell32/shlwapi/msvcrt/user32 whose name is a file-API family member (FILE_FAMILY) must have a
 ROLES row; an import added to a module without one stops the pass.
 Assumptions: those of regsites.py (ASM-001, ASM-003, ASM-006, ASM-012, ASM-013; registry verify/ASSUMPTIONS.json).
-Usage: filesites.py <dir-with-modules> <root.exe> <out.tsv> [dynamic.dll,...]
+Usage: filesites.py <dir-with-modules> <root.exe> <out.tsv> --bridge bridge.tsv --dllkind dllkind.py --dllkind-sha SHA256 [--facts DIR]
+Image set: the root and the dlls of dllkind role `image` (pemanifest.closure); no name list.
 """
 import collections, os, re, sys
 
@@ -161,15 +162,8 @@ def rows_of(mod):
         regsites.ROLES, regsites.rows_of, regsites.Analyzer.open_result, regsites.DEPTH = saved
 
 
-def main(d, root, out, dynamic=""):
-    files = {f.lower(): os.path.join(d, f) for f in os.listdir(d) if f.lower().endswith((".exe", ".dll"))}
-    mods, todo = {}, [m.lower() for m in dynamic.split(",") if m] + [root.lower()]
-    while todo:
-        n = todo.pop()
-        if n in mods or n not in files:
-            continue
-        m = mods[n] = pemanifest.Mod(files[n])
-        todo += sorted({dll for dll, _, _ in m.imports})
+def main(d, root, out, argv=()):
+    mods = pemanifest.closure_from_argv(list(argv), d, root)[0]
     bad = gate_domain(mods)
     if bad:
         raise SystemExit("file import without a ROLES row: %r" % bad)
@@ -195,4 +189,4 @@ if __name__ == "__main__":
     if len(sys.argv) < 4:
         sys.stderr.write(__doc__)
         sys.exit(2)
-    main(*sys.argv[1:5])
+    main(*sys.argv[1:4], argv=sys.argv[4:])

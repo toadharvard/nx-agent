@@ -349,7 +349,10 @@ def load_dllkind(path, sha):
     return mod
 
 
-def main(d, root, out, bridge_tsv, dllkind_py, dllkind_sha):
+def closure(d, root, bridge_tsv, dllkind_py, dllkind_sha):
+    """The image set of every manifest pass: the root and the dlls whose dllkind role is `image` (contract/dllkind.py, pinned by its
+    sha256), reached from the root's imports and the constant-name LoadLibrary literals of the reached images. A dll of role bridge,
+    declared or platform is never mapped into the guest, so it has no code and no sites. -> (mods {name: Mod}, kind {name: role}, order, files)"""
     dk = load_dllkind(dllkind_py, dllkind_sha)
     bridge = {l.split("\t")[0].lower() for l in open(bridge_tsv, encoding="utf-8")
               if l.strip() and not l.startswith(("#", "dll\t")) and not l.startswith("!")}
@@ -395,6 +398,24 @@ def main(d, root, out, bridge_tsv, dllkind_py, dllkind_sha):
         for dll in m.normal + m.delay:
             if dll not in kind and dll != root:
                 sys.exit("dll %s imported by %s has no role in dllkind" % (dll, n))
+    return mods, kind, order, files
+
+
+def closure_from_argv(argv, d, root):
+    """closure() with `--bridge TSV --dllkind PATH --dllkind-sha SHA` popped from argv (the same pinned inputs as pemanifest.py main)."""
+    opt = {}
+    for k in ("--bridge", "--dllkind", "--dllkind-sha"):
+        if k not in argv:
+            sys.exit("missing %s (the image set is the dllkind role image/root of the closure)" % k)
+        i = argv.index(k)
+        opt[k] = argv[i + 1]
+        del argv[i:i + 2]
+    return closure(d, root, opt["--bridge"], opt["--dllkind"], opt["--dllkind-sha"])
+
+
+def main(d, root, out, bridge_tsv, dllkind_py, dllkind_sha):
+    mods, kind, order, files = closure(d, root, bridge_tsv, dllkind_py, dllkind_sha)
+    root = root.lower()
     static_names = {x for m in mods.values() for x in m.normal + m.delay}
     os.makedirs(out, exist_ok=True)
     with open(os.path.join(out, "imports.tsv"), "w") as fi, \

@@ -1,0 +1,36 @@
+< atimgpud.dll	0x10003633	GetProcAddress	DecodePointer	dynamic
+> atimgpud.dll	0x10003633	GetProcAddress	KERNEL32.DLL DecodePointer	KERNEL32.DLL
+< atimgpud.dll	0x100092d4	LoadLibraryA	ADVAPI32.DLL	-
+< atimgpud.dll	0x10009304	GetProcAddress	SystemFunction036	dynamic
+> atimgpud.dll	0x100092d6	LoadLibraryA	ADVAPI32.DLL	-
+> atimgpud.dll	0x10009306	GetProcAddress	SystemFunction036	dynamic
+< atimgpud.dll	0x10009565	GetProcAddress	InitializeCriticalSectionAndSpinCount	dynamic
+> atimgpud.dll	0x10009565	GetProcAddress	kernel32.dll InitializeCriticalSectionAndSpinCount	kernel32.dll
+< d3dx9_38.dll	0x0056b719	LoadLibraryA	dynamic	-
+> d3dx9_38.dll	0x0056b717	LoadLibraryA	dynamic	-
+< falloutnv.exe	0x004de010	GetProcAddress	atiadlxx.dll atiadlxy.dll ADL_Main_Control_Destroy	atiadlxx.dll,atiadlxy.dll
+> falloutnv.exe	0x004de010	GetProcAddress	dynamic	dynamic
+< falloutnv.exe	0x00ed1092	GetModuleHandleW	dynamic	-
+< falloutnv.exe	0x00ed10c0	GetProcAddress	EncodePointer	dynamic
+< falloutnv.exe	0x00ed1333	GetModuleHandleW	dynamic	-
+< falloutnv.exe	0x00ed134e	GetProcAddress	dynamic	dynamic
+> falloutnv.exe	0x00ed1090	GetModuleHandleW	L:KERNEL32.DLL	-
+> falloutnv.exe	0x00ed10c4	GetProcAddress	EncodePointer	dynamic
+> falloutnv.exe	0x00ed10d4	GetProcAddress	DecodePointer	dynamic
+> falloutnv.exe	0x00ed1331	GetModuleHandleW	L:KERNEL32.DLL	-
+> falloutnv.exe	0x00ed1358	GetProcAddress	FlsAlloc	dynamic
+> falloutnv.exe	0x00ed1365	GetProcAddress	FlsGetValue	dynamic
+> falloutnv.exe	0x00ed1372	GetProcAddress	FlsSetValue	dynamic
+> falloutnv.exe	0x00ed137f	GetProcAddress	FlsFree	dynamic
+< libvorbis.dll	0x100023d2	GetModuleHandleA	mscoree.dll	-
+< libvorbis.dll	0x100023e2	GetProcAddress	mscoree.dll CorExitProcess	dynamic
+> libvorbis.dll	0x100023d0	GetModuleHandleA	mscoree.dll	-
+> libvorbis.dll	0x100023e0	GetProcAddress	mscoree.dll CorExitProcess	mscoree.dll
+< libvorbis.dll	0x10006ea6	GetProcAddress	EncodePointer	dynamic
+< libvorbis.dll	0x10006eb6	GetProcAddress	DecodePointer	dynamic
+> libvorbis.dll	0x10006ea6	GetProcAddress	KERNEL32.DLL EncodePointer	KERNEL32.DLL
+> libvorbis.dll	0x10006eb6	GetProcAddress	KERNEL32.DLL DecodePointer	KERNEL32.DLL
+< libvorbisfile.dll	0x10008711	GetProcAddress	EncodePointer	dynamic
+< libvorbisfile.dll	0x10008721	GetProcAddress	DecodePointer	dynamic
+> libvorbisfile.dll	0x10008711	GetProcAddress	KERNEL32.DLL EncodePointer	KERNEL32.DLL
+> libvorbisfile.dll	0x10008721	GetProcAddress	KERNEL32.DLL DecodePointer	KERNEL32.DLL
