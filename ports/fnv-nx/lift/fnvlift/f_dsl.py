@@ -11,7 +11,7 @@ fs_base = `fsb`; flo (the other EFLAGS bits) = c->eflx | IF (EFL_PUSH/EFL_POP ke
 memory = M8/M16/M32 (core's macros).  A flag a form declares undefined gets no assignment; a write with `when` is conditional.
 
 Faults (Form.faults) raise through f_flow.raise_site like int3/ud2 and the hand div: code 1 (#DE) is FNVL_DE0 when the failing disjunct is the
-divisor-zero test `eq(x, 0)` and FNVL_DEOVF otherwise (the quotient overflow); 2 = FNVL_BP, 3 = FNVL_UD.
+divisor-zero test `eq(x, 0)` and FNVL_DEOVF otherwise (the quotient overflow); 2 = FNVL_BP, 3 = FNVL_UD, 4 = FNVL_BOUNDS (#BR, bound; a fault like #DE).
 
 Control transfer is derived from the Form's eip node by structure: constant == next address -> falls through; another constant -> `call` pushes
 (the Form's esp/store effects) and uses f_flow.call_xfer, anything else f_flow.jump_to; ite(c, constant T, next) -> `if (c) jump_to(T)` (jcc, jecxz,
@@ -23,7 +23,7 @@ from . import dsl
 
 from proof import forms, forms_alu, forms_flow, forms_move             # noqa: F401  (proof/forms.py: the Form builders; forms_* register their handlers in forms.H)
 
-FAULT = {1: 'DE', 2: 'BP', 3: 'UD'}
+FAULT = {1: 'DE', 2: 'BP', 3: 'UD', 4: 'BR'}
 STATE = {'df': 'df', 'fs_base': 'fsb', 'flo': '(c->eflx|0x200u)'}      # Form pre-state variables besides the registers and the five flags
 SIXFLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
 
@@ -66,8 +66,8 @@ def de_code(n, ref):
 
 def fault_fn(cx):
     def f(code, n, ref):
-        c = {1: lambda: de_code(n, ref), 2: lambda: 'FNVL_BP', 3: lambda: 'FNVL_UD'}[code]()
-        st = f_flow.raise_site(cx, c, trap=code != 1)
+        c = {1: lambda: de_code(n, ref), 2: lambda: 'FNVL_BP', 3: lambda: 'FNVL_UD', 4: lambda: 'FNVL_BOUNDS'}[code]()
+        st = f_flow.raise_site(cx, c, trap=code not in (1, 4))      # #DE and #BR are faults (Eip = the instruction); #BP / #UD report the address after it
         if n.op == 'const' and n.x == 1:
             cx.term = True
             return st
@@ -113,7 +113,7 @@ def emit_form(cx, ins):
         return SKIP
     F = forms.build(ins, cx.a)
     force, xfer = transfer(cx, ins, F)
-    L, ref = F.to_c_inline(varc(cx), fault_fn(cx), flo_fn, force)
+    L, ref = F.to_c_inline(varc(cx), fault_fn(cx), flo_fn, force, cx.macc)
     L += xfer(ref)
     if L:
         cx.em('{')

@@ -7,23 +7,22 @@ roots of verify/admit.json; each root is built or taken from the cache by gate_b
 objects (objects.json "objects") are judged; no product root: universe 0, green. The loader modules (gate_build, recipe) are imported from
 ports/fnv-nx/verify, sibling of lift/, the way verify/gate_contract.py imports its own; a checkout without verify/ cannot run the gate (no result file: red).
 All object input handling is in `read_inputs` (objects.json -> [(unit, object path)]) and `read_f2i` (the plugin's file of one object).
-The table files are files of the admitted root that holds them (L3a's guest root lift/rt: rcpref.h, rcptab.c, rcptab.cert.json): the item
-`<image>:rcpcert` exists per linked image (a root with a link stage) iff another object of the image references a symbol that the object compiled from the unit rcptab.c defines (symbol tables of the objects: the link resolves exactly those references); no image, or no such reference: no item (universe 0 for check 1).
+The lift directory is the one this script lies in (rt/rcpref.h, rt/rcptab.c, rt/rcptab.cert.json).
 
 Check 0, dependency (item `<root>:forms`): the correctness of the helpers sse_f2i / fv_i, whose conversions this gate lets through, is
 established by the form certificates, not here. The item is certified iff the gate `forms` (formgate.py, the one copy) is green on its own
-declared inputs; fpexact evaluates it by calling formgate.judge(repo, cache) (verdict.py gives every gate its own GATE_OUT, so one gate cannot read another's
+declared inputs; fpexact evaluates it by calling formgate.judge (verdict.py gives every gate its own GATE_OUT, so one gate cannot read another's
 result file; the same code on the same declared inputs gives the same verdict). Red reason `forms: not green` plus forms' own reason.
 
-Check 1, certificate (item `<root>:rcpcert`, files of the root): rcptab.c is the table of RCPSS / RSQRTSS of the one reference CPU. The pinned certificate
+Check 1, certificate (item `<root>:rcpcert`): rt/rcptab.c is the table of RCPSS / RSQRTSS of the one reference CPU. The pinned certificate
 rt/rcptab.cert.json (made on that CPU by farm/rcpcert.sh: CPUID identity read with the instruction, all 2^32 inputs of both functions
 executed on the hardware and compared bit for bit with the functions of rt/rcptab.c, SHA-256 of both result streams) is accepted iff
   sha256(rt/rcptab.c) == source_sha256, sha256(rt/rcpref.h) == header_sha256, mismatches == 0 (the integer 0), and the CPU identity of the
   certificate equals the four FNVL_RCP_REF_* constants of rt/rcpref.h (the same header rt/rcptab.c includes and the certifying program uses).
 A missing, unreadable or malformed certificate is a finding. Argument: the table functions are pure functions of 32 bits; the certificate
 states equality with the hardware on the whole domain for the exact source bytes whose hash it carries, on the reference identity; so the
-source named by the hash computes RCPSS / RSQRTSS of the reference CPU for every input. Registered assumptions (ports/fnv-nx/lift/ASSUMPTIONS.l3b.json): ASM-320 (the certifying run was made by farm/rcpcert.sh on a CPU
-with the reference identity; the certificate's hash is kept in the store) and ASM-321 (RCPSS / RSQRTSS are pure functions of the input
+source named by the hash computes RCPSS / RSQRTSS of the reference CPU for every input. Registered assumptions (ports/fnv-nx/lift/ASSUMPTIONS.l3b.json): A-RCPHOST (the certifying run was made by farm/rcpcert.sh on a CPU
+with the reference identity; the certificate's hash is kept in the store) and A-RCPPURE (RCPSS / RSQRTSS are pure functions of the input
 bits, independent of MXCSR).
 
 Check 2, every use goes through the table (item `rcp:<root>/<unit>`): an object contains no AArch64 reciprocal / reciprocal-square-root
@@ -35,7 +34,7 @@ definition), so an object without them cannot compute an rcp / rsqrt value excep
 table of rt/rcptab.c (or an exact division / square root). Soundness needs every instruction of the section to be decoded: the bytes of
 a section are code except the ranges the object marks as data with the AArch64 ELF mapping symbols ($d ... $x); bytes the decoder
 cannot decode in a code range are the finding `undecodable` (and make the item of check 3b uncertified as well). Registered
-assumption: ASM-043 (capstone decodes an instruction to its architectural id; sections the object does not mark are code from their start).
+assumption: A-CAPSTONE-A64 (capstone decodes an instruction to its architectural id; sections the object does not mark are code from their start).
 
 Check 3, float -> integer exactness (item `f2i:<root>/<unit>`). The x86 rule (cvt*2si, cvtt*, fist, fistp, fisttp): rounding by MXCSR.RC /
 FCW.RC (truncation for the cvtt* and fisttp forms); NaN and out-of-range give the integer indefinite (0x80000000, 0x8000,
@@ -45,18 +44,17 @@ if-converts the conversion around their range guard (the FCVTZS may sit above a 
 by two guards), so a per-instruction object-level property ("this FCVT is guarded") is only a path-sensitive interval analysis of
 compiler-chosen code, not decidable per instruction from operands. The rule is therefore at source level, before inlining, plus an
 object-level necessary condition:
-  3a (source) the GCC plugin fnvnx_ftoi (toolchain/ftoi, L2's; in mode=lifted, taken from the root's cxx_origin, it also reports): in the CC stage
-      of every C and C++ unit it reports every float -> integer conversion (GIMPLE FIX_TRUNC_EXPR, scalar or vector; the lround / lrint / iround /
-      irint / {i,l,ll}{ceil,floor} builtin families; IFN_VEC_CONVERT; target builtins with a float argument and an integer result; inline asm with a
-      float / vector operand or an FP register clobber) that lies in a function without the attribute fnvnx_f2i (FNVL_F2I in rt/fnvl_x87.h, on the
-      helpers sse_f2i and fv_i), right after the CFG is built, before early inlining and every optimisation, so inlining a helper into its callers
-      cannot hide a site and no transformation adds one. It writes `<unit>.f2i.json` (format fnvnx-f2i/1: unit, sites, helpers, findings = sorted
-      {function, file, line, kind: conv|builtin|asm}) into the CC stage's /out; the recipe keeps it as obj/<unit>.o.f2i.json next to the object.
-      Rule: every object has its result file, its `unit` field equals the unit of objects.json, and `findings` == []; a missing or malformed file,
-      another unit, or any finding is a finding of the object.
-  3c (native C++ unit) a unit of a root whose cxx_origin is native needs, in its CC stage document (gate_datamodel.cc_docs, the one reader), the declared
-      input /plug/fnvnx_ftoi and the argv flag -fplugin=/plug/fnvnx_ftoi/fnvnx_ftoi.so: the compile ran the plugin that rewrites or rejects every
-      conversion. A lifted root's units need no plugin (the lifter emits the conversions through the helpers); their f2i file is judged by 3a.
+  3a (source) the GCC plugin toolchain/f2i_check/fnvnx_f2i_check.cc, a declared plugin of every guest product root's recipe (RECIPE.md "Plugins":
+      {"name": "fnvnx_f2i_check", "source": "ports/fnv-nx/toolchain/f2i_check/fnvnx_f2i_check.cc", "args": {"out": "/out/unit.f2i.json"}}, built by the
+      recipe's plugin stage against the plugin headers of the game's compiler, loaded in the CC stage of every C and C++ unit; the recipe keeps the
+      stage's unit.f2i.json as obj/<unit>.o.f2i.json), run in the compile of every unit,
+      reports every float -> integer conversion (GIMPLE FIX_TRUNC_EXPR, scalar or vector; the lround / lrint / iround / irint /
+      {i,l,ll}{ceil,floor} builtin families; IFN_VEC_CONVERT; target builtins with a float argument and an integer result; inline asm
+      with a float / vector operand or an FP register clobber) that lies in a function without the attribute fnvnx_f2i (FNVL_F2I in
+      rt/fnvl_x87.h, on the helpers sse_f2i and fv_i). It runs right after the CFG is built, before early inlining and every
+      optimisation, so inlining a helper into its callers cannot hide a site and no transformation adds one. Every object needs the
+      result file `<object>.f2i.json` next to it (obj/<unit>.o.f2i.json beside obj/<unit>.o; format fnvnx-f2i/1); a missing or malformed file is a finding; every entry of its
+      `findings` is a finding of the object.
   3b (object) an object with at least one FCVT{Z,N,M,P,A}{S,U} / FJCVTZS instruction (capstone ids, all sections, scalar and vector)
       needs `sites` > 0 in its result file (the unit has a conversion site in some function, helper or not). It catches a conversion
       that entered the object by a route the plugin does not see (an asm without FP operands, the assembler, a hand-written .S): with
@@ -66,12 +64,12 @@ object-level necessary condition:
   transformation; outside the attributed helpers none exists, so the conversion instructions of the object are copies of the helpers'
   bodies. The helpers' own correctness (range guard, rounding mode, indefinite value) is not decided here: it is by review, and it is
   listed per object in the output (`helpers` of each result file are the analysed helper functions). Registered assumptions (ASSUMPTIONS.l3b.json), none new:
-  ASM-322 (the helpers are correct: removed by the dependency on the gate forms, item `<root>:forms`), ASM-323 (an object and its result file
-  come from the same compile: the recipe's stage key binds both), ASM-218 (an inline asm without a float / vector operand and without an FP register
-  clobber does no conversion; 3b backs it up for units with no site), ASM-325 (no conversion of a C literal occurs in lifted code), ASM-801
+  A-F2IHELPERS (the helpers are correct: removed by the dependency on the gate forms, item `<root>:forms`), A-F2IKEY (an object and its result file
+  come from the same compile: the recipe's stage key binds both), A-F2IASM (an inline asm without a float / vector operand and without an FP register
+  clobber does no conversion; 3b backs it up for units with no site), A-F2ICONST (no conversion of a C literal occurs in lifted code), A-F2INATIVE
   (native bodies compiled with the fnvnx_ftoi plugin are judged by the L2 rules, not here).
 
-Universe: per product root: `<root>:rcpcert` (per image, when it uses the table), `<root>:forms`, and for every object `rcp:<root>/<unit>` and `f2i:<root>/<unit>`; a root that does not
+Universe: per product root: `<root>:rcpcert`, `<root>:forms`, and for every object `rcp:<root>/<unit>` and `f2i:<root>/<unit>`; a root that does not
 build or whose recipe is invalid is the one item `<root>:inputs` (uncertified, reason in detail: never skipped). Certified: items with no finding.
 uncertified: the first 50 ids sorted. Exit 0 iff green."""
 import hashlib
@@ -93,7 +91,6 @@ sys.path.insert(0, os.path.join(VERIFY, "..", "contract"))
 sys.path.insert(0, VERIFY)
 from proof import formgate  # noqa: E402
 import gate_build  # noqa: E402
-import gate_datamodel  # noqa: E402     (cc_docs: the reader of the CC stage documents, the one copy)
 import gatefile  # noqa: E402     (ports/fnv-nx/contract)
 import recipe  # noqa: E402
 
@@ -120,10 +117,10 @@ def read_inputs(res):
     return sorted((o["unit"], o["object"]) for o in res["objects"])
 
 
-def read_ref(rt):
+def read_ref(lift_dir):
     """the four FNVL_RCP_REF_* constants of rt/rcpref.h -> {"VENDOR": str, "FAMILY": int, ...}; ValueError unless each is defined exactly once"""
     out = {}
-    with open(os.path.join(rt, "rcpref.h")) as fh:
+    with open(os.path.join(lift_dir, "rt", "rcpref.h")) as fh:
         for line in fh:
             m = re.match(r'#define FNVL_RCP_REF_([A-Z]+) ("[^"\n]*"|[0-9]+)\s*$', line)
             if m and m[1] in REF_KEYS:
@@ -135,13 +132,13 @@ def read_ref(rt):
     return out
 
 
-def check_cert(rt):
+def check_cert(lift_dir):
     """check 1 -> [finding strings]"""
     try:
-        ref = read_ref(rt)
+        ref = read_ref(lift_dir)
     except (OSError, ValueError) as e:
         return ["reference identity unreadable: %s" % e]
-    path = os.path.join(rt, "rcptab.cert.json")
+    path = os.path.join(lift_dir, "rt", "rcptab.cert.json")
     if not os.path.isfile(path):
         return ["certificate rt/rcptab.cert.json is missing (the farm job farm/rcpcert.sh must run on the reference host)"]
     try:
@@ -157,7 +154,7 @@ def check_cert(rt):
         if cert["mismatches"] != 0 or isinstance(cert["mismatches"], bool):
             bad.append("mismatches is %r, not 0" % (cert["mismatches"],))
         for key, file in (("source_sha256", "rcptab.c"), ("header_sha256", "rcpref.h")):
-            have = sha256_file(os.path.join(rt, file))
+            have = sha256_file(os.path.join(lift_dir, "rt", file))
             if cert[key] != have:
                 bad.append("%s %s differs from sha256 of rt/%s (%s)" % (key, cert[key], file, have))
         for key in ("rcp_stream_sha256", "rsqrt_stream_sha256"):
@@ -236,21 +233,6 @@ def scan_object(path):
     return res
 
 
-def symbols_of(path):
-    """-> (defined, referenced): the global/weak symbol names an object defines and the undefined ones it references (its symbol table, as nm reads it)"""
-    dfn, ref = set(), set()
-    with open(path, "rb") as fh:
-        elf = ELFFile(fh)
-        for sec in elf.iter_sections():
-            if sec["sh_type"] != "SHT_SYMTAB":
-                continue
-            for sym in sec.iter_symbols():
-                if not sym.name or sym["st_info"]["bind"] == "STB_LOCAL" or sym["st_info"]["type"] in ("STT_FILE", "STT_SECTION"):
-                    continue
-                (ref if sym["st_shndx"] == "SHN_UNDEF" else dfn).add(sym.name)
-    return dfn, ref
-
-
 def read_f2i(obj_path):
     """-> (result dict or None, problem string or None) of the plugin's file next to the object"""
     p = obj_path + ".f2i.json"
@@ -263,13 +245,12 @@ def read_f2i(obj_path):
             raise ValueError("not a fnvnx-f2i/1 result")
         for f in d["findings"]:
             f["function"], f["file"], f["line"], f["kind"]
-        d["unit"]
         return d, None
     except (OSError, ValueError, KeyError, TypeError) as e:
         return None, "result file %s unreadable or malformed: %s" % (os.path.basename(p), str(e)[:150] or type(e).__name__)
 
 
-def judge_object(oid, path, asm=False, unit=None):
+def judge_object(oid, path, asm=False):
     """-> {item id: [finding strings]} for `rcp:<oid>` and `f2i:<oid>`. ASM: the unit is an assembler unit (.s / .S, the recipe's own kind): the compiler
     never builds GIMPLE for it, so the plugin has no file to write and no conversion site exists in its source: the result is the empty one (sites 0),
     and check 3b still makes any FCVT / FJCVTZS instruction of the object a finding."""
@@ -282,73 +263,29 @@ def judge_object(oid, path, asm=False, unit=None):
     d, why = ({"format": "fnvnx-f2i/1", "findings": [], "sites": 0, "helpers": []}, None) if asm else read_f2i(path)
     if d is None:
         f2i.append(why)
-    elif not asm and d["unit"] != unit:
-        f2i.append("result file names the unit %r, not %r" % (d["unit"], unit))
     else:
-        f2i += ["%s:%s in %s: %s outside a conversion helper" % (f["file"], f["line"], f["function"], f["kind"]) for f in d["findings"] if f["kind"] != "builtin"]
-        # a builtin finding (lround, a libm call) is IEEE under OWNER ASM-008: not red; conv and asm are
+        f2i += ["%s:%s in %s: %s outside a conversion helper" % (f["file"], f["line"], f["function"], f["kind"]) for f in d["findings"]]
         if scan["fcvt"] and d["sites"] == 0:
             f2i.append("%d float->int instruction(s) (%s) but the unit has no conversion site" % (len(scan["fcvt"]), scan["fcvt"][0][1]))
     return {"rcp:" + oid: rcp, "f2i:" + oid: f2i}
 
 
-FTOI = "fnvnx_ftoi"
-
-
-def ftoi_why(doc):
-    """[reasons] a native C++ unit's CC stage document does not show the plugin fnvnx_ftoi: the declared input /plug/fnvnx_ftoi and the argv flag
-    -fplugin=/plug/fnvnx_ftoi/fnvnx_ftoi.so (the document is the stage key, so the object is the one these flags and inputs built)"""
-    if doc is None:
-        return ["no CC stage document"]
-    ins = {i["at"] for i in doc.get("inputs", [])}
-    return (["no declared input /plug/" + FTOI] if "/plug/" + FTOI not in ins else []) + \
-        (["argv lacks -fplugin for " + FTOI] if "-fplugin=/plug/%s/%s.so" % (FTOI, FTOI) not in doc.get("argv", []) else [])
-
-
-TABLE_UNIT = "rcptab.c"
-
-
-def table_item(objs, image_dir):
-    """-> None (no item) or [findings] of the item `<image>:rcpcert`. IMAGE_DIR: the directory of the root that is linked into one image, or None when
-    the root links nothing. The table object is the object of the unit rcptab.c of the image; the symbols it defines come from its symbol table. The image
-    needs the item iff another object of the image references one of those symbols (the link resolves the reference to the table). The certificate is
-    judged on the directory that holds the unit rcptab.c (rcpref.h, rcptab.c, rcptab.cert.json there)."""
-    if image_dir is None:
-        return None
-    tabs = [(u, p) for u, p in objs if os.path.basename(u) == TABLE_UNIT]
-    if not tabs:
-        return None
-    defined = set()
-    for _, p in tabs:
-        defined |= symbols_of(p)[0]
-    used = sorted({n for u, p in objs if os.path.basename(u) != TABLE_UNIT for n in symbols_of(p)[1] & defined})
-    if not used:
-        return None
-    return check_cert(os.path.join(image_dir, os.path.dirname(tabs[0][0])))
-
-
-def judge_objects(root, objs, image_dir, forms_ok, docs=None):
-    """-> {item id: [findings]} of one root: OBJS [(unit, path)], IMAGE_DIR (see table_item), FORMS_OK (reason string or None: the dependency on the gate
-    forms), DOCS ({unit: CC document} of a native root; None: lifted root)."""
-    items = {root + ":forms": [forms_ok] if forms_ok else []}
-    cert = table_item(objs, image_dir)
-    if cert is not None:
-        items[root + ":rcpcert"] = cert
+def judge_objects(root, objs, lift_dir, forms_ok):
+    """-> {item id: [findings]} of one root: OBJS [(unit, path)], FORMS_OK (reason string or None: the dependency on the gate forms)."""
+    items = {root + ":rcpcert": check_cert(lift_dir), root + ":forms": [forms_ok] if forms_ok else []}
     for unit, path in objs:
-        r = judge_object(root + "/" + unit, path, unit.endswith(recipe.ASM_EXT), unit)
-        if docs is not None and unit.endswith(recipe.CXX_EXT):
-            r["f2i:" + root + "/" + unit] += ftoi_why(docs.get(unit))
+        r = judge_object(root + "/" + unit, path, unit.endswith(recipe.ASM_EXT))
         items.update(r)
     return items
 
 
-def forms_reason(repo, cache):
+def forms_reason(cache):
     """None iff the gate forms is green on its declared inputs, else `forms: not green: <its reason>`"""
-    u, c, ids, detail = formgate.judge(repo, cache)
+    u, c, ids, detail = formgate.judge(cache)
     return None if u == c else "forms: not green: %s" % detail[:300]
 
 
-def judge_root(root, repo, cache, forms):
+def judge_root(root, repo, cache, lift_dir, forms):
     """One admitted product ROOT -> (universe, certified, ids, detail); an input problem is one red item, never a skip"""
     try:
         rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
@@ -360,10 +297,7 @@ def judge_root(root, repo, cache, forms):
     if res["status"] == "red":
         return 1, 0, [root + ":inputs"], "root does not build (stage %s)" % res["failure"]["stage"]
     try:
-        image = os.path.join(repo, root) if res.get("elf") else None
-        native = recipe.load_admit(repo).get(root, {}).get("cxx_origin") == "native"
-        docs = gate_datamodel.cc_docs(os.path.join(cache, "store"), res) if native else None
-        items = judge_objects(root, read_inputs(res), image, forms(), docs)
+        items = judge_objects(root, read_inputs(res), lift_dir, forms())
     except (OSError, ValueError, ELFError) as e:
         return 1, 0, [root + ":inputs"], "input error: %s" % (str(e)[:300] or type(e).__name__)
     bad = sorted(k for k, v in items.items() if v)
@@ -381,9 +315,9 @@ def main(argv):
 
     def forms():
         if not memo:
-            memo.append(forms_reason(".", os.path.join(cache, "forms")))
+            memo.append(forms_reason(os.path.join(cache, "forms")))
         return memo[0]
-    u, c, ids, detail = gate_build.quantify(".", lambda root: judge_root(root, ".", cache, forms))
+    u, c, ids, detail = gate_build.quantify(".", lambda root: judge_root(root, ".", cache, LIFT, forms))
     gatefile.write(NAME, u, c, ids, detail if u != c else ("rcp table certified, no rcp/rsqrt estimate instruction and no uncertified float->int conversion in %d items" % u if u else detail))
     st = "green" if u == c else "red"
     sys.stdout.write("%s: %s %d/%d %s\n" % (NAME, st, c, u, detail[:200]))
