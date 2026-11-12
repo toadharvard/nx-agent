@@ -470,3 +470,17 @@ Update 2026-11-12, at 698adefb:
   - Decision: each lift/test test file moves to the tests/ of the root it imports (static import graph; ambiguous cases go to the lead).
   - lift/test keeps only harness and drops selftests, or is removed if empty.
   - w6 on int3.
+
+## 2026-11-12 10:26
+- Triage of int-l3a 380e3cde3 (w8, per-root recipe.py builds on t16f claude/fnv-l3a-lift-w8-t16f):
+  - GREEN:
+    - platform (114 objects, full plugins);
+    - shim, hostabi, translator (headers only);
+    - the lift/bridges check;
+    - the lifted test roots 3/3.
+  - RED:
+    1. lift/rt, lift/pack: int3 fixes not merged (w20 merges 8e40a0e54); pack is still held on w17.
+    2. lib/sha256: a stale recipe form (semantic flags per root, no plugins). Owner L1 (402b50fdb).
+    3. plugin_errors judges a host variant by its guest base root: an L1 gate defect, reported.
+    4. Native test roots 0/3: rt/guest not admitted. Owner L5, asked.
+- DEF0 is in L3b's prover (w4 4a9eabc91). At the shapes pin, 3 850 int keys (360 131 sites) have undefined flags. w5 sends w4 the context bytes for the CRT sites.
