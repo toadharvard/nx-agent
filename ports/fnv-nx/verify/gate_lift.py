@@ -5,8 +5,10 @@
 The driver is impure (it builds roots through recipe.py, reads the cache, runs the tools); the rules are in the pure tool root
 ports/fnv-nx/lift/gates (gate_order.py, gate_eh.py), which the driver runs as processes on the cached build results.
 Roots come from admit.json, never from arguments. A root is judged by its admit.json declaration `cxx_origin`, never by a name:
-  lifted  {"lifted_by", "pack"}   order: gate_order's `order` and `align` rows, addr32: its `addrwrap` rows, over every object of the root
-          (the runtime object of rt/enter.c is the object of the root that defines the 4-byte symbol fnvnx_lift_cpu_bytes: sizeof(struct cpu)).
+  lifted  {"lifted_by", "pack"}   order: gate_order's `order` and `align` rows, addr32: its `addrwrap` rows, over the objects of the image
+          in every image that names the root in link.roots (a lifted root that no image names has universe 0 until the ELF root exists); the
+          objects are those of the lifted root and of the runtime root, the root among the image's link.roots that holds the unique object
+          defining the 4-byte symbol fnvnx_lift_cpu_bytes (sizeof(struct cpu); none or several is red).
           eh: gate_eh over the pack (the external of the recipe that `pack` names) and the EH facts (the external that the key `ehfacts` of
           contract_inputs.json names; layout ehtables.json and <module>/ehtables.json, as the facts of the other contract gates).
   native  "native", "target" "guest"   order: gate_argorder's certificate for fnvnx_order, addr32: the same certificate for fnvnx_addr.
@@ -97,21 +99,55 @@ def fold(root, rows):
     return u, c, ids, "; ".join(r["detail"] for r in (red or rows))[:600]
 
 
-def judge_lifted_order(gate, root, repo, cache):
-    res, _ = gate_build.ensure(root, cache, repo)
-    if res["status"] == "red":
-        return 1, 0, [root + ":build"], "build red at stage %s" % res["failure"]["stage"]
-    objs = sorted(res["objects"], key=lambda o: o["unit"])
-    holders = sorted({d["object"] for d in res["defined"] if d["symbol"] == CPU_SYMBOL})
+def images_naming(root, repo):
+    """The link roots whose recipe lists ROOT in link.roots (the image that links it): [path]. A recipe that does not load names nothing."""
+    admit = recipe.load_admit(repo)
+    out = []
+    for p in gate_build.product_roots(repo):
+        try:
+            rl = recipe.load_recipe(repo, admit, p).get("link")
+        except (OSError, ValueError, AttributeError):
+            continue
+        rs = rl.get("roots") if isinstance(rl, dict) else None
+        if isinstance(rs, list) and root in rs:
+            out.append(p)
+    return out
+
+
+def judge_image(gate, root, image, repo, cache):
+    """The objects judged are those of the image: the lifted ROOT and the runtime root, the root among link.roots of IMAGE that defines
+    the 4-byte symbol fnvnx_lift_cpu_bytes (its object is the unique definer over all link.roots; none or several is red)."""
+    admit = recipe.load_admit(repo)
+    members = recipe.load_recipe(repo, admit, image)["link"]["roots"]
+    built, holders = {}, []
+    for m in sorted(set(members) | {root}):
+        res, _ = gate_build.ensure(m, cache, repo)
+        if res["status"] == "red":
+            return 1, 0, [m + ":build"], "build red at stage %s" % res["failure"]["stage"]
+        built[m] = res
+        holders += [(m, d["object"]) for d in res["defined"] if d["symbol"] == CPU_SYMBOL]
     if len(holders) != 1:
-        return 1, 0, [root + ":inputs"], ("input missing: no object of the lifted root defines %s (the runtime object of rt/enter.c; admit.json "
-                                          "names no runtime root, owner L1/L3a)" % CPU_SYMBOL) if not holders else \
-            "input error: %d objects define %s: %s" % (len(holders), CPU_SYMBOL, ", ".join(holders))
-    rt = next(o for o in objs if o["unit"] == holders[0])
+        return 1, 0, [image + ":inputs"], ("input missing: no object of the roots of image %s defines %s (the runtime object of rt/enter.c; owner L3a)"
+                                          % (image, CPU_SYMBOL)) if not holders else \
+            "input error: %d objects of the roots of image %s define %s: %s" % (len(holders), image, CPU_SYMBOL, ", ".join("%s:%s" % h for h in holders))
+    rtroot, rtunit = holders[0]
+    rt = next(o for o in built[rtroot]["objects"] if o["unit"] == rtunit)
+    objs = sorted((o for m in sorted({root, rtroot}) for o in built[m]["objects"]), key=lambda o: (o["unit"], o["sha256"]))
     r = run_tool(repo, cache, "gate_order.py", [rt["object"]] + [o["object"] for o in objs], ("order", "addrwrap", "align"),
                  [rt["sha256"], [o["sha256"] for o in objs]], {"JOBS": "4"})
-    u, c, ids, d = fold(root, [r[g] for g in ROWS[gate]])
-    return u, c, ids, d
+    return fold(image, [r[g] for g in ROWS[gate]])
+
+
+def judge_lifted_order(gate, root, repo, cache):
+    """A lifted root is judged in every image that names it in link.roots; no image names it: universe 0 until the ELF root exists."""
+    u = c = 0
+    ids, why = [], []
+    for image in images_naming(root, repo):
+        iu, ic, iids, idetail = judge_image(gate, root, image, repo, cache)
+        u, c, ids = u + iu, c + ic, ids + iids
+        if ic != iu:
+            why.append("%s: %s" % (image, idetail))
+    return u, c, ids, "; ".join(why) or "%d items in %d images" % (u, len(images_naming(root, repo)))
 
 
 def eh_inputs(repo, cache, root, rec, ws):
