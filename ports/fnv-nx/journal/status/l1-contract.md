@@ -628,3 +628,4 @@ Ids: gate_eh uses the orchestrator's ASM-222/223/224. L1's 225..227 are withdraw
 - The orchestrator is removing the 24 legal pairs itself.
 - w20 44bc3b66: objstub A/B + descs. Verdict red 916e0dc7, 348.5 s, 29 gates; the only red is `assumptions`, L2's and inherited. 0 admitted roots, so counts are 0. Three corrections sent: layout-derived join (no handler column, op_cover 0ae75213); error_abi kinds noreturn|flag, mandatory for table roots; trap shape by output effect only (the subset that excluded reads is dropped). Then it stops.
 - L2: libpcre2 is already served by the trunk deb mirror. Any Wine-built cl table must use pinned Wine + cl via a profile and a generated stage.
+- Queued for after the merge: the `wine` profile (w5's resolver; seeds = Wine 9.0 + closure from the snapshot index; mirror tools/wine-debs), for L2's cl reference-table generated stage (cl from fnv-nx-build toolchain/msvc9 f26d2624). Until then L2's run is a measurement.
