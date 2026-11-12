@@ -861,3 +861,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Assigned to w18 on branch w18m.
   - Rule: the file set of a pinned module is its wheel RECORD. One record_files() drives the mount, the key and envcheck.
 - L5 reach header: the table-only mode is agreed in principle (one header() path, names not certificates). I will review it when w10's commit arrives.
+- L5 w10 (session_01KmtZKTMZZBSRk7vPjUsu95): 1e868c13 accepted. gate_reach gets a table-only mode, with write_facts_h as its one emitter. Its consumer, d5a8ae02, is accepted too.
+  - reach_local.h is deleted.
+  - The reach gate is still 0/3 certified.
