@@ -28,6 +28,9 @@ for _n, _g in (('eax', ('AX', 'AL', 'AH')), ('ebx', ('BX', 'BL', 'BH')), ('ecx',
     for _x in _g: R32[getattr(X, 'X86_REG_' + _x)] = _n
 CALLER_SAVED = ('eax', 'ecx', 'edx')
 CALLER_SAVED_NEVER = ()
+COPYLIKE = {'mov', 'push', 'pop', 'call', 'jmp', 'ret', 'cmp', 'test', 'nop', 'leave', 'movzx', 'movsx', 'int3', 'hlt', 'ud2', 'iret', 'iretd', 'retf', 'wait', 'fwait'}
+COPYLIKE |= {'j' + c for c in ('o','no','b','ae','e','ne','be','a','s','ns','p','np','l','ge','le','g','ecxz','cxz')} | {'loop', 'loope', 'loopne'}
+COPYLIKE |= {'set' + c for c in ('o','no','b','ae','e','ne','be','a','s','ns','p','np','l','ge','le','g')}
 BLOCK_KINDS = {'tail', 'inner', 'eh-unwind', 'eh-catch', 'eh-cont', 'eh-throw'}
 FP_ENV = {'fnstenv': 28, 'fstenv': 28, 'fnsave': 108, 'fsave': 108}      # 32-bit protected mode image: FIP at +12, FDP at +20
 FP_FXSAVE = ('fxsave',)                                                   # FIP at +8, FDP at +16
@@ -40,9 +43,16 @@ RETS = ('ret', 'retf', 'iret', 'iretd')
 def tr(v): return v == 'mix' or (isinstance(v, tuple) and v[0] in ('ra', 'fip', 'fdp', 'abs'))
 
 
+T_CODE = ('code', 0)      # s1: a value that is, or was loaded from, a relocated in-span constant (an entry by rule R3)
+T_S4 = ('s4', 0)          # s4: arithmetic on s1 / s4 (no rule makes its result an entry)
+TYPES = (T_CODE, T_S4)
+
+
 def j(a, b):
     """join of two values at a merge: equal stays; a pc-derived value on one path and anything else on the other is 'mix' (possibly pc-derived); two different stack pointers or data are untracked."""
     if a == b: return a
+    if a == T_S4 or b == T_S4: return T_S4
+    if a == T_CODE or b == T_CODE: return T_CODE if not (tr(a) or tr(b)) else 'mix'
     return 'mix' if (tr(a) or tr(b)) else None
 
 
@@ -168,6 +178,7 @@ def analyse_entry(img, e, mode='owner'):
             n = R32.get(op.reg)
             if n is None: return None
             v = ('sp', esp) if n == 'esp' and esp is not None else regs.get(n)
+            if v in TYPES and op.size != 4: return None      # a narrow read of an address is not an address
             if v is not None and op.size != 4: return 'mix'
             return v
         def load(key, a=a):
@@ -209,6 +220,7 @@ def analyse_entry(img, e, mode='owner'):
             if op.type != X.X86_OP_REG: return
             n = R32.get(op.reg)
             if n is None or n == 'esp': return
+            if op.size != 4 and regs.get(n) in TYPES: return      # a partial write keeps the register's type
             if op.size != 4 and regs.get(n) is not None: regs[n] = 'mix'; return
             if v is None or v == 'mix' and False: regs.pop(n, None)
             else: regs[n] = v
@@ -227,7 +239,35 @@ def analyse_entry(img, e, mode='owner'):
                 if o.type == X.X86_OP_REG:
                     v = regval(o)
                     if v is not None and (tracked(v) or v == 'mix'): consume(v, 'unknown-use', mn, True)
-        if mn == 'call' and img.calltg.get(a) == nxt:
+        def reloc_imm():
+            return g.imm_size == 4 and (a + g.imm_offset) in img.rset and img.T0 <= (ops[-1].imm & M32) < img.T1
+        def reloc_load(op):
+            m = op.mem
+            if m.base or img.rd is None or not op.size == 4 and op.size != 0: return False
+            slot = m.disp & M32
+            if slot not in img.rset: return False
+            try: w = img.rd(slot)
+            except Exception: return False
+            return img.T0 <= w < img.T1
+        # s1/s4: arithmetic on a typed value gives s4 (copies, loads and stores keep the type)
+        tin = False
+        if mn not in COPYLIKE and mn != 'lea':
+            rn_, wn_ = access(g)
+            tin = any(regs.get(n) in TYPES for n in rn_) and bool(wn_ or any(o.type == X.X86_OP_MEM and o.access & capstone.CS_AC_WRITE for o in ops))
+        if tin:
+            for o in ops:
+                if o.type == X.X86_OP_MEM and o.access & capstone.CS_AC_READ: read_mem(o)
+            for n in sorted(wn_):
+                if n != 'esp': regs[n] = T_S4
+            for o in ops:
+                if o.type == X.X86_OP_MEM and o.access & capstone.CS_AC_WRITE:
+                    key = memkey(img, g, o, esp, regs)
+                    if key is not None and key[0] == 'stk': st[key[1]] = T_S4
+                    else: emit(a, 's4', 'escape-stored', 'arithmetic result stored to memory', False)
+            if X.X86_REG_ESP in g.regs_access()[1]:
+                img.info['esp-lost'] += 1; esp = None
+            succ = [nxt]
+        elif mn == 'call' and img.calltg.get(a) == nxt:
             # call $+5: pushes the concrete address of the next instruction (a typed source of its own)
             if esp is not None:
                 esp -= 4; st[esp] = ('abs', frozenset({nxt})); emit(a, 'pc', 'read', 'call $+5 pushes its own next address', False)
@@ -241,6 +281,10 @@ def analyse_entry(img, e, mode='owner'):
                     for t in sorted(v[1]):
                         if t not in img.entries and t not in img.retsites: emit(a, vsrc(v), 'target-not-entry', '%08x' % t, True)
                 else: emit(a, vsrc(v), 'unresolved-target', 'call through a relative value', True)
+            elif o.type == X.X86_OP_REG and regs.get(R32.get(o.reg)) in TYPES:
+                v = regs[R32[o.reg]]
+                if v == T_S4: emit(a, 's4', 'target-s4', 'call through a register holding arithmetic on a code address', True)
+                else: emit(a, 'code', 'code-target', 'call reg', False)
             elif o.type == X.X86_OP_MEM: read_mem(o)
             if tg is not None and tg in img.entries and tg != e: sm = analyse_entry(img, tg)[1]
             for off, v in sorted(st.items()):
@@ -251,6 +295,7 @@ def analyse_entry(img, e, mode='owner'):
                 if v is None: continue
                 # the callee's code decides: it reads the register first (a pass), overwrites it on every path (the value dies), or leaves it (the value survives)
                 fate = path_kill(img, tg, n) if (tg is not None and tg in img.entries) else 'read'
+                if v == T_S4 and fate == 'read': emit(a, 's4', 'escape-passed', 'register %s read by the callee' % n, False)
                 if (tracked(v) or v == 'mix') and fate == 'read': emit(a, vsrc(v) if v != 'mix' else 'pc', 'passed', 'register %s read by the callee%s' % (n, '' if tg is not None and tg in img.entries else ' (callee unknown)'), True)
                 if fate == 'live' and n not in CALLER_SAVED_NEVER: keep[n] = v
             regs.clear(); regs.update(keep)
@@ -268,10 +313,12 @@ def analyse_entry(img, e, mode='owner'):
             if ops and ops[0].type == X.X86_OP_IMM: n = ops[0].imm & 0xffff
             v = st.get(esp) if esp is not None else None
             if esp is not None and v is not None and tracked(v) and v != ('ra', 0): consume(v, 'ret-transfer', 'ret to %s+%d' % (v[0], v[1] if v[0] != 'abs' else 0), False); emit(a, vsrc(v), 'ret-transfer', 'ret through a moved return address', False)
+            elif esp is not None and v == T_S4: emit(a, 's4', 'target-s4', 'ret through a stack slot holding arithmetic on a code address', True)
             elif esp is not None and v == ('ra', 0): pass
             elif esp is None: emit(a, '-', 'esp-lost-ret', 'ret with an unknown esp offset', False)
             rr = {n_: regs[n_] for n_ in sorted(regs) if isinstance(regs[n_], tuple) and regs[n_][0] == 'ra'}
             for n_, v_ in sorted(regs.items()):
+                if v_ == T_S4: emit(a, 's4', 'escape-returned', 'returned in %s' % n_, False)
                 if v_ is not None and tracked(v_) and v_[0] != 'ra':
                     if n_ in CALLER_SAVED and not anyra: retscratch.append((a, n_, vsrc(v_)))      # dead iff every caller overwrites it first: decided in resolve()
                     else: emit(a, vsrc(v_), 'passed', 'returned in %s' % n_, True)
@@ -280,6 +327,8 @@ def analyse_entry(img, e, mode='owner'):
             o = ops[0]
             if o.type == X.X86_OP_REG:
                 v = regs.get(R32.get(o.reg))
+                if v == T_S4: emit(a, 's4', 'target-s4', 'jmp through a register holding arithmetic on a code address', True)
+                elif v == T_CODE: emit(a, 'code', 'code-target', 'jmp reg', False)
                 if tracked(v):
                     consume(v, 'code-target', 'jmp reg')
                     if v[0] == 'abs':
@@ -311,7 +360,8 @@ def analyse_entry(img, e, mode='owner'):
             succ = [nxt, ops[0].imm & M32] if ops and ops[0].type == X.X86_OP_IMM else [nxt]
         elif mn == 'push':
             o = ops[0]
-            v = regval(o) if o.type == X.X86_OP_REG else (read_mem(o) if o.type == X.X86_OP_MEM else None)
+            v = regval(o) if o.type == X.X86_OP_REG else (read_mem(o) if o.type == X.X86_OP_MEM else (T_CODE if (o.type == X.X86_OP_IMM and reloc_imm()) else None))
+            if v is None and o.type == X.X86_OP_MEM and reloc_load(o): v = T_CODE
             if esp is not None:
                 esp -= 4
                 if v is not None: st[esp] = v
@@ -339,9 +389,10 @@ def analyse_entry(img, e, mode='owner'):
                 if s.type == X.X86_OP_REG: write_reg(d, regval(s))
                 elif s.type == X.X86_OP_MEM:
                     v = read_mem(s)
+                    if v is None and d.size == 4 and reloc_load(s): v = T_CODE
                     if d.size == 4: write_reg(d, v)
                     else: write_reg(d, 'mix' if tracked(v) else None)
-                else: write_reg(d, None)
+                else: write_reg(d, T_CODE if (d.size == 4 and reloc_imm()) else None)
                 if d.type == X.X86_OP_REG and R32.get(d.reg) == 'esp' and s.type == X.X86_OP_REG:
                     v = regs.get(R32.get(s.reg)); esp = v[1] if isinstance(v, tuple) and v[0] == 'sp' else None
                     if esp is None: img.info['esp-lost'] += 1
@@ -351,6 +402,8 @@ def analyse_entry(img, e, mode='owner'):
                 if v is not None and tracked(v):
                     if key is not None and key[0] == 'stk': st[key[1]] = v
                     else: emit(a, vsrc(v), 'store', 'mov to memory', True)
+                elif v in TYPES and key is not None and key[0] == 'stk': st[key[1]] = v
+                elif v == T_S4: emit(a, 's4', 'escape-stored', 'mov to memory', False)
                 elif key is not None and key[0] == 'stk': st.pop(key[1], None)
                 for r_ in (d.mem.base, d.mem.index):
                     n = R32.get(r_) if r_ else None
@@ -364,7 +417,10 @@ def analyse_entry(img, e, mode='owner'):
             elif b and not ix and isinstance(bv, tuple) and bv[0] in ('ra', 'fip', 'fdp'): v = (bv[0], bv[1] + m.disp)
             elif b and not ix and isinstance(bv, tuple) and bv[0] == 'abs': v = ('abs', frozenset(t + m.disp for t in bv[1]))
             elif (b and tracked(bv)) or (ix and tracked(regs.get(ix))): v = 'mix'; emit(a, 'pc', 'merge', 'lea with an index', True)
-            if v is not None and isinstance(v, tuple) and v[0] == 'sp' and v[1] <= 0 <= v[1] + 0 and False: pass
+            if v is None:
+                bt = bv if b else None; it = regs.get(ix) if ix else None
+                if bt in TYPES or it in TYPES: v = bt if (bt in TYPES and not ix and m.disp == 0) else T_S4
+                elif not b and not ix and g.disp_size == 4 and (a + g.disp_offset) in img.rset and img.T0 <= (m.disp & M32) < img.T1: v = T_CODE
             write_reg(d, v)
             succ = [nxt]
         elif mn in ('add', 'sub') and ops[0].type == X.X86_OP_REG and R32.get(ops[0].reg):
@@ -428,7 +484,6 @@ def analyse_entry(img, e, mode='owner'):
                 else: img.info['fpu-env-unknown-destination'] += 1
             succ = [nxt]
         elif mn.startswith('f') and mn not in FPU_CONTROL:
-            fpl = frozenset({a})
             for o in ops:
                 if o.type == X.X86_OP_MEM and o.access & capstone.CS_AC_READ: read_mem(o)
             succ = [nxt]
@@ -463,7 +518,7 @@ def analyse_entry(img, e, mode='owner'):
                 s2 = {k: j(o[1].get(k), st.get(k)) for k in set(o[1]) | set(st)}
                 s2 = {k: v for k, v in s2.items() if v is not None}
                 e2 = o[2] if o[2] == esp else None
-                f2 = o[3] | fpl; fe2 = {k: v for k, v in o[4].items() if fpe.get(k) == v}
+                f2 = o[3]; fe2 = {k: v for k, v in o[4].items() if fpe.get(k) == v}
                 # abs values merge as a union of concrete addresses (the same typed source at a join)
                 for dct in (r2, s2):
                     for k in list(dct):
@@ -653,8 +708,9 @@ def run(text, T0, entries, ranges, outdir, name, rd=None, rset=None, parent=None
     byc = Counter((r[2], r[3]) for r in rows); redc = Counter((r[2], r[3]) for r in red)
     sources = len({(r[1], r[2]) for r in rows if r[3] == 'read'})
     res = dict(schema='fnvnx-gate/1', name='l3.pcsrc.' + name, status='red' if red else 'green', sources=sources, rows=len(rows), red=len(red), by_class={'%s/%s' % k: n for k, n in sorted(byc.items())},
-               red_by_class={'%s/%s' % k: n for k, n in sorted(redc.items())}, red_candidate_entries=redcand, red_proven_entries=len(red) - redcand, esp_lost=img.info['esp-lost'], entries=len(entries), info=dict(img.info))
+               red_by_class={'%s/%s' % k: n for k, n in sorted(redc.items())}, s4_red=sum(1 for r in red if r[2] == 's4'), s4_red_proven=sum(1 for r in red if r[2] == 's4' and r[0] not in cand), s4_escapes=sum(1 for r in rows if r[2] == 's4' and not r[5]), code_sources=sum(1 for r in rows if r[2] == 'code'), red_candidate_entries=redcand, red_proven_entries=len(red) - redcand, esp_lost=img.info['esp-lost'], entries=len(entries), info=dict(img.info))
     json.dump(res, open(outdir + '/gate_pcsrc.json', 'w'), sort_keys=True)
+    json.dump({'s4_violations': res['s4_red']}, open(outdir + '/pcsrc_s4.json', 'w'), sort_keys=True)      # read by modlift's residual: no file = unchecked, N > 0 = violation
     return len(red), res
 
 

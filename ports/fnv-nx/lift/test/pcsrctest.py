@@ -101,6 +101,23 @@ red, res, rows = run2([(0x1000, thunk_c2), (0x1100, thunk)], {0x1000: {'call'}, 
 check('scratch live: a caller reads ecx', red >= 1 and any(r[3] == 'passed' for r in rows), rows)
 red, res, rows = run2([(0x1000, thunk_c), (0x1100, thunk)], {0x1000: {'call'}, 0x1100: {'call', 'ptr'}})
 check('scratch with indirect callers stays red', red >= 1, rows)
+
+# ---- s1 / s4 typed sources (relocated in-span constants and arithmetic on them)
+IMM = b'\xb8' + (0x1020).to_bytes(4, 'little')                      # mov eax, 0x1020  (the imm32 at 0x1001 is relocated)
+red, res, rows = run2([(0x1000, IMM + b'\xff\xe0'), (0x1020, b'\xc3')], {0x1000: {'call'}, 0x1020: {'ptr'}}, rd=lambda a: 0x1020, rset={0x1001})
+check('s1: a relocated constant reaching jmp reg is fine (an entry by R3)', red == 0 and any(r[2] == 'code' and r[3] == 'code-target' for r in rows), rows)
+red, res, rows = run2([(0x1000, IMM + b'\x83\xc0\x04\xff\xe0'), (0x1020, b'\xc3')], {0x1000: {'call'}, 0x1020: {'ptr'}}, rd=lambda a: 0x1020, rset={0x1001})
+check('s4: arithmetic on a relocated constant reaching jmp reg is red', red >= 1 and any(r[2] == 's4' and r[3] == 'target-s4' for r in rows), rows)
+red, res, rows = run2([(0x1000, IMM + b'\x83\xc0\x04\x8b\x08\x31\xc0\xc3'), (0x1020, b'\xc3')], {0x1000: {'call'}, 0x1020: {'ptr'}}, rd=lambda a: 0x1020, rset={0x1001})
+check('s4 reaching only a data use (mov ecx,[eax]) is fine', red == 0, rows)
+tb = 0x2000
+TL = b'\x8b\x04\x8d' + tb.to_bytes(4, 'little') + b'\xff\xe0'               # mov eax,[ecx*4+tb]; jmp eax: a jump-table load is s1
+red, res, rows = run2([(0x1000, TL), (0x1020, b'\xc3')], {0x1000: {'call'}, 0x1020: {'ptr'}}, rd=lambda a: 0x1020, rset={tb})
+check('s1: a load of a relocated table word is code, not s4', red == 0 and any(r[2] == 'code' for r in rows), rows)
+red, res, rows = run2([(0x1000, IMM + b'\x8d\x44\x00\x04\xff\xe0'), (0x1020, b'\xc3')], {0x1000: {'call'}, 0x1020: {'ptr'}}, rd=lambda a: 0x1020, rset={0x1001})
+check('s4: lea with a non-zero term is arithmetic', red >= 1 and any(r[3] == 'target-s4' for r in rows), rows)
+red, res, rows = run2([(0x1000, IMM + b'\x50\x59\xff\xe1'), (0x1020, b'\xc3')], {0x1000: {'call'}, 0x1020: {'ptr'}}, rd=lambda a: 0x1020, rset={0x1001})
+check('s1: push/pop copies keep the type (no s4)', red == 0 and not any(r[2] == 's4' for r in rows), rows)
 # 11 determinism
 a = run([(0x1000, call(0x1000, THUNK) + b'\xc3'), (THUNK, t)])[2]; b = run([(0x1000, call(0x1000, THUNK) + b'\xc3'), (THUNK, t)])[2]
 check('deterministic', a == b)
