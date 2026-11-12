@@ -53,6 +53,19 @@ def _size(t, i):
     return int(n)
 
 
+# The element of a homogeneous aggregate, by the part mode the compiler's own backend reports for it (the plugin asks targetm.calls.function_arg /
+# function_value, it does not classify types itself): suffix -> (element size in bytes, C++ element type). An element code not in this table is an error.
+ELEM = {'hf': (4, 'float'), 'hd': (8, 'double'), 'hq': (16, 'long double'), 'hh': (2, '_Float16'),
+        'hv8': (8, 'v8f'), 'hv16': (16, 'v16f')}
+
+
+def _hsuf(t):
+    """the element code at the end of t (`s12hf`, `a8hd`, `s32hv16`) and the rest."""
+    for c in sorted(ELEM, key=len, reverse=True):
+        if t.endswith(c): return c, t[:-len(c)]
+    return None, t
+
+
 def _hfa(n, e, t):
     if n % e or not 1 <= n // e <= 4: raise ValueError('%r: an HFA of %d bytes of %d-byte elements' % (t, n, e))
     return n // e
@@ -65,8 +78,8 @@ def parse(desc):
     conv, r, a = p
     if r in ('v', 'i', 'q', 'f', 'd'): ret = (r, 0, 0, 0)
     elif r[:1] == 'm': ret = ('m', _size(r, 1), 0, 0)
-    elif r[:1] == 'a' and r[-2:] in ('hf', 'hd'):
-        n = _size(r[:-2], 1); e = 4 if r[-1] == 'f' else 8; ret = ('h', n, _hfa(n, e, r), e)
+    elif r[:1] == 'a' and _hsuf(r)[0]:
+        c, rest = _hsuf(r); n = _size(rest, 1); ret = ('h', n, _hfa(n, ELEM[c][0], r), c)
     elif r[:1] == 'a':
         n = _size(r, 1)
         if n > 16: raise ValueError('%r: a register aggregate of more than 16 bytes' % r)
@@ -76,8 +89,8 @@ def parse(desc):
     for t in (a.split(',') if a else []):
         if t in ('i', 'q', 'f', 'd'): args.append((t, 0, 0, 0))
         elif t[:1] == 's' and t[-1] == 'r': args.append(('r', _size(t[:-1], 1), 0, 0))
-        elif t[:1] == 's' and t[-2:] in ('hf', 'hd'):
-            n = _size(t[:-2], 1); e = 4 if t[-1] == 'f' else 8; args.append(('h', n, _hfa(n, e, t), e))
+        elif t[:1] == 's' and _hsuf(t)[0]:
+            c, rest = _hsuf(t); n = _size(rest, 1); args.append(('h', n, _hfa(n, ELEM[c][0], t), c))
         elif t[:1] == 's' and t[-1] == 'g':
             n = _size(t[:-1], 1)
             if n > 16: raise ValueError('%r: a general aggregate of more than 16 bytes' % t)
@@ -94,7 +107,7 @@ def emit(desc, name):
     conv, ret, args, reg_ret = parse(desc)
     cls, rn, rk, re_ = ret
     rt = {'v': 'void', 'i': 'u32', 'q': 'u64', 'f': 'float', 'd': 'double', 'a': 'G%d' % rn, 'm': 'M%d' % rn,
-          'h': ('HF%d' if re_ == 4 else 'HD%d') % rk}[cls]
+          'h': 'H%s_%d' % (re_, rk)}[cls]
     ps, body, w = [], [], 0          # w: stack word index
     ecx = edx = '0'
     nregs = 0
@@ -102,7 +115,7 @@ def emit(desc, name):
     if not reg_ret: stack.append(('hid', 0, 'hid'))
     for i, (c, n, k, e) in enumerate(args):
         a = 'a%d' % i
-        pt = {'i': 'u32', 'q': 'u64', 'f': 'float', 'd': 'double', 'r': 'u32', 'g': 'G%d' % n, 'h': ('HF%d' if e == 4 else 'HD%d') % k if c == 'h' else ''}[c]
+        pt = {'i': 'u32', 'q': 'u64', 'f': 'float', 'd': 'double', 'r': 'u32', 'g': 'G%d' % n, 'h': 'H%s_%d' % (e, k) if c == 'h' else ''}[c]
         ps.append('%s %s' % (pt, a))
         if conv == 'this' and i == 0: ecx = a
         elif conv == 'fast' and c == 'i' and nregs < 2:
@@ -133,6 +146,8 @@ typedef unsigned char u8;
 typedef unsigned short u16;
 typedef unsigned int u32;
 typedef unsigned long long u64;
+typedef float v8f __attribute__((vector_size(8)));
+typedef float v16f __attribute__((vector_size(16)));
 struct fnvnx_guest_ret { u32 eax, edx; double st0; };
 extern "C" {
 void fnvnx_guest_invoke_regs(u32 addr, u32 ecx, u32 edx, u32 nargs, const u32 *args, u32 kind, struct fnvnx_guest_ret *out);
@@ -148,15 +163,15 @@ static inline u64 dbits(double f) { union { double f; u64 u; } t; t.f = f; retur
 
 
 def types(descs):
-    G, HF, HD, M_ = set(), set(), set(), set()
+    G, H, M_ = set(), set(), set()
     for d in descs:
         conv, ret, args, _ = parse(d)
         for c, n, k, e in [ret] + args:
             if c in ('a', 'g'): G.add(n)
             elif c == 'm': M_.add(n)
-            elif c == 'h': (HF if e == 4 else HD).add(k)
+            elif c == 'h': H.add((e, k))
     out = ['typedef struct { u8 b[%d]; } G%d;' % (n, n) for n in sorted(G)]
-    out += ['typedef struct { float v[%d]; } HF%d;' % (k, k) for k in sorted(HF)] + ['typedef struct { double v[%d]; } HD%d;' % (k, k) for k in sorted(HD)]
+    out += ['typedef struct { %s v[%d]; } H%s_%d;' % (ELEM[e][1], k, e, k) for e, k in sorted(H)]
     out += ['struct M%d { u8 b[%d]; M%d() {} M%d(const M%d &o) { cp(b, o.b, %d); } };' % (n, n, n, n, n, n) for n in sorted(M_)]
     return '\n'.join(out) + '\n'
 
