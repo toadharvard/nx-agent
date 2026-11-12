@@ -1,0 +1,15 @@
+# face (as w32_face_name spells it)	Wine 9.0 files it maps to (win32u font.c default_fonts / wine.inf [Fonts] + FontSubstitutes; fonts-wine 9.0~repack-4build3)	or: none = no file in Wine's own font set
+Tahoma	tahoma.ttf,tahomabd.ttf
+Courier	courier.ttf,coure.fon,couree.fon,coureg.fon,courer.fon,couret.fon,coue1255.fon,coue1256.fon,coue1257.fon
+MS Sans Serif	ms_sans_serif.ttf,sserife.fon,sserifee.fon,sserifeg.fon,sserifer.fon,sserifet.fon,sseriff.fon,sseriffe.fon,sseriffg.fon,sseriffr.fon,sserifft.fon,ssee1255.fon,ssee1256.fon,ssee1257.fon,ssee874.fon,ssef1255.fon,ssef1256.fon,ssef1257.fon,ssef874.fon
+System	system.ttf,vgasys.fon,vgasyse.fon,vgasysg.fon,vgasysr.fon,vgasyst.fon,vgas1255.fon,vgas1256.fon,vgas1257.fon,vgas874.fon,svgasys.fon,cvgasys.fon,hvgasys.fon
+MS Shell Dlg	none
+Arial	none
+Courier New	none
+Times New Roman	none
+Liberation Mono	none
+Liberation Sans	none
+Liberation Serif	none
+Bitstream Vera Sans	none
+Bitstream Vera Sans Mono	none
+Bitstream Vera Serif	none

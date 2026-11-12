@@ -16,6 +16,7 @@
  * fontconfig-derived family fallbacks beyond Wine's three built-in names per family class. */
 #include "w32.h"
 #include "gdi_int.h"
+#include "font_faces.h"
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -333,10 +334,12 @@ void scan_host(const std::string &d)
 bool is_full_name(const ustr &n) { for (Family *f : g_fam) for (Face *x : f->faces) if (x->scalable && !fcmp(x->full, n, 63)) return true; return false; }
 bool enum_fallback(int pf, int i, ustr *out)
 {
-    static const char *const fixed[3] = { "Courier New", "Liberation Mono", "Bitstream Vera Sans Mono" }, *const serif[3] = { "Times New Roman", "Liberation Serif", "Bitstream Vera Serif" },
-        *const sans[3] = { "Arial", "Liberation Sans", "Bitstream Vera Sans" };
     if (i >= 3) return false;
-    *out = widen(((pf & 1) || (pf & 0xf0) == 0x30) ? fixed[i] : (pf & 0xf0) == 0x10 ? serif[i] : sans[i]);
+    int fixed = (pf & 1) || (pf & 0xf0) == 0x30, serif = !fixed && (pf & 0xf0) == 0x10;
+    const char *n = fixed ? (i == 0 ? w32_face_name(FACE_COURIER_NEW) : i == 1 ? w32_face_name(FACE_LIBERATION_MONO) : w32_face_name(FACE_BITSTREAM_VERA_SANS_MONO))
+                  : serif ? (i == 0 ? w32_face_name(FACE_TIMES_NEW_ROMAN) : i == 1 ? w32_face_name(FACE_LIBERATION_SERIF) : w32_face_name(FACE_BITSTREAM_VERA_SERIF))
+                          : (i == 0 ? w32_face_name(FACE_ARIAL) : i == 1 ? w32_face_name(FACE_LIBERATION_SANS) : w32_face_name(FACE_BITSTREAM_VERA_SANS));
+    *out = widen(n);
     return true;
 }
 void set_default(int pf, ustr *def)
@@ -691,8 +694,9 @@ bool get_tm(RF *f, TMW *out)
 bool stock_lf(int idx, LF *lf)
 {
     struct S { int idx, h, w, wt, cs, pf; const char *face; };
-    static const S t[] = { { 10, 12, 0, 400, OEM_CS, 0x31, "" }, { 11, 12, 0, 400, 0, 0x31, "Courier" }, { 12, 12, 0, 400, 0, 0x22, "MS Sans Serif" },
-        { 13, 16, 7, 700, 0, 0x22, "System" }, { 14, 16, 0, 700, 0, 0x22, "System" }, { 16, 16, 0, 400, 0, 0x31, "Courier" }, { 17, -11, 0, 400, 0, 0x22, "MS Shell Dlg" } };
+    const S t[] = { { 10, 12, 0, 400, OEM_CS, 0x31, "" }, { 11, 12, 0, 400, 0, 0x31, w32_face_name(FACE_COURIER) }, { 12, 12, 0, 400, 0, 0x22, w32_face_name(FACE_MS_SANS_SERIF) },
+        { 13, 16, 7, 700, 0, 0x22, w32_face_name(FACE_SYSTEM) }, { 14, 16, 0, 700, 0, 0x22, w32_face_name(FACE_SYSTEM) }, { 16, 16, 0, 400, 0, 0x31, w32_face_name(FACE_COURIER) },
+        { 17, -11, 0, 400, 0, 0x22, w32_face_name(FACE_MS_SHELL_DLG) } };
     for (const S &s : t) if (s.idx == idx) {
         memset(lf, 0, sizeof *lf);
         lf->h = s.h; lf->w = s.w; lf->weight = s.wt; lf->cs = (uint8_t)s.cs; lf->pf = (uint8_t)s.pf;

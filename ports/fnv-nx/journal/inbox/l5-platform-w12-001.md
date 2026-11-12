@@ -61,3 +61,9 @@ constant writer, unbound writer, unaccounted pointer, multiple-inheritance offse
 - Open: gdifont.cpp add_font_file(.., listed=false): files NAMED by the declared registry export (vgasys.fon, vgafix.fon, coure.fon, ...) that the wine dir lacks are skipped (Wine 9.0
   load_registry_fonts / load_system_bitmap_fonts skip them). My local reference lacks them. Class-closing proposal: a build-time check that every .fon the exported hive names exists in the
   declared set (w10's reference), instead of a run-time exit.
+
+## fongate2 (option a): face census by rule
+- platform/win32/font_faces.{h,cpp}: the only place a face name is spelled; gdifont/display/window request faces through w32_face_name(FACE_x).
+- platform/manifest/platform_faces.py: census over the compiled platform objects (relocations to w32_face_name / GetStockObject with immediate arg). At this commit: 37 objects, 18 face requests, 14 distinct faces, 2 stock-font sites, 0 unresolved.
+- platform/manifest/wine_fontmap.tsv + fontgate.py: gate declared files == mapped Wine files. Against fonts-wine 9.0~repack-4build3 (63 files): mapped 43, extra 20, missing 0, 10 faces have no file in Wine's own set (Arial, Courier New, Times New Roman, MS Shell Dlg, Liberation x3, Vera x3).
+- Open for the lead: the 10 no-file faces; literal-face bypass in a function that also memcpy's a literal is not excluded by relocations; weights are family-wide.
