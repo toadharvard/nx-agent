@@ -91,7 +91,7 @@ Update 2026-11-12, at 698adefb:
 - Correction: an SDM-prose model patch for pop/mov sreg is withdrawn. It would be an informal step, so a new assumption. L3b escalated it to the orchestrator as "no class-closing reference known". Candidate formal source: ACL2 x86isa (the source of sail-x86-from-acl2). Reached sites stay red until it is ruled.
 - L3b asks for one lifted-set predicate. w5 factors out lift/tools lifted(img, facts) / is_lifted(...): the universe entries → lift_one's decoder, which liftgen itself calls. Check: equal byte for byte to liftgen's shapes. L3b drops its DATA_CLASSES list.
 - w8 7a85cf41 (claude/fnv-l3a-lift-w8-disp, on L2 fada8750): the dispatch plugin plus descclasstest (40 ok, run with copied files, not counted). test_plugins and cc1 are BLOCKED by the env. Returned: defdisp missing?; pod_type_p must be conditioned on the language, not on dlsym success; the branch must be self-contained for its test. Then item 16.
-- Correction: facts 2eeea27b already holds ranges and universe for atimgpud (b3ef19d) and d3dx9_31 (15c914d), with all 7 images pinned in manifest.json. w18's external was stale; it re-pins and reruns. New defect: universe.tsv `extent` means SUM in the exe and SPAN in the modules. w7 unifies it (SPAN) in the refined commit. L5 (ASM-501) is pointed at ranges.tsv for function boundaries.
+- Correction: facts 2eeea27b already holds ranges and universe for atimgpud (b3ef19d) and d3dx9_31 (15c914d), with all 7 images pinned in manifest.json. w18's external was stale; it re-pins and reruns. New defect: universe.tsv `extent` means SUM in the exe and SPAN in the modules. w7 unifies it (SPAN) in the refined commit. L5 is pointed at ranges.tsv for function boundaries.
 - Merged L3b w4's 13-commit stack (claude/fnv-l3b-lift-w4-l3a) as d40bcf6c: the XIN selectors, push sreg, a16 ea, segment prefixes, pusha/popa by size, the segment_bases model patch, forms_sys. The semantics of the forms.py and forms_move.py conflict hunks were reviewed and accepted. Returned to L3b: implicit memory operands (xlat, the string source) skip the segment override; one address function for all loads and stores, with a census. Also a stale fault-code comment.
 - w8 f59b5327: .fnvnx.defdisp is done (defdisptest 0 failed), with L2 reviewing. Item 16 is BLOCKED on L1: (1) recipe py_modules keyed by installed_files_sha256 (L1 w14), (2) keystone/capstone pins (L1 w17). w8 meanwhile admits lift/tools as a tool root and writes the x86 sources and guest mains. The generated stage lives in L4's tests/guest_lift.
 - L1: tlsmodel gate at w10 6645c214 (L2 asked for a `.fnvnx.tls` note to close the IE-declared-but-LE gap). L1 w22 71d8cafb is green 28/28 with envcheck OK on a fresh container (the setup fix), pending MERGER.
@@ -183,3 +183,46 @@ Update 2026-11-12, at 698adefb:
   - w1 rebuilds the pack with the origin set when w17 lands. The current farm 1 run is labelled a measurement.
 - w3 d77f58ef, merged as 6bed89ae: tools/cli.py. Every entry point declares its usage. --help exits 0, a bad argument exits 2, and nothing undeclared reaches the file system. 11 tools were fixed: rcpgen had written the stray --help/g, and 10 others crashed or ran on --help. The lead spot-checked rcpgen and packcopy: rc 0 and 2, no files created.
 - w8 643c058e: item 16 has 3 of 5 drivers converted (citest, imptest, msvcrttest); 5 Unicorn harnesses remain. msvcrttest's 3 terminal cases run one invocation each, checked against terminal.json; asked of L4.
+
+## 09:00 update (head ba908b36)
+- L3b F1/F2 cb32e9e4 merged as ba908b36. proof/forms.py has one family of address functions (ea, ssa, esa, dsa), and an untagged access is refused.
+  - 0 raw load/store outside forms.py; the AST test passes here.
+  - Of the 19 817 int shape keys, 77 changed and were re-proved.
+  - Model defect: the pinned ACL2 x86-cmps computes [edi]-[esi]. L3b fixes it with a transcription of the master hunk (ASM-009), in one IR bump after w4's G1.
+- Orchestrator's base: claude/fnv-first-root-next 862b0708, not int2. Records go in with the commit that cites them.
+  - w6 builds int3 = 862b0708 + lift-gates + lead ba908b36 + w5-flags (doing).
+  - w4 makes an ASM-225 + pcsrc.py commit on 862b0708 (doing).
+  - w5 rebases the flags work onto 862b0708 (doing).
+- w5 30da5cec: gate_flags now reports reads and no-form rows separately, with an assertion that certified ≥ 0. binkw32's 4 entry-seeded reads are unknown-consumer 4 at the present facts.
+  - Next: a jump-table target's incoming flags come from the dispatching jmp.
+  - The 2 undefined-flag sites, 01441246 and 01457d65, go to L3b's rule.
+- w8: takes int2's instest.py; item 16 rebases onto int3.
+- gate_flags is L3a's gate for "every read of a flag bit has only defining reaching definitions" (agreed with L3b). w5 implements the two dataflow exceptions and classifies 01441246 and 01457d65 (doing).
+- Fact requests from L1 / L5 w15 (manifest e15d385):
+  - the extent of exe 1269a9c for the 10 dbghelp GPA rows: w2, idxrange (queued);
+  - the write set for exe 19345408/19345418: no writer in 7 images;
+  - the write set for d3dx9_38 [793b20+4]: only the ctor 56b74b writes it, so d3dx9_31 is reached.
+  - The two write-set facts are w4's, from pcsrc address sources, after its totals (queued).
+- w4 7bd3abbd (claude/fnv-l3a-lift-w4-asm225, on 862b0708): pcsrc.py with the ASM-225 record. gate_assumptions is green: 120/120, 80 entries, 9 OWNER, 71 REMOVE. Sent to the orchestrator for the candidate. Done.
+- w8 ffb33e01: one build.json pair per test (lifted/ + native/) for citest, imptest and msvcrttest, with no admit rows. recipe.py check runs on int3.
+- w2 62c1bcd2 / 96cdc4eb: the 1269a9c request is an object, not an array. da2840 stores 11 GPA results at this+[4, 0x2c]. idxrange now joins register state over the call sites of a pure direct-call entry. "Pure" is a fact from the code: the producer set, no relocated reference, no jump predecessor, at least one call site. The exe run is going (doing); entry counts come with it.
+- w8 f7d3c182 (claude/fnv-l3a-lift-w8-t16b on 862b0708): 6 test roots (3 pairs) with admit rows. recipe.py check finds 4 blockers:
+  - a pack-less lifted origin is needed (L1, asked); w8's stand-in value is removed;
+  - the link script (L1, asked);
+  - lift/rt is missing at 862b0708 (int3, w6);
+  - link/ldcheck.py and py_modules (L1, after the first-root merge).
+- w8-disp 13a5a195: the MSVC return-in-registers POD predicate judges only the returned class; cl VC 2008 verifies it. Sent to L2.
+- w5 d5a90fed: the undefined-flag rule is in gate_flags, with an identity rule for opaque copies that the lead checked as sound.
+  - binkw32 (facts bc9f12d): red reads 7 → 6; certified 4 120/4 126; no-form rows 7 992. The cpuid probe 01441246 is green.
+  - All 6 remaining reads lie in 3 `ptr candidate` entries with reloc-misfits: 0144ddec, 01457d50, 0145e388.
+- New universe rule (w7, in the 7-image facts commit): a decoding is code only if every relocation in the span lands on an imm32/disp32 field. A misfit refuses the candidate (doing).
+
+## 09:10 update
+- int3 7ca2a51a2 (w6) = 862b0708 + lift-gates 662f4d9f + lift ba908b36 + w5-flags 30da5cec. Cold verdict vd24 is running (doing). vd23 on int2 never landed because of container restarts.
+  - Known red, gate_assumptions: 51 findings. Registry ids for L3a's records are missing from 862b0708, and there are mention blocks without an id.
+  - w6 fixes it by rule: union with the L3a records 203..221 from w3a 500b1f03, ASM-225 from w4, and the alias map for the rest. Blocks without an alias go to the lead (doing).
+- L1:
+  - A lifted test root's source may be a generated stage, `source: {"stage": …}` (L1 w14, a path item).
+  - Test roots link with the product's link/guest.ld; verify/tests/guest/guest.ld is a double (L1 raises it with L4).
+- Orchestrator: an undefined flag that is live in proven code takes the reference CPU's value, from a per-(form, flag) cert (L3b, after the first-root merge). It applies only after w7's universe rules (reloc consistency, unproven ptr candidates) have removed misdecoded data.
+- L2 on 13a5a195: the direction is accepted. Before L2 takes it, the predicate must match w4's full cl matrix with 0 mismatches, rebased onto 862b0708 (w8 doing, w4 matrix).
