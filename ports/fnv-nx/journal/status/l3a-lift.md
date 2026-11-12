@@ -148,3 +148,9 @@ Update 2026-11-12, at 698adefb:
 - w8 d800d540 (claude/fnv-l3a-lift-w8-t16): citest as a guest root. lift/tools/mpfr_oracle.py is the one oracle definition; gen.py is a generated stage that needs gmpy2 in py_modules; main.cc is the guest main. Drivers converted: 1. The gmpy2 and MPFR pins were asked of L1, and they wait until after the first-root merge (blocked, L1). Next: imptest, msvcrttest, disptest, instest.
 - w5 c40135c6 (lift-gates d6147475 + flags, L1 w22 env, envcheck OK): gate_lift 28 PASS / 0 FAIL, test_gates 52 / 0, gate_flags 7 OK. Done. The flags go into int2 through w6; the 7-image flags run waits for w7's facts.
 - w4 5c60b01e: ASM-225 cited in pcsrc.py. Comments and an attribute only, so the code is identical to 9d71e6cd.
+- int2 a62f47f5 (w6) = lift-gates 662f4d9f + lift 7b10290c.
+  - Registry: 71 entries; used_by is derived from the citing files; gate_eh uses ASM-222/223/224.
+  - The six L3b records come back with L3b's files.
+  - Cold verdict vd23 is running (doing). Next into int2: w5-flags and 800efa95.
+- 800efa95: deleted a stray host ELF, lift/--help/g (from w3's census run).
+- Farm 2 is running modlift_closure binkw32 at 7b10290c (3 h timeout) and w2's idxrange at 2a326b21 (doing).
