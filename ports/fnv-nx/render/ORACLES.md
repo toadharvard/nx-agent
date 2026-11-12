@@ -105,3 +105,60 @@ Asks to L1 (the form), in one rule: (a) a REF kind for Wine 9.0 source = {wine 9
 1. The 10 NONE: for the tool self-tests (d3d9total, cmp, wrap, shcache, sm_total, layout, nxcheck) the rule is a documented tool rule: write it as a `spec` anchor in `docs/` and cite it; for env_ident, oom, dkcore a real external value is needed (declared-machine record, Windows/Wine failure codes, deko3d documented results).
 2. The 23 tests that cite Wine 9.0 source or an MS page (as primary or also): store the citation (file, function, quoted lines) in one tracked doc outside the product roots, then every row names an anchor.
 3. The 3 W-rec tests: put the Wine recordings (probe and game exe) in fnv-nx-build with commit and tree_sha256.
+
+## Reference files: kind and destination under render/ref/ (static, nothing moved; L1's kinds: `external`, `probe`, `model`)
+
+Measured at the base `origin/claude/fnv-l6-render` merged into this branch (commit of the push below). Method: `git grep` of every file name that a test or a generator reads as expected values, plus the files named in the test docstrings. Nothing is moved until w10's class `ref` lands. Probe test (L1): the probe source is pinned, the machine it ran on is stated, the dump's sha256 is stated; a dump without a pinned probe source is not a reference.
+
+### A. Probe dumps (kind `probe`)
+
+| file | read by | probe source tracked? | machine stated? | dump sha256 stated? | verdict | destination |
+|---|---|---|---|---|---|---|
+| `render/d3d9/env/env_handheld.tsv`, `env_docked.tsv` (11.3 MB each) | `gen_env.py` (the generator of the product's env tables: a product INPUT as well), `tests/l6/env/test_env.py`, `tests/l6/devlife/test_devlife.py`, `render/d3d9/tests/test_env_ident.py` (via the generator), texoracle / front (format roles) | yes: `tests/l6/env/envprobe2.c`, `envrun.h`, `envdev.h`, `make_env.py`, `render/d3d9/env/envq.py` (the query list), recorder `render/tools/rec`; all tracked in git | yes: `ENV_PIN.txt` (Wine 9.0 package, Mesa/LLVM packages, xvfb, CPU, display, VideoMemorySize 960) | yes: ENV_PIN.txt holds the tsv sha256 (handheld ff340ae4...), envprobe2.exe sha256 (6f64a3af...), recorder d3d9.dll sha256 (c9e0b480...) | **conditional, one gap**: the probe was built with `i686-w64-mingw32-gcc -O1` (make_env.py:32) and ENV_PIN.txt has no mingw/gcc line (0 hits), and neither exe is archived (no .exe/.dll tracked). So the exe is identified by sha256 but not reproducible from the pinned source. Closed by either the compiler package versions in ENV_PIN plus a rebuild whose sha256 equals the recorded one, or the two binaries archived in fnv-nx-build with commit and tree_sha256 | `render/ref/env/` (the two tsv, ENV_PIN.txt, and the probe sources under `render/ref/env/probe/`) |
+| `tests/l6/rec/wine_llvmpipe_env.tsv`, `wine_llvmpipe_env_nxd9play.tsv` | written by `test_rec.py`; no test reads them (git grep: only test_rec, README, QUEUE.md) | yes: `tests/l6/rec/envprobe.c` | no | no | **not a reference**: output of a run, no reader | stay; not moved (candidate to delete) |
+
+Circularity to state in the record: `env_*.tsv` is the INPUT of the generator that makes the product's tables, so a row-for-row equality of our answers with the rows is a round trip for the rows stored as data; the independent part is the closing rules (README "Closing rules": domains extended from the Wine function path and verified by probe rows), which `test_env.py` part (b) checks.
+
+### B. External-derived tables (kind `external`, derived file = the cited extraction)
+
+| file | read by | external pinned? | verdict | destination |
+|---|---|---|---|---|
+| `render/shaders/total/sm_table.json` (`src` per entry), `sm_legacy.tsv`, `sm_illegal.tsv` | `test_sm_total.py`, `tests/l6/res/test_res.py`; `sm_illegal.tsv` also by the product generator `render/d3d9/dev/res_smgen.py` and `res_smcheck.cpp` | yes, in `render/total/externals.json`: `msdocs-sm` (fnv-nx-build tools/msdocs-sm @ e18183f8, tree_sha256 6bfddc8d..., 172 MS D3D9 shader-assembly pages, "fetched 2026-11", source repo MicrosoftDocs/win32 desktop-src/direct3dhlsl), `wine-sm1` (tools/wine-sm1 @ 0a52e82d; upstream wine-9.0 = fd1153552d77..., files shader_sm1.c and asmparser.c only), `vkd3d` (@ fd97ca35...), `mojoshader` | **reference** (derived from pinned externals by `sm_table.py`, `sm_legacy.py`); the manifest has a retrieval date and the upstream repo but no per-page URL list: L1 asked for URL per page | `render/ref/shaders/` (the three files + the generators that produce them stay tools) |
+| `render/backend/nx/dk_facts.tsv` (from `dk_facts.py` over deko3d headers and `format_traits.inc`) | `tests/l6/dkfmt/test_dkfmt.py`, `dkstate/test_dkstate.py`, `dk_fmt.h` | **no**: no externals.json names deko3d or libnx; the tests default to the local path `FNVNX_DK=/home/user/work/l6/dk` | **not a reference until deko3d and libnx are pinned** (fnv-nx-build tools/deko3d, tools/libnx, commit + tree_sha256) | `render/ref/dk/` after the pin |
+
+Not references although in the same directories: `render/shaders/total/sm_total.tsv` (our gate's output, read by test_sm_total only to print), `render/total/census/sm_ops.tsv` (a census output, input of sm_legacy.py).
+
+### C. Spec table (kind `model`: our own derivation)
+
+| file | read by | verdict | destination |
+|---|---|---|---|
+| `render/d3d9/spec/d3d9_spec.json` (262 KB) | 42 readers: gen_bridge/gen_wrap/gen_echo (generators of product and test code), test_bridge, test_exports, test_spec, test_cmp, test_wrap, front and others | built by `d3d9_spec.py` from `shim/include/d3d9*.h` + hand tables (`d3d9_rules/cls/tables/exports/structs/expr`): our own derivation, and the INPUT of the generators. Not a reference for the tests that run generator output against it (circular: test_bridge, test_exports, test_wrap). Independent only in `test_spec.py` against the SDK headers, which are not archived | stays in the product (generator input). A reference copy needs the MS SDK `d3d9*.h` archived as `external` (tools/docs-d3d9 with a manifest); then test_spec has its reference |
+
+### D. Independent models (kind `model`; independence = not in the import closure of the subject, gate rule 4)
+
+| files | test | destination |
+|---|---|---|
+| `tests/l6/draw/oracle.py` | test_draw | `render/ref/models/draw/` |
+| `tests/l6/pvw/oracle.py` | test_pvw | `render/ref/models/pvw/` |
+| `tests/l6/ffpdev/model.py`, `ref/ffp_vs_ref.c/.h`, `ref/ffp_ps_ref.c/.h` | test_ffpdev | `render/ref/models/ffp/` (risk: built "from the same description" as the product) |
+| `tests/l6/tex/texoracle.py` | test_tex, test_copy (imports it) | `render/ref/models/tex/` |
+| `tests/l6/copy/t_ref.h` | test_copy | `render/ref/models/copy/` |
+| `tests/l6/gl4/t_ref.h` | test_gl4 | `render/ref/models/gl4/` |
+| `tests/l6/res/t_fvf.cpp` | test_res (FVF oracle) | `render/ref/models/res/` |
+
+12 files in all. Hand assemblers `render/shaders/total/sm_hand.py` and `render/total/census/sm_hand.py` are two copies of one tool that builds test INPUT, not references: dedupe, stay tools.
+
+### E. Own earlier output read as expected values (not references: reds)
+
+| file | read by | note |
+|---|---|---|
+| `tests/l6/draw/g_record.json` (39 bytes) | `test_draw.py` part g ("the numbers it records") | a previous run of our product as the expectation; replace by a static count rule or delete |
+| `tests/l6/conf/conf_summary.tsv`, `conf_never_called.txt` | `conf/run.py` writes them; README and ASSUMPTIONS.md cite them | measurement records of Wine's conformance run, no test compares against them |
+
+### F. Wine and MS text with no archive
+
+`verify/wine_fixme.tsv` (L1's table, `wine_ref = wine-9.0:<path>:<function>`) and the docstrings of 23 tests cite Wine 9.0 functions and MS pages. Only `wine-sm1` (2 files) and `msdocs-sm` (shader pages) are archived. The files the cited functions live in (`dlls/d3d9/device.c`, `directx.c`, `d3d9_main.c`, `dlls/wined3d/directx.c`, `device.c`, `state.c`, `stateblock.c`, `utils.c`, `shader.c`, and Wine's `dlls/d3d9/tests/device.c`, `visual.c`) and the MS pages for dev, m1, res, al, ps1x, sink, sm_ops are not. Needed: an `external` `tools/wine-9.0` (tag wine-9.0, commit fd1153552d779e1ac14b0b1c48fbd1cde894eb0a, the files above) and `tools/docs-d3d9` (MS pages, manifest with URL and retrieval date); then `render/ref/cites.tsv` (test -> file:line) can be the `external` reference of the W-src and MS tests.
+
+### Totals (all of render, this commit)
+
+Reference-like files found: 2 probe dumps + ENV_PIN.txt + 6 probe sources (conditional: compiler pin missing); 3 SM tables (references, manifest lacks per-page URL); 1 deko3d facts table (not a reference: unpinned); 1 spec json (our own derivation); 12 model files; 2 unread probe dumps, 1 baseline json, 2 conf outputs, 2 census/gate outputs (not references). Probe dumps that qualify under L1's definition today: **0 of 2 env dumps** (compiler gap), 0 of the 2 unread dumps.
