@@ -113,7 +113,7 @@ typedef struct fnvnx_ctab_entry {
 int fnvnx_shader_ctab(const void *d3d_bytecode, size_t n, fnvnx_ctab_entry **out, char *err, size_t errlen);
 
 /* Names of compiled-in GLSL backends, NULL-terminated. */
-const char *const *fnvnx_shader_backends(void);
+extern const char *const fnvnx_shader_backend_names[];
 
 #ifdef __cplusplus
 }

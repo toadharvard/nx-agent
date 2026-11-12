@@ -7,9 +7,8 @@
 #include "fnvnx_sha256.h"
 
 static const fnvnx_glsl_backend *const g_backends[] = { &fnvnx_backend_mojoshader_glsldk, NULL };
-static const char *const g_backend_names[] = { "mojoshader-glsldk", NULL };
+const char *const fnvnx_shader_backend_names[] = { "mojoshader-glsldk", NULL };
 
-const char *const *fnvnx_shader_backends(void) { return g_backend_names; }
 
 static void glsl_stats(const char *g, fnvnx_shader_stats *st)
 {

@@ -18,13 +18,13 @@ if len(sys.argv) > 5:
 here = os.path.dirname(os.path.abspath(__file__))
 hdr = open(os.path.join(here, "..", "include", "fnvnx_shaders.h")).read()
 hdr = re.sub(r"/\*.*?\*/", "", hdr, flags=re.S)
-decl = set(re.findall(r"\b(fnvnx_[a-z0-9_]+)\s*\(", hdr))
+decl = set(re.findall(r"\b(fnvnx_[a-z0-9_]+)\s*\(", hdr)) | set(re.findall(r"\b(fnvnx_[a-z0-9_]+)\s*\[\]", hdr))
 objs = sorted(os.path.join(d, f) for d, _, fs in os.walk(objdir) for f in fs if f.endswith(".o"))
 defd = set()
 for o in objs:
     for l in subprocess.check_output([nm, "--defined-only", o], text=True).splitlines():
         p = l.split()
-        if len(p) == 3 and p[1] in "TtWw": defd.add(p[2])
+        if len(p) == 3 and p[1] in "TtWwDdRr": defd.add(p[2])
 roots = sorted(decl & defd)
 cmd = [ld, "-m", "aarch64linux32", "--gc-sections", "--print-gc-sections", "--entry=0", "--unresolved-symbols=ignore-all",
        "-o", os.devnull] + sum((["-u", r] for r in roots), []) + objs
