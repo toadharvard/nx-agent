@@ -314,3 +314,8 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - Open class: fail() sites in the root. w1b runs fail_census.py, classifying each site as (v) validator-rejected input, (r) allocation failure, or (o) other. (v) goes to L1 as certificate input.
     - Translating the rows needs the L1 w10/w15 test root on the L4 boot machine; pending.
     - The farm is released.
+- 08:45Z w1b f4cda250 fail census: 253 sites, (v) 10, (r) 0, (o) 243; a measurement.
+    - Rule: a site is closed iff its guard together with "validated by the front end" is impossible.
+    - Next, per (o) site: (v) the validator rejects (cited), (g) gap = a validator or translator defect, (i) internal invariant.
+    - The (g) list is the defect deliverable.
+    - The translator's error_abi is {fail, flag isfail}, stored via failf one call level down; w20 informed.
