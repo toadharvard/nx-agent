@@ -1,6 +1,6 @@
 /* mmio.cpp - winmm's buffered multimedia file I/O (mmioOpenA ... mmioAdvance), for the game's WAV loader.
  *
- * The exe imports mmioOpenA, Descend, Read, Ascend, GetInfo, Advance and Close (IAT 0x00fdf318..0x00fdf330). Its WAV
+ * The exe imports mmioOpenA, Descend, Read, Ascend, GetInfo, Advance and Close. Its WAV
  * loader opens with MMIO_ALLOCBUF and its own I/O procedure (pIOProc, fccIOProc 'WAV '), which reads through the
  * game's archive files: it keeps its file in adwInfo[0] and the position in lDiskOffset, and returns 0 from
  * MMIOM_SEEK. So every position here comes from lDiskOffset after a message, never from MMIOM_SEEK's return
