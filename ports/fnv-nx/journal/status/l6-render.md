@@ -319,3 +319,12 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - Next, per (o) site: (v) the validator rejects (cited), (g) gap = a validator or translator defect, (i) internal invariant.
     - The (g) list is the defect deliverable.
     - The translator's error_abi is {fail, flag isfail}, stored via failf one call level down; w20 informed.
+- 08:50Z Owner order (via the orchestrator): only the path runs.
+    - w6 builds render/d3d9 as a guest product root on claude/fnv-first-root-next 58c113f0:
+        - the full guest plugin set;
+        - includes only from same-target product roots or externals;
+        - header homes as in L5's platform root;
+        - ident outputs declared.
+      Status: doing.
+    - Paused, each pushing its state: w1b (fail census), w3b (179-row classification), w5 (op_syntax and handler column), w4. The farm is released.
+    - GL is untouched.
