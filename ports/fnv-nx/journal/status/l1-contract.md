@@ -495,3 +495,6 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - **Trunk:** 4fb048ec = w17 39cc794a merged (28 gates, 322 s). flags.semantics is on the trunk.
 - **Not in yet:** exepin, w10 (via w14), w16, w19, w5 (via w22). MERGER next: w22, w14.
 - **guest_flags.py:** not on the trunk yet; w17 pushed to deliver it to L5 w14 now.
+- L5 ASM-501 (REMOVE): prologue-scan function boundaries in 7 manifest passes; removed by L3a's function fact.
+  - Record accepted. The heuristic must be discharged before L5's platform root merges if its outputs are inputs of that root.
+  - Escalated to the orchestrator for the transitional decision.
