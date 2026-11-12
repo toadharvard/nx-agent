@@ -4,6 +4,7 @@ Dispatch order per instruction (same as the PoC): mnemonic handler (@op); a hand
 through; then the fallbacks in registration order (@fallback(pred): x87 by opcode byte, SSE by xmm operand);
 then Unsupported('insn ...')."""
 import bisect
+import re
 import capstone
 from capstone import x86 as X
 
@@ -240,12 +241,25 @@ def tab_tails(img, insns, lo, hi):
     return sorted(out)
 
 
+GUEST_ACCESS = re.compile(r'\b(?:M8|M16|M32|M64|MF32|MF64|MX)\s*\(')     # every accessor of the prelude that reaches guest memory outside a locked instruction (rt/fnvl.h GM, GMF, MX)
+
+
+def locked_access_check(cx, lines):
+    """Rule LK-ONLY (R9): while the emitter is inside a locked instruction, a guest memory access reaches memory only through LKA<T> (LK8..LK64, which the commit then
+    compare-and-swaps). Any other accessor in the emitted text is a generator error: the instruction would read or write the cell non-atomically. Closes the class for the hand
+    and the DSL path alike, whatever the gate sees."""
+    for t in lines:
+        m = GUEST_ACCESS.search(t)
+        if m:
+            raise Unsupported('locked instruction at %x: guest access %s outside LKA<T> in %r' % (cx.a, m.group(0).rstrip('( '), t[:80]))
+
+
 def dispatch(cx, ins):
     from . import f_cpufeat, f_sys
     if f_cpufeat.missing(ins):         # CPUID-UD rule (f_cpufeat.py): a form the model's CPUID denies is #UD before any handler of any family runs
         f_sys.ud_site(cx)
         return
-    if EMIT == 'dsl':
+    if EMIT == 'dsl' and cx.macc == 'M':        # the DSL emits plain guest accesses (M8..M64): inside a locked instruction (macc LK) the hand handlers, which go through LKA<T>, run
         from . import f_dsl
         if f_dsl.emit_form(cx, ins) is not SKIP:
             return
@@ -364,8 +378,10 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
             gs_guard(cx, ins)
             cx.macc = 'LK'
             em('{ LK_BEGIN(%d); lk_%x: ;' % (f_sys.lock_size(ins), a))
+            n1 = len(cx.L)
             dispatch(cx, ins)
             cx.macc = 'M'
+            locked_access_check(cx, cx.L[n1:])
             em('if(!lk_commit(lk_,0x%xu)){ LK_RESTORE; goto lk_%x; } }' % (a, a))
         else:
             gs_guard(cx, ins)

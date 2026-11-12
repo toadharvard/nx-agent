@@ -50,6 +50,13 @@ class Image:
         # every reloc'd dword value -> sorted list (address-taken code candidates)
         self.taken = sorted(self.u32(r) for r in self.relocs)
 
+    @classmethod
+    def from_bytes(cls, code, base):
+        """a one-section image of `code` at `base` with no relocations (code under test)"""
+        self = object.__new__(cls)
+        self.d, self.base, self.secs, self.relocs, self.nobytes, self.rset, self.taken = bytes(code), base, [('.text', base, len(code), 0, len(code))], [], 0, set(), []
+        return self
+
     def off(self, a):
         for n, va, vs, ro, rs in self.secs:
             if va <= a < va + vs and a - va < rs:
