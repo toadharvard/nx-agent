@@ -18,18 +18,32 @@
  *               value computed at run time is an address computed in a 32-bit integer. lhs gets its value from
  *               the barrier, the sum goes to a new SSA name that only the barrier uses.
  *
- * Constants (rule C). An INTEGER_CST converted to a pointer, and a POINTER_PLUS_EXPR with an INTEGER_CST offset, are
- * not routed: a constant is a finished 32-bit value, it has no run-time sum to take apart; a constant displacement
- * folded into an addressing mode is `[zext(p), #d]` with |d| below 2^16 (the immediate field of the A64 loads and
- * stores), and that equals the wrapped sum whenever p + d does not cross 0 or 2^32 (assumption A-EDGE: no guest
- * object, hence no guest pointer, lies within 64 KiB of address 0 or of 2^32; the guest is a 32-bit Windows process
- * whose user space ends below 0xc0000000 and whose first 64 KiB are never mapped) (ASM-802).
+ * Constants (rule C). An INTEGER_CST converted to a pointer is not routed: a constant is a finished 32-bit value, it has no
+ * run-time sum to take apart. A constant displacement from a pointer is not routed when its magnitude, as a signed 32-bit
+ * number, is below LIMIT = 2^16 (0x10000); anything else is routed (class PLUS below). The bound is the one the hardware
+ * gives: the displacement the expander folds into an addressing mode is an immediate of at most 4095 * 16 = 65520 bytes
+ * (the largest A64 scaled load/store immediate, `ldr q`) or 504 (`ldp`) or -256 (`ldur`), so what stays unrouted is a
+ * `[zext(p), #d]` with |d| < 2^16, which equals the wrapped sum p + d unless p + d crosses 0 or 2^32. A larger constant is
+ * not folded into the addressing mode: GCC computes `uxtw x0, w0; add x0, x0, #d` (a 64-bit sum, found by compiling
+ * `p->f` at offset 0x20000), which is why a displacement of 2^16 or more is routed: the 32-bit add `add w0, w0, #d`
+ * that follows the barrier wraps as x86 does. What remains is a window of 2^16 bytes at each end of the address space:
+ * the checked fact LAYOUT of gate_addr.py says that every byte of [0, 2^16) and [2^32 - 2^16, 2^32) is a guard region
+ * (no access, no object), so an address p + d with |d| < 2^16 that crosses 0 or 2^32 starts in or ends in a guard (it
+ * would fault on x86 and it faults here: above 2^32 nothing is mapped). The two bounds are one number, LIMIT, here
+ * and as GUARD in gate_addr.py.
+ *   The displacement of a memory reference is the constant part of base pointer + MEM_REF offset + the path through
+ * fields and constant array indexes (get_inner_reference); a run-time array index through a pointer base is a
+ * run-time displacement. A reference through a pointer (MEM_REF or non-indexed TARGET_MEM_REF whose base is not the
+ * address of a declaration) with a run-time displacement or a constant one of 2^16 or more is rewritten to
+ * MEM_REF[q, 0] with q = pointer p+ displacement, a POINTER_PLUS routed like every other (class PLUS). A bit-field or
+ * BIT_FIELD_REF access with such a displacement is a compile error (no address of it can be formed).
  *
  * Totality. Every assignment whose result is a pointer and whose operand computes it from an integer is of class
  * CONV or PLUS or has a constant operand; any other form that makes a pointer from a non-pointer value
  * (a TARGET_MEM_REF with an index, a result that cannot be rewritten) is a compile error. Memory operands that
- * are `MEM_REF[p + constant]` are covered by A-EDGE; ARRAY_REF with a variable index of a declared array is
- * in bounds by C++ semantics (assumption A-BOUNDS: native code is tested by ASan/UBSan, not proven, ASM-005).
+ * go through a pointer are covered by the displacement rule above; a variable index into a declared array (the base is
+ * a declaration: a global, a local) is in bounds by C++ semantics (Assumption ASM-006: the exe makes no wild accesses;
+ * array indices in bounds).
  *
  * Verification (last GIMPLE point). After the rewrite the pass scans the function again: every statement of class
  * CONV must have an operand defined by an asm statement (or a constant), every statement of class PLUS must have a
@@ -82,6 +96,57 @@ const pass_data addr_data = { GIMPLE_PASS, "fnvnx_addr", OPTGROUP_NONE, TV_NONE,
 
 enum cls { C_NONE, C_CONV, C_PLUS };
 
+/* the bound of rule C: a constant displacement whose magnitude is below LIMIT (as a signed 32-bit number) is not routed;
+   it is the guard size of gate_addr.py */
+const HOST_WIDE_INT LIMIT = 0x10000;
+
+bool large_const(tree cst)
+{
+  HOST_WIDE_INT v = (int32_t)TREE_INT_CST_LOW(cst);
+  return v >= LIMIT || v <= -LIMIT;
+}
+
+/* a memory reference that goes through a pointer: the pointer, the constant displacement in bytes, the run-time part of
+   the displacement (or NULL), whether the access is a whole object at a byte position (not a bit-field), the alias
+   pointer type of the base */
+struct thru { tree ptr; HOST_WIDE_INT k; tree var; bool simple; tree alias; };
+
+bool through_pointer(tree t, thru &r)
+{
+  if (!t || !(handled_component_p(t) || TREE_CODE(t) == MEM_REF || TREE_CODE(t) == TARGET_MEM_REF)) return false;
+  poly_int64 bitsize, bitpos;
+  tree offset;
+  machine_mode mode;
+  int uns, rev, vol;
+  tree base = get_inner_reference(t, &bitsize, &bitpos, &offset, &mode, &uns, &rev, &vol);
+  HOST_WIDE_INT off0, bp, bs;
+  if (TREE_CODE(base) == MEM_REF) {
+    r.ptr = TREE_OPERAND(base, 0);
+    poly_int64 po = mem_ref_offset(base).force_shwi();
+    if (!po.is_constant(&off0)) return false;
+    r.alias = TREE_TYPE(TREE_OPERAND(base, 1));
+  } else if (TREE_CODE(base) == TARGET_MEM_REF && !TMR_INDEX(base) && !TMR_INDEX2(base) && TMR_BASE(base)) {
+    r.ptr = TMR_BASE(base);
+    off0 = TMR_OFFSET(base) ? (int32_t)TREE_INT_CST_LOW(TMR_OFFSET(base)) : 0;
+    r.alias = TREE_TYPE(TMR_OFFSET(base) ? TMR_OFFSET(base) : build_int_cst(ptr_type_node, 0));
+  } else
+    return false;
+  if (TREE_CODE(r.ptr) == ADDR_EXPR) return false;      /* the address of a declaration: a link-time or frame address */
+  if (!bitpos.is_constant(&bp) || !bitsize.is_constant(&bs)) bp = 0, bs = -1;
+  tree ty = TREE_TYPE(t);
+  r.k = off0 + (bp >> 3);
+  r.var = offset;
+  r.simple = bs >= 0 && (bp & 7) == 0 && TYPE_SIZE(ty) && tree_fits_uhwi_p(TYPE_SIZE(ty)) && (HOST_WIDE_INT)tree_to_uhwi(TYPE_SIZE(ty)) == bs &&
+             TREE_CODE(t) != BIT_FIELD_REF && !(TREE_CODE(t) == COMPONENT_REF && DECL_BIT_FIELD(TREE_OPERAND(t, 1))) && !rev;
+  return true;
+}
+
+/* a reference that must be rewritten: a run-time displacement, or a constant one of LIMIT or more */
+bool needs_route(const thru &r)
+{
+  return r.var != NULL_TREE || r.k >= LIMIT || r.k <= -LIMIT;
+}
+
 /* the class of a statement; an unhandled way of making a pointer is an error */
 cls classify(gimple *st)
 {
@@ -90,7 +155,10 @@ cls classify(gimple *st)
   if (!POINTER_TYPE_P(TREE_TYPE(lhs))) return C_NONE;
   enum tree_code code = gimple_assign_rhs_code(st);
   tree rhs = gimple_assign_rhs1(st);
-  if (code == POINTER_PLUS_EXPR) return TREE_CODE(gimple_assign_rhs2(st)) == INTEGER_CST ? C_NONE : C_PLUS;
+  if (code == POINTER_PLUS_EXPR) {
+    tree off = gimple_assign_rhs2(st);
+    return TREE_CODE(off) == INTEGER_CST && !large_const(off) ? C_NONE : C_PLUS;
+  }
   if (CONVERT_EXPR_CODE_P(code) || code == VIEW_CONVERT_EXPR) {
     if (code == VIEW_CONVERT_EXPR) rhs = TREE_OPERAND(rhs, 0);
     tree ty = TREE_TYPE(rhs);
@@ -152,12 +220,68 @@ bool only_asm_uses(tree t)
   return true;
 }
 
+/* q = ptr p+ (var + k), as a gimple value inserted before gsi */
+tree address_sum(const thru &r, gimple_stmt_iterator *gsi)
+{
+  tree off = build_int_cst(sizetype, r.k);
+  if (r.var) off = fold_build2(PLUS_EXPR, sizetype, fold_convert(sizetype, r.var), off);
+  tree e = fold_build2(POINTER_PLUS_EXPR, TREE_TYPE(r.ptr), r.ptr, off);
+  gimple_seq seq = NULL;
+  tree q = force_gimple_operand(e, &seq, true, NULL_TREE);
+  gsi_insert_seq_before(gsi, seq, GSI_SAME_STMT);
+  return q;
+}
+
+void route_refs(gimple *st)
+{
+  gimple_stmt_iterator gsi = gsi_for_stmt(st);
+  location_t loc = gimple_location(st);
+  switch (gimple_code(st)) {
+    case GIMPLE_ASSIGN: case GIMPLE_CALL: case GIMPLE_RETURN: break;
+    default: return;
+  }
+  for (unsigned i = 0; i < gimple_num_ops(st); i++) {
+    tree *op = gimple_op_ptr(st, i);
+    if (!op || !*op) continue;
+    tree t = *op;
+    if (TREE_CODE(t) == ADDR_EXPR) {
+      thru r;
+      if (i != 1 || !is_gimple_assign(st) || !through_pointer(TREE_OPERAND(t, 0), r) || !needs_route(r)) continue;
+      if (TREE_CODE(gimple_assign_lhs(st)) != SSA_NAME) continue;
+      /* &ref: the same sum, as a pointer sum */
+      tree q = address_sum(r, &gsi);
+      gimple_assign_set_rhs_from_tree(&gsi, q);
+      update_stmt(gsi_stmt(gsi));
+      continue;
+    }
+    thru r;
+    if (!through_pointer(t, r) || !needs_route(r)) continue;
+    if (!r.simple) {
+      error_at(loc, "%<fnvnx_addr%>: ADDR32 does not handle a bit-field access through a pointer at a run-time or large displacement");
+      continue;
+    }
+    tree q = address_sum(r, &gsi);
+    tree nr = build2(MEM_REF, TREE_TYPE(t), q, build_int_cst(r.alias, 0));
+    TREE_THIS_VOLATILE(nr) = TREE_THIS_VOLATILE(t);
+    TREE_SIDE_EFFECTS(nr) = TREE_SIDE_EFFECTS(t);
+    TREE_THIS_NOTRAP(nr) = 0;
+    *op = nr;
+    update_stmt(st);
+  }
+}
+
 struct addr_pass : gimple_opt_pass {
   addr_pass(gcc::context *c) : gimple_opt_pass(addr_data, c) {}
   unsigned int execute(function *fun) override
   {
     basic_block bb;
     std::vector<gimple *> work;
+    /* memory references through a pointer with a run-time displacement or a constant one of LIMIT or more: the address
+       becomes an explicit pointer sum, which class PLUS routes below */
+    std::vector<gimple *> stmts;
+    FOR_EACH_BB_FN(bb, fun)
+      for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) stmts.push_back(gsi_stmt(gsi));
+    for (gimple *st : stmts) route_refs(st);
     FOR_EACH_BB_FN(bb, fun)
       for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
         gimple *st = gsi_stmt(gsi);
@@ -208,6 +332,14 @@ struct addr_pass : gimple_opt_pass {
     FOR_EACH_BB_FN(bb, fun)
       for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi)) {
         gimple *st = gsi_stmt(gsi);
+        if (is_gimple_assign(st) || is_gimple_call(st) || gimple_code(st) == GIMPLE_RETURN)
+          for (unsigned i = 0; i < gimple_num_ops(st); i++) {
+            thru r;
+            tree o = gimple_op(st, i);
+            if (o && TREE_CODE(o) == ADDR_EXPR) o = TREE_OPERAND(o, 0);
+            if (o && through_pointer(o, r) && needs_route(r))
+              error_at(gimple_location(st), "%<fnvnx_addr%>: ADDR32: a memory reference through a pointer at a run-time or large displacement is not routed");
+          }
         cls c = classify(st);
         if (c == C_NONE) continue;
         seen++;

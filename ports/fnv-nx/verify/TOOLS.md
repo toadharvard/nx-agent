@@ -1463,7 +1463,7 @@ Flow, computed from the syntax trees of all items together (call structure, not 
            which is itself an item of this gate) is allowed;
   cut      a call of `load_exe` (exepin.load_exe): its result is bytes, the taint stops, and its body is not an item of the flow
            (exepin.py is the one item allowed to open its own parameter: `load_exe` is the function named in the gate).
-A tool that gets the exe path any other way (not `--exe`, not the file name) is outside the rule: that is the stated assumption, and the
+A tool that gets the exe path any other way (not `--exe`, not the file name) is outside the rule: that is the stated assumption (ASM-102), and the
 sources are the only two ways the tools of this tree name the exe.
 Result: universe = items, certified = items without a violation, uncertified = the first 50 `path:line what`. Green iff all certified.
 ```

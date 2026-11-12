@@ -58,6 +58,12 @@ static const struct ggc_root_tab keep_roots[] = {
   LAST_GGC_ROOT_TAB
 };
 
+/* A C unit (cc1) lays out plain records and unions: no classes, bases or templates, and none of the cp/ lang flags exist (CLASS_TYPE_P and
+ * ANON_AGGR_TYPE_P read cp lang flags, which mean something else in C). The key of a C record is cl's: `U<tag>@@` for a struct, `T<tag>@@` for a
+ * union; a record without a tag has no name here (nokey). */
+static bool cxx_class(tree t) { return is_cxx() && CLASS_TYPE_P(t); }
+static bool anon_aggr(tree t) { return is_cxx() ? ANON_AGGR_TYPE_P(t) : !TYPE_NAME(t); }
+
 static void add_type(tree t)
 {
   while (t && (POINTER_TYPE_P(t) || TREE_CODE(t) == ARRAY_TYPE || TREE_CODE(t) == TYPE_DECL)) {
@@ -66,7 +72,7 @@ static void add_type(tree t)
   if (!t || !TYPE_P(t) || !RECORD_OR_UNION_TYPE_P(t)) return;
   t = TYPE_MAIN_VARIANT(t);
   /* a pointer to member function is a record of the compiler's own making: a member's size, no layout to compare */
-  if (!CLASS_TYPE_P(t) && TREE_CODE(t) != UNION_TYPE) return;
+  if (is_cxx() && !CLASS_TYPE_P(t) && TREE_CODE(t) != UNION_TYPE) return;
   if (found_set.insert(t).second) {
     found.push_back(t);
     keep = tree_cons(NULL_TREE, t, keep);
@@ -107,6 +113,12 @@ static void pre_genericize_cb(void *gcc_data, void *)
 /* the record's decorated name; empty and *why set when no rule names it */
 static std::string record_key(tree t, std::string &why)
 {
+  if (!is_cxx()) {   /* C: the tag, no scopes */
+    tree n = TYPE_NAME(t);
+    if (n && TREE_CODE(n) == TYPE_DECL) n = DECL_NAME(n);
+    if (!n || TREE_CODE(n) != IDENTIFIER_NODE) { why = "record without a tag"; return std::string(); }
+    return std::string(1, TREE_CODE(t) == UNION_TYPE ? 'T' : 'U') + IDENTIFIER_POINTER(n) + "@@";
+  }
   M m;
   m.type_name(t);
   if (!m.why.empty()) { why = m.why; return std::string(); }
@@ -114,7 +126,13 @@ static std::string record_key(tree t, std::string &why)
   return std::string(1, c) + m.out;
 }
 
-static std::string itanium(tree t) { return mangle_type_string(t); }
+static std::string itanium(tree t)
+{
+  if (is_cxx()) return mangle_type_string(t);
+  tree n = TYPE_NAME(t);   /* C has no mangling: the tag */
+  if (n && TREE_CODE(n) == TYPE_DECL) n = DECL_NAME(n);
+  return n && TREE_CODE(n) == IDENTIFIER_NODE ? IDENTIFIER_POINTER(n) : "-";
+}
 
 static std::string key_of(tree t, std::string &why)
 {
@@ -148,7 +166,7 @@ static void fields_of(tree t, HOST_WIDE_INT base_bits, std::vector<std::string> 
       if (is_vptr(f)) out.push_back("<vptr>:" + std::to_string(bp / 8) + ":" + std::to_string(size_unit(TREE_TYPE(f))));
       continue;
     }
-    if (!DECL_NAME(f) && RECORD_OR_UNION_TYPE_P(TREE_TYPE(f)) && ANON_AGGR_TYPE_P(TREE_TYPE(f)) && !DECL_C_BIT_FIELD(f)) {
+    if (!DECL_NAME(f) && RECORD_OR_UNION_TYPE_P(TREE_TYPE(f)) && anon_aggr(TREE_TYPE(f)) && !DECL_C_BIT_FIELD(f)) {
       fields_of(TYPE_MAIN_VARIANT(TREE_TYPE(f)), bp, out, flags, index);
       continue;
     }
@@ -175,7 +193,7 @@ static bool alignment_altered(tree t)
     tree ft = DECL_C_BIT_FIELD(f) && DECL_BIT_FIELD_TYPE(f) ? DECL_BIT_FIELD_TYPE(f) : TREE_TYPE(f);
     nat = MAX(nat, TYPE_ALIGN(ft));
   }
-  vec<tree, va_gc> *vbs = CLASS_TYPE_P(t) ? CLASSTYPE_VBASECLASSES(t) : NULL;
+  vec<tree, va_gc> *vbs = cxx_class(t) ? CLASSTYPE_VBASECLASSES(t) : NULL;
   unsigned ix; tree vb;
   FOR_EACH_VEC_SAFE_ELT(vbs, ix, vb) nat = MAX(nat, TYPE_ALIGN(BINFO_TYPE(vb)));
   return TYPE_ALIGN(t) != nat;
@@ -223,7 +241,7 @@ static void finish_unit_cb(void *, void *)
   for (size_t i = 0; i < found.size(); i++) {
     tree t = found[i];
     if (!COMPLETE_TYPE_P(t) || !RECORD_OR_UNION_TYPE_P(t)) continue;
-    if (CLASS_TYPE_P(t) && uses_template_parms(t)) continue;
+    if (cxx_class(t) && uses_template_parms(t)) continue;
     if (!tree_fits_uhwi_p(TYPE_SIZE_UNIT(t))) continue;
     std::string why;
     std::string key = key_of(t, why);
@@ -235,7 +253,7 @@ static void finish_unit_cb(void *, void *)
     std::vector<std::string> fields, bases;
     int index = 0;
     fields_of(t, 0, fields, flags, index);
-    if (CLASS_TYPE_P(t) && TYPE_BINFO(t)) {
+    if (cxx_class(t) && TYPE_BINFO(t)) {
       std::set<tree> direct;
       tree b; int k;
       for (k = 0; BINFO_BASE_ITERATE(TYPE_BINFO(t), k, b); k++) {
@@ -283,10 +301,15 @@ extern "C" int plugin_init(struct plugin_name_args *info, struct plugin_gcc_vers
   }
   /* the name rules need the class-key reports and the scope numbers of toolchain/names */
   register_callback(info->base_name, PLUGIN_REGISTER_GGC_ROOTS, NULL, (void *)keep_roots);
-  register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);
-  register_callback(info->base_name, PLUGIN_FINISH_DECL, finish_decl_cb, NULL);
-  register_callback(info->base_name, PLUGIN_FINISH_TYPE, (plugin_callback_func)+[](void *d, void *u) { finish_type(d, u); finish_type_cb(d, u); }, NULL);
-  register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, pre_genericize_cb, NULL);
+  if (is_cxx()) {
+    register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);
+    register_callback(info->base_name, PLUGIN_FINISH_DECL, finish_decl_cb, NULL);
+    register_callback(info->base_name, PLUGIN_FINISH_TYPE, (plugin_callback_func)+[](void *d, void *u) { finish_type(d, u); finish_type_cb(d, u); }, NULL);
+    register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, pre_genericize_cb, NULL);
+  } else {   /* cc1: records come from the types the front end finishes and the declarations it finishes */
+    register_callback(info->base_name, PLUGIN_FINISH_DECL, +[](void *d, void *) { if (d && DECL_P((tree)d) && !DECL_ARTIFICIAL((tree)d)) add_type(TREE_TYPE((tree)d)); }, NULL);
+    register_callback(info->base_name, PLUGIN_FINISH_TYPE, finish_type_cb, NULL);
+  }
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit_cb, NULL);
   return 0;
 }

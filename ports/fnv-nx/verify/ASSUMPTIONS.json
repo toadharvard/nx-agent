@@ -132,6 +132,10 @@
   {
    "id": "ASM-330",
    "aliases": []
+  },
+  {
+   "id": "ASM-800",
+   "aliases": []
   }
  ],
  "entries": [
@@ -1212,17 +1216,6 @@
    "owner": "L3b"
   },
   {
-   "id": "ASM-800",
-   "text": "The -Wmismatched-tags warning is not suppressed for a declaration (system header, #pragma GCC diagnostic), so the names plugin sees every class key.",
-   "used_by": [
-    "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
-   ],
-   "aliases": [],
-   "status": "REMOVE",
-   "removed_by": "planned: gate namegate (L2 w5) compares every name with cl's symbol table and so certifies the names; closes when L2's plugin sources reach the trunk",
-   "owner": "L2"
-  },
-  {
    "id": "ASM-801",
    "text": "Every FIX_TRUNC_EXPR in a native unit is rewritten to _ftol/fistp semantics, sits in an fnvnx_f2i helper, or is a compile error (fnvnx_ftoi native rule (c), L2 w1 649a2960); native bodies compiled with fnvnx_ftoi are judged by this rule, not by the lifted-code half of fpexact.",
    "used_by": [
@@ -1236,17 +1229,39 @@
    "owner": "L2"
   },
   {
-   "id": "ASM-802",
-   "text": "No guest object, hence no guest pointer, lies within 64 KiB of address 0 or of 2^32 (fnvnx_addr rule C: a constant displacement folded into [zext(p), #d] equals the wrapped sum).",
+   "id": "ASM-102",
+   "text": "The tools of this tree name the player's exe only through their `--exe` option or the file name FalloutNV.exe, and the gate's sink list is the class of ways Python opens a path.",
    "used_by": [
-    "ports/fnv-nx/toolchain/addr/fnvnx_addr.cc"
+    "ports/fnv-nx/verify/RULES.md",
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/gate_exepin.py"
    ],
-   "aliases": [
-    "A-EDGE"
-   ],
+   "aliases": [],
    "status": "REMOVE",
-   "removed_by": "planned: a fact of the loader's layout (the first 64 KiB and everything from 0xc0000000 unmapped, guard zones), checked by the loader at start (L5), as ASM-020",
-   "owner": "L2+L5"
+   "removed_by": "planned: gate exepin taints every path value that enters a tool from argv or the environment (sys.argv, argparse, os.environ), not only `--exe`, so no exe path is outside the flow",
+   "owner": "L1"
+  },
+  {
+   "id": "ASM-803",
+   "text": "The decomp's `// @fnv 0x...` address tags and the address-range constants of the rules (IAT_RANGE, the image-data and code ranges) are those of the pinned exe.",
+   "used_by": [
+    "ports/fnv-nx/rules/README.md"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: the range constants come from the pinned exe's section table and L3a ranges.tsv facts, and every @fnv tag is checked against the exe facts by gate namegate",
+   "owner": "L2"
+  },
+  {
+   "id": "ASM-804",
+   "text": "A rule does not delete a decomp preprocessor conditional and create a non-permitted one with the same header.",
+   "used_by": [
+    "ports/fnv-nx/rules/mscgate.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: a gate reads the facts of rules/prepare.py, whose mscgate.check_rule_edit checks every edit of every rule at the moment it is made, so the whole-file count does not rest on it",
+   "owner": "L2"
   }
  ]
 }

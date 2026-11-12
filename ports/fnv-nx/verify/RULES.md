@@ -32,7 +32,7 @@ field that differs; no fact is produced from another exe.
 Proof argument: the exe path enters a tool only through its `--exe` option (or the file name `FalloutNV.exe`); gate `exepin` follows that
 value through the call structure of every tracked tool and refuses any file-reading call it reaches except through `load_exe`.
 So every fact, certificate and table derived from the exe is derived from bytes that matched the pin.
-Assumptions: SHA-256 is collision resistant; the tools name the exe by the two ways above; a stdlib file-reading API missing from the
+Assumptions (ASM-002, ASM-102): SHA-256 is collision resistant; the tools name the exe by the two ways above; a stdlib file-reading API missing from the
 gate's sink list does not occur (the list is the class of ways Python opens a path). Another build is a new pin and a new address remap,
 never a looser check. Gate: `exepin` (`verify/gate_exepin.py`); selftests `contract/tests/test_exepin.py`, `verify/tests/test_gate_exepin.py`.
 

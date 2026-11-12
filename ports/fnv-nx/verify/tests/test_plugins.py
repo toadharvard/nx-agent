@@ -3,7 +3,7 @@
 PASS/FAIL line per case. Needs root (sandbox) and the compilers of verify/env.json. Scratch: mkdtemp, removed at exit.
 Cases: (a) the .so is byte-equal in two cold stores and a warm build runs no stage; (b) a volatile access is ldar/stlr; (c) float -> int is
 MSVC's _ftol (0x80000000 for NaN and out of range) where a root without the plugin has the bare fcvtzs; (d) the gate rule: a native C++
-root without a plugin is invalid (red build gate), a lifted root without plugins builds; the plugin is a declared input of the CC stage."""
+root without a plugin is invalid (red build gate), a lifted root builds with fnvnx_ftoi (mode lifted) alone and is red without it; the plugin is a declared input of the CC stage."""
 import atexit
 import copy
 import glob
@@ -151,6 +151,45 @@ def main():
     hw = disasm(ra, "_Z3hrwi")
     check("HARDREG: a global register variable is no memory: no ldar/stlr/dmb, no ICE", all(x not in hw for x in ("ldar", "stlr", "dmb")), hw)
     check("float -> int is _ftol: 0x80000000 for NaN and out of range", "#0x80000000" in f2i, f2i)
+    # fnvnx_ftoi rewrites every FIX_TRUNC_EXPR or fails the compile: a conversion it does not cover (here to __int128) fails the build
+    wide = make_repo("wide", REC, "native", {ROOT + "/c.cc": "__int128 w(double d) { return (__int128)d; }\n"})
+    rwd, _ = build(wide, "W")
+    check("double -> __int128 fails the build with an FTOI error naming both types", rwd["status"] == "red" and any(
+        "FTOI" in x and "double" in x and "__int128" in x for x in rwd["failure"]["stderr"]), rwd.get("failure"))
+    check("the ordinary conversions of the same root still compile", "#0x80000000" in f2i)
+    # --- ORDER-CONT: a block-ending statement without a fall-through edge needs no fence; every resumption point begins with dmb ishld
+    cont_src = (
+        "#include <setjmp.h>\n"
+        "struct NF { void *jb[5]; };\nstruct C { NF *nf; int v; };\n"
+        "void lj(C *c) { if (c->nf) __builtin_longjmp((void **)c->nf->jb, 1); }\n"
+        "void thrower();\nint sj(void **b, int *p) { if (__builtin_setjmp(b)) return *p; thrower(); return 0; }\n"
+        "int tc(int *p) { try { thrower(); } catch (...) { return *p; } return 0; }\n"
+        "struct cpu { int r[4]; };\nregister cpu *cc asm(\"x26\");\nint hl(int v) { register unsigned loc asm(\"x25\") = v; cc->r[1] = loc; return cc->r[1]; }\n"
+        "int sj2(jmp_buf b, int *p) { if (setjmp(b)) return *p; return 0; }\n")
+    crepo = make_repo("cont", REC, "native", {ROOT + "/b.cc": cont_src})
+    rc_, _ = build(crepo, "C")
+    check("ORDER-CONT: longjmp / setjmp / try-catch fixtures compile with no error", rc_["status"] == "green", rc_.get("failure"))
+    if rc_["status"] == "green":
+        ob = next(x["object"] for x in rc_["objects"] if x["unit"] == "b.cc")
+        syms = {n.split()[-1] for n in subprocess.run(["aarch64-linux-gnu-nm", ob], capture_output=True, text=True).stdout.splitlines()}
+
+        def lines(sym):
+            sym = next((n for n in syms if sym in n and n.startswith("_Z")), sym)
+            return [x.split("\t", 2)[-1].strip() for x in disasm(rc_, sym, "b.cc").split("\n") if "\t" in x]
+        before_ldar = lambda ls: any("dmb\tishld" in x for x in ls) and next(i for i, x in enumerate(ls) if "dmb\tishld" in x) < max(i for i, x in enumerate(ls) if x.startswith("ldar"))  # noqa: E731
+        lj = lines("2ljP1C")
+        hl = lines("2hli")
+        check("HARDREG: local register variable plain; the load/store through a register-held pointer stays ordered", not any("dmb" in x and "ishld" in x and False for x in hl) and any("stlr" in x for x in hl) and any("ldar" in x for x in hl), hl)
+        print("DISASM lj:", lj)
+        check("(i) noreturn __builtin_longjmp: no fence needed after it", any(x.startswith("br") or x.startswith("b ") or x.startswith("bl") or x.startswith("ldr") for x in lj) and lj, lj)
+        s2 = lines("2sjPPvPi")
+        check("(ii) __builtin_setjmp: dmb ishld at the receiver, before the load", before_ldar(s2), s2)
+        tc = lines("2tcPi")
+        check("(iii) catch landing pad: dmb ishld before the load in the catch", before_ldar(tc), tc)
+        s3 = lines("3sj2P")
+        i3 = [i for i, x in enumerate(s3) if "_setjmp" in x or "setjmp" in x]
+        print("DISASM sj2:", s3, "\nDISASM sj:", s2, "\nDISASM tc:", tc)
+        check("(iv) setjmp(): dmb ishld right after the call", bool(i3) and any("dmb" in x and "ishld" in x for x in s3[i3[0] + 1:i3[0] + 3]), s3)
     # the plugin is a declared input of the CC stage and its flags are in the stage document
     docs = [json.load(open(p)) for p in glob.glob(os.path.join(BASE, "A", "stage-docs", "*", "*.json"))]
     cc = [d for d in docs if d["stage"] == "cc:a.cc"]
@@ -181,15 +220,20 @@ def main():
     chk = os.path.join(BASE, "pack-tree")
     subprocess.run(["git", "-C", ext, "checkout-index", "-a", "-f", "--prefix=" + chk + "/"], check=True)
     tree = cas.ingest(chk, os.path.join(BASE, "ingest-store"))
-    lrec = {"format": "fnvnx-recipe/1", "compiler": REC["compiler"], "flags": REC["flags"], "include": [], "units": "all",
+    lrec = {"format": "fnvnx-recipe/1", "compiler": REC["compiler"], "flags": REC["flags"], "include": [], "units": "all", "plugin_cxx": REC["plugin_cxx"],
+            "plugins": [dict(P["fnvnx_ftoi"], args=dict(recipe.LIFTED_ARGS["fnvnx_ftoi"]))],
             "generated": [{"tool": T + "gen/lift.py", "args": [], "inputs": [], "outputs": ["gen/a.cc"]}],
             "external": [{"name": "pack", "repo": "fnv-nx-build", "ref": "t", "commit": commit, "tree_sha256": tree, "at": "/ext/pack"}]}
-    lift = ('import os\nos.makedirs("/out/gen")\nopen("/out/gen/a.cc", "w").write(%r)\n' % SRC)
+    LSRC = SRC.replace("int f2i(float f)", "__attribute__((fnvnx_f2i)) int f2i(float f)")   # lifted C++ converts inside a helper only
+    lift = ('import os\nos.makedirs("/out/gen")\nopen("/out/gen/a.cc", "w").write(%r)\n' % LSRC)
     lrepo = make_repo("lifted", lrec, {"lifted_by": T + "gen/lift.py", "pack": "pack"}, {T + "gen/lift.py": lift, ROOT + "/a.cc": None})
-    check("lifted root without plugins is valid", errs(lrepo, lrec) == [], errs(lrepo, lrec))
+    check("lifted root with fnvnx_ftoi in mode lifted is valid", errs(lrepo, lrec) == [], errs(lrepo, lrec))
+    check("lifted root without fnvnx_ftoi is red", any("does not load plugin fnvnx_ftoi" in x for x in errs(lrepo, dict(lrec, plugins=[], plugin_cxx=None))))
+    check("lifted root with fnvnx_ftoi in mode native is red", any("arguments of a lifted root" in x for x in errs(lrepo, dict(
+        lrec, plugins=[dict(P["fnvnx_ftoi"], args=dict(recipe.PLUGIN_ARGS["fnvnx_ftoi"]))]))))
     os.environ["ARTIFACTS_URL"] = ext
     rl, _ = build(lrepo, "L")
-    check("lifted root without plugins builds green", rl["status"] == "green" and not rl["plugins"], rl.get("failure"))
+    check("lifted root builds green with only fnvnx_ftoi (lifted)", rl["status"] == "green" and [p["name"] for p in rl["plugins"]] == ["fnvnx_ftoi"], rl.get("failure"))
     if rl["status"] == "green":
         check("without the plugin the conversion is the bare fcvtzs", "#0x80000000" not in disasm(rl, "_Z3f2if", "gen/a.cc") and "fcvtzs" in disasm(rl, "_Z3f2if", "gen/a.cc"))
     # --- the CC stage mounts no external but the compiler's: a new commit of another external re-runs PP only; CC cannot read it

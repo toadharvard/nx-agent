@@ -58,6 +58,23 @@
 #include "gcc-plugin.h"
 #include "plugin-version.h"
 #include "cp/cp-tree.h"
+/* ONE .so SERVES BOTH FRONT ENDS: guest C units (cc1) load the same plugins as C++ units (cc1plus). GCC loads a plugin with RTLD_NOW, so
+ * every symbol the host does not export fails the load ("undefined symbol"); these exist only in cc1plus (variables and functions of cp/),
+ * so they are weak: null under cc1, where no C tree reaches them (every use is behind a C++-only tree or hook). Rule, checked by
+ * toolchain/tests/test_cc1.py: every plugin loads under cc1 and builds a C unit. */
+#define FNVNX_CXX_ONLY(sym) extern __typeof__(sym) sym __attribute__((weak))
+FNVNX_CXX_ONLY(cp_global_trees);
+FNVNX_CXX_ONLY(scope_chain);
+FNVNX_CXX_ONLY(cp_walk_subtrees);
+FNVNX_CXX_ONLY(mangle_type_string);
+FNVNX_CXX_ONLY(cp_get_callee_fndecl_nofold);
+
+/* The front end of this unit. A guest C unit is read by the same plugin: the same function-level rules, over C's trees (no classes, no
+ * AGGR_INIT_EXPR, no clones or thunks; the front end gives the function body to PLUGIN_FINISH_PARSE_FUNCTION instead of
+ * PLUGIN_PRE_GENERICIZE). */
+#include "langhooks.h"
+static bool is_cxx() { return !strncmp(lang_hooks.name, "GNU C++", 7); }
+static tree fnvnx_walk(tree *tp, walk_tree_fn f, void *data) { return walk_tree_without_duplicates_1(tp, f, data, is_cxx() ? cp_walk_subtrees : NULL); }
 #include "context.h"
 #include "stringpool.h"
 #include "attribs.h"
@@ -206,6 +223,12 @@ static void note_type(tree t, std::set<std::string> &types)
   while (t && (POINTER_TYPE_P(t) || TREE_CODE(t) == ARRAY_TYPE)) t = TREE_TYPE(t);
   if (!t || !RECORD_OR_UNION_TYPE_P(t)) return;
   t = TYPE_MAIN_VARIANT(t);
+  if (!is_cxx()) {   /* a C record: its tag */
+    tree n = TYPE_NAME(t);
+    if (n && TREE_CODE(n) == TYPE_DECL) n = DECL_NAME(n);
+    types.insert(n && TREE_CODE(n) == IDENTIFIER_NODE ? IDENTIFIER_POINTER(n) : "<unnamed>");
+    return;
+  }
   if (!TYPE_NAME(t) || !CLASS_TYPE_P(t)) { types.insert("<unnamed>"); return; }
   types.insert(mangle_type_string(t));
 }
@@ -256,7 +279,8 @@ static std::set<std::string> arg_unreadable;      /* functions (the declaration'
 /* the function a call or an aggregate-initializing call names, else null */
 static tree callee_of(tree t)
 {
-  if (TREE_CODE(t) == CALL_EXPR) return cp_get_callee_fndecl_nofold(t);
+  if (TREE_CODE(t) == CALL_EXPR) return is_cxx() ? cp_get_callee_fndecl_nofold(t) : get_callee_fndecl(t);
+  if (!is_cxx()) return NULL_TREE;   /* AGGR_INIT_EXPR is C++'s */
   tree f = AGGR_INIT_EXPR_FN(t);
   if (f && TREE_CODE(f) == ADDR_EXPR) f = TREE_OPERAND(f, 0);
   return f && TREE_CODE(f) == FUNCTION_DECL ? f : NULL_TREE;
@@ -278,8 +302,10 @@ static tree callee_of(tree t)
        body was already judged free by this same rule (its summary, memoized by DECL_UID, is made when its definition
        is finished, so a callee defined later, an indirect or virtual callee, or a recursive one has no summary and is an
        effect). Names are never looked at.
-   Assumption (ASM-001, ASM-005): the contract GCC itself relies on for const and pure (no store, no throw, termination); the arguments of
-   a free call are walked by the same rule.
+   The const and pure flags of a built-in and the flags GCC derives itself are covered by Assumption ASM-001 (the pinned compiler is
+   correct: the contract GCC relies on for const and pure: no store, no throw, termination).  The rule does not tell a user-declared
+   `__attribute__((const/pure))` from those: that flag is a claim of the source, not of the compiler (open, reported to the orchestrator).
+   The arguments of a free call are walked by the same rule.
    What the rule decides: two arguments without an effect commute with each other (each only reads); the verdict
    `argorder` is for a call with two or more arguments that have one, whose relative order the exe's code fixes and no
    rule here proves. An argument with an effect against one that only reads is the case of the order plugin's
@@ -360,7 +386,7 @@ static tree walk_effect(tree *tp, int *walk_subtrees, void *data)
     case DECL_EXPR: {
       tree d = DECL_EXPR_DECL(t);
       if (c->self && VAR_P(d) && !TREE_STATIC(d) && !DECL_EXTERNAL(d) && DECL_CONTEXT(d) == c->self) {
-        if (tree i = DECL_INITIAL(d)) cp_walk_tree_without_duplicates(&i, walk_effect, c);
+        if (tree i = DECL_INITIAL(d)) fnvnx_walk(&i, walk_effect, c);
         return c->effect ? t : NULL_TREE;
       }
       c->effect = true; return t;
@@ -379,7 +405,7 @@ static tree walk_effect(tree *tp, int *walk_subtrees, void *data)
 static bool arg_has_effect(tree arg)
 {
   eff_ctx c; c.self = NULL_TREE; c.effect = false;
-  cp_walk_tree_without_duplicates(&arg, walk_effect, &c);
+  fnvnx_walk(&arg, walk_effect, &c);
   return c.effect;
 }
 
@@ -389,7 +415,7 @@ static void summarize(tree fn)
   if (!lookup_attribute("always_inline", DECL_ATTRIBUTES(fn))) return;
   eff_ctx c; c.self = fn; c.effect = false;
   tree body = DECL_SAVED_TREE(fn);
-  cp_walk_tree_without_duplicates(&body, walk_effect, &c);
+  fnvnx_walk(&body, walk_effect, &c);
   body_free[DECL_UID(fn)] = !c.effect;
 }
 
@@ -460,7 +486,7 @@ static tree walk_calls(tree *tp, int *walk_subtrees, void *data)
   for (size_t i = 0; i < args.size(); i++) {
     arg_effects e; e.other = false;
     if (effect[i]) {
-      cp_walk_tree_without_duplicates(&args[i], walk_effects, &e);
+      fnvnx_walk(&args[i], walk_effects, &e);
       if (e.other || e.calls.empty()) readable = false;
       for (size_t k = 0; k < e.calls.size(); k++) if (!seen.insert(e.calls[k]).second) readable = false;
     }
@@ -478,11 +504,11 @@ static void pre_genericize(void *gcc_data, void *)
   summarize(fn);
   std::string name = asmname(fn);
   call_count.clear(); fn_sites.clear();
-  cp_walk_tree_without_duplicates(&DECL_SAVED_TREE(fn), walk_calls, (void *)name.c_str());
+  fnvnx_walk(&DECL_SAVED_TREE(fn), walk_calls, (void *)name.c_str());
   /* the in-charge form of a constructor or destructor is never emitted: its clones (C1/C2, D0/D1/D2) are, and each
      clone with a body of its own comes here itself. The form is still walked: the verdict of its clones is looked
      up by its name (source_name). */
-  if (DECL_LANG_SPECIFIC(fn) && DECL_MAYBE_IN_CHARGE_CDTOR_P(fn)) return;
+  if (is_cxx() && DECL_LANG_SPECIFIC(fn) && DECL_MAYBE_IN_CHARGE_CDTOR_P(fn)) return;
   for (size_t i = 0; i < fn_sites.size(); i++)
     arg_sites.push_back(fn_sites[i].head + "\\t" + std::to_string(fn_sites[i].ordinal) + "/" + std::to_string(call_count[fn_sites[i].callee]));
 }
@@ -548,7 +574,7 @@ static bool unproven_memory_read(function *fun)
 /* the symbol of the declaration a body was parsed under (a constructor / destructor variant: its declaration) */
 static std::string source_name(tree fn)
 {
-  if (DECL_LANG_SPECIFIC(fn) && DECL_CLONED_FUNCTION_P(fn)) fn = DECL_CLONED_FUNCTION(fn);
+  if (is_cxx() && DECL_LANG_SPECIFIC(fn) && DECL_CLONED_FUNCTION_P(fn)) fn = DECL_CLONED_FUNCTION(fn);
   return asmname(fn);
 }
 
@@ -696,7 +722,7 @@ struct late_pass : gimple_opt_pass {
     }
     if (e == early.end()) {
       /* a this-adjusting thunk: made by the compiler, an adjustment and a jump */
-      if (!DECL_LANG_SPECIFIC(fun->decl) || !DECL_THUNK_P(fun->decl))
+      if (!is_cxx() || !DECL_LANG_SPECIFIC(fun->decl) || !DECL_THUNK_P(fun->decl))
         { error("N3: function %qD is emitted but was never read early", fun->decl); return 0; }
       lines.push_back(name + "\\tok\\t" + join(inl) + "\\tthunk\\t");
       thunk_rows.insert(name);
@@ -825,7 +851,7 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
   pl.pos_op = PASS_POS_INSERT_AFTER;
   register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pl);
   register_callback(info->base_name, PLUGIN_ATTRIBUTES, register_attrs, NULL);
-  register_callback(info->base_name, PLUGIN_PRE_GENERICIZE, pre_genericize, NULL);
+  register_callback(info->base_name, is_cxx() ? PLUGIN_PRE_GENERICIZE : PLUGIN_FINISH_PARSE_FUNCTION, pre_genericize, NULL);
   register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);
   register_callback(info->base_name, PLUGIN_ALL_IPA_PASSES_START, ipa_start, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);
