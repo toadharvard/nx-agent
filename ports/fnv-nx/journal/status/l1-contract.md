@@ -913,3 +913,13 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Each check function sits in a unit that a declared generator stage outputs, with a literal OWNER id.
   - A direct call from hand code is red. This gives polarity by construction.
   - L5's errno compare chain moves to the generated check.
+- w19 2b0719b (w19-cache): accepted in direction.
+  - What it adds: hermetic per-test views built from declared reads (reads.json from tracereads), so an undeclared read is red; the selftests universe derived from admit.json (100 files, against 92 before); test_gates 75/75.
+  - Questions open with w19:
+    - directory reads must be declared as directories;
+    - a stale reads.json must be red;
+    - gates must use the same per-read keys rather than a key on the whole tree.
+  - w17k import_closure is on hold, so there is one mechanism. w5's keying fix will follow the same mechanism.
+  - Roots that declare selftests but have no tests/ are now red:
+    - L1's farm: w5 adds farm/tests or drops the gate.
+    - L3a's lift/fnvlift, lift/test, lift/tools: routed to L3a.
