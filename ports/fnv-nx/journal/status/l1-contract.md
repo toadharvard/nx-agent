@@ -485,3 +485,4 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - w4/w8 exepin 50e0b7be: image set derived (exe + 7 DLLs incl. d3dx9_31), digest-pinned. Green 29/29 (cold 401 s, report-only). It goes to MERGER separately.
   - L3a must re-pin `facts` with range facts for d3dx9_31 and atimgpud.
 - w4 G e62cabf0: recipe_model.py + fnvnx-built/1 manifest + gates.json `needs` order. Green 28/28 (cold 381 s). Into w14's integration head, without the held closure/MANIFEST commit.
+- L3a range facts for all 7 images (incl. atimgpud and d3dx9_31): L3a w7 (session_01KmtZKV5F6B2PqGD9piX26f), ETA about 1.5 h, after the R3 refinement. Blocks: gpa/reach/reachlink items for those images.
