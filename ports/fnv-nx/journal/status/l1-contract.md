@@ -321,3 +321,8 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - It waits on MERGER's verdict, because w20's container has the z3 env block.
   - w20 now takes the descs fact over from w16, in parallel. w16 keeps the toy roots, -dU, root fixtures and iat.
 - **w18 38bae062:** the globext consumer is sound (certified-object bound under ASM-006). It judges 0 sites until L2 w3 publishes the fact. I asked L3a for the value-range format.
+- 04:07Z:
+  - **d3dx9_31 location (L6).** It is in gamedata/redist (fnv-nx-build c53729e, extracted from the DirectX redist cab), not in the game directory.
+    - The declared machine therefore decides it: is the DirectX redist installed into system32?
+    - d3dx9_38 is in the image set on the same basis, so for consistency I recommended (A), with "DirectX redist installed" stated as part of the declared machine (L5). Sent to the orchestrator.
+  - **Value ranges (rule b).** L3a item 30 (w2) will publish fnv-nx-build l3a-lift/facts/<image>/idxrange.tsv. w18 sends it the list of open stores and implements the consumer.
