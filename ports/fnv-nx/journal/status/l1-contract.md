@@ -138,3 +138,9 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - w19's speed fixes are prioritized right after w16.
   - w16's new head 1cba64c8: env.json is the union of pins, and the trunk version wins on a clash.
   - Worker heads: w10 0371bf6, w12 f6ac90a, w14 0e474275, w15 3a6ec1b2, w18 9b1c64ee (a6c97620 local), w20 11168c64.
+- 03:31Z:
+  - The trunk has no gate_assumptions and no ASSUMPTIONS.json. They arrive with w10 (4c5bcc2; judge_stray makes any unrecorded ASM-\d{3} red), so w10 merges before L3a.
+  - ASM-043/045 records are deleted from w10, because they are removed by fact.
+  - w16 369d5948 is green (92a5e9da, 218 s) and contains w15 fea3d99. It still has to merge aaa709c8 (env.json union) and add fixtures to REQUIRED_PRODUCT.
+  - w3 (L3a): gate_pure's class is the import closure, not a directory name. w14 deletes any `tests`-name exemption.
+  - L4 has the link-stage form for item 11 (guest test image).
