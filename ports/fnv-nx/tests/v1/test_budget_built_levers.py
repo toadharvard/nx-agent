@@ -20,6 +20,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = os.path.normpath(os.path.join(HERE, '..', '..'))
 sys.path.insert(0, os.path.join(PORT, 'tools', 'perf'))
 import frame_budget  # noqa: E402
+sys.path.insert(0, os.path.join(PORT, 'tools'))
+import tables  # noqa: E402
 
 BAD = 0
 
@@ -35,7 +37,7 @@ def main():
     h = open(os.path.join(PORT, 'shim', 'include', 'fnvnx_win32.h')).read()
     case('B1', re.search(r'ORDER_REFCOUNT=\$\{ORDER_REFCOUNT:-weak\}', cs) and 'fnvnx_refcount_inc' in h
          and '__ATOMIC_RELAXED' in h, 'barrier_relax is not what compile.sh builds')
-    model = json.load(open(os.path.join(PORT, 'tools', 'perf', 'budget_model.json')))
+    model = json.load(open(tables.path('budget_model.json')))
     built = set(next(s for s in model['scenarios'] if s['id'] == 'placed')['levers'])
     lacking = {s['id']: sorted(built - set(s['levers'])) for s in model['scenarios'] if s['id'] != 'placed'}
     lacking = {k: v for k, v in lacking.items() if v}

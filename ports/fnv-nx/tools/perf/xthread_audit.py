@@ -19,7 +19,7 @@ How it works
      recorded as indexed), classified W / R / RW (RMW), with width, `lock` prefix and xchg as atomic. Interlocked*
      imports with a pushed static address count as an atomic RW of that address.
   4. Locks (intraprocedural, linear instruction order): RecursiveSpinLock Lock/Unlock with ecx = object,
-     TES lock FUN_00453860(1)/(0), Enter/LeaveCriticalSection(push obj). An access between acquire and release is
+     TES lock the TES lock function(1)/(0), Enter/LeaveCriticalSection(push obj). An access between acquire and release is
      locked under that lock id; an unknown object is named by its acquire site. Call sites inside a locked region
      propagate the lock to the callee: the entry lock set of a function is the intersection over all its call sites on
      that side (fixpoint). Limitations: linear order is not control flow (an early-return unlock ends the region for
@@ -31,6 +31,7 @@ How it works
 import argparse
 import bisect
 import collections
+import json
 import os
 import re
 import struct
@@ -39,19 +40,16 @@ import sys
 import capstone
 from capstone import x86 as X
 
-DEF_AI_ROOTS = (0x008c7bd0, 0x008c7da0, 0x008c7f50)
-DEF_MAIN_FUNC = 0x0086e650
-DEF_MAIN_START = 0x0086ec87     # call FUN_008c78c0 (start AI threads)
-DEF_MAIN_JOIN = 0x0086ee4e      # call FUN_008c7990 (join)
-# Calls in the window that do not run while the AI threads do (decomp of FUN_0086e650): the iThreads<=1 branch
-# (FUN_008ca070 single-threaded update; FUN_00408d60/FUN_006c3640/FUN_00991500 under `== 1`) and the
-# `iThreads > 1 && !update` branch where the threads were not started (FUN_0086fd70, FUN_00702360, FUN_007058e0).
-DEF_MAIN_EXCLUDE = (0x008ca070, 0x0086fd70, 0x00702360, 0x007058e0, 0x00408d60, 0x006c3640, 0x00991500)
-DEF_SPIN_LOCK = 0x0040fbf0
-DEF_SPIN_UNLOCK = 0x0040fba0
-DEF_AI_LOCK_OBJ = 0x011f11a0
-DEF_TES_LOCK_FN = 0x00453860
-DEF_TES_LOCK_OBJ = 0x011c3d84
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+import tables  # noqa: E402
+
+
+def defaults():
+    """The exe addresses of the audit's defaults (AI thread roots, the main window, the spin locks and the lock
+    objects): the pinned private table xthread_defaults.json (tools/tables.py)."""
+    with open(tables.path('xthread_defaults.json')) as f:
+        return json.load(f)
+
 
 PURE_WRITE = {'mov', 'movss', 'movsd', 'movq', 'movd', 'movaps', 'movups', 'movapd', 'movupd', 'movdqa', 'movdqu',
               'movlps', 'movhps', 'movlpd', 'movhpd', 'movntps', 'movnti', 'fstp', 'fst', 'fistp', 'fist', 'fisttp',
@@ -139,8 +137,13 @@ class Func:
 
 
 class Auditor:
-    def __init__(self, img, starts, vtables=(), spin_lock=DEF_SPIN_LOCK, spin_unlock=DEF_SPIN_UNLOCK,
-                 tes_lock=DEF_TES_LOCK_FN, sync_objs=(DEF_AI_LOCK_OBJ, DEF_TES_LOCK_OBJ), max_func=0x8000):
+    def __init__(self, img, starts, vtables=(), spin_lock=None, spin_unlock=None,
+                 tes_lock=None, sync_objs=None, max_func=0x8000):
+        d = defaults() if None in (spin_lock, spin_unlock, tes_lock, sync_objs) else None
+        spin_lock = d['spin_lock'] if spin_lock is None else spin_lock
+        spin_unlock = d['spin_unlock'] if spin_unlock is None else spin_unlock
+        tes_lock = d['tes_lock_fn'] if tes_lock is None else tes_lock
+        sync_objs = (d['ai_lock_obj'], d['tes_lock_obj']) if sync_objs is None else sync_objs
         self.img = img
         self.starts = sorted(set(a for a in starts if img.is_text(a)))
         self.startset = set(self.starts)
@@ -642,11 +645,12 @@ def main(argv=None):
     ap.add_argument('--addrmap', required=True)
     ap.add_argument('--out', required=True)
     ap.add_argument('--decomp', help='fnv_decomp checkout, for DAT_ names/types (optional)')
-    ap.add_argument('--ai-roots', default=','.join('%08x' % a for a in DEF_AI_ROOTS))
-    ap.add_argument('--main-func', default='%08x' % DEF_MAIN_FUNC)
-    ap.add_argument('--main-start', default='%08x' % DEF_MAIN_START)
-    ap.add_argument('--main-join', default='%08x' % DEF_MAIN_JOIN)
-    ap.add_argument('--main-exclude', default=','.join('%08x' % x for x in DEF_MAIN_EXCLUDE),
+    D = defaults()
+    ap.add_argument('--ai-roots', default=','.join('%08x' % a for a in D['ai_roots']))
+    ap.add_argument('--main-func', default='%08x' % D['main_func'])
+    ap.add_argument('--main-start', default='%08x' % D['main_start'])
+    ap.add_argument('--main-join', default='%08x' % D['main_join'])
+    ap.add_argument('--main-exclude', default=','.join('%08x' % x for x in D['main_exclude']),
                     help='window calls on branches exclusive with the AI threads running (empty: keep all)')
     ap.add_argument('--why', default='', help='comma list of functions: print the call path from each side root')
     ap.add_argument('--max-func', type=lambda s: int(s, 0), default=0x8000)

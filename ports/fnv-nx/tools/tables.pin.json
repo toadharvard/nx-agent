@@ -2,11 +2,14 @@
  "format": "fnvnx-tables-pin/1",
  "repo": "fnv-nx-build",
  "ref": "l5-platform/manifest",
- "commit": "348f67b03ead2323fe9bc398423b54b11ece034b",
- "tree_sha256": "3780fd5ef0a8660609302777f179cb36344c052079e5f76288c58be208aa5e87",
+ "commit": "0f3f8dd7ad99768765632aa2ea785c82be0419ed",
+ "tree_sha256": "50dc1737dbfc466e150e63b07b9ca652a41f079146bea2e60329b530c1cdb0f6",
  "dir": "tables",
  "files": {
   "imports.tsv": "762bf9fb4ab97eb4c02460fe00d5488bb862cd69c96eb69916c62622366d1f2d",
-  "runtime_doc_sections.md": "d9a005fefb57e0673c6dfc39f5e9fcc9475800b58619e5e30c3901a09cf8ceec"
+  "runtime_doc_sections.md": "d9a005fefb57e0673c6dfc39f5e9fcc9475800b58619e5e30c3901a09cf8ceec",
+  "budget_model.json": "da12363f563c6a63fd462eac1f3243ca84844e4e602bd7a9862ba1b95227fa5a",
+  "hot_rows.json": "31a232bdf79d7ee5ed4663f500f83e6bb224109f0994d186052e3a14a1bf36c3",
+  "xthread_defaults.json": "cd9e5a79338762e6d47cf5a872c77065fde9fef69ae760568da0a1c039b42bfe"
  }
 }
