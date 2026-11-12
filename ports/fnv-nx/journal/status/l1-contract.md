@@ -611,3 +611,8 @@ Ids: gate_eh uses the orchestrator's ASM-222/223/224. L1's 225..227 are withdraw
 ## 09:55Z
 - w12 legal (rule applied): 617 files, 2270 VA records, 68 pairs in 18 files; names that meet a VA: 83 decomp-class, 10 from source 2. Refinements on the way (Legal outranks the path order): source 2 = everything defined or referenced by the toolchain objects; C++ compared by qualified name; zlib pinned as source 3. Then a decomp-only path:line list goes to the file owners.
 - L5 w9 c4aaacf2: ASM-501 is removed by funcfacts.py (L3a facts 2eeea27b), accepted. Its guard check_funcfacts.py uses name and literal patterns, which is red as a heuristic; to be replaced by an import/data-graph rule: only funcfacts reads image bytes.
+
+## 10:00Z
+- A GL-path blocker in the candidate's machinery: unitstage.py PP `-E -dU` is fed to CC, and -dU drops #undef. render/gl4 gl4_gl.c fails "X redefined" (gl4 builds 16/17 units). w16 is resumed for the side-stage port alone, on 862b0708 → claude/fnv-l1-contract-w16-du — doing. Whether it goes in before or after the trunk merge is the orchestrator's call.
+- w17 ff99b9ac: verdict green (87bfe30c, 391.7 s, over budget = the base). The 2-item job is rebasing onto 862b0708; RECIPE.md states that the exe's MSVC EH/SEH stay lifted from its tables.
+- The orchestrator removes the legal decomp pairs itself, from w12's private path:line list.
