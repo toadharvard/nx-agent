@@ -282,8 +282,16 @@ def gs_guard(cx, ins):
     """the #GP of a `gs:` access (SDM Vol 3 5.3 / 3.4.2): one guard at the start of the instruction, whichever handler uses the operand (ea adds the base). With GS holding the null selector any
     access is #GP(0); a write through a code segment (GS loaded with CS: readable code, not writable) is #GP(0) too. #GP(0) is STATUS_ACCESS_VIOLATION {0, 0xFFFFFFFF} (f_sys.gp_cond)."""
     from . import f_sys
+    if ins.mnemonic.split(' ')[-1] in NO_ACCESS:
+        return
+    if any(o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_CS and o.access & capstone.CS_AC_WRITE for o in ins.operands):
+        # CS-store: CS is a readable, executable, not writable code segment, so a store through it is #GP(0) (SDM Vol 3 5.3.1 "Limit and Type Checking": writing to a code segment); a load through CS is legal.
+        # Windows reports a ring-3 #GP as STATUS_ACCESS_VIOLATION {0, 0xFFFFFFFF} at the instruction, the mapping Wine 9.0 makes for trap 13 (dlls/ntdll/signal_i386.c, segv_handler, case TRAP_x86_PROTFLT:
+        # ExceptionCode = EXCEPTION_ACCESS_VIOLATION, ExceptionInformation[0] = 0, [1] = 0xffffffff; ExceptionAddress = the faulting Eip); the same row as f_sys.gp_cond. Nothing was modified yet.
+        cx.em(f_sys.gp_cond(cx, '1'))
+        return
     g = [o for o in ins.operands if o.type == X.X86_OP_MEM and o.mem.segment == X.X86_REG_GS]
-    if not g or ins.mnemonic.split(' ')[-1] in NO_ACCESS:
+    if not g:
         return
     cond = 'SELK(c->sel[SEG_GS])==0'
     if any(o.access & capstone.CS_AC_WRITE for o in g):
