@@ -6,8 +6,8 @@ KiTrap0D / Wine 9.0), the machine constants are rt/fnvl.h's.  Fault kinds (dsl.F
   INT n / INTO / INT1   the vector table of f_sys.INT_VECTORS
   SLDT STR SMSW SGDT SIDT   the model's constants
   CPUID RDTSC   the reference CPU's fixed answer / the platform timer: uf nodes (dsl.uf)"""
-from fnvlift.dsl import C, V, extract, ite, load, slt, uf, ult, zext
-from proof.forms import ea, handler, rd, wr, Op
+from fnvlift.dsl import C, V, extract, ite, slt, uf, ult, zext
+from proof.forms import Op, ea, handler, rd, store_op, wr
 
 # the reference machine (rt/fnvl.h; test/dsl_int_classes_test.py checks these against the header)
 GDTR_BASE, GDTR_LIMIT, IDTR_BASE, IDTR_LIMIT, LDTR_SEL, TR_SEL, CR0 = 0x80b95000, 0x03ff, 0x80b95400, 0x07ff, 0, 0x28, 0x80010033
@@ -21,7 +21,7 @@ def arpl(c):
     F, o = c.F, c.ops; d, s = rd(o[0], 16), rd(o[1], 16)
     lt = ult(d & C(3, 16), s & C(3, 16)); new = (d & C(0xfffc, 16)) | (s & C(3, 16))
     F.flag('zf', lt)
-    if o[0].k == 'm': F.store(ea(o[0]), new, lt)
+    if o[0].k == 'm': store_op(F, o[0], ea(o[0]), new, lt)
     else: wr(F, o[0], ite(lt, new, d))
 
 def privileged(c):
@@ -39,7 +39,7 @@ def int1(c): c.F.fault(K_STEP, C(1, 1))
 def store16(c, v):
     """SLDT / STR / SMSW into r/m16 or a register: memory gets 16 bits, a 32-bit register gets the value zero-extended (SDM)"""
     o = c.ops[0]
-    if o.k == 'm': c.F.store(ea(o), v)
+    if o.k == 'm': store_op(c.F, o, ea(o), v)
     else: wr(c.F, o, zext(v, o.w) if o.w > 16 else v)
 @handler('sldt')
 def sldt(c): store16(c, C(LDTR_SEL, 16))
@@ -52,8 +52,8 @@ def smsw(c):
     else: store16(c, C(CR0 & 0xffff, 16))
 @handler('sgdt', 'sidt')
 def sgdt(c):
-    a = ea(c.ops[0]); lim, base = (GDTR_LIMIT, GDTR_BASE) if c.m == 'sgdt' else (IDTR_LIMIT, IDTR_BASE)
-    c.F.store(a, C(lim, 16)); c.F.store(a + 2, C(base, 32))
+    o = c.ops[0]; lim, base = (GDTR_LIMIT, GDTR_BASE) if c.m == 'sgdt' else (IDTR_LIMIT, IDTR_BASE)
+    store_op(c.F, o, ea(o), C(lim, 16)); store_op(c.F, o, ea(o, off=2), C(base, 32))
 
 @handler('cpuid')
 def cpuid(c):
