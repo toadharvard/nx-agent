@@ -33,6 +33,7 @@
 #include <unistd.h>
 
 #include "fnvnx/hostapi.h"
+#include "fnvnx/reach.h"
 #include "fnvnx/sockwire.h"
 
 #ifndef FNVNX_SOCK_NAME   /* the test build renames the guest functions so they do not clash with the host libc */
@@ -56,7 +57,7 @@ static int local_errno(int w) {
 #define X(N, v) if (w == (v)) return N;
     FNVNX_WIRE_ERRNO_LIST(X)
 #undef X
-    return EIO;
+    fnvnx_assume_violation(FNVNX_ASM_004, (uint64_t)(uint32_t)w);   /* the host answers only list numbers while ASM-004 holds */
 }
 /* a negative service result -> errno + -1 */
 static int fail(int64_t r) { errno = local_errno((int)-r); return -1; }
