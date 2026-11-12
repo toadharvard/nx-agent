@@ -5,7 +5,9 @@ function of the stage key. Needs root, Linux x86-64. Stage document "fnvnx-stage
   optional "class": "build" | "verification" (part of the key; verdict.py provenance requires it); optional "tool"
   (the declared tool kind toolflags.py checks; part of the key).
 key = cas.stage_key(document + {"sandbox": {sandbox.py sha256, cas.py sha256}}). Results: STORE/keys/<key>/result.json.
-Sandbox: new mount/net/uts/pid/ipc namespaces; tmpfs root; inputs hardlinked from the CAS and bound read-only;
+Sandbox: new mount/net/uts/pid/ipc namespaces; tmpfs root; inputs hardlinked from the CAS and bound read-only (a VIEW input, a tree that holds
+unitview.PLACEHOLDER, is its all-placeholder base placed once, bound read-only, with each real file's object bound read-only over its
+placeholder path: O(real files) mounts per stage, never a tree per view);
 outputs fresh rw dirs; fresh /proc (time/stat/sys masked), /dev = null+zero, tmpfs /tmp; hostname fnvnx; no interface up;
 stdin /dev/null; umask 022; ASLR off; no core files; all capabilities dropped; seccomp: getrandom -> ENOSYS (x32 ABI and foreign arch killed).
 Measured (tests/test_sandbox.py case 9), NOT closed, listed in result.json "open_channels":
@@ -33,6 +35,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
+import unitview  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OPEN_CHANNELS = ["wall_clock", "entropy", "cpu_count_scheduling", "kernel_version", "memory_size",
@@ -103,7 +106,7 @@ def _setup_root(doc, root, run, srcs):
     _mount(None, "/", None, MS_REC | MS_PRIVATE)
     _mount("tmpfs", root, "tmpfs", 0, "mode=755")
     for n, i in enumerate(doc["inputs"]):
-        src, tgt = srcs[n], root + i["at"]
+        (src, binds), tgt = srcs[n], root + i["at"]
         os.makedirs(os.path.dirname(tgt), exist_ok=True)
         if os.path.isdir(src) and not os.path.islink(src):
             os.mkdir(tgt)
@@ -112,6 +115,8 @@ def _setup_root(doc, root, run, srcs):
         else:
             raise SbxError("input %s is a symlink; only files and directories can be mounted" % i["at"])
         _bind_ro(src, tgt)
+        for rel, obj in binds:   # a view: the real file over its placeholder (the base is read-only, the object is mounted read-only)
+            _bind_ro(obj, tgt + "/" + rel)
     for n, o in enumerate(doc["outputs"]):
         os.makedirs(root + o)
         _bind_ro(os.path.join(run, "out", str(n)), root + o, ro=False)
@@ -202,11 +207,97 @@ def placed(store, tree):
             shutil.rmtree(tmp, ignore_errors=True) if os.path.isdir(tmp) else os.unlink(tmp)
     return d
 
+MAX_LINKS = 60000   # below the 65000 links of an inode on ext4: a placeholder inode serves at most this many names
+_SPLIT = {}   # {(store, directory hash): (base hash, [(path, entry)] of the non-placeholder files)}, a pure function of the manifest
+_HAS_PH = {}
+
+
+def _has_ph(store, h):
+    """True iff the tree of directory manifest H holds the placeholder object somewhere (it is a VIEW)."""
+    k = (store, h)
+    if k not in _HAS_PH:
+        _HAS_PH[k] = any(e["t"] == "f" and e["h"] == unitview.PH_SHA or e["t"] == "d" and _has_ph(store, e["h"])
+                         for e in cas.manifest(h, store)["entries"].values())
+    return _HAS_PH[k]
+
+
+def _split(store, h):
+    """(base, reals) of view H: BASE = the hash of the manifest with every file entry replaced by the placeholder entry (every directory,
+    symlink and name stays: a function of the real tree's structure alone, the same for every unit); REALS = [(tree-relative path, file
+    entry)] of the files that are not the placeholder. The base manifests are written to the store."""
+    k = (store, h)
+    if k in _SPLIT:
+        return _SPLIT[k]
+    ents, reals = {}, []
+    ph = {"t": "f", "h": unitview.PH_SHA, "x": 0}
+    for name, e in cas.manifest(h, store)["entries"].items():
+        if e["t"] == "d":
+            b, rs = _split(store, e["h"])
+            ents[name] = {"t": "d", "h": b}
+            reals += [(name + "/" + p, x) for p, x in rs]
+        elif e["t"] == "f":
+            ents[name] = ph
+            if e["h"] != unitview.PH_SHA:
+                reals.append((name, e))
+        else:
+            ents[name] = e
+    data = cas.canon({"format": cas.FORMAT, "entries": ents})
+    b = hashlib.sha256(data).hexdigest()
+    cas._put(store, "tree", b + ".json", data)
+    _SPLIT[k] = (b, reals)
+    return _SPLIT[k]
+
+
+def _place_base(store, e, dest, state):
+    if e["t"] == "f":   # a placeholder: its own small file, a new inode after every MAX_LINKS names
+        if state["n"] % MAX_LINKS == 0:
+            with open(dest, "wb") as f:
+                f.write(unitview.PLACEHOLDER)
+            os.chmod(dest, 0o444)
+            os.utime(dest, (0, 0))
+            state["first"] = dest
+        else:
+            os.link(state["first"], dest)
+        state["n"] += 1
+    elif e["t"] == "l":
+        os.symlink(e["to"], dest)
+        os.utime(dest, (0, 0), follow_symlinks=False)
+    else:
+        os.mkdir(dest)
+        for name, c in cas.manifest(e["h"], store)["entries"].items():
+            _place_base(store, c, os.path.join(dest, name), state)
+        os.chmod(dest, 0o755)
+        os.utime(dest, (0, 0))
+
+
+def placed_base(store, base):
+    """The directory of the store that holds the all-placeholder tree BASE (made once per store and base, atomic rename)."""
+    d = os.path.join(store, "placed-base", base)
+    if not os.path.lexists(d):
+        os.makedirs(os.path.dirname(d), exist_ok=True)
+        tmp = "%s.tmp-%d-%s" % (d, os.getpid(), os.urandom(4).hex())
+        _place_base(store, {"t": "d", "h": base}, tmp, {"n": 0, "first": None})
+        try:
+            os.rename(tmp, d)
+        except OSError:
+            shutil.rmtree(tmp, ignore_errors=True)
+    return d
+
+
+def placed_input(store, tree):
+    """(host path, [(path in the tree, host object file)]) of an input tree. A view (a directory tree that holds the placeholder): the
+    placed base and the objects of its real files, which the sandbox binds over the placeholder paths. Any other tree: placed(), no binds."""
+    m = cas.manifest(tree, store)
+    if cas._is_dir_manifest(m) and _has_ph(store, tree):
+        base, reals = _split(store, tree)
+        return placed_base(store, base), [(p, cas._obj(store, e)) for p, e in sorted(reals)]
+    return placed(store, tree), []
+
 def execute(store, doc, key):
     run = os.path.join(store, "run", "%s.%d.%s" % (key, os.getpid(), os.urandom(4).hex()))
     root = os.path.join(run, "root")
     try:
-        srcs = [placed(store, i["tree"]) for i in doc["inputs"]]
+        srcs = [placed_input(store, i["tree"]) for i in doc["inputs"]]
         for n in range(len(doc["outputs"])):
             os.makedirs(os.path.join(run, "out", str(n)))
         os.makedirs(root)

@@ -8,29 +8,15 @@
  "flags": {
   "c": [
    "-O2",
-   "-mabi=ilp32"
+   "-Werror=attributes"
   ],
   "cxx": [
    "-O2",
-   "-mabi=ilp32",
-   "-fms-extensions",
-   "-fshort-wchar",
-   "-frounding-math",
-   "-fsigned-char",
-   "-fno-strict-aliasing",
-   "-fwrapv",
-   "-fno-delete-null-pointer-checks",
-   "-fcheck-new",
-   "-fno-sized-deallocation",
-   "-fno-lifetime-dse",
-   "-ffp-contract=off",
    "-DFNVNX_SDD=1",
-   "-fno-devirtualize",
-   "-std=gnu++20"
+   "-std=gnu++20",
+   "-Werror=attributes"
   ],
-  "asm": [
-   "-mabi=ilp32"
-  ]
+  "asm": []
  },
  "include": [
   "/ext/a64/aarch64-none-elf/include/c++/15.2.0",

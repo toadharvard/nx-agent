@@ -321,6 +321,46 @@ for abi in ("ilp32", "lp64"):
     cnt = objstub.wine_counts(objstub.analyse_all([("x", build(HDR + "int f(void) { fnvnx_wine_fixme(5); return 7; }\nint g(void) { fnvnx_wine_fixme(5); return 7; }", abi))], set(), set()))
     check(T("wine: call sites per id are counted"), cnt == {5: 2}, cnt)
 # u32nz<N>: `p ? 0 : E_INVALIDCALL` style bodies at every optimisation level
+# tail B of the log function = BL then RET (the compiler's sibling call); several names at one address are one body
+def asmf(names, body):
+    return ".text\n" + "".join(".global %s\n.type %s,%%function\n" % (n, n) for n in names) + "".join("%s:\n" % n for n in names) + body + \
+        "".join(".size %s,.-%s\n" % (n, names[0]) for n in names)
+for abi in ("ilp32", "lp64"):
+    T = lambda n: "%s/%s" % (abi, n)
+    def wa(names, body, tbl=WT, rows=None):
+        o = build(asmf(names, body), abi, "s")
+        items, finds = objstub.run_check([(o, o)], set(), {(o, k): v for k, v in (rows or {}).items()}, set(), None, None, 1, tbl)
+        return {(n, k) for _, n, k, _ in finds}, finds
+    k, f = wk("void f(void) { fnvnx_wine_fixme(6); }")
+    check(T("wine tail: compiler-made `b fnvnx_wine_fixme` (void row): certified like bl + ret"), not k, f)
+    k, f = wa(["f"], " mov w0, 6\n b fnvnx_wine_fixme\n")
+    check(T("wine tail: assembled `mov w0,6; b fnvnx_wine_fixme`: certified"), not k, f)
+    k, f = wa(["f"], " mov w0, 9\n b fnvnx_wine_fixme\n")
+    check(T("wine tail: id not in the table: wine-fixme-unknown-id"), k == {("f", "wine-fixme-unknown-id")}, f)
+    k, f = wa(["f"], " mov w0, 5\n b fnvnx_wine_fixme\n")
+    check(T("wine tail: a u32 row needs the result the tail call leaves in x0 (the callee's): wine-fixme-mismatch"), k == {("f", "wine-fixme-mismatch")}, f)
+    k, f = wa(["f"], " cbz w1, 1f\n mov w0, 6\n b fnvnx_wine_fixme\n1: mov w0, 5\n b fnvnx_wine_fixme\n")
+    check(T("wine tail: two ids on two paths: wine-fixme-mismatch"), k == {("f", "wine-fixme-mismatch")}, f)
+    k, f = wa(["f"], " mov w0, 6\n b fnvnx_other\n")
+    check(T("wine tail: a tail b of a function that is not cited is no wine body (a real body, no wine-* finding), as before"), not {x for x in k if x[1].startswith("wine")}, f)
+    k, f = wa(["f"], " adrp x1, g\n mov w2, 1\n str w2, [x1, :lo12:g]\n mov w0, 6\n b fnvnx_wine_fixme\n.bss\ng: .word 0\n.text\n")
+    check(T("wine tail: a store before the tail call: wine-fixme-in-real-body"), k == {("f", "wine-fixme-in-real-body")}, f)
+    k, f = wa(["f", "g"], " mov w0, 6\n b fnvnx_wine_fixme\n")
+    check(T("alias pair (ICF) of a tail-b wine body, one id: both names certified"), not k, f)
+    k, f = wa(["f", "g"], " stp x29, x30, [sp, -16]!\n mov w0, 6\n bl fnvnx_wine_fixme\n ldp x29, x30, [sp], 16\n ret\n")
+    check(T("alias pair of a bl wine body: both names certified"), not k, f)
+    k, f = wa(["f", "g"], " mov w0, 9\n b fnvnx_wine_fixme\n")
+    check(T("alias pair with an id that is not a row: both names wine-fixme-unknown-id"), k == {("f", "wine-fixme-unknown-id"), ("g", "wine-fixme-unknown-id")}, f)
+    k, f = wa(["f", "g"], " mov w0, 3\n ret\n", rows={"f": ("u32", "3", "r"), "g": ("u32", "3", "r")})
+    check(T("alias pair of a V body, a constants row for each name: both certified"), not k, f)
+    k, f = wa(["f", "g"], " mov w0, 3\n ret\n", rows={"f": ("u32", "3", "r")})
+    check(T("alias pair of a V body, a row for one name only: the other name is red (V, no constants row)"), k == {("g", "V")}, f)
+    k, f = wa(["f", "g"], " stp x29, x30, [sp, -16]!\n mov w0, w1\n bl fnvnx_wine_fixme\n ldp x29, x30, [sp], 16\n ret\n")
+    check(T("alias pair, a log call whose id is not a constant: the finding is on both names"), {("f", "wine-fixme-nonconstant"), ("g", "wine-fixme-nonconstant")} <= k, f)
+    o = build(asmf(["f", "g"], " mov w0, 6\n b fnvnx_wine_fixme\n"), abi, "s")
+    cnt = objstub.wine_counts(objstub.analyse_all([("x", o)], set(), set()))
+    check(T("alias pair: the log call is counted once (one body)"), cnt == {6: 1}, cnt)
+
 NZ = {2: ("IDirect3DDevice9::SetClipStatus", "wine-9.0:dlls/wined3d/device.c:wined3d_device_set_clip_status", "u32nz1", "0x8876086C,0")}
 SWAP = {2: NZ[2][:3] + ("0,0x8876086C",)}
 for abi in ("ilp32", "lp64"):
@@ -528,6 +568,15 @@ print("INFO ILP32 toy gate warm %.1f s" % secs)
 r32r = TR.make_repo("os-reach32", rec=TR.abi_rec("ilp32"), files={"toy/constants.tsv": CONST, "toy/c.c": RV, "toy/os.S": OS.replace("ldr x1, [x1, :lo12:hostslot]", "ldr w1, [x1, :lo12:hostslot]").replace("blr x1", "blr x1").replace(".quad 0", ".word 0")})
 rc, g, _, txt, st = gate(r32r, ROOT + "/g32r", GC)
 check("ILP32 reach call (P32 CALL26 relocation) is judged by the reach rule: reach-uncertified, nothing else red", rc == 2 and g["uncertified"] == [TR.ROOT + "/c.c:f_c"] and "reach-uncertified 1" in g["detail"], (g, txt))
+
+# a host root: the terminator plugin is built against the plugin headers of the root's own (x86-64 distro) compiler, and sees its noreturn declarations
+xt = tf + ".x86"
+open(tf + ".x86.h", "w").write("void fnvnx_die(void) __attribute__((noreturn));\n")
+xn = objstub.derive_terminators("x86_64-linux-gnu-gcc-13", ["-I" + os.path.dirname(tf)], [os.path.basename(tf) + ".x86.h"], "c", xt)
+check("host root compiler x86_64-linux-gnu-gcc-13: the plugin builds against its own plugin headers and finds the noreturn function", "fnvnx_die" in xn, xn)
+xh = objstub.plugin_so("x86_64-linux-gnu-gcc-13", tempfile.mkdtemp(prefix="objstub-x86-"))[1]
+check("the plugin key depends on the root compiler: x86-64 distro gcc and the aarch64 compiler give different plugins",
+      xh != objstub.plugin_so("aarch64-linux-gnu-g++", tempfile.mkdtemp(prefix="objstub-a64-"))[1])
 
 print("%d failed, wall %.1f s" % (len(FAILED), time.time() - T0))
 sys.exit(1 if FAILED else 0)

@@ -41,9 +41,6 @@ typedef struct FnvnxHostApi {
     uint64_t sleep_ns;             /* (ns) -> 0; ns above INT64_MAX sleeps INT64_MAX ns */
     uint64_t exit;                 /* (code) -> does not return; ends the process through libnx */
     uint64_t console_write;        /* (buf, len) -> bytes written to the host text console */
-    uint64_t console_flush;        /* () -> 0; presents the console framebuffer */
-    uint64_t main_loop;            /* () -> 1 while the applet should keep running (appletMainLoop) */
-    uint64_t buttons_down;         /* () -> HidNpadButton bits newly pressed on the default pad */
     uint64_t system_tick;          /* () -> armGetSystemTick() */
     uint64_t system_tick_freq;     /* () -> armGetSystemTickFreq() */
 
@@ -76,8 +73,6 @@ typedef struct FnvnxHostApi {
     uint64_t wake_address;         /* (addr, count; count > 0x7FFFFFFF: all) -> 0 or the kernel's result of
                                       svcSignalToAddress (0xCC01 addr not 4-aligned, 0xD401 not guest memory) */
     uint64_t wall_time_us;         /* () -> microseconds since 1970 UTC */
-    uint64_t tz_offset_minutes;    /* () -> off_s / 60 (C division) of TZ_AT at the moment of the call (int64 as u64); 0 when TZ_AT
-                                      does not answer 0 for that instant. The platform no longer uses this slot (it calls TZ_AT). */
     uint64_t random64;             /* () -> random u64 */
     uint64_t memory_info;          /* (FnvnxMemInfo *) -> 0 (avail_phys = 0 when used > total) */
     uint64_t cpu_count;            /* () -> cores the game may use: 3 (application cores 0-2), 4 with the platform config core3=1 */
@@ -115,7 +110,7 @@ typedef struct FnvnxHostApi {
     uint64_t input_poll;           /* (FnvnxInputEvent *, cap) -> events written (<= cap; cap 0: none) since the last poll */
     uint64_t map_fixed;            /* (addr, size, src) -> 0 or Result: makes [addr, addr+size) read-write memory at exactly
                                       addr from src, a page-aligned guest heap block of the same size (it becomes
-                                      inaccessible until UNMAP_FIXED). The mapping is reprotectable (VM_PROTECT). Checks in
+                                      inaccessible for the rest of the process). The mapping is reprotectable (VM_PROTECT). Checks in
                                       this order: size 0, addr+size wraps, addr or size not 4 KiB aligned -> FNVNX_HE_BADINPUT
                                       (0x1759); [addr, addr+size) inside a window the host claimed at start (the original
                                       image range 0x00400000..0x00FDF000, the data window 0x00FDF000..0x02100000): the range
@@ -133,7 +128,7 @@ typedef struct FnvnxHostApi {
 
 /* ext_call results that belong to no service (all three are -255, -254, -253 as int64; no service answers one of them otherwise):
  *   NO_MODULE  the module number is >= 64 or no host module is registered under it
- *   NO_SERVICE the module is registered but has no service of that number (module 11: fn 0 and 37 and up)
+ *   NO_SERVICE the module is registered but has no service of that number (module 11: fn 0, 27..29, 32, 33 and 37 and up)
  *   BAD_NARGS  module 11: fewer arguments than the service takes (the column "n" of the table below), or nargs > 0 with a null array */
 #define FNVNX_EXT_NO_MODULE 0xFFFFFFFFFFFFFF01ull
 #define FNVNX_EXT_NO_SERVICE 0xFFFFFFFFFFFFFF02ull
@@ -152,6 +147,8 @@ typedef struct FnvnxHostApi {
 /* ext_call module of the host's platform services (toolchain/host/host.c; render/nine is 9, render/native 10) */
 #define FNVNX_EXT_PLATFORM 11u
 #define FNVNX_EXT_NINE 9u    /* module of the D3D9 proxy (render/nine); its services belong to the render lead */
+#define FNVNX_EXT_DK 12u     /* machine model of the deko3d API (dk*): served by the emulator machine (verify/bootdk.py) in host-test ELFs only; in the product dk* is the
+                                real deko3d, so this module is no service of the platform and has no FNVNX_PLAT_* number: rule "used = declared" is about the services of module 11 */
 #define FNVNX_EXT_GPU 10u    /* module of the native renderer (render/native); its services belong to the render lead */
 #define FNVNX_PLAT_CPU_BOOST 1u   /* (mode: 0 normal, 1 fast load; any non-zero = fast) -> 0 set (or already in that mode), 1 off by the
                                      platform config (boost_loading=0), else the Horizon result of appletSetCpuBoostMode (the
@@ -198,7 +195,7 @@ typedef struct FnvnxHostApi {
  * wraps -> FNVNX_HE_RANGE; prot is not 0, 1 or 3 (X, write-only, anything else) -> FNVNX_HE_PERM; a page that is not guest-owned (the guest
  * module, host memory, a section view, committed nowhere, unmapped) -> FNVNX_HE_RANGE, nothing changed; then the kernel's results
  * unchanged. The change is applied run by run; if the kernel refuses a run (its block slab is exhausted) the runs before it keep
- * the new protection. UNMAP_FIXED and DECOMMIT work on pages of any protection, and a page that stays mapped after a partial
+ * the new protection. DECOMMIT works on pages of any protection, and a page that stays mapped after a partial
  * DECOMMIT is read-write: nothing needs restoring first (the loader may still do it). The loader sets the PE section protection
  * and the stack guard pages with this call; the platform's VirtualProtect uses the same call. */
 #define FNVNX_PLAT_VM_PROTECT 8u
@@ -207,29 +204,7 @@ typedef struct FnvnxHostApi {
 /* 9 DISPLAY_DOCKED () -> 1 docked (1080p output), 0 handheld (720p): appletGetOperationMode() == AppletOperationMode_Console.
  * Takes no argument: nargs 0 is the call; nargs > 0 with a null argument array -> FNVNX_EXT_BAD_NARGS; otherwise the arguments are ignored. */
 #define FNVNX_PLAT_DISPLAY_DOCKED 9u
-/* ACCESS_FAULT_HANDLER {handler, stack_top} -> 0. Registers, for the CALLING thread, the guest function
- * `uint64_t handler(FnvnxFaultFrame *frame)` and the top of a separate stack it runs on (16-byte aligned, guest memory).
- * On a data or instruction access fault of that thread the host fills a frame at stack_top - sizeof(frame), switches to
- * that stack and calls handler with faults of the same kind masked (a fault inside the handler ends the process).
- * Return 0: the host loads every register from the frame (the handler may have changed any of them, pc included) and
- * resumes. Return non-zero: the process ends with that value as exit code. A thread without a handler: the fault ends
- * the process. handler == 0 unregisters.
- * Registration results: stack_top not 16-byte aligned, below sizeof(FnvnxFaultFrame) or >= 4 GiB -> 0xCC01 (nothing
- * registered). The frame's `pstate` carries only the condition flags NZCV (bits 31..28); every other bit reads as 0 and is
- * ignored when the host resumes. A fault taken while the HOST dereferences a bad guest pointer passed to a host slot is not
- * delivered to the guest: the process ends.
- * Served by the console host: toolchain/host/host_fault.inc (the delivery rule and its proof), row 10 of host_platform.inc. */
-#define FNVNX_PLAT_ACCESS_FAULT_HANDLER 10u
-typedef struct FnvnxFaultFrame {
-    uint32_t kind;        /* 0 read, 1 write, 2 execute */
-    uint32_t reason;      /* 0 unmapped, 1 protection, 2 alignment */
-    uint64_t addr;        /* faulting data address (kind 0, 1) or pc (kind 2) */
-    uint64_t pc, sp, pstate;
-    uint64_t x[31];       /* x0..x30 */
-    uint32_t fpcr, fpsr;
-    uint64_t v[32][2];    /* v0..v31, low then high 64 bits */
-} __attribute__((aligned(16))) FnvnxFaultFrame;
-typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 : -1];   /* both sides of the host boundary */
+/* Numbers 10 and 15 are reserved holes (not renumbered): no product unit uses them. */
 /* Memory sections: SHARED views of the same pages (Win32 CreateFileMapping over the paging file + MapViewOfFile
  * FILE_MAP_WRITE). Implemented by toolchain/host/host_section.inc; the proofs from the Mesosphere sources (commit
  * 4e3f37038d9e82dde7054897213ab32b2ecf651f) are in that file's header. All four take their arguments as a uint64 array
@@ -249,7 +224,7 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
  *   14 SECTION_FREE (id)                     -> 0 | error. The id dies at once (MAP with it fails with 0xE401); the pages
  *                                               live until the last view is unmapped (the kernel needs the backing mapped
  *                                               to unmap a view), then they are released. Deferred, never refused.
- * 15 is UNMAP_FIXED below. Error codes (the Horizon result values the kernel uses for the same condition, kernel results of a
+ * Error codes (the Horizon result values the kernel uses for the same condition, kernel results of a
  * failing svc are passed through unchanged):
  *   0xCA01 size is 0, not a 4 KiB multiple or too large   0xCC01 addr or offset not 4 KiB aligned
  *   0xD401 range outside the section; addr range not free in the kernel; not exactly a view
@@ -282,17 +257,6 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
 #define FNVNX_SEC_E_FULL 0xCE01u
 #define FNVNX_SEC_E_NOSERVICE 0xFFu   /* the host answers FNVNX_EXT_NO_MODULE (= -255): an older host without sections */
 #define FNVNX_SEC_MAX_SIZE 0x80000000ull
-/* 15 UNMAP_FIXED (addr, size, src) -> 0 or an error, the undo of the host slot map_fixed. (addr, size, src) must be exactly
- * the arguments of one live, successful map_fixed call (src: the page-aligned guest heap block that call was given). Effect: the
- * range stops being mapped; the source heap block becomes ordinary accessible heap again, with the contents the guest had left in
- * the mapped range, and the guest frees it. The range is unmapped, so a later map_fixed of it, or any VM service reservation,
- * can use it again. The pages may have ANY protection (VM_PROTECT R, RW or none): nothing needs restoring first. A range inside
- * the window the host claimed at startup (where map_fixed only zeroes, see map_fixed) is made read-write and zeroed again and
- * stays the host's window; src is not looked at there. Results, in this order: addr or src not 4 KiB aligned -> FNVNX_HE_ADDR
- * (0xCC01); size 0 or not a 4 KiB multiple -> FNVNX_HE_SIZE (0xCA01); addr+size wraps -> FNVNX_HE_RANGE (0xD401); not a window range
- * and no live map_fixed with exactly these arguments (also a second unmap of the same call) -> FNVNX_HE_RANGE, nothing changed;
- * else the kernel's result. */
-#define FNVNX_PLAT_UNMAP_FIXED 15u
 /* TOTALITY TABLE BEGIN
  * The guest <-> host boundary is TOTAL: every service has one specified result for every input and one host implementation. Columns:
  * service, n = least nargs (fewer -> FNVNX_EXT_BAD_NARGS; extra arguments are ignored), results (numbers: FNVNX_HE_* above), host
@@ -303,7 +267,7 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
  *
  * ext_call (slot): module >= 64 or not registered -> NO_MODULE (-255); fn > UINT32_MAX -> NO_SERVICE (-254); nargs > UINT32_MAX counts as
  *   UINT32_MAX; host_ext.inc:h_ext_call, fnvnx_host_register_ext (a null handler or a taken module: -1)      test:total_ext test:test_ext_and_map
- * module 11, platform_ext (host_platform.inc, one row per service); fn 0 and fn >= 37 -> NO_SERVICE (-254):
+ * module 11, platform_ext (host_platform.inc, one row per service); fn 0, 10, 15, 27..29, 32, 33 and fn >= 37 -> NO_SERVICE (-254):
  *   test:total_unknown test:total_nargs test:total_declared
  *  1 CPU_BOOST          n=1  0 set / already that mode | 1 boost_loading=0 | the Horizon result of appletSetCpuBoostMode, mode unchanged
  *                            host_platform.inc:pf_cpu_boost,set_cpu_boost                                    test:cpu_boost
@@ -325,20 +289,15 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
  *                            test:protect_mapfixed test:protect_window test:protect_not_owned test:protect_partial_failure
  *  9 DISPLAY_DOCKED     n=0  1 docked | 0 handheld
  *                            host_platform.inc:pf_display_docked                                              test:display_docked
- * 10 ACCESS_FAULT_HANDLER n=2  0 | 0xCC01 (stack_top not 16-aligned, < sizeof(FnvnxFaultFrame) or >= 4 GiB; handler == 0 unregisters and skips the check)
- *                            host_fault.inc:host_fault_register, fnvnx_fault_deliver (decode + delivery rule), fnvnx_fault_entry (asm) test:fault_register
- *                            test:fault_deliver test:fault_resume test:fault_masked test:fault_die test:fault_logic
  * 11 SECTION_CREATE     n=1  id | -(0xCA01 | 0xCE01 | 0xD001 | kernel | 0x1359 no own-process handle)
  * 12 SECTION_MAP        n=4  address | -(0xCA01 | 0xCC01 | 0xE401 | 0xD401 | 0xCE01 | 0xDA01 | 0xD001 | kernel), the order of checks is in the text above
  * 13 SECTION_UNMAP      n=2  0 | -(0xD401 not exactly a view | kernel)
  * 14 SECTION_FREE       n=1  0 | -(0xE401 unknown id | kernel)
  *                            host_section.inc:host_section_create,_map,_unmap,_free                           test:host_section_test test:via_dispatch_section
- * 15 UNMAP_FIXED        n=3  0 | 0xCC01 | 0xCA01 | 0xD401 (wraps, not exactly one live map_fixed) | kernel
- *                            host_vm.inc:h_unmap_fixed                                                        test:unmapfixed_args test:via_dispatch_unmap_fixed
- * 16..33 SOCK_SOCKET SOCK_CLOSE SOCK_BIND SOCK_LISTEN SOCK_ACCEPT SOCK_CONNECT SOCK_SENDTO SOCK_RECVFROM SOCK_SETSOCKOPT SOCK_GETSOCKOPT
- *         SOCK_POLL SOCK_SHUTDOWN SOCK_GETSOCKNAME SOCK_GETPEERNAME SOCK_GETFL SOCK_SETFL SOCK_GAI_OPEN SOCK_GAI_FETCH   n = the count each service states (SOCK_SOCKET 3, CLOSE 1, BIND 2, LISTEN 2, ACCEPT 2, CONNECT 2, SENDTO 5, RECVFROM 5,
- *                            SETSOCKOPT 5, GETSOCKOPT 5, POLL 3, SHUTDOWN 2, GETSOCKNAME 2, GETPEERNAME 2, GETFL 1, SETFL 2, GAI_OPEN 4, GAI_FETCH 3)
- *                            value >= 0 | -(wire errno, sockwire.h). ORDER (host_platform.inc:platform_ext): a fn in 16..33 goes to host_sock_call BEFORE
+ * 16..26 30 31 SOCK_SOCKET SOCK_CLOSE SOCK_BIND SOCK_LISTEN SOCK_ACCEPT SOCK_CONNECT SOCK_SENDTO SOCK_RECVFROM SOCK_SETSOCKOPT SOCK_GETSOCKOPT
+ *         SOCK_POLL SOCK_GETFL SOCK_SETFL   n = the count each service states (SOCK_SOCKET 3, CLOSE 1, BIND 2, LISTEN 2, ACCEPT 2, CONNECT 2, SENDTO 5, RECVFROM 5,
+ *                            SETSOCKOPT 5, GETSOCKOPT 5, POLL 3, GETFL 1, SETFL 2)
+ *                            value >= 0 | -(wire errno, sockwire.h). ORDER (host_platform.inc:platform_ext): a fn in 16..31 goes to host_sock_call BEFORE
  *                            the generic nargs / null-array check, so for sockets "n" is the EXACT count: nargs != n (more or fewer, null array or not)
  *                            -> -FNVNX_WE_INVAL; nargs == n with a null array -> FNVNX_EXT_BAD_NARGS; no socket service reads a null array
  *                            host_sock.inc:host_sock_call (the platform lead's, verbatim)                      test:via_dispatch_sock test:total_declared
@@ -353,17 +312,17 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
  * FnvnxHostApi slots: the results are stated at each slot above. Host function (file) and tests; "-" = a direct libnx / newlib call
  * whose answer is that call's (Result or -errno) with no host logic of its own:
  *   output_debug_string h_output_debug_string (host.c) -; sleep_ns h_sleep_ns (host.c) -; exit h_exit (host.c) -; console_write,
- *   console_flush, main_loop, buttons_down, system_tick, system_tick_freq (host.c) -;
+ *   system_tick, system_tick_freq (host.c) -;
  *   thread_create, thread_start, thread_join, thread_free, thread_set_priority, thread_set_cpu (host_v2.inc, ids host_ids.inc)  test:thread_slots test:thread_ids;
  *   thread_exit, thread_yield (host_v2.inc) -;
  *   wait_on_address, wake_address (host_v2.inc)  test:wait_wake;
- *   wall_time_us, random64, memory_info (host_v2.inc) -; tz_offset_minutes (host_v2.inc)  test:tz_at; cpu_count (host_v2.inc)  test:thread_slots;
+ *   wall_time_us, random64, memory_info (host_v2.inc) -; cpu_count (host_v2.inc)  test:thread_slots;
  *   fs_open, fs_read, fs_write, fs_pread, fs_pwrite, fs_seek, fs_truncate, fs_sync, fs_fstat, fs_close, fs_stat, fs_mkdir, fs_rmdir, fs_remove,
  *   fs_rename (host_v2.inc)  test:fs_errors; fs_dir_open, fs_dir_next, fs_dir_close (host_v2.inc)  test:dir_slots;
  *   audio_open, audio_submit, audio_close, pad_read, pad_vibrate, input_poll (host_v3.inc)  test:test_audio test:test_pads test:test_events;
  *   map_fixed (host_vm.inc:h_map_fixed)  test:mapfixed_args test:protect_mapfixed test:protect_window;  ext_call (host_ext.inc)  test:total_ext.
  * TOTALITY TABLE END */
-/* ---- BSD sockets (FNVNX_PLAT_SOCK_*, services 16..33; guest: platform/os/sock_guest.c, host:
+/* ---- BSD sockets (FNVNX_PLAT_SOCK_*, services 16..26, 30, 31; guest: platform/os/sock_guest.c, host:
  * toolchain/host/host_sock.inc; the wire constants and structs: fnvnx/sockwire.h). The rule: EVERY BSD-socket
  * operation of the guest is one of these services; the guest's C library has no network device of its own.
  *  - Arguments are the uint64 words of ext_call's args array; nargs must be exactly the count shown, else the
@@ -382,8 +341,7 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
  *    number outside the set (checked before anything else of that service, after the count check), so the guest cannot name another
  *    descriptor of the host. The guest keeps it inside its own descriptor table (a newlib
  *    device "soc"), so close/read/write/dup/fcntl on a socket descriptor reach these services.
- *  - Blocking: a blocking call (connect, accept, sendto, recvfrom, poll with a timeout, the resolution of
- *    GAI_OPEN) blocks only the calling guest thread: ext_call runs on the caller's own thread, as audio_submit and
+ *  - Blocking: a blocking call (connect, accept, sendto, recvfrom, poll with a timeout) blocks only the calling guest thread: ext_call runs on the caller's own thread, as audio_submit and
  *    the file services do. A new socket is blocking until FNVNX_PLAT_SOCK_SETFL says otherwise. There are no signals:
  *    EINTR does not occur and sends never raise SIGPIPE (the host passes MSG_NOSIGNAL where the OS has it). */
 #define FNVNX_PLAT_SOCK_SOCKET 16u      /* (domain WAF_*, type WSOCK_*, protocol IANA) -> h; domain not in FNVNX_WIRE_AF_LIST (or not an int32)
@@ -426,34 +384,13 @@ typedef char fnvnx_fault_frame_is_816_bytes[sizeof(FnvnxFaultFrame) == 816 ? 1 :
                                            (timeout 0: it reports what is ready now). Event bits outside FNVNX_WIRE_POLL_LIST are dropped
                                            (not an error). Otherwise the platform's poll(): open sockets with no traffic give revents 0 for them
                                            and, after the timeout (forever for -1), the result 0; a failure of poll() is -(its wire errno) */
-#define FNVNX_PLAT_SOCK_SHUTDOWN 27u    /* (h, how 0 read / 1 write / 2 both) -> 0; how > 2 -> -EINVAL */
-#define FNVNX_PLAT_SOCK_GETSOCKNAME 28u /* (h, FnvnxWireSockaddr *out) -> 0 */
-#define FNVNX_PLAT_SOCK_GETPEERNAME 29u /* (h, FnvnxWireSockaddr *out) -> 0 */
 #define FNVNX_PLAT_SOCK_GETFL 30u       /* (h) -> FNVNX_WO_RDWR | (non-blocking ? FNVNX_WO_NONBLOCK : 0); of the flags only NONBLOCK is returned */
 #define FNVNX_PLAT_SOCK_SETFL 31u       /* (h, flags) -> 0; only FNVNX_WO_NONBLOCK of flags is applied (POSIX F_SETFL); any other bit of
                                            flags is IGNORED, not an error (no -EINVAL); the result is 0, or the wire errno of the platform's fcntl() */
-/* getaddrinfo is two services: its result list lives in host memory, which a 32-bit guest cannot address. GAI_OPEN
- * resolves once and keeps the result under a ticket; GAI_FETCH copies it into a guest buffer. */
-#define FNVNX_PLAT_SOCK_GAI_OPEN 32u    /* (node or 0, service or 0: guest C strings, const FnvnxWireAddrinfo *hints or 0,
-                                           int32_t *sys_errno or 0) -> ticket > 0, or -FNVNX_WEAI_x (sockwire.h; for
-                                           FNVNX_WEAI_SYSTEM the wire errno is stored to *sys_errno); the host checks only the hints: a flag bit outside
-                                           FNVNX_WIRE_AI_LIST -> -EAI_BADFLAGS, a family outside FNVNX_WIRE_AF_LIST -> -EAI_FAMILY, a non-zero
-                                           socktype outside FNVNX_WIRE_SOCKTYPE_LIST -> -EAI_SOCKTYPE; the rest (node and service both null, a service
-                                           name, AI_CANONNAME / AI_V4MAPPED / AI_ADDRCONFIG / AI_ALL / AI_NUMERIC*, protocol) goes to the platform's
-                                           getaddrinfo() and its answer is the result: a ticket, or -(its EAI code mapped through FNVNX_WIRE_EAI_LIST;
-                                           a code outside the list is -EAI_FAIL); host-generated: an empty result -> -EAI_NONAME, the ticket table out of
-                                           memory -> -EAI_MEMORY. A null errno_out (sys_errno) is allowed */
 /* Declared machine (CLAUDE.md, owner decision 2026-11-11: no network connection). Under the L4 emulator the stage host is that
- * machine: GAI_OPEN with a node that is not a numeric address and not the local host answers -FNVNX_WEAI_NONAME (what
- * Windows answers without a connection: WSAHOST_NOT_FOUND 11001); connect/sendto to a non-local address answer
- * -ENETUNREACH (WSAENETUNREACH 10051). On the console the answer is whatever the bsd service gives. */
-#define FNVNX_PLAT_SOCK_GAI_FETCH 33u   /* (ticket, buf or 0, cap) -> total bytes of the result: a sequence of
-                                           FnvnxWireAddrinfo records each followed by its canonical name bytes, padded
-                                           to 8. cap < total: nothing is written, the ticket stays. cap >= total: the
-                                           records are written and the ticket is freed (buf 0: nothing
-                                           is written and the ticket is freed: how a result that cannot be taken
-                                           is released). -FNVNX_WE_INVAL for a ticket
-                                           that is not open. */
+ * machine: connect/sendto to a non-local address answer -ENETUNREACH (WSAENETUNREACH 10051). On the console the answer is whatever
+ * the bsd service gives. Name resolution, shutdown and getsockname/getpeername are not services: the platform never calls them
+ * (rule "used = declared", gate hostapi); the numbers 27, 28, 29, 32 and 33 stay unassigned and answer FNVNX_EXT_NO_SERVICE. */
 /* TZ_AT (utc_seconds, FnvnxTzAt *) -> 0 | -errno (wire number, int64 as u64). The zone of the console's time service
  * (timeToCalendarTimeWithMyRule) at one instant; platform/os/os_tzrule.inc derives the zone's rule (os_tz_rule) from it.
  * Out null -> -EFAULT; utc_seconds outside the host time service's range -> -EOVERFLOW (the host answers it for any refusal of the
@@ -491,8 +428,6 @@ typedef struct FnvnxTzAt {
     uint32_t dst;       /* 1: daylight time at that instant */
     char abbr[8];       /* the zone's abbreviation then, NUL-terminated */
 } FnvnxTzAt;
-#define FNVNX_PLAT_SOCK_FIRST 16u
-#define FNVNX_PLAT_SOCK_LAST 33u
 
 /* Thread placement (docs/PERF.md 6.3): roles for thread_create's cpu argument; the host's table
  * (toolchain/host/placement.h) gives each an ideal core, an affinity mask and a priority. */
@@ -548,11 +483,11 @@ typedef struct FnvnxMemInfo {
 } FnvnxMemInfo;
 
 #if defined(__cplusplus)
-static_assert(sizeof(FnvnxHostApi) == 0x1C0, "FnvnxHostApi layout");
+static_assert(sizeof(FnvnxHostApi) == 0x1A0, "FnvnxHostApi layout");
 static_assert(sizeof(FnvnxStat) == 40 && sizeof(FnvnxMemInfo) == 16 && sizeof(FnvnxInputEvent) == 24,
                "shared struct layout");
 #else
-_Static_assert(sizeof(FnvnxHostApi) == 0x1C0, "FnvnxHostApi layout");
+_Static_assert(sizeof(FnvnxHostApi) == 0x1A0, "FnvnxHostApi layout");
 _Static_assert(sizeof(FnvnxStat) == 40 && sizeof(FnvnxMemInfo) == 16 && sizeof(FnvnxInputEvent) == 24,
                "shared struct layout");
 #endif
@@ -563,7 +498,7 @@ _Static_assert(sizeof(FnvnxStat) == 40 && sizeof(FnvnxMemInfo) == 16 && sizeof(F
  *   +0 branch to the entry, +4 offset of MOD0 from the module base, +8 FNVNX_GUEST_MAGIC, +12 ABI version. */
 
 #if defined(__ILP32__) || defined(FNVNX_HOST_CALLS)
-/* (FNVNX_HOST_CALLS: the same helpers in an LP64 test process, tests/s4/sockwire.)
+/* (FNVNX_HOST_CALLS: the same helpers in an LP64 test process.)
  * Guest-side helpers: call an LP64 host function through its slot. */
 #define FNVNX_ADDR(p) ((uint64_t)(uintptr_t)(p))
 typedef uint64_t (*fnvnx_hfn0)(void);
