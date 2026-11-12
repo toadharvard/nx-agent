@@ -42,6 +42,18 @@ def outputs():
     return unit_names() + [PRELUDE_H, EMITTED_TSV, BAD_TSV, UNDEF_TSV]
 
 
+def listing(root, rel=''):
+    """sorted relative names of all files below root/rel"""
+    r = []
+    for n in sorted(os.listdir(os.path.join(root, rel))):
+        p = os.path.join(rel, n)
+        if os.path.isdir(os.path.join(root, p)):
+            r += listing(root, p)
+        else:
+            r.append(p)
+    return sorted(r)
+
+
 def load_shapes(root):
     keys = set()
     for d in sorted(os.listdir(root)):
@@ -153,8 +165,7 @@ def main():
         f.write('# shape\tclass\treason\n' + ''.join('%s\t%s\t%s\n' % r for r in sorted(bad)))
     with open(os.path.join(out, UNDEF_TSV), 'w') as f:
         f.write('# mnemonic\tflag (the form declares it undefined, the hand handler assigns it)\n' + ''.join('%s\t%s\n' % (m, fl) for m in sorted(undef) for fl in sorted(undef[m])))
-    written = sorted(os.path.relpath(os.path.join(d, n), out) for d, _, fs in os.walk(out) for n in fs)
-    assert written == sorted(outputs()), 'files written differ from outputs()'
+    assert listing(out) == sorted(outputs()), 'files written differ from outputs()'
     print('shapes %d emitted %d (functions %d) bad %d' % (len(keys), len({e[0] for e in emitted}), len(emitted), len(bad)))
 
 
