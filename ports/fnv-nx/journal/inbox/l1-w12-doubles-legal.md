@@ -1,0 +1,5 @@
+# L1 w12: doubles and legal gates
+
+- `doubles` (verify/gate_doubles.py, admit class `test`): done, committed 5217b6c. Global counts at the head: 0 test roots, 0 product roots, 0 test symbols, 0 doubles (no test or product root is admitted on the trunk yet; universe 0 is green).
+- `legal` (verify/gate_legal.py): done, strict rule, RED on the head: 73 pairs in 20 files, 2270 records with a guest VA, 616 tracked files, 178177 decomp names from the pinned pristine objects, 8 image ranges. All pairs are in ports/fnv-nx (docs, JOURNAL.md, PERF_budget.json). 16 distinct names meet a VA; most are public names that the pristine objects also define (C library, operator new/delete, std, `main`, zlib), a few are decomp-derived (Ghidra-style `FUN_` names). Open rule question for L1: which names count as public (not decomp-derived) must be a rule over a pinned public source, not a list. Candidate: exports of the declared system32 images plus the symbols of the pinned toolchain libraries; MSVC-mangled std names need the undecorator.
+- setup_verdict_env.sh: hashed pip install reads requirements from /dev/stdin.
