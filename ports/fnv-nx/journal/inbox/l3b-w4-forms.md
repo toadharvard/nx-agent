@@ -34,7 +34,7 @@ the 2 FAILED(dsl) are those that also carry 0x67 (see above).
 bound: forms_flow `bound`: fault code 4 (#BR) = slt(index, lower) | slt(upper, index), state unchanged; f_dsl.py maps code 4 to FNVL_BOUNDS as a fault (trap=False,
 same as the hand handler f_sys.h_bound). 75 int shapes got a Form; prover: all 75 model-gap, "Opcode Unimplemented in x86isa!" (the Sail model does not
 implement BOUND). So bound stays uncertified by the model: needs another reference (SDM table, a host test) or a model extension: L3b decision.
-Int shapes with a Form: 19,416 -> 19,494 (+78: bound 75, pop r16 3). Still no builder (int, 7,0xx incl.): arpl 157, sal 43, les 42, lds 23, daa/das/aas/aaa/aad/aam, salc,
+Int shapes with a Form: 19,416 -> 19,494 (+78: bound 75, pop r16 3). Still no builder (int family, counted at the time of the run): arpl 157, sal 43, les 42, lds 23, daa/das/aas/aaa/aad/aam, salc,
 popaw/pushaw, retf, lcall/ljmp, mov sreg, enter (symbolic branch).
 
 ## 4. :NON-WRITABLE-SEGMENT (model clause, not patched)
@@ -52,9 +52,9 @@ Clean /home/user/l3work, toolchain built from tools/sail-mirror @33c9badb (verif
  * First attempt FAILED after the toolchain: prove.py -> enc_table.py imports `keystone`; the mirror path installs neither capstone nor keystone. Fixed in
    farm_shapeprove.sh (pip install capstone==5.0.9 keystone-engine==0.9.2, versions as measured, from PyPI, not hash-pinned; mirror them if the farm has no PyPI).
  * Second run (toolchain warm): shard 1/400 of the 19,494-shape queue, 40 shapes: proved 39, model-gap 1 (2e006900: :NON-WRITABLE-SEGMENT), wall 446 s
-   including ~17 s of queue computation = 11.1 s/encoding (the handoff estimate 11.5 s held). The 7,0xx-shape-free queue is the int family only.
- * Targeted run (same prover, 3 processes in parallel on the 4 cores, 373 shapes, 0x67 + bound + push/pop16): 93+91+92 proved ... totals proved 276, FAILED(dsl) 11,
-   model-gap 86; ~ 25 min wall for 373 shapes with 3 processes = ~12 s/encoding/process.
+   including ~17 s of queue computation = 11.1 s/encoding (the handoff estimate 11.5 s held).
+ * Targeted run (same prover, 3 processes in parallel on the 4 cores, 373 shapes, 0x67 + bound + push/pop16): shards proved 93+91+92 = 276, FAILED(dsl) 11,
+   model-gap 86; wall time of that run was not timed separately (the three shards finished within the monitor window, ~12 s/encoding/process by the 40-shape rate).
  * Whole queue estimate: 19,494 x 11.1 s = 60 CPU-hours (before re-runs of timeouts). Memory: each process runs under ulimit -v 6,000,000 KB; I did not measure
    the RSS peak, so shards-in-parallel within VMEM_KB = 6 GB per process: 15 GB / 6 GB = 2 by address-space budget, 3 ran side by side here without trouble
    (4 cores bound it at 4). That is a bound by arithmetic, not by a measurement of peak RSS.
