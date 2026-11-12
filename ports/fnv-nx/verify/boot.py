@@ -9,7 +9,7 @@ plan = bootlayout (same rules as its CLI), watch points = bootmiles.resolve(tabl
 base). OUT.json ("fnvnx-boot/1", sorted keys, indent 1, no wall time) holds the plan, the run record, the milestone state
 and log, and the Icount report; the console text is OUT.console.txt. The tool only reports: which milestone must be
 reached is the caller's verdict. Exit 0: run reason "exit" with code 0, or "limit"; 2: fault / deadlock /
-ext-module-missing / scenario-error (a --text-entry text longer than the call's max_len) / nonzero exit / reach-violation (guest exit code 0x52000000|fact_id, reported with its fact_id); 1: usage or input error (message on stderr).
+ext-module-missing / scenario-error (a --scenario file that is not valid, or a --text-entry text longer than the call's max_len) / nonzero exit / reach-violation (guest exit code 0x52000000|fact_id, reported with its fact_id); 1: usage or input error (message on stderr).
 
 Watch log: --watch-log SYMS (text file, one ELF symbol per line, # starts a comment) logs every execution of each named function's
 first instruction: OUT.json "watch_log" = [{"seq", "tid", "sym", "pc" (guest-relative), "sp"}], seq from 0 in machine order, no
@@ -33,6 +33,7 @@ import os
 import sys
 import time
 
+import bootinput
 import bootgpu
 import bootlayout
 import bootmachine
@@ -109,9 +110,25 @@ def run(a):
     watch = bootmiles.resolve(table, manifest, syms, base)
     host = _host_lines(watch["host"])
     wl = _watch_names(a.watch_log, syms) if a.watch_log else None
+    sc, text_entries = None, a.text_entry
+    if a.scenario:
+        try:
+            with open(a.scenario, encoding="utf-8") as f:
+                sc = bootinput.Scenario(f.read())
+            if sc.text_entries is not None:
+                if a.text_entry:
+                    raise bootinput.ScenarioError("text_entries in the scenario together with --text-entry")
+                text_entries = sc.text_entries
+        except bootinput.ScenarioError as e:   # a range or format error ends the run as scenario-error, nothing is clamped
+            doc = {"elf_sha256": hashlib.sha256(raw).hexdigest(), "plan": plan, "run": {"reason": "scenario-error", "scenario": str(e)},
+                   "inputs": {"scenario_error": str(e)}}
+            with open(a.out, "w") as f:
+                f.write(json.dumps(doc, sort_keys=True, indent=1) + "\n")
+            print("boot: reason=scenario-error %s" % e)
+            return 2
     kw = {"hc_slice": a.hc_slice} if a.hc_slice else {}
-    m = bootmachine.Machine(raw, plan, boothost.Services(a.root, a.game), limit_instructions=a.limit_instructions, profile=a.profile,
-                            text_entries=a.text_entry, n_stacks=a.threads, **kw)
+    m = bootmachine.Machine(raw, plan, boothost.Services(a.root, a.game, sc, watch_reads=wl is not None), limit_instructions=a.limit_instructions,
+                            profile=a.profile, text_entries=text_entries, n_stacks=a.threads, **kw)
     ic = m.attach_icount(a.icount_spec if a.icount_spec else {}, base)
     prog, log = bootmiles.Progress(table), []
 
@@ -171,7 +188,12 @@ def run(a):
     rep = ic.report()
     doc = {"elf_sha256": hashlib.sha256(raw).hexdigest(), "plan": plan, "run": r,
            "console_sha256": hashlib.sha256(console.encode()).hexdigest(), "milestones": prog.state(),
-           "milestone_log": log, "inputs": {"text_entry": list(a.text_entry)}, "manifest_id": manifest.table_id, "last_reached": prog.last_reached(), "icount": rep}
+           "milestone_log": log, "inputs": {"text_entry": list(text_entries)}, "manifest_id": manifest.table_id, "last_reached": prog.last_reached(), "icount": rep}
+    if sc:
+        doc["inputs"]["scenario"] = {"sha256": sc.sha256, "content": sc.text}
+    diff = sc.check_expect(r["events"]) if sc else []
+    if sc:
+        doc["inputs"]["expect_events"] = {"ok": not diff, "diff": diff}
     if wl is not None:
         doc["watch_log"] = wlog
     if gpu:
@@ -184,6 +206,9 @@ def run(a):
     print("boot: reason=%s last=%s instr=%d main=%d threads=%d vns=%d wall=%.1f" % (
         r["reason"], prog.last_reached() or "none", tot["all"]["total"], tot.get("1", {"total": 0})["total"],
         r["threads"], r["virtual_ns"], time.time() - t0))
+    if diff:
+        print("boot: expect_events differ: %s" % "; ".join(diff))
+        return 2
     return 0 if r["reason"] == "limit" or (r["reason"] == "exit" and r["exit_code"] == 0) else 2
 
 
@@ -206,6 +231,7 @@ def main(argv=None):
     sp.add_argument("--profile", choices=("handheld", "docked"), default="handheld",
                     help="what FNVNX_PLAT_DISPLAY_DOCKED answers: docked 1, handheld 0 (default handheld)")
     sp.add_argument("--watch-log", metavar="SYMS", help="text file of ELF function names; OUT.json gets watch_log, every hit of each")
+    sp.add_argument("--scenario", metavar="FILE", help="device states over virtual time, schema fnvnx-scenario/1 (bootinput.py, rule R-INPUT)")
     sp.add_argument("--text-entry", action="append", default=[], metavar="TEXT",
                     help="the answer of one TEXT_ENTRY call (the system keyboard), repeatable, consumed in order; none left: the call "
                          "is cancelled (0); a text longer than the call's max_len ends the run as scenario-error")

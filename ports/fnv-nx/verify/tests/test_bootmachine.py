@@ -6,6 +6,7 @@ freestanding entry (the real runtime.c needs devkitA64's newlib: sys/iosupport.h
 does. Scratch: tempfile.mkdtemp, removed at exit."""
 import atexit
 import functools
+import json
 import os
 import re
 import shutil
@@ -21,6 +22,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))
 GUEST_ROOT = "ports/fnv-nx/tests/bootguest"   # the recipe root of the guest images (class test); its files are the fixtures
 GUEST_DIR = os.path.join(REPO, GUEST_ROOT)
 sys.path.insert(0, VERIFY)
+import bootinput  # noqa: E402
 import bootlayout  # noqa: E402
 import boothost  # noqa: E402
 import bootmachine  # noqa: E402
@@ -119,7 +121,7 @@ def main():
     root = os.path.join(TMP, "sd")
     os.makedirs(root)
     open(os.path.join(root, "data.bin"), "wb").write(b"01ABCDEFGH23")
-    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, *range(30, 42), 44, 45, 46, 47, 48, *range(49, 58), 58, 59)}   # MODE 6 (boot CLI guest) is built by test_boot.py
+    built = {m: build(m) for m in (0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, *range(30, 42), 44, 45, 46, 47, 48, *range(49, 58), 58, 59, 90, 91)}   # MODE 6 (boot CLI guest) is built by test_boot.py
     elf0, path0 = built[0]
     plan0 = make_plan(elf0)
     base = plan0["image"]["base"]
@@ -614,6 +616,149 @@ def main():
          r47["reason"] == "exit" and not bad and (1 << 63) - 1 <= r47["virtual_ns"] <= (1 << 63) - 1 + 10**9, (bad, r47))
     case("new modes: two identical runs give identical run() dicts", r44 == run(built[44][0], root)[0]
          and r45 == run(built[45][0], root)[0] and r46 == run(built[46][0], root)[0] and r40 == run(built[40][0], root)[0], "")
+
+    # R-INPUT (journal/inbox/l4-verify-011.md): the declared device states, read as host_v3.inc does (expected values derived by hand from it)
+    ms = lambda n: n * 1_000_000   # noqa: E731
+    S1 = {"schema": "fnvnx-scenario/1", "states": [
+        {"t_ns": ms(100), "dev": "pad", "index": 0, "connected": 1, "buttons": 16, "lx": -5, "ly": 6, "rx": 7, "ry": -8},
+        {"t_ns": ms(100), "dev": "pad", "index": 3, "connected": 1, "buttons": 0x8000000000000001},
+        {"t_ns": ms(100), "dev": "kbd", "keys": [4, 225]},
+        {"t_ns": ms(200), "dev": "kbd", "keys": [4]},
+        {"t_ns": ms(300), "dev": "kbd", "keys": [30]},
+        {"t_ns": ms(310), "dev": "kbd", "keys": []},
+        {"t_ns": ms(400), "dev": "mouse", "connected": 1, "buttons": 1, "dx": 3, "dy": -2, "wheel": 1},
+        {"t_ns": ms(500), "dev": "mouse", "connected": 1, "buttons": 0},
+        {"t_ns": ms(600), "dev": "touch", "points": [{"id": 7, "x": 640, "y": 360}, {"id": 9, "x": -1, "y": 2}]},
+        {"t_ns": ms(700), "dev": "touch", "points": []},
+        {"t_ns": ms(800), "dev": "kbd", "keys": [4, 5, 6]},
+        {"t_ns": ms(900), "dev": "docked", "value": 1},
+        {"t_ns": ms(1000), "dev": "docked", "value": 0}]}
+    sc1 = bootinput.Scenario(json.dumps(S1))
+    r90, l90 = run(built[90][0], root, svc=boothost.Services(root, None, sc1))[:2]
+    k = kv(l90)
+    Z = {"c": "0", "p": "0", "l": "0", "h": "0", "x": "0", "y": "0", "X": "0", "Y": "0"}
+    A = {f: "aaaaaaaa" for f in Z}
+    pad = lambda n, rc, f: {n: rc, **{"%s.%s" % (n, a): v for a, v in f.items()}}   # noqa: E731
+    END0 = ["5.0.0.0.0"]
+
+    def evl(n, evs, tail="aa"):
+        d = {n: str(len(evs)), n + ".t": tail}
+        d.update({"%s.%x" % (n, i): e for i, e in enumerate(evs)})
+        return d
+    want = {}
+    want.update(pad("a-pad0", "0", Z)); want.update(evl("a-e60", END0)); want["a-d60"] = "0"
+    want.update(pad("b-pad0", "1", {"c": "1", "p": "0", "l": "10", "h": "0", "x": "fffffffb", "y": "6", "X": "7", "Y": "fffffff8"}))
+    want.update(pad("b-pad1", "0", Z)); want.update(pad("b-pad3", "1", dict(Z, c="1", l="1", h="80000000"))); want.update(pad("b-pad4", "0", A))
+    want.update(evl("b-e150", ["1.4.1.0.0", "1.e1.1.0.0"] + END0)); want.update(evl("b-e151", END0))
+    want.update(evl("c-e250", ["1.e1.0.0.0"] + END0))
+    want.update(evl("d-e290", END0)); want.update(evl("d-e350", ["1.4.0.0.0"] + END0))
+    want.update(evl("e-e450", ["2.0.3.fffffffe.1", "3.0.1.0.0"] + END0)); want.update(evl("e-e451", ["2.0.3.fffffffe.1"] + END0))
+    want.update(evl("f-e550", ["3.0.0.0.0"] + END0))
+    T2 = ["4.7.280.168.0", "4.9.ffffffff.2.0", "5.2.0.0.0"]
+    want.update(evl("g-e650", T2)); want.update(evl("g-e651", T2)); want.update(evl("h-e750", END0))
+    want["j-d850"] = "0"; want.update(evl("j-e850", ["1.4.1.0.0", "1.5.1.0.0"])); want.update(evl("j-e851", END0)); want.update(evl("j-e852", []))
+    want["k-d950"] = "1"; want["k-d1050"] = "0"
+    bad = {n: (k.get(n), v) for n, v in want.items() if k.get(n) != v}
+    case("R-INPUT before the first state: pad_read 0 and zeros, input_poll only TOUCH_END(0), docked = the profile (0) (%d values)" % len(want),
+         r90["reason"] == "exit" and not [n for n in bad if n.startswith("a-")], {n: x for n, x in bad.items() if n.startswith("a-")})
+    case("R-INPUT pad_read: a connected pad's buttons (u64) and sticks (s32); a pad never declared is zeros; index 4 writes nothing and returns 0",
+         not [n for n in bad if n.startswith("b-pad")], {n: x for n, x in bad.items() if n.startswith("b-pad")})
+    case("R-INPUT key edges: down for each new key in usage order, up when released; a second poll with the same state gives none",
+         not [n for n in bad if n[:2] in ("b-", "c-") and "pad" not in n], {n: x for n, x in bad.items() if n[:2] in ("b-", "c-")})
+    case("R-INPUT a short stroke between two polls is not seen (key 30 down at 300 ms, up at 310 ms, polls at 290 and 350 ms)",
+         not [n for n in bad if n.startswith("d-")] and "1.1e.1.0.0" not in str(k), {n: x for n, x in bad.items() if n.startswith("d-")})
+    case("R-INPUT mouse: the sample's delta is delivered by every poll that reads it (twice), the button edge once; zero delta gives no move",
+         not [n for n in bad if n[:2] in ("e-", "f-")], {n: x for n, x in bad.items() if n[:2] in ("e-", "f-")})
+    case("R-INPUT touch: every current point and TOUCH_END(count) on every poll, also with no point",
+         not [n for n in bad if n[:2] in ("g-", "h-")], {n: x for n, x in bad.items() if n[:2] in ("g-", "h-")})
+    case("R-INPUT cap: events beyond cap are lost, the key state still advances (KEY 6 never comes), cap 0 writes nothing",
+         not [n for n in bad if n.startswith("j-e")], {n: x for n, x in bad.items() if n.startswith("j-e")})
+    case("R-INPUT DISPLAY_DOCKED follows state(docked, T): 0 before, 1 after 900 ms, 0 after 1000 ms",
+         not [n for n in bad if n[:2] in ("j-", "k-") and "-d" in n], {n: x for n, x in bad.items() if "-d" in n})
+    case("R-INPUT run: all %d values of the scenario guest as derived from host_v3.inc" % len(want), r90["reason"] == "exit" and not bad, bad)
+    r90b = run(built[90][0], root, svc=boothost.Services(root, None, sc1))[0]
+    case("R-INPUT run: two identical runs give identical run() dicts", r90 == r90b, "")
+    rp = run(built[90][0], root, profile="docked", svc=boothost.Services(root, None, sc1))[1]
+    case("R-INPUT docked default is the profile until the scenario declares it (--profile docked: 1 before, 0 after 1000 ms)",
+         kv(rp).get("a-d60") == "1" and kv(rp).get("j-d850") == "1" and kv(rp).get("k-d1050") == "0", kv(rp))
+    rn = run(built[90][0], root)[1]
+    kn = kv(rn)
+    case("R-INPUT no scenario: nothing attached on every read (the declared machine's default), as before",
+         kn.get("b-pad0") == "0" and kn.get("e-e450") == "1" and kn.get("g-e650") == "1" and kn.get("j-e850") == "1" and kn.get("k-d950") == "0", kn)
+    # watch reads
+    sw = boothost.Services(root, None, sc1, watch_reads=True)
+    rw = run(built[90][0], root, svc=sw)[0]
+    rd = [e for e in rw["events"] if e["kind"] == "input-read"]
+    case("R-INPUT input-read events only under the watch switch: one per device read (pad 1 per pad_read, kbd/mouse/touch per poll, docked)",
+         not [e for e in r90["events"] if e["kind"] == "input-read"] and len(rd) > 0
+         and {e["dev"] for e in rd} == {"pad", "kbd", "mouse", "touch", "docked"}
+         and sum(e["dev"] == "pad" for e in rd) == 4 and sum(e["dev"] == "kbd" for e in rd) == 15 and sum(e["dev"] == "docked" for e in rd) == 4
+         and all(e["t_ns"] > 0 and e["tid"] == 1 for e in rd), rd[:3])
+    # pad_vibrate
+    r91, l91 = run(built[91][0], root)[:2]
+    k = kv(l91)
+    vib = [e for e in r91["events"] if e["kind"] == "pad-vibrate"]
+    case("R-INPUT pad_vibrate returns 0 for every index; index > 3 (also 2^32) records nothing; float bits recorded as the low 32 bits given",
+         r91["reason"] == "exit" and all(k.get(n) == "0" for n in ("v0", "v2", "v4", "vbig", "v3"))
+         and [(e["index"], e["lo"], e["hi"]) for e in vib] == [(0, "0x3f000000", "0x0"), (2, "0x3f800000", "0x3e800000"), (3, "0x80000000", "0x7fc00000")],
+         (k, vib))
+    case("R-INPUT pad_vibrate events carry tid and the virtual time of the call (100 ms, 200 ms, then after 300 ms)",
+         len(vib) == 3 and all(e["tid"] == 1 for e in vib) and ms(100) <= vib[0]["t_ns"] < ms(101) and ms(200) <= vib[1]["t_ns"] < ms(201)
+         and ms(300) <= vib[2]["t_ns"] < ms(301), vib)
+    ex_ok = bootinput.Scenario(json.dumps({"schema": "fnvnx-scenario/1", "expect_events": [
+        {"kind": "pad-vibrate", "index": 0, "lo": "0x3f000000", "hi": "0x0"}, {"kind": "pad-vibrate", "index": 2},
+        {"kind": "pad-vibrate", "index": 3, "lo": "0x80000000"}]}))
+    case("R-INPUT expect_events: compared in order, with the keys given; equal -> no difference", ex_ok.check_expect(r91["events"]) == [], ex_ok.check_expect(r91["events"]))
+    ex_bad = bootinput.Scenario(json.dumps({"schema": "fnvnx-scenario/1", "expect_events": [
+        {"kind": "pad-vibrate", "index": 2}, {"kind": "pad-vibrate", "index": 0}]}))
+    ex_short = bootinput.Scenario(json.dumps({"schema": "fnvnx-scenario/1", "expect_events": [{"kind": "pad-vibrate", "index": 0}]}))
+    ex_val = bootinput.Scenario(json.dumps({"schema": "fnvnx-scenario/1", "expect_events": [
+        {"kind": "pad-vibrate", "index": 0, "lo": "0x3f800000"}, {"kind": "pad-vibrate"}, {"kind": "pad-vibrate"}]}))
+    case("R-INPUT expect_events: another order, a different count or a different value is a difference",
+         len(ex_bad.check_expect(r91["events"])) == 3 and ex_short.check_expect(r91["events"]) == ["expected 1 pad-vibrate events, recorded 3"]
+         and ex_val.check_expect(r91["events"]) == ["event 0: lo expected '0x3f800000', recorded '0x3f000000'"],
+         (ex_bad.check_expect(r91["events"]), ex_short.check_expect(r91["events"]), ex_val.check_expect(r91["events"])))
+    # state(dev, T): stable sort, last state with t_ns <= T
+    sc = bootinput.Scenario(json.dumps({"schema": "fnvnx-scenario/1", "states": [
+        {"t_ns": 20, "dev": "docked", "value": 0}, {"t_ns": 10, "dev": "docked", "value": 1}, {"t_ns": 10, "dev": "docked", "value": 0},
+        {"t_ns": 10, "dev": "docked", "value": 1}]}))
+    st = lambda t: sc.state("docked", 0, t, {"value": 7})["value"]   # noqa: E731
+    case("R-INPUT state(dev, T): the default before the first state, equal t_ns keep the file order (last wins), the state holds until the next",
+         [st(0), st(9), st(10), st(19), st(20), st(10**12)] == [7, 7, 1, 1, 0, 0], [st(t) for t in (0, 9, 10, 19, 20)])
+
+    def err(doc):
+        try:
+            bootinput.Scenario(doc if isinstance(doc, str) else json.dumps(doc))
+        except bootinput.ScenarioError as e:
+            return str(e)
+        return None
+
+    def one(dev, **kw):
+        return {"schema": "fnvnx-scenario/1", "states": [dict(t_ns=0, dev=dev, **kw)]}
+    I = "fnvnx-scenario/1"   # noqa: E741
+    ranges = [
+        ("not JSON", "{", "not JSON"), ("schema", {"schema": "x"}, "schema must be"), ("top-level key", {"schema": I, "foo": 1}, "unknown key 'foo'"),
+        ("state key", one("kbd", keyz=[]), "unknown key 'keyz'"), ("dev", one("gamepad"), "dev must be"),
+        ("missing index", one("pad"), "missing key 'index'"), ("pad index 4", one("pad", index=4), "outside 0..3"),
+        ("pad connected 2", one("pad", index=0, connected=2), "outside 0..1"),
+        ("pad buttons 2^64", one("pad", index=0, buttons=1 << 64), "outside 0..18446744073709551615"),
+        ("stick 2^31", one("pad", index=0, lx=1 << 31), "outside -2147483648..2147483647"),
+        ("stick -2^31-1", one("pad", index=0, ry=-(1 << 31) - 1), "outside"), ("stick a bool", one("pad", index=0, lx=True), "must be an integer"),
+        ("stick a float", one("pad", index=0, lx=1.5), "must be an integer"), ("key 3", one("kbd", keys=[3]), "outside 4..231"),
+        ("key 232", one("kbd", keys=[232]), "outside 4..231"), ("mouse button 5", one("mouse", buttons=0x20), "outside 0..31"),
+        ("mouse dx", one("mouse", dx=1 << 31), "outside"), ("17 points", one("touch", points=[{"id": i, "x": 0, "y": 0} for i in range(17)]), "at most 16"),
+        ("point x", one("touch", points=[{"id": 0, "x": 1 << 31, "y": 0}]), "outside"), ("point key", one("touch", points=[{"id": 0, "x": 0, "y": 0, "z": 1}]), "unknown key 'z'"),
+        ("point id", one("touch", points=[{"id": -1, "x": 0, "y": 0}]), "outside 0..4294967295"), ("docked 2", one("docked", value=2), "outside 0..1"),
+        ("t_ns negative", {"schema": I, "states": [{"t_ns": -1, "dev": "docked", "value": 0}]}, "outside"),
+        ("t_ns missing", {"schema": I, "states": [{"dev": "docked", "value": 0}]}, "missing key 't_ns'"),
+        ("expect kind", {"schema": I, "expect_events": [{"kind": "other"}]}, "kind 'pad-vibrate'"),
+        ("expect key", {"schema": I, "expect_events": [{"kind": "pad-vibrate", "x": 1}]}, "unknown key 'x'"),
+        ("text_entries", {"schema": I, "text_entries": [1]}, "list of strings")]
+    badr = [(n, err(d)) for n, d, why in ranges if not (err(d) or "").count(why)]
+    case("R-INPUT scenario errors: %d malformed or out-of-range inputs are each rejected with its reason, none is clamped" % len(ranges), not badr, badr)
+    good = err(one("pad", index=3, buttons=(1 << 64) - 1, lx=-(1 << 31), ry=(1 << 31) - 1)) or err(one("kbd", keys=[4, 231])) or \
+        err(one("mouse", buttons=0x1F, dx=-(1 << 31))) or err(one("touch", points=[{"id": i, "x": -(1 << 31), "y": (1 << 31) - 1} for i in range(16)]))
+    case("R-INPUT the range limits themselves are accepted", good is None, good)
     print("%d cases, %.1f s" % (N[0], time.time() - t0))
     return 1 if FAILED else 0
 

@@ -10,8 +10,7 @@ Host slots whose effect is not modelled (the observable contract is kept; see HO
  thread_free, thread_set_priority / thread_set_cpu (recorded in .placement only, no placement effect),
  wall_time_us (fixed epoch + virtual ns), random64 (deterministic splitmix64, seed 0),
  memory_info (4 GiB / 3 GiB), cpu_count (3), audio_open / audio_submit / audio_close (frames counted, samples
- dropped, submit sleeps the period in virtual time), pad_read (never connected, zeros), pad_vibrate, input_poll
- (no events), module 11 CPU_BOOST (recorded in .boosts, returns 0: no platform config), MESSAGE (caption and text recorded in
+ dropped, submit sleeps the period in virtual time), pad_read / pad_vibrate / input_poll (the declared device states of a scenario, bootinput.py; none: nothing attached), module 11 CPU_BOOST (recorded in .boosts, returns 0: no platform config), MESSAGE (caption and text recorded in
  .messages, returns 0: the dialog is closed at once). The rest of module 11 (thread_activity, vm_*) is the machine's.
 """
 import os
@@ -21,6 +20,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import bootinput  # noqa: E402
 import bootmachine  # noqa: E402
 import bootpath  # noqa: E402
 
@@ -35,8 +35,9 @@ def neg(e):
 
 
 class Services:
-    def __init__(self, root, game=None):
+    def __init__(self, root, game=None, scenario=None, watch_reads=False):
         self.m = None
+        self.input = bootinput.InputModel(scenario, watch_reads)   # R-INPUT: the declared device states, read as host_v3.inc does
         self.dp = bootpath.BootPath(root, game)
         self.debug, self.fds = [], {}
         self.audio_period, self.audio_frames, self.boosts, self.placement, self.messages = 0, 0, [], {}, []
@@ -301,16 +302,16 @@ class Services:
         return 0
 
     def h_pad_read(self, i, out, *_):
-        """index 0..3: not connected (0, zeros written); index > 3: 0, nothing written"""
-        if i <= 3:
-            self.m.uc.mem_write(out, bytes(32))
-        return 0
+        """index 0..3: the declared pad state (not connected by default: 0, zeros written); index > 3: 0, nothing written (bootinput)"""
+        return self.input.pad_read(self.m, i, out)
 
-    def h_pad_vibrate(self, *_):
-        return 0
+    def h_pad_vibrate(self, i, lo, hi, *_):
+        """recorded as an event pad-vibrate (index <= 3), returns 0 (bootinput)"""
+        return self.input.pad_vibrate(self.m, i, lo, hi)
 
-    def h_input_poll(self, *_):
-        return 0
+    def h_input_poll(self, out, cap, *_):
+        """host_v3.inc's input_poll over the declared device states (bootinput)"""
+        return self.input.input_poll(self.m, out, cap)
 
     def h_map_fixed(self, addr, size, src, *_):
         return self.m.map_fixed(addr, size, src)
