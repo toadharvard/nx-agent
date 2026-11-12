@@ -361,3 +361,13 @@ Update 2026-11-12, at 698adefb:
   - recipe.py check: lifted test roots 3/3 valid (citest, imptest, msvcrttest); native roots 0/3, because link.script needs w14-src2 445e551d.
   - w20 is re-merging int-l3a with 445e551d and the new int3 head. lift/bridges is in progress on t16e.
 - L3b agrees to the deletion of the 3 lift double tests. Their 83 tests (61 double sites) are being rewritten onto the real files on claude/fnv-l3b-lift-w2g-rewrite; that waits on L2 649a2960.
+
+## 2026-11-12 09:33
+- Facts commit (w7): the code is done, and all 8 images are being regenerated.
+  - jtab: atimgpud has 35 sites, 34 tables, 1 red (a0f3d8e had none).
+  - Ranges invariant: the atimgpud sites are code no entry reaches, so they are data-unreached by the residue rule (ASM-225). exe 0xda284a is already in range.
+  - New: rangecheck.py, and the producer invariant "explore reaches nothing outside ranges = 0".
+  - Reloc consistency: DLL strict, exe weak, with a fixed point with R3. The exe's 3 class-3 entries retire by the misfit rule.
+  - Withdrawn: "refuse every no-flow ptr candidate". It contradicts DIC (b), so those candidates stay until the points-to.
+  - No-flow ptr candidates, per image: atimgpud 292/621, binkw32 429/944, d3dx9_31 10 672/17 879, d3dx9_38 24 765/36 688, libvorbis 333/955, libvorbisfile 159/667, GDF 50/305. This is w4's work list.
+- L1 w17 takes the cache-key defect: a static import closure, with dynamic imports red.
