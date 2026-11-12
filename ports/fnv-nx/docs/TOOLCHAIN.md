@@ -554,7 +554,7 @@ ExitProcess), so the real exe's import directory may name it differently; the no
 ### The game memory manager
 
 * Who sets the heap pointer 0x011f6080: in the MSVC-built pristine objects (S11, `objdump -M intel`) the only store
-  is in `InitHolder` = 0x00aa2020 (`blk_00aa0000_o2.cpp`), which allocates 4 bytes from the MemoryManager at
+  is in `InitHolder` = <va> (`blk_00aa0000_o2.cpp`), which allocates 4 bytes from the MemoryManager at
   0x011f6238 (`FUN_00aa3e40`) and stores the result there. Every other reference reads it (nimemorydefines,
   nimemobject).
 * The chain above it is 0x00aa2020 <- `InitializeGlobal` 0x00866690 (`blk_00860000_od.cpp`) <- the MemoryManager
@@ -658,12 +658,12 @@ the units. Frontier against fresh8's compile logs and S1's census c18 (2,869 cle
   | 105 | constructors reading through null (`FUN_00633000` 46, `FUN_004a4a40` 21, `FUN_004de2f0` 15, ...) |
 
 * **WinMain gets past +0x1c8**: 0x00af3020 is defined now. The next call, at **+0x1d0**, is `FUN_00aa20b0` ->
-  `FUN_00aa3050`. That is a once-only Gamebryo memory initialisation (flag byte, then `InitHolder` 0x00aa2020,
-  `FUN_00aa1920`, 0x00aa7eb0). `InitHolder` allocates the holder (0x00aa3e40, the heap stand-in) and stores it at
+  `FUN_00aa3050`. That is a once-only Gamebryo memory initialisation (flag byte, then `InitHolder` <va>,
+  `FUN_00aa1920`, <va>). `InitHolder` allocates the holder (<va>, the heap stand-in) and stores it at
   0x011f6080. It then asks the source list at 0x011f6118 for its head (`CBaseList::GetHeadPositionI` 0x009fd0f0,
   **untranslated**: `blk_009e0000_o2.cpp`, which still fails in c18 with `conflicting declaration of C function 'void*
   VirtualAlloc(...)'`). The trap returns 0, and the tail call through `(*holder)->vtbl[7]` reads address 0. **That is
-  the first fault: InitHolder [00aa2020]+0x54.** Before it, inside WinMain: 0x00c3c460 (`blk_00c20000_od_ob1_variant`,
+  the first fault: InitHolder [<va>]+0x54.** Before it, inside WinMain: <va> (`blk_00c20000_od_ob1_variant`,
   c18: `fabs` conflicts with a previous declaration) and `StandardLibrarySingletonObject`'s constructor.
 * So 0x011f6080 is also set from WinMain's path, through 0x00aa3050's guard. The static initializers that need it
   earlier (`FUN_00aa1070`) still point to the constructor section 11 describes. S1's census c18 has the constructor's
@@ -897,7 +897,7 @@ InitHolder.
 The faults it runs past, and their causes:
 
 * **Allocator, one-slot vtable (S1).**
-  - `InitHolder` 0x00aa2020 makes the tail call through slot 7.
+  - `InitHolder` <va> makes the tail call through slot 7.
   - NiMalloc 0x00aa1070, the aligned allocations 0x00aa10b0 and 0x00aa1130, and `NiMemObject::operator new`
     0x00aa13e0 all call through the same allocator (`use-malloc`). Their frees return 0.
 * **The constructor's stand-in member `MemoryManagerAA3880::Allocate`** (f13 only) has no address, so it is a

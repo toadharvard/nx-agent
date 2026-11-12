@@ -343,6 +343,9 @@ def main():
     ii = open(unitstage.result_file(STORE, a["pp_key"], "unit.ii"), "rb").read()
     obj = syms(a["object"], "a") and open(BASE + "/obj-a/unit.o", "rb").read()
     check("unit.ii and unit.o hold no host path", all(x.encode() not in blob for blob in (ii, obj) for x in (WORK, BASE, "/root/")) and b'"/src/u/a.cpp"' in ii)
+    du = open(unitstage.result_file(STORE, a["du_key"], "unit.du"), "rb").read()
+    check("macro-use fact: a stage of its own (unit.du from -dU); the CC input unit.ii is the plain preprocessed text (no #define/#undef line)",
+          a["du_key"] != a["pp_key"] and not any(l.startswith((b"#define", b"#undef")) for l in ii.splitlines()) and b"#define" in du)
     shutil.rmtree(WORK, ignore_errors=True)
     print("%d failed" % len(FAILED))
     return 1 if FAILED else 0
