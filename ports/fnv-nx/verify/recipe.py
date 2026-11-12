@@ -25,6 +25,7 @@ import concurrent.futures
 import hashlib
 import json
 import os
+import pathlib
 import posixpath
 import re
 import shutil
@@ -121,21 +122,33 @@ _ENV_OK = set()   # sha256 of the env.json files this process already found matc
 
 def pinned_modules(repo):
     """The python modules pinned in repo's env.json (python.modules), each as (distribution, version, installed_files_sha256, [top-level import
-    names]): the digest is envcheck.wheel_digest (the content of the installed files read from the disk, not the RECORD's claim). Every pinned
-    module is mounted in the python runtime of the generated stages and is named, with its digest, in their key (Job.generate)."""
+    names], [absolute paths to mount]): the digest is envcheck.wheel_digest and the paths are envcheck.record_tops, both from ONE set, the files the
+    wheel's RECORD lists (envcheck.record_files: the package, its sibling *.libs, top-level .so/.pth files, the dist-info), read from the disk. A module
+    whose installed files are not exactly its RECORD (a listed file missing or different, an unlisted file under its paths, no RECORD) blocks the
+    environment (EnvBlocked). Every pinned module is mounted in the python runtime of the generated stages (all of the paths) and is named, with
+    its digest, in their key (Job.generate)."""
     doc = json.load(open(os.path.join(repo, ENV_JSON)))
-    out = []
+    out, bad = [], []
     for m, ver in sorted(doc["python"]["modules"].items()):
+        try:
+            bad += ["env: python module " + x for x in envcheck.record_problems(m)]
+        except envcheck.RecordError as e:
+            bad.append("env: python module %s" % e)
+            continue
         d = envcheck.metadata.distribution(m)
         tops = set()
-        for f in d.files or []:
+        for p in envcheck.record_files(m):
+            f = pathlib.PurePosixPath(p)
             top = f.parts[0] if f.parts else ""
-            if top in ("..", "__pycache__") or top.endswith((".dist-info", ".data", ".libs")):
+            if top.endswith((".dist-info", ".data", ".libs")):
                 continue
             n = top.split(".")[0] if len(f.parts) == 1 else top
             if n.isidentifier():
                 tops.add(n)
-        out.append((m, ver, envcheck.wheel_digest(m), sorted(tops)))
+        paths = [os.path.realpath(str(d.locate_file(t))) for t in envcheck.record_tops(m)]
+        out.append((m, ver, envcheck.wheel_digest(m), sorted(tops), paths))
+    if bad:
+        raise EnvBlocked(bad)
     return out
 
 
@@ -1096,9 +1109,10 @@ class Job:
         if not self.rec.get("generated"):
             return
         mods = pinned_modules(self.repo)
-        sites = sorted({n for _, _, _, tops in mods for n in tops})
-        _, py = self.cached_rt("python-" + hashlib.sha256(repr(sites).encode()).hexdigest()[:16], lambda: runtime.build(self.store, sys.executable, sites))
-        self.pymods = ";".join("%s==%s:%s" % (m, v, d) for m, v, d, _ in mods)   # in the key of every generated stage: the interpreter digest (runtime_id) plus the installed files of every pinned module
+        sites = sorted({n for _, _, _, tops, _ in mods for n in tops})
+        paths = sorted({p for _, _, _, _, ps in mods for p in ps})
+        _, py = self.cached_rt("python-" + hashlib.sha256(repr((sites, paths)).encode()).hexdigest()[:16], lambda: runtime.build(self.store, sys.executable, sites, paths))
+        self.pymods = ";".join("%s==%s:%s" % (m, v, d) for m, v, d, _, _ in mods)   # in the key of every generated stage: the interpreter digest (runtime_id) plus the installed files of every pinned module
         xin = [{"at": e["at"], "tree": e["tree"]} for e in self.ext.values()]
         for i, g in enumerate(self.rec["generated"]):
             try:

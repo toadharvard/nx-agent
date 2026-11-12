@@ -195,7 +195,7 @@ def ingest_tree(d, store, third=(), keep=()):
             dirs[:] = [x for x in dirs if any(under(k, os.path.join(root, x)) or under(os.path.join(root, x), k) for k in keep)]
     return cas.ingest(d, store, ex)
 
-def build(store, python, sites):
+def build(store, python, sites, paths=()):
     real = os.path.realpath(python)
     p = subprocess.run([real, "-s", "-B", "-c", INFO] + sites, env=ENV, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if p.returncode:
@@ -222,6 +222,13 @@ def build(store, python, sites):
             else:
                 extra[loc] = loc
             roots += elf_files(loc, want) if os.path.isdir(loc) else [loc] * (is_elf(loc) and ident(loc) == want)
+    for pth in paths:     # the files of a declared module that no import name reaches (the sibling *.libs, top-level .so/.pth files, the dist-info): by path
+        rp = os.path.realpath(pth)
+        if not os.path.lexists(rp):
+            raise RtError("--path %s: does not exist" % pth)
+        keep.append(rp)
+        extra[rp] = rp
+        roots += elf_files(rp, want) if os.path.isdir(rp) else [rp] * (is_elf(rp) and ident(rp) == want)
     dyn = info["dynload"]
     if dyn and os.path.isdir(dyn) and any(under(dyn, t) for t in trees):
         roots += elf_files(dyn, want)
@@ -307,7 +314,7 @@ def parse(argv):
         p.add_argument(n, dest=n.lstrip("-"), default="/work" if n == "--cwd" else None)
     p.add_argument("--class", dest="cls")
     p.add_argument("--python", default=sys.executable)
-    for n in ("site", "input", "output", "env", "exe", "tree"):
+    for n in ("site", "path", "input", "output", "env", "exe", "tree"):
         p.add_argument("--" + n, action="append", default=[])
     a = vars(p.parse_args(argv[:k]))
     a["input"] = [tuple(x.split("=", 1)) for x in a["input"]]
@@ -321,7 +328,7 @@ def main(argv):
         if not a["store"] or not a["o"]:
             raise RtError("--store and -o are required")
         if argv[:1] == ["python"]:
-            doc = build(a["store"], a["python"], a["site"])
+            doc = build(a["store"], a["python"], a["site"], a["path"])
             open(a["o"], "wb").write(json.dumps(doc, sort_keys=True, indent=1).encode() + b"\n")
             print("runtime %s: %d inputs" % (doc["runtime_id"], len(doc["inputs"])))
         elif argv[:1] == ["tool"] and (a["exe"] or a["tree"]):
