@@ -14,13 +14,7 @@ def _inline(name):
         return ''.join(_inline(l.split('"')[1]) if l.startswith('#include "') else l for l in f.read().splitlines(True))
 
 
-def __getattr__(name):
-    """PRELUDE (the text of rt/fnvl.h with its includes inlined) is read when first asked for: importing the package (for fnvlift.dsl, which the form gate
-    imports) needs no file of rt/."""
-    if name == 'PRELUDE':
-        globals()['PRELUDE'] = _inline('fnvl.h')
-        return globals()['PRELUDE']
-    raise AttributeError(name)
+PRELUDE = _inline('fnvl.h')
 
 
 def lift_entry(img, a):

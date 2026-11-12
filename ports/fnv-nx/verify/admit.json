@@ -56,6 +56,34 @@
    ]
   },
   {
+   "path": "ports/fnv-nx/lift/rt/fmath.h",
+   "class": "tool",
+   "gates": [
+    "selftests"
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/lift/rt/fnvl.h",
+   "class": "tool",
+   "gates": [
+    "selftests"
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/lift/rt/fnvl_abi.h",
+   "class": "tool",
+   "gates": [
+    "selftests"
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/lift/rt/fnvl_x87.h",
+   "class": "tool",
+   "gates": [
+    "selftests"
+   ]
+  },
+  {
    "path": "ports/fnv-nx/lift/rt/rcpref.h",
    "class": "tool",
    "gates": [
@@ -71,6 +99,13 @@
   },
   {
    "path": "ports/fnv-nx/lift/rt/rcptab.cert.json",
+   "class": "tool",
+   "gates": [
+    "selftests"
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/lift/rt/x87.h",
    "class": "tool",
    "gates": [
     "selftests"
