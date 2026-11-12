@@ -257,8 +257,14 @@ def access(inf):
 
 
 def is_wine(w, rel, obj):
-    """True iff word w, with relocation rel (or None), is a BL of a citation function (WINE or DECL)."""
-    return bool(rel) and w >> 26 == 0b100101 and obj.syms[rel[0]][0] in CITE
+    """True iff word w, with relocation rel (or None), is a call of a citation function (WINE or DECL): a BL, or a tail B, which is the
+    same body as BL then RET (the compiler's choice of a sibling call is not a different class). See is_tail."""
+    return bool(rel) and w >> 26 in (0b100101, 0b000101) and obj.syms[rel[0]][0] in CITE
+
+
+def is_tail(w, rel, obj):
+    """True iff word w is a tail B of a citation function: a call after which the function returns (BL; RET)."""
+    return w >> 26 == 0b000101 and is_wine(w, rel, obj)
 
 
 def cfg(words, a, b, rels, obj):
@@ -281,9 +287,11 @@ def cfg(words, a, b, rels, obj):
             return None  # exclusive/ordered/CAS or LSE atomic
         if (w >> 27) & 7 == 0b011 and (w >> 24) & 3 == 0 and not a <= o + 4 * sx((w >> 5) & 0x7FFFF, 19) < b:
             return None  # LDR literal outside the function
-        if o in rels and (w >> 26 == 0b000101 or w >> 24 == 0x54 or (w >> 25) & 63 in (0b011010, 0b011011) or (w >> 27) & 7 == 0b011 and (w >> 24) & 3 == 0):
+        if o in rels and not is_tail(w, rels[o], obj) and (w >> 26 == 0b000101 or w >> 24 == 0x54 or (w >> 25) & 63 in (0b011010, 0b011011) or (w >> 27) & 7 == 0b011 and (w >> 24) & 3 == 0):
             return None
-        if w >> 26 == 0b000101:  # B
+        if is_tail(w, rels.get(o), obj):  # tail B of WINE: the call, then RET
+            nxt = []
+        elif w >> 26 == 0b000101:  # B
             nxt = [o + 4 * sx(w & 0x3FFFFFF, 26)]
         elif w >> 24 == 0x54 or (w >> 25) & 63 == 0b011010:  # B.cond, CBZ/CBNZ
             nxt.append(o + 4 * sx((w >> 5) & 0x7FFFF, 19))
@@ -374,9 +382,10 @@ def vanalyse(words, a, b, rels, obj, dec, wine=False):
     if live[a] and not wine:   # WINE: the input rule (v) is replaced by the result rule (the result must be constant, wine_sim)
         return None
     rets = [o for o in succ if not succ[o]]
+    fin = {o: step(o, words[o], ins[o], rels.get(o), obj, inf[o]) if is_tail(words[o], rels.get(o), obj) else ins[o] for o in rets}   # a tail B returns after the call
     res = {}
     for name, r in (("x0", 0), ("x1", 1), ("v0", 32)):
-        vals = {ins[o][r] for o in rets}
+        vals = {fin[o][r] for o in rets}
         res[name] = None if vals == {("E", r)} else sorted(vals)[0] if len(vals) == 1 and sorted(vals)[0][0] in "KA" else ("U",)
     return res
 
@@ -422,7 +431,7 @@ def constprop(words, a, b, rels, obj, dec, sites):
             out = step(o, w, ins[o], rels.get(o), obj, access(dec.get(o)))
             if w >> 26 == 0b100101 or isblr(w) or w >> 24 == 0xD4:
                 out = tuple(("I",) if k in CALLER_SAVED else v for k, v in enumerate(out))
-            for t in succ_of(w, o):
+            for t in ([] if is_tail(w, rels.get(o), obj) else succ_of(w, o)):   # a tail B of WINE returns after the call
                 if t in words and a <= t < b:
                     new = out if t not in ins else tuple(map(join, ins[t], out))
                     if new != ins.get(t):
@@ -566,6 +575,11 @@ def wine_sim(words, a, b, rels, obj, argn, zero):
                     raise SimFail
                 if z == (not (w >> 24) & 1):   # CBZ branches when zero, CBNZ when not
                     nxt = o + 4 * sx((w >> 5) & 0x7FFFF, 19)
+            elif is_tail(w, rels.get(o), obj):   # tail B of WINE = BL then RET
+                for r in CALLER_SAVED:
+                    if r < 31:
+                        R[r] = None
+                return None
             elif w >> 26 == 0b000101:
                 nxt = o + 4 * sx(w & 0x3FFFFFF, 26)
             elif w >> 24 == 0x54 and not w & 0x10:   # B.cond
@@ -679,7 +693,7 @@ def wine_path_id(words, a, b, sites):
         v = st[o]
         if o in sites:
             v = ("M",) if v != (0,) or sites[o] is None else (1, sites[o])
-        nxt = [t for t in succ_of(words[o], o) if a <= t < b]
+        nxt = [t for t in succ_of(words[o], o) if a <= t < b] if not (o in sites and words[o] >> 26 == 0b000101) else []   # a tail B at a site returns after the call
         if not nxt:
             ends.add(v)
         for t in nxt:
@@ -722,7 +736,7 @@ def check_obj(path, terms, os_layer):
     """-> (items [name], findings [(name, KIND, detail, V result as JSON or None)], extra {"reach": [[function, offset, constant|None]],
     "exit_ok": [function whose every path ends in a BLR tail]}). OS_LAYER: the object may contain SVC (a fact of the recipe)."""
     o = Obj(path)
-    items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "declared": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}}
+    items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "declared": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}, "alias": {}}
     unw = {t[1:] for t in terms if t[:1] == "~"}   # unwinders: calls that continue an exception already in flight
     tid = {i for i, s in enumerate(o.syms) if s[0] in terms and s[4] != 0 and s[0] not in (REACH,) + CITE}   # REACH is judged by the reach rule
     for si, (sname, stype, sflags, soff, ssize, _, _) in enumerate(o.secs):
@@ -743,7 +757,8 @@ def check_obj(path, terms, os_layer):
             if sz == 0 or a + sz > ssize or (last and a < last[1] and (a, a + sz) != last[:2]):
                 finds.append((name, "uncovered", "size 0, overlaps another function or leaves %s" % sname, None))
                 continue
-            if last and (a, a + sz) == last[:2]:  # alias of the previous symbol: same body, same findings
+            if last and (a, a + sz) == last[:2]:  # alias of the previous symbol (ICF, .set): one body, judged once, every name attached
+                extra["alias"].setdefault(last[3], []).append(name)
                 finds += [(name, k, d, v) for _, k, d, v in last[2]]
                 if last[3] in extra["wine_id"]:
                     extra["wine_id"][name] = extra["wine_id"][last[3]]
@@ -925,6 +940,11 @@ def analyse_all(objs, terms, os_layer_ids, cache=None, jobs=1):
     return res
 
 
+def names_of(r, name):
+    """The body's first name and every other name at the same address (ICF, aliases) of analysis R: one body, each name judged."""
+    return [name] + r.get("alias", {}).get(name, [])
+
+
 def judge(results, rows, facts, wine=None, declared=None):
     """RESULTS {id: analysis}, ROWS {(id, symbol): (kind, value, ref)}, FACTS None (no reach facts file) or a set of fact ids
     -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). Pure function.
@@ -977,17 +997,18 @@ def judge(results, rows, facts, wine=None, declared=None):
         if REACH in funcs and REACH not in exit_ok:
             out.append((oid, REACH, "reach-not-exit", "the definition does not end in a call through a pointer on every path"))
         for key, sym, pre in (("wine", WINE, "wine-fixme"), ("declared", DECL, "declared-machine")):
-            for name, off, c in r.get(key, []):
+            for name0, off, c in r.get(key, []):
                 if c is None:
-                    out.append((oid, name, pre + "-nonconstant", "w0 is not a constant at the call of %s at +0x%x" % (sym, off)))
-        for name, off, c in r["reach"]:
-            if c is None:
-                out.append((oid, name, "reach-nonconstant", "w0 is not a constant at the call of %s at +0x%x" % (REACH, off)))
-            elif facts is None:
-                out.append((oid, name, "reach-uncertified", "fact %d: no reach facts file of this verdict" % c))
-            elif c not in facts:
-                out.append((oid, name, "reach-uncertified", "fact %d is not in the reach facts" % c))
-            else:
+                    out += [(oid, name, pre + "-nonconstant", "w0 is not a constant at the call of %s at +0x%x" % (sym, off)) for name in names_of(r, name0)]
+        for name0, off, c in r["reach"]:
+            for name in names_of(r, name0):   # every name of the body carries the finding; the fact is used once
+                if c is None:
+                    out.append((oid, name, "reach-nonconstant", "w0 is not a constant at the call of %s at +0x%x" % (REACH, off)))
+                elif facts is None:
+                    out.append((oid, name, "reach-uncertified", "fact %d: no reach facts file of this verdict" % c))
+                elif c not in facts:
+                    out.append((oid, name, "reach-uncertified", "fact %d is not in the reach facts" % c))
+            if c is not None and facts is not None and c in facts:
                 used.add(c)
     for (oid, name), row in rows.items():
         if row[0] == "exit":

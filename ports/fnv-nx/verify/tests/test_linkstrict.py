@@ -191,6 +191,16 @@ check("gate on a host-target root without a link: a reference to printf is certi
 HW = HB.replace("printf", "nothere_zz")
 (rc, g, _, txt), st = LS(TR.make_repo("ls-host2", rec=TR.mut(link=None), files={"toy/b.c": HW}), "t7", GC)
 check("gate on a host-target root: a name the host runtime does not export is red", rc == 2 and g["uncertified"] == [TR.ROOT + "/b.c:nothere_zz"], (g, txt))
+# (e) outline atomics in guest objects
+AT = "int v;\nint f(void) { return __atomic_fetch_add(&v, 1, __ATOMIC_RELAXED); }\n"
+ao = build(AT, "c", ["-moutline-atomics"])
+an = build(AT, "c", ["-mno-outline-atomics"])
+items, finds = L.judge({"g/o.o": L.elf_symbols(ao)}, {}, {}, {}, None, ["g/"])
+check("(e) a guest object compiled with -moutline-atomics references __aarch64_ldadd*: finding outline-atomic", [(n, k) for _, n, k, _ in finds if k == "outline-atomic"] == [("__aarch64_ldadd4_relax", "outline-atomic")], finds)
+items, finds = L.judge({"g/o.o": L.elf_symbols(an)}, {}, {}, {}, None, ["g/"])
+check("(e) the same code with -mno-outline-atomics: no reference, no finding", not finds, finds)
+items, finds = L.judge({"h/o.o": L.elf_symbols(ao)}, {}, {}, {}, None, ["g/"])
+check("(e) outside a guest root the clause does not apply (an undefined name only)", [k for _, _, k, _ in finds] == ["undefined"], finds)
 ABI[0] = "lp64"
 print("%d failed, wall %.1f s" % (len(FAILED), time.time() - T0))
 sys.exit(1 if FAILED else 0)

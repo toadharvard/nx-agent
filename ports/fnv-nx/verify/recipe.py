@@ -61,15 +61,21 @@ _T = TREE + "/toolchain/"
 PLUGIN_SOURCES = {"fnvnx_ftoi": _T + "ftoi/fnvnx_ftoi.cc", "fnvnx_order": _T + "order/fnvnx_order.cc", "fnvnx_sdd": _T + "sdd/fnvnx_sdd.cc",
                   "fnvnx_pi": _T + "pi/fnvnx_pi.cc", "fnvnx_dispatch": _T + "dispatch/fnvnx_dispatch.cc", "fnvnx_addr": _T + "addr/fnvnx_addr.cc",
                   "fnvnx_names": _T + "names/fnvnx_names.cc", "fnvnx_layout": _T + "layout/fnvnx_layout.cc"}
-# The plugins the gate `datamodel` requires in the CC stage of every native guest C++ unit (RECIPE.md, "Gate rule"); a subset of PLUGIN_SOURCES.
-GUEST_CXX_PLUGINS = ("fnvnx_ftoi", "fnvnx_order")
 PLUGIN_INPUTS = {"fnvnx_layout": [_T + "names/fnvnx_names.cc"]}
 PLUGIN_ARGS = {n: {} for n in PLUGIN_SOURCES}
 PLUGIN_ARGS["fnvnx_order"] = {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}
-# Flags of the game's C++ that fix its semantics (compile.sh); fnvnx_sdd needs -DFNVNX_SDD=1 and -fno-devirtualize.
-SEMANTICS_FLAGS = ("-mabi=ilp32", "-fms-extensions", "-fshort-wchar", "-frounding-math", "-fsigned-char", "-fno-strict-aliasing", "-fwrapv",
-                   "-fno-delete-null-pointer-checks", "-fcheck-new", "-fno-sized-deallocation", "-fno-lifetime-dse", "-ffp-contract=off",
-                   "-DFNVNX_SDD=1", "-fno-devirtualize")
+# The semantic flags of a guest root (data model, ABI, target, FP, aliasing, overflow, language model, calling convention): ONE ordered set, the
+# guest compiler pin's "flags"."semantics" (guest_compiler.json, next to this file). The RECIPE appends it to every guest compile stage, C, C++ and
+# assembler alike, minus what the pinned driver itself says does not apply to that language (semantics_for); a guest build.json carries none of them.
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "guest_compiler.json")) as _f:
+    SEMANTICS_FLAGS = tuple(json.load(_f)["flags"]["semantics"])
+SDD_DEFINE = "-DFNVNX_SDD=1"   # per root: the plugin fnvnx_sdd needs it (and -fno-devirtualize, which is in the semantic set of a guest root)
+SDD_FLAGS = (SDD_DEFINE, "-fno-devirtualize")   # what a NATIVE C++ root of a host target holds itself
+LANG_X = {"c": "c", "cxx": "c++", "asm": "assembler-with-cpp"}   # the driver's -x language of each kind of unit
+# What a guest build.json may carry (per-root classes); every other -f/-m/... token comes from flags.semantics and is refused here. Warnings and
+# diagnostics, defines, the language standard, the optimisation level (-O0..-O3, -Os, -Og: not -Ofast, which switches FP semantics), debug info,
+# section splitting. -Wa, -Wl, -Wp are driver pass-throughs, not warnings.
+PER_ROOT = re.compile(r"-W(?![alp],)[^\s]*|-D[^\s]+|-std=[^\s]+|-O[0-3sg]|-g[^\s]*|-ffunction-sections|-fdata-sections")
 WERROR_ATTR = "-Werror=attributes"   # required in flags.c and flags.cxx of every guest root
 EXT_KEYS = {"name", "repo", "ref", "commit", "tree_sha256", "at"}
 SANDBOX_PATHS = ("/src", "/inc", "/in", "/out", "/tool", "/objs", "/ld", "/work", "/proc", "/dev", "/tmp", "/oldroot")
@@ -237,6 +243,11 @@ def guest_errors(rec, root, roots, pin):
     fl = rec.get("flags") if isinstance(rec.get("flags"), dict) else {}
     # an attribute that neither the compiler nor a loaded plugin registers is otherwise dropped with a warning: a marker a rule relies on vanishes
     bad += ["flags.%s lacks %s" % (k, WERROR_ATTR) for k in ("c", "cxx") if WERROR_ATTR not in (fl.get(k) if isinstance(fl.get(k), list) else [])]
+    # every semantic flag comes from the pin's flags.semantics (the recipe appends it to each compile stage), so a guest build.json holds only the
+    # per-root classes (PER_ROOT): -mabi, -march, -mtune, -fPIE/-fPIC, -ftls-model, char signedness, -fshort-wchar, -m*outline-atomics, FP, aliasing, ... are refused
+    bad += ["flags.%s: %s is not a per-root flag (-W*, -D*, -std=, -O0..3/s/g, -g*, -ffunction-sections, -fdata-sections); the semantic flags come from "
+            "flags.semantics of %s" % (k, f, GUEST_PIN) for k in ("c", "cxx", "asm") for f in (fl.get(k) if isinstance(fl.get(k), list) else [])
+            if isinstance(f, str) and not PER_ROOT.fullmatch(f)]
     # a flag that downgrades an error to a warning (or silences it) lets a diagnostic a rule relies on vanish
     bad += ["flags.%s: %s downgrades an error (forbidden)" % (k, f) for k in ("c", "cxx", "asm") for f in (fl.get(k) if isinstance(fl.get(k), list) else [])
             if isinstance(f, str) and (f in ("-fpermissive", "-w", "-Wno-error") or f.startswith("-Wno-error="))]
@@ -393,6 +404,16 @@ def plugin_errors(rec, root, files, roots, units, ext_names):
     cxx = [u for u in units if u.endswith(CXX_EXT)]
     ent = roots.get(root, {})
     origin = ent.get("cxx_origin")
+    # RULE (orchestrator, 2026-11-12): every guest CC stage, C and C++ alike and whatever the origin of the code, loads the FULL plugin set of
+    # PLUGIN_SOURCES with its fixed arguments in the fixed order. No language declarations, no exception list.
+    if ent.get("target") == "guest" and any(u.endswith(CC_EXT + CXX_EXT) for u in units) and not (origin == "native" and cxx):
+        for n in sorted(PLUGIN_SOURCES):
+            if n not in loaded:
+                err.append("guest root %s does not load plugin %s (every guest C and C++ unit is compiled with the full plugin set)" % (root, n))
+            elif loaded[n].get("args") != PLUGIN_ARGS[n]:
+                err.append("plugin %s: arguments must be %s, are %s" % (n, PLUGIN_ARGS[n], loaded[n].get("args")))
+        if list(loaded) != [n for n in PLUGIN_SOURCES if n in loaded]:
+            err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
     if not cxx:
         return err + (["admit.json %s: cxx_origin of a root without C++ units" % root] if origin is not None else [])
     if origin == "native":
@@ -404,7 +425,8 @@ def plugin_errors(rec, root, files, roots, units, ext_names):
         if list(loaded) != [n for n in PLUGIN_SOURCES if n in loaded]:
             err.append("plugins must be loaded in the order %s" % list(PLUGIN_SOURCES))
         fl = rec.get("flags", {}).get("cxx", []) if isinstance(rec.get("flags"), dict) else []
-        err += ["native C++ root %s: flags.cxx lacks the semantics flag %s" % (root, f) for f in SEMANTICS_FLAGS if f not in fl]
+        # fnvnx_sdd needs the define and -fno-devirtualize; a guest root's -fno-devirtualize comes from flags.semantics, its define is per root
+        err += ["native C++ root %s: flags.cxx lacks %s" % (root, f) for f in (SDD_FLAGS if ent.get("target") != "guest" else (SDD_DEFINE,)) if f not in fl]
     elif isinstance(origin, dict) and set(origin) == {"lifted_by", "pack"}:
         tool, pack = origin["lifted_by"], origin["pack"]
         mine = {f[len(root) + 1:] for f in files if under(f, root)}
@@ -486,6 +508,49 @@ def fetch_externals(exts, store, extcache, ws):
             raise BuildRed({"stage": stage, "exit": None, "stderr": ["tree_sha256 is %s, recipe says %s" % (tree, e["tree_sha256"])]})
         out[e["name"]] = {"host": dest, "tree": tree, "at": e["at"]}
     return out
+
+
+def _dynsyms(path, defined):
+    """Dynamic symbols of ELF PATH: the defined ones, or the undefined ones (versions cut) -> set."""
+    r = subprocess.run(["nm", "-D", "--defined-only" if defined else "--undefined-only", path], capture_output=True, text=True)
+    if r.returncode:
+        raise BuildRed({"stage": "plugin-frontend", "exit": r.returncode, "stderr": r.stderr.splitlines()[-5:]})
+    return {l.split()[-1].split("@")[0] for l in r.stdout.splitlines() if l.split()}
+
+
+def plugin_languages(cc, cxx, sos):
+    """{kind: [plugin names that front end can load]} for kind "c" (cc1) and "cxx" (cc1plus), in the order of SOS ({name: path of the .so}). A plugin
+    loads into a front end iff it needs no symbol that only the OTHER front end defines: the symbols only cc1plus defines are the dynamic symbols
+    of cc1plus not defined by cc1, and the other way round (nm -D of the two compiler programs and of the plugin: a static fact of the ELF files,
+    not a name or a run). A plugin that references C++-front-end symbols (cp_global_trees, ...) is not loadable by cc1: there is no C instance of it."""
+    prog = {k: subprocess.run([d, "-print-prog-name=" + p], capture_output=True, text=True).stdout.strip() for k, d, p in (("c", cc, "cc1"), ("cxx", cxx, "cc1plus"))}
+    defs = {k: _dynsyms(v, True) for k, v in prog.items()}
+    only = {"c": defs["c"] - defs["cxx"], "cxx": defs["cxx"] - defs["c"]}   # symbols only that front end defines
+    refs = {n: _dynsyms(p, False) for n, p in sos.items()}
+    return {k: [n for n in sos if not (refs[n] & only["cxx" if k == "c" else "c"])] for k in ("c", "cxx")}
+
+
+def predefined(driver, kind, flags):
+    """The macros the pinned DRIVER predefines for a unit of KIND under FLAGS (`-dM -E` on an empty input) -> {name: value}: the compiler's own
+    statement of the data model (__SIZE_TYPE__, __PTRDIFF_TYPE__, __CHAR_UNSIGNED__, ...), the same macros the unit's preprocessing stage sees."""
+    r = subprocess.run([driver, "-x", LANG_X[kind], "-dM", "-E", "-o", "/dev/stdout"] + list(flags) + ["/dev/null"], capture_output=True, text=True,
+                       env=dict(os.environ, LC_ALL="C", LANGUAGE="C"))
+    if r.returncode:
+        raise BuildRed({"stage": "predefined:" + kind, "exit": r.returncode, "stderr": r.stderr.splitlines()[-20:]})
+    return {l.split(" ", 2)[1]: (l.split(" ", 2) + [""])[2] for l in r.stdout.splitlines() if l.startswith("#define ")}
+
+
+def semantics_for(driver, kind, flags=SEMANTICS_FLAGS):
+    """The semantic flags the pinned DRIVER (host path) applies to a unit of KIND ("c", "cxx", "asm"), in their order: FLAGS minus every flag that
+    the driver itself says does not apply to that language (its diagnostic "command-line option 'X' is valid for C++/ObjC++ but not for C", read
+    from one run on an empty input in the driver's -x language). Nothing is decided by a name here; a flag the driver does not know is an error
+    (an unrecognised option makes the run fail: BuildRed), never dropped."""
+    r = subprocess.run([driver, "-x", LANG_X[kind], "-E", "-o", "/dev/null"] + list(flags) + ["/dev/null"], capture_output=True, text=True,
+                       env=dict(os.environ, LC_ALL="C", LANGUAGE="C"))
+    if r.returncode:
+        raise BuildRed({"stage": "semantics:" + kind, "exit": r.returncode, "stderr": r.stderr.splitlines()[-20:]})
+    drop = set(re.findall(r"command-line option '([^']+)' is valid for [^\n]* but not for", r.stderr))
+    return [f for f in flags if f not in drop]
 
 
 class Job:
@@ -678,8 +743,14 @@ class Job:
         if not used:
             return {}
         rtp, _ = self.toolrt(used)
-        self.built = self.plugins(ws) if any(k == "cxx" for k in kinds.values()) else []
+        guest = self.roots.get(self.root, {}).get("target") == "guest"
+        pk = ("c", "cxx") if guest else ("cxx",)   # guest: the plugins are loaded by the C and the C++ front end alike
+        self.built = self.plugins(ws) if any(k in pk for k in kinds.values()) else []
         builds = {}
+        sos = {}
+        for n, t, _ in self.built:   # the plugins each front end can load (plugin_languages): the stage loads exactly those, the gate reads the same fact
+            sos[n] = cas._obj(self.store, cas.manifest(t, self.store)["entries"][n + ".so"])
+        loadable = plugin_languages(self.hostpath(drv["c"]), self.hostpath(drv["cxx"]), sos) if sos else {"c": [], "cxx": []}
         # RULE: the CC stage (-fpreprocessed, input unit.ii) mounts, and so keys on, only the compiler (its external, if it is one), the
         # declared plugin .so files and unit.ii. Any other external is not mounted there: what is not mounted cannot be read, so the object
         # does not depend on it by construction (a new commit of such an external changes the PP keys, not the CC keys).
@@ -687,13 +758,15 @@ class Job:
         drop = {e["at"] for n, e in self.ext.items() if n != cc}
         for k in sorted(set(kinds.values())):
             fp = os.path.join(ws, "flags-%s.json" % k)
-            json.dump({"argv": rec["flags"][k]}, open(fp, "w"))
+            sem = semantics_for(self.hostpath(drv["c" if k == "asm" else k]), k) if guest else []   # the recipe's flags: semantics first, then the root's own
+            json.dump({"argv": sem + rec["flags"][k]}, open(fp, "w"))
             builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtp, flags_file=fp,
                                                            src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws)))
             builds[k].cc_drop = drop
-            if k == "cxx":   # plugins are loaded by the C++ front end of the CC stage only (not by cc1, not by preprocessing)
-                builds[k].cc_flags = [f for _, _, fl in self.built for f in fl]
-                builds[k].cc_inputs = [("/plug/" + n, t) for n, t, _ in self.built]
+            if k in pk:   # plugins are loaded by the CC stage only, never by preprocessing (guest roots: C and C++ units; host roots: C++ only)
+                ok = loadable[k]
+                builds[k].cc_flags = [f for n, _, fl in self.built if n in ok for f in fl]
+                builds[k].cc_inputs = [("/plug/" + n, t) for n, t, _ in self.built if n in ok]
 
         def one(u):
             try:
@@ -755,14 +828,9 @@ class Job:
         return self.stage(doc)[1]["outputs"]["/out"]
 
 
-def host_compilers(rec, cache):
-    """Host paths of the recipe's (cc, cxx): /usr/bin/NAME, or the paths inside the external compiler tree, checked out (by exact commit,
-    from the bare fetch the build made in CACHE/external) into CACHE/exttree/<commit>. For gates that run the compiler on the host
-    (objstub's terminator plugin); the build itself runs it in the sandbox."""
-    c = rec["compiler"]
-    if "external" not in c:
-        return "/usr/bin/" + c["cc"], "/usr/bin/" + c["cxx"]
-    e = next(x for x in rec["external"] if x["name"] == c["external"])
+def exttree(e, cache):
+    """Host directory of external E (a recipe `external` entry) checked out by its exact commit from the bare fetch the build made in
+    CACHE/external, into CACHE/exttree/<commit> (shared, atomic). For gates that read what a build linked in."""
     dest = os.path.join(cache, "exttree", e["commit"])
     if not os.path.isdir(dest):
         tmp = "%s.tmp%d-%s" % (dest, os.getpid(), os.urandom(4).hex())
@@ -776,6 +844,18 @@ def host_compilers(rec, cache):
             os.rename(tmp, dest)
         except OSError:
             shutil.rmtree(tmp, ignore_errors=True)
+    return dest
+
+
+def host_compilers(rec, cache):
+    """Host paths of the recipe's (cc, cxx): /usr/bin/NAME, or the paths inside the external compiler tree, checked out (by exact commit,
+    from the bare fetch the build made in CACHE/external) into CACHE/exttree/<commit>. For gates that run the compiler on the host
+    (objstub's terminator plugin); the build itself runs it in the sandbox."""
+    c = rec["compiler"]
+    if "external" not in c:
+        return "/usr/bin/" + c["cc"], "/usr/bin/" + c["cxx"]
+    e = next(x for x in rec["external"] if x["name"] == c["external"])
+    dest = exttree(e, cache)
     return os.path.join(dest, c["cc"]), os.path.join(dest, c["cxx"])
 
 
