@@ -9,11 +9,16 @@ import importlib.util, json, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
-def recipe_outputs_match():
-    """build.json's declared outputs are exactly gen_dslemit.outputs() (the unit list is derived from the generator, never hand-edited)"""
+def load_gen():
     sp = importlib.util.spec_from_file_location('gen_dslemit', os.path.join(HERE, '..', 'gen', 'gen_dslemit.py'))
     m = importlib.util.module_from_spec(sp)
     sp.loader.exec_module(m)
+    return m
+
+
+def recipe_outputs_match():
+    """build.json's declared outputs are exactly gen_dslemit.outputs() (the unit list is derived from the generator, never hand-edited)"""
+    m = load_gen()
     g = json.load(open(os.path.join(HERE, 'dslemit', 'build.json')))['generated']
     g = g[0] if isinstance(g, list) else g
     return g['outputs'] == m.outputs()
@@ -33,7 +38,7 @@ def main():
         print('red: build.json outputs differ from gen_dslemit.outputs()')
         return 1
     units = {os.path.basename(o['object']) for o in json.load(open(obj))['objects']}
-    want = {'%03x.cpp.o' % i for i in range(4096)}
+    want = {os.path.basename(n) + '.o' for n in load_gen().unit_names()}
     missing = sorted(want - units)
     e, b, u = (rows(one(gen, n)) for n in ('emitted.tsv', 'bad.tsv', 'undef.tsv'))
     print('units compiled %d/%d, failed %d' % (len(want & units), len(want), len(missing)))
