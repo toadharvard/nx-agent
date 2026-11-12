@@ -1,0 +1,22 @@
+--- gcc-13.3.0/libstdc++-v3/src/c++17/fs_path.cc
++++ gcc-13.3.0/libstdc++-v3/src/c++17/fs_path.cc
+@@ -267,7 +267,7 @@
+     {
+       __glibcxx_assert(p->_M_size <= p->_M_capacity);
+       p->clear();
+-      ::operator delete(p, sizeof(*p) + p->_M_capacity * sizeof(value_type));
++      ::operator delete(p);
+     }
+ }
+ 
+--- gcc-13.3.0/libstdc++-v3/src/c++17/memory_resource.cc
++++ gcc-13.3.0/libstdc++-v3/src/c++17/memory_resource.cc
+@@ -56,7 +56,7 @@
+       void
+       do_deallocate(void* __p, size_t __bytes, size_t __alignment) noexcept
+       override
+-      { ::operator delete(__p, __bytes, std::align_val_t(__alignment)); }
++      { ::operator delete(__p, std::align_val_t(__alignment)); }
+ 
+       bool
+       do_is_equal(const memory_resource& __other) const noexcept override
