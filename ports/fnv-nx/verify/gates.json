@@ -79,6 +79,15 @@
    "result": "linkstrict.json"
   },
   {
+   "name": "onedef",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_onedef.py"
+   ],
+   "result": "onedef.json"
+  },
+  {
    "name": "determinism",
    "argv": [
     "python3",
