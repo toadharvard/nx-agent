@@ -195,6 +195,58 @@ check("install_mirror: a mirror with another wheels tree hash -> exit 2", rc3 ==
 check("install_mirror: a mirror with another tree hash -> exit 2", rc == 2 and "tree_sha256 is" in err, (rc, out, err))
 check("install_mirror: it leaves nothing in its TMPDIR, on success and on every failure", left == [], left)
 
+# ---- build profiles (env.json profiles.toolchain-build): structure is checked everywhere, the package set only in its own chroot
+PN = "toolchain-build"
+d0 = doc()
+check("profile %s: 162-package whole set with deb pins, programs, mirror tools/toolchain-debs" % PN,
+      len(d0["profiles"][PN]["packages"]) == len(d0["profiles"][PN]["debs"]["packages"]) >= 100 and d0["profiles"][PN]["programs"]
+      and d0["profiles"][PN]["debs"]["mirror"]["branch"] == "tools/toolchain-debs", None)
+def prof(f):
+    d = doc()
+    f(d["profiles"][PN])
+    return write(d, "prof.json")
+for name, f, msg in (
+        ("deb pin missing", lambda p: p["debs"]["packages"].pop("make"), "env: profile %s: debs.packages: make has no deb pin" % PN),
+        ("deb pin sha256 not 64 hex", lambda p: p["debs"]["packages"]["make"].__setitem__("sha256", "abc"), "env: profile %s: debs.packages.make: needs version" % PN),
+        ("mirror commit not 40 hex", lambda p: p["debs"]["mirror"].__setitem__("commit", "x"), "env: profile %s: debs.mirror needs repo" % PN),
+        ("no programs", lambda p: p.__setitem__("programs", []), "env: profile %s: programs: the programs the build invokes" % PN)):
+    rc, out, err = ec("check", "--env", prof(f))
+    check("verdict check refuses a broken profile: " + name, rc == 2 and msg in out, (rc, out[-300:]))
+rc, out, err = ec("check", "--profile", PN)
+check("check --profile on the verdict root is a mismatch (a profile is installed only in its own chroot)",
+      rc == 2 and "env: profile %s: package texinfo: want " % PN in out and "program makeinfo: want in PATH" in out, (rc, out[-200:]))
+rc, out, err = ec("check", "--profile", "no-such-profile")
+check("check --profile of an unknown profile", rc == 2 and "env: no profile no-such-profile" in out, (rc, out))
+rc, out, err = ec("id", "--profile", PN)
+check("id --profile: sha256 of the profile alone", rc == 0 and len(out.strip()) == 64 and out.strip() != ec("id")[1].strip(), out)
+MK = os.path.join(os.path.dirname(VERIFY), "farm", "make_chroot.py")
+rc = subprocess.run([sys.executable, "-I", MK, "--profile", PN, "--chroot", "/"], capture_output=True, text=True)
+check("make_chroot refuses the root /", rc.returncode == 2 and "not an empty directory" in rc.stderr, rc)
+ne = os.path.join(TD, "notempty")
+os.makedirs(ne)
+open(os.path.join(ne, "x"), "w").close()
+rc = subprocess.run([sys.executable, "-I", MK, "--profile", PN, "--chroot", ne], capture_output=True, text=True)
+check("make_chroot refuses a directory that is not empty", rc.returncode == 2 and "not an empty directory" in rc.stderr, rc)
+rc = subprocess.run(["bash", SETUP, "--profile", PN], capture_output=True, text=True)
+check("setup --profile needs NAME and CHROOT", rc.returncode == 1 and "usage" in rc.stderr, rc)
+
+# script_programs: the programs a build script invokes
+SP = os.path.join(os.path.dirname(VERIFY), "farm", "script_programs.py")
+sh = os.path.join(TD, "b.sh")
+open(sh, "w").write("""#!/bin/bash
+f() { :; }
+CONF=(--target=x --prefix=y)
+FOO=1 make -j4 && tar -xf a.tar.xz   # a comment: rm -rf /
+if ! patch -p1 -i x; then sed -i s/a/b/ y; fi
+python3 - "$1" <<'EOF2'
+import os
+EOF2
+echo "$(realpath .)" | tee out; f; "$CC" -c a.c; ./local.sh
+""")
+rc = subprocess.run([sys.executable, "-I", SP, sh], capture_output=True, text=True)
+check("script_programs: command words, not options/builtins/functions/comments/paths; a dynamic command is marked",
+      rc.stdout.split() == ["?\"$CC\"", "make", "patch", "python3", "realpath", "sed", "tar", "tee"], rc.stdout)
+
 shutil.rmtree(TD, ignore_errors=True)
 print("%d failed: %s" % (len(FAILED), FAILED) if FAILED else "ALL PASS")
 sys.exit(1 if FAILED else 0)

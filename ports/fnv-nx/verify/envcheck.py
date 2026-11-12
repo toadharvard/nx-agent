@@ -281,6 +281,8 @@ def check(doc, repo=None):
         if not (isinstance(f, str) and f.endswith(".whl") and "/" not in f):
             bad.append("env: python module %s: no wheel file name in python.wheel_files (setup installs from the mirror)" % m)
     bad += deb_pins(doc)
+    for pn, pf in sorted(doc.get("profiles", {}).items()):
+        bad += profile_pins(pn, pf)
     pinned, owners = pinned_set(doc["packages"]), file_owners()
     for t, dg in sorted(doc["trees"].items()):
         cmp("tree " + t, dg[:12], (tree_digest(t, pinned, owners) if os.path.isdir(t) else "missing")[:12])
@@ -330,6 +332,62 @@ def deb_pins(doc):
                               and hx(e.get("sha256"), 64) and isinstance(e.get("url"), str)):
             out.append("env: debs.packages.%s: needs version %s, file, sha256 (64 hex) and url" % (p, want[p]))
     return out
+
+def profile_pins(name, prof):
+    """Mismatch lines of the STRUCTURE of build profile NAME (doc["profiles"][NAME]; checked on every machine, in the verdict too): the
+    package set is the whole set (the base and the closure are in it, nothing is resolved at install time), each package has a version
+    and a deb pin {version, file, sha256 (64 hex), origin, url}, debs.packages and packages name the same packages at the same
+    versions, and debs.mirror names the commit and the tree sha256 of debs/. Programs the build invokes are listed."""
+    out, pre = [], "env: profile %s: " % name
+    pk, dp = prof.get("packages"), prof.get("debs")
+    if not (isinstance(pk, dict) and pk and isinstance(dp, dict) and isinstance(dp.get("packages"), dict) and isinstance(dp.get("mirror"), dict)):
+        return [pre + "needs packages, debs.mirror and debs.packages"]
+    m = dp["mirror"]
+    hx = lambda h, n: isinstance(h, str) and len(h) == n and all(c in HEX64 for c in h)
+    if not (isinstance(m.get("repo"), str) and hx(m.get("commit"), 40) and hx(m.get("tree_sha256"), 64)):
+        out.append(pre + "debs.mirror needs repo, a 40-hex commit and a 64-hex tree_sha256")
+    for p in sorted(set(pk) ^ set(dp["packages"])):
+        out.append(pre + "debs.packages: %s %s" % (p, "has no deb pin" if p in pk else "is not in packages"))
+    for p, e in sorted(dp["packages"].items()):
+        if p in pk and not (isinstance(e, dict) and e.get("version") == pk[p] and isinstance(e.get("file"), str)
+                            and hx(e.get("sha256"), 64) and isinstance(e.get("url"), str) and isinstance(e.get("origin"), str)):
+            out.append(pre + "debs.packages.%s: needs version %s, file, sha256 (64 hex), origin and url" % (p, pk[p]))
+    if not (isinstance(prof.get("programs"), list) and prof["programs"]):
+        out.append(pre + "programs: the programs the build invokes (each must be owned by a pinned package)")
+    return out
+
+def check_profile(doc, name):
+    """Mismatch lines of THIS machine against build profile NAME: it is run inside the profile's chroot (farm/setup_verdict_env.sh
+    --profile). The installed package set must be EXACTLY the profile's (name and version, nothing else installed), the os and arch
+    must match, and every program the build invokes must be in PATH and owned by a pinned package (a program of no pinned package is
+    a build input that the profile does not declare)."""
+    prof = doc.get("profiles", {}).get(name)
+    if prof is None:
+        return ["env: no profile %s" % name]
+    bad = profile_pins(name, prof)
+    pre = "env: profile %s: " % name
+    def cmp(what, want, have):
+        if want != have:
+            bad.append("%s%s: want %s, have %s" % (pre, what, want, have))
+    cmp("os", _os(), prof.get("os"))
+    cmp("arch", prof.get("arch"), platform.machine())
+    have = {}
+    for ln in subprocess.run(["dpkg-query", "-W", "-f=${Package}\t${Version}\t${Status}\n"], capture_output=True, text=True).stdout.splitlines():
+        n, v, st = ln.split("\t")
+        if st.endswith(" installed"):
+            have[n] = v
+    for n in sorted(set(prof.get("packages", {})) | set(have)):
+        w, h = prof.get("packages", {}).get(n), have.get(n)
+        if w != h:
+            bad.append("%spackage %s: want %s, have %s" % (pre, n, w or "not installed", h or "not installed"))
+    own = _owners()
+    for prog in prof.get("programs", []):
+        path = shutil.which(prog)
+        if path is None:
+            bad.append("%sprogram %s: want in PATH, have missing" % (pre, prog))
+        elif not (own.get(os.path.realpath(path), set()) & set(prof.get("packages", {}))):
+            bad.append("%sprogram %s: %s is owned by no pinned package" % (pre, prog, os.path.realpath(path)))
+    return bad
 
 def wheel_pins(prev):
     """(python.wheel_sha256, python.wheel_files) of the new snapshot: the sha256 and the file name of each module's wheel FILE (what
@@ -414,7 +472,7 @@ def snapshot(prev=None):
             "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in sorted(PY_MODULES)},
                        "installed_files_sha256": {m: wheel_digest(m) for m in sorted(PY_MODULES)},
                        "wheel_sha256": wheel_pins(prev)[0], "wheel_files": wheel_pins(prev)[1]},
-            "programs": sorted(PROGRAMS), "kernel": {"needs": KERNEL}, "debs": (prev or {}).get("debs")}
+            "programs": sorted(PROGRAMS), "kernel": {"needs": KERNEL}, "debs": (prev or {}).get("debs"), "profiles": (prev or {}).get("profiles", {})}
 
 def main(argv):
     ap = argparse.ArgumentParser(prog="envcheck.py")
@@ -423,6 +481,7 @@ def main(argv):
     ap.add_argument("--json")
     ap.add_argument("-o")
     ap.add_argument("--from-code", action="store_true")
+    ap.add_argument("--profile", help="check/id of this build profile (doc[\"profiles\"][NAME]) instead of the verdict environment")
     a = ap.parse_args(argv)
     if a.cmd == "snapshot":
         if not (a.o and a.from_code):
@@ -430,10 +489,13 @@ def main(argv):
         open(a.o, "w").write(json.dumps(snapshot(json.load(open(a.env)) if os.path.exists(a.env) else None), sort_keys=True, indent=1) + "\n")
         return 0
     doc = json.load(open(a.env))
+    if a.profile and a.cmd == "id":
+        print(env_id(doc.get("profiles", {}).get(a.profile, {})))
+        return 0
     if a.cmd == "id":
         print(env_id(doc))
         return 0
-    bad = check(doc)
+    bad = check_profile(doc, a.profile) if a.profile else check(doc)
     print("\n".join(bad + ["envcheck: OK" if not bad else "envcheck: MISMATCH (%d)" % len(bad)]))
     if a.json:
         json.dump({"env_id": env_id(doc), "mismatches": bad}, open(a.json, "w"), sort_keys=True)

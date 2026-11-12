@@ -14,7 +14,13 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); VERIFY=$(dirname "$HERE")/verify
 ENV_JSON=$(readlink -f "${ENV_JSON:-$VERIFY/env.json}")
-MODE=${1:-run}; case $MODE in run|--print) ;; *) echo "usage: $0 [--print]" >&2; exit 1 ;; esac
+# --profile NAME CHROOT: a build profile (env.json profiles.NAME, e.g. toolchain-build) is built into its own empty CHROOT from its mirror
+# (make_chroot.py) and checked there (`envcheck.py check --profile NAME` inside the chroot). Never into this root.
+if [ "${1:-}" = --profile ]; then
+  [ $# -eq 3 ] || { echo "usage: $0 --profile NAME CHROOT" >&2; exit 1; }
+  exec python3 -I "$HERE/make_chroot.py" --profile "$2" --chroot "$3" --env "$ENV_JSON"
+fi
+MODE=${1:-run}; case $MODE in run|--print) ;; *) echo "usage: $0 [--print | --profile NAME CHROOT]" >&2; exit 1 ;; esac
 CHECK="python3 -I $VERIFY/envcheck.py check --env $ENV_JSON"
 DEBS="python3 -I $HERE/install_mirror.py --env $ENV_JSON"
 if [ "$MODE" = --print ]; then
