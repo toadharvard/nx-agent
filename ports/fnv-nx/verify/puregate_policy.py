@@ -73,5 +73,5 @@ RESTRICTED = {
 # modules every member of which is ruled: importing is harmless, any use is reported by its rule
 BANNED = set("random secrets tempfile platform socket getpass pwd grp importlib builtins".split())
 # (d) EXTERNAL-PURE: third-party modules assumed pure (assumption A-ext)
-EXTERNAL = set("capstone elftools unicorn mako".split())
+EXTERNAL = set("capstone elftools unicorn mako z3".split())   # z3: the z3-solver wheel, pinned by sha256 in env.json (assumption ASM-009: pinned formal tools)
 LISTED = PURE | set(RESTRICTED) | BANNED | EXTERNAL
