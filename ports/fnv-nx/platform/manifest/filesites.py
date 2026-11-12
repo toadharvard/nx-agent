@@ -16,7 +16,7 @@ same function: the row then reads `<API>` + `+?` (a suffix appended by an intra-
 dynamic with that reason). Nothing is guessed from names or text.
 Domain gate: every import of kernel32/shell32/shlwapi/msvcrt/user32 whose name is a file-API family member (FILE_FAMILY) must have a
 ROLES row; an import added to a module without one stops the pass.
-Assumptions: the registry ids of regsites.py apply (verify/ASSUMPTIONS.json).
+Assumptions: those of regsites.py (ASM-001, ASM-003, ASM-006, ASM-012, ASM-013, ASM-501; registry verify/ASSUMPTIONS.json).
 Usage: filesites.py <dir-with-modules> <root.exe> <out.tsv> [dynamic.dll,...]
 """
 import collections, os, re, sys

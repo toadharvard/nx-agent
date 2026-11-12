@@ -12,7 +12,7 @@ Rule (mechanical, from the images only; the engine is pemanifest.Mod and regsite
            `unresolved`, never guessed.
 Output rows: module, site, api, function, kind, detail. `kind` = stock-font | stock-other | api-site; `detail` = the stock id, or the exports that
 the backward closure ends at (`unresolved: ...` when it does not end at exports only), and `imported` when the exe imports one.
-Assumptions: the registry ids of regsites.py apply (verify/ASSUMPTIONS.json); Win32 as documented (OWNER 3), the stock object ids of wingdi.h.
+Assumptions: those of regsites.py (ASM-001, ASM-003, ASM-006, ASM-012, ASM-013, ASM-501; registry verify/ASSUMPTIONS.json); Win32 as documented (ASM-003), the stock object ids of wingdi.h.
 Usage: fontfaces.py <dir-with-modules> <root.exe> <out.tsv> [dynamic.dll,...]
 """
 import os, sys

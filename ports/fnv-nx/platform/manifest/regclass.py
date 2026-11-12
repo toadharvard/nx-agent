@@ -24,16 +24,16 @@ combined with an index, copied by an instruction this flow does not follow, a vt
 constructor that does not return `this`, a typed value returned from a function that has entries other than direct calls.
 A class with any leak has no closed writer set: `field` and `string` answer None with the exact leak.
 
-Soundness (the registry of assumptions is verify/ASSUMPTIONS.json; ids are the OWNER numbers of CLAUDE.md, 2026-11-11):
-  OWNER 1 (the compiler is correct): the vtable/RTTI layout and the thiscall convention (this in ecx, callee-saved ebx/esi/edi/ebp,
+Soundness (the registry of assumptions is verify/ASSUMPTIONS.json; ids: ASM-001 compiler, ASM-003 Win32 as documented, ASM-006 no wild accesses):
+  ASM-001 (the compiler is correct): the vtable/RTTI layout and the thiscall convention (this in ecx, callee-saved ebx/esi/edi/ebp: ASM-010,
     constructors return this) are what the ABI says; MSVC allocates a complete object, stores its vtable words in its constructor and
     never moves it.
-  OWNER 6 (the exe makes no wild accesses, array indices in bounds): a pointer to an object reaches only that object's bytes. It makes
+  ASM-006 (the exe makes no wild accesses, array indices in bounds): a pointer to an object reaches only that object's bytes. It makes
     the `("o", C, k)` coordinates exact, and a byte string at D is written only by stores that cover D (the string rule below).
-  OWNER 3 (Win32 as documented): a registry call with a NULL key handle fails with ERROR_INVALID_HANDLE and accesses no key.
-  Existing scope of pemanifest.py (REMOVE items, owner: L5): function boundaries, forward-only control flow, complete code ranges,
-    no computed code addresses (so every reference to a function is a relocation or a direct rel32).
-No new assumption: where the closure needs a fact that none of these gives, the answer is None and names it.
+  ASM-003 (Win32 as documented): a registry call with a NULL key handle fails with ERROR_INVALID_HANDLE and accesses no key.
+  Existing scope of pemanifest.py (REMOVE items: ASM-501 function boundaries and forward-only control flow, ASM-013 complete code ranges,
+    ASM-012 no computed code addresses (so every reference to a function is a relocation or a direct rel32).
+No other assumption: where the closure needs a fact that none of these gives, the answer is None and names it.
 String rule: the string at D is "" when every store that covers byte D writes the constant 0 and the class has no leak; any other
 writer (a copy of a longer string, a call that receives the address) leaves it unresolved, so no extent of the array is assumed.
 """

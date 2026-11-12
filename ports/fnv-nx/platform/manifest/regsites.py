@@ -34,10 +34,10 @@ the class `unaccounted` and the row `dynamic`, with the instruction named). A st
 writer covering its first byte stores the constant 0. A handle opened into a field is the set of opens that store it; a NULL handle is
 dropped (Win32: invalid handle, no key accessed). Every other writer value keeps the row `dynamic`: the reason names the writer
 instruction (or the parameter / list element that is not bound).
-Assumptions: OWNER 1 (compiler correct: MSVC ABI, RTTI layout, thiscall, constructors return this), OWNER 3 (Win32 as documented: NULL
-handle, LPCSTR name arguments are inputs), OWNER 6 (no wild accesses: a pointer reaches only its object). The scope below is the existing
-one (REMOVE items owned by L5: function boundaries, forward-only control flow, complete code ranges, no computed code addresses). No new
-assumption; the ids in verify/ASSUMPTIONS.json are not yet on the trunk, so the OWNER numbers of CLAUDE.md are cited.
+Assumptions: ASM-001 (compiler correct: MSVC ABI, RTTI layout, thiscall, constructors return this), ASM-003 (Win32 as documented: NULL
+handle, LPCSTR name arguments are inputs), ASM-006 (no wild accesses: a pointer reaches only its object). The scope below is the existing
+one (REMOVE items: ASM-501 function boundaries and forward-only control flow, ASM-013 complete code ranges, ASM-012 no computed code
+addresses). No other assumption; the registry is verify/ASSUMPTIONS.json.
 Scope: as for pemanifest.py (function boundaries, forward-only control flow, no ebp slot written through a pointer);
 stdcall/cdecl argument order (the first argument is the last push); a call through a function pointer other than a register loaded
 from the import slot, and a `jmp [slot]` thunk, is reported `dynamic` (reason `indirect`), never skipped; a global cell is not
@@ -51,7 +51,7 @@ row stops the pass. Output rows: module, site, api, root, subkey, value, status 
 Key-level rule (L5 lead, 2026-11-12): when the root and key path of a value access are static and the declared machine
 (declared_registry.tsv) declares no value under that key, the value name does not matter: a query answers ERROR_FILE_NOT_FOUND for
 every name and a set writes run-time hive state. The row is `static`, value `*`, reason `key-has-no-declared-values`. When a value
-is declared under the key the rule no longer applies and the row is dynamic again. No assumption beyond OWNER 3.
+is declared under the key the rule no longer applies and the row is dynamic again. No assumption beyond ASM-003.
 """
 import os, re, struct, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -528,7 +528,7 @@ class Analyzer:
 
 def key_alts(an, v, depth=0):
     """[(root, path)] of a key argument | (None, reason). A NULL handle is dropped: Win32 documents ERROR_INVALID_HANDLE and no key is
-    accessed (OWNER 3). A handle opened by a call whose arguments were fields is ("H", api, args) and is resolved here, lazily."""
+    accessed (ASM-003). A handle opened by a call whose arguments were fields is ("H", api, args) and is resolved here, lazily."""
     a, why = an.alts(v)
     if a is None:
         return None, why
@@ -622,7 +622,7 @@ def rows_of(an, site, f, args, via=None):
             and not any((r.lower(), "\\".join(p for p in (pa, s) if p).lower()) in an.declared for r, pa in roots for s in subs)):
         # Key-level rule (L5 lead, 2026-11-12): the keys are static and none of them has a declared value, so a query answers
         # ERROR_FILE_NOT_FOUND whatever the value name is, and a set writes run-time hive state: the result does not depend on
-        # the name. Declared machine, OWNER 3 (Win32 as documented). When a value is declared under one of the keys the rule no
+        # the name. Declared machine, ASM-003 (Win32 as documented). When a value is declared under one of the keys the rule no
         # longer applies and the row is dynamic again.
         return [(site, f, r, "\\".join(p for p in (pa, s) if p), "*", "static", NO_VALUES, via)
                 for r, pa in roots for s in subs]

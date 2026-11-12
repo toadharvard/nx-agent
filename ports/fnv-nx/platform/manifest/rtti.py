@@ -12,7 +12,7 @@ A vtable is accepted when the word before it is a relocated pointer to a COL who
 whose type descriptor carries a decorated class name; the slots are the run of relocated words that point into code. Nothing here
 reads a name to decide anything: the decorated name is only a label for the reports; classes are identified by their TypeDescriptor
 address and bases by their TypeDescriptor addresses.
-Assumption (OWNER 1, the compiler is correct): the compiler emitted these structures as the ABI defines
+Assumption (ASM-001, the compiler is correct): the compiler emitted these structures as the ABI defines
 them; a vtable that fails the checks above is not a class vtable and is reported as `unknown` by `kind_of_word`.
 """
 import bisect

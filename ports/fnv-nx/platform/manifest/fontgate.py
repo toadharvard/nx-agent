@@ -16,7 +16,7 @@ A face with no family in the closure is `no file` and the gate is red. Declared 
 Literal bypass: no string constant in a platform object other than font_faces.cpp.o (read from the object's data sections, as bytes or UTF-16LE)
 equals, case-insensitively, a name of the full map: the faces, every FontSubstitutes key and target, the three default lists, the shelldlg names.
 Usage: fontgate.py <faces.txt> <wine.inf.in> <font.c> <30-metric-aliases.conf> <declared-dir> <fontdir>... -- <platform .o>...
-Assumptions: Win32/Wine 9.0 as documented (OWNER 3); the compiler is correct (OWNER 1).
+Assumptions: Win32/Wine 9.0 as documented (ASM-003); the compiler is correct (ASM-001).
 """
 import hashlib, os, re, subprocess, sys, tempfile
 
