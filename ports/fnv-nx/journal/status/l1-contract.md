@@ -46,7 +46,7 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` 29b41938 (07862d5a
 | 2b | budget in VERDICT.md, budget gate, delete second build paths | lead | - | blocked by 2 (numbers) |
 | 4a | assumptions gate over verify/ASSUMPTIONS.json (OWNER = 9; field `pending` removed) | session_01KmtZKQZb21XFPG5GMjmjUp | claude/fnv-l1-contract-w10 (from b9f7cf14) | doing: rebase on trunk, drop `pending` + 47 pending records, add L6A, selftests in pinned env |
 | 4b | w11 test-defined symbols ∩ product-root symbols = ∅ in objstub | predecessor's local agent -> moving to a cloud worker | claude/fnv-l1-contract-w11 001306f0 | doing: stage 2 (COMDAT, python AST rule, six L1 names to 0) |
-| 4c | w12 (ec1ed3e: rule (i) FNVNX_PLAT_ only in hostapi.h defines; SOCK 16..26, 30, 31 measured used, kept; SOCK_FIRST/LAST deleted; console_flush, tz_offset_minutes, 10, main_loop, buttons_down, 15 deleted, holes kept; struct 0x1A0, 46 slots, 29 services; sha f4463658) hostapi.h = services with a call site in product roots | session_01KmtZKUQGJi3gKcTZcB8sr6 | claude/fnv-l1-contract-w12 | doing: rule (i) widened to every header of admitted roots, headers trees and externals (only unit files may use FNVNX_PLAT_); then full L1 green with fnv-nx-build, then MERGER after w10; header forwarded to L5, L4, L6 |
+| 4c | w12 (ec1ed3e: rule (i) FNVNX_PLAT_ only in hostapi.h defines; SOCK 16..26, 30, 31 measured used, kept; SOCK_FIRST/LAST deleted; console_flush, tz_offset_minutes, 10, main_loop, buttons_down, 15 deleted, holes kept; struct 0x1A0, 46 slots, 29 services; sha f4463658) hostapi.h = services with a call site in product roots | session_01KmtZKUQGJi3gKcTZcB8sr6 | claude/fnv-l1-contract-w12 | doing: rule (i) widened to every header of admitted roots, headers trees and externals (only unit files may use FNVNX_PLAT_); merge clean 7503d2fa (3 hunks, w12 side) + bootmachine.py rule 5a docstring generated from SOCK_SERVICES (L4 review); then full L1 green with fnv-nx-build, then MERGER after w10; header forwarded to L5, L4, L6 |
 
 Rule (L1+L2): a header-only dir is not a root; its headers are certified as PP inputs of admitted units (shim/include L2, loader include).
 
@@ -85,3 +85,9 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 
 - Rule B (generated runs a root's ELF; uam, sdp2dksh).
 - TLS gate: 0 R_AARCH64_TLS* / STT_TLS in roots without the console TLS ABI (L6A measured 0 in render/backend 87323b02).
+
+- 2026-11-12 02:58Z clean=7503d2fa. Decisions:
+  - contract+link become one admitted root (`trees` list); a declared-import cycle between distinct roots is red (w14).
+  - Contract gates' `covers` = roots with a non-null link (w10, from the L6 translator root).
+  - L2 w5 lands before L2 w4: a branch carries admit/oracle records for every file it adds. w4 was red on admit 494/513 and oracle 56/76 at fad7d2d4.
+  - w16 rebases onto 7503d2fa for the env.json conflict.
