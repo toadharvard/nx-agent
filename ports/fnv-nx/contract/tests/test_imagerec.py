@@ -92,9 +92,12 @@ e = imagerec.ImageRec(pe(GOOD), 'a.exe', {T0: [(T0, T0 + 11)]}, None, [(BASE + R
 check('data range outside every run: fine, read answered', (e.in_data(BASE + RD, 4), e.read(BASE + RD, 4)), (True, bytes([0, 1, 2, 3])))
 check('data range over a run that is not a candidate: contradictory fact', raises(imagerec.ImageError, imagerec.ImageRec, pe(GOOD), 'a.exe',
                                                                                   {T0: [(T0, T0 + 11)]}, None, [(T0 + 1, T0 + 5)], set()) is not None, True)
-check('parse: candidate column', imagerec._runs_of('# base=0x10:\n10\t10-20,30-40\tcandidate\n50\t50-60\n'),
-      ({0x10: [(0x10, 0x20), (0x30, 0x40)], 0x50: [(0x50, 0x60)]}, 0x10, {0x10}))
-check('parse: bad third column', raises(imagerec.ImageError, imagerec._runs_of, '# base=0x10:\n10\t10-20\tcand\n') is not None, True)
+check('parse: ranges', imagerec._runs_of('# base=0x10:\n10\t10-20,30-40\n50\t50-60\n'),
+      ({0x10: [(0x10, 0x20), (0x30, 0x40)], 0x50: [(0x50, 0x60)]}, 0x10))
+check('parse: a third column of ranges is an error', raises(imagerec.ImageError, imagerec._runs_of, '# base=0x10:\n10\t10-20\tcandidate\n') is not None, True)
+check('parse: universe flags', imagerec._universe_of('# base=0x10:\n10\tentry\t5\tproven\n20\tentry\t5\tcandidate\n'), ({0x10: 'proven', 0x20: 'candidate'}, 0x10))
+check('parse: universe flag other than proven/candidate', raises(imagerec.ImageError, imagerec._universe_of, '# base=0x10:\n10\tentry\t5\tmaybe\n') is not None, True)
+check('parse: universe row without flags', raises(imagerec.ImageError, imagerec._universe_of, '10\tentry\t5\n') is not None, True)
 check('parse: data ranges', imagerec._data_of('# base=0x10:\n20\t30\tjumptable\tjmp [eax*4+20] at 11\n'), ([(0x20, 0x30)], 0x10))
 check('parse: reversed data range', raises(imagerec.ImageError, imagerec._data_of, '20\t10\tx\ty\n') is not None, True)
 
@@ -119,11 +122,18 @@ with tempfile.TemporaryDirectory() as t:
     facts = os.path.join(t, 'facts')
     os.mkdir(facts)
 
-    def put(sha, base=0x10000):
+    def put(sha, base=0x10000, flag='proven', ubase=None, urow=True, key=True):
         with open(os.path.join(facts, 'ranges.tsv'), 'w') as fh:
             fh.write('# base=%x:\n%x\t%x-%x\n' % (base, base + TEXT, base + TEXT, base + TEXT + 11))
-        json.dump({'format': 'fnvnx-liftfacts-manifest/1', 'images': [{'image': 'a.exe', 'sha256': sha, 'ranges': 'ranges.tsv'}]},
-                  open(os.path.join(facts, 'manifest.json'), 'w'))
+        with open(os.path.join(facts, 'universe.tsv'), 'w') as fh:
+            fh.write('# base=%x:\n' % (base if ubase is None else ubase))
+            if urow:
+                fh.write('%x\tentry\t11\t%s\n' % (base + TEXT, flag))
+            fh.write('%x\trefused\t4\tproven\n' % (base + 0x2000))      # a universe row with no ranges row: nothing is read for it
+        e = {'image': 'a.exe', 'sha256': sha, 'ranges': 'ranges.tsv'}
+        if key:
+            e['universe'] = 'universe.tsv'
+        json.dump({'format': 'fnvnx-liftfacts-manifest/1', 'images': [e]}, open(os.path.join(facts, 'manifest.json'), 'w'))
         return {'tree_sha256': cas.tree_hash(facts)}
 
     pin = put(hashlib.sha256(data).hexdigest())
@@ -135,12 +145,23 @@ with tempfile.TemporaryDirectory() as t:
     pin = put('0' * 64)
     check('load: image sha not the manifest\'s', raises(imagerec.ImageError, imagerec.load, img, facts, pin) is not None, True)
     imagerec._trees.clear()
+    for what, kw in (('flag other than proven/candidate', {'flag': 'maybe'}), ('universe base differs from the ranges base', {'ubase': 0x20000}),
+                     ('ranges entry with no universe row', {'urow': False}), ('manifest entry without the universe key', {'key': False})):
+        pin = put(hashlib.sha256(data).hexdigest(), **kw)
+        check('load: ' + what, raises(imagerec.ImageError, imagerec.load, img, facts, pin) is not None, True)
+        imagerec._trees.clear()
+    pin = put(hashlib.sha256(data).hexdigest(), flag='candidate')
+    check('load: candidate flag read from universe.tsv', imagerec.load(img, facts, pin).candidates, {T0})
+    imagerec._trees.clear()
+    put(hashlib.sha256(data).hexdigest())
     with open(os.path.join(facts, 'data_in_code.tsv'), 'w') as fh:
         fh.write('# base=%x:\n%x\t%x\tjumptable\tx\n' % (0x10000, 0x10000 + TEXT + 1, 0x10000 + TEXT + 5))
     with open(os.path.join(facts, 'ranges.tsv'), 'w') as fh:
-        fh.write('# base=%x:\n%x\t%x-%x\tcandidate\n' % (0x10000, 0x10000 + TEXT, 0x10000 + TEXT, 0x10000 + TEXT + 11))
+        fh.write('# base=%x:\n%x\t%x-%x\n' % (0x10000, 0x10000 + TEXT, 0x10000 + TEXT, 0x10000 + TEXT + 11))
+    with open(os.path.join(facts, 'universe.tsv'), 'w') as fh:
+        fh.write('# base=%x:\n%x\tentry\t11\tcandidate\n' % (0x10000, 0x10000 + TEXT))
     json.dump({'format': 'fnvnx-liftfacts-manifest/1', 'images': [{'image': 'a.exe', 'sha256': hashlib.sha256(data).hexdigest(), 'ranges': 'ranges.tsv',
-                                                                    'data_in_code': 'data_in_code.tsv'}]}, open(os.path.join(facts, 'manifest.json'), 'w'))
+                                                                    'universe': 'universe.tsv', 'data_in_code': 'data_in_code.tsv'}]}, open(os.path.join(facts, 'manifest.json'), 'w'))
     r = imagerec.load(img, facts, {'tree_sha256': cas.tree_hash(facts)})
     check('load: data range rebased, candidate entry', (r.data, r.candidates), ([(T0 + 1, T0 + 5)], {T0}))
     check('load: word in the data range', r.word(T0 + 1), BASE + RD + 8)

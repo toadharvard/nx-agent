@@ -52,9 +52,33 @@ def sha256_bytes(b):
 
 
 def _runs_of(text, name='ranges'):
-    """ranges.tsv text -> ({entry: [(start, end)]}, base from the `# base=` header or None, {entries marked `candidate`}); absolute VAs of the
-    file's base. Row: `entry<TAB>start-end,start-end,...[<TAB>candidate]`."""
-    runs, base, cand = {}, None, set()
+    """ranges.tsv text -> ({entry: [(start, end)]}, base from the `# base=` header or None); absolute VAs of the file's base.
+    Row: `entry<TAB>start-end,start-end,...` and nothing else (a third column is an ImageError: the candidate flag lives in universe.tsv)."""
+    runs, base = {}, None
+    for ln in text.splitlines():
+        if ln.startswith('# base='):
+            base = int(ln.split()[1][5:].rstrip(':'), 16)
+            continue
+        if not ln or ln[0] == '#':
+            continue
+        f = ln.split('\t')
+        if len(f) > 2:
+            raise ImageError('%s: malformed line %r (ranges rows have two columns)' % (name, ln[:60]))
+        try:
+            e = int(f[0], 16)
+            runs[e] = [tuple(int(x, 16) for x in p.split('-')) for p in (f[1].split(',') if len(f) > 1 else []) if p]
+        except ValueError:
+            raise ImageError('%s: malformed line %r' % (name, ln[:60]))
+    return runs, base
+
+
+FLAGS = ('proven', 'candidate')
+
+
+def _universe_of(text, name='universe'):
+    """universe.tsv text -> ({entry: flag}, base from the `# base=` header or None). Row: `entry<TAB>kind<TAB>extent<TAB>flags`; flags is
+    `proven` or `candidate`, anything else is an ImageError."""
+    out, base = {}, None
     for ln in text.splitlines():
         if ln.startswith('# base='):
             base = int(ln.split()[1][5:].rstrip(':'), 16)
@@ -64,14 +88,12 @@ def _runs_of(text, name='ranges'):
         f = ln.split('\t')
         try:
             e = int(f[0], 16)
-            runs[e] = [tuple(int(x, 16) for x in p.split('-')) for p in (f[1].split(',') if len(f) > 1 else []) if p]
         except ValueError:
             raise ImageError('%s: malformed line %r' % (name, ln[:60]))
-        if len(f) > 2:
-            if f[2] != 'candidate' or len(f) > 3:
-                raise ImageError('%s: malformed line %r (third column is `candidate` or absent)' % (name, ln[:60]))
-            cand.add(e)
-    return runs, base, cand
+        if len(f) < 4 or f[3] not in FLAGS:
+            raise ImageError('%s: entry %x has flags %r, not one of %s' % (name, e, f[3] if len(f) > 3 else None, '/'.join(FLAGS)))
+        out[e] = f[3]
+    return out, base
 
 
 def _data_of(text, name='data_in_code'):
@@ -258,9 +280,22 @@ def load(image_path, facts_dir, pin):
     if not rp.startswith(os.path.realpath(facts_dir) + os.sep):
         raise ImageError('%s: ranges path leaves the facts directory' % ent['ranges'])
     with open(rp) as fh:
-        runs, fb, cand = _runs_of(fh.read(), ent['ranges'])
+        runs, fb = _runs_of(fh.read(), ent['ranges'])
     if fb is None:
         raise ImageError('%s has no `# base=` header' % ent['ranges'])
+    if 'universe' not in ent:
+        raise ImageError('%s: the manifest entry of %s has no `universe` (the candidate flags of its entries)' % (facts_dir, name))
+    up = os.path.realpath(os.path.join(facts_dir, ent['universe']))
+    if not up.startswith(os.path.realpath(facts_dir) + os.sep):
+        raise ImageError('%s: universe path leaves the facts directory' % ent['universe'])
+    with open(up) as fh:
+        flags, ub = _universe_of(fh.read(), ent['universe'])
+    if ub != fb:
+        raise ImageError('%s: `# base=` %s differs from the ranges base %s' % (ent['universe'], ub, fb))
+    missing = sorted(e for e in runs if e not in flags)
+    if missing:
+        raise ImageError('%s: %d ranges entries have no universe row (first %x)' % (ent['universe'], len(missing), missing[0]))
+    cand = {e for e in runs if flags[e] == 'candidate'}
     dr = []
     if 'data_in_code' in ent:     # data in code (jump tables) of the facts, in the same tree, rebased the same way
         dp = os.path.realpath(os.path.join(facts_dir, ent['data_in_code']))
