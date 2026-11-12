@@ -12,7 +12,7 @@
  * Built-in procedures: DOS files (fccIOProc 0 or 'DOS ', through CreateFileA) and memory files ('MEM ': the buffer
  * is the file). The I/O procedure gets the handle's own MMIOINFO, which is what mmioGetInfo copies out. */
 #include "w32.h"
-#include "fnvnx_mmio.h"
+#include "../include/fnvnx_mmio.h"
 
 #include <stdio.h>   /* SEEK_SET/CUR/END = FILE_BEGIN/CURRENT/END */
 #include <stdlib.h>

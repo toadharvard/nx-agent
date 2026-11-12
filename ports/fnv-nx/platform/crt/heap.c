@@ -9,7 +9,7 @@
 #include <time.h>
 
 #include "../os/os.h"
-#include "fnvnx_clock.h"
+#include "../include/fnvnx_clock.h"
 
 size_t _msize(void *p) { return p ? malloc_usable_size(p) : (size_t)-1; }
 

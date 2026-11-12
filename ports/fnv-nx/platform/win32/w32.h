@@ -2,9 +2,9 @@
 #ifndef FNVNX_W32_H
 #define FNVNX_W32_H
 
-#include "fnvnx_win32_ext.h"
+#include "../include/fnvnx_win32_ext.h"
 #include "../os/os.h"
-#include "fnvnx_clock.h"
+#include "../include/fnvnx_clock.h"
 
 #include <stdarg.h>
 #include <string.h>
