@@ -10,7 +10,7 @@
 * **withdrawn as no-ops** (`fnvnx-recon-pending/1`, not counted): recon/fallout_shared_tesrace,
   recon/staging_blk_00640000_od_006592f0, recon/r8_pathhandler, recon/r8_facegenmgr (15 rows). units.json at 87eb9373
   already maps every one of those names to the address, and REC1 adds symbols with setdefault, so nothing changes.
-  - The traps come from link shape pairing (S2-bodies). Example: 0x00559450 is `?FUN_00559450@@YIHPAH@Z` (fastcall,
+  - The traps come from link shape pairing (S2-bodies). Example: <va> is `?FUN_00559450@@YIHPAH@Z` (fastcall,
     one pointer) while 14 references are thiscall `??B` smart-pointer conversions. Both take the pointer in ecx (x86)
     and in x0 (AArch64).
   - Rule added to the R2 workers' brief: no binding for a name units.json already maps.

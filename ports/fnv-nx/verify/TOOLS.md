@@ -1418,8 +1418,8 @@ gate treats a dynamic-name GetProcAddress site; there is no allow-list. Universe
 Wrapper rule (class): a `FNVNX_PLAT_` identifier may appear only in the `#define FNVNX_PLAT_X <integer>` lines of hostapi.h and in unit files (.c/.cc/.cpp/.S) of the root. Any other includable file (a non-unit file under the root, under a recipe include directory, or in an external include tree) that names one is a red item (`wrapper use in PATH`), and so is a non-define use inside hostapi.h; with that the `-dU` position of a define does not matter.
 Gate `hostapi` (product class, in `gate_admit.REQUIRED_PRODUCT`). For every admitted product root that includes `fnvnx/hostapi.h`: the set of
 service numbers declared in the header (`#define FNVNX_PLAT_<NAME> <integer>`, read by token grammar; names with one number are aliases) equals
-the set of service numbers that some unit of the root expands. Evidence: `unit.ii` of the PP stage, which runs `-dU` (GCC lists exactly the
-macros the unit expands or tests). A used `FNVNX_PLAT_` name with an undeclared number or another value is red. Module ids (`FNVNX_EXT_*`,
+the set of service numbers that some unit of the root expands. Evidence: `unit.du` of the unit's macro-fact stage, which runs `-dU` on the PP
+stage's view (GCC lists exactly the macros the unit expands or tests); the CC input `unit.ii` is the plain preprocessed text. A used `FNVNX_PLAT_` name with an undeclared number or another value is red. Module ids (`FNVNX_EXT_*`,
 including `FNVNX_EXT_DK`, the machine model of deko3d below the product boundary) are no services and no items. No root that includes the
 header: universe 0, green, no exception list. Limit: a use in a function that no code reaches counts; reachability is the job of reach/reachlink.
 Run: `python3 -I ports/fnv-nx/verify/gate_hostapi.py [--header PATH]` (cwd = checkout root, env GATE_OUT).
@@ -2142,7 +2142,7 @@ recompiled when nothing it reads changed.
     unitstage.py gcc-set --cxx /abs/g++       print the --exe/--tree arguments of `runtime.py tool` for that compiler
 RULE: what a preprocessor run reads is exactly (1) the CONTENT of the files it opens and (2) the EXISTENCE answers for the paths it
   probes (#include search, __has_include, __has_include_next). A stage is given both, exactly.
-  PP stage  `g++ FLAGS -E -dU -MD -MT x -MF /out/deps.d -o /out/unit.ii /src/UNIT`, inputs: the tool runtime (runtime.py tool) and VIEWS
+  PP stage  `g++ FLAGS -E -MD -MT x -MF /out/deps.d -o /out/unit.ii /src/UNIT` (the macro-use fact `-dU` is a stage of its own, unit.du), inputs: the tool runtime (runtime.py tool) and VIEWS
             of the source root (/src) and the include roots (/inc/0..), see unitview.py: every name of the real tree, real content
             only for the files of a set C (the closure), every other file a placeholder `#error fnvnx: file outside the declared
             closure`. The key is f(name trees, content of C, compiler, flags).
