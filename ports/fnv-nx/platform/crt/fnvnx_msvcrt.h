@@ -48,7 +48,10 @@ int fnvnx_msvc_format(char *buf, size_t n, const char *fmt, va_list ap);
 int fnvnx_msvc_bound(char *buf, size_t n, int len);
 int fnvnx_msvc_scan(const char *in, const char *fmt, va_list ap);
 double fnvnx_msvc_strtod(const char *s, char **end);
+int fnvnx_msvcrt_va_sprintf(char *dst, const char *fmt, const uint32_t *args);
 int fnvnx_msvcrt_va_vsnprintf(char *dst, size_t count, const char *fmt, const uint32_t *args);
+int fnvnx_msvcrt_va_snprintf(char *dst, size_t count, const char *fmt, const uint32_t *args);
+int fnvnx_msvcrt_va_sscanf(const char *src, const char *fmt, const uint32_t *args);
 int fnvnx_msvcrt_wc_to_byte(unsigned short wc, unsigned char *out);   /* current code page; 1 when it converts */
 int fnvnx_msvcrt_byte_to_wc(unsigned char b, unsigned short *out);
 
