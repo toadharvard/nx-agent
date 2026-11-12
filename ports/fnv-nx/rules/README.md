@@ -3,13 +3,11 @@
 `prepare.py` rewrites a decomp checkout so that a second compiler (the pinned GCC, ILP32) accepts it, without changing
 what the original compiler (cl) sees. It is a stage tool: its output is a function of the content of its argv inputs.
 
-    python3 -I rules/prepare.py <decomp root> <out dir> --win32-header FILE --crt-symbols FILE
+    python3 -I rules/prepare.py <decomp root> <out dir> --win32-header FILE
 
 - `<decomp root>`: `src/`, `include/`, `build/units.json` (the unit list: source path, symbol table, function addresses),
   `build/`, `third_party/`. `src/` and `include/` are rewritten; `build/` and `third_party/` are copied by content.
 - `--win32-header FILE`: the target's Win32 header text (names and prototypes DECL1 / CALL1 / SDK1 / GAME1 rest on).
-- `--crt-symbols FILE`: the target's CRT symbol table (tab separated; `crt_inline` rows name the out-of-line float
-  overloads MATH1 and DECL1 rest on).
 - Output: the rewritten tree and `prepare_stats.tsv` (edits and files per rule id). Exit 3 names the rule and the
   file when the dual-compile check fails; exit 2 is a bad command line.
 - No environment variable, no skip list, no cache or memo, no clock, no dynamic import: the sources name none

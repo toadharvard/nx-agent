@@ -157,7 +157,7 @@ def r_sal_attributes(path, text, stats):
 
 SDK_TAGS = ('tagRECT tagPOINT tagSIZE _FILETIME _SYSTEMTIME _GUID _RTL_CRITICAL_SECTION _LARGE_INTEGER _ULARGE_INTEGER '
             '_OVERLAPPED _WIN32_FIND_DATAA _SYSTEM_INFO tagMSG tagPALETTEENTRY _LUID _RGNDATA tagBITMAPFILEHEADER '
-            'tagBITMAPINFOHEADER _iobuf _MEMORYSTATUS CRITICAL_SECTION _RTL_CRITICAL_SECTION_DEBUG').split()
+            'tagBITMAPINFOHEADER _MEMORYSTATUS CRITICAL_SECTION _RTL_CRITICAL_SECTION_DEBUG').split()
 # CRITICAL_SECTION: a struct copy of the PC type. _RTL_CRITICAL_SECTION_DEBUG: the decomp's SDK copy of
 # unit merges winnt.h's two records into `typedef struct _RTL_CRITICAL_SECTION_DEBUG {...}
 # RTL_CRITICAL_SECTION, *PRTL_CRITICAL_SECTION;` (so its CRITICAL_SECTION was the 32-byte debug record under MSVC);
@@ -183,7 +183,7 @@ def r_sdk_types(path, text, stats):
         end = core.match_brace(text, m.end() - 1)
         tail = re.match(r'([^;{}]*);[ \t]*', text[end:])
         if not tail or not SDK_DECLARATORS.match(tail[1]): continue
-        found.append((m.start(), end + tail.end(), '"fnvnx_iobuf.h"' if m[2] == '_iobuf' else '"fnvnx_win32.h"'))
+        found.append((m.start(), end + tail.end(), '"fnvnx_win32.h"'))
     for m in SDK_TYPEDEF.finditer(text):
         found.append((m.start(), m.end(), SDK_TYPEDEFS[m[1]]))
     for m in SDK_FNTYPEDEF.finditer(text):

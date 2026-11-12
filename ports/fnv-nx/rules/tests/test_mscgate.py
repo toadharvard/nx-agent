@@ -97,13 +97,13 @@ with open(os.path.join(src_root, 'src', 'a.cpp'), 'w') as f:
     f.write('void f()\n{\n    __asm nop\n}\n')
 with open(os.path.join(src_root, 'build', 'units.json'), 'w') as f:
     f.write('{"units": []}')
-core.configure(src_root, '', '')
-stats, files, texts, found = prepare.prepare(src_root, out_root, '', '')
+core.configure(src_root, '')
+stats, files, texts, found = prepare.prepare(src_root, out_root, '')
 check('prepare.prepare: ASM rule only, no violation', str(found) + str(dict(stats)), ["[]", "ASM-spans"])
 check('prepare.prepare: the output holds the asm form', open(os.path.join(out_root, 'src', 'a.cpp')).read(), ['#ifdef _MSC_VER', '__asm__("");'])
 orig = prepare.rule_list
 prepare.rule_list = lambda: orig() + [bad_rule]
-_s, _f, _t, found = prepare.prepare(src_root, os.path.join(work, 'out2'), '', '')
+_s, _f, _t, found = prepare.prepare(src_root, os.path.join(work, 'out2'), '')
 prepare.rule_list = orig
 check('prepare.prepare: a rule emitting a cl-only group is named', '\n'.join(found), ['bad_rule', 'a.cpp'])
 support.finish()

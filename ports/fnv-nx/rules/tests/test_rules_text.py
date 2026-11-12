@@ -21,7 +21,6 @@ import s1_compile as s1  # noqa: E402
 
 core = prepare
 core.CTX['win32_header'] = support.WIN32_HEADER
-core.CTX['crt_symbols'] = '00401040\tcrt_inline\tfloor(float) -> floorf\n'
 support.legacy_units_lookup()
 
 
@@ -404,9 +403,9 @@ open(os.path.join(_m, 'src', 'u_decls.h'), 'w').write('extern "C" double floor(f
 open(os.path.join(_m, 'src', 'u.cpp'), 'w').write('#include "u_decls.h"\nbool f(float a, float b) { return floor(a) != floor(b); }\n')
 open(os.path.join(_m, 'src', 'v_decls.h'), 'w').write('float cos(float);\n')
 open(os.path.join(_m, 'src', 'v.cpp'), 'w').write('#include <math.h>\n#include "v_decls.h"\n')
-_saved = (prepare._GAME_FILES, prepare._INC_GRAPH, dict(prepare._MATH_SEEN), dict(prepare._GAME_FLOAT_RET))
+_saved = (prepare._GAME_FILES, prepare._INC_GRAPH, dict(prepare._MATH_SEEN))
 prepare._GAME_FILES, prepare._INC_GRAPH = None, None
-prepare._MATH_SEEN.clear(); prepare._GAME_FLOAT_RET.clear()
+prepare._MATH_SEEN.clear()
 _h = os.path.join(_m, 'src', 'u_decls.h')
 got = prepare.r_game_bound_names(_h, open(_h).read(), Counter())
 got2 = prepare.r_game_bound_names(os.path.join(_m, 'src', 'u.cpp'), open(os.path.join(_m, 'src', 'u.cpp')).read(), Counter())
@@ -414,9 +413,8 @@ _v = os.path.join(_m, 'src', 'v_decls.h')
 got3 = prepare.r_platform_protos(_v, open(_v).read(), Counter())
 prepare._GAME_FILES, prepare._INC_GRAPH = _saved[0], _saved[1]
 prepare._MATH_SEEN.clear(); prepare._MATH_SEEN.update(_saved[2])
-prepare._GAME_FLOAT_RET.clear(); prepare._GAME_FLOAT_RET.update(_saved[3])
-check('GAME1 renames a C-linkage float math prototype the unit binds, with the game function\'s float return',
-      got + got2, ['extern "C" float fnvnx_game_floor(float); /* fnv-nx GAME1: the game function returns float */',
+check('GAME1 renames a C-linkage float math prototype the unit binds',
+      got + got2, ['extern "C" double fnvnx_game_floor(float);',
                    'return fnvnx_game_floor(a) != fnvnx_game_floor(b);'])
 check('DECL1 drops the decomp\'s float overload where a unit includes <math.h>', got3,
       ['#include "fnvnx_cmath/cos.h" /* fnv-nx DECL1 */'], ['float cos(float)'])
@@ -773,16 +771,6 @@ check('SSE2 drops (_mm_x)(...) prototypes, SSE4 unqualified using-declarations o
 # ---- scope heads
 spans = prepare.scope_spans('// ' + 'y' * 295 + ' (a) b\n// c\n\nstruct T\n{\n    int f();\n};\n')
 check('scope head after a cut comment is a class', str([k for _, _, k, _ in spans]), ['class'], ['function'])
-
-# ---- DECL1-FOPEN: an _iobuf fopen prototype gives way to the shim's fopen -> fnvnx_iob_fopen (S1-crt)
-_fo = prepare.r_platform_protos('/x/src/a.h', 'struct _iobuf;\nextern "C" _iobuf* fopen(const char*, const char*);\n'
-                                'extern "C" int fclose(_iobuf*);\nvoid g();\n', Counter())
-check('DECL1-FOPEN _iobuf fopen -> fnvnx_iobuf_fopen.h, same lines', _fo,
-      ['struct _iobuf;\n#include "fnvnx_iobuf_fopen.h" /* fnv-nx DECL1 */\n#include "fnvnx_iobuf.h" /* fnv-nx DECL1 */\n'
-       'void g();'], ['fopen(const'])
-check('DECL1-FOPEN a fopen prototype without _iobuf is left alone',
-      prepare.r_platform_protos('/x/src/a.cpp', 'extern "C" void* __cdecl fopen(const char*, const char*);\n', Counter()),
-      ['void* __cdecl fopen(const char*, const char*);'], ['fnv-nx'])
 
 # ---- DECL2 the decomp's merged SDK record `struct _RTL_CRITICAL_SECTION_DEBUG {...} RTL_CRITICAL_SECTION` (S1-crt)
 _cs = ('extern "C"{\ntypedef struct _RTL_CRITICAL_SECTION_DEBUG{\nWORD Type;\nstruct _RTL_CRITICAL_SECTION*CriticalSection;\n'

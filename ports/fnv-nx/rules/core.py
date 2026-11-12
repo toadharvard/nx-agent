@@ -19,11 +19,11 @@ from collections import Counter
 # The inputs of a run besides the decomp tree's own files, set once by prepare.py from its argv (configure) before any
 # rule runs: the root of the decomp checkout, the text of the target's Win32 shim header and the text of the CRT symbol
 # table. Nothing else is read: no environment, no clock, no file outside these.
-CTX = {'root': None, 'win32_header': '', 'crt_symbols': ''}
+CTX = {'root': None, 'win32_header': ''}
 
-def configure(root, win32_header, crt_symbols):
+def configure(root, win32_header):
     CTX['root'] = os.path.normpath(os.path.abspath(root)) if root else None
-    CTX['win32_header'], CTX['crt_symbols'] = win32_header, crt_symbols
+    CTX['win32_header'] = win32_header
 
 def walk_sorted(top):
     """os.walk(top), top-down, every directory's subdirectories and files in sorted order (symbolic links to
@@ -403,15 +403,6 @@ CRT_HEADERS = {
           '_operator_delete_sized',   # in the force-included fnvnx_compat.h
 }
 CRT_NAMES = [n for v in CRT_HEADERS.values() for n in v.split()]
-# stdio functions S4b implements on MSVC's struct _iobuf (platform/crt/fnvnx_iobuf.h): a decomp prototype of one of
-# these that takes or returns _iobuf* is replaced by that header (its C++ overloads take _iobuf*). fopen has libc's
-# parameters, so no overload can return _iobuf*: its prototype is replaced by "fnvnx_iobuf_fopen.h", that header plus
-# `#define fopen fnvnx_iob_fopen` for the rest of the unit (fnvnx_iob_fopen is the provider of the CRT fopen that
-# units.json binds, platform/crt/crt_symbols.tsv; DECL1-FOPEN)
-IOBUF_NAMES = set('''_fclose_nolock _fdopen _fileno _fseeki64 _fsopen _ftelli64 clearerr fclose feof ferror fflush fgetc
-    fgetpos fgets fopen fopen_s fprintf fputc fputs fread fseek fsetpos ftell fwrite getc putc rewind setvbuf ungetc
-    vfprintf __iob_func'''.split())
-IOBUF_MACRO = {'fopen': '"fnvnx_iobuf_fopen.h"'}
 MACRO_NAMES = {'_alloca'}     # macros on the target (fnvnx_compat.h): no using-declaration possible
 
 OWN_STD = re.compile(r'\b(?:class|struct)\s+(?:exception|bad_alloc|bad_cast|type_info)\s*[:{]')
@@ -595,7 +586,7 @@ def r_platform_protos(path, text, stats):
     for m in PROTO.finditer(text):
         name = re.sub(r'\s+', ' ', m[1])
         is_op = name.startswith('operator')
-        if not is_op and name not in PLATFORM and not (name in IOBUF_NAMES and '_iobuf' in m[0]): continue
+        if not is_op and name not in PLATFORM: continue
         if spans is None: spans = scope_spans(text)
         chain = scope_chain(spans, m.start())
         if any(k not in ('namespace', 'extern') for k, _ in chain): continue
@@ -606,8 +597,7 @@ def r_platform_protos(path, text, stats):
                 and not math_seen(path)):
             stats['DECL1-MATHKEEP'] += 1             # the decomp's float / double types (see MATH_NAMES above)
             continue
-        if (not is_op and spaces and spaces != ['namespace std'] and not c_linkage
-                and not cxx_copy_is_crt(path, name)):
+        if not is_op and spaces and spaces != ['namespace std'] and not c_linkage:
             kept.add(name)                           # N::name stays N's own function (DECL1-NSADL below)
             continue
         if is_math and spaces != ['namespace std']:  # the C function, by itself (no <math.h> overloads)
@@ -641,9 +631,6 @@ def r_platform_protos(path, text, stats):
         if is_op:   # the usual forms are declared implicitly in every unit; placement forms come from <new>
             params = re.search(r'\(([^;{}]*)\)', m[0][m[0].index('operator'):])[1]
             hdr = new_header(text) if PLACEMENT_PARAMS.match(params) else ''
-        elif name in IOBUF_NAMES and '_iobuf' in m[0]:
-            hdr = IOBUF_MACRO.get(name, '"fnvnx_iobuf.h"')
-            if name in IOBUF_MACRO: stats['DECL1-FOPEN'] += 1
         elif name == 'abs' and spaces == ['namespace std']:
             hdr = '"fnvnx_cmath/std_abs.h"'           # DECL1-STDABS (the header says why)
             stats['DECL1-STDABS'] += 1
@@ -865,7 +852,7 @@ def ns_own_calls(text, names, stats):
 #
 # A unit that carries its own <stdio.h> (`typedef _iobuf FILE;`, `typedef __int64 fpos_t;`) clashes with the target's
 # FILE (glibc's struct _IO_FILE) and fpos_t (a struct). Under MSVC FILE is _iobuf: the typedef goes and every FILE of
-# the unit is spelled _iobuf, so DECL1 then sees its stdio prototypes as the _iobuf functions of fnvnx_iobuf.h (S4b).
+# the unit is spelled _iobuf (the exe's own stdio struct, which the decomp declares).
 # MSVC's fpos_t is __int64: the unit's typedef and its uses get the name fnvnx_msvc_fpos_t (the same type).
 CRT_TYPEDEF_FILE = re.compile(r'^[ \t]*typedef[ \t]+(?:struct[ \t]+)?_iobuf[ \t]+FILE[ \t]*;', re.M)
 CRT_TYPEDEF_FPOS = re.compile(r'^[ \t]*typedef[ \t]+(?:__int64|long[ \t]+long)[ \t]+fpos_t[ \t]*;', re.M)
@@ -932,43 +919,6 @@ _DECO = [re.compile(r'^__imp__([A-Za-z_]\w*?)(?:@\d+)?$'), re.compile(r'^__imp_\
          re.compile(r'^\?([A-Za-z_]\w*)@@Y'), re.compile(r'^@([A-Za-z_]\w*)@\d+$'),
          re.compile(r'^_([A-Za-z_]\w*?)(?:@\d+)?$')]
 
-_CRT_BINDINGS = None
-# file -> math names whose GAME1 prototype there gets the float return type of the game function (see GAME1)
-_GAME_FLOAT_RET = {}
-
-def crt_inline_float():
-    """addresses of the game's out-of-line copies of MSVC's float math overloads (platform/crt/crt_symbols.tsv
-    `crt_inline` rows `name(float) -> namef`)"""
-    out = set()
-    for line in CTX['crt_symbols'].split('\n'):
-        f = line.rstrip('\n').split('\t')
-        if len(f) > 2 and f[1] == 'crt_inline' and re.match(r'\w+\(float(?:, float)*\) -> \w+f\b', f[2]):
-            out.add(int(f[0], 16))
-    return out
-
-def cxx_copy_is_crt(path, name):
-    """True when the unit of `path` binds a namespace-qualified C++ spelling of the CRT function `name`
-    (`?memcpy@fnv_ADDR@@...`) to an address that is that CRT function's (an address some unit binds `_name`
-    to): the decomp's namespace copy of the prototype is then the CRT function itself (D13)."""
-    global _CRT_BINDINGS
-    if PLATFORM is None or PLATFORM.get(name) == '"fnvnx_win32.h"': return False
-    if _CRT_BINDINGS is None:
-        import json
-        _CRT_BINDINGS = ({}, {})
-        root, uj = _units_json(path)
-        if uj:
-            for u in json.load(open(uj))['units']:
-                syms = u.get('symbols', {})
-                _CRT_BINDINGS[1][os.path.normpath(os.path.join(root, u['source']))] = syms
-                for k, v in syms.items():
-                    m = re.match(r'^_([A-Za-z_]\w*?)(?:@\d+)?$', k)
-                    if m and not IAT_RANGE[0] <= int(v, 16) < IAT_RANGE[1]:
-                        _CRT_BINDINGS[0].setdefault(m[1], set()).add(int(v, 16))
-    syms = _CRT_BINDINGS[1].get(os.path.normpath(os.path.abspath(path)))
-    if not syms: return False
-    addrs = {int(v, 16) for k, v in syms.items() if re.match(r'^\?%s@\w+@@' % re.escape(name), k)}
-    return bool(addrs) and addrs <= _CRT_BINDINGS[0].get(name, set())
-
 def _units_json(path):
     """(root, root/build/units.json) for a file below the configured decomp root that has a units.json, else (None, None).
     Only the root given to configure() is consulted: no search upwards through the file system."""
@@ -1014,7 +964,6 @@ def game_bound_names(path):
     others = {f: v[2] for f, v in graph.items() if v[2]}
     if others:
         names = set().union(*others.values())
-        float_ret = crt_inline_float()
         for u in units:
             syms = u.get('symbols', {})
             want = {n for n in names if '_' + n in syms}
@@ -1026,7 +975,6 @@ def game_bound_names(path):
                 done.add(f)
                 for n in others.get(f, set()) & want:
                     bad.setdefault(u['source'], set()).add(n)
-                    if int(syms['_' + n], 16) in float_ret: _GAME_FLOAT_RET.setdefault(f, set()).add(n)
                 todo.extend(graph.get(f, ((),))[0])
     inc = re.compile(r'^[ \t]*#[ \t]*include[ \t]*"([^"]+)"', re.M)
     for src, names in bad.items():
@@ -1058,13 +1006,6 @@ def r_game_bound_names(path, text, stats):
         stats['GAME1'] += 1
     out.append(text[pos:])
     text = ''.join(out)
-    # `extern "C" double floor(float);` bound to the game's floor(float) (0xADDR): on x86 both return in st0, so
-    # the double declaration read the float result exactly; on AArch64 the function returns it in s0, so the
-    # prototype says float (the call converts it to double, the value the x86 caller read)
-    for n in _GAME_FLOAT_RET.get(key, ()):
-        text, k = re.subn(r'\bdouble(\s+(?:__cdecl\s+)?%s%s\s*\(\s*float\b[^(),]*\)\s*;)' % (GAME_PREFIX, n),
-                          r'float\1 /* fnv-nx GAME1: the game function returns float */', text)
-        stats['GAME1'] += k
     return text
 
 RULES = [r_sse_local_types, r_sse_local_protos, r_sse_members, r_sse_qualified, r_game_bound_names,

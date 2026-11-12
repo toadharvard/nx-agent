@@ -64,15 +64,13 @@ def make_checkout(root):
 
 
 HDR = os.path.join(W, 'win32.h')
-CRT = os.path.join(W, 'crt.tsv')
 open(HDR, 'w').write(support.WIN32_HEADER)
-open(CRT, 'w').write('')
 DEC = os.path.join(W, 'dec')
 make_checkout(DEC)
 
 
 def run(out, env, dec=DEC, cwd=None, extra=()):
-    p = subprocess.run([sys.executable, '-I', PREPARE, dec, out, '--win32-header', HDR, '--crt-symbols', CRT, *extra],
+    p = subprocess.run([sys.executable, '-I', PREPARE, dec, out, '--win32-header', HDR, *extra],
                        env=env, cwd=cwd or W, capture_output=True, text=True)
     return p
 
@@ -121,8 +119,8 @@ shutil.rmtree(os.path.join(W, 'memo'), ignore_errors=True)
 for name, args in (('no inputs', []), ('one directory', [DEC]), ('unknown option', [DEC, os.path.join(W, 'o'), '--skip', 'x'])):
     p = subprocess.run([sys.executable, '-I', PREPARE, *args], capture_output=True, text=True, env=CLEAN)
     check('argv contract: %s refused (exit 2)' % name, str(p.returncode), ['2'])
-p = subprocess.run([sys.executable, '-I', PREPARE, DEC, os.path.join(W, 'o'), '--win32-header', HDR], capture_output=True, text=True, env=CLEAN)
-check('argv contract: --crt-symbols missing refused (exit 2)', str(p.returncode), ['2'])
+p = subprocess.run([sys.executable, '-I', PREPARE, DEC, os.path.join(W, 'o')], capture_output=True, text=True, env=CLEAN)
+check('argv contract: --win32-header missing refused (exit 2)', str(p.returncode), ['2'])
 
 # the source of the tool names no environment and no skip list
 import re  # noqa: E402

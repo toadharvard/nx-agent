@@ -38,3 +38,20 @@ Counting unit: one (file, line, name) pair, whole-word match. Class BINDING = co
 
 ## (c) port-nsw-un6t9s tools/rules/{s4_stl,s1b_patches,equiv}.py and tools/equiv/msvc/*  (count only)
 23 pairs in 7 files (s1b_patches.py 7, fnvnx_equiv_compat.h 6, msvc/fnvnx_crt.h 3, s4_stl.py 2, fnvnx_equiv_fi.h 2, msvc/fnvnx_iobuf_fopen.h 2, fnvnx_new.h 1). Not edited.
+
+## Narrow scope (lead's reclassification) - (a) rules/, after the edit
+
+BINDING = exe function -> native body by name (table, link stand-in, prepare rewrite into one). Deleted in rules/:
+IOBUF_NAMES/IOBUF_MACRO and the DECL1 iobuf/DECL1-FOPEN branch (rewrite into fnvnx_iobuf*.h / fnvnx_iob_fopen), the DECL2
+`_iobuf` -> fnvnx_iobuf.h entry, cxx_copy_is_crt/_CRT_BINDINGS (units.json address -> CRT function), crt_inline_float and
+the GAME1 float-return rewrite, and the crt_symbols.tsv input (`--crt-symbols`, CTX['crt_symbols']).
+LIBRARY kept: CRT_HEADERS library rows, DECL1 math/MATHNS/STDABS, MATH1, STD1, CONST_RESULT, VA_PLATFORM_LAST.
+Count (pattern IOBUF|iobuf|FOPEN|fopen|cxx_copy_is_crt|_CRT_BINDINGS|crt_inline|crt_symbols|crt-symbols|_GAME_FLOAT_RET,
+rules/ *.py *.md): before 68 at d6255e6e, after 9 (all DECL3 on the decomp's own `typedef _iobuf FILE`, not a stand-in).
+
+MSVC-only names in rules/ (file:line, no analysis), core.py at this head:
+- core.py CRT_HEADERS `"fnvnx_crt.h"` row: _stricmp _strnicmp stricmp strnicmp _strdup _snprintf _vsnprintf _msize strcpy_s
+  strcat_s strncpy_s sprintf_s vsprintf_s memcpy_s memmove_s strtok_s _splitpath_s _strlwr_s _finite _isnan _gcvt (core.py:392-394)
+- core.py `''` row: _CxxThrowException (core.py:402)
+- s1_compile.py:1190 VA_PLATFORM_LAST: _vsnprintf, vsprintf_s, _vscprintf, _vsnprintf_s, _vswprintf
+- comments/doc only: core.py:824-844, s1_compile.py:3585-3590 (strcpy_s, _stricmp examples)

@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """prepare.py - derive the port's source tree from a decompilation checkout (stage tool, a pure function of its inputs).
 
-    prepare.py <decomp root> <out dir> --win32-header FILE --crt-symbols FILE
+    prepare.py <decomp root> <out dir> --win32-header FILE
 
 Inputs (everything the output depends on, nothing else is read; no environment, no clock):
   <decomp root>     the checkout: src/ include/ build/ third_party/ (build/units.json is the recipe the rules read)
   --win32-header    the target's Win32 shim header (text): the names and prototypes DECL1 / CALL1 / SDK1 rest on
-  --crt-symbols     the target's CRT symbol table (tab separated text): `crt_inline` rows name the out-of-line float overloads
 
 Output: <out dir> holds src/ and include/ (every .cpp .h .hpp .inl .c file rewritten by the rules of README.md, the
 other files copied), build/ and third_party/ (copied, then the POST hooks of the rules edit build/units.json) and
@@ -72,12 +71,12 @@ def copy_tree(src, dst):
             copy_bytes(os.path.join(dp, n), os.path.join(out, n))
 
 
-def prepare(src_root, out_root, win32_header, crt_symbols):
+def prepare(src_root, out_root, win32_header):
     """Run the rules over the checkout. Returns (stats, files, texts, bad): the Counter of edits per rule id, of files
     changed per rule id, {relative path: (input text, output text)} of the source files, and the dual-compile
     violations found rule by rule."""
     src_root, out_root = os.path.abspath(src_root), os.path.abspath(out_root)
-    core.configure(src_root, win32_header, crt_symbols)
+    core.configure(src_root, win32_header)
     rules = rule_list()
     stats, files, texts, bad = Counter(), Counter(), {}, []
     for top in ('src', 'include'):
@@ -114,7 +113,7 @@ def main(argv):
     pos, opt, i = [], {}, 0
     while i < len(argv):
         a = argv[i]
-        if a in ('--win32-header', '--crt-symbols') and i + 1 < len(argv):
+        if a == '--win32-header' and i + 1 < len(argv):
             opt[a], i = argv[i + 1], i + 2
         elif a.startswith('--'):
             sys.stderr.write('prepare.py: unknown option %s\n' % a)
@@ -122,11 +121,11 @@ def main(argv):
         else:
             pos.append(a)
             i += 1
-    if len(pos) != 2 or len(opt) != 2:
+    if len(pos) != 2 or len(opt) != 1:
         sys.stderr.write(__doc__.split('\n\n')[1] + '\n')
         return 2
     src_root, out_root = pos
-    stats, files, texts, bad = prepare(src_root, out_root, read_text(opt['--win32-header']), read_text(opt['--crt-symbols']))
+    stats, files, texts, bad = prepare(src_root, out_root, read_text(opt['--win32-header']))
     bad += mscgate.check_tree(texts)
     with open(os.path.join(out_root, 'prepare_stats.tsv'), 'w') as f:
         for k in sorted(stats):
