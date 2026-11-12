@@ -81,3 +81,4 @@ Update 2026-11-12, at 698adefb:
     - per-definition descriptors from the L2 dispatch plugin (asked of L2);
     - test objects through recipe.py (after the headers tree).
 - w2 ddfbd301: idxrange premises are stated. Closed intervals carry cond:no_s4_arith until s4 closes, and are counted apart from unconditional ones.
+- 26b facts sourced: w7 adds facts/<img>/retn.tsv (pop per entry from the ret-site set by flow; mixed and noreturn explicit; removes the "ret n" assumption). The L2 lead is asked for per-definition descriptors from the dispatch plugin. w2: escape_open = w4's pcsrc s4 targets; closed intervals are counted as unconditional / cond:no_s4_arith / open.
