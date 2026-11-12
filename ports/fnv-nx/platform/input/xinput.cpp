@@ -10,7 +10,7 @@
 #include <xinput.h>
 #include "input.h"
 #include "../os/os.h"
-#include "fnvnx_clock.h"
+#include "../include/fnvnx_clock.h"
 
 #include <stdlib.h>
 #include <string.h>

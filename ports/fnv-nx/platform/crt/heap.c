@@ -9,7 +9,7 @@
 #include <time.h>
 
 #include "../os/os.h"
-#include "fnvnx_clock.h"
+#include "../include/fnvnx_clock.h"
 
 
 

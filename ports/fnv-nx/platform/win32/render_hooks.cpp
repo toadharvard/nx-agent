@@ -2,7 +2,7 @@
  * declarations: platform/include/fnvnx_render_hooks.h). nxd3d_gpu_call is not here: its definition is
  * platform/guest/platform_glue.cpp. */
 #include "w32.h"
-#include "fnvnx_render_hooks.h"
+#include "../include/fnvnx_render_hooks.h"
 
 extern "C" {
 HDC fnvnx_gdi_memdc_over_bits(void *mem, int w, int h, int bpp, const uint32_t *masks, size_t pitch);

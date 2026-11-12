@@ -7,8 +7,8 @@
  * unreferenced for as long as the other object lives (the weak graph pointer of JoinFilterGraph). */
 #include "combridge.h"
 
-#include "fnvnx_boundary.h"
-#include "fnvnx_guestfn.h"
+#include "../include/fnvnx_boundary.h"
+#include "../include/fnvnx_guestfn.h"
 #include "../os/os.h"
 
 #include <stdlib.h>

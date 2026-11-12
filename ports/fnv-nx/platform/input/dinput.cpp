@@ -8,11 +8,11 @@
  * buffered (DIPROP_BUFFERSIZE + GetDeviceData) access are both implemented; mouse axes are relative by default.
  */
 #include <dinput.h>
-#include "fnvnx_win32_ext.h"
+#include "../include/fnvnx_win32_ext.h"
 
 #include "input.h"
 #include "../os/os.h"
-#include "fnvnx_clock.h"
+#include "../include/fnvnx_clock.h"
 
 #include <stddef.h>
 #include <new>
