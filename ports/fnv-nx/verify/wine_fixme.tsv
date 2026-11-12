@@ -22,3 +22,10 @@
 45	D3DPERF_SetRegion	wine-9.0:dlls/d3d9/d3d9_main.c:D3DPERF_SetRegion	void	
 46	IDirect3DDevice9::SetDialogBoxMode	wine-9.0:dlls/wined3d/device.c:wined3d_device_set_dialog_box_mode	u32	0
 47	IDirect3DDevice9Ex::ComposeRects	wine-9.0:dlls/d3d9/device.c:d3d9_device_ComposeRects	u32	0x80004001
+48	IDirect3DDevice9::DrawRectPatch	wine-9.0:dlls/d3d9/device.c:d3d9_device_DrawRectPatch	u32	0
+49	IDirect3DDevice9::DrawTriPatch	wine-9.0:dlls/d3d9/device.c:d3d9_device_DrawTriPatch	u32	0
+50	IDirect3DDevice9::DeletePatch	wine-9.0:dlls/d3d9/device.c:d3d9_device_DeletePatch	u32	0x8876086C
+51	IDirect3D9::RegisterSoftwareDevice	wine-9.0:dlls/wined3d/directx.c:wined3d_register_software_device	u32	0
+52	DebugSetMute	wine-9.0:dlls/d3d9/d3d9_main.c:DebugSetMute	void	
+53	IDirect3DShaderValidator9::AddRef	wine-9.0:dlls/d3d9/d3d9_main.c:shader_validator_AddRef	u32	2
+54	IDirect3DShaderValidator9::Release	wine-9.0:dlls/d3d9/d3d9_main.c:shader_validator_Release	u32	1
