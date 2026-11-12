@@ -38,6 +38,16 @@
    "at": "/ms",
    "upstream": "text rendering (learn.microsoft.com) of 172 pages of MicrosoftDocs/win32 desktop-src/direct3dhlsl, the D3D9 shader assembly reference; fetched 2026-11 by the L6 worker",
    "use": "render/shaders/total/sm_table.py, not a build input"
+  },
+  {
+   "name": "wine-wined3d",
+   "repo": "fnv-nx-build",
+   "ref": "tools/wine-wined3d",
+   "commit": "9fa10f835a288b72b28da6ea70bcb233793ef0fc",
+   "tree_sha256": "d5c1d2a96a627fadda5f3c162c0121d391d3562e78931b9017b2f74cb397ec29",
+   "at": "/wine-wined3d",
+   "upstream": "https://gitlab.winehq.org/wine/wine.git tag wine-9.0 fd1153552d779e1ac14b0b1c48fbd1cde894eb0a (dlls/wined3d/glsl_shader.c, shader.c, shader_sm1.c, wined3d_private.h)",
+   "use": "reference implementation for translator semantics (owner decision: Wine 9.0 is the accepted reference), not a build input"
   }
  ]
 }
