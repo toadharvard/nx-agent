@@ -444,30 +444,74 @@ static void vtmap_line(tree vt, HOST_WIDE_INT off)
           (long)tree_to_shwi(BINFO_OFFSET(b)), mangle_type_string(t), path.c_str());
 }
 
-static void finish_unit(void *, void *)
+/* VTSYM1, the rule: wherever `_ZTV<C>` (or `_ZTC...`) is emitted, every address point `<table>.fnvnx_ap<off>` that the table has is
+   defined with the table: same binding and visibility, in the table's own section and comdat group (switch_to_section of the
+   table's own section, which is what puts the `.set` inside `.section <table section>,"a[w]G",@progbits,<group>,comdat`), so it is
+   discarded together with the table. The address points of a table are the union of
+     (a) the entries after a sub-table's RTTI slot in its initializer (-frtti),
+     (b) for `_ZTV<C>`: the BINFO_VTABLE `&_ZTV<C> + off` of every base subobject of C (the front end's own account of the table's
+         sub-tables, independent of -fno-rtti, which leaves no `_ZTI` slot to find),
+     (c) every `<table>.fnvnx_ap<off>` that this unit referenced (ap_decls): the table is emitted here, so its reference is defined here.
+   A referenced point that is no entry-aligned offset inside the table's size is an error, never a silent miss: the symbol would stay
+   undefined. The .fnvnx.vtmap lines go out for the same set. */
+static void table_aps(tree vt, std::set<HOST_WIDE_INT> &aps)
 {
-  varpool_node *n;
-  FOR_EACH_DEFINED_VARIABLE(n) {
-    tree vt = n->decl;
-    if (!is_table(vt) || !TREE_ASM_WRITTEN(vt) || !DECL_INITIAL(vt) || TREE_CODE(DECL_INITIAL(vt)) != CONSTRUCTOR) continue;
-    const char *base = asmname(vt);
-    HOST_WIDE_INT esz = int_size_in_bytes(TREE_TYPE(TREE_TYPE(vt)));
+  const char *base = asmname(vt);
+  HOST_WIDE_INT esz = int_size_in_bytes(TREE_TYPE(TREE_TYPE(vt)));
+  if (DECL_INITIAL(vt) && TREE_CODE(DECL_INITIAL(vt)) == CONSTRUCTOR) {
     unsigned HOST_WIDE_INT ix; tree idx, val; bool after_rtti = false;
-    /* an address point is the entry after a sub-table's RTTI slot */
-    std::vector<HOST_WIDE_INT> aps;
     FOR_EACH_CONSTRUCTOR_ELT(CONSTRUCTOR_ELTS(DECL_INITIAL(vt)), ix, idx, val) {
-      if (after_rtti) {
-        aps.push_back(ix * esz);
-        std::string s = std::string(base) + ".fnvnx_ap" + std::to_string((long long)(ix * esz));
-        fprintf(asm_out_file, "\t%s\t%s\n\t.type\t%s, %%object\n\t.set\t%s, %s+%ld\n",
-                DECL_WEAK(vt) ? ".weak" : TREE_PUBLIC(vt) ? ".globl" : ".local", s.c_str(), s.c_str(), s.c_str(), base, (long)(ix * esz));
-        if (DECL_VISIBILITY(vt) == VISIBILITY_HIDDEN) fprintf(asm_out_file, "\t.hidden\t%s\n", s.c_str());
-      }
+      if (after_rtti) aps.insert(ix * esz);
       tree v = val;
       STRIP_NOPS(v);
       after_rtti = TREE_CODE(v) == ADDR_EXPR && VAR_P(TREE_OPERAND(v, 0)) && DECL_ASSEMBLER_NAME_SET_P(TREE_OPERAND(v, 0))
                    && !strncmp(asmname(TREE_OPERAND(v, 0)), "_ZTI", 4);
     }
+  }
+  if (!strncmp(base, "_ZTV", 4) && DECL_CONTEXT(vt) && TYPE_P(DECL_CONTEXT(vt)) && TYPE_BINFO(DECL_CONTEXT(vt))) {
+    std::vector<tree> todo(1, TYPE_BINFO(DECL_CONTEXT(vt)));
+    std::set<tree> seen;
+    while (!todo.empty()) {
+      tree b = todo.back(); todo.pop_back();
+      if (!seen.insert(b).second) continue;
+      HOST_WIDE_INT o;
+      tree e = BINFO_VTABLE(b);
+      if (e && table_ref(e, &o) == vt && o > 0) aps.insert(o);
+      tree c;
+      for (unsigned i = 0; BINFO_BASE_ITERATE(b, i, c); i++) todo.push_back(c);
+    }
+  }
+  std::string pre = std::string(base) + ".fnvnx_ap";
+  for (std::map<std::string, tree>::iterator d = ap_decls.lower_bound(pre); d != ap_decls.end() && d->first.compare(0, pre.size(), pre) == 0; ++d) {
+    HOST_WIDE_INT o = atol(d->first.c_str() + pre.size());
+    HOST_WIDE_INT sz = DECL_SIZE_UNIT(vt) && tree_fits_shwi_p(DECL_SIZE_UNIT(vt)) ? tree_to_shwi(DECL_SIZE_UNIT(vt)) : -1;
+    if (o < 0 || o % esz || (sz >= 0 && o >= sz)) {
+      error("VTSYM1: table %qD is emitted here but its referenced address point %s is not an entry offset inside it", vt, d->first.c_str());
+      continue;
+    }
+    aps.insert(o);
+  }
+}
+
+static void finish_unit(void *, void *)
+{
+  varpool_node *n;
+  FOR_EACH_DEFINED_VARIABLE(n) {
+    tree vt = n->decl;
+    if (!is_table(vt) || !TREE_ASM_WRITTEN(vt)) continue;
+    const char *base = asmname(vt);
+    std::set<HOST_WIDE_INT> aps;
+    table_aps(vt, aps);
+    if (aps.empty()) continue;
+    section *saved = in_section;
+    switch_to_section(get_variable_section(vt, false));   /* the table's own section and comdat group */
+    for (HOST_WIDE_INT a : aps) {
+      std::string s = std::string(base) + ".fnvnx_ap" + std::to_string((long long)a);
+      fprintf(asm_out_file, "\t%s\t%s\n\t.type\t%s, %%object\n\t.set\t%s, %s+%ld\n",
+              DECL_WEAK(vt) ? ".weak" : TREE_PUBLIC(vt) ? ".globl" : ".local", s.c_str(), s.c_str(), s.c_str(), base, (long)a);
+      if (DECL_VISIBILITY(vt) == VISIBILITY_HIDDEN) fprintf(asm_out_file, "\t.hidden\t%s\n", s.c_str());
+    }
+    if (saved) switch_to_section(saved);
     fprintf(asm_out_file, "\t.pushsection\t.fnvnx.vtmap,\"\",%%progbits\n");
     for (HOST_WIDE_INT a : aps) vtmap_line(vt, a);
     fprintf(asm_out_file, "\t.popsection\n");

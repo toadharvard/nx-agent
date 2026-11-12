@@ -1190,3 +1190,15 @@ The new table lines, the faults the stub boot ran past to get there:
 * The host v2/v3 implementations (threads, wait/wake, files, audren, hid, map_fixed, ext_call) compile but have
   not run; the emulator's Python host stands in for them.
 * S4/S7 test suites have not been run inside the guest (dropped for the full-link priority).
+
+## Address points of vtables (VTSYM1, `toolchain/sdd/fnvnx_sdd.cc`)
+
+Code and VTTs address a sub-table as `&_ZTV<C> + off`; the plugin turns each into the symbol `_ZTV<C>.fnvnx_ap<off>`. The rule that keeps
+every such symbol defined: wherever `_ZTV<C>` (or a construction vtable `_ZTC...`) is emitted, every address point of the table is defined
+there, with the table's binding and visibility, in the table's own section and comdat group (the symbol is set inside
+`.section <table section>,"a[w]G",@progbits,<group>,comdat`), so it is discarded with the table and defined wherever the table is. The
+address points of a table are the union of the entries after a sub-table's RTTI slot (with RTTI), the `BINFO_VTABLE` offset of every base
+subobject of the class (the front end's own account, independent of `-fno-rtti`) and every `<table>.fnvnx_ap<off>` the unit referenced. A
+referenced point that is not an entry offset inside the table is a compile error. The `.fnvnx.vtmap` lines go out for the same set. Tests:
+`link/tests/test_vtsym.py` (inline-virtual class, COM-style interface, key-function class, virtual bases; with and without `-fno-rtti`,
+`-fdata-sections`; two units linked with `ld -r`).

@@ -61,6 +61,7 @@
     "ports/fnv-nx/link/gate_disp.py"
    ]
   },
+<<<<<<< HEAD
   "test_gate_names.py": {
    "references": [
     {
@@ -95,6 +96,18 @@
    ],
    "subject": [
     "ports/fnv-nx/link/odr.py"
+=======
+  "test_vtsym.py": {
+   "references": [
+    {
+     "anchor": "## Address points of vtables (VTSYM1, `toolchain/sdd/fnvnx_sdd.cc`)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/docs/TOOLCHAIN.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc"
+>>>>>>> fa88efa
    ]
   }
  }
