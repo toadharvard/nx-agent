@@ -26,10 +26,11 @@
  *          fast   __fastcall: the first two integer arguments in ecx, edx
  *          stack  everything on the stack (__cdecl and __stdcall alike: the callee's own `ret N` tells them apart)
  *   ret    v | i (32-bit integer or pointer) | q (64-bit integer) | f | d | a<N> (an N-byte aggregate returned in
- *          general registers) | a<N>hf, a<N>hd (a homogeneous aggregate of floats, of doubles, returned in
- *          floating-point registers) | m<N> (returned in memory the caller provides)
- *   arg    i | q | f | d | s<N>g (an N-byte aggregate in general registers or on the stack) | s<N>hf, s<N>hd (a
- *          homogeneous aggregate of floats, of doubles) | s<N>r (passed as a reference to a copy)
+ *          general registers) | a<N>h<elt> (a homogeneous aggregate, elt = f d q h v8 v16 as the backend's part mode says, returned in
+ *          floating-point registers) | m<N> (returned in memory the caller provides); a trailing x on an `a` result: the AAPCS side
+ *          returns it in registers but the x86 callee returns it through the hidden pointer (a type that is not a POD, see msvc_pod)
+ *   arg    i | q | f | d | s<N>g (an N-byte aggregate in general registers or on the stack) | s<N>h<elt> (a
+ *          homogeneous aggregate) | s<N>r (passed as a reference to a copy)
  * (A homogeneous aggregate names its element type: {float, float} and {double} are both 8 bytes and travel in
  * different registers, so the size alone does not say how a bridge receives or returns it.)
  *
@@ -69,6 +70,9 @@
 #include "target.h"
 #include "calls.h"
 #include "output.h"
+#include "langhooks.h"
+#include <dlfcn.h>
+#include <string.h>
 #include <set>
 #include <string>
 #include <vector>
@@ -122,6 +126,19 @@ static tree new_site()
 /* the backend's own initialiser of the cumulative state (config/aarch64/aarch64.cc, INIT_CUMULATIVE_ARGS expands to it; cc1 exports it to plugins) */
 extern void aarch64_init_cumulative_args(CUMULATIVE_ARGS *, const_tree, rtx, const_tree, unsigned, bool = false);
 
+/* Is `t` a POD type in the sense of the x86 convention's documentation (learn.microsoft.com, "Argument Passing and Naming Conventions": "Structures that are
+ * not PODs will not be returned in registers"; Agner Fog, Calling conventions, table 7: a constructor, a copy constructor, a destructor, virtual functions or
+ * inheritance make the result go through the hidden pointer)? The front end of C++ owns that predicate (cp/tree.cc pod_type_p); cc1 (C) has no such type, so the
+ * symbol is looked up at run time, only for a C++ unit, and a C unit's aggregate is a POD by the language. */
+static bool msvc_pod(tree t)
+{
+  if (strncmp(lang_hooks.name, "GNU C++", 7)) return true;
+  static bool (*pod)(const_tree);
+  if (!pod) pod = (bool (*)(const_tree))dlsym(RTLD_DEFAULT, "_Z10pod_type_pPK9tree_node");
+  if (!pod) { error("DISPATCH1: the C++ front end does not export pod_type_p"); return true; }
+  return pod(t);
+}
+
 /* How the target passes a value is asked of the pinned compiler's own backend, never classified here (ASM-001): pass_by_reference, then
  * targetm.calls.function_arg on a fresh cumulative state (the argument is the first of the call), and for a result targetm.calls.function_value.
  * The rtx says where the value lives: a REG or a PARALLEL of vector registers is a homogeneous aggregate, and the part mode names the element;
@@ -172,7 +189,8 @@ static bool shape(tree t, bool ret, tree fntype, std::string &out, location_t lo
   if (ret) {
     if (aggregate_value_p(t, fntype)) { out += "m" + n; return true; }
     if (!reg_class(targetm.calls.function_value(t, fntype, false), he, loc)) return false;
-    out += "a" + n + he; return true;
+    /* "x": the x86 callee returns it through the hidden pointer although the AAPCS side returns it in registers (a type that is not a POD) */
+    out += "a" + n + he + ((TREE_CODE(t) == RECORD_TYPE || TREE_CODE(t) == UNION_TYPE) && !msvc_pod(t) ? "x" : ""); return true;
   }
   CUMULATIVE_ARGS cum;
   INIT_CUMULATIVE_ARGS(cum, fntype, NULL_RTX, NULL_TREE, 0);
