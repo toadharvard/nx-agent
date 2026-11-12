@@ -1,5 +1,5 @@
 
-	TITLE	Z:\tmp\claude-0\clpod\cases.cpp
+	TITLE	cases.cpp
 	.686P
 	.XMM
 	include listing.inc
@@ -652,7 +652,7 @@ PUBLIC	?c@N0@@YAXXZ					; N0::c
 EXTRN	?use@@YAXPAX@Z:PROC				; use
 EXTRN	?f@N0@@YA?AUS@1@XZ:PROC				; N0::f
 ; Function compile flags: /Ogtpy
-; File z:\tmp\claude-0\clpod\cases.cpp
+; File cases.cpp
 ;	COMDAT ?c@N0@@YAXXZ
 _TEXT	SEGMENT
 _x$ = -1						; size = 1
