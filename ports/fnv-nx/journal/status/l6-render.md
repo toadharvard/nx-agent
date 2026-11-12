@@ -212,3 +212,10 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - w1b merged w5 b622cbf8 by fast-forward. The translator root is red only on the lib/sha256 include until L4's root reaches the trunk through w6.
     - L4 w7 is moving lib/sha256 to include [] with a quoted relative include, which passes on both recipe lines. w6 retakes it.
     - The shim doc→tool class change has gone to the orchestrator and L5.
+- 03:55Z
+    - Orchestrator: d3dx9_31 joins the image set as a may-load image under the superset rule (trunk CLAUDE.md b6a8e5d).
+    - Defect in the translator root (w1b): it is a guest product but is built by the host x86_64 gcc-13 with -fPIC and target host. Order sent:
+        - the msvcmodel external with the plugins, platform's semantics flags, target guest;
+        - a host build only as the w15 `translator@host` variant.
+      objstub on b622cbf8 is red with no functions judged (the x86_64 build has no plugin headers); it is rerun after the fix.
+    - The w5 container fails envcheck on the /usr/include tree hash (want a40af4d0, have 59bd1db7). Sent to L1. Runs there are measurements, not verdicts.
