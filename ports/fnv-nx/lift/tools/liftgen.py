@@ -204,12 +204,15 @@ def finish(a):
     assert t.startswith('#include "fnvl.h"\n#include "imp.h"\n')
     open(pk + '/imp.cpp', 'w').write('#include "fnvl_prelude.h"\n' + t.split('\n', 1)[1])
     assert not set(k for k, *_ in imp) & code
-    syms.update({k: s for k, s, *_ in imp})
+    kind = {x: 'code' for x in code}                      # the kind of an entry is the producer set its key came from: the keys of texts, the rows of impgen.generate, EH_KEYS (pairwise disjoint)
+    for k, s, *_ in imp:
+        assert k not in syms
+        syms[k] = s; kind[k] = 'import'
     for k, s in EH_KEYS:
         assert k not in syms
-        syms[k] = s
+        syms[k] = s; kind[k] = 'runtime'
     w = lambda n, rows: open('%s/%s.tsv' % (pk, n), 'w').write(''.join('\t'.join(map(str, x)) + '\n' for x in rows))
-    rows = [('%08x' % x, s, 'code' if x in code else 'import' if s.startswith('I_') or x >= 0x00100000 else 'runtime') for x, s in sorted(syms.items())]
+    rows = [('%08x' % x, s, kind[x]) for x, s in sorted(syms.items())]
     w('entries', rows)
     open(pk + '/entries.tsv', 'a').write(open(pk + '/imp_entries.tsv').readline())      # `# table_id <sha256 of bridge.tsv>` (last line)
     asm, h = dispgen.table(rows)      # the one dispatcher generator (tools/dispgen.py): disp.S is a pure function of the entry rows
