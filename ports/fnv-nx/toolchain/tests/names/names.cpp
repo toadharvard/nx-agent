@@ -8,8 +8,10 @@
 #define __int64 long long
 typedef __SIZE_TYPE__ size_t;
 #define EXPORT
+#define KEEP __attribute__((used))        // g++ emits this inline member, as cl's dllexport emits every member
 #else
-#define EXPORT __declspec(dllexport)        // cl then emits every member, as g++ -fkeep-inline-functions does
+#define EXPORT __declspec(dllexport)        // cl then emits every member
+#define KEEP
 #endif
 typedef unsigned int uint;
 struct S { int a; };
@@ -66,38 +68,38 @@ namespace N { int n_i; namespace M { D n_d; const D *n_pd; } }
 
 // ---- members
 struct EXPORT Mem {
-  Mem() {} Mem(int) {} Mem(const Mem &) {} ~Mem() {}
-  void m0() {} void m1() const {} void m2() volatile {} void m3() const volatile {}
-  static void s0() {} static int s_i; static const int s_ci; static S s_s; static const char *s_p; static int s_arr[2];
-  virtual void v0() {} virtual int v1(int) const { return 0; }
-  int __stdcall ms(int) { return 0; } int __cdecl mc(int) { return 0; } int __fastcall mf(int) { return 0; }
-  void mv(int, ...) {}
-  Mem &operator=(const Mem &) { return *this; }
-  bool operator==(const Mem &) const { return true; } bool operator!=(const Mem &) const { return false; }
-  bool operator<(const Mem &) const { return false; } bool operator>(const Mem &) const { return false; }
-  bool operator<=(const Mem &) const { return false; } bool operator>=(const Mem &) const { return false; }
-  Mem operator+(const Mem &) const { return *this; } Mem operator-(const Mem &) const { return *this; }
-  Mem operator-() const { return *this; } Mem operator+() const { return *this; }
-  Mem operator*(const Mem &) const { return *this; } int operator*() const { return 0; }
-  Mem operator/(const Mem &) const { return *this; } Mem operator%(const Mem &) const { return *this; }
-  Mem *operator&() { return this; } Mem operator&(const Mem &) const { return *this; }
-  Mem operator|(const Mem &) const { return *this; } Mem operator^(const Mem &) const { return *this; }
-  Mem operator~() const { return *this; } bool operator!() const { return false; }
-  bool operator&&(const Mem &) const { return false; } bool operator||(const Mem &) const { return false; }
-  Mem &operator++() { return *this; } Mem operator++(int) { return *this; }
-  Mem &operator--() { return *this; } Mem operator--(int) { return *this; }
-  Mem &operator+=(int) { return *this; } Mem &operator-=(int) { return *this; } Mem &operator*=(int) { return *this; }
-  Mem &operator/=(int) { return *this; } Mem &operator%=(int) { return *this; } Mem &operator&=(int) { return *this; }
-  Mem &operator|=(int) { return *this; } Mem &operator^=(int) { return *this; } Mem &operator<<=(int) { return *this; }
-  Mem &operator>>=(int) { return *this; } Mem operator<<(int) const { return *this; } Mem operator>>(int) const { return *this; }
-  int operator[](int) const { return 0; } int operator()(int, int) const { return 0; } Mem *operator->() { return this; }
-  int operator->*(int) { return 0; } Mem operator,(int) { return *this; }
-  operator int() const { return 0; } operator const char *() const { return 0; } operator S() const { S s = {0}; return s; }
-  void *operator new(size_t) { return 0; } void operator delete(void *) {}
-  void *operator new[](size_t) { return 0; } void operator delete[](void *) {}
-  void *operator new(size_t, int) { return 0; } void operator delete(void *, int) {}
-protected: void p0() {} static void ps0() {} virtual void pv0() {} static int ps_i;
-private: void q0() {} static void qs0() {} virtual void qv0() {} static int qs_i;
+  KEEP Mem() {} KEEP Mem(int) {} KEEP Mem(const Mem &) {} KEEP ~Mem() {}
+  KEEP void m0() {} KEEP void m1() const {} KEEP void m2() volatile {} KEEP void m3() const volatile {}
+  KEEP static void s0() {} static int s_i; static const int s_ci; static S s_s; static const char *s_p; static int s_arr[2];
+  KEEP virtual void v0() {} KEEP virtual int v1(int) const { return 0; }
+  KEEP int __stdcall ms(int) { return 0; } KEEP int __cdecl mc(int) { return 0; } KEEP int __fastcall mf(int) { return 0; }
+  KEEP void mv(int, ...) {}
+  KEEP Mem &operator=(const Mem &) { return *this; }
+  KEEP bool operator==(const Mem &) const { return true; } KEEP bool operator!=(const Mem &) const { return false; }
+  KEEP bool operator<(const Mem &) const { return false; } KEEP bool operator>(const Mem &) const { return false; }
+  KEEP bool operator<=(const Mem &) const { return false; } KEEP bool operator>=(const Mem &) const { return false; }
+  KEEP Mem operator+(const Mem &) const { return *this; } KEEP Mem operator-(const Mem &) const { return *this; }
+  KEEP Mem operator-() const { return *this; } KEEP Mem operator+() const { return *this; }
+  KEEP Mem operator*(const Mem &) const { return *this; } KEEP int operator*() const { return 0; }
+  KEEP Mem operator/(const Mem &) const { return *this; } KEEP Mem operator%(const Mem &) const { return *this; }
+  KEEP Mem *operator&() { return this; } KEEP Mem operator&(const Mem &) const { return *this; }
+  KEEP Mem operator|(const Mem &) const { return *this; } KEEP Mem operator^(const Mem &) const { return *this; }
+  KEEP Mem operator~() const { return *this; } KEEP bool operator!() const { return false; }
+  KEEP bool operator&&(const Mem &) const { return false; } KEEP bool operator||(const Mem &) const { return false; }
+  KEEP Mem &operator++() { return *this; } KEEP Mem operator++(int) { return *this; }
+  KEEP Mem &operator--() { return *this; } KEEP Mem operator--(int) { return *this; }
+  KEEP Mem &operator+=(int) { return *this; } KEEP Mem &operator-=(int) { return *this; } KEEP Mem &operator*=(int) { return *this; }
+  KEEP Mem &operator/=(int) { return *this; } KEEP Mem &operator%=(int) { return *this; } KEEP Mem &operator&=(int) { return *this; }
+  KEEP Mem &operator|=(int) { return *this; } KEEP Mem &operator^=(int) { return *this; } KEEP Mem &operator<<=(int) { return *this; }
+  KEEP Mem &operator>>=(int) { return *this; } KEEP Mem operator<<(int) const { return *this; } KEEP Mem operator>>(int) const { return *this; }
+  KEEP int operator[](int) const { return 0; } KEEP int operator()(int, int) const { return 0; } KEEP Mem *operator->() { return this; }
+  KEEP int operator->*(int) { return 0; } KEEP Mem operator,(int) { return *this; }
+  KEEP operator int() const { return 0; } KEEP operator const char *() const { return 0; } KEEP operator S() const { S s = {0}; return s; }
+  KEEP void *operator new(size_t) { return 0; } KEEP void operator delete(void *) {}
+  KEEP void *operator new[](size_t) { return 0; } KEEP void operator delete[](void *) {}
+  KEEP void *operator new(size_t, int) { return 0; } KEEP void operator delete(void *, int) {}
+protected: KEEP void p0() {} KEEP static void ps0() {} KEEP virtual void pv0() {} static int ps_i;
+private: KEEP void q0() {} KEEP static void qs0() {} KEEP virtual void qv0() {} static int qs_i;
 public: void callall();
 };
 int Mem::s_i; const int Mem::s_ci = 1; S Mem::s_s; const char *Mem::s_p; int Mem::s_arr[2]; int Mem::ps_i; int Mem::qs_i;
@@ -113,7 +115,7 @@ struct D1 : B1, B2, B3 { virtual void a() {} virtual void b() {} virtual void b2
 struct VB { virtual void vb() {} virtual ~VB() {} int w; };
 struct V1 : virtual VB { virtual void vb() {} virtual void v1() {} };
 struct V2 : virtual VB { virtual void v2() {} };
-struct VD : V1, V2 { virtual void vb() {} virtual ~VD() {} };
+struct VD : V1, V2 { virtual void vb() {} KEEP virtual ~VD() {} };
 struct NV : virtual S { int n; };
 namespace N { struct ND : B1, B2 { virtual void b() {} }; }
 
@@ -139,11 +141,11 @@ template <class T> void tfa(T (&)[3], T1<T> &) {}
 
 // ---- local scopes, local classes
 int ls0() { static int a; { static int b; { static int c; b += c; } a += b; } { static int d; a += d; } return a; }
-inline int ls1(int x) { static S s; struct L { int lm() { static int q; return q; } virtual void lv() {} }; L l; for (int i = 0; i < x; i++) { static int e; e++; } if (x) { static int g; g++; } else { static int h; h++; } return l.lm() + s.a; }
+KEEP inline int ls1(int x) { static S s; struct L { int lm() { static int q; return q; } virtual void lv() {} }; L l; for (int i = 0; i < x; i++) { static int e; e++; } if (x) { static int g; g++; } else { static int h; h++; } return l.lm() + s.a; }
 int Mem_ls(Mem *m);
 struct LS { int m() { static int a; { static int b; a += b; } return a; } static int sm() { static E e; return e; } };
 template <class T> struct TLS { int m() { static T a; return (int)a; } };
-struct EXPORT LC { LC() { static int a; a++; } ~LC() { static int b; b++; } };
+struct EXPORT LC { KEEP LC() { static int a; a++; } KEEP ~LC() { static int b; b++; } };
 namespace { int anon_i; void anon_f() {} struct AnonS { void m() {} }; }
 static int st_i; static void st_f() {}
 struct Anon { union { int a; float b; }; struct { int c; } s; enum { AX } e; void m() {} };

@@ -2,7 +2,7 @@
 """Test of toolchain/layout/fnvnx_layout.cc (section .fnvnx.layout), built from the tracked source with the argv of the recipe's
 plugin stage (plugbuild.py). The layout stage includes toolchain/names/fnvnx_names.cc (one mangler): the names source is an
 input of the layout plugin's build. Compiles layout/layout.cpp (ILP32) with the pi and layout plugins, with a garbage
-collection after every function (--param ggc-min-expand=0 ggc-min-heapsize=0), and checks the lines read in-process from the
+collection after every function (the recipe's `gcstress` variant, verify/recipe.py GCSTRESS_*; its object must be byte-equal to the root's), and checks the lines read in-process from the
 object: key (MSVC's decorated type name), size, align, members, bases; every type of pi's `types` column has a layout line; an
 unknown plugin argument is an error. No network, no game data. Run: python3 -I <this file> from the checkout root."""
 import os
@@ -63,10 +63,15 @@ def main():
     try:
         so = [pb.build(n, td) for n in ('pi', 'layout')]
         obj = os.path.join(td, 't.o')
-        r = pb.compile(FIX, obj, so, args=['--param', 'ggc-min-expand=0', '--param', 'ggc-min-heapsize=0'])
-        check('compiles', r.returncode == 0, r.stderr[:2000])
+        r = pb.compile(FIX, obj, so, variant=pb.recipe.GCSTRESS_VARIANT)   # the root's declared variant: a collection after every function
+        check('compiles under the %s variant' % pb.recipe.GCSTRESS_VARIANT, r.returncode == 0, r.stderr[:2000])
         if r.returncode == 0:
             checks(obj)
+            plain = os.path.join(td, 'plain.o')
+            r = pb.compile(FIX, plain, so)
+            check('compiles in the root itself', r.returncode == 0, r.stderr[:2000])
+            if r.returncode == 0:   # the variant changes the compiler's own collection, not the code: the objects are the same bytes
+                check('the %s variant\'s object is byte-equal to the root\'s' % pb.recipe.GCSTRESS_VARIANT, open(obj, 'rb').read() == open(plain, 'rb').read())
         r = pb.compile(FIX, os.path.join(td, 'x.o'), so, args=['-fplugin-arg-fnvnx_layout-mode=1'])
         check('a plugin argument is an error: the recipe fixes them', r.returncode != 0 and 'arguments must be' in r.stderr and 'fnvnx_layout' in r.stderr, r.stderr[:500])
     finally:
