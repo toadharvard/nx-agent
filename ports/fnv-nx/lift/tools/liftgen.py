@@ -228,8 +228,12 @@ def finish(a):
 def recipe(ref, commit, tree):
     """lift/pack/build.json: the flags are PACK_CXX_FLAGS (one source; test/instest.py imports them), the units are the fixed names."""
     gc = json.load(open(os.path.join(LIFT, '..', 'verify', 'guest_compiler.json')))   # the one source of the guest compiler (msvcmodel)
+    sys.path.insert(0, os.path.join(LIFT, '..', 'verify')); import recipe as RC      # the plugin rule is recipe.py's (one source): the full set, in its order, a lifted root takes LIFTED_ARGS
+    want = dict(RC.PLUGIN_ARGS, **RC.LIFTED_ARGS)
+    plugins = [dict(name=n, source=RC.PLUGIN_SOURCES[n], args=want[n], **({'inputs': list(RC.PLUGIN_INPUTS[n])} if n in RC.PLUGIN_INPUTS else {})) for n in RC.PLUGIN_SOURCES]
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': gc['external']['name'], 'cc': gc['cc'], 'cxx': gc['cxx']},
            'flags': {'c': list(PACK_C_FLAGS), 'cxx': list(PACK_CXX_FLAGS), 'asm': []},
+           'plugins': plugins, 'plugin_cxx': 'x86_64-linux-gnu-g++-13',      # env.json driver of the compiler's GCC version (verify/samples/platform.build.json)
            'include': ['/ext/liftpack/inc'], 'units': 'all',
            'generated': [{'tool': 'ports/fnv-nx/lift/tools/packcopy.py', 'args': ['/ext/liftpack', '/out'], 'inputs': [], 'outputs': unit_names()}],
            'link': None,
