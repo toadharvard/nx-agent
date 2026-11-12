@@ -670,17 +670,6 @@
    "owner": "L1"
   },
   {
-   "id": "ASM-800",
-   "text": "The -Wmismatched-tags warning is not suppressed for a declaration (system header, #pragma GCC diagnostic), so the names plugin sees every class key.",
-   "used_by": [
-    "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
-   ],
-   "aliases": [],
-   "status": "REMOVE",
-   "removed_by": "planned: gate namegate (L2 w5) compares every name with cl's symbol table and so certifies the names; closes when L2's plugin sources reach the trunk",
-   "owner": "L2"
-  },
-  {
    "id": "ASM-051",
    "text": "regsites.tsv is complete over the exe and the modules (the registry-site pass reports what it cannot bind as dynamic, never skips); the seed unit and the registry implementation are the only code that reaches the hive, and the implementation creates no key by itself.",
    "used_by": [
@@ -730,6 +719,320 @@
    "owner": "L1"
   },
   {
+   "id": "ASM-203",
+   "text": "capstone group tags classify the instruction-set extension of a form correctly.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
+    "ports/fnv-nx/lift/fnvlift/f_cpufeat.py"
+   ],
+   "aliases": [
+    "ASM-302",
+    "L3b:A-GROUPS"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: same decoder-agreement gate, extension class compared with XED isa-set on every instruction",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-204",
+   "text": "No x87/SSE exception is ever unmasked (I-FPMASK); fwait and FP arithmetic never raise.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-002.md",
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
+    "ports/fnv-nx/journal/status/l3b-lift.md",
+    "ports/fnv-nx/lift/fnvlift/f_x87.py",
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
+    "ports/fnv-nx/lift/fnvlift/fpfacts.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "ports/fnv-nx/lift/test/instest.py",
+    "ports/fnv-nx/lift/test/mmxtest.py",
+    "ports/fnv-nx/lift/tools/fpstate.py"
+   ],
+   "aliases": [
+    "ASM-305",
+    "L3b:A-FPMASK",
+    "L3b:I-FPMASK"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: every control-word write (fldcw, ldmxcsr, fninit, frstor, fldenv, fxrstor, _controlfp/_control87 with operand) found statically and proved to keep the masks; if not proved, exact unmasked-exception semantics before the first frame (orchestrator decision 2026-11-11; owner of the work L3b)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-205",
+   "text": "Test harness only: sticky flags not observed (I-FPSTICKY set in instest ASSUME).",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
+    "ports/fnv-nx/lift/fnvlift/fpfacts.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "ports/fnv-nx/lift/test/instest.py",
+    "ports/fnv-nx/lift/test/mmxtest.py",
+    "ports/fnv-nx/lift/tools/fpstate.py"
+   ],
+   "aliases": [
+    "ASM-306",
+    "L3b:A-FPSTICKY",
+    "L3b:I-FPSTICKY"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: test-only; product path maintains the flags",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-206",
+   "text": "GCC keeps an FP operation before the FPSR read that follows it in program order (GCC has no FENV_ACCESS).",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "ports/fnv-nx/lift/test/fpflags.py"
+   ],
+   "aliases": [
+    "ASM-307",
+    "L3b:A-ORDER"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: not compiler correctness: GCC is allowed to reorder. Closing rule: FPSR read through an operation the compiler must order (asm with FP operand dependency), then gate on objects",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-207",
+   "text": "Host code between guest instructions (imports, native bodies) runs with the guest FPSR parked or raises nothing the guest sees.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "ASM-308",
+    "L3b:A-NATIVE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: rt/imp.h parks FPSR on imports; native bodies need the same by rule (L2/L3a)",
+   "owner": "L3a+L2"
+  },
+  {
+   "id": "ASM-208",
+   "text": "A handler resuming by ContinueExecution does not change the FP flag owner nor leave the x87/MMX register file in another carrier format.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "ASM-309",
+    "L3b:A-RESUME"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: closable by canonicalising on resume in rt/seh.c (L3a)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-209",
+   "text": "An MMX read of a register popped by a static-stack function, with no MMX write since, reads data undefined on the CPU too.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "ASM-310",
+    "L3b:A-STALE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the CPU value is defined (old bits); closing = write back on pop or prove no such read statically",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-210",
+   "text": "fnsave stores the real indefinite for an empty register; fldenv/frstor treat an empty-tagged register per the tag only.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-001.md",
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "ports/fnv-nx/lift/test/instest_extra.py"
+   ],
+   "aliases": [
+    "ASM-311",
+    "L3b:A-EMPTY"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the CPU stores the kept 80-bit image; fv_free keeps it, so this can be made exact and the assumption removed",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-211",
+   "text": "ES (bit 7) and B (bit 15) of FSW are 0.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "ASM-312",
+    "L3b:A-ES"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: follows the A-FPMASK fact, or is implemented with the unmasked semantics",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-212",
+   "text": "FDP after an instruction without memory operand is unchanged (SDM leaves it unspecified).",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-001.md",
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "ASM-313",
+    "L3b:A-FDP"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: pin to the reference CPU by a host table, then fact",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-213",
+   "text": "FDS is DS whenever FDP != 0 (FS-relative operand reported with DS).",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-001.md",
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "ASM-314",
+    "L3b:A-FDS"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: wrong for FS operands on the CPU; closing = keep the selector per operand (1 store)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-214",
+   "text": "FOP is recomputed from the opcode bytes at FIP when an image is written.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "ASM-315",
+    "L3b:A-FOP"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: code is read-only (W^X of the lifted image) so the bytes are those executed; needs the read-only fact from L3a universe",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-215",
+   "text": "Reserved bits of the fnstenv/fnsave image are 0.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "ASM-316",
+    "L3b:A-RES"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: pin to the reference CPU by host comparison (exhaustive over the state that feeds them)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-216",
+   "text": "fbld with a nibble above 9 gives the arithmetic sum nibble*10^i (SDM: undefined).",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-001.md",
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
+    "ports/fnv-nx/lift/fnvlift/f_x87.py",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "ports/fnv-nx/lift/rt/x87.c"
+   ],
+   "aliases": [
+    "ASM-317",
+    "L3b:A-BCD"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: pin to the reference CPU; per-digit-position independence would make a host table exhaustive",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-217",
+   "text": "Only instructions of the lifter decode transfer control (constant-address proof for lock/xchg within a block).",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
+    "ports/fnv-nx/journal/inbox/l3b-w3-r9.md"
+   ],
+   "aliases": [
+    "ASM-318",
+    "L3b:A-DECODEFLOW"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: universe closure gate of L3a",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-218",
+   "text": "A stack slot at a proved coordinate of a frame whose address does not escape is accessed by its thread only (class PLAIN).",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md"
+   ],
+   "aliases": [
+    "ASM-319",
+    "L3b:A-STACKPRIVATE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "deleted: no consumer since L3a c0d18b76; every guest access is GM/LKA",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-219",
+   "text": "An inline asm without FP/vector operand and without FP clobber does no float->int conversion.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+   ],
+   "aliases": [
+    "ASM-324",
+    "L3b:A-F2IASM"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: check 3b covers units with no site; closing fully = forbid inline asm outside listed rt files by the plugin",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-220",
+   "text": "Every guest thread starts with FCW 0x027F and MXCSR 0x1F80.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
+    "ports/fnv-nx/lift/tools/fpstate.py"
+   ],
+   "aliases": [
+    "ASM-327",
+    "L3b:A-START"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: set by the runtime at thread entry (rt/enter.c); being verified against the code with the FP-mask fact",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-221",
+   "text": "The CONTEXT image handed to guest SEH handlers is only read back by the runtime restore, which restores a reachable control state.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
+    "ports/fnv-nx/journal/status/l3b-lift.md",
+    "ports/fnv-nx/lift/tools/fpstate.py"
+   ],
+   "aliases": [
+    "ASM-328",
+    "L3b:A-CTX"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: a handler may write the FP control words in CONTEXT; being checked against rt/seh.c with the FP-mask fact",
+   "owner": "L3a"
+  },
+  {
    "id": "ASM-300",
    "text": "With --eip fixed: semantics is translation-invariant in eip.",
    "used_by": [
@@ -760,25 +1063,12 @@
   },
   {
    "id": "ASM-302",
-   "text": "capstone group tags classify the instruction-set extension of a form correctly.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/f_cpufeat.py"
-   ],
-   "aliases": [
-    "L3b:A-GROUPS"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: same decoder-agreement gate, extension class compared with XED isa-set on every instruction",
-   "owner": "L3a"
-  },
-  {
-   "id": "ASM-303",
    "text": "For shapes outside the Sail model (x87 control/state, cpuid, rdtsc, part of SIMD: 7 019 shapes have no DSL builder yet) the reference is a transcription of the SDM compared with the host.",
    "used_by": [
     "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md"
    ],
    "aliases": [
+    "ASM-303",
     "L3b:A-SDMREF"
    ],
    "status": "REMOVE",
@@ -786,12 +1076,13 @@
    "owner": "L3b"
   },
   {
-   "id": "ASM-304",
+   "id": "ASM-303",
    "text": "17 (mnemonic, undefined flag) pairs: the value the reference CPU produces is not yet pinned.",
    "used_by": [
     "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md"
    ],
    "aliases": [
+    "ASM-304",
     "L3b:A-UNDEFFLAGS"
    ],
    "status": "REMOVE",
@@ -799,251 +1090,14 @@
    "owner": "L3b+L3a"
   },
   {
-   "id": "ASM-305",
-   "text": "No x87/SSE exception is ever unmasked (I-FPMASK); fwait and FP arithmetic never raise.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-002.md",
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/journal/status/l3b-lift.md",
-    "ports/fnv-nx/lift/fnvlift/f_x87.py",
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
-    "ports/fnv-nx/lift/fnvlift/fpfacts.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h",
-    "ports/fnv-nx/lift/test/instest.py",
-    "ports/fnv-nx/lift/test/mmxtest.py",
-    "ports/fnv-nx/lift/tools/fpstate.py"
-   ],
-   "aliases": [
-    "L3b:A-FPMASK",
-    "L3b:I-FPMASK"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: every control-word write (fldcw, ldmxcsr, fninit, frstor, fldenv, fxrstor, _controlfp/_control87 with operand) found statically and proved to keep the masks; if not proved, exact unmasked-exception semantics before the first frame (orchestrator decision 2026-11-11; owner of the work L3b)",
-   "owner": "L3a"
-  },
-  {
-   "id": "ASM-306",
-   "text": "Test harness only: sticky flags not observed (I-FPSTICKY set in instest ASSUME).",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/fpfacts.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h",
-    "ports/fnv-nx/lift/test/instest.py",
-    "ports/fnv-nx/lift/test/mmxtest.py",
-    "ports/fnv-nx/lift/tools/fpstate.py"
-   ],
-   "aliases": [
-    "L3b:A-FPSTICKY",
-    "L3b:I-FPSTICKY"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: test-only; product path maintains the flags",
-   "owner": "L3a"
-  },
-  {
-   "id": "ASM-307",
-   "text": "GCC keeps an FP operation before the FPSR read that follows it in program order (GCC has no FENV_ACCESS).",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h",
-    "ports/fnv-nx/lift/test/fpflags.py"
-   ],
-   "aliases": [
-    "L3b:A-ORDER"
-   ],
-   "status": "REMOVE",
-   "removed_by": "no gate yet: not compiler correctness: GCC is allowed to reorder. Closing rule: FPSR read through an operation the compiler must order (asm with FP operand dependency), then gate on objects",
-   "owner": "L3a"
-  },
-  {
-   "id": "ASM-308",
-   "text": "Host code between guest instructions (imports, native bodies) runs with the guest FPSR parked or raises nothing the guest sees.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h"
-   ],
-   "aliases": [
-    "L3b:A-NATIVE"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: rt/imp.h parks FPSR on imports; native bodies need the same by rule (L2/L3a)",
-   "owner": "L2+L3a"
-  },
-  {
-   "id": "ASM-309",
-   "text": "A handler resuming by ContinueExecution does not change the FP flag owner nor leave the x87/MMX register file in another carrier format.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h"
-   ],
-   "aliases": [
-    "L3b:A-RESUME"
-   ],
-   "status": "REMOVE",
-   "removed_by": "no gate yet: closable by canonicalising on resume in rt/seh.c (L3a)",
-   "owner": "L3a"
-  },
-  {
-   "id": "ASM-310",
-   "text": "An MMX read of a register popped by a static-stack function, with no MMX write since, reads data undefined on the CPU too.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h"
-   ],
-   "aliases": [
-    "L3b:A-STALE"
-   ],
-   "status": "REMOVE",
-   "removed_by": "no gate yet: the CPU value is defined (old bits); closing = write back on pop or prove no such read statically",
-   "owner": "L3a"
-  },
-  {
-   "id": "ASM-311",
-   "text": "fnsave stores the real indefinite for an empty register; fldenv/frstor treat an empty-tagged register per the tag only.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-001.md",
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h",
-    "ports/fnv-nx/lift/test/instest_extra.py"
-   ],
-   "aliases": [
-    "L3b:A-EMPTY"
-   ],
-   "status": "REMOVE",
-   "removed_by": "no gate yet: the CPU stores the kept 80-bit image; fv_free keeps it, so this can be made exact and the assumption removed",
-   "owner": "L3a"
-  },
-  {
-   "id": "ASM-312",
-   "text": "ES (bit 7) and B (bit 15) of FSW are 0.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h"
-   ],
-   "aliases": [
-    "L3b:A-ES"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: follows the A-FPMASK fact, or is implemented with the unmasked semantics",
-   "owner": "L3a"
-  },
-  {
-   "id": "ASM-313",
-   "text": "FDP after an instruction without memory operand is unchanged (SDM leaves it unspecified).",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-001.md",
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h"
-   ],
-   "aliases": [
-    "L3b:A-FDP"
-   ],
-   "status": "REMOVE",
-   "removed_by": "no gate yet: pin to the reference CPU by a host table, then fact",
-   "owner": "L3a"
-  },
-  {
-   "id": "ASM-314",
-   "text": "FDS is DS whenever FDP != 0 (FS-relative operand reported with DS).",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-001.md",
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h"
-   ],
-   "aliases": [
-    "L3b:A-FDS"
-   ],
-   "status": "REMOVE",
-   "removed_by": "no gate yet: wrong for FS operands on the CPU; closing = keep the selector per operand (1 store)",
-   "owner": "L3a"
-  },
-  {
-   "id": "ASM-315",
-   "text": "FOP is recomputed from the opcode bytes at FIP when an image is written.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h"
-   ],
-   "aliases": [
-    "L3b:A-FOP"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: code is read-only (W^X of the lifted image) so the bytes are those executed; needs the read-only fact from L3a universe",
-   "owner": "L3a"
-  },
-  {
-   "id": "ASM-316",
-   "text": "Reserved bits of the fnstenv/fnsave image are 0.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h"
-   ],
-   "aliases": [
-    "L3b:A-RES"
-   ],
-   "status": "REMOVE",
-   "removed_by": "no gate yet: pin to the reference CPU by host comparison (exhaustive over the state that feeds them)",
-   "owner": "L3a"
-  },
-  {
-   "id": "ASM-317",
-   "text": "fbld with a nibble above 9 gives the arithmetic sum nibble*10^i (SDM: undefined).",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-001.md",
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/fnvlift/f_x87.py",
-    "ports/fnv-nx/lift/rt/fnvl_x87.h",
-    "ports/fnv-nx/lift/rt/x87.c"
-   ],
-   "aliases": [
-    "L3b:A-BCD"
-   ],
-   "status": "REMOVE",
-   "removed_by": "no gate yet: pin to the reference CPU; per-digit-position independence would make a host table exhaustive",
-   "owner": "L3a"
-  },
-  {
-   "id": "ASM-318",
-   "text": "Only instructions of the lifter decode transfer control (constant-address proof for lock/xchg within a block).",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/journal/inbox/l3b-w3-r9.md"
-   ],
-   "aliases": [
-    "L3b:A-DECODEFLOW"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: universe closure gate of L3a",
-   "owner": "L3a"
-  },
-  {
-   "id": "ASM-319",
-   "text": "A stack slot at a proved coordinate of a frame whose address does not escape is accessed by its thread only (class PLAIN).",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md"
-   ],
-   "aliases": [
-    "L3b:A-STACKPRIVATE"
-   ],
-   "status": "REMOVE",
-   "removed_by": "deleted: no consumer since L3a c0d18b76; every guest access is GM/LKA",
-   "owner": "L3a"
-  },
-  {
-   "id": "ASM-320",
+   "id": "ASM-304",
    "text": "rt/rcptab.cert.json was produced by farm/rcpcert.sh on a CPU with the reference identity.",
    "used_by": [
     "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
+    "ASM-320",
     "L3b:A-RCPHOST"
    ],
    "status": "REMOVE",
@@ -1051,13 +1105,14 @@
    "owner": "L3b"
   },
   {
-   "id": "ASM-321",
+   "id": "ASM-305",
    "text": "RCPSS/RSQRTSS are pure functions of the input bits: MXCSR does not influence them.",
    "used_by": [
     "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
+    "ASM-321",
     "L3b:A-RCPPURE"
    ],
    "status": "REMOVE",
@@ -1065,13 +1120,14 @@
    "owner": "L3b"
   },
   {
-   "id": "ASM-322",
+   "id": "ASM-306",
    "text": "The helpers sse_f2i and fv_i are correct (range guard, rounding mode, integer indefinite).",
    "used_by": [
     "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
+    "ASM-322",
     "L3b:A-F2IHELPERS"
    ],
    "status": "REMOVE",
@@ -1079,13 +1135,14 @@
    "owner": "L3b"
   },
   {
-   "id": "ASM-323",
+   "id": "ASM-307",
    "text": "An object and its .f2i.json come from the same compile.",
    "used_by": [
     "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
+    "ASM-323",
     "L3b:A-F2IKEY"
    ],
    "status": "REMOVE",
@@ -1093,27 +1150,14 @@
    "owner": "L3b"
   },
   {
-   "id": "ASM-324",
-   "text": "An inline asm without FP/vector operand and without FP clobber does no float->int conversion.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/proof/gate_fpexact.py"
-   ],
-   "aliases": [
-    "L3b:A-F2IASM"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: check 3b covers units with no site; closing fully = forbid inline asm outside listed rt files by the plugin",
-   "owner": "L3a"
-  },
-  {
-   "id": "ASM-325",
+   "id": "ASM-308",
    "text": "No float->int conversion of a C literal occurs in lifted code (GCC folds an out-of-range constant to the saturated value, not the x86 indefinite).",
    "used_by": [
     "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
+    "ASM-325",
     "L3b:A-F2ICONST"
    ],
    "status": "REMOVE",
@@ -1121,47 +1165,30 @@
    "owner": "L3b"
   },
   {
-   "id": "ASM-326",
+   "id": "ASM-800",
+   "text": "The -Wmismatched-tags warning is not suppressed for a declaration (system header, #pragma GCC diagnostic), so the names plugin sees every class key.",
+   "used_by": [
+    "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: gate namegate (L2 w5) compares every name with cl's symbol table and so certifies the names; closes when L2's plugin sources reach the trunk",
+   "owner": "L2"
+  },
+  {
+   "id": "ASM-801",
    "text": "Native bodies compiled with fnvnx_ftoi are judged by L2 rules, not by fpexact.",
    "used_by": [
     "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
+    "ASM-326",
     "L3b:A-F2INATIVE"
    ],
    "status": "REMOVE",
    "removed_by": "planned: L2 gate",
    "owner": "L2"
-  },
-  {
-   "id": "ASM-327",
-   "text": "Every guest thread starts with FCW 0x027F and MXCSR 0x1F80.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/lift/tools/fpstate.py"
-   ],
-   "aliases": [
-    "L3b:A-START"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: set by the runtime at thread entry (rt/enter.c); being verified against the code with the FP-mask fact",
-   "owner": "L3a"
-  },
-  {
-   "id": "ASM-328",
-   "text": "The CONTEXT image handed to guest SEH handlers is only read back by the runtime restore, which restores a reachable control state.",
-   "used_by": [
-    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
-    "ports/fnv-nx/journal/status/l3b-lift.md",
-    "ports/fnv-nx/lift/tools/fpstate.py"
-   ],
-   "aliases": [
-    "L3b:A-CTX"
-   ],
-   "status": "REMOVE",
-   "removed_by": "no gate yet: a handler may write the FP control words in CONTEXT; being checked against rt/seh.c with the FP-mask fact",
-   "owner": "L3a"
   }
  ]
 }
