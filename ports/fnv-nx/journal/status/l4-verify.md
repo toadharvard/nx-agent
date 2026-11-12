@@ -37,3 +37,4 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; session_01KmtZKURk
 - 02:36Z fleet check (the 23:43, 00:44 and 01:43 checks were missed: this session was stopped by the 5 h limit): w3 PENDING since 22:56Z, never started -> archived and replaced by w3b; w4 FAILED on the 5 h limit -> resumed. Branch merged with trunk e35b870 (CLAUDE.md) as 66e0da2; resubmitted to MERGER.
 - 02:45Z: L4 in the trunk: MERGER merged cd2a5fe6 -> clean 07862d5a (L1 green 94602318, 215 s, 26 gates).
 - 02:44Z fleet check: w3b running (release derivation from the libnx/newlib headers); w4 done, asked for per-gate and warm-cache times. L1's census of the arguments reaching bootsock is run by L1 w18 (session_01KmtZKQwjYFpEvoHtfEjCcb, claude/fnv-l1-contract-w18).
+- 02:48Z: L4 in the trunk again: MERGER merged 1ca3cd46 -> clean 7503d2fa (L1 green 35175069, 196 s, 26 gates); --watch-log is on the trunk.
