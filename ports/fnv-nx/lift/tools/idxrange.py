@@ -4,6 +4,11 @@ widening at loop heads, no step cap), carried across calls: a function entered o
 the pushed argument at that site (computed by the same analysis in the caller, whose own parameters are joined the same way). A function that can be entered otherwise (a relocated or exported address, an entry reached by a
 jump from another function, no decoded call site, a recursive chain, an exception-handler entry) has unknown parameters. A value loaded from memory that is not a tracked frame cell is unknown: the rule never narrows a range
 that the code does not bound. Result per store: (lo, hi) mod 2^32 or None with the reason; the source of the index is classified from its defining instruction (param#n@entry, ebp-slot@va, reg@va).
+Premises of "entered only by direct calls" (each is a named fact; the entry is unknown, never joined, if any is open):
+  (a) no relocated value names the entry (R3 after the displacement-only refinement; here ANY relocated dword whose value is the entry makes it unknown, which is a superset);
+  (b) no PIC / computed code address: the exe-checked fact `no PIC`; (c) no escape-open path: the gate `no_s4_arith` (pcsrc escapes) must have no OPEN item that can form the entry's address:
+  `escape_open(e)` supplies it; while no such fact is supplied the closed intervals are labelled `cond:no_s4_arith` in the why column, so a consumer sees the premise it depends on;
+  (d) no jump or fall-through predecessor (the entry is not also entered from another function), no exception-handler / TLS / export kind: checked by `pure_entry`.
 Basis: closure completeness (every call site is a decoded edge, ASM-202); frame cells are tracked only when no instruction of the cone forms the frame address (jtab.flow)."""
 import re
 import jtab as JT
@@ -13,10 +18,10 @@ NP = 8
 
 
 class Ranger:
-    def __init__(s, dec, ins_at, preds, callers_of, entry_of, pure_entry, seed_other, u8):
+    def __init__(s, dec, ins_at, preds, callers_of, entry_of, pure_entry, seed_other, u8, escape_open=None):
         """dec/ins_at/preds as for jtab.resolve; callers_of(e) -> decoded call-site addresses of the entry e; entry_of(a) -> the entry of the function containing a; pure_entry(e) -> None if e is entered only by
         direct calls, else the reason it is not; u8 as for jtab.resolve."""
-        s.dec = dec; s.ins_at = ins_at; s.preds = preds; s.callers_of = callers_of; s.entry_of = entry_of; s.pure = pure_entry; s.seed_other = seed_other; s.u8 = u8
+        s.dec = dec; s.ins_at = ins_at; s.preds = preds; s.callers_of = callers_of; s.entry_of = entry_of; s.pure = pure_entry; s.seed_other = seed_other; s.u8 = u8; s.esc = escape_open
         s.P = {}; s.A = {}; s.busy = set()
 
     def seedfn(s, e):
@@ -40,6 +45,7 @@ class Ranger:
         if e in s.P: return s.P[e]
         top = ((TOP,) * NP, ('unknown',) * NP)
         why = s.pure(e)
+        if why is None and s.esc is not None and s.esc(e): why = 'an escape-open path (no_s4_arith OPEN) can form its address'
         if why is not None: return top[0], ('entry %x: %s' % (e, why),) * NP
         if e in s.busy: return top[0], ('recursive call chain at %x' % e,) * NP
         s.busy.add(e)
@@ -80,7 +86,7 @@ class Ranger:
         v = st.g(reg); w = st.why.get(reg, '')
         src = s.source(reg, w, va, e)
         if v == TOP: return None, None, src, 'unknown: ' + (w or 'no definition in the cone') + ('; ' + st.why['*'] if '*' in st.why else '')
-        return v[0], (v[0] + v[1]) % N, src, 'interval by the jtab domain; defined by ' + (w or 'seed')
+        return v[0], (v[0] + v[1]) % N, src, ('' if s.esc is not None else 'cond:no_s4_arith ') + 'interval by the jtab domain; defined by ' + (w or 'seed')
 
     def source(s, reg, w, va, e):
         m = re.search(r'\[ebp \+ (0x[0-9a-f]+|\d+)\]', w)
