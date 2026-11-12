@@ -225,12 +225,16 @@ class F2I(unittest.TestCase):
     def test_no_findings_is_green(self):
         self.assertEqual(self.judge('a.o', f2i('a.o', sites=2, helpers=['u32 conv(double)'])), ([], []))
 
-    def test_every_finding_kind_is_red(self):
-        for kind in ('conv', 'builtin', 'asm'):
+    def test_conv_and_asm_findings_are_red(self):
+        for kind in ('conv', 'asm'):
             f2, _ = self.judge('a.o', f2i('a.o', [{'function': 'bare', 'file': 'x.cpp', 'line': 7, 'kind': kind}], 1))
             self.assertEqual(len(f2), 1, kind)
             self.assertIn('%s outside' % kind, f2[0])
             self.assertIn('bare', f2[0])
+
+    def test_builtin_finding_is_green(self):
+        f2, _ = self.judge('a.o', f2i('a.o', [{'function': 'bare', 'file': 'x.cpp', 'line': 7, 'kind': 'builtin'}], 1))
+        self.assertEqual(f2, [])
 
     def test_one_red_line_per_finding(self):
         fs = [{'function': 'f%d' % i, 'file': 'x.cpp', 'line': i, 'kind': 'conv'} for i in range(3)]
