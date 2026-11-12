@@ -345,6 +345,8 @@ def main():
     # --- link roots: the stored objects of a listed root are declared inputs of the link stage
     LIB = T + "lib"
 
+    LRS = BASE + "/ss-lr"   # the link-roots scenarios run concurrently with the main flow and build other content of the same root path: a store of their own
+
     def link_roots():
         librec = {k: v for k, v in RECIPE.items() if k not in ("generated", "os_layer", "constants", "link")}
         librec["include"] = []
@@ -358,13 +360,13 @@ def main():
         w(lr, "verify/admit.json", json.dumps(ad))
         git(lr, "add", "-A")
         git(lr, "commit", "-q", "-m", "lib")
-        x1 = recipe.build(lr, ROOT, SS, BASE + "/lr1")
+        x1 = recipe.build(lr, ROOT, LRS, BASE + "/lr1")
         check("link roots: the image links the objects of the listed root (f_lib resolves)", x1["status"] == "green" and x1["elf"]
               and [r["root"] for r in x1.get("link_roots", [])] == [LIB], x1.get("failure"))
         w(lr, "lib/l.c", "int f_lib(void) { return 2; }\n")
         git(lr, "add", "-A")
         git(lr, "commit", "-q", "-m", "lib changed")
-        x2 = recipe.build(lr, ROOT, SS, BASE + "/lr2")
+        x2 = recipe.build(lr, ROOT, LRS, BASE + "/lr2")
         check("link roots: a change in the listed root changes the link key and the ELF", x2["status"] == "green"
               and x2["elf"]["sha256"] != x1["elf"]["sha256"] and set(x2["stage_keys"]) != set(x1["stage_keys"]), (x1["stage_keys"], x2["stage_keys"]))
         nolink = dict(json.load(open(os.path.join(lr, ROOT, "build.json"))))
@@ -372,7 +374,7 @@ def main():
         w(lr, "toy/build.json", json.dumps(nolink))
         git(lr, "add", "-A")
         git(lr, "commit", "-q", "-m", "no roots")
-        x3 = recipe.build(lr, ROOT, SS, BASE + "/lr3")
+        x3 = recipe.build(lr, ROOT, LRS, BASE + "/lr3")
         check("link roots: without the root f_lib has no body and the link is red, never a silent zero", x3["status"] == "red", x3.get("failure"))
         ig = dict(nolink)
         ig["link"] = dict(nolink["link"], roots=[LIB], flags=["-m", "aarch64linux32", "--unresolved-symbols=ignore-all"])
@@ -380,7 +382,7 @@ def main():
         git(lr, "add", "-A")
         git(lr, "commit", "-q", "-m", "ignore-all")
         try:
-            recipe.build(lr, ROOT, SS, BASE + "/lr4")
+            recipe.build(lr, ROOT, LRS, BASE + "/lr4")
             raised = None
         except recipe.RecipeError as x:
             raised = str(x)

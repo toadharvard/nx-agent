@@ -69,12 +69,15 @@ def result_file(store, key, name):
     return cas._obj(store, cas.manifest(sandbox._load(store, key)["outputs"]["/out"], store)["entries"][name])
 
 
-def hint_path(store, rel):
-    return os.path.join(store, "hints", hashlib.sha256(rel.encode()).hexdigest() + ".json")
+def hint_path(store, rel, ns=""):
+    """The closure hint of unit REL in namespace NS: the identity of the root that owns the unit (recipe.py passes the root spec). The store is
+    shared by every root and every build, so a hint named by the unit's path alone is overwritten by any other root's unit of that name
+    (`main.cpp`): each one then starts from the other's closure, runs one extra PP iteration, and reports `run` on an unchanged tree."""
+    return os.path.join(store, "hints", *([hashlib.sha256(ns.encode()).hexdigest()] if ns else []), hashlib.sha256(rel.encode()).hexdigest() + ".json")
 
 
-def write_hint(store, rel, paths):
-    p = hint_path(store, rel)
+def write_hint(store, rel, paths, ns=""):
+    p = hint_path(store, rel, ns)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     tmp = "%s.tmp-%d-%s" % (p, os.getpid(), os.urandom(4).hex())
     open(tmp, "w").write(json.dumps(sorted(paths)))
@@ -131,6 +134,7 @@ def run_stage(store, doc, cold):
 class Build:
     def __init__(self, a):
         self.store, self.cold, self.cxx, self.cache = a.store, a.cold, a.cxx, {}
+        self.hint_ns = getattr(a, "hint_ns", "")   # the root that owns the units (hint_path); "" for a caller with a store of its own
         self.variant = ""   # recipe variant: its name is in the env, so in every stage key ("" adds nothing)
         self.cc_drop = set()   # `at` of tool-runtime inputs the CC stage does not mount (externals other than the compiler's)
         self.cc_flags, self.cc_inputs = [], []   # plugins: flags and declared inputs [(at, tree)] of the CC stage only (a plugin is part of its key)
@@ -219,7 +223,7 @@ class Build:
             return self.assemble(e, rel)
         files, expect, ran = None, None, False
         try:
-            hint = json.load(open(hint_path(self.store, rel)))
+            hint = json.load(open(hint_path(self.store, rel, self.hint_ns)))
             files = {r for r in (self.real(p, False) for p in hint) if r} | {"/src/" + rel}
         except (OSError, ValueError, TypeError):
             pass
@@ -269,7 +273,7 @@ class Build:
             return e
         e["object"] = res["outputs"]["/out"]
         if files:
-            write_hint(self.store, rel, files)
+            write_hint(self.store, rel, files, self.hint_ns)
         return e
 
     def assemble(self, e, rel):
@@ -307,6 +311,7 @@ def main(argv):
             p.add_argument("--unit", action="append", required=True)
             p.add_argument("--jobs", type=int, default=1)
             p.add_argument("--cold", action="store_true")
+            p.add_argument("--hint-ns", default="")   # the root that owns the units: closure hints are per root (hint_path)
         a = p.parse_args(argv)
         if a.cmd == "build":
             return build_cmd(a)

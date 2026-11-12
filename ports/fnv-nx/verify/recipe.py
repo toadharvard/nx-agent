@@ -1199,6 +1199,7 @@ class Job:
             builds[k].cc_drop = drop | {i["at"] for i in self.use_inputs(ws)}
             builds[k].rt = dict(builds[k].rt, inputs=builds[k].rt["inputs"] + self.use_inputs(ws))
             builds[k].variant = self.variant
+            builds[k].hint_ns = self.root + ("@" + self.variant if self.variant else "")   # closure hints are per root (unitstage.hint_path)
             if k in pk:   # plugins are loaded by the CC stage only, never by preprocessing (guest roots: C and C++ units; host roots: C++ only)
                 ok = loadable[k]
                 builds[k].cc_flags = [f for n, _, fl in self.built if n in ok for f in fl]
