@@ -164,3 +164,4 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - crt0 is split by input section (.crt0 ax is 4 bytes; .crt0.hdr and .crt0.mod0 are a), so the loader contract is unchanged.
   - L3a's trace variant is withdrawn: the trace becomes a boot-machine observation.
 - 03:51Z: new gate `onedef` (w15), per image: (a) strong/weak defined in one root; (b) COMDAT from one source definition with equal bytes (ODR); (c) equal normalized function bytes from different definitions are red. Censuses over the platform and render roots come before MERGER. lib/sha256 is a product root (owner L4) with a guest build plus a host variant.
+- 03:53Z w14's next item: gate_reach request kind closure_key (for L3a item 26). Premises: the closure fact, dispgen --closure, and 0 open dynamic sites. It is measurement-only until then.
