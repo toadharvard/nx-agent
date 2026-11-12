@@ -190,3 +190,7 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - objstub: green, 1785/1785 functions over 71 objects in 2 roots.
     - The DOUBLES class: 22 `--unresolved-symbols=ignore-all` link commands in 16 scripts under tests/l6, 0 in render code (5d47e18d). Sent to L1.
     - Open: gl4 calls `fnvnx_shader_translate_glsl` (no uam link). That function exists only on w1b's translator root (render/shaders/translator, w1b 0013509c, a trunk-based branch). The switch lands together with that root.
+- 03:45Z Three items.
+    - Merged farm-env 17c3b933 as 4ab53430: the validator declaration is generated from shim d3d9.h; the probe PEs are byte-reproducible (envprobe-bin 594dedc2); the dumps are unchanged.
+    - Merged w3b dfffc07: the uniform rule, and the link outcome is per (vs, ps) pair (wined3d's reorder shader). Farm job 2 is now keyed by pair over the full cross product of distinct GLSL texts; V, P and V×P are reported first.
+    - New goal step 1 item: render/d3d9 becomes a trunk product root with ident_{handheld,docked}.bin declared as outputs, for L5 w13 `uses`. w6 (session_01KmtZKQbpDKvc9qzXT9bLHX) is on claude/fnv-l6-render-w6-root from trunk 8cfbcdbf: doing.
