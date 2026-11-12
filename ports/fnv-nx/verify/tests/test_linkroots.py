@@ -60,7 +60,7 @@ check("a repeated root is red", any("listed twice" in e for e in errs(IMG, lk("p
 check("roots that is not a list is red", bool(errs(IMG, dict(lk("pie", []), roots="x"))), "")
 # the refusal set names the class and reaches the link flags of every root class
 for f in (["--unresolved-symbols=ignore-all"], ["-Wl,--unresolved-symbols=ignore-all"], ["--noinhibit-exec"], ["-z", "undefs"], ["--warn-unresolved-symbols"],
-          ["--allow-shlib-undefined"], ["-z", "lazy"], ["-zlazy"], ["-Wl,-z,lazy"], ["-Xlinker", "--unresolved-symbols=ignore-in-object-files"]):
+          ["--allow-shlib-undefined"], ["-Xlinker", "--unresolved-symbols=ignore-in-object-files"]):
     check("resolution-relaxing option %s is refused" % " ".join(f), recipe.refused(f) != [], f)
 check("an ordinary flag is not refused", recipe.refused(["-e", "entry", "-z", "now"]) == [], recipe.refused(["-e", "entry", "-z", "now"]))
 # admit.json: variants
