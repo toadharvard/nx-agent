@@ -165,9 +165,9 @@ CONTRACT = ["n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcre
 dirs_pure = [a.rsplit("/", 1)[-1] for a in byname["pure"]["argv"][3:]]
 dirs_tests = [a.rsplit("/", 1)[-1] for a in byname["selftests"]["argv"][5:]]
 check("gates.json: contract gates run gate_contract.py --gate NAME", all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_contract.py", "--gate", n] and byname[n]["result"] == n + ".json" for n in CONTRACT), spec)
-check("gates.json: format and the gates", spec["format"] == "fnvnx-gates/1" and [g["name"] for g in spec["gates"]] == ["pure", "selftests", "admit", "oracle", "build", "objstub", "linkstrict", "determinism"] + CONTRACT + ["argordergate", "forms", "fpexact"]
+check("gates.json: format and the gates", spec["format"] == "fnvnx-gates/1" and [g["name"] for g in spec["gates"]] == ["pure", "selftests", "admit", "oracle", "build", "objstub", "linkstrict", "determinism"] + CONTRACT + ["argordergate", "imports", "machine", "hostapi", "forms", "fpexact"]
       and all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_%s.py" % n] and byname[n]["result"] == n + ".json"
-              for n in ("build", "objstub", "linkstrict", "determinism"))
+              for n in ("build", "objstub", "linkstrict", "determinism", "hostapi"))
       and byname["forms"]["argv"] == ["python3", "-I", "ports/fnv-nx/lift/proof/formgate.py"] and byname["forms"]["result"] == "forms.json"
       and byname["fpexact"]["argv"] == ["python3", "-I", "ports/fnv-nx/lift/proof/gate_fpexact.py"] and byname["fpexact"]["result"] == "fpexact.json"
       and byname["argordergate"]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_argorder.py"] and byname["argordergate"]["result"] == "argordergate.json"

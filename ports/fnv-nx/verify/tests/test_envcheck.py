@@ -43,7 +43,8 @@ d0 = doc()
 check("env.json: format, programs owned, non-trivial package list", d0["format"] == "fnvnx-env/1" and d0["uid"] == 0
       and d0["arch"] == "x86_64" and {"strace", "busybox", "aarch64-linux-gnu-g++", "aarch64-linux-gnu-as"} <= set(d0["programs"])
       and {"busybox-static", "gcc-13-plugin-dev-aarch64-linux-gnu", "libc6-dev-arm64-cross", "strace"} <= set(d0["packages"])
-      and set(d0["python"]["modules"]) == {"capstone", "numpy", "unicorn", "pyelftools"}, d0["programs"])
+      and set(d0["python"]["modules"]) == {"capstone", "numpy", "unicorn", "pyelftools", "z3-solver"}
+      and set(d0["python"]["wheels"]) == {"z3-solver"} and len(d0["python"]["wheels"]["z3-solver"]["sha256"]) == 64, d0["programs"])
 
 def mutate(f):
     d = doc()
@@ -56,6 +57,8 @@ CASES = [
      "env: package no-such-package-xyz: want 1, have not installed"),
     ("python module version", mutate(lambda d: d["python"]["modules"].__setitem__("capstone", "0.0")),
      "env: python module capstone: want 0.0, have "),
+    ("pinned wheel content", mutate(lambda d: d["python"]["wheels"]["z3-solver"].__setitem__("files_sha256", "0" * 64)),
+     "env: python wheel files z3-solver: want " + "0" * 64 + ", have "),
     ("python version", mutate(lambda d: d["python"].__setitem__("version", "2.7.0")), "env: python.version: want 2.7.0, have "),
     ("missing program", mutate(lambda d: d["programs"].append("no-such-program-xyz")), "env: program no-such-program-xyz: want in PATH, have missing"),
     ("program not owned by a listed package", mutate(lambda d: d["packages"].pop("busybox-static")), "env: program busybox: want owned by a listed package"),
@@ -90,12 +93,14 @@ check("setup script: bash -n", subprocess.run(["bash", "-n", SETUP]).returncode 
 p = subprocess.run(["bash", SETUP, "--print"], capture_output=True, text=True)
 lines = p.stdout.splitlines()
 apt = [ln for ln in lines if ln.startswith("apt-get install")]
-pip = [ln for ln in lines if " pip install " in ln]
+pip = [ln for ln in lines if " pip install " in ln and "--require-hashes" not in ln]
+piph = [ln for ln in lines if "--require-hashes" in ln]
 check("setup --print: apt-get update, one install line with every package=version, pip with every module==version, then envcheck check",
       p.returncode == 0 and lines[0] == "apt-get update" and len(apt) == 1 and len(pip) == 1 and "--break-system-packages" in pip[0]
       and all(("%s=%s" % kv) in apt[0].split() for kv in d0["packages"].items())
-      and all(("%s==%s" % kv) in pip[0].split() for kv in d0["python"]["modules"].items())
-      and lines[-1].endswith("envcheck.py check --env " + ENVF) and len(lines) == 4, p.stdout[:300] + p.stderr)
+      and all(("%s==%s" % kv) in pip[0].split() for kv in d0["python"]["modules"].items() if kv[0] not in d0["python"]["wheels"])
+      and len(piph) == 1 and all(("%s==%s --hash=sha256:%s" % (m, d0["python"]["modules"][m], w["sha256"])) in piph[0] for m, w in d0["python"]["wheels"].items())
+      and lines[-1].endswith("envcheck.py check --env " + ENVF) and len(lines) == 5, p.stdout[:300] + p.stderr)
 # the run mode (real apt-get, real pip) is not run here: it changes the machine. Every farm runs it for real and ends with envcheck.
 
 shutil.rmtree(TD, ignore_errors=True)
