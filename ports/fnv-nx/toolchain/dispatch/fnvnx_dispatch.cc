@@ -65,6 +65,8 @@
 #include "cfgloop.h"
 #include "attribs.h"
 #include "builtins.h"
+#include "rtl.h"
+#include "target.h"
 #include "calls.h"
 #include "output.h"
 #include <set>
@@ -117,20 +119,33 @@ static tree new_site()
 
 /* ---- the call's shape */
 
-static bool hfa(tree t, tree *elt, int *n)
+/* the backend's own initialiser of the cumulative state (config/aarch64/aarch64.cc, INIT_CUMULATIVE_ARGS expands to it; cc1 exports it to plugins) */
+extern void aarch64_init_cumulative_args(CUMULATIVE_ARGS *, const_tree, rtx, const_tree, unsigned, bool = false);
+
+/* How the target passes a value is asked of the pinned compiler's own backend, never classified here (ASM-001): pass_by_reference, then
+ * targetm.calls.function_arg on a fresh cumulative state (the argument is the first of the call), and for a result targetm.calls.function_value.
+ * The rtx says where the value lives: a REG or a PARALLEL of vector registers is a homogeneous aggregate, and the part mode names the element;
+ * general registers, or no register (the stack), are `g`. A part mode that has no element code is an error: no guess. */
+static bool elem_code(machine_mode m, std::string &c)
 {
-  if (SCALAR_FLOAT_TYPE_P(t)) {
-    if (*elt && TYPE_MAIN_VARIANT(*elt) != TYPE_MAIN_VARIANT(t)) return false;
-    *elt = t; return ++*n <= 4;
-  }
-  if (TREE_CODE(t) == ARRAY_TYPE && TYPE_DOMAIN(t) && TYPE_MAX_VALUE(TYPE_DOMAIN(t)) && tree_fits_shwi_p(TYPE_MAX_VALUE(TYPE_DOMAIN(t)))) {
-    for (HOST_WIDE_INT i = 0; i <= tree_to_shwi(TYPE_MAX_VALUE(TYPE_DOMAIN(t))); i++)
-      if (!hfa(TREE_TYPE(t), elt, n)) return false;
-    return true;
-  }
-  if (TREE_CODE(t) != RECORD_TYPE) return false;
-  for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f))
-    if (TREE_CODE(f) == FIELD_DECL && !hfa(TREE_TYPE(f), elt, n)) return false;
+  if (m == SFmode) c = "hf"; else if (m == DFmode) c = "hd"; else if (m == TFmode) c = "hq"; else if (m == HFmode) c = "hh";
+  else if (VECTOR_MODE_P(m) && GET_MODE_SIZE(m).to_constant() == 8) c = "hv8";
+  else if (VECTOR_MODE_P(m) && GET_MODE_SIZE(m).to_constant() == 16) c = "hv16";
+  else return false;
+  return true;
+}
+
+/* "" (general registers or stack), or the element code of the vector registers rtx `r` lives in; false: a mode with no code */
+static bool reg_class(rtx r, std::string &c, location_t loc)
+{
+  c = "";
+  if (!r) return true;
+  rtx first = NULL_RTX;
+  if (GET_CODE(r) == PARALLEL) {
+    for (int i = 0; i < XVECLEN(r, 0); i++) { rtx e = XVECEXP(r, 0, i); if (GET_CODE(e) == EXPR_LIST) e = XEXP(e, 0); if (e && REG_P(e)) { first = e; break; } }
+  } else if (REG_P(r)) first = r;
+  if (!first || !FP_REGNUM_P(REGNO(first))) return true;
+  if (!elem_code(GET_MODE(first), c)) { error_at(loc, "DISPATCH1: the backend passes a value in vector registers of mode %s, which has no element code", GET_MODE_NAME(GET_MODE(first))); return false; }
   return true;
 }
 
@@ -152,13 +167,20 @@ static bool shape(tree t, bool ret, tree fntype, std::string &out, location_t lo
     { error_at(loc, "DISPATCH1: type %qT in an indirect call has no shape", t); return false; }
   if (!TYPE_SIZE_UNIT(t) || !tree_fits_uhwi_p(TYPE_SIZE_UNIT(t))) { error_at(loc, "DISPATCH1: type %qT has no constant size", t); return false; }
   std::string n = std::to_string((unsigned long)tree_to_uhwi(TYPE_SIZE_UNIT(t)));
-  tree elt = NULL_TREE; int cnt = 0;
-  bool h = AGGREGATE_TYPE_P(t) && hfa(t, &elt, &cnt) && cnt;
-  std::string he = h ? (TYPE_PRECISION(elt) == 32 ? "hf" : "hd") : "";
-  if (ret) { out += aggregate_value_p(t, fntype) ? "m" + n : "a" + n + he; return true; }
-  /* AAPCS64: a class that is not trivially copyable is passed as a reference to a copy; a homogeneous aggregate of up to four elements travels in
-     floating-point registers whatever its size (4 doubles are 32 bytes); any other aggregate of more than 16 bytes is passed as a reference to a copy */
-  out += "s" + n + (TREE_ADDRESSABLE(t) ? "r" : h ? he : tree_to_uhwi(TYPE_SIZE_UNIT(t)) > 16 ? "r" : "g");
+  machine_mode mode = TYPE_MODE(t);
+  std::string he;
+  if (ret) {
+    if (aggregate_value_p(t, fntype)) { out += "m" + n; return true; }
+    if (!reg_class(targetm.calls.function_value(t, fntype, false), he, loc)) return false;
+    out += "a" + n + he; return true;
+  }
+  CUMULATIVE_ARGS cum;
+  INIT_CUMULATIVE_ARGS(cum, fntype, NULL_RTX, NULL_TREE, 0);
+  cumulative_args_t pack = pack_cumulative_args(&cum);
+  function_arg_info arg(t, mode, true);
+  if (TREE_ADDRESSABLE(t) || targetm.calls.pass_by_reference(pack, arg)) { out += "s" + n + "r"; return true; }
+  if (!reg_class(targetm.calls.function_arg(pack, arg), he, loc)) return false;
+  out += "s" + n + (he.empty() ? "g" : he);
   return true;
 }
 
