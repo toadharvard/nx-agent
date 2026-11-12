@@ -15,8 +15,8 @@ sys.path[:0] = [VERIFY, HERE, os.path.join(VERIFY, "..", "link"), os.path.join(V
 import gate_build  # noqa: E402
 import odr  # noqa: E402
 import recipe  # noqa: E402
+import test_plugins as TP  # noqa: E402
 import test_recipe as TR  # noqa: E402
-import verdict  # noqa: E402
 
 FAILED = []
 
@@ -28,17 +28,18 @@ def check(name, ok, extra=""):
 
 
 N = [0]
-TEMPLATE = "template <class T> struct Box { T v; T get() const { return v; } };\nint use%s(Box<int>& b) { return b.get(); }\n"
+TEMPLATE = "template <class T> struct Box { T v; __attribute__((noinline)) T get() const { return v; } };\nint use%s(Box<int>& b) { return b.get(); }\n"
 
 
-def run(files, rec=None):
-    """Build the toy root with FILES by the recipe; -> (odr (universe, red), linkstrict gate result, odr+linkstrict statuses)."""
+def run(files):
+    """Build the toy native C++ root (test_plugins: both plugins, no link) with FILES by the recipe; -> (build status, odr.check (universe, red),
+    linkstrict gate result, its text)."""
     N[0] += 1
-    repo = TR.make_repo("cd%d" % N[0], rec=rec, files=files)
-    cache = os.path.join(TR.BASE, "cdcache")
-    res, _ = gate_build.ensure(TR.ROOT, cache, repo)
+    repo = TP.make_repo("cd%d" % N[0], TP.REC, "native", files=dict({TP.ROOT + "/a.cc": None}, **{TP.ROOT + "/" + k[4:]: v for k, v in files.items()}))
+    cache = os.path.join(TP.BASE, "cdcache")
+    res, _ = gate_build.ensure(TP.ROOT, cache, repo)
     objs = [o["object"] for o in res["objects"] if o["unit"].endswith(recipe.CXX_EXT)]
-    out = os.path.join(TR.BASE, "cdout%d" % N[0])
+    out = os.path.join(TP.BASE, "cdout%d" % N[0])
     rc, g, _, txt = TR.gate(repo, "linkstrict", out, cache)
     return res["status"], odr.check(objs), g, txt
 
@@ -50,9 +51,9 @@ check("two units instantiating one template: the COMDAT is one definition (odr g
 check("... linkstrict has no comdat finding", g["status"] == "green", (g, txt))
 
 # 2. different flags (an optimisation level by pragma) give different bytes: red, both copies named
-OPT = "#pragma GCC optimize(\"O2\")\n"
+OPT = "#pragma GCC optimize(\"O0\")\n"
 st, (uni, red), g, txt = run({"toy/x1.cc": TEMPLATE % "A", "toy/x2.cc": OPT + TEMPLATE % "B"})
-check("a unit built with another optimisation level: odr red, both objects named", any("x1.cc" in r and "x2.cc" in r for r in red.values()), (uni, red))
+check("a unit built with another optimisation level (O0 against the root's O2): odr red, both objects named", any("x1.cc" in r and "x2.cc" in r for r in red.values()), (uni, red))
 check("... linkstrict: comdat-differs", g["status"] == "red" and "comdat-differs" in g["detail"], (g, txt))
 
 
@@ -85,8 +86,8 @@ check("... linkstrict: identity-undecidable", g["status"] == "red" and "identity
 TI = "struct S { virtual ~S(); virtual int f(); };\nint use%s(S* s) { return s->f(); }\nstruct P : S { int f() { return 1; } };\nint t%s(S* s) { return dynamic_cast<P*>(s) != 0; }\n"
 st, (uni, red), g, txt = run({"toy/x1.cc": TI % ("A", "A"), "toy/x2.cc": TI % ("B", "B")})
 check("typeinfo (_ZTI) and vtable groups of two units: green", any(u.startswith("_ZTI") for u in uni) and not red, (uni, red))
-DW = lambda: (".section .data.rel.ro.DW.ref.__gxx_personality_v0,\"awG\",@progbits,DW.ref.__gxx_personality_v0,comdat\n.balign 8\n"
-              ".weak DW.ref.__gxx_personality_v0\nDW.ref.__gxx_personality_v0:\n.xword __gxx_personality_v0\n")
+DW = lambda: (".section .data.rel.ro.DW.ref.__gxx_personality_v0,\"awG\",@progbits,DW.ref.__gxx_personality_v0,comdat\n.balign 4\n"
+              ".weak DW.ref.__gxx_personality_v0\nDW.ref.__gxx_personality_v0:\n.word __gxx_personality_v0\n")
 st, (uni, red), g, txt = run({"toy/x1.cc": asm(DW()), "toy/x2.cc": asm(DW())})
 check("a DW.ref group (pointer to a named symbol): green", "DW.ref.__gxx_personality_v0" in uni and not red, (uni, red))
 

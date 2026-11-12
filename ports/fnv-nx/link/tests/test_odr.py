@@ -62,7 +62,7 @@ check('same string in different objects', rc, 0)
 rc, r = gate(cc('s3', STR % ('hello', 'A'), '-Os'), cc('s4', STR % ('world', 'B'), '-Os'))
 check('different string is red', (rc, 'relocations differ' in r['uncertified'][0]), (1, True))
 rc, r = gate(cc('o1', STR % ('hello', 'A')), cc('o2', STR % ('hello', 'B')))
-check('string in a plain section is opaque, uncertified even when equal', (rc, 'not delimited' in r['uncertified'][0]), (1, True))
+check('string in a plain section with no symbol at its offset: identity-undecidable, even when equal', (rc, 'identity-undecidable' in r['uncertified'][0]), (1, True))
 
 INL = 'struct W { virtual int f() { return %d; } };\nint mk%s() { W w; return w.f(); }\n'
 w1 = cc('w1', INL % (1, 'A'))
