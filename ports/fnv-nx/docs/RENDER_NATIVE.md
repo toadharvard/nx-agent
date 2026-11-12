@@ -613,7 +613,7 @@ The console reads `sdmc:/switch/fnv/translated.nxsp` (`FNVNX_SD_TRANSLATED`, sdl
 
 | family | name | variant | blob |
 |---|---|---|---|
-| `translated` | the bytecode hash, `fnvnx_shader_hash` (FNV-1a 64 of the D3D9 bytecode up to and including END), 16 lowercase hex digits: **the index key** | `<vs\|ps>_<major>_<minor>/<mask>`, mask = 4 hex digits, the VS input locations read | the DKSH |
+| `translated` | the bytecode key, `fnvnx_sha256` (lib/sha256: SHA-256 of the D3D9 bytecode up to and including END), 64 lowercase hex digits (`fnvnx_shader_key_hex`): **the index key** | `<vs\|ps>_<major>_<minor>/<mask>`, mask = 4 hex digits, the VS input locations read | the DKSH |
 | `translated-glsl` | the same hash (host / emulator packs only, `--glsl`) | - | the GLSL, NUL-terminated |
 | `translated-name` | the program's name in the package the engine loads (e.g. `SLS2001.vso`) | its hash | none (size 0) |
 
@@ -890,7 +890,7 @@ through the native D3D9 translator (`front/d3d9_state.h`, Nine 20.1 rules) and S
 backend. **Choice:** shader translation is S6b's (`render/shaders`, MojoShader `glsldk` profile, layout contract
 `render/shaders/include/fnvnx_dk_layout.h`); nx_render does not link it. The converter either embeds each shader's
 GLSL in its `VSH`/`PSH` record, or leaves it empty and passes `--shaders <dir>` holding `<hash %016llx>.glsl` as
-`sdp2dksh -o <dir> --glsl shaderpackage*.sdp` writes them (hash = `fnvnx_shader_hash`, FNV-1a 64 of the bytecode).
+`sdp2dksh -o <dir> --glsl shaderpackage*.sdp` writes them (key = `fnvnx_sha256`, SHA-256 of the bytecode, as 64 hex digits by `fnvnx_shader_key_hex`).
 
 File: magic `"NXD9\0\0\0\1"`, then records `u32 tag, u32 payload bytes, payload, zero padding to 4` (the length
 excludes the padding). Little-endian; ids are converter-chosen, nonzero, unique per kind; records apply in order,
