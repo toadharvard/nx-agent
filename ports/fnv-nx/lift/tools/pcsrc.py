@@ -765,10 +765,22 @@ def run(text, T0, entries, ranges, outdir, name, rd=None, rset=None, parent=None
     byc = Counter((r[2], r[3]) for r in rows); redc = Counter((r[2], r[3]) for r in red)
     sources = len({(r[1], r[2]) for r in rows if r[3] == 'read'})
     res = dict(schema='fnvnx-gate/1', name='l3.pcsrc.' + name, status='red' if red else 'green', sources=sources, rows=len(rows), red=len(red), by_class={'%s/%s' % k: n for k, n in sorted(byc.items())},
-               red_by_class={'%s/%s' % k: n for k, n in sorted(redc.items())}, s4_red=sum(1 for r in red if r[2] == 's4'), s4_red_proven=sum(1 for r in red if r[2] == 's4' and r[0] not in cand), s4_escapes=sum(1 for r in rows if r[2] == 's4' and not r[5]), code_sources=sum(1 for r in rows if r[2] == 'code'), red_candidate_entries=redcand, red_proven_entries=len(red) - redcand, esp_lost=img.info['esp-lost'], entries=len(entries), info=dict(img.info))
+               red_by_class={'%s/%s' % k: n for k, n in sorted(redc.items())}, s4_red=sum(1 for r in red if r[2] == 's4'), s4_target=sum(1 for r in red if r[2] == 's4' and not r[3].startswith('escape')), s4_escape_red=sum(1 for r in red if r[2] == 's4' and r[3].startswith('escape')), s4_red_proven=sum(1 for r in red if r[2] == 's4' and r[0] not in cand), s4_escapes=sum(1 for r in rows if r[2] == 's4' and not r[5]), code_sources=sum(1 for r in rows if r[2] == 'code'), red_candidate_entries=redcand, red_proven_entries=len(red) - redcand, esp_lost=img.info['esp-lost'], entries=len(entries), info=dict(img.info))
     json.dump(res, open(outdir + '/gate_pcsrc.json', 'w'), sort_keys=True)
     json.dump({'s4_violations': res['s4_red']}, open(outdir + '/pcsrc_s4.json', 'w'), sort_keys=True)      # read by modlift's residual: no file = unchecked, N > 0 = violation
     return len(red), res
+
+
+def pin_of(facts, name):
+    """the manifest.json entry (gamedata branch, commit, tree_sha256, file sha256) of image `name` from the facts manifest in the facts dir or its parent; None if there is no manifest or no entry"""
+    for d in (facts, os.path.dirname(os.path.abspath(facts))):
+        f = os.path.join(d, 'manifest.json')
+        if os.path.exists(f):
+            for im in json.load(open(f)).get('images', []):
+                n = im['image'].lower(); stem = n.rsplit('.', 1)[0]
+                if stem == name.lower() or (name == 'exe' and n.endswith('.exe')):
+                    return {k: im[k] for k in ('image', 'sha256', 'gamedata_branch', 'gamedata_commit', 'gamedata_tree_sha256') if k in im}
+    return None
 
 
 def run_facts(facts, name, text, T0, rd=None, rset=None):
@@ -785,4 +797,7 @@ def run_facts(facts, name, text, T0, rd=None, rset=None):
         if l[0] == '#' or not l.strip(): continue
         for r in l.rstrip('\n').split('\t')[1].split(','):
             if '-' in r: a, b = r.split('-'); rg.append((int(a, 16), int(b, 16)))
-    return run(text, T0, ent, rg, facts, name, rd, rset, parent, cand)
+    red, res = run(text, T0, ent, rg, facts, name, rd, rset, parent, cand)
+    res['input'] = pin_of(facts, name)       # the pinned gamedata external the image was read from (facts manifest.json), or None when the facts dir has no manifest
+    json.dump(res, open(facts + '/gate_pcsrc.json', 'w'), sort_keys=True)
+    return red, res

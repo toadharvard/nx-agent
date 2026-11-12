@@ -270,6 +270,7 @@ def run(arg):
     print('ranges.tsv %d rows, noreturn.tsv %d rows, range-span vs extent mismatches %d' % (len(rg), len(nrr), bad))
     # ---- the residue is settled HERE, after universe.tsv / ranges.tsv exist and after the pcsrc facts of this run (pcsrc_s4.json) have been written: residue.closure reads them (tools/residue.py)
     # (the call that runs pcsrc.run_facts(outd, ...) must come before this point)
+    import pcsrc; pcsrc_red, pcsrc_res = pcsrc.run_facts(outd, name, X_.text, X_.T0, X_.u32, X_.rset)     # reads only universe.tsv and ranges.tsv; writes gate_pcsrc.json and pcsrc_s4.json
     # residue (valid executable bytes no entry body reaches and no PE directory names), cut by rule into: padding (nop / int3 instructions at the run's ends), dead gap (the run decodes
     # completely from its first byte, ends at a terminator or at the next reached instruction, and has relocated dwords only at operand fields), relocation slots (the bytes of a
     # HIGHLOW fixup site: a relocated pointer slot, e.g. a jump table), UNEXPLAINED (reason named). Nothing else is ever called data or dead.
@@ -393,6 +394,6 @@ def run(arg):
     print('mnemonics only in candidate-only code: %d mnemonics, %d instructions (of %d candidate-only); top 30: %s' % (len(cm), sum(cm.values()), cand_only, ' '.join('%s=%d' % kv for kv in sorted(cm.items(), key=lambda kv: (-kv[1], kv[0]))[:30])))
     print('mnemonics in proven code not in the exe universe (%d%s): %s' % (len([k for k in mp if k not in exe_mn]), '' if exe_mn else ', exe list missing', ' '.join('%s=%d' % kv for kv in new_mn)))
     open(outd + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap.' + name, 'status': 'green' if green else 'red', 'universe': TN - cc[7], 'certified': TN - cc[7] - nunx, 'uncertified': nunx, 'targets': len(targets), 'targets_certified': cert}) + '\n')
-    import pcsrc; pcsrc_red, pcsrc_res = pcsrc.run_facts(outd, name, X_.text, X_.T0, X_.u32, X_.rset); print('gate %s red=%d sources=%d rows=%d' % (pcsrc_res['name'], pcsrc_red, pcsrc_res['sources'], pcsrc_res['rows']))
+    print('gate %s red=%d sources=%d rows=%d' % (pcsrc_res['name'], pcsrc_red, pcsrc_res['sources'], pcsrc_res['rows']))
     print('gate l3.codemap.%s: %s (bytes %d, unexplained %d; targets %d, certified %d)%s' % (name, 'green' if green else 'red', TN - cc[7], nunx, len(targets), cert, ''.join('; RED: ' + w for w in why)))
     return 0 if green else 1
