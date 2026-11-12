@@ -373,13 +373,13 @@ for abi in ("ilp32", "lp64"):
             return {(n, k) for _, n, k, _ in finds}, finds
         SRC = "unsigned f(void *self, void *p) { (void)self; fnvnx_wine_fixme(2); return p ? 0u : 0x8876086Cu; }"
         k, f = nzk(SRC, NZ)
-        case('wine u32nz1: p ? 0 : 0x8876086C certified', not k, f, key=abi)
+        case('wine u32nz1: p ? 0 : 0x8876086C certified', not k, f, key=(opt, abi))
         k, f = nzk(SRC, SWAP)
-        case('wine u32nz1: swapped row values: wine-fixme-mismatch', k == {("f", "wine-fixme-mismatch")}, f, key=abi)
+        case('wine u32nz1: swapped row values: wine-fixme-mismatch', k == {("f", "wine-fixme-mismatch")}, f, key=(opt, abi))
         k, f = nzk("unsigned f(void *self, int *p) { (void)self; fnvnx_wine_fixme(2); return *p ? 0u : 0x8876086Cu; }", NZ)
-        case('wine u32nz1: a body that dereferences p: wine-fixme-in-real-body', k == {("f", "wine-fixme-in-real-body")}, f, key=abi)
+        case('wine u32nz1: a body that dereferences p: wine-fixme-in-real-body', k == {("f", "wine-fixme-in-real-body")}, f, key=(opt, abi))
         k, f = nzk("unsigned f(void *self, unsigned long p) { (void)self; fnvnx_wine_fixme(2); return p + 1 ? 0u : 0x8876086Cu; }", NZ)
-        case('wine u32nz1: arithmetic on p: not certified', k and ("f", "wine-fixme-mismatch") in k or ("f", "wine-fixme-in-real-body") in k, f, key=abi)
+        case('wine u32nz1: arithmetic on p: not certified', k and ("f", "wine-fixme-mismatch") in k or ("f", "wine-fixme-in-real-body") in k, f, key=(opt, abi))
 
 # kind addr: the function returns the address of a named object
 for abi in ("ilp32", "lp64"):

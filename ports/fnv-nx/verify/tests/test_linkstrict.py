@@ -170,15 +170,15 @@ for abi in ("ilp32", "lp64"):
     t0 = time.time()
     (rc, g, _, txt), st = LS(TR.make_repo("ls-toy-" + abi, rec=TR.abi_rec(abi)), "ta" + abi, GC)
     n = 8 if abi == "ilp32" else 7      # LP64: no ELF (a link is the ILP32 guest ELF)
-    case("toy root: green %d/%d and accepted", rc == 0 and g["universe"] == n == g["certified"] and st[0] == "green", (g, txt), key=(n, n))
+    case("toy root: green %d/%d and accepted", rc == 0 and g["universe"] == n == g["certified"] and st[0] == "green", (g, txt), key=(abi, (n, n)))
     print("INFO %s toy gate %.1f s" % (abi, time.time() - t0))
     IE = {"toy/a.c": TR.FILES["toy/a.c"].replace("int f_a(void) {", "extern char __image_end[];\nint f_a(void) { (void)*(volatile char *)__image_end;"),
           "toy/link.ld": TR.FILES["toy/link.ld"].replace("/DISCARD/", "__image_end = .; /DISCARD/")}
     if abi == "ilp32":
         (rc, g, _, txt), st = LS(TR.make_repo("ls-ie-" + abi, rec=TR.abi_rec(abi), files=IE), "ie" + abi, GC)
-        case("link script defines __image_end, the root links an ELF: the reference is certified", rc == 0 and g["certified"] == g["universe"] and st[0] == "green", (g, txt))
+        case("link script defines __image_end, the root links an ELF: the reference is certified", rc == 0 and g["certified"] == g["universe"] and st[0] == "green", (g, txt), key=abi)
     (rc, g, _, txt), st = LS(TR.make_repo("ls-ie0-" + abi, rec=TR.abi_rec(abi, TR.mut(link=None, os_layer=["os.S"])), files=IE), "ie0" + abi, GC)
-    case("the same objects, the recipe links no ELF: __image_end is undefined", rc == 2 and g["uncertified"] == [TR.ROOT + "/a.c:__image_end"], (g, txt))
+    case("the same objects, the recipe links no ELF: __image_end is undefined", rc == 2 and g["uncertified"] == [TR.ROOT + "/a.c:__image_end"], (g, txt), key=abi)
 # (d) the host boundary: the exports of the pinned host runtime (libc6, libgcc-s1, libstdc++6)
 exp, hk = L.host_exports(GC)
 case("(d) host_exports: the pinned runtime's exports hold libc, libstdc++ and libgcc_s names and no local name", {"printf", "memcpy", "sqrt", "__cxa_throw", "_Unwind_Resume"} <= set(exp)
