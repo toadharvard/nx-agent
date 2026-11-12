@@ -34,6 +34,8 @@ on 2026-11-11 22:35 UTC. Handoff read: `journal/inbox/l3b-lift-handoff-opus.md` 
   - TAB_BIAS becomes a rule: the bias comes from the dispatch's own guard bound, and an unguarded site is red.
   - The undef-flag liveness gate is L3b's rule, built by L3a w5.
   - DSL coverage order: int, then sys, x87, simd.
+  - f2i_check is folded into L2's fnvnx_ftoi (mode native|lifted from cxx_origin, output <unit>.f2i.json, registers attribute fnvnx_f2i) on claude/fnv-l2-source-w1, commit pending. Until then, units that include fnvl.h are red under w14's -Werror=attributes.
+  - The ftoi stage-doc reader is on L1 w17 cdc0041 (MERGER #4).
   - L1 w14 adds admit.json `imports:` and z3 in EXTERNAL (ASM-009).
 - L3a (fnvlift @8ec81459):
   - FNVL_EMIT is an undeclared environment input; set_emit is proposed.
