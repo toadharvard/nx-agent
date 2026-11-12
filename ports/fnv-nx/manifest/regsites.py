@@ -60,33 +60,7 @@ from rtti import Rtti
 from regclass import Closure
 X = funcfacts.X
 
-# kind: open/create (out handle), read, write, enum, delete, info, close
-_BASE = {
-    "RegOpenKey":      (3, 0, 1, None, 2, "open"),
-    "RegOpenKeyEx":    (5, 0, 1, None, 4, "open"),
-    "RegCreateKey":    (3, 0, 1, None, 2, "create"),
-    "RegCreateKeyEx":  (9, 0, 1, None, 7, "create"),
-    "RegQueryValue":   (4, 0, 1, None, None, "read"),
-    "RegQueryValueEx": (6, 0, None, 1, None, "read"),
-    "RegGetValue":     (7, 0, 1, 2, None, "read"),
-    "RegSetValue":     (5, 0, 1, None, None, "write"),
-    "RegSetValueEx":   (6, 0, None, 1, None, "write"),
-    "RegEnumKey":      (4, 0, None, None, None, "enum"),
-    "RegEnumKeyEx":    (8, 0, None, None, None, "enum"),
-    "RegEnumValue":    (8, 0, None, None, None, "enum"),
-    "RegDeleteKey":    (2, 0, 1, None, None, "delete"),
-    "RegDeleteKeyEx":  (4, 0, 1, None, None, "delete"),
-    "RegDeleteValue":  (2, 0, None, 1, None, "delete"),
-    "RegQueryInfoKey": (12, 0, None, None, None, "info"),
-    "SHGetValue":      (6, 0, 1, 2, None, "read"),
-    "SHSetValue":      (6, 0, 1, 2, None, "write"),
-    "SHDeleteKey":     (2, 0, 1, None, None, "delete"),
-    "SHDeleteValue":   (3, 0, 1, 2, None, "delete"),
-}
-ROLES = {"RegCloseKey": (1, 0, None, None, None, "close")}
-for _n, _r in _BASE.items():
-    ROLES[_n + "A"] = ROLES[_n + "W"] = _r
-# RegDeleteKeyEx has no A-less variant in shlwapi; SH* names take the same suffix rule
+from regtable import ROLES, NO_VALUES, COLUMNS, header
 HKEY = {0x80000000: "HKEY_CLASSES_ROOT", 0x80000001: "HKEY_CURRENT_USER", 0x80000002: "HKEY_LOCAL_MACHINE",
         0x80000003: "HKEY_USERS", 0x80000004: "HKEY_PERFORMANCE_DATA", 0x80000005: "HKEY_CURRENT_CONFIG",
         0x80000006: "HKEY_DYN_DATA"}
@@ -564,7 +538,6 @@ def name_alts(an, v):
     return list(dict.fromkeys(out)), None
 
 
-NO_VALUES = "key-has-no-declared-values"
 
 
 def declared_keys(path=None):
@@ -728,7 +701,7 @@ def write(mods, out):
         raise SystemExit("registry import without a ROLES row: %r" % bad)
     n = 0
     with open(os.path.join(out, "regsites.tsv"), "w") as f:
-        f.write("module\tsite\tapi\troot\tsubkey\tvalue\tstatus\treason\n")
+        f.write(header())
         for name in sorted(mods):
             for site, api, root, sub, val, st, why, via in sorted(set(regsites(mods[name])), key=lambda r: (r[0], str(r[7]))):
                 s = "0x%08x" % site + ("<-" + via.split()[-1] if via and via.startswith("via ") else "")

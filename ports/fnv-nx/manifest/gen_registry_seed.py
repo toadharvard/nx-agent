@@ -17,7 +17,7 @@ declared row (the keys a real Windows or Wine populates; they stay absent here):
 import os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import regsites
+import regtable
 
 ROOTS = {"HKEY_CLASSES_ROOT": 0x80000000, "HKEY_CURRENT_USER": 0x80000001, "HKEY_LOCAL_MACHINE": 0x80000002, "HKEY_USERS": 0x80000003}
 TYPES = {"REG_SZ": 1, "REG_EXPAND_SZ": 2, "REG_BINARY": 3, "REG_DWORD": 4, "REG_MULTI_SZ": 7, "REG_QWORD": 11}
@@ -98,13 +98,13 @@ def main(argv):
     if len(argv) != 3:
         die("usage: gen_registry_seed.py <regsites.tsv> <declared_registry.tsv> <out.inc> [--uncovered <report.tsv>]")
     sites_path, decl_path, out = argv
-    sites = [f for _, f in table(sites_path, "module site api root subkey value status reason".split(), "regsites")]
+    sites = [f for _, f in table(sites_path, regtable.COLUMNS, "regsites")]
     reads = {}
     for f in sites:
-        role = regsites.ROLES.get(f[2])
+        role = regtable.ROLES.get(f[2])
         if role is None:
             die("%s: api %s has no registry role" % (sites_path, f[2]))
-        if role[5] == "read" and f[6] == "static" and f[7] != regsites.NO_VALUES:
+        if role[5] == "read" and f[6] == "static" and f[7] != regtable.NO_VALUES:
             reads.setdefault((f[3].lower(), f[4].lower(), f[5].lower()), []).append(f)
     decl, seen, body = table(decl_path, "root key name type data source".split(), "declared table"), set(), []
     for n, (root, key, name, typ, data, source) in decl:

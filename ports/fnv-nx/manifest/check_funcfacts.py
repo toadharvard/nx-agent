@@ -18,6 +18,8 @@ Structural rule over the import and data graph (no names, no byte patterns):
       find_bytes searches only outside code. The one code read allowed is a relocated 32-bit word at its relocation address, answered
       by imagerec as the decoded field. Code is reachable only as decoded facts: FuncFacts.ins / edges / insn_at / heads.
       Data reads (strings, tables, relocated words) are free. funcfacts defines no error type of its own.
+  G4  a build-stage generator (a "tool" of platform/build.json) reads published tables only: no module in its import closure is in the
+      image-pass graph or imports a reader.
 A module outside the graph (the generators of the platform tables, which read their own text inputs) is not constrained by G2/G3; G1
 holds for every module. The graph is computed from the imports, never listed.
 The self-tests build synthetic modules for each of the three rules and for a module that reaches the graph through another module.
@@ -58,6 +60,46 @@ def graph(trees):
     return g
 
 
+def closure(trees, root_tree):
+    """The modules of this directory that a generator imports, directly or through others (the import closure)."""
+    seen, todo = set(), [root_tree]
+    while todo:
+        for m in imports(todo.pop()) & set(trees):
+            if m not in seen:
+                seen.add(m)
+                todo.append(trees[m])
+    return seen
+
+
+def g4(trees, gens):
+    """G4: gens is {tool path: tree}. A generator's closure holds no image-pass module and imports no reader."""
+    ing, r = graph(trees), []
+    for g, t in sorted(gens.items()):
+        direct = imports(t)
+        for m in sorted(closure(trees, t)):
+            if m in ing:
+                r.append((g, "G4", "imports %s, which is in the image-pass graph" % m))
+        for x in sorted((direct | set().union(*[imports(trees[m]) for m in closure(trees, t)] or [set()])) & READERS):
+            r.append((g, "G4", "reaches the reader %s" % x))
+    return r
+
+
+def tools_of(path):
+    import json
+    out = set()
+    def walk(o):
+        if isinstance(o, dict):
+            if isinstance(o.get("tool"), str):
+                out.add(o["tool"])
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+    walk(json.load(open(path)))
+    return out
+
+
 def binary_open(n):
     if not isinstance(n, ast.Call):
         return False
@@ -93,11 +135,19 @@ def main():
     for m, rs in sorted(bad.items()):
         for ln, rule, text in sorted(rs):
             sys.stderr.write("%s.py:%d: %s %s\n" % (m, ln, rule, text))
+    gens = {}
+    bj = os.path.join(HERE, "..", "platform", "build.json")
+    if os.path.exists(bj):
+        for t in sorted(tools_of(bj)):
+            gens[t] = parse(os.path.join(HERE, "..", "..", "..", t))
+    g4bad = g4(trees, gens)
+    for g, rule, text in g4bad:
+        sys.stderr.write("%s: %s %s\n" % (g, rule, text))
     selftest()
-    if bad:
+    if bad or g4bad:
         sys.exit(1)
-    print("funcfacts gate ok: %d modules, %d in the image-pass graph, image bytes only through funcfacts.py"
-          % (len(trees), len(graph(trees))))
+    print("funcfacts gate ok: %d modules, %d in the image-pass graph, image bytes only through funcfacts.py; %d generators, none reaches the image pass"
+          % (len(trees), len(graph(trees)), len(gens)))
 
 
 def selftest_code_read():
@@ -157,6 +207,11 @@ def selftest():
     assert "c" not in run(dict(base, c="x = open(p, 'rb')\n"))
     assert "a" not in run(dict(base, a="import funcfacts\nx = open(p, encoding='utf-8')\ny = open(p, 'w')\n"))
     assert "a" not in run(dict(base, a="import funcfacts\nx = [b'\\x55\\x8b\\xec']\n"))   # the rule is the graph, not byte patterns
+    # G4
+    ts = {"funcfacts": ast.parse("import imagerec\n"), "x": ast.parse("import funcfacts\n"), "tbl": ast.parse("import os\n")}
+    assert g4(ts, {"gen": ast.parse("import tbl\n")}) == []
+    assert g4(ts, {"gen": ast.parse("import x\n")})[0][1] == "G4"                     # through the image-pass graph
+    assert g4(ts, {"gen": ast.parse("import capstone\n")})[0][1] == "G4"
 
 
 if __name__ == "__main__":
