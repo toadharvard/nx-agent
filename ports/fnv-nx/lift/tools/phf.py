@@ -1,8 +1,43 @@
 """Dispatcher table for rt/rt.c: a minimal perfect hash (hash-and-displace).
    idx = ((a ^ g[(a*K1)>>(32-NBITS)]) * K2) >> (32-TBITS); the slot holds the key, empty slots the key 0xffffffff.
    build(keys) -> dict(k1, k2, nbits, tbits, g, slots) ; slots[i] = key or None."""
-import math, random
+import math
 M = 0xffffffff
+
+
+class MT19937:
+    """The Mersenne Twister of CPython's random.Random(int seed), bit for bit (init_by_array of the 32-bit words of the seed, genrand_uint32): the build must not import
+    `random` (puregate bans it), and the published tables stay byte-identical. getrandbits(k <= 32) = next32() >> (32 - k)."""
+    def __init__(self, seed):
+        key = []; n = abs(seed)
+        while True:
+            key.append(n & M); n >>= 32
+            if not n: break
+        mt = [0] * 624; mt[0] = 19650218
+        for i in range(1, 624): mt[i] = (1812433253 * (mt[i - 1] ^ (mt[i - 1] >> 30)) + i) & M
+        i, j = 1, 0
+        for _ in range(max(624, len(key))):
+            mt[i] = ((mt[i] ^ ((mt[i - 1] ^ (mt[i - 1] >> 30)) * 1664525)) + key[j] + j) & M
+            i += 1; j += 1
+            if i >= 624: mt[0] = mt[623]; i = 1
+            if j >= len(key): j = 0
+        for _ in range(623):
+            mt[i] = ((mt[i] ^ ((mt[i - 1] ^ (mt[i - 1] >> 30)) * 1566083941)) - i) & M
+            i += 1
+            if i >= 624: mt[0] = mt[623]; i = 1
+        mt[0] = 0x80000000
+        self.mt, self.i = mt, 624
+    def next32(self):
+        mt = self.mt
+        if self.i >= 624:
+            for k in range(624):
+                y = (mt[k] & 0x80000000) | (mt[(k + 1) % 624] & 0x7fffffff)
+                mt[k] = mt[(k + 397) % 624] ^ (y >> 1) ^ (0x9908b0df if y & 1 else 0)
+            self.i = 0
+        y = mt[self.i]; self.i += 1
+        y ^= y >> 11; y ^= (y << 7) & 0x9d2c5680; y ^= (y << 15) & 0xefc60000; y ^= y >> 18
+        return y & M
+    def getrandbits32(self): return self.next32()
 
 
 def build(keys, seed=1, load=0.4):
@@ -11,8 +46,8 @@ def build(keys, seed=1, load=0.4):
     tbits = max(3, math.ceil(math.log2(n / load)))
     nbits = max(1, math.ceil(math.log2(max(n, 2) / 4)))
     for att in range(200):
-        r = random.Random(seed * 1000 + att)
-        k1, k2 = r.getrandbits(32) | 1, r.getrandbits(32) | 1
+        r = MT19937(seed * 1000 + att)
+        k1, k2 = r.getrandbits32() | 1, r.getrandbits32() | 1
         bk = {}
         for a in keys:
             bk.setdefault(((a * k1) & M) >> (32 - nbits), []).append(a)

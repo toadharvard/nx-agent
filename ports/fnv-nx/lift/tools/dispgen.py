@@ -2,12 +2,12 @@
 """The dispatcher generator: ONE implementation of the table that rt/rt.c reads (fnvl_disp_table, fnvl_g, fnvl_phf_params in disp.S).
     dispgen.py ENTRIES OUT.S          ENTRIES = rows `addr<TAB>sym[<TAB>...]` (the format of the pack's entries.tsv; addr is hex; `#` lines and blank lines are ignored)
 RULE: disp.S is a pure function of the entry list. The keys are the set of addresses, the symbol of a key is the second column; the row order does not matter
-(phf.build sorts the keys). Same rows, same bytes: no clock, no environment variable, no path in the output. The hash is bench/phf.py (the minimal perfect hash,
-hash-and-displace); the only inputs of the program are this file, bench/phf.py and the entries file, so it is usable as a recipe `generated`-stage tool.
+(phf.build sorts the keys). Same rows, same bytes: no clock, no environment variable, no path in the output. The hash is tools/phf.py (the minimal perfect hash,
+hash-and-displace); the only inputs of the program are this file, tools/phf.py and the entries file, so it is usable as a recipe `generated`-stage tool.
 A key that is not in the list resolves to fnvl_nobody (rt/rt.c): no row is added for it. Two rows with one address, a bad address or a row without a symbol exit with an error.
 Used by liftgen.py --finish (rows of the pack it writes) and by test roots that build their own disp.S from their entry list."""
 import os, sys
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'bench'))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))      # the hash lives in this tool root: a tool imports only from its own root
 import phf
 
 

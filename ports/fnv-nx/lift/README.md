@@ -167,9 +167,9 @@ classifies every byte of `.text`. The exit gate "100 % of exe functions lifted" 
 ## The dispatcher table: one generator (`tools/dispgen.py`)
 
 `disp.S` (`fnvl_disp_table`, `fnvl_g`, `fnvl_phf_params`, read by `rt/rt.c`) is a pure function of an entry list, and `tools/dispgen.py` is its only
-implementation (`bench/phf.py` is the hash it calls). It reads rows `addr<TAB>sym[...]` (the format of the pack's `entries.tsv`, `#` lines ignored) and writes
+implementation (`tools/phf.py` is the hash it calls). It reads rows `addr<TAB>sym[...]` (the format of the pack's `entries.tsv`, `#` lines ignored) and writes
 the assembly; the row order, the clock and the environment do not change a byte. `liftgen.py --finish` writes `entries.tsv` first and calls `dispgen.table` on
-those same rows. A root builds its own table with a `generated` step (`verify/RECIPE.md`): `{"tool": "ports/fnv-nx/lift/tools/dispgen.py", "args": ["/in/<repo path of the entries file>", "/out/disp.S"], "inputs": ["<repo path of the entries file>"], "outputs": ["disp.S"]}`. The recipe mounts the whole admitted tool root at `/tool` and the inputs at `/in/<repo path>`, and the generator writes only `/out/disp.S`, which is then a unit of the root (a `.S` file). `bench/phf.py` is read from the same root, so `ports/fnv-nx/lift` must be an admitted tool root in `verify/admit.json` for the step to run (the root is L1's to admit; the trunk's admit.json does not list it yet). A key that is not in the list resolves to `fnvl_nobody`. `test/dispgentest.py` checks the
+those same rows. A root builds its own table with a `generated` step (`verify/RECIPE.md`): `{"tool": "ports/fnv-nx/lift/tools/dispgen.py", "args": ["/in/<repo path of the entries file>", "/out/disp.S"], "inputs": ["<repo path of the entries file>"], "outputs": ["disp.S"]}`. The recipe mounts the whole admitted tool root at `/tool` and the inputs at `/in/<repo path>`, and the generator writes only `/out/disp.S`, which is then a unit of the root (a `.S` file). `phf.py` sits beside `dispgen.py`, so the generator reads nothing outside `/tool` except the entries file under `/in` (the admitted tool root is `ports/fnv-nx/lift/tools`; a tool imports only from its own root). A key that is not in the list resolves to `fnvl_nobody`. `test/dispgentest.py` checks the
 determinism and the lookup.
 
 ## Cache

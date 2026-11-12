@@ -6,7 +6,7 @@ Compared per run: call trace (entry address, esp at entry), 8 registers, x87 top
 Everything exe-derived goes to --work (default /home/user/l3work/chain/run), never the repo. Inputs FNVNX_EXE, FNVNX_UNIVERSE."""
 import argparse, collections, hashlib, multiprocessing as mp, os, pickle, statistics, subprocess, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
-sys.path.insert(0, HERE)
+sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(LIFT, 'tools'))      # phf lives in the tool root
 G = {}
 EXCL = ('indcall', 'import', 'jmp-indirect-untabled', 'fs')
 CHKSTK = 0xec8660                      # __chkstk / _alloca_probe: returns with a changed esp
