@@ -638,3 +638,15 @@ Ids: gate_eh uses the orchestrator's ASM-222/223/224. L1's 225..227 are withdraw
 - Doubles finding: verify/tests/guest/guest.ld is a second guest link script (fixed, not PIE). Raised with L4; the rule is a single link script, checked as part of the doubles gate.
 - History decision (orchestrator, 2026-11-12): no rewrite before the first frame; gate_legal checks the tree only; the history is the orchestrator's open item. w12 records this as a stated limit in gate_legal.
 - L4 accepts the single link script rule: w6 deletes verify/tests/guest/guest.ld and tests/bootguest/guest.ld; the proof is `git ls-files '*.ld'` = link/guest.ld. Link-script identity in the doubles gate is queued for w12 after the merge.
+
+## 10:40Z — FIRST ROOT ON THE TRUNK
+The trunk claude/fnv-nx-clean is 11187daf (the candidate 862b0708 merged; green, 38 gates, 438 s against the 300 s budget). The next candidate is claude/fnv-first-root-next 83f7504f (-dU 41c58415, legal 1b918f47, ASM-225 7bd3abbd).
+Rebasing onto 83f7504f, in delivery order:
+1. w19: selftests per-file cache (the budget) — doing
+2. w17: origin semantics + plugin-compiler constant — doing
+3. w16 → w16-fix: fixtures, specdefaults (gl4), headers, covers — doing
+4. w5: toolchain-build → GL pins (PP read sets) → wine profile — doing
+5. w14 → w14-src: lifted source from a stage + py_modules — doing
+6. w15: link remainder + onedef — doing
+7. w18: re-pin to facts a0f3d8e + manifest e15d385 — doing
+Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (blocked on L2's tls note).
