@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory() as t:
     m = refused(put('notpe.exe', notpe), dict(pin, size=len(notpe), sha256=hashlib.sha256(notpe).hexdigest()))
     check('no PE header: fields unreadable, refused', m and 'unreadable' in m, m)
     check('missing file: refused', refused(os.path.join(t, 'nope.exe'), pin) is not None)
-    check('directory: refused', 'regular file' in (refused(t, pin) or ''))
+    check('directory: refused', 'cannot read' in (refused(t, pin) or ''))
     os.symlink(gp, os.path.join(t, 'link.exe'))
     check('symlink to the right file: accepted (the bytes are what is pinned)', refused(os.path.join(t, 'link.exe'), pin) is None)
     err, out = io.StringIO(), io.StringIO()
