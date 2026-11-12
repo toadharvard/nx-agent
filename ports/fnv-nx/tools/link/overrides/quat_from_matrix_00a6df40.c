@@ -5,7 +5,7 @@
  * next and last axes come from the image table 0x011a9e98, {1, 2, 0}). Its square root goes through a volatile
  * float (a store and a reload), and the largest-diagonal branch writes three components through an array of
  * pointers on the stack. GCC compiles that to a 112-byte frame, four saved register pairs and indexed loads of the
- * array: 89 A64 instructions per call (tools/perf/dyncount.py).
+ * array: 89 A64 instructions per call.
  *
  * This replacement has the same arithmetic, operation by operation and in float as compiled. The source's
  * `root * 0.5` and `0.5 / root` are double expressions, but GCC computes them in float, and both give the same bits:

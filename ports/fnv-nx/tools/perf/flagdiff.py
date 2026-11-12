@@ -6,7 +6,7 @@
 <root>/<variant>/<unit>.o as written by a variants driver (one directory per flag set, same object names). For
 every variant: static instructions over the functions present in both builds, GOT loads, calls (and of those the
 stack-protector, outline-atomic and bridge calls), and the functions that changed most. Static counts only; the
-dynamic side is `dyncount.py`.
+dynamic side is the measured instruction count.
 """
 import argparse
 import os

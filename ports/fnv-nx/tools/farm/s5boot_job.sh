@@ -63,7 +63,7 @@ fail() { NOTES+=("FAILED: $*"); log "FAILED: $*"; write_report; exit 1; }
 [ -n "${ARTIFACTS:-}" ] || { [ -d /home/user/fnv-nx-build/.git ] && ARTIFACTS=/home/user/fnv-nx-build; }
 [ -n "${ARTIFACTS:-}" ] || fail "ARTIFACTS unset"
 export ARTIFACTS
-# the emulator's Python packages (the same pins as fuzz_job.sh) and aarch64 binutils, installed when missing
+# the emulator's Python packages and aarch64 binutils, installed when missing
 S5BOOT_PIPS=${S5BOOT_PIPS:-"unicorn==2.1.4 capstone==5.0.9 pyelftools==0.33"}
 if ! python3 -I -c 'import unicorn, capstone, elftools' 2> /dev/null; then
 	log "installing $S5BOOT_PIPS"

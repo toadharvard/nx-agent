@@ -12,7 +12,6 @@ def on(paths): p = q.plan(paths); return sorted(c for c, v in p['checks'].items(
 assert on(['docs/X.md', 'ports/../JOURNAL.md'.split('/')[-1]]) == ([], []), on(['docs/X.md'])
 assert on(['render/native/families/lit.cpp'])[0] == ['boottrace', 'build', 'replay']
 assert on(['render/shaders/src/a.c'])[0] == ['boottrace', 'build', 'programs', 'replay']
-assert on(['tools/difffuzz/fuzz.py'])[0] == ['audit', 'build', 'fuzz']   # the link, not a new guest: no boot trace
 assert on(['tools/lockstep/fnvtrace.c'])[0] == ['boottrace']
 assert on(['tools/equiv/equiv.py'])[0] == ['equiv']
 assert on(['tools/rules/r.py'])[0] == list(q.ALL) and True or True
@@ -30,7 +29,7 @@ assert on(['tools/perf/plat.py'])[0] == ['plat'] and on(['tools/perf/linfeed.py'
 assert on(['tests/s15/test_plat_report.py'])[0] == ['plat']
 assert on(['tools/threads/variant.sh'])[0] == ['mem', 'plat', 'threads']
 # fnvlink: this head's link and guest lanes, never equiv or the replay (qk1 on aec30808: a cold equiv on a link change)
-assert on(['tools/link/bodies.py'])[0] == ['audit', 'boottrace', 'build', 'frames', 'fuzz', 'mem', 'plat', 'scenario',
+assert on(['tools/link/bodies.py'])[0] == ['boottrace', 'build', 'frames', 'mem', 'plat', 'scenario',
                                           'threads'], on(['tools/link/bodies.py'])
 # the MSVC shim headers: every unitcache key, equiv is cold (left to the eq farms)
 pc = q.plan(['tools/equiv/msvc/fnvnx_win32.h'])
@@ -52,7 +51,7 @@ git -C "$G" -c user.name=t -c user.email=t@t commit -q --allow-empty -m base; B=
 echo x >"$G/ports/fnv-nx/render/a.cpp"; git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m r; H1=$(git -C "$G" rev-parse HEAD)
 echo y >"$G/ports/fnv-nx/toolchain/t.sh"; git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m t; H2=$(git -C "$G" rev-parse HEAD)
 mkdir -p "$G/ports/fnv-nx/tools/farm" "$T/jobs"; cp "$P/tools/farm/quick_job.sh" "$P/tools/farm/quick_plan.py" "$G/ports/fnv-nx/tools/farm/"
-for j in full fuzz audit equiv sweep threads frames mem plat scenario boottrace; do
+for j in full equiv sweep threads frames mem plat scenario boottrace; do
 	printf '#!/bin/sh\necho "$(date +%%s) %s" >> %s/order\nsleep 1\neval "out=\\${$#}"; printf "# %s\\n\\n- %s ok\\n" > "$out"\nexit ${RC_%s:-0}\n' "$j" "$T" "$j" "$j" "$j" >"$T/jobs/${j}_job.sh"
 done
 # the full_job stand-in leaves stage records like the pipeline's (PREPARE_STATUS=fail: the prepare stage failed)
@@ -76,21 +75,21 @@ ok "toolchain change, equiv failed: FAIL, with the full run named beside it" 'gr
 ok "base was the verified head" 'grep -q "base: ${H1:0:12}" "$T/q-$H2.md"'
 ok "not verified" '[ "$(cat "$T/home/quick/verified")" = "$H1" ]'
 rm -f "$T/home/quick/verified"; : >"$T/order"; RC_equiv=1 run_q "$H2"
-ok "no base: every check" 'grep -q "no verified head" "$T/q-$H2.md" && grep -q "^| fuzz | ran" "$T/q-$H2.md"'
-ok "lane D starts after the build, beside fuzz" 'f=$(awk "/ full\$/{print \$1}" "$T/order"); d=$(awk "/ threads\$/{print \$1}" "$T/order"); z=$(awk "/ fuzz\$/{print \$1}" "$T/order"); [ "$d" -ge $((f + 1)) ] && [ $((d - z)) -le 1 ] && [ $((z - d)) -le 1 ]'
+ok "no base: every check" 'grep -q "no verified head" "$T/q-$H2.md" && grep -q "^| build | ran" "$T/q-$H2.md"'
+ok "lane D starts after the build, after it" 'f=$(awk "/ full\$/{print \$1}" "$T/order"); d=$(awk "/ threads\$/{print \$1}" "$T/order"); [ "$d" -ge $((f + 1)) ]'
 ok "boottrace ran" 'grep -q " boottrace$" "$T/order" && grep -q "^| boottrace | ran" "$T/q-$H2.md"'
 # the lanes start together: the first job of A (full), B (equiv) and C (sweep) within 2 s; lane D starts after A's build
 st() { awk -v j="$1" '$2 == j {print $1; exit}' "$T/order"; }
 ok "lanes in parallel" '[ -n "$(st full)" ] && [ -n "$(st equiv)" ] && [ -n "$(st sweep)" ] && [ $(( $(printf "%s\n" "$(st full)" "$(st equiv)" "$(st sweep)" | sort -n | tail -1) - $(printf "%s\n" "$(st full)" "$(st equiv)" "$(st sweep)" | sort -n | head -1) )) -le 2 ]'
 ok "lane D after the build" '[ -n "$(st threads)" ] && [ "$(st threads)" -ge $(( $(st full) + 1 )) ]'
 # a version-constant bump of one cache: full run needed, with the values
-mkdir -p "$G/ports/fnv-nx/tools/difffuzz"; echo "HARNESS = 'difffuzz-19'" >"$G/ports/fnv-nx/tools/difffuzz/fnkeys.py"
+mkdir -p "$G/ports/fnv-nx/tools/equiv"; echo "CACHE_V = 'u19'" >"$G/ports/fnv-nx/tools/equiv/unitcache.py"
 git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m k1; K1=$(git -C "$G" rev-parse HEAD)
-echo "HARNESS = 'difffuzz-20'" >"$G/ports/fnv-nx/tools/difffuzz/fnkeys.py"
+echo "CACHE_V = 'u20'" >"$G/ports/fnv-nx/tools/equiv/unitcache.py"
 git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m k2; K2=$(git -C "$G" rev-parse HEAD)
 python3 -I "$P/tools/farm/quick_plan.py" plan "$G" "$K1" "$K2" --out "$T/kp.json"
-ok "HARNESS bump: full, fuzz + audit" 'python3 -c "import json,sys; p=json.load(open(sys.argv[1])); assert \"difffuzz-19 -> difffuzz-20\" in p[\"full\"][0] and p[\"checks\"][\"fuzz\"]" "$T/kp.json"'
-echo "# x" >>"$G/ports/fnv-nx/tools/difffuzz/fnkeys.py"
+ok "CACHE_V bump: full, equiv" 'python3 -c "import json,sys; p=json.load(open(sys.argv[1])); assert \"u19 -> u20\" in p[\"full\"][0] and p[\"checks\"][\"equiv\"]" "$T/kp.json"'
+echo "# x" >>"$G/ports/fnv-nx/tools/equiv/unitcache.py"
 git -C "$G" add -A; git -C "$G" -c user.name=t -c user.email=t@t commit -q -m k3; K3=$(git -C "$G" rev-parse HEAD)
 python3 -I "$P/tools/farm/quick_plan.py" plan "$G" "$K2" "$K3" --out "$T/kp2.json"
 ok "same HARNESS: no full run" 'python3 -c "import json,sys; assert not json.load(open(sys.argv[1]))[\"full\"]" "$T/kp2.json"'
@@ -106,10 +105,10 @@ ok "first run: every check, equiv fails" 'grep -q "^| equiv | ran | 1 " "$T/q-$D
 run_q "$D2"
 ok "docs-only next head: base is the failed head" 'grep -q "base: ${D1:0:12}" "$T/q-$D2.md"'
 ok "and equiv runs again (not a pass before)" 'grep -q "^| equiv | ran | 0 " "$T/q-$D2.md" && grep -q "not a pass here before" "$T/q-$D2.md"'
-ok "passing checks stay skipped" 'grep -q "^| fuzz | skipped: not affected" "$T/q-$D2.md"'
+ok "passing checks stay skipped" 'grep -q "^| threads | skipped: not affected" "$T/q-$D2.md"'
 run_q "$D3"
 ok "all passed: a docs-only head runs nothing" '! grep -q "| ran |" "$T/q-$D3.md"'
-# full_job exits 0 with a failed prepare stage: the build is failed, fuzz/audit/lane D skipped with the reason
+# full_job exits 0 with a failed prepare stage: the build is failed, lane D skipped with the reason
 rm -rf "$T/home/quick"; PREPARE_STATUS=fail run_q "$D1"
 ok "failed stage: build reported failed with its stage" 'grep -q "^| build | ran | 2 .*the build failed: prepare: fail" "$T/q-$D1.md"'
 ok "failed stage: the verdict is FAIL (build)" 'grep -q "^- verdict: FAIL (build)" "$T/q-$D1.md"'
@@ -117,7 +116,7 @@ ok "failed stage: the verdict is FAIL (build)" 'grep -q "^- verdict: FAIL (build
 rm -rf "$T/home/quick"; QUICK_BASE=$H1 PREPARE_STATUS=fail RC_sweep=1 run_q "$H2"
 ok "full run needed and the build failed: FAIL, not FULL RUN NEEDED" 'grep -q "^- verdict: FAIL (build, replay); a full run is needed too" "$T/q-$H2.md" && ! grep -q "verdict: FULL RUN NEEDED" "$T/q-$H2.md" && python3 -c "import json,sys; assert json.load(open(sys.argv[1]))[\"verdict\"].startswith(\"FAIL\")" "$T/q-$H2.json"'
 ok "a failed replay reads FAILED, not its counts" 'grep -q "^| replay | ran | 1 | [0-9]* | FAILED (exit 1): " "$T/q-$H2.md"'
-ok "failed stage: fuzz and lane D skipped" 'grep -q "^| fuzz | skipped: the build failed" "$T/q-$D1.md" && grep -q "^| threads | skipped: the build failed" "$T/q-$D1.md"'
+ok "failed stage: lane D skipped" 'grep -q "^| threads | skipped: the build failed" "$T/q-$D1.md"'
 # a cold equiv (the MSVC shim headers): left to the eq farms, planned again on the next head; QUICK_COLD_LOCAL=1 runs it
 rm -rf "$T/home/quick"; run_q "$D3"
 mkdir -p "$G/ports/fnv-nx/tools/equiv/msvc"; echo x >"$G/ports/fnv-nx/tools/equiv/msvc/fnvnx_win32.h"; git -C "$G" add -A

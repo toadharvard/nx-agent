@@ -4,7 +4,7 @@ the first report sets the ledger; a better one advances it; a worse one gets "- 
 its first line and a REGRESSIONS section naming each item, its best and the head that first had it good, with the
 commit range between the heads, and does not advance the ledger (not even its improved metrics); a good report
 clears the marks. An older head reported late is not compared; a WIP report is compared and changes nothing; a
-fuzz shard with pending functions and a sweep shard whose setup failed measure nothing; checking twice gives one
+sweep shard whose setup failed measure nothing; checking twice gives one
 section; `accept` drops a metric; zero_targets.py's regressions column counts the marks.
     python3 tests/t1/test_ratchet.py"""
 import json, os, shutil, subprocess, sys, tempfile
@@ -36,12 +36,6 @@ def full_md(h, traps=(100, 20), undef=500, objs=2900, failed=(), winmain='yes', 
          ['', '## Emulated boot', '', '- WinMain entered: %s; initializers skipped after a fault: %d; trapped keys 0' % (winmain, skipped),
           '- game milestones (tests/s5/milestones.txt): %s; last reached: x' % ', '.join('%s %s' % kv for kv in ms.items()), '']
     return '\n'.join(L) + '\n'
-
-
-def fuzz_md(h, functions, hard, soft, pending=0, k=3, n=8):
-    return ('# fuzz %s shard %d/%d\n\n- this head: fuzzed 10, verdict reused 0, pending %d (key changed 0)\n\n'
-            '## Verdicts, cumulative\n\n| stream | functions | executions | hard | soft | oracle gap | not set up | causes |\n'
-            '|---|---:|---:|---:|---:|---:|---:|---|\n| ALL | %d | 99 | %d | %d | 0 | 0 | |\n' % (h, k, n, pending, functions, hard, soft))
 
 
 def main():
@@ -107,13 +101,7 @@ def main():
                                          milestones={'winmain': 'yes', 'ini-read': 'yes'}))
         ok('good again: advanced, marks cleared', not r4.startswith('- REGRESSION') and L()['full: trap stubs']['best'] == 90
            and not any('regression' in e for e in L().values()) and json.load(open(led))['head'] == H[4][:12])
-        # fuzz, equiv, sweep, scenario
-        check('fuzz', H[4], fuzz_md(H[4], 100, 10, 5))
-        f5 = check('fuzz', H[5], fuzz_md(H[5], 100, 12, 5))
-        ok('fuzz: passing functions of the shard (functions - hard - soft)', L()['fuzz 3of8: passing functions']['best'] == 85
-           and '- fuzz 3of8: passing functions: 83 now, 85 at %s' % H[4][:12] in f5)
-        fp = check('fuzz', H[5], fuzz_md(H[5], 50, 12, 5, pending=40))
-        ok('fuzz with pending functions: not compared', not fp.startswith('- REGRESSION') and 'partial: 40 pending' in fp)
+        # equiv, sweep, scenario
         eq = check('equiv', H[4], '# MSVC equivalence gate - x shard 1/1\n\n- units: 2988 compared; 2407 identical, 580 differ\n'
                    '- functions: 68456 compared, 1141 differ (EH-only 789)\n')
         ok('equiv: identical functions and units', L()['equiv 1of1: identical functions']['best'] == 67315 and
@@ -132,7 +120,7 @@ def main():
             '3': {'count': 4, 'measured_in': 5, 'of': 5}}})
         ok('scenario: a D25 target measured, worse', '- scenario D25 #3 (5 scenarios): 4 now, 2 at %s' % H[4][:12] in s2
            and 'scenario D25 #9 (5 scenarios)' not in L())
-        # the zero table's column: the marks of the fuzz, sweep and scenario regressions above
+        # the zero table's column: the marks of the sweep and scenario regressions above
         zr = os.path.join(t, 'z')
         os.makedirs(os.path.join(zr, 'ratchet'))
         shutil.copy(led, os.path.join(zr, 'ratchet', 'ledger.json'))
@@ -142,7 +130,7 @@ def main():
         z = json.load(open(os.path.join(t, 'zero.json')))
         rg = {r['key']: r['regressions'] for r in z['rows']}
         zm = open(os.path.join(t, 'zero.md')).read()
-        ok('zero table: regressions per target from the ledger', rg['fuzz'] == 1 and rg['shaders'] == 2 and rg['#3'] == 1
+        ok('zero table: regressions per target from the ledger', rg['shaders'] == 2 and rg['#3'] == 1
            and rg['traps'] == 0 and '| regressions |' in zm and '- regressions (the ratchet ledger' in zm)
         ratchet.main(['accept', '--ledger', led, 'scenario D25 #3 (5 scenarios)'])
         ok('accept: the metric dropped', 'scenario D25 #3 (5 scenarios)' not in L())

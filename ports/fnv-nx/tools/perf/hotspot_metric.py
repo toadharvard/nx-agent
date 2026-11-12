@@ -4,7 +4,7 @@
 
     hotspot_metric.py [--model tools/perf/budget_model.json] [--top 20] [--json]
 
-Per row of the model's `hotspot_functions`: A64 instructions per call (mid of `per_call_insn`; dyncount.py [M] or
+Per row of the model's `hotspot_functions`: A64 instructions per call (mid of `per_call_insn`; a measured count [M] or
 an estimate [E]) x calls per frame (mid of `calls`, [E]) / IPC (the model's `ipc` assumption, 0.8) = cycles per
 frame. A row with `per_call_cycles` (an A57 pipeline model's cycles per call, P0-perfmodel) uses that instead of
 instructions / IPC. Rows ranked by cycles; the metric is the sum of the top N, in M cycles per frame, and its time

@@ -16,7 +16,7 @@ Eligible now = no eh, no vbt_imm, no unproven indirect call. With the vcall pass
 
 Inputs are read at run time and nothing derived is written to the repository; --out goes to a local path.
 Usage: census.py --exe FalloutNV.exe --units build/units.json [--set NAME=addrfile ...] [--out rows.tsv]
-addrfile: one hex address per line, or a TSV whose 2nd column is the address (difffuzz/EQ row tables).
+addrfile: one hex address per line, or a TSV whose 2nd column is the address (EQ row tables).
 """
 import argparse, collections, hashlib, json, re, sys
 import capstone, pefile

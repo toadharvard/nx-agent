@@ -147,7 +147,7 @@ CLASSES = [
      'size (pointers into one array); for unrelated pointers MSVC and GCC give different garbage (S13: 0065c700)',
      'benign', 'none'),
     ('OUTARG-UNINIT', 'uninitialized local whose first use passes its address to a call (`T x; f(&x); use(x);`)',
-     'none in the port (the callee writes it); the difffuzz harness runs callees as stubs that do not write through '
+     'none in the port (the callee writes it); the old fuzz harness ran callees as stubs that do not write through '
      'pointer arguments, so S13 uninit-* divergences of these functions are the harness\'s', 'benign',
      'S13: model out-parameter writes of stubbed callees, or discount uninit-* divergences that read these locals'),
     ('W-UNINIT', 'read of an uninitialized local (clang -Wuninitialized/-Wsometimes-uninitialized, GCC '

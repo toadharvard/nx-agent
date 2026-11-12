@@ -200,7 +200,7 @@ t_end=$(( $(date +%s) + MAX )); [ "$PERSIST" = 1 ] && t_end=$(( $(date +%s) + 10
 # The session's background Bash kills this process (and the job under it) $RUNNER_KILL_S seconds (default 7200, the
 # 2 h background limit) after it starts: a job that has not published by then publishes nothing, ever, if each pass
 # takes that long (fz1, J-0138). FARM_DEADLINE (epoch seconds, 5 min before the kill) tells the job when it must
-# have written its report; tools/farm/fuzz_job.sh stops fuzzing in time and reports the rest as pending.
+# have written its report.
 export FARM_DEADLINE=$(( $(date +%s) + ${RUNNER_KILL_S:-7200} - 300 ))
 while [ "$(date +%s)" -lt "$t_end" ]; do
   TAG=""
@@ -255,7 +255,7 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
     mv -f "$R.failed" "$R"
     rm -f "${R%.md}.json"
   fi
-  # a job's machine-readable summary (<report>.json, e.g. fuzz_job.sh's fnvnx-fuzz-summary/1) goes first, its report
+  # a job's machine-readable summary (<report>.json) goes first, its report
   # second: a report on the branch always has its summary beside it when the job wrote one
   [ -f "$R" ] && [ $rc -eq 0 ] && [ -f "${R%.md}.json" ] && publish_report "${R%.md}.json"
   # a try farm's report names what it tried: the wip branch and the commit, in its title line

@@ -33,7 +33,7 @@ and the call path (the enclosing calls on both sides) with --context lines befor
 
 seeds: per function, the distinct argument tuples of the reference run (values and the bytes behind pointers),
 as JSON lines {"address", "name", "conv", "cases": [{"args": {label: hex}, "deref": {label: hex}}]}: the real
-inputs of the original program, for tools/difffuzz (fuzz.py's queue takes them as first cases; labels this, p0..).
+inputs of the original program, as first fuzz cases (labels p0..).
 
 Our own code; it reads logs and names only addresses.
 """

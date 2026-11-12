@@ -272,28 +272,6 @@ class T(unittest.TestCase):
             self.assertTrue(mk & ik, ms)
         self.assertNotEqual(sigs.parse_msvc('?f@@YAP6AXXZH@Z', dm['?f@@YAP6AXXZH@Z']).kind, 'func')
 
-    @unittest.skipUnless(shutil.which('aarch64-linux-gnu-as') and shutil.which('aarch64-linux-gnu-ld'),
-                         'needs the aarch64 binutils')
-    def test_fuzz_image_links_vcall_stubs(self):
-        """The fuzz harness's unit image (difffuzz/a64image) links fixed/zz_bd_vcall.o like zz_bridges.o: a call
-        of a __fnvnx_bdvc_ stub is not left as a named stub (S1-refs' native-undefined rows)."""
-        import subprocess
-        sys.path.insert(0, os.path.join(HERE, '..', '..', 'tools', 'difffuzz'))
-        import a64image
-        with tempfile.TemporaryDirectory() as d:
-            os.makedirs(os.path.join(d, 'fixed'))
-            os.makedirs(os.path.join(d, 'out'))
-            open(os.path.join(d, 'out', 'aliases.ld'), 'w').close()
-            for name, src in (('src_u.cpp.o', '.text\n.globl f\nf: b __fnvnx_bdvc_00000001\n'),
-                              ('zz_bd_vcall.o', '.text\n.globl __fnvnx_bdvc_00000001\n.type __fnvnx_bdvc_00000001,'
-                                                '%function\n__fnvnx_bdvc_00000001: ret\n')):
-                sp = os.path.join(d, name + '.s')
-                open(sp, 'w').write(src)
-                subprocess.run(['aarch64-linux-gnu-as', '-mabi=ilp32', sp, '-o', os.path.join(d, 'fixed', name)],
-                               check=True)
-            img = a64image.build_many(['src/u.cpp'], d, os.path.join(d, 'w'), 'u')
-        self.assertFalse([n for n in img.stubs.values() if n.startswith('__fnvnx_bdvc_')])
-
     def test_gdel_pass(self):
         """gdel: a D1 bound to its class's ??_G when the native build defines that address as a member function
         taking (unsigned int); a D2 only without virtual bases (no _ZTT of the class known); no member of that

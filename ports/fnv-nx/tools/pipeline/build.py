@@ -1662,7 +1662,7 @@ def link_tool_inputs(b):
     --units-renames), the shim and sse2neon (layout probes and vtable synthesis compile against them)."""
     rn = b.cfg['UNITS_RENAMES']
     return [tree_hash('tools/link', 'platform/crt/crt_symbols.tsv', 'platform/win32/imports.tsv',
-                      'platform/win32/exports.cpp', 'shim/include', 'tools/difffuzz/check_rebind.py'),
+                      'platform/win32/exports.cpp', 'shim/include', 'tools/pipeline/check_rebind.py'),
             file_hash(os.path.join(ROOT, 'patches', 'units_renames.tsv')) if not rn else
             (rn if rn == 'none' else file_hash(os.path.abspath(rn))),
             b.rec('fetch').get('metrics', {}).get('pin_sse2neon')]
@@ -2007,7 +2007,7 @@ class Link(Stage):
         # S13's split-global check on the rewritten objects (part of S2c's run summary): want 0
         rb = os.path.join(d, 'check_rebind.txt')
         open(rb, 'w').close()
-        rrc = b.sh([PY, '-I', os.path.join(ROOT, 'tools', 'difffuzz', 'check_rebind.py'), fixed], rb, env=env)
+        rrc = b.sh([PY, '-I', os.path.join(ROOT, 'tools', 'pipeline', 'check_rebind.py'), fixed], rb, env=env)
         rbtext = open(rb, errors='replace').read()
         mm = re.search(r'objects with bypassing references: (\d+); variables: (\d+); relocations: code (\d+), '
                        r'data (\d+)', rbtext)

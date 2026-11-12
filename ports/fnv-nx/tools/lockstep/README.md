@@ -41,7 +41,7 @@ call follows within `--resync` calls. It is counted per function, not reported a
 
 `boot_trace.py seeds` writes one JSON line per function: `{"address", "name", "conv", "source": "wine-boot",
 "cases": [{"args": {label: 4-byte hex}, "deref": {label: bytes behind it}}]}`. Labels are `this`, `p0`, `p1`...
-(difffuzz's logical labels). They are game-derived data and live only on the artifacts repository
+(logical labels). They are game-derived data and live only on the artifacts repository
 (`trace/<link12>/seeds.jsonl`).
 
 ## Running

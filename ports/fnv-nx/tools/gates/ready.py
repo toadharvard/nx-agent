@@ -357,82 +357,6 @@ def parse_static(text):
     return d
 
 
-def fuzz_summary(text):
-    """the report's ```json fnvnx-fuzz-summary``` block (tools/farm/fuzz_job.sh, the same object as the
-    <head12>-fuzz.json beside it); None when absent, {} when present but unreadable"""
-    m = re.search(r'^```json fnvnx-fuzz-summary\n(.*?)\n```', text or '', re.M | re.S)
-    if not m:
-        return None
-    try:
-        d = json.loads(m.group(1))
-    except ValueError:
-        return {}
-    return d if isinstance(d, dict) and d.get('format') == 'fnvnx-fuzz-summary/1' else {}
-
-
-def parse_fuzz(text):
-    m = re.search(r'^# fuzz \S+ shard (\d+)/(\d+)(.*)$', text, re.M)
-    if not m or 'HARNESS BROKEN' in m.group(3):
-        return None         # a broken harness's verdicts are not meaningful (fuzz_job.sh says so in the title)
-    d = dict(k=int(m.group(1)), n=int(m.group(2)), catalogued=first(r'functions catalogued (\d+)', text),
-             shard=first(r'in this shard (\d+)', text), no_native=first(r'no native object (\d+)', text),
-             not_modelled=first(r'control flow not modelled[^)]*\) (\d+)', text),
-             fuzzable=first(r'fuzzable (\d+)', text), verdicts=first(r'cumulative \(verdicts valid for this head\): '
-                                                                    r'(\d+) functions', text),
-             pending=first(r'pending (\d+)', text), crash=first(r'fuzzed this head: crash (\d+)', text), hard=[])
-    sec = False
-    for l in text.splitlines():
-        if l.startswith('## '):
-            sec = l.startswith('## Hard divergences, cumulative')
-            continue
-        mm = re.match(r'^\| (\*?)([0-9a-f]{8}) \| ([^|]+?) \| ([^|]+?) \| ([^|]+?) \|', l) if sec else None
-        if mm:
-            d['hard'].append((mm.group(2), mm.group(3), mm.group(5)))
-    d['causes'] = causes_block(text)
-    d['with_obj'] = (d['shard'] or 0) - (d['no_native'] or 0)
-    d['status'] = None
-    sm = fuzz_summary(text)
-    if sm is not None:
-        # fnvnx-fuzz-summary/1: it must describe this shard, and a harness-broken run is no evidence
-        fn = dct(sm.get('functions'))
-        if not sm or (sm.get('shard'), sm.get('shards')) != (d['k'], d['n']) or sm.get('status') == 'harness-broken':
-            return None
-        if isinstance(fn.get('with_native_object'), int) and isinstance(fn.get('verdicts'), int):
-            d['with_obj'], d['verdicts'] = fn['with_native_object'], fn['verdicts']
-        if isinstance(fn.get('not_modelled'), int):
-            d['not_modelled'] = fn['not_modelled']
-        d['status'] = sm.get('status')
-        d['summary_commit'] = sm.get('commit')
-    return d
-
-
-def causes_block(text):
-    """the ```json fnvnx-causes``` block of a fuzz report (S13b, tools/farm/fuzz_job.sh), or a fnvnx-causes/1 JSON
-    file (causes.py summary / merge); None when absent or unreadable"""
-    i = (text or '').find('```json fnvnx-causes')
-    if i >= 0:
-        i = text.find('\n', i) + 1
-        j = text.find('```', i)
-        text = text[i:j if j >= 0 else len(text)]
-    elif not (text or '').lstrip().startswith('{'):
-        return None
-    try:
-        d = json.loads(text)
-    except ValueError:
-        return None
-    return d if isinstance(d, dict) and isinstance(d.get('causes'), dict) else None
-
-
-def causes_shards(d):
-    """the fuzz shards a causes.py summary covers, from its campaign directories (c<k>, <k>of<N>); None: unknown"""
-    ks = set()
-    for c in d.get('campaigns') or []:
-        m = re.search(r'(?:^|[/_-])c(\d+)$|(\d+)of\d+$', str(c).rstrip('/'))
-        if m:
-            ks.add(int(m.group(1) or m.group(2)))
-    return ks or None
-
-
 def parse_frameprof(text):
     """tools/perf/frameprof.py --json: [{label, instructions, subsystems, ...}]"""
     try:
@@ -596,14 +520,6 @@ def static_classifier(port):
 
 def static_verdicts(port):
     return static_classifier(port)[0]
-
-
-def fuzz_policy(port):
-    """cause -> (verdict class, owner, hard, why) of tools/difffuzz/causes.py POLICY (S13b); this checkout's policy
-    decides the class of every cause, as `causes.py merge` does. {} when the tool is absent"""
-    mod = load_module(port, os.path.join('tools', 'difffuzz', 'causes.py'), 'fnvnx_difffuzz_causes')
-    pol = getattr(mod, 'POLICY', None) if mod else None
-    return dict(pol) if isinstance(pol, dict) else {}
 
 
 # ------------------------------------------------------------------------------------------------- scorecard
@@ -977,206 +893,6 @@ class Card:
         self.gate('static.gate', 'Static target hazards', 'S12 gate: shards over baseline / units GCC did not compile',
                   '%d / %d' % (sum(1 for e in exits if e), uncovered), '0 / 0',
                   PASS if not any(exits) and uncovered == 0 else FAIL, srcs, rank=18)
-
-    def fuzz_gates(self):
-        n = self.th['fuzz_shards']
-        shards = {}
-        for farm, (d, s) in self.newest('fz', r'-fuzz\.md$', parse_fuzz, lambda d: shard_of(d, n)).items():
-            if d['k'] not in shards or (s['published'] or 0) > (shards[d['k']][1]['published'] or 0):
-                shards[d['k']] = (d, s)
-        srcs = [v[1] for _, v in sorted(shards.items())]
-        missing = sorted(set(range(1, n + 1)) - set(shards))
-        if not self.fuzz_causes_gates(shards, n):
-            self.fuzz_table_gate(shards, srcs, missing, n)
-        if shards:
-            # per shard (V1 R16/R17): a shard's verdicts count up to its own functions with a native object, a shard
-            # without a positive count of such functions is broken, and every shard must reach the threshold on its
-            # own, so no surplus of one shard hides the gap of another
-            want = self.th.get('fuzz_min_coverage', 0.9)
-            per, broken, over = {}, [], []
-            for k, (d, _) in sorted(shards.items()):
-                wo, v = d.get('with_obj'), d.get('verdicts') or 0
-                if not isinstance(wo, int) or wo <= 0 or not isinstance(v, int) or v < 0:
-                    broken.append(k)
-                    continue
-                if v > wo:
-                    over.append(k)
-                per[k] = (min(v, wo), wo)
-            with_obj = sum(wo for _, wo in per.values())
-            ver = sum(v for v, _ in per.values())
-            nm = sum(d['not_modelled'] or 0 for d, _ in shards.values())
-            cov = ver / with_obj if with_obj > 0 else 0
-            low = sorted(k for k, (v, wo) in per.items() if v / wo < want)
-            worst = min(per, key=lambda k: per[k][0] / per[k][1]) if per else None
-            summ = sorted(k for k, (d, _) in shards.items() if d.get('status'))
-            part = sorted(k for k, (d, _) in shards.items() if d.get('status') == 'partial')
-            note = '%d not modelled (indirect control flow); %d of %d shards reported' % (nm, len(shards), n)
-            if missing:
-                note += ' (missing: %s)' % ','.join(map(str, missing))
-            if worst is not None:
-                note += '; lowest shard %d: %.1f %%' % (worst, 100.0 * per[worst][0] / per[worst][1])
-            if low:
-                note += '; shards below %.0f %%: %s' % (100 * want, ','.join(map(str, low)))
-            if broken:
-                note += '; shards with no positive function count: %s' % ','.join(map(str, broken))
-            if over:
-                note += '; shards with more verdicts than functions (capped): %s' % ','.join(map(str, over))
-            note += '; fnvnx-fuzz-summary/1 from %d shards' % len(summ)
-            if part:
-                note += ', partial (pending functions): %s' % ','.join(map(str, part))
-            ok = per and not missing and not broken and not low and not over
-            self.gate('fuzz.coverage', 'Fuzz', 'S13: functions with a verdict / functions with a native object',
-                      '%.1f %% (%d/%d)' % (100 * cov, ver, with_obj), '>= %.0f %% in every one of %d shards' % (
-                          100 * want, n), PASS if ok else FAIL, srcs, note, rank=19,
-                      per_shard={str(k): [v, wo] for k, (v, wo) in per.items()})
-        else:
-            self.nodata('fuzz.coverage', 'Fuzz', 'S13 coverage', '>= 90 %', 'no fuzz report', rank=19)
-        self.s13_metric_gate(n)
-
-    def s13_metric_gate(self, n):
-        """S13's own convergence metric, tools/difffuzz/metric.py of this checkout (artifacts + not fuzzable +
-        unpublished shards, fnvnx-s13-metric/1), run on the artifacts repository; fixtures: <dir>/_s13_metric.json.
-        Informative: the hard divergences are fuzz.hard; this is the harness's distance from a complete campaign"""
-        title = 'S13 metric: artifact divergences + functions not fuzzable + unpublished shards (difffuzz/metric.py)'
-        m, why = None, None
-        if getattr(self.store, 'gitdir', None):
-            mod = load_module(self.port, os.path.join('tools', 'difffuzz', 'metric.py'), 'fnvnx_difffuzz_metric')
-            if mod is None:
-                why = 'no tools/difffuzz/metric.py in this checkout'
-            else:
-                try:
-                    m = mod.measure(self.store.gitdir, self.hist.repo, n)
-                except Exception as e:          # noqa: BLE001 - a broken tool must not hide the other gates
-                    why = 'metric.py failed: %s: %s' % (type(e).__name__, str(e)[:80])
-        else:
-            f = os.path.join(getattr(self.store, 'root', ''), '_s13_metric.json')
-            try:
-                m = json.loads(readf(f)) if os.path.isfile(f) else None
-            except ValueError:
-                m = None
-            why = None if m else 'no S13 metric (fixtures: _s13_metric.json)'
-        tot = dct(dct(m).get('totals'))
-        if not isinstance(tot.get('metric'), int):
-            self.nodata('fuzz.s13_metric', 'Fuzz', title, '0', why or 'metric.py gave no totals', rank=19,
-                        required=False)
-            return
-        shards = [s for s in dct(m).get('shards') or [] if isinstance(s, dict)]
-        srcs = [self.src('reports/fz%d' % s['shard'], '%s-fuzz.md' % s['good'], s['good'])
-                for s in shards if s.get('good')]
-        bad = [str(s.get('shard')) for s in shards if s.get('newest_status') != 'ok']
-        note = 'artifacts %s + not fuzzable %s (coverage %s %%) + unpublished shards %s%s; artifact causes: %s' % (
-            tot.get('artifacts'), tot.get('not_fuzzable'), tot.get('coverage'), tot.get('unpublished'),
-            ' (%s)' % ','.join(bad) if bad else '',
-            ', '.join('%s %s' % kv for kv in list(dct(m.get('artifact_causes')).items())[:6]) or '-')
-        tr = dct(self.th.get('fuzz_s13_metric'))
-        st = PASS if tot['metric'] == 0 else FAIL
-        if tr.get('trusted') is False:
-            # the value is shown, but a refuted tool decides nothing until its stream fixes it
-            st, note = NODATA, 'not trusted: %s; %s' % (tr.get('why') or 'refuted', note)
-        self.gate('fuzz.s13_metric', 'Fuzz', title, tot['metric'], '0', st, srcs,
-                  note, rank=19, required=False, terms={k: tot.get(k) for k in ('artifacts', 'not_fuzzable',
-                                                                                 'unpublished', 'coverage')})
-
-    def fuzz_table_gate(self, shards, srcs, missing, n):
-        """fuzz.hard from the reports' hard-divergence tables (reports without an fnvnx-causes block)"""
-        bd = self.th.get('fuzz_by_design_causes', {})
-        hard = sorted(set(h for d, _ in shards.values() for h in d['hard']))
-        un = [h for h in hard if h[1] not in bd]
-        fns = len(set(h[0] for h in un))
-        per = {}
-        for h in un:
-            per[h[1]] = per.get(h[1], 0) + 1
-        note = '%d hard divergences in %d functions not by design (by design: %s); causes: %s' % (
-            len(un), fns, '+'.join(sorted(bd)) or '-', ', '.join('%s %d' % kv for kv in sorted(per.items(),
-                                                                                           key=lambda x: -x[1])[:6]))
-        note += '; from the hard-divergence tables (no fnvnx-causes block)'
-        if missing:
-            note += '; shards without a %d-shard report: %s' % (n, ','.join(map(str, missing)))
-        st = FAIL if un else (PASS if not missing else NODATA)
-        self.gate('fuzz.hard', 'Fuzz', 'S13: hard divergences not by design', len(un) if shards else None, '0',
-                  st if shards else NODATA, srcs, note, rank=11)
-
-    def fuzz_causes(self, shards):
-        """the S13b cause summary with the widest shard coverage: the fnvnx-causes blocks of the shards' newest
-        reports, merged, or S13b's whole-campaign summary (thresholds fuzz_causes: branch + path, causes_all.json).
-        Returns (summary, shards covered, sources, what) or None"""
-        cands = []
-        rep = {k: (d['causes'], s) for k, (d, s) in shards.items() if d.get('causes')}
-        if rep:
-            tot = dict(functions_ok=0, functions_diverging=0, causes={})
-            for c, _ in rep.values():
-                tot['functions_ok'] += c.get('functions_ok') or 0
-                tot['functions_diverging'] += c.get('functions_diverging') or 0
-                for cause, r in c['causes'].items():
-                    t_ = tot['causes'].setdefault(cause, dict(verdict=r.get('verdict'), divergences=0, functions=0,
-                                                              worst_of=0))
-                    for k_ in ('divergences', 'functions', 'worst_of'):
-                        t_[k_] += r.get(k_) or 0
-            cands.append((tot, set(rep), [s for _, (_, s) in sorted(rep.items())], 'the shards\' report blocks'))
-        fc = self.th.get('fuzz_causes', {})
-        br, path = fc.get('branch'), fc.get('path')
-        if br and path and br in self.store.branches(br):
-            pub = dict(self.store.files(br)).get(path)
-            d = causes_block(self.store.read(br, path) or '')
-            if d:
-                ks = causes_shards(d) or set()
-                cands.append((d, ks, [self.src(br, path, d.get('commit'), pub)], 'S13b\'s campaign summary'))
-        if not cands:
-            return None
-        return max(cands, key=lambda c: (len(c[1]), c[3].startswith('the shards')))
-
-    def fuzz_causes_gates(self, shards, n):
-        """fuzz.hard from the S13b causes (fnvnx-causes/1): only causes whose class is real-bug or triage
-        (thresholds fuzz_hard_classes) count; by-design and artifact causes follow causes.py POLICY: not a
-        divergence of the port. Harness artifacts are shown as an informative gate (fuzz.artifacts, S13)"""
-        got = self.fuzz_causes(shards)
-        if not got:
-            return False
-        cs, covered, srcs, what = got
-        pol = fuzz_policy(self.port)
-        hard_cls = set(self.th.get('fuzz_hard_classes', ['real-bug', 'triage']))
-
-        def cls(cause, r):
-            # as causes.py policy(): a cause not in the table is triage; without the tool, the report's own class
-            if pol:
-                return (pol.get(cause) or ('triage',))[0]
-            return r.get('verdict') or 'triage'
-        by = {}
-        for cause, r in cs['causes'].items():
-            c = cls(cause, r)
-            b = by.setdefault(c, dict(functions=0, divergences=0, causes={}))
-            b['functions'] += r.get('worst_of') or 0               # functions whose worst cause it is: no overlaps
-            b['divergences'] += r.get('divergences') or 0
-            b['causes'][cause] = r.get('worst_of') or 0
-        hard_fn = sum(by.get(c, {}).get('functions', 0) for c in hard_cls)
-        hard_div = sum(by.get(c, {}).get('divergences', 0) for c in hard_cls)
-        owners = {}
-        for cause, r in cs['causes'].items():
-            if cls(cause, r) in hard_cls:
-                o = (pol.get(cause) or (None, r.get('owner') or ('S13b' if pol else '?')))[1]
-                owners[o] = owners.get(o, 0) + (r.get('worst_of') or 0)
-        top = sorted(((f, c) for b in (by.get(x, {}) for x in hard_cls) for c, f in b.get('causes', {}).items()),
-                     key=lambda x: (-x[0], x[1]))[:6]
-        nocov = sorted(set(range(1, n + 1)) - covered)
-        note = '%d functions, %d divergences (%s); by class: %s; owners: %s; top: %s; from %s, %d of %d shards' % (
-            hard_fn, hard_div, '+'.join(sorted(hard_cls)),
-            ', '.join('%s %d' % (c, by[c]['functions']) for c in ('real-bug', 'triage', 'artifact', 'by-design')
-                      if c in by),
-            ', '.join('%s %d' % kv for kv in sorted(owners.items(), key=lambda x: -x[1])),
-            ', '.join('%s %d' % (c, f) for f, c in top), what, len(covered), n)
-        if nocov:
-            note += '; shards not covered: %s' % ','.join(map(str, nocov))
-        st = FAIL if hard_fn else PASS if not nocov else NODATA
-        self.gate('fuzz.hard', 'Fuzz', 'S13: functions with a real-bug or triage divergence (S13b causes)', hard_fn,
-                  '0', st, srcs, note, rank=11, by_class={c: by[c]['functions'] for c in by}, owners=owners,
-                  divergences=hard_div)
-        art = by.get('artifact', dict(functions=0, divergences=0, causes={}))
-        self.gate('fuzz.artifacts', 'Fuzz', 'S13: functions whose worst divergence is a harness artifact (S13 fixes)',
-                  art['functions'], '0', PASS if not art['functions'] else FAIL, srcs, 'not the port (causes.py POLICY); '
-                  'by cause: %s' % ', '.join('%s %d' % (c, f) for c, f in sorted(art['causes'].items(),
-                                                                                 key=lambda x: (-x[1], x[0]))[:6]),
-                  rank=19, required=False)
-        return True
 
     def player_exe(self):
         """(sha256 of the player's FalloutNV.exe, why not) from gamedata/exe's checksum file: only its line for the
@@ -1712,7 +1428,6 @@ class Card:
         self.abi_gates(L, s)
         self.equiv_gates()
         self.static_gates()
-        self.fuzz_gates()
         self.boot_gates()
         self.frames_gate()
         self.perf_gates()
@@ -1824,15 +1539,6 @@ def scorecard(gates, th):
     row('abi.rows', 'ABI', 'ABI rows open (x86-inconsistent not explained + manual)', ['abi.x86_inconsistent', 'abi.manual'],
         None if x is None or m is None else x + m, 0, None if x is None or m is None else x + m,
         note='x86-inconsistent %s, manual %s' % (x, m))
-    fd, ff = val('fuzz.hard', 'divergences'), val('fuzz.hard')
-    fz = fd if fd is not None else ff
-    row('fuzz.hard', 'fuzz', 'hard divergences (real-bug + triage)' if fd is not None else 'functions with a hard divergence',
-        ['fuzz.hard', 'fuzz.coverage'], fz, 0, fz,
-        note='%s functions; coverage %s' % (ff, G['fuzz.coverage']['value'] if 'fuzz.coverage' in G else '-'))
-    sm = G.get('fuzz.s13_metric')
-    s13 = sm['value'] if sm and isinstance(sm.get('value'), int) else None
-    row('fuzz.s13', 'fuzz', 'S13 metric: artifacts + not fuzzable + unpublished shards (difffuzz/metric.py)',
-        ['fuzz.s13_metric'], s13, 0, s13 if sm and sm['status'] != NODATA else None, note=sm['note'] if sm else '')
     ec, en = val('equiv.code'), val('equiv.nobuild')
     eq = None if ec is None or en is None else ec + en
     row('equiv.diffs', 'equivalence', 'S11 diffs not by design (functions + units)', ['equiv.code', 'equiv.nobuild'], eq, 0, eq,

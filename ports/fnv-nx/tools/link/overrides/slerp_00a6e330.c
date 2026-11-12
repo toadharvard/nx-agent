@@ -4,7 +4,7 @@
  * The decomp's Slerp computes the cosine of the two quaternions, calls the weight function 0x00a6dc30 (once, with t
  * or with 1 - t), interpolates the four components linearly by that weight and tail-calls the normalisation
  * 0x00a4ff00 (three-step polynomial inverse square root around 0.959). Compiled by GCC that is three functions,
- * 134 A64 instructions per call (tools/perf/dyncount.py), with the components loaded twice, the stack frame of the
+ * 134 A64 instructions per call, with the components loaded twice, the stack frame of the
  * caller and the call/return.
  *
  * This replacement does the same arithmetic, operation by operation, in the same order and the same precision:

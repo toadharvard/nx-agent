@@ -1,9 +1,0 @@
-{
- "format": "fnvnx-s13-metric/1",
- "totals": {"artifacts": 0, "not_fuzzable": 0, "unpublished": 0, "fuzzable": 20, "with_native": 20, "coverage": 100.0, "metric": 0},
- "artifact_causes": {},
- "shards": [
-  {"shard": 1, "newest": "c0ffee000001", "newest_status": "ok", "good": "c0ffee000001"},
-  {"shard": 2, "newest": "c0ffee000001", "newest_status": "ok", "good": "c0ffee000001"}
- ]
-}

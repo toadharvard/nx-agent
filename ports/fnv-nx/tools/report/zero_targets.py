@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""zero_targets.py - one table of the zero targets (D24's four, D25's twelve) for one head, from the newest reports of
+"""zero_targets.py - one table of the zero targets (D24's three, D25's twelve) for one head, from the newest reports of
 every lane, with the delta against the previous head. The orchestrator's view each cycle (farm job `zero`).
 
     python3 -I tools/report/zero_targets.py <reports dir> --heads <file> [--head C] --out zero.md
@@ -13,8 +13,6 @@ not --head itself); the delta compares it with the next older head that has one.
 Sources (the number each row shows):
   D24 trap stubs           <h>-full.md: the sum of the "undefined symbols" table (the guest's trap stubs)
   D24 link errors          <h>-full.md: the trial link's undefined + multiple definitions
-  D24 false interpretations <h>-fuzz.json (fnvnx-fuzz-summary/1): hard.functions, summed over the shards seen
-                           (partial when fewer shards than `shards` reported)
   D24 wrong shaders        <h>-sweep.json (sweep_report.py shard): distinct failing programs (over / ill) + programs
                            vacuous in some parameter set, over the shards seen
   D25 #1..#12              <h>-scenario.json (fnvnx-scenario-metric/1, S18): the target's count when measured in
@@ -32,7 +30,7 @@ Sources (the number each row shows):
                            scenario's when both exist.
 Regressions column: the regression ratchet's ledger, <reports dir>/ratchet/ledger.json (tools/farm/ratchet.py,
 branch reports/ratchet): per target, the items of its ledger metrics that the last check found worse than their
-best (traps: "full: trap stubs"; link: "full: trial-link undefined"; fuzz: "fuzz <shard>: ..."; shaders:
+best (traps: "full: trap stubs"; link: "full: trial-link undefined"; shaders:
 "sweep <shard>: ..."; D25 #n: "scenario D25 #n ..."); "-" without a ledger.
 Writes <out> and <out>.json (fnvnx-zero/1). Numbers and our own names only. Exit 0.
 """
@@ -43,7 +41,7 @@ import os
 import re
 import sys
 
-D24 = [('trap stubs', 'traps'), ('link errors', 'link'), ('false interpretations (fuzz hard)', 'fuzz'),
+D24 = [('trap stubs', 'traps'), ('link errors', 'link'),
        ('wrong shaders', 'shaders')]
 D25 = [(1, 'faults'), (2, 'lockstep divergences'), (3, 'unimplemented platform calls'), (4, 'failed file opens'),
        (5, 'skipped draws / unsupported states'), (6, 'audio decode / input mapping failures'),
@@ -107,26 +105,6 @@ def full_link(R, h):
     u, d = num(m.group(2)), num(m.group(3))
     return ((u or 0) + (d or 0) if u is not None or d is not None else None, ps[:1], 'undefined %s + multiple %s' %
             (m.group(2), m.group(3)))
-
-
-def fuzz_hard(R, h):
-    ps = R.get(h, 'fuzz', 'json')
-    if not ps:
-        return None
-    shards, of, total = set(), None, 0
-    for p in ps:
-        j = load(p) or {}
-        if j.get('format') != 'fnvnx-fuzz-summary/1':
-            continue
-        if j.get('shard') in shards:
-            continue
-        shards.add(j.get('shard'))
-        of = j.get('shards', of)
-        total += (j.get('hard') or {}).get('functions', 0)
-    if not shards:
-        return (None, ps, 'no fnvnx-fuzz-summary/1')
-    note = '' if of and len(shards) >= of else 'partial: %d of %s shards' % (len(shards), of or '?')
-    return (total, ps, note)
 
 
 def sweep_shaders(R, h):
@@ -199,7 +177,7 @@ LANES = {
 }
 
 
-RATCHET = {'traps': ('full: trap stubs',), 'link': ('full: trial-link undefined',), 'fuzz': ('fuzz ',),
+RATCHET = {'traps': ('full: trap stubs',), 'link': ('full: trial-link undefined',),
            'shaders': ('sweep ',)}
 
 
@@ -269,7 +247,7 @@ def main():
         d['regressions'] = regressions(led, key)
         rows.append(d)
 
-    srcs = {'traps': full_traps, 'link': full_link, 'fuzz': fuzz_hard, 'shaders': sweep_shaders}
+    srcs = {'traps': full_traps, 'link': full_link, 'shaders': sweep_shaders}
     for name, k in D24:
         row('D24', k, name, srcs[k])
     for n, name in D25:

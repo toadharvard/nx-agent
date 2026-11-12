@@ -23,7 +23,6 @@ What is measured (each from the report itself, or its sidecar; a report that doe
   full      trap stubs (lower; only when the guest linked), trial-link undefined (lower), compile objects (higher),
             units without an object (bad items; only when the list is complete), WinMain entered and the game
             milestones (good items), initializers skipped in the boot (lower)
-  fuzz      passing functions of the shard (cumulative ALL: functions - hard - soft; higher; only with 0 pending)
   equiv     identical functions and identical units of the shard (higher)
   sweep     passing programs of the shard (checked - failing; higher; only when programs were checked) and the
             failing programs (bad items); a shard whose setup failed (sidecar "error") measures nothing
@@ -117,23 +116,6 @@ def boot_metrics(pre, bt):
     return out
 
 
-def x_fuzz(t, side):
-    h = re.search(r'^# fuzz \S+ shard (\d+)/(\d+)', t, re.M)
-    if not h:
-        return []
-    sh = '%sof%s' % h.groups()
-    p = re.search(r'pending ([\d,]+)', t)
-    c = re.search(r'^## Verdicts, cumulative\n(.*?)(?=^## |\Z)', t, re.M | re.S)
-    if not c or not p:
-        return []
-    a = re.search(r'^\| ALL \| ([\d,]+) \| ([\d,]+) \| ([\d,]+) \| ([\d,]+) \|', c.group(1), re.M)
-    if not a:
-        return []
-    if num(p.group(1)):
-        return [M('fuzz %s: passing functions' % sh, 'skip', note='partial: %s pending' % p.group(1))]
-    return [M('fuzz %s: passing functions' % sh, 'value', num(a.group(1)) - num(a.group(3)) - num(a.group(4)), 'higher')]
-
-
 def x_equiv(t, side):
     h = re.search(r'^# MSVC equivalence gate - \S+ shard (\d+)/(\d+)', t, re.M)
     if not h:
@@ -183,7 +165,7 @@ def x_bootloop(t, side):
             M(pre + ' reached', 'value', j.get('reached'), 'higher')]
 
 
-EXTRACT = {'bootloop': x_bootloop, 'full': x_full, 'fuzz': x_fuzz, 'equiv': x_equiv, 'sweep': x_sweep, 'scenario': x_scenario}
+EXTRACT = {'bootloop': x_bootloop, 'full': x_full, 'equiv': x_equiv, 'sweep': x_sweep, 'scenario': x_scenario}
 
 
 # ---- ledger ---------------------------------------------------------------------------------------------------------

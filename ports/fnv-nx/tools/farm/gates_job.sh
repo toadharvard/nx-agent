@@ -78,7 +78,7 @@ abiclass() {  # abiclass <link12>: $AC/cur/<link12>.tsv, or false
       git -C "$dec" checkout -q --detach "$4" || return 1
     fi
     [ -f "$dec/build/units.json" ] || { log "$dec has no build/units.json"; return 1; }
-    # the pristine MSVC objects of that decomp, laid out as fuzz_job.sh's oracle ($FARM_HOME/oracle-<d12>/obj);
+    # the pristine MSVC objects of that decomp, laid out as the oracle ($FARM_HOME/oracle-<d12>/obj);
     # GATES_PRISTINE=<dir of u<i>.obj> takes a local copy
     oracle=$FARM_HOME/oracle-$d12
     if [ -n "${GATES_PRISTINE:-}" ]; then
