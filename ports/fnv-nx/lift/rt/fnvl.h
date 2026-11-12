@@ -161,6 +161,23 @@ template<class T> static inline __attribute__((always_inline)) bool lk_commit(LK
 #define SYNC_OUT do{ FL_OUT; }while(0)   /* the general registers need no sync; flags (instest), x87 (per site, f_x87_ctl.py) and xmm state are appended by the lifter */
 #define SYNC_X_IN do{ x0=c->x[0];x1=c->x[1];x2=c->x[2];x3=c->x[3];x4=c->x[4];x5=c->x[5];x6=c->x[6];x7=c->x[7]; }while(0)
 #define SYNC_X_OUT do{ c->x[0]=x0;c->x[1]=x1;c->x[2]=x2;c->x[3]=x3;c->x[4]=x4;c->x[5]=x5;c->x[6]=x6;c->x[7]=x7; }while(0)
+/* `.fnvl.fsw` (same 12-byte record as `.fnvl.lk`: x86 pc plain, host start, host end as R_AARCH64_P32_ABS32): the store of the x87 status word, and nothing else. FSW_ST16 / FSW_ST32 are
+   the store of GM<u16> / GM<u32> with the range around the one store instruction (the aligned stlr, the unaligned str behind its dmb ishst, one asm statement each, so the labels bracket exactly
+   that instruction, ASM-001); FSW_AX is the write of AX, the one instruction `bfxil` on the register of EAX (no guest access). Both paths of an address that is not constant record: one pc
+   may have several records. */
+#define FNVL_FSWREC_ "9:\n.pushsection .fnvl.fsw,\"a\",%%progbits\n.balign 4\n.word %c[pc]\n.word 8b\n.word 9b\n.popsection\n"
+#define FNVL_FSW_(T, R, SUF, MASK) \
+static inline __attribute__((always_inline)) void fsw_st(u32 a, T v, u32 pc, T*){ \
+  if(__builtin_constant_p(a)){ \
+    if(a&MASK) __asm__ volatile(FNVL_K_ "dmb ishst\n8: str" SUF " %" R "[v], [%x[a]]\n" FNVL_FSWREC_ : [a]"=&r"(a) : [v]"r"(v), [lo]"i"(a&0xffffu), [hi]"i"(a>>16), [pc]"i"(pc) : "memory"); \
+    else __asm__ volatile(FNVL_K_ "8: stlr" SUF " %" R "[v], [%x[a]]\n" FNVL_FSWREC_ : [a]"=&r"(a) : [v]"r"(v), [lo]"i"(a&0xffffu), [hi]"i"(a>>16), [pc]"i"(pc) : "memory"); } \
+  else if(__builtin_expect(!(a&MASK), 1)) __asm__ volatile(FNVL_A_ "8: stlr" SUF " %" R "[v], [%x[a]]\n" FNVL_FSWREC_ : [a]"+r"(a) : [v]"r"(v), [pc]"i"(pc) : "memory"); \
+  else __asm__ volatile(FNVL_A_ "dmb ishst\n8: str" SUF " %" R "[v], [%x[a]]\n" FNVL_FSWREC_ : [a]"+r"(a) : [v]"r"(v), [pc]"i"(pc) : "memory"); }
+FNVL_FSW_(u16, "w", "h", 1)
+FNVL_FSW_(u32, "w", "", 3)
+#define FSW_ST16(A, V, PC) fsw_st((u32)(A), (u16)(V), (PC), (u16*)0)
+#define FSW_ST32(A, V, PC) fsw_st((u32)(A), (u32)(V), (PC), (u32*)0)
+#define FSW_AX(V, PC) do{ u32 v_=(V); __asm__ volatile("8: bfxil %w[r], %w[v], 0, 16\n" FNVL_FSWREC_ : [r]"+r"(eax) : [v]"r"(v_), [pc]"i"(PC)); }while(0)
 #include "fnvl_x87.h"
 /* ---- SSE / SSE2 / MMX runtime (W6). MXCSR: RC, FTZ, DAZ are honoured; the exception status bits and the exception masks are not
    modelled (no SIMD exception is ever raised). ldmxcsr mirrors RC into FPCR so that host arithmetic rounds like the guest. mm0-7 are the significands of the physical

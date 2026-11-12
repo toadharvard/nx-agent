@@ -149,14 +149,14 @@ static inline u32 fx_fop(void){ u32 a=c->fip, b;
 /* tag of a physical register (SDM 8.1.7): 0 valid, 1 zero, 2 special (NaN, infinity, denormal, unsupported), 3 empty */
 static inline u32 fx_tag(const fv *p){ if(!p->k) return 3; fnvl_f80 x=fv_x(*p); u32 e=x.se&0x7fff; if(e==0x7fff) return 2; if(e==0) return x.m?2:1; return (x.m>>63)?0:2; }
 /* fnstenv / fnsave image of the environment (32-bit layout fig 8-9 / 16-bit fig 8-11: FCW, FSW (TOP in), FTW (2-bit tags from the contents), FIP, FCS | FOP<<16, FDP, FDS) */
-static inline void fx_env_st(u32 a,u32 d32,u32 fsw,u32 cs,u32 ds){ u32 ftw=0, ip=c->fip, dp=c->fdp, cs_=ip?cs:0, op=fx_fop(), ds_=dp?ds:0;
+static inline __attribute__((always_inline)) void fx_env_st(u32 a,u32 d32,u32 fsw,u32 cs,u32 ds,u32 pc){ u32 ftw=0, ip=c->fip, dp=c->fdp, cs_=ip?cs:0, op=fx_fop(), ds_=dp?ds:0;
   for(u32 p=0;p<8;p++) ftw|=fx_tag(&c->fx[p])<<(2*p);
-  if(d32){ M32(a)=c->fcw&0xffffu; M32(a+4u)=fsw&0xffffu; M32(a+8u)=ftw; M32(a+12u)=ip; M32(a+16u)=cs_|(op<<16); M32(a+20u)=dp; M32(a+24u)=ds_; }
-  else { M16(a)=(u16)c->fcw; M16(a+2u)=(u16)fsw; M16(a+4u)=(u16)ftw; M16(a+6u)=(u16)ip; M16(a+8u)=(u16)cs_; M16(a+10u)=(u16)dp; M16(a+12u)=(u16)ds_; } }
+  if(d32){ M32(a)=c->fcw&0xffffu; FSW_ST32(a+4u,fsw&0xffffu,pc); M32(a+8u)=ftw; M32(a+12u)=ip; M32(a+16u)=cs_|(op<<16); M32(a+20u)=dp; M32(a+24u)=ds_; }
+  else { M16(a)=(u16)c->fcw; FSW_ST16(a+2u,fsw,pc); M16(a+4u)=(u16)ftw; M16(a+6u)=(u16)ip; M16(a+8u)=(u16)cs_; M16(a+10u)=(u16)dp; M16(a+12u)=(u16)ds_; } }
 /* fnstenv: the image, then all exceptions masked (SDM FNSTENV: "then masks all floating-point exceptions": FCW |= 3F through the one control-word hook) */
-#define FNSTENV(A,D32,FSW) do{ u32 a_=(A); fx_env_st(a_,(D32),(FSW),c->sel[SEG_CS],c->sel[SEG_DS]); FLDCW(c->fcw|0x3fu); }while(0)
+#define FNSTENV(A,D32,FSW,PC) do{ u32 a_=(A); fx_env_st(a_,(D32),(FSW),c->sel[SEG_CS],c->sel[SEG_DS],(PC)); FLDCW(c->fcw|0x3fu); }while(0)
 /* fnsave: the environment, then ST(0..7) as 80-bit images in ST order (an empty register holds the real indefinite: ASM-210), then FNINIT */
-#define FNSAVE(A,D32,FSW) do{ u32 a_=(A), h_=(D32)?28u:14u; fx_env_st(a_,(D32),(FSW),c->sel[SEG_CS],c->sel[SEG_DS]); \
+#define FNSAVE(A,D32,FSW,PC) do{ u32 a_=(A), h_=(D32)?28u:14u; fx_env_st(a_,(D32),(FSW),c->sel[SEG_CS],c->sel[SEG_DS],(PC)); \
   for(u32 i_=0;i_<8;i_++){ fv v_=c->fx[(c->ftop+i_)&7]; fnvl_f80 t_=fv_x(v_.k?v_:FV_INDEF); M64(a_+h_+10u*i_)=t_.m; M16(a_+h_+10u*i_+8u)=t_.se; } \
   fnvl_x87_init(); c0=c2=c3=0; }while(0)
 /* fldenv / frstor (SDM Vol 1 8.1.10, 32-bit layout fig 8-9, 16-bit layout fig 8-11; assumptions ASM-210 and ASM-211: see f_x87_ctl.py env()). Dynamic stack only. The image words: FCW at 0,
