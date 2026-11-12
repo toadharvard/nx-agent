@@ -23,7 +23,7 @@
  * folded into an addressing mode is `[zext(p), #d]` with |d| below 2^16 (the immediate field of the A64 loads and
  * stores), and that equals the wrapped sum whenever p + d does not cross 0 or 2^32 (assumption A-EDGE: no guest
  * object, hence no guest pointer, lies within 64 KiB of address 0 or of 2^32; the guest is a 32-bit Windows process
- * whose user space ends below 0xc0000000 and whose first 64 KiB are never mapped) (ASM-801).
+ * whose user space ends below 0xc0000000 and whose first 64 KiB are never mapped) (ASM-802).
  *
  * Totality. Every assignment whose result is a pointer and whose operand computes it from an integer is of class
  * CONV or PLUS or has a constant operand; any other form that makes a pointer from a non-pointer value

@@ -40,6 +40,98 @@
    "aliases": [
     "images dynamic names"
    ]
+  },
+  {
+   "id": "ASM-217",
+   "aliases": [
+    "L3b:A-DECODEFLOW"
+   ]
+  },
+  {
+   "id": "ASM-302",
+   "aliases": []
+  },
+  {
+   "id": "ASM-305",
+   "aliases": []
+  },
+  {
+   "id": "ASM-306",
+   "aliases": []
+  },
+  {
+   "id": "ASM-307",
+   "aliases": []
+  },
+  {
+   "id": "ASM-308",
+   "aliases": []
+  },
+  {
+   "id": "ASM-309",
+   "aliases": []
+  },
+  {
+   "id": "ASM-310",
+   "aliases": []
+  },
+  {
+   "id": "ASM-311",
+   "aliases": []
+  },
+  {
+   "id": "ASM-312",
+   "aliases": []
+  },
+  {
+   "id": "ASM-313",
+   "aliases": []
+  },
+  {
+   "id": "ASM-314",
+   "aliases": []
+  },
+  {
+   "id": "ASM-315",
+   "aliases": []
+  },
+  {
+   "id": "ASM-316",
+   "aliases": []
+  },
+  {
+   "id": "ASM-317",
+   "aliases": []
+  },
+  {
+   "id": "ASM-318",
+   "aliases": []
+  },
+  {
+   "id": "ASM-319",
+   "aliases": [
+    "L3b:A-STACKPRIVATE"
+   ]
+  },
+  {
+   "id": "ASM-324",
+   "aliases": []
+  },
+  {
+   "id": "ASM-326",
+   "aliases": []
+  },
+  {
+   "id": "ASM-327",
+   "aliases": []
+  },
+  {
+   "id": "ASM-328",
+   "aliases": []
+  },
+  {
+   "id": "ASM-330",
+   "aliases": []
   }
  ],
  "entries": [
@@ -674,6 +766,7 @@
    "id": "ASM-043",
    "text": "The instruction decoders are correct (LLVM's AArch64 descriptions, capstone).",
    "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py",
     "ports/fnv-nx/verify/TOOLS.md",
     "ports/fnv-nx/verify/VERDICT.md",
     "ports/fnv-nx/verify/objstub.py"
@@ -851,6 +944,177 @@
   },
   {
    "id": "ASM-203",
+   "text": "capstone group tags classify the instruction-set extension of a form correctly.",
+   "used_by": [
+    "ports/fnv-nx/lift/fnvlift/f_cpufeat.py"
+   ],
+   "aliases": [
+    "L3b:A-GROUPS"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: same decoder-agreement gate, extension class compared with XED isa-set on every instruction",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-204",
+   "text": "No x87/SSE exception is ever unmasked (I-FPMASK); fwait and FP arithmetic never raise.",
+   "used_by": [
+    "ports/fnv-nx/lift/fnvlift/f_x87.py",
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py",
+    "ports/fnv-nx/lift/fnvlift/fpfacts.py"
+   ],
+   "aliases": [
+    "L3b:A-FPMASK",
+    "L3b:I-FPMASK"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: fpstate control-word mask census and sticky-read census (L3a item 29, w7)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-205",
+   "text": "The product keeps the x87 sticky flags (rt/fnvl_x87.h:32-37); the test harness injected them as not observed (I-FPSTICKY set in instest ASSUME).",
+   "used_by": [
+    "ports/fnv-nx/lift/fnvlift/fpfacts.py"
+   ],
+   "aliases": [
+    "L3b:A-FPSTICKY",
+    "L3b:I-FPSTICKY"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: sticky-read census (L3a item 29); the test injections are deleted (L3a w3)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-208",
+   "text": "A handler resuming by ContinueExecution does not change the FP flag owner nor leave the x87/MMX register file in another carrier format.",
+   "used_by": [
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
+   ],
+   "aliases": [
+    "L3b:A-RESUME"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: closable by canonicalising on resume in rt/seh.c (L3a)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-210",
+   "text": "fnsave stores the real indefinite for an empty register; fldenv/frstor treat an empty-tagged register per the tag only.",
+   "used_by": [
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
+   ],
+   "aliases": [
+    "L3b:A-EMPTY"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the CPU stores the kept 80-bit image; fv_free keeps it, so this can be made exact and the assumption removed",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-211",
+   "text": "ES (bit 7) and B (bit 15) of FSW are 0.",
+   "used_by": [
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
+   ],
+   "aliases": [
+    "L3b:A-ES"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: follows the A-FPMASK fact, or is implemented with the unmasked semantics",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-212",
+   "text": "FDP after an instruction without memory operand is unchanged (SDM leaves it unspecified).",
+   "used_by": [
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
+   ],
+   "aliases": [
+    "L3b:A-FDP"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: pin to the reference CPU by a host table, then fact",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-213",
+   "text": "FDS is DS whenever FDP != 0 (FS-relative operand reported with DS).",
+   "used_by": [
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
+   ],
+   "aliases": [
+    "L3b:A-FDS"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: wrong for FS operands on the CPU; closing = keep the selector per operand (1 store)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-214",
+   "text": "FOP is recomputed from the opcode bytes at FIP when an image is written.",
+   "used_by": [
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
+   ],
+   "aliases": [
+    "L3b:A-FOP"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: code is read-only (W^X of the lifted image) so the bytes are those executed; needs the read-only fact from L3a universe",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-215",
+   "text": "Reserved bits of the fnstenv/fnsave image are 0.",
+   "used_by": [
+    "ports/fnv-nx/lift/fnvlift/f_x87_ctl.py"
+   ],
+   "aliases": [
+    "L3b:A-RES"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: pin to the reference CPU by host comparison (exhaustive over the state that feeds them)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-216",
+   "text": "fbld with a nibble above 9 gives the arithmetic sum nibble*10^i (SDM: undefined).",
+   "used_by": [
+    "ports/fnv-nx/lift/fnvlift/f_x87.py"
+   ],
+   "aliases": [
+    "L3b:A-BCD"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: pin to the reference CPU; per-digit-position independence would make a host table exhaustive",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-218",
+   "text": "An inline asm without FP/vector operand and without FP clobber does no float->int conversion.",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+   ],
+   "aliases": [
+    "L3b:A-F2IASM"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: check 3b covers units with no site; closing fully = forbid inline asm outside listed rt files by the plugin",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-221",
+   "text": "The lowest index of a jump table is below 16: the table starts at most 16 dwords above the displacement (TAB_BIAS, fnvlift/core.py).",
+   "used_by": [
+    "ports/fnv-nx/lift/fnvlift/core.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: deleted by L3a w3 1292383f; the extents come from the jtab_tables facts (tools/jtab.py, L3a w2)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-222",
    "text": "Every FuncInfo of the exe and modules (x86-32 MSVC, VC8..VC10, no FH4) is reached from a decoded frame-handler stub `mov eax, imm32; jmp rel32`; a FuncInfo reached any other way is not enumerated by gate_eh (tools/ehtables.py).",
    "used_by": [
     "ports/fnv-nx/lift/gates/gate_eh.py"
@@ -861,7 +1125,7 @@
    "owner": "L3a+L3b"
   },
   {
-   "id": "ASM-204",
+   "id": "ASM-223",
    "text": "Every ThrowInfo reaches `_CxxThrowException` as a call argument; a ThrowInfo reached through a stored pointer is not enumerated by gate_eh (thrower_escapes covers uses of the thrower, not the pointer's origin).",
    "used_by": [
     "ports/fnv-nx/lift/gates/gate_eh.py"
@@ -872,7 +1136,7 @@
    "owner": "L3a+L3b"
   },
   {
-   "id": "ASM-205",
+   "id": "ASM-224",
    "text": "Every catch funclet of the exe and modules returns its continuation by `mov eax, imm32(reloc); ret`; a funclet that returns it by another form is not enumerated by gate_eh.",
    "used_by": [
     "ports/fnv-nx/lift/gates/gate_eh.py"
@@ -881,6 +1145,71 @@
    "status": "REMOVE",
    "removed_by": "planned: every catch funclet's return forms are classified from its decoded code; an unclassified form is red",
    "owner": "L3a+L3b"
+  },
+  {
+   "id": "ASM-320",
+   "text": "rt/rcptab.cert.json was produced by farm/rcpcert.sh on a CPU with the reference identity.",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+   ],
+   "aliases": [
+    "L3b:A-RCPHOST"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: rcptab.cert.json binds the table to a farm/rcpcert.sh run on the pinned reference host (host cpuid + run output sha256), checked by rcpcert",
+   "owner": "L3b"
+  },
+  {
+   "id": "ASM-321",
+   "text": "RCPSS/RSQRTSS are pure functions of the input bits: MXCSR does not influence them.",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+   ],
+   "aliases": [
+    "L3b:A-RCPPURE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: the exhaustive 2^32 run is repeated under every MXCSR RC×FTZ×DAZ combination (16) and every result recorded in the cert; rcpcert is red unless all 16 tables are equal",
+   "owner": "L3b"
+  },
+  {
+   "id": "ASM-322",
+   "text": "The helpers sse_f2i and fv_i are correct (range guard, rounding mode, integer indefinite).",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+   ],
+   "aliases": [
+    "L3b:A-F2IHELPERS"
+   ],
+   "status": "REMOVE",
+   "removed_by": "gate:fpexact",
+   "owner": "L3b"
+  },
+  {
+   "id": "ASM-323",
+   "text": "An object and its .f2i.json come from the same compile.",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+   ],
+   "aliases": [
+    "L3b:A-F2IKEY"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: recipe cache key binds both once the plugin is a recipe stage",
+   "owner": "L3b"
+  },
+  {
+   "id": "ASM-325",
+   "text": "No float->int conversion of a C literal occurs in lifted code (GCC folds an out-of-range constant to the saturated value, not the x86 indefinite).",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+   ],
+   "aliases": [
+    "L3b:A-F2ICONST"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: closable in the plugin: constant operand of a conversion = finding",
+   "owner": "L3b"
   },
   {
    "id": "ASM-800",
@@ -895,6 +1224,19 @@
   },
   {
    "id": "ASM-801",
+   "text": "Every FIX_TRUNC_EXPR in a native unit is rewritten to _ftol/fistp semantics, sits in an fnvnx_f2i helper, or is a compile error (fnvnx_ftoi native rule (c), L2 w1 649a2960); native bodies compiled with fnvnx_ftoi are judged by this rule, not by the lifted-code half of fpexact.",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+   ],
+   "aliases": [
+    "L3b:A-F2INATIVE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "gate:fpexact",
+   "owner": "L2"
+  },
+  {
+   "id": "ASM-802",
    "text": "No guest object, hence no guest pointer, lies within 64 KiB of address 0 or of 2^32 (fnvnx_addr rule C: a constant displacement folded into [zext(p), #d] equals the wrapped sum).",
    "used_by": [
     "ports/fnv-nx/toolchain/addr/fnvnx_addr.cc"

@@ -1924,6 +1924,11 @@ recipe: build a product root from its recipe `build.json` ("fnvnx-recipe/1", con
 every step is a sandbox stage (sandbox.py) keyed by its declared inputs, cached in the store (cas.py).
     python3 -I recipe.py build --root ports/fnv-nx/X --store S --out DIR [--jobs N]     (cwd = checkout root; exit 0 green, 2 red)
     python3 -I recipe.py check --root ports/fnv-nx/X                                    validate only
+Link: `link` = {script, output, flags, kind pie|exe, roots}. kind pie needs target guest, exe needs host; `roots` lists distinct admitted
+product roots of the same target (never the root itself) whose stored objects are declared inputs of the link stage (in its key); the
+image of a product root lists base roots only, a test root any root (a variant is a product root with `variant_of` in admit.json, checked by
+gate_admit.py: a base product root of the same target, no chain). Resolution-relaxing ld options (the refusal set R, `-z lazy` included) are
+refused in every link; linkstrict judges the linked output of every product and test root (no undefined symbol of any binding).
 Steps: (1) generated stages (python runtime, runtime.py), (2) one unit stage per source: .c/.cc/.cpp/.cxx = unitstage.Build (PP on
 name-complete views, then CC on the preprocessed text), .s/.S = unitstage.Build too (.S: PP then CC; .s: one stage on its own file), (3) the link: stage `ld:<root>` (the fixed options of RECIPE.md "Link", the objects of the root and of its
 `link.roots` whole, `link.libs` searched) and the post stage `ldcheck:<root>` (link/ldcheck.py). Tools (compilers, ld) are runtime.py `tool` runtimes: declared inputs, no host /usr.
