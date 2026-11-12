@@ -607,3 +607,7 @@ Ids: gate_eh uses the orchestrator's ASM-222/223/224. L1's 225..227 are withdraw
   - The plugin compiler becomes a recipe constant derived from env.json; a hand name is red.
   - w17 is resumed for this one path item (base 58c113f0 + 9762e823).
 - A new gate, owned by L1 after the first-root merge: every lifted→native edge targets a callee proven not to throw (-fno-exceptions, or noexcept from L2's dispatch facts); otherwise red. Until it exists, the lifted pack is a measurement build on that edge.
+
+## 09:55Z
+- w12 legal (rule applied): 617 files, 2270 VA records, 68 pairs in 18 files; names that meet a VA: 83 decomp-class, 10 from source 2. Refinements on the way (Legal outranks the path order): source 2 = everything defined or referenced by the toolchain objects; C++ compared by qualified name; zlib pinned as source 3. Then a decomp-only path:line list goes to the file owners.
+- L5 w9 c4aaacf2: ASM-501 is removed by funcfacts.py (L3a facts 2eeea27b), accepted. Its guard check_funcfacts.py uses name and literal patterns, which is red as a heuristic; to be replaced by an import/data-graph rule: only funcfacts reads image bytes.
