@@ -1057,6 +1057,9 @@ Content-addressed store and tree manifests (base of the hermetic build sandbox, 
 
 Layout: STORE/obj/<aa>/<sha256>      file contents, mode 0444, mtime 0
         STORE/obj/<aa>/<sha256>.x    same content with exec bit, mode 0555 (separate object)
+        STORE/obj/<aa>/<name>.r<n>   replica n >= 1 of an object: the same bytes and mode in a new inode, made when the inode before it
+                                     is full (MAX_LINKS names): an inode serves at most MAX_LINKS hard links (EMLINK of ext4 is closed
+                                     by rule), so materialize places any number of files of one content. Identity is unchanged.
         STORE/tree/<aa>/<hash>.json  canonical manifests (<aa> = first two hex digits)
 
 Tree hash definition:
