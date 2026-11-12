@@ -1,4 +1,4 @@
-/* INVARIANT I-FPMASK (fnvlift/fpfacts.py, certified per program by tools/fpstate.py): no x87 or SSE exception is ever unmasked. Everywhere this runtime answers an operation with its MASKED
+/* INVARIANT ASM-305 (fnvlift/fpfacts.py, certified per program by tools/fpstate.py): no x87 or SSE exception is ever unmasked. Everywhere this runtime answers an operation with its MASKED
    response (indefinite, infinity, denormal, rounded result) and never raises an FP exception, and `fwait` has no effect, it relies on that invariant; the lifter refuses `fwait` where the fact
    file does not say `holds`. */
 /* x87 runtime of lifted code (R8, W13). Included from fnvl.h; the lifter's PRELUDE inlines it (and x87.h) textually.
@@ -29,7 +29,7 @@ static inline fv fv_ld80(u64 m,u32 se){ return fvmk(FK_M80,m,se&0xffffu); }
 static inline void fnvl_fp_set_rc_x87(u32 rc){ static const unsigned char m[4]={0,2,1,3}; u64 f; __asm__ volatile("mrs %0, fpcr":"=r"(f)); f=(f&~(3ull<<22))|((u64)m[rc&3]<<22); __asm__ volatile("msr fpcr, %0"::"r"(f)); }
 static inline u32 fnvl_fp_x87_flags(void){ u64 f; __asm__ volatile("mrs %0, fpsr":"=r"(f)); return (u32)((f&1)|((f>>1&1)<<2)|((f>>2&1)<<3)|((f>>3&1)<<4)|((f>>4&1)<<5)|((f>>7&1)<<1)); }
 static inline void fnvl_fp_x87_clear(void){ u64 f; __asm__ volatile("mrs %0, fpsr":"=r"(f)); f&=~0x9full; __asm__ volatile("msr fpsr, %0"::"r"(f)); }
-/* STICKY EXCEPTION FLAGS: two shadow sets, one host FPSR (task C4a / B2; the flags are observable: tools/fpstate.py A2, I-FPSTICKY unproven). x86 keeps the x87 flags (FSW IE DE ZE OE UE PE
+/* STICKY EXCEPTION FLAGS: two shadow sets, one host FPSR (task C4a / B2; the flags are observable: tools/fpstate.py A2, ASM-306 unproven). x86 keeps the x87 flags (FSW IE DE ZE OE UE PE
    = bits 0-5) and the SSE flags (MXCSR bits 0-5, the same order) in SEPARATE sticky sets; the host has one FPSR. RULE: the live FPSR holds the flags of exactly ONE family, its OWNER
    (c->fex bits 24-25: 0 nobody, 1 x87, 2 SSE). The x87 set is c->fex bits 0-5 (SF bit 6 and C1 bit 9 beside it), the SSE set is c->mxcsr bits 0-5. Every instruction that can raise a host
    flag first makes its family the owner (FOWN_X87 / FOWN_SSE): a change of owner folds the live FPSR into the LEAVING family's set and clears it (fown_set). A reader of a set adds the live
@@ -37,10 +37,10 @@ static inline void fnvl_fp_x87_clear(void){ u64 f; __asm__ volatile("mrs %0, fps
    "FPSR flags = flags raised by the owner's instructions since the last fold" holds initially (owner 0, FPSR clear at thread start), every flag-raising instruction of family F runs with owner F
    (the macro, or the lifter's must-dataflow f_x87_ctl.fown_prepass proves it: kills = call, entry from outside, the other family), and fown_set preserves it; so each set equals the union of
    the flags its own family's instructions raised since the last clear, which is the x86 definition of a sticky set. Flags come from the host IEEE operations of the SOURCE types (R8): the x87
-   flags are those of binary64/binary32 arithmetic, not of 80-bit arithmetic. Assumptions: A-RESUME (rt/fnvl_x87.h MMX_ENTER: a resumed handler does not change the owner), A-ORDER (the host
-   compiler keeps an FP operation before the FPSR read that follows it in program order: no FENV_ACCESS in GCC, same assumption as the old FSWV), A-NATIVE (host code between guest
+   flags are those of binary64/binary32 arithmetic, not of 80-bit arithmetic. Assumptions: ASM-309 (rt/fnvl_x87.h MMX_ENTER: a resumed handler does not change the owner), ASM-307 (the host
+   compiler keeps an FP operation before the FPSR read that follows it in program order: no FENV_ACCESS in GCC, same assumption as the old FSWV), ASM-308 (host code between guest
    instructions, imports and native bodies, runs with the guest's FPSR parked or raises nothing the guest can see: rt/imp.h parks FPSR on imports). ES (bit 7) and B (bit 15) of FSW are 0:
-   they need an unmasked flag, which I-FPMASK (fnvlift/fpfacts.py) excludes. */
+   they need an unmasked flag, which ASM-305 (fnvlift/fpfacts.py) excludes. */
 #define FEX_X87 0x27fu
 static inline u32 fown(void){ return (c->fex>>24)&3u; }
 static __attribute__((noinline)) void fown_set(u32 f){ u32 o=fown(), fl=fnvl_fp_x87_flags()&0x3fu; if(o==1u) c->fex|=fl; else if(o==2u) c->mxcsr|=fl; fnvl_fp_x87_clear(); c->fex=(c->fex&~(3u<<24))|(f<<24); }
@@ -131,17 +131,17 @@ static inline void dyn_push(fv v){ u32 t=(c->ftop-1)&7; if(__builtin_expect(c->f
 static inline void fv_free(fv *p){ if(p->k){ if(p->k!=FK_M80){ fnvl_f80 x=fv_x(*p); p->v=x.m; p->e=x.se; } p->k=0; } }   /* tag := empty; the register KEEPS its 80-bit image (MMX reads it, SDM 9.2) */
 static inline void dyn_pop(void){ fv *p=&c->fx[c->ftop&7]; if(__builtin_expect(!p->k,0)) c->fex|=0x41; fv_free(p); c->ftop=(c->ftop+1)&7; }
 static inline void fnvl_x87_init(void){ for(int i=0;i<8;i++) fv_free(&c->fx[i]); c->ftop=0; c->fcw=0x37f; fx_flags_clear(); c->fip=c->fdp=0; fnvl_fp_set_rc_x87(0); }
-/* fbld / fbstp: packed BCD (rt/x87.c; A-BCD: digits above 9 follow the arithmetic formula d*10^k). The value of an 18-digit number is an integer below 10^18: exact in the M80 carrier. */
+/* fbld / fbstp: packed BCD (rt/x87.c; ASM-317: digits above 9 follow the arithmetic formula d*10^k). The value of an 18-digit number is an integer below 10^18: exact in the M80 carrier. */
 static inline fv fv_ldbcd(u64 lo,u32 hi){ u8 b[10]; u16 h=(u16)hi; __builtin_memcpy(b,&lo,8); __builtin_memcpy(b+8,&h,2); fnvl_f80 r=fnvl_x_from_bcd(b); return fvmk(FK_M80,r.m,r.se); }
 static inline void fv_stbcd(fv a,u64 *lo,u64 *hi){ u8 b[10]; u32 f=0; u16 h; fnvl_x_to_bcd(fv_x(a),c->fcw,b,&f); __builtin_memcpy(lo,b,8); __builtin_memcpy(&h,b+8,2); *hi=h; FM_FL(f); }
 /* x87 last-instruction state (SDM Vol 1 8.1.8, "x87 FPU Instruction and Data (Operand) Pointers"). Sentences relied on: the x87 FPU saves the instruction pointer (FIP, FCS) and the
    opcode (FOP) of the last non-control instruction it executed, and the data pointer (FDP, FDS) of its memory operand; the control instructions (FNINIT, FNCLEX, FLDCW, FNSTCW, FNSTSW,
    FNSTENV, FLDENV, FNSAVE, FRSTOR, WAIT) leave them alone; FNINIT / FNSAVE (re-initialisation) zero them. State: c->fip (address of the first byte of the instruction, prefixes included) and
    c->fdp (offset of the last memory operand, no segment base), written by the lifter's x87 entry (f_x87.py) before every non-control x87 instruction (fdp only with a memory operand).
-   A-FDP: the SDM leaves the data pointer of an instruction without a memory operand unspecified; it is modelled as unchanged. A-FDS: FDS is DS whenever FDP != 0 (an FS-relative operand is
-   reported with the DS selector: the selector is not kept per operand). A-FOP: FOP is not stored, it is the low 11 bits of the two opcode bytes at FIP (first byte & 7, second byte), read
+   ASM-313: the SDM leaves the data pointer of an instruction without a memory operand unspecified; it is modelled as unchanged. ASM-314: FDS is DS whenever FDP != 0 (an FS-relative operand is
+   reported with the DS selector: the selector is not kept per operand). ASM-315: FOP is not stored, it is the low 11 bits of the two opcode bytes at FIP (first byte & 7, second byte), read
    from the code when an image is written; FIP == 0 (no x87 instruction since FNINIT / thread start) gives the FNINIT state: FIP = FCS = FOP = FDP = FDS = 0. FCS and FDS are the model's
-   selectors (c->sel[], the CONTEXT SegCs / SegDs of rt/seh.cc). A-RES: reserved bits of the image are 0. */
+   selectors (c->sel[], the CONTEXT SegCs / SegDs of rt/seh.cc). ASM-316: reserved bits of the image are 0. */
 static inline u32 fx_fop(void){ u32 a=c->fip, b;
   if(!a) return 0;
   for(int n=0;n<14;n++){ b=M8(a); if(b==0x66||b==0x67||b==0xf0||b==0xf2||b==0xf3||b==0x2e||b==0x36||b==0x3e||b==0x26||b==0x64||b==0x65) a++; else break; }
@@ -155,13 +155,13 @@ static inline void fx_env_st(u32 a,u32 d32,u32 fsw,u32 cs,u32 ds){ u32 ftw=0, ip
   else { M16(a)=(u16)c->fcw; M16(a+2u)=(u16)fsw; M16(a+4u)=(u16)ftw; M16(a+6u)=(u16)ip; M16(a+8u)=(u16)cs_; M16(a+10u)=(u16)dp; M16(a+12u)=(u16)ds_; } }
 /* fnstenv: the image, then all exceptions masked (SDM FNSTENV: "then masks all floating-point exceptions": FCW |= 3F through the one control-word hook) */
 #define FNSTENV(A,D32,FSW) do{ u32 a_=(A); fx_env_st(a_,(D32),(FSW),c->sel[SEG_CS],c->sel[SEG_DS]); FLDCW(c->fcw|0x3fu); }while(0)
-/* fnsave: the environment, then ST(0..7) as 80-bit images in ST order (an empty register holds the real indefinite: A-EMPTY), then FNINIT */
+/* fnsave: the environment, then ST(0..7) as 80-bit images in ST order (an empty register holds the real indefinite: ASM-311), then FNINIT */
 #define FNSAVE(A,D32,FSW) do{ u32 a_=(A), h_=(D32)?28u:14u; fx_env_st(a_,(D32),(FSW),c->sel[SEG_CS],c->sel[SEG_DS]); \
   for(u32 i_=0;i_<8;i_++){ fv v_=c->fx[(c->ftop+i_)&7]; fnvl_f80 t_=fv_x(v_.k?v_:FV_INDEF); M64(a_+h_+10u*i_)=t_.m; M16(a_+h_+10u*i_+8u)=t_.se; } \
   fnvl_x87_init(); c0=c2=c3=0; }while(0)
-/* fldenv / frstor (SDM Vol 1 8.1.10, 32-bit layout fig 8-9, 16-bit layout fig 8-11; assumptions A-EMPTY and A-ES: see f_x87_ctl.py env()). Dynamic stack only. The image words: FCW at 0,
+/* fldenv / frstor (SDM Vol 1 8.1.10, 32-bit layout fig 8-9, 16-bit layout fig 8-11; assumptions ASM-311 and ASM-312: see f_x87_ctl.py env()). Dynamic stack only. The image words: FCW at 0,
    FSW at w, FTW at 2w with w = 4 (32-bit operand size) or 2; FIP at 12 / 6, FDP at 20 / 10; frstor's ST(i) images follow the 7 dwords (28 bytes) / 7 words (14 bytes) of the environment,
-   10 bytes each in ST order. FIP and FDP are loaded; FCS, FOP, FDS are derived (A-FOP, A-FDS). */
+   10 bytes each in ST order. FIP and FDP are loaded; FCS, FOP, FDS are derived (ASM-315, ASM-314). */
 static inline u32 fx_env_ld(u32 a,u32 w,u32 *ftw){ u32 fsw=M16(a+w); *ftw=M16(a+2*w); FLDCW(M16(a)); c->ftop=(fsw>>11)&7; c->fex=(c->fex&~FEX_X87)|(fsw&FEX_X87); if(fown()==1u) fnvl_fp_x87_clear();
   c->fip=w==4?M32(a+12u):M16(a+6u); c->fdp=w==4?M32(a+20u):M16(a+10u); return fsw; }
 #define FLDENV(A,D32) do{ u32 ftw_, a_=(A), fsw_=fx_env_ld(a_,(D32)?4u:2u,&ftw_); c0=(fsw_>>8)&1; c2=(fsw_>>10)&1; c3=(fsw_>>14)&1; \
@@ -173,8 +173,8 @@ static inline u32 fx_env_ld(u32 a,u32 w,u32 *ftw){ u32 fsw=M16(a+w); *ftw=M16(a+
    Any MMX instruction except EMMS sets TOP = 0 and the whole tag word to valid (00); a write of MMi sets the exponent and sign field of Ri (bits 64-79) to all ones; a read sees the significand.
    MMX_ENTER makes every carrier an M80 image (a carrier of another kind is converted exactly, an empty register contributes the 80-bit image it kept, see fv_free) and TOP = 0; after it
    MMR(i) = c->fx[i].v and MMW(i,v) are the whole of the architectural effect. EMMS: all tags empty, contents and TOP unchanged. The lifter emits MMX_ENTER before an MMX instruction unless a
-   static dataflow proves the registers are already canonical on every path (f_x87_ctl.mmx_prepass). A-RESUME: a guest exception handler that resumes (ContinueExecution) into an MMX region does not
-   leave the interrupted x87/MMX register file in another carrier format (a program that did would read clobbered MMX registers on the real CPU too). A-STALE: the bits of a register popped by a
+   static dataflow proves the registers are already canonical on every path (f_x87_ctl.mmx_prepass). ASM-309: a guest exception handler that resumes (ContinueExecution) into an MMX region does not
+   leave the interrupted x87/MMX register file in another carrier format (a program that did would read clobbered MMX registers on the real CPU too). ASM-310: the bits of a register popped by a
    static-stack function are not written back (the static slot is a C local), so an MMX read of such a register that no MMX write and no dynamic-stack pop produced reads older bits (undefined
    data on the real CPU as well: no correct program's result depends on it). */
 static inline void mmx_canon(void){ for(int i=0;i<8;i++){ fv *p=&c->fx[i]; if(p->k!=FK_M80){ if(p->k){ fnvl_f80 x=fv_x(*p); p->v=x.m; p->e=x.se; } p->k=FK_M80; } } }

@@ -229,7 +229,7 @@ def class_tables(img):
         bad += bool(miss); print('%-22s %-44s %s' % (hx, what, 'ok' if not miss else 'FAIL missing/forbidden: %s' % miss))
     return bad
 # ---- X1: x87 environment loads, packed BCD, fstpnce, VEX (vpavgw) ----------------------------------------------------------------------------------------------------
-# fldenv / frstor: the oracle is Unicorn. Assumption A-EMPTY (f_x87_ctl.py env()): a register the loaded tag word marks non-empty while it was empty holds the real indefinite in the
+# fldenv / frstor: the oracle is Unicorn. Assumption ASM-311 (f_x87_ctl.py env()): a register the loaded tag word marks non-empty while it was empty holds the real indefinite in the
 # lifted code, a stale value in the oracle (QEMU keeps the register file). Those registers are masked in the comparison and COUNTED ("masked fields" below), never silently equal.
 # The FIP / FCS / FOP / FDP / FDS words of the image are not part of any state the lifted code keeps (open class question Q-FIP); a load discards them and the oracle's are checked by
 # nobody because the only observers are fnstenv / fnsave, which are not lifted (no case here).
@@ -266,8 +266,8 @@ def oracle_run(s, E, st):
 # seeded with a known last-instruction state (c->fip, c->fdp, c->sel[] written into the harness CPU block before the run); the expected fields come from an independent Python model of SDM
 # Vol 1 8.1.8 (FIP = the instruction address, FCS = CS, FOP = (first opcode byte & 7) << 8 | second opcode byte after the prefixes, FDP = the operand offset, FDS = DS when FDP != 0; FIP = 0
 # is the FNINIT state, all five fields 0) and replace the oracle's bytes: every such field is COUNTED in "oracle-unmodelled fields", never silently equal. The sticky exception bits of the FSW word
-# follow the fnstsw convention (not compared) and are counted as "fsw sticky bits masked". An empty register's image in fnsave (stale value in QEMU, real indefinite in the lifted code: A-EMPTY) is
-# counted in the A-EMPTY masks. Everything else of the image is compared against the oracle byte for byte.
+# follow the fnstsw convention (not compared) and are counted as "fsw sticky bits masked". An empty register's image in fnsave (stale value in QEMU, real indefinite in the lifted code: ASM-311) is
+# counted in the ASM-311 masks. Everything else of the image is compared against the oracle byte for byte.
 CODE0 = 0x7d0f0000
 SEEDS = [(0, 0, b''), (CODE0, 0x30001234, bytes.fromhex('d94508')), (CODE0 + 0x10, 0x7ffdf00c, bytes.fromhex('66dd4508')), (CODE0 + 0x20, 0x1000, bytes.fromhex('dec1')),
          (CODE0 + 0x30, 0xffffff00, bytes.fromhex('3ed9c0')), (CODE0 + 0x40, 0x4, bytes.fromhex('f2dd45f8'))]
@@ -294,7 +294,7 @@ def mset(mem, st, a, v):
     else: mem[a] = v
 def mget(mem, st, a): return mem.get(a, T.origbyte(st, a))
 def env_compare(E, st, o, c):
-    """fnstenv / fnsave: returns (unmodelled fields, sticky bits masked, A-EMPTY registers masked)"""
+    """fnstenv / fnsave: returns (unmodelled fields, sticky bits masked, ASM-311 registers masked)"""
     a0 = min(a for a, n in o['wr']); d32 = E['raw'][0] != 0x66; om, cm = dict(o['mem']), dict(c['mem']); u = 0
     for off, n, v in model_fields(fseed(E, st), d32):
         for k in range(n): mset(om, st, a0 + off + k, v >> 8 * k & 0xff)
@@ -335,7 +335,7 @@ def masked_report(work):
             for r in e['cases']:
                 if r[0] == 'equal' and r[1].startswith(MASKED + ':'):
                     for k, x in enumerate(r[1].split(':')[1].split('/')): t[k] += int(x)
-    print('masked fields: %d  (A-EMPTY: fldenv registers revived by the tag word, fnsave images of empty registers)' % t[0])
+    print('masked fields: %d  (ASM-311: fldenv registers revived by the tag word, fnsave images of empty registers)' % t[0])
     print('oracle-unmodelled fields: %d  (FIP/FCS/FOP/FDP/FDS of fnstenv/fnsave images: asserted against the SDM model of this file, QEMU stores 0)' % t[1])
     print('fsw sticky bits masked: %d  (fnstsw convention, exception bits / ES / B / C1 are not compared)' % t[2])
 def tables():

@@ -9,7 +9,7 @@ import mmxtest as M
 
 DST = M.DST
 # mov [ebx],edx (1.0f); mov dword [ebx+4],0; fld dword [ebx]; fld dword [ebx+4]; fdivp st(1),st      1/0 on the x87: ZE (0x04); TOP 0 -> 6 -> 7. The operand comes from a register of the
-# guest, not from a constant, so the host compiler cannot fold or hoist the division (assumption A-ORDER of rt/fnvl_x87.h: an FP operation stays between the owner switch and the read)
+# guest, not from a constant, so the host compiler cannot fold or hoist the division (assumption ASM-307 of rt/fnvl_x87.h: an FP operation stays between the owner switch and the read)
 X87_ZE = bytes([0x89, 0x13, 0xc7, 0x43, 0x04, 0, 0, 0, 0, 0xd9, 0x03, 0xd9, 0x43, 0x04, 0xde, 0xf9])
 # movd xmm0,eax; movd xmm1,ecx; mulss xmm0,xmm1    FLT_MAX * 2.0 on the SSE unit: OE | PE (0x28)
 SSE_OEPE = bytes([0x66, 0x0f, 0x6e, 0xc0, 0x66, 0x0f, 0x6e, 0xc9, 0xf3, 0x0f, 0x59, 0xc1])
