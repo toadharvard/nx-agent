@@ -3,8 +3,8 @@
 decls() is the C++ text of every case: one feature at a time (FEATURES, plus `none`), at depth 0 (the class itself, C_), depth 1 (a member of that
 class, D_), depth 1 through an array (A_) and depth 2 (a member whose class has the member, E_); controls `sm` (static data member) and `mf`
 (non-virtual member function) must stay POD; `ebase` is an empty base, `base` a non-empty one, for each payload size SIZES. The same text is compiled by the reference (cl 15.00.30729.01, VC 2008 SP1,
-fnv-nx-build toolchain/msvc9) as `T fn_T(); void c_T() { fn_T(); }` with /c /O2 /FAs: the caller reads the result through eax:edx
-(`regs`) or pushes the address of a temporary (`hidden`). The table `cl_pod_table.tsv` (`<type><TAB>regs|hidden`, header lines `#`) is that output,
+fnv-nx-build toolchain/msvc9) as `T fn_T(); void c_T() { fn_T(); }` (fn_T only declared) with /c /O2 /FAs: the caller reads the result through eax:edx
+(`regs`) or passes the address of its own temporary as the one argument (`hidden`); classify() decides by that structure and fails on anything else. The table `cl_pod_table.tsv` (`<type><TAB>regs|hidden`, header lines `#`) is that output,
 a committed fact; defdisptest compares the plugin with every row, no expected value is written by hand.
 Run: python3 podmatrix.py [--cl-source]   prints decls() / the cl input;  python3 podmatrix.py --cl CL.EXE --wine-prefix P --toolchain-commit C --out cl_pod_table.tsv"""
 import os, re, sys
@@ -62,15 +62,36 @@ def cl_source():
     return decls() + ''.join('%s fn_%s();\nvoid c_%s() { fn_%s(); }\n' % ((n,) * 4) for n, _ in cases())
 
 
+def instrs(body):
+    """the instructions of a PROC body as [(mnemonic, operand text)], comments and directives dropped"""
+    out = []
+    for l in body.split('\n'):
+        l = l.split(';')[0].strip()
+        m = re.match(r'([a-z]+)\b\s*(.*)$', l)
+        if m and m.group(1) not in ('proc', 'endp', 'ret', 'align') and not l.startswith(('?', '$', '_', 'PUBLIC', 'EXTRN', 'TEXT', 'END')): out.append((m.group(1), m.group(2).strip()))
+        elif m and m.group(1) == 'ret': out.append(('ret', ''))
+    return out
+
+
 def classify(asm):
-    """{type: 'hidden'|'regs'} from the /FAs listing: fn_T takes no declared parameter, so any `push` between the start of c_T and its call to fn_T is
-    the hidden result pointer; none = the result comes back in eax:edx / eax (one rule, read from the caller's own code)."""
+    """{type: 'hidden'|'regs'} from the /FAs listing, by the structure of the fixed caller `void c_T() { fn_T(); }` (fn_T only declared, no parameter, no
+    local of the caller): the call (or tail `jmp`) to fn_T is preceded by
+      lea R, [esp|ebp ...] ; push R     -> hidden: exactly one argument, an address in the caller's own frame (the result temporary);
+      anything that is not a push        -> regs: no argument is passed (the prologue's own pushes come earlier and are not adjacent to the call);
+    a push right before the call that is not that pair, a missing call, or a `jmp` after a frame address argument is an ERROR naming the case, never a guess."""
     out = {}
     for m in re.finditer(r'^(\?c_(\w+)@@\S+)\s+PROC.*?^\1\s+ENDP', asm, re.S | re.M):
-        body = m.group(0)
-        call = re.search(r'call\s+\?fn_%s@@' % re.escape(m.group(2)), body)
-        if call is None: raise SystemExit('podmatrix: no call of fn_%s in its caller' % m.group(2))
-        out[m.group(2)] = 'hidden' if re.search(r'^\s*push\b', body[:call.start()], re.M) else 'regs'
+        t = m.group(2); ins = instrs(m.group(0))
+        ci = [i for i, (op, rest) in enumerate(ins) if op in ('call', 'jmp') and re.search(r'\?fn_%s@@' % re.escape(t), rest)]
+        if len(ci) != 1: raise SystemExit('podmatrix: %s: the caller has %d calls of fn_%s' % (t, len(ci), t))
+        i = ci[0]
+        if i >= 2 and ins[i - 1][0] == 'push' and ins[i - 2][0] == 'lea' and ins[i - 2][1].split(',')[0].strip() == ins[i - 1][1] \
+                and re.search(r'\[(esp|ebp)[^\]]*\]', ins[i - 2][1]) and ins[i][0] == 'call':
+            out[t] = 'hidden'
+        elif i >= 1 and ins[i - 1][0] == 'push':
+            raise SystemExit('podmatrix: %s: a push before the call that is not a frame address (%s; %s)' % (t, ins[i - 1], ins[i - 2] if i >= 2 else None))
+        else:
+            out[t] = 'regs'
     return out
 
 
@@ -87,6 +108,8 @@ def run_cl(cl, prefix, commit, outp):
     names = [c[0] for c in cases()]
     if set(cls) != set(names): raise SystemExit('podmatrix: cl produced %d callers for %d cases' % (len(cls), len(names)))
     pk = subprocess.run('dpkg-query -W wine wine64 wine32 libwine 2>/dev/null; true', shell=True, capture_output=True, text=True).stdout.strip().split('\n')
+    bad = [n for n in names if (n.split('_')[1] in CONTROLS and int(n.split('_')[2]) in (1, 2, 4, 8) and cls[n] != 'regs') or (int(n.split('_')[2]) == 12 and cls[n] != 'hidden')]
+    if bad: raise SystemExit('podmatrix: the table is invalid: a control that is not regs or a size 12 that is not hidden: %s' % bad[:8])
     h = ['# MEASUREMENT of %d cases (podmatrix.py --cl): the caller of `T fn_T()` reads the result through a hidden pointer (hidden) or eax:edx (regs)' % len(names),
          '# cl: %s; cl.exe sha256 %s' % (ver, hashlib.sha256(open(cl, 'rb').read()).hexdigest()),
          '# toolchain commit (fnv-nx-build toolchain/msvc9): %s' % commit] + ['# dpkg-query -W: ' + p.replace('\t', ' ') for p in pk if p]
