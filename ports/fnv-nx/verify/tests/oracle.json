@@ -1,5 +1,17 @@
 {
  "format": "fnvnx-oracle/1",
+ "test_gate_legal.py": {
+  "references": [
+   {
+    "anchor": "## verify/gate_legal.py",
+    "kind": "spec",
+    "path": "ports/fnv-nx/verify/TOOLS.md"
+   }
+  ],
+  "subject": [
+   "ports/fnv-nx/verify/gate_legal.py"
+  ]
+ },
  "tests": {
   "test_a64access.py": {
    "references": [

@@ -303,6 +303,15 @@
     "ports/fnv-nx/verify/gate_doubles.py"
    ],
    "result": "doubles.json"
+  },
+  {
+   "name": "legal",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_legal.py"
+   ],
+   "result": "legal.json"
   }
  ]
 }
