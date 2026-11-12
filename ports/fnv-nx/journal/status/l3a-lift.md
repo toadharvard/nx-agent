@@ -318,3 +318,13 @@ Update 2026-11-12, at 698adefb:
 - ehtables.py:268: a real assumption. L1 has been asked for a REMOVE id; the removing fact is reloc-consistency plus data_in_code (w7). w6 cites the id.
 - w4: pcsrc.run_facts is 2b0797ff, sent to w7. The d3dx9 pcsrc runs are in progress; the points-to coding starts in parallel.
 - Bridges: L1 w20 builds claude/fnv-l1-contract-int-l3a (6d3a2800 + w14-src2 + w20-descs + int3). The cross-root include of fnvl_host.h is legal under the header-home rule.
+
+## 2026-11-12 09:15
+- Rule DIC (data in code) for L1/L5, implemented by w7 in the next facts commit.
+  - Data ranges and entries are two independent over-approximations of the constant image bytes, not a partition.
+  - Data range: a range that a proven consumer reads. Its kind and extent come from the consumer: jtab via idxrange, a pointer table, a string or struct by import contract (OWNER 3), a constant, an EH table.
+  - R3 entries from a relocated pointer stay candidates while the value's flow is unknown. The points-to removes those whose value reaches no control transfer.
+  - Reloc consistency in all images: refuse the candidate, and red under proven flow.
+  - Gate: in a proven-flow run every relocation is an operand.
+  - Open and counted: VirtualProtect/WriteProcessMemory/FlushInstructionCache sites that may target image ranges. The points-to removes them.
+- Input: L1/L5 measured 16 714 non-operand relocated words in 1 452 runs (6 images, facts 2eeea27), plus d3dx9_38 strings decoded as code. L5's gpa_names, pemanifest and argflow are red until the commit.
