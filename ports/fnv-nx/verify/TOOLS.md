@@ -2091,3 +2091,37 @@ Inputs of the certificate: the root's game objects (staged as `<UNIT with / -> _
 red item `<root>:inputs` naming it and its owner, never skipped. Stated limit: no `--n3` is passed by the bodysel stage of gate_contract.py yet, so
 bodysel gives no NATIVE and the universe is 0 until L1/L2 wire the N3 verdicts (reported, not worked around).
 ```
+
+## link/exevft.py
+
+```text
+exevft - the vftables of the player's exe with their RTTI class hierarchy, and the exact adjustor thunks in their slots (L2 SOURCE, ABI1).
+
+    exevft.py --exe FalloutNV.exe [--out exevft.json]
+
+RULE.  An MSVC vftable is the word run that follows a relocated pointer to a complete object locator (COL).  The vftables
+and their slot runs are exefacts.rtti_vftables (L1's reader, reused, not re-parsed here).  This module adds what the COL
+points at and what the slots hold:
+  * hierarchy(img, col): COL (signature 0, vfptr offset, TypeDescriptor, ClassHierarchyDescriptor) -> the class's bases
+    [(TypeDescriptor name, mdisp, pdisp)] in the order of the BaseClassArray.  Checked as a structure: hierarchy signature
+    0, 1..127 bases, every BaseClassDescriptor inside the image with a TypeDescriptor name `.?A..`, the first base is the
+    class itself.  A violation is a ValueError naming the COL (the exe does not have the documented RTTI layout), never a
+    skipped entry.
+  * thunk(img, a): the function at `a` is an MSVC adjustor thunk iff its decoded instruction sequence is exactly
+    `[sub|add ecx, imm | lea ecx,[ecx+imm] | sub|add dword ptr [esp+4], imm]  jmp rel32`.  The instructions are decoded
+    (capstone) and their semantics read (ecx or the stacked this moves by `adj`, then a direct tail jump), so every
+    encoding of these instructions is one case.  Result Thunk(adj, target, stacked) with `this_new = this - adj`; a plain
+    `jmp` has adj 0.  Anything else is None: "not an exact thunk", which is a fact of the function, not a failure.
+  * chain(img, a): the thunks followed to a non-thunk: (total adj, final target, thunks passed); a cycle is a ValueError.
+  * entry_offsets(vfts): {function address: sorted COL offsets of every vftable that holds it directly}.
+UNIVERSE of the CLI: every vftable the exe's RTTI yields; each is emitted with name, COL offset, bases and, per slot, the
+address, its thunk chain (or null).  Output is canonical JSON (sorted keys, LF), a function of the exe bytes only.
+PROOF.  The hierarchy and thunk statements are decodes of bytes by the documented layouts and by instruction semantics;
+no name, string or count decides anything.
+INPUT FACT: the exe is a PE32 with COLs in .rdata and TypeDescriptors in .data (exefacts's precondition, read from the PE section table).
+Open (REMOVE, owner L1 exefacts): completeness of the RTTI scan is not yet a checked fact.  Open (REMOVE, owner L2): agreement of two
+independent decoders on every instruction of the set; after first frame.  Dropped from the legacy tool (heuristic or per-item): the D1/D0 slot-name
+regexes, the deleting-destructor byte patterns (`_FLAGS_TEST`), `delete_this`, `leaf_constant`, `string_at`, the vftable
+getter walker (GETTER_MAX), the constructor "last store wins" rule (exefacts records every vptr store in order), hard-coded
+TEXT/DATA ranges (the section table is used), the JSON cache keyed on mtime.
+```
