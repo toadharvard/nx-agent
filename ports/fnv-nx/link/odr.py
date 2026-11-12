@@ -52,7 +52,7 @@ def check(paths):
         p0, f0 = cs[0]
         for p, f in cs[1:]:
             if not comdat.same(f, f0):
-                red[s] = 'copies in %s and %s differ: %s' % (p0, p, comdat.first_difference(f0, f))
+                red[s] = 'copies in %s (%s) and %s (%s) differ: %s' % (p0, f0.digest[:12], p, f.digest[:12], comdat.first_difference(f0, f))
                 break
     return universe, red
 

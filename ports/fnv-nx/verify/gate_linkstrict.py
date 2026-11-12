@@ -190,7 +190,7 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
             u = undec[sig][0]
             out.add(("<comdat>", sig, "identity-undecidable", "object %s section %s offset %d: %s" % u))
         elif len(set(c.values())) > 1:
-            out.add(("<comdat>", sig, "comdat-differs", "copies differ across %s" % ", ".join(sorted(c))[:200]))
+            out.add(("<comdat>", sig, "comdat-differs", "copies differ across %s" % ", ".join("%s (%s)" % (o, c[o][:12]) for o in sorted(c))[:400]))
     script = {}   # elf id -> names the link (script or linker), not an object, defines in that ELF
     for eid, syms in elfs.items():
         pre = eid.rsplit("/", 1)[0] + "/"
