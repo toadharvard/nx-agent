@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "link"))
 sys.path.insert(0, os.path.join(HERE, "..", "contract"))
 import abi  # noqa: E402
 import elfobj  # noqa: E402
+import factcache  # noqa: E402
 import gate_argorder  # noqa: E402
 import gate_build  # noqa: E402
 import l2sections  # noqa: E402
@@ -50,14 +51,28 @@ def read_objects(objs):
     return store, layouts, red
 
 
-def judge_objects(objs):
-    """-> (universe, certified, ids, detail) of the objects OBJS [(id, path)] of one root."""
+def _enc(x):
+    """a COMDAT fingerprint (tuples, ints, str, bytes) as JSON: bytes are {"bytes": hex}, tuples are lists; equal fingerprints encode equal"""
+    if isinstance(x, bytes):
+        return {"bytes": x.hex()}
+    if isinstance(x, (tuple, list)):
+        return [_enc(e) for e in x]
+    return x
+
+
+def judge_objects(objs, facts=None):
+    """-> (universe, certified, ids, detail) of the objects OBJS [(id, path)] of one root. FACTS (factcache.Facts): the COMDAT copies of an object
+    (odr.copies) are a fact of the object's bytes; the checks across the objects always run, over the facts."""
     store, layouts, red = read_objects(objs)
     uni, abi_red = abi.check(store)
     items = list(uni)
     reds = {k: v for k, v in abi_red.items()}
     try:
-        odr_uni, odr_red = odr.check([p for _, p in objs])
+        if facts is None:
+            odr_uni, odr_red = odr.check([p for _, p in objs])
+        else:
+            odr_uni, odr_red = odr.check([p for _, p in objs], lambda p: facts.get(
+                ["comdat", factcache.file_digest(p)], lambda: {k: _enc(v) for k, v in odr.copies(p).items()}))
     except (ValueError, OSError) as e:        # odr cannot parse an object: no verdict on the copies, the gate is red for it
         odr_uni, odr_red = ["unreadable"], {"unreadable": str(e)[:300]}
     items += ["odr:" + s for s in odr_uni]
@@ -77,7 +92,7 @@ def judge_objects(objs):
             len(items), len(uni), len(odr_uni), sum(1 for i in items if i.startswith("layout:")), len(red))
 
 
-def judge_root(repo, cache, root):
+def judge_root(repo, cache, root, facts=None):
     roots, files = recipe.load_admit(repo), recipe.tracked(repo)
     try:
         rec = recipe.load_recipe(repo, roots, root)
@@ -87,7 +102,7 @@ def judge_root(repo, cache, root):
     if res["status"] != "green":
         return 1, 0, [root + ":build"], "build %s" % res["status"]
     objs = [(root + "/" + o["unit"], o["object"]) for o in res["objects"] if o["unit"].endswith(recipe.CXX_EXT)]
-    return judge_objects(objs)
+    return judge_objects(objs, facts)
 
 
 def main():
@@ -99,8 +114,14 @@ def main():
         u = c = 0
         ids, why = [], []
         roots = gate_argorder.native_guest(repo)
+        try:
+            facts = factcache.Facts(repo, os.environ.get("GATE_CACHE"), "abi", "ports/fnv-nx/verify/gate_abi.py")
+        except factcache.ClosureError as e:
+            roots, facts = [], None
+            why.append(str(e)[:600])
+            u, c, ids = 1, 0, ["gate:closure"]
         for r in roots:
-            ru, rc, rids, rd = judge_root(repo, cache, r)
+            ru, rc, rids, rd = judge_root(repo, cache, r, facts)
             u, c, ids = u + ru, c + rc, ids + rids
             if rc != ru:
                 why.append("%s: %s" % (r, rd))
@@ -112,7 +133,7 @@ def main():
            "uncertified": sorted(ids)[:50], "detail": detail[:900]}
     with open(os.path.join(os.environ["GATE_OUT"], "abi.json"), "w") as f:
         json.dump(res, f, sort_keys=True)
-    print("abi: %s %d/%d %s" % (res["status"], c, u, detail[:200]))
+    print("abi: %s %d/%d %s%s" % (res["status"], c, u, detail[:200], " [%s]" % facts.stats() if facts else ""))
     return 2 if why else 0
 
 

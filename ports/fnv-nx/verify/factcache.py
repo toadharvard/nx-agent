@@ -3,7 +3,7 @@
 reads its cached facts and does not recompute). stdlib + importclosure; python3 -I.
 
     f = Facts(repo, cache, gate, entry)        ENTRY: repo-relative .py file of the gate (its import closure is the code part of every key)
-    f.get(parts, compute) -> the JSON value   PARTS: JSON-able content digests of the inputs of one fact (sha256 of object bytes, flags ...)
+    f.get(parts, compute, keep=None) -> the JSON value   PARTS: JSON-able content digests of the inputs of one fact (sha256 of object bytes, flags ...)
 Key = sha256(closure_key(import closure of ENTRY, the interpreter, the env id), gate, PARTS). The fact is GATE_CACHE/facts/<gate>/<key>.json,
 written atomically (a reader sees all of it or none). COMPUTE() -> JSON-able, a pure function of what the key names: it must give the same value
 with an empty cache (a gate run without GATE_CACHE computes every fact and stores none). The value is returned as stored (JSON round trip),
@@ -54,7 +54,7 @@ class Facts:
     def key(self, parts):
         return digest(self.base, self.gate, parts)
 
-    def get(self, parts, compute):
+    def get(self, parts, compute, keep=None):
         k = self.key(parts)
         path = os.path.join(self.cache, "facts", self.gate, k[:2], k + ".json") if self.cache else None
         if path and os.path.isfile(path):
@@ -67,13 +67,29 @@ class Facts:
                 pass   # a torn or unreadable file is a miss: the fact is computed again and replaces it
         v = json.loads(json.dumps(compute()))
         self.misses += 1
-        if path:
+        if path and (keep is None or keep(v)):   # KEEP(value): a value that is a finding about one run (a mismatch seen once) is not a fact
             os.makedirs(os.path.dirname(path), exist_ok=True)
             fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".tmp")
             with os.fdopen(fd, "w") as f:
                 json.dump(v, f, sort_keys=True)
             os.replace(tmp, path)
         return v
+
+    def path(self, parts):
+        k = self.key(parts)
+        return os.path.join(self.cache, "facts", self.gate, k[:2], k + ".json") if self.cache else None
+
+    def known(self, parts):
+        """a fact of PARTS is stored (and readable)"""
+        p = self.path(parts)
+        try:
+            return bool(p) and os.path.isfile(p) and json.load(open(p)) is not None
+        except (OSError, ValueError):
+            return False
+
+    def put(self, parts, value):
+        """store the fact VALUE of PARTS (a gate that proves it by a run of its own)"""
+        self.get(parts, lambda: value)
 
     def stats(self):
         return "facts %d hit %d computed" % (self.hits, self.misses)
