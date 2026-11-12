@@ -1776,7 +1776,7 @@ point; REACH is in it by its BLR tail) else `error-abi-noreturn`; kind flag: the
 member FLAG, and on EVERY path the definition stores a nonzero constant at that offset through x0 as it was at entry (flag_events: no write of x0 before; the
 ILP32 `mov w0, w0` is no write), directly or through direct calls (BL, tail B) of functions of the same object with x0 unchanged (flag_holds, any depth,
 cycles do not count) else `error-abi-flag` (also without DWARF). STATED SUBSET: a callee in another object is not followed (red, the safe side). Both
-kinds read the code of the object: the compiler's code generation is assumption 1.
+kinds read the code of the object: the compiler's code generation is ASM-001.
 
 (H) EMPTY HANDLERS BY RECORDS. A table of handlers selects functions by their address stored in a data section (an instruction table). A V function
 (empty or constant body) with no constants row is certified iff the root's generated records justify it (`--op-cover FILE --op-syntax FILE --table
