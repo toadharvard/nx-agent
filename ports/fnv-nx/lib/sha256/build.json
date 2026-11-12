@@ -36,9 +36,7 @@
    "-mabi=ilp32"
   ]
  },
- "include": [
-  "ports/fnv-nx/lib/sha256/include"
- ],
+ "include": [],
  "units": "all",
  "external": [
   {
