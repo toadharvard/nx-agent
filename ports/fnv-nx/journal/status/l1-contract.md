@@ -953,3 +953,9 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - The hostapi union rule is ae942a0a5 on claude/fnv-l5-platform-root. L1 has reviewed and accepted it; it goes to the trunk with L5's head.
   - The dshow_filters.cpp vcvtq_s32_f32 finding moves to the MSVC ftoi form (L5 w10) after w22f.
   - L5 w10 runs a warm verdict for the real platform-root red list once (d'), (b'), treehash and abi layout are in.
+
+- 09:44 L5 w10 head 1f37eb85:
+  - pure is 43/43 with contract/treehash.py.
+  - Correction sent: one traversal, walk(root, visit), used by both tree_hash and cas ingest, so they agree by construction rather than by a test.
+  - New L1 class (abi): 7 of 612 shared layouts are uncertified as "same key in two TUs", because the names plugin mangles every anonymous namespace as ?A0x00000000. Rule: an internal-linkage entity has no cross-TU identity, so its key is qualified by the TU. Linkage comes from a compiler bit in the layout fact (type_internal_linkage), never from the name. Owners: L1 w23 (gate) + L2 (fact bit).
+  - w22 runs a warm verdict of 1f37eb85 for L5 on its fresh, pinned machine. w10's machine has GL dev packages outside the pin and the purge was denied there.
