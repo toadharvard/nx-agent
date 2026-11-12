@@ -12,7 +12,7 @@ M = 0xffffffff
 OK = ['stack:v:', 'this:i:i', 'this:q:i,q,f,d', 'fast:i:i,i', 'fast:i:i,q,i,i', 'stack:a8:i', 'stack:a12:i', 'stack:a16:', 'stack:a8hf:', 'stack:a8hd:', 'stack:a16hd:', 'stack:a12hf:i',
       'stack:m20:s4r', 'stack:m4:', 'this:m12:i,q', 'stack:f:s8hf,s16hd,s24hd,s32hd,s3g,s16g', 'stack:d:s100r', 'stack:a3:i', 'stack:a1:', 'this:v:i']
 BAD = ['', 'stack', 'stack:v', 'stack:v:i:i', 'pascal:v:', 'stack:x:', 'stack:v:z', 'stack:a17:', 'stack:a0:', 'stack:aN:', 'stack:m0:', 'stack:v:s0g', 'stack:v:s17g', 'stack:v:s6hf',
-       'stack:v:s20hf', 'stack:v:s40hd', 'stack:a12hd:', 'stack:v:s8', 'stack:v:s8x', 'stack:v:s-8g', 'this:v:', 'this:v:q', 'this:v:f,i', 'fast:m20:i,i', 'fast:a12:i', 'stack:v:i,',
+       'stack:v:s20hf', 'stack:v:s40hd', 'stack:a12hd:', 'stack:v:s8', 'stack:v:s8x', 'stack:v:s-8g', 'this:v:', 'this:v:q', 'this:v:f,i', 'fast:m20:i,i', 'stack:v:i,',
        'stack:v:,i', 'stack: v:', 'STACK:v:']
 
 
@@ -71,6 +71,17 @@ def main():
     check('a hash collision is a build error', ok)
     t, r = bridgegen.generate([])
     check('the empty set: a table of 8 empty slots, no bridge', r == [] and t.count('{ 0, 0, 0 },') == 8)
+    # MSVC result rules (Microsoft doc "Argument Passing and Naming Conventions"; Agner Fog, Calling conventions, table 7)
+    def parses(d):
+        try: return bridgegen.parse(d)
+        except ValueError: return None
+    check('a8x (a non-POD of 8 bytes): hidden pointer, not registers', parses('stack:a8x:i') and not parses('stack:a8x:i')[3] and parses('stack:a8:i')[3])
+    check('a12 under fast: the hidden pointer is on the stack (PS), allowed', parses('fast:a12:i,i') is not None)
+    check('a non-POD result under fast: the register is not documented, error', parses('fast:a8x:i') is None and parses('fast:m20:i') is None)
+    check('x on a scalar result is an error', parses('stack:ix:') is None)
+    check('element codes hq hh hv8 hv16 parse, an undivided size does not', all(parses('stack:v:s%d%s' % x) for x in ((16, 'hq'), (4, 'hh'), (16, 'hv8'), (32, 'hv16'))) and parses('stack:v:s12hq') is None and parses('stack:v:s40hd') is None)
+    t, r = bridgegen.generate(['stack:a8x:i', 'stack:v:s16hq'])
+    check('x and hq descriptors generate bridges', len(r) == 2)
     print('bridgegentest: %d failed' % bad); sys.exit(1 if bad else 0)
 
 

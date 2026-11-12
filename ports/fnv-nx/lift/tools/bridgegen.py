@@ -76,6 +76,8 @@ def parse(desc):
     p = desc.split(':')
     if len(p) != 3 or p[0] not in ('this', 'fast', 'stack'): raise ValueError('not conv:ret:args with conv this, fast or stack')
     conv, r, a = p
+    xmem = r[-1:] == 'x'                  # the x86 callee returns through the hidden pointer whatever the size (a type that is not a POD): the AAPCS side is in registers
+    if xmem: r = r[:-1]
     if r in ('v', 'i', 'q', 'f', 'd'): ret = (r, 0, 0, 0)
     elif r[:1] == 'm': ret = ('m', _size(r, 1), 0, 0)
     elif r[:1] == 'a' and _hsuf(r)[0]:
@@ -97,8 +99,11 @@ def parse(desc):
             args.append(('g', n, 0, 0))
         else: raise ValueError('bad argument class %r' % t)
     if conv == 'this' and (not args or args[0][0] != 'i'): raise ValueError('this-call whose first argument is not `i`')
-    reg_ret = ret[0] in ('v', 'i', 'q', 'f', 'd') or (ret[0] in ('a', 'h') and ret[1] in (1, 2, 4, 8))
-    if not reg_ret and conv == 'fast': raise ValueError('a result in memory under fast: the register of the hidden pointer is not defined')
+    if xmem and ret[0] not in ('a', 'h'): raise ValueError('%r: x on a result that is not an aggregate in registers' % desc)
+    reg_ret = ret[0] in ('v', 'i', 'q', 'f', 'd') or (ret[0] in ('a', 'h') and ret[1] in (1, 2, 4, 8) and not xmem)
+    # documented (Agner Fog, Calling conventions, table 7, Microsoft 32 bit): a result too big or of a size that is no power of two (PS) has its hidden pointer on the stack
+    # even under __fastcall; a non-POD result (P) has it "in a register if fastcall", which register the document does not say: that case has no proof yet
+    if not reg_ret and conv == 'fast' and (xmem or ret[0] == 'm'): raise ValueError('a non-POD result under fast: the register of the hidden pointer is not documented')
     return conv, ret, args, reg_ret
 
 

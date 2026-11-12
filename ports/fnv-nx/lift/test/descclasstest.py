@@ -31,6 +31,10 @@ TYPES = [
     ('bf', 'struct BF { float a; int : 0; float b; };', 'BF'),
     ('ld', 'struct LD { long double a; };', 'LD'),
     ('h2', 'struct H2 { _Float16 a, b; };', 'H2'),
+    ('ct', 'struct CT { CT() : a(0), b(0) {} int a, b; };', 'CT'),
+    ('in', 'struct B0 { int a; }; struct IN : B0 { int b; };', 'IN'),
+    ('vf', 'struct VF { virtual void f(); int a; };', 'VF'),
+    ('mf', 'struct MF { int a, b; int f() { return a; } };', 'MF'),
     ('mix', 'struct MX { float a; int b; };', 'MX'),
     ('i16', 'struct I16 { int a, b, c, d; };', 'I16'),
     ('i20', 'struct I20 { int a, b, c, d, e; };', 'I20'),
@@ -134,6 +138,9 @@ def main():
             elif h: cls = ('h',)
             else: cls = ('g',)
             ok = cls == want or (cls == ('m',) and want == ('g',) and kind == 'r') or (got.endswith('r') and kind == 'a' and want == ('g',))
+            # MSVC: a type that is not a POD is not returned in registers (documents cited in the plugin): x on the result, never on an argument
+            nonpod = n in ('ct', 'in', 'vf')
+            if kind == 'r' and got[:1] == 'a': ok = ok and got.endswith('x') == nonpod
             check('%s %s' % ('argument' if kind == 'a' else 'result', n), ok, 'descriptor %s, the compiler uses %s' % (d1, want))
     print('descclasstest: %d failed' % bad); sys.exit(1 if bad else 0)
 
