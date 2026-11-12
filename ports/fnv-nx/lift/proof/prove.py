@@ -83,10 +83,18 @@ def check(conds, assume, args):
         s.pop()
     return z3.unsat, s
 
+def _nodes(roots):
+    seen, st = set(), list(roots)
+    while st:
+        n = st.pop()
+        if id(n) in seen: continue
+        seen.add(id(n)); yield n; st.extend(n.a)
+
 def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     """-> (result, note, certificate extras).  Shape proofs (shapeprove.py) pass pre = a pre-state with a symbolic eip, model = a thunk returning the model
     post-state of the shape, fields = {name: (offset, size)} of the symbolic encoding bytes (z3 variables fld_<name>, free = universally quantified)"""
     pre = PRE if pre is None else pre
+    model_sail.SYMSEL = any(n.op == 'var' and n.x.startswith('sel_') for n in _nodes(F.roots()))
     base = getattr(mod, 'FAULT_OK_ORIG', None) or set(mod.FAULT_OK); mod.FAULT_OK_ORIG = base; mod.FAULT_OK = Perm(base, {k for k, _ in F.faults}) if F.faults else base
     M = model() if model else mod.model_post(code, pre); memo = {}; domain = M.pop('domain', z3.BoolVal(True)); complete = M.pop('complete', True)    # domain: restriction of the pre-state by construction (shape runs: eip range), not a model fault
     M = {k: (rewrite.narrow_div(v, memo) if not isinstance(v, dict) else {n: rewrite.narrow_div(t, memo) for n, t in v.items()}) for k, v in M.items()}

@@ -1,4 +1,5 @@
 """Moves, conversions, stack, EFLAGS and string families (see forms.py)."""
+from fnvlift import dsl
 from fnvlift.dsl import REGS, C, V, ashr, bit, concat, eq, extract, ite, load, msb, sext, trunc, ult, zext
 from proof.forms import AReg, Op, cond, ea, handler, pzs, rd, store_op, wr
 
@@ -43,7 +44,10 @@ def xlat(c):
 def push(c):
     """SDM PUSH: operand size 32, or 16 under the 0x66 prefix (ESP - 2, a 16-bit store; the stack address size is SS.B = 32, the 0x67 prefix does not change it).
     The value of a register operand is its pre-state value (PUSH ESP / SP pushes the value before the decrement)."""
-    F, o = c.F, c.ops[0]; w = 16 if c.o16 else 32; v = rd(o, w)
+    F, o = c.F, c.ops[0]; w = 16 if c.o16 else 32
+    if o.k == 'r' and o.name in dsl.SEGS:      # PUSH Sreg: ESP -= operand size, a 16-bit store of the selector; the upper half of a 32-bit slot is NOT written (pinned model x86-push-segment-register: 'a 16-bit move, leaving the upper portion of the stack location unmodified')
+        F.reg('esp', V('esp', 32) - w // 8); F.store(V('esp', 32) - w // 8, V('sel_' + o.name, 16)); return
+    v = rd(o, w)
     F.reg('esp', V('esp', 32) - w // 8); F.store(V('esp', 32) - w // 8, v)
 @handler('pop')
 def pop(c):

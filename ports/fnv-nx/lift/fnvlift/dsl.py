@@ -200,10 +200,11 @@ template<class T> static inline T shl_(T a, T c, unsigned w) { return c >= w ? (
 template<class T> static inline T lshr_(T a, T c, unsigned w) { return c >= w ? (T)0 : (T)(a >> c); }
 template<class T> static inline T ashr_(T a, T c, unsigned w, T m) { T s = (a >> (w - 1)) & 1; if (c >= w) return s ? m : (T)0; T r = a >> c; if (s) r |= m ^ (m >> c); return r; }
 '''
-XIN = ('df', 'flo', 'fs_base', 'gs_base')          # other pre-state: DF (1 bit), the other EFLAGS bits (32, masked), segment bases
+SEGS = ('es', 'cs', 'ss', 'ds', 'fs', 'gs')      # the segment registers in rt/fnvl.h SEG_* order
+XIN = ('df', 'flo', 'fs_base', 'gs_base') + tuple('sel_' + s for s in SEGS)          # other pre-state: DF (1 bit), the other EFLAGS bits (32, masked), segment bases, the six segment selectors (16 bits, = c->sel[SEG_*])
 SIG = ','.join('[[maybe_unused]] u32& ' + r for r in REGS + FLAGS + XIN) + ',u32& eip'
 FAULTS = {1: 'DE', 2: 'BP', 3: 'UD', 4: 'BOUNDS', 5: 'INTO', 6: 'PRIV', 7: 'AV', 8: 'STEP', 9: 'ASSERT', 10: 'DBGSRV', 11: 'INTO_AT1'}
-INW = {'df': 1, 'flo': 32, 'fs_base': 32, 'gs_base': 32}
+INW = {'df': 1, 'flo': 32, 'fs_base': 32, 'gs_base': 32, **{'sel_' + s: 16 for s in SEGS}}
 
 class Form:
     def __init__(s, key, addr, size):
