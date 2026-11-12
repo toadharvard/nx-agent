@@ -10,8 +10,6 @@
  ],
  "result": "gpa.json",
  "covers": [
-  "product-guest",
-  "lifted",
-  "host-product"
+  "linked"
  ]
 }

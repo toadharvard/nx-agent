@@ -10,8 +10,6 @@
  ],
  "result": "n2_vcall.json",
  "covers": [
-  "product-guest",
-  "lifted",
-  "host-product"
+  "linked"
  ]
 }

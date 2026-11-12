@@ -10,8 +10,6 @@
  ],
  "result": "abs.json",
  "covers": [
-  "product-guest",
-  "lifted",
-  "host-product"
+  "linked"
  ]
 }

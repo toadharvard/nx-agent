@@ -109,7 +109,7 @@ def _present_classes(wt):
     """The set of root classes of the admitted roots of the tree under test (gatesdir.root_classes); empty when admit.json is absent."""
     try:
         with open(os.path.join(wt, gatesdir.ADMIT), encoding="utf-8") as fh:
-            return set(gatesdir.root_classes(json.load(fh)).values()) - {None}
+            return set().union(*gatesdir.root_classes(json.load(fh), wt).values())
     except (OSError, ValueError):
         return set()
 

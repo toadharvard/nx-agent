@@ -10,8 +10,6 @@
  ],
  "result": "n2_data.json",
  "covers": [
-  "product-guest",
-  "lifted",
-  "host-product"
+  "linked"
  ]
 }

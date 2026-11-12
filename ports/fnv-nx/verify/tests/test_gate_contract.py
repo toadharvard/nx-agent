@@ -92,7 +92,7 @@ check("quantify: two roots, one red", res[:3] == (5, 4, ["ports/fnv-nx/b:x"]) an
 # an admitted root without its outputs is red with the reason, for every gate; no inputs file at all as well
 admit([{"path": "ports/fnv-nx/p", "class": "product", "recipe": "ports/fnv-nx/p/build.json"}])
 os.makedirs(repo + "/ports/fnv-nx/p")
-rec = {"format": "x"}
+rec = {"format": "x", "link": {"script": "l.ld"}}
 json.dump(rec, open(repo + "/ports/fnv-nx/p/build.json", "w"))
 for g in gc.GATES:
     p, r = run(g)
@@ -102,9 +102,13 @@ open(repo + "/ports/fnv-nx/verify/contract_inputs.json", "w").write(json.dumps(g
 for g, key in (("reach", "reach_requests"), ("reachlink", "reach_requests"), ("gpa", "dynsites")):
     p, r = run(g)
     check("%s: inputs without %s -> red naming it" % (g, key), r["status"] == "red" and "no " + key in r["detail"], r)
-p, r = run("n1")
-check("root without a link -> red", r["status"] == "red" and "links no ELF" in r["detail"], r)
+json.dump(dict(rec, link=None), open(repo + "/ports/fnv-nx/p/build.json", "w"))
+for g in gc.GATES:
+    p, r = run(g)
+    check("%s: a link-null root is outside the universe: 0, green, not red" % g, p.returncode == 0 and r["status"] == "green" and (r["universe"], r["certified"]) == (0, 0), (p.returncode, r))
+check("quantify: a link-null root is not a linked root", gb.linked_roots(repo) == [] and gb.product_roots(repo) == ["ports/fnv-nx/p"])
 json.dump(dict(rec, link={"script": "l.ld"}), open(repo + "/ports/fnv-nx/p/build.json", "w"))
+check("quantify: a root with a link is a linked root (and missing outputs stay red above)", gb.linked_roots(repo) == ["ports/fnv-nx/p"])
 p, r = run("n1")
 check("root without game -> red naming build.json", r["status"] == "red" and '"game"' in r["detail"], r)
 

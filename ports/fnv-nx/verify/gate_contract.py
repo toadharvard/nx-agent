@@ -7,7 +7,7 @@ objfacts, registry, xunit, rtti, pcrel, bodysel), run with the same arguments, i
 their outputs are kept in GATE_CACHE/contract/<key>/ (key = sha256 of contract_inputs.json, the git tree under test and the content of
 the objects and ELF of the root), so the nine gates cost one run of the chain and a cold run gives the same files.
 
-Universe (the convention of build, objstub, linkstrict, determinism: gate_build.quantify): the admitted product roots of admit.json. Every gate is
+Universe (a link-null root, build.json `link` null, is outside it: the contract gates judge a link; gate_build.linked_roots; other gates still cover that root) (the convention of build, objstub, linkstrict, determinism: gate_build.quantify): the admitted product roots of admit.json. Every gate is
 judged on every root and the items are summed; no product root: universe 0, green. A root that is admitted but lacks objects, an ELF, a result
 file or an input is RED with the reason (item `<root>:inputs`), never skipped. Admission (gate_admit rule 3 + REQUIRED_PRODUCT) is what forces
 each of these gates to exist before a root can be admitted.
@@ -26,7 +26,7 @@ Inputs shared by every root (verify/contract_inputs.json, "fnvnx-contract-inputs
   The image set of gpa/reach/reachlink is not an input: contract/images.py derives it (transitive closure of the normal and delay-load import
   directories from the exe, resolved against the files of externals exe and redist). An image without range facts is a red item of those gates.
 A gate whose input is missing is RED with the reason, never skipped: no inputs file, an invalid one, an external that does not fetch or does
-not match its hash, a root that has no link, no "game", does not build or lacks a result file.
+not match its hash, a linked root with no "game", does not build or lacks a result file.
 n2_data n2_call n2_vcall xc (registry.py counts, rows = functions that are not N2): not failures in themselves (the function becomes LIFTED, a
 legal outcome); the invariant that closes the class is that EVERY row is turned into LIFTED by bodysel. Universe = the functions the gate
 judged, certified = judged minus the rows whose address bodysel does not give LIFTED (the function would run a native body that fails its contract)."""
@@ -225,7 +225,7 @@ def main(argv):
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-contract-")
     cache = os.environ.get("GATE_CACHE") or tmp
     try:
-        u, c, ids, detail = gate_build.quantify(repo, lambda root: judge_root(gate, repo, cache, root))
+        u, c, ids, detail = gate_build.quantify(repo, lambda root: judge_root(gate, repo, cache, root), gate_build.linked_roots(repo))
     finally:
         if tmp and not os.environ.get("GATE_KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)

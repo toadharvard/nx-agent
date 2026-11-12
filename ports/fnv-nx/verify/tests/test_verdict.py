@@ -219,7 +219,18 @@ GUEST = {"path": "ports/fnv-nx/platform", "class": "product", "target": "guest"}
 LIFTED = {"path": "ports/fnv-nx/pack", "class": "product", "target": "guest", "cxx_origin": {"lifted_by": "ports/fnv-nx/lift/liftall.py", "pack": "p"}}
 HOSTP = {"path": "ports/fnv-nx/render", "class": "product", "target": "host"}
 check("covers: root classes derive from admit.json", gatesdir.root_classes({"roots": [GUEST, LIFTED, HOSTP, {"path": "d", "class": "doc"}, {"path": "t", "class": "tool"}]})
-      == {"ports/fnv-nx/platform": "product-guest", "ports/fnv-nx/pack": "lifted", "ports/fnv-nx/render": "host-product", "d": "doc", "t": "tool"})
+      == {"ports/fnv-nx/platform": {"product-guest"}, "ports/fnv-nx/pack": {"lifted"}, "ports/fnv-nx/render": {"host-product"}, "d": {"doc"}, "t": {"tool"}})
+def covers_linked(name, link, want):
+    r = with_admit([HOSTP])
+    os.makedirs(os.path.join(r, "ports/fnv-nx/render"))
+    json.dump({"format": "x", "link": link}, open(os.path.join(r, "ports/fnv-nx/render/build.json"), "w"))
+    git(r, "add", "-A"); git(r, "commit", "-m", "b")
+    d = tmp("covers"); gp = gates_file(d, [gate("g", universe=0, certified=0, covers=("linked",))]); v = os.path.join(d, "v.json")
+    run_verdict(r, head(r), gp, v)
+    gr = json.load(open(v))["gates"][0]
+    check("covers: " + name, gr["status"] == want, gr)
+covers_linked("a link-null host root is outside `linked`: universe 0 is green", None, "green")
+covers_linked("a host root with a link is `linked`: universe 0 is red", {"script": "l.ld"}, "red")
 covers_case("a covered class present with universe 0 is red", [GUEST], gate("g", universe=0, certified=0, covers=("product-guest",)), "red", "vacuous")
 covers_case("a covered class present with universe 0 is red (one of several classes)", [HOSTP], gate("g", universe=0, certified=0, covers=("product-guest", "host-product")), "red", "host-product")
 covers_case("a covered class present with a universe is green", [GUEST], gate("g", covers=("product-guest",)), "green")

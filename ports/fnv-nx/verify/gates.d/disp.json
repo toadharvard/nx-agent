@@ -10,8 +10,6 @@
  ],
  "result": "disp.json",
  "covers": [
-  "product-guest",
-  "lifted",
-  "host-product"
+  "linked"
  ]
 }

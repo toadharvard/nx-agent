@@ -4,9 +4,11 @@ The gates of a tree are the files of this directory, sorted by name; there is no
 and two branches that add different gates never conflict. The verdict (l1.py) assembles the sorted entries into the canonical gates
 document (format fnvnx-gates/1) of the commit under test; that document is a value in memory and in the verdict's temporary directory,
 never a tracked file.
-`covers` is the set of ROOT CLASSES the gate judges, declared from what the gate reads. The classes of the admitted roots (verify/admit.json)
-are derived by one rule, root_classes: class doc -> doc; class tool -> tool; class product with "target": "host" -> host-product; product
-with a guest target whose "cxx_origin" is {"lifted_by", "pack"} -> lifted; any other product -> product-guest. verdict.py judges a gate
+`covers` is the set of ROOT CLASSES the gate judges, declared from what the gate reads: a class is a predicate over root facts, not a list of
+roots. The classes of the admitted roots (verify/admit.json) are derived by one rule, root_classes: class doc -> doc; class tool -> tool;
+class product with "target": "host" -> host-product; product with a guest target whose "cxx_origin" is {"lifted_by", "pack"} -> lifted; any
+other product -> product-guest; and a product root whose build.json declares a link stage (`link` not null) is also `linked`. The contract
+gates cover `linked`: a link-null root is outside their universe (they judge a link), and the other gates still cover it. verdict.py judges a gate
 red when its `covers` is missing or not a non-empty list of ROOT_CLASSES, and red when its universe is 0 while an admitted root of a covered
 class exists (a gate that judges nothing where there is something to judge is not green: no vacuous green); with no root of a covered
 class and universe 0 it is green. Proof: the universe of every gate is counted from the roots it reads, so universe 0 with a covered root
@@ -20,7 +22,7 @@ DIR = TREE + "/verify/gates.d"
 ADMIT = TREE + "/verify/admit.json"
 FILE_FORMAT = "fnvnx-gatefile/1"
 FORMAT = "fnvnx-gates/1"
-ROOT_CLASSES = ("doc", "tool", "product-guest", "lifted", "host-product")
+ROOT_CLASSES = ("doc", "tool", "product-guest", "lifted", "host-product", "linked")
 
 
 class Bad(ValueError):
@@ -40,9 +42,27 @@ def root_class(root):
     return "lifted" if isinstance(o, dict) and "lifted_by" in o else "product-guest"
 
 
-def root_classes(admit):
-    """{root path: root class} of a parsed admit.json."""
-    return {r["path"]: root_class(r) for r in admit.get("roots", []) if isinstance(r, dict) and isinstance(r.get("path"), str)}
+def has_link(repo, path):
+    """The root fact `linked`: the root's build.json declares a link stage (`link` is not null). A root without build.json has none."""
+    try:
+        with open(os.path.join(repo, path, "build.json"), encoding="utf-8") as fh:
+            return bool(json.load(fh).get("link"))
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def root_classes(admit, repo=None):
+    """{root path: set of root classes} of a parsed admit.json: the one class of root_class, plus `linked` for a product root whose
+    build.json (read under REPO) has a link stage. A class is a predicate over root facts, so a gate covers the roots that satisfy it."""
+    out = {}
+    for r in admit.get("roots", []):
+        if isinstance(r, dict) and isinstance(r.get("path"), str):
+            c = root_class(r)
+            s = {c} if c else set()
+            if c in ("product-guest", "lifted", "host-product") and repo is not None and has_link(repo, r["path"]):
+                s.add("linked")
+            out[r["path"]] = s
+    return out
 
 
 def parse_entry(name, text):
