@@ -175,6 +175,11 @@ static bool elem_code(machine_mode m, std::string &c)
 }
 
 /* "" (general registers or stack), or the element code of the vector registers rtx `r` lives in; false: a mode with no code */
+/* the descriptor of a call site is a build error when its types have no shape; the descriptor of a definition is a fact that exists only for the types that have one:
+ * a definition whose type has no shape (a static helper with a 128-bit result) cannot be the target of an exit bridge, so it has no row and no diagnostic */
+static int shape_quiet;
+#define shape_err(...) do { if (!shape_quiet) error_at(__VA_ARGS__); } while (0)
+
 static bool reg_class(rtx r, std::string &c, location_t loc)
 {
   c = "";
@@ -184,7 +189,7 @@ static bool reg_class(rtx r, std::string &c, location_t loc)
     for (int i = 0; i < XVECLEN(r, 0); i++) { rtx e = XVECEXP(r, 0, i); if (GET_CODE(e) == EXPR_LIST) e = XEXP(e, 0); if (e && REG_P(e)) { first = e; break; } }
   } else if (REG_P(r)) first = r;
   if (!first || !FP_REGNUM_P(REGNO(first))) return true;
-  if (!elem_code(GET_MODE(first), c)) { error_at(loc, "DISPATCH1: the backend passes a value in vector registers of mode %s, which has no element code", GET_MODE_NAME(GET_MODE(first))); return false; }
+  if (!elem_code(GET_MODE(first), c)) { shape_err(loc, "DISPATCH1: the backend passes a value in vector registers of mode %s, which has no element code", GET_MODE_NAME(GET_MODE(first))); return false; }
   return true;
 }
 
@@ -197,16 +202,16 @@ static bool shape(tree t, bool ret, tree fntype, std::string &out, location_t lo
   if (VOID_TYPE_P(t)) { out += "v"; return ret; }
   if (INTEGRAL_TYPE_P(t) || POINTER_TYPE_P(t) || TREE_CODE(t) == OFFSET_TYPE || TREE_CODE(t) == NULLPTR_TYPE) {
     unsigned p = TREE_CODE(t) == OFFSET_TYPE ? POINTER_SIZE : TYPE_PRECISION(t);
-    if (p > 64) { error_at(loc, "DISPATCH1: a %u-bit integer in an indirect call", p); return false; }
+    if (p > 64) { shape_err(loc, "DISPATCH1: a %u-bit integer in an indirect call", p); return false; }
     out += p > 32 ? "q" : "i"; return true;
   }
   if (SCALAR_FLOAT_TYPE_P(t)) {
-    if (TYPE_PRECISION(t) != 32 && TYPE_PRECISION(t) != 64) { error_at(loc, "DISPATCH1: a floating type of %d bits in an indirect call", (int)TYPE_PRECISION(t)); return false; }
+    if (TYPE_PRECISION(t) != 32 && TYPE_PRECISION(t) != 64) { shape_err(loc, "DISPATCH1: a floating type of %d bits in an indirect call", (int)TYPE_PRECISION(t)); return false; }
     out += TYPE_PRECISION(t) == 32 ? "f" : "d"; return true;
   }
   if (!AGGREGATE_TYPE_P(t) && TREE_CODE(t) != COMPLEX_TYPE && TREE_CODE(t) != VECTOR_TYPE)
-    { error_at(loc, "DISPATCH1: type %qT in an indirect call has no shape", t); return false; }
-  if (!TYPE_SIZE_UNIT(t) || !tree_fits_uhwi_p(TYPE_SIZE_UNIT(t))) { error_at(loc, "DISPATCH1: type %qT has no constant size", t); return false; }
+    { shape_err(loc, "DISPATCH1: type %qT in an indirect call has no shape", t); return false; }
+  if (!TYPE_SIZE_UNIT(t) || !tree_fits_uhwi_p(TYPE_SIZE_UNIT(t))) { shape_err(loc, "DISPATCH1: type %qT has no constant size", t); return false; }
   std::string n = std::to_string((unsigned long)tree_to_uhwi(TYPE_SIZE_UNIT(t)));
   machine_mode mode = TYPE_MODE(t);
   std::string he;
@@ -217,7 +222,7 @@ static bool shape(tree t, bool ret, tree fntype, std::string &out, location_t lo
     bool pod = !(TREE_CODE(t) == RECORD_TYPE || TREE_CODE(t) == UNION_TYPE) || msvc_pod(t);
     bool x86_reg = pod && (sz == 1 || sz == 2 || sz == 4 || sz == 8);
     /* a hidden pointer for a non-POD under __fastcall is in a register that no document names (Agner Fog, table 7): no descriptor, no guess */
-    if (!x86_reg && !pod && !strcmp(conv_of(fntype), "fast")) { error_at(loc, "DISPATCH1: type %qT is a non-POD result under __fastcall: the register of the hidden pointer is not documented", t); return false; }
+    if (!x86_reg && !pod && !strcmp(conv_of(fntype), "fast")) { shape_err(loc, "DISPATCH1: type %qT is a non-POD result under __fastcall: the register of the hidden pointer is not documented", t); return false; }
     out += "a" + n + (x86_reg ? "R" : "H") + (nat_mem ? "m" : he.empty() ? "g" : he); return true;
   }
   CUMULATIVE_ARGS cum;
@@ -279,6 +284,7 @@ static tree descriptor(gcall *call)
  * definition's own, `this` first for a method. */
 static bool def_descriptor(tree decl, std::string &d)
 {
+  struct quiet { quiet() { shape_quiet++; } ~quiet() { shape_quiet--; } } q_;
   location_t loc = DECL_SOURCE_LOCATION(decl);
   tree ft = TREE_TYPE(decl);
   d = std::string(conv_of(ft)) + ":";
