@@ -401,3 +401,6 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - It adds a class `headers` beside the candidate's unit-less product header roots: two forms for one class.
     - Sent to w16 and the L1 lead to reconcile with the orchestrator.
     - render/d3d9 is still blocked (owner L1).
+- 09:16Z L1: 1c59bda9 is not an L1 head and is not taken as a base.
+    - w16 is redoing commit 1 on next3b: generator inputs in the orchestrator's form, plus the header-root rule merged with L5's header-home rule.
+    - render/d3d9 (w6 57051038) goes on the candidate together with it (waiting).
