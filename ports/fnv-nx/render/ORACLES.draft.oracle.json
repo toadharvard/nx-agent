@@ -1,0 +1,106 @@
+{
+ "format": "fnvnx-oracle/1",
+ "tests": {
+  "test_copy.py": {
+   "references": [
+    {
+     "kind": "model",
+     "path": "ports/fnv-nx/tests/l6/copy/t_ref.h"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/render/d3d9/dev/copy_clear.cpp",
+    "ports/fnv-nx/render/d3d9/dev/copy_dc.cpp",
+    "ports/fnv-nx/render/d3d9/dev/copy_misc.cpp",
+    "ports/fnv-nx/render/d3d9/dev/copy_stretch.cpp",
+    "ports/fnv-nx/render/d3d9/dev/copy_update.cpp",
+    "ports/fnv-nx/render/d3d9/dev/copy_util.cpp",
+    "ports/fnv-nx/render/d3d9/dev/glue_buf.cpp",
+    "ports/fnv-nx/render/d3d9/dev/glue_image.cpp",
+    "ports/fnv-nx/render/d3d9/dev/glue_present.cpp",
+    "ports/fnv-nx/render/d3d9/dev/glue_query.cpp",
+    "ports/fnv-nx/render/d3d9/dev/glue_stream.cpp"
+   ]
+  },
+  "test_draw.py": {
+   "references": [
+    {
+     "kind": "model",
+     "path": "ports/fnv-nx/tests/l6/draw/oracle.py"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/render/d3d9/dev/draw_api.cpp",
+    "ports/fnv-nx/render/d3d9/dev/draw_bind.cpp",
+    "ports/fnv-nx/render/d3d9/dev/draw_const.cpp",
+    "ports/fnv-nx/render/d3d9/dev/draw_core.h",
+    "ports/fnv-nx/render/d3d9/dev/draw_exec.cpp",
+    "ports/fnv-nx/render/d3d9/dev/draw_ffp.h",
+    "ports/fnv-nx/render/d3d9/dev/draw_ids.cpp",
+    "ports/fnv-nx/render/d3d9/dev/draw_layout.cpp",
+    "ports/fnv-nx/render/d3d9/dev/draw_prim.cpp",
+    "ports/fnv-nx/render/d3d9/dev/draw_prog.cpp",
+    "ports/fnv-nx/render/d3d9/dev/draw_state.cpp",
+    "ports/fnv-nx/render/d3d9/dev/draw_tex.cpp"
+   ]
+  },
+  "test_ffpdev.py": {
+   "references": [
+    {
+     "kind": "model",
+     "path": "ports/fnv-nx/tests/l6/ffpdev/model.py"
+    },
+    {
+     "kind": "model",
+     "path": "ports/fnv-nx/tests/l6/ffpdev/ref/ffp_vs_ref.c"
+    },
+    {
+     "kind": "model",
+     "path": "ports/fnv-nx/tests/l6/ffpdev/ref/ffp_ps_ref.c"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/render/d3d9/dev/ffp_dev.cpp",
+    "ports/fnv-nx/render/d3d9/dev/ffp_dev.h",
+    "ports/fnv-nx/render/d3d9/dev/ffp_map.cpp",
+    "ports/fnv-nx/render/d3d9/dev/ffp_prog.cpp",
+    "ports/fnv-nx/render/d3d9/dev/ffp_sets.cpp",
+    "ports/fnv-nx/render/d3d9/ffp/ffp_state.c",
+    "ports/fnv-nx/render/d3d9/ffp/ffp_state.h",
+    "ports/fnv-nx/render/d3d9/ffp/ffp_vs_state.c",
+    "ports/fnv-nx/render/d3d9/ffp/ffp_vs_state.h"
+   ]
+  },
+  "test_pvw.py": {
+   "references": [
+    {
+     "kind": "model",
+     "path": "ports/fnv-nx/tests/l6/pvw/oracle.py"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/render/d3d9/dev/pv_exit.cpp",
+    "ports/fnv-nx/render/d3d9/dev/pvw.h",
+    "ports/fnv-nx/render/d3d9/dev/pvw_api.cpp",
+    "ports/fnv-nx/render/d3d9/dev/pvw_core.cpp",
+    "ports/fnv-nx/render/d3d9/dev/pvw_light.cpp",
+    "ports/fnv-nx/render/d3d9/dev/pvw_math.cpp",
+    "ports/fnv-nx/render/d3d9/dev/pvw_stream.cpp"
+   ]
+  },
+  "test_tex.py": {
+   "references": [
+    {
+     "kind": "model",
+     "path": "ports/fnv-nx/tests/l6/tex/texoracle.py"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/render/d3d9/dev/res_create.cpp",
+    "ports/fnv-nx/render/d3d9/dev/res_fmt.cpp",
+    "ports/fnv-nx/render/d3d9/dev/res_surf.cpp",
+    "ports/fnv-nx/render/d3d9/dev/res_tex.cpp"
+   ]
+  }
+ }
+}
