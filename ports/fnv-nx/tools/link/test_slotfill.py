@@ -45,7 +45,7 @@ rest; its exe vftable holds the same bodies. Checks:
   to `__fnv_00401190` - not to the D1 of Hd, which merely shares the ??_G address (the aliasing of the identical-code
   folding picked the wrong body), and without the exe the alias stays (W26);
 * vtmetric.py counts what is left: trap slots 6 (c, d, e in both vtables), 2 of them with a native at the exe slot
-  (c: the abi gap).
+  (c: the abi gap); the full fixture's totals and their derivation are at the vtmetric checks below.
 """
 import os
 import struct
@@ -468,17 +468,32 @@ def main():
         # the exe address (the fixture's 0x4010e0 is also Vk::kp's), and Bd3's slot 0 the exe body no unit compiles
         # R2 (vtgate): a destructor slot that holds the CRT's _purecall (S4's provider) is that provider, not a trap: -1
         # strict deleting_dtor: Bf's unreferenced copy (slot 0 0x4010e0, int3 here) is no longer minus-one: no D1 trap, -1
-        check(st['trap-slots'] == 9 and st['trap-native-at-exe'] == 2 and st['primary-shorter'] == 0,
-              'vtmetric: 9 trap slots left (Sh\'s extension holds one, the unreferenced vftables\' copies three, '
-              'Bd3\'s slot 0), 4 with a native at the exe slot, no short primary (%s)' % dict(st))
+        # Derivation of 9 -> 13 (per-slot rows of vtmetric --rows, before and after the deletion of the CRT provider
+        # `_purecall`, which the fixture used to register at 0x004010e0 in the address map):
+        # the rule is "a virtual slot whose exe address is a native definition in the map binds to it; with no native
+        # at that address and no unit compiling it, the slot is a trap". Four exe slots hold 0x004010e0 and were bound
+        # to the provider, so they were no trap: Vk slot 3 (kp), Pv slot 0 (pa) and the two slots of Bf's unreferenced
+        # copy (__fnvnx_vmo_00fdf640, slots 0 and 1). With the provider deleted nothing is native at 0x004010e0:
+        # these four are traps without a native at the exe slot (+4 trap-no-native, 7 -> 11; of the 11: 9 not
+        # compiled, 2 past the exe slots). The two with a native at the exe slot (Vb::c, Der::c at 0x401030) are
+        # unchanged, so 13 = 9 old + 4 and 2 = 2.
+        check(st['trap-slots'] == 13 and st['trap-native-at-exe'] == 2 and st['trap-no-native'] == 11 and
+              st['primary-shorter'] == 0,
+              'vtmetric: 13 trap slots left (Sh\'s extension one, the unreferenced vftables\' copies three, Bd3\'s '
+              'slot 0, and the four slots at the exe address 0x004010e0 that no native defines any more), 2 with a '
+              'native at the exe slot, no short primary (%s)' % dict(st))
         check(st['slot-mismatch'] == 0 and st['slot-compared'] >= 1,
               'vtmetric: no native slot differs from the exe\'s function (%s)' % dict(st))
         st0 = vtmetric.measure(_link_dir(t, res['none'][0], res['none'][1]), exe)
         check(st0['slot-mismatch'] == 5 and st0['slot-mismatch-pairs'] == 2,
               'vtmetric without the fill: Vh::hh, Vu::hu, Vc::hc and Wh::hw (0x401020 against the exe\'s 0x4011a8) '
               'and Wd\'s hw (against 0x401198) are the mismatches (%s)' % dict(st0))
-        check(st0['trap-slots'] == 19 and st0['trap-native-at-exe'] == 13 and st0['primary-shorter'] == 1,
-              'vtmetric without the fill: 19 / 13, Sh short (%s)'
+        # Without the fill Vk slot 3 (kp, exe address 0x004010e0) is a trap in both states; it counted as having a
+        # native at the exe slot while the provider's row `_purecall` was native at 0x004010e0 and does not now: 13 -> 12
+        # with trap-no-native 6 -> 7, the trap count 19 unchanged. No other row differs (diff of the per-slot rows).
+        check(st0['trap-slots'] == 19 and st0['trap-native-at-exe'] == 12 and st0['trap-no-native'] == 7 and
+              st0['primary-shorter'] == 1,
+              'vtmetric without the fill: 19 / 12, Sh short (%s)'
               % dict(st0))
     print('%d failed' % len(FAILS))
     return 1 if FAILS else 0

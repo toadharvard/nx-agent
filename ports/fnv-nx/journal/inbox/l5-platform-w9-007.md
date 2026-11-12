@@ -8,3 +8,7 @@
 - budget_model.json, hot_rows.json, xthread_defaults.json (константы DEF_* xthread_audit.py) перенесены в fnv-nx-build tables/ (commit 0f3f8dd7, tree 50dc1737…); читатели (hotspot_metric, frame_budget, content_presets, mtmodel, xthread_audit, 4 теста) берут через tools/tables.py (FNVNX_TABLES, sha-пин). Адреса в комментариях mtmodel/xthread_audit убраны.
 - check_regsites.py: адреса синтетического образа, остаются (комментарий добавлен).
 - Тесты perf с unicorn/elftools в контейнере не запускаются (нет модулей); проверены: regsites selftest 21 rows, test_xthread all ok, hotspot_metric работает на пине.
+
+## test_slotfill vtmetric (verified env: setup_verdict_env.sh, envcheck OK)
+- До удаления: 52+2 ok / 0 failed (d52fe657^). После: 13/2 и 19/12. Построчная разница (vtmetric --rows, обе ссылки): 4 новых trap-no-native на exe-адресе 0x004010e0 (бывший _purecall): Vk слот 3, Pv слот 0, копия Bf слоты 0 и 1; в варианте без fill Vk слот 3 из native-at-exe в no-native. Ожидания в тесте исправлены с выводом в комментарии: 54 ok, 0 failed.
+- tests/v1/test_a57_perf_prices.py: KeyError per_call_cycles в p1 — и до моих правок (данные budget_model.json те же sha256 da12363f…); не моё, лиду.
