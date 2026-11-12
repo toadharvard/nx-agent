@@ -123,7 +123,7 @@ fi
 # no sized/aligned-sized deallocation function, and the two places of libstdc++ 13.3's own sources that call one explicitly
 # (src/c++17/fs_path.cc, src/c++17/memory_resource.cc: the sized forms only forward to the unsized one) call the unsized form.
 # One sha256-pinned patch; the pack then calls no sized operator delete, which is what the flag states.
-NOSIZED_PATCH_SHA256=1a05016a200042a7e31b486a0fe0a885dd5dba8ac370d9aefce9744ad4d77980
+NOSIZED_PATCH_SHA256=cb8a51365da7062a063e21a13aa461670f2054c7d9a3a36e6dcfa5cdfe7db204
 if ! step nosized; then
 	echo "$NOSIZED_PATCH_SHA256  $HERE/libstdcxx-nosized.patch" | sha256sum -c --quiet
 	patch -p0 -d "$BUILD" -i "$HERE/libstdcxx-nosized.patch"

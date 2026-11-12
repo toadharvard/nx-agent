@@ -1,3 +1,15 @@
+libstdcxx-nosized.patch - two sized operator delete calls of libstdc++ 13.3.0 become the unsized forms.
+
+Why: the guest compiler runs with -fno-sized-deallocation (guest_compiler.json flags.semantics), under which the sized and
+aligned-sized declarations of operator delete are not declared, so these two call sites do not compile
+(src/c++17/fs_path.cc, the path list deallocation; src/c++17/memory_resource.cc, the new_delete_resource).
+Equivalence: [new.delete.single] and [new.delete.array] define the default sized operator delete(void*, size_t) as
+"calls operator delete(ptr)" (and the aligned-sized form as operator delete(ptr, align)), and the default operator
+delete[](void*, size_t) likewise forwards to operator delete[](ptr). The size argument carries no other effect in the default
+functions, so the unsized call has the same behaviour for the default operators; a user replacement of the unsized form is
+what both calls reach. In memory_resource.cc the aligned case calls the aligned unsized form ([new.delete.single], align_val_t).
+check_mirror.py C6 proves no sized symbol is referenced in the pack.
+
 --- gcc-13.3.0/libstdc++-v3/src/c++17/fs_path.cc
 +++ gcc-13.3.0/libstdc++-v3/src/c++17/fs_path.cc
 @@ -267,7 +267,7 @@
