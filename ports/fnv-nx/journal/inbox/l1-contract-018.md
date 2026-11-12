@@ -34,3 +34,9 @@ Final 2 (w10 finish, lead's decisions applied), measured at code commit 6066375 
 - Records: 48 = 9 OWNER + 39 REMOVE. REMOVE by owner: L1 12, L4 14, L2 5, L3a 3, L6 2, L5 1, L1+L3b 1, L3b+L4 1. By removed_by: gate 3, fact 0, planned 14, no gate yet 22, OPEN 0.
 - Mentions: 92 of 98 certified. Red on 6 mentions that arrived with the trunk (new text of others, no record, none invented): contract/hive.py:17 "regsites.tsv is complete over the exe and the modules", contract/imports.py:13 "objects.json lists every global, weak symbol", verify/TOOLS.md:274 and :360 (copies of those two), verify/RECIPE.md:64 "units.json is ..." and verify/recipe.py:318 "unit_facts is produced from the exe/decomp facts by the generator, not by hand".
 - L1 (verdict at 6066375, env OK): 24 of 26 gates green, 208 s. Red: assumptions (above) and selftests 55/57 (test_argorder, test_guest: need fnv-nx-build access, identical on the trunk).
+
+Final 3 (w10, trunk e35b870 merged), measured at code commit 2f1bbe2:
+- The 6 trunk mentions and the 2 gate_call clauses have L1 records: ASM-051 (regsites.tsv complete, owner L1+L5, planned: gate that every Reg* site's key and value-name are statically resolved), ASM-052 (objects.json lists every global/weak symbol, planned: recipe link check w15), ASM-053 (pristine cl names are the exe's contract, planned: namegate L2), ASM-054 (one entity per decorated name link-wide, planned: a link check; the xc gate judges static initializers only and does not prove uniqueness). The unit_facts mentions went away with the trunk's own rewrite (e35b870).
+- Records: 52 = 9 OWNER + 43 REMOVE. By owner: L1 15, L4 14, L2 5, L3a 3, L6 2, L5 1, L1+L3b 1, L1+L5 1, L3b+L4 1. By removed_by: gate 3, fact 0, planned 18, no gate yet 22, OPEN 0.
+- Mentions: 96 of 96 certified; assumptions gate GREEN.
+- L1: 25 of 26 gates green, 180.5 s. Red: selftests 54/56 (test_argorder, test_guest need fnv-nx-build access; identical on the trunk).
