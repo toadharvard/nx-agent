@@ -97,3 +97,9 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - class `test`, with its own build.json and every product gate plus oracle;
   - it links its product roots' guest objects through link.roots and runs in the L4 boot machine;
   - a symbol no root defines is linkstrict red, blocked by the named owner.
+- 03:00Z render/d3d9 closure, from L6:
+  - fnvnx_wine_fixme → L5 platstat.cpp; fnvnx_reach_violation → L5 (asked).
+  - fnvnx_import_key* → an L1 generated root from contract/iat.py (w16 B).
+  - New headers tree contract/include declares them (w16 A).
+  - D3DX compile-site census per site → w18, for L6 w3b.
+  - Dynamic GetProcAddress sites open: 12, so certificates don't count yet.
