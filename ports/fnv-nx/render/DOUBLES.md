@@ -119,3 +119,15 @@ Map for the render/d3d9 closure at base 24f18cdb (80 undefined names; details in
 - → blocked(L1): **2** (`fnvnx_wine_fixme`, `fnvnx_import_key`); blocked(L3a): **2** (`fnvnx_guest_invoke`, `fnvnx_dispatch`); blocked(L2/L1): **1** (`__aarch64_ldadd4_relax`).
 - → vtables: **48**, blocked(L2) (confirm which root emits them).
 Total 0 + 2 + 16 + 9 + 5 + 48 = 80. Doubles census at this commit: 17 tests, 14 files, 30 distinct symbols, 173 summed (unchanged: no test has been rewritten, because each is blocked as above).
+
+## Recount after w2b (rebased onto claude/fnv-l6-render c84c69f9, which holds 61443784)
+
+`recipe.py build --root ports/fnv-nx/render/d3d9`: green, **70 objects** (ffp_prog.cpp now builds), 1507 defined global symbols. (Measurement note: the include roots shim, render/backend and render/shaders/include are still not admitted; added to admit.json locally for the build only, not committed.)
+Undefined names: **78** (was 80; `nx_ffp_ps_program` and `nx_ffp_vs_program` are now defined inside the root). Per owner:
+- L5 platform: 9 (`nxd3d_gpu_alloc`, `nxd3d_gpu_free`, `nxd3d_dc_create`, `nxd3d_dc_release`, `nxd3d_perf_counter`, `nxd3d_os_cursor_pos`, `nxd3d_window_client`, `nx_env_profile`; plus `nxd3d_gpu_call`, glue L5 / backend L6A). `nx_env_profile` now has its row in dev/platform_hooks.tsv.
+- L1: 2 (`fnvnx_wine_fixme`, `fnvnx_import_key`).
+- L3a: 2 (`fnvnx_guest_invoke`, `fnvnx_dispatch`).
+- L2 / L1: 1 (`__aarch64_ldadd4_relax`).
+- L2: 48 vtable clones.
+- guest libc/libstdc++/crt (L5 / toolchain): 16.
+Total 9 + 2 + 2 + 1 + 48 + 16 = 78. Defined by another root in link.roots: 0. Doubles census (unchanged, no test rewritten): 17 tests, 14 files, 30 distinct symbols, 173 summed.
