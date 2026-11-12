@@ -27,12 +27,19 @@ def bucket(key):
     return int(hashlib.sha256(key.encode()).hexdigest()[:8], 16) % NB
 
 
+PRELUDE_H, EMITTED_TSV, BAD_TSV, UNDEF_TSV = 'inc/fnvl_prelude.h', 'emitted.tsv', 'bad.tsv', 'undef.tsv'
+
+
+def unit_name(i):
+    return 'u/%03x.cpp' % i
+
+
 def unit_names():
-    return ['u/%03x.cpp' % i for i in range(NB)]
+    return [unit_name(i) for i in range(NB)]
 
 
 def outputs():
-    return unit_names() + ['inc/fnvl_prelude.h', 'emitted.tsv', 'bad.tsv', 'undef.tsv']
+    return unit_names() + [PRELUDE_H, EMITTED_TSV, BAD_TSV, UNDEF_TSV]
 
 
 def load_shapes(root):
@@ -130,22 +137,24 @@ def main():
                 continue
             for ad, vi, t in texts:
                 units[b].append(t)
-                emitted.append((s, vi, '%03x' % b, '%08x' % ad))
+                emitted.append((s, vi, unit_name(b), '%08x' % ad))
             n += len(vars_)
     out = a.out
-    os.makedirs(out + '/u')
-    os.makedirs(out + '/inc')
-    with open(out + '/inc/fnvl_prelude.h', 'w') as f:
+    for d in sorted({os.path.dirname(o) for o in outputs() if os.path.dirname(o)}):
+        os.makedirs(os.path.join(out, d))
+    with open(os.path.join(out, PRELUDE_H), 'w') as f:
         f.write(fnvlift.PRELUDE)
     for i in range(NB):
-        with open(out + '/u/%03x.cpp' % i, 'w') as f:
+        with open(os.path.join(out, unit_name(i)), 'w') as f:
             f.write('#include "fnvl_prelude.h"\n' + ''.join(units[i]))
-    with open(out + '/emitted.tsv', 'w') as f:
-        f.write('# shape\tvariant\tbucket\taddress\n' + ''.join('%s\t%d\t%s\t%s\n' % r for r in sorted(emitted)))
-    with open(out + '/bad.tsv', 'w') as f:
+    with open(os.path.join(out, EMITTED_TSV), 'w') as f:
+        f.write('# shape\tvariant\tunit\taddress\n' + ''.join('%s\t%d\t%s\t%s\n' % r for r in sorted(emitted)))
+    with open(os.path.join(out, BAD_TSV), 'w') as f:
         f.write('# shape\tclass\treason\n' + ''.join('%s\t%s\t%s\n' % r for r in sorted(bad)))
-    with open(out + '/undef.tsv', 'w') as f:
+    with open(os.path.join(out, UNDEF_TSV), 'w') as f:
         f.write('# mnemonic\tflag (the form declares it undefined, the hand handler assigns it)\n' + ''.join('%s\t%s\n' % (m, fl) for m in sorted(undef) for fl in sorted(undef[m])))
+    written = sorted(os.path.relpath(os.path.join(d, n), out) for d, _, fs in os.walk(out) for n in fs)
+    assert written == sorted(outputs()), 'files written differ from outputs()'
     print('shapes %d emitted %d (functions %d) bad %d' % (len(keys), len({e[0] for e in emitted}), len(emitted), len(bad)))
 
 
