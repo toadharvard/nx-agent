@@ -95,12 +95,20 @@ def main():
     if fails: return 1
     wv = sh(["wine", "--version"]).stdout.strip(); dp = sh(["dpkg-query", "-W", "-f", "${Package}:${Architecture} ${Version}\\n", "wine", "wine32:i386", "libwine:i386", "libgl1-mesa-dri:i386",
                                                               "libglx-mesa0:i386", "libllvm20:i386", "xvfb"]).stdout
+    # the toolchain that built the two Windows binaries: every installed mingw-w64 package (gcc, g++, binutils, headers, crt) by package and version,
+    # and the version lines of the driver and the linker; no line means no pin, so no ENV_PIN (the probe would not be reproducible)
+    mg = sh(["dpkg-query", "-W", "-f", "${Package}:${Architecture} ${Version}\\n", "gcc-mingw-w64-*", "g++-mingw-w64-*", "binutils-mingw-w64-*", "mingw-w64-*"]).stdout
+    tc = [sh([c, "--version"]).stdout.splitlines()[:1] for c in ("i686-w64-mingw32-gcc", "i686-w64-mingw32-g++", "i686-w64-mingw32-ld")]
+    if not mg.strip() or not all(tc): print("make_env: FAILED: the mingw-w64 packages / tool versions cannot be read, the binaries would have no pinned toolchain"); return 1
+    bindir = os.environ.get("D9ENV_BIN", W + "/bin"); os.makedirs(bindir, exist_ok=True)   # the two binaries, archived by the caller in fnv-nx-build tools/envprobe-bin
+    for b in (W + "/run/envprobe2.exe", W + "/run/d3d9.dll"): shutil.copy(b, os.path.join(bindir, os.path.basename(b)))
     cpu = [l.split(":", 1)[1].strip() for l in open("/proc/cpuinfo") if l.startswith("model name")][:1]
     L = ["ENV_PIN: the pinned recording environment of render/d3d9/env/env_*.tsv (written by tests/l6/env/make_env.py; do not edit)",
          f"wine --version: {wv}", "packages (dpkg):", *["  " + l for l in dp.splitlines()], f"host cpu (llvmpipe vector width follows it): {cpu[0] if cpu else '?'}",
          "renderer: LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe (Mesa 25.2.8, LLVM 20.1.2 as the GL strings below say); Wine renderer = OpenGL (wined3d default)",
          "display: Xvfb <display> -screen 0 WxHx24 -nolisten tcp -noreset (no window manager, no RANDR mode list beyond the screen: one mode)", f"emulated video memory: HKCU\\Software\\Wine\\Direct3D\\VideoMemorySize = {VIDMEM_MB} (MiB)",
-         f"recorder d3d9.dll sha256 {sha(W + '/rec/d3d9.dll')}", f"envprobe2.exe sha256 {sha(W + '/run/envprobe2.exe')}", f"query list: {envq.count()} queries (envq.py), {len(envq.FMT)} formats"]
+         "build toolchain (dpkg): ", *["  " + l for l in mg.splitlines()], *["  " + x[0] for x in tc],
+         f"recorder d3d9.dll sha256 {sha(W + '/rec/d3d9.dll')}", f"envprobe2.exe sha256 {sha(W + '/run/envprobe2.exe')}", "both binaries archived in fnv-nx-build tools/envprobe-bin (the files of D9ENV_BIN: d3d9.dll, envprobe2.exe)", f"query list: {envq.count()} queries (envq.py), {len(envq.FMT)} formats"]
     for name, p in pin.items():
         L += [f"profile {name}: screen {p['w']}x{p['h']}x24, {p['rows']} answer rows, env_{name}.tsv sha256 {p['sha']}, recorded stream {p['stream']} records"] + ["  GL: " + g for g in p["gl"]]
     L += ["registry HKCU\\Software\\Wine (reg query /s, last profile):"] + ["  " + l for l in next(reversed(pin.values()))["reg"][:60]]

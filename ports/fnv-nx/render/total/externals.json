@@ -48,6 +48,46 @@
    "at": "/wine-wined3d",
    "upstream": "https://gitlab.winehq.org/wine/wine.git tag wine-9.0 fd1153552d779e1ac14b0b1c48fbd1cde894eb0a (dlls/wined3d/glsl_shader.c, shader.c, shader_sm1.c, wined3d_private.h)",
    "use": "reference implementation for translator semantics (owner decision: Wine 9.0 is the accepted reference), not a build input"
+  },
+  {
+   "name": "wine-9.0",
+   "repo": "fnv-nx-build",
+   "ref": "tools/wine-9.0",
+   "commit": "c8373ee49fb674f3fe535904d24c5670513c56e1",
+   "tree_sha256": "3ac9a4a08e2692795769c34c62071796084c642ccca4e611684b1e79fe8b4e84",
+   "at": "/wine-9.0",
+   "upstream": "https://gitlab.winehq.org/wine/wine.git tag wine-9.0 fd1153552d779e1ac14b0b1c48fbd1cde894eb0a (the whole git tree, via github.com/wine-mirror/wine; MIRROR.md in the branch)",
+   "use": "citation source of the render tests and of verify/wine_fixme.tsv (wine-9.0:<path>:<line>), read-only, not a build input"
+  },
+  {
+   "name": "docs-d3d9",
+   "repo": "fnv-nx-build",
+   "ref": "tools/docs-d3d9",
+   "commit": "56908b51d5574192e55c268f90bb04a5e7da01c7",
+   "tree_sha256": "e19cab4c7e63bc4c7e98f6f6eab4464fd17c9e253c197e22e146138b3c667b79",
+   "at": "/docs-d3d9",
+   "upstream": "MicrosoftDocs/sdk-api @ 656e9656bfaef34dd29cd7ee9e1146aec17e924c (d3d9, d3d9caps, d3d9helper) and MicrosoftDocs/win32 @ bc82a65f74ef2c4f2f44a3d7db5f7cfebfdc3583 (desktop-src/direct3d9), 1987 pages, MANIFEST.tsv = URL, source commit, retrieval date 2026-11-12, sha256 per page. Not in either repository: the page of IDirect3DSwapChain9Ex::GetPresentStats",
+   "use": "citation source of the MS-class render tests, read-only, not a build input"
+  },
+  {
+   "name": "libnx",
+   "repo": "fnv-nx-build",
+   "ref": "tools/libnx",
+   "commit": "518bf11ad6a52149e43fbd0fa83b0087a430f446",
+   "tree_sha256": "28642e369e75dfe075aac6ee427a82ee9e0cbbe6941be36b0e977da3c96d9298",
+   "at": "/libnx",
+   "upstream": "switchbrew/libnx (pin by L6A)",
+   "use": "reference of the deko3d / libnx call contracts of the dk tests (external kind: pinned header + path)"
+  },
+  {
+   "name": "deko3d",
+   "repo": "fnv-nx-build",
+   "ref": "tools/deko3d-373bfd43d8b2",
+   "commit": "efc4858975273ddae82c03745e5c2d8b2bdda893",
+   "tree_sha256": "5a51dcc3f4b66baef807a77c18b80366fee145031946e3973b4adbd8ed32defe",
+   "at": "/deko3d",
+   "upstream": "devkitPro/deko3d (pin by L6A)",
+   "use": "reference of the deko3d call contracts of the dk tests (external kind: pinned header + path)"
   }
  ]
 }
