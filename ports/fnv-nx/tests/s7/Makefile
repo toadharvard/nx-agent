@@ -18,7 +18,7 @@ CFLAGS_ := -std=gnu11 $(FLAGS)
 CXXFLAGS_ := -std=gnu++17 $(FLAGS)
 
 S4_C := $(HP)/os/os_posix.c $(P)/os/os_world.c $(wildcard $(P)/crt/*.c)
-S4_CXX := $(P)/clock/clock_rt.cpp $(P)/clock/clock_real.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(wildcard $(P)/crt/*.cpp)
+S4_CXX := $(HP)/win32/filemap_shared.cpp $(P)/clock/clock_rt.cpp $(P)/clock/clock_real.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(wildcard $(P)/crt/*.cpp)
 S7_CXX := $(P)/com/combridge.cpp $(P)/com/combridge.gen.cpp $(P)/com/combridge_exports.gen.cpp $(wildcard $(P)/audio/*.cpp) $(filter-out %/input_horizon.cpp,$(wildcard $(P)/input/*.cpp))   # input_horizon.cpp: libnx only (make ilp32)
 S7_HZ := $(HP)/audio/backend_audren.c
 TEST_CXX := $(wildcard $(HERE)/*.cpp) $(ROOT)/tests/s4/host_boundary.cpp
@@ -27,7 +27,7 @@ OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(S4_C) $(S4_CXX) $(S7_CXX) $(TEST_CXX))
 
 # The platform's own sources see the game's callbacks (WNDPROC, ...) as fnvnx_guestfn (shim/include/fnvnx_callback.h:
 # a call goes through the boundary, a direct call does not compile); the tests are "the game" and keep plain pointers.
-$(filter $(OUT)/platform/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
+$(filter $(OUT)/platform/%.cpp.o $(OUT)/platform_host/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 
 .PHONY: all test vclock ilp32 qemu clean com-spec-check com-nocompile
 all: test

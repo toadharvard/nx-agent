@@ -43,14 +43,14 @@ PLAT_C := $(HP)/os/os_posix.c $(P)/os/os_world.c $(wildcard $(P)/crt/*.c)
 # the clock interface (platform/include/fnvnx_clock.h): clock_rt.cpp is in both, clock_real.cpp is the product's clock; `make vclock`
 # links clock_virtual.cpp instead (the verification mode, definition VC1)
 CLOCK_CXX := $(P)/clock/clock_rt.cpp $(P)/clock/clock_real.cpp
-PLAT_CXX := $(CLOCK_CXX) $(P)/com/combridge.cpp $(P)/com/combridge.gen.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(filter-out %/msvcrt_table.gen.cpp,$(wildcard $(P)/crt/*.cpp)) $(P)/crt/msvcrt_table.gen.cpp $(wildcard $(P)/audio/*.cpp) $(filter-out %/input_horizon.cpp,$(wildcard $(P)/input/*.cpp))   # audio: winmm waveOut* are exports of the table; input: DirectInput, XInput, the keyboard applet (input_horizon.cpp is libnx only)
+PLAT_CXX := $(CLOCK_CXX) $(HP)/win32/filemap_shared.cpp $(P)/com/combridge.cpp $(P)/com/combridge.gen.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(filter-out %/msvcrt_table.gen.cpp,$(wildcard $(P)/crt/*.cpp)) $(P)/crt/msvcrt_table.gen.cpp $(wildcard $(P)/audio/*.cpp) $(filter-out %/input_horizon.cpp,$(wildcard $(P)/input/*.cpp))   # audio: winmm waveOut* are exports of the table; input: DirectInput, XInput, the keyboard applet (input_horizon.cpp is libnx only)
 TEST_CXX := $(filter-out %/host_section.cpp,$(wildcard $(HERE)/*.cpp)) $(HERE)/m32/host_input.cpp   # host_input.cpp: the host has no polled input source (input_horizon.cpp is libnx only)   # the host section services belong to the private binary only
 
 OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
 
 # The platform's own sources see the game's callbacks (WNDPROC, ...) as fnvnx_guestfn (shim/include/fnvnx_callback.h:
 # a call goes through the boundary, a direct call does not compile); the tests are "the game" and keep plain pointers.
-$(filter $(OUT)/platform/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
+$(filter $(OUT)/platform/%.cpp.o $(OUT)/platform_host/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 
 .PHONY: regsites-check all test vclock probe private ilp32 m32 iat device qemu clean gfn-nocompile hostapi-check dynsites-check
 all: test
