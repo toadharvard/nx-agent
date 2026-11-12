@@ -328,6 +328,7 @@
    "used_by": [
     "ports/fnv-nx/journal/inbox/orch-assumptions.md",
     "ports/fnv-nx/journal/status/l3a-lift.md",
+    "ports/fnv-nx/lift/gates/flagcause.py",
     "ports/fnv-nx/lift/gates/gate_flags.py",
     "ports/fnv-nx/verify/RULES.md",
     "ports/fnv-nx/verify/TOOLS.md",
