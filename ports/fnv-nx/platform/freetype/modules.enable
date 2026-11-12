@@ -1,0 +1,5 @@
+# The platform's declared FreeType module set, in the syntax of FreeType's own modules.cfg. The generator reads /ext/freetype/modules.cfg and then
+# these lines (make's `+=` order); the modules that result are the build's modules. TrueType GX/AAT and OpenType table validation: the modules the
+# declared machine's FreeType (the Wine 9.0 / Debian package set the game was run with) carries and the exe's text path may reach.
+AUX_MODULES += gxvalid
+AUX_MODULES += otvalid
