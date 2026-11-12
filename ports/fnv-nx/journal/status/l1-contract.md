@@ -670,3 +670,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - New recipe rule (orchestrator): a unit-less header root is includable by any target and compiles under the includer's flags; its headers include only standard headers, other header roots or externals; checked from the PP read sets. Owner w16, after w19 and w17, together with L5's duplicate-include-path check.
 - L6 render/d3d9 blocker (recipe.py:517 refuses generator inputs that are tracked files of another root): decided. One rule, visible(R, file) = own files | unit-less header roots | includable same-target product roots | externals. It serves both the PP read check and generator inputs (read-only, content in the key; `uses` only for generated files). Owner w16, first item.
 - ASM-231 removed_by: planned, an alignment fact for every locked operand (locksites + points-to offsets, L3a w4). ASM-230 also covers lift/test/fmathtest.py:454.
+
+## 11:20Z
+- Trunk a5c8f427 (83f7504f merged; v6 green, 38 gates, 457 s). Candidate claude/fnv-first-root-next 33c443b5 (legalfix, note018, L3b w2g v2, crt0 c7f3b9d2e, L6 header root 2f1bac09, L3a flags 07ff95cd); v7 running.
+- Generator inputs (orchestrator's form, it supersedes my visibility restriction): any tracked file of an admitted root, declared, read-only, content-keyed; `uses` only for generated outputs; a path outside all roots is red. PP reads keep the header-root rule. w16, one commit on 33c443b5. L6 d3d9 head w6 4f5be583 (gate_admit 1041/1041) waits only on this.
