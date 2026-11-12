@@ -137,3 +137,8 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - the probe binaries are not byte-reproducible (two builds give two sha256): find the cause and fix it;
     - delete the tracked partial copy of shim d3d9.h (rec/d9_validator_compat.h) and generate it at build time instead.
   - Merge after both.
+- 03:31Z b# ALU source (3 sm_table rows: vs_2_0, vs_2_x, vs_3_0 `mov r0, b0`), w3b at 65f7c6b.
+  - The proof of unreachability is not available. The precompiled set has 0 uses (15791 shaders), but D3DXCompileShader at be1387/be1b2e is reached with an open source value set, and 12 gpa + 3 LoadLibrary sites are open (L1 w18), so no certificate exists.
+  - Lead decision, per the orchestrator's rule (proof, otherwise Wine-observable behaviour): step 2 now, as a full implementation of the form whether or not it is reached.
+    - w3b traces Wine 9.0 (tools/wine-9.0 c8373ee4) from CreateVertexShader through GLSL compile/link to the draw, citing file:line, and implements exactly what it shows.
+    - It applies to the whole class of SM forms whose GLSL link fails, not only the 3 rows.
