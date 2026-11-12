@@ -80,6 +80,14 @@ extern "C" void fnvnx_wine_fixme(uint32_t id)
     fnvnx_plat_note(FNVNX_PLAT_UNIMPL, "wine-fixme", FNVNX_PLAT_RA, d);
 }
 
+/* The citation function of the declared-machine bodies (verify/VERDICT.md "Declared-machine bodies", verify/declared_machine.tsv): a body that
+ * answers from the declared machine (no network, fixed time zone, registry values, no Galaxy) calls it with the id of its row. It writes nothing
+ * and returns: the gate reads the call, the body's result is the row's value. */
+extern "C" void fnvnx_declared_machine(uint32_t id)
+{
+    (void)id;
+}
+
 extern "C" void fnvnx_plat_note(int cls, const char *name, unsigned caller, const char *detail)
 {
     if (!fnvnx_plat_on || cls < 0 || cls >= FNVNX_PLAT_NCLASS || !name)

@@ -1,0 +1,11 @@
+# id	contract_name	fact	source	kind	value
+# fact: no-network | time-zone | registry | no-galaxy (CLAUDE.md "The declared machine"; no-galaxy: Owner order of 2026-11-11, 23:00, GOG Galaxy is not lifted); source: win-doc:<documentation page or header path>:<function> | wine-9.0:<path>:<function> | galaxy-sdk:<Steamworks/Galaxy SDK doc page or header>:<function>; kind void|u32|u64|addr|u32nz<N> as in wine_fixme.tsv
+# rows come from the platform owner (L5) with the body that cites them; see VERDICT.md "Declared-machine bodies"
+# registry rows are never written by hand: the L5 tool derives them from the static Reg* reads of the exe and modules; hand-written rows are machine facts only (no-network, time-zone) with their source
+100	SteamAPI_Init	no-galaxy	galaxy-sdk:partner.steamgames.com/doc/api/steam_api#SteamAPI_Init:SteamAPI_Init	u32	0
+101	SteamAPI_IsSteamRunning	no-galaxy	galaxy-sdk:partner.steamgames.com/doc/api/steam_api#SteamAPI_IsSteamRunning:SteamAPI_IsSteamRunning	u32	0
+102	SteamUser	no-galaxy	galaxy-sdk:partner.steamgames.com/doc/api/ISteamUser:SteamUser	u32	0
+103	SteamFriends	no-galaxy	galaxy-sdk:partner.steamgames.com/doc/api/ISteamFriends:SteamFriends	u32	0
+104	SteamUtils	no-galaxy	galaxy-sdk:partner.steamgames.com/doc/api/ISteamUtils:SteamUtils	u32	0
+105	SteamApps	no-galaxy	galaxy-sdk:partner.steamgames.com/doc/api/ISteamApps:SteamApps	u32	0
+106	SteamUserStats	no-galaxy	galaxy-sdk:partner.steamgames.com/doc/api/ISteamUserStats:SteamUserStats	u32	0
