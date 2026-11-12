@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Generate render/shaders/total/fnvnx_sm_rows.h from sm_table.json (the SM1-3 language definition): one row per command (stage, opcode form).
     python3 -I render/shaders/total/gen_sm_rows.py [--check]      --check: exit 1 if the committed header differs
+    python3 -I render/shaders/total/gen_sm_rows.py TABLE OUT      recipe step: write OUT from TABLE
 build.sh copies the header into the MojoShader clone, where fnvnx_sm_check.h (part of mojoshader.patch) turns every row into static asserts.
 Name mapping: the MojoShader identifier of an opcode is the upper-cased table name, except the two opcodes MojoShader names differently from
 the D3D9 header (D3DSIO_TEXCOORD = TEXCRD, D3DSIO_TEX = TEXLD); the static assert on the opcode value guards the mapping.
@@ -35,6 +36,12 @@ def render(table=None):
 
 
 if __name__ == "__main__":
+    args = [a for a in sys.argv[1:] if a != "--check"]
+    if len(args) == 2:   # recipe step: TABLE OUT (the sandbox mounts this tool read-only)
+        text = render(args[0])
+        os.makedirs(os.path.dirname(args[1]), exist_ok=True)
+        open(args[1], "w").write(text)
+        sys.exit(0)
     text = render()
     path = os.path.join(HERE, "fnvnx_sm_rows.h")
     if "--check" in sys.argv:
