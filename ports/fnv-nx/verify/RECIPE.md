@@ -128,6 +128,21 @@ kind `built`) runs the executable at `/built/<R with / as __>/NAME`, whose loade
 `args`, `inputs` (at `/in/<repo path>`) and `outputs` follow the python rule: it writes only `/out/<output>`, and the set of files it writes must
 equal `outputs` exactly (else red, naming both sets). A cycle between roots is a RecipeError. The outputs are part of the determinism gate's two cold builds.
 
+## Fixtures (`"fixtures"`)
+
+`"fixtures": {"<unit>": {"gate": "<gate>", "expect": "red", "finding": "<finding code>"}}`: a unit that is meant to be rejected by a gate, kept
+beside the code the gate protects so that the gate is known to bite.
+- `<unit>` is a tracked source file of the root (not a generated output). `gate` is a gate of `verify/gates.json`; `expect` is `"red"`.
+- recipe.py builds a fixture like any unit (same flags, same stages, in the same store). It is NOT a unit of the product: `units_of`, `objects`,
+  `defined`/`undefined`, `pp_keys` and the link never hold it; it is refused in `os_layer`, in the link's flags or script and in a generated input.
+  Its object is in `objects.json` under `fixtures` (`unit, gate, expect, finding, object, sha256, pp_key`).
+- Fixture mode: the gate `fixtures` (gate_fixtures.py) runs the named gate's own argv with env `GATE_FIXTURES=1`. Then `gate_build.ensure()` returns each root
+  with its fixture units as its only objects/units (`fixture_view`: no ELF, no constants), so every gate that takes its input from `ensure()` judges the
+  fixtures and nothing else. The gate writes its findings to its result file as `"findings": [{"id": "<root>/<unit>[:<symbol>]", "code": CODE}]`
+  (objstub does; a gate that does not is red for its fixtures).
+- A fixture passes iff its gate reports exactly the declared `finding` on that unit and no other finding there, and no finding on any other item. A fixture
+  that comes out green, or red with another or an additional finding, makes the gate `fixtures` (so the verdict) red. Universe: the fixtures of all roots.
+
 ## Refusal set R (GNU ld option syntax, not a text guess)
 Options that let a link accept missing or substituted symbols: `--unresolved-symbols`, `--allow-shlib-undefined`, `--noinhibit-exec`,
 `--defsym`, `--wrap`, `--allow-multiple-definition`, `--warn-unresolved-symbols`, `-z undefs`, `-z muldefs`. A token is refused when, with one or two
