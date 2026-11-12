@@ -75,7 +75,11 @@ def facts(setfile, out):
 
 
 if __name__ == '__main__':
-    if sys.argv[1] == '--sites':
-        facts(sys.argv[2], sys.argv[3])
-    else:
-        main(*sys.argv[1:])
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import cli
+    U = 'usage: locksites.py EXE RANGES [BASE]   lock-prefix census of the image\n       locksites.py --sites SETFILE OUT   the .fnvl.lk/.fnvl.fsw site facts (SETFILE lines: IMAGE<TAB>RANGES<TAB>BASE)'
+    pos, o = cli.parse(U, sys.argv[1:], (2, 3), {'--sites': False})
+    if o and len(pos) != 2: cli.parse(U, [], (2, 2))
+    if o: facts(*pos)
+    elif len(pos) < 2 or len(pos) > 3: cli.parse(U, [], (2, 3))
+    else: main(*pos)

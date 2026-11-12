@@ -164,7 +164,9 @@ def check(pack, root):
 
 
 def main(argv):
-    pack, root = argv
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
+    import cli
+    (pack, root), _ = cli.parse('usage: gate_eh.py PACK ROOT   exception-handling gate', argv, (2, 2))
     uni, unc, why, red = check(pack, root)
     nred = sum(len(x) for v in red.values() for x in v.values())
     if why: status, detail = 'red', why

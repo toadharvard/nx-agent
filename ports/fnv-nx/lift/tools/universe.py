@@ -10,6 +10,9 @@ import ehtables, codemap, reconcile, pemod, jtab as JT
 from array import array
 from collections import Counter, deque
 from capstone import x86 as X
+import cli
+USAGE = 'usage: universe.py [--module NAME]   code universe of the exe (FNVNX_EXE) or of the module NAME (a name or file of modules.tsv); env FNVNX_FACTS_OUT, FNVNX_MODULES, FNVNX_MODDIRS'
+if __name__ == '__main__': cli.parse(USAGE, sys.argv[1:], (0, 0), {'--module': True})
 ARGV = sys.argv[1:]; MOD = ARGV[ARGV.index('--module') + 1] if '--module' in ARGV else None; STRICT = MOD is not None   # module mode: pointers are code/data only on evidence
 if STRICT: import modlift; sys.exit(modlift.run(MOD))      # module mode: separate engine (every relocated pointer into executable bytes is an entry)
 EXE = MOD or os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')

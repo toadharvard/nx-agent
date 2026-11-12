@@ -607,5 +607,8 @@ class EH(Flow):
         return L
 
 if __name__ == '__main__':
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import cli
+    cli.parse('usage: ehtables.py [--module NAME]   exception-handling facts of the exe or module (runs tools/universe.py, same environment)', sys.argv[1:], (0, 0), {'--module': True})
     import universe
 
