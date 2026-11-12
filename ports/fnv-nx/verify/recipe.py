@@ -590,7 +590,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             continue
         if not rel_ok(d) or not any(under(d, r) for r in roots):
             err.append("include %r is not a path inside an admitted root or an external's at" % (d,))
-        elif not any(under(d, r) and roots[r].get("class") == "product" and tg in targets_of(roots[r]) for r in roots):
+        elif not under(d, root) and not any(under(d, r) and roots[r].get("class") == "product" and tg in targets_of(roots[r]) for r in roots):
             # one home per header: the headers a product root includes lie in a product root of the same target (covered by its gates through
             # the units that read them), never in a doc or tool root or a root of the other target
             err.append("include %r lies in no admitted product root of target %r (a header dir of a doc or tool root, or of the other target, is no home)"

@@ -44,7 +44,8 @@ def mkrepo(name, libs, extra=None, img=IMG):
         for f, text in fs.items():
             TR.w(repo, path[len(T):] + "/" + f, text)
     if any(p.startswith(T + "hdr") for p in (extra or {})) or any(T + "hdr" in r["include"] for r, _ in libs.values()):
-        adm["roots"].append({"path": T + "hdr", "class": "doc", "gates": []})
+        adm["roots"].append({"path": T + "hdr", "class": "product", "target": "host", "gates": [], "recipe": T + "hdr/build.json"})   # a header home is a product root
+        TR.w(repo, "hdr/build.json", json.dumps(dict(LIB_REC, include=[])))
     for f, text in (extra or {}).items():
         TR.w(repo, f[len(T):], text)
     adm["roots"].sort(key=lambda x: x["path"])
