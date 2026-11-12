@@ -785,14 +785,9 @@ class Job:
         return self.stage(doc)[1]["outputs"]["/out"]
 
 
-def host_compilers(rec, cache):
-    """Host paths of the recipe's (cc, cxx): /usr/bin/NAME, or the paths inside the external compiler tree, checked out (by exact commit,
-    from the bare fetch the build made in CACHE/external) into CACHE/exttree/<commit>. For gates that run the compiler on the host
-    (objstub's terminator plugin); the build itself runs it in the sandbox."""
-    c = rec["compiler"]
-    if "external" not in c:
-        return "/usr/bin/" + c["cc"], "/usr/bin/" + c["cxx"]
-    e = next(x for x in rec["external"] if x["name"] == c["external"])
+def exttree(e, cache):
+    """Host directory of external E (a recipe `external` entry) checked out by its exact commit from the bare fetch the build made in
+    CACHE/external, into CACHE/exttree/<commit> (shared, atomic). For gates that read what a build linked in."""
     dest = os.path.join(cache, "exttree", e["commit"])
     if not os.path.isdir(dest):
         tmp = "%s.tmp%d-%s" % (dest, os.getpid(), os.urandom(4).hex())
@@ -806,6 +801,18 @@ def host_compilers(rec, cache):
             os.rename(tmp, dest)
         except OSError:
             shutil.rmtree(tmp, ignore_errors=True)
+    return dest
+
+
+def host_compilers(rec, cache):
+    """Host paths of the recipe's (cc, cxx): /usr/bin/NAME, or the paths inside the external compiler tree, checked out (by exact commit,
+    from the bare fetch the build made in CACHE/external) into CACHE/exttree/<commit>. For gates that run the compiler on the host
+    (objstub's terminator plugin); the build itself runs it in the sandbox."""
+    c = rec["compiler"]
+    if "external" not in c:
+        return "/usr/bin/" + c["cc"], "/usr/bin/" + c["cxx"]
+    e = next(x for x in rec["external"] if x["name"] == c["external"])
+    dest = exttree(e, cache)
     return os.path.join(dest, c["cc"]), os.path.join(dest, c["cxx"])
 
 

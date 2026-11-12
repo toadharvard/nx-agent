@@ -37,6 +37,9 @@ its objects (relocatable) and of its linked ELF, never a name's text. Rules:
       gate_linkstrict.host_exports and cached by the content of those files (CACHE/hostexports). It mirrors newlib/libnx on the guest
       side: a guest root has no such set, and any other undefined name of a host root stays `undefined`. Not covered (stated): the
       fact is a cached read of the installed packages, not a sandbox stage; a symbol version is not compared, only the name.
+  (f) Flags of foreign objects (a guest root that links an ELF): what the link stage takes from externals (explicit paths, -l through -L) shows in its
+      DW_AT_producer the option set the pinned driver writes for the recipe's semantic set (producers.py): findings `flags-differ`, `no-producer`,
+      `asm-unproven`, `shared-input`, `no-link-stage`. Items: one per foreign object or archive member. Details and limits: producers.py.
 Universe = undefined references + defined global names + contract names + one `<elf>` per linked root (+ a root whose recipe is invalid or
 whose build is red, one uncertified item). Certified = the items with no finding. No product root: universe 0, green.
 NOT EXACT (stated): rule (b) is by name over the objects. A script symbol with hidden visibility (PROVIDE_HIDDEN) is LOCAL in the
@@ -54,6 +57,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gate_build  # noqa: E402
+import producers  # noqa: E402
 import recipe  # noqa: E402
 
 COMMON, GLOBAL, WEAK, UNIQUE, IFUNC = 0xFFF2, 1, 2, 10, 10
@@ -286,6 +290,25 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
     return items, sorted(out)
 
 
+def foreign_flags(root, res, cache, repo):
+    """Rule (f) of ROOT (a guest root that links an ELF): the objects its link stage takes from externals (producers.link_inputs) each show, in their
+    DW_AT_producer, the option set the pinned driver writes for the recipe's semantic set. -> (items [(id, name)], findings)."""
+    roots = recipe.load_admit(repo)
+    rec = recipe.load_recipe(repo, roots, root)
+    doc = None
+    for k in res.get("stage_keys", []):
+        p = os.path.join(cache, "store", "stage-docs", k[:2], k + ".json")
+        if os.path.isfile(p):
+            d = json.load(open(p))
+            if d.get("stage") == "ld:" + root:
+                doc = d
+    if doc is None:
+        return [(root, "<link-stage>")], [(root, "<link-stage>", "no-link-stage", "no ld stage document for the root's link")]
+    at = {e["at"]: recipe.exttree(e, cache) for e in rec.get("external", [])}
+    cc, cxx = recipe.host_compilers(rec, cache)
+    return producers.foreign_items(root, doc, at, {"c": producers.expected(cc, "c"), "cxx": producers.expected(cxx, "cxx")})
+
+
 def main():
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-linkstrict-")
     cache, repo = os.environ.get("GATE_CACHE") or tmp, "."
@@ -307,6 +330,10 @@ def main():
             eid = root + "/" + os.path.basename(res["elf"]["path"]) if res["elf"] else None
             if eid:
                 elfs[eid] = elf_symbols(res["elf"]["path"])
+            if eid and root + "/" in guest:   # rule (f): what an external contributes to the link was built with the one semantic set
+                fitems, ffinds = foreign_flags(root, res, cache, repo)
+                items += fitems
+                finds += ffinds
             if res.get("contract_names"):
                 rows = [l.rstrip("\n").split("\t") for l in open(res["contract_names"]) if l.strip()]
                 if any(len(r) != 2 or not r[0] or not r[1] for r in rows):

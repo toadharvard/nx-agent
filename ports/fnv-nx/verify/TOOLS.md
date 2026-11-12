@@ -1288,6 +1288,9 @@ its objects (relocatable) and of its linked ELF, never a name's text. Rules:
       gate_linkstrict.host_exports and cached by the content of those files (CACHE/hostexports). It mirrors newlib/libnx on the guest
       side: a guest root has no such set, and any other undefined name of a host root stays `undefined`. Not covered (stated): the
       fact is a cached read of the installed packages, not a sandbox stage; a symbol version is not compared, only the name.
+  (f) Flags of foreign objects (a guest root that links an ELF): what the link stage takes from externals (explicit paths, -l through -L) shows in its
+      DW_AT_producer the option set the pinned driver writes for the recipe's semantic set (producers.py): findings `flags-differ`, `no-producer`,
+      `asm-unproven`, `shared-input`, `no-link-stage`. Items: one per foreign object or archive member. Details and limits: producers.py.
 Universe = undefined references + defined global names + contract names + one `<elf>` per linked root (+ a root whose recipe is invalid or
 whose build is red, one uncertified item). Certified = the items with no finding. No product root: universe 0, green.
 NOT EXACT (stated): rule (b) is by name over the objects. A script symbol with hidden visibility (PROVIDE_HIDDEN) is LOCAL in the
@@ -1724,6 +1727,25 @@ is not checked by this tool (at 0b9ad57: test_envcheck.py, test_gates.py, test_o
 A test passes iff it exits 0, undeclared and unopened are empty. The report states these facts per test; it ranks
 nothing and excuses nothing. Exit 0 iff every test passes, 2 otherwise, 1 on a usage or tool error.
 This is a verifier (after-merge, farm/runner.sh job `oraclecheck`), not a gate: it needs strace and runs every test.
+```
+
+## verify/producers.py
+
+```text
+producers.py - rule (f) of gate linkstrict: every object linked into one image was built with ONE semantic flag set.
+Own units are proven by their CC stage documents (gate datamodel: the whole set, in order, per language). What the recipe's link takes from an external
+(a prebuilt object or archive named in the link stage's argv, `-lNAME` through the `-L` directories of that argv) has no stage document of ours; its
+build is read from the object itself: the DW_AT_producer of each compile unit (`readelf --debug-dump=info --dwarf-depth=1`, which applies the
+relocations), the compiler's own record of the options it was run with.
+  EXPECTED, per language (c, cxx): the producer the pinned driver writes for a trivial unit of that language compiled with `-g` and
+  recipe.semantics_for(driver, language) (the set minus what the driver says does not apply), its option tokens minus the per-root classes
+  (recipe.PER_ROOT: -W*, -D*, -std=, -O*, -g*, -ffunction-sections, -fdata-sections). Nothing here is a flag list: the driver renders its own set.
+  A CU is certified iff its option tokens, minus the same per-root classes, equal the expected set of its language; otherwise `flags-differ`
+  (the extra and the missing tokens are the detail). A foreign object with no DW_AT_producer (built without -g) cannot show its flags: `no-producer`.
+  A foreign assembler CU (`GNU AS`) records no options: `asm-unproven`. A foreign shared object in the link: `shared-input`.
+Not covered (stated): every member of a foreign archive is read, not only the members the linker pulls in (conservative: an unused foreign member with
+other flags is a finding); the compiler version and language standard in the producer's head are not compared; an option the compiler does not record
+in the producer (-U_FORTIFY_SOURCE, preprocessor options) is not seen; own units are not read here (their stage documents are the proof).
 ```
 
 ## verify/puregate.py
