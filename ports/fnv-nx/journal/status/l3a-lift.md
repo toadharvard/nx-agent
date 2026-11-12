@@ -288,3 +288,19 @@ Update 2026-11-12, at 698adefb:
 ## 2026-11-12 09:05
 - w8 disptest on lift/bridges: blocked. The root does not exist yet, and its three base lines conflict in L1 files: w14-src, w20-descs (recipe.py/admit.json/RECIPE.md) and int3 (gate_lift.py). Owner: L1, asked for one merged line. The root design is accepted (a bridgegen stage `uses` descs, forbid_sections .fnvnx.disp). fnvl_host.h comes from L5's platform root through a cross-root include, not as a copy. w8 has moved on to the L2 cl-matrix comparison.
 - w8 done: gen.py stdcall/fastcall/thiscall rows d9c91cc0 (disp2), t16c 6b3cb220.
+
+## 2026-11-12 09:10
+- Item 29 (w7, census bb80c6a on facts a0f3d8e, 7 images):
+  - Global counts:
+    - FCW loads: 934 proven-masked / 0 unmasking / 167 unproven;
+    - MXCSR loads: 1 / 0 / 9;
+    - sticky-bit readers: 3 109;
+    - RC at import call sites: 8 505;
+    - import-return start points that reach an escaping reader: 19 897 of 20 566.
+  - Decision: delete OWNER_ASSUMED, the default path and the I-FPMASK / I-FPSTICKY keys. The default is the full x87/SSE guest state:
+    - FCW, the status word with its sticky bits, and MXCSR;
+    - #MF/#XM raised through SEH.
+  - The memory-word value flow and fown/fpreach become static narrowing only, after the first frame unless the budget requires them. The next facts commit stays w7's priority 1.
+- The 3 exe class-3 entries: decided by the class-3 data-pointer rule, in the next facts commit.
+- int3 + w14-src cefa39a3: w6 merges it (6 gate files conflict; verify/gate_lift.py goes to L1). The link.script fix (a) has been asked of w14. w6 has L1's gate_assumptions edits (prove.py :15/:76, shapeprove.py:15).
+- Blocked: w7 waits on pcsrc.run_facts (w4, chased).
