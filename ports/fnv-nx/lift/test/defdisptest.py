@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
-"""defdisptest - .fnvnx.defdisp: one row `<asm name> <descriptor>` per emitted function definition (toolchain/dispatch, the same shape() as the call sites).
-(1) a C++ unit with a method, a virtual method, a __stdcall-style free function, a __fastcall one and a constructor with its two clones (virtual base:
-    C1 and C2 differ) has one row per definition, each with the descriptor its own type gives;
-(2) the section is ASCII, sorted, unique per section, ends in LF (L1's descs parser reads the same form);
+"""defdisptest - .fnvnx.defdisp: one row `<asm name> <descriptor>` per function symbol the object defines (toolchain/dispatch, the same shape() as the call sites).
+(1) a C++ unit at the product's -O2 with a method, a virtual method, a stdcall-style and a fastcall free function, a constructor with its C1/C2 clones
+    (virtual base), a C1/C2 and D1/D2 alias pair (no virtual base), a this-adjusting thunk (_ZThn) and a covariant-return thunk (_ZTc): the rows are
+    EXACTLY the defined function symbols of the object (nm, T/t/W/w), the difference empty in both directions, each with the descriptor its own type gives;
+(2) the section is ASCII, sorted, unique, ends in LF (L1's descs parser reads the same form);
 (3) for every aggregate type of descclasstest.TYPES the definitions a_<n> (argument) and r_<n> (result) get a descriptor whose register class is the one the
-    callee's own compiled body uses (descclasstest.ref_arg / ref_ret: the compiler as reference).
-Run: python3 lift/test/defdisptest.py [--cc <dir of aarch64-linux-gnu-g++>] [--work dir]   exit 0 on pass."""
+    callee's own compiled body uses (descclasstest.ref_arg / ref_ret: the compiler as reference);
+(4) the C++03 POD rule on results (msvc_pod): base class, user ctor / dtor / copy ctor / copy assign, virtual function, member of non-POD class type, array of it
+    are not PODs (hidden pointer: `m<N>` or the `x` mark); a plain aggregate with private members and a member of POD class type are PODs.
+    The expectations are the convention's documents' rule; the cl (VC9) reference run of the same cases is BLOCKED here (no cl in this container).
+Run: python3 -B lift/test/defdisptest.py [--cc <dir of aarch64-linux-gnu-g++>] [--work dir]   exit 0 on pass."""
 import argparse, os, re, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
 import descclasstest as dc
+import bridgegen
 
 UNIT = r'''
 struct VB { int v; };
@@ -19,6 +25,16 @@ C::C(int x) : a(x) { v = x; }
 int C::m(int y) { return a + y; }
 int C::vf() { return a; }
 struct F2 { float a, b; };
+struct NV { NV(int x); ~NV(); int a; };                          // no virtual base: C1 is an alias of C2, D1 of D2 at -O2
+NV::NV(int x) : a(x) {}
+NV::~NV() {}
+struct A1 { virtual int f(); int a; };  struct A2 { virtual int g(); int b; };
+struct MI : A1, A2 { int f(); int g(); };                        // g is reached through a this-adjusting thunk (_ZThn)
+int MI::f() { return 1; }
+int MI::g() { return 2; }
+struct CB { virtual CB *cl(); };  struct CD : A1, CB { CD *cl(); };   // covariant return with a base at an offset: a _ZTc thunk
+CB *CB::cl() { return this; }
+CD *CD::cl() { return this; }
 int __attribute__((fnvnx_cc("stack"))) sc(float x, F2 p) { return (int)x + (int)p.b; }
 int __attribute__((fnvnx_cc("fast"))) fc(int x, int y) { return x + y; }
 '''
@@ -29,20 +45,29 @@ WANT = {
     '_ZN1C2vfEv': 'this:i:i',
     '_ZN1CC1Ei': 'this:v:i,i',          # complete-object constructor
     '_ZN1CC2Ei': 'this:v:i,i,i',        # base-object constructor: the clone's own type has the VTT parameter
+    '_ZN2NVC1Ei': 'this:v:i,i', '_ZN2NVC2Ei': 'this:v:i,i', '_ZN2NVD1Ev': 'this:v:i', '_ZN2NVD2Ev': 'this:v:i',   # alias pairs
+    '_ZThn8_N2MI1gEv': 'this:i:i',
 }
-
-
-def rows(obj, objcopy, out):
-    r = subprocess.run([objcopy, '--dump-section', '.fnvnx.defdisp=' + out, obj, '/dev/null'], capture_output=True, text=True)
-    if r.returncode: return None
-    return open(out, 'rb').read()
+POD_DECLS = r'''
+struct P1 { int a; int b; };
+struct P2 { private: int a; public: int b; };                   // a plain aggregate with private members: a POD
+struct N1 { int a; };  struct Nb : N1 { int b; };                // a base class
+struct Nc { Nc(int x) : a(x) {} int a; int b; };                 // a user constructor
+struct Nd { ~Nd() {} int a; int b; };                            // a user destructor
+struct Na { Na &operator=(const Na &o) { a = o.a; return *this; } int a; int b; };   // a user copy assignment
+struct Nv { virtual void f(); int a; };                          // a virtual function
+struct Nm { Nc c; };                                             // a member of non-POD class type
+struct Nr { Nc c[1]; };                                          // an array of such a member
+struct Nk { Nk(const Nk &o) : a(o.a), b(o.b) {} int a; int b; }; // a user copy constructor
+struct Pm { P1 p; };                                             // a member of POD class type: a POD
+'''
+POD = [('P1', True), ('P2', True), ('Pm', True), ('Nb', False), ('Nc', False), ('Nd', False), ('Na', False), ('Nv', False), ('Nm', False), ('Nr', False), ('Nk', False)]
 
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--cc', default=''); ap.add_argument('--work', default='/tmp/defdisp'); a = ap.parse_args()
     w = a.work; os.makedirs(w, exist_ok=True)
     cc = lambda t: (a.cc + '/' if a.cc else '') + 'aarch64-linux-gnu-' + t
-    objcopy = 'aarch64-linux-gnu-objcopy'
     pdir = dc.run([cc('g++'), '-print-file-name=plugin']).strip() + '/include'
     plug = []
     for n, src in (('fnvnx_names', 'names/fnvnx_names.cc'), ('fnvnx_dispatch', 'dispatch/fnvnx_dispatch.cc')):
@@ -57,8 +82,11 @@ def main():
     def build(src, stem):
         open('%s/%s.cc' % (w, stem), 'w').write(src)
         dc.run([cc('g++')] + F + plug + ['-c', '%s/%s.cc' % (w, stem), '-o', '%s/%s.o' % (w, stem)])
-        data = rows('%s/%s.o' % (w, stem), objcopy, '%s/%s.defdisp' % (w, stem))
-        return data
+        out = '%s/%s.defdisp' % (w, stem)
+        r = subprocess.run(['aarch64-linux-gnu-objcopy', '--dump-section', '.fnvnx.defdisp=' + out, '%s/%s.o' % (w, stem), '/dev/null'], capture_output=True, text=True)
+        return open(out, 'rb').read() if r.returncode == 0 else None
+    def rows(data):
+        return dict(l.split(' ', 1) for l in data.decode('ascii').split('\n')[:-1])
     # (1) + (2)
     data = build(UNIT, 'unit')
     check('section present', data is not None)
@@ -68,15 +96,25 @@ def main():
         check('final LF', txt.endswith('\n') and lines[-1] == '')
         lines = lines[:-1]
         check('sorted and unique', lines == sorted(set(lines)))
-        got = dict(l.split(' ', 1) for l in lines)
-        check('one row per definition', set(got) == set(WANT), str(sorted(got)))
+        got = rows(data)
+        nm = dc.run(['aarch64-linux-gnu-nm', '--defined-only', '%s/unit.o' % w])
+        defined = {l.split()[2] for l in nm.split('\n') if len(l.split()) == 3 and l.split()[1] in ('T', 't', 'W', 'w')}
+        check('defined function symbols == rows', defined == set(got), 'only in the object %s, only in the rows %s' % (sorted(defined - set(got)), sorted(set(got) - defined)))
+        check('a covariant thunk is a defined symbol with a row', any(k.startswith('_ZTch') or k.startswith('_ZTc') for k in got), str(sorted(got)))
         for k, v in WANT.items(): check('descriptor of ' + k, got.get(k) == v, 'got %s, want %s' % (got.get(k), v))
+    # (4) the C++03 POD rule on results: each type's function is called through a pointer, so the call site's descriptor is the unit's only one
+    for ty, ispod in POD:
+        open('%s/podone.cc' % w, 'w').write(POD_DECLS + 'void c(%s (*f)()) { f(); }\n' % ty)
+        dc.run([cc('g++')] + F + plug + ['-c', '%s/podone.cc' % w, '-o', '%s/podone.o' % w])
+        ds = bridgegen.read_obj('%s/podone.o' % w)
+        rt = ds[0].split(':')[1] if len(ds) == 1 else None
+        ok = rt is not None and ((rt[0] == 'a' and not rt.endswith('x')) if ispod else (rt[0] == 'm' or rt.endswith('x')))
+        check('result %s is %s' % (ty, 'a POD' if ispod else 'not a POD'), ok, 'descriptors %s' % ds)
     # (3)
     decls = '\n'.join(t[1] for t in dc.TYPES)
     ref = ''.join('%s g_%s;\nextern "C" void __attribute__((noinline)) a_%s(%s x) { g_%s = x; }\nextern "C" %s __attribute__((noinline)) r_%s(void) { return g_%s; }\n' % (T, n, n, T, n, T, n, n) for n, d, T in dc.TYPES)
-    src = decls + '\n' + ref
-    data = build(src, 'ref')
-    got = dict(l.split(' ', 1) for l in data.decode('ascii').split('\n')[:-1]) if data is not None else {}
+    data = build(decls + '\n' + ref, 'ref')
+    got = rows(data) if data is not None else {}
     dc.run([cc('g++')] + F + ['-S', w + '/ref.cc', '-o', w + '/ref.s'])
     asm = open(w + '/ref.s').read()
     for n, d, T in dc.TYPES:

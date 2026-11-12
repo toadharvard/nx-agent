@@ -53,6 +53,8 @@
 #include "gimple.h"
 #include "gimple-iterator.h"
 #include "ssa.h"
+#include "cp/cp-tree.h"
+#include "../cpweak.h"
 #include "tree-ssanames.h"
 #include "tree-phinodes.h"
 #include "cfghooks.h"
@@ -72,7 +74,6 @@
 #include "calls.h"
 #include "output.h"
 #include "langhooks.h"
-#include <dlfcn.h>
 #include <string.h>
 #include <set>
 #include <string>
@@ -124,17 +125,42 @@ static tree new_site()
 
 /* ---- the call's shape */
 
-/* Is `t` a POD type in the sense of the x86 convention's documentation (learn.microsoft.com, "Argument Passing and Naming Conventions": "Structures that are
- * not PODs will not be returned in registers"; Agner Fog, Calling conventions, table 7: a constructor, a copy constructor, a destructor, virtual functions or
- * inheritance make the result go through the hidden pointer)? The front end of C++ owns that predicate (cp/tree.cc pod_type_p); cc1 (C) has no such type, so the
- * symbol is looked up at run time, only for a C++ unit, and a C unit's aggregate is a POD by the language. */
+/* Is `t` returned through the hidden pointer by the x86 callee? The rule is the one the convention's documents state, not GCC's POD notion
+ * (learn.microsoft.com, "Argument Passing and Naming Conventions": "Structures that are not PODs will not be returned in registers"; the C++03 POD of
+ * ISO/IEC 14882:2003 9/4 that VC9 uses: Agner Fog, Calling conventions, table 7). A class is NOT a POD if it has: a user-declared constructor, copy
+ * constructor, copy assignment operator or destructor; a virtual function; a base class (a direct base, virtual or not); or a non-static member whose
+ * type (array elements included) is a class that is not a POD. Read from the C++ front end's own declarations of the class, recursively; every C++ front-end
+ * symbol used is on toolchain/cpweak.h and sits behind fnvnx_cxx_fe(). A C unit has no such type: its aggregate is a POD by the language. */
+static bool user_declared_special(tree t)
+{
+  tree mv = TYPE_MAIN_VARIANT(t);
+  for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f)) {
+    if (TREE_CODE(f) != FUNCTION_DECL || DECL_ARTIFICIAL(f)) continue;
+    if (DECL_DESTRUCTOR_P(f)) return true;
+    /* the first declared parameter after `this` */
+    tree p = TYPE_ARG_TYPES(TREE_TYPE(f));
+    if (p && TREE_CODE(TREE_TYPE(f)) == METHOD_TYPE) p = TREE_CHAIN(p);
+    bool ref_to_self = p && p != void_list_node && TYPE_REF_P(TREE_VALUE(p)) && TYPE_MAIN_VARIANT(TREE_TYPE(TREE_VALUE(p))) == mv;
+    bool rest_default = ref_to_self;
+    if (ref_to_self) for (tree q = TREE_CHAIN(p); q && q != void_list_node; q = TREE_CHAIN(q)) if (!TREE_PURPOSE(q)) rest_default = false;
+    if (DECL_CONSTRUCTOR_P(f) && rest_default) return true;                       /* copy constructor */
+    if (DECL_OVERLOADED_OPERATOR_IS(f, NOP_EXPR) && ref_to_self) return true;     /* copy assignment (by reference; by value is the same rule) */
+    if (DECL_OVERLOADED_OPERATOR_IS(f, NOP_EXPR) && p && p != void_list_node && TYPE_MAIN_VARIANT(TREE_VALUE(p)) == mv) return true;
+  }
+  return false;
+}
+
 static bool msvc_pod(tree t)
 {
-  if (strncmp(lang_hooks.name, "GNU C++", 7)) return true;
-  static bool (*pod)(const_tree);
-  if (!pod) pod = (bool (*)(const_tree))dlsym(RTLD_DEFAULT, "_Z10pod_type_pPK9tree_node");
-  if (!pod) { error("DISPATCH1: the C++ front end does not export pod_type_p"); return true; }
-  return pod(t);
+  if (!fnvnx_cxx_fe()) return true;
+  while (TREE_CODE(t) == ARRAY_TYPE) t = TREE_TYPE(t);
+  if (!CLASS_TYPE_P(t)) return true;
+  if (TYPE_HAS_USER_CONSTRUCTOR(t) || TYPE_POLYMORPHIC_P(t)) return false;
+  if (TYPE_BINFO(t) && BINFO_N_BASE_BINFOS(TYPE_BINFO(t)) > 0) return false;
+  if (user_declared_special(t)) return false;
+  for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f))
+    if (TREE_CODE(f) == FIELD_DECL && !msvc_pod(TREE_TYPE(f))) return false;
+  return true;
 }
 
 /* How the target passes a value is asked of the pinned compiler's own backend, never classified here (ASM-001): pass_by_reference, then
@@ -285,7 +311,7 @@ static void finish_unit(void *, void *)
   cgraph_node *node;
   FOR_EACH_DEFINED_FUNCTION(node) {
     tree decl = node->decl;
-    if (!TREE_ASM_WRITTEN(decl) || node->alias || node->thunk) continue;
+    if (!node->alias && !node->thunk && !TREE_ASM_WRITTEN(decl)) continue;
     std::string d;
     if (!def_descriptor(decl, d)) continue;
     const char *name = targetm.strip_name_encoding(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(decl)));
