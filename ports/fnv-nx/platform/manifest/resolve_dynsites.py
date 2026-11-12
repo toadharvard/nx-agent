@@ -124,7 +124,12 @@ def load_image(argflow, spec, exe_name=None):
         data = fh.read()
     if rg:
         with open(rg) as fr:
-            ranges = argflow.read_ranges(fr.read())
+            txt = fr.read()
+        ranges = argflow.read_ranges(txt)
+        m = re.search(r'base=0x([0-9a-fA-F]+)', txt)
+        if m:       # the facts are at the load base of the L1 module set: rebase to the image base of the file
+            d = argflow.Image(data, nm.lower(), {}, exe_name).base - int(m.group(1), 16)
+            ranges = {e + d: [(a + d, b + d) for a, b in rs] for e, rs in ranges.items()}
     else:
         ranges = build_ranges(argflow, data, nm.lower())
     return nm.lower(), argflow.Image(data, nm.lower(), ranges, exe_name), data
