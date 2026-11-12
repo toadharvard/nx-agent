@@ -62,17 +62,30 @@ def inputs_doc(facts):
     return d
 
 
-def lifted_repo(name, body, pack, ehfacts=None, rt=RT):
-    """A repo with the REAL tools of lift/gates and a lifted product root: rt.S (runtime object), generated lifted.cc (body)."""
+REC_ASM = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
+           "flags": {"c": ["-mabi=ilp32"], "cxx": [], "asm": ["-mabi=ilp32"]}, "include": [], "units": "all"}
+
+
+def lifted_repo(name, body, pack, ehfacts=None, rts=(RT,), image=True):
+    """A repo with the REAL tools of lift/gates, a lifted product root (generated lifted.cc from BODY), one runtime root per text of RTS
+    (rt.S, a separate product root of the toy tree) and, when IMAGE, a link root whose recipe lists the lifted root and the runtime roots in
+    link.roots (the image: the unit the gates judge)."""
     rec = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
            "flags": {"c": ["-mabi=ilp32"], "cxx": ["-mabi=ilp32", "-O1"], "asm": ["-mabi=ilp32"]}, "include": [], "units": "all",
            "generated": [{"tool": T + "gen/lift.py", "args": [], "inputs": [ROOT + "/body.s"], "outputs": ["gen/lifted.cc"]}],
            "external": [pack]}
     files = {T + "gen/lift.py": GEN, ROOT + "/body.s": body, ROOT + "/a.cc": None}
-    if rt is not None:
-        files[ROOT + "/rt.S"] = rt
-    repo = tp.make_repo(name, rec, {"lifted_by": T + "gen/lift.py", "pack": pack["name"]}, files,
-                        [{"path": T + "lift/gates", "class": "tool", "gates": []}])
+    rtroots = [T + "rt%d" % i for i in range(len(rts))]
+    for r, text in zip(rtroots, rts):
+        files[r + "/rt.S"] = text
+        files[r + "/build.json"] = json.dumps(REC_ASM)
+    if image:
+        files[T + "img/build.json"] = json.dumps({"format": "fnvnx-recipe/1", "link": {"roots": [ROOT] + rtroots}})
+    extra = [{"path": T + "lift/gates", "class": "tool", "gates": []}]
+    extra += [{"path": r, "class": "product", "target": "host", "gates": [], "recipe": r + "/build.json"} for r in rtroots]
+    if image:
+        extra.append({"path": T + "img", "class": "product", "target": "host", "gates": [], "recipe": T + "img/build.json"})
+    repo = tp.make_repo(name, rec, {"lifted_by": T + "gen/lift.py", "pack": pack["name"]}, files, extra)
     os.makedirs(os.path.join(repo, LIFT), exist_ok=True)
     for f in ("gate_order.py", "gate_eh.py"):
         shutil.copyfile(os.path.join(REAL, LIFT, f), os.path.join(repo, LIFT, f))
@@ -100,7 +113,7 @@ def h(a):
 
 
 def eh_facts(b):
-    return {"text": [h(b), h(b + 0x1000)], "failed_funcinfo": [], "frame_handlers": {}, "frame_regs": {},
+    return {"text": [h(b), h(b + 0x1000)], "failed_funcinfo": [], "failed_throwinfo": [], "thrower_escapes": [], "seh_red": [], "helpers": [], "registrations": [], "throw_sites": [],
             "funcinfo": [{"addr": h(b + 0x800), "stubs": [], "unwind": [[-1, h(b + 0x30)]], "tries": []}], "scopes": [], "throwinfo": [], "conts": {}}
 
 
@@ -122,8 +135,13 @@ def main():
             rc, r, o = gate(repo, n, cache)
             check("lifted %s: gate %s is %s" % (case, n, want), r.get("status") == want and (rc == 0) == (want == G) and r.get("universe", 0) >= 1
                   and (want != G or r["certified"] == r["universe"]) and (want == G or r["uncertified"]), (rc, r, o))
-    rc, r, o = gate(lifted_repo("l-rt", BODIES["ordered"][0], pack, rt=None), "order", cache)
-    check("lifted root without the runtime object: red, input missing", rc == 2 and r.get("status") == R and "input missing" in r["detail"], (rc, r))
+    rc, r, o = gate(lifted_repo("l-rt", BODIES["ordered"][0], pack, rts=()), "order", cache)
+    check("image without a runtime definer: red, input missing", rc == 2 and r.get("status") == R and "input missing" in r["detail"], (rc, r))
+    rc, r, o = gate(lifted_repo("l-rt2", BODIES["ordered"][0], pack, rts=(RT, RT)), "order", cache)
+    check("image with two runtime definers: red", rc == 2 and r.get("status") == R and "2 objects" in r["detail"], (rc, r))
+    for n in ("order", "addr32"):
+        rc, r, o = gate(lifted_repo("l-noimg-" + n, BODIES["plain_store"][0], pack, image=False), n, cache)
+        check("lifted root that no image names: gate %s has universe 0, green" % n, rc == 0 and r.get("status") == G and r["universe"] == 0, (rc, r, o))
     # --- eh: the pack (external of the recipe) against the EH facts external named by contract_inputs.json `ehfacts`
     def pack_pub(name, drop=()):
         def pop(d):

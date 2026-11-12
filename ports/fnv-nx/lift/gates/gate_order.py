@@ -96,6 +96,14 @@ lifted roots is given) and ASM-007 (ILP32). Rule (a) does not rest on the decode
 decided from the encoding's destination fields, and the decoder's operand view only adds writes (the union decides); the corpus
 test compares the two over every instruction class.
 
+Lock ranges (class B, docs/ORDERING.md "Locked instructions"). The lifter emits per object an ELF32 section `.fnvl.lk`: 8-byte records
+(start, end), each a 32-bit word with an R_AARCH64_P32_ABS32 relocation against an executable section (the host pcs of the code of one
+locked x86 instruction, [start, end)). Every record is an item of the order result and is red when it cannot be read, is empty, reversed,
+unaligned, outside the section or its $d ranges, overlaps the previous one, contains a call, or holds no load-exclusive and store-exclusive
+pair. Every guest access inside a range must be ldaxr/ldaxp or stlxr/stlxp of any size (the A57 has no LSE): a plain access, ldar or stlr
+there is red, whichever emitter wrote it. The universe of guest accesses is unchanged: every access of every object. Whether every locked
+instruction of the exe has a record is a fact of the lifter against the exe's code, not of this gate.
+
 Exit 0 iff all three results are green."""
 import json
 import multiprocessing
@@ -111,6 +119,9 @@ GATES = ('order', 'addrwrap', 'align')
 CLS = ('guest', 'cpu', 'frame', 'image')
 SP = 31
 NEG = -1 << 60
+R_P32_ABS32 = 1                       # R_AARCH64_P32_ABS32: the relocation of a pc in a .fnvl.lk record
+LOCKSEC = '.fnvl.lk'
+LOCKX = ('ldaxr', 'ldaxrb', 'ldaxrh', 'ldaxp', 'stlxr', 'stlxrb', 'stlxrh', 'stlxp')     # the exclusive instructions a lock range may hold
 R_PG_HI21, R_ADD_LO12 = 11, 12        # R_AARCH64_P32_ADR_PREL_PG_HI21, R_AARCH64_P32_ADD_ABS_LO12_NC
 R_GOT_LOAD = 27                      # R_AARCH64_P32_LD32_GOT_LO12_NC
 LSE = ('cas', 'swp', 'ldadd', 'ldclr', 'ldeor', 'ldset', 'ldsmax', 'ldsmin', 'ldumax', 'ldumin')
@@ -129,7 +140,7 @@ def elf(path):
     cstr = lambda tab, o: b[tab + o:b.index(b'\0', tab + o)].decode()
     names = [cstr(sh[shstr][4], s[0]) for s in sh]
     out = {i: [names[i], b[s[4]:s[4] + s[5]], {}, [], [], []] for i, s in enumerate(sh) if s[1] == 1 and s[2] & 4}
-    syms = {}; symname = {}; deffunc = set(); drel = {}        # drel: {section: {offset: (reloc type, the target is in an executable section)}} for every section
+    lkrel = []; lkdata = None; syms = {}; symname = {}; deffunc = set(); drel = {}        # drel: {section: {offset: (reloc type, the target is in an executable section)}} for every section
     for s in sorted(sh, key=lambda s: s[1] != 2):
         if s[1] == 2:                                                   # SHT_SYMTAB
             marks = {}
@@ -150,10 +161,25 @@ def elf(path):
             for k in range(s[5] // 12):
                 off, info, add = struct.unpack_from('<IIi', b, s[4] + 12 * k)
                 y = syms.get(info >> 8)
+                if names[s[7]] == LOCKSEC: lkrel.append((off, info, add))
                 drel.setdefault(s[7], {})[off] = (info & 0xff, bool(y and y[5]))
                 if s[7] not in out: continue         # the target: (section, offset, bytes from the target to the section end, the section is SHF_WRITE, section alignment)
                 out[s[7]][2][off] = (info & 0xff, (y[0], y[1] + add, y[2] - y[1] - add, y[3], y[4]) if y and 0 <= y[1] + add < y[2] else None, symname.get(info >> 8))
-    return [tuple(v) + (drel, deffunc) for _, v in sorted(out.items())]
+    lock, lkerr = {}, []                     # {executable section index: [(lo, hi, record number)]}; the records that cannot be read
+    for i, h in enumerate(sh):
+        if names[i] != LOCKSEC: continue
+        if h[1] != 1 or h[5] % 8: lkerr.append('%s: not a PROGBITS section of 8-byte records' % LOCKSEC); continue
+        rel = {off: (info, add) for off, info, add in lkrel}
+        for r in range(h[5] // 8):
+            ends = []
+            for w in (0, 4):
+                got = rel.get(8 * r + w)
+                y = syms.get(got[0] >> 8) if got else None
+                if not got or got[0] & 0xff != R_P32_ABS32 or not y or not y[5]: ends.append(None)
+                else: ends.append((y[0], y[1] + got[1]))
+            if None in ends or ends[0][0] != ends[1][0]: lkerr.append('%s record %d: a pc of the record is not an R_AARCH64_P32_ABS32 against an executable section, or the two are in different sections' % (LOCKSEC, r))
+            else: lock.setdefault(ends[0][0], []).append((ends[0][1], ends[1][1], r))
+    return [tuple(v) + (drel, deffunc, i, lock.get(i, []), lkerr if k == 0 else []) for k, (i, v) in enumerate(sorted(out.items()))] or [(None,) * 7 + (None, None, None, [], lkerr)]
 
 
 def regno(name):
@@ -493,7 +519,9 @@ def analyse(path):
 
     def glob(why, ins): tick('rule_violations'); red('order', ins, why, 'rule')
 
-    for sname, code, relocs, funcs, data, fsyms, drel, _deff in elf(path):
+    for sname, code, relocs, funcs, data, fsyms, drel, _deff, sidx, lkr, lkerr in elf(path):
+        for e in lkerr: tick('rule_violations'); tab['order'].setdefault((LOCKSEC, 0, e), [LOCKSEC, e])
+        if sname is None: continue
         cur[0] = sname; cur[1] = fsyms
         L, badoff = decode(md, code, relocs, data)
         if L is None:
@@ -820,6 +848,23 @@ def analyse(path):
                     else: red('order', ins, 'a plain guest store without dmb ishst after the last guest access or call')
                 sb = False
             for w in wait: red('order', w, 'a plain guest load without dmb ishld before the block end')
+        # lock ranges (.fnvl.lk, docs/ORDERING.md "Locked instructions"): the host-pc ranges of the code of the locked x86 instructions
+        iset = set(at); prev = 0
+        for lo, hi, rec in sorted(lkr):
+            tick('lock_ranges'); ri = type('R', (), {'a': lo})()
+            tab['order'].setdefault((cur[0], lo, 'lock'), [label(lo), ''])
+            def lockred(why, ri=ri): rr = tab['order'][(cur[0], ri.a, 'lock')]; rr[1] = rr[1] + '; ' + why if rr[1] else why
+            if not (lo < hi and lo % 4 == 0 and hi % 4 == 0 and lo in iset and (hi in iset or hi == len(code)) and lo >= prev and not any(l <= lo < h or l < hi <= h for l, h in data)):
+                lockred('a malformed lock range [%#x, %#x): it must be a non-empty range of instructions, 4-aligned, inside the section, ordered, outside the data ranges, not overlapping the previous one' % (lo, hi))
+                prev = max(prev, hi); continue
+            prev = hi
+            inr = [x for x in L if lo <= x.a < hi]
+            for x in inr:
+                if x.call: lockred('a call inside the range at %#x' % x.a)
+                if x.a in gacc and x.txt.split()[0] not in LOCKX:
+                    tick('lock_plain_access'); item('order', x); red('order', x, 'a guest access of a locked instruction that is not an exclusive load or store (ldaxr/stlxr)')
+            ld = [x for x in inr if x.a in gacc and x.txt.split()[0].startswith('ldax')]; stx = [x for x in inr if x.a in gacc and x.txt.split()[0].startswith('stlx')]
+            if not (ld and stx): lockred('a range with no exclusive load and exclusive store pair')
     res['rows'] = {g: sorted((stem, lab, why) for lab, why in tab[g].values()) for g in GATES}
     return res
 

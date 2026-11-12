@@ -392,6 +392,16 @@ inc neg not or sbb sub xor xadd xchg) and for `xchg` with memory without a prefi
 total is 69 / 69 for the exe. No alignment is taken on trust for the 35: each takes the aligned or the split-lock path by the
 run-time test.
 
+### Locked instructions: the lock ranges (`.fnvl.lk`, gate `order`)
+
+The claim "every locked x86 instruction is an atomic read-modify-write" is judged on the compiled object, not on the emitter. A plain access with the right
+barriers satisfies the ordering rules and is not atomic, so the gate has to know which accesses belong to a locked instruction. The lifter emits per object
+the section `.fnvl.lk`: 8-byte records (start, end), each word an R_AARCH64_P32_ABS32 relocation against an executable section, the host pcs of the
+code of one locked instruction, whichever emitter path wrote it. gate_order requires every guest access inside a range to be an exclusive instruction
+(ldaxr/ldaxp, stlxr/stlxp; no LSE on the A57) and the range to hold a load-exclusive and a store-exclusive; a malformed record is a red item. The universe
+of guest accesses stays every access of every object. The completeness side (every lock-prefixed instruction of the exe has a record) is a lifter fact against
+the exe's code. Tests: tests/test_gate_order.py (`lock_*`: a plain RMW in a range is red, the exclusive pair green).
+
 ## Open, not closed by this
 
 * **ORDER-OBJECT / ORDER-OPERATOR / ORDER-ASSIGN: per shape, from MSVC.** S11 recorded MSVC 2008 (SP1 and RTM, /O2,
