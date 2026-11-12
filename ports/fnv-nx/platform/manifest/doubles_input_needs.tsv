@@ -1,0 +1,23 @@
+file	test	calls	first calls (api(args)), in source order
+tests/s4/test_display_contract.cpp	display_profile_and_state	1	os_posix_set_docked(d)
+tests/s4/test_display_contract.cpp	display_enum_adapter	1	os_posix_set_docked(d)
+tests/s4/test_display_contract.cpp	display_change_validation	1	os_posix_set_docked(d)
+tests/s4/test_display_contract.cpp	display_change_flags	1	os_posix_set_docked(d)
+tests/s4/test_display_contract.cpp	display_change_message	1	os_posix_set_docked(d)
+tests/s4/test_display_contract.cpp	display_metrics_table	1	os_posix_set_docked(d)
+tests/s4/test_display_contract.cpp	display_consistency_after_dock_change	1	os_posix_set_docked(d)
+tests/s4/test_swkbd.cpp	swkbd_layout_inverse	7	fnvnx_swkbd_stroke((uint16_t)c, &vk, &sc, &sh)) ; fnvnx_swkbd_stroke(0xE9, &vk, &sc, &sh)) ; fnvnx_swkbd_stroke(0x0A, &vk, &sc, &sh)) ; fnvnx_swkbd_stroke(0x20AC, &vk, &sc, &sh)) ; fnvnx_swkbd_stroke('C', &vk, &sc, &sh)) ; fnvnx_swkbd_stroke('c', &vk, &sc, &sh)) ; ...
+tests/s4/test_swkbd.cpp	swkbd_combo_name_entry	33	fnvnx_swkbd_pending(), 0u) ; fnvnx_swkbd_pending(), 20u) ; fnvnx_swkbd_pending(), 19u) ; fnvnx_swkbd_pending() ; fnvnx_swkbd_pump() ; fnvnx_swkbd_pending(), left) ; ...
+tests/s4/test_swkbd.cpp	swkbd_text_entry_contract	6	os_text_script_reset() ; os_text_script_calls(), 0u) ; os_text_script_cancel() ; os_text_script_init(back, 4), 3u) ; os_text_script_reset() ; os_text_script_push(v.data(), v.size())
+tests/s4/test_swkbd.cpp	swkbd_polling_rate_independent	4	fnvnx_swkbd_pending() ; fnvnx_swkbd_pending(), 0u) ; os_text_script_push(v.data(), v.size()) ; fnvnx_pad_inject(0, &r)
+tests/s4/test_swkbd.cpp	swkbd_holds_until_observed	10	fnvnx_swkbd_pending(), 5u) ; fnvnx_swkbd_pump() ; fnvnx_swkbd_pending(), 5u) ; fnvnx_swkbd_pending(), 4u) ; fnvnx_swkbd_pending() ; fnvnx_swkbd_pump() ; ...
+tests/s7/test_input.cpp	input_xinput_api	7	fnvnx_pad_set_layout(FNVNX_PAD_LAYOUT_LABEL) ; fnvnx_pad_inject(1, &off) ; fnvnx_pad_inject(0, &p) ; fnvnx_pad_inject(0, &p) ; fnvnx_pad_last_vibration(0, &lo, &hi) ; fnvnx_pad_last_vibration(0, &lo, &hi) ; ...
+tests/s7/test_input.cpp	input_dinput_keyboard_immediate_and_buffered	3	fnvnx_input_key(DIK_W, 1) ; fnvnx_input_key(DIK_W, 0) ; fnvnx_input_key(DIK_A, i & 1 ? 0 : 1)
+tests/s7/test_input.cpp	input_dinput_mouse_and_touch	13	fnvnx_input_mouse_move(5, -3, 120) ; fnvnx_input_mouse_move(1, 0, 0) ; fnvnx_input_mouse_button(1, 1) ; fnvnx_input_mouse_button(1, 0) ; fnvnx_touch_reset() ; fnvnx_touch_frame(&p, 1, 1000) ; ...
+tests/s7/test_input_contract.cpp	contract_xinput_state	2	fnvnx_pad_set_layout(FNVNX_PAD_LAYOUT_LABEL) ; fnvnx_pad_inject(0, &r)
+tests/s7/test_input_contract.cpp	contract_xinput_vibration_caps_misc	4	fnvnx_pad_last_vibration(0, &lo, &hi) ; fnvnx_pad_last_vibration(0, &lo, &hi) ; fnvnx_pad_last_vibration(0, &lo, &hi) ; fnvnx_pad_last_vibration(0, &lo, &hi)
+tests/s7/test_input_contract.cpp	contract_xinput_keystroke	1	fnvnx_pad_inject(0, &r)
+tests/s7/test_input_contract.cpp	contract_di8_semantics_and_action_maps	2	fnvnx_input_key(DIK_A, 1) ; fnvnx_input_key(DIK_A, 0)
+tests/s7/test_input_contract.cpp	contract_di8_custom_data_formats	12	fnvnx_input_mouse_button(0, 1) ; fnvnx_input_mouse_move(7, 3, 0) ; fnvnx_input_mouse_move(2, 0, 0) ; fnvnx_input_mouse_button(0, 0) ; fnvnx_input_mouse_move(-100000, 0, 0) ; fnvnx_input_mouse_move(10, 0, 0) ; ...
+tests/s7/test_input_contract.cpp	contract_di8_cooperative_acquire_foreground	2	fnvnx_input_key(DIK_A, 1) ; fnvnx_input_key(DIK_A, 0)
+tests/s7/test_input_contract.cpp	contract_di8_buffered_data	10	fnvnx_input_key(DIK_A, 1) ; fnvnx_input_mouse_move(4, 0, 0) ; fnvnx_input_key(DIK_S, 1) ; fnvnx_input_key(DIK_D, 1) ; fnvnx_input_key(DIK_A, 0) ; fnvnx_input_key(DIK_S, 0) ; ...
