@@ -17,7 +17,6 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import gatesdir  # noqa: E402
 import recipe  # noqa: E402
 
 
@@ -28,17 +27,12 @@ def product_roots(repo="."):
 NO_ROOT = "no product root (nothing to build yet)"
 
 
-def linked_roots(repo="."):
-    """The product roots whose build.json has a link stage (gatesdir.has_link): the roots a link-side gate judges."""
-    return [r for r in product_roots(repo) if gatesdir.has_link(repo, r)]
-
-
-def quantify(repo, judge_root, roots=None):
+def quantify(repo, judge_root):
     """The universe convention of every per-root gate: the admitted product roots of admit.json. JUDGE_ROOT(root) -> (universe, certified,
     ids, detail); the items are summed (ids <= 50), a root's red detail is kept. No product root: (0, 0, [], NO_ROOT), green."""
     u = c = 0
     ids, why = [], []
-    roots = product_roots(repo) if roots is None else roots
+    roots = product_roots(repo)
     for root in roots:
         ru, rc, rids, rd = judge_root(root)
         u, c, ids = u + ru, c + rc, ids + rids

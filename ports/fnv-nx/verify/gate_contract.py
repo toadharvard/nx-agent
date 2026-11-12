@@ -7,9 +7,10 @@ objfacts, registry, xunit, rtti, pcrel, bodysel), run with the same arguments, i
 their outputs are kept in GATE_CACHE/contract/<key>/ (key = sha256 of contract_inputs.json, the git tree under test and the content of
 the objects and ELF of the root), so the nine gates cost one run of the chain and a cold run gives the same files.
 
-Universe (a link-null root, build.json `link` null, is outside it: the contract gates judge a link; gate_build.linked_roots; other gates still cover that root) (the convention of build, objstub, linkstrict, determinism: gate_build.quantify): the admitted product roots of admit.json. Every gate is
-judged on every root and the items are summed; no product root: universe 0, green. A root that is admitted but lacks objects, an ELF, a result
-file or an input is RED with the reason (item `<root>:inputs`), never skipped. Admission (gate_admit rule 3 + REQUIRED_PRODUCT) is what forces
+Universe (the convention of build, objstub, linkstrict, determinism: gate_build.quantify): the admitted product roots of admit.json. Every gate is
+judged on every root and the items are summed; no product root: universe 0, green. A root that links a guest image and lacks objects, the ELF, a result
+file or an input is RED with the reason (item `<root>:inputs`), never skipped. A root that links no image has universe 0 for the link gates
+(abs disp reach reachlink gpa) and, when it declares no "game" directory, for the game gates too; a root with "game" but no link is red. Admission (gate_admit rule 3 + REQUIRED_PRODUCT) is what forces
 each of these gates to exist before a root can be admitted.
 
 Per-root inputs are outputs of the root's own build and link, read from the out dir of gate_build.ensure (beside objects.json), the names
@@ -26,7 +27,7 @@ Inputs shared by every root (verify/contract_inputs.json, "fnvnx-contract-inputs
   The image set of gpa/reach/reachlink is not an input: contract/images.py derives it (transitive closure of the normal and delay-load import
   directories from the exe, resolved against the files of externals exe and redist). An image without range facts is a red item of those gates.
 A gate whose input is missing is RED with the reason, never skipped: no inputs file, an invalid one, an external that does not fetch or does
-not match its hash, a linked root with no "game", does not build or lacks a result file.
+not match its hash, a root that has no link, no "game" (only an image root needs one), does not build or lacks a result file.
 n2_data n2_call n2_vcall xc (registry.py counts, rows = functions that are not N2): not failures in themselves (the function becomes LIFTED, a
 legal outcome); the invariant that closes the class is that EVERY row is turned into LIFTED by bodysel. Universe = the functions the gate
 judged, certified = judged minus the rows whose address bodysel does not give LIFTED (the function would run a native body that fails its contract)."""
@@ -43,6 +44,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "contract"))
 import gate_build  # noqa: E402
+import iat  # noqa: E402
 import images  # noqa: E402
 import gatefile  # noqa: E402
 import recipe  # noqa: E402
@@ -154,7 +156,10 @@ def py(script, *args):
 def images_of(doc, ext):
     """([(name, pe path, ranges path)] of the images that have range facts, [names without]) of contract.images.image_set."""
     have, lack = [], []
-    for name, path in images.image_set(P2(ext, doc["exe"]), [ext[n]["host"] for n in ("exe", "redist")]):
+    bridge = set()          # a bridge dll is never an image (contract/dllkind.py): the dlls with rows in the declared bridge.tsv
+    if doc.get("bridge"):
+        bridge = {r["dll"] for r in iat.bridge_rows(P2(ext, doc["bridge"]))[0]}
+    for name, path in images.image_set(P2(ext, doc["exe"]), [ext[n]["host"] for n in ("exe", "redist")], bridge):
         rel = doc["ranges"]["exe"] if name.endswith(".exe") else doc["ranges"]["module"] % name.rsplit(".", 1)[0]
         rg = P2(ext, rel)
         if os.path.isfile(rg):
@@ -225,7 +230,7 @@ def main(argv):
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-contract-")
     cache = os.environ.get("GATE_CACHE") or tmp
     try:
-        u, c, ids, detail = gate_build.quantify(repo, lambda root: judge_root(gate, repo, cache, root), gate_build.linked_roots(repo))
+        u, c, ids, detail = gate_build.quantify(repo, lambda root: judge_root(gate, repo, cache, root))
     finally:
         if tmp and not os.environ.get("GATE_KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)
@@ -248,15 +253,21 @@ def judge_root(gate, repo, cache, root):
 
 def judge(gate, repo, cache, root):
     """-> (universe, certified, ids, detail) of the gate on ROOT; raises Red."""
+    rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
+    image = bool(rec.get("link"))
+    game = rec.get("game")
+    if not image:         # universe rule (VERDICT.md "Universe rule of the per-root gates"): the link gates' items come from the root's linked guest ELF
+        if gate in LINK_GATES:
+            return 0, 0, [], "root links no guest image: its objects are judged on the image root that links it (link.roots)"
+        if game:
+            raise Red("root %s declares \"game\" but links no ELF: the game's units are judged on the image that links them" % root)
+        return 0, 0, [], "root declares no game directory: no game functions"
+    if not isinstance(game, str) or not game:
+        raise Red("root %s: build.json declares no \"game\" (the root-relative directory of the game's units; no default)" % root)
     doc = load_inputs(os.path.join(repo, INPUTS))
     for k in GATE_KEYS.get(gate, []):
         if not doc.get(k):
             raise Red("%s declares no %s (%s): gate %s cannot judge" % (INPUTS, k, OPT_PATHS.get(k, ("", "L5/L2: the image set of the stage"))[1], gate))
-    rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
-    if not rec.get("link"):
-        raise Red("root %s links no ELF (recipe has no link)" % root)
-    if not isinstance(rec.get("game"), str) or not rec["game"]:
-        raise Red("root %s: build.json declares no \"game\" (the root-relative directory of the game's units; no default)" % root)
     objs, out = gate_build.ensure(root, cache, repo)
     if objs["status"] == "red" or not objs["elf"]:
         raise Red("root %s does not build (stage %s)" % (root, objs.get("failure", {}).get("stage", "?")))

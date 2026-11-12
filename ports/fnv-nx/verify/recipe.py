@@ -35,6 +35,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
+import envcheck  # noqa: E402
 import runtime  # noqa: E402
 import sandbox  # noqa: E402
 import toolflags  # noqa: E402
@@ -43,6 +44,7 @@ import unitstage  # noqa: E402
 FORMAT, OBJ_FORMAT = "fnvnx-recipe/1", "fnvnx-objects/1"
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
+ENV_JSON = TREE + "/verify/env.json"   # the declared environment of the checkout (l1.py checks the same file)
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
         "plugins", "plugin_cxx"}
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
@@ -58,6 +60,8 @@ _T = TREE + "/toolchain/"
 PLUGIN_SOURCES = {"fnvnx_ftoi": _T + "ftoi/fnvnx_ftoi.cc", "fnvnx_order": _T + "order/fnvnx_order.cc", "fnvnx_sdd": _T + "sdd/fnvnx_sdd.cc",
                   "fnvnx_pi": _T + "pi/fnvnx_pi.cc", "fnvnx_dispatch": _T + "dispatch/fnvnx_dispatch.cc", "fnvnx_addr": _T + "addr/fnvnx_addr.cc",
                   "fnvnx_names": _T + "names/fnvnx_names.cc", "fnvnx_layout": _T + "layout/fnvnx_layout.cc"}
+# The plugins the gate `datamodel` requires in the CC stage of every native guest C++ unit (RECIPE.md, "Gate rule"); a subset of PLUGIN_SOURCES.
+GUEST_CXX_PLUGINS = ("fnvnx_ftoi", "fnvnx_order")
 PLUGIN_INPUTS = {"fnvnx_layout": [_T + "names/fnvnx_names.cc"]}
 PLUGIN_ARGS = {n: {} for n in PLUGIN_SOURCES}
 PLUGIN_ARGS["fnvnx_order"] = {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}
@@ -65,6 +69,7 @@ PLUGIN_ARGS["fnvnx_order"] = {"args": "rtl", "object": "msvc", "operator": "rtl"
 SEMANTICS_FLAGS = ("-mabi=ilp32", "-fms-extensions", "-fshort-wchar", "-frounding-math", "-fsigned-char", "-fno-strict-aliasing", "-fwrapv",
                    "-fno-delete-null-pointer-checks", "-fcheck-new", "-fno-sized-deallocation", "-fno-lifetime-dse", "-ffp-contract=off",
                    "-DFNVNX_SDD=1", "-fno-devirtualize")
+WERROR_ATTR = "-Werror=attributes"   # required in flags.c and flags.cxx of every guest root
 EXT_KEYS = {"name", "repo", "ref", "commit", "tree_sha256", "at"}
 SANDBOX_PATHS = ("/src", "/inc", "/in", "/out", "/tool", "/objs", "/ld", "/work", "/proc", "/dev", "/tmp", "/oldroot")
 STYPE = {0: "NOTYPE", 1: "OBJECT", 2: "FUNC", 5: "COMMON", 6: "TLS", 10: "IFUNC"}
@@ -83,6 +88,29 @@ class RecipeError(Exception):
 
 class BuildRed(Exception):
     pass
+
+
+class EnvBlocked(RecipeError):
+    """The machine does not match the env.json of the checkout: no stage runs and nothing is stored (a result computed in the wrong
+    environment is not a result: a stage that failed for a tool that was not installed yet must not stay cached red)."""
+
+
+_ENV_OK = set()   # sha256 of the env.json files this process already found matching (an install between processes is seen by the next one)
+
+
+def env_blocked(repo):
+    """Raise EnvBlocked unless this machine matches repo/verify/env.json (envcheck.py check; a missing file is a mismatch, as in l1.py)."""
+    p = os.path.join(repo, ENV_JSON)
+    if not os.path.exists(p):
+        raise EnvBlocked(["env: " + ENV_JSON + ": want a declared environment, have none"])
+    raw = open(p, "rb").read()
+    h = hashlib.sha256(raw).hexdigest()
+    if h in _ENV_OK:
+        return
+    bad = envcheck.check(json.loads(raw))
+    if bad:
+        raise EnvBlocked(list(bad))
+    _ENV_OK.add(h)
 
 
 def refused(tokens):
@@ -175,6 +203,12 @@ def guest_errors(rec, root, roots, pin):
     if isinstance(rt, dict):
         bad += ["external %r is not the pinned runtime (%s)" % (e["name"], rt) for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == rt["name"] and e != rt]
     bad += ["compiler.%s is %r, pinned %r" % (k, c[k], pin.get(k)) for k in ("cc", "cxx") if c[k] != pin.get(k)]
+    fl = rec.get("flags") if isinstance(rec.get("flags"), dict) else {}
+    # an attribute that neither the compiler nor a loaded plugin registers is otherwise dropped with a warning: a marker a rule relies on vanishes
+    bad += ["flags.%s lacks %s" % (k, WERROR_ATTR) for k in ("c", "cxx") if WERROR_ATTR not in (fl.get(k) if isinstance(fl.get(k), list) else [])]
+    # a flag that downgrades an error to a warning (or silences it) lets a diagnostic a rule relies on vanish
+    bad += ["flags.%s: %s downgrades an error (forbidden)" % (k, f) for k in ("c", "cxx", "asm") for f in (fl.get(k) if isinstance(fl.get(k), list) else [])
+            if isinstance(f, str) and (f in ("-fpermissive", "-w", "-Wno-error") or f.startswith("-Wno-error="))]
     return ["guest root %s: %s" % (root, b) for b in bad]
 
 
@@ -633,10 +667,10 @@ class Job:
             try:
                 return u, builds[kinds[u]].unit(u)
             except (sandbox.SbxError, unitstage.UnitError) as e:
-                return u, {"status": "cc-failed", "failure": {"stage": "cc:" + u, "exit": None, "stderr": [str(e)[-300:]]}}
+                return u, {"status": "cc-failed", "failure": {"stage": getattr(e, "stage", "cc:" + u), "exit": None, "stderr": [str(e)[-300:]]}}
         res, failed = {}, {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.jobs) as ex:
-            for u, e in ex.map(one, units):
+            for u, e in ex.map(one, units):   # every unit is judged, PP and CC alike: a failed unit never stops another
                 if e["status"] != "ok":
                     cc = e["status"] == "cc-failed"
                     failed[u] = e.get("failure") or {"stage": "%s:%s" % ("cc" if cc else "pp", u), "exit": e.get("cc_rc" if cc else "pp_rc"),
@@ -648,8 +682,9 @@ class Job:
                 res[u] = e["object"]
                 if e.get("pp_key"):
                     self.ppkeys[u] = e["pp_key"]
-        if failed:
-            raise BuildRed(dict(failed[sorted(failed)[0]], units=sorted(failed), done=sorted(res)))
+        if failed:   # in unit order (UNITS is sorted), so the first failure and the list are deterministic
+            fl = [{"unit": u, "stage": failed[u]["stage"], "exit": failed[u]["exit"], "stderr": list(failed[u]["stderr"])[-20:]} for u in units if u in failed]
+            raise BuildRed(dict(fl[0], failed_units=fl, done=sorted(res)))
         return res
 
     def link(self, ws, objs):
@@ -704,6 +739,7 @@ def host_compilers(rec, cache):
 def build(repo, root, store, out, jobs=4, ext=None):
     """Build product ROOT of the checkout REPO into STORE; write OUT/objects.json and the files it names. EXT: bare cache dir of
     externals (default STORE/external). -> the objects dict; raises RecipeError for an invalid recipe."""
+    env_blocked(repo)   # BEFORE any stage: nothing below runs or stores on a machine that is not the declared one
     j = Job(repo, root, store, jobs, ext or os.path.join(store, "external"))
     errs = check(j.rec, root, j.files, j.roots, load_pin(repo))
     if errs:
@@ -744,7 +780,11 @@ def build(repo, root, store, out, jobs=4, ext=None):
                 shutil.copyfile(os.path.join(ws, "root", j.rec[key]), os.path.join(out, key + ".tsv"))
                 res[key] = os.path.abspath(os.path.join(out, key + ".tsv"))
     except BuildRed as r:
-        res.update(status="red", failure=r.args[0], failed_units=r.args[0].get("units", []))
+        fl = r.args[0].get("failed_units", [])
+        res.update(status="red", failure={k: v for k, v in r.args[0].items() if k in ("stage", "exit", "stderr", "done")}, failed_units=fl)
+    except (sandbox.SbxError, OSError, cas.CasError, runtime.RtError, unitstage.UnitError) as e:
+        # a store or sandbox failure (EMLINK, ENOSPC, EXDEV ...) is a red build naming its stage: objects.json is always written
+        res.update(status="red", failed_units=[], failure={"stage": getattr(e, "stage", "store"), "exit": None, "stderr": [str(e)[-300:]]})
     finally:
         shutil.rmtree(ws, ignore_errors=True)
     res.update(stage_keys=sorted(j.keys), stages={"run": j.run, "hit": j.hit}, units=units, pp_keys=dict(sorted(j.ppkeys.items())))
@@ -768,6 +808,9 @@ def main(argv):
         if res["status"] == "red":
             print(json.dumps(res["failure"], indent=1))
         return 0 if res["status"] == "green" else 2
+    except EnvBlocked as e:
+        print("\n".join(["blocked: env"] + e.errors))
+        return 4
     except RecipeError as e:
         print("\n".join(e.errors), file=sys.stderr)
         return 2

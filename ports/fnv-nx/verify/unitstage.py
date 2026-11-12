@@ -104,7 +104,12 @@ def run_stage(store, doc, cold):
     if old is not None and not cold:
         return key, old, "hit", 0.0
     t0 = time.time()
-    res = sandbox.execute(store, doc, key)
+    try:
+        res = sandbox.execute(store, doc, key)
+    except OSError as e:   # EMLINK, ENOSPC, EXDEV ... of the store or the sandbox set-up: a red stage naming the stage, never a crash
+        x = sandbox.SbxError("stage %s: %s (errno %s)" % (doc["stage"], e.strerror or e, e.errno))
+        x.stage = doc["stage"]
+        raise x
     sec = time.time() - t0
     if old is None:
         sandbox._store_result(store, key, res)

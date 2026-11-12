@@ -333,21 +333,6 @@
    "owner": "L5"
   },
   {
-   "id": "ASM-021",
-   "text": "Dynamic LoadLibrary names are facts of the gpa gate, not of the image closure rule.",
-   "used_by": [
-    "ports/fnv-nx/contract/images.py",
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/VERDICT.md"
-   ],
-   "aliases": [
-    "images dynamic names"
-   ],
-   "status": "REMOVE",
-   "removed_by": "gate:gpa",
-   "owner": "L1"
-  },
-  {
    "id": "ASM-022",
    "text": "The platform writes through a pointer argument only as ImportInfo says (default: every pointer argument may be written); a callee reads no register of an import call; no code outside the images writes the tracked memory except through the imports.",
    "used_by": [
@@ -644,25 +629,6 @@
    "owner": "L4"
   },
   {
-   "id": "ASM-043",
-   "text": "The instruction decoders are correct (LLVM's AArch64 descriptions, capstone).",
-   "used_by": [
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/VERDICT.md",
-    "ports/fnv-nx/verify/objstub.py"
-   ],
-   "aliases": [
-    "objstub LLVM decoder",
-    "instrument decoder",
-    "L3b:A-CAPSTONE-X86",
-    "L3b:A-CAPSTONE-A64"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: agreement of independent decoders on every instruction (after the first frame)",
-   "owner": "L3b+L4",
-   "note": "Deferred until the first frame."
-  },
-  {
    "id": "ASM-044",
    "text": "Every terminating routine of the toolchain is declared noreturn in the headers given.",
    "used_by": [
@@ -675,20 +641,6 @@
    ],
    "status": "REMOVE",
    "removed_by": "no gate yet: the headers' noreturn declarations checked against the toolchain's terminating routines",
-   "owner": "L4"
-  },
-  {
-   "id": "ASM-045",
-   "text": "The decoder's write sets name every register an instruction writes.",
-   "used_by": [
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/objstub.py"
-   ],
-   "aliases": [
-    "objstub write sets"
-   ],
-   "status": "REMOVE",
-   "removed_by": "no gate yet: the decoder's write sets checked against the architectural encoding of every instruction",
    "owner": "L4"
   },
   {

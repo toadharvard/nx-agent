@@ -438,6 +438,10 @@ class Machine:
                 cb(self.tid(), a, s, value & ((1 << 8 * s) - 1))
         self.uc.hook_add(UC_HOOK_MEM_WRITE, hit, begin=max(addr - 31, 0), end=addr + size - 1)
 
+    def sp(self):
+        """the guest SP of the running thread (valid inside a watch callback)"""
+        return self.uc.reg_read(UC_ARM64_REG_SP)
+
     def tid(self):
         return self.cur.tid if self.cur else 0
 
