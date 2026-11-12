@@ -39,6 +39,14 @@ Updated 2026-11-12 02:40Z (hourly check plus the resume after the 5 h limit rese
   - Recorded in CLAUDE.md: trunk e35b870, integration 40f73cb.
   - Owner: L5. L4 mounts the file.
 - **GOG Galaxy is not lifted.** It is a declared-machine module (CLAUDE.md trunk 9e5856f). L5 w15 has the bodies: 11/11 names, with SDK citations.
+- **Admit class "headers" accepted (02:40Z).** It replaces the 23:01 line "no header roots". It counts as the include closure under four conditions:
+  - no units, link or outputs;
+  - PP keys on every header it reads;
+  - the stub, doubles, assumptions and Legal gates scan it;
+  - it is included only by roots that list it.
+  - Owner: L1 w16. It unblocks the platform root at 65/73.
+- **lift/fnvlift on the trunk as a tool root (02:40Z).** It comes in with L3b w2g, because formgate needs the DSL to compute shape_sha. L3a owns it, and there is one source, not a copy.
+- **f2i_check folded into fnvnx_ftoi** (L2 w1), by the rule of one plugin per class.
 - **crt_symbols.tsv:** the 4,546 name rows are deleted. The first ELF is fully lifted.
 
 ## Stuck sessions and actions (02:36Z)
