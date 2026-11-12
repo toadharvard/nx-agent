@@ -573,3 +573,11 @@ Active:
 - (d) the orchestrator's merge — waiting on its verdict
 Stopped until after the merge: w14 (62623608 kept), w16 (w16-int cancelled), w18 (ea0cb570), w20, w12, w4, w15, w10, w22 (71d8cafb queued).
 Ids: gate_eh uses the orchestrator's ASM-222/223/224. L1's 225..227 are withdrawn.
+
+## 09:20Z
+- The trunk is bee3dbfc: MERGER merged w22 71d8cafb (tree 81488e8e, 332 s, 28 gates). w22 done.
+- w18 ea0cb570: L1 verdict green, 189.9 s. The contract gates stay red on L5/L3a inputs (11 open). Stopped.
+- w17 9762e823: recipe.plugin_args(origin) is the single source of plugin arguments. ftoi `mode` is deferred to L2's plugin. Stopped.
+- w10 f21fae30: trunk merged; pure tests 0 FAIL. Stopped.
+- L2: A-EDGE is the checked fact LAYOUT (gate_addr), A-BOUNDS = ASM-006, pi = ASM-001. L1 rebases take toolchain/ from L2 0989525.
+- ASM-225 minted: REMOVE, L3a w4, pcsrc premise F (cond:fresh is never green). L3a w7 is closing the range hole (atimgpud 0x100092d4) and the dataflow sites.
