@@ -23,13 +23,13 @@ r = subprocess.run(cmd, capture_output=True, text=True)
 if r.returncode: sys.exit("ld failed: " + r.stderr[:2000])
 coll = set()
 for l in r.stderr.splitlines() + r.stdout.splitlines():
-    m = re.match(r"ld[^:]*: removing unused section '(.+)' in file '(.+)'", l)
+    m = re.search(r"ld: removing unused section '(.+)' in file '(.+)'", l)
     if m: coll.add((m.group(2), m.group(1)))
 rows = []
 for o in objs:
     for l in subprocess.check_output([nm.replace("-nm", "-objdump"), "-h", o], text=True).splitlines():
-        m = re.match(r"\s*\d+\s+(\.(?:text|data|rodata|bss)\S*)\s", l)
-        if m: rows.append((o, m.group(1), "collected" if (o, m.group(1)) in coll else "reached"))
+        m = re.match(r"\s*\d+\s+(\.(?:text|data|rodata|bss)\S*)\s+([0-9a-f]+)\s", l)
+        if m and int(m.group(2), 16): rows.append((o, m.group(1), "collected" if (o, m.group(1)) in coll else "reached"))
 with open(out, "w") as f:
     for o, s, st in rows: f.write("%s\t%s\t%s\n" % (os.path.relpath(o, objdir), s, st))
 print("roots", roots)

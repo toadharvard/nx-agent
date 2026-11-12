@@ -87,7 +87,8 @@
    "dir": ".",
    "patches": [
     "mojoshader.patch",
-    "mojoshader_units.patch"
+    "mojoshader_units.patch",
+    "mojoshader_prune.patch"
    ],
    "include": [
     "."
