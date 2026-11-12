@@ -18,6 +18,7 @@ from types import SimpleNamespace
 import capstone
 from capstone import x86 as X
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))     # the sibling tools, by this file's own directory (runs under python3 -I)
 import pemod, ehtables, codemap
 from fnvlift import Image as LImage; from fnvlift import core as LCore
 TERM = {'ret', 'retf', 'int3', 'hlt', 'ud2', 'iret', 'iretd'}
