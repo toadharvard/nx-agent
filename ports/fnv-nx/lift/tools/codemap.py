@@ -66,7 +66,7 @@ def finish(U):
     """final accounting -> (stdout lines, unexplained bytes, classes). The residue runs are settled by tools/residue.py (the one residual rule); the per-run sweep reason is printed for information."""
     import residue
     cls = U.classify(); runs = split_runs(U, U.pad_split(cls)); res, ops = analyse(U, runs); bad = []
-    CLO = residue.closure(U.rvals, U.entries, U.outdir); brk = Counter()
+    CLO = residue.closure(U.vals, U.entries, U.outdir); brk = Counter()
     for s, e, st in res:
         brk[st if st != 'dead' else 'decodes-and-ends'] += e - s
         if CLO.complete: cls[s:e] = bytes([residue.DATA]) * (e - s)

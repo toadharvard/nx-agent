@@ -5,7 +5,7 @@ for the accounting and never exclude an entry); jump tables; R3 byte accounting 
 comparison (reconcile.py). Output: $FNVNX_FACTS_OUT (default /home/user/l3facts)/{universe,codemap}.tsv + count-only stdout; exit 1 if any byte is unexplained."""
 import os, re, sys, json, struct, bisect, capstone
 from types import SimpleNamespace
-import ehtables, codemap, reconcile, pemod
+import ehtables, codemap, reconcile, pemod, residue
 from array import array
 from collections import Counter, deque
 from capstone import x86 as X
@@ -331,7 +331,10 @@ for v, ss in psites.items():
 # `ud`), they are not a build error. Entries made here are not committed to insns/cov: their bodies are re-readings of bytes that byte accounting (codemap.py) has
 # already classified exactly once, so accounting stays total; an address inside a decomp function gets parent= like every inner entry.
 scx = {}; udset = set(); r3call = Counter(); r3site = {}
-for r, v in rvals: r3site.setdefault(v, r)
+# R3 refined (residue.disp_only): a relocation that is only the displacement of a non-lea memory operand of committed flow is a data address, not a value; the value sites alone make entries
+vals = [(r, v) for r, v in rvals if not residue.disp_only(md, text, T0, cov, r)]; U.vals = vals
+print('R3 refinement: relocated in-span sites %d, displacement-only (not entry sites) %d, value sites %d' % (len(rvals), len(rvals) - len(vals), len(vals)))
+for r, v in vals: r3site.setdefault(v, r)
 for v in sorted(r3site):
     if v in entries: continue
     f = indec(v); entries[v] = None; kinds[v] = {'ptr'}; esite[v] = r3site[v]; r3set.add(v)
@@ -356,11 +359,14 @@ def uni(I):
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fnvlift import Image as LImage; from fnvlift import core as LCore
 limg = LImage(EXE); cl_cache = {}; cl_ft = set(); cl_out = Counter(); cl_outex = {}; cl_outt = {}; cl_outsrc = Counter(); cl_add = Counter(); cl_jx = set(); cl_rounds = 0
+def span_of(a):
+    """the universe.tsv extent of entry a: residue.span over the instructions it reaches (R3 bodies: scx, committed code: extent_insns)"""
+    I = scx.get(a)
+    return residue.span(a, ((x, I[x][0]) for x in I) if I is not None else ((x, insns[x][0]) for x in extent_insns(a)))
 def cl_range(a):
     p = parent.get(a)
     if p is not None and p in entries: return p, p + fsize[p]
-    I = scx.get(a)
-    return a, a + (sum(y - x for x, y in uni(I)) if I is not None else sum(insns[x][0] for x in extent_insns(a)))
+    return a, a + span_of(a)
 def cl_targets(a, kids):
     lo, hi = cl_range(a); own = tuple(x for x in kids.get(lo, ()) if lo <= x < hi)
     key = (lo, hi, a, own)
@@ -375,14 +381,14 @@ def cl_targets(a, kids):
             elif m == 'jecxz' and not lo <= (o[0].imm & 0xffffffff) < hi: jx.add(x); ts.add(o[0].imm & 0xffffffff)      # jecxz leaving the range: a direct jump out (f_sys, f_flow.jump_out)
             if m not in ('jmp', 'ret', 'retf', 'hlt', 'ud2') and not (m == 'int3' and x + g.size >= hi) and x + g.size not in ins and x + g.size not in bad:       # explore's own stop rule: a fall-out is a control transfer to the successor (f_flow.jump_out)
                 ts.add(x + g.size); cl_ft.add((a, x + g.size))
-        cl_cache[key] = (cs, ts, jx)
+        cl_cache[key] = (cs, ts, jx, residue.body_facts(ins, tabs, None, intext, imports))
     return cl_cache[key]
 while True:
     kids = {}
     for x, q in parent.items(): kids.setdefault(q, []).append(x)
     miss = {}
     for a in sorted(entries):
-        cs, ts, jx = cl_targets(a, kids); cl_jx |= {(a, x) for x in jx}
+        cs, ts, jx, _rf = cl_targets(a, kids); cl_jx |= {(a, x) for x in jx}
         for kd, T in (('call', cs), ('tail', ts)):
             for t in T:
                 if t in entries: continue
@@ -405,12 +411,19 @@ for a in sorted(entries):
     if not isd and a not in parent: extsum += ex
     fts = [nm for i, nm in enumerate(FEATS) if ft >> i & 1]; fe.update((nm, isd) for nm in fts)
     fl = sorted(kinds[a] - {pk}) + fts + (['baddecode'] if a in bad_entries else []) + (['ud'] if a in udset else []) + (['parent=%08x' % parent[a]] if a in parent else [])
-    rows.append('%08x\t%s\t%d\t%s' % (a, pk, fsize.get(a, ex), ','.join(fl) or '-'))
+    rows.append('%08x\t%s\t%d\t%s' % (a, pk, fsize.get(a, span_of(a)), ','.join(fl) or '-'))
     if not isd and a not in scx: ss_ = set(xs); eclo += sum(1 for x in xs for t in insns[x][4] if intext(t) and t not in entries and t not in ss_)       # closure check (report only)
     rg = uni(I) if a in scx else codemap.ranges(xs, lambda x: insns[x][0]); rgs.append('%08x\t%s' % (a, codemap.rng_str(rg))); s_ = sum(y - x for x, y in rg); rbad += (s_ != ex) if not isd else (s_ > fsize[a] + 15); rdec += isd
+kids = {}
+for x, q in parent.items(): kids.setdefault(q, []).append(x)
+RI = {}; NRS = {a for a, _ in NRR}                                      # retn.tsv: how each entry returns (residue.retn_rows)
+for a in sorted(entries):
+    cs_, ts_, jx_, rf_ = cl_targets(a, kids)
+    RI[a] = dict(rets=rf_['rets'], far=rf_['far'], open=rf_['open'], tails={t for t in ts_ if t in entries}, outside=any(t not in entries for t in ts_), noreturn=a in NRS)
 os.makedirs(os.path.dirname(OUT), exist_ok=True); HD = '# base=0x%08x: absolute VAs at the preferred image base (not RVAs)' % base
-open(OUT, 'w').write(HD + '; columns: entry, kind, extent, flags; extent is the SUM of the bytes the entry reaches (not a contiguous span; decomp rows: the declared function size), see ranges.tsv\n' + '\n'.join(rows) + '\n')
+open(OUT, 'w').write(HD + '; columns: entry, kind, extent, flags; extent is the SPAN [entry, entry + extent) that holds every instruction the entry reaches at or above it (the range the lifter takes; decomp rows: the declared function size; the bytes reached: ranges.tsv)\n' + '\n'.join(rows) + '\n')
 open(OUTD + '/ranges.tsv', 'w').write(HD + '; columns: entry, half-open ranges start-end (hex) of the instruction bytes reached\n' + '\n'.join(rgs) + '\n')
+rc = residue.write_retn(OUTD, HD, residue.retn_rows(RI)); print('retn.tsv %d rows: %s' % (len(RI), dict(sorted(rc.items()))))
 open(OUTD + '/noreturn.tsv', 'w').write(HD + '; columns: entry, reason\n' + ''.join('%08x\t%s\n' % kv for kv in NRR))
 print('R3 pointer entries: %d new (%d insn-start of decoded code, %d bodies re-read from their first byte, %d of them hit undecodable bytes #UD, %d inside decomp functions); direct targets of those bodies: %s' % (
     len(r3set), len(r3set) - len(scx), len(scx), len(udset), sum(1 for a in r3set if a in parent), dict(sorted(r3call.items()))))
@@ -422,7 +435,8 @@ print('ranges.tsv %d rows, noreturn.tsv %d rows; range-sum vs extent mismatches 
 def gate(green, TNu, why):
     open(OUTD + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap' + ('.' + NAME if STRICT else ''), 'status': 'green' if green else 'red', 'universe': TNu, 'certified': TNu - unexpl, 'uncertified': unexpl}) + '\n')
     print('gate l3.codemap%s: %s (certified %d of %d, uncertified %d, rejected pointers %d, bad-decode entries %d)%s' % ('.' + NAME if STRICT else '', 'green' if green else 'red', TNu - unexpl, TNu, unexpl, len(rejects), len(bad_entries), ''.join('; RED: ' + w for w in why)))
-    sys.exit(0 if green else 1)
+    bad = residue.entries_on_data(OUTD); print('invariant entries on class-3 data bytes: %d%s' % (len(bad), ' RED: ' + ' '.join('%08x' % a for a in bad[:8]) if bad else ''))
+    sys.exit(0 if green and not bad else 1)
 CL, unexpl, cls = codemap.finish(U); cc = Counter(cls)
 if not STRICT: print('noreturn: %d entries never return (seeds: thrower %s); %d instructions / %d bytes (decomp %d, non-decomp %d) only flowed after such calls and are no longer reached; entry set unchanged (%d)' % (NRN, 'yes' if eh.thrower in entries else 'no', NRI, NRB[0], NRB[1], NRB[0] - NRB[1], len(entries)))
 if not STRICT:

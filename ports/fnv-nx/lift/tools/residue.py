@@ -17,6 +17,112 @@ DATA = 9
 TERMS = {'ret', 'retf', 'jmp', 'int3', 'ud2', 'iret', 'iretd'}
 
 
+def disp_only(md, text, T0, cov, r, bad=()):
+    """R3 REFINED (owner order of the lead, 2026-11-12): a relocated in-span value V is a code entry iff V can become a run-time value, i.e. V occurs in a relocated data word or as an immediate
+    operand or as the effective address of a lea. A relocation that sits ONLY in the 4-byte displacement of a non-lea memory operand of an instruction of reached flow (jmp [r*4+V], movzx r,[r+V],
+    mov r,[V], call [V], ...) never yields V as a value: the effective-address computation consumes the displacement inside address generation (a base + disp form gives V + base as an address, never
+    V). So V is a data address, and its bytes are code only if flow reaches them.
+    True iff the relocation at site r is such a displacement. md: capstone disassembler; text/T0: executable bytes and their base; cov[o] == 1 starts a reached instruction, 2 is its interior;
+    bad: instruction starts that are not trusted (a relocated dword straddling its operand fields = decoding ran into data): their sites stay value sites.
+    THE ONE FUNCTION: modlift.py (modules) and universe.py (exe) both filter the relocated values through it, and the closure / unent check reads the filtered list."""
+    o = r - T0
+    if not (0 <= o < len(cov)) or not cov[o]:
+        return False
+    s0 = o
+    while s0 > 0 and cov[s0] != 1:
+        s0 -= 1
+    if T0 + s0 in bad:
+        return False
+    ins = next(md.disasm(text[s0:s0 + 15], T0 + s0, 1), None)
+    if ins is None or ins.mnemonic == 'lea' or ins.disp_size != 4 or T0 + s0 + ins.disp_offset != r:
+        return False
+    if ins.imm_size == 4 and T0 + s0 + ins.imm_offset == r:
+        return False
+    return any(op.type == 3 and op.mem.disp & 0xffffffff == int.from_bytes(text[o:o + 4], 'little') for op in ins.operands)       # 3 = X86_OP_MEM
+
+
+def entries_on_data(facts_dir):
+    """INVARIANT (R3 refined): no universe entry starts on a byte that codemap.tsv classes as data named by a relocation. The universe and the codemap come from one rule, so an entry over table bytes
+    would be a lifted body over data. -> sorted entry addresses violating it. Reads <facts>/universe.tsv and <facts>/codemap.tsv; writes the count into gate_codemap.json (key entries_on_data) and
+    turns its status red when nonzero."""
+    cm = []
+    for l in open(os.path.join(facts_dir, 'codemap.tsv')):
+        f = l.rstrip('\n').split('\t')
+        if len(f) >= 3 and not l.startswith('#') and f[2] == 'data-reloc':
+            cm.append((int(f[0], 16), int(f[0], 16) + int(f[1])))
+    cm.sort(); st = [a for a, b in cm]; bad = []
+    for l in open(os.path.join(facts_dir, 'universe.tsv')):
+        f = l.rstrip('\n').split('\t')
+        if len(f) < 3 or l.startswith('#'):
+            continue
+        a = int(f[0], 16); i = bisect.bisect_right(st, a) - 1
+        if i >= 0 and cm[i][0] <= a < cm[i][1]:
+            bad.append(a)
+    g = os.path.join(facts_dir, 'gate_codemap.json')
+    if os.path.exists(g):
+        j = json.load(open(g)); j['entries_on_data'] = len(bad)
+        if bad:
+            j['status'] = 'red'
+        open(g, 'w').write(json.dumps(j) + '\n')
+    return sorted(bad)
+
+
+def span(entry, ins):
+    """universe.tsv `extent` for every image, one meaning: the SPAN [entry, entry + extent) that holds every instruction the entry reaches at or above it (a reached instruction below the entry is outside:
+    a jump to it leaves the range) = the largest end of an instruction starting at or above the entry, minus the entry. ins: iterable of (address, size) of the instructions the entry reaches."""
+    return max([a + n - entry for a, n in ins if a >= entry] or [0])
+
+
+def body_facts(ins, tabs, entries, intext, imports):
+    """what the body of one entry (the lifter's explore over [entry, entry + span), `ins`: address -> capstone instruction, `tabs`: jump tables by jmp address) says about how it returns:
+    -> dict(rets = {N} the `ret N` operands of its ret sites (0 for a plain ret), far = it has a retf / iret, open = None or a reason (an indirect jmp that is not a jump table, an IAT thunk is
+    named import!dll!name, a transfer target outside the executable sections: the callee is not known statically)). Tails (jumps and fall-throughs leaving the range) come from the caller."""
+    rets, far, op = set(), False, []
+    for a, g in ins.items():
+        m = g.mnemonic.split(' ')[-1]; o = g.operands
+        if m == 'ret':
+            rets.add(o[0].imm & 0xffff if o else 0)
+        elif m in ('retf', 'iret', 'iretd'):
+            far = True
+        elif m == 'jmp' and o[0].type != 2 and a not in tabs:       # 2 = X86_OP_IMM
+            sl = o[0].mem.disp & 0xffffffff if o[0].type == 3 and not o[0].mem.base and not o[0].mem.index else None
+            op.append('import:' + imports[sl] if sl in imports else 'indirect-jmp')
+    return dict(rets=rets, far=far, open=sorted(set(op)))
+
+
+def retn_rows(info):
+    """facts/<img>/retn.tsv: `entry pop N`, one row per entry. info[e] = dict(rets, far, open (list of reasons), tails (entries the body leaves to by a jump or a fall-through),
+    outside (a leaving target that is no entry: dispatcher), noreturn (e in the NORETURN set)). Rule: the set of `ret N` sites reachable from the entry in its body, with every tail entry's set added
+    (least fixed point over the tail graph); {0} -> caller, {N>0} -> callee N, several values -> mixed, no ret site -> noreturn, and `open` when some path leaves to an unknown callee (an indirect jmp,
+    an import thunk, a target outside the executable sections) or returns with retf / iret: never a guess. -> [(entry, pop, N, note)], pop in caller | callee | mixed | noreturn | open."""
+    V = {e: set(i['rets']) for e, i in info.items()}; OP = {e: set(i['open']) | ({'outside'} if i['outside'] else set()) | ({'far-return'} if i['far'] else set()) for e, i in info.items()}
+    ch = True
+    while ch:
+        ch = False
+        for e, i in info.items():
+            for t in i['tails']:
+                if t in info:
+                    if not V[t] <= V[e]: V[e] |= V[t]; ch = True
+                    if not OP[t] <= OP[e]: OP[e] |= OP[t]; ch = True
+    rows = []
+    for e in sorted(info):
+        v = V[e]
+        if info[e]['noreturn']: rows.append((e, 'noreturn', '-', 'NORETURN set'))
+        elif OP[e]: rows.append((e, 'open', '-', ','.join(sorted(OP[e])) + (' rets=%s' % ','.join(map(str, sorted(v))) if v else '')))
+        elif not v: rows.append((e, 'noreturn', '-', 'no ret site'))
+        elif v == {0}: rows.append((e, 'caller', '0', '-'))
+        elif len(v) == 1: rows.append((e, 'callee', str(next(iter(v))), '-'))
+        else: rows.append((e, 'mixed', '-', 'rets=' + ','.join(map(str, sorted(v)))))
+    return rows
+
+
+def write_retn(facts_dir, hd, rows):
+    open(os.path.join(facts_dir, 'retn.tsv'), 'w').write(hd.rstrip() + '; columns: entry, pop (caller: every reachable ret pops 0 | callee: every ret pops N | mixed | noreturn | open), N (callee only), note; rule residue.retn_rows (ret sites reachable in the body by flow, tail entries take their own value)\n'
+                                                      + ''.join('%08x\t%s\t%s\t%s\n' % r for r in rows))
+    from collections import Counter
+    return Counter(r[1] for r in rows)
+
+
 def closure(rvals, entries, facts_dir):
     """-> SimpleNamespace(complete, reason, unent, s4_status, s4_viol). rvals: [(site, value)] of every relocated dword whose value lies in an executable section; entries: the entry set."""
     unent = sorted({v for r, v in rvals if v not in entries})

@@ -25,7 +25,7 @@ PRI = ['entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-co
 CN = {1: 'entry-nondecomp', 2: 'entry-nondecomp', 3: 'data-pe-header', 4: 'padding', 5: 'data-reloc', 6: 'dead-gap', 9: 'data-unreached', 8: 'UNEXPLAINED'}      # the exe's class names (codemap.py CLS)
 M32 = 0xffffffff
 
-def run(arg):
+def _run(arg, XEX):
     path, mrow = pemod.locate(arg)      # modules.tsv row (missing = KeyError) and the file (sha256 + size checked = ValueError)
     name = os.path.splitext(mrow.name)[0]; outd = os.environ.get('FNVNX_FACTS_OUT', '/home/user/l3facts2') + '/' + name; os.makedirs(outd, exist_ok=True)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
@@ -35,7 +35,8 @@ def run(arg):
     for n, a, z, ro in M.xs: V[a - T0:a - T0 + z] = b'\1' * z; tx[a - T0:a - T0 + z] = M.d[ro:ro + z]
     text = bytes(tx)
     def intext(a): return T0 <= a < T1 and V[a - T0] == 1
-    rvals = [(r, v) for r, v in ((r, u32(r)) for r in relocs) if intext(v)]
+    rvals_all = [(r, v) for r, v in ((r, u32(r)) for r in relocs) if intext(v)]
+    rvals = [(r, v) for r, v in rvals_all if r not in XEX]          # R3 refined (residue.disp_only): the value sites; XEX = the displacement-only sites of the previous round
     ent = {}; roots = set(); queue = deque(); dec = {}; cov = bytearray(TN); ud = set(); xf = set(); misfit = set(); callers = {}; calltg = {}; leaves = set(); jtab = {}; jins = []
     def add(a, kind, proven=False):
         if not intext(a): return False
@@ -160,10 +161,10 @@ def run(arg):
                 elif m == 'jecxz' and not lo <= (o[0].imm & M32) < hi: jx.add(a_); ts.setdefault(o[0].imm & M32, a_)      # jecxz leaving the range: a direct jump out (f_sys, f_flow.jump_out)
                 if m not in ('jmp', 'ret', 'retf', 'hlt', 'ud2') and not (m == 'int3' and a_ + g.size >= hi) and a_ + g.size not in ins and a_ + g.size not in bad:      # explore's own stop rule: the path falls out of what was decoded
                     ts.setdefault(a_ + g.size, a_); ft.add(a_ + g.size)         # a fall-through is a control transfer to its successor, like `jmp nxt` (f_flow.jump_out)
-            lcache[k] = (cs, ts, jx, ft)
+            lcache[k] = (cs, ts, jx, ft, residue.body_facts(ins, tabs, None, intext, imports))
         return lcache[k]
     def span(e, xs):        # the lifter range of entry e is [e, e + span): the smallest interval from e that holds every instruction e reaches (a reached instruction below e is outside: a jump to it leaves the range)
-        return max([a + dec[a][0] - e for a in xs if a >= e] or [0])
+        return residue.span(e, ((a, dec[a][0]) for a in xs))      # the one function (residue.span), shared with the exe producer
     while True:
         while True:
             while queue: descend(queue.popleft())
@@ -172,7 +173,7 @@ def run(arg):
         E = es(); NR, res = codemap.noreturn_lfp(E, trav, {eh.thrower} & set(ent)); exts = {e: res[e][0] for e in E}; edges = {e: res[e][1] for e in E}
         rounds += 1; n_before = n_before or len(E); viol = {}; outside = {}; jxs = set(); ftall = set()
         for e in E:
-            cs, ts, jx, ft = lc_targets(e, span(e, exts[e])); jxs |= {(e, x) for x in jx}; ftall |= ft
+            cs, ts, jx, ft, _rf = lc_targets(e, span(e, exts[e])); jxs |= {(e, x) for x in jx}; ftall |= ft
             for kd, T in (('call', cs), ('tail', ts)):
                 for t, a_ in T.items():
                     if t in ent: continue
@@ -256,6 +257,11 @@ def run(arg):
         out.append('%08x\t%s\t%d\t%s' % (e, pk, span(e, exts[e]), ','.join(fl)))
     open(outd + '/universe.tsv', 'w').write('# base=0x%08x: addresses are absolute VAs at the assigned load base (not RVAs; preferred base 0x%08x); columns: entry, kind, extent, flags; extent is the SPAN [entry, entry + extent) that holds every instruction the entry reaches at or above it (the range the lifter takes; the bytes reached: ranges.tsv)\n' % (M.base, M.pref) + '\n'.join(out) + '\n')
     hd = '# base=0x%08x: absolute VAs at the assigned load base (not RVAs)\n' % M.base; bad = 0; rg = []
+    RI = {}                                                  # retn.tsv: how each entry returns (residue.retn_rows)
+    for e in E:
+        cs_, ts_, jx_, ft_, rf_ = lc_targets(e, span(e, exts[e]))
+        RI[e] = dict(rets=rf_['rets'], far=rf_['far'], open=rf_['open'], tails={t for t in ts_ if t in ent}, outside=any(t not in ent for t in ts_), noreturn=e in NR)
+    rc = residue.write_retn(outd, hd, residue.retn_rows(RI)); print('retn.tsv %d rows: %s' % (len(RI), dict(sorted(rc.items()))))
     for e, row in zip(E, out):
         r = codemap.ranges(exts[e], lambda a: dec[a][0]); bad += max([b - e for a, b in r if b > e] or [0]) != int(row.split('\t')[2]); rg.append('%08x\t%s' % (e, codemap.rng_str(r)))
     open(outd + '/ranges.tsv', 'w').write(hd.rstrip() + '; columns: entry, half-open ranges start-end (hex) of the instruction bytes reached\n' + '\n'.join(rg) + '\n')
@@ -394,4 +400,25 @@ def run(arg):
     print('mnemonics in proven code not in the exe universe (%d%s): %s' % (len([k for k in mp if k not in exe_mn]), '' if exe_mn else ', exe list missing', ' '.join('%s=%d' % kv for kv in new_mn)))
     open(outd + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap.' + name, 'status': 'green' if green else 'red', 'universe': TN - cc[7], 'certified': TN - cc[7] - nunx, 'uncertified': nunx, 'targets': len(targets), 'targets_certified': cert}) + '\n')
     print('gate l3.codemap.%s: %s (bytes %d, unexplained %d; targets %d, certified %d)%s' % (name, 'green' if green else 'red', TN - cc[7], nunx, len(targets), cert, ''.join('; RED: ' + w for w in why)))
-    return 0 if green else 1
+    return (0 if green else 1), {r for r, v in rvals_all if residue.disp_only(md, text, T0, cov, r, misfit)}
+
+
+def run(arg):
+    """R3 refined, to its fixed point: X = {relocation sites that are only the displacement of a non-lea memory operand of an instruction of the flow} (residue.disp_only); the flow depends on the entries,
+    the entries on the value sites (not in X). Round k runs the whole producer with X_k excluded and yields X_{k+1} = X(flow of round k); X_0 = empty. Done when X_{k+1} == X_k: every excluded site is a
+    displacement inside the final flow and every entry is justified by a value site or a root. A cycle or no fixed point in 12 rounds is an error (never a result)."""
+    import io, contextlib
+    X = frozenset(); seen = []
+    for k in range(12):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code, Xo = _run(arg, X)
+        if frozenset(Xo) == X:
+            sys.stdout.write(buf.getvalue()); print('R3 refinement: fixed point after %d rounds, %d displacement-only relocation sites excluded from the entry rule' % (k + 1, len(X)))
+            od = os.environ.get('FNVNX_FACTS_OUT', '/home/user/l3facts2') + '/' + os.path.splitext(pemod.locate(arg)[1].name)[0]
+            bad = residue.entries_on_data(od); print('invariant entries on class-3 data bytes: %d%s' % (len(bad), ' RED: ' + ' '.join('%08x' % a for a in bad[:8]) if bad else ''))
+            return code or (1 if bad else 0)
+        seen.append(X); X = frozenset(Xo)
+        if X in seen:
+            raise RuntimeError('R3 refinement does not converge (cycle at round %d)' % k)
+    raise RuntimeError('R3 refinement: no fixed point in 12 rounds')
