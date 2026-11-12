@@ -33,7 +33,7 @@ def blocked(err):
     print('blocker: platform root admission (L5) and link.roots (L1); host behaviour comes from the L4 boot machine shared model, never from a test file')
     sys.exit(3)
 import liftgen   # tools/liftgen.py PACK_CXX_FLAGS: the ONE definition of the lifted-code flags (the pack recipe and every test compile with it)
-FLAGS = ['-c'] + liftgen.PACK_CXX_FLAGS + ['-DFNVL_FLAGS_IO']      # + the test's I/O hook and -c: they compile no product code differently
+FLAGS = ['-c'] + liftgen.semantics() + liftgen.PACK_CXX_FLAGS + ['-DFNVL_FLAGS_IO']      # + the test's I/O hook and -c: they compile no product code differently
 HARN, HARN_END, CPU, ASTACK, RETPAD = 0xE0000000, 0xE2000000, 0xE1000000, 0xE1F00000, 0xE1FF0000
 HX = 0xE1E00000                  # x86 oracle harness page (inside the guarded range: a test access to it counts as a collision)
 FSB = 0x7FFDF000                 # fs base on both sides
