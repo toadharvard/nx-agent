@@ -21,3 +21,11 @@ status: готово, тесты зелёные на стенде (msvcmodel и�
 4. `nativerows.py`: несколько символов на один адрес (ctor c1/c2) — ошибка, а не выбор. Что делает N1 для ctor c1/c2 — вопрос L1.
 5. #UD, который обработчик «продолжает» (ContinueExecution), перевыбрасывается на том же fp (x86: возобновление по тому же EIP). Обработчик, правящий EIP на другой адрес и возвращающийся по сентинелу, из `fnvnx_dispatch` не выразим: возврата функции-указателя нет.
 6. `fnvnx_call_fp` — `__thread` (initial-exec): платформа/загрузчик обязаны выделять TLS-блок гостевым потокам; стенд делает это сам.
+
+## Update (corrections of the L3a lead, L2 review)
+- Rule 3 (#UD) is withdrawn. dispgen.py --closure F makes a closure target with no entry a build error (2a9138eb). The run-time miss paths (rt/dispatch.c, fnvl_nobody in rt/enter.cc and rt/rt.c) are NOT yet replaced by fnvnx_reach_violation(fact_id): loader/include/fnvnx_reach.h exists only on claude/fnv-l1-contract, and gate_reach.py has no request kind for "every fp reaching the dispatcher is a closure key", so no certificate id exists. Waiting for L1/lead. Any such certificate is valid only after the 12 dynamic GetProcAddress/LoadLibrary sites are resolved (measurement build until then).
+- Plugin: hfa() deleted, classes come from the backend (pass_by_reference, function_arg, function_value). Commit af7283ad (for L2), the x flag for non-POD results 
+  is a separate commit. Element codes hf hd hq hh hv8 hv16.
+- MSVC return rule now from documents: Microsoft "Argument Passing and Naming Conventions" (8-byte structures in EDX:EAX, larger through the hidden pointer, non-PODs never in registers) and Agner Fog "Calling conventions" table 7 (Microsoft 32 bit: PS = hidden pointer on the stack even under fastcall for too-big and non-power-of-2 sizes; P = non-POD, register under fastcall not stated). Under fast a non-POD or `m` result stays a build error (the register is undocumented).
+- Tests: lift/test/descclasstest.py (descriptor classes vs the compiler's own prologue/epilogue registers, 20 types, argument and result), bridgegentest, dispgentest, disptest 14/14, verify/tests/test_plugins.py 39 PASS in the declared env.
+- Needs from others: L1 descs.tsv fact over .fnvnx.disp of admitted roots; L5 TLS block for fnvnx_call_fp (initial/local-exec).
