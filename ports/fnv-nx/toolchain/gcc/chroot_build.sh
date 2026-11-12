@@ -25,7 +25,12 @@ PY
 mkdir -p "$CH/var/lib/dpkg" "$CH/proc" "$CH/etc"; : > "$CH/var/lib/dpkg/status"
 dpkg --root="$CH" --force-all --unpack "$DEBS"/debs/*.deb > "$OUT/dpkg-unpack.log" 2>&1 || { tail -20 "$OUT/dpkg-unpack.log"; exit 1; }
 mount --bind /proc "$CH/proc"
-trap 'umount "$CH/src" "$CH/dl" "$CH/dkp" "$CH/gc" "$CH/proc" 2>/dev/null || true' EXIT
+# the standard device nodes (a missing /dev/null is created by the first `>/dev/null` as a regular file that then collects
+# output and breaks configure's config.status): bind the host's character devices over empty files
+mkdir -p "$CH/dev"
+DEVS="null zero full random urandom tty"
+for n in $DEVS; do rm -f "$CH/dev/$n"; : > "$CH/dev/$n"; mount --bind "/dev/$n" "$CH/dev/$n"; done
+trap 'for n in $DEVS; do umount "$CH/dev/$n" 2>/dev/null || true; done; umount "$CH/src" "$CH/dl" "$CH/dkp" "$CH/gc" "$CH/proc" 2>/dev/null || true' EXIT
 chroot "$CH" /usr/bin/dpkg --force-all --configure -a > "$OUT/dpkg-configure.log" 2>&1 || { tail -20 "$OUT/dpkg-configure.log"; exit 1; }
 chroot "$CH" dpkg-query -W -f='${Package}=${Version}\n' > "$OUT/chroot-packages.txt"
 python3 - "$DEBS" "$OUT/chroot-packages.txt" <<'PY'
