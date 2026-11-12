@@ -63,6 +63,11 @@ extern "C" { void (*fnvl_dispatch(u32 image_addr))(void);
    value type loads, assignment stores. */
 template<class T> struct GM;
 template<class T> struct LKA;
+/* Rule LK-ONLY by construction: every plain accessor macro (M8..M64, MF32, MF64, MX) passes the name `lkwin_` to its accessor. Outside a locked instruction `lkwin_` is the global NoLkWin and the call
+   compiles; LK_BEGIN declares a block-local `lkwin_` of another type, so a plain guest access spelled inside the window of a locked instruction (by any emitter path) does not compile.
+   The accessors themselves (GM, GMF, GMX) are named only here. */
+struct NoLkWin {}; struct LkWin {};
+static constexpr NoLkWin lkwin_ = {};
 #define FNVL_A_ "mov %w[a], %w[a]\n"
 #define FNVL_K_ "movz %w[a], %[lo]\nmovk %w[a], %[hi], lsl 16\n"
 #define FNVL_GM_(T, R, SUF, MASK) \
@@ -83,7 +88,8 @@ template<> struct GM<T> { u32 a; \
     else __asm__ volatile(FNVL_A_ "tst %w[a], " #MASK "\nb.ne 1f\nstlr" SUF " %" R "[v], [%x[a]]\nb 2f\n1: dmb ishst\nstr" SUF " %" R "[v], [%x[a]]\n2:" \
                           : [a]"+r"(a_) : [v]"r"(v) : "memory", "cc"); \
     return v; } \
-  __attribute__((always_inline)) T operator=(const GM &o) const { return *this=(T)o; } };
+  __attribute__((always_inline)) T operator=(const GM &o) const { return *this=(T)o; } \
+  __attribute__((always_inline)) const GM &g(NoLkWin) const { return *this; } };
 FNVL_GM_(u8, "w", "b", 0)
 FNVL_GM_(u16, "w", "h", 1)
 FNVL_GM_(u32, "w", "", 3)
@@ -91,13 +97,14 @@ FNVL_GM_(u64, "x", "", 7)
 template<class F,class T> struct GMF { u32 a;      /* a float / double cell: the same access on its bit pattern */
   __attribute__((always_inline)) operator F() const { union{ T u; F f; } x; x.u=(T)GM<T>{a}; return x.f; }
   __attribute__((always_inline)) F operator=(F v) const { union{ T u; F f; } x; x.f=v; GM<T>{a}=x.u; return v; }
-  __attribute__((always_inline)) F operator=(const GMF &o) const { return *this=(F)o; } };
-#define M8(a) (GM<u8>{(u32)(a)})
-#define M16(a) (GM<u16>{(u32)(a)})
-#define M32(a) (GM<u32>{(u32)(a)})
-#define M64(a) (GM<u64>{(u32)(a)})
-#define MF32(a) (GMF<float,u32>{(u32)(a)})
-#define MF64(a) (GMF<double,u64>{(u32)(a)})
+  __attribute__((always_inline)) F operator=(const GMF &o) const { return *this=(F)o; }
+  __attribute__((always_inline)) const GMF &g(NoLkWin) const { return *this; } };
+#define M8(a) (GM<u8>{(u32)(a)}.g(lkwin_))
+#define M16(a) (GM<u16>{(u32)(a)}.g(lkwin_))
+#define M32(a) (GM<u32>{(u32)(a)}.g(lkwin_))
+#define M64(a) (GM<u64>{(u32)(a)}.g(lkwin_))
+#define MF32(a) (GMF<float,u32>{(u32)(a)}.g(lkwin_))
+#define MF64(a) (GMF<double,u64>{(u32)(a)}.g(lkwin_))
 /* LOCK-prefixed instructions and XCHG with memory (SDM Vol 2 "LOCK", "XCHG"): the instruction is one atomic read-modify-write of its memory operand.
    Rule (fnvlift/core.py lock mode): the instruction body runs on a private copy of the operand (LK8..LK64: the first use loads the cell, a store
    changes the copy), then lk_commit replaces the cell by the copy iff it still holds the loaded value (ldaxr / stlxr compare-and-swap); if not, the
@@ -149,7 +156,7 @@ template<class T> static inline __attribute__((always_inline)) bool lk_commit(LK
   bool ok=LKA<T>::commit(s.a,s.o,s.n,pc);
   if(!ok) s.st=0;
   return ok; }
-#define LK_BEGIN(n) LKS<u##n> lk_={0,0,0,0}; const u32 lkr_[8]={eax,ecx,edx,ebx,esp,ebp,esi,edi}, lkf_[6]={cf,zf,sf,of,pf,af}
+#define LK_BEGIN(n) const LkWin lkwin_ = {}; LKS<u##n> lk_={0,0,0,0}; const u32 lkr_[8]={eax,ecx,edx,ebx,esp,ebp,esi,edi}, lkf_[6]={cf,zf,sf,of,pf,af}
 #define LK_RESTORE do{ eax=lkr_[0];ecx=lkr_[1];edx=lkr_[2];ebx=lkr_[3];esp=lkr_[4];ebp=lkr_[5];esi=lkr_[6];edi=lkr_[7]; cf=lkf_[0];zf=lkf_[1];sf=lkf_[2];of=lkf_[3];pf=lkf_[4];af=lkf_[5]; }while(0)
 #define LK8(a) (LKP<u8>{&lk_,(u32)(a)})
 #define LK16(a) (LKP<u16>{&lk_,(u32)(a)})
@@ -184,8 +191,9 @@ typedef xmm_t __attribute__((aligned(1))) xmm_ua;
 struct GMX { u32 a;        /* a 16-byte cell: two 8-byte accesses under the rule above; the second address wraps at 2^32 like the first */
   __attribute__((always_inline)) operator xmm_t() const { xmm_t r; r.q[0]=(u64)GM<u64>{a}; r.q[1]=(u64)GM<u64>{a+8u}; return r; }
   __attribute__((always_inline)) xmm_t operator=(const xmm_t &v) const { GM<u64>{a}=v.q[0]; GM<u64>{a+8u}=v.q[1]; return v; }
-  __attribute__((always_inline)) xmm_t operator=(const GMX &o) const { return *this=(xmm_t)o; } };
-#define MX(a) (GMX{(u32)(a)})
+  __attribute__((always_inline)) xmm_t operator=(const GMX &o) const { return *this=(xmm_t)o; }
+  __attribute__((always_inline)) const GMX &g(NoLkWin) const { return *this; } };
+#define MX(a) (GMX{(u32)(a)}.g(lkwin_))
 static inline xmm_t mmx_x(u64 v){ xmm_t r; r.q[0]=v; r.q[1]=0; return r; }
 template<class T> struct FX;
 template<> struct FX<float>{ typedef u32 U; static const U S=0x80000000u, E=0x7f800000u, M=0x7fffffu, Q=0x400000u; };
