@@ -10,12 +10,14 @@ One rule over the facts of the images (the same argflow.Image and may-write rule
            (norm_dll'd); any other leaf, a break, or an escape of the slot reference makes the site open.  A closed site
            loads exactly its names (a name no file answers makes LoadLibrary fail: no module).
   set      images.image_set over the loads (fixpoint): members with range facts are derived once, their closed names enter the
-           walk and can add members; the set only grows.  A member without range facts has no row (its sites are unknown).
+           walk and can add members; the set only grows.  An open site may load any file of the declared set (--dir), so its image
+           loads every one of them.  The set is then checked against the pinned one (exepin.IMAGES, digests; a difference exits 2).  A member without range facts has no row (its sites are unknown).
 Outputs: loadlib.tsv (module, site, calls, api, status closed|open, names, breaks), images.tsv (name, pe, ranges or '-'), and the
 gate file `loadlib`: universe = sites + disagreements, certified = closed sites.
 Agreement with L5's dynsites.tsv (--sites): the LoadLibrary rows of every module that has a derivation must be exactly the sites found
 here; a site in only one of the two lists is uncertified (the two finders are one rule or the gate is red)."""
 import argparse
+import hashlib
 import os
 import sys
 
@@ -23,6 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import argflow
 import gatefile
 import dllkind
+import exepin
 import gpa_names
 import iat
 import images
@@ -103,12 +106,22 @@ def targets(per):
     return {m: sorted({n for r in per[m] for n in r[4]}) for m in sorted(per)}
 
 
-def fixpoint(exe_path, dirs, bridge, ranges_of, derive_image):
+def declared_files(dirs):
+    """[normalised names] of every dll file of the declared file set DIRS (the exe's directory and the installed redist): what an open LoadLibrary site may load."""
+    out = set()
+    for d in dirs:
+        out |= {iat.norm_dll(f) for f in os.listdir(d) if f.lower().endswith('.dll') and os.path.isfile(os.path.join(d, f))}
+    return sorted(out)
+
+
+def fixpoint(exe_path, dirs, bridge, ranges_of, derive_image, may_load=()):
     """The least image set under imports and resolved LoadLibrary names (images.py) and the derivation it needs.
     ranges_of(name) -> ranges path | None (the image has facts); derive_image(name, pe path, ranges path) -> derive() rows.
     -> (members [(name, pe path)], per {name: rows} for the members that have facts).  Every member is derived once; the loads of a
     derived member can add members, whose loads can add more; the set only grows (loads only grow), so the loop ends within the
-    number of dll files.  A member without facts has no row (its sites are unknown: the gate lists it)."""
+    number of dll files.  A member without facts has no row (its sites are unknown: the gate lists it).
+    MAY_LOAD: the declared file set's names.  An open site (a name the rule cannot derive) may load any file of the declared set, so a member with
+    an open site loads all of MAY_LOAD (the set stays a sound superset; classification drops bridge and declared names as for imports)."""
     per, loads = {}, {}
     while True:
         members = images.image_set(exe_path, dirs, bridge, loads)
@@ -117,7 +130,7 @@ def fixpoint(exe_path, dirs, bridge, ranges_of, derive_image):
             return members, per
         for n, p in todo:
             per[n] = derive_image(n, p, ranges_of(n))
-            loads[n] = sorted({x for r in per[n] for x in r[4]})
+            loads[n] = sorted({x for r in per[n] for x in r[4]} | (set(may_load) if any(r[3] != 'closed' for r in per[n]) else set()))
 
 
 def main(argv=None):
@@ -149,7 +162,12 @@ def main(argv=None):
         return derive(img)
 
     bridge = {iat.norm_dll(r['dll']) for r in iat.bridge_rows(a.bridge)[0]} if a.bridge else set()
-    members, per = fixpoint(a.exe, a.dir, bridge, ranges_of, derive_image)
+    members, per = fixpoint(a.exe, a.dir, bridge, ranges_of, derive_image, declared_files(a.dir))
+    try:   # the declared machine's image set is the pinned one (contract/exepin.py IMAGES: digests of every guest image DLL): checked here, where the set is made
+        exepin.check_images([(n, os.path.getsize(p), hashlib.sha256(open(p, 'rb').read()).hexdigest()) for n, p in members if n != me])
+    except exepin.ExePinError as e:
+        print('loadlib: %s' % e, file=sys.stderr)
+        return 2
     os.makedirs(a.out, exist_ok=True)
     with open(os.path.join(a.out, 'loadlib.tsv'), 'w', newline='\n') as fh:
         fh.write(tsv(per))

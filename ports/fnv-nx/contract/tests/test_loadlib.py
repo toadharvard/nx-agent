@@ -91,6 +91,11 @@ asked.clear()
 members, per = loadlib.fixpoint(d + "/A.exe", [d], BR, has, fake({"a.exe": rows(["z.dll"])}))
 check("a member without facts (z) has no row: unknown, listed by the gate", [n for n, _ in members] == ["a.exe", "z.dll"] and sorted(per) == ["a.exe"], (members, per))
 check("an open site contributes no name", [n for n, _ in loadlib.fixpoint(d + "/A.exe", [d], BR, has, fake({"a.exe": rows([], "open")}))[0]] == ["a.exe"])
+asked.clear()
+mm = loadlib.fixpoint(d + "/A.exe", [d], BR, has, fake({"a.exe": rows([], "open"), "b.dll": rows([])}), ["b.dll"])[0]
+check("an open site may load any file of the declared set: that file is an image (a sound superset)", [n for n, _ in mm] == ["a.exe", "b.dll"], mm)
+mm = loadlib.fixpoint(d + "/A.exe", [d], BR, has, fake({"a.exe": rows([]), "b.dll": rows([])}), ["b.dll"])[0]
+check("... a closed set of names loads nothing else", [n for n, _ in mm] == ["a.exe"], mm)
 
 per = {"x.dll": [(0x10, [0xe], "LoadLibraryA", "closed", ["a.dll"], []), (0x20, [0x1e], "LoadLibraryW", "open", [], ["1e name argument is imm 5"])]}
 text = loadlib.tsv(per)

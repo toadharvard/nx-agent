@@ -161,6 +161,21 @@ rows = [(0, gpa_names.derive_site(img, site_of('f_const', 0))), (1, gpa_names.de
 check('mixed-convention file: the call-VA row is closed, the slot-ref row is open (red), nothing converted', [r[1]['status'] for r in rows], ['closed', 'open'])
 d = gpa_names.derive_site(img, site_of('f_const', 0), 'LoadLibraryA')
 check('a call of another API is not a site of this one: open', (d['status'], any('not LoadLibraryA' in b for b in d['breaks'])), ('open', True))
+# a dynsites row whose call is in bytes no range covers has no derived site: red (only in dynsites), not certified by having nothing to derive
+cs = site_of('f_const', 0)
+rg2 = {s: [(s, e)] for s, e in a.funcs.values() if s != a.funcs['thunk'][0] and s != a.funcs['f_const'][0]}
+img2 = argflow.Image(data, 'syn.exe', rg2)
+img2.import_stack = img.import_stack
+d2 = gpa_names.derive_site(img2, cs)
+row = ('syn.exe', cs, 'GetProcAddress', 'dynamic')
+check('a row in unreached bytes is derived as unreached', d2['note'], 'unreached')
+import gatefile  # noqa: E402
+_w = gatefile.write
+got = []
+gatefile.write = lambda name, u, c, unc, detail: got.append((u, c, unc))
+gpa_names.gate([(row, d2), (('syn.exe', site_of('f_const', 0), 'GetProcAddress', 'dynamic'), gpa_names.derive_site(img, cs))])
+gatefile.write = _w
+check('gate: the unreached row is uncertified (only in dynsites), the reached one is certified', (got[0][0], got[0][1], any('only in dynsites' in x for x in got[0][2])), (2, 1, True))
 # cross-check: platform constant must be among the derived names
 res = [(('syn.exe', site_of('f_const', 0), 'GetProcAddress', 'mod.dll Foo'), pairs('f_const')),
        (('syn.exe', site_of('f_reg', 0), 'GetProcAddress', 'mod.dll Nope'), pairs('f_reg'))]

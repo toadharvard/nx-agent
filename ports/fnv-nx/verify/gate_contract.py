@@ -170,19 +170,6 @@ def images_of(w):
     return have, lack
 
 
-def check_pin(w):
-    """The declared machine's image set is the pinned one (contract/exepin.py IMAGES): the digests of every guest image DLL of the set the
-    loadlib stage wrote (images.tsv: name, pe, ranges); a difference is Red."""
-    p = os.path.join(w, "loadlib", "images.tsv")
-    if not os.path.isfile(p):
-        return
-    rows = [ln.split("\t") for ln in open(p).read().splitlines()[1:]]
-    try:
-        exepin.check_images([(f[0], os.path.getsize(f[1]), hashlib.sha256(open(f[1], "rb").read()).hexdigest()) for f in rows if not f[0].endswith(".exe")])
-    except exepin.ExePinError as e:
-        raise Red(str(e))
-
-
 def stages(w, doc, ext, rp, only=None):
     """{stage: (argv, [files it writes])} with paths inside the work dir W (contract/verdict.py's arguments). ONLY: a stage name; the image set (it
     reads the exe) is derived only for the stages that take it (gpa, reach, reachlink), so the other stages can be built without it."""
@@ -353,7 +340,6 @@ def _judge(gate, repo, cache, root, doc, rp, ext, w):
             u, c, ids = u + r2["universe"], c + r2["certified"], ids + [root + ":" + i for i in r2["uncertified"]]
             detail += "; loadlib: " + r2["detail"]
         if gate in IMAGE_GATES:                 # an image of the closure without range facts: a reported red item (the stage judged the rest)
-            check_pin(w)
             lack = images_of(w)[1]
             u, ids = u + len(lack), ids + [root + ":" + n for n in lack]
             detail += "".join("; %s has no range facts (owner L3a/L5)" % n for n in lack)

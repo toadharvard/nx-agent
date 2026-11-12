@@ -17,7 +17,7 @@ written (*, name): the platform must provide the name in every module.
 
 Output gpa_names.tsv: module, site, api, operand, status, modules, npairs, ndlls, pairs, uses, proof, breaks.
 proof = per use `call@va<-args`: name definition addresses | module definition addresses.  Gate `gpa` (gatefile.py): universe =
-GetProcAddress rows with a dynamic operand, certified = closed ones.  Cross-check: rows with a constant operand are derived
+GetProcAddress rows with a dynamic operand, certified = closed ones with a derived site (a row whose call is in unreached bytes is red: only in dynsites).  Cross-check: rows with a constant operand are derived
 too and compared with the platform's constant.  Check (--bridge): pairs the platform does not provide.
 Exe-derived: container and fnv-nx-build only.
 """
@@ -192,7 +192,10 @@ def tsv(results):
 
 def gate(results):
     dyn = [(r, d) for r, d in results if r[3] == 'dynamic']
-    unc = ['%s@%x' % (r[0], r[1]) for r, d in dyn if d['status'] != 'closed']
+    # a row of dynsites whose call is in bytes no range of the facts covers has no derived site: red as "only in dynsites" (the same rule as
+    # loadlib.py), never certified by having nothing to derive
+    unc = ['%s@%x%s' % (r[0], r[1], ':only in dynsites (the call is in unreached bytes)' if d['note'] == 'unreached' else '')
+           for r, d in dyn if d['status'] != 'closed' or d['note'] == 'unreached']
     return gatefile.write('gpa', len(dyn), len(dyn) - len(unc), unc, 'GetProcAddress dynamic sites with a derived name set')
 
 
