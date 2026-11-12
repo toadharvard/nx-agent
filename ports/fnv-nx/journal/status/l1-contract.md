@@ -498,3 +498,6 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - L5 ASM-501 (REMOVE): prologue-scan function boundaries in 7 manifest passes; removed by L3a's function fact.
   - Record accepted. The heuristic must be discharged before L5's platform root merges if its outputs are inputs of that root.
   - Escalated to the orchestrator for the transitional decision.
+- One L1 integration line: w16 builds claude/fnv-l1-contract-w16-int = trunk 4fb048ec + w14 integration (w10, w15, keep-going, G) + w16 dbfaefeb, all conflicts resolved by L1. L6's render/d3d9 root and L2 w6 go on top.
+- L5 manifest 8be98a3: import_escape.tsv has a row for every bridge row (1553) and `?` = unresolved (1459 resolved, 94 `?`); the missing-row default is gone. w18 handles `?` as open.
+  - Asked w15 for one manifest commit that also has call-VA dynsites and import_writes.tsv.
