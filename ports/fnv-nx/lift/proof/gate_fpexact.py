@@ -21,8 +21,8 @@ executed on the hardware and compared bit for bit with the functions of rt/rcpta
   certificate equals the four FNVL_RCP_REF_* constants of rt/rcpref.h (the same header rt/rcptab.c includes and the certifying program uses).
 A missing, unreadable or malformed certificate is a finding. Argument: the table functions are pure functions of 32 bits; the certificate
 states equality with the hardware on the whole domain for the exact source bytes whose hash it carries, on the reference identity; so the
-source named by the hash computes RCPSS / RSQRTSS of the reference CPU for every input. Registered assumptions (ports/fnv-nx/lift/ASSUMPTIONS.l3b.json): A-RCPHOST (the certifying run was made by farm/rcpcert.sh on a CPU
-with the reference identity; the certificate's hash is kept in the store) and A-RCPPURE (RCPSS / RSQRTSS are pure functions of the input
+source named by the hash computes RCPSS / RSQRTSS of the reference CPU for every input. Registered assumptions (verify/ASSUMPTIONS.json): ASM-320 = A-RCPHOST (the certifying run was made by farm/rcpcert.sh on a CPU
+with the reference identity; the certificate's hash is kept in the store) and ASM-321 = A-RCPPURE (RCPSS / RSQRTSS are pure functions of the input
 bits, independent of MXCSR).
 
 Check 2, every use goes through the table (item `rcp:<root>/<unit>`): an object contains no AArch64 reciprocal / reciprocal-square-root
@@ -63,7 +63,7 @@ object-level necessary condition:
   builtin or IFN_VEC_CONVERT) present in the function bodies the plugin saw, or from an asm; the plugin sees every body before the first
   transformation; outside the attributed helpers none exists, so the conversion instructions of the object are copies of the helpers'
   bodies. The helpers' own correctness (range guard, rounding mode, indefinite value) is not decided here: it is by review, and it is
-  listed per object in the output (`helpers` of each result file are the analysed helper functions). Registered assumptions (ASSUMPTIONS.l3b.json), none new:
+  listed per object in the output (`helpers` of each result file are the analysed helper functions). Registered assumptions (verify/ASSUMPTIONS.json), none new: ASM-801 (the native f2i rule, L2's fnvnx_ftoi; removed by gate:fpexact plus the f2i fact objects);
   A-F2IHELPERS (the helpers are correct: removed by the dependency on the gate forms, item `<root>:forms`), A-F2IKEY (an object and its result file
   come from the same compile: the recipe's stage key binds both), A-F2IASM (an inline asm without a float / vector operand and without an FP register
   clobber does no conversion; 3b backs it up for units with no site), A-F2ICONST (no conversion of a C literal occurs in lifted code), A-F2INATIVE

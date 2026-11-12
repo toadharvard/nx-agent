@@ -1341,10 +1341,50 @@
    "owner": "L3a"
   },
   {
+   "id": "ASM-320",
+   "text": "rt/rcptab.cert.json was produced by farm/rcpcert.sh on a CPU with the reference identity.",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+   ],
+   "aliases": [
+    "L3b:A-RCPHOST"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: rcptab.cert.json binds the table to a farm/rcpcert.sh run on the pinned reference host (host cpuid + run output sha256), checked by rcpcert",
+   "owner": "L3b"
+  },
+  {
+   "id": "ASM-321",
+   "text": "RCPSS/RSQRTSS are pure functions of the input bits: MXCSR does not influence them.",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+   ],
+   "aliases": [
+    "L3b:A-RCPPURE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: the exhaustive 2^32 run is repeated under every MXCSR RC×FTZ×DAZ combination (16) and every result recorded in the cert; rcpcert is red unless all 16 tables are equal",
+   "owner": "L3b"
+  },
+  {
+   "id": "ASM-331",
+   "aliases": [
+    "L3a:A3"
+   ],
+   "status": "REMOVE",
+   "owner": "L3b",
+   "text": "The sdm-class reference (float->int E1, compare flag mapping E2, fnstsw/fldcw/fnstenv/fnsave/frstor, cpuid, rdtsc) was transcribed from SDM prose and compared with the host; prose transcription is not a formal source.",
+   "removed_by": "planned: each sdm-class mnemonic is certified against a formal source instead: E1/E2 and the SSE conversions against the K x86-64 semantics or ACL2 x86isa master (transcription, ASM-009 class); x87 control/state against ACL2 x86isa master where defined; cpuid and rdtsc are declared-machine facts (owner: one fixed reference CPU; reference cpuid answer, platform monotonic timer), not model semantics. Whatever has no formal source is reported to the orchestrator. Owner L3b, after the first frame unless it blocks the pack roots.",
+   "used_by": [
+    "ports/fnv-nx/lift/README.md"
+   ]
+  },
+  {
    "id": "ASM-801",
    "text": "Every FIX_TRUNC_EXPR in a native unit is rewritten to _ftol/fistp semantics, sits in an fnvnx_f2i helper, or is a compile error (fnvnx_ftoi native rule (c), L2 w1 649a2960); native bodies compiled with fnvnx_ftoi are judged by this rule, not by the lifted-code half of fpexact.",
    "used_by": [
-    "ports/fnv-nx/journal/status/l3a-lift.md"
+    "ports/fnv-nx/journal/status/l3a-lift.md",
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
     "L3b:A-F2INATIVE"

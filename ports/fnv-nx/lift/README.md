@@ -94,7 +94,7 @@ of the image is ever rewritten (vtable slots, EH tables and jump tables included
     (kframework/X86-64-semantics).
   - `sdm`: float->int (E1), compare flag mapping (E2), x87 control and state (`fnstsw`, `fldcw`, `fnstenv`,
     `fnsave`, `frstor`), `cpuid`, `rdtsc`: a reference module written once from the SDM in the same logic, checked
-    against the pinned x86 host exhaustively where the input space allows (16 and 32 bits). Assumption A3 for this
+    against the pinned x86 host exhaustively where the input space allows (16 and 32 bits). ASM-331 for this
     remainder, stated plainly: the reference was transcribed from the SDM and exhaustively compared with the host
     where that is possible.
   - `table`: `rcp*`/`rsqrt*`: the 2^32 table of the reference CPU is the specification.
