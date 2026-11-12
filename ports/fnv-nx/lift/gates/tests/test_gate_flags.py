@@ -66,7 +66,6 @@ CASES = {
     # the product-program proof (invariance.py) for what the taint walk cannot show unobserved: both runs reach identical observable states
     'pf_prove_idiom':     ('21d8 53 9c 58 89c3 3500002000 50 9d 9c 58 53 9d 39d8 7407 b801000000 31db 31c0 5b c3', []),    # cpuid ID-bit probe shape: the bit cancels in cmp, ebx is restored
     'pf_prove_ret_eax':   ('21d8 53 9c 58 89c3 3500002000 50 9d 9c 58 53 9d 39d8 7402 31db 5b c3', [('af', 4, 'pushf')]),   # eax still holds the bit at the ret
-    'pf_prove_no_form':   ('21d8 9c 58 89c1 0fa2 c3', [('af', 4, 'pushf'), ('-', 0, 'no-form')]),                                            # cpuid has no Form: red, never assumed
     'pf_prove_dead_slot': ('21d8 9c 83c404 c3', []),                                                                  # the pushed word lies below ESP again: dead
     'pf_prove_shift':     ('21d8 9c 58 c1e804 83e001 c3', [('af', 4, 'pushf')]),                                        # shr moves the bit to bit 0: observed
     'cmc_at_entry':       ('f5 c3', [('cf', 1, 'other')]),
@@ -95,11 +94,32 @@ CASES = {
     'inc_keeps_cf':       ('40 7200 c3', [('cf', 1, 'jcc')]),                           # inc does not write CF
     'inc_zf_defined':     ('40 7400 c3', []),
     'rol_of_undefined':   ('f8 c1c003 7000 c3', [('of', 4, 'jcc')]),
-    'daa_no_form':        ('01c0 27 c3', [('-', 0, 'no-form')]),                        # daa has no Form yet (item 23)
 }
 
 
+def uncovered_encoding():
+    """DERIVED from the real Form set, never picked: the first decodable instruction, in the order of the opcode space (one-byte opcodes, then 0f xx, each with
+    ModRM and immediates of zero bytes), whose shape has no certified Form (gate_flags.effect is None). None when the Form set has no gap."""
+    for pre in (b'', b'\x0f'):
+        for op in range(256):
+            code = pre + bytes([op]) + bytes(8)
+            for i in g._md.disasm(code, A):
+                if g.effect(i) is None and i.mnemonic and i.id not in (g.X.X86_INS_RET,) and i.size <= len(pre) + 1 + 7: return bytes(i.bytes)
+                break
+    return None
+
+
+UNCOVERED = uncovered_encoding()
+if UNCOVERED is not None:
+    CASES['no_form_row'] = ('01c0 %s c3' % UNCOVERED.hex(), [('-', 0, 'no-form')])                            # an instruction with no Form is a red row, never assumed
+    CASES['pf_prove_no_form'] = ('21d8 9c 58 89c1 %s c3' % UNCOVERED.hex(), [('af', 4, 'pushf'), ('-', 0, 'no-form')])   # the proof stops at it: no Form, red
+
+
 class T(unittest.TestCase):
+    def test_form_set_gap(self):
+        """the no-Form cases above exist only while the Form set has a gap; when it has none, no decodable encoding is uncovered"""
+        self.assertEqual(UNCOVERED is None, all(g.effect(i) is not None for pre in (b'', b'\\x0f') for op in range(256) for i in list(g._md.disasm(pre + bytes([op]) + bytes(8), A))[:1] if i.mnemonic))
+
     def test_cases(self):
         bad = []
         for name, (hx, exp) in sorted(CASES.items()):
