@@ -231,11 +231,7 @@ The owner's words, on a render defect that unit tests missed because the sibling
     hand-written stand-ins of sibling files.
   - The check is mechanical, per test binary: (symbols the test defines) ∩ (symbols the product roots define) = ∅.
     There is no allow-list. The owner is L1, as part of the stub gate.
-<<<<<<< HEAD
 - Below the product there is one boundary: the GL library (for the OpenGL backend), deko3d, libnx and the kernel. A test that runs on the host meets it in one
-=======
-- Below the product there is one boundary: deko3d, libnx and the kernel. A test that runs on the host meets it in one
->>>>>>> 8ce32e8f7a165a9a1ac700fcbf040ad46600df62
   shared model, the L4 boot machine (its GPU and kernel model, checked against its references). There is no
   per-test double of it.
 - Failure injection is allowed only as an input of that shared model, such as a kernel or allocator result that
@@ -276,7 +272,6 @@ The owner's words: "Агенты вызывают соннетов которы�
   - every current task, with its worker session id and status: doing, done (commit) or blocked (by what, owner);
   - the layer's global progress numbers, with the commit they were measured at.
   - The orchestrator collects these files into the overall progress.
-<<<<<<< HEAD
 - **Two render backends: OpenGL and deko3d (owner correction, 2026-11-11 22:45; it replaces the earlier
   "one backend" line, which was the orchestrator's mistake).** The owner's words: "их два. Один опенгл другой деко"
   and "Нахуя ты гл удалил. Ты же рендерил с помощью него."
@@ -308,12 +303,3 @@ The owner's words: "Трекай прогресс послойно и прогр
   that breaks a rule (a stub, a double, a second build path, a new assumption, a heuristic) is not progress: it is red.
 - **Progress is tracked per layer** in `ports/fnv-nx/journal/status/<layer>.md` (see "late night"); the orchestrator
   collects them into `ports/fnv-nx/journal/status/ALL.md` on the integration branch every hour.
-=======
-- **One render backend: deko3d.**
-  - Desktop GL (`gl4`), Mesa (llvmpipe, switch-mesa, Gallium Nine) and host GL packages are not product, and are not
-    part of the boot machine.
-  - The emulator runs the same product backend as the console. The boot machine's GPU is the L4 model of the deko3d
-    boundary (the dk* functions, the libnx calls it uses and the command buffers).
-  - Shaders run in that model from the DKSH that the build produced. An instruction that the model does not cover makes
-    the build red.
->>>>>>> 8ce32e8f7a165a9a1ac700fcbf040ad46600df62
