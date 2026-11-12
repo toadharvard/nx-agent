@@ -19,7 +19,7 @@
  * every other access to a cell, and the slot table, is under g_fls_lock. A slot being freed stays reserved (busy)
  * until its last callback ran, so FlsAlloc cannot hand it out and a thread ending meanwhile still finds its callback. */
 #include "w32.h"
-#include "../include/fnvnx_guestfn.h"
+#include "fnvnx_guestfn.h"
 
 #include <stdlib.h>
 

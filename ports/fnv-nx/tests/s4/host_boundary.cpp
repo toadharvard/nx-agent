@@ -1,4 +1,4 @@
-/* host_boundary.cpp - the host test process's implementation of platform/include/fnvnx_boundary.h.
+/* host_boundary.cpp - the host test process's implementation of shim/include/fnvnx_boundary.h.
  * "The game" is the native test code: an export's value is its native address, a game function is called natively, a
  * game thread runs natively on the OS thread the platform made, and there is no loader (images are registered by the
  * tests through fnvnx_win32_register_image). The calls are
