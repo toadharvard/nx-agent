@@ -52,7 +52,7 @@ Rule (L1+L2): a header-only dir is not a root; its headers are certified as PP i
 
 Assumptions (w10 a2bd503, code 2f1bbe2 on e35b870): gate GREEN, mentions 96/96; 52 records = 9 OWNER + 43 REMOVE (removed_by: gate 3, planned 18, no gate yet 22, OPEN 0); queued at MERGER. Next w10: objstub DECL_FACTS/DECL_SOURCE from declared_machine.tsv header (no-galaxy).
 
-MERGER serial queue: w16 885852ac (green 4043444, 171 s) → L2 w4 5380477 (fnvnx_order, no gate files) → w14 2d8176a (EMLINK) → w18 (contract universe, dllkind; head with green line) → w17 cdc0041 → L2 w5 77836bf → w10 a2bd503 → L6 w4 (d3d9total) → w5 → w8 25977efc. Gate-file conflicts resolved by union until gates.d lands (orchestrator).
+MERGER serial queue: w16 885852ac (green 4043444, 171 s) → L2 w4 5380477 (fnvnx_order, no gate files) → w14 2d8176a (EMLINK) → w18 (contract universe, dllkind; head with green line) → w17 cdc0041 → L2 w5 77836bf → w10 a2bd503 → L6 w4 (d3d9total) → w5 84af0b87 (green 25/25) → w8 25977efc. ASSUMPTIONS.json conflicts: union by id (records enter with the files that use them, e.g. L3a ASM-200..202 with lift/gates). Gate-file conflicts resolved by union until gates.d lands (orchestrator).
 
 ## Missing REQUIRED_PRODUCT gates (blocker of goal step 1)
 
