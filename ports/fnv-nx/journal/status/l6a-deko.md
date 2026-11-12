@@ -1,6 +1,6 @@
 # L6A DEKO status (lead: Opus, branch claude/fnv-l6a-deko)
 
-Updated 2026-11-11. Trunk read at claude/fnv-nx-clean 6f549875. CLAUDE.md on this branch = trunk 6f549875.
+Updated 2026-11-12. Trunk read at claude/fnv-nx-clean e35b870a (2026-11-12). CLAUDE.md on this branch = trunk e35b870a. L1 w15 (559fc150) and w16 (d91524a3) not yet on the trunk.
 
 ## Priority after the owner correction (6f549875: two backends)
 GL renders in the emulator; deko3d (this layer) is the console backend. On the first-frame path L6A has only item 1
