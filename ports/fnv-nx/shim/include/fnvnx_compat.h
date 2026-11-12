@@ -278,8 +278,6 @@ struct fnvnx_new_tag {};
 /* Compiler-runtime helpers the decomp calls without declaring them in every unit (prepare.py DECL1 drops its own
  * unsigned-int prototypes of operator_delete_sized). */
 #ifdef __cplusplus
-struct _ThrowInfo;
-extern "C" void _CxxThrowException(void *, _ThrowInfo *);
 extern "C" void operator_delete_sized(void *, __SIZE_TYPE__);
 extern "C" void _operator_delete_sized(void *, __SIZE_TYPE__);
 #endif

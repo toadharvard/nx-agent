@@ -10,7 +10,7 @@
 #define FNVNX_MSVCSTL_H
 #ifdef __cplusplus
 
-extern "C" void _invalid_parameter_noinfo(void);
+#include "fnvnx_crt.h"   /* _invalid_parameter_noinfo */
 
 #ifndef _SCL_SECURE_VALIDATE
 #define _SCL_SECURE_VALIDATE(cond) { if (!(cond)) { _invalid_parameter_noinfo(); } }
