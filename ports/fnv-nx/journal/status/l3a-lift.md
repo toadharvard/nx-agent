@@ -332,3 +332,8 @@ Update 2026-11-12, at 698adefb:
 ## 2026-11-12 09:18
 - ASM-233 (REMOVE, L3a), minted by L1 for the ehtables.py:268 premise. w6 cites it, and w7's facts commit removes it. The next free id is 234.
 - With L1, on DIC: (1) ranges with kind and derivation, and (2) 0 in-run non-operand relocations over all runs are accepted. (3) "R3 refuses entries at data referents" is declined as unproven: R3 refuses only when the points-to proves no control transfer. L1 is asked whether imagerec needs no overlap structurally; if so, it goes to the orchestrator as an open class.
+
+## 2026-11-12 09:20
+- L1 accepted DIC.
+- New id: ASM-234 (REMOVE, L3a), for the VirtualProtect/WPM/FlushIC sites on image ranges. Its removing fact is w4's points-to. w6 adds the record; w7 counts the sites in the facts commit.
+- data_in_code.tsv will be pinned in the facts manifest (same tree_sha256) for contract/imagerec. The next free id is 235.
