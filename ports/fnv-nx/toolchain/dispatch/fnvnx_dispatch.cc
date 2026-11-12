@@ -130,28 +130,28 @@ static tree new_site()
 
 /* ---- the call's shape */
 
-/* Is `t` returned through the hidden pointer by the x86 callee? The rule is stated from the documents: the Microsoft x86 convention ("Structures that
- * are not PODs will not be returned in registers", learn.microsoft.com, Argument Passing and Naming Conventions) and the VC 2008 ABI's reading of the
- * C++03 aggregate (ISO/IEC 14882:2003 8.5.1, 9/4; Agner Fog, Calling conventions, table 7): the returned class itself is judged. It is NOT returned in
- * registers if it has a user-declared constructor, copy constructor, copy assignment operator or destructor; a virtual function; a base class; or a
- * private or protected non-static data member (not an aggregate). The types of its members do not count. The cl 15.00.30729.01 runs (lift/test/
- * podmatrix.py, cl_pod_table.tsv) verify this rule on every case; they never define it. Read from the C++ front end's own declarations of the class; every C++ front-end
- * symbol used is declared weak at the top of this file and sits behind fnvnx_cxx_fe(). A C unit has no such type: its aggregate is a POD by the language. */
-static bool user_declared_special(tree t)
+/* Is `t` returned through the hidden pointer by the x86 callee? The statement is the convention's own ("Structures that are not PODs will not be
+ * returned in registers", learn.microsoft.com, Argument Passing and Naming Conventions; the C++03 aggregate of ISO/IEC 14882:2003 8.5.1 and 9/4 that
+ * VC9 uses; Agner Fog, Calling conventions, table 7), and the VC 2008 reading of it that cl 15.00.30729.01 shows on all 245 cases of
+ * lift/test/clpod (table.tsv, a MEASUREMENT; the table verifies the rule, it does not define it) splits the properties in two:
+ *   own (judged on the returned class only):  a user-declared constructor (copy constructor included), a base class, a private or protected
+ *                                             non-static data member (the class is not an aggregate);
+ *   deep (judged on the class and, recursively, on every non-static member's class, array elements included): a user copy assignment operator,
+ *                                             a user destructor, a virtual function, a reference member (the class is not trivially copyable).
+ * Read from the C++ front end's own declarations of the class; every C++ front-end symbol used is declared weak at the top of this file and sits
+ * behind fnvnx_cxx_fe(). A C unit has no such type: its aggregate is a POD by the language. */
+static bool deep_nontrivial(tree t)
 {
-  tree mv = TYPE_MAIN_VARIANT(t);
+  while (TREE_CODE(t) == ARRAY_TYPE) t = TREE_TYPE(t);
+  if (!CLASS_TYPE_P(t)) return false;
+  if (TYPE_POLYMORPHIC_P(t)) return true;
   for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f)) {
-    if (TREE_CODE(f) != FUNCTION_DECL || DECL_ARTIFICIAL(f)) continue;
-    if (DECL_DESTRUCTOR_P(f)) return true;
-    /* the first declared parameter after `this` */
-    tree p = TYPE_ARG_TYPES(TREE_TYPE(f));
-    if (p && TREE_CODE(TREE_TYPE(f)) == METHOD_TYPE) p = TREE_CHAIN(p);
-    bool ref_to_self = p && p != void_list_node && TYPE_REF_P(TREE_VALUE(p)) && TYPE_MAIN_VARIANT(TREE_TYPE(TREE_VALUE(p))) == mv;
-    bool rest_default = ref_to_self;
-    if (ref_to_self) for (tree q = TREE_CHAIN(p); q && q != void_list_node; q = TREE_CHAIN(q)) if (!TREE_PURPOSE(q)) rest_default = false;
-    if (DECL_CONSTRUCTOR_P(f) && rest_default) return true;                       /* copy constructor */
-    if (DECL_OVERLOADED_OPERATOR_IS(f, NOP_EXPR) && ref_to_self) return true;     /* copy assignment (by reference; by value is the same rule) */
-    if (DECL_OVERLOADED_OPERATOR_IS(f, NOP_EXPR) && p && p != void_list_node && TYPE_MAIN_VARIANT(TREE_VALUE(p)) == mv) return true;
+    if (TREE_CODE(f) == FUNCTION_DECL && !DECL_ARTIFICIAL(f)) {
+      if (DECL_DESTRUCTOR_P(f)) return true;
+      if (DECL_OVERLOADED_OPERATOR_IS(f, NOP_EXPR)) { tree p = TYPE_ARG_TYPES(TREE_TYPE(f)); if (p && TREE_CODE(TREE_TYPE(f)) == METHOD_TYPE) p = TREE_CHAIN(p);
+        if (p && p != void_list_node && TYPE_MAIN_VARIANT(TYPE_REF_P(TREE_VALUE(p)) ? TREE_TYPE(TREE_VALUE(p)) : TREE_VALUE(p)) == TYPE_MAIN_VARIANT(t)) return true; }
+    }
+    if (TREE_CODE(f) == FIELD_DECL && (TYPE_REF_P(TREE_TYPE(f)) || deep_nontrivial(TREE_TYPE(f)))) return true;
   }
   return false;
 }
@@ -161,14 +161,11 @@ static bool msvc_pod(tree t)
   if (!fnvnx_cxx_fe()) return true;
   while (TREE_CODE(t) == ARRAY_TYPE) t = TREE_TYPE(t);
   if (!CLASS_TYPE_P(t)) return true;
-  /* cl 15.00.30729.01 (VC 2008 SP1, measured by w4 on 11 types) looks at the returned class itself: a member's own type does not matter */
-  if (TYPE_HAS_USER_CONSTRUCTOR(t) || TYPE_POLYMORPHIC_P(t)) return false;
+  if (TYPE_HAS_USER_CONSTRUCTOR(t)) return false;
   if (TYPE_BINFO(t) && BINFO_N_BASE_BINFOS(TYPE_BINFO(t)) > 0) return false;
-  if (user_declared_special(t)) return false;
-  /* C++03 8.5.1: a class with a private or protected non-static data member is not an aggregate */
   for (tree f = TYPE_FIELDS(t); f; f = DECL_CHAIN(f))
     if (TREE_CODE(f) == FIELD_DECL && (TREE_PRIVATE(f) || TREE_PROTECTED(f))) return false;
-  return true;
+  return !deep_nontrivial(t);
 }
 
 /* How the target passes a value is asked of the pinned compiler's own backend, never classified here (ASM-001): pass_by_reference, then

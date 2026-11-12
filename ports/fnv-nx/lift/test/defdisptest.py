@@ -6,9 +6,8 @@
 (2) the section is ASCII, sorted, unique, ends in LF (L1's descs parser reads the same form);
 (3) for every aggregate type of descclasstest.TYPES the definitions a_<n> (argument) and r_<n> (result) get a descriptor whose register class is the one the
     callee's own compiled body uses (descclasstest.ref_arg / ref_ret: the compiler as reference);
-(4) the hidden-pointer rule on results (msvc_pod): every case of podmatrix.py (9 features x depth 0/1/array x sizes 1,2,4,8,12) against the reference table
-    cl_pod_table.tsv (the /FAs output of Microsoft cl 15.00.30729.01, Visual C++ 2008 SP1, toolchain/msvc9 of fnv-nx-build, commit in the table header; the rule itself
-    is stated from the MSVC documentation and the VC 2008 ABI in fnvnx_dispatch.cc, the table verifies it and defines nothing); exit 3 (BLOCKED) while the table is absent.
+(4) the hidden-pointer rule on results (msvc_pod): every case of clpod/gen.py (12 features x depth d0/d1/d1a/d2 x sizes 1,2,4,8,12 + plain controls) against
+    clpod/table.tsv, the cl 15.00.30729.01 (VC 2008 SP1) measurement with its toolchain commit and cl.exe sha256; prints the mismatch count (must be 0).
 Run: python3 -B lift/test/defdisptest.py [--cc <dir of aarch64-linux-gnu-g++>] [--work dir]   exit 0 on pass."""
 import argparse, os, re, subprocess, sys
 
@@ -17,7 +16,6 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
 import descclasstest as dc
 import bridgegen
-import podmatrix
 
 UNIT = r'''
 struct VB { int v; };
@@ -89,29 +87,30 @@ def main():
         check('defined function symbols == rows', defined == set(got), 'only in the object %s, only in the rows %s' % (sorted(defined - set(got)), sorted(set(got) - defined)))
         check('a covariant thunk is a defined symbol with a row', any(k.startswith('_ZTch') or k.startswith('_ZTc') for k in got), str(sorted(got)))
         for k, v in WANT.items(): check('descriptor of ' + k, got.get(k) == v, 'got %s, want %s' % (got.get(k), v))
-    # (4) the hidden-pointer rule on results, every row of the reference table (podmatrix.py; cl_pod_table.tsv = the cl output, a committed fact)
-    tp = os.path.join(HERE, 'cl_pod_table.tsv')
-    if not os.path.exists(tp):
-        print('defdisptest: BLOCKED: cl_pod_table.tsv is absent (the cl reference run of podmatrix.py --cl)'); sys.exit(3)
+    # (4) the hidden-pointer rule on results, every row of the cl reference table (clpod/table.tsv, a MEASUREMENT of cl 15.00.30729.01 = VC 2008 SP1 under
+    # Wine, toolchain/msvc9 of fnv-nx-build: the table verifies the rule stated in fnvnx_dispatch.cc and defines nothing); the case sources are clpod/gen.py's own
+    import importlib.util
+    sp = importlib.util.spec_from_file_location('clpod_gen', os.path.join(HERE, 'clpod', 'gen.py')); cg = importlib.util.module_from_spec(sp); sp.loader.exec_module(cg)
+    tp = os.path.join(HERE, 'clpod', 'table.tsv')
     hdr = [l for l in open(tp).read().split('\n') if l.startswith('#')]
-    check('table header: MEASUREMENT, cl.exe sha256, toolchain commit', len(hdr) >= 3 and 'MEASUREMENT' in hdr[0] and 'sha256' in hdr[1] and 'commit' in hdr[2], hdr[:3])
-    table = dict(l.split('\t') for l in open(tp).read().split('\n') if l and not l.startswith('#'))
-    cs = [c[0] for c in podmatrix.cases()]
-    check('table rows == matrix cases', set(table) == set(cs), 'only in the table %s, only in the matrix %s' % (sorted(set(table) - set(cs))[:5], sorted(set(cs) - set(table))[:5]))
-    src = podmatrix.decls() + ''.join('extern %s g_%s;\nextern "C" %s r_%s() { return g_%s; }\n' % (n, n, n, n, n) for n in cs)
+    check('table header: MEASUREMENT, cl 15.00.30729.01, cl.exe sha256, toolchain', len(hdr) >= 5 and 'MEASUREMENT' in hdr[0] and 'toolchain' in hdr[1] and '15.00.30729.01' in hdr[2] and 'sha256' in hdr[3], hdr[:4])
+    trows = [l.split('\t') for l in open(tp).read().split('\n') if l and not l.startswith('#')]
+    allc = cg.cases()
+    check('table rows == generator cases', [(r[0], r[1], int(r[2])) for r in trows] == allc, '%d rows, %d cases' % (len(trows), len(allc)))
+    skipped = [r for r in trows if r[4] == 'SKIPPED']
+    check('no case skipped or unread by cl', not skipped and all(r[4] in ('HIDDEN', 'REGS') and r[6] == '' for r in trows), str(skipped[:3]))
+    src = 'void use(void *);\n' + ''.join(cg.case_source(i, *allc[i]) + 'extern "C" N%d::S r_%d() { return N%d::f(); }\n' % (i, i, i) for i in range(len(allc)))
     got = rows(build(src, 'pod') or b'')
     mism = 0
-    for n in cs:
-        d1 = got.get('r_' + n)
-        if d1 is None or n not in table: check('result %s' % n, False, 'row %s, table %s' % (d1, table.get(n))); continue
+    for i, r in enumerate(trows):
+        d1 = got.get('r_%d' % i)
+        if d1 is None: check('result %s %s %s' % tuple(r[:3]), False, 'no row'); mism += 1; continue
         rt = d1.split(':')[1]
         size = int(re.match(r'[am](\d+)', rt).group(1))
         hidden = rt[0] == 'm' or rt.endswith('x') or size not in (1, 2, 4, 8)   # sizes that are no x86 register size: bridgegen's rule
-        ok = hidden == (table[n] == 'hidden'); mism += not ok
-        check('result %s: cl %s' % (n, table[n]), ok, 'plugin %s (%s)' % ('hidden' if hidden else 'regs', d1))
-    ctl = [n for n in cs if n.split('_')[1] in podmatrix.CONTROLS]
-    check('controls (none, sm, mf) are regs in the table', all(table.get(n) == 'regs' or int(n.split('_')[2]) not in (1, 2, 4, 8) for n in ctl))
-    print('POD matrix: %d cases, %d mismatches plugin vs cl' % (len(cs), mism))
+        ok = hidden == (r[4] == 'HIDDEN'); mism += not ok
+        check('result %s %s %s: cl %s' % (r[0], r[1], r[2], r[4]), ok, 'plugin %s (%s)' % ('hidden' if hidden else 'regs', d1))
+    print('POD matrix: %d cases, %d mismatches plugin vs cl' % (len(trows), mism))
     # (3)
     decls = '\n'.join(t[1] for t in dc.TYPES)
     ref = ''.join('%s g_%s;\nextern "C" void __attribute__((noinline)) a_%s(%s x) { g_%s = x; }\nextern "C" %s __attribute__((noinline)) r_%s(void) { return g_%s; }\n' % (T, n, n, T, n, T, n, n) for n, d, T in dc.TYPES)
