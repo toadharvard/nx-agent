@@ -94,7 +94,7 @@ def main():
         pin[name] = dict(w=w, h=h, rows=len(rows), sha=sha(dst), stream=n, gl=gl, reg=reg)
     if fails: return 1
     wv = sh(["wine", "--version"]).stdout.strip(); dp = sh(["dpkg-query", "-W", "-f", "${Package}:${Architecture} ${Version}\\n", "wine", "wine32:i386", "libwine:i386", "libgl1-mesa-dri:i386",
-                                                              "libglx-mesa0:i386", "libllvm20:i386", "xvfb"]).stdout
+                                                              "libglx-mesa0:i386", "libllvm20:i386", "mesa-libgallium:i386", "xvfb"]).stdout
     # the toolchain that built the two Windows binaries: every installed mingw-w64 package (gcc, g++, binutils, headers, crt) by package and version,
     # and the version lines of the driver and the linker; no line means no pin, so no ENV_PIN (the probe would not be reproducible)
     mg = sh(["dpkg-query", "-W", "-f", "${Package}:${Architecture} ${Version}\\n", "gcc-mingw-w64-*", "g++-mingw-w64-*", "binutils-mingw-w64-*", "mingw-w64-*"]).stdout
