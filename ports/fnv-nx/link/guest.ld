@@ -5,7 +5,7 @@
  * R_AARCH64_P32_RELATIVE entries of .rela.dyn that the loader applies.
  *
  * Shape as libnx's switch.ld: three PT_LOAD segments text (R-X) / rodata (R--) / data (RW-), page aligned, text first,
- * plus PT_DYNAMIC and PT_TLS.  Order inside the text segment: .crt0 (the entry code, ENTRY __fnvnx_guest_start) first,
+ * plus PT_DYNAMIC and PT_TLS.  Order inside the text segment: .crt0 (the entry branch, ENTRY __fnvnx_guest_start), then .crt0.hdr and .crt0.mod0 (data, "a"), then
  * the ordinary code, then the lifted bodies (input section .text.fnvl, one `void L_<addr>(void)` each) as an output
  * section of their own.  The perfect-hash dispatcher table of the lifted code (input section .rodata.fnvl_disp,
  * lift/bench/phf.py table_asm) is kept in rodata.
@@ -34,6 +34,8 @@ SECTIONS
 	.text :
 	{
 		KEEP (*(.crt0))
+		KEEP (*(.crt0.hdr))
+		KEEP (*(.crt0.mod0))
 		*(.text.unlikely .text.*_unlikely .text.unlikely.*)
 		*(.text.exit .text.exit.*)
 		*(.text.startup .text.startup.*)
@@ -42,6 +44,11 @@ SECTIONS
 		*(.text.[!f]* .text.f .text.f[!n]* .text.fn .text.fn[!v]* .text.fnv .text.fnv[!l]* .text.fnvl?*)
 		. = ALIGN(8);
 	} :code
+
+	/* crt0.s (toolchain/guest): the entry branch is the only code of .crt0 ("ax"); the 0x1c header bytes (.crt0.hdr) and the MOD0 block
+	   (.crt0.mod0) are data in "a" sections. They follow the branch directly, so the module header words sit at +4..+31 as the host expects. */
+	ASSERT(__fnvnx_guest_hdr == __fnvnx_guest_start + 4, ".crt0.hdr must follow the entry branch directly")
+	ASSERT(__fnvnx_mod0 == __fnvnx_guest_hdr + 28, ".crt0.mod0 must follow the 28 header bytes directly")
 
 	.text.fnvl :
 	{
