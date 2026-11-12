@@ -70,7 +70,7 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 | addr32 | L3a | claude/fnv-l3a-lift-gates | 376acbaa | with order |
 | forms | L3b | claude/fnv-l3b-lift-w2g | - | doing |
 | fpexact | L3b, claude/fnv-l3b-lift-w2g (native criterion: w17 makes fnvnx_ftoi reject any unrewritten FIX_TRUNC_EXPR) | - | - | - |
-| d3d9total | L6 | claude/fnv-l6-render-w4 (session_01KmtZKUN17roaVoBLBe4QKK) | - | doing |
+| d3d9total | L6 | claude/fnv-l6-render-w4 | 8cfbcdbf (merged, trunk) | done |
 
 ## Global numbers (trunk 58a79b3e)
 
@@ -147,3 +147,4 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - 03:33Z w20 bce5dead deletes the xc runner class (xc.c, mkxctab, mkxcgen, dyninit_rewrite XC1, XC2, the boot.cpp xc capture), about 2300 lines together with 5126d5b0, plus the objstub tail-b/ICF rule. envcheck in its container fails on /usr/include, so MERGER runs the verdict. The ??__E bodies without a generator are handed to L2's static rule (the exe's own table and the exe's atexit).
 - 03:36Z: a guest test root uses link.kind pie, not exe (L4 corrected; w15 fixes RECIPE.md and refuses guest+exe). Plugins declare languages; ftoi and order load for C guest units too, with required evidence (w17, from L3b). L2's w20 decisions: the first ELF lifts all ??__E bodies through the exe's atexit; dyninit_conv is deleted. L3b merges aaa709c8.
 - 03:38Z: w14 76130ea is the trunk plus the pure entry-point universe (the tests-name exemption deleted), plus the EMLINK replicas rule (a 70000-link test). test_gates was fixed in 803327b; verdict running. Full plugin set for C and C++ (order, ftoi, addr, dispatch, names, sdd, pi, layout): recipe by w17, cc1 support by L2 w1.
+- 03:40Z trunk clean=8cfbcdbf: 28 gates (L6 d3d9total), cold 302.9 s, over budget. Returned: w10 0371bf6 (real rebase, gates.d carrying 28 gates), w16 8d72015d (env.json). L1 order: w16 → w10 → w19 (speed: cold, warm and per-gate times).
