@@ -1,0 +1,50 @@
+{
+ "format": "fnvnx-assumptions/1",
+ "entries": [
+  {
+   "id": "ASM-200",
+   "text": "A callee in a hand-written assembler object preserves x19-x30 and sp and writes the caller's frame only through an address it was given (ORDERING A1 for .S).",
+   "used_by": [
+    "ports/fnv-nx/docs/ORDERING.md",
+    "ports/fnv-nx/lift/gates/gate_order.py",
+    "ports/fnv-nx/lift/gates/tests/test_gate_order.py"
+   ],
+   "aliases": [
+    "ORDERING:A1(.S)"
+   ],
+   "status": "REMOVE",
+   "removed_by": "fact:ports/fnv-nx/lift/gates/gate_order.py",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-201",
+   "text": "Guest memory is the mappings below 2^32 the loader made; the host stack, struct cpu and the lifted image are host mappings disjoint from them (ORDERING A2).",
+   "used_by": [
+    "ports/fnv-nx/docs/ORDERING.md",
+    "ports/fnv-nx/lift/gates/gate_order.py",
+    "ports/fnv-nx/lift/gates/tests/test_gate_order.py"
+   ],
+   "aliases": [
+    "ORDERING:A2"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the loader layout fact that every host mapping lies outside [0,2^32)",
+   "owner": "L3a+L4",
+   "note": "the loader layout is also L5's (guard zones, host mappings)"
+  },
+  {
+   "id": "ASM-202",
+   "text": "Every object linked into the lifted image is in the build manifest and is given to the gate (ORDERING closure, was A3).",
+   "used_by": [
+    "ports/fnv-nx/docs/ORDERING.md",
+    "ports/fnv-nx/lift/gates/gate_order.py"
+   ],
+   "aliases": [
+    "ORDERING:A3"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: the fnvnx-built/1 manifest lists every linked object; rules (a) and (b) of gate_order are checked on each",
+   "owner": "L3a+L1"
+  }
+ ]
+}
