@@ -99,8 +99,8 @@ Two conditions; a function with a row of either is not N2 (bodysel takes LIFTED)
    by-value/sret shape the caller compiled against are the callee's exe contract.  A name that carries no types gives no such
    equality: the edge is not provable and the caller is LIFTED, never guessed.  Several native copies of one address: each is
    judged, the worst verdict stands.
-Assumptions: the `names` plugin ran on every native unit (the recipe's guest-compiler/plugin rule); the pristine cl symbol
-names are the exe's contract (N1: byte-equal, one symbol map); an external decorated name denotes one entity link-wide.
+Assumptions: the `names` plugin ran on every native unit (the recipe's guest-compiler/plugin rule) (ASM-050); the pristine cl symbol
+names are the exe's contract (N1: byte-equal, one symbol map) (ASM-053); an external decorated name denotes one entity link-wide (ASM-054).
 Zero edges: provable.  An object with no sympair section: every function of it with an edge is not N2.
 ```
 
@@ -159,7 +159,7 @@ Rule.  A request about import I = (dll D, name N, argument k) is CERTIFIED for t
      GetProcAddress slot must be covered by a row of the table) is closed, and no pair (D, N), (*, N) (module unknown) or (D, #n)
      / (*, #n) (an ordinal in D could be N) exists.  An OPEN site (name or module not derived) anywhere in S makes (b) fail for
      EVERY request: reason `gpa-open`, the condition under which certificates are not valid yet;
- (c) the assumptions of argflow A1..A6 (and A8, the provenance premise of memfx, when its rule closed a handle chain) are recorded in each certificate (BASE: the contract's standing assumptions, the same for
+ (c) the assumptions of argflow A1..A6 (and A8, the provenance premise of memfx, when its rule closed a handle chain) are recorded in each certificate (BASE: the contract's standing assumptions, the same for (ASM-010, ASM-011, ASM-012, ASM-013, ASM-014, ASM-015, ASM-016, ASM-017, ASM-018, ASM-019)
      every gate that uses argflow); an assumption that is not a proven rule makes the fact NOT certified: BLOCKING = {A7} (a call
      between a store and a load does not write that memory; only the `open` handle mode depends on it).  A fact whose only
      derivation needs A7 is listed `assumption:A7`.
@@ -172,7 +172,7 @@ that the facts' ranges contain every executed instruction of the images (A4).  T
 (sha256 of the PE and of the ranges file), the request, the GetProcAddress rows used, the assumptions and the per-site proof chain.
 
 Outputs ($GATE_OUT, gatefile.py): reach.json (gate `reach`; universe = facts, certified = certified facts; uncertified ids
-`<fact_id>:<reason>:<image>:<address>`, reason `assumption:A7` etc. may contain a colon: split the last two fields off), reach.ids
+`<fact_id>:<reason>:<image>:<address>`, reason `assumption:A7` etc. may contain a colon: split the last two fields off), reach.ids (ASM-016)
 (all of them, sorted), reach.facts.tsv (`fact_id<TAB>sha256 of the certificate`, certified facts only, sorted by id).  --out: per
 fact status, sites examined and reasons.  --facts-h: the C header (FNVNX_REACH_<DLL>_<NAME>_<n> with n the 1-based position among
 the requests of the same dll!name in canonical order; FNVNX_<request id> for the platform's own names; FNVNX_REACH_TABLE_ID).
@@ -271,7 +271,7 @@ Items of the universe and their certification:
   writer:<unit>                   every product object that references a hive-writing API (role create or write); certified iff it is the
                                   declared seed unit: no other code of the product makes a hive key
 generate() is the port of platform/manifest/gen_registry_seed.py (L5): it refuses a declared row that no static read site reads, a malformed or
-duplicate row, a value not valid for its type, and a `{` that is not `{game_dir}`. Assumptions: regsites.tsv is complete over the exe and the
+duplicate row, a value not valid for its type, and a `{` that is not `{game_dir}`. Assumptions (ASM-051): regsites.tsv is complete over the exe and the
 modules (the registry-site pass reports what it cannot bind as dynamic, never skips); the seed unit and the registry implementation are the only
 code that reaches the hive, and the implementation creates no key by itself (the writers rule closes the entry points, not the internals).
 ```
@@ -296,7 +296,7 @@ value the dispatcher of the lifted code maps to an entry.  Rule, total over the 
             from the ELF symbol).
 
 Keys lie in [IMPORT_BASE, LIMIT), and SENTINEL (the return address under the first guest frame) below them.
-Assumption, checked by the loader at start: no mapping of the process intersects [SENTINEL, LIMIT) - the range
+Assumption, checked by the loader at start: no mapping of the process intersects [SENTINEL, LIMIT) - the range (ASM-020)
 is below the lowest address the 32-bit address space hands out (0x00200000), so a key is never a readable or
 executable address and never the address of an image, module, heap or stack.
 
@@ -358,7 +358,7 @@ A row is certified iff its body is proven by the symbol table of a build product
 Classes of an uncertified row: none (no symbol of that name is defined or referenced), unresolved-symbol (referenced only), weak (defined weak
 only), not-a-function (defined global of the wrong type), lookup-miss (an msvcrt name that the name table does not carry, or whose entry names
 no proven symbol), external (l3 or another owner's row that no other root defines).
-The decision reads symbol tables and tables, never a source text, a run or a name pattern. Assumption: objects.json lists every global, weak
+The decision reads symbol tables and tables, never a source text, a run or a name pattern. Assumption (ASM-052): objects.json lists every global, weak
 and unique symbol of every object of the root (recipe.symbols); locals are not symbols a row can bind to.
 ```
 
@@ -414,7 +414,7 @@ reaches memory only through an ESCAPE).  For a global, additionally (W1) no dire
 (exact for [disp]; [disp+idx*s] covers [disp, disp+max*s+size) when the index maximum is proven (and-mask, movzx, constant)
 and else the whole section), no relocated data word points into the section (that word is a pointer stored in memory: an
 ESCAPE of the section's closure), and the loader does not write L (base relocations, import slots, IAT / TLS-index of the
-PE directories).  Assumptions (stated, not proven): P; the image's code ranges are instruction-aligned and complete (A4); a
+PE directories).  Assumptions (stated, not proven): P; the image's code ranges are instruction-aligned and complete (A4); a (ASM-010, ASM-013, ASM-017, ASM-022)
 callee preserves ebx/esi/edi/ebp (A1) and reads no register of an import call (the platform's calling convention); the
 platform implementation writes through a pointer argument only when ImportInfo says so (default: every pointer argument
 may be written); no code outside the images (the loader, the OS) writes L except through those imports.
@@ -996,7 +996,7 @@ needs real traffic, or an OS's own choice, is NOT answered: the model raises Not
 "ext-module-missing" naming the service. A guest address that is not readable / writable memory raises BadGuestMemory (a violated
 precondition of the header; the machine ends the run as a host-call fault). Never an invented value.
 
-Stated assumptions (each is a fact of the stage's model, not of the header):
+Stated rules of the model (each is a fact of the stage's model, not of the header):
   A1 handle numbers (a rule of the model, deterministic): a new handle is the lowest number >= 3 that is not open (0..2 are stdio); a
      number is free again after its close. This is the descriptor rule of POSIX.1-2017 2.14 "File Descriptor Allocation" (the lowest
      number not open), which the bsd service's descriptors follow. Nothing above the host may depend on the number: the header says only
@@ -1163,7 +1163,7 @@ Universe: every file git tracks below ports/fnv-nx (`git ls-files -z`), an item 
 A file is certified iff ALL hold:
   1. exactly one root contains it (a root is a directory prefix or one exact file path; roots do not nest);
   2. the root's class is one of CLASSES and the root names every gate REQUIRED for that class;
-  3. every gate the root names is a gate of verify/gates.json of this same tree;
+  3. every gate the root names is a gate file of verify/gates.d of this same tree;
   4. a product root names a "recipe": a file inside the root that the build gates read (how its code is compiled in the
      declared environment); the file exists.
 Classes:
@@ -1171,11 +1171,15 @@ Classes:
   tool     stage and verification tools: "selftests" required (their tests pass in the declared environment).
   product  code that is compiled into the shipped binary: REQUIRED_PRODUCT gates, the static closure of the run-time
            failure classes of verify/VERDICT.md. A product root cannot be admitted before those gates exist in
-           gates.json, so code enters the trunk only together with the gates that judge it.
+           gates.d, so code enters the trunk only together with the gates that judge it.
+  ref      reference files that tests/oracle.json records point at (spec, contract, model): no gate named, no recipe, no units, no link,
+           no outputs. Every file of a ref root is the `path` of a reference of some tests/oracle.json, and none is a build.json or a
+           test (is_test_file): a product or test root is never a ref root. The gates that cover class ref (gates.d `covers`) are the
+           ones that read any root: pure, assumptions (and the Legal and stub gates where they exist).
 Argument: the verdict is green only if certified == universe, so a tracked file outside every root, a root with a
 missing gate, or a product root without its gates makes every merge red. The table maps directories to gates; it
 holds no exception for a file, a function or a finding.
-Assumption: `git ls-files` lists the tree under test (the verdict runs gates in a clean worktree of the commit).
+Assumption: `git ls-files` lists the tree under test (the verdict runs gates in a clean worktree of the commit). (ASM-041)
 ```
 
 ## verify/gate_build.py
@@ -1199,7 +1203,7 @@ gates call ensure() (build or cache hits, same result). Without GATE_CACHE nothi
 Gate "contract" family (fnvnx-gate/1, class 8 of VERDICT.md): the whole-binary gates of contract/ judged on the link of the product root.
     python3 -I gate_contract.py --gate NAME     NAME: n1 n2_data n2_call n2_vcall xc xunit rtti pcrel bodysel
     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/NAME.json (gatefile.py shape).
-One entry per gate in gates.json, so each is its own line of the verdict; the stages are the ones of contract/verdict.py (exefacts, n1,
+One entry per gate file in gates.d, so each is its own line of the verdict; the stages are the ones of contract/verdict.py (exefacts, n1,
 objfacts, registry, xunit, rtti, pcrel, bodysel), run with the same arguments, in the order of their dependencies, each once per input set:
 their outputs are kept in GATE_CACHE/contract/<key>/ (key = sha256 of contract_inputs.json, the git tree under test and the content of
 the objects and ELF of the root), so the nine gates cost one run of the chain and a cold run gives the same files.
@@ -1384,7 +1388,7 @@ Gate "oracle" (fnvnx-gate/1): every test names where its expected values come fr
 code under test (verify/VERDICT.md class 10).
     python3 -I gate_oracle.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/oracle.json
 
-Universe: the test files of gate "selftests" (the DIRs of its argv in verify/gates.json, DIR/tests/test_*.py, found by
+Universe: the test files of gate "selftests" (the DIRs of its argv in verify/gates.d/selftests.json, DIR/tests/test_*.py, found by
 gate_tests.universe: one list for both gates). An item is a repo-relative path.
 Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
   {"format": "fnvnx-oracle/1", "tests": {"test_x.py": {"subject": [PATH...], "references": [REF...]}}}
@@ -1396,6 +1400,11 @@ Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
     {"kind": "spec", "path": PATH, "anchor": STR}   cited text: a tracked file and a place in it. `anchor` is a line
                                          range "L<m>-L<n>" (1 <= m <= n <= number of lines) or a whole line of the file
                                          that starts with "#" (a heading) and occurs exactly once
+    {"kind": "external", "name": NAME, "path": STR}   a file of an external that a recipe or the contract inputs pin (NAME is
+                                         its `name`, pinned to one commit and tree_sha256; fetched like a wine-exe artifact)
+    {"kind": "probe", "probe": {"external": NAME, "path": STR}, "platform": NAME, "dump_sha256": H64}   a probe program
+                                         (a file of a pinned external) run on the declared platform (a pinned external) whose dump
+                                         has this sha256
     {"kind": "contract", "path": PATH}     a contract table of the tree
     {"kind": "model", "path": PATH}        an independent model in the tree
 Rule. A test file is certified iff ALL hold:
@@ -1417,9 +1426,71 @@ Argument: an expected value "comes from the code under test" when its declared s
 through it. Rules 2-5 leave four sources: a dump of the exe under the pinned Wine, text at a place that exists in a
 file, a contract table and a model, the last three outside everything the subject can load, and for product code never
 the product tree. The verdict is green only if certified == universe, so a test without such a source blocks the merge.
-Assumption (checked by verification, not by this gate): the declaration is true - the subject list is complete and
+Assumption (checked by verification, not by this gate): the declaration is true - the subject list is complete and (ASM-042)
 the test compares against the declared references. The after-merge verifier runs every test under verify/opentrace.py
 and compares the tracked files it opened with subject + references (verify/oraclecheck.py).
+```
+
+## verify/gate_assumptions.py
+
+```text
+Gate "assumptions" (fnvnx-gate/1): every assumption the rules rest on is in one registry, with an id and a status
+(verify/VERDICT.md class 18); the accepted ones are ASM-001 to ASM-009.
+    python3 -I gate_assumptions.py   run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/assumptions.json
+
+Registry: verify/ASSUMPTIONS.json ("fnvnx-assumptions/1"; the accepted entries are ASM-001 to ASM-009):
+  {"format": "fnvnx-assumptions/1", "entries": [ENTRY...]}
+  ENTRY  {"id": "ASM-NNN", "text": STR, "used_by": [PATH...], "aliases": [STR...], "status": "OWNER" | "REMOVE", ...}
+    OWNER   + "decision": {"file": "CLAUDE.md", "quote": STR}   the owner's acceptance, verbatim
+    REMOVE  + "removed_by": STR, "owner": LEAD | LEAD+LEAD      the discharge and the stream lead(s) who owe it
+    optional: "note": STR. The registry holds exactly the entries that files of THIS tree rely on: the entry of an unmerged
+              branch enters with that branch's merge, and every rule below applies to every entry without exception.
+Universe: the MENTIONS of the tree. A text file is a tracked file below ports/fnv-nx that decodes as UTF-8 without NUL
+bytes and is not data (suffix .json); a file of a root of verify/admit.json marked "record": true is an append-only log
+(its dated entries state what was said then; the owner forbids editing it) and is not scanned. CLAUDE.md (the owner's
+words) is read for the decisions, not scanned. A BLOCK is the unit of a text file: in a .md file a paragraph (lines up to a
+blank line) cut further at every list item and every table row; in any other file the maximal run of non-blank lines. A
+mention is a block whose PROSE matches `assum` or `допущени` at a word start (case-insensitive); the prose of a .py file is
+its comments and docstrings (code and string values are not statements), of any other file the whole text. An item of the
+universe is (path, first line of the block). A mention is certified iff ALL hold:
+  1. its raw block contains at least one id of the form ASM-NNN, for example ASM-001 (the compiler is correct);
+  2. every id in it is the id of an entry of the registry.
+The registry is certified iff ALL hold:
+  3. ids are unique and well formed, aliases are unique across entries, text is not empty;
+  4. used_by is not empty and every path in it is a tracked file that contains the entry's id (the reliance is written at the
+     place of reliance, so an entry nobody cites is dead and is red); 
+  5. an OWNER entry has decision.file CLAUDE.md and decision.quote occurring verbatim inside exactly one numbered item under
+     the line "OWNER, the only accepted ones:", no item serves two entries, and every item has an entry: the OWNER set is
+     exactly the owner's list, so a tenth OWNER entry without the owner's item is red;
+  6. a REMOVE entry has an owner of LEADS (or two joined by +) and `removed_by` of one of the forms `gate:NAME` (NAME is a
+     gate file of verify/gates.d), `fact:PATH` (PATH is a tracked file: the fact table that decides it), `planned: TEXT`
+     (the gate or fact is named and does not exist yet), `no gate yet: TEXT` (the fact that is needed) or `OPEN: TEXT`
+     (nobody has a discharge yet). planned, no gate yet and OPEN are reported by count; they are the debt of the owner named in the entry.
+  7. id ranges: the registry's `ranges` is {lead: [first, last]} for exactly L1, L3a, L3b, L4, L5, L6, L6A, L2, integers from 100,
+     pairwise disjoint (L1 100..199, L3a 200..299, L3b 300..399, L4 400..499, L5 500..599, L6 600..699, L6A 700..799, L2 800..899).
+     An id below 100 is a legacy id and exempt; an id from 100 lies in the range of the first lead named in its owner. An id
+     defined by two records and an alias claimed by two records are red. A record of a layer branch enters with the branch's merge
+     under its range, so ids never collide.
+  9. never reuse: the registry's `retired` lists {id, aliases} of every record that is no longer an entry. A live entry with a retired id
+     or a retired alias is red; a retired id or alias occurring in any scanned file (outside the registry) is red, so a record cannot be
+     removed while anything cites it, and a citation moves to the live record. The merge ratchet (verdict.py merge, ratchet_errors):
+     every id and alias that the base registry held, live or retired, is held by the new one, live or retired; a vanished id or alias
+     blocks the merge, the same mechanism as the dropped-gate ratchet.
+  8. findings: every red item is a finding with a code (entry-form, id-form, id-repeated, id-range, alias-claimed, used-by-*,
+     decision-*, owner-*, removed-by-form, ranges-form, mention-no-id, mention-unknown-id, stray-id, ...). stdout shows the first
+     20; the FULL list (every id and code, sorted, with the total per code) is written as JSON to GATE_DETAIL/assumptions.findings.json
+     (the verdict gives GATE_DETAIL = <verdict file>.detail/<gate>, kept beside the stored verdict), and the summary line names the path.
+And no id outside the registry occurs in any tracked text file of the tree (a .json file included): an id that is
+not in the registry is red wherever it is written.
+Argument: an assumption is introduced by writing it down; every writing with the word in the universe is a mention, and a
+mention passes only if it names a registry entry, so a new assumption that is written with the word has an id, and an id has
+an entry (2, and the last rule); the entry has an owner decision or a named discharge (5, 6), and the files that rely on it
+cite it (4). The verdict is green only if certified == universe and the registry is certified. The accepted
+assumptions of the rule itself are ASM-001 (the compiler) and ASM-004 (the console), as for every gate.
+Limits of this rule (stated as ASM-001..009 do not cover them; they are what a gate over words can close): an assumption that
+is written without the words of the pattern is not seen (the rule closes the class "written with the word"; review closes the
+rest); a data file (.json) states values, the rule that reads it is the code or document that cites ids; the append-only
+logs are not scanned.
 ```
 
 ## verify/gate_pure.py
@@ -1522,7 +1593,7 @@ approximate. Threads that switch at host calls (blocks ended by a branch to a ho
 ```text
 L1: the one command a merger runs. Run as `python3 -I l1.py CMD ...`. Exit codes: 0 green/merged, 2 red/blocked, 3 conflict, 4 blocked: env, 1 error.
   verdict  --repo R --commit C --verdicts VDIR [--budget-s 300]
-           verdict.py run with the gates file OF THAT COMMIT (ports/fnv-nx/verify/gates.json read from C's tree), then store.
+           verdict.py run with the gates file OF THAT COMMIT (the files of ports/fnv-nx/verify/gates.d read from C's tree, assembled by gatesdir.py), then store.
   merge    --repo R --into BRANCH --from REF --verdicts VDIR [--budget-s 300]
            Computes the merge tree as verdict.py merge does. If VDIR has no verdict for it, makes the merge commit object with
            commit-tree (no ref moves) to have something to check out, runs `verdict` on it and stores it. Then verdict.py merge
@@ -1583,7 +1654,7 @@ objstub: decide on MACHINE CODE whether built AArch64 objects contain (T) a trap
 Inputs: ELF relocatable objects, ELF32 (ILP32; SHT_RELA with Elf32_Rela, R_AARCH64_P32_* kinds) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
 the host g++ against LLVM 18's MC layer; env var A64ACCESS names a prebuilt binary): per word the registers read and written
 (MCInstrDesc defs/uses/implicit, tied operands), the memory operand and the kind. Everything the T and V classes need beyond that
-is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64
+is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64 (ASM-043)
 instruction descriptions and disassembler are correct; the test cross-checks the decoded word set against objdump. Output: one line `obj:symbol: KIND detail`, sorted; exit 0 iff no finding.
 
 FUNCTION UNIVERSE. Every STT_FUNC symbol defined in an SHF_EXECINSTR section, range [value, value+size); equal ranges are aliases of
@@ -1599,7 +1670,7 @@ whose symbol is global/weak and in the TERMINATOR SET (calls, tail calls, GOT/AD
 can be incomplete; a local symbol cannot be the library routine). `T2-noreturn-tail`: the last instruction is a direct BL (callee a symbol; control
 runs off the end after a call the compiler knew not to return), except a BL of `fnvnx_reach_violation` (reach rule below); another last instruction that can fall through (not RET, B, BR*, T1) is
 `fallthrough`. Reachability of a trap is NOT computed: presence anywhere in a function is a finding; every function is judged, so
-a caller of a flagged function is not flagged for it. Assumption: every terminating routine of the toolchain is declared noreturn
+a caller of a flagged function is not flagged for it. Assumption: every terminating routine of the toolchain is declared noreturn (ASM-044)
 in the headers given. TERMINATOR RULE (what is a terminator): a routine that ENDS THE PROCESS. Resuming or starting the propagation of
 an exception is not process end: it transfers control to a handler (or on to the caller), and whether a handler exists is the EH
 class, not class 1. The plugin applies GCC's own flags (TREE_THIS_VOLATILE = noreturn, TREE_NOTHROW) and its own EH lowering: (1) the
@@ -1651,7 +1722,7 @@ T2-noreturn-tail; it is judged by the reach rule: w0 at the call must be a const
 V dataflow over a CFG where a call returns and clobbers the AAPCS64 caller-saved registers), else `reach-nonconstant`; the constant must be a
 fact of GATE_CACHE/reach/<git tree>/reach.facts.tsv (`fact_id<TAB>sha256`, written by the gate `reach`), else `reach-uncertified` (also
 when the file does not exist); a fact with no call site in the universe is `reach-stale`; any other reference to the symbol (address
-taken, in code or in data) is `reach-address-taken`. Assumption: the decoder's write sets (LLVM defs) name every register an instruction
+taken, in code or in data) is `reach-address-taken`. Assumption: the decoder's write sets (LLVM defs) name every register an instruction (ASM-045)
 writes (a missed write of x0 would make a constant wrong).
 
 CACHE. Per object, CACHE/objstub/<key>.json, key = sha256 of (analysis version = objstub.py + a64access.cc, object sha256, os_layer
@@ -1698,7 +1769,7 @@ Exit: 0 green, 2 red, 1 usage/tool error.
 ## verify/oraclecheck.py
 
 ```text
-oraclecheck: verification of the assumption of gate "oracle" - the declaration of a test is true.
+oraclecheck: verification of the assumption of gate "oracle" - the declaration of a test is true. (ASM-042)
     python3 -I oraclecheck.py [--jobs N] [--timeout-s N] --out REPORT.json [TEST...]      cwd = checkout root
 
 Runs each test file of the oracle universe (or the TESTs named, repo-relative) as `python3 -I FILE` under
@@ -1730,7 +1801,7 @@ puregate: DEFAULT-DENY static gate for rule R12-T (a build stage's output is a f
 PATH: .py file or directory (sorted walk); shell files (suffix .sh/.bash or shell shebang): `shell-unanalysable`. Output
 `file:line: RULE symbol`, at most 200 lines (JSON: all). Policy tables: puregate_policy.py (data only; rule classes there).
 "Accepted" means: no Python code in the checked files can read an undeclared channel (clock, entropy, host identity,
-directory/set order, file times/inodes), UNDER THE ASSUMPTIONS below. Anything not analysable is a violation, never a pass.
+directory/set order, file times/inodes), UNDER THE ASSUMPTIONS below. Anything not analysable is a violation, never a pass. (ASM-032, ASM-033, ASM-034, ASM-035, ASM-036, ASM-037)
 Names resolve through import bindings with Python scoping; a name bound by an import and by anything else in one scope is
 `dynamic`; an escape of a module/class that carries rules (other than as an attribute base) is `dynamic`.
 Rules: the class rules of POLICY/ATTR (clock inode entropy unsorted-listing host completion-order dynamic) plus
@@ -1767,7 +1838,7 @@ ASSUMPTIONS (named; what "accepted" does NOT prove):
 ## verify/puregate_policy.py
 
 ```text
-puregate policy tables: DATA ONLY (the rules that read them are in puregate.py, which documents the assumptions).
+puregate policy tables: DATA ONLY (the rules that read them are in puregate.py, which documents the assumptions). (ASM-032, ASM-033)
 
 Rule classes: clock (wall/monotonic time, file times), inode (inode/device/link identity), entropy (random, id, hash),
 unsorted-listing (directory order), unsorted-set (set iteration order), host (machine identity/load), completion-order
@@ -1798,7 +1869,7 @@ EXTERNAL inputs (key "external", RECIPE.md): fetched only by exact commit from A
   compiler {"external": N, cc, cxx}: the tree is declared to runtime.py tool as HOST@AT (loader closure resolved as inside the sandbox, RECIPE.md).
 Outputs in --out: objects.json ("fnvnx-objects/1": root, objects[{unit,object,sha256,os_layer}], elf, constants, defined [{symbol,bind,type,object}] and undefined [symbol] (ELF .symtab of the objects, struct), stage_keys, stages
   {run,hit}, status green|red, failure {stage,exit,stderr tail 20} / failed_units when red), obj/<unit>.o, <name>.elf, constants.tsv.
-Assumptions: the compiler and ld are deterministic given the flags of unitstage/toolflags (A-env); the sandbox leaves the channels of
+Assumptions: the compiler and ld are deterministic given the flags of unitstage/toolflags (A-env); the sandbox leaves the channels of (ASM-038, ASM-039)
   sandbox.OPEN_CHANNELS open (see gate_determinism.py for which of them two cold builds expose).
 ```
 
@@ -1902,14 +1973,14 @@ unreadable or a cycle: `response-file-unreadable`). Output `STAGE: RULE detail [
 Declared dependencies, NOT checked here: "no_date_time_macros": {"checked_by": NAME} names the stage/gate proving the sources
 use no __DATE__/__TIME__ (VC9 has no switch); "coff_normalize"/"pe_normalize": the consumer normalizes time stamps
 (verify/coffnorm.py); a python script must itself pass puregate.
-ASSUMPTION A-env: external tools invoked this way are deterministic. It rests on each tool's reproducible-builds
+ASSUMPTION A-env: external tools invoked this way are deterministic. It rests on each tool's reproducible-builds (ASM-038)
 documentation; the gate enforces the invocation, it does not prove the tool.
 ```
 
 ## verify/toolflags_policy.py
 
 ```text
-toolflags policy table (data only): key -> (kind, requirement, citation). The reviewable statement of assumption A-env.
+toolflags policy table (data only): key -> (kind, requirement, citation). The reviewable statement of assumption A-env. (ASM-038)
 Rows citing VC9 are UNVERIFIED (no VC9 here); GCC 13.3 / binutils 2.42 rows were checked against the installed --help.
 ```
 
@@ -1939,7 +2010,7 @@ Closure discovery (this runner, outside the sandbox, a pure function of stage re
   hashes); the accepted result is the run on the view of D. ARGUMENT that the hint never changes the result: the accepted run opened
   only files of D, all real, and saw the true name tree, so every include search and probe got the answer it gets on the real tree and
   every opened file had its real content; its output equals the output on the real trees. A different hint only changes how many runs
-  lead to D. ASSUMED about GCC: it reads the content of a file only by lexing it (then the file is in deps.d) or it fails; (a
+  lead to D. ASSUMED about GCC: it reads the content of a file only by lexing it (then the file is in deps.d) or it fails; (a (ASM-040)
   #pragma-once identity check on a file that is not included would not be caught by the placeholder, only by the equality assert).
 Languages by suffix (LANG): .c gets `-x c` (PP) and `-x c -fpreprocessed` (CC); .S gets `-x assembler-with-cpp` and `-x assembler` (CC on the
   preprocessed text, the same two stages); .s has no PP stage (its CC stage reads the unit alone, a `.include` fails). `--include` may also be

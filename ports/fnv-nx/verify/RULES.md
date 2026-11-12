@@ -1,7 +1,7 @@
 # Rules referenced by the gates
 
 The ids that gate code and docstrings cite (`N1`, `R5`, `K16`, ...). Source: the plan of record MASTER_PLAN4 (private
-plan repository; section 1 "Rules (with proof and assumptions)") and, for K16/K2, MASTER_PLAN2. The statements are
+plan repository; section 1 "Rules (with proof and assumptions)"; the registry of assumptions is ASSUMPTIONS.json: ASM-001 to ASM-009 accepted, the others to be removed) and, for K16/K2, MASTER_PLAN2. The statements are
 carried over in our own words; no fact about the exe is stored here. Verdict and gate list: `VERDICT.md`.
 Principle (MASTER_PLAN4): the solver must be sound and static; incompleteness costs speed, never correctness.
 Whatever is not proved gets the lifted body. Fuzzing, boots and farms only verify a rule.
@@ -11,7 +11,7 @@ Whatever is not proved gets the lifted body. Fuzzing, boots and farms only verif
 `NATIVE(f)` iff N1 and N2 and N3 and N4 hold for `f`; otherwise `LIFTED(f)`.
 Proof argument: N1 gives "exe = MSVC(source)"; N2 gives "the GCC source = the same source"; N3 and N4 give "GCC and MSVC
 agree on the subset P". Floating-point arithmetic inside P is not excluded (rule R8): its reference is the source under IEEE.
-Assumptions: A1 (the list of GCC/MSVC divergences that defines P is complete; there is no formal semantics of MSVC 2008),
+Assumptions: A1 (the list of GCC/MSVC divergences that defines P is complete; there is no formal semantics of MSVC 2008), (ASM-027, ASM-001, ASM-030)
 A2 (GCC is correct), A10 (accepted by the owner, see R9). Proof level is N1-N4 only (owner decision); no SMT translation
 validation for native bodies.
 Gate: `bodysel` (`contract/bodysel.py`); it takes N1-N4 as inputs and decides statically before any run.
@@ -35,7 +35,7 @@ COFF symbol name of Y, and that name is decorated (`?...`). No row, an `unnamed:
 undecorated one (extern "C", every asm/x87/register CRT helper: `_ftol2`, `_CI*`, `_alloca_probe`, with no name table) is
 not provable: the caller is not N2. Proof: R5 derives convention, stack words, varargs and sret from the decorated name;
 byte-equality of the full names gives equality of all of them. Assumptions: the `names` plugin ran on every native unit
-(recipe rule: guest compiler plus plugins); the pristine cl names are the exe's contract (N1).
+(recipe rule: guest compiler plus plugins) (ASM-050); the pristine cl names are the exe's contract (N1) (ASM-053).
 Gates: `n2_data`, `n2_call`, `n2_vcall`, `xc` (`contract/gate_data.py`, `gate_call.py`, `gate_vcall.py`, `gate_xc.py`;
 rows come from `contract/registry.py`; a function with a row is not N2 and becomes LIFTED in `bodysel`).
 
@@ -63,7 +63,7 @@ by a relocation. Anything else is a build error. Indirect jumps go through a dis
 `.reloc`; the set is complete if a static taint check proves there is no arithmetic over a code address, and where it does
 not, that function statically gets a dispatcher over all instruction boundaries. `call` pushes the exe return address on the
 guest stack; a `ret` to another address goes to the same dispatcher.
-Assumption A6: the code does not modify itself; `.text` is mapped read-only and a write raises the exception Windows raises.
+Assumption A6: the code does not modify itself; `.text` is mapped read-only and a write raises the exception Windows raises. (ASM-028)
 Gate: `disp` (VERDICT.md class 5, dispatcher table against the R3 universe; not written yet); resolution of code pointers in
 `link/tables.py`.
 
@@ -87,7 +87,7 @@ Enforced by: `contract/vtid.py`, `contract/n1.py` (the map; one decorated name, 
 ## R12 BUILD-PURE
 
 A stage runs in a sandbox that holds only the declared inputs; clocks and network are closed; the order is deterministic.
-The key is the hash of the inputs and of the tool code. Then warm == cold is a theorem (assumption A9: SHA-256). A release is
+The key is the hash of the inputs and of the tool code. Then warm == cold is a theorem (assumption A9: SHA-256). A release is (ASM-002)
 always built cold; the shadow farm stays a check.
 Gates: `pure` (`verify/gate_pure.py`, `verify/puregate.py` = rule R12-T, policy in `puregate_policy.py`), `determinism`
 (`verify/gate_determinism.py`); `verify/sandbox.py`, `verify/cas.py`.
@@ -101,7 +101,7 @@ Enforced by: `contract/bodysel.py` (its argument list is the whole key of the st
 ## K2 identity of object and table (basis of K16)
 
 The vptr value in an object equals the vftable address of the exe in the data image. Every relocation `_ZTV...+8` is rebound
-to that address by key (unit, symbol). Assumption: the key is unambiguous. (Implemented as R6.)
+to that address by key (unit, symbol). Assumption: the key is unambiguous. (Implemented as R6.) (ASM-031)
 
 ## K16 RTTI
 
@@ -129,8 +129,11 @@ slot whose address provably does not leave the function; a native automatic vari
 second complete path (`ldr` + `dmb ishld`, `dmb ishst` + `str`); (c) native bodies get the same mapping from the plugin;
 (d) `Interlocked*` and `xchg` with memory are `ldaxr`/`stlxr` loops. Argument: when all shared events are acquire or
 release, program order between them is preserved, so executions are sequentially consistent and SC is within TSO.
-Assumptions: A7 (the ARMv8 model matches the A57), A10 (the lifter keeps the exe's access order exactly; a native body runs
+Assumptions: A7 (the ARMv8 model matches the A57), A10 (the lifter keeps the exe's access order exactly; a native body runs (ASM-029, ASM-030)
 the source's accesses in GCC's order, so at a race site it gives the source's behaviour under SC, not necessarily the exe's).
+
+## R14 ASSUMPTIONS (gate `assumptions`, VERDICT.md class 18)
+An assumption that a proof rests on is in `ASSUMPTIONS.json` with an id (ASM-NNN, for example ASM-001 for the compiler) and a status. OWNER: the owner accepted it in `CLAUDE.md` (the nine of the owner's list, ASM-001 to ASM-009). REMOVE: a gate, a fact or a planned work removes it, and one lead owns the work. Argument: a statement that rests on an assumption names its id; an id has exactly one entry; an OWNER entry exists only with the owner's words; so the set of assumptions is the set of entries, and nothing is assumed that the registry does not show. Assumption: none beyond the nine (ASM-001 to ASM-009); an assumption written without the words of the pattern is closed by review, not by the gate.
 
 ## Host API header holds only what the product calls
 

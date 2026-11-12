@@ -7,7 +7,7 @@
 PATH: .py file or directory (sorted walk); shell files (suffix .sh/.bash or shell shebang): `shell-unanalysable`. Output
 `file:line: RULE symbol`, at most 200 lines (JSON: all). Policy tables: puregate_policy.py (data only; rule classes there).
 "Accepted" means: no Python code in the checked files can read an undeclared channel (clock, entropy, host identity,
-directory/set order, file times/inodes), UNDER THE ASSUMPTIONS below. Anything not analysable is a violation, never a pass.
+directory/set order, file times/inodes), UNDER THE ASSUMPTIONS below. Anything not analysable is a violation, never a pass. (ASM-032, ASM-033, ASM-034, ASM-035, ASM-036, ASM-037)
 Names resolve through import bindings with Python scoping; a name bound by an import and by anything else in one scope is
 `dynamic`; an escape of a module/class that carries rules (other than as an attribute base) is `dynamic`.
 Rules: the class rules of POLICY/ATTR (clock inode entropy unsorted-listing host completion-order dynamic) plus

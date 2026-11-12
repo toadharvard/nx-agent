@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for verify/gate_pure.py, verify/gate_tests.py, verify/gates.json and verify/l1.py.
+"""Tests for verify/gate_pure.py, verify/gate_tests.py, verify/gates.d and verify/l1.py.
 Plain script: exit 0 on pass, one PASS/FAIL line per case. Uses temp git repositories."""
 import json
 import os
@@ -20,7 +20,7 @@ ENV = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@e", GIT_COMMITTE
 _n = [0]
 # the tool files the gate machinery itself needs in a checkout (verdict.py/l1.py run from VERIFY, on the repos built here);
 # the synthetic repos hold only tiny test files, never this directory's tests (no nested run of the real test suite)
-SMALL = ("gate_pure.py", "gate_tests.py", "puregate.py", "puregate_policy.py", "cas.py", "envcheck.py")
+SMALL = ("gatesdir.py", "verdict.py", "gate_pure.py", "gate_tests.py", "puregate.py", "puregate_policy.py", "cas.py", "envcheck.py")
 CLEAN = "import sys\n\ndef f(x):\n    return sorted(x)\n"
 BAD = "import random\n\nx = random.random()\n"
 
@@ -158,21 +158,28 @@ put(d, "verify/tests/test_env.py", "import os, sys\nsys.exit(1 if [k for k in os
 rc, r, e = tests(d)
 check("tests: a test file does not see the gate's GATE_* variables", rc == 0 and r["certified"] == 1, (rc, r, e))
 
-# ---- gates.json
-spec = json.load(open(os.path.join(VERIFY, "gates.json")))
+# ---- gates.d
+sys.path.insert(0, VERIFY)
+import gatesdir  # noqa: E402
+spec = gatesdir.load_dir(os.path.join(VERIFY, "gates.d"))
+files_d = sorted(f[:-5] for f in os.listdir(os.path.join(VERIFY, "gates.d")))
+check("gates.d: no gates.json is tracked and every file is one gate named like it", not os.path.exists(os.path.join(VERIFY, "gates.json"))
+      and [g["name"] for g in spec["gates"]] == files_d and len(files_d) == len(set(files_d)), files_d)
+check("gates.d: every gate file declares valid covers", all(isinstance(g.get("covers"), list) and g["covers"] and all(c in gatesdir.ROOT_CLASSES for c in g["covers"])
+                                                          for g in spec["gates"]), spec)
 byname = {g["name"]: g for g in spec["gates"]}
 CONTRACT = ["n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcrel", "bodysel", "abs", "disp", "reach", "reachlink", "gpa"]
 dirs_pure = [a.rsplit("/", 1)[-1] for a in byname["pure"]["argv"][3:]]
 dirs_tests = [a.rsplit("/", 1)[-1] for a in byname["selftests"]["argv"][5:]]
-check("gates.json: contract gates run gate_contract.py --gate NAME", all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_contract.py", "--gate", n] and byname[n]["result"] == n + ".json" for n in CONTRACT), spec)
-check("gates.json: format and the gates", spec["format"] == "fnvnx-gates/1" and [g["name"] for g in spec["gates"]] == ["pure", "selftests", "admit", "oracle", "build", "objstub", "linkstrict", "determinism"] + CONTRACT + ["argordergate", "imports", "machine", "hostapi", "datamodel", "d3d9total", "order", "addr32", "eh"]
+check("gates.d: contract gates run gate_contract.py --gate NAME", all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_contract.py", "--gate", n] and byname[n]["result"] == n + ".json" for n in CONTRACT), spec)
+check("gates.d: format and the gates", spec["format"] == "fnvnx-gates/1" and {"pure", "selftests", "admit", "oracle", "assumptions", "build", "objstub", "linkstrict", "determinism", "argordergate", "imports", "machine", "hostapi", "datamodel", "d3d9total"}.union(CONTRACT) <= set(byname) and {"order", "addr32", "eh"} <= set(byname)
       and all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_%s.py" % n] and byname[n]["result"] == n + ".json"
               for n in ("build", "objstub", "linkstrict", "determinism", "hostapi"))
       and byname["argordergate"]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_argorder.py"] and byname["argordergate"]["result"] == "argordergate.json"
       and byname["datamodel"]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_datamodel.py"] and byname["datamodel"]["result"] == "datamodel.json"
       and byname["d3d9total"]["argv"] == ["python3", "-I", "ports/fnv-nx/render/total/gate_d3d9total.py"] and byname["d3d9total"]["result"] == "d3d9total.json"
       and byname["pure"]["result"] == "pure.json" and byname["selftests"]["result"] == "selftests.json"
-      and dirs_pure == ["contract", "link", "rules", "lift", "total"] and dirs_tests == ["verify", "farm", "contract", "link", "rules", "lift", "gates", "total"]
+      and dirs_pure == ["contract", "link", "rules", "lift", "gates", "total"] and dirs_tests == ["verify", "farm", "contract", "link", "rules", "lift", "gates", "total"]
       and all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_lift.py", "--gate", n] and byname[n]["result"] == n + ".json" for n in ("order", "addr32", "eh"))
       and byname["pure"]["argv"][:3] == ["python3", "-I", "ports/fnv-nx/verify/gate_pure.py"]
       and byname["selftests"]["argv"][:5] == ["python3", "-I", "ports/fnv-nx/verify/gate_tests.py", "--jobs", "3"], spec)
@@ -190,7 +197,8 @@ def small_repo(gates=None, link=None):
     os.makedirs(os.path.join(r, "ports/fnv-nx/verify"))
     for f in SMALL:
         shutil.copy(os.path.join(VERIFY, f), os.path.join(r, "ports/fnv-nx/verify", f))
-    put(r, "ports/fnv-nx/verify/gates.json", json.dumps(gates or two_gates()))
+    for g in (gates or two_gates())["gates"]:
+        put(r, "ports/fnv-nx/verify/gates.d/%s.json" % g["name"], json.dumps(dict(g, format="fnvnx-gatefile/1")))
     shutil.copy(os.path.join(VERIFY, "env.json"), os.path.join(r, "ports/fnv-nx/verify/env.json"))
     put(r, "ports/fnv-nx/link/tests/test_ok.py", "import sys\nsys.exit(0)\n")
     for k, v in (link or {}).items():
@@ -202,8 +210,8 @@ def small_repo(gates=None, link=None):
 def two_gates():
     v = "ports/fnv-nx/verify/"
     return {"format": "fnvnx-gates/1", "gates": [
-        {"name": "pure", "argv": ["python3", "-I", v + "gate_pure.py", "ports/fnv-nx/link"], "result": "pure.json"},
-        {"name": "selftests", "argv": ["python3", "-I", v + "gate_tests.py", "ports/fnv-nx/link"], "result": "selftests.json"}]}
+        {"name": "pure", "argv": ["python3", "-I", v + "gate_pure.py", "ports/fnv-nx/link"], "result": "pure.json", "covers": ["tool"]},
+        {"name": "selftests", "argv": ["python3", "-I", v + "gate_tests.py", "ports/fnv-nx/link"], "result": "selftests.json", "covers": ["tool"]}]}
 
 def branch(r, name, files, base="main", delete=()):
     git(r, "checkout", "-b", name, base)
@@ -252,9 +260,7 @@ rc, line, out, err = l1("merge", "--repo", r, "--into", "main", "--from", "feat2
 check("l1 merge: second green merge, previous verdict used", rc == 0 and "bootstrap" not in out and "merged " in out, (rc, line, out, err))
 
 # ratchet: gate dropped
-g1 = two_gates()
-g1["gates"] = g1["gates"][:1]
-branch(r, "drop", {"ports/fnv-nx/verify/gates.json": json.dumps(g1)})
+branch(r, "drop", {}, delete=["ports/fnv-nx/verify/gates.d/selftests.json"])
 before = git(r, "rev-parse", "main")
 rc, line, out, err = l1("merge", "--repo", r, "--into", "main", "--from", "drop", "--verdicts", vd)
 check("l1 merge: dropping a gate is blocked by the ratchet", rc == 2 and "ratchet" in out + err and "selftests" in out + err

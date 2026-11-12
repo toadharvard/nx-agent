@@ -1,0 +1,13 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "oracle",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_oracle.py"
+ ],
+ "result": "oracle.json",
+ "covers": [
+  "tool"
+ ]
+}

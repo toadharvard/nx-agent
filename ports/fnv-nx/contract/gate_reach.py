@@ -40,7 +40,7 @@ Rule.  A request about import I = (dll D, name N, argument k) is CERTIFIED for t
      GetProcAddress slot must be covered by a row of the table) is closed, and no pair (D, N), (*, N) (module unknown) or (D, #n)
      / (*, #n) (an ordinal in D could be N) exists.  An OPEN site (name or module not derived) anywhere in S makes (b) fail for
      EVERY request: reason `gpa-open`, the condition under which certificates are not valid yet;
- (c) the assumptions of argflow A1..A6 (and A8, the provenance premise of memfx, when its rule closed a handle chain) are recorded in each certificate (BASE: the contract's standing assumptions, the same for
+ (c) the assumptions of argflow A1..A6 (and A8, the provenance premise of memfx, when its rule closed a handle chain) are recorded in each certificate (BASE: the contract's standing assumptions, the same for (ASM-010, ASM-011, ASM-012, ASM-013, ASM-014, ASM-015, ASM-016, ASM-017)
      every gate that uses argflow); an assumption that is not a proven rule makes the fact NOT certified: BLOCKING = {A7} (a call
      between a store and a load does not write that memory; only the `open` handle mode depends on it).  A fact whose only
      derivation needs A7 is listed `assumption:A7`.
@@ -48,12 +48,12 @@ Proof argument: (a) says that the argument at every call that can execute is in 
 all paths of the function backwards, expands own parameters to every caller, and is closed or reports a break); (b) says that no
 call can execute that is not a static use of the slot (the only way to get an import's address other than its slot is
 GetProcAddress, G1; a forwarder chain between distinct dll names is not followed, G2); therefore no execution passes a value
-outside the predicate to the import, and the branch of the body that handles it is unreachable.  Assumptions: A1..A6, G1, G2, and
+outside the predicate to the import, and the branch of the body that handles it is unreachable.  Assumptions: A1..A6, G1, G2, and (ASM-010, ASM-011, ASM-012, ASM-013, ASM-014, ASM-015, ASM-018, ASM-019)
 that the facts' ranges contain every executed instruction of the images (A4).  The certificate fixes the set of images by hash
 (sha256 of the PE and of the ranges file), the request, the GetProcAddress rows used, the assumptions and the per-site proof chain.
 
 Outputs ($GATE_OUT, gatefile.py): reach.json (gate `reach`; universe = facts, certified = certified facts; uncertified ids
-`<fact_id>:<reason>:<image>:<address>`, reason `assumption:A7` etc. may contain a colon: split the last two fields off), reach.ids
+`<fact_id>:<reason>:<image>:<address>`, reason `assumption:A7` etc. may contain a colon: split the last two fields off), reach.ids (ASM-016)
 (all of them, sorted), reach.facts.tsv (`fact_id<TAB>sha256 of the certificate`, certified facts only, sorted by id).  --out: per
 fact status, sites examined and reasons.  --facts-h: the C header (FNVNX_REACH_<DLL>_<NAME>_<n> with n the 1-based position among
 the requests of the same dll!name in canonical order; FNVNX_<request id> for the platform's own names; FNVNX_REACH_TABLE_ID).
