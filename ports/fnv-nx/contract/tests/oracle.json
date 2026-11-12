@@ -90,6 +90,18 @@
     "ports/fnv-nx/contract/gate_xc.py"
    ]
   },
+  "test_globext.py": {
+   "references": [
+    {
+     "anchor": "## contract/globext.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/globext.py"
+   ]
+  },
   "test_gpa_names.py": {
    "references": [
     {

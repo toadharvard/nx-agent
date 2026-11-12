@@ -1981,3 +1981,21 @@ Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 
               (transitively), is tainted. Exit 2 lists chains. Stage results: S/keys/<key>/result.json (sandbox.py).
   defect / defects   rule-defect queue: content-addressed JSON entries, verification-class data only.
 ```
+
+## contract/globext.py
+
+```text
+globext - the global-extents fact: exe VA ranges of the global data objects that the gates certify (L2).
+
+    globext.py --rows rows.json --out fact.txt [--audit audit.tsv] [--range LO HI] [--probe VA ...]
+
+rows.json: a list of {"image", "va", "size", "certified_by": [gate ids], "type", "symbol", "unit"}. Every row is a
+certified object: the caller (the gate-output reader) passes only objects whose address, type layout and size the
+namegate, layout and abi gates certified. This tool never certifies, guesses or fills in; an uncertified object is
+not a row.
+Output fact, one line per object: `image va_start size certified_by` (hex va, decimal size, gate ids joined by '+',
+no spaces), sorted by image then va_start. The audit file holds `image va_start size type symbol unit`.
+A row with size < 1, a missing field, a non-hex-able va, or an empty certified_by is a ValueError. Two objects of
+one image whose ranges overlap are a ValueError naming both. Identical duplicate rows are one object.
+--range prints the object count inside [LO, HI); --probe prints the object containing each VA, or `none certified`.
+```
