@@ -46,34 +46,58 @@ class Op:
         if s.w == 32: return n, 0
         if s.w == 16: return 'e' + n, 0
         return 'e' + n[0] + 'x', (8 if n[1] == 'h' else 0)
-def ea(op, esp=None, seg=True):
+_OK = set()      # the u-serials of the address nodes made by the address functions below (the registry mload / mstore check)
+def tag(n): _OK.add(n.u); return n
+def ea(op, esp=None, seg=True, off=0):
     """effective address of a memory operand.  Address-size attribute 16 (prefix 0x67 in a 32-bit code segment, SDM Vol. 2 2.1.5 / Table 2-1, Vol. 1 3.7.5):
     the offset is base16 + index16 + disp, computed modulo 2^16 and zero-extended to 32 bits; the segment base is added after.  Capstone names the 16-bit
     registers (bx, bp, si, di): their values are the low words of ebx, ebp, esi, edi, so the sum of the 32-bit registers has the same low 16 bits."""
     if op.a16:
         sub16 = lambda n: V('e' + n, 32)
-        a = C(op.disp, 32)
+        a = (C(op.disp, 32) + C(off, 32) if off else C(op.disp, 32))
         if op.base: a = a + sub16(op.base)
         if op.index: a = a + sub16(op.index) * op.scale
         a = zext(trunc(a, 16), 32)
         if seg and op.seg in ('fs', 'gs'): a = a + V(op.seg + '_base', 32)
-        return a
+        return tag(a)
     sub = lambda n: esp if (n == 'esp' and esp is not None) else V(n, 32)
-    a = C(op.disp, 32)
+    a = (C(op.disp, 32) + C(off, 32) if off else C(op.disp, 32))
     if op.base: a = a + sub(op.base)
     if op.index: a = a + sub(op.index) * op.scale
     if seg and op.seg in ('fs', 'gs'): a = a + V(op.seg + '_base', 32)
-    return a
+    return tag(a)
+def addoff(a, d):
+    """a tagged address plus a displacement (the bit-string word offset of BT mem,reg)"""
+    assert a.u in _OK, 'address not made by an address function'
+    return tag(a + d)
+def ssa(a):
+    """an implicit stack address (SS: flat, no base variable; ESP / EBP based) -- the stack of PUSH, POP, CALL, RET, ENTER, LEAVE, PUSHA, POPA, PUSHF, POPF"""
+    return tag(a)
+def esa(a):
+    """the implicit string destination ES:(E)DI (ES is flat whatever the override, SDM Vol. 2 MOVS, STOS, SCAS, CMPS)"""
+    return tag(a)
+def dsa(c, a):
+    """an implicit DS-default operand (string source (E)SI, XLAT [(E)BX + AL]): the effective segment is the LAST override prefix (c.dseg); FS and GS have a base, the flat segments none"""
+    return tag(a + V(c.dseg + '_base', 32) if c.dseg in ('fs', 'gs') else a)
+def mload(a, w):
+    """the one load of the Form builders: the address must come from an address function (ea / addoff / ssa / esa / dsa); tests/test_forms_mem.py also checks that no builder calls dsl.load"""
+    assert a.u in _OK, 'load through an address not made by an address function'
+    return load(a, w)
+def mstore(F, a, v, when=None):
+    assert a.u in _OK, 'store through an address not made by an address function'
+    F.store(a, v, when)
+def sload(a, w): return mload(ssa(a), w)
+def sstore(F, a, v): mstore(F, ssa(a), v)
 def rd(op, w=None):
     w = w or op.w
     if op.k == 'i': return C(op.val, w)
-    if op.k == 'm': return load(ea(op), w)
+    if op.k == 'm': return mload(ea(op), w)
     r, lo = op.full(); return extract(V(r, 32), lo + op.w - 1, lo)
-def store_op(F, op, addr, v):
+def store_op(F, op, addr, v, when=None):
     """the one store of a memory operand.  SDM Vol. 3, 5.6 (data-segment write rule) and 3.4.5.1: a code segment is not writable, so a store whose effective segment is CS
-    (the 0x2e override, last prefix wins) raises #GP(0) -- Windows reports STATUS_ACCESS_VIOLATION -- before anything is written: fault code 5 (f_dsl FAULT), always."""
+    (the 0x2e override, last prefix wins) raises #GP(0) -- Windows reports STATUS_ACCESS_VIOLATION -- before anything is written: fault code 7 (dsl.FAULTS AV), always."""
     if op.seg == 'cs': F.fault(7, C(1, 1))
-    F.store(addr, v)
+    mstore(F, addr, v, when)
 def wr(F, op, v, when=None):
     if op.k == 'm': return store_op(F, op, ea(op), v)
     r, lo = op.full(); old = F.cur(r)
@@ -126,6 +150,7 @@ def build(ins, addr):
     for o in c.ops:
         o.a16 = c.a16
         if o.k == 'm': o.seg = None if o.cseg == X.X86_REG_ES else sp      # the string destination is ES:EDI whatever the override (SDM Vol. 2, MOVS / STOS / SCAS / CMPS)
+    c.dseg = sp                      # the effective segment of the implicit DS-default operands (string source, XLAT): the last override prefix
     c.opc = raw[i + 1] if raw[i] == 0x0f else raw[i]; c.raw = raw
     fn = H.get(c.m)
     if fn is None and c.m[0] == 'j': fn = H['jcc']
