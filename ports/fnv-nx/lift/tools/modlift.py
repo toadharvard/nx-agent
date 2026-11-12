@@ -26,7 +26,7 @@ PRI = ['entry', 'tls', 'export', 'call', 'tail', 'eh-unwind', 'eh-catch', 'eh-co
 CN = {1: 'entry-nondecomp', 2: 'entry-nondecomp', 3: 'data-pe-header', 4: 'padding', 5: 'data-reloc', 6: 'dead-gap', 9: 'data-unreached', 8: 'UNEXPLAINED'}      # the exe's class names (codemap.py CLS)
 M32 = 0xffffffff
 
-def _run(arg, XEX):
+def _run(arg, XEX, REF=frozenset()):
     path, mrow = pemod.locate(arg)      # modules.tsv row (missing = KeyError) and the file (sha256 + size checked = ValueError)
     name = os.path.splitext(mrow.name)[0]; outd = os.environ.get('FNVNX_FACTS_OUT', '/home/user/l3facts2') + '/' + name; os.makedirs(outd, exist_ok=True)
     md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
@@ -37,10 +37,12 @@ def _run(arg, XEX):
     text = bytes(tx)
     def intext(a): return T0 <= a < T1 and V[a - T0] == 1
     rvals_all = [(r, v) for r, v in ((r, u32(r)) for r in relocs) if intext(v)]
-    rvals = [(r, v) for r, v in rvals_all if r not in XEX]          # R3 refined (residue.disp_only): the value sites; XEX = the displacement-only sites of the previous round
+    rvals = [(r, v) for r, v in rvals_all if r not in XEX and v not in REF]          # R3 refined (residue.disp_only): the value sites; XEX = the displacement-only sites of the previous round
     ent = {}; roots = set(); queue = deque(); dec = {}; cov = bytearray(TN); ud = set(); xf = set(); misfit = set(); callers = {}; calltg = {}; leaves = set(); jtab = {}; jins = []
+    refhit = set()
     def add(a, kind, proven=False):
         if not intext(a): return False
+        if a in REF and not proven: refhit.add(a); return False      # reloc-consistency (residue.misfit_refused): an unproven candidate whose decoding has a relocation-misfit is not code (strict images: every DLL)
         if a not in ent: ent[a] = set(); queue.append(a)
         ent[a].add(kind)
         if proven: roots.add(a)
@@ -190,7 +192,7 @@ def _run(arg, XEX):
                 elif m == 'jecxz' and not lo <= (o[0].imm & M32) < hi: jx.add(a_); ts.setdefault(o[0].imm & M32, a_)      # jecxz leaving the range: a direct jump out (f_sys, f_flow.jump_out)
                 if m not in ('jmp', 'ret', 'retf', 'hlt', 'ud2') and not (m == 'int3' and a_ + g.size >= hi) and a_ + g.size not in ins and a_ + g.size not in bad:      # explore's own stop rule: the path falls out of what was decoded
                     ts.setdefault(a_ + g.size, a_); ft.add(a_ + g.size)         # a fall-through is a control transfer to its successor, like `jmp nxt` (f_flow.jump_out)
-            lcache[k] = (cs, ts, jx, ft, residue.body_facts(ins, tabs, None, intext, imports))
+            lcache[k] = (cs, ts, jx, ft, residue.body_facts(ins, tabs, None, intext, imports), frozenset(ins))
         return lcache[k]
     def span(e, xs):        # the lifter range of entry e is [e, e + span): the smallest interval from e that holds every instruction e reaches (a reached instruction below e is outside: a jump to it leaves the range)
         return residue.span(e, ((a, dec[a][0]) for a in xs))      # the one function (residue.span), shared with the exe producer
@@ -202,10 +204,10 @@ def _run(arg, XEX):
         E = es(); NR, res = codemap.noreturn_lfp(E, trav, {eh.thrower} & set(ent)); exts = {e: res[e][0] for e in E}; edges = {e: res[e][1] for e in E}
         rounds += 1; n_before = n_before or len(E); viol = {}; outside = {}; jxs = set(); ftall = set()
         for e in E:
-            cs, ts, jx, ft, _rf = lc_targets(e, span(e, exts[e])); jxs |= {(e, x) for x in jx}; ftall |= ft
+            cs, ts, jx, ft, _rf, _ia = lc_targets(e, span(e, exts[e])); jxs |= {(e, x) for x in jx}; ftall |= ft
             for kd, T in (('call', cs), ('tail', ts)):
                 for t, a_ in T.items():
-                    if t in ent: continue
+                    if t in ent or t in REF: continue
                     if intext(t):
                         viol.setdefault(t, kd)
                         if TRACE: print('closure-trace round %d: %08x %s from entry %08x ext %d at %08x' % (rounds, t, kd, e, span(e, exts[e]), a_), file=sys.stderr, flush=True)
@@ -253,6 +255,9 @@ def _run(arg, XEX):
         new = [w for w in new if w in ent and w not in proven]
         if not new: break
         work = new
+    def refbad(e): return cnt[e][2] + sum(1 for a in exts[e] if calltg.get(a) in REF or any(t in REF for t in dec[a][4]))      # misfit instructions in the decoding of e + direct transfers of e to a refused entry (a transfer into non-code)
+    REFO = {e: refbad(e) for e in E if e not in proven and refbad(e) > 0}           # this round's refusals: unproven entries whose decoding has a relocation-misfit or transfers into a refused entry
+    PMF = sorted(e for e in E if e in proven and refbad(e) > 0)                      # proven flow over a misfit: a contradiction (a red), never a refusal
     # ---- coverage, classes, ownership
     covP = bytearray(TN); covC = bytearray(TN); own = array('I', bytes(4 * TN)); cand_insn = set()
     for e in E:
@@ -286,11 +291,13 @@ def _run(arg, XEX):
         out.append('%08x\t%s\t%d\t%s' % (e, pk, span(e, exts[e]), ','.join(fl)))
     open(outd + '/universe.tsv', 'w').write('# base=0x%08x: addresses are absolute VAs at the assigned load base (not RVAs; preferred base 0x%08x); columns: entry, kind, extent, flags; extent is the SPAN [entry, entry + extent) that holds every instruction the entry reaches at or above it (the range the lifter takes; the bytes reached: ranges.tsv)\n' % (M.base, M.pref) + '\n'.join(out) + '\n')
     hd = '# base=0x%08x: absolute VAs at the assigned load base (not RVAs)\n' % M.base; bad = 0; rg = []
-    RI = {}                                                  # retn.tsv: how each entry returns (residue.retn_rows)
+    RI = {}; LO = {}                                         # LO: instructions the lifter's own flow reaches that lie outside the entry's ranges (invariant: 0)
+    # retn.tsv: how each entry returns (residue.retn_rows)
     for e in E:
-        cs_, ts_, jx_, ft_, rf_ = lc_targets(e, span(e, exts[e]))
+        cs_, ts_, jx_, ft_, rf_, ia_ = lc_targets(e, span(e, exts[e])); LO[e] = len(ia_ - set(exts[e]))
         RI[e] = dict(rets=rf_['rets'], far=rf_['far'], open=rf_['open'], tails={t for t in ts_ if t in ent}, outside=any(t not in ent for t in ts_), noreturn=e in NR)
     rc = residue.write_retn(outd, hd, residue.retn_rows(RI)); print('retn.tsv %d rows: %s' % (len(RI), dict(sorted(rc.items()))))
+    print('invariant ranges: instructions the lifter reaches outside the entry ranges %d (entries %d of %d)' % (sum(LO.values()), sum(1 for v in LO.values() if v), len(LO)))
     for e, row in zip(E, out):
         r = codemap.ranges(exts[e], lambda a: dec[a][0]); bad += max([b - e for a, b in r if b > e] or [0]) != int(row.split('\t')[2]); rg.append('%08x\t%s' % (e, codemap.rng_str(r)))
     open(outd + '/ranges.tsv', 'w').write(hd.rstrip() + '; columns: entry, half-open ranges start-end (hex) of the instruction bytes reached\n' + '\n'.join(rg) + '\n')
@@ -367,6 +374,8 @@ def _run(arg, XEX):
     if len(targets) != len(E): why.append('gate universe %d != universe.tsv rows %d' % (len(targets), len(E)))
     if viol: why.append('%d in-span direct targets are not entries (closure not reached)' % len(viol))
     if bad: why.append('%d entries whose ranges do not sum to the extent' % bad)
+    if sum(LO.values()): why.append('%d instructions reached by the lifter outside the entry ranges' % sum(LO.values()))
+    if PMF: why.append('%d proven entries whose decoding has a relocation-misfit' % len(PMF))
     if eh.unknown: why.append('%d frame-handler stubs with unknown FuncInfo magic' % eh.unknown)
     # ---- information: pointer targets by old classes, mnemonics
     pt = sorted({v for r, v in rvals}); dread = set()
@@ -429,7 +438,7 @@ def _run(arg, XEX):
     print('mnemonics in proven code not in the exe universe (%d%s): %s' % (len([k for k in mp if k not in exe_mn]), '' if exe_mn else ', exe list missing', ' '.join('%s=%d' % kv for kv in new_mn)))
     open(outd + '/gate_codemap.json', 'w').write(json.dumps({'schema': 'fnvnx-gate/1', 'name': 'l3.codemap.' + name, 'status': 'green' if green else 'red', 'universe': TN - cc[7], 'certified': TN - cc[7] - nunx, 'uncertified': nunx, 'targets': len(targets), 'targets_certified': cert}) + '\n')
     print('gate l3.codemap.%s: %s (bytes %d, unexplained %d; targets %d, certified %d)%s' % (name, 'green' if green else 'red', TN - cc[7], nunx, len(targets), cert, ''.join('; RED: ' + w for w in why)))
-    return (0 if green else 1), {r for r, v in rvals_all if residue.disp_only(md, text, T0, cov, r, misfit)}
+    return (0 if green else 1), {r for r, v in rvals_all if residue.disp_only(md, text, T0, cov, r, misfit)}, REFO, PMF, len(E), sum(1 for e in E if e not in proven), len(refhit)
 
 
 def run(arg):
@@ -437,17 +446,20 @@ def run(arg):
     the entries on the value sites (not in X). Round k runs the whole producer with X_k excluded and yields X_{k+1} = X(flow of round k); X_0 = empty. Done when X_{k+1} == X_k: every excluded site is a
     displacement inside the final flow and every entry is justified by a value site or a root. A cycle or no fixed point in 12 rounds is an error (never a result)."""
     import io, contextlib
-    X = frozenset(); seen = []
+    X = frozenset(); R = frozenset(); seen = []; refinfo = {}
     for k in range(12):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            code, Xo = _run(arg, X)
-        if frozenset(Xo) == X:
+            code, Xo, Ro, PMF, nE, nC, nh = _run(arg, X, R)
+        refinfo.update(Ro)
+        if frozenset(Xo) == X and set(Ro) <= R:
             sys.stdout.write(buf.getvalue()); print('R3 refinement: fixed point after %d rounds, %d displacement-only relocation sites excluded from the entry rule' % (k + 1, len(X)))
+            print('reloc-consistency: entries %d (candidates %d); refused (unproven, decoding has a relocation-misfit) %d; proven entries with a misfit %d%s' % (nE, nC, len(R), len(PMF), ' RED: ' + ' '.join('%08x' % a for a in PMF[:8]) if PMF else ''))
             od = os.environ.get('FNVNX_FACTS_OUT', '/home/user/l3facts2') + '/' + os.path.splitext(pemod.locate(arg)[1].name)[0]
+            open(od + '/refused.tsv', 'w').write('# columns: entry, relocation-misfit instructions in its decoding, reason; unproven candidate entries refused by reloc-consistency (the bytes go to data, the relocated pointer is a data fact)\n' + ''.join('%08x\t%d\treloc-misfit\n' % (e, refinfo[e]) for e in sorted(R)))
             bad = residue.entries_on_data(od); print('invariant entries on class-3 data bytes: %d%s' % (len(bad), ' RED: ' + ' '.join('%08x' % a for a in bad[:8]) if bad else ''))
             return code or (1 if bad else 0)
-        seen.append(X); X = frozenset(Xo)
-        if X in seen:
+        seen.append((X, R)); X = frozenset(Xo); R = R | frozenset(Ro)          # a refusal is intrinsic to the bytes (the misfit) and the proven set only shrinks with the universe: R grows monotonically
+        if (X, R) in seen:
             raise RuntimeError('R3 refinement does not converge (cycle at round %d)' % k)
     raise RuntimeError('R3 refinement: no fixed point in 12 rounds')
