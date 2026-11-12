@@ -1,0 +1,32 @@
+{
+  "format": "fnvnx-guest-compiler/1",
+  "external": {
+    "name": "gcc-msvcmodel",
+    "repo": "fnv-nx-build",
+    "ref": "tools/gcc-ilp32-msvcmodel",
+    "commit": "b4057704c0babd012e466cc89181132e02542289",
+    "tree_sha256": "b60eafe7a5b0ae3dc679f9bf21e20d3363e3bac2af7379e34127ea5cf8455116",
+    "at": "/ext/gcc"
+  },
+  "cc": "bin/aarch64-linux-gnu-gcc",
+  "cxx": "bin/aarch64-linux-gnu-g++",
+  "triplet": "aarch64-linux-gnu",
+  "provenance": {
+    "gcc_tarball": "gcc-13.3.0.tar.xz",
+    "gcc_tarball_sha256": "0845e9621c9543a13f484e94584a49ffc0129970e9914624235fc1d061a0c083",
+    "patch": "ports/fnv-nx/toolchain/msvcmodel/msvcmodel.patch",
+    "patch_sha256": "08c9569a8e7b42ae529c202adc549474954a7f60b73cd4b50a4f111e3f0459d3",
+    "src_commit": "7ac84bda81732cad1c9f78deb23911e2d0dddebb",
+    "build": "ports/fnv-nx/toolchain/msvcmodel/build.sh",
+    "distribution_packages": "ports/fnv-nx/verify/env.json (cross packages g++-13-aarch64-linux-gnu, binutils-aarch64-linux-gnu, libc6-dev-arm64-cross, libstdc++-13-dev-arm64-cross, gcc-13-plugin-dev-aarch64-linux-gnu; versions are not copied)",
+    "runtime": "README.md of the runtime external: binutils 2.45.1, gcc 15.2.0 + newlib 4.6.0.20260123 (devkitPro patches) + toolchain/msvcmodel/msvcmodel.patch, target aarch64-none-elf, multilibs ., pic, ilp32, ilp32/pic (the guest's libc, libm, libstdc++ and headers)"
+  },
+  "runtime": {
+    "name": "fnvnx-a64-msvcmodel",
+    "repo": "fnv-nx-build",
+    "ref": "tools/fnvnx-a64-msvcmodel",
+    "commit": "00e3d42acd10593d534b9a70bb8940cee7991436",
+    "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
+    "at": "/ext/a64"
+  }
+}

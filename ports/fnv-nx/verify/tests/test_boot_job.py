@@ -67,7 +67,7 @@ def git(*args, cwd=None, check=True):
 def lifted_elf(mode):
     """the guest of test_bootmachine.build(mode) with .text renamed to .text.fnvl (crt0 header patched as build() does)"""
     renamed = os.path.join(SCRATCH, "g%d.fnvl.elf" % mode)
-    raw_path = tb.build(mode)[1]
+    raw_path = tb.build(mode, tg.MODE50)[1]   # MODE 50: the renderer guest of test_bootgpu
     subprocess.run(["aarch64-linux-gnu-objcopy", "--rename-section", ".text=.text.fnvl", raw_path, renamed], check=True)
     data = bytearray(open(renamed, "rb").read())
     phoff, phnum = struct.unpack_from("<I", data, 28)[0], struct.unpack_from("<H", data, 44)[0]
@@ -111,7 +111,6 @@ def published(branch):
 
 def main():
     t0 = time.time()
-    tb.GUEST = tb.GUEST.replace("#if MODE == 6", tg.MODE50, 1)   # MODE 50: the renderer guest of test_bootgpu
     os.makedirs(HOME)
     os.makedirs(GAME)
     with open(os.path.join(GAME, "FalloutNV.exe"), "wb") as f:

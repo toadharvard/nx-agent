@@ -142,6 +142,17 @@ rc, r, e = tests(d, extra=("--timeout-s", "15"))
 check("tests: timeout is a failure", rc != 0 and r["uncertified"] == ["verify/tests/test_slow.py"] and r["certified"] == 1,
       (rc, r, e))
 
+d = tmp("tests-scratch")
+log = os.path.join(d, "where.txt")
+put(d, "verify/tests/test_leaves.py", "import tempfile\nd = tempfile.mkdtemp(prefix='left-')\nopen(d + '/f', 'w').write('x')\n"
+    "open(%r, 'a').write(d + '\\n')\n" % log)
+put(d, "verify/tests/test_leaves_fails.py", "import sys, tempfile\nopen(%r, 'a').write(tempfile.mkdtemp(prefix='left-') + '\\n')\nsys.exit(3)\n" % log)
+rc, r, e = tests(d)
+left = open(log).read().split()
+check("tests: the scratch a file leaves in its temporary directory is removed, passed or failed", rc != 0 and r["certified"] == 1
+      and len(left) == 2 and not any(os.path.exists(x) or os.path.exists(os.path.dirname(x)) for x in left)
+      and all(os.path.basename(os.path.dirname(x)).startswith("selftest-") for x in left), (rc, r, left))
+
 d = tmp("tests-env")
 put(d, "verify/tests/test_env.py", "import os, sys\nsys.exit(1 if [k for k in os.environ if k.startswith('GATE_')] else 0)\n")
 rc, r, e = tests(d)
@@ -154,9 +165,10 @@ CONTRACT = ["n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcre
 dirs_pure = [a.rsplit("/", 1)[-1] for a in byname["pure"]["argv"][3:]]
 dirs_tests = [a.rsplit("/", 1)[-1] for a in byname["selftests"]["argv"][5:]]
 check("gates.json: contract gates run gate_contract.py --gate NAME", all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_contract.py", "--gate", n] and byname[n]["result"] == n + ".json" for n in CONTRACT), spec)
-check("gates.json: format and the gates", spec["format"] == "fnvnx-gates/1" and [g["name"] for g in spec["gates"]] == ["pure", "selftests", "admit", "oracle", "exepin", "build", "objstub", "linkstrict", "determinism"] + CONTRACT
+check("gates.json: format and the gates", spec["format"] == "fnvnx-gates/1" and [g["name"] for g in spec["gates"]] == ["pure", "selftests", "admit", "oracle", "exepin", "build", "objstub", "linkstrict", "determinism"] + CONTRACT + ["argordergate", "imports", "machine"]
       and all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_%s.py" % n] and byname[n]["result"] == n + ".json"
               for n in ("build", "objstub", "linkstrict", "determinism"))
+      and byname["argordergate"]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_argorder.py"] and byname["argordergate"]["result"] == "argordergate.json"
       and byname["pure"]["result"] == "pure.json" and byname["selftests"]["result"] == "selftests.json"
       and dirs_pure == ["contract", "link", "rules", "lift"] and dirs_tests == ["verify", "farm", "contract", "link", "rules", "lift"]
       and byname["pure"]["argv"][:3] == ["python3", "-I", "ports/fnv-nx/verify/gate_pure.py"]

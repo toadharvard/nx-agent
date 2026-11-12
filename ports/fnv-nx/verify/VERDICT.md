@@ -26,7 +26,7 @@ below, not written yet, so no product root can be admitted; **no rule** = report
 | 1 | Trap or abort path: a trap instruction or a call of a terminating routine outside the one exit through the host | `objstub` (T) | machine code of every function of the built objects | L4 | required |
 | 2 | No-op or fake success: a function with no store, no call and a result that depends on no input, not generated from contract data | `objstub` (V) | data flow over the machine code; the table of constant answers | L4 | required |
 | 3 | Unresolved or substitutable symbol: undefined, weak undefined, two contract names on one body | `linkstrict` | the linked ELF's symbol table and the link command | L1 | required |
-| 4 | Import without a body | `imports` | manifest of reachable imports against defined symbols | L5 | required with the platform root |
+| 4 | Import without a body | `imports` | manifest of reachable imports against defined symbols | L5 | wired (per root, `gate_build.quantify`); a root without `imports.in.json` is red |
 | 5 | Code address without a dispatcher entry | `disp` (`link/gate_disp.py`; also `abs`, `link/gate_abs.py`) | dispatcher table against the R3 universe | L1 | wired, red until its inputs are declared |
 | 6 | x86 form without a certificate | `forms` | form universe against published proofs of the current DSL hash | L3b | required with the lift root |
 | 7 | D3D9 enum value or SM1-3 op without a translation | `d3d9total` | generated tables against the enum and op universes | L6 | required with the render root |
@@ -44,7 +44,7 @@ below, not written yet, so no product root can be admitted; **no rule** = report
 | D | C++ EH or SEH through lifted frames that does not match the exe's EH tables | `eh` | lifted frames against the exe's own EH tables | L3a, L3b | required |
 | E | The exe that was analysed is not the exe that is declared | `exepin` | exe size, SHA-256 and PE fields against the pin: the exe is read only through `exepin.load_exe` (`contract/exepin.py`, rule E1) | L1 | wired |
 | F | A guest address that does not fit the 32-bit guest address space | `addr32` | every address constant and pointer width of a product root | L2, L3a | required |
-| G | Registry key read by the exe or a module with no value in the declared machine, or a value with no reading site | `machine` | the hive against the registry call sites found statically | L1, L5 | required |
+| G | Registry key read by the exe or a module with no value in the declared machine, or a value with no reading site | `machine` | the hive against the registry call sites found statically (`gate_machine.py`: regsites.tsv, an `external`, against declared_registry.tsv, the tracked seed include and the symbol tables of the objects; a declared row nobody reads, a seed that is not the generator's output, a writer outside the seed unit, or a site whose key or value is not statically resolved (a measurement build) is red) | L1, L5 | wired per root (`gate_build.quantify`); a root without `registry.in.json` is red |
 | 11 | Tool that is not a pure function of its declared inputs | `pure` | AST of every stage tool | L4 | runs |
 | 12 | Tool defect covered by its own tests | `selftests` | every test file, in the declared environment | L4 | runs |
 | 13 | Code in the trunk that no gate judges | `admit` | tracked files against `admit.json` | L4 | runs |
@@ -138,8 +138,8 @@ every merge pays today; with a product root each judges it (tested on a toy root
   is a definition when the root links an ELF and the ELF defines it GLOBAL. Both ABIs are tested.
 
 Required by `gate_admit.REQUIRED_PRODUCT`, so no product root is admitted without a result of each: `oracle` (10, L4, wired) and the gates written on
-their leads' branches that enter with those merges: `imports` (4; L5), `forms` (6; L3a/L3b, one copy to be chosen), `d3d9total` (7; L6), `r7`, `namegate`,
-`argordergate` and the ABI tools (8; L2). A name in `REQUIRED_PRODUCT` must also be an entry of `gates.json` (admit rule 3), so the root stays out until the gate exists.
+their leads' branches that enter with those merges: `imports` (4; L5), `forms` (6; L3a/L3b, one copy to be chosen), `d3d9total` (7; L6), `r7`, `namegate`
+and the ABI tools (8; L2). `argordergate` (class 8, argument order; verify/gate_argorder.py, wired): the universe is the C++ units of the native guest roots (`target` guest, `cxx_origin` native), the certificate is the rule's plugin list in the rule's load order with `fnvnx_order` and its arguments, its .so in the build result (so in the CC-stage key of each unit) and the unit's object; no such root: universe 0, green. A name in `REQUIRED_PRODUCT` must also be an entry of `gates.json` (admit rule 3), so the root stays out until the gate exists.
 **Universe rule of the per-root gates.** Every per-root gate (`build`, `objstub`, `linkstrict`, `determinism` and the 14 contract gates `n1`, `n2_*`, `xc`, `xunit`, `rtti`, `pcrel`, `bodysel`, `abs`, `disp`, `reach`, `reachlink`, `gpa`) quantifies over the admitted product roots of `admit.json` (contract gates through the one function `gate_build.quantify`), and with no product root its universe is 0 and it is green. Admission (`gate_admit` rule 3 plus `REQUIRED_PRODUCT`) is what forces every gate to exist and run on a root, and a root that is admitted but lacks objects, an ELF or an input is red with the reason, never skipped.
 
 The contract gates (class 8, plus the link-side `abs`, `disp`, `reach`, `reachlink`, `gpa`) run through `gate_contract.py --gate NAME`, one `gates.json` entry each. Per-root inputs are outputs of the root's own build and link, read beside `objects.json` (`root_results` of `contract_inputs.json`): `units.json`, `addrmap.tsv`, `aliases.ld` and, for `disp`, `entries.tsv`; a file the link stage does not emit yet makes the gate red for that root naming it (owner: L1 link stage). The game's units are the directory `build.json` declares as `game` (no default). Shared inputs are the five true externals of fnv-nx-build (commit plus `tree_sha256`: `exe`, `redist`, `msvc`, `facts`, `manifest`), `reach_requests`, `dynsites`, optional `keys`, `bridge`, and `ranges` (where an image's range facts are). The image set of `gpa`, `reach`, `reachlink` is not an input: it is derived by the rule in the section "The guest image set" below. An image of the set without range facts is a reported red item of those gates (owner L3a/L5). `n2_*` and `xc` judge that every function they flag is turned into LIFTED by `bodysel`. Outputs of the chain are cached in `GATE_CACHE/contract/<key>`.
@@ -193,3 +193,8 @@ The rules cited by the gates (N1-N4, R1, R3, R5, R6, R12, R13, K16 and others) a
 - The set of terminating routines for class 1 is derived from the toolchain's own headers (the `noreturn`
   attribute); a terminating routine without that attribute would be missed.
 - The verdict runs gates in a clean worktree of the commit, in the environment declared by `env.json`.
+
+## Compiler plugins (`build` gate)
+A product root with native or decomp C++ is compiled with `fnvnx_order` and `fnvnx_ftoi` (RECIPE.md, "Plugins"); a root whose C++ is all lifted
+(declared `cxx_origin` of its admit.json entry, consistency checked against the recipe) needs none. A missing plugin, a changed source or argument, or
+an undeclared origin makes the recipe invalid and the `build` gate red. Tests: `verify/tests/test_plugins.py`.

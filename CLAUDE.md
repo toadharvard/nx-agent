@@ -122,6 +122,12 @@ The owner's words: "Транк никогда красный. Всегда зе�
   - **Registry.** The hive holds exactly the keys that the exe and modules read, found statically from their call
     sites. Values come from the declared machine (for example `Installed Path` = the game directory). A key with no
     declared value is absent, the same as on a machine where nothing wrote it. No installer script is needed.
+  - **Installed, launcher run once (orchestrator decision, 2026-11-12).** The declared machine is a finished install
+    on which FalloutNVLauncher.exe has been run once for the declared adapter. `FalloutPrefs.ini` (and any other file
+    the launcher writes) is exactly what the launcher's own code writes from its preset files in gamedata for that
+    adapter, derived statically from the launcher's code and presets; no hand-written values. WinMain's launcher
+    gate therefore takes the "prefs present" path. Owner: platform (L5); the emulator (L4) mounts the result. If the
+    launcher or its presets are missing from gamedata, report it to the orchestrator.
 - Merges stop while anything is red. That is intended. Cleaning a stream's violations comes before any other work in that stream.
 
 ## Owner decisions of 2026-11-10 (do not re-ask)
@@ -231,10 +237,99 @@ The owner's words, on a render defect that unit tests missed because the sibling
     hand-written stand-ins of sibling files.
   - The check is mechanical, per test binary: (symbols the test defines) ∩ (symbols the product roots define) = ∅.
     There is no allow-list. The owner is L1, as part of the stub gate.
-- Below the product there is one boundary: deko3d, libnx and the kernel. A test that runs on the host meets it in one
+- Below the product there is one boundary: the GL library (for the OpenGL backend), deko3d, libnx and the kernel. A test that runs on the host meets it in one
   shared model, the L4 boot machine (its GPU and kernel model, checked against its references). There is no
   per-test double of it.
 - Failure injection is allowed only as an input of that shared model, such as a kernel or allocator result that
   Windows, Wine 9.0 or the console documents. A test never injects it by replacing a function.
 - Existing tests with doubles are rewritten onto the real files and the shared model, or deleted. Each lead gives the
   global count of its tests with doubles (files and symbols, with the commit) and takes it to 0.
+
+## Owner orders of 2026-11-11, late night: leads, workers, one fast build (binding)
+
+The owner's words: "Агенты вызывают соннетов которые делают задачи. Задачи соннетов механические. Опусы чекают
+корректность в рамках своей области. Обязательно трекать текущие задачи, статусы и общий прогресс." and "Заниматься
+остальным можно только когда сборка идет и нет более приоритетных задач. Сборка с гейтами должна оставаться почти
+моментальной. Сборка должна быть универсальной. И всегда быстрой. Единой."
+
+- **Leads are Opus 5.5** (`claude-opus-5-5`), one per layer: L1 contract and verdict, L2 source, rules and plugins,
+  L3a lift, L3b lift certification, L4 verify and boot machine, L5 platform, L6 render (D3D9 front end), L6A deko3d.
+  - The lead gives mechanical tasks to **Sonnet 5.5 workers** (`claude-sonnet-5-5`): edits by a stated rule, builds
+    and runs through the recipe or a farm, censuses, moving tests onto the real files.
+    - A worker task names the files, the rule, the check that proves it and the branch.
+    - Farms are Sonnet sessions too.
+  - The lead checks every worker result for correctness within its layer before it takes it into the lead branch:
+    - the rule closes the whole class;
+    - the numbers are global, with the commit;
+    - the build used the prepared machinery.
+  - The lead does not do mechanical work itself.
+- **The build comes first.** The one build is `verify/recipe.py` plus the L1 gates, in `GATE_CACHE`.
+  - Any other work is done only while that build is running and nothing of higher priority is open.
+  - The build with gates stays almost instant: content-keyed, so an unchanged unit is never rebuilt and a gate reads
+    cached facts.
+  - It is universal: every product root (platform, lifted packs, render, deko, loader, tests, sanitizer variant) is
+    built by this one build. There is no per-layer build script, no second cache and no direct compiler call.
+  - It is always fast. A change that makes the incremental verdict slower than its budget is red like any failing gate.
+- **No idling.** Each lead always has its layer's next step on the goal path in progress.
+  - Waiting on another layer is a reason to take the next item, not to stop.
+  - A blocked item names its blocker and the layer that owns it.
+- **Status, always current.** Each lead keeps `ports/fnv-nx/journal/status/<layer>.md` on its branch and pushes it after
+  every finished item. It holds:
+  - every current task, with its worker session id and status: doing, done (commit) or blocked (by what, owner);
+  - the layer's global progress numbers, with the commit they were measured at.
+  - The orchestrator collects these files into the overall progress.
+- **Two render backends: OpenGL and deko3d (owner correction, 2026-11-11 22:45; it replaces the earlier
+  "one backend" line, which was the orchestrator's mistake).** The owner's words: "их два. Один опенгл другой деко"
+  and "Нахуя ты гл удалил. Ты же рендерил с помощью него."
+  - The OpenGL backend (`gl4`, `nxgl`, the renderer pair and `verify/bootgpu.py` with its GL library) is product and
+    stays. It is the backend that already rendered frames, and it renders in the emulator. Nothing of it is deleted.
+  - The deko3d backend (L6A, `render/backend`) is the second backend, built beside it, for the console.
+  - **OpenGL is the reference for deko3d** (owner, 22:50: "Опенгл должен был быть эталоном для деко"). The same
+    nxgpu command stream (the same D3D9 front end, the same scenes and game frames) is rendered by both backends, and
+    the deko3d frames are checked against the GL frames. A difference is a deko3d defect until it is explained by
+    rule. GL frames are produced on the boot machine with the GL library. This check verifies deko3d; it never
+    selects code.
+  - The D3D9 front end (L6) serves both through the same nxgpu ABI.
+  - The worker branches that deleted GL (`claude/fnv-l6-render-w1` 89fa6a889, `claude/fnv-l4-verify-w1` 68e37dab7)
+    are not merged, ever. No session deletes or disables GL, Mesa in the boot machine, or their tests.
+
+## Owner order of 2026-11-11, night: the first frame in this budget, correct by construction (binding)
+
+The owner's words: "Трекай прогресс послойно и прогрессируй всегда. Задача понятная. Осталось 50% недельного лимита. За
+это время можно закрыть первый кадр точно. Что говорить об остальном. Опять же все должно быть корректно по
+построению."
+
+- **Target:** the first frame in the L4 emulator within the remaining half of the weekly usage limit. Everything a
+  session does is measured against that path: product roots → lifted packs as roots → ELF → boot → WinMain → menu →
+  first frame.
+- **Spend only on the path.** Work that does not move a layer toward the first frame waits until after it. Workers are
+  Sonnet; long or mechanical runs go to farms or workers, not to a lead's own context. No repeated censuses of numbers
+  that did not change; a gate reads cached facts.
+- **Correct by construction.** Each step is closed by its rule and gate, never by a run that happened to pass. A shortcut
+  that breaks a rule (a stub, a double, a second build path, a new assumption, a heuristic) is not progress: it is red.
+- **Progress is tracked per layer** in `ports/fnv-nx/journal/status/<layer>.md` (see "late night"); the orchestrator
+  collects them into `ports/fnv-nx/journal/status/ALL.md` on the integration branch every hour.
+
+## Owner order of 2026-11-11, 23:00: the orchestrator decides, the owner is not disturbed (binding)
+
+The owner's words: "Я запрещаю меня тревожить и просить мое да. Делай что хочешь... Я разрешаю тебе как оркестратору
+решать что архивировать закрывать а что нет. Ты главный. А я сплю. Меня нельзя тревожить и нельзя не делать то что
+необходимо."
+
+- No session asks the owner for a yes, a confirmation or a choice. The orchestrator decides everything the owner would
+  decide, within these rules and the Legal limits, and records the decision in ALL.md.
+- The orchestrator decides which sessions are archived, stopped, resumed or created (leads, workers, farms, old waves).
+  Stale, finished or duplicate sessions are archived without asking.
+- Nothing necessary is left undone for want of an answer: a blocked decision goes to the orchestrator, never to the owner.
+- No messages to the owner except milestones on the goal path (exe entry, WinMain, menu, first frame, Switch).
+
+## Owner order of 2026-11-11, 23:00: GOG Galaxy is not lifted (binding)
+
+The owner's words: "нахуя лифтить гэлакси... Ну нет доступа к нему. Похуй на него. Это как сокеты."
+
+- Galaxy.dll and GalaxyWrp.dll are not lifted. The declared machine has no Galaxy service, the same as it has no network.
+- Every Galaxy entry the exe or a module reaches answers the documented "Galaxy unavailable / not initialized / not
+  signed in" result of the Galaxy SDK, the same way network calls answer the documented "network down" error. It is a
+  declared-machine body (CLAUDE.md "The declared machine"), with the SDK documentation cited per function, not a stub.
+- Owner of the bodies: platform (L5). Lifting work on Galaxy stops; modules.tsv lists Galaxy as a declared-machine
+  module, not as a lifted one.

@@ -81,7 +81,7 @@ def make_repo(name, gen_extra="", rec=None, files=None):
     w(repo, "gen/gen.py", GEN.replace("@IMPORT@", imp).replace("@EXTRA@", ex or "0"))
     w(repo, "toy/build.json", json.dumps(rec or RECIPE, indent=1))
     w(repo, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
-        {"path": ROOT, "class": "product", "gates": [], "recipe": ROOT + "/build.json"},
+        {"path": ROOT, "class": "product", "target": "host", "gates": [], "recipe": ROOT + "/build.json"},
         {"path": T + "gen", "class": "tool", "gates": []}, {"path": T + "verify", "class": "tool", "gates": []}]}))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "toy")

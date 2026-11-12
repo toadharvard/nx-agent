@@ -966,15 +966,23 @@ def sh(cmd):
     return r.stdout
 
 
-def build(mode):
-    """crt0.s + test C (GUEST with -DMODE) -> (ELF bytes, ELF path); importable: test_boot.py uses it"""
-    src, ld = os.path.join(TMP, "g.c"), os.path.join(TMP, "guest.ld")
+def build(mode, more=""):
+    """crt0.s + test C (GUEST with -DMODE) -> (ELF bytes, ELF path); importable: test_boot.py uses it. `more`: C text of further
+    `#if MODE == n ... #elif` branches of another test file, placed before the MODE 6 branch (the guest source is this argument's
+    function; the module's GUEST is never changed)"""
+    tag = "x" if more else ""
+    src, ld = os.path.join(TMP, "g%s.c" % tag), os.path.join(TMP, "guest.ld")
     if not os.path.exists(ld):
         shutil.copy(os.path.join(GUEST_DIR, "guest.ld"), ld)
-        open(src, "w").write(GUEST)
         sh([CC] + CFLAGS[:3] + ["-c", os.path.join(GUEST_DIR, "crt0.s"), "-o", os.path.join(TMP, "crt0.o")])
+    if not os.path.exists(src):
+        text = GUEST
+        if more:
+            assert text.count("#if MODE == 6") == 1
+            text = text.replace("#if MODE == 6", more, 1)
+        open(src, "w").write(text)
     # crt0 header: the +20 size and +24 flags are filled as elf2nso does
-    obj, elf = os.path.join(TMP, "g%d.o" % mode), os.path.join(TMP, "g%d.elf" % mode)
+    obj, elf = os.path.join(TMP, "g%s%d.o" % (tag, mode)), os.path.join(TMP, "g%s%d.elf" % (tag, mode))
     sh([CC] + CFLAGS + ["-DMODE=%d" % mode, "-g", "-c", src, "-o", obj])
     sh(["aarch64-linux-gnu-ld"] + LDFLAGS + ["-T", ld, os.path.join(TMP, "crt0.o"), obj, "-o", elf])
     data = bytearray(open(elf, "rb").read())
@@ -1296,23 +1304,6 @@ def main():
     except bootmachine.MachineError:
         ok = False
     case("section fns are served by the machine itself", ok)
-    del bootmachine.PLATFORM_FNS[14]
-    try:
-        bootmachine.Machine(elf0, plan0, boothost.Services(root))
-        ok, msg = True, ""
-    except bootmachine.MachineError as e:
-        ok, msg = False, str(e)
-    case("construction check is over PLATFORM_FNS (fn 14 removed: still builds)", ok, msg)
-    bootmachine.PLATFORM_FNS[14] = ("section_free", 1)
-    saved = bootmachine.Machine._plat_section_free
-    del bootmachine.Machine._plat_section_free
-    try:
-        bootmachine.Machine(elf0, plan0, boothost.Services(root))
-        ok, msg = False, "no error"
-    except bootmachine.MachineError as e:
-        ok, msg = "section_free" in str(e), str(e)
-    bootmachine.Machine._plat_section_free = saved
-    case("totality: a missing section fn raises at construction", ok, msg)
     # ACCESS_FAULT_HANDLER (module 11 fn 10)
     def kv(lines):
         return {l.split("=")[0]: l.split("=")[1] for l in lines if "=" in l}

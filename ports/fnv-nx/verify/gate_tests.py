@@ -7,7 +7,9 @@ sorted by name; items are repo-relative paths. Each file runs as `python3 -I FIL
 (default 300 s; a timeout kills the process group and is a failure). Certified: exit status 0. No skip logic: a test that
 cannot run in this environment (root, namespaces, strace) is uncertified. Zero files: green, universe 0. Exit 0 iff green.
 --jobs N (default 1): N test files run at once, each in its own process; results are reported in sorted universe order.
-  A test must therefore keep its scratch under its own tempfile.mkdtemp directory (no fixed path). No test needs a serial
+  A test must therefore keep its scratch under its own tempfile.mkdtemp directory (no fixed path). Each file runs with
+  TMPDIR set to a fresh directory of its own, and the gate removes that directory (and kills what is left of the file's
+  process group) when the file ends, passed, failed or timed out: no test leaves anything in the temporary directory. No test needs a serial
   group: sandbox namespaces are per process and every store/work directory is per run.
 --cache DIR (default $GATE_CACHE, see verdict.py; none = no caching): a test file's result is a function of the content of the
   directories the gate declares and of the declared environment. KEY = sha256 over: cas.tree_hash of every key dir
@@ -22,9 +24,11 @@ import glob
 import hashlib
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -39,14 +43,23 @@ def run_one(path, timeout):
     # a test file is not a gate: it does not see GATE_OUT / GATE_COMMIT / GATE_CACHE (a test that runs gates of its own
     # would otherwise share this gate's result cache and outputs)
     env = {k: v for k, v in os.environ.items() if not k.startswith("GATE_")}
-    p = subprocess.Popen([sys.executable, "-I", path], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, start_new_session=True, env=env)
+    # the file's scratch: TMPDIR is a directory of its own, removed when the file ends, however it ends (see the doc comment)
+    tmp = tempfile.mkdtemp(prefix="selftest-")
+    env["TMPDIR"] = tmp
     try:
-        ok = p.wait(timeout=timeout) == 0
-    except subprocess.TimeoutExpired:
-        os.killpg(p.pid, signal.SIGKILL)
+        p = subprocess.Popen([sys.executable, "-I", path], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True, env=env)
+        try:
+            ok = p.wait(timeout=timeout) == 0
+        except subprocess.TimeoutExpired:
+            ok = False
+        try:
+            os.killpg(p.pid, signal.SIGKILL)   # whatever the file left running in its process group
+        except ProcessLookupError:
+            pass
         p.wait()
-        ok = False
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
     return ok, round(time.time() - t0, 3)
 
 def parse(argv):

@@ -15,7 +15,7 @@ tests/test_graph,test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linu
 aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount; ar,clang test_coffnorm;
 git verdict.py,l1.py,test_gates; ldd,true test_runtime; g++,llvm-config-18 build a64access.cc (objstub.py, test_a64access).
 The a64access build set is derived the same way: every header `g++ -M` reports for a64access.cc under `llvm-config-18 --cxxflags`,
-and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). Python modules: capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts); numpy (lift/test/instest.py packer)."""
+and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules: capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts); numpy (lift/test/instest.py packer)."""
 import argparse
 import ctypes
 import hashlib
@@ -38,6 +38,9 @@ UNIT_CC = "aarch64-linux-gnu-g++"  # the unit stage ingests its trees whole
 HOST_GCC_PROGS = ["cc1", "cc1plus", "collect2"]  # gcc -print-prog-name=: what the host gcc runs for the static probe / -fsyntax-only
 HOST_GCC_FILES = ["libc.a", "crt1.o", "libgcc.a", "libgcc_eh.a", "libstdc++.so"]  # gcc -print-file-name=: what `gcc -static` links
 A64ACCESS = (os.path.join(HERE, "a64access.cc"), ["aarch64", "mc", "mcdisassembler", "support"])  # source, llvm-config components
+CLANG_API = ["clang/AST/RecursiveASTVisitor.h", "clang/Frontend/FrontendPluginRegistry.h", "clang/Basic/Version.h"]  # the plugin API vtnames (clang-18 MSVC-ABI facts plugin) includes: headers under `llvm-config-18 --includedir`
+CLANG_LIBS = ["libclang-cpp.so.18.1", "libclang.so"]   # under `llvm-config-18 --libdir`: what a clang plugin links / dlopens
+M32_PROBE = "#include <stdint.h>\n#include <stdlib.h>\nint main(){return 0;}\n"   # clang -m32 -M: every header a 32-bit compile of the C library reads (gnu/stubs-32.h: libc6-dev-i386)
 PY_MODULES = {"capstone": "capstone", "numpy": "numpy", "unicorn": "unicorn", "pyelftools": "elftools"}   # distribution -> import name
 KERNEL = ["unshare mount+pid+net+uts+ipc namespaces as root", "seccomp filter", "ptrace (strace)"]
 
@@ -173,6 +176,17 @@ def snapshot():
         add(h)
     for lib in subprocess.run(["llvm-config-18", "--libfiles"] + comps, capture_output=True, text=True, check=True).stdout.split():
         add(lib)
+    inc, lib = [subprocess.run(["llvm-config-18", f], capture_output=True, text=True, check=True).stdout.strip() for f in ("--includedir", "--libdir")]
+    for h in CLANG_API:   # the API headers and the whole clang/ tree they sit in (a plugin may include any sibling)
+        add(os.path.join(inc, h))
+        for r, _, fs in os.walk(os.path.join(inc, h.split("/")[0])):
+            for f in fs:
+                add(os.path.join(r, f))
+    for l in CLANG_LIBS:
+        add(os.path.join(lib, l))
+    m32 = subprocess.run(["clang", "-m32", "-x", "c", "-M", "-"], input=M32_PROBE, capture_output=True, text=True, check=True).stdout
+    for h in m32.replace("\\\n", " ").split()[1:]:
+        add(h)
     gcc = shutil.which("gcc")
     for flag, names in (("-print-prog-name=", HOST_GCC_PROGS), ("-print-file-name=", HOST_GCC_FILES)):
         for n in names:

@@ -86,13 +86,12 @@ def parse(lines):
 
 def main():
     t0 = time.time()
-    tb.GUEST = tb.GUEST.replace("#if MODE == 6", MODE50, 1)
     d = tb.TMP
     c = os.path.join(d, "fake.c")
     open(c, "w").write(FAKE_C)
     lib = os.path.join(d, "libnxgl4.so")
     subprocess.run(["gcc", "-O2", "-fPIC", "-shared", c, "-o", lib], check=True)
-    elf50, elf51 = tb.build(50)[0], tb.build(51)[0]
+    elf50, elf51 = tb.build(50, MODE50)[0], tb.build(51, MODE50)[0]
     root = os.path.join(d, "sd")
     os.makedirs(root)
     frames = os.path.join(d, "frames")

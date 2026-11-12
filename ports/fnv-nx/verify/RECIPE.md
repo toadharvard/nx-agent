@@ -13,6 +13,9 @@ the hash of the stage document + tool code. All paths are root-relative unless m
  "generated": [{"tool": "ports/fnv-nx/contract/gen.py", "args": ["/out/gen/t.h"], "inputs": ["ports/fnv-nx/X/table.tsv"], "outputs": ["gen/t.h"]}],
  "os_layer": ["os.S"], "constants": "constants.tsv", "contract_names": "contract.tsv",
  "link": {"script": "link.ld", "output": "x.elf", "flags": ["-e", "entry"]},
+ "plugin_cxx": "x86_64-linux-gnu-g++-13",
+ "plugins": [{"name": "fnvnx_order", "source": "ports/fnv-nx/toolchain/order/fnvnx_order.cc", "args": {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}},
+             {"name": "fnvnx_ftoi", "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc", "args": {"enum": "error"}}],
  "external": [{"name": "ft", "repo": "fnv-nx-build", "ref": "mirror/freetype", "commit": "<40 hex>", "tree_sha256": "<64 hex>", "at": "/ext/ft"}]}
 ```
 
@@ -48,6 +51,50 @@ the hash of the stage document + tool code. All paths are root-relative unless m
   `ld`; `aarch64elf32` also links a static image). The objects are ELF32 (`SHT_RELA` with `Elf32_Rela`, relocations `R_AARCH64_P32_*`),
   the linked ELF is ELF32. LP64 is the default, with no flag.
 - `external`: content-pinned inputs (see below).
+- `plugins`, `plugin_cxx`: GCC plugins of the C++ front end (see "Plugins"). `flags` may not hold any `-fplugin*` token.
+
+## Plugins (`fnvnx_order`, `fnvnx_ftoi`)
+Our compiler is the pinned g++-13 with our two plugins. Their sources are tracked under the tool root `ports/fnv-nx/toolchain` (no build script:
+the recipe is the only way they are built). Each entry of `plugins` is `{"name", "source", "args"}`: `source` is `<dir>/<name>.cc`, a tracked file of an
+admitted tool root; `args` becomes `-fplugin-arg-<name>-<key>[=<value>]`. `plugin_cxx` is the host driver under `/usr/bin` (env.json) that builds
+them: x86_64 `x86_64-linux-gnu-g++-13` (the bare `g++-13` prints no path for `as`/`ld`), same GCC version as `compiler.cxx`.
+- Stage `plugin:<name>` (sandbox, class build): `plugin_cxx -shared -nostdlib -fPIC -fno-rtti -fno-exceptions -O2 -I<compiler.cxx -print-file-name=plugin>/include
+  crti.o crtbeginS.o SOURCE crtendS.o crtn.o`. Declared inputs: the driver's tool runtime, the plugin headers of the target compiler
+  (gcc-13-plugin-dev-aarch64-linux-gnu of env.json), the source, crti.o/crtn.o of libc6-dev. Key = content of these + driver + flags, like every stage.
+  The `.so` is stored in `GATE_CACHE/store`, copied to `OUT/plugins/<name>.so`, listed in `objects.json` (`plugins`: name, sha256, path).
+  It is linked against no library (symbols come from the compiler that loads it; `-fno-exceptions` because `_Unwind_Resume` is not exported by cc1plus).
+- CC stage of every C++ unit (only C++: C and assembler units load nothing): the `.so` of each plugin is a declared input at `/plug/<name>`,
+  and the stage argv holds `-fplugin=/plug/<name>/<name>.so` and the `-fplugin-arg-*` flags, so they are part of its key. The preprocessor stage loads
+  no plugin. `toolflags` accepts `-fplugin=P` only under a declared input; it is not relaxed.
+- Memory ordering has no option: `fnvnx_order` makes every access to memory that is not a proven local `ldar`/`stlr` (x86 TSO), volatile or not.
+  `ORDER_MODE` of the old compile.sh no longer exists in the plugin (it rejects an unknown argument).
+### Guest roots: the game's compiler (MSVCMODEL1)
+Every product root's admit.json entry declares `"target": "guest"` (the game's code) or `"host"`; missing = invalid recipe = red `build`. A guest root's
+compiler, for C and C++ alike, is the external compiler pinned in `verify/guest_compiler.json`
+(`{"format": "fnvnx-guest-compiler/1", "external": {EXT_KEYS}, "cc", "cxx"}`): GCC 13.3.0 + `toolchain/msvcmodel/msvcmodel.patch`, a fnv-nx-build mirror
+(`tools/gcc-ilp32-msvcmodel`). The root's `compiler` must be `{"external", "cc", "cxx"}` naming an `external` entry equal to the pinned one (name, commit,
+tree_sha256, at) with the pinned driver paths. The distribution g++-13 is the base the compiler is built from, never the compiler of guest code. A tree
+without the pin file has no valid guest root. The plugins are built against this compiler's own plugin headers (the plugin stage reads
+`<cxx> -print-file-name=plugin`, inside the external).
+What an external compiler names outside its tree is declared as inputs at their own paths, from the compiler's own answers: the assembler and linker it is
+configured with (`-print-prog-name=as|ld`) and the header directories of its search list, symlink targets included (the distribution's cross binutils and
+headers pinned by env.json). The CC stage mounts the compiler external, the plugins and unit.ii only; other externals are PP inputs.
+
+The pin file also names the guest's **runtime** (`"runtime": {EXT_KEYS}`, fnv-nx-build `tools/fnvnx-a64-msvcmodel`: gcc 15.2.0 + newlib built with the same
+msvcmodel.patch, target `aarch64-none-elf`, multilibs `.`, `pic`, `ilp32`, `ilp32/pic`; its libc, libm, libstdc++ and headers). A guest recipe may declare it
+as an `external` entry (it is only a PP input of the units, never mounted in the CC stage); if it does, the entry must equal the pinned one exactly (red
+otherwise). `verify/samples/platform.build.json` is the sample recipe of the platform root (compiler + runtime externals, the eight plugins, the semantics
+flags, `include` = the runtime's `c++/15.2.0`, its ilp32 target directory and `include`); `test_guest.py` checks it with `recipe.py check` and builds a unit
+that includes `<vector>`, `<string>`, `<cstdio>`. The 13.3 compiler reads gcc 15.2's libstdc++ headers only with `-std=gnu++20` (the sample's `flags.cxx`).
+
+### Gate rule: native and decomp C++ is compiled with both plugins; lifted C++ with none
+`admit.json` entry of a product root with at least one C++ unit declares `"cxx_origin"`: `"native"` (hand-written or decomp C++), or
+`{"lifted_by": "<tracked .py of a tool root>", "pack": "<external name of the recipe>"}`. Missing declaration = invalid recipe = red `build`.
+- `native`: `plugins` must hold `fnvnx_order` and `fnvnx_ftoi`, with the sources `PLUGIN_SOURCES` and the arguments `PLUGIN_ARGS` of recipe.py (the MSVC
+  semantics; `ltr`, `first`, `cpp17` exist for A/B measurements and are no product). Anything missing or different is a finding naming it.
+- lifted (the lifter emits `ldar`/`stlr` itself): consistent only if the root has NO tracked C++ unit, every C++ unit is an output of a `generated`
+  step whose tool is `lifted_by`, and `pack` is an external of the recipe (an input of every generator). Plugins are then not required.
+Assumption: the declaration `lifted_by` names the lifter is the owner's (admit.json is reviewed); the gate proves that no hand-written C++ sits in a lifted root.
 
 ## Refusal set R (GNU ld option syntax, not a text guess)
 Options that let a link accept missing or substituted symbols: `--unresolved-symbols`, `--allow-shlib-undefined`, `--noinhibit-exec`,

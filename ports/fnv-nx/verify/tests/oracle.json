@@ -25,6 +25,19 @@
     "ports/fnv-nx/verify/gate_admit.py"
    ]
   },
+  "test_argorder.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_argorder.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_argorder.py",
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_boot.py": {
    "references": [
     {
@@ -265,6 +278,48 @@
     "ports/fnv-nx/verify/gate_exepin.py"
    ]
   },
+  "test_gate_imports.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_imports.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/imports.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/bridgetable.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_imports.py",
+    "ports/fnv-nx/contract/imports.py",
+    "ports/fnv-nx/contract/bridgetable.py"
+   ]
+  },
+  "test_gate_machine.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_machine.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/hive.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_machine.py",
+    "ports/fnv-nx/contract/hive.py"
+   ]
+  },
   "test_gates.py": {
    "references": [
     {
@@ -303,6 +358,19 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/graph.py"
+   ]
+  },
+  "test_guest.py": {
+   "references": [
+    {
+     "anchor": "### Guest roots: the game's compiler (MSVCMODEL1)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/verify/unitstage.py"
    ]
   },
   "test_icount.py": {
@@ -411,6 +479,19 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/oraclecheck.py"
+   ]
+  },
+  "test_plugins.py": {
+   "references": [
+    {
+     "anchor": "## Plugins (`fnvnx_order`, `fnvnx_ftoi`)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/verify/unitstage.py"
    ]
   },
   "test_puregate.py": {
