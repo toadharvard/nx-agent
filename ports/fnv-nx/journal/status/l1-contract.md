@@ -490,3 +490,8 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - w16 dbfaefeb (trunk 0d8f1c89 + w5 c44308c0 + 42e25b50): content accepted, with no GL pins.
   - Held: the cause of MERGER's toy-root red (pp:seed.c) is not shown yet. It lands after w22 and w14.
   - `patch` must be a pinned deb (w22).
+
+## 2026-11-12 05:05Z
+- **Trunk:** 4fb048ec = w17 39cc794a merged (28 gates, 322 s). flags.semantics is on the trunk.
+- **Not in yet:** exepin, w10 (via w14), w16, w19, w5 (via w22). MERGER next: w22, w14.
+- **guest_flags.py:** not on the trunk yet; w17 pushed to deliver it to L5 w14 now.
