@@ -143,11 +143,22 @@
    "id": "ASM-001",
    "text": "The compiler is correct (the pinned msvcmodel GCC and the pinned toolchain).",
    "used_by": [
+    "ports/fnv-nx/docs/ORDERING.md",
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
+    "ports/fnv-nx/journal/inbox/l2-source-handoff-opus.md",
+    "ports/fnv-nx/journal/inbox/orch-assumptions.md",
+    "ports/fnv-nx/lift/gates/gate_order.py",
+    "ports/fnv-nx/link/a64order.py",
+    "ports/fnv-nx/link/gate_addr.py",
+    "ports/fnv-nx/link/gate_order.py",
+    "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc",
+    "ports/fnv-nx/toolchain/pi/fnvnx_pi.cc",
     "ports/fnv-nx/verify/MEMSAFE.md",
     "ports/fnv-nx/verify/RULES.md",
     "ports/fnv-nx/verify/TOOLS.md",
     "ports/fnv-nx/verify/VERDICT.md",
-    "ports/fnv-nx/verify/gate_assumptions.py"
+    "ports/fnv-nx/verify/gate_assumptions.py",
+    "ports/fnv-nx/verify/gatesdir.py"
    ],
    "aliases": [
     "L1:A2",
@@ -184,6 +195,7 @@
    "used_by": [
     "ports/fnv-nx/contract/iat.py",
     "ports/fnv-nx/contract/modules.py",
+    "ports/fnv-nx/lift/gates/gate_eh.py",
     "ports/fnv-nx/verify/VERDICT.md"
    ],
    "aliases": [
@@ -202,9 +214,11 @@
    "id": "ASM-004",
    "text": "The console's behaviour holds as assumed until a run on it.",
    "used_by": [
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/verify/TOOLS.md",
     "ports/fnv-nx/verify/VERDICT.md",
-    "ports/fnv-nx/verify/gate_assumptions.py"
+    "ports/fnv-nx/verify/gate_assumptions.py",
+    "ports/fnv-nx/verify/gatesdir.py"
    ],
    "aliases": [
     "Horizon behaviour"
@@ -219,6 +233,7 @@
    "id": "ASM-005",
    "text": "Native code is tested by ASan/UBSan, not proven; external libraries (libc, libnx, FreeType, minimp3) are taken by their documentation.",
    "used_by": [
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/verify/MEMSAFE.md",
     "ports/fnv-nx/verify/VERDICT.md"
    ],
@@ -236,6 +251,12 @@
    "id": "ASM-006",
    "text": "The exe makes no wild accesses: array indices are in bounds, guest accesses do not reach host pages.",
    "used_by": [
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
+    "ports/fnv-nx/journal/inbox/l2-source-handoff-opus.md",
+    "ports/fnv-nx/link/a64order.py",
+    "ports/fnv-nx/link/gate_addr.py",
+    "ports/fnv-nx/link/gate_order.py",
+    "ports/fnv-nx/toolchain/addr/fnvnx_addr.cc",
     "ports/fnv-nx/verify/VERDICT.md"
    ],
    "aliases": [
@@ -253,6 +274,9 @@
    "id": "ASM-007",
    "text": "The address space is 32-bit, ILP32.",
    "used_by": [
+    "ports/fnv-nx/docs/ORDERING.md",
+    "ports/fnv-nx/lift/gates/gate_order.py",
+    "ports/fnv-nx/lift/gates/tests/test_gate_order.py",
     "ports/fnv-nx/verify/VERDICT.md"
    ],
    "aliases": [],
@@ -266,6 +290,7 @@
    "id": "ASM-008",
    "text": "Floating point is IEEE binary32/binary64.",
    "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py",
     "ports/fnv-nx/verify/VERDICT.md"
    ],
    "aliases": [
@@ -281,10 +306,12 @@
    "id": "ASM-009",
    "text": "The pinned formal tools and published theorems are correct: the Sail CPU model at its pinned patch, isla and z3, the published proof of the x86-TSO to Arm memory mapping.",
    "used_by": [
+    "ports/fnv-nx/journal/inbox/orch-assumptions.md",
     "ports/fnv-nx/verify/RULES.md",
     "ports/fnv-nx/verify/TOOLS.md",
     "ports/fnv-nx/verify/VERDICT.md",
-    "ports/fnv-nx/verify/gate_assumptions.py"
+    "ports/fnv-nx/verify/gate_assumptions.py",
+    "ports/fnv-nx/verify/puregate_policy.py"
    ],
    "aliases": [
     "L3b:A-SAILMODEL",
@@ -569,6 +596,7 @@
    "id": "ASM-029",
    "text": "The ARMv8 memory model matches the Cortex-A57.",
    "used_by": [
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/verify/RULES.md"
    ],
    "aliases": [
@@ -833,6 +861,7 @@
    "text": "The `names` plugin ran on every native C++ unit (the recipe's guest-compiler/plugin rule).",
    "used_by": [
     "ports/fnv-nx/contract/gate_call.py",
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/verify/RULES.md",
     "ports/fnv-nx/verify/TOOLS.md"
    ],
@@ -846,6 +875,7 @@
    "text": "regsites.tsv is complete over the exe and the modules (the registry-site pass reports what it cannot bind as dynamic, never skips); the seed unit and the registry implementation are the only code that reaches the hive, and the implementation creates no key by itself.",
    "used_by": [
     "ports/fnv-nx/contract/hive.py",
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/verify/TOOLS.md"
    ],
    "aliases": [],
@@ -858,6 +888,7 @@
    "text": "objects.json lists every global, weak and unique symbol of every object of the root (recipe.symbols).",
    "used_by": [
     "ports/fnv-nx/contract/imports.py",
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/verify/TOOLS.md"
    ],
    "aliases": [],
@@ -870,8 +901,9 @@
    "text": "The pristine cl symbol names are the exe's contract (N1: byte-equal, one symbol map).",
    "used_by": [
     "ports/fnv-nx/contract/gate_call.py",
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/RULES.md"
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
+    "ports/fnv-nx/verify/RULES.md",
+    "ports/fnv-nx/verify/TOOLS.md"
    ],
    "aliases": [],
    "status": "REMOVE",
@@ -883,6 +915,7 @@
    "text": "An external decorated name denotes one entity link-wide.",
    "used_by": [
     "ports/fnv-nx/contract/gate_call.py",
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/verify/TOOLS.md"
    ],
    "aliases": [],
@@ -899,6 +932,19 @@
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: gate admit checks that `lifted_by` is the path of the lifter tool liftall.py of an admitted tool root and that every generated step of the root runs it",
+   "owner": "L1"
+  },
+  {
+   "id": "ASM-102",
+   "text": "The tools of this tree name the player's exe only through their `--exe` option or the file name FalloutNV.exe, and the gate's sink list is the class of ways Python opens a path.",
+   "used_by": [
+    "ports/fnv-nx/verify/RULES.md",
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/gate_exepin.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: gate exepin taints every path value that enters a tool from argv or the environment (sys.argv, argparse, os.environ), not only `--exe`, so no exe path is outside the flow",
    "owner": "L1"
   },
   {
@@ -1216,6 +1262,17 @@
    "owner": "L3b"
   },
   {
+   "id": "ASM-800",
+   "text": "The -Wmismatched-tags warning is not suppressed for a declaration (system header, #pragma GCC diagnostic), so the names plugin sees every class key.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l1-contract-018.md"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: gate namegate (L2 w5) compares every name with cl's symbol table and so certifies the names; closes when L2's plugin sources reach the trunk",
+   "owner": "L2"
+  },
+  {
    "id": "ASM-801",
    "text": "Every FIX_TRUNC_EXPR in a native unit is rewritten to _ftol/fistp semantics, sits in an fnvnx_f2i helper, or is a compile error (fnvnx_ftoi native rule (c), L2 w1 649a2960); native bodies compiled with fnvnx_ftoi are judged by this rule, not by the lifted-code half of fpexact.",
    "used_by": [
@@ -1227,19 +1284,6 @@
    "status": "REMOVE",
    "removed_by": "gate:fpexact",
    "owner": "L2"
-  },
-  {
-   "id": "ASM-102",
-   "text": "The tools of this tree name the player's exe only through their `--exe` option or the file name FalloutNV.exe, and the gate's sink list is the class of ways Python opens a path.",
-   "used_by": [
-    "ports/fnv-nx/verify/RULES.md",
-    "ports/fnv-nx/verify/TOOLS.md",
-    "ports/fnv-nx/verify/gate_exepin.py"
-   ],
-   "aliases": [],
-   "status": "REMOVE",
-   "removed_by": "planned: gate exepin taints every path value that enters a tool from argv or the environment (sys.argv, argparse, os.environ), not only `--exe`, so no exe path is outside the flow",
-   "owner": "L1"
   },
   {
    "id": "ASM-803",
