@@ -1,29 +1,22 @@
 // ffp_prog.cpp: nx_ffp_vs_program / nx_ffp_ps_program (draw_ffp.h) and the backend programs behind them.
 //  P1 Programs: ONE vertex and ONE pixel program (render/d3d9/ffp/ffp.vert.glsl, ffp.frag.glsl), in two variants selected by D3DRS_SHADEMODE FLAT (locations 0 / 1 `flat`, NX_FFP_FLAT; both stages by the same rule), made
 //     lazily at the first draw that needs (stage, variant), cached on the device record (ffp_dev.cpp R1), destroyed with it. A program id is NOT a function of any other state: everything else is uniform data.
-//  P2 The blob is a total switch over the backend kind the ABI reports (NXGPU_FN_INFO -> NxGpuInfo.backend, gpu_abi.h: 1 deko3d, 2 GL): deko3d takes a DKSH image (NxShaderDesc.dksh, compiled by uam at BUILD time from
-//     the same GLSL: ffp_dksh.gen.h, render/d3d9/ffp/gen_glsl.py; the guest build requires the translator build, build_guest.sh), the GL backend takes the GLSL text (NxShaderDesc.glsl, ffp_glsl.gen.h; "the GL backend
-//     rewrites version + bindings"). A kind the ABI does not define, or a build without the DKSH images (host builds over GL only) asked for a DKSH, has no blob: the backend is refused = 0 (draw_ffp.h).
+//  P2 The front end sends one GLSL blob and its sha256 key (NxShaderDesc.glsl / glsl_size / key, gpu_abi.h) to every backend and never DKSH: ffp_glsl.gen.h, render/d3d9/ffp/gen_glsl.py computes both at generation time;
+//     a backend that needs DKSH compiles the GLSL itself. The blob is a function of (stage, variant) only; there is no backend switch.
 //  P3 Every address the backend call reads is backend memory (nxd3d_gpu_alloc, glue_stream.h): the blob is copied there for the call and returned after it (the backend compiles / copies synchronously, as draw_prog.cpp
 //     does for bytecode); the descriptors live in the scratch of the glue. No memory = 0.
 //  P4 The blocks handed out (ubo[i].data) are the record's: the vertex block (memoised by its inputs, ffp_dev.h F2), the pixel block, and the world palette = the device's own WORLDMATRIX(0..255) states
 //     (256 consecutive D3DMATRIX = the std140 mat4[256] of the program, row-major bytes: ffp_vs_state.h).
 #include "ffp_dev.h"
 #include "../gen/ffp_glsl.gen.h"
-#include "../gen/ffp_dksh.gen.h"
 
 namespace {
-struct Blob { const unsigned char* p; unsigned n; };
-Blob blob(uint32_t kind, uint32_t stage, uint32_t flat) {
-    switch ((NxBackendKind)kind) {
-    case NX_BACKEND_GL:
-        if (stage == NxStage_Vertex) return flat ? Blob{nx_ffp_glsl_vs_flat, nx_ffp_glsl_vs_flat_size} : Blob{nx_ffp_glsl_vs_smooth, nx_ffp_glsl_vs_smooth_size};
-        return flat ? Blob{nx_ffp_glsl_ps_flat, nx_ffp_glsl_ps_flat_size} : Blob{nx_ffp_glsl_ps_smooth, nx_ffp_glsl_ps_smooth_size};
-    case NX_BACKEND_DEKO3D:
-        if (stage == NxStage_Vertex) return flat ? Blob{nx_ffp_dksh_vs_flat, nx_ffp_dksh_vs_flat_size} : Blob{nx_ffp_dksh_vs_smooth, nx_ffp_dksh_vs_smooth_size};
-        return flat ? Blob{nx_ffp_dksh_ps_flat, nx_ffp_dksh_ps_flat_size} : Blob{nx_ffp_dksh_ps_smooth, nx_ffp_dksh_ps_smooth_size};
-    }
-    return Blob{nullptr, 0};
+struct Blob { const unsigned char* p; unsigned n; const unsigned char* key; };
+Blob blob(uint32_t stage, uint32_t flat) {
+#define NXB_(s, v) Blob{nx_ffp_glsl_##s##_##v, nx_ffp_glsl_##s##_##v##_size, nx_ffp_glsl_##s##_##v##_key}
+    if (stage == NxStage_Vertex) return flat ? NXB_(vs, flat) : NXB_(vs, smooth);
+    return flat ? NXB_(ps, flat) : NXB_(ps, smooth);
+#undef NXB_
 }
 }
 
@@ -40,18 +33,12 @@ bool nx_ffp_flat(NxDeviceCore* d, uint32_t* flat) {
 
 uint32_t nx_ffp_make_program(NxFfpDev* f, uint32_t stage, uint32_t flat) {
     if (!nxs_reserve()) return 0;                                      // the scratch of the glue exists once the ring does (glue_stream.h E1)
-    if (!f->kind) {
-        NxGpuInfo* info = (NxGpuInfo*)nxs_scratch(sizeof *info); if (!info) return 0;
-        memset(info, 0, sizeof *info); uint64_t a[1] = {FNVNX_ADDR_(info)};
-        if (nxd3d_gpu_call(NXGPU_FN_INFO, a, 1) != 0) return 0;
-        f->kind = info->backend;
-    }
-    Blob b = blob(f->kind, stage, flat); if (!b.n) return 0;           // P2
+    Blob b = blob(stage, flat);                                        // P2
     uint32_t bytes = (b.n + 4095u) & ~4095u; uint8_t* m = (uint8_t*)nxd3d_gpu_alloc(bytes); if (!m) return 0;   // P3
     memset(m, 0, bytes); memcpy(m, b.p, b.n);
     NxShaderDesc* d = (NxShaderDesc*)nxs_scratch(sizeof *d); if (!d) { nxd3d_gpu_free(m); return 0; }
     memset(d, 0, sizeof *d); d->stage = stage;
-    if (f->kind == NX_BACKEND_GL) { d->glsl = FNVNX_ADDR_(m); d->glsl_size = b.n; } else { d->dksh = FNVNX_ADDR_(m); d->dksh_size = b.n; }
+    d->glsl = FNVNX_ADDR_(m); d->glsl_size = b.n; memcpy(d->key, b.key, sizeof d->key);
     uint64_t a[1] = {FNVNX_ADDR_(d)}, r = nxd3d_gpu_call(NXGPU_FN_SHADER_CREATE, a, 1); nxd3d_gpu_free(m);
     return nxs_ok(r) && r != 0 && r < (1u << 16) ? (uint32_t)r : 0;
 }

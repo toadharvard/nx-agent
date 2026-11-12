@@ -11,7 +11,7 @@ handoff (journal/inbox/l6-render-handoff.md) says B3 starts only when the orches
   WAIT_VBLANK) + v4.1 1 (SHADER_CREATE_D3D=19) = 20 functions. NXGPU_FN_COUNT4 = 19.
 - Stream ops: v3 20 (NxOp_End..NxOp_Marker) + v4 8 (BeginPass4, DefineLayout4, BindVtxN, ImageUpdate, Blit, GenMips, QueryBegin,
   QueryEnd) = 28 (NXGL4_OP_LIST, gl4.h:200-204). Stream rules R1-R4/E1-E4: render/d3d9/dev/glue_stream.h.
-- Struct sizes (static asserts): NxImageDesc 32, NxImageDesc4 16, NxMemBlockDesc 16, NxShaderDesc 32, NxShaderD3D 40, NxVtxLayout 36,
+- Struct sizes (static asserts): NxImageDesc 32, NxImageDesc4 16, NxMemBlockDesc 16, NxShaderDesc 48, NxShaderD3D 40, NxVtxLayout 36,
   NxVtxLayout4 50 words per DefineLayout4, NxVtxAttr4 8, NxTarget 8, NxRenderState 32, NxSamplerState 16, NxFormatInfo 8, NxFrameStats 32,
   NxSubmit 32, NxReadback 40, NxGpuInfo 32, NxPresent 80 (was 56, QUEUE.md:219), NxGpuApi 32+9*8. NxImageRead: size unknown (not asserted).
 - Limits: NX_MAX_IMAGES 4096, NX_MAX_SAMPLERS 256, 4 render targets, 16 streams, 16 attrs, 4096 query ids. NxFormat 35 formats.

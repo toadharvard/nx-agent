@@ -17,6 +17,7 @@ vs_2_x	srcmod	not@if.p0	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'i
 vs_3_0	srcmod	not	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register	NOT modifier on b# invalid	D3DERR_INVALIDCALL	census legal=?
 vs_3_0	dstmod	pp@mov	MS:dx9-graphics-reference-asm-vs-instructions-modifiers (vs: only _sat); wine check_ps_dstmod agrees	_pp invalid in vertex shaders	D3DERR_INVALIDCALL	census legal=?
 vs_3_0	srcmod	not@if.p0	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register	NOT modifier on b# invalid	D3DERR_INVALIDCALL	census legal=?
+vs_3_0	addr	v[a0.x]	MS:dx9-graphics-reference-asm-vs-registers-vs-3-0 ('Indexing Registers': v# indexed 'using the loop counter register (aL)'; the register table's 'a0/aL' RelAddr cell is the row summary; same-page prose wins, as for o#)	v# relative addressing only through aL in vs_3_0	D3DERR_INVALIDCALL	census legal=?
 vs_3_0	addr	o[a0.x]	MS:dx9-graphics-reference-asm-vs-registers-vs-3-0 (o# RelAddr aL only)	o# relative addressing only through aL	D3DERR_INVALIDCALL	census legal=?
 ps_1_1	dstmod	shift_x8	MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)	result shift x8 invalid in ps_1_1	D3DERR_INVALIDCALL	census legal=?
 ps_1_1	dstmod	shift_d8	MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)	result shift d8 invalid in ps_1_1	D3DERR_INVALIDCALL	census legal=?
@@ -102,6 +103,7 @@ ps_3_0	srcmod	x2@mad.s2	MS:dx9-graphics-reference-asm-ps-registers-modifiers-sou
 ps_3_0	srcmod	x2neg@mov	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees	legacy source modifier x2neg invalid in ps_3_0	D3DERR_INVALIDCALL	census legal=?
 ps_3_0	srcmod	x2neg@mad.s2	MS:dx9-graphics-reference-asm-ps-registers-modifiers-source ('ps_2_0 and Above': only negate/abs); wine check_legacy_srcmod agrees	legacy source modifier x2neg invalid in ps_3_0	D3DERR_INVALIDCALL	census legal=?
 ps_3_0	srcmod	not@if.p0	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register	NOT modifier on b# invalid	D3DERR_INVALIDCALL	census legal=?
+vs_3_0	opcode	sgn@3src	MS:dx9-graphics-reference-asm-sgn---vs (syntax line is version-generic); wine shader_sm1.c {SGN,1,2,(3,0)-} and vkd3d d3dbc.c {SGN,1,1,{3,0}} fix vs_3_0 at one source (R2)	sgn in vs_3_0 takes dst, src0 only	D3DERR_INVALIDCALL	census legal=y
 ps_2_x	opcode	loop	MS:dx9-graphics-reference-asm-ps-instructions-ps-2-x / loop---ps (loop, endloop: 3_0 only)	loop is not in the ps_2_x instruction set	D3DERR_INVALIDCALL	census legal=y
 ps_2_x	opcode	endloop	MS:dx9-graphics-reference-asm-endloop---ps (3_0 only)	endloop is not in the ps_2_x instruction set	D3DERR_INVALIDCALL	census legal=y
 ps_3_0	addr	c[aL+n]	MS:dx9-graphics-reference-asm-ps-registers-ps-3-0 (c# RelAddr No); wine ps_3_reg_allowed CONST reladdr FALSE agrees	relative addressing of c# invalid in ps_3_0 (census had it legal=y)	D3DERR_INVALIDCALL	census legal=y

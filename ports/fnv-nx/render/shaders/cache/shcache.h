@@ -8,8 +8,8 @@
  * never a failure. The cache never decides what a shader is; it can only return what the translator returned before.
  *
  * KEY = (bytecode hash = fnvnx_shader_hash, bytecode length, stage, variant flags, L).
- *   variant flags: the bits of fnvnx_shader_opts.flags that change the output (EPI_STATIC/ALPHA/FOG, NUMERICS_NINE); KEEP_GLSL / NO_DKSH
- *     are not part of the key: the cache holds complete translations (DKSH + reflection).
+ *   variant flags: ALL bits of fnvnx_shader_opts.flags (EPI_*, NUMERICS_NINE, VS_COMPLETE, FLAT_COLOR, and any added later) except FNVNX_SHADER_NONKEY_FLAGS
+ *     (KEEP_GLSL / NO_DKSH: the cache holds complete translations, DKSH + reflection). The mask is the complement of that short list (fnvnx_shaders.h).
  *   L: the canonical varying link set (shcache_link_set) when the stage's locations depend on the draw's VS/PS pair, else empty: a
  *     stage-alone translation (link_pairs = NULL). The run-time caller passes L (sorted ascending, unique) as link_pairs unchanged.
  *   The 64-bit hash is the translator's own cache key; the stored length and the stored L (compared byte-wise) narrow it, and the builder
@@ -30,6 +30,7 @@
 #define SHCACHE_H
 #include <stddef.h>
 #include <stdint.h>
+#include "../include/fnvnx_shaders.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -39,7 +40,7 @@ extern "C" {
 #define SHCACHE_MAX_L 31                 /* FNVNX_DK_VARYING_SLOTS */
 #define SHCACHE_STAGE_VERTEX 0
 #define SHCACHE_STAGE_PIXEL 1
-#define SHCACHE_FLAGS_MASK ((1u << 2) | (1u << 3) | (1u << 4) | (1u << 5))   /* FNVNX_SHADER_EPI_STATIC|EPI_ALPHA|EPI_FOG|NUMERICS_NINE */
+#define SHCACHE_FLAGS_MASK FNVNX_SHADER_KEY_FLAGS   /* every flag bit of the translator input except the declared non-key ones (fnvnx_shaders.h): derived, no list here */
 #define SHCACHE_MAIN_HEADER 64
 #define SHCACHE_INDEX_ENTRY 36
 #define SHCACHE_LOG_HEADER 24

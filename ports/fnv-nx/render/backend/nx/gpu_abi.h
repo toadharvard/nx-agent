@@ -14,6 +14,7 @@
 #ifndef FNVNX_NX_GPU_ABI_H
 #define FNVNX_NX_GPU_ABI_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include "nx/state.h"
 
@@ -62,11 +63,9 @@ typedef struct NxImageDesc {
 enum NxStage { NxStage_Vertex = 0, NxStage_Fragment = 1 };
 typedef struct NxShaderDesc {
     uint32_t stage;        /* NxStage */
-    uint32_t dksh_size;
-    uint64_t dksh;         /* DKSH image (deko3d); 0 is fine for the GL backend */
-    uint64_t glsl;         /* GLSL 4.60 source in the deko3d flavour (the GL backend rewrites version + bindings) */
     uint32_t glsl_size;
-    uint32_t pad;
+    uint64_t glsl;         /* GLSL 4.60 source in the deko3d flavour (the GL backend rewrites version + bindings) */
+    uint8_t key[32];       /* sha256 of the glsl_size bytes at glsl */
 } NxShaderDesc;
 /* Resource bindings in the GLSL: UBO and sampler `binding = n` are deko3d per-stage slots; the GL backend maps
  * them to GL binding stage * 16 + n. */
@@ -198,7 +197,11 @@ enum NxGpuFn {
 #endif
 NX_ASSERT_(sizeof(NxMemBlockDesc) == 16, "NxMemBlockDesc");
 NX_ASSERT_(sizeof(NxImageDesc) == 32, "NxImageDesc");
-NX_ASSERT_(sizeof(NxShaderDesc) == 32, "NxShaderDesc");
+NX_ASSERT_(sizeof(NxShaderDesc) == 48, "NxShaderDesc");
+NX_ASSERT_(offsetof(NxShaderDesc, stage) == 0, "NxShaderDesc.stage");
+NX_ASSERT_(offsetof(NxShaderDesc, glsl_size) == 4, "NxShaderDesc.glsl_size");
+NX_ASSERT_(offsetof(NxShaderDesc, glsl) == 8, "NxShaderDesc.glsl");
+NX_ASSERT_(offsetof(NxShaderDesc, key) == 16, "NxShaderDesc.key");
 NX_ASSERT_(sizeof(NxVtxLayout) == 36, "NxVtxLayout");
 NX_ASSERT_(sizeof(NxFrameStats) == 32, "NxFrameStats");
 NX_ASSERT_(sizeof(NxSubmit) == 32, "NxSubmit");
