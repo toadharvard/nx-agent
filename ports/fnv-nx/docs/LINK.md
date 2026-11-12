@@ -201,7 +201,7 @@ class/struct/union/enum tags, which Itanium names do not.
   is read with balanced parentheses (function-pointer parameters). Typedefs, `struct`/`class`/`enum` tags and
   integer spellings (`unsigned`, `long int`, `__int16`) are resolved. Undeclared, a stdcall/fastcall name gets a
   stand-in for its parameters only: N/4 integers, when the other side passes nothing but 32-bit integers and
-  pointers, with the other side's own result type (R3-1: an assumed int result gave a float callee a
+  pointers, with the other side's own result type (R3-1: an int result taken by default gave a float callee a
   `fmov s0, w0` bridge that clobbered its result). Otherwise, and for a cdecl name nobody declares, the pair is not
   compared and is bound directly.
 * A narrow integer the reference passes (`char`, `bool`, `short`, ...) where the definition reads a 32/64-bit value

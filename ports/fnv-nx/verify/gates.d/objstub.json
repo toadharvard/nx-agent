@@ -1,0 +1,16 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "objstub",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_objstub.py"
+ ],
+ "result": "objstub.json",
+ "covers": [
+  "test",
+  "product-guest",
+  "lifted",
+  "host-product"
+ ]
+}

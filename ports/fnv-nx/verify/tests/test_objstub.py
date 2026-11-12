@@ -428,6 +428,7 @@ for abi in ("ilp32", "lp64"):
     cnt = objstub.declared_counts(objstub.analyse_all([("x", build(DH + "unsigned f(void) { fnvnx_declared_machine(31); return 2; }\nunsigned g(void) { fnvnx_declared_machine(31); return 2; }", abi))], set(), set()))
     check(T("declared: call sites per id are counted"), cnt == {31: 2}, cnt)
     check(T("declared: a call of the wine citation is not counted as declared"), objstub.declared_counts(objstub.analyse_all([("x", build(DH + "unsigned f(void) { fnvnx_wine_fixme(5); return 7; }", abi))], set(), set())) == {})
+HDR_REAL = [l for l in open(os.path.join(os.path.dirname(os.path.abspath(objstub.__file__)), "declared_machine.tsv")).read().split("\n") if l.startswith("# fact:")][0]
 GOODS = ("31\tRegOpenKeyExA\tregistry\twin-doc:sysinfo/regopenkeyex:RegOpenKeyExA\tu32\t2",
          "32\tconnect\tno-network\twine-9.0:dlls/ws2_32/socket.c:connect\tu32\t0xFFFFFFFF",
          "33\tGetTimeZoneInformation\ttime-zone\twin-doc:timezoneapi/gettimezoneinformation:GetTimeZoneInformation\tu32nz0\t0,1")
@@ -435,16 +436,40 @@ for bad in ("31\tx\tnetwork\twin-doc:a/b:f\tu32\t1", "31\tx\tno-network\thttp://
             "31\tx\tno-network\twin-doc:a/b:f\tvoid\t1", "x\tx\tregistry\twin-doc:a/b:f\tu32\t1", "31\tx\tregistry\twine:a.c:f\tu32\t1",
             "31\tx\tregistry\twin-doc:a/b:f\tu32\t1\n31\ty\tregistry\twin-doc:a/b:g\tu32\t1", "31\tx\tregistry\tu32\t1"):
     tf_ = os.path.join(ROOT, "d.tsv")
-    open(tf_, "w").write(bad + "\n")
+    open(tf_, "w").write(HDR_REAL + "\n" + bad + "\n")
     try:
         objstub.read_declared_table(tf_)
         check("declared table: malformed row rejected: %r" % bad[:36], False)
     except ValueError:
         check("declared table: malformed row rejected: %r" % bad[:36], True)
-open(tf_, "w").write("# header\n" + "\n".join(GOODS) + "\n")
+open(tf_, "w").write(HDR_REAL + "\n" + "\n".join(GOODS) + "\n")
 got = objstub.read_declared_table(tf_)
 check("declared table: header comment and three valid rows (win-doc and wine-9.0 sources, three facts)",
       set(got) == {31, 32, 33} and got[32][1:3] == ("no-network", "wine-9.0:dlls/ws2_32/socket.c:connect"), got)
+# the facts and sources come from the header line of the table itself
+GAL = "34\tGalaxyInit\tno-galaxy\tgalaxy-sdk:IGalaxy/Init:Init\tu32\t1"
+open(tf_, "w").write(HDR_REAL + "\n" + GAL + "\n")
+check("declared table: a galaxy-sdk row with fact no-galaxy is accepted", objstub.read_declared_table(tf_).get(34, ("",))[1:3] == ("no-galaxy", "galaxy-sdk:IGalaxy/Init:Init"), "")
+for what, row in (("an undeclared fact", "35\tx\tno-wifi\twin-doc:a/b:f\tu32\t1"), ("an undeclared source prefix", "35\tx\tno-galaxy\tgog-sdk:a/b:f\tu32\t1")):
+    open(tf_, "w").write(HDR_REAL + "\n" + row + "\n")
+    try:
+        objstub.read_declared_table(tf_)
+        check("declared table: a row with " + what + " is red", False)
+    except ValueError:
+        check("declared table: a row with " + what + " is red", True)
+slim = HDR_REAL.replace(" | no-galaxy", "").replace(" | galaxy-sdk:<page>:<function>", "")
+open(tf_, "w").write(slim + "\n" + GAL + "\n")
+try:
+    objstub.read_declared_table(tf_)
+    check("declared table: without no-galaxy in its header a galaxy row is red (table and check agree)", False)
+except ValueError:
+    check("declared table: without no-galaxy in its header a galaxy row is red (table and check agree)", True)
+open(tf_, "w").write("# header\n" + "\n".join(GOODS) + "\n")
+try:
+    objstub.read_declared_table(tf_)
+    check("declared table: no header line is an error", False)
+except ValueError:
+    check("declared table: no header line is an error", True)
 try:
     objstub.read_declared_table(os.path.join(ROOT, "nonexistent.tsv"))
     check("declared table: missing file is an error", False)

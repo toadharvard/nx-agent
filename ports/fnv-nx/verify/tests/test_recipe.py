@@ -53,7 +53,7 @@ FILES = {
     "toy/inc/toy.h": "#define TOY 7\n",
     "toy/constants.tsv": "f_c\t1\nf_b\t2\n",
     "verify/wine_fixme.tsv": "# id\tcontract_name\twine_ref\tkind\tvalue\n",
-    "verify/declared_machine.tsv": "# id\tcontract_name\tfact\tsource\tkind\tvalue\n",
+    "verify/declared_machine.tsv": "# id\tcontract_name\tfact\tsource\tkind\tvalue\n# fact: no-network | time-zone | registry | no-galaxy (fixture); source: win-doc:<page>:<function> | wine-9.0:<path>:<function> | galaxy-sdk:<page>:<function>; kind void|u32\n",
     "toy/link.ld": open(os.path.join(VERIFY, "..", "link", "guest.ld")).read(),
 }
 LINK_TOOLS = ("link/ldcheck.py", "link/gateids.py", "contract/gatefile.py")   # the real files of the tree: the ldcheck stage mounts them
@@ -234,7 +234,20 @@ def main():
               r1["status"] == "red" and [f["unit"] for f in fu] == ["b.c", "c.c"] and fu[0]["stage"] == "cc:b.c" and fu[1]["stage"] == "pp:c.c"
               and all(f["exit"] and 0 < len(f["stderr"]) <= 20 and set(f) == {"unit", "stage", "exit", "stderr"} for f in fu)
               and any("undeclared_b" in l for l in fu[0]["stderr"]) and any("missing_c.h" in l for l in fu[1]["stderr"])
-              and r1["failure"]["stage"] == "cc:b.c" and r1["elf"] is None and r1["objects"] == [], (fu, r1.get("failure")))
+              and r1["failure"]["stage"] == "cc:b.c" and r1["elf"] is None and [o["unit"] for o in r1["objects"]] == ["a.c"], (fu, r1.get("failure")))
+        # KEEP GOING: a red generator does not stop the other stages. Its output unit is blocked by it (never built), every other unit is
+        # built, the ELF is blocked, and the root is red naming the red stage.
+        kg = make_repo("kg", rec=dict(RECIPE, os_layer=[], generated=RECIPE["generated"] + [
+            {"tool": T + "gen/bad.py", "args": [], "inputs": [ROOT + "/constants.tsv"], "outputs": ["bad.c"]}]),
+            files={"toy/os.S": None, "gen/bad.py": "import sys\nsys.stderr.write('generator went wrong\\n')\nsys.exit(3)\n"})
+        rk = recipe.build(kg, ROOT, BASE + "/kg-store", BASE + "/kg-out")
+        check("red generator: the other units are built, its output unit and the ELF are blocked by its stage, root red",
+              rk["status"] == "red" and rk["failure"]["stage"] == "gen:%s:1" % ROOT and any("generator went wrong" in l for l in rk["failure"]["stderr"])
+              and [o["unit"] for o in rk["objects"]] == ["a.c", "b.c", "c.c"] and rk["elf"] is None and rk["red_stages"] == ["gen:%s:1" % ROOT]
+              and rk["blocked"] == [{"unit": "bad.c", "blocked_by": "gen:%s:1" % ROOT}, {"unit": "toy.elf", "blocked_by": "gen:%s:1" % ROOT}]
+              and "bad.c" in rk["units"], (rk.get("failure"), rk.get("blocked"), [o["unit"] for o in rk["objects"]]))
+        ok_ = recipe.build(kg, ROOT, BASE + "/kg-store", BASE + "/kg-out2")
+        check("red generator: a second run is deterministic and the built objects are cache hits", ok_["blocked"] == rk["blocked"] and ok_["stages"]["run"] == 0, ok_["stages"])
         norm = lambda r: json.dumps({k: v for k, v in r.items() if k not in ("stages", "stage_keys")}, sort_keys=True).replace(BASE + "/two-out1", "O").replace(BASE + "/two-out2", "O")
         check("two cold runs of the failing root give the same objects.json", norm(r1) == norm(r2))
 
@@ -329,10 +342,31 @@ def main():
     check("external: second build is all cache hits with identical objects and stage keys (cross-store equality: the determinism gate below)",
           ry["status"] == "green" and ry["stages"]["run"] == 0 and rx["stage_keys"] == ry["stage_keys"]
           and [o["sha256"] for o in rx["objects"]] == [o["sha256"] for o in ry["objects"]], ry.get("failure"))
+    # the verified (commit, tree_sha256) is a stored fact: a warm build ingests, walks and checks out nothing
+    fdir = SS + "/external-facts"
+    facts = sorted(os.listdir(fdir)) if os.path.isdir(fdir) else []
+    check("external: one fact per (commit, tree_sha256) in the store, one checkout per commit in the external cache",
+          facts == ["%s-%s.json" % (commit, thash)] and os.path.isdir(ec + "/" + commit + ".co"), (facts, os.listdir(ec)))
+    ingests, runs = [], []
+    real_ingest, real_run = recipe.cas.ingest, recipe.subprocess.run
+    recipe.cas.ingest = lambda p, st, exclude=(): ingests.append(p) or real_ingest(p, st, exclude)
+    recipe.subprocess.run = lambda cmd, *a_, **k: runs.append(cmd) or real_run(cmd, *a_, **k)
+    try:
+        # the build's own non-external work uses cas.ingest too; count only ingests of an external path
+        rw = recipe.build(xrepo, ROOT, SS, BASE + "/xo2w", ext=ec)
+    finally:
+        recipe.cas.ingest, recipe.subprocess.run = real_ingest, real_run
+    check("external: a warm build makes 0 ingests of the external and runs no git read-tree/checkout/fetch",
+          rw["status"] == "green" and not [i for i in ingests if ec in i] and not [c for c in runs if c[:1] == ["git"] and ("checkout-index" in c or "read-tree" in c or "fetch" in c)],
+          (rw.get("failure"), [i for i in ingests if ec in i]))
+    rv = recipe.build(xrepo, ROOT, BASE + "/store-v", BASE + "/xo2v", ext=ec)   # another store, same external cache: ingests once, no checkout
+    check("external: a new store with the same cache ingests the checkout once and stores its own fact", rv["status"] == "green"
+          and os.path.isfile(BASE + "/store-v/external-facts/%s-%s.json" % (commit, thash)), rv.get("failure"))
     bad_t = mut(external=[dict(ex, tree_sha256="0" * 64)], include=erec["include"])
     rt = recipe.build(make_repo("ext-t", rec=bad_t, files=ef), ROOT, SS, BASE + "/xo3", ext=ec)
     check("wrong tree_sha256: red naming the external", rt["status"] == "red" and rt["failure"]["stage"] == "external:tiny"
           and thash in " ".join(rt["failure"]["stderr"]), rt.get("failure"))
+    check("wrong tree_sha256: no fact is stored for it", not os.path.exists(SS + "/external-facts/%s-%s.json" % (commit, "0" * 64)))
     bad_c = mut(external=[dict(ex, commit="1" * 40)], include=erec["include"])
     rc_ = recipe.build(make_repo("ext-c", rec=bad_c, files=ef), ROOT, SS, BASE + "/xo4", ext=BASE + "/ec2")
     check("commit not in the repository: red naming the external", rc_["status"] == "red" and rc_["failure"]["stage"] == "external:tiny", rc_.get("failure"))
@@ -408,7 +442,7 @@ def check_tc_gate(repo, tcc, tiny):
     print("INFO gate determinism, external compiler + external include tree (2 cold + warm) %.1f s: %s" % (td, g and g["detail"]))
     check("determinism gate with the compiler as an external tree at /opt/tc and a second external: green, accepted by verdict, each fetched once",
           rc == 0 and g["universe"] == 2 == g["certified"] and accepted("determinism", BASE + "/gtc")[0] == "green"
-          and sorted(os.listdir(BASE + "/tccache/external")) == sorted([tcc, tiny]), (g, txt))
+          and sorted(os.listdir(BASE + "/tccache/external")) == sorted([tcc, tiny, tcc + ".co", tiny + ".co"]), (g, txt))
 
 
 if __name__ == "__main__":

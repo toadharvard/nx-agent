@@ -3,7 +3,7 @@
 code under test (verify/VERDICT.md class 10).
     python3 -I gate_oracle.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/oracle.json
 
-Universe: the test files of gate "selftests" (the DIRs of its argv in verify/gates.json, DIR/tests/test_*.py, found by
+Universe: the test files of gate "selftests" (the DIRs of its argv in verify/gates.d/selftests.json, DIR/tests/test_*.py, found by
 gate_tests.universe: one list for both gates). An item is a repo-relative path.
 Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
   {"format": "fnvnx-oracle/1", "tests": {"test_x.py": {"subject": [PATH...], "references": [REF...]}}}
@@ -15,6 +15,11 @@ Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
     {"kind": "spec", "path": PATH, "anchor": STR}   cited text: a tracked file and a place in it. `anchor` is a line
                                          range "L<m>-L<n>" (1 <= m <= n <= number of lines) or a whole line of the file
                                          that starts with "#" (a heading) and occurs exactly once
+    {"kind": "external", "name": NAME, "path": STR}   a file of an external that a recipe or the contract inputs pin (NAME is
+                                         its `name`, pinned to one commit and tree_sha256; fetched like a wine-exe artifact)
+    {"kind": "probe", "probe": {"external": NAME, "path": STR}, "platform": NAME, "dump_sha256": H64}   a probe program
+                                         (a file of a pinned external) run on the declared platform (a pinned external) whose dump
+                                         has this sha256
     {"kind": "contract", "path": PATH}     a contract table of the tree
     {"kind": "model", "path": PATH}        an independent model in the tree
 Rule. A test file is certified iff ALL hold:
@@ -25,18 +30,20 @@ Rule. A test file is certified iff ALL hold:
      verify/oracle_pins.json "exe_sha256"; the artifact is fetched by its exact commit (`git fetch --depth 1
      $ARTIFACTS_URL <commit>`, cached in GATE_CACHE/external/<commit> like a recipe's external), its tree hash
      (cas.py) equals `tree_sha256` and `path` is a file of it; every `path` of a spec, contract or model is a tracked
-     file inside a root; a spec's anchor resolves in its file. A spec without a file and an anchor is not a reference;
+     file inside a root; an external or probe names externals pinned by a recipe or the contract inputs, fetched to their
+     tree_sha256, holding the path; a spec's anchor resolves in its file. A spec without a file and an anchor is not a reference;
   4. independence: no spec, contract or model `path` is in the import closure of the subject. The closure is computed
      from the syntax trees: a subject file, plus, for every `import a.b` / `from a.b import c` in a closure file, every
      tracked file of the tree named a/b.py, b.py, a/b/__init__.py, a/b/c.py or c.py at any depth (a superset of what
      python can load, whatever sys.path is; a closure file that does not parse makes the test uncertified);
-  5. product: when a subject file lies in a product root, some REF is wine-exe or spec, and no REF `path` lies in a
+  5. a subject file does not lie in a root of class ref (a ref root holds references only);
+  6. product: when a subject file lies in a product root, some REF is wine-exe or spec, and no REF `path` lies in a
      product root.
 Argument: an expected value "comes from the code under test" when its declared source is the subject or is computed
 through it. Rules 2-5 leave four sources: a dump of the exe under the pinned Wine, text at a place that exists in a
 file, a contract table and a model, the last three outside everything the subject can load, and for product code never
 the product tree. The verdict is green only if certified == universe, so a test without such a source blocks the merge.
-Assumption (checked by verification, not by this gate): the declaration is true - the subject list is complete and
+Assumption (checked by verification, not by this gate): the declaration is true - the subject list is complete and (ASM-042)
 the test compares against the declared references. The after-merge verifier runs every test under verify/opentrace.py
 and compares the tracked files it opened with subject + references (verify/oraclecheck.py)."""
 import ast
@@ -49,14 +56,16 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
+import gate_admit  # noqa: E402
 import gate_tests  # noqa: E402
+import gatesdir  # noqa: E402
 
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
-GATES = TREE + "/verify/gates.json"
 PINS = TREE + "/verify/oracle_pins.json"
 FORMAT = "fnvnx-oracle/1"
 HEX = set("0123456789abcdef")
+TREE_KINDS = ("spec", "contract", "model")      # the kinds whose `path` is a tracked file of this tree
 
 
 def is_hex(s, n):
@@ -115,7 +124,7 @@ def closure(subject, tracked, read):
 
 def root_of(path, roots):
     for r in roots:
-        if path == r["path"] or path.startswith(r["path"] + "/"):
+        if any(path == t or path.startswith(t + "/") for t in gate_admit.trees(r)):
             return r
     return None
 
@@ -135,7 +144,28 @@ def anchor_ok(anchor, body):
     return anchor.startswith("#") and lines.count(anchor) == 1
 
 
-def judge_ref(ref, tracked, roots, pins, read, artifact):
+def ext_reason(name, path, extpins, artifact):
+    """-> reason or None: NAME is an external pinned by exactly one (commit, tree_sha256) in the recipes or the contract inputs, that
+    commit fetches to that tree hash, and PATH (None: no path asked) is a file of it"""
+    if not text(name):
+        return "external name is not a non-empty string"
+    pin = extpins.get(name)
+    if not pin:
+        return "external %r is not pinned by a recipe or the contract inputs" % name
+    if len(pin) != 1:
+        return "external %r is pinned to more than one commit or tree" % name
+    (commit, tree_sha256), = pin
+    tree, files = artifact(commit)
+    if tree is None:
+        return "external %r: commit %s cannot be fetched: %s" % (name, commit, files)
+    if tree != tree_sha256:
+        return "external %r: tree_sha256 of %s is %s, the pin says %s" % (name, commit, tree, tree_sha256)
+    if path is not None and (not text(path) or path not in files):
+        return "external %r: %r is not a file of %s" % (name, path, commit)
+    return None
+
+
+def judge_ref(ref, tracked, roots, pins, read, artifact, extpins=None):
     """-> reason or None (rule 3)"""
     if not isinstance(ref, dict):
         return "a reference is not an object"
@@ -161,6 +191,19 @@ def judge_ref(ref, tracked, roots, pins, read, artifact):
         if a["path"] not in files:
             return "wine-exe: %s is not a file of %s" % (a["path"], a["commit"])
         return None
+    if kind == "external":
+        if keys != {"kind", "name", "path"}:
+            return "external: keys are not kind, name, path"
+        return ext_reason(ref["name"], ref["path"], extpins or {}, artifact)
+    if kind == "probe":
+        if keys != {"kind", "probe", "platform", "dump_sha256"}:
+            return "probe: keys are not kind, probe, platform, dump_sha256"
+        pr = ref["probe"]
+        if not isinstance(pr, dict) or set(pr) != {"external", "path"}:
+            return "probe: probe keys are not external, path"
+        if not is_hex(ref["dump_sha256"], 64):
+            return "probe: dump_sha256 is not 64 hex"
+        return ext_reason(pr["external"], pr["path"], extpins or {}, artifact) or ext_reason(ref["platform"], None, extpins or {}, artifact)
     if kind == "spec":
         if keys != {"kind", "path", "anchor"}:
             return "spec: keys are not kind, path, anchor"
@@ -177,7 +220,7 @@ def judge_ref(ref, tracked, roots, pins, read, artifact):
     return None
 
 
-def judge_test(entry, tracked, roots, pins, read, artifact):
+def judge_test(entry, tracked, roots, pins, read, artifact, extpins=None):
     """-> reason or None (rules 2-5)"""
     if not isinstance(entry, dict) or set(entry) != {"subject", "references"}:
         return "entry keys are not subject, references"
@@ -187,28 +230,30 @@ def judge_test(entry, tracked, roots, pins, read, artifact):
     for s in subject:
         if not isinstance(s, str) or s not in tracked or root_of(s, roots) is None:
             return "subject %r is not a tracked file inside a root" % (s,)
+        if root_of(s, roots).get("class") == "ref":
+            return "subject %r lies in a root of class ref" % (s,)
     if not isinstance(refs, list) or not refs:
         return "references is empty"
     for ref in refs:
-        why = judge_ref(ref, tracked, roots, pins, read, artifact)
+        why = judge_ref(ref, tracked, roots, pins, read, artifact, extpins)
         if why:
             return why
     clo, why = closure(subject, tracked, read)
     if why:
         return why
     for ref in refs:
-        if "path" in ref and ref["path"] in clo:
+        if ref["kind"] in TREE_KINDS and ref["path"] in clo:
             return "%s %s is in the import closure of the subject" % (ref["kind"], ref["path"])
     if any(root_of(s, roots).get("class") == "product" for s in subject):
         if not any(ref["kind"] in ("wine-exe", "spec") for ref in refs):
             return "a product subject has no wine-exe or spec reference"
         for ref in refs:
-            if "path" in ref and root_of(ref["path"], roots).get("class") == "product":
+            if ref["kind"] in TREE_KINDS and root_of(ref["path"], roots).get("class") == "product":
                 return "reference %s of a product subject lies in a product root" % ref["path"]
     return None
 
 
-def judge(files, decls, tracked, roots, pins, read, artifact):
+def judge(files, decls, tracked, roots, pins, read, artifact, extpins=None):
     """files: the universe; decls: {DIR/tests: parsed oracle.json or None}; artifact(commit) -> (tree hash, set of
     file paths) or (None, reason) -> {path: reason} of the uncertified;
     pure function of its arguments"""
@@ -233,7 +278,7 @@ def judge(files, decls, tracked, roots, pins, read, artifact):
             elif n not in doc["tests"]:
                 bad[f] = "no entry in %s/oracle.json" % d
             else:
-                w = judge_test(doc["tests"][n], tracked, roots, pins, read, artifact)
+                w = judge_test(doc["tests"][n], tracked, roots, pins, read, artifact, extpins)
                 if w:
                     bad[f] = w
     return bad
@@ -301,16 +346,32 @@ def fetcher(cache):
     return artifact
 
 
+def external_pins(admit_roots):
+    """{external name: set of (commit, tree_sha256)} of every pin the build knows: the externals of verify/contract_inputs.json and of the
+    recipe of every product root (recipe.py's `external` entries)"""
+    pins = {}
+
+    def add(lst):
+        for e in lst if isinstance(lst, list) else []:
+            if isinstance(e, dict) and isinstance(e.get("name"), str) and is_hex(e.get("commit"), 40) and is_hex(e.get("tree_sha256"), 64):
+                pins.setdefault(e["name"], set()).add((e["commit"], e["tree_sha256"]))
+    add((load(TREE + "/verify/contract_inputs.json") or {}).get("external"))
+    for r in admit_roots:
+        if r.get("class") == "product" and isinstance(r.get("recipe"), str):
+            add((load(r["recipe"]) or {}).get("external"))
+    return pins
+
+
 def main():
     out = os.environ["GATE_OUT"]
     ls = subprocess.run(["git", "ls-files", "-z", "--", TREE], capture_output=True, check=True).stdout
     tracked = set(p for p in ls.decode("utf-8", "surrogateescape").split("\0") if p)
-    gates = load(GATES) or {}
+    gates = gatesdir.load_dir_or_empty()
     argv = next((g["argv"] for g in gates.get("gates", []) if g.get("name") == "selftests"), None)
     errors = []
     files = []
     if argv is None:
-        errors.append("gates.json has no selftests gate: the universe is not defined")
+        errors.append("verify/gates.d has no selftests gate: the universe is not defined")
     else:
         files = gate_tests.universe(gate_tests.parse(argv[argv.index(TREE + "/verify/gate_tests.py") + 1:])[1])
     admit = load(ADMIT) or {}
@@ -327,7 +388,7 @@ def main():
     cache = os.path.join(os.environ.get("GATE_CACHE") or tmp, "external")
     os.makedirs(cache, exist_ok=True)
     try:
-        bad = judge(files, decls, tracked, roots, pins, read, fetcher(cache))
+        bad = judge(files, decls, tracked, roots, pins, read, fetcher(cache), external_pins(roots))
     finally:
         if tmp:
             shutil.rmtree(tmp, ignore_errors=True)

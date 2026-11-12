@@ -227,6 +227,54 @@ def _():
     return same and cas.tree_hash(d, skip=("__pycache__",)) == h and cas.tree_hash(d) != h and cas.tree_hash(d + "/a.txt") == cas.ingest(d + "/a.txt", st)
 
 
+@case("materialize: an inode serves at most MAX_LINKS names; a replica is made past it (same bytes, mode, identity)")
+def _():
+    d = fresh("rep")
+    for i in range(10):
+        write("%s/f%d.h" % (d, i), b"same\n")
+    write(d + "/x.sh", b"same\n", 0o755)
+    st = fresh("rep-store")
+    h = cas.ingest(d, st)
+    old = cas.MAX_LINKS
+    cas.MAX_LINKS = 4
+    try:
+        out = fresh("rep-out") + "/t"
+        cas.materialize(h, st, out)
+        ino = {}
+        for n in sorted(os.listdir(out)):
+            s = os.lstat(os.path.join(out, n))
+            ino.setdefault(s.st_ino, []).append(n)
+        e = cas.manifest(h, st)["entries"]["f0.h"]
+        obj = cas._obj(st, e)
+        counts = sorted(os.stat(p).st_nlink for p in (obj, obj + ".r1", obj + ".r2") if os.path.exists(p))
+        out2 = fresh("rep-out2") + "/t"
+        cas.materialize(h, st, out2)  # a second place of the same tree: still correct
+        same = all(open(os.path.join(out, n), "rb").read() == b"same\n" for n in os.listdir(out)) and cas.ingest(out, st) == h == cas.ingest(out2, st)
+        return (all(len(v) <= 4 for v in ino.values()) and len(ino) >= 3 and counts and max(counts) <= 4 and same
+                and os.stat(os.path.join(out, "x.sh")).st_mode & 0o111 and not cas.verify(st))
+    finally:
+        cas.MAX_LINKS = old
+
+
+@case("materialize: 70000 names of one blob are placed (the filesystem's own link cap is closed by rule)")
+def _():
+    d = fresh("many")
+    write(d + "/blob.h", b"one blob\n")
+    st = fresh("many-store")
+    h0 = cas.ingest(d, st)
+    e = cas.manifest(h0, st)["entries"]["blob.h"]
+    import json as _j
+    ents = {"n%05d.h" % i: e for i in range(70000)}
+    data = cas.canon({"format": cas.FORMAT, "entries": ents})
+    import hashlib as _h
+    big = _h.sha256(data).hexdigest()
+    cas._put(st, "tree", big + ".json", data)
+    out = fresh("many-out") + "/t"
+    cas.materialize(big, st, out)
+    inodes = {os.lstat(os.path.join(out, n)).st_ino for n in os.listdir(out)}
+    return len(os.listdir(out)) == 70000 and len(inodes) >= 2 and all(open(os.path.join(out, n), "rb").read() == b"one blob\n" for n in ("n00000.h", "n69999.h"))
+
+
 def _cleanup():
     for dp, dns, fns in os.walk(ROOT):
         for n in dns:

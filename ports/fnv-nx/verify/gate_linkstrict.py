@@ -280,10 +280,10 @@ def judge(objs, elfs, tables, comdat=None, host=None):
 def main():
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-linkstrict-")
     cache, repo = os.environ.get("GATE_CACHE") or tmp, "."
-    items, finds, why, objs, elfs, tables, roots, comdat = [], [], "", {}, {}, {}, gate_build.product_roots(repo), {}
+    items, finds, why, objs, elfs, tables, roots, comdat = [], [], "", {}, {}, {}, gate_build.buildable_roots(repo), {}
     host = None
     try:
-        hroots = [r + "/" for r, e in recipe.load_admit(repo).items() if e.get("class") == "product" and e.get("target") == "host"]
+        hroots = [r + "/" for r, e in recipe.load_admit(repo).items() if e.get("class") in ("product", "test") and e.get("target") == "host"]
         host = (hroots, set(host_exports(cache)[0])) if hroots else None
         for root in roots:
             res, _ = gate_build.ensure(root, cache, repo)

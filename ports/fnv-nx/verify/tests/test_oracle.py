@@ -36,10 +36,11 @@ SRC = {
     T + "game/body.cc": "// Section G\nint f();\n",
     T + "game/ref.tsv": "1\n",
     T + "game/build.json": "{}",
+    T + "refs/dump.tsv": "z\n",
 }
 TRACKED = set(SRC)
 ROOTS = [{"path": T + "verify", "class": "tool"}, {"path": T + "docs", "class": "doc"},
-         {"path": T + "game", "class": "product"}]
+         {"path": T + "game", "class": "product"}, {"path": T + "refs", "class": "ref"}]
 PINS = {"exe_sha256": PIN}
 FILES = [T + "verify/tests/test_a.py", T + "verify/tests/test_b.py"]
 D = T + "verify/tests"
@@ -53,8 +54,14 @@ GOOD = {"format": "fnvnx-oracle/1", "tests": {
     "test_b.py": {"subject": [T + "game/body.cc"], "references": [WINE, {"kind": "model", "path": T + "verify/model.py"}]}}}
 
 
+C1, C2, C3 = "1" * 40, "2" * 40, "3" * 40
+T1, T2, T3 = "5" * 64, "6" * 64, "7" * 64
+ART.update({C1: (T1, {"p/probe.c", "p/dump.bin"}), C2: (T2, {"w/os"}), C3: (T3, {"x"})})
+EXTP = {"probes": {(C1, T1)}, "wineplat": {(C2, T2)}, "twice": {(C1, T1), (C3, T3)}, "badtree": {(C3, "8" * 64)}}
+
+
 def run(doc, files=FILES):
-    return G.judge(files, {D: doc}, TRACKED, ROOTS, PINS, lambda p: SRC[p], lambda c: ART.get(c, (None, "unknown commit")))
+    return G.judge(files, {D: doc}, TRACKED, ROOTS, PINS, lambda p: SRC[p], lambda c: ART.get(c, (None, "unknown commit")), EXTP)
 
 
 def with_a(**kw):
@@ -207,8 +214,8 @@ check("malformed json is not a declaration", G.load(p) is None)
 # the gate program on a synthetic checkout: one tool, one test, one spec reference
 root = os.path.join(tmp, "repo")
 T = "ports/fnv-nx"
-tree = {T + "/verify/gates.json": json.dumps({"gates": [{"name": "selftests", "argv": ["python3", "-I", T + "/verify/gate_tests.py",
-                                                                                      T + "/x"]}]}),
+tree = {T + "/verify/gates.d/selftests.json": json.dumps({"format": "fnvnx-gatefile/1", "name": "selftests", "result": "selftests.json",
+                                                         "argv": ["python3", "-I", T + "/verify/gate_tests.py", T + "/x"], "covers": ["tool"]}),
         T + "/verify/admit.json": json.dumps({"roots": [{"path": T + "/x", "class": "tool", "gates": []}]}),
         T + "/verify/oracle_pins.json": "{}",
         T + "/x/a.py": "def f():\n    return 1\n",
@@ -224,6 +231,34 @@ subprocess.run(["git", "-C", root, "add", "-A"], check=True)
 out = os.path.join(tmp, "out")
 os.makedirs(out)
 env = {k: v for k, v in os.environ.items() if not k.startswith("GATE_")}
+U = "ports/fnv-nx/"
+# oracle REF kinds external and probe; class ref
+EXT = {"kind": "external", "name": "probes", "path": "p/dump.bin"}
+PROBE = {"kind": "probe", "probe": {"external": "probes", "path": "p/probe.c"}, "platform": "wineplat", "dump_sha256": "9" * 64}
+check("external: pinned name and a file of it -> green", run(with_a(references=[EXT])) == {}, run(with_a(references=[EXT])))
+check("probe: probe source, platform and dump hash -> green", run(with_a(references=[PROBE])) == {}, run(with_a(references=[PROBE])))
+check("external + probe + spec together -> green", run(with_a(references=[SPEC, EXT, PROBE])) == {})
+bad_a("external: a name no recipe pins is red", with_a(references=[dict(EXT, name="nope")]), "not pinned")
+bad_a("external: a name pinned to two commits is red", with_a(references=[dict(EXT, name="twice")]), "more than one")
+bad_a("external: a path that is not a file of the external is red", with_a(references=[dict(EXT, path="p/none")]), "not a file")
+bad_a("external: a tree_sha256 that differs from the pin is red", with_a(references=[dict(EXT, name="badtree", path="x")]), "tree_sha256")
+bad_a("external: unknown key is red", with_a(references=[dict(EXT, extra=1)]), "keys")
+bad_a("probe: probe path not in the external is red", with_a(references=[dict(PROBE, probe={"external": "probes", "path": "p/none"})]), "not a file")
+bad_a("probe: unpinned platform is red", with_a(references=[dict(PROBE, platform="nope")]), "not pinned")
+bad_a("probe: dump_sha256 not 64 hex is red", with_a(references=[dict(PROBE, dump_sha256="12")]), "64 hex")
+bad_a("probe: missing platform key is red", with_a(references=[{k: v for k, v in PROBE.items() if k != "platform"}]), "keys")
+d = copy.deepcopy(GOOD)
+d["tests"]["test_b.py"]["references"] = [EXT]
+bad_b("a product subject with only an external reference is red", d, "wine-exe or spec")
+REFROOT = {"kind": "contract", "path": U + "refs/dump.tsv"}
+d = copy.deepcopy(GOOD)
+d["tests"]["test_b.py"]["references"] = [WINE, REFROOT]
+check("a product subject may cite a file of a ref root", run(d) == {}, run(d))
+d = copy.deepcopy(GOOD)
+d["tests"]["test_b.py"]["references"] = [WINE, {"kind": "model", "path": U + "game/ref.tsv"}]
+bad_b("a record whose ref points into a product root stays red", d, "product root")
+bad_a("a subject inside a ref root is red", with_a(subject=[U + "refs/dump.tsv"]), "class ref")
+
 GATE = os.path.join(os.path.dirname(HERE), "gate_oracle.py")
 rc = subprocess.run([sys.executable, "-I", GATE], cwd=root, env=dict(env, GATE_OUT=out)).returncode
 res = json.load(open(os.path.join(out, "oracle.json")))

@@ -22,7 +22,7 @@ Closure discovery (this runner, outside the sandbox, a pure function of stage re
   hashes); the accepted result is the run on the view of D. ARGUMENT that the hint never changes the result: the accepted run opened
   only files of D, all real, and saw the true name tree, so every include search and probe got the answer it gets on the real tree and
   every opened file had its real content; its output equals the output on the real trees. A different hint only changes how many runs
-  lead to D. ASSUMED about GCC: it reads the content of a file only by lexing it (then the file is in deps.d) or it fails; (a
+  lead to D. ASSUMED about GCC: it reads the content of a file only by lexing it (then the file is in deps.d) or it fails; (a (ASM-040)
   #pragma-once identity check on a file that is not included would not be caught by the placeholder, only by the equality assert).
 Languages by suffix (LANG): .c gets `-x c` (PP) and `-x c -fpreprocessed` (CC); .S gets `-x assembler-with-cpp` and `-x assembler` (CC on the
   preprocessed text, the same two stages); .s has no PP stage (its CC stage reads the unit alone, a `.include` fails). `--include` may also be

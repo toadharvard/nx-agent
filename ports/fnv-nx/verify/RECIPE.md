@@ -96,7 +96,7 @@ that includes `<vector>`, `<string>`, `<cstdio>`. The 13.3 compiler reads gcc 15
   semantics; `ltr`, `first`, `cpp17` exist for A/B measurements and are no product). Anything missing or different is a finding naming it.
 - lifted (the lifter emits `ldar`/`stlr` itself): consistent only if the root has NO tracked C++ unit, every C++ unit is an output of a `generated`
   step whose tool is `lifted_by`, and `pack` is an external of the recipe (an input of every generator). Plugins are then not required.
-Assumption: the declaration `lifted_by` names the lifter is the owner's (admit.json is reviewed); the gate proves that no hand-written C++ sits in a lifted root.
+Check: `lifted_by` must be a tracked `.py` of an admitted root of class `tool` (recipe.py check, `cxx_origin.lifted_by ... is not a tracked .py of an admitted tool root` otherwise), and the gate proves that no hand-written C++ sits in a lifted root: every C++ unit is an output of a step of that tool. When the single lifter `liftall.py` is on the trunk, `lifted_by` must equal its path (one constant `LIFTER` of recipe.py); until then the check is the one stated here.
 
 ## Link: the guest ELF
 There is one way to link: the recipe key `link` (no other path runs a linker; link/ has no subprocess call). Every key below is validated by
@@ -169,6 +169,17 @@ in `except` (else the cycle check is red), and it must carry `forbid_sections: [
 LF-terminated, ASCII; an absent section is no indirect call) into the sorted union `descs.tsv`, output `descs`. A malformed section is red at the
 generate stage, naming the object. `lift/bridges` takes it as `{"root": "ports/fnv-nx/lift/descs", "output": "descs"}` (at `/uses/ports/fnv-nx/lift/descs/descs`),
 is listed in the `except` of lift/descs' recipe in the commit that admits it, and has `forbid_sections: [".fnvnx.disp"]`.
+
+## Keep going
+
+A root build does not stop at the first red stage. Every unit whose declared inputs are all produced is built (and its objects land in the
+store as usual); a red stage is recorded with its stage name, exit and the last 20 diagnostic lines. Blocked, never run and never hidden:
+(i) a unit that is the output of a red generator, (ii) every unit of a root whose `uses` producer or whose external is red, (iii) the C++ units
+when a plugin stage is red, (iv) the ELF whenever anything is red or blocked (also when an input root of `link.roots` is red). A unit that
+includes a file a red generator did not produce fails in its own preprocessing stage and is listed with those diagnostics. The root is `red`
+if any unit or stage is red or blocked. `objects.json` of a red root: `objects` (the built units), `failed_units` ({unit, stage, exit, stderr}, in unit order),
+`blocked` ({unit, blocked_by: stage}, sorted by unit), `red_stages` (the stages that were red outside a unit), `failure` (the first red stage).
+`units` is always the whole universe.
 
 ## Refusal set R (GNU ld option syntax, not a text guess)
 Options that let a link accept missing or substituted symbols: `--unresolved-symbols`, `--allow-shlib-undefined`, `--noinhibit-exec`,

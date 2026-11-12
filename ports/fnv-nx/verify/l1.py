@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """L1: the one command a merger runs. Run as `python3 -I l1.py CMD ...`. Exit codes: 0 green/merged, 2 red/blocked, 3 conflict, 4 blocked: env, 1 error.
   verdict  --repo R --commit C --verdicts VDIR [--budget-s 300]
-           verdict.py run with the gates file OF THAT COMMIT (ports/fnv-nx/verify/gates.json read from C's tree), then store.
+           verdict.py run with the gates file OF THAT COMMIT (the files of ports/fnv-nx/verify/gates.d read from C's tree, assembled by gatesdir.py), then store.
   merge    --repo R --into BRANCH --from REF --verdicts VDIR [--budget-s 300]
            Computes the merge tree as verdict.py merge does. If VDIR has no verdict for it, makes the merge commit object with
            commit-tree (no ref moves) to have something to check out, runs `verdict` on it and stores it. Then verdict.py merge
@@ -32,9 +32,11 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import envcheck  # noqa: E402
+import cas  # noqa: E402
+import gatesdir  # noqa: E402
 import verdict  # noqa: E402
 
-GATES = "ports/fnv-nx/verify/gates.json"
+GATES = "ports/fnv-nx/verify/gates.d"
 ENV = "ports/fnv-nx/verify/env.json"
 
 def _opts(a, extra=(), optional=()):
@@ -44,12 +46,14 @@ def _line(v):
     return "L1 %s %s %ss gates:%d over_budget:%s" % (v["verdict"], v["tree"], v["seconds"], len(v["gates"]), v["over_budget"])
 
 def _gates_file(repo, rev, td):
-    p = subprocess.run(["git", "-C", repo, "show", "%s:%s" % (rev, GATES)], capture_output=True)
-    if p.returncode:
-        raise verdict.Err("blocked: no %s in %s" % (GATES, rev), 2)
+    """The gates document of REV's verify/gates.d (one file per gate, gatesdir.py), written canonically into TD: a value of this run, never a tracked file."""
+    try:
+        doc = gatesdir.from_git(repo, rev)
+    except gatesdir.Bad as e:
+        raise verdict.Err("blocked: %s" % e, 2)
     path = os.path.join(td, "gates.json")
     with open(path, "wb") as fh:
-        fh.write(p.stdout)
+        fh.write(cas.canon(doc) + b"\n")
     return path
 
 def _env(repo, rev):

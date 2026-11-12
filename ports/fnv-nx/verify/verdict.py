@@ -35,6 +35,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
+import gatesdir  # noqa: E402
 import sandbox  # noqa: E402
 
 HEX = re.compile(r"^([0-9a-f]{40}|[0-9a-f]{64})$")
@@ -104,6 +105,27 @@ def _gate_result(g, out_dir, rc):
         return "red", u, c, "gate status red: " + r["detail"]
     return "green", u, c, ""
 
+def _present_classes(wt):
+    """The set of root classes of the admitted roots of the tree under test (gatesdir.root_classes); empty when admit.json is absent."""
+    try:
+        with open(os.path.join(wt, gatesdir.ADMIT), encoding="utf-8") as fh:
+            return set().union(*gatesdir.root_classes(json.load(fh), wt).values())
+    except (OSError, ValueError):
+        return set()
+
+
+def _covers_verdict(g, st, u, present):
+    """No vacuous green (gatesdir.py): a gate whose `covers` is missing or not a non-empty list of root classes is red, and a gate whose
+    universe is 0 while an admitted root of a covered class exists is red. Returns (status, reason or '')."""
+    cv = g.get("covers")
+    if not (isinstance(cv, list) and cv and all(c in gatesdir.ROOT_CLASSES for c in cv) and len(set(cv)) == len(cv)):
+        return "red", "gate file has no valid covers (a non-empty list of %s)" % "/".join(gatesdir.ROOT_CLASSES)
+    seen = sorted(set(cv) & present)
+    if st == "green" and u == 0 and seen:
+        return "red", "vacuous: universe 0 while admitted roots of class %s exist" % ",".join(seen)
+    return st, ""
+
+
 def cmd_run(a):
     o = _opts(a, {"--repo": 0, "--commit": 0, "--gates": 0, "--out": 0, "--budget-s": 1, "--env-id": 1, "--cache": 1})
     spec = _load(o["--gates"], "gates")
@@ -125,6 +147,7 @@ def cmd_run(a):
         os.makedirs(genv["GATE_CACHE"], exist_ok=True)
     res, t_all = [], time.time()
     try:
+        present = _present_classes(wt)
         for g in gates:
             out = os.path.join(work, "gate-%d" % len(res))
             os.makedirs(out)
@@ -135,6 +158,9 @@ def cmd_run(a):
                 st, u, c, why = _gate_result(g, out, rc)
             except OSError as e:
                 st, u, c, why = "red", 0, 0, "cannot run: %s" % e
+            st2, why2 = _covers_verdict(g, st, u, present)
+            if st2 != st:
+                st, why = st2, why2 if st == "green" else why + "; " + why2
             res.append({"name": g["name"], "status": st, "universe": u, "certified": c,
                         "seconds": round(time.time() - t0, 3), "reason": why})
     finally:

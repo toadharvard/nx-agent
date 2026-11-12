@@ -392,6 +392,57 @@ else:
         check('main --objects', gate_reach.main(['--objects', rsp, '--requests', rq, '--certified', ct]), 1)
     shutil.rmtree(td)
 
+# ---- closure_key: every value reaching a dispatcher is a key of its table
+SRC_OK = ''.join('%s\tclosed\n' % x for x in gate_reach.CLOSURE_SOURCES)
+CK = ('REACH_CLOSURE_KEY_LIFTED', '-', 'fnvl_dispatch', '0', 'closure_key', 'dispatcher=lifted', 'n')
+CK2 = ('REACH_CLOSURE_KEY_NATIVE', '-', 'fnvnx_dispatch', '0', 'closure_key', 'dispatcher=native', 'n')
+LL_OK = 'module\tsite\tcalls\tapi\tstatus\tnames\tbreaks\nexe\t401000\t1\tLoadLibraryA\tclosed\tx.dll\t-\n'
+LL_OPEN = LL_OK + 'exe\t402000\t1\tLoadLibraryA\topen\t-\tx\n'
+
+
+def ck(entries, closure, sources=SRC_OK, loadlib=LL_OK, rows=(CK,)):
+    ctx = {'dispatchers': {'lifted': (entries, closure, sources), 'native': (entries, closure, sources)}, 'loadlib': loadlib}
+    rs = reqs(*rows)
+    facts, certs, g = gate_reach.run(rs, {}, [], [], ctx)
+    return rs, facts, certs
+
+
+ENT = '00401000\tf1\n00401010\tf2\n'
+rs, facts, certs = ck(ENT, '00401000\n00401010\n')
+check('closure_key: everything closed is certified', (len(certs), reasons(facts)), (1, {'REACH_CLOSURE_KEY_LIFTED': []}))
+CKF = ('REACH_CLOSURE_KEY_NATIVE', '-', 'fnvnx_dispatch', '0', 'closure_key', 'dispatcher=native;miss=fallthrough', 'n')
+rs, facts, certs = ck(ENT, '00401000\n00401010\n00401020\n', rows=(CKF,))
+check('closure_key fallthrough: keys inside the closure are certified, closure addresses without a key are fine', (len(certs), reasons(facts)), (1, {'REACH_CLOSURE_KEY_NATIVE': []}))
+rs, facts, certs = ck(ENT, '00401000\n', rows=(CKF,))
+check('closure_key fallthrough: a key outside the closure is red', (certs, sorted(facts[0].reasons)), ({}, [('key-outside-closure', 'native', '0x401010')]))
+rs, facts, certs = ck(ENT, '00401000\n00401020\n')
+check('closure_key: a closure address without a key is red', (certs, sorted(facts[0].reasons)), ({}, [('closure-missing', 'lifted', '0x401020')]))
+rs, facts, certs = ck(ENT, '00401000\n', sources=SRC_OK.replace('eh\tclosed', 'eh\topen'))
+check('closure_key: an open source of the closure is red', (certs, sorted(facts[0].reasons)), ({}, [('source-open', 'lifted', 'eh')]))
+rs, facts, certs = ck(ENT, '00401000\n', sources=SRC_OK.replace('tls\tclosed\n', ''))
+check('closure_key: an absent source is red', sorted(facts[0].reasons), [('source-open', 'lifted', 'tls')])
+rs, facts, certs = ck(ENT, '00401000\n', loadlib=LL_OPEN)
+check('closure_key: an open LoadLibrary site is measurement, never valid', (certs, sorted({r[0] for r in facts[0].reasons}),
+      gate_reach.report_tsv(facts, certs).split('\n')[1].split('\t')[5]), ({}, ['loadlib-open'], 'measurement'))
+rs, facts, certs = ck(ENT, '00401020\n', loadlib=LL_OPEN)
+check('closure_key: a missing key with open loads stays red (uncertified), not measurement', gate_reach.report_tsv(facts, certs).split('\n')[1].split('\t')[5], 'uncertified')
+rs, facts, certs = ck(ENT, '00401000\n', loadlib=None)
+check('closure_key: no loadlib.tsv is open', sorted({r[0] for r in facts[0].reasons}), ['loadlib-open'])
+rs, facts, certs = ck(ENT, '00401000\n', rows=(CK2,))
+check('closure_key: one id per dispatcher, names bound by --dispatcher', (len(certs), rs[0]['spec']), (1, {'dispatcher': 'native', 'fallthrough': False}))
+rs = reqs(CK, CK2)
+facts, certs, g = gate_reach.run(rs, {}, [], [], {'dispatchers': {'native': (ENT, '00401000\n', SRC_OK)}, 'loadlib': LL_OK})
+check('closure_key: a dispatcher without inputs is red', (sorted(certs), [sorted(f.reasons)[0][0] for f in facts if f.reasons]), ([2], ['dispatcher-missing']))
+h = gate_reach.header(rs)
+check('closure_key: FNVNX_REACH_* macros, one id per dispatcher, each defined once', (h.count('#define FNVNX_REACH_CLOSURE_KEY_LIFTED 1 '), h.count('#define FNVNX_REACH_CLOSURE_KEY_NATIVE 2 '),
+      h.count('#define FNVNX_REACH_CLOSURE_KEY_LIFTED'), h.count('#define FNVNX_REACH_CLOSURE_KEY_NATIVE')), (1, 1, 1, 1))
+for bad in (('X', 'k.dll', 'f', '0', 'closure_key', 'dispatcher=a', ''), ('X', '-', 'f', '0', 'closure_key', 'a', ''), ('X', '-', 'f', '0', 'closure_key', 'dispatcher=1 x', '')):
+    try:
+        reqs(bad)
+        check('closure_key: malformed row is an error %r' % (bad[1:],), 'parsed', 'error')
+    except gate_reach.FormatError:
+        pass
+
 if fails:
     print('FAIL\n' + '\n'.join(fails))
     sys.exit(1)

@@ -1,0 +1,15 @@
+{
+ "format": "fnvnx-gatefile/1",
+ "name": "machine",
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_machine.py"
+ ],
+ "result": "machine.json",
+ "covers": [
+  "product-guest",
+  "lifted",
+  "host-product"
+ ]
+}

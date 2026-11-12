@@ -228,6 +228,10 @@ def main():
     check("lifted root with a tracked C++ unit is red", any("is not an output" in x for x in errs(tracked, lrec)), errs(tracked, lrec))
     nopack = make_repo("nopack", lrec, {"lifted_by": T + "gen/lift.py", "pack": "nope"}, {T + "gen/lift.py": lift, ROOT + "/a.cc": None})
     check("lifted root naming no external is red", any("names no external" in x for x in errs(nopack, lrec)), errs(nopack, lrec))
+    for what, tool in (("an untracked file", T + "gen/none.py"), ("a file that is not a .py", T + "gen/lift.txt"),
+                       ("a file of the product root", ROOT + "/lift.py")):
+        bad = make_repo("liftby_" + what.replace(" ", "_"), lrec, {"lifted_by": tool, "pack": "pack"}, {T + "gen/lift.py": lift, T + "gen/lift.txt": lift, ROOT + "/lift.py": lift, ROOT + "/a.cc": None})
+        check("lifted_by naming %s is red" % what, any("is not a tracked .py of an admitted tool root" in x for x in errs(bad, lrec)), errs(bad, lrec))
 
 
 if __name__ == "__main__":
