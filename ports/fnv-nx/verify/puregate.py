@@ -1,7 +1,7 @@
 #!/usr/bin/env python3 -I
 """puregate: DEFAULT-DENY static gate for rule R12-T (a build stage's output is a function of its declared inputs).
 
-    python3 -I puregate.py check PATH... [--json OUT.json]      exit 0 clean, 2 violations, 1 usage error
+    python3 -I puregate.py check PATH... [--base DIR]... [--lib PATH]... [--json OUT.json]      exit 0 clean, 2 violations, 1 usage error
     python3 -I puregate.py audit-stdlib                          check the PURE table (A-stdlib): a report, not a gate
 
 PATH: .py file or directory (sorted walk); shell files (suffix .sh/.bash or shell shebang): `shell-unanalysable`. Output
@@ -14,7 +14,8 @@ Rules: the class rules of POLICY/ATTR (clock inode entropy unsorted-listing host
   import-unlisted  every import must be (a) PURE stdlib, (b) RESTRICTED stdlib (only allow-listed members, else the rule
                    of the member or `member-unlisted`), (c) PROJECT, (d) EXTERNAL (A-ext), or a banned module whose uses
                    are ruled. Project rule: `import a.b` / `from a.b import x` resolves a/b.py or a/b/__init__.py below
-                   the importing file's directory or a directory PATH; `from .m import x` below the importing file's
+                   the importing file's directory, a directory PATH or a `--base` DIR (`--lib` PATHs add files that may be
+                   resolved without checking them); `from .m import x` below the importing file's
                    directory (one level up per extra dot); `x` must be a submodule or (module a real file) a name in it.
                    The file must be among the checked files (a namespace directory counts only for submodules); a
                    checked file with the name of a listed module is ambiguous. Project modules are checked in the same
@@ -368,13 +369,19 @@ def main(argv):
         i = args.index("--json")
         js = args[i + 1]
         del args[i:i + 2]
+    bases, libs = [], []
+    for opt, acc in (("--base", bases), ("--lib", libs)):
+        while opt in args[:-1]: acc.append(args.pop(args.index(opt) + 1)), args.remove(opt)
     paths = args[1:]
-    if args[:1] != ["check"] or not paths or any(not os.path.exists(p) for p in paths):
-        sys.stderr.write("usage: puregate.py check PATH... [--json OUT.json] | audit-stdlib (PATHs must exist)\n")
+    if args[:1] != ["check"] or not paths or any(not os.path.exists(p) for p in paths + bases + libs):
+        sys.stderr.write("usage: puregate.py check PATH... [--base DIR]... [--lib PATH]... [--json OUT.json] | audit-stdlib (PATHs must exist)\n")
         return 1
     files, seen, viol, by_rule, by_file, unproven, ext = [], [], [], {}, {}, {}, set()
     for p in paths: collect(p, files)
-    proj = (frozenset(norm(f) for f in files if f.endswith(".py")), tuple(norm(p) for p in paths if os.path.isdir(p)))
+    lib = []  # --lib: files that project imports may resolve to; not checked here (their own run judges them)
+    for p in libs: collect(p, lib)
+    proj = (frozenset(norm(f) for f in files + lib if f.endswith(".py")),
+            tuple(norm(p) for p in paths if os.path.isdir(p)) + tuple(norm(b) for b in bases))
     for f in files:
         r = analyse(f, proj)
         if r is not None:

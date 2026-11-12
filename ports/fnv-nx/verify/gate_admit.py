@@ -2,7 +2,14 @@
 """Gate "admit" (fnvnx-gate/1): nothing is in the trunk without the gates that close its classes of failure.
     python3 -I gate_admit.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/admit.json
 
-Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"path", "class", "gates", ["recipe"]}.
+Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"path", "class", "gates", ["recipe"], ["imports"], ["trees"]}.
+`trees` (optional): the list of the directories (or exact files) of one root, at least two, the first equal to "path"; the root's
+universe is their union, and its python is judged in one puregate run, so trees that import each other form ONE root with no
+file moved. Two roots never share or nest a tree. The root is named by "path" in `imports`.
+`imports` (a root's python cross-root imports): a list of paths of other admitted roots; "pure" (gate_pure.py) judges the root
+with its own directory and the parent directory of each imported root as import bases, so a root's python may import another
+root's modules only when it declares it. Each entry must be an admitted root other than the root itself, without repeats; the
+declared imports form no cycle (an error of the table: every file is uncertified).
 Universe: every file git tracks below ports/fnv-nx (`git ls-files -z`), an item is its repo-relative path.
 A file is certified iff ALL hold:
   1. exactly one root contains it (a root is a directory prefix or one exact file path; roots do not nest);
@@ -40,6 +47,46 @@ REQUIRED_PRODUCT = ("objstub", "linkstrict", "determinism", "oracle",
 REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT}
 
 
+def trees(r):
+    """The trees of an admit root: its `trees` list, else [path]."""
+    t = r.get("trees")
+    return list(t) if isinstance(t, list) else [r.get("path", "")]
+
+
+def imports_errors(roots):
+    """Errors of the declared imports of ROOTS (list of admit root dicts): an unknown root, itself, a repeat, a cycle."""
+    by = {r.get("path"): r for r in roots}
+    errs, edges = [], {}
+    for r in roots:
+        imp = r.get("imports", [])
+        p = r.get("path")
+        if not isinstance(imp, list) or any(not isinstance(i, str) for i in imp):
+            errs.append("root %s: imports is not a list of paths" % p)
+            continue
+        if len(set(imp)) != len(imp):
+            errs.append("root %s: imports repeats a root" % p)
+        for i in imp:
+            if i == p:
+                errs.append("root %s imports itself" % p)
+            elif i not in by:
+                errs.append("root %s: import %s is not an admitted root" % (p, i))
+        edges[p] = [i for i in imp if i in by and i != p]
+    state = {}
+
+    def visit(n, stack):
+        state[n] = 1
+        for m in sorted(edges.get(n, [])):
+            if state.get(m) == 1:
+                errs.append("imports cycle: " + " -> ".join(stack[stack.index(m):] + [n, m] if m in stack else [n, m]))
+            elif m not in state:
+                visit(m, stack + [n])
+        state[n] = 2
+    for n in sorted(edges):
+        if n not in state:
+            visit(n, [])
+    return errs
+
+
 def judge(files, admit, gate_names, exists):
     """-> (uncertified {path: reason}, root errors [str]); pure function of its arguments"""
     roots, errors = [], []
@@ -48,31 +95,36 @@ def judge(files, admit, gate_names, exists):
     for r in admit.get("roots", []):
         path, cls, gates = r.get("path", ""), r.get("class"), r.get("gates", [])
         why = []
-        if not path or path != path.strip("/") or not (path == TREE or path.startswith(TREE + "/")):
-            why.append("path is not below " + TREE)
+        if "trees" in r and not (isinstance(r["trees"], list) and len(r["trees"]) >= 2 and r["trees"][0] == path
+                                 and len(set(r["trees"])) == len(r["trees"]) and all(isinstance(t, str) for t in r["trees"])):
+            why.append("trees is not a list of at least two distinct paths starting with path")
+        for t in (trees(r) if not why else [path]):
+            if not t or t != t.strip("/") or not (t == TREE or t.startswith(TREE + "/")):
+                why.append("%s is not below %s" % (t, TREE))
         if cls not in CLASSES:
             why.append("class %r is not one of %s" % (cls, ", ".join(CLASSES)))
         else:
             why += ["required gate %s not named" % g for g in REQUIRED[cls] if g not in gates]
             if cls == "product":
                 rec = r.get("recipe", "")
-                if not rec.startswith(path + "/") or not exists(rec):
+                if not any(rec.startswith(t + "/") for t in trees(r)) or not exists(rec):
                     why.append("recipe %r is not an existing file inside the root" % rec)
         why += ["gate %s is not in gates.json" % g for g in gates if g not in gate_names]
-        roots.append((path, why))
-    paths = [p for p, _ in roots]
-    for i, a in enumerate(paths):
-        for b in paths[i + 1:]:
+        roots.append((trees(r) if not why else [path], why))
+    errors += imports_errors(admit.get("roots", []))
+    paths = [(t, i) for i, (ts, _) in enumerate(roots) for t in ts]
+    for n, (a, i) in enumerate(paths):
+        for b, j in paths[n + 1:]:
             if a == b or a.startswith(b + "/") or b.startswith(a + "/"):
-                errors.append("roots %s and %s overlap" % (a, b))
+                errors.append("trees %s and %s overlap" % (a, b))
     bad = {}
     for f in files:
-        hit = [(p, why) for p, why in roots if f == p or f.startswith(p + "/")]
+        hit = [(ts[0], why) for ts, why in roots if any(f == p or f.startswith(p + "/") for p in ts)]
         if len(hit) != 1:
             bad[f] = "in %d roots" % len(hit)
         elif hit[0][1]:
             bad[f] = "root %s: %s" % (hit[0][0], "; ".join(hit[0][1]))
-    errors += ["root %s: %s" % (p, "; ".join(why)) for p, why in roots if why]
+    errors += ["root %s: %s" % (ts[0], "; ".join(why)) for ts, why in roots if why]
     return bad, errors
 
 

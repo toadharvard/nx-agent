@@ -4,11 +4,10 @@
   {"path": "ports/fnv-nx/.gitignore", "class": "doc", "gates": []},
   {"path": "ports/fnv-nx/JOURNAL.md", "class": "doc", "gates": []},
   {"path": "ports/fnv-nx/README.md", "class": "doc", "gates": []},
-  {"path": "ports/fnv-nx/contract", "class": "tool", "gates": ["pure", "selftests"]},
+  {"path": "ports/fnv-nx/contract", "trees": ["ports/fnv-nx/contract", "ports/fnv-nx/link"], "class": "tool", "gates": ["pure", "selftests"]},
   {"path": "ports/fnv-nx/docs", "class": "doc", "gates": []},
   {"path": "ports/fnv-nx/farm", "class": "tool", "gates": ["selftests"]},
   {"path": "ports/fnv-nx/journal", "class": "doc", "gates": []},
-  {"path": "ports/fnv-nx/link", "class": "tool", "gates": ["pure", "selftests"]},
   {"path": "ports/fnv-nx/toolchain", "class": "tool", "gates": ["selftests"]},
   {"path": "ports/fnv-nx/verify", "class": "tool", "gates": ["selftests"]}
  ]

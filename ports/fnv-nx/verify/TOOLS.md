@@ -1150,7 +1150,11 @@ Infinities/NaN from memory or from exact operands are exact. Division by an inte
 Gate "admit" (fnvnx-gate/1): nothing is in the trunk without the gates that close its classes of failure.
     python3 -I gate_admit.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/admit.json
 
-Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"path", "class", "gates", ["recipe"]}.
+Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"path", "class", "gates", ["recipe"], ["imports"]}.
+`imports` (a root's python cross-root imports): a list of paths of other admitted roots; "pure" (gate_pure.py) judges the root
+with its own directory and the parent directory of each imported root as import bases, so a root's python may import another
+root's modules only when it declares it. Each entry must be an admitted root other than the root itself, without repeats; the
+declared imports form no cycle (an error of the table: every file is uncertified).
 Universe: every file git tracks below ports/fnv-nx (`git ls-files -z`), an item is its repo-relative path.
 A file is certified iff ALL hold:
   1. exactly one root contains it (a root is a directory prefix or one exact file path; roots do not nest);
@@ -1393,7 +1397,10 @@ Gate "pure" (fnvnx-gate/1): every Python file of the stage-tool directories is a
     python3 -I gate_pure.py DIR...        run in the checkout root, env GATE_OUT (result dir); writes GATE_OUT/pure.json
 Universe: the items puregate checks below the existing DIRs given (a missing DIR contributes nothing): every .py file, and
 every shell file (a shell file is an item and is never certified: `shell-unanalysable`). An item is a repo-relative path.
-Certified: items with zero puregate violations. All DIRs are checked in ONE puregate run, so project imports resolve across them.
+Certified: items with zero puregate violations. Each admitted root inside a DIR (verify/admit.json; DIR itself when it holds none) is
+checked in its own puregate run: project imports resolve below the importing file's directory, the root's directory, or the parent
+directory of a root it DECLARES in admit.json `imports`. An import of a module of another root that is not declared is
+`import-unlisted` (red); a declared-import cycle, an unknown or repeated import is an error of admit.json (red).
 uncertified: the first 50 uncertified paths, sorted. Zero items: green, universe 0 (nothing to certify yet), said in "detail".
 The universe is the STAGE-TOOL directories only (contract link rules lift). verify/ and farm/ are NOT stage tools: the
 sandbox, the tracer and the farm scripts legitimately read the host (clock, processes, directory listings), so they are
@@ -1688,7 +1695,7 @@ This is a verifier (after-merge, farm/runner.sh job `oraclecheck`), not a gate: 
 ```text
 puregate: DEFAULT-DENY static gate for rule R12-T (a build stage's output is a function of its declared inputs).
 
-    python3 -I puregate.py check PATH... [--json OUT.json]      exit 0 clean, 2 violations, 1 usage error
+    python3 -I puregate.py check PATH... [--base DIR]... [--lib PATH]... [--json OUT.json]      exit 0 clean, 2 violations, 1 usage error
     python3 -I puregate.py audit-stdlib                          check the PURE table (A-stdlib): a report, not a gate
 
 PATH: .py file or directory (sorted walk); shell files (suffix .sh/.bash or shell shebang): `shell-unanalysable`. Output
@@ -1701,7 +1708,8 @@ Rules: the class rules of POLICY/ATTR (clock inode entropy unsorted-listing host
   import-unlisted  every import must be (a) PURE stdlib, (b) RESTRICTED stdlib (only allow-listed members, else the rule
                    of the member or `member-unlisted`), (c) PROJECT, (d) EXTERNAL (A-ext), or a banned module whose uses
                    are ruled. Project rule: `import a.b` / `from a.b import x` resolves a/b.py or a/b/__init__.py below
-                   the importing file's directory or a directory PATH; `from .m import x` below the importing file's
+                   the importing file's directory, a directory PATH or a `--base` DIR (`--lib` PATHs add files that may be
+                   resolved without checking them); `from .m import x` below the importing file's
                    directory (one level up per extra dot); `x` must be a submodule or (module a real file) a name in it.
                    The file must be among the checked files (a namespace directory counts only for submodules); a
                    checked file with the name of a listed module is ambiguous. Project modules are checked in the same
