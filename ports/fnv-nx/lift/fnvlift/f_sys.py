@@ -57,7 +57,7 @@ def wine_is_privileged(b):
 
 def row_privileged(b, row):
     """the null_seg_access row's privileged_check_first over the instruction bytes b: True -> EXCEPTION_PRIV_INSTRUCTION, False -> the row's access violation. A decoded instruction has fewer than
-    prefix_limit prefixes (x86 length <= 15 with an opcode byte), so the row's at_limit case cannot occur; checked here, not assumed."""
+    prefix_limit prefixes (x86 length <= 15 with an opcode byte), so the row's at_limit case cannot occur; checked here from the table."""
     p = row['privileged_check_first']
     skip = {int(x, 16) for x in p['prefix_skip']}
     pri = {int(x, 16) for x in p['priv_instruction_opcodes']}

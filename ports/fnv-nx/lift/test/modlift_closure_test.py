@@ -3,7 +3,7 @@
 ORDER: modlift runs pcsrc BEFORE it settles the residue, so sources.tsv and the residual rule read the files of THIS run: stale gate_pcsrc.json / pcsrc_s4.json seeded in the facts dir (claiming
 0 violations) are overwritten, and sources.tsv's pcsrc and no_s4_arith rows equal what the run's own files say.
 modlift residual rule (item 22 b): the residue is data (class 9, gate green) only when the closure is complete, i.e. every relocated in-span value is an entry (R3)
-AND pcsrc's s4 result (<facts>/<module>/pcsrc_s4.json) says 0 violations. No pcsrc file -> red 's4-unchecked' (never assumed green); violations > 0 -> red 's4-violation'.
+AND pcsrc's s4 result (<facts>/<module>/pcsrc_s4.json) says 0 violations. No pcsrc file -> red 's4-unchecked' (never read as green); violations > 0 -> red 's4-violation'.
     modlift_closure_test.py MODULES.TSV DIR:DIR KEYS.TSV [module=binkw32]       (exit 0 = all pass; needs the module's DLL, there is no skip)"""
 import os, subprocess, sys, tempfile, json
 HERE = os.path.dirname(os.path.abspath(__file__)); TOOL = os.path.join(os.path.dirname(HERE), 'tools', 'universe.py')
