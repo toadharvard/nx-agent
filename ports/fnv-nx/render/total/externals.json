@@ -88,6 +88,16 @@
    "at": "/deko3d",
    "upstream": "devkitPro/deko3d (pin by L6A)",
    "use": "reference of the deko3d call contracts of the dk tests (external kind: pinned header + path)"
+  },
+  {
+   "name": "envprobe-bin",
+   "repo": "fnv-nx-build",
+   "ref": "tools/envprobe-bin",
+   "commit": "d2b6916ca026dece9ef6503b7548d8afd88fb484",
+   "tree_sha256": "ac3c8ad2b1ad15c9ff93efd2c2745f3ce71c0067da2a244d4be05f13158f62fa",
+   "at": "/envprobe-bin",
+   "upstream": "built by tests/l6/env/make_env.py (i686-w64-mingw32 13.2.0-6ubuntu1+26.1) at claude/fnv-l6-render f1d0fa1 + d0fa620; Wine 9.0~repack-4build3, Mesa llvmpipe 25.2.8; files: envprobe2.exe, d3d9.dll (recorder), ENV_PIN.txt, env_handheld.tsv, env_docked.tsv",
+   "use": "binaries that record render/d3d9/env/env_*.tsv (sha256 in ENV_PIN.txt); not a build input"
   }
  ]
 }
