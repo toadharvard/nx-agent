@@ -11,7 +11,8 @@ Facts used: manifest.json (per image: name, sha256, ranges file, base) and each 
     <entry>\\t<a-b>,<a-b>,...            the half-open runs of instruction bytes reached from the entry by proven flow
 No other fact is read (universe.tsv's extent column is not).
 
-Image access: this is the only module that imports capstone, pefile or dnfile, opens an image file, or touches the bytes of an image.
+Image access: this is the only module of platform/ that imports pefile or dnfile, opens an image file, or touches the bytes of an image; the x86 decoder
+and the pinned constructor of the facts are contract/imagerec.py (use_contract), and no module of platform/ imports capstone.
 `Image` (read_image) is the typed record of one PE image: its base, sections, relocations, import and export tables and the accessors
 u32/u8/bytes_at/zstr/cstr over the mapped bytes. The other passes hold an Image (pemanifest.Mod is one) and never the bytes or the parser
 object. check_funcfacts.py keeps this by the import graph, whatever the names are.
@@ -39,15 +40,36 @@ import os
 import struct
 import sys
 
-import capstone
 import pefile
-from capstone import x86_const as X   # the operand/register constants, for the passes that read decoded instructions
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PIN = os.path.join(HERE, "facts.json")
 _dir = None
-_manifest = None
+_pinned = False
 _images = {}
+_recs = {}
+_ic = None
+
+
+def use_contract(contract):
+    """Select the L1 contract directory (the one that holds imagerec.py: the decoder and the pinned constructor of the facts)."""
+    global _ic
+    if contract not in sys.path:
+        sys.path.insert(0, contract)
+    import imagerec
+    _ic = imagerec
+
+
+class _Constants:
+    """The operand/register constants of the decoded instructions (contract/imagerec.py X): attribute access resolves them once use_contract ran."""
+
+    def __getattr__(self, name):
+        if _ic is None:
+            raise SystemExit("funcfacts: X.%s used before funcfacts.use_contract(contract dir)" % name)
+        return getattr(_ic.X, name)
+
+
+X = _Constants()
 
 
 def _pin():
@@ -57,26 +79,19 @@ def _pin():
     return p["external"]
 
 
-def _tree_hash(path):
-    sys.path.insert(0, os.path.join(HERE, "..", "..", "verify"))
-    import cas
-    return cas.tree_hash(path)
-
-
 def set_facts_dir(d):
-    """Select the facts directory; it must be the pinned tree (tree_sha256), checked out without .git."""
-    global _dir, _manifest
-    ext = _pin()
-    h = _tree_hash(d)
-    if h != ext["tree_sha256"]:
-        raise SystemExit("funcfacts: %s is tree %s, the pin %s (commit %s) is %s" % (d, h, PIN, ext["commit"], ext["tree_sha256"]))
+    """Select the facts directory; it is checked against the pinned tree (tree_sha256) by contract/imagerec.py on the first load."""
+    global _dir
     _dir = d
-    _manifest = {i["image"].lower(): i for i in json.load(open(os.path.join(d, "manifest.json")))["images"]}
     _images.clear()
+    _recs.clear()
 
 
 def facts_dir_from_argv(argv):
-    """Pop `--facts DIR` from argv (the passes take it anywhere in their arguments) and select it."""
+    """Pop `--facts DIR` from argv (the passes take it anywhere in their arguments) and select it; `--contract DIR` (left in argv: the passes
+    take it too) selects the L1 contract directory."""
+    if "--contract" in argv:
+        use_contract(argv[argv.index("--contract") + 1])
     if "--facts" in argv:
         k = argv.index("--facts")
         d = argv[k + 1]
@@ -222,7 +237,7 @@ class FuncFacts:
     ok = True
 
     def __init__(self, name, image, runs):
-        """`image` = the Image the runs are of; `runs` = {entry: [(a, b), ...]} at its ImageBase (file_runs() reads and rebases a ranges.tsv)."""
+        """`image` = the Image the runs are of; `runs` = {entry: [(a, b), ...]} at its ImageBase (contract/imagerec.py load reads, checks and rebases a ranges.tsv)."""
         self.name, self.image, self.base = name, image, image.base
         self.runs = runs
         iv = sorted((a, b, e) for e, rs in self.runs.items() for a, b in rs)
@@ -234,7 +249,6 @@ class FuncFacts:
             m = max(m, b)
             self._pm.append(m)
         self._ins = collections.OrderedDict()   # a small LRU: all 100k entries decoded would not fit in memory
-        self._md = None
         self._el = None
         self.bad = {}   # entry -> reason, for entries whose runs do not decode to exactly their bytes (reported, never analysed)
 
@@ -256,19 +270,15 @@ class FuncFacts:
     def why(self, addr):
         return "inside no run of the function facts"
 
-    def _decode(self):
-        if self._md is None:
-            self._md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
-            self._md.detail = True
-        return self._md
-
     def ins(self, entry):
         """The instructions of the entry's runs, in address order, or None when its runs do not decode to exactly their bytes (the
         entry is then `unresolved`: self.bad[entry] says why). Cached."""
         if entry not in self._ins:
-            md, out = self._decode(), []
+            out = []
+            if _ic is None:
+                raise SystemExit("funcfacts: no contract directory (--contract DIR or funcfacts.use_contract)")
             for a, b in sorted(self.runs[entry]):
-                run = list(md.disasm(self.image.bytes_at(a, b - a), a))
+                run = list(_ic.disasm(self.image.bytes_at(a, b - a), a))
                 if not run or run[-1].address + run[-1].size != b or run[0].address != a:
                     self.bad[entry] = "the run %x-%x does not decode to exactly its bytes (facts and image disagree)" % (a, b)
                     out = None
@@ -322,9 +332,8 @@ class FuncFacts:
         if getattr(self, "_edges", None) is None:
             calls, jmps = collections.defaultdict(list), collections.defaultdict(list)
             seen = set()
-            md = self._decode()
             for a, b in sorted({r for rs in self.runs.values() for r in rs}):
-                run = list(md.disasm(self.image.bytes_at(a, b - a), a))
+                run = list(_ic.disasm(self.image.bytes_at(a, b - a), a))
                 if not run or run[-1].address + run[-1].size != b:
                     continue
                 for i in run:
@@ -345,45 +354,34 @@ class FuncFacts:
         return None if ins is None else [i.address for i in ins if i.mnemonic == "jmp" and i.operands and i.operands[0].type != X.X86_OP_IMM]
 
 
-def file_runs(path, base):
-    """Parse a ranges.tsv and rebase it from its `# base=` header to `base`."""
-    runs, fb = {}, None
-    for ln in open(path):
-        ln = ln.rstrip("\n")
-        if ln.startswith("# base="):
-            fb = int(ln.split()[1][5:].rstrip(":"), 16)
-            continue
-        if not ln or ln[0] == "#":
-            continue
-        e, _, r = ln.partition("\t")
-        runs[int(e, 16)] = [tuple(int(x, 16) for x in p.split("-")) for p in r.split(",")] if r else []
-    if fb is None:
-        raise SystemExit("funcfacts: %s has no `# base=` header" % path)
-    d = base - fb
-    return {e + d: [(a + d, b + d) for a, b in rs] for e, rs in runs.items()} if d else runs
-
-
 def declare(image, runs):
     """Facts for an image that has no facts directory: the self-test's synthetic PE, whose entries and runs are its own input data."""
     _images[(image.name, image.base)] = FuncFacts(image.name, image, runs)
 
 
+def record(image):
+    """The imagerec.ImageRec of an Image over the pinned facts (contract/imagerec.py load: tree_sha256, image sha256, rebased runs): the
+    record argflow takes. SystemExit when the facts directory or the contract is not selected."""
+    key = (image.name, image.base)
+    if key not in _recs:
+        if _dir is None:
+            raise SystemExit("funcfacts: no facts directory (pass --facts DIR, the tree pinned in %s)" % PIN)
+        if _ic is None:
+            raise SystemExit("funcfacts: no contract directory (funcfacts.use_contract)")
+        try:
+            _recs[key] = _ic.load(image.path, _dir, _pin())
+        except _ic.ImageError as e:
+            raise SystemExit("funcfacts: %s" % e)
+    return _recs[key]
+
+
 def for_image(image):
     """The facts of one Image: a FuncFacts, or NoFacts with the reason."""
-    name, base, path = image.name, image.base, image.path
-    key = (name, base)
+    key = (image.name, image.base)
     if key in _images:
         return _images[key]
-    if _dir is None:
-        raise SystemExit("funcfacts: no facts directory (pass --facts DIR, the tree pinned in %s)" % PIN)
-    ent = _manifest.get(name.lower())
-    if ent is None:
-        r = NoFacts("no function facts")
-    else:
-        sha = sha256_file(path)
-        if sha != ent["sha256"]:
-            raise SystemExit("funcfacts: %s has sha256 %s, the facts are of %s" % (path, sha, ent["sha256"]))
-        r = FuncFacts(name, image, file_runs(os.path.join(_dir, ent["ranges"]), base))
+    rec = record(image)
+    r = NoFacts(rec.facts) if rec.facts is not None else FuncFacts(image.name, image, rec.runs)
     _images[key] = r
     return r
 

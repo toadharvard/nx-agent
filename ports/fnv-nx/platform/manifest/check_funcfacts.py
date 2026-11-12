@@ -4,7 +4,8 @@
     python3 -I check_funcfacts.py            # scans every .py file of this directory; exit 1 and the findings on stderr if any
 
 Structural rule over the import and data graph (no names, no byte patterns):
-  G1  only funcfacts.py imports a reader of an image or of machine code: capstone, pefile, dnfile, mmap, lief, elftools, ctypes.
+  G1  only funcfacts.py imports a reader of an image: pefile, dnfile (mmap, lief, elftools, ctypes: nobody). No module of this directory, funcfacts.py
+      included, imports a decoder of machine code (capstone): the one x86 decoder is the L1 contract's imagerec.py (funcfacts.use_contract).
   G2  in the image-pass graph (funcfacts.py and every module that imports, directly or through other modules of this directory, funcfacts
       or a module of the graph: pemanifest, regsites, regclass, rtti, filesites, fontfaces, prefs_settings, ...) a file is opened in
       binary mode only by funcfacts.py: a call open(...) with a mode that contains `b` or is not a literal, os.open, Path.read_bytes /
@@ -20,6 +21,7 @@ import ast, os, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 READERS = {"capstone", "pefile", "dnfile", "mmap", "lief", "elftools", "ctypes"}
+IMAGE_PARSERS = {"pefile", "dnfile"}      # funcfacts.py alone
 IMAGE_ATTRS = {"img", "_img", "pe"}
 PARSER_CALLS = {"get_memory_mapped_image", "get_data", "get_string_at_rva", "read_bytes", "open_bytes"}
 
@@ -63,18 +65,16 @@ def binary_open(n):
 
 
 def findings(trees):
-    """{module: [(line, rule, text)]} for the modules of `trees` ({name: ast}) other than funcfacts."""
+    """{module: [(line, rule, text)]} for the modules of `trees` ({name: ast}); funcfacts itself only for G1 (it may import pefile, dnfile)."""
     g = graph(trees)
     out = {}
     for m, t in trees.items():
-        if m == "funcfacts":
-            continue
         r = []
         for n in ast.walk(t):
             if isinstance(n, (ast.Import, ast.ImportFrom)):
-                bad = [x for x in imports(ast.Module([n], [])) if x in READERS]
+                bad = [x for x in imports(ast.Module([n], [])) if x in READERS - (IMAGE_PARSERS if m == "funcfacts" else set())]
                 r += [(n.lineno, "G1", "imports %s" % x) for x in bad]
-            if m in g:
+            if m in g and m != "funcfacts":
                 if binary_open(n):
                     r.append((n.lineno, "G2", "opens or reads a file as bytes / through the parser"))
                 if isinstance(n, ast.Attribute) and n.attr in IMAGE_ATTRS:
@@ -102,8 +102,10 @@ def selftest():
     def run(sources):
         trees = {k: ast.parse(v) for k, v in sources.items()}
         return findings(trees)
-    base = {"funcfacts": "import capstone, pefile\n"}
+    base = {"funcfacts": "import pefile\n"}
     assert run(dict(base, a="import capstone\n")).get("a", [])[0][1] == "G1"
+    assert run({"funcfacts": "import capstone\n"})["funcfacts"][0][1] == "G1"          # no decoder in platform/, funcfacts included
+    assert "funcfacts" not in run({"funcfacts": "import pefile\nx = open(p, 'rb')\n"})
     assert run(dict(base, a="from pefile import PE\n"))["a"][0][1] == "G1"
     assert run(dict(base, a="import funcfacts\nx = open(p, 'rb')\n"))["a"][0][1] == "G2"
     assert run(dict(base, a="import funcfacts\nx = open(p, mode)\n"))["a"][0][1] == "G2"

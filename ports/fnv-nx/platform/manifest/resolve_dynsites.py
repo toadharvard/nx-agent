@@ -42,7 +42,8 @@ CONTRACT = None
 
 def load_contract(d):
     global CONTRACT
-    sys.path.insert(0, d)
+    import funcfacts
+    funcfacts.use_contract(d)
     import argflow, gpa_names, memfx, iat  # noqa: E401
     CONTRACT = (argflow, gpa_names, memfx, iat)
     return CONTRACT
@@ -60,10 +61,9 @@ def load_image(argflow, spec, exe_name=None):
     nm, pe = spec.split('=', 1)
     fi = funcfacts.Image(pe)
     ff = funcfacts.for_image(fi)
-    ranges = {e: list(rs) for e, rs in ff.runs.items()} if ff.ok else {}
-    img = argflow.Image(fi.file_bytes(), nm.lower(), ranges, exe_name)
+    img = argflow.Image(funcfacts.record(fi), exe_name)
     img.ff = ff
-    return nm.lower(), img, fi.file_bytes()
+    return nm.lower(), img, None
 
 
 def derive_loader(argflow, img, site, api):

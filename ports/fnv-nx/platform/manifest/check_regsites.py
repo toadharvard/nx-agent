@@ -207,4 +207,8 @@ def main():
 
 
 if __name__ == "__main__":
+    if "--contract" in sys.argv:                  # the L1 contract directory (imagerec.py), taken out of the positional arguments
+        k = sys.argv.index("--contract")
+        funcfacts.use_contract(sys.argv[k + 1])
+        del sys.argv[k:k + 2]
     sys.exit(main())

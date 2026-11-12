@@ -114,4 +114,5 @@ def main():
 
 
 if __name__ == "__main__":
+    funcfacts.facts_dir_from_argv(sys.argv)      # --contract DIR: the L1 contract directory (imagerec.py)
     main()

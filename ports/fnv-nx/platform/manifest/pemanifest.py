@@ -65,16 +65,16 @@ class Mod(funcfacts.Image):
 
     def argimage(self, contract, bridge_tsv, escape_tsv):
         """The L1 contract's argflow.Image of this module over the pinned L3a function facts: the ranges are the ones funcfacts.py loaded
-        (tree_sha256 and image sha256 checked, rebased to the image base), so argflow reads no facts file of its own. None when the image has no facts."""
+        (contract/imagerec.py load: tree_sha256 and image sha256 checked, rebased to the image base), so argflow reads no file and no facts of its own. None when the image has no facts."""
         if getattr(self, "_ai", "unset") == "unset":
             ff = self.ff
             if not ff.ok:
                 self._ai = None
                 return None
-            sys.path.insert(0, contract)
+            funcfacts.use_contract(contract)
             import argflow, gpa_names, memfx
             self._argflow = argflow
-            im = argflow.Image(self.file_bytes(), self.name, {e: list(rs) for e, rs in ff.runs.items()})
+            im = argflow.Image(funcfacts.record(self))
             im.import_stack = gpa_names.import_stacks(open(bridge_tsv, encoding="utf-8").read())
             memfx.Memfx(im, memfx.ImportInfo(open(bridge_tsv, encoding="utf-8").read(), [open(escape_tsv, encoding="utf-8").read()], ""))
             self._ai = im
@@ -168,6 +168,7 @@ def load_dllkind(path, sha):
 
 
 def closure(d, root, bridge_tsv, dllkind_py, dllkind_sha, contract, escape_tsv):
+    funcfacts.use_contract(contract)
     """The image set of every manifest pass: the root and the dlls whose dllkind role is `image` (contract/dllkind.py, pinned by its
     sha256), reached from the root's imports and the constant-name LoadLibrary literals of the reached images. A dll of role bridge,
     declared or platform is never mapped into the guest, so it has no code and no sites. `contract` (the L1 contract directory) and `escape_tsv` give the
