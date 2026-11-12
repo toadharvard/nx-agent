@@ -7,16 +7,110 @@
  },
  "flags": {
   "c": [
-   "-Werror=attributes"
+   "-mabi=ilp32",
+   "-fms-extensions",
+   "-fshort-wchar",
+   "-frounding-math",
+   "-fsigned-char",
+   "-fno-strict-aliasing",
+   "-fwrapv",
+   "-fno-delete-null-pointer-checks",
+   "-fno-lifetime-dse",
+   "-ffp-contract=off",
+   "-O2",
+   "-Werror=attributes",
+   "-Wall",
+   "-DSTDMETHODCALLTYPE=",
+   "-DNDEBUG",
+   "-std=gnu99",
+   "-ffunction-sections",
+   "-fdata-sections",
+   "-DSUPPORT_PROFILE_ARB1=0",
+   "-DSUPPORT_PROFILE_ARB1_NV=0",
+   "-DSUPPORT_PROFILE_BYTECODE=0",
+   "-DSUPPORT_PROFILE_D3D=0",
+   "-DSUPPORT_PROFILE_GLSL=1",
+   "-DSUPPORT_PROFILE_GLSL120=0",
+   "-DSUPPORT_PROFILE_GLSLDK=1",
+   "-DSUPPORT_PROFILE_GLSLES=1",
+   "-DSUPPORT_PROFILE_GLSLES3=1",
+   "-DSUPPORT_PROFILE_GLSPIRV=0",
+   "-DSUPPORT_PROFILE_HLSL=0",
+   "-DSUPPORT_PROFILE_METAL=0",
+   "-DSUPPORT_PROFILE_SPIRV=0"
   ],
   "cxx": [
-   "-Werror=attributes"
+   "-O2",
+   "-mabi=ilp32",
+   "-fms-extensions",
+   "-fshort-wchar",
+   "-frounding-math",
+   "-fsigned-char",
+   "-fno-strict-aliasing",
+   "-fwrapv",
+   "-fno-delete-null-pointer-checks",
+   "-fcheck-new",
+   "-fno-sized-deallocation",
+   "-fno-lifetime-dse",
+   "-ffp-contract=off",
+   "-DFNVNX_SDD=1",
+   "-fno-devirtualize",
+   "-Werror=attributes",
+   "-Wall",
+   "-DSTDMETHODCALLTYPE=",
+   "-std=gnu++20",
+   "-DNDEBUG",
+   "-ffunction-sections",
+   "-fdata-sections"
   ],
-  "asm": []
+  "asm": [
+   "-mabi=ilp32"
+  ]
  },
- "include": [],
+ "include": [
+  "ports/fnv-nx/lib/sha256/include"
+ ],
  "units": "all",
+ "generated": [
+  {
+   "tool": "ports/fnv-nx/render/shaders/total/gen_sm_rows.py",
+   "args": [
+    "/in/ports/fnv-nx/render/shaders/total/sm_table.json",
+    "/out/ext/mojoshader/fnvnx_sm_rows.h"
+   ],
+   "inputs": [
+    "ports/fnv-nx/render/shaders/total/sm_table.json"
+   ],
+   "outputs": [
+    "ext/mojoshader/fnvnx_sm_rows.h"
+   ]
+  }
+ ],
+ "sources": [
+  {
+   "external": "mojoshader",
+   "dir": ".",
+   "patches": [
+    "mojoshader.patch",
+    "mojoshader_units.patch",
+    "mojoshader_prune.patch",
+    "mojoshader_sm.patch"
+   ],
+   "include": [
+    "."
+   ]
+  }
+ ],
+ "link": null,
  "external": [
+  {
+   "name": "mojoshader",
+   "repo": "fnv-nx-build",
+   "ref": "tools/mojoshader",
+   "commit": "ad5dff84830c2863c841f4b1f4e3df78c705b383",
+   "tree_sha256": "e49a1b65e09c86647fd8c0b26c7a8e16e4a16e6ad1290a1e7ada85047306f361",
+   "at": "/ext/mojoshader"
+  },
   {
    "name": "gcc-msvcmodel",
    "repo": "fnv-nx-build",
@@ -24,6 +118,59 @@
    "commit": "b4057704c0babd012e466cc89181132e02542289",
    "tree_sha256": "b60eafe7a5b0ae3dc679f9bf21e20d3363e3bac2af7379e34127ea5cf8455116",
    "at": "/ext/gcc"
+  }
+ ],
+ "plugin_cxx": "x86_64-linux-gnu-g++-13",
+ "plugins": [
+  {
+   "name": "fnvnx_ftoi",
+   "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc",
+   "args": {
+    "mode": "native"
+   }
+  },
+  {
+   "name": "fnvnx_order",
+   "source": "ports/fnv-nx/toolchain/order/fnvnx_order.cc",
+   "args": {
+    "args": "rtl",
+    "object": "msvc",
+    "operator": "rtl",
+    "assign": "msvc"
+   }
+  },
+  {
+   "name": "fnvnx_sdd",
+   "source": "ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_pi",
+   "source": "ports/fnv-nx/toolchain/pi/fnvnx_pi.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_dispatch",
+   "source": "ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_addr",
+   "source": "ports/fnv-nx/toolchain/addr/fnvnx_addr.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_names",
+   "source": "ports/fnv-nx/toolchain/names/fnvnx_names.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_layout",
+   "source": "ports/fnv-nx/toolchain/layout/fnvnx_layout.cc",
+   "args": {},
+   "inputs": [
+    "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
+   ]
   }
  ]
 }

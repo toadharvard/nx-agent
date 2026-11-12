@@ -1,0 +1,106 @@
+diff --git a/profiles/mojoshader_profile_glsl.c b/profiles/mojoshader_profile_glsl.c
+index 4b34dea..7b21c2a 100644
+--- a/profiles/mojoshader_profile_glsl.c
++++ b/profiles/mojoshader_profile_glsl.c
+@@ -15,11 +15,6 @@
+ 
+ #if SUPPORT_PROFILE_GLSL
+ 
+-#define EMIT_GLSL_OPCODE_UNIMPLEMENTED_FUNC(op) \
+-    void emit_GLSL_##op(Context *ctx) { \
+-        fail(ctx, #op " unimplemented in glsl profile"); \
+-    }
+-
+ static inline const char *get_GLSL_register_string(Context *ctx,
+                         const RegisterType regtype, const int regnum,
+                         char *regnum_str, const size_t regnum_size)
+@@ -3230,7 +3225,7 @@ void emit_GLSL_TEXREG2AR(Context *ctx)
+ #if SUPPORT_PROFILE_GLSLDK
+     if (dk_ps1x(ctx)) { dk_texreg(ctx, "vec3(%s.a, %s.r, 0.0)"); return; }
+ #endif
+-    fail(ctx, "TEXREG2AR unimplemented in this profile");
++    fail(ctx, "TEXREG2AR is not an instruction of this shader model (ps_1_1 - ps_1_3 only)");
+ } // emit_GLSL_TEXREG2AR
+ 
+ void emit_GLSL_TEXREG2GB(Context *ctx)
+@@ -3238,7 +3233,7 @@ void emit_GLSL_TEXREG2GB(Context *ctx)
+ #if SUPPORT_PROFILE_GLSLDK
+     if (dk_ps1x(ctx)) { dk_texreg(ctx, "vec3(%s.g, %s.b, 0.0)"); return; }
+ #endif
+-    fail(ctx, "TEXREG2GB unimplemented in this profile");
++    fail(ctx, "TEXREG2GB is not an instruction of this shader model (ps_1_2 - ps_1_3 only)");
+ } // emit_GLSL_TEXREG2GB
+ 
+ void emit_GLSL_TEXREG2RGB(Context *ctx)
+@@ -3246,7 +3241,7 @@ void emit_GLSL_TEXREG2RGB(Context *ctx)
+ #if SUPPORT_PROFILE_GLSLDK
+     if (dk_ps1x(ctx)) { dk_texreg(ctx, "%s.rgb"); return; }
+ #endif
+-    fail(ctx, "TEXREG2RGB unimplemented in this profile");
++    fail(ctx, "TEXREG2RGB is not an instruction of this shader model (ps_1_2 - ps_1_3 only)");
+ } // emit_GLSL_TEXREG2RGB
+ 
+ void emit_GLSL_TEXDP3(Context *ctx)
+@@ -3264,7 +3259,7 @@ void emit_GLSL_TEXDP3(Context *ctx)
+         return;
+     } // if
+ #endif
+-    fail(ctx, "TEXDP3 unimplemented in this profile");
++    fail(ctx, "TEXDP3 is not an instruction of this shader model (ps_1_2 - ps_1_3 only)");
+ } // emit_GLSL_TEXDP3
+ 
+ void emit_GLSL_TEXDP3TEX(Context *ctx)
+@@ -3281,7 +3276,7 @@ void emit_GLSL_TEXDP3TEX(Context *ctx)
+         return;
+     } // if
+ #endif
+-    fail(ctx, "TEXDP3TEX unimplemented in this profile");
++    fail(ctx, "TEXDP3TEX is not an instruction of this shader model (ps_1_2 - ps_1_3 only)");
+ } // emit_GLSL_TEXDP3TEX
+ 
+ #if SUPPORT_PROFILE_GLSLDK
+@@ -3306,7 +3301,7 @@ void emit_GLSL_TEXDEPTH(Context *ctx)
+         return;
+     } // if
+ #endif
+-    fail(ctx, "TEXDEPTH unimplemented in this profile");
++    fail(ctx, "TEXDEPTH is not an instruction of this shader model (ps_1_4 only)");
+ } // emit_GLSL_TEXDEPTH
+ 
+ void emit_GLSL_TEXM3X2DEPTH(Context *ctx)
+@@ -3329,7 +3324,7 @@ void emit_GLSL_TEXM3X2DEPTH(Context *ctx)
+         return;
+     } // if
+ #endif
+-    fail(ctx, "TEXM3X2DEPTH unimplemented in this profile");
++    fail(ctx, "TEXM3X2DEPTH is not an instruction of this shader model (ps_1_3 only)");
+ } // emit_GLSL_TEXM3X2DEPTH
+ 
+ void emit_GLSL_BEM(Context *ctx)
+@@ -3351,7 +3346,7 @@ void emit_GLSL_BEM(Context *ctx)
+         return;
+     } // if
+ #endif
+-    fail(ctx, "BEM unimplemented in this profile");
++    fail(ctx, "BEM is not an instruction of this shader model (ps_1_4 only)");
+ } // emit_GLSL_BEM
+ 
+ 
+@@ -3514,7 +3509,7 @@ void emit_GLSL_TEXM3X3SPEC(Context *ctx)
+         return;
+     } // if
+ #endif
+-    fail(ctx, "TEXM3X3SPEC unimplemented in this profile");
++    fail(ctx, "TEXM3X3SPEC is not an instruction of this shader model (ps_1_1 - ps_1_3 only)");
+ } // emit_GLSL_TEXM3X3SPEC
+ 
+ void emit_GLSL_TEXM3X3VSPEC(Context *ctx)
+@@ -3538,7 +3533,7 @@ void emit_GLSL_TEXM3X3VSPEC(Context *ctx)
+         return;
+     } // if
+ #endif
+-    fail(ctx, "TEXM3X3VSPEC unimplemented in this profile");
++    fail(ctx, "TEXM3X3VSPEC is not an instruction of this shader model (ps_1_1 - ps_1_3 only)");
+ } // emit_GLSL_TEXM3X3VSPEC
+ 
+ void emit_GLSL_EXPP(Context *ctx)
