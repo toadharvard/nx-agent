@@ -31,7 +31,7 @@ ROOT = T + "toy"
 PLUGS = [dict({"name": n, "source": recipe.PLUGIN_SOURCES[n], "args": dict(recipe.PLUGIN_ARGS[n])},
               **({"inputs": recipe.PLUGIN_INPUTS[n]} if n in recipe.PLUGIN_INPUTS else {})) for n in recipe.PLUGIN_SOURCES]
 P = {p["name"]: p for p in PLUGS}
-SRC = "volatile int g;\nint rd() { return g; }\nvoid wr(int v) { g = v; }\nint f2i(float f) { return (int)f; }\nint ic(int (*f)(int)) { return f(1); }\nstruct S { int a; char b; };\nS gs;\nregister int hr asm(\"x27\");\nregister unsigned eax asm(\"x19\");\nint hrw(int v) { hr = v; eax = v + 1; return hr + eax; }\n"
+SRC = "volatile int g;\nint rd() { return g; }\nvoid wr(int v) { g = v; }\nint f2i(float f) { return (int)f; }\nint ic(int (*f)(int)) { return f(1); }\nstruct S { int a; char b; };\nS gs;\nregister int hr asm(\"x27\");\nregister unsigned eax asm(\"x19\");\nint hrw(int v) { hr = v; eax = v + 1; return hr + eax; }\nstatic int arr[7];\nint ua(int i) { return arr[i]; }\nint lf() { static char ls[3]; return ls[0]; }\nextern int ex;\nint uex() { return ex; }\nextern int dg[];\nint udg() { return dg[0]; }\n"
 REC = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
        "flags": {"c": [], "cxx": ["-O2"] + list(recipe.SEMANTICS_FLAGS), "asm": []}, "include": [], "units": "all",
        "plugin_cxx": "x86_64-linux-gnu-g++-13", "plugins": PLUGS}
@@ -137,7 +137,15 @@ def main():
     o = next(x["object"] for x in ra["objects"] if x["unit"] == "a.cc")
     secs = subprocess.run(["aarch64-linux-gnu-readelf", "-SW", o], capture_output=True, text=True).stdout
     have = set(x for x in secs.split() if ".fnvnx" in x)
-    check("pi, names and layout plugins wrote their sections", {".fnvnx.n3", ".fnvnx.sympair", ".fnvnx.layout"} <= have, sorted(have))
+    check("pi, names and layout plugins wrote their sections", {".fnvnx.n3", ".fnvnx.sympair", ".fnvnx.layout", ".fnvnx.objects"} <= have, sorted(have))
+    ob = os.path.join(BASE, "objects.bin")
+    subprocess.run(["aarch64-linux-gnu-objcopy", "--dump-section", ".fnvnx.objects=" + ob, o, os.path.join(BASE, "objects.o")], capture_output=True, text=True)
+    objs = open(ob).read() if os.path.exists(ob) else ""
+    rows = {r.split("\t")[0]: r.split("\t")[1:] for r in objs.splitlines() if r}
+    check("OBJECTS: a global struct, a static array and a local static have a row; extern declarations have none",
+          rows.get("gs") == ["8", "4", "US@@", "1S", ""] and rows.get("_ZL3arr") == ["28", "4", "-", "A7_i", "internal"] and
+          any(v[0] == "3" and v[-1] == "internal,local" for k, v in rows.items() if k.startswith("_ZZ2lfv")) and
+          "ex" not in rows and "dg" not in rows and not any(k.startswith("*") for k in rows), (rows, objs[:400], have))
     und = subprocess.run(["aarch64-linux-gnu-nm", "-u", o], capture_output=True, text=True).stdout
     check("dispatch plugin routes an indirect call through fnvnx_dispatch", "fnvnx_dispatch" in und, und)
     rd, wr_, f2i = disasm(ra, "_Z2rdv"), disasm(ra, "_Z2wri"), disasm(ra, "_Z3f2if")
