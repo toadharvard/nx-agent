@@ -522,6 +522,34 @@ class Job:
                 os.makedirs(os.path.dirname(os.path.join(ws, "root", o)), exist_ok=True)
                 shutil.copyfile(os.path.join(tmp, "out", o), os.path.join(ws, "root", o))
 
+    def probe(self, ws):
+        """The guest compiler's own answers (one hermetic stage per language, keyed by the compiler and PROBE_SRC): the SEMANTICS_FLAGS it applies
+        to that language (the driver itself says which it ignores for C: "valid for C++/ObjC++ but not for C") and sizeof/alignof of PROBE_TYPES.
+        -> {"flags_c": [...], "flags_cxx": [...], "layout": {"sizeof": {...}, "alignof": {...}}}."""
+        drv = dict(zip(("c", "cxx"), self.drivers()))
+        _, rt = self.toolrt(sorted(set(drv.values())))
+        src = os.path.join(ws, "probe")
+        os.makedirs(src)
+        open(os.path.join(src, "probe.c"), "w").write(PROBE_SRC)
+        shutil.copyfile(os.path.join(src, "probe.c"), os.path.join(src, "probe.cc"))
+        tree = cas.ingest(src, self.store)
+        out, lay = {}, []
+        for k, f in (("c", "probe.c"), ("cxx", "probe.cc")):
+            doc = {"format": "fnvnx-stage/1", "stage": "probe:" + k, "class": "build", "tool": "gcc", "cwd": "/", "outputs": ["/out"],
+                   "argv": [drv[k]] + list(SEMANTICS_FLAGS) + ["-frandom-seed=" + hashlib.sha256(b"probe").hexdigest(), "-Werror=date-time", "-ffile-prefix-map=/probe=probe",
+                                                  "-S", "-o", "/out/probe.s", "/probe/" + f],
+                   "env": dict(unitstage.ENV, PATH=os.path.dirname(drv[k])),
+                   "inputs": sorted(rt["inputs"] + [{"at": "/probe", "tree": tree}], key=lambda i: i["at"])}
+            res = self.stage(doc)[1]
+            err = "\n".join(open(cas._obj(self.store, cas.manifest(res["stderr"], self.store)), errors="replace").read().splitlines())
+            out["flags_" + k] = probe_flags(err)
+            asm = open(cas._obj(self.store, cas.manifest(res["outputs"]["/out"], self.store)["entries"]["probe.s"]), errors="replace").read()
+            lay.append(probe_layout(asm))
+        if lay[0] != lay[1]:
+            raise BuildRed({"stage": "probe", "exit": None, "stderr": ["sizeof/alignof differ between C and C++: %s vs %s" % (lay[0], lay[1])]})
+        out["layout"] = lay[0]
+        return out
+
     def includes(self, ws):
         """unitstage --include specs in recipe order: HOST@/inc/N for a directory of this root or the repo, the sandbox path itself
         for a directory inside an external (a declared input of the tool runtime)."""
@@ -688,9 +716,40 @@ def host_compilers(rec, cache):
     return os.path.join(dest, c["cc"]), os.path.join(dest, c["cxx"])
 
 
-def runtime_errors(text, pin):
-    """The runtime external's manifest (PIN["runtime_manifest"]) against the guest compiler's own: compiler version, msvcmodel patch sha256, every
-    flag of SEMANTICS_FLAGS, sizeof wchar_t/size_t/long. -> [str]. A runtime built by another compiler or with another data model is red."""
+PROBE_TYPES = ("char", "short", "int", "long", "long long", "void *", "float", "double", "long double", "__WCHAR_TYPE__", "__SIZE_TYPE__", "__PTRDIFF_TYPE__")
+PROBE_SRC = "".join("unsigned fnvnx_sz_%d = sizeof(%s);\nunsigned fnvnx_al_%d = __alignof__(%s);\n" % (i, t, i, t) for i, t in enumerate(PROBE_TYPES))
+RUNTIME_FORMAT = "fnvnx-runtime-manifest/2"
+
+
+def probe_flags(stderr):
+    """SEMANTICS_FLAGS minus those the driver itself reports as not applying to the language it was run for (its warning
+    "command-line option 'F' is valid for C++/ObjC++ but not for C")."""
+    skip = set(re.findall(r"command-line option '([^']+)' is valid for [A-Za-z+/]+ but not for", stderr))
+    return [f for f in SEMANTICS_FLAGS if f not in skip]
+
+
+def probe_layout(asm):
+    """{"sizeof": {type: n}, "alignof": {type: n}} from the assembler text of PROBE_SRC (one `.word`/`.xword`/`.byte` after each label)."""
+    val, cur = {}, None
+    for ln in asm.splitlines():
+        ln = ln.strip()
+        m = re.match(r"(fnvnx_(?:sz|al)_\d+):$", ln)
+        if m:
+            cur = m.group(1)
+            continue
+        m = re.match(r"\.(?:word|long|xword|byte|hword|2byte|4byte|8byte)\s+(\d+)$", ln)
+        if m and cur and cur not in val:
+            val[cur] = int(m.group(1))
+    out = {"sizeof": {}, "alignof": {}}
+    for i, t in enumerate(PROBE_TYPES):
+        out["sizeof"][t], out["alignof"][t] = val.get("fnvnx_sz_%d" % i), val.get("fnvnx_al_%d" % i)
+    return out
+
+
+def runtime_errors(text, pin, probe):
+    """The runtime external's manifest (PIN["runtime_manifest"].path, format fnvnx-runtime-manifest/2) against the guest compiler's: version,
+    msvcmodel patch sha256, per language the flags it was built with (flags_c, flags_cxx: every flag the guest compiler applies to that
+    language, PROBE["flags_*"], is in it), sizeof/alignof of PROBE_TYPES (equal to PROBE["layout"], the compiler's own answers). -> [str]."""
     ex = pin.get("runtime_manifest")
     if not isinstance(ex, dict):
         return ["%s has no runtime_manifest" % GUEST_PIN]
@@ -701,13 +760,19 @@ def runtime_errors(text, pin):
     except ValueError as x:
         return ["runtime manifest is not JSON: %s" % str(x)[:80]]
     err = []
-    if m.get("format") != ex["format"]:
-        err.append("manifest format is %r, not %s" % (m.get("format"), ex["format"]))
-    for k in ("compiler_version", "msvcmodel_patch_sha256", "sizeof"):
+    if m.get("format") != RUNTIME_FORMAT:
+        err.append("manifest format is %r, not %s" % (m.get("format"), RUNTIME_FORMAT))
+    for k in ("compiler_version", "msvcmodel_patch_sha256"):
         if m.get(k) != ex[k]:
             err.append("manifest %s is %r, the guest compiler's is %r" % (k, m.get(k), ex[k]))
-    have = m.get("flags") if isinstance(m.get("flags"), list) else []
-    err += ["manifest flags lack %s (the runtime must be built with the guest's semantics flags)" % f for f in SEMANTICS_FLAGS if f not in have]
+    for k, name in (("flags_c", "C"), ("flags_cxx", "C++")):
+        have = m.get(k) if isinstance(m.get(k), list) else []
+        err += ["manifest %s lacks %s (the runtime must be built with every flag the guest compiler applies to %s)" % (k, f, name) for f in probe[k] if f not in have]
+    lay = m.get("layout")
+    for k in ("sizeof", "alignof"):
+        got = lay.get(k) if isinstance(lay, dict) else None
+        if got != probe["layout"][k]:
+            err.append("manifest layout.%s is %r, the guest compiler's is %r" % (k, got, probe["layout"][k]))
     return err
 
 
@@ -738,7 +803,7 @@ def build(repo, root, store, out, jobs=4, ext=None):
         if roots_target(j.roots, root) == "guest":
             rt = pin["runtime"]
             mf = os.path.join(j.ext[rt["name"]]["host"], pin["runtime_manifest"]["path"])
-            me = runtime_errors(open(mf).read(), pin) if os.path.isfile(mf) else ["runtime external has no %s" % pin["runtime_manifest"]["path"]]
+            me = runtime_errors(open(mf).read(), pin, j.probe(ws)) if os.path.isfile(mf) else ["runtime external has no %s" % pin["runtime_manifest"]["path"]]
             if me:
                 raise BuildRed({"stage": "runtime_manifest", "exit": None, "stderr": me[:20]})
         j.generate(ws)

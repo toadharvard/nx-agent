@@ -97,12 +97,21 @@ def main():
     check("guest root with a glibc include dir is red", any("neither inside a declared external" in x for x in errs(g, gi)), errs(g, gi))
     # --- the manifest of the runtime against the guest compiler's own (pure rule)
     good = good_manifest(pin_real)
-    check("manifest equal to the guest compiler's: no error", recipe.runtime_errors(json.dumps(good), pin_real) == [])
-    for name, mut_ in (("compiler 15.2.0", {"compiler_version": "15.2.0"}), ("4-byte wchar_t", {"sizeof": {"wchar_t": 4, "size_t": 4, "long": 4}}),
-                       ("another patch", {"msvcmodel_patch_sha256": "0" * 64}), ("no -fshort-wchar", {"flags": [f for f in recipe.SEMANTICS_FLAGS if f != "-fshort-wchar"]})):
-        e = recipe.runtime_errors(json.dumps(dict(good, **mut_)), pin_real)
+    pr = PROBE
+    check("manifest equal to the guest compiler's: no error", recipe.runtime_errors(json.dumps(good), pin_real, pr) == [])
+    sz = dict(good["layout"]["sizeof"], __WCHAR_TYPE__=4)
+    for name, mut_ in (("compiler 15.2.0", {"compiler_version": "15.2.0"}), ("4-byte wchar_t", {"layout": dict(good["layout"], sizeof=sz)}),
+                       ("another patch", {"msvcmodel_patch_sha256": "0" * 64}), ("format /1", {"format": "fnvnx-runtime-manifest/1"}),
+                       ("no -fshort-wchar in C", {"flags_c": [f for f in pr["flags_c"] if f != "-fshort-wchar"]}),
+                       ("no -fcheck-new in C++", {"flags_cxx": [f for f in pr["flags_cxx"] if f != "-fcheck-new"]}),
+                       ("another alignof", {"layout": dict(good["layout"], alignof=dict(good["layout"]["alignof"], double=4))})):
+        e = recipe.runtime_errors(json.dumps(dict(good, **mut_)), pin_real, pr)
         check("manifest with %s is red" % name, bool(e), e)
-    check("manifest that is not JSON is red", bool(recipe.runtime_errors("x", pin_real)))
+    check("a flag the driver does not apply to C is not required of the C pack", "-fno-sized-deallocation" not in pr["flags_c"] and recipe.runtime_errors(json.dumps(good), pin_real, pr) == [])
+    check("probe_flags reads the driver's own warning", recipe.probe_flags("cc1: warning: command-line option '-fno-sized-deallocation' is valid for C++/ObjC++ but not for C [enabled by default]\n")
+          == [f for f in recipe.SEMANTICS_FLAGS if f != "-fno-sized-deallocation"])
+    check("probe_layout reads the labels", recipe.probe_layout("fnvnx_sz_2:\n\t.word\t4\nfnvnx_al_2:\n\t.word\t4\n")["sizeof"]["int"] == 4)
+    check("manifest that is not JSON is red", bool(recipe.runtime_errors("x", pin_real, pr)))
     # --- the real compiler, by the pin of the checkout (no environment switch, no skip)
     ext = pin_real["external"]
     rt = pin_real["runtime"]
@@ -162,10 +171,17 @@ def main():
     check("test_msvcmodel.py on the external", p.returncode == 0 and "skip" not in p.stdout, p.stdout + p.stderr)
 
 
+PROBE = {"flags_c": [f for f in recipe.SEMANTICS_FLAGS if f != "-fno-sized-deallocation"], "flags_cxx": list(recipe.SEMANTICS_FLAGS),
+         "layout": {"sizeof": {"char": 1, "short": 2, "int": 4, "long": 4, "long long": 8, "void *": 4, "float": 4, "double": 8, "long double": 16,
+                               "__WCHAR_TYPE__": 2, "__SIZE_TYPE__": 4, "__PTRDIFF_TYPE__": 4},
+                    "alignof": {"char": 1, "short": 2, "int": 4, "long": 4, "long long": 8, "void *": 4, "float": 4, "double": 8, "long double": 16,
+                                "__WCHAR_TYPE__": 2, "__SIZE_TYPE__": 4, "__PTRDIFF_TYPE__": 4}}}
+
+
 def good_manifest(pin_real):
-    """the manifest a runtime pack must carry: the guest compiler's own version, patch, semantics flags and data model"""
-    return {"format": "fnvnx-runtime-manifest/1", "compiler_version": "13.3.0", "msvcmodel_patch_sha256": pin_real["runtime_manifest"]["msvcmodel_patch_sha256"],
-            "flags": list(recipe.SEMANTICS_FLAGS), "sizeof": {"wchar_t": 2, "size_t": 4, "long": 4}}
+    """the manifest a runtime pack must carry (schema /2): the guest compiler's version and patch, the flags it applies per language, its sizeof/alignof"""
+    return {"format": "fnvnx-runtime-manifest/2", "compiler_version": "13.3.0", "msvcmodel_patch_sha256": pin_real["runtime_manifest"]["msvcmodel_patch_sha256"],
+            "flags_c": list(PROBE["flags_c"]), "flags_cxx": list(PROBE["flags_cxx"]), "layout": json.loads(json.dumps(PROBE["layout"]))}
 
 
 def valid_runtime(ext, pin_real, good):

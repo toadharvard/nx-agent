@@ -31,13 +31,8 @@
   },
   "runtime_manifest": {
     "path": "MANIFEST.json",
-    "format": "fnvnx-runtime-manifest/1",
+    "format": "fnvnx-runtime-manifest/2",
     "compiler_version": "13.3.0",
-    "msvcmodel_patch_sha256": "08c9569a8e7b42ae529c202adc549474954a7f60b73cd4b50a4f111e3f0459d3",
-    "sizeof": {
-      "wchar_t": 2,
-      "size_t": 4,
-      "long": 4
-    }
+    "msvcmodel_patch_sha256": "08c9569a8e7b42ae529c202adc549474954a7f60b73cd4b50a4f111e3f0459d3"
   }
 }

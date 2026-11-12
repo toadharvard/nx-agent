@@ -81,10 +81,10 @@ configured with (`-print-prog-name=as|ld`) and the header directories of its sea
 headers pinned by env.json). The CC stage mounts the compiler external, the plugins and unit.ii only; other externals are PP inputs.
 
 The pin file also names the guest's **runtime** (`"runtime": {EXT_KEYS}`, fnv-nx-build mirror of the guest libc/libstdc++/headers) and its
-`runtime_manifest` (the `MANIFEST.json` the pack must carry: `format`, `compiler_version`, `msvcmodel_patch_sha256`, `flags`, `sizeof`). Every guest root
+`runtime_manifest` (the `MANIFEST.json` the pack must carry: `format` = `fnvnx-runtime-manifest/2`, `compiler_version`, `msvcmodel_patch_sha256`, `flags_c`, `flags_cxx`, `layout`: {`sizeof`, `alignof`}). Every guest root
 **declares the runtime external exactly as pinned** (red otherwise), builds with `-nostdinc` (C) / `-nostdinc -nostdinc++` (C++), and every include dir lies
-inside a declared external or the root. Before any unit runs, the pack's manifest is compared with the guest compiler's own (version, patch sha256, every
-`SEMANTICS_FLAGS` entry, sizeof wchar_t/size_t/long); a missing or unequal manifest is red, stage `runtime_manifest`. After PP, every file a unit read
+inside a declared external or the root. Before any unit runs, the pack's manifest is compared with the guest compiler's own (version, patch sha256; per language every
+`SEMANTICS_FLAGS` entry the driver applies to it, found by the stages `probe:c` / `probe:cxx`, which run the guest compiler itself and read its warning "valid for C++/ObjC++ but not for C"; `layout` equal to the sizeof/alignof the same probe reads from the compiler's assembler for `PROBE_TYPES`); a missing or unequal manifest is red, stage `runtime_manifest`. After PP, every file a unit read
 (closure plus the files outside its trees) must lie under `/src`, `/inc` or a declared external; a distribution glibc cross header is red, stage `closure`,
 naming unit and file. There is no `-std=` requirement: a runtime built by another compiler version fails the manifest check instead.
 `verify/samples/platform.build.json` is the sample recipe of the platform root; `test_guest.py` checks it and the rules above.
