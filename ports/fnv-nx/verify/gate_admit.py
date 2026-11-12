@@ -16,6 +16,10 @@ Classes:
   product  code that is compiled into the shipped binary: REQUIRED_PRODUCT gates, the static closure of the run-time
            failure classes of verify/VERDICT.md. A product root cannot be admitted before those gates exist in
            gates.d, so code enters the trunk only together with the gates that judge it.
+  ref      reference files that tests/oracle.json records point at (spec, contract, model): no gate named, no recipe, no units, no link,
+           no outputs. Every file of a ref root is the `path` of a reference of some tests/oracle.json, and none is a build.json or a
+           test (is_test_file): a product or test root is never a ref root. The gates that cover class ref (gates.d `covers`) are the
+           ones that read any root: pure, assumptions (and the Legal and stub gates where they exist).
 Argument: the verdict is green only if certified == universe, so a tracked file outside every root, a root with a
 missing gate, or a product root without its gates makes every merge red. The table maps directories to gates; it
 holds no exception for a file, a function or a finding.
@@ -30,7 +34,7 @@ import gatesdir  # noqa: E402
 
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
-CLASSES = ("doc", "tool", "product")
+CLASSES = ("doc", "tool", "product", "ref")
 # A product root names a gate for every run-time failure class of VERDICT.md. Wired on the trunk: objstub .. oracle,
 # the contract and link gates. Owned by other leads: imports, forms, d3d9total, r7, namegate, argordergate, abi.
 # Classes A-G of the owner's rule: datamodel, order, fpexact, eh, exepin, addr32, machine.
@@ -39,11 +43,17 @@ REQUIRED_PRODUCT = ("objstub", "linkstrict", "determinism", "oracle",
                     "abs", "disp", "reach", "reachlink", "gpa",
                     "imports", "forms", "d3d9total", "r7", "namegate", "argordergate", "abi",
                     "datamodel", "order", "fpexact", "eh", "exepin", "addr32", "machine", "hostapi")
-REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT}
+REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT, "ref": ()}
 
 
-def judge(files, admit, gate_names, exists):
-    """-> (uncertified {path: reason}, root errors [str]); pure function of its arguments"""
+def is_test_file(f):
+    b = f.rsplit("/", 1)[-1]
+    return b == "build.json" or (b.startswith("test_") and b.endswith(".py")) or "/tests/" in f
+
+
+def judge(files, admit, gate_names, exists, ref_paths=frozenset()):
+    """-> (uncertified {path: reason}, root errors [str]); pure function of its arguments. REF_PATHS: the tracked paths that a tests/oracle.json
+    reference (spec, contract, model) points at; the files of a root of class ref must all be among them."""
     roots, errors = [], []
     if admit.get("format") != "fnvnx-admit/1":
         errors.append("admit.json: format is not fnvnx-admit/1")
@@ -56,6 +66,8 @@ def judge(files, admit, gate_names, exists):
             why.append("class %r is not one of %s" % (cls, ", ".join(CLASSES)))
         else:
             why += ["required gate %s not named" % g for g in REQUIRED[cls] if g not in gates]
+            if cls == "ref" and ("recipe" in r or "gates" in r and r["gates"]):
+                why.append("a ref root has no recipe and names no gate (it has no units, no link and no outputs)")
             if cls == "product":
                 rec = r.get("recipe", "")
                 if not rec.startswith(path + "/") or not exists(rec):
@@ -67,6 +79,7 @@ def judge(files, admit, gate_names, exists):
         for b in paths[i + 1:]:
             if a == b or a.startswith(b + "/") or b.startswith(a + "/"):
                 errors.append("roots %s and %s overlap" % (a, b))
+    cls_of = {r.get("path", ""): r.get("class") for r in admit.get("roots", [])}
     bad = {}
     for f in files:
         hit = [(p, why) for p, why in roots if f == p or f.startswith(p + "/")]
@@ -74,6 +87,9 @@ def judge(files, admit, gate_names, exists):
             bad[f] = "in %d roots" % len(hit)
         elif hit[0][1]:
             bad[f] = "root %s: %s" % (hit[0][0], "; ".join(hit[0][1]))
+        elif cls_of[hit[0][0]] == "ref" and (is_test_file(f) or f not in ref_paths):
+            bad[f] = "root %s is a ref root: %s" % (hit[0][0], "a build file or a test is not a reference" if is_test_file(f)
+                                                   else "the file is not the path of a reference of any tests/oracle.json")
     errors += ["root %s: %s" % (p, "; ".join(why)) for p, why in roots if why]
     return bad, errors
 
@@ -85,7 +101,16 @@ def main():
     with open(ADMIT) as f:
         admit = json.load(f)
     gate_names = [g["name"] for g in gatesdir.load_dir().get("gates", [])]
-    bad, errors = judge(files, admit, gate_names, os.path.isfile)
+    ref_paths = set()
+    for f in files:
+        if f.endswith("/tests/oracle.json"):
+            try:
+                with open(f) as fh:
+                    for e in json.load(fh).get("tests", {}).values():
+                        ref_paths.update(x["path"] for x in e.get("references", []) if isinstance(x, dict) and x.get("kind") in ("spec", "contract", "model") and isinstance(x.get("path"), str))
+            except (OSError, ValueError, AttributeError):
+                pass          # gate oracle judges a malformed declaration; here it names no reference
+    bad, errors = judge(files, admit, gate_names, os.path.isfile, ref_paths)
     red = bool(bad or errors)
     certified = 0 if errors else len(files) - len(bad)
     detail = "%d files, %d roots; %s" % (len(files), len(admit.get("roots", [])),

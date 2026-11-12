@@ -63,7 +63,7 @@ def judge(test, entry, got, tracked, read):
     clo, why = gate_oracle.closure(subject, tracked, read)
     if why:
         clo = set(subject)
-    refs = set(r["path"] for r in entry.get("references", []) if isinstance(r, dict) and isinstance(r.get("path"), str))
+    refs = set(r["path"] for r in entry.get("references", []) if isinstance(r, dict) and r.get("kind") in gate_oracle.TREE_KINDS and isinstance(r.get("path"), str))
     tdir = os.path.dirname(test) + "/"
     allowed = clo | refs | {test} | set(f for f in tracked if f.startswith(tdir))
     return {"undeclared": sorted(got - allowed), "unopened": sorted(set(subject) - got), "refs_in_run": sorted(refs & got)}

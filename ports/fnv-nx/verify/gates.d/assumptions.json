@@ -8,6 +8,7 @@
  ],
  "result": "assumptions.json",
  "covers": [
-  "tool"
+  "tool",
+  "ref"
  ]
 }

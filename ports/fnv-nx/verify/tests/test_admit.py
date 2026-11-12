@@ -27,6 +27,18 @@ files = [T + "/verify/a.py", T + "/docs/x.md"]
 yes = lambda p: True  # noqa: E731
 no = lambda p: False  # noqa: E731
 
+ref = {"path": T + "/refs", "class": "ref", "gates": []}
+rf = [T + "/refs/spec.md", T + "/refs/t.tsv"]
+bad, err = ga.judge(files + rf, adm(tool, doc, ref), GATES, yes, set(rf))
+check("a ref root whose files are all references is certified", not bad and not err)
+bad, err = ga.judge(files + rf, adm(tool, doc, ref), GATES, yes, {rf[0]})
+check("a ref root file that no oracle record points at is refused", list(bad) == [rf[1]] and not err)
+bad, err = ga.judge(files + [T + "/refs/test_x.py", T + "/refs/build.json"], adm(tool, doc, ref), GATES, yes, {T + "/refs/test_x.py", T + "/refs/build.json"})
+check("a test or a build.json in a ref root is refused even when cited", set(bad) == {T + "/refs/test_x.py", T + "/refs/build.json"})
+bad, err = ga.judge(files + rf, adm(tool, doc, dict(ref, recipe=T + "/refs/build.json")), GATES, yes, set(rf))
+check("a ref root with a recipe is refused (it is not a product root)", err and bad)
+bad, err = ga.judge(files + rf, adm(tool, doc, dict(ref, gates=["selftests"])), GATES, yes, set(rf))
+check("a ref root that names a gate is refused", err and bad)
 bad, err = ga.judge(files, adm(tool, doc), GATES, yes)
 check("two roots cover two files", not bad and not err)
 bad, err = ga.judge(files + [T + "/platform/w.c"], adm(tool, doc), GATES, yes)

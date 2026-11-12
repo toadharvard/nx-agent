@@ -12,6 +12,7 @@
  ],
  "result": "pure.json",
  "covers": [
-  "tool"
+  "tool",
+  "ref"
  ]
 }

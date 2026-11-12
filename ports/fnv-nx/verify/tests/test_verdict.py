@@ -231,6 +231,10 @@ def covers_linked(name, link, want):
     check("covers: " + name, gr["status"] == want, gr)
 covers_linked("a link-null host root is outside `linked`: universe 0 is green", None, "green")
 covers_linked("a host root with a link is `linked`: universe 0 is red", {"script": "l.ld"}, "red")
+REFR = {"path": "ports/fnv-nx/refs", "class": "ref"}
+check("covers: a ref root has the class ref", gatesdir.root_classes({"roots": [REFR]}) == {"ports/fnv-nx/refs": {"ref"}})
+covers_case("a ref root with universe 0 is red for a gate that covers ref", [REFR], gate("g", universe=0, certified=0, covers=("tool", "ref")), "red", "ref")
+covers_case("a ref root does not make a product-only gate vacuous", [REFR], gate("g", universe=0, certified=0, covers=("linked",)), "green")
 covers_case("a covered class present with universe 0 is red", [GUEST], gate("g", universe=0, certified=0, covers=("product-guest",)), "red", "vacuous")
 covers_case("a covered class present with universe 0 is red (one of several classes)", [HOSTP], gate("g", universe=0, certified=0, covers=("product-guest", "host-product")), "red", "host-product")
 covers_case("a covered class present with a universe is green", [GUEST], gate("g", covers=("product-guest",)), "green")

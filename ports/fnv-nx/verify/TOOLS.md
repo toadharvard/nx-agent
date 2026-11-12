@@ -1164,6 +1164,10 @@ Classes:
   product  code that is compiled into the shipped binary: REQUIRED_PRODUCT gates, the static closure of the run-time
            failure classes of verify/VERDICT.md. A product root cannot be admitted before those gates exist in
            gates.d, so code enters the trunk only together with the gates that judge it.
+  ref      reference files that tests/oracle.json records point at (spec, contract, model): no gate named, no recipe, no units, no link,
+           no outputs. Every file of a ref root is the `path` of a reference of some tests/oracle.json, and none is a build.json or a
+           test (is_test_file): a product or test root is never a ref root. The gates that cover class ref (gates.d `covers`) are the
+           ones that read any root: pure, assumptions (and the Legal and stub gates where they exist).
 Argument: the verdict is green only if certified == universe, so a tracked file outside every root, a root with a
 missing gate, or a product root without its gates makes every merge red. The table maps directories to gates; it
 holds no exception for a file, a function or a finding.
@@ -1360,6 +1364,11 @@ Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
     {"kind": "spec", "path": PATH, "anchor": STR}   cited text: a tracked file and a place in it. `anchor` is a line
                                          range "L<m>-L<n>" (1 <= m <= n <= number of lines) or a whole line of the file
                                          that starts with "#" (a heading) and occurs exactly once
+    {"kind": "external", "name": NAME, "path": STR}   a file of an external that a recipe or the contract inputs pin (NAME is
+                                         its `name`, pinned to one commit and tree_sha256; fetched like a wine-exe artifact)
+    {"kind": "probe", "probe": {"external": NAME, "path": STR}, "platform": NAME, "dump_sha256": H64}   a probe program
+                                         (a file of a pinned external) run on the declared platform (a pinned external) whose dump
+                                         has this sha256
     {"kind": "contract", "path": PATH}     a contract table of the tree
     {"kind": "model", "path": PATH}        an independent model in the tree
 Rule. A test file is certified iff ALL hold:
