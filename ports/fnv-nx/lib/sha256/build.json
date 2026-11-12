@@ -79,27 +79,6 @@
      "-mabi=ilp32"
     ]
    }
-  },
-  "host": {
-   "compiler": {
-    "cc": "gcc-13",
-    "cxx": "g++-13"
-   },
-   "flags": {
-    "c": [
-     "-O2",
-     "-g",
-     "-Wall",
-     "-Wextra",
-     "-Wshadow",
-     "-Wconversion",
-     "-Wno-sign-conversion",
-     "-Werror",
-     "-std=c99"
-    ],
-    "cxx": [],
-    "asm": []
-   }
   }
  }
 }
