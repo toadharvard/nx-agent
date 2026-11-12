@@ -25,7 +25,7 @@ import test_plugins as tp  # noqa: E402
 from test_plugins import BASE, ROOT, T, check, git, w  # noqa: E402
 
 LIFT = T + "lift/gates/"
-RT = ".data\n.globl fnvnx_lift_cpu_bytes\n.type fnvnx_lift_cpu_bytes,%object\n.size fnvnx_lift_cpu_bytes,4\nfnvnx_lift_cpu_bytes: .word 536\n"
+RT = ".data\n.globl fnvnx_lift_cpu_bytes\n.type fnvnx_lift_cpu_bytes,%object\n.size fnvnx_lift_cpu_bytes,4\nfnvnx_lift_cpu_bytes: .word 536\n.text\n.globl fnvl_dispatch\n.type fnvl_dispatch,%function\nfnvl_dispatch: ret\n.size fnvl_dispatch,.-fnvl_dispatch\n"
 FN = ".text\n.globl f\n.type f,%function\nf:\n{}\n.size f,.-f\n"
 GEN = ('import os\nbody = open("/in/ports/fnv-nx/toy/body.s").read()\nos.makedirs("/out/gen")\n'
        'lines = ["asm(\\n"] + [\'"\' + l + \'\\\\n"\\n\' for l in body.split("\\n") if l] + [");\\n"]\n'

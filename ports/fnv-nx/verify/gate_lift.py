@@ -108,8 +108,8 @@ def judge_lifted_order(gate, root, repo, cache):
                                           "names no runtime root, owner L1/L3a)" % CPU_SYMBOL) if not holders else \
             "input error: %d objects define %s: %s" % (len(holders), CPU_SYMBOL, ", ".join(holders))
     rt = next(o for o in objs if o["unit"] == holders[0])
-    r = run_tool(repo, cache, "gate_order.py", [rt["object"]] + [o["object"] for o in objs], ("order", "addrwrap", "align"),
-                 [rt["sha256"], [o["sha256"] for o in objs]], {"JOBS": "4"})
+    r = run_tool(repo, cache, "gate_order.py", [rt["object"]] + [o["object"] for o in objs if o is not rt], ("order", "addrwrap", "align"),
+                 [rt["sha256"], [o["sha256"] for o in objs if o is not rt]], {"JOBS": "4"})
     u, c, ids, d = fold(root, [r[g] for g in ROWS[gate]])
     return u, c, ids, d
 
