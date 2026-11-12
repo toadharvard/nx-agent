@@ -73,8 +73,6 @@ LIBNX_INC=${LIBNX_INC:-}
 PINC=("-I$HERE/include" -iquote "$ROOT/shim/include" "-I$ROOT/shim/include" "-I$HERE/crt" "-I$TCDIR/include" "-I$ROOT/loader/include"
       "-I$EXT/minimp3" "-I$EXT/freetype/include" -D__LINUX_ERRNO_EXTENSIONS__)
 [ -z "$LIBNX_INC" ] || PINC+=(-idirafter "$LIBNX_INC")
-# platform files of the host side (LP64 / libnx), not part of the guest (guest_link.py HOST_SIDE)
-HOST_SIDE=(platform_host/input/input_horizon.cpp platform_host/audio/backend_audren.c platform_host/os/os_horizon.c platform_host/os/os_posix.c platform_host/win32/filemap_shared.cpp)
 
 # ---- FreeType: module list and defines of tests/s4/Makefile (read from it, not copied)
 S4MK=$ROOT/tests/s4/Makefile
@@ -150,10 +148,8 @@ OBJ=$OUT/obj
 rm -rf "$OBJ" "$OUT/logs"; mkdir -p "$OBJ" "$OUT/logs"
 JOBLIST=$OUT/jobs.txt
 : >"$JOBLIST"
-is_host_side() { local r=$1 h; for h in "${HOST_SIDE[@]}"; do [ "$r" = "$h" ] && return 0; done; return 1; }
 add_src() {                                                         # absolute source path
     local s=$1 rel=${1#"$ROOT/"}
-    if is_host_side "$rel"; then return 0; fi
     case $s in
         *.c)   echo "c $s $OBJ/${rel//\//_}.o" >>"$JOBLIST" ;;
         *.cpp) echo "cxx $s $OBJ/${rel//\//_}.o" >>"$JOBLIST" ;;
