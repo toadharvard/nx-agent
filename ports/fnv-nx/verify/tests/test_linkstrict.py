@@ -183,7 +183,7 @@ items, finds = L.judge({"g/o.o": hs}, {}, {}, {}, (["h/"], set(exp)))
 check("(d) the same object in a guest root (not a host prefix): printf is undefined too, no boundary", sorted(n for _, n, _, _ in finds) == ["nothere", "printf"], finds)
 items, finds = L.judge({"h/o.o": hs}, {}, {}, {}, None)
 check("(d) without host roots the rule does not exist: printf and nothere are undefined", sorted(n for _, n, _, _ in finds) == ["nothere", "printf"], finds)
-HB = '#include "toy.h"\nint printf(const char *, ...);\nint f_b(void) { return printf("x") + TOY; }\n'
+HB = '#include "inc/toy.h"\nint printf(const char *, ...);\nint f_b(void) { return printf("x") + TOY; }\n'
 (rc, g, _, txt), st = LS(TR.make_repo("ls-host", rec=TR.mut(link=None), files={"toy/b.c": HB}), "t6", GC)
 check("gate on a host-target root without a link: a reference to printf is certified, accepted", rc == 0 and g["certified"] == g["universe"] and st[0] == "green", (g, txt))
 HW = HB.replace("printf", "nothere_zz")

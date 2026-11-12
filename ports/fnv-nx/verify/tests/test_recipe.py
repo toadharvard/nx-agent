@@ -527,7 +527,7 @@ def rule_a_cases(SS, ext_cache):
     # a file in the library tree is a unit by the rule "all" (no exclude list): the build is red, naming it, until a patch deletes it
     rr = recipe.build(make_repo("ra-all", rec=rec, files=files), ROOT, SS, BASE + "/ra0", ext=ext_cache)
     check("rule A: every source of the external tree is a unit (no exclude list): the unbuildable skip.c makes the build red", rr["status"] == "red"
-          and "clib:src/skip.c" in rr["failed_units"] and "clib:src/lib.c" not in rr["failed_units"], rr.get("failure"))
+          and "clib:src/skip.c" in [f["unit"] for f in rr["failed_units"]] and "clib:src/lib.c" not in [f["unit"] for f in rr["failed_units"]], rr.get("failure"))
     c2, h2 = publish("clib2", tree({"src/lib.c": '#include <lib.h>\nint lib_add(int a, int b) { return a + b; }\n', "include/lib.h": "int lib_add(int a, int b);\n"}))
     cl2 = dict(cl, name="clib2", ref="clib2", commit=c2, tree_sha256=h2, at="/ext/clib2")
     rec2 = json.loads(json.dumps(rec).replace("clib", "clib2").replace("clib22", "clib2"))
@@ -557,7 +557,7 @@ def rule_a_cases(SS, ext_cache):
     e1 = errs(mut(include=[ROOT + "/inc"]))
     check("include inside the root is refused: use a quoted relative include", any("include %s/inc is inside the root; use a quoted relative include" % ROOT in e for e in e1), e1)
     # 3m: include dirs are mounted at their repo paths in one mirrored tree; only declared files are visible
-    lib = {"path": T + "lib", "class": "tool", "gates": []}
+    lib = {"path": T + "lib", "class": "headers", "gates": []}
     mf = dict(only_c, **{"toy/a.c": '#include "a.h"\nint f_a(void) { return AV + BV; }\n', "lib/a/a.h": '#include "../b/b.h"\n#define AV 1\n',
                          "lib/b/b.h": "#define BV 2\n", "lib/c/c.h": "#define CV 3\n"})
     mrec = dict(base, include=[T + "lib/a", T + "lib/b"])

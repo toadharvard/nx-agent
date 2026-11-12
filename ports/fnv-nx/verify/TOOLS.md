@@ -1391,6 +1391,18 @@ that writes no "findings", is red. Universe: the fixtures of all roots. Certifie
 No fixture: universe 0, green. The fixture objects are in no other gate's universe (units_of and objects.json exclude them).
 ```
 
+## verify/gate_headers.py
+
+```text
+Gate "headers" (fnvnx-gate/1): every header of every admitted headers tree is read by an admitted unit (RECIPE.md "Headers trees").
+    python3 -I gate_headers.py     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/headers.json
+Universe: every tracked file under a root of class `headers` in verify/admit.json (admit.json refuses a unit file, a recipe and a link there).
+Certified: a file that the preprocessor stage of at least one unit of an admitted product root (every variant) read: the stage's own
+dependency list (deps.d of the stage result found by the pp_key of objects.json), so a header is certified through the units that include it, and
+those units' objects are judged by objstub and the other gates. A header no unit reads is not certified (uncertified lists them, <= 50, and the
+detail gives the count). A root whose build is red certifies nothing. No headers tree: universe 0, green.
+```
+
 ## verify/gate_oracle.py
 
 ```text

@@ -22,8 +22,8 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 ## Keys (any other key is an error; all problems are listed at once)
 - `compiler`: driver names under `/usr/bin` that env.json provides, or `{"external": NAME, "cc": PATH, "cxx": PATH}` (paths inside the external).
 - `flags`: per language. Refused: `-I*` (use `include`), `-o -c -E -S -x -M*`, and the refusal set R below.
-- `include`: repo-relative directory inside an admitted root (tracked files, or generated outputs of this root), or an absolute path inside an
-  external's `at`. Included files are inputs by content; a file the unit reads that is not in them does not exist for it.
+- `include`: repo-relative directory inside an admitted `headers` tree (Headers trees), or an absolute path inside an external's `at`. Another root's
+  own tree (tool, product, doc) is refused, and so is the root's own tree. Included files are inputs by content; a file the unit reads that is not in them does not exist for it.
   Mirror (3m): the stages see ONE tree at `/src`, a mirror of the repo that holds only declared files: the root's own files (units, generated
   outputs, patched external trees) at `/src/<root>/...` and each `include` directory at `/src/<its repo path>`, passed as `-I/src/<path>`. So
   `"..."` and `../` resolve as in the source tree; a `../` that leaves the declared set names a file that does not exist (a compile error in the
@@ -134,6 +134,18 @@ built first by the same build, in the same store (its stage keys and stage count
 kind `built`) runs the executable at `/built/<R with / as __>/NAME`, whose loader closure is resolved as for an external compiler (`HOST@AT`).
 `args`, `inputs` (at `/in/<repo path>`) and `outputs` follow the python rule: it writes only `/out/<output>`, and the set of files it writes must
 equal `outputs` exactly (else red, naming both sets). A cycle between roots is a RecipeError. The outputs are part of the determinism gate's two cold builds.
+
+## Headers trees (admit class `headers`)
+
+`verify/admit.json` entry `{"path": P, "class": "headers", "gates": ["headers"]}`: a tracked tree of header files shared by roots (for example the
+declarations of the platform's host API). It has no `recipe`/`target`, no unit file (`.c .cc .cpp .cxx .S .s`: admit refuses it), no link and no outputs.
+- A root uses it only by listing a directory of it in its recipe `include` (`-I/src/<path>` in the mirror, RECIPE "3m"): there are no ambient `-I`
+  paths, and a root that does not list the tree does not see it (a quoted `../` into it is a missing file). `check()` refuses an `include` that is
+  in no admitted root and no external, or inside a root that is not a headers tree.
+- The PP key stays the content of every header the stage actually reads (nothing about the tree as a whole).
+- Certificates: admit counts every file of the tree as covered by the entry. The gate `headers` (gate_headers.py) certifies a header only through
+  the admitted units whose PP stage read it (the stage's deps), and a header no unit reads is not certified (the detail gives the count). The code in a
+  header is built into the objects of the units that include it, so objstub and the object gates judge it through those units.
 
 ## Fixtures (`"fixtures"`)
 
