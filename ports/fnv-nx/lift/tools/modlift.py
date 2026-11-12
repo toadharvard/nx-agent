@@ -120,13 +120,12 @@ def run(arg):
             for t in tg: pm.setdefault(t, set()).add(a)
             if fall: pm.setdefault(a + sz, set()).add(a)
         def ins_at(a): return next(md.disasm(text[a - T0:a - T0 + 15], a, 1), None) if T0 <= a < T1 else None
-        def pred1(x): p = pm.get(x); return next(iter(p)) if p and len(p) == 1 else None
         def u8(a):
             try: return u32(a) & 0xff
             except Exception: return None
         n = 0
         for a in sorted(jtab):
-            tg, why = JT.resolve(a, ins_at(a), ins_at, pred1, lambda x: x in ent or x in callers, rset, u32, u8, intext, lambda v: intext(v))
+            tg, why = JT.resolve(a, dec, ins_at, lambda x: pm.get(x, ()), lambda x: x in ent or x in callers, rset, u32, u8, intext, TN // 4)
             if tg is None: jt_red[a] = why; continue
             jt_red.pop(a, None)
             if a not in jt_ok or jt_ok[a] != tg:
