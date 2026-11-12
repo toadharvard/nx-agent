@@ -825,3 +825,14 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Decision A′: a case is a test_* function, or a call to the single shared case() in verify/testcase.py, resolved through its import.
   - All 85 script-style files are migrated to it mechanically.
 - Header homes have one form: unit-less product roots. w16's `headers` class is dropped (L6 confirmed it would be a second mechanism).
+
+## 2026-11-12 10:10 UTC
+- **Cache-key class**, found by L3a w6: a gate key hashes only its entry file, not the modules it imports.
+  - w17 takes it on branch w17k, with a single import_closure(entry):
+    - the closure is static, over the ast, using only constant sys.path changes;
+    - dynamic or non-constant imports are red;
+    - a runtime check confirms sys.modules ⊆ closure ∪ stdlib ∪ env.
+  - Gate keys and w19's selftests keys both use it.
+- **L5 w9 526c4e249 accepted:** funcfacts is built on imagerec, and the CodeRead BaseException change is reviewed.
+  - Census at facts 2eeea27: 21669 refused relocations over 7 images.
+  - It waits on L3a's DIC facts.
