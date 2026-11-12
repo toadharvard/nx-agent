@@ -12,7 +12,6 @@
    "-mtune=cortex-a57",
    "-fPIE",
    "-fsigned-char",
-   "-O2",
    "-g",
    "-ffunction-sections",
    "-fdata-sections",
@@ -22,9 +21,14 @@
    "-Wconversion",
    "-Wno-sign-conversion",
    "-Werror",
-   "-std=c99"
+   "-Werror=attributes",
+   "-std=c99",
+   "-O2"
   ],
-  "cxx": [],
+  "cxx": [
+   "-mabi=ilp32",
+   "-Werror=attributes"
+  ],
   "asm": [
    "-mabi=ilp32"
   ]
@@ -42,5 +46,60 @@
    "tree_sha256": "b60eafe7a5b0ae3dc679f9bf21e20d3363e3bac2af7379e34127ea5cf8455116",
    "at": "/ext/gcc"
   }
- ]
+ ],
+ "variants": {
+  "asan": {
+   "flags": {
+    "c": [
+     "-mabi=ilp32",
+     "-march=armv8-a+crc+crypto",
+     "-mtune=cortex-a57",
+     "-fPIE",
+     "-fsigned-char",
+     "-g",
+     "-ffunction-sections",
+     "-fdata-sections",
+     "-Wall",
+     "-Wextra",
+     "-Wshadow",
+     "-Wconversion",
+     "-Wno-sign-conversion",
+     "-Werror",
+     "-Werror=attributes",
+     "-std=c99",
+     "-O1",
+     "-fsanitize=address,undefined",
+     "-fno-omit-frame-pointer"
+    ],
+    "cxx": [
+     "-mabi=ilp32",
+     "-Werror=attributes"
+    ],
+    "asm": [
+     "-mabi=ilp32"
+    ]
+   }
+  },
+  "host": {
+   "compiler": {
+    "cc": "gcc-13",
+    "cxx": "g++-13"
+   },
+   "flags": {
+    "c": [
+     "-O2",
+     "-g",
+     "-Wall",
+     "-Wextra",
+     "-Wshadow",
+     "-Wconversion",
+     "-Wno-sign-conversion",
+     "-Werror",
+     "-std=c99"
+    ],
+    "cxx": [],
+    "asm": []
+   }
+  }
+ }
 }
