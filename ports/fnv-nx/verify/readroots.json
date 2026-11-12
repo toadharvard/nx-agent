@@ -1,0 +1,20 @@
+{
+ "format": "fnvnx-readroots/1",
+ "doc": "Host C/C++ roots built outside recipe.py (their build scripts name the compile line). Each is preprocessed with the host gcc (`gcc -M`, cwd = root cwd); every system header it reads must belong to a package of env.json (packages + dependency closure): envcheck check (a read of a header owned by no pinned package, or a header that is missing, is a mismatch) and envcheck snapshot (the packages that own the reads are pinned). Replaced by the PP read set of the recipe stage when a root enters recipe.py.",
+ "roots": [
+  {
+   "name": "gl4",
+   "cwd": "ports/fnv-nx/render/d3d9/backend",
+   "source": "build_gl4.sh",
+   "flags": [
+    "-std=c11",
+    "-I.",
+    "-I../../shaders/include"
+   ],
+   "sources": [
+    "gl4_*.c",
+    "nxgpu4_check.c"
+   ]
+  }
+ ]
+}
