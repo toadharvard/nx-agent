@@ -277,3 +277,9 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - On it go L2 w6 00576a10 (the shim/include headers admission, the one copy, 68 headers) and then our root files.
     - w6 drops its own shim copy; any header need goes to L2 w6.
     - Blocked on L1's head.
+- 04:45Z Merged w5 a3029d14 as 9826ef37: op_syntax, op_cover and op_reserved records (measurement; env mismatch open).
+    - Counts: emit a 3 / b 7 / c 1 / own 161; args a 13 / c 1 / none 2.
+    - 3 red syntax rows (pages without a Syntax line). Proposed to L1: the wined3d SM1 opcode table as a second structured source.
+    - Found: 9 GLSL emitters EMIT_GLSL_OPCODE_UNIMPLEMENTED_FUNC (ps_1_x tex ops and BEM). This is a stub class.
+        - w1b implements all 9 from Wine 9.0 glsl_shader.c: doing.
+        - Proposed to L1: a structural objstub class for "every path reaches the failure function".
