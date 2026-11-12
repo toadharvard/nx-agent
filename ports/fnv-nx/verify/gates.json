@@ -301,6 +301,15 @@
     "ports/fnv-nx/verify/gate_r7gate.py"
    ],
    "result": "r7.json"
+   },
+  {
+   "name": "datamodel",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_datamodel.py"
+   ],
+   "result": "datamodel.json"
   }
  ]
 }

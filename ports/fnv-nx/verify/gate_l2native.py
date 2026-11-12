@@ -105,6 +105,8 @@ def judge_native_root(gate, repo, cache, root, rows_of, select_rows, certified, 
                 raise gc.Red("the cl reference objects %s/obj are missing (owner L2): the pristine MSVC objects of the msvc external" % doc["msvc"])
             return judge_files(rec["game"], objs["objects"], cl, rp["units"], load_addrmap(rp["addrmap"]), load_bodysel(w + "/bodysel.tsv"),
                                rows_of, select_rows, certified, row_id, root)
+    except gc.Skip as e:
+        return 0, 0, [], str(e)
     except gc.Red as e:
         return 1, 0, [root + ":inputs"], str(e)[:600]
     except (recipe.RecipeError, recipe.BuildRed, OSError, KeyError, ValueError) as e:
