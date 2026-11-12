@@ -31,6 +31,10 @@ fetch_branch() {   # fetch_branch <branch> <dir>: a worktree of the branch head 
     if [ ! -d "$d" ]; then git -C "$B" fetch -q --depth 1 origin "$1"; git -C "$B" worktree add -f "$d" FETCH_HEAD >/dev/null; fi
 }
 
+# 0. python dependencies of the prover (versions as measured; PyPI is reachable on the farms): capstone (shape.py, the decoder) and keystone-engine (enc_table.py,
+#    imported by prove.py); z3-solver is installed by sail_setup.sh from the mirror wheel
+python3 -c 'import capstone, keystone' 2>/dev/null || python3 -m pip install -q --break-system-packages "capstone==5.0.9" "keystone-engine==0.9.2"
+
 # 1. toolchain: the installed one, else built from the mirror branch (sail_setup.sh prints the IR sha256 and exits 1 unless it equals the pin)
 ISLA=${ISLA_EXEC:-/home/user/rems-project/isla/target/release/isla-execute-function}
 if [ ! -x "$ISLA" ] || [ ! -f "$WORKDIR/sail/x86_proof.ir" ]; then
