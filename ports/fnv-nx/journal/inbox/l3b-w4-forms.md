@@ -92,3 +92,14 @@ Model answer, one representative encoding per class (27 encodings, prove_one on 
 (cpuid, rdtsc) have no model counterpart at all (the model does not implement either), so "uf matched to the model" has no answer: the declared machine's cpuid / platform timer are not a model fact.
 Fault kinds 4-11 in the model-faults table (prove.MODEL_FAULT): none. Kinds 4,5,6,8,9,10,11 correspond to no model message; kind 7 = :NON-WRITABLE-SEGMENT (CS store) only; 1 = DE. The Windows reporting of
 kinds 2-11 is the platform's (KiTrap0D / Wine 9.0), not the model's. A certificate for them needs another reference: L3b/orchestrator decision (no hand-written model hunk).
+
+## 9. Farm questions (w4, answers)
+PUBLISH=0 rerun: PUBLISH=0 proves and writes DIR/shapeprove_K_of_N.jsonl in the work dir, publishes nothing, and does not read the published shards. A later run without PUBLISH=0 publishes the same rows ONLY IF the queue id is
+unchanged (the same OUT dir <IR id>-<queue id>, shapeprove.py resumes: rows already in the jsonl are skipped). The queue id is a function of the published shards (a shape with a valid certificate leaves the queue), so as soon as any
+farm publishes, a rerun has another id, another OUT dir, and proves again. The rows themselves stay valid (key, shape_sha, IR sha): publish by the farm path or by certs_build --shards of the jsonl, not by id.
+Queue id vs KEYS.tsv: the farm script fetches the HEAD of the branch l3b-lift/shapes (not a commit). A re-pinned census pushed to that branch changes the shape union and so the queue id of every farm that starts afterwards.
+Rule: the re-pinned census goes to ANOTHER branch (farm_shapeprove.sh now has SHAPES_BRANCH, default l3b-lift/shapes); l3b-lift/shapes @77524556 is never moved.
+Selector hunk e2975877: dsl.XIN += sel_es/cs/ss/ds/fs/gs (16 bit, SEG_* order); push sreg Form = 16-bit store (pinned model x86-push-segment-register: 'a 16-bit move, leaving the upper portion of the stack location unmodified'; so the
+32-bit slot keeps its upper half, the Form is written from the model); prover: a Form that reads sel_* runs isla without the uniform seg_visibles literal (the six selectors are free, isla prints (_ vec v0..v5), element i = SEG_* i). No IR change
+(IR sha 70c8dc39 unchanged, existing certificates untouched). Proved: 06 0e 16 1e 0fa0 0fa8 661e. pop sreg / mov sreg are NOT in it: they write a selector (and, for FS, the base); the Form has no selector output slot (needs an output
+in dsl.Form and f_dsl: L3a's side) and the model does not implement them.

@@ -13,7 +13,7 @@
 #   Already published: nothing is re-run.
 # Resumable: rerun the same command after an interruption (the jsonl is appended, shapes already in it are skipped).
 # Env: FNVNX_BUILD (clone of fnv-nx-build, default /home/user/fnv-nx-build)  FNVNX_WORK (default /home/user/l3work/farm-shapeprove)
-#      BRANCH_PREFIX (default l3b-lift/shapeprove; tests use l3b-lift/shapeprove-test)  PUBLISH (1 default; 0: prove only)
+#      SHAPES_BRANCH (default l3b-lift/shapes; the census branch, KEYS.tsv-pinned; a re-pinned census goes to ANOTHER branch, the running farms read the head of this one)  BRANCH_PREFIX (default l3b-lift/shapeprove; tests use l3b-lift/shapeprove-test)  PUBLISH (1 default; 0: prove only)
 #      TIMEOUT (s per shape, default 600)  EIP (sym|fixed, default sym)  SLICE (default 1)  LIMIT (first LIMIT shapes of the shard, default all)
 #      VMEM_KB (address-space limit per process, default 6000000)  SHAPES (a shapes.tsv: skips the fetch of l3b-lift/shapes; local tests)
 # Last line: SHAPEPROVE shard=K/N id=ID shapes=<n> proved=<n> ... seconds=<wall> ; exit 1 if publication failed.
@@ -58,7 +58,7 @@ grep -q "^x86_proof.ir .* $SHA\$" "$HERE/sail_pins.txt" || { echo "IR sha256 $SH
 
 # 2. shapes: l3b-lift/shapes (each module's shapes.tsv is checked against the sha256 in KEYS.tsv); the union of the modules' shape keys is the universe
 if [ -z "${SHAPES:-}" ]; then
-    fetch_branch l3b-lift/shapes "$W/in/shapes"
+    fetch_branch "${SHAPES_BRANCH:-l3b-lift/shapes}" "$W/in/shapes"
     python3 -I - "$W/in/shapes" <<'PY' || { echo "a shapes.tsv of the shapes branch does not match KEYS.tsv" >&2; exit 1; }
 import hashlib, os, sys
 d = sys.argv[1]
