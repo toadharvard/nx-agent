@@ -198,13 +198,15 @@ fi
 # devkitA64's gcc links `--start-group -lsysbase -lc --end-group` (devkitPro gcc patch, LIB_DEFAULT_SPEC): newlib's libc takes
 # its syscall layer (_exit, __getreent, locks) from libsysbase. Plain gcc 13.3 links -lc only, so configure's link tests of the
 # target libraries cannot succeed. The scratch driver gets the same library group in a `specs` file of its own libdir (scratch
-# prefix only; nothing of it enters the mirror).
+# prefix and build tree only; nothing of it enters the mirror).
 if ! step s2specs; then
-	cat > "$S2/lib/gcc/$TARGET/$GCC13_VER/specs" <<'EOF2'
+	cat > "$BUILD/s2.specs" <<'EOF2'
 *lib:
 %{!shared:%{g*:-lg} %{!p:%{!pg:--start-group -lc -lsysbase --end-group}}%{p:-lc_p}%{pg:-lc_p}}
 
 EOF2
+	cp "$BUILD/s2.specs" "$S2/lib/gcc/$TARGET/$GCC13_VER/specs"   # the installed driver
+	cp "$BUILD/s2.specs" "$BUILD/b-gcc13/gcc/specs"               # the build-tree driver (xgcc) the target libraries are built with
 	done_ s2specs
 fi
 if ! step s2newlib; then
