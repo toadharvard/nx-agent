@@ -7,7 +7,7 @@ Form-level conventions: fault(code, cond) = the instruction raises DE/BP/UD when
 model driver does not expose, so a form that writes them can only be certified on its observable fields."""
 import os, sys
 sys.path.insert(0, os.environ.get('FNVLIFT_ROOT') or os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from fnvlift.dsl import C, Form, V, bit, concat, eq, extract, load, msb, trunc
+from fnvlift.dsl import C, Form, V, bit, concat, eq, extract, load, msb, trunc, zext
 from capstone import x86 as X
 
 R8 = ['al', 'cl', 'dl', 'bl', 'ah', 'ch', 'dh', 'bh']; R16 = ['ax', 'cx', 'dx', 'bx', 'sp', 'bp', 'si', 'di']
@@ -45,10 +45,13 @@ class Op:
         if s.w == 16: return 'e' + n, 0
         return 'e' + n[0] + 'x', (8 if n[1] == 'h' else 0)
 def ea(op, esp=None):
-    sub = lambda n: esp if (n == 'esp' and esp is not None) else V(n, 32)
+    """effective address. 16-bit addressing (67 prefix; capstone names the base / index registers bx bp si di): the 16-bit register is the low half of the 32-bit one
+    (a subregister view), base + index + disp are summed modulo 2^16 and zero-extended (SDM Vol 1 3.7.5), the segment base is added after. Same rule as core.Ctx.ea."""
+    sub = lambda n: esp if (n == 'esp' and esp is not None) else V('e' + n if n in R16 else n, 32)
     a = C(op.disp, 32)
     if op.base: a = a + sub(op.base)
     if op.index: a = a + sub(op.index) * op.scale
+    if (op.base in R16) or (op.index in R16): a = zext(trunc(a, 16), 32)
     if op.seg: a = a + V(op.seg + '_base', 32)
     return a
 def rd(op, w=None):

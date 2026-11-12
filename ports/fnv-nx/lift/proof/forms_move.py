@@ -34,13 +34,13 @@ def xlat(c): wr(c.F, Op.reg('al', 8), load(V('ebx', 32) + zext(extract(V('eax', 
 
 @handler('push')
 def push(c):
-    F, o = c.F, c.ops[0]; v = rd(o, 32)
-    F.reg('esp', V('esp', 32) - 4); F.store(V('esp', 32) - 4, v)
+    F, o = c.F, c.ops[0]; w = 16 if c.o16 else 32; v = rd(o, w)      # operand size: the 66 prefix pushes a word (SDM PUSH), the stack size is 32 bits
+    F.reg('esp', V('esp', 32) - w // 8); F.store(V('esp', 32) - w // 8, v)
 @handler('pop')
 def pop(c):
-    F, o = c.F, c.ops[0]; esp = V('esp', 32); F.reg('esp', esp + 4)
-    if o.k == 'm': F.store(ea(o, esp + 4), load(esp, 32))      # SDM POP: ESP as base of the destination is incremented before the address is computed
-    else: wr(F, o, load(esp, 32))
+    F, o = c.F, c.ops[0]; w = 16 if c.o16 else 32; esp = V('esp', 32); F.reg('esp', esp + w // 8)
+    if o.k == 'm': F.store(ea(o, esp + w // 8), load(esp, w))      # SDM POP: ESP as base of the destination is incremented before the address is computed
+    else: wr(F, o, load(esp, w))
 @handler('pushal', 'pushad')
 def pushad(c):
     F, esp = c.F, V('esp', 32)

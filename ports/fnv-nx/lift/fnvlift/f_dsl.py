@@ -38,8 +38,8 @@ def supported(ins):
 
 def varc(cx):
     def v(name):
-        if name == 'gs_base':
-            raise Unsupported('segment')
+        if name == 'gs_base':      # the GS base is a function of the CURRENT GS selector (core.Ctx.ea); the null / code-selector #GP is the guard core.gs_guard emits before the instruction
+            return 'FNVL_GS_BASE()'
         if name == 'fs_base':
             cx.usesfs = True
         if name in dsl.REGS or name in SIXFLAGS or name in STATE:
