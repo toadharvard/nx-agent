@@ -2,7 +2,9 @@
 """Gate "admit" (fnvnx-gate/1): nothing is in the trunk without the gates that close its classes of failure.
     python3 -I gate_admit.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/admit.json
 
-Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"path", "class", "gates", ["recipe"], ["imports"], ["trees"]}.
+Rule. verify/admit.json ("fnvnx-admit/1") lists the roots of the port tree: {"path", "class", "gates", ["recipe"], ["imports"], ["trees"], ["entry"]}.
+`entry` (class tool: required, may be empty): the stage entry points of the root, .py files inside its trees. gate_pure's universe is the
+import closure of these and of the `generated` tools of the recipes; a script only a gate driver runs is not an entry point.
 `trees` (optional): the list of the directories (or exact files) of one root, at least two, the first equal to "path"; the root's
 universe is their union, and its python is judged in one puregate run, so trees that import each other form ONE root with no
 file moved. Two roots never share or nest a tree. The root is named by "path" in `imports`.
@@ -98,6 +100,11 @@ def judge(files, admit, gate_names, exists):
         if "trees" in r and not (isinstance(r["trees"], list) and len(r["trees"]) >= 2 and r["trees"][0] == path
                                  and len(set(r["trees"])) == len(r["trees"]) and all(isinstance(t, str) for t in r["trees"])):
             why.append("trees is not a list of at least two distinct paths starting with path")
+        if cls == "tool":
+            en = r.get("entry")
+            if not isinstance(en, list) or any(not isinstance(e, str) or not e.endswith(".py") or not exists(e)
+                                               or not any(e.startswith(t + "/") for t in trees(r)) for e in en):
+                why.append("entry is not a list of existing .py files inside the root's trees")
         for t in (trees(r) if not why else [path]):
             if not t or t != t.strip("/") or not (t == TREE or t.startswith(TREE + "/")):
                 why.append("%s is not below %s" % (t, TREE))
