@@ -116,3 +116,4 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - 03:11Z w20 5126d5b0 deletes onexit.c and its set: 278 lines in 49 files → 223 in 40 at 3fb7f9bc→5126d5b0, journal excluded; 121 of the remainder are newlib crt_symbols rows.
   - platform/crt keeps _onexit, __dllonexit, exit and _amsg_exit (imported by d3dx9_31/38); deleted atexit, doexit, _cexit and _c_exit (no importer).
   - Next, same class: the xc runner (xc.c, mkxctab, XC1/XC2, dyninit_rewrite's ??__E emission). Verdict pending: envcheck fails in w20's container, so the env setup is rerun.
+- 03:13Z MERGER order for L1: exepin (w4, priority from the orchestrator: a required gate for product roots), w16, w17, w12. env.json conflicts resolved by union of disjoint pins (authorized).
