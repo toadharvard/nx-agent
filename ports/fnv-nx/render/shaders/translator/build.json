@@ -93,7 +93,8 @@
    "patches": [
     "mojoshader.patch",
     "mojoshader_units.patch",
-    "mojoshader_prune.patch"
+    "mojoshader_prune.patch",
+    "mojoshader_sm.patch"
    ],
    "include": [
     "."
