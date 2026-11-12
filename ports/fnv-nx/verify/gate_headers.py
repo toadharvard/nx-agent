@@ -39,12 +39,22 @@ def read_set(repo, cache):
         if res["status"] == "red":
             why.append("%s: build red at %s" % (root, res["failure"]["stage"]))
             continue
+        try:
+            rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
+        except (OSError, KeyError, ValueError):
+            rec = {}
+        # /inc/N = the N-th include dir that is no external (recipe order, see Build.includes): back to its repo path
+        incs = [d for d in rec.get("include", []) if not d.startswith("/")]
         for key in res["pp_keys"].values():
             text = open(unitstage.result_file(store, key, "deps.d")).read()
             for p in unitview.parse_deps(text):
                 p = posixpath.normpath(p)
                 if p.startswith("/src/"):
-                    seen.add(p[len("/src/"):])
+                    seen.add(root + "/" + p[len("/src/"):])
+                elif p.startswith("/inc/"):
+                    n, _, rest = p[len("/inc/"):].partition("/")
+                    if n.isdigit() and int(n) < len(incs):
+                        seen.add(incs[int(n)] + "/" + rest)
     return seen, why
 
 

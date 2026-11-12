@@ -105,7 +105,7 @@ def main():
            "cc": "bin/cc", "cxx": "bin/c++"}
     files = {"toy/a.c": UNIT, "toy/constants.tsv": None, "toy/os.S": None, "verify/guest_compiler.json": json.dumps(pin)}
     OK = {"c": ["-O2", "-fno-asynchronous-unwind-tables", "-fPIE"], "cxx": [], "asm": []}
-    rec = TR.mut(link=None, os_layer=[], constants=None, generated=[], include=[], flags=OK)
+    rec = TR.mut(link=None, os_layer=[], constants=None, generated=[], include=[TR.ROOT + "/inc"], flags=OK)
     repo = TR.make_repo("sd-ok", rec=rec, files=files)
     res = recipe.build(repo, TR.ROOT, TR.BASE + "/st", TR.BASE + "/o1", ext=TR.BASE + "/ec")
     check("recipe: a distribution-compiler root with a reference pin builds", res["status"] == "green", res.get("failure"))
@@ -115,11 +115,11 @@ def main():
     cached = [json.load(open(os.path.join(TR.BASE, "st", "rt", n))) for n in os.listdir(TR.BASE + "/st/rt") if n.startswith("specdefaults-")]
     check("recipe: the derived set is cached once, keyed on environment, drivers, reference pin and derivation code",
           len(cached) == 1 and "-fno-stack-protector" in cached[0]["c"]["forced"] and "-U_FORTIFY_SOURCE" in cached[0]["cxx"]["forced"], cached)
-    bad = TR.mut(link=None, os_layer=[], constants=None, generated=[], include=[], flags=dict(OK, c=OK["c"] + ["-fstack-protector-strong"]))
+    bad = TR.mut(link=None, os_layer=[], constants=None, generated=[], include=[TR.ROOT + "/inc"], flags=dict(OK, c=OK["c"] + ["-fstack-protector-strong"]))
     resb = recipe.build(TR.make_repo("sd-bad", rec=bad, files=files), TR.ROOT, TR.BASE + "/st", TR.BASE + "/o2", ext=TR.BASE + "/ec")
     check("recipe: a root that sets a flag of the derived family is red at specdefaults, naming it",
           resb["status"] == "red" and resb["failure"]["stage"] == "specdefaults" and "-fstack-protector-strong" in " ".join(resb["failure"]["stderr"]) and "implicit" not in " ".join(resb["failure"]["stderr"]), resb.get("failure"))
-    imp = TR.mut(link=None, os_layer=[], constants=None, generated=[], include=[], flags={"c": ["-O2"], "cxx": [], "asm": []})
+    imp = TR.mut(link=None, os_layer=[], constants=None, generated=[], include=[TR.ROOT + "/inc"], flags={"c": ["-O2"], "cxx": [], "asm": []})
     resi = recipe.build(TR.make_repo("sd-implicit", rec=imp, files=files), TR.ROOT, TR.BASE + "/st", TR.BASE + "/o4", ext=TR.BASE + "/ec")
     check("recipe: a root that leaves PIE implicit is red at specdefaults (implicit target choice); stating -fPIE (the ok root above) is green",
           resi["status"] == "red" and resi["failure"]["stage"] == "specdefaults" and "implicit target choice" in " ".join(resi["failure"]["stderr"]), resi.get("failure"))

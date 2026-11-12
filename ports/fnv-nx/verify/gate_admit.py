@@ -149,7 +149,8 @@ def judge(files, admit, gate_names, exists, ref_paths=frozenset(), covers=None, 
                 ex = r.get("expect")
                 if not (isinstance(ex, list) and ex and all(isinstance(e, dict) and set(e) == {"gate", "code"} and e["gate"] in gate_names
                                                           and isinstance(e["code"], str) and e["code"] for e in ex)):
-                    why.append('a fixture root declares "expect": a non-empty list of {"gate": a gate of gates.d, "code": a finding code}')
+                    why.append('a fixture root declares "expect": a non-empty list of {"gate": a gate of gates.d, "code": a finding code}%s'
+                               % "".join("; %r is no gate of gates.d" % e["gate"] for e in (ex if isinstance(ex, list) else []) if isinstance(e, dict) and e.get("gate") not in gate_names))
             if cls in ("product", "test", "fixture"):
                 rec = r.get("recipe", "")
                 if not any(rec.startswith(t + "/") for t in trees(r)) or not exists(rec):
@@ -163,7 +164,8 @@ def judge(files, admit, gate_names, exists, ref_paths=frozenset(), covers=None, 
         for b, j in paths[n + 1:]:
             if a == b or a.startswith(b + "/") or b.startswith(a + "/"):
                 inner = a if a.startswith(b + "/") else b if b.startswith(a + "/") else None
-                if not (inner is not None and cls_of_tree[inner] == "headers"):   # a headers tree may nest in another root and owns its files
+                outer = b if inner == a else a
+                if not (inner is not None and cls_of_tree[inner] == "headers" and cls_of_tree[outer] != "headers"):   # a headers tree may nest in another root and owns its files
                     errors.append("trees %s and %s overlap" % (a, b))
     cls_of = {r.get("path", ""): r.get("class") for r in admit.get("roots", [])}
     bad = {}

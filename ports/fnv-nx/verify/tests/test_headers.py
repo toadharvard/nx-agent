@@ -21,7 +21,7 @@ HDR_ROOT = {"path": T + "hdr", "class": "headers", "gates": ["headers"]}
 GC = TR.BASE + "/gcache"
 A = '#include "h.h"\nint f_a(void) { return HV; }\n'
 FILES = {"toy/a.c": A, "hdr/h.h": "#define HV 3\n", "hdr/unused.h": "#define UNUSED 1\n"}
-REC = lambda **kw: TR.mut(**dict(dict(link=None, os_layer=[], constants=None, generated=[], include=[T + "hdr"]), **kw))  # noqa: E731
+REC = lambda **kw: TR.mut(**dict(dict(link=None, os_layer=[], constants=None, generated=[], include=[TR.ROOT + "/inc", T + "hdr"]), **kw))  # noqa: E731
 
 
 def mk(name, files=None, rec=None, roots=(HDR_ROOT,)):
@@ -46,7 +46,7 @@ def main():
     rc, g, txt = gate(TR.make_repo("h-none"), "headers", "g3")
     check("gate headers: no headers tree: universe 0, green", rc == 0 and g["universe"] == 0, (g, txt))
     # a root that does not list the tree does not see it: the mirror holds declared files only (no ambient -I)
-    res = recipe.build(mk("h-nolist", {"toy/a.c": '#include "../hdr/h.h"\nint f_a(void) { return HV; }\n'}, REC(include=[])), TR.ROOT, TR.BASE + "/st", TR.BASE + "/o2", ext=TR.BASE + "/ec")
+    res = recipe.build(mk("h-nolist", {"toy/a.c": '#include "../hdr/h.h"\nint f_a(void) { return HV; }\n'}, REC(include=[TR.ROOT + "/inc"])), TR.ROOT, TR.BASE + "/st", TR.BASE + "/o2", ext=TR.BASE + "/ec")
     check("a root that does not list the headers tree cannot include it (missing file, red at pp:a.c)", res["status"] == "red" and res["failure"]["stage"] == "pp:a.c", res.get("failure"))
     # include rules of check()
     lib = {"path": T + "lib", "class": "tool", "gates": []}
@@ -84,7 +84,7 @@ def main():
                                        "toy/a.c": '#include <stdint.h>\n#include "h.h"\nint f_a(void) { return HV; }\n'}), "headers", "g7")
     check("gate headers: a header that does not parse alone (not self-contained) is red", rc == 2 and "does not parse alone" in g["detail"], (g, txt))
     # nested roots: a headers tree may sit inside a root of another class and owns its files; any other nesting overlaps
-    outer = {"path": T + "lay", "class": "tool", "gates": ["selftests"]}
+    outer = {"path": T + "lay", "class": "tool", "gates": ["selftests"], "entry": [T + "lay/x.py"]}
     inner = {"path": T + "lay/include", "class": "headers", "gates": ["headers"]}
     bad, errs_ = gate_admit.judge([T + "lay/x.py", T + "lay/include/a.h"], {"format": "fnvnx-admit/1", "roots": [outer, inner]}, ["headers", "selftests"], lambda p: True)
     check("admit: a headers tree inside a tool root owns its files; the tool root keeps the others", not bad and not errs_, (bad, errs_))

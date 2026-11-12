@@ -192,7 +192,7 @@ class Build:
     def du(self, rel, files):
         """The macro-use fact of the unit: a `-dU` run on the same minimal view as the last PP run -> (key, result)."""
         ins = [(at, unitview.view(self.store, t, [p[len(at) + 1:] for p in files if p.startswith(at + "/")], self.cache)) for at, t in self.roots]
-        key, res, _, _ = run_stage(self.store, self.doc("pu", rel, ins, self.lang(rel)[0] + DU_TAIL, self.sp(rel)), self.cold)
+        key, res, _, _ = run_stage(self.store, self.doc("pu", rel, ins, self.lang(rel)[0] + DU_TAIL, "/src/" + rel), self.cold)
         return key, res
 
     def stderr(self, res):

@@ -40,7 +40,11 @@ def _full(repo, ent):
 
 def buildable_roots(repo="."):
     """The roots the build family (build, determinism, linkstrict, objstub) judges: the product roots and the test roots (admit class test)."""
-    return sorted(p for p, r in recipe.load_admit(repo).items() if r["class"] in ("product", "test"))
+    adm = recipe.load_admit(repo)
+    only = os.environ.get("GATE_ONLY_ROOT")   # a whole-root fixture (gate_fixtures.py): exactly that root
+    if only:
+        return [only] if only in adm and adm[only]["class"] in ("fixture", "product", "test") else []
+    return sorted(p for p, r in adm.items() if r["class"] in ("product", "test"))
 
 
 NO_ROOT = "no product root (nothing to build yet)"

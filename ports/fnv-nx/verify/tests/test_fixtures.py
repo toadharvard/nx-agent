@@ -16,8 +16,11 @@ import verdict  # noqa: E402
 T0 = time.time()
 FAILED = TR.FAILED
 check = TR.check
-GATES = json.dumps({"format": "fnvnx-gates/1", "gates": [{"name": "objstub", "argv": [sys.executable, "-I", VERIFY + "/gate_objstub.py"], "result": "objstub.json"},
-                                                          {"name": "fixtures", "argv": [sys.executable, "-I", VERIFY + "/gate_fixtures.py"], "result": "fixtures.json"}]})
+def _gf(name, script):
+    return json.dumps({"format": "fnvnx-gatefile/1", "name": name, "argv": [sys.executable, "-I", VERIFY + "/" + script], "result": name + ".json", "covers": ["test"] if name == "objstub" else ["fixture"]})
+
+
+GATES = {"verify/gates.d/objstub.json": _gf("objstub", "gate_objstub.py"), "verify/gates.d/fixtures.json": _gf("fixtures", "gate_fixtures.py")}
 VAC = "int fx(int x) { return x; }\n"   # objstub: exactly one finding, V (a vacuous body)
 TRAP = "#include <stdlib.h>\nvoid fx(void) { abort(); }\n"   # objstub: two findings on it, T2 and T2-noreturn-tail
 CLEAN = "void ext(void);\nvoid fx(void) { ext(); }\n"
@@ -28,7 +31,7 @@ GC = TR.BASE + "/gcache"
 def repo(name, src, fixtures=None, **rec):
     r = TR.mut(link=None, **rec)
     r["fixtures"] = fixtures if fixtures is not None else {"fx.c": FX}
-    return TR.make_repo(name, rec=r, files={"toy/fx.c": src, "toy/constants.tsv": "b.c\tf_b\tu32\t14\tref b\n", "verify/gates.json": GATES})
+    return TR.make_repo(name, rec=r, files={"toy/fx.c": src, "toy/constants.tsv": "b.c\tf_b\tu32\t14\tref b\n", **GATES})
 
 
 def run(r, out):
@@ -58,7 +61,7 @@ def main():
     # recipe validation: a fixture never enters the product
     for what, kw, fx in (("os_layer", {"os_layer": ["fx.c"]}, None), ("a link flag", {"link": {"script": "link.ld", "output": "t.elf", "flags": ["fx.c"]}}, None),
                          ("a generated input", {"generated": [{"tool": TR.T + "gen/gen.py", "args": [], "inputs": [TR.ROOT + "/fx.c"], "outputs": ["gen/gen.h"]}]}, None)):
-        r = TR.make_repo("fx-ref-" + what.replace(" ", "-"), rec=dict(TR.mut(**kw), fixtures={"fx.c": FX}), files={"toy/fx.c": VAC, "verify/gates.json": GATES})
+        r = TR.make_repo("fx-ref-" + what.replace(" ", "-"), rec=dict(TR.mut(**kw), fixtures={"fx.c": FX}), files={"toy/fx.c": VAC, **GATES})
         rec = recipe.load_recipe(r, recipe.load_admit(r), TR.ROOT)
         errs = recipe.check(rec, TR.ROOT, recipe.tracked(r), recipe.load_admit(r), None, r)
         check("fixture named in %s is refused" % what, any("fixture fx.c is named in" in e or "is not a unit" in e for e in errs), errs)
@@ -76,7 +79,7 @@ def main():
     def rootfx(name, src, expect):
         rec = json.dumps(TR.mut(link=None, os_layer=[], constants=None, generated=[], include=[], fixtures={}))
         ent = {"path": F2, "class": "fixture", "target": "host", "gates": [], "recipe": F2 + "/build.json", "expect": expect}
-        return TR.make_repo(name, rec=TR.mut(link=None), files={"toy/fx.c": VAC, "fx2/a.c": src, "fx2/build.json": rec, "verify/gates.json": GATES}, roots=[ent])
+        return TR.make_repo(name, rec=TR.mut(link=None), files={"toy/fx.c": VAC, "fx2/a.c": src, "fx2/build.json": rec, **GATES}, roots=[ent])
     rv = rootfx("fr-ok", VAC, [{"gate": "objstub", "code": "V"}])
     old = os.environ.pop("GATE_ONLY_ROOT", None)
     cwd = os.getcwd()
