@@ -326,3 +326,13 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
     - The declared machine therefore decides it: is the DirectX redist installed into system32?
     - d3dx9_38 is in the image set on the same basis, so for consistency I recommended (A), with "DirectX redist installed" stated as part of the declared machine (L5). Sent to the orchestrator.
   - **Value ranges (rule b).** L3a item 30 (w2) will publish fnv-nx-build l3a-lift/facts/<image>/idxrange.tsv. w18 sends it the list of open stores and implements the consumer.
+- 04:10Z:
+  - **w17 397d7feb** (plus 7f8b2dab, plugins per front end) is accepted. flags.semantics has 34 flags and is the only source. Per-root flags are limited to -W, -D, -std, -O, -g and the section flags. The datamodel gate re-derives each unit's subset and checks for no __CHAR_UNSIGNED__.
+    - -ffreestanding is dropped, because the hosted libstdc++ headers need it gone.
+    - Every one of the 4109 unit keys in lift/pack and lift/rt changes once the set applies.
+    - The EH fact is blocked until the dispgen/descs edges (L3a, w20) and L2's dispatch call sites exist.
+    - Next: the DW_AT_producer check.
+  - **w16 a9f7b0cb (specdefaults).**
+    - Family 1, hardening defaults: always neutralised.
+    - Family 2, target/code-model (PIC/PIE, mcmodel, mabi, march/mtune/mcpu): must be stated explicitly by the root; an implicit one is red. The family is derived from the driver's `-Q --help=target`.
+    - This fixes the PIE refusal of render/backend (L6A).
