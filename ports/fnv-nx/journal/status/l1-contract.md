@@ -417,3 +417,13 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - The per-language set is derived via a CLI for L5 w14 (no copy).
 - x19..x27 rule: -ffixed regs are not native state, so the pack's hand asm (setjmp/longjmp, crti/crtn; libnx later) neither saves nor restores them. jmp_buf layout is unchanged.
   - Census gate: writes = 0 (w4). L5 patches the build.
+
+## 2026-11-12 04:23Z
+- Merge order revised (sent to MERGER and L3a), each item on its own green verdict:
+  1. w5 env snapshot + setup script as one unit;
+  2. w14 10c85a41 (w10 + w15 + warm ensure + closure_key);
+  3. w17 4af72433;
+  4. toolchain-build profile;
+  5. w16 (with or after the GL pins);
+  6. w19, then exepin;
+  then L3a lift-gates, then L3b. w4 2cb48877 is held on L5's runtime MANIFEST.
