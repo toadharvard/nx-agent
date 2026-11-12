@@ -1279,6 +1279,9 @@ its objects (relocatable) and of its linked ELF, never a name's text. Rules:
       the root links no ELF), and two listed symbols with DIFFERENT body ids may not share one address (`contract-alias`: an alias stub
       that serves two contracts with one body). Two names with the same body id on one address are fine. A symbol listed twice with
       two body ids is `contract-duplicate`. Without the key rule (c) has universe 0 for that root.
+  (e) No guest object references a libgcc outline-atomics helper (__aarch64_{cas,swp,ldadd,ldclr,ldeor,ldset}<bytes>_<memory model>): the helpers
+      choose LSE or LL/SC through getauxval, which Horizon lacks, and the declared CPU (Cortex-A57) has no LSE, so guest roots build with
+      -mno-outline-atomics (a member of guest_compiler.json "flags"."semantics", appended by the recipe and read back by gate datamodel). Finding `outline-atomic`, per reference.
   (d) The host boundary (a root with "target": "host" in admit.json). A reference no object defines is certified iff its object belongs to
       a host root and its name is EXPORTED by the pinned host runtime: the defined GLOBAL/WEAK `.dynsym` names of the shared objects that
       dpkg lists for libc6, libgcc-s1 and libstdc++6 (verify/env.json pins their versions; envcheck checks them), a fact computed by
@@ -1347,13 +1350,15 @@ found by the keys objects.json lists, the document whose "stage" is `cc:<unit>`)
   compiler item: the build is green, the root's recipe compiler is the external of verify/guest_compiler.json (recipe.guest_errors: name,
     repo, ref, commit, tree_sha256, at, driver paths), and every CC document mounts at the pin's `at` the pin's tree_sha256 and starts
     with the pin's driver (the object was built by that tree, not by a name).
-  unit item, all of: a CC stage document exists for the unit; its argv holds -mabi=ilp32; a C or C++ unit's argv holds every flag of the pin's
-    "flags"."required" (-mno-outline-atomics) and none of "flags"."forbidden" (-moutline-atomics); a C++ unit of a native root also
-    every flag of the pin's "flags"."semantics" (guest_compiler.json, the one source recipe.SEMANTICS_FLAGS reads); and EVERY C and C++ unit
-    of a guest root, any origin, holds all plugins of recipe.PLUGIN_SOURCES, each as the declared input /plug/<name> and the argv flag
-    -fplugin=/plug/<name>/<name>.so (a missing plugin is red; no exception list, no language declaration).
+  unit item, all of: a CC stage document exists for the unit; its argv holds the whole semantic set of the pin ("flags"."semantics", the one source
+    recipe.SEMANTICS_FLAGS reads) for the unit's language as ONE ordered run, exactly as recipe.semantics_for derives it from the pinned driver
+    (the set minus the flags the driver's own diagnostic says do not apply to that language; the gate re-runs that probe itself), and no other
+    -f/-m token except a stage's own (-fplugin, -frandom-seed, -ffile-prefix-map, -fpreprocessed) and the per-root class recipe.PER_ROOT; and
+    EVERY C and C++ unit of a guest root, any origin, holds every plugin of recipe.PLUGIN_SOURCES that its front end can load, each as the declared
+    input /plug/<name> and the argv flag -fplugin=/plug/<name>/<name>.so, and no plugin it cannot load. Loadable = needs no symbol that only the
+    other front end defines (recipe.plugin_languages: nm -D of cc1, cc1plus and the .so, re-derived by the gate from the built plugins: a static
+    fact of the ELF files; a plugin using C++-front-end symbols has no C instance). A missing loadable plugin is red; no name list, no exception list.
     The documents are the stage keys, so the object is the one these flags and inputs built.
-Does not cover (stated): assembler units are checked for -mabi=ilp32 only.
 Relies on the owner-accepted item "the compiler is correct": the pinned compiler under -mabi=ilp32 has the exe's data model.
 ```
 

@@ -33,7 +33,7 @@ PLUGS = [dict({"name": n, "source": recipe.PLUGIN_SOURCES[n], "args": dict(recip
 P = {p["name"]: p for p in PLUGS}
 SRC = "volatile int g;\nint rd() { return g; }\nvoid wr(int v) { g = v; }\nint f2i(float f) { return (int)f; }\nint ic(int (*f)(int)) { return f(1); }\nstruct S { int a; char b; };\nS gs;\n"
 REC = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
-       "flags": {"c": [], "cxx": ["-O2"] + list(recipe.SEMANTICS_FLAGS), "asm": []}, "include": [], "units": "all",
+       "flags": {"c": [], "cxx": ["-O2", "-mabi=ilp32"] + list(recipe.SDD_FLAGS), "asm": []}, "include": [], "units": "all",
        "plugin_cxx": "x86_64-linux-gnu-g++-13", "plugins": PLUGS}
 
 
@@ -114,7 +114,7 @@ def main():
         repo, mut(plugins=[dict(p, source=recipe.PLUGIN_SOURCES["fnvnx_ftoi"]) if p["name"] == "fnvnx_order" else p for p in PLUGS]))))
     check("plugins out of load order are red", any("order" in x for x in errs(repo, mut(plugins=PLUGS[::-1]))))
     check("native root without a semantics flag is red", any("semantics flag -fwrapv" in x for x in errs(repo, mut(
-        flags={"c": [], "cxx": [f for f in REC["flags"]["cxx"] if f != "-fwrapv"], "asm": []}))))
+        flags={"c": [], "cxx": [f for f in REC["flags"]["cxx"] if f != "-fno-devirtualize"], "asm": []}))))
     check("-fplugin in flags is red", any("plugin" in x for x in errs(repo, mut(flags={"c": [], "cxx": ["-fplugin=/x.so"], "asm": []}))))
     check("plugins without plugin_cxx is red", any("plugin_cxx" in x for x in errs(repo, mut(plugin_cxx=None))) or
           any("plugin_cxx" in x for x in errs(repo, {k: v for k, v in REC.items() if k != "plugin_cxx"})))

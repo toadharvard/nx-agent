@@ -14,25 +14,41 @@
   "flags": {
     "semantics": [
       "-mabi=ilp32",
-      "-fms-extensions",
-      "-fshort-wchar",
-      "-frounding-math",
+      "-march=armv8-a+crc+crypto",
+      "-mtune=cortex-a57",
+      "-fPIC",
+      "-ftls-model=local-exec",
       "-fsigned-char",
-      "-fno-strict-aliasing",
+      "-frounding-math",
+      "-fshort-wchar",
+      "-mno-outline-atomics",
       "-fwrapv",
+      "-fno-strict-aliasing",
       "-fno-delete-null-pointer-checks",
+      "-ffp-contract=off",
+      "-fms-extensions",
       "-fcheck-new",
       "-fno-sized-deallocation",
       "-fno-lifetime-dse",
-      "-ffp-contract=off",
-      "-DFNVNX_SDD=1",
-      "-fno-devirtualize"
-    ],
-    "required": [
-      "-mno-outline-atomics"
-    ],
-    "forbidden": [
-      "-moutline-atomics"
+      "-fno-devirtualize",
+      "-ffixed-x19",
+      "-ffixed-x20",
+      "-ffixed-x21",
+      "-ffixed-x22",
+      "-ffixed-x23",
+      "-ffixed-x24",
+      "-ffixed-x25",
+      "-ffixed-x26",
+      "-ffixed-x27",
+      "-fno-jump-tables",
+      "-fno-ipa-ra",
+      "-fno-builtin",
+      "-ffreestanding",
+      "-fno-stack-protector",
+      "-fno-stack-clash-protection",
+      "-U_FORTIFY_SOURCE",
+      "-fno-math-errno",
+      "-fno-asynchronous-unwind-tables"
     ]
   },
   "provenance": {

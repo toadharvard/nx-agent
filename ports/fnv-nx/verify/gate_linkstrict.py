@@ -30,7 +30,7 @@ its objects (relocatable) and of its linked ELF, never a name's text. Rules:
       two body ids is `contract-duplicate`. Without the key rule (c) has universe 0 for that root.
   (e) No guest object references a libgcc outline-atomics helper (__aarch64_{cas,swp,ldadd,ldclr,ldeor,ldset}<bytes>_<memory model>): the helpers
       choose LSE or LL/SC through getauxval, which Horizon lacks, and the declared CPU (Cortex-A57) has no LSE, so guest roots build with
-      -mno-outline-atomics (guest_compiler.json "flags"."required", checked by recipe and gate datamodel). Finding `outline-atomic`, per reference.
+      -mno-outline-atomics (a member of guest_compiler.json "flags"."semantics", appended by the recipe and read back by gate datamodel). Finding `outline-atomic`, per reference.
   (d) The host boundary (a root with "target": "host" in admit.json). A reference no object defines is certified iff its object belongs to
       a host root and its name is EXPORTED by the pinned host runtime: the defined GLOBAL/WEAK `.dynsym` names of the shared objects that
       dpkg lists for libc6, libgcc-s1 and libstdc++6 (verify/env.json pins their versions; envcheck checks them), a fact computed by
