@@ -184,6 +184,12 @@ def run(a):
             gpu_report = gpu.report()
             gpu.close()
     ic.stop(r["reason"])
+    dump = {}
+    for spec in a.dump:
+        name, _, n = spec.rpartition(":")
+        if name not in syms or not n.isdigit():
+            raise bootmiles.ResolveError("--dump %s: needs SYM:BYTES with SYM a defined symbol of the ELF" % spec)
+        dump[name] = bytes(m.uc.mem_read(syms[name] + base, int(n))).hex()
     console = r.pop("console")
     rep = ic.report()
     doc = {"elf_sha256": hashlib.sha256(raw).hexdigest(), "plan": plan, "run": r,
@@ -194,6 +200,8 @@ def run(a):
     diff = sc.check_expect(r["events"]) if sc else []
     if sc:
         doc["inputs"]["expect_events"] = {"ok": not diff, "diff": diff}
+    if a.dump:
+        doc["dump"] = dump
     if wl is not None:
         doc["watch_log"] = wlog
     if gpu:
@@ -235,6 +243,8 @@ def main(argv=None):
     sp.add_argument("--text-entry", action="append", default=[], metavar="TEXT",
                     help="the answer of one TEXT_ENTRY call (the system keyboard), repeatable, consumed in order; none left: the call "
                          "is cancelled (0); a text longer than the call's max_len ends the run as scenario-error")
+    sp.add_argument("--dump", action="append", default=[], metavar="SYM:BYTES",
+                    help="after the run, read BYTES bytes at the ELF data symbol SYM from guest memory; OUT.json \"dump\" = {SYM: lowercase hex}, repeatable")
     a = ap.parse_args(argv)
     if a.frames and not a.gpu:
         ap.error("--frames needs --gpu")

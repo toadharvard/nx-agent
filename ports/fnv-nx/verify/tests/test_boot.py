@@ -211,6 +211,12 @@ def main():
     w2 = json.load(open(os.path.join(d, "w2.json")))["watch_log"]
     tb.case("watch_log: two names at one address give one entry per name, file order",
             [x["sym"] for x in w2] == ["fnvwl_g", "fnvwl_g"] and w2[0]["pc"] == w2[1]["pc"], w2)
+    rc, o, e = cli(args(elfw, "d1.json", table, manifest, "--dump", "fnvwl_g:8"))
+    dd = json.load(open(os.path.join(d, "d1.json"))).get("dump", {})
+    tb.case("dump: SYM:BYTES gives that many bytes of guest memory as lowercase hex in OUT.json", rc == 0 and list(dd) == ["fnvwl_g"]
+            and len(dd["fnvwl_g"]) == 16 and dd["fnvwl_g"] == dd["fnvwl_g"].lower(), (rc, dd))
+    rc, o, e = cli(args(elfw, "d2.json", table, manifest, "--dump", "no_such_sym:4"))
+    tb.case("dump: an unknown symbol is an input error naming it", rc == 1 and "no_such_sym" in e, (rc, e))
     rc, o, e = cli(args(elfw, "w3.json", table, manifest, "--watch-log", w("syms3.txt", "fnvwl_f\nno_such_fn\n")))
     tb.case("watch_log: unknown name fails the run before it starts, naming it", rc == 1 and "no_such_fn" in e
             and not os.path.exists(os.path.join(d, "w3.json")), (rc, e))
