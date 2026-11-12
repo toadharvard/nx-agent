@@ -67,11 +67,11 @@ def vjoin(a, b):
 
 
 class St:
-    __slots__ = ('regs', 'stack', 'sp', 'root', 'exp')
+    __slots__ = ('regs', 'stack', 'sp', 'root', 'exp', 'esc')
 
-    def __init__(s, regs, stack, sp, root, exp): s.regs = regs; s.stack = stack; s.sp = sp; s.root = root; s.exp = exp
-    def cp(s): return St(dict(s.regs), dict(s.stack), s.sp, s.root, s.exp)
-    def __eq__(s, o): return s.sp == o.sp and s.root == o.root and s.exp == o.exp and s.regs == o.regs and s.stack == o.stack
+    def __init__(s, regs, stack, sp, root, exp, esc=frozenset()): s.regs = regs; s.stack = stack; s.sp = sp; s.root = root; s.exp = exp; s.esc = esc
+    def cp(s): return St(dict(s.regs), dict(s.stack), s.sp, s.root, s.exp, s.esc)
+    def __eq__(s, o): return s.sp == o.sp and s.root == o.root and s.exp == o.exp and s.esc == o.esc and s.regs == o.regs and s.stack == o.stack
 
 
 def sload(st, o):
@@ -95,10 +95,10 @@ def joinst(p, q):
         if v is not None: regs[k] = v
     stack = {}
     for k in set(p.stack) | set(q.stack): stack[k] = vjoin(sload(p, k), sload(q, k))
-    return St(regs, stack, p.sp if p.sp == q.sp else None, p.root if p.root == q.root else None, p.exp or q.exp)
+    return St(regs, stack, p.sp if p.sp == q.sp else None, p.root if p.root == q.root else None, p.exp or q.exp, p.esc | q.esc)
 
 
-UNKNOWN = lambda: St({}, {}, None, None, True)
+UNKNOWN = lambda: St({}, {}, None, None, True, frozenset())
 
 
 def alu(mn, a, b):
@@ -165,6 +165,8 @@ class Flow:
     def wr(s, ins, op, st, v):
         if isinstance(v, tuple) and v and v[0] == 'sp' and v[1] >= 4 and not (op.type == cx.X86_OP_REG and FULL.get(ins.reg_name(op.reg)) == 'esp'):
             st.exp = True      # an address inside the incoming-argument area escapes: a call may modify the arguments
+        if isinstance(v, tuple) and v and v[0] == 'sp' and not (op.type == cx.X86_OP_REG and FULL.get(ins.reg_name(op.reg)) in ('esp', 'ebp')):
+            st.esc = st.esc | {v[1]}      # a stack address is formed anywhere but in esp/ebp (the frame pointer): a callee may access the object it points into
         if op.type == cx.X86_OP_REG:
             f = FULL.get(ins.reg_name(op.reg))
             if f is None: return
@@ -190,7 +192,9 @@ class Flow:
         if mn == 'push' and n == 1:
             v = s.rd(ins, ops[0], st) if ops[0].size == 4 else None
             if st.sp is None: return
-            if isinstance(v, tuple) and v[0] == 'sp' and v[1] >= 4: st.exp = True
+            if isinstance(v, tuple) and v[0] == 'sp':
+                st.esc = st.esc | {v[1]}
+                if v[1] >= 4: st.exp = True
             st.sp -= 4; swrite(st, st.sp, 4, v); return
         if mn == 'pop' and n == 1:
             if st.sp is None: s.wr(ins, ops[0], st, ('ld',) if ops[0].size == 4 else None); return
@@ -247,12 +251,20 @@ class Flow:
     def docall(s, ins, st):
         op = ins.operands[0]; eff = s.summary(op.imm & M32) if op.type == cx.X86_OP_IMM else s.import_effect(op)
         sp0 = st.sp
+        if eff is not None and eff[1] is None and op.type == cx.X86_OP_IMM:
+            post = s.inline(op.imm & M32, st, ins.address)
+            if post is not None: st.regs, st.stack, st.sp, st.root, st.exp, st.esc = post.regs, post.stack, post.sp, post.root, post.exp, post.esc; return
+        keep = {}
+        if sp0 is not None:      # save slots (R2): the entry value of a callee-saved register stored in this function's frame survives a call iff (1) the flow knows no store at a constant offset that overlaps it
+            for o, v in st.stack.items():      # (a store replaces the value), (2) no other store reaches it (through a pointer to another object: ASM-006, distinct allocations: ASM-001) and (3) no
+                if o >= sp0 and isinstance(v, tuple) and v[0] == 'in' and not any(o - 3 <= x <= o + 3 for x in st.esc): keep[o] = v      # formed address overlaps it; a callee's frame lies below sp0
         for r in ('eax', 'ecx', 'edx'): st.regs.pop(r, None)
         for r in CALLEE:
             if eff and r in eff[2] and sp0 is not None: st.regs[r] = ('sp', sp0 - 4 + eff[2][r])
             elif not (eff and r in eff[0]): st.regs.pop(r, None)
         if st.exp: killstack(st)
         else: st.stack = {k: v for k, v in st.stack.items() if k >= 4}
+        st.stack.update(keep)
         st.sp = sp0 + eff[1] if sp0 is not None and eff and eff[1] is not None else None
 
     # ---- forward solver over a set of decoded instructions
@@ -286,6 +298,30 @@ class Flow:
         elif conv == 'stdcall': bal = sum(8 if t in 'dq' else 4 for t in types)
         else: return None
         return (frozenset(CALLEE), bal, {})
+
+    def inline(s, C, st, site):
+        """the state after `call C` for a leaf C (no call in its decoded extent) whose stack effect is not a constant (a frame helper such as a SEH prolog/epilog: it builds or tears down the
+        caller's frame): the callee's instructions run on the caller's actual state (the same stack coordinates; the return address slot holds a token), and every ret must return through
+        that token, else None (not proven)"""
+        X = s.X
+        if st.sp is None or C not in X.insns: return None
+        ext = s.extent(C)
+        for x in ext:
+            if X.insns[x][1] == 'call': return None
+        tok = ('ret', site); init = st.cp(); init.sp = st.sp - 4; init.stack[init.sp] = tok
+        IN = s.solve(ext, {C: init}); posts = []
+        for x in sorted(ext):
+            sz, mn, ft, fall, tg = X.insns[x]
+            if mn in ('retf', 'iret', 'iretd') or any(t not in X.insns for t in tg) or (fall and (x + sz) not in X.insns): return None
+            if mn == 'jmp' and not tg: return None
+            if mn == 'ret' and x in IN:
+                p = IN[x]; ins = s.dis(x)
+                if p.sp is None or sload(p, p.sp) != tok: return None
+                q = p.cp(); q.sp = p.sp + 4 + (ins.operands[0].imm & 0xffff if ins.operands else 0); posts.append(q)
+        if not posts: return None
+        r = posts[0]
+        for q in posts[1:]: r = joinst(r, q)
+        return r
 
     # ---- R2: callee summaries
     def calltargets(s, n):
@@ -343,6 +379,24 @@ class Flow:
                 v = next(iter(vs))
                 if isinstance(v, tuple) and v[0] == 'sp': outs[r] = v[1]
         return (pres, bal, outs)
+
+    def why(s, C, r):
+        """why register r is not proven preserved by C (a diagnosis of the facts, not a decision): 'exit' (a path leaves decoded code or returns far), 'indirect_call' (a call whose target the
+        decoded code does not name: its callee-saved effect is unknown), 'callee' (a direct callee not proven for r), 'local' (the flow found no restore on some path to a ret)"""
+        X = s.X; ext = s.extent(C); cause = set()
+        for x in ext:
+            sz, mn, ft, fall, tg = X.insns[x]
+            if mn in ('retf', 'iret', 'iretd') or any(t not in X.insns for t in tg) or (fall and (x + sz) not in X.insns) or (mn == 'jmp' and not tg and (s.dis(x) is None or (s.dis(x).operands[0].type != cx.X86_OP_IMM and not (s.dis(x).operands[0].type == cx.X86_OP_MEM and s.import_effect(s.dis(x).operands[0]) is not None)))): cause.add('exit')
+            if mn == 'call':
+                ins = s.dis(x); op = ins.operands[0] if ins is not None and ins.operands else None
+                if op is None: cause.add('exit')
+                elif op.type == cx.X86_OP_IMM:
+                    e = s.summary(op.imm & M32)
+                    if e is None or r not in e[0]: cause.add('callee')
+                elif s.import_effect(op) is None: cause.add('indirect_call')
+        for c in ('exit', 'indirect_call', 'callee'):
+            if c in cause: return c
+        return 'local'
 
     # ---- state before an instruction: forward dataflow over its backward cone, cut at seeds
     def state_before(s, a):

@@ -22,6 +22,7 @@ import capstone
 from capstone import x86 as cx
 import ehflow
 from ehflow import Flow, FULL, M32, St, sload, cset
+CALLEE_ORDER = ('ebx', 'esi', 'edi', 'ebp')
 MAGIC = (0x19930520, 0x19930521, 0x19930522)
 EXC_CODE = 0xE06D7363           # the thrower is the function whose code copies the EXCEPTION_RECORD template starting with this code
 RE_STUB = re.compile(rb'(?=\xb8(.{4})\xe9(.{4}))', re.S)
@@ -556,6 +557,14 @@ class EH(Flow):
         for e in es:
             r = s.summary(e) if e in X.insns else None
             pres[h(e)] = [sum(MASK[x] for x in r[0]), -1 if r[1] is None else r[1]] if r else [0, -1]
+        pw = Counter(); loc = []
+        for e in es:
+            r = s.summary(e) if e in X.insns else None
+            for x in CALLEE_ORDER:
+                if r is None or x not in r[0]:
+                    c = s.why(e, x) if r is not None else 'exit'; pw[x + ':' + c] += 1
+                    if c == 'local': loc.append(h(e) + ':' + x)
+        J['preserves_why'] = dict(sorted(pw.items())); J['preserves_local'] = loc
         J['preserves'] = pres      # entry -> [bitmask of ebx 1, esi 2, edi 4, ebp 8 proven restored on every path to every ret, ret n if every ret is balanced else -1]
         J['throw_sites'] = tsl; J['failed_throwinfo'] = tfail; J['throwers'] = [h(x) for x in s.throwers]; J['thrower_escapes'] = [h(x) for x in esc]
         J['text'] = [h(X.T0), h(X.T1)]                        # [lo, hi): the executable span of this image (rebased for a module); tools/gate_eh.py assigns the pack's code entries to images by it
