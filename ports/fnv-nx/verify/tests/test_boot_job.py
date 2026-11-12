@@ -62,7 +62,7 @@ def git(*args, cwd=None, check=True):
 def lifted_elf(mode):
     """the guest of test_bootmachine.build(mode) with .text renamed to .text.fnvl (crt0 header patched as build() does)"""
     renamed = os.path.join(SCRATCH, "g%d.fnvl.elf" % mode)
-    raw_path = tb.build(mode, tg.MODE50)[1]   # MODE 50: the renderer guest of test_bootgpu (real nxgpu calls)
+    raw_path = tb.build(mode)[1]   # MODE 80: the renderer guest (real nxgpu calls)
     subprocess.run(["aarch64-linux-gnu-objcopy", "--rename-section", ".text=.text.fnvl", raw_path, renamed], check=True)
     data = bytearray(open(renamed, "rb").read())
     phoff, phnum = struct.unpack_from("<I", data, 28)[0], struct.unpack_from("<H", data, 44)[0]
@@ -135,7 +135,7 @@ def main():
     rd = lambda d, n: open(os.path.join(d, n), "rb").read()  # noqa: E731
     lib, meta_j, ar, build_j = rd(gdir, "libnxgl4.so"), rd(gdir, "meta.json"), rd(bdir, "libfnvnx-d3d9.a"), rd(bdir, "build.json")
     GB, BB = tg.NXGL4["ref"], tg.BRIDGE["ref"]
-    gpu_elf = lifted_elf(50)
+    gpu_elf = lifted_elf(80)
     sha = lambda b: hashlib.sha256(b).hexdigest()  # noqa: E731
     jd = lambda d: json.dumps(d).encode()  # noqa: E731
     gman = lambda render: jd(dict({"schema": "fnvnx-elf/1", "name": "guest.elf", "size": len(gpu_elf), "sha256": sha(gpu_elf), "parts": []},

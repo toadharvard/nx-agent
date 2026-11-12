@@ -27,27 +27,6 @@ all3  all:g call    0x3000
 MANIFEST = "1000\tfnvboot_a\n2000\tfnvboot_b\n3000\tfnvboot_c\n"
 
 
-WL_GUEST = r'''
-#if MODE == 70
-    /* watch-log guest: fnvwl_f(n) recurses once per n, fnvwl_g is a leaf; each records its SP at its first instruction */
-    __asm__(".pushsection .bss\n.balign 4\nwl_sp: .space 64\nwl_n: .space 4\n.popsection\n"
-            ".macro WLREC\n adrp x9, wl_n\n add x9, x9, :lo12:wl_n\n ldr w10, [x9]\n add w11, w10, #1\n str w11, [x9]\n"
-            " adrp x12, wl_sp\n add x12, x12, :lo12:wl_sp\n mov x13, sp\n str w13, [x12, x10, lsl #2]\n.endm\n"
-            ".pushsection .text.wl,\"ax\",%progbits\n"
-            ".globl fnvwl_f\n.type fnvwl_f,%function\nfnvwl_f:\n WLREC\n cbz x0, 1f\n stp x29, x30, [sp, #-16]!\n"
-            " sub x0, x0, #1\n bl fnvwl_f\n ldp x29, x30, [sp], #16\n1: ret\n.size fnvwl_f, .-fnvwl_f\n"
-            ".globl fnvwl_g\n.type fnvwl_g,%function\nfnvwl_g:\n WLREC\n ret\n.size fnvwl_g, .-fnvwl_g\n"
-            ".popsection\n");
-    {
-        extern void fnvwl_f(uint32_t), fnvwl_g(void);
-        extern uint32_t wl_sp[];
-        fnvwl_f(1); fnvwl_g(); fnvwl_f(0);
-        for (uint32_t i = 0; i < 4; i++) num("wlsp", wl_sp[i]);
-    }
-    fnvnx_hcall1(H->exit, 0);
-#elif'''
-
-
 def cli(argv):
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -163,7 +142,7 @@ def main():
     tb.case("--text-entry repeated: order kept", td["inputs"] == {"text_entry": ["x", "yz"]}, td["inputs"])
     # --watch-log: the guest MODE 70 calls f(1) (recursing once into f(0)), g, f(0); the guest prints the SP of each entry
     elfw = os.path.join(d, "hw.elf")
-    open(elfw, "wb").write(tb.build(70, WL_GUEST)[0])
+    open(elfw, "wb").write(tb.build(70)[0])
     rc, o, e = cli(args(elfw, "w0.json"))
     w0 = json.load(open(os.path.join(d, "w0.json")))
     tb.case("without --watch-log the key is absent", rc == 0 and "watch_log" not in w0, (rc, e, list(w0)))
