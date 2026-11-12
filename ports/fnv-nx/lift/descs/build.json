@@ -4,6 +4,6 @@
  "flags": {"c": ["-mabi=ilp32"], "cxx": ["-mabi=ilp32"], "asm": ["-mabi=ilp32"]},
  "include": [],
  "units": "all",
- "generated": [{"tool": "ports/fnv-nx/lift/descs/descs.py", "args": [], "inputs": [], "objects_of": {"except": []}, "outputs": ["descs.tsv"]}],
+ "generated": [{"tool": "ports/fnv-nx/lift/descs/descs.py", "args": [], "inputs": [], "objects_of": {"except": ["ports/fnv-nx/lift/bridges"]}, "outputs": ["descs.tsv"]}],
  "outputs": {"descs": "descs.tsv"}
 }
