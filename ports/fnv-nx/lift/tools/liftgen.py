@@ -15,7 +15,7 @@ Symbols the pack references in the runtime (bind-l3 import rows, the two EH hand
 not define is an undefined symbol of the link, which the linkstrict gate refuses.
 Deterministic: sorted iteration, no clocks or paths in the outputs. Inputs FNVNX_EXE, FNVNX_UNIVERSE, FNVNX_PROOF; outputs only under --out
 (exe-derived: they go to the private fnv-nx-build repository, never into this one)."""
-import argparse, collections, glob, json, multiprocessing as mp, os, re, sys
+import argparse, collections, glob, hashlib, json, multiprocessing as mp, os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
 for p in ('bench', 'tools', 'test', ''):
     sys.path.insert(0, os.path.join(LIFT, p))
@@ -109,7 +109,7 @@ def shard(a):
     import fnvlift as L, fnvlift.core as core, formcert
     K, N = map(int, a.shard.split('/')); out = a.out
     ent = L.universe.load()[0]; mine = sorted(ent)[K::N]
-    init(a.exe, ent, a.emit)
+    init(a.exe, ent, a.emit, a.jtab)
     with mp.Pool(a.jobs, initializer=init, initargs=(a.exe, ent, a.emit, a.jtab)) as p: got = list(p.imap(work, [mine[j:j + BATCH] for j in range(0, len(mine), BATCH)], 1))
     texts = [t for g in got for t in g[0]]; miss = sorted(m for g in got for m in g[2])
     forms = collections.Counter()
@@ -119,6 +119,7 @@ def shard(a):
     shapes = collections.Counter()
     for g in got: shapes.update(g[4])
     certs = formcert.Certs()
+    json.dump(inputs(a), open('%s/inputs_%d.json' % (out, K), 'w'), sort_keys=True)      # what this shard generated from (finish checks that every shard of an image agrees)
     write_texts('%s/texts_%d.txt' % (out, K), texts)
     w = lambda n, rows: open('%s/%s_%d.tsv' % (out, n, K), 'w').write(''.join('\t'.join(map(str, x)) + '\n' for x in rows))
     w('missing', [('%08x' % ad, k, why) for ad, k, why in miss])
@@ -126,6 +127,30 @@ def shard(a):
     w('encs', [(f, r.hex(), '%08x' % x) for f, e in sorted(encs.items()) for r, x in sorted(e.items(), key=lambda t: (t[1], t[0]))])
     w('shapes', [(k, fam, n) for (k, fam), n in sorted(shapes.items(), key=lambda t: (t[0][0].encode(), t[0][1]))])    # shape_key, family, instruction count (L3b formgate)
     print('shard %d/%d: entries %d lifted %d missing %d; text bytes %d; forms %d' % (K, N, len(mine), len(texts), len(miss), sum(len(t) for _, t in texts), len(forms)))
+
+
+def sha(path):
+    return hashlib.sha256(open(path, 'rb').read()).hexdigest() if path else None
+
+
+def lifter_tree():
+    """sha256 over (path, content) of every file the generated text is a function of: the lifter package, the runtime headers it inlines and the generator tools"""
+    fs = sorted(glob.glob(LIFT + '/fnvlift/*.py') + glob.glob(LIFT + '/fnvlift/*/*.py') + glob.glob(LIFT + '/rt/*.h') + [LIFT + '/tools/' + n + '.py' for n in ('liftgen', 'impgen', 'dispgen', 'formcert')])
+    h = hashlib.sha256()
+    for f in fs: h.update(os.path.relpath(f, LIFT).encode() + b'\0' + hashlib.sha256(open(f, 'rb').read()).digest())
+    return h.hexdigest()
+
+
+def inputs(a):
+    """the generation inputs of a shard: the exe, the universe, the jump-table facts, the emit mode and the lifter; a change of any of them changes the pack manifest and so the external's tree"""
+    return dict(exe_sha256=sha(a.exe), universe_sha256=sha(os.environ.get('FNVNX_UNIVERSE', '/home/user/l3facts/universe.tsv')), jtab_sha256=sha(a.jtab), emit=a.emit, lifter_tree_sha256=lifter_tree())
+
+
+def image_inputs(d):
+    """the one inputs record of the shards of image directory d (every shard must agree)"""
+    rs = [json.load(open(f)) for f in sorted(glob.glob(d + '/inputs_*.json'))]
+    if not rs or any(r != rs[0] for r in rs): sys.exit('finish: %s: shards missing their inputs record or generated from different inputs' % d)
+    return rs[0]
 
 
 def tsv(f): return [l.rstrip('\n').split('\t') for l in open(f)]
@@ -196,6 +221,7 @@ def finish(a):
     res = dict(schema='fnvnx-gate/1', name='l3.liftgen', status='green', images=len(images), universe=[len(e) for _, e in images], entries=len(texts), imports=len(imp), units=NBUCKET + 2,
                text_bytes=sum(len(t) for t in texts.values()), forms=len(forms), forms_certified=nc, build='measurement: forms without a certificate %d of %d' % (len(forms) - nc, len(forms)))
     json.dump(res, open(pk + '/gate_liftgen.json', 'w'), sort_keys=True)
+    json.dump(dict(format='fnvnx-liftpack-manifest/1', images=[image_inputs(d) for d, _ in images]), open(pk + '/manifest.json', 'w'), sort_keys=True, indent=1)      # generation inputs: part of the external's tree
     print('finish: images %d, entries %d, imports %d, units %d, text bytes %d, largest unit %d bytes; forms %d (certified %d); dispatcher %d slots, %d hash attempts' % (
         len(images), len(texts), len(imp), NBUCKET + 2, res['text_bytes'], max(sum(map(len, u)) for u in units.values()), len(forms), nc, len(h['slots']), h['attempts']))
 
