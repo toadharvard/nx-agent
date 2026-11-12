@@ -37,8 +37,8 @@
    "name": "manifest",
    "repo": "fnv-nx-build",
    "ref": "l5-platform/manifest",
-   "commit": "2ac3091b7095598d04dce6091b2012f7cfa14bc7",
-   "tree_sha256": "4708f3d8d2dfa1adeab65fa4eeb4f994ad806372d49da392d22b4f93d2f169bb",
+   "commit": "07d79c58e37f71c784ed6465f4bface5eb7773ca",
+   "tree_sha256": "b3888b9f57c7f07907b5eae8b4f07e8cd101ac90378c5457d308c73ff00df01c",
    "at": "/ext/manifest"
   },
   {
@@ -65,5 +65,6 @@
   "exe": "facts/ranges.tsv",
   "module": "facts/%s/ranges.tsv"
  },
- "bridge": "manifest/manifest/bridge.tsv"
+ "bridge": "manifest/manifest/bridge.tsv",
+ "escape": "manifest/manifest/import_escape.tsv"
 }
