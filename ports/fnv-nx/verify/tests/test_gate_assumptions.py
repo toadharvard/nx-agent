@@ -274,7 +274,7 @@ check("lexer shell: a heredoc body is not a comment", mention("x.sh", "cat <<EOF
 check("lexer toml: a # comment is a mention, a quoted value and a key are not", mention("x.toml", 'assume = "# assume"\n\n# assume\n') == [3], "")
 check("lexer shell: a here-string is not a heredoc", mention("x.sh", 'read x <<< "$a"\n\n# assume\n') == [3], "")
 check("lexer asm: a ; comment is a mention, a quoted ; and a label are not", mention("x.asm", 'db "a ; assume"\nassume: nop\n\n; assume\n') == [4], "")
-check("lexer sail is the c lexer", mention("x.sail", "val assume : int // assume\n") == [1] and mention("x.sail", "val assume : int\n") == [], "")
+check("lexer sail: C comments, a type variable apostrophe is not a literal", mention("x.sail", "val f : forall 'n. bits('n) -> int // assume\n") == [1] and mention("x.sail", "val assume : bits('n)\n") == [], "")
 check("lexer data: json, tsv, txt are never prose", all(mention("x" + e, "assume\n") == [] for e in (".json", ".tsv", ".txt")), "")
 check("an extension not in the table is red and named", mention("x.zzz", "assume\n") == [0] and
       "'.zzz'" in str(G.judge_mentions(["x.zzz"], ids, lambda p: "a")[1][("x.zzz", 0)]) and

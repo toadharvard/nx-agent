@@ -18,7 +18,7 @@ blank line) cut further at every list item and every table row; in any other fil
 mention is a block whose PROSE matches `assum` or `допущени` at a word start (case-insensitive). PROSE is defined by one lexer per
 file kind, chosen by the extension from the one table LEXER: python = COMMENT tokens and docstring STRING tokens (tokenize + ast); c, c++,
 headers, .ld, .s = // and /* */ comments (string and char literals skipped); markdown = text outside fenced code blocks; shell and toml =
-# comments (quoted strings and heredoc bodies skipped); asm = ; comments; sail = as c; data (.json .tsv .txt .expect .patch) = never prose. In every prose span the
+# comments (quoted strings and heredoc bodies skipped); asm = ; comments; sail = as c without char literals; data (.json .tsv .txt .expect .patch) = never prose. In every prose span the
 backticked spans are dropped. Totality: a text file whose extension is not in the table, or that its lexer cannot read, is red (codes
 ext-unknown, lex-error); nothing is skipped silently. An item of the
 universe is (path, first line of the block). A mention is certified iff ALL hold:
@@ -91,7 +91,7 @@ ITEM = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 ROW = re.compile(r"\s*\|")
 
 
-LEXER = {".py": "python", ".c": "c", ".cc": "c", ".cpp": "c", ".cxx": "c", ".h": "c", ".hh": "c", ".hpp": "c", ".ld": "c", ".s": "c", ".sail": "c", ".asm": "semi",
+LEXER = {".py": "python", ".c": "c", ".cc": "c", ".cpp": "c", ".cxx": "c", ".h": "c", ".hh": "c", ".hpp": "c", ".ld": "c", ".s": "c", ".sail": "sail", ".asm": "semi",
          ".md": "markdown", ".sh": "shell", ".gitignore": "shell", ".toml": "toml",
          ".json": "data", ".tsv": "data", ".txt": "data", ".expect": "data", ".patch": "data"}
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
@@ -139,8 +139,9 @@ def py_spans(body, lines, off):
         raise LexError("python: %s" % e)
 
 
-def c_spans(body):
-    """// and /* */ comments of C and C++ (with string, char and raw string literals and digit separators skipped)"""
+def c_spans(body, chars=True):
+    """// and /* */ comments of C and C++ (with string, char and raw string literals and digit separators skipped); CHARS false (Sail: an
+    apostrophe starts a type variable, not a literal) skips strings only"""
     n, i, out = len(body), 0, []
     while i < n:
         ch = body[i]
@@ -157,7 +158,7 @@ def c_spans(body):
                 raise LexError("c: unterminated /* comment")
             out.append((i, j + 2))
             i = j + 2
-        elif ch == '"' or ch == "'":
+        elif ch == '"' or (ch == "'" and chars):
             raw = ch == '"' and i > 0 and body[i - 1] == "R" and (i < 2 or body[i - 2] in "uUL8" or not (body[i - 2].isalnum() or body[i - 2] == "_"))
             if raw:
                 m = re.compile(r'"([^()\\ \t\n]{0,16})\(').match(body, i)
@@ -302,7 +303,7 @@ def prose_lines(path, body):
         o += len(ln) + 1
     if kind == "data":
         return [" " * len(ln) for ln in lines]
-    spans = {"python": lambda: py_spans(body, lines, off), "c": lambda: c_spans(body), "markdown": lambda: md_spans(body),
+    spans = {"python": lambda: py_spans(body, lines, off), "c": lambda: c_spans(body), "sail": lambda: c_spans(body, False), "markdown": lambda: md_spans(body),
              "shell": lambda: hash_spans(body, False), "toml": lambda: hash_spans(body, True), "semi": lambda: hash_spans(body, True, ";")}[kind]()
     keep = bytearray(len(body))
     for s, e in strip_code(body, spans):
