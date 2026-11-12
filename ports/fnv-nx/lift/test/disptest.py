@@ -22,7 +22,7 @@ from elftools.elf.elffile import ELFFile
 BASE, IAT, DATA, GSTACK, HSTACK, STOP, TEXT, TLS = 0x401000, 0x406000, 0x407000, 0x60000000, 0x70000000, 0x7e000000, 0xE0000000, 0x7d000000
 NATIVE_ADDR, NOWHERE = 0x403f00, 0x500000       # an exe address a native root defines (and the lifted table holds too); an address no table holds
 CASES = ['this', 'fast', 'stdcdecl', 'q', 'fd', 'mem', 'a12', 'a8', 'hfa', 'hfa3', 'hfaret', 'ref', 'native', 'ud',
-         'uf', 'u1', 'vec', 'vec2', 'd4', 'al', 'bf', 'f4r', 'd4r', 'ct', 'ur', 'vr']
+         'uf', 'u1', 'vec', 'vec2', 'd4', 'al', 'bf', 'f4r', 'd4r', 'ct', 'ur', 'vr', 'fsw', 'frm']
 BRIDGE = [('t.dll', 'tc_' + c, 'stdcall', 'i', '', 'tc_' + c, 'sym') for c in CASES]
 KEY = {r[1]: 0x00100000 + 16 * i for i, r in enumerate(sorted(BRIDGE, key=lambda r: (r[0], r[1])))}      # the key rule of tools/impgen.py
 SLOT = {r[1]: IAT + 4 * i for i, r in enumerate(BRIDGE)}
@@ -82,6 +82,10 @@ TARGETS = {
     'ct': 'mov eax, dword ptr [esp+4]; mov dword ptr [eax], 5; mov dword ptr [eax+4], 7; ret',
     # union {float a[2]} as a result (a8hf): edx:eax = {1.5f, 2.25f}
     'ur': 'mov eax, 0x3fc00000; mov edx, 0x40100000; ret',
+    # FP state through a bridge called from a native body (rule R-FP, enter.cc): the callee sees the caller's sticky flags and rounding mode
+    'fsw': 'fnstsw ax; movzx eax, ax; ret',
+    # 1.0f + 2^-60 as binary64 arithmetic under the host rounding mode, minus 1.0, stored as a float: 0 to nearest, 2^-52 rounding toward +infinity
+    'frm': 'fld dword ptr [esp+4]; fadd dword ptr [esp+8]; fld1; fsubp st(1), st(0); fstp dword ptr [esp+12]; mov eax, dword ptr [esp+12]; ret',
     # the same exe address has a lifted body too: native (rule 1) wins
     'native': 'mov eax, 0x2222; ret',
 }
@@ -171,6 +175,22 @@ u32 tc_vr(void) { HV r = FP(HV (CC("stack") *)(void), @vr@)(); return (u32)(int)
 u32 tc_d4r(void) { D4 r = FP(D4 (CC("stack") *)(void), @d4r@)(); return (u32)(int)(r.a + r.b * 10 + r.c * 100 + r.d * 1000); }
 u32 tc_ct(void) { CT r = FP(CT (CC("stack") *)(void), @ct@)(); return r.a * 100 + r.b; }
 u32 tc_ur(void) { U1 r = FP(U1 (CC("stack") *)(void), @ur@)(); return (u32)(int)(r.a[0] * 4 + r.a[1] * 100); }
+/* R-FP: a native body is guest code, so a bridge into lifted code leaves FPCR/FPSR as the native code had them. The guest root first makes the x87 family the owner of the live FPSR
+   (rt/fnvl_x87.h: a reader adds the live FPSR only while its family is the owner), then IXC set in FPSR by the native code reaches the guest's fnstsw as PE (0x20); RMode RP in FPCR
+   makes the guest's binary64 addition round up (the result minus 1.0 is 2^-52, bits 0x25800000; to nearest it would be 0) */
+u32 tc_fsw(void)
+{
+    unsigned long s = 0x10; __asm__ volatile("msr fpsr, %0" :: "r"(s) : "memory");
+    u32 r = FP(u32 (CC("stack") *)(void), @fsw@)();
+    return r & 0x3f;
+}
+u32 tc_frm(void)
+{
+    unsigned long z = 0, rp = 0x400000ul; __asm__ volatile("msr fpcr, %0" :: "r"(rp) : "memory");
+    u32 r = FP(u32 (CC("stack") *)(float, float, u32), @frm@)(1.0f, 5.421010862427522e-20f, 0);
+    __asm__ volatile("msr fpcr, %0" :: "r"(z) : "memory");
+    return r;
+}
 /* rule 3: an address no table holds raises #UD there, through the guest's exception chain; the guest handler computes code ^ address */
 u32 tc_ud(void) { return FP(u32 (CC("stack") *)(void), @nowhere@)(); }
 }
@@ -208,6 +228,7 @@ def main():
         ad = ROOTS + 0x40 * i
         t = 'call %s; ret' % S(c)
         if c == 'ud': t = udtext
+        if c == 'fsw': t = 'fld1; fadd st(0), st(0); fstp st(0); call %s; ret' % S(c)       # the x87 family owns the live FPSR from here
         put('root_' + c, ad, t); roots[c] = ad
         if c == 'ud': ents['root_ud'] = (ad, ents['root_ud'][1], [label])       # the label is a continuation of the root (what the lifter takes as `owns`)
     code = bytes(code); img = Fake(code); img.entries = set(v[0] for v in ents.values())
@@ -267,7 +288,7 @@ def main():
         sym = {x.name: x['st_value'] for x in e.get_section_by_name('.symtab').iter_symbols() if x.name}
     want = {'this': 25, 'fast': 107, 'stdcdecl': 7 + 12 + 7, 'q': ((0x01234567 ^ 0x89abcdef) + (2 ^ 0)) & 0xffffffff, 'fd': 375 * 4 // 4 * 1 + 0, 'mem': 7 + 8 + 9 + 10 + 11,
             'a12': 50607, 'a8': 9 + 18 * 1000, 'hfa': 4 * 10 + 5, 'hfa3': 7, 'hfaret': 6 + 225, 'ref': 321, 'native': 0x1111, 'ud': 0xC000001D ^ NOWHERE,
-            'uf': 40, 'u1': 60, 'vec': 10, 'vec2': 10, 'd4': 11, 'al': 13, 'bf': 40, 'f4r': 4321, 'vr': 4321, 'd4r': 4321, 'ct': 507, 'ur': 6 + 225}
+            'uf': 40, 'u1': 60, 'vec': 10, 'vec2': 10, 'd4': 11, 'al': 13, 'bf': 40, 'f4r': 4321, 'vr': 4321, 'd4r': 4321, 'ct': 507, 'ur': 6 + 225, 'fsw': 0x20, 'frm': 0x25800000}
     want['fd'] = 15 * 100 + 6
     want['vr'] = 4321
     for name in CASES:
