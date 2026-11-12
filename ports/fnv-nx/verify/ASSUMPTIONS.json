@@ -201,6 +201,7 @@
     "ports/fnv-nx/contract/iat.py",
     "ports/fnv-nx/contract/modules.py",
     "ports/fnv-nx/lift/gates/gate_eh.py",
+    "ports/fnv-nx/lift/proof/README.md",
     "ports/fnv-nx/lift/tools/fpstate.py",
     "ports/fnv-nx/verify/VERDICT.md"
    ],
@@ -260,6 +261,8 @@
     "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/journal/inbox/l2-source-handoff-opus.md",
     "ports/fnv-nx/journal/status/l3a-lift.md",
+    "ports/fnv-nx/lift/proof/README.md",
+    "ports/fnv-nx/lift/proof/symcheck.py",
     "ports/fnv-nx/lift/tools/ehflow.py",
     "ports/fnv-nx/lift/tools/jtab.py",
     "ports/fnv-nx/link/a64order.py",
@@ -390,6 +393,8 @@
     "ports/fnv-nx/contract/argflow.py",
     "ports/fnv-nx/contract/gate_reach.py",
     "ports/fnv-nx/contract/memfx.py",
+    "ports/fnv-nx/lift/proof/README.md",
+    "ports/fnv-nx/lift/proof/model_sail.py",
     "ports/fnv-nx/verify/TOOLS.md"
    ],
    "aliases": [
@@ -808,6 +813,7 @@
    "text": "The instruction decoders are correct (LLVM's AArch64 descriptions, capstone).",
    "used_by": [
     "ports/fnv-nx/journal/status/l3a-lift.md",
+    "ports/fnv-nx/lift/proof/gate_fpexact.py",
     "ports/fnv-nx/verify/TOOLS.md",
     "ports/fnv-nx/verify/VERDICT.md",
     "ports/fnv-nx/verify/objstub.py"
@@ -1058,6 +1064,39 @@
    "owner": "L3a"
   },
   {
+   "id": "ASM-206",
+   "text": "GCC keeps an FP operation before the FPSR read that follows it in program order (GCC has no FENV_ACCESS).",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h",
+    "ports/fnv-nx/lift/test/fpflags.py"
+   ],
+   "aliases": [
+    "ASM-307",
+    "L3b:A-ORDER"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: not compiler correctness: GCC is allowed to reorder. Closing rule: FPSR read through an operation the compiler must order (asm with FP operand dependency), then gate on objects",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-207",
+   "text": "Host code between guest instructions (imports, native bodies) runs with the guest FPSR parked or raises nothing the guest sees.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/journal/inbox/l3a-w8-native-fp.md",
+    "ports/fnv-nx/journal/status/l3a-lift.md",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "ASM-308",
+    "L3b:A-NATIVE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: rt/imp.h parks FPSR for import bodies; bridgegen (L3a w8) parks FPSR on every lifted->native transfer",
+   "owner": "L3a"
+  },
+  {
    "id": "ASM-208",
    "text": "A handler resuming by ContinueExecution does not change the FP flag owner nor leave the x87/MMX register file in another carrier format.",
    "used_by": [
@@ -1070,6 +1109,21 @@
    ],
    "status": "REMOVE",
    "removed_by": "no gate yet: closable by canonicalising on resume in rt/seh.c (L3a)",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-209",
+   "text": "An MMX read of a register popped by a static-stack function, with no MMX write since, reads data undefined on the CPU too.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/rt/fnvl_x87.h"
+   ],
+   "aliases": [
+    "ASM-310",
+    "L3b:A-STALE"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the CPU value is defined (old bits); closing = write back on pop or prove no such read statically",
    "owner": "L3a"
   },
   {
@@ -1195,6 +1249,36 @@
    "owner": "L3a"
   },
   {
+   "id": "ASM-219",
+   "text": "Every guest thread starts with FCW 0x027F and MXCSR 0x1F80.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/tools/fpstate.py"
+   ],
+   "aliases": [
+    "ASM-327",
+    "L3b:A-START"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: set by the runtime at thread entry (rt/enter.c); being verified against the code with the FP-mask fact",
+   "owner": "L3a"
+  },
+  {
+   "id": "ASM-220",
+   "text": "The CONTEXT image handed to guest SEH handlers is only read back by the runtime restore, which restores a reachable control state.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3a-w3-assumptions.md",
+    "ports/fnv-nx/lift/tools/fpstate.py"
+   ],
+   "aliases": [
+    "ASM-328",
+    "L3b:A-CTX"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: a handler may write the FP control words in CONTEXT; being checked against rt/seh.c with the FP-mask fact",
+   "owner": "L3a"
+  },
+  {
    "id": "ASM-221",
    "text": "The lowest index of a jump table is below 16: the table starts at most 16 dwords above the displacement (TAB_BIAS, fnvlift/core.py).",
    "used_by": [
@@ -1243,67 +1327,13 @@
    "id": "ASM-225",
    "text": "Fresh stack space (premise F): when esp is loaded from a register that is not a known stack address (chkstk/alloca: esp = esp - size), the fresh space is disjoint from every tracked slot of the old frame: its accesses are below the new esp or inside the allocated block, and the new esp does not lie above a live tracked old slot (size >= 0, no wraparound, no access past the allocated size). A red-free pcsrc result of an entry that creates a fresh space holds under it (cond:fresh, listed as cond_fresh_list in gate_pcsrc.json).",
    "used_by": [
+    "ports/fnv-nx/journal/status/l3a-lift.md",
     "ports/fnv-nx/lift/tools/pcsrc.py"
    ],
    "aliases": [],
    "status": "REMOVE",
    "removed_by": "planned: the affine esp-minus-size domain plus the probe-loop relation (L3a w4)",
    "owner": "L3a"
-  },
-  {
-   "id": "ASM-320",
-   "text": "rt/rcptab.cert.json was produced by farm/rcpcert.sh on a CPU with the reference identity.",
-   "used_by": [],
-   "aliases": [
-    "L3b:A-RCPHOST"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: rcptab.cert.json binds the table to a farm/rcpcert.sh run on the pinned reference host (host cpuid + run output sha256), checked by rcpcert",
-   "owner": "L3b"
-  },
-  {
-   "id": "ASM-321",
-   "text": "RCPSS/RSQRTSS are pure functions of the input bits: MXCSR does not influence them.",
-   "used_by": [],
-   "aliases": [
-    "L3b:A-RCPPURE"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: the exhaustive 2^32 run is repeated under every MXCSR RC×FTZ×DAZ combination (16) and every result recorded in the cert; rcpcert is red unless all 16 tables are equal",
-   "owner": "L3b"
-  },
-  {
-   "id": "ASM-322",
-   "text": "The helpers sse_f2i and fv_i are correct (range guard, rounding mode, integer indefinite).",
-   "used_by": [],
-   "aliases": [
-    "L3b:A-F2IHELPERS"
-   ],
-   "status": "REMOVE",
-   "removed_by": "gate:fpexact",
-   "owner": "L3b"
-  },
-  {
-   "id": "ASM-323",
-   "text": "An object and its .f2i.json come from the same compile.",
-   "used_by": [],
-   "aliases": [
-    "L3b:A-F2IKEY"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: recipe cache key binds both once the plugin is a recipe stage",
-   "owner": "L3b"
-  },
-  {
-   "id": "ASM-325",
-   "text": "No float->int conversion of a C literal occurs in lifted code (GCC folds an out-of-range constant to the saturated value, not the x86 indefinite).",
-   "used_by": [],
-   "aliases": [
-    "L3b:A-F2ICONST"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: closable in the plugin: constant operand of a conversion = finding",
-   "owner": "L3b"
   },
   {
    "id": "ASM-800",

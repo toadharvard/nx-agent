@@ -103,7 +103,7 @@ Gate with the patched IR (forms.py md5 5ba2bb32...): proved 358, FAILED 33 (rol/
   outside the symbolic ranges (and the 16 - len window bytes to 0); the field bytes stay free. The traces' `read-reg code_bytes` is bound to
   `Concat(concrete bytes, fld_imm / fld_disp bytes)`. isla forks only on the sign bit / value ranges of the field (e.g. imm8 sign extension, shift-count
   masks): the paths come back with their path conditions and are merged as before, so the case split is exhaustive by construction (isla enumerates every
-  feasible branch); no field is split by hand (certificate `split: none`). eip: `code_base = rip` stay symbolic with `rip < 2^32 - 16` (assumption A-EIPRANGE; cost
+  feasible branch); no field is split by hand (certificate `split: none`). eip: `code_base = rip` stay symbolic with `rip < 2^32 - 16` (assumption ASM-013; cost
   about 10 s per shape instead of 1-2 s); `--eip fixed` keeps 0x401000 (assumption A-EIP "semantics is translation-invariant in eip") and the certificate gives
   `eip_dependence` per shape by the structure of the Form (`none`: eip only in eip + size; `target`: relative transfer; `data`: eip stored, i.e. call).
 * **DSL side.** `fnvlift/dsl.py` has a field-variable node `F(name, w)` (z3 name `fld_<name>`) and nodes may stand in `C(...)`. `symform.symbuild` presents to the
@@ -114,7 +114,7 @@ Gate with the patched IR (forms.py md5 5ba2bb32...): proved 358, FAILED 33 (rol/
 * **Link to the lifter** (it builds concrete Forms): `canon(build(i)) == canon(symbuild(shape(i))[fields := i, eip := addr(i)])`, canon = serialization after constant
   folding; `symcheck.py` checks it for EVERY instance of the image (all unique (address, bytes) of the code ranges), `tests/test_symform.py` on synthetic encodings.
 * **Obligation** = `prove.prove_one` (imported); the field variables are free in the unsat query. `shapeprove.py --shard K/N`, farm: `bash ports/fnv-nx/farm/farm_shapeprove.sh K N`.
-  `dsl_sha` = `symform.shape_sha(key)` (no z3). Assumptions: A-FLAT, A-EIPRANGE | A-EIP, A-SEGLIM (the model's segment-limit faults, now also
+  `dsl_sha` = `symform.shape_sha(key)` (no z3). Assumptions: ASM-003, ASM-013 | A-EIP, ASM-006 (the model's segment-limit faults, now also
   `:OUT-OF-SEGMENT-INSTRUCTION-POINTER`, are excluded; symcheck counts the relative targets of the image that leave [0, 2^32): 0 expected).
 
 ## Gates `forms` and `fpexact` (fnvnx-gate/1, verify/VERDICT.md classes 6 and C)

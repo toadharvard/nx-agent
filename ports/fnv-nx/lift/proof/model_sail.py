@@ -47,7 +47,7 @@ def ir_sha():
     if _irsha is None: _irsha = hashlib.sha256(open(IR, 'rb').read()).hexdigest()
     return _irsha
 
-EIP_LIMIT = 0xfffffff0       # symbolic-eip runs: the instruction (at most 16 bytes) lies below 2^32 (assumption A-EIPRANGE)
+EIP_LIMIT = 0xfffffff0       # symbolic-eip runs: the instruction (at most 16 bytes) lies below 2^32 (assumption ASM-013)
 
 def sym_constraint(code, ranges, eip_sym):
     """isla --reset-constraint text of a shape run: the instruction bytes outside `ranges` (the symbolic field byte ranges (off, size)) are the bytes of
@@ -271,7 +271,7 @@ def model_post(code, pre):
 def model_post_shape(code, fields, pre, eip_sym=True, timeout=600):
     """model_post for a whole encoding shape: `code` = representative bytes, fields = {name: (offset, size) | None} (imm / disp byte ranges), the bytes of
     the fields are the z3 variables fld_<name> (BitVec 8*size), eip is pre['eip'] (a variable when eip_sym: then code_base = rip = pre['eip'] and the
-    assumption eip < EIP_LIMIT (A-EIPRANGE) is part of `assume`; otherwise the constant 0x401000, assumption A-EIP in the certificate)"""
+    assumption eip < EIP_LIMIT (ASM-013) is part of `assume`; otherwise the constant 0x401000, assumption A-EIP in the certificate)"""
     rg = [(o, n) for o, n in (f for f in fields.values() if f)]; var = {nm: z3.BitVec('fld_' + nm, 8 * f[1]) for nm, f in fields.items() if f}
     byte = {}
     for nm, (o, n) in ((nm, f) for nm, f in fields.items() if f):

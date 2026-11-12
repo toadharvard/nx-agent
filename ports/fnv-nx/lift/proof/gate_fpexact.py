@@ -34,7 +34,7 @@ definition), so an object without them cannot compute an rcp / rsqrt value excep
 table of rt/rcptab.c (or an exact division / square root). Soundness needs every instruction of the section to be decoded: the bytes of
 a section are code except the ranges the object marks as data with the AArch64 ELF mapping symbols ($d ... $x); bytes the decoder
 cannot decode in a code range are the finding `undecodable` (and make the item of check 3b uncertified as well). Registered
-assumption: A-CAPSTONE-A64 (capstone decodes an instruction to its architectural id; sections the object does not mark are code from their start).
+assumption: ASM-043 (capstone decodes an instruction to its architectural id; sections the object does not mark are code from their start).
 
 Check 3, float -> integer exactness (item `f2i:<root>/<unit>`). The x86 rule (cvt*2si, cvtt*, fist, fistp, fisttp): rounding by MXCSR.RC /
 FCW.RC (truncation for the cvtt* and fisttp forms); NaN and out-of-range give the integer indefinite (0x80000000, 0x8000,

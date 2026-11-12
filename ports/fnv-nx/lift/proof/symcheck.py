@@ -8,7 +8,7 @@ Universe: the union of the half-open ranges of ranges.tsv (entry <TAB> start-end
 --proc K/N splits the unique ranges over N processes (K = 1..N, range index mod N).
 Result classes per instance: linked | MISMATCH | unlinked:<class> (symbuild failed with that class while the concrete builder succeeded: the shape has no
 symbolic Form, so the instance is NOT covered by a shape proof) | no-form (neither builder covers it) | other-family | shape-error.
-Also counted (assumption A-SEGLIM, shapeprove.py): relative targets whose non-wrapping value addr + size + sext(rel) leaves [0, 2^32): seglim-violations.
+Also counted (assumption ASM-006, shapeprove.py): relative targets whose non-wrapping value addr + size + sext(rel) leaves [0, 2^32): seglim-violations.
 Memory: the DSL interns every node, so the intern table and the per-shape cache are cleared every CHUNK instances (nodes are compared by serialization, not identity)."""
 import argparse, collections, json, os, re, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
