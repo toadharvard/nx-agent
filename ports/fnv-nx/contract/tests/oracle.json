@@ -1,0 +1,213 @@
+{
+ "format": "fnvnx-oracle/1",
+ "tests": {
+  "test_bind.py": {
+   "references": [
+    {
+     "anchor": "## contract/bind.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/store.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/bodysel.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/bind.py",
+    "ports/fnv-nx/contract/store.py",
+    "ports/fnv-nx/contract/bodysel.py"
+   ]
+  },
+  "test_gate_call_decl.py": {
+   "references": [
+    {
+     "anchor": "## contract/gate_call.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## N2 prepare rules",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RULES.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/gate_call.py"
+   ]
+  },
+  "test_gate_reach.py": {
+   "references": [
+    {
+     "anchor": "## contract/gate_reach.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/gpa_names.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/gate_reach.py",
+    "ports/fnv-nx/contract/gpa_names.py"
+   ]
+  },
+  "test_gates.py": {
+   "references": [
+    {
+     "anchor": "## contract/gate_data.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/gate_call.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/gate_vcall.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/gate_xc.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/gate_data.py",
+    "ports/fnv-nx/contract/gate_call.py",
+    "ports/fnv-nx/contract/gate_vcall.py",
+    "ports/fnv-nx/contract/gate_xc.py"
+   ]
+  },
+  "test_gpa_names.py": {
+   "references": [
+    {
+     "anchor": "## contract/gpa_names.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/gpa_names.py"
+   ]
+  },
+  "test_iat.py": {
+   "references": [
+    {
+     "anchor": "## contract/iat.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/iat.py"
+   ]
+  },
+  "test_images.py": {
+   "references": [
+    {
+     "anchor": "## The guest image set",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
+    },
+    {
+     "anchor": "## contract/images.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/images.py"
+   ]
+  },
+  "test_l2sections.py": {
+   "references": [
+    {
+     "anchor": "## contract/l2sections.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/l2sections.py"
+   ]
+  },
+  "test_memfx.py": {
+   "references": [
+    {
+     "anchor": "## contract/memfx.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/memfx.py"
+   ]
+  },
+  "test_objmerge.py": {
+   "references": [
+    {
+     "anchor": "## contract/objfacts_merge.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/store.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/objfacts_merge.py",
+    "ports/fnv-nx/contract/store.py"
+   ]
+  },
+  "test_proto.py": {
+   "references": [
+    {
+     "anchor": "## contract/proto.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/bodysel.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/proto.py",
+    "ports/fnv-nx/contract/bodysel.py"
+   ]
+  },
+  "test_store.py": {
+   "references": [
+    {
+     "anchor": "## contract/store.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/gatefile.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/store.py",
+    "ports/fnv-nx/contract/gatefile.py"
+   ]
+  }
+ }
+}

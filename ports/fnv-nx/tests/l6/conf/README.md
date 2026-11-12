@@ -1,7 +1,7 @@
 # Wine d3d9 conformance tests -> recorded D9S1 streams (V1a)
 
 Wine 9.0's `dlls/d3d9/tests` (device, stateblock, visual, d3d9ex; LGPL) are built standalone with mingw and run under Wine + Xvfb
-(llvmpipe), plain and through our recorder `render/d3d9/rec` (proxy d3d9.dll). The Wine sources and all streams stay in scratch
+(llvmpipe), plain and through our recorder `render/tools/rec` (proxy d3d9.dll). The Wine sources and all streams stay in scratch
 (`/home/user/work/l6/conf`); only our own scripts and measurements are in the repo.
 
 ## Rebuild / rerun
@@ -24,7 +24,7 @@ and the first differing line printed; (ii) every stream decodes (`d9s1.py`); (ii
 
 ## Result (2026-11-10, Wine 9.0 / llvmpipe)
 Only stateblock passes all checks. device, d3d9ex, visual **crash under the recorder** (exit 5, partial stream) and differ from the
-plain run before the crash; plain runs are stable (plain rerun = plain). Recorder defects found (render/d3d9/rec + gen, not fixed here):
+plain run before the crash; plain runs are stable (plain rerun = plain). Recorder defects found (render/tools/rec + gen, not fixed here):
 1. Wrapper freed when `Release` returns 0 (`D9Rec::commit` -> `free_obj`). Wine keeps such objects alive (implicit swapchain, back
    buffers) and tests use them again (device.c:1294): use after free; as built, device.exe dies in GetPrivateData with a NULL guid
    (a freed SwapChain9 wrapper's memory reused by a Surface9 wrapper, slot 5 = GetBackBuffer vs GetPrivateData).

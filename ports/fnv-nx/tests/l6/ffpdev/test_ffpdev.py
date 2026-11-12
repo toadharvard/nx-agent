@@ -15,7 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.pat
 sys.path.insert(0, os.path.join(HERE, "..", "gl4")); import xl  # noqa: E402  (the translator build libnxgl4 links: FNVNX_SHADERS_BUILD, required)
 sys.path.insert(0, HERE)
 import model, gen  # noqa: E402
-D3D9 = os.path.join(ROOT, "render", "d3d9"); DEV = os.path.join(D3D9, "dev"); FFP = os.path.join(D3D9, "ffp"); GENDIR = os.path.join(D3D9, "gen"); ENV = os.path.join(D3D9, "env"); BACK = os.path.join(D3D9, "backend")
+D3D9 = os.path.join(ROOT, "render", "d3d9"); DEV = os.path.join(D3D9, "dev"); FFP = os.path.join(D3D9, "ffp"); GENDIR = os.path.join(D3D9, "gen"); ENV = os.path.join(D3D9, "env"); BACK = os.path.join(D3D9, "backend"); NXB = os.path.normpath(os.path.join(BACK, "..", "backend"))
 FRONT = os.path.join(D3D9, "front"); SPEC = os.path.join(D3D9, "spec", "d3d9_spec.json"); INC = os.path.join(ROOT, "shim", "include"); COPY = os.path.join(ROOT, "tests", "l6", "copy")
 LIB = ["obj.cpp", "app_unk_native.cpp", "state_rt.cpp", "state_ext.cpp"]; GENS = ["d9impl_unk.gen.cpp", "state.gen.cpp"]
 RES = ["res_buf.cpp", "res_fvf.cpp", "res_decl.cpp", "res_shader.cpp", "res_smcheck.cpp", "res_query.cpp", "res_fmt.cpp", "res_tex.cpp", "res_surf.cpp", "res_create.cpp"]
@@ -45,8 +45,8 @@ def locations_check():
 
 
 def build_server(tmp):
-    srcs = sorted(os.path.join(BACK, f) for f in os.listdir(BACK) if (f.startswith("gl4_") or f == "nxgpu4_check.c") and f.endswith(".c")) + [os.path.join(COPY, "server.c")]
-    out = os.path.join(tmp, "server"); r = sh(["gcc", "-std=gnu11", "-O1", "-w", "-I", BACK, *srcs, *xl.flags(), "-lEGL", "-lGL", "-lm", "-o", out])
+    srcs = sorted(os.path.join(BACK, f) for f in os.listdir(BACK) if f.startswith("gl4_") and f.endswith(".c")) + [os.path.join(NXB, "nxgpu4_check.c")] + [os.path.join(COPY, "server.c")]
+    out = os.path.join(tmp, "server"); r = sh(["gcc", "-std=gnu11", "-O1", "-w", "-I", BACK, "-I", NXB, *srcs, *xl.flags(), "-lEGL", "-lGL", "-lm", "-o", out])
     return (out, "") if r.returncode == 0 else (None, r.stderr[-800:])
 
 
@@ -62,11 +62,11 @@ def gens(tmp, uam=None):
 CXX = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O1", "-w"]
 
 
-def flags(tmp): return CXX + ["-I", INC, "-I", tmp, "-I", DEV, "-I", BACK, "-I", FRONT, "-I", HERE]
+def flags(tmp): return CXX + ["-I", INC, "-I", tmp, "-I", DEV, "-I", BACK, "-I", NXB, "-I", FRONT, "-I", HERE]
 
 
 def src_of(name, tmp):
-    for d in (DEV, FFP, HERE, tmp):
+    for d in (DEV, FFP, HERE, tmp, os.path.join(HERE, "..", "native"), os.path.join(HERE, "ref")):
         if os.path.exists(os.path.join(d, name)): return os.path.join(d, name)
     raise SystemExit("no source " + name)
 
@@ -78,11 +78,11 @@ def build(tmp, jobs=3):
     cmds, objs = [], {}
     for s in srcs:
         o = os.path.join(tmp, s + ".o"); objs[s] = o
-        if s.endswith(".c"): cmds.append(["gcc", "-m32", "-std=gnu11", "-O1", "-w", "-I", FFP, "-c", src_of(s, tmp), "-o", o])
+        if s.endswith(".c"): cmds.append(["gcc", "-m32", "-std=gnu11", "-O1", "-w", "-I", FFP, "-I", os.path.join(HERE, "ref"), "-c", src_of(s, tmp), "-o", o])
         else: cmds.append(flags(tmp) + ["-c", src_of(s, tmp), "-o", o])
     fronts = sorted(f for f in os.listdir(FRONT) if f.startswith("front_") and f.endswith(".c"))
     for f in fronts:
-        o = os.path.join(tmp, "nx_" + f + ".o"); objs["nx_" + f] = o; cmds.append(["gcc", "-m32", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK, "-c", os.path.join(FRONT, f), "-o", o])
+        o = os.path.join(tmp, "nx_" + f + ".o"); objs["nx_" + f] = o; cmds.append(["gcc", "-m32", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK, "-I", NXB, "-c", os.path.join(FRONT, f), "-o", o])
     with cf.ThreadPoolExecutor(jobs) as ex: rs = list(ex.map(sh, cmds))
     for c, r in zip(cmds, rs):
         if r.returncode: return None, None, " ".join(c[-3:]) + "\n" + r.stderr[-1500:]
@@ -184,7 +184,7 @@ def mut_build(base, tmp, rel, old, new, idx):
         fd = os.path.join(mdir, "ffp"); shutil.copytree(FFP, fd); shutil.copy(mp, os.path.join(fd, os.path.basename(rel))); g = os.path.join(mdir, "gen"); os.makedirs(g)
         r = sh([sys.executable, "-I", os.path.join(fd, "gen_glsl.py"), g])
         if r.returncode: return None, "gen_glsl: " + r.stderr[-300:]
-        o = os.path.join(mdir, "x.o"); r = sh(CXX + ["-I", INC, "-I", g, "-I", base["tmp"], "-I", DEV, "-I", BACK, "-I", FRONT, "-I", HERE, "-c", os.path.join(DEV, "ffp_prog.cpp"), "-o", o])
+        o = os.path.join(mdir, "x.o"); r = sh(CXX + ["-I", INC, "-I", g, "-I", base["tmp"], "-I", DEV, "-I", BACK, "-I", NXB, "-I", FRONT, "-I", HERE, "-c", os.path.join(DEV, "ffp_prog.cpp"), "-o", o])
         if r.returncode: return None, "compile: " + r.stderr[-300:]
         objs["ffp_prog.cpp"] = o
     exe = os.path.join(mdir, "t"); r = sh(["g++", "-m32", "-no-pie", "-o", exe] + list(objs.values()) + ["-lm", "-Wl,--unresolved-symbols=ignore-all"])

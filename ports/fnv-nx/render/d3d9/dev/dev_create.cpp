@@ -5,11 +5,11 @@
 // CreateDevice and CreateDeviceEx (Wine: the device is "extended" iff its d3d9 is). DECISIONS (doubt): null pp / null out = INVALIDCALL (Windows: same for pp); the D3DDISPLAYMODEEX of CreateDeviceEx is ignored
 // (Wine FIXME "Ignoring display mode"); a full-screen device whose focus window (else hDeviceWindow) is no window fails E_FAIL (wined3d_device_acquire_focus_window); AdapterOrdinal >= count = INVALIDCALL.
 #include "res_tex.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include "dev_core.h"
 #include "dev_hooks.h"
 #include "d3d9_adapter.h"
-#include "env_table.gen.h"
+#include "../gen/env_table.gen.h"
 #include <string.h>
 
 HRESULT nx_make_auto_ds(NxDeviceCore* d, const NxPPEff& e, const D3DPRESENT_PARAMETERS& p, NxObj** out) {

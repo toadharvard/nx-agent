@@ -33,7 +33,7 @@ for t in stateblock device d3d9ex visual; do   # -include initguid.h: the IIDs (
   ( cd "$T" && i686-w64-mingw32-gcc -DSTANDALONE -D__WINESRC__ -O1 -w -include initguid.h -I"$W/shim" -I. -o "$W/out/$t.exe" $t.c \
       -ld3d9 -luser32 -lgdi32 -lole32 -luuid -static-libgcc )
 done
-"$ROOT/render/d3d9/rec/build.sh" "$W/rec" >/dev/null
+"$ROOT/render/tools/rec/build.sh" "$W/rec" >/dev/null
 ls -l "$W"/out/*.exe "$W/rec/d3d9.dll" | awk '{print $5, $9}'
 # Variant WORK/rec_nofree/d3d9.dll (diagnostic, scratch only): identical except an object whose Release returned 0 is "zombied": its id is retired
 # once (D9Rec::retire); the D9Obj and its wrappers are NOT freed (`free_obj(ret[i])` replaced by: unlink from the real-pointer map only, so a reused real address gets a fresh object) and a later Release->0 does not retire again. Needed because

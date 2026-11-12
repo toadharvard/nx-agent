@@ -3,7 +3,7 @@
 // default 0), WaitForVBlank, CheckResourceResidency (a resource of OURS lives in memory the device manages: always resident). Env rows DEV.GetDisplayModeEx / GetMaximumFrameLatency / CheckDeviceState.
 // SetConvolutionMonoKernel, ComposeRects, IDirect3DSwapChain9Ex::GetPresentStats: m1_misc.cpp / m1_stats.cpp (M1). DECISIONS (doubt): GPU thread priority out of range = D3DERR_INVALIDCALL (MS page lists no code); WaitForVBlank on a swap chain index >= 1 = INVALIDCALL.
 #include "res_tex.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include "dev_core.h"
 #include "dev_hooks.h"
 #define INV D3DERR_INVALIDCALL

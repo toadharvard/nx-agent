@@ -11,8 +11,8 @@
 // offscreen plain) = E_OUTOFMEMORY (d3d9_device_create_surface); the CPU storage = E_OUTOFMEMORY (wined3d_texture_init); the backend refusing the image = D3DERR_OUTOFVIDEOMEMORY (NxImg::init). A failed call releases everything
 // it made through the object's own destruction (the object holds its device reference and registry entry only once made, and gives them back), and leaves *out null.
 #include "res_tex.h"
-#include "d9impl.gen.h"
-#include "env_table.gen.h"
+#include "../gen/d9impl.gen.h"
+#include "../gen/env_table.gen.h"
 #include <string.h>
 #define MAXU64 ((uint64_t)NX_MAX_TEX_BYTES)
 static bool is_ex(NxObj* dev) { return strcmp(dev->ci->name, "IDirect3DDevice9Ex") == 0; }

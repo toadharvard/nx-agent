@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_nxcheck.py: render/d3d9/backend/nxgpu4_check.c, the backend-neutral nxgpu v4 argument and stream checks.
+"""test_nxcheck.py: render/backend/nxgpu4_check.c, the backend-neutral nxgpu v4 argument and stream checks.
   python3 -I tests/l6/nxcheck/test_nxcheck.py [--no-mutations]
  a  neutrality: nxgpu4_check.c is compiled ALONE with a plain C compiler (-std=c11 -Wall -Werror), in a directory that holds
     only nxgpu4.h, nxgpu4_check.h and the source, so no GL header can be found; the preprocessor's include list names no
@@ -12,7 +12,7 @@ The driver defines nxchk_err and an image table (the neutral view), the way a ba
 import os, re, shutil, subprocess, sys, tempfile
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-BACK = os.path.join(ROOT, "render", "d3d9", "backend")
+BACK = os.path.join(ROOT, "render", "gl4"); NXB = os.path.normpath(os.path.join(BACK, "..", "backend"))
 SRC = ["nxgpu4.h", "nxgpu4_check.h", "nxgpu4_check.c", "nx/gpu_abi.h", "nx/state.h"]   # the ABI headers only
 fails = []; nchecks = 0
 
@@ -215,7 +215,7 @@ def part_a():
     for f in ["nxgpu4_check.h", "nxgpu4_check.c"]:
         t = open(os.path.join(BACK, f)).read()
         check(not re.search(r"\bGL_\w+|\bGL(enum|int|uint|boolean|sizei)\b|\bp_gl\w+|\bg4\b|\bgl4_\w+|#\s*include\s*<GL", re.sub(r"/\*.*?\*/", "", t, flags=re.S)), f + " has no GL token")
-    check(not re.search(r"\bdefault\s*:", open(os.path.join(BACK, "nxgpu4_check.c")).read()), "no default: label")
+    check(not re.search(r"\bdefault\s*:", open(os.path.join(NXB, "nxgpu4_check.c")).read()), "no default: label")
 
 
 def main():
@@ -228,7 +228,7 @@ def main():
             print("cases: %s, failed %s" % (m.group(1), m.group(2)))
             check(int(m.group(1)) >= 30, "at least 30 cases (%s)" % m.group(1))
     if "--no-mutations" not in sys.argv:
-        src = open(os.path.join(BACK, "nxgpu4_check.c")).read()
+        src = open(os.path.join(NXB, "nxgpu4_check.c")).read()
         for name, old, new in MUTS:
             check(src.count(old) == 1, "mutation '%s' matches once" % name)
             if src.count(old) != 1: continue

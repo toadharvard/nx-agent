@@ -34,7 +34,7 @@ def build(tmp, genpy=None, tables_edit=None, tag="host"):
     open(g + "/envq.gen.h", "w").write(envq.emit()); open(g + "/envfmt.gen.h", "w").write(envq.emit_fmt())
     if tables_edit: p = g + "/env_table.gen.cpp"; t = open(p).read(); t2 = tables_edit(t); assert t2 != t, "mutation did not change the tables"; open(p, "w").write(t2)
     fl = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O1", "-w", "-I", INC, "-I", g, "-I", DEV, "-I", HERE]
-    srcs = [(DEV + "/obj.cpp", "obj"), (DEV + "/app_unk_native.cpp", "appunk"), (g + "/d9impl_unk.gen.cpp", "unk"), (DEV + "/d3d9_adapter.cpp", "adapter"), (g + "/env_table.gen.cpp", "table"), (HERE + "/hostenv.cpp", "host")]
+    srcs = [(DEV + "/obj.cpp", "obj"), (os.path.join(ROOT, "tests", "l6", "native") + "/app_unk_native.cpp", "appunk"), (g + "/d9impl_unk.gen.cpp", "unk"), (DEV + "/d3d9_adapter.cpp", "adapter"), (g + "/env_table.gen.cpp", "table"), (HERE + "/hostenv.cpp", "host")]
     cmds = [fl + ["-c", s, "-o", f"{tmp}/{tag}_{n}.o"] for s, n in srcs]
     with cf.ThreadPoolExecutor(5) as ex: rs = list(ex.map(sh, cmds))
     for c, r in zip(cmds, rs):

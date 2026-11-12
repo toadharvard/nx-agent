@@ -11,8 +11,8 @@ HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.pat
 sys.path.insert(0, HERE); sys.path.insert(0, os.path.join(HERE, "..", "dev"))
 import oracle  # noqa: E402
 DEV = os.path.join(ROOT, "render", "d3d9", "dev"); GEN = os.path.join(ROOT, "render", "d3d9", "gen"); ENV = os.path.join(ROOT, "render", "d3d9", "env"); SPEC = os.path.join(ROOT, "render", "d3d9", "spec", "d3d9_spec.json")
-INC = os.path.join(ROOT, "shim", "include"); FRONT = os.path.join(ROOT, "render", "d3d9", "front"); BACK = os.path.join(ROOT, "render", "d3d9", "backend")
-LIB = ["obj.cpp", "app_unk_native.cpp", "state_rt.cpp", "state_ext.cpp"]; GENS = ["d9impl_unk.gen.cpp", "state.gen.cpp"]
+INC = os.path.join(ROOT, "shim", "include"); FRONT = os.path.join(ROOT, "render", "d3d9", "front"); BACK = os.path.join(ROOT, "render", "gl4"); NXB = os.path.normpath(os.path.join(BACK, "..", "backend"))
+LIB = ["obj.cpp", "app_unk_native.cpp", "state_rt.cpp", "state_ext.cpp"]; GENS = ["d9impl_unk.gen.cpp", "state.gen.cpp"]; NATIVE = os.path.join(ROOT, "tests", "l6", "native")
 RES = ["res_buf.cpp", "res_fvf.cpp", "res_decl.cpp", "res_shader.cpp", "res_smcheck.cpp", "res_query.cpp", "res_fmt.cpp", "res_tex.cpp", "res_surf.cpp", "res_create.cpp"]
 GLUE = ["glue_stream.cpp", "glue_image.cpp", "glue_query.cpp", "glue_buf.cpp"]
 DRAW = ["draw_api.cpp", "draw_exec.cpp", "draw_prim.cpp", "draw_prog.cpp", "draw_layout.cpp", "draw_ids.cpp", "draw_state.cpp", "draw_const.cpp", "draw_tex.cpp", "draw_bind.cpp"]
@@ -24,7 +24,7 @@ fails = []
 def sh(cmd, **kw): return subprocess.run(cmd, capture_output=True, text=True, **kw)
 
 
-def flags(dev, tmp): return ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O1", "-w", "-I", INC, "-I", tmp, "-I", dev, "-I", BACK, "-I", FRONT, "-I", HERE]
+def flags(dev, tmp): return ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O1", "-w", "-I", INC, "-I", tmp, "-I", dev, "-I", BACK, "-I", NXB, "-I", FRONT, "-I", HERE]
 
 
 def build(dev, tmp, jobs=8, base=None, only=None):
@@ -38,10 +38,10 @@ def build(dev, tmp, jobs=8, base=None, only=None):
             if r.returncode: return None, r.stderr[-800:]
     gdir = tmp if base is None else base
     fl = flags(dev, gdir)
-    srcs = [(os.path.join(dev, s), s) for s in LIB + RES + GLUE + DRAW] + [(os.path.join(gdir, s), s) for s in GENS + ["env_table.gen.cpp"]] + [(os.path.join(HERE, s), s) for s in TESTS]
+    srcs = [(os.path.join(NATIVE if s == "app_unk_native.cpp" else dev, s), s) for s in LIB + RES + GLUE + DRAW] + [(os.path.join(gdir, s), s) for s in GENS + ["env_table.gen.cpp"]] + [(os.path.join(HERE, s), s) for s in TESTS]
     fronts = sorted(f for f in os.listdir(FRONT) if f.startswith("front_") and f.endswith(".c"))
     cmds = [fl + ["-c", src, "-o", os.path.join(tmp, n + ".o")] for src, n in srcs if only is None or n in only]
-    if base is None: cmds += [["gcc", "-m32", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK, "-c", os.path.join(FRONT, f), "-o", os.path.join(tmp, "nx_" + f + ".o")] for f in fronts]
+    if base is None: cmds += [["gcc", "-m32", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK, "-I", NXB, "-c", os.path.join(FRONT, f), "-o", os.path.join(tmp, "nx_" + f + ".o")] for f in fronts]
     with cf.ThreadPoolExecutor(jobs) as ex: rs = list(ex.map(sh, cmds))
     for c, r in zip(cmds, rs):
         if r.returncode: return None, " ".join(c[-3:]) + "\n" + r.stderr[-1500:]

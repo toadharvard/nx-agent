@@ -15,7 +15,7 @@
 // colour-renderable per the env table (CheckDeviceFormat RENDERTARGET) - a plain surface of any other format has no fill; rect = whole when null, else a valid box of the level (check_box_dimensions:
 // non-empty, inside, block aligned) or INVALIDCALL; the colour is not affected by SRGBWRITEENABLE (the view is the plain one).
 #include "copy_util.h"
-#include "env_table.gen.h"
+#include "../gen/env_table.gen.h"
 #include <math.h>
 
 static NxRc whole(const NxSub* s) { return {0, 0, (int32_t)s->w, (int32_t)s->h}; }
@@ -78,5 +78,5 @@ static HRESULT do_fill(NxObj* dev, IDirect3DSurface9* surface, const RECT* rect,
 #define CLEAR_METHODS(C) \
     HRESULT STDMETHODCALLTYPE C::Clear(DWORD n, const D3DRECT* r, DWORD f, D3DCOLOR c, float z, DWORD s) { return do_clear(this, n, r, f, c, z, s); } \
     HRESULT STDMETHODCALLTYPE C::ColorFill(IDirect3DSurface9* s, const RECT* r, D3DCOLOR c) { return do_fill(this, s, r, c); }
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 CLEAR_METHODS(NxDevice9) CLEAR_METHODS(NxDevice9Ex)

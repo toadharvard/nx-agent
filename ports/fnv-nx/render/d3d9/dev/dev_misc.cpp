@@ -7,11 +7,11 @@
 // Cursor (Wine: image copy at Set time, no AddRef of the surface; visible only with an image): A8R8G8B8, power-of-two size, not larger than the display mode, readable; composited by Present (dev_chain.cpp).
 // DECISIONS (doubt): SetCursorProperties reading a non-lockable surface = INVALIDCALL; SetDialogBoxMode: Wine returns WINED3D_OK always (contract_consts.tsv); one fixme per call (Wine logs only when disabling; every path passes exactly one id, L4 rule), id 46.
 #include "res_tex.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include "dev_core.h"
 #include "dev_hooks.h"
 #include "const_fixme.h"
-#include "env_table.gen.h"
+#include "../gen/env_table.gen.h"
 #include <string.h>
 #define INV D3DERR_INVALIDCALL
 static NxChainCore* implicit_chain(NxObj* d, UINT i) { NxDevLife* L = nx_life(d); return i < 1 && L->nchains ? L->chains[0] : nullptr; }   // wined3d_device_get_swapchain over the implicit chains

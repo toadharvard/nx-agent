@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_dkcore.py: tests of render/d3d9/backend/nx/dk_core.c + dk_swap.c (deko3d backend core: device, queue, memory, dispatch, swapchain, PRESENT).
+"""test_dkcore.py: tests of render/backend/nx/dk_core.c + dk_swap.c (deko3d backend core: device, queue, memory, dispatch, swapchain, PRESENT).
     python3 -I tests/l6/dkcore/test_dkcore.py [--no-mutations]     needs gcc, the devkitA64 cross compiler and libnx / deko3d headers (FNVNX_DK,
                                                                    default /home/user/work/l6/dk)
  a  static: each .c <= 300 lines; no stub-class words and no empty function body in the product files; nxdk_guest_ptr is not defined (not even weak)
@@ -12,7 +12,7 @@ Output: the check count, mutations caught, ALL OK."""
 import os, re, shutil, subprocess, sys, tempfile
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-BACK = os.path.join(ROOT, "render", "d3d9", "backend"); NXD = os.path.join(BACK, "nx")
+BACK = os.path.join(ROOT, "render", "gl4"); NXB = os.path.normpath(os.path.join(BACK, "..", "backend")); NXD = os.path.join(os.path.normpath(os.path.join(BACK, "..", "backend")), "nx")
 DK = os.environ.get("FNVNX_DK", "/home/user/work/l6/dk")
 NM = os.path.join(DK, "dkp", "devkitA64", "bin", "aarch64-none-elf-nm")
 FILES = ["dk_core.c", "dk_swap.c"]
@@ -76,7 +76,7 @@ if r.returncode == 0:
 # ---- c ------------------------------------------------------------------------------------------------------------------------------------------
 def host(srcdir, exe):
     inc = ["-I" + os.path.join(HERE, "shim"), "-I" + os.path.join(DK, "dkp", "libnx", "include"), "-I" + os.path.join(DK, "deko3d", "include"),
-           "-I" + NXD, "-I" + BACK]
+           "-I" + NXD, "-I" + BACK, "-I" + NXB]
     cmd = ["gcc", "-std=gnu11", "-g", "-O1", "-fsanitize=address,undefined", "-fno-sanitize-recover=undefined", "-Wall", "-Wextra", "-Werror"] + inc + \
           [os.path.join(HERE, "host_main.c")] + [os.path.join(srcdir, f) for f in FILES] + ["-o", exe]
     return sh(cmd)

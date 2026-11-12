@@ -3,7 +3,7 @@
 (models, registers, modifiers, opcode model sets and operand roles) and spec/d3d9_tables.py SM1_PARAMS (sm1 token-walk operand counts). Nothing is chosen
 by hand here: a fact the table does not state is not generated (the checker then accepts: superset)."""
 import csv, importlib.util, json, os, sys
-out, tabj, tabpy = sys.argv[1:4]
+out, tabj, tabpy = sys.argv[1:4]; os.makedirs(out, exist_ok=True)
 T = json.load(open(tabj)); sp = importlib.util.spec_from_file_location("d3d9_tables", tabpy); D = importlib.util.module_from_spec(sp); sp.loader.exec_module(D)
 CLS = ["r", "v", "c", "t", "a0", "aL", "b", "i", "l", "oPos", "oFog", "oPts", "oD", "oT", "o", "oC", "oDepth", "s", "p0", "vPos", "vFace"]
 SRCMOD = ["neg", "bias", "biasneg", "sign", "signneg", "comp", "x2", "x2neg", "dz", "dw", "abs", "absneg"]          # token codes 1..12 (13 = not: predicate only)

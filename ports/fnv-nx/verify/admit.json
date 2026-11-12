@@ -1,0 +1,108 @@
+{
+ "format": "fnvnx-admit/1",
+ "roots": [
+  {
+   "path": "ports/fnv-nx/.gitignore",
+   "class": "doc",
+   "gates": []
+  },
+  {
+   "path": "ports/fnv-nx/JOURNAL.md",
+   "class": "doc",
+   "gates": []
+  },
+  {
+   "path": "ports/fnv-nx/README.md",
+   "class": "doc",
+   "gates": []
+  },
+  {
+   "path": "ports/fnv-nx/contract",
+   "class": "tool",
+   "gates": [
+    "pure",
+    "selftests"
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/docs",
+   "class": "doc",
+   "gates": []
+  },
+  {
+   "path": "ports/fnv-nx/farm",
+   "class": "tool",
+   "gates": [
+    "selftests"
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/journal",
+   "class": "doc",
+   "gates": []
+  },
+  {
+   "path": "ports/fnv-nx/link",
+   "class": "tool",
+   "gates": [
+    "pure",
+    "selftests"
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/render/d3d9",
+   "class": "product",
+   "target": "guest",
+   "cxx_origin": "native",
+   "recipe": "ports/fnv-nx/render/d3d9/build.json",
+   "gates": [
+    "abi",
+    "abs",
+    "addr32",
+    "argordergate",
+    "bodysel",
+    "d3d9total",
+    "datamodel",
+    "determinism",
+    "disp",
+    "eh",
+    "exepin",
+    "forms",
+    "fpexact",
+    "gpa",
+    "imports",
+    "linkstrict",
+    "machine",
+    "n1",
+    "n2_call",
+    "n2_data",
+    "n2_vcall",
+    "namegate",
+    "objstub",
+    "oracle",
+    "order",
+    "pcrel",
+    "r7",
+    "reach",
+    "reachlink",
+    "rtti",
+    "xc",
+    "xunit"
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/toolchain",
+   "class": "tool",
+   "gates": [
+    "selftests"
+   ]
+  },
+  {
+   "path": "ports/fnv-nx/verify",
+   "class": "tool",
+   "gates": [
+    "selftests"
+   ]
+  }
+ ]
+}

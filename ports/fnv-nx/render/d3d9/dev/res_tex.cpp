@@ -9,7 +9,7 @@
 // when the backend refuses the image (wined3d resource_init "Out of adapter memory"). The failed NxImg owns what it made; its destructor returns it. upload() / sync() are all or nothing per sub-resource: a sub-resource
 // whose push failed stays dirty (a later flush retries it), every earlier one is clean; they return false for it.
 #include "res_tex.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include <string.h>
 static uint32_t dim(uint32_t v, uint32_t l) { v = l > 31 ? 0 : v >> l; return v ? v : 1; }
 NxImg::~NxImg() {

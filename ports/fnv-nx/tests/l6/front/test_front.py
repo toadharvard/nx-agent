@@ -16,8 +16,8 @@ import ctypes as C, json, os, re, shutil, subprocess, sys, tempfile
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install(preload=True); import mutsrc
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-FRONT = os.path.join(ROOT, "render", "d3d9", "front"); BACKEND = os.path.join(ROOT, "render", "d3d9", "backend")
-sys.path.insert(0, os.path.join(HERE, "..", "env")); sys.path.insert(0, os.path.join(HERE, "..", "tex")); import envq, texoracle   # noqa: E402  (query domains of the environment table; the layout oracle)
+FRONT = os.path.join(ROOT, "render", "d3d9", "front"); BACKEND = os.path.join(ROOT, "render", "gl4"); NXB = os.path.normpath(os.path.join(BACKEND, "..", "backend"))
+sys.path.insert(0, os.path.join(HERE, "..", "..", "..", "render", "d3d9", "env")); sys.path.insert(0, os.path.join(HERE, "..", "tex")); import envq, texoracle   # noqa: E402  (query domains of the environment table; the layout oracle)
 M32, MASKS = 0xffffffff, [0, 1, 2, 3, 0xf, 0x10, 0xff, 0x100, 0x80000000, 0x7fffffff, 0xffffffff]
 
 # ---- independent table: the numbers of d3d9types.h for the consumed enumerations (without FORCE_DWORD) ----------------------------
@@ -72,7 +72,7 @@ class Lib:
     def __init__(self, front, tmp, tag):
         os.makedirs(tmp, exist_ok=True); self.so = os.path.join(tmp, tag + ".so"); self.err = ""
         srcs = sorted(os.path.join(front, f) for f in os.listdir(front) if f.endswith(".c"))
-        r = subprocess.run(["gcc", "-shared", "-fPIC", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror", "-Werror=switch", "-Werror=switch-enum", "-I", BACKEND, "-I", front,
+        r = subprocess.run(["gcc", "-shared", "-fPIC", "-std=c11", "-O1", "-Wall", "-Wextra", "-Werror", "-Werror=switch", "-Werror=switch-enum", "-I", BACKEND, "-I", NXB, "-I", front,
                             *srcs, "-o", self.so], capture_output=True, text=True)
         if r.returncode: self.err = r.stderr[-600:]; self.lib = None; return
         self.lib = L = C.CDLL(self.so)
@@ -97,7 +97,7 @@ class Latch(C.Structure): _fields_ = [("depth_func", C.c_uint8), ("cull", C.c_ui
 def consts(tmp):
     src = '#include "nx/state.h"\n#include <stdint.h>\nconst struct { const char* n; uint64_t v; } T[] = {' + ",".join('{"%s", (uint64_t)%s}' % (n, n) for n in KN) + ',{0,0}};\n'
     c, so = os.path.join(tmp, "k.c"), os.path.join(tmp, "k.so"); open(c, "w").write(src)
-    subprocess.run(["gcc", "-shared", "-fPIC", "-std=c11", "-I", BACKEND, c, "-o", so], check=True, capture_output=True)
+    subprocess.run(["gcc", "-shared", "-fPIC", "-std=c11", "-I", BACKEND, "-I", NXB, c, "-o", so], check=True, capture_output=True)
     class E(C.Structure): _fields_ = [("n", C.c_char_p), ("v", C.c_uint64)]
     arr = (E * (len(KN) + 1)).in_dll(C.CDLL(so), "T")
     return {e.n.decode(): e.v for e in arr if e.n}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_dkstate.py: tests of render/d3d9/backend/nx/dk_state.c (nxgpu v4.1 state words -> deko3d state structs).
+"""test_dkstate.py: tests of render/backend/nx/dk_state.c (nxgpu v4.1 state words -> deko3d state structs).
     python3 -I tests/l6/dkstate/test_dkstate.py [--no-mutations]       needs gcc, the aarch64 cross gcc and the deko3d headers (FNVNX_DK, default /home/user/work/l6/dk)
  a  dk_state.c compiles for the host against the real deko3d.h and for aarch64 with -Wall -Wextra -Werror
  b  every value of every state field is run through the real functions (single-field enumeration over several baselines, the full cross products
@@ -12,7 +12,7 @@ Output: rows per table, the number of cases, mutations caught, ALL OK."""
 import os, random, re, struct, subprocess, sys, tempfile
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-BACK = os.path.join(ROOT, "render", "d3d9", "backend"); NXD = os.path.join(BACK, "nx")
+BACK = os.path.join(ROOT, "render", "gl4"); NXB = os.path.normpath(os.path.join(BACK, "..", "backend")); NXD = os.path.join(os.path.normpath(os.path.join(BACK, "..", "backend")), "nx")
 DK = os.environ.get("FNVNX_DK", "/home/user/work/l6/dk")
 INC = os.path.join(DK, "deko3d", "include")
 CROSS = os.path.join(DK, "dkp", "devkitA64", "bin", "aarch64-none-elf-gcc")
@@ -229,7 +229,7 @@ def check(d, dkc):
     """-> (failures, stats) for one dk_state.c"""
     cdir = os.path.join(d, "t"); os.makedirs(cdir, exist_ok=True)
     h = os.path.join(cdir, "h.c"); exe = os.path.join(cdir, "h"); open(h, "w").write(HARNESS)
-    r = sh(["gcc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-Werror=switch-enum", "-I", INC, "-I", NXD, "-I", BACK, "-I", ROOT, h, dkc, "-o", exe])
+    r = sh(["gcc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-Werror=switch-enum", "-I", INC, "-I", NXD, "-I", BACK, "-I", NXB, "-I", ROOT, h, dkc, "-o", exe])
     if r.returncode: return ["host build: " + (r.stderr.strip().splitlines() or ["?"])[-1][:200]], {}
     cs = cases(); rnd = random.Random(5); lines, exps = [], []
     for k, a in cs:
@@ -256,7 +256,7 @@ def check(d, dkc):
     return fails, {"cases": len(lines), "errs": nerr}
 
 def cross(dkc):
-    r = sh([CROSS, "-std=gnu11", "-ffreestanding", "-O2", "-Wall", "-Wextra", "-Werror", "-Werror=switch-enum", "-I", INC, "-I", NXD, "-I", BACK, "-I", ROOT, "-c", dkc, "-o", os.devnull])
+    r = sh([CROSS, "-std=gnu11", "-ffreestanding", "-O2", "-Wall", "-Wextra", "-Werror", "-Werror=switch-enum", "-I", INC, "-I", NXD, "-I", BACK, "-I", NXB, "-I", ROOT, "-c", dkc, "-o", os.devnull])
     return None if r.returncode == 0 else (r.stderr.strip().splitlines() or ["?"])[-1][:200]
 
 def mutations(src):

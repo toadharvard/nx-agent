@@ -116,11 +116,17 @@ def cmd_merge(a):
     with tempfile.TemporaryDirectory() as td:
         gates = _gates_file(repo, tree, td)
         vpath = os.path.join(vdir, tree + ".json")
-        if not os.path.isfile(vpath):
+        try:
+            stored = json.load(open(vpath)) if os.path.isfile(vpath) else None
+        except ValueError:
+            stored = None
+        # only a GREEN stored verdict is reused: green records that every gate passed on this tree; a red one is computed again
+        # (it can turn green only by every gate passing), so a red verdict is never a permanent mark on a tree
+        if stored is None or stored.get("verdict") != "green":
             cand = verdict._git_ok(repo, "commit-tree", tree, "-p", old, "-p", src, inp="l1 candidate merge of %s\n" % o["--from"])
             v = _check(repo, cand, vdir, o.get("--budget-s"), gates, td, env_id)
         else:
-            v = json.load(open(vpath))
+            v = stored
         print(_line(v))
         args = ["--repo", repo, "--into", o["--into"], "--from", o["--from"], "--verdicts", vdir, "--gates", gates, "--env-id", env_id]
         if remote:

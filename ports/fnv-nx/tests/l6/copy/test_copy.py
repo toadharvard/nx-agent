@@ -12,12 +12,12 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."));
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, os.path.join(HERE, "..", "gl4")); import xl  # noqa: E402  (the translator build libnxgl4 links: FNVNX_SHADERS_BUILD, required)
-sys.path.insert(0, os.path.join(HERE, "..", "tex")); sys.path.insert(0, os.path.join(HERE, "..", "env"))
+sys.path.insert(0, os.path.join(HERE, "..", "tex")); sys.path.insert(0, os.path.join(HERE, "..", "..", "..", "render", "d3d9", "env"))
 import texoracle as T  # noqa: E402
 from texoracle import fcc  # noqa: E402
 DEV = os.path.join(ROOT, "render", "d3d9", "dev"); GEN = os.path.join(ROOT, "render", "d3d9", "gen"); ENV = os.path.join(ROOT, "render", "d3d9", "env"); SPEC = os.path.join(ROOT, "render", "d3d9", "spec", "d3d9_spec.json")
-INC = os.path.join(ROOT, "shim", "include"); FRONT = os.path.join(ROOT, "render", "d3d9", "front"); BACK = os.path.join(ROOT, "render", "d3d9", "backend"); DEVT = os.path.join(ROOT, "tests", "l6", "dev")
-LIB = ["obj.cpp", "app_unk_native.cpp", "state_rt.cpp", "state_ext.cpp"]; GENS = ["d9impl_unk.gen.cpp", "state.gen.cpp"]
+INC = os.path.join(ROOT, "shim", "include"); FRONT = os.path.join(ROOT, "render", "d3d9", "front"); BACK = os.path.join(ROOT, "render", "gl4"); NXB = os.path.normpath(os.path.join(BACK, "..", "backend")); DEVT = os.path.join(ROOT, "tests", "l6", "dev")
+LIB = ["obj.cpp", "app_unk_native.cpp", "state_rt.cpp", "state_ext.cpp"]; GENS = ["d9impl_unk.gen.cpp", "state.gen.cpp"]; NATIVE = os.path.join(ROOT, "tests", "l6", "native")
 RES = ["res_buf.cpp", "res_fvf.cpp", "res_decl.cpp", "res_shader.cpp", "res_smcheck.cpp", "res_query.cpp", "res_fmt.cpp", "res_tex.cpp", "res_surf.cpp", "res_create.cpp"]
 GLUE = ["glue_stream.cpp", "glue_image.cpp", "glue_query.cpp", "glue_buf.cpp"]; COPY = ["copy_util.cpp", "copy_clear.cpp", "copy_stretch.cpp", "copy_update.cpp", "copy_dc.cpp", "copy_misc.cpp"]
 TESTS = ["t_rpc.cpp", "t_help.cpp", "t_a.cpp", "t_b.cpp", "t_c.cpp", "t_d.cpp"]
@@ -34,15 +34,15 @@ def native_formats(tmp):
     d = os.path.join(tmp, "drv"); os.makedirs(d, exist_ok=True); c = os.path.join(d, "drv.c")
     open(c, "w").write('#include <stdio.h>\n#include "d3d9_state.h"\nint main(void) { unsigned v; while (scanf("%u", &v) == 1) printf("%u %u\\n", v, (unsigned)nx_d3d9_format(v).format); return 0; }\n')
     srcs = sorted(os.path.join(FRONT, f) for f in os.listdir(FRONT) if f.startswith("front_") and f.endswith(".c"))
-    r = sh(["gcc", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK, c, *srcs, "-o", os.path.join(d, "drv")])
+    r = sh(["gcc", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK, "-I", NXB, c, *srcs, "-o", os.path.join(d, "drv")])
     if r.returncode: raise SystemExit("format driver: " + r.stderr[-500:])
     o = subprocess.run([os.path.join(d, "drv")], input="\n".join(str(v) for v in envq.FMT), capture_output=True, text=True).stdout
     return {int(a): int(b) for a, b in (l.split() for l in o.split("\n") if l)}
 
 
 def build_server(tmp):
-    srcs = sorted(os.path.join(BACK, f) for f in os.listdir(BACK) if (f.startswith("gl4_") or f == "nxgpu4_check.c") and f.endswith(".c")) + [os.path.join(HERE, "server.c")]
-    out = os.path.join(tmp, "server"); r = sh(["gcc", "-std=gnu11", "-O1", "-w", "-I", BACK, *srcs, *xl.flags(), "-lEGL", "-lGL", "-lm", "-o", out])
+    srcs = sorted(os.path.join(BACK, f) for f in os.listdir(BACK) if f.startswith("gl4_") and f.endswith(".c")) + [os.path.join(NXB, "nxgpu4_check.c")] + [os.path.join(HERE, "server.c")]
+    out = os.path.join(tmp, "server"); r = sh(["gcc", "-std=gnu11", "-O1", "-w", "-I", BACK, "-I", NXB, *srcs, *xl.flags(), "-lEGL", "-lGL", "-lm", "-o", out])
     return (out, "") if r.returncode == 0 else (None, r.stderr[-800:])
 
 
@@ -53,11 +53,11 @@ def build(dev, tmp, jobs=8):
                 [sys.executable, "-I", os.path.join(ENV, "gen_env.py"), tmp]):
         r = sh(cmd)
         if r.returncode: return None, None, r.stderr[-800:]
-    fl = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O1", "-w", "-I", INC, "-I", tmp, "-I", dev, "-I", BACK, "-I", FRONT, "-I", HERE]
-    jobs_ = [(os.path.join(dev, s), s) for s in LIB + RES + GLUE + COPY] + [(os.path.join(tmp, s), s) for s in GENS + ["env_table.gen.cpp"]] + [(os.path.join(HERE, s), s) for s in TESTS]
+    fl = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O1", "-w", "-I", INC, "-I", tmp, "-I", dev, "-I", BACK, "-I", NXB, "-I", FRONT, "-I", HERE]
+    jobs_ = [(os.path.join(NATIVE if s == "app_unk_native.cpp" else dev, s), s) for s in LIB + RES + GLUE + COPY] + [(os.path.join(tmp, s), s) for s in GENS + ["env_table.gen.cpp"]] + [(os.path.join(HERE, s), s) for s in TESTS]
     cmds = [fl + ["-c", src, "-o", os.path.join(tmp, n + ".o")] for src, n in jobs_]
     fronts = sorted(f for f in os.listdir(FRONT) if f.startswith("front_") and f.endswith(".c"))
-    for f in fronts: cmds.append(["gcc", "-m32", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK, "-c", os.path.join(FRONT, f), "-o", os.path.join(tmp, "nx_" + f + ".o")])
+    for f in fronts: cmds.append(["gcc", "-m32", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK, "-I", NXB, "-c", os.path.join(FRONT, f), "-o", os.path.join(tmp, "nx_" + f + ".o")])
     with cf.ThreadPoolExecutor(jobs) as ex: rs = list(ex.map(sh, cmds))
     for c, r in zip(cmds, rs):
         if r.returncode: return None, None, " ".join(c[-3:]) + "\n" + r.stderr[-1500:]
@@ -112,9 +112,9 @@ def mut_build(base, tmp, src_rel, old, new, idx):
     mroot = os.path.join(tmp, f"m{idx}"); os.makedirs(mroot, exist_ok=True); path = os.path.join(ROOT, "render", "d3d9", src_rel); txt = open(path).read()
     mp = os.path.join(mroot, os.path.basename(src_rel)); open(mp, "w").write(mutsrc.apply(txt, old, new, f"{src_rel} #{idx}")); o = os.path.join(mroot, "x.o"); objs = dict(base["objs"])
     if src_rel.startswith("dev/"):
-        r = sh(["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O1", "-w", "-I", INC, "-I", base["gen"], "-I", DEV, "-I", BACK, "-I", FRONT, "-I", HERE, "-c", mp, "-o", o]); key = os.path.basename(src_rel) + ".o"
+        r = sh(["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O1", "-w", "-I", INC, "-I", base["gen"], "-I", DEV, "-I", BACK, "-I", NXB, "-I", FRONT, "-I", HERE, "-c", mp, "-o", o]); key = os.path.basename(src_rel) + ".o"
     elif src_rel.startswith("front/"):
-        r = sh(["gcc", "-m32", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK, "-c", mp, "-o", o]); key = "nx_" + os.path.basename(src_rel) + ".o"
+        r = sh(["gcc", "-m32", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK, "-I", NXB, "-c", mp, "-o", o]); key = "nx_" + os.path.basename(src_rel) + ".o"
     else:   # env/env_rules.cpp.in: regenerate the table with the mutated rules
         e = os.path.join(mroot, "render", "d3d9", "env"); os.makedirs(os.path.dirname(e), exist_ok=True); shutil.copytree(ENV, e, ignore=shutil.ignore_patterns("*.tsv"))
         for ln, tg in (("tests", "tests"), ("shim", "shim")): os.symlink(os.path.join(ROOT, tg), os.path.join(mroot, ln))

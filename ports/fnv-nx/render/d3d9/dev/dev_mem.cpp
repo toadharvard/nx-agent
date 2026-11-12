@@ -5,9 +5,9 @@
 // (+ mark_managed_resource_dirty), d3d9/device.c reset_enum_callback (a DEFAULT pool texture, vertex / index buffer, or a surface with a public reference blocks Reset). Size of a texture = sum over the exposed levels of the
 // sub-resource size (wined3d_format_calculate_size), rounded up to 16 per layer (wined3d_texture_init RESOURCE_ALIGNMENT). DECISION (doubt): the available memory is clamped at 0 (Wine wraps; creation fails before).
 #include "res_tex.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include "dev_core.h"
-#include "env_table.gen.h"
+#include "../gen/env_table.gen.h"
 
 static uint64_t tex_bytes(const NxImg* im) {
     uint64_t t = 0;

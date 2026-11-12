@@ -7,7 +7,7 @@ import contextlib, hashlib, io, json, os, re, shutil, struct, subprocess, sys, t
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")); import san; san.install()
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-GEN, CMP, SPEC = (os.path.join(ROOT, "render", "d3d9", x) for x in ("gen", "cmp", os.path.join("spec", "d3d9_spec.json"))); INC = os.path.join(ROOT, "shim", "include")
+GEN, SPEC = (os.path.join(ROOT, "render", "d3d9", x) for x in ("gen", os.path.join("spec", "d3d9_spec.json"))); CMP = os.path.join(ROOT, "render", "tools", "cmp"); REPLAY = os.path.join(ROOT, "render", "tools", "replay"); INC = os.path.join(ROOT, "shim", "include")
 sys.path[:0] = [os.path.join(ROOT, "tests", "l6", "wrap"), CMP]
 import plan as P, enc, gen_echo, d9cmp, d9s1                       # noqa: E402
 fails, counts = [], {}
@@ -23,7 +23,7 @@ def sh(cmd): return subprocess.run(cmd, capture_output=True, text=True)
 
 
 def cc(src, out, tmp):
-    r = sh(["g++", "-m32", "-std=c++17", "-O0", "-w", "-I", INC, "-I", GEN, "-I", CMP, "-I", tmp, "-c", src, "-o", out]); return r.returncode == 0, r.stderr[-1500:]
+    r = sh(["g++", "-m32", "-std=c++17", "-O0", "-w", "-I", INC, "-I", GEN, "-I", CMP, "-I", REPLAY, "-I", tmp, "-c", src, "-o", out]); return r.returncode == 0, r.stderr[-1500:]
 
 
 def replay_echo(pl, spec, mut, sha):
@@ -57,7 +57,7 @@ def main():
     for n, s in srcs.items(): open(os.path.join(tmp, f"echo_{n}.cpp"), "w").write(s)
     with cf.ThreadPoolExecutor(6) as ex:
         fut = {k: ex.submit(cc, os.path.join(tmp, f), os.path.join(tmp, k + ".o"), tmp) for k, f in (("gen", "d9wrap.gen.cpp"), ("rgen", "d9replay.gen.cpp"), ("drv", "echo_drv.cpp"), ("rp", "echo_rp.cpp"))}
-        fut["st"] = ex.submit(cc, os.path.join(GEN, "d9stream.cpp"), os.path.join(tmp, "st.o"), tmp); fut["rt"] = ex.submit(cc, os.path.join(CMP, "d9replay_rt.cpp"), os.path.join(tmp, "rt.o"), tmp)
+        fut["st"] = ex.submit(cc, os.path.join(REPLAY, "d9stream.cpp"), os.path.join(tmp, "st.o"), tmp); fut["rt"] = ex.submit(cc, os.path.join(CMP, "d9replay_rt.cpp"), os.path.join(tmp, "rt.o"), tmp)
         for k, f in fut.items(): ok, err = f.result(); check(f"compile {k}", ok, err)
     if fails: return finish(tmp)
     o = lambda *n: [os.path.join(tmp, x + ".o") for x in n]

@@ -1,0 +1,86 @@
+--- a/gcc/config/aarch64/aarch64.h
++++ b/gcc/config/aarch64/aarch64.h
+@@ -149,9 +149,13 @@
+ /* Using long long breaks -ansi and -std=c90, so these will need to be
+    made conditional for an LLP64 ABI.  */
+ 
+-#define SIZE_TYPE	"long unsigned int"
++/* fnv-nx msvcmodel: under ILP32 the data model is the 32-bit Windows one of
++   the program this compiler builds: size_t is unsigned int and ptrdiff_t is
++   int (types of their own in overloads, templates and names), not the
++   32-bit long types.  */
++#define SIZE_TYPE	(TARGET_ILP32 ? "unsigned int" : "long unsigned int")
+ 
+-#define PTRDIFF_TYPE	"long int"
++#define PTRDIFF_TYPE	(TARGET_ILP32 ? "int" : "long int")
+ 
+ #define PCC_BITFIELD_TYPE_MATTERS	1
+ 
+--- a/gcc/cp/call.cc
++++ b/gcc/cp/call.cc
+@@ -5096,7 +5096,8 @@
+   if (size_check != NULL_TREE)
+     {
+       tree errval = TYPE_MAX_VALUE (sizetype);
+-      if (cxx_dialect >= cxx11 && flag_exceptions)
++      /* fnv-nx msvcmodel: see build_new_1 (init.cc).  */
++      if (cxx_dialect >= cxx11 && flag_exceptions && POINTER_SIZE != 32)
+ 	errval = throw_bad_array_new_length ();
+       *size = fold_build3 (COND_EXPR, sizetype, size_check,
+ 			   original_size, errval);
+--- a/gcc/cp/class.cc
++++ b/gcc/cp/class.cc
+@@ -5856,6 +5856,13 @@
+   if (TYPE_HAS_NONTRIVIAL_DESTRUCTOR (type))
+     return true;
+ 
++  /* fnv-nx msvcmodel: with 32-bit pointers an array has the count before
++     it exactly when its elements have a non-trivial destructor, as
++     Visual C++ does it; a two-argument operator delete[] gets the size
++     of one element (build_vec_delete_1) and needs no count.  */
++  if (POINTER_SIZE == 32)
++    return false;
++
+   /* If the usual deallocation function is a two-argument whose second
+      argument is of type `size_t', then we have to pass the size of
+      the array to the deallocation function, so we will need to store
+--- a/gcc/cp/init.cc
++++ b/gcc/cp/init.cc
+@@ -3358,7 +3358,10 @@
+ 	}
+       /* Perform the overflow check.  */
+       tree errval = TYPE_MAX_VALUE (sizetype);
+-      if (cxx_dialect >= cxx11 && flag_exceptions)
++      /* fnv-nx msvcmodel: with 32-bit pointers a size that overflows is
++	 passed to the allocation function as the largest size, as Visual
++	 C++ 2008 does; nothing is thrown before the call.  */
++      if (cxx_dialect >= cxx11 && flag_exceptions && POINTER_SIZE != 32)
+ 	errval = throw_bad_array_new_length ();
+       if (outer_nelts_check != NULL_TREE)
+ 	size = fold_build3 (COND_EXPR, sizetype, outer_nelts_check,
+@@ -4202,6 +4205,12 @@
+ 	  virtual_size = size_binop (PLUS_EXPR, virtual_size, cookie_size);
+ 	}
+ 
++      /* fnv-nx msvcmodel: with 32-bit pointers a two-argument operator
++	 delete[] is given the size of one element, as Visual C++ gives it
++	 (and without a count there is no other size to give).  */
++      if (POINTER_SIZE == 32)
++	virtual_size = size_exp;
++
+       deallocate_expr = build_op_delete_call (VEC_DELETE_EXPR,
+ 					      base_tbd, virtual_size,
+ 					      use_global_delete & 1,
+--- a/gcc/targhooks.cc
++++ b/gcc/targhooks.cc
+@@ -318,6 +318,10 @@
+   tree type_align;
+ 
+   sizetype_size = size_in_bytes (sizetype);
++  /* fnv-nx msvcmodel: with 32-bit pointers the count before an array is
++     one size_t whatever the element's alignment, as Visual C++ lays it.  */
++  if (POINTER_SIZE == 32)
++    return sizetype_size;
+   type_align = size_int (TYPE_ALIGN_UNIT (type));
+   if (tree_int_cst_lt (type_align, sizetype_size))
+     cookie_size = sizetype_size;

@@ -14,7 +14,7 @@
 //  applications depend on it), MANAGED pool only the locked range, D3DLOCK_NO_DIRTY_UPDATE (MS: no dirty change) suppresses it for MANAGED only. rev counts write locks.
 //  Unlock without Lock = D3D_OK (Wine).
 #include "res_core.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include <string.h>
 
 HRESULT NxBufCore::init(uint32_t len, uint32_t use, uint32_t fmt_, uint32_t) {   // E_OUTOFMEMORY: raw stays null

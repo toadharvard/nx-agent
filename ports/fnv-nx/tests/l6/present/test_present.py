@@ -12,7 +12,7 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, os.path.join(HERE, "..", "gl4")); import xl  # noqa: E402  (the translator build libnxgl4 links: FNVNX_SHADERS_BUILD, required)
 D3 = os.path.join(ROOT, "render", "d3d9"); DEV = os.path.join(D3, "dev"); GEN = os.path.join(D3, "gen"); ENV = os.path.join(D3, "env"); SPEC = os.path.join(D3, "spec", "d3d9_spec.json")
-INC = os.path.join(ROOT, "shim", "include"); BACK = os.path.join(D3, "backend"); FRONT = os.path.join(D3, "front"); COPY = os.path.join(ROOT, "tests", "l6", "copy"); TOT = os.path.join(ROOT, "render", "shaders", "total")
+INC = os.path.join(ROOT, "shim", "include"); BACK = os.path.join(D3, "..", "gl4"); NXB = os.path.normpath(os.path.join(BACK, "..", "backend")); FRONT = os.path.join(D3, "front"); COPY = os.path.join(ROOT, "tests", "l6", "copy"); TOT = os.path.join(ROOT, "render", "shaders", "total")
 GENS = ["d9impl_unk.gen.cpp", "state.gen.cpp", "env_table.gen.cpp"]
 ENVLLVM = dict(os.environ, LIBGL_ALWAYS_SOFTWARE="1", GALLIUM_DRIVER="llvmpipe", EGL_PLATFORM="surfaceless")
 fails = []
@@ -30,7 +30,7 @@ def gen(tmp):
 
 
 def cxx(tmp, src, obj, dev=DEV):
-    cmd = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O0", "-w", "-I", INC, "-I", tmp, "-I", dev, "-I", BACK, "-I", FRONT, "-I", COPY, "-I", HERE]
+    cmd = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O0", "-w", "-I", INC, "-I", tmp, "-I", dev, "-I", BACK, "-I", NXB, "-I", FRONT, "-I", COPY, "-I", HERE]
     if os.path.basename(src) == "t_rpc.cpp": cmd += ["-Dnxd3d_gpu_call=t_rpc_gpu_call", "-Dnxd3d_gpu_alloc=t_rpc_gpu_alloc", "-Dnx_env_profile_of=t_rpc_unused_env_profile_of"]   # the harness's RPC / arena / profile become the layer under the spy (t_env.cpp)
     return cmd + ["-c", src, "-o", obj]
 
@@ -52,7 +52,7 @@ def compile_objs(tmp, objs, od, jobs=3, only=None, dev=DEV):
     for n, src in objs.items():
         if only is not None and n not in only: continue
         obj = os.path.join(od, os.path.splitext(n)[0] + ".o")
-        cmds.append((n, ["gcc", "-m32", "-std=c11", "-w", "-I", BACK, "-I", FRONT, "-c", src, "-o", obj] if src.endswith(".c") else cxx(tmp, src, obj, dev)))
+        cmds.append((n, ["gcc", "-m32", "-std=c11", "-w", "-I", BACK, "-I", NXB, "-I", FRONT, "-c", src, "-o", obj] if src.endswith(".c") else cxx(tmp, src, obj, dev)))
     with cf.ThreadPoolExecutor(jobs) as ex: rs = list(ex.map(lambda c: sh(c[1]), cmds))
     for (n, c), r in zip(cmds, rs):
         if r.returncode: return n + "\n" + r.stderr[-1500:]

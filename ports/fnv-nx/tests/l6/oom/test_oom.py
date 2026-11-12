@@ -14,7 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.pat
 sys.path.insert(0, HERE)
 import allocscan  # noqa: E402
 D3 = os.path.join(ROOT, "render", "d3d9"); DEV = os.path.join(D3, "dev"); GEN = os.path.join(D3, "gen"); ENV = os.path.join(D3, "env"); SPEC = os.path.join(D3, "spec", "d3d9_spec.json")
-INC = os.path.join(ROOT, "shim", "include"); FRONT = os.path.join(D3, "front"); BACK = os.path.join(D3, "backend")
+INC = os.path.join(ROOT, "shim", "include"); FRONT = os.path.join(D3, "front"); BACK = os.path.join(D3, "..", "gl4"); NXB = os.path.normpath(os.path.join(BACK, "..", "backend"))
 ALL_DEV = sorted(os.path.splitext(os.path.basename(p))[0] for p in glob.glob(os.path.join(DEV, "*.cpp")))
 NOT_YET = [n for n in ALL_DEV if n.startswith(("ffp_", "m1_"))]   # other workers, in progress: scanned and listed (OTHER), not gated, not mutated
 OWNED = [n for n in ALL_DEV if n not in NOT_YET]
@@ -53,14 +53,14 @@ def obj_cpp(text):
     return "\n".join(out)
 
 
-def flags(gen): return CXX + ["-O1", "-w", "-I", INC, "-I", gen, "-I", DEV, "-I", BACK, "-I", FRONT, "-I", HERE]
+def flags(gen): return CXX + ["-O1", "-w", "-I", INC, "-I", gen, "-I", DEV, "-I", BACK, "-I", NXB, "-I", FRONT, "-I", HERE]
 
 
 def build(tmp, jobs=3):
     gen = os.path.join(tmp, "gen"); generate(gen); os.makedirs(os.path.join(tmp, "o"), exist_ok=True)
     jl = [("g++", flags(gen), os.path.join(DEV, n + ".cpp"), n) for n in NATIVE] + [("g++", flags(gen), os.path.join(gen, n + ".gen.cpp"), n) for n in GENS] + [("g++", flags(gen), os.path.join(HERE, "t_oom.cpp"), "t_oom")]
     xo = os.path.join(tmp, "obj_x.cpp"); open(xo, "w").write(obj_cpp(open(os.path.join(DEV, "obj.cpp")).read())); jl.append(("g++", flags(gen), xo, "obj"))
-    for f in sorted(glob.glob(os.path.join(FRONT, "front_*.c"))): jl.append(("gcc", ["-m32", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK], f, "nx_" + os.path.basename(f)))
+    for f in sorted(glob.glob(os.path.join(FRONT, "front_*.c"))): jl.append(("gcc", ["-m32", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK, "-I", NXB], f, "nx_" + os.path.basename(f)))
     cmds = [[cc] + fl + ["-c", src, "-o", os.path.join(tmp, "o", n + ".o")] for cc, fl, src, n in jl]
     with cf.ThreadPoolExecutor(jobs) as ex: rs = list(ex.map(sh, cmds))
     for c, r in zip(cmds, rs):
@@ -113,7 +113,7 @@ void seed_ok_image(NxImg* i) { if (!i->upload()) return; }   // CONTROL
 
 
 def gcc_findings(src, gen, c=False):
-    r = sh((["gcc", "-m32", "-std=gnu11"] if c else ["g++"] + CXX) + ["-O0", "-I", INC, "-I", gen, "-I", DEV, "-I", BACK, "-I", FRONT] + GCC_FLAGS + ["-c", src, "-o", os.devnull])
+    r = sh((["gcc", "-m32", "-std=gnu11"] if c else ["g++"] + CXX) + ["-O0", "-I", INC, "-I", gen, "-I", DEV, "-I", BACK, "-I", NXB, "-I", FRONT] + GCC_FLAGS + ["-c", src, "-o", os.devnull])
     out = []
     for l in r.stderr.split("\n"):
         m = re.match(r"^(\S+?):(\d+):(\d+): (?:warning|error): (.*?) \[-W(?:error=)?([a-z-]+)", l)
@@ -124,7 +124,7 @@ def gcc_findings(src, gen, c=False):
     return out
 
 
-def ast_args(gen, c=False): return ["--target=i386-linux-gnu"] + (["-std=gnu11"] if c else ["-std=c++17", "-fno-exceptions", "-fno-rtti"]) + ["-I", INC, "-I", gen, "-I", DEV, "-I", BACK, "-I", FRONT]
+def ast_args(gen, c=False): return ["--target=i386-linux-gnu"] + (["-std=gnu11"] if c else ["-std=c++17", "-fno-exceptions", "-fno-rtti"]) + ["-I", INC, "-I", gen, "-I", DEV, "-I", BACK, "-I", NXB, "-I", FRONT]
 
 
 def analyzers(tmp, gen):
@@ -198,7 +198,7 @@ def guest_build(tmp, gen):
     gxx = os.path.join(TC, "bin", "aarch64-none-elf-g++"); gcc = os.path.join(TC, "bin", "aarch64-none-elf-gcc"); od = os.path.join(tmp, "guest", "obj"); os.makedirs(od, exist_ok=True)
     arch = ["-mabi=ilp32", "-march=armv8-a+crc+crypto", "-mtune=cortex-a57", "-fno-pie", "-ftls-model=local-exec", "-fsigned-char"]
     common = arch + ["-O2", "-g", "-ffunction-sections", "-fdata-sections", "-frounding-math", "-fshort-wchar", "-Wall"]
-    inc = ["-I" + INC, "-I" + gen, "-I" + DEV, "-I" + FRONT, "-I" + BACK]; jobs = []
+    inc = ["-I" + INC, "-I" + gen, "-I" + DEV, "-I" + FRONT, "-I" + BACK, "-I" + NXB]; jobs = []
     for n in ALL_DEV:
         if n in ("app_unk_native",) or n.startswith("ffp_"): continue
         jobs.append(([gxx] + common + ["-std=c++17", "-fno-exceptions", "-fno-rtti", "-DSTDMETHODCALLTYPE="] + inc + ["-c", os.path.join(DEV, n + ".cpp"), "-o", os.path.join(od, "render_d3d9_dev_" + n + ".cpp.o")]))

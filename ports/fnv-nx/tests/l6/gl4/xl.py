@@ -1,8 +1,8 @@
 """xl.py: the translator build, the declared input of every test that builds libnxgl4 / the backend sources (FNVNX_SHADERS_BUILD = the render/shaders/build.sh build directory).
-Without it the test stops with the message of render/d3d9/backend/gl4_xlator.sh (exit 2): there is no mode without the translator."""
+Without it the test stops with the message of render/gl4/gl4_xlator.sh (exit 2): there is no mode without the translator."""
 import os, re, subprocess, sys
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
-BACK = os.path.join(ROOT, "render", "d3d9", "backend")
+BACK = os.path.join(ROOT, "render", "gl4"); NXB = os.path.normpath(os.path.join(BACK, "..", "backend"))
 _flags = None
 
 

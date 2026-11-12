@@ -24,13 +24,17 @@ Closure discovery (this runner, outside the sandbox, a pure function of stage re
   every opened file had its real content; its output equals the output on the real trees. A different hint only changes how many runs
   lead to D. ASSUMED about GCC: it reads the content of a file only by lexing it (then the file is in deps.d) or it fails; (a
   #pragma-once identity check on a file that is not included would not be caught by the placeholder, only by the equality assert).
+Languages by suffix (LANG): .c gets `-x c` (PP) and `-x c -fpreprocessed` (CC); .S gets `-x assembler-with-cpp` and `-x assembler` (CC on the
+  preprocessed text, the same two stages); .s has no PP stage (its CC stage reads the unit alone, a `.include` fails). `--include` may also be
+  an absolute sandbox path inside an input of the tool runtime (an external tree): it is passed as `-I<path>` in the given order; its content is
+  covered by the runtime's input hash (not by the closure).
 Flags appended by this tool: -I/inc/N (PP only), -frandom-seed=<sha256 of the unit path>, -ffile-prefix-map for /src and each /inc/N,
   -Werror=date-time (the macros expand at PP). Both stage documents must pass toolflags.check_doc. Caller flags may not contain -I*,
   -o, -c, -E, -S, -M*. Sandbox paths are fixed, so keys are host-independent; line markers of unit.ii hold only /src, /inc/N paths.
   Documents are kept at STORE/stage-docs/<aa>/<key>.json. --cold runs a stage again and fails if the result differs.
 Report "fnvnx-unitstage/2": per unit status (ok|pp-failed|cc-failed), closure (sandbox paths of real files), files, pp_key, pp_status
   (hit if every iteration hit), pp_seconds, pp_iterations, ii_bytes, cc_key, cc_status (hit|run|skipped), cc_seconds, object (tree hash
-  of /out), name_tree_id (hash of the placeholder-only views = the pure name trees), error; totals. Exit 0 ok, 2 a unit failed, 1 usage.
+  of /out), name_tree_id (hash of the placeholder-only views = the pure name trees), error (the last 20 lines of the failing stage's stderr); totals. Exit 0 ok, 2 a unit failed, 1 usage.
 """
 import argparse
 import concurrent.futures
@@ -50,6 +54,10 @@ import unitview  # noqa: E402
 from unitview import UnitError, parse_deps  # noqa: E402,F401
 FORMAT = "fnvnx-unitstage/2"
 ENV = {"TZ": "UTC", "LC_ALL": "C", "PYTHONHASHSEED": "0", "SOURCE_DATE_EPOCH": "0", "COLUMNS": "80"}
+# language options by the unit's suffix (what the driver itself does by suffix, made explicit so that the stage's input name does not matter):
+# (PP stage, CC stage). .s has no preprocessing: its CC stage reads the unit alone (a `.include` there fails: use .S and #include).
+LANG = {".c": (["-x", "c"], ["-x", "c", "-fpreprocessed"]), ".S": (["-x", "assembler-with-cpp"], ["-x", "assembler"]),
+        ".s": ([], ["-x", "assembler"])}
 PP_TAIL = ["-E", "-MD", "-MT", "x", "-MF", "/out/deps.d", "-o", "/out/unit.ii"]
 
 
@@ -64,7 +72,7 @@ def hint_path(store, rel):
 def write_hint(store, rel, paths):
     p = hint_path(store, rel)
     os.makedirs(os.path.dirname(p), exist_ok=True)
-    tmp = "%s.tmp-%d" % (p, os.getpid())
+    tmp = "%s.tmp-%d-%s" % (p, os.getpid(), os.urandom(4).hex())
     open(tmp, "w").write(json.dumps(sorted(paths)))
     os.replace(tmp, p)
 
@@ -108,6 +116,9 @@ def run_stage(store, doc, cold):
 class Build:
     def __init__(self, a):
         self.store, self.cold, self.cxx, self.cache = a.store, a.cold, a.cxx, {}
+        self.cc_drop = set()   # `at` of tool-runtime inputs the CC stage does not mount (externals other than the compiler's)
+        self.unit_cc_flags = {}   # {unit rel: [flag]}: per-unit flags of the CC stage (the recipe's unit_flags)
+        self.cc_flags, self.cc_inputs = [], []   # plugins: flags and declared inputs [(at, tree)] of the CC stage only (a plugin is part of its key)
         self.rt = json.load(open(a.toolrt))
         if self.cxx not in self.rt["exes"]:
             raise UnitError("--cxx %s is not an exe of the tool runtime" % self.cxx)
@@ -115,22 +126,32 @@ class Build:
         bad = [f for f in self.flags if not isinstance(f, str) or f in ("-o", "-c", "-E", "-S") or f.startswith(("-M", "-I"))]
         if bad:
             raise UnitError("caller flags that change a stage's job (use --include for -I): %s" % bad)
-        self.roots = []
-        for spec, want in [(a.src_root, "/src")] + [(s, "/inc/%d" % n) for n, s in enumerate(a.include)]:
-            host, _, at = spec.rpartition("@")
+        self.roots, self.iargs = [], []
+        for spec in [a.src_root] + a.include:
+            host, sep, at = spec.rpartition("@")
+            if not sep and spec is not a.src_root:   # -I of a sandbox path inside a declared input of the tool runtime (an external)
+                if not any(spec == i["at"] or spec.startswith(i["at"].rstrip("/") + "/") for i in self.rt["inputs"]):
+                    raise UnitError("--include %s: not HOST@/inc/N and inside no input of the tool runtime" % spec)
+                self.iargs.append("-I" + spec)
+                continue
+            want = "/src" if spec is a.src_root else "/inc/%d" % (len(self.roots) - 1)
             if at != want:
                 raise UnitError("%s: sandbox path must be %s" % (spec, want))
             self.roots.append((at, cas.ingest(host, self.store)))
+            if want != "/src":
+                self.iargs.append("-I" + at)
         names = [(at, unitview.view(self.store, t, (), self.cache)) for at, t in self.roots]
         self.name_tree_id = hashlib.sha256(cas.canon(names)).hexdigest()
 
     def doc(self, kind, rel, inputs, tail, src, inc=True):
         seed = hashlib.sha256(rel.encode()).hexdigest()
-        argv = [self.cxx] + ["-I" + at for at, _ in self.roots[1:] if inc] + self.flags + ["-frandom-seed=" + seed, "-Werror=date-time"]
+        argv = [self.cxx] + (self.iargs if inc else []) + self.flags + (self.cc_flags + self.unit_cc_flags.get(rel, []) if kind == "cc" else []) + ["-frandom-seed=" + seed, "-Werror=date-time"]
         argv += ["-ffile-prefix-map=%s=%s" % (at, at[1:]) for at, _ in self.roots] + tail + [src]
         doc = {"format": "fnvnx-stage/1", "stage": "%s:%s" % (kind, rel), "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
                "env": dict(ENV, PATH=os.path.dirname(self.cxx)), "outputs": ["/out"],
-               "inputs": sorted(self.rt["inputs"] + [{"at": at, "tree": t} for at, t in inputs], key=lambda i: i["at"])}
+               "inputs": sorted([i for i in self.rt["inputs"] if kind != "cc" or i["at"] not in self.cc_drop] +
+                                [{"at": at, "tree": t} for at, t in inputs + (self.cc_inputs if kind == "cc" else [])],
+                                key=lambda i: i["at"])}
         v = toolflags.check_doc(doc)
         if v:
             raise UnitError("toolflags: " + "; ".join("%s %s" % (r, d) for r, d, _ in v))
@@ -151,10 +172,14 @@ class Build:
         """One PP run on the views of FILES (set of sandbox paths of real files; None = the real trees)."""
         ins = [(at, t if files is None else unitview.view(self.store, t, [p[len(at) + 1:] for p in files if p.startswith(at + "/")],
                                                           self.cache)) for at, t in self.roots]
-        return run_stage(self.store, self.doc("pp", rel, ins, PP_TAIL, "/src/" + rel), self.cold)
+        return run_stage(self.store, self.doc("pp", rel, ins, self.lang(rel)[0] + PP_TAIL, "/src/" + rel), self.cold)
 
     def stderr(self, res):
-        return open(cas._obj(self.store, cas.manifest(res["stderr"], self.store))).read()
+        return open(cas._obj(self.store, cas.manifest(res["stderr"], self.store)), errors="replace").read()
+
+    def last(self, res):
+        """The failure record: the last 20 lines of the stage's stderr."""
+        return "\n".join(self.stderr(res).splitlines()[-20:])
 
     def deps(self, key):
         out = set()
@@ -169,6 +194,8 @@ class Build:
     def unit(self, rel):
         e = {"unit": rel, "status": "ok", "cc_status": "skipped", "object": None, "name_tree_id": self.name_tree_id, "pp_iterations": 0,
              "pp_seconds": 0.0}
+        if rel.endswith(".s"):
+            return self.assemble(e, rel)
         files, expect, ran = None, None, False
         try:
             hint = json.load(open(hint_path(self.store, rel)))
@@ -183,10 +210,10 @@ class Build:
             e["pp_key"], e["pp_rc"], e["pp_status"] = key, res["rc"], "run" if ran else "hit"
             if res["rc"]:
                 if expect:
-                    raise UnitError("internal: minimal view of %s fails after the run it was derived from: %s" % (rel, self.stderr(res)[-300:]))
+                    raise UnitError("internal: minimal view of %s fails after the run it was derived from: %s" % (rel, self.last(res)))
                 miss = {r for r in (self.real(p, False) for p in unitview.placeholder_paths(self.stderr(res))) if r}
                 if files is None or not miss or miss <= files:
-                    e["status"], e["error"] = "pp-failed", self.stderr(res)[-300:]
+                    e["status"], e["error"] = "pp-failed", self.last(res)
                     return e
                 files = files | miss
                 continue
@@ -203,15 +230,29 @@ class Build:
         tdata = cas.canon({"format": cas.FORMAT, "entries": {"unit.ii": dict(ii, x=0)}})
         tree = hashlib.sha256(tdata).hexdigest()
         cas._put(self.store, "tree", tree + ".json", tdata)
-        c = self.doc("cc", rel, [("/in", tree)], ["-fpreprocessed", "-c", "-o", "/out/unit.o"], "/in/unit.ii", inc=False)
+        c = self.doc("cc", rel, [("/in", tree)], self.lang(rel)[1] + ["-c", "-o", "/out/unit.o"], "/in/unit.ii", inc=False)
+        return self.compile(e, rel, c, files)
+
+    def lang(self, rel):
+        return LANG.get(posixpath.splitext(rel)[1], ([], ["-fpreprocessed"]))
+
+    def compile(self, e, rel, c, files):
         e["cc_key"], res, e["cc_status"], e["cc_seconds"] = run_stage(self.store, c, self.cold)
         e["cc_rc"] = res["rc"]
         if res["rc"]:
-            e["status"], e["error"] = "cc-failed", self.stderr(res)[-300:]
+            e["status"], e["error"] = "cc-failed", self.last(res)
             return e
         e["object"] = res["outputs"]["/out"]
-        write_hint(self.store, rel, files)
+        if files:
+            write_hint(self.store, rel, files)
         return e
+
+    def assemble(self, e, rel):
+        """A .s unit: no preprocessing, one stage on the /src view that holds this file alone (every other name is a placeholder)."""
+        real = unitview.resolve(self.store, self.roots[0][1], rel, self.cache)
+        v = unitview.view(self.store, self.roots[0][1], [real], self.cache)
+        e["closure"], e["files"] = ["/src/" + real], 1
+        return self.compile(e, rel, self.doc("cc", rel, [("/src", v)], self.lang(rel)[1] + ["-c", "-o", "/out/unit.o"], "/src/" + rel, inc=False), set())
 
 
 def build_cmd(a):

@@ -6,7 +6,7 @@
 // FVF grammar (total decision): position field (fvf & 0x400E) in {0, XYZ 2, XYZRHW 4, XYZB1..5 6..0xE, XYZW 0x4002}; bit 0 (RESERVED0) and bits 13-14 (RESERVED2) clear; texture count (bits 8-11) <= 8.
 // Everything else is "invalid": no layout is documented (Wine would convert it to garbage). Texture-size bits (16-31) of textures >= the count are ignored (Wine). The 4 two-bit size codes are all defined.
 #include "res_core.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include "../ffp/ffp_vs_state.h"
 #include <string.h>
 

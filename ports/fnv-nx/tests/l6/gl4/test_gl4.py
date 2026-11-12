@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_gl4.py: tests of render/d3d9/backend (GL 4.5 backend v4, tasks B2a + B2b).  python3 -I tests/l6/gl4/test_gl4.py [--no-mutations]
+"""test_gl4.py: tests of render/gl4 (GL 4.5 backend v4, tasks B2a + B2b).  python3 -I tests/l6/gl4/test_gl4.py [--no-mutations]
  a  every NxFormat x {2D, Cube, 3D}: update every level/layer, read back byte-equal
  b  sub-box updates (pitched, offset, BCn blocks, 3D slices, cube faces), rejected updates
  c  Blit: copy, 2x point, linear vs CPU reference (<= 1 LSB), depth, MSAA resolve, conversion, swapchain
@@ -24,7 +24,7 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, HERE)
 import xl, d3dsyn  # noqa: E402  (the translator build: FNVNX_SHADERS_BUILD is a required input)
-BACK = os.path.join(ROOT, "render", "d3d9", "backend"); NXINC = BACK
+BACK = os.path.join(ROOT, "render", "gl4"); NXB = os.path.normpath(os.path.join(BACK, "..", "backend")); NXINC = BACK
 ENV = dict(os.environ, LIBGL_ALWAYS_SOFTWARE="1", GALLIUM_DRIVER="llvmpipe", EGL_PLATFORM="surfaceless")
 TESTS = ["t_main.c", "t_parts_ab.c", "t_parts_cd.c", "t_parts_ef.c", "t_parts_i.c", "t_parts_j.c", "t_parts_k.c", "t_parts_l.c", "t_parts_m.c", "t_parts_n.c", "t_parts_o.c", "t_parts_q.c"]
 PARTS = "abcdefijklmnoq"
@@ -50,7 +50,7 @@ def run(exe, parts=PARTS):
 
 def source_gates():
     n = bad = 0
-    srcs = sorted(glob.glob(os.path.join(BACK, "gl4*.[ch]")) + [os.path.join(BACK, "nxgpu4.h")] + glob.glob(os.path.join(BACK, "nxgpu4_check.[ch]")))
+    srcs = sorted(glob.glob(os.path.join(BACK, "gl4*.[ch]")) + [os.path.join(NXB, "nxgpu4.h")] + glob.glob(os.path.join(NXB, "nxgpu4_check.[ch]")))
     pending = "NXGL4_B2B_" + "PENDING"
     for p in srcs:
         text = open(p).read(); n += 3

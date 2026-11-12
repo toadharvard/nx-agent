@@ -115,11 +115,11 @@ old = head(r)
 rc3, out3, e3 = tool("merge", "--repo", r, "--into", "main", "--from", "feat", "--verdicts", vd, "--gates", gp)
 new = head(r)
 body = git(r, "log", "-1", "--format=%B", new)
-trailers = git(r, "interpret-trailers", "--parse", inp=body).splitlines()
-check("merge green moves branch, 2 parents, only trailer", rc3 == 0 and out3.strip() == new and new != old
+lines = body.rstrip("\n").split("\n")
+check("merge green moves branch, 2 parents, message = subject and the verdict line", rc3 == 0 and out3.strip() == new and new != old
       and git(r, "rev-parse", new + "^1") == old and git(r, "rev-parse", new + "^2") == head(r, "feat")
       and git(r, "rev-parse", new + "^{tree}") == tree
-      and trailers == ["Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"] and "verdict: green" in body, (rc3, e3, body))
+      and lines == ["merge feat", "", "verdict: green, tree %s, gates 2" % tree], (rc3, e3, body))
 print("INFO green path seconds: %.2f" % (time.time() - t0))
 
 # 2 blocking reasons

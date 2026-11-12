@@ -60,14 +60,16 @@ def project():
     write("src/u/hn.cpp", '#include "hn.h"\n')
 
 
-def build(units, flags=(), cold=False, extra=(), name="r"):
+def build(units, flags=(), cold=False, extra=(), name="r", toolrt=None, inc=None):
     json.dump({"argv": list(flags)}, open(BASE + "/flags.json", "w"))
     rep = "%s/%s.json" % (BASE, name)
     if os.path.exists(rep):
         os.unlink(rep)
     cmd = PY + [VERIFY + "/unitstage.py", "build", "--store", STORE, "--toolrt", TOOLRT, "--cxx", CXX,
-                "--src-root", WORK + "/src@/src", "--include", WORK + "/inc0@/inc/0", "--include", WORK + "/inc1@/inc/1",
-                "--flags-file", BASE + "/flags.json", "--report", rep, "--jobs", "2"]
+                "--src-root", WORK + "/src@/src", "--flags-file", BASE + "/flags.json", "--report", rep, "--jobs", "2"]
+    cmd[cmd.index("--toolrt") + 1] = toolrt or TOOLRT
+    for i in inc or [WORK + "/inc0@/inc/0", WORK + "/inc1@/inc/1"]:
+        cmd += ["--include", i]
     for u in units:
         cmd += ["--unit", u]
     cmd += (["--cold"] if cold else []) + list(extra)
@@ -257,6 +259,63 @@ def main():
     check("a caller flag that violates toolflags is an error", rc == 1 and "toolflags" in err, err[-200:])
     rc, _, err = build(["u/a.cpp"], flags=["-M"], name="r17")
     check("caller flags that change the stage's job are refused", rc == 1, err[-200:])
+
+    # (a) -I of a path inside an external input (a declared input of the tool runtime); (b) .S/.s units; (c) failure record
+    write("ext/x/inc/xe.h", "#define XE 11\n")
+    write("ext/x/inc/a.h", "#define A_VAL 99\n")
+    xrt = BASE + "/toolrt-x.json"
+    cmd = PY + [VERIFY + "/runtime.py", "tool", "--store", STORE, "-o", xrt, "--tree", WORK + "/ext/x@/ext/x"]
+    for e in exes:
+        cmd += ["--exe", e]
+    for t in trees:
+        cmd += ["--tree", t]
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    check("tool runtime with an external tree at /ext/x", p.returncode == 0, p.stderr)
+    write("src/u/x.cpp", '#include "xe.h"\n#include "a.h"\nint fx() { return XE + A_VAL; }\n')
+    incs = [WORK + "/inc0@/inc/0", "/ext/x/inc", WORK + "/inc1@/inc/1"]
+    rc, rx, err = build(["u/x.cpp"], name="rx", toolrt=xrt, inc=incs)
+    x = unit(rx, "u/x.cpp") if rx else {}
+    check("-I of an external path: header found there (covered by the declared input, not the closure), search order kept (/inc/0 a.h wins)", rc == 0 and x.get("status") == "ok"
+          and x["closure"] == ["/inc/0/a.h", "/src/u/x.cpp"], (err, x))
+    sx = (rx or {}).get("units", {}).get("u/x.cpp", {}).get("object")
+    check("-I of an external path: object computes XE + A_VAL from both", sx and "fx" in syms(sx, "x"))
+    write("ext/x/inc/xe.h", "#define XE 12\n")
+    xrt2 = BASE + "/toolrt-x2.json"
+    subprocess.run(cmd[:cmd.index("-o") + 1] + [xrt2] + cmd[cmd.index("-o") + 2:], check=True, stdout=subprocess.PIPE)
+    rc, rx2, err = build(["u/x.cpp"], name="rx2", toolrt=xrt2, inc=incs)
+    x2 = unit(rx2, "u/x.cpp") if rx2 else {}
+    check("changed external content: PP and CC keys change (stage keys stay content-addressed)", rc == 0 and x2.get("pp_key") != x.get("pp_key")
+          and x2.get("cc_key") != x.get("cc_key"), err)
+    rc, _, err = build(["u/x.cpp"], name="rx3", toolrt=TOOLRT, inc=incs)
+    check("-I of a path in no declared input is an error naming the path", rc == 1 and "/ext/x/inc" in err, err[-200:])
+    write("src/u/s1.S", '#include "sasm.h"\n.text\n.globl s1\ns1:\n mov w0, #SV\n ret\n')
+    write("inc0/sasm.h", "#define SV 5\n")
+    write("src/u/s2.s", ".text\n.globl s2\ns2:\n mov w0, #3\n ret\n")
+    write("src/u/s3.S", '#include "sasm.h"\n.text\n.globl s3\ns3:\n mov w0, #SV+1\n ret\n')
+    au = ["u/s1.S", "u/s2.s", "u/s3.S"]
+    rc, ra, err = build(au, name="ra")
+    check("asm units: .S preprocessed in its own stage, .s assembled alone; all ok with symbols", rc == 0 and all(unit(ra, u)["status"] == "ok" for u in au)
+          and "T s1" in syms(unit(ra, "u/s1.S")["object"], "s1") and "T s2" in syms(unit(ra, "u/s2.s")["object"], "s2"), (err, ra))
+    s1 = unit(ra, "u/s1.S")
+    check(".S closure is exactly the headers it includes", s1.get("closure") == ["/inc/0/sasm.h", "/src/u/s1.S"], s1.get("closure"))
+    write("inc0/unrelated.h", "#define U 10\n")
+    rc, ra2, _ = build(au, name="ra2")
+    check("editing a file no asm unit reads: every stage of the asm units is a HIT", rc == 0 and all(
+        unit(ra2, u)["pp_status" if u.endswith(".S") else "cc_status"] == "hit" and unit(ra2, u)["cc_status"] == "hit" for u in au), ra2)
+    write("inc0/sasm.h", "#define SV 6\n")
+    rc, ra3, _ = build(au, name="ra3")
+    check("editing the included header: the two .S units re-run, the .s unit is a HIT", rc == 0 and unit(ra3, "u/s1.S")["cc_status"] == "run"
+          and unit(ra3, "u/s3.S")["cc_status"] == "run" and unit(ra3, "u/s2.s")["cc_status"] == "hit"
+          and unit(ra3, "u/s1.S")["object"] != s1["object"], ra3)
+    write("src/u/s4.s", '.include "sasm.h"\n')
+    rc, ra4, _ = build(["u/s4.s"], name="ra4")
+    check(".s with .include: reads nothing outside its own file, the assembler's error is the unit's error", rc == 2
+          and unit(ra4, "u/s4.s")["status"] == "cc-failed" and "sasm.h" in unit(ra4, "u/s4.s")["error"], ra4)
+    write("src/u/many.cpp", "".join("#error boom_%d\n" % i for i in range(30)))
+    rc, rm, _ = build(["u/many.cpp"], name="rm")
+    em = unit(rm, "u/many.cpp") if rm else {}
+    check("failure record keeps the last 20 lines of stderr", rc == 2 and 20 <= len(em.get("error", "").splitlines()) <= 21 and "boom_29" in em["error"]
+          and "boom_0\n" not in em["error"] + "\n" and len(em["error"]) > 300, em.get("error", "")[:300])
 
     docs = sorted(os.path.join(r, f) for r, _, fs in os.walk(STORE + "/stage-docs") for f in fs)
     tf = subprocess.run(PY + [VERIFY + "/toolflags.py", "check"] + docs, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

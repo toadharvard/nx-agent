@@ -18,7 +18,7 @@
 //  A destination without storage (D3DFMT_NULL target) discards the copy: D3D_OK. A source without storage is INVALIDCALL (no contents).
 // Effect: pending CPU writes of both images are uploaded first; NxOp_Blit (outside a pass); the destination sub-resource is then GPU-newer (nx_img_gpu_wrote: stale CPU copy, AUTOGENMIPMAP flag).
 #include "copy_util.h"
-#include "env_table.gen.h"
+#include "../gen/env_table.gen.h"
 
 static bool full(const RECT* r, const NxSub* s) { return !r || (r->left == 0 && r->top == 0 && r->right == (LONG)s->w && r->bottom == (LONG)s->h); }
 static bool valid_rect(const NxImg* im, uint32_t level, const RECT* r) { if (!r) return true; D3DBOX b = {(UINT)r->left, (UINT)r->top, (UINT)r->right, (UINT)r->bottom, 0, 1}; return r->left >= 0 && r->top >= 0 && nx_box_valid(im, level, &b); }
@@ -53,6 +53,6 @@ static HRESULT do_stretch(NxObj* dev, IDirect3DSurface9* ps, const RECT* sr, IDi
     else return D3DERR_INVALIDCALL;
     return D3D_OK;
 }
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #define STRETCH(C) HRESULT STDMETHODCALLTYPE C::StretchRect(IDirect3DSurface9* s, const RECT* sr, IDirect3DSurface9* d, const RECT* dr, D3DTEXTUREFILTERTYPE f) { return do_stretch(this, s, sr, d, dr, f); }
 STRETCH(NxDevice9) STRETCH(NxDevice9Ex)

@@ -6,7 +6,7 @@
 //  P3 everything after that is pvw_core.cpp (return codes: D3D_OK, D3DERR_INVALIDCALL for a source without position element, and for the memory-unsafe cases of its rules M1 / M2).
 // State is untouched: Wine rebinds sysmem streams around the call only to read them (the sources are read from the CPU memory of our buffers). Only the destination's dirty range moves (write map).
 #include "pvw.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 
 static HRESULT process(NxDeviceCore* d, UINT s, UINT di, UINT n, IDirect3DVertexBuffer9* dst, IDirect3DVertexDeclaration9* decl) {
     if (!dst || !nx_chk_obj(dst) || !nx_chk_obj(decl)) return D3DERR_INVALIDCALL;

@@ -8,7 +8,7 @@
 // GPU readback: a read lock of a sub-resource the GPU wrote (nx_img_gpu_wrote) first refreshes the CPU copy through nxd3d_image_read, unless the lock is an effective DISCARD. MS: Lockable RT + MSAA is refused at creation.
 // GetDC / ReleaseDC are left out: they need a GDI DIB section, which the backend ABI cannot express (README of dev/: open point).
 #include "res_tex.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include <string.h>
 static const uint32_t USAGE_MASK = 0x10007bf0u | 3u;   // WINED3DUSAGE_MASK | RENDERTARGET | DEPTHSTENCIL (d3dusage_from_wined3dusage)
 bool nx_box_valid(const NxImg* im, uint32_t level, const D3DBOX* b) {

@@ -7,8 +7,8 @@
 #include "t_common.h"
 #include <math.h>
 extern "C" {
-#include "../../../render/d3d9/ffp/ffp_vs_ref.h"
-#include "../../../render/d3d9/ffp/ffp_ps_ref.h"
+#include "ref/ffp_vs_ref.h"
+#include "ref/ffp_ps_ref.h"
 }
 
 static IDirect3DBaseTexture9 *g_t2[8], *g_tcube, *g_tvol; static float g_texcol[8][4]; static float g_xf[512][16];   // texture pool; the colour of each 1x1 2D texture; every matrix the case files set (the reference palette)

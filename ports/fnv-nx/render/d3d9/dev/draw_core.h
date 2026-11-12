@@ -8,8 +8,8 @@
 #include "glue_buf.h"
 #include "draw_ffp.h"
 #include "nxgpu4_shader.h"
-#include "d3d9_state.h"
-#include "../../shaders/include/fnvnx_dk_layout.h"
+#include "../front/d3d9_state.h"
+#include "fnvnx_dk_layout.h"
 #include <string.h>
 
 enum : uint32_t { NXD_STREAM_INDEXED = D3DSTREAMSOURCE_INDEXEDDATA, NXD_STREAM_INSTANCE = D3DSTREAMSOURCE_INSTANCEDATA, NXD_FREQ_MASK = 0x7FFFFFu };

@@ -11,7 +11,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include "face.h"
 extern "C" void fnvnx_wine_fixme(uint32_t id);   // loader/include/fnvnx_reach.h: writes one line and returns
 enum : uint32_t { NX_WINE_FIXME_ShaderValidatorCreate9 = 20, NX_WINE_FIXME_ShaderValidator_Begin = 22,

@@ -1,0 +1,60 @@
+{
+ "format": "fnvnx-contract-inputs/1",
+ "external": [
+  {
+   "name": "exe",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/exe",
+   "commit": "0948da1e89ab719dcf8471e45b67bc60575f6b93",
+   "tree_sha256": "ba933b684b5e221e74b8a841a0ebb35ea8599c78a4d582ca0c376ef5a424ef2b",
+   "at": "/ext/exe"
+  },
+  {
+   "name": "redist",
+   "repo": "fnv-nx-build",
+   "ref": "gamedata/redist",
+   "commit": "c53729e3bac168798fddcf4312f5a64a9b5eb08f",
+   "tree_sha256": "fe7d3b56dba13c2bb236bdd3f7681dab41029f192283b7d4ba0c81105878bfd2",
+   "at": "/ext/redist"
+  },
+  {
+   "name": "msvc",
+   "repo": "fnv-nx-build",
+   "ref": "msvc/pristine/87eb9373a0bb",
+   "commit": "64d64a8b4a2b0eb81c522791d9c271a3df13f5c7",
+   "tree_sha256": "18079c57ed676afccfda45502248c55840fb8e730f7a8bf76c7066c19a5bce4f",
+   "at": "/ext/msvc"
+  },
+  {
+   "name": "facts",
+   "repo": "fnv-nx-build",
+   "ref": "l3a-lift/facts",
+   "commit": "163ec389036feb9593005bb8fb9ac38a8e85dfd2",
+   "tree_sha256": "48833743dbdb51757616a112291f71184393258f2173b30c0f19cecefccaeccc",
+   "at": "/ext/facts"
+  },
+  {
+   "name": "manifest",
+   "repo": "fnv-nx-build",
+   "ref": "l5-platform/manifest",
+   "commit": "2ac3091b7095598d04dce6091b2012f7cfa14bc7",
+   "tree_sha256": "4708f3d8d2dfa1adeab65fa4eeb4f994ad806372d49da392d22b4f93d2f169bb",
+   "at": "/ext/manifest"
+  }
+ ],
+ "exe": "exe/FalloutNV.exe",
+ "msvc": "msvc/obj",
+ "universe": "facts/universe.tsv",
+ "reach_requests": "manifest/manifest/reach_requests.tsv",
+ "dynsites": "manifest/manifest/dynsites.tsv",
+ "root_results": {
+  "units": "units.json",
+  "addrmap": "addrmap.tsv",
+  "aliases": "aliases.ld",
+  "entries": "entries.tsv"
+ },
+ "ranges": {
+  "exe": "facts/ranges.tsv",
+  "module": "facts/%s/ranges.tsv"
+ }
+}

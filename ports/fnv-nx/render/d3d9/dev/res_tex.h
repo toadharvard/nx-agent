@@ -3,7 +3,7 @@
 #pragma once
 #include "res_texcore.h"
 #include "nxgpu4.h"
-#include "d3d9_state.h"   // nx_d3d9_format / nx_d3d9_convert: the one D3DFORMAT -> NxFormat table
+#include "../front/d3d9_state.h"   // nx_d3d9_format / nx_d3d9_convert: the one D3DFORMAT -> NxFormat table
 #define NX_MAX_TEX_BYTES 0x40000000u   // largest single image we allocate (1 GiB, as NX_MAX_BUFFER_BYTES)
 
 // ---- format layout (res_fmt.cpp): wined3d format table (utils.c formats[], format_block_info[], format_base_flags[]) over the D3DFORMAT -> wined3d id map of d3d9/device.c

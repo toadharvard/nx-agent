@@ -19,7 +19,7 @@
 //  pending CPU writes of the source first, then nxd3d_image_read of the whole sub-resource (R3 of glue_stream.h: observes every earlier op) into the destination's CPU copy (a CPU-only source: memcpy);
 //  the destination records a dirty region (wined3d_device_context_blt: dirty region of the destination box).
 #include "copy_util.h"
-#include "env_table.gen.h"
+#include "../gen/env_table.gen.h"
 #include <string.h>
 
 static bool ours(NxObj* dev, const NxSurfCore* s) { return s && s->dev == dev; }
@@ -97,7 +97,7 @@ static HRESULT do_rt_data(NxObj* dev, IDirect3DSurface9* prt, IDirect3DSurface9*
     if (di->rec_dirty) { if (d->level == 0) { NxBox3 b = {0, 0, 0, ds->w, ds->h, 1}; di->add_dirty(0, d->face, &b); } else di->add_dirty(d->level, d->face, nullptr); }
     return D3D_OK;
 }
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #define UPDATE(C) \
     HRESULT STDMETHODCALLTYPE C::UpdateSurface(IDirect3DSurface9* s, const RECT* r, IDirect3DSurface9* d, const POINT* p) { return do_update_surface(this, s, r, d, p); } \
     HRESULT STDMETHODCALLTYPE C::UpdateTexture(IDirect3DBaseTexture9* s, IDirect3DBaseTexture9* d) { return do_update_texture(this, s, d); } \

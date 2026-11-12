@@ -16,7 +16,7 @@ GATE_OUT=/gate (output dir), data to /out. Class: all stages are "build". n1, th
 own static certificates (bodysel's input is the gate rows), so "verification" would make provenance reject them; no stage
 of this graph is verification-only, hence none has that class. --jobs-in-tools is in argv and so in the keys.
 NOT in the graph: gate_xunit, gate_rtti (subprocess `aarch64-linux-gnu-nm` / `-readelf` by bare name), gate_pcrel (same plus
-toolchain/game/pcrel_abs.py): they need those ELF programs and their loader closure as declared inputs; link/tables.py needs
+contract/pcrel_abs.py): they need those ELF programs and their loader closure as declared inputs; link/tables.py needs
 vtid.json, whose producer vtid.py needs L2's pair file (--pairs).
 
 verdict: every file of every stage output tree (cas listing) of at most GATE_MAX bytes (a gate file holds <= 50 ids) that parses

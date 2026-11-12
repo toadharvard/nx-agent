@@ -9,10 +9,10 @@
 // is ignored (one output); GetFrontBufferData accepts dest format A8R8G8B8 only (MS), dest in SYSTEMMEM-like lockable pools only (the surface must be CPU writable), windowed: the client origin offset
 // of wined3d_swapchain_get_front_buffer_data; GetLastPresentCount = number of presents of this chain (MS; Wine returns 0); GetPresentStats: m1_stats.cpp.
 #include "res_tex.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include "dev_core.h"
 #include "dev_hooks.h"
-#include "env_table.gen.h"
+#include "../gen/env_table.gen.h"
 #include <string.h>
 #define INV D3DERR_INVALIDCALL
 

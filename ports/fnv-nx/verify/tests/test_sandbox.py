@@ -281,6 +281,16 @@ echo "mounts=$(wc -l < /proc/mounts)"'''
                    ["/bin/busybox", "sh", "/in/s.sh"], env={})
     rc, res, err = run(store, st10)
     check("10 busybox-only sandbox runs a script, empty environment", rc == 0, "%s %s" % (rc, err[:200]))
+    # (11) one key executed by several threads of ONE process at once (a verdict gate builds units of one store in a thread pool): the
+    # run directory and the result temp file must not be named by the pid alone (FileExistsError on out/0 was the symptom)
+    import concurrent.futures
+    doc10 = json.load(open(st10))
+    key10 = sandbox.key_of(doc10)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+        futs = [ex.submit(sandbox.execute, store, doc10, key10) for _ in range(6)]
+        errs = [f.exception() for f in futs]
+    check("11 same key run by 6 threads of one process: no collision, equal results", not any(errs)
+          and len({json.dumps(f.result(), sort_keys=True) for f in futs}) == 1, str(errs))
     return 1 if FAILED else 0
 
 

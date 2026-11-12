@@ -10,8 +10,8 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."));
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 DEV = os.path.join(ROOT, "render", "d3d9", "dev"); GEN = os.path.join(ROOT, "render", "d3d9", "gen"); ENV = os.path.join(ROOT, "render", "d3d9", "env"); SPEC = os.path.join(ROOT, "render", "d3d9", "spec", "d3d9_spec.json")
-INC = os.path.join(ROOT, "shim", "include"); NXF = os.path.join(ROOT, "render", "native"); DEVT = os.path.join(ROOT, "tests", "l6", "dev"); BACK = os.path.join(ROOT, "render", "d3d9", "backend")
-LIB = ["obj.cpp", "app_unk_native.cpp", "state_rt.cpp", "state_ext.cpp"]; GENS = ["d9impl_unk.gen.cpp", "state.gen.cpp"]
+INC = os.path.join(ROOT, "shim", "include"); NXF = os.path.join(ROOT, "render", "native"); DEVT = os.path.join(ROOT, "tests", "l6", "dev"); BACK = os.path.join(ROOT, "render", "gl4"); NXB = os.path.normpath(os.path.join(BACK, "..", "backend"))
+LIB = ["obj.cpp", "app_unk_native.cpp", "state_rt.cpp", "state_ext.cpp"]; GENS = ["d9impl_unk.gen.cpp", "state.gen.cpp"]; NATIVE = os.path.join(ROOT, "tests", "l6", "native")
 RES = ["res_buf.cpp", "res_fvf.cpp", "res_decl.cpp", "res_shader.cpp", "res_smcheck.cpp", "res_query.cpp"]; TEX = ["res_fmt.cpp", "res_tex.cpp", "res_surf.cpp", "res_create.cpp"]
 TESTS = ["t_env.cpp", "t_a.cpp", "t_b.cpp", "t_c.cpp", "t_d.cpp", "t_e.cpp", "t_h.cpp"]
 fails = []
@@ -24,7 +24,7 @@ sys.path.insert(0, HERE)
 from texoracle import *  # noqa: E402,F401  (fcc, PLAIN, MAPPABLE, layout, pitch, mappitch, size, dim, chain, Env, result codes)
 
 
-FRONT = os.path.join(ROOT, "render", "d3d9", "front"); sys.path.insert(0, os.path.join(HERE, "..", "env")); import envq  # noqa: E402
+FRONT = os.path.join(ROOT, "render", "d3d9", "front"); sys.path.insert(0, os.path.join(HERE, "..", "..", "..", "render", "d3d9", "env")); import envq  # noqa: E402
 NX = set(); NXI = {}   # NX: D3DFORMAT values with a native format (calling the compiled front); NXI: value -> (format, flags)
 DRIVER = r"""#include <stdio.h>
 #include "d3d9_state.h"
@@ -36,7 +36,7 @@ def nx_table(tmp, fmts):
     """the format table by calling the compiled function: a tiny C driver over render/d3d9/front/front_*.c (-I front -I backend)"""
     d = os.path.join(tmp, "drv"); os.makedirs(d, exist_ok=True); c = os.path.join(d, "drv.c"); open(c, "w").write(DRIVER)
     srcs = sorted(os.path.join(FRONT, f) for f in os.listdir(FRONT) if f.startswith("front_") and f.endswith(".c"))
-    r = sh(["gcc", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK, c, *srcs, "-o", os.path.join(d, "drv")])
+    r = sh(["gcc", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK, "-I", NXB, c, *srcs, "-o", os.path.join(d, "drv")])
     if r.returncode: raise SystemExit("format driver build failed:\n" + r.stderr[-800:])
     o = subprocess.run([os.path.join(d, "drv")], input="\n".join(str(f) for f in fmts), capture_output=True, text=True).stdout
     t = {}
@@ -153,11 +153,11 @@ def build(dev, tmp, jobs=8, with_res=True):
                 [sys.executable, "-I", os.path.join(ENV, "gen_env.py"), tmp]):
         r = sh(cmd)
         if r.returncode: return None, None, r.stderr[-800:]
-    fl = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O0", "-w", "-I", HERE, "-I", INC, "-I", tmp, "-I", dev, "-I", BACK, "-I", FRONT]
-    jobs_ = [(os.path.join(dev, s), s) for s in LIB + RES + TEX] + [(os.path.join(tmp, s), s) for s in GENS + ["env_table.gen.cpp"]] + [(os.path.join(HERE, s), s) for s in TESTS]
+    fl = ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O0", "-w", "-I", HERE, "-I", INC, "-I", tmp, "-I", dev, "-I", BACK, "-I", NXB, "-I", FRONT]
+    jobs_ = [(os.path.join(NATIVE if s == "app_unk_native.cpp" else dev, s), s) for s in LIB + RES + TEX] + [(os.path.join(tmp, s), s) for s in GENS + ["env_table.gen.cpp"]] + [(os.path.join(HERE, s), s) for s in TESTS]
     cmds = [fl + ["-c", src, "-o", os.path.join(tmp, n + ".o")] for src, n in jobs_]
     fronts = sorted(f for f in os.listdir(FRONT) if f.startswith("front_") and f.endswith(".c"))
-    for f in fronts: cmds.append(["gcc", "-m32", "-std=c11", "-w", "-I", FRONT, "-I", BACK, "-c", os.path.join(FRONT, f), "-o", os.path.join(tmp, "nx_" + f + ".o")])
+    for f in fronts: cmds.append(["gcc", "-m32", "-std=c11", "-w", "-I", FRONT, "-I", BACK, "-I", NXB, "-c", os.path.join(FRONT, f), "-o", os.path.join(tmp, "nx_" + f + ".o")])
     with cf.ThreadPoolExecutor(jobs) as ex: rs = list(ex.map(sh, cmds))
     for c, r in zip(cmds, rs):
         if r.returncode: return None, None, " ".join(c[-3:]) + "\n" + r.stderr[-1500:]

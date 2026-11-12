@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_reclock.py: recorder (render/d3d9/rec) vs lock handling, under Wine. Builds the recorder + lockprobe.c, runs the probe WITHOUT the proxy
+"""test_reclock.py: recorder (render/tools/rec) vs lock handling, under Wine. Builds the recorder + lockprobe.c, runs the probe WITHOUT the proxy
 (baseline) and WITH it, with a hard timeout (a hang is a failure). Checks: both exit 0 with identical output; the stream decodes fully; for
 EVERY lock call of the probe (in call order) the recorded Lock bytes / Unlock bytes have exactly rows(fmt,h)*rowbytes(fmt,w)*depth bytes, computed
 here from the level dimensions and the rect printed by the probe, and carry the pattern the probe wrote / read (the pattern is regenerated here).
@@ -56,7 +56,7 @@ def parse(out):
 
 
 os.makedirs(W, exist_ok=True)
-r = sh([os.path.join(ROOT, "render/d3d9/rec/build.sh"), W + "/rec"]); check(r.returncode == 0, "build.sh: " + r.stderr[-400:])
+r = sh([os.path.join(ROOT, "render/tools/rec/build.sh"), W + "/rec"]); check(r.returncode == 0, "build.sh: " + r.stderr[-400:])
 r = sh(["i686-w64-mingw32-gcc", "-O1", "-Wall", "-Wno-unused", os.path.join(HERE, "lockprobe.c"), "-o", W + "/lockprobe.exe", "-ld3d9"]); check(r.returncode == 0, "lockprobe build: " + r.stderr[-400:])
 if fails: sys.exit(1)
 for d in ("plain", "proxy"):

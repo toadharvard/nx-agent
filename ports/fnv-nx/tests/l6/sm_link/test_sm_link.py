@@ -74,7 +74,7 @@ class Lab:
             if not os.path.exists(p): sys.exit("missing build artefact: " + p + " (pass --build DIR, the render/shaders/build.sh output root)")
         self.ops = sm_hand.load_opcodes(hdr); self.cache = {}; self.nid = 0
         self.gl = os.path.join(work, "gl_link"); n = os.path.join(ROOT, "render", "native")
-        r = subprocess.run(["gcc", "-std=gnu11", "-O1", "-w", "-I", os.path.join(ROOT, "render", "d3d9", "backend"), "-I", n, "-I", os.path.join(n, "gl"),
+        r = subprocess.run(["gcc", "-std=gnu11", "-O1", "-w", "-I", os.path.join(ROOT, "render", "gl4"), "-I", n, "-I", os.path.join(n, "gl"),
                             os.path.join(HERE, "gl_link.c"), os.path.join(n, "gl", "nxgl.c"), "-lEGL", "-ldl", "-lm", "-o", self.gl], capture_output=True, text=True)
         if r.returncode: sys.exit("gl_link build failed\n" + r.stderr[-800:])
     def translate(self, asm, complete=False, link=(), dksh=False):

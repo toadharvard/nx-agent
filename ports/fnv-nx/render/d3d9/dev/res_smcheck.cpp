@@ -10,7 +10,7 @@
 // `conflicts` rows (the table's model sets already hold the union).
 #include "res_sm.h"
 #include <string.h>
-#include "res_smtab.gen.h"
+#include "../gen/res_smtab.gen.h"
 enum { OP_COMMENT = 0xFFFE, OP_END = 0xFFFF, OP_PHASE = 0xFFFD, OP_DCL = 31, OP_DEFB = 47, OP_DEFI = 48, OP_DEF = 81, T_TEX = 66 };
 static const NxSm1P* sm1(uint32_t op) { for (int i = 0; i < NX_SM1_N; i++) if (NX_SM1[i].opnum == op) return &NX_SM1[i]; return nullptr; }
 

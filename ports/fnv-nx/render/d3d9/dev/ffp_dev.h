@@ -6,7 +6,7 @@
 //     bytes, no derivation). The FFP-only groups the module consumes are cleared after the consumer ran (VS: LIGHTS XFORM MATERIAL TESS; PS: TEXFACTOR); no result depends on them.
 #pragma once
 #include "draw_core.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include "state_rt.h"
 #define NX_RS_COUNT NX_FFP_PS_RS_COUNT_   // ffp_state.h declares its own NX_RS_COUNT (= 210); the device's generated one (state.gen.h) is the same number: keep both, rename the module's
 extern "C" {
@@ -41,7 +41,6 @@ uint32_t nx_ffp_ps_pairs(uint32_t tex_mask, uint8_t out[31]);                   
 // ---- ffp_dev.cpp: the per-device record (an IUnknown private-data entry of the device: it dies with the device)
 struct NxFfpDev : IUnknown {
     long refs = 1;
-    uint32_t kind = 0;                                   // NxGpuInfo.backend (NX_BACKEND_*), 0 = not asked yet
     uint32_t vs[2] = {0, 0}, ps[2] = {0, 0};             // backend shader ids by flat shading (0 = not made)
     bool vs_ok = false; NxFfpVsKey key; NxFfpVsState vsb; NxFfpPsState psb;
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void** pp) override { *pp = nullptr; return E_NOINTERFACE; }
@@ -54,4 +53,4 @@ NxFfpDev* nx_ffp_dev(NxDeviceCore* d);                    // the device's record
 // ---- ffp_prog.cpp
 enum NxBackendKind : uint32_t { NX_BACKEND_DEKO3D = 1, NX_BACKEND_GL = 2 };   // NxGpuInfo.backend (gpu_abi.h)
 bool nx_ffp_flat(NxDeviceCore* d, uint32_t* flat);        // the program variant: D3DRS_SHADEMODE FLAT (the front's flat_shade rule over the draw path's latch); false = no memory for the latch
-uint32_t nx_ffp_make_program(NxFfpDev* f, uint32_t stage /* NxStage */, uint32_t flat);   // a backend shader id (>= 1) of the program for the backend kind, 0 = not made
+uint32_t nx_ffp_make_program(NxFfpDev* f, uint32_t stage /* NxStage */, uint32_t flat);   // a backend shader id (>= 1) of the program, 0 = not made

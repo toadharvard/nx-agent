@@ -2,9 +2,9 @@
 // The profile (handheld / docked) is chosen once at creation and kept as a private-data entry of the object (the class layout is fixed by the generated header;
 // IDirect3D9 has no SetPrivateData in its interface, so the entry is unreachable from the application).
 #include <new>
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include "d3d9_adapter.h"
-#include "env_table.gen.h"
+#include "../gen/env_table.gen.h"
 
 static const GUID G_NXENV_PROFILE = { 0x6e78656e, 0x7670, 0x4d39, { 0x90, 0x01, 0x6e, 0x78, 0x65, 0x6e, 0x76, 0x70 } };
 static int prof(NxObj* o) { uint32_t p = 0; DWORD sz = sizeof p; return SUCCEEDED(o->getPrivateData(G_NXENV_PROFILE, &p, &sz)) ? (int)p : 0; }

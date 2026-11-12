@@ -135,19 +135,40 @@ check("tests: deterministic order (directory argument order, then name)", rc == 
       and r["universe"] == 4, (rc, order, r))
 
 d = tmp("tests-timeout")
-put(d, "verify/tests/test_slow.py", "import time\ntime.sleep(30)\n")
+# no wall-clock assertion: the slow file outlives any plausible limit, the quick one has 15 s on any loaded machine
+put(d, "verify/tests/test_slow.py", "import time\ntime.sleep(3600)\n")
 put(d, "verify/tests/test_ok.py", "pass\n")
-t0 = time.time()
-rc, r, e = tests(d, extra=("--timeout-s", "1"))
-check("tests: timeout is a failure", rc != 0 and r["uncertified"] == ["verify/tests/test_slow.py"] and r["certified"] == 1
-      and time.time() - t0 < 20, (rc, r, e))
+rc, r, e = tests(d, extra=("--timeout-s", "15"))
+check("tests: timeout is a failure", rc != 0 and r["uncertified"] == ["verify/tests/test_slow.py"] and r["certified"] == 1,
+      (rc, r, e))
+
+d = tmp("tests-scratch")
+log = os.path.join(d, "where.txt")
+put(d, "verify/tests/test_leaves.py", "import tempfile\nd = tempfile.mkdtemp(prefix='left-')\nopen(d + '/f', 'w').write('x')\n"
+    "open(%r, 'a').write(d + '\\n')\n" % log)
+put(d, "verify/tests/test_leaves_fails.py", "import sys, tempfile\nopen(%r, 'a').write(tempfile.mkdtemp(prefix='left-') + '\\n')\nsys.exit(3)\n" % log)
+rc, r, e = tests(d)
+left = open(log).read().split()
+check("tests: the scratch a file leaves in its temporary directory is removed, passed or failed", rc != 0 and r["certified"] == 1
+      and len(left) == 2 and not any(os.path.exists(x) or os.path.exists(os.path.dirname(x)) for x in left)
+      and all(os.path.basename(os.path.dirname(x)).startswith("selftest-") for x in left), (rc, r, left))
+
+d = tmp("tests-env")
+put(d, "verify/tests/test_env.py", "import os, sys\nsys.exit(1 if [k for k in os.environ if k.startswith('GATE_')] else 0)\n")
+rc, r, e = tests(d)
+check("tests: a test file does not see the gate's GATE_* variables", rc == 0 and r["certified"] == 1, (rc, r, e))
 
 # ---- gates.json
 spec = json.load(open(os.path.join(VERIFY, "gates.json")))
 byname = {g["name"]: g for g in spec["gates"]}
+CONTRACT = ["n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcrel", "bodysel", "abs", "disp", "reach", "reachlink", "gpa"]
 dirs_pure = [a.rsplit("/", 1)[-1] for a in byname["pure"]["argv"][3:]]
 dirs_tests = [a.rsplit("/", 1)[-1] for a in byname["selftests"]["argv"][5:]]
-check("gates.json: format and the two gates", spec["format"] == "fnvnx-gates/1" and [g["name"] for g in spec["gates"]] == ["pure", "selftests"]
+check("gates.json: contract gates run gate_contract.py --gate NAME", all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_contract.py", "--gate", n] and byname[n]["result"] == n + ".json" for n in CONTRACT), spec)
+check("gates.json: format and the gates", spec["format"] == "fnvnx-gates/1" and [g["name"] for g in spec["gates"]] == ["pure", "selftests", "admit", "oracle", "build", "objstub", "linkstrict", "determinism"] + CONTRACT + ["argordergate"]
+      and all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_%s.py" % n] and byname[n]["result"] == n + ".json"
+              for n in ("build", "objstub", "linkstrict", "determinism"))
+      and byname["argordergate"]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_argorder.py"] and byname["argordergate"]["result"] == "argordergate.json"
       and byname["pure"]["result"] == "pure.json" and byname["selftests"]["result"] == "selftests.json"
       and dirs_pure == ["contract", "link", "rules", "lift"] and dirs_tests == ["verify", "farm", "contract", "link", "rules", "lift"]
       and byname["pure"]["argv"][:3] == ["python3", "-I", "ports/fnv-nx/verify/gate_pure.py"]
@@ -294,13 +315,16 @@ def tests_c(d, cache, extra=(), dirs=("verify",)):
     return gate("gate_tests.py", d, ["--cache", cache] + list(extra) + list(dirs))
 
 d = tmp("tests-jobs")
-mk(d, test_a="import time\ntime.sleep(1.5)\n", test_b="import time\ntime.sleep(1.5)\n", test_c="import time\ntime.sleep(1.5)\n")
-t0 = time.time()
-rc, r, e = tests(d, extra=("--jobs", "3"))
-par = time.time() - t0
-check("tests: --jobs 3 runs files concurrently, reported in sorted order", rc == 0 and par < 4.0 and r["universe"] == 3
+# concurrency is proved by a rendezvous, not by the clock: each file leaves a marker and passes only once all three exist,
+# which can happen only while all three run at the same time (a sequential run would hit the 3600 s limit instead)
+RDV = ("import os, sys, time\nd = %r\nopen(os.path.join(d, %%r), 'w').close()\n"
+       "while len(os.listdir(d)) < 3:\n    time.sleep(0.05)\n") % tmp("tests-jobs-rdv")
+mk(d, test_a=RDV % "a", test_b=RDV % "b", test_c=RDV % "c")
+rc, r, e = tests(d, extra=("--jobs", "3", "--timeout-s", "3600"))
+par = None
+check("tests: --jobs 3 runs files concurrently, reported in sorted order", rc == 0 and r["universe"] == 3
       and [f["name"] for f in r["files"]] == ["verify/tests/test_a.py", "verify/tests/test_b.py", "verify/tests/test_c.py"]
-      and all(f["status"] == "passed" and f["seconds"] >= 1.4 for f in r["files"]), (rc, par, r, e))
+      and all(f["status"] == "passed" for f in r["files"]), (rc, par, r, e))
 
 d = tmp("tests-times")
 mk(d, test_a="pass\n", test_b="import sys\nsys.exit(1)\n")
@@ -373,7 +397,7 @@ check("tests cache: fixed file is a new key, passes, then is cached", rc3 == 0 a
 
 d = tmp("tests-cache-timeout")
 cache = os.path.join(d, "cache")
-mk(d, test_slow="import time\ntime.sleep(30)\n")
+mk(d, test_slow="import time\ntime.sleep(3600)\n")
 rc, r, e = tests_c(d, cache, extra=("--timeout-s", "1"))
 rc2, r2, e = tests_c(d, cache, extra=("--timeout-s", "1"))
 check("tests cache: a timeout is never cached as passed", rc != 0 and rc2 != 0 and "cached" not in r2["detail"], (r, r2))

@@ -8,7 +8,7 @@
 //  P4 a backend shader id is made at the first draw that needs the (shader, variant, L) and cached on the shader object (NxShaderCore::progs); it is destroyed with the object (nxd3d_shader_ids_destroy).
 //     A 0 from the backend = D3DERR_DRIVERINTERNALERROR (a backend defect, never a skipped draw); no backend memory for the bytecode copy = D3DERR_OUTOFVIDEOMEMORY (glue_stream.h exhaustion rules: the result of the call, nothing recorded).
 #include "draw_core.h"
-#include "d9impl.gen.h"
+#include "../gen/d9impl.gen.h"
 #include "ffp_dev.h"
 #include <string.h>
 

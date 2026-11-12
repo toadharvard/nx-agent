@@ -13,7 +13,7 @@ sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."));
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 D3 = os.path.join(ROOT, "render", "d3d9"); DEV = os.path.join(D3, "dev"); GEN = os.path.join(D3, "gen"); ENV = os.path.join(D3, "env"); SPEC = os.path.join(D3, "spec", "d3d9_spec.json")
-INC = os.path.join(ROOT, "shim", "include"); BACK = os.path.join(D3, "backend"); FRONT = os.path.join(D3, "front"); DEVT = os.path.join(ROOT, "tests", "l6", "dev"); TOT = os.path.join(ROOT, "render", "shaders", "total")
+INC = os.path.join(ROOT, "shim", "include"); BACK = os.path.join(D3, "..", "gl4"); NXB = os.path.normpath(os.path.join(BACK, "..", "backend")); FRONT = os.path.join(D3, "front"); DEVT = os.path.join(ROOT, "tests", "l6", "dev"); TOT = os.path.join(ROOT, "render", "shaders", "total")
 TESTS = ["t_env.cpp", "t_a.cpp", "t_b.cpp", "t_c.cpp", "t_d.cpp", "t_e.cpp"]; GENS = ["d9impl_unk.gen.cpp", "state.gen.cpp", "env_table.gen.cpp"]
 M1 = ["m1_validate.cpp", "m1_stats.cpp", "m1_misc.cpp"]
 TC = os.environ.get("FNVNX_TC", "/home/user/work/l6/toolchain/toolchain-1fc1f7b1ef44/toolchain/prefix"); UAM_DEPS = os.environ.get("FNVNX_SHADERS_DEPS", "/home/user/work/l6/s2a/build/deps")
@@ -180,7 +180,7 @@ def write_data(d):
 
 
 # ---------------------------------------------------------------- build (as tests/l6/devlife)
-def fl(tmp, dev): return ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O0", "-w", "-I", dev, "-I", INC, "-I", tmp, "-I", BACK, "-I", FRONT, "-I", HERE]
+def fl(tmp, dev): return ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O0", "-w", "-I", dev, "-I", INC, "-I", tmp, "-I", BACK, "-I", NXB, "-I", FRONT, "-I", HERE]
 
 
 def gen(tmp, dev=DEV):
@@ -195,7 +195,7 @@ def gen(tmp, dev=DEV):
 def compile_all(tmp, dev, objs, jobs=3, outdir=None):
     od = outdir or os.path.join(tmp, "objs"); os.makedirs(od, exist_ok=True); cmds = []
     for n, src in objs.items():
-        cmds.append((n, (["gcc", "-m32", "-std=c11", "-w", "-I", BACK, "-I", FRONT] if src.endswith(".c") else fl(tmp, dev)) + ["-c", src, "-o", os.path.join(od, os.path.splitext(n)[0] + ".o")]))
+        cmds.append((n, (["gcc", "-m32", "-std=c11", "-w", "-I", BACK, "-I", NXB, "-I", FRONT] if src.endswith(".c") else fl(tmp, dev)) + ["-c", src, "-o", os.path.join(od, os.path.splitext(n)[0] + ".o")]))
     with cf.ThreadPoolExecutor(jobs) as ex: rs = list(ex.map(lambda c: sh(c[1]), cmds))
     for (n, c), r in zip(cmds, rs):
         if r.returncode: return n + "\n" + r.stderr[-1500:]

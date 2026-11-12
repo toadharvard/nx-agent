@@ -7,7 +7,7 @@ env: D9ENV_WORK (default /home/user/work/l6/env).  usage: make_env.py [handheld]
 import hashlib, json, os, re, shutil, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.dont_write_bytecode = True
 ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-sys.path[:0] = [HERE, os.path.join(ROOT, "tools", "compare"), os.path.join(HERE, "..", "wrap")]
+sys.path[:0] = [HERE, os.path.join(HERE, "..", "..", "..", "render", "d3d9", "env"), os.path.join(ROOT, "tools", "compare"), os.path.join(HERE, "..", "wrap")]
 import envq, replay, d9s1_read as R  # noqa: E402
 W = os.environ.get("D9ENV_WORK", "/home/user/work/l6/env"); OUT = os.path.join(ROOT, "render", "d3d9", "env")
 SPEC = os.path.join(ROOT, "render", "d3d9", "spec", "d3d9_spec.json")
@@ -31,7 +31,7 @@ def build():
     open(W + "/gen/envq.gen.h", "w").write(envq.emit()); open(W + "/gen/envfmt.gen.h", "w").write(envq.emit_fmt())
     r = sh(["i686-w64-mingw32-gcc", "-O1", "-w", "-I", W + "/gen", "-I", HERE, "-o", W + "/run/envprobe2.exe", HERE + "/envprobe2.c", "-ld3d9", "-luser32", "-static-libgcc"])
     check(r.returncode == 0, "envprobe2 build: " + r.stderr[-500:])
-    r = sh([os.path.join(ROOT, "render/d3d9/rec/build.sh"), W + "/rec"]); check(r.returncode == 0, "recorder build: " + r.stderr[-300:])
+    r = sh([os.path.join(ROOT, "render/tools/rec/build.sh"), W + "/rec"]); check(r.returncode == 0, "recorder build: " + r.stderr[-300:])
     shutil.copy(W + "/rec/d3d9.dll", W + "/run/d3d9.dll")
 
 
