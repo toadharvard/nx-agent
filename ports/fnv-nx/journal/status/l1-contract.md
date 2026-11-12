@@ -432,3 +432,12 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - The w5 queue is split (orchestrator):
   - w5 does only the toolchain-build profile, then the GL pins.
   - New worker w22 (session_01KmtZKQg3UUv7uNveDucFNR, claude/fnv-l1-contract-w22) does the setup fix: from w5 c44308c0, plus the install_mirror closure fix, plus the trunk merge, plus a fresh-container green as merge step 1.
+
+## 2026-11-12 04:30Z
+- w20 descs 9692df48 accepted (L1 green e0162f13, 27 gates, 290 s, local):
+  - objects_of derived from admit.json, forbid_sections, strict `.fnvnx.disp` parse.
+  - Real counts are 0, since there are 0 admitted product roots.
+  - Next: merge w14, then to MERGER after w17. L2 asked for the dispatch plugin to emit `.fnvnx.disp`.
+- w18 51e4809d: manifest pin 07d79c58 plus the escape table. Counts unchanged: LoadLibrary 20/23, gpa 0/2 certified, reach red (174 open GPA sites/refs). Verdict 556059a6 green, 422 s on a loaded host (measurement).
+- w18 f916f6ed: allocsites by return-flow closure, 203 sites over 5 images, 25 const; 27 allocators (7 pure, 20 mixed), 3 address-taken.
+  - Open: the exe CRT malloc/new and the indirect callers. They need L3a points-to (memory-resident flow); dependency L3a.
