@@ -71,7 +71,7 @@
  "units": "all",
  "generated": [
   {
-   "tool": "ports/fnv-nx/contract/gate_reach.py",
+   "tool": "ports/fnv-nx/contract/reachreq.py",
    "args": [
     "--requests",
     "/in/ports/fnv-nx/manifest/reach_requests.tsv",

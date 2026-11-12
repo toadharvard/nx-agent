@@ -452,19 +452,25 @@ for bad in (('X', 'k.dll', 'f', '0', 'closure_key', 'dispatcher=a', ''), ('X', '
     except gate_reach.FormatError:
         pass
 
-# table-only mode: `--requests T --facts-h OUT` alone writes the header that the full mode writes (one emitter, write_facts_h), from the table alone
+# reachreq.py (the request table and the one header emitter): its CLI writes the header that gate_reach.header builds from the same table,
+# through the function the full mode uses (write_facts_h); gate_reach re-exports the emitter, so there is one
 tdir = tempfile.mkdtemp(prefix='reach-h-')
-for nm, rows_ in (('one', (CK,)), ('two', (CK, CK2))):
+RR = os.path.join(HERE, '..', 'reachreq.py')
+import reachreq
+check('gate_reach uses the one emitter and parser of reachreq', (gate_reach.header is reachreq.header, gate_reach.parse_requests is reachreq.parse_requests,
+      gate_reach.write_facts_h is reachreq.write_facts_h), (True, True, True))
+for nm, rows_ in (('one', (CK,)), ('two', (CK, CK2)), ('cfm', (R_H, R_P, R_W))):
     tsv = os.path.join(tdir, nm + '.tsv')
-    open(tsv, 'w').write('request\tdll\tname\targ_index\tkind\tvalues\tnote\n' + ''.join('\t'.join(r) + '\n' for r in rows_))
-    outh = os.path.join(tdir, nm + '.h')
-    rc_ = gate_reach.main(['--requests', tsv, '--facts-h', outh])
-    check('table-only mode %s: exit 0 and the header equals header(parse_requests(table))' % nm,
+    open(tsv, 'w').write('\t'.join(gate_reach.COLUMNS) + '\n' + ''.join('\t'.join(r) + '\n' for r in rows_))
+    outh = os.path.join(tdir, 'sub', nm + '.h')
+    rc_ = subprocess.run([sys.executable, '-s', '-B', '-I', RR, '--requests', tsv, '--facts-h', outh], capture_output=True).returncode
+    check('reachreq CLI %s: exit 0 and the header equals gate_reach.header(parse_requests(table)) (output dir created)' % nm,
           (rc_, open(outh).read()), (0, gate_reach.header(gate_reach.parse_requests(open(tsv).read()))))
-rc_ = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'gate_reach.py'), '--requests', tsv, '--facts-h', outh, '--out', tdir], capture_output=True).returncode
-check('table-only mode takes no other output option', rc_ != 0, True)
-rc_ = subprocess.run([sys.executable, '-I', os.path.join(HERE, '..', 'gate_reach.py'), '--requests', os.path.join(tdir, 'nope.tsv'), '--facts-h', outh], capture_output=True).returncode
-check('table-only mode on a missing table is an error', rc_ != 0, True)
+rc_ = subprocess.run([sys.executable, '-s', '-B', '-I', RR, '--requests', os.path.join(tdir, 'nope.tsv'), '--facts-h', outh], capture_output=True).returncode
+check('reachreq CLI on a missing table is an error', rc_ != 0, True)
+open(os.path.join(tdir, 'bad.tsv'), 'w').write('request\tx\n')
+rc_ = subprocess.run([sys.executable, '-s', '-B', '-I', RR, '--requests', os.path.join(tdir, 'bad.tsv'), '--facts-h', outh], capture_output=True).returncode
+check('reachreq CLI on a malformed table exits 2', rc_, 2)
 shutil.rmtree(tdir, ignore_errors=True)
 
 if fails:
