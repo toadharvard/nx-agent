@@ -71,50 +71,28 @@ dii = open(os.path.join(work, "dU.ii")).read()
 check("-dU lists the expanded FNVNX_PLAT_ macro and not the unexpanded one",
       g.used([dii]) == {"FNVNX_PLAT_A": 1} and "#define UNUSED" not in dii, dii)
 
-# (i) a header whose static inline wrappers expand FNVNX_PLAT_ macros inside the header itself: the expansion happens when the header is
-# preprocessed, so every includer of it "expands" that service whether or not it calls the wrapper. FACT (reported to the lead): for such
-# a header the used-evidence is vacuous for those services; the gate counts them used by every includer.
+# (i) wrapper rule: a header whose function body expands a FNVNX_PLAT_ macro makes the -dU evidence vacuous (every includer "expands" it);
+# the gate makes such a header red.
 hdr = os.path.join(work, "wrap", "hostapi.h")
 os.makedirs(os.path.dirname(hdr))
-open(hdr, "w").write("#define FNVNX_PLAT_A 1u\n#define FNVNX_PLAT_B 2u\n"
-                     "static inline int wrap_b(void) { return FNVNX_PLAT_B; }\n")
-unit = os.path.join(work, "inc.cc")
-open(unit, "w").write('#include "wrap/hostapi.h"\nint never_calls_b(void) { return FNVNX_PLAT_A; }\n')
-r = run([CXX, "-E", "-dU", "-o", os.path.join(work, "inc.ii"), unit])
-iii = open(os.path.join(work, "inc.ii")).read()
-dh = g.declared(open(hdr).read())
-u, c, ids = g.judge(dh, g.used([iii]))
-check("(i) header-internal wrapper: includes_header sees the header", g.includes_header(iii))
-check("(i) header-internal wrapper: service B counts as used though the unit never calls wrap_b (rule is vacuous for it)",
-      (u, c, ids) == (2, 2, []) and g.used([iii]) == {"FNVNX_PLAT_A": 1, "FNVNX_PLAT_B": 2}, (u, c, ids, g.used([iii])))
-# the same unit through a header with no wrapper: B is unused and red
-open(hdr, "w").write("#define FNVNX_PLAT_A 1u\n#define FNVNX_PLAT_B 2u\n")
-r = run([CXX, "-E", "-dU", "-o", os.path.join(work, "inc2.ii"), unit])
-u, c, ids = g.judge(dh, g.used([open(os.path.join(work, "inc2.ii")).read()]))
-check("(i) control: without the wrapper B is unused and red", (u, c) == (2, 1) and ids[0].startswith("unused service 2"), (u, c, ids))
-
-# (ii) range markers SOCK_FIRST / SOCK_LAST of the real header
+wrapped = "#define FNVNX_PLAT_A 1u\n#define FNVNX_PLAT_B 2u\nstatic inline int wrap_b(void) { return FNVNX_PLAT_B; }\n"
+open(hdr, "w").write(wrapped)
+check("(i) a static inline wrapper expanding a service macro is a wrapper use (red)", [n for _, n in g.wrapper_uses(wrapped)] == ["FNVNX_PLAT_B"], g.wrapper_uses(wrapped))
+check("(i) a macro-defined function is a wrapper use", g.wrapper_uses("#define CALL() (FNVNX_PLAT_B)\n") != [])
+clean = "/* FNVNX_PLAT_B in a comment */\n#define FNVNX_PLAT_A 1u // FNVNX_PLAT_B\n#define FNVNX_PLAT_B 2u\nconst char *s = \"FNVNX_PLAT_B\";\n"
+check("(i) declarations, comments and strings are not wrapper uses", g.wrapper_uses(clean) == [], g.wrapper_uses(clean))
 real = None
-for p in g.DEFAULT_HEADERS:
-    q = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(VERIFY))), p)
+for p_ in g.DEFAULT_HEADERS:
+    q = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(VERIFY))), p_)
     if os.path.isfile(q):
         real = open(q).read()
         break
-check("(ii) the real header is found", real is not None)
+check("(i) the real header has no wrapper use", real is not None and g.wrapper_uses(real) == [], g.wrapper_uses(real or ""))
+# (ii) no SOCK service and no range marker in the real header
 if real is not None:
     dr = g.declared(real)
-    byname = {n: v for v, ns in dr.items() for n in ns}
-    check("(ii) SOCK_FIRST aliases SOCK_SOCKET and SOCK_LAST aliases SOCK_SETFL (no item of their own)",
-          byname["FNVNX_PLAT_SOCK_FIRST"] == byname["FNVNX_PLAT_SOCK_SOCKET"] == 16
-          and byname["FNVNX_PLAT_SOCK_LAST"] == byname["FNVNX_PLAT_SOCK_SETFL"] == 31
-          and dr[16] == ["FNVNX_PLAT_SOCK_FIRST", "FNVNX_PLAT_SOCK_SOCKET"] and dr[31] == ["FNVNX_PLAT_SOCK_LAST", "FNVNX_PLAT_SOCK_SETFL"], (dr.get(16), dr.get(31)))
-    nsvc = len(dr)
-    u, c, ids = g.judge(dr, {"FNVNX_PLAT_SOCK_FIRST": 16, "FNVNX_PLAT_SOCK_LAST": 31})
-    check("(ii) a range loop FIRST..LAST uses only the two end services: 16 and 31 certified, the 17..26 and 30 in between stay unused",
-          u == nsvc and c == 2 and all("service %d " % n in " ".join(ids) for n in (17, 18, 26, 30)) and not any("service 16 " in i or "service 31 " in i for i in ids), (u, c, ids[:4]))
-    u, c, ids = g.judge(dr, {"FNVNX_PLAT_SOCK_FIRST": 17})
-    check("(ii) a marker with a changed value is an undeclared use (red)", "undeclared FNVNX_PLAT_SOCK_FIRST=17" in ids, ids)
-# a marker whose number equals no service is a declared item of its own (nothing hides it)
+    names = [n for ns in dr.values() for n in ns]
+    check("(ii) no SOCK_ service and no *_FIRST / *_LAST marker is declared", not any("SOCK" in n or n.endswith(("_FIRST", "_LAST")) for n in names), names)
 dm = g.declared("#define FNVNX_PLAT_X 1u\n#define FNVNX_PLAT_X_LAST 5u\n")
 u, c, ids = g.judge(dm, {"FNVNX_PLAT_X": 1})
 check("(ii) a marker equal to no service is its own item and red while unused", (u, c) == (2, 1) and ids == ["unused service 5 (FNVNX_PLAT_X_LAST)"], (u, c, ids))

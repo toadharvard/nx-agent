@@ -14,6 +14,8 @@ a line marker (`# N "path"`) whose file name is hostapi.h. A used FNVNX_PLAT_ ma
 the header's, is a red item as well (the unit saw another header).
 Universe: one item per declared service number of each root that includes hostapi.h, plus one per undeclared use. Certified: declared and
 used. No product root, or none that includes hostapi.h: universe 0, green, no exception list (gate_build.quantify).
+Wrapper rule: a PREFIX identifier in the header outside a `#define PREFIX_X <integer>` directive (wrapper function, macro-defined function) is a red
+item, so that "expanded by a unit" means a call site of the unit and nothing the header itself expands.
 Limit (stated, not hidden): a use inside a function that no code reaches still counts; reachability is the job of the gates reach / reachlink.
 The module ids (FNVNX_EXT_*) are not services and are not items: a module id names a host module, a service number names an entry of module 11,
 which is the only table of the header. Models of machines below the product boundary (deko3d, libnx, kernel) are modules, not services."""
@@ -62,6 +64,25 @@ def declared(header_text):
     return {v: sorted(ns) for v, ns in d.items()}
 
 
+def strip_comments(text):
+    """text without /* */ and // comments and string literals (newlines kept)"""
+    import re
+    return re.sub(r'/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\\n])*"', lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
+
+
+def wrapper_uses(text):
+    """-> [(line, name)] of PREFIX identifiers that occur outside a `#define PREFIX_X <integer>` directive. RULE (vacuity closed): the header
+    may only DECLARE service numbers. A body in a header that expands a service macro (static inline wrapper, macro-defined function) would make
+    the -dU evidence say "used" for every unit that merely includes the header, whether or not the unit calls it: such a use is red."""
+    import re
+    out = []
+    for i, line in enumerate(strip_comments(text).splitlines(), 1):
+        names = re.findall(r"\b(%s\w*)" % PREFIX, line)
+        if names and not (len(defines(line)) == 1 and line.strip().startswith("#")):
+            out += [(i, n) for n in names]
+    return out
+
+
 def includes_header(ii_text):
     """True iff the preprocessed text has a line marker for a file named hostapi.h"""
     for line in ii_text.splitlines():
@@ -107,6 +128,8 @@ def root_judge(root, repo, cache, header):
     if not any(includes_header(t) for t in iis):
         return 0, 0, [], "does not include %s" % HEADER
     u, c, ids = judge(declared(header), used(iis))
+    w = ["wrapper use %s line %d" % (n, l) for l, n in wrapper_uses(header)]
+    u, ids = u + len(w), ids + w
     return u, c, [root + ":" + i for i in ids], "; ".join(ids)[:300]
 
 

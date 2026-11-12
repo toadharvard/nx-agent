@@ -186,18 +186,6 @@
     "ports/fnv-nx/verify/bootpath.py"
    ]
   },
-  "test_bootsock.py": {
-   "references": [
-    {
-     "anchor": "## verify/bootsock.py",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/TOOLS.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/bootsock.py"
-   ]
-  },
   "test_cas.py": {
    "references": [
     {

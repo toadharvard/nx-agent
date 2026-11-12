@@ -846,7 +846,7 @@ Rules:
 5a. TOTAL against the header (hostapi.h TOTALITY TABLE, checked mechanically by tests/test_bootmachine.py against the parsed table): ext_call returns
    NO_MODULE (module >= 64 or not registered), NO_SERVICE (fn > UINT32_MAX, or a module-11 fn without a row: 0, 37 and up), BAD_NARGS
    (fewer arguments than the row, or nargs > 0 with a null array); nargs above UINT32_MAX counts as UINT32_MAX; only a handler raising
-   ExtMissing ends the run. Module 11 serves fn 1..36 here. The stage has no network interface and a fixed UTC zone (VC1). Sockets 16..33 are bootsock.py's model (a host with no network interface; its docstring lists every
+   ExtMissing ends the run. Module 11 serves fn 1..36 here. The stage has no network interface and a fixed UTC zone (VC1). Services 16..33 are reserved holes that answer FNVNX_EXT_NO_SERVICE; the former socket model is deleted (no network: the product does not call them) (a host with no network interface; its docstring lists every
    served and every NOT answered (service, case); the latter end the run as "ext-module-missing" naming the service, with an event
    "sock-undetermined" saying why): the nargs rule (sockets dispatch before the general check: nargs != the exact count, null array or not, is -EINVAL;
    the exact count with a null array is BAD_NARGS). TZ_AT 34: UTC, offset 0, no DST, abbr "UTC",
@@ -972,87 +972,6 @@ used (os.path.lexists); else the host entries equal under str.casefold() are col
 (code-point order, deterministic) is taken; with no match the spelling given is kept (a path to be created).
 The old driver took `sorted(hit)[0]` too, so two entries differing only by case resolve the same way here.
 Directory listings are cached per directory until changed() (call after create/remove/rename).
-```
-
-## verify/bootsock.py
-
-```text
-The socket services (module 11, fn 16..33, hostapi.h + sockwire.h) of the boot stage machine, for a host that has NO network interface.
-
-Model (owner decision "The declared machine", CLAUDE.md: the machine has no network connection and every network call returns the
-documented error of that state, never a fake success): the machine's host has only the loopback addresses; no packet ever arrives and nothing can connect. A socket is an entry of a
-table of open handles; every result is derived from the header text and host_sock.inc (the reference host: its argument checks, in its
-order) plus POSIX where the header states "an OS result" for a situation that exists without traffic. A (service, case) whose result
-needs real traffic, or an OS's own choice, is NOT answered: the model raises NotDetermined and the machine ends the run as
-"ext-module-missing" naming the service. A guest address that is not readable / writable memory raises BadGuestMemory (a violated
-precondition of the header; the machine ends the run as a host-call fault). Never an invented value.
-
-Stated assumptions (each is a fact of the stage's model, not of the header):
-  A1 handle numbers (a rule of the model, deterministic): a new handle is the lowest number >= 3 that is not open (0..2 are stdio); a
-     number is free again after its close. This is the descriptor rule of POSIX.1-2017 2.14 "File Descriptor Allocation" (the lowest
-     number not open), which the bsd service's descriptors follow. Nothing above the host may depend on the number: the header says only
-     that a handle is the descriptor number the service returned, and on the Windows side a SOCKET is an opaque handle whose only
-     special value is INVALID_SOCKET (Winsock "Socket Data Type"), so a program correct on Windows reads no meaning from it. SOCKET
-     never fails for lack of room.
-  A2 addresses (facts, cited): loopback is 127.0.0.0/8 (RFC 1122 3.2.1.3 (g)) and ::1 (RFC 4291 2.5.3); "any" is 0.0.0.0 (RFC 1122
-     3.2.1.3 (a)) and :: (RFC 4291 2.5.2); the declared machine has no network connection (CLAUDE.md "The declared machine"), so it has
-     no interface but loopback and every other unicast address is not local.
-  A3 getaddrinfo with no network: a numeric node is parsed (strict dotted quad, or an RFC 4291 text without a scope) and a null hints
-     argument is a hints record of zeros (POSIX); the list of a numeric node is one record per socket type STREAM/TCP 6, DGRAM/UDP 17,
-     RAW/0 (the type given in the hints keeps one; the protocol given keeps those with that protocol), in this order, ai_flags = hints flags.
-  A4 EPROTONOSUPPORT: STREAM takes protocol 0 or 6, DGRAM 0 or 17; any other protocol is EPROTONOSUPPORT except those a real OS may
-     implement for the type (1, 58, 132, 136, 262, or outside 0..255), which are not answered.
-
-The header (hostapi.h at a1923f65) and host_sock.inc agree on every case below; where a result is "the platform's answer" and depends on
-traffic or on the OS's own choice, the case is NOT answered.
-
-Served per service (everything else listed here as NOT answered):
-  SOCKET     the domain is checked before the type: unknown domain (not 0/2/10, or wider than int32) EAFNOSUPPORT; unknown type EINVAL; STREAM/DGRAM (domain 2 or 10) -> a handle
-             (A1, A4). NOT answered: domain AF_UNSPEC, type RAW, the protocols of A4's exception.
-  CLOSE      an open handle -> 0 and gone; not open -> EBADF.
-  every handle-first service: a handle that is not open (or wider than int32) -> EBADF before anything else.
-  BIND       null address EFAULT; family not 0/2/10 EAFNOSUPPORT; a local address (A2) or any of the socket's family -> 0 (recorded);
-             a unicast address that is not local EADDRNOTAVAIL; a socket already bound or listening EINVAL (POSIX).
-             NOT answered: family AF_UNSPEC or another than the socket's, a v4-mapped / multicast / broadcast / link-local address,
-             flowinfo or scope_id != 0, a port 1..1023, a port also in a bound socket's overlapping address, a bound socket's port 0
-             later asked by GETSOCKNAME.
-  LISTEN     DGRAM EOPNOTSUPP; a bound STREAM -> 0. NOT answered: an unbound STREAM.
-  ACCEPT     DGRAM EOPNOTSUPP; not listening EINVAL; listening: non-blocking EAGAIN, blocking waits for ever (nothing can arrive).
-  CONNECT    (the host checks only null and family, then the system service) null address EFAULT; family not 0/2/10 EAFNOSUPPORT; an address that is not local (A2) ENETUNREACH; a local address on a
-             DGRAM socket (port != 0) -> 0, the peer recorded. NOT answered: a local address on a STREAM socket (loopback traffic), AF_UNSPEC
-             or another family than the socket's, multicast / broadcast / link-local / v4-mapped addresses, flowinfo or scope_id != 0,
-             a listening socket, address any, port 0.
-  SENDTO     len > 0x7FFFFFFF EINVAL; an unknown flag bit EOPNOTSUPP; a bad address family EAFNOSUPPORT; DGRAM to a non-local address
-             ENETUNREACH; DGRAM without address and without peer EDESTADDRREQ. NOT answered: every STREAM socket, MSG_OOB, a socket
-             shut down, a local destination or a peer (loopback traffic), other families / exotic addresses as for CONNECT.
-  RECVFROM   len / flags as SENDTO; STREAM ENOTCONN; DGRAM with nothing to receive: non-blocking or MSG_DONTWAIT EAGAIN, blocking waits for ever,
-             or SO_RCVTIMEO (set earlier, > 0) in virtual time and then EAGAIN. NOT answered: MSG_OOB, a socket shut down for reading.
-  SETSOCKOPT unknown (level, option) / read-only (SO_TYPE, SO_ERROR) ENOPROTOOPT, null value EFAULT, vallen != the shape's size EINVAL,
-             TCP level on a non-STREAM, IP level on a non-INET, IPV6 level on a non-INET6 socket ENOPROTOOPT; then, for the boolean options
-             (SO_DEBUG REUSEADDR DONTROUTE BROADCAST KEEPALIVE OOBINLINE REUSEPORT, TCP_NODELAY), SO_LINGER (onoff, linger_s >= 0) and
-             SO_RCVTIMEO / SO_SNDTIMEO (sec >= 0, 0 <= usec < 1000000): 0 and recorded. NOT answered: every other option (its accepted
-             range is the OS's), a linger / timeval outside those ranges.
-  GETSOCKOPT order: handle EBADF, unknown (level, option) ENOPROTOOPT, null value EFAULT (also with capacity 0), null vallen EFAULT; then,
-             for an option never set on this socket: SO_TYPE, SO_ERROR 0, the boolean options 0, SO_LINGER {0, 0}, the timeouts {0, 0}:
-             min(capacity, size) bytes are written and *vallen is ALWAYS the full size (INT/TYPE/ERRNO 4, LINGER 8, TIMEVAL 16), result 0.
-             NOT answered: an option that was set (the OS stores its own form), every other option, SO_ACCEPTCONN, an option of another
-             protocol level than the socket's.
-  SHUTDOWN   how > 2 EINVAL; a socket with no peer ENOTCONN; a DGRAM socket with a peer -> 0 (recorded).
-  GETSOCKNAME null EFAULT; a bound socket (port != 0) -> its address. NOT answered: an unbound socket, a bound port 0.
-  GETPEERNAME null EFAULT; no peer ENOTCONN; a recorded peer -> it.
-  GETFL / SETFL  RDWR | NONBLOCK as the header says; SETFL sets NONBLOCK from that bit, other bits are ignored, result 0 (always answered).
-  POLL       nfds > 0x1000000 EINVAL, nfds > 0 with a null array EFAULT; a negative fd is ignored (revents 0); an fd that is not an open
-             handle gets POLLNVAL, counts, and makes the call not wait (timeout 0); event bits outside the wire list are dropped; an open
-             socket with no local peer has no traffic ever (no network): revents 0, and after the timeout (virtual time; for ever for -1)
-             the result is 0. NOT answered: an open socket that has a local peer or could get one: a recorded peer, a bound or a listening
-             socket (a local sender could produce traffic; the model never produces it, so the case is left to the OS).
-  GAI_OPEN   hints checked first (BADFLAGS, FAMILY, SOCKTYPE), both nodes null NONAME; node a name: NONAME (the name "localhost" without AI_NUMERICHOST is not answered)
-             (*sys_errno not written); node null with a family INET / INET6 in the hints, or numeric of that family or of AF_UNSPEC hints
-             (A3), service null or decimal 0..65535 (no leading zero): a ticket; a non-numeric service with AI_NUMERICSERV NONAME.
-             NOT answered: node null with family AF_UNSPEC, a numeric node of the other family, flags CANONNAME V4MAPPED ALL ADDRCONFIG,
-             a service name, a node that is numeric by inet_aton's rules but not strict (1.2.3, 0x7f.1, 01.2.3.4), an unparsable text
-             with ':' or '%', an empty node, a hints type/protocol combination without a record.
-  GAI_FETCH  the ticket's records as host_sock.inc writes them; a ticket that is not open EINVAL.
 ```
 
 ## verify/cas.py
@@ -1321,6 +1240,8 @@ gate treats a dynamic-name GetProcAddress site; there is no allow-list. Universe
 ```
 
 ## verify/gate_hostapi.py
+
+Wrapper rule (vacuity closed): a `FNVNX_PLAT_` identifier in the header outside a `#define FNVNX_PLAT_X <integer>` directive (static inline wrapper, macro-defined function) is a red item (`wrapper use NAME line N`), so `-dU` evidence is exactly the units' own call sites. The header has no SOCK services and no range markers.
 
 Gate `hostapi` (product class, in `gate_admit.REQUIRED_PRODUCT`). For every admitted product root that includes `fnvnx/hostapi.h`: the set of
 service numbers declared in the header (`#define FNVNX_PLAT_<NAME> <integer>`, read by token grammar; names with one number are aliases) equals

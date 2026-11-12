@@ -18,7 +18,6 @@
 #define FNVNX_HOSTAPI_H
 
 #include <stdint.h>
-#include "fnvnx/sockwire.h"
 
 #define FNVNX_HOSTAPI_MAGIC   0x48584e46u /* "FNXH" */
 #define FNVNX_GUEST_MAGIC     0x47584e46u /* "FNXG", at guest text + 8 */
@@ -267,7 +266,7 @@ typedef struct FnvnxHostApi {
  *
  * ext_call (slot): module >= 64 or not registered -> NO_MODULE (-255); fn > UINT32_MAX -> NO_SERVICE (-254); nargs > UINT32_MAX counts as
  *   UINT32_MAX; host_ext.inc:h_ext_call, fnvnx_host_register_ext (a null handler or a taken module: -1)      test:total_ext test:test_ext_and_map
- * module 11, platform_ext (host_platform.inc, one row per service); fn 0, 10, 15, 27..29, 32, 33 and fn >= 37 -> NO_SERVICE (-254):
+ * module 11, platform_ext (host_platform.inc, one row per service); fn 0, 10, 15, 16..33 and fn >= 37 -> NO_SERVICE (-254):
  *   test:total_unknown test:total_nargs test:total_declared
  *  1 CPU_BOOST          n=1  0 set / already that mode | 1 boost_loading=0 | the Horizon result of appletSetCpuBoostMode, mode unchanged
  *                            host_platform.inc:pf_cpu_boost,set_cpu_boost                                    test:cpu_boost
@@ -294,13 +293,6 @@ typedef struct FnvnxHostApi {
  * 13 SECTION_UNMAP      n=2  0 | -(0xD401 not exactly a view | kernel)
  * 14 SECTION_FREE       n=1  0 | -(0xE401 unknown id | kernel)
  *                            host_section.inc:host_section_create,_map,_unmap,_free                           test:host_section_test test:via_dispatch_section
- * 16..26 30 31 SOCK_SOCKET SOCK_CLOSE SOCK_BIND SOCK_LISTEN SOCK_ACCEPT SOCK_CONNECT SOCK_SENDTO SOCK_RECVFROM SOCK_SETSOCKOPT SOCK_GETSOCKOPT
- *         SOCK_POLL SOCK_GETFL SOCK_SETFL   n = the count each service states (SOCK_SOCKET 3, CLOSE 1, BIND 2, LISTEN 2, ACCEPT 2, CONNECT 2, SENDTO 5, RECVFROM 5,
- *                            SETSOCKOPT 5, GETSOCKOPT 5, POLL 3, GETFL 1, SETFL 2)
- *                            value >= 0 | -(wire errno, sockwire.h). ORDER (host_platform.inc:platform_ext): a fn in 16..31 goes to host_sock_call BEFORE
- *                            the generic nargs / null-array check, so for sockets "n" is the EXACT count: nargs != n (more or fewer, null array or not)
- *                            -> -FNVNX_WE_INVAL; nargs == n with a null array -> FNVNX_EXT_BAD_NARGS; no socket service reads a null array
- *                            host_sock.inc:host_sock_call (the platform lead's, verbatim)                      test:via_dispatch_sock test:total_declared
  * 34 TZ_AT              n=2  0 | -14 (out null) | -75 (instant outside the time service's range)
  *                            host_platform.inc:pf_tz_at, host_v2.inc:host_tz_at (the platform lead's service)  test:tz_at
  * 35 THREAD_SELF        n=0  thread id | 0 (no memory, id table full)
@@ -322,75 +314,10 @@ typedef struct FnvnxHostApi {
  *   audio_open, audio_submit, audio_close, pad_read, pad_vibrate, input_poll (host_v3.inc)  test:test_audio test:test_pads test:test_events;
  *   map_fixed (host_vm.inc:h_map_fixed)  test:mapfixed_args test:protect_mapfixed test:protect_window;  ext_call (host_ext.inc)  test:total_ext.
  * TOTALITY TABLE END */
-/* ---- BSD sockets (FNVNX_PLAT_SOCK_*, services 16..26, 30, 31; guest: platform/os/sock_guest.c, host:
- * toolchain/host/host_sock.inc; the wire constants and structs: fnvnx/sockwire.h). The rule: EVERY BSD-socket
- * operation of the guest is one of these services; the guest's C library has no network device of its own.
- *  - Arguments are the uint64 words of ext_call's args array; nargs must be exactly the count shown, else the
- *    result is -FNVNX_WE_INVAL (and with the exact count but a null args array, FNVNX_EXT_BAD_NARGS). A pointer argument is a guest address zero-extended to 64 bits (one shared address
- *    space, as for fs_read); 0 is the null pointer where "or 0" is said.
- *  - Result: an int64 in a uint64, value >= 0, or -errno with errno a WIRE number (sockwire.h FNVNX_WIRE_ERRNO_LIST,
- *    the Linux numbers). The guest translates wire errno into newlib's and the host translates its own into the wire
- *    ones, both by name, so nothing assumes that two systems' errno numbers agree (a host errno that is not in the list is -EIO).
- *    Where a service below says "the platform's answer", the host passes the call to the console's bsd service (libnx) with the
- *    constants translated by name and returns its outcome: 0 / a count / a descriptor, or -(that errno mapped through the list),
- *    i.e. any value of FNVNX_WIRE_ERRNO_LIST the bsd service can produce; the host adds only the answers the service names. FNVNX_EXT_NO_MODULE is what a host
- *    without these services returns for every one of them.
- *  - A socket handle h is the descriptor number that the bsd service's socket() / accept() returned, unchanged: the host has no numbering
- *    of its own and makes no claim about which number is next (no "lowest free"); a number can be returned again by the bsd service
- *    after its close. The host keeps the set of descriptors it created; every service with a handle argument answers -EBADF for a
- *    number outside the set (checked before anything else of that service, after the count check), so the guest cannot name another
- *    descriptor of the host. The guest keeps it inside its own descriptor table (a newlib
- *    device "soc"), so close/read/write/dup/fcntl on a socket descriptor reach these services.
- *  - Blocking: a blocking call (connect, accept, sendto, recvfrom, poll with a timeout) blocks only the calling guest thread: ext_call runs on the caller's own thread, as audio_submit and
- *    the file services do. A new socket is blocking until FNVNX_PLAT_SOCK_SETFL says otherwise. There are no signals:
- *    EINTR does not occur and sends never raise SIGPIPE (the host passes MSG_NOSIGNAL where the OS has it). */
-#define FNVNX_PLAT_SOCK_SOCKET 16u      /* (domain WAF_*, type WSOCK_*, protocol IANA) -> h; domain not in FNVNX_WIRE_AF_LIST (or not an int32)
-                                           -> -EAFNOSUPPORT, checked first; type not in FNVNX_WIRE_SOCKTYPE_LIST (no SOCK_NONBLOCK/CLOEXEC bits; or not an int32) ->
-                                           -EINVAL; else the platform's socket(): WAF_UNSPEC and WSOCK_RAW are in the lists and are passed on, their
-                                           outcome (a handle or any wire errno the bsd service gives, e.g. -EPROTONOSUPPORT, -EACCES) is the platform's;
-                                           registry out of memory -> -ENOMEM (the new descriptor is closed) */
-#define FNVNX_PLAT_SOCK_CLOSE 17u       /* (h) -> 0; the handle is gone whatever the result; a handle that is not open -> -EBADF */
-#define FNVNX_PLAT_SOCK_BIND 18u        /* (h, const FnvnxWireSockaddr *) -> 0; null address -> -EFAULT; family not in
-                                           WAF_UNSPEC/INET/INET6 -> -EAFNOSUPPORT; else the platform's bind(): the host checks no port or address,
-                                           so port 1..1023, 0 or any other value is the bsd service's answer (0 or a wire errno) */
-#define FNVNX_PLAT_SOCK_LISTEN 19u      /* (h, backlog) -> 0 */
-#define FNVNX_PLAT_SOCK_ACCEPT 20u      /* (h, FnvnxWireSockaddr *peer or 0) -> new h (blocking mode); blocks until a
-                                           connection arrives, -EAGAIN when non-blocking and none is pending */
-#define FNVNX_PLAT_SOCK_CONNECT 21u     /* (h, const FnvnxWireSockaddr *) -> 0; null address -> -EFAULT; family not in WAF_UNSPEC/INET/INET6 ->
-                                           -EAFNOSUPPORT; else the platform's connect(), also for a local / loopback address (no host check): 0 or a wire
-                                           errno of the bsd service; a non-blocking socket: -FNVNX_WE_INPROGRESS as the bsd service gives it; an
-                                           interrupted connect (EINTR) is -FNVNX_WE_INPROGRESS too */
-#define FNVNX_PLAT_SOCK_SENDTO 22u      /* (h, buf, len, FNVNX_WIRE_MSG_LIST flags, const FnvnxWireSockaddr *to or 0)
-                                           -> bytes sent; len > 0x7FFFFFFF is -FNVNX_WE_INVAL */
-#define FNVNX_PLAT_SOCK_RECVFROM 23u    /* (h, buf, len, flags, FnvnxWireSockaddr *from or 0) -> bytes received (0 =
-                                           orderly shutdown of a stream); *from is written on every success (family
-                                           WAF_UNSPEC when the socket has no source address) */
-#define FNVNX_PLAT_SOCK_SETSOCKOPT 24u  /* (h, level, option, const void *val, vallen) -> 0; level FNVNX_WLVL_SOCKET or
-                                           an IANA protocol number; option and value shape: the FNVNX_WIRE_*_OPT_LISTs */
-#define FNVNX_PLAT_SOCK_GETSOCKOPT 25u  /* (h, level, option, void *val, uint32_t *vallen; in: capacity, out: size of
-                                           the option's value) -> 0. Checks in this order: handle (-EBADF); level or option not in the
-                                           FNVNX_WIRE_*_OPT_LISTs (or above UINT32_MAX) -> -ENOPROTOOPT; null val -> -EFAULT (whatever the
-                                           capacity, so capacity 0 with a null val is -EFAULT too); null vallen -> -EFAULT; then the platform's
-                                           getsockopt() (its wire errno on failure, nothing written). On success the value's wire size
-                                           (INT, TYPE, ERRNO: 4; LINGER: 8; TIMEVAL: 16) is stored in *vallen ALWAYS, and min(capacity, size)
-                                           bytes of the value are written to val: a capacity smaller than the size gives a truncated value, *vallen = the
-                                           full size (so *vallen > the capacity tells the truncation), result 0; a capacity 0 with a non-null val writes
-                                           nothing and gives *vallen = the size, result 0 */
-#define FNVNX_PLAT_SOCK_POLL 26u        /* (FnvnxWirePollfd *fds, nfds, timeout_ms int32, -1 = forever) -> number of
-                                           entries with revents != 0. Checks: nfds > 0x1000000 -> -EINVAL; nfds > 0 with a null array ->
-                                           -EFAULT; nfds > 32 and no memory -> -ENOMEM. nfds 0: no array access, waits the timeout, returns 0.
-                                           An element with a negative fd is ignored (revents 0); an element whose fd is not an open
-                                           host-created socket gets revents FNVNX_WPOLLNVAL and counts, and when there is any such element the call does not wait
-                                           (timeout 0: it reports what is ready now). Event bits outside FNVNX_WIRE_POLL_LIST are dropped
-                                           (not an error). Otherwise the platform's poll(): open sockets with no traffic give revents 0 for them
-                                           and, after the timeout (forever for -1), the result 0; a failure of poll() is -(its wire errno) */
-#define FNVNX_PLAT_SOCK_GETFL 30u       /* (h) -> FNVNX_WO_RDWR | (non-blocking ? FNVNX_WO_NONBLOCK : 0); of the flags only NONBLOCK is returned */
-#define FNVNX_PLAT_SOCK_SETFL 31u       /* (h, flags) -> 0; only FNVNX_WO_NONBLOCK of flags is applied (POSIX F_SETFL); any other bit of
-                                           flags is IGNORED, not an error (no -EINVAL); the result is 0, or the wire errno of the platform's fcntl() */
-/* Declared machine (CLAUDE.md, owner decision 2026-11-11: no network connection). Under the L4 emulator the stage host is that
- * machine: connect/sendto to a non-local address answer -ENETUNREACH (WSAENETUNREACH 10051). On the console the answer is whatever
- * the bsd service gives. Name resolution, shutdown and getsockname/getpeername are not services: the platform never calls them
- * (rule "used = declared", gate hostapi); the numbers 27, 28, 29, 32 and 33 stay unassigned and answer FNVNX_EXT_NO_SERVICE. */
+/* Declared machine (CLAUDE.md, owner decision 2026-11-11: no network connection). There is no socket service: the platform's
+ * network calls are answered by the platform itself with the documented no-network errors, and none reaches the host (rule
+ * "used = declared", gate hostapi). The numbers 10, 15, 16..33 are reserved holes (never reused, never renumbered) and answer
+ * FNVNX_EXT_NO_SERVICE. */
 /* TZ_AT (utc_seconds, FnvnxTzAt *) -> 0 | -errno (wire number, int64 as u64). The zone of the console's time service
  * (timeToCalendarTimeWithMyRule) at one instant; platform/os/os_tzrule.inc derives the zone's rule (os_tz_rule) from it.
  * Out null -> -EFAULT; utc_seconds outside the host time service's range -> -EOVERFLOW (the host answers it for any refusal of the
@@ -428,8 +355,6 @@ typedef struct FnvnxTzAt {
     uint32_t dst;       /* 1: daylight time at that instant */
     char abbr[8];       /* the zone's abbreviation then, NUL-terminated */
 } FnvnxTzAt;
-#define FNVNX_PLAT_SOCK_FIRST 16u
-#define FNVNX_PLAT_SOCK_LAST 31u
 
 /* Thread placement (docs/PERF.md 6.3): roles for thread_create's cpu argument; the host's table
  * (toolchain/host/placement.h) gives each an ideal core, an affinity mask and a priority. */
@@ -500,7 +425,7 @@ _Static_assert(sizeof(FnvnxStat) == 40 && sizeof(FnvnxMemInfo) == 16 && sizeof(F
  *   +0 branch to the entry, +4 offset of MOD0 from the module base, +8 FNVNX_GUEST_MAGIC, +12 ABI version. */
 
 #if defined(__ILP32__) || defined(FNVNX_HOST_CALLS)
-/* (FNVNX_HOST_CALLS: the same helpers in an LP64 test process, tests/s4/sockwire.)
+/* (FNVNX_HOST_CALLS: the same helpers in an LP64 test process.)
  * Guest-side helpers: call an LP64 host function through its slot. */
 #define FNVNX_ADDR(p) ((uint64_t)(uintptr_t)(p))
 typedef uint64_t (*fnvnx_hfn0)(void);

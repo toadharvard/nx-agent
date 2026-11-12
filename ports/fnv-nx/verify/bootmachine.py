@@ -7,7 +7,7 @@ Rules:
 1. Layout only from bootlayout.plan(): PT_LOADs at plan base + vaddr with ELF protection (bss = fresh zero pages), stacks /
    host page / heap = the plan's regions. No relocation: the guest relocates itself. A segment outside the image region
    or sharing a page with another raises MachineError.
-2. Totality: all 50 slots resolve to services.h_<slot> at construction, else MachineError (the list is the header's struct, checked by the tests).
+2. Totality: all 46 slots resolve to services.h_<slot> at construction, else MachineError (the list is the header's struct, checked by the tests).
 3. One CPU. A thread switches only at a blocking host call and at a host call's return after `hc_slice` calls of its
    slice while another thread is ready: no wall clock, no instruction counts, so switch points repeat. Nothing ready:
    the virtual tick jumps to the earliest deadline; none: reason "deadlock" with a per-thread wait report.
@@ -25,16 +25,12 @@ Rules:
    (fn, args) found at construction; an unregistered module, or a handler raising ExtMissing, ends the run with reason
    "ext-module-missing": a configuration error, never answered with a value.
 5a. TOTAL against the header (hostapi.h TOTALITY TABLE, checked mechanically by tests/test_bootmachine.py against the parsed table): ext_call returns
-   NO_MODULE (module >= 64 or not registered), NO_SERVICE (fn > UINT32_MAX, or a module-11 fn without a row: 0, 37 and up), BAD_NARGS
+   NO_MODULE (module >= 64 or not registered), NO_SERVICE (fn > UINT32_MAX, or a module-11 fn without a row: 0, 10, 15, 16..33, 37 and up), BAD_NARGS
    (fewer arguments than the row, or nargs > 0 with a null array); nargs above UINT32_MAX counts as UINT32_MAX; only a handler raising
-   ExtMissing ends the run. Module 11 serves fn 1..36 here. The stage has no network interface and a fixed UTC zone (VC1). Sockets 16..33 are bootsock.py's model (a host with no network interface; its docstring lists every
-   served and every NOT answered (service, case); the latter end the run as "ext-module-missing" naming the service, with an event
-   "sock-undetermined" saying why): the nargs rule (sockets dispatch before the general check: nargs != the exact count, null array or not, is -EINVAL;
-   the exact count with a null array is BAD_NARGS). TZ_AT 34: UTC, offset 0, no DST, abbr "UTC",
+   ExtMissing ends the run. Module 11 serves fn 1..9, 11..14, 34..36 here. The stage has no network interface and a fixed UTC zone (VC1); there are no socket services. TZ_AT 34: UTC, offset 0, no DST, abbr "UTC",
    for every instant (utc_seconds is any int64: the declared machine's zone in the emulator is fixed UTC, CLAUDE.md "The declared machine", and UTC has one rule at every instant, so the stage's time service refuses nothing and -EOVERFLOW (-75) never comes from the stage);
-   tz_offset_minutes is the same zone's off_s / 60. THREAD_SELF 35: a record of the calling thread under a new id
+   THREAD_SELF 35: a record of the calling thread under a new id
    (never a second thread): started, so thread_start and thread_join answer BadInput; thread_free ends the record only.
-   ACCESS_FAULT_HANDLER (10) is the machine's own (rule 5c); the console host serves it too (host_fault.inc).
    DISPLAY_DOCKED (9) answers 1 for the constructor argument profile="docked", 0 for "handheld" (default). Thread and directory ids are table
    handles (IdTable: (generation << 16) | slot, at most 1024 live together); the stack count (n_stacks) is a limit of this machine, not of the header.
 5b. Platform service (module 11; always on). Totality at construction: every fn of PLATFORM_FNS
@@ -54,10 +50,6 @@ Rules:
    never picked; unknown tid NotFound 0x1359, a thread not started or ended BadInput 0x1759 (no kernel call, also for a THREAD_SELF record of such a thread); a thread (or the
    record of a thread) that is the CALLING thread: ResultBusy 0xF401, pause or resume; another live thread: pause of a paused one or resume of one that is not paused
    ResultInvalidState 0xFA01, else 0 (svcSetThreadActivity as Atmosphere's libmesosphere states it, source/svc/kern_svc_activity.cpp and KThread::SetActivity: svc::ResultBusy for the current thread, svc::ResultInvalidState for a pause of a paused or a resume of a not paused thread; a result is module | description << 9, module Kernel = 1, descriptions Busy 122, InvalidState 125 - libnx b156b4774fb2 nx/include/switch/result.h MAKERESULT, where 122 is spelled KernelError_AlreadyExists).
-5e. UNMAP_FIXED (fn 15, addr, size, src): the undo of exactly one earlier map_fixed. addr or src unaligned 0xCC01; size 0 / unaligned 0xCA01; (addr, size,
-   src) not exactly a live map_fixed mapping 0xD401 (so a second unmap refuses). Success: the range is unmapped (an access faults), the src heap block
-   is accessible RW again with the content the mapping had, and addr may be mapped again. A page of the range that is not RW is the header's
-   violated precondition: MachineError, which ends the run as a host-call fault (the contract defines no result).
 5d. Sections (module 11 fn 11..14, host_section.inc; errors are -(code) as u64, recorded as events section_*-refused with the
    positive code). A section is one anonymous mmap (zero, page aligned) kept alive for the machine's life; each view is
    uc.mem_map_ptr of that buffer at the view's address, so views share bytes. MAP checks in the host's order: size, alignment, id,
@@ -66,25 +58,13 @@ Rules:
    reservations and views (not a VM reservation). Views are RW guest memory but not guest-owned pages: VM_PROTECT / COMMIT /
    DECOMMIT of a range holding a view page and VM_RELEASE of a reservation holding one are refused 0xD401 (nothing done);
    map_fixed cannot land on one (refused by its own range rules). FREE kills the id at once, the pages live until the last view is
-   unmapped. The fault-handler frame may live in a view: a view is writable guest memory (rule 5c asks only that).
+   unmapped.
 5d. TEXT_ENTRY (module 11 fn 36, args {max_len, init, init_n, out, n}; _plat_text_entry): the run's scenario `text_entries` (a list of
    strings, one consumed per successful call, in order). Checks as on the console: max_len 0 or > 500, out or n null -> -FNVNX_HE_BADINPUT, no
    text consumed. A text left -> 1, its UTF-16 units + NUL at out, *n = units; no text left (or no scenario) -> 0 (cancel, out and *n
    untouched). DIFFERENCE from the console, as the header says for the emulator: no human, so the answer comes from the scenario instead of
    always 0. A text of more than max_len units is a scenario error: the run ends, reason "scenario-error", extra["scenario"] = why (never
    truncated). A non-writable out / n on an answer of 1 is a host-call fault. Every call is an event {kind "text-entry", max_len, result}.
-5c. ACCESS_FAULT_HANDLER (module 11 fn 10, args {handler, stack_top}, result 0; handler 0 unregisters; stack_top must be 16-byte
-   aligned, >= 816 and < 4 GiB, else 0xCC01 and an event). Per calling thread. A data or instruction access fault (Unicorn's
-   UC_HOOK_MEM_INVALID: unmapped or protection, read/write/fetch) of a thread with a handler, not already inside it, is
-   delivered at once: the frame (FnvnxFaultFrame, 816 bytes) is written at stack_top - 816 from the exact register state at the
-   faulting instruction (pc = that instruction; pstate = NZCV only, bits 31..28), then x0 = frame, sp = frame, lr = a return stub
-   on the host page, pc = handler. reason is 0 (unmapped) or 1 (protection); 2 (alignment) is never produced: Unicorn raises no
-   alignment fault through the hook (an alignment trap ends the run as "uc-error"), so the machine cannot tell it. When the
-   handler returns to the stub: x0 == 0 loads x0..x30, sp, pc, NZCV, fpcr, fpsr, v0..v31 from the frame in guest memory and
-   resumes; x0 != 0 ends the run, reason "exit", exit_code x0. A fault of a thread inside its handler ends the run: reason
-   "fault", record with in_handler. A frame range that is not wholly guest memory the guest can write (not host page) ends the
-   run, reason "fault", kind "frame-unwritable". Each delivery is an event {kind "fault-handler", tid, access, reason, addr, pc}.
-   Faults of host calls on bad guest pointers ("host-access") are not thread faults and are not delivered.
 6. Bound and count: one UC_HOOK_BLOCK over the image region (installed only with limit_instructions or attach_icount)
    adds size/4 per block, feeds the Icount if attached, and stops at the first block boundary where the total >=
    limit_instructions: reason "limit", the same stop point on every run (the stopping block is counted).
@@ -98,25 +78,22 @@ import ctypes
 import mmap
 import struct
 
-from unicorn import arm64_const
 
 from unicorn import UC_ARCH_ARM64, UC_HOOK_BLOCK, UC_HOOK_CODE, UC_HOOK_MEM_INVALID, UC_HOOK_MEM_WRITE, UC_MODE_ARM, UC_PROT_ALL, \
     UC_PROT_EXEC, UC_PROT_READ, UC_PROT_WRITE, Uc, UcError
 from unicorn import unicorn_const as UCC
-from unicorn.arm64_const import UC_ARM64_REG_CPACR_EL1, UC_ARM64_REG_FPCR, UC_ARM64_REG_FPSR, UC_ARM64_REG_LR, UC_ARM64_REG_NZCV, UC_ARM64_REG_PC, UC_ARM64_REG_SP, \
+from unicorn.arm64_const import UC_ARM64_REG_CPACR_EL1, UC_ARM64_REG_LR, UC_ARM64_REG_PC, UC_ARM64_REG_SP, \
     UC_ARM64_REG_TPIDR_EL0, UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3, UC_ARM64_REG_X4
 
 import bootlayout
-import bootsock
 import icount
 
 PAGE, U64 = 0x1000, (1 << 64) - 1
 REACH_VIOLATION = 0x52   # top byte of a guest exit code 0x52000000 | fact_id: a build invariant was violated (fnvnx_reach_violation)
-SLOTS = ["output_debug_string", "sleep_ns", "exit", "console_write", "console_flush", "main_loop",
-         "buttons_down", "system_tick", "system_tick_freq",
+SLOTS = ["output_debug_string", "sleep_ns", "exit", "console_write", "system_tick", "system_tick_freq",
          "thread_create", "thread_start", "thread_join", "thread_free", "thread_exit", "thread_yield",
          "thread_set_priority", "thread_set_cpu", "wait_on_address", "wake_address", "wall_time_us",
-         "tz_offset_minutes", "random64", "memory_info", "cpu_count",
+         "random64", "memory_info", "cpu_count",
          "fs_open", "fs_read", "fs_write", "fs_pread", "fs_pwrite", "fs_seek", "fs_truncate", "fs_sync",
          "fs_fstat", "fs_close", "fs_stat", "fs_mkdir", "fs_rmdir", "fs_remove", "fs_rename", "fs_dir_open",
          "fs_dir_next", "fs_dir_close",
@@ -126,20 +103,13 @@ API_SIZE = 0x30 + 8 * len(SLOTS)
 FNVNX_EXT_PLATFORM = 11
 EXT_NO_MODULE, EXT_NO_SERVICE, EXT_BAD_NARGS = U64 - 254, U64 - 253, U64 - 252   # FNVNX_EXT_*: -255, -254, -253 as int64 (hostapi.h)
 FNVNX_EXT_MODULES, UINT32_MAX, INT64_MAX = 64, 0xFFFFFFFF, (1 << 63) - 1
-FAULT_FRAME = 816
 FNVNX_TEXT_ENTRY_MAX = 500   # hostapi.h
-# hostapi.h TOTALITY TABLE, module 11 services 1..15, 34, 35 and 36: fn -> (name, least nargs). The sockets 16..26, 30, 31 are SOCK_SERVICES;
-# both tables are checked against the header's parsed table by tests/test_bootmachine.py.
+# hostapi.h TOTALITY TABLE, module 11 services 1..9, 11..14, 34, 35 and 36: fn -> (name, least nargs); checked against the header's parsed table by tests/test_bootmachine.py.
 PLATFORM_FNS = {1: ("cpu_boost", 1), 2: ("thread_activity", 2), 3: ("message", 2), 4: ("vm_reserve", 2), 5: ("vm_commit", 2),
                 6: ("vm_decommit", 2), 7: ("vm_release", 1), 8: ("vm_protect", 3), 9: ("display_docked", 0),
-                10: ("access_fault_handler", 2), 11: ("section_create", 1), 12: ("section_map", 4), 13: ("section_unmap", 2),
-                14: ("section_free", 1), 15: ("unmap_fixed", 3), 34: ("tz_at", 2), 35: ("thread_self", 0), 36: ("text_entry", 5)}
-SOCK_SERVICES = {16: ("sock_socket", 3), 17: ("sock_close", 1), 18: ("sock_bind", 2), 19: ("sock_listen", 2), 20: ("sock_accept", 2),
-                 21: ("sock_connect", 2), 22: ("sock_sendto", 5), 23: ("sock_recvfrom", 5), 24: ("sock_setsockopt", 5),
-                 25: ("sock_getsockopt", 5), 26: ("sock_poll", 3), 30: ("sock_getfl", 1), 31: ("sock_setfl", 2)}
-# wire numbers and lists of sockwire.h live in bootsock.py (tests/test_bootmachine.py compares them with the fixture copy)
-from bootsock import (WE_BADF, WE_FAULT, WE_INVAL, WE_OVERFLOW, WE_AFNOSUPPORT, WIRE_AF, WIRE_SOCKTYPE, WIRE_AI_MASK,  # noqa: F401
-                      WEAI_BADFLAGS, WEAI_NONAME, WEAI_FAMILY, WEAI_SOCKTYPE, WPOLLNVAL)
+                11: ("section_create", 1), 12: ("section_map", 4), 13: ("section_unmap", 2),
+                14: ("section_free", 1), 34: ("tz_at", 2), 35: ("thread_self", 0), 36: ("text_entry", 5)}
+WE_FAULT = 14   # wire errno numbers (EFAULT) of hostapi.h TZ_AT
 TZ_VC1 = (0, 0, b"UTC")   # VC1's zone: off_s, dst, abbr
 WINDOW = (0x00400000, 0x02100000)   # the image range 0x00400000..0x00FDF000 and the data window up to 0x02100000: claimed by the host at start
 MAP_FIXED_MAX = 512
@@ -157,8 +127,6 @@ ERR_INVALID_NEW_MEMORY_PERMISSION, ERR_INVALID_HANDLE, ERR_INVALID_STATE = 0xD80
 ACCESS_KINDS = {UCC.UC_MEM_READ_UNMAPPED: "read-unmapped", UCC.UC_MEM_WRITE_UNMAPPED: "write-unmapped",
                 UCC.UC_MEM_FETCH_UNMAPPED: "fetch-unmapped", UCC.UC_MEM_WRITE_PROT: "write-protected",
                 UCC.UC_MEM_READ_PROT: "read-protected", UCC.UC_MEM_FETCH_PROT: "fetch-protected"}
-X_REGS = tuple(getattr(arm64_const, "UC_ARM64_REG_X%d" % i) for i in range(31))
-V_REGS = tuple(getattr(arm64_const, "UC_ARM64_REG_V%d" % i) for i in range(32))
 REGS = (UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3, UC_ARM64_REG_X4)
 
 
@@ -196,24 +164,6 @@ class VirtualClock:
         self.tick = max(self.tick, when * self.FREQ // 1_000_000_000 + 1)
 
 
-class _GuestMem:
-    """the socket model's view of guest memory: readable / writable ranges of the machine (the host page is not writable)"""
-    def __init__(self, m):
-        self.m = m
-
-    def can_read(self, lo, hi):
-        return self.m.accessible(lo, hi, UC_PROT_READ)
-
-    def can_write(self, lo, hi):
-        return self.m._writable(lo, hi)
-
-    def read(self, addr, n):
-        return bytes(self.m.uc.mem_read(addr, n))
-
-    def write(self, addr, data):
-        self.m.uc.mem_write(addr, data)
-
-
 class SelfRecord:
     """THREAD_SELF's record (hostapi.h 35): an id for the thread that called it; the record is started, the thread is not the host's"""
     def __init__(self, t):
@@ -225,7 +175,6 @@ class Thread:
         self.handle = 0   # the table handle thread_create returned (0: the main thread, which has none)
         self.tid, self.ctx, self.state, self.wait, self.result, self.resume_pc = tid, None, "new", None, 0, None
         self.paused = False
-        self.fh, self.in_handler, self.frame = None, False, 0   # fault handler (handler, stack_top); inside it; its frame address
         self.entry = self.arg = 0   # new: new, ready, running, blocked, done; wait: ("addr", a, dl) / ("join", t) / ("sleep", dl)
 
 
@@ -282,7 +231,6 @@ class Machine:
             raise MachineError("text_entries: a text is not a sequence of Unicode scalars: %s" % e) from None
         self.text_texts, self.text_next, self.scenario_error = list(text_entries), 0, None   # TEXT_ENTRY scenario (rule 5d)
         self.ids = IdTable()
-        self.socks = bootsock.SockModel(_GuestMem(self), lambda: self.clock.now_ns())
         self.elf = elf = bootlayout.parse_elf(elf_bytes)
         self.services, self.clock, self.hc_slice, self.limit = services, clock or VirtualClock(), hc_slice, limit_host_calls
         reg = {n: (r["lo"], r["hi"]) for n, r in plan["regions"].items()}
@@ -324,7 +272,6 @@ class Machine:
         self.host_page = hp = reg["host_page"][0]
         self._map(hp, PAGE, UC_PROT_ALL, track=False)   # the host page is never handed out as a host pointer
         self.stub_base, self.return_addr, self.thread_end = hp + 0x800, hp + 0xFF0, hp + 0xFF8
-        self.fault_ret, self.pending = hp + 0xFE0, None
         self.stubs = {self.stub_base + 4 * i: n for i, n in enumerate(SLOTS)}
         api = struct.pack("<IIII", 0x48584E46, 3, API_SIZE, 0)
         api += struct.pack("<QQQQ", ilo, ihi - ilo, reg["heap"][0], reg["heap"][1] - reg["heap"][0])
@@ -574,30 +521,6 @@ class Machine:
             else:
                 self.mapped.append((a, b))
 
-    def _plat_unmap_fixed(self, a):
-        """FNVNX_PLAT_UNMAP_FIXED (addr, size, src): the undo of exactly one earlier map_fixed (hostapi.h 15); pages of any protection"""
-        addr, size, src = a[:3]
-        if (addr | src) % PAGE:
-            return self._refuse("unmap_fixed", addr, size, "addr or src not page aligned", ERR_INVALID_ADDRESS)
-        if size == 0 or size % PAGE:
-            return self._refuse("unmap_fixed", addr, size, "size", ERR_INVALID_SIZE)
-        if addr + size >= 1 << 64:
-            return self._refuse("unmap_fixed", addr, size, "addr + size wraps", ERR_INVALID_CURRENT_MEMORY)
-        if self._in_window(addr, addr + size):   # the host's window: read-write and zeroed again, src is not looked at
-            self._zero_window(addr, size)
-            return 0
-        if self.mf_live.get(addr) != (size, src):
-            return self._refuse("unmap_fixed", addr, size, "not the mapping of that src (kernel: InvalidCurrentMemory)",
-                                ERR_INVALID_CURRENT_MEMORY)
-        content = bytes(self.uc.mem_read(addr, size))   # Unicorn's host-side read ignores the page protection
-        self._unmap(addr, size)
-        del self.mf_live[addr]
-        self.given.remove((src, src + size))
-        self._map(src, size)   # the heap block is ordinary accessible heap again
-        self.uc.mem_write(src, content)
-        self._merge_mapped()
-        return 0
-
     def _refuse(self, what, addr, size, why, code):
         self._event(what + "-refused", addr=addr, size=size, why=why, result=code)
         return code
@@ -618,20 +541,7 @@ class Machine:
         return self.ext[module](fn, self._words(args, nargs) if nargs else [])
 
     def _platform_ext(self, fn, args, nargs):
-        """host_platform.inc: sockets 16..33 check nargs themselves (exactly the count, else -WE_INVAL); a fn without a row is
-        NO_SERVICE; fewer arguments than the row, or nargs > 0 with a null array, is BAD_NARGS; extra arguments are ignored"""
-        if fn in SOCK_SERVICES:   # host_platform.inc: 16..31 dispatch BEFORE the general nargs / null-array check
-            if nargs != SOCK_SERVICES[fn][1]:
-                return -WE_INVAL & U64
-            if not args:
-                return EXT_BAD_NARGS
-            try:
-                return self.socks.call(fn, self._words(args, nargs))
-            except bootsock.NotDetermined as e:
-                self._event("sock-undetermined", fn=fn, why=str(e))
-                raise ExtMissing(FNVNX_EXT_PLATFORM, fn) from None
-            except bootsock.BadGuestMemory as e:
-                raise MachineError("sock service %d: %s" % (fn, e)) from None
+        """host_platform.inc: a fn without a row is NO_SERVICE; fewer arguments than the row, or nargs > 0 with a null array, is BAD_NARGS; extra arguments are ignored"""
         if fn not in PLATFORM_FNS:
             return EXT_NO_SERVICE
         _name, need = PLATFORM_FNS[fn]
@@ -893,18 +803,6 @@ class Machine:
         self._event("text-entry", max_len=max_len, result=1, units=len(units))
         return 1
 
-    def _plat_access_fault_handler(self, a):
-        handler, top = a[:2]
-        t = self.cur
-        if handler == 0:
-            t.fh = None
-            return 0
-        if top % 16 or top < FAULT_FRAME or top >= 1 << 32:
-            return self._refuse("access_fault_handler", handler, top, "stack_top not 16-byte aligned or outside 816..4 GiB (exclusive)",
-                                ERR_INVALID_ADDRESS)
-        t.fh = (handler, top)
-        return 0
-
     def accessible(self, lo, hi, perm):
         """[lo, hi) is wholly mapped with the permission `perm` (UC_PROT_READ / UC_PROT_WRITE)"""
         while lo < hi:
@@ -917,53 +815,6 @@ class Machine:
     def _writable(self, lo, hi):
         """[lo, hi) is wholly mapped writable guest memory, not the host page"""
         return not (lo < self.host_page + PAGE and self.host_page < hi) and self.accessible(lo, hi, UC_PROT_WRITE)
-
-    def _deliver_fault(self, t):
-        """rule 5c: build the frame from the thread's registers at the faulting instruction and enter its handler"""
-        uc, (access, addr, size) = self.uc, self.pending
-        self.pending = None
-        handler, top = t.fh
-        pc, fa = uc.reg_read(UC_ARM64_REG_PC), top - FAULT_FRAME
-        kind = 1 if access in (UCC.UC_MEM_WRITE_UNMAPPED, UCC.UC_MEM_WRITE_PROT) else 2 if access in (
-            UCC.UC_MEM_FETCH_UNMAPPED, UCC.UC_MEM_FETCH_PROT) else 0
-        reason = 0 if access in (UCC.UC_MEM_READ_UNMAPPED, UCC.UC_MEM_WRITE_UNMAPPED, UCC.UC_MEM_FETCH_UNMAPPED) else 1
-        if not self._writable(fa, top):
-            self.fault = dict(kind="frame-unwritable", addr=fa, size=FAULT_FRAME, pc=pc, lr=uc.reg_read(UC_ARM64_REG_LR), tid=t.tid)
-            return
-        f = struct.pack("<IIQQQQ", kind, reason, pc if kind == 2 else addr, pc, uc.reg_read(UC_ARM64_REG_SP),
-                        uc.reg_read(UC_ARM64_REG_NZCV) & 0xF0000000)
-        f += b"".join(struct.pack("<Q", uc.reg_read(r)) for r in X_REGS)
-        f += struct.pack("<II", uc.reg_read(UC_ARM64_REG_FPCR), uc.reg_read(UC_ARM64_REG_FPSR))
-        f += b"".join(struct.pack("<QQ", v & U64, v >> 64) for v in (uc.reg_read(r) for r in V_REGS))
-        uc.mem_write(fa, f.ljust(FAULT_FRAME, b"\0"))
-        self._event("fault-handler", access=ACCESS_KINDS.get(access), reason=reason, addr=addr, pc=pc)
-        uc.reg_write(UC_ARM64_REG_X0, fa)
-        uc.reg_write(UC_ARM64_REG_SP, fa & ~15)
-        uc.reg_write(UC_ARM64_REG_LR, self.fault_ret)
-        t.ctx, t.resume_pc, t.result, t.state = uc.context_save(), handler, fa, "ready"
-        t.in_handler, t.frame = True, fa
-
-    def _fault_return(self):
-        """the handler returned to the stub: 0 resumes from the frame, else the process ends with that value"""
-        uc, t = self.uc, self.cur
-        rv = uc.reg_read(UC_ARM64_REG_X0)
-        if rv:
-            self.exit(rv)
-            return
-        f = bytes(uc.mem_read(t.frame, FAULT_FRAME))
-        _k, _r, _a, pc, sp, pstate = struct.unpack_from("<IIQQQQ", f, 0)
-        for i, r in enumerate(X_REGS):
-            uc.reg_write(r, struct.unpack_from("<Q", f, 40 + 8 * i)[0])
-        fpcr, fpsr = struct.unpack_from("<II", f, 288)
-        uc.reg_write(UC_ARM64_REG_FPCR, fpcr)
-        uc.reg_write(UC_ARM64_REG_FPSR, fpsr)
-        for i, r in enumerate(V_REGS):
-            lo, hi = struct.unpack_from("<QQ", f, 296 + 16 * i)
-            uc.reg_write(r, lo | hi << 64)
-        uc.reg_write(UC_ARM64_REG_NZCV, pstate & 0xF0000000)
-        uc.reg_write(UC_ARM64_REG_SP, sp)
-        uc.reg_write(UC_ARM64_REG_PC, pc)
-        t.in_handler = False
 
     def _plat_thread_activity(self, a):
         tid, paused = a[0], a[1]
@@ -1067,14 +918,9 @@ class Machine:
 
     # -- host-call dispatch
     def _on_bad(self, uc, access, addr, size, value, _):
-        t = self.cur
-        if self.fault is None and t is not None and t.fh and not t.in_handler:
-            self.pending = (access, addr, size)   # delivered by run() once Unicorn has stopped with the error
-            return False
         if self.fault is None:
             self.fault = dict(kind=ACCESS_KINDS.get(access, "access-%d" % access), addr=addr, size=size,
-                              pc=uc.reg_read(UC_ARM64_REG_PC), lr=uc.reg_read(UC_ARM64_REG_LR), tid=self.tid(),
-                              **({"in_handler": True} if t is not None and t.in_handler else {}))
+                              pc=uc.reg_read(UC_ARM64_REG_PC), lr=uc.reg_read(UC_ARM64_REG_LR), tid=self.tid())
         return False
 
     def _stop_fault(self, kind, addr=None, size=None):
@@ -1084,12 +930,6 @@ class Machine:
         self.uc.emu_stop()
 
     def _on_code(self, uc, addr, size, _):
-        if addr == self.fault_ret:
-            try:
-                self._fault_return()
-            except UcError as e:
-                self._stop_fault("host-access")
-            return
         if addr == self.thread_end:
             self._block(("done",), 0)
             return
@@ -1169,10 +1009,7 @@ class Machine:
             try:
                 uc.emu_start(t.resume_pc, self.return_addr)
             except UcError as e:
-                if self.pending is not None:
-                    self._deliver_fault(t)
-                else:
-                    self._stop_fault("uc-error: %s" % e)
+                self._stop_fault("uc-error: %s" % e)
                 continue
             if self.cur is t and self.fault is None and not self.limit_hit and self.exit_code is None \
                     and not self.ext_missing and self.scenario_error is None:
