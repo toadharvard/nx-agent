@@ -42,8 +42,8 @@ check('FALL1 non-void without final return gets a trap',
       run(s1.r_falloff_traps, 'int f(int x)\n{\n    if (x) return 1;\n}\n'), [TRAP])
 check('FALL1 empty non-void body gets a trap',
       run(s1.r_falloff_traps, 'struct S\n{\n    virtual const char* V0()\n    {}\n};\n'), [TRAP])
-check('FALL1 extern "C" void function: no trap (XC1 initializers)',
-      run(s1.r_falloff_traps, 'extern "C" void __fnvnx_dyninit_00f35430(void) { g_x = 1; }\n'), (), [TRAP])
+check('FALL1 extern "C" void function: no trap',
+      run(s1.r_falloff_traps, 'extern "C" void f(void) { g_x = 1; }\n'), (), [TRAP])
 check('FALL1 extern "C" int function without return: trap',
       run(s1.r_falloff_traps, 'extern "C" int f(void) { g_x = 1; }\n'), [TRAP])
 check('FALL1 void with calling convention / keep macro: no trap',
@@ -1649,16 +1649,6 @@ check('HUNIT1 once only', str(run(s1.r_header_unit_instantiations, _hu,
       '/nonexistent/src/gamebryo2.2/corelibs/nimain/nitarray_h_unit.cpp').count('fnv-nx HUNIT1')), ['1'])
 check('HUNIT1 other units untouched', run(s1.r_header_unit_instantiations, 'int x;\n', '/nonexistent/src/x_h_unit.cpp'),
       [], ['HUNIT1'])
-
-# ---- S1-refs: XC2 (a hand-written dynamic initializer in XC1's form)
-_x2 = run(s1.r_handwritten_dyninit, 'struct NiPoint3StartupTable { int data[17]; };\nNiPoint3StartupTable gNiPoint3StartupSrc;\n'
-          'NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;\n',
-          '/nonexistent/src/gamebryo2.2/corelibs/nimain/console/nipoint3_console.cpp')
-check('XC2 the copy-initialization becomes extern + __fnvnx_dyninit_<addr>', _x2,
-      ['extern NiPoint3StartupTable gNiPoint3StartupDst;', 'extern "C" void __fnvnx_dyninit_00a62110(void)'],
-      ['gNiPoint3StartupDst = gNiPoint3StartupSrc;\n'])
-check('XC2 other units untouched', run(s1.r_handwritten_dyninit, 'NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;\n',
-      '/nonexistent/src/x.cpp'), [], ['XC2'])
 
 # ---- S1-layout: EBO3 (an empty base after a base with data goes after it, as in MSVC)
 _E3 = ('struct NodeBase0\n{\n    int a, b, c, d;\n};\nstruct NodeBase16\n{\n    NodeBase16* Next(NodeBase16* p);\n};\n'

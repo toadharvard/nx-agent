@@ -1848,7 +1848,7 @@ def r_falloff_traps(path, text, stats):
         ret = re.sub(r'\b(?:__thiscall|__cdecl|__stdcall|__fastcall|__clrcall|WINAPI|CALLBACK|APIENTRY|NTAPI|WINAPIV|'
                      r'STDMETHODCALLTYPE|__declspec|FNV_\w+|FNVNX_\w+|FORCEINLINE|NOINLINE)\b', ' ', ret).strip()
         # linkage / storage / function specifiers are not part of the return type: `extern "C" void f(void)` is void
-        # (S1b found FALL1 trapping all 10,957 XC1 dyninit/dynexit functions without this)
+        # (S1b found FALL1 trapping every `extern "C" void` function without this)
         ret = re.sub(r'(?:\bextern\s*)?"C\+?\+?"|\b(?:extern|static|inline|virtual|explicit|friend|constexpr|'
                      r'__inline|__forceinline)\b', ' ', ret)
         ret = re.sub(r'\s+', ' ', ret).strip()
@@ -5597,34 +5597,6 @@ def r_header_unit_instantiations(path, text, stats):
             stats['HUNIT1'] += inst.count('template ')
     return text
 
-# ---------------------------------------------------------------------------------------------------------- XC2
-#
-# XC1 (S10, startup/tools/dyninit_rewrite.py) gives every ??__E dynamic initializer of the generated units its own
-# extern "C" __fnvnx_dyninit_<addr>, which the link maps to the address and the startup runner calls in the image's
-# order. A hand-written unit can spell one as a plain copy-initialization, which XC1 does not see (it rewrites
-# generated/ only): nipoint3_console.cpp's `NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;` is
-# ??__EgNiPoint3StartupDst@@YAXXZ at 0x00a62110 (the 17-dword copy; the decomp's tag sits on the line above), which
-# InitializeGameSystems calls directly (S5-boot collect-all: "decomp body exists, not in the link"). GCC made it an
-# anonymous local static initializer, so the address had no native definition. XC2 writes XC1's form for the sites
-# of XC2_SITES: the object becomes `extern` (the recipe binds it to its image address, 0x011f4600) and the copy
-# becomes __fnvnx_dyninit_<addr>. Same line. Platform, like XC1.
-
-XC2_SITES = [
-    ('gamebryo2.2/corelibs/nimain/console/nipoint3_console.cpp',
-     'NiPoint3StartupTable gNiPoint3StartupDst = gNiPoint3StartupSrc;',
-     'extern NiPoint3StartupTable gNiPoint3StartupDst; extern "C" void __fnvnx_dyninit_00a62110(void) '
-     '{ gNiPoint3StartupDst = gNiPoint3StartupSrc; } /* fnv-nx XC2: ??__EgNiPoint3StartupDst 0x00a62110 */'),
-]
-
-def r_handwritten_dyninit(path, text, stats):
-    """XC2: XC1's extern + __fnvnx_dyninit_<addr> form for hand-written dynamic initializers (XC2_SITES, above)."""
-    rel = path.replace(os.sep, '/')
-    for unit, old, new in XC2_SITES:
-        if rel.endswith('/' + unit) and text.count(old) == 1:
-            text = text.replace(old, new)
-            stats['XC2'] += 1
-    return text
-
 # ---------------------------------------------------------------------------------------------------------- EBO3
 #
 # An empty base that is not the first base (S1-layout, S13b layout-offset). In `struct Node : NodeBase0, NodeBase16
@@ -7699,7 +7671,7 @@ def r_template_member_stand_ins(path, text, stats):
 REFS_RULES = [r_operator_temporaries, r_address_of_temporaries, r_lane_array_address, r_std_definitions,
               r_conditional_bool_gates, r_restrict_reference_args, r_placement_only_delete,
               r_namespace_crt_calls, r_forceinline_declarations, r_vfptr_empty_base, r_recon_bodies,
-              r_header_unit_instantiations, r_handwritten_dyninit, r_later_empty_base,
+              r_header_unit_instantiations, r_later_empty_base,
               r_implicit_bound_destructors, r_split_virtual_declarators, r_hk_referenced_object_slots, r_vtable_dtor_slot, r_placeholder_slots, r_bound_dtor_stand_ins,
               r_template_member_stand_ins, r_raw_vtable_slots, r_rawvt_ssa, r_empty_string_objects]
 RULES += REFS_RULES

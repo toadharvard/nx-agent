@@ -21,7 +21,7 @@ XCXX=${XCXX:-aarch64-linux-gnu-g++}; XCC=${XCC:-aarch64-linux-gnu-gcc}
 SSE2NEON=${SSE2NEON:-$ROOT/ext/sse2neon}
 ARCH="-mabi=ilp32 -march=armv8-a+crc+crypto -fPIE -fsigned-char -fno-stack-protector -U_FORTIFY_SOURCE"
 COMMON="$ARCH -O1 -ffunction-sections -fdata-sections -frounding-math -fshort-wchar -w"
-PINC="-I$P/include -iquote $ROOT/shim/include -I$ROOT/shim/include -I$P/crt -I$ROOT/toolchain/include -I$ROOT/startup/guest"
+PINC="-I$P/include -iquote $ROOT/shim/include -I$ROOT/shim/include -I$P/crt -I$ROOT/toolchain/include"
 D3DX="-USTDMETHODCALLTYPE -include $ROOT/shim/include/fnvnx_compat.h -I$SSE2NEON -fno-exceptions -fno-rtti -fno-threadsafe-statics"
 for f in "$P"/win32/*.cpp "$P"/crt/*.c "$P"/crt/*.cpp "$ROOT"/render/nine/d3dx/*.cpp "$ROOT"/toolchain/game/null_d3d9.cpp; do
 	o="$OUT/obj/$(echo "${f#$ROOT/}" | tr / _).o"

@@ -118,8 +118,6 @@ ARGS+=(LINK_OVERRIDES="${LINK_OVERRIDES:-render}")
 # S14's synthesized image (J-0128)
 job_gamedata
 [ -n "$GAME_EXE" ] && { ARGS+=(BOOT_IMAGE="$GAME_EXE"); rm -rf "$F/build/boot/synth"; }   # no stale synth.exe in the publish
-# S5-boot's initializer generator (startup/tools/mkxcgen.py): the exe's straight-line __xc initializers become natives
-[ -n "$GAME_EXE" ] && export XCGEN_EXE="$GAME_EXE"
 # the player's exe for every link tool that reads FNVNX_EXE (thisadj's secondary-base entries, exevft, bodies), as
 # link_job.sh does: BOOT_IMAGE alone reached only resolve's --exe (full1 0540aff0: no __fnvnx_msvc_ binding at all)
 if [ -n "$GAME_EXE" ]; then export FNVNX_EXE="$GAME_EXE"; else unset FNVNX_EXE; fi

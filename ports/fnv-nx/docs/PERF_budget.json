@@ -2419,41 +2419,6 @@
    "needs_hardware": false,
    "detail": "interval: until __fnv_0086a850",
    "rank": 9
-  },
-  {
-   "kind": "boot",
-   "id": "boot_fnvnx_xc_locate",
-   "name": "fnvnx_xc_locate",
-   "subsystem": "boot",
-   "role": "main",
-   "critical": true,
-   "basis": "M",
-   "minsn": {
-    "lo": 6.443,
-    "mid": 6.443,
-    "hi": 6.443
-   },
-   "ms": {
-    "1020": {
-     "lo": 6.317,
-     "mid": 7.896,
-     "hi": 10.528
-    },
-    "1785": {
-     "lo": 3.61,
-     "mid": 4.512,
-     "hi": 6.016
-    }
-   },
-   "fix": "S3: a sorted or bitmap index for the code-pointer scan (fnvnx_scan_codeptrs, fnvnx_image_ptr, fnvnx_codemap_find, eligible_in) instead of a search per word",
-   "gain_main_minsn": [
-    0,
-    0
-   ],
-   "owner": "S3",
-   "needs_hardware": false,
-   "detail": "interval: until __fnv_0086a850",
-   "rank": 10
   }
  ],
  "queue": [

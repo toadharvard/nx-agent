@@ -96,9 +96,9 @@ LOCAL_GUARD = re.compile(r'^\?\$(?:S|TSS)\d+@\?\d+\?(\?.+)@4IA$')
 
 
 def dyninit_conv(symbol, source):
-    """`??__E...` / `??__F...` (dynamic initializer / atexit destructor; XC1's __fnvnx_dyninit_/_dynexit_):
+    """`??__E...` / `??__F...` (dynamic initializer / atexit destructor):
     void __cdecl (void)."""
-    if symbol.startswith(('??__E', '??__F', '__fnvnx_dyn')):
+    if symbol.startswith(('??__E', '??__F')):
         return convmod.Conv('?fnvnx_s13_init@@YAXXZ', source)
     return None
 

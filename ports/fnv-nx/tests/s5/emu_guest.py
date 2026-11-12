@@ -821,7 +821,7 @@ class Emu(SanitizeMixin):
         self.data_syms = {}
         for line in out.splitlines():
             f = line.split()
-            if len(f) == 3 and f[1] in "bBdD" and f[2] in ("g_fnvnx_xc_current", "fnvnx_trap_stats",
+            if len(f) == 3 and f[1] in "bBdD" and f[2] in ("fnvnx_trap_stats",
                                                                  "fnvnx_plat_on", "fnvnx_stub_nulldev"):
                 self.data_syms[f[2]] = int(f[0], 16)
             if len(f) == 3 and f[1] in "tTwW":
@@ -2539,7 +2539,7 @@ class Emu(SanitizeMixin):
     # -- guarded initializer calls (--skip-faulting-init): every indirect call (blr) made by the initializer
     # runners is a checkpoint; a fault below one restores the registers of the call and returns 0 from it, so a
     # boot without game data can be traced past initializers that fault on the empty image.
-    GUARD_FUNCS = ("__libc_init_array", "call", "fnvnx_xc_run_address_order", "fnvnx_xc_run_image_order")
+    GUARD_FUNCS = ("__libc_init_array", "call")
 
     def install_guards(self):
         import bisect
@@ -2599,12 +2599,6 @@ class Emu(SanitizeMixin):
         self.last_trace = tr = {"why": why, "thread": self.cur.tid if self.cur else None,
                                 "pc": self.sym(pc), "lr": self.sym(lr), "trap": self.trap_text() or None,
                                 "call": self.null_call() if pc == 0 or "fetch" in why.lower() else None, "frames": []}
-        xa = getattr(self, "data_syms", {}).get("g_fnvnx_xc_current")
-        if xa is not None:
-            xa = xa - self.link_base + self.base if self.relocatable else xa
-            (cur,) = struct.unpack("<I", uc.mem_read(xa, 4))
-            if cur:   # S10's xc runner does not clear it: after the initializers this is the last one run
-                print(f"   S10 initializer (running or last run): orig {cur:#010x}")
         print(f"   pc  {self.sym(pc)}")
         if self.trap_text():
             print(f"   trap {self.trap_text()}")

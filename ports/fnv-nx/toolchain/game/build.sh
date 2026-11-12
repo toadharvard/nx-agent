@@ -10,8 +10,8 @@
 # (game/traps.S, generated) that logs its name and the caller and returns 0, so the image boots as far as it can.
 # GUEST=pie (default): relocatable guest (guest_pie.specs, link base 0x30000000), the host places it after the
 # S10 reservation; GUEST=fixed: fixed address (guest.specs; FNVNX_GUEST_BASE, default 0x02100000 next to the
-# data window), the host must claim it (-DFNVNX_GUEST_RESERVE=<size printed below>). S10's startup objects
-# (xc.c) and the generated initializer table (mkxctab.py -> xctab.c) are linked as objects.
+# data window), the host must claim it (-DFNVNX_GUEST_RESERVE=<size printed below>). The exe's own
+# initializers and terminators are the lifted exe's code; the guest runs only GCC's .init_array and newlib's exit list.
 set -euo pipefail
 : "${DEVKITPRO:?set DEVKITPRO}"
 S2=$(realpath "$1"); FIXED=$(realpath "$2"); OUT=$(mkdir -p "$3" && realpath "$3"); VORBIS=${4:-}
@@ -30,7 +30,7 @@ case "${GUEST:-pie}" in
 	*) echo "GUEST must be pie or fixed"; exit 1 ;;
 esac
 COMMON="$ARCH -O2 -g -ffunction-sections -fdata-sections -frounding-math -fshort-wchar -w"
-PINC="-I$P/include -iquote $ROOT/shim/include -I$ROOT/shim/include -I$P/crt -I$TC/include -I$ROOT/startup/guest -I$MINIMP3"   # minimp3: platform/audio/dshow.cpp (tools/fetch.sh)
+PINC="-I$P/include -iquote $ROOT/shim/include -I$ROOT/shim/include -I$P/crt -I$TC/include -I$MINIMP3"   # minimp3: platform/audio/dshow.cpp (tools/fetch.sh)
 VFLAGS=""
 if [ -n "$VORBIS" ]; then VFLAGS="-DFNVNX_HAVE_VORBIS -I$VORBIS/include"; fi
 rm -rf "$OUT/obj"; mkdir -p "$OUT/obj"
@@ -79,24 +79,6 @@ case " ${EXTRA_OBJS:-} " in
 	*libnxrender.a\ *) SRCS+=("$TC/game/native_device.cpp") ;;
 esac
 SRCS+=("$ROOT"/loader/src/*.c)
-# S10 startup: initializer runner, plus the generated table (as objects: xc.c
-# references the table weakly, an archive member would not be pulled)
-# XCGEN_EXE=<the owner's FalloutNV.exe>: natives for the exe initializers the decomp lacks (startup/tools/mkxcgen.py,
-# straight-line shapes translated from the exe; local output). They are weak __fnvnx_dyninit_<addr>, so mkxctab
-# lists them and a real definition from a unit wins.
-XCGEN_OBJ=()
-if [ -n "${XCGEN_EXE:-}" ]; then
-	mkdir -p "$OUT/obj"
-	aarch64-none-elf-nm "$FIXED"/*.o > "$OUT/fixed.nm" 2>/dev/null || true
-	python3 -I "$ROOT/startup/tools/mkxcgen.py" --exe "$XCGEN_EXE" --addrmap "$S2/addrmap.tsv" --nm "$OUT/fixed.nm" \
-		--out "$OUT/xcgen.c" --tsv "$OUT/xcgen.tsv" || exit 1
-	aarch64-none-elf-gcc $COMMON -std=gnu11 -c "$OUT/xcgen.c" -o "$OUT/obj/out_xcgen.c.o" || exit 1
-	XCGEN_OBJ=("$OUT/obj/out_xcgen.c.o")
-fi
-python3 -I "$ROOT/startup/tools/mkxctab.py" --out "$OUT/xctab.c" --tsv "$OUT/xctab.tsv" --addrmap "$S2/addrmap.tsv" \
-	"$FIXED"/*.o "${XCGEN_OBJ[@]}" > "$OUT/mkxctab.log" 2>&1 || { tail -5 "$OUT/mkxctab.log"; exit 1; }
-tail -3 "$OUT/mkxctab.log"
-SRCS+=("$ROOT/startup/guest/xc.c" "$OUT/xctab.c")
 for f in "${SRCS[@]}"; do
 	o="$OUT/obj/$(echo "${f#$ROOT/}" | sed "s|^$OUT/|out_|" | tr / _).o"
 	extra=""

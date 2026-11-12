@@ -2118,7 +2118,7 @@ class Guest(Stage):
         return ['guest-v3', scr, tree_hash(os.path.dirname(scr)) if not own else
                 tree_hash('tools/pipeline/guest_link.py', 'tools/pipeline/guest_stub.c'),
                 tree_hash('tools/pipeline/undef.py', 'toolchain/game', 'toolchain/guest', 'toolchain/include',
-                          'toolchain/tools', 'platform', 'loader', 'startup', 'shim/include', 'tests/s5/dynbrk.py'),
+                          'toolchain/tools', 'platform', 'loader', 'startup', 'shim/include'),
                 tree_hash('render/nine') if b.cfg['NINE'] == '1' else '',
                 up_id(b, 'link'), up_id(b, 'toolchain'), b.cfg['NINE'], b.art('toolchain', 'vorbis'), b.cfg['GAME_NEW'],
                 file_hash(b.art('link', 'override_lib')),
@@ -2211,29 +2211,13 @@ class Guest(Stage):
         if rc or not os.path.isfile(nso):
             raise StageError('guest link failed (exit %d), see %s: %s' % (rc, b.rel(r['log']),
                                                                          ' | '.join(Build.tail(r['log'], 3))))
-        # S5's checks of the linked guest: PC-relative references to absolute image symbols (want 0: relocatable),
-        # static initializers / finalizers that hold a trap (want 0, tests/s5/dynbrk.py)
+        # S5's check of the linked guest: PC-relative references to absolute image symbols (want 0: relocatable)
         pl = os.path.join(prod, 'pcrel_abs.log')
         if os.path.isfile(pl):
             mm = re.search(r'absolute symbols: (\d+) in (\d+) objects', open(pl, errors='replace').read())
             if mm:
                 r.metric('guest_pcrel_abs_refs', int(mm.group(1)))
                 r.metric('guest_pcrel_abs_objects', int(mm.group(2)))
-        nm = os.path.join(b.art('toolchain', 'prefix'), 'bin', 'aarch64-none-elf-nm')
-        rc, dyn = b.capture([PY, '-I', os.path.join(ROOT, 'tests', 's5', 'dynbrk.py'), os.path.join(d, 'fnvnx.elf'),
-                             nm], timeout=600)
-        with open(os.path.join(d, 'dynbrk.txt'), 'w') as f:
-            f.write(dyn)
-        for kind in ('dyninit', 'dynexit'):
-            mm = re.search(r'\b%s\D*?(\d+)\D+?(\d+)' % kind, dyn)
-            if mm:
-                r.metric('guest_%s_functions' % kind, int(mm.group(1)))
-                r.metric('guest_%s_brk' % kind, int(mm.group(2)))
-        if rc:
-            r.note('tests/s5/dynbrk.py exited %d (build/guest/dynbrk.txt)' % rc)
-        if r.get('metrics', {}).get('guest_dyninit_brk') or r.get('metrics', {}).get('guest_dynexit_brk'):
-            r['status'] = 'warn'
-            r.note('static initializers / finalizers with a trap: see build/guest/dynbrk.txt')
         rc, dump = b.capture([PY, '-I', os.path.join(ROOT, 'toolchain', 'tools', 'elf2nso.py'), '--dump', nso])
         r['nso_dump'] = dump.splitlines()[:12]
         if rc:
@@ -2802,7 +2786,7 @@ def suites(b):
     if os.path.isfile(os.path.join(ROOT, 'tests', 's8', 'run.sh')):
         s.append(Suite('s8', ['tests/s8', 'shim/include'], [['bash', 'tests/s8/run.sh', os.path.join(t, 's8')]]))
     if os.path.isfile(os.path.join(ROOT, 'tests', 's10', 'run.sh')):
-        s.append(Suite('s10', ['tests/s10', 'startup', 'tests/s5/emu_guest.py'], [
+        s.append(Suite('s10', ['tests/s10', 'startup'], [
             ['env', 'FNVNX_A64=' + tc, 'bash', 'tests/s10/run.sh', os.path.join(t, 's10')]]))
     if b.cfg['NINE'] == '1' and os.path.isfile(os.path.join(ROOT, 'render', 'nine', 'test', 'run_gate.sh')):
         # S6c's host gate of the D3D9 proxy path (Mesa st/nine + softpipe for x86-64, ILP32 test guest)

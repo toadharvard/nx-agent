@@ -69,7 +69,6 @@ CLASSES = {
     'RET1': 'neutral',          # return <trailing stmt> where MSVC code is identical (S1b)
     'DBUG1': 'neutral',         # decomp-bug fixes per site (S1-crt 0x00b01510: identical)
     'MT1': 'platform',          # gated Switch behaviour changes (S15-threads mt_cull), behind FNVNX_MT1_ON; no MSVC parity
-    'XC1': 'platform',          # dynamic initializers -> extern + __fnvnx_dyninit_<addr> (S10 runner order)
     'VA1': 'platform',          # MSVC char* va_list -> real va_list
     'FALL1': 'platform',        # __builtin_trap() at fall-off ends (GCC only)
     'DUPINT1': 'neutral',       # one of two integer-only-different prototypes of one address (same callee)
@@ -141,7 +140,6 @@ CLASSES = {
                                # exact-text replace pairs, applied before the append (part of REC1; each pair is the recon's
                                # accepted edit, gated with it)
     'HUNIT1': 'neutral',       # explicit instantiations of the template members a header unit's recipe lists (MSVC emitted them)
-    'XC2': 'platform',         # XC1's extern + __fnvnx_dyninit_<addr> form for a hand-written dynamic initializer (site table)
     'EBO3': 'layout',           # FNVNX_EBO2 (empty under MSVC) in an empty base after a base with data: after it, as MSVC
     'VORDER1': 'layout',        # R2: same-name virtual overloads in exe slot order (GCC lays them in declaration order, MSVC reversed)
     'IDTOR1': 'neutral',        # FNVNX_IDTOR1(C) (empty under MSVC): `~C();` declared where the recipe binds C's implicit dtor

@@ -394,51 +394,6 @@ class ExeSlotPlanTest(unittest.TestCase):
         self.assertIn("exe-vtables", emu_guest.fault_table_options(os.path.join(HERE, "known_faults.txt")))
 
 
-class XcgenTest(unittest.TestCase):
-    """startup/tools/mkxcgen.py: exe initializers without a native translated from their straight-line x86"""
-
-    @staticmethod
-    def tr(code, natives, sigs):
-        sys.path.insert(0, os.path.join(HERE, "..", "..", "startup", "tools"))
-        import mkxcgen
-
-        class Img:
-            def read(self, va, n):
-                return code[va - 0x1000:va - 0x1000 + n]
-        return mkxcgen.translate(Img(), 0x1000, natives, lambda name: sigs.get(name))
-
-    def test_static_object(self):
-        # mov ecx, 0x0126f104; jmp ctor  (0x00fc72d0's shape)
-        jmp = (0x2000 - (0x1000 + 10)) & 0xFFFFFFFF
-        code = b"\xb9" + struct.pack("<I", 0x0126F104) + b"\xe9" + struct.pack("<I", jmp)
-        out, decls = self.tr(code, {0x2000: "_ZN1A4ctorEv"}, {"_ZN1A4ctorEv": (True, [])})
-        self.assertEqual(out, ["fnvnx_x__ZN1A4ctorEv(0x0126f104u);", "return;"])
-
-    def test_thiscall_args_and_atexit(self):
-        # push 2; push 1; mov ecx, obj; call f(int, int); push dtor; call atexit; add esp, 4; ret
-        c1 = (0x2000 - (0x1000 + 9 + 5)) & 0xFFFFFFFF
-        body = b"\x6a\x02\x6a\x01\xb9" + struct.pack("<I", 0x0400) + b"\xe8" + struct.pack("<I", c1)
-        at = (0x00EC658F - (0x1000 + len(body) + 5 + 5)) & 0xFFFFFFFF
-        body += b"\x68" + struct.pack("<I", 0x3000) + b"\xe8" + struct.pack("<I", at) + b"\x83\xc4\x04\xc3"
-        natives = {0x2000: "_ZN1A1fEii", 0x3000: "_Z4dtorv"}
-        out, decls = self.tr(body, natives, {"_ZN1A1fEii": (True, [False, False])})
-        self.assertEqual(out, ["fnvnx_x__ZN1A1fEii(0x00000400u, 0x00000001u, 0x00000002u);",
-                               "atexit(fnvnx_x__Z4dtorv);"])
-
-    def test_float_argument_and_store(self):
-        # push ecx; fld1; fstp [esp]; call g(float); add esp, 4; mov dword [0x500], 7; ret
-        call = (0x2000 - (0x1000 + 1 + 2 + 3 + 5)) & 0xFFFFFFFF
-        body = b"\x51\xd9\xe8\xd9\x1c\x24\xe8" + struct.pack("<I", call) + b"\x83\xc4\x04"
-        body += b"\xc7\x05" + struct.pack("<II", 0x500, 7) + b"\xc3"
-        out, _ = self.tr(body, {0x2000: "_Z1gf"}, {"_Z1gf": (False, [True])})
-        self.assertEqual(out, ["fnvnx_x__Z1gf(1.0f);", "*(volatile uint32_t *)0x00000500u = 0x00000007u;"])
-
-    def test_unknown_left(self):
-        out, why = self.tr(b"\x64\xa1\x00\x00\x00\x00", {}, {})
-        self.assertIsNone(out)
-        self.assertIn("instruction", why)
-
-
 class MilestoneTest(unittest.TestCase):
     """tests/s5/milestones.txt (emu_guest.py --milestones) parses into the five boot milestones in boot order, the
     store watch reads the right word of a wide store, and the farm report shows the summary of a boot that ended by

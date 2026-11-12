@@ -400,9 +400,7 @@ loader decompresses into the claimed range and converts it with `fnvnx_reserve_r
 | `host.c` `main` | `fnvnx_reserve_late(log)` after console/log, before the guest (relaunches on a collision). S10 objects are referenced weakly (`#pragma weak`): a host built without `reserve*.c` (render/nine's test build) links and logs "windows NOT reserved". The header is included by relative path. |
 | `host.c` `as_name()` | stack region (32-bit spaces report the ASLR region as `[0x00200000, 4 GiB)`), or `fnvnx_reserve_address_space()` when linked. |
 | `host_v3.inc` `map_fixed` | inside a claimed range: `fnvnx_reserve_map_fixed` (zeroes, no memory needed); else the old svcMapMemory path. |
-| `boot.cpp` (S3 loader driver) | `map_fixed` goes to the host with no source block first; after mapping and before code-pointer fixups `fnvnx_xc_locate` over `.rdata` captures the image's `__xc` slots (IMAGE mode); trace mode maps the text range and the window as the two ranges S10 claims. |
-| `runtime.c` | after `__libc_init_array`: `fnvnx_xc_run_initializers(slots or NULL, ...)` + report. Opt-in by the game boot defining `fnvnx_guest_xc_hooks` (S10's own e2e guest drives xc.c itself and still passes). |
-| game build | `startup/tools/mkxctab.py --addrmap ... <objects>` -> `xctab.c`; `xc.c`, `xctab.c` linked as objects. |
+| `boot.cpp` (S3 loader driver) | `map_fixed` goes to the host with no source block first; trace mode maps the text range and the window as the two ranges S10 claims. |
 | `tests/s5/hello/build.sh` | host links `startup/host/reserve.c` + `reserve_nx.c`; `HOST_DEFS` passes host build switches. |
 
 ### Emulated boot (`tests/s5/emu_guest.py guest.nso --elf fnvnx.elf --skip-faulting-init`)

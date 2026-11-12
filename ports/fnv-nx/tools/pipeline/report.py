@@ -313,11 +313,8 @@ def render(b, stages, snap, prev):
                 ad['multidef_count'], ', '.join('`%s`' % n for n in ad.get('multidef', [])[:8])))
             L.append('')
     if gu.get('metrics'):
-        L.append('D3D9 `%s`, GAME_NEW `%s`; PC-relative references to absolute image symbols %s (want 0: relocatable); '
-                 'static initializers with a trap %s of %s, finalizers %s of %s (`build/guest/dynbrk.txt`).' % (
-                     gu.get('d3d9', '-'), gu.get('game_new', '-'), fmt(m.get('guest_pcrel_abs_refs')),
-                     fmt(m.get('guest_dyninit_brk')), fmt(m.get('guest_dyninit_functions')),
-                     fmt(m.get('guest_dynexit_brk')), fmt(m.get('guest_dynexit_functions'))))
+        L.append('D3D9 `%s`, GAME_NEW `%s`; PC-relative references to absolute image symbols %s (want 0: relocatable).' % (
+                     gu.get('d3d9', '-'), gu.get('game_new', '-'), fmt(m.get('guest_pcrel_abs_refs'))))
         L.append('')
     if gu.get('undefined'):
         L.append('**Undefined symbols after the full link: %s** (each bound to a trap stub; per symbol: '

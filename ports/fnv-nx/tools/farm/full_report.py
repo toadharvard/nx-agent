@@ -238,12 +238,9 @@ def main(argv):
     if gu.get('metrics'):
         L.append('## Guest')
         L.append('')
-        L.append('- %s; D3D9 %s, GAME_NEW %s, Ogg Vorbis %s; guest.nso %s bytes; PC-relative absolute references %s; '
-                 'initializers with a trap %s of %s, finalizers %s of %s' % (
+        L.append('- %s; D3D9 %s, GAME_NEW %s, Ogg Vorbis %s; guest.nso %s bytes; PC-relative absolute references %s' % (
                      gu.get('method'), gu.get('d3d9', '-'), gu.get('game_new', '-'), 'yes' if gu.get('vorbis') else 'no',
-                     fmt(m.get('guest_guest_nso_bytes')), fmt(m.get('guest_pcrel_abs_refs')),
-                     fmt(m.get('guest_dyninit_brk')), fmt(m.get('guest_dyninit_functions')),
-                     fmt(m.get('guest_dynexit_brk')), fmt(m.get('guest_dynexit_functions'))))
+                     fmt(m.get('guest_guest_nso_bytes')), fmt(m.get('guest_pcrel_abs_refs'))))
         if gu.get('layout'):
             L.append('- ' + clean(gu['layout']))
         if gu.get('undefined'):

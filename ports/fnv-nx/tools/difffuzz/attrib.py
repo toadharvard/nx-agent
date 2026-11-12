@@ -32,9 +32,8 @@ FAMILIES = [
     ('XINC1', re.compile(r'\w+_s1b\b')),
     ('FALL1', re.compile(r'\b__builtin_trap\b')),
     ('FTOL1', re.compile(r'\bfnvnx_ftol\w*|\bfnvnx_x87_\w+')),
-    ('XC1', re.compile(r'__fnvnx_dyn(?:init|exit)_|\bfnvnx_dyn_tag\b')),
     ('VCALL', re.compile(r'\bFNVNX_MSVC_VCALL\b')),
-    ('FNVNX', re.compile(r'\bfnvnx_(?!lvalue|xc_atexit|dyn_tag|asm|rdtsc)\w+|\bFNVNX_(?!MSVC_VCALL|KEEP)\w+')),
+    ('FNVNX', re.compile(r'\bfnvnx_(?!lvalue|asm|rdtsc)\w+|\bFNVNX_(?!MSVC_VCALL|KEEP)\w+')),
 ]
 
 

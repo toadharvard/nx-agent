@@ -276,7 +276,7 @@ def streams_of(r, rules, bridges, ttags=None):
                 tags.append('S1-sse')
             elif f in S1B:
                 tags.append('S1b:' + f)
-            elif f not in ('XC1', 'GONE'):
+            elif f != 'GONE':
                 tags.append('S1-rules:' + f)
         if not tags:
             tags.append('S0-compile')

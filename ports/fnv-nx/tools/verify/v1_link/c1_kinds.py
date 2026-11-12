@@ -140,10 +140,6 @@ def main():
             icls = v1names.tok_norm(re.sub(r'^vtable for ', '', it))
             if mcls and icls not in mcls and not any(m.split('::')[-1] == icls.split('::')[-1] for m in mcls):
                 probs.append('V class %s, MSVC names %s' % (icls, sorted(mcls)[:3]))
-        elif native.startswith(('__fnvnx_dyninit_', '__fnvnx_dynexit_')):
-            fam = {n for n in defs.get(a, ()) if n.startswith(('??__E', '??__F'))}
-            if native[-8:] != c[0] or not fam:
-                probs.append('dyninit/dynexit %s for %s' % (native, sorted(defs.get(a, ()))[:2]))
         elif not c[5].startswith('provider'):
             ik = v1names.key_itanium(it)
             mk = [v1names.key_msvc(mdem[n]) for n in defs.get(a, ()) if mdem.get(n)]

@@ -20,8 +20,8 @@
  *   - a guest heap (heap_base/heap_size, default 64 MiB like tests/s5/emu_guest.py), map_fixed (mremap of the heap
  *     block, as svcMapMemory leaves the source inaccessible), the fs_* slots under --root as sdmc:/ (without
  *     --root they return -ENOSYS), wall time, audio/input stubs and ext_call (platform CPU boost: on);
- *   - --skip-faulting-init: emu_guest.py's guard of the initializer runners. Each blr of __libc_init_array, call,
- *     fnvnx_xc_run_address_order and fnvnx_xc_run_image_order (found in .symtab) is patched into a bl to a
+ *   - --skip-faulting-init: emu_guest.py's guard of the initializer runners. Each blr of __libc_init_array and call
+ *     (found in .symtab) is patched into a bl to a
  *     trampoline that records the callee-saved registers; a SIGSEGV/SIGBUS/SIGILL/SIGTRAP/SIGFPE below it resumes
  *     after the call with 0, as the emulator does. A fault with no guard prints pc, lr and the frame chain;
  *   - --expect: the process ends (exit 0) once the guest's console or debug output contains TEXT, and says after
@@ -827,8 +827,7 @@ static int streq(const char *a, const char *b) { while (*a && *a == *b) a++, b++
 
 /* patch every blr of the initializer runners (by name, .symtab) into a guarded call */
 static void install_guards(long fd) {
-    static const char *const runners[] = { "__libc_init_array", "call", "fnvnx_xc_run_address_order",
-                                           "fnvnx_xc_run_image_order" };
+    static const char *const runners[] = { "__libc_init_array", "call" };
     E32 e;
     sc(SYS_pread64, fd, (long)&e, sizeof e, 0, 0, 0);
     S32 *sh = anon((u64)e.shnum * sizeof(S32));
