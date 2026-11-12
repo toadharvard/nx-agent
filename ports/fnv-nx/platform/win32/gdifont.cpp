@@ -93,7 +93,7 @@ struct Face {
 };
 struct Family { ustr name, second; std::vector<Face *> faces; };
 
-std::string g_wine_dir, g_host_dir, g_reg_dir;   /* copies of fnvnx_declared_fonts(), made once by load_all */
+std::string g_wine_dir;   /* copy of fnvnx_declared_fonts()->dir, made once by load_all */
 std::vector<Family *> g_fam;
 bool g_loaded;
 FT_Library g_lib;
@@ -277,27 +277,32 @@ void add_font_file(const std::string &path, bool allow_bitmap, bool listed)   /*
     }
 }
 
-/* ---- registry export files (.reg, UTF-16LE) */
-void parse_reg(const std::string &path)
+/* ---- the declared machine's font registry (Wine 9.0, ANSI 1252 / OEM 437, 96 dpi). Every value is Wine's own, cited:
+ *   nls_update_font_list row "Latin 1 (United States)" (dlls/win32u/font.c:344-346) as written by update_font_list (font.c:3150-3190) and add_font_list (font.c:2981);
+ *   FontSubstitutes: loader/wine.inf.in:495-513 [Fonts] plus the row's shelldlg/tmsrmn values (font.c:3186-3187);
+ *   Replacements: fontconfig-config 30-metric-aliases.conf <accept> of Arial, Courier New, Times New Roman, as win32u freetype.c adds them from FcConfigSubstitute.
+ * The font files are exactly the pinned tools/fonts-wine9 mirror in one directory; nothing else is read. */
+void declare_machine()
 {
-    std::vector<uint8_t> d;
-    if (!read_file(path, d)) declared_input_broken("registry export listed by its directory is unreadable", path);
-    if (d.size() < 2) return;
-    std::string txt;
-    for (size_t i = 2; i + 1 < d.size(); i += 2) txt += d[i + 1] ? '?' : (char)d[i];
-    std::string key;
-    size_t p = 0;
-    while (p < txt.size()) {
-        size_t e = txt.find('\n', p);
-        std::string l = txt.substr(p, e == std::string::npos ? std::string::npos : e - p);
-        p = e == std::string::npos ? txt.size() : e + 1;
-        while (!l.empty() && l.back() == '\r') l.pop_back();
-        if (l.size() > 2 && l[0] == '[') { key = l.substr(1, l.size() - 2); for (char &c : key) c = (char)tolower((unsigned char)c); g_reg[key]; continue; }
-        size_t q = l.find("\"=\"");
-        if (l.size() < 6 || l[0] != '"' || q == std::string::npos || l.back() != '"') continue;
-        auto unesc = [](const std::string &s) { std::string r; for (size_t i = 0; i < s.size(); i++) { if (s[i] == '\\' && i + 1 < s.size()) i++; r += s[i]; } return r; };
-        g_reg[key].push_back({ unesc(l.substr(1, q - 1)), unesc(l.substr(q + 3, l.size() - q - 4)) });
-    }
+    const char *nt = "hkey_local_machine\\software\\microsoft\\windows nt\\currentversion\\";
+    g_reg["hkey_local_machine\\system\\currentcontrolset\\control\\nls\\codepage"].push_back({ "ACP", "1252" });
+    auto &hw = g_reg["hkey_local_machine\\system\\currentcontrolset\\hardware profiles\\current\\software\\fonts"];
+    hw.push_back({ "OEMFONT.FON", "vgaoem.fon" }); hw.push_back({ "FIXEDFON.FON", "vgafix.fon" }); hw.push_back({ "FONTS.FON", "vgasys.fon" });
+    auto &fl = g_reg[std::string(nt) + "fonts"];
+    fl.push_back({ "Courier", "coure.fon" }); fl.push_back({ "MS Serif", "serife.fon" });
+    fl.push_back({ "MS Sans Serif", "sserife.fon" }); fl.push_back({ "Small Fonts", "smalle.fon" });
+    auto &fs = g_reg[std::string(nt) + "fontsubstitutes"];
+    static const char *const subst[][2] = {
+        { "MS Shell Dlg", "Tahoma" }, { "Tms Rmn", "Times New Roman" },
+        { "Arial Baltic,186", "Arial,186" }, { "Arial CE,238", "Arial,238" }, { "Arial CYR,204", "Arial,204" }, { "Arial Greek,161", "Arial,161" }, { "Arial TUR,162", "Arial,162" },
+        { "Courier New Baltic,186", "Courier New,186" }, { "Courier New CE,238", "Courier New,238" }, { "Courier New CYR,204", "Courier New,204" },
+        { "Courier New Greek,161", "Courier New,161" }, { "Courier New TUR,162", "Courier New,162" },
+        { "Helv", "MS Sans Serif" }, { "Helvetica", "Arial" }, { "MS Shell Dlg 2", "Tahoma" }, { "Times", "Times New Roman" },
+        { "Times New Roman Baltic,186", "Times New Roman,186" }, { "Times New Roman CE,238", "Times New Roman,238" }, { "Times New Roman CYR,204", "Times New Roman,204" },
+        { "Times New Roman Greek,161", "Times New Roman,161" }, { "Times New Roman TUR,162", "Times New Roman,162" } };
+    for (auto &r : subst) fs.push_back({ r[0], r[1] });
+    auto &rp = g_reg["hkey_current_user\\software\\wine\\fonts\\replacements"];
+    rp.push_back({ "Arial", "Liberation Sans" }); rp.push_back({ "Courier New", "Liberation Mono" }); rp.push_back({ "Times New Roman", "Liberation Serif" });
 }
 const std::vector<std::pair<std::string, std::string>> &reg_key(const char *k)
 {
@@ -318,18 +323,6 @@ std::vector<std::string> list_dir(const std::string &d)
     os_dir_close(dir);
     std::sort(v.begin(), v.end());
     return v;
-}
-void scan_host(const std::string &d)
-{
-    for (const std::string &n : list_dir(d)) {
-        std::string p = d + "/" + n;
-        os_stat_t st;
-        if (os_stat(p.c_str(), &st)) continue;
-        if (st.is_dir) { scan_host(p); continue; }
-        size_t dot = n.rfind('.');
-        std::string ext = dot == std::string::npos ? "" : n.substr(dot);
-        if (ext == ".ttf" || ext == ".ttc" || ext == ".otf") add_font_file(p, false, true);
-    }
 }
 bool is_full_name(const ustr &n) { for (Family *f : g_fam) for (Face *x : f->faces) if (x->scalable && !fcmp(x->full, n, 63)) return true; return false; }
 bool enum_fallback(int pf, int i, ustr *out)
@@ -352,9 +345,9 @@ void load_all()
     if (g_loaded) return;
     g_loaded = true;
     const fnvnx_font_dirs *d = fnvnx_declared_fonts();   /* a declared input of the root: no setter, no unset state */
-    g_wine_dir = d->wine; g_host_dir = d->host; g_reg_dir = d->reg;
+    g_wine_dir = d->dir;
     if (!g_lib && FT_Init_FreeType(&g_lib)) declared_input_broken("FreeType does not start (FT_Init_FreeType: out of memory)", "libfreetype");
-    for (const std::string &n : list_dir(g_reg_dir)) if (n.size() > 4 && n.substr(n.size() - 4) == ".reg") parse_reg(g_reg_dir + "/" + n);
+    declare_machine();
     for (auto &kv : reg_key("HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Nls\\CodePage")) if (kv.first == "ACP") g_acp = atoi(kv.second.c_str());
     auto sys = reg_key("HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Hardware Profiles\\Current\\Software\\Fonts");
     for (const char *k : { "FONTS.FON", "OEMFONT.FON", "FIXEDFON.FON" })   /* load_system_bitmap_fonts */
@@ -364,7 +357,6 @@ void load_all()
         if (!os_stat((g_wine_dir + "/" + n).c_str(), &st) && st.is_dir) continue;   /* Wine opens regular files only */
         add_font_file(g_wine_dir + "/" + n, false, true);
     }   /* the data directory */
-    scan_host(g_host_dir);                                                                          /* fontconfig's fonts */
     for (auto &kv : reg_key("HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts")) {   /* load_registry_fonts */
         std::string v = kv.first;
         if (v.size() > 11 && v.compare(v.size() - 11, 11, " (TrueType)") == 0) v.resize(v.size() - 11);

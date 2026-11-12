@@ -72,3 +72,9 @@ constant writer, unbound writer, unaccounted pointer, multiple-inheritance offse
 - platform/manifest/fontgate.py derives face -> files from Wine 9.0 data (wine.inf.in FontSubstitutes, font.c default lists + shelldlg row 1252/437, fontconfig 30-metric-aliases accept lists), files = fonts-wine + fonts-liberation (libwine Depends/Recommends closure). Declared == mapped (fnv-nx-build tools/fonts-wine9 099942c, 56 files, SHA256SUMS + inputs + per-face README citations).
 - Literal gate: no face-name constant (bytes or UTF-16, case-folded) in any platform object other than font_faces.cpp.o; selftested.
 - RED by design: Bitstream Vera Sans/Sans Mono/Serif are named by Wine's default lists but no package of the closure ships them.
+
+## fongate2: one /fonts directory
+- fnvnx_font_dirs is `{dir}`; boot.cpp reads sdmc:/switch/fnv/fonts = exactly the fnv-nx-build tools/fonts-wine9 mirror (099942c). No wine/host/reg split; no host font dir.
+- gdifont declare_machine(): the registry values (ACP, system bitmap fonts, Fonts, FontSubstitutes, Replacements) are Wine 9.0's, cited per group; no .reg files.
+- fontgate.py: default lists evaluated in order, first present reached, later entries recorded unreached.
+- s4 at this commit: 485 tests, 404922 checks, 0 failed (full run before the test_gdifont scan fix had 1 failed check: the format scan walked the old reference host tree; it now scans FNVNX_FONTS).

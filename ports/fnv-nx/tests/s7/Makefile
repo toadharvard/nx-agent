@@ -20,6 +20,7 @@ CXXFLAGS_ := -std=gnu++17 $(FLAGS)
 # the declared fonts (platform/include/fnvnx_win32_ext.h): the reference font set, an input of every test binary (see tests/s4/Makefile)
 FNVNX_FONT_REF ?= /home/user/gd/fontref
 FNVNX_FONT_HOST ?= /home/user/gd/fonts/deb/usr/share/fonts
+FNVNX_FONTS ?= /home/user/fonts-wine9/fonts
 export FNVNX_FONT_REF FNVNX_FONT_HOST
 S4_C := $(HP)/os/os_posix.c $(P)/os/os_world.c $(wildcard $(P)/crt/*.c)
 S4_CXX := $(HP)/win32/filemap_shared.cpp $(P)/clock/clock_rt.cpp $(P)/clock/clock_real.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(wildcard $(P)/crt/*.cpp)

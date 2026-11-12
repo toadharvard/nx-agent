@@ -58,6 +58,21 @@ for f in faces:
     rows.append((f, n, fs))
     want |= set(fs)
     if not fs: nofile.append(f)
+# Wine's enum_fallbacks/set_default_family (font.c:997-1030): each default list is tried in order and the first name whose family exists is the
+# one reached; the later names are unreached by construction. A list with no present name stays red (its faces keep `no file`).
+unreached = []
+fmap = {f: fs for f, n, fs in rows}
+for lname, lst in sorted(dl.items()):
+    pres = [x for x in lst if fmap.get(x)]
+    if not pres:
+        continue
+    for x in lst[lst.index(pres[0]) + 1:]:
+        if x in fmap:
+            unreached.append((x, lname, pres[0]))
+            for y in fmap[x]:
+                if not any(y in fmap[z] for z in fmap if z not in {u[0] for u in unreached}):
+                    want.discard(y)
+            if not fmap[x] and x in nofile: nofile.remove(x)
 have = {x for x in os.listdir(declared) if not x.startswith(("SHA256", "README"))}
 extra, missing = sorted(have - want), sorted(want - have)
 names = {x.lower() for x in faces} | set(subs) | set(subs.values()) | {x.lower() for v in dl.values() for x in v} | {shell.lower()}
@@ -86,8 +101,9 @@ for f, n, fs in rows: print("map\t%s\t%s\t%s" % (f, n, ",".join(fs) or "NO FILE"
 for n in sorted(have & want):
     d = next(d for d in [declared] if os.path.exists(os.path.join(d, n)))
     print("sha256\t%s\t%s" % (hashlib.sha256(open(os.path.join(d, n), "rb").read()).hexdigest(), n))
-print("faces %d; mapped files %d; declared files %d; extra %d; missing %d; faces without a file %d; face literals outside font_faces %d; fallback names %s" % (
-    len(faces), len(want), len(have), len(extra), len(missing), len(nofile), len(lit), sorted(x for v in dl.values() for x in v) and "ok"), file=sys.stderr)
+print("faces %d; mapped files %d; declared files %d; extra %d; missing %d; faces without a file %d; unreached %d; face literals outside font_faces %d; fallback names %s" % (
+    len(faces), len(want), len(have), len(extra), len(missing), len(nofile), len(unreached), len(lit), sorted(x for v in dl.values() for x in v) and "ok"), file=sys.stderr)
+for u in unreached: print("unreached: %s (default_%s_list: %s is present first, font.c:997-1030)" % (u[0], u[1], u[2]), file=sys.stderr)
 for n in nofile: print("no file:", n, file=sys.stderr)
 for n in extra: print("extra:", n, file=sys.stderr)
 for n in missing: print("missing:", n, file=sys.stderr)
