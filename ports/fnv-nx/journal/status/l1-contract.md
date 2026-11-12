@@ -304,3 +304,11 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
     - selftest time goes to w19.
   - L3a `flags` gate becomes gates.d/flags.json with covers ["lifted"].
   - Guest C units without the layout, names, sdd and pi checks, in admitted roots: 0 at trunk 8cfbcdbf, because no guest root is admitted yet. render/d3d9 has C units (ffp/*.c), and they count once it is admitted. Owner of the open class: L2 (w4 cc1 port).
+- 04:01Z:
+  - **Image-set soundness (w18).** d3dx9_38's LoadLibraryA site 0x56b708 takes field +4 of static object 0x793b20. The constructor sets it, from a static initializer, to the .rdata string "d3dx9_31.dll".
+    - d3dx9_31 is not in the image set, and the site can't be closed without static object extents.
+    - I proposed adding d3dx9_31 as a may-load image (a sound superset). It goes to the orchestrator.
+  - **L5 w15:** the SAL-derived import_escape is at de35ad73 (private l5-platform/manifest 07d79c5). LoadLibraryA is `n` and GetProcAddress is `en`, so w18 reruns 0x9fea3e and 0x9fea5a.
+    - Coverage: 346 of 1554 bridge rows annotated.
+  - **Allocation-site fact** (orchestrator: one producer). w18 writes fnvnx-allocsites/1, and L3a's points-to consumes it later.
+  - **w10 next:** the retired rule plus gate_admit.py:38, which unblocks L3b. Then link.kind/roots with the ld refusals; L6 has 22 ignore-all link commands in 16 scripts.
