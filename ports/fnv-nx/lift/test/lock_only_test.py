@@ -20,7 +20,7 @@ assert set(ACCESSORS) == {'M8', 'M16', 'M32', 'M64', 'MF32', 'MF64', 'MX'}, ACCE
 GUEST_ACCESS = re.compile(r'\b(?:%s)\s*\(' % '|'.join(ACCESSORS))
 WORK = sys.argv[sys.argv.index('--work') + 1] if '--work' in sys.argv else os.path.join(LIFT, '..', '..', '..', 'build_lock_only_test')
 os.makedirs(WORK, exist_ok=True)
-FLAGS = [f for f in liftgen.PACK_CXX_FLAGS if f != '-Werror=attributes'] + ['-Wno-attributes']
+FLAGS = [f for f in liftgen.resolved_flags() if f != '-Werror=attributes'] + ['-Wno-attributes']
 
 
 def compiles(body):
