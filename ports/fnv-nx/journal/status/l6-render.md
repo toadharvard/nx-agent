@@ -300,3 +300,13 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
         - wined3d shader_sm1.c as a second syntax source (w5 regenerates);
         - the trap-body objstub class (L1 w20, `error_abi` in build.json).
     - The farm holds for the GLSL compile check of w1b's 9 ops.
+- 08:35Z L1 rules for objstub (w20).
+    - Join pin: 0ae75213, re-pinned when the regenerated op_syntax lands.
+    - error_abi has two kinds:
+        - noreturn;
+        - flag, checked from the definition.
+    - Every root with table handlers must declare error_abi, or it is red at recipe load.
+    - Trap bodies (every path reaches fail with no output) are red.
+    - Work assigned:
+        - w5: op_cover `handler` and `covering` as object symbols, cross-checked by nm, sent to w20;
+        - w1b: the translator's error_abi (fail and its flag field) next to the 9 ops.
