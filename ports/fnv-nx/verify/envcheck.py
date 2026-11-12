@@ -5,11 +5,13 @@
     envcheck.py id [--env F]                   sha256 of the canonical env.json (the verdict's env_id)
     envcheck.py snapshot -o F --from-code      regenerate F from THIS machine by the rule below; only on a machine set up by
                                                farm/setup_verdict_env.sh, then commit F
+check also requires, for the distribution compiler (no external) of every admitted product root, that its plugin headers (`-print-file-name=plugin`, the
+gcc-N-plugin-dev package; objstub builds its terminator plugin against them) belong to a package listed in env.json (`plugin headers of <driver>` mismatch).
 Rule (packages are DERIVED, never listed by hand): a package is in the environment iff dpkg says it owns a file that a verify tool
 or test executes or reads as data: (1) each of PROGRAMS (resolved path + loader closure); (2) python's loader closure (interpreter,
 lib-dynload, PY_MODULES); (3) UNIT_CC through unitstage.gcc_set(): driver, `as`, every ELF file of its trees + closure, and EVERY
 FILE under its trees (the unit stage ingests them whole: /usr/include, GCC install dir with plugin headers, libexec); the host
-gcc's HOST_GCC_PROGS/HOST_GCC_FILES; (4) the renderer's host libraries: RENDER_LIBS (loader cache names, with their loader closure) and RENDER_FILES. The trees also get a listing digest (an extra package adding files there is a mismatch).
+gcc's HOST_GCC_PROGS/HOST_GCC_FILES and every file of its plugin directory (HOST_GCC_PLUGIN_DIRS: the plugin headers of the host-root compiler); (4) the renderer's host libraries: RENDER_LIBS (loader cache names, with their loader closure) and RENDER_FILES. The trees also get a listing digest (an extra package adding files there is a mismatch).
 A file without a dpkg owner outside python's prefix is an error. Programs and who executes them: strace opentrace.py; busybox
 tests/test_graph,test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linux-gnu-g++ test_unitstage (unitstage.py);
 aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount; ar,clang test_coffnorm;
@@ -46,6 +48,11 @@ WHEEL_SHA256 = {"z3-solver": "e680ce083683abca5d07c3e55c2f620ff9a29cb91c548eeeea
 PY_WHEELS = ["z3-solver"]   # pinned by the sha256 of the wheel (env.json python.wheels) and installed with --require-hashes; the installed files are checked too
 RENDER_LIBS = ["libEGL.so.1", "libEGL_mesa.so.0"]   # ldconfig names: the EGL loader the published libnxgl4.so links, and the Mesa vendor it dispatches to (NXGL4_HOST.md section 2); their loader closure (mesa-libgallium, libllvm, ...) is derived
 RENDER_FILES = ["/usr/share/glvnd/egl_vendor.d/50_mesa.json"]   # read by libEGL.so.1 to find that vendor
+def HOST_GCC_PLUGIN_DIRS(gcc):
+    """Every file of the plugin directory of compiler GCC (`gcc -print-file-name=plugin`: the gcc-N-plugin-dev package of a distro compiler)."""
+    d = subprocess.run([gcc, "-print-file-name=plugin"], capture_output=True, text=True).stdout.strip()
+    return [os.path.join(r, f) for r, _, fs in os.walk(d) for f in fs] if os.path.isdir(d) else []
+
 KERNEL = ["unshare mount+pid+net+uts+ipc namespaces as root", "seccomp filter", "ptrace (strace)"]
 
 def env_id(doc):
@@ -129,7 +136,25 @@ def _ptrace():
 
 PROBES = {KERNEL[0]: lambda: os.geteuid() == 0 and _children(_unshare), KERNEL[1]: lambda: _children(_seccomp), KERNEL[2]: _ptrace}
 
-def check(doc):
+def _root_compilers(repo=None):
+    """Driver names of the distribution compilers (no external) of the admitted product roots of the checkout, from admit.json and the recipes."""
+    import recipe
+    repo = repo or os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+    try:
+        roots = recipe.load_admit(repo)
+    except (OSError, ValueError):
+        return []
+    out = set()
+    for r, e in roots.items():
+        if e.get("class") == "product":
+            rec = recipe.load_recipe(repo, roots, r)
+            c = rec.get("compiler") if isinstance(rec, dict) else None
+            if isinstance(c, dict) and "external" not in c:
+                out |= {c[k] for k in ("cc", "cxx") if isinstance(c.get(k), str)}
+    return sorted(out)
+
+
+def check(doc, repo=None):
     """List of mismatch lines (empty = the machine is the declared environment)."""
     bad = []
     def cmp(item, want, have):
@@ -166,6 +191,11 @@ def check(doc):
         pk = own.get(real, set())
         if not (pk & set(doc["packages"])) and real != os.path.realpath(sys.executable):
             cmp("program " + prog, "owned by a listed package", "%s owned by %s" % (real, sorted(pk) or "no package"))
+    own = own or _owners()
+    for drv in _root_compilers(repo):   # a distro compiler of an admitted root: its plugin headers (objstub's plugin) belong to a listed package
+        files = HOST_GCC_PLUGIN_DIRS(shutil.which(drv) or drv)
+        miss = sorted({p for f in files for p in [sorted(own.get(os.path.realpath(f), {"no package"}))[0]] if p not in doc["packages"]})
+        cmp("plugin headers of " + drv, "owned by listed packages", "no plugin headers" if not files else ("owned by %s" % miss if miss else "owned by listed packages"))
     for need in doc["kernel"]["needs"]:
         ok = need in PROBES and PROBES[need]()
         cmp("kernel " + need, "available", "available" if ok else ("unavailable" if need in PROBES else "unknown capability"))
@@ -223,6 +253,8 @@ def snapshot():
     for flag, names in (("-print-prog-name=", HOST_GCC_PROGS), ("-print-file-name=", HOST_GCC_FILES)):
         for n in names:
             add(subprocess.run([gcc, flag + n], capture_output=True, text=True).stdout.strip())
+    for p in HOST_GCC_PLUGIN_DIRS(gcc):   # objstub builds its terminator plugin against the plugin headers of the root compiler (host roots: the distro gcc)
+        add(p)
     ld = subprocess.run(["/sbin/ldconfig", "-p"], capture_output=True, text=True, check=True).stdout
     for n in RENDER_LIBS:   # the renderer's host libraries (verify/bootgpu.py loads libnxgl4.so; test_bootgpu, test_boot_job, boot_job.sh)
         hit = [l.split("=>")[1].strip() for l in ld.splitlines() if l.strip().startswith(n + " ") and "x86-64" in l]

@@ -31,6 +31,7 @@ import argparse
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # the gate runs it with -I: the script's directory is not on the path
 import argflow
 import gatefile
 import iat
@@ -126,6 +127,10 @@ def run(rows, images):
     out = []
     for mod, site, api, operand in rows:
         if api != 'GetProcAddress':
+            continue
+        if mod.lower() not in images:     # a module with no image (no range facts): the site is not derivable, an open item, never a crash
+            out.append(((mod, site, api, operand), dict(status='open', uses=[], pairs=set(), proof=[], mod_unknown=True, note='',
+                                                         breaks=['%s has no image: no range facts' % mod.lower()])))
             continue
         out.append(((mod, site, api, operand), derive_site(images[mod.lower()], site)))
     return out

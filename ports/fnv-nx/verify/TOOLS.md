@@ -334,11 +334,12 @@ Rules fixed here (all three consumers use them through this file and importkey.c
 ```text
 images - the guest image set of the contract gates (L1 CONTRACT): one pure function, no hand list.
 
-RULE: the set is the transitive closure of the PE import directories (normal and delay-load) starting from the exe, in modules.PE's
-reading. An imported dll name (iat.norm_dll: ASCII lowercase, ".dll" when it has no '.') is resolved case-insensitively against the
-files of the given directories (first directory in list order that has it; two files of one directory that differ only in case are an
-error). A dll found there is a GUEST IMAGE and is walked further; a dll not found there is a platform import (gate `imports`, owner L5)
-and is not an image. Assumption (stated, VERDICT.md): dynamic LoadLibrary names are facts of the `gpa` gate, not of this rule.
+RULE (dllkind.py, shared with modules.py): the set is the exe and the dlls reached from its import directories (normal and delay-load, in
+modules.PE's reading) through guest images only.  A dll name (iat.norm_dll) is resolved case-insensitively against the files of the
+given directories; it is a GUEST IMAGE iff it is found, has no bridge row, and its whole normal import closure resolves to guest images
+or bridge dlls.  A bridge dll (rows in bridge.tsv) and a found dll the declared machine cannot load are not images and are not walked
+further; a name that is neither found nor bridged is a platform import (gate `imports`, owner L5).  Dynamic LoadLibrary names are facts of
+the `gpa` gate, not of this rule (VERDICT.md).
 Order: the exe, then the images in discovery order (depth first, import directory then delay-load directory).
 ```
 
@@ -1103,11 +1104,13 @@ envcheck: the declared, reproducible environment of the L1 verdict (verify/env.j
     envcheck.py id [--env F]                   sha256 of the canonical env.json (the verdict's env_id)
     envcheck.py snapshot -o F --from-code      regenerate F from THIS machine by the rule below; only on a machine set up by
                                                farm/setup_verdict_env.sh, then commit F
+check also requires, for the distribution compiler (no external) of every admitted product root, that its plugin headers (`-print-file-name=plugin`, the
+gcc-N-plugin-dev package; objstub builds its terminator plugin against them) belong to a package listed in env.json (`plugin headers of <driver>` mismatch).
 Rule (packages are DERIVED, never listed by hand): a package is in the environment iff dpkg says it owns a file that a verify tool
 or test executes or reads as data: (1) each of PROGRAMS (resolved path + loader closure); (2) python's loader closure (interpreter,
 lib-dynload, PY_MODULES); (3) UNIT_CC through unitstage.gcc_set(): driver, `as`, every ELF file of its trees + closure, and EVERY
 FILE under its trees (the unit stage ingests them whole: /usr/include, GCC install dir with plugin headers, libexec); the host
-gcc's HOST_GCC_PROGS/HOST_GCC_FILES; (4) the renderer's host libraries: RENDER_LIBS (loader-cache names libEGL.so.1 and libEGL_mesa.so.0, with their loader closure) and RENDER_FILES (the glvnd EGL vendor file). The trees also get a listing digest (an extra package adding files there is a mismatch).
+gcc's HOST_GCC_PROGS/HOST_GCC_FILES and every file of its plugin directory (HOST_GCC_PLUGIN_DIRS: the plugin headers of the host-root compiler); (4) the renderer's host libraries: RENDER_LIBS (loader-cache names libEGL.so.1 and libEGL_mesa.so.0, with their loader closure) and RENDER_FILES (the glvnd EGL vendor file). The trees also get a listing digest (an extra package adding files there is a mismatch).
 A file without a dpkg owner outside python's prefix is an error. Programs and who executes them: strace opentrace.py; busybox
 tests/test_graph,test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linux-gnu-g++ test_unitstage (unitstage.py);
 aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount; ar,clang test_coffnorm;
@@ -1285,6 +1288,12 @@ its objects (relocatable) and of its linked ELF, never a name's text. Rules:
       the root links no ELF), and two listed symbols with DIFFERENT body ids may not share one address (`contract-alias`: an alias stub
       that serves two contracts with one body). Two names with the same body id on one address are fine. A symbol listed twice with
       two body ids is `contract-duplicate`. Without the key rule (c) has universe 0 for that root.
+  (d) The host boundary (a root with "target": "host" in admit.json). A reference no object defines is certified iff its object belongs to
+      a host root and its name is EXPORTED by the pinned host runtime: the defined GLOBAL/WEAK `.dynsym` names of the shared objects that
+      dpkg lists for libc6, libgcc-s1 and libstdc++6 (verify/env.json pins their versions; envcheck checks them), a fact computed by
+      gate_linkstrict.host_exports and cached by the content of those files (CACHE/hostexports). It mirrors newlib/libnx on the guest
+      side: a guest root has no such set, and any other undefined name of a host root stays `undefined`. Not covered (stated): the
+      fact is a cached read of the installed packages, not a sandbox stage; a symbol version is not compared, only the name.
 Universe = undefined references + defined global names + contract names + one `<elf>` per linked root (+ a root whose recipe is invalid or
 whose build is red, one uncertified item). Certified = the items with no finding. No product root: universe 0, green.
 NOT EXACT (stated): rule (b) is by name over the objects. A script symbol with hidden visibility (PROVIDE_HIDDEN) is LOCAL in the
