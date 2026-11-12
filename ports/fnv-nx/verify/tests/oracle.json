@@ -430,6 +430,18 @@
     "ports/fnv-nx/verify/unitstage.py"
    ]
   },
+  "test_headerroots.py": {
+   "references": [
+    {
+     "anchor": "## Header roots",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
   "test_icount.py": {
    "references": [
     {

@@ -32,6 +32,9 @@ the hash of the stage document + tool code. All paths are root-relative unless m
   root (the whole root is mounted at `/tool`, the script at `/tool/<path in its root>`), `inputs` are tracked files or directories (repo-relative;
   mounted at `/in/<repo path>`; they may not nest), the generator writes ONLY `/out/<output>` (the set of produced files must equal `outputs`).
   Outputs are root-relative, never tracked files, and appear in the root's view for `include` and as units when named like a source.
+  RULE (generator inputs): an input is any tracked file of ANY admitted root (data: read-only, content-keyed in the stage key like a unit's closure,
+  no target restriction). A path in no admitted root, or an untracked path, is red; another root's generated output is no tracked file and comes
+  only through `uses`.
   The script must itself pass `puregate`; wall-clock reads and other open channels of the sandbox make `determinism` red.
 - `os_layer`: units that implement the OS interface (may contain SVC). They are flagged `os_layer: true` in objects.json for `objstub --os-layer`.
 - `game`: root-relative directory whose units are the game's (decomp) objects; the contract gates (gate_contract.py) require it of a root that links, no default.
@@ -154,6 +157,17 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   `link.roots` works for every kind; a root needed by several images has `link` null and is built once per (root, variant).
 - Target of the link: every linked object (own and input roots') has the ELF class and e_machine of the link's emulation (`aarch64linux32` ILP32 = class 1,
   AArch64; `aarch64linux` = class 2, AArch64; `elf_x86_64` = class 2, x86-64), read from its ELF header. A mismatch is red, stage `ld:<root>`, naming the object.
+
+## Header roots
+
+A header root is a product root with no unit and no link (`recipe.header_roots`; a root is one by what it holds, with no flag): `shim`,
+`render/shaders/translator`, `render/shaders/total`. It has no object target.
+- A root of ANY target may list a directory of it in `include`; the files compile under the includer's flags. Every other include keeps the one-home
+  rule (`check()`): the include dir lies in a header root or in a product root of the SAME target, or in an external. `header_dirs` (one name, one file)
+  covers the include dirs of header roots of every target and of product roots of the same target.
+- A header of a header root includes only standard headers, other header roots or an external's tree. The recipe checks it from the PP read set
+  of every unit (`include_edges`: the compiler's own line markers of unit.ii say which file read which; no scan of `#include` text): a file of a header
+  root that reads a file of any root that is no header root makes the unit red at stage `pp:<unit>`, naming both files.
 
 ## Variants
 `variants: {NAME: {"compiler": .., "flags": {..}}}`: one root built for several targets. A variant replaces only the keys it names (`compiler`, `flags`), the rest is

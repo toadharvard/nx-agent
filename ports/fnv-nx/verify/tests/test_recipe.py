@@ -82,7 +82,7 @@ def git(repo, *a):
     return subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@t"] + list(a), capture_output=True, text=True, check=True).stdout
 
 
-def make_repo(name, gen_extra="", rec=None, files=None):
+def make_repo(name, gen_extra="", rec=None, files=None, roots=()):
     repo = os.path.join(BASE, name)
     os.makedirs(repo)
     git(repo, "init", "-q")
@@ -101,7 +101,7 @@ def make_repo(name, gen_extra="", rec=None, files=None):
     w(repo, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
         {"path": ROOT, "class": "product", "target": "host", "gates": [], "recipe": ROOT + "/build.json"},
         {"path": T + "gen", "class": "tool", "gates": []}, {"path": T + "verify", "class": "tool", "gates": []},
-        {"path": T + "link", "class": "tool", "gates": []}, {"path": T + "contract", "class": "tool", "gates": []}]}))
+        {"path": T + "link", "class": "tool", "gates": []}, {"path": T + "contract", "class": "tool", "gates": []}] + list(roots)}))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "toy")
     return repo

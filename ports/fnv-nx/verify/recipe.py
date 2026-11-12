@@ -227,6 +227,69 @@ def units_of(rec, root, files):
     return sorted(u for u in mine | set(generated_outputs(rec)) if is_unit(u))
 
 
+def header_roots(roots, files, repo="."):
+    """The header roots: admitted product roots with no unit and no link (RECIPE.md "Header roots"). A header root has no object target: a root of any
+    target may include its files, and they compile under the includer's flags. -> set of root paths."""
+    out = set()
+    for p, r in roots.items():
+        if r.get("class") != "product" or not r.get("recipe"):
+            continue
+        try:
+            with open(os.path.join(repo, r["recipe"])) as f:
+                rec = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(rec, dict) and not rec.get("link") and not units_of(rec, p, files):
+            out.add(p)
+    return out
+
+
+LINE_MARK = re.compile(r'^# \d+ "([^"]*)"((?: [1-4])*)\s*$')
+
+
+def include_edges(ii):
+    """(includer, included) pairs of the preprocessed text II, from its line markers (flag 1 enters a file, 2 returns): the compiler's own record of
+    which file read which, never a scan of `#include` text."""
+    stack, out = [], set()
+    for line in ii.splitlines():
+        if not line.startswith("# "):
+            continue
+        m = LINE_MARK.match(line)
+        if not m:
+            continue
+        f, fl = m.group(1), m.group(2).split()
+        if "1" in fl:
+            if stack:
+                out.add((stack[-1], f))
+            stack.append(f)
+        elif "2" in fl:
+            if stack:
+                stack.pop()
+            if not stack or stack[-1] != f:
+                stack.append(f)
+        elif not stack:
+            stack.append(f)
+    return out
+
+
+def header_root_violations(edges, repo_of, hroots, roots):
+    """EDGES (includer, included) of one unit; REPO_OF maps a sandbox path to a repo path or None (an external or the system). -> sorted messages: a
+    file of a header root reads a file that lies in a root that is no header root (a header root's headers include only standard headers, other
+    header roots or externals)."""
+    bad = []
+    for a, b in sorted(edges):
+        ra, rb = repo_of(a), repo_of(b)
+        if ra is None or rb is None:
+            continue
+        ha = max((h for h in hroots if under(ra, h)), key=len, default=None)
+        if ha is None:
+            continue
+        owner = max((r for r in roots if under(rb, r)), key=len, default=None)
+        if owner is not None and owner not in hroots:
+            bad.append("%s (header root %s) reads %s of root %s, which is no header root" % (ra, ha, rb, owner))
+    return bad
+
+
 def load_pin(repo="."):
     """verify/guest_compiler.json of the checkout, or None when the tree has none."""
     p = os.path.join(repo, GUEST_PIN)
@@ -430,9 +493,10 @@ def link_errors(lk, root, mine, roots, ext_names, repo):
 HEADER_EXTS = (".h", ".hh", ".hpp", ".hxx", ".inc")
 
 
-def header_dirs(rec, root, roots, repo="."):
+def header_dirs(rec, root, roots, repo=".", hroots=()):
     """The repo include dirs that can supply a header to a product of ROOT's target: the `include` of REC, the `include` of the recipe of every
-    admitted product root of that target (read from REPO; a recipe that is not there adds none) and the `include/` dir of each such root."""
+    admitted product root of that target or that is a header root of any target (HROOTS; read from REPO; a recipe that is not there adds none) and
+    the `include/` dir of each such root."""
     tg = roots[root].get("target")
     dirs = set()
 
@@ -440,7 +504,7 @@ def header_dirs(rec, root, roots, repo="."):
         dirs.update(d for d in inc if isinstance(d, str) and not d.startswith("/"))
     add(rec.get("include") if isinstance(rec.get("include"), list) else [])
     for p, r in roots.items():
-        if r.get("class") == "product" and r.get("target") == tg:
+        if r.get("class") == "product" and (r.get("target") == tg or p in hroots):
             dirs.add(p + "/include")
             try:
                 with open(os.path.join(repo, r["recipe"])) as f:
@@ -507,16 +571,17 @@ def check(rec, root, files, roots, pin=None, repo="."):
         err += ["flags.%s: %s changes a stage's job (use include / the unit's own name)" % (k, t) for t in toks if t in (
             "-o", "-c", "-E", "-S", "-x") or t.startswith(("-I", "-M"))]
         err += ["flags.%s: %s loads or configures a plugin (use plugins)" % (k, t) for t in toks if t.startswith("-fplugin")]
+    hr = header_roots(roots, files, repo)
     inc = rec.get("include")
     for d in inc if isinstance(inc, list) else err.append("include must be a list") or []:
         if isinstance(d, str) and any(under(d, a) for a in ats):
             continue
         if not rel_ok(d) or not any(under(d, r) for r in roots):
             err.append("include %r is not a path inside an admitted root or an external's at" % (d,))
-        elif not any(under(d, r) and roots[r].get("class") == "product" and roots[r].get("target") == roots[root].get("target") for r in roots):
-            # one home per header: the headers a product root includes lie in a product root of the same target (covered by its gates through
-            # the units that read them), never in a doc or tool root or a root of the other target
-            err.append("include %r lies in no admitted product root of target %r (a header dir of a doc or tool root, or of the other target, is no home)"
+        elif not any(under(d, r) and roots[r].get("class") == "product" and (roots[r].get("target") == roots[root].get("target") or r in hr) for r in roots):
+            # one home per header: the headers a product root includes lie in a header root (any target: unit-less, compiled under the includer's
+            # flags) or in a product root of the same target, never in a doc or tool root or a root of the other target
+            err.append("include %r lies in no header root and no admitted product root of target %r (a header dir of a doc or tool root, or of the other target, is no home)"
                        % (d, roots[root].get("target")))
         elif not (any(under(f, d) for f in files) or any(under(root + "/" + o, d) for o in gen)):
             err.append("include %r holds no tracked or generated file" % d)
@@ -524,7 +589,7 @@ def check(rec, root, files, roots, pin=None, repo="."):
     # and the `include/` dir of each such root; two files of one include-relative path in them make `#include <that/path>` depend on the
     # order of a -I list (the first wins, silently), or on which root builds: a header is in one home only
     home = {}
-    for d in header_dirs(rec, root, roots, repo):
+    for d in header_dirs(rec, root, roots, repo, hr):
         for f in files:
             if under(f, d) and f.endswith(HEADER_EXTS):
                 home.setdefault(f[len(d):].lstrip("/"), set()).add(f)
@@ -545,9 +610,9 @@ def check(rec, root, files, roots, pin=None, repo="."):
             err.append("generated[%d].inputs must be tracked files or directories (repo-relative)" % i)
         elif any(a != b and under(a, b) for a in ins for b in ins):
             err.append("generated[%d].inputs nest" % i)
-        for p in ins if isinstance(ins, list) else []:
-            if isinstance(p, str) and not under(p, root) and not any(under(p, r) and roots[r]["class"] == "tool" for r in roots):
-                err.append("generated[%d].inputs: %s is a file of another root: take it through `uses` (the producer's declared output), not by path" % (i, p))
+        for p in ins if isinstance(ins, list) else []:   # RULE: a generator input is any tracked file of any admitted root (data: read-only, content-keyed in the stage key like a unit's closure, no target restriction); a path in no root is red; another root's generated output comes only through `uses` (it is no tracked file)
+            if isinstance(p, str) and not any(under(p, q) for q in roots):
+                err.append("generated[%d].inputs: %s is in no admitted root" % (i, p))
         if not (isinstance(outs, list) and outs and all(rel_ok(o) for o in outs)):
             err.append("generated[%d].outputs must be a non-empty list of root-relative paths" % i)
             continue
@@ -1133,10 +1198,33 @@ class Job:
                 res[u] = e["object"]
                 if e.get("pp_key"):
                     self.ppkeys[u] = e["pp_key"]
+                    bad = self.header_violations(e["pp_key"])
+                    if bad:   # RULE (RECIPE.md "Header roots"): checked from the unit's PP read set, the compiler's own record
+                        failed[u] = {"stage": "pp:" + u, "exit": None, "stderr": bad[:20]}
+                        res.pop(u, None)
+                        continue
                 if e.get("du_key"):
                     self.dukeys[u] = e["du_key"]
         self.failed = [{"unit": u, "stage": failed[u]["stage"], "exit": failed[u]["exit"], "stderr": list(failed[u]["stderr"])[-20:]} for u in units if u in failed]
         return res   # in unit order (UNITS is sorted), so the failures are deterministic
+
+    def header_violations(self, pp_key):
+        """Messages for the PP read set of one unit (stage PP_KEY): a file of a header root that reads a file of a root that is no header root."""
+        hr = self.__dict__.setdefault("_hroots", header_roots(self.roots, self.files, self.repo))
+        if not hr:
+            return []
+        incs = [d for d in self.rec.get("include", []) if not any(under(d, x["at"]) for x in self.ext.values())]
+
+        def repo_of(p):
+            p = posixpath.normpath(p)
+            if p.startswith("/src/"):
+                return self.root + "/" + p[5:]
+            if p.startswith("/inc/"):
+                n, _, rest = p[5:].partition("/")
+                return incs[int(n)] + "/" + rest if n.isdigit() and int(n) < len(incs) else None
+            return None
+        ii = open(unitstage.result_file(self.store, pp_key, "unit.ii"), errors="replace").read()
+        return header_root_violations(include_edges(ii), repo_of, hr, self.roots)
 
     def link(self, ws, groups):
         """Stage `ld:<root>`: the linker of the compiler with the options the rule fixes (RECIPE.md "Link"). GROUPS: [(label, [(unit, path of
