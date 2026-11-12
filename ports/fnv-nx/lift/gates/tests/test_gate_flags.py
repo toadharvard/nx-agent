@@ -55,6 +55,14 @@ CASES = {
     'pushfd_at_entry':    ('9c c3', [(f, 1, 'pushf') for f in ('cf', 'pf', 'af', 'zf', 'sf', 'of')]),
     'lahf_after_cmp':     ('39c0 9f c3', []),
     'lahf_at_entry':      ('9f c3', [(f, 1, 'pushf') for f in ('cf', 'pf', 'af', 'zf', 'sf')]),
+    'pf_pop_and_clean':   ('21d8 9c 58 2500002000 c3', []),                             # and: AF undefined; the copy is masked down to bit 21 before ret
+    'pf_pop_ret':         ('21d8 9c 58 c3', [('af', 4, 'pushf')]),                       # a masked register leaves in eax
+    'pf_pop_test_jz':     ('21d8 9c 58 a910000000 7400 c3', [('af', 4, 'pushf')]),       # test eax,0x10 (AF) then jz: the masked bit decides a branch
+    'pf_pop_test_other':  ('21d8 9c 58 a900002000 7400 31c0 c3', []),                    # test eax,0x200000: the masked bit is not observed
+    'pf_pop_store':       ('21d8 9c 58 a300200000 31c0 c3', [('af', 4, 'pushf')]),       # mov [0x2000],eax stores the masked value
+    'pf_pop_mov_xor_and': ('21d8 9c 58 89c1 3500002000 31c8 2500002000 31c9 c3', []),        # cpuid id-bit idiom
+    'pf_popf_pushf_pop':  ('21d8 9c 9d 9c 58 2500002000 31c0 c3', []),                   # push, popf, push again, pop, mask: the mask moves through popf
+    'pf_popf_jz':         ('21d8 9c 9d 7400 c3', []),                                    # popf of a masked word masks AF only; jz reads ZF
     'cmc_at_entry':       ('f5 c3', [('cf', 1, 'other')]),
     'cmc_after_clc':      ('f8 f5 c3', []),
     'adc_at_entry':       ('11c0 c3', [('cf', 1, 'carry')]),

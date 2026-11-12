@@ -163,6 +163,174 @@ def effect(ins):
     return r
 
 
+# ---------------------------------------------------------------- the pushf / lahf class: bit dataflow of the flag word
+# A pushf or lahf copies the flags into a value. A flag that is may-undefined at that point makes the matching bit of the copy may-undefined. That bit is
+# harmless unless it is OBSERVED: the value of the bit decides a branch, a setcc, a compare, a store to memory or an address, or leaves the entry in a register
+# or in an argument slot. A pushf, lahf or popf only moves the mask between the flags and a word. So the copy is followed forward, per entry, on one abstract state: a may-undefined mask per general register, a stack of masks for the
+# words pushed since the copy, and one mask "the flags computed from a may-undefined value" (the flag bits of a flag word). Transfer by operation (and/or/xor/test/mov/movzx/shl/shr/rol/ror/
+# push/pop/popf/xchg; the register operands come from the decoder, which decides nothing about the masks); any other instruction that reads a masked register is
+# an observation. At a join the masks are united; stacks of different depth are an observation. The state without any mask ends the walk.
+GPR = {'eax': (0, 0, 0xffffffff), 'ecx': (1, 0, 0xffffffff), 'edx': (2, 0, 0xffffffff), 'ebx': (3, 0, 0xffffffff), 'esp': (4, 0, 0xffffffff),
+       'ebp': (5, 0, 0xffffffff), 'esi': (6, 0, 0xffffffff), 'edi': (7, 0, 0xffffffff), 'ax': (0, 0, 0xffff), 'cx': (1, 0, 0xffff), 'dx': (2, 0, 0xffff),
+       'bx': (3, 0, 0xffff), 'sp': (4, 0, 0xffff), 'bp': (5, 0, 0xffff), 'si': (6, 0, 0xffff), 'di': (7, 0, 0xffff), 'al': (0, 0, 0xff),
+       'cl': (1, 0, 0xff), 'dl': (2, 0, 0xff), 'bl': (3, 0, 0xff), 'ah': (0, 8, 0xff), 'ch': (1, 8, 0xff), 'dh': (2, 8, 0xff), 'bh': (3, 8, 0xff)}
+WORDBIT = {'cf': 0, 'pf': 2, 'af': 4, 'zf': 6, 'sf': 7, 'of': 11}
+FLAGWORD = sum(1 << b for b in WORDBIT.values())
+ESP = 4
+
+
+def _w(regs, loc, v):
+    i, sh, m = loc
+    r = list(regs)
+    r[i] = (r[i] & ~(m << sh) & 0xffffffff) | ((v & m) << sh)
+    return tuple(r)
+
+
+def _tv(i, regs, op):
+    """taint mask of a register or immediate operand value, None for memory"""
+    if op.type == X.X86_OP_REG:
+        loc = GPR.get(i.reg_name(op.reg))
+        return 0 if loc is None else (regs[loc[0]] >> loc[1]) & loc[2]
+    if op.type == X.X86_OP_IMM: return 0
+    return None
+
+
+def _addr_taint(i, regs, stack, op):
+    """a memory operand is an observation when its address is masked, or when it may read a masked slot of the stack"""
+    for rid in (op.mem.base, op.mem.index):
+        if rid:
+            loc = GPR.get(i.reg_name(rid))
+            if loc is not None and regs[loc[0]] & (loc[2] << loc[1]): return True
+            if rid == X.X86_REG_ESP and any(stack): return True
+    return False
+
+
+def tstep(i, row, regs, stack, ft):
+    """one instruction on the abstract state -> (regs, stack, ft, observed)"""
+    rd, keep = row[4], row[5]
+    ops, ID = i.operands, i.id
+    if ID in (X.X86_INS_PUSHF, X.X86_INS_PUSHFD): return regs, stack + (ft,), ft, False                   # the flag word carries the masked flags
+    if ID == X.X86_INS_LAHF: return _w(regs, GPR['ah'], ft & 0xff), stack, ft, False
+    if ft & sum(1 << WORDBIT[FLAGS[k]] for k in range(NF) if rd >> k & 1): return regs, stack, ft, True        # a masked flag decides this instruction
+    for op in ops:
+        if op.type == X.X86_OP_MEM and _addr_taint(i, regs, stack, op): return regs, stack, ft, True
+    if ID == X.X86_INS_PUSH:
+        v = 0
+        if ID == X.X86_INS_PUSH:
+            v = _tv(i, regs, ops[0])
+            v = 0 if v is None else v
+        return regs, stack + (v,), ft, False
+    if ID in (X.X86_INS_POP, X.X86_INS_POPF, X.X86_INS_POPFD):
+        v, stack = (stack[-1], stack[:-1]) if stack else (0, stack)
+        if ID != X.X86_INS_POP: return regs, stack, v & FLAGWORD, False                      # popf: the masked bits of the word are the masked flags
+        if ops[0].type == X.X86_OP_REG:
+            loc = GPR.get(i.reg_name(ops[0].reg))
+            if loc is not None: return _w(regs, loc, v), stack, ft, False
+            return regs, stack, ft, False
+        return regs, stack, ft, bool(v)
+    if ID in (X.X86_INS_MOV, X.X86_INS_MOVZX) and len(ops) == 2:
+        v = _tv(i, regs, ops[1])
+        v = 0 if v is None else v
+        if ops[0].type == X.X86_OP_MEM: return regs, stack, ft, bool(v)
+        loc = GPR.get(i.reg_name(ops[0].reg))
+        return (regs if loc is None else _w(regs, loc, v)), stack, ft, False
+    if ID in (X.X86_INS_AND, X.X86_INS_OR, X.X86_INS_XOR, X.X86_INS_TEST) and len(ops) == 2:
+        d, s = ops
+        dl = GPR.get(i.reg_name(d.reg)) if d.type == X.X86_OP_REG else None
+        td, ts = _tv(i, regs, d), _tv(i, regs, s)
+        if d.type == X.X86_OP_MEM: return regs, stack, ft, bool(ts)
+        if td is None or dl is None: return regs, stack, ft, True
+        m = dl[2]
+        if s.type == X.X86_OP_IMM:
+            im = s.imm & m
+            nv = td & im if ID in (X.X86_INS_AND, X.X86_INS_TEST) else (td & ~im if ID == X.X86_INS_OR else td)
+        elif s.type == X.X86_OP_REG and s.reg == d.reg: nv = 0 if ID == X.X86_INS_XOR else td
+        else: nv = td | (ts or 0)
+        regs = regs if ID == X.X86_INS_TEST else _w(regs, dl, nv)
+        return regs, stack, FLAGWORD if nv else 0, False
+    if ID in (X.X86_INS_SHL, X.X86_INS_SHR, X.X86_INS_ROL, X.X86_INS_ROR) and len(ops) == 2 and ops[0].type == X.X86_OP_REG and ops[1].type == X.X86_OP_IMM:
+        dl = GPR.get(i.reg_name(ops[0].reg))
+        td = _tv(i, regs, ops[0])
+        if dl is None or td is None: return regs, stack, ft, True
+        c, m = ops[1].imm & 31, dl[2]
+        if c == 0: return regs, stack, ft, False
+        nb = m.bit_length()
+        if ID == X.X86_INS_SHL: nv = (td << c) & m
+        elif ID == X.X86_INS_SHR: nv = td >> c
+        elif ID == X.X86_INS_ROL: c %= nb; nv = ((td << c) | (td >> (nb - c))) & m
+        else: c %= nb; nv = ((td >> c) | (td << (nb - c))) & m
+        return _w(regs, dl, nv), stack, (FLAGWORD if nv else 0) if ID in (X.X86_INS_SHL, X.X86_INS_SHR) else ft, False
+    if ID == X.X86_INS_NOT and ops and ops[0].type == X.X86_OP_REG: return regs, stack, ft, False
+    # any other instruction: a masked register that it reads is an observation; the registers it writes are unmasked
+    rr, ww = i.regs_access()
+    for rid in rr:
+        loc = GPR.get(i.reg_name(rid))
+        if loc is not None and rid != X.X86_REG_ESP and regs[loc[0]] & (loc[2] << loc[1]): return regs, stack, ft, True
+    if ID in (X.X86_INS_CALL, X.X86_INS_LCALL, X.X86_INS_INT, X.X86_INS_SYSCALL, X.X86_INS_SYSENTER) and any(stack): return regs, stack, ft, True
+    for rid in ww:
+        loc = GPR.get(i.reg_name(rid))
+        if loc is not None and rid != X.X86_REG_ESP: regs = _w(regs, loc, 0)
+    return regs, stack, (0 if keep == 0 else ft), False
+
+
+def taint_observed(ins, objs, site, mask, lahf):
+    """True when the may-undefined bits of the flag word copied at `site` reach an observing consumer"""
+    r0 = ins[site]
+    if lahf: regs, stack = (mask << 8, 0, 0, 0, 0, 0, 0, 0), ()
+    else: regs, stack = (0,) * 8, (mask,)
+    state = {site + r0[1]: (regs, stack, 0)}
+    work = [site + r0[1]]
+    while work:
+        a = work.pop()
+        regs, stack, ft = state[a]
+        if a not in ins: continue
+        row = ins[a]
+        regs, stack, ft, obs = tstep(objs[a], row, regs, stack, ft)
+        if obs: return True
+        kind, tgt = row[2], row[3]
+        if kind == KEND: succ = ()
+        elif kind == KCALL: succ = (a + row[1],)
+        else:
+            succ = [a + row[1]] if kind in (KSEQ, KJCC) else []
+            if kind in (KJMP, KJCC) and tgt is not None: succ.append(tgt)
+        if kind in (KEND, KJMP) and (kind == KEND or tgt not in ins):          # the value leaves the entry: ret, indirect jmp, tail jmp
+            if any(regs) or any(stack): return True
+        if not (any(regs) or any(stack) or ft): continue
+        for s in succ:
+            if s not in ins:
+                if any(regs) or any(stack): return True          # falls into, or jumps to, another entry
+                continue
+            n = state.get(s)
+            if n is None: state[s] = (regs, stack, ft); work.append(s)
+            else:
+                if len(n[1]) != len(stack): return True
+                j = (tuple(x | y for x, y in zip(n[0], regs)), tuple(x | y for x, y in zip(n[1], stack)), n[2] or ft)
+                if j != n: state[s] = j; work.append(s)
+    return False
+
+
+def pushf_filter(img, ranges, ins, red):
+    """drop the red rows of the pushf class whose may-undefined bits are never observed"""
+    sites = {}
+    for r in red:
+        if r[3] == 'pushf': sites.setdefault(r[0], []).append(r)
+    if not sites: return red
+    objs = {}
+    for lo, hi in ranges:
+        code = img.read(lo, hi)
+        if code is None: continue
+        for i in _md.disasm(code, lo): objs[i.address] = i
+    keep = [r for r in red if r[3] != 'pushf']
+    for a, rows in sorted(sites.items()):
+        lahf = objs[a].id == X.X86_INS_LAHF
+        mask = 0
+        for r in rows:
+            if lahf and r[1] == 'of': continue
+            mask |= 1 << (WORDBIT[r[1]] + (0 if not lahf else 0))
+        if mask and taint_observed(ins, objs, a, mask, lahf): keep += rows
+    return sorted(keep)
+
+
 class Image:
     def __init__(self, path, base):
         d = self.d = open(path, 'rb').read()
@@ -283,6 +451,7 @@ def analyse(img, entry, ranges, st0, entries=(), final=False):
                 reads += 1
                 org = st >> (3 * k) & 7
                 if org and final: red.append((a, FLAGS[k], org, r[7], r[8]))
+    if final and red: red = pushf_filter(img, ranges, ins, red)
     return len(ins), sorted(set(contrib)), red, reads, bad
 
 
