@@ -1,0 +1,6 @@
+test	fs: files and directories	test observation (lock counting, violations)	threads+futex: locks
+d3d9_null_module	0	2	2
+d3dx9_38_exports	0	16	16
+d3dx_save_bmp_tga_dds	63	104	104
+d3dx_save_texture_png	20	34	34
+s7_modules_by_ordinal_and_iat_name	0	8	8
