@@ -310,3 +310,7 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - Work assigned:
         - w5: op_cover `handler` and `covering` as object symbols, cross-checked by nm, sent to w20;
         - w1b: the translator's error_abi (fail and its flag field) next to the 9 ops.
+- 08:40Z w1b dc0d34ec: the 9 ps_1_x ops already have bodies in the translator root (the unimplemented ones were in the old render/shaders/src copy). EMIT_GLSL_OPCODE_UNIMPLEMENTED_FUNC is deleted.
+    - Open class: fail() sites in the root. w1b runs fail_census.py, classifying each site as (v) validator-rejected input, (r) allocation failure, or (o) other. (v) goes to L1 as certificate input.
+    - Translating the rows needs the L1 w10/w15 test root on the L4 boot machine; pending.
+    - The farm is released.
