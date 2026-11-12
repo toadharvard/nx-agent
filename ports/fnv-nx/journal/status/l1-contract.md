@@ -336,3 +336,6 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
     - Family 1, hardening defaults: always neutralised.
     - Family 2, target/code-model (PIC/PIE, mcmodel, mabi, march/mtune/mcpu): must be stated explicitly by the root; an implicit one is red. The family is derived from the driver's `-Q --help=target`.
     - This fixes the PIE refusal of render/backend (L6A).
+- 04:12Z: **w14 09b509e4 (warm ensure) measured by L4** (w7 57228c44, test_bootmachine with 54 variants).
+  - Cold: 90.7 s → 37.2 s. Warm: 62.3 s → 6.2 s. 145 cases, 0 fail.
+  - Accepted.
