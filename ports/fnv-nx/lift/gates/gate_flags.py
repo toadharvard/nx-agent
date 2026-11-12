@@ -18,8 +18,14 @@ instruction's operands come from the facts' decoder, capstone, which decides not
            w false (undefined: OF of a rotate or shld/shrd with an immediate count other than 1); a count in cl leaves k and w unknown: in-state kept, defined
            or undefined (in-state U-union);
   undef    the Form's `undefined(f)`.
-The transfer of a flag is out = (in & KEEP) | UNDEF, per instruction; a call (and int, syscall) sets every flag to origin C (the calling convention: the
-status flags are undefined at a call and after it); the direction flag is not tracked (DF = 0 by the ABI).
+The transfer of a flag is out = (in & KEEP) | UNDEF, per instruction; a call to a KNOWN ENTRY (a direct call whose target is an entry of the facts) has the callee's
+summary as its transfer: S[callee] is the join, over every way out of the callee's body, of the state at that exit when every flag starts as PASS (the
+flag still holds its value at the callee's entry); a ret exits with its state, a direct jmp / jcc / fall-through into another entry (a tail) exits with that
+entry's summary applied, recursion and mutual calls are the least fixpoint (monotone: finite bits, a body is recomputed when a summary it used changed),
+and an exit that is not a ret or a tail to a known entry (an indirect jmp, retf, iret, running off the decoded body) is every flag C. The state after the call
+is: where the summary has PASS the caller's state before the call, joined with the summary's own origins. A callee with no exit (it never returns) has no
+summary: the fall-through past its call is every flag C (judged, never dropped). Every other call (indirect, import, int, syscall) sets every flag to origin C
+(the calling convention: the status flags are undefined at a call and after it); the direction flag is not tracked (DF = 0 by the ABI).
 A shape with no Form is UNCOVERED: its instructions are red with reason no-form (item 23 closes them) and pass the in-state through.
 
 Dataflow. Per entry forward, may-be-undefined (a map instruction address -> 18 bits, three origin bits per flag, 0 = defined on every path), union at joins.
@@ -50,8 +56,8 @@ from proof import forms, shape
 FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
 NF = len(FLAGS)
 E_, C_, U_ = 1, 2, 4
-ALL_E = sum(E_ << (3 * k) for k in range(NF))
-ALL_C = sum(C_ << (3 * k) for k in range(NF))
+ALL_E = sum(E_ << (4 * k) for k in range(NF))
+ALL_C = sum(C_ << (4 * k) for k in range(NF))
 SHIFT_IDS = (X.X86_INS_SHL, X.X86_INS_SHR, X.X86_INS_SAR, X.X86_INS_SAL, X.X86_INS_ROL, X.X86_INS_ROR, X.X86_INS_RCL, X.X86_INS_RCR,
              X.X86_INS_SHLD, X.X86_INS_SHRD)
 CALL_IDS = (X.X86_INS_CALL, X.X86_INS_LCALL, X.X86_INS_INT, X.X86_INS_SYSCALL, X.X86_INS_SYSENTER)
@@ -411,35 +417,102 @@ def decode(img, lo, hi):
     return r
 
 
-def analyse(img, entry, ranges, st0, entries=(), final=False):
-    """Forward flow over the body of one entry from in-state st0. -> (n instructions, contributions [(target entry, state)], red rows
-    [(site, flag, origins, class, mnemonic)] (only when final), reads, undecodable ranges)"""
+class Lay:
+    """a bit layout of the flow states: NF fields of W bits (origin bits at the low end, the PASS bit at PBIT: the flag still holds the value it had at the entry
+    of the summarised body), ALLC = every flag at origin C"""
+    def __init__(self, W, pbit, c_bit=C_):
+        self.W, self.pbit, self.FM = W, pbit, (1 << W) - 1
+        self.PM = sum(1 << (pbit + W * k) for k in range(NF))
+        self.allp = self.PM
+        self.allc = sum(c_bit << (W * k) for k in range(NF))
+
+
+LAY = Lay(4, 3)
+RETS = ('ret', 'retn')
+STOPS = ('hlt', 'ud2', 'int3')
+
+
+def apply_summary(st, S, lay):
+    """the state after a call (or tail transfer) to a body with summary S from the state ST before it: a flag whose summary has PASS keeps the caller's origins,
+    and gets the summary's own origins besides"""
+    return (st & (((S & lay.PM) >> lay.pbit) * lay.FM)) | (S & ~lay.PM)
+
+
+def flow(ins, entry, st0, entries, xf, lay, S, bottom=False):
+    """The one forward flow over the body INS of an entry from the in-state ST0; XF(addr, row) -> (keep mask, add mask) in LAY.
+    A call to a known entry (a direct call whose target is an entry of the facts) has the out-state S[target] applied to the state before it (the join over the
+    target's ret sites, see summaries); a call to anything else (indirect, import, int, syscall) leaves every flag at origin C (the calling convention).
+    A target with no summary: BOTTOM (the summary iteration: nothing flows past the call yet) or every flag C (a body that never returns: the fall-through
+    is kept judged, never dropped).
+    -> (state per instruction, contributions [(entry, in-state)], exit state (join of the states at the rets, tail transfers by the summary of the entry they
+    reach, every unknown exit as C; None when no exit), entries whose summary was consumed)"""
+    state = {entry: st0} if entry in ins and st0 is not None else {}
+    work = [entry] if state else []
+    contrib, deps, ret = [], set(), None
+    j = lambda x, y: y if x is None else x | y
+    while work:
+        a = work.pop()
+        r = ins[a]
+        st = state[a]
+        size, kind, tgt = r[1], r[2], r[3]
+        keep, add = xf(a, r)
+        if kind == KCALL:
+            if tgt is not None and tgt in entries:
+                deps.add(tgt)
+                if tgt not in ins: contrib.append((tgt, st))
+                sc = S.get(tgt)
+                o = apply_summary(st, sc, lay) if sc is not None else (None if bottom else lay.allc)
+            else: o = lay.allc
+        else: o = (st & keep) | add
+        succ = []
+        if o is not None and kind in (KSEQ, KCALL, KJCC): succ.append((a + size, o, kind != KCALL))
+        if kind in (KJMP, KJCC) and tgt is not None: succ.append((tgt, st, True))
+        if kind == KEND:
+            mn = r[8].split()[-1]
+            if mn in RETS: ret = j(ret, o)
+            elif mn not in STOPS: ret = j(ret, lay.allc)           # retf, iret, an indirect jmp: the exit is unknown
+        for s, so, direct in succ:
+            if s in ins:
+                n = state.get(s)
+                if n is None or n | so != n:
+                    state[s] = so if n is None else n | so
+                    work.append(s)
+            elif s in entries:
+                if direct: contrib.append((s, so))
+                deps.add(s)
+                sc = S.get(s)
+                if sc is not None: ret = j(ret, apply_summary(so, sc, lay))
+            else: ret = j(ret, lay.allc)
+    return state, contrib, ret, deps
+
+
+def _xf4(cache):
+    def xf(a, r):
+        v = cache.get(a)
+        if v is None:
+            keep = add = 0
+            for k in range(NF):
+                if (r[5] >> (3 * k)) & 7: keep |= 15 << (4 * k)
+                add |= ((r[6] >> (3 * k)) & 7) << (4 * k)
+            v = cache[a] = (keep, add)
+        return v
+    return xf
+
+
+def _body(img, ranges):
     ins, bad = {}, 0
     for lo, hi in ranges:
         rows, b = decode(img, lo, hi)
         if b is not None: bad += 1
         for r in rows: ins[r[0]] = r
-    state = {entry: st0} if entry in ins and st0 is not None else {}
-    work = [entry] if state else []
-    contrib = []
-    while work:
-        a = work.pop()
-        r = ins[a]
-        st = state[a]
-        _, size, kind, tgt, rd, keep, undef, cls, mn, cov = r
-        o = ALL_C if kind == KCALL else (st & keep) | undef
-        if kind == KCALL and tgt is not None and tgt in entries and tgt not in ins: contrib.append((tgt, st))
-        succ = []
-        if kind in (KSEQ, KCALL, KJCC): succ.append(a + size)
-        if kind in (KJMP, KJCC) and tgt is not None: succ.append(tgt)
-        for s in succ:
-            if s not in ins:
-                if s in entries and kind != KCALL: contrib.append((s, o if s == a + size else st))
-                continue
-            n = state.get(s)
-            if n is None or n | o != n:
-                state[s] = o if n is None else n | o
-                work.append(s)
+    return ins, bad
+
+
+def analyse(img, entry, ranges, st0, entries=(), final=False, S=None):
+    """Forward flow over the body of one entry from in-state st0. -> (n instructions, contributions [(target entry, state)], red rows
+    [(site, flag, origins, class, mnemonic)] (only when final), reads, undecodable ranges)"""
+    ins, bad = _body(img, ranges)
+    state, contrib, _, _ = flow(ins, entry, st0, entries, _xf4({}), LAY, S or {})
     red, reads = [], 0
     for a in sorted(state):
         r = ins[a]
@@ -452,18 +525,55 @@ def analyse(img, entry, ranges, st0, entries=(), final=False):
         for k in range(NF):
             if rd >> k & 1:
                 reads += 1
-                org = st >> (3 * k) & 7
+                org = st >> (LAY.W * k) & 7
                 if org and final: red.append((a, FLAGS[k], org, r[7], r[8]))
     if final and red: red = pushf_filter(img, ranges, ins, red)
     return len(ins), sorted(set(contrib)), red, reads, bad
 
 
+def summarise_entry(img, entry, ranges, entries, S):
+    """-> (exit state of the body from the PASS seed, entries whose summary it used) for the summary iteration"""
+    ins, _ = _body(img, ranges)
+    _, _, ret, deps = flow(ins, entry, LAY.allp, entries, _xf4({}), LAY, S, bottom=True)
+    return ret, deps
+
+
+def solve_summaries(ents, jobs, mkpool, worker, setS):
+    """The summary S[e] of every entry e: the join, over every way out of its body, of the state at that exit when each flag starts as PASS (a call to a known
+    entry applies that entry's summary; recursion and mutual calls are the least fixpoint). Monotone (S only grows, finite bits); an entry is recomputed
+    when a summary it consumed changed. MKPOOL(S) -> a process pool whose workers see S (or None), WORKER((entries)) -> [(e, exit state, deps)]."""
+    S, rev, dirty = {}, {}, sorted(ents)
+    chunk = lambda lst: [lst[i:i + 64] for i in range(0, len(lst), 64)]
+    while dirty:
+        p = mkpool(S)
+        if p is None: setS(S)
+        new = {}
+        try:
+            for part in (p.imap(worker, chunk(dirty)) if p is not None else map(worker, chunk(dirty))):
+                for e, ret, deps in part:
+                    for d in deps: rev.setdefault(d, set()).add(e)
+                    if ret is not None and (e not in S or S[e] | ret != S[e]): new[e] = S.get(e, 0) | ret
+        finally:
+            if p is not None: p.close(); p.join()
+        nd = set()
+        for e, v in new.items():
+            S[e] = v
+            nd |= rev.get(e, set())
+        dirty = sorted(nd)
+    return S
+
+
 G = {}
 
 
-def _init(path, base, rows, entries):
+def _init(path, base, rows, entries, S=None):
     MEMO.clear()
-    G['img'] = Image(path, base) if isinstance(path, str) else path; G['rows'] = rows; G['ents'] = entries
+    G['img'] = Image(path, base) if isinstance(path, str) else path; G['rows'] = rows; G['ents'] = entries; G['S'] = S if S is not None else {}
+
+
+def _wsum(items):
+    img, rows, ents, S = G['img'], G['rows'], G['ents'], G['S']
+    return [(e,) + summarise_entry(img, e, rows[e], ents, S) for e in items]
 
 
 def _work(task):
@@ -471,7 +581,7 @@ def _work(task):
     final, items = task
     out = []
     for e, st in items:
-        n, contrib, red, reads, bad = analyse(img, e, rows[e], st, ents, final)
+        n, contrib, red, reads, bad = analyse(img, e, rows[e], st, ents, final, G['S'])
         out.append((e, n, contrib, red, reads, bad))
     return out
 
@@ -480,10 +590,12 @@ def solve(path, base, rows, uni, jobs=4):
     """-> (in-state per entry (None: unreached), results of the final pass [(entry, n, contributions, red rows, reads, undecodable)])"""
     ents = frozenset(rows)
     chunk = lambda lst: [lst[i:i + 64] for i in range(0, len(lst), 64)]
-    pool = multiprocessing.Pool(jobs, _init, (path, base, rows, ents)) if jobs > 1 else None
-    if pool is None:
-        _init(path, base, rows, ents)
+    def setS(S):
+        _init(path, base, rows, ents, S)
         if not isinstance(path, str): G['img'] = path          # jobs = 1: an image object (the self-test)
+    S = solve_summaries(ents, jobs, lambda S: multiprocessing.Pool(jobs, _init, (path, base, rows, ents, S)) if jobs > 1 else None, _wsum, setS)
+    pool = multiprocessing.Pool(jobs, _init, (path, base, rows, ents, S)) if jobs > 1 else None
+    if pool is None: setS(S)
     run = (lambda t: pool.imap(_work, t)) if pool is not None else (lambda t: map(_work, t))
     try:
         # pass 0: the direct edges (they do not depend on the state)

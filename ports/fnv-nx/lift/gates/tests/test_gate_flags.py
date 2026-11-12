@@ -172,6 +172,35 @@ class T(unittest.TestCase):
         self.assertEqual(red, [(A + 0x200, [('zf', 4, 'jcc')])])
         inst, red = solve({A: '39c0 e8f9000000 c3', A + 0x100: 'e8fb000000 7400 c3'}, {A: ('export', ['-']), A + 0x100: ('call', ['-'])})
         self.assertEqual(red, [(A + 0x100, [('zf', 2, 'jcc')])])
+        # the call transfer is the callee's summary: a callee that defines every flag (cmp) before its ret gives the caller defined flags
+        X = {A: ('export', ['-']), A + 0x100: ('call', ['-'])}
+        inst, red = solve({A: 'e8fb000000 7400 c3', A + 0x100: '39c0 c3'}, X)
+        self.assertEqual(red, [])
+        # a callee that leaves the flags alone passes the caller's state through: the cmp before the call is still the definition
+        inst, red = solve({A: '39c0 e8f9000000 7400 c3', A + 0x100: '90 c3'}, X)
+        self.assertEqual(red, [])
+        # the same pass-through with no definition before the call: the caller's own entry state (E) comes out of the call
+        inst, red = solve({A: 'e8fb000000 7400 c3', A + 0x100: '90 c3'}, X)
+        self.assertEqual(red, [(A, [('zf', 1, 'jcc')])])
+        # a callee with one path that defines and one that does not: the join keeps the caller's state on the second path
+        inst, red = solve({A: '39c0 e8f9000000 7400 c3', A + 0x100: '85c9 7402 39c0 c3'}, X)
+        self.assertEqual(red, [])
+        # a callee that leaves ZF undefined (mul) hands that to the caller; the callee's own ret reads nothing
+        inst, red = solve({A: '39c0 e8f9000000 7400 c3', A + 0x100: 'f7e1 c3'}, X)
+        self.assertEqual(red, [(A, [('zf', 4, 'jcc')])])
+        # an indirect call is the calling convention: every flag undefined (C)
+        inst, red = solve({A: '39c0 ffd0 7400 c3'}, X)
+        self.assertEqual(red, [(A, [('zf', 2, 'jcc')])])
+        # a tail jmp takes the tail entry's summary: A jmp B, B = cmp; ret, and a caller C calls A
+        inst, red = solve({A: 'e9fb000000', A + 0x100: '39c0 c3', A + 0x200: 'e8fbfdffff 7400 c3'},
+                          {A: ('call', ['-']), A + 0x100: ('tail', ['-']), A + 0x200: ('export', ['-'])})
+        self.assertEqual(red, [])
+        # recursion is the least fixpoint: the callee calls itself and defines the flags on its base path
+        inst, red = solve({A: 'e8fb000000 7400 c3', A + 0x100: '85c9 7405 e8f6ffffff 39c0 c3'}, X)
+        self.assertEqual(red, [])
+        # a callee that never returns (jmp $) is no exit: its call's fall-through keeps the calling convention (C), judged and not dropped
+        inst, red = solve({A: '39c0 e8f9000000 7400 c3', A + 0x100: 'ebfe'}, X)
+        self.assertEqual(red, [(A, [('zf', 2, 'jcc')])])
         # an entry with no direct predecessor is an unknown predecessor itself
         inst, red = solve({A: '7400 c3'}, {A: ('call', ['-'])})
         self.assertEqual(red, [(A, [('zf', 1, 'jcc')])])
