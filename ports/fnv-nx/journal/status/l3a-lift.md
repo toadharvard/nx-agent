@@ -49,3 +49,11 @@ Lead: Opus 5.5, branch `claude/fnv-l3a-lift`. Handoff read: 422c3d39 (`journal/i
 
 
 Note (L1/orchestrator 03:32): lift/pack and lift/rt take exceptions and unwind tables ON (conservative) until w17's fact (host C++ exception across a lifted frame, by the call graph) proves otherwise. L3a sent the edge inputs (dispatch table, bridges, imports, enter.cc). Guest MSVC EH never becomes a host exception (rt/seh).
+Update 2026-11-12, at 698adefb:
+- L3b's range 00e7c100-00e7c1d9 (decoding stops at 00e7c11c) is with w7. Rule: a byte is code iff proven flow reaches it. An undecodable byte that flow reaches is the #UD point. If the facts are wrong, the codemap or residue.py rule is fixed, and every same-shape range in all 6 images is counted.
+- L1 w17 397d7feb flags.semantics: w1 strips every semantic flag from lift/pack and lift/rt build.json (keep -D, -W, -O), coordinating with w8 on rt. It is queued after cold 2 and warm. `recipe.py check` is the proof.
+- w5 pure-gate (a08ef74c), the lead's decisions:
+  - census_doubles and the farm scripts are already resolved by 7788747f;
+  - mp.Pool only with a pinned interpreter;
+  - the test/ → tests/ move is declined (a directory name is not the class), and the test-root classification is asked of L1;
+  - bench/ is deleted if it has no consumer.
