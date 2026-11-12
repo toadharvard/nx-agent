@@ -21,7 +21,7 @@ PIPW=$(J 'print(*[m + "==" + d["python"]["modules"][m] + " --hash=sha256:" + w["
 CHECK="python3 -I $VERIFY/envcheck.py check --env $ENV_JSON"
 APT="apt-get install -y --no-install-recommends $PKGS"
 PIP="python3 -m pip install --break-system-packages $PIPS"
-PIPH="python3 -m pip install --break-system-packages --require-hashes -r -"
+PIPH="python3 -m pip install --break-system-packages --require-hashes -r /dev/stdin"
 if [ "$MODE" = --print ]; then
   printf '%s\n' "apt-get update" "$APT" "$PIP" "printf '%s\\n' '$PIPW' | $PIPH" "$CHECK"
   exit 0
