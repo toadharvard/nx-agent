@@ -277,6 +277,21 @@ def read_rows(text):
     return rows
 
 
+def read_unresolved(text):
+    """dynsites_open.tsv (module, ref va, api, reason): slot uses that are not call sites of the rule (a slot reference in bytes no run of the
+    function facts covers, an escaped slot). -> open result rows: no call is decided, so the use is `open` with its reason, never dropped
+    (an `unreached` verdict comes only from a call-graph certificate)."""
+    out = []
+    for line in text.splitlines():
+        f = line.split('\t')
+        if len(f) < 4 or f[0] == 'module':
+            continue
+        r = (f[0], int(f[1], 16), f[2], 'dynamic', 'dynamic' if f[2] == 'GetProcAddress' else '-')
+        out.append(dict(row=r, status='open', mods=[], names=[], pairs=[], proof=[], breaks=[f[3]], note='', star=False,
+                        need_name=True, need_mod=f[2] == 'GetProcAddress'))
+    return out
+
+
 def write_sites(res, out):
     lines = ['module\tsite\tapi\told_operand\tstatus\tresolved\tproof\tbreaks']
     for r in res:
@@ -343,6 +358,10 @@ def selftest():
     assert (c['dyn'], c['resolved'], c['conditional'], c['unreached'], c['open']) == (5, 2, 1, 1, 1), c
     assert NOT_A_MODULE.fullmatch('hModule is imm 1') and not NOT_A_MODULE.fullmatch('hModule is str 1')
     assert GLOBAL.search('load of writable global 11b76d0').group(1) == '11b76d0'
+    u = read_unresolved('module\tva\tapi\treason\natimgpud.dll\t0x100092d6\tLoadLibraryA\tunresolved: inside no run of the function facts\n')
+    assert len(u) == 1 and u[0]['status'] == 'open' and u[0]['row'][1] == 0x100092d6 and u[0]['breaks'][0].startswith('unresolved: inside no run'), u
+    cu = counts(u)
+    assert (cu['dyn'], cu['open'], cu['unreached']) == (1, 1, 0), cu
     print('selftest ok')
     return 0
 
@@ -360,6 +379,7 @@ def main(argv=None):
     ap.add_argument('--escape', action='append', default=[])
     ap.add_argument('--out', required=True)
     ap.add_argument('--rewrite')
+    ap.add_argument('--open', help='dynsites_open.tsv of pemanifest: slot uses without a decoded call, counted as open rows')
     funcfacts.facts_dir_from_argv(sys.argv)
     a = ap.parse_args(argv)
     argflow, gpa_names, memfx, iat = load_contract(a.contract)
@@ -382,6 +402,8 @@ def main(argv=None):
         if r[0].lower() not in images and r[2] in SITE_APIS:
             res.append(dict(row=r, status='open', mods=[], names=[], pairs=[], proof=[], breaks=['no image %s' % r[0]], note='', star=False,
                             need_name=r[3] == 'dynamic', need_mod=r[2] == 'GetProcAddress' and r[4] == 'dynamic'))
+    if a.open:
+        res += read_unresolved(open(a.open, encoding='utf-8').read())
     os.makedirs(a.out, exist_ok=True)
     write_sites(res, a.out)
     if a.rewrite:

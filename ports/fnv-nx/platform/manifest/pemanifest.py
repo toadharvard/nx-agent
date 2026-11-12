@@ -147,11 +147,14 @@ class Mod:
         im = self.argimage(contract, bridge_tsv, escape_tsv)
         if im is None:
             return [], [("*", 0, "unresolved: " + self.ff.reason)]
+        ff = self.ff
         af = self._argflow
         rows, op_ = [], []
         for api in sorted({n for _, n, _ in self.imports if n in DYN}):
             calls, o = af.imports_called(im, api)
             op_ += [(api, va, why) for va, why in o]
+            slots = {sl for _, n, sl in self.imports if n == api}
+            op_ += uncovered_refs(ff, api, [r for r in self.relocs if self.u32(r) in slots and self.in_code(r)])
             for c in calls:
                 if api == "CoCreateInstance":
                     gs = []
@@ -200,6 +203,13 @@ class Mod:
         es = ff.entries_of(site)
         return "inside no run of the function facts" if not es else "; ".join(
             "entry %x: %s" % (e, ff.bad[e]) for e in es if e in ff.bad)
+
+
+def uncovered_refs(ff, api, refs):
+    """[(api, va, reason)] for the slot references `refs` of `api` that lie in code bytes no run of the function facts covers: nothing is decoded
+    there, so no call is decided; each is an open row `unresolved: inside no run of the function facts`, never dropped (the facts are not known to
+    be complete, so "no run" is no proof of "no call"; `unreached` needs a call-graph certificate)."""
+    return [(api, r, "unresolved: " + ff.why(r)) for r in sorted(refs) if not ff.entries_of(r)]
 
 
 def load_dllkind(path, sha):
@@ -288,7 +298,9 @@ def main(d, root, out, bridge_tsv, dllkind_py, dllkind_sha, contract, escape_tsv
     os.makedirs(out, exist_ok=True)
     with open(os.path.join(out, "imports.tsv"), "w") as fi, \
          open(os.path.join(out, "dynsites.tsv"), "w") as fd, \
-         open(os.path.join(out, "closure.tsv"), "w") as fc:
+         open(os.path.join(out, "closure.tsv"), "w") as fc, \
+         open(os.path.join(out, "dynsites_open.tsv"), "w") as fo:
+        fo.write("module\tva\tapi\treason\n")
         fi.write("module\tdll\tname\tslot\tcode_refs\tdata_refs\n")
         fd.write("module\tsite\tapi\toperand\thmod\n")
         fc.write("module\trole\timports\texports\treach\n")
@@ -300,6 +312,7 @@ def main(d, root, out, bridge_tsv, dllkind_py, dllkind_sha, contract, escape_tsv
             rows, opn = m.dynsites(contract, bridge_tsv, escape_tsv)
             for api, va, why in opn:
                 sys.stderr.write("OPEN %s %s@%x %s\n" % (n, api, va, why))
+                fo.write("%s\t0x%08x\t%s\t%s\n" % (n, va, api, why))
             for site, nm, op, hm in sorted(set(rows)):
                 fd.write("%s\t0x%08x\t%s\t%s\t%s\n" % (n, site, nm, op, hm))
             fc.write("%s\t%s\t%d\t%d\t%s\n" % (n, kind.get(n, "root"), len(m.imports), m.exports,
