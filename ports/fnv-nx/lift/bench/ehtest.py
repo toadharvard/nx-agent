@@ -202,7 +202,7 @@ def main():
     texts = {}
     for n, (ad, sz, start, owns) in ents.items(): texts[start] = L.lift(img, ad, sz, start=start, owns=owns)[0]
     flags = [f for f in T.FLAGS if f != '-DFNVL_FLAGS_IO'] + ['-I', LIFT + '/rt']
-    o, err = chain.comp_chunk((L.PRELUDE + '\n'.join(texts.values()), flags + ['-DFNVL_TRACE'], a.work))
+    o, err = chain.comp_chunk((L.prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt')) + '\n'.join(texts.values()), flags + ['-DFNVL_TRACE'], a.work))
     if not o: sys.exit('compile: ' + err)
     so = a.work + '/seh.o'; r = subprocess.run(['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++', '-I', LIFT + '/rt', LIFT + '/rt/seh.cc', '-o', so], capture_output=True, text=True)
     if r.returncode: sys.exit('seh.cc: ' + r.stderr[:600])

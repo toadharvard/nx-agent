@@ -85,7 +85,7 @@ def main():
     a = ap.parse_args(); os.makedirs(a.work, exist_ok=True)
     out, bad, undef = collect(a.shapes)
     chunks = [out[i:i + 300] for i in range(0, len(out), 300)]
-    with mp.Pool(a.jobs) as p: res = p.map(compile_tu, [(k, fnvlift.PRELUDE, c, a.work) for k, c in enumerate(chunks)])
+    with mp.Pool(a.jobs) as p: res = p.map(compile_tu, [(k, fnvlift.prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt')), c, a.work) for k, c in enumerate(chunks)])
     ok = sum(r[0] for r in res); fails = [f for r in res for f in r[1]]
     nshapes = len(out) + len(bad)
     print('(%d of them the second, outside-target copy of a branch)' % sum(1 for f in out if f[1].endswith('+')))

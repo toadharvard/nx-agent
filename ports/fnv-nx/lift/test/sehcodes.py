@@ -11,7 +11,7 @@ from unicorn import *
 from unicorn.arm64_const import *
 from elftools.elf.elffile import ELFFile
 W = '/home/user/l3work/sehcodes'; CPU, STK, FSB, RET, SEL = 0xE1000000, 0x10100000, 0x7FFDF000, 0xE1FF0000, 400
-DRV = L.PRELUDE + '''
+DRV = L.prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt')) + '''
 extern "C" { u32 g_rec, g_ctx; u32 fnvl_os_unhandled(u32 r, u32 x){ g_rec=r; g_ctx=x; return 0; } void (*fnvl_dispatch(u32 a))(void){ return 0; }
   void drv_raise(u32 code, u32 at){ fnvl_rt::fnvl_raise(code, at); }
   void drv_av(u32 at){ fnvl_rt::fnvl_raise_av(0, 0xffffffffu, at); }

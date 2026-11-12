@@ -462,7 +462,7 @@ def build(batch_id, items, work):
     env = dict(os.environ, LC_ALL='C'); bad = {}; objs = []; d = '%s/b%d' % (work, batch_id); os.makedirs(d, exist_ok=True)
     def comp(its):
         if not its: return
-        cpp = '%s/%d.cpp' % (d, len(objs)); o = cpp[:-4] + '.o'; open(cpp, 'w').write(G['L'].PRELUDE + STUBX + '\n'.join(t for a, t in its))
+        cpp = '%s/%d.cpp' % (d, len(objs)); o = cpp[:-4] + '.o'; open(cpp, 'w').write(G['L'].prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt')) + STUBX + '\n'.join(t for a, t in its))
         r = subprocess.run(['aarch64-linux-gnu-g++'] + FLAGS + [cpp, '-o', o], capture_output=True, text=True, env=env)
         if r.returncode == 0: objs.append(o); return
         why = {int(m.group(2), 16): re.findall(r'error: ([^\n]*)', r.stderr[m.start():])[:1] for m in re.finditer(r'In function [^\n]*?(L_([0-9a-f]{8}))', r.stderr)}
@@ -541,7 +541,7 @@ def main():
     open(a.work + '/hostshim.c', 'w').write('unsigned long long fnvl_host_ticks_ns(void){ return 0; }\n')
     subprocess.check_call(['gcc', '-shared', '-fPIC', '-O1', '-o', a.work + '/cpumodel_host.so', os.path.join(a.lifter, 'rt', 'cpumodel.c'), a.work + '/hostshim.c'])
     import ctypes; G['cpum'] = ctypes.CDLL(a.work + '/cpumodel_host.so')
-    open(a.work + '/off.cpp', 'w').write(L.PRELUDE + '\n#include <stddef.h>\nstatic_assert(offsetof(cpu,fs)==32&&offsetof(cpu,ftop)==36&&offsetof(cpu,fcw)==40&&offsetof(cpu,fc)==44&&offsetof(cpu,x)==48&&offsetof(cpu,fl)==176&&offsetof(cpu,mxcsr)==180&&offsetof(cpu,mm_unused)==184&&offsetof(cpu,ra)==248&&offsetof(cpu,fex)==252&&offsetof(cpu,fx)==256&&offsetof(cpu,eflx)==384&&offsetof(cpu,sel)==400&&offsetof(cpu,teb)==424&&offsetof(cpu,fip)==428&&offsetof(cpu,fdp)==432&&offsetof(cpu,eflags)==460&&offsetof(cpu,dr)==464&&sizeof(cpu)==488,"cpu layout");\n')
+    open(a.work + '/off.cpp', 'w').write(L.prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt')) + '\n#include <stddef.h>\nstatic_assert(offsetof(cpu,fs)==32&&offsetof(cpu,ftop)==36&&offsetof(cpu,fcw)==40&&offsetof(cpu,fc)==44&&offsetof(cpu,x)==48&&offsetof(cpu,fl)==176&&offsetof(cpu,mxcsr)==180&&offsetof(cpu,mm_unused)==184&&offsetof(cpu,ra)==248&&offsetof(cpu,fex)==252&&offsetof(cpu,fx)==256&&offsetof(cpu,eflx)==384&&offsetof(cpu,sel)==400&&offsetof(cpu,teb)==424&&offsetof(cpu,fip)==428&&offsetof(cpu,fdp)==432&&offsetof(cpu,eflags)==460&&offsetof(cpu,dr)==464&&sizeof(cpu)==488,"cpu layout");\n')
     subprocess.check_call(['aarch64-linux-gnu-g++'] + FLAGS + ['-fsyntax-only', a.work + '/off.cpp'])
     d = load_forms(a, None); forms = d['forms']; print('pack: %d forms' % len(forms), file=sys.stderr)
     keys = sorted(k for k in forms if not a.only or k.split('|')[0] in a.only.split(','))

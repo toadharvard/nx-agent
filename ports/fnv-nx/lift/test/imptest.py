@@ -131,7 +131,7 @@ def main():
     CF = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-w', '-c']
     syms = {ad: 'L_%08x' % ad for ad, sz, owns in ents.values()}; syms.update({k: s for k, s, *_ in ent})
     assert {n: k for k, s, d, n, b in ent} == {r[1]: KEY[r[1]] for r in BRIDGE if r[6] != 'none'}
-    h = phf.build(list(syms)); open(w + '/tab.S', 'w').write(phf.table_asm(syms, h)); open(w + '/native.c', 'w').write(NATIVE); open(w + '/guest.cpp', 'w').write(L.PRELUDE + '\n'.join(texts))
+    h = phf.build(list(syms)); open(w + '/tab.S', 'w').write(phf.table_asm(syms, h)); open(w + '/native.c', 'w').write(NATIVE); open(w + '/guest.cpp', 'w').write(L.prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt')) + '\n'.join(texts))
     jobs = [(['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], w + '/guest.cpp'), (['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], w + '/imp.cpp'),
             (['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], LIFT + '/rt/enter.cc'), (['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], LIFT + '/rt/seh.cc'), (['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], LIFT + '/rt/unhandled.cc'),
             (['aarch64-linux-gnu-gcc'] + CF, LIFT + '/rt/rt.c'), (['aarch64-linux-gnu-gcc'] + CF, LIFT + '/rt/rcptab.c'), (['aarch64-linux-gnu-gcc'] + CF + ['-I', LIFT + '/rt'], LIFT + '/rt/x87.c'),

@@ -4,7 +4,6 @@ Dispatch order per instruction (same as the PoC): mnemonic handler (@op); a hand
 through; then the fallbacks in registration order (@fallback(pred): x87 by opcode byte, SSE by xmm operand);
 then Unsupported('insn ...')."""
 import bisect
-import os
 import capstone
 from capstone import x86 as X
 
@@ -200,9 +199,14 @@ def explore(img, lo, hi, code, start=None, extra=(), fall_hi=None):
     return insns, tables, taken, bad
 
 
-EMIT = os.environ.get('FNVL_EMIT', '')      # 'dsl': integer instructions are emitted from the proven DSL forms (f_dsl.py) before the hand handlers; '' = the hand handlers only
-if EMIT not in ('', 'dsl'):
-    raise ValueError('FNVL_EMIT=%s (want dsl or unset)' % EMIT)
+EMIT = ''      # 'dsl': integer instructions are emitted from the proven DSL forms (f_dsl.py) before the hand handlers; '' = the hand handlers only. Set by the caller with set_emit (an argument of the generator, no environment)
+
+
+def set_emit(mode):
+    global EMIT
+    if mode not in ('', 'dsl'):
+        raise ValueError('emit mode %r (want "dsl" or "")' % (mode,))
+    EMIT = mode
 
 
 TAB_BIAS = 16     # assumption: the lowest index of a table is below 16 (the table starts at most 16 dwords above the displacement)
