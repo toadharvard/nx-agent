@@ -25,3 +25,6 @@ claude/fnv-l1-contract-w16 на origin не найдена, скретч-сли�
 Слияние origin/claude/fnv-nx-clean e35b870a в ветку: a23ca9ad. Конфликты gates.json и test_gates.py разрешены объединением
 (imports, machine, d3d9total; test_gates.py ждёт объединение), правила гейтов не менялись.
 Вердикт l1.py на a23ca9ad: green, 26 гейтов, 238.0 s; pure 39/39, selftests 56/56, admit 459/459, oracle 56/56, d3d9total 332/332.
+
+Класс doc для render/d3d9, render/shaders, shim (в admit.json есть только doc, tool, product; класса «входные данные гейта» нет):
+replaced when render/d3d9 (L6), shim/include (L2) and the translator root land as product roots.
