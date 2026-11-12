@@ -53,17 +53,6 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 - `external`: content-pinned inputs (see below).
 - `plugins`, `plugin_cxx`: GCC plugins of the C++ front end (see "Plugins"). `flags` may not hold any `-fplugin*` token.
 
-- `unit_flags`, `unit_facts`: per-unit flags of the CC stage (see "Per-unit flags").
-
-### Per-unit flags (`unit_flags`, `unit_facts`)
-`unit_flags` is `{unit: [flag]}` for C++ units under `game`; the only flag is `-fplugin-arg-fnvnx_pi-fpfast` (the pi plugin: this unit is built with
-/fp:fast, so its source does not fix the evaluation order of floating-point arguments). It enters the argv of that unit's CC stage, so it is in the CC
-key (the PP key is unchanged). `unit_facts` is a tracked file or generated output of the root, units.json: `{"units": [{"source": UNIT, "flags": [...]}]}`
-with `source` equal to the root-relative unit path. RULE: the flag stands on a unit iff its entry lists `/fp:fast`; a unit with no entry has no such
-fact (compile.sh: no entry, no argument). A mismatch in either direction, a fact for a source that is no game C++ unit, or a flag on a unit outside `game`
-is red (build stage `unit_facts`, before any compile). A native guest root that declares `game` must declare `unit_facts`. Assumption: units.json is
-generated from the exe/decomp facts, not written by hand. No other flag can be attached to a unit: a flag not derived from a fact has no place here.
-
 ## Plugins (`fnvnx_order`, `fnvnx_ftoi`)
 Our compiler is the pinned g++-13 with our two plugins. Their sources are tracked under the tool root `ports/fnv-nx/toolchain` (no build script:
 the recipe is the only way they are built). Each entry of `plugins` is `{"name", "source", "args"}`: `source` is `<dir>/<name>.cc`, a tracked file of an
@@ -90,6 +79,13 @@ without the pin file has no valid guest root. The plugins are built against this
 What an external compiler names outside its tree is declared as inputs at their own paths, from the compiler's own answers: the assembler and linker it is
 configured with (`-print-prog-name=as|ld`) and the header directories of its search list, symlink targets included (the distribution's cross binutils and
 headers pinned by env.json). The CC stage mounts the compiler external, the plugins and unit.ii only; other externals are PP inputs.
+
+The pin file also names the guest's **runtime** (`"runtime": {EXT_KEYS}`, fnv-nx-build `tools/fnvnx-a64-msvcmodel`: gcc 15.2.0 + newlib built with the same
+msvcmodel.patch, target `aarch64-none-elf`, multilibs `.`, `pic`, `ilp32`, `ilp32/pic`; its libc, libm, libstdc++ and headers). A guest recipe may declare it
+as an `external` entry (it is only a PP input of the units, never mounted in the CC stage); if it does, the entry must equal the pinned one exactly (red
+otherwise). `verify/samples/platform.build.json` is the sample recipe of the platform root (compiler + runtime externals, the eight plugins, the semantics
+flags, `include` = the runtime's `c++/15.2.0`, its ilp32 target directory and `include`); `test_guest.py` checks it with `recipe.py check` and builds a unit
+that includes `<vector>`, `<string>`, `<cstdio>`. The 13.3 compiler reads gcc 15.2's libstdc++ headers only with `-std=gnu++20` (the sample's `flags.cxx`).
 
 ### Gate rule: native and decomp C++ is compiled with both plugins; lifted C++ with none
 `admit.json` entry of a product root with at least one C++ unit declares `"cxx_origin"`: `"native"` (hand-written or decomp C++), or
