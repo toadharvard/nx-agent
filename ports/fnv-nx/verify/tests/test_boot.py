@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Tests of verify/boot.py (the boot stage CLI). Plain script: exit 0 on pass. The guests are built by
 test_bootmachine.build (MODE 6: three functions called in order and a console line; MODE 3: a fault)."""
+import atexit
+import hashlib
 import io
 import contextlib
 import json
 import os
+import stat
 import sys
 import time
 
@@ -12,6 +15,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 import boot  # noqa: E402
+import bootdecl  # noqa: E402
+import bootmachine  # noqa: E402
+import boothost  # noqa: E402
 import test_bootmachine as tb  # noqa: E402
 
 LINE = "fnvnx-start: identity ok"
@@ -216,6 +222,108 @@ def main():
             and not os.path.exists(os.path.join(d, "w3.json")), (rc, e))
     rc, o, e = cli(args(elfw, "w4.json", table, manifest, "--watch-log", w("syms4.txt", "wl_n\n")))
     tb.case("watch_log: a non-function symbol (data) fails, naming it", rc == 1 and "wl_n" in e, (rc, e))
+
+    # -- declared inputs (bootdecl.py, --declared-inputs): a small fixture set made here (not real fonts), pinned like boot_inputs.json
+    def unlock(top):
+        for dp, dn, fn in os.walk(top):
+            os.chmod(dp, 0o755)
+    atexit.register(lambda: unlock(os.path.join(d, "decl")))   # runs before tb's rmtree of the scratch directory (LIFO)
+
+    def fixture(name, files, extra_sums=()):
+        """a source tree with fonts/<files> and SHA256SUMS (the fixture's own list, plus extra_sums lines for names outside fonts/)"""
+        src = os.path.join(d, "decl", name)
+        for f, data in files.items():
+            os.makedirs(os.path.dirname(os.path.join(src, "fonts", f)), exist_ok=True)
+            open(os.path.join(src, "fonts", f), "wb").write(data)
+        sums = "".join("%s  fonts/%s\n" % (hashlib.sha256(v).hexdigest(), k) for k, v in sorted(files.items())) + "".join(extra_sums)
+        open(os.path.join(src, "SHA256SUMS"), "w").write(sums)
+        return src, hashlib.sha256(sums.encode()).hexdigest()
+
+    def pins(name, sums_sha):
+        pin = {"name": "fonts", "repo": "fnv-nx-build", "ref": "tools/fonts-wine9", "commit": "0" * 39 + "1", "path": "fonts", "sums": "SHA256SUMS",
+               "sums_sha256": sums_sha, "mount": "switch/fnv/fonts"}
+        return w(name, json.dumps({"format": "fnvnx-boot-inputs/1", "inputs": [pin]}))
+
+    good = {"A.ttf": b"alpha", "Sub/B.ttf": b"bravo"}
+    src, sha = fixture("ok", good, extra_sums=("%s  inputs/doc.txt\n" % ("1" * 64),))   # an entry outside fonts/ is not mounted and not read
+    droot = os.path.join(d, "sd-decl")
+    os.makedirs(droot)
+    rc, o, e = cli(args(elf6, "d0.json", table, manifest, "--declared-inputs", pins("p0.json", sha), "--declared-src", "fonts=" + src))
+    # args() has --root fixed; use a fresh root for the declared runs
+    mounted = os.path.join(root, "switch", "fnv", "fonts")
+    dd = json.load(open(os.path.join(d, "d0.json"))) if rc in (0, 2) else {}
+    tb.case("declared inputs: a verified set is mounted and the run proceeds", rc == 0 and dd.get("run", {}).get("reason") == "exit", (rc, o, e))
+    tb.case("declared inputs: OUT.json inputs.declared = {name, commit, sums_sha256, files}",
+            dd.get("inputs", {}).get("declared") == [{"name": "fonts", "commit": "0" * 39 + "1", "sums_sha256": sha, "files": 2}], dd.get("inputs"))
+    tb.case("declared inputs: the mounted files are the fixture's bytes, nothing else",
+            sorted(os.path.relpath(os.path.join(a, f), mounted) for a, _, fs in os.walk(mounted) for f in fs) == ["A.ttf", "Sub/B.ttf"]
+            and open(os.path.join(mounted, "Sub", "B.ttf"), "rb").read() == b"bravo")
+    tb.case("declared inputs: files are 0444 and directories 0555",
+            all(stat.S_IMODE(os.stat(os.path.join(a, f)).st_mode) == 0o444 for a, _, fs in os.walk(mounted) for f in fs)
+            and all(stat.S_IMODE(os.stat(a).st_mode) == 0o555 for a, _, _ in os.walk(mounted)))
+    rc, o, e = cli(args(elf6, "d0b.json", table, manifest, "--declared-inputs", pins("p0b.json", sha), "--declared-src", "fonts=" + src))
+    tb.case("declared inputs: a second run on the same root remounts the same bytes (read-only tree replaced)", rc == 0 and
+            open(os.path.join(mounted, "A.ttf"), "rb").read() == b"alpha", (rc, e))
+
+    def refused(name, src, sha, needle):
+        out = "d_%s.json" % name
+        rc, o, e = cli(args(elf6, out, table, manifest, "--declared-inputs", pins("p_%s.json" % name, sha), "--declared-src", "fonts=" + src))
+        tb.case("declared inputs: %s is an input error (exit 1) naming it; nothing runs" % name,
+                rc == 1 and needle in e and not os.path.exists(os.path.join(d, out)), (rc, e))
+    refused("a bad sums hash", src, "f" * 64, "sha256(SHA256SUMS)")
+    s2, h2 = fixture("extra", good)
+    open(os.path.join(s2, "fonts", "Extra.ttf"), "wb").write(b"x")
+    refused("an extra file", s2, h2, "Extra.ttf")
+    s3, h3 = fixture("missing", good)
+    os.remove(os.path.join(s3, "fonts", "A.ttf"))
+    refused("a missing file", s3, h3, "A.ttf")
+    s4, h4 = fixture("changed", good)
+    open(os.path.join(s4, "fonts", "Sub", "B.ttf"), "wb").write(b"bravp")
+    refused("a changed byte", s4, h4, "B.ttf")
+    try:
+        rc, o, e = cli(args(elf6, "d_nosrc.json", table, manifest, "--declared-src", "fonts=" + src))
+    except SystemExit as x:   # argparse's usage error
+        rc = x.code
+    tb.case("declared inputs: --declared-src without --declared-inputs is a usage error (exit 2)", rc == 2, rc)
+    real = bootdecl.load_pins(os.path.join(os.path.dirname(HERE), "boot_inputs.json"))
+    tb.case("boot_inputs.json: one input, fonts, the pinned commit and checksum list, mounted at switch/fnv/fonts",
+            len(real) == 1 and real[0]["name"] == "fonts" and real[0]["mount"] == "switch/fnv/fonts" and real[0]["path"] == "fonts"
+            and real[0]["commit"] == "099942c35ee21a2ff7ac50e4d13fed12cc173ad3"
+            and real[0]["sums_sha256"] == "0a9b00c5904737b42fee3d81e220d1b646dd012c1aef96d132bf0231369cd077", real)
+
+    # the guest-visible side: writes under the mounted tree fail with EROFS through the real file handlers (bootpath.READ_ONLY)
+    svc = boothost.Services(root)
+    mach = bootmachine.Machine(open(elf6, "rb").read(), tb.make_plan(open(elf6, "rb").read()), svc)
+    page = tb.make_plan(open(elf6, "rb").read())["regions"]["host_page"]["lo"]
+
+    def sd(path):
+        mach.uc.mem_write(page, path.encode() + b"\0")
+        return page
+    def sd2(a, b):
+        mach.uc.mem_write(page, a.encode() + b"\0" + b.encode() + b"\0")
+        return page, page + len(a) + 1
+    neg = lambda e: (-e) & (2 ** 64 - 1)   # noqa: E731
+    import errno as errno_
+    EROFS = neg(errno_.EROFS)
+    O_READ, O_WRITE, O_RW, O_CREAT, O_TRUNC = 1, 2, 3, 4, 0x10
+    for path in ("sdmc:/switch/fnv/fonts/A.ttf", "SDMC:/SWITCH/FNV/FONTS/a.TTF", "sdmc:/switch/fnv/fonts/new.ttf"):
+        tb.case("EROFS: open for write / create / truncate under fonts, %s" % path,
+                all(svc.h_fs_open(sd(path), f) == EROFS for f in (O_WRITE, O_RW, O_WRITE | O_CREAT, O_RW | O_TRUNC)))
+    tb.case("EROFS: mkdir, rmdir, remove under fonts",
+            svc.h_fs_mkdir(sd("sdmc:/switch/fnv/fonts/newdir")) == EROFS and svc.h_fs_rmdir(sd("sdmc:/switch/fnv/fonts/Sub")) == EROFS
+            and svc.h_fs_remove(sd("sdmc:/switch/fnv/fonts/A.ttf")) == EROFS)
+    tb.case("EROFS: rename out of, into and inside fonts", svc.h_fs_rename(*sd2("sdmc:/switch/fnv/fonts/A.ttf", "sdmc:/A2.ttf")) == EROFS
+            and svc.h_fs_rename(*sd2("sdmc:/Data/x", "sdmc:/switch/fnv/fonts/x")) == EROFS
+            and svc.h_fs_rename(*sd2("sdmc:/switch/fnv/fonts/A.ttf", "sdmc:/switch/fnv/fonts/Z.ttf")) == EROFS)
+    fd = svc.h_fs_open(sd("sdmc:/switch/fnv/fonts/A.ttf"), O_READ)
+    tb.case("read-only open of a font works", fd < 2 ** 31, fd)
+    svc.h_fs_close(fd)
+    tb.case("EROFS calls are counted as faults and the files are unchanged",
+            sum(v for (c, er, s), v in svc.dp.faults.items() if er == "EROFS") >= 14 and open(os.path.join(mounted, "A.ttf"), "rb").read() == b"alpha"
+            and not os.path.exists(os.path.join(mounted, "new.ttf")), svc.dp.faults)
+    fd = svc.h_fs_open(sd("sdmc:/scratch.bin"), O_WRITE | O_CREAT)
+    tb.case("a write outside fonts is not refused", fd < 2 ** 31, fd)
+    svc.h_fs_close(fd)
     print("%d cases, %.1f s" % (tb.N[0], time.time() - t0))
     return 1 if tb.FAILED else 0
 

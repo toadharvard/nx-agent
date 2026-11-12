@@ -7,6 +7,9 @@ Mounts. The guest sees one SD card, mapped to `root`. The game install (`game`) 
 sdmc:/fnvnx/game: a path under either prefix (compared case-folded) continues inside `game`, except that the port's own
 entries of sdmc:/switch/fnv (PORT_NAMES, PORT_PREFIXES: logs, profile, launcher files) stay on `root`. Without `game`
 it is <root>/switch/fnv when that directory holds anything besides the port's own entries, else <root>/fnvnx/game.
+Read-only. sdmc:/switch/fnv/fonts (READ_ONLY, compared case-folded, after ".." clamping) holds a declared input of the port (the font
+set, bootdecl.py): it is on `root`, never in `game`, and read_only(sd) is true for it and everything below it; the file calls that
+create, change or remove under it answer EROFS (boothost.py).
 Case. The SD card folds case. Each component is matched against the host entries: if the exact spelling exists it is
 used (os.path.lexists); else the host entries equal under str.casefold() are collected and the first in sorted order
 (code-point order, deterministic) is taken; with no match the spelling given is kept (a path to be created).
@@ -18,8 +21,9 @@ import os
 
 GAME_MOUNTS = ("switch/fnv", "fnvnx/game")
 PORT_NAMES = {"fnv.nro", "fnv-exefs.nsp", "guest.nso", "fnvnx.ini", "user", "host.log", "crash.log", "launcher.log",
-              "override.txt", "readme.txt", "shaders.nvc0cache", "nxgpu.log"}
+              "override.txt", "readme.txt", "shaders.nvc0cache", "nxgpu.log", "fonts"}
 PORT_PREFIXES = ("drive_",)
+READ_ONLY = ("switch/fnv/fonts",)   # declared inputs (verify/boot_inputs.json, bootdecl.py): verified, read-only, on `root` in every mode
 
 
 def _parts(p):
@@ -59,6 +63,13 @@ class BootPath:
                     break
                 return self.game, parts[len(mp):]
         return self.root, parts
+
+    def read_only(self, sd):
+        """true for a guest path at or below a READ_ONLY mount (case-folded, after the same normalisation as resolve)"""
+        if sd.lower().startswith("sdmc:"):
+            sd = sd[5:]
+        low = [c.lower() for c in _parts(sd)]
+        return any(low[:len(m.split("/"))] == m.split("/") for m in READ_ONLY)
 
     def _names(self, d):
         if d not in self.listing:

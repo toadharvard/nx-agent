@@ -43,6 +43,8 @@ FINAL = re.compile(r"^BOOT elf=(\S+) rc=(\d+) reason=(\S+) last=(\S+) instr=(\d+
 HOME = os.path.join(SCRATCH, "home")
 BARE = os.path.join(SCRATCH, "artifacts.git")
 GAME = os.path.join(SCRATCH, "game")
+PINS = os.path.join(SCRATCH, "boot_inputs.json")   # the declared-inputs pin file of the job: a fixture set (not the real fonts) in the test's bare repository
+FONT_FILES = {"fonts/A.ttf": b"alpha", "fonts/Sub/B.ttf": b"bravo"}
 def _pe():
     b = bytearray(0x200)
     b[:2] = b"MZ"
@@ -84,7 +86,7 @@ def publish_branch(name, files):
 
 
 def run_job(args, env_extra=None, game=GAME):
-    env = {"PATH": os.environ["PATH"], "HOME": HOME, "ARTIFACTS_URL": BARE, "LANG": "C.UTF-8"}
+    env = {"PATH": os.environ["PATH"], "HOME": HOME, "ARTIFACTS_URL": BARE, "LANG": "C.UTF-8", "BOOT_INPUTS": PINS}
     if game:
         env["GAME_DIR"] = game
     env.update(env_extra or {})
@@ -152,6 +154,16 @@ def main():
     publish_branch("gpu-othersha", {"libnxgl4.so": lib, "meta.json": jd(dict(json.loads(meta_j), sha256="0" * 64))})
     publish_branch("gpu-empty", {"README": b"no library here\n"})
     publish_branch("gpu-bad", {"libnxgl4.so": b"not an elf\n", "meta.json": jd(dict(json.loads(meta_j), sha256=sha(b"not an elf\n")))})
+    # the declared inputs: a fixture font set + its sums file at the root of a branch; the pin file names that commit
+    fsums = "".join("%s  %s\n" % (hashlib.sha256(v).hexdigest(), k) for k, v in sorted(FONT_FILES.items())).encode()
+    publish_branch("test/fonts", dict(FONT_FILES, SHA256SUMS=fsums))
+    fcommit = git("rev-parse", "refs/heads/test/fonts", cwd=BARE).strip()
+
+    def write_pins(path, sums_sha, commit=fcommit):
+        open(path, "w").write(json.dumps({"format": "fnvnx-boot-inputs/1", "inputs": [
+            {"name": "fonts", "repo": "fnv-nx-build", "ref": "test/fonts", "commit": commit, "path": "fonts", "sums": "SHA256SUMS",
+             "sums_sha256": sums_sha, "mount": "switch/fnv/fonts"}]}))
+    write_pins(PINS, hashlib.sha256(fsums).hexdigest())
     tb.case("setup: contract branches built", True)
 
     rc, out, err = run_job(["testid"])
@@ -182,6 +194,16 @@ def main():
     tb.case("console file holds the guest's line", LINE in files.get("OUT.console.txt", b"").decode(), files.get("OUT.console.txt"))
     tb.case("milestones: loader console line of run.txt reached in order, then exe-entry",
             [m["name"] for m in doc.get("milestones", [])] == ["start-01", "exe-entry"] and all(m["reached"] for m in doc["milestones"]), doc.get("milestones"))
+    tb.case("OUT.json inputs.declared records {name, commit, sums_sha256, files}", doc.get("inputs", {}).get("declared") ==
+            [{"name": "fonts", "commit": fcommit, "sums_sha256": hashlib.sha256(fsums).hexdigest(), "files": 2}], doc.get("inputs"))
+    n_pub = git("rev-parse", "refs/heads/l4-verify/boot/testid", cwd=BARE).strip()
+    for what, pinfile in (("a wrong sums hash", ("w1", hashlib.sha256(fsums).hexdigest()[::-1], fcommit)),
+                          ("a commit the repository does not have", ("w2", hashlib.sha256(fsums).hexdigest(), "1" * 40))):
+        bp = os.path.join(SCRATCH, pinfile[0] + ".json")
+        write_pins(bp, pinfile[1], pinfile[2])
+        rc3, out3, err3 = run_job(["testid"], {"BOOT_INPUTS": bp})
+        tb.case("declared input with %s: the job ends as input-error before the boot, nothing published" % what, rc3 == 1 and "input-error" in err3
+                and out3 == "" and git("rev-parse", "refs/heads/l4-verify/boot/testid", cwd=BARE).strip() == n_pub, (rc3, out3, err3[-300:]))
     rc2, out2, err2 = run_job(["testid"])
     files2 = published("l4-verify/boot/testid")[0]
     tb.case("second run republishes byte-equal OUT.json and console", rc2 == 0 and files2.get("OUT.json") == files["OUT.json"]

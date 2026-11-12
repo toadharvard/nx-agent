@@ -3,7 +3,7 @@
 
   boot.py run --elf GUEST.elf --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
               --milestones TABLE --manifest entries.tsv [--icount-spec SPEC.json] [--limit-instructions N]
-              [--hc-slice N] [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
+              [--hc-slice N] [--declared-inputs PINS [--declared-src NAME=DIR]] [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
 
 plan = bootlayout (same rules as its CLI), watch points = bootmiles.resolve(table, manifest, ELF symbols, bias = image
 base). OUT.json ("fnvnx-boot/1", sorted keys, indent 1, no wall time) holds the plan, the run record, the milestone state
@@ -34,6 +34,7 @@ import sys
 import time
 
 import bootinput
+import bootdecl
 import bootgpu
 import bootlayout
 import bootmachine
@@ -45,7 +46,7 @@ HOST_PREFIX = "console."
 HOST_EVENTS = ("present", "gpu-first-call")
 GPU_ENV = {"LIBGL_ALWAYS_SOFTWARE": "1", "GALLIUM_DRIVER": "llvmpipe", "EGL_PLATFORM": "surfaceless"}
 FRAME_MARKS = 3   # presents that get an icount mark; later ones are only counted
-INPUT_ERRORS = (bootlayout.LayoutError, bootmiles.TableError, bootmiles.ManifestError, bootmiles.ResolveError,
+INPUT_ERRORS = (bootdecl.InputError, bootlayout.LayoutError, bootmiles.TableError, bootmiles.ManifestError, bootmiles.ResolveError,
                 bootmiles.ElfError, bootmachine.MachineError, bootgpu.GpuError, ValueError, OSError)
 
 
@@ -101,6 +102,9 @@ def run(a):
     with open(a.elf, "rb") as f:
         raw = f.read()
     plan = _plan(a, raw)
+    declared = []
+    if a.declared_inputs:   # verified and mounted read-only on the SD root before anything runs; a mismatch is an input error
+        declared = bootdecl.mount_all(a.declared_inputs, a.root, dict(s.split("=", 1) for s in a.declared_src))
     base = plan["image"]["base"]
     with open(a.milestones) as f:
         table = bootmiles.load_table(f.read())
@@ -189,6 +193,8 @@ def run(a):
     doc = {"elf_sha256": hashlib.sha256(raw).hexdigest(), "plan": plan, "run": r,
            "console_sha256": hashlib.sha256(console.encode()).hexdigest(), "milestones": prog.state(),
            "milestone_log": log, "inputs": {"text_entry": list(text_entries)}, "manifest_id": manifest.table_id, "last_reached": prog.last_reached(), "icount": rep}
+    if declared:
+        doc["inputs"]["declared"] = declared
     if sc:
         doc["inputs"]["scenario"] = {"sha256": sc.sha256, "content": sc.text}
     diff = sc.check_expect(r["events"]) if sc else []
@@ -235,7 +241,14 @@ def main(argv=None):
     sp.add_argument("--text-entry", action="append", default=[], metavar="TEXT",
                     help="the answer of one TEXT_ENTRY call (the system keyboard), repeatable, consumed in order; none left: the call "
                          "is cancelled (0); a text longer than the call's max_len ends the run as scenario-error")
+    sp.add_argument("--declared-inputs", metavar="PINS", help="verify/boot_inputs.json: each pinned port input (the font set) is fetched by its commit "
+                    "(or taken from --declared-src), verified against its checksum list and mounted read-only under --root (bootdecl.py); "
+                    "any mismatch is an input error and nothing runs; OUT.json inputs.declared holds {name, commit, sums_sha256, files}")
+    sp.add_argument("--declared-src", action="append", default=[], metavar="NAME=DIR",
+                    help="a checkout holding the input's path and sums file, in place of the fetch (needs --declared-inputs)")
     a = ap.parse_args(argv)
+    if a.declared_src and not a.declared_inputs:
+        ap.error("--declared-src needs --declared-inputs")
     if a.frames and not a.gpu:
         ap.error("--frames needs --gpu")
     try:
