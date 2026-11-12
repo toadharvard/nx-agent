@@ -151,6 +151,13 @@ byte-identical changes no consumer key. Red (check errors): an output the root d
 `link.roots` between distinct roots; a `generated` input that is a file of another root (class other than tool) by path, which must go through `uses`.
 Objects of another root enter only through `link.roots`.
 
+### Generated `sources`
+`sources: PATH` (a path in generated[].outputs of the root) names a file a generate stage writes, one `<external>:<path>` line per unit; `.` names the root
+itself (a tracked file of it). Each listed file of a declared external is copied into the unit view as the unit `<external>/<path>`, so its content is in
+the unit's keys; the units are built with the root's own. Red (stage `sources:<root>`): a line that is not `<external>:<path>`, an external the recipe does
+not declare, a path that is no file inside the external (`..` included), a `.` path the root does not track. A changed list adds only the new units:
+the other units keep their objects and compile-stage keys (their preprocessing keys follow the view's file names, the compile keys do not).
+
 ## Refusal set R (GNU ld option syntax, not a text guess)
 Options that let a link accept missing or substituted symbols: `--unresolved-symbols`, `--allow-shlib-undefined`, `--noinhibit-exec`,
 `--defsym`, `--wrap`, `--allow-multiple-definition`, `--warn-unresolved-symbols`, `-z undefs`, `-z muldefs`. A token is refused when, with one or two

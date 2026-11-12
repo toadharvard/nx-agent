@@ -19,6 +19,7 @@ MK = ("import os, sys\nos.makedirs('/out/gen', exist_ok=True)\n"
 USE = ("import hashlib, os, sys\nos.makedirs('/out/gen', exist_ok=True)\n"
        "n = sum(len(open('/uses/%s/%s' % (sys.argv[1], k), 'rb').read()) for k in ('handheld', 'docked'))\n"
        "open('/out/gen/used.c', 'w').write('const int used_len_%d = 1;\\n' % n)\n")
+LST = "import os, sys\nos.makedirs('/out/gen', exist_ok=True)\nopen('/out/gen/srcs.txt', 'w').write('\\n'.join(sys.argv[1:]) + '\\n')\n"
 PREC = dict(TL.LIB_REC, generated=[{"tool": P + "/mk.py", "args": ["alpha"], "inputs": [],
                                     "outputs": ["gen/ident_handheld.bin", "gen/ident_docked.bin"]}],
             outputs={"handheld": "gen/ident_handheld.bin", "docked": "gen/ident_docked.bin"})
@@ -71,6 +72,43 @@ def main():
     check("a stage reading another root's file by path (generated input) is a check error pointing at `uses`", any("another root" in e and "uses" in e for e in e4), e4)
     e5 = errs(consumer(outputs={"used": "gen/other.c"}), "red5")
     check("outputs: a name that maps to no generated output of the root is a check error", any("outputs must be" in e for e in e5), e5)
+    # generated `sources`: units listed by a generate stage as <external>:<path> lines
+    def srcpop(body1):
+        def f(d):
+            os.makedirs(d + "/src")
+            open(d + "/src/s1.c", "w").write(body1)
+            open(d + "/src/s2.c", "w").write("int s2_fn(void) { return 4; }\n")
+        return f
+    c1, h1 = TR.publish("srcs1", srcpop("int s1_fn(void) { return 3; }\n"))
+    ext = {"name": "tsrc", "repo": "fnv-nx-build", "ref": "srcs1", "commit": c1, "tree_sha256": h1, "at": "/ext/tsrc"}
+
+    def srepo(name, args, e=ext, **kw):
+        r = TL.main_rec()
+        r["external"] = [e]
+        r["generated"] = [{"tool": T + "gen/lst.py", "args": args, "inputs": [], "outputs": ["gen/srcs.txt"]}]
+        r["sources"] = "gen/srcs.txt"
+        r.update(kw)
+        return TL.mk(name, r, dict(TL.BASE_FILES, **{"gen/lst.py": LST, "toy/b.c": "int f_b(void) { return 1; }\n"}))
+    rs1 = recipe.build(srepo("s1", ["tsrc:src/s1.c"]), ROOT, SS, BASE + "/o-s1")
+    check("sources: the unit listed by the generate stage (a file of an external) is compiled and linked: unit tsrc/src/s1.c, symbol s1_fn",
+          rs1["status"] == "green" and "tsrc/src/s1.c" in rs1["units"] and "s1_fn" in TL.syms(rs1["elf"]["path"]), TL.err_text(rs1))
+    rs2 = recipe.build(srepo("s2", ["tsrc:src/s1.c", "tsrc:src/s2.c"]), ROOT, SS, BASE + "/o-s2")
+    o1 = {o["unit"]: o["sha256"] for o in rs1["objects"]}
+    o2 = {o["unit"]: o["sha256"] for o in rs2["objects"]}
+    check("sources: a changed list adds only the new unit: the other units keep their objects and their compile-stage keys (cache hits)",
+          rs2["status"] == "green" and set(o2) - set(o1) == {"tsrc/src/s2.c"} and all(o2[u] == o1[u] for u in o1)
+          and len(set(rs1["stage_keys"]) & set(rs2["stage_keys"])) >= len(o1), rs2["stages"])
+    c3, h3 = TR.publish("srcs3", srcpop("int s1_fn(void) { return 30; }\n"))
+    rs3 = recipe.build(srepo("s3", ["tsrc:src/s1.c"], e=dict(ext, commit=c3, tree_sha256=h3, ref="srcs3")), ROOT, SS, BASE + "/o-s3")
+    check("sources: the unit's keys include its content hash: another content of the same path has another preprocessing key and object",
+          rs3["status"] == "green" and rs3["pp_keys"]["tsrc/src/s1.c"] != rs1["pp_keys"]["tsrc/src/s1.c"] and {o["unit"]: o["sha256"] for o in rs3["objects"]}["tsrc/src/s1.c"] != o1["tsrc/src/s1.c"], "")
+    for what, args in (("a path outside the external (..)", ["tsrc:../x.c"]), ("an external the recipe does not declare", ["nope:src/s1.c"]),
+                       ("a file the external does not hold", ["tsrc:src/zzz.c"])):
+        rr = recipe.build(srepo("sr-" + str(abs(hash(what)) % 10000), args), ROOT, SS, BASE + "/o-sr")
+        check("sources: %s is red (stage sources:<root>)" % what, rr["status"] == "red" and rr["failure"]["stage"] == "sources:" + ROOT, TL.err_text(rr))
+    rk = srepo("sk", ["tsrc:src/s1.c"], sources="gen/other.txt")
+    ek = recipe.check(json.load(open(rk + "/" + ROOT + "/build.json")), ROOT, recipe.tracked(rk), recipe.load_admit(rk), None, rk)
+    check("sources: a name that is no generated output of the root is a check error", any("sources must name" in e for e in ek), ek)
     print("%d FAILED" % len(TR.FAILED) if TR.FAILED else "all passed")
     return 1 if TR.FAILED else 0
 

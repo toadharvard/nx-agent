@@ -47,7 +47,7 @@ FORMAT, OBJ_FORMAT = "fnvnx-recipe/1", "fnvnx-objects/1"
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
-        "plugins", "plugin_cxx", "variants", "outputs", "uses"}
+        "plugins", "plugin_cxx", "variants", "outputs", "uses", "sources"}
 VARIANT_KEYS = {"compiler", "flags"}   # the keys a variant may replace
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
@@ -270,6 +270,19 @@ def link_roots_cycle(root, roots, repo, seen=()):
     return None
 
 
+def source_lines(text):
+    """[(ext name, path)] of a `sources` file: one `<ext>:<path>` line per unit, '.' naming the root itself; blank lines skipped. ValueError for a bad line."""
+    out = []
+    for n, ln in enumerate(text.splitlines(), 1):
+        if not ln.strip():
+            continue
+        m = re.fullmatch(r"([A-Za-z0-9._-]+):(.+)", ln.strip())
+        if not m or not rel_ok(m.group(2)):
+            raise ValueError("line %d is not <external>:<path inside it>: %r" % (n, ln[:80]))
+        out.append((m.group(1), m.group(2)))
+    return out
+
+
 def uses_errors(rec, root, roots, repo):
     """Problems of `outputs` ({name: a generated output of this root}) and `uses` ([{root, output}]: an output another admitted root declares)."""
     err, gen = [], generated_outputs(rec)
@@ -456,6 +469,9 @@ def check(rec, root, files, roots, pin=None, repo="."):
                 err.append("generated output %s is produced twice" % o)
             seen.add(o)
     err += uses_errors(rec, root, roots, repo)
+    sr = rec.get("sources")
+    if sr is not None and not (isinstance(sr, str) and sr in generated_outputs(rec)):
+        err.append("sources must name a path in generated[].outputs of this root (a file of <external>:<path> lines)")
     units = set(units_of(rec, root, files))
     ol = rec.get("os_layer", [])
     for u in ol if isinstance(ol, list) else err.append("os_layer must be a list") or []:
@@ -708,6 +724,37 @@ class Job:
         os.makedirs(d, exist_ok=True)
         _copy(self.repo, files, base, d)
         return cas.ingest(d, self.store)
+
+    def generated_sources(self, ws):
+        """The units a generate stage lists in `sources` (lines `<external>:<path>`): each file inside a declared external (or tracked in the root,
+        for '.') is copied into the stage view as unit `<external>/<path>`, so its content is in the unit's keys. A path outside the externals
+        and the root is red. -> [unit names]."""
+        sr = self.rec.get("sources")
+        if not sr:
+            return []
+        out, mine = [], {f[len(self.root) + 1:] for f in self.files if under(f, self.root)}
+        try:
+            lines = source_lines(open(os.path.join(ws, "root", sr)).read())
+        except (OSError, ValueError) as e:
+            raise BuildRed({"stage": "sources:" + self.root, "exit": None, "stderr": ["%s: %s" % (sr, e)]})
+        for ext, p in lines:
+            if ext == ".":
+                if p not in mine:
+                    raise BuildRed({"stage": "sources:" + self.root, "exit": None, "stderr": ["%s: %s is no tracked file of the root" % (sr, p)]})
+                continue
+            if ext not in self.ext:
+                raise BuildRed({"stage": "sources:" + self.root, "exit": None, "stderr": ["%s: %s names no external of the recipe" % (sr, ext)]})
+            base = os.path.realpath(self.ext[ext]["host"])
+            src = os.path.realpath(os.path.join(base, p))
+            if not (src.startswith(base + os.sep) and os.path.isfile(src)):
+                raise BuildRed({"stage": "sources:" + self.root, "exit": None, "stderr": ["%s: %s is not a file inside external %s" % (sr, p, ext)]})
+            unit = "%s/%s" % (ext, p)
+            dest = os.path.join(ws, "root", unit)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copyfile(src, dest)
+            if is_unit(unit):
+                out.append(unit)
+        return sorted(set(out))
 
     def use_inputs(self, ws):
         """The declared outputs of other roots this root `uses`, as stage inputs {at: /uses/<root>/<name>, tree}: the producer's generate stages
@@ -1064,6 +1111,7 @@ def build(repo, root, store, out, jobs=4, ext=None):
         _copy(repo, [f for f in j.files if under(f, root)], root, os.path.join(ws, "root"))
         j.externals(ws)
         j.generate(ws)
+        units = sorted(set(units) | set(j.generated_sources(ws)))
         objs, und = j.compile(ws, units), set()
         for n, t, _ in j.built:
             ent = cas.manifest(t, store)["entries"][n + ".so"]
