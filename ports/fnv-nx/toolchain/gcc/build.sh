@@ -45,19 +45,20 @@ S2=$BUILD/s2            # stage 2's scratch prefix: only its ILP32 libraries and
 export SOURCE_DATE_EPOCH=1769126400 TZ=UTC LC_ALL=C
 MAPS="-ffile-prefix-map=$BUILD=/fnvnx/build -ffile-prefix-map=$DL=/fnvnx/dl -ffile-prefix-map=$PREFIX=/fnvnx/prefix"
 export CFLAGS="-O2 -g0 $MAPS" CXXFLAGS="-O2 -g0 $MAPS" LDFLAGS="-Wl,--build-id=none"
-# The guest semantics flag set is read from verify/guest_compiler.json (flags.semantics) at build time, never copied by hand.
-# GUEST_COMPILER_JSON names the file (the trunk's, pinned by the caller); -fno-reorder-blocks-and-partition is the
-# integration branch's addition to that set. The multilib table adds -mabi=ilp32 -fshort-wchar -fsigned-char -fPIC per
-# variant itself, so the target libraries get the rest here; MANIFEST.json records the whole set as compiled.
-GUEST_COMPILER_JSON=${GUEST_COMPILER_JSON:?GUEST_COMPILER_JSON: path of verify/guest_compiler.json}
-SEMANTICS=$(python3 - "$GUEST_COMPILER_JSON" <<'PY'
+# The guest semantics flag sets come from verify/guest_flags.py (L1: the recipe's own semantics_for on the pinned driver), one
+# JSON array per language, written by the caller into GUEST_FLAGS_DIR as flags-c.json, flags-c++.json, flags-asm.json; never
+# copied by hand. GUEST_FLAGS_COMMIT is the commit guest_flags.py was taken from (recorded in MANIFEST.json). The multilib table
+# adds -mabi=ilp32 -fshort-wchar -fsigned-char -fPIC per variant itself, so the target libraries get the rest here.
+GUEST_FLAGS_DIR=${GUEST_FLAGS_DIR:?GUEST_FLAGS_DIR: directory with flags-c.json flags-c++.json flags-asm.json}
+GUEST_FLAGS_COMMIT=${GUEST_FLAGS_COMMIT:?GUEST_FLAGS_COMMIT: commit of verify/guest_flags.py}
+sem() { python3 - "$GUEST_FLAGS_DIR/flags-$1.json" <<'PY'
 import json, sys
-f = json.load(open(sys.argv[1]))["flags"]["semantics"] + ["-fno-reorder-blocks-and-partition"]
-print(" ".join(x for x in f if x not in ("-mabi=ilp32", "-fPIC", "-fshort-wchar", "-fsigned-char")))
+print(" ".join(x for x in json.load(open(sys.argv[1])) if x not in ("-mabi=ilp32", "-fPIC", "-fshort-wchar", "-fsigned-char")))
 PY
-)
+}
+SEM_C=$(sem c); SEM_CXX=$(sem c++)
 TFLAGS="-O2 -ffunction-sections -fdata-sections $MAPS"
-S2FLAGS="$TFLAGS $SEMANTICS"
+S2CFLAGS="$TFLAGS $SEM_C"; S2CXXFLAGS="$TFLAGS $SEM_CXX"
 export PATH=$PREFIX/bin:$PATH
 
 cd "$BUILD"
@@ -200,7 +201,7 @@ GCC13_CONF=(--target=$TARGET --prefix="$S2" --enable-languages=c,c++
 S2PATH=$S2/bin:$PATH
 if ! step s2gcc1; then
 	rm -rf b-gcc13; mkdir -p b-gcc13; cd b-gcc13
-	CFLAGS_FOR_TARGET="$S2FLAGS" CXXFLAGS_FOR_TARGET="$S2FLAGS" LDFLAGS_FOR_TARGET="" \
+	CFLAGS_FOR_TARGET="$S2CFLAGS" CXXFLAGS_FOR_TARGET="$S2CXXFLAGS" LDFLAGS_FOR_TARGET="" \
 		../gcc-$GCC13_VER/configure "${GCC13_CONF[@]}"
 	make -j"$JOBS" all-gcc
 	make install-gcc
@@ -222,7 +223,7 @@ EOF2
 fi
 if ! step s2newlib; then
 	rm -rf b-newlib13; mkdir -p b-newlib13; cd b-newlib13
-	PATH=$S2PATH CFLAGS_FOR_TARGET="$S2FLAGS" \
+	PATH=$S2PATH CFLAGS_FOR_TARGET="$S2CFLAGS" \
 		../newlib-$NEWLIB_VER/configure --disable-newlib-supplied-syscalls --enable-newlib-mb \
 		--disable-newlib-wide-orient --enable-newlib-register-fini --target=$TARGET --prefix="$S2"
 	PATH=$S2PATH make -j"$JOBS"
@@ -252,11 +253,13 @@ if ! step merge; then
 	mkdir -p "$PREFIX/lib/gcc/$TARGET/$GCC13_VER"
 	cp -a "$S2/lib/gcc/$TARGET/$GCC13_VER/$V" "$PREFIX/lib/gcc/$TARGET/$GCC13_VER/$V"
 	cp -a "$S2/lib/gcc/$TARGET/$GCC13_VER/include" "$PREFIX/lib/gcc/$TARGET/$GCC13_VER/include"
-	rm -rf "$PREFIX/$TARGET/include/c++/$GCC13_VER"; mkdir -p "$PREFIX/$TARGET/include/c++"
+	# the C++ library of the mirror is gcc 13.3's alone: stage 1's c++/15.2.0 headers and its LP64 libstdc++/libsupc++ go too
+	rm -rf "$PREFIX/$TARGET/include/c++" "$PREFIX/$TARGET/lib/"{,pic/}{libstdc++*,libsupc++*}
+	mkdir -p "$PREFIX/$TARGET/include/c++"
 	cp -a "$S2/$TARGET/include/c++/$GCC13_VER" "$PREFIX/$TARGET/include/c++/$GCC13_VER"
 	# only the ILP32 target-specific headers of 13.3 (the default variant's are LP64: stage 1 owns LP64)
 	find "$PREFIX/$TARGET/include/c++/$GCC13_VER/$TARGET" -mindepth 1 -maxdepth 1 ! -name "$V" -exec rm -rf {} +
 	done_ merge
 fi
-python3 "$HERE/check_mirror.py" "$PREFIX" --s2 "$S2" --gcc13 "$GCC13_VER" --manifest --semantics "$GUEST_COMPILER_JSON"
+python3 "$HERE/check_mirror.py" "$PREFIX" --s2 "$S2" --gcc13 "$GCC13_VER" --manifest --flags-dir "$GUEST_FLAGS_DIR" --flags-commit "$GUEST_FLAGS_COMMIT"
 echo "fnvnx-a64 installed in $PREFIX"

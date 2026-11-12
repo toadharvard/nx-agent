@@ -71,8 +71,10 @@ def c1(prefix, s2):
     print('C1 ok: ILP32 variants %s' % sorted(have))
 
 
-def c2(prefix):
-    gcc = prefix + '/bin/%s-gcc' % TARGET
+def c2(prefix, s2=None, gcc13='13.3.0'):
+    # the game compiler's base driver (stage 2, gcc 13.3) against the mirror's libraries
+    gcc = (s2 or prefix) + '/bin/%s-gcc' % TARGET
+    mir = ['--sysroot=%s/%s' % (prefix, TARGET), '-B%s/lib/gcc/%s/%s/' % (prefix, TARGET, gcc13)]
     d1 = run([gcc, '-mabi=ilp32', '-print-multi-directory']).stdout.strip()
     d2 = run([gcc] + FLAGS + ['-print-multi-directory']).stdout.strip()
     if d1 != '.':
@@ -81,10 +83,10 @@ def c2(prefix):
         fail('C2 full ILP32 flags resolve to "%s"' % d2)
     with tempfile.TemporaryDirectory() as t:
         open(t + '/m.c', 'w').write('int main(void){return 0;}\n')
-        r = run([gcc, '-mabi=ilp32', t + '/m.c', '-o', t + '/m.elf'])
+        r = run([gcc] + mir + ['-mabi=ilp32', t + '/m.c', '-o', t + '/m.elf'])
         if r.returncode == 0:
             fail('C2 a link of -mabi=ilp32 without -fshort-wchar succeeded')
-        r = run([gcc] + FLAGS + [t + '/m.c', '-o', t + '/m.elf', '-nostartfiles', '-Wl,-e,main'])
+        r = run([gcc] + mir + FLAGS + [t + '/m.c', '-o', t + '/m.elf', '-nostartfiles', '-Wl,-e,main'])
         if r.returncode != 0:
             fail('C2 a link with the full ILP32 flags failed: ' + r.stderr.strip()[-300:])
     print('C2 ok: -mabi=ilp32 -> "%s" (link fails), full flags -> "%s"' % (d1, d2))
@@ -93,9 +95,13 @@ def c2(prefix):
 WIDE = ['wcslen', 'wcscpy', 'wcscmp', 'wmemcpy', 'wcschr']
 
 
-def member_asm(prefix, libc, member):
+def member_asm(prefix, libc, name):
     od = prefix + '/bin/%s-objdump' % TARGET
     ar = prefix + '/bin/%s-ar' % TARGET
+    names = [m for m in run([ar, 't', libc]).stdout.split() if re.fullmatch(r'(lib|libc)_a-%s\.o' % name, m)]
+    if len(names) != 1:
+        return None
+    member = names[0]
     with tempfile.TemporaryDirectory() as t:
         r = run([ar, 'x', libc, member], cwd=t)
         if r.returncode != 0 or not os.path.exists(t + '/' + member):
@@ -103,8 +109,8 @@ def member_asm(prefix, libc, member):
         return run([od, '-d', t + '/' + member]).stdout
 
 
-def c3(prefix):
-    gcc = prefix + '/bin/%s-gcc' % TARGET
+def c3(prefix, s2=None):
+    gcc = (s2 or prefix) + '/bin/%s-gcc' % TARGET
     for d, fl in multilibs(gcc):
         if 'mabi=ilp32' not in fl:
             continue
@@ -114,11 +120,11 @@ def c3(prefix):
             fail('C3 variant %s: the target preprocessor does not say 2-byte wchar_t / signed char' % d)
     n = 0
     for m in WIDE:
-        member = 'lib_a-%s.o' % m
+        member = m
         a32 = member_asm(prefix, prefix + '/%s/lib/ilp32/wchar16/schar/libc.a' % TARGET, member)
         a64 = member_asm(prefix, prefix + '/%s/lib/libc.a' % TARGET, member)
         if a32 is None or a64 is None:
-            fail('C3 %s: member %s missing' % (m, member))
+            fail('C3 %s: not exactly one member (lib|libc)_a-%s.o in the ILP32 and LP64 libc.a' % (m, m))
             continue
         if not re.search(r'\b(ldrh|strh)\b', a32):
             fail('C3 %s: the ILP32 object has no 2-byte access' % m)
@@ -140,7 +146,7 @@ def c4(prefix, gcc13):
     print('C4 ok: libstdc++ headers %s only, ILP32 c++config.h is 13' % gcc13)
 
 
-def c5(prefix, s2, gcc13, here, semantics=None):
+def c5(prefix, s2, gcc13, here, flags_dir=None, flags_commit=''):
     gcc = (s2 or prefix) + '/bin/%s-gcc' % TARGET
     with tempfile.TemporaryDirectory() as t:
         open(t + '/p.c', 'w').write(
@@ -170,14 +176,23 @@ def c5(prefix, s2, gcc13, here, semantics=None):
         fail('C5 the ILP32 data model is not the exe\'s: %s' % man['sizeof'])
     # L1's pack manifest: the same facts under the names the guest roots compare (all from the built compiler's own answers)
     man['version'] = man['compiler'].split()[1]
-    if semantics:   # the flags as compiled: guest_compiler.json's set + the integration branch's addition; per language
-        full = json.load(open(semantics))['flags']['semantics'] + ['-fno-reorder-blocks-and-partition']
-        man['flags'] = {'c': full, 'c++': full}
-        man['guest_compiler_json_sha256'] = hashlib.sha256(open(semantics, 'rb').read()).hexdigest()
-        r = run([gcc] + full + ['-O0', '-c', '-x', 'c', '/dev/null', '-o', '/dev/null'])
+    if flags_dir:   # the flags as compiled, per language, from verify/guest_flags.py (commit recorded)
+        fl = {l: json.load(open('%s/flags-%s.json' % (flags_dir, l))) for l in ('c', 'c++', 'asm')}
+        # the C set is derived again from the built C driver: the C++ set minus every flag it rejects for C
+        derived = []
+        for f in fl['c++']:
+            r = run([gcc, f, '-O0', '-fsyntax-only', '-x', 'c', '/dev/null'])
+            if r.returncode == 0 and 'but not for C' not in r.stderr and 'unrecognized' not in r.stderr:
+                derived.append(f)
+        if derived != fl['c']:
+            fail('C5 flags-c.json differs from the set the built C driver accepts: %s' % sorted(set(derived) ^ set(fl['c'])))
+        r = run([gcc] + fl['c'] + ['-O0', '-c', '-x', 'c', '/dev/null', '-o', '/dev/null'])
         if r.returncode != 0:
-            fail('C5 the pack\'s own compiler rejects the semantics set: ' + r.stderr.strip()[-300:])
-    man['SEMANTICS_FLAGS'] = ' '.join(man['flags']['c']) if semantics else man['ilp32_flags']
+            fail('C5 the pack\'s own C driver rejects its C set: ' + r.stderr.strip()[-300:])
+        man['flags'] = fl
+        man['guest_flags_commit'] = flags_commit
+        man['guest_flags_sha256'] = {l: hashlib.sha256(open('%s/flags-%s.json' % (flags_dir, l), 'rb').read()).hexdigest() for l in fl}
+    man['SEMANTICS_FLAGS'] = ' '.join(man['flags']['c++']) if flags_dir else man['ilp32_flags']
     man['sizeof_wchar_t'], man['sizeof_size_t'], man['sizeof_long'] = (man['sizeof'][k] for k in ('wchar_t', 'size_t', 'long'))
     open(prefix + '/MANIFEST.json', 'w').write(json.dumps(man, indent=1, sort_keys=True) + '\n')
     print('C5 ok: manifest written: %s' % json.dumps(man, sort_keys=True))
@@ -297,17 +312,18 @@ def main():
     ap.add_argument('--s2')
     ap.add_argument('--gcc13', default='13.3.0')
     ap.add_argument('--manifest', action='store_true')
-    ap.add_argument('--semantics', help='verify/guest_compiler.json: the flag set the pack is compiled with')
+    ap.add_argument('--flags-dir', help='directory of flags-{c,c++,asm}.json from verify/guest_flags.py')
+    ap.add_argument('--flags-commit', default='')
     ap.add_argument('--libnx')
     a = ap.parse_args()
     prefix = a.prefix.rstrip('/')
     here = os.path.dirname(os.path.abspath(__file__))
     c1(prefix, a.s2)
-    c2(prefix)
-    c3(prefix)
+    c2(prefix, a.s2, a.gcc13)
+    c3(prefix, a.s2)
     c4(prefix, a.gcc13)
     if a.manifest:
-        c5(prefix, a.s2, a.gcc13, here, a.semantics)
+        c5(prefix, a.s2, a.gcc13, here, a.flags_dir, a.flags_commit)
     if a.libnx:
         c6(prefix, a.libnx)
     sys.exit(1 if fails else 0)
