@@ -112,6 +112,7 @@ def main(argv=None):
     ap.add_argument('--bridge', help='bridge.tsv (L5): its dlls are never images')
     ap.add_argument('--escape', action='append', default=[])
     ap.add_argument('--writes')
+    ap.add_argument('--globext')
     ap.add_argument('--sites', help='dynsites.tsv of the platform manifest (L5)')
     ap.add_argument('--out', required=True)
     a = ap.parse_args(argv)
@@ -125,7 +126,7 @@ def main(argv=None):
 
     def derive_image(name, pe, rg):
         paths[name] = (pe, rg)
-        return derive(gpa_names.load_images(['%s=%s,%s' % (name, pe, rg)], a.bridge, a.escape, a.writes)[name])
+        return derive(gpa_names.load_images(['%s=%s,%s' % (name, pe, rg)], a.bridge, a.escape, a.writes, False, a.globext)[name])
 
     bridge = {iat.norm_dll(r['dll']) for r in iat.bridge_rows(a.bridge)[0]} if a.bridge else set()
     members, per = fixpoint(a.exe, a.dir, bridge, ranges_of, derive_image)

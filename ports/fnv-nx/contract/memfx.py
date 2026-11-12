@@ -4,6 +4,8 @@
     mx.const_range(lo, hi)        -> Verdict            no write in the process changes [lo, hi) after load (case: global constancy)
     mx.call_keeps(fn, call_va, R) -> (bool, why)        the call at call_va does not write [R+d] of the object R points to
     mx.words(addr)                -> (leaves, writers, why)   value set of the global dword at addr (initial bytes + every writer)
+    Memfx(img, imports, extents)  extents = certified global object extents [(va, size)] (read_globext of an fnvnx-globext/1 fact):
+                                  an indexed store with a constant base in a certified object writes only inside it (OWNER ASM-006)
 
 The question and the rule.  A write modifies location L only through (W1) an instruction that names L (an absolute operand
 [disp] or [disp+idx*s] whose address range covers L), or (W2) an instruction whose address register holds a pointer value.
@@ -835,8 +837,29 @@ def frame_exposed(fn):
     return mx.exposed(fn)
 
 
+def read_globext(text):
+    """Parse an fnvnx-globext/1 fact (certified global object extents of one exe) -> (exe_sha256, [(va, size)] sorted by va).
+    Only va and size are read (the other fields never leave the private repository).  An overlap, an unsorted list or a zero size is
+    an error: the fact is certified, so a violation is a defect of the fact."""
+    import json
+    d = json.loads(text)
+    if d.get('format', 'fnvnx-globext/1') != 'fnvnx-globext/1':
+        raise ValueError('not an fnvnx-globext/1 fact')
+    out = [(int(o['va']), int(o['size'])) for o in d['objects']]
+    for k, (va, size) in enumerate(out):
+        if size <= 0 or (k and (va < out[k - 1][0] or va < out[k - 1][0] + out[k - 1][1])):
+            raise ValueError('global extents: object at %x is empty, unsorted or overlaps the one before it' % va)
+    return d.get('exe_sha256'), out
+
+
 class Memfx:
-    def __init__(self, img, imports=None):
+    """extents: certified global object extents [(va, size)] sorted by va, or None.  With them an indexed store whose constant base
+    lies in a certified object writes only inside that object (OWNER ASM-006: array indices are in bounds); a base in no certified
+    object keeps the rule without them."""
+
+    def __init__(self, img, imports=None, extents=None):
+        self.extents = extents
+        self._ext_starts = [a for a, b in extents] if extents else []
         self.img = img
         self.imports = imports or ImportInfo()
         img.mx = self
@@ -929,6 +952,13 @@ class Memfx:
                 out.append('TLS directory unreadable')
         return out
 
+    def object_of(self, va):
+        """(start, size) of the certified object containing va, or None."""
+        k = bisect.bisect_right(self._ext_starts, va) - 1
+        if k >= 0 and va < self.extents[k][0] + self.extents[k][1]:
+            return self.extents[k]
+        return None
+
     def direct_writers(self, lo, hi):
         """-> ([(va, why)], n_indexed_considered)"""
         sc = self.scan
@@ -946,6 +976,11 @@ class Memfx:
             es = argflow.entries_for(self.img, va)
             us = [umax(self.img.func(e), va, idx) for e in es]
             mxv = None if (not us or any(u is None for u in us)) else max(us)
+            ob = self.object_of(disp)
+            if ob is not None:         # OWNER ASM-006: the store stays inside the certified object that contains its base
+                if ob[0] < hi and ob[0] + ob[1] > lo:
+                    out.append((va, 'indexed store [%x+idx*%d] inside the certified object [%x,%x) covers it' % (disp, scale, ob[0], ob[0] + ob[1])))
+                continue
             if mxv is None:
                 out.append((va, 'indexed store [%x+idx*%d] with an unbounded index covers the section %x-%x' % (disp, scale, s2[0], s2[1])))
             elif disp < hi and disp + mxv * scale + size > lo:

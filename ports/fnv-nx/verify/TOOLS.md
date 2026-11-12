@@ -455,6 +455,8 @@ memfx - may-write analysis of an x86 PE image (L1 CONTRACT): which writes can re
     mx.const_range(lo, hi)        -> Verdict            no write in the process changes [lo, hi) after load (case: global constancy)
     mx.call_keeps(fn, call_va, R) -> (bool, why)        the call at call_va does not write [R+d] of the object R points to
     mx.words(addr)                -> (leaves, writers, why)   value set of the global dword at addr (initial bytes + every writer)
+    Memfx(img, imports, extents)  extents = certified global object extents [(va, size)] (read_globext of an fnvnx-globext/1 fact):
+                                  an indexed store with a constant base in a certified object writes only inside it (OWNER ASM-006)
 
 The question and the rule.  A write modifies location L only through (W1) an instruction that names L (an absolute operand
 [disp] or [disp+idx*s] whose address range covers L), or (W2) an instruction whose address register holds a pointer value.

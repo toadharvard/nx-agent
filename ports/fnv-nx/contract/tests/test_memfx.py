@@ -312,6 +312,28 @@ v = const(glob_prog(w_cmp(0x7f, 3)), G + 0x100, G + 0x106, writes=wi)
 check('a signed jump gives no bound', v.ok, False)
 
 
+def const_ext(prog, lo, hi, extents, **kw):
+    img, mx, a = image(prog, **kw)
+    mx2 = memfx.Memfx(img, mx.imports, extents)
+    return mx2.const_range(lo, hi)
+
+
+v = const_ext(glob_prog(w_idx_unbounded), G + 0x100, G + 0x106, [(G, 0x40)], writes=wi)
+check('extents: an unbounded indexed store whose base lies in a certified object [G,G+0x40) does not reach G+0x100', v.ok, True)
+v = const_ext(glob_prog(w_idx_unbounded), G + 0x20, G + 0x24, [(G, 0x40)], writes=wi)
+check('extents: ... and does write inside its own object', v.ok, False)
+v = const_ext(glob_prog(w_idx_unbounded), G + 0x100, G + 0x106, [(G + 0x80, 0x40)], writes=wi)
+check('extents: a base in no certified object keeps the unbounded rule (section covered)', v.ok, False)
+tx = '{"format": "fnvnx-globext/1", "exe_sha256": "ab", "objects": [{"va": 16, "size": 8, "symbol": "x"}, {"va": 24, "size": 4}]}'
+check('read_globext: sha and (va, size) only', memfx.read_globext(tx), ("ab", [(16, 8), (24, 4)]))
+for bad in ('{"objects": [{"va": 16, "size": 8}, {"va": 20, "size": 4}]}', '{"objects": [{"va": 16, "size": 0}]}', '{"objects": [{"va": 24, "size": 4}, {"va": 16, "size": 4}]}'):
+    try:
+        memfx.read_globext(bad)
+        check('read_globext: overlap, empty or unsorted is an error', 'no error', 'error')
+    except ValueError:
+        check('read_globext: overlap, empty or unsorted is an error', 1, 1)
+
+
 def leak_prog(a):           # the address of a global kept in a data word
     a.func('rd'); a.push(G + 0x100); a.push(0); a.call_imp('GetProcAddress'); a.ret(); a.end('rd')
 

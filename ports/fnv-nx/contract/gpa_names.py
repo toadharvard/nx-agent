@@ -28,6 +28,7 @@ too and compared with the platform's constant.  Check (--bridge): pairs the plat
 Exe-derived: container and fnv-nx-build only.
 """
 import argparse
+import hashlib
 import os
 import sys
 
@@ -215,25 +216,28 @@ def members_of(images_file):
         return [line.split('\t')[0] for line in fh.read().splitlines()[1:]]
 
 
-def load_images(specs, bridge, escapes=(), writes=None, no_memfx=False):
+def load_images(specs, bridge, escapes=(), writes=None, no_memfx=False, globext=None):
     """{name (lower): argflow.Image} of `name=pe_path,ranges_path` specs, with the platform's import stacks and (unless no_memfx)
     the may-write rule; shared by every contract tool that derives call arguments (gpa_names, loadlib)."""
     stacks = {}
     if bridge:
         with open(bridge) as fh:
             stacks = import_stacks(fh.read())
-    images = {}
+    images, shas = {}, {}
+    ext = memfx.read_globext(open(globext).read()) if globext else (None, None)
     for spec in specs:
         nm, rest = spec.split('=', 1)
         pe, rg = rest.split(',')
         with open(pe, 'rb') as fh, open(rg) as fr:
-            images[nm.lower()] = argflow.Image(fh.read(), nm.lower(), argflow.read_ranges(fr.read()))
+            raw = fh.read()
+        images[nm.lower()] = argflow.Image(raw, nm.lower(), argflow.read_ranges(fr.read()))
+        shas[nm.lower()] = hashlib.sha256(raw).hexdigest()
         images[nm.lower()].import_stack = stacks
     if not no_memfx:
         bt = open(bridge).read() if bridge else ''
         info = memfx.ImportInfo(bt, [open(p).read() for p in escapes], open(writes).read() if writes else '')
         for nm in sorted(images):
-            memfx.Memfx(images[nm], info)
+            memfx.Memfx(images[nm], info, ext[1] if ext[0] == shas[nm] else None)    # the extents of the exe apply to the file they were certified for
     return images
 
 
@@ -245,12 +249,13 @@ def main(argv=None):
     ap.add_argument('--handle', action='append', default=[], help='name:0xVA of a CreateFileMapping call')
     ap.add_argument('--bridge')
     ap.add_argument('--escape', action='append', default=[], help='import_escape.tsv of a platform backend (repeat; the worst letter counts)')
+    ap.add_argument('--globext', help='fnvnx-globext/1 fact: certified global object extents of the exe (applied to the image with that sha256)')
     ap.add_argument('--writes', help='tsv dll, name, letters (n = never written through) per import argument; default: all may be written')
     ap.add_argument('--no-memfx', action='store_true', help='derive without the may-write rule')
     ap.add_argument('--modules', help='modules.tsv (lifted modules provide their own names)')
     ap.add_argument('--out', required=True)
     a = ap.parse_args(argv)
-    images = load_images(a.image + (specs_of(a.images_file) if a.images_file else []), a.bridge, a.escape, a.writes, a.no_memfx)
+    images = load_images(a.image + (specs_of(a.images_file) if a.images_file else []), a.bridge, a.escape, a.writes, a.no_memfx, a.globext)
     with open(a.sites) as fh:
         rows = read_sites(fh.read())
     if a.images_file:     # a dll that is no member of the image set is never loaded: its sites are not sites of the product
