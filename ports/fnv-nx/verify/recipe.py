@@ -191,6 +191,12 @@ def under(p, d):
     return p == d or p.startswith(d + "/")
 
 
+def tree_of(roots, p):
+    """The admitted root path or tree (admit.json `trees`) that holds repo path P, or None: tool-file membership is over the trees of the
+    admitted roots, not over the root paths only (link/ is a tree of the tool root contract)."""
+    return next((t for r in roots for t in (roots[r].get("trees") or [r]) if under(p, t)), None)
+
+
 def load_admit(repo="."):
     with open(os.path.join(repo, ADMIT)) as f:
         return {r["path"]: r for r in json.load(f)["roots"]}
@@ -536,7 +542,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
     for d in inc if isinstance(inc, list) else err.append("include must be a list") or []:
         if isinstance(d, str) and any(under(d, a) for a in ats):
             continue
-        if not rel_ok(d) or not any(under(d, r) for r in roots):
+        if not rel_ok(d) or tree_of(roots, d) is None:
             err.append("include %r is not a path inside an admitted root or an external's at" % (d,))
         elif not (any(under(f, d) for f in files) or any(under(root + "/" + o, d) for o in gen)):
             err.append("include %r holds no tracked or generated file" % d)
@@ -546,7 +552,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
             err.append("generated[%d] needs exactly tool, args, inputs, outputs" % i)
             continue
         t, ins, outs = g["tool"], g["inputs"], g["outputs"]
-        owner = next((r for r in roots if isinstance(t, str) and under(t, r)), None)
+        owner = next((r for r in roots if isinstance(t, str) and tree_of({r: roots[r]}, t)), None)
         if not (isinstance(t, str) and t in files and t.endswith(".py") and owner and roots[owner]["class"] in ("tool", "product")):
             err.append("generated[%d].tool %r is not a tracked .py file of an admitted tool or product root" % (i, t))
         if not (isinstance(g["args"], list) and all(isinstance(a, str) for a in g["args"])):
@@ -556,7 +562,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         elif any(a != b and under(a, b) for a in ins for b in ins):
             err.append("generated[%d].inputs nest" % i)
         for p in ins if isinstance(ins, list) else []:
-            if isinstance(p, str) and not under(p, root) and not any(under(p, r) and roots[r]["class"] == "tool" for r in roots):
+            if isinstance(p, str) and not under(p, root) and not any(tree_of({r: roots[r]}, p) and roots[r]["class"] == "tool" for r in roots):
                 err.append("generated[%d].inputs: %s is a file of another root: take it through `uses` (the producer's declared output), not by path" % (i, p))
         if not (isinstance(outs, list) and outs and all(rel_ok(o) for o in outs)):
             err.append("generated[%d].outputs must be a non-empty list of root-relative paths" % i)
@@ -588,7 +594,7 @@ def check(rec, root, files, roots, pin=None, repo=".", variant=""):
         err += link_errors(lk, root, mine, roots, names, repo, variant)
         err += ["link: the ldcheck stage needs %s (a tracked file of an admitted tool root)" % p for p in (
             LD_TOOLS[0] + "/ldcheck.py", LD_TOOLS[0] + "/gateids.py", LD_TOOLS[1] + "/gatefile.py")
-            if p not in files or not any(under(p, r) for r in roots)]
+            if p not in files or tree_of(roots, p) is None]
     err += guest_errors(rec, root + "@" + variant if variant else root, roots, pin)
     err += plugin_errors(rec, root, files, roots, units, names)
     return err
@@ -618,7 +624,7 @@ def plugin_errors(rec, root, files, roots, units, ext_names):
             err.append("plugins[%d] needs exactly name, source, args (name and source strings, args {string: string})" % i)
             continue
         n, src = p["name"], p["source"]
-        owner = next((r for r in roots if under(src, r)), None)
+        owner = next((r for r in roots if tree_of({r: roots[r]}, src)), None)
         if not re.fullmatch("[a-z][a-z0-9_]*", n):
             err.append("plugins[%d].name %r is not [a-z][a-z0-9_]*" % (i, n))
         elif n in loaded:
@@ -678,7 +684,7 @@ def plugin_errors(rec, root, files, roots, units, ext_names):
             elif loaded[n].get("args") != a:
                 err.append("plugin %s: arguments of a lifted root must be %s, are %s" % (n, a, loaded[n].get("args")))
         mine = {f[len(root) + 1:] for f in files if under(f, root)}
-        owner = next((r for r in roots if isinstance(tool, str) and under(tool, r)), None)
+        owner = next((r for r in roots if isinstance(tool, str) and tree_of({r: roots[r]}, tool)), None)
         if not (isinstance(tool, str) and tool in files and tool.endswith(".py") and owner and roots[owner]["class"] == "tool"):
             err.append("cxx_origin.lifted_by %r is not a tracked .py of an admitted tool root" % (tool,))
         steps = rec.get("generated", []) if isinstance(rec.get("generated"), list) else []
@@ -1006,7 +1012,7 @@ class Job:
                     self.blocked[o] = f["stage"]
 
     def generate_one(self, ws, i, g, py, xin):
-        owner = next(r for r in self.roots if under(g["tool"], r))
+        owner = tree_of(self.roots, g["tool"])
         tmp = tempfile.mkdtemp(dir=ws)
         ins = [{"at": "/tool", "tree": self.ingest_files(tmp, "tool", [f for f in self.files if under(f, owner)], owner)}] + xin + self.use_inputs(ws)
         for p in g["inputs"]:

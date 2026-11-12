@@ -290,6 +290,14 @@ def main():
     check("both pack and stage: red", any("exactly one of pack and stage" in x for x in errs(both, lrec)), errs(both, lrec))
     neither = make_repo("stageneither", srec, {"lifted_by": T + "gen/lift.py"}, sfiles)
     check("neither pack nor stage: red", any("exactly one of pack and stage" in x for x in errs(neither, srec)), errs(neither, srec))
+    # --- tool-file membership is over the trees of an admitted root (admit.json trees), not the root path only
+    tt = T + "gen2tree/lift.py"
+    trec = dict(srec, generated=[dict(srec["generated"][0], tool=tt)])
+    tr = make_repo("treetool", trec, {"lifted_by": tt, "stage": st}, {tt: lift, T + "gen2/x.py": "", ROOT + "/a.cc": None},
+                   extra_roots=[{"path": T + "gen2", "class": "tool", "gates": [], "trees": [T + "gen2", T + "gen2tree"]}])
+    check("a tool file in a tree of an admitted tool root (not under the root path) is a valid lifted_by and generator tool", errs(tr, trec) == [], errs(tr, trec))
+    tr2 = make_repo("treeplain", trec, {"lifted_by": tt, "stage": st}, {tt: lift, ROOT + "/a.cc": None})
+    check("the same file under no root or tree is red", any("not a tracked .py of an admitted tool" in x for x in errs(tr2, trec)), errs(tr2, trec))
     for what, name in (("an index past the steps", "gen:%s:1" % ROOT), ("another root's step", "gen:%s:0" % (ROOT + "x")), ("a free name", "lift")):
         bs = make_repo("stagebad_" + what.replace(" ", "_").replace("'", ""), srec, {"lifted_by": T + "gen/lift.py", "stage": name}, sfiles)
         check("stage naming %s is red" % what, any("is not a generated step" in x for x in errs(bs, srec)), errs(bs, srec))
