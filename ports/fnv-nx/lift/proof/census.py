@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Encoding census of one module: every instruction of the recursive ranges, grouped by encoding shape (proof/shape.py).
 
-    python3 -I census.py IMAGE FACTS_DIR OUT.tsv        FACTS_DIR/ranges.tsv names the byte ranges (absolute VAs at the preferred base)
+    python3 -I census.py IMAGE FACTS_DIR OUT.tsv        FACTS_DIR/ranges.tsv names the byte ranges (absolute VAs at the preferred base), FACTS_DIR/codemap.tsv the byte accounting of the same facts commit
 
 OUT.tsv (stage output; sorted, no clock):
     # fnvnx-census/1 image_sha256=... ranges_sha256=... tool_sha256=... forms_sha256=... instructions=N shapes=S form_keys=K
@@ -90,15 +90,42 @@ def read_ranges(path):
     return base, sorted(out)
 
 
-def census(image, ranges_path):
+DATA_CLASSES = ('data-reloc', 'data-unreached', 'data-pe-header', 'hole')       # codemap classes (L3a tools/codemap.py CLS, tools/modlift.py CN) that are bytes, not code
+
+
+def read_codemap(path):
+    """sorted [(start, end, class)] from codemap.tsv (`start<TAB>length<TAB>class<TAB>detail`, hex start, decimal length): the byte-accounting of the facts commit"""
+    out = []
+    with open(path) as fh:
+        for ln in fh:
+            f = ln.rstrip('\n').split('\t')
+            if len(f) < 3 or not f[0] or f[0][0] == '#':
+                continue
+            out.append((int(f[0], 16), int(f[0], 16) + int(f[1]), f[2]))
+    out.sort()
+    return out
+
+
+def codemap_class(cm, va):
+    """the class of byte va ('' when the codemap does not cover it)"""
+    import bisect
+    i = bisect.bisect_right(cm, (va, 1 << 40, '')) - 1
+    return cm[i][2] if i >= 0 and cm[i][0] <= va < cm[i][1] else ''
+
+
+def census(image, ranges_path, codemap_path=None):
     """({shape: [family, form_key, count, first_address]}, instructions, [(lo, hi, stopped_at)] ranges that do not decode to whole instructions)"""
     pe = Pe(image)
     base, rngs = read_ranges(ranges_path)
     if base != pe.base:
         raise ValueError('ranges base %08x != image base %08x' % (base, pe.base))
     md = shape.decoder()
-    shapes, seen, bad, split = {}, set(), [], {}
+    shapes, seen, bad, split, skipped = {}, set(), [], {}, []
+    cm = read_codemap(codemap_path) if codemap_path else None
     for lo, hi in rngs:
+        if cm is not None and codemap_class(cm, lo) in DATA_CLASSES:          # the code rule: a range whose first byte the codemap accounts as data is not code (it has no lifted body)
+            skipped.append((lo, hi, codemap_class(cm, lo)))
+            continue
         code = pe.bytes(lo, hi - lo)
         pos = lo
         for ins in md.disasm(code, lo):
@@ -129,16 +156,16 @@ def census(image, ranges_path):
         if len(got) != 1 or got[0].size != len(r) or shape.shape_key(got[0]) != k or shape.family(got[0]) != shapes[k][0]:      # (the family of every instruction was already checked above)
             raise ValueError('shape %s: the representative encoding does not reproduce the shape' % k)
         shapes[k][1] = forms.form_key(got[0])
-    return shapes, len(seen), bad
+    return shapes, len(seen), bad, skipped
 
 
-def write(path, image, ranges_path, shapes, n, bad):
+def write(path, image, ranges_path, shapes, n, bad, codemap_path=None, skipped=()):
     keys = sorted({v[1] for v in shapes.values()})
     with open(forms.__file__, 'rb') as fh:
         fsha = hashlib.sha256(fh.read()).hexdigest()
     with open(path, 'w', newline='\n') as fh:
-        fh.write('# fnvnx-census/1 image_sha256=%s ranges_sha256=%s tool_sha256=%s forms_sha256=%s instructions=%d shapes=%d form_keys=%d undecodable_ranges=%d\n'
-                 % (sha_file(image), sha_file(ranges_path), tool_sha(), fsha, n, len(shapes), len(keys), len(bad)))
+        fh.write('# fnvnx-census/1 image_sha256=%s ranges_sha256=%s tool_sha256=%s forms_sha256=%s codemap_sha256=%s instructions=%d shapes=%d form_keys=%d undecodable_ranges=%d data_ranges_skipped=%d\n'
+                 % (sha_file(image), sha_file(ranges_path), tool_sha(), fsha, sha_file(codemap_path) if codemap_path else '-', n, len(shapes), len(keys), len(bad), len(skipped)))
         for lo, hi, at in bad:
             fh.write('# undecodable %08x-%08x stopped_at=%08x\n' % (lo, hi, at))
         fh.write('# shape\tfamily\tform_key\tcount\tfirst_address\n')
@@ -153,8 +180,9 @@ def main(argv):
         return 2
     image, facts, out = argv
     rp = os.path.join(facts, 'ranges.tsv')
-    shapes, n, bad = census(image, rp)
-    write(out, image, rp, shapes, n, bad)
+    cp = os.path.join(facts, 'codemap.tsv')
+    shapes, n, bad, skipped = census(image, rp, cp)          # the codemap of the same facts commit and image: one source for code (the lifter's)
+    write(out, image, rp, shapes, n, bad, cp, skipped)
     fam = {}
     for v in shapes.values():
         fam[v[0]] = fam.get(v[0], 0) + 1
