@@ -15,6 +15,7 @@ import jtab as JT
 from jtab import St, TOP, N, M32, FULL
 
 NP = 8
+REGS = ('eax', 'ecx', 'edx', 'ebx', 'esi', 'edi')     # the register state at an entry is the join of the states at its call sites, whatever the callee's convention
 
 
 class Ranger:
@@ -25,12 +26,14 @@ class Ranger:
         s.P = {}; s.A = {}; s.busy = set()
 
     def seedfn(s, e, use=True):
-        pv = s.params(e) if use else ((TOP,) * NP, ('parameters not used',) * NP)
+        pv = s.params(e) if use else ((TOP,) * (NP + len(REGS)), ('parameters not used',) * (NP + len(REGS)))
         def seed(x):
             if x == e:
                 st = St({}, None)
-                for n, v in enumerate(pv[0]):
+                for n, v in enumerate(pv[0][:NP]):
                     if v != TOP: st.r[('c', 'esp0', 4 + 4 * n)] = v
+                for n, r in enumerate(REGS):
+                    if pv[0][NP + n] != TOP: st.r[r] = pv[0][NP + n]; st.why[r] = 'join over the call sites of the entry: ' + pv[1][NP + n]
                 for n, w in enumerate(pv[1]): st.why['p%d' % n] = w
                 return st
             if s.is_seed(x): return St({}, None, why={'*': 'entry %x entered from outside the decoded edges' % x})
@@ -43,21 +46,21 @@ class Ranger:
     def params(s, e):
         """-> ((interval per parameter), (reason per parameter))"""
         if e in s.P: return s.P[e]
-        top = ((TOP,) * NP, ('unknown',) * NP)
+        top = ((TOP,) * (NP + len(REGS)), ('unknown',) * (NP + len(REGS)))
         why = s.pure(e)
         if why is None and s.esc is not None and s.esc(e): why = 'an escape-open path (no_s4_arith OPEN) can form its address'
-        if why is not None: return top[0], ('entry %x: %s' % (e, why),) * NP
-        if e in s.busy: return top[0], ('recursive call chain at %x' % e,) * NP
+        if why is not None: return top[0], ('entry %x: %s' % (e, why),) * (NP + len(REGS))
+        if e in s.busy: return top[0], ('recursive call chain at %x' % e,) * (NP + len(REGS))
         s.busy.add(e)
         try:
-            cs = s.callers_of(e); acc = [None] * NP; rs = [''] * NP
-            if not cs: return top[0], ('entry %x has no decoded call site' % e,) * NP
+            K = NP + len(REGS); cs = s.callers_of(e); acc = [None] * K; rs = [''] * K
+            if not cs: return top[0], ('entry %x has no decoded call site' % e,) * (NP + len(REGS))
             for c in cs:
                 av, aw = s.args(c)
-                for n in range(NP):
+                for n in range(K):
                     acc[n] = av[n] if acc[n] is None else JT.join(acc[n], av[n])
                     if av[n] == TOP and not rs[n]: rs[n] = aw[n]
-            res = (tuple(a if a is not None else TOP for a in acc), tuple(rs[n] or 'join over %d call sites' % len(cs) for n in range(NP)))
+            res = (tuple(a if a is not None else TOP for a in acc), tuple(rs[n] or 'join over %d call sites' % len(cs) for n in range(K)))
         finally:
             s.busy.discard(e)
         s.P[e] = res
@@ -75,6 +78,9 @@ class Ranger:
                 if n < len(st.pk): v = st.pk[-1 - n]; w = 'pushed argument at %x' % c
                 elif st.espd is not None and cells and ('c', 'esp0', st.espd + 4 * n) in st.r: v = st.r[('c', 'esp0', st.espd + 4 * n)]; w = 'stack cell argument at %x' % c
             iv.append(v); ws.append(w if v == TOP else 'bound')
+        for r in REGS:
+            v = st.g(r) if st is not None else TOP
+            iv.append(v); ws.append('bound' if v != TOP else 'call site %x: %s: %s' % (c, r, (st.why.get(r, 'no definition in the cone') if st is not None else 'unreachable')))
         s.A[c] = (tuple(iv), tuple(ws))
         return s.A[c]
 

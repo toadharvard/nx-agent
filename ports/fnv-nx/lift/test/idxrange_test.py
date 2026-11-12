@@ -9,9 +9,9 @@ F = 0x1000
 def rel(frm, to): return struct.pack('<i', to - (frm + 5))
 FUNC = b'\x55\x8b\xec\x8b\x45\x08\xc7\x04\x85\x00\x20\x00\x00\x01\x00\x00\x00\x5d\xc3'          # push ebp; mov ebp,esp; mov eax,[ebp+8]; mov dword [eax*4+0x2000],1; pop ebp; ret
 STORE = F + 6
-def build(callers_code, pure=None, ret_guard=False):
+def build(callers_code, pure=None, func=FUNC):
     mem = {}
-    for i, b in enumerate(FUNC): mem[F + i] = b
+    for i, b in enumerate(func): mem[F + i] = b
     at = 0x1100; csites = []; fn = {F: F}
     for blk in callers_code:
         start = at; code = b''
@@ -53,4 +53,12 @@ class T(unittest.TestCase):
         lo, hi, src, why = rg.index_range(STORE, 'eax'); s.assertIsNone(lo)
     def test_no_call_site_unknown(s):
         rg = build([]); lo, hi, src, why = rg.index_range(STORE, 'eax'); s.assertIsNone(lo)
+THIS = b'\x8b\xf1\xc7\x46\x04\x01\x00\x00\x00\xc3'                      # mov esi,ecx; mov dword [esi+4],1; ret
+class R(unittest.TestCase):
+    def test_register_argument_joined_over_callers(s):
+        rg = build([[b'\xb9\x00\x50\x00\x00', 'call']], func=THIS)
+        lo, hi, src, why = rg.index_range(F + 2, 'esi'); s.assertEqual((lo, hi), (0x5000, 0x5000))
+    def test_two_callers_two_objects(s):
+        rg = build([[b'\xb9\x00\x50\x00\x00', 'call'], [b'\xb9\x00\x60\x00\x00', 'call']], func=THIS)
+        lo, hi, src, why = rg.index_range(F + 2, 'esi'); s.assertEqual((lo, hi), (0x5000, 0x6000))
 if __name__ == '__main__': unittest.main()
