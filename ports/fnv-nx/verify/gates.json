@@ -269,6 +269,15 @@
    "result": "machine.json"
   },
   {
+   "name": "hostapi",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_hostapi.py"
+   ],
+   "result": "hostapi.json"
+  },
+  {
    "name": "d3d9total",
    "argv": [
     "python3",
