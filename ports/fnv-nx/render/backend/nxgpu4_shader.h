@@ -16,6 +16,7 @@
  * NXGPU_FN_COUNT4 is unchanged (the v4 table), NXGPU_VERSION4 stays 4. */
 #ifndef FNVNX_NXGPU4_SHADER_H
 #define FNVNX_NXGPU4_SHADER_H
+#include <stddef.h>
 #include "nxgpu4.h"
 
 #ifdef __cplusplus
@@ -33,6 +34,7 @@ typedef struct NxShaderD3D {
     uint32_t n_link_pairs, pad2;
 } NxShaderD3D;
 NX_ASSERT_(sizeof(NxShaderD3D) == 64, "NxShaderD3D");
+NX_ASSERT_(offsetof(NxShaderD3D, key) == 16 && offsetof(NxShaderD3D, link_pairs) == 48 && offsetof(NxShaderD3D, n_link_pairs) == 56, "NxShaderD3D layout");
 
 #ifdef __cplusplus
 }

@@ -49,7 +49,7 @@ uint64_t gl4_api_shader_create_d3d(uint64_t a) {
     uint8_t* code = (uint8_t*)malloc(d.size);
     if (!code) return refuse("out of memory");
     memcpy(code, bc, d.size);
-    { uint8_t key[32]; fnvnx_sha256(code, d.size, key); if (memcmp(key, d.key, sizeof key)) { free(code); return refuse("key is not the SHA-256 hash of the bytecode"); } }
+    { uint8_t k[32]; fnvnx_sha256(code, d.size, k); if (memcmp(k, d.key, sizeof k)) { free(code); return refuse("key is not the SHA-256 hash of the bytecode"); } }
     uint32_t id = memo_find(&key, code);
     if (id) { free(code); g4.sh[id].d3d->refs++; return id; }
     fnvnx_shader_opts o; memset(&o, 0, sizeof o);

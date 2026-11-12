@@ -175,7 +175,7 @@ MUTS = [  # (part that must catch it, file, old text (exactly once), replacement
     ("o", "gl4_read.c", "gl4_img(r->src.image ? r->src.image : g4.swapImage);   /* image 0", "gl4_img(r->src.image);   /* image 0"),
     ("q", "gl4_d3dshader.c", "if (d.variant > 3 || (d.stage == 1 && (d.variant & 1)))", "if (d.variant > 3)"),
     ("q", "gl4_d3dshader.c", "if (d.variant > 3 ||", "if (d.variant > 4 ||"),
-    ("q", "gl4_d3dshader.c", "if (memcmp(key, d.key, sizeof key)) {", "if (0) {"),
+    ("q", "gl4_d3dshader.c", "if (memcmp(k, d.key, sizeof k)) {", "if (0) {"),
     ("q", "gl4_d3dshader.c", "if (d.pad[0] || d.pad[1] || d.pad2) return", "if (d.pad[0] || d.pad2) return"),
     ("q", "gl4_d3dshader.c", "if (lp[i] / 16 > 13 || (i && lp[i] <= lp[i - 1])) return", "if (lp[i] / 16 > 13 || (i && lp[i] < lp[i - 1])) return"),
     ("q", "gl4_d3dshader.c", "e->stage == k->stage && e->variant == k->variant && e->nl", "e->stage == k->stage && e->nl"),
