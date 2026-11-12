@@ -19,7 +19,7 @@ import argparse, hashlib, json, os, re, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import z3
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32
-from proof import universe, defects, rewrite, forms, enc_table, model_sail, backends
+from proof import universe, defects, rewrite, forms, model_sail, backends
 MODELS = {'model_sail': model_sail}      # the reference models --model can name
 ADDR = 0x401000
 REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'); FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
@@ -27,8 +27,12 @@ RFO = z3.BitVec('rflags_other', 32)
 SUBS = [(z3.BitVec('df', 1), z3.Extract(10, 10, RFO)), (z3.BitVec('flo', 32), RFO & 0xFFFFF328)]    # DSL inputs df / flo = bits of the model's free rflags_other
 SEVERITY = ['FAILED(dsl)', 'timeout', 'FAILED(model-defect)', 'model-gap', 'proved']
 
-class Perm(set):                      # tolerated model faults for forms with fault(DE): the divide error paths
-    def __ge__(self, other): return all(re.match(r'\(!!FAULT-FRESH :DE |:(UN)?SIGNED-DIVIDE', m) or m in self for m in other)
+MODEL_FAULT = {1: r'\(!!FAULT-FRESH :DE |:(UN)?SIGNED-DIVIDE',            # DSL fault code -> the model's messages of that fault (divide error paths)
+               7: r':NON-WRITABLE-SEGMENT$'}                                # a store through CS (memory_accessors.sail store_bytes_to_ea): #GP(0)
+class Perm(set):                      # tolerated model faults of a form: exactly the messages of the fault codes that the form declares (a fault the DSL does not declare stays a model-gap)
+    declared = True
+    def __init__(self, base, codes): super().__init__(base); self.rx = '|'.join(MODEL_FAULT.get(c, r'(?!)') for c in sorted(codes))
+    def __ge__(self, other): return all(re.match(self.rx, m) or m in self for m in other)
 
 def items(forms, args):
     """[(key, source, F or None, bytes, width, error)] : real encodings of every in-scope key, then enc_table.py extras"""
@@ -43,6 +47,7 @@ def items(forms, args):
     for k in keys:
         for b in real[k]: add(b, 'real', k)
         if not real[k]: out.append((k, 'real', None, b'', 0, 'no real encoding in result.json'))
+    from proof import enc_table  # lazy: keystone is reached only by the table mode, never by a shape stage
     for b in enc_table.encodings(): add(b, 'table')
     if args.only: out = [o for o in out if args.only in o[0] or args.only in o[3].hex()]
     return keys, out
@@ -78,23 +83,25 @@ def check(conds, assume, args):
         s.pop()
     return z3.unsat, s
 
+def _nodes(roots):
+    seen, st = set(), list(roots)
+    while st:
+        n = st.pop()
+        if id(n) in seen: continue
+        seen.add(id(n)); yield n; st.extend(n.a)
+
 def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     """-> (result, note, certificate extras).  Shape proofs (shapeprove.py) pass pre = a pre-state with a symbolic eip, model = a thunk returning the model
     post-state of the shape, fields = {name: (offset, size)} of the symbolic encoding bytes (z3 variables fld_<name>, free = universally quantified)"""
     pre = PRE if pre is None else pre
-    base = getattr(mod, 'FAULT_OK_ORIG', None) or set(mod.FAULT_OK); mod.FAULT_OK_ORIG = base; mod.FAULT_OK = Perm(base) if F.faults else base
-    drv = False; M = model() if model else mod.model_post(code, pre); memo = {}; domain = M.pop('domain', z3.BoolVal(True))    # domain: restriction of the pre-state by construction (shape runs: eip range), not a model fault
+    model_sail.SYMSEL = any(n.op == 'var' and n.x.startswith('sel_') for n in _nodes(F.roots()))
+    base = getattr(mod, 'FAULT_OK_ORIG', None) or set(mod.FAULT_OK); mod.FAULT_OK_ORIG = base; mod.FAULT_OK = Perm(base, {k for k, _ in F.faults}) if F.faults else base
+    M = model() if model else mod.model_post(code, pre); memo = {}; domain = M.pop('domain', z3.BoolVal(True)); complete = M.pop('complete', True)    # domain: restriction of the pre-state by construction (shape runs: eip range), not a model fault
     M = {k: (rewrite.narrow_div(v, memo) if not isinstance(v, dict) else {n: rewrite.narrow_div(t, memo) for n, t in v.items()}) for k, v in M.items()}
     D = post_of(F); assume = M.get('assume', z3.BoolVal(True))
     mm2 = {}; mm3 = {}; fx = lambda v: rewrite.div_norm(rewrite.pow2_mul(v, mm2), mm3)
     M = {k: (fx(v) if not isinstance(v, dict) else {n: fx(t) for n, t in v.items()}) for k, v in M.items()}; D = {k: (fx(v) if not isinstance(v, dict) else {n: fx(t) for n, t in v.items()}) for k, v in D.items()}
     assume = M.get('assume', z3.BoolVal(True))
-    if not any(b in (0x64, 0x65) for b in code[:defects.prefix_skip(code)]) and any(b in (0x64, 0x65) for b in code[:4]):
-        # model_sail.py takes a 0x64/0x65 ModRM/SIB/opcode byte among the first four bytes for an FS/GS prefix and adds a free fs_base/gs_base to every address;
-        # with no segment prefix the base is 0 (flat), so those free variables are set to 0 in the model terms
-        z0 = [(z3.BitVec('fs_base', 32), z3.BitVecVal(0, 32)), (z3.BitVec('gs_base', 32), z3.BitVecVal(0, 32))]
-        M = {k: (z3.substitute(v, *z0) if not isinstance(v, dict) else {n: z3.substitute(t, *z0) for n, t in v.items()}) for k, v in M.items()}
-        assume = M.get('assume', z3.BoolVal(True)); drv = True
     side = M.pop('side', z3.BoolVal(True)); nofault = M.pop('nofault', None)
     assume_d = z3.And(assume, D['fault'] == 0, domain) if F.faults else z3.And(assume, domain)
     probe = z3.BitVec('probe', 32); diffs = []                     # (field, dsl, model, strict difference)
@@ -102,7 +109,10 @@ def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     for f in FLAGS: diffs.append((f, D['flags'][f], M['flags'][f], z3.And(D['defined'][f], D['flags'][f] != M['flags'][f])))
     dm, mm = z3.Select(D['mem'], probe), z3.Select(M['mem'], probe)
     diffs += [('mem', dm, mm, dm != mm), ('eip', D['eip'], M['eip'], D['eip'] != M['eip'])]
-    extra = {'model_sha256': hashlib.sha256(zser([(k, m) for k, _, m, _ in diffs]).encode()).hexdigest(), 'fault_checks': '', 'driver_fs_gs_base_forced_to_0': drv}
+    extra = {'model_sha256': hashlib.sha256(zser([(k, m) for k, _, m, _ in diffs]).encode()).hexdigest(), 'fault_checks': ''}
+    if not complete:                                             # every model path faults (a declared fault, prove.Perm): nothing to compare, but the DSL must fault in every pre-state of the domain
+        r0, _ = check([D['fault'] == 0], domain, args); extra['fault_checks'] = 'model never completes => DSL faults in every state: %s' % r0
+        return ('proved', '', extra) if r0 == z3.unsat else ('timeout', '', extra) if r0 != z3.sat else ('FAILED(dsl)', 'the model faults on every path, the DSL does not: ' + extra['fault_checks'], extra)
     r, s = check([d for *_, d in diffs], assume_d, args); notes = []; ids = []
     if r == z3.sat:                                              # does a declared model defect explain every disagreement?
         mo = s.model(); ev = lambda e: mo.eval(e, model_completion=True)

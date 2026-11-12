@@ -85,10 +85,10 @@ def h_x87(cx, ins):
 
 @op('fwait', 'wait')
 def h_fwait(cx, ins):
-    """FWAIT (9B): raises #MF iff an UNMASKED x87 exception is pending (SDM Vol 1 8.6, Vol 2 FWAIT). Invariant I-FPMASK (fnvlift/fpfacts.py, certified by tools/fpstate.py over every module): no
-    exception is ever unmasked, so none is ever pending and the instruction has no effect. The lifter READS the fact file: where I-FPMASK is not proven for the program being lifted, the
+    """FWAIT (9B): raises #MF iff an UNMASKED x87 exception is pending (SDM Vol 1 8.6, Vol 2 FWAIT). Invariant ASM-204 (fnvlift/fpfacts.py, certified by tools/fpstate.py over every module): no
+    exception is ever unmasked, so none is ever pending and the instruction has no effect. The lifter READS the fact file: where ASM-204 is not proven for the program being lifted, the
     form is Unsupported (a lift error), not a silent no-op."""
-    inv = fpfacts.require('I-FPMASK', 'fwait')
+    inv = fpfacts.require('ASM-204', 'fwait')
     cx.kinds.add('fwait:' + inv)
 
 
@@ -199,7 +199,7 @@ def x87_mem(cx, ins, b0, mr, g):
         em(a + 'M64(a_)=fv_s64(%s); }%s' % (r0(), pop(cx) if g == 3 else ''))
     elif b0 == 0xdb and g == 7:
         em(a + 'fnvl_f80 t_=fv_x(%s); M64(a_)=t_.m; M16(a_+8u)=t_.se; }%s' % (r0(), pop(cx)))
-    elif b0 == 0xdf and g == 4:                                                    # fbld m80: packed BCD -> ST(0) (rt/x87.c fnvl_x_from_bcd: A-BCD)
+    elif b0 == 0xdf and g == 4:                                                    # fbld m80: packed BCD -> ST(0) (rt/x87.c fnvl_x_from_bcd: ASM-216)
         em(a + push(cx, 'fv_ldbcd(M64(a_),M16(a_+8u))') + ' }')
     elif b0 == 0xdf and g == 6:                                                    # fbstp m80: round per RC, 18 digits, indefinite on NaN / inf / out of range; pop
         em(a + 'u64 lo_, hi_; fv_stbcd(%s,&lo_,&hi_); M64(a_)=lo_; M16(a_+8u)=(u16)hi_; }%s' % (r0(), pop(cx)))

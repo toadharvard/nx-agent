@@ -100,7 +100,7 @@ def h(a):
 
 
 def eh_facts(b):
-    return {"text": [h(b), h(b + 0x1000)], "failed_funcinfo": [], "frame_handlers": {}, "frame_regs": {},
+    return {"text": [h(b), h(b + 0x1000)], "failed_funcinfo": [], "failed_throwinfo": [], "thrower_escapes": [], "seh_red": [], "throw_sites": [], "registrations": [], "helpers": [],
             "funcinfo": [{"addr": h(b + 0x800), "stubs": [], "unwind": [[-1, h(b + 0x30)]], "tries": []}], "scopes": [], "throwinfo": [], "conts": {}}
 
 

@@ -7,7 +7,7 @@ offset != 0. Prints one line per check; exit status 1 on any failure."""
 import os, random, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(LIFT, 'tools'))
-import dispgen
+import dispgen, phf
 M = 0xffffffff
 ROWS = ['%08x\tL_%08x\tcode\n' % (a, a) for a in (0x401000, 0x401005, 0x40100a, 0x4010ff, 0x402000, 0x5fffff0, 0x7fffffff, 0xdeadbeef)] + \
        ['000fffd0\tfnvl_msvcrt_eh_nested_catch\truntime\n', '00100000\tI_00100000\timport\n', '# table_id 00\n', '\n']
@@ -59,10 +59,27 @@ def main():
         slots, g, (k1, k2, nb, tb) = tab
         return (((a ^ g[((a * k1) & M) >> (32 - nb)]) * k2) & M) >> (32 - tb)
     check('an empty slot holds a key that does not hash to that slot', all(home(k) != i for i, (k, s) in enumerate(tab[0]) if s is None))
+    # the table of native bodies (rt/dispatch.c): the same generator under another prefix, and an empty list is a table that every lookup misses
+    nasm, nh = dispgen.table(ROWS[:3], 'fnvnx_native')
+    check('prefix: the symbols and the section carry the prefix, none of the lifted names remain', all(x in nasm for x in ('fnvnx_native_disp_table:', 'fnvnx_native_g:', 'fnvnx_native_phf_params:', '.rodata.fnvnx_native_disp')) and 'fnvl_' not in nasm)
+    easm, eh = dispgen.table([], 'fnvnx_native', True)
+    check('empty list with allow_empty: 8 empty slots, every key misses', easm.count(', 0\n') == 8 and all(phf.lookup(eh, k) is None for k in (0, 1, 0x401000, 0xffffffff)))
+    try: dispgen.table([], 'fnvnx_native'); ok = False
+    except SystemExit: ok = True
+    check('empty list without allow_empty exits', ok)
     for name, rows in (('a duplicate address exits', ROWS + ['401000\tX\n']), ('a row without a symbol exits', ['401000\n']), ('an empty list exits', ['# x\n']), ('a non-hex address exits', ['zz\tX\n'])):
         try: dispgen.table(rows); ok = False
         except SystemExit: ok = True
         check(name, ok)
+    # COMPLETENESS: a closure target with no entry makes the generator fail (build red); a complete closure passes
+    a0 = ROWS[0].split('\t')[0] if isinstance(ROWS[0], str) else '%08x' % ROWS[0][0]
+    allc = ['%s\n' % (r.split('\t')[0] if isinstance(r, str) else '%08x' % r[0]) for r in ROWS]
+    try: dispgen.table(ROWS, closure=allc); ok = True
+    except SystemExit: ok = False
+    check('closure: every target has an entry, the table is generated', ok)
+    try: dispgen.table(ROWS, closure=allc + ['deadbee0\n']); ok = False
+    except SystemExit as e: ok = 'deadbee0' in str(e) and 'no dispatch entry' in str(e)
+    check('closure: a target with no entry exits naming it', ok)
     print('dispgentest: %d failed' % bad); sys.exit(1 if bad else 0)
 
 

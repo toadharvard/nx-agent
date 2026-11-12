@@ -11,7 +11,7 @@
 # What this script adds: the proof IR x86_proof.ir = the stock model + two extra splices that move instruction fetch into a register
 # window (x86_code_regs.sail declares code_base/code_bytes and is compiled first; x86_fetch.sail replaces `rb`).  The stock x86.ir
 # cannot be used because isla-execute-function has no memory initialisation: fetching from symbolic memory forks on every opcode.
-# Options: --stock builds the UNPATCHED model IR (x86_proof_stock.ir); default builds x86_proof.ir with the three local fixes of sail_patches/.
+# Options: --stock builds the UNPATCHED model IR (x86_proof_stock.ir); default builds x86_proof.ir with the local fixes of sail_patches/.
 STOCK=0; [ "${1:-}" = "--stock" ] && STOCK=1
 set -euo pipefail
 REMS=${REMS:-/home/user/rems-project}; TOOLS=${TOOLS:-/home/user/l3tools}; WORK=${WORK:-/home/user/l3work/proof}
@@ -30,7 +30,7 @@ eval "$($TOOLS/opam env --switch=sail)"; export PATH=$REMS/isla/isla-sail:$PATH
 [ -f "$MODEL/x86.ir" ] || make -C "$MODEL" x86.ir
 
 # proof IR: same file list as the model Makefile (PRELUDE_SAILS MODEL_SAILS MAIN_SAIL), plus the window registers first
-OUT=$WORK/sail/x86_proof; PATCHES="$HERE/sail_patches/rotate_count.sail $HERE/sail_patches/ror_cf.sail $HERE/sail_patches/bt_bitnumber.sail"
+OUT=$WORK/sail/x86_proof; PATCHES="$HERE/sail_patches/rotate_count.sail $HERE/sail_patches/ror_cf.sail $HERE/sail_patches/bt_bitnumber.sail $HERE/sail_patches/segment_bases.sail"
 [ $STOCK = 1 ] && { OUT=${OUT}_stock; PATCHES=""; }
 FILES="prelude.sail register_types.sail registers.sail register_accessors.sail opcode_ext.sail memory_accessors.sail init.sail config.sail logging.sail step.sail main.sail"
 newest=$(ls -t $PATCHES "$HERE/x86_fetch.sail" "$HERE/x86_code_regs.sail" $(for f in $FILES; do echo "$MODEL/$f"; done) "$MODEL"/../test-generation-patches/*.sail | head -1)

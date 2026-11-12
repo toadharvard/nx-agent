@@ -4,11 +4,15 @@ pointers (rule R3: EVERY relocated value into an executable section is an entry;
 for the accounting and never exclude an entry); jump tables; R3 byte accounting of .text (codemap.py), entry-set
 comparison (reconcile.py). Output: $FNVNX_FACTS_OUT (default /home/user/l3facts)/{universe,codemap}.tsv + count-only stdout; exit 1 if any byte is unexplained."""
 import os, re, sys, json, struct, bisect, capstone
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))      # the tool root: a tool imports its siblings from its own root (the generated stages run it under python3 -I, which has no script directory on the path)
 from types import SimpleNamespace
-import ehtables, codemap, reconcile, pemod, residue
+import ehtables, codemap, reconcile, pemod, residue, jtab as JT
 from array import array
 from collections import Counter, deque
 from capstone import x86 as X
+import cli
+USAGE = 'usage: universe.py [--module NAME]   code universe of the exe (FNVNX_EXE) or of the module NAME (a name or file of modules.tsv); env FNVNX_FACTS_OUT, FNVNX_MODULES, FNVNX_MODDIRS'
+if __name__ == '__main__': cli.parse(USAGE, sys.argv[1:], (0, 0), {'--module': True})
 ARGV = sys.argv[1:]; MOD = ARGV[ARGV.index('--module') + 1] if '--module' in ARGV else None; STRICT = MOD is not None   # module mode: pointers are code/data only on evidence
 if STRICT: import modlift; sys.exit(modlift.run(MOD))      # module mode: separate engine (every relocated pointer into executable bytes is an entry)
 EXE = MOD or os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')
@@ -77,7 +81,7 @@ def walk(start, lo, hi, dec, r3=False):
     covers it (no interior/table stop; an indexed jmp is an indirect jmp, its relocated targets are entries by R3); the result is never committed."""
     out = {}; refs = []; tabs = []; ok = True; work = [start]
     while work:
-        a = work.pop(); trail = []
+        a = work.pop()
         while True:
             if a in insns or a in out or not (lo <= a < hi) or not V[a - T0] or (STRICT and (tbl[a - T0] or pedat[a - T0])): break
             if not dec:
@@ -107,8 +111,7 @@ def walk(start, lo, hi, dec, r3=False):
                     fall = False; op = ops[0]
                     if op.type == X.X86_OP_IMM: tg = (op.imm & 0xffffffff,)
                     elif not r3 and op.type == X.X86_OP_MEM and op.mem.scale == 4 and op.mem.index and (a + ins.disp_offset) in rset:
-                        tg = table(ins, trail, lo, hi, dec, tabs); jtab.add(a)
-                        if not tg: feat |= 2
+                        jtab.add(a); feat |= 2                                  # edges come from jt_pass (tools/jtab.py), never from a pattern at the site
                     else: feat |= 1 if op.type == X.X86_OP_REG else 2
                 elif mn in ('ret', 'retf', 'int3', 'hlt', 'ud2', 'iret', 'iretd'): fall = False
                 elif mn[0] == 'j' or mn in ('loop', 'loope', 'loopne'): tg = (ops[0].imm & 0xffffffff,)
@@ -117,7 +120,6 @@ def walk(start, lo, hi, dec, r3=False):
                 for t in tg:
                     if dec and not (lo <= t < hi): refs.append(('tail', t, start))
                     else: work.append(t)
-                trail.append(ins); trail = trail[-8:]
                 a = nxt
                 if not fall: stop = True; break
                 if a in insns or a in out or not (lo <= a < hi) or not V[a - T0] or (not dec and (a in entries or dmap[a - T0])): break
@@ -127,30 +129,6 @@ def walk(start, lo, hi, dec, r3=False):
                 break
             if stop: break
     return ok, out, refs, tabs
-def table(ins, trail, lo, hi, dec, tabs):
-    a = ins.address; T = ins.operands[0].mem.disp & 0xffffffff; D = None; nidx = 0; D_site = 0
-    ok = lambda v: (lo <= v < hi) if dec else intext(v)
-    for p in reversed(trail):
-        o = p.operands
-        if D is None and p.mnemonic == 'movzx' and len(o) == 2 and o[1].type == X.X86_OP_MEM and o[1].size == 1 and (p.address + p.disp_offset) in rset: D = o[1].mem.disp & 0xffffffff; D_site = p.address + p.disp_offset
-        if not nidx and p.mnemonic == 'cmp' and len(o) == 2 and o[1].type == X.X86_OP_IMM and 0 <= o[1].imm < 256: nidx = o[1].imm + 1
-    ent = []
-    if D is not None:
-        if not nidx and D < T and T - D <= 256: nidx = T - D
-        x = off(D); idx = d[x:x + nidx] if x is not None else b''
-        if not idx: return ()
-        for k in range(max(idx) + 1):
-            v = u32(T + 4 * k)
-            if (T + 4 * k) not in rset or not ok(v): return ()
-            ent.append(v)
-        tabs.append((D, nidx, D_site)); tstarts.add(D)
-    else:
-        t = T
-        while t in rset and ok(u32(t)) and not (intext(t) and cov[t - T0]):
-            ent.append(u32(t)); t += 4
-        if not ent: return ()
-    tabs.append((T, 4 * len(ent), a + ins.disp_offset)); tstarts.add(T); tslots.update(T + 4 * k for k in range(len(ent)))
-    return tuple(ent)
 def commit(res):
     ok, out, refs, tabs = res
     for a, v in out.items():
@@ -167,6 +145,40 @@ def tail_pass():
         o = es[bisect.bisect_right(es, a) - 1]
         for t in insns[a][4]:
             if intext(t) and t in insns and t not in entries and not dmap[t - T0] and es[bisect.bisect_right(es, t) - 1] != o: add_entry(t, 'tail', a); n += 1
+    return n
+jt_red = {}; jt_ok = {}; svals = sorted((u32(r), r) for r in relocs); vrefs = {}
+for r, v in rvals: vrefs.setdefault(v, []).append(r)
+def jt_pass():
+    """jump-table edges (tools/jtab.py): every `jmp [T + r*4]` site is evaluated on the CURRENT decode; a site that resolves gets its table words as edges (descended, the words marked as table data), a site that does not is red with the reason."""
+    pm = {}
+    for a, (sz, mn, ft, fall, tg) in insns.items():
+        for t in tg: pm.setdefault(t, set()).add(a)
+        if fall: pm.setdefault(a + sz, set()).add(a)
+    def ins_at(a): return next(md.disasm(text[a - T0:a - T0 + 15], a, 1), None) if T0 <= a < T1 else None
+    def u8(a):
+        if any(v <= a < v + z for v, z in M.wr): return None           # a byte table is read only from a read-only section (a writable one is not a fact)
+        try: return u32(a) & 0xff
+        except Exception: return None
+    ex = JT.exclusive(jt_ok, svals)
+    def seeded(x):
+        if x in callers: return True
+        if x in entries and (kinds[x] - {'ptr', 'tail', 'inner'}): return True
+        return any(r not in ex for r in vrefs.get(x, ()))           # a relocated reference other than an exclusive table word
+    n = 0
+    for a in sorted(jtab):
+        if a not in insns: continue
+        tg, why = JT.resolve(a, insns, ins_at, lambda x: pm.get(x, ()), seeded, rset, u32, u8, intext, TN // 4)
+        if tg is None: jt_red[a] = why; continue
+        jt_red.pop(a, None)
+        if jt_ok.get(a) == tg: continue
+        jt_ok[a] = tg; sz, mn, ft, fall, old = insns[a]; insns[a] = (sz, mn, ft & ~2, False, tuple(tg)); n += 1
+        lo = min(tg.addrs); hi = max(tg.addrs) + 4
+        if intext(lo): mark(lo, hi - lo, a)
+        tstarts.add(lo); tslots.update(tg.addrs)
+        for t in tg:
+            if t in insns: continue
+            f = indec(t); res = walk(t, f[0], f[0] + f[1], True) if f else walk(t, T0, T1, False); commit(res)
+            if not res[0]: bad_entries.add(t)
     return n
 def drain():
     while queue:
@@ -197,6 +209,8 @@ def disp_ref(r, v, ins, final):
     op = next(o for o in ins.operands if o.type == X.X86_OP_MEM and o.mem.disp & 0xffffffff == v)
     if cov[v - T0]: dinfo['disp_into_code'] += 1; return 1
     ctl = not STRICT or ins.mnemonic in ('call', 'jmp')               # module mode: a table loaded (not called) is data; its targets stay undetermined
+    if ins.mnemonic == 'jmp' and op.mem.index and op.mem.scale == 4 and not op.mem.base:
+        dinfo['disp_jtab'] += 1; return 1                                   # a table jump: its words are the edges jt_pass proves (tools/jtab.py), never a run read off the relocations
     if op.mem.index and op.mem.scale == 4:
         t = v; ent = []
         while t in rset and intext(u32(t)) and not cov[t - T0] and (t == v or t not in tstarts): ent.append(u32(t)); t += 4
@@ -289,7 +303,7 @@ def extent_insns(a):
     return seen
 def isdata(a): return sec(a) is not None and not (intext(a) and cov[a - T0])      # an address that is not known code
 X_ = SimpleNamespace(d=d, secs=secs, text=text, T0=T0, T1=T1, cov=cov, insns=insns, rset=rset, u32=u32, sec=sec, intext=intext, callers=callers, isdata=isdata,
-                     indec=indec, emit=add_entry, relocs=relocs, extent_insns=extent_insns, rvals=rvals, fsize=fsize, mark=mark, imports=imports, outdir=OUTD, cstr=M.cstr, strict=STRICT)
+                     jtab=jtab, jtab_red=jt_red, jtab_ok=jt_ok, indec=indec, emit=add_entry, relocs=relocs, extent_insns=extent_insns, rvals=rvals, fsize=fsize, mark=mark, imports=imports, outdir=OUTD, cstr=M.cstr, strict=STRICT)
 def entry_of(a):
     f = indec(a)
     if f: return f[0]
@@ -313,6 +327,7 @@ for rnd in range(30):
     OWN[:] = sorted(entries); ch += eh.scan(); drain()
     ch += codemap.strict_pass(U, fin, eh) if STRICT else ptr_pass(True, fin, eh); drain()
     ch += tail_pass(); drain()
+    ch += jt_pass(); drain()
     if (len(entries), len(insns), len(tslots), len(tstarts)) == n0 and not ch:
         if fin: break
         fin = True
@@ -322,6 +337,8 @@ for v, n, rf in arrays:           # an array read through an index register exte
     while e < T1 and not cov[e - T0] and not tbl[e - T0]: e += 1
     while e > v + n and text[e - T0 - 1] in (0xCC, 0x90): e -= 1
     if e > v + n: mark(v + n, e - v - n, rf); dinfo['array_ext_bytes'] += e - v - n
+print('JTAB_AFTER sites=%d resolved=%d red=%d' % (len(jtab), len(jt_ok), len(jt_red)), flush=True)
+for a in sorted(jt_red): print('JTAB_RED %08x %s' % (a, jt_red[a]))
 NRN, NRI, NRB, NRR = codemap.exe_noreturn(U, eh.thrower)        # NORETURN: unreach what only flows after a call that never returns
 # ---- extents / features / output
 for v, ss in psites.items():

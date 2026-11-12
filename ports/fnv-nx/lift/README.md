@@ -11,7 +11,6 @@ What lives where:
 | `fnvlift/` | the lifter: `image.py` (PE, .reloc), `core.py` (descent, emit loop, handler registry), one module per instruction family (`f_int`, `f_flow`, `f_string`, `f_x87`, `f_sse`, `f_sys`) |
 | `rt/` | the runtime: `fnvl.h` (state and inline semantics every lifted file includes), `x87.c` (exact 80-bit arithmetic), `rt.c` (dispatch, bridges' helpers, host calls) |
 | `test/` | `golden.py` (output digest of a lifter over all functions), `instest.py` (every instruction form against Unicorn), unit tests of the runtime |
-| `bench/` | function-level equivalence bench (x86 under Unicorn against lifted AArch64 under Unicorn, same memory world) |
 | `tools/` | `universe.py` (every entry the exe needs a body for), `census.py`, `cache.py`, `bridges.py`, `report.py` |
 
 The tools are ours. Their **output is exe-derived** (lifted C, entry lists, per-function tables, objects) and is
@@ -100,7 +99,7 @@ of the image is ever rewritten (vtable slots, EH tables and jump tables included
     where that is possible.
   - `table`: `rcp*`/`rsqrt*`: the 2^32 table of the reference CPU is the specification.
   Assumption recorded: memory forms are proven for pre-states where the model raises no segment-limit fault; on the
-  flat 4 GiB segments of the real process an address wraps modulo 2^32, which is what the lifted code does. `instest` (Unicorn) and the bench verify; they
+  flat 4 GiB segments of the real process an address wraps modulo 2^32, which is what the lifted code does. `instest` (Unicorn) verifies; it
   prove nothing.
 - **R3, code map.** Every byte of `.text` of every lifted module is an instruction of an entry, alignment, or a
   table named by a relocation (`tools/universe.py`); anything else is a build error. There are no trap codes.
@@ -155,8 +154,11 @@ No trap paths. Whatever the x86 code does on the CPU, the lifted code does:
 - native frames in between: the entry and exit bridges link a native frame into the chain in both directions
   (a registration whose handler runs the native unwinder for that frame), so a throw crosses lifted and native
   frames in any order.
-Proof: every FuncInfo and scope table of the exe is parsed (`tools/ehtables.py`, 0 unparsed), and the bench throws
-through every function that has one, comparing the unwind actions with the x86 execution.
+Proof: every FuncInfo and scope table of every image is a dataflow fact over the decoded code (`tools/ehtables.py` on the flow engine `tools/ehflow.py`):
+ThrowInfo at each throw site through the callers' arguments (R1), callee-saved registers across calls only where the callee is proven to restore them (R2),
+the SEH scope table of a registration helper from the argument at every direct call site (R3), the table length as 1 + the largest constant trylevel stored (R4).
+A site no rule resolves is red in `gates/gate_eh.py` (never skipped), as is a table entry without a lifted landing. The unwind actions are compared with the x86 execution only by
+`test/` cases that exist; there is no per-function throw bench.
 
 ## Entries: the universe
 
@@ -184,4 +186,3 @@ A lifted object is keyed by (function bytes, relocation mask inside them, lifter
 | coverage | `tools/census.py` | entries lifted / entries, failure reasons |
 | golden (refactors) | `test/golden.py <dir>` | sha256 of all outputs |
 | instruction | `test/instest.py` | forms tested, cases equal / different, per mnemonic |
-| equivalence | `bench/` on farms | functions equal on all usable inputs / no usable input / diverging |

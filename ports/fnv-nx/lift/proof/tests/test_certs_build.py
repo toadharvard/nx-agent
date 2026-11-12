@@ -57,20 +57,64 @@ class Aggregate(unittest.TestCase):
         self.assertTrue(all(r[3] == MODEL and r[4] == 'sail' and r[5] == 'proved' and r[2] == symform.shape_sha(r[0]) for r in rows))
 
     def test_only_proved_rows(self):
+        keys = KEYS
         a = self.write('shapeprove_1_of_1.jsonl', [rec(KEYS[0]), rec(KEYS[1], 'timeout'), {'shape': KEYS[2], 'result': 'no-form'}])
         o = os.path.join(self.d, 'o')
         self.assertEqual(self.run_main([a], o), 0)
         self.assertEqual(len(open(o).read().splitlines()), 2)
 
-    def test_refusals(self):
+    def test_stale_records_are_ignored_not_refused(self):
         o = os.path.join(self.d, 'o')
         for bad in (rec(KEYS[0], model='0' * 64), rec(KEYS[0], dsl='1' * 64)):
-            a = self.write('shapeprove_1_of_1.jsonl', [bad])
-            self.assertEqual(self.run_main([a], o), 2)
-            self.assertFalse(os.path.exists(o))
+            a = self.write('shapeprove_1_of_1.jsonl', [bad, rec(KEYS[1])])
+            self.assertEqual(self.run_main([a], o), 0)
+            self.assertEqual([ln.split('\t')[0] for ln in open(o).read().splitlines()[1:]], [KEYS[1]])
+
+    def test_refusals(self):
+        o = os.path.join(self.d, 'o')
         a = self.write('shapeprove_1_of_1.jsonl', [rec(KEYS[0]), rec(KEYS[0], 'FAILED(dsl)')])
         self.assertEqual(self.run_main([a], o), 2)
         self.assertFalse(os.path.exists(o))
+
+    def shapes_file(self, keys=KEYS):
+        p = os.path.join(self.d, 'shapes.tsv')
+        with open(p, 'w') as fh:
+            fh.write('# fixture\n' + ''.join('%s\tint\t1\n' % k for k in keys))
+        return p
+
+    def queue(self, paths, keys=KEYS):
+        o = os.path.join(self.d, 'q')
+        self.assertEqual(certs_build.main(['--queue', self.shapes_file(keys), '--shards'] + paths + ['--out', o]), 0)
+        return open(o).read().split()
+
+    def test_dsl_edit_requeues_exactly_the_changed_forms(self):
+        from proof import forms
+        keys = KEYS + [key_of('01d8'), key_of('31db')]          # add eax,ebx / xor ebx,ebx: 5 shapes, 2 of them xor
+        keys = sorted(set(keys))
+        a = self.write('shapeprove_1_of_1.jsonl', [rec(k) for k in keys])
+        self.assertEqual(self.queue([a], keys), [])                   # everything proved under the current DSL
+        xor_keys = [k for k in keys if k.startswith('31')]
+        orig = forms.H['xor']
+
+        def edited(c):
+            orig(c)
+            c.F.undefined('df', 'edited')
+        forms.H['xor'] = edited
+        certs_build._SHA.clear()
+        try:
+            self.assertEqual(self.queue([a], keys), xor_keys)         # the old records are stale for xor, valid for the rest
+            o = os.path.join(self.d, 'o')
+            self.assertEqual(self.run_main([a], o), 0)
+            self.assertEqual([ln.split('\t')[0] for ln in open(o).read().splitlines()[1:]], [k for k in keys if k not in xor_keys])
+        finally:
+            forms.H['xor'] = orig
+            certs_build._SHA.clear()
+        self.assertEqual(self.queue([a], keys), [])
+
+    def test_failed_and_timeout_stay_queued(self):
+        keys = KEYS
+        a = self.write('shapeprove_1_of_1.jsonl', [rec(KEYS[0]), rec(KEYS[1], 'timeout'), rec(KEYS[2], 'FAILED(dsl)')])
+        self.assertEqual(self.queue([a], keys), KEYS[1:])
 
     def test_directory_argument(self):
         self.write('shapeprove_1_of_1.jsonl', [rec(KEYS[0])])

@@ -18,4 +18,7 @@ def main(pack, out):
 
 
 if __name__ == '__main__':
-    main(sys.argv[1], sys.argv[2])
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import cli
+    (a, b), _ = cli.parse('usage: packcopy.py PACK OUT\n  copies the lifted pack PACK to OUT', sys.argv[1:], (2, 2))
+    main(a, b)
