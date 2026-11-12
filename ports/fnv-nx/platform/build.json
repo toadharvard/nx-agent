@@ -242,7 +242,7 @@
   {
    "tool": "ports/fnv-nx/platform/manifest/gen_registry_seed.py",
    "args": [
-    "/ext/manifest/regsites.tsv",
+    "/ext/manifest/manifest/regsites.tsv",
     "/in/ports/fnv-nx/platform/manifest/declared_registry.tsv",
     "/out/win32/registry_seed.gen.inc"
    ],
