@@ -154,3 +154,16 @@ Update 2026-11-12, at 698adefb:
   - Cold verdict vd23 is running (doing). Next into int2: w5-flags and 800efa95.
 - 800efa95: deleted a stray host ELF, lift/--help/g (from w3's census run).
 - Farm 2 is running modlift_closure binkw32 at 7b10290c (3 h timeout) and w2's idxrange at 2a326b21 (doing).
+
+## 08:55 update
+- Flags census, binkw32 (w5, code c40135c6): RED.
+  - Global for the image: 988 entries (0 unreached), 61 561 instructions, 4 126 flag reads.
+  - Violations: 7 genuine flag reads and 7 992 no-form rows.
+  - The 7 reads by cause: 2 read a flag a certified form leaves undefined (asked of L3b); 4 are entries of kind ptr (split jtab / call, waits on w7's jtab facts); 1 path crosses a no-form row.
+  - The 7 992 no-form rows are x87, MMX/SSE-int and rare system ops. Form coverage is L3b's (blocked, L3b).
+  - The json field `certified` is negative because of a reporting defect. w5 splits reads from no-form rows (doing).
+- w8 bf936c0c: item 16 has 2 of 5 drivers converted (citest, imptest); 5 of 5 Unicorn harnesses remain.
+  - Decision: a test's lifted units form a lifted sub-root with LIFTED_ARGS, and its natives and main form a native test root that links it (origin rule 58c113f0).
+  - disptest is done with the lift/bridges wiring on int2. msvcrttest is next.
+  - instest is parked: Unicorn is not a reference. Sail through isla is proposed to L3b.
+- L1: farm/ on the trunk bee3dbfc already uses `-r FILE`. Farm 2 re-runs setup from the trunk after its current runs, dropping the hand-installed wheel. The gmpy2, MPFR and GMP pins are queued in w17 after the first-root merge (blocked, L1).
