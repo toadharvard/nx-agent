@@ -142,3 +142,6 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
   - Lead decision, per the orchestrator's rule (proof, otherwise Wine-observable behaviour): step 2 now, as a full implementation of the form whether or not it is reached.
     - w3b traces Wine 9.0 (tools/wine-9.0 c8373ee4) from CreateVertexShader through GLSL compile/link to the draw, citing file:line, and implements exactly what it shows.
     - It applies to the whole class of SM forms whose GLSL link fails, not only the 3 rows.
+- 03:32Z Merged w6 c646a014 (render/d3d9) and f8adf66b (lib/sha256): both on platform's semantics flags, C included. L1 w17 adopted the rule as one flags.semantics set for all languages.
+  - render/d3d9: 70 objects; cold 155 stages run, 34.3 s; warm 155/155 hit, 3.1 s; objstub 1784/1784, 0 findings. fmadd/fmsub/fnmadd/fnmsub over all 70 objects: 0 (it was 7).
+  - lib/sha256: cold green 1 object, warm 0 stages run; 233/233 NIST vectors pass.
