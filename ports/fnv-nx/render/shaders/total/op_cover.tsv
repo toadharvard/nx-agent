@@ -1,219 +1,219 @@
-slot	id	opnum	op	class	covering	evidence
-args	sm:ps:break	44	BREAK	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
-args	sm:ps:else	42	ELSE	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
-args	sm:ps:endif	43	ENDIF	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
-args	sm:ps:endloop	29	ENDLOOP	none	-	no 0-operand syntax row for ps:endloop
-args	sm:ps:endrep	39	ENDREP	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
-args	sm:ps:nop	0	NOP	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
-args	sm:ps:phase	65533	PHASE	a	-	op_syntax: 0 operands in 1 form(s); parse_args_NULL body `return 1;`
-args	sm:ps:ret	28	RET	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
-args	sm:vs:break	44	BREAK	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
-args	sm:vs:else	42	ELSE	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
-args	sm:vs:endif	43	ENDIF	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
-args	sm:vs:endloop	29	ENDLOOP	none	-	no 0-operand syntax row for ps:endloop
-args	sm:vs:endrep	39	ENDREP	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
-args	sm:vs:nop	0	NOP	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
-args	sm:vs:ret	28	RET	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
-args	table:RESERVED	49	RESERVED	c	-	opcode_string 0
-args	table:RESERVED	50	RESERVED	c	-	opcode_string 0
-args	table:RESERVED	51	RESERVED	c	-	opcode_string 0
-args	table:RESERVED	52	RESERVED	c	-	opcode_string 0
-args	table:RESERVED	53	RESERVED	c	-	opcode_string 0
-args	table:RESERVED	54	RESERVED	c	-	opcode_string 0
-args	table:RESERVED	55	RESERVED	c	-	opcode_string 0
-args	table:RESERVED	56	RESERVED	c	-	opcode_string 0
-args	table:RESERVED	57	RESERVED	c	-	opcode_string 0
-args	table:RESERVED	58	RESERVED	c	-	opcode_string 0
-args	table:RESERVED	59	RESERVED	c	-	opcode_string 0
-args	table:RESERVED	60	RESERVED	c	-	opcode_string 0
-args	table:RESERVED	61	RESERVED	c	-	opcode_string 0
-args	table:RESERVED	62	RESERVED	c	-	opcode_string 0
-args	table:RESERVED	63	RESERVED	c	-	opcode_string 0
-args	table:RESERVED	75	RESERVED	c	-	opcode_string 0
-emit	sm:ps:abs	35	ABS	own	-	non-empty body
-emit	sm:ps:add	2	ADD	own	-	non-empty body
-emit	sm:ps:bem	89	BEM	own	-	non-empty body
-emit	sm:ps:break	44	BREAK	own	-	non-empty body
-emit	sm:ps:break_eq	45	BREAKC	own	-	non-empty body
-emit	sm:ps:break_ge	45	BREAKC	own	-	non-empty body
-emit	sm:ps:break_gt	45	BREAKC	own	-	non-empty body
-emit	sm:ps:break_le	45	BREAKC	own	-	non-empty body
-emit	sm:ps:break_lt	45	BREAKC	own	-	non-empty body
-emit	sm:ps:break_ne	45	BREAKC	own	-	non-empty body
-emit	sm:ps:breakp	96	BREAKP	own	-	non-empty body
-emit	sm:ps:call	25	CALL	own	-	non-empty body
-emit	sm:ps:callnz_bool	26	CALLNZ	own	-	non-empty body
-emit	sm:ps:callnz_pred	26	CALLNZ	own	-	non-empty body
-emit	sm:ps:cmp	88	CMP	own	-	non-empty body
-emit	sm:ps:cnd	80	CND	own	-	non-empty body
-emit	sm:ps:crs	33	CRS	own	-	non-empty body
-emit	sm:ps:dcl	31	DCL	b	emit_GLSL_attribute,emit_GLSL_sampler	state_DCL>add_sampler>ctx->samplers>sampler_emitter;state_DCL>add_attribute_register>ctx->attributes>attribute_emitter
-emit	sm:ps:dcl_samplertype	31	DCL	b	emit_GLSL_attribute,emit_GLSL_sampler	state_DCL>add_sampler>ctx->samplers>sampler_emitter;state_DCL>add_attribute_register>ctx->attributes>attribute_emitter
-emit	sm:ps:dcl_usage	31	DCL	b	emit_GLSL_attribute,emit_GLSL_sampler	state_DCL>add_sampler>ctx->samplers>sampler_emitter;state_DCL>add_attribute_register>ctx->attributes>attribute_emitter
-emit	sm:ps:def	81	DEF	own	-	non-empty body
-emit	sm:ps:defb	47	DEFB	own	-	non-empty body
-emit	sm:ps:defi	48	DEFI	own	-	non-empty body
-emit	sm:ps:dp2add	90	DP2ADD	own	-	non-empty body
-emit	sm:ps:dp3	8	DP3	own	-	non-empty body
-emit	sm:ps:dp4	9	DP4	own	-	non-empty body
-emit	sm:ps:dsx	91	DSX	own	-	non-empty body
-emit	sm:ps:dsy	92	DSY	own	-	non-empty body
-emit	sm:ps:else	42	ELSE	own	-	non-empty body
-emit	sm:ps:endif	43	ENDIF	own	-	non-empty body
-emit	sm:ps:endloop	29	ENDLOOP	own	-	non-empty body
-emit	sm:ps:endrep	39	ENDREP	own	-	non-empty body
-emit	sm:ps:exp	14	EXP	own	-	non-empty body
-emit	sm:ps:frc	19	FRC	own	-	non-empty body
-emit	sm:ps:if_bool	40	IF	own	-	non-empty body
-emit	sm:ps:if_eq	41	IFC	own	-	non-empty body
-emit	sm:ps:if_ge	41	IFC	own	-	non-empty body
-emit	sm:ps:if_gt	41	IFC	own	-	non-empty body
-emit	sm:ps:if_le	41	IFC	own	-	non-empty body
-emit	sm:ps:if_lt	41	IFC	own	-	non-empty body
-emit	sm:ps:if_ne	41	IFC	own	-	non-empty body
-emit	sm:ps:if_pred	40	IF	own	-	non-empty body
-emit	sm:ps:label	30	LABEL	own	-	non-empty body
-emit	sm:ps:log	15	LOG	own	-	non-empty body
-emit	sm:ps:loop	27	LOOP	own	-	non-empty body
-emit	sm:ps:lrp	18	LRP	own	-	non-empty body
-emit	sm:ps:m3x2	24	M3X2	own	-	non-empty body
-emit	sm:ps:m3x3	23	M3X3	own	-	non-empty body
-emit	sm:ps:m3x4	22	M3X4	own	-	non-empty body
-emit	sm:ps:m4x3	21	M4X3	own	-	non-empty body
-emit	sm:ps:m4x4	20	M4X4	own	-	non-empty body
-emit	sm:ps:mad	4	MAD	own	-	non-empty body
-emit	sm:ps:max	11	MAX	own	-	non-empty body
-emit	sm:ps:min	10	MIN	own	-	non-empty body
-emit	sm:ps:mov	1	MOV	own	-	non-empty body
-emit	sm:ps:mul	5	MUL	own	-	non-empty body
-emit	sm:ps:nop	0	NOP	a	-	op_syntax: 0 dst 0 src 0 other in 2 form(s)
-emit	sm:ps:nrm	36	NRM	own	-	non-empty body
-emit	sm:ps:phase	65533	PHASE	a	-	op_syntax: 0 dst 0 src 0 other in 1 form(s)
-emit	sm:ps:pow	32	POW	own	-	non-empty body
-emit	sm:ps:rcp	6	RCP	own	-	non-empty body
-emit	sm:ps:rep	38	REP	own	-	non-empty body
-emit	sm:ps:ret	28	RET	own	-	non-empty body
-emit	sm:ps:rsq	7	RSQ	own	-	non-empty body
-emit	sm:ps:setp_eq	94	SETP	own	-	non-empty body
-emit	sm:ps:setp_ge	94	SETP	own	-	non-empty body
-emit	sm:ps:setp_gt	94	SETP	own	-	non-empty body
-emit	sm:ps:setp_le	94	SETP	own	-	non-empty body
-emit	sm:ps:setp_lt	94	SETP	own	-	non-empty body
-emit	sm:ps:setp_ne	94	SETP	own	-	non-empty body
-emit	sm:ps:sincos	37	SINCOS	own	-	non-empty body
-emit	sm:ps:sub	3	SUB	own	-	non-empty body
-emit	sm:ps:tex	66	TEXLD	own	-	non-empty body
-emit	sm:ps:texbem	67	TEXBEM	own	-	non-empty body
-emit	sm:ps:texbeml	68	TEXBEML	own	-	non-empty body
-emit	sm:ps:texcoord	64	TEXCRD	own	-	non-empty body
-emit	sm:ps:texcrd	64	TEXCRD	own	-	non-empty body
-emit	sm:ps:texdepth	87	TEXDEPTH	own	-	non-empty body
-emit	sm:ps:texdp3	85	TEXDP3	own	-	non-empty body
-emit	sm:ps:texdp3tex	83	TEXDP3TEX	own	-	non-empty body
-emit	sm:ps:texkill	65	TEXKILL	own	-	non-empty body
-emit	sm:ps:texld	66	TEXLD	own	-	non-empty body
-emit	sm:ps:texld14	66	TEXLD	own	-	non-empty body
-emit	sm:ps:texldb	66	TEXLD	own	-	non-empty body
-emit	sm:ps:texldd	93	TEXLDD	own	-	non-empty body
-emit	sm:ps:texldl	95	TEXLDL	own	-	non-empty body
-emit	sm:ps:texldp	66	TEXLD	own	-	non-empty body
-emit	sm:ps:texm3x2depth	84	TEXM3X2DEPTH	own	-	non-empty body
-emit	sm:ps:texm3x2pad	71	TEXM3X2PAD	b	emit_GLSL_TEXM3X2TEX	state_TEXM3X2PAD writes ctx->texm3x2pad_dst0, read by emit_GLSL_TEXM3X2TEX;state_TEXM3X2PAD writes ctx->texm3x2pad_src0, read by emit_GLSL_TEXM3X2TEX
-emit	sm:ps:texm3x2tex	72	TEXM3X2TEX	own	-	non-empty body
-emit	sm:ps:texm3x3	86	TEXM3X3	own	-	non-empty body
-emit	sm:ps:texm3x3pad	73	TEXM3X3PAD	b	emit_GLSL_TEXM3X3,emit_GLSL_TEXM3X3SPEC,emit_GLSL_TEXM3X3TEX,emit_GLSL_TEXM3X3VSPEC	state_TEXM3X3PAD writes ctx->texm3x3pad_dst0, read by emit_GLSL_TEXM3X3;state_TEXM3X3PAD writes ctx->texm3x3pad_dst0, read by emit_GLSL_TEXM3X3SPEC;state_TEXM3X3PAD writes ctx->texm3x3pad_dst0, read by emit_GLSL_TEXM3X3TEX;state_TEXM3X3PAD writes ctx->texm3x3pad_dst0, read by emit_GLSL_TEXM3X3VSPEC;state_TEXM3X3PAD writes ctx->texm3x3pad_dst1, read by emit_GLSL_TEXM3X3;state_TEXM3X3PAD writes ctx->texm3x3pad_dst1, read by emit_GLSL_TEXM3X3SPEC;state_TEXM3X3PAD writes ctx->texm3x3pad_dst1, read by emit_GLSL_TEXM3X3TEX;state_TEXM3X3PAD writes ctx->texm3x3pad_dst1, read by emit_GLSL_TEXM3X3VSPEC;state_TEXM3X3PAD writes ctx->texm3x3pad_src0, read by emit_GLSL_TEXM3X3;state_TEXM3X3PAD writes ctx->texm3x3pad_src0, read by emit_GLSL_TEXM3X3SPEC;state_TEXM3X3PAD writes ctx->texm3x3pad_src0, read by emit_GLSL_TEXM3X3TEX;state_TEXM3X3PAD writes ctx->texm3x3pad_src0, read by emit_GLSL_TEXM3X3VSPEC;state_TEXM3X3PAD writes ctx->texm3x3pad_src1, read by emit_GLSL_TEXM3X3;state_TEXM3X3PAD writes ctx->texm3x3pad_src1, read by emit_GLSL_TEXM3X3SPEC;state_TEXM3X3PAD writes ctx->texm3x3pad_src1, read by emit_GLSL_TEXM3X3TEX;state_TEXM3X3PAD writes ctx->texm3x3pad_src1, read by emit_GLSL_TEXM3X3VSPEC
-emit	sm:ps:texm3x3spec	76	TEXM3X3SPEC	own	-	non-empty body
-emit	sm:ps:texm3x3tex	74	TEXM3X3TEX	own	-	non-empty body
-emit	sm:ps:texm3x3vspec	77	TEXM3X3VSPEC	own	-	non-empty body
-emit	sm:ps:texreg2ar	69	TEXREG2AR	own	-	non-empty body
-emit	sm:ps:texreg2gb	70	TEXREG2GB	own	-	non-empty body
-emit	sm:ps:texreg2rgb	82	TEXREG2RGB	own	-	non-empty body
-emit	sm:vs:abs	35	ABS	own	-	non-empty body
-emit	sm:vs:add	2	ADD	own	-	non-empty body
-emit	sm:vs:break	44	BREAK	own	-	non-empty body
-emit	sm:vs:break_eq	45	BREAKC	own	-	non-empty body
-emit	sm:vs:break_ge	45	BREAKC	own	-	non-empty body
-emit	sm:vs:break_gt	45	BREAKC	own	-	non-empty body
-emit	sm:vs:break_le	45	BREAKC	own	-	non-empty body
-emit	sm:vs:break_lt	45	BREAKC	own	-	non-empty body
-emit	sm:vs:break_ne	45	BREAKC	own	-	non-empty body
-emit	sm:vs:breakp	96	BREAKP	own	-	non-empty body
-emit	sm:vs:call	25	CALL	own	-	non-empty body
-emit	sm:vs:callnz_bool	26	CALLNZ	own	-	non-empty body
-emit	sm:vs:callnz_pred	26	CALLNZ	own	-	non-empty body
-emit	sm:vs:crs	33	CRS	own	-	non-empty body
-emit	sm:vs:dcl_samplertype	31	DCL	b	emit_GLSL_attribute,emit_GLSL_sampler	state_DCL>add_sampler>ctx->samplers>sampler_emitter;state_DCL>add_attribute_register>ctx->attributes>attribute_emitter
-emit	sm:vs:dcl_usage	31	DCL	b	emit_GLSL_attribute,emit_GLSL_sampler	state_DCL>add_sampler>ctx->samplers>sampler_emitter;state_DCL>add_attribute_register>ctx->attributes>attribute_emitter
-emit	sm:vs:def	81	DEF	own	-	non-empty body
-emit	sm:vs:defb	47	DEFB	own	-	non-empty body
-emit	sm:vs:defi	48	DEFI	own	-	non-empty body
-emit	sm:vs:dp3	8	DP3	own	-	non-empty body
-emit	sm:vs:dp4	9	DP4	own	-	non-empty body
-emit	sm:vs:dst	17	DST	own	-	non-empty body
-emit	sm:vs:else	42	ELSE	own	-	non-empty body
-emit	sm:vs:endif	43	ENDIF	own	-	non-empty body
-emit	sm:vs:endloop	29	ENDLOOP	own	-	non-empty body
-emit	sm:vs:endrep	39	ENDREP	own	-	non-empty body
-emit	sm:vs:exp	14	EXP	own	-	non-empty body
-emit	sm:vs:expp	78	EXPP	own	-	non-empty body
-emit	sm:vs:frc	19	FRC	own	-	non-empty body
-emit	sm:vs:if_bool	40	IF	own	-	non-empty body
-emit	sm:vs:if_eq	41	IFC	own	-	non-empty body
-emit	sm:vs:if_ge	41	IFC	own	-	non-empty body
-emit	sm:vs:if_gt	41	IFC	own	-	non-empty body
-emit	sm:vs:if_le	41	IFC	own	-	non-empty body
-emit	sm:vs:if_lt	41	IFC	own	-	non-empty body
-emit	sm:vs:if_ne	41	IFC	own	-	non-empty body
-emit	sm:vs:if_pred	40	IF	own	-	non-empty body
-emit	sm:vs:label	30	LABEL	own	-	non-empty body
-emit	sm:vs:lit	16	LIT	own	-	non-empty body
-emit	sm:vs:log	15	LOG	own	-	non-empty body
-emit	sm:vs:logp	79	LOGP	own	-	non-empty body
-emit	sm:vs:loop	27	LOOP	own	-	non-empty body
-emit	sm:vs:lrp	18	LRP	own	-	non-empty body
-emit	sm:vs:m3x2	24	M3X2	own	-	non-empty body
-emit	sm:vs:m3x3	23	M3X3	own	-	non-empty body
-emit	sm:vs:m3x4	22	M3X4	own	-	non-empty body
-emit	sm:vs:m4x3	21	M4X3	own	-	non-empty body
-emit	sm:vs:m4x4	20	M4X4	own	-	non-empty body
-emit	sm:vs:mad	4	MAD	own	-	non-empty body
-emit	sm:vs:max	11	MAX	own	-	non-empty body
-emit	sm:vs:min	10	MIN	own	-	non-empty body
-emit	sm:vs:mov	1	MOV	own	-	non-empty body
-emit	sm:vs:mova	46	MOVA	own	-	non-empty body
-emit	sm:vs:mul	5	MUL	own	-	non-empty body
-emit	sm:vs:nop	0	NOP	a	-	op_syntax: 0 dst 0 src 0 other in 2 form(s)
-emit	sm:vs:nrm	36	NRM	own	-	non-empty body
-emit	sm:vs:pow	32	POW	own	-	non-empty body
-emit	sm:vs:rcp	6	RCP	own	-	non-empty body
-emit	sm:vs:rep	38	REP	own	-	non-empty body
-emit	sm:vs:ret	28	RET	own	-	non-empty body
-emit	sm:vs:rsq	7	RSQ	own	-	non-empty body
-emit	sm:vs:setp_eq	94	SETP	own	-	non-empty body
-emit	sm:vs:setp_ge	94	SETP	own	-	non-empty body
-emit	sm:vs:setp_gt	94	SETP	own	-	non-empty body
-emit	sm:vs:setp_le	94	SETP	own	-	non-empty body
-emit	sm:vs:setp_lt	94	SETP	own	-	non-empty body
-emit	sm:vs:setp_ne	94	SETP	own	-	non-empty body
-emit	sm:vs:sge	13	SGE	own	-	non-empty body
-emit	sm:vs:sgn	34	SGN	own	-	non-empty body
-emit	sm:vs:sincos	37	SINCOS	own	-	non-empty body
-emit	sm:vs:slt	12	SLT	own	-	non-empty body
-emit	sm:vs:sub	3	SUB	own	-	non-empty body
-emit	sm:vs:texldl	95	TEXLDL	own	-	non-empty body
-emit	table:RESERVED	49	RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	50	RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	51	RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	52	RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	53	RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	54	RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	55	RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	56	RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	57	RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	58	RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	59	RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	60	RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	61	RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	62	RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	63	RESERVED	c	-	opcode_string 0: see OUT_RESERVED
-emit	table:RESERVED	75	RESERVED	c	-	opcode_string 0: see OUT_RESERVED
+slot	id	opnum	op	handler	class	covering	evidence
+args	sm:ps:break	44	BREAK	parse_args_NULL	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
+args	sm:ps:else	42	ELSE	parse_args_NULL	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
+args	sm:ps:endif	43	ENDIF	parse_args_NULL	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
+args	sm:ps:endloop	29	ENDLOOP	parse_args_NULL	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
+args	sm:ps:endrep	39	ENDREP	parse_args_NULL	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
+args	sm:ps:nop	0	NOP	parse_args_NULL	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
+args	sm:ps:phase	65533	PHASE	parse_args_NULL	a	-	op_syntax: 0 operands in 1 form(s); parse_args_NULL body `return 1;`
+args	sm:ps:ret	28	RET	parse_args_NULL	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
+args	sm:vs:break	44	BREAK	parse_args_NULL	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
+args	sm:vs:else	42	ELSE	parse_args_NULL	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
+args	sm:vs:endif	43	ENDIF	parse_args_NULL	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
+args	sm:vs:endloop	29	ENDLOOP	parse_args_NULL	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
+args	sm:vs:endrep	39	ENDREP	parse_args_NULL	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
+args	sm:vs:nop	0	NOP	parse_args_NULL	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
+args	sm:vs:ret	28	RET	parse_args_NULL	a	-	op_syntax: 0 operands in 2 form(s); parse_args_NULL body `return 1;`
+args	table:RESERVED	49	RESERVED	parse_args_NULL	c	-	opcode_string 0
+args	table:RESERVED	50	RESERVED	parse_args_NULL	c	-	opcode_string 0
+args	table:RESERVED	51	RESERVED	parse_args_NULL	c	-	opcode_string 0
+args	table:RESERVED	52	RESERVED	parse_args_NULL	c	-	opcode_string 0
+args	table:RESERVED	53	RESERVED	parse_args_NULL	c	-	opcode_string 0
+args	table:RESERVED	54	RESERVED	parse_args_NULL	c	-	opcode_string 0
+args	table:RESERVED	55	RESERVED	parse_args_NULL	c	-	opcode_string 0
+args	table:RESERVED	56	RESERVED	parse_args_NULL	c	-	opcode_string 0
+args	table:RESERVED	57	RESERVED	parse_args_NULL	c	-	opcode_string 0
+args	table:RESERVED	58	RESERVED	parse_args_NULL	c	-	opcode_string 0
+args	table:RESERVED	59	RESERVED	parse_args_NULL	c	-	opcode_string 0
+args	table:RESERVED	60	RESERVED	parse_args_NULL	c	-	opcode_string 0
+args	table:RESERVED	61	RESERVED	parse_args_NULL	c	-	opcode_string 0
+args	table:RESERVED	62	RESERVED	parse_args_NULL	c	-	opcode_string 0
+args	table:RESERVED	63	RESERVED	parse_args_NULL	c	-	opcode_string 0
+args	table:RESERVED	75	RESERVED	parse_args_NULL	c	-	opcode_string 0
+emit	sm:ps:abs	35	ABS	emit_GLSL_ABS	own	-	non-empty body
+emit	sm:ps:add	2	ADD	emit_GLSL_ADD	own	-	non-empty body
+emit	sm:ps:bem	89	BEM	emit_GLSL_BEM	own	-	non-empty body
+emit	sm:ps:break	44	BREAK	emit_GLSL_BREAK	own	-	non-empty body
+emit	sm:ps:break_eq	45	BREAKC	emit_GLSL_BREAKC	own	-	non-empty body
+emit	sm:ps:break_ge	45	BREAKC	emit_GLSL_BREAKC	own	-	non-empty body
+emit	sm:ps:break_gt	45	BREAKC	emit_GLSL_BREAKC	own	-	non-empty body
+emit	sm:ps:break_le	45	BREAKC	emit_GLSL_BREAKC	own	-	non-empty body
+emit	sm:ps:break_lt	45	BREAKC	emit_GLSL_BREAKC	own	-	non-empty body
+emit	sm:ps:break_ne	45	BREAKC	emit_GLSL_BREAKC	own	-	non-empty body
+emit	sm:ps:breakp	96	BREAKP	emit_GLSL_BREAKP	own	-	non-empty body
+emit	sm:ps:call	25	CALL	emit_GLSL_CALL	own	-	non-empty body
+emit	sm:ps:callnz_bool	26	CALLNZ	emit_GLSL_CALLNZ	own	-	non-empty body
+emit	sm:ps:callnz_pred	26	CALLNZ	emit_GLSL_CALLNZ	own	-	non-empty body
+emit	sm:ps:cmp	88	CMP	emit_GLSL_CMP	own	-	non-empty body
+emit	sm:ps:cnd	80	CND	emit_GLSL_CND	own	-	non-empty body
+emit	sm:ps:crs	33	CRS	emit_GLSL_CRS	own	-	non-empty body
+emit	sm:ps:dcl	31	DCL	emit_GLSL_DCL	b	emit_GLSL_attribute,emit_GLSL_sampler	state_DCL>add_sampler>ctx->samplers>sampler_emitter;state_DCL>add_attribute_register>ctx->attributes>attribute_emitter
+emit	sm:ps:dcl_samplertype	31	DCL	emit_GLSL_DCL	b	emit_GLSL_attribute,emit_GLSL_sampler	state_DCL>add_sampler>ctx->samplers>sampler_emitter;state_DCL>add_attribute_register>ctx->attributes>attribute_emitter
+emit	sm:ps:dcl_usage	31	DCL	emit_GLSL_DCL	b	emit_GLSL_attribute,emit_GLSL_sampler	state_DCL>add_sampler>ctx->samplers>sampler_emitter;state_DCL>add_attribute_register>ctx->attributes>attribute_emitter
+emit	sm:ps:def	81	DEF	emit_GLSL_DEF	own	-	non-empty body
+emit	sm:ps:defb	47	DEFB	emit_GLSL_DEFB	own	-	non-empty body
+emit	sm:ps:defi	48	DEFI	emit_GLSL_DEFI	own	-	non-empty body
+emit	sm:ps:dp2add	90	DP2ADD	emit_GLSL_DP2ADD	own	-	non-empty body
+emit	sm:ps:dp3	8	DP3	emit_GLSL_DP3	own	-	non-empty body
+emit	sm:ps:dp4	9	DP4	emit_GLSL_DP4	own	-	non-empty body
+emit	sm:ps:dsx	91	DSX	emit_GLSL_DSX	own	-	non-empty body
+emit	sm:ps:dsy	92	DSY	emit_GLSL_DSY	own	-	non-empty body
+emit	sm:ps:else	42	ELSE	emit_GLSL_ELSE	own	-	non-empty body
+emit	sm:ps:endif	43	ENDIF	emit_GLSL_ENDIF	own	-	non-empty body
+emit	sm:ps:endloop	29	ENDLOOP	emit_GLSL_ENDLOOP	own	-	non-empty body
+emit	sm:ps:endrep	39	ENDREP	emit_GLSL_ENDREP	own	-	non-empty body
+emit	sm:ps:exp	14	EXP	emit_GLSL_EXP	own	-	non-empty body
+emit	sm:ps:frc	19	FRC	emit_GLSL_FRC	own	-	non-empty body
+emit	sm:ps:if_bool	40	IF	emit_GLSL_IF	own	-	non-empty body
+emit	sm:ps:if_eq	41	IFC	emit_GLSL_IFC	own	-	non-empty body
+emit	sm:ps:if_ge	41	IFC	emit_GLSL_IFC	own	-	non-empty body
+emit	sm:ps:if_gt	41	IFC	emit_GLSL_IFC	own	-	non-empty body
+emit	sm:ps:if_le	41	IFC	emit_GLSL_IFC	own	-	non-empty body
+emit	sm:ps:if_lt	41	IFC	emit_GLSL_IFC	own	-	non-empty body
+emit	sm:ps:if_ne	41	IFC	emit_GLSL_IFC	own	-	non-empty body
+emit	sm:ps:if_pred	40	IF	emit_GLSL_IF	own	-	non-empty body
+emit	sm:ps:label	30	LABEL	emit_GLSL_LABEL	own	-	non-empty body
+emit	sm:ps:log	15	LOG	emit_GLSL_LOG	own	-	non-empty body
+emit	sm:ps:loop	27	LOOP	emit_GLSL_LOOP	own	-	non-empty body
+emit	sm:ps:lrp	18	LRP	emit_GLSL_LRP	own	-	non-empty body
+emit	sm:ps:m3x2	24	M3X2	emit_GLSL_M3X2	own	-	non-empty body
+emit	sm:ps:m3x3	23	M3X3	emit_GLSL_M3X3	own	-	non-empty body
+emit	sm:ps:m3x4	22	M3X4	emit_GLSL_M3X4	own	-	non-empty body
+emit	sm:ps:m4x3	21	M4X3	emit_GLSL_M4X3	own	-	non-empty body
+emit	sm:ps:m4x4	20	M4X4	emit_GLSL_M4X4	own	-	non-empty body
+emit	sm:ps:mad	4	MAD	emit_GLSL_MAD	own	-	non-empty body
+emit	sm:ps:max	11	MAX	emit_GLSL_MAX	own	-	non-empty body
+emit	sm:ps:min	10	MIN	emit_GLSL_MIN	own	-	non-empty body
+emit	sm:ps:mov	1	MOV	emit_GLSL_MOV	own	-	non-empty body
+emit	sm:ps:mul	5	MUL	emit_GLSL_MUL	own	-	non-empty body
+emit	sm:ps:nop	0	NOP	emit_GLSL_NOP	a	-	op_syntax (ok): 0 dst 0 src 0 other in 2 form(s)
+emit	sm:ps:nrm	36	NRM	emit_GLSL_NRM	own	-	non-empty body
+emit	sm:ps:phase	65533	PHASE	emit_GLSL_phase	a	-	op_syntax (ok): 0 dst 0 src 0 other in 1 form(s)
+emit	sm:ps:pow	32	POW	emit_GLSL_POW	own	-	non-empty body
+emit	sm:ps:rcp	6	RCP	emit_GLSL_RCP	own	-	non-empty body
+emit	sm:ps:rep	38	REP	emit_GLSL_REP	own	-	non-empty body
+emit	sm:ps:ret	28	RET	emit_GLSL_RET	own	-	non-empty body
+emit	sm:ps:rsq	7	RSQ	emit_GLSL_RSQ	own	-	non-empty body
+emit	sm:ps:setp_eq	94	SETP	emit_GLSL_SETP	own	-	non-empty body
+emit	sm:ps:setp_ge	94	SETP	emit_GLSL_SETP	own	-	non-empty body
+emit	sm:ps:setp_gt	94	SETP	emit_GLSL_SETP	own	-	non-empty body
+emit	sm:ps:setp_le	94	SETP	emit_GLSL_SETP	own	-	non-empty body
+emit	sm:ps:setp_lt	94	SETP	emit_GLSL_SETP	own	-	non-empty body
+emit	sm:ps:setp_ne	94	SETP	emit_GLSL_SETP	own	-	non-empty body
+emit	sm:ps:sincos	37	SINCOS	emit_GLSL_SINCOS	own	-	non-empty body
+emit	sm:ps:sub	3	SUB	emit_GLSL_SUB	own	-	non-empty body
+emit	sm:ps:tex	66	TEXLD	emit_GLSL_TEXLD	own	-	non-empty body
+emit	sm:ps:texbem	67	TEXBEM	emit_GLSL_TEXBEM	own	-	non-empty body
+emit	sm:ps:texbeml	68	TEXBEML	emit_GLSL_TEXBEML	own	-	non-empty body
+emit	sm:ps:texcoord	64	TEXCRD	emit_GLSL_TEXCRD	own	-	non-empty body
+emit	sm:ps:texcrd	64	TEXCRD	emit_GLSL_TEXCRD	own	-	non-empty body
+emit	sm:ps:texdepth	87	TEXDEPTH	emit_GLSL_TEXDEPTH	own	-	non-empty body
+emit	sm:ps:texdp3	85	TEXDP3	emit_GLSL_TEXDP3	own	-	non-empty body
+emit	sm:ps:texdp3tex	83	TEXDP3TEX	emit_GLSL_TEXDP3TEX	own	-	non-empty body
+emit	sm:ps:texkill	65	TEXKILL	emit_GLSL_TEXKILL	own	-	non-empty body
+emit	sm:ps:texld	66	TEXLD	emit_GLSL_TEXLD	own	-	non-empty body
+emit	sm:ps:texld14	66	TEXLD	emit_GLSL_TEXLD	own	-	non-empty body
+emit	sm:ps:texldb	66	TEXLD	emit_GLSL_TEXLD	own	-	non-empty body
+emit	sm:ps:texldd	93	TEXLDD	emit_GLSL_TEXLDD	own	-	non-empty body
+emit	sm:ps:texldl	95	TEXLDL	emit_GLSL_TEXLDL	own	-	non-empty body
+emit	sm:ps:texldp	66	TEXLD	emit_GLSL_TEXLD	own	-	non-empty body
+emit	sm:ps:texm3x2depth	84	TEXM3X2DEPTH	emit_GLSL_TEXM3X2DEPTH	own	-	non-empty body
+emit	sm:ps:texm3x2pad	71	TEXM3X2PAD	emit_GLSL_TEXM3X2PAD	b	emit_GLSL_TEXM3X2DEPTH,emit_GLSL_TEXM3X2TEX	state_TEXM3X2PAD writes ctx->texm3x2pad_dst0, read by emit_GLSL_TEXM3X2DEPTH;state_TEXM3X2PAD writes ctx->texm3x2pad_dst0, read by emit_GLSL_TEXM3X2TEX;state_TEXM3X2PAD writes ctx->texm3x2pad_src0, read by emit_GLSL_TEXM3X2DEPTH;state_TEXM3X2PAD writes ctx->texm3x2pad_src0, read by emit_GLSL_TEXM3X2TEX
+emit	sm:ps:texm3x2tex	72	TEXM3X2TEX	emit_GLSL_TEXM3X2TEX	own	-	non-empty body
+emit	sm:ps:texm3x3	86	TEXM3X3	emit_GLSL_TEXM3X3	own	-	non-empty body
+emit	sm:ps:texm3x3pad	73	TEXM3X3PAD	emit_GLSL_TEXM3X3PAD	b	emit_GLSL_TEXM3X3,emit_GLSL_TEXM3X3SPEC,emit_GLSL_TEXM3X3TEX,emit_GLSL_TEXM3X3VSPEC	state_TEXM3X3PAD writes ctx->texm3x3pad_dst0, read by emit_GLSL_TEXM3X3;state_TEXM3X3PAD writes ctx->texm3x3pad_dst0, read by emit_GLSL_TEXM3X3TEX;state_TEXM3X3PAD writes ctx->texm3x3pad_dst0, read by emit_GLSL_TEXM3X3VSPEC;state_TEXM3X3PAD writes ctx->texm3x3pad_dst1, read by emit_GLSL_TEXM3X3;state_TEXM3X3PAD writes ctx->texm3x3pad_dst1, read by emit_GLSL_TEXM3X3TEX;state_TEXM3X3PAD writes ctx->texm3x3pad_dst1, read by emit_GLSL_TEXM3X3VSPEC;state_TEXM3X3PAD writes ctx->texm3x3pad_src0, read by emit_GLSL_TEXM3X3;state_TEXM3X3PAD writes ctx->texm3x3pad_src0, read by emit_GLSL_TEXM3X3TEX;state_TEXM3X3PAD writes ctx->texm3x3pad_src1, read by emit_GLSL_TEXM3X3;state_TEXM3X3PAD writes ctx->texm3x3pad_src1, read by emit_GLSL_TEXM3X3SPEC;state_TEXM3X3PAD writes ctx->texm3x3pad_src1, read by emit_GLSL_TEXM3X3TEX;state_TEXM3X3PAD writes ctx->texm3x3pad_src1, read by emit_GLSL_TEXM3X3VSPEC
+emit	sm:ps:texm3x3spec	76	TEXM3X3SPEC	emit_GLSL_TEXM3X3SPEC	own	-	non-empty body
+emit	sm:ps:texm3x3tex	74	TEXM3X3TEX	emit_GLSL_TEXM3X3TEX	own	-	non-empty body
+emit	sm:ps:texm3x3vspec	77	TEXM3X3VSPEC	emit_GLSL_TEXM3X3VSPEC	own	-	non-empty body
+emit	sm:ps:texreg2ar	69	TEXREG2AR	emit_GLSL_TEXREG2AR	own	-	non-empty body
+emit	sm:ps:texreg2gb	70	TEXREG2GB	emit_GLSL_TEXREG2GB	own	-	non-empty body
+emit	sm:ps:texreg2rgb	82	TEXREG2RGB	emit_GLSL_TEXREG2RGB	own	-	non-empty body
+emit	sm:vs:abs	35	ABS	emit_GLSL_ABS	own	-	non-empty body
+emit	sm:vs:add	2	ADD	emit_GLSL_ADD	own	-	non-empty body
+emit	sm:vs:break	44	BREAK	emit_GLSL_BREAK	own	-	non-empty body
+emit	sm:vs:break_eq	45	BREAKC	emit_GLSL_BREAKC	own	-	non-empty body
+emit	sm:vs:break_ge	45	BREAKC	emit_GLSL_BREAKC	own	-	non-empty body
+emit	sm:vs:break_gt	45	BREAKC	emit_GLSL_BREAKC	own	-	non-empty body
+emit	sm:vs:break_le	45	BREAKC	emit_GLSL_BREAKC	own	-	non-empty body
+emit	sm:vs:break_lt	45	BREAKC	emit_GLSL_BREAKC	own	-	non-empty body
+emit	sm:vs:break_ne	45	BREAKC	emit_GLSL_BREAKC	own	-	non-empty body
+emit	sm:vs:breakp	96	BREAKP	emit_GLSL_BREAKP	own	-	non-empty body
+emit	sm:vs:call	25	CALL	emit_GLSL_CALL	own	-	non-empty body
+emit	sm:vs:callnz_bool	26	CALLNZ	emit_GLSL_CALLNZ	own	-	non-empty body
+emit	sm:vs:callnz_pred	26	CALLNZ	emit_GLSL_CALLNZ	own	-	non-empty body
+emit	sm:vs:crs	33	CRS	emit_GLSL_CRS	own	-	non-empty body
+emit	sm:vs:dcl_samplertype	31	DCL	emit_GLSL_DCL	b	emit_GLSL_attribute,emit_GLSL_sampler	state_DCL>add_sampler>ctx->samplers>sampler_emitter;state_DCL>add_attribute_register>ctx->attributes>attribute_emitter
+emit	sm:vs:dcl_usage	31	DCL	emit_GLSL_DCL	b	emit_GLSL_attribute,emit_GLSL_sampler	state_DCL>add_sampler>ctx->samplers>sampler_emitter;state_DCL>add_attribute_register>ctx->attributes>attribute_emitter
+emit	sm:vs:def	81	DEF	emit_GLSL_DEF	own	-	non-empty body
+emit	sm:vs:defb	47	DEFB	emit_GLSL_DEFB	own	-	non-empty body
+emit	sm:vs:defi	48	DEFI	emit_GLSL_DEFI	own	-	non-empty body
+emit	sm:vs:dp3	8	DP3	emit_GLSL_DP3	own	-	non-empty body
+emit	sm:vs:dp4	9	DP4	emit_GLSL_DP4	own	-	non-empty body
+emit	sm:vs:dst	17	DST	emit_GLSL_DST	own	-	non-empty body
+emit	sm:vs:else	42	ELSE	emit_GLSL_ELSE	own	-	non-empty body
+emit	sm:vs:endif	43	ENDIF	emit_GLSL_ENDIF	own	-	non-empty body
+emit	sm:vs:endloop	29	ENDLOOP	emit_GLSL_ENDLOOP	own	-	non-empty body
+emit	sm:vs:endrep	39	ENDREP	emit_GLSL_ENDREP	own	-	non-empty body
+emit	sm:vs:exp	14	EXP	emit_GLSL_EXP	own	-	non-empty body
+emit	sm:vs:expp	78	EXPP	emit_GLSL_EXPP	own	-	non-empty body
+emit	sm:vs:frc	19	FRC	emit_GLSL_FRC	own	-	non-empty body
+emit	sm:vs:if_bool	40	IF	emit_GLSL_IF	own	-	non-empty body
+emit	sm:vs:if_eq	41	IFC	emit_GLSL_IFC	own	-	non-empty body
+emit	sm:vs:if_ge	41	IFC	emit_GLSL_IFC	own	-	non-empty body
+emit	sm:vs:if_gt	41	IFC	emit_GLSL_IFC	own	-	non-empty body
+emit	sm:vs:if_le	41	IFC	emit_GLSL_IFC	own	-	non-empty body
+emit	sm:vs:if_lt	41	IFC	emit_GLSL_IFC	own	-	non-empty body
+emit	sm:vs:if_ne	41	IFC	emit_GLSL_IFC	own	-	non-empty body
+emit	sm:vs:if_pred	40	IF	emit_GLSL_IF	own	-	non-empty body
+emit	sm:vs:label	30	LABEL	emit_GLSL_LABEL	own	-	non-empty body
+emit	sm:vs:lit	16	LIT	emit_GLSL_LIT	own	-	non-empty body
+emit	sm:vs:log	15	LOG	emit_GLSL_LOG	own	-	non-empty body
+emit	sm:vs:logp	79	LOGP	emit_GLSL_LOGP	own	-	non-empty body
+emit	sm:vs:loop	27	LOOP	emit_GLSL_LOOP	own	-	non-empty body
+emit	sm:vs:lrp	18	LRP	emit_GLSL_LRP	own	-	non-empty body
+emit	sm:vs:m3x2	24	M3X2	emit_GLSL_M3X2	own	-	non-empty body
+emit	sm:vs:m3x3	23	M3X3	emit_GLSL_M3X3	own	-	non-empty body
+emit	sm:vs:m3x4	22	M3X4	emit_GLSL_M3X4	own	-	non-empty body
+emit	sm:vs:m4x3	21	M4X3	emit_GLSL_M4X3	own	-	non-empty body
+emit	sm:vs:m4x4	20	M4X4	emit_GLSL_M4X4	own	-	non-empty body
+emit	sm:vs:mad	4	MAD	emit_GLSL_MAD	own	-	non-empty body
+emit	sm:vs:max	11	MAX	emit_GLSL_MAX	own	-	non-empty body
+emit	sm:vs:min	10	MIN	emit_GLSL_MIN	own	-	non-empty body
+emit	sm:vs:mov	1	MOV	emit_GLSL_MOV	own	-	non-empty body
+emit	sm:vs:mova	46	MOVA	emit_GLSL_MOVA	own	-	non-empty body
+emit	sm:vs:mul	5	MUL	emit_GLSL_MUL	own	-	non-empty body
+emit	sm:vs:nop	0	NOP	emit_GLSL_NOP	a	-	op_syntax (ok): 0 dst 0 src 0 other in 2 form(s)
+emit	sm:vs:nrm	36	NRM	emit_GLSL_NRM	own	-	non-empty body
+emit	sm:vs:pow	32	POW	emit_GLSL_POW	own	-	non-empty body
+emit	sm:vs:rcp	6	RCP	emit_GLSL_RCP	own	-	non-empty body
+emit	sm:vs:rep	38	REP	emit_GLSL_REP	own	-	non-empty body
+emit	sm:vs:ret	28	RET	emit_GLSL_RET	own	-	non-empty body
+emit	sm:vs:rsq	7	RSQ	emit_GLSL_RSQ	own	-	non-empty body
+emit	sm:vs:setp_eq	94	SETP	emit_GLSL_SETP	own	-	non-empty body
+emit	sm:vs:setp_ge	94	SETP	emit_GLSL_SETP	own	-	non-empty body
+emit	sm:vs:setp_gt	94	SETP	emit_GLSL_SETP	own	-	non-empty body
+emit	sm:vs:setp_le	94	SETP	emit_GLSL_SETP	own	-	non-empty body
+emit	sm:vs:setp_lt	94	SETP	emit_GLSL_SETP	own	-	non-empty body
+emit	sm:vs:setp_ne	94	SETP	emit_GLSL_SETP	own	-	non-empty body
+emit	sm:vs:sge	13	SGE	emit_GLSL_SGE	own	-	non-empty body
+emit	sm:vs:sgn	34	SGN	emit_GLSL_SGN	own	-	non-empty body
+emit	sm:vs:sincos	37	SINCOS	emit_GLSL_SINCOS	own	-	non-empty body
+emit	sm:vs:slt	12	SLT	emit_GLSL_SLT	own	-	non-empty body
+emit	sm:vs:sub	3	SUB	emit_GLSL_SUB	own	-	non-empty body
+emit	sm:vs:texldl	95	TEXLDL	emit_GLSL_TEXLDL	own	-	non-empty body
+emit	table:RESERVED	49	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
+emit	table:RESERVED	50	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
+emit	table:RESERVED	51	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
+emit	table:RESERVED	52	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
+emit	table:RESERVED	53	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
+emit	table:RESERVED	54	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
+emit	table:RESERVED	55	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
+emit	table:RESERVED	56	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
+emit	table:RESERVED	57	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
+emit	table:RESERVED	58	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
+emit	table:RESERVED	59	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
+emit	table:RESERVED	60	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
+emit	table:RESERVED	61	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
+emit	table:RESERVED	62	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
+emit	table:RESERVED	63	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED
+emit	table:RESERVED	75	RESERVED	emit_GLSL_RESERVED	c	-	opcode_string 0: see OUT_RESERVED

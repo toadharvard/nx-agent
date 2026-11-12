@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """gen_opcover.py: why each empty handler of the translator's MojoShader GLSL profile is not a stub. Records, no prose matching, no per-handler list.
 
-    python3 -I gen_opcover.py MOJOSHADER_TREE SM_TABLE_JSON OP_SYNTAX_TSV OUT_COVER_TSV OUT_RESERVED_TSV [--check]
+    python3 -I gen_opcover.py MOJOSHADER_TREE SM_TABLE_JSON OP_SYNTAX_TSV OUT_COVER_TSV OUT_RESERVED_TSV OBJ [OBJ...] [--nm=NM] [--check]
+
+OBJ are the translator's object files (mojoshader.c.o and mojoshader_profile_glsl.c.o of the root being checked). `handler` and `covering` are the
+symbols of those objects: the source name S of the table's macro expansion (emit_GLSL_<op>, parse_args_NULL, the profile hook emit_GLSL_<hook>)
+resolves to every defined symbol of the objects whose name is S followed by GCC clone suffixes (.isra.N .constprop.N .part.N .cold ...), joined
+with `+`. A name without a defined symbol is `MISSING:<S>` and the row is red.
 
 MOJOSHADER_TREE is the (patched) tree the translator root compiles (external `mojoshader`, plus translator/mojoshader*.patch). It is read, never
 changed. Every fact comes from its own code or from op_syntax.tsv (gen_opsyntax.py):
@@ -66,10 +71,25 @@ def load(tree):
 
 def main(argv):
     check = "--check" in argv
+    nm = next((x[5:] for x in argv if x.startswith("--nm=")), "nm")
     a = [x for x in argv if not x.startswith("--")]
-    if len(a) != 5:
+    if len(a) < 6:
         print(__doc__); return 1
-    tree, tpath, spath, outc, outr = a
+    tree, tpath, spath, outc, outr = a[:5]
+    objs = a[5:]
+    import subprocess
+    symtab = set()
+    for o in objs:
+        r = subprocess.run([nm, "--defined-only", o], capture_output=True, text=True)
+        if r.returncode:
+            print("opcover: nm failed on %s: %s" % (o, r.stderr.strip())); return 2
+        for ln in r.stdout.splitlines():
+            f = ln.split()
+            if len(f) == 3: symtab.add(f[2])
+    clone = re.compile(r"(\.(isra|constprop|part|cold|lto_priv|localalias)(\.\d+)?)*$")
+    def sym(name):
+        got = sorted(x for x in symtab if x == name or (x.startswith(name + ".") and clone.fullmatch(x[len(name):])))
+        return "+".join(got) if got else "MISSING:" + name
     table, msrc_raw, glsl_raw = load(tree)
     msrc, glsl = strip_comments(msrc_raw), strip_comments(glsl_raw)
     sm = json.load(open(tpath))["opcodes"]
@@ -135,11 +155,11 @@ def main(argv):
         is_empty = fname in empty_emit
         cls, covering, evid = "own", "-", "non-empty body"
         if is_empty:
-            allz = keys and all(syn.get(k, [None] * 10)[-1] == "ok" and syn[k][3:6] == ["0", "0", "0"] for k in keys)
+            allz = keys and all(syn.get(k, [None] * 15)[9] in ("ok", "wine-only") and syn[k][3:6] == ["0", "0", "0"] for k in keys)
             if ostr == "0":
                 cls, evid = "c", "opcode_string 0: see OUT_RESERVED"
             elif allz:
-                cls, evid = "a", "op_syntax: 0 dst 0 src 0 other in %d form(s)" % len(keys)
+                cls, evid = "a", "op_syntax (%s): 0 dst 0 src 0 other in %d form(s)" % (",".join(sorted({syn[k][9] for k in keys})), len(keys))
             else:
                 cov, ev = cover(op)
                 bad = [c for c in cov if c in empty_emit]
@@ -148,17 +168,17 @@ def main(argv):
                 else:
                     cls, evid = "none", ev if cov else "no covering emitter"
         for k in (keys or [None]):
-            rows.append(("emit", idn(k, op), idx, op, cls, covering, evid))
+            rows.append(("emit", idn(k, op), idx, op, sym(fname), cls, ",".join(sym(c) for c in covering.split(",")) if covering != "-" else "-", evid))
         if args == "NULL":
             if ostr == "0":
                 acls, aev = "c", "opcode_string 0"
-            elif keys and all(syn.get(k, [None] * 10)[-1] == "ok" and syn[k][3:6] == ["0", "0", "0"] for k in keys):
+            elif keys and all(syn.get(k, [None] * 15)[9] in ("ok", "wine-only") and syn[k][3:6] == ["0", "0", "0"] for k in keys):
                 acls, aev = "a", "op_syntax: 0 operands in %d form(s); parse_args_NULL body `%s`" % (len(keys), args_null_empty_semantics)
             else:
-                bad = [k for k in keys if not (syn.get(k, [None] * 10)[-1] == "ok" and syn[k][3:6] == ["0", "0", "0"])]
+                bad = [k for k in keys if not (syn.get(k, [None] * 15)[9] in ("ok", "wine-only") and syn[k][3:6] == ["0", "0", "0"])]
                 acls, aev = "none", "no 0-operand syntax row for %s" % (",".join(bad) if bad else "any form")
             for k in (keys or [None]):
-                rows.append(("args", idn(k, op), idx, op, acls, "-", aev))
+                rows.append(("args", idn(k, op), idx, op, sym("parse_args_" + args), acls, "-", aev))
 
     # (c) facts
     pit = funcs["parse_instruction_token"][0]
@@ -185,23 +205,23 @@ def main(argv):
     reserved.append(("second_rejection", "(ctx->shader_type & instruction->shader_types) == 0 -> failf, MOJOSHADER_TYPE_UNKNOWN", "mojoshader.c:%d" % line_of("(ctx->shader_type & instruction->shader_types) == 0")))
     reserved.append(("glsl_body", "emit_GLSL_RESERVED: empty (comment: fails in the state machine)", "mojoshader_profile_glsl.c:%d" % (emit["emit_GLSL_RESERVED"][1])))
 
-    rows.sort(key=lambda r: (r[0], r[1], r[3]))
-    text = "slot\tid\topnum\top\tclass\tcovering\tevidence\n" + "".join("\t".join(str(c) for c in r) + "\n" for r in rows)
+    rows.sort(key=lambda r: (r[0], r[1], r[3], r[2]))
+    text = "slot\tid\topnum\top\thandler\tclass\tcovering\tevidence\n" + "".join("\t".join(str(c) for c in r) + "\n" for r in rows)
     rtext = "fact\tdetail\tvalue\n" + "".join("\t".join(r) + "\n" for r in reserved)
     # global counts
     def counts(slot):
         keys = {}
         for r in rows:
-            if r[0] == slot: keys.setdefault(r[1], r[4])
+            if r[0] == slot: keys.setdefault(r[1], r[5])
         ops = {}
         for r in rows:
-            if r[0] == slot: ops.setdefault(r[3], set()).add(r[4])
+            if r[0] == slot: ops.setdefault(r[3], set()).add(r[5])
         cf, co = {}, {}
         for k, c in keys.items(): cf[c] = cf.get(c, 0) + 1
         for o, cs in ops.items():
             for c in cs: co[c] = co.get(c, 0) + 1
         return cf, co
-    red = [r for r in rows if r[4] == "none"]
+    red = [r for r in rows if r[5] == "none" or "MISSING:" in r[4] or "MISSING:" in r[6]]
     if check:
         same = os.path.isfile(outc) and open(outc).read() == text and os.path.isfile(outr) and open(outr).read() == rtext
         print("op_cover: %s" % ("byte-equal" if same else "DIFFERS"))
@@ -211,7 +231,7 @@ def main(argv):
         cf, co = counts(slot)
         print("slot %-4s forms by class %s ; table ops by class %s" % (slot, dict(sorted(cf.items())), dict(sorted(co.items()))))
     print("empty emitters: %s" % ",".join(sorted(empty_emit)))
-    for r in red: print("  RED %s %s (%s): %s" % (r[0], r[1], r[3], r[6]))
+    for r in red: print("  RED %s %s (%s): class %s handler %s covering %s: %s" % (r[0], r[1], r[3], r[5], r[4], r[6], r[7]))
     print("reserved: order %s" % ("ok" if ok_order else "NOT ok"))
     return 2 if (red or not ok_order) else 0
 
