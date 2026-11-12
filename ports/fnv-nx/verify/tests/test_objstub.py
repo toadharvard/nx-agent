@@ -428,6 +428,7 @@ for abi in ("ilp32", "lp64"):
     cnt = objstub.declared_counts(objstub.analyse_all([("x", build(DH + "unsigned f(void) { fnvnx_declared_machine(31); return 2; }\nunsigned g(void) { fnvnx_declared_machine(31); return 2; }", abi))], set(), set()))
     check(T("declared: call sites per id are counted"), cnt == {31: 2}, cnt)
     check(T("declared: a call of the wine citation is not counted as declared"), objstub.declared_counts(objstub.analyse_all([("x", build(DH + "unsigned f(void) { fnvnx_wine_fixme(5); return 7; }", abi))], set(), set())) == {})
+HDR_REAL = [l for l in open(os.path.join(os.path.dirname(os.path.abspath(objstub.__file__)), "declared_machine.tsv")).read().split("\n") if l.startswith("# fact:")][0]
 GOODS = ("31\tRegOpenKeyExA\tregistry\twin-doc:sysinfo/regopenkeyex:RegOpenKeyExA\tu32\t2",
          "32\tconnect\tno-network\twine-9.0:dlls/ws2_32/socket.c:connect\tu32\t0xFFFFFFFF",
          "33\tGetTimeZoneInformation\ttime-zone\twin-doc:timezoneapi/gettimezoneinformation:GetTimeZoneInformation\tu32nz0\t0,1")
@@ -435,16 +436,40 @@ for bad in ("31\tx\tnetwork\twin-doc:a/b:f\tu32\t1", "31\tx\tno-network\thttp://
             "31\tx\tno-network\twin-doc:a/b:f\tvoid\t1", "x\tx\tregistry\twin-doc:a/b:f\tu32\t1", "31\tx\tregistry\twine:a.c:f\tu32\t1",
             "31\tx\tregistry\twin-doc:a/b:f\tu32\t1\n31\ty\tregistry\twin-doc:a/b:g\tu32\t1", "31\tx\tregistry\tu32\t1"):
     tf_ = os.path.join(ROOT, "d.tsv")
-    open(tf_, "w").write(bad + "\n")
+    open(tf_, "w").write(HDR_REAL + "\n" + bad + "\n")
     try:
         objstub.read_declared_table(tf_)
         check("declared table: malformed row rejected: %r" % bad[:36], False)
     except ValueError:
         check("declared table: malformed row rejected: %r" % bad[:36], True)
-open(tf_, "w").write("# header\n" + "\n".join(GOODS) + "\n")
+open(tf_, "w").write(HDR_REAL + "\n" + "\n".join(GOODS) + "\n")
 got = objstub.read_declared_table(tf_)
 check("declared table: header comment and three valid rows (win-doc and wine-9.0 sources, three facts)",
       set(got) == {31, 32, 33} and got[32][1:3] == ("no-network", "wine-9.0:dlls/ws2_32/socket.c:connect"), got)
+# the facts and sources come from the header line of the table itself
+GAL = "34\tGalaxyInit\tno-galaxy\tgalaxy-sdk:IGalaxy/Init:Init\tu32\t1"
+open(tf_, "w").write(HDR_REAL + "\n" + GAL + "\n")
+check("declared table: a galaxy-sdk row with fact no-galaxy is accepted", objstub.read_declared_table(tf_).get(34, ("",))[1:3] == ("no-galaxy", "galaxy-sdk:IGalaxy/Init:Init"), "")
+for what, row in (("an undeclared fact", "35\tx\tno-wifi\twin-doc:a/b:f\tu32\t1"), ("an undeclared source prefix", "35\tx\tno-galaxy\tgog-sdk:a/b:f\tu32\t1")):
+    open(tf_, "w").write(HDR_REAL + "\n" + row + "\n")
+    try:
+        objstub.read_declared_table(tf_)
+        check("declared table: a row with " + what + " is red", False)
+    except ValueError:
+        check("declared table: a row with " + what + " is red", True)
+slim = HDR_REAL.replace(" | no-galaxy", "").replace(" | galaxy-sdk:<page>:<function>", "")
+open(tf_, "w").write(slim + "\n" + GAL + "\n")
+try:
+    objstub.read_declared_table(tf_)
+    check("declared table: without no-galaxy in its header a galaxy row is red (table and check agree)", False)
+except ValueError:
+    check("declared table: without no-galaxy in its header a galaxy row is red (table and check agree)", True)
+open(tf_, "w").write("# header\n" + "\n".join(GOODS) + "\n")
+try:
+    objstub.read_declared_table(tf_)
+    check("declared table: no header line is an error", False)
+except ValueError:
+    check("declared table: no header line is an error", True)
 try:
     objstub.read_declared_table(os.path.join(ROOT, "nonexistent.tsv"))
     check("declared table: missing file is an error", False)
@@ -528,6 +553,15 @@ print("INFO ILP32 toy gate warm %.1f s" % secs)
 r32r = TR.make_repo("os-reach32", rec=TR.abi_rec("ilp32"), files={"toy/constants.tsv": CONST, "toy/c.c": RV, "toy/os.S": OS.replace("ldr x1, [x1, :lo12:hostslot]", "ldr w1, [x1, :lo12:hostslot]").replace("blr x1", "blr x1").replace(".quad 0", ".word 0")})
 rc, g, _, txt, st = gate(r32r, ROOT + "/g32r", GC)
 check("ILP32 reach call (P32 CALL26 relocation) is judged by the reach rule: reach-uncertified, nothing else red", rc == 2 and g["uncertified"] == [TR.ROOT + "/c.c:f_c"] and "reach-uncertified 1" in g["detail"], (g, txt))
+
+# a host root: the terminator plugin is built against the plugin headers of the root's own (x86-64 distro) compiler, and sees its noreturn declarations
+xt = tf + ".x86"
+open(tf + ".x86.h", "w").write("void fnvnx_die(void) __attribute__((noreturn));\n")
+xn = objstub.derive_terminators("x86_64-linux-gnu-gcc-13", ["-I" + os.path.dirname(tf)], [os.path.basename(tf) + ".x86.h"], "c", xt)
+check("host root compiler x86_64-linux-gnu-gcc-13: the plugin builds against its own plugin headers and finds the noreturn function", "fnvnx_die" in xn, xn)
+xh = objstub.plugin_so("x86_64-linux-gnu-gcc-13", tempfile.mkdtemp(prefix="objstub-x86-"))[1]
+check("the plugin key depends on the root compiler: x86-64 distro gcc and the aarch64 compiler give different plugins",
+      xh != objstub.plugin_so("aarch64-linux-gnu-g++", tempfile.mkdtemp(prefix="objstub-a64-"))[1])
 
 print("%d failed, wall %.1f s" % (len(FAILED), time.time() - T0))
 sys.exit(1 if FAILED else 0)

@@ -65,6 +65,7 @@ def make_repo(name, rec, origin, files=None, extra_roots=()):
         if v is not None:
             w(repo, k, v)
     w(repo, ROOT + "/build.json", json.dumps(rec, indent=1))
+    w(repo, recipe.ENV_JSON, open(os.path.join(REAL, recipe.ENV_JSON)).read())   # the declared environment: a build runs only on the machine it describes
     root = {"path": ROOT, "class": "product", "target": "host", "gates": [], "recipe": ROOT + "/build.json"}
     if origin is not None:
         root["cxx_origin"] = origin
@@ -223,6 +224,10 @@ def main():
     check("lifted root with a tracked C++ unit is red", any("is not an output" in x for x in errs(tracked, lrec)), errs(tracked, lrec))
     nopack = make_repo("nopack", lrec, {"lifted_by": T + "gen/lift.py", "pack": "nope"}, {T + "gen/lift.py": lift, ROOT + "/a.cc": None})
     check("lifted root naming no external is red", any("names no external" in x for x in errs(nopack, lrec)), errs(nopack, lrec))
+    for what, tool in (("an untracked file", T + "gen/none.py"), ("a file that is not a .py", T + "gen/lift.txt"),
+                       ("a file of the product root", ROOT + "/lift.py")):
+        bad = make_repo("liftby_" + what.replace(" ", "_"), lrec, {"lifted_by": tool, "pack": "pack"}, {T + "gen/lift.py": lift, T + "gen/lift.txt": lift, ROOT + "/lift.py": lift, ROOT + "/a.cc": None})
+        check("lifted_by naming %s is red" % what, any("is not a tracked .py of an admitted tool root" in x for x in errs(bad, lrec)), errs(bad, lrec))
 
 
 if __name__ == "__main__":

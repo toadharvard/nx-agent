@@ -40,6 +40,14 @@
    "commit": "2ac3091b7095598d04dce6091b2012f7cfa14bc7",
    "tree_sha256": "4708f3d8d2dfa1adeab65fa4eeb4f994ad806372d49da392d22b4f93d2f169bb",
    "at": "/ext/manifest"
+  },
+  {
+   "name": "wine",
+   "repo": "fnv-nx-build",
+   "ref": "tools/wine-specs",
+   "commit": "678c780eb7cd295e714fd01a3d35623f4d76d840",
+   "tree_sha256": "d21bd71296e96a391fcf9349cb63205d58a830422cdc9e42bd0bc3fde4b9d796",
+   "at": "/ext/wine"
   }
  ],
  "ehfacts": "facts",
@@ -57,5 +65,6 @@
  "ranges": {
   "exe": "facts/ranges.tsv",
   "module": "facts/%s/ranges.tsv"
- }
+ },
+ "bridge": "manifest/manifest/bridge.tsv"
 }

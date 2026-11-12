@@ -28,7 +28,7 @@ the link, from ELF symbol tables only (no linker message, no map file, no name o
      of an entry is taken iff the entry's name is an undefined STRONG reference (D and S do not contain it; a weak reference pulls nothing).
      A taken member adds its definitions and references.  The library file of `-lNAME` is the first `libNAME.a` of the -L directories.
   4. undefined = (strong and weak references) - (D and members' definitions) - S.
-Assumptions, each CHECKED by structure and failing the stage when violated: every library archive has its symbol index and the index holds
+Preconditions, each CHECKED by structure and failing the stage when violated: every library archive has its symbol index and the index holds
 exactly the global and weak definitions of its members; a library member defines no COMMON symbol, no indirect function (STT_GNU_IFUNC),
 no versioned symbol (a `@` in the name); an input's COMMON symbol is not an entry of a library's index; no library index entry names a
 symbol of S that is referenced.  Within these the closure is the linker's choice, and a member taken that the linker would not take, or the

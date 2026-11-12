@@ -56,6 +56,25 @@ Gate `bodysel` ($GATE_OUT/bodysel.json, gatefile.py): universe = the code addres
 with a verdict (totality).  The result is a function of the argument files only; rows are written sorted.
 ```
 
+## contract/bridgetable.py
+
+```text
+Bridge table of the import guest entries, pure derivation (rows: dll, name, ordinal, conv, ret, args, native_symbol, bind).
+
+A pure function of its arguments (no file, no process): the driver verify/gate_imports.py reads the declared inputs and calls derive().
+  names       text of sys_names.tsv (dll TAB name per line) from the private manifest
+  spec_text   function dll -> text of the export specification of the reference environment (Wine 9.0 dlls/<dll>/<dll>.spec)
+  syms        the set of symbol names that the product objects define or reference (objects.json defined + undefined)
+  name_table  {msvcrt name: (symbol, kind)} of the name table the product serves msvcrt names from (read_name_table)
+  extra       texts of rows in this 8-column format (other owners' rows: COM interfaces); a row of the same (dll, name) replaces the derived one
+bind  sym    native_symbol is a symbol of the product objects     lookup  msvcrt name served by the name table (native_symbol `-`)
+      l3     provided by the lifter runtime under native_symbol   data    the slot holds the address of the object native_symbol
+      none   no implementation: the gate `imports` is red for the row
+conv  stdcall | cdecl | vararg | thiscall | fastcall | data;  ret v|i|q|f|d;  args: x86 stack slots i|q|f|d.
+A name missing from its spec, a stub in the spec, a forward that cannot be followed or an unknown argument type is an error: total or failing.
+`lookup` is decided by the name table, a declared input (a name is in it or not), not by a run.
+```
+
 ## contract/gate_call.py
 
 ```text
@@ -80,8 +99,8 @@ Two conditions; a function with a row of either is not N2 (bodysel takes LIFTED)
    by-value/sret shape the caller compiled against are the callee's exe contract.  A name that carries no types gives no such
    equality: the edge is not provable and the caller is LIFTED, never guessed.  Several native copies of one address: each is
    judged, the worst verdict stands.
-Assumptions: the `names` plugin ran on every native unit (the recipe's guest-compiler/plugin rule); the pristine cl symbol
-names are the exe's contract (N1: byte-equal, one symbol map); an external decorated name denotes one entity link-wide.
+Assumptions: the `names` plugin ran on every native unit (the recipe's guest-compiler/plugin rule) (ASM-050); the pristine cl symbol
+names are the exe's contract (N1: byte-equal, one symbol map) (ASM-053); an external decorated name denotes one entity link-wide (ASM-054).
 Zero edges: provable.  An object with no sympair section: every function of it with an edge is not N2.
 ```
 
@@ -140,7 +159,7 @@ Rule.  A request about import I = (dll D, name N, argument k) is CERTIFIED for t
      GetProcAddress slot must be covered by a row of the table) is closed, and no pair (D, N), (*, N) (module unknown) or (D, #n)
      / (*, #n) (an ordinal in D could be N) exists.  An OPEN site (name or module not derived) anywhere in S makes (b) fail for
      EVERY request: reason `gpa-open`, the condition under which certificates are not valid yet;
- (c) the assumptions of argflow A1..A6 (and A8, the provenance premise of memfx, when its rule closed a handle chain) are recorded in each certificate (BASE: the contract's standing assumptions, the same for
+ (c) the assumptions of argflow A1..A6 (and A8, the provenance premise of memfx, when its rule closed a handle chain) are recorded in each certificate (BASE: the contract's standing assumptions, the same for (ASM-010, ASM-011, ASM-012, ASM-013, ASM-014, ASM-015, ASM-016, ASM-017, ASM-018, ASM-019)
      every gate that uses argflow); an assumption that is not a proven rule makes the fact NOT certified: BLOCKING = {A7} (a call
      between a store and a load does not write that memory; only the `open` handle mode depends on it).  A fact whose only
      derivation needs A7 is listed `assumption:A7`.
@@ -153,7 +172,7 @@ that the facts' ranges contain every executed instruction of the images (A4).  T
 (sha256 of the PE and of the ranges file), the request, the GetProcAddress rows used, the assumptions and the per-site proof chain.
 
 Outputs ($GATE_OUT, gatefile.py): reach.json (gate `reach`; universe = facts, certified = certified facts; uncertified ids
-`<fact_id>:<reason>:<image>:<address>`, reason `assumption:A7` etc. may contain a colon: split the last two fields off), reach.ids
+`<fact_id>:<reason>:<image>:<address>`, reason `assumption:A7` etc. may contain a colon: split the last two fields off), reach.ids (ASM-016)
 (all of them, sorted), reach.facts.tsv (`fact_id<TAB>sha256 of the certificate`, certified facts only, sorted by id).  --out: per
 fact status, sites examined and reasons.  --facts-h: the C header (FNVNX_REACH_<DLL>_<NAME>_<n> with n the 1-based position among
 the requests of the same dll!name in canonical order; FNVNX_<request id> for the platform's own names; FNVNX_REACH_TABLE_ID).
@@ -233,6 +252,30 @@ too and compared with the platform's constant.  Check (--bridge): pairs the plat
 Exe-derived: container and fnv-nx-build only.
 ```
 
+## contract/hive.py
+
+```text
+Gate `registry` (class G of verify/VERDICT.md, the declared machine's registry), pure rules: the product's hive holds exactly the keys that
+the exe and the modules read, found statically from their call sites, with the values of the declared machine.
+
+Values (no file, no process): `sites` text of regsites.tsv (module, site, api, root, subkey, value, status static|dynamic, reason: the registry-API
+call sites of the exe and its modules, exe-derived and private), `declared` text of declared_registry.tsv (root, key, name, type, data, source:
+public), `seed` text of the include the product is built from, `refs` {unit: set of referenced symbol names} of the product objects.
+Items of the universe and their certification:
+  declared:<root>\<key>:<name>   every declared row; certified iff a static read site (role read, status static) reads it (root, key and
+                                  name equal, case-insensitive as the registry compares)
+  site:<module>:<site>:<api>      every site of role open, create or read whose root, key or value is not statically resolved; never certified
+                                  (class dynamic). While one exists the verdict is a MEASUREMENT build, as for a dynamic-name GetProcAddress
+                                  site in the reach gate (VERDICT.md): a declared row cannot be proven complete against an unresolved site
+  seed                            certified iff `seed` equals, byte for byte, the include generate() makes from (sites, declared)
+  writer:<unit>                   every product object that references a hive-writing API (role create or write); certified iff it is the
+                                  declared seed unit: no other code of the product makes a hive key
+generate() is the port of platform/manifest/gen_registry_seed.py (L5): it refuses a declared row that no static read site reads, a malformed or
+duplicate row, a value not valid for its type, and a `{` that is not `{game_dir}`. Assumptions (ASM-051): regsites.tsv is complete over the exe and the
+modules (the registry-site pass reports what it cannot bind as dynamic, never skips); the seed unit and the registry implementation are the only
+code that reaches the hive, and the implementation creates no key by itself (the writers rule closes the entry points, not the internals).
+```
+
 ## contract/iat.py
 
 ```text
@@ -253,7 +296,7 @@ value the dispatcher of the lifted code maps to an entry.  Rule, total over the 
             from the ELF symbol).
 
 Keys lie in [IMPORT_BASE, LIMIT), and SENTINEL (the return address under the first guest frame) below them.
-Assumption, checked by the loader at start: no mapping of the process intersects [SENTINEL, LIMIT) - the range
+Assumption, checked by the loader at start: no mapping of the process intersects [SENTINEL, LIMIT) - the range (ASM-020)
 is below the lowest address the 32-bit address space hands out (0x00200000), so a key is never a readable or
 executable address and never the address of an image, module, heap or stack.
 
@@ -291,12 +334,32 @@ Rules fixed here (all three consumers use them through this file and importkey.c
 ```text
 images - the guest image set of the contract gates (L1 CONTRACT): one pure function, no hand list.
 
-RULE: the set is the transitive closure of the PE import directories (normal and delay-load) starting from the exe, in modules.PE's
-reading. An imported dll name (iat.norm_dll: ASCII lowercase, ".dll" when it has no '.') is resolved case-insensitively against the
-files of the given directories (first directory in list order that has it; two files of one directory that differ only in case are an
-error). A dll found there is a GUEST IMAGE and is walked further; a dll not found there is a platform import (gate `imports`, owner L5)
-and is not an image. Assumption (stated, VERDICT.md): dynamic LoadLibrary names are facts of the `gpa` gate, not of this rule.
+RULE (dllkind.py, shared with modules.py): the set is the exe and the dlls reached from its import directories (normal and delay-load, in
+modules.PE's reading) through guest images only.  A dll name (iat.norm_dll) is resolved case-insensitively against the files of the
+given directories; it is a GUEST IMAGE iff it is found, has no bridge row, and its whole normal import closure resolves to guest images
+or bridge dlls.  A bridge dll (rows in bridge.tsv) and a found dll the declared machine cannot load are not images and are not walked
+further; a name that is neither found nor bridged is a platform import (gate `imports`, owner L5).  Dynamic LoadLibrary names are facts of
+the `gpa` gate, not of this rule (VERDICT.md).
 Order: the exe, then the images in discovery order (depth first, import directory then delay-load directory).
+```
+
+## contract/imports.py
+
+```text
+Gate `imports` (class 4 of verify/VERDICT.md), pure judgement: every row of the bridge table has a body proven by the build products.
+
+Inputs (all values, no file): rows from bridgetable.derive; `syms` {symbol: [(bind, type)]} of the product objects (objects.json `defined`);
+`table` the msvcrt name table {name: (symbol, kind)}; `others` the same kind of map over every product root that is not the one the rows belong
+to; `owner_of` {(dll, name): index} of rows taken from files that belong to another owner's build (the `external` rows).
+A row is certified iff its body is proven by the symbol table of a build product:
+  sym/data  a GLOBAL (or UNIQUE) symbol of type FUNC (sym) or OBJECT (data) is defined in the row's root
+  lookup    the name table entry of the name names a symbol defined GLOBAL of type FUNC (kind func) or OBJECT (kind data) in the root
+  l3        and rows of another owner's file: such a symbol is defined in another product root (the lifter runtime's build); else `external`
+Classes of an uncertified row: none (no symbol of that name is defined or referenced), unresolved-symbol (referenced only), weak (defined weak
+only), not-a-function (defined global of the wrong type), lookup-miss (an msvcrt name that the name table does not carry, or whose entry names
+no proven symbol), external (l3 or another owner's row that no other root defines).
+The decision reads symbol tables and tables, never a source text, a run or a name pattern. Assumption (ASM-052): objects.json lists every global, weak
+and unique symbol of every object of the root (recipe.symbols); locals are not symbols a row can bind to.
 ```
 
 ## contract/l2sections.py
@@ -351,7 +414,7 @@ reaches memory only through an ESCAPE).  For a global, additionally (W1) no dire
 (exact for [disp]; [disp+idx*s] covers [disp, disp+max*s+size) when the index maximum is proven (and-mask, movzx, constant)
 and else the whole section), no relocated data word points into the section (that word is a pointer stored in memory: an
 ESCAPE of the section's closure), and the loader does not write L (base relocations, import slots, IAT / TLS-index of the
-PE directories).  Assumptions (stated, not proven): P; the image's code ranges are instruction-aligned and complete (A4); a
+PE directories).  Assumptions (stated, not proven): P; the image's code ranges are instruction-aligned and complete (A4); a (ASM-010, ASM-013, ASM-017, ASM-022)
 callee preserves ebx/esi/edi/ebp (A1) and reads no register of an import call (the platform's calling convention); the
 platform implementation writes through a pointer argument only when ImportInfo says so (default: every pointer argument
 may be written); no code outside the images (the loader, the OS) writes L except through those imports.
@@ -450,8 +513,8 @@ Steps:
  6 publish the orphan commit of OUT.json, OUT.console.txt, spec.json, meta.json to branch l4-verify/boot/<elf_id>
  7 final line: BOOT elf=<id> rc=<boot rc> reason=<r> last=<milestone|none> instr=<n> main=<n> threads=<n> seconds=<s> published=<branch>@<commit12>
 --gpu-branch B: the renderer. Branch B of the artifacts repository must hold libnxgl4.so (the renderer's host library, GL 4.5 on
-   Mesa llvmpipe). The job fetches it, installs what is missing of GPU_PKGS (default "libegl1 libgl1-mesa-dri libgles2 mesa-utils") and
-   gcc (the callback shim of verify/bootgpu.py), checks that the library loads, and runs boot.py with --gpu LIB --frames DIR. The first 3
+   Mesa llvmpipe). The job fetches it, requires the packages gcc (the callback shim of verify/bootgpu.py), libegl1 and libegl-mesa0 at the
+   versions of verify/env.json (installed by farm/setup_verdict_env.sh, never by the job; a missing or other version fails the job), checks that the library loads, and runs boot.py with --gpu LIB --frames DIR. The first 3
    frames (frame_*.rgba + .txt) are published under frames/ with the result; later ones are not. meta.json gains gpu_branch and
    gpu_branch_commit, the final line gains presents=<n>.
    The renderer pair rule (bootinputs.py pair), checked before the run; false = the job fails: the ELF branch's manifest.json names
@@ -461,7 +524,7 @@ Steps:
 Stage table: env BOOT_STAGE_TABLE_BRANCH (default l4-verify/milestones), file stage.milestones (bootmiles format), appended after the
    contract's rows (bootinputs.py milestones --stage-table: names unique, every exe address a lifted code entry). A missing branch: the
    job runs with the contract rows only and the final line says stage_table=absent; a present branch without the file fails the job.
-Env: GPU_PKGS (see above), ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
+Env: ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
 when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (default $HOME/fnvnx-farm),
 WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
 passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it).
@@ -598,13 +661,18 @@ The boot stage CLI: runs the guest ELF under bootmachine.Machine, watches the mi
 
   boot.py run --elf GUEST.elf --reserved modules.tsv --keys LO:HI --heap-size N --root SDROOT [--game DIR]
               --milestones TABLE --manifest entries.tsv [--icount-spec SPEC.json] [--limit-instructions N]
-              [--hc-slice N] [--profile handheld|docked] --out OUT.json
+              [--hc-slice N] [--profile handheld|docked] [--watch-log SYMS] --out OUT.json
 
 plan = bootlayout (same rules as its CLI), watch points = bootmiles.resolve(table, manifest, ELF symbols, bias = image
 base). OUT.json ("fnvnx-boot/1", sorted keys, indent 1, no wall time) holds the plan, the run record, the milestone state
 and log, and the Icount report; the console text is OUT.console.txt. The tool only reports: which milestone must be
 reached is the caller's verdict. Exit 0: run reason "exit" with code 0, or "limit"; 2: fault / deadlock /
 ext-module-missing / scenario-error (a --text-entry text longer than the call's max_len) / nonzero exit / reach-violation (guest exit code 0x52000000|fact_id, reported with its fact_id); 1: usage or input error (message on stderr).
+
+Watch log: --watch-log SYMS (text file, one ELF symbol per line, # starts a comment) logs every execution of each named function's
+first instruction: OUT.json "watch_log" = [{"seq", "tid", "sym", "pc" (guest-relative), "sp"}], seq from 0 in machine order, no
+sampling, no cap, two names at one address in file order. A name that is absent or not STT_FUNC is an input error naming it.
+Without the option the key is absent.
 
 Host parts: the table's `host` target is an ID word, so the exact console line a part waits for is spelled
 `console.<hex>` (hex of the line's UTF-8 bytes, no newline; helper console_part(line)). The part fires when the guest
@@ -629,6 +697,8 @@ one mapping readable and writable for the guest: Machine.host_ptr) and nxgl4_on_
 this file builds a tiny C shim once per process (the two symbols forwarding to function pointers set through nxgl4_shim_set), loads
 it RTLD_GLOBAL, then loads the library. The shim needs the host gcc. The environment of the library (LIBGL_ALWAYS_SOFTWARE,
 GALLIUM_DRIVER, EGL_PLATFORM, NXGL4_FRAMES) is the caller's: boot.py sets it before Gpu() loads the library.
+The library's host packages (libegl1, libegl-mesa0 and what they pull: libglvnd0, mesa-libgallium, libllvm20, ...) are part of the declared
+environment (verify/env.json, derived by envcheck.py snapshot from RENDER_LIBS/RENDER_FILES); nothing installs them at test or job time.
 ```
 
 ## verify/boothost.py
@@ -784,7 +854,7 @@ Rules:
 5a. TOTAL against the header (hostapi.h TOTALITY TABLE, checked mechanically by tests/test_bootmachine.py against the parsed table): ext_call returns
    NO_MODULE (module >= 64 or not registered), NO_SERVICE (fn > UINT32_MAX, or a module-11 fn without a row: 0, 37 and up), BAD_NARGS
    (fewer arguments than the row, or nargs > 0 with a null array); nargs above UINT32_MAX counts as UINT32_MAX; only a handler raising
-   ExtMissing ends the run. Module 11 serves fn 1..36 here. The stage has no network interface and a fixed UTC zone (VC1). Sockets 16..33 are bootsock.py's model (a host with no network interface; its docstring lists every
+   ExtMissing ends the run. Module 11 serves fn 1..36 here. The stage has no network interface and a fixed UTC zone (VC1). Sockets 16..26, 30, 31 are bootsock.py's model (a host with no network interface; its docstring lists every
    served and every NOT answered (service, case); the latter end the run as "ext-module-missing" naming the service, with an event
    "sock-undetermined" saying why): the nargs rule (sockets dispatch before the general check: nargs != the exact count, null array or not, is -EINVAL;
    the exact count with a null array is BAD_NARGS). TZ_AT 34: UTC, offset 0, no DST, abbr "UTC",
@@ -850,6 +920,7 @@ Rules:
    invariant, not an ordinary exit: reason "reach-violation" with "fact_id" (exit_code stays the raw value).
    run() -> {reason, exit_code, host_calls, switches, threads, virtual_ns, events, console, fault|waits|ext};
    "console" is the whole text the guest wrote (decoded with errors="replace").
+
 ```
 
 ## verify/bootmiles.py
@@ -915,7 +986,7 @@ Directory listings are cached per directory until changed() (call after create/r
 ## verify/bootsock.py
 
 ```text
-The socket services (module 11, fn 16..33, hostapi.h + sockwire.h) of the boot stage machine, for a host that has NO network interface.
+The socket services (module 11, fn 16..26, 30, 31, hostapi.h + sockwire.h) of the boot stage machine, for a host that has NO network interface.
 
 Model (owner decision "The declared machine", CLAUDE.md: the machine has no network connection and every network call returns the
 documented error of that state, never a fake success): the machine's host has only the loopback addresses; no packet ever arrives and nothing can connect. A socket is an entry of a
@@ -925,7 +996,7 @@ needs real traffic, or an OS's own choice, is NOT answered: the model raises Not
 "ext-module-missing" naming the service. A guest address that is not readable / writable memory raises BadGuestMemory (a violated
 precondition of the header; the machine ends the run as a host-call fault). Never an invented value.
 
-Stated assumptions (each is a fact of the stage's model, not of the header):
+Stated rules of the model (each is a fact of the stage's model, not of the header):
   A1 handle numbers (a rule of the model, deterministic): a new handle is the lowest number >= 3 that is not open (0..2 are stdio); a
      number is free again after its close. This is the descriptor rule of POSIX.1-2017 2.14 "File Descriptor Allocation" (the lowest
      number not open), which the bsd service's descriptors follow. Nothing above the host may depend on the number: the header says only
@@ -935,9 +1006,6 @@ Stated assumptions (each is a fact of the stage's model, not of the header):
   A2 addresses (facts, cited): loopback is 127.0.0.0/8 (RFC 1122 3.2.1.3 (g)) and ::1 (RFC 4291 2.5.3); "any" is 0.0.0.0 (RFC 1122
      3.2.1.3 (a)) and :: (RFC 4291 2.5.2); the declared machine has no network connection (CLAUDE.md "The declared machine"), so it has
      no interface but loopback and every other unicast address is not local.
-  A3 getaddrinfo with no network: a numeric node is parsed (strict dotted quad, or an RFC 4291 text without a scope) and a null hints
-     argument is a hints record of zeros (POSIX); the list of a numeric node is one record per socket type STREAM/TCP 6, DGRAM/UDP 17,
-     RAW/0 (the type given in the hints keeps one; the protocol given keeps those with that protocol), in this order, ai_flags = hints flags.
   A4 EPROTONOSUPPORT: STREAM takes protocol 0 or 6, DGRAM 0 or 17; any other protocol is EPROTONOSUPPORT except those a real OS may
      implement for the type (1, 58, 132, 136, 262, or outside 0..255), which are not answered.
 
@@ -952,8 +1020,7 @@ Served per service (everything else listed here as NOT answered):
   BIND       null address EFAULT; family not 0/2/10 EAFNOSUPPORT; a local address (A2) or any of the socket's family -> 0 (recorded);
              a unicast address that is not local EADDRNOTAVAIL; a socket already bound or listening EINVAL (POSIX).
              NOT answered: family AF_UNSPEC or another than the socket's, a v4-mapped / multicast / broadcast / link-local address,
-             flowinfo or scope_id != 0, a port 1..1023, a port also in a bound socket's overlapping address, a bound socket's port 0
-             later asked by GETSOCKNAME.
+             flowinfo or scope_id != 0, a port 1..1023, a port also in a bound socket's overlapping address.
   LISTEN     DGRAM EOPNOTSUPP; a bound STREAM -> 0. NOT answered: an unbound STREAM.
   ACCEPT     DGRAM EOPNOTSUPP; not listening EINVAL; listening: non-blocking EAGAIN, blocking waits for ever (nothing can arrive).
   CONNECT    (the host checks only null and family, then the system service) null address EFAULT; family not 0/2/10 EAFNOSUPPORT; an address that is not local (A2) ENETUNREACH; a local address on a
@@ -961,10 +1028,10 @@ Served per service (everything else listed here as NOT answered):
              or another family than the socket's, multicast / broadcast / link-local / v4-mapped addresses, flowinfo or scope_id != 0,
              a listening socket, address any, port 0.
   SENDTO     len > 0x7FFFFFFF EINVAL; an unknown flag bit EOPNOTSUPP; a bad address family EAFNOSUPPORT; DGRAM to a non-local address
-             ENETUNREACH; DGRAM without address and without peer EDESTADDRREQ. NOT answered: every STREAM socket, MSG_OOB, a socket
-             shut down, a local destination or a peer (loopback traffic), other families / exotic addresses as for CONNECT.
+             ENETUNREACH; DGRAM without address and without peer EDESTADDRREQ. NOT answered: every STREAM socket, MSG_OOB,
+             a local destination or a peer (loopback traffic), other families / exotic addresses as for CONNECT.
   RECVFROM   len / flags as SENDTO; STREAM ENOTCONN; DGRAM with nothing to receive: non-blocking or MSG_DONTWAIT EAGAIN, blocking waits for ever,
-             or SO_RCVTIMEO (set earlier, > 0) in virtual time and then EAGAIN. NOT answered: MSG_OOB, a socket shut down for reading.
+             or SO_RCVTIMEO (set earlier, > 0) in virtual time and then EAGAIN. NOT answered: MSG_OOB.
   SETSOCKOPT unknown (level, option) / read-only (SO_TYPE, SO_ERROR) ENOPROTOOPT, null value EFAULT, vallen != the shape's size EINVAL,
              TCP level on a non-STREAM, IP level on a non-INET, IPV6 level on a non-INET6 socket ENOPROTOOPT; then, for the boolean options
              (SO_DEBUG REUSEADDR DONTROUTE BROADCAST KEEPALIVE OOBINLINE REUSEPORT, TCP_NODELAY), SO_LINGER (onoff, linger_s >= 0) and
@@ -975,22 +1042,13 @@ Served per service (everything else listed here as NOT answered):
              min(capacity, size) bytes are written and *vallen is ALWAYS the full size (INT/TYPE/ERRNO 4, LINGER 8, TIMEVAL 16), result 0.
              NOT answered: an option that was set (the OS stores its own form), every other option, SO_ACCEPTCONN, an option of another
              protocol level than the socket's.
-  SHUTDOWN   how > 2 EINVAL; a socket with no peer ENOTCONN; a DGRAM socket with a peer -> 0 (recorded).
-  GETSOCKNAME null EFAULT; a bound socket (port != 0) -> its address. NOT answered: an unbound socket, a bound port 0.
-  GETPEERNAME null EFAULT; no peer ENOTCONN; a recorded peer -> it.
   GETFL / SETFL  RDWR | NONBLOCK as the header says; SETFL sets NONBLOCK from that bit, other bits are ignored, result 0 (always answered).
   POLL       nfds > 0x1000000 EINVAL, nfds > 0 with a null array EFAULT; a negative fd is ignored (revents 0); an fd that is not an open
              handle gets POLLNVAL, counts, and makes the call not wait (timeout 0); event bits outside the wire list are dropped; an open
              socket with no local peer has no traffic ever (no network): revents 0, and after the timeout (virtual time; for ever for -1)
              the result is 0. NOT answered: an open socket that has a local peer or could get one: a recorded peer, a bound or a listening
              socket (a local sender could produce traffic; the model never produces it, so the case is left to the OS).
-  GAI_OPEN   hints checked first (BADFLAGS, FAMILY, SOCKTYPE), both nodes null NONAME; node a name: NONAME (the name "localhost" without AI_NUMERICHOST is not answered)
-             (*sys_errno not written); node null with a family INET / INET6 in the hints, or numeric of that family or of AF_UNSPEC hints
-             (A3), service null or decimal 0..65535 (no leading zero): a ticket; a non-numeric service with AI_NUMERICSERV NONAME.
-             NOT answered: node null with family AF_UNSPEC, a numeric node of the other family, flags CANONNAME V4MAPPED ALL ADDRCONFIG,
-             a service name, a node that is numeric by inet_aton's rules but not strict (1.2.3, 0x7f.1, 01.2.3.4), an unparsable text
-             with ':' or '%', an empty node, a hints type/protocol combination without a record.
-  GAI_FETCH  the ticket's records as host_sock.inc writes them; a ticket that is not open EINVAL.
+
 ```
 
 ## verify/cas.py
@@ -1046,11 +1104,13 @@ envcheck: the declared, reproducible environment of the L1 verdict (verify/env.j
     envcheck.py id [--env F]                   sha256 of the canonical env.json (the verdict's env_id)
     envcheck.py snapshot -o F --from-code      regenerate F from THIS machine by the rule below; only on a machine set up by
                                                farm/setup_verdict_env.sh, then commit F
+check also requires, for the distribution compiler (no external) of every admitted product root, that its plugin headers (`-print-file-name=plugin`, the
+gcc-N-plugin-dev package; objstub builds its terminator plugin against them) belong to a package listed in env.json (`plugin headers of <driver>` mismatch).
 Rule (packages are DERIVED, never listed by hand): a package is in the environment iff dpkg says it owns a file that a verify tool
 or test executes or reads as data: (1) each of PROGRAMS (resolved path + loader closure); (2) python's loader closure (interpreter,
 lib-dynload, PY_MODULES); (3) UNIT_CC through unitstage.gcc_set(): driver, `as`, every ELF file of its trees + closure, and EVERY
 FILE under its trees (the unit stage ingests them whole: /usr/include, GCC install dir with plugin headers, libexec); the host
-gcc's HOST_GCC_PROGS/HOST_GCC_FILES. The trees also get a listing digest (an extra package adding files there is a mismatch).
+gcc's HOST_GCC_PROGS/HOST_GCC_FILES and every file of its plugin directory (HOST_GCC_PLUGIN_DIRS: the plugin headers of the host-root compiler); (4) the renderer's host libraries: RENDER_LIBS (loader-cache names libEGL.so.1 and libEGL_mesa.so.0, with their loader closure) and RENDER_FILES (the glvnd EGL vendor file). The trees also get a listing digest (an extra package adding files there is a mismatch).
 A file without a dpkg owner outside python's prefix is an error. Programs and who executes them: strace opentrace.py; busybox
 tests/test_graph,test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linux-gnu-g++ test_unitstage (unitstage.py);
 aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount; ar,clang test_coffnorm;
@@ -1103,7 +1163,7 @@ Universe: every file git tracks below ports/fnv-nx (`git ls-files -z`), an item 
 A file is certified iff ALL hold:
   1. exactly one root contains it (a root is a directory prefix or one exact file path; roots do not nest);
   2. the root's class is one of CLASSES and the root names every gate REQUIRED for that class;
-  3. every gate the root names is a gate of verify/gates.json of this same tree;
+  3. every gate the root names is a gate file of verify/gates.d of this same tree;
   4. a product root names a "recipe": a file inside the root that the build gates read (how its code is compiled in the
      declared environment); the file exists.
 Classes:
@@ -1111,11 +1171,15 @@ Classes:
   tool     stage and verification tools: "selftests" required (their tests pass in the declared environment).
   product  code that is compiled into the shipped binary: REQUIRED_PRODUCT gates, the static closure of the run-time
            failure classes of verify/VERDICT.md. A product root cannot be admitted before those gates exist in
-           gates.json, so code enters the trunk only together with the gates that judge it.
+           gates.d, so code enters the trunk only together with the gates that judge it.
+  ref      reference files that tests/oracle.json records point at (spec, contract, model): no gate named, no recipe, no units, no link,
+           no outputs. Every file of a ref root is the `path` of a reference of some tests/oracle.json, and none is a build.json or a
+           test (is_test_file): a product or test root is never a ref root. The gates that cover class ref (gates.d `covers`) are the
+           ones that read any root: pure, assumptions (and the Legal and stub gates where they exist).
 Argument: the verdict is green only if certified == universe, so a tracked file outside every root, a root with a
 missing gate, or a product root without its gates makes every merge red. The table maps directories to gates; it
 holds no exception for a file, a function or a finding.
-Assumption: `git ls-files` lists the tree under test (the verdict runs gates in a clean worktree of the commit).
+Assumption: `git ls-files` lists the tree under test (the verdict runs gates in a clean worktree of the commit). (ASM-041)
 ```
 
 ## verify/gate_build.py
@@ -1139,7 +1203,7 @@ gates call ensure() (build or cache hits, same result). Without GATE_CACHE nothi
 Gate "contract" family (fnvnx-gate/1, class 8 of VERDICT.md): the whole-binary gates of contract/ judged on the link of the product root.
     python3 -I gate_contract.py --gate NAME     NAME: n1 n2_data n2_call n2_vcall xc xunit rtti pcrel bodysel
     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/NAME.json (gatefile.py shape).
-One entry per gate in gates.json, so each is its own line of the verdict; the stages are the ones of contract/verdict.py (exefacts, n1,
+One entry per gate file in gates.d, so each is its own line of the verdict; the stages are the ones of contract/verdict.py (exefacts, n1,
 objfacts, registry, xunit, rtti, pcrel, bodysel), run with the same arguments, in the order of their dependencies, each once per input set:
 their outputs are kept in GATE_CACHE/contract/<key>/ (key = sha256 of contract_inputs.json, the git tree under test and the content of
 the objects and ELF of the root), so the nine gates cost one run of the chain and a cold run gives the same files.
@@ -1167,6 +1231,24 @@ not match its hash, a root that has no link, no "game", does not build or lacks 
 n2_data n2_call n2_vcall xc (registry.py counts, rows = functions that are not N2): not failures in themselves (the function becomes LIFTED, a
 legal outcome); the invariant that closes the class is that EVERY row is turned into LIFTED by bodysel. Universe = the functions the gate
 judged, certified = judged minus the rows whose address bodysel does not give LIFTED (the function would run a native body that fails its contract).
+```
+
+## verify/gate_imports.py
+
+```text
+Gate "imports" (fnvnx-gate/1, class 4 of VERDICT.md): every import of the manifest has a body, proven by the build products (rules: contract/imports.py).
+    python3 -I gate_imports.py      cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/imports.json and GATE_OUT/imports.ids
+Roots come only from verify/admit.json (class product); for each the gate calls gate_build.ensure (build or cache hits) and reads the symbol
+tables the recipe wrote (objects.json: defined {symbol, bind, type}, undefined). No nm, no ELF parsing, no probe run.
+A product root DECLARES its imports in `<root>/imports.in.json` ("fnvnx-imports-in/1"):
+  {"format", "external": NAME of an entry of the root's recipe `external` (the private manifest: fnv-nx-build commit + tree_sha256),
+   "names": path of sys_names.tsv inside it, "specs": directory of the reference environment's .spec files inside it,
+   "extra": [row files inside it, judged against this root], "extra_other": [row files of another owner's build, judged against the other roots],
+   "name_table": path inside the root of the msvcrt name table `name TAB symbol TAB func|data` (the same file the root generates its lookup table from)}
+The external is checked out from the build's own fetch (GATE_CACHE/external/<commit>) and its tree hash must equal tree_sha256.
+Universe (gate_build.quantify, the convention of build/objstub): the admitted product roots; per root every row of the bridge table (contract/bridgetable.derive). A root without imports.in.json is one red item. Certified: rows with no class
+(contract/imports.py). uncertified: the first 50 ids `dll!name`; imports.ids lists `id TAB class`, sorted. No product root: universe 0, green. Bad input, a red build, an invalid recipe or an
+external that fails its hash is red with the reason in detail. Exit 0 iff green.
 ```
 
 ## verify/gate_linkstrict.py
@@ -1201,6 +1283,12 @@ its objects (relocatable) and of its linked ELF, never a name's text. Rules:
       the root links no ELF), and two listed symbols with DIFFERENT body ids may not share one address (`contract-alias`: an alias stub
       that serves two contracts with one body). Two names with the same body id on one address are fine. A symbol listed twice with
       two body ids is `contract-duplicate`. Without the key rule (c) has universe 0 for that root.
+  (d) The host boundary (a root with "target": "host" in admit.json). A reference no object defines is certified iff its object belongs to
+      a host root and its name is EXPORTED by the pinned host runtime: the defined GLOBAL/WEAK `.dynsym` names of the shared objects that
+      dpkg lists for libc6, libgcc-s1 and libstdc++6 (verify/env.json pins their versions; envcheck checks them), a fact computed by
+      gate_linkstrict.host_exports and cached by the content of those files (CACHE/hostexports). It mirrors newlib/libnx on the guest
+      side: a guest root has no such set, and any other undefined name of a host root stays `undefined`. Not covered (stated): the
+      fact is a cached read of the installed packages, not a sandbox stage; a symbol version is not compared, only the name.
 Universe = undefined references + defined global names + contract names + one `<elf>` per linked root (+ a root whose recipe is invalid or
 whose build is red, one uncertified item). Certified = the items with no finding. No product root: universe 0, green.
 NOT EXACT (stated): rule (b) is by name over the objects. A script symbol with hidden visibility (PROVIDE_HIDDEN) is LOCAL in the
@@ -1222,6 +1310,54 @@ the rule's list in the rule's load order (recipe.PLUGIN_SOURCES order, the order
 (recipe.PLUGIN_ARGS); (3) the build is green and its result holds the fnvnx_order .so (the file built by the hermetic plugin stage); (4) the unit's object
 was built. The .so is a declared input of every CC stage of a C++ unit (recipe.Job.compile: cc_inputs), so it is in the CC stage key; an
 object compiled without it, or with another .so, has another key and is not this object. A red build or invalid recipe certifies no unit of the root.
+```
+
+## verify/gate_machine.py
+
+```text
+Gate "machine" (fnvnx-gate/1, class G of VERDICT.md): the product's registry hive holds exactly the keys that the exe and the modules read
+(rules: contract/hive.py).
+    python3 -I gate_machine.py     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/machine.json and machine.ids
+Roots come only from verify/admit.json (class product). A root DECLARES its hive in `<root>/registry.in.json` ("fnvnx-registry-in/1"):
+  {"format", "external": NAME of an entry of the root's recipe `external` (private: fnv-nx-build commit + tree_sha256),
+   "sites": path of regsites.tsv inside it (the registry-API call sites of the exe and the modules),
+   "declared": path inside the root of declared_registry.tsv, "seed": path inside the root of the tracked seed include the product is built from,
+   "seed_unit": the recipe unit that applies the seed (the only unit allowed to reference a hive-writing API)}
+Universe, classes and certification: contract/hive.py. Writers are read from the objects of the build (recipe.symbols per object: undefined
+names). A dynamic site (root, key or value not statically resolved) is class `dynamic`: the gate is red and its detail says MEASUREMENT, as the reach
+gate treats a dynamic-name GetProcAddress site; there is no allow-list. Universe: gate_build.quantify (the admitted product roots; a root without registry.in.json is one red item). No product root: universe 0, green. Bad input, a red build, an invalid recipe or an external that fails its hash is red. Exit 0 iff green.
+```
+
+## verify/gate_hostapi.py
+
+Gate `hostapi` (product class, in `gate_admit.REQUIRED_PRODUCT`). For every admitted product root that includes `fnvnx/hostapi.h`: the set of
+service numbers declared in the header (`#define FNVNX_PLAT_<NAME> <integer>`, read by token grammar; names with one number are aliases) equals
+the set of service numbers that some unit of the root expands. Evidence: `unit.ii` of the PP stage, which runs `-dU` (GCC lists exactly the
+macros the unit expands or tests). A used `FNVNX_PLAT_` name with an undeclared number or another value is red. Module ids (`FNVNX_EXT_*`,
+including `FNVNX_EXT_DK`, the machine model of deko3d below the product boundary) are no services and no items. No root that includes the
+header: universe 0, green, no exception list. Limit: a use in a function that no code reaches counts; reachability is the job of reach/reachlink.
+Run: `python3 -I ports/fnv-nx/verify/gate_hostapi.py [--header PATH]` (cwd = checkout root, env GATE_OUT).
+
+## verify/gate_datamodel.py
+
+```text
+Gate "datamodel" (fnvnx-gate/1, VERDICT.md class A: data model): every unit of a guest product root is compiled by the pinned game
+compiler in the exe's data model.
+    python3 -I gate_datamodel.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/datamodel.json
+Universe (through gate_build.quantify): the admitted product roots with "target": "guest" (a host root has none); per root one item
+`<root>:compiler` plus one item `<root>/<unit>` per unit of the build. No guest root: universe 0, green.
+Certificate, read from the build's own outputs (objects.json of the root, the CC stage documents of its units in GATE_CACHE/store/stage-docs,
+found by the keys objects.json lists, the document whose "stage" is `cc:<unit>`); nothing is decided by a name in a file:
+  compiler item: the build is green, the root's recipe compiler is the external of verify/guest_compiler.json (recipe.guest_errors: name,
+    repo, ref, commit, tree_sha256, at, driver paths), and every CC document mounts at the pin's `at` the pin's tree_sha256 and starts
+    with the pin's driver (the object was built by that tree, not by a name).
+  unit item, all of: a CC stage document exists for the unit; its argv holds -mabi=ilp32; for a C++ unit of a native root also every flag of
+    recipe.SEMANTICS_FLAGS and, for every plugin of recipe.GUEST_CXX_PLUGINS, the declared input /plug/<name> (a tree holding <name>.so) and the
+    argv flag -fplugin=/plug/<name>/<name>.so. A C++ unit of a lifted root needs no plugin (RECIPE.md: the lifter emits the order itself).
+    The documents are the stage keys, so the object is the one these flags and inputs built.
+Does not cover (stated): the pin file declares no data-model flags of its own, so the flag set is -mabi=ilp32 for every unit plus
+recipe.SEMANTICS_FLAGS for native C++ (the constant of the recipe rule); C and assembler units are checked for -mabi=ilp32 only.
+Relies on the owner-accepted item "the compiler is correct": the pinned compiler under -mabi=ilp32 has the exe's data model.
 ```
 
 ## verify/gate_objstub.py
@@ -1252,7 +1388,7 @@ Gate "oracle" (fnvnx-gate/1): every test names where its expected values come fr
 code under test (verify/VERDICT.md class 10).
     python3 -I gate_oracle.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/oracle.json
 
-Universe: the test files of gate "selftests" (the DIRs of its argv in verify/gates.json, DIR/tests/test_*.py, found by
+Universe: the test files of gate "selftests" (the DIRs of its argv in verify/gates.d/selftests.json, DIR/tests/test_*.py, found by
 gate_tests.universe: one list for both gates). An item is a repo-relative path.
 Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
   {"format": "fnvnx-oracle/1", "tests": {"test_x.py": {"subject": [PATH...], "references": [REF...]}}}
@@ -1264,6 +1400,11 @@ Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
     {"kind": "spec", "path": PATH, "anchor": STR}   cited text: a tracked file and a place in it. `anchor` is a line
                                          range "L<m>-L<n>" (1 <= m <= n <= number of lines) or a whole line of the file
                                          that starts with "#" (a heading) and occurs exactly once
+    {"kind": "external", "name": NAME, "path": STR}   a file of an external that a recipe or the contract inputs pin (NAME is
+                                         its `name`, pinned to one commit and tree_sha256; fetched like a wine-exe artifact)
+    {"kind": "probe", "probe": {"external": NAME, "path": STR}, "platform": NAME, "dump_sha256": H64}   a probe program
+                                         (a file of a pinned external) run on the declared platform (a pinned external) whose dump
+                                         has this sha256
     {"kind": "contract", "path": PATH}     a contract table of the tree
     {"kind": "model", "path": PATH}        an independent model in the tree
 Rule. A test file is certified iff ALL hold:
@@ -1285,9 +1426,71 @@ Argument: an expected value "comes from the code under test" when its declared s
 through it. Rules 2-5 leave four sources: a dump of the exe under the pinned Wine, text at a place that exists in a
 file, a contract table and a model, the last three outside everything the subject can load, and for product code never
 the product tree. The verdict is green only if certified == universe, so a test without such a source blocks the merge.
-Assumption (checked by verification, not by this gate): the declaration is true - the subject list is complete and
+Assumption (checked by verification, not by this gate): the declaration is true - the subject list is complete and (ASM-042)
 the test compares against the declared references. The after-merge verifier runs every test under verify/opentrace.py
 and compares the tracked files it opened with subject + references (verify/oraclecheck.py).
+```
+
+## verify/gate_assumptions.py
+
+```text
+Gate "assumptions" (fnvnx-gate/1): every assumption the rules rest on is in one registry, with an id and a status
+(verify/VERDICT.md class 18); the accepted ones are ASM-001 to ASM-009.
+    python3 -I gate_assumptions.py   run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/assumptions.json
+
+Registry: verify/ASSUMPTIONS.json ("fnvnx-assumptions/1"; the accepted entries are ASM-001 to ASM-009):
+  {"format": "fnvnx-assumptions/1", "entries": [ENTRY...]}
+  ENTRY  {"id": "ASM-NNN", "text": STR, "used_by": [PATH...], "aliases": [STR...], "status": "OWNER" | "REMOVE", ...}
+    OWNER   + "decision": {"file": "CLAUDE.md", "quote": STR}   the owner's acceptance, verbatim
+    REMOVE  + "removed_by": STR, "owner": LEAD | LEAD+LEAD      the discharge and the stream lead(s) who owe it
+    optional: "note": STR. The registry holds exactly the entries that files of THIS tree rely on: the entry of an unmerged
+              branch enters with that branch's merge, and every rule below applies to every entry without exception.
+Universe: the MENTIONS of the tree. A text file is a tracked file below ports/fnv-nx that decodes as UTF-8 without NUL
+bytes and is not data (suffix .json); a file of a root of verify/admit.json marked "record": true is an append-only log
+(its dated entries state what was said then; the owner forbids editing it) and is not scanned. CLAUDE.md (the owner's
+words) is read for the decisions, not scanned. A BLOCK is the unit of a text file: in a .md file a paragraph (lines up to a
+blank line) cut further at every list item and every table row; in any other file the maximal run of non-blank lines. A
+mention is a block whose PROSE matches `assum` or `допущени` at a word start (case-insensitive); the prose of a .py file is
+its comments and docstrings (code and string values are not statements), of any other file the whole text. An item of the
+universe is (path, first line of the block). A mention is certified iff ALL hold:
+  1. its raw block contains at least one id of the form ASM-NNN, for example ASM-001 (the compiler is correct);
+  2. every id in it is the id of an entry of the registry.
+The registry is certified iff ALL hold:
+  3. ids are unique and well formed, aliases are unique across entries, text is not empty;
+  4. used_by is not empty and every path in it is a tracked file that contains the entry's id (the reliance is written at the
+     place of reliance, so an entry nobody cites is dead and is red); 
+  5. an OWNER entry has decision.file CLAUDE.md and decision.quote occurring verbatim inside exactly one numbered item under
+     the line "OWNER, the only accepted ones:", no item serves two entries, and every item has an entry: the OWNER set is
+     exactly the owner's list, so a tenth OWNER entry without the owner's item is red;
+  6. a REMOVE entry has an owner of LEADS (or two joined by +) and `removed_by` of one of the forms `gate:NAME` (NAME is a
+     gate file of verify/gates.d), `fact:PATH` (PATH is a tracked file: the fact table that decides it), `planned: TEXT`
+     (the gate or fact is named and does not exist yet), `no gate yet: TEXT` (the fact that is needed) or `OPEN: TEXT`
+     (nobody has a discharge yet). planned, no gate yet and OPEN are reported by count; they are the debt of the owner named in the entry.
+  7. id ranges: the registry's `ranges` is {lead: [first, last]} for exactly L1, L3a, L3b, L4, L5, L6, L6A, L2, integers from 100,
+     pairwise disjoint (L1 100..199, L3a 200..299, L3b 300..399, L4 400..499, L5 500..599, L6 600..699, L6A 700..799, L2 800..899).
+     An id below 100 is a legacy id and exempt; an id from 100 lies in the range of the first lead named in its owner. An id
+     defined by two records and an alias claimed by two records are red. A record of a layer branch enters with the branch's merge
+     under its range, so ids never collide.
+  9. never reuse: the registry's `retired` lists {id, aliases} of every record that is no longer an entry. A live entry with a retired id
+     or a retired alias is red; a retired id or alias occurring in any scanned file (outside the registry) is red, so a record cannot be
+     removed while anything cites it, and a citation moves to the live record. The merge ratchet (verdict.py merge, ratchet_errors):
+     every id and alias that the base registry held, live or retired, is held by the new one, live or retired; a vanished id or alias
+     blocks the merge, the same mechanism as the dropped-gate ratchet.
+  8. findings: every red item is a finding with a code (entry-form, id-form, id-repeated, id-range, alias-claimed, used-by-*,
+     decision-*, owner-*, removed-by-form, ranges-form, mention-no-id, mention-unknown-id, stray-id, ...). stdout shows the first
+     20; the FULL list (every id and code, sorted, with the total per code) is written as JSON to GATE_DETAIL/assumptions.findings.json
+     (the verdict gives GATE_DETAIL = <verdict file>.detail/<gate>, kept beside the stored verdict), and the summary line names the path.
+And no id outside the registry occurs in any tracked text file of the tree (a .json file included): an id that is
+not in the registry is red wherever it is written.
+Argument: an assumption is introduced by writing it down; every writing with the word in the universe is a mention, and a
+mention passes only if it names a registry entry, so a new assumption that is written with the word has an id, and an id has
+an entry (2, and the last rule); the entry has an owner decision or a named discharge (5, 6), and the files that rely on it
+cite it (4). The verdict is green only if certified == universe and the registry is certified. The accepted
+assumptions of the rule itself are ASM-001 (the compiler) and ASM-004 (the console), as for every gate.
+Limits of this rule (stated as ASM-001..009 do not cover them; they are what a gate over words can close): an assumption that
+is written without the words of the pattern is not seen (the rule closes the class "written with the word"; review closes the
+rest); a data file (.json) states values, the rule that reads it is the code or document that cites ids; the append-only
+logs are not scanned.
 ```
 
 ## verify/gate_pure.py
@@ -1390,7 +1593,7 @@ approximate. Threads that switch at host calls (blocks ended by a branch to a ho
 ```text
 L1: the one command a merger runs. Run as `python3 -I l1.py CMD ...`. Exit codes: 0 green/merged, 2 red/blocked, 3 conflict, 4 blocked: env, 1 error.
   verdict  --repo R --commit C --verdicts VDIR [--budget-s 300]
-           verdict.py run with the gates file OF THAT COMMIT (ports/fnv-nx/verify/gates.json read from C's tree), then store.
+           verdict.py run with the gates file OF THAT COMMIT (the files of ports/fnv-nx/verify/gates.d read from C's tree, assembled by gatesdir.py), then store.
   merge    --repo R --into BRANCH --from REF --verdicts VDIR [--budget-s 300]
            Computes the merge tree as verdict.py merge does. If VDIR has no verdict for it, makes the merge commit object with
            commit-tree (no ref moves) to have something to check out, runs `verdict` on it and stores it. Then verdict.py merge
@@ -1451,7 +1654,7 @@ objstub: decide on MACHINE CODE whether built AArch64 objects contain (T) a trap
 Inputs: ELF relocatable objects, ELF32 (ILP32; SHT_RELA with Elf32_Rela, R_AARCH64_P32_* kinds) or ELF64, AArch64, little endian. Decoder: ONE source, verify/a64access.cc (built with
 the host g++ against LLVM 18's MC layer; env var A64ACCESS names a prebuilt binary): per word the registers read and written
 (MCInstrDesc defs/uses/implicit, tied operands), the memory operand and the kind. Everything the T and V classes need beyond that
-is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64
+is read from architectural encoding fields (Arm ARM A64 top-level table), never from mnemonics. Assumption: LLVM's AArch64 (ASM-043)
 instruction descriptions and disassembler are correct; the test cross-checks the decoded word set against objdump. Output: one line `obj:symbol: KIND detail`, sorted; exit 0 iff no finding.
 
 FUNCTION UNIVERSE. Every STT_FUNC symbol defined in an SHF_EXECINSTR section, range [value, value+size); equal ranges are aliases of
@@ -1467,7 +1670,7 @@ whose symbol is global/weak and in the TERMINATOR SET (calls, tail calls, GOT/AD
 can be incomplete; a local symbol cannot be the library routine). `T2-noreturn-tail`: the last instruction is a direct BL (callee a symbol; control
 runs off the end after a call the compiler knew not to return), except a BL of `fnvnx_reach_violation` (reach rule below); another last instruction that can fall through (not RET, B, BR*, T1) is
 `fallthrough`. Reachability of a trap is NOT computed: presence anywhere in a function is a finding; every function is judged, so
-a caller of a flagged function is not flagged for it. Assumption: every terminating routine of the toolchain is declared noreturn
+a caller of a flagged function is not flagged for it. Assumption: every terminating routine of the toolchain is declared noreturn (ASM-044)
 in the headers given. TERMINATOR RULE (what is a terminator): a routine that ENDS THE PROCESS. Resuming or starting the propagation of
 an exception is not process end: it transfers control to a handler (or on to the caller), and whether a handler exists is the EH
 class, not class 1. The plugin applies GCC's own flags (TREE_THIS_VOLATILE = noreturn, TREE_NOTHROW) and its own EH lowering: (1) the
@@ -1519,7 +1722,7 @@ T2-noreturn-tail; it is judged by the reach rule: w0 at the call must be a const
 V dataflow over a CFG where a call returns and clobbers the AAPCS64 caller-saved registers), else `reach-nonconstant`; the constant must be a
 fact of GATE_CACHE/reach/<git tree>/reach.facts.tsv (`fact_id<TAB>sha256`, written by the gate `reach`), else `reach-uncertified` (also
 when the file does not exist); a fact with no call site in the universe is `reach-stale`; any other reference to the symbol (address
-taken, in code or in data) is `reach-address-taken`. Assumption: the decoder's write sets (LLVM defs) name every register an instruction
+taken, in code or in data) is `reach-address-taken`. Assumption: the decoder's write sets (LLVM defs) name every register an instruction (ASM-045)
 writes (a missed write of x0 would make a constant wrong).
 
 CACHE. Per object, CACHE/objstub/<key>.json, key = sha256 of (analysis version = objstub.py + a64access.cc, object sha256, os_layer
@@ -1566,7 +1769,7 @@ Exit: 0 green, 2 red, 1 usage/tool error.
 ## verify/oraclecheck.py
 
 ```text
-oraclecheck: verification of the assumption of gate "oracle" - the declaration of a test is true.
+oraclecheck: verification of the assumption of gate "oracle" - the declaration of a test is true. (ASM-042)
     python3 -I oraclecheck.py [--jobs N] [--timeout-s N] --out REPORT.json [TEST...]      cwd = checkout root
 
 Runs each test file of the oracle universe (or the TESTs named, repo-relative) as `python3 -I FILE` under
@@ -1598,7 +1801,7 @@ puregate: DEFAULT-DENY static gate for rule R12-T (a build stage's output is a f
 PATH: .py file or directory (sorted walk); shell files (suffix .sh/.bash or shell shebang): `shell-unanalysable`. Output
 `file:line: RULE symbol`, at most 200 lines (JSON: all). Policy tables: puregate_policy.py (data only; rule classes there).
 "Accepted" means: no Python code in the checked files can read an undeclared channel (clock, entropy, host identity,
-directory/set order, file times/inodes), UNDER THE ASSUMPTIONS below. Anything not analysable is a violation, never a pass.
+directory/set order, file times/inodes), UNDER THE ASSUMPTIONS below. Anything not analysable is a violation, never a pass. (ASM-032, ASM-033, ASM-034, ASM-035, ASM-036, ASM-037)
 Names resolve through import bindings with Python scoping; a name bound by an import and by anything else in one scope is
 `dynamic`; an escape of a module/class that carries rules (other than as an attribute base) is `dynamic`.
 Rules: the class rules of POLICY/ATTR (clock inode entropy unsorted-listing host completion-order dynamic) plus
@@ -1635,7 +1838,7 @@ ASSUMPTIONS (named; what "accepted" does NOT prove):
 ## verify/puregate_policy.py
 
 ```text
-puregate policy tables: DATA ONLY (the rules that read them are in puregate.py, which documents the assumptions).
+puregate policy tables: DATA ONLY (the rules that read them are in puregate.py, which documents the assumptions). (ASM-032, ASM-033)
 
 Rule classes: clock (wall/monotonic time, file times), inode (inode/device/link identity), entropy (random, id, hash),
 unsorted-listing (directory order), unsorted-set (set iteration order), host (machine identity/load), completion-order
@@ -1666,7 +1869,7 @@ EXTERNAL inputs (key "external", RECIPE.md): fetched only by exact commit from A
   compiler {"external": N, cc, cxx}: the tree is declared to runtime.py tool as HOST@AT (loader closure resolved as inside the sandbox, RECIPE.md).
 Outputs in --out: objects.json ("fnvnx-objects/1": root, objects[{unit,object,sha256,os_layer}], elf, constants, defined [{symbol,bind,type,object}] and undefined [symbol] (ELF .symtab of the objects, struct), stage_keys, stages
   {run,hit}, status green|red, failure {stage,exit,stderr tail 20} / failed_units when red), obj/<unit>.o, <name>.elf, constants.tsv.
-Assumptions: the compiler and ld are deterministic given the flags of unitstage/toolflags (A-env); the sandbox leaves the channels of
+Assumptions: the compiler and ld are deterministic given the flags of unitstage/toolflags (A-env); the sandbox leaves the channels of (ASM-038, ASM-039)
   sandbox.OPEN_CHANNELS open (see gate_determinism.py for which of them two cold builds expose).
 ```
 
@@ -1770,14 +1973,14 @@ unreadable or a cycle: `response-file-unreadable`). Output `STAGE: RULE detail [
 Declared dependencies, NOT checked here: "no_date_time_macros": {"checked_by": NAME} names the stage/gate proving the sources
 use no __DATE__/__TIME__ (VC9 has no switch); "coff_normalize"/"pe_normalize": the consumer normalizes time stamps
 (verify/coffnorm.py); a python script must itself pass puregate.
-ASSUMPTION A-env: external tools invoked this way are deterministic. It rests on each tool's reproducible-builds
+ASSUMPTION A-env: external tools invoked this way are deterministic. It rests on each tool's reproducible-builds (ASM-038)
 documentation; the gate enforces the invocation, it does not prove the tool.
 ```
 
 ## verify/toolflags_policy.py
 
 ```text
-toolflags policy table (data only): key -> (kind, requirement, citation). The reviewable statement of assumption A-env.
+toolflags policy table (data only): key -> (kind, requirement, citation). The reviewable statement of assumption A-env. (ASM-038)
 Rows citing VC9 are UNVERIFIED (no VC9 here); GCC 13.3 / binutils 2.42 rows were checked against the installed --help.
 ```
 
@@ -1792,7 +1995,7 @@ recompiled when nothing it reads changed.
     unitstage.py gcc-set --cxx /abs/g++       print the --exe/--tree arguments of `runtime.py tool` for that compiler
 RULE: what a preprocessor run reads is exactly (1) the CONTENT of the files it opens and (2) the EXISTENCE answers for the paths it
   probes (#include search, __has_include, __has_include_next). A stage is given both, exactly.
-  PP stage  `g++ FLAGS -E -MD -MT x -MF /out/deps.d -o /out/unit.ii /src/UNIT`, inputs: the tool runtime (runtime.py tool) and VIEWS
+  PP stage  `g++ FLAGS -E -dU -MD -MT x -MF /out/deps.d -o /out/unit.ii /src/UNIT`, inputs: the tool runtime (runtime.py tool) and VIEWS
             of the source root (/src) and the include roots (/inc/0..), see unitview.py: every name of the real tree, real content
             only for the files of a set C (the closure), every other file a placeholder `#error fnvnx: file outside the declared
             closure`. The key is f(name trees, content of C, compiler, flags).
@@ -1807,7 +2010,7 @@ Closure discovery (this runner, outside the sandbox, a pure function of stage re
   hashes); the accepted result is the run on the view of D. ARGUMENT that the hint never changes the result: the accepted run opened
   only files of D, all real, and saw the true name tree, so every include search and probe got the answer it gets on the real tree and
   every opened file had its real content; its output equals the output on the real trees. A different hint only changes how many runs
-  lead to D. ASSUMED about GCC: it reads the content of a file only by lexing it (then the file is in deps.d) or it fails; (a
+  lead to D. ASSUMED about GCC: it reads the content of a file only by lexing it (then the file is in deps.d) or it fails; (a (ASM-040)
   #pragma-once identity check on a file that is not included would not be caught by the placeholder, only by the equality assert).
 Languages by suffix (LANG): .c gets `-x c` (PP) and `-x c -fpreprocessed` (CC); .S gets `-x assembler-with-cpp` and `-x assembler` (CC on the
   preprocessed text, the same two stages); .s has no PP stage (its CC stage reads the unit alone, a `.include` fails). `--include` may also be

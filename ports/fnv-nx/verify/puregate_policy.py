@@ -1,4 +1,4 @@
-"""puregate policy tables: DATA ONLY (the rules that read them are in puregate.py, which documents the assumptions).
+"""puregate policy tables: DATA ONLY (the rules that read them are in puregate.py, which documents the assumptions). (ASM-032, ASM-033)
 
 Rule classes: clock (wall/monotonic time, file times), inode (inode/device/link identity), entropy (random, id, hash),
 unsorted-listing (directory order), unsorted-set (set iteration order), host (machine identity/load), completion-order
@@ -41,7 +41,7 @@ ORDER_ATTRS = "join extend fromkeys".split()
 SETOPS = "union intersection difference symmetric_difference copy".split()
 # gzip/zipfile/tarfile members whose call is analysed for read/write mode (writing embeds mtime)
 MODECALLS = "gzip.open gzip.GzipFile gzip.compress zipfile.ZipFile tarfile.open tarfile.TarFile".split()
-# (a) PURE: stdlib modules whose documented behaviour is a function of their arguments (assumption A-stdlib)
+# (a) PURE: stdlib modules whose documented behaviour is a function of their arguments (assumption A-stdlib) (ASM-032)
 PURE = set(("ast json hashlib re struct collections itertools functools dataclasses typing enum abc math bisect heapq "
             "array binascii base64 zlib io string textwrap shlex fnmatch posixpath copy contextlib types argparse errno "
             "stat csv difflib bz2 lzma codecs unicodedata decimal fractions traceback warnings keyword "
@@ -72,6 +72,6 @@ RESTRICTED = {
 }
 # modules every member of which is ruled: importing is harmless, any use is reported by its rule
 BANNED = set("random secrets tempfile platform socket getpass pwd grp importlib builtins".split())
-# (d) EXTERNAL-PURE: third-party modules assumed pure (assumption A-ext)
-EXTERNAL = set("capstone elftools unicorn mako".split())
+# (d) EXTERNAL-PURE: third-party modules assumed pure (assumption A-ext) (ASM-033)
+EXTERNAL = set("capstone elftools unicorn mako z3".split())   # z3: the z3-solver wheel, pinned by sha256 in env.json (assumption ASM-009: pinned formal tools)
 LISTED = PURE | set(RESTRICTED) | BANNED | EXTERNAL
