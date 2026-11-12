@@ -337,3 +337,10 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
         - Clear translator defects: SRCMOD_DZ/DW unsupported (glsl.c:453/458); attribute and varying locations for usages > 8 (glsl.c:67/105, should use fnvnx_dk_assign); comment-block parse failures (26).
         - The other (g) groups wait on msdocs-sm to decide whether the validator or the translator is at fault.
         - Paused by owner order; resumes after the render/d3d9 root.
+- 09:00Z The render/d3d9 root base is L5 platform-root a13d876c, which contains first-root-next 58c113f0.
+    - There, shim is a unit-less guest product root (68 headers, L2 00576a10), and platform includes shim/include.
+    - w6:
+        - render/d3d9 includes only guest product homes: shim, render/backend and render/shaders/include in shim's form, and lib/sha256 as its own root;
+        - the gen_env input rule is checked on this line;
+        - the ident outputs are declared.
+      Status: doing.
