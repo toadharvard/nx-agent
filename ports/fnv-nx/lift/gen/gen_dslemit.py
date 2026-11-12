@@ -130,7 +130,7 @@ def main():
                 continue
             for ad, vi, t in texts:
                 units[b].append(t)
-                emitted.append((s, vi, '%02x' % b, '%08x' % ad))
+                emitted.append((s, vi, '%03x' % b, '%08x' % ad))
             n += len(vars_)
     out = a.out
     os.makedirs(out + '/u')
@@ -138,7 +138,7 @@ def main():
     with open(out + '/inc/fnvl_prelude.h', 'w') as f:
         f.write(fnvlift.PRELUDE)
     for i in range(NB):
-        with open(out + '/u/%02x.cpp' % i, 'w') as f:
+        with open(out + '/u/%03x.cpp' % i, 'w') as f:
             f.write('#include "fnvl_prelude.h"\n' + ''.join(units[i]))
     with open(out + '/emitted.tsv', 'w') as f:
         f.write('# shape\tvariant\tbucket\taddress\n' + ''.join('%s\t%d\t%s\t%s\n' % r for r in sorted(emitted)))
