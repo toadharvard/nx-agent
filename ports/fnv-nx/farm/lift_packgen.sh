@@ -1,6 +1,6 @@
 #!/bin/bash
-# Collect the source shards published by tools/farm_liftgen.sh (exe and modules) and publish the pack tree: the units the product root lift/pack builds.
-#   farm_packgen.sh SHA12 N BRIDGE.tsv IAT.tsv [MODULE:N ...]        e.g. ... 64 bridge.tsv iat.tsv d3dx9_38:32 binkw32:1 libvorbis:1 libvorbisfile:1
+# Collect the source shards published by farm/lift_liftgen.sh (exe and modules) and publish the pack tree: the units the product root lift/pack builds.
+#   lift_packgen.sh SHA12 N BRIDGE.tsv IAT.tsv [MODULE:N ...]        e.g. ... 64 bridge.tsv iat.tsv d3dx9_38:32 binkw32:1 libvorbis:1 libvorbisfile:1
 # Fetches l3a-lift/src/<SHA12>/<K>of<N> and l3a-lift/src/<SHA12>-<module>/<K>of<n>, runs liftgen.py --finish --also ..., and pushes ONE orphan commit to
 # fnv-nx-build l3a-lift/pack/<SHA12>: the pack directory of liftgen.py (u/*.cpp, disp.S, imp.cpp, inc/, entries.tsv, forms.tsv, encs.tsv, imp_*.tsv, gate_liftgen.json)
 # plus shards.txt, finish.txt, README. Last line: PACKGEN commit=<40 hex> — the `commit` of the recipe's external (liftgen.py --recipe REF COMMIT TREE_SHA256;
@@ -9,7 +9,7 @@
 # FNVNX_FACTS (directory of the published facts: universe.tsv and <module>/universe.tsv).
 set -euo pipefail
 SHA=$1; N=$2; BRIDGE=$3; IAT=$4; shift 4
-HERE=$(cd "$(dirname "$0")/.." && pwd)
+HERE=$(cd "$(dirname "$0")/../lift" && pwd)
 B=${FNVNX_BUILD:-/home/user/fnv-nx-build}; W=${FNVNX_WORK:-/home/user/l3work/farm}; F=${FNVNX_FACTS:-/home/user/l3facts2}
 export FNVNX_UNIVERSE="$F/universe.tsv" PYTHONHASHSEED=0 LC_ALL=C
 fetch() {   # tag, count, dir
