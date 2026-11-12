@@ -22,6 +22,8 @@
  *   - nxdk_guest_ptr(addr, len): guest address -> host pointer; the mapping is stable while the guest block lives (one shared address space).
  *     It is NOT defined here: the symbol stays undefined, a build without the embedder does not link.
  *   - nxdk_on_present(frame): called after every completed present.
+ *   - nxdk_shader_pack(size): the install-time shader pack (translated.nxsp) read into memory, NULL when none is installed. No default: a build
+ *     without the embedder does not link (dk_shader.c).
  *   - libnx's vi service and the default native window are initialised before nxdk_create (viInitialize, nwindowGetDefault()).
  * Memory model: every memory block is caller backed (DkMemBlockMaker.storage) and 4 KiB aligned; the CPU cache of a block is flushed by the file
  * that makes the GPU read it (dkMemBlockFlushCpuCache at bind time), not here. */
