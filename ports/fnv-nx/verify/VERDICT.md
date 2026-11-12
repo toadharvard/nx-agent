@@ -169,6 +169,10 @@ Bases are a pure function of the image set in name order: the images are sorted 
 - The gate `gpa` counts the `loadlib` sites (universe = sites + disagreements, certified = closed sites) with its own rows, and `gpa`, `reach`, `reachlink` count a member without range facts as one uncertified item (owner L3a/L5).
 - The facts of an image are at the base the module table assigns (`# base=0x..` header of `ranges.tsv`); the image, its relocations and `dynsites.tsv` are at the preferred base. `argflow.Image` shifts the facts by (preferred - assigned), one coordinate system (`argflow.rebased`); a fact that does not shift into the address space is an error. Before this rule every range fact of a dll was outside its image and every site of a dll read as unreached (a closed row with no pairs); the shift is a precondition of every gate that derives a call argument in a dll.
 
+### Argument census of a platform dll
+
+`contract/argcensus.py` answers, for the imports of chosen dlls (for example the Winsock dlls the L4 boot machine models), which values every stdcall argument of every call can take in the image set. It uses the same engine as `reach` (`argflow.imports_called`/`uses_of_slot_ref` and `derive_arg` with the may-write rule): an argument is **closed** (its value set is the immediates found, the same on every path) or **open** (class `any`: a string, a call result, a break). An aggregate per (dll, function, argument) is closed iff every use is, and any value outside a closed aggregate is excluded, provided no dynamic path reaches the dll (`reach: none`: no open `gpa` row, no `gpa` pair and no resolved or open `loadlib` site naming the dll). Outputs `argcensus.tsv`, `argcensus.agg.tsv`, `argcensus.reach.txt`. The certificates of `fnv_reach_violation` facts remain those of `gate_reach` (requests of the platform manifest); the census gives the platform the closed value sets the requests are written from.
+
 ## References of tests (class 10, gate `oracle`)
 
 Every test file of the `selftests` universe has one entry in `DIR/tests/oracle.json` ("fnvnx-oracle/1"): the files under

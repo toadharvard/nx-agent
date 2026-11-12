@@ -384,6 +384,30 @@ def api_list():
 def derive(img):
 ```
 
+## contract/argcensus.py
+
+```text
+argcensus - the value set of every stdcall argument of every call of the imports of chosen dlls, over the image set (L1 CONTRACT).
+
+    argcensus.py --images-file images.tsv --bridge bridge.tsv --dll wsock32.dll [--dll ...] [--gpa gpa_names.tsv] [--loadlib loadlib.tsv] --out DIR
+
+Rule (argflow, the same engine and may-write rule as gpa_names.py / gate_reach.py).  For every bridge row (dll D in --dll, name N, args
+letters = the stdcall argument count) and every image of the set: the uses of the slots of D!N (argflow.imports_called: call [slot], a
+thunk, a register-loaded call) and, per use and argument k (0 = pushed last), argflow.derive_arg:
+  closed   every leaf is an immediate value: the argument is one of those values on every path (argflow walks all paths of the
+           function backwards and expands own parameters to every caller, or reports a break);
+  open     a leaf is a string / a call result / an import slot, or the derivation broke: the argument is of class `any`.
+An escape of a slot (imports_called's open list) or an import of D by ordinal makes the import's rows open for all its arguments: its
+uses are not all known.  Aggregate per (D, N, k): closed iff every use is closed; values = the union (hex, sorted).  A closed aggregate
+is the complete value set of the argument for the exe's own calls; any value outside it is excluded by a certificate (`excluded` rows
+of the --gpa/--loadlib check below), provided no dynamic path reaches D at all (below).
+Reach of D by dynamic names (--gpa gpa_names.tsv, --loadlib loadlib.tsv): `reach: none` iff no gpa row is open, no pair of gpa_names
+names a module of D, and no loadlib site is open or names D; else `reach: possible` with the open items (the aggregate then covers the
+static uses only; a dynamic use is outside it).
+Outputs: argcensus.tsv (dll, name, argc, image, ref, call, k, status, values, other, breaks), argcensus.agg.tsv (dll, name, k, status,
+values, uses), argcensus.reach.txt.  Exe-derived: container and fnv-nx-build only.
+```
+
 ## contract/imports.py
 
 ```text
