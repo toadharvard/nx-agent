@@ -348,13 +348,13 @@ def exe_slots(exe):
 
 
 def run(exe_path, bridge_path, dirs, out, declared_path):
-    exe = PE(exepin.load_exe(exe_path), os.path.basename(exe_path))
+    exe = PE(exepin.load_exe(exe_path), exepin.NAME)
     brows, _ = iat.bridge_rows(bridge_path)
     bridge = [(r['dll'], r['name'], r['conv'], r['ordinal']) for r in brows]
     system = {r['dll'] for r in brows}
     wine = declareddlls.read(declared_path)         # the dlls of the declared machine (Wine 9.0)
     mods = scan(dirs, system)
-    me = lower(os.path.basename(exe_path))
+    me = lower(exepin.NAME)
     image = dllkind.images_of({n: [iat.norm_dll(d) for d, _ in m.imports] for n, m in mods.items()}, system | {me})
     declared_mods = {n: m for n, m in mods.items() if n not in image}   # found, no bridge row, the declared machine cannot load them
     order = closure(exe, system, {n: m for n, m in mods.items() if n in image}, set(declared_mods))

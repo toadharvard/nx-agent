@@ -16,6 +16,8 @@ import hashlib
 import struct
 import sys
 
+NAME = 'FalloutNV.exe'   # the file name of the supported exe: tools name the exe by this, never by the path they were given
+
 PIN = {
     'size': 16084808,
     'sha256': '89e7020487e80f20ddc92ea641c4433b2c6839a82f45a076e414d167d11dd0fe',
