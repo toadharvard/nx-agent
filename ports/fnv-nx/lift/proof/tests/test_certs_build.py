@@ -7,7 +7,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..'))
-from proof import certs_build, shape, symform
+from proof import certs_build, prove, shape, symform
 
 WORK = os.environ.get('FNVNX_TEST_WORK', '/home/user/l3work/proof/test_work')
 MD = shape.decoder()
@@ -23,7 +23,7 @@ MODEL = certs_build.pinned_model()
 
 
 def rec(key, result='proved', model=MODEL, dsl=None):
-    return {'shape': key, 'result': result, 'model_sha': model, 'dsl_sha': dsl or symform.shape_sha(key)}
+    return {'shape': key, 'result': result, 'model_sha': model, 'dsl_sha': dsl or symform.shape_sha(key), 'obligations': list(prove.OBLIGATIONS)}
 
 
 class Aggregate(unittest.TestCase):

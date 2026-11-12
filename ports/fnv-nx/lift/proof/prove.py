@@ -25,7 +25,8 @@ ADDR = 0x401000
 REGS = ('eax', 'ecx', 'edx', 'ebx', 'esp', 'ebp', 'esi', 'edi'); FLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
 RFO = z3.BitVec('rflags_other', 32)
 SUBS = [(z3.BitVec('df', 1), z3.Extract(10, 10, RFO)), (z3.BitVec('flo', 32), RFO & 0xFFFFF328)]    # DSL inputs df / flo = bits of the model's free rflags_other
-SEVERITY = ['FAILED(dsl)', 'timeout', 'FAILED(model-defect)', 'model-gap', 'proved']
+OBLIGATIONS = ('def0',)      # what a record of this prover certifies beyond the field equalities; certs_build refuses a record without it (stale-obligations)
+SEVERITY = ['FAILED(dsl)', 'FAILED(def0)', 'timeout', 'FAILED(model-defect)', 'model-gap', 'proved']
 
 MODEL_FAULT = {1: r'\(!!FAULT-FRESH :DE |:(UN)?SIGNED-DIVIDE',            # DSL fault code -> the model's messages of that fault (divide error paths)
                7: r':NON-WRITABLE-SEGMENT$'}                                # a store through CS (memory_accessors.sail store_bytes_to_ea): #GP(0)
@@ -90,6 +91,43 @@ def _nodes(roots):
         if id(n) in seen: continue
         seen.add(id(n)); yield n; st.extend(n.a)
 
+FREE = re.compile(r'^[pf]\d+_')     # the fresh constants of a model path (model_sail.Env.fresh: tag_name): isla's undefined / nondeterministic values; every other constant is pre-state or a shape field
+def _free(terms):
+    """{name: z3 constant} of the model's fresh (undefined / nondeterministic) constants in the terms"""
+    out, seen, st = {}, set(), list(terms)
+    while st:
+        e = st.pop()
+        if e.get_id() in seen: continue
+        seen.add(e.get_id())
+        if z3.is_const(e) and e.decl().kind() == z3.Z3_OP_UNINTERPRETED and FREE.match(e.decl().name()): out[e.decl().name()] = e
+        st.extend(e.children())
+    return out
+
+def _zero(c): return z3.BoolVal(False) if c.sort().kind() == z3.Z3_BOOL_SORT else z3.BitVecVal(0, c.sort().size())
+
+def def0(M, D, flags, assume_d, side, args, extra):
+    """DEF0 (owner / orchestrator / L3a, 2026-11-12): the lifter writes the constant 0 to every flag the Form declares architecturally undefined.  Certified as a refinement of the pinned model: the
+    model's undefined values (the fresh constants of its paths) are free; the witness assigns every one of them 0; the obligation model[free := 0] == lifted (0) on that flag is a forall query (unsat of the
+    inequality).  A flag the model DEFINES (not free) and that is not 0 is a mismatch (sat).  The witness must satisfy the model's side constraints on the free values, else it is not admissible.
+    extra['def0'] = {'undef_flags': [...], 'witness': 0, 'free': n, 'nonflag_free': [fields whose model term mentions a free value]}"""
+    und = [f for f in flags if z3.is_false(z3.simplify(D['defined'][f]))]
+    terms = [M['regs'][r] for r in M['regs']] + [M['flags'][f] for f in flags] + [M['mem'], M['eip']]
+    free = _free(terms + [side])
+    nonflag = sorted([r for r in M['regs'] if _free([M['regs'][r]])] + (['mem'] if _free([M['mem']]) else []) + (['eip'] if _free([M['eip']]) else []))
+    extra['def0'] = {'undef_flags': und, 'witness': 0, 'free': len(free), 'nonflag_free': nonflag}
+    if not und: return 'proved', ''
+    wit = [(c, _zero(c)) for c in free.values()]
+    sw = z3.substitute(side, *wit) if wit else side
+    r, _ = check([z3.Not(sw)], z3.BoolVal(True), args)
+    if r != z3.unsat: return 'FAILED(def0)', 'the witness 0 does not satisfy the side constraints of the model on its undefined values: %s' % r
+    aw = z3.substitute(assume_d, *wit) if wit else assume_d
+    for f in und:
+        mw = z3.substitute(M['flags'][f], *wit) if wit else M['flags'][f]
+        r, _ = check([mw != 0], aw, args)
+        if r == z3.unsat: continue
+        return ('FAILED(def0)' if r == z3.sat else 'timeout'), 'DEF0 flag %s: model[free := 0] %s the lifted 0 (%s)' % (f, 'differs from' if r == z3.sat else 'unknown against', r)
+    return 'proved', ''
+
 def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
     """-> (result, note, certificate extras).  Shape proofs (shapeprove.py) pass pre = a pre-state with a symbolic eip, model = a thunk returning the model
     post-state of the shape, fields = {name: (offset, size)} of the symbolic encoding bytes (z3 variables fld_<name>, free = universally quantified)"""
@@ -139,6 +177,8 @@ def prove_one(mod, F, code, key, args, pre=None, model=None, fields=None):
         if not has_mem and nofault is not None and z3.Solver().check(side) != z3.sat: r2 = z3.unknown       # exists free values with `side` (closed): one satisfiability check
         extra['fault_checks'] = 'assume=>no DSL fault: %s; no DSL fault=>assume: %s' % (r1, 'not applicable (memory operand: segment-limit faults)' if has_mem else r2)
         if r1 != z3.unsat or r2 != z3.unsat: return 'FAILED(dsl)', 'fault condition differs: ' + extra['fault_checks'], extra
+    d0, dnote = def0(M, D, FLAGS, assume_d, side, args, extra)      # DEF0: every architecturally undefined flag output is 0 in the lifted body; prove model[free := 0] == lifted
+    if d0 != 'proved': return d0, dnote, extra
     if F.writes_unobserved(): return 'model-gap', 'post-state of df / other EFLAGS bits is not exposed by the model interface (other fields proved)', extra
     return 'proved', '', extra
 
@@ -157,7 +197,7 @@ def prove(args):
         e['enc'].append((res, b.hex())); note and e['notes'].append('%s: %s' % (b.hex(), note[:230]))
         json.dump(dict(form=key, encoding=b.hex(), result=res, dsl_sha256=F.sha(), z3=z3.get_version_string(), model=args.model, note=note, **extra),
                   open(os.path.join(args.cert, '%s_%s.json' % (re.sub(r'[^\w-]', '_', key), b.hex())), 'w'))
-    tot = {k: 0 for k in ('proved', 'FAILED(dsl)', 'FAILED(model-defect)', 'model-gap', 'timeout')}; status = {}; missing = []
+    tot = {k: 0 for k in ('proved', 'FAILED(dsl)', 'FAILED(def0)', 'FAILED(model-defect)', 'model-gap', 'timeout')}; status = {}; missing = []
     for key in order:
         e = per[key]
         if not e['builds']: missing.append(key); res = 'no-form'
@@ -178,7 +218,7 @@ def prove(args):
     json.dump({'schema': 'fnvnx-gate/1', 'name': 'l3.forms.int', 'status': 'green' if not (tot['FAILED(dsl)'] or tot['timeout'] or [k for k in scope if k in missing]) else 'red',
                'universe': order, 'certified': cert, 'uncertified': [k for k in order if k not in cert], 'status_by_key': status},
               open(os.path.join(args.cert, 'gate_forms.json'), 'w'), indent=1)
-    return tot['FAILED(dsl)'] + tot['timeout']
+    return tot['FAILED(dsl)'] + tot['FAILED(def0)'] + tot['timeout']
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser(); ap.add_argument('--model', choices=sorted(MODELS)); ap.add_argument('--backends', action='store_true'); ap.add_argument('--only')

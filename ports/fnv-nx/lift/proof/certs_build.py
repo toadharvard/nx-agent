@@ -33,7 +33,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 LIFT = os.path.dirname(HERE)
 sys.path.insert(0, LIFT)
-from proof import shape, symform  # noqa: E402
+from proof import prove, shape, symform  # noqa: E402
 
 HEADER = '# shape_key\tfamily\tdsl_sha\tmodel_sha\treference\tresult\n'
 
@@ -105,6 +105,9 @@ def scan(files):
         key = r['shape']
         if r.get('model_sha') != model:
             counts['stale-model'] = counts.get('stale-model', 0) + 1
+            continue
+        if r.get('obligations') != list(prove.OBLIGATIONS):          # a record of a prover that did not check DEF0 (every undefined flag = 0) certifies less than this one
+            counts['stale-obligations'] = counts.get('stale-obligations', 0) + 1
             continue
         if r.get('dsl_sha') is None or r.get('dsl_sha') != current_sha(key):
             counts['stale-dsl'] = counts.get('stale-dsl', 0) + 1

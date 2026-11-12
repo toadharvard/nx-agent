@@ -64,7 +64,7 @@ def one(key, args):
     if model_sail.LAST.get('fault_paths'): asm.append('A-SEGLIM')
     ids = res[len('FAILED(model-defect:'):-1].split(',') if res.startswith('FAILED(model-defect:') else []
     return fin('FAILED(model-defect)' if ids else res, note, defects=ids, assumptions=asm,
-               model_terms_sha=extra.get('model_sha256'), isla_paths=model_sail.LAST.get('paths'), isla_fault_paths=model_sail.LAST.get('fault_paths'))
+               model_terms_sha=extra.get('model_sha256'), def0=extra.get('def0'), obligations=list(prove.OBLIGATIONS), isla_paths=model_sail.LAST.get('paths'), isla_fault_paths=model_sail.LAST.get('fault_paths'))
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--shapes', required=True); ap.add_argument('--shard', default='1/1'); ap.add_argument('--out', required=True)

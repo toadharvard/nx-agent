@@ -32,4 +32,16 @@ class ModelPatches(unittest.TestCase):
         for h in ('06', '0e', '16', '1e', '0fa0', '0fa8', '661e', '666a00'):
             self.proved(h)
 
+class Def0(unittest.TestCase):
+    """DEF0: the lifter writes 0 to every architecturally undefined flag; the prover proves model[free := 0] == lifted"""
+    def test_undefined_flags_are_zero_witness(self):
+        for h, flags in (('85c0', ['af']), ('31c0', ['af']), ('d1e0', ['af']), ('f7e1', ['pf', 'af', 'zf', 'sf']), ('c1e005', ['af', 'of'])):
+            r, note, x = run(h); self.assertEqual(r, 'proved', '%s %s' % (h, note)); self.assertEqual(x['def0']['undef_flags'], flags)
+
+    def test_a_defined_model_flag_declared_undefined_is_red(self):      # add defines CF: declaring it undefined (value 0) is a mismatch, never a free pass
+        code = bytes.fromhex('01c8'); cs = Cs(CS_ARCH_X86, CS_MODE_32); cs.detail = True; ins = list(cs.disasm(code, prove.ADDR))[0]
+        F = forms.build(ins, prove.ADDR); F.undefined('cf', 'test')
+        r, note, _ = prove.prove_one(model_sail, F, code, forms.form_key(ins), argparse.Namespace(timeout=300))
+        self.assertEqual(r, 'FAILED(def0)', note)
+
 if __name__ == '__main__': unittest.main()
