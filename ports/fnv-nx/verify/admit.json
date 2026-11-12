@@ -13,6 +13,7 @@
   {"path": "ports/fnv-nx/lift/test", "class": "tool", "gates": ["selftests"], "entry": []},
   {"path": "ports/fnv-nx/lift/tools", "class": "tool", "gates": ["selftests"], "entry": []},
   {"path": "ports/fnv-nx/lift/gates", "class": "tool", "gates": ["pure", "selftests"], "entry": []},
+  {"path": "ports/fnv-nx/tests/bootguest", "class": "test", "target": "guest", "gates": ["build", "determinism", "linkstrict"], "recipe": "ports/fnv-nx/tests/bootguest/build.json"},
   {"path": "ports/fnv-nx/toolchain", "class": "tool", "gates": ["selftests"], "entry": []},
   {"path": "ports/fnv-nx/verify", "class": "tool", "gates": ["selftests"], "entry": []},
   {"path": "ports/fnv-nx/render/d3d9", "class": "doc", "gates": []},
