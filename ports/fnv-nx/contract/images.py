@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """images - the guest image set of the contract gates (L1 CONTRACT): one pure function, no hand list.
 
-RULE (dllkind.py, shared with modules.py): the set is the exe and the dlls reached from its import directories (normal and delay-load, in
-modules.PE's reading) through guest images only.  A dll name (iat.norm_dll) is resolved case-insensitively against the files of the
+RULE (dllkind.py, shared with modules.py): the set is the exe and every guest image: the images reached from its import directories (normal and
+delay-load, in modules.PE's reading) through images only, then every other dll file of the directories that is an image (a dll loaded later through
+LoadLibrary has its static base, as in modules.py).  A dll name (iat.norm_dll) is resolved case-insensitively against the files of the
 given directories; it is a GUEST IMAGE iff it is found, has no bridge row, and its whole normal import closure resolves to guest images
 or bridge dlls.  A bridge dll (rows in bridge.tsv) and a found dll the declared machine cannot load are not images and are not walked
 further; a name that is neither found nor bridged is a platform import (gate `imports`, owner L5).  Dynamic LoadLibrary names are facts of
 the `gpa` gate, not of this rule (VERDICT.md).
-Order: the exe, then the images in discovery order (depth first, import directory then delay-load directory)."""
+Order: the exe, the images reached from the exe in discovery order (depth first, import directory then delay-load directory), then the others by name."""
 import os
 import sys
 
@@ -39,7 +40,10 @@ def classify(exe_path, dirs, bridge=frozenset()):
 
     n, d = imports_of(exe_path)
     me = modules.lower(os.path.basename(exe_path))
-    order, kind = dllkind.classify((n, d), imports_of, find, frozenset(bridge), me)
+    # total over the files: a module loaded later through LoadLibrary must already be a guest image (modules.py gives every dll file a base), so
+    # every dll file of the directories is a candidate after the dlls reached from the exe (discovery order first, then name order)
+    files = sorted({modules.lower(f) for x in dirs for f in os.listdir(x) if modules.lower(f).endswith(".dll")})
+    order, kind = dllkind.classify((n, d, files), imports_of, find, frozenset(bridge), me)
     return order, kind
 
 

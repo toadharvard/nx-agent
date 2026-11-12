@@ -64,5 +64,6 @@
  "ranges": {
   "exe": "facts/ranges.tsv",
   "module": "facts/%s/ranges.tsv"
- }
+ },
+ "bridge": "manifest/manifest/bridge.tsv"
 }

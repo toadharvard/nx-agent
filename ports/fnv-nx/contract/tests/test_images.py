@@ -71,9 +71,10 @@ check("... the declared B is reached but not walked", [n for n, _ in images.clas
       and images.classify(d + "/A.exe", [d])[1] == {"b.dll": "declared", "c.dll": "platform", "kernel32.dll": "platform"}, images.classify(d + "/A.exe", [d])[1])
 check("C and kernel32 bridged -> B is an image again", [n for n, _ in images.image_set(d + "/A.exe", [d], {"c.dll", "kernel32.dll"})] == ["a.exe", "b.dll"])
 dB = tree({"A.exe": pe(["B.DLL", "kernel32.dll"]), "b.dll": pe(["C.dll"]), "c.dll": pe(["kernel32.dll"])})
-check("a bridge dll with a found file is not an image and its imports are not walked",
-      [n for n, _ in images.image_set(dB + "/A.exe", [dB], {"b.dll", "kernel32.dll"})] == ["a.exe"]
-      and images.classify(dB + "/A.exe", [dB], {"b.dll", "kernel32.dll"})[1] == {"b.dll": "bridge", "kernel32.dll": "bridge"}, images.classify(dB + "/A.exe", [dB], {"b.dll", "kernel32.dll"})[1])
+kB = images.classify(dB + "/A.exe", [dB], {"b.dll", "kernel32.dll"})
+check("a bridge dll with a found file is not an image and is not walked (c.dll is an image on its own, as a file of the directory, not through b)",
+      [n for n, _ in images.image_set(dB + "/A.exe", [dB], {"b.dll", "kernel32.dll"})] == ["a.exe", "c.dll"]
+      and kB[1]["b.dll"] == "bridge" and [n for n, _ in kB[0]] == ["c.dll"], kB[1])
 check("without the bridge row the same chain is images",
       [n for n, _ in images.image_set(dB + "/A.exe", [dB], {"kernel32.dll"})] == ["a.exe", "b.dll", "c.dll"])
 check("an image whose dependency is a declared dll is itself declared (closure, no named list)",
