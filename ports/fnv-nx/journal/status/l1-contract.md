@@ -1,6 +1,6 @@
 # L1 CONTRACT status (lead: Opus 5.5, session started 2026-11-11 22:34Z)
 
-Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` e35b870a (CLAUDE.md launcher-run-once; code as 2b7897a5, w4 @1fa25f8b merged, 240 s), 25 gates, 0 product roots. Target: first frame in this budget (CLAUDE.md 08f6ea30).
+Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` 07862d5a (L4 verify @cd2a5fe6 merged, tree 94602318, 215 s), 26 gates, 0 product roots. Target: first frame in this budget (CLAUDE.md 08f6ea30).
 
 ## Tasks
 
