@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-Key-level rule (L5 lead, 2026-11-12): when the root and key path of a value access are static and the declared machine
-(declared_registry.tsv) declares no value under that key, the value name does not matter: a query answers ERROR_FILE_NOT_FOUND for
-every name and a set writes run-time hive state. The row is `static`, value `*`, reason `key-has-no-declared-values`. When a value
-is declared under the key the rule no longer applies and the row is dynamic again. No assumption beyond OWNER 3.
 """Registry read/write sites of a PE module set (L5 declared machine).
 
 Rule (owner): the registry hive holds exactly the keys that the exe and the modules read, found statically from their call sites.
@@ -52,6 +48,10 @@ Domain: ROLES is the argument-position table of the registry APIs. It is checked
 function that is a registry function by the export family must have a row (`gate_domain`): an API added to a module without a
 row stops the pass. Output rows: module, site, api, root, subkey, value, status static|dynamic, reason. A wrapper row's site is
 `site<-caller`.
+Key-level rule (L5 lead, 2026-11-12): when the root and key path of a value access are static and the declared machine
+(declared_registry.tsv) declares no value under that key, the value name does not matter: a query answers ERROR_FILE_NOT_FOUND for
+every name and a set writes run-time hive state. The row is `static`, value `*`, reason `key-has-no-declared-values`. When a value
+is declared under the key the rule no longer applies and the row is dynamic again. No assumption beyond OWNER 3.
 """
 import os, re, struct, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
