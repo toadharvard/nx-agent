@@ -99,5 +99,55 @@ bp.fault("open", "/x", errno.ENOENT)
 bp.fault("open", "/x", errno.ENOENT)
 case("faults counted, mkdir EEXIST is none", bp.faults == {("open", "ENOENT", "/x"): 2}, bp.faults)
 
+# declared FalloutPrefs.ini: bootpath.py PORT_NAMES: port entries of sdmc:/switch/fnv stay on root
+PREFS = "sdmc:/switch/fnv/user/Documents/My Games/FalloutNV/FalloutPrefs.ini"
+
+
+def listing(d):
+    return sorted(os.path.join(a, n) for a, ds, fs in os.walk(d) for n in ds + fs)
+
+
+root, game = fresh("p1"), fresh("p1g")
+touch(game, "Data", "FalloutNV.esm")
+bp = bootpath.BootPath(root, game)
+want = os.path.join(root, "switch", "fnv", "user", "Documents", "My Games", "FalloutNV", "FalloutPrefs.ini")
+case("prefs with game: under root/switch/fnv/user (bootpath.py PORT_NAMES: port entries stay on root)",
+     bp.resolve(PREFS) == want, bp.resolve(PREFS))
+case("prefs with game: not under game", not bp.resolve(PREFS).startswith(game + os.sep))
+# a missing path keeps the given spelling, so before creation compare case-folded; after it, exactly
+case("prefs with game: any case of User stays on root (bootpath.py PORT_NAMES)",
+     all(bp.resolve(PREFS.replace("/user/", "/" + u + "/")).casefold() == want.casefold() and
+         not bp.resolve(PREFS.replace("/user/", "/" + u + "/")).startswith(game + os.sep)
+         for u in ("User", "USER", "uSeR")))
+# a file created through the resolution lands on root; game unchanged
+before = listing(game)
+h = bp.resolve(PREFS)
+os.makedirs(os.path.dirname(h), exist_ok=True)   # the platform's own mkdir of the profile dir
+bp.changed()
+with open(h, "w") as fh:
+    fh.write("[Display]\n")
+case("prefs created: lands on root (bootpath.py PORT_NAMES)", os.path.isfile(want) and bp.resolve(PREFS) == want)
+case("prefs created: game listing unchanged", listing(game) == before)
+bp.changed()
+case("prefs created: any case of User resolves to the same file",
+     all(bp.resolve(PREFS.replace("/user/", "/" + u + "/")) == want for u in ("User", "USER", "uSeR")))
+case("prefs created: other spelling finds the same file",
+     bp.resolve(PREFS.replace("FalloutPrefs.ini", "falloutprefs.INI").replace("/user/", "/User/")) == want)
+
+# no game: the same path under root/switch/fnv/user
+root = fresh("p2")
+bp = bootpath.BootPath(root)
+case("prefs without game: under root/switch/fnv/user (bootpath.py PORT_NAMES)",
+     bp.resolve(PREFS) == os.path.join(root, "switch", "fnv", "user", "Documents", "My Games", "FalloutNV",
+                                       "FalloutPrefs.ini"))
+
+# BootPath creates neither the user dir nor the file (the platform does)
+for n, g in (("p3", None), ("p4", fresh("p4g"))):
+    root = fresh(n)
+    bootpath.BootPath(root, g)
+    u = os.path.join(root, "switch", "fnv", "user")
+    case("BootPath(%s) does not create user dir or FalloutPrefs.ini" % ("root, game" if g else "root"),
+         not os.path.exists(u))
+
 print("%d failed" % len(FAILED) if FAILED else "all %d passed" % N[0])
 sys.exit(1 if FAILED else 0)
