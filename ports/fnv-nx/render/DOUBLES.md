@@ -131,3 +131,63 @@ Undefined names: **78** (was 80; `nx_ffp_ps_program` and `nx_ffp_vs_program` are
 - L2: 48 vtable clones.
 - guest libc/libstdc++/crt (L5 / toolchain): 16.
 Total 9 + 2 + 2 + 1 + 48 + 16 = 78. Defined by another root in link.roots: 0. Doubles census (unchanged, no test rewritten): 17 tests, 14 files, 30 distinct symbols, 173 summed.
+
+## The 48 vtable clones `_ZTV<C>.fnvnx_ap8` (L2 question), after the rebase (70 objects, base c84c69f9)
+
+Method: for each of the 48 undefined `_ZTV<C>.fnvnx_ap8`, look up `_ZTV<C>` in the `defined` list of the root's objects.json and the objects that reference the ap name (`nm -u` of the 70 objects). No object of the root defines any `*.fnvnx_ap*` symbol (0 defined).
+- (a) `_ZTV<C>` defined in render/d3d9, ap symbol missing: **48**. All are WEAK OBJECT definitions of the vtable in a unit of the root; the sdd plugin emits the reference to `_ZTV<C>.fnvnx_ap8` from the referencing unit but no unit defines the clone symbol. In 48 of the 48 the referencing object is also an object that defines `_ZTV<C>`; in the other 0 the vtable is defined in a different object than the one that references the clone (the clone is then undefined in the referencing object and absent in the defining one).
+- (b) `_ZTV<C>` undefined as well (vtable from another root or the exe): **0**. Every one of the 48 classes, the COM interfaces (IDirect3D9, IDirect3DDevice9[Ex], IDirect3DSurface9, ..., IUnknown) and the Nx* classes of the device layer, has its vtable built and defined in render/d3d9 (the shim d3d9.h interfaces have inline-emitted vtables in the units that construct or use them).
+Defining unit of `_ZTV<C>` (first), count: dev/copy_clear.cpp 1, dev/d3d9_adapter.cpp 3, dev/dev_chain.cpp 5, dev/dev_create.cpp 2, dev/draw_api.cpp 1, dev/ffp_dev.cpp 1, dev/res_buf.cpp 2, dev/res_create.cpp 5, dev/res_decl.cpp 1, dev/res_fvf.cpp 1, dev/res_query.cpp 1, dev/res_shader.cpp 2, dev/state_ext.cpp 1, dev/x1_validator.cpp 1, gen/d9impl_unk.gen.cpp 21
+
+| class C | `_ZTV<C>` | defined (WEAK OBJECT) in | referenced as `.fnvnx_ap8` from | same object |
+|---|---|---|---|---|
+| IDirect3D9 | `_ZTV10IDirect3D9` | dev/d3d9_adapter.cpp | dev/d3d9_adapter.cpp | yes |
+| NxSurface9 | `_ZTV10NxSurface9` | gen/d9impl_unk.gen.cpp | dev/dev_chain.cpp; dev/dev_create.cpp; dev/res_create.cpp; gen/d9impl_unk.gen.cpp | yes |
+| NxTexture9 | `_ZTV10NxTexture9` | gen/d9impl_unk.gen.cpp | dev/res_create.cpp; gen/d9impl_unk.gen.cpp | yes |
+| NxDevice9Ex | `_ZTV11NxDevice9Ex` | gen/d9impl_unk.gen.cpp | dev/dev_create.cpp; gen/d9impl_unk.gen.cpp | yes |
+| NxDirect3D9 | `_ZTV11NxDirect3D9` | gen/d9impl_unk.gen.cpp | dev/d3d9_adapter.cpp; gen/d9impl_unk.gen.cpp | yes |
+| NxResource9 | `_ZTV11NxResource9` | gen/d9impl_unk.gen.cpp | gen/d9impl_unk.gen.cpp | yes |
+| IDirect3D9Ex | `_ZTV12IDirect3D9Ex` | dev/d3d9_adapter.cpp | dev/d3d9_adapter.cpp | yes |
+| NxSwapChain9 | `_ZTV12NxSwapChain9` | gen/d9impl_unk.gen.cpp | dev/dev_chain.cpp; gen/d9impl_unk.gen.cpp | yes |
+| NxDevLifeBase | `_ZTV13NxDevLifeBase` | dev/copy_clear.cpp; dev/copy_dc.cpp; dev/copy_misc.cpp; dev/copy_stretch.cpp; dev/copy_update.cpp; dev/copy_util.cpp; dev/d3d9_adapter.cpp; dev/dev_chain.cpp; dev/dev_create.cpp; dev/dev_ex.cpp; dev/dev_mem.cpp; dev/dev_misc.cpp; dev/dev_params.cpp; dev/dev_reset.cpp; dev/draw_api.cpp; dev/draw_bind.cpp; dev/draw_const.cpp; dev/draw_exec.cpp; dev/draw_ids.cpp; dev/draw_layout.cpp; dev/draw_prim.cpp; dev/draw_prog.cpp; dev/draw_state.cpp; dev/draw_tex.cpp; dev/ffp_dev.cpp; dev/ffp_map.cpp; dev/ffp_prog.cpp; dev/ffp_sets.cpp; dev/glue_buf.cpp; dev/glue_image.cpp; dev/glue_query.cpp; dev/m1_misc.cpp; dev/m1_stats.cpp; dev/m1_validate.cpp; dev/pv_exit.cpp; dev/pvw_api.cpp; dev/pvw_core.cpp; dev/pvw_light.cpp; dev/pvw_math.cpp; dev/pvw_stream.cpp; dev/res_buf.cpp; dev/res_create.cpp; dev/res_decl.cpp; dev/res_fmt.cpp; dev/res_fvf.cpp; dev/res_query.cpp; dev/res_shader.cpp; dev/res_surf.cpp; dev/res_tex.cpp; dev/state_ext.cpp; dev/state_rt.cpp; dev/x1_validator.cpp; gen/d9bridge.gen.cpp; gen/d9impl_unk.gen.cpp; gen/state.gen.cpp | dev/copy_clear.cpp; dev/copy_dc.cpp; dev/copy_misc.cpp; dev/copy_stretch.cpp; dev/copy_update.cpp; dev/copy_util.cpp; dev/d3d9_adapter.cpp; dev/dev_chain.cpp; dev/dev_create.cpp; dev/dev_ex.cpp; dev/dev_mem.cpp; dev/dev_misc.cpp; dev/dev_params.cpp; dev/dev_reset.cpp; dev/draw_api.cpp; dev/draw_bind.cpp; dev/draw_const.cpp; dev/draw_exec.cpp; dev/draw_ids.cpp; dev/draw_layout.cpp; dev/draw_prim.cpp; dev/draw_prog.cpp; dev/draw_state.cpp; dev/draw_tex.cpp; dev/ffp_dev.cpp; dev/ffp_map.cpp; dev/ffp_prog.cpp; dev/ffp_sets.cpp; dev/glue_buf.cpp; dev/glue_image.cpp; dev/glue_query.cpp; dev/m1_misc.cpp; dev/m1_stats.cpp; dev/m1_validate.cpp; dev/pv_exit.cpp; dev/pvw_api.cpp; dev/pvw_core.cpp; dev/pvw_light.cpp; dev/pvw_math.cpp; dev/pvw_stream.cpp; dev/res_buf.cpp; dev/res_create.cpp; dev/res_decl.cpp; dev/res_fmt.cpp; dev/res_fvf.cpp; dev/res_query.cpp; dev/res_shader.cpp; dev/res_surf.cpp; dev/res_tex.cpp; dev/state_ext.cpp; dev/state_rt.cpp; dev/x1_validator.cpp; gen/d9bridge.gen.cpp; gen/d9impl_unk.gen.cpp; gen/state.gen.cpp | yes |
+| NxDirect3D9Ex | `_ZTV13NxDirect3D9Ex` | gen/d9impl_unk.gen.cpp | dev/d3d9_adapter.cpp; gen/d9impl_unk.gen.cpp | yes |
+| NxStateBlock9 | `_ZTV13NxStateBlock9` | gen/d9impl_unk.gen.cpp | dev/state_ext.cpp; gen/d9impl_unk.gen.cpp | yes |
+| NxBaseTexture9 | `_ZTV14NxBaseTexture9` | gen/d9impl_unk.gen.cpp | gen/d9impl_unk.gen.cpp | yes |
+| NxCubeTexture9 | `_ZTV14NxCubeTexture9` | gen/d9impl_unk.gen.cpp | dev/res_create.cpp; gen/d9impl_unk.gen.cpp | yes |
+| NxIndexBuffer9 | `_ZTV14NxIndexBuffer9` | gen/d9impl_unk.gen.cpp | dev/res_buf.cpp; gen/d9impl_unk.gen.cpp | yes |
+| NxPixelShader9 | `_ZTV14NxPixelShader9` | gen/d9impl_unk.gen.cpp | dev/res_shader.cpp; gen/d9impl_unk.gen.cpp | yes |
+| NxSwapChain9Ex | `_ZTV14NxSwapChain9Ex` | gen/d9impl_unk.gen.cpp | dev/dev_chain.cpp; gen/d9impl_unk.gen.cpp | yes |
+| IDirect3DQuery9 | `_ZTV15IDirect3DQuery9` | dev/res_query.cpp | dev/res_query.cpp | yes |
+| NxVertexBuffer9 | `_ZTV15NxVertexBuffer9` | gen/d9impl_unk.gen.cpp | dev/res_buf.cpp; gen/d9impl_unk.gen.cpp | yes |
+| NxVertexShader9 | `_ZTV15NxVertexShader9` | gen/d9impl_unk.gen.cpp | dev/res_shader.cpp; gen/d9impl_unk.gen.cpp | yes |
+| IDirect3DDevice9 | `_ZTV16IDirect3DDevice9` | dev/dev_create.cpp | dev/dev_create.cpp | yes |
+| IDirect3DVolume9 | `_ZTV16IDirect3DVolume9` | dev/res_create.cpp | dev/res_create.cpp | yes |
+| NxVolumeTexture9 | `_ZTV16NxVolumeTexture9` | gen/d9impl_unk.gen.cpp | dev/res_create.cpp; gen/d9impl_unk.gen.cpp | yes |
+| IDirect3DSurface9 | `_ZTV17IDirect3DSurface9` | dev/dev_chain.cpp; dev/dev_create.cpp; dev/res_create.cpp | dev/dev_chain.cpp; dev/dev_create.cpp; dev/res_create.cpp | yes |
+| IDirect3DTexture9 | `_ZTV17IDirect3DTexture9` | dev/res_create.cpp | dev/res_create.cpp | yes |
+| IDirect3DDevice9Ex | `_ZTV18IDirect3DDevice9Ex` | dev/dev_create.cpp | dev/dev_create.cpp | yes |
+| IDirect3DResource9 | `_ZTV18IDirect3DResource9` | dev/dev_chain.cpp; dev/dev_create.cpp; dev/res_buf.cpp; dev/res_create.cpp | dev/dev_chain.cpp; dev/dev_create.cpp; dev/res_buf.cpp; dev/res_create.cpp | yes |
+| NxShaderValidator9 | `_ZTV18NxShaderValidator9` | dev/x1_validator.cpp | dev/x1_validator.cpp; gen/d9impl_unk.gen.cpp | yes |
+| IDirect3DSwapChain9 | `_ZTV19IDirect3DSwapChain9` | dev/dev_chain.cpp | dev/dev_chain.cpp | yes |
+| IDirect3DStateBlock9 | `_ZTV20IDirect3DStateBlock9` | dev/state_ext.cpp | dev/state_ext.cpp | yes |
+| NxVertexDeclaration9 | `_ZTV20NxVertexDeclaration9` | gen/d9impl_unk.gen.cpp | dev/res_decl.cpp; dev/res_fvf.cpp; gen/d9impl_unk.gen.cpp | yes |
+| IDirect3DBaseTexture9 | `_ZTV21IDirect3DBaseTexture9` | dev/res_create.cpp | dev/res_create.cpp | yes |
+| IDirect3DCubeTexture9 | `_ZTV21IDirect3DCubeTexture9` | dev/res_create.cpp | dev/res_create.cpp | yes |
+| IDirect3DIndexBuffer9 | `_ZTV21IDirect3DIndexBuffer9` | dev/res_buf.cpp | dev/res_buf.cpp | yes |
+| IDirect3DPixelShader9 | `_ZTV21IDirect3DPixelShader9` | dev/res_shader.cpp | dev/res_shader.cpp | yes |
+| IDirect3DSwapChain9Ex | `_ZTV21IDirect3DSwapChain9Ex` | dev/dev_chain.cpp | dev/dev_chain.cpp | yes |
+| IDirect3DVertexBuffer9 | `_ZTV22IDirect3DVertexBuffer9` | dev/res_buf.cpp | dev/res_buf.cpp | yes |
+| IDirect3DVertexShader9 | `_ZTV22IDirect3DVertexShader9` | dev/res_shader.cpp | dev/res_shader.cpp | yes |
+| IDirect3DVolumeTexture9 | `_ZTV23IDirect3DVolumeTexture9` | dev/res_create.cpp | dev/res_create.cpp | yes |
+| IDirect3DVertexDeclaration9 | `_ZTV27IDirect3DVertexDeclaration9` | dev/res_decl.cpp; dev/res_fvf.cpp | dev/res_decl.cpp; dev/res_fvf.cpp | yes |
+| FvfCache | `_ZTV8FvfCache` | dev/res_fvf.cpp | dev/res_fvf.cpp | yes |
+| IUnknown | `_ZTV8IUnknown` | dev/d3d9_adapter.cpp; dev/dev_chain.cpp; dev/dev_create.cpp; dev/ffp_dev.cpp; dev/res_buf.cpp; dev/res_create.cpp; dev/res_decl.cpp; dev/res_fvf.cpp; dev/res_query.cpp; dev/res_shader.cpp; dev/state_ext.cpp | dev/d3d9_adapter.cpp; dev/dev_chain.cpp; dev/dev_create.cpp; dev/ffp_dev.cpp; dev/res_buf.cpp; dev/res_create.cpp; dev/res_decl.cpp; dev/res_fvf.cpp; dev/res_query.cpp; dev/res_shader.cpp; dev/state_ext.cpp | yes |
+| NxFfpDev | `_ZTV8NxFfpDev` | dev/ffp_dev.cpp | dev/ffp_dev.cpp | yes |
+| NxQuery9 | `_ZTV8NxQuery9` | gen/d9impl_unk.gen.cpp | dev/res_query.cpp; gen/d9impl_unk.gen.cpp | yes |
+| NxDevLife | `_ZTV9NxDevLife` | dev/dev_chain.cpp | dev/dev_chain.cpp | yes |
+| NxDevice9 | `_ZTV9NxDevice9` | gen/d9impl_unk.gen.cpp | dev/dev_create.cpp; gen/d9impl_unk.gen.cpp | yes |
+| NxDrawDev | `_ZTV9NxDrawDev` | dev/draw_api.cpp; dev/draw_bind.cpp; dev/draw_const.cpp; dev/draw_exec.cpp; dev/draw_ids.cpp; dev/draw_layout.cpp; dev/draw_prim.cpp; dev/draw_prog.cpp; dev/draw_state.cpp; dev/draw_tex.cpp; dev/ffp_dev.cpp; dev/ffp_map.cpp; dev/ffp_prog.cpp; dev/ffp_sets.cpp | dev/draw_api.cpp; dev/draw_bind.cpp; dev/draw_const.cpp; dev/draw_exec.cpp; dev/draw_ids.cpp; dev/draw_layout.cpp; dev/draw_prim.cpp; dev/draw_prog.cpp; dev/draw_state.cpp; dev/draw_tex.cpp; dev/ffp_dev.cpp; dev/ffp_map.cpp; dev/ffp_prog.cpp; dev/ffp_sets.cpp | yes |
+| NxUnknown | `_ZTV9NxUnknown` | gen/d9impl_unk.gen.cpp | gen/d9impl_unk.gen.cpp | yes |
+| NxVolume9 | `_ZTV9NxVolume9` | gen/d9impl_unk.gen.cpp | dev/res_create.cpp; gen/d9impl_unk.gen.cpp | yes |
+
+Class for L2: (a) for all 48: an sdd defect (the clone symbol is not defined in the object that defines `_ZTV<C>`); counts (a) 48, (b) 0. Since each vtable is weak and emitted in every unit that uses it, the clone must be emitted as a weak companion in each of them, or the reference must not be created.
