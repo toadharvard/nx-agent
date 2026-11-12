@@ -151,3 +151,8 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - this behaviour, cited;
     - a farm measures the class (link ok/failed per sm_table row and per sm_illegal form) as a reference fact.
   - Blocked on: the orchestrator's decision. w3b is checking Wine's program tracking across draws.
+- 03:34Z Orchestrator accepted option (d) and the reference farm. Reachability is still checked first.
+  - w3b: per-row census of shipped-shader use over all 7553 sm_table rows, as the generated table render/shaders/total/sm_reach.tsv (doing). It implements (d) once the link table lands.
+  - Farm session_01KmtZKSSTwzATWBSyXQRW2Q, second job: Wine 9.0 + pinned Mesa link probe over all 7553 rows plus sm_illegal, run twice and byte-equal, published as fnv-nx-build tools/sm-linkprobe and render/shaders/total/sm_link.tsv. It is queued after its two open fixes.
+  - L6A: both backends keep the previously bound program when the program is link-failed; the ABI flag field comes with the table.
+  - L1: lib/sha256's admit entry and host test variant go to w15, taken from f8adf66b.
