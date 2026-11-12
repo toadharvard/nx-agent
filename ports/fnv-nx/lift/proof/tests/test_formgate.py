@@ -282,6 +282,7 @@ class Universe(unittest.TestCase):
             u, c, ids, detail = f.judge()
             self.assertEqual((u, c, ids), (1, 0, [ROOT + ':shapes']), detail)
             self.assertIn('shapes.tsv is missing from external liftpack', detail)
+            self.assertEqual(formgate.FINDINGS, [{'id': ROOT, 'code': 'forms-missing-shapes'}])
 
     def test_pack_not_declared_by_the_recipe_is_red(self):
         with workdir() as td:
@@ -306,6 +307,7 @@ class Universe(unittest.TestCase):
             with workdir() as td:
                 u, c, ids, detail = Fixture(td, GOOD, shapes_text=text).judge()
                 self.assertEqual((u, c, ids), (1, 0, [ROOT + ':shapes']), detail)
+                self.assertEqual(formgate.FINDINGS, [{'id': ROOT, 'code': 'forms-bad-shapes'}])
                 self.assertIn(why, detail)
 
     def test_union_of_two_lifted_roots_counts_a_shared_shape_once(self):

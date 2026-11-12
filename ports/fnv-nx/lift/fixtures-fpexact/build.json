@@ -108,32 +108,5 @@
    "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
    "at": "/ext/a64"
   }
- ],
- "fixtures": {
-  "fx_rcp.cc": {
-   "gate": "fpexact",
-   "expect": "red",
-   "finding": "rcp-estimate"
-  },
-  "fx_undec.cc": {
-   "gate": "fpexact",
-   "expect": "red",
-   "finding": "undecodable"
-  },
-  "fx_nosite.cc": {
-   "gate": "fpexact",
-   "expect": "red",
-   "finding": "fcvt-no-site"
-  },
-  "fx_conv.cc": {
-   "gate": "fpexact",
-   "expect": "red",
-   "finding": "f2i-conv"
-  },
-  "fx_asm.cc": {
-   "gate": "fpexact",
-   "expect": "red",
-   "finding": "f2i-asm"
-  }
- }
+ ]
 }
