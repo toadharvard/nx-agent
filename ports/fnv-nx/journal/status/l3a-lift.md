@@ -260,3 +260,8 @@ Update 2026-11-12, at 698adefb:
   - 2 are L2's (f2i_check);
   - 5 real L3a assumptions: REMOVE ids requested from L1 (R1 unhandled CONTEXT, R2 IP-to-state consumer, R3 callee eax reads, R4 _XcptFilter code, R5 fmath table bound). The removal work is owned by L3a;
   - LOCK-SPLIT's id was asked of L1.
+- w5 07ff95cd (claude/fnv-l3a-lift-w5-flags-83f, on 83f7504f, no identity rule): test_gate_flags 9/9, test_gate_lift 28/0. Sent to the orchestrator for the candidate. Done.
+- Flags census, 8 images @ facts a0f3d8e, gate 07ff95cd:
+  - Totals: 154 898 entries, 6 568 999 instructions, 573 267 flag reads, 15 630 red, 557 637 certified, 680 128 no-form rows, 3 919 undecodable ranges.
+  - Red per image: exe 14, binkw32 1 (the cpuid probe), atimgpud 3, gdffalloutnv 2, libvorbis 9, libvorbisfile 3, d3dx9_31 4 355, d3dx9_38 11 243.
+  - The d3dx9 counts wait on w7's next facts. Next: the cause table, the exe's 14 first.
