@@ -60,10 +60,14 @@ def sym_constraint(code, ranges, eip_sym):
     if eip_sym: cs += ['(= code_base ((_ extract 47 0) rip))', '(bvult rip #x%016x)' % EIP_LIMIT]
     return '(and %s)' % ' '.join(cs)
 
+SEG_FREE = tuple(x for i, x in enumerate(SEG) if x != 'seg_visibles=[#x002b; 6]' and not (i + 1 < len(SEG) and SEG[i + 1] == 'seg_visibles=[#x002b; 6]'))
+SYMSEL = False      # set by prove.prove_one: the Form reads the segment selectors (sel_*), so the six selectors of the initial state are free (isla gives each element a fresh symbol) instead of the literal 0x2b
+SELREG = ('es', 'cs', 'ss', 'ds', 'fs', 'gs')      # isla prints the register seg_visibles (vector(6, dec, bits(16))) as (_ vec v0 .. v5), element i = rt/fnvl.h SEG_* i (checked: push ds / es / gs proved only in this order)
+
 def run_isla(code, timeout=600, sym=None):
     """raw isla output (stdout, stderr) for one encoding, from the on-disk cache when present.  sym = (ranges, eip_sym): a SHAPE run, see sym_constraint"""
     if not os.path.exists(IR): raise RuntimeError('missing %s: run ports/fnv-nx/farm/sail_build.sh' % IR)
-    args = list(SEG) + sum([['--probe', f] for f in ERRFNS], []) + sum([['-L', f] for f in LINEARIZE], [])
+    args = list(SEG_FREE if SYMSEL else SEG) + sum([['--probe', f] for f in ERRFNS], []) + sum([['-L', f] for f in LINEARIZE], [])
     cons = sym_constraint(code, *sym) if sym else ''
     key = hashlib.sha256(('|'.join([ir_sha(), hashlib.sha256(open(CFG, 'rb').read()).hexdigest(), ' '.join(args), code.hex(), str(ADDR), 'v1'] + ([str(timeout)] if timeout != 600 else []) + ([cons] if sym else []))).encode()).hexdigest()
     os.makedirs(CACHE, exist_ok=True); base = os.path.join(CACHE, key)
@@ -226,6 +230,10 @@ def run_path(tag, trace, pre, fault=False, extra=None):
         elif h == 'assume': pass                      # the --reset-constraint of a shape run: holds by construction of `extra` (sym_constraint)
         elif h == 'read-reg':
             r = regname(ev[1]); v = unwrap(ev[3])
+            if r == 'seg_visibles' and isinstance(ev[3], list) and ev[3][:2] == ['_', 'vec']:       # free selectors: element i of the pre-state = the DSL variable sel_<segment>
+                for s, e in zip(SELREG, ev[3][2:]):
+                    if e in env.pending and e not in env.v: env.v[e] = z3.BitVec('sel_' + s, 16)
+                continue
             if r in cur and v in env.pending and v not in env.v: env.v[v] = cur[r]       # first use of the pre value (a re-read is skipped)
         elif h == 'write-reg':
             r = regname(ev[1]); v = unwrap(ev[3])

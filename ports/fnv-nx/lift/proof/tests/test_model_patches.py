@@ -28,4 +28,8 @@ class ModelPatches(unittest.TestCase):
         for h in ('60', '61', '6660', '6661'):
             self.proved(h)
 
+    def test_push_segment_register(self):               # pinned model x86-push-segment-register: the selector (free in the initial state, model_sail.SYMSEL) is stored with a 16-bit move, ESP -= operand size
+        for h in ('06', '0e', '16', '1e', '0fa0', '0fa8', '661e', '666a00'):
+            self.proved(h)
+
 if __name__ == '__main__': unittest.main()
