@@ -31,7 +31,7 @@ Soundness (the registry of assumptions is verify/ASSUMPTIONS.json; ids: ASM-001 
   ASM-006 (the exe makes no wild accesses, array indices in bounds): a pointer to an object reaches only that object's bytes. It makes
     the `("o", C, k)` coordinates exact, and a byte string at D is written only by stores that cover D (the string rule below).
   ASM-003 (Win32 as documented): a registry call with a NULL key handle fails with ERROR_INVALID_HANDLE and accesses no key.
-  Existing scope of pemanifest.py (REMOVE items: ASM-501 function boundaries and forward-only control flow, ASM-013 complete code ranges,
+  Existing scope of pemanifest.py (REMOVE items: ASM-013 complete code ranges,
     ASM-012 no computed code addresses (so every reference to a function is a relocation or a direct rel32).
 No other assumption: where the closure needs a fact that none of these gives, the answer is None and names it.
 String rule: the string at D is "" when every store that covers byte D writes the constant 0 and the class has no leak; any other
@@ -68,12 +68,16 @@ class Closure:
             for r in mod.targets().get(v, []):
                 if not mod.in_code(r):
                     continue
-                st = mod.func_start(r)
-                ins = None if st is None else next((i for i in self.an.region(st).ins if i.address <= r < i.address + i.size), None)
-                if ins is None or ins.mnemonic != "mov" or ins.operands[0].type != X.X86_OP_MEM or ins.operands[1].type != X.X86_OP_IMM:
-                    self.leaks[td].append((r, "vtable address used by a form that is not `mov [this+d],vtable`"))
+                ents = mod.entries_of(r)
+                if not ents:   # the code site is in no entry of the function facts: its form is not decided
+                    self.leaks[td].append((r, "unresolved: " + mod.unresolved_why(r) + "; vtable address used at a site with no function"))
                     continue
-                self.add(st, ("o", td, off - ins.operands[0].mem.disp), None, None, None, (ins.address, td))
+                for st in ents:   # the site is analysed in every entry that contains it
+                    ins = next((i for i in self.an.region(st).ins if i.address <= r < i.address + i.size), None)
+                    if ins is None or ins.mnemonic != "mov" or ins.operands[0].type != X.X86_OP_MEM or ins.operands[1].type != X.X86_OP_IMM:
+                        self.leaks[td].append((r, "vtable address used by a form that is not `mov [this+d],vtable`"))
+                        continue
+                    self.add(st, ("o", td, off - ins.operands[0].mem.disp), None, None, None, (ins.address, td))
         self.drain()
 
     def add(self, func, this, binds=None, results=None, cells=None, ctor=None, origin=None, slot=False):
@@ -169,14 +173,18 @@ class Closure:
             return
         funcs = set()
         for r in self.mod.targets().get(cell, []):
-            st = self.mod.func_start(r) if self.mod.in_code(r) else None
-            ins = None if st is None else next((i for i in self.an.region(st).ins if i.address <= r < i.address + i.size), None)
-            plain = ins is not None and any(o.type == X.X86_OP_MEM and o.mem.base == 0 and o.mem.index == 0 and o.mem.disp == cell
-                                            for o in ins.operands) and ins.mnemonic in ("mov", "cmp", "test")
-            if not plain:
-                self.leaks[val[1]].append((r, "address of global cell 0x%08x used by a form that is not a plain [cell] operand" % cell))
-            else:
-                funcs.add(st)
+            ents = self.mod.entries_of(r) if self.mod.in_code(r) else []
+            if not ents:
+                self.leaks[val[1]].append((r, "address of global cell 0x%08x used at a site with no function (%s)" % (
+                    cell, self.mod.unresolved_why(r) if self.mod.in_code(r) else "not in code")))
+            for st in ents:   # the site is analysed in every entry that contains it
+                ins = next((i for i in self.an.region(st).ins if i.address <= r < i.address + i.size), None)
+                plain = ins is not None and any(o.type == X.X86_OP_MEM and o.mem.base == 0 and o.mem.index == 0 and o.mem.disp == cell
+                                                for o in ins.operands) and ins.mnemonic in ("mov", "cmp", "test")
+                if not plain:
+                    self.leaks[val[1]].append((r, "address of global cell 0x%08x used by a form that is not a plain [cell] operand" % cell))
+                else:
+                    funcs.add(st)
         for f in sorted(funcs):
             self.add(f, None, None, None, {cell: val})
 

@@ -16,7 +16,7 @@ Every row of filesites.tsv gets exactly one class, decided by the call kind and 
             buffer was built from. The class is not decided by this pass; nothing is guessed from the fragments.
 Class iii (written only by another program) needs a reader whose name is constant and absent from the shipped set; no row has
 one in this pass's output, and the count is printed (0 is a measurement of this pass, not a proof about the exe).
-Assumptions: none beyond filesites.py (ASM-001, ASM-003, ASM-006, ASM-012, ASM-013, ASM-501).
+Assumptions: none beyond filesites.py (ASM-001, ASM-003, ASM-006, ASM-012, ASM-013).
 """
 import collections, sys
 

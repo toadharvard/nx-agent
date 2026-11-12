@@ -16,13 +16,13 @@ same function: the row then reads `<API>` + `+?` (a suffix appended by an intra-
 dynamic with that reason). Nothing is guessed from names or text.
 Domain gate: every import of kernel32/shell32/shlwapi/msvcrt/user32 whose name is a file-API family member (FILE_FAMILY) must have a
 ROLES row; an import added to a module without one stops the pass.
-Assumptions: those of regsites.py (ASM-001, ASM-003, ASM-006, ASM-012, ASM-013, ASM-501; registry verify/ASSUMPTIONS.json).
+Assumptions: those of regsites.py (ASM-001, ASM-003, ASM-006, ASM-012, ASM-013; registry verify/ASSUMPTIONS.json).
 Usage: filesites.py <dir-with-modules> <root.exe> <out.tsv> [dynamic.dll,...]
 """
 import collections, os, re, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import pemanifest, regsites
+import funcfacts, pemanifest, regsites
 from regsites import Analyzer, NOPUSH
 
 # (nargs, None (no key argument), name arg index, extra name arg index, out buffer arg index, kind)
@@ -99,15 +99,15 @@ def provenance(an, site, v):
     """For a buffer operand ("a", slot): the directory API of the same function that filled it before `site`, or None."""
     if v[0] != "a":
         return None
-    st = an.mod.func_start(site)
-    if st is None:
-        return None
-    best = None
-    for s, f, args in an.run(st)[0]:
-        o = ROLES[f][4]
-        if s < site and o is not None and o < len(args) and args[o] == v:
-            best = f
-    return best
+    found = set()
+    for st in an.mod.entries_of(site):   # the site is analysed in every entry that contains it; the entries must agree
+        best = None
+        for s, f, args in an.run(st)[0]:
+            o = ROLES[f][4]
+            if s < site and o is not None and o < len(args) and args[o] == v:
+                best = f
+        found.add(best)
+    return found.pop() if len(found) == 1 else None
 
 
 def trace(an, st, site, v):
@@ -140,13 +140,12 @@ def file_rows_of(an, site, f, args, via=None):
         if names is not None:
             out += [(site, f, kind, n, "-", "static", "", via) for n in names]
             continue
-        st = an.mod.func_start(site)
         p = provenance(an, site, v)
         if p:
             out.append((site, f, kind, "<%s>+?" % p, "-", "dynamic", "suffix not resolved: buffer from %s" % p, via))
             continue
-        if v[0] == "a" and st is not None:
-            t = trace(an, st, site, v)
+        if v[0] == "a":
+            t = list(dict.fromkeys(x for st in an.mod.entries_of(site) for x in trace(an, st, site, v)))
             if t:
                 why += "; built by " + " ".join(t)
         out.append((site, f, kind, "dynamic", "-", "dynamic", why or "", via))
@@ -192,6 +191,7 @@ def main(d, root, out, dynamic=""):
 
 
 if __name__ == "__main__":
+    funcfacts.facts_dir_from_argv(sys.argv)
     if len(sys.argv) < 4:
         sys.stderr.write(__doc__)
         sys.exit(2)
