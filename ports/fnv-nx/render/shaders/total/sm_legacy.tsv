@@ -6,8 +6,8 @@ vs_2_0	srcmod	absneg@mad.s2	illegal	MS:dx9-graphics-reference-asm-ps/vs-register
 vs_2_0	srcmod	not	illegal	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register
 vs_2_0	dstmod	sat@mov	illegal	MS:dx9-graphics-reference-asm-vs-instructions-modifiers (_sat: 3_0/3_sw only)
 vs_2_0	dstmod	pp@mov	illegal	MS:dx9-graphics-reference-asm-vs-instructions-modifiers (vs: only _sat); wine check_ps_dstmod agrees
-vs_2_0	opcode	if@temp-written-in-branch-only	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
-vs_2_0	opcode	rep@temp-written-in-loop	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
+vs_2_0	opcode	if@temp-written-in-branch-only	legal	R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal
+vs_2_0	opcode	rep@temp-written-in-loop	legal	R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal
 vs_2_0	opcode	call@label-used-in-and-out-of-loop	legal	MS:dx9-graphics-reference-asm-vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)
 vs_2_0	addr	c[a0.x+n]@aL-loop	legal	MS:dx9-graphics-reference-asm-vs-registers-vs-2-0/2-x/3-0 (c# RelAddr a0/aL)
 vs_2_x	opcode	breakc	legal	MS:dx9-graphics-reference-asm-instructions/break-comp---vs (instruction page 'break_comp', version table) (breakc = break_comp)
@@ -21,8 +21,8 @@ vs_2_x	dstmod	pp@mov	illegal	MS:dx9-graphics-reference-asm-vs-instructions-modif
 vs_2_x	opcode	callnz@p0	legal	MS:dx9-graphics-reference-asm-instructions/callnz-pred---vs (instruction page 'callnz_pred', version table)
 vs_2_x	opcode	if@p0	legal	MS:dx9-graphics-reference-asm-instructions/if-pred---vs (instruction page 'if_pred', version table)
 vs_2_x	srcmod	not@if.p0	illegal	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register
-vs_2_x	opcode	if@temp-written-in-branch-only	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
-vs_2_x	opcode	rep@temp-written-in-loop	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
+vs_2_x	opcode	if@temp-written-in-branch-only	legal	R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal
+vs_2_x	opcode	rep@temp-written-in-loop	legal	R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal
 vs_2_x	opcode	call@label-used-in-and-out-of-loop	legal	MS:dx9-graphics-reference-asm-vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)
 vs_2_x	addr	c[a0.x+n]@aL-loop	legal	MS:dx9-graphics-reference-asm-vs-registers-vs-2-0/2-x/3-0 (c# RelAddr a0/aL)
 vs_3_0	srcmod	not	illegal	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register
@@ -37,11 +37,11 @@ vs_3_0	usage	9:positiont0@output	legal	MS:dx9-graphics-reference-asm-dcl-usage--
 vs_3_0	opcode	callnz@p0	legal	MS:dx9-graphics-reference-asm-instructions/callnz-pred---vs (instruction page 'callnz_pred', version table)
 vs_3_0	opcode	if@p0	legal	MS:dx9-graphics-reference-asm-instructions/if-pred---vs (instruction page 'if_pred', version table)
 vs_3_0	srcmod	not@if.p0	illegal	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register
-vs_3_0	opcode	if@temp-written-in-branch-only	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
-vs_3_0	opcode	rep@temp-written-in-loop	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
+vs_3_0	opcode	if@temp-written-in-branch-only	legal	R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal
+vs_3_0	opcode	rep@temp-written-in-loop	legal	R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal
 vs_3_0	opcode	call@label-used-in-and-out-of-loop	legal	MS:dx9-graphics-reference-asm-vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)
 vs_3_0	addr	c[a0.x+n]@aL-loop	legal	MS:dx9-graphics-reference-asm-vs-registers-vs-2-0/2-x/3-0 (c# RelAddr a0/aL)
-vs_3_0	addr	v[a0.x]	conflict	MS vs-registers-vs-3-0 table: v# RelAddr 'a0/aL'; MS vs-3-0 page 'Indexing Registers': v# indexed 'using the loop counter register (aL)'
+vs_3_0	addr	v[a0.x]	illegal	MS:dx9-graphics-reference-asm-vs-registers-vs-3-0 ('Indexing Registers': v# indexed 'using the loop counter register (aL)'; the register table's 'a0/aL' RelAddr cell is the row summary; same-page prose wins, as for o#)
 vs_3_0	addr	o[a0.x]	illegal	MS:dx9-graphics-reference-asm-vs-registers-vs-3-0 (o# RelAddr aL only)
 ps_1_1	dstmod	shift_x8	illegal	MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)
 ps_1_1	dstmod	shift_d8	illegal	MS:dx9-graphics-reference-asm-ps-instructions-modifiers-ps-1-x (_x8/_d4/_d8: 1_4 only)
@@ -119,8 +119,8 @@ ps_2_x	srcmod	neg@texld.coord	illegal	MS:dx9-graphics-reference-asm-texld---ps-2
 ps_2_x	srcmod	abs@texld.coord	illegal	MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')
 ps_2_x	srcmod	swizzle@texld.coord	illegal	MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_0/ps_2_x: src0 'no modifier or swizzle')
 ps_2_x	srcmod	swizzle@texld.sampler-src	illegal	MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_2_x: src1 no modifier or swizzle)
-ps_2_x	opcode	if@temp-written-in-branch-only	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
-ps_2_x	opcode	rep@temp-written-in-loop	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
+ps_2_x	opcode	if@temp-written-in-branch-only	legal	R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal
+ps_2_x	opcode	rep@temp-written-in-loop	legal	R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal
 ps_2_x	opcode	call@label-used-in-and-out-of-loop	legal	MS:dx9-graphics-reference-asm-vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)
 ps_2_x	addr	c[aL+n]	illegal	MS:dx9-graphics-reference-asm-ps-registers-ps-2-x (c# RelAddr N); wine ps_2_x_reg_allowed CONST reladdr FALSE agrees
 ps_3_0	opcode	lit	illegal	MS:dx9-graphics-reference-asm-ps-instructions-ps-0 (no lit in the instruction set); vkd3d d3dbc.c ps_opcode_table agrees; wine decoder table unconstrained (silent)
@@ -164,6 +164,6 @@ ps_3_0	opcode	if@p0	legal	MS:dx9-graphics-reference-asm-instructions/if-pred---p
 ps_3_0	srcmod	not@if.p0	illegal	MS:dx9-graphics-reference-asm-if-bool---vs/ps: syntax 'if bool' has no NOT; '!' only on predicate register
 ps_3_0	srcmod	abs@texld.coord	legal	MS:dx9-graphics-reference-asm-texld---ps-2-0 ps_3_0: only src1 forbids modifiers; swizzle allowed on src0
 ps_3_0	srcmod	swizzle@texld.sampler-src	legal	MS:dx9-graphics-reference-asm-texld---ps-2-0 (ps_3_0: swizzle allowed on src1)
-ps_3_0	opcode	if@temp-written-in-branch-only	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
-ps_3_0	opcode	rep@temp-written-in-loop	unreachable-doc	MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; sm2/3 pages are silent
+ps_3_0	opcode	if@temp-written-in-branch-only	legal	R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal
+ps_3_0	opcode	rep@temp-written-in-loop	legal	R4 closed world: MS ps-registers-ps-1-x states the uninitialised-temp validator rule for ps_1_x only; the sm2/3 pages are silent, so no source states the form illegal
 ps_3_0	opcode	call@label-used-in-and-out-of-loop	legal	MS:dx9-graphics-reference-asm-vs-instructions-vs-3-0 call (aL rule only when the subroutine reads aL; this one does not)

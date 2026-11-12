@@ -4402,6 +4402,8 @@ vs_1_1|def|def:c255	ok
 vs_1_1|rel|c[a0.x+0]	ok			
 vs_1_1|rel|c[a0.x+1]	ok			
 vs_1_1|rel|c[a0.x+255]	ok			
+vs_1_1|srcreg|a0@mov.s0	ok			closed-world
+vs_1_1|srcreg|a0@add.s1	ok			closed-world
 vs_2_0|opcode|abs	ok			
 vs_2_0|operand|abs@src0=r	ok			
 vs_2_0|operand|abs@src0=c	ok			
@@ -5230,6 +5232,11 @@ vs_2_0|rel|c[aL+0]	ok
 vs_2_0|rel|c[aL+255]	ok			
 vs_2_0|rel|mad.c[a0.x]@s0,s1,s2	ok			
 vs_2_0|rel|c[a0.x]+c[aL]	ok			
+vs_2_0|srcreg|a0@mov.s0	ok			closed-world
+vs_2_0|srcreg|a0@add.s1	ok			closed-world
+vs_2_0|srcreg|b0@mov.s0	uam_fail	unclassified: glsl-compile: value of type bool cannot be assigned to variable of type vecN	glsl-compile: value of type bool cannot be assigned to variable of type vec4	closed-world
+vs_2_0|srcreg|i0@mov.s0	ok			closed-world
+vs_2_0|dstreg|a0@mov.dst	ok			closed-world
 vs_2_x|opcode|abs	ok			
 vs_2_x|operand|abs@src0=r	ok			
 vs_2_x|operand|abs@src0=c	ok			
@@ -6327,6 +6334,11 @@ vs_2_x|rel|c[aL+0]	ok
 vs_2_x|rel|c[aL+255]	ok			
 vs_2_x|rel|mad.c[a0.x]@s0,s1,s2	ok			
 vs_2_x|rel|c[a0.x]+c[aL]	ok			
+vs_2_x|srcreg|a0@mov.s0	ok			closed-world
+vs_2_x|srcreg|a0@add.s1	ok			closed-world
+vs_2_x|srcreg|b0@mov.s0	uam_fail	unclassified: glsl-compile: value of type bool cannot be assigned to variable of type vecN	glsl-compile: value of type bool cannot be assigned to variable of type vec4	closed-world
+vs_2_x|srcreg|i0@mov.s0	ok			closed-world
+vs_2_x|dstreg|a0@mov.dst	ok			closed-world
 vs_3_0|opcode|abs	ok			
 vs_3_0|operand|abs@src0=r	ok			
 vs_3_0|operand|abs@src0=c	ok			
@@ -6537,7 +6549,6 @@ vs_3_0|operand|sge@src1=c	ok
 vs_3_0|operand|sge@src1=aL	ok			
 vs_3_0|operand|sge@dst=o	ok			
 vs_3_0|opcode|sgn	ok			
-vs_3_0|opcode|sgn@3src	ok			conflict
 vs_3_0|operand|sgn@src0=r	ok			
 vs_3_0|operand|sgn@src0=c	ok			
 vs_3_0|operand|sgn@src0=aL	ok			
@@ -7498,42 +7509,46 @@ vs_3_0|rel|v[aL+14]	ok
 vs_3_0|rel|o[aL+0]	ok			
 vs_3_0|rel|o[aL+1]	ok			
 vs_3_0|rel|o[aL+10]	ok			
-vs_3_0|rel|v[a0.x]	ok			conflict
-vs_1_0|opcode|add	ok			undet
-vs_1_0|opcode|dp3	ok			undet
-vs_1_0|opcode|dp4	ok			undet
-vs_1_0|opcode|dst	ok			undet
-vs_1_0|opcode|exp	ok			undet
-vs_1_0|opcode|expp	ok			undet
-vs_1_0|opcode|frc	ok			undet
-vs_1_0|opcode|lit	ok			undet
-vs_1_0|opcode|log	ok			undet
-vs_1_0|opcode|logp	ok			undet
-vs_1_0|opcode|m3x2	ok			undet
-vs_1_0|opcode|m3x3	ok			undet
-vs_1_0|opcode|m3x4	ok			undet
-vs_1_0|opcode|m4x3	ok			undet
-vs_1_0|opcode|m4x4	ok			undet
-vs_1_0|opcode|mad	ok			undet
-vs_1_0|opcode|max	ok			undet
-vs_1_0|opcode|min	ok			undet
-vs_1_0|opcode|mov	ok			undet
-vs_1_0|opcode|mul	ok			undet
-vs_1_0|opcode|nop	ok			undet
-vs_1_0|opcode|rcp	ok			undet
-vs_1_0|opcode|rsq	ok			undet
-vs_1_0|opcode|sge	ok			undet
-vs_1_0|opcode|slt	ok			undet
-vs_1_0|opcode|sub	ok			undet
-ps_1_0|opcode|add	ok			undet
-ps_1_0|opcode|cnd	ok			undet
-ps_1_0|opcode|dp3	ok			undet
-ps_1_0|opcode|lrp	ok			undet
-ps_1_0|opcode|mad	ok			undet
-ps_1_0|opcode|mov	ok			undet
-ps_1_0|opcode|mul	ok			undet
-ps_1_0|opcode|nop	ok			undet
-ps_1_0|opcode|sub	ok			undet
-ps_1_0|opcode|texcoord	ok			undet
-ps_1_0|opcode|texkill	ok			undet
-ps_1_0|opcode|texm3x2pad	ok			undet
+vs_3_0|srcreg|a0@mov.s0	ok			closed-world
+vs_3_0|srcreg|a0@add.s1	ok			closed-world
+vs_3_0|srcreg|b0@mov.s0	uam_fail	unclassified: glsl-compile: value of type bool cannot be assigned to variable of type vecN	glsl-compile: value of type bool cannot be assigned to variable of type vec4	closed-world
+vs_3_0|srcreg|i0@mov.s0	ok			closed-world
+vs_3_0|dstreg|a0@mov.dst	ok			closed-world
+vs_1_0|opcode|add	ok			closed-world
+vs_1_0|opcode|dp3	ok			closed-world
+vs_1_0|opcode|dp4	ok			closed-world
+vs_1_0|opcode|dst	ok			closed-world
+vs_1_0|opcode|exp	ok			closed-world
+vs_1_0|opcode|expp	ok			closed-world
+vs_1_0|opcode|frc	ok			closed-world
+vs_1_0|opcode|lit	ok			closed-world
+vs_1_0|opcode|log	ok			closed-world
+vs_1_0|opcode|logp	ok			closed-world
+vs_1_0|opcode|m3x2	ok			closed-world
+vs_1_0|opcode|m3x3	ok			closed-world
+vs_1_0|opcode|m3x4	ok			closed-world
+vs_1_0|opcode|m4x3	ok			closed-world
+vs_1_0|opcode|m4x4	ok			closed-world
+vs_1_0|opcode|mad	ok			closed-world
+vs_1_0|opcode|max	ok			closed-world
+vs_1_0|opcode|min	ok			closed-world
+vs_1_0|opcode|mov	ok			closed-world
+vs_1_0|opcode|mul	ok			closed-world
+vs_1_0|opcode|nop	ok			closed-world
+vs_1_0|opcode|rcp	ok			closed-world
+vs_1_0|opcode|rsq	ok			closed-world
+vs_1_0|opcode|sge	ok			closed-world
+vs_1_0|opcode|slt	ok			closed-world
+vs_1_0|opcode|sub	ok			closed-world
+ps_1_0|opcode|add	ok			closed-world
+ps_1_0|opcode|cnd	ok			closed-world
+ps_1_0|opcode|dp3	ok			closed-world
+ps_1_0|opcode|lrp	ok			closed-world
+ps_1_0|opcode|mad	ok			closed-world
+ps_1_0|opcode|mov	ok			closed-world
+ps_1_0|opcode|mul	ok			closed-world
+ps_1_0|opcode|nop	ok			closed-world
+ps_1_0|opcode|sub	ok			closed-world
+ps_1_0|opcode|texcoord	ok			closed-world
+ps_1_0|opcode|texkill	ok			closed-world
+ps_1_0|opcode|texm3x2pad	ok			closed-world
