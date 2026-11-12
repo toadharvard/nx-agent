@@ -299,6 +299,20 @@ def main():
     tb.case("library that does not load: job fails", rc == 1 and "does not load" in err, (rc, err[-300:]))
     rc, out, err = run_job(["testid", "--gpu-branch", "-bad"], genv)
     tb.case("bad --gpu-branch value: job fails", rc == 1 and "--gpu-branch" in err, (rc, err[-300:]))
+    # nothing is installed: a host that does not match the declared environment is an input error before anything is fetched or published
+    bad = os.path.join(SCRATCH, "badenv")
+    os.makedirs(bad)
+    for tag, edit in (("a pinned program missing", lambda d: d["programs"].__setitem__("fnvnx-no-such-program", {"path": "/nonexistent/fnvnx-no-such-program"})),
+                      ("a pinned python module missing", lambda d: d["python"]["modules"].__setitem__("fnvnx-no-such-module", "1.0"))):
+        doc = json.load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "env.json")))
+        edit(doc)
+        ef = os.path.join(bad, tag.replace(" ", "_") + ".json")
+        json.dump(doc, open(ef, "w"), sort_keys=True)
+        rc, out, err = run_job(["envbad"], {"BOOT_ENV": ef})
+        tb.case("%s: input error rc 1 naming setup_verdict_env.sh, nothing published" % tag,
+                rc == 1 and "input-error" in err and "setup_verdict_env.sh" in err and "envbad" not in git("ls-remote", BARE, check=False), (rc, err[-400:]))
+    src = open(JOB).read()
+    tb.case("job text installs nothing", not any(w in src for w in ("apt-get install", "pip install", "sudo ")), None)
     print("%d cases, %.1f s" % (tb.N[0], time.time() - t0))
     return 1 if tb.FAILED else 0
 
