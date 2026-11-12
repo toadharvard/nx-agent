@@ -181,3 +181,5 @@ Update 2026-11-12, at 698adefb:
   - recipe.py gets a constant for the plugin compiler, derived from env.json, and a hand-typed compiler name becomes red. Both are L1 w17's, after the first-root merge.
   - New condition, owned by L1 with L2's facts: every lifted→native edge must target a callee proven not to throw. Until that gate exists, the pack is a measurement build on that edge.
   - w1 rebuilds the pack with the origin set when w17 lands. The current farm 1 run is labelled a measurement.
+- w3 d77f58ef, merged as 6bed89ae: tools/cli.py. Every entry point declares its usage. --help exits 0, a bad argument exits 2, and nothing undeclared reaches the file system. 11 tools were fixed: rcpgen had written the stray --help/g, and 10 others crashed or ran on --help. The lead spot-checked rcpgen and packcopy: rc 0 and 2, no files created.
+- w8 643c058e: item 16 has 3 of 5 drivers converted (citest, imptest, msvcrttest); 5 Unicorn harnesses remain. msvcrttest's 3 terminal cases run one invocation each, checked against terminal.json; asked of L4.
