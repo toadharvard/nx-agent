@@ -176,6 +176,12 @@ struct ftoi_pass : gimple_opt_pass {
         if (strcmp(kind, "conv")) {   // native: builtin and asm are not rewritten
           expanded_location l = expand_location(gimple_location(stmt));
           findings.insert({name, l.file ? l.file : "", l.line, kind});
+          // __builtin_convertvector is a vector float -> integer conversion (IFN_VEC_CONVERT at this point of the pipeline): the same
+          // shape as a vector FIX_TRUNC_EXPR, which the rewrite does not cover, so rule (c) makes it a compile error too.
+          if (gcall *c = dyn_cast<gcall *>(stmt))
+            if (gimple_call_internal_p(c) && gimple_call_internal_fn(c) == IFN_VEC_CONVERT)
+              error_at(gimple_location(stmt), "FTOI: vector conversion %qT to %qT is not covered by the MSVC rewrite",
+                       TREE_TYPE(gimple_call_arg(c, 0)), TREE_TYPE(gimple_call_lhs(c)));
           continue;
         }
         tree lhs = gimple_assign_lhs(stmt), x = gimple_assign_rhs1(stmt);

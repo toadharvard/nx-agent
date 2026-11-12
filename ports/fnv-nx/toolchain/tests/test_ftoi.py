@@ -56,9 +56,14 @@ def main():
             check('native: report holds the helper, 3 sites, and the builtin as the only finding',
                   j and j['format'] == 'fnvnx-f2i/1' and j['helpers'] == ['int helper(float)'] and j['sites'] == 3
                   and [(f['function'], f['kind']) for f in j['findings']] == [('long int lr(float)', 'builtin')], j)
-        r, _, _ = comp(td, 'wide', 'F2I_X\n__int128 w(double d) { return (__int128)d; }\n'.replace('F2I_X\n', ''), native=True)
-        check('native: double -> __int128 (a shape the rewrite does not cover) is a build error naming both types',
-              r.returncode != 0 and 'FTOI' in r.stderr and 'double' in r.stderr and '__int128' in r.stderr, r.stderr[-1500:])
+        for name, text, tys in (
+                ('vec', 'typedef float v4sf __attribute__((vector_size(16)));\ntypedef int v4si __attribute__((vector_size(16)));\n'
+                        'v4si cv(v4sf v) { return __builtin_convertvector(v, v4si); }\n', ('v4sf', 'v4si')),
+                ('ld', 'long long ld(long double x) { return (long long)x; }\n', ('long double', 'long long')),
+                ('i128', '__int128 w(double d) { return (__int128)d; }\n', ('double', '__int128'))):
+            r, _, _ = comp(td, 'wide_' + name, text, native=True)
+            check('native: a conversion the rewrite does not cover (%s) is a build error naming both types' % name,
+                  r.returncode != 0 and 'FTOI' in r.stderr and all(t in r.stderr for t in tys), r.stderr[-1500:])
         # --- lifted
         r, obj, j = comp(td, 'ok', OK)
         check('lifted: a conversion inside a helper builds', r.returncode == 0, r.stderr[-1500:])
