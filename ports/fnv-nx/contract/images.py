@@ -42,7 +42,7 @@ def classify(exe_path, dirs, bridge=frozenset()):
     me = modules.lower(os.path.basename(exe_path))
     # total over the files: a module loaded later through LoadLibrary must already be a guest image (modules.py gives every dll file a base), so
     # every dll file of the directories is a candidate after the dlls reached from the exe (discovery order first, then name order)
-    files = sorted({modules.lower(f) for x in dirs for f in os.listdir(x) if modules.lower(f).endswith(".dll")})
+    files = sorted(dict.fromkeys(modules.lower(f) for x in dirs for f in sorted(os.listdir(x)) if modules.lower(f).endswith(".dll")))
     order, kind = dllkind.classify((n, d, files), imports_of, find, frozenset(bridge), me)
     return order, kind
 

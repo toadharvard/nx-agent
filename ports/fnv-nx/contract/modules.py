@@ -374,8 +374,8 @@ def run(exe_path, bridge_path, dirs, out, declared_path):
             with open(p, 'rb') as fh:
                 data = fh.read()
             bridged.append((n, 'bridge', hashlib.sha256(data).hexdigest(), len(data), ''))
-    dec = bridged + [(n, 'unloadable', m.sha256, m.size, ','.join(sorted('%s:%s' % (x, 'wine' if x in wine else 'absent') for x in {iat.norm_dll(d) for d, _ in m.imports
-                                                                    if iat.norm_dll(d) not in system and iat.norm_dll(d) not in image})))
+    dec = bridged + [(n, 'unloadable', m.sha256, m.size, ','.join(sorted('%s:%s' % (x, 'wine' if x in wine else 'absent') for x in dict.fromkeys(iat.norm_dll(d) for d, _ in m.imports
+                                                                    if iat.norm_dll(d) not in system and iat.norm_dll(d) not in image))))
                      for n, m in sorted(declared_mods.items())]
     tsv(os.path.join(out, 'modules_declared.tsv'), '# name\tkind\tsha256\tsize\tmissing_imports\n' + ''.join('%s\t%s\t%s\t%d\t%s\n' % r for r in sorted(dec)))
     raw = {}
