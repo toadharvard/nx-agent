@@ -95,6 +95,17 @@ if ! step unpack-gcc13; then
 	done_ unpack-gcc13
 fi
 
+# The guest's registers x19..x27 are the emulator's (-ffixed-x19..x27 in the semantics set): the pack's hand asm must not
+# write them. One sha256-pinned patch removes every save and restore of x19..x27 from newlib's setjmp/longjmp (the jmp_buf
+# layout is unchanged, the slots stay unused) and from libgcc's crti/crtn (both gcc trees). The gate is a census of the
+# built objects (instructions that write x19..x27 = 0), added to MANIFEST by L1.
+X19_PATCH_SHA256=6b0cea9340bc0291ef74fc3a6eaa2e033b06896955fc7c5ebbd9eb2c21e8d935
+if ! step x19x27; then
+	echo "$X19_PATCH_SHA256  $HERE/x19-x27.patch" | sha256sum -c --quiet
+	patch -p0 -d "$BUILD" -i "$HERE/x19-x27.patch"
+	done_ x19x27
+fi
+
 # Note: no "a && b" for build steps, set -e does not stop on a failing left side of &&.
 if ! step binutils; then
 	mkdir -p b-binutils; cd b-binutils

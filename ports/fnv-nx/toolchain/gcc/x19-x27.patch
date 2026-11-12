@@ -1,0 +1,75 @@
+--- newlib-4.6.0.20260123/newlib/libc/machine/aarch64/setjmp.S
++++ newlib-4.6.0.20260123/newlib/libc/machine/aarch64/setjmp.S
+@@ -29,11 +29,7 @@
+ #include "asmdefs.h"
+ 
+ #define GPR_LAYOUT			\
+-	REG_PAIR (x19, x20,  0);	\
+-	REG_PAIR (x21, x22, 16);	\
+-	REG_PAIR (x23, x24, 32);	\
+-	REG_PAIR (x25, x26, 48);	\
+-	REG_PAIR (x27, x28, 64);	\
++	REG_ONE (x28, 72);		\
+ 	REG_PAIR (x29, x30, 80);	\
+ 	REG_ONE (x16,      96)
+ 
+--- gcc-13.3.0/libgcc/config/aarch64/crti.S
++++ gcc-13.3.0/libgcc/config/aarch64/crti.S
+@@ -43,11 +43,7 @@
+ .macro FUNC_START
+ 	#  Create a stack frame and save any call-preserved registers
+ 	stp	x29, x30, [sp, #-16]!
+-	stp	x27, x28, [sp, #-16]!
+-	stp	x25, x26, [sp, #-16]!
+-	stp	x23, x24, [sp, #-16]!
+-	stp	x21, x22, [sp, #-16]!
+-	stp	x19, x20, [sp, #-16]!
++	str	x28, [sp, #-16]!
+ .endm
+ 
+ 	.section	".init"
+--- gcc-13.3.0/libgcc/config/aarch64/crtn.S
++++ gcc-13.3.0/libgcc/config/aarch64/crtn.S
+@@ -40,11 +40,7 @@
+ 	# simple.  Restore all the save resgisters, including the link
+ 	# register and then perform the correct function return instruction.
+ .macro FUNC_END
+-	ldp	x19, x20, [sp], #16
+-	ldp	x21, x22, [sp], #16
+-	ldp	x23, x24, [sp], #16
+-	ldp	x25, x26, [sp], #16
+-	ldp	x27, x28, [sp], #16
++	ldr	x28, [sp], #16
+ 	ldp	x29, x30, [sp], #16
+ 	ret
+ .endm
+--- gcc-15.2.0/libgcc/config/aarch64/crti.S
++++ gcc-15.2.0/libgcc/config/aarch64/crti.S
+@@ -33,11 +33,7 @@
+ .macro FUNC_START
+ 	#  Create a stack frame and save any call-preserved registers
+ 	stp	x29, x30, [sp, #-16]!
+-	stp	x27, x28, [sp, #-16]!
+-	stp	x25, x26, [sp, #-16]!
+-	stp	x23, x24, [sp, #-16]!
+-	stp	x21, x22, [sp, #-16]!
+-	stp	x19, x20, [sp, #-16]!
++	str	x28, [sp, #-16]!
+ .endm
+ 
+ 	.section	".init"
+--- gcc-15.2.0/libgcc/config/aarch64/crtn.S
++++ gcc-15.2.0/libgcc/config/aarch64/crtn.S
+@@ -36,11 +36,7 @@
+ 	# simple.  Restore all the save resgisters, including the link
+ 	# register and then perform the correct function return instruction.
+ .macro FUNC_END
+-	ldp	x19, x20, [sp], #16
+-	ldp	x21, x22, [sp], #16
+-	ldp	x23, x24, [sp], #16
+-	ldp	x25, x26, [sp], #16
+-	ldp	x27, x28, [sp], #16
++	ldr	x28, [sp], #16
+ 	ldp	x29, x30, [sp], #16
+ 	ret
+ .endm
