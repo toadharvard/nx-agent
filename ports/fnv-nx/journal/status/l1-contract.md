@@ -563,3 +563,13 @@ Answered: L3a w8 (py_modules in stage entry, pinned in env.json; lift/tools = on
 ## 09:10Z
 - w14 62623608: generated-stage key done (recipe.pinned_modules; the installed-files digest of each pinned module is in the stage key; the test changes each of the 5 digests in turn, and exactly one key changes). Next: w14 merges w10 7e67961e in the variants form; then w16-int builds on that head.
 - L2 `.fnvnx.tls` is assigned to L2 w2: `<asm> <model>`, model = the final DECL_TLS_MODEL; claude/fnv-l2-source-w2-tls, ETA 3–4 h. w10 prepares the reader and test.
+
+## 09:15Z — orchestrator order: path items only until the first root is on the trunk
+The integration candidate is claude/fnv-first-root-next 58c113f0 (orchestrator; it merges this itself with l1.py merge on green). MERGER takes no verify/ change before it.
+Active:
+- (a) w19: selftests per-file key = item one (verdict 438 s, of which ~400 s is selftests) — doing
+- (b) w17 ff99b9ac guest_flags.py — done; verdict running
+- (c) w5 1f088b42 toolchain-build profile — doing (program names by shell AST, no hand additions)
+- (d) the orchestrator's merge — waiting on its verdict
+Stopped until after the merge: w14 (62623608 kept), w16 (w16-int cancelled), w18 (ea0cb570), w20, w12, w4, w15, w10, w22 (71d8cafb queued).
+Ids: gate_eh uses the orchestrator's ASM-222/223/224. L1's 225..227 are withdrawn.
