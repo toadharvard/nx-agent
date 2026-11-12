@@ -414,6 +414,29 @@
     "ports/fnv-nx/verify/toolflags_policy.py"
    ]
   },
+  "test_link.py": {
+   "references": [
+    {
+     "anchor": "## Link: the guest ELF",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    },
+    {
+     "anchor": "## link/ldcheck.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/recipe.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/link/ldcheck.py"
+   ]
+  },
   "test_linkstrict.py": {
    "references": [
     {
@@ -632,6 +655,18 @@
    "subject": [
     "ports/fnv-nx/verify/unitstage.py",
     "ports/fnv-nx/verify/runtime.py"
+   ]
+  },
+  "test_uses.py": {
+   "references": [
+    {
+     "anchor": "## Outputs and uses",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py"
    ]
   },
   "test_verdict.py": {
