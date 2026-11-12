@@ -237,6 +237,15 @@ rc, res = gate(tree({T + "docs/b.md": "An assumption, %s.\n" % asm(77)}))
 check("gate: a mention of an id without an entry is red", rc == 2, (rc, res))
 rc, res = gate(tree({T + "data.json": '{"a": "%s"}' % asm(77)}))
 check("gate: a stray id in a json file is red", rc == 2 and has(res["errors"], asm(77)), (rc, res))
+for name, path, body in (("a .py comment", T + "verify/gate_x.py", "x = 1  # rests on %s\n"),
+                         ("a .py docstring", T + "lift/gates/gate_y.py", '"""The decoder (%s)."""\n'),
+                         ("a test file", T + "verify/tests/test_z.py", "# %s\n"),
+                         ("a gate file of gates.d", T + "verify/gates.d/h.json", '{"note": "%s"}\n'),
+                         ("a shell script", T + "farm/run.sh", "# %s\n")):
+    rc, res = gate(tree({path: body % asm(43)}))
+    check("gate: an unrecorded id in %s is red, the file is named" % name, rc == 2 and res["status"] == "red" and has(res["errors"], asm(43)) and has(res["errors"], path), (rc, res))
+    rc, res = gate(tree({path: body % asm(1)}))
+    check("gate: a recorded id in %s is green" % name, rc == 0 and res["status"] == "green", (rc, res))
 rc, res = gate(tree({T + "data.json": '{"a": "assumption"}'}))
 check("gate: a json file is data, not a mention", rc == 0, (rc, res))
 d = base()
