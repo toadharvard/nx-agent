@@ -516,7 +516,6 @@ def main():
     A('--exe', default=os.environ.get('FNVNX_EXE', '/home/user/game/FalloutNV.exe')); A('--pack', default=os.environ.get('FNVNX_PACK', '/home/user/l3work/pack'))
     a = ap.parse_args(); t0 = time.time(); os.makedirs(a.work, exist_ok=True); sys.path.insert(0, a.lifter)
     import fnvlift as L, fnvlift.core
-    from fnvlift import fpfacts; fpfacts.ASSUME.update(('ASM-204', 'ASM-205'))      # the generated states have every exception masked and nothing reads sticky flags: the invariants hold by construction of the test states (fnvlift/fpfacts.py)
     class TImage(L.Image):                             # an encoding outside the exe (a module of the pack): its bytes come from encs.tsv
         def bytes(self, x, n):
             r = G['other'].get(x)
