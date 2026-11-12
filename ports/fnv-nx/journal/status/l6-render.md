@@ -25,6 +25,7 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
 | 6 | L1 assumption #80 (uam, translator, Wine pins) | lead | - | done: answered L1 22:40Z |
 | 7 | 5 DROP rows of render/ASSUMPTIONS.md; front/gen_enums.py runs g++ -m32 (compile-only rule) | - | - | next |
 | 8 | Adapter Description = one fact for L5 (FalloutPrefs.ini sD3DDevice): env_{docked,handheld}.tsv GetAdapterIdentifier(0,0), "NVIDIA GeForce GTX 470" both profiles, b4373f37 | session_01KmtZKUrHj7PAAvjM7QVXb4 (w2b) | claude/fnv-l6-render-w2b | done: render/d3d9 gen/ident_{handheld,docked}.bin (33ba56a, merged 61443784; build dies if they differ), sent to L5 + w13 |
+| 9 | render/d3d9 link closure (w5 56f5ac6b, 69 objects): 80 undefined = 2 own (ffp_prog, now built), 16 guest libc/libm/libstdc++/crt, 48 vtable "[clone .fnvnx_ap8]" (L2), 14 gaps: platform hooks x6 incl. nx_env_profile (L5), nxd3d_gpu_call/alloc/free guest glue (L6A), fnvnx_wine_fixme/fnvnx_import_key (L1), fnvnx_guest_invoke/fnvnx_dispatch (L3a), __aarch64_ldadd4_relax outline atomics (L2/L1; proposed -mno-outline-atomics, A57 has no LSE) | session_01KmtZKS7moRHazN3AonGwXJ (w5) | claude/fnv-l6-render-w5 | doing: each gap sent to its owner 02:57Z; recount on 61443784; test roots proposed as guest roots on the L4 boot machine (L1) |
 
 ## Global numbers
 
