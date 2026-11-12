@@ -674,3 +674,18 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 ## 11:20Z
 - Trunk a5c8f427 (83f7504f merged; v6 green, 38 gates, 457 s). Candidate claude/fnv-first-root-next 33c443b5 (legalfix, note018, L3b w2g v2, crt0 c7f3b9d2e, L6 header root 2f1bac09, L3a flags 07ff95cd); v7 running.
 - Generator inputs (orchestrator's form, it supersedes my visibility restriction): any tracked file of an admitted root, declared, read-only, content-keyed; `uses` only for generated outputs; a path outside all roots is red. PP reads keep the header-root rule. w16, one commit on 33c443b5. L6 d3d9 head w6 4f5be583 (gate_admit 1041/1041) waits only on this.
+
+## 2026-11-12 09:05 UTC
+- w18 b9944d38 accepted. There is now one image-set path, and gpa rows in unreached bytes are red.
+  - Global counts at b9944d38, 8 images, facts a0f3d8e, manifest e15d385:
+    - loadlib: 34/45 certified
+    - gpa: 43/43 rows
+    - reach: 0/3 facts
+  - w18 is rebasing onto the candidate 33c443b5 (branch w18b).
+  - Blocked on L5: dynsites rows for d3dx9_31 and gdffalloutnv (9 loadlib rows and 39 gpa-uncovered calls).
+  - Blocked on an owner the orchestrator will name: the A7 (ASM-029) and ret-predicate facts at d3dx9_31 0x61bb40 and d3dx9_38 0x769b11.
+- w14 f4c04b92: the lifted stage source form is accepted, but it sits on the wrong base (862b0708).
+  - Sent back to w14 with three items:
+    - rebase onto 33c443b5 (branch w14-src2);
+    - make the ldcheck tree-membership fix a separate first commit;
+    - fix the test_recipe second-build miss {run:1, hit:10}, a key or hermeticity defect.
