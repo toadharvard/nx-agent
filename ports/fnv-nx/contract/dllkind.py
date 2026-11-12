@@ -30,10 +30,17 @@ def declared_roots(hosts):
     return [(n, hosts[n]) for n in DECLARED_ROOTS]
 
 
+RULE_BRIDGE = "bridge row: the platform serves the name, a found file is never a guest image (N1-N4 body rule of the bridge row)"
+RULE_APPDIR = "LoadLibrary search order: the application directory before system32 (Windows, Wine 9.0), the first root in DECLARED_ROOTS order is loaded, the later copies are shadowed"
+
+
 def conflicts(files, bridge):
     """files: {root name: [file names of that root]}, bridge: the dll names that have bridge rows.
-    -> (bridge_named, collisions): bridge_named = sorted [(dll name, [roots])] of the *.dll files of the set that have a bridge row;
-    collisions = sorted [(dll name, [roots])] of the *.dll names found in more than one root (case-insensitive)."""
+    -> (bridge_named, collisions, unresolved): every row is (dll name, [roots in rule order], rule text).
+    bridge_named: the *.dll files of the set that have a bridge row, resolved by RULE_BRIDGE.
+    collisions: the *.dll names found in more than one root (case-insensitive), resolved by RULE_APPDIR; a name that is also bridge-named is
+    served by RULE_BRIDGE first, so both rows list it.
+    unresolved: collisions that no rule orders (a root outside DECLARED_ROOTS); the caller makes the build red on a non-empty list."""
     where = {}
     for root, names in files.items():
         for f in names:
@@ -41,9 +48,11 @@ def conflicts(files, bridge):
             if n.endswith(".dll") and root not in where.setdefault(n, []):
                 where[n].append(root)
     order = {r: i for i, r in enumerate(DECLARED_ROOTS)}
-    key = lambda v: sorted(v, key=lambda r: order[r])
-    return (sorted((n, key(r)) for n, r in where.items() if n in bridge),
-            sorted((n, key(r)) for n, r in where.items() if len(r) > 1))
+    key = lambda v: sorted(v, key=lambda r: order.get(r, len(order)))
+    bn = sorted((n, key(r), RULE_BRIDGE) for n, r in where.items() if n in bridge)
+    co = sorted((n, key(r), RULE_APPDIR) for n, r in where.items() if len(r) > 1 and all(x in order for x in r))
+    un = sorted((n, key(r), None) for n, r in where.items() if len(r) > 1 and not all(x in order for x in r))
+    return bn, co, un
 
 
 def images_of(normal_imports, ok):

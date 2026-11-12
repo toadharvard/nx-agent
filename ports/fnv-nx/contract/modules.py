@@ -390,10 +390,12 @@ def run(exe_path, bridge_path, roots, out, declared_path):
     iat.write_table(os.path.join(out, 'iat.tsv'), rows)
     gatefile.write('iat', len(rows) + len(bad), len(rows), ['%08x %s!%s: %s' % b for b in bad],
                    '%d slots, %d without a value' % (len(rows) + len(bad), len(bad)))
-    bnamed, coll = dllkind.conflicts({n: [f for f in os.listdir(d) if os.path.isfile(os.path.join(d, f))] for n, d in roots}, system)
-    summary = ['declared file set %s; bridge-named files %d: %s; name collisions between roots %d: %s' % (
-        '+'.join(n for n, _ in roots), len(bnamed), ', '.join('%s(%s)' % (n, '+'.join(r)) for n, r in bnamed) or '-', len(coll),
-        ', '.join('%s(%s)' % (n, '+'.join(r)) for n, r in coll) or '-')]
+    bnamed, coll, unres = dllkind.conflicts({n: [f for f in os.listdir(d) if os.path.isfile(os.path.join(d, f))] for n, d in roots}, system)
+    summary = ['declared file set %s; bridge-named files %d; name collisions between roots %d; unresolved %d' % (
+        '+'.join(n for n, _ in roots), len(bnamed), len(coll), len(unres))]
+    summary += ['  bridge-named %s (%s): %s' % (n, '+'.join(r), rule) for n, r, rule in bnamed]
+    summary += ['  collision %s (%s): %s' % (n, '+'.join(r), rule) for n, r, rule in coll]
+    summary += ['  UNRESOLVED collision %s (%s)' % (n, '+'.join(r)) for n, r, _ in unres]
     summary += ['modules %d: range 0x%08x..0x%08x' % (len(order), order and min(m.base for m in order) or 0, end)]
     summary += ['  %d %s base 0x%08x preferred 0x%08x size 0x%x relocs %d static %d' % (i, m.name, m.base, m.pe.base, m.pe.size_of_image, m.relocs, int(m.static))
                 for i, m in enumerate(order)]
@@ -413,7 +415,7 @@ def run(exe_path, bridge_path, roots, out, declared_path):
         k['none'] = len(mbad)
         summary += ['module import slots %s: via bridge %d, via modules %d, no provider %d' % (m.name, k['system'], k['module'], k['none'])]
         summary += ['  no provider: %s!%s' % (d, n) for _, d, n, _ in mbad]
-    return '\n'.join(summary), bool(bad)
+    return '\n'.join(summary), bool(bad) or bool(unres)
 
 
 def main():
