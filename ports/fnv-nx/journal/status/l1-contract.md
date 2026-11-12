@@ -1,6 +1,6 @@
 # L1 CONTRACT status (lead: Opus 5.5, session started 2026-11-11 22:34Z)
 
-Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` 2b7897a5 (w4 @1fa25f8b merged, tree 7b488485, 240 s), 25 gates, 0 product roots. Target: first frame in this budget (CLAUDE.md 08f6ea30).
+Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` e35b870a (CLAUDE.md launcher-run-once; code as 2b7897a5, w4 @1fa25f8b merged, 240 s), 25 gates, 0 product roots. Target: first frame in this budget (CLAUDE.md 08f6ea30).
 
 ## Tasks
 
@@ -21,9 +21,11 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` 2b7897a5 (w4 @1fa2
 | 3a | recipe: bare prog name (as, ld) resolved like the driver (programs: list, then PATH); host x86_64 roots red today (L6A render/gl4) | w16 | claude/fnv-l1-contract-w16 | doing |
 | 3n | recipe check: include dir inside the root's own tree refused (#pragma once identity; L6) | w16 | claude/fnv-l1-contract-w16 | doing |
 | 3i | recipe key isystem (paths inside externals only) for libnx/newlib headers (L6A) | w16 | claude/fnv-l1-contract-w16 | doing |
-| 1u | owner order 9e5856f0: Galaxy/GalaxyWrp not lifted. One rule for images.py+modules.py: guest image = found, no bridge row, closure resolves; else declared-machine module (kind declared, bodies = L5 bridge rows, not walked); rule contract/dllkind.py 568b67ab (images: exe, d3dx9_38, binkw32, libvorbis(file); Galaxy not reached; declared: galaxy, galaxywrp, ssce5432 (comdlg32 gap, L5)); mp4 push accepted with libvorbis 01ce0000, libvorbisfile 01e20000; item 2 green f31d416d at c7acc8c1 (194 s) | session_01KmtZKQwjYFpEvoHtfEjCcb (w18) | claude/fnv-l1-contract-w18 | doing |
+| 1u | owner order 9e5856f0: Galaxy/GalaxyWrp not lifted. One rule for images.py+modules.py: guest image = found, no bridge row, closure resolves; else declared-machine module (kind declared, bodies = L5 bridge rows, not walked); rule contract/dllkind.py 568b67ab (images: exe, d3dx9_38, binkw32, libvorbis(file); Galaxy not reached; declared: galaxy, galaxywrp, ssce5432 (comdlg32 gap, L5)); mp4 0772c61 pushed (libvorbis 01ce0000, libvorbisfile 01e20000); next: declared_dlls.tsv from pinned Wine 9.0 dlls/*.spec, provider column, closure.tsv roles from dllkind, regenerate stale gpa/reach; item 2 green f31d416d at c7acc8c1 (194 s) | session_01KmtZKQwjYFpEvoHtfEjCcb (w18) | claude/fnv-l1-contract-w18 | doing |
 | 3f | link root over admitted roots of mixed cxx_origin (L3b product ELF/tests) | w15 | claude/fnv-l1-contract-w15 | doing |
+| 3p | PLUGIN_SOURCES built as hermetic stages incl. L2 f2i_check (attribute-registering plugin declared by every root using it) | w4 (B2) | claude/fnv-l1-contract-w4 | queued after runtime manifest |
 | 3l | link.libs: archives inside declared externals (newlib libc.a), pulled members judged by linkstrict+objstub (L3b) | w15 | claude/fnv-l1-contract-w15 | doing |
+| 3d | admit.json class "headers" (tracked tree, include-only, no units/gates; certified via PP reads; unit file inside refused) — L2 shim/include, 58/73 platform units wait | w16 | claude/fnv-l1-contract-w16 | TOP, doing |
 | 3m | include mounts at root-relative paths in one mirrored tree (`../` works; undeclared = missing) (L2, L5 platform root) | w16 | claude/fnv-l1-contract-w16 | queued (before 3x) |
 | 3g | guest library external fnvnx-a64-msvcmodel + sample platform build.json (L1 green 63511d69, 215.8 s, 51/51 selftests) | w4 | claude/fnv-l1-contract-w4 1fa25f8b | done (trunk 2b7897a5); next: runtime manifest == guest compiler (same GCC 13.3+msvcmodel, -fshort-wchar; 00e3d42a = GCC 15.2 libstdc++ red), L5 rebuilds tools/fnvnx-a64-msvcmodel13; runtime external required, -nostdinc |
 | 3h | guest system headers = linked libc's (fnvnx-a64-msvcmodel newlib+libnx, -nostdinc); glibc cross headers refused in guest roots (L2/L5 socket units) | w4 | claude/fnv-l1-contract-w4 | queued (after w8 rebase) |
@@ -32,7 +34,7 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` 2b7897a5 (w4 @1fa2
 | 2b | budget in VERDICT.md, budget gate, delete second build paths | lead | - | blocked by 2 (numbers) |
 | 4a | assumptions gate over verify/ASSUMPTIONS.json (OWNER = 9; field `pending` removed) | session_01KmtZKQZb21XFPG5GMjmjUp | claude/fnv-l1-contract-w10 (from b9f7cf14) | doing: rebase on trunk, drop `pending` + 47 pending records, add L6A, selftests in pinned env |
 | 4b | w11 test-defined symbols ∩ product-root symbols = ∅ in objstub | predecessor's local agent -> moving to a cloud worker | claude/fnv-l1-contract-w11 001306f0 | doing: stage 2 (COMDAT, python AST rule, six L1 names to 0) |
-| 4c | w12 (d161674, L1 red only selftests needing fnv-nx-build; next: no inline wrappers expanding FNVNX_PLAT_, delete SOCK 16..26,30 + markers, zero-use slots) hostapi.h = services with a call site in product roots (rule), FNVNX_EXT_DK for L4 | session_01KmtZKUQGJi3gKcTZcB8sr6 | claude/fnv-l1-contract-w12 (from 6766d18a) | doing: L5 took 6766d18a (3bf9c4d6); delete zero-use slots console_flush, tz_offset_minutes, ACCESS_FAULT_HANDLER 10, main_loop/buttons_down (test-only), UNMAP_FIXED unless a loader unit calls it; numbers kept as holes; selftest diagnosis |
+| 4c | w12 (7f318d95: slots 10, 15, console_flush, main_loop, buttons_down, tz_offset_minutes deleted, holes kept; d161674, L1 red only selftests needing fnv-nx-build; next: no inline wrappers expanding FNVNX_PLAT_, delete SOCK 16..26,30 + markers, zero-use slots) hostapi.h = services with a call site in product roots (rule), FNVNX_EXT_DK for L4 | session_01KmtZKUQGJi3gKcTZcB8sr6 | claude/fnv-l1-contract-w12 (from 6766d18a) | doing: L5 took 6766d18a (3bf9c4d6); delete zero-use slots console_flush, tz_offset_minutes, ACCESS_FAULT_HANDLER 10, main_loop/buttons_down (test-only), UNMAP_FIXED unless a loader unit calls it; numbers kept as holes; selftest diagnosis |
 
 Rule (L1+L2): a header-only dir is not a root; its headers are certified as PP inputs of admitted units (shim/include L2, loader include).
 
