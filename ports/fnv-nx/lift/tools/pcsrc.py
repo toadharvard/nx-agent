@@ -70,12 +70,14 @@ class Img:
     def reached(self, a):
         i = bisect.bisect_right(self.ms, a) - 1
         return i >= 0 and a < self.mer[i][1]
-    def dec(self, a):
+    def dec(self, a, keep=True):
         g = self.cache.get(a)
         if g is None:
             o = a - self.T0
             g = next(self.md.disasm(self.text[o:o + 15], a, 1), False) if 0 <= o < len(self.text) else False
-            self.cache[a] = g
+            if keep:
+                if len(self.cache) > 150000: self.cache.clear()      # bounded memory: a decoded instruction is a pure function of its address
+                self.cache[a] = g
         return g
 
 
@@ -85,7 +87,7 @@ def scan_calls(img):
     for a0, b0 in img.mer:
         a = a0
         while a < b0:
-            g = img.dec(a)
+            g = img.dec(a, False)
             if not g: a += 1; continue
             if a not in seen:
                 seen.add(a)
@@ -106,7 +108,7 @@ def scan_calls(img):
     for e in sorted(img.entries):
         a = e
         while img.reached(a):
-            g = img.dec(a)
+            g = img.dec(a, False)
             if not g: break
             if a in seen: break
             seen.add(a)
