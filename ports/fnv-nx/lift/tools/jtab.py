@@ -413,7 +413,12 @@ def resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords):
 
 def exclusive(ok, svals):
     """-> the set of table-word addresses whose only readers are resolved jump sites: svals = sorted [(value, reloc site)] of every relocated dword; a word range [lo, hi) of a resolved table is read by
-    the relocated references whose value lies in it, and those must all be the displacement fields of resolved jump sites. A word of a table that anything else can read may reach code through data: it is not exclusive."""
+    the relocated references whose value lies in it, and those must all be the displacement fields of resolved jump sites. A word of a table that anything else can read may reach code through data: it is not exclusive.
+    Argument: the table object is the proved extent [lo, hi) (the words T + 4v over the proved interval of the index; the displacement T may lie above the extent, e.g. T-8, T-16). By OWNER 6 (ASM-006: the exe makes no wild
+    accesses, in-bounds indices) a read of a byte of the object goes through a pointer derived from a reference to the object, and every reference to an address in the image is a relocated value (the loader's relocation set,
+    s1): the reference may be the base T itself or a derived base such as T-8 (inside or outside the extent, the value is then still an address the relocation names; the reference whose value is in [lo, hi) is the one counted here,
+    a derived base below lo is a reference to the neighbouring object, whose own extent is read the same way). So if every relocated reference into [lo, hi) is the displacement of a resolved jump site, no other read reaches the
+    words, and the targets are entered only through the table edges. Code reachability does not change (the edges reach the targets); only the entry split does: such targets are not seeded."""
     import bisect
     allowed = {t.dsite for t in ok.values()}; out = set()
     for t in ok.values():

@@ -11,6 +11,7 @@ BASE = 0x400000; FN = BASE + 0x1000; TAB = FN + 0x100; RO = BASE + 0x2000; RW = 
 OUT = [0x500000 + 0x10 * i for i in range(8)]
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); md.detail = True
 def u32(v): return struct.pack('<I', v & 0xffffffff)
+def u32v(a): return TAB if a else 0
 def tab(*v): return b''.join(u32(x) for x in v)
 def jmp_tab(disp, reg=0x85): return b'\xff\x24' + bytes([reg]) + u32(disp)
 
@@ -99,4 +100,13 @@ class P(unittest.TestCase):
     def test_escaping_frame_address_drops_cells(s):
         code = b'\x8d\x4d\xec\x89\x55\xec\x83\x7d\xec\x04\x77\x0a\x8b\x45\xec' + jmp_tab(TAB) + b'\xc3'
         s.red(code, tab(*OUT[:5]), relocs=[FN + 18] + [TAB + 4 * i for i in range(5)])
+class E(unittest.TestCase):
+    def test_second_reference_into_the_table_keeps_targets_seeded(s):
+        code = b'\x83\xf8\x03\x77\x0a' + jmp_tab(TAB) + b'\xcc\xcc\xcc\xc3'
+        t, why = run(code, tab(*OUT[:5]), relocs=[FN + 8] + [TAB + 4 * i for i in range(5)])
+        ok = {FN + 5: t}
+        sv = sorted([(u32v(FN + 8), FN + 8)] + [(OUT[i], TAB + 4 * i) for i in range(5)])
+        s.assertEqual(jtab.exclusive(ok, sv), set(t.addrs))                                  # the only reference into the words is the jump's displacement
+        sv2 = sorted(sv + [(TAB + 8, FN + 0x80)])                                              # a second relocated reference to the middle of the table
+        s.assertEqual(jtab.exclusive(ok, sv2), set())
 if __name__ == '__main__': unittest.main()
