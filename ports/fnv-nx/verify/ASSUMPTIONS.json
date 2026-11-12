@@ -743,12 +743,12 @@
     "L3b:I-FPMASK"
    ],
    "status": "REMOVE",
-   "removed_by": "planned: every control-word write (fldcw, ldmxcsr, fninit, frstor, fldenv, fxrstor, _controlfp/_control87 with operand) found statically and proved to keep the masks; if not proved, exact unmasked-exception semantics before the first frame (orchestrator decision 2026-11-11; owner of the work L3b)",
+   "removed_by": "planned: fpstate control-word mask census and sticky-read census (L3a item 29, w7)",
    "owner": "L3a"
   },
   {
    "id": "ASM-205",
-   "text": "Test harness only: sticky flags not observed (I-FPSTICKY set in instest ASSUME).",
+   "text": "The product keeps the x87 sticky flags (rt/fnvl_x87.h:32-37); the test harness injected them as not observed (I-FPSTICKY set in instest ASSUME).",
    "used_by": [],
    "aliases": [
     "ASM-306",
@@ -756,7 +756,7 @@
     "L3b:I-FPSTICKY"
    ],
    "status": "REMOVE",
-   "removed_by": "planned: test-only; product path maintains the flags",
+   "removed_by": "planned: sticky-read census (L3a item 29); the test injections are deleted (L3a w3)",
    "owner": "L3a"
   },
   {
@@ -892,18 +892,6 @@
    "owner": "L3a"
   },
   {
-   "id": "ASM-217",
-   "text": "Only instructions of the lifter decode transfer control (constant-address proof for lock/xchg within a block).",
-   "used_by": [],
-   "aliases": [
-    "ASM-318",
-    "L3b:A-DECODEFLOW"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: universe closure gate of L3a",
-   "owner": "L3a"
-  },
-  {
    "id": "ASM-218",
    "text": "An inline asm without FP/vector operand and without FP clobber does no float->int conversion.",
    "used_by": [
@@ -926,7 +914,7 @@
     "L3b:A-START"
    ],
    "status": "REMOVE",
-   "removed_by": "planned: set by the runtime at thread entry (rt/enter.c); being verified against the code with the FP-mask fact",
+   "removed_by": "planned: rt/enter.cc:46 sets FCW/MXCSR at thread reset; remaining: a call-graph check that no other path starts a guest thread",
    "owner": "L3a"
   },
   {
@@ -964,11 +952,10 @@
    "owner": "L3b"
   },
   {
-   "id": "ASM-302",
+   "id": "ASM-303",
    "text": "For shapes outside the Sail model (x87 control/state, cpuid, rdtsc, part of SIMD: 7 019 shapes have no DSL builder yet) the reference is a transcription of the SDM compared with the host.",
    "used_by": [],
    "aliases": [
-    "ASM-303",
     "L3b:A-SDMREF"
    ],
    "status": "REMOVE",
@@ -976,11 +963,10 @@
    "owner": "L3b"
   },
   {
-   "id": "ASM-303",
+   "id": "ASM-304",
    "text": "17 (mnemonic, undefined flag) pairs: the value the reference CPU produces is not yet pinned.",
    "used_by": [],
    "aliases": [
-    "ASM-304",
     "L3b:A-UNDEFFLAGS"
    ],
    "status": "REMOVE",
@@ -988,13 +974,12 @@
    "owner": "L3b+L3a"
   },
   {
-   "id": "ASM-304",
+   "id": "ASM-320",
    "text": "rt/rcptab.cert.json was produced by farm/rcpcert.sh on a CPU with the reference identity.",
    "used_by": [
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
-    "ASM-320",
     "L3b:A-RCPHOST"
    ],
    "status": "REMOVE",
@@ -1002,13 +987,12 @@
    "owner": "L3b"
   },
   {
-   "id": "ASM-305",
+   "id": "ASM-321",
    "text": "RCPSS/RSQRTSS are pure functions of the input bits: MXCSR does not influence them.",
    "used_by": [
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
-    "ASM-321",
     "L3b:A-RCPPURE"
    ],
    "status": "REMOVE",
@@ -1016,13 +1000,12 @@
    "owner": "L3b"
   },
   {
-   "id": "ASM-306",
+   "id": "ASM-322",
    "text": "The helpers sse_f2i and fv_i are correct (range guard, rounding mode, integer indefinite).",
    "used_by": [
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
-    "ASM-322",
     "L3b:A-F2IHELPERS"
    ],
    "status": "REMOVE",
@@ -1030,13 +1013,12 @@
    "owner": "L3b"
   },
   {
-   "id": "ASM-307",
+   "id": "ASM-323",
    "text": "An object and its .f2i.json come from the same compile.",
    "used_by": [
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
-    "ASM-323",
     "L3b:A-F2IKEY"
    ],
    "status": "REMOVE",
@@ -1044,13 +1026,12 @@
    "owner": "L3b"
   },
   {
-   "id": "ASM-308",
+   "id": "ASM-325",
    "text": "No float->int conversion of a C literal occurs in lifted code (GCC folds an out-of-range constant to the saturated value, not the x86 indefinite).",
    "used_by": [
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
    ],
    "aliases": [
-    "ASM-325",
     "L3b:A-F2ICONST"
    ],
    "status": "REMOVE",
@@ -1058,18 +1039,18 @@
    "owner": "L3b"
   },
   {
-   "id": "ASM-309",
+   "id": "ASM-329",
    "text": "capstone decodes every x86 instruction of the universe to its true length, fields and operands.",
    "used_by": [],
    "aliases": [
     "L3b:A-CAPSTONE-X86"
    ],
    "status": "REMOVE",
-   "removed_by": "planned: agreement of independent decoders (capstone, LLVM MC, XED) on every byte of the code ranges of the exe and modules; any difference is red (orchestrator decision 2026-11-11)",
+   "removed_by": "planned: capstone/keystone pinned by sha256 from the fnv-nx-build mirror (L3b w4) + w4's ACL2 cross-check of every certified shape",
    "owner": "L3b"
   },
   {
-   "id": "ASM-310",
+   "id": "ASM-330",
    "text": "capstone decodes every AArch64 instruction of an object to its architectural id; unmarked sections are code from their start.",
    "used_by": [
     "ports/fnv-nx/lift/proof/gate_fpexact.py"
@@ -1078,7 +1059,7 @@
     "L3b:A-CAPSTONE-A64"
    ],
    "status": "REMOVE",
-   "removed_by": "planned: agreement of capstone and LLVM MC on every instruction of every object of ours; any difference is red (orchestrator decision 2026-11-11)",
+   "removed_by": "planned: capstone/keystone pinned by sha256 from the fnv-nx-build mirror (L3b w4) + w4's ACL2 cross-check of every certified shape",
    "owner": "L3b"
   },
   {
