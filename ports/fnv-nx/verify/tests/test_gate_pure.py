@@ -108,6 +108,16 @@ def main():
              [root("lift/gen", ["lift/fnvlift"]), root("lift/fnvlift"), pr])
     rc, res, err = run(d)
     check("a clock read in a file the generator reaches is red", rc == 2 and T + "/lift/fnvlift/m.py" in res["uncertified"], (res, err))
+    # no directory name is special: only the import closure counts
+    d = tree({T + "/lift/gen/g.py": "import tests.x\n", T + "/lift/gen/tests/x.py": "import time\nt = time.time()\n", T + "/lift/gen/tests/y.py": "z = 1\n",
+              T + "/lift/gen/other/w.py": "import time\nt = time.time()\n"}, [root("lift/gen", entry=["lift/gen/g.py"])])
+    rc, res, err = run(d)
+    check("a file named tests/x.py that a stage imports is in the universe (and red for its clock read); not-imported files in tests/ or any directory are not",
+          rc == 2 and T + "/lift/gen/tests/x.py" in res["uncertified"] and res["universe"] == 2, (res, err))
+    d = tree({T + "/lift/gen/g.py": "import tests.x\n", T + "/lift/gen/tests/x.py": "z = 1\n", T + "/lift/gen/tests/y.py": "import time\nt = time.time()\n"},
+             [root("lift/gen", entry=["lift/gen/g.py"])])
+    rc, res, err = run(d)
+    check("a clean tests/x.py imported by a stage is certified, a non-imported tests/y.py with a clock read is outside: green", rc == 0 and res["universe"] == 2, (res, err))
     # `entry` is required for a tool root
     adm = lambda rs, files=(): gate_admit.judge(list(files), {"format": "fnvnx-admit/1", "roots": rs}, ["pure", "selftests"], lambda p: True)
     noent = {"path": T + "/x", "class": "tool", "gates": ["pure", "selftests"]}

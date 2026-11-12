@@ -1442,8 +1442,8 @@ Gate "pure" (fnvnx-gate/1): every Python file a build stage can run is accepted 
 Universe: the import closure, by puregate's own project-import resolution, of the STAGE ENTRY POINTS: (i) the `tool` scripts of the
 `generated` steps of every recipe (build.json) of an admitted root, and (ii) the `entry` list of every admitted tool root
 (verify/admit.json; required for class tool, may be empty). An item is a repo-relative .py path. A file reachable only from gate
-drivers (scripts the verdict runs on the host) is outside the universe: it is not a stage, and it may read the host. Files below a
-directory named `tests` are outside it unless a stage imports them.
+drivers (scripts the verdict runs on the host) is outside the universe: it is not a stage, and it may read the host. No directory name
+is special (a file in `tests/` is in the universe iff a stage imports it).
 Certified: items with zero puregate violations that import no HOST-READER module. Each admitted root that names gate "pure" is
 checked in its own puregate run: project imports resolve below the importing file's directory, the root's directories (`trees`) or their
 parents, or the parent directory of a root it DECLARES in admit.json `imports`. An import of a module of another root that is not declared is
