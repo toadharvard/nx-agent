@@ -51,7 +51,18 @@ def tree_of(repo="."):
 def ensure(root, cache, repo="."):
     """Build ROOT with the stage cache GATE_CACHE (CACHE, or a fresh temp dir) -> (objects dict, out dir); raises RecipeError."""
     out = os.path.join(cache, "objects", tree_of(repo), root.replace("/", "__"))
-    return recipe.build(repo, root, os.path.join(cache, "store"), out, ext=os.path.join(cache, "external")), out
+    res = recipe.build(repo, root, os.path.join(cache, "store"), out, ext=os.path.join(cache, "external"))
+    return (fixture_view(res) if os.environ.get("GATE_FIXTURES") else res), out
+
+
+def fixture_view(res):
+    """RULE (fixtures, RECIPE.md): with env GATE_FIXTURES set, every gate that gets its input from ensure() sees ONLY the fixture units of the
+    root as its objects/units (no ELF, constants or link); a gate then reports its findings as usual and writes them to its result file as
+    "findings": [{"id": ITEM-ID, "code": FINDING-CODE}] (an id is `<root>/<unit>` or `<root>/<unit>:<symbol>`). gate_fixtures.py judges them."""
+    fx = res.get("fixtures", [])
+    return dict(res, objects=[{"unit": f["unit"], "object": f["object"], "sha256": f["sha256"], "os_layer": False} for f in fx],
+                units=[f["unit"] for f in fx], elf=None, constants=None, contract_names=None, defined=[], undefined=[],
+                pp_keys={f["unit"]: f["pp_key"] for f in fx if f.get("pp_key")}, fixtures=[])
 
 
 def ids(root, res, rec):

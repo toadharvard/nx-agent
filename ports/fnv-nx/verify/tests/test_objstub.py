@@ -456,7 +456,7 @@ sys.path.insert(0, HERE)
 import test_recipe as TR  # noqa: E402
 import verdict  # noqa: E402
 
-RV = ("#include \"toy.h\"\nvoid fnvnx_reach_violation(unsigned) __attribute__((noreturn));\n"
+RV = ("#include \"inc/toy.h\"\nvoid fnvnx_reach_violation(unsigned) __attribute__((noreturn));\n"
       "int f_c(int x) { if (x > 3) fnvnx_reach_violation(42); return x + TOY; }\n")
 OS = TR.FILES["toy/os.S"] + (".globl fnvnx_reach_violation\n.type fnvnx_reach_violation,%function\nfnvnx_reach_violation:\n adrp x1, hostslot\n"
                              " ldr x1, [x1, :lo12:hostslot]\n blr x1\n.size fnvnx_reach_violation,.-fnvnx_reach_violation\n.data\n.balign 8\n.globl hostslot\nhostslot: .quad 0\n")
@@ -511,7 +511,7 @@ rc, g, _, txt, st = gate(repo3, ROOT + "/g7", GC)
 check("a malformed facts file: red, input error", rc == 2 and g["status"] == "red" and "input error" in g["detail"], (g, txt))
 
 # wine_fixme and ILP32 at the gate level
-WC = '#include "toy.h"\nvoid fnvnx_wine_fixme(unsigned);\nint f_c(int x) { (void)x; fnvnx_wine_fixme(5); return 7; }\n'
+WC = '#include "inc/toy.h"\nvoid fnvnx_wine_fixme(unsigned);\nint f_c(int x) { (void)x; fnvnx_wine_fixme(5); return 7; }\n'
 for tag, tbl, want in (("row matches", "5\tm\twine-9.0:dlls/x/y.c:f\tu32\t7\n", "green"), ("row value differs", "5\tm\twine-9.0:dlls/x/y.c:f\tu32\t8\n", "red"),
                        ("malformed table", "5\tm\tnot-a-ref\tu32\t7\n", "input")):
     wr = TR.make_repo("os-wine-" + tag.replace(" ", "-"), rec=TR.mut(link=None), files={"toy/constants.tsv": CONST, "toy/c.c": WC, "verify/wine_fixme.tsv": tbl})
@@ -528,6 +528,15 @@ print("INFO ILP32 toy gate warm %.1f s" % secs)
 r32r = TR.make_repo("os-reach32", rec=TR.abi_rec("ilp32"), files={"toy/constants.tsv": CONST, "toy/c.c": RV, "toy/os.S": OS.replace("ldr x1, [x1, :lo12:hostslot]", "ldr w1, [x1, :lo12:hostslot]").replace("blr x1", "blr x1").replace(".quad 0", ".word 0")})
 rc, g, _, txt, st = gate(r32r, ROOT + "/g32r", GC)
 check("ILP32 reach call (P32 CALL26 relocation) is judged by the reach rule: reach-uncertified, nothing else red", rc == 2 and g["uncertified"] == [TR.ROOT + "/c.c:f_c"] and "reach-uncertified 1" in g["detail"], (g, txt))
+
+# a host root: the terminator plugin is built against the plugin headers of the root's own (x86-64 distro) compiler, and sees its noreturn declarations
+xt = tf + ".x86"
+open(tf + ".x86.h", "w").write("void fnvnx_die(void) __attribute__((noreturn));\n")
+xn = objstub.derive_terminators("x86_64-linux-gnu-gcc-13", ["-I" + os.path.dirname(tf)], [os.path.basename(tf) + ".x86.h"], "c", xt)
+check("host root compiler x86_64-linux-gnu-gcc-13: the plugin builds against its own plugin headers and finds the noreturn function", "fnvnx_die" in xn, xn)
+xh = objstub.plugin_so("x86_64-linux-gnu-gcc-13", tempfile.mkdtemp(prefix="objstub-x86-"))[1]
+check("the plugin key depends on the root compiler: x86-64 distro gcc and the aarch64 compiler give different plugins",
+      xh != objstub.plugin_so("aarch64-linux-gnu-g++", tempfile.mkdtemp(prefix="objstub-a64-"))[1])
 
 print("%d failed, wall %.1f s" % (len(FAILED), time.time() - T0))
 sys.exit(1 if FAILED else 0)

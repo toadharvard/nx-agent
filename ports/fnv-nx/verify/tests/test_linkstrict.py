@@ -145,13 +145,13 @@ print("INFO toy gate (incl. build) %.1f s" % (time.time() - t0))
 t0 = time.time()
 (rc, g, _, txt), st = LS(repo, "t2", GC)
 print("INFO toy gate warm %.1f s" % (time.time() - t0))
-WK = '#include "toy.h"\nint wk(void) __attribute__((weak));\nint f_c(int x) { return wk ? wk() : x + TOY; }\n'
+WK = '#include "inc/toy.h"\nint wk(void) __attribute__((weak));\nint f_c(int x) { return wk ? wk() : x + TOY; }\n'
 (rc, g, _, txt), st = LS(TR.make_repo("ls-weak", files={"toy/c.c": WK}), "t3", GC)
 check("weak undefined symbol: ld links (and drops it from the static ELF, so rule (a) cannot see it) but rule (b) on the object is red",
       rc == 2 and st[0] == "red" and g["uncertified"] == [TR.ROOT + "/c.c:wk"] and "undefined 1" in g["detail"], (g, txt))
 (rc, g, _, txt), st = LS(TR.make_repo("ls-nolink", rec=TR.mut(link=None), files={"toy/b.c": None}), "t4", GC)
 check("root without a link: an undefined reference (f_b, no definition anywhere) is red", rc == 2 and g["uncertified"] == [TR.ROOT + "/a.c:f_b"], (g, txt))
-ALIAS = '#include "toy.h"\nint f_b(void) { return TOY * 2; }\nint f_b2(void) __attribute__((alias("f_b")));\n'
+ALIAS = '#include "inc/toy.h"\nint f_b(void) { return TOY * 2; }\nint f_b2(void) __attribute__((alias("f_b")));\n'
 for tag, rows, ok in (("different body ids", "f_b\tB1\nf_b2\tB2\n", False), ("one body id", "f_b\tB1\nf_b2\tB1\n", True)):
     rr = TR.make_repo("ls-alias-" + str(ok), rec=TR.mut(contract_names="contract.tsv"), files={"toy/b.c": ALIAS, "toy/contract.tsv": rows})
     (rc, g, _, txt), st = LS(rr, "t5" + str(ok), GC)
@@ -171,6 +171,24 @@ for abi in ("ilp32", "lp64"):
     check("link script defines __image_end, the root links an ELF: the reference is certified", rc == 0 and g["certified"] == g["universe"] and st[0] == "green", (g, txt))
     (rc, g, _, txt), st = LS(TR.make_repo("ls-ie0-" + abi, rec=TR.abi_rec(abi, TR.mut(link=None, os_layer=["os.S"])), files=IE), "ie0" + abi, GC)
     check("the same objects, the recipe links no ELF: __image_end is undefined", rc == 2 and g["uncertified"] == [TR.ROOT + "/a.c:__image_end"], (g, txt))
+# (d) the host boundary: the exports of the pinned host runtime (libc6, libgcc-s1, libstdc++6)
+exp, hk = L.host_exports(GC)
+check("(d) host_exports: the pinned runtime's exports hold libc, libstdc++ and libgcc_s names and no local name", {"printf", "memcpy", "sqrt", "__cxa_throw", "_Unwind_Resume"} <= set(exp)
+      and "fnvnx_nothing" not in exp and len(hk) == 64 and L.host_exports(GC)[1] == hk, (len(exp), hk))
+href = build("int printf(const char *, ...);\nint nothere(void);\nint u(void) { return printf(\"x\") + nothere(); }\n")
+hs = L.elf_symbols(href)
+items, finds = L.judge({"h/o.o": hs}, {}, {}, {}, (["h/"], set(exp)))
+check("(d) an object of a host root: printf is certified (exported by the host runtime), the name nothing defines stays undefined", [(o, n, k) for o, n, k, _ in finds] == [("h/o.o", "nothere", "undefined")], finds)
+items, finds = L.judge({"g/o.o": hs}, {}, {}, {}, (["h/"], set(exp)))
+check("(d) the same object in a guest root (not a host prefix): printf is undefined too, no boundary", sorted(n for _, n, _, _ in finds) == ["nothere", "printf"], finds)
+items, finds = L.judge({"h/o.o": hs}, {}, {}, {}, None)
+check("(d) without host roots the rule does not exist: printf and nothere are undefined", sorted(n for _, n, _, _ in finds) == ["nothere", "printf"], finds)
+HB = '#include "inc/toy.h"\nint printf(const char *, ...);\nint f_b(void) { return printf("x") + TOY; }\n'
+(rc, g, _, txt), st = LS(TR.make_repo("ls-host", rec=TR.mut(link=None), files={"toy/b.c": HB}), "t6", GC)
+check("gate on a host-target root without a link: a reference to printf is certified, accepted", rc == 0 and g["certified"] == g["universe"] and st[0] == "green", (g, txt))
+HW = HB.replace("printf", "nothere_zz")
+(rc, g, _, txt), st = LS(TR.make_repo("ls-host2", rec=TR.mut(link=None), files={"toy/b.c": HW}), "t7", GC)
+check("gate on a host-target root: a name the host runtime does not export is red", rc == 2 and g["uncertified"] == [TR.ROOT + "/b.c:nothere_zz"], (g, txt))
 ABI[0] = "lp64"
 print("%d failed, wall %.1f s" % (len(FAILED), time.time() - T0))
 sys.exit(1 if FAILED else 0)
