@@ -33,7 +33,7 @@ struct fm_spec {
 /* filled by the backend into zeroed memory of the section's size, before the section exists (SEC_IMAGE: the layout) */
 typedef DWORD (*fm_fill_fn)(void *mem, void *ctx);
 
-/* 0 when the backend creates the section described by sp, else the reach fact (reach_local.h) of the proven-unreachable
+/* 0 when the backend creates the section described by sp, else the reach fact (reach_facts.h, generated from manifest/reach_requests.tsv by contract/gate_reach.py) of the proven-unreachable
  * branch the section belongs to: the caller (CreateFileMappingA) has released what it holds and ends in w32_reach(fact).
  * The backend whose contract is the full one (filemap_shared.cpp) always answers 0. */
 uint32_t fm_backing_reach(const struct fm_spec *sp);
