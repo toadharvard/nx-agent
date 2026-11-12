@@ -729,16 +729,19 @@ def fetch_externals(exts, store, extcache, ws):
 
 
 def _dynsyms(path, defined):
-    """Dynamic symbols of ELF PATH: the defined ones, or the undefined ones (versions cut) -> set."""
+    """Dynamic symbols of ELF PATH: the defined ones, or the STRONG undefined ones (versions cut) -> set. A weak undefined reference (nm type w/v)
+    is not a load requirement: the dynamic loader resolves it to null when no object defines it (RTLD_NOW fails only on a strong one), so it is
+    not counted (rule CC1PLUS-SYMS: the C++ front end's symbols are weak in every plugin, toolchain/tests/test_cc1.py)."""
     r = subprocess.run(["nm", "-D", "--defined-only" if defined else "--undefined-only", path], capture_output=True, text=True)
     if r.returncode:
         raise BuildRed({"stage": "plugin-frontend", "exit": r.returncode, "stderr": r.stderr.splitlines()[-5:]})
-    return {l.split()[-1].split("@")[0] for l in r.stdout.splitlines() if l.split()}
+    rows = [l.split() for l in r.stdout.splitlines() if l.split()]
+    return {t[-1].split("@")[0] for t in rows if defined or (len(t) >= 2 and t[-2] not in ("w", "v"))}
 
 
 def plugin_languages(cc, cxx, sos):
     """{kind: [plugin names that front end can load]} for kind "c" (cc1) and "cxx" (cc1plus), in the order of SOS ({name: path of the .so}). A plugin
-    loads into a front end iff it needs no symbol that only the OTHER front end defines: the symbols only cc1plus defines are the dynamic symbols
+    loads into a front end iff it has no STRONG undefined reference to a symbol that only the OTHER front end defines: the symbols only cc1plus defines are the dynamic symbols
     of cc1plus not defined by cc1, and the other way round (nm -D of the two compiler programs and of the plugin: a static fact of the ELF files,
     not a name or a run). A plugin that references C++-front-end symbols (cp_global_trees, ...) is not loadable by cc1: there is no C instance of it."""
     prog = {k: subprocess.run([d, "-print-prog-name=" + p], capture_output=True, text=True).stdout.strip() for k, d, p in (("c", cc, "cc1"), ("cxx", cxx, "cc1plus"))}
