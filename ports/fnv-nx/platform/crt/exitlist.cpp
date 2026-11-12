@@ -8,7 +8,7 @@
  * doexit(code, quick, retcaller): `quick` skips the handlers (_c_exit), `retcaller` returns instead of ending the
  * process (_cexit, _c_exit); otherwise ExitProcess(code) follows. */
 #include "../win32/w32.h"
-#include "../include/fnvnx_boundary.h"
+#include "fnvnx_boundary.h"
 #include "fnvnx_msvcrt.h"
 
 #include <stdlib.h>

@@ -368,7 +368,7 @@ CRT_HEADERS = {
           '_operator_delete_sized',   # in the force-included fnvnx_compat.h
 }
 CRT_NAMES = [n for v in CRT_HEADERS.values() for n in v.split()]
-# stdio functions S4b implements on MSVC's struct _iobuf (platform/crt/fnvnx_iobuf.h): a decomp prototype of one of
+# stdio functions S4b implements on MSVC's struct _iobuf (shim/include/fnvnx_iobuf.h): a decomp prototype of one of
 # these that takes or returns _iobuf* is replaced by that header (its C++ overloads take _iobuf*). fopen has libc's
 # parameters, so no overload can return _iobuf*: its prototype is replaced by "fnvnx_iobuf_fopen.h", that header plus
 # `#define fopen fnvnx_iob_fopen` for the rest of the unit (fnvnx_iob_fopen is the provider of the CRT fopen that

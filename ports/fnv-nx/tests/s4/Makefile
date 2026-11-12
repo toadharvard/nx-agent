@@ -19,6 +19,7 @@
 HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 ROOT := $(abspath $(HERE)/../..)
 P := $(ROOT)/platform
+HP := $(ROOT)/platform_host
 OUT ?= $(HERE)/build
 FT := $(ROOT)/ext/freetype
 FNVNX_FONT_REF ?= /home/user/gd/fontref
@@ -38,7 +39,7 @@ FLAGS := -g -O1 -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wcha
 CFLAGS_ := -std=gnu11 $(FLAGS)
 CXXFLAGS_ := -std=gnu++17 $(FLAGS)
 
-PLAT_C := $(P)/os/os_posix.c $(P)/os/os_world.c $(wildcard $(P)/crt/*.c)
+PLAT_C := $(HP)/os/os_posix.c $(P)/os/os_world.c $(wildcard $(P)/crt/*.c)
 # the clock interface (platform/include/fnvnx_clock.h): clock_rt.cpp is in both, clock_real.cpp is the product's clock; `make vclock`
 # links clock_virtual.cpp instead (the verification mode, definition VC1)
 CLOCK_CXX := $(P)/clock/clock_rt.cpp $(P)/clock/clock_real.cpp
@@ -91,15 +92,15 @@ $(P)/win32/env_const.gen.inc: $(ENV_SRC)
 $(P)/crt/env_const.gen.inc: $(ENV_SRC)
 	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only crt/
 $(P)/os/env_const_posix.gen.inc: $(ENV_SRC)
-	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only os/os_posix.c
+	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only ../platform_host/os/os_posix.c
 $(P)/os/env_const_horizon.gen.inc: $(ENV_SRC)
-	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only os/os_horizon.c
+	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only ../platform_host/os/os_horizon.c
 $(OUT)/platform/win32/env_const.cpp.o: $(P)/win32/env_const.gen.inc
 $(OUT)/platform/crt/msvcrt_exports.cpp.o: $(P)/crt/env_const.gen.inc
-$(OUT)/platform/os/os_posix.c.o: $(P)/os/env_const_posix.gen.inc
+$(OUT)/platform_host/os/os_posix.c.o: $(P)/os/env_const_posix.gen.inc
 $(OUT)-m32/platform/win32/env_const.cpp.o: $(P)/win32/env_const.gen.inc
 $(OUT)-m32/platform/crt/msvcrt_exports.cpp.o: $(P)/crt/env_const.gen.inc
-$(OUT)-m32/platform/os/os_posix.c.o: $(P)/os/env_const_posix.gen.inc
+$(OUT)-m32/platform_host/os/os_posix.c.o: $(P)/os/env_const_posix.gen.inc
 
 # the registry's first-boot rows: platform/manifest/declared_registry.tsv, checked against the static read sites (REGSITES, the exe-derived
 # private regsites.tsv of the product build; the tests use their own synthetic file) and generated into registry_seed.gen.inc
@@ -313,8 +314,8 @@ ilp32: $(ENV_GEN)
 	@set -e; for f in $(PLAT_C); do echo "ilp32 cc  $${f#$(ROOT)/}"; $(XCC) -std=gnu11 $(XFLAGS) $$f; done
 	@set -e; for f in $(PLAT_CXX); do echo "ilp32 c++ $${f#$(ROOT)/}"; $(XCXX) -std=gnu++17 $(XFLAGS) $$f; done
 	@echo "ilp32 c++ platform/clock/clock_virtual.cpp"; $(XCXX) -std=gnu++17 $(XFLAGS) $(P)/clock/clock_virtual.cpp
-	@echo "ilp32 cc  platform/os/os_horizon.c (libnx headers, newlib lock stub)"
-	@$(XCC) -std=gnu11 $(XFLAGS) -D__SWITCH__ -I$(HERE)/ilp32-stubs -I$(LIBNX)/nx/include $(P)/os/os_horizon.c
+	@echo "ilp32 cc  platform_host/os/os_horizon.c (libnx headers, newlib lock stub)"
+	@$(XCC) -std=gnu11 $(XFLAGS) -D__SWITCH__ -I$(HERE)/ilp32-stubs -I$(LIBNX)/nx/include $(HP)/os/os_horizon.c
 	@echo "ilp32: all platform sources parse"
 
 # BSD socket services, guest side <-> host side over loopback (sockwire/Makefile; not part of the default target)

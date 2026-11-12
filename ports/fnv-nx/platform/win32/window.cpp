@@ -9,7 +9,7 @@
  * Locking: g_ui_lock guards the tree, is never held across a window procedure call and is not recursive; the *_l
  * helpers expect it held. */
 #include "window_int.h"
-#include "../include/fnvnx_boundary.h"
+#include "fnvnx_boundary.h"
 
 #include <stdio.h>
 #include <stdlib.h>

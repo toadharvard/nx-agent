@@ -7,7 +7,7 @@ PLAN.json is `scenario.py compile` output (fnvnx-scenario-plan/1): primitive ste
 run on the emulator's virtual time (emu_guest's tick: it advances with the guest's sleeps, waits and timers), so a
 run is the same every time for the same guest. Keys go to the guest as FNVNX_EV_KEY events through the host API's
 input_poll (HID usages, tools/scenario/keys.py), exactly where the console host feeds the keyboard; the guest's
-platform maps them to DirectInput codes (toolchain/guest/platform_glue.cpp).
+platform maps them to DirectInput codes (platform/guest/platform_glue.cpp).
 
   press  key down, key up after half the gap, the next step after the gap (seconds)
   wait   the next step after s seconds

@@ -13,12 +13,12 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "../../platform/audio/backend.h"
-#include "../../platform/audio/mixer.h"
-#include "../../platform/input/input.h"
+#include "../audio/backend.h"
+#include "../audio/mixer.h"
+#include "../input/input.h"
 #include "fnvnx_render_hooks.h"
-#include "../../platform/os/os.h"
-#include "../../platform/include/fnvnx_clock.h"
+#include "../os/os.h"
+#include "../include/fnvnx_clock.h"
 #include "fnvnx/hostapi.h"
 
 extern "C" const fnvnx_audio_backend fnvnx_audio_backend_audren;
