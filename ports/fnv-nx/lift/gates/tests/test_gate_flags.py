@@ -24,7 +24,7 @@ def red(hexs, ranges=None):
     g.MEMO.clear()
     code = bytes.fromhex(hexs.replace(' ', ''))
     r = ranges or [(A, A + len(code))]
-    n, rows, reads, bad = g.analyse_entry(Img(code), A, r)
+    n, contrib, rows, reads, bad = g.analyse(Img(code), A, r, g.ALL_E, (), True)
     return [(f, o, c) for _, f, o, c, _ in rows], reads, bad
 
 
@@ -35,18 +35,18 @@ CASES = {
     'jz_at_entry':        ('7400 c3', [('zf', 1, 'jcc')]),
     'call_kills':         ('39c0 e800000000 7400 c3', [('zf', 2, 'jcc')]),
     'call_then_cmp':      ('e800000000 39c0 7400 c3', []),
-    'and_af_undefined':   ('21d8 27 c3', [('af', 4, 'other')]),                       # and: AF undefined; daa reads AF
-    'cmp_af_defined':     ('39c0 27 c3', []),
+    'and_af_undefined':   ('21d8 9c c3', [('af', 4, 'pushf')]),                       # and: AF undefined; pushfd reads it
+    'cmp_af_defined':     ('39c0 9c c3', []),
     'mul_zf_undefined':   ('f7e1 7400 c3', [('zf', 4, 'jcc')]),
     'mul_cf_defined':     ('f7e1 7200 c3', []),
     'imul_zf_undefined':  ('0fafc1 7400 c3', [('zf', 4, 'jcc')]),
     'imul_cf_defined':    ('0fafc1 7200 c3', []),
     'shl_imm_defined':    ('c1e002 7400 c3', []),
-    'shl_imm_af_undef':   ('c1e002 27 c3', [('af', 4, 'other')]),
+    'shl_imm_af_undef':   ('c1e002 9c c3', [('af', 4, 'pushf'), ('of', 4, 'pushf')]),
     'shl_imm0_nothing':   ('c1e000 7400 c3', [('zf', 1, 'jcc')]),                       # a count of 0 writes no flag: ZF is still as at the entry
     'shl_cl_keeps_entry': ('d3e0 7400 c3', [('zf', 1, 'jcc')]),                         # by cl: the write is conditional, an undefined flag stays so
     'shl_cl_after_cmp':   ('39c0 d3e0 7400 c3', []),
-    'shl_cl_af_undef':    ('39c0 d3e0 27 c3', [('af', 4, 'other')]),                    # conditional undefined adds U to a defined flag
+    'shl_cl_af_undef':    ('39c0 d3e0 9c c3', [('cf', 4, 'pushf'), ('af', 4, 'pushf'), ('of', 4, 'pushf')]),                    # conditional undefined adds U to a defined flag
     'join_call_path':     ('39c0 7403 e800000000 7400 c3', [('zf', 2, 'jcc')]),         # one path crosses a call
     'join_both_define':   ('85c0 7405 39c0 eb00 7400 c3', []),
     'loop_back_edge':     ('31c0 39c0 7402 ebfa c3', []),
@@ -55,6 +55,14 @@ CASES = {
     'pushfd_at_entry':    ('9c c3', [(f, 1, 'pushf') for f in ('cf', 'pf', 'af', 'zf', 'sf', 'of')]),
     'lahf_after_cmp':     ('39c0 9f c3', []),
     'lahf_at_entry':      ('9f c3', [(f, 1, 'pushf') for f in ('cf', 'pf', 'af', 'zf', 'sf')]),
+    'pf_pop_and_clean':   ('21d8 9c 58 2500002000 c3', []),                             # and: AF undefined; the copy is masked down to bit 21 before ret
+    'pf_pop_ret':         ('21d8 9c 58 c3', [('af', 4, 'pushf')]),                       # a masked register leaves in eax
+    'pf_pop_test_jz':     ('21d8 9c 58 a910000000 7400 c3', [('af', 4, 'pushf')]),       # test eax,0x10 (AF) then jz: the masked bit decides a branch
+    'pf_pop_test_other':  ('21d8 9c 58 a900002000 7400 31c0 c3', []),                    # test eax,0x200000: the masked bit is not observed
+    'pf_pop_store':       ('21d8 9c 58 a300200000 31c0 c3', [('af', 4, 'pushf')]),       # mov [0x2000],eax stores the masked value
+    'pf_pop_mov_xor_and': ('21d8 9c 58 89c1 3500002000 31c8 2500002000 31c9 c3', []),        # cpuid id-bit idiom
+    'pf_popf_pushf_pop':  ('21d8 9c 9d 9c 58 2500002000 31c0 c3', []),                   # push, popf, push again, pop, mask: the mask moves through popf
+    'pf_popf_jz':         ('21d8 9c 9d 7400 c3', []),                                    # popf of a masked word masks AF only; jz reads ZF
     'cmc_at_entry':       ('f5 c3', [('cf', 1, 'other')]),
     'cmc_after_clc':      ('f8 f5 c3', []),
     'adc_at_entry':       ('11c0 c3', [('cf', 1, 'carry')]),
@@ -64,10 +72,15 @@ CASES = {
     'rep_cmps_keeps':     ('f3a6 7400 c3', [('zf', 1, 'jcc')]),                         # a zero count writes nothing
     'rep_cmps_after_cmp': ('39c0 f3a6 7400 c3', []),
     'cmps_plain_defines': ('a6 7400 c3', []),
-    'fucomip_defines':    ('dfe9 7400 c3', []),                                         # decoder table hole, covered by WR_EXTRA
+    'fucomip_no_form':    ('39c0 dfe9 7400 c3', [('-', 0, 'no-form')]),                 # x87 compares have no Form yet (item 23)
     'sahf_defines':       ('9e 7600 c3', []),
-    'test_mem_defines':   ('845e00 7400 c3', []),                                       # decoder table hole for test m8, r8, covered by HOLE
-    'test_mem_af_undef':  ('845e00 27 c3', [('af', 4, 'other')]),
+    'test_mem_defines':   ('845e00 7400 c3', []),                                       # the Form of test m8, r8 (capstone lists no flags for it)
+    'test_mem_af_undef':  ('845e00 9c c3', [('af', 4, 'pushf')]),
+    'rol_of_imm1_defined': ('f8 d1c0 7000 c3', []),                                     # the SDM defines OF of a one-bit rotate
+    'rol_cl_of_union':    ('39c0 d3c0 7000 c3', [('of', 4, 'jcc')]),                    # by cl: in-state, defined or undefined
+    'shr_imm1_of':        ('39c0 d1e8 7000 c3', []),
+    'shld_imm2_of_undef': ('39c0 0fa4c802 7000 c3', [('of', 4, 'jcc')]),
+    'imul_sf_undefined':  ('0fafc1 7800 c3', [('sf', 4, 'jcc')]),                       # the Form (SDM), not the decoder's table
     'jmp_out_is_exit':    ('39c0 e900000000', []),
     'jmp_out_unreached': ('e900100000 7400', []),                                      # the bytes after a jmp are reached by no path from the entry
     'bsf_zf_defined':     ('0fbcc1 7400 c3', []),
@@ -76,7 +89,7 @@ CASES = {
     'inc_keeps_cf':       ('40 7200 c3', [('cf', 1, 'jcc')]),                           # inc does not write CF
     'inc_zf_defined':     ('40 7400 c3', []),
     'rol_of_undefined':   ('f8 c1c003 7000 c3', [('of', 4, 'jcc')]),
-    'daa_after_add':      ('01c0 27 c3', []),
+    'daa_no_form':        ('01c0 27 c3', [('-', 0, 'no-form')]),                        # daa has no Form yet (item 23)
 }
 
 
@@ -94,6 +107,30 @@ class T(unittest.TestCase):
         rows, reads, _ = red('7400 c3')
         self.assertEqual((len(rows), reads), (1, 1))
 
+    def test_entry_consumer(self):
+        import flagcause
+        uni = {0x10: ('ptr', ['candidate']), 0x20: ('ptr', ['candidate']), 0x30: ('ptr', ['candidate', 'call'])}
+        jt = frozenset([0x10])
+        self.assertEqual([flagcause.consumer(e, uni, jt) for e in (0x10, 0x20, 0x30, 0x40)], ['jtab', 'unknown-consumer', 'call', 'unknown-consumer'])
+        self.assertEqual(flagcause.consumer(0x20, uni, frozenset()), 'unknown-consumer')
+
+    def test_summary_splits_reads_from_no_form_rows(self):
+        rd = [(0x1010, 'zf', 1, 'jcc', 'je'), (0x1020, '-', 0, 'no-form', 'fld'), (0x1030, '-', 0, 'no-form', 'fld')]     # (site, flag, origin, class, mnemonic)
+        s = g.summary([A], {A: 1}, [(A, 9, [], rd, 5, 0)])[0]
+        self.assertEqual((s['red_flag_reads'], s['no_form_rows'], s['flag_reads'], s['uncovered_by_mnemonic']), (1, 2, 5, {'fld': 2}))
+        with self.assertRaises(AssertionError):                  # a red read count above the reads is impossible by construction
+            g.summary([A], {A: 1}, [(A, 9, [], rd, 0, 0)])
+
+    def test_decode_depends_on_the_range_only(self):
+        code = bytes.fromhex('b8c3c3c3c3 7400 c3'.replace(' ', ''))                        # mov eax,imm32 (c3 bytes) ; jz ; ret
+        fresh = []
+        for lo in (A, A + 1):
+            g.MEMO.clear(); fresh.append(g.decode(Img(code), lo, A + len(code)))
+        g.MEMO.clear()
+        both = [g.decode(Img(code), lo, A + len(code)) for lo in (A, A + 1)]               # the second range overlaps the first with another alignment
+        self.assertEqual(fresh, both)
+        self.assertNotEqual(both[0][0][1], both[1][0][1])
+
     def test_undecodable_range_reported(self):
         _, _, bad = red('39c0 0f', [(A, A + 3)])
         self.assertEqual(bad, 1)
@@ -101,10 +138,43 @@ class T(unittest.TestCase):
     def test_class_of_reader(self):
         self.assertEqual([c for _, _, c in red('7400 c3')[0]], ['jcc'])
 
-    def test_decoder_holes_are_ids_not_forms(self):
-        """every id of RD_EXTRA / WR_EXTRA / HOLE is a decoder id that exists in this decoder"""
-        for t in (g.RD_EXTRA, g.WR_EXTRA, g.HOLE):
-            self.assertNotIn(-1, t)
+    def test_interprocedural(self):
+        """entries B (0x1100) .. reached by a direct transfer take the caller's state; an entry with an unknown predecessor starts undefined"""
+        def solve(parts, uni):
+            code, rows = bytearray(0x400), {}
+            for a, hx in parts.items():
+                b = bytes.fromhex(hx.replace(' ', ''))
+                code[a - A:a - A + len(b)] = b
+                rows[a] = [(a, a + len(b))]
+            g.MEMO.clear()
+            inst, res = g.solve(Img(bytes(code)), A, rows, uni, 1)
+            return inst, sorted((e, [(f, o, c) for _, f, o, c, _ in r]) for e, n, ct, r, rd, b in res if r)
+        T = ('tail', ['-'])
+        # jmp to B after cmp: B's jz reads a defined flag
+        inst, red = solve({A: '39c0 e9f9000000', A + 0x100: '7400 c3'}, {A: ('export', ['-']), A + 0x100: T})
+        self.assertEqual(red, [])
+        # the same without the cmp: the entry state is E through the jmp
+        inst, red = solve({A: 'e9fb000000', A + 0x100: '7400 c3'}, {A: ('export', ['-']), A + 0x100: T})
+        self.assertEqual(red, [(A + 0x100, [('zf', 1, 'jcc')])])
+        # a call passes the state before the call; the callee's reads are defined
+        inst, red = solve({A: '39c0 e8f9000000 c3', A + 0x100: '7400 c3'}, {A: ('export', ['-']), A + 0x100: ('call', ['-'])})
+        self.assertEqual(red, [])
+        # an entry whose address is taken (flag ptr) starts undefined even when a direct caller defines the flags
+        inst, red = solve({A: '39c0 e8f9000000 c3', A + 0x100: '7400 c3'}, {A: ('export', ['-']), A + 0x100: ('call', ['ptr'])})
+        self.assertEqual(red, [(A + 0x100, [('zf', 1, 'jcc')])])
+        # two callers: one defines, one does not: the join is undefined
+        inst, red = solve({A: '39c0 e8f9000000 c3', A + 0x10: 'e8eb000000 c3', A + 0x100: '7400 c3'},
+                          {A: ('export', ['-']), A + 0x10: ('export', ['-']), A + 0x100: ('call', ['-'])})
+        self.assertEqual(red, [(A + 0x100, [('zf', 1, 'jcc')])])
+        # a callee reached with every flag defined is still judged, and still passes its own states on: B (state 0 from A) multiplies (ZF undefined) and calls C
+        inst, red = solve({A: '39c0 e8f9000000 c3', A + 0x100: 'f7e1 e8f9000000 c3', A + 0x200: '7400 c3'},
+                          {A: ('export', ['-']), A + 0x100: ('call', ['-']), A + 0x200: ('call', ['-'])})
+        self.assertEqual(red, [(A + 0x200, [('zf', 4, 'jcc')])])
+        inst, red = solve({A: '39c0 e8f9000000 c3', A + 0x100: 'e8fb000000 7400 c3'}, {A: ('export', ['-']), A + 0x100: ('call', ['-'])})
+        self.assertEqual(red, [(A + 0x100, [('zf', 2, 'jcc')])])
+        # an entry with no direct predecessor is an unknown predecessor itself
+        inst, red = solve({A: '7400 c3'}, {A: ('call', ['-'])})
+        self.assertEqual(red, [(A, [('zf', 1, 'jcc')])])
 
 
 class Agree(unittest.TestCase):
@@ -113,7 +183,8 @@ class Agree(unittest.TestCase):
         reps = {'and': bytes.fromhex('21d8'), 'cmp': bytes.fromhex('39c0'), 'imul': bytes.fromhex('0fafc1'), 'shl0': bytes.fromhex('c1e000'),
                 'rol1': bytes.fromhex('d1c0'), 'test_mem': bytes.fromhex('845e00')}
         n, bad = flagagree.agreement(reps)
-        self.assertEqual(sorted(bad), [('imul', 'sf', 'undef', 'def'), ('rol', 'of', 'def', 'undef')])
+        self.assertEqual(sorted(bad), [('imul', 'sf', 'undef', 'def'), ('rol', 'of', 'def', 'undef'), ('test', 'af', 'undef', 'none')] +
+                         [('test', f, 'def', 'none') for f in ('cf', 'of', 'pf', 'sf', 'zf')])             # capstone lists no flags for test m8, r8
         self.assertEqual(n, 5)             # shl by a count of 0 is not compared
 
 

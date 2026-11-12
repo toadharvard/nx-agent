@@ -36,7 +36,7 @@ import gate_build  # noqa: E402
 import gate_contract  # noqa: E402
 import recipe  # noqa: E402
 
-GATES = ("order", "addr32", "eh")
+GATES = ("order", "addr32", "eh", "flags")
 TOOLS = os.path.join("ports", "fnv-nx", "lift", "gates")
 CPU_SYMBOL = "fnvnx_lift_cpu_bytes"
 PLUGIN = {"order": "fnvnx_order", "addr32": "fnvnx_addr"}
@@ -193,10 +193,91 @@ def judge_lifted_eh(root, repo, cache):
     return fold(root, [r["eh"]])
 
 
+def deps_hash(repo, pkgs):
+    """content hash of the source trees that a tool imports besides its own file (the Forms, the DSL, the runtime headers it reads): part of the cache key"""
+    h = hashlib.sha256()
+    for pkg in pkgs:
+        top = os.path.join(repo, "ports", "fnv-nx", "lift", pkg)
+        for d, ds, fs in sorted(os.walk(top)):
+            ds[:] = sorted(x for x in ds if x != "__pycache__")
+            for f in sorted(fs):
+                p = os.path.join(d, f)
+                h.update(os.path.relpath(p, top).encode() + b"\0" + open(p, "rb").read() + b"\0")
+    return h.hexdigest()
+
+
+def facts_spans(path):
+    """{entry: [(lo, hi)]} of a ranges.tsv (`ADDR8 <TAB> lo-hi[,lo-hi...]`, absolute hex addresses; `#` lines are comments)"""
+    out = {}
+    for l in open(path):
+        if l.startswith("#") or not l.strip():
+            continue
+        e, r = l.rstrip("\n").split("\t")
+        out[int(e, 16)] = [tuple(int(x, 16) for x in p.split("-")) for p in r.split(",") if p]
+    return out
+
+
+def judge_lifted_flags(root, repo, cache):
+    """Class B `flags` (item 21), judged per admitted lifted root like order/eh: the images are those whose code the pack lifts (an image is judged when a `code`
+    entry of PACK/entries.tsv lies in a range of its range facts; the images and the facts come from the externals of contract_inputs.json, `exe`
+    and `redist` for the PE files). gate_flags.py runs once per such image. Universe = flag reads + instructions without a Form + undecodable ranges + the `code`
+    entries of the pack that lie in no range of any facts image (an entry no tool judges is never certified by absence); certified = flag reads that no
+    may-undefined origin reaches."""
+    rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
+    doc = gate_contract.load_inputs(os.path.join(repo, gate_contract.INPUTS))
+    pack = recipe.load_admit(repo)[root]["cxx_origin"]["pack"]
+    pe = [e for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == pack]
+    if len(pe) != 1:
+        raise gate_contract.Red("input missing: the recipe of %s has no external %r (cxx_origin.pack)" % (root, pack))
+    ws = tempfile.mkdtemp(prefix="gate-lift-ext-")
+    try:
+        store, extc = os.path.join(cache, "store"), os.path.join(cache, "external")
+        pk = recipe.fetch_externals(pe, store, extc, os.path.join(ws, "pack"))[pack]
+        ext = recipe.fetch_externals(doc["external"], store, extc, os.path.join(ws, "facts"))
+        ef = os.path.join(pk["host"], "entries.tsv")
+        if not os.path.isfile(ef):
+            raise gate_contract.Red("input missing: the pack %s has no entries.tsv (owner L3a)" % pack)
+        code = {int(l.split("\t")[0], 16) for l in open(ef) if l.strip() and not l.startswith("#") and l.rstrip("\n").split("\t")[2] == "code"}
+        have, lack = gate_contract.images_of(doc, ext)
+        trees = sorted(e["tree"] for e in ext.values()) + [pk["tree"], deps_hash(repo, ("proof", "fnvlift", "rt"))]
+        u = c = 0
+        ids, why = [], []
+        covered = set()
+        for name, pepath, rg in have:
+            spans = facts_spans(rg)
+            mine = {a for a in code if any(lo <= a < hi for rs in spans.values() for lo, hi in rs)}
+            covered |= mine
+            if not mine:
+                continue
+            r = run_tool(repo, cache, "gate_flags.py", [pepath, os.path.dirname(rg)], ("flags",), [name, trees], {"JOBS": os.environ.get("JOBS", "4")})["flags"]
+            nf = r.get("no_form_rows", 0)
+            reads, bad = r.get("flag_reads", 0), r.get("undecodable_ranges", 0)
+            red = r.get("red_flag_reads", 0)
+            if "flag_reads" not in r:
+                u, ids = u + 1, ids + [name + ":tool"]
+                why.append("%s: %s" % (name, r.get("detail", "tool red")))
+                continue
+            u += reads + nf + bad
+            c += reads - red
+            ids += ["%s:%s" % (name, x) for x in r.get("uncertified", [])] + ["%s:%s:no-form" % (name, x) for x in r.get("no_form_sites", [])]
+            if red or nf or bad:
+                why.append("%s: %d red reads, %d instructions without a Form, %d undecodable ranges" % (name, red, nf, bad))
+        rest = sorted(code - covered)
+        if rest:
+            u += len(rest)
+            ids += ["%s:%08x" % (root, a) for a in rest[:20]]
+            why.append("%d code entries of the pack lie in no range of any facts image" % len(rest))
+    finally:
+        shutil.rmtree(ws, ignore_errors=True)
+    return u, c, ids, "; ".join(why) or "%d items in the images of the pack" % u
+
+
 def judge_root(gate, root, repo, cache, kind):
     try:
         if kind == "native":
-            return gate_argorder.judge_root(root, repo, cache, PLUGIN[gate]) if gate != "eh" else (0, 0, [], "native: no EH universe")
+            return gate_argorder.judge_root(root, repo, cache, PLUGIN[gate]) if gate not in ("eh", "flags") else (0, 0, [], "native: no %s universe" % gate)
+        if gate == "flags":
+            return judge_lifted_flags(root, repo, cache)
         if gate == "eh":
             return judge_lifted_eh(root, repo, cache)
         return judge_lifted_order(gate, root, repo, cache)
@@ -210,7 +291,7 @@ def judge_root(gate, root, repo, cache, kind):
 
 def main(argv):
     if len(argv) != 2 or argv[0] != "--gate" or argv[1] not in GATES:
-        print("usage: gate_lift.py --gate order|addr32|eh", file=sys.stderr)
+        print("usage: gate_lift.py --gate order|addr32|eh|flags", file=sys.stderr)
         return 1
     gate, repo = argv[1], "."
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-lift-cache-")

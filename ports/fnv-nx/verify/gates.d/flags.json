@@ -1,0 +1,15 @@
+{
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_lift.py",
+  "--gate",
+  "flags"
+ ],
+ "covers": [
+  "lifted"
+ ],
+ "format": "fnvnx-gatefile/1",
+ "name": "flags",
+ "result": "flags.json"
+}

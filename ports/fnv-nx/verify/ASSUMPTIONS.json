@@ -316,6 +316,7 @@
    "used_by": [
     "ports/fnv-nx/journal/inbox/orch-assumptions.md",
     "ports/fnv-nx/journal/status/l3a-lift.md",
+    "ports/fnv-nx/lift/gates/gate_flags.py",
     "ports/fnv-nx/verify/RULES.md",
     "ports/fnv-nx/verify/TOOLS.md",
     "ports/fnv-nx/verify/VERDICT.md",
@@ -605,7 +606,6 @@
    "id": "ASM-029",
    "text": "The ARMv8 memory model matches the Cortex-A57.",
    "used_by": [
-    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/verify/RULES.md"
    ],
    "aliases": [
@@ -808,8 +808,6 @@
    "text": "The instruction decoders are correct (LLVM's AArch64 descriptions, capstone).",
    "used_by": [
     "ports/fnv-nx/journal/status/l3a-lift.md",
-    "ports/fnv-nx/lift/gates/gate_flags.py",
-    "ports/fnv-nx/lift/proof/flagagree.py",
     "ports/fnv-nx/verify/TOOLS.md",
     "ports/fnv-nx/verify/VERDICT.md",
     "ports/fnv-nx/verify/objstub.py"
@@ -844,8 +842,6 @@
    "id": "ASM-045",
    "text": "The decoder's write sets name every register an instruction writes.",
    "used_by": [
-    "ports/fnv-nx/lift/gates/gate_flags.py",
-    "ports/fnv-nx/lift/proof/flagagree.py",
     "ports/fnv-nx/verify/TOOLS.md",
     "ports/fnv-nx/verify/objstub.py"
    ],
