@@ -79,7 +79,7 @@ void os_cpu_boost(int fast_load);
  * Switch's error applet; a no-op where the platform has none (the caller logs the text). */
 void os_show_message(const char *caption, const char *text);
 
-/* Text entry through the system software keyboard (docs/AUDIO_INPUT.md "Text entry"); the host service FNVNX_PLAT_TEXT_ENTRY
+/* Text entry through the system software keyboard (docs/AUDIO_INPUT.md "Text entry"); the host service TEXT_ENTRY (hostapi.h)
  * (toolchain/include/fnvnx/hostapi.h), same arguments. Opens the applet for at most max_len UTF-16 units (1..500) starting with
  * init[0..init_n) (init NULL: empty). Returns 1: entered (out[0..*n) holds the text, out[*n] = 0, *n <= max_len; out has room for
  * max_len + 1 units), 0: the user cancelled (out and *n untouched), <0: -FNVNX_HE_BADINPUT (max_len 0 or above 500, out or n NULL)

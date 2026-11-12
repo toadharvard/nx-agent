@@ -5,7 +5,7 @@
  * (hostapi_total.py generates the list of declared services from the header with the C preprocessor: FNVNX_DECL_H); every service gets
  * its wrong-nargs, invalid-argument and success cases. Test names (hostapi.h table): total_declared, total_unknown, total_nargs,
  * total_ext, cpu_boost, thread_activity, thread_ids, message, display_docked, via_dispatch_vm, via_dispatch_section,
- * via_dispatch_unmap_fixed, tz_at, via_dispatch_sock. */
+ * tz_at, via_dispatch_sock. */
 #include "kdouble.h"
 #include "fnvnx/hostapi.h"
 
@@ -64,10 +64,10 @@ static const struct { const char *name; unsigned v; } g_decl[] = {
     {"FNVNX_PLAT_MESSAGE", FNVNX_PLAT_MESSAGE}, {"FNVNX_PLAT_VM_RESERVE", FNVNX_PLAT_VM_RESERVE},
     {"FNVNX_PLAT_VM_COMMIT", FNVNX_PLAT_VM_COMMIT}, {"FNVNX_PLAT_VM_DECOMMIT", FNVNX_PLAT_VM_DECOMMIT},
     {"FNVNX_PLAT_VM_RELEASE", FNVNX_PLAT_VM_RELEASE}, {"FNVNX_PLAT_VM_PROTECT", FNVNX_PLAT_VM_PROTECT},
-    {"FNVNX_PLAT_DISPLAY_DOCKED", FNVNX_PLAT_DISPLAY_DOCKED}, {"FNVNX_PLAT_ACCESS_FAULT_HANDLER", FNVNX_PLAT_ACCESS_FAULT_HANDLER},
+    {"FNVNX_PLAT_DISPLAY_DOCKED", FNVNX_PLAT_DISPLAY_DOCKED},
     {"FNVNX_PLAT_SECTION_CREATE", FNVNX_PLAT_SECTION_CREATE}, {"FNVNX_PLAT_SECTION_MAP", FNVNX_PLAT_SECTION_MAP},
     {"FNVNX_PLAT_SECTION_UNMAP", FNVNX_PLAT_SECTION_UNMAP}, {"FNVNX_PLAT_SECTION_FREE", FNVNX_PLAT_SECTION_FREE},
-    {"FNVNX_PLAT_UNMAP_FIXED", FNVNX_PLAT_UNMAP_FIXED}, {"FNVNX_PLAT_TZ_AT", FNVNX_PLAT_TZ_AT},
+    {"FNVNX_PLAT_TZ_AT", FNVNX_PLAT_TZ_AT},
     {"FNVNX_PLAT_SOCK_SOCKET", FNVNX_PLAT_SOCK_SOCKET}, {"FNVNX_PLAT_SOCK_CLOSE", FNVNX_PLAT_SOCK_CLOSE}, {"FNVNX_PLAT_SOCK_BIND", FNVNX_PLAT_SOCK_BIND}, {"FNVNX_PLAT_SOCK_LISTEN", FNVNX_PLAT_SOCK_LISTEN}, {"FNVNX_PLAT_SOCK_ACCEPT", FNVNX_PLAT_SOCK_ACCEPT}, {"FNVNX_PLAT_SOCK_CONNECT", FNVNX_PLAT_SOCK_CONNECT}, {"FNVNX_PLAT_SOCK_SENDTO", FNVNX_PLAT_SOCK_SENDTO}, {"FNVNX_PLAT_SOCK_RECVFROM", FNVNX_PLAT_SOCK_RECVFROM}, {"FNVNX_PLAT_SOCK_SETSOCKOPT", FNVNX_PLAT_SOCK_SETSOCKOPT}, {"FNVNX_PLAT_SOCK_GETSOCKOPT", FNVNX_PLAT_SOCK_GETSOCKOPT}, {"FNVNX_PLAT_SOCK_POLL", FNVNX_PLAT_SOCK_POLL}, {"FNVNX_PLAT_SOCK_GETFL", FNVNX_PLAT_SOCK_GETFL}, {"FNVNX_PLAT_SOCK_SETFL", FNVNX_PLAT_SOCK_SETFL}, 
 };
 #endif
@@ -120,7 +120,7 @@ int main(int argc, char **argv)
         {FNVNX_PLAT_CPU_BOOST, 1}, {FNVNX_PLAT_THREAD_ACTIVITY, 2}, {FNVNX_PLAT_MESSAGE, 2}, {FNVNX_PLAT_VM_RESERVE, 2}, {FNVNX_PLAT_VM_COMMIT, 2},
         {FNVNX_PLAT_VM_DECOMMIT, 2}, {FNVNX_PLAT_VM_RELEASE, 1}, {FNVNX_PLAT_VM_PROTECT, 3}, {FNVNX_PLAT_DISPLAY_DOCKED, 0},
         {FNVNX_PLAT_SECTION_CREATE, 1}, {FNVNX_PLAT_SECTION_MAP, 4}, {FNVNX_PLAT_SECTION_UNMAP, 2}, {FNVNX_PLAT_SECTION_FREE, 1},
-        {FNVNX_PLAT_UNMAP_FIXED, 3}, {FNVNX_PLAT_TZ_AT, 2},
+        {FNVNX_PLAT_TZ_AT, 2},
     };
     int calls0 = s_act_calls + s_boost_calls + s_shown;
     for (size_t i = 0; i < sizeof need / sizeof need[0]; i++) {
@@ -222,14 +222,6 @@ int main(int argc, char **argv)
         if (fn != FNVNX_PLAT_SOCK_GETFL && fn != FNVNX_PLAT_SOCK_SETFL && fn != FNVNX_PLAT_TZ_AT && fn != FNVNX_PLAT_THREAD_SELF)
             T(call(fn, 5, 0, 0, 0, 0) == FNVNX_EXT_NO_SERVICE);
 
-    /* ---- via_dispatch_unmap_fixed */
-    {
-        void *b = t_memalign(PG, 0x2000);
-        u64 s = (u64)(uintptr_t)b, a = g_alo + (30ull << 20);
-        T(h_map_fixed(a, 0x2000, s) == 0);
-        T(call(15, 3, a, 0x2000, s + 0x1000, 0) == FNVNX_HE_RANGE && call(15, 3, a, 0x2000, s, 0) == 0 && kstate(a) == A_FREE);
-        t_free(b);
-    }
     T(g_free_while_locked == 0 && g_unmapcode_with_views == 0);
     if (unserved) printf("host_total: %d declared service(s) not served%s\n", unserved, strict ? "" : " (reported, not failed here: hostapi_total.py --served fails on it)");
     printf("host_total: %s\n", g_fail ? "FAIL" : "ok");

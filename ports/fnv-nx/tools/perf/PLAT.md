@@ -11,7 +11,7 @@ Recording is off by default: each report site pays one load. It starts with `fnv
 
 | class | reported by | detail |
 |---|---|---|
-| unimpl | `fnvnx_plat_note(FNVNX_PLAT_UNIMPL, ...)` for an entry whose function is missing and `fnvnx_wine_fixme(id)` for a body that does what Wine 9.0 does (name `wine-fixme`, detail `id N`): BinkOpen (no movie player), an unsupported TEB offset (`__readfsdword`) | - |
+| unimpl | `fnvnx_plat_note(FNVNX_NOTE_UNIMPL, ...)` for an entry whose function is missing and `fnvnx_wine_fixme(id)` for a body that does what Wine 9.0 does (name `wine-fixme`, detail `id N`): BinkOpen (no movie player), an unsupported TEB offset (`__readfsdword`) | - |
 | noop | `FNVNX_NOOP()` in a documented Switch no-op: SteamAPI_Init and the Steam / GOG Galaxy interface accessors, winsock offline (WSAStartup, socket, gethostbyname), DebugBreak | - |
 | open | a failed CreateFileA, the CRT's fopen (fnvnx_fopen) and _open (fnvnx_open) | path class (bsa, esm, save, ini, other), the Win32 error or errno, `ci yes/no/nodir` (see below), and an FNV hash of the Windows path |
 | decode | `ov_open_callbacks` failing (or a build without libvorbis), an MP3 that minimp3 cannot open | the libvorbisfile code, or the decoder |
@@ -38,7 +38,7 @@ address.
 **Using it in other code.**
 - New stand-ins mark missing functionality with `FNVNX_UNIMPL()` and deliberate Switch no-ops with
   `FNVNX_NOOP()`.
-- A render backend can call `fnvnx_plat_note(FNVNX_PLAT_UNIMPL, name, caller, detail)` for unsupported D3D9 paths.
+- A render backend can call `fnvnx_plat_note(FNVNX_NOTE_UNIMPL, name, caller, detail)` for unsupported D3D9 paths.
   The null device is generated (toolchain/game) and is not marked here.
 
 ## The report: tools/perf/plat.py

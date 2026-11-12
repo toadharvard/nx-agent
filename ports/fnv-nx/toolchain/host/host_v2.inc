@@ -174,16 +174,6 @@ static u64 h_wall_time_us(void) {
     gettimeofday(&tv, NULL);
     return (u64)((s64)tv.tv_sec * 1000000 + tv.tv_usec);
 }
-/* hostapi.h: off_s / 60 (C division) of the TZ_AT zone (the console's time service, timeToCalendarTimeWithMyRule) at this moment; 0 when
- * the time service has no answer for it. The same source as TZ_AT (host_platform.inc). */
-static u64 h_tz_offset_minutes(void) {
-    struct timeval tv;
-    TimeCalendarTime cal;
-    TimeCalendarAdditionalInfo info;
-    gettimeofday(&tv, NULL);
-    if (R_FAILED(timeToCalendarTimeWithMyRule((u64)tv.tv_sec, &cal, &info))) return 0;
-    return (u64)(s64)(info.offset / 60);
-}
 static u64 h_random64(void) { return randomGet64(); }
 static u64 h_memory_info(u64 out) {
     FnvnxMemInfo *m = (FnvnxMemInfo *)out;
@@ -290,7 +280,7 @@ static u64 h_fs_dir_close(u64 id) {
     .thread_yield = (u64)h_thread_yield, .thread_set_priority = (u64)h_thread_set_priority,              \
     .thread_set_cpu = (u64)h_thread_set_cpu, .wait_on_address = (u64)h_wait_on_address,                  \
     .wake_address = (u64)h_wake_address, .wall_time_us = (u64)h_wall_time_us,                            \
-    .tz_offset_minutes = (u64)h_tz_offset_minutes, .random64 = (u64)h_random64,                          \
+    .random64 = (u64)h_random64,                          \
     .memory_info = (u64)h_memory_info, .cpu_count = (u64)h_cpu_count, .fs_open = (u64)h_fs_open,          \
     .fs_read = (u64)h_fs_read, .fs_write = (u64)h_fs_write, .fs_pread = (u64)h_fs_pread,                 \
     .fs_pwrite = (u64)h_fs_pwrite, .fs_seek = (u64)h_fs_seek, .fs_truncate = (u64)h_fs_truncate,          \

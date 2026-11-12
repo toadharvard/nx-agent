@@ -18,7 +18,7 @@ void fnvnx_plat_note(int cls, const char *name, unsigned caller, const char *det
 #ifdef __cplusplus
 }
 #endif
-#define NX_PLAT_CLASS_UNIMPL 0   /* FNVNX_PLAT_UNIMPL */
+#define NX_PLAT_CLASS_UNIMPL 0   /* FNVNX_NOTE_UNIMPL */
 #define NX_PLAT_UNSUPPORTED(name, value)                                                                              \
     do {                                                                                                              \
         if (&fnvnx_plat_on && fnvnx_plat_on && fnvnx_plat_note) {                                                     \
