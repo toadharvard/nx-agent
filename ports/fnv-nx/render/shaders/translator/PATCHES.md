@@ -4,7 +4,7 @@ Applied in this order on the pinned trees of fnv-nx-build (git archive of the pi
 
 | external | pin | tree_sha256 (verify/cas.py ingest) | patches, in order |
 |---|---|---|---|
-| mojoshader | `tools/mojoshader` ad5dff84830c2863c841f4b1f4e3df78c705b383 | e49a1b65e09c86647fd8c0b26c7a8e16e4a16e6ad1290a1e7ada85047306f361 | `../translator/mojoshader.patch`, `translator/mojoshader_units.patch` |
+| mojoshader | `tools/mojoshader` ad5dff84830c2863c841f4b1f4e3df78c705b383 | e49a1b65e09c86647fd8c0b26c7a8e16e4a16e6ad1290a1e7ada85047306f361 | `../translator/mojoshader.patch`, `translator/mojoshader_units.patch`, `translator/mojoshader_prune.patch` |
 
 Patched trees (cas.py ingest, measured at the commit of this note): mojoshader after both patches 7af1fe43..., uam after the three patches 4e16a499...
 
@@ -16,3 +16,11 @@ clone has no HEAD~, so CMake's git step always gave "???"). Result: 13 units, al
 output byte-equal to the committed `total/fnvnx_sm_rows.h`, which `gen_sm_rows.py --check` compares).
 
 uam patches (`uam_gen.patch`, `uam_nomain.patch`) were removed: generated content is not tracked. See journal/inbox/l6-render-w1b.md, "after the first frame".
+
+## mojoshader_prune.patch (reach census)
+Rule: the root holds only what its ABI (the functions of include/fnvnx_shaders.h that its objects define) reaches. `tools/reach_census.py`
+links the recipe's -ffunction-sections/-fdata-sections objects with `ld --gc-sections --print-gc-sections -u <root>` (binutils of env.json)
+and writes reach.tsv; `tools/prune_collected.py` deletes a file with no reached code and every collected function of the other files. A
+collected function that the remaining code still calls (the compiler inlined all calls; the out-of-line copy is unreferenced) stays: the loop
+adds each undefined symbol of the pruned objects (a build fact) to the keep list until none is left (3 rounds). Census of the result:
+589 non-empty sections, 12 collected (the 12 inlined-only helpers). Measurement only, the build is `recipe.py`.
