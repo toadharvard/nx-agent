@@ -13,7 +13,8 @@ Rule (mechanical, from the images only; the engine is pemanifest.Mod and regsite
 Output rows: module, site, api, function, kind, detail. `kind` = stock-font | stock-other | api-site; `detail` = the stock id, or the exports that
 the backward closure ends at (`unresolved: ...` when it does not end at exports only), and `imported` when the exe imports one.
 Assumptions: those of regsites.py (ASM-001, ASM-003, ASM-006, ASM-012, ASM-013; registry verify/ASSUMPTIONS.json); Win32 as documented (ASM-003), the stock object ids of wingdi.h.
-Usage: fontfaces.py <dir-with-modules> <root.exe> <out.tsv> [dynamic.dll,...]
+Usage: fontfaces.py <dir-with-modules> <root.exe> <out.tsv> --bridge bridge.tsv --dllkind dllkind.py --dllkind-sha SHA256 [--facts DIR]
+Image set: the root and the dlls of dllkind role `image` (pemanifest.closure); no name list.
 """
 import os, sys
 
@@ -45,15 +46,9 @@ def exports_of(path, base):
     return {base + s.address: (s.name or b"#%d" % s.ordinal).decode() for s in pe.DIRECTORY_ENTRY_EXPORT.symbols} if hasattr(pe, "DIRECTORY_ENTRY_EXPORT") else {}
 
 
-def main(d, root, out, dynamic=""):
+def main(d, root, out, argv=()):
+    mods = pemanifest.closure_from_argv(list(argv), d, root)[0]
     files = {f.lower(): os.path.join(d, f) for f in os.listdir(d) if f.lower().endswith((".exe", ".dll"))}
-    mods, todo = {}, [m.lower() for m in dynamic.split(",") if m] + [root.lower()]
-    while todo:
-        n = todo.pop()
-        if n in mods or n not in files:
-            continue
-        mods[n] = pemanifest.Mod(files[n])
-        todo += sorted({dll for dll, _, _ in mods[n].imports})
     rootmod = mods[root.lower()]
     imported = {}   # module -> {export names the closure imports from it}
     for m in mods.values():
@@ -117,4 +112,4 @@ if __name__ == "__main__":
     funcfacts.facts_dir_from_argv(sys.argv)
     if len(sys.argv) < 4:
         sys.stderr.write(__doc__); sys.exit(2)
-    main(*sys.argv[1:5])
+    main(*sys.argv[1:4], argv=sys.argv[4:])

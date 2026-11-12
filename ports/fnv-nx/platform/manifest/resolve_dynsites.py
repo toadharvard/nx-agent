@@ -350,6 +350,7 @@ def selftest():
 def main(argv=None):
     if argv is None and '--selftest' in sys.argv:
         return selftest()
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import funcfacts
     ap = argparse.ArgumentParser()
     ap.add_argument('--contract', required=True)
