@@ -122,6 +122,14 @@ The owner's words: "Транк никогда красный. Всегда зе�
   - **Registry.** The hive holds exactly the keys that the exe and modules read, found statically from their call
     sites. Values come from the declared machine (for example `Installed Path` = the game directory). A key with no
     declared value is absent, the same as on a machine where nothing wrote it. No installer script is needed.
+  - **FalloutPrefs.ini (orchestrator decision, 2026-11-12, revised).** The launcher binary is not in the owner's
+    gamedata, so its output cannot be derived. Rule, the same as for the registry: the file holds exactly the keys
+    that the exe's own code requires before its main path, with values of the declared machine, and every other key is
+    absent so the exe uses its own built-in default. Found statically: WinMain compares `[Display] sD3DDevice` with
+    `IDirect3D9::GetAdapterIdentifier(0,0).Description`, so the file is `[Display]` / `sD3DDevice=<the declared
+    adapter's Description, as our D3D9 returns it>` and nothing else. The platform (L5) checks statically that every
+    FalloutPrefs setting the exe reads has a default in the exe's settings table; the emulator (L4) mounts the file.
+    If the owner's launcher or installed FalloutPrefs.ini later enters gamedata, the file is derived from it instead.
 - Merges stop while anything is red. That is intended. Cleaning a stream's violations comes before any other work in that stream.
 
 ## Owner decisions of 2026-11-10 (do not re-ask)
@@ -231,7 +239,7 @@ The owner's words, on a render defect that unit tests missed because the sibling
     hand-written stand-ins of sibling files.
   - The check is mechanical, per test binary: (symbols the test defines) ∩ (symbols the product roots define) = ∅.
     There is no allow-list. The owner is L1, as part of the stub gate.
-- Below the product there is one boundary: deko3d, libnx and the kernel. A test that runs on the host meets it in one
+- Below the product there is one boundary: the GL library (for the OpenGL backend), deko3d, libnx and the kernel. A test that runs on the host meets it in one
   shared model, the L4 boot machine (its GPU and kernel model, checked against its references). There is no
   per-test double of it.
 - Failure injection is allowed only as an input of that shared model, such as a kernel or allocator result that
@@ -272,10 +280,58 @@ The owner's words: "Агенты вызывают соннетов которы�
   - every current task, with its worker session id and status: doing, done (commit) or blocked (by what, owner);
   - the layer's global progress numbers, with the commit they were measured at.
   - The orchestrator collects these files into the overall progress.
-- **One render backend: deko3d.**
-  - Desktop GL (`gl4`), Mesa (llvmpipe, switch-mesa, Gallium Nine) and host GL packages are not product, and are not
-    part of the boot machine.
-  - The emulator runs the same product backend as the console. The boot machine's GPU is the L4 model of the deko3d
-    boundary (the dk* functions, the libnx calls it uses and the command buffers).
-  - Shaders run in that model from the DKSH that the build produced. An instruction that the model does not cover makes
-    the build red.
+- **Two render backends: OpenGL and deko3d (owner correction, 2026-11-11 22:45; it replaces the earlier
+  "one backend" line, which was the orchestrator's mistake).** The owner's words: "их два. Один опенгл другой деко"
+  and "Нахуя ты гл удалил. Ты же рендерил с помощью него."
+  - The OpenGL backend (`gl4`, `nxgl`, the renderer pair and `verify/bootgpu.py` with its GL library) is product and
+    stays. It is the backend that already rendered frames, and it renders in the emulator. Nothing of it is deleted.
+  - The deko3d backend (L6A, `render/backend`) is the second backend, built beside it, for the console.
+  - **OpenGL is the reference for deko3d** (owner, 22:50: "Опенгл должен был быть эталоном для деко"). The same
+    nxgpu command stream (the same D3D9 front end, the same scenes and game frames) is rendered by both backends, and
+    the deko3d frames are checked against the GL frames. A difference is a deko3d defect until it is explained by
+    rule. GL frames are produced on the boot machine with the GL library. This check verifies deko3d; it never
+    selects code.
+  - The D3D9 front end (L6) serves both through the same nxgpu ABI.
+  - The worker branches that deleted GL (`claude/fnv-l6-render-w1` 89fa6a889, `claude/fnv-l4-verify-w1` 68e37dab7)
+    are not merged, ever. No session deletes or disables GL, Mesa in the boot machine, or their tests.
+
+## Owner order of 2026-11-11, night: the first frame in this budget, correct by construction (binding)
+
+The owner's words: "Трекай прогресс послойно и прогрессируй всегда. Задача понятная. Осталось 50% недельного лимита. За
+это время можно закрыть первый кадр точно. Что говорить об остальном. Опять же все должно быть корректно по
+построению."
+
+- **Target:** the first frame in the L4 emulator within the remaining half of the weekly usage limit. Everything a
+  session does is measured against that path: product roots → lifted packs as roots → ELF → boot → WinMain → menu →
+  first frame.
+- **Spend only on the path.** Work that does not move a layer toward the first frame waits until after it. Workers are
+  Sonnet; long or mechanical runs go to farms or workers, not to a lead's own context. No repeated censuses of numbers
+  that did not change; a gate reads cached facts.
+- **Correct by construction.** Each step is closed by its rule and gate, never by a run that happened to pass. A shortcut
+  that breaks a rule (a stub, a double, a second build path, a new assumption, a heuristic) is not progress: it is red.
+- **Progress is tracked per layer** in `ports/fnv-nx/journal/status/<layer>.md` (see "late night"); the orchestrator
+  collects them into `ports/fnv-nx/journal/status/ALL.md` on the integration branch every hour.
+
+## Owner order of 2026-11-11, 23:00: the orchestrator decides, the owner is not disturbed (binding)
+
+The owner's words: "Я запрещаю меня тревожить и просить мое да. Делай что хочешь... Я разрешаю тебе как оркестратору
+решать что архивировать закрывать а что нет. Ты главный. А я сплю. Меня нельзя тревожить и нельзя не делать то что
+необходимо."
+
+- No session asks the owner for a yes, a confirmation or a choice. The orchestrator decides everything the owner would
+  decide, within these rules and the Legal limits, and records the decision in ALL.md.
+- The orchestrator decides which sessions are archived, stopped, resumed or created (leads, workers, farms, old waves).
+  Stale, finished or duplicate sessions are archived without asking.
+- Nothing necessary is left undone for want of an answer: a blocked decision goes to the orchestrator, never to the owner.
+- No messages to the owner except milestones on the goal path (exe entry, WinMain, menu, first frame, Switch).
+
+## Owner order of 2026-11-11, 23:00: GOG Galaxy is not lifted (binding)
+
+The owner's words: "нахуя лифтить гэлакси... Ну нет доступа к нему. Похуй на него. Это как сокеты."
+
+- Galaxy.dll and GalaxyWrp.dll are not lifted. The declared machine has no Galaxy service, the same as it has no network.
+- Every Galaxy entry the exe or a module reaches answers the documented "Galaxy unavailable / not initialized / not
+  signed in" result of the Galaxy SDK, the same way network calls answer the documented "network down" error. It is a
+  declared-machine body (CLAUDE.md "The declared machine"), with the SDK documentation cited per function, not a stub.
+- Owner of the bodies: platform (L5). Lifting work on Galaxy stops; modules.tsv lists Galaxy as a declared-machine
+  module, not as a lifted one.
