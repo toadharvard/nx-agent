@@ -118,3 +118,4 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - Next, same class: the xc runner (xc.c, mkxctab, XC1/XC2, dyninit_rewrite's ??__E emission). Verdict pending: envcheck fails in w20's container, so the env setup is rerun.
 - 03:13Z MERGER order for L1: exepin (w4, priority from the orchestrator: a required gate for product roots), w16, w17, w12. env.json conflicts resolved by union of disjoint pins (authorized).
 - 03:14Z w5 adds a new item: env.json profile toolchain-build (for L5 w14's guest runtime from source), with envcheck --profile, a chroot-only setup script, and the debs mirrored.
+- 03:15Z w15 3a6ec1b2: cross-root outputs/uses (test_uses 9/9; test_link 45/45 and test_recipe 53/53 at bcf281fb). Full verdict running. toolchain-build package list from L5 w14 forwarded to w5 (full closure plus sha256; pyelftools as a deb).
