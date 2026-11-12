@@ -280,3 +280,41 @@ What is needed to avoid the product (not asserted, needs a proof):
 - One global coupling: `num_consts = (cur + 1) >> 1` where cur counts the np2-flagged 2D samplers (7734-7749). It declares `ps_samplerNP2Fixup[num_consts]`, which is zero-sized when no flagged sampler resolves to 2D.
 - Factorisation would be: enumerate each sampler's args independently, plus the np2 pattern class (flagged count and whether it is 0), with a proof that compile status is the conjunction over regions.
 I did not prove it. NFIX itself is a context constant (the format-table fixups: complex YUY2, UYVY, YUV, YV12, NV12, P8 = 6 descs, plus scaling fixups, whose set depends on the GL extensions, utils.c:3530-3666); the farm should state it from its run.
+
+## Domain restrictions by context facts (answer to the lead's (a)(b)(c)); sm_domain.py updated
+
+(a) np2 bit: domain {0}.
+- shader.c:2952-2954 sets np2_fixup[i] only if `!(texture->flags & WINED3D_TEXTURE_POW2_MAT_IDENT)`.
+- texture.c:3931 sets POW2_MAT_IDENT on every texture; it is cleared only for gl_type TEX_RECT (3962-3966) or WINED3D_TEXTURE_COND_NP2_EMULATED (3968-3972).
+- Both are set only when the dimensions are not powers of two and `!d3d_info->texture_npot` (texture.c:3814-3815, 3831-3847).
+- texture_npot = supported[ARB_TEXTURE_NON_POWER_OF_TWO] (adapter_gl.c:5198); a GL >= 2.0 context sets it by version (adapter_gl.c:3287). The R500/NV FX removal (adapter_gl.c:900-931) is vendor-gated.
+- Mesa 25.2.8: lp_screen.c:214 `caps->npot_textures = true;`. I did not read the st_extensions.c mapping from that cap to the GL extension; the version rule above applies to a 4.5 context in any case.
+- So the bit is never set, ps_samplerNP2Fixup is never declared, and the num_consts coupling disappears.
+
+(b) colour fixup: NFIX = 2 = {identity, "xyZW"}.
+- In the args only a non-swizzle fixup survives (shader.c:2932; wined3d_private.h:4663-4666: texture_swizzle and not complex and not scaling).
+  - texture_swizzle = ARB_TEXTURE_SWIZZLE, GL 3.3 (adapter_gl.c:3340).
+- d3d9 sets WINED3D_LEGACY_UNBOUND_RESOURCE_COLOR (d3d9/directx.c:686), so the legacy fixup rows apply (utils.c:3594-3604).
+- Core-context caps (WINED3D_GL_LEGACY_CONTEXT false, EXT_TEXTURE_SNORM from GL 3.1: adapter_gl.c:3319; NV_TEXTURE_SHADER absent). Rows applied in table order, last one wins:
+  - R8G8_SNORM, R16G16_SNORM, R8G8B8A8_SNORM, R5G5_SNORM_L6_UNORM end as XY11 / XYZW: not scaling.
+  - R8G8_SNORM_L8X8_UNORM ("xyZW") has no EXT_TEXTURE_SNORM row (utils.c:3550-3553): scaling fixup, stays.
+  - All other table fixups are swizzles (X11W, XY1W, XXXX, YX11, 000X, XXXY, XXX1): they become identity in the args.
+- Complex fixups (YUY2, UYVY, YV12, NV12, P8: utils.c:3610-3666) do not occur: env_handheld.tsv / env_docked.tsv CheckDeviceFormat (restype 3, 4, 5) accepts none of their formats (FOURCC YUY2/UYVY/YV12/NV12, P8 = 0x29). The accepted texture set (hex): 0x15-0x1a 0x1c 0x1e-0x24 0x32 0x33 0x3c-0x3f 0x40 0x46 0x4b 0x4d 0x50-0x54 0x65 0x66 0x6e-0x74 plus FOURCC DXT1-5, ATI1/ATI2, ATOC, INTZ, RESZ, NULL.
+- Of the accepted formats only D3DFMT_X8L8V8U8 (0x3e) maps to R8G8_SNORM_L8X8_UNORM. NFIX = 2.
+
+(c) texture type per declared 2d/volume sampler: NOT fixed by the dcl in wine 9.0.
+- shader.c:2899-2927 starts from the declared type (3D to 3D, CUBE to CUBE, else 2D), and then overrides with the bound texture:
+  - bound 3D texture with a declared 2D sampler gives 3D;
+  - bound 2D texture (not a legacy cubemap) with a declared 3D sampler gives 2D.
+- pixelshader_get_resource_type reads it for every declared sampler (shader.c:3107-3128).
+- Domain per declared 2d/volume sampler = 2 (2D, 3D); cube = 1; ps_1_x keeps the full product.
+- The "dcl only" domain of 1 holds only if the D3D9 front end guarantees that the bound texture type equals the declared type. D3D9 allows SetTexture with any texture type, so I cannot cite such a guarantee. The script takes both (--tex2 2, --tex2 1).
+
+Also (new): srgb_correction has 1 value. Condition: shader.c:2775-2778, only if `!d3d_info->srgb_write_control`; srgb_write_control = ARB_FRAMEBUFFER_SRGB (adapter_gl.c:5206, GL 3.0), and d3d9 sets WINED3D_SRGB_READ_WRITE_CONTROL (directx.c:686). ffp_alpha_test is false on a core context (adapter_gl.c:5192), so alpha_test_func keeps 8 values.
+
+Totals (sm_domain.py --nfix 2 --np2 1; at my branch head, 15791 shaders, distinct bytecodes):
+| tex2 | |ps compile set| | vs | |R| | total |
+|---|---|---|---|---|
+| 2 (Wine override) | 4,985,192,486,272 | 342,344 | 69,642 | 4.985e12 |
+| 1 (dcl only) | 118,694,016 | 342,344 | 69,642 | 119,036,360 + 69,642 = 119,106,002 |
+At 10 ms per item, 119.1 million items need 1.19 million core-seconds = about 83 h on 4 cores. Neither row fits the 12 h budget (about 17 million items).

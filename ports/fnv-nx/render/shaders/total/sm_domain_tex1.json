@@ -1,25 +1,26 @@
 {
  "R": 69642,
- "commit": "b575bb94",
+ "commit": "84ce4886",
  "compile_set_all": {
-  "ps": 2344532921995152376284717440,
+  "ps": 927412288,
   "vs": 5461848
  },
  "compile_set_distinct": {
-  "ps": 293066615249949958598763776,
-  "total": 293066615249949958599106120,
+  "ps": 118694016,
+  "total": 119036360,
   "vs": 342344
  },
- "nfix": 7,
+ "nfix": 2,
+ "np2": 1,
  "per_model": {
   "ps_2_x": {
    "all_shaders": 7604,
-   "distinct_args": 293066615249907511433030144,
+   "distinct_args": 118046976,
    "distinct_shaders": 1190
   },
   "ps_3_0": {
    "all_shaders": 556,
-   "distinct_args": 42447165733632,
+   "distinct_args": 647040,
    "distinct_shaders": 176
   },
   "vs_1_1": {
@@ -55,12 +56,13 @@
   "8": 16,
   "9": 4
  },
- "ps_distinct_without_sampler_dims": 677888,
+ "ps_distinct_without_sampler_dims": 338944,
  "shaders": {
   "ps_all": 8160,
   "ps_distinct": 1366,
   "vs_all": 7631,
   "vs_distinct": 443
  },
+ "tex2": 1,
  "vs_classes": 146
 }
