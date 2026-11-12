@@ -8,7 +8,7 @@ objects (objects.json "objects") are judged; no product root: universe 0, green.
 ports/fnv-nx/verify, sibling of lift/, the way verify/gate_contract.py imports its own; a checkout without verify/ cannot run the gate (no result file: red).
 All object input handling is in `read_inputs` (objects.json -> [(unit, object path)]) and `read_f2i` (the plugin's file of one object).
 The table files are files of the admitted root that holds them (L3a's guest root lift/rt: rcpref.h, rcptab.c, rcptab.cert.json): the item
-`<root>:rcpcert` exists iff the root's directory holds rcptab.c; a root without the table has no such item (universe 0 for check 1 until the root lands).
+`<root>:rcpcert` exists iff an object of the root defines or references a table symbol that the root's rcpref.h declares (`#define FNVL_RCP_REF_SYMBOLS "a b"`, parsed; the names are read from the objects' symbol tables); a root with no such object has no item (universe 0 for check 1).
 
 Check 0, dependency (item `<root>:forms`): the correctness of the helpers sse_f2i / fv_i, whose conversions this gate lets through, is
 established by the form certificates, not here. The item is certified iff the gate `forms` (formgate.py, the one copy) is green on its own
@@ -54,6 +54,9 @@ object-level necessary condition:
       {function, file, line, kind: conv|builtin|asm}) into the CC stage's /out; the recipe keeps it as obj/<unit>.o.f2i.json next to the object.
       Rule: every object has its result file, its `unit` field equals the unit of objects.json, and `findings` == []; a missing or malformed file,
       another unit, or any finding is a finding of the object.
+  3c (native C++ unit) a unit of a root whose cxx_origin is native needs, in its CC stage document (gate_datamodel.cc_docs, the one reader), the declared
+      input /plug/fnvnx_ftoi and the argv flag -fplugin=/plug/fnvnx_ftoi/fnvnx_ftoi.so: the compile ran the plugin that rewrites or rejects every
+      conversion. A lifted root's units need no plugin (the lifter emits the conversions through the helpers); their f2i file is judged by 3a.
   3b (object) an object with at least one FCVT{Z,N,M,P,A}{S,U} / FJCVTZS instruction (capstone ids, all sections, scalar and vector)
       needs `sites` > 0 in its result file (the unit has a conversion site in some function, helper or not). It catches a conversion
       that entered the object by a route the plugin does not see (an asm without FP operands, the assembler, a hand-written .S): with
@@ -68,7 +71,7 @@ object-level necessary condition:
   clobber does no conversion; 3b backs it up for units with no site), A-F2ICONST (no conversion of a C literal occurs in lifted code), A-F2INATIVE
   (native bodies compiled with the fnvnx_ftoi plugin are judged by the L2 rules, not here).
 
-Universe: per product root: `<root>:rcpcert`, `<root>:forms`, and for every object `rcp:<root>/<unit>` and `f2i:<root>/<unit>`; a root that does not
+Universe: per product root: `<root>:rcpcert` (when the table symbols occur), `<root>:forms`, and for every object `rcp:<root>/<unit>` and `f2i:<root>/<unit>`; a root that does not
 build or whose recipe is invalid is the one item `<root>:inputs` (uncertified, reason in detail: never skipped). Certified: items with no finding.
 uncertified: the first 50 ids sorted. Exit 0 iff green."""
 import hashlib
@@ -90,6 +93,7 @@ sys.path.insert(0, os.path.join(VERIFY, "..", "contract"))
 sys.path.insert(0, VERIFY)
 from proof import formgate  # noqa: E402
 import gate_build  # noqa: E402
+import gate_datamodel  # noqa: E402     (cc_docs: the reader of the CC stage documents, the one copy)
 import gatefile  # noqa: E402     (ports/fnv-nx/contract)
 import recipe  # noqa: E402
 
@@ -232,6 +236,34 @@ def scan_object(path):
     return res
 
 
+def symbols_of(path):
+    """-> (defined, referenced): the global/weak symbol names an object defines and the undefined ones it references (its symbol table, as nm reads it)"""
+    dfn, ref = set(), set()
+    with open(path, "rb") as fh:
+        elf = ELFFile(fh)
+        for sec in elf.iter_sections():
+            if sec["sh_type"] != "SHT_SYMTAB":
+                continue
+            for sym in sec.iter_symbols():
+                if not sym.name or sym["st_info"]["bind"] == "STB_LOCAL" or sym["st_info"]["type"] in ("STT_FILE", "STT_SECTION"):
+                    continue
+                (ref if sym["st_shndx"] == "SHN_UNDEF" else dfn).add(sym.name)
+    return dfn, ref
+
+
+def read_symbols(rt):
+    """the table symbols rcpref.h of the directory RT declares: the one line `#define FNVL_RCP_REF_SYMBOLS "name name ..."` -> sorted list; None when
+    the directory holds no rcpref.h (no table is declared there); ValueError when rcpref.h declares no or a malformed list"""
+    path = os.path.join(rt, "rcpref.h")
+    if not os.path.isfile(path):
+        return None
+    with open(path) as fh:
+        found = [m[1] for m in (re.match(r'#define FNVL_RCP_REF_SYMBOLS "([A-Za-z_][A-Za-z_0-9]*(?: [A-Za-z_][A-Za-z_0-9]*)*)"\s*$', l) for l in fh) if m]
+    if len(found) != 1:
+        raise ValueError("rcpref.h does not declare exactly one FNVL_RCP_REF_SYMBOLS list of identifiers")
+    return sorted(set(found[0].split()))
+
+
 def read_f2i(obj_path):
     """-> (result dict or None, problem string or None) of the plugin's file next to the object"""
     p = obj_path + ".f2i.json"
@@ -272,14 +304,39 @@ def judge_object(oid, path, asm=False, unit=None):
     return {"rcp:" + oid: rcp, "f2i:" + oid: f2i}
 
 
-def judge_objects(root, objs, rt, forms_ok):
-    """-> {item id: [findings]} of one root: OBJS [(unit, path)], RT (the root's own directory when it holds rcptab.c, else None: the root has no
-    table, so no certificate item), FORMS_OK (reason string or None: the dependency on the gate forms)."""
+FTOI = "fnvnx_ftoi"
+
+
+def ftoi_why(doc):
+    """[reasons] a native C++ unit's CC stage document does not show the plugin fnvnx_ftoi: the declared input /plug/fnvnx_ftoi and the argv flag
+    -fplugin=/plug/fnvnx_ftoi/fnvnx_ftoi.so (the document is the stage key, so the object is the one these flags and inputs built)"""
+    if doc is None:
+        return ["no CC stage document"]
+    ins = {i["at"] for i in doc.get("inputs", [])}
+    return (["no declared input /plug/" + FTOI] if "/plug/" + FTOI not in ins else []) + \
+        (["argv lacks -fplugin for " + FTOI] if "-fplugin=/plug/%s/%s.so" % (FTOI, FTOI) not in doc.get("argv", []) else [])
+
+
+def judge_objects(root, objs, rt, forms_ok, docs=None):
+    """-> {item id: [findings]} of one root: OBJS [(unit, path)], RT (the root's own directory: its rcpref.h declares the table symbols; None when the root has
+    no directory), FORMS_OK (reason string or None: the dependency on the gate forms), DOCS ({unit: CC document} of a native root; None: lifted root).
+    Item `<root>:rcpcert` exists iff an object of the root defines or references a table symbol that rcpref.h declares (read from the objects' symbol
+    tables, the names from the declaration, no list in this gate); a root with no rcpref.h declares no table, so no symbol is known to be one."""
     items = {root + ":forms": [forms_ok] if forms_ok else []}
-    if rt is not None:
-        items[root + ":rcpcert"] = check_cert(rt)
+    try:
+        names = read_symbols(rt) if rt is not None else None
+    except ValueError as e:
+        names, why = [], str(e)
+        items[root + ":rcpcert"] = [why]
+    if names:
+        used = sorted({n for _, path in objs for n in (lambda d, r: (d | r) & set(names))(*symbols_of(path))})
+        if used:
+            items[root + ":rcpcert"] = check_cert(rt) if os.path.isfile(os.path.join(rt, "rcptab.c")) else \
+                ["%s used but the root holds no table (rcptab.c) to certify" % ", ".join(used)]
     for unit, path in objs:
         r = judge_object(root + "/" + unit, path, unit.endswith(recipe.ASM_EXT), unit)
+        if docs is not None and unit.endswith(recipe.CXX_EXT):
+            r["f2i:" + root + "/" + unit] += ftoi_why(docs.get(unit))
         items.update(r)
     return items
 
@@ -303,7 +360,9 @@ def judge_root(root, repo, cache, forms):
         return 1, 0, [root + ":inputs"], "root does not build (stage %s)" % res["failure"]["stage"]
     try:
         rt = os.path.join(repo, root)
-        items = judge_objects(root, read_inputs(res), rt if os.path.isfile(os.path.join(rt, "rcptab.c")) else None, forms())
+        native = recipe.load_admit(repo).get(root, {}).get("cxx_origin") == "native"
+        docs = gate_datamodel.cc_docs(os.path.join(cache, "store"), res) if native else None
+        items = judge_objects(root, read_inputs(res), rt, forms(), docs)
     except (OSError, ValueError, ELFError) as e:
         return 1, 0, [root + ":inputs"], "input error: %s" % (str(e)[:300] or type(e).__name__)
     bad = sorted(k for k, v in items.items() if v)

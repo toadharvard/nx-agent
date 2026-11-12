@@ -73,7 +73,7 @@ class Cert(unittest.TestCase):
     def fake_lift(self, d, cert):
         rt = os.path.join(d, 'lift', 'rt')
         os.makedirs(rt)
-        put(rt + '/rcpref.h', '#define FNVL_RCP_REF_VENDOR "GenuineIntel"\n#define FNVL_RCP_REF_FAMILY 6\n#define FNVL_RCP_REF_MODEL 207\n#define FNVL_RCP_REF_STEPPING 2\n')
+        put(rt + '/rcpref.h', '#define FNVL_RCP_REF_SYMBOLS "fnvl_rcp32 fnvl_rsqrt32"\n#define FNVL_RCP_REF_VENDOR "GenuineIntel"\n#define FNVL_RCP_REF_FAMILY 6\n#define FNVL_RCP_REF_MODEL 207\n#define FNVL_RCP_REF_STEPPING 2\n')
         put(rt + '/rcptab.c', '/* synthetic table */\n')
         if cert is not None:
             c = {'cpu': {'family': 6, 'model': 207, 'stepping': 2, 'vendor': 'GenuineIntel'}, 'format': 'fnvnx-rcpcert/1',
@@ -195,8 +195,23 @@ class Recip(unittest.TestCase):
             items = G.judge_objects('R', [('ok.o', d + '/objs/ok.o'), ('sub/bad.o', d + '/objs/sub/bad.o')], None, None)
             self.assertEqual(sorted(k for k, v in items.items() if v), ['rcp:R/sub/bad.o'])
             self.assertEqual(sorted(items), ['R:forms', 'f2i:R/ok.o', 'f2i:R/sub/bad.o', 'rcp:R/ok.o', 'rcp:R/sub/bad.o'])
-            with_table = G.judge_objects('R', [], self.fake_rt(d), None)
-            self.assertEqual(sorted(with_table), ['R:forms', 'R:rcpcert'])
+            rt = self.fake_rt(d)
+            self.assertEqual(sorted(G.judge_objects('R', [], rt, None)), ['R:forms'])      # a table declared, no symbol used: no item
+            for body, items in (('.global fnvl_rcp32\nfnvl_rcp32:\nret', ['R:rcpcert']), ('bl fnvl_rsqrt32', ['R:rcpcert']), ('.global other\nother:\nbl fnvl_rcp32x', [])):
+                o2 = asm_object(d, 'sym', body)
+                put(o2 + '.f2i.json', nosites('s.o'))
+                got = G.judge_objects('R', [('s.o', o2)], rt, None)
+                self.assertEqual([k for k in got if k.endswith('rcpcert')], items, body)
+                if items:
+                    self.assertEqual(got['R:rcpcert'], [])
+            os.remove(rt + '/rcptab.cert.json')
+            o2 = asm_object(d, 'sym2', 'bl fnvl_rcp32')
+            self.assertIn('missing', G.judge_objects('R', [('s.o', o2)], rt, None)['R:rcpcert'][0])
+            os.remove(rt + '/rcptab.c')
+            self.assertIn('no table', G.judge_objects('R', [('s.o', o2)], rt, None)['R:rcpcert'][0])
+            put(rt + '/rcpref.h', '#define FNVL_RCP_REF_FAMILY 6\n')
+            self.assertIn('FNVL_RCP_REF_SYMBOLS', G.judge_objects('R', [('s.o', o2)], rt, None)['R:rcpcert'][0])
+            self.assertEqual(G.judge_objects('R', [('s.o', o2)], None, None).get('R:rcpcert'), None)
 
 
 class F2I(unittest.TestCase):
@@ -298,6 +313,28 @@ class Dependency(unittest.TestCase):
             self.assertIsNone(G.forms_reason(REPO, d))
 
 
+class Native(unittest.TestCase):
+    DOC = {'inputs': [{'at': '/plug/fnvnx_ftoi', 'tree': 't'}], 'argv': ['/c/g++', '-fplugin=/plug/fnvnx_ftoi/fnvnx_ftoi.so', '-c']}
+
+    def test_ftoi_why(self):
+        self.assertEqual(G.ftoi_why(self.DOC), [])
+        self.assertEqual(G.ftoi_why(None), ['no CC stage document'])
+        self.assertEqual(len(G.ftoi_why({'inputs': [], 'argv': self.DOC['argv']})), 1)
+        self.assertEqual(len(G.ftoi_why({'inputs': self.DOC['inputs'], 'argv': ['/c/g++']})), 1)
+        self.assertEqual(len(G.ftoi_why({'inputs': [], 'argv': []})), 2)
+
+    def test_native_cxx_unit_needs_the_plugin_c_and_asm_units_do_not(self):
+        with workdir() as d:
+            o = asm_object(d, 'o', 'fadd s0, s1, s2')
+            for u in ('a.cc', 'b.c'):
+                put(o + '.f2i.json', nosites(u))
+                items = G.judge_objects('R', [(u, o)], None, None, {})
+                self.assertEqual(items['f2i:R/' + u] != [], u.endswith('.cc'), u)
+            put(o + '.f2i.json', nosites('a.cc'))
+            self.assertEqual(G.judge_objects('R', [('a.cc', o)], None, None, {'a.cc': self.DOC})['f2i:R/a.cc'], [])
+            self.assertEqual(G.judge_objects('R', [('a.cc', o)], None, None)['f2i:R/a.cc'], [])      # lifted root: no document judged
+
+
 class Roots(unittest.TestCase):
     """judge_root with the recipe's build replaced by a given objects.json result (the build needs the sandbox and the compiler mirror)"""
     def judge(self, d, res, forms=None, repo='.'):
@@ -321,10 +358,10 @@ class Roots(unittest.TestCase):
             r = self.judge(d, {'status': 'green', 'objects': objs}, forms='forms: not green: y')
             self.assertEqual(r[:3], (5, 0, ['X:forms', 'f2i:X/a.o', 'f2i:X/z/b.o', 'rcp:X/a.o', 'rcp:X/z/b.o']))
 
-    def test_root_holding_the_table_gets_the_certificate_item(self):
-        """the item exists iff the root's directory holds rcptab.c, and its files are the root's own"""
+    def test_root_using_the_table_gets_the_certificate_item(self):
+        """the item exists iff an object uses a declared table symbol; the table files are the root's own"""
         with workdir() as d:
-            o = asm_object(d, 'a', 'fadd s0, s1, s2')
+            o = asm_object(d, 'a', 'bl fnvl_rcp32')
             put(o + '.f2i.json', nosites('a.o'))
             res = {'status': 'green', 'objects': [{'unit': 'a.o', 'object': o}]}
             os.makedirs(d + '/repo')
