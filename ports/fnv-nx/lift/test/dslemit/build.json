@@ -7,7 +7,8 @@
  },
  "flags": {
   "c": [
-   "-mabi=ilp32"
+   "-mabi=ilp32",
+   "-Werror=attributes"
   ],
   "cxx": [
    "-mabi=ilp32",
@@ -25,7 +26,6 @@
    "-fno-lifetime-dse",
    "-ffp-contract=off",
    "-fPIC",
-   "-fpermissive",
    "-march=armv8-a+crc+crypto",
    "-mtune=cortex-a57",
    "-fno-stack-protector",
@@ -47,7 +47,8 @@
    "-ffixed-x24",
    "-ffixed-x25",
    "-ffixed-x26",
-   "-ffixed-x27"
+   "-ffixed-x27",
+   "-Werror=attributes"
   ],
   "asm": [
    "-mabi=ilp32",
