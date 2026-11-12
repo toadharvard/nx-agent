@@ -219,3 +219,7 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
         - a host build only as the w15 `translator@host` variant.
       objstub on b622cbf8 is red with no functions judged (the x86_64 build has no plugin headers); it is rerun after the fix.
     - The w5 container fails envcheck on the /usr/include tree hash (want a40af4d0, have 59bd1db7). Sent to L1. Runs there are measurements, not verdicts.
+- 03:57Z Orchestrator ruling on w6 6d1fbd4b.
+    - shim stays out of class tool. shim/include becomes class `headers` (L2 w6, L1 w16).
+    - Generator inputs come from a root of class tool or headers. L1 extends the recipe rule.
+    - gen_env.py takes d3d9types.h through `uses` on the headers entry. Until that lands, it is a named blocker (L1).
