@@ -316,3 +316,8 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - (A) Present: it joins the image set as a may-load image, pinned by exepin. The set grows from 6 to 7.
   - (B) Absent: LoadLibraryA returns NULL with GetLastError 126 (ERROR_MOD_NOT_FOUND). That is a declared-machine body owned by L5.
   - In both cases the site stays open until extents exist, and certificates stay measurement-only.
+- 04:05Z: **w20 crt0 c7f3b9d2 accepted.**
+  - .text is identical (112 B), mod0-start is 0x20, the only AX input section is the 4-byte b, and both ASSERTs hold. L5 confirmed it matches 281c4a33.
+  - It waits on MERGER's verdict, because w20's container has the z3 env block.
+  - w20 now takes the descs fact over from w16, in parallel. w16 keeps the toy roots, -dU, root fixtures and iat.
+- **w18 38bae062:** the globext consumer is sound (certified-object bound under ASM-006). It judges 0 sites until L2 w3 publishes the fact. I asked L3a for the value-range format.
