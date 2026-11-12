@@ -7,6 +7,7 @@ Branch: claude/fnv-l5-platform. Workers: Sonnet 5.5, branches claude/fnv-l5-plat
 ## RESTART 2026-11-12 08:23Z (orchestrator): ONE task, the platform product root
 - w10 session_01KmtZKTMZZBSRk7vPjUsu95, branch claude/fnv-l5-platform-root cut from claude/fnv-first-root-next a50c6990. Platform from -w10 e9cbd45c; only the included shim/loader headers; build.json plugins == recipe.PLUGIN_SOURCES/ARGS; keep-going recipe build in GATE_CACHE; l1 verdict in the background. Status: doing.
 - w14: msvcmodel13 (stage 1 restarted); repin on publish.
+- w15 paused at 64189b0f (private 880555c): import_escape 1459/1553 annotated, 94 `?`; dynsites 221 name-lookup rows, 40 to derive = 21 resolved + 3 conditional + 4 unreached + 12 open (10 dbghelp rows need an L1 array-extent fact); d3dx9_38@56b719 → d3dx9_31 via w18's field-flow trace. w12 paused at 9dab272d (font units compile in the recipe; its gate run is reserved for w10's new root).
 - w9: ASM-501 (gates the root merge). w12, w13, w15: paused until the root is green.
 
 ## Tasks (goal-path order)
