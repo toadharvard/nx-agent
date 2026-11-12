@@ -1151,6 +1151,33 @@
    "owner": "L3b"
   },
   {
+   "id": "ASM-309",
+   "text": "capstone decodes every x86 instruction of the universe to its true length, fields and operands.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md"
+   ],
+   "aliases": [
+    "L3b:A-CAPSTONE-X86"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: agreement of independent decoders (capstone, LLVM MC, XED) on every byte of the code ranges of the exe and modules; any difference is red (orchestrator decision 2026-11-11)",
+   "owner": "L3b"
+  },
+  {
+   "id": "ASM-310",
+   "text": "capstone decodes every AArch64 instruction of an object to its architectural id; unmarked sections are code from their start.",
+   "used_by": [
+    "ports/fnv-nx/journal/inbox/l3b-lift-handoff-opus.md",
+    "ports/fnv-nx/lift/proof/gate_fpexact.py"
+   ],
+   "aliases": [
+    "L3b:A-CAPSTONE-A64"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: agreement of capstone and LLVM MC on every instruction of every object of ours; any difference is red (orchestrator decision 2026-11-11)",
+   "owner": "L3b"
+  },
+  {
    "id": "ASM-800",
    "text": "The -Wmismatched-tags warning is not suppressed for a declaration (system header, #pragma GCC diagnostic), so the names plugin sees every class key.",
    "used_by": [
