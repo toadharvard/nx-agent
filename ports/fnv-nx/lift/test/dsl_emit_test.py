@@ -37,7 +37,8 @@ def mkctx(ins, a):
 
 
 def func(cx, a):
-    return 'extern "C" void L_%08x(void)\n{ DECL; SYNC_IN; u32 fsb=c->fs; u32 E=esp;\nL_%08x: ;\n%s\nafter_tail: ; nonlocal: ; return;\n}\n' % (a, a, '\n'.join(cx.L))
+    decl = ''.join('extern "C" void L_%08x(void);\n' % t for t in sorted(cx.calls | cx.tails))      # the callees, declared as fnvlift/core.py does for a lifted function
+    return '%sextern "C" void L_%08x(void)\n{ DECL; SYNC_IN; u32 fsb=c->fs; u32 E=esp;\nL_%08x: ;\n%s\nafter_tail: ; nonlocal: ; return;\n}\n' % (decl, a, a, '\n'.join(cx.L))
 
 
 def collect(pk):

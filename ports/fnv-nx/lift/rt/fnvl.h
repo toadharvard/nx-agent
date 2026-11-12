@@ -214,6 +214,7 @@ static inline u32 sse_pmovmskb(xmm_t s,int n){ u32 r=0; for(int i=0;i<n;i++) r|=
 #define FNVL_INTO 8
 #define FNVL_ASSERT 9
 extern "C" { void fnvl_cpuid(u32 leaf, u32 sub, u32 out[4]); u64 fnvl_rdtsc(void); }
+static inline u32 fnvl_cpuid_w(u32 leaf, u32 sub, int i) { u32 o[4]; fnvl_cpuid(leaf, sub, o); return o[i]; }      // word i of the reference CPU's answer (a pure function of leaf / subleaf); the DSL's cpuid forms read it per register
 /* The hardware-raise entries of the runtime (rt/seh.cc) are declared ONLY here, inside namespace fnvl_rt, and only FNVL_RAISE / FNVL_RAISE_AV below name them: a lifted unit that calls the raw
    fnvl_raise or fnvl_raise_av (no EFLAGS / C0 C2 C3 flush) does not find the name and is a compile error. They are the same C-linkage functions as the definitions in seh.cc. */
 namespace fnvl_rt { extern "C" { void fnvl_raise(u32 code, u32 at); void fnvl_raise_av(u32 access, u32 addr, u32 at); } }

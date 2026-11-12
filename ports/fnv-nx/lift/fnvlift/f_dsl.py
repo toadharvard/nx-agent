@@ -21,9 +21,8 @@ from .core import CC, SKIP, SUB, Unsupported
 from . import f_flow
 from . import dsl
 
-from proof import forms, forms_alu, forms_flow, forms_move             # noqa: F401  (proof/forms.py: the Form builders; forms_* register their handlers in forms.H)
+from proof import forms, forms_alu, forms_flow, forms_move, forms_sys             # noqa: F401  (proof/forms.py: the Form builders; forms_* register their handlers in forms.H)
 
-FAULT = {1: 'DE', 2: 'BP', 3: 'UD'}
 STATE = {'df': 'df', 'fs_base': 'fsb', 'flo': '(c->eflx|0x200u)'}      # Form pre-state variables besides the registers and the five flags
 SIXFLAGS = ('cf', 'pf', 'af', 'zf', 'sf', 'of')
 
@@ -33,7 +32,7 @@ def supported(ins):
     operand is a general register (the string forms' mnemonics movsd/cmpsd are also SSE2 instructions)"""
     m = ins.mnemonic.split()[-1]
     ok = m in forms.H or (m[0] == 'j' and m[1:] in CC) or (m.startswith('set') and m[3:] in CC) or (m.startswith('cmov') and m[4:] in CC)
-    return ok and all(ins.reg_name(o.reg) in SUB for o in ins.operands if o.type == forms.X.X86_OP_REG)
+    return ok and all(ins.reg_name(o.reg) in SUB or ins.reg_name(o.reg)[:2] in ('cr', 'dr') for o in ins.operands if o.type == forms.X.X86_OP_REG)      # CRn / DRn: only MOV, a privileged fault (forms_move.mov)
 
 
 def varc(cx):
@@ -64,10 +63,28 @@ def de_code(n, ref):
     return e
 
 
+# Fault kinds (dsl.FAULTS) -> (the C code of the exception, trap?, address the exception reports: 0 = the instruction, 'next' = the next instruction, 1 = the instruction + 1). The rows are
+# f_sys.INT_VECTORS and the privileged-instruction rules (KiTrap0D / Wine 9.0 cited there); AV = #GP reported as an access violation {0, 0xFFFFFFFF}. A trap also makes the next instruction a resume label.
+FAULT_ROWS = {2: ('FNVL_BP', True, 0), 3: ('FNVL_UD', True, 0), 4: ('FNVL_BOUNDS', False, 0), 5: ('FNVL_INTO', True, 0), 6: ('FNVL_PRIV', True, 0), 7: ('AV', True, 0), 8: ('FNVL_STEP', True, 'next'),
+              9: ('FNVL_ASSERT', True, 0), 10: ('FNVL_DBGSRV', True, 0), 11: ('FNVL_INTO', True, 1)}
+
+
+def fault_stmt(cx, code, n, ref):
+    if code == 1:
+        return f_flow.raise_site(cx, de_code(n, ref), trap=False)
+    name, trap, at = FAULT_ROWS[code]
+    at = cx.nxt if at == 'next' else cx.a + at
+    if name == 'AV':
+        cx.nonlocal_ = True
+        cx.raises.add(cx.a)
+        cx.raises.add(cx.nxt)
+        return 'SYNC_OUT; REGS(); FNVL_RAISE_AV(0,0xffffffffu,0x%xu); REGS(); SYNC_IN; goto nonlocal;' % at
+    return f_flow.raise_site(cx, name, trap=trap, at=at)
+
+
 def fault_fn(cx):
     def f(code, n, ref):
-        c = {1: lambda: de_code(n, ref), 2: lambda: 'FNVL_BP', 3: lambda: 'FNVL_UD'}[code]()
-        st = f_flow.raise_site(cx, c, trap=code != 1)
+        st = fault_stmt(cx, code, n, ref)
         if n.op == 'const' and n.x == 1:
             cx.term = True
             return st
@@ -113,7 +130,7 @@ def emit_form(cx, ins):
         return SKIP
     F = forms.build(ins, cx.a)
     force, xfer = transfer(cx, ins, F)
-    L, ref = F.to_c_inline(varc(cx), fault_fn(cx), flo_fn, force)
+    L, ref = F.to_c_inline(varc(cx), fault_fn(cx), flo_fn, force, cx.macc)
     L += xfer(ref)
     if L:
         cx.em('{')
