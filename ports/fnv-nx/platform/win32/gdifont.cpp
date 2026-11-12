@@ -218,10 +218,19 @@ bool read_file(const std::string &p, std::vector<uint8_t> &out)
 }
 
 /* one font file -> faces (new_ft_face / unix_face_create / add_gdi_face) */
-void add_font_file(const std::string &path, bool allow_bitmap)
+/* A declared input that is absent or unreadable is a broken build invariant, not a machine without it: the process ends once, through
+ * the host exit slot (os_exit_process), naming the input. An empty directory that is present stays a valid (empty) machine. */
+[[noreturn]] void declared_input_broken(const char *what, const std::string &path)
+{
+    std::string m = std::string("fnvnx: declared input broken: ") + what + ": " + path;
+    os_debug_print(m.c_str());
+    os_exit_process(78);
+}
+void add_font_file(const std::string &path, bool allow_bitmap, bool listed)   /* listed: the directory scan returned it, so it must be readable */
 {
     std::vector<uint8_t> data;
-    if (!read_file(path, data) || data.empty()) return;
+    if (!read_file(path, data)) { if (listed) declared_input_broken("font file listed by its directory is unreadable", path); return; }   /* a registry-named file the set lacks: Wine 9.0 load_registry_fonts skips it */
+    if (data.empty()) return;
     for (FT_Long idx = 0, count = 1; idx < count; idx++) {
         FT_Face ft;
         if (FT_New_Memory_Face(g_lib, data.data(), (FT_Long)data.size(), idx, &ft)) break;
@@ -294,7 +303,10 @@ const std::vector<std::pair<std::string, std::string>> &reg_key(const char *k)
 std::vector<std::string> list_dir(const std::string &d)
 {
     std::vector<std::string> v;
-    if (os_dir *dir = os_dir_open(d.c_str())) { while (const char *n = os_dir_next(dir)) v.push_back(n); os_dir_close(dir); }
+    os_dir *dir = os_dir_open(d.c_str());
+    if (!dir) declared_input_broken("declared directory missing or unreadable", d);
+    while (const char *n = os_dir_next(dir)) v.push_back(n);
+    os_dir_close(dir);
     std::sort(v.begin(), v.end());
     return v;
 }
@@ -336,7 +348,7 @@ void load_all()
         if (v.size() > 11 && v.compare(v.size() - 11, 11, " (TrueType)") == 0) v.resize(v.size() - 11);
         if (is_full_name(widen(v.c_str()))) continue;
         const std::string &path = kv.second;
-        if (path.size() > 4 && !strcasecmp(path.c_str() + path.size() - 4, ".fon") && !(path.size() > 1 && path[1] == ':')) add_font_file(g_wine_dir + "/" + path, true);
+        if (path.size() > 4 && !strcasecmp(path.c_str() + path.size() - 4, ".fon") && !(path.size() > 1 && path[1] == ':')) add_font_file(g_wine_dir + "/" + path, true, false);
     }
     set_default(0x10, &g_def_roman); set_default(0x30, &g_def_modern); set_default(0x20, &g_def_swiss);   /* reorder_font_list */
     std::stable_sort(g_fam.begin(), g_fam.end(), [](Family *a, Family *b) { return namecmp(a->name, b->name) < 0; });
@@ -546,7 +558,8 @@ RF *realize(LF lf, bool bitmap_ok = true)
         f->scale_y = scale;
     }
     f->data = new std::vector<uint8_t>;
-    if (!read_file(face->file, *f->data) || FT_New_Memory_Face(g_lib, f->data->data(), (FT_Long)f->data->size(), face->index, &f->ft)) { delete f->data; delete f; return nullptr; }
+    if (!read_file(face->file, *f->data)) declared_input_broken("font file of a listed face is unreadable", face->file);
+    if (FT_New_Memory_Face(g_lib, f->data->data(), (FT_Long)f->data->size(), face->index, &f->ft)) { delete f->data; delete f; return nullptr; }
     FT_UInt w = 0, h = 0;
     if (f->scalable) {
         f->ppem = load_vdmx(f, lf.h);
