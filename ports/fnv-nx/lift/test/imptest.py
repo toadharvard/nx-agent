@@ -47,7 +47,7 @@ u32 t_each(u32 n, u32 cb, u32 ctx) { u32 s = 0; for (u32 i = 0; i < n; i++) { st
 /* calls the guest function cb(arg) once (cdecl or stdcall) */
 u32 t_call1(u32 cb, u32 arg) { struct fnvnx_guest_ret r; fnvnx_guest_invoke(cb, 0, 1, &arg, 0, &r); return r.eax + 1000; }
 /* a native body raises an exception (the platform's w32_raise); returns x + 1 when a handler continued execution */
-void w32_raise(u32 code, u32 flags, u32 nargs, const u32 *args);      /* the platform's own raise (product symbol, not defined here) */
+void w32_raise(u32 code, u32 flags, u32 nargs, const u32 *args);      /* platform/win32/thread.cpp:642 (declared w32.h:304) on origin/claude/fnv-l5-platform: extern "C" void w32_raise(DWORD, DWORD, DWORD, const ULONG_PTR *), 32-bit words under ILP32 */
 u32 t_boom(u32 x) { u32 a[1] = { x }; w32_raise(0xE0000001u, 0, 1, a); return x + 1; }
 u32 test_main(u32 eip, u32 esp, u32 teb, u32 *out)
 {

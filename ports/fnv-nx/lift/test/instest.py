@@ -23,6 +23,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 STUBX = 'extern "C" void fnvl_call(struct cpu*, u32 target);\n#undef CALLX\n#define CALLX(h) fnvl_call(c,0x##h)\n'
 sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
 
+def blocked_on(what):
+    print('BLOCKED: needs ' + what); print('blocker: L4 shared model (boot machine) and the platform root; this test defines no clock'); sys.exit(3)
 def blocked(err):
     """Exit status 3 = BLOCKED. The platform and libc symbols (lookup_export, ExitProcess, UnhandledExceptionFilter, the raise backend, the TLS slot, the host clock, memcpy, memset)
     are product files: a test defines none of them (CLAUDE.md, no doubles in tests). An undefined one means the product root is not linkable yet."""
@@ -391,8 +393,15 @@ def model_fix(E, st, o, c, X):
         import ctypes; out = (ctypes.c_uint32 * 4)(); G['cpum'].fnvl_cpuid(ctypes.c_uint32(st['regs'][0]), ctypes.c_uint32(st['regs'][1]), out)
         for ri, oi in ((0, 0), (3, 1), (1, 2), (2, 3)): o['regs'][ri] = out[oi]
     elif b == 'rdtsc':
-        t = c['regs'][0] | c['regs'][2] << 32
-        if t == 0: return 'diff', 'rdtsc read 0 from the platform clock', '%x' % t, ''      # the clock is the platform's (L4 shared model); the value is its, checked there
+        # Owner decision: rdtsc reads the platform's monotonic timer; ticks = fnvl_rdtsc's conversion of fnvl_host_ticks_ns (rt/cpumodel.c). The clock is the PLATFORM's symbol, which runs on the
+        # L4 boot machine's shared model (no syscall exists under bare Unicorn); this test defines no clock. The model that runs the state returns c['clk'] = (ns read before, ns read after) of
+        # that clock; a run without it (bare Unicorn) is BLOCKED.
+        if 'clk' not in c: blocked_on('the L4 shared model clock (platform fnvl_host_ticks_ns) as c[\'clk\']')
+        t = c['regs'][0] | c['regs'][2] << 32; lo, hi = c['clk']
+        conv = lambda ns: ns // 10 * 21 + ns % 10 * 21 // 10           # the definition in rt/cpumodel.c, restated: one multiplication by 21/10 on a monotonic clock
+        if not conv(lo) <= t <= conv(hi): return 'diff', 'rdtsc outside conv(ns) of the platform clock read before and after', '%x' % t, '[%x,%x]' % (conv(lo), conv(hi))
+        if t < G.get('rdtsc_last', 0): return 'diff', 'rdtsc went backwards', '%x' % t, '%x' % G['rdtsc_last']
+        G['rdtsc_last'] = t
         o['regs'][0], o['regs'][2] = c['regs'][0], c['regs'][2]
     elif b in ('mov', 'push') and any(op.type == X.X86_OP_REG and ins.reg_name(op.reg) in SELV for op in ops):
         sv = SELV[ins.reg_name(ops[-1].reg)] if b == 'mov' else SELV[ins.reg_name(ops[0].reg)]
