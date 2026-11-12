@@ -94,3 +94,4 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
   - w5 does phase 1: move fnvnx_sha256 there unchanged; the loader keeps building by path; NIST vectors pass. L4 reviews before it enters their branch.
   - Phase 2 follows: the 8 key sites become calls into it, the 5 copies are deleted, and NxShaderD3D.hash becomes key[32] in one ABI commit with L6A.
   - Asked L1: one root for two targets, and the gate clause for a renamed second copy.
+- 03:22Z Key ABI diff sent to L6A: NxShaderD3D.hash (u64) becomes key[32] = sha256(bytecode); the struct goes from 40 to 64 bytes, with offset asserts. dk takes the NXSP v2 D-table with byte compare (no sha256 needed); gl4 links lib/sha256. lib/sha256 review is L4 item 14 (session_01KmtZKUcrakBqKb1mC8iXp4): one definition across roots, the FIPS/CAVP vectors, guest/host/ASan variants, and a warm run of 0 stages.
