@@ -882,6 +882,15 @@
    "owner": "L3a"
   },
   {
+   "id": "ASM-221",
+   "text": "The lowest index of a jump table is below 16: the table starts at most 16 dwords above the displacement (TAB_BIAS, fnvlift/core.py).",
+   "used_by": [],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: deleted by L3a w3 1292383f; the extents come from the jtab_tables facts (tools/jtab.py, L3a w2)",
+   "owner": "L3a"
+  },
+  {
    "id": "ASM-320",
    "text": "rt/rcptab.cert.json was produced by farm/rcpcert.sh on a CPU with the reference identity.",
    "used_by": [
