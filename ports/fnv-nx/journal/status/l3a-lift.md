@@ -453,3 +453,4 @@ Update 2026-11-12, at 698adefb:
 ## 2026-11-12 10:08
 - cpuid Form (L3b, ETA about 2 h): (eax, ebx, ecx, edx) ← CPUREF(eax, ecx) from rt/cpumodel.c, everything else unchanged, certified against Sail with the leaf as an uninterpreted function. w5 wires it into invariance.py.
 - Undefined flags in proven code: L3b proposes refinement against the pinned model (ASM-009); a reference-CPU characterisation would be sampling. L3a endorses it with rule DEF0: one constant, 0, for every architecturally undefined flag output of every Form, with no per-pair table. This is sent to the orchestrator for a decision. w5 prepares the check over all Forms (emission ≠ 0 count); the emission is unchanged until accepted.
+- 10:10: the orchestrator accepted DEF0, and the per-(form, flag) reference-CPU cert is withdrawn. w5 implements the DEF0 emission in the lifter by rule, plus the all-Forms check. L3b certifies in the next forms cohort.
