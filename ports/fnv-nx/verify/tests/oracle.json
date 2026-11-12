@@ -266,6 +266,18 @@
     "ports/fnv-nx/verify/gate_contract.py"
    ]
   },
+  "test_gate_hostapi.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_hostapi.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_hostapi.py"
+   ]
+  },
   "test_gate_imports.py": {
    "references": [
     {
@@ -594,19 +606,6 @@
     "ports/fnv-nx/verify/toolflags_policy.py",
     "ports/fnv-nx/verify/puregate.py",
     "ports/fnv-nx/verify/puregate_policy.py"
-   ]
-  },
-  "test_unitflags.py": {
-   "references": [
-    {
-     "anchor": "### Per-unit flags (`unit_flags`, `unit_facts`)",
-     "kind": "spec",
-     "path": "ports/fnv-nx/verify/RECIPE.md"
-    }
-   ],
-   "subject": [
-    "ports/fnv-nx/verify/recipe.py",
-    "ports/fnv-nx/verify/unitstage.py"
    ]
   },
   "test_unitstage.py": {

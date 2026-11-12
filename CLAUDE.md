@@ -122,6 +122,14 @@ The owner's words: "Транк никогда красный. Всегда зе�
   - **Registry.** The hive holds exactly the keys that the exe and modules read, found statically from their call
     sites. Values come from the declared machine (for example `Installed Path` = the game directory). A key with no
     declared value is absent, the same as on a machine where nothing wrote it. No installer script is needed.
+  - **FalloutPrefs.ini (orchestrator decision, 2026-11-12, revised).** The launcher binary is not in the owner's
+    gamedata, so its output cannot be derived. Rule, the same as for the registry: the file holds exactly the keys
+    that the exe's own code requires before its main path, with values of the declared machine, and every other key is
+    absent so the exe uses its own built-in default. Found statically: WinMain compares `[Display] sD3DDevice` with
+    `IDirect3D9::GetAdapterIdentifier(0,0).Description`, so the file is `[Display]` / `sD3DDevice=<the declared
+    adapter's Description, as our D3D9 returns it>` and nothing else. The platform (L5) checks statically that every
+    FalloutPrefs setting the exe reads has a default in the exe's settings table; the emulator (L4) mounts the file.
+    If the owner's launcher or installed FalloutPrefs.ini later enters gamedata, the file is derived from it instead.
 - Merges stop while anything is red. That is intended. Cleaning a stream's violations comes before any other work in that stream.
 
 ## Owner decisions of 2026-11-10 (do not re-ask)
