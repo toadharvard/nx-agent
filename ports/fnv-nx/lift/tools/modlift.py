@@ -111,7 +111,7 @@ def run(arg):
         while intext(u32(p)): add(u32(p), 'tls', True); p += 4
     for r, v in rvals: add(v, 'ptr')
     tailsrc = {}; jt_red = {}; jt_ok = {}
-    X_.jtab = jtab; X_.jtab_red = jt_red
+    X_.jtab = jtab; X_.jtab_red = jt_red; X_.jtab_ok = jt_ok
     def jt_pass():
         """jump-table edges (tools/jtab.py): every `jmp [T + r*4]` site is evaluated on the CURRENT decode (a guard chain needs unique predecessors, so the evaluation is repeated until the entry set is closed);
         a site that resolves gets its table words as edges (the descent follows them), a site that does not is red with the reason."""

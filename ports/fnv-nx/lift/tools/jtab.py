@@ -165,6 +165,10 @@ def refine(ins, st, taken):
     return o
 
 
+class Tg(tuple):
+    pass
+
+
 def resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords):
     """-> (targets tuple, None) or (None, why). dec[x] = (size, mnemonic, feat, falls through, direct targets); preds(x) = the decoded predecessors of x."""
     ins = ins_at(site); op = ins.operands[0]
@@ -209,11 +213,11 @@ def resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords):
     if st is None: return None, 'the site is unreachable from any entry in the decoded edges'
     v = st.g(ireg)
     if v[1] + 1 > maxwords: return None, 'index register %s unbounded (interval of %d values)' % (ireg, v[1] + 1)
-    out = []
+    out = []; addrs = []
     for k in range(v[1] + 1):
         a = (T + 4 * ((v[0] + k) % N)) % N
         if a not in rset: return None, 'table word %x (index %d) is not a relocated dword' % (a, (v[0] + k) % N if (v[0] + k) % N < N // 2 else (v[0] + k) % N - N)
         w = u32(a)
         if not intext(w): return None, 'table word %x -> %x is no code address' % (a, w)
-        out.append(w)
-    return tuple(out), None
+        out.append(w); addrs.append(a)
+    r = Tg(out); r.addrs = tuple(addrs); r.base = T; r.lo = v[0] if v[0] < N // 2 else v[0] - N; r.hi = r.lo + v[1]; return r, None
