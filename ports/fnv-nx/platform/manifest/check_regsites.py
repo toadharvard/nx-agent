@@ -141,12 +141,8 @@ def build():
     asm(0x4015c0, [b"\xe9", ("rel", 0x401580)])
     asm(0x4015e0, [b"\xb8", ("abs", 0x401580), b"\xc3"])
     asm(0x4013f0, [b"\xc3"])
-    m = pemanifest.Mod.__new__(pemanifest.Mod)
-    m.name, m.base, m.img, m.relocs = "synth.exe", BASE, bytes(img), sorted(rel)
-    m.path = None
-    funcfacts.declare(m.name, m.img, m.base, runs)
-    m.code = [(0x401000, 0x800)]
-    m.imports = [("advapi32.dll", "RegOpenKeyA", OPEN), ("advapi32.dll", "RegQueryValueExA", QUERY), ("advapi32.dll", "RegSetValueExA", SETV)]
+    m = pemanifest.Mod.synthetic("synth.exe", BASE, img, rel, [("advapi32.dll", "RegOpenKeyA", OPEN), ("advapi32.dll", "RegQueryValueExA", QUERY), ("advapi32.dll", "RegSetValueExA", SETV)], [(0x401000, 0x800)])
+    funcfacts.declare(m, runs)
     return m
 
 

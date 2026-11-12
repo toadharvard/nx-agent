@@ -27,31 +27,20 @@ import os, re, struct, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import funcfacts
 
-try:
-    import capstone
-    import pefile
-except ImportError as e:
-    sys.stderr.write("prefs_settings: %s\n" % e)
-    sys.exit(2)
+import pemanifest
 
 
 def main(exe, out):
-    pe = pefile.PE(exe)
-    base = pe.OPTIONAL_HEADER.ImageBase
-    img = pe.get_memory_mapped_image()
-    text = [s for s in pe.sections if s.Characteristics & 0x20000000][0]
-    tva, tsz = text.VirtualAddress, text.Misc_VirtualSize
-    seg = img[tva:tva + tsz]
-    lo, hi = base + tva, base + tva + tsz
+    mod = pemanifest.Mod(exe)
+    base = mod.base
+    lo, tsz = mod.code[0]
+    hi = lo + tsz
 
     def cstr(va):
-        o = va - base
-        if not (0 < o < len(img)):
-            return None
-        e = img.find(b"\0", o)
-        return img[o:e].decode("latin1") if 0 < e - o < 200 else None
+        z = mod.zstr(va, 200) if va > base else None
+        return z.decode("latin1") if z else None
 
-    ff = funcfacts.for_image(os.path.basename(exe).lower(), img, base, exe)
+    ff = mod.ff
     unresolved = []   # (site, reason): a site that no entry of the function facts contains is reported, never given to another function
 
     def fs(a, report=True):
@@ -70,19 +59,15 @@ def main(exe, out):
         """the contiguous instructions of entry f around `site` (a pattern window never crosses a gap between runs)"""
         return ff.block_of(f, site) or []
 
-    calls = {}
-    for m in re.finditer(b"\xe8", seg):
-        t = lo + m.start() + 5 + struct.unpack("<i", seg[m.start() + 1:m.start() + 5])[0]
-        calls.setdefault(t, []).append(lo + m.start())
+    calls = ff.edges()[0]   # {target: [call instruction addresses]} of the decoded instructions of the facts
 
     # 1. string and cells
-    s_va = base + img.find(b"FalloutPrefs.ini\0")
-    cells = [base + o for o in range(0, len(img) - 3, 4) if struct.unpack("<I", img[o:o + 4])[0] == s_va]
+    s_va = mod.find_bytes(b"FalloutPrefs.ini\0")
+    cells = [r for r in mod.relocs if mod.u32(r) == s_va]   # every stored address of the string is a relocation
     # 2. getter G
     gs = set()
     for c in cells:
-        for m in re.finditer(re.escape(struct.pack("<I", c)), seg):
-            site = lo + m.start()
+        for site in (r for r in mod.targets().get(c, []) if mod.in_code(r)):   # the operand of an instruction that holds the cell address
             for f in fs(site):
                 ins = window(f, site)
                 idx = [n for n, i in enumerate(ins) if i.address <= site < i.address + i.size]
@@ -159,7 +144,7 @@ def main(exe, out):
                     for i in win:
                         m = re.match(r"dword ptr \[(0x[0-9a-f]+)\]$", i.op_str) if i.mnemonic == "fld" else None
                         if m:
-                            dflt, kind = repr(struct.unpack("<f", img[int(m.group(1), 16) - base:int(m.group(1), 16) - base + 4])[0]), "float"
+                            dflt, kind = repr(struct.unpack("<f", mod.bytes_at(int(m.group(1), 16), 4))[0]), "float"
                 key, sec = name.rsplit(":", 1)
                 rows.append((key, sec, "0x%x" % K[k], "0x%x" % k, kind, dflt if dflt is not None else "", "0x%x" % (obj or 0), "0x%x" % site))
     byobj = {r[6]: r[0] for r in rows}
@@ -175,17 +160,13 @@ def main(exe, out):
     # ShellExecuteA (the launcher start) whose result is tested (`call G; ...; test; je`) right before that call; its settings =
     # the registered prefs objects it loads (`mov ecx, obj`), directly and in its direct callees.
     objs = {r[6]: r for r in rows}
-    se = None
-    for e in pe.DIRECTORY_ENTRY_IMPORT:
-        for im in e.imports:
-            if im.name == b"ShellExecuteA":
-                se = im.address
+    se = [slot for _, nm, slot in mod.imports if nm == "ShellExecuteA"]
     assert se, "no ShellExecuteA import"
     gates = set()
-    for m in re.finditer(b"\xff\x15" + struct.pack("<I", se), seg):
-        for f in fs(lo + m.start()):
-            ins = window(f, lo + m.start())
-            n = [k for k, i in enumerate(ins) if i.address == lo + m.start()][0]
+    for site in mod.refs()[0][se[0]]:   # the code references of the slot (relocations in code)
+        for f in fs(site):
+            ins = window(f, site)
+            n = [k for k, i in enumerate(ins) if i.address <= site < i.address + i.size][0]
             for k in range(n - 1, 0, -1):
                 if ins[k].mnemonic == "call" and ins[k].op_str.startswith("0x") and any(j.mnemonic == "test" for j in ins[k + 1:k + 4]) \
                         and any(j.mnemonic == "je" for j in ins[k + 1:k + 5]):

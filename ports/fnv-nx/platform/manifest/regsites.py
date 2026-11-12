@@ -58,11 +58,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import funcfacts
 from rtti import Rtti
 from regclass import Closure
-try:
-    import capstone
-    from capstone import x86_const as X
-except ImportError:  # the role table and gate_domain serve the generator without a disassembler; the pass itself needs it
-    capstone = X = None
+X = funcfacts.X
 
 # kind: open/create (out handle), read, write, enum, delete, info, close
 _BASE = {
@@ -438,40 +434,21 @@ class Analyzer:
         return (root, "\\".join(x for x in (path, sub) if x))
 
     def callers(self, target):
-        """Direct `call rel32` sites targeting `target`, each verified as a call instruction in its function's disassembly."""
+        """Direct `call rel32` sites targeting `target`, with each entry of the facts that contains the site (a decoded call instruction)."""
         if target not in self.callers_cache:
             mod, out = self.mod, []
-            for a, n in mod.code:
-                o0, k = a - mod.base, a - mod.base
-                while True:
-                    k = mod.img.find(b"\xe8", k, o0 + n - 4)
-                    if k < 0:
-                        break
-                    va = mod.base + k
-                    k += 1
-                    if (va + 5 + struct.unpack_from("<i", mod.img, k)[0]) & 0xffffffff != target:
-                        continue
-                    for st in mod.entries_of(va):
-                        if any(i.address == va and i.mnemonic == "call" for i in self.region(st).ins):
-                            out.append((va, st))
+            for va in mod.ff.edges()[0].get(target, []) if mod.ff.ok else []:
+                out += [(va, st) for st in mod.entries_of(va)]
             self.callers_cache[target] = out
         return self.callers_cache[target]
 
     def entries_x(self, target):
         """Every reference to the entry of `target` other than a direct `call rel32`, over the whole image, as dicts
-        {kind: jmp|code|vtable|data, text, at, vtable, slot}: a `jmp rel32`, a relocated word in code (address taken), a relocated word
-        in data (a slot of an RTTI vtable, or another data word)."""
+        {kind: jmp|code|vtable|data, text, at, vtable, slot}: a decoded `jmp rel32` (funcfacts edges), a relocated word in code (address
+        taken), a relocated word in data (a slot of an RTTI vtable, or another data word)."""
         mod, out = self.mod, []
-        for a, n in mod.code:
-            o0, k = a - mod.base, a - mod.base
-            while True:
-                k = mod.img.find(b"\xe9", k, o0 + n - 4)
-                if k < 0:
-                    break
-                va = mod.base + k
-                k += 1
-                if (va + 5 + struct.unpack_from("<i", mod.img, k)[0]) & 0xffffffff == target:
-                    out.append({"kind": "jmp", "at": va, "text": "jmp from 0x%08x" % va})
+        for va in mod.ff.edges()[1].get(target, []) if mod.ff.ok else []:
+            out.append({"kind": "jmp", "at": va, "text": "jmp from 0x%08x" % va})
         for r in sorted(mod.targets().get(target, [])):
             if mod.in_code(r):
                 out.append({"kind": "code", "at": r, "text": "address word in code at 0x%08x" % r})

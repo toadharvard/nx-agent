@@ -114,7 +114,7 @@ def provenance(an, site, v):
 def trace(an, st, site, v):
     """Facts about a computed buffer ("a", slot): the direct intra-module calls before `site` in the function at `st` that received the
     buffer as an argument, each with the constant strings among their other arguments, in call order. No call is interpreted."""
-    from capstone import x86_const as X
+    X = funcfacts.X
     targets = {i.operands[0].imm for i in an.region(st).ins if i.mnemonic == "call" and i.operands and i.operands[0].type == X.X86_OP_IMM}
     out = []
     for s2, t, pushes in an.run(st, None, targets)[1]:

@@ -1,0 +1,7 @@
+# l5-platform-w9-012: ворота ASM-501 переписаны на граф импортов
+
+Правило check_funcfacts.py (структурное, без имён и байтовых шаблонов): G1 capstone/pefile/dnfile/mmap/lief/elftools/ctypes импортирует только funcfacts.py; G2 в графе проходов образа (funcfacts + все модули, импортирующие граф, вычисляется) файлы открываются как байты только в funcfacts; G3 в графе нет доступа .img/._img/.pe. Самотесты на синтетических модулях всех трёх правил и модуля, достигающего графа через другой модуль.
+Сделано для правила: funcfacts.Image (типизированная запись образа: base, relocs, imports, code, u8/u32/bytes_at/zstr/cstr/find_bytes/size), pemanifest.Mod наследует Image; сырые сканы E8/E9 в regsites и prefs_settings, regex-сканы prefs_settings по байтам, ручной разбор PE заменены: прямые переходы из funcfacts.edges() (декодированные инструкции фактов), ссылки на ячейки и слоты из релокаций (Mod.targets/refs). import_escape: dnfile и sha через funcfacts.
+Выходы после рефакторинга побитно те же: dynsites, regsites, filesites (255), fontfaces, prefs_settings, prefs_required. Перепись: 215 с (edges декодирует все runs один раз).
+Красное остаётся: resolve_dynsites.py (w15) импортирует capstone и строит ranges сам (build_ranges из reloc-замыкания) — параллельный путь границ функций и чтения образа через contract/argflow; владелец w15/L5.
+Запись реестра ASM-501 (ASSUMPTIONS.json нет ни в одной ветке этого репозитория, файл у L1): status REMOVE, removed_by fact:platform/manifest/funcfacts.py, gate check_funcfacts.py.
