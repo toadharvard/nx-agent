@@ -205,3 +205,10 @@ Update 2026-11-12, at 698adefb:
   - The two write-set facts are w4's, from pcsrc address sources, after its totals (queued).
 - w4 7bd3abbd (claude/fnv-l3a-lift-w4-asm225, on 862b0708): pcsrc.py with the ASM-225 record. gate_assumptions is green: 120/120, 80 entries, 9 OWNER, 71 REMOVE. Sent to the orchestrator for the candidate. Done.
 - w8 ffb33e01: one build.json pair per test (lifted/ + native/) for citest, imptest and msvcrttest, with no admit rows. recipe.py check runs on int3.
+- w2 62c1bcd2 / 96cdc4eb: the 1269a9c request is an object, not an array. da2840 stores 11 GPA results at this+[4, 0x2c]. idxrange now joins register state over the call sites of a pure direct-call entry. "Pure" is a fact from the code: the producer set, no relocated reference, no jump predecessor, at least one call site. The exe run is going (doing); entry counts come with it.
+- w8 f7d3c182 (claude/fnv-l3a-lift-w8-t16b on 862b0708): 6 test roots (3 pairs) with admit rows. recipe.py check finds 4 blockers:
+  - a pack-less lifted origin is needed (L1, asked); w8's stand-in value is removed;
+  - the link script (L1, asked);
+  - lift/rt is missing at 862b0708 (int3, w6);
+  - link/ldcheck.py and py_modules (L1, after the first-root merge).
+- w8-disp 13a5a195: the MSVC return-in-registers POD predicate judges only the returned class; cl VC 2008 verifies it. Sent to L2.
