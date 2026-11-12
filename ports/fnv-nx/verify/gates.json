@@ -281,6 +281,17 @@
     "eh"
    ],
    "result": "eh.json"
+  },
+  {
+   "name": "flags",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_lift.py",
+    "--gate",
+    "flags"
+   ],
+   "result": "flags.json"
   }
  ]
 }

@@ -36,7 +36,7 @@ import gate_build  # noqa: E402
 import gate_contract  # noqa: E402
 import recipe  # noqa: E402
 
-GATES = ("order", "addr32", "eh")
+GATES = ("order", "addr32", "eh", "flags")
 TOOLS = os.path.join("ports", "fnv-nx", "lift", "gates")
 CPU_SYMBOL = "fnvnx_lift_cpu_bytes"
 PLUGIN = {"order": "fnvnx_order", "addr32": "fnvnx_addr"}
@@ -180,6 +180,53 @@ def judge_lifted_eh(root, repo, cache):
     return fold(root, [r["eh"]])
 
 
+def deps_hash(repo, pkgs):
+    """content hash of the source trees that a tool imports besides its own file (the Forms, the DSL, the runtime headers it reads): part of the cache key"""
+    h = hashlib.sha256()
+    for pkg in pkgs:
+        top = os.path.join(repo, "ports", "fnv-nx", "lift", pkg)
+        for d, ds, fs in sorted(os.walk(top)):
+            ds[:] = sorted(x for x in ds if x != "__pycache__")
+            for f in sorted(fs):
+                p = os.path.join(d, f)
+                h.update(os.path.relpath(p, top).encode() + b"\0" + open(p, "rb").read() + b"\0")
+    return h.hexdigest()
+
+
+def judge_flags(repo, cache):
+    """Class B `flags` (item 21): the facts and the images of the exe and the modules, not a root. gate_flags.py runs once per image that has range facts
+    (images_of: the exe and the modules of the declared machine); results are cached by the tool's hash and the trees of the externals. Universe = flag reads
+    + instructions without a Form + undecodable ranges; certified = flag reads that no may-undefined origin reaches. An image without range facts is red."""
+    doc = gate_contract.load_inputs(os.path.join(repo, gate_contract.INPUTS))
+    ws = tempfile.mkdtemp(prefix="gate-lift-ext-")
+    try:
+        store, extc = os.path.join(cache, "store"), os.path.join(cache, "external")
+        ext = recipe.fetch_externals(doc["external"], store, extc, ws)
+        have, lack = gate_contract.images_of(doc, ext)
+        trees = sorted(e["tree"] for e in ext.values()) + [deps_hash(repo, ("proof", "fnvlift", "rt"))]
+        u = c = 0
+        ids, why = [], ["%s: input missing: no range facts (owner L3a)" % n for n in lack]
+        ids += [n + ":inputs" for n in lack]
+        u += len(lack)
+        for name, pe, rg in have:
+            r = run_tool(repo, cache, "gate_flags.py", [pe, os.path.dirname(rg)], ("flags",), [name, trees], {"JOBS": os.environ.get("JOBS", "4")})["flags"]
+            nf = r.get("red_by_class", {}).get("no-form", 0)
+            reads, bad = r.get("flag_reads", 0), r.get("undecodable_ranges", 0)
+            red = r.get("red_flag_reads", 0) - nf
+            if r.get("status") != "green" and "flag_reads" not in r:
+                u, ids = u + 1, ids + [name + ":tool"]
+                why.append("%s: %s" % (name, r.get("detail", "tool red")))
+                continue
+            u += reads + nf + bad
+            c += reads - red
+            ids += ["%s:%s" % (name, x) for x in r.get("uncertified", [])]
+            if red or nf or bad:
+                why.append("%s: %d red reads, %d instructions without a Form, %d undecodable ranges" % (name, red, nf, bad))
+    finally:
+        shutil.rmtree(ws, ignore_errors=True)
+    return u, c, ids, "; ".join(why) or "%d flag reads in %d images" % (u, len(have))
+
+
 def judge_root(gate, root, repo, cache, kind):
     try:
         if kind == "native":
@@ -197,7 +244,7 @@ def judge_root(gate, root, repo, cache, kind):
 
 def main(argv):
     if len(argv) != 2 or argv[0] != "--gate" or argv[1] not in GATES:
-        print("usage: gate_lift.py --gate order|addr32|eh", file=sys.stderr)
+        print("usage: gate_lift.py --gate order|addr32|eh|flags", file=sys.stderr)
         return 1
     gate, repo = argv[1], "."
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-lift-cache-")
@@ -205,9 +252,17 @@ def main(argv):
     try:
         admit = recipe.load_admit(repo)
         roots = [(r, kind_of(admit[r])) for r in gate_build.product_roots(repo)]
-        roots = [(r, k) for r, k in roots if k]
+        roots = [(r, k) for r, k in roots if k] if gate != "flags" else []
         u = c = 0
         ids, why = [], []
+        if gate == "flags":
+            try:
+                u, c, ids, fd = judge_flags(repo, cache)
+            except gate_contract.Red as e:
+                u, c, ids, fd = 1, 0, ["flags:inputs"], str(e)[:600]
+            except (recipe.BuildRed, OSError, KeyError, ValueError) as e:
+                u, c, ids, fd = 1, 0, ["flags:inputs"], "input error: %s" % (str(e)[:300] or type(e).__name__)
+            if c != u: why.append(fd)
         for r, k in roots:
             ru, rc, rids, rd = judge_root(gate, r, repo, cache, k)
             u, c, ids = u + ru, c + rc, ids + rids
