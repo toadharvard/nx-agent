@@ -337,3 +337,12 @@ Update 2026-11-12, at 698adefb:
 - L1 accepted DIC.
 - New id: ASM-234 (REMOVE, L3a), for the VirtualProtect/WPM/FlushIC sites on image ranges. Its removing fact is w4's points-to. w6 adds the record; w7 counts the sites in the facts commit.
 - data_in_code.tsv will be pinned in the facts manifest (same tree_sha256) for contract/imagerec. The next free id is 235.
+
+## 2026-11-12 09:24
+- w5's flags call summary 2f94d41d is accepted (callee summaries joined over the exits, least fixpoint, C for unknown). Census @ a0f3d8e:
+  - red 15 614 of 573 267 reads (was 15 630);
+  - exe 14 → 4: 2 adc cf at class-3 entries, which w7's class-3 rule removes, and 2 pushfd AF, which wait on the invariance proof.
+  - Per image: binkw32 1, atimgpud 3, gdffalloutnv 2, libvorbis 3, libvorbisfile 3, d3dx9_31 4 355, d3dx9_38 11 243.
+- L1 w20: claude/fnv-l1-contract-int-l3a 2d215f16a (6d3a2800 + w14-src + w20-descs + int3 3b31bdc5).
+  - w6 runs the verdict there and feeds int3's newer head (4115a256a + w5 + ASM-233/234) back.
+  - w8 builds t16c and the lift/bridges root on it; w14-src2 445e551d carries the link.script fix.
