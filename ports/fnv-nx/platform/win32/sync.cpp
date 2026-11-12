@@ -209,7 +209,7 @@ static struct w32_mutex *g_mutexes;
 struct w32_sem { struct w32_obj o; LONG count, max; char *name; };
 
 /* named objects share one namespace, as in a Windows session */
-struct named { struct named *next; char *name; struct w32_obj *o; };
+namespace { struct named { struct named *next; char *name; struct w32_obj *o; }; }   // TU-local type: internal linkage (filemap.cpp has its own)
 static struct named *g_named;
 
 static void unname(struct w32_obj *o)

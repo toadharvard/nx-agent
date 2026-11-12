@@ -241,9 +241,8 @@ class ImageRec:
 
 
 def _tree_hash(path):
-    sys.path.insert(0, os.path.join(HERE, '..', 'verify'))
-    import cas
-    return cas.tree_hash(path)
+    import treehash
+    return treehash.tree_hash(path)
 
 
 _trees = {}

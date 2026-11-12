@@ -46,6 +46,15 @@ check("no product root: universe 0, green, accepted by the verdict", rc == 0 and
 rc, g, txt, acc = run(TR.make_repo("im-undeclared"), "undecl")
 check("product root without imports.in.json: red, one item", rc == 2 and g["status"] == "red" and g["universe"] == 1 and "imports.in.json" in g["detail"], (g, txt))
 
+# header-only root (gate_build.unitless): no unit and no link, so it holds no code and has no imports by construction; it needs no imports.in.json
+# and counts 0 items. The same root with one unit added and still no imports.in.json is red again (one item): the rule is "no code", not "no file".
+HO = {"format": "fnvnx-recipe/1", "compiler": TR.RECIPE["compiler"], "flags": TR.RECIPE["flags"], "include": [TR.ROOT + "/inc"], "units": "all", "link": None}
+HO_FILES = {"toy/a.c": None, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/link.ld": None, "toy/constants.tsv": None}
+rc, g, txt, acc = run(TR.make_repo("im-hdronly", rec=HO, files=HO_FILES), "hdronly")
+check("header-only product root without imports.in.json: 0 items, green", rc == 0 and g["status"] == "green" and g["universe"] == 0, (g, txt))
+rc, g, txt, acc = run(TR.make_repo("im-hdrunit", rec=HO, files=dict(HO_FILES, **{"toy/c.c": TR.FILES["toy/c.c"]})), "hdrunit")
+check("the same root with one unit and no imports.in.json: red, one item", rc == 2 and g["status"] == "red" and g["universe"] == 1, (g, txt))
+
 SPEC = {"toy.spec": "1 stdcall f_a()\n2 stdcall f_b(long)\n3 stdcall f_c(long)\n", "msvcrt.spec": "1 cdecl memcpy(ptr ptr long)\n2 cdecl strlen(str)\n"}
 
 

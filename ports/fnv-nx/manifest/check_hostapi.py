@@ -11,7 +11,7 @@ Checks (exit 1 with one line per violation):
   A. the header is consistent: no service number and no module number defined twice, no service name defined twice, every
      table row names a defined service with the defined number, every defined service (but the not-served ones) has a count, the
      socket list names exactly the FNVNX_PLAT_SOCK_* services;
-  B. every use of ext_call in platform/ and toolchain/guest/ is
+  B. every use of ext_call in platform/ and rt/guest/ is
         fnvnx_hcall4(<slot>ext_call, FNVNX_EXT_PLATFORM, FNVNX_PLAT_<NAME>, <args>, <literal n>)
      or a call of a wrapper of that form: a function whose body makes that call with the service (and the count) taken from its
      own parameters. Wrappers are found by rule, transitively (a function that passes its own parameter as the service of a
@@ -36,7 +36,7 @@ import sys
 HDR = "hostabi/include/fnvnx/hostapi.h"
 HOST_PLAT = "toolchain/host/host_platform.inc"
 HOST_SOCK = "toolchain/host/host_sock.inc"
-SCAN = ["platform", "toolchain/guest"]
+SCAN = ["platform", "rt/guest"]
 EXTS = (".c", ".cpp", ".h", ".inc", ".hpp", ".cc")
 NOT_SERVED = set()   # services the header declares without a count are exactly those whose table row says NOT SERVED
 

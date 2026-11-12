@@ -37,6 +37,7 @@ static __thread int t_scoped;
 static __thread int t_in_sync;
 
 /* ---- pumps */
+namespace {   // TU-local type: internal linkage (the other clock backend defines its own clk_pump)
 struct clk_pump {
     clk_pump *next;
     clk_pump_fn render, after;
@@ -44,6 +45,7 @@ struct clk_pump {
     uint32_t rate, period;
     uint64_t t0, n_done;
 };
+}   // namespace
 static os_lock_t g_dev_lock;       /* one device period at a time, in the order of their instants */
 static clk_pump *g_pumps;
 
@@ -185,7 +187,7 @@ int64_t clk_peek_filetime(void) { return EPOCH_FT + (int64_t)(t_now / Q); }
 
 /* The zone is not a property of the clock: it is the host's (TZ_AT; the emulator's host answers UTC, the posix test backend the scripted
  * zone). One source for the real and the virtual clock, no literal here. */
-int32_t clk_tz_offset_minutes(void) { return os_tz_offset_minutes(); }
+int32_t clk_zone_offset_minutes(void) { return os_zone_offset_minutes(); }
 int clk_tz_rule(clk_tzrule_t *r)
 {
     os_tzrule_t o;

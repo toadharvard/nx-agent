@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Gate "hostapi" (fnvnx-gate/1): the host services declared in fnvnx/hostapi.h are exactly the services the product calls.
     python3 -I gate_hostapi.py [--header PATH]     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/hostapi.json
-Rule (owner order 2026-11-10/11: nothing that the product does not need, no placeholder behind a number): for every admitted product root
-that includes hostapi.h, {service numbers declared in the header} == {service numbers expanded by at least one unit of the root}.
+Rule (owner order 2026-11-10/11: nothing that the product does not need, no placeholder behind a number): hostapi.h is an interface root's header
+(hostabi/); {service numbers declared in the header} == {service numbers expanded by at least one unit of ANY admitted product root that includes
+it}: the universe is per interface, over the union of all its includers (L1 decision 2026-11-12), never per including root. A service that no
+admitted root uses is red; two roots that use different halves are both green.
 Declared: the header's own text (PATH, default ports/fnv-nx/hostabi/include/fnvnx/hostapi.h, its one home; a missing file is an error): every `#define FNVNX_PLAT_<NAME> <integer>` directive (a preprocessor directive read by its token grammar: #, define,
 identifier, one pp-number). A service is a NUMBER; names with the same number are aliases of one service.
 Used: the evidence is the PP stage result unit.ii of every unit of the root (found by pp_key in objects.json, as gate_objstub does); the macro uses come
@@ -164,7 +166,10 @@ def header_text(repo, explicit):
     return open(os.path.join(repo, explicit or HOSTAPI_HEADER)).read()
 
 
-def root_judge(root, repo, cache, header):
+def root_judge(root, repo, cache, header, seen):
+    """One admitted product ROOT -> (universe, certified, ids, detail) of the items that belong to the root alone (build state, wrapper rule,
+    foreign uses). The service evidence is not judged here: a root that includes hostapi.h appends (root, {name: value} used by its units) to SEEN
+    and main judges the declared services once, over the union of its includers (rule: the interface root owns the numbers)."""
     try:
         res, _ = gate_build.ensure(root, cache, repo)
     except recipe.RecipeError as e:
@@ -176,11 +181,19 @@ def root_judge(root, repo, cache, header):
     dus = [open(unitstage.result_file(store, k, "unit.du"), errors="replace").read() for _, k in sorted(res["du_keys"].items())]
     if not any(includes_header(t) for t in iis):
         return 0, 0, [], "does not include %s" % HEADER
-    u, c, ids = judge(declared(header), used(dus))
+    seen.append((root, used(dus)))
     w = ["wrapper use %s line %d" % (n, l) for l, n in wrapper_uses(header)]
     w += foreign_uses(repo, recipe.load_recipe(repo, recipe.load_admit(repo), root), root, store)
-    u, ids = u + len(w), ids + w
-    return u, c, [root + ":" + i for i in ids], "; ".join(ids)[:300]
+    return len(w), 0, [root + ":" + i for i in w], "; ".join(w)[:300]
+
+
+def union_judge(decl, seen):
+    """-> (universe, certified, ids) of the services over the union of the includers' uses. DECL {number: [names]}, SEEN [(root, {name: value})]."""
+    use = {}
+    for _, u in seen:
+        use.update(u)
+    u, c, ids = judge(decl, use)
+    return u, c, ids
 
 
 def main(argv):
@@ -190,7 +203,13 @@ def main(argv):
     try:
         roots = gate_build.product_roots(repo)
         header = header_text(repo, explicit) if roots else ""
-        u, c, ids, detail = gate_build.quantify(repo, lambda r: root_judge(r, repo, cache, header))
+        seen = []
+        u, c, ids, detail = gate_build.quantify(repo, lambda r: root_judge(r, repo, cache, header, seen))
+        if seen:
+            su, sc, sids = union_judge(declared(header), seen)
+            u, c, ids = u + su, c + sc, sids + ids
+            if sc != su:
+                detail = ("%s; services: %s" % (detail, "; ".join(sids)))[:900]
         st = stale_names(repo) if os.path.isfile(os.path.join(repo, HOLES)) else []
         u, ids = u + len(st), st + ids
         status = "green" if u == c else "red"

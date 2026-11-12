@@ -33,7 +33,7 @@ uint32_t clk_peek_tick_ms(void) { return clk_read_tick_ms(); }
 uint64_t clk_peek_ns(void) { return os_monotonic_ns(); }
 int64_t clk_peek_filetime(void) { return clk_read_filetime(); }
 
-int32_t clk_tz_offset_minutes(void) { return os_tz_offset_minutes(); }
+int32_t clk_zone_offset_minutes(void) { return os_zone_offset_minutes(); }
 int clk_tz_rule(clk_tzrule_t *r)
 {
     os_tzrule_t o;
@@ -65,6 +65,7 @@ void clk_file_removed(const char *host) { (void)host; }
 int clk_file_times(const char *host, int64_t ft[3]) { (void)host; (void)ft; return 0; }
 
 /* ---- pumps: a thread paced by the monotonic clock, one render per period */
+namespace {   // TU-local type: internal linkage (the other clock backend defines its own clk_pump)
 struct clk_pump {
     os_thread *thread;
     volatile int run;
@@ -73,6 +74,7 @@ struct clk_pump {
     uint64_t period_ns;
     uint32_t period;
 };
+}   // namespace
 
 static void pump_main(void *p)
 {

@@ -277,7 +277,7 @@ Failure signs: back to HOME / error at launch = NSO or NPDM rejected by ldr (che
 `-DFNVNX_HOST_NO_CONSOLE` builds the host without the libnx text console (graphics owns the display); output then
 goes to `sdmc:/fnvnx/host.log` and svcOutputDebugString only.
 
-### Guest runtime (`toolchain/guest/`, `toolchain/guest/build.sh` -> `crt0.o`, `libfnvnx-guest.a`)
+### Guest runtime (`rt/guest/`, `the recipe (rt/guest/build.json)` -> `crt0.o`, `libfnvnx-guest.a`)
 
 * `threads.c`: guest threads = host threads with their own static TLS block (TPIDR_EL0) and newlib reent; futex
   locks (normal + recursive) and sequence condvars on `wait_on_address`; all devkitPro libsysbase hooks
@@ -977,8 +977,8 @@ those vftables can a hand vptr into the image work at all.
   4,343 skips, the same stop.
 
 **Startup order of the guest** (S1's INIT question):
-1. `__fnvnx_guest_entry` (`toolchain/guest/runtime.c:167`): bss, self-relocation, host API, TLS, newlib, files.
-2. `__libc_init_array()` (`runtime.c:199`): `.preinit_array`, `_init`, then `.init_array`. `toolchain/guest/guest.ld:95-96`
+1. `__fnvnx_guest_entry` (`rt/guest/runtime.c:167`): bss, self-relocation, host API, TLS, newlib, files.
+2. `__libc_init_array()` (`runtime.c:199`): `.preinit_array`, `_init`, then `.init_array`. `rt/guest/guest.ld:95-96`
    orders it: prioritized entries first, then the rest in link order. On the 9a0243c7eabe guest it has 19 entries:
    - `register_fini`;
    - `boot_banner`, `constructor(101)` (now 110, see below) (`toolchain/game/boot.cpp:339`): it maps the data image (`load_image`, :349)
@@ -1003,7 +1003,7 @@ What that means for the INIT fix:
      `time.cpp` `time_init`), module/COM registrations 103 (`input/register.cpp`);
   3. `boot_banner` 110;
   4. the runtime libraries' unprioritized constructors (crtbegin, libstdc++ `eh_alloc`/`eh_globals`, newlib's
-     stack guard), which `toolchain/guest/guest.ld` now places ahead of the rest. It needs one input section per
+     stack guard), which `rt/guest/guest.ld` now places ahead of the rest. It needs one input section per
      `KEEP`, and `libstdc??.a`, because `+` is not a pattern character;
   5. the game units' constructors.
 
