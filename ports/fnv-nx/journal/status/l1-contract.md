@@ -377,3 +377,11 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - pin keystone-engine 0.9.2 (L3b);
   - register A-ext as a REMOVE id in L1's range, removed by the sandbox and the reproducibility gate.
 - Orchestrator: L5 w13 puts the declared redist file set in contract/dllkind.py. w4's hold on L5's MANIFEST is accepted.
+
+## 2026-11-12 04:05Z
+- Runtime MANIFEST schema decided and sent to w4 and L5:
+  - per-language flag lists as compiled, version, patch sha256, and the full sizeof/alignof map;
+  - comparison: version and sha equal, map equal to the guest compiler's own probe, and pack flags ⊇ guest semantics flags per language;
+  - plus a census of x19..x27 writes in the pack.
+- w14 new item: recipe keep-going by default. Red units are reported, dependents marked `blocked-by`, and the verdict is red. Asked for by L5.
+- Relayed w18's idxopen_all.tsv (fnv-nx-build l1-contract/mp4 4843d9f, 216 open indexed stores; exe 151/155) to L3a w2 for item 30.
