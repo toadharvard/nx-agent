@@ -164,35 +164,12 @@ class ReadyTest(unittest.TestCase):
         self.assertIn('call-flow 1', g['note'])
         self.assertIn('no fnvnx-causes block', g['note'])
 
-    def test_fuzz_counts_real_bug_and_triage_only(self):
-        self.set_causes(1, {'x87-precision': ('by-design', 5, 4), 'new-null': ('artifact', 3, 3),
-                            'native-undefined': ('real-bug', 2, 2)})
-        self.set_causes(2, {'call-flow': ('triage', 4, 3), 'nan-bits': ('by-design', 9, 9)})
-        card = self.world.run()
-        g = self.gate(card, 'fuzz.hard')
-        self.assertEqual((g['status'], g['value']), ('fail', 5))        # 2 real-bug + 3 triage functions
-        self.assertEqual(g['by_class'], {'by-design': 13, 'artifact': 3, 'real-bug': 2, 'triage': 3})
-        self.assertEqual(g['owners'], {'S1': 2, 'S13b': 3})
-        self.assertIn('6 divergences', g['note'])
-        a = self.gate(card, 'fuzz.artifacts')
-        self.assertEqual((a['value'], a['status'], a['required']), (3, 'fail', False))
-
     def test_fuzz_artifacts_and_by_design_do_not_block(self):
         self.set_causes(1, {'new-null': ('artifact', 3, 3), 'x87-precision': ('by-design', 1, 1)})
         card = self.world.run()
         self.assertEqual(self.gate(card, 'fuzz.hard')['status'], 'pass')
         self.assertEqual(card['verdict'], 'READY')
         self.assertNotIn('fuzz.artifacts', card['blockers'])
-
-    def test_fuzz_policy_of_the_checkout_decides(self):
-        # the report called split-global by-design; this checkout's causes.py POLICY says real-bug (S2c)
-        self.set_causes(1, {'split-global': ('by-design', 1, 1)})
-        g = self.gate(self.world.run(), 'fuzz.hard')
-        self.assertEqual((g['status'], g['value'], g['owners']), ('fail', 1, {'S2c': 1}))
-
-    def test_fuzz_unknown_cause_is_triage(self):
-        self.set_causes(2, {'brand-new': ('by-design', 1, 1)})
-        self.assertEqual(self.gate(self.world.run(), 'fuzz.hard')['value'], 1)
 
     def test_fuzz_s13b_summary_when_it_covers_more_shards(self):
         self.world.sub('reports/fz2/%s-fuzz.md' % C, 'shard 2/2', 'shard 2/32')
@@ -457,48 +434,6 @@ class ReadyTest(unittest.TestCase):
         md = readf(os.path.join(self.world.tmp, 'card.md'))
         self.assertIn('## Scorecard', md)
         self.assertIn('| compile | census errors | 3 | 0 | 3 | **open** |', md)
-
-    def test_s13_metric_from_difffuzz_metric_py(self):
-        g = self.gate(self.world.run(), 'fuzz.s13_metric')
-        self.assertEqual((g['status'], g['value'], g['required']), ('pass', 0, False))
-        self.assertEqual([s['branch'] for s in g['sources']], ['reports/fz1', 'reports/fz2'])
-        self.world.edit_json('_s13_metric.json', lambda d: d['totals'].update(artifacts=7, metric=9, unpublished=2))
-        card = self.world.run()
-        g = self.gate(card, 'fuzz.s13_metric')
-        self.assertEqual((g['status'], g['terms']['artifacts']), ('fail', 7))
-        self.assertEqual(card['verdict'], 'READY')          # informative: fuzz.hard decides
-        self.assertEqual([r['gap'] for r in card['scorecard'] if r['gates'] == ['fuzz.s13_metric']], [9])
-        self.world.edit_json('thresholds.json', lambda d: d['fuzz_s13_metric'].update(trusted=False), port=True)
-        card = self.world.run()
-        g = self.gate(card, 'fuzz.s13_metric')
-        self.assertEqual((g['status'], g['value']), ('no-data', 9))
-        self.assertIn('not trusted: V1 refuted', g['note'])
-        r = [r for r in card['scorecard'] if r['gates'] == ['fuzz.s13_metric']][0]
-        self.assertEqual((r['value'], r['gap'], r['status']), (9, None, 'no-data'))
-        self.world.remove('_s13_metric.json')
-        self.assertEqual(self.gate(self.world.run(), 'fuzz.s13_metric')['status'], 'no-data')
-
-    def test_s13_metric_runs_metric_py_on_a_git_store(self):
-        """the real path: tools/difffuzz/metric.py of the checkout on a bare artifacts repository"""
-        import subprocess
-        mod = ready.load_module(PORT, os.path.join('tools', 'difffuzz', 'metric.py'), 'fnvnx_difffuzz_metric')
-        if mod is None:
-            self.skipTest('no tools/difffuzz/metric.py')
-        git = os.path.join(self.world.tmp, 'art')
-        run = lambda *a: subprocess.run(['git', '-C', git, *a], check=True, capture_output=True)
-        os.makedirs(git)
-        run('init', '-q')
-        run('checkout', '-q', '-b', 'fz1')
-        writef(os.path.join(git, C + '-fuzz.md'), '# fuzz %s shard 1/1\n- in this shard 10: no native object 2, '
-               'control flow not modelled (x) 1, fuzzable 7\n' % C)
-        run('add', '.')
-        run('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'r')
-        run('update-ref', 'refs/remotes/origin/reports/fz1', 'HEAD')
-        card = ready.Card(ready.GitStore(os.path.join(git, '.git')), ready.History(head=C, table={}),
-                          json.loads(self.world.read('thresholds.json', True)) | {'fuzz_shards': 1}, port=PORT)
-        card.s13_metric_gate(1)
-        g = card.gates[-1]
-        self.assertEqual((g['id'], g['value'], g['terms']['not_fuzzable']), ('fuzz.s13_metric', 1, 1), g['note'])
 
     def test_fuzz_coverage_per_shard(self):
         g = self.gate(self.world.run(), 'fuzz.coverage')

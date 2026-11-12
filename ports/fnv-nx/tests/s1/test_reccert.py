@@ -79,7 +79,7 @@ def patch_cert(root):
     open(rep, 'w').write(json.dumps({'unit': 0, 'source': 'src/h.cpp', 'addr': '0x00401000', 'status': 'identical'}) + '\n')
     real = rc.TOOLS
     import shutil
-    fake = os.path.join(root, 'tools'); shutil.copytree(real, fake, ignore=shutil.ignore_patterns('__pycache__', 'equiv', 'link', 'farm', 'difffuzz'))
+    fake = os.path.join(root, 'tools'); shutil.copytree(real, fake, ignore=shutil.ignore_patterns('__pycache__', 'equiv', 'link', 'farm'))
     rcf = load('reccert_f', os.path.join(fake, 'rules', 'reccert.py'))
     # the stamping module reads the patches next to its own tools/: give it this test's
     os.makedirs(os.path.join(root, 'patches'), exist_ok=True)
