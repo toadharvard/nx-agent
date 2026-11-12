@@ -4,7 +4,7 @@ Applied in this order on the pinned trees of fnv-nx-build (git archive of the pi
 
 | external | pin | tree_sha256 (verify/cas.py ingest) | patches, in order |
 |---|---|---|---|
-| mojoshader | `tools/mojoshader` ad5dff84830c2863c841f4b1f4e3df78c705b383 | e49a1b65e09c86647fd8c0b26c7a8e16e4a16e6ad1290a1e7ada85047306f361 | `../mojoshader.patch`, `mojoshader_units.patch` |
+| mojoshader | `tools/mojoshader` ad5dff84830c2863c841f4b1f4e3df78c705b383 | e49a1b65e09c86647fd8c0b26c7a8e16e4a16e6ad1290a1e7ada85047306f361 | `../translator/mojoshader.patch`, `translator/mojoshader_units.patch` |
 
 Patched trees (cas.py ingest, measured at the commit of this note): mojoshader after both patches 7af1fe43..., uam after the three patches 4e16a499...
 

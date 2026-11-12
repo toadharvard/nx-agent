@@ -19,7 +19,7 @@ tests/s6b/run.py                          # corpus + unit tests (+ exec scenes o
 ```
 
 Pins (build.sh): MojoShader `ad5dff8` (zlib), uam `5a5afc2` (Mesa-derived, MIT-style), and for tests
-only mojoshader_assembler `c4b96e2` (zlib). Our changes: `mojoshader.patch` (the `glsldk` profile),
+only mojoshader_assembler `c4b96e2` (zlib). Our changes: `translator/mojoshader.patch` (the `glsldk` profile),
 `uam.patch` (static library target, in-memory DKSH + stats, `uam_api.h` C API). Nothing is vendored.
 Host needs git, cmake, ninja, gcc/g++, bison, flex, python3 with meson and mako.
 

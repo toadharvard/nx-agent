@@ -45,4 +45,7 @@ extern const fnvnx_glsl_backend fnvnx_backend_mojoshader_glsldk;
 int fnvnx_frontend_parse(const void *bc, size_t n, const unsigned char *link, uint32_t nlink, fnvnx_reflection *refl, char **json, char *err, size_t errlen);
 void fnvnx_frontend_release(fnvnx_reflection *refl);
 
-/* dk.cpp */
+#ifdef __cplusplus
+}
+#endif
+#endif

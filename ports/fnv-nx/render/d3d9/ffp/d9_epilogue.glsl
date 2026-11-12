@@ -1,6 +1,6 @@
 // d9_epilogue.glsl: the D3D9 pixel epilogue of the fixed-function pixel program: alpha test, then fog (the pixel stage is
 // below ps_3_0, so the fixed-function stage always has the fog part), statement for statement what dk_epilogue of
-// render/shaders/mojoshader.patch emits for a translated pixel shader, over the PS driver block of fnvnx_dk_layout.h
+// render/shaders/translator/mojoshader.patch emits for a translated pixel shader, over the PS driver block of fnvnx_dk_layout.h
 // (UBO 2 of the pixel stage: vec4 fogcolor; vec4 fog (x mode 0 off / 1 vertex / 2 exp / 3 exp2 / 4 linear, y start, z end,
 // w density); ivec4 alpha (x = D3DCMPFUNC, 0 = off); vec4 alpharef (x); the rest of the 352 bytes is not read here).
 // The fog factor of the vertex stage is read at the canonical fog location 18 (.x). Included by ffp.frag.glsl.

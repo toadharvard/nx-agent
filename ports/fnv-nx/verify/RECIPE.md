@@ -51,18 +51,8 @@ the hash of the stage document + tool code. All paths are root-relative unless m
   `ld`; `aarch64elf32` also links a static image). The objects are ELF32 (`SHT_RELA` with `Elf32_Rela`, relocations `R_AARCH64_P32_*`),
   the linked ELF is ELF32. LP64 is the default, with no flag.
 - `external`: content-pinned inputs (see below).
+- `sources`: units from an external's source tree (see "Sources and patches (rule A)"). Allowed for every class.
 - `plugins`, `plugin_cxx`: GCC plugins of the C++ front end (see "Plugins"). `flags` may not hold any `-fplugin*` token.
-
-- `unit_flags`, `unit_facts`: per-unit flags of the CC stage (see "Per-unit flags").
-
-### Per-unit flags (`unit_flags`, `unit_facts`)
-`unit_flags` is `{unit: [flag]}` for C++ units under `game`; the only flag is `-fplugin-arg-fnvnx_pi-fpfast` (the pi plugin: this unit is built with
-/fp:fast, so its source does not fix the evaluation order of floating-point arguments). It enters the argv of that unit's CC stage, so it is in the CC
-key (the PP key is unchanged). `unit_facts` is a tracked file or generated output of the root, units.json: `{"units": [{"source": UNIT, "flags": [...]}]}`
-with `source` equal to the root-relative unit path. RULE: the flag stands on a unit iff its entry lists `/fp:fast`; a unit with no entry has no such
-fact (compile.sh: no entry, no argument). A mismatch in either direction, a fact for a source that is no game C++ unit, or a flag on a unit outside `game`
-is red (build stage `unit_facts`, before any compile). A native guest root that declares `game` must declare `unit_facts`. Assumption: units.json is
-generated from the exe/decomp facts, not written by hand. No other flag can be attached to a unit: a flag not derived from a fact has no place here.
 
 ## Plugins (`fnvnx_order`, `fnvnx_ftoi`)
 Our compiler is the pinned g++-13 with our two plugins. Their sources are tracked under the tool root `ports/fnv-nx/toolchain` (no build script:
@@ -99,6 +89,30 @@ headers pinned by env.json). The CC stage mounts the compiler external, the plug
 - lifted (the lifter emits `ldar`/`stlr` itself): consistent only if the root has NO tracked C++ unit, every C++ unit is an output of a `generated`
   step whose tool is `lifted_by`, and `pack` is an external of the recipe (an input of every generator). Plugins are then not required.
 Assumption: the declaration `lifted_by` names the lifter is the owner's (admit.json is reviewed); the gate proves that no hand-written C++ sits in a lifted root.
+
+## Sources and patches (rule A)
+`"sources": {"external": NAME, "dir": PATH, "patches": [P...], "include": [D...]}`: the root's units come from the tree of external NAME.
+- `dir` is a directory of the external's tree (or `.`), `patches` are tracked `.patch` files of the root (root-relative, distinct), `include` are
+  directories inside `dir` of the PATCHED tree, passed as `-I` after the recipe's `include`.
+- Stage `patch:<root>` (sandbox, python runtime + `patchtree.py`, GNU `patch` of env.json as a declared input at `/ptool`) copies the
+  external's tree and applies the patches in list order with `patch -p1 -F0 --no-backup-if-mismatch`. Its output tree is the root's source view,
+  materialized at `ext/<NAME>/`. A patch that does not apply cleanly makes the build red with stage `patch:<root>`.
+- Unit rule stays `all`: every `*.c *.cc *.cpp *.cxx *.s *.S` of the patched tree under `dir`, named `ext/<NAME>/<path in the tree>`, plus the root's own
+  tracked units. There is no exclude list: a file of upstream that must not be built is deleted by the patch (reviewed content).
+- A non-tool root with C++ units from a patched tree takes the plugin rule of `cxx_origin` after the stage (RecipeError otherwise).
+### Tool roots (class "tool" with a recipe)
+A `tool` root of admit.json may name `"recipe"` and `"target": "host"`. Its compiler is the host driver pair `x86_64-linux-gnu-gcc-13` / `-g++-13`
+(env.json); no plugins, `cxx_origin`, `os_layer`, `game`, `constants`, `contract_names`. `link` is `{"output": NAME, "flags": [..]}` (no script):
+`ld -static` with the driver's own startup files and libraries as declared inputs at `/ldlibs` (found by `-print-file-name`; a linker-script library
+such as libm.a gets its member paths rewritten), the result is checked to be an ELF64 little-endian x86-64 executable. Tool roots are not
+product roots: they are built as dependencies (rule B), and their stages count in the dependent root's stage keys and determinism.
+
+## Built tools (rule B)
+`generated` entry with `"tool": {"root": R, "output": NAME}` (instead of a tracked `.py`): NAME is R's `link.output`, R an admitted root with a recipe, R is
+built first by the same build, in the same store (its stage keys and stage counts join the dependent root's). Stage `gen:<root>:<i>` (toolflags
+kind `built`) runs the executable at `/built/<R with / as __>/NAME`, whose loader closure is resolved as for an external compiler (`HOST@AT`).
+`args`, `inputs` (at `/in/<repo path>`) and `outputs` follow the python rule: it writes only `/out/<output>`, and the set of files it writes must
+equal `outputs` exactly (else red, naming both sets). A cycle between roots is a RecipeError. The outputs are part of the determinism gate's two cold builds.
 
 ## Refusal set R (GNU ld option syntax, not a text guess)
 Options that let a link accept missing or substituted symbols: `--unresolved-symbols`, `--allow-shlib-undefined`, `--noinhibit-exec`,

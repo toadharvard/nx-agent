@@ -9,7 +9,15 @@
    "-O3",
    "-DNDEBUG",
    "-fPIC",
-   "-std=gnu99"
+   "-std=gnu99",
+   "-DSUPPORT_PROFILE_ARB1=0",
+   "-DSUPPORT_PROFILE_ARB1_NV=0",
+   "-DSUPPORT_PROFILE_D3D=0",
+   "-DSUPPORT_PROFILE_GLSL120=0",
+   "-DSUPPORT_PROFILE_GLSPIRV=0",
+   "-DSUPPORT_PROFILE_HLSL=0",
+   "-DSUPPORT_PROFILE_METAL=0",
+   "-DSUPPORT_PROFILE_SPIRV=0"
   ],
   "cxx": [
    "-O3",
@@ -21,13 +29,14 @@
  "include": [
   "ports/fnv-nx/render/shaders/translator/include",
   "ports/fnv-nx/render/shaders/translator/src",
-  "/ext/mojoshader"
+  "ports/fnv-nx/render/shaders/translator"
  ],
  "units": "all",
  "generated": [
   {
    "tool": "ports/fnv-nx/render/shaders/total/gen_sm_rows.py",
    "args": [
+    "/in/ports/fnv-nx/render/shaders/total/sm_table.json",
     "/out/fnvnx_sm_rows.h"
    ],
    "inputs": [
@@ -38,32 +47,17 @@
    ]
   }
  ],
- "sources": [
-  {
-   "external": "mojoshader",
-   "dir": "/ext/mojoshader",
-   "patches": [
-    "ports/fnv-nx/render/shaders/mojoshader.patch",
-    "ports/fnv-nx/render/shaders/patches/mojoshader_units.patch"
-   ],
-   "flags": {
-    "c": [
-     "-O3",
-     "-DNDEBUG",
-     "-fPIC",
-     "-Wall",
-     "-DSUPPORT_PROFILE_ARB1=0",
-     "-DSUPPORT_PROFILE_ARB1_NV=0",
-     "-DSUPPORT_PROFILE_D3D=0",
-     "-DSUPPORT_PROFILE_GLSL120=0",
-     "-DSUPPORT_PROFILE_GLSPIRV=0",
-     "-DSUPPORT_PROFILE_HLSL=0",
-     "-DSUPPORT_PROFILE_METAL=0",
-     "-DSUPPORT_PROFILE_SPIRV=0"
-    ]
-   }
-  }
- ],
+ "sources": {
+  "external": "mojoshader",
+  "dir": ".",
+  "patches": [
+   "mojoshader.patch",
+   "mojoshader_units.patch"
+  ],
+  "include": [
+   "."
+  ]
+ },
  "link": null,
  "external": [
   {

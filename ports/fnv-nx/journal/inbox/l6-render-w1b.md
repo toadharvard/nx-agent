@@ -65,3 +65,12 @@ Root `ports/fnv-nx/render/shaders/translator` (class product, target host, link 
   (glsl_parser.{cpp,h}: bison -p _mesa_glsl_; glsl_lexer.cpp: flex; glcpp-parse.{c,h}: bison -p glcpp_parser_; glcpp-lex.c: flex; ir_expression_operation{,_constant,_strings}.h: python+mako).
 - Root `uam_lib` (link null) = 179 units, reused by sdp2dksh and the uam ELF via link.roots; uam ELF root patch reduces to adding main.cpp (180 units). Same flags in all, so units cache once.
 - Root sdp2dksh: own src/*.c(pp) (dk.cpp, sdp.c, translate_dksh.c, sdp2dksh.c) + link.roots = [glsl, uam_lib]; flags gnu99/gnu++17; link -lm -lpthread.
+
+## w16 build of the translator root (measurement base: verify/ of origin/claude/fnv-l1-contract-w16 d91524a3, copied as files; my branch has unrelated history, so no merge)
+- w15 (559fc150) was NOT merged: it conflicts with w16 in verify/recipe.py, RECIPE.md and tests/test_recipe.py (checked in a scratch worktree, aborted). That merge is L1's.
+- Root render/shaders/translator, admit class "tool" + target host (w16 rules; gates selftests). `sources` = {external mojoshader, dir ".", patches [mojoshader.patch, mojoshader_units.patch] (moved into the root, because patches are root-relative), include ["."]}.
+  All references to render/shaders/mojoshader.patch were updated (build.sh, mkshcache.py, gate_d3d9total.py + its test, ASSUMPTIONS.md, TRUNK.md, READMEs). mkshcache.py build_id listed a nonexistent "include" dir after my earlier move: fixed to "translator".
+- Fixed bugs of my split: backend.h and dk_api.h had lost their closing #ifdef/#endif.
+- gen_sm_rows.py got a recipe form `TABLE OUT` (the sandbox mounts the tool read-only; it wrote next to itself).
+- Build (cold = fresh store, jobs 4): check "recipe valid"; cold1 green 16 objects, stages run 34 hit 0, 7.3 s; cold2 (fresh store) green 16 objects, run 34 hit 0, 5.9 s; warm (cold1 store) green, run 0 hit 34, 0.17 s.
+  Determinism: the 16 .o files of cold1, cold2 and warm are byte-identical (diff -r); objects.json differs only in the out-dir path.

@@ -41,7 +41,7 @@ REPO = os.path.normpath(os.path.join(PORT, "..", ".."))
 PORT_REL = os.path.relpath(PORT, REPO)
 INPUTS = ["render/d3d9/front", "render/d3d9/backend", "render/d3d9/spec/d3d9_spec.json", "shim/include",
           "render/shaders/total/sm_table.json", "render/shaders/total/gen_sm_rows.py", "render/shaders/total/fnvnx_sm_rows.h",
-          "render/shaders/mojoshader.patch", "render/shaders/build.sh", "render/total/externals.json"]
+          "render/shaders/translator/mojoshader.patch", "render/shaders/build.sh", "render/total/externals.json"]
 GCC, CLANG, GIT = "/usr/bin/gcc", "/usr/bin/clang", "/usr/bin/git"
 ARTIFACTS_URL = "https://github.com/toadharvard/fnv-nx-build"
 STRICT = ["-Wall", "-Wextra", "-Werror", "-Werror=switch", "-Werror=switch-enum"]
