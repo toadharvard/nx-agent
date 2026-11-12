@@ -199,6 +199,7 @@ class Analyzer:
         reg, slots, pushes, saved, dead, fptr = {"ecx": this_bind or ("t",)}, {}, [], {}, False, {}
         calls, tracked = [], []
         cur = [None]
+        itag = None
         typed = lambda v: v[0] == "o"
 
         def leak(i, why, v):
@@ -220,7 +221,9 @@ class Analyzer:
             if k is None:
                 if op.type == X.X86_OP_MEM and op.mem.base != 0 and op.mem.index == 0 and op.mem.segment == 0 and op.size == 4:
                     b = reg.get(P.get(i.reg_name(op.mem.base), ""), UNK)
-                    if b[0] in ("t", "p", "f", "o"):
+                    if b[0] == "it" and op.mem.disp == 0:
+                        return ("el", b[1])  # the item of a container node: an element of that container (regclass, container rule)
+                    if b[0] in ("t", "p", "f", "o", "el"):
                         return ("f", b, op.mem.disp)
                 if op.type == X.X86_OP_MEM and op.mem.base == 0 and op.mem.index == 0 and op.size == 4 and op.mem.disp in cells:
                     return cells[op.mem.disp]
@@ -230,6 +233,11 @@ class Analyzer:
             if k >= 8 and (k - 8) % 4 == 0:
                 return binds.get((k - 8) // 4, ("p", (k - 8) // 4))
             return UNK
+
+        def deref(k):  # the value held by the ebp slot / parameter that a pushed `lea` address points to
+            if k in slots:
+                return slots[k]
+            return binds.get((k - 8) // 4, ("p", (k - 8) // 4)) if k >= 8 and (k - 8) % 4 == 0 else UNK
 
         def setreg(op, v):
             r = P.get(cur[0].reg_name(op.reg))
@@ -282,11 +290,16 @@ class Analyzer:
                         tracked.append((i.address, a.imm, list(pushes)))
                     if ev is not None:
                         tv = ("imm", a.imm) if a.type == X.X86_OP_IMM else rd(a)
-                        ev.append(("call", i.address, tv, reg.get("ecx", UNK), list(pushes)))
+                        ev.append(("call", i.address, tv, reg.get("ecx", UNK), list(pushes),
+                                   [deref(v[1]) if v[0] == "a" else None for v in pushes]))
+                        ec = reg.get("ecx", UNK)
+                        itag = ("it", (ec[1], ec[2])) if ec[0] == "o" else ec if ec[0] == "it" else None
                     pushes = []
                 for r in ("eax", "ecx", "edx"):
                     reg[r] = UNK
                     fptr.pop(r, 0)
+                if ev is not None and not f and itag is not None:
+                    reg["eax"] = itag  # a pointer into the container that was the receiver
                 if i.address in results:
                     reg["eax"] = results[i.address]
                 continue
