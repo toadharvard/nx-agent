@@ -18,6 +18,7 @@
   {"path": "ports/fnv-nx/render/d3d9", "class": "doc", "gates": []},
   {"path": "ports/fnv-nx/render/shaders", "class": "doc", "gates": []},
   {"path": "ports/fnv-nx/render/total", "class": "tool", "gates": ["pure", "selftests"], "entry": []},
+  {"path": "ports/fnv-nx/rules", "class": "tool", "gates": ["pure", "selftests"], "entry": []},
   {"path": "ports/fnv-nx/shim", "class": "doc", "gates": []}
  ]
 }
