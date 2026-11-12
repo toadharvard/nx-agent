@@ -142,7 +142,8 @@ def tail_pass():
         for t in insns[a][4]:
             if intext(t) and t in insns and t not in entries and not dmap[t - T0] and es[bisect.bisect_right(es, t) - 1] != o: add_entry(t, 'tail', a); n += 1
     return n
-jt_red = {}; jt_ok = {}
+jt_red = {}; jt_ok = {}; svals = sorted((u32(r), r) for r in relocs); vrefs = {}
+for r, v in rvals: vrefs.setdefault(v, []).append(r)
 def jt_pass():
     """jump-table edges (tools/jtab.py): every `jmp [T + r*4]` site is evaluated on the CURRENT decode; a site that resolves gets its table words as edges (descended, the words marked as table data), a site that does not is red with the reason."""
     pm = {}
@@ -151,12 +152,18 @@ def jt_pass():
         if fall: pm.setdefault(a + sz, set()).add(a)
     def ins_at(a): return next(md.disasm(text[a - T0:a - T0 + 15], a, 1), None) if T0 <= a < T1 else None
     def u8(a):
+        if any(v <= a < v + z for v, z in M.wr): return None           # a byte table is read only from a read-only section (a writable one is not a fact)
         try: return u32(a) & 0xff
         except Exception: return None
+    ex = JT.exclusive(jt_ok, svals)
+    def seeded(x):
+        if x in callers: return True
+        if x in entries and (kinds[x] - {'ptr', 'tail', 'inner'}): return True
+        return any(r not in ex for r in vrefs.get(x, ()))           # a relocated reference other than an exclusive table word
     n = 0
     for a in sorted(jtab):
         if a not in insns: continue
-        tg, why = JT.resolve(a, insns, ins_at, lambda x: pm.get(x, ()), lambda x: x in entries or x in callers, rset, u32, u8, intext, TN // 4)
+        tg, why = JT.resolve(a, insns, ins_at, lambda x: pm.get(x, ()), seeded, rset, u32, u8, intext, TN // 4)
         if tg is None: jt_red[a] = why; continue
         jt_red.pop(a, None)
         if jt_ok.get(a) == tg: continue
@@ -198,6 +205,8 @@ def disp_ref(r, v, ins, final):
     op = next(o for o in ins.operands if o.type == X.X86_OP_MEM and o.mem.disp & 0xffffffff == v)
     if cov[v - T0]: dinfo['disp_into_code'] += 1; return 1
     ctl = not STRICT or ins.mnemonic in ('call', 'jmp')               # module mode: a table loaded (not called) is data; its targets stay undetermined
+    if ins.mnemonic == 'jmp' and op.mem.index and op.mem.scale == 4 and not op.mem.base:
+        dinfo['disp_jtab'] += 1; return 1                                   # a table jump: its words are the edges jt_pass proves (tools/jtab.py), never a run read off the relocations
     if op.mem.index and op.mem.scale == 4:
         t = v; ent = []
         while t in rset and intext(u32(t)) and not cov[t - T0] and (t == v or t not in tstarts): ent.append(u32(t)); t += 4
