@@ -57,3 +57,5 @@ Update 2026-11-12, at 698adefb:
   - mp.Pool only with a pinned interpreter;
   - the test/ → tests/ move is declined (a directory name is not the class), and the test-root classification is asked of L1;
   - bench/ is deleted if it has no consumer.
+- d3dx9_31.dll joins the image set (orchestrator; 7 images, gamedata/redist c53729e). Assigned: w7 (manifest pin, unent, codemap, return-address census), w4 (s4 escapes), w5 (flags universe), w1 (the pack covers 7 images). From now on, global numbers read "7 images @ commit".
+- Trunk plan (orchestrator): the lifter tree is one trunk unit (lift/tools, proof, fnvlift, rt, plus the flags gate). It is cut once int1 is reviewed, and goes to MERGER after lift-gates (w6 0be860f47) and before the pack root. The pack root is red on forms until L3b's 16 farms finish (certs.tsv has 0 rows), which is expected.
