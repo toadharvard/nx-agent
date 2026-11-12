@@ -452,8 +452,14 @@ def main():
     check("external compiler: objects and ELF equal the system compiler's (same bytes of the tools, other path), other stage keys",
           [o["sha256"] for o in rc_x["objects"]] == [o["sha256"] for o in r1["objects"]] and rc_x["elf"]["sha256"] == r1["elf"]["sha256"]
           and set(rc_x["stage_keys"]).isdisjoint(r1["stage_keys"]), rc_x.get("failure"))
-    rc_y = recipe.build(crepo, ROOT, SS, BASE + "/tco2", ext=ec)
-    check("external compiler: second build is all cache hits", rc_y["stages"]["run"] == 0 and rc_y["stage_keys"] == rc_x["stage_keys"], rc_y["stages"])
+    ran = []
+    _rs = recipe.unitstage.run_stage
+    recipe.unitstage.run_stage = lambda store, doc, *a, **k: (lambda r: (ran.append((doc["stage"], r[0][:12], r[2])) if r[2] == "run" else None) or r)(_rs(store, doc, *a, **k))
+    try:
+        rc_y = recipe.build(crepo, ROOT, SS, BASE + "/tco2", ext=ec)
+    finally:
+        recipe.unitstage.run_stage = _rs
+    check("external compiler: second build is all cache hits", rc_y["stages"]["run"] == 0 and rc_y["stage_keys"] == rc_x["stage_keys"], (rc_y["stages"], ran))
     print("INFO +%.1f s: external compiler builds done" % (time.time() - t_start))
     # --- the toy root in the LP64 ABI: ELF64 objects, no ELF (the link is the ILP32 guest ELF); the ILP32 toy (r1) has ELF32 objects and ELF
     t0 = time.time()
