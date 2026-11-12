@@ -171,6 +171,25 @@ def under(p, d):
     return p == d or p.startswith(d + "/")
 
 
+def tree_of(roots, p):
+    """The admitted root path or tree (admit.json `trees`) that holds repo path P, or None: a tool file is admitted iff it is a tracked file
+    under a tree of an admitted tool root; membership is over the trees, not over the root paths only (link/ is a tree of the tool root contract)."""
+    return next((t for r in roots for t in (roots[r].get("trees") or [r]) if under(p, t)), None)
+
+
+def tool_file(roots, files, p):
+    """P is a tracked file (of FILES, the repo paths) under a tree of an admitted root of class tool."""
+    return isinstance(p, str) and p in files and any(roots[r]["class"] == "tool" and any(under(p, t) for t in (roots[r].get("trees") or [r])) for r in roots)
+
+
+def link_file(rec_file, root, mine, roots, files):
+    """The repo path of a link file (script, version_script) named REC_FILE, or None: a tracked file of the root (root-relative), else a tracked
+    file under a tree of an admitted tool root (repo-relative). One membership definition with the ldcheck tools."""
+    if rel_ok(rec_file) and rec_file in mine:
+        return root + "/" + rec_file
+    return rec_file if rel_ok(rec_file) and tool_file(roots, files, rec_file) else None
+
+
 def load_admit(repo="."):
     with open(os.path.join(repo, ADMIT)) as f:
         return {r["path"]: r for r in json.load(f)["roots"]}
@@ -369,17 +388,17 @@ def uses_errors(rec, root, roots, repo):
     return err
 
 
-def link_errors(lk, root, mine, roots, ext_names, repo):
+def link_errors(lk, root, mine, roots, ext_names, repo, files=()):
     """Problems of the `link` key: {script, output, flags} and optionally `roots` (admitted product roots whose objects are link inputs after
     the root's own, in list order) and `libs` ({external, dirs, names, startfiles, endfiles}: the guest libraries inside an external)."""
     kind = lk.get("kind", "pie") if isinstance(lk, dict) else None
     if not (isinstance(lk, dict) and LINK_KEYS <= set(lk) <= LINK_KEYS | LINK_OPT and isinstance(lk["flags"], list)
             and all(isinstance(t, str) for t in lk["flags"]) and isinstance(lk["output"], str) and kind in KINDS
             and re.fullmatch(r"[A-Za-z0-9._-]+\.(elf|so|exe)", lk["output"])
-            and all(k not in lk or (rel_ok(lk[k]) and lk[k] in mine) for k in ("script", "version_script"))
+            and all(k not in lk or link_file(lk[k], root, mine, roots, files) for k in ("script", "version_script"))
             and ("script" in lk or kind != "pie") and ("version_script" in lk) == (kind == "shared")):
-        return ["link must be {output: NAME.elf|.so|.exe, flags: [..]} with `script` (a tracked file of the root; required for kind pie, the default), kind pie|exe|shared, "
-                "`version_script` (a tracked file of the root: required for, and only for, kind shared), optionally roots, libs"]
+        return ["link must be {output: NAME.elf|.so|.exe, flags: [..]} with `script` (a tracked file of the root, or of a tree of an admitted tool root; required for kind pie, the default), kind pie|exe|shared, "
+                "`version_script` (a tracked file of the root or of a tool tree: required for, and only for, kind shared), optionally roots, libs"]
     err = ["link.flags: %s is in the refusal set R" % t for t in refused(lk["flags"])] + emulation_flags(lk["flags"], kind)
     deps = lk.get("roots", [])
     if not (isinstance(deps, list) and all(isinstance(d, str) for d in deps)):
@@ -537,10 +556,10 @@ def check(rec, root, files, roots, pin=None, repo="."):
             err.append("%s %r is neither a tracked file of the root nor a generated output" % (key, c))
     lk = rec.get("link")
     if lk is not None:
-        err += link_errors(lk, root, mine, roots, names, repo)
+        err += link_errors(lk, root, mine, roots, names, repo, files)
         err += ["link: the ldcheck stage needs %s (a tracked file of an admitted tool root)" % p for p in (
             LD_TOOLS[0] + "/ldcheck.py", LD_TOOLS[0] + "/gateids.py", LD_TOOLS[1] + "/gatefile.py")
-            if p not in files or not any(under(p, r) for r in roots)]
+            if not tool_file(roots, files, p)]
     err += guest_errors(rec, root, roots, pin)
     err += plugin_errors(rec, root, files, roots, units, names)
     return err
@@ -1126,7 +1145,7 @@ class Job:
         kind = lk.get("kind", "pie")
         for k in ("script", "version_script"):
             if k in lk:
-                shutil.copyfile(os.path.join(self.repo, self.root, lk[k]), os.path.join(sd, os.path.basename(lk[k])))
+                shutil.copyfile(os.path.join(self.repo, link_file(lk[k], self.root, {f[len(self.root) + 1:] for f in self.files if under(f, self.root)}, self.roots, self.files)), os.path.join(sd, os.path.basename(lk[k])))
         lb, pre, post, search, libs, sysin = lk.get("libs"), [], [], [], [], []
         if lb and "system" in lb:
             # the shared libraries of env.json packages: their content is the input, mounted at /syslib under their own file names
