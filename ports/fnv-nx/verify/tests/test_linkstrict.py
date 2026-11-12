@@ -116,7 +116,7 @@ for ABI[0] in ("lp64", "ilp32"):
     wk = build("__attribute__((weak)) int wk() { return 1; }\n", "cc")
     k, _, _ = kinds([wk])
     check("(b1) a weak definition outside every COMDAT group stays weak-only in C++", ("wk", "weak-only") in k or ("_Z2wkv", "weak-only") in k, k)
-    mem, grp = L.elf_comdat(ca)
+    mem, grp, und = L.elf_comdat(ca)
     check("elf_comdat: signature -> digest, member section indices; no group in a C object", "_Z2sqi" in grp and mem and not any(L.elf_comdat(build("int x(void){return 1;}")))
           , (mem, grp))
     # (b2) script symbols

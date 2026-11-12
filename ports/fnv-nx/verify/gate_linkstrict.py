@@ -59,6 +59,8 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "link"))
+import comdat as comdat_id  # noqa: E402
 import gate_build  # noqa: E402
 import producers  # noqa: E402
 import recipe  # noqa: E402
@@ -107,59 +109,12 @@ def _sections(path):
 
 
 def elf_comdat(path):
-    """COMDAT groups of an ELF relocatable (b1 of the module docstring) -> (member, groups). MEMBER {section index of a member of a
-    GRP_COMDAT group: signature}; GROUPS {signature: sha256 hex of the copy's canonical form (member sections in group order, their
-    relocations normalised)}. A signature that occurs twice in one object keeps the digest of both joined (two copies in one object)."""
-    d, w64, secs, names, cs = _sections(path)
-    symtab = next((i for i, s in enumerate(secs) if s[1] == 2), None)
-    if symtab is None:
-        return {}, {}
-    st = secs[secs[symtab][6]]
-    sfmt = "<IBBHQQ" if w64 else "<IIIBBH"
-    syms = []
-    for t in struct.iter_unpack(sfmt, d[secs[symtab][4]:secs[symtab][4] + secs[symtab][5]]):
-        n, info, shn, val = (t[0], t[1], t[3], t[4]) if w64 else (t[0], t[3], t[5], t[1])
-        syms.append((cs(st[4], n), info, shn, val))
-    rels = {}
-    for i, s in enumerate(secs):
-        if s[1] == 4:   # SHT_RELA: the object's relocations of section s[7]
-            for o, inf, a in struct.iter_unpack("<QQq" if w64 else "<IIi", d[s[4]:s[4] + s[5]]):
-                rels.setdefault(s[7], []).append((o, inf >> 32 if w64 else inf >> 8, inf & 0xFFFFFFFF if w64 else inf & 255, a))
-    member, groups = {}, {}
-    for gi, g in enumerate(secs):
-        if g[1] != 17 or g[5] < 4 or struct.unpack_from("<I", d, g[4])[0] & 1 == 0:   # SHT_GROUP with GRP_COMDAT
-            continue
-        sn, sinfo, sval_shn, _ = syms[g[7]]
-        sig = names[sval_shn] if sinfo & 15 == 3 else sn
-        mem = [m for m in struct.unpack_from("<%dI" % (g[5] // 4 - 1), d, g[4] + 4) if secs[m][1] != 4]   # relocation sections follow their section
-        ordinal = {m: k for k, m in enumerate(mem)}
-        canon = []
-        for m in mem:
-            member[m] = sig
-            s = secs[m]
-            body = b"" if s[1] == 8 else d[s[4]:s[4] + s[5]]
-            rl = []
-            for o, si, ty, a in sorted(rels.get(m, [])):
-                n, inf, shn, val = syms[si]
-                if inf >> 4 != 0 and shn != 0xFFF2 and inf & 15 != 3:   # global or weak symbol (or undefined): by name
-                    tgt = ("sym", n, a)
-                elif shn in ordinal:
-                    tgt = ("member", ordinal[shn], val + a)
-                elif 0 < shn < len(secs) and secs[shn][2] & 0x10 and secs[shn][9]:   # SHF_MERGE: the entity pointed at
-                    base = secs[shn][4] + val + a
-                    es = secs[shn][9]
-                    end = base + es
-                    while secs[shn][2] & 0x20 and d[end - es:end] != bytes(es):   # SHF_STRINGS: up to the terminating all-zero entity
-                        end += es
-                    
-                    tgt = ("merge", d[base:end].hex())
-                else:
-                    tgt = ("local", names[shn] if 0 < shn < len(secs) else shn, n if inf & 15 != 3 else "", val + a)
-                rl.append((o, ty, tgt))
-            canon.append((names[m], s[1], s[2], s[8], body.hex(), rl))
-        h = hashlib.sha256(repr(canon).encode()).hexdigest()
-        groups[sig] = hashlib.sha256((groups[sig] + h).encode()).hexdigest() if sig in groups else h
-    return member, groups
+    """COMDAT groups of an ELF relocatable (b1 of the module docstring) -> (member, groups, undecidable). MEMBER {section index of a member of a
+    GRP_COMDAT group: signature}; GROUPS {signature: digest of the copy's identity}; UNDECIDABLE {signature: [(object, section, offset, why)]}.
+    The identity is link/comdat.py comdat_identity, the ONE definition of "the same COMDAT definition" (also used by gates odr/abi and onedef).
+    A signature that occurs twice in one object keeps both copies in one digest."""
+    ids, member = comdat_id.copies(path)
+    return member, {s: i.digest for s, i in ids.items()}, {s: i.undecidable for s, i in ids.items() if i.undecidable}
 
 
 OUTLINE = re.compile(r"__aarch64_(cas|swp|ldadd|ldclr|ldeor|ldset)[0-9]+_(relax|acq|rel|acq_rel|sync)")   # libgcc's outline-atomics ABI: __aarch64_<op><bytes>_<memory model>
@@ -214,7 +169,7 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
     HOST (host root prefixes ["<root>/"], exports {name}) or None: rule (d), the host boundary
     -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). Pure function of its arguments."""
     items, out, comdat = [], set(), comdat or {}
-    defs, refs, copies = {}, [], {}
+    defs, refs, copies, undec = {}, [], {}, {}
     for oid, syms in sorted(objs.items()):
         member = comdat.get(oid, ({}, {}))[0]
         for name, val, size, typ, bind, shn in syms:
@@ -226,10 +181,15 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
                 defs.setdefault(name, []).append((oid, bind, shn, typ, member.get(shn) if bind != GLOBAL else None))
         for sig, dg in sorted(comdat.get(oid, ({}, {}))[1].items()):
             copies.setdefault(sig, {})[oid] = dg
+        for sig, us in sorted((comdat.get(oid, ({}, {}, {})) + ({},))[2].items()):
+            undec.setdefault(sig, []).extend((oid,) + u[1:] for u in us)
     bad = {}
     for sig, c in sorted(copies.items()):
         items.append(("<comdat>", sig))
-        if len(set(c.values())) > 1:
+        if sig in undec:
+            u = undec[sig][0]
+            out.add(("<comdat>", sig, "identity-undecidable", "object %s section %s offset %d: %s" % u))
+        elif len(set(c.values())) > 1:
             out.add(("<comdat>", sig, "comdat-differs", "copies differ across %s" % ", ".join(sorted(c))[:200]))
     script = {}   # elf id -> names the link (script or linker), not an object, defines in that ELF
     for eid, syms in elfs.items():
@@ -242,7 +202,7 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
         items.append(("<defs>", name))
         strong = [d for d in ds if d[1] == GLOBAL and d[2] != COMMON]
         cdef = [d for d in ds if d[4] is not None]
-        differs = any(len(set(copies[d[4]].values())) > 1 for d in cdef)
+        differs = any(len(set(copies[d[4]].values())) > 1 or d[4] in undec for d in cdef)
         for kind, why in (("common", any(d[2] == COMMON for d in ds)), ("ifunc", any(d[3] == IFUNC for d in ds)),
                           ("duplicate-strong", len(strong) > 1), ("comdat-differs", differs and not strong),
                           ("weak-only", not strong and not any(d[2] == COMMON for d in ds) and (not cdef or any(d[4] is None for d in ds)))):
