@@ -2,8 +2,7 @@
 # Restore /home/user/gd for fnv-nx L5 (run from a fresh container; repo at /home/user/nx-agent, build repo at /home/user/fnv-nx-build)
 set -euo pipefail
 G=/home/user/gd; B=/home/user/fnv-nx-build; R=/home/user/nx-agent/ports/fnv-nx; L="flock /home/user/fnvb.lock"
-mkdir -p $G/{toolchain,ext,nls,wine-mc,wine,fontref,fonts/deb/usr/share/fonts/truetype/liberation}
-apt-get update -qq; apt-get install -y libgmp-dev libmpfr-dev libmpc-dev texinfo bison flex
+mkdir -p $G/{ext,nls,wine-mc,wine,fontref,fonts/deb/usr/share/fonts/truetype/liberation}
 # mirrors (private fnv-nx-build tools/* branches; every git op under the lock, on HTTP 429 sleep 5 and retry once)
 for b in freetype minimp3 nls mc fonts wine-specs; do
   $L git -C $B fetch -q --depth 1 origin tools/$b:refs/remotes/origin/tools/$b || { sleep 5; $L git -C $B fetch -q --depth 1 origin tools/$b:refs/remotes/origin/tools/$b; }
@@ -19,8 +18,3 @@ x fonts $t/fonts; cp -r $t/fonts/prefix/. $G/fontref/; cp $t/fonts/liberation/*.
 git clone -q --filter=blob:none https://github.com/switchbrew/libnx $G/ext/libnx; git -C $G/ext/libnx checkout -q --detach b156b4774fb2df7b93402169509266da7547fc4c
 git clone -q --filter=blob:none https://github.com/DLTcollab/sse2neon $G/ext/sse2neon; git -C $G/ext/sse2neon checkout -q --detach 2272251cc3ad9cba8b8c47c4065811cfb396b802
 ln -sfn $G/ext $R/ext
-# toolchain (no prebuilt mirror exists in tools/*): sources + build (about 1 h at JOBS=2..4)
-$R/toolchain/sources.sh $G/toolchain/dl $G/ext        # tarballs (SHA-256 checked) + buildscripts, devkita64-rules
-JOBS=${JOBS:-2} nohup $R/toolchain/gcc/build.sh $G/toolchain/dl $G/toolchain/build $G/toolchain/prefix $G/ext/buildscripts > $G/tc.log 2>&1
-$R/toolchain/devkita64/setup.sh $G/toolchain/prefix $G/ext/libnx $G/ext/devkita64-rules $G/toolchain/dkp > $G/dkp.log 2>&1
-FNVNX_TC=$G/toolchain/prefix $R/platform/build_guest.sh $G/out-lead > $G/guest.log 2>&1
