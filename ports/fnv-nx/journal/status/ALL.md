@@ -1,60 +1,87 @@
 # fnv-nx overall status (orchestrator session_01KmtZKRGpFka9ShREBTYbTx)
 
-Updated 2026-11-12 02:40Z (hourly check plus the resume after the 5 h limit reset).
+Updated 2026-11-12 03:36Z (hourly check).
 
-- Trunk `claude/fnv-nx-clean` is at e35b870: 25 gates and 0 product roots.
-  - admit.json has 10 roots: 5 doc and 5 tool.
-  - The last verdict was at 2b7897a5, 240 s cold.
+- Trunk `claude/fnv-nx-clean` is at 8cfbcdbf: 28 gates and 0 product roots.
+  - Merged since 02:40Z:
+    - L1 w14 (EMLINK, d6c72958);
+    - L1 w18 (image bases, 7675fda5);
+    - L1 w17 (datamodel, aaa709c8);
+    - L6 w4 (d3d9total, 8cfbcdbf).
+  - The last verdict took 302.9 s cold. Budget rule (L1, accepted): 300 s gates the warm incremental verdict on the pinned farm host, and cold time is reported only. The open defect is that warm ensure() takes 63 s with 0 stages run, and a docs-only change took 303 s. w19 must show per-gate times, and a gate that re-runs without a changed declared input is red.
 - Goal path: product roots -> lifted packs as roots -> ELF -> boot -> WinMain -> menu -> first frame (GL in the emulator).
 
-## Blocker of goal step 1
+## Blocker of goal step 1 (the first product root)
 
-`gate_admit.REQUIRED_PRODUCT` names 32 gates. gates.json has 25 gates, but only 21 of them are on that list, so 11 required gates are missing at e35b870. Owners:
+Required gates still missing on the trunk, with the MERGER queue in order:
 
-| Missing gate(s) | Owner |
-|---|---|
-| datamodel | L1 w17 |
-| exepin | L1 w4 |
-| r7, namegate, abi | L2 w5 |
-| order, eh, addr32 | L3a w6 |
-| forms, fpexact | L3b w2g |
-| d3d9total | L6 w4 |
+| Gate(s) | Head at MERGER | State |
+|---|---|---|
+| headers class (L1 w16) | de8ed638 | green |
+| gates.d + class `test` (L1 w10) | 1638c742, 29 gates | green; merged as one unit with L3b w2g + the ASM registry |
+| exepin (L1 w4) | 03c699d0 | green |
+| order, eh, addr32 + lock/fsw sites (L3a w6) | 0be860f47 | green, 262 s |
+| r7, namegate, abi (L2 w5) | rebasing | conflict in gate_contract.py |
+| forms, fpexact (L3b w2g) | with w10 | 28/29; stale verify/ in its merge, being restored |
+| L2 heads | w4-clean b227059, w2 d19ba5a7, w3-rules 1d6d803f, w6-dyninit c9bdb4e8 | green on 8cfbcdbf |
 
-## Per layer (lead branch head; status file time)
+The first product root is L5 w10's platform root on `claude/fnv-l5-platform-trunk`, cut from 8cfbcdbf. It merges together with L2 w6's shim/include `headers` entry in one verdict.
+
+## Per layer
 
 | layer | lead | path item now | global numbers (commit) |
 |---|---|---|---|
-| L1 | session_01KmtZKUn5UJpiHYPtNRT6p9 (728ca4d; 23:02Z) | PP-view EMLINK at the 4,098-unit pack (w14); link across roots (w15); missing gates | gates 25, roots 0 (2b7897a5); assumptions 46 = 9 OWNER + 37 REMOVE (943d70d) |
-| L2 | session_01KmtZKRi5XRMhd5qzRaEyxC (303cc29; 23:02Z) | r7/namegate/abi gates (w5); plugins as recipe stages; shim copies (w6) | names certified 62,210/73,568 (8f324ec); r7 0/748,920 |
-| L3a | session_01KmtZKSANKhYEe4nVesF6Ho (8ec8145; 02:36Z) | pack as product root (w1, lifter 7b2faae2); lift/rt root; order/eh/addr32 (w6) | universe 101,590 entries (bba4826); pack objects 0 |
-| L3b | session_01KmtZKSQpF5Su9oG96Kbe4A (f9e7e84; 02:36Z) | forms/fpexact gates into the trunk (w2g); forms prover (w4) | golden 101,590/101,590, 0 errors (26ab4c2); doubles 9/35 (6385fff6); shape certs 0/26,500 |
-| L4 | session_01KmtZKUcrakBqKb1mC8iXp4 (cd2a5fe; 02:36Z) | trunk merge into 1979832, then MERGER; boot of the next ELF (waits for the ELF) | last boot ELF 509809b3b809: 17/17 loader steps, exit 0xC000001D after init d3dx9_38; doubles 0 (0b7cd8e) |
-| L5 | session_01KmtZKTGM2tLun8zgoE6X44 (41a38a1; 23:03Z) | platform root (w7); guest runtime from msvcmodel (w14); launcher prefs (decision A) | platform root 13/73 green; bridge.tsv 1,552 rows; s4 477 tests, 0 failed (7967978d) |
-| L6 | session_01KmtZKRq7TGNHj6H8m8jpAZ (c50a770; 23:02Z) | render/d3d9 root (w2, 413db88d, 69/70 compile); d3d9total gate (w4) | d3d9total 332/332 (f8545efa); render roots on trunk 0 |
-| L6A | session_01KmtZKSgdFAv1Sd3kGuQtHk (2caaa63; 02:36Z) | GL backend root (w6); dk product root (w4) | backend units 19 (4335c142); dk harnesses with doubles 12/12 (after first frame) |
+| L1 | session_01KmtZKUn5UJpiHYPtNRT6p9 | MERGER queue; w15 link + onedef; w17 flags.semantics; w19 warm speed | trunk 28 gates, 0 roots (8cfbcdbf); LoadLibrary 20/23 closed, dynamic GPA 12 open |
+| L2 | session_01KmtZKRi5XRMhd5qzRaEyxC | 4 green heads at MERGER; w5 rebase; all 8 plugins load for C and C++ | CRT name bindings 0 (84fb9bc7); shim/include 517 names, 2 duplicate declarations being removed |
+| L3a | session_01KmtZKSANKhYEe4nVesF6Ho | lift-gates at MERGER; pack as product root; dispatch (w8, 26/26) | flags gate 16,787 red reads (5b308371, being recounted on the 6-image set and split by cause); unent 0 on all 6 images |
+| L3b | session_01KmtZKSQpF5Su9oG96Kbe4A | w2g + registry merge unit; forms queue 19,494 int shapes (~60 CPU-h) after the Sail hunks | assumption registry 77 entries: L3b 11, L3a 17, L2 1 live (326f2c8e); mirror shard 39/40 proved |
+| L4 | session_01KmtZKUcrakBqKb1mC8iXp4 | item 11 guest test image (w6, on L1 w16); item 14 lib/sha256 intake | lib/sha256: 233 NIST vectors, 0 mismatches (782e8872) |
+| L5 | session_01KmtZKTGM2tLun8zgoE6X44 | platform root to the trunk (w10); crt0 split via L1 w20 c7f3b9d2; doubles -> 0 | s4 485 tests / 404,818 checks / 0 failed, s7 89 / 3,412 / 0; doubles 6 files / 88 symbols (3950cd01); registry sites 20/20 static; file sites 396 (75 static) |
+| L6 | session_01KmtZKRq7TGNHj6H8m8jpAZ | sha256 shader keys (8 sites); b# census + link-failed reference farm | env dumps reproducible, 4/4 byte-equal runs per profile (tools/envprobe-bin d2b6916c); fmadd in C 7 -> 0 |
+| L6A | session_01KmtZKSgdFAv1Sd3kGuQtHk | A2 dk side done (16893be), gl4 waits for lib/sha256; A3 link-failed forms | dk 19/19 units green, deterministic, 86 externals |
 
-## Decisions
+## Decisions since 02:40Z
 
-- **Launcher gate: option A.** The declared machine is installed, and the launcher has been run once. FalloutPrefs.ini is derived statically from FalloutNVLauncher.exe's code and its gamedata presets.
-  - Recorded in CLAUDE.md: trunk e35b870, integration 40f73cb.
-  - Owner: L5. L4 mounts the file.
-- **GOG Galaxy is not lifted.** It is a declared-machine module (CLAUDE.md trunk 9e5856f). L5 w15 has the bodies: 11/11 names, with SDK citations.
-- **Admit class "headers" accepted (02:40Z).** It replaces the 23:01 line "no header roots". It counts as the include closure under four conditions:
-  - no units, link or outputs;
-  - PP keys on every header it reads;
-  - the stub, doubles, assumptions and Legal gates scan it;
-  - it is included only by roots that list it.
-  - Owner: L1 w16. It unblocks the platform root at 65/73.
-- **lift/fnvlift on the trunk as a tool root (02:40Z).** It comes in with L3b w2g, because formgate needs the DSL to compute shape_sha. L3a owns it, and there is one source, not a copy.
-- **f2i_check folded into fnvnx_ftoi** (L2 w1), by the rule of one plugin per class.
-- **crt_symbols.tsv:** the 4,546 name rows are deleted. The first ELF is fully lifted.
+- **FalloutPrefs.ini, revised:** the minimal-keys rule replaces option A, because the launcher is not in gamedata. CLAUDE.md trunk 29b4193, integration 33f97d7.
+- **Sail model patches:** a hunk stays under OWNER 9 only if it is derived from the pinned ACL2 x86isa (function plus commit cited), with the new pin recorded. A form ACL2 does not model is never hand-written: it is counted by census, and the closure rule decides whether it is reachable.
+- **ASM-043/045:** removed by the replacing fact (Form-writes), not given records. Id ranges are fixed per layer:
 
-## Stuck sessions and actions (02:36Z)
+  | Layer | Range |
+  |---|---|
+  | L1 | 1xx |
+  | L3a | 2xx |
+  | L3b | 3xx |
+  | L4 | 4xx |
+  | L5 | 5xx |
+  | L6 | 6xx |
+  | L6A | 7xx |
+  | L2 | 8xx |
 
-- The 5 h usage limit stopped these sessions at 23:00-23:40Z: L1, L2, L3a, L3b, MERGER and about 30 workers.
-  - Each got "continue: limit reset" at 02:36Z.
-  - Affected workers: L1 w4 w5 w10 w12 w14-w18; L2 w1-w6; L3a w1-w6; L3b w2-w4; L4 w4; L5 w7 w9 w12 w13; L6 w3 w4; L6A w4.
-- L6 and L6A leads were idle (review_ready) for more than 3 h. Both were told to take their next path item.
-- L6 w2 was blocked on a push permission. I told it the push is authorized by CLAUDE.md.
-- Finished and awaiting lead review: L5 w8, w14, w15; L6 w1; L6A w6.
+  The gate is red on an id defined twice or outside its owner's range.
+- **difffuzz deleted** from the integration branch with all its consumers (b84a2c0), because selection from test results is forbidden.
+- **Plugins:** every guest CC stage loads the full plugin set, C and C++ alike, with a per-unit key clause.
+- **flags.semantics:** one set for all languages, including -ffp-contract=off and -fsigned-char (the MSVC char model).
+  - -fno-exceptions is decided by a static call-graph fact. Until that fact exists, exceptions and unwind tables stay on, in lift/pack and lift/rt as well.
+- **onedef gate:**
+  - strong or weak symbols are defined in exactly one root;
+  - a COMDAT comes from one source definition with equal bytes (the ODR);
+  - source provenance: a unit belongs to one root, and a header's content appears under one path.
+  - Rejected: equal-bytes-as-copy, which is a heuristic.
+- **lib/sha256:** a shared product root (guest + host) owned by L4. All content keys are sha256 (OWNER 2). L6 shader keys move from 64-bit FNV-1a to 32 bytes, an ABI pair change with L6A.
+- **flags gate (L3a):** on the trunk, scoped to admitted roots (0/0 today), and REQUIRED for class `lifted`. Its universe is the 6-image set.
+- **b# as an ALU source:**
+  - reachability first, by a census of every shader bytecode in gamedata and at run time;
+  - otherwise the Wine 9.0 / GL 4.6 §7.3 behaviour: a link-failed program keeps the previous one bound;
+  - the link-failed set is generated by a farm over all 7,553 sm_table rows.
+- **x87/SSE FP exceptions (L3a item 29):** first, a static fact that every control-word write keeps the masks set and that every sticky-flag read is listed. Full trap semantics are written only for what that fact leaves open.
+- **Perf:** the metric is verify/icount.py. The A57 cycle pricing and the hand estimates are not ported. IPC is a REMOVE record (measured on the console), after the first frame.
+- **Test inputs:** every reference a test reads is a declared external (commit + tree_sha256). Old failures are never accepted as a baseline.
+- **Integration vs trunk:** they do not merge wholesale. Trunk-bound work is cut from the trunk, and the old line retires once the roots are on the trunk.
+- **env dumps:** re-recorded now on a farm, because a generator input that cannot be reproduced is a determinism defect.
+
+## Sessions (03:36Z)
+
+- All 8 leads and MERGER are active (each messaged within the last 10 min). Nothing was stopped by limits this hour.
+- L1 w21 (legal gate) has been PENDING since 03:01Z without starting. L1 was told.
+- L1 w13 setup-from-scratch: a fresh container fails at install_debs (25 dpkg errors). L1 was asked for the commit of the first fresh-container green.
 - `pgrep -f autoadopt` is empty.
