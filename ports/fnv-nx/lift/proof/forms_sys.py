@@ -24,11 +24,6 @@ def arpl(c):
     if o[0].k == 'm': F.store(ea(o[0]), new, lt)
     else: wr(F, o[0], ite(lt, new, d))
 
-@handler('bound')
-def bound(c):
-    F, o = c.F, c.ops; w = o[0].w; i = rd(o[0], w); a = ea(o[1])
-    F.fault(K_BOUNDS, slt(i, load(a, w)) | slt(load(a + w // 8, w), i))
-
 def privileged(c):
     from fnvlift.f_sys import trap0d_privileged
     c.F.fault(K_PRIV if trap0d_privileged(c.raw) else K_AV, C(1, 1))

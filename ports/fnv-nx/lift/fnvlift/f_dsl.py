@@ -11,7 +11,7 @@ fs_base = `fsb`; flo (the other EFLAGS bits) = c->eflx | IF (EFL_PUSH/EFL_POP ke
 memory = M8/M16/M32 (core's macros).  A flag a form declares undefined gets no assignment; a write with `when` is conditional.
 
 Faults (Form.faults) raise through f_flow.raise_site like int3/ud2 and the hand div: code 1 (#DE) is FNVL_DE0 when the failing disjunct is the
-divisor-zero test `eq(x, 0)` and FNVL_DEOVF otherwise (the quotient overflow); 2 = FNVL_BP, 3 = FNVL_UD.
+divisor-zero test `eq(x, 0)` and FNVL_DEOVF otherwise (the quotient overflow); 2 = FNVL_BP, 3 = FNVL_UD, 4 = FNVL_BOUNDS (#BR, bound; a fault like #DE).
 
 Control transfer is derived from the Form's eip node by structure: constant == next address -> falls through; another constant -> `call` pushes
 (the Form's esp/store effects) and uses f_flow.call_xfer, anything else f_flow.jump_to; ite(c, constant T, next) -> `if (c) jump_to(T)` (jcc, jecxz,

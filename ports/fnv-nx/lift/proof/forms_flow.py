@@ -1,6 +1,6 @@
 """Control-flow and fault forms (see forms.py): the eip effect carries the branch; the target of a relative branch is the capstone absolute target."""
-from fnvlift.dsl import C, V, eq, ite, load
-from proof.forms import cond, handler, rd
+from fnvlift.dsl import C, V, eq, ite, load, slt
+from proof.forms import AReg, cond, ea, handler, rd
 
 def target(c):
     o = c.ops[0]
@@ -19,12 +19,18 @@ def ret(c):
     F.eip = load(esp, 32); F.reg('esp', esp + (4 + extra))
 @handler('loop', 'loope', 'loopne')
 def loop(c):
-    F = c.F; ecx = V('ecx', 32); F.reg('ecx', ecx - 1); more = ~eq(ecx - 1, 0)
+    F = c.F; A = AReg(c, 'ecx'); ecx = A.val; A.put(F, ecx - 1); more = ~eq(ecx - 1, 0)
     if c.m == 'loope': more = more & V('zf', 1)
     if c.m == 'loopne': more = more & ~V('zf', 1)
     F.eip = ite(more, target(c), F.eip)
-@handler('jecxz')
-def jecxz(c): c.F.eip = ite(eq(V('ecx', 32), 0), target(c), c.F.eip)
+@handler('jecxz', 'jcxz')
+def jecxz(c): c.F.eip = ite(eq(AReg(c, 'ecx').val, 0), target(c), c.F.eip)
+@handler('bound')
+def bound(c):
+    """SDM BOUND r16/32, m16&16 / m32&32: #BR (fault code 4: the state is unchanged, the exception is reported at the instruction) when the signed index is below the
+    lower bound (at the effective address) or above the upper bound (the next word / dword)."""
+    r, m = c.ops; w = r.w; lo = load(ea(m), w); hi = load(ea(m) + w // 8, w); i = rd(r, w)
+    c.F.fault(4, slt(i, lo) | slt(hi, i))
 @handler('leave')
 def leave(c):
     F = c.F; ebp = V('ebp', 32); F.reg('esp', ebp + 4); F.reg('ebp', load(ebp, 32))

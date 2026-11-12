@@ -1,6 +1,6 @@
 """Moves, conversions, stack, EFLAGS and string families (see forms.py)."""
 from fnvlift.dsl import REGS, C, V, ashr, bit, concat, eq, extract, ite, load, msb, sext, trunc, ult, zext
-from proof.forms import Op, cond, ea, handler, pzs, rd, wr
+from proof.forms import AReg, Op, cond, ea, handler, pzs, rd, wr
 
 LAHF_SDM = 'LAHF/SAHF: AH = SF:ZF:0:AF:0:PF:1:CF'
 MODIFIABLE = 0x00240100 | 0x4000      # EFLAGS bits (besides the six, DF) POPFD may change in user mode: TF, NT, AC, ID (IF/IOPL need privilege)
@@ -34,15 +34,20 @@ def xchg(c): a, b = rd(c.ops[0]), rd(c.ops[1]); wr(c.F, c.ops[0], b); wr(c.F, c.
 @handler('nop')
 def nop(c): pass
 @handler('xlatb', 'xlat')
-def xlat(c): wr(c.F, Op.reg('al', 8), load(V('ebx', 32) + zext(extract(V('eax', 32), 7, 0), 32), 8))
+def xlat(c):
+    b = AReg(c, 'ebx')                    # BX + AL wraps in 16 bits under the 0x67 prefix (SDM XLAT)
+    a = b.val + zext(extract(V('eax', 32), 7, 0), 32)
+    wr(c.F, Op.reg('al', 8), load(zext(trunc(a, 16), 32) if c.a16 else a, 8))
 
 @handler('push')
 def push(c):
-    F, o = c.F, c.ops[0]; w = 16 if c.o16 else 32; v = rd(o, w)      # operand size: the 66 prefix pushes a word (SDM PUSH), the stack size is 32 bits
+    """SDM PUSH: operand size 32, or 16 under the 0x66 prefix (ESP - 2, a 16-bit store; the stack address size is SS.B = 32, the 0x67 prefix does not change it).
+    The value of a register operand is its pre-state value (PUSH ESP / SP pushes the value before the decrement)."""
+    F, o = c.F, c.ops[0]; w = 16 if c.o16 else 32; v = rd(o, w)
     F.reg('esp', V('esp', 32) - w // 8); F.store(V('esp', 32) - w // 8, v)
 @handler('pop')
 def pop(c):
-    F, o = c.F, c.ops[0]; w = 16 if c.o16 else 32; esp = V('esp', 32); F.reg('esp', esp + w // 8)
+    F, o = c.F, c.ops[0]; esp = V('esp', 32); w = 16 if c.o16 else 32; F.reg('esp', esp + w // 8)
     if o.k == 'm': F.store(ea(o, esp + w // 8), load(esp, w))      # SDM POP: ESP as base of the destination is incremented before the address is computed
     else: wr(F, o, load(esp, w))
 @handler('pushal', 'pushad')
@@ -94,21 +99,22 @@ def string(c):
     """ONE iteration step.  Without a prefix: the body.  With rep/repe/repne: if ecx == 0 nothing happens (eip = next); otherwise the body, ecx - 1,
     and eip stays on the instruction (the step repeats) unless ecx - 1 == 0 or (repe: ZF == 0 / repne: ZF == 1) after the body."""
     F = c.F; op, sz = c.m[:4], {'b': 1, 'w': 2, 'd': 4}[c.m[4]]; w = 8 * sz
-    esi, edi, ecx = V('esi', 32), V('edi', 32), V('ecx', 32)
+    A = {n: AReg(c, n) for n in ('esi', 'edi', 'ecx')}          # address-size registers (CX/SI/DI under the 0x67 prefix)
+    esi, edi, ecx = A['esi'].val, A['edi'].val, A['ecx'].val
     act = ~eq(ecx, 0) if c.rep else C(1, 1)
     step = ite(V('df', 1), C(-sz, 32), C(sz, 32)); acc = Op.reg({8: 'al', 16: 'ax', 32: 'eax'}[w], w)
     g = lambda new, old: ite(act, new, old)
     if op in ('movs', 'stos'):
         v = load(esi, w) if op == 'movs' else rd(acc); F.store(edi, g(v, load(edi, w)))
-    if op in ('movs', 'cmps', 'lods'): F.reg('esi', g(esi + step, esi))
-    if op in ('movs', 'cmps', 'scas', 'stos'): F.reg('edi', g(edi + step, edi))
+    if op in ('movs', 'cmps', 'lods'): A['esi'].put(F, g(esi + step, esi))
+    if op in ('movs', 'cmps', 'scas', 'stos'): A['edi'].put(F, g(edi + step, edi))
     if op == 'lods': wr(F, acc, g(load(esi, w), rd(acc)))
     if op in ('cmps', 'scas'):
         a, b = (load(esi, w), load(edi, w)) if op == 'cmps' else (rd(acc), load(edi, w)); r = a - b
         for f, v in (('cf', ult(a, b)), ('of', msb((a ^ b) & (a ^ r))), ('af', bit(a ^ b ^ r, 4))): F.flag(f, g(v, V(f, 1)))
         pzs(F, r, lambda f, v: g(v, V(f, 1)))
     if c.rep:
-        F.reg('ecx', g(ecx - 1, ecx)); more = ~eq(ecx - 1, 0)
+        A['ecx'].put(F, g(ecx - 1, ecx)); more = ~eq(ecx - 1, 0)
         if op in ('cmps', 'scas'):
             zf = eq(a - b, 0); more = more & (zf if c.rep == 'repe' else ~zf)
         F.eip = ite(act & more, C(c.addr, 32), C(c.addr + c.ins.size, 32))
