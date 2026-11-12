@@ -182,3 +182,11 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - the D3DX run-time path (L1 w18);
     - the BSAs not scanned: Meshes, Textures, Textures2, Sound, Voices1, Music. They are large; a farm will name-scan their directory tables.
   - Option (d) applies meanwhile, so neither item blocks the first frame.
+- 03:41Z merged w5 93a2c17e as 176db7f8 (sha256 content key, phase 2).
+    - NxShaderD3D.key[32] sits at offset 16; the struct is 64 bytes; offsets are asserted.
+    - The 5 FNV hash functions are gone. nm over all 71 objects: 0 definitions and 0 references.
+    - fnvnx_sha256 is defined only in lib/sha256.
+    - recipe render/d3d9: cold green, 70 objects; warm green, 0 stages run.
+    - objstub: green, 1785/1785 functions over 71 objects in 2 roots.
+    - The DOUBLES class: 22 `--unresolved-symbols=ignore-all` link commands in 16 scripts under tests/l6, 0 in render code (5d47e18d). Sent to L1.
+    - Open: gl4 calls `fnvnx_shader_translate_glsl` (no uam link). That function exists only on w1b's translator root (render/shaders/translator, w1b 0013509c, a trunk-based branch). The switch lands together with that root.
