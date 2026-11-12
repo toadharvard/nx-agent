@@ -8,7 +8,8 @@
  "flags": {
   "c": [
    "-O2",
-   "-mabi=ilp32"
+   "-mabi=ilp32",
+   "-Werror=attributes"
   ],
   "cxx": [
    "-O2",
@@ -26,7 +27,8 @@
    "-ffp-contract=off",
    "-DFNVNX_SDD=1",
    "-fno-devirtualize",
-   "-std=gnu++20"
+   "-std=gnu++20",
+   "-Werror=attributes"
   ],
   "asm": [
    "-mabi=ilp32"
