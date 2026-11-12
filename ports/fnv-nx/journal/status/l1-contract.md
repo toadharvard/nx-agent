@@ -849,3 +849,6 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Blocked by snapshot.ubuntu.com returning 503 (external); a poller is waiting.
   - L2 is told to replace the unpinned apt block in setup_msvc.sh with the profile.
 - L3a: the site universe is the call sites in ranges. A dynsites row in unreached bytes is a stale row and is red.
+- w14 2197f005 (on 6d3a2800): test totals are plugins 68/0, admit 0 fail, linkroots 0 fail, recipe 90 pass.
+  - The cache miss is not reproduced yet. A diagnostic is in, and it passed 5/5.
+  - Assigned: find the cause directly. Either a hermeticity gap (state shared across runs, to be traced with strace) or a store write/read race. Reproduce it with concurrent runs.
