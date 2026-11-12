@@ -206,6 +206,14 @@ void get_fontsig(FT_Face ft, FSig *fs)
         }
 }
 
+/* A declared input that is absent or unreadable is a broken build invariant, not a machine without it: the process ends once, through
+ * the host exit slot (os_exit_process), naming the input. An empty directory that is present stays a valid (empty) machine. */
+[[noreturn]] void declared_input_broken(const char *what, const std::string &path)
+{
+    std::string m = std::string("fnvnx: declared input broken: ") + what + ": " + path;
+    os_debug_print(m.c_str());
+    os_exit_process(78);
+}
 bool read_file(const std::string &p, std::vector<uint8_t> &out)
 {
     int fd = os_file_open(p.c_str(), OS_O_READ);
@@ -218,10 +226,11 @@ bool read_file(const std::string &p, std::vector<uint8_t> &out)
 }
 
 /* one font file -> faces (new_ft_face / unix_face_create / add_gdi_face) */
-void add_font_file(const std::string &path, bool allow_bitmap)
+void add_font_file(const std::string &path, bool allow_bitmap, bool listed)   /* listed: the directory scan returned it, so it must be readable */
 {
     std::vector<uint8_t> data;
-    if (!read_file(path, data) || data.empty()) return;
+    if (!read_file(path, data)) { if (listed) declared_input_broken("font file listed by its directory is unreadable", path); return; }   /* a registry-named file the set lacks: Wine 9.0 load_registry_fonts skips it */
+    if (data.empty()) return;
     for (FT_Long idx = 0, count = 1; idx < count; idx++) {
         FT_Face ft;
         if (FT_New_Memory_Face(g_lib, data.data(), (FT_Long)data.size(), idx, &ft)) break;
@@ -271,7 +280,8 @@ void add_font_file(const std::string &path, bool allow_bitmap)
 void parse_reg(const std::string &path)
 {
     std::vector<uint8_t> d;
-    if (!read_file(path, d) || d.size() < 2) return;
+    if (!read_file(path, d)) declared_input_broken("registry export listed by its directory is unreadable", path);
+    if (d.size() < 2) return;
     std::string txt;
     for (size_t i = 2; i + 1 < d.size(); i += 2) txt += d[i + 1] ? '?' : (char)d[i];
     std::string key;
@@ -301,7 +311,10 @@ const std::vector<std::pair<std::string, std::string>> &reg_key(const char *k)
 std::vector<std::string> list_dir(const std::string &d)
 {
     std::vector<std::string> v;
-    if (os_dir *dir = os_dir_open(d.c_str())) { while (const char *n = os_dir_next(dir)) v.push_back(n); os_dir_close(dir); }
+    os_dir *dir = os_dir_open(d.c_str());
+    if (!dir) declared_input_broken("declared directory missing or unreadable", d);
+    while (const char *n = os_dir_next(dir)) v.push_back(n);
+    os_dir_close(dir);
     std::sort(v.begin(), v.end());
     return v;
 }
@@ -314,7 +327,7 @@ void scan_host(const std::string &d)
         if (st.is_dir) { scan_host(p); continue; }
         size_t dot = n.rfind('.');
         std::string ext = dot == std::string::npos ? "" : n.substr(dot);
-        if (ext == ".ttf" || ext == ".ttc" || ext == ".otf") add_font_file(p, false);
+        if (ext == ".ttf" || ext == ".ttc" || ext == ".otf") add_font_file(p, false, true);
     }
 }
 bool is_full_name(const ustr &n) { for (Family *f : g_fam) for (Face *x : f->faces) if (x->scalable && !fcmp(x->full, n, 63)) return true; return false; }
@@ -337,20 +350,24 @@ void load_all()
     g_loaded = true;
     const fnvnx_font_dirs *d = fnvnx_declared_fonts();   /* a declared input of the root: no setter, no unset state */
     g_wine_dir = d->wine; g_host_dir = d->host; g_reg_dir = d->reg;
-    if (!g_lib && FT_Init_FreeType(&g_lib)) return;
+    if (!g_lib && FT_Init_FreeType(&g_lib)) declared_input_broken("FreeType does not start (FT_Init_FreeType: out of memory)", "libfreetype");
     for (const std::string &n : list_dir(g_reg_dir)) if (n.size() > 4 && n.substr(n.size() - 4) == ".reg") parse_reg(g_reg_dir + "/" + n);
     for (auto &kv : reg_key("HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Nls\\CodePage")) if (kv.first == "ACP") g_acp = atoi(kv.second.c_str());
     auto sys = reg_key("HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Hardware Profiles\\Current\\Software\\Fonts");
     for (const char *k : { "FONTS.FON", "OEMFONT.FON", "FIXEDFON.FON" })   /* load_system_bitmap_fonts */
-        for (auto &kv : sys) if (kv.first == k) add_font_file(g_wine_dir + "/" + kv.second, true);
-    for (const std::string &n : list_dir(g_wine_dir)) add_font_file(g_wine_dir + "/" + n, false);   /* the data directory */
+        for (auto &kv : sys) if (kv.first == k) add_font_file(g_wine_dir + "/" + kv.second, true, false);
+    for (const std::string &n : list_dir(g_wine_dir)) {
+        os_stat_t st;
+        if (!os_stat((g_wine_dir + "/" + n).c_str(), &st) && st.is_dir) continue;   /* Wine opens regular files only */
+        add_font_file(g_wine_dir + "/" + n, false, true);
+    }   /* the data directory */
     scan_host(g_host_dir);                                                                          /* fontconfig's fonts */
     for (auto &kv : reg_key("HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts")) {   /* load_registry_fonts */
         std::string v = kv.first;
         if (v.size() > 11 && v.compare(v.size() - 11, 11, " (TrueType)") == 0) v.resize(v.size() - 11);
         if (is_full_name(widen(v.c_str()))) continue;
         const std::string &path = kv.second;
-        if (path.size() > 4 && !strcasecmp(path.c_str() + path.size() - 4, ".fon") && !(path.size() > 1 && path[1] == ':')) add_font_file(g_wine_dir + "/" + path, true);
+        if (path.size() > 4 && !strcasecmp(path.c_str() + path.size() - 4, ".fon") && !(path.size() > 1 && path[1] == ':')) add_font_file(g_wine_dir + "/" + path, true, false);
     }
     set_default(0x10, &g_def_roman); set_default(0x30, &g_def_modern); set_default(0x20, &g_def_swiss);   /* reorder_font_list */
     std::stable_sort(g_fam.begin(), g_fam.end(), [](Family *a, Family *b) { return namecmp(a->name, b->name) < 0; });
@@ -524,7 +541,6 @@ void pick_charmap(FT_Face ft, int charset)
 RF *realize(LF lf, bool bitmap_ok = true)
 {
     load_all();
-    if (!g_lib) return nullptr;
     if (!fcmp(ustr(lf.face), u"Symbol")) lf.cs = SYMBOL_CS;
     lf.w = abs(lf.w);
     for (RF *r : g_rf) if (!memcmp(&r->lf, &lf, sizeof lf)) return r;
@@ -560,7 +576,8 @@ RF *realize(LF lf, bool bitmap_ok = true)
         f->scale_y = scale;
     }
     f->data = new std::vector<uint8_t>;
-    if (!read_file(face->file, *f->data) || FT_New_Memory_Face(g_lib, f->data->data(), (FT_Long)f->data->size(), face->index, &f->ft)) { delete f->data; delete f; return nullptr; }
+    if (!read_file(face->file, *f->data)) declared_input_broken("font file of a listed face is unreadable", face->file);
+    if (FT_New_Memory_Face(g_lib, f->data->data(), (FT_Long)f->data->size(), face->index, &f->ft)) { delete f->data; delete f; return nullptr; }
     FT_UInt w = 0, h = 0;
     if (f->scalable) {
         f->ppem = load_vdmx(f, lf.h);

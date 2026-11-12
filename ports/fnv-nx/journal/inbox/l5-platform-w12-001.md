@@ -48,3 +48,16 @@ constant writer, unbound writer, unaccounted pointer, multiple-inheritance offse
 - Fonts are a declared input: `fnvnx_gdi_set_font_dirs` is deleted. The root defines `fnvnx_declared_fonts()` (fnvnx_win32_ext.h): boot.cpp
   (sdmc:/switch/fnv/fonts/{wine,host,reg}: the layout is my choice, owner of the layout please confirm) and host_boundary.cpp (env FNVNX_FONT_REF /
   FNVNX_FONT_HOST, stops loudly if missing). A root without it does not link. No unset state, no `wine ? wine : ""`.
+
+## declared inputs absent = broken build (branch claude/fnv-l5-platform-w12-declin)
+- Layout sdmc:/switch/fnv/fonts/{wine,host,reg} is the DEVELOPMENT layout (Atmosphere exefs override, sdmc); decided again at packaging (boot.cpp comment says so).
+- gdifont.cpp: declared_input_broken(what, path) prints one line (os_debug_print) and ends the process through os_exit_process(78). Closed: FT_Init_FreeType failure;
+  list_dir on a missing/unreadable directory (wine, host and every host subdirectory, reg); a file that a declared directory listed and that cannot be read
+  (font file, .reg, and the face file re-read by realize). Empty but present directory = valid machine. Directory entries of the wine dir are skipped (Wine opens regular files only).
+- Census of platform/win32, every place that reads an input at run time: file reads = gdifont.cpp (above), registry.cpp:215 (the hive is persistence, not a declared input:
+  absent = first boot, the declared rows are compiled in registry_seed.gen.inc and written by fnvnx_registry_first_run), ini.cpp:180 (player INI files: Win32 documents the
+  default answer), resource.cpp:568 (player module files), path.cpp:364 / platstat.cpp:170 (player directories, diagnostics). Declared inputs compiled in (absence = build error):
+  registry seed, FalloutPrefs (declared_files.gen.inc), NLS (nls_tables.inc), message table (winerr_msgs.inc), env_const.gen.inc: 0 run-time reads. Run-time declared-input reads: 1 file (gdifont.cpp), 0 left silent.
+- Open: gdifont.cpp add_font_file(.., listed=false): files NAMED by the declared registry export (vgasys.fon, vgafix.fon, coure.fon, ...) that the wine dir lacks are skipped (Wine 9.0
+  load_registry_fonts / load_system_bitmap_fonts skip them). My local reference lacks them. Class-closing proposal: a build-time check that every .fon the exported hive names exists in the
+  declared set (w10's reference), instead of a run-time exit.
