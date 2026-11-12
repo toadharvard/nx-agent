@@ -16,7 +16,8 @@ While the file is absent, every call of fnvnx_reach_violation is the finding `re
 Universe: every function of every object of every product root, every uncovered gap, and a root whose recipe is invalid or whose build is
 red (one item `root`, uncertified). Certified: items with no finding. uncertified: the first 50 `unit path:symbol`, sorted. Per object results
 are cached by (object sha256, os_layer flag, analysis version, the terminators the object mentions) under GATE_CACHE/objstub/<key>.json;
-uncached objects run in --jobs processes (default os.cpu_count()). Exit 0 iff green; unreadable input is red with the reason in detail."""
+uncached objects run in --jobs processes (default os.cpu_count()). Fixture mode (env GATE_FIXTURES, RECIPE.md "Fixtures"): the result also holds "findings": [{"id": "<unit path>:<symbol>", "code": KIND}].
+Exit 0 iff green; unreadable input is red with the reason in detail."""
 import json
 import os
 import shutil
@@ -90,7 +91,9 @@ def main(argv):
     else:
         status, detail = "green", "%d functions in %d objects of %d roots, no trap path, no vacuous body" % (len(items), len(results), len(roots))
     res = {"format": "fnvnx-gate/1", "name": "objstub", "status": status, "universe": len(items), "certified": cert,
-           "uncertified": bad[:50], "detail": detail, "wine_fixme": {str(k): v for k, v in objstub.wine_counts(results).items()},
+           "uncertified": bad[:50], "detail": detail,
+           "findings": [{"id": "%s:%s" % (o, sy) if o != "-" else sy, "code": k} for o, sy, k, _ in finds],   # fixture mode (gate_fixtures.py)
+           "wine_fixme": {str(k): v for k, v in objstub.wine_counts(results).items()},
            "declared_machine": {str(k): v for k, v in objstub.declared_counts(results).items()}}
     with open(os.path.join(os.environ["GATE_OUT"], "objstub.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)

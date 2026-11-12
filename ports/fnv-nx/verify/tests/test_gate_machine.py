@@ -31,7 +31,7 @@ DH = "\t".join(hive.DECL_HEAD) + "\n"
 READ = "\t".join(["t.exe", "0x1", "RegQueryValueExA", LM, "SOFTWARE\\Toy", "Path", "static", "r"]) + "\n"
 DYN = "\t".join(["t.exe", "0x2", "RegQueryValueExA", LM, "?", "?", "dynamic", "r"]) + "\n"
 DECL = DH + "%s\tSOFTWARE\\Toy\tPath\tREG_SZ\t{game_dir}\tdeclared machine\n" % LM
-WRITER = '#include "toy.h"\nint RegSetValueExA(void);\nint seed(void) { return RegSetValueExA() + TOY; }\n'
+WRITER = '#include "inc/toy.h"\nint RegSetValueExA(void);\nint seed(void) { return RegSetValueExA() + TOY; }\n'
 
 
 def run(repo, tag):

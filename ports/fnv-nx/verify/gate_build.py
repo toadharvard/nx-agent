@@ -23,7 +23,10 @@ import recipe  # noqa: E402
 
 def product_roots(repo="."):
     """Every (root, variant) pair of the admitted product roots, spelled `root` (the implicit variant) or `root@NAME` (recipe.split_spec)."""
+    only = os.environ.get("GATE_ONLY_ROOT")   # set by gate_fixtures.py for a whole-root fixture: exactly that root, the gate runs on it alone
     adm = recipe.load_admit(repo)
+    if only:
+        return [only] if only in adm and adm[only]["class"] in ("fixture", "product") else []
     return sorted(s for p, r in adm.items() if r["class"] == "product" for s in recipe.pairs_of(_full(repo, r), p))
 
 
@@ -37,7 +40,11 @@ def _full(repo, ent):
 
 def buildable_roots(repo="."):
     """The roots the build family (build, determinism, linkstrict, objstub) judges: the product roots and the test roots (admit class test)."""
-    return sorted(p for p, r in recipe.load_admit(repo).items() if r["class"] in ("product", "test"))
+    adm = recipe.load_admit(repo)
+    only = os.environ.get("GATE_ONLY_ROOT")   # a whole-root fixture (gate_fixtures.py): exactly that root
+    if only:
+        return [only] if only in adm and adm[only]["class"] in ("fixture", "product", "test") else []
+    return sorted(p for p, r in adm.items() if r["class"] in ("product", "test"))
 
 
 NO_ROOT = "no product root (nothing to build yet)"
@@ -67,7 +74,18 @@ def tree_of(repo="."):
 def ensure(root, cache, repo="."):
     """Build ROOT with the stage cache GATE_CACHE (CACHE, or a fresh temp dir) -> (objects dict, out dir); raises RecipeError."""
     out = os.path.join(cache, "objects", tree_of(repo), root.replace("/", "__"))
-    return recipe.build(repo, root, os.path.join(cache, "store"), out, ext=os.path.join(cache, "external")), out
+    res = recipe.build(repo, root, os.path.join(cache, "store"), out, ext=os.path.join(cache, "external"))
+    return (fixture_view(res) if os.environ.get("GATE_FIXTURES") else res), out
+
+
+def fixture_view(res):
+    """RULE (fixtures, RECIPE.md): with env GATE_FIXTURES set, every gate that gets its input from ensure() sees ONLY the fixture units of the
+    root as its objects/units (no ELF, constants or link); a gate then reports its findings as usual and writes them to its result file as
+    "findings": [{"id": ITEM-ID, "code": FINDING-CODE}] (an id is `<root>/<unit>` or `<root>/<unit>:<symbol>`). gate_fixtures.py judges them."""
+    fx = res.get("fixtures", [])
+    return dict(res, objects=[{"unit": f["unit"], "object": f["object"], "sha256": f["sha256"], "os_layer": False} for f in fx],
+                units=[f["unit"] for f in fx], elf=None, constants=None, contract_names=None, defined=[], undefined=[],
+                pp_keys={f["unit"]: f["pp_key"] for f in fx if f.get("pp_key")}, du_keys={f["unit"]: f["du_key"] for f in fx if f.get("du_key")}, fixtures=[])
 
 
 def ids(root, res, rec):

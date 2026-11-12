@@ -125,7 +125,7 @@ gate_reach - certificates that a branch of a platform import body is unreachable
     gate_reach.py --objects <ld out>/inputs.rsp --requests reach_requests.tsv --certified reach.facts.tsv [--out reach.link.tsv]
 
 Why.  A request that a Win32 import accepts by its documentation but the target cannot express leads, in the body of the platform
-import, to `fnvnx_reach_violation(fact_id)` (loader/include/fnvnx_reach.h).  The build is valid only if that call is unreachable
+import, to `fnvnx_reach_violation(fact_id)` (contract/include/fnvnx/reach.h).  The build is valid only if that call is unreachable
 for exactly the linked set of images.  Every fact_id has a certificate from this gate, produced from the machine code of the
 images; a referenced fact without a certificate makes the build red.  No hand-written list: the requests are data of the platform
 manifest (manifest/reach_requests.tsv, columns request dll name arg_index kind values note) and the images are an explicit --image
@@ -1439,7 +1439,37 @@ While the file is absent, every call of fnvnx_reach_violation is the finding `re
 Universe: every function of every object of every product root, every uncovered gap, and a root whose recipe is invalid or whose build is
 red (one item `root`, uncertified). Certified: items with no finding. uncertified: the first 50 `unit path:symbol`, sorted. Per object results
 are cached by (object sha256, os_layer flag, analysis version, the terminators the object mentions) under GATE_CACHE/objstub/<key>.json;
-uncached objects run in --jobs processes (default os.cpu_count()). Exit 0 iff green; unreadable input is red with the reason in detail.
+uncached objects run in --jobs processes (default os.cpu_count()). Fixture mode (env GATE_FIXTURES, RECIPE.md "Fixtures"): the result also holds "findings": [{"id": "<unit path>:<symbol>", "code": KIND}].
+Exit 0 iff green; unreadable input is red with the reason in detail.
+```
+
+## verify/gate_fixtures.py
+
+```text
+Gate "fixtures" (fnvnx-gate/1): every fixture of every product root's recipe (build.json "fixtures", RECIPE.md) is judged by the gate it names.
+    python3 -I gate_fixtures.py     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/fixtures.json
+A fixture {gate G, expect red, finding CODE} on unit U passes iff G, run in fixture mode, reports exactly the finding CODE on U and no other
+finding on U, and nothing on any other item. Fixture mode: G's own argv from verify/gates.json with env GATE_FIXTURES=1 and a private GATE_OUT;
+gate_build.ensure() then returns each root with the fixture units as its only objects (gate_build.fixture_view), and G's result file must
+carry "findings": [{"id": "<root>/<unit>[:<symbol>]", "code": CODE}]. A fixture that comes out green, or red with another finding, or a gate
+that writes no "findings", is red. Whole-root fixtures: an admit entry of class `fixture` with "expect": [{gate, code}]; each expected gate is run on that root alone (env GATE_ONLY_ROOT, normal
+mode) and its findings under the root must be exactly the expected codes of that gate. Universe: the fixtures of all roots, one item per fixture root. Certified: those that pass. uncertified: `<root>/<unit>` (<= 50).
+No fixture: universe 0, green. The fixture objects are in no other gate's universe (units_of and objects.json exclude them).
+```
+
+## verify/gate_headers.py
+
+```text
+Gate "headers" (fnvnx-gate/1): every header of every admitted headers tree is read by an admitted unit (RECIPE.md "Headers trees").
+    python3 -I gate_headers.py     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/headers.json
+Universe: every tracked file under a root of class `headers` in verify/admit.json (admit.json refuses a unit file, a recipe and a link there).
+Certified: a file that the preprocessor stage of at least one unit of an admitted product root (every variant) read: the stage's own
+dependency list (deps.d of the stage result found by the pp_key of objects.json), so a header is certified through the units that include it, and
+those units' objects are judged by objstub and the other gates. A header no unit reads is not certified (uncertified lists them, <= 50, and the
+detail gives the count). A root whose build is red certifies nothing. No headers tree: universe 0, green.
+One declaration per symbol: the declarations of every header of every headers tree and of every product root are taken from the compiler
+(gcc -fdump-ada-spec on the header alone, so it must be self-contained: a header that does not parse is red), as (external name -> declaring
+file); a symbol declared in two different header files is red (`declared-twice`, listed with both places).
 ```
 
 ## verify/gate_exepin.py
@@ -2071,6 +2101,39 @@ sdcheck.py - rule: the SD tree equals the reference manifest.
 Exit: 0 green, 2 error, 3 incomplete (size-only pass). The manifest of the game is private (kept in the private
 repository); nothing here carries game data. FAT32 limit: a file may hold at most 2^32 - 1 bytes (the spec text
 "size >= 4 GiB - 1" is read as "size > 2^32 - 1": a file of exactly 2^32 - 1 bytes is representable).
+```
+
+## verify/specdefaults.py
+
+```text
+specdefaults: the flags that make a distribution compiler behave as the reference compiler (RECIPE.md "Distribution spec defaults").
+
+    python3 -I specdefaults.py derive --ref CC --distro CC [--lang c|c++] [--out FILE.json]
+
+Why.  A distribution builds its GCC with a spec file that adds defaults the GNU release does not have: -fstack-protector-strong,
+-fstack-clash-protection, -fcf-protection, default PIE, and, in the preprocessor spec, -D_FORTIFY_SOURCE (and -D_GLIBCXX_ASSERTIONS).
+They change the code that comes out (a `__stack_chk_fail` or `__memcpy_chk` call that exists in no source).  The reference is the GNU GCC
+(the msvcmodel compiler of the guest root, built from the pinned GNU tarball without a distribution spec).  The rule is not a list of
+names: it is the DIFFERENCE of the two compilers' own reports.
+
+Rule.  Run both compilers with the same arguments on the same null translation unit and read their reports:
+  options  `-Q --help=common`, `=target`, `=optimizers` (one run each): every line `-name  VALUE`.  An option the two compilers report with different VALUEs, and the
+           distribution's own spelling is known (the reference has it too), is set to the reference's VALUE:
+             [enabled]  -> the option itself          (-fstack-clash-protection)
+             [disabled] -> its off form               (-fno-stack-protector; -fno-PIE; -mno-...)
+             =VALUE     -> `-name=VALUE`              (-fcf-protection=none)
+           An option only the distribution has cannot differ in effect from the reference (the reference does not know it): not emitted.
+  macros   `-dM -E`: a macro the distribution defines and the reference does not  -> `-UNAME`   (_FORTIFY_SOURCE, _GLIBCXX_ASSERTIONS);
+           a macro both define with different values                               -> `-DNAME=VALUE` of the reference;
+           a macro only the reference defines                                      -> `-DNAME=VALUE`.
+Two families. Forced: hardening and semantic defaults (always neutralised; a root may not set them). Target: the options of the driver's `-Q --help=target` plus the
+PIC/PIE options (specdefaults.is_target): NOT neutralised, the root must state each one whose distribution default differs from the reference, else
+`implicit target choice`. A token of the cc1 line is a spec default only where `-Q --help` does not report the option's effective value.
+The result is a function of the two reports only: sorted, no host state.  Applying it (recipe.py) is a stage keyed on both compilers; a root
+may not set an option of the result or its negation (`overlap`).  An option whose value text is a list ("[default]", "[disabled]|…") is read
+as a value only in the forms above; any other form is emitted as `-name=VALUE` taken verbatim from the reference.
+Rests on the compiler being correct (item 1 of the owner's accepted list): `-Q --help` and `-dM -E` report every default of the compiler that changes
+code generation or the preprocessed text (GCC manual, Developer Options "-Q --help", Preprocessor Options "-dM").
 ```
 
 ## verify/toolflags.py

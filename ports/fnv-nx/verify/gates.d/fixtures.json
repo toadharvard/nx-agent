@@ -1,0 +1,13 @@
+{
+ "argv": [
+  "python3",
+  "-I",
+  "ports/fnv-nx/verify/gate_fixtures.py"
+ ],
+ "covers": [
+  "fixture"
+ ],
+ "format": "fnvnx-gatefile/1",
+ "name": "fixtures",
+ "result": "fixtures.json"
+}

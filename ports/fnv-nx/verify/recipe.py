@@ -40,6 +40,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import relocs  # noqa: E402
 import ldcheck  # noqa: E402
 import runtime  # noqa: E402
+import specdefaults  # noqa: E402
 import sandbox  # noqa: E402
 import toolflags  # noqa: E402
 import unitstage  # noqa: E402
@@ -49,9 +50,10 @@ TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
 ENV_JSON = TREE + "/verify/env.json"   # the declared environment of the checkout (l1.py checks the same file)
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
-        "plugins", "plugin_cxx", "variants", "outputs", "uses", "sources"}
+        "plugins", "plugin_cxx", "variants", "outputs", "uses", "sources", "fixtures"}
 VARIANT_KEYS = {"compiler", "flags"}   # the keys a variant may replace
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
+GATES_DIR = TREE + "/verify/gates.d"
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
 GUEST_TARGETS = ("guest", "host")
 # The plugins every product root with native or decomp C++ loads, their only admitted sources and their fixed arguments (RECIPE.md,
@@ -224,7 +226,45 @@ def generated_outputs(rec):
 def units_of(rec, root, files):
     """Sorted root-relative unit paths: tracked source files + generated outputs with a source name."""
     mine = {f[len(root) + 1:] for f in files if under(f, root)}
-    return sorted(u for u in mine | set(generated_outputs(rec)) if is_unit(u))
+    return sorted(u for u in mine | set(generated_outputs(rec)) if is_unit(u) and u not in fixtures_of(rec))
+
+
+def fixtures_of(rec):
+    """The fixture units of a recipe: root-relative names (a fixture is a unit that is built but is no unit of the product: see RECIPE.md)."""
+    fx = rec.get("fixtures") if isinstance(rec, dict) else None
+    return set(fx) if isinstance(fx, dict) else set()
+
+
+FIXTURE_KEYS = {"gate", "expect", "finding"}
+
+
+def fixture_errors(rec, root, mine, gen, repo):
+    """RULE (fixtures): `"fixtures": {UNIT: {"gate": G, "expect": "red", "finding": CODE}}`. UNIT is a tracked source file of the root (not a
+    generated output); G is a gate of verify/gates.d; the fixture is built like a unit but is never a unit of the product: it is in no link,
+    no os_layer, no generated input, no gate's universe (the gate `fixtures` judges it)."""
+    fx = rec.get("fixtures", {})
+    if not isinstance(fx, dict):
+        return ["fixtures must be an object {unit: {gate, expect, finding}}"]
+    err, gates = [], None
+    if repo is not None and os.path.isdir(os.path.join(repo, GATES_DIR)):
+        gates = {f[:-5] for f in os.listdir(os.path.join(repo, GATES_DIR)) if f.endswith(".json")}
+    lk = rec.get("link") if isinstance(rec.get("link"), dict) else {}
+    named = set(rec.get("os_layer", []) if isinstance(rec.get("os_layer", []), list) else [])
+    named |= {t for t in lk.get("flags", []) if isinstance(t, str)} | {lk.get("script")}
+    for g in rec.get("generated", []) if isinstance(rec.get("generated", []), list) else []:
+        if isinstance(g, dict) and isinstance(g.get("inputs"), list):
+            named |= {i[len(root) + 1:] for i in g["inputs"] if isinstance(i, str) and i.startswith(root + "/")}
+    for u, f in fx.items():
+        if not (isinstance(u, str) and u in mine and is_unit(u) and u not in gen):
+            err.append("fixture %r is not a tracked source file of the root" % (u,))
+        elif u in named:
+            err.append("fixture %s is named in os_layer, the link or a generated input: a fixture never enters the product" % u)
+        if not (isinstance(f, dict) and set(f) == FIXTURE_KEYS and f["expect"] == "red" and all(isinstance(f[k], str) and f[k] for k in FIXTURE_KEYS)
+                and re.fullmatch(r"[a-z0-9_]+", f["gate"]) and re.fullmatch(r"[A-Za-z0-9_-]+", f["finding"])):
+            err.append("fixture %r needs exactly gate, expect (\"red\") and finding (a code)" % (u,))
+        elif gates is not None and f["gate"] not in gates:
+            err.append("fixture %s: %r is not a gate of %s" % (u, f["gate"], GATES_DIR))
+    return err
 
 
 def load_pin(repo="."):
@@ -513,10 +553,12 @@ def check(rec, root, files, roots, pin=None, repo="."):
             continue
         if not rel_ok(d) or not any(under(d, r) for r in roots):
             err.append("include %r is not a path inside an admitted root or an external's at" % (d,))
-        elif not any(under(d, r) and roots[r].get("class") == "product" and roots[r].get("target") == roots[root].get("target") for r in roots):
-            # one home per header: the headers a product root includes lie in a product root of the same target (covered by its gates through
-            # the units that read them), never in a doc or tool root or a root of the other target
-            err.append("include %r lies in no admitted product root of target %r (a header dir of a doc or tool root, or of the other target, is no home)"
+        elif not any(under(d, r) and (roots[r].get("class") == "headers" or roots[r].get("class") == "product" and roots[r].get("target") == roots[root].get("target"))
+                     for r in roots):
+            # one home per header: the headers a root includes lie in a unit-less header root (any target: they compile under the includer's flags)
+            # or in a product root of the same target (covered by its gates through the units that read them), never in a doc or tool root or a
+            # root of the other target
+            err.append("include %r lies in no header root and no admitted product root of target %r (a header dir of a doc or tool root, or of the other target, is no home)"
                        % (d, roots[root].get("target")))
         elif not (any(under(f, d) for f in files) or any(under(root + "/" + o, d) for o in gen)):
             err.append("include %r holds no tracked or generated file" % d)
@@ -545,9 +587,9 @@ def check(rec, root, files, roots, pin=None, repo="."):
             err.append("generated[%d].inputs must be tracked files or directories (repo-relative)" % i)
         elif any(a != b and under(a, b) for a in ins for b in ins):
             err.append("generated[%d].inputs nest" % i)
-        for p in ins if isinstance(ins, list) else []:
-            if isinstance(p, str) and not under(p, root) and not any(under(p, r) and roots[r]["class"] == "tool" for r in roots):
-                err.append("generated[%d].inputs: %s is a file of another root: take it through `uses` (the producer's declared output), not by path" % (i, p))
+        for p in ins if isinstance(ins, list) else []:   # RULE: a generator input is any tracked file of any admitted root (data: read-only, content-keyed in the stage key like a unit's closure, no target restriction); a path in no root is red; a generated output of any root comes only through `uses` (it is no tracked file)
+            if isinstance(p, str) and not any(under(p, q) for q in roots):
+                err.append("generated[%d].inputs: %s is in no admitted root" % (i, p))
         if not (isinstance(outs, list) and outs and all(rel_ok(o) for o in outs)):
             err.append("generated[%d].outputs must be a non-empty list of root-relative paths" % i)
             continue
@@ -561,6 +603,7 @@ def check(rec, root, files, roots, pin=None, repo="."):
     sr = rec.get("sources")
     if sr is not None and not (isinstance(sr, str) and sr in generated_outputs(rec)):
         err.append("sources must name a path in generated[].outputs of this root (a file of <external>:<path> lines)")
+    err += fixture_errors(rec, root, mine, seen, repo)
     units = set(units_of(rec, root, files))
     ol = rec.get("os_layer", [])
     for u in ol if isinstance(ol, list) else err.append("os_layer must be a list") or []:
@@ -821,6 +864,7 @@ class Job:
         self.keys, self.run, self.hit, self.ext, self.ppkeys, self.built = set(), 0, 0, {}, {}, []
         self.dukeys = {}   # {unit: key of its macro-fact stage (-dU, unitstage.DU_TAIL)}
         self.red, self.blocked, self.failed = [], {}, []   # KEEP GOING: red stages (failure dicts) and {unit: stage it is blocked by}; nothing is masked (see build)
+        self.spec = {}
         os.makedirs(os.path.join(store, "rt"), exist_ok=True)
 
     def stage(self, doc):
@@ -858,6 +902,37 @@ class Job:
             e = self.ext[c["external"]]
             return e["at"] + "/" + c["cc"], e["at"] + "/" + c["cxx"]
         return "/usr/bin/" + c["cc"], "/usr/bin/" + c["cxx"]
+
+    def spec_flags(self, ws, kinds):
+        """RULE (RECIPE.md "Distribution spec defaults"): a root compiled by a distribution driver gets the flags that remove the distribution's
+        spec defaults relative to the reference compiler (verify/guest_compiler.json: the GNU GCC of the msvcmodel external) -> {"c","cxx"}: flags.
+        They are derived by specdefaults.py from the two compilers' own reports, cached by (environment, drivers, the reference pin, the derivation
+        code), and they enter every PP and CC key as flags. A root may not set an option of the derived set (BuildRed `specdefaults`).
+        A tree without the pin has no reference: nothing to remove."""
+        c, pin = self.rec["compiler"], load_pin(self.repo)
+        if "external" in c or pin is None:
+            return {}
+        drv = {"c": "/usr/bin/" + c["cc"], "cxx": "/usr/bin/" + c["cxx"]}
+        env = envcheck.env_id(json.load(open(os.path.join(self.repo, ENV_JSON))))
+        tag = hashlib.sha256(repr((env, drv, pin["external"], pin["cc"], pin["cxx"],
+                                   hashlib.sha256(open(specdefaults.__file__, "rb").read()).hexdigest())).encode()).hexdigest()[:16]
+
+        def make():
+            ex = fetch_externals([pin["external"]], self.store, self.extcache, ws)[pin["external"]["name"]]
+            ref = {"c": os.path.join(ex["host"], pin["cc"]), "cxx": os.path.join(ex["host"], pin["cxx"])}
+            try:
+                return {k: specdefaults.derive(ref[k], drv[k], "c" if k == "c" else "c++") for k in ("c", "cxx")}
+            except specdefaults.SpecError as e:
+                raise BuildRed({"stage": "specdefaults", "exit": None, "stderr": [str(e)[-300:]]})
+        derived = self.cached_rt("specdefaults-" + tag, make)[1]
+        fl, out, bad = self.rec["flags"], {}, []
+        for k in sorted(kinds):   # only the languages the root has units in
+            forced, err = specdefaults.for_root(fl.get(k, []), derived["c" if k == "asm" else k])
+            out[k] = forced
+            bad += ["flags.%s: %s" % (k, e) for e in err]
+        if bad:
+            raise BuildRed({"stage": "specdefaults", "exit": None, "stderr": bad})
+        return out
 
     def hostpath(self, p):
         for e in self.ext.values():
@@ -1077,6 +1152,12 @@ class Job:
         guest = self.roots.get(self.root, {}).get("target") == "guest"
         pk = ("c", "cxx") if guest else ("cxx",)   # guest: the plugins are loaded by the C and the C++ front end alike
         try:
+            self.spec = self.spec_flags(ws, set(kinds.values()))
+        except BuildRed as r:
+            self.red.append(dict(r.args[0]))
+            self.blocked.update({u: r.args[0]["stage"] for u in units})
+            return {}
+        try:
             self.use_inputs(ws)
         except BuildRed as r:
             self.red.append(dict(r.args[0]))
@@ -1103,7 +1184,7 @@ class Job:
         for k in sorted(set(kinds.values())):
             fp = os.path.join(ws, "flags-%s.json" % k)
             sem = semantics_for(self.hostpath(drv["c" if k == "asm" else k]), k) if guest else []   # the recipe's flags: semantics first, then the root's own
-            json.dump({"argv": sem + rec["flags"][k]}, open(fp, "w"))
+            json.dump({"argv": self.spec.get(k, []) + sem + rec["flags"][k]}, open(fp, "w"))
             builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtp, flags_file=fp,
                                                            src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws)))
             builds[k].cc_drop = drop | {i["at"] for i in self.use_inputs(ws)}
@@ -1133,8 +1214,8 @@ class Job:
                 res[u] = e["object"]
                 if e.get("pp_key"):
                     self.ppkeys[u] = e["pp_key"]
-                if e.get("du_key"):
-                    self.dukeys[u] = e["du_key"]
+                    if e.get("du_key"):
+                        self.dukeys[u] = e["du_key"]
         self.failed = [{"unit": u, "stage": failed[u]["stage"], "exit": failed[u]["exit"], "stderr": list(failed[u]["stderr"])[-20:]} for u in units if u in failed]
         return res   # in unit order (UNITS is sorted), so the failures are deterministic
 
@@ -1331,7 +1412,7 @@ def build(repo, root, store, out, jobs=4, ext=None):
         raise RecipeError(errs)
     units = units_of(j.rec, root, j.files)
     res = {"format": OBJ_FORMAT, "root": spec, "objects": [], "elf": None, "link_roots": [], "constants": None, "contract_names": None, "defined": [], "undefined": [], "plugins": [],
-           "link_archives": [], "stage_keys": [], "status": "green"}
+           "link_archives": [], "stage_keys": [], "status": "green", "fixtures": []}
     ws = tempfile.mkdtemp(prefix="recipe-")
     os.makedirs(out, exist_ok=True)
     all_units = units
@@ -1339,7 +1420,7 @@ def build(repo, root, store, out, jobs=4, ext=None):
         _copy(repo, [f for f in j.files if under(f, root)], root, os.path.join(ws, "root"))
         # KEEP GOING (RECIPE.md "Keep going"): every unit whose declared inputs are produced is built; a red stage is recorded with its
         # diagnostics, what needs its output is blocked by it and not run; the root is red if anything is red or blocked.
-        und, objs = set(), {}
+        und, objs, fx, allo = set(), {}, [], {}
         try:
             j.externals(ws)
             try:
@@ -1347,7 +1428,9 @@ def build(repo, root, store, out, jobs=4, ext=None):
                 units = sorted(set(units) | set(j.generated_sources(ws)))
             except BuildRed as r:   # the list of externally sourced units is itself not produced
                 j.red.append(dict(r.args[0]))
-            objs = j.compile(ws, units)
+            fx = sorted(fixtures_of(j.rec))
+            allo = j.compile(ws, units + fx)
+            objs = {u: allo[u] for u in units if u in allo}   # fixture objects never reach the link, the objects list or any gate's universe
         except BuildRed as r:   # an external is not available: no stage of the root has its inputs
             j.red.append(dict(r.args[0]))
             j.blocked.update({u: r.args[0]["stage"] for u in units})
@@ -1374,6 +1457,14 @@ def build(repo, root, store, out, jobs=4, ext=None):
                 shutil.copyfile(cas._obj(store, rep), fd)
                 row["f2i"] = os.path.abspath(fd)
             res["objects"].append(row)
+        for u in fx:
+            if u not in allo:
+                continue
+            dest = os.path.join(out, "fixtures", u + ".o")
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            ent = cas.manifest(allo[u], store)["entries"]["unit.o"]
+            shutil.copyfile(cas._obj(store, ent), dest)
+            res["fixtures"].append(dict(j.rec["fixtures"][u], unit=u, object=os.path.abspath(dest), sha256=ent["h"], pp_key=j.ppkeys.pop(u, None), du_key=j.dukeys.pop(u, None)))
         res.update(defined=sorted(res["defined"], key=lambda d: (d["symbol"], d["object"])), undefined=sorted(und))
         if j.rec.get("link") and (j.red or j.blocked or j.failed):
             j.blocked[j.rec["link"]["output"]] = (j.red or j.failed)[0]["stage"]

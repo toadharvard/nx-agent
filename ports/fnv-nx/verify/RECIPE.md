@@ -23,12 +23,12 @@ the hash of the stage document + tool code. All paths are root-relative unless m
 ## Keys (any other key is an error; all problems are listed at once)
 - `compiler`: driver names under `/usr/bin` that env.json provides, or `{"external": NAME, "cc": PATH, "cxx": PATH}` (paths inside the external).
 - `flags`: per language. Refused: `-I*` (use `include`), `-o -c -E -S -x -M*`, and the refusal set R below.
-- `include`: repo-relative directory inside an admitted root (tracked files, or generated outputs of this root), or an absolute path inside an
+- `include`: repo-relative directory inside the root itself (tracked files, or generated outputs of this root), inside an admitted `headers` root of any target (Headers trees) or inside a product root of the same target, or an absolute path inside an
   external's `at`. Included files are inputs by content; a file the unit reads that is not in them does not exist for it.
 - `units`: must be `"all"`. A `.S` unit is preprocessed as its own stage like a C unit (its key covers exactly the headers it includes);
   a `.s` unit sees nothing but its own file (`.include` fails: use `.S` and `#include`). RULE: every tracked `*.c *.cc *.cpp *.cxx *.s *.S` under the root, and every generated output with such a name, is
   compiled. A file that must not be compiled does not belong in the root; there is no `exclude`.
-- `generated`: python generators run as sandbox stages before compilation, in list order. `tool` is a tracked `.py` of an admitted tool or product
+- `generated`: python generators run as sandbox stages before compilation, in list order (declared `inputs` are tracked files of ANY admitted root, read-only and content-keyed in the stage key like a unit's closure, with no target restriction: they are data; a path in no admitted root is red; another root's generated output is no tracked file and comes only through `uses`). `tool` is a tracked `.py` of an admitted tool or product
   root (the whole root is mounted at `/tool`, the script at `/tool/<path in its root>`), `inputs` are tracked files or directories (repo-relative;
   mounted at `/in/<repo path>`; they may not nest), the generator writes ONLY `/out/<output>` (the set of produced files must equal `outputs`).
   Outputs are root-relative, never tracked files, and appear in the root's view for `include` and as units when named like a source.
@@ -163,6 +163,59 @@ a root without variants keeps its keys), its objects are stored at `GATE_CACHE/o
 `root: "root@NAME"`. `link.roots` entries may be `root@NAME` (the variant must exist). The gates that quantify over product roots (`gate_build.product_roots`)
 quantify over the pairs: build, determinism, objstub, linkstrict, argorder, contract's per-root gates.
 
+## Headers trees (admit class `headers`)
+
+`verify/admit.json` entry `{"path": P, "class": "headers", "gates": ["headers"]}`: a tracked tree of header files shared by roots (for example the
+declarations of the platform's host API). It has no `recipe`/`target`, no unit file (`.c .cc .cpp .cxx .S .s`: admit refuses it), no link and no outputs.
+- A root uses it only by listing a directory of it in its recipe `include` (`-I` of its path): there are no ambient `-I` paths. A header root has no
+  object target: a root of ANY target (host or guest) may include its files and they compile under the includer's flags. Every other include keeps the one
+  home rule: a product root of the SAME target (header_dirs, one home per header) or an external. `check()` refuses an `include` in no header root, no
+  same-target product root and no external.
+- Rule for what a header root's headers may include: only standard headers, other header roots or an external's tree. It is checked by the compiler, not by
+  scanning `#include` text: gate `headers` preprocesses every header of a header root alone with `-I` of the header roots and of the externals' include
+  dirs (the externals the product recipes declare) and nothing else; a header that includes a product root's header does not parse there and is red.
+- The PP key stays the content of every header the stage actually reads (nothing about the tree as a whole).
+- Certificates: admit counts every file of the tree as covered by the entry. The gate `headers` (gate_headers.py) certifies a header only through
+  the admitted units whose PP stage read it (the stage's deps), and a header no unit reads is not certified (the detail gives the count). The code in a
+  header is built into the objects of the units that include it, so objstub and the object gates judge it through those units.
+
+- Nesting: a headers tree may sit inside a root of another class (a layer keeps its shared headers in its own directory, for example
+  `contract/include` in the `contract` tool root); it owns its files, the outer root keeps the rest. Any other nesting is an overlap. `check()`
+  resolves an `include` path to its innermost root.
+- One declaration per symbol (gate `headers`): the compiler lists the declarations of every header of every headers tree and of every product root
+  (`gcc -fdump-ada-spec` on the header alone: a header must be self-contained, one that does not parse is red); a symbol declared in two different
+  header files is red (`declared-twice`, both places named). The owner of a symbol has its one header; every other root includes it.
+- A headers tree is admitted together with its first consumer: the gate certifies a header only through the units that read it.
+
+## Distribution spec defaults
+
+A distribution builds its GCC with a spec that adds defaults the GNU release does not have (`-fstack-protector-strong`, `-fstack-clash-protection`,
+`-fcf-protection`, default PIE, `-D_FORTIFY_SOURCE`): they put `__stack_chk_fail` and `*_chk` calls into code that has none in its source. A root
+compiled by a distribution driver (`compiler` `{cc, cxx}`) gets the flags that remove them, relative to the reference compiler: the GNU GCC of
+`verify/guest_compiler.json` (the msvcmodel external, built without a distribution spec).
+- The set is derived, never listed: `specdefaults.py` compares the two compilers' own reports (`-Q --help=common|target|optimizers`, the `-###`
+  command line of the compiler proper, `-dM -E`, at `-O0` and `-O2`): an option the reference has in another state is set to the reference's state
+  (the first spelling the distribution compiler accepts: `-fno-stack-protector` for `-fstack-protector-strong`), a macro only the distribution
+  defines is `-U`, one that differs is `-D` of the reference's value; macros that follow from an option (`__PIE__`) are not a second rule. A
+  difference that no flag removes is a `SpecError`: the build is red at stage `specdefaults`, never skipped.
+- It is computed once per (environment, drivers, the reference's pin, the derivation code) and cached under `store/rt/specdefaults-*`; the flags
+  are the first of every PP and CC command line, so they are in every key.
+- A root may not set an option of the derived set, of either sign, with any value, or of its family (`-fstack-protector-all` against
+  `-fno-stack-protector`): the build is red at `specdefaults` naming the flag.
+- Two families. (1) Hardening and semantic defaults the distribution adds silently (stack protector, stack clash, FORTIFY, unwind tables, ...) are always
+  neutralised (`forced`), and a root may not set them. (2) Target and code-model choices are NOT neutralised: where the distribution's default differs from the
+  reference the root must STATE the option in its flags for every language it has units in (any value; for PIC/PIE any of `-fPIC -fpic -fPIE -fpie`), else the
+  build is red at `specdefaults` ("implicit target choice"): no distribution default applies silently and the root's choice is in its key. Family (2) is exactly
+  the options of the driver's `-Q --help=target` plus the PIC/PIE code-generation options; the classification is read from the driver, never listed by hand
+  (only the PIC/PIE group is named, because the driver does not list the generic code-generation options under `target`). Guest roots (external compiler)
+  are not affected: their family (2) comes from `flags.semantics`.
+- A token of the distribution's own compiler command line is a spec default only where `-Q --help` does not report the option's effective value (a default
+  the target itself gives, such as `-fasynchronous-unwind-tables` on aarch64, is no spec default); the help difference is authoritative.
+- A tree without `guest_compiler.json` has no reference and nothing to remove. A root with an external compiler (a guest root) is not affected:
+  its compiler has no distribution spec.
+
+## Fixtures (`"fixtures"`)
+
 ## Outputs and uses
 `outputs: {NAME: a path in generated[].outputs of this root}` declares what other roots may take. `uses: [{"root": R, "output": NAME}]` (R any admitted
 root with a recipe that declares NAME) makes that output an input of this root's stages: the `generated` stages and the preprocessing stages mount it
@@ -189,6 +242,27 @@ includes a file a red generator did not produce fails in its own preprocessing s
 if any unit or stage is red or blocked. `objects.json` of a red root: `objects` (the built units), `failed_units` ({unit, stage, exit, stderr}, in unit order),
 `blocked` ({unit, blocked_by: stage}, sorted by unit), `red_stages` (the stages that were red outside a unit), `failure` (the first red stage).
 `units` is always the whole universe.
+
+## Fixtures (`"fixtures"`)
+
+`"fixtures": {"<unit>": {"gate": "<gate>", "expect": "red", "finding": "<finding code>"}}`: a unit that is meant to be rejected by a gate, kept
+beside the code the gate protects so that the gate is known to bite.
+- `<unit>` is a tracked source file of the root (not a generated output). `gate` is a gate of `verify/gates.d`; `expect` is `"red"`.
+- recipe.py builds a fixture like any unit (same flags, same stages, in the same store). It is NOT a unit of the product: `units_of`, `objects`,
+  `defined`/`undefined`, `pp_keys` and the link never hold it; it is refused in `os_layer`, in the link's flags or script and in a generated input.
+  Its object is in `objects.json` under `fixtures` (`unit, gate, expect, finding, object, sha256, pp_key`).
+- Fixture mode: the gate `fixtures` (gate_fixtures.py) runs the named gate's own argv with env `GATE_FIXTURES=1`. Then `gate_build.ensure()` returns each root
+  with its fixture units as its only objects/units (`fixture_view`: no ELF, no constants), so every gate that takes its input from `ensure()` judges the
+  fixtures and nothing else. The gate writes its findings to its result file as `"findings": [{"id": "<root>/<unit>[:<symbol>]", "code": CODE}]`
+  (objstub does; a gate that does not is red for its fixtures).
+- A fixture passes iff its gate reports exactly the declared `finding` on that unit and no other finding there, and no finding on any other item. A fixture
+  that comes out green, or red with another or an additional finding, makes the gate `fixtures` (so the verdict) red. Universe: the fixtures of all roots.
+
+Whole-root fixtures: a root that is expected to be red as a whole (for example a lifted root whose pack external lacks `shapes.tsv`, expecting
+`forms-missing-shapes`) is an admit entry of class `fixture`: `{"path", "class": "fixture", "recipe", "target", "expect": [{"gate": G, "code": CODE}, ...]}`.
+It is in no gate's universe (`gate_build.product_roots` lists product roots only). The gate `fixtures` runs each expected gate on that root alone (env
+`GATE_ONLY_ROOT=<path>`, normal mode, private GATE_OUT) and requires the gate's findings (`"findings": [{id, code}]`, ids `<root>/...`) to be exactly the
+expected codes of that gate, none outside the root; a root that comes out green, or red with other codes, or under a gate that writes no findings, is red.
 
 ## Refusal set R (GNU ld option syntax, not a text guess)
 Options that let a link accept missing or substituted symbols: `--unresolved-symbols`, `--allow-shlib-undefined`, `--noinhibit-exec`,

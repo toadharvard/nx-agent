@@ -255,6 +255,25 @@
     "ports/fnv-nx/verify/a64access.cc"
    ]
   },
+  "test_fixtures.py": {
+   "references": [
+    {
+     "anchor": "## Fixtures (`\"fixtures\"`)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    },
+    {
+     "anchor": "## verify/gate_objstub.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/verify/gate_fixtures.py",
+    "ports/fnv-nx/verify/gate_build.py"
+   ]
+  },
   "test_fpbound.py": {
    "references": [
     {
@@ -428,6 +447,25 @@
    "subject": [
     "ports/fnv-nx/verify/recipe.py",
     "ports/fnv-nx/verify/unitstage.py"
+   ]
+  },
+  "test_headers.py": {
+   "references": [
+    {
+     "anchor": "## Headers trees (admit class `headers`)",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    },
+    {
+     "anchor": "## verify/gate_headers.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_headers.py",
+    "ports/fnv-nx/verify/gate_admit.py",
+    "ports/fnv-nx/verify/recipe.py"
    ]
   },
   "test_icount.py": {
@@ -718,6 +756,24 @@
    ],
    "subject": [
     "ports/fnv-nx/verify/sdcheck.py"
+   ]
+  },
+  "test_specdefaults.py": {
+   "references": [
+    {
+     "anchor": "## Distribution spec defaults",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    },
+    {
+     "anchor": "## verify/specdefaults.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/specdefaults.py",
+    "ports/fnv-nx/verify/recipe.py"
    ]
   },
   "test_toolflags.py": {
