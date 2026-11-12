@@ -30,8 +30,8 @@ SRC = {
     T + "verify/model.py": "y = 2\n",
     T + "verify/table.tsv": "a\tb\n",
     T + "verify/broken.py": "def (:\n",
-    T + "verify/tests/test_a.py": "",
-    T + "verify/tests/test_b.py": "",
+    T + "verify/tests/test_a.py": 'from testcase import case\ncase("a1", True)\ncase("a2", True)\n',
+    T + "verify/tests/test_b.py": 'import testcase\ntestcase.case("b1", True)\n',
     T + "docs/SPEC.md": "# Spec\n## 4.2 Rounding\ntext\n## Twice\n## Twice\n",
     T + "docs/TOOL.md": "## tool\nRule of the tool: sorted output.\n",
     T + "game/body.cc": "// Section G\nint f();\n",
@@ -50,7 +50,7 @@ TREE = "e" * 64
 ART = {"b" * 40: (TREE, {"ref/x.bin", "ref/y.bin"}), "f" * 40: (None, "not our ref")}
 WINE = {"kind": "wine-exe", "wine": "9.0", "exe_sha256": PIN,
         "artifact": {"repo": "fnv-nx-build", "commit": "b" * 40, "path": "ref/x.bin", "tree_sha256": TREE}}
-GOOD = {"format": "fnvnx-oracle/1", "tests": {
+GOOD = {"format": "fnvnx-oracle/2", "tests": {
     "test_a.py": {"subject": [T + "verify/tool.py"], "references": [SPEC]},
     "test_b.py": {"subject": [T + "game/body.cc"], "references": [WINE, {"kind": "model", "path": T + "verify/model.py"}]}}}
 
@@ -61,8 +61,30 @@ ART.update({C1: (T1, {"p/probe.c", "p/dump.bin"}), C2: (T2, {"w/os"}), C3: (T3, 
 EXTP = {"probes": {(C1, T1)}, "wineplat": {(C2, T2)}, "twice": {(C1, T1), (C3, T3)}, "badtree": {(C3, "8" * 64)}}
 
 
-def run(doc, files=FILES):
+def conv(doc):
+    """a test written as {subject, references} -> the per-case form: every case of the file owes all the references"""
+    if not isinstance(doc, dict) or not isinstance(doc.get("tests"), dict):
+        return doc
+    out = dict(doc, tests={})
+    for fn, e in doc["tests"].items():
+        if isinstance(e, dict) and set(e) == {"subject", "references"} and isinstance(e["references"], list):
+            names = G.case_names(SRC[D + "/" + fn])[0] if D + "/" + fn in SRC else []
+            refs = {"r%d" % i: r for i, r in enumerate(e["references"])}
+            e = {"subject": e["subject"], "refs": refs, "cases": {n: sorted(refs) for n in names}}
+        out["tests"][fn] = e
+    return out
+
+
+def judge2(doc, files=FILES):
     return G.judge(files, {D: doc}, TRACKED, ROOTS, PINS, lambda p: SRC[p], lambda c: ART.get(c, (None, "unknown commit")), EXTP)
+
+
+def run(doc, files=FILES):
+    """{test file: reason} of the files with an uncertified case (the first reason)"""
+    bad = {}
+    for k, v in sorted(judge2(conv(doc), files)[1].items()):
+        bad.setdefault(k.split("::")[0], v)
+    return bad
 
 
 def with_a(**kw):
@@ -88,10 +110,10 @@ def bad_b(name, doc, word):
 
 
 case("good declaration: all certified", run(GOOD) == {}, run(GOOD))
-case("no universe: nothing uncertified", G.judge([], {}, TRACKED, ROOTS, PINS, lambda p: SRC[p], None) == {})
+case("no universe: nothing uncertified", G.judge([], {}, TRACKED, ROOTS, PINS, lambda p: SRC[p], None) == ([], {}))
 r = run(None)
 case("missing oracle.json: every test of the DIR uncertified", set(r) == set(FILES), r)
-r = run(dict(GOOD, format="fnvnx-oracle/2"))
+r = run(dict(GOOD, format="fnvnx-oracle/1"))
 case("wrong format: every test uncertified", set(r) == set(FILES), r)
 r = run(dict(GOOD, note="x"))
 case("unknown top-level key: every test uncertified", set(r) == set(FILES), r)
@@ -155,8 +177,8 @@ bad_b("artifact in another repository", with_b(references=[dict(WINE, artifact=d
       "fnv-nx-build")
 bad_b("artifact with a missing key", with_b(references=[dict(WINE, artifact={"repo": "fnv-nx-build"})]), "artifact keys")
 bad_b("wine-exe with an extra key", with_b(references=[dict(WINE, note="x")]), "wine-exe: keys")
-r = G.judge(FILES, {D: GOOD}, TRACKED, ROOTS, {}, lambda p: SRC[p], lambda c: ART[c])
-case("no pinned exe: wine-exe uncertified", set(r) == {D + "/test_b.py"}, r)
+r = G.judge(FILES, {D: conv(GOOD)}, TRACKED, ROOTS, {}, lambda p: SRC[p], lambda c: ART[c])[1]
+case("no pinned exe: wine-exe uncertified", set(k.split("::")[0] for k in r) == {D + "/test_b.py"}, r)
 bad_b("product subject with a model only", with_b(references=[{"kind": "model", "path": T + "verify/model.py"}]),
       "no wine-exe or spec")
 bad_b("product subject with a contract only", with_b(references=[{"kind": "contract", "path": T + "verify/table.tsv"}]),
@@ -207,7 +229,7 @@ del os.environ["ARTIFACTS_URL"]
 # repeated key in oracle.json
 tmp = tempfile.mkdtemp(prefix="oracle-test-")
 p = os.path.join(tmp, "o.json")
-open(p, "w").write('{"format": "fnvnx-oracle/1", "tests": {"test_a.py": 1, "test_a.py": 2}}')
+open(p, "w").write('{"format": "fnvnx-oracle/2", "tests": {"test_a.py": 1, "test_a.py": 2}}')
 case("repeated entry is not a declaration", G.load(p) is None)
 open(p, "w").write("{")
 case("malformed json is not a declaration", G.load(p) is None)
@@ -221,9 +243,10 @@ tree = {T + "/verify/gates.d/selftests.json": json.dumps({"format": "fnvnx-gatef
         T + "/verify/oracle_pins.json": "{}",
         T + "/x/a.py": "def f():\n    return 1\n",
         T + "/x/RULE.md": "# rule\nf returns 1\n",
-        T + "/x/tests/test_a.py": "",
-        T + "/x/tests/oracle.json": json.dumps({"format": "fnvnx-oracle/1", "tests": {"test_a.py": {
-            "subject": [T + "/x/a.py"], "references": [{"kind": "spec", "path": T + "/x/RULE.md", "anchor": "# rule"}]}}})}
+        T + "/x/tests/test_a.py": "from testcase import case\ncase('f returns 1', True)\n",
+        T + "/x/tests/oracle.json": json.dumps({"format": "fnvnx-oracle/2", "tests": {"test_a.py": {
+            "subject": [T + "/x/a.py"], "refs": {"r": {"kind": "spec", "path": T + "/x/RULE.md", "anchor": "# rule"}},
+            "cases": {"f returns 1": ["r"]}}}})}
 for f, text in tree.items():
     os.makedirs(os.path.dirname(os.path.join(root, f)), exist_ok=True)
     open(os.path.join(root, f), "w").write(text)
@@ -260,6 +283,65 @@ d["tests"]["test_b.py"]["references"] = [WINE, {"kind": "model", "path": U + "ga
 bad_b("a record whose ref points into a product root stays red", d, "product root")
 bad_a("a subject inside a ref root is red", with_a(subject=[U + "refs/dump.tsv"]), "class ref")
 
+# ---- per-case rule: a reference is owed per case, not per file
+def cases(src):
+    return G.case_names(src)
+
+
+case("cases: a literal testcase.case call is a case, found through `from testcase import case`",
+     cases('from testcase import case\ncase("a", 1)\ncase("b", 1)\n') == (["a", "b"], None))
+case("cases: found through `import testcase` and the module attribute",
+     cases('import testcase\ntestcase.case("a", 1)\n') == (["a"], None))
+case("cases: found through an alias of the import",
+     cases('from testcase import case as c\nc("a", 1)\n') == (["a"], None))
+case("cases: a def test_* and a unittest.TestCase method are cases",
+     cases('import unittest\ndef test_x(): pass\nclass K(unittest.TestCase):\n    def test_y(self): pass\n    def helper(self): pass\n')
+     == (["test_x", "K.test_y"], None))
+case("cases: a file with neither form is red", cases('print(1)\n')[1] is not None and "no test case" in cases('print(1)\n')[1])
+case("cases: a helper named check is not a case (no guessing by name)", cases('def check(n, ok): pass\ncheck("a", 1)\n')[1] is not None)
+case("cases: a case name that is not a literal is red", "not a string constant" in (cases('from testcase import case\nn = "a"\ncase(n, 1)\n')[1] or ""))
+case("cases: a name built by + is red even with key=", "not a string constant" in (cases('from testcase import case\ncase("a" + "b", 1, key=3)\n')[1] or ""))
+case("cases: a duplicate case name in one file is red", "duplicate" in (cases('from testcase import case\ncase("a", 1)\ncase("a", 2)\n')[1] or ""))
+case("cases: a local function named case is red", "binds" in (cases('def case(n, ok): pass\ncase("a", 1)\n')[1] or ""))
+case("cases: a local def case next to the import is red", "binds" in (cases('from testcase import case\ndef case(n, ok): pass\ncase("a", 1)\n')[1] or ""))
+case("cases: a loop variable named case is red", "binds" in (cases('from testcase import case\nfor case in []: pass\ncase("a", 1)\n')[1] or ""))
+case("cases: a case in a loop with key= is one static case",
+     cases('from testcase import case\nfor k in range(3):\n    case("a", True, key=k)\n') == (["a"], None))
+case("cases: a call of a function with another source named case is not the shared one",
+     cases('from other import case\ncase("a", 1)\n')[1] is not None)
+
+def tests_doc(names_to_refs, extra=None):
+    e = {"subject": [U + "verify/tool.py"], "refs": {"r1": SPEC, "r2": {"kind": "model", "path": U + "verify/model.py"}},
+         "cases": names_to_refs}
+    e.update(extra or {})
+    return {"format": "fnvnx-oracle/2", "tests": {"test_a.py": e, "test_b.py": {"subject": [U + "game/body.cc"], "refs": {"w": WINE}, "cases": {"b1": ["w"]}}}}
+
+
+u, bad = judge2(tests_doc({"a1": ["r1"], "a2": ["r2"]}))
+case("per case: every case with its own reference -> green; the universe counts cases", bad == {} and u == [D + "/test_a.py::a1", D + "/test_a.py::a2", D + "/test_b.py::b1"], (u, bad))
+u, bad = judge2(tests_doc({"a1": ["r1", "r2"]}))
+case("per case: a case without an entry is uncertified although another case of its file has one",
+     set(bad) == {D + "/test_a.py::a2"} and "no entry" in bad[D + "/test_a.py::a2"], bad)
+u, bad = judge2(tests_doc({"a1": ["r1"], "a2": ["r1"], "ghost": ["r1"]}))
+case("per case: an entry for a case that does not exist makes the file uncertified",
+     set(bad) == {D + "/test_a.py::a1", D + "/test_a.py::a2"} and "ghost" in bad[D + "/test_a.py::a1"], bad)
+u, bad = judge2(tests_doc({"a1": ["r1"], "a2": []}, {"refs": {"r1": SPEC}}))
+case("per case: empty references of one case uncertify that case only", set(bad) == {D + "/test_a.py::a2"} and "empty" in bad[D + "/test_a.py::a2"], bad)
+u, bad = judge2(tests_doc({"a1": ["r1"], "a2": ["zz"]}, {"refs": {"r1": SPEC}}))
+case("per case: an id that refs does not hold is red for that case", set(bad) == {D + "/test_a.py::a2"} and "refs does not hold" in bad[D + "/test_a.py::a2"], bad)
+u, bad = judge2(tests_doc({"a1": ["r1"], "a2": ["r1"]}))
+case("per case: a reference no case uses is an error of the file", set(bad) == {D + "/test_a.py::a1", D + "/test_a.py::a2"} and "not used" in bad[D + "/test_a.py::a1"], bad)
+u, bad = judge2(tests_doc({"a1": ["r1"], "a2": ["r1"]}, {"refs": {"r1": SPEC}}))
+case("per case: all references used -> green", bad == {}, bad)
+SAVE = SRC[D + "/test_a.py"]
+SRC[D + "/test_a.py"] = "print(1)\n"
+u, bad = judge2(tests_doc({}))
+case("script-style: a file without cases is one uncertified item, the file itself", D + "/test_a.py" in bad and D + "/test_a.py" in u, (u, bad))
+SRC[D + "/test_a.py"] = 'from testcase import case\nn = "x"\ncase(n, 1)\n'
+u, bad = judge2(tests_doc({}))
+case("script-style: a case with a non-literal name makes the file uncertified", "not a string constant" in bad.get(D + "/test_a.py", ""), bad)
+SRC[D + "/test_a.py"] = SAVE
+
 GATE = os.path.join(os.path.dirname(HERE), "gate_oracle.py")
 rc = subprocess.run([sys.executable, "-I", GATE], cwd=root, env=dict(env, GATE_OUT=out)).returncode
 res = json.load(open(os.path.join(out, "oracle.json")))
@@ -270,5 +352,5 @@ os.remove(os.path.join(root, T + "/x/tests/oracle.json"))
 rc = subprocess.run([sys.executable, "-I", GATE], cwd=root, env=dict(env, GATE_OUT=out)).returncode
 res = json.load(open(os.path.join(out, "oracle.json")))
 case("gate program: test without a declaration -> red, exit 2", rc == 2 and res["status"] == "red"
-      and res["uncertified"] == [T + "/x/tests/test_a.py"], res)
+      and res["uncertified"] == [T + "/x/tests/test_a.py::f returns 1"], res)
 sys.exit(testcase.finish())

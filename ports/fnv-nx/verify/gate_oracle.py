@@ -339,7 +339,7 @@ def judge_entry(entry, names, tracked, roots, pins, read, artifact, extpins=None
         if ids is None:
             bad[n] = "no entry"
         elif not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
-            bad[n] = "references are empty"
+            bad[n] = "references is empty"
         elif any(i not in refs for i in ids):
             bad[n] = "names a reference id that refs does not hold"
         else:
