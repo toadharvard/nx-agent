@@ -69,9 +69,18 @@ them: x86_64 `x86_64-linux-gnu-g++-13` (the bare `g++-13` prints no path for `as
 - Memory ordering has no option: `fnvnx_order` makes every access to memory that is not a proven local `ldar`/`stlr` (x86 TSO), volatile or not.
   `ORDER_MODE` of the old compile.sh no longer exists in the plugin (it rejects an unknown argument).
 ### Guest roots: the game's compiler (MSVCMODEL1)
+**Flags.** The recipe, not the build.json, supplies every semantic flag: data model and ABI (`-mabi`, `-march`, `-mtune`, `-fPIC`, `-ftls-model`, char
+signedness, `-fshort-wchar`, `-ffixed-x19..x27`), outline atomics, overflow, aliasing, null checks, lifetime-dse, FP (`-ffp-contract=off`,
+`-frounding-math`, `-fno-math-errno`), language model (`-fms-extensions`, `-fcheck-new`, `-fno-sized-deallocation`, `-fno-devirtualize`), EH tables, stack
+protection, jump tables, builtins, `-U_FORTIFY_SOURCE`. They are `flags.semantics` of `guest_compiler.json`, appended to every guest compile stage (C,
+C++, asm) in that order BEFORE the root's own flags, minus the flags the pinned driver itself says do not apply to that language (`recipe.semantics_for`:
+one run of the driver on an empty input; its diagnostic "command-line option 'X' is valid for C++/ObjC++ but not for C" is the rule; an unknown flag is an
+error). A guest build.json may carry only per-root classes (`recipe.PER_ROOT`): `-W*` (not `-Wa,` `-Wl,` `-Wp,`), `-D*`, `-std=*`, `-O0..3/s/g`,
+`-g*`, `-ffunction-sections`, `-fdata-sections`; any other token is refused by `guest_errors` (an allow-list of classes, no list of semantic flags to
+keep in sync). `-DFNVNX_SDD=1` is per root (a native C++ root must hold it).
 Every product root's admit.json entry declares `"target": "guest"` (the game's code) or `"host"`; missing = invalid recipe = red `build`. A guest root's
 compiler, for C and C++ alike, is the external compiler pinned in `verify/guest_compiler.json`
-(`{"format": "fnvnx-guest-compiler/1", "external": {EXT_KEYS}, "cc", "cxx"}`): GCC 13.3.0 + `toolchain/msvcmodel/msvcmodel.patch`, a fnv-nx-build mirror
+(`{"format": "fnvnx-guest-compiler/1", "external": {EXT_KEYS}, "cc", "cxx", "flags": {"semantics": [flag]}}`; `flags.semantics` is the one source of `recipe.SEMANTICS_FLAGS`: every flag that changes generated-code semantics): GCC 13.3.0 + `toolchain/msvcmodel/msvcmodel.patch`, a fnv-nx-build mirror
 (`tools/gcc-ilp32-msvcmodel`). The root's `compiler` must be `{"external", "cc", "cxx"}` naming an `external` entry equal to the pinned one (name, commit,
 tree_sha256, at) with the pinned driver paths. The distribution g++-13 is the base the compiler is built from, never the compiler of guest code. A tree
 without the pin file has no valid guest root. The plugins are built against this compiler's own plugin headers (the plugin stage reads
@@ -87,13 +96,18 @@ otherwise). `verify/samples/platform.build.json` is the sample recipe of the pla
 flags, `include` = the runtime's `c++/15.2.0`, its ilp32 target directory and `include`); `test_guest.py` checks it with `recipe.py check` and builds a unit
 that includes `<vector>`, `<string>`, `<cstdio>`. The 13.3 compiler reads gcc 15.2's libstdc++ headers only with `-std=gnu++20` (the sample's `flags.cxx`).
 
-### Gate rule: native and decomp C++ is compiled with both plugins; lifted C++ with none
+### Gate rule: every guest C and C++ unit is compiled with the full plugin set
 `admit.json` entry of a product root with at least one C++ unit declares `"cxx_origin"`: `"native"` (hand-written or decomp C++), or
 `{"lifted_by": "<tracked .py of a tool root>", "pack": "<external name of the recipe>"}`. Missing declaration = invalid recipe = red `build`.
 - `native`: `plugins` must hold `fnvnx_order` and `fnvnx_ftoi`, with the sources `PLUGIN_SOURCES` and the arguments `PLUGIN_ARGS` of recipe.py (the MSVC
   semantics; `ltr`, `first`, `cpp17` exist for A/B measurements and are no product). Anything missing or different is a finding naming it.
 - lifted (the lifter emits `ldar`/`stlr` itself): consistent only if the root has NO tracked C++ unit, every C++ unit is an output of a `generated`
-  step whose tool is `lifted_by`, and `pack` is an external of the recipe (an input of every generator). Plugins are then not required.
+  step whose tool is `lifted_by`, and `pack` is an external of the recipe (an input of every generator).
+- every guest root with a C or C++ unit (native or lifted, any language mix) holds ALL of `PLUGIN_SOURCES` with `PLUGIN_ARGS`, in that order: the
+  C and the C++ CC stage of the root load every plugin their front end can load (`-fplugin=/plug/<n>/<n>.so`, `/plug/<n>` a declared input), so a
+  plugin is in every unit key. Loadable = needs no symbol that only the other front end defines (`recipe.plugin_languages`: `nm -D` of cc1, cc1plus
+  and the .so; measured: cc1plus loads all 8, cc1 loads ftoi, order, dispatch, addr; sdd, pi, names, layout use cp_global_trees). Gate `datamodel`
+  re-derives the set and reads it back from the CC stage documents; a unit lacking a loadable plugin .so is red, no name list, no exception list.
 Assumption: the declaration `lifted_by` names the lifter is the owner's (admit.json is reviewed); the gate proves that no hand-written C++ sits in a lifted root.
 
 ## Refusal set R (GNU ld option syntax, not a text guess)
