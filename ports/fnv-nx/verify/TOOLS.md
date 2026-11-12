@@ -1121,11 +1121,13 @@ envcheck: the declared, reproducible environment of the L1 verdict (verify/env.j
     envcheck.py id [--env F]                   sha256 of the canonical env.json (the verdict's env_id)
     envcheck.py snapshot -o F --from-code      regenerate F from THIS machine by the rule below; only on a machine set up by
                                                farm/setup_verdict_env.sh, then commit F
+check also requires, for the distribution compiler (no external) of every admitted product root, that its plugin headers (`-print-file-name=plugin`, the
+gcc-N-plugin-dev package; objstub builds its terminator plugin against them) belong to a package listed in env.json (`plugin headers of <driver>` mismatch).
 Rule (packages are DERIVED, never listed by hand): a package is in the environment iff dpkg says it owns a file that a verify tool
 or test executes or reads as data: (1) each of PROGRAMS (resolved path + loader closure); (2) python's loader closure (interpreter,
 lib-dynload, PY_MODULES); (3) UNIT_CC through unitstage.gcc_set(): driver, `as`, every ELF file of its trees + closure, and EVERY
 FILE under its trees (the unit stage ingests them whole: /usr/include, GCC install dir with plugin headers, libexec); the host
-gcc's HOST_GCC_PROGS/HOST_GCC_FILES; (4) the renderer's host libraries: RENDER_LIBS (loader-cache names libEGL.so.1 and libEGL_mesa.so.0, with their loader closure) and RENDER_FILES (the glvnd EGL vendor file). The trees also get a listing digest (an extra package adding files there is a mismatch).
+gcc's HOST_GCC_PROGS/HOST_GCC_FILES and every file of its plugin directory (HOST_GCC_PLUGIN_DIRS: the plugin headers of the host-root compiler); (4) the renderer's host libraries: RENDER_LIBS (loader-cache names libEGL.so.1 and libEGL_mesa.so.0, with their loader closure) and RENDER_FILES (the glvnd EGL vendor file). The trees also get a listing digest (an extra package adding files there is a mismatch).
 A file without a dpkg owner outside python's prefix is an error. Programs and who executes them: strace opentrace.py; busybox
 tests/test_graph,test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linux-gnu-g++ test_unitstage (unitstage.py);
 aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount; ar,clang test_coffnorm;
@@ -1294,6 +1296,12 @@ its objects (relocatable) and of its linked ELF, never a name's text. Rules:
       the root links no ELF), and two listed symbols with DIFFERENT body ids may not share one address (`contract-alias`: an alias stub
       that serves two contracts with one body). Two names with the same body id on one address are fine. A symbol listed twice with
       two body ids is `contract-duplicate`. Without the key rule (c) has universe 0 for that root.
+  (d) The host boundary (a root with "target": "host" in admit.json). A reference no object defines is certified iff its object belongs to
+      a host root and its name is EXPORTED by the pinned host runtime: the defined GLOBAL/WEAK `.dynsym` names of the shared objects that
+      dpkg lists for libc6, libgcc-s1 and libstdc++6 (verify/env.json pins their versions; envcheck checks them), a fact computed by
+      gate_linkstrict.host_exports and cached by the content of those files (CACHE/hostexports). It mirrors newlib/libnx on the guest
+      side: a guest root has no such set, and any other undefined name of a host root stays `undefined`. Not covered (stated): the
+      fact is a cached read of the installed packages, not a sandbox stage; a symbol version is not compared, only the name.
 Universe = undefined references + defined global names + contract names + one `<elf>` per linked root (+ a root whose recipe is invalid or
 whose build is red, one uncertified item). Certified = the items with no finding. No product root: universe 0, green.
 NOT EXACT (stated): rule (b) is by name over the objects. A script symbol with hidden visibility (PROVIDE_HIDDEN) is LOCAL in the
@@ -1342,6 +1350,28 @@ macros the unit expands or tests). A used `FNVNX_PLAT_` name with an undeclared 
 including `FNVNX_EXT_DK`, the machine model of deko3d below the product boundary) are no services and no items. No root that includes the
 header: universe 0, green, no exception list. Limit: a use in a function that no code reaches counts; reachability is the job of reach/reachlink.
 Run: `python3 -I ports/fnv-nx/verify/gate_hostapi.py [--header PATH]` (cwd = checkout root, env GATE_OUT).
+
+## verify/gate_datamodel.py
+
+```text
+Gate "datamodel" (fnvnx-gate/1, VERDICT.md class A: data model): every unit of a guest product root is compiled by the pinned game
+compiler in the exe's data model.
+    python3 -I gate_datamodel.py        cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/datamodel.json
+Universe (through gate_build.quantify): the admitted product roots with "target": "guest" (a host root has none); per root one item
+`<root>:compiler` plus one item `<root>/<unit>` per unit of the build. No guest root: universe 0, green.
+Certificate, read from the build's own outputs (objects.json of the root, the CC stage documents of its units in GATE_CACHE/store/stage-docs,
+found by the keys objects.json lists, the document whose "stage" is `cc:<unit>`); nothing is decided by a name in a file:
+  compiler item: the build is green, the root's recipe compiler is the external of verify/guest_compiler.json (recipe.guest_errors: name,
+    repo, ref, commit, tree_sha256, at, driver paths), and every CC document mounts at the pin's `at` the pin's tree_sha256 and starts
+    with the pin's driver (the object was built by that tree, not by a name).
+  unit item, all of: a CC stage document exists for the unit; its argv holds -mabi=ilp32; for a C++ unit of a native root also every flag of
+    recipe.SEMANTICS_FLAGS and, for every plugin of recipe.GUEST_CXX_PLUGINS, the declared input /plug/<name> (a tree holding <name>.so) and the
+    argv flag -fplugin=/plug/<name>/<name>.so. A C++ unit of a lifted root needs no plugin (RECIPE.md: the lifter emits the order itself).
+    The documents are the stage keys, so the object is the one these flags and inputs built.
+Does not cover (stated): the pin file declares no data-model flags of its own, so the flag set is -mabi=ilp32 for every unit plus
+recipe.SEMANTICS_FLAGS for native C++ (the constant of the recipe rule); C and assembler units are checked for -mabi=ilp32 only.
+Relies on the owner-accepted item "the compiler is correct": the pinned compiler under -mabi=ilp32 has the exe's data model.
+```
 
 ## verify/gate_objstub.py
 
