@@ -32,7 +32,7 @@
     "asm": []
   },
   "include": [
-    "ports/fnv-nx/toolchain/include",
+    "ports/fnv-nx/hostabi/include",
     "/ext/a64/aarch64-none-elf/include/c++/15.2.0",
     "/ext/a64/aarch64-none-elf/include/c++/15.2.0/aarch64-none-elf/ilp32",
     "/ext/a64/aarch64-none-elf/include"
