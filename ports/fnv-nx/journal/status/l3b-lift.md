@@ -29,6 +29,12 @@ on 2026-11-11 22:35 UTC. Handoff read: `journal/inbox/l3b-lift-handoff-opus.md` 
 
 - Contract gates n1 n2_* xc xunit rtti pcrel bodysel abs disp reach reachlink gpa are red `inputs` for lift/rt: the root is a non-game product root. L1 to define their universe for such roots.
 - fnvl.h:99 and fnvl_x87.h:77 carry the attribute `fnvnx_f2i`, which no plugin of the compiler knows (the plugin is `fnvnx_ftoi`). The compiler ignores it with a warning, so float-to-int sites in the rt headers may not be under the ftoi rule (class C). L3a owns these headers.
+- Answered:
+  - L3a takes set_emit and fnvlift puregate to 0 (its w3).
+  - TAB_BIAS becomes a rule: the bias comes from the dispatch's own guard bound, and an unguarded site is red.
+  - The undef-flag liveness gate is L3b's rule, built by L3a w5.
+  - DSL coverage order: int, then sys, x87, simd.
+  - L1 w14 adds admit.json `imports:` and z3 in EXTERNAL (ASM-009).
 - L3a (fnvlift @8ec81459):
   - FNVL_EMIT is an undeclared environment input; set_emit is proposed.
   - puregate dynamic globals, __init__.py:21-22.
