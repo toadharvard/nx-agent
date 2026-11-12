@@ -86,12 +86,25 @@ $(P)/win32/declared_files.gen.inc: $(PREFS_REQUIRED) $(IDENT_HANDHELD) $(IDENT_D
 	python3 -I $(P)/manifest/gen_prefs_ini.py $(PREFS_REQUIRED) $@ --ident $(IDENT_HANDHELD) --ident $(IDENT_DOCKED)
 $(OUT)/platform/win32/declared_files.cpp.o: $(P)/win32/declared_files.gen.inc
 
+# the generated platform tables the s4 build makes too (tests/s4/Makefile: nls_tables.inc from Wine 9.0 nls/*.nls, winerr_msgs.inc from
+# winerror.mc; reference inputs from the private fnv-nx-build mirror): NLS_DIR=<nls directory>, MC_DIR=<directory with winerror.mc>
+NLS_DIR ?= /home/user/gd/nls
+$(P)/win32/nls_tables.inc: $(P)/win32/tools/gen_nls.py
+	@test -f $(NLS_DIR)/locale.nls || { echo "nls_tables.inc: set NLS_DIR to the Wine 9.0 nls directory (fnv-nx-build tools/nls)"; exit 1; }
+	python3 $< $(NLS_DIR) $@
+$(OUT)/platform/win32/nls.cpp.o: $(P)/win32/nls_tables.inc
+MC_DIR ?= /home/user/gd/wine-mc
+$(P)/win32/winerr_msgs.inc: $(P)/win32/tools/gen_winerr.py
+	@test -f $(MC_DIR)/winerror.mc || { echo "winerr_msgs.inc: set MC_DIR to the directory with Wine 9.0 winerror.mc (fnv-nx-build tools/mc)"; exit 1; }
+	python3 -I $< $(MC_DIR)/winerror.mc $@
+$(OUT)/platform/win32/module.cpp.o: $(P)/win32/winerr_msgs.inc
+
 $(OUT)/%.cpp.o: $(ROOT)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_) -c $< -o $@
 
 # platform/win32/gdifont.cpp needs the reference FreeType: the archive tests/s4 builds from ext/freetype
-FTLIB := $(HERE)/../s4/build/libfreetype.a
+FTLIB := $(abspath $(HERE)/../s4/build/libfreetype.a)
 $(FTLIB):
 	$(MAKE) -C $(HERE)/../s4 $(FTLIB)
 $(OUT)/s7_tests: $(OBJS) $(FTLIB)
