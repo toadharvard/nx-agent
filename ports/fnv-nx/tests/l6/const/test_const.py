@@ -20,8 +20,9 @@ def check(p, ok, msg=""):
     return ok
 
 # case -> (id or None, expected result (None = any), kind). Wine 9.0 text per row: const_fixme.tsv wine_ref; no-id rows: contract_consts.tsv.
-IDS = {"D3DPERF_GetStatus": 41, "D3DPERF_QueryRepeatFrame": 42, "D3DPERF_SetMarker": 43, "D3DPERF_SetOptions": 44, "D3DPERF_SetRegion": 45, "SetDialogBoxMode": 46, "NxDevice9Ex::ComposeRects": 47}
-NOID = {"D3DPERF_BeginEvent", "D3DPERF_EndEvent", "DebugSetMute", "NxShaderValidator9::AddRef", "NxShaderValidator9::Release"}
+IDS = {"D3DPERF_GetStatus": 41, "D3DPERF_QueryRepeatFrame": 42, "D3DPERF_SetMarker": 43, "D3DPERF_SetOptions": 44, "D3DPERF_SetRegion": 45, "SetDialogBoxMode": 46, "NxDevice9Ex::ComposeRects": 47,
+       "DrawRectPatch": 48, "DrawTriPatch": 49, "DeletePatch": 50, "RegisterSoftwareDevice": 51, "DebugSetMute": 52, "NxShaderValidator9::AddRef": 53, "NxShaderValidator9::Release": 54}
+NOID = {"D3DPERF_BeginEvent", "D3DPERF_EndEvent"}
 OTHER = {"Direct3DShaderValidatorCreate9": 20, "probe.GetClipStatus": 3}   # ids of other tables (x1_validator.cpp, pv_exit.cpp): a call after / next to ours still logs exactly its own line
 
 def read_tsv(p):
@@ -56,9 +57,9 @@ def judge(ids, res, rows, quiet=False):
     f = []; byid = {int(r[0]): r for r in rows}
     perf_levels = {}; seen = set()
     for (case, n), got in sorted(ids.items(), key=lambda x: x[0][1]):
-        base = case.split(".")[0] if case.startswith("SetDialogBoxMode.") else case
+        base = case.split(".")[0]   # "<name>.<class tag>" for a body called on both device classes
         seen.add(base)
-        if case.startswith("probe."): base = "probe.GetClipStatus"
+        if case.startswith("probe."): base = "probe.GetClipStatus"   # (the case name has a dot of its own)
         r = res.get((case, n))
         if r is None: f.append(f"{case}#{n}: no result line"); continue
         if base in IDS:
@@ -70,8 +71,6 @@ def judge(ids, res, rows, quiet=False):
         elif base in OTHER: want_ids = [OTHER[base]]
         elif base in NOID:
             want_ids = []
-            want = {"NxShaderValidator9::AddRef": 2, "NxShaderValidator9::Release": 1}.get(base)
-            if want is not None and r != want: f.append(f"{case}#{n}: result {r}, Wine {want}")
         else: f.append(f"{case}#{n}: unknown case"); continue
         if ids[(case, n)] != want_ids: f.append(f"{case}#{n}: fixme lines {ids[(case, n)]}, want {want_ids}")
     ev = [res[k] for k in sorted(res, key=lambda k: k[1]) if k[0] in ("D3DPERF_BeginEvent", "D3DPERF_EndEvent")]
@@ -79,8 +78,9 @@ def judge(ids, res, rows, quiet=False):
     need = set(IDS) | NOID | {"Direct3DShaderValidatorCreate9"}
     for c in sorted(need - seen): f.append(f"case {c} never ran")
     cnt = {}
-    for (case, n) in ids: cnt[case.split(".")[0] if case.startswith("SetDialogBoxMode.") else case] = cnt.get(case.split(".")[0] if case.startswith("SetDialogBoxMode.") else case, 0) + 1
-    exp = {"D3DPERF_GetStatus": 3, "D3DPERF_QueryRepeatFrame": 3, "D3DPERF_SetMarker": 3, "D3DPERF_SetOptions": 3, "D3DPERF_SetRegion": 3, "SetDialogBoxMode": 12, "NxDevice9Ex::ComposeRects": 4, "DebugSetMute": 2, "NxShaderValidator9::AddRef": 3, "NxShaderValidator9::Release": 3}
+    for (case, n) in ids: cnt[case.split(".")[0]] = cnt.get(case.split(".")[0], 0) + 1
+    exp = {"D3DPERF_GetStatus": 3, "D3DPERF_QueryRepeatFrame": 3, "D3DPERF_SetMarker": 3, "D3DPERF_SetOptions": 3, "D3DPERF_SetRegion": 3, "SetDialogBoxMode": 12, "NxDevice9Ex::ComposeRects": 4, "DebugSetMute": 2, "NxShaderValidator9::AddRef": 3, "NxShaderValidator9::Release": 3,
+           "DrawRectPatch": 4, "DrawTriPatch": 4, "DeletePatch": 4, "RegisterSoftwareDevice": 4}
     for k, v in exp.items():
         if cnt.get(k) != v: f.append(f"calls of {k}: {cnt.get(k)}, want {v}")
     return f
@@ -89,7 +89,7 @@ def main():
     tmp = tempfile.mkdtemp(prefix="d9const_")
     # ---- a
     rows = read_tsv(os.path.join(DEV, "const_fixme.tsv"))
-    check("a", len(rows) == 7 and [int(r[0]) for r in rows] == list(range(41, 48)), f"ids {[r[0] for r in rows]}")
+    check("a", len(rows) == 7 and [int(r[0]) for r in rows] == list(range(41, 55)), f"ids {[r[0] for r in rows]}")
     other_ids = set()
     for f in ("pvw_fixme.tsv", "d5a_fixme.tsv"): other_ids |= {int(r[0]) for r in read_tsv(os.path.join(DEV, f)) if r[0].isdigit()}
     other_ids |= {2, 3, 20, 22, 23, 24}   # verify/wine_fixme.tsv rows of x1_validator.cpp / pv_exit.cpp
@@ -100,9 +100,12 @@ def main():
         check("a", bool(re.fullmatch(r"wine-9\.0:dlls/(d3d9|wined3d)/[a-z0-9_]+\.c:[A-Za-z_][A-Za-z0-9_]*", r[2])), r[2])
         check("a", (r[3] == "void" and r[4] == "") or (r[3] == "u32" and re.fullmatch(r"(0x[0-9a-fA-F]+|[0-9]+)", r[4]) is not None), str(r))
         name = {"D3DPERF_GetStatus": "NX_CF_D3DPERF_GetStatus", "D3DPERF_QueryRepeatFrame": "NX_CF_D3DPERF_QueryRepeatFrame", "D3DPERF_SetMarker": "NX_CF_D3DPERF_SetMarker", "D3DPERF_SetOptions": "NX_CF_D3DPERF_SetOptions",
-                "D3DPERF_SetRegion": "NX_CF_D3DPERF_SetRegion", "IDirect3DDevice9::SetDialogBoxMode": "NX_CF_SetDialogBoxMode", "IDirect3DDevice9Ex::ComposeRects": "NX_CF_ComposeRects"}[r[1]]
+                "D3DPERF_SetRegion": "NX_CF_D3DPERF_SetRegion", "IDirect3DDevice9::SetDialogBoxMode": "NX_CF_SetDialogBoxMode", "IDirect3DDevice9Ex::ComposeRects": "NX_CF_ComposeRects",
+                "IDirect3DDevice9::DrawRectPatch": "NX_CF_DrawRectPatch", "IDirect3DDevice9::DrawTriPatch": "NX_CF_DrawTriPatch", "IDirect3DDevice9::DeletePatch": "NX_CF_DeletePatch",
+                "IDirect3D9::RegisterSoftwareDevice": "NX_CF_RegisterSoftwareDevice", "DebugSetMute": "NX_CF_DebugSetMute", "IDirect3DShaderValidator9::AddRef": "NX_CF_ShaderValidatorAddRef",
+                "IDirect3DShaderValidator9::Release": "NX_CF_ShaderValidatorRelease"}[r[1]]
         check("a", re.search(name + r" = " + r[0] + r"\b", hdr) is not None, f"enum {name} = {r[0]}")
-        check("a", len(re.findall(r"fnvnx_wine_fixme\(" + name + r"\)", src)) >= 1, f"call site of {name}")
+        check("a", len(re.findall(r"(?:fnvnx_wine_fixme|NX_WINE_FIXME_VOID)\(" + name + r"\)", src)) >= 1, f"call site of {name}")
     # Wine function text exists in the downloaded tree when it is there (optional evidence, never a decision)
     wine = os.environ.get("FNVNX_WINE_SRC", "/home/user/work/l6/wine")
     wf = {"d3d9/d3d9_main.c": "d3d9_d3d9_main.c", "wined3d/device.c": "wined3d_device.c", "d3d9/device.c": "d3d9_device.c"}
@@ -142,19 +145,22 @@ def main():
         if c[0] in ("D3DPERF_GetStatus", "D3DPERF_QueryRepeatFrame", "NxDevice9::SetDialogBoxMode"): check("c", c[2] == "0", c[0])
         if c[0].startswith(("D3DPERF_Get", "D3DPERF_Query", "D3DPERF_Set", "NxDevice9")) and not c[0].endswith("ComposeRects"): check("c", "fnvnx_wine_fixme" in c[3], c[0] + " row does not name its fixme id")
     # ---- d mutations: (name, file in dev, old, new, consumer files to recompile)
-    H = "const_fixme.h"; EX = ["d3d9_exports.cpp", "dev_misc.cpp", "m1_misc.cpp"]
+    H = "const_fixme.h"; EX = ["d3d9_exports.cpp", "dev_misc.cpp", "m1_misc.cpp", "copy_misc.cpp", "d3d9_adapter.cpp", "x1_validator.cpp"]
     muts = [("GetStatus no fixme", "d3d9_exports.cpp", "{ fnvnx_wine_fixme(NX_CF_D3DPERF_GetStatus); return 0; }", "{ return 0; }"),
             ("GetStatus result", "d3d9_exports.cpp", "fnvnx_wine_fixme(NX_CF_D3DPERF_GetStatus); return 0;", "fnvnx_wine_fixme(NX_CF_D3DPERF_GetStatus); return 1;"),
             ("QueryRepeatFrame result", "d3d9_exports.cpp", "NX_CF_D3DPERF_QueryRepeatFrame); return FALSE;", "NX_CF_D3DPERF_QueryRepeatFrame); return TRUE;"),
-            ("SetMarker two lines", "d3d9_exports.cpp", "{ fnvnx_wine_fixme(NX_CF_D3DPERF_SetMarker); }", "{ fnvnx_wine_fixme(NX_CF_D3DPERF_SetMarker); fnvnx_wine_fixme(NX_CF_D3DPERF_SetMarker); }"),
-            ("SetOptions wrong id", "d3d9_exports.cpp", "fnvnx_wine_fixme(NX_CF_D3DPERF_SetOptions)", "fnvnx_wine_fixme(NX_CF_D3DPERF_SetRegion)"),
-            ("SetRegion no fixme", "d3d9_exports.cpp", "{ fnvnx_wine_fixme(NX_CF_D3DPERF_SetRegion); }", "{ }"),
+            ("SetMarker two lines", "d3d9_exports.cpp", "{ NX_WINE_FIXME_VOID(NX_CF_D3DPERF_SetMarker); }", "{ NX_WINE_FIXME_VOID(NX_CF_D3DPERF_SetMarker); NX_WINE_FIXME_VOID(NX_CF_D3DPERF_SetMarker); }"),
+            ("SetOptions wrong id", "d3d9_exports.cpp", "NX_WINE_FIXME_VOID(NX_CF_D3DPERF_SetOptions)", "NX_WINE_FIXME_VOID(NX_CF_D3DPERF_SetRegion)"),
+            ("SetRegion no fixme", "d3d9_exports.cpp", "{ NX_WINE_FIXME_VOID(NX_CF_D3DPERF_SetRegion); }", "{ }"),
             ("SetDialogBoxMode result", "dev_misc.cpp", "fnvnx_wine_fixme(NX_CF_SetDialogBoxMode); return D3D_OK;", "fnvnx_wine_fixme(NX_CF_SetDialogBoxMode); return D3DERR_INVALIDCALL;"),
             ("SetDialogBoxMode conditional line", "dev_misc.cpp", "C::SetDialogBoxMode(BOOL) { fnvnx_wine_fixme(NX_CF_SetDialogBoxMode); return D3D_OK; }", "C::SetDialogBoxMode(BOOL b) { if (!b) fnvnx_wine_fixme(NX_CF_SetDialogBoxMode); return D3D_OK; }"),
             ("ComposeRects old result", "m1_misc.cpp", "fnvnx_wine_fixme(NX_CF_ComposeRects); return E_NOTIMPL;", "fnvnx_wine_fixme(NX_CF_ComposeRects); return D3DERR_INVALIDCALL;"),
             ("ComposeRects no fixme", "m1_misc.cpp", "{ fnvnx_wine_fixme(NX_CF_ComposeRects); return E_NOTIMPL; }", "{ return E_NOTIMPL; }"),
             ("id value in header", H, "NX_CF_ComposeRects = 47", "NX_CF_ComposeRects = 46"),
-            ("Release result", "x1_validator.cpp", "NxShaderValidator9::Release() { return 1; }", "NxShaderValidator9::Release() { return 0; }"),
+            ("Release result", "x1_validator.cpp", "fnvnx_wine_fixme(NX_WINE_FIXME_ShaderValidator_Release); return 1;", "fnvnx_wine_fixme(NX_WINE_FIXME_ShaderValidator_Release); return 0;"),
+            ("DrawRectPatch result", "copy_misc.cpp", "fnvnx_wine_fixme(NX_CF_DrawRectPatch); return D3D_OK;", "fnvnx_wine_fixme(NX_CF_DrawRectPatch); return D3DERR_INVALIDCALL;"),
+            ("DeletePatch no fixme", "copy_misc.cpp", "fnvnx_wine_fixme(NX_CF_DeletePatch); return D3DERR_INVALIDCALL;", "return D3DERR_INVALIDCALL;"),
+            ("RegisterSoftwareDevice no fixme", "d3d9_adapter.cpp", "{ fnvnx_wine_fixme(NX_CF_RegisterSoftwareDevice); return D3D_OK; }", "{ return D3D_OK; }"),
             ("EndEvent level", "d3d9_exports.cpp", "fetch_sub(1, std::memory_order_relaxed) - 1", "fetch_sub(1, std::memory_order_relaxed)")]
     if "--no-mutations" not in sys.argv:
         def one(i):

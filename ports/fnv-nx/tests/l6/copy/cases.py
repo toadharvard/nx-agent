@@ -204,7 +204,7 @@ def write(d, native=None):
                     for nr, hr_ in ((0, 0), (1, 1), (2, 1), (1, 0), (0, 1)):
                         w("CL %d %d %d %d %d %x" % (rt.id, -1 if ds is None else ds.id, flags, nr, hr_, clear(flags, nr, bool(hr_), ds, rt)))
         # ValidateDevice moved to render/d3d9/dev/m1_validate.cpp (tests/l6/m1 part a)
-        for k in range(3): w("PT %d %x" % (k, INV))
+        for k in range(3): w("PT %d %x" % (k, 0 if k < 2 else INV))   # Wine 9.0 d3d9 device.c: DrawRectPatch / DrawTriPatch return D3D_OK, DeletePatch D3DERR_INVALIDCALL (all three log a FIXME)
         # CreateOffscreenPlainSurfaceEx domain
         for pool in (0, 1, 2, 3, 4):
             for usage in (0, 1, 2, 3, 0x200, 0x10):

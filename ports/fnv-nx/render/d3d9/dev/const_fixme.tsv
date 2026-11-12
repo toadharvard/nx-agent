@@ -1,6 +1,14 @@
 # id	contract_name	wine_ref	kind	value
 # Wine 9.0 constant-result bodies of the d3d9 layer; rows in L4 format (verify/wine_fixme.tsv). Evidence = the text of the named Wine function.
-# ids 41-47. DebugSetMute / shader_validator_AddRef / shader_validator_Release: Wine 9.0 logs no FIXME (nothing to do / TRACE only), so they have no id (contract_consts.tsv).
+# ids 41-47 and 48-54 (below).
+# ids 48-54 (R1 of l6-render-w6): the Wine 9.0 bodies that do nothing or return a fixed value, each read from the Wine source (wine-9.0 tag, fetched).
+48	IDirect3DDevice9::DrawRectPatch	wine-9.0:dlls/d3d9/device.c:d3d9_device_DrawRectPatch	u32	0
+49	IDirect3DDevice9::DrawTriPatch	wine-9.0:dlls/d3d9/device.c:d3d9_device_DrawTriPatch	u32	0
+50	IDirect3DDevice9::DeletePatch	wine-9.0:dlls/d3d9/device.c:d3d9_device_DeletePatch	u32	0x8876086C
+51	IDirect3D9::RegisterSoftwareDevice	wine-9.0:dlls/wined3d/directx.c:wined3d_register_software_device	u32	0
+52	DebugSetMute	wine-9.0:dlls/d3d9/d3d9_main.c:DebugSetMute	void	
+53	IDirect3DShaderValidator9::AddRef	wine-9.0:dlls/d3d9/d3d9_main.c:shader_validator_AddRef	u32	2
+54	IDirect3DShaderValidator9::Release	wine-9.0:dlls/d3d9/d3d9_main.c:shader_validator_Release	u32	1
 41	D3DPERF_GetStatus	wine-9.0:dlls/d3d9/d3d9_main.c:D3DPERF_GetStatus	u32	0
 42	D3DPERF_QueryRepeatFrame	wine-9.0:dlls/d3d9/d3d9_main.c:D3DPERF_QueryRepeatFrame	u32	0
 43	D3DPERF_SetMarker	wine-9.0:dlls/d3d9/d3d9_main.c:D3DPERF_SetMarker	void	
