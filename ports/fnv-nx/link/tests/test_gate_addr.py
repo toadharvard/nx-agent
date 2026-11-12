@@ -15,16 +15,16 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..'))
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'contract'))
 import a64obj
 import addrsec
 import gate_addr
+import mutate
+import realobj
 
 TOOL = os.path.join(HERE, '..', '..', 'toolchain', 'addr', 'fnvnx_addr.cc')
-CXX = 'aarch64-linux-gnu-g++-13'
-FLAGS = ['-mabi=ilp32', '-std=gnu++17', '-O2', '-fwrapv', '-fno-strict-aliasing', '-march=armv8-a+crc+crypto', '-mtune=cortex-a57',
-         '-fno-stack-protector', '-fno-stack-clash-protection', '-mno-outline-atomics', '-fno-exceptions', '-fno-rtti']
 fails = []
 tmp = tempfile.mkdtemp(prefix='gate-addr-')
 
@@ -34,42 +34,33 @@ def check(what, got, want):
         fails.append('%s: got %r, want %r' % (what, got, want))
 
 
-def run(argv, **kw):
-    return subprocess.run(argv, capture_output=True, text=True, **kw)
+
+def fixture(name):
+    src = open(os.path.join(realobj.FIXDIR, name + '.cc')).read()
+    res = realobj.build({name: src})
+    if res['status'] != 'green':
+        print('FAIL real-object build %s: %s' % (name, res.get('failure')))
+        sys.exit(1)
+    return open(res['objects'][0]['object'], 'rb').read()
 
 
-def build_plugin():
-    out = run([CXX, '-print-file-name=plugin'])
-    pdir = out.stdout.strip()
-    so = os.path.join(tmp, 'fnvnx_addr.so')
-    host = 'x86_64-linux-gnu-g++-13'
-    crt = [run([host, '-print-file-name=' + n]).stdout.strip() for n in ('crti.o', 'crtbeginS.o')]
-    end = [run([host, '-print-file-name=' + n]).stdout.strip() for n in ('crtendS.o', 'crtn.o')]
-    r = run([host, '-shared', '-nostdlib', '-fPIC', '-fno-rtti', '-fno-exceptions', '-O2', '-I' + pdir + '/include', '-o', so] + crt + [TOOL] + end)
-    if r.returncode:
-        fails.append('plugin build: ' + r.stderr[-800:])
-        return None
-    return so
+def put(name, data):
+    p = os.path.join(tmp, name + '.o')
+    open(p, 'wb').write(data)
+    return p
 
 
-def compile_cxx(src, name, plugin):
-    p = os.path.join(tmp, name + '.cpp')
-    o = os.path.join(tmp, name + '.o')
-    open(p, 'w').write(src)
-    r = run([CXX] + FLAGS + (['-fplugin=' + plugin] if plugin else []) + ['-c', p, '-o', o])
-    if r.returncode:
-        fails.append('compile %s: %s' % (name, r.stderr[-800:]))
-    return o
-
-
-def asm(name, text):
-    s = os.path.join(tmp, name + '.s')
-    o = os.path.join(tmp, name + '.o')
-    open(s, 'w').write(text)
-    r = run(['aarch64-linux-gnu-as', '-mabi=ilp32', s, '-o', o])
-    if r.returncode:
-        fails.append('assemble %s: %s' % (name, r.stderr[-400:]))
-    return o
+def asm_obj(name, funcs, section):
+    """the real object of fixtures/addr_fn.cc (functions fa, fb) with its `.fnvnx.addr` section replaced by SECTION (None: section renamed away);
+    FUNCS = [] -> the real object with no function (fixtures/addr_nofn.cc)"""
+    data = BASE_FN if funcs else BASE_NOFN
+    if not funcs:
+        return put(name, data)   # the plugin writes an empty section for an object without a function
+    if section is None:
+        data = mutate.rename_section(data, '.fnvnx.addr', '.fnvnx.adds')
+    else:
+        data = mutate.replace_section(data, '.fnvnx.addr', section.replace('\\t', '\t').replace('\\n', '\n').encode())
+    return put(name, data)
 
 
 def layout_file(name, doc, raw=None):
@@ -99,28 +90,12 @@ def gate(*objs, layout=LAY):
     return r, json.load(open(os.path.join(d, 'addr.json')))
 
 
-def asm_obj(name, funcs, section):
-    t = '\t.text\n' + ''.join('\t.global %s\n\t.type %s,%%function\n%s:\n\tret\n\t.size %s,.-%s\n' % (f, f, f, f, f) for f in funcs)
-    if section is not None:
-        t += '\t.section .fnvnx.addr,"",%progbits\n\t.ascii "' + section + '"\n'
-    return asm(name, t)
-
-
-SRC = '''
-extern "C" void sink(void*);
-int r1(unsigned x) { return *(int*)(x + 0x40u); }
-int r3(int* p, int i) { return p[i]; }
-int r6(char* b, unsigned o) { return *(int*)(b + o); }
-int r9() { return *(int*)0x1234; }
-struct A { virtual void f(); int a; }; struct B { virtual void g(); int b; };
-struct C : A, B { void g() override; int c; };
-void C::g() { sink(this); }
-struct E { E(); ~E(); int x; }; E::E() { x = 1; } E::~E() { sink(this); }
-'''
-plug = build_plugin()
-if plug:
-    good = compile_cxx(SRC, 'good', plug)
-    plain = compile_cxx(SRC, 'plain', None)
+GOOD = fixture('addr_main')
+BASE_FN = fixture('addr_fn')
+BASE_NOFN = fixture('addr_nofn')
+good = put('good', GOOD)
+plain = put('plain', mutate.rename_section(GOOD, '.fnvnx.addr', '.fnvnx.adds'))
+if True:
     rows = addrsec.read(good)
     check('section present', rows is not None, True)
     byname = {s: (a, b) for s, a, b in rows or []}
@@ -133,7 +108,7 @@ if plug:
     check('record for every function symbol', sorted(set(names) - set(byname)), [])
     check('thunk or alias record', any(n.startswith('_ZThn') for n in names) and byname.get(
         [n for n in names if n.startswith('_ZThn')][0]), (0, 0))
-    code = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', good]).stdout
+    code = subprocess.run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', good], capture_output=True, text=True).stdout
     r1 = code.split('<_Z2r1j>:')[1].split('\n\n')[0]
     check('r1 adds in 32 bits, no displacement addressing', ('add\tw' in r1) and ('#0x40]' not in r1), True)
     r, j = gate(good)
@@ -146,7 +121,7 @@ if plug:
 o = asm_obj('norec', ['fa', 'fb'], 'fa\\t0\\t0\\n')
 r, j = gate(o)
 check('function without a record', (r.returncode, j['uncertified']), (2, [o + ':fb']))
-o = asm_obj('two', ['fa'], 'fa\\t0\\t0\\nfa\\t0\\t0\\n')
+o = asm_obj('two', ['fa'], 'fa\\t0\\t0\\nfa\\t0\\t0\\nfb\\t0\\t0\\n')
 r, j = gate(o)
 check('two records', (r.returncode, j['uncertified']), (2, [o + ':fa']))
 o = asm_obj('skew', ['fa', 'fb'], 'fa\\t2\\t1\\nfb\\t1\\t1\\n')
@@ -161,7 +136,7 @@ r, j = gate(o)
 check('record of a non-function is ignored; green', (r.returncode, j['status'], j['universe']), (0, 'green', 4))
 o = asm_obj('empty', [], '')
 r, j = gate(o)
-check('no functions, empty section: green', (r.returncode, j['status']), (0, 'green'))
+check('no functions (the plugin writes no section): green', (r.returncode, j['status']), (0, 'green'))
 junk = os.path.join(tmp, 'junk.o')
 open(junk, 'wb').write(b'not an object')
 r, j = gate(junk)
@@ -242,19 +217,13 @@ except ValueError:
     pass
 
 # plugin: displacements of 2^16 or more and run-time field-array sums are routed (32-bit add, no 64-bit sum)
-if plug:
-    dsrc = '''
-struct S { int pad[40000]; int f[8]; };
-int big(S* s) { return s->pad[39000]; }
-int fld(S* s, unsigned i) { return s->f[i]; }
-int small(int* p) { return p[100]; }
-'''
-    d = compile_cxx(dsrc, 'disp', plug)
+if True:
+    d = put('disp', fixture('addr_disp'))
     rr = {s: (a, b) for s, a, b in addrsec.read(d) or []}
     check('big displacement routed', rr.get('_Z3bigP1S', (0, 1))[0] >= 1 and rr['_Z3bigP1S'][0] == rr['_Z3bigP1S'][1], True)
     check('field-array index routed', rr.get('_Z3fldP1Sj', (0, 1))[0] >= 1 and rr['_Z3fldP1Sj'][0] == rr['_Z3fldP1Sj'][1], True)
     check('small displacement not routed', rr.get('_Z5smallPi'), (0, 0))
-    dis = run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', d]).stdout
+    dis = subprocess.run(['aarch64-linux-gnu-objdump', '-d', '--no-show-raw-insn', d], capture_output=True, text=True).stdout
     for fn in ('_Z3bigP1S', '_Z3fldP1Sj'):
         body = dis.split('<%s>:' % fn)[1].split('\n\n')[0]
         check('%s: no 64-bit add or uxtw' % fn, ('add\tx' in body) or ('uxtw' in body), False)

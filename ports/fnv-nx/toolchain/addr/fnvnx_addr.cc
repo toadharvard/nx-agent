@@ -370,7 +370,7 @@ void finish_unit(void *, void *)
     const char *name = IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(n->decl));
     if (!records.count(name)) records[name] = std::make_pair(0u, 0u);
   }
-  if (records.empty()) return;
+  /* always written, empty for a unit without a function: the section is the evidence that the pass ran */
   fprintf(asm_out_file, "\t.pushsection\t.fnvnx.addr,\"\",%%progbits\n");
   for (auto &r : records) fprintf(asm_out_file, "\t.ascii\t\"%s\\t%u\\t%u\\n\"\n", r.first.c_str(), r.second.first, r.second.second);
   fprintf(asm_out_file, "\t.popsection\n");
