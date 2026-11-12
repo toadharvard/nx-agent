@@ -28,6 +28,7 @@ PACK_C_FLAGS = ['-mabi=ilp32', '-Werror=attributes']
 ROOT = 'ports/fnv-nx/lift/pack'
 EH_KEYS = ((0x000fffd0, 'fnvl_msvcrt_eh_nested_catch'), (0x000fffe0, 'fnvl_msvcrt_eh_nested_collide'))    # rt/msvcrt.h FNVL_EH_KEY_*: the two handlers the msvcrt EH runtime registers on fs:[0]
 G = {}
+import lifted      # the one definition of the lifted set (the lift step and the census read it from here)
 
 
 def bucket(a): return (a >> 4) & (NBUCKET - 1)
@@ -38,17 +39,12 @@ def unit_names(): return ['u/%03x.cpp' % i for i in range(NBUCKET)] + ['disp.S',
 
 def lift_one(a):
     """-> (text, (form counter, form rows, shape counter)) or (None, reason)"""
-    import fnvlift as L
     from proof import shape
     import formcert
-    G['cap'].clear()
-    try:
-        t, m = L.lift_entry(G['img'], a)
-    except L.Unsupported as e:
-        return None, str(e)
+    t, ins = lifted.lift_with_instructions(a)
+    if t is None: return None, ins
     t = re.sub(r'extern "C" void (L_%08x\(void\)\n\{)' % a, r'extern "C" __attribute__((section(".text.fnvl"))) void \1', t, count=1)
     assert '.text.fnvl' in t
-    ins = G['cap'][-1][0]
     return t, (formcert.census(ins), [(formcert.form_key(i), bytes(i.bytes), x) for x, i in ins.items()],
                collections.Counter((shape.shape_key(i), shape.family(i)) for i in ins.values()))
 
@@ -95,13 +91,9 @@ def read_texts(path):
 
 def init(exe, ent, emit):
     """the state of a lifting process (the parent and every pool worker), built from the arguments: the result does not depend on the start method"""
-    import fnvlift as L, fnvlift.core as core
-    core.set_emit(emit)
-    G.update(ent=ent, img=L.Image(exe), cap=[])
-    if 'orig_explore' not in G:         # once per process: the capture wrapper around core.explore
-        G['orig_explore'] = orig = core.explore
-        def cap(*x, **k): r = orig(*x, **k); G['cap'].append(r); return r
-        core.explore = cap
+    import fnvlift as L
+    G.update(ent=ent)
+    lifted.begin(L.Image(exe), emit)
 
 
 def shard(a):
