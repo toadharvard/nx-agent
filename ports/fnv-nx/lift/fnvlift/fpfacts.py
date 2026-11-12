@@ -1,5 +1,5 @@
 """Certified invariants of the floating-point control state (tools/fpstate.py, task C4a). A lifter body that has no effect BECAUSE of an invariant asks this module; the answer is read from the
-fact file of the module being lifted, never assumed.
+fact file of the module being lifted, never assumed (ASM-204).
 
     <facts>/fpstate/invariants.tsv     lines `ASM-204 <holds|unproven> <per-module detail>` (written by `fpstate.py combine`: the PROGRAM invariant = AND over all modules)
     <facts> = $FNVNX_FPSTATE_DIR, else $FNVNX_FACTS/fpstate, else /home/user/l3facts/fpstate
@@ -51,7 +51,7 @@ def status(name):
 
 def require(name, what):
     """the body of `what` has no effect under invariant `name`: returns the invariant id when it holds, the id of the owner's recorded assumption when
-    the invariant is unproven but assumed (OWNER_ASSUMED), raises Unsupported otherwise"""
+    the invariant is unproven but assumed (OWNER_ASSUMED, ASM-204), raises Unsupported otherwise"""
     ok, detail = status(name)
     if not ok and name in OWNER_ASSUMED:
         return OWNER_ASSUMED[name]

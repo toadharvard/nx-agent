@@ -209,7 +209,7 @@ def set_emit(mode):
     EMIT = mode
 
 
-TAB_BIAS = 16     # assumption: the lowest index of a table is below 16 (the table starts at most 16 dwords above the displacement)
+TAB_BIAS = 16     # assumption ASM-221: the lowest index of a table is below 16 (the table starts at most 16 dwords above the displacement)
 
 
 def tab_tails(img, insns, lo, hi):
