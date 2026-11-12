@@ -31,8 +31,9 @@ def gate(repo, cache):
 def main():
     pin = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))
     ext = pin["external"]
+    rt, pin, _, _ = tg.valid_runtime(ext, pin, tg.good_manifest(pin))   # a runtime pack with a valid manifest (the mirror's 00e3d42a has none)
     cache = os.path.join(BASE, "gate-cache")
-    rec = tg.guest_rec(ext)
+    rec = tg.guest_rec(ext, rt)
     # --- no native guest root: universe 0, green (host root, lifted root)
     host = tg.guest_repo("a1", REC, pin, target="host")
     rc, r, o = gate(host, cache)

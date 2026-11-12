@@ -82,8 +82,7 @@ def main():
     gi["include"] = gi["include"] + ["/usr/aarch64-linux-gnu/include"]
     check("guest root with a glibc include dir is red", any("neither inside a declared external" in x for x in errs(g, gi)), errs(g, gi))
     # --- the manifest of the runtime against the guest compiler's own (pure rule)
-    good = {"format": "fnvnx-runtime-manifest/1", "compiler_version": "13.3.0", "msvcmodel_patch_sha256": pin_real["runtime_manifest"]["msvcmodel_patch_sha256"],
-            "flags": list(recipe.SEMANTICS_FLAGS), "sizeof": {"wchar_t": 2, "size_t": 4, "long": 4}}
+    good = good_manifest(pin_real)
     check("manifest equal to the guest compiler's: no error", recipe.runtime_errors(json.dumps(good), pin_real) == [])
     for name, mut_ in (("compiler 15.2.0", {"compiler_version": "15.2.0"}), ("4-byte wchar_t", {"sizeof": {"wchar_t": 4, "size_t": 4, "long": 4}}),
                        ("another patch", {"msvcmodel_patch_sha256": "0" * 64}), ("no -fshort-wchar", {"flags": [f for f in recipe.SEMANTICS_FLAGS if f != "-fshort-wchar"]})):
@@ -110,21 +109,7 @@ def main():
     check("the pinned runtime is judged by its manifest: green only if it states the guest compiler's version, patch, flags and data model",
           (rr["status"] == "green") == (f.get("stage") != "runtime_manifest") and (rr["status"] == "green" or f.get("stage") == "runtime_manifest"), f)
     print("INFO pinned runtime %s: %s %s" % (rt["commit"][:8], rr["status"], "; ".join(f.get("stderr", []))[:300]))
-    # a runtime pack with a valid manifest (the test's own, in a local artifacts repository next to the real compiler commit)
-    art = os.path.join(BASE, "artifacts.git")
-    work = os.path.join(BASE, "rtpack")
-    subprocess.run(["git", "init", "-q", "--bare", art], check=True)
-    subprocess.run(["git", "-C", art, "fetch", "-q", "--depth", "1", os.environ.get("ARTIFACTS_URL", recipe.ARTIFACTS_URL), ext["commit"]], check=True)
-    w(work, "MANIFEST.json", json.dumps(good))
-    w(work, "include/sys/_types.h", "typedef unsigned int fnvnx_t;\n")
-    w(work, "include/sys/socket.h", "#include <sys/_types.h>\ninline fnvnx_t sock() { return 1; }\n")
-    git(work, "init", "-q")
-    git(work, "add", "-A")
-    git(work, "commit", "-q", "-m", "rt")
-    git(work, "push", "-q", art, "HEAD:refs/heads/rt")
-    rt2 = dict(rt, name="rtpack", ref="rt", commit=git(work, "rev-parse", "HEAD").strip(), tree_sha256=cas.ingest(work_checkout(work), os.path.join(BASE, "ingest-store2")), at="/ext/rt")
-    pin2 = dict(pin_real, runtime=rt2)
-    os.environ["ARTIFACTS_URL"] = art
+    rt2, pin2, work, art = valid_runtime(ext, pin_real, good)
     rec = guest_rec(ext, rt2)
     src = SRC + "void sz(decltype(sizeof 0) n) { (void)n; }\n#include <sys/socket.h>\nfnvnx_t use() { return sock(); }\n"
     gr = guest_repo("gb", rec, pin2, files={ROOT + "/a.cc": src})
@@ -161,6 +146,33 @@ def main():
     t = os.path.join(os.path.dirname(VERIFY), "toolchain", "msvcmodel", "test_msvcmodel.py")
     p = subprocess.run([sys.executable, "-I", t], env=dict(os.environ, CXX=os.path.join(prefix, "bin/aarch64-linux-gnu-g++")), capture_output=True, text=True)
     check("test_msvcmodel.py on the external", p.returncode == 0 and "skip" not in p.stdout, p.stdout + p.stderr)
+
+
+def good_manifest(pin_real):
+    """the manifest a runtime pack must carry: the guest compiler's own version, patch, semantics flags and data model"""
+    return {"format": "fnvnx-runtime-manifest/1", "compiler_version": "13.3.0", "msvcmodel_patch_sha256": pin_real["runtime_manifest"]["msvcmodel_patch_sha256"],
+            "flags": list(recipe.SEMANTICS_FLAGS), "sizeof": {"wchar_t": 2, "size_t": 4, "long": 4}}
+
+
+def valid_runtime(ext, pin_real, good):
+    """A runtime pack with a valid manifest GOOD in a local artifacts repository (next to the real compiler commit); sets ARTIFACTS_URL to it.
+    -> (rt2 external entry, pin2, work dir, artifacts repo)"""
+    rt = pin_real["runtime"]
+    art = os.path.join(BASE, "artifacts.git")
+    work = os.path.join(BASE, "rtpack")
+    subprocess.run(["git", "init", "-q", "--bare", art], check=True)
+    subprocess.run(["git", "-C", art, "fetch", "-q", "--depth", "1", os.environ.get("ARTIFACTS_URL", recipe.ARTIFACTS_URL), ext["commit"]], check=True)
+    w(work, "MANIFEST.json", json.dumps(good))
+    w(work, "include/sys/_types.h", "typedef unsigned int fnvnx_t;\n")
+    w(work, "include/sys/socket.h", "#include <sys/_types.h>\ninline fnvnx_t sock() { return 1; }\n")
+    git(work, "init", "-q")
+    git(work, "add", "-A")
+    git(work, "commit", "-q", "-m", "rt")
+    git(work, "push", "-q", art, "HEAD:refs/heads/rt")
+    rt2 = dict(rt, name="rtpack", ref="rt", commit=git(work, "rev-parse", "HEAD").strip(), tree_sha256=cas.ingest(work_checkout(work), os.path.join(BASE, "ingest-store2")), at="/ext/rt")
+    pin2 = dict(pin_real, runtime=rt2)
+    os.environ["ARTIFACTS_URL"] = art
+    return rt2, pin2, work, art
 
 
 def work_checkout(work):
