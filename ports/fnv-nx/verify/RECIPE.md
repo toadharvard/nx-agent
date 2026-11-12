@@ -170,6 +170,7 @@ compiled by a distribution driver (`compiler` `{cc, cxx}`) gets the flags that r
   are the first of every PP and CC command line, so they are in every key.
 - A root may not set an option of the derived set, of either sign, with any value, or of its family (`-fstack-protector-all` against
   `-fno-stack-protector`): the build is red at `specdefaults` naming the flag.
+- Target choices are the root's own: a root that states a flag of the family PIC/PIE (`-fPIC -fpic -fPIE -fpie`, either sign), `-mabi`, `-march/-mtune/-mcpu` or `-mcmodel` drops the derived flags of that family (a console NRO is position independent; the guest reference is not). Hardening (stack protector, stack clash, FORTIFY, cf-protection) is never a target choice and stays forced.
 - A tree without `guest_compiler.json` has no reference and nothing to remove. A root with an external compiler (a guest root) is not affected:
   its compiler has no distribution spec.
 
@@ -187,6 +188,12 @@ beside the code the gate protects so that the gate is known to bite.
   (objstub does; a gate that does not is red for its fixtures).
 - A fixture passes iff its gate reports exactly the declared `finding` on that unit and no other finding there, and no finding on any other item. A fixture
   that comes out green, or red with another or an additional finding, makes the gate `fixtures` (so the verdict) red. Universe: the fixtures of all roots.
+
+Whole-root fixtures: a root that is expected to be red as a whole (for example a lifted root whose pack external lacks `shapes.tsv`, expecting
+`forms-missing-shapes`) is an admit entry of class `fixture`: `{"path", "class": "fixture", "recipe", "target", "expect": [{"gate": G, "code": CODE}, ...]}`.
+It is in no gate's universe (`gate_build.product_roots` lists product roots only). The gate `fixtures` runs each expected gate on that root alone (env
+`GATE_ONLY_ROOT=<path>`, normal mode, private GATE_OUT) and requires the gate's findings (`"findings": [{id, code}]`, ids `<root>/...`) to be exactly the
+expected codes of that gate, none outside the root; a root that comes out green, or red with other codes, or under a gate that writes no findings, is red.
 
 ## Refusal set R (GNU ld option syntax, not a text guess)
 Options that let a link accept missing or substituted symbols: `--unresolved-symbols`, `--allow-shlib-undefined`, `--noinhibit-exec`,

@@ -21,7 +21,12 @@ import recipe  # noqa: E402
 
 
 def product_roots(repo="."):
-    return sorted(p for p, r in recipe.load_admit(repo).items() if r["class"] == "product")
+    """The admitted product roots. With env GATE_ONLY_ROOT (set by gate_fixtures.py for a whole-root fixture) exactly that root: the gate runs on it alone."""
+    only = os.environ.get("GATE_ONLY_ROOT")
+    adm = recipe.load_admit(repo)
+    if only:
+        return [only] if only in adm and adm[only]["class"] in ("fixture", "product") else []
+    return sorted(p for p, r in adm.items() if r["class"] == "product")
 
 
 NO_ROOT = "no product root (nothing to build yet)"
@@ -62,7 +67,7 @@ def fixture_view(res):
     fx = res.get("fixtures", [])
     return dict(res, objects=[{"unit": f["unit"], "object": f["object"], "sha256": f["sha256"], "os_layer": False} for f in fx],
                 units=[f["unit"] for f in fx], elf=None, constants=None, contract_names=None, defined=[], undefined=[],
-                pp_keys={f["unit"]: f["pp_key"] for f in fx if f.get("pp_key")}, fixtures=[])
+                pp_keys={f["unit"]: f["pp_key"] for f in fx if f.get("pp_key")}, du_keys={f["unit"]: f["du_key"] for f in fx if f.get("du_key")}, fixtures=[])
 
 
 def ids(root, res, rec):

@@ -68,6 +68,40 @@ def main():
                            ("expect other than red", {"fx.c": dict(FX, expect="green")}, "needs exactly"), ("a generated output", {"gen/gen.h": FX}, "not a tracked source file")):
         errs = recipe.check(dict(rec, fixtures=fx), TR.ROOT, recipe.tracked(r), recipe.load_admit(r), None, r)
         check("fixture refused: " + what, any(want in e for e in errs), errs)
+    # --- whole-root fixtures: admit class `fixture` {recipe, target, expect: [{gate, code}]}; each expected gate runs on that root alone
+    import gate_admit
+    import gate_build
+    F2 = TR.T + "fx2"
+
+    def rootfx(name, src, expect):
+        rec = json.dumps(TR.mut(link=None, os_layer=[], constants=None, generated=[], include=[], fixtures={}))
+        ent = {"path": F2, "class": "fixture", "target": "host", "gates": [], "recipe": F2 + "/build.json", "expect": expect}
+        return TR.make_repo(name, rec=TR.mut(link=None), files={"toy/fx.c": VAC, "fx2/a.c": src, "fx2/build.json": rec, "verify/gates.json": GATES}, roots=[ent])
+    rv = rootfx("fr-ok", VAC, [{"gate": "objstub", "code": "V"}])
+    old = os.environ.pop("GATE_ONLY_ROOT", None)
+    cwd = os.getcwd()
+    os.chdir(rv)
+    try:
+        pr, os.environ["GATE_ONLY_ROOT"] = gate_build.product_roots("."), F2
+        one = gate_build.product_roots(".")
+    finally:
+        os.environ.pop("GATE_ONLY_ROOT", None)
+        os.chdir(cwd)
+    check("fixture root: not a product root, but the one root of a run with GATE_ONLY_ROOT", F2 not in pr and one == [F2], (pr, one))
+    rc, g, txt, st = run(rv, "r1")
+    check("whole-root fixture: objstub on that root alone reports exactly V: green, counted in the universe", rc == 0 and g["certified"] == g["universe"] and g["universe"] >= 1
+          and "%s (root)" % F2 not in g["uncertified"], (g, txt))
+    rc, g, txt, st = run(rootfx("fr-clean", CLEAN, [{"gate": "objstub", "code": "V"}]), "r2")
+    check("whole-root fixture that comes out green: red, naming the root", rc == 2 and "%s (root)" % F2 in g["uncertified"] and "green" in g["detail"], (g, txt))
+    rc, g, txt, st = run(rootfx("fr-code", VAC, [{"gate": "objstub", "code": "T2"}]), "r3")
+    check("whole-root fixture with another code than expected: red", rc == 2 and "got ['V']" in g["detail"], (g, txt))
+    bad, errs_ = gate_admit.judge([F2 + "/a.c"], {"format": "fnvnx-admit/1", "roots": [{"path": F2, "class": "fixture", "gates": [], "recipe": F2 + "/build.json"}]}, ["objstub"], lambda p: True)
+    check("admit: a fixture root without expect is refused", any("expect" in x for x in errs_), (bad, errs_))
+    bad, errs_ = gate_admit.judge([F2 + "/a.c"], {"format": "fnvnx-admit/1", "roots": [{"path": F2, "class": "fixture", "gates": [], "recipe": F2 + "/build.json",
+                                                                                          "expect": [{"gate": "nogate", "code": "V"}]}]}, ["objstub"], lambda p: True)
+    check("admit: a fixture root whose expect names an unknown gate is refused", any("nogate" in x for x in errs_), (bad, errs_))
+    if old:
+        os.environ["GATE_ONLY_ROOT"] = old
     print("%d failed, wall %.1f s" % (len(FAILED), time.time() - T0))
     return 1 if FAILED else 0
 

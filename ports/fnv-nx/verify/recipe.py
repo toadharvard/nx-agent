@@ -595,6 +595,7 @@ class Job:
         self.roots, self.files = load_admit(repo), tracked(repo)
         self.rec = load_recipe(repo, self.roots, root)
         self.keys, self.run, self.hit, self.ext, self.ppkeys, self.built = set(), 0, 0, {}, {}, []
+        self.dukeys = {}
         self.spec = {}
         os.makedirs(os.path.join(store, "rt"), exist_ok=True)
 
@@ -658,12 +659,14 @@ class Job:
             except specdefaults.SpecError as e:
                 raise BuildRed({"stage": "specdefaults", "exit": None, "stderr": [str(e)[-300:]]})
         derived = self.cached_rt("specdefaults-" + tag, make)[1]
-        fl = self.rec["flags"]
-        bad = ["flags.%s: %s sets an option the distribution compiler's spec default fixes (derived: %s)" % (k, t, " ".join(derived[k]))
-               for k in ("c", "cxx", "asm") for t in specdefaults.overlap(fl.get(k, []), derived["c" if k == "asm" else k])]
+        fl, out, bad = self.rec["flags"], {}, []
+        for k in ("c", "cxx", "asm"):
+            kept, ov = specdefaults.for_root(fl.get(k, []), derived["c" if k == "asm" else k])
+            out[k] = kept
+            bad += ["flags.%s: %s sets an option the distribution compiler's spec default fixes (derived: %s)" % (k, t, " ".join(kept)) for t in ov]
         if bad:
             raise BuildRed({"stage": "specdefaults", "exit": None, "stderr": bad})
-        return {"c": derived["c"], "cxx": derived["cxx"], "asm": derived["c"]}
+        return out
 
     def hostpath(self, p):
         for e in self.ext.values():
@@ -932,6 +935,8 @@ class Job:
                 res[u] = e["object"]
                 if e.get("pp_key"):
                     self.ppkeys[u] = e["pp_key"]
+                if e.get("du_key"):
+                    self.dukeys[u] = e["du_key"]
         if failed:   # in unit order (UNITS is sorted), so the first failure and the list are deterministic
             fl = [{"unit": u, "stage": failed[u]["stage"], "exit": failed[u]["exit"], "stderr": list(failed[u]["stderr"])[-20:]} for u in units if u in failed]
             raise BuildRed(dict(fl[0], failed_units=fl, done=sorted(res)))
@@ -1087,7 +1092,7 @@ def build(repo, root, store, out, jobs=4, ext=None, stack=()):
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             ent = cas.manifest(allo[u], store)["entries"]["unit.o"]
             shutil.copyfile(cas._obj(store, ent), dest)
-            res["fixtures"].append(dict(j.rec["fixtures"][u], unit=u, object=os.path.abspath(dest), sha256=ent["h"], pp_key=j.ppkeys.pop(u, None)))
+            res["fixtures"].append(dict(j.rec["fixtures"][u], unit=u, object=os.path.abspath(dest), sha256=ent["h"], pp_key=j.ppkeys.pop(u, None), du_key=j.dukeys.pop(u, None)))
         if j.rec.get("link"):
             name = j.rec["link"]["output"]
             ent = cas.manifest((j.link_host if j.roots[root]["class"] == "tool" else j.link)(ws, objs), store)["entries"][name]
@@ -1105,7 +1110,7 @@ def build(repo, root, store, out, jobs=4, ext=None, stack=()):
         res.update(status="red", failed_units=[], failure={"stage": getattr(e, "stage", "store"), "exit": None, "stderr": [str(e)[-300:]]})
     finally:
         shutil.rmtree(ws, ignore_errors=True)
-    res.update(stage_keys=sorted(j.keys), stages={"run": j.run, "hit": j.hit}, units=units, pp_keys=dict(sorted(j.ppkeys.items())))
+    res.update(stage_keys=sorted(j.keys), stages={"run": j.run, "hit": j.hit}, units=units, pp_keys=dict(sorted(j.ppkeys.items())), du_keys=dict(sorted(j.dukeys.items())))
     with open(os.path.join(out, "objects.json"), "w") as f:
         json.dump(res, f, indent=1, sort_keys=True)
         f.write("\n")

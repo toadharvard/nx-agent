@@ -7,7 +7,7 @@ recompiled when nothing it reads changed.
     unitstage.py gcc-set --cxx /abs/g++       print the --exe/--tree arguments of `runtime.py tool` for that compiler
 RULE: what a preprocessor run reads is exactly (1) the CONTENT of the files it opens and (2) the EXISTENCE answers for the paths it
   probes (#include search, __has_include, __has_include_next). A stage is given both, exactly.
-  PP stage  `g++ FLAGS -E -dU -MD -MT x -MF /out/deps.d -o /out/unit.ii /src/UNIT`, inputs: the tool runtime (runtime.py tool) and VIEWS
+  PP stage  `g++ FLAGS -E -MD -MT x -MF /out/deps.d -o /out/unit.ii /src/UNIT`, inputs: the tool runtime (runtime.py tool) and VIEWS
             of the source root (/src) and the include roots (/inc/0..), see unitview.py: every name of the real tree, real content
             only for the files of a set C (the closure), every other file a placeholder `#error fnvnx: file outside the declared
             closure`. The key is f(name trees, content of C, compiler, flags).
@@ -58,7 +58,10 @@ ENV = {"TZ": "UTC", "LC_ALL": "C", "PYTHONHASHSEED": "0", "SOURCE_DATE_EPOCH": "
 # (PP stage, CC stage). .s has no preprocessing: its CC stage reads the unit alone (a `.include` there fails: use .S and #include).
 LANG = {".c": (["-x", "c"], ["-x", "c", "-fpreprocessed"]), ".S": (["-x", "assembler-with-cpp"], ["-x", "assembler"]),
         ".s": ([], ["-x", "assembler"])}
-PP_TAIL = ["-E", "-dU", "-MD", "-MT", "x", "-MF", "/out/deps.d", "-o", "/out/unit.ii"]
+PP_TAIL = ["-E", "-MD", "-MT", "x", "-MF", "/out/deps.d", "-o", "/out/unit.ii"]
+# The macro-use fact is a stage of its own (same inputs, `-dU`: GCC writes `#define NAME VALUE` for exactly the macros the unit expands or tests):
+# its output is never an input of CC, so an object does not depend on a fact-collection flag.
+DU_TAIL = ["-E", "-dU", "-o", "/out/unit.du"]
 
 
 def result_file(store, key, name):
@@ -206,6 +209,12 @@ class Build:
                                                           self.cache)) for at, t in self.roots]
         return run_stage(self.store, self.doc("pp", rel, ins, self.lang(rel)[0] + PP_TAIL, self.sp(rel)), self.cold)
 
+    def du(self, rel, files):
+        """The macro-use fact of the unit: a `-dU` run on the same minimal view as the last PP run -> (key, result)."""
+        ins = [(at, unitview.view(self.store, t, [p[len(at) + 1:] for p in files if p.startswith(at + "/")], self.cache)) for at, t in self.roots]
+        key, res, _, _ = run_stage(self.store, self.doc("pu", rel, ins, self.lang(rel)[0] + DU_TAIL, self.sp(rel)), self.cold)
+        return key, res
+
     def stderr(self, res):
         return open(cas._obj(self.store, cas.manifest(res["stderr"], self.store)), errors="replace").read()
 
@@ -257,6 +266,10 @@ class Build:
                 break
             expect, files = (d, h), d
         e["closure"], e["files"] = sorted(files), len(files)
+        e["du_key"], dres = self.du(rel, files)
+        if dres["rc"]:
+            e["status"], e["error"] = "pp-failed", "macro-fact stage: " + self.last(dres)
+            return e
         ii = cas.manifest(res["outputs"]["/out"], self.store)["entries"]["unit.ii"]
         e["ii_bytes"] = os.path.getsize(cas._obj(self.store, ii))
         tdata = cas.canon({"format": cas.FORMAT, "entries": {"unit.ii": dict(ii, x=0)}})

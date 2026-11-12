@@ -18,6 +18,9 @@ Classes:
   headers  a tree of header files that admitted roots list in their recipe `include` (RECIPE.md "Headers trees"): no recipe, no unit file
            (.c .cc .cpp .cxx .S .s), no link, no outputs. The gate "headers" is required: a header is certified only through admitted units whose
            preprocessor stage reads it (the stage's own deps), and a header no unit reads is not certified.
+  fixture  a whole root that is EXPECTED to be red (RECIPE.md "Fixtures"): {"path", "class": "fixture", "recipe", "target", "expect": [{"gate", "code"}]}. It is in
+           no gate's universe (gate_build.product_roots lists product roots only); the gate `fixtures` runs each expected gate on that root alone and
+           requires exactly the expected codes. No required gate: its files are covered by this entry.
   product  code that is compiled into the shipped binary: REQUIRED_PRODUCT gates, the static closure of the run-time
            failure classes of verify/VERDICT.md. A product root cannot be admitted before those gates exist in
            gates.json, so code enters the trunk only together with the gates that judge it.
@@ -33,7 +36,7 @@ import sys
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
 GATES = TREE + "/verify/gates.json"
-CLASSES = ("doc", "tool", "product", "headers")
+CLASSES = ("doc", "tool", "product", "headers", "fixture")
 UNIT_EXT = (".c", ".cc", ".cpp", ".cxx", ".S", ".s")   # recipe.is_unit: a headers tree holds none
 # A product root names a gate for every run-time failure class of VERDICT.md. Wired on the trunk: objstub .. oracle,
 # the contract and link gates. Owned by other leads: imports, forms, d3d9total, r7, namegate, argordergate, abi.
@@ -43,7 +46,7 @@ REQUIRED_PRODUCT = ("objstub", "linkstrict", "determinism", "fixtures", "oracle"
                     "abs", "disp", "reach", "reachlink", "gpa",
                     "imports", "forms", "d3d9total", "r7", "namegate", "argordergate", "abi",
                     "datamodel", "order", "fpexact", "eh", "exepin", "addr32", "machine", "hostapi")
-REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT, "headers": ("headers",)}
+REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT, "headers": ("headers",), "fixture": ()}
 
 
 def judge(files, admit, gate_names, exists):
@@ -60,10 +63,16 @@ def judge(files, admit, gate_names, exists):
             why.append("class %r is not one of %s" % (cls, ", ".join(CLASSES)))
         else:
             why += ["required gate %s not named" % g for g in REQUIRED[cls] if g not in gates]
-            if cls == "product" or (cls == "tool" and "recipe" in r):   # a tool root with a recipe (a host executable the build runs)
+            if cls == "product" or cls == "fixture" or (cls == "tool" and "recipe" in r):   # a tool root with a recipe (a host executable the build runs)
                 rec = r.get("recipe", "")
                 if not rec.startswith(path + "/") or not exists(rec):
                     why.append("recipe %r is not an existing file inside the root" % rec)
+        if cls == "fixture":
+            ex = r.get("expect")
+            if not (isinstance(ex, list) and ex and all(isinstance(x, dict) and set(x) == {"gate", "code"} and all(isinstance(v, str) and v for v in x.values()) for x in ex)):
+                why.append('a fixture root declares "expect": [{"gate": G, "code": CODE}, ...] (non-empty)')
+            else:
+                why += ["expect: gate %s is not in gates.json" % x["gate"] for x in ex if x["gate"] not in gate_names]
         if cls == "headers":
             if "recipe" in r or "target" in r:
                 why.append("a headers root has no recipe (no units, no link, no outputs)")

@@ -61,6 +61,15 @@ def main():
     check("overlap: -O2 and -Wall are free, the rest is refused", ov == ["-fno-stack-clash-protection", "-D_FORTIFY_SOURCE=2", "-fcf-protection=full"], ov)
     ov = S.overlap(["-fstack-protector-strong", "-fstack-protector"], ["-fno-stack-protector"])
     check("overlap: -fstack-protector-strong is the same family as -fno-stack-protector", ov == ["-fstack-protector-strong", "-fstack-protector"], ov)
+    d0 = ["-U_FORTIFY_SOURCE", "-fno-PIC", "-fno-PIE", "-fno-stack-clash-protection", "-fno-stack-protector"]
+    kept, ov = S.for_root(["-O2", "-fPIE"], d0)
+    check("for_root: a root that states -fPIE owns the pic family (its derived -fno-PIC/-fno-PIE drop), hardening stays forced",
+          kept == ["-U_FORTIFY_SOURCE", "-fno-stack-clash-protection", "-fno-stack-protector"] and ov == [], (kept, ov))
+    kept, ov = S.for_root(["-fPIE", "-fno-stack-protector", "-D_FORTIFY_SOURCE=2"], d0)
+    check("for_root: a target family does not free the hardening flags (still refused)", ov == ["-fno-stack-protector", "-D_FORTIFY_SOURCE=2"], (kept, ov))
+    check("family: either sign and -mabi=/-march= values are target choices; hardening is none",
+          S.family("-fno-PIE") == "pic" and S.family("-mabi=ilp32") == "abi" and S.family("-march=armv8-a") == "arch" and S.family("-mcmodel=small") == "cmodel"
+          and S.family("-fno-stack-protector") is None and S.family("-U_FORTIFY_SOURCE") is None)
     # --- the real rule on real compilers
     ref = os.path.join(TR.BASE, "ref")
     wrapper(ref, "cc", CC)
@@ -106,6 +115,10 @@ def main():
     resb = recipe.build(TR.make_repo("sd-bad", rec=bad, files=files), TR.ROOT, TR.BASE + "/st", TR.BASE + "/o2", ext=TR.BASE + "/ec")
     check("recipe: a root that sets a flag of the derived family is red at specdefaults, naming it",
           resb["status"] == "red" and resb["failure"]["stage"] == "specdefaults" and "-fstack-protector-strong" in " ".join(resb["failure"]["stderr"]), resb.get("failure"))
+    pie = TR.mut(link=None, os_layer=[], constants=None, generated=[], include=[], flags=dict(OK, c=OK["c"] + ["-fPIE"]))
+    resp = recipe.build(TR.make_repo("sd-pie", rec=pie, files=files), TR.ROOT, TR.BASE + "/st", TR.BASE + "/o4", ext=TR.BASE + "/ec")
+    check("recipe: a root that states -fPIE builds (the pic family is its own), and its unit keeps the position independence it asked for",
+          resp["status"] == "green", resp.get("failure"))
     nopin = TR.make_repo("sd-nopin", rec=rec, files=dict(files, **{"verify/guest_compiler.json": None}))
     resn = recipe.build(nopin, TR.ROOT, TR.BASE + "/st", TR.BASE + "/o3", ext=TR.BASE + "/ec")
     on = next((o["object"] for o in resn.get("objects", []) if o["unit"].endswith("a.c")), None)
