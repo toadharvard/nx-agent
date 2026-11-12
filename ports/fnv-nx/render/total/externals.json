@@ -63,10 +63,10 @@
    "name": "docs-d3d9",
    "repo": "fnv-nx-build",
    "ref": "tools/docs-d3d9",
-   "commit": "56908b51d5574192e55c268f90bb04a5e7da01c7",
-   "tree_sha256": "e19cab4c7e63bc4c7e98f6f6eab4464fd17c9e253c197e22e146138b3c667b79",
+   "commit": "efe9ae7f753e2bb0a24ed4850063811d3a2bbc31",
+   "tree_sha256": "135b42600e94a2a7880edcf21b7c4be1159d7b9806f967b24a636702eca20588",
    "at": "/docs-d3d9",
-   "upstream": "MicrosoftDocs/sdk-api @ 656e9656bfaef34dd29cd7ee9e1146aec17e924c (d3d9, d3d9caps, d3d9helper) and MicrosoftDocs/win32 @ bc82a65f74ef2c4f2f44a3d7db5f7cfebfdc3583 (desktop-src/direct3d9), 1987 pages, MANIFEST.tsv = URL, source commit, retrieval date 2026-11-12, sha256 per page. Not in either repository: the page of IDirect3DSwapChain9Ex::GetPresentStats",
+   "upstream": "MicrosoftDocs/sdk-api @ 656e9656bfaef34dd29cd7ee9e1146aec17e924c (d3d9, d3d9caps, d3d9helper) and MicrosoftDocs/win32 @ bc82a65f74ef2c4f2f44a3d7db5f7cfebfdc3583 (desktop-src/direct3d9), 1987 pages + nist/ (FIPS 180-4 SHA-256 examples PDF and CAVP vectors SHA256ShortMsg/LongMsg/Monte, 129 byte-oriented vectors re-checked against hashlib: 0 mismatches), MANIFEST.tsv = URL, source commit, retrieval date 2026-11-12, sha256 per page. Not in either repository: the page of IDirect3DSwapChain9Ex::GetPresentStats",
    "use": "citation source of the MS-class render tests, read-only, not a build input"
   },
   {
