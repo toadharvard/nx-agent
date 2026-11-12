@@ -431,8 +431,7 @@ static inline unsigned int _rotr(unsigned int v, int s) { s &= 31; return s ? (v
 #endif
 
 /* ---- C++ exception plumbing referenced by name in a few units (compiler-generated on MSVC) */
-typedef struct _ThrowInfo _ThrowInfo;
-void _CxxThrowException(void *, _ThrowInfo *);
+#include "fnvnx_crt.h"   /* _ThrowInfo, _CxxThrowException */
 
 /* ==== merged from platform/include/fnvnx_win32_ext.h (S4): imports the runtime implements */
 #ifndef WAIT_ABANDONED

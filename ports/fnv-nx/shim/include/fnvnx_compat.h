@@ -30,10 +30,20 @@
 
 /* Calling conventions: AArch64 has one. Argument-order mismatches that x86 hid (fastcall with a
  * dummy EDX parameter called as thiscall, ...) are fixed by generated bridges, not here. */
+#ifdef FNVNX_SDD
+/* CC1: the x86 calling convention of a declaration is a fact of the exe's contract (the MSVC name encodes it, a
+ * bridge to a lifted body needs it). It changes no AArch64 code, so it is kept as an attribute that the
+ * fnvnx_dispatch plugin registers, on the function type, where MSVC's keyword stood. */
+#define __cdecl __attribute__((fnvnx_cc("cdecl")))
+#define __stdcall __attribute__((fnvnx_cc("std")))
+#define __fastcall __attribute__((fnvnx_cc("fast")))
+#define __thiscall __attribute__((fnvnx_cc("this")))
+#else
 #define __cdecl
 #define __stdcall
 #define __fastcall
 #define __thiscall
+#endif
 #define __clrcall
 #define _cdecl
 #define _stdcall
@@ -76,6 +86,7 @@ extern "C" {
  * load and load -> store), _WriteBarrier dmb ishst (store -> store). Volatile accesses get acquire/release from the
  * fnvnx_order plugin (toolchain/order). FNVNX_COMPILER_BARRIERS=1 keeps the compiler-only barriers (A/B
  * measurement only: not a valid multicore build). */
+#ifndef FNVNX_MSVC_NAMES   /* the name pass (toolchain/vtnames: clang with the MSVC ABI) has these as builtins */
 #if defined(FNVNX_COMPILER_BARRIERS) && FNVNX_COMPILER_BARRIERS
 inline __attribute__((always_inline)) void _ReadWriteBarrier(void) { __asm__ __volatile__("" ::: "memory"); }
 inline __attribute__((always_inline)) void _ReadBarrier(void) { __asm__ __volatile__("" ::: "memory"); }
@@ -85,11 +96,15 @@ inline __attribute__((always_inline)) void _ReadWriteBarrier(void) { __asm__ __v
 inline __attribute__((always_inline)) void _ReadBarrier(void) { __asm__ __volatile__("dmb ishld" ::: "memory"); }
 inline __attribute__((always_inline)) void _WriteBarrier(void) { __asm__ __volatile__("dmb ishst" ::: "memory"); }
 #endif
+#endif
 /* winnt.h MemoryBarrier (x86: a locked or, a full barrier) and YieldProcessor (pause) */
 inline __attribute__((always_inline)) void MemoryBarrier(void) { __asm__ __volatile__("dmb ish" ::: "memory"); }
 inline __attribute__((always_inline)) void YieldProcessor(void) { __asm__ __volatile__("yield" ::: "memory"); }
+#ifndef FNVNX_MSVC_NAMES   /* the name pass (toolchain/vtnames: clang with the MSVC ABI) has these as builtins */
 inline __attribute__((always_inline)) void __debugbreak(void) { __builtin_trap(); }
+#endif
 /* <stdlib.h> rotates (intrinsics on MSVC; the decomp declares some itself, extern "C" unsigned int _rotl(...)) */
+#ifndef FNVNX_MSVC_NAMES   /* the name pass (toolchain/vtnames: clang with the MSVC ABI) has these as builtins */
 inline __attribute__((always_inline)) unsigned int _rotl(unsigned int v, int s)
 {
     s &= 31;
@@ -100,8 +115,11 @@ inline __attribute__((always_inline)) unsigned int _rotr(unsigned int v, int s)
     s &= 31;
     return s ? (v >> s) | (v << (32 - s)) : v;
 }
+#endif
 /* SEH has no exceptions on the target (below): the code of the exception being handled is never asked for */
+#ifndef FNVNX_MSVC_NAMES   /* the name pass (toolchain/vtnames: clang with the MSVC ABI) has these as builtins */
 inline __attribute__((always_inline)) unsigned long _exception_code(void) { return 0UL; }
+#endif
 #ifdef __cplusplus
 }
 #endif
@@ -160,7 +178,11 @@ template <> struct fnvnx_int_of_align<1> { typedef unsigned char type; };
 template <> struct fnvnx_int_of_align<2> { typedef unsigned short type; };
 template <> struct fnvnx_int_of_align<4> { typedef unsigned int type; };
 template <> struct fnvnx_int_of_align<8> { typedef unsigned long long type; };
+#ifndef FNVNX_MSVC_NAMES
 template <> struct fnvnx_int_of_align<16> { typedef unsigned __int128 type; };
+#else   /* no __int128 on the name pass's 32-bit target; same alignment */
+template <> struct fnvnx_int_of_align<16> { typedef unsigned int type __attribute__((aligned(16))); };
+#endif
 template <> struct fnvnx_int_of_align<32> { typedef unsigned int type __attribute__((aligned(32))); };
 template <> struct fnvnx_int_of_align<64> { typedef unsigned int type __attribute__((aligned(64))); };
 template <> struct fnvnx_int_of_align<128> { typedef unsigned int type __attribute__((aligned(128))); };
@@ -202,22 +224,12 @@ struct fnvnx_new_tag {};
 /* IDTOR1: a body-less destructor declaration for a class whose implicit destructor the recipe binds (GCC calls the
  * bound D1 by name instead of defining it inline); MSVC's implicit one already compiles to that call */
 #define FNVNX_IDTOR1(cls) public: ~cls();
-/* D22: a listed class's slot-0 placeholder virtual becomes its virtual destructor (GCC's D1/D0 where MSVC's ??_G
- * is, the link's minus-one rule); a derived class's re-declaration of that placeholder goes */
-#define FNVNX_D22(C, ...) virtual ~C();
-#define FNVNX_D22I(C, ...) virtual ~C() {}
 /* HKRO1: Havok hkReferencedObject's getClassType / calcContentStatistics (exe slots 1 / 2) */
 #define FNVNX_HKRO1 virtual const void* GetClassType() const; virtual void CalcContentStatistics(void*, const void*) const;
-#define FNVNX_D22_DROP(...)
-/* D26: a call of a converted slot-0 placeholder (MSVC: the deleting destructor ??_G(flags)) is a virtual destructor
- * call: flags bit 0 deletes (D0, slot 1), else the complete destructor (D1, slot 0) */
-template <class T> inline void fnvnx_d22_vdtor(T* p, unsigned int flags) { if (flags & 1) delete p; else p->~T(); }
-#define FNVNX_D22_CALL(p, m, ...) fnvnx_d22_vdtor((p), (__VA_ARGS__))
-/* DBUG1 (V1): a hand-indexed `vtbl[k]` of an exe slot k past the receiver class's D1/D0 pair (slot 0 for most classes, 4 for
- * the TESForm / Actor family) is native slot k + 1 (D26 minus-one); MSVC keeps k. Use it only past the pair. */
-#define FNVNX_VSLOT(k) ((k) + 1)
-/* RAWVT1 (D26): a raw exe slot index on `this`; native vtables are minus-one */
-#define FNVNX_D26_SLOT(k) ((k) + 1)
+/* A raw exe vftable slot index is the native index: the compiler gives a virtual destructor its one slot, as in the
+ * exe (SDD2, toolchain/sdd). The two names are kept for text that still spells an index through them. */
+#define FNVNX_VSLOT(k) (k)
+#define FNVNX_D26_SLOT(k) (k)
 /* EMPTY1: a declared-only empty-string object is the temporary T("") the exe builds */
 #define FNVNX_EMPTY1(T, name) T("")
 /* DTORB1: a destructor stand-in calls the address the recipe binds its ??1 to (the link's __fnv_<a>), the
@@ -266,8 +278,6 @@ template <class T> inline void fnvnx_d22_vdtor(T* p, unsigned int flags) { if (f
 /* Compiler-runtime helpers the decomp calls without declaring them in every unit (prepare.py DECL1 drops its own
  * unsigned-int prototypes of operator_delete_sized). */
 #ifdef __cplusplus
-struct _ThrowInfo;
-extern "C" void _CxxThrowException(void *, _ThrowInfo *);
 extern "C" void operator_delete_sized(void *, __SIZE_TYPE__);
 extern "C" void _operator_delete_sized(void *, __SIZE_TYPE__);
 #endif

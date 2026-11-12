@@ -8,11 +8,14 @@ A file is certified iff ALL hold:
   1. exactly one root contains it (a root is a directory prefix or one exact file path; roots do not nest);
   2. the root's class is one of CLASSES and the root names every gate REQUIRED for that class;
   3. every gate the root names is a gate of verify/gates.json of this same tree;
-  4. a product root names a "recipe": a file inside the root that the build gates read (how its code is compiled in the
+  4. a product root (and a tool root that names one) names a "recipe": a file inside the root that the build gates read (how its code is compiled in the
      declared environment); the file exists.
 Classes:
   doc      text for people: no gate required. Nothing in a doc root is compiled or run by a build.
   tool     stage and verification tools: "selftests" required (their tests pass in the declared environment).
+  headers  a tree of header files that admitted roots list in their recipe `include` (RECIPE.md "Headers trees"): no recipe, no unit file
+           (.c .cc .cpp .cxx .S .s), no link, no outputs. The gate "headers" is required: a header is certified only through admitted units whose
+           preprocessor stage reads it (the stage's own deps), and a header no unit reads is not certified.
   product  code that is compiled into the shipped binary: REQUIRED_PRODUCT gates, the static closure of the run-time
            failure classes of verify/VERDICT.md. A product root cannot be admitted before those gates exist in
            gates.json, so code enters the trunk only together with the gates that judge it.
@@ -28,16 +31,17 @@ import sys
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
 GATES = TREE + "/verify/gates.json"
-CLASSES = ("doc", "tool", "product")
+CLASSES = ("doc", "tool", "product", "headers")
+UNIT_EXT = (".c", ".cc", ".cpp", ".cxx", ".S", ".s")   # recipe.is_unit: a headers tree holds none
 # A product root names a gate for every run-time failure class of VERDICT.md. Wired on the trunk: objstub .. oracle,
 # the contract and link gates. Owned by other leads: imports, forms, d3d9total, r7, namegate, argordergate, abi.
 # Classes A-G of the owner's rule: datamodel, order, fpexact, eh, exepin, addr32, machine.
-REQUIRED_PRODUCT = ("objstub", "linkstrict", "determinism", "oracle",
+REQUIRED_PRODUCT = ("objstub", "linkstrict", "determinism", "fixtures", "oracle",
                     "n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcrel", "bodysel",
                     "abs", "disp", "reach", "reachlink", "gpa",
                     "imports", "forms", "d3d9total", "r7", "namegate", "argordergate", "abi",
                     "datamodel", "order", "fpexact", "eh", "exepin", "addr32", "machine", "hostapi")
-REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT}
+REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT, "headers": ("headers",)}
 
 
 def judge(files, admit, gate_names, exists):
@@ -54,10 +58,14 @@ def judge(files, admit, gate_names, exists):
             why.append("class %r is not one of %s" % (cls, ", ".join(CLASSES)))
         else:
             why += ["required gate %s not named" % g for g in REQUIRED[cls] if g not in gates]
-            if cls == "product":
+            if cls == "product" or (cls == "tool" and "recipe" in r):   # a tool root with a recipe (a host executable the build runs)
                 rec = r.get("recipe", "")
                 if not rec.startswith(path + "/") or not exists(rec):
                     why.append("recipe %r is not an existing file inside the root" % rec)
+        if cls == "headers":
+            if "recipe" in r or "target" in r:
+                why.append("a headers root has no recipe (no units, no link, no outputs)")
+            why += ["%s is a unit file in a headers tree" % f for f in files if f.startswith(path + "/") and f.endswith(UNIT_EXT)]
         why += ["gate %s is not in gates.json" % g for g in gates if g not in gate_names]
         roots.append((path, why))
     paths = [p for p, _ in roots]
