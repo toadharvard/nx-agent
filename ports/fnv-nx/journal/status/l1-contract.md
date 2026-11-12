@@ -91,3 +91,4 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - Contract gates' `covers` = roots with a non-null link (w10, from the L6 translator root).
   - L2 w5 lands before L2 w4: a branch carries admit/oracle records for every file it adds. w4 was red on admit 494/513 and oracle 56/76 at fad7d2d4.
   - w16 rebases onto 7503d2fa for the env.json conflict.
+- 2026-11-12 02:57Z new task 4u (from the orchestrator): w20 (session_01KmtZKSwpJXxijdPeaxppza, claude/fnv-l1-contract-w20) deletes startup/guest/onexit.c (7 MSVC CRT bodies by name) and its reference set. platform/crt import bodies are kept iff an image-set module imports the name. Count at 3fb7f9bc: 307 lines including the journal; the orchestrator counted 89 lines in 20 files. Status: doing.
