@@ -23,7 +23,7 @@ The gate reads only the git-tracked files of these paths (`git ls-files`). It co
 - `render/d3d9/spec/d3d9_spec.json`
 - `shim/include`
 - `render/shaders/total/sm_table.json`, `gen_sm_rows.py`, `fnvnx_sm_rows.h`
-- `render/shaders/mojoshader.patch`
+- `render/shaders/translator/mojoshader.patch`
 - `render/shaders/build.sh` (`MOJO_PIN`)
 - `render/total/externals.json`
 

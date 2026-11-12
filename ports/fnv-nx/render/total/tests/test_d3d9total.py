@@ -147,7 +147,7 @@ def mut_table(regen):
 
 
 def mut_patch(old, new):
-    return lambda base: edit(base, "render/shaders/mojoshader.patch", lambda t: t.replace(old, new, 1))
+    return lambda base: edit(base, "render/shaders/translator/mojoshader.patch", lambda t: t.replace(old, new, 1))
 
 
 def mut_untrack(rel):
@@ -169,7 +169,7 @@ CASES["table-not-generated"] = (mut_table(False), SM_ALL, [])
 CASES["table-wrong-opcode"] = (mut_table(True), SM_ALL, [])
 CASES["pin-differs"] = (lambda b: edit(b, "render/shaders/build.sh", lambda t: t.replace("MOJO_PIN=ad5d", "MOJO_PIN=bd5d", 1)), SM_ALL, [])
 CASES["tree-hash-wrong"] = (lambda b: edit(b, "render/total/externals.json", lambda t: re.sub(r'"tree_sha256": "(.)', lambda m: '"tree_sha256": "' + ("0" if m[1] != "0" else "1"), t)), SM_ALL, [])
-CASES["patch-corrupt"] = (lambda b: edit(b, "render/shaders/mojoshader.patch", lambda t: t[:len(t) // 2].replace("\n+", "\n-", 3) + t[len(t) // 2:]), SM_ALL, [])
+CASES["patch-corrupt"] = (lambda b: edit(b, "render/shaders/translator/mojoshader.patch", lambda t: t[:len(t) // 2].replace("\n+", "\n-", 3) + t[len(t) // 2:]), SM_ALL, [])
 CASES["value-assert-dead"] = (mut_patch(VALUE_ASSERT, "_Static_assert(1, id)"), SM_OP, [])
 CASES["stage-assert-dead"] = (mut_patch(STAGE_ASSERT, "_Static_assert(1, id)"), SM_OP, [])
 CASES["cmp-assert-dead"] = (mut_patch(CMP_ASSERT, "_Static_assert(1, id)"), SM_CMP, [])

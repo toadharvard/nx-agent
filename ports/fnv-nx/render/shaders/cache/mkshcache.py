@@ -33,7 +33,7 @@ def build_id(root=None, extra=()):
     root = root or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
     h = hashlib.sha256()
     for f in extra: h.update(b"extra\0" + hashlib.sha256(open(f, "rb").read()).digest())
-    for sub in ("src", "include", "mojoshader.patch", "uam.patch", "build.sh"):
+    for sub in ("src", "translator", "uam.patch", "build.sh"):
         p = os.path.join(root, sub)
         files = sorted(os.path.join(d, f) for d, _, fs in os.walk(p) for f in fs) if os.path.isdir(p) else [p]
         for f in files:
