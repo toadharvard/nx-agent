@@ -18,7 +18,7 @@ def rows(p):
 def main():
     obj, gen = sys.argv[1], sys.argv[2]
     units = {os.path.basename(o['object']) for o in json.load(open(obj))['objects']}
-    want = {'%02x.cpp.o' % i for i in range(128)}
+    want = {'%03x.cpp.o' % i for i in range(4096)}
     missing = sorted(want - units)
     e, b, u = (rows(one(gen, n)) for n in ('emitted.tsv', 'bad.tsv', 'undef.tsv'))
     print('units compiled %d/%d, failed %d' % (len(want & units), len(want), len(missing)))

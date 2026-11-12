@@ -6,7 +6,7 @@ DIR/<image>/shapes.tsv   the shape census of every image (proof/census.py; colum
 --lifter DIR             the directory holding the packages fnvlift/ and proof/ and rt/fnvl.h, rt/fnvl_x87.h (declared inputs of the stage, tracked files)
 --emit                   the lifter's emission mode (fnvlift.core.EMIT): '' = the hand handlers are the baseline for undef.tsv, 'dsl' = no baseline
 Outputs under --out (the declared list, fixed): u/00.cpp .. u/7f.cpp, inc/fnvl_prelude.h, emitted.tsv, bad.tsv, undef.tsv.
-RULE units: a shape key lives in bucket sha256(key)[0:8 hex digits] mod 128 (128 fixed names, an empty bucket is the include alone). Inside a bucket the shapes are
+RULE units: a shape key lives in bucket sha256(key)[0:8 hex digits] mod 4096 (4096 fixed names, an empty bucket is the include alone). Inside a bucket the shapes are
 sorted by key and the n-th function sits at the fake address 0x400000 + 0x100*n, so a changed or added shape changes exactly its bucket's unit and no other.
 RULE every shape is in exactly one of emitted.tsv / bad.tsv: bad.tsv gives the class `uncovered` (no DSL form covers the mnemonic, or the bytes do not decode to
 one instruction of their own length) or `emit` (the emitter's stated reason, or the form builder's precondition). Nothing is dropped.
@@ -19,7 +19,7 @@ import os
 import re
 import sys
 
-NB = 128      # fixed bucket count: the recipe's name-complete unit view hardlinks one #error blob per other unit into each unit's view, so units^2 links to one inode must stay below the filesystem's link limit (65000 on ext4): 128^2 = 16384; 4096 units fail the cold build with EMLINK (a limit of verify/unitview.py, reported to L1)
+NB = 4096     # the generator's own unit split: one unit per 1/4096 of the shapes (by sha256 of the key); about 6 shapes per unit
 BASE, STEP = 0x400000, 0x100
 
 
@@ -28,7 +28,7 @@ def bucket(key):
 
 
 def unit_names():
-    return ['u/%02x.cpp' % i for i in range(NB)]
+    return ['u/%03x.cpp' % i for i in range(NB)]
 
 
 def load_shapes(root):

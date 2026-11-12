@@ -22,4 +22,4 @@ and af; imul af pf sf zf; mul af pf sf zf; or af; sar af; shl af; shld af; shr a
 Owner: emitter (L3a/forms). Not rt, platform or libc. The DSL leaves the flag untouched, the hand handler writes a value; they differ only for code that reads an architecturally undefined flag.
 
 ## verdict findings for L1 (EMLINK)
-The unit view hardlinks one #error blob per other unit into every unit: links = units^2. 4096 units gave EMLINK (ext4 limit 65000); the generator uses 128 buckets. L3a's 4096-unit pack hits it.
+The unit view hardlinks one #error blob per other unit into every unit: links = units^2. 4096 units gave EMLINK (ext4 limit 65000); the generator keeps its own 4096-unit split (no workaround); fix is L1 w14. L3a's 4096-unit pack hits it.
