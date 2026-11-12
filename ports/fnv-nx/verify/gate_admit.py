@@ -36,7 +36,7 @@ REQUIRED_PRODUCT = ("objstub", "linkstrict", "determinism", "oracle",
                     "n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcrel", "bodysel",
                     "abs", "disp", "reach", "reachlink", "gpa",
                     "imports", "forms", "d3d9total", "r7", "namegate", "argordergate", "abi",
-                    "datamodel", "order", "fpexact", "eh", "exepin", "addr32", "machine")
+                    "datamodel", "order", "fpexact", "eh", "exepin", "addr32", "machine", "hostapi")
 REQUIRED = {"doc": (), "tool": ("selftests",), "product": REQUIRED_PRODUCT}
 
 
