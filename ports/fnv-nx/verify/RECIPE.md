@@ -112,8 +112,9 @@ that includes `<vector>`, `<string>`, `<cstdio>`. The 13.3 compiler reads gcc 15
   step whose tool is `lifted_by`, and `pack` is an external of the recipe (an input of every generator). The one plugin it must load is `fnvnx_ftoi` with `LIFTED_ARGS` (`mode=lifted`): no rewrite, and every float -> integer conversion outside an `fnvnx_f2i` function is a build error.
 - every guest root with a C or C++ unit (native or lifted, any language mix) holds ALL of `PLUGIN_SOURCES` with `PLUGIN_ARGS` (a lifted root: `LIFTED_ARGS` for the plugins it names, so `fnvnx_ftoi` in mode lifted), in that order: the
   C and the C++ CC stage of the root load every plugin their front end can load (`-fplugin=/plug/<n>/<n>.so`, `/plug/<n>` a declared input), so a
-  plugin is in every unit key. Loadable = needs no symbol that only the other front end defines (`recipe.plugin_languages`: `nm -D` of cc1, cc1plus
-  and the .so; measured: cc1plus loads all 8, cc1 loads ftoi, order, dispatch, addr; sdd, pi, names, layout use cp_global_trees). Gate `datamodel`
+  plugin is in every unit key. Loadable = has no STRONG undefined reference to a symbol that only the other front end defines (`recipe.plugin_languages`: `nm -D` of cc1,
+  cc1plus and the .so; a weak undefined reference resolves to null and is no load requirement). Every plugin declares the C++ front end's symbols weak
+  and uses them only under the C++ front end (CC1PLUS-SYMS, `toolchain/tests/test_cc1.py`), so both front ends load all 8. Gate `datamodel`
   re-derives the set and reads it back from the CC stage documents; a unit lacking a loadable plugin .so is red, no name list, no exception list.
 Assumption: the declaration `lifted_by` names the lifter is the owner's (admit.json is reviewed); the gate proves that no hand-written C++ sits in a lifted root. (ASM-101)
 Check: `lifted_by` must be a tracked `.py` of an admitted root of class `tool` (recipe.py check, `cxx_origin.lifted_by ... is not a tracked .py of an admitted tool root` otherwise), and the gate proves that no hand-written C++ sits in a lifted root: every C++ unit is an output of a step of that tool. When the single lifter `liftall.py` is on the trunk, `lifted_by` must equal its path (one constant `LIFTER` of recipe.py); until then the check is the one stated here.
