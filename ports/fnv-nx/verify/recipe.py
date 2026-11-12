@@ -427,14 +427,22 @@ def symbols(path, unit):
 
 
 def fetch_externals(exts, store, extcache, ws):
-    """Content-pinned inputs: each external of EXTS fetched by exact commit into the bare cache EXTCACHE/<commit>, checked out at
-    WS/ext/<name>, ingested into the CAS STORE; its tree hash must equal tree_sha256 (BuildRed naming the external). -> {name: {host, tree, at}}.
-    Used by a recipe (Job.externals) and by gate_contract.py (the exe-derived inputs of the contract gates), one mechanism."""
+    """Content-pinned inputs: each external of EXTS fetched by exact commit into the bare cache EXTCACHE/<commit>, checked out ONCE at
+    EXTCACHE/<commit>.co, ingested into the CAS STORE; its tree hash must equal tree_sha256 (BuildRed naming the external). -> {name:
+    {host, tree, at}}. FACT: the verified pair (commit, tree_sha256) is stored as STORE/external-facts/<commit>-<tree_sha256>.json; a
+    pair with a fact, its checkout and its tree in the STORE is not fetched, walked or hashed again (a warm call reads the fact only), and
+    a variant of a root adds only its own stage keys. A mismatch stores nothing. Used by a recipe (Job.externals) and by gate_contract.py
+    (the exe-derived inputs of the contract gates), one mechanism."""
     out = {}
     url = os.environ.get("ARTIFACTS_URL", ARTIFACTS_URL)
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     for e in exts:
-        stage, bare, dest = "external:" + e["name"], os.path.join(extcache, e["commit"]), os.path.join(ws, "ext", e["name"])
+        stage, bare, co = "external:" + e["name"], os.path.join(extcache, e["commit"]), os.path.join(extcache, e["commit"] + ".co")
+        fact = os.path.join(store, "external-facts", "%s-%s.json" % (e["commit"], e["tree_sha256"]))
+        if os.path.isfile(fact) and os.path.isdir(co) and os.path.isfile(os.path.join(store, "tree", e["tree_sha256"][:2], e["tree_sha256"] + ".json")):
+            out[e["name"]] = {"host": co, "tree": e["tree_sha256"], "at": e["at"]}
+            continue
+        tmpco = None
         try:
             if not os.path.isdir(bare):
                 tmp = "%s.tmp%d-%s" % (bare, os.getpid(), os.urandom(4).hex())
@@ -442,17 +450,34 @@ def fetch_externals(exts, store, extcache, ws):
                 for cmd in (["init", "-q", "--bare"], ["fetch", "-q", "--depth", "1", url, e["commit"]]):
                     subprocess.run(["git", "-C", tmp] + cmd, env=env, check=True, capture_output=True)
                 os.replace(tmp, bare)
-            os.makedirs(dest)
-            ienv = dict(env, GIT_INDEX_FILE=os.path.join(ws, "idx-" + e["name"]))
-            subprocess.run(["git", "--git-dir", bare, "read-tree", e["commit"]], env=ienv, check=True, capture_output=True)
-            subprocess.run(["git", "--git-dir", bare, "--work-tree", dest, "checkout-index", "-a", "-f"], env=ienv, check=True, capture_output=True)
+            dest = co
+            if not os.path.isdir(co):
+                dest = tmpco = "%s.tmp%d-%s" % (co, os.getpid(), os.urandom(4).hex())
+                os.makedirs(dest)
+                ienv = dict(env, GIT_INDEX_FILE=os.path.join(ws, "idx-" + e["name"]))
+                subprocess.run(["git", "--git-dir", bare, "read-tree", e["commit"]], env=ienv, check=True, capture_output=True)
+                subprocess.run(["git", "--git-dir", bare, "--work-tree", dest, "checkout-index", "-a", "-f"], env=ienv, check=True, capture_output=True)
         except (subprocess.CalledProcessError, OSError) as x:
+            if tmpco:
+                shutil.rmtree(tmpco, ignore_errors=True)
             raise BuildRed({"stage": stage, "exit": getattr(x, "returncode", None),
                             "stderr": (getattr(x, "stderr", b"") or str(x).encode()).decode(errors="replace").splitlines()[-20:]})
         tree = cas.ingest(dest, store)
         if tree != e["tree_sha256"]:
+            if tmpco:
+                shutil.rmtree(tmpco, ignore_errors=True)
             raise BuildRed({"stage": stage, "exit": None, "stderr": ["tree_sha256 is %s, recipe says %s" % (tree, e["tree_sha256"])]})
-        out[e["name"]] = {"host": dest, "tree": tree, "at": e["at"]}
+        if tmpco:
+            try:
+                os.rename(tmpco, co)
+            except OSError:      # another process made it first: the same commit, the same tree
+                shutil.rmtree(tmpco, ignore_errors=True)
+        os.makedirs(os.path.dirname(fact), exist_ok=True)
+        ftmp = "%s.tmp%d-%s" % (fact, os.getpid(), os.urandom(4).hex())
+        with open(ftmp, "w") as fh:
+            json.dump({"commit": e["commit"], "tree_sha256": tree}, fh, sort_keys=True)
+        os.replace(ftmp, fact)
+        out[e["name"]] = {"host": co, "tree": tree, "at": e["at"]}
     return out
 
 
