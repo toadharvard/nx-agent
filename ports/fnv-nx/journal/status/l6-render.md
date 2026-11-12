@@ -223,3 +223,6 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - shim stays out of class tool. shim/include becomes class `headers` (L2 w6, L1 w16).
     - Generator inputs come from a root of class tool or headers. L1 extends the recipe rule.
     - gen_env.py takes d3d9types.h through `uses` on the headers entry. Until that lands, it is a named blocker (L1).
+- 04:00Z w1b e2efc18d: the translator is a guest root (msvcmodel, plugins, semantics flags, no -fPIC).
+    - Measurement with borrowed lib/sha256: recipe green, 16 objects; objstub red, 365/473 certified, 107 findings. The findings are unused MojoShader GL runtime and bytecode profile bodies.
+    - Rule given: the root holds only code reachable from fnvnx_shaders.h. Reachability is the relocation graph (--gc-sections semantics) from reach_census.py. Unreachable files and functions are deleted, and 0 collected sections remain. A reached stub-like body is reported as a finding, not deleted.
