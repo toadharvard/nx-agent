@@ -393,3 +393,6 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
         - FLAT_COLOR is ported from the lead's render/shaders/src (817a0abd); 24b76f32 lacks it.
         - lib/sha256 comes from w6 57051038; the census tools move to render/total.
         - Status: doing.
+- 09:14Z A2-gl4 pair: L6A b83b7309 (claude/fnv-l6a-deko-w6-a2gl4), forwarded to the orchestrator.
+    - The guest producer already keys with sha256: res_shader.cpp:28 and draw_prog.cpp:49.
+    - docs/RENDER_NATIVE.md fixed in bd2868bb.
