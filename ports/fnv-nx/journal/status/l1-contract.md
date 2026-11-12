@@ -312,3 +312,7 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
     - Coverage: 346 of 1554 bridge rows annotated.
   - **Allocation-site fact** (orchestrator: one producer). w18 writes fnvnx-allocsites/1, and L3a's points-to consumes it later.
   - **w10 next:** the retired rule plus gate_admit.py:38, which unblocks L3b. Then link.kind/roots with the ld refusals; L6 has 22 ignore-all link commands in 16 scripts.
+- 04:03Z: **d3dx9_31 decided** (orchestrator). Which branch applies depends on the gamedata fact, which L6 provides.
+  - (A) Present: it joins the image set as a may-load image, pinned by exepin. The set grows from 6 to 7.
+  - (B) Absent: LoadLibraryA returns NULL with GetLastError 126 (ERROR_MOD_NOT_FOUND). That is a declared-machine body owned by L5.
+  - In both cases the site stays open until extents exist, and certificates stay measurement-only.
