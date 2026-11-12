@@ -368,6 +368,11 @@ def check(rec, root, files, roots, pin=None, repo=None):
             err.append("generated[%d].inputs must be tracked files or directories (repo-relative)" % i)
         elif any(a != b and under(a, b) for a in ins for b in ins):
             err.append("generated[%d].inputs nest" % i)
+        else:   # RULE: a generator reads declared inputs from its own root or from a root of class tool or headers (content-keyed; neither runs as part of this root)
+            for p in ins:
+                o = max((q for q in roots if under(p, q)), key=len, default=None)
+                if o is not None and o != root and roots[o]["class"] not in ("tool", "headers"):
+                    err.append("generated[%d].inputs: %s is in root %s of class %s (a generator reads its own root, a tool root or a headers root)" % (i, p, o, roots[o]["class"]))
         if not (isinstance(outs, list) and outs and all(rel_ok(o) for o in outs)):
             err.append("generated[%d].outputs must be a non-empty list of root-relative paths" % i)
             continue
@@ -637,7 +642,7 @@ class Job:
             return e["at"] + "/" + c["cc"], e["at"] + "/" + c["cxx"]
         return "/usr/bin/" + c["cc"], "/usr/bin/" + c["cxx"]
 
-    def spec_flags(self, ws):
+    def spec_flags(self, ws, kinds):
         """RULE (RECIPE.md "Distribution spec defaults"): a root compiled by a distribution driver gets the flags that remove the distribution's
         spec defaults relative to the reference compiler (verify/guest_compiler.json: the GNU GCC of the msvcmodel external) -> {"c","cxx"}: flags.
         They are derived by specdefaults.py from the two compilers' own reports, cached by (environment, drivers, the reference pin, the derivation
@@ -660,10 +665,10 @@ class Job:
                 raise BuildRed({"stage": "specdefaults", "exit": None, "stderr": [str(e)[-300:]]})
         derived = self.cached_rt("specdefaults-" + tag, make)[1]
         fl, out, bad = self.rec["flags"], {}, []
-        for k in ("c", "cxx", "asm"):
-            kept, ov = specdefaults.for_root(fl.get(k, []), derived["c" if k == "asm" else k])
-            out[k] = kept
-            bad += ["flags.%s: %s sets an option the distribution compiler's spec default fixes (derived: %s)" % (k, t, " ".join(kept)) for t in ov]
+        for k in sorted(kinds):   # only the languages the root has units in
+            forced, err = specdefaults.for_root(fl.get(k, []), derived["c" if k == "asm" else k])
+            out[k] = forced
+            bad += ["flags.%s: %s" % (k, e) for e in err]
         if bad:
             raise BuildRed({"stage": "specdefaults", "exit": None, "stderr": bad})
         return out
@@ -897,7 +902,7 @@ class Job:
         if not used:
             return {}
         rtp, _ = self.toolrt(used)
-        self.spec = self.spec_flags(ws)
+        self.spec = self.spec_flags(ws, set(kinds.values()))
         self.built = self.plugins(ws) if any(k == "cxx" for k in kinds.values()) else []
         builds = {}
         # RULE: the CC stage (-fpreprocessed, input unit.ii) mounts, and so keys on, only the compiler (its external, if it is one), the

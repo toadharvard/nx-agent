@@ -58,37 +58,41 @@ def main():
                         {"M": "1", "N": "2"}, {"M": "1", "N": "3", "_FORTIFY_SOURCE": "3"}) == ["-DN=2", "-U_FORTIFY_SOURCE", "-fno-a"])
     ov = S.overlap(["-O2", "-fno-stack-clash-protection", "-D_FORTIFY_SOURCE=2", "-fcf-protection=full", "-Wall"],
                    ["-U_FORTIFY_SOURCE", "-fcf-protection=none", "-fno-stack-clash-protection", "-fno-stack-protector"])
+    ov = S.overlap(["-O2", "-fno-stack-clash-protection", "-D_FORTIFY_SOURCE=2", "-fcf-protection=full", "-Wall"],
+                   ["-U_FORTIFY_SOURCE", "-fcf-protection=none", "-fno-stack-clash-protection", "-fno-stack-protector"])
     check("overlap: -O2 and -Wall are free, the rest is refused", ov == ["-fno-stack-clash-protection", "-D_FORTIFY_SOURCE=2", "-fcf-protection=full"], ov)
     ov = S.overlap(["-fstack-protector-strong", "-fstack-protector"], ["-fno-stack-protector"])
     check("overlap: -fstack-protector-strong is the same family as -fno-stack-protector", ov == ["-fstack-protector-strong", "-fstack-protector"], ov)
-    d0 = ["-U_FORTIFY_SOURCE", "-fno-PIC", "-fno-PIE", "-fno-stack-clash-protection", "-fno-stack-protector"]
-    kept, ov = S.for_root(["-O2", "-fPIE"], d0)
-    check("for_root: a root that states -fPIE owns the pic family (its derived -fno-PIC/-fno-PIE drop), hardening stays forced",
-          kept == ["-U_FORTIFY_SOURCE", "-fno-stack-clash-protection", "-fno-stack-protector"] and ov == [], (kept, ov))
-    kept, ov = S.for_root(["-fPIE", "-fno-stack-protector", "-D_FORTIFY_SOURCE=2"], d0)
-    check("for_root: a target family does not free the hardening flags (still refused)", ov == ["-fno-stack-protector", "-D_FORTIFY_SOURCE=2"], (kept, ov))
-    check("family: either sign and -mabi=/-march= values are target choices; hardening is none",
-          S.family("-fno-PIE") == "pic" and S.family("-mabi=ilp32") == "abi" and S.family("-march=armv8-a") == "arch" and S.family("-mcmodel=small") == "cmodel"
-          and S.family("-fno-stack-protector") is None and S.family("-U_FORTIFY_SOURCE") is None)
+    D0 = {"forced": ["-U_FORTIFY_SOURCE", "-fno-stack-clash-protection", "-fno-stack-protector"], "target": ["-fno-PIC", "-fno-PIE"]}
+    fo, er = S.for_root(["-O2", "-fPIE"], D0)
+    check("for_root: a root that states -fPIE has stated its target choice; the forced flags apply", fo == D0["forced"] and er == [], (fo, er))
+    fo, er = S.for_root(["-O2"], D0)
+    check("for_root: a target choice left implicit is red (implicit target choice)", len(er) == 2 and all("implicit target choice" in e for e in er), er)
+    fo, er = S.for_root(["-fPIE", "-fno-stack-protector", "-D_FORTIFY_SOURCE=2"], D0)
+    check("for_root: stating a target option does not free the hardening flags (still refused)", len(er) == 2 and "-fno-stack-protector" in er[0] and "-D_FORTIFY_SOURCE=2" in er[1], er)
+    check("norm: either sign, value dropped; option_names reads the driver's report",
+          S.norm("-fno-PIE") == "-fPIE" and S.norm("-mabi=ilp32") == "-mabi" and S.option_names("  -mabi=[ilp32|lp64]  x\n  -mno-foo   y\n") == {"-mabi", "-mfoo"})
     # --- the real rule on real compilers
     ref = os.path.join(TR.BASE, "ref")
     wrapper(ref, "cc", CC)
     wrapper(ref, "c++", CXX)
-    fl = S.derive(os.path.join(ref, "bin/cc"), "/usr/bin/" + CC, "c")
-    check("derive (distribution cross gcc vs GNU defaults): the stack-protector class and _FORTIFY_SOURCE are in the set",
-          "-fno-stack-protector" in fl and "-fno-stack-clash-protection" in fl and "-U_FORTIFY_SOURCE" in fl, fl)
+    dv = S.derive(os.path.join(ref, "bin/cc"), "/usr/bin/" + CC, "c")
+    fl = dv["forced"] + dv["target"]
+    check("derive (distribution cross gcc vs GNU defaults): hardening is forced (stack protector class, _FORTIFY_SOURCE), PIC/PIE is a target choice",
+          "-fno-stack-protector" in dv["forced"] and "-fno-stack-clash-protection" in dv["forced"] and "-U_FORTIFY_SOURCE" in dv["forced"]
+          and "-fno-PIE" in dv["target"] and not any(f in dv["forced"] for f in ("-fno-PIE", "-fno-PIC")), dv)
     fx = S.derive(os.path.join(ref, "bin/c++"), "/usr/bin/" + CXX, "c++")
-    check("derive for the C++ driver: the same classes", "-fno-stack-protector" in fx and "-U_FORTIFY_SOURCE" in fx, fx)
-    check("derive is a function of the two compilers: a second run gives the identical list", fl == S.derive(os.path.join(ref, "bin/cc"), "/usr/bin/" + CC, "c"))
+    check("derive for the C++ driver: the same classes", "-fno-stack-protector" in fx["forced"] and "-U_FORTIFY_SOURCE" in fx["forced"], fx)
+    check("derive is a function of the two compilers: a second run gives the identical list", dv == S.derive(os.path.join(ref, "bin/cc"), "/usr/bin/" + CC, "c"))
     same = S.derive("/usr/bin/" + CC, "/usr/bin/" + CC, "c")
-    check("derive of a compiler against itself is empty", same == [], same)
+    check("derive of a compiler against itself is empty", same == {"forced": [], "target": []}, same)
     # --- what it is for: a dk-style unit has no __stack_chk_* and no *_chk calls
     d = os.path.join(TR.BASE, "u")
     os.makedirs(d)
     raw = compile_obj("/usr/bin/" + CC, [], d, "raw")
     check("positive control: the distribution compiler by itself builds __stack_chk_fail / *_chk references into the unit",
           "__stack_chk" in raw and "_chk" in raw.replace("__stack_chk", ""), raw)
-    neu = compile_obj("/usr/bin/" + CC, fl, d, "neu")
+    neu = compile_obj("/usr/bin/" + CC, dv["forced"], d, "neu")
     check("with the derived flags the unit has no __stack_chk_* and no *_chk symbol", "_chk" not in neu and "__stack_chk" not in neu, neu)
     # --- in the recipe: a guest pin names the reference external; the derived flags enter the unit; a root's own overlap is red
     def refext(dd):
@@ -100,7 +104,7 @@ def main():
     pin = {"format": "fnvnx-guest-compiler/1", "external": {"name": "ref", "repo": "fnv-nx-build", "ref": "ref", "commit": commit, "tree_sha256": th, "at": "/ext/ref"},
            "cc": "bin/cc", "cxx": "bin/c++"}
     files = {"toy/a.c": UNIT, "toy/constants.tsv": None, "toy/os.S": None, "verify/guest_compiler.json": json.dumps(pin)}
-    OK = {"c": ["-O2", "-fno-asynchronous-unwind-tables"], "cxx": [], "asm": []}
+    OK = {"c": ["-O2", "-fno-asynchronous-unwind-tables", "-fPIE"], "cxx": [], "asm": []}
     rec = TR.mut(link=None, os_layer=[], constants=None, generated=[], include=[], flags=OK)
     repo = TR.make_repo("sd-ok", rec=rec, files=files)
     res = recipe.build(repo, TR.ROOT, TR.BASE + "/st", TR.BASE + "/o1", ext=TR.BASE + "/ec")
@@ -110,15 +114,15 @@ def main():
           syms(ob) if ob else res)
     cached = [json.load(open(os.path.join(TR.BASE, "st", "rt", n))) for n in os.listdir(TR.BASE + "/st/rt") if n.startswith("specdefaults-")]
     check("recipe: the derived set is cached once, keyed on environment, drivers, reference pin and derivation code",
-          len(cached) == 1 and "-fno-stack-protector" in cached[0]["c"] and "-U_FORTIFY_SOURCE" in cached[0]["cxx"], cached)
+          len(cached) == 1 and "-fno-stack-protector" in cached[0]["c"]["forced"] and "-U_FORTIFY_SOURCE" in cached[0]["cxx"]["forced"], cached)
     bad = TR.mut(link=None, os_layer=[], constants=None, generated=[], include=[], flags=dict(OK, c=OK["c"] + ["-fstack-protector-strong"]))
     resb = recipe.build(TR.make_repo("sd-bad", rec=bad, files=files), TR.ROOT, TR.BASE + "/st", TR.BASE + "/o2", ext=TR.BASE + "/ec")
     check("recipe: a root that sets a flag of the derived family is red at specdefaults, naming it",
-          resb["status"] == "red" and resb["failure"]["stage"] == "specdefaults" and "-fstack-protector-strong" in " ".join(resb["failure"]["stderr"]), resb.get("failure"))
-    pie = TR.mut(link=None, os_layer=[], constants=None, generated=[], include=[], flags=dict(OK, c=OK["c"] + ["-fPIE"]))
-    resp = recipe.build(TR.make_repo("sd-pie", rec=pie, files=files), TR.ROOT, TR.BASE + "/st", TR.BASE + "/o4", ext=TR.BASE + "/ec")
-    check("recipe: a root that states -fPIE builds (the pic family is its own), and its unit keeps the position independence it asked for",
-          resp["status"] == "green", resp.get("failure"))
+          resb["status"] == "red" and resb["failure"]["stage"] == "specdefaults" and "-fstack-protector-strong" in " ".join(resb["failure"]["stderr"]) and "implicit" not in " ".join(resb["failure"]["stderr"]), resb.get("failure"))
+    imp = TR.mut(link=None, os_layer=[], constants=None, generated=[], include=[], flags={"c": ["-O2"], "cxx": [], "asm": []})
+    resi = recipe.build(TR.make_repo("sd-implicit", rec=imp, files=files), TR.ROOT, TR.BASE + "/st", TR.BASE + "/o4", ext=TR.BASE + "/ec")
+    check("recipe: a root that leaves PIE implicit is red at specdefaults (implicit target choice); stating -fPIE (the ok root above) is green",
+          resi["status"] == "red" and resi["failure"]["stage"] == "specdefaults" and "implicit target choice" in " ".join(resi["failure"]["stderr"]), resi.get("failure"))
     nopin = TR.make_repo("sd-nopin", rec=rec, files=dict(files, **{"verify/guest_compiler.json": None}))
     resn = recipe.build(nopin, TR.ROOT, TR.BASE + "/st", TR.BASE + "/o3", ext=TR.BASE + "/ec")
     on = next((o["object"] for o in resn.get("objects", []) if o["unit"].endswith("a.c")), None)
