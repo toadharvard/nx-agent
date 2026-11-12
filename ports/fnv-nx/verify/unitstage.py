@@ -190,6 +190,10 @@ class Build:
                 raise UnitError("dependency %s is in no declared input" % p)
         return out
 
+    def outside(self, key):
+        """Sandbox paths PP read that are in no tree of the unit's own view (the compiler's and runtime's inputs, the base tool root)."""
+        return {p for p in parse_deps(open(result_file(self.store, key, "deps.d")).read()) if not self.real(p, False)}
+
     def unit(self, rel):
         e = {"unit": rel, "status": "ok", "cc_status": "skipped", "object": None, "name_tree_id": self.name_tree_id, "pp_iterations": 0,
              "pp_seconds": 0.0}
@@ -223,7 +227,7 @@ class Build:
             if d == files:
                 break
             expect, files = (d, h), d
-        e["closure"], e["files"] = sorted(files), len(files)
+        e["closure"], e["files"], e["outside"] = sorted(files), len(files), sorted(self.outside(key))
         ii = cas.manifest(res["outputs"]["/out"], self.store)["entries"]["unit.ii"]
         e["ii_bytes"] = os.path.getsize(cas._obj(self.store, ii))
         tdata = cas.canon({"format": cas.FORMAT, "entries": {"unit.ii": dict(ii, x=0)}})

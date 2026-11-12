@@ -171,9 +171,19 @@ def guest_errors(rec, root, roots, pin):
         return ["guest root %s: compiler must be the external compiler %r (not a distribution driver)" % (root, pin["external"].get("name"))]
     ex = next((e for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == c["external"]), None)
     bad = [] if ex == pin["external"] else ["external %r is not the pinned one (%s)" % (c["external"], pin["external"])]
-    rt = pin.get("runtime")   # the guest's libc/libstdc++ external: when a recipe declares it (by name), it is the pinned one, exactly
-    if isinstance(rt, dict):
-        bad += ["external %r is not the pinned runtime (%s)" % (e["name"], rt) for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == rt["name"] and e != rt]
+    rt = pin.get("runtime")   # the guest's libc/libstdc++ external: every guest root declares it, exactly the pinned one
+    if not isinstance(rt, dict):
+        bad.append("%s has no runtime external" % GUEST_PIN)
+    else:
+        rx = [e for e in rec.get("external", []) if isinstance(e, dict) and e.get("name") == rt["name"]]
+        bad += ["runtime external %r must be declared exactly as pinned (%s)" % (rt["name"], rt)] if rx != [rt] else []
+        fl = rec.get("flags") if isinstance(rec.get("flags"), dict) else {}
+        for k, need in (("c", ("-nostdinc",)), ("cxx", ("-nostdinc", "-nostdinc++")), ("asm", ("-nostdinc",))):
+            bad += ["flags.%s lacks %s: the system headers of a guest root are the runtime's, never the distribution's" % (k, f)
+                    for f in need if f not in (fl.get(k) if isinstance(fl.get(k), list) else [])]
+        inside = [e["at"] for e in rec.get("external", []) if isinstance(e, dict) and isinstance(e.get("at"), str)]
+        bad += ["include %r is neither inside a declared external nor inside the root" % d for d in rec.get("include", [])
+                if isinstance(d, str) and not (any(under(d, a) for a in inside) or under(d, root))]
     bad += ["compiler.%s is %r, pinned %r" % (k, c[k], pin.get(k)) for k in ("cc", "cxx") if c[k] != pin.get(k)]
     return ["guest root %s: %s" % (root, b) for b in bad]
 
@@ -428,6 +438,7 @@ class Job:
         self.roots, self.files = load_admit(repo), tracked(repo)
         self.rec = load_recipe(repo, self.roots, root)
         self.keys, self.run, self.hit, self.ext, self.ppkeys, self.built = set(), 0, 0, {}, {}, []
+        self.closures = {}   # {unit: sandbox paths its preprocessing read}
         os.makedirs(os.path.join(store, "rt"), exist_ok=True)
 
     def stage(self, doc):
@@ -646,6 +657,7 @@ class Job:
                 self.run += (e.get("pp_status") == "run") + (e.get("cc_status") == "run")
                 self.hit += (e.get("pp_status") == "hit") + (e.get("cc_status") == "hit")
                 res[u] = e["object"]
+                self.closures[u] = e.get("closure", []) + e.get("outside", [])
                 if e.get("pp_key"):
                     self.ppkeys[u] = e["pp_key"]
         if failed:
@@ -701,6 +713,40 @@ def host_compilers(rec, cache):
     return os.path.join(dest, c["cc"]), os.path.join(dest, c["cxx"])
 
 
+def roots_target(roots, root):
+    return roots.get(root, {}).get("target")
+
+
+def runtime_errors(text, pin):
+    """The runtime external's manifest (PIN["runtime_manifest"]) against the guest compiler's own: compiler version, msvcmodel patch sha256, every
+    flag of SEMANTICS_FLAGS, sizeof wchar_t/size_t/long. -> [str]. A runtime built by another compiler or with another data model is red."""
+    ex = pin.get("runtime_manifest")
+    if not isinstance(ex, dict):
+        return ["%s has no runtime_manifest" % GUEST_PIN]
+    try:
+        m = json.loads(text)
+        if not isinstance(m, dict):
+            raise ValueError("not an object")
+    except ValueError as x:
+        return ["runtime manifest is not JSON: %s" % str(x)[:80]]
+    err = []
+    if m.get("format") != ex["format"]:
+        err.append("manifest format is %r, not %s" % (m.get("format"), ex["format"]))
+    for k in ("compiler_version", "msvcmodel_patch_sha256", "sizeof"):
+        if m.get(k) != ex[k]:
+            err.append("manifest %s is %r, the guest compiler's is %r" % (k, m.get(k), ex[k]))
+    have = m.get("flags") if isinstance(m.get("flags"), list) else []
+    err += ["manifest flags lack %s (the runtime must be built with the guest's semantics flags)" % f for f in SEMANTICS_FLAGS if f not in have]
+    return err
+
+
+def closure_errors(units, closures, ext_ats):
+    """A unit of a guest root reads only its own tree (/src, /inc) and declared externals: any other file (a distribution glibc/cross header
+    under /usr, ...) is an error naming unit and file. closures {unit: [sandbox path]}, EXT_ATS the `at` of every external."""
+    ok = ("/src/", "/inc/") + tuple(a.rstrip("/") + "/" for a in ext_ats)
+    return ["unit %s reads %s, outside the root and the declared externals" % (u, p) for u in units for p in closures.get(u, []) if not p.startswith(ok)]
+
+
 def build(repo, root, store, out, jobs=4, ext=None):
     """Build product ROOT of the checkout REPO into STORE; write OUT/objects.json and the files it names. EXT: bare cache dir of
     externals (default STORE/external). -> the objects dict; raises RecipeError for an invalid recipe."""
@@ -716,8 +762,19 @@ def build(repo, root, store, out, jobs=4, ext=None):
     try:
         _copy(repo, [f for f in j.files if under(f, root)], root, os.path.join(ws, "root"))
         j.externals(ws)
+        pin = load_pin(repo)
+        if roots_target(j.roots, root) == "guest":
+            rt = pin["runtime"]
+            mf = os.path.join(j.ext[rt["name"]]["host"], pin["runtime_manifest"]["path"])
+            me = runtime_errors(open(mf).read(), pin) if os.path.isfile(mf) else ["runtime external has no %s" % pin["runtime_manifest"]["path"]]
+            if me:
+                raise BuildRed({"stage": "runtime_manifest", "exit": None, "stderr": me[:20]})
         j.generate(ws)
         objs, und = j.compile(ws, units), set()
+        if roots_target(j.roots, root) == "guest":
+            ce = closure_errors(units, j.closures, [e["at"] for e in j.ext.values()])
+            if ce:
+                raise BuildRed({"stage": "closure", "exit": None, "stderr": ce[:20]})
         for n, t, _ in j.built:
             ent = cas.manifest(t, store)["entries"][n + ".so"]
             dest = os.path.join(out, "plugins", n + ".so")

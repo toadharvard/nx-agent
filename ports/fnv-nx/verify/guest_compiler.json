@@ -28,5 +28,16 @@
     "commit": "00e3d42acd10593d534b9a70bb8940cee7991436",
     "tree_sha256": "3f25152cbc5a729d9e0a12fc5c62b6b912b6ab1571b6b3494de8f35e3904207d",
     "at": "/ext/a64"
+  },
+  "runtime_manifest": {
+    "path": "MANIFEST.json",
+    "format": "fnvnx-runtime-manifest/1",
+    "compiler_version": "13.3.0",
+    "msvcmodel_patch_sha256": "08c9569a8e7b42ae529c202adc549474954a7f60b73cd4b50a4f111e3f0459d3",
+    "sizeof": {
+      "wchar_t": 2,
+      "size_t": 4,
+      "long": 4
+    }
   }
 }

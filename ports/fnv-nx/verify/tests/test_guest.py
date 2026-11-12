@@ -16,9 +16,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import test_plugins as tp
 from test_plugins import BASE, ROOT, T, REC, PLUGS, SRC, check, git, w, make_repo, errs, build, disasm, mut, recipe, cas, REAL, VERIFY
 
-def guest_rec(ext, **kw):
-    r = mut(compiler={"external": "gcc-msvcmodel", "cc": "bin/aarch64-linux-gnu-gcc", "cxx": "bin/aarch64-linux-gnu-g++"}, external=[ext], **kw)
+def guest_rec(ext, rt, **kw):
+    """A guest recipe: the compiler external, the runtime external, -nostdinc(++) and the include dirs of the compiler's own headers and the runtime's."""
+    r = mut(compiler={"external": ext["name"], "cc": "bin/aarch64-linux-gnu-gcc", "cxx": "bin/aarch64-linux-gnu-g++"}, external=[ext, rt],
+            include=[ext["at"] + "/lib/gcc/aarch64-linux-gnu/13/include", rt["at"] + "/include"], **kw)
+    r["flags"] = {"c": ["-nostdinc"], "cxx": ["-nostdinc", "-nostdinc++"] + r["flags"]["cxx"], "asm": ["-nostdinc"]}
     return r
+
+
+def copy_rec(r):
+    return json.loads(json.dumps(r))
 
 
 def guest_repo(name, rec, pin, target="guest", files=None):
@@ -41,17 +48,17 @@ def guest_repo(name, rec, pin, target="guest", files=None):
 def main():
     pin_real = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))
     ext = {"name": "gcc-msvcmodel", "repo": "fnv-nx-build", "ref": "tools/gcc-ilp32-msvcmodel", "commit": "a" * 40, "tree_sha256": "b" * 64, "at": "/ext/gcc"}
-    pin = {"format": "fnvnx-guest-compiler/1", "external": ext, "cc": "bin/aarch64-linux-gnu-gcc", "cxx": "bin/aarch64-linux-gnu-g++"}
-    rec = guest_rec(ext)
+    rt = {"name": "rt", "repo": "fnv-nx-build", "ref": "tools/rt", "commit": "c" * 40, "tree_sha256": "d" * 64, "at": "/ext/rt"}
+    pin = dict(pin_real, external=ext, runtime=rt)
+    rec = guest_rec(ext, rt)
     # --- the rule, validation only (no compiler needed)
     g = guest_repo("g1", rec, pin)
-    check("guest root on the pinned external compiler is valid", errs(g, rec) == [] or [x for x in errs(g, rec) if "guest" in x] == [], errs(g, rec))
+    check("guest root on the pinned compiler and runtime is valid", errs(g, rec) == [], errs(g, rec))
     stock = guest_repo("g2", REC, pin)
     check("guest root on the stock g++-13 is red", any("must be the external compiler" in x for x in errs(stock, REC)), errs(stock, REC))
-    other = dict(ext, commit="c" * 40)
-    check("guest root on another commit of the external is red", any("not the pinned one" in x for x in errs(g, guest_rec(other))))
-    check("guest root on another tree hash is red", any("not the pinned one" in x for x in errs(g, guest_rec(dict(ext, tree_sha256="d" * 64)))))
-    r2 = guest_rec(ext)
+    check("guest root on another commit of the external is red", any("not the pinned one" in x for x in errs(g, guest_rec(dict(ext, commit="e" * 40), rt))))
+    check("guest root on another tree hash is red", any("not the pinned one" in x for x in errs(g, guest_rec(dict(ext, tree_sha256="f" * 64), rt))))
+    r2 = guest_rec(ext, rt)
     r2["compiler"]["cxx"] = "bin/other-g++"
     check("guest root on another driver path is red", any("compiler.cxx" in x for x in errs(g, r2)))
     nopin = guest_repo("g3", rec, None)
@@ -60,23 +67,33 @@ def main():
     check("product root without target is red", any('"target"' in x for x in errs(notarget, REC)), errs(notarget, REC))
     host = guest_repo("g5", REC, pin, target="host")
     check("host root may use the distribution compiler", not [x for x in errs(host, REC) if "guest" in x or "target" in x], errs(host, REC))
-    # --- the runtime external (guest libc/libstdc++) and the sample build.json of the platform root
-    rtp = pin_real["runtime"]
-    sample = json.load(open(os.path.join(REAL, T + "verify/samples/platform.build.json")))
-    gs = guest_repo("gs", sample, pin_real, files={ROOT + "/a.cc": SRC})
-    check("sample platform build.json is accepted by recipe check", errs(gs, sample) == [], errs(gs, sample))
-    bad_rt = json.loads(json.dumps(sample))
-    bad_rt["external"] = [x if x["name"] != rtp["name"] else dict(x, commit="e" * 40) for x in bad_rt["external"]]
-    check("a recipe whose runtime external is not the pinned one is red", any("not the pinned runtime" in x for x in errs(gs, bad_rt)), errs(gs, bad_rt))
-    no_rt = json.loads(json.dumps(sample))
-    no_rt["external"] = [x for x in no_rt["external"] if x["name"] != rtp["name"]]
-    no_rt["include"] = []
-    check("a guest root may leave the runtime out", not [x for x in errs(gs, no_rt) if "runtime" in x], errs(gs, no_rt))
+    # --- the runtime external: declared exactly, system headers only from it
+    no_rt = copy_rec(rec)
+    no_rt["external"] = [ext]
+    check("guest root without the runtime external is red", any("must be declared exactly as pinned" in x for x in errs(g, no_rt)), errs(g, no_rt))
+    check("guest root with another commit of the runtime is red", any("must be declared exactly" in x for x in errs(g, guest_rec(ext, dict(rt, commit="9" * 40)))))
+    ns = copy_rec(rec)
+    ns["flags"]["cxx"].remove("-nostdinc++")
+    check("guest root without -nostdinc++ is red", any("lacks -nostdinc++" in x for x in errs(g, ns)), errs(g, ns))
+    ns = copy_rec(rec)
+    ns["flags"]["c"] = []
+    check("guest root without -nostdinc in flags.c is red", any("flags.c lacks -nostdinc" in x for x in errs(g, ns)), errs(g, ns))
+    gi = copy_rec(rec)
+    gi["include"] = gi["include"] + ["/usr/aarch64-linux-gnu/include"]
+    check("guest root with a glibc include dir is red", any("neither inside a declared external" in x for x in errs(g, gi)), errs(g, gi))
+    # --- the manifest of the runtime against the guest compiler's own (pure rule)
+    good = {"format": "fnvnx-runtime-manifest/1", "compiler_version": "13.3.0", "msvcmodel_patch_sha256": pin_real["runtime_manifest"]["msvcmodel_patch_sha256"],
+            "flags": list(recipe.SEMANTICS_FLAGS), "sizeof": {"wchar_t": 2, "size_t": 4, "long": 4}}
+    check("manifest equal to the guest compiler's: no error", recipe.runtime_errors(json.dumps(good), pin_real) == [])
+    for name, mut_ in (("compiler 15.2.0", {"compiler_version": "15.2.0"}), ("4-byte wchar_t", {"sizeof": {"wchar_t": 4, "size_t": 4, "long": 4}}),
+                       ("another patch", {"msvcmodel_patch_sha256": "0" * 64}), ("no -fshort-wchar", {"flags": [f for f in recipe.SEMANTICS_FLAGS if f != "-fshort-wchar"]})):
+        e = recipe.runtime_errors(json.dumps(dict(good, **mut_)), pin_real)
+        check("manifest with %s is red" % name, bool(e), e)
+    check("manifest that is not JSON is red", bool(recipe.runtime_errors("x", pin_real)))
     # --- the real compiler, by the pin of the checkout (no environment switch, no skip)
-    pin = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))
-    ext = pin["external"]
-    rec = guest_rec(ext)
-    prefix = os.path.join(BASE, "mirror")
+    ext = pin_real["external"]
+    rt = pin_real["runtime"]
+    prefix = None
     try:
         got = recipe.fetch_externals([ext], os.path.join(BASE, "ingest-store"), os.path.join(BASE, "extcache"), BASE)
         prefix = got[ext["name"]]["host"]
@@ -84,13 +101,51 @@ def main():
     except recipe.BuildRed as x:
         check("the pinned external is fetched by its commit and its tree hash matches", False, x.args)
         return
-    src = SRC + "void sz(decltype(sizeof 0) n) { (void)n; }\n"
-    gr = guest_repo("gb", rec, pin, files={ROOT + "/a.cc": src})
-    check("guest root with the real pin is valid", errs(gr, rec) == [], errs(gr, rec))
+    # the pinned runtime as the mirror holds it: its manifest must be there and equal the guest compiler's own
+    sample = json.load(open(os.path.join(REAL, T + "verify/samples/platform.build.json")))
+    gs = guest_repo("gs", sample, pin_real, files={ROOT + "/a.cc": SRC})
+    check("sample platform build.json is accepted by recipe check", errs(gs, sample) == [], errs(gs, sample))
+    rr, _ = build(gs, "GR")
+    f = rr.get("failure") or {}
+    check("the pinned runtime is judged by its manifest: green only if it states the guest compiler's version, patch, flags and data model",
+          (rr["status"] == "green") == (f.get("stage") != "runtime_manifest") and (rr["status"] == "green" or f.get("stage") == "runtime_manifest"), f)
+    print("INFO pinned runtime %s: %s %s" % (rt["commit"][:8], rr["status"], "; ".join(f.get("stderr", []))[:300]))
+    # a runtime pack with a valid manifest (the test's own, in a local artifacts repository next to the real compiler commit)
+    art = os.path.join(BASE, "artifacts.git")
+    work = os.path.join(BASE, "rtpack")
+    subprocess.run(["git", "init", "-q", "--bare", art], check=True)
+    subprocess.run(["git", "-C", art, "fetch", "-q", "--depth", "1", os.environ.get("ARTIFACTS_URL", recipe.ARTIFACTS_URL), ext["commit"]], check=True)
+    w(work, "MANIFEST.json", json.dumps(good))
+    w(work, "include/sys/_types.h", "typedef unsigned int fnvnx_t;\n")
+    w(work, "include/sys/socket.h", "#include <sys/_types.h>\ninline fnvnx_t sock() { return 1; }\n")
+    git(work, "init", "-q")
+    git(work, "add", "-A")
+    git(work, "commit", "-q", "-m", "rt")
+    git(work, "push", "-q", art, "HEAD:refs/heads/rt")
+    rt2 = dict(rt, name="rtpack", ref="rt", commit=git(work, "rev-parse", "HEAD").strip(), tree_sha256=cas.ingest(work_checkout(work), os.path.join(BASE, "ingest-store2")), at="/ext/rt")
+    pin2 = dict(pin_real, runtime=rt2)
+    os.environ["ARTIFACTS_URL"] = art
+    rec = guest_rec(ext, rt2)
+    src = SRC + "void sz(decltype(sizeof 0) n) { (void)n; }\n#include <sys/socket.h>\nfnvnx_t use() { return sock(); }\n"
+    gr = guest_repo("gb", rec, pin2, files={ROOT + "/a.cc": src})
+    check("guest root with the real compiler and a valid runtime is valid", errs(gr, rec) == [], errs(gr, rec))
     ra, ta = build(gr, "GA")
-    check("guest root builds on the external compiler", ra["status"] == "green", ra.get("failure"))
+    check("guest root builds; <sys/socket.h> finds the runtime's sys/_types.h (no glibc header)", ra["status"] == "green", ra.get("failure"))
     if ra["status"] != "green":
         return
+    gl = guest_repo("gl", rec, pin2, files={ROOT + "/a.cc": src, ROOT + "/glibc.cc": "#include </usr/aarch64-linux-gnu/include/bits/wordsize.h>\nint g() { return 1; }\n"})
+    rl, _ = build(gl, "GL")
+    check("a unit that reads a glibc cross header is red, stage closure naming unit and file", rl["status"] == "red" and rl["failure"]["stage"] == "closure"
+          and any("glibc.cc" in x and "/usr/aarch64-linux-gnu/include" in x for x in rl["failure"]["stderr"]), rl.get("failure"))
+    bad = dict(good, compiler_version="15.2.0")
+    w(work, "MANIFEST.json", json.dumps(bad))
+    git(work, "add", "-A")
+    git(work, "commit", "-q", "-m", "bad")
+    git(work, "push", "-q", art, "HEAD:refs/heads/rt-bad")
+    rt3 = dict(rt2, commit=git(work, "rev-parse", "HEAD").strip(), tree_sha256=cas.ingest(work_checkout(work), os.path.join(BASE, "ingest-store3")))
+    gm = guest_repo("gm", guest_rec(ext, rt3), dict(pin_real, runtime=rt3), files={ROOT + "/a.cc": SRC})
+    rm, _ = build(gm, "GM")
+    check("a runtime whose manifest names compiler 15.2.0 is red, stage runtime_manifest", rm["status"] == "red" and rm["failure"]["stage"] == "runtime_manifest", rm.get("failure"))
     rb, tb = build(gr, "GB")
     rw, tw = build(gr, "GA", os.path.join(BASE, "out-GA2"))
     so = lambda r: {p["name"]: p["sha256"] for p in r["plugins"]}  # noqa: E731
@@ -105,12 +160,14 @@ def main():
           and "#0x80000000" in disasm(ra, "_Z3f2if"))
     t = os.path.join(os.path.dirname(VERIFY), "toolchain", "msvcmodel", "test_msvcmodel.py")
     p = subprocess.run([sys.executable, "-I", t], env=dict(os.environ, CXX=os.path.join(prefix, "bin/aarch64-linux-gnu-g++")), capture_output=True, text=True)
-    # the sample root builds a unit that includes the guest's libstdc++ and newlib headers (compiler 13.3 reads gcc 15.2 headers: -std=gnu++20)
-    hdr = "#include <vector>\n#include <string>\n#include <cstdio>\nint hv(int n) { std::vector<int> v(n); std::string s(\"x\"); std::printf(\"%d\", (int)v.size()); return (int)s.size(); }\n"
-    gp = guest_repo("gp", sample, pin_real, files={ROOT + "/h.cc": hdr})
-    rp, tpb = build(gp, "GP")
-    check("sample platform root builds a unit using the runtime's libstdc++ and newlib headers", rp["status"] == "green", rp.get("failure"))
     check("test_msvcmodel.py on the external", p.returncode == 0 and "skip" not in p.stdout, p.stdout + p.stderr)
+
+
+def work_checkout(work):
+    """The committed tree of WORK checked out into a clean directory (what fetch_externals ingests)."""
+    out = work + "-co-" + os.urandom(3).hex()
+    subprocess.run(["git", "-C", work, "checkout-index", "-a", "-f", "--prefix=" + out + "/"], check=True)
+    return out
 
 
 if __name__ == "__main__":

@@ -7,10 +7,13 @@
  },
  "flags": {
   "c": [
+   "-nostdinc",
    "-O2",
    "-mabi=ilp32"
   ],
   "cxx": [
+   "-nostdinc",
+   "-nostdinc++",
    "-O2",
    "-mabi=ilp32",
    "-fms-extensions",
@@ -25,14 +28,15 @@
    "-fno-lifetime-dse",
    "-ffp-contract=off",
    "-DFNVNX_SDD=1",
-   "-fno-devirtualize",
-   "-std=gnu++20"
+   "-fno-devirtualize"
   ],
   "asm": [
+   "-nostdinc",
    "-mabi=ilp32"
   ]
  },
  "include": [
+  "/ext/gcc/lib/gcc/aarch64-linux-gnu/13/include",
   "/ext/a64/aarch64-none-elf/include/c++/15.2.0",
   "/ext/a64/aarch64-none-elf/include/c++/15.2.0/aarch64-none-elf/ilp32",
   "/ext/a64/aarch64-none-elf/include"
