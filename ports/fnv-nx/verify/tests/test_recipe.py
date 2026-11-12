@@ -511,6 +511,44 @@ def main():
     check("refusal set also through compile flags -Wl,", any("refusal set" in e for e in errs(m)))
     check("legit ld options are not refused", not recipe.refused(["-e", "f_a", "--gc-sections", "-z", "noexecstack", "-Map=x", "--entry=x", "-Ttext=0"]))
     check("include dir outside admitted roots rejected", any("include" in e for e in errs(mut(include=["/etc", "../x"]))))
+    # one home per header: the include dir lies in an admitted product root of the recipe root's own target
+    rk = os.path.join(BASE, "ck")
+    base_roots = recipe.load_admit(rk)
+    own = base_roots[ROOT].get("target")
+    other = "host" if own != "host" else "guest"
+    extra = {T + "hdr_prod": {"path": T + "hdr_prod", "class": "product", "target": own},
+             T + "hdr_other": {"path": T + "hdr_other", "class": "product", "target": other},
+             T + "hdr_tool": {"path": T + "hdr_tool", "class": "tool"}, T + "hdr_doc": {"path": T + "hdr_doc", "class": "doc"}}
+    rr = dict(base_roots, **extra)
+    rfiles = list(recipe.tracked(rk)) + [T + n + "/h.h" for n in ("hdr_prod", "hdr_other", "hdr_tool", "hdr_doc")]
+
+    def home(d):
+        return [e for e in recipe.check(mut(include=RECIPE["include"] + [T + d]), ROOT, rfiles, rr, None, rk) if "lies in no admitted product root" in e]
+    check("include dir in a product root of the same target accepted", not home("hdr_prod"), home("hdr_prod"))
+    check("include dir in a product root of the other target rejected", len(home("hdr_other")) == 1, home("hdr_other"))
+    check("include dir in a tool root rejected", len(home("hdr_tool")) == 1, home("hdr_tool"))
+    check("include dir in a doc root rejected", len(home("hdr_doc")) == 1, home("hdr_doc"))
+    # one name, one file: two include dirs of one recipe holding a header of the same include-relative path are red
+    rr2 = dict(rr, **{T + "hdr_prod2": {"path": T + "hdr_prod2", "class": "product", "target": own}})
+    rf2 = rfiles + [T + "hdr_prod2/h.h", T + "hdr_prod2/g.h"]
+
+    def dups(dirs, files_):
+        return [e for e in recipe.check(mut(include=RECIPE["include"] + dirs), ROOT, files_, rr2, None, rk) if "one home per header" in e]
+    check("one header in one include dir accepted", not dups([T + "hdr_prod"], rf2), dups([T + "hdr_prod"], rf2))
+    check("two include dirs holding the same include-relative header rejected, naming both files",
+          len(dups([T + "hdr_prod", T + "hdr_prod2"], rf2)) == 1 and T + "hdr_prod/h.h" in dups([T + "hdr_prod", T + "hdr_prod2"], rf2)[0]
+          and T + "hdr_prod2/h.h" in dups([T + "hdr_prod", T + "hdr_prod2"], rf2)[0])
+    check("two include dirs with different headers accepted", not dups([T + "hdr_prod", T + "hdr_prod2"], rfiles + [T + "hdr_prod2/g.h"]))
+    # across the whole target: two admitted guest roots with their own include/ dirs holding fnvnx/x.h, neither in this recipe's include
+    cr = dict(rr, **{T + "cr1": {"path": T + "cr1", "class": "product", "target": own}, T + "cr2": {"path": T + "cr2", "class": "product", "target": own},
+                     T + "cr3": {"path": T + "cr3", "class": "product", "target": other}})
+    crf = rfiles + [T + "cr1/include/fnvnx/x.h", T + "cr2/include/fnvnx/x.h", T + "cr3/include/fnvnx/x.h"]
+
+    def cross(roots_, files_):
+        return [e for e in recipe.check(mut(), ROOT, files_, roots_, None, rk) if "one home per header" in e]
+    check("two admitted roots of one target with fnvnx/x.h in include/ are red (naming both)", len(cross(cr, crf)) == 1 and T + "cr1/include/fnvnx/x.h" in cross(cr, crf)[0]
+          and T + "cr2/include/fnvnx/x.h" in cross(cr, crf)[0] and T + "cr3/include/fnvnx/x.h" not in cross(cr, crf)[0], cross(cr, crf))
+    check("the same header in a root of the other target, or only once, is accepted", not cross(cr, [f for f in crf if "cr2" not in f]), cross(cr, [f for f in crf if "cr2" not in f]))
     m = mut()
     m["generated"][0]["outputs"] = ["a.c"]
     check("generated output colliding with a tracked file rejected", any("also a tracked file" in e for e in errs(m)))
