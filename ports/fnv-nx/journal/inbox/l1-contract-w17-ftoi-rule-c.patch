@@ -1,0 +1,47 @@
+diff --git a/ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc b/ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc
+index 25a86c7..ba2ab4f 100644
+--- a/ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc
++++ b/ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc
+@@ -63,10 +63,22 @@ struct ftoi_pass : gimple_opt_pass {
+         if (!is_gimple_assign(stmt) || gimple_assign_rhs_code(stmt) != FIX_TRUNC_EXPR) continue;
+         tree lhs = gimple_assign_lhs(stmt), x = gimple_assign_rhs1(stmt);
+         tree it = TREE_TYPE(lhs), ft = TREE_TYPE(x);
+-        if (TREE_CODE(it) != INTEGER_TYPE && TREE_CODE(it) != ENUMERAL_TYPE) continue;
+-        if (!SCALAR_FLOAT_TYPE_P(ft) || TYPE_PRECISION(ft) > 64) continue;
++        // RULE: every FIX_TRUNC_EXPR of the function is rewritten here or is a compile error, so a unit that this plugin compiled
++        // holds no unbounded float -> integer conversion (the load of the plugin is the proof, gate fpexact). A shape the rewrite does
++        // not cover (a vector, a floating type wider than 64 bits, an integer type wider than 64 bits) names its types and fails.
++        if (TREE_CODE(it) != INTEGER_TYPE && TREE_CODE(it) != ENUMERAL_TYPE) {
++          error_at(gimple_location(stmt), "FTOI: conversion %qT to %qT is not covered by the MSVC rewrite", ft, it);
++          continue;
++        }
++        if (!SCALAR_FLOAT_TYPE_P(ft) || TYPE_PRECISION(ft) > 64) {
++          error_at(gimple_location(stmt), "FTOI: conversion %qT to %qT is not covered by the MSVC rewrite (source wider than 64 bits)", ft, it);
++          continue;
++        }
+         unsigned p = TYPE_PRECISION(it);
+-        if (p > 64) continue;
++        if (p > 64) {
++          error_at(gimple_location(stmt), "FTOI: conversion %qT to %qT is not covered by the MSVC rewrite (target wider than 64 bits)", ft, it);
++          continue;
++        }
+         // A floating value converted straight to an enum is not the exe's language: MSVC 2008 rejects it (C2440,
+         // "conversions between enumeration and floating point values are no longer allowed"; tests/s12 ftoi_enum
+         // has the compiler's own answer), so the exe's source named an integer type in between and that type chose
+diff --git a/ports/fnv-nx/verify/tests/test_plugins.py b/ports/fnv-nx/verify/tests/test_plugins.py
+index 6dc85dc..3a8ba83 100644
+--- a/ports/fnv-nx/verify/tests/test_plugins.py
++++ b/ports/fnv-nx/verify/tests/test_plugins.py
+@@ -143,6 +143,12 @@ def main():
+     check("volatile read is ldar", "ldar" in rd, rd)
+     check("volatile write is stlr", "stlr" in wr_, wr_)
+     check("float -> int is _ftol: 0x80000000 for NaN and out of range", "#0x80000000" in f2i, f2i)
++    # fnvnx_ftoi rewrites every FIX_TRUNC_EXPR or fails the compile: a conversion it does not cover (here to __int128) fails the build
++    wide = make_repo("wide", REC, "native", {ROOT + "/c.cc": "__int128 w(double d) { return (__int128)d; }\n"})
++    rwd, _ = build(wide, "W")
++    check("double -> __int128 fails the build with an FTOI error naming both types", rwd["status"] == "red" and any(
++        "FTOI" in x and "double" in x and "__int128" in x for x in rwd["failure"]["stderr"]), rwd.get("failure"))
++    check("the ordinary conversions of the same root still compile", "#0x80000000" in f2i)
+     # the plugin is a declared input of the CC stage and its flags are in the stage document
+     docs = [json.load(open(p)) for p in glob.glob(os.path.join(BASE, "A", "stage-docs", "*", "*.json"))]
+     cc = [d for d in docs if d["stage"] == "cc:a.cc"]

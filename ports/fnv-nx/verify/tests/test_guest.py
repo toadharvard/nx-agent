@@ -17,10 +17,12 @@ import test_plugins as tp
 from test_plugins import BASE, ROOT, T, REC, PLUGS, SRC, check, git, w, make_repo, errs, build, disasm, mut, recipe, cas, REAL, VERIFY
 
 def guest_rec(ext, rt, **kw):
-    """A guest recipe: the compiler external, the runtime external, -nostdinc(++) and the include dirs of the compiler's own headers and the runtime's."""
+    """A guest recipe: the compiler external, the runtime external, -nostdinc(++), -Werror=attributes and the include dirs of the compiler's own headers and the runtime's."""
     r = mut(compiler={"external": ext["name"], "cc": "bin/aarch64-linux-gnu-gcc", "cxx": "bin/aarch64-linux-gnu-g++"}, external=[ext, rt],
             include=[ext["at"] + "/lib/gcc/aarch64-linux-gnu/13/include", rt["at"] + "/include"], **kw)
     r["flags"] = {"c": ["-nostdinc"], "cxx": ["-nostdinc", "-nostdinc++"] + r["flags"]["cxx"], "asm": ["-nostdinc"]}
+    if "flags" not in kw:   # every guest root carries -Werror=attributes in flags.c and flags.cxx
+        r["flags"] = dict(r["flags"], **{k: list(r["flags"][k]) + [recipe.WERROR_ATTR] for k in ("c", "cxx")})
     return r
 
 
@@ -67,6 +69,18 @@ def main():
     check("product root without target is red", any('"target"' in x for x in errs(notarget, REC)), errs(notarget, REC))
     host = guest_repo("g5", REC, pin, target="host")
     check("host root may use the distribution compiler", not [x for x in errs(host, REC) if "guest" in x or "target" in x], errs(host, REC))
+    check("guest root with -Werror=attributes in flags.c and flags.cxx has no attribute-flag error", not [x for x in errs(g, rec) if "attributes" in x], errs(g, rec))
+    for k in ("c", "cxx"):
+        bad = guest_rec(ext, rt)
+        bad["flags"][k] = [f for f in bad["flags"][k] if f != recipe.WERROR_ATTR]
+        check("guest root without -Werror=attributes in flags.%s is invalid" % k, any("flags.%s lacks %s" % (k, recipe.WERROR_ATTR) in x for x in errs(g, bad)), errs(g, bad))
+    for f in ("-fpermissive", "-w", "-Wno-error", "-Wno-error=attributes"):
+        for k in ("c", "cxx"):
+            bad = guest_rec(ext, rt)
+            bad["flags"][k] = bad["flags"][k] + [f]
+            check("guest root with %s in flags.%s is invalid" % (f, k), any("flags.%s: %s downgrades" % (k, f) in x for x in errs(g, bad)), errs(g, bad))
+    check("host root may carry -fpermissive", not [x for x in errs(host, dict(REC, flags=dict(REC["flags"], cxx=REC["flags"]["cxx"] + ["-fpermissive"]))) if "downgrades" in x])
+    check("host root needs no -Werror=attributes", not [x for x in errs(host, REC) if "attributes" in x], errs(host, REC))
     # --- the runtime external: declared exactly, system headers only from it
     no_rt = copy_rec(rec)
     no_rt["external"] = [ext]

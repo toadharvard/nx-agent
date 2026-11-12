@@ -9,7 +9,8 @@
   "c": [
    "-nostdinc",
    "-O2",
-   "-mabi=ilp32"
+   "-mabi=ilp32",
+   "-Werror=attributes"
   ],
   "cxx": [
    "-nostdinc",
@@ -29,7 +30,9 @@
    "-ffp-contract=off",
    "-DFNVNX_SDD=1",
    "-fno-devirtualize",
-   "-fno-reorder-blocks-and-partition"
+   "-fno-reorder-blocks-and-partition",
+   "-std=gnu++20",
+   "-Werror=attributes"
   ],
   "asm": [
    "-nostdinc",
