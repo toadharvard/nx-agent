@@ -581,3 +581,9 @@ Ids: gate_eh uses the orchestrator's ASM-222/223/224. L1's 225..227 are withdraw
 - w10 f21fae30: trunk merged; pure tests 0 FAIL. Stopped.
 - L2: A-EDGE is the checked fact LAYOUT (gate_addr), A-BOUNDS = ASM-006, pi = ASM-001. L1 rebases take toolchain/ from L2 0989525.
 - ASM-225 minted: REMOVE, L3a w4, pcsrc premise F (cond:fresh is never green). L3a w7 is closing the range hole (atimgpud 0x100092d4) and the dataflow sites.
+
+## 09:30Z
+- L4 d2352fef conflicts with the trunk because it carries copies of L1 recipe commits. L4 rebases tests/bootguest onto the candidate 58c113f0, which has variants, ldcheck and link.roots but no fixtures.
+- L6A: isystem, specdefaults and -dU are not on the trunk or the candidate. gl4 builds against the candidate. If it is blocked, w16's specdefaults/-dU become the first item after the merge.
+- L3a farm 2: the setup failure came from an old script; the trunk's install_mirror uses -r FILE. Queued for w17's pins: gmpy2 + MPFR/GMP libs.
+- Finding (asked L4 for the owner): trunk farm/boot_job.sh:103-105 does an unpinned apt-get of python3-pip and a pip install of unicorn==2.1.4 without a hash. It is a pinned-machinery violation.
