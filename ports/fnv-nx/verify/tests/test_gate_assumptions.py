@@ -44,7 +44,7 @@ RANGES = {"L1": [100, 199], "L3a": [200, 299], "L3b": [300, 399], "L4": [400, 49
 
 
 def base():
-    return {"format": G.FORMAT, "ranges": RANGES, "entries": [
+    return {"format": G.FORMAT, "ranges": RANGES, "retired": [], "entries": [
         {"id": asm(1), "text": "t", "used_by": [T + "docs/a.md"], "aliases": ["c"], "status": "OWNER",
          "decision": {"file": "CLAUDE.md", "quote": "1. the compiler is correct;"}},
         {"id": asm(2), "text": "t", "used_by": [T + "docs/a.md"], "aliases": [], "status": "OWNER",
@@ -165,6 +165,41 @@ check("an id defined by two records is red", "id-repeated" in codes(run(d)[0]), 
 d = base()
 d["entries"][2]["aliases"] = ["c"]
 check("an alias claimed by two records is red", "alias-claimed" in codes(run(d)[0]), run(d)[0])
+def withret(d, ret):
+    d = copy.deepcopy(d)
+    d["retired"] = ret
+    return d
+
+
+# never reuse: retired ids and aliases
+d = withret(base(), [{"id": asm(11), "aliases": ["gone alias"]}])
+check("a retired record is green", run(d)[0] == [], run(d)[0])
+d = withret(base(), [{"id": asm(10), "aliases": []}])
+check("a new entry with a retired id is red", "id-retired-reused" in codes(run(d)[0]), run(d)[0])
+d = withret(base(), [{"id": asm(11), "aliases": ["x"]}])
+check("a live alias that is retired is red", "alias-retired-reused" in codes(run(d)[0]), run(d)[0])
+check("retired twice is red", "retired-form" in codes(run(withret(base(), [{"id": asm(11), "aliases": []}] * 2))[0]), "")
+check("a malformed retired item is red", "retired-form" in codes(run(withret(base(), [{"id": "x"}]))[0]), "")
+check("retired not a list is red", "retired-form" in codes(run(withret(base(), {}))[0]), "")
+R = {"id": asm(11), "aliases": ["gone alias"]}
+FR = {T + "docs/a.md": "see %s\n" % asm(11), T + "docs/b.md": "rests on gone alias\n", T + "docs/c.md": "fine\n"}
+errs = G.judge_retired(sorted(FR), {R["id"]: R["aliases"]}, FR.__getitem__)
+check("a cited retired id and a cited retired alias are red, an uncited file is not",
+      sorted(e.subject for e in errs) == [T + "docs/a.md", T + "docs/b.md"] and codes(errs) == {"retired-cited"}, errs)
+# the merge ratchet
+B = base()
+N = copy.deepcopy(B)
+check("ratchet: same registry is green", G.ratchet_errors(B, N) == [], "")
+N["entries"].pop(2)
+check("ratchet: a vanished id is red", codes(G.ratchet_errors(B, N)) == {"ratchet-id", "ratchet-alias"}, G.ratchet_errors(B, N))
+N["retired"] = [{"id": asm(10), "aliases": ["x"]}]
+check("ratchet: retiring the id and its aliases is green", G.ratchet_errors(B, N) == [], G.ratchet_errors(B, N))
+N = copy.deepcopy(B)
+N["entries"][2]["aliases"] = []
+check("ratchet: a dropped alias is red", codes(G.ratchet_errors(B, N)) == {"ratchet-alias"}, G.ratchet_errors(B, N))
+N["retired"] = [{"id": asm(77), "aliases": ["x"]}]
+check("ratchet: an alias that moved to retired is green", G.ratchet_errors(B, N) == [], G.ratchet_errors(B, N))
+check("ratchet: a base without a registry holds nothing", G.ratchet_errors(None, N) == [], "")
 check("ranges missing is red", "registry-form" in codes(run({"format": G.FORMAT, "entries": base()["entries"]})[0]) or
       "ranges-form" in codes(run({"format": G.FORMAT, "entries": base()["entries"]})[0]), run({"format": G.FORMAT, "entries": []})[0])
 for name, rg in (("a lead missing", {k: v for k, v in RANGES.items() if k != "L2"}), ("overlapping", dict(RANGES, L2=[150, 899])),
@@ -278,6 +313,14 @@ rc, res = gate(tree({T + "docs/c.py": "# assumed\nx = 1\n"}))
 check("gate: a python comment is a mention", rc == 2 and res["universe"] == 1, (rc, res))
 rc, res = gate(tree({T + "docs/c.py": "assumed = 1\nname = 'assumption'\n"}))
 check("gate: python code is not a mention", rc == 0, (rc, res))
+
+# whole gate
+rc, res = gate(tree({T + "docs/b.md": "x gone alias\n"}, withret(base(), [R])))
+check("gate: a retired alias cited in the tree is red", rc == 2 and has(res["errors"], "gone alias"), (rc, res))
+rc, res = gate(tree({T + "docs/b.md": "x %s\n" % asm(11)}, withret(base(), [R])))
+check("gate: a retired id cited in the tree is red", rc == 2 and has(res["errors"], asm(11)), (rc, res))
+rc, res = gate(tree(None, withret(base(), [R])))
+check("gate: a retired id in the registry only is green", rc == 0, (rc, res))
 
 # the full findings file: uncapped, sorted, counted per code, named in the summary line
 d = base()

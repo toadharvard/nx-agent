@@ -1471,6 +1471,11 @@ The registry is certified iff ALL hold:
      An id below 100 is a legacy id and exempt; an id from 100 lies in the range of the first lead named in its owner. An id
      defined by two records and an alias claimed by two records are red. A record of a layer branch enters with the branch's merge
      under its range, so ids never collide.
+  9. never reuse: the registry's `retired` lists {id, aliases} of every record that is no longer an entry. A live entry with a retired id
+     or a retired alias is red; a retired id or alias occurring in any scanned file (outside the registry) is red, so a record cannot be
+     removed while anything cites it, and a citation moves to the live record. The merge ratchet (verdict.py merge, ratchet_errors):
+     every id and alias that the base registry held, live or retired, is held by the new one, live or retired; a vanished id or alias
+     blocks the merge, the same mechanism as the dropped-gate ratchet.
   8. findings: every red item is a finding with a code (entry-form, id-form, id-repeated, id-range, alias-claimed, used-by-*,
      decision-*, owner-*, removed-by-form, ranges-form, mention-no-id, mention-unknown-id, stray-id, ...). stdout shows the first
      20; the FULL list (every id and code, sorted, with the total per code) is written as JSON to GATE_DETAIL/assumptions.findings.json

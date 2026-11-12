@@ -201,17 +201,73 @@ def ranges_errors(rg):
     return out
 
 
+def retired_of(rl):
+    """`retired` is a list of {"id": ASM-NNN, "aliases": [str]}: records that are no longer entries, with every alias they had. -> ({id: [aliases]}, [finding])"""
+    out, err = {}, []
+    if not isinstance(rl, list):
+        return {}, [finding("retired-form", "retired", "retired is not a list")]
+    for r in rl:
+        if not (isinstance(r, dict) and set(r) == {"id", "aliases"} and isinstance(r["id"], str) and ID_FORM.match(r["id"])
+                and isinstance(r["aliases"], list) and all(isinstance(a, str) and a.strip() for a in r["aliases"])):
+            err.append(finding("retired-form", "retired", "a retired item is not {id ASM-NNN, aliases [str]}: %r" % (r,)))
+        elif r["id"] in out:
+            err.append(finding("retired-form", r["id"], "id is retired twice"))
+        else:
+            out[r["id"]] = list(r["aliases"])
+    return out, err
+
+
+def judge_retired(files, retired, read):
+    """A retired id or alias occurring in any scanned file is red: the citation moves to the live record, and a record cannot be removed
+    while anything cites it. -> [finding]"""
+    out = []
+    for f in files:
+        t = read(f)
+        for i, al in sorted(retired.items()):
+            for tok in [i] + al:
+                if tok in t:
+                    out.append(finding("retired-cited", f, "%s cites %r of the retired record %s" % (f, tok, i)))
+    return out
+
+
+def ratchet_errors(base, new):
+    """The merge ratchet: every id and alias that the BASE registry held (entry or retired) is in the new registry, live or retired. A record
+    or an alias cannot vanish; to remove one it is listed in `retired`, and then the tree may not cite it. -> [finding]"""
+    out = []
+    def held(d):
+        ids, als = set(), set()
+        if isinstance(d, dict):
+            for e in d.get("entries", []):
+                if isinstance(e, dict):
+                    ids.add(e.get("id"))
+                    als.update(a for a in e.get("aliases", []) if isinstance(a, str))
+            for r in d.get("retired", []):
+                if isinstance(r, dict):
+                    ids.add(r.get("id"))
+                    als.update(a for a in r.get("aliases", []) if isinstance(a, str))
+        return ids, als
+    bi, ba = held(base)
+    ni, na = held(new)
+    for i in sorted(x for x in bi - ni if isinstance(x, str)):
+        out.append(finding("ratchet-id", i, "%s was held by the base registry and is neither an entry nor retired now" % i))
+    for a in sorted(ba - na):
+        out.append(finding("ratchet-alias", a, "alias %r was held by the base registry and is neither an alias nor retired now" % a))
+    return out
+
+
 def judge_registry(doc, tracked, read, gate_names):
     """-> ([error str], counts); pure function of its arguments"""
     err = []
-    if not isinstance(doc, dict) or set(doc) != {"format", "ranges", "entries"} or doc["format"] != FORMAT \
+    if not isinstance(doc, dict) or set(doc) != {"format", "ranges", "retired", "entries"} or doc["format"] != FORMAT \
             or not isinstance(doc["entries"], list):
-        return [finding("registry-form", "registry", "registry is missing or is not %s with keys format, ranges, entries" % FORMAT)], {}
+        return [finding("registry-form", "registry", "registry is missing or is not %s with keys format, ranges, retired, entries" % FORMAT)], {}
     rg = doc["ranges"]
     rerr = ranges_errors(rg)
     if rerr:
         return [finding("ranges-form", "ranges", m) for m in rerr], {}
     ids, aliases = set(), {}
+    retired, rerr2 = retired_of(doc["retired"])
+    err += rerr2
     count = {"OWNER": 0, "REMOVE": {}, "no gate yet": 0, "planned": 0, "OPEN": 0,
              "entries": len(doc["entries"])}
     items = owner_items(read(OWNER_FILE)) if OWNER_FILE in tracked else []
@@ -225,6 +281,8 @@ def judge_registry(doc, tracked, read, gate_names):
             err.append(finding("id-form", str(i), "entry id %r is not ASM-NNN" % (i,)))
             continue
         w = "%s: " % i
+        if i in retired:
+            err.append(finding("id-retired-reused", i, w + "id is retired: an id is never reused"))
         if i in ids:
             err.append(finding("id-repeated", i, w + "id is repeated"))
         ids.add(i)
@@ -247,6 +305,8 @@ def judge_registry(doc, tracked, read, gate_names):
             err.append(finding("aliases-form", i, w + "aliases is not a list of strings"))
         else:
             for a in al:
+                if a in {x for r in retired.values() for x in r}:
+                    err.append(finding("alias-retired-reused", i, w + "alias %r is retired" % a))
                 if a in aliases:
                     err.append(finding("alias-claimed", i, w + "alias %r is also an alias of %s" % (a, aliases[a])))
                 aliases[a] = i
@@ -376,6 +436,7 @@ def main():
                 text_files.append(p)
     # the owner's file is outside the tree: it is read, not scanned (it holds the owner's words)
     tracked_all = set(tracked) | {"CLAUDE.md"}
+    scanned_all = [p for p in text_files if not any(p == r or p.startswith(r + "/") for r in records)]
     scanned = [p for p in text_files if not p.endswith(".json")
                and not any(p == r or p.startswith(r + "/") for r in records)]
     doc = load(REGISTRY)
@@ -384,8 +445,10 @@ def main():
     errors, count = judge_registry(doc, tracked_all, read, gate_names)
     ids = set(e["id"] for e in doc["entries"] if isinstance(e, dict) and isinstance(e.get("id"), str)) \
         if isinstance(doc, dict) and isinstance(doc.get("entries"), list) else set()
+    retired = retired_of(doc.get("retired"))[0] if isinstance(doc, dict) else {}
+    errors += judge_retired([p for p in scanned_all if p != REGISTRY], retired, read)
     mentions, bad = judge_mentions(scanned, ids, read)
-    stray = judge_stray(text_files, ids, read)
+    stray = judge_stray(text_files, ids | set(retired), read)
     for f, x in sorted(stray.items()):
         errors.append(finding("stray-id", f, "%s: ids not in the registry: %s" % (f, ", ".join(x))))
     n = len(mentions) - len(bad)

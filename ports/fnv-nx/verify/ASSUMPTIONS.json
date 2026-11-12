@@ -34,6 +34,14 @@
    899
   ]
  },
+ "retired": [
+  {
+   "id": "ASM-021",
+   "aliases": [
+    "images dynamic names"
+   ]
+  }
+ ],
  "entries": [
   {
    "id": "ASM-001",

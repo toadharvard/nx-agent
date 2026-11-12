@@ -35,6 +35,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
+import gate_assumptions  # noqa: E402
 import gatesdir  # noqa: E402
 import sandbox  # noqa: E402
 
@@ -236,6 +237,17 @@ def cmd_merge(a):
         gone = sorted({g["name"] for g in prev["gates"]} - {g["name"] for g in v["gates"]})
         if gone:
             raise Err("blocked: ratchet, gate(s) removed since previous green verdict: " + ",".join(gone), 2)
+    # the registry ratchet: every id and alias the base registry held is still held, live or retired (gate_assumptions.ratchet_errors)
+    brc, btxt, _ = _git(repo, "show", old + ":" + gate_assumptions.REGISTRY)
+    if brc == 0:
+        nrc, ntxt, nerr = _git(repo, "show", tree + ":" + gate_assumptions.REGISTRY)
+        try:
+            lost = gate_assumptions.ratchet_errors(json.loads(btxt), json.loads(ntxt)) if nrc == 0 else \
+                [gate_assumptions.finding("ratchet-id", "registry", "the registry is missing from the merge tree")]
+        except ValueError:
+            lost = [gate_assumptions.finding("ratchet-id", "registry", "a registry is not JSON")]
+        if lost:
+            raise Err("blocked: ratchet, registry: " + "; ".join(str(x) for x in lost[:10]), 2)
     msg = "%smerge %s\n\nverdict: green, tree %s, gates %d\n" % (o.get("--message-prefix", ""), o["--from"], tree, len(v["gates"]))
     new = _git_ok(repo, "commit-tree", tree, "-p", old, "-p", src, inp=msg)
     rc, _, err = (0, "", "") if "--base" in o else _git(repo, "update-ref", ref, new, old)
