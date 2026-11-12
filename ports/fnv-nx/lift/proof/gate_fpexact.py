@@ -285,7 +285,8 @@ def judge_object(oid, path, asm=False, unit=None):
     elif not asm and d["unit"] != unit:
         f2i.append("result file names the unit %r, not %r" % (d["unit"], unit))
     else:
-        f2i += ["%s:%s in %s: %s outside a conversion helper" % (f["file"], f["line"], f["function"], f["kind"]) for f in d["findings"]]
+        f2i += ["%s:%s in %s: %s outside a conversion helper" % (f["file"], f["line"], f["function"], f["kind"]) for f in d["findings"] if f["kind"] != "builtin"]
+        # a builtin finding (lround, a libm call) is IEEE under OWNER ASM-008: not red; conv and asm are
         if scan["fcvt"] and d["sites"] == 0:
             f2i.append("%d float->int instruction(s) (%s) but the unit has no conversion site" % (len(scan["fcvt"]), scan["fcvt"][0][1]))
     return {"rcp:" + oid: rcp, "f2i:" + oid: f2i}
