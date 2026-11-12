@@ -1,0 +1,8 @@
+{
+ "format": "fnvnx-boot-inputs/1",
+ "inputs": [
+  {"name": "fonts", "repo": "fnv-nx-build", "ref": "tools/fonts-wine9", "commit": "099942c35ee21a2ff7ac50e4d13fed12cc173ad3",
+   "path": "fonts", "sums": "SHA256SUMS", "sums_sha256": "0a9b00c5904737b42fee3d81e220d1b646dd012c1aef96d132bf0231369cd077",
+   "mount": "switch/fnv/fonts"}
+ ]
+}

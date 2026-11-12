@@ -22,6 +22,10 @@
 #    Shaders; every part's and every file's sha256 checked by the fetcher), or only the Data items named in BOOT_DATA_ITEMS; `--no-data`
 #    there means no Data item, a run without the game's archives). FalloutNV.exe must be in it; its sha256 is printed. The fetched
 #    Data items are recorded in meta.json (data_items; null with GAME_DIR, whose content the job does not know)
+#    The declared port inputs (verify/boot_inputs.json; now the font set, fnv-nx-build tools/fonts-wine9 at a pinned commit) are fetched by that
+#    commit, verified (sha256 of the sums file, the file set equal to the sums entries under the input's path, every file) and mounted
+#    read-only on the card (sdmc:/switch/fnv/fonts, verify/bootdecl.py); any mismatch ends the job "input-error" before the boot, and
+#    OUT.json inputs.declared records {name, commit, sums_sha256, files}
 #  5 verify/boot.py run, heap size 0x40000000. Exit 0 or 2 (the guest stopped with a fault, a deadlock, a missing
 #    module or a nonzero exit) is a RESULT; 1 is an input error and fails the job
 #  6 publish the orphan commit of OUT.json, OUT.console.txt, spec.json, meta.json to branch l4-verify/boot/<elf_id>
@@ -38,7 +42,7 @@
 # Stage table: env BOOT_STAGE_TABLE_BRANCH (default l4-verify/milestones), file stage.milestones (bootmiles format), appended after the
 #    contract's rows (bootinputs.py milestones --stage-table: names unique, every exe address a lifted code entry). A missing branch: the
 #    job runs with the contract rows only and the final line says stage_table=absent; a present branch without the file fails the job.
-# Env: ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
+# Env: BOOT_INPUTS (the declared-inputs pin file, default verify/boot_inputs.json), ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
 # when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (default $HOME/fnvnx-farm),
 # WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
 # passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it).
@@ -189,7 +193,28 @@ fi
 [ -s "$GAME_DIR/FalloutNV.exe" ] || die "$GAME_DIR/FalloutNV.exe is missing or empty"
 EXE_SHA=$(sha256sum "$GAME_DIR/FalloutNV.exe" | cut -c1-64)
 log "game $GAME_DIR: FalloutNV.exe sha256 $EXE_SHA"
-SD=$WORK/sd; rm -rf "$SD"; mkdir -p "$SD"
+SD=$WORK/sd; chmod -R u+w "$SD" 2> /dev/null || true; rm -rf "$SD"; mkdir -p "$SD"
+# the declared port inputs (verify/boot_inputs.json: the font set): the pinned commit is fetched through the same artifacts clone, then
+# verify/bootdecl.py verifies sha256(sums file) == the pin, the file set against the sums list (an extra or a missing file is an error)
+# and every file, and mounts it read-only under the card. Any mismatch ends the job as input-error before the boot.
+PINS=${BOOT_INPUTS:-$NX/verify/boot_inputs.json}   # BOOT_INPUTS: another pin file (the job test points it at a fixture)
+DECL=$WORK/declared; rm -rf "$DECL"; mkdir -p "$DECL"
+DSRC=(); DERR=$WORK/declared.err
+while IFS=$'\t' read -r dname dcommit dpath dsums; do
+  [ -n "$dname" ] || continue
+  retry GITA fetch -q "$ARTIFACTS_URL" "$dcommit" || die "input-error: fetch of declared input $dname@${dcommit:0:12} failed"
+  [ "$(GITA rev-parse FETCH_HEAD^{commit})" = "$dcommit" ] || die "input-error: declared input $dname: fetched commit is not $dcommit"
+  mkdir -p "$DECL/$dname"
+  dextract() { GITA archive "$dcommit" "$dpath" "$dsums" | tar -x -C "$DECL/$dname"; }
+  retry dextract || die "input-error: cannot extract $dpath and $dsums of declared input $dname@${dcommit:0:12}"
+  DSRC+=(--src "$dname=$DECL/$dname")
+done < <(python3 -s -B -c 'import json, sys
+for p in json.load(open(sys.argv[1]))["inputs"]:
+    print("\t".join(p[k] for k in ("name", "commit", "path", "sums")))' "$PINS" 2> "$DERR" || echo "pins unreadable" > "$DERR")
+[ ! -s "$DERR" ] || die "input-error: $PINS: $(tail -1 "$DERR" | cut -c1-300)"
+python3 -s -B "$NX/verify/bootdecl.py" mount --pins "$PINS" --root "$SD" "${DSRC[@]}" --record "$WORK/declared.json" > "$WORK/declared.log" 2> "$DERR" \
+  || die "input-error: $(tail -1 "$DERR" | cut -c1-400)"
+log "declared inputs: $(cat "$WORK/declared.log" | tr '\n' ' ')"
 # the contract's files in the forms boot.py takes (each converter fails on any row it does not understand)
 conv() { "$@" 2> "$WORK/conv.err" || die "$(tail -1 "$WORK/conv.err" | cut -c1-400)"; }
 conv "${BI[@]}" reserved --modules "$IN/modules.tsv" --exe "$GAME_DIR/FalloutNV.exe" -o "$IN/reserved.tsv"
@@ -232,6 +257,12 @@ field() { sed -n "s/.* $1=\([^ ]*\).*/\1/p" <<< "$SUMMARY" | head -1; }
 REASON=$(field reason); LAST=$(field last); INSTR=$(field instr); MAIN=$(field main); THREADS=$(field threads)
 for v in REASON LAST INSTR MAIN THREADS; do [ -n "${!v}" ] || die "summary line has no $v field: $SUMMARY"; done
 [ -f "$OUT" ] && [ -f "$WORK/OUT.console.txt" ] || die "boot.py exit $RC but OUT.json or OUT.console.txt is missing"
+
+# the declared inputs (name, commit, sums_sha256, files) into OUT.json "inputs.declared"
+python3 -I -c 'import json, sys
+o = json.load(open(sys.argv[1]))
+o.setdefault("inputs", {})["declared"] = json.load(open(sys.argv[2]))
+open(sys.argv[1], "w").write(json.dumps(o, sort_keys=True, indent=1) + "\n")' "$OUT" "$WORK/declared.json" || die "cannot record the declared inputs in OUT.json"
 
 PRESENTS=""
 if [ -n "$GPU_LIB" ]; then
