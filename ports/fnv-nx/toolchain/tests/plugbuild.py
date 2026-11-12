@@ -33,11 +33,7 @@ TOOLCHAIN = os.path.normpath(os.path.join(HERE, '..'))
 STORE = os.environ.get('GATE_CACHE') or os.path.join(tempfile.gettempdir(), 'fnvnx-toolchain-tests-cache')
 STATS = {'run': 0, 'hit': 0}
 CXX_ONLY_FLAGS = ('-std=gnu++17', '-fno-sized-deallocation', '-fpermissive')   # the C++-only options cc1 warns about
-PRODUCT_FLAGS = ['-mabi=ilp32', '-std=gnu++17', '-O2', '-fms-extensions', '-fshort-wchar', '-frounding-math', '-fsigned-char',
-                 '-fno-strict-aliasing', '-fwrapv', '-fno-delete-null-pointer-checks', '-fcheck-new', '-fno-sized-deallocation',
-                 '-fno-lifetime-dse', '-ffp-contract=off', '-fPIC', '-fpermissive', '-Wno-narrowing', '-march=armv8-a+crc+crypto',
-                 '-mtune=cortex-a57', '-fno-stack-protector', '-fno-stack-clash-protection', '-mno-outline-atomics',
-                 '-U_FORTIFY_SOURCE', '-fno-devirtualize']
+PRODUCT_FLAGS = ['-O2', '-Werror=attributes']   # per-root flags only; the semantic flags (-mabi=ilp32, -fms-extensions, ...) come from verify/guest_compiler.json
 _N = [0]
 # the plugins of a lifted root: fnvnx_ftoi in mode lifted is required (recipe.LIFTED_ARGS), the others are the test's choice
 
