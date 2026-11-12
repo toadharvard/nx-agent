@@ -1,0 +1,14 @@
+Reference tests of fnvnx_sha256 (accepted assumption 2: SHA-256 is correct; these check our implementation against the published vectors).
+
+nist.c   FIPS 180-4 examples ("abc", empty, 448-bit message, 1,000,000 x 'a') and the CAVP byte-oriented vector files
+         SHA256ShortMsg.rsp (65) and SHA256LongMsg.rsp (64): `nist FILE...`.
+monte.c  CAVP SHA256Monte.rsp (100 checkpoints, 1000 iterations each): `monte FILE`.
+
+Vector files: fnv-nx-build tools/docs-d3d9 commit efe9ae7f (NIST shabytetestvectors.zip, members
+shabytetestvectors/SHA256ShortMsg.rsp, SHA256LongMsg.rsp, SHA256Monte.rsp; listed in that mirror's manifest).
+Total: 4 + 65 + 64 + 100 = 233 vectors, 0 mismatches required.
+
+Host build (ASan/UBSan):
+  cc -O1 -fsanitize=address,undefined -Ilib/sha256/include lib/sha256/tests/nist.c lib/sha256/sha256.c -o nist
+  cc -O1 -fsanitize=address,undefined -Ilib/sha256/include lib/sha256/tests/monte.c lib/sha256/sha256.c -o monte
+It becomes a test root (class test, reference = the NIST files via the pinned external) when the test-root shape exists.
