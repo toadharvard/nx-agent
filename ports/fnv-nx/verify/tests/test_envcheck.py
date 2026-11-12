@@ -247,9 +247,18 @@ find . -name x -exec chmod +x {} +; exec env A=1 nice -n 5 gzip
 bash -c 'grep -q x y; unzip z'; timeout 5 chroot "$CH" apt-get update
 """)
 rc = subprocess.run([sys.executable, "-I", SP, sh], capture_output=True, text=True)
-check("script_programs: every command node (nesting, backticks, subshells, runners, bash -c), no builtins/functions/paths/options/heredoc text",
-      rc.returncode == 0 and rc.stdout.split() == ["apt-get", "bash", "cat", "chmod", "chroot", "dirname", "env", "find", "grep", "gzip", "ls", "make", "nice", "patch",
+check("script_programs: every command node (nesting, backticks, subshells, runners, bash -c), no builtins/functions/paths/options/heredoc text; unzip has no record",
+      rc.returncode == 1 and "unclassified: unzip" in rc.stderr and rc.stdout.split() == ["apt-get", "bash", "cat", "chmod", "chroot", "dirname", "env", "find", "grep", "gzip", "ls", "make", "nice", "patch",
                                                     "python3", "realpath", "sed", "tar", "tee", "timeout", "unzip"], (rc.returncode, rc.stdout, rc.stderr))
+sys.path.insert(0, os.path.join(os.path.dirname(VERIFY), "farm"))
+import script_programs as sp  # noqa: E402
+RECS = sp.load_classes()
+rn = {n for n, r in RECS.items() if r["class"] == "runner"}
+check("program_classes: every runner of the scanner has an argv/flag/string rule; leaf, runner and opaque all occur; a record per program in the profile's scanned set",
+      {"env", "nice", "timeout", "chroot", "xargs", "find", "sh", "bash", "exec"} <= rn and {r["class"] for r in RECS.values()} == {"leaf", "runner", "opaque"}
+      and {"cp", "make", "patch", "python3", "tar", "sed"} <= set(RECS), sorted(rn))
+cd = doc()
+check("verdict check validates program_classes (the committed file is clean)", [b for b in envcheck.check(cd) if "program_classes" in b] == [], None)
 open(sh, "w").write('$CC -c a.c\n"${TOOL}" x\nok=1; true\n')
 rc = subprocess.run([sys.executable, "-I", SP, sh], capture_output=True, text=True)
 check("script_programs: a command name that is not literal is reported and exits 1", rc.returncode == 1 and rc.stderr.count("dynamic:") == 2, (rc.returncode, rc.stderr))
@@ -260,6 +269,11 @@ check("envcheck scripts: a program outside the profile and a non-literal name ar
 open(sh, "w").write("make\ngcc\n")
 rc, out, err = ec("scripts", "--profile", PN, sh)
 check("envcheck scripts: programs of the profile pass", rc == 0 and out.strip() == "envcheck: OK", (rc, out))
+d = doc()
+d["profiles"][PN]["programs"].append("no-record-prog")
+rc, out, err = ec("check", "--env", write(d, "norec.json"))
+check("a program of a profile without a record in program_classes.json is a mismatch (totality)",
+      rc == 2 and "env: profile %s: program no-record-prog has no record in farm/program_classes.json" % PN in out, (rc, out))
 d = doc()
 d["profiles"][PN]["prerequisites"].append("not-in-programs")
 rc, out, err = ec("check", "--env", write(d, "pre.json"))

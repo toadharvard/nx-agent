@@ -3,22 +3,24 @@
     python3 -I script_programs.py FILE.sh... [--json]
 Prints one program name per line, then, on stderr, one `dynamic:` line per command whose name is not a literal; any dynamic command
 makes the exit status 1 (a name that is a variable or an expansion cannot be derived statically: the build declares it or removes it).
-Rule: shfmt parses each file into a syntax tree; every command node (CallExpr: simple commands, also inside $(..), `..`, pipelines,
+Every scanned program has one record in program_classes.json (leaf / runner with its argv rule and the man page it cites / opaque); a
+program without a record is printed as `unclassified:` and makes the exit status 1. Rule: shfmt parses each file into a syntax tree; every command node (CallExpr: simple commands, also inside $(..), `..`, pipelines,
 subshells, functions, loops, conditions, process substitutions) names its program by its first word. That word is literal when all its
 parts are literal text (plain or quoted). Not programs: shell builtins and keywords (bash's own list, `bash -c compgen -b`), functions
 the scripts define, and words with a `/` (files of the build). A runner is followed to the program it runs: exec command env nohup time
 nice timeout sudo setsid stdbuf chroot xargs, `find ... -exec/-execdir CMD`, and `sh|bash|dash -c 'LITERAL'` (the literal is parsed
 the same way). Here-documents are data."""
 import json
+import os
 import subprocess
 import sys
 
-WRAP = {"exec": 0, "command": 0, "env": 0, "nohup": 0, "time": 0, "nice": 0, "sudo": 0, "setsid": 0, "stdbuf": 0, "xargs": 0,
-        "chroot": 1, "timeout": 1}   # runner -> positional arguments before the command (chroot DIR, timeout DURATION)
-OPTARG = {"nice": {"-n"}, "timeout": {"-s", "-k"}, "env": {"-u", "-C", "-S"}, "sudo": {"-u", "-g", "-C", "-h", "-p", "-r", "-t", "-U"},
-          "xargs": {"-n", "-I", "-P", "-L", "-d", "-s", "-a", "-E"}, "stdbuf": set(), "chroot": {"--userspec", "--groups"},
-          "exec": {"-a"}, "command": set(), "nohup": set(), "time": {"-f", "-o"}, "setsid": set()}   # options of runners that take a value
-SHELLS = {"sh", "bash", "dash"}
+CLASSES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "program_classes.json")
+
+
+def load_classes(path=None):
+    """{program: record} of program_classes.json (see its `doc`): the classification of every program a scanned script may invoke."""
+    return json.load(open(path or CLASSES))["programs"]
 
 
 def parse(src):
@@ -72,40 +74,54 @@ def builtins():
     return set(p.stdout.split())
 
 
-def programs(src, bi=None):
-    """(set of programs, list of dynamic commands) of shell text SRC."""
+def programs(src, classes=None, bi=None):
+    """(programs, dynamic, unclassified) of shell text SRC: the programs it invokes, the commands whose name is not a literal, and the
+    programs that have no record in CLASSES (a scanned program without a classification is red). A `runner` record is followed by its
+    rule (argv: after `skip` positionals and the options, `optarg` options take a value; flag: after one of the flags, find -exec;
+    string: the literal after the flag is shell text and is scanned too); a builtin is skipped unless it has a record (exec, command,
+    time are runners)."""
+    classes = classes if classes is not None else load_classes()
     bi = bi if bi is not None else builtins()
     tree = parse(src)
     funcs = set()
     walk(tree, lambda n: funcs.add(n["Name"]["Value"]) if n.get("Type") == "FuncDecl" else None)
-    progs, dyn = set(), []
+    progs, dyn, unc = set(), [], set()
+
+    def isopt(x):
+        return x is not None and x.startswith("-")
+
+    def isassign(x):
+        return x is not None and "=" in x and x.split("=")[0].replace("_", "a").isalnum()
 
     def name(args, i):
-        """Resolve the command whose name is word I of ARGS (following runners); add it to progs/dyn."""
-        while i < len(args):
-            w = literal(args[i])
-            if w is None:
-                if "/" not in prefix(args[i]):   # a path with an expansion is a file of the build, not a program
-                    dyn.append(src[args[i]["Pos"]["Offset"]:args[i]["End"]["Offset"]])
-                return
-            if w.startswith("-") or ("=" in w and w.split("=")[0].replace("_", "a").isalnum()):
-                i += 1   # an option or VAR=value of a runner
-                continue
-            break
-        else:
+        """The command at word I of ARGS: scan leading VAR=value words, resolve it, follow it by its record."""
+        while i < len(args) and isassign(literal(args[i])):
+            i += 1
+        if i >= len(args):
             return
         w = literal(args[i])
-        if "/" in w or w in funcs or (w in bi and w not in WRAP):
+        if w is None:
+            if "/" not in prefix(args[i]):   # a path with an expansion is a file of the build, not a program
+                dyn.append(src[args[i]["Pos"]["Offset"]:args[i]["End"]["Offset"]])
+            return
+        if "/" in w or w in funcs or (w in bi and w not in classes):
             return
         if w not in bi:
             progs.add(w)
-        if w in WRAP:
-            j, skip = i + 1, WRAP[w]
-            while j < len(args):   # the runner's own options (and their values), VAR=value words and positional arguments
+        rec = classes.get(w)
+        if rec is None:
+            unc.add(w)
+            return
+        if rec["class"] != "runner":
+            return
+        rule = rec["rule"]
+        if rule["kind"] == "argv":
+            j, skip = i + 1, rule["skip"]
+            while j < len(args):   # the runner's options (and their values), VAR=value words, positionals
                 x = literal(args[j])
-                if x is not None and x.startswith("-"):
-                    j += 2 if x in OPTARG.get(w, ()) else 1
-                elif x is not None and "=" in x and x.split("=")[0].replace("_", "a").isalnum():
+                if isopt(x):
+                    j += 2 if x in rule["optarg"] else 1
+                elif isassign(x):
                     j += 1
                 elif skip:
                     skip -= 1
@@ -113,42 +129,46 @@ def programs(src, bi=None):
                 else:
                     break
             name(args, j)
-        elif w in SHELLS:
+        elif rule["kind"] == "flag":
             for j in range(i + 1, len(args) - 1):
-                if literal(args[j]) == "-c":
-                    s = literal(args[j + 1])
-                    if s is None:
-                        dyn.append("%s -c <non-literal>" % w)
+                if literal(args[j]) in rule["flags"]:
+                    name(args, j + 1)
+        elif rule["kind"] == "string":
+            for j in range(i + 1, len(args) - 1):
+                if literal(args[j]) in rule["flags"]:
+                    t = literal(args[j + 1])
+                    if t is None:
+                        dyn.append("%s %s <non-literal>" % (w, literal(args[j])))
                     else:
-                        p2, d2 = programs(s, bi)
+                        p2, d2, u2 = programs(t, classes, bi)
                         progs.update(p2)
                         dyn.extend(d2)
-        elif w == "find":
-            for j in range(i + 1, len(args) - 1):
-                if literal(args[j]) in ("-exec", "-execdir"):
-                    name(args, j + 1)
+                        unc.update(u2)
 
     def visit(n):
         if n.get("Type") == "CallExpr" and n.get("Args"):
             name(n["Args"], 0)
     walk(tree, visit)
-    return progs, dyn
+    return progs, dyn, unc
 
 
 def main(a):
     files = [x for x in a if not x.startswith("--")]
-    progs, dyn = set(), []
+    progs, dyn, unc = set(), [], set()
     for f in files:
-        p, d = programs(open(f, encoding="utf-8").read())
+        p, d, u = programs(open(f, encoding="utf-8").read())
         progs |= p
+        unc |= u
         dyn += ["%s: %s" % (f, x) for x in d]
     if "--json" in a:
-        print(json.dumps({"programs": sorted(progs), "dynamic": dyn}))
+        print(json.dumps({"programs": sorted(progs), "dynamic": dyn, "unclassified": sorted(unc)}))
     else:
         print("\n".join(sorted(progs)))
         for d in dyn:
             print("dynamic: " + d, file=sys.stderr)
-    return 1 if dyn else 0
+        for u in sorted(unc):
+            print("unclassified: " + u, file=sys.stderr)
+    return 1 if dyn or unc else 0
 
 
 if __name__ == "__main__":

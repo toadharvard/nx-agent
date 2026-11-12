@@ -320,6 +320,7 @@ def check(doc, repo=None):
         if not (isinstance(f, str) and f.endswith(".whl") and "/" not in f):
             bad.append("env: python module %s: no wheel file name in python.wheel_files (setup installs from the mirror)" % m)
     bad += deb_pins(doc)
+    bad += program_classes(doc)
     for pn, pf in sorted(doc.get("profiles", {}).items()):
         bad += profile_pins(pn, pf)
     pinned, owners = pinned_set(doc["packages"]), file_owners()
@@ -403,6 +404,32 @@ def profile_pins(name, prof):
         out.append(pre + "programs lack prerequisites %s" % sorted(set(prof.get("prerequisites", [])) - set(prof.get("programs", []))))
     return out
 
+def program_classes(doc):
+    """Mismatch lines of farm/program_classes.json (the classification of the programs a scanned script may invoke): every record has a
+    class (leaf, runner, opaque), a doc citation, and a `package` that is a package of a build profile (the documentation is the pinned
+    version's); a runner has a rule of kind argv (skip, optarg), flag (flags) or string (flags)."""
+    try:
+        recs = json.load(open(os.path.join(os.path.dirname(HERE), "farm", "program_classes.json")))["programs"]
+    except (OSError, ValueError, KeyError):
+        return ["env: farm/program_classes.json: missing or not a classification"]
+    pk = {p for pf in doc.get("profiles", {}).values() for p in pf.get("packages", {})}
+    out = []
+    for n, r in sorted(recs.items()):
+        pre = "env: program_classes.%s: " % n
+        if r.get("class") not in ("leaf", "runner", "opaque") or not (isinstance(r.get("doc"), str) and r["doc"]):
+            out.append(pre + "needs class (leaf, runner, opaque) and a doc citation")
+        if pk and r.get("package") not in pk:
+            out.append(pre + "package %s is not a package of a build profile" % r.get("package"))
+        if r.get("class") == "runner":
+            rl = r.get("rule") or {}
+            ok = (rl.get("kind") == "argv" and isinstance(rl.get("skip"), int) and isinstance(rl.get("optarg"), list)) or \
+                 (rl.get("kind") in ("flag", "string") and isinstance(rl.get("flags"), list) and rl["flags"])
+            if not ok:
+                out.append(pre + "a runner needs a rule: argv (skip, optarg), flag (flags) or string (flags)")
+    for pn, pf in sorted(doc.get("profiles", {}).items()):   # totality: every program of a profile has a record
+        out += ["env: profile %s: program %s has no record in farm/program_classes.json" % (pn, x) for x in sorted(set(pf.get("programs", [])) - set(recs))]
+    return out
+
 def check_scripts(doc, name, files):
     """Mismatch lines of the programs that shell scripts FILES invoke (farm/script_programs.py: a real shfmt parse) against build profile
     NAME: every program must be in the profile's `programs` (which must be in PATH and owned by a pinned package in the chroot), and a
@@ -414,8 +441,9 @@ def check_scripts(doc, name, files):
     import script_programs
     bad, have = [], set(prof.get("programs", []))
     for f in files:
-        progs, dyn = script_programs.programs(open(f, encoding="utf-8").read())
+        progs, dyn, unc = script_programs.programs(open(f, encoding="utf-8").read())
         bad += ["env: profile %s: %s runs %s, not in the profile's programs" % (name, f, p) for p in sorted(progs - have)]
+        bad += ["env: profile %s: %s runs %s, which has no record in farm/program_classes.json" % (name, f, p) for p in sorted(unc)]
         bad += ["env: profile %s: %s: command name is not literal: %s" % (name, f, d) for d in dyn]
     return bad
 

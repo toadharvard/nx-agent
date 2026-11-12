@@ -1,0 +1,371 @@
+{
+ "format": "fnvnx-program-classes/1",
+ "doc": "One record per program the scanned scripts invoke (farm/script_programs.py): leaf = starts no other program; runner = starts the program named by its argv (the rule says where: kind argv = after `skip` positionals and the options, optarg lists options that take a value; kind flag = after one of the flags; kind string = the literal after the flag is shell text, parsed again); opaque = starts programs named in data files (makefiles, python code): they are the profile's `prerequisites`, verified by the exec log. A scanned program without a record is red (script_programs.py, envcheck scripts). `package` is the Ubuntu package whose documentation `doc` cites (it must be a package of a build profile).",
+ "programs": {
+  "bash": {
+   "class": "runner",
+   "package": "bash",
+   "doc": "man 1 bash: bash -c string",
+   "rule": {
+    "kind": "string",
+    "flags": [
+     "-c"
+    ]
+   }
+  },
+  "cat": {
+   "class": "leaf",
+   "package": "coreutils",
+   "doc": "man 1 cat (coreutils): the program runs no other program"
+  },
+  "chroot": {
+   "class": "runner",
+   "package": "coreutils",
+   "doc": "man 1 chroot: chroot [OPTION] NEWROOT [COMMAND [ARG]...]",
+   "rule": {
+    "kind": "argv",
+    "skip": 1,
+    "optarg": [
+     "--userspec",
+     "--groups"
+    ]
+   }
+  },
+  "command": {
+   "class": "runner",
+   "package": "bash",
+   "doc": "man 1 bash: command [-pVv] command [arg ...]",
+   "rule": {
+    "kind": "argv",
+    "skip": 0,
+    "optarg": []
+   }
+  },
+  "cp": {
+   "class": "leaf",
+   "package": "coreutils",
+   "doc": "man 1 cp (coreutils): the program runs no other program"
+  },
+  "dash": {
+   "class": "runner",
+   "package": "dash",
+   "doc": "man 1 dash: dash -c command_string",
+   "rule": {
+    "kind": "string",
+    "flags": [
+     "-c"
+    ]
+   }
+  },
+  "dirname": {
+   "class": "leaf",
+   "package": "coreutils",
+   "doc": "man 1 dirname (coreutils): the program runs no other program"
+  },
+  "dpkg-query": {
+   "class": "leaf",
+   "package": "dpkg",
+   "doc": "man 1 dpkg-query (dpkg): runs no other program"
+  },
+  "env": {
+   "class": "runner",
+   "package": "coreutils",
+   "doc": "man 1 env: env [OPTION]... [-] [NAME=VALUE]... [COMMAND [ARG]...]",
+   "rule": {
+    "kind": "argv",
+    "skip": 0,
+    "optarg": [
+     "-u",
+     "-C",
+     "-S"
+    ]
+   }
+  },
+  "exec": {
+   "class": "runner",
+   "package": "bash",
+   "doc": "man 1 bash, SHELL BUILTIN COMMANDS: exec [-cl] [-a name] [command [arguments]]",
+   "rule": {
+    "kind": "argv",
+    "skip": 0,
+    "optarg": [
+     "-a"
+    ]
+   }
+  },
+  "find": {
+   "class": "runner",
+   "package": "findutils",
+   "doc": "man 1 find: -exec command ; / -exec command {} + (also -execdir)",
+   "rule": {
+    "kind": "flag",
+    "flags": [
+     "-exec",
+     "-execdir"
+    ]
+   }
+  },
+  "grep": {
+   "class": "leaf",
+   "package": "grep",
+   "doc": "man 1 grep: runs no other program"
+  },
+  "gzip": {
+   "class": "leaf",
+   "package": "gzip",
+   "doc": "man 1 gzip: runs no other program"
+  },
+  "id": {
+   "class": "leaf",
+   "package": "coreutils",
+   "doc": "man 1 id (coreutils): the program runs no other program"
+  },
+  "ls": {
+   "class": "leaf",
+   "package": "coreutils",
+   "doc": "man 1 ls (coreutils): the program runs no other program"
+  },
+  "make": {
+   "class": "opaque",
+   "package": "make",
+   "doc": "info make: commands of the makefiles run through the shell; the programs they name are the build's `prerequisites` field, checked by the exec log"
+  },
+  "mkdir": {
+   "class": "leaf",
+   "package": "coreutils",
+   "doc": "man 1 mkdir (coreutils): the program runs no other program"
+  },
+  "nice": {
+   "class": "runner",
+   "package": "coreutils",
+   "doc": "man 1 nice: nice [OPTION] [COMMAND [ARG]...]",
+   "rule": {
+    "kind": "argv",
+    "skip": 0,
+    "optarg": [
+     "-n"
+    ]
+   }
+  },
+  "nohup": {
+   "class": "runner",
+   "package": "coreutils",
+   "doc": "man 1 nohup: nohup COMMAND [ARG]...",
+   "rule": {
+    "kind": "argv",
+    "skip": 0,
+    "optarg": []
+   }
+  },
+  "nproc": {
+   "class": "leaf",
+   "package": "coreutils",
+   "doc": "man 1 nproc (coreutils): the program runs no other program"
+  },
+  "patch": {
+   "class": "leaf",
+   "package": "patch",
+   "doc": "man 1 patch: runs no other program (-g/--get is not used by a pinned build: version control programs are named only with that option)"
+  },
+  "python3": {
+   "class": "opaque",
+   "package": "python3",
+   "doc": "python3 docs: runs the program's own code; programs it starts (subprocess) are the build's `prerequisites` field, checked by the exec log"
+  },
+  "realpath": {
+   "class": "leaf",
+   "package": "coreutils",
+   "doc": "man 1 realpath (coreutils): the program runs no other program"
+  },
+  "rm": {
+   "class": "leaf",
+   "package": "coreutils",
+   "doc": "man 1 rm (coreutils): the program runs no other program"
+  },
+  "sed": {
+   "class": "leaf",
+   "package": "sed",
+   "doc": "man 1 sed: runs no other program except through the GNU `e` command / s///e flag (a script text; none in a pinned build)"
+  },
+  "setsid": {
+   "class": "runner",
+   "package": "util-linux",
+   "doc": "man 1 setsid: setsid [options] program [arguments]",
+   "rule": {
+    "kind": "argv",
+    "skip": 0,
+    "optarg": []
+   }
+  },
+  "sh": {
+   "class": "runner",
+   "package": "dash",
+   "doc": "man 1 dash: sh -c command_string",
+   "rule": {
+    "kind": "string",
+    "flags": [
+     "-c"
+    ]
+   }
+  },
+  "sha256sum": {
+   "class": "leaf",
+   "package": "coreutils",
+   "doc": "man 1 sha256sum (coreutils): the program runs no other program"
+  },
+  "stdbuf": {
+   "class": "runner",
+   "package": "coreutils",
+   "doc": "man 1 stdbuf: stdbuf OPTION... COMMAND",
+   "rule": {
+    "kind": "argv",
+    "skip": 0,
+    "optarg": [
+     "-i",
+     "-o",
+     "-e"
+    ]
+   }
+  },
+  "tar": {
+   "class": "leaf",
+   "package": "tar",
+   "doc": "man 1 tar: runs no other program unless --use-compress-program/-I/--to-command/--checkpoint-action=exec is given (a flag the scan reports as a literal argument; none is used by a pinned build)"
+  },
+  "tee": {
+   "class": "leaf",
+   "package": "coreutils",
+   "doc": "man 1 tee (coreutils): the program runs no other program"
+  },
+  "time": {
+   "class": "runner",
+   "package": "bash",
+   "doc": "man 1 bash: time [-p] pipeline (keyword; /usr/bin/time: time [-f F] [-o FILE] command)",
+   "rule": {
+    "kind": "argv",
+    "skip": 0,
+    "optarg": [
+     "-f",
+     "-o"
+    ]
+   }
+  },
+  "timeout": {
+   "class": "runner",
+   "package": "coreutils",
+   "doc": "man 1 timeout: timeout [OPTION] DURATION COMMAND [ARG]...",
+   "rule": {
+    "kind": "argv",
+    "skip": 1,
+    "optarg": [
+     "-s",
+     "-k"
+    ]
+   }
+  },
+  "touch": {
+   "class": "leaf",
+   "package": "coreutils",
+   "doc": "man 1 touch (coreutils): the program runs no other program"
+  },
+  "tr": {
+   "class": "leaf",
+   "package": "coreutils",
+   "doc": "man 1 tr (coreutils): the program runs no other program"
+  },
+  "wc": {
+   "class": "leaf",
+   "package": "coreutils",
+   "doc": "man 1 wc (coreutils): the program runs no other program"
+  },
+  "xargs": {
+   "class": "runner",
+   "package": "findutils",
+   "doc": "man 1 xargs: xargs [options] [command [initial-arguments]]",
+   "rule": {
+    "kind": "argv",
+    "skip": 0,
+    "optarg": [
+     "-n",
+     "-I",
+     "-P",
+     "-L",
+     "-d",
+     "-s",
+     "-a",
+     "-E"
+    ]
+   }
+  },
+  "xz": {
+   "class": "leaf",
+   "package": "xz-utils",
+   "doc": "man 1 xz: runs no other program"
+  },
+  "gcc": {
+   "class": "opaque",
+   "package": "gcc",
+   "doc": "man 1 gcc: the driver runs cc1/cc1plus, collect2, as and ld (gcc -print-prog-name=; all of them from the pinned gcc-13/cpp-13/binutils packages, in the profile)"
+  },
+  "g++": {
+   "class": "opaque",
+   "package": "g++",
+   "doc": "man 1 gcc: the driver runs cc1/cc1plus, collect2, as and ld (gcc -print-prog-name=; all of them from the pinned gcc-13/cpp-13/binutils packages, in the profile)"
+  },
+  "gcc-13": {
+   "class": "opaque",
+   "package": "gcc-13",
+   "doc": "man 1 gcc: the driver runs cc1/cc1plus, collect2, as and ld (gcc -print-prog-name=; all of them from the pinned gcc-13/cpp-13/binutils packages, in the profile)"
+  },
+  "g++-13": {
+   "class": "opaque",
+   "package": "g++-13",
+   "doc": "man 1 gcc: the driver runs cc1/cc1plus, collect2, as and ld (gcc -print-prog-name=; all of them from the pinned gcc-13/cpp-13/binutils packages, in the profile)"
+  },
+  "ld": {
+   "class": "leaf",
+   "package": "binutils",
+   "doc": "man 1 ld (binutils): runs no other program (ld plugins -plugin are named by the gcc driver: lto-wrapper of gcc-13)"
+  },
+  "as": {
+   "class": "leaf",
+   "package": "binutils",
+   "doc": "man 1 as (binutils): runs no other program (ld plugins -plugin are named by the gcc driver: lto-wrapper of gcc-13)"
+  },
+  "ar": {
+   "class": "leaf",
+   "package": "binutils",
+   "doc": "man 1 ar (binutils): runs no other program (ld plugins -plugin are named by the gcc driver: lto-wrapper of gcc-13)"
+  },
+  "makeinfo": {
+   "class": "opaque",
+   "package": "texinfo",
+   "doc": "info texi2any: a perl program; runs perl (and, with --html/--docbook, no other pinned program); perl is in the profile"
+  },
+  "bison": {
+   "class": "opaque",
+   "package": "bison",
+   "doc": "info bison: runs m4 (a profile program) to expand skeletons"
+  },
+  "flex": {
+   "class": "opaque",
+   "package": "flex",
+   "doc": "man 1 flex: runs m4 (a profile program) to expand its skeleton"
+  },
+  "m4": {
+   "class": "leaf",
+   "package": "m4",
+   "doc": "info m4: runs no other program unless syscmd/esyscmd macros are used (none in the GNU tarballs' pre-generated sources)"
+  },
+  "perl": {
+   "class": "opaque",
+   "package": "perl",
+   "doc": "man 1 perl: runs its own code; programs it starts are the profile's prerequisites"
+  },
+  "awk": {
+   "class": "opaque",
+   "package": "mawk",
+   "doc": "man 1 mawk: system() and pipes run programs named in the awk program (configure scripts); those are the profile's prerequisites"
+  }
+ }
+}
