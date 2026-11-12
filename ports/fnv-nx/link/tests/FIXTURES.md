@@ -91,3 +91,16 @@ builds a toy guest root (native: all 8 plugins; lifted-origin: any subset, incl.
   frame ranges against hand-written stores); alias cases alias_ok / alias_bad (`.set fb, fa` with two records: C++ ctor C1/C2 aliases exist in
   fixtures/order_doc.cc but their records are written by the plugin from one function; no mutation gives two different records on aliased symbols
   without editing the symbol table, which mutate.py does not do yet). 25 hand-assembled functions + 3 record cases + 2 alias cases = 30 cases listed.
+
+### Step 2 continued (test_gate_addr, test_gate_abs, test_gate_disp)
+- test_gate_addr.py: moved. Real objects of fixtures/addr_main.cc, addr_disp.cc (all 8 plugins, native root), addr_fn.cc (functions fa, fb), addr_nofn.cc (no function).
+  Negative cases are `.fnvnx.addr` section replacements/renames of the real addr_fn object (mutate.replace_section / rename_section); the plugin is no longer
+  built by the test. Remaining tool call: `aarch64-linux-gnu-objdump -d` (read-only disassembly of a real object, no compile/assemble/link).
+  Finding fixed on the way: fnvnx_addr wrote no section for a unit without a function, so gate_addr certified such an object red; the plugin now always writes it.
+- test_gate_abs.py: moved. Real clean object (fixtures/abs_clean.cc); absolute reference/definition = mutate.set_symbol_shndx (ext -> SHN_ABS), symbol-less
+  relocation = mutate.zero_reloc_symbol; archive written in Python (ar format, no `ar`); linked image = the recipe's `link` stage (realobj.build(link_script=...)
+  with a script that defines `scr = 0x1000;`, fixtures/abs_ref.cc refers to it). Nothing left blocked.
+- test_gate_disp.py: no compiler/assembler/linker call (struct-built ELF32 image). NOT moved: the image needs the lifted runtime's perfect-hash dispatch
+  table (fnvl_disp_table, fnvl_g, fnvl_phf_params), which no tracked source or recipe stage in this repository generates (the producer is private); blocked on the
+  lifted runtime product root. 25 checks stay hand-built until then.
+- test_abi.py: no compiler call (checked); unchanged.
