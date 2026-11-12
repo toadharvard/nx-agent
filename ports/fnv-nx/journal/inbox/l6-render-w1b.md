@@ -116,3 +116,8 @@ Files:
   tests/l6/shcache/{run_real.sh (1: the -I of shxlate), t_shcache.c (1: the #include path)}, tests/l6/sm_fix/test_layout.py (1: docstring)
 Also needed on the lead branch: gl4_d3dshader.c calls fnvnx_shader_translate_glsl instead of fnvnx_shader_translate (same args; NO_DKSH|KEEP_GLSL).
 Not carried from my work: render/shaders/build.sh and CMakeLists.txt stay in render/shaders (they reference translator/ paths); they are not recipe roots.
+
+## Scope narrowed again (lead): the branch carries ONLY render/shaders/translator/** and render/shaders/total/** + the 2 admit entries + this note
+Removed from the branch (they stay on the lead branch until their roots exist after the first frame): render/shaders/{.gitignore, CMakeLists.txt, README.md, SDP.md, build.sh, uam.patch, cache/*, src/*}.
+The DKSH side (src/{dk.cpp, sdp.c, sdp2dksh.c, translate_dksh.c, dk_api.h}) includes "fnvnx_shaders.h" etc. through CMake's -I translator/include: on the lead branch they keep working unchanged
+(translator/include/ is the public API dir; translator/src/backend.h now includes "../include/fnvnx_shaders.h").
