@@ -265,3 +265,10 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
         - 9 gates absent from gates.json: abi, addr32, eh, exepin, forms, fpexact, namegate, order, r7.
         - imports/machine facts for the new roots (L5/L1).
         - Time 409.7 s on the red path (L1 to confirm).
+- 04:35Z
+    - L1 w16 dbfaefeb: the generator-input rule (own root, tool or headers). w6 merges it and takes L2's shim/include headers entry (commit asked of L2). L4 keeps lib/sha256 at 20724246.
+    - w3b 84ce4886 merged: C1 closed; C2 cited (Mesa 25.2.8 llvmpipe 128 components against a demand of 41; L4 to confirm the boot machine's Mesa).
+    - Census:
+        - vs compile set 342,344; reorder set 69,642; ps set without sampler args 677,888.
+        - With free per-sampler args: 9.97e12, over budget.
+        - Order given: restrict the sampler fields by the declared machine's GL caps and texture formats (np2 = {0}, colour fixups from the format table, SM2+ type from dcl), then job 3.
