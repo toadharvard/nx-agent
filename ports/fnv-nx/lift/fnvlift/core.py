@@ -248,7 +248,7 @@ def dispatch(cx, ins):
     if f_cpufeat.missing(ins):         # CPUID-UD rule (f_cpufeat.py): a form the model's CPUID denies is #UD before any handler of any family runs
         f_sys.ud_site(cx)
         return
-    if EMIT == 'dsl' and cx.macc == 'M':        # the DSL emits plain guest accesses (M8..M64): inside a locked instruction (macc LK) the hand handlers, which go through LKA<T>, run
+    if EMIT == 'dsl':
         from . import f_dsl
         if f_dsl.emit_form(cx, ins) is not SKIP:
             return

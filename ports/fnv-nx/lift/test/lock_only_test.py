@@ -1,5 +1,5 @@
 """Rule LK-ONLY (R9): inside a locked instruction a guest memory access reaches memory only through LKA<T> (LK8..LK64). By construction, in two places:
-  emitter: an emitter that spells plain accessors (the DSL emit_form, core.fmem) raises Unsupported when cx.macc is not 'M';
+  emitter: the accessor prefix is cx.macc (core rd/wr/ea, f_int, the DSL emit), 'LK' inside a locked window; core.fmem (MF32 / MF64, no LK form) raises Unsupported there;
   prelude: every plain accessor macro of rt/fnvl.h passes `lkwin_` to its accessor and LK_BEGIN declares a block-local `lkwin_` of another type, so any spelling of a plain accessor (hand, DSL, helper)
   inside the window does not compile. Positive: the hand handlers of every LOCKABLE form lift, and the lifted unit compiles with the pack flags. Negative: the old defect (the DSL emitter handling a
   locked add) raises at the emitter; a plain accessor of every kind inside LK_BEGIN fails to compile. The accessor list is read from rt/fnvl.h (every `#define M..(a)` that is a guest accessor).
@@ -8,7 +8,7 @@ import os, re, subprocess, sys
 LIFT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, LIFT); sys.path.insert(0, os.path.join(LIFT, 'tools'))
 import fnvlift as L, liftgen
-from fnvlift import core, f_dsl
+from fnvlift import core, f_dsl, dsl
 from fnvlift.core import Unsupported
 from fnvlift.image import Image
 
@@ -53,12 +53,15 @@ for hexs, name in CASES:
         r = compiles(t)
         assert r.returncode == 0, (name, emit, r.stderr[-600:])
 
-old = core.OPS['add']                                                        # the old defect: the DSL emitter handling a locked add (plain M32 inside the lock)
-core.OPS['add'] = lambda cx, ins: f_dsl.emit_form(cx, ins)
+class Cx: a = 0x401000; macc = 'LK'
+assert 'outside LKA' in raises(lambda: core.Ctx.fmem(Cx, None, None))                        # the float accessors (MF32 / MF64) have no LK form: refused at the emitter
+old = dsl.InlineEmit.macc                                                    # the old defect: a DSL emitter that spells plain accessors inside the lock window: the unit does not compile
+dsl.InlineEmit.macc = property(lambda s: 'M', lambda s, v: None)
 try:
-    assert 'DSL emitter' in raises(lambda: lift_bytes(bytes.fromhex('f00108') + b'\xc3', ''))
+    r = compiles(lift_bytes(bytes.fromhex('f00108') + b'\xc3', 'dsl'))
+    assert r.returncode != 0 and 'LkWin' in r.stderr, r.stderr[-300:]
 finally:
-    core.OPS['add'] = old
+    dsl.InlineEmit.macc = old
 
 OUT = 'extern "C" void L_t(u32 ecx_){ u32 cf=0,zf=0,sf=0,of=0,pf=0,af=0; u32 eax=0,ecx=ecx_,edx=0,ebx=0,esp=0,ebp=0,esi=0,edi=0; %s %s }'
 for acc, stmt in (('M8', 'M8(ecx)=1;'), ('M16', 'M16(ecx)=1;'), ('M32', 'eax=M32(ecx);'), ('M64', 'M64(ecx)=1;'), ('MF32', 'float f=MF32(ecx); (void)f;'), ('MF64', 'MF64(ecx)=1.0;'), ('MX', 'MX(ecx)=MX(edx);')):

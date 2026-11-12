@@ -109,8 +109,6 @@ def transfer(cx, ins, F):
 
 def emit_form(cx, ins):
     """emit the C of one instruction from its Form -> None, or SKIP when the forms do not cover it. A build error propagates."""
-    if cx.macc != 'M':      # Rule LK-ONLY: this emitter spells plain accessors; inside a locked instruction only LKA<T> (the hand handlers) may touch guest memory
-        raise Unsupported('locked instruction at %x: the DSL emitter writes plain guest accesses' % cx.a)
     if not supported(ins):
         return SKIP
     F = forms.build(ins, cx.a)
