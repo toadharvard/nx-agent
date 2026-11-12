@@ -595,3 +595,8 @@ Ids: gate_eh uses the orchestrator's ASM-222/223/224. L1's 225..227 are withdraw
 ## 09:40Z
 - A correction: the trunk bee3dbfc env.json (from w22) already pins the python modules capstone 5.0.9, gmpy2 2.3.2, keystone-engine 0.9.2, numpy 2.5.3, pefile 2024.8.26, pyelftools 0.33, unicorn 2.1.4 and z3-solver 5.4.1.0 (wheel sha256 + installed_files_sha256). w17's pin item is therefore down to the derived EXTERNAL only. The MPFR/GMP that gmpy2 bundles are covered by its installed_files digest.
 - L4 owns farm/boot_job.sh. Rule: the job installs nothing and step 1 is envcheck; L4 w7 does it.
+
+## 09:45Z
+- w12 0fc0b167: the doubles gate is built and green, but vacuously: 0 test roots are admitted yet (14 unit checks pass). The legal gate is built and red, not for merge: 73 VA-with-name pairs in 20 files under ports/fnv-nx, measured at w12's head 0fc0b167.
+  The public-name rule is set: public iff a pinned public artifact defines it (system exports, env.json toolchain libraries, pinned third-party sources such as zlib). Anything else is decomp, and red. The census is written only to fnv-nx-build. Reported to the orchestrator as a Legal finding.
+- w8 (L3a item 16): the lift-test pair (a `lifted` sub-root + a native `test` root) is accepted. Its arguments come from plugin_args.
