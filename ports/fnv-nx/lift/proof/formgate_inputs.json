@@ -1,0 +1,16 @@
+{
+ "format": "fnvnx-forms-inputs/1",
+ "external": [
+  {
+   "name": "certs",
+   "repo": "fnv-nx-build",
+   "ref": "l3b-lift/certs",
+   "commit": "16ca5eb9d8f046d395cc7e5a0e8e351e11ee7ff4",
+   "tree_sha256": "04910d46b71be1e1c6e1e0d2559b9a81df87484206f119cf639d0e8d6841b560",
+   "at": "/ext/certs"
+  }
+ ],
+ "shapes": "liftpack/shapes.tsv",
+ "certs": "certs/certs.tsv",
+ "model_sha256": "70c8dc39cf64be4fe52d50f34ffd37eeefdc8bfa8162c5da8ffdd98d6b393eae"
+}

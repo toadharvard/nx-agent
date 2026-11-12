@@ -92,9 +92,8 @@ not change since, or the base is a constant that is a multiple of the size.
 The assumptions it rests on are registered (verify/ASSUMPTIONS.json): ASM-001 (the compiler: AAPCS64 call clobbers of compiler
 output, -fno-ipa-ra), ASM-200 (AAPCS64 of hand-written assembler, discharged by rule (c)), ASM-201 (layout: x27 points at a
 struct cpu of fnvnx_lift_cpu_bytes bytes below 2^32, host mappings disjoint from guest ones), ASM-202 (every object of the
-lifted roots is given) and ASM-007 (ILP32). Rule (a) does not rest on the decoder: the destination registers of an instruction are
-decided from the encoding's destination fields, and the decoder's operand view only adds writes (the union decides); the corpus
-test compares the two over every instruction class.
+lifted roots is given), ASM-007 (ILP32), ASM-043 (the decoder, capstone) and ASM-045 (its write sets; rule (a) adds the
+encoding's destination fields).
 
 Lock ranges (class B, docs/ORDERING.md "Locked instructions"). The lifter emits per object an ELF32 section `.fnvl.lk`: 12-byte records
 (x86 address, start, end): start and end are 32-bit words with an R_AARCH64_P32_ABS32 relocation against an executable section (the host pcs of the code of one
