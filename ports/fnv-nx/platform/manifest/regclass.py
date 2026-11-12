@@ -9,7 +9,8 @@ Typed value ("o", C, k): a pointer to byte k of a complete object whose class is
 start of the complete object, so a base or embedded sub-object is the same class at a larger offset). The seeds are exact, from the
 exe's RTTI (rtti.py):
   vtable entries   a function that is a slot of the vtable of C located at offset o of the object is entered with this = ("o", C, o)
-                   (a thunk `add/sub ecx,n; jmp f` adjusts it);
+                   (a thunk `add/sub ecx,n; jmp f` adjusts it). Whoever calls a slot holds the object, and every holder is reached from a
+                   creation by the flow below, so a typed result returned from a slot goes back to the traced call that entered it;
   constructors     a function that stores the vtable of C (the relocated word in code) into [this+disp] is entered with
                    this = ("o", C, o - disp) (o = the offset field of the COL); it returns this, so its callers get ("o", C, ..) in eax.
 Flow (regsites.Analyzer.run in typed mode, the same forward-only control flow as pemanifest.py): the typed value is followed through
@@ -52,7 +53,8 @@ class Closure:
         self.leaks = collections.defaultdict(list)  # class -> [(site, text)]
         self.cellvals, self.rets = {}, {}
         self.vcalls = collections.defaultdict(list)  # slot function -> [(site, class, offset, pushes)] reached through typed receivers
-        self.names = {}
+        self.origin = collections.defaultdict(set)  # job key -> {(caller job key, call site)} for jobs entered through a typed call
+        self.seeded = set()
 
     # ---- seeds -------------------------------------------------------------------------------------------------------------
     def ensure(self, td):
@@ -62,7 +64,7 @@ class Closure:
         mod, rt = self.mod, self.rt
         for off, v in sorted(rt.by_class.get(td, {}).items()):
             for w in rt.run[v]:
-                self.add(w, ("o", td, off))
+                self.add(w, ("o", td, off), slot=True)
             for r in mod.targets().get(v, []):
                 if not mod.in_code(r):
                     continue
@@ -74,9 +76,14 @@ class Closure:
                 self.add(st, ("o", td, off - ins.operands[0].mem.disp), None, None, None, (ins.address, td))
         self.drain()
 
-    def add(self, func, this, binds=None, results=None, cells=None, ctor=None):
+    def add(self, func, this, binds=None, results=None, cells=None, ctor=None, origin=None, slot=False):
         key = (func, this, tuple(sorted((binds or {}).items())), tuple(sorted((results or {}).items())),
                tuple(sorted((cells or {}).items())), ctor)
+        if origin is None:
+            if not slot:
+                self.seeded.add(key)
+        else:
+            self.origin[key].add(origin)
         if key not in self.jobs:
             self.jobs.add(key)
             self.todo.append(key)
@@ -106,13 +113,13 @@ class Closure:
             elif k == "cellstore":
                 self.cellstore(e[1], e[2], e[3])
             elif k == "ret":
-                self.ret(func, e[1], e[2])
+                self.ret(key, e[1], e[2])
             elif k == "call":
-                self.call(func, *e[1:])
+                self.call(key, *e[1:])
         if ctor is not None and not stored:
             self.leaks[ctor[1]].append((ctor[0], "vtable stored through a base that is not this"))
 
-    def call(self, func, site, tv, ecx, pushes):
+    def call(self, key, site, tv, ecx, pushes):
         args = {k: pushes[-1 - k] for k in range(len(pushes)) if pushes[-1 - k][0] == "o"}
         t = None
         if tv[0] == "imm":
@@ -129,10 +136,21 @@ class Closure:
             for v in ([ecx] if ecx[0] == "o" else []) + list(args.values()):
                 self.leaks[v[1]].append((site, "typed pointer passed to a call whose target is not static"))
             return
-        self.add(t, ecx if ecx[0] == "o" else None, args)
+        self.add(t, ecx if ecx[0] == "o" else None, args, origin=(key, site))
 
-    def ret(self, func, site, val):
+    def ret(self, key, site, val):
         if val[0] != "o":
+            return
+        func = key[0]
+        for ck, csite in sorted(self.origin.get(key, ()), key=repr):  # the result goes back to the call that entered with typed arguments
+            nk = (ck[0], ck[1], ck[2], tuple(sorted({**dict(ck[3]), csite: val}.items())), ck[4], ck[5])
+            if nk not in self.jobs:
+                self.jobs.add(nk)
+                self.todo.append(nk)
+                if ck in self.seeded:
+                    self.seeded.add(nk)
+                self.origin[nk] |= self.origin.get(ck, set())
+        if key not in self.seeded:
             return
         if self.rets.setdefault(func, val) != val:
             self.leaks[val[1]].append((site, "function returns pointers of different objects"))
