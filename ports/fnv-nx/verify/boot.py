@@ -102,8 +102,9 @@ def run(a):
     with open(a.elf, "rb") as f:
         raw = f.read()
     plan = _plan(a, raw)
-    declared = []
-    if a.declared_inputs:   # verified and mounted read-only on the SD root before anything runs; a mismatch is an input error
+    declared, ro = [], []
+    if a.declared_inputs:
+        ro = [p["mount"] for p in bootdecl.load_pins(a.declared_inputs)]   # read-only on the guest's card, bootpath.BootPath   # verified and mounted read-only on the SD root before anything runs; a mismatch is an input error
         declared = bootdecl.mount_all(a.declared_inputs, a.root, dict(s.split("=", 1) for s in a.declared_src))
     base = plan["image"]["base"]
     with open(a.milestones) as f:
@@ -131,7 +132,8 @@ def run(a):
             print("boot: reason=scenario-error %s" % e)
             return 2
     kw = {"hc_slice": a.hc_slice} if a.hc_slice else {}
-    m = bootmachine.Machine(raw, plan, boothost.Services(a.root, a.game, sc, watch_reads=wl is not None), limit_instructions=a.limit_instructions,
+    svc = boothost.Services(a.root, a.game, sc, watch_reads=wl is not None, read_only=ro)
+    m = bootmachine.Machine(raw, plan, svc, limit_instructions=a.limit_instructions,
                             profile=a.profile, text_entries=text_entries, n_stacks=a.threads, **kw)
     ic = m.attach_icount(a.icount_spec if a.icount_spec else {}, base)
     prog, log = bootmiles.Progress(table), []
@@ -195,6 +197,10 @@ def run(a):
            "milestone_log": log, "inputs": {"text_entry": list(text_entries)}, "manifest_id": manifest.table_id, "last_reached": prog.last_reached(), "icount": rep}
     if declared:
         doc["inputs"]["declared"] = declared
+    dif = svc.declared_faults   # a write under a declared input: L5's static fact is wrong, the verdict is failed whatever the guest did next
+    if dif:
+        doc["declared_input_faults"] = dif
+        doc["run"]["verdict"] = "failed"
     if sc:
         doc["inputs"]["scenario"] = {"sha256": sc.sha256, "content": sc.text}
     diff = sc.check_expect(r["events"]) if sc else []
@@ -214,6 +220,9 @@ def run(a):
         r["threads"], r["virtual_ns"], time.time() - t0))
     if diff:
         print("boot: expect_events differ: %s" % "; ".join(diff))
+        return 2
+    if dif:
+        print("boot: declared_input_faults=%d first=%s %s" % (len(dif), dif[0]["call"], dif[0]["sd"]))
         return 2
     return 0 if r["reason"] == "limit" or (r["reason"] == "exit" and r["exit_code"] == 0) else 2
 

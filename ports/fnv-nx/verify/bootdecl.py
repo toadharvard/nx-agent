@@ -1,6 +1,7 @@
 """bootdecl.py - declared inputs of the boot stage: port content (not game content) pinned by commit and a checksum list, verified,
 then mounted read-only on the SD root.
 
+  bootdecl.py verify --pins verify/boot_inputs.json --src NAME=DIR ...      (verify only)
   bootdecl.py mount --pins verify/boot_inputs.json --root SDROOT [--src NAME=DIR ...] [--artifacts URL] [--record OUT.json]
 
 A pin ("fnvnx-boot-inputs/1", verify/boot_inputs.json) is {name, repo, ref, commit, path, sums, sums_sha256, mount}. `ref` is
@@ -160,10 +161,22 @@ def mount_all(pins_path, root, srcs=None, url=None):
     return recs
 
 
+def verify_all(pins_path, srcs):
+    """verify (no mount) every pin of pins_path against srcs {name: dir}; -> [record]"""
+    pins = load_pins(pins_path)
+    missing = [p["name"] for p in pins if p["name"] not in srcs]
+    if missing:
+        raise InputError("no --src for input(s) %s" % ", ".join(missing))
+    return [{"name": p["name"], "commit": p["commit"], "sums_sha256": p["sums_sha256"], "files": len(verify(p, srcs[p["name"]]))} for p in pins]
+
+
 def main(argv=None):
     import argparse
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
+    vp = sub.add_parser("verify", help="verify the sources only (the job's early input-error), mount nothing")
+    vp.add_argument("--pins", required=True)
+    vp.add_argument("--src", action="append", default=[], metavar="NAME=DIR")
     sp = sub.add_parser("mount")
     sp.add_argument("--pins", required=True)
     sp.add_argument("--root", required=True)
@@ -171,6 +184,14 @@ def main(argv=None):
     sp.add_argument("--artifacts")
     sp.add_argument("--record")
     a = ap.parse_args(argv)
+    if a.cmd == "verify":
+        try:
+            for r in verify_all(a.pins, dict(s.split("=", 1) for s in a.src)):
+                print("bootdecl: %s@%s sums %s files %d verified" % (r["name"], r["commit"][:12], r["sums_sha256"][:12], r["files"]))
+            return 0
+        except (InputError, ValueError, OSError) as e:
+            print("bootdecl: %s" % e, file=sys.stderr)
+            return 1
     try:
         srcs = dict(s.split("=", 1) for s in a.src)
         recs = mount_all(a.pins, a.root, srcs, a.artifacts)

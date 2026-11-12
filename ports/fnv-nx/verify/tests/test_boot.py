@@ -291,8 +291,8 @@ def main():
             and real[0]["commit"] == "099942c35ee21a2ff7ac50e4d13fed12cc173ad3"
             and real[0]["sums_sha256"] == "0a9b00c5904737b42fee3d81e220d1b646dd012c1aef96d132bf0231369cd077", real)
 
-    # the guest-visible side: writes under the mounted tree fail with EROFS through the real file handlers (bootpath.READ_ONLY)
-    svc = boothost.Services(root)
+    # the guest-visible side: writes under the mounted tree fail with EACCES through the real file handlers (bootpath.READ_ONLY)
+    svc = boothost.Services(root, read_only=[p["mount"] for p in real])
     mach = bootmachine.Machine(open(elf6, "rb").read(), tb.make_plan(open(elf6, "rb").read()), svc)
     page = tb.make_plan(open(elf6, "rb").read())["regions"]["host_page"]["lo"]
 
@@ -304,26 +304,52 @@ def main():
         return page, page + len(a) + 1
     neg = lambda e: (-e) & (2 ** 64 - 1)   # noqa: E731
     import errno as errno_
-    EROFS = neg(errno_.EROFS)
+    EACCES = neg(errno_.EACCES)   # the platform maps OS_EACCES (13) to ERROR_ACCESS_DENIED: platform/win32/handles.cpp:208 w32_os_error
     O_READ, O_WRITE, O_RW, O_CREAT, O_TRUNC = 1, 2, 3, 4, 0x10
     for path in ("sdmc:/switch/fnv/fonts/A.ttf", "SDMC:/SWITCH/FNV/FONTS/a.TTF", "sdmc:/switch/fnv/fonts/new.ttf"):
-        tb.case("EROFS: open for write / create / truncate under fonts, %s" % path,
-                all(svc.h_fs_open(sd(path), f) == EROFS for f in (O_WRITE, O_RW, O_WRITE | O_CREAT, O_RW | O_TRUNC)))
-    tb.case("EROFS: mkdir, rmdir, remove under fonts",
-            svc.h_fs_mkdir(sd("sdmc:/switch/fnv/fonts/newdir")) == EROFS and svc.h_fs_rmdir(sd("sdmc:/switch/fnv/fonts/Sub")) == EROFS
-            and svc.h_fs_remove(sd("sdmc:/switch/fnv/fonts/A.ttf")) == EROFS)
-    tb.case("EROFS: rename out of, into and inside fonts", svc.h_fs_rename(*sd2("sdmc:/switch/fnv/fonts/A.ttf", "sdmc:/A2.ttf")) == EROFS
-            and svc.h_fs_rename(*sd2("sdmc:/Data/x", "sdmc:/switch/fnv/fonts/x")) == EROFS
-            and svc.h_fs_rename(*sd2("sdmc:/switch/fnv/fonts/A.ttf", "sdmc:/switch/fnv/fonts/Z.ttf")) == EROFS)
+        tb.case("EACCES: open for write / create / truncate under fonts, %s" % path,
+                all(svc.h_fs_open(sd(path), f) == EACCES for f in (O_WRITE, O_RW, O_WRITE | O_CREAT, O_RW | O_TRUNC)))
+    tb.case("EACCES: mkdir, rmdir, remove under fonts",
+            svc.h_fs_mkdir(sd("sdmc:/switch/fnv/fonts/newdir")) == EACCES and svc.h_fs_rmdir(sd("sdmc:/switch/fnv/fonts/Sub")) == EACCES
+            and svc.h_fs_remove(sd("sdmc:/switch/fnv/fonts/A.ttf")) == EACCES)
+    tb.case("EACCES: rename out of, into and inside fonts", svc.h_fs_rename(*sd2("sdmc:/switch/fnv/fonts/A.ttf", "sdmc:/A2.ttf")) == EACCES
+            and svc.h_fs_rename(*sd2("sdmc:/Data/x", "sdmc:/switch/fnv/fonts/x")) == EACCES
+            and svc.h_fs_rename(*sd2("sdmc:/switch/fnv/fonts/A.ttf", "sdmc:/switch/fnv/fonts/Z.ttf")) == EACCES)
     fd = svc.h_fs_open(sd("sdmc:/switch/fnv/fonts/A.ttf"), O_READ)
     tb.case("read-only open of a font works", fd < 2 ** 31, fd)
     svc.h_fs_close(fd)
-    tb.case("EROFS calls are counted as faults and the files are unchanged",
-            sum(v for (c, er, s), v in svc.dp.faults.items() if er == "EROFS") >= 14 and open(os.path.join(mounted, "A.ttf"), "rb").read() == b"alpha"
+    tb.case("EACCES calls are counted as faults and the files are unchanged",
+            sum(v for (c, er, s), v in svc.dp.faults.items() if er == "EACCES") >= 14 and len(svc.declared_faults) >= 14 and open(os.path.join(mounted, "A.ttf"), "rb").read() == b"alpha"
             and not os.path.exists(os.path.join(mounted, "new.ttf")), svc.dp.faults)
-    fd = svc.h_fs_open(sd("sdmc:/scratch.bin"), O_WRITE | O_CREAT)
-    tb.case("a write outside fonts is not refused", fd < 2 ** 31, fd)
+    f0 = svc.declared_faults[0]
+    tb.case("declared_faults record {kind, call, sd, t_ns, tid}", sorted(f0) == ["call", "kind", "sd", "t_ns", "tid"] and f0["kind"] == "declared-input-write"
+            and f0["call"] == "open" and f0["sd"] == "sdmc:/switch/fnv/fonts/A.ttf" and isinstance(f0["t_ns"], int) and isinstance(f0["tid"], int), f0)
+    # an fd opened below the mount (read-only) never writes: write, pwrite and truncate on it are refused too
+    fd = svc.h_fs_open(sd("sdmc:/switch/fnv/fonts/A.ttf"), O_READ)
+    n0 = len(svc.declared_faults)
+    tb.case("write, pwrite, truncate on an fd opened under a declared input: EACCES, three faults",
+            svc.h_fs_write(fd, page, 1) == EACCES and svc.h_fs_pwrite(fd, page, 1, 0) == EACCES and svc.h_fs_truncate(fd, 0) == EACCES
+            and [x["call"] for x in svc.declared_faults[n0:]] == ["write", "pwrite", "truncate"], svc.declared_faults[n0:])
     svc.h_fs_close(fd)
+    nf = len(svc.declared_faults)
+    fd = svc.h_fs_open(sd("sdmc:/scratch.bin"), O_WRITE | O_CREAT)
+    tb.case("a write outside fonts is not refused and records no fault", fd < 2 ** 31 and svc.h_fs_write(fd, page, 1) == 1 and len(svc.declared_faults) == nf, fd)
+    svc.h_fs_close(fd)
+
+    # boot.py: a real guest (variant m61 = the CLI guest plus one create under sdmc:/switch/fnv/fonts) with the declared set mounted: the refused call
+    # is a fault in OUT.json and the verdict is failed (exit 2) although the guest carried on and exited cleanly
+    elf61 = patched("h61.elf", 61)
+    rc, o, e = cli(args(elf61, "d61.json", table, manifest, "--declared-inputs", pins("p61.json", sha), "--declared-src", "fonts=" + src))
+    d61 = json.load(open(os.path.join(d, "d61.json"))) if rc in (0, 2) else {}
+    console61 = open(os.path.join(d, "d61.console.txt")).read() if rc in (0, 2) else ""
+    f61 = d61.get("declared_input_faults", [])
+    tb.case("declared-input write: the run still ends exit 0 by itself, the guest saw EACCES (-13)", d61.get("run", {}).get("reason") == "exit"
+            and d61["run"].get("exit_code") == 0 and "write-fonts" in console61 and "18446744073709551603" in console61, (d61.get("run"), console61))
+    tb.case("declared-input write: fault {kind, call, sd, t_ns, tid} in OUT.json, run.verdict failed, exit 2",
+            rc == 2 and len(f61) == 1 and f61[0]["kind"] == "declared-input-write" and f61[0]["call"] == "open"
+            and f61[0]["sd"] == "sdmc:/switch/fnv/fonts/New.ttf" and f61[0]["tid"] == 1 and f61[0]["t_ns"] > 0 and d61["run"].get("verdict") == "failed"
+            and "declared_input_faults=1" in o and not os.path.exists(os.path.join(mounted, "New.ttf")), (rc, f61, o))
+    tb.case("without a declared fault the key and the verdict field are absent", "declared_input_faults" not in dd and "verdict" not in dd["run"], list(dd))
     print("%d cases, %.1f s" % (tb.N[0], time.time() - t0))
     return 1 if tb.FAILED else 0
 
