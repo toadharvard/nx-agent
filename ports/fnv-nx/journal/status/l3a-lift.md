@@ -226,3 +226,13 @@ Update 2026-11-12, at 698adefb:
   - Test roots link with the product's link/guest.ld; verify/tests/guest/guest.ld is a double (L1 raises it with L4).
 - Orchestrator: an undefined flag that is live in proven code takes the reference CPU's value, from a per-(form, flag) cert (L3b, after the first-root merge). It applies only after w7's universe rules (reloc consistency, unproven ptr candidates) have removed misdecoded data.
 - L2 on 13a5a195: the direction is accepted. Before L2 takes it, the predicate must match w4's full cl matrix with 0 mismatches, rebased onto 862b0708 (w8 doing, w4 matrix).
+- Facts a0f3d8e (w7; fnv-nx-build l3a-lift/facts; tree 2a5bd36e…bb8dd; rule lift-facts/2; producer f12c75b), done:
+  - R3 refinement, residue.disp_only as one function. Entries: exe 101 590 → 96 839; d3dx9_31 18 945 → 17 879; d3dx9_38 38 853 → 36 688; small modules −29 to −44 each.
+  - ud entries: exe 155 → 0, small modules → 0; d3dx9_31 510 → 432, d3dx9_38 719 → 559 (candidates).
+  - Entries over class-3 bytes: exe 1 451 → 3, modules → 0. The 3 exe entries are data-word pointers into tables in .text. Lead decision: such a pointer is no entry iff a proven data consumer covers it and no proven flow reaches it; otherwise red.
+  - extent = SPAN everywhere.
+  - retn.tsv over 8 images, 154 898 entries: caller 77 147, callee 44 379, mixed 122, noreturn 19 332, open 13 918.
+  - r3_refine_test: 32 checks, 0 failed.
+  - Open for the next facts commit: jtab_tables, the ranges invariant (L1's 3 sites), reloc consistency and unproven ptr candidates, pcsrc.run_facts (w4), and the 3 class-3 entries.
+- w5: the identity rule is replaced by a product invariance check (two runs, v=0/1). 01441246 is red until it lands. A read below ESP is red (ASM-003).
+- w8: b6324d18 (disp2) states the dispatch rule from the MSVC documentation and C++03; cl 15.00.30729.01 verifies it. defdisptest: 0 failed. test_plugins and test_cc1_plugins are queued on farm 2. The 144-case cl table is pending from w4.
