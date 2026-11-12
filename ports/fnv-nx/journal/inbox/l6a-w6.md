@@ -39,3 +39,8 @@ link.libs = ["libEGL.so.1"] only (lead: every GL entry point loads through eglGe
 - Undefined set of the root: fnvnx_shader_hash, fnvnx_shader_result_free, fnvnx_shader_translate_glsl; fnvnx_shader_translate is absent. egl: eglBindAPI eglCreateContext eglDestroyContext eglGetError eglGetProcAddress eglInitialize eglMakeCurrent eglTerminate; no direct gl* (non-gl4) symbol. So libGL is not needed.
 - Not yet done: link (waits for w15), "defined by the translator root" (translator root not built here), L1 verdict.
 - Fix: my earlier merge of w1b left conflict markers in CLAUDE.md (I only resolved admit.json). Removed in e7f28e6. Those markers were only on my branch.
+
+## Rebase onto translator 85dc017f, w16 885852ac (real branch head see git log)
+- Old translator merges replaced by merge of 85dc017f; render/shaders and verify/ (except admit.json) are byte-equal to 85dc017f; admit.json has gl4, backend, shaders/total, shaders/translator once each. (History of the real branch still holds the older merges; a force-push to replace them was denied, so they stay in history.)
+- Scratch merge with w16 885852ac, link null: recipe check valid; 17/17 green; two fresh stores and one warm run (34 stage hits, 0 run). All 17 object sha256 equal the first run (out1).
+- fnvnx_shaders.h: gl4/gl4_d3dshader.c:12 `#include "fnvnx_shaders.h"`, resolved by the include entry "ports/fnv-nx/render/shaders/translator/include" of gl4/build.json, a directory of another admitted root. It builds green under w16 885852ac, so a cross-root include dir is accepted today; the nxgpu headers come the same way through "ports/fnv-nx/render/backend". No -I of the own root.
