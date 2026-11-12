@@ -27,7 +27,7 @@ import tempfile
 TARGETS = ("sys/socket.h", "netinet/in.h", "netinet/tcp.h", "sys/errno.h", "sys/_sockaddr_storage.h")
 ERRNO_TARGET = "sys/errno.h"
 INCLUDES = ("sys/types.h", "sys/socket.h", "netinet/in.h", "netinet/tcp.h", "sys/errno.h", "sys/_timeval.h")
-OPTIONAL_INCLUDES = ("netinet6/in6.h",)   # FreeBSD splits netinet/in.h over it; libnx's merged header has no such file
+OPTIONAL_INCLUDES = ()   # (netinet6/in6.h must not be included directly: FreeBSD's netinet/in.h pulls it in, any_file sees its macros)
 STRUCTS = {
     "sockaddr": ("sa_len", "sa_family", "sa_data"),
     "sockaddr_in": ("sin_len", "sin_family", "sin_port", "sin_addr", "sin_zero"),
