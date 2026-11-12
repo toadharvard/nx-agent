@@ -13,6 +13,7 @@
   {"path": "ports/fnv-nx/shim/include", "class": "headers", "gates": ["headers"]},
   {"path": "ports/fnv-nx/loader/include", "class": "headers", "gates": ["headers"]},
   {"path": "ports/fnv-nx/toolchain/include", "class": "headers", "gates": ["headers"]},
+  {"path": "ports/fnv-nx/contract/include", "class": "headers", "gates": ["headers"]},
   {"path": "ports/fnv-nx/toolchain", "class": "tool", "gates": ["selftests"]},
   {"path": "ports/fnv-nx/verify", "class": "tool", "gates": ["selftests"]},
   {"path": "ports/fnv-nx/render/d3d9", "class": "doc", "gates": []},
