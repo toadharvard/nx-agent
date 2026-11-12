@@ -396,3 +396,13 @@ Update 2026-11-12, at 698adefb:
   - drop -mabi=ilp32 from lift/pack/build.json (flags.semantics supplies it);
   - point rt's include path from shim/include, which has no tracked file, to the header home.
 - Top-level asm (enter.cc, unhandled.cc): no change until L2 says whether 3d needs function-level asm.
+
+## 2026-11-12 09:46
+- int3 90f52d98e (w6):
+  - The liftgen.recipe() generator now emits lift/pack's build.json by rule. Per-root flag classes only; semantic flags come from flags.semantics; the full plugin set uses LIFTED_ARGS.
+  - lift/rt includes from platform/include.
+  - recipe check: lift/pack valid on int3; lift/rt valid on int-l3a 2d215f16a (on int3 alone it waits on the platform root).
+- Open before acceptance:
+  - proof that -mabi=ilp32 stays in the resolved pack flags (readelf ELF32 ILP32), per L3b's check;
+  - lift tests compile with their own PACK_CXX_FLAGS list. That is a second flag source, so they move to the recipe's resolved flags.
+- Top-level asm: L2/L3b close it by class (the plugin brackets top-level asm, so every executable byte lies in a function or asm range). No conversion.
