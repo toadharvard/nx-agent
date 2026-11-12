@@ -182,3 +182,18 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - **crt0 split** (w20, queued). L5 w12 281c4a33 plus guest.ld KEEP/ASSERT, in one commit.
   - **Incremental acceptance** (w19). A warm run is timed per gate for three cases: docs-only, one unit changed, one gates.d file changed. A gate that re-runs without a changed declared input is red. Each gate's deps are declared and enforced by the sandbox.
   - test_gates on 8cfbcdbf: the pure/tests/gates.json cases are all green; the verdict fixtures need the declared env. The w2g failures come from a stale verify/ in its merge.
+- 03:28Z: assumption id ranges, fixed by L1. Legacy ASM-001..054 stay. New ids by layer:
+
+  | Layer | Range |
+  |---|---|
+  | L1 | 100-199 |
+  | L3a | 200-299 |
+  | L3b | 300-399 |
+  | L4 | 400-499 |
+  | L5 | 500-599 |
+  | L6 | 600-699 |
+  | L6A | 700-799 |
+  | L2 | 800-899 |
+
+  - ASM-300..328 are L3b's. L3a w9 cites them in fnvlift, so there is no collision.
+  - w10's gate will be red on a duplicate id, a duplicate alias, or a new id outside its owner's range.
