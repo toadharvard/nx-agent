@@ -1,0 +1,105 @@
+ENV_PIN: the pinned recording environment of render/d3d9/env/env_*.tsv (written by tests/l6/env/make_env.py; do not edit)
+wine --version: wine-9.0 (Ubuntu 9.0~repack-4build3)
+packages (dpkg):
+  libgl1-mesa-dri:i386 25.2.8-0ubuntu0.24.04.4
+  libglx-mesa0:i386 25.2.8-0ubuntu0.24.04.4
+  libllvm20:i386 1:20.1.2-0ubuntu1~24.04.3
+  libwine:i386 9.0~repack-4build3
+  wine:all 9.0~repack-4build3
+  wine32:i386 9.0~repack-4build3
+  xvfb:amd64 2:21.1.12-1ubuntu1.9
+host cpu (llvmpipe vector width follows it): Intel(R) Xeon(R) Processor @ 2.10GHz
+renderer: LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe (Mesa 25.2.8, LLVM 20.1.2 as the GL strings below say); Wine renderer = OpenGL (wined3d default)
+display: Xvfb <display> -screen 0 WxHx24 -nolisten tcp -noreset (no window manager, no RANDR mode list beyond the screen: one mode)
+emulated video memory: HKCU\Software\Wine\Direct3D\VideoMemorySize = 960 (MiB)
+build toolchain (dpkg): 
+  binutils-mingw-w64-i686:amd64 2.41.90.20240122-1ubuntu1+11.4
+  binutils-mingw-w64-x86-64: 
+  g++-mingw-w64-i686:all 13.2.0-6ubuntu1+26.1
+  g++-mingw-w64-i686-posix:amd64 13.2.0-6ubuntu1+26.1
+  g++-mingw-w64-i686-win32:amd64 13.2.0-6ubuntu1+26.1
+  gcc-mingw-w64-base:amd64 13.2.0-6ubuntu1+26.1
+  gcc-mingw-w64-bootstrap: 
+  gcc-mingw-w64-i686:all 13.2.0-6ubuntu1+26.1
+  gcc-mingw-w64-i686-posix:amd64 13.2.0-6ubuntu1+26.1
+  gcc-mingw-w64-i686-posix-runtime:amd64 13.2.0-6ubuntu1+26.1
+  gcc-mingw-w64-i686-win32:amd64 13.2.0-6ubuntu1+26.1
+  gcc-mingw-w64-i686-win32-runtime:amd64 13.2.0-6ubuntu1+26.1
+  mingw-w64-common:all 11.0.1-3build1
+  mingw-w64-i686-dev:all 11.0.1-3build1
+  i686-w64-mingw32-gcc (GCC) 13-win32
+  i686-w64-mingw32-g++ (GCC) 13-win32
+  GNU ld (GNU Binutils) 2.41.90.20240122
+recorder d3d9.dll sha256 c89a0d1f1de1a245209f52c79eb5c5362f1b46d6528ff25e7617f3316c377eea
+envprobe2.exe sha256 3028e5959f443148d4dfc7f90d6294bddaafad1895b9d840b0302a3084c801a9
+both binaries archived in fnv-nx-build tools/envprobe-bin (the files of D9ENV_BIN: d3d9.dll, envprobe2.exe)
+query list: 232251 queries (envq.py), 95 formats
+profile handheld: screen 1280x720x24, 232832 answer rows, env_handheld.tsv sha256 ff340ae400828835e3ab9c3e076fb483952d15e9d66a18131196e38082597a52, recorded stream 233602 records
+  GL: GL_RENDERER: "llvmpipe (LLVM 20.1.2, 256 bits)".
+  GL: GL_VENDOR: "Mesa".
+  GL: GL_VERSION: "4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.4".
+profile docked: screen 1920x1080x24, 232832 answer rows, env_docked.tsv sha256 e1db357d0bf2cf28cee280ed57137a2adf25b0d44e4a187f6d95bd6d5ce71e77, recorded stream 233602 records
+  GL: GL_RENDERER: "llvmpipe (LLVM 20.1.2, 256 bits)".
+  GL: GL_VENDOR: "Mesa".
+  GL: GL_VERSION: "4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.4".
+registry HKCU\Software\Wine (reg query /s, last profile):
+  HKEY_CURRENT_USER\Software\Wine\AppDefaults
+  HKEY_CURRENT_USER\Software\Wine\Debug
+  RelayExclude    REG_SZ    ntdll.RtlEnterCriticalSection;ntdll.RtlTryEnterCriticalSection;ntdll.RtlLeaveCriticalSection;kernel32.48;kernel32.49;kernel32.94;kernel32.95;kernel32.96;kernel32.97;kernel32.98;kernel32.TlsGetValue;kernel32.TlsSetValue;kernel32.FlsGetValue;kernel32.FlsSetValue;kernel32.SetLastError
+  RelayFromExclude    REG_SZ    winex11.drv;winemac.drv;user32;gdi32;advapi32;kernel32
+  HKEY_CURRENT_USER\Software\Wine\Direct3D
+  VideoMemorySize    REG_SZ    960
+  HKEY_CURRENT_USER\Software\Wine\DllOverrides
+  HKEY_CURRENT_USER\Software\Wine\Fonts
+  Codepages    REG_SZ    1252,437
+  LogPixels    REG_DWORD    0x60
+  HKEY_CURRENT_USER\Software\Wine\Fonts\Cache
+  HKEY_CURRENT_USER\Software\Wine\Fonts\External Fonts
+  @IPAGothic (TrueType)    REG_SZ    Z:\usr\share\fonts\opentype\ipafont-gothic\ipag.ttf
+  @IPAPGothic (TrueType)    REG_SZ    Z:\usr\share\fonts\opentype\ipafont-gothic\ipagp.ttf
+  @Unifont (TrueType)    REG_SZ    Z:\usr\share\fonts\opentype\unifont\unifont.otf
+  @Unifont CSUR (TrueType)    REG_SZ    Z:\usr\share\fonts\opentype\unifont\unifont_csur.otf
+  @Unifont Sample (TrueType)    REG_SZ    Z:\usr\share\fonts\opentype\unifont\unifont_jp_sample.otf
+  @Unifont Upper (TrueType)    REG_SZ    Z:\usr\share\fonts\opentype\unifont\unifont_upper.otf
+  @Unifont-JP (TrueType)    REG_SZ    Z:\usr\share\fonts\opentype\unifont\unifont_jp.otf
+  @WenQuanYi Zen Hei (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\wqy\wqy-zenhei.ttc
+  @WenQuanYi Zen Hei Mono (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\wqy\wqy-zenhei.ttc
+  @WenQuanYi Zen Hei Sharp (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\wqy\wqy-zenhei.ttc
+  Caladea Bold (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\crosextra\Caladea-Bold.ttf
+  Caladea Bold Italic (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\crosextra\Caladea-BoldItalic.ttf
+  Caladea Italic (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\crosextra\Caladea-Italic.ttf
+  Caladea Regular (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\crosextra\Caladea-Regular.ttf
+  Carlito Bold (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\crosextra\Carlito-Bold.ttf
+  Carlito Bold Italic (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\crosextra\Carlito-BoldItalic.ttf
+  Carlito Italic (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\crosextra\Carlito-Italic.ttf
+  Carlito Regular (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\crosextra\Carlito-Regular.ttf
+  DejaVu Sans (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\dejavu\DejaVuSans.ttf
+  DejaVu Sans Bold (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\dejavu\DejaVuSans-Bold.ttf
+  DejaVu Sans Mono (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\dejavu\DejaVuSansMono.ttf
+  DejaVu Sans Mono Bold (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\dejavu\DejaVuSansMono-Bold.ttf
+  DejaVu Sans Mono Bold Oblique (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\dejavu\DejaVuSansMono-BoldOblique.ttf
+  DejaVu Sans Mono Oblique (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\dejavu\DejaVuSansMono-Oblique.ttf
+  DejaVu Serif (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\dejavu\DejaVuSerif.ttf
+  DejaVu Serif Bold (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\dejavu\DejaVuSerif-Bold.ttf
+  FreeMono (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\freefont\FreeMono.ttf
+  FreeMono Bold (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\freefont\FreeMonoBold.ttf
+  FreeMono Bold Oblique (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\freefont\FreeMonoBoldOblique.ttf
+  FreeMono Oblique (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\freefont\FreeMonoOblique.ttf
+  FreeSans (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\freefont\FreeSans.ttf
+  FreeSans Bold (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\freefont\FreeSansBold.ttf
+  FreeSans Bold Oblique (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\freefont\FreeSansBoldOblique.ttf
+  FreeSans Oblique (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\freefont\FreeSansOblique.ttf
+  FreeSerif (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\freefont\FreeSerif.ttf
+  FreeSerif Bold (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\freefont\FreeSerifBold.ttf
+  FreeSerif Bold Italic (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\freefont\FreeSerifBoldItalic.ttf
+  FreeSerif Italic (TrueType)    REG_SZ    Z:\usr\share\fonts\truetype\freefont\FreeSerifItalic.ttf
+  Inter Black (TrueType)    REG_SZ    Z:\usr\share\fonts\opentype\inter\Inter-Black.otf
+  Inter Black Italic (TrueType)    REG_SZ    Z:\usr\share\fonts\opentype\inter\Inter-BlackItalic.otf
+  Inter Bold (TrueType)    REG_SZ    Z:\usr\share\fonts\opentype\inter\Inter-Bold.otf
+  Inter Bold Italic (TrueType)    REG_SZ    Z:\usr\share\fonts\opentype\inter\Inter-BoldItalic.otf
+  Inter Display Black (TrueType)    REG_SZ    Z:\usr\share\fonts\opentype\inter\InterDisplay-Black.otf
+  Inter Display Black Italic (TrueType)    REG_SZ    Z:\usr\share\fonts\opentype\inter\InterDisplay-BlackItalic.otf
+  Inter Display Bold (TrueType)    REG_SZ    Z:\usr\share\fonts\opentype\inter\InterDisplay-Bold.otf
+  Inter Display Bold Italic (TrueType)    REG_SZ    Z:\usr\share\fonts\opentype\inter\InterDisplay-BoldItalic.otf
+  Inter Display ExtraBold (TrueType)    REG_SZ    Z:\usr\share\fonts\opentype\inter\InterDisplay-ExtraBold.otf
+  Inter Display ExtraBold Italic (TrueType)    REG_SZ    Z:\usr\share\fonts\opentype\inter\InterDisplay-ExtraBoldItalic.otf
