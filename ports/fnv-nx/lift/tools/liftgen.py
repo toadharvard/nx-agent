@@ -22,6 +22,9 @@ for p in ('bench', 'tools', 'test', ''):
 BATCH = 60
 ENCS = 4            # encodings listed per form (encs.tsv): the distinct byte strings at the lowest addresses; the universe of test/instest.py
 NBUCKET = 4096
+# THE flags of lifted C++ (one definition: the pack recipe below and test/instest.py use it). No flag that turns an error into a warning or silences one.
+PACK_CXX_FLAGS = ['-mabi=ilp32', '-std=gnu++17', '-O2', '-fms-extensions', '-fshort-wchar', '-frounding-math', '-fsigned-char', '-fno-strict-aliasing', '-fwrapv', '-fno-delete-null-pointer-checks', '-fcheck-new', '-fno-sized-deallocation', '-fno-lifetime-dse', '-ffp-contract=off', '-fPIC', '-march=armv8-a+crc+crypto', '-mtune=cortex-a57', '-fno-stack-protector', '-fno-stack-clash-protection', '-mno-outline-atomics', '-U_FORTIFY_SOURCE', '-ffreestanding', '-fno-exceptions', '-fno-asynchronous-unwind-tables', '-fno-math-errno', '-fno-jump-tables', '-fno-ipa-ra', '-ffixed-x19', '-ffixed-x20', '-ffixed-x21', '-ffixed-x22', '-ffixed-x23', '-ffixed-x24', '-ffixed-x25', '-ffixed-x26', '-ffixed-x27', '-Werror=attributes']
+PACK_C_FLAGS = ['-mabi=ilp32', '-Werror=attributes']
 ROOT = 'ports/fnv-nx/lift/pack'
 EH_KEYS = ((0x000fffd0, 'fnvl_msvcrt_eh_nested_catch'), (0x000fffe0, 'fnvl_msvcrt_eh_nested_collide'))    # rt/msvcrt.h FNVL_EH_KEY_*: the two handlers the msvcrt EH runtime registers on fs:[0]
 G = {}
@@ -187,12 +190,10 @@ def finish(a):
 
 
 def recipe(ref, commit, tree):
-    """lift/pack/build.json: the flags are the lifted-code flags of test/instest.py (one source), the units are the fixed names."""
-    import instest
-    drop = ('-c', '-DFNVL_FLAGS_IO', '-fpermissive', '-w')      # L1 rule: a guest root carries no flag that turns an error into a warning or silences diagnostics
+    """lift/pack/build.json: the flags are PACK_CXX_FLAGS (one source; test/instest.py imports them), the units are the fixed names."""
     gc = json.load(open(os.path.join(LIFT, '..', 'verify', 'guest_compiler.json')))   # the one source of the guest compiler (msvcmodel)
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': gc['external']['name'], 'cc': gc['cc'], 'cxx': gc['cxx']},
-           'flags': {'c': ['-mabi=ilp32', '-Werror=attributes'], 'cxx': [f for f in instest.FLAGS if f not in drop] + ['-Werror=attributes'], 'asm': ['-mabi=ilp32', '-fPIC']},
+           'flags': {'c': list(PACK_C_FLAGS), 'cxx': list(PACK_CXX_FLAGS), 'asm': ['-mabi=ilp32', '-fPIC']},
            'include': ['/ext/liftpack/inc'], 'units': 'all',
            'generated': [{'tool': 'ports/fnv-nx/lift/tools/packcopy.py', 'args': ['/ext/liftpack', '/out'], 'inputs': [], 'outputs': unit_names()}],
            'link': None,
