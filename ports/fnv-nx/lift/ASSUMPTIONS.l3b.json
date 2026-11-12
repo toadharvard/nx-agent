@@ -251,9 +251,9 @@
   {
    "id": "A-F2IASM",
    "area": "fpexact",
-   "file": "lift/tools/fnvnx_f2i_check.cc",
+   "file": "lift/proof/gate_fpexact.py",
    "statement": "An inline asm without FP/vector operand and without FP clobber does no float->int conversion.",
-   "disposition": "gate: check 3b covers units with no site; closing fully = forbid inline asm outside listed rt files by the plugin"
+   "disposition": "closed: gate fpexact check 3c decodes the bytes of every inline asm (ranges recorded by the plugin in .fnvnx.asmrange); no operand or clobber text is trusted"
   },
   {
    "id": "A-F2ICONST",

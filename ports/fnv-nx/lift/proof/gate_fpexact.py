@@ -48,27 +48,36 @@ object-level necessary condition:
   3a (source) the GCC plugin fnvnx_ftoi (toolchain/ftoi, L2's; in mode=lifted, taken from the root's cxx_origin, it also reports): in the CC stage
       of every C and C++ unit it reports every float -> integer conversion (GIMPLE FIX_TRUNC_EXPR, scalar or vector; the lround / lrint / iround /
       irint / {i,l,ll}{ceil,floor} builtin families; IFN_VEC_CONVERT; target builtins with a float argument and an integer result; inline asm with a
-      float / vector operand or an FP register clobber) that lies in a function without the attribute fnvnx_f2i (FNVL_F2I in rt/fnvl_x87.h, on the
+      float / vector operand or an FP register clobber: a cross-check only, check 3d reads the bytes) that lies in a function without the attribute fnvnx_f2i (FNVL_F2I in rt/fnvl_x87.h, on the
       helpers sse_f2i and fv_i), right after the CFG is built, before early inlining and every optimisation, so inlining a helper into its callers
       cannot hide a site and no transformation adds one. It writes `<unit>.f2i.json` (format fnvnx-f2i/1: unit, sites, helpers, findings = sorted
-      {function, file, line, kind: conv|builtin|asm}) into the CC stage's /out; the recipe keeps it as obj/<unit>.o.f2i.json next to the object.
+      {function, file, line, kind: conv|builtin|asm}) into the CC stage's /out; the recipe keeps it as obj/<unit>.f2i.json next to obj/<unit>.o.
       Rule: every object has its result file, its `unit` field equals the unit of objects.json, and `findings` == []; a missing or malformed file,
       another unit, or any finding is a finding of the object.
   3c (native C++ unit) a unit of a root whose cxx_origin is native needs, in its CC stage document (gate_datamodel.cc_docs, the one reader), the declared
       input /plug/fnvnx_ftoi and the argv flag -fplugin=/plug/fnvnx_ftoi/fnvnx_ftoi.so: the compile ran the plugin that rewrites or rejects every
       conversion. A lifted root's units need no plugin (the lifter emits the conversions through the helpers); their f2i file is judged by 3a.
-  3b (object) an object with at least one FCVT{Z,N,M,P,A}{S,U} / FJCVTZS instruction (capstone ids, all sections, scalar and vector)
+  3b (object) an object with at least one FP -> integer conversion word (the table fp_to_int, all sections, scalar and vector)
       needs `sites` > 0 in its result file (the unit has a conversion site in some function, helper or not). It catches a conversion
       that entered the object by a route the plugin does not see (an asm without FP operands, the assembler, a hand-written .S): with
       no site in the source of the unit there is nothing that may produce one.
+  3d (object) the bytes of every inline asm. The plugin brackets each asm insn that reaches `final` with two zero-byte markers (a pass inserted right before `final`, after
+      sched2 and every pass that moves code, so no instruction changes; the markers are assembler-local labels in .text that add no byte, which the plugin's own test proves
+      by comparing every section except the asm-range pair with and without the pass) and records the pair in the non-alloc section .fnvnx.asmrange (two relocated addresses, line, column,
+      function, file). The gate resolves each entry's relocations to the byte range [BEGIN, END) of the executable section and decodes exactly those bytes with capstone, by
+      instruction id like check 2: any word in a range that the table fp_to_int selects (FCVT{N,P,M,Z,A}{S,U}, scalar and vector, fixed-point forms, FJCVTZS: the Arm ARM encoding groups cited there) is a finding, as is a range that does not resolve, a word capstone cannot decode, a missing
+      section, an asm insn found after `final` without markers (a second pass walks the insn stream), a top-level asm statement (its bytes lie in no range) and an entry count that
+      differs from the plugin's count. The report carries the compiler's own per-function counts [GIMPLE at the first pass, GIMPLE given to the expander, asm insns right after expand,
+      asm insns at the marker pass, unrecorded]; totals over the objects judged are N (GIMPLE asm given to the expander), M (emitted with a range), D (deleted before final: the
+      expander dropping unreachable blocks and the RTL passes deleting dead insns, per function N - rtl0 and rtl0 - M, never negative), U (unrecorded). It replaces the earlier
+      reliance on an asm without a float operand doing no conversion: no operand or clobber text is trusted for this, the instructions are read.
   Soundness argument: a compiler-generated A64 conversion instruction comes from a GIMPLE conversion (FIX_TRUNC_EXPR, a conversion
   builtin or IFN_VEC_CONVERT) present in the function bodies the plugin saw, or from an asm; the plugin sees every body before the first
   transformation; outside the attributed helpers none exists, so the conversion instructions of the object are copies of the helpers'
   bodies. The helpers' own correctness (range guard, rounding mode, indefinite value) is not decided here: it is by review, and it is
   listed per object in the output (`helpers` of each result file are the analysed helper functions). Registered assumptions (ASSUMPTIONS.l3b.json), none new:
   ASM-322 (the helpers are correct: removed by the dependency on the gate forms, item `<root>:forms`), ASM-323 (an object and its result file
-  come from the same compile: the recipe's stage key binds both), ASM-218 (an inline asm without a float / vector operand and without an FP register
-  clobber does no conversion; 3b backs it up for units with no site), ASM-325 (no conversion of a C literal occurs in lifted code), ASM-801
+  come from the same compile: the recipe's stage key binds both), ASM-325 (no conversion of a C literal occurs in lifted code), ASM-801
   (native bodies compiled with the fnvnx_ftoi plugin are judged by the L2 rules, not here).
 
 Universe: per product root: `<root>:rcpcert` (per image, when it uses the table), `<root>:forms`, and for every object `rcp:<root>/<unit>` and `f2i:<root>/<unit>`; a root that does not
@@ -101,12 +110,153 @@ NAME = "fpexact"
 FORMAT = "fnvnx-gate/1"
 RECIP = {A.ARM64_INS_FRECPE: "frecpe", A.ARM64_INS_FRECPS: "frecps", A.ARM64_INS_FRECPX: "frecpx", A.ARM64_INS_FRSQRTE: "frsqrte",
          A.ARM64_INS_FRSQRTS: "frsqrts", A.ARM64_INS_URECPE: "urecpe", A.ARM64_INS_URSQRTE: "ursqrte"}
-FCVT = {A.ARM64_INS_FCVTZS: "fcvtzs", A.ARM64_INS_FCVTZU: "fcvtzu", A.ARM64_INS_FCVTNS: "fcvtns", A.ARM64_INS_FCVTNU: "fcvtnu",
-        A.ARM64_INS_FCVTMS: "fcvtms", A.ARM64_INS_FCVTMU: "fcvtmu", A.ARM64_INS_FCVTPS: "fcvtps", A.ARM64_INS_FCVTPU: "fcvtpu",
-        A.ARM64_INS_FCVTAS: "fcvtas", A.ARM64_INS_FCVTAU: "fcvtau", A.ARM64_INS_FJCVTZS: "fjcvtzs"}
+def _bits(w, hi, lo):
+    return (w >> lo) & ((1 << (hi - lo + 1)) - 1)
+
+
+# The one table that says which A64 words convert floating point to an integer (the x86 semantics are not the saturating ones these instructions
+# have, so none may appear outside a certified helper). It selects from the ENCODING FIELDS of the 32-bit word, never from a mnemonic text and never
+# from a disassembler's instruction id. Source: Arm Architecture Reference Manual for A-profile architecture (DDI 0487), the A64 instruction set
+# encoding, "Data Processing -- Scalar Floating-Point and Advanced SIMD", the groups (field names as the manual spells them):
+#   "Conversion between floating-point and integer"        sf 0 S 11110 ptype 1 rmode opcode 000000 Rn Rd   FCVT{N,P,M,Z}{S,U} (opcode 000/001, rmode 00/01/10/11),
+#                                                          FCVTA{S,U} (opcode 100/101, rmode 00), FJCVTZS (sf 0, ptype 01, rmode 11, opcode 110)
+#   "Conversion between floating-point and fixed-point"    sf 0 S 11110 ptype 0 rmode opcode scale Rn Rd    FCVTZ{S,U} (rmode 11, opcode 000/001)
+#   "Advanced SIMD scalar two-register miscellaneous" and its FP16 form, "Advanced SIMD two-register miscellaneous" and its FP16 form
+#                                                          opcode 11010 (a 0: FCVTN, a 1: FCVTP), 11011 (a 0: FCVTM, a 1: FCVTZ), 11100 (a 0: FCVTA), U 0: signed, 1: unsigned
+#   "Advanced SIMD scalar shift by immediate" and "Advanced SIMD shift by immediate"
+#                                                          opcode 11111: FCVTZ{S,U} (fixed-point)
+# Not conversions to an integer and so not listed: FMOV between the general and the FP registers (a bit move), SCVTF / UCVTF (integer to FP), FCVT / FCVTL / FCVTN / FCVTXN
+# (FP to FP), FRINT* (FP to FP). SVE conversions are not in the guest's architecture (-march armv8.1-a): check 3d makes any SVE-class word (bits 28:25 = 0010) in an asm range a finding.
+def fp_to_int(w):
+    """-> the lower-case mnemonic ('fcvtzs', ..., 'fjcvtzs') when the A64 word W is a floating-point -> integer conversion by the table above, else None"""
+    if _bits(w, 30, 30) == 0 and _bits(w, 28, 24) == 0b11110 and _bits(w, 29, 29) == 0:
+        if _bits(w, 21, 21) == 1 and _bits(w, 15, 10) == 0:
+            rmode, opc, ptype, sf = _bits(w, 20, 19), _bits(w, 18, 16), _bits(w, 23, 22), _bits(w, 31, 31)
+            if opc in (0, 1):
+                return "fcvt" + {0: "n", 1: "p", 2: "m", 3: "z"}[rmode] + "su"[opc]
+            if opc in (4, 5) and rmode == 0:
+                return "fcvta" + "su"[opc - 4]
+            if opc == 6 and rmode == 3 and ptype == 1 and sf == 0:
+                return "fjcvtzs"
+            return None
+        if _bits(w, 21, 21) == 0:
+            if _bits(w, 20, 19) == 3 and _bits(w, 18, 16) in (0, 1):
+                return "fcvtz" + "su"[_bits(w, 18, 16)]
+            return None
+    two = ((_bits(w, 31, 30) == 0b01 and _bits(w, 28, 24) == 0b11110) or (_bits(w, 31, 31) == 0 and _bits(w, 28, 24) == 0b01110)) and _bits(w, 11, 10) == 0b10
+    if two and (_bits(w, 21, 17) == 0b10000 or _bits(w, 22, 17) == 0b111100):
+        opc, a, u = _bits(w, 16, 12), _bits(w, 23, 23), "su"[_bits(w, 29, 29)]
+        if opc == 0b11010:
+            return "fcvt" + "np"[a] + u
+        if opc == 0b11011:
+            return "fcvt" + "mz"[a] + u
+        if opc == 0b11100 and a == 0:
+            return "fcvta" + u
+        return None
+    if _bits(w, 15, 11) == 0b11111 and _bits(w, 10, 10) == 1 and (
+            (_bits(w, 31, 30) == 0b01 and _bits(w, 28, 23) == 0b111110) or (_bits(w, 31, 31) == 0 and _bits(w, 28, 23) == 0b011110)):
+        return "fcvtz" + "su"[_bits(w, 29, 29)]
+    return None
+
+
 REF_KEYS = ("VENDOR", "FAMILY", "MODEL", "STEPPING")
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 SHF_EXECINSTR = 4
+
+
+def sha256_file(path):
+    with open(path, "rb") as fh:
+        return hashlib.sha256(fh.read()).hexdigest()
+
+
+def read_inputs(res):
+    """-> [(unit, absolute object path)] sorted by unit, from the objects.json dict RES of one root (the recipe's result). The one place the object
+    input is read. The plugin's file of an object is found by read_f2i next to it."""
+    return sorted((o["unit"], o["object"]) for o in res["objects"])
+
+
+def read_ref(lift_dir):
+    """the four FNVL_RCP_REF_* constants of rt/rcpref.h -> {"VENDOR": str, "FAMILY": int, ...}; ValueError unless each is defined exactly once"""
+    out = {}
+    with open(os.path.join(lift_dir, "rt", "rcpref.h")) as fh:
+        for line in fh:
+            m = re.match(r'#define FNVL_RCP_REF_([A-Z]+) ("[^"\n]*"|[0-9]+)\s*$', line)
+            if m and m[1] in REF_KEYS:
+                if m[1] in out:
+                    raise ValueError("FNVL_RCP_REF_%s defined twice" % m[1])
+                out[m[1]] = m[2][1:-1] if m[2].startswith('"') else int(m[2])
+    if sorted(out) != sorted(REF_KEYS):
+        raise ValueError("rt/rcpref.h does not define exactly FNVL_RCP_REF_{VENDOR,FAMILY,MODEL,STEPPING}")
+    return out
+
+
+def check_cert(lift_dir):
+    """check 1 -> [finding strings]"""
+    try:
+        ref = read_ref(lift_dir)
+    except (OSError, ValueError) as e:
+        return ["reference identity unreadable: %s" % e]
+    path = os.path.join(lift_dir, "rt", "rcptab.cert.json")
+    if not os.path.isfile(path):
+        return ["certificate rt/rcptab.cert.json is missing (the farm job farm/rcpcert.sh must run on the reference host)"]
+    try:
+        with open(path) as fh:
+            cert = json.load(fh)
+        if not isinstance(cert, dict) or cert.get("format") != "fnvnx-rcpcert/1":
+            return ["certificate is not fnvnx-rcpcert/1"]
+        cpu = cert["cpu"]
+        want = {"vendor": ref["VENDOR"], "family": ref["FAMILY"], "model": ref["MODEL"], "stepping": ref["STEPPING"]}
+        bad = []
+        if cpu != want:
+            bad.append("cpu identity %s is not the reference %s" % (json.dumps(cpu, sort_keys=True), json.dumps(want, sort_keys=True)))
+        if cert["mismatches"] != 0 or isinstance(cert["mismatches"], bool):
+            bad.append("mismatches is %r, not 0" % (cert["mismatches"],))
+        for key, file in (("source_sha256", "rcptab.c"), ("header_sha256", "rcpref.h")):
+            have = sha256_file(os.path.join(lift_dir, "rt", file))
+            if cert[key] != have:
+                bad.append("%s %s differs from sha256 of rt/%s (%s)" % (key, cert[key], file, have))
+        for key in ("rcp_stream_sha256", "rsqrt_stream_sha256"):
+            if not isinstance(cert[key], str) or not HEX64.match(cert[key]):
+                bad.append("%s is not a SHA-256" % key)
+        return bad
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        return ["certificate unreadable or malformed: %s" % (str(e)[:200] or type(e).__name__)]
+
+
+def mapping_ranges(elf, sec_index, size):
+    """-> [(start, end, is_code)] covering [0, size) of one section by its AArch64 mapping symbols ($x code, $d data); no symbol before offset 0 means code"""
+    marks = {}
+    symtab = elf.get_section_by_name(".symtab")
+    for sym in (symtab.iter_symbols() if symtab else ()):
+        n = sym.name
+        if sym["st_shndx"] == sec_index and sym["st_info"]["type"] == "STT_NOTYPE" and n[:2] in ("$x", "$d") and (len(n) == 2 or n[2] == "."):
+            marks[sym["st_value"]] = n[1] == "x"
+    cuts = sorted(marks)
+    ranges, pos, code = [], 0, True
+    for c in cuts:
+        if c > pos:
+            ranges.append((pos, min(c, size), code))
+        pos, code = max(c, pos), marks[c]
+    if pos < size:
+        ranges.append((pos, size, code))
+    return [r for r in ranges if r[0] < r[1]]
+
+
+def functions(elf, sec_index):
+    """-> sorted [(start, end, name)] of the FUNC symbols of one section"""
+    symtab = elf.get_section_by_name(".symtab")
+    out = []
+    for sym in (symtab.iter_symbols() if symtab else ()):
+        if sym["st_shndx"] == sec_index and sym["st_info"]["type"] == "STT_FUNC":
+            out.append((sym["st_value"], sym["st_value"] + sym["st_size"], sym.name))
+    return sorted(out)
+
+
+def owner(funcs, off, secname):
+    for s, e, n in funcs:
+        if s <= off < max(e, s + 1):
+            return n
+    return "%s+0x%x" % (secname, off)
 
 
 def sha256_file(path):
@@ -227,13 +377,80 @@ def scan_object(path):
                         seen_end = ins.address + ins.size
                         if ins.id in RECIP:
                             res["recip"].append((owner(funcs, ins.address, sec.name), RECIP[ins.id]))
-                        elif ins.id in FCVT:
-                            res["fcvt"].append((owner(funcs, ins.address, sec.name), FCVT[ins.id]))
+                        elif fp_to_int(int.from_bytes(ins.bytes, "little")):
+                            res["fcvt"].append((owner(funcs, ins.address, sec.name), fp_to_int(int.from_bytes(ins.bytes, "little"))))
                     if seen_end < hi:
                         res["undecodable"].append("%s@0x%x" % (owner(funcs, seen_end, sec.name), seen_end))
                         seen_end += 4
                     pos = seen_end
     return res
+
+
+def _cstr(data, pos):
+    end = data.index(b"\0", pos)
+    return data[pos:end].decode("utf-8", "replace"), end + 1
+
+
+def scan_asmranges(path):
+    """Check 3d, the object side. -> {"entries": n, "findings": [str], "fcvt": n} for the section .fnvnx.asmrange of the object at PATH: every entry
+    (two relocated addresses BEGIN, END into one executable section, line, column, function, file) is resolved through the section's own relocations to
+    the byte range [BEGIN, END) of that section, and exactly those bytes are read as A64 words: a word that fp_to_int (the encoding-field table) selects is a
+    finding, a word capstone (CS_ARCH_ARM64) cannot decode is a finding (nothing is skipped, mapping symbols included), and so is a range that cannot be resolved, lies in no executable section, is empty-and-reversed, or holds undecodable code
+    bytes. A missing section is a finding (the plugin always writes it)."""
+    md = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
+    out = {"entries": 0, "findings": [], "fcvt": 0}
+    with open(path, "rb") as fh:
+        elf = ELFFile(fh)
+        sec = elf.get_section_by_name(".fnvnx.asmrange")
+        if sec is None:
+            out["findings"].append("no section .fnvnx.asmrange (the plugin always writes it)")
+            return out
+        data = sec.data()
+        rela = elf.get_section_by_name(".rela.fnvnx.asmrange")
+        relocs = {}
+        symtab = elf.get_section(rela["sh_link"]) if rela is not None else None
+        for r in (rela.iter_relocations() if rela is not None else []):
+            sym = symtab.get_symbol(r["r_info_sym"])
+            relocs[r["r_offset"]] = (sym["st_shndx"], r["r_addend"] + (sym["st_value"] if sym["st_info"]["type"] != "STT_SECTION" else 0))
+        pos = 0
+        while pos < len(data):
+            if pos + 16 > len(data):
+                out["findings"].append("truncated entry at 0x%x of .fnvnx.asmrange" % pos)
+                break
+            line = int.from_bytes(data[pos + 8:pos + 12], "little")
+            try:
+                func, q = _cstr(data, pos + 16)
+                file, q = _cstr(data, q)
+            except ValueError:
+                out["findings"].append("entry at 0x%x of .fnvnx.asmrange has an unterminated string" % pos)
+                break
+            where = "%s:%d in %s" % (file, line, func)
+            out["entries"] += 1
+            b, e = relocs.get(pos), relocs.get(pos + 4)
+            if b is None or e is None or not isinstance(b[0], int) or b[0] != e[0] or not 0 < b[0] < elf.num_sections():
+                out["findings"].append("asm range at %s: its addresses do not resolve to one section" % where)
+            else:
+                tsec = elf.get_section(b[0])
+                lo, hi = b[1], e[1]
+                if not tsec["sh_flags"] & SHF_EXECINSTR or tsec["sh_type"] != "SHT_PROGBITS" or not 0 <= lo <= hi <= tsec["sh_size"]:
+                    out["findings"].append("asm range at %s: [0x%x, 0x%x) is not inside an executable section" % (where, lo, hi))
+                else:
+                    tdata = tsec.data()
+                    if (hi - lo) % 4 or lo % 4:
+                        out["findings"].append("asm range at %s: [0x%x, 0x%x) is not a whole number of A64 words" % (where, lo, hi))
+                    # every word of the range, whatever the section's mapping symbols say: an asm text may hold any bytes, and none is skipped
+                    for p2 in range(lo - lo % 4, hi - (hi % 4), 4):
+                        word = tdata[p2:p2 + 4]
+                        name = fp_to_int(int.from_bytes(word, "little"))
+                        if name:
+                            out["fcvt"] += 1
+                            out["findings"].append("asm range at %s: %s at 0x%x" % (where, name, p2))
+                        elif _bits(int.from_bytes(word, "little"), 28, 25) == 0b0010:   # the SVE encoding class: not in the guest architecture, and its conversions are not in the table
+                            out["findings"].append("asm range at %s: SVE word at 0x%x (not in the guest architecture)" % (where, p2))
+                        elif not any(True for _ in md.disasm(word, p2)):
+                            out["findings"].append("asm range at %s: undecodable word at 0x%x" % (where, p2))
+            pos = (q + 3) & ~3
+    return out
 
 
 def symbols_of(path):
@@ -253,7 +470,7 @@ def symbols_of(path):
 
 def read_f2i(obj_path):
     """-> (result dict or None, problem string or None) of the plugin's file next to the object"""
-    p = obj_path + ".f2i.json"
+    p = (obj_path[:-2] if obj_path.endswith(".o") else obj_path) + ".f2i.json"   # the recipe's layout: obj/<unit>.o beside obj/<unit>.f2i.json
     if not os.path.isfile(p):
         return None, "no result file %s of the plugin" % os.path.basename(p)
     try:
@@ -264,9 +481,43 @@ def read_f2i(obj_path):
         for f in d["findings"]:
             f["function"], f["file"], f["line"], f["kind"]
         d["unit"]
+        a = d["asm"]
+        if not isinstance(a["toplevel"], int) or not all(
+                isinstance(v, list) and len(v) == 5 and all(isinstance(x, int) for x in v) for v in a["functions"].values()):
+            raise ValueError("malformed asm accounting")
         return d, None
     except (OSError, ValueError, KeyError, TypeError) as e:
         return None, "result file %s unreadable or malformed: %s" % (os.path.basename(p), str(e)[:150] or type(e).__name__)
+
+
+TOTALS3D = {"N": 0, "M": 0, "D": 0, "U": 0, "units": 0, "fcvt": 0}   # check 3d, summed over every object judged by this run
+
+
+def asm_totals(a, ranges):
+    """-> (N, M, D, U) of one unit: N asm statements the back end was given (GIMPLE, per function, summed), M asm insns emitted with a range, D deleted
+    before final by the compiler's own passes (the expander dropping unreachable blocks, the RTL passes deleting dead insns: N - rtl0 and rtl0 - M per
+    function, never negative), U unrecorded (asm insns found at final without markers, plus entries that do not match M)."""
+    N = M = D = U = 0
+    for e, x, r0, m, u in a["functions"].values():
+        N += x
+        M += m
+        D += max(x - r0, 0) + max(r0 - m, 0)
+        U += u
+    return N, M, D, U + abs(ranges - M)
+
+
+def check_3d(path, a):
+    """Check 3d: the bytes of every inline asm of the object, as the object contains them. -> [finding strings]"""
+    r = scan_asmranges(path)
+    N, M, D, U = asm_totals(a, r["entries"])
+    for k, v in (("N", N), ("M", M), ("D", D), ("U", U), ("units", 1), ("fcvt", r["fcvt"])):
+        TOTALS3D[k] += v
+    out = list(r["findings"])
+    if U:
+        out.append("%d asm insn(s) reached final without a range (N=%d M=%d D=%d, entries in .fnvnx.asmrange %d)" % (U, N, M, D, r["entries"]))
+    if a["toplevel"]:
+        out.append("%d top-level asm statement(s): their bytes lie in no range" % a["toplevel"])
+    return out
 
 
 def judge_object(oid, path, asm=False, unit=None):
@@ -287,6 +538,8 @@ def judge_object(oid, path, asm=False, unit=None):
     else:
         f2i += ["%s:%s in %s: %s outside a conversion helper" % (f["file"], f["line"], f["function"], f["kind"]) for f in d["findings"] if f["kind"] != "builtin"]
         # a builtin finding (lround, a libm call) is IEEE under OWNER ASM-008: not red; conv and asm are
+        if not asm:   # an assembler unit has no GIMPLE and no plugin report; every byte of it is already decoded by check 2 and 3b
+            f2i += check_3d(path, d["asm"])
         if scan["fcvt"] and d["sites"] == 0:
             f2i.append("%d float->int instruction(s) (%s) but the unit has no conversion site" % (len(scan["fcvt"]), scan["fcvt"][0][1]))
     return {"rcp:" + oid: rcp, "f2i:" + oid: f2i}
@@ -384,9 +637,13 @@ def main(argv):
             memo.append(forms_reason(".", os.path.join(cache, "forms")))
         return memo[0]
     u, c, ids, detail = gate_build.quantify(".", lambda root: judge_root(root, ".", cache, forms))
-    gatefile.write(NAME, u, c, ids, detail if u != c else ("rcp table certified, no rcp/rsqrt estimate instruction and no uncertified float->int conversion in %d items" % u if u else detail))
+    tot = ("3d over %d units: N=%d asm at GIMPLE, M=%d emitted with a range, D=%d deleted before final, U=%d unrecorded, %d conversion instructions in ranges" % (
+        TOTALS3D["units"], TOTALS3D["N"], TOTALS3D["M"], TOTALS3D["D"], TOTALS3D["U"], TOTALS3D["fcvt"])) if TOTALS3D["units"] else ""
+    msg = detail if u != c else ("rcp table certified, no rcp/rsqrt estimate instruction and no uncertified float->int conversion in %d items" % u if u else detail)
+    msg = (msg + "; " + tot) if tot else msg
+    gatefile.write(NAME, u, c, ids, msg)
     st = "green" if u == c else "red"
-    sys.stdout.write("%s: %s %d/%d %s\n" % (NAME, st, c, u, detail[:200]))
+    sys.stdout.write("%s: %s %d/%d %s\n" % (NAME, st, c, u, msg[:400]))
     return 0 if st == "green" else 2
 
 

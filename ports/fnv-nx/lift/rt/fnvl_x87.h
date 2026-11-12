@@ -9,7 +9,7 @@
 #include "x87.h"
 #include "fmath.h"
 /* FNVL_F2I marks a float -> integer conversion helper: the only functions whose bodies may convert a float to an integer (x86 semantics:
-   out of range / NaN -> integer indefinite). toolchain/f2i_check/fnvnx_f2i_check.cc finds any other conversion in a unit; proof/gate_fpexact.py judges. */
+   out of range / NaN -> integer indefinite). toolchain/ftoi/fnvnx_ftoi.cc (mode lifted) finds any other conversion in a unit; proof/gate_fpexact.py judges. */
 #define FNVL_F2I __attribute__((fnvnx_f2i))
 enum { FK_E, FK_F64, FK_F32, FK_I16, FK_I32, FK_I64, FK_M80 };
 #define FQ64 (1ull<<51)

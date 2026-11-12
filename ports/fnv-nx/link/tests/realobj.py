@@ -50,6 +50,11 @@ def _w(repo, rel, text):
     open(p, 'w').write(text)
 
 
+def _unitfile(n):
+    """a source key with an extension .S, .s or .c is kept as named (assembler or C unit); any other key is a C++ unit `key.cc`"""
+    return n if n.endswith(('.S', '.s', '.c')) else n + '.cc'
+
+
 def _store():
     d = os.environ.get('GATE_CACHE')
     if d:
@@ -60,10 +65,13 @@ def _store():
     return _cache['store']
 
 
-def build(sources, plugins=None, lifted=False, flags=()):
+def build(sources, plugins=None, lifted=False, flags=(), plugin_text=None, files=(), include=(), asm_flags=()):
     """Build C++ SOURCES ({unit file name: text}) as a toy guest root of a temp git repo -> the recipe's result dict (status green or red, with
     'failure' holding the stage, exit and the compiler's stderr tail).  PLUGINS: None = all of recipe.PLUGIN_SOURCES, else the names to load (a subset is refused: every guest root loads them all, RECIPE.md gate rule).  LIFTED: the toy root is a lifted-origin root (RECIPE.md): its C++ units are
     outputs of a `generated` step (gen/lift.py writes them) whose pack is an external served from a local git repo through ARTIFACTS_URL; the guest
+    PLUGIN_TEXT: {plugin name: source text} replaces that plugin's source in the toy repo (the recipe builds whatever the tracked file holds): a test varies the product plugin, never a compiler call.
+    ASM_FLAGS: flags of the recipe's `asm` list (.S/.s units: key `name.S`, preprocessed and assembled by the game's driver); a root whose units are all assembler loads no plugin.
+    FILES: tracked files of this checkout (paths relative to the checkout root) copied to the same paths of the toy repo; INCLUDE: the recipe's include directories (repo-relative), for a unit that includes product headers.
     FLAGS: extra per-root C++ flags of the recipe (recipe.PER_ROOT: the semantic flags come from the guest compiler pin, the recipe appends them).  The guest compiler external is taken from the store's external cache (fetched by pin on the first native build)."""
     base = _mk('realobj-')
     pin = json.load(open(os.path.join(REAL, T + 'verify/guest_compiler.json')))
@@ -74,8 +82,11 @@ def build(sources, plugins=None, lifted=False, flags=()):
     plugs = [dict({'name': n, 'source': recipe.PLUGIN_SOURCES[n], 'args': dict(recipe.PLUGIN_ARGS[n])},
                   **({'inputs': recipe.PLUGIN_INPUTS[n]} if n in recipe.PLUGIN_INPUTS else {})) for n in recipe.PLUGIN_SOURCES if n in names]
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': ext['name'], 'cc': pin['cc'], 'cxx': pin['cxx']}, 'external': [ext],
-           'flags': {'c': [recipe.WERROR_ATTR], 'cxx': ['-O2', recipe.SDD_DEFINE] + list(flags) + [recipe.WERROR_ATTR], 'asm': []}, 'include': [], 'units': 'all',
+           'flags': {'c': [recipe.WERROR_ATTR], 'cxx': ['-O2', recipe.SDD_DEFINE] + list(flags) + [recipe.WERROR_ATTR], 'asm': list(asm_flags)}, 'include': list(include), 'units': 'all',
            'plugin_cxx': 'x86_64-linux-gnu-g++-13', 'plugins': plugs}
+    asm_only = all(n.endswith(('.S', '.s')) for n in sources)
+    if asm_only:
+        plugs = []
     if not plugs:
         rec.pop('plugin_cxx')
         rec.pop('plugins')
@@ -85,6 +96,11 @@ def build(sources, plugins=None, lifted=False, flags=()):
     for n in list(recipe.PLUGIN_SOURCES.values()) + [i for v in recipe.PLUGIN_INPUTS.values() for i in v]:
         os.makedirs(os.path.dirname(os.path.join(repo, n)), exist_ok=True)
         shutil.copyfile(os.path.join(REAL, n), os.path.join(repo, n))
+    for n in files:
+        os.makedirs(os.path.dirname(os.path.join(repo, n)), exist_ok=True)
+        shutil.copyfile(os.path.join(REAL, n), os.path.join(repo, n))
+    for n, text in (plugin_text or {}).items():
+        _w(repo, recipe.PLUGIN_SOURCES[n], text)
     store = _store()
     old_url = os.environ.get('ARTIFACTS_URL')
     root = {'path': ROOT, 'class': 'product', 'target': 'guest', 'gates': [], 'recipe': ROOT + '/build.json'}
@@ -102,8 +118,9 @@ def build(sources, plugins=None, lifted=False, flags=()):
         outs = []
         lift = 'import os\nos.makedirs("/out/gen")\n'
         for n, text in sources.items():
-            outs.append('gen/%s.cc' % n)
-            lift += 'open("/out/gen/%s.cc", "w").write(%r)\n' % (n, text)
+            fn = _unitfile(n)
+            outs.append('gen/' + fn)
+            lift += 'open("/out/gen/%s", "w").write(%r)\n' % (fn, text)
         rec['generated'] = [{'tool': T + 'gen/lift.py', 'args': [], 'inputs': [], 'outputs': outs}]
         rec['external'] = [ext, {'name': 'pack', 'repo': 'fnv-nx-build', 'ref': 't', 'commit': commit, 'tree_sha256': tree, 'at': '/ext/pack'}]
         _w(repo, T + 'gen/lift.py', lift)
@@ -113,14 +130,15 @@ def build(sources, plugins=None, lifted=False, flags=()):
         os.environ['ARTIFACTS_URL'] = pack
     else:
         for n, text in sources.items():
-            _w(repo, ROOT + '/%s.cc' % n, text)
-        root['cxx_origin'] = 'native'
+            _w(repo, ROOT + '/' + _unitfile(n), text)
+        if not asm_only:
+            root['cxx_origin'] = 'native'
     _w(repo, ROOT + '/build.json', json.dumps(rec, indent=1))
     _w(repo, T + 'verify/guest_compiler.json', json.dumps(pin))
     _w(repo, T + 'verify/env.json', open(os.path.join(REAL, T + 'verify/env.json')).read())   # the declared machine: recipe.build checks it before any stage
     _w(repo, T + 'verify/admit.json', json.dumps({'format': 'fnvnx-admit/1', 'roots': [
         root, {'path': T + 'toolchain', 'class': 'tool', 'gates': []}, {'path': T + 'verify', 'class': 'tool', 'gates': []},
-        {'path': T + 'gen', 'class': 'tool', 'gates': []}]}))
+        {'path': T + 'gen', 'class': 'tool', 'gates': []}] + [{'path': d, 'class': 'tool', 'gates': []} for d in include]}))
     _git(repo, 'add', '-A')
     _git(repo, 'commit', '-q', '-m', 'toy')
     try:

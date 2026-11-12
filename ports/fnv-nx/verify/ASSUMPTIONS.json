@@ -1256,7 +1256,7 @@
     "L3b:A-F2IASM"
    ],
    "status": "REMOVE",
-   "removed_by": "planned: check 3b covers units with no site; closing fully = forbid inline asm outside listed rt files by the plugin",
+   "removed_by": "gate:fpexact",
    "owner": "L3a"
   },
   {

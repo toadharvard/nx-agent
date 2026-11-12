@@ -32,12 +32,16 @@
 //                        (all three float widths), or IFN_VEC_CONVERT with a float operand and an integer result, or a target
 //                        (BUILT_IN_MD) builtin with a float-typed argument and an integer-typed (scalar or vector) result;
 //              asm       an inline asm that could read a float: a float, vector or complex-typed operand or an FP/SIMD register
-//                        clobber (asm_may_read_float).
+//                        clobber (asm_may_read_float). A cross-check only: nothing rests on this classification. Gate fpexact check 3c
+//                        decodes the bytes of EVERY inline asm of the object (see asm_mark_pass), whatever its operands are.
 //            Types and GCC's function codes decide; no name, no text of source or assembly is looked at.
 // Report (-fplugin-arg-fnvnx_ftoi-out=FILE, required, both modes), JSON "fnvnx-f2i/1" for gate fpexact: unit (main input file), sites
 // (conversion sites, conv and builtin, seen in every analysed function, helpers included), helpers (printable names of the analysed
 // helpers), findings [{function, file, line, kind}] (what is outside a helper and is not rewritten: in lifted mode the errors, in native
-// mode the builtin and asm kinds, and a conv the rewrite does not cover), both sorted.
+// mode the builtin and asm kinds, and a conv the rewrite does not cover), both sorted; asm (accounting for check 3c: functions
+// {assembler name: [GIMPLE asm at the first pass, GIMPLE asm given to the expander, asm insns right after expand, asm insns marked before
+// final, asm insns after final without markers]}, toplevel (top-level asm statements of the unit)).
+// Besides the report the plugin writes the section .fnvnx.asmrange into the object (see asm_mark_pass).
 #include "gcc-plugin.h"
 #include "plugin-version.h"
 #include "context.h"
@@ -58,9 +62,16 @@
 #include "attribs.h"
 #include "tm.h"
 #include "output.h"
+#include "rtl.h"
+#include "memmodel.h"
+#include "emit-rtl.h"
+#include "cgraph.h"
+#include "varasm.h"
+#include <map>
 #include <set>
 #include <string>
 #include <tuple>
+#include <vector>
 
 int plugin_is_GPL_compatible;   // the plugin interface asks for it; the code is MIT (LICENSE), which is compatible
 
@@ -71,6 +82,17 @@ static std::string outpath;
 static unsigned long sites;
 static std::set<std::string> helpers;
 static std::set<std::tuple<std::string, std::string, int, std::string>> findings;   // function, file, line, kind
+
+// Asm accounting (gate fpexact check 3c). Every inline asm that reaches `final` is bracketed by two zero-byte markers (see asm_mark_pass) and
+// recorded in the non-alloc section .fnvnx.asmrange; the counts below are the compiler's own, per function (assembler name).
+struct asm_count { unsigned early = 0, expand = 0, rtl0 = 0, marked = 0, unrecorded = 0; };
+static std::map<std::string, asm_count> asm_counts;
+typedef std::tuple<std::string, int, int> locus_t;   // file, line, column of the asm statement (GIMPLE location, carried by the insn)
+struct asm_row { std::string func, b, e; locus_t loc; };
+static std::vector<asm_row> asm_rows;
+static std::set<int> marker_names;   // the labels this plugin created: any asm insn at final without them around it is unrecorded
+static std::string fn_asm_name(function *fun) { return IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fun->decl)); }
+static locus_t locus_of(location_t l) { expanded_location x = expand_location(l); return locus_t(x.file ? x.file : "", x.line, x.column); }
 
 static bool is_int_like(tree t) {
   if (!t) return false;
@@ -116,9 +138,9 @@ static bool conv_builtin(gcall *c) {
 
 // An inline asm "can read a float" when a float, vector or complex-typed C object is passed to or from it, or when it declares an
 // FP/SIMD register (v0..v31 and their s/d/q/h/b names, decoded by GCC's decode_reg_name) clobbered. Fact used: by GCC's documented
-// extended-asm contract an asm reads only the operands it is given, so FP/SIMD state it was not given has no defined value for it;
-// an asm that reads such state breaks that contract (ASM-001: the pinned compiler is correct). The object-level check 3b of the gate
-// backs this up: FCVT* instructions in an object whose unit has no conversion site at all are a finding, whatever put them there.
+// extended-asm contract an asm reads only the operands it is given, so FP/SIMD state it was not given has no defined value for it
+// (ASM-001: the pinned compiler is correct). This test only classifies a statement for the early finding; it decides nothing about
+// what an asm contains. The bytes of EVERY inline asm are decoded by gate fpexact check 3c, through the ranges this plugin records.
 static bool asm_may_read_float(gasm *a) {
   for (unsigned i = 0; i < gimple_asm_ninputs(a); i++) {
     tree t = TREE_TYPE(TREE_VALUE(gimple_asm_input_op(a, i)));
@@ -161,6 +183,7 @@ struct ftoi_pass : gimple_opt_pass {
         gimple *stmt = gsi_stmt(gsi);
         const char *kind = NULL;
         bool conv = false;
+        if (is_a<gasm *>(stmt)) asm_counts[fn_asm_name(fun)].early++;
         if (is_gimple_assign(stmt) && gimple_assign_rhs_code(stmt) == FIX_TRUNC_EXPR) { kind = "conv"; conv = true; }
         else if (gcall *c = dyn_cast<gcall *>(stmt)) { if (conv_builtin(c)) { kind = "builtin"; conv = true; } }
         else if (gasm *as = dyn_cast<gasm *>(stmt)) { if (asm_may_read_float(as)) kind = "asm"; }
@@ -242,6 +265,92 @@ struct ftoi_pass : gimple_opt_pass {
   }
 };
 
+
+// ---- Asm accounting: GIMPLE counts, markers around every asm insn that reaches final, the check after final ----
+static bool asm_insn_p(rtx_insn *insn) {
+  if (!NONDEBUG_INSN_P(insn)) return false;
+  rtx b = PATTERN(insn);
+  return asm_noperands(b) >= 0 || GET_CODE(b) == ASM_INPUT;   // ASM_OPERANDS (alone, in a SET or a PARALLEL), asm goto (a jump insn) and basic asm
+}
+
+// Before expand: the asm statements of the function body the back end is given (inlining, cloning, unrolling and DCE are done).
+static const pass_data asm_gimple_data = {GIMPLE_PASS, "fnvnx_asm_gimple", OPTGROUP_NONE, TV_NONE, PROP_cfg, 0, 0, 0, 0};
+struct asm_gimple_pass : gimple_opt_pass {
+  asm_gimple_pass(gcc::context *ctx) : gimple_opt_pass(asm_gimple_data, ctx) {}
+  unsigned int execute(function *fun) final override {
+    asm_count &c = asm_counts[fn_asm_name(fun)];
+    basic_block bb;
+    FOR_EACH_BB_FN(bb, fun)
+      for (gimple_stmt_iterator gsi = gsi_start_bb(bb); !gsi_end_p(gsi); gsi_next(&gsi))
+        if (is_a<gasm *>(gsi_stmt(gsi))) c.expand++;
+    return 0;
+  }
+};
+
+// Right after expand: the asm insns the expander produced from those statements.
+static const pass_data asm_rtl0_data = {RTL_PASS, "fnvnx_asm_rtl0", OPTGROUP_NONE, TV_NONE, 0, 0, 0, 0, 0};
+struct asm_rtl0_pass : rtl_opt_pass {
+  asm_rtl0_pass(gcc::context *ctx) : rtl_opt_pass(asm_rtl0_data, ctx) {}
+  unsigned int execute(function *fun) final override {
+    asm_count &c = asm_counts[fn_asm_name(fun)];
+    for (rtx_insn *i = get_insns(); i; i = NEXT_INSN(i))
+      if (asm_insn_p(i)) c.rtl0++;
+    return 0;
+  }
+};
+
+// Immediately before `final`: after sched2, block reordering and every pass that moves code, so no instruction is changed. Each asm insn gets
+// a zero-byte marker before and after it: a NOTE_INSN_DELETED_LABEL with a fresh label number, which final prints as the assembler-local label `.L<number>:`
+// and which no alignment or branch-shortening code looks at (they look at CODE_LABELs). The pair is recorded in .fnvnx.asmrange.
+static std::string new_marker(rtx_insn *at, bool before) {
+  int num = CODE_LABEL_NUMBER(gen_label_rtx());   // a fresh label number: final prints the note as `.L<num>:`, so it cannot collide with another label
+  std::string name = ".L" + std::to_string(num);
+  // emit_note refuses to create this kind (it is made only by patching out an insn), so the note is made as a plain NOTE_INSN_DELETED and given
+  // the kind and the label number of a deleted label: the same state delete_insn leaves a named label in.
+  rtx_insn *n = before ? emit_note_before(NOTE_INSN_DELETED, at) : emit_note_after(NOTE_INSN_DELETED, at);
+  NOTE_KIND(n) = NOTE_INSN_DELETED_LABEL;
+  CODE_LABEL_NUMBER(n) = num;
+  marker_names.insert(num);
+  return name;
+}
+static const pass_data asm_mark_data = {RTL_PASS, "fnvnx_asm_mark", OPTGROUP_NONE, TV_NONE, 0, 0, 0, 0, 0};
+struct asm_mark_pass : rtl_opt_pass {
+  asm_mark_pass(gcc::context *ctx) : rtl_opt_pass(asm_mark_data, ctx) {}
+  unsigned int execute(function *fun) final override {
+    std::string fn = fn_asm_name(fun);
+    asm_count &c = asm_counts[fn];
+    std::vector<rtx_insn *> todo;
+    for (rtx_insn *i = get_insns(); i; i = NEXT_INSN(i))
+      if (asm_insn_p(i)) todo.push_back(i);
+    for (rtx_insn *i : todo) {
+      std::string b = new_marker(i, true), e = new_marker(i, false);
+      locus_t loc = locus_of(INSN_LOCATION(i));
+      asm_rows.push_back({fn, b, e, loc});
+      c.marked++;
+    }
+    return 0;
+  }
+};
+
+// After final: every asm insn that is still in the stream must have its marker notes next to it. One that has none reached final unrecorded.
+static const pass_data asm_verify_data = {RTL_PASS, "fnvnx_asm_verify", OPTGROUP_NONE, TV_NONE, 0, 0, 0, 0, 0};
+struct asm_verify_pass : rtl_opt_pass {
+  asm_verify_pass(gcc::context *ctx) : rtl_opt_pass(asm_verify_data, ctx) {}
+  static bool marker(rtx_insn *i, bool before) {
+    for (; i; i = before ? PREV_INSN(i) : NEXT_INSN(i)) {
+      if (NOTE_P(i) && NOTE_KIND(i) == NOTE_INSN_DELETED_LABEL) return marker_names.count(CODE_LABEL_NUMBER(i)) != 0;
+      if (!NOTE_P(i)) return false;   // another insn first (a CODE_LABEL, a barrier, an instruction): no marker adjacent
+    }
+    return false;
+  }
+  unsigned int execute(function *fun) final override {
+    asm_count &c = asm_counts[fn_asm_name(fun)];
+    for (rtx_insn *i = get_insns(); i; i = NEXT_INSN(i))
+      if (asm_insn_p(i) && !(marker(PREV_INSN(i), true) && marker(NEXT_INSN(i), false))) c.unrecorded++;
+    return 0;
+  }
+};
+
 static void js(FILE *f, const std::string &s) {
   fputc('"', f);
   for (unsigned char ch : s) {
@@ -252,11 +361,34 @@ static void js(FILE *f, const std::string &s) {
   fputc('"', f);
 }
 
+static unsigned toplevel;   // top-level asm statements of the unit, counted before the compiler outputs (and drops) them
+static void count_toplevel(void *, void *) {
+  for (asm_node *a = symtab->first_asm_symbol(); a; a = a->next) toplevel++;
+}
+
 static void finish(void *, void *) {
   if (verbose) inform(UNKNOWN_LOCATION, "%<fnvnx_ftoi%>: %lu conversions in this unit", total);
+  // .fnvnx.asmrange: one entry per asm insn that reached final: .long BEGIN, .long END (relocated against the section the code is in), .long line,
+  // .long column, function assembler name, file (NUL-terminated), padded to 4. Always written, empty when the unit has no asm insn.
+  fprintf(asm_out_file, "\t.pushsection .fnvnx.asmrange,\"\",%%progbits\n");
+  for (auto &r : asm_rows) {
+    fprintf(asm_out_file, "\t.long %s\n\t.long %s\n\t.long %d\n\t.long %d\n\t.asciz \"", r.b.c_str(), r.e.c_str(), std::get<1>(r.loc), std::get<2>(r.loc));
+    for (unsigned char ch : r.func) { if (ch == '"' || ch == '\\') fputc('\\', asm_out_file); fputc(ch, asm_out_file); }
+    fprintf(asm_out_file, "\"\n\t.asciz \"");
+    for (unsigned char ch : std::get<0>(r.loc)) { if (ch == '"' || ch == '\\') fputc('\\', asm_out_file); fputc(ch, asm_out_file); }
+    fprintf(asm_out_file, "\"\n\t.p2align 2\n");
+  }
+  fprintf(asm_out_file, "\t.popsection\n");
   FILE *f = fopen(outpath.c_str(), "w");
   if (!f) { error("%<fnvnx_ftoi%>: cannot write %s", outpath.c_str()); return; }
-  fprintf(f, "{\"findings\": [");
+  fprintf(f, "{\"asm\": {\"functions\": {");
+  bool af = true;
+  for (auto &kv : asm_counts) {
+    fprintf(f, "%s", af ? "" : ", "); js(f, kv.first);
+    fprintf(f, ": [%u, %u, %u, %u, %u]", kv.second.early, kv.second.expand, kv.second.rtl0, kv.second.marked, kv.second.unrecorded);
+    af = false;
+  }
+  fprintf(f, "}, \"toplevel\": %u}, \"findings\": [", toplevel);
   bool first = true;
   for (auto &t : findings) {
     fprintf(f, "%s{\"file\": ", first ? "" : ", "); js(f, std::get<1>(t));
@@ -309,7 +441,17 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *versio
   pass.ref_pass_instance_number = 1;
   pass.pos_op = PASS_POS_INSERT_AFTER;
   register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pass);
+  struct register_pass_info pg, p0, pm, pv;
+  pg.pass = new asm_gimple_pass(g); pg.reference_pass_name = "optimized"; pg.ref_pass_instance_number = 1; pg.pos_op = PASS_POS_INSERT_AFTER;
+  p0.pass = new asm_rtl0_pass(g); p0.reference_pass_name = "vregs"; p0.ref_pass_instance_number = 1; p0.pos_op = PASS_POS_INSERT_BEFORE;
+  pm.pass = new asm_mark_pass(g); pm.reference_pass_name = "final"; pm.ref_pass_instance_number = 1; pm.pos_op = PASS_POS_INSERT_BEFORE;
+  pv.pass = new asm_verify_pass(g); pv.reference_pass_name = "final"; pv.ref_pass_instance_number = 1; pv.pos_op = PASS_POS_INSERT_AFTER;
+  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pg);
+  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &p0);
+  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pm);
+  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pv);
   register_callback(info->base_name, PLUGIN_ATTRIBUTES, reg_attrs, NULL);
+  register_callback(info->base_name, PLUGIN_ALL_IPA_PASSES_START, count_toplevel, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish, NULL);
   return 0;
 }

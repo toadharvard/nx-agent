@@ -126,7 +126,7 @@ from `ports/fnv-nx/verify` (sibling of lift/; a lift-only branch has no verify/,
   `sail_pins.txt`). A shape is certified iff a `proved` row of the pinned model carries the dsl_sha the current code gives. Today the file declares no `liftpack`:
   red, `inputs: external liftpack not declared` (the docstring says what to add). Tests: `tests/test_formgate.py` (local bare repos as externals).
 * `gate_fpexact.py` (gate `fpexact`): per admitted product root (gate_build.quantify convention, no root = universe 0 green): the rcp/rsqrt certificate, no A64
-  estimate instruction, float->int conversions only in marked helpers (plugin `toolchain/f2i_check/fnvnx_f2i_check.cc`, result file `obj/<unit>.o.f2i.json`), and the item
+  estimate instruction, float->int conversions only in marked helpers (plugin `toolchain/ftoi/fnvnx_ftoi.cc`, result file `obj/<unit>.f2i.json`; check 3c decodes the bytes of every inline asm through `.fnvnx.asmrange`), and the item
   `<root>:forms` = the gate forms is green (the helpers' correctness is the form certificates'; evaluated by calling `formgate.judge`, since each gate has its own GATE_OUT).
   Tests: `tests/test_fpexact.py`.
 
