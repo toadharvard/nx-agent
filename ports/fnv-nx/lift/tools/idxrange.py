@@ -24,8 +24,8 @@ class Ranger:
         s.dec = dec; s.ins_at = ins_at; s.preds = preds; s.callers_of = callers_of; s.entry_of = entry_of; s.pure = pure_entry; s.seed_other = seed_other; s.u8 = u8; s.esc = escape_open
         s.P = {}; s.A = {}; s.busy = set()
 
-    def seedfn(s, e):
-        pv = s.params(e)
+    def seedfn(s, e, use=True):
+        pv = s.params(e) if use else ((TOP,) * NP, ('parameters not used',) * NP)
         def seed(x):
             if x == e:
                 st = St({}, None)
@@ -81,12 +81,15 @@ class Ranger:
     def index_range(s, va, reg):
         """-> (lo, hi, source, why)"""
         e = s.entry_of(va)
+        st0, _ = JT.flow(va, s.dec, s.ins_at, s.preds, s.seedfn(e, False), s.u8)            # without any parameter fact: a bound found here is unconditional on the call-graph premises
         st, cells = JT.flow(va, s.dec, s.ins_at, s.preds, s.seedfn(e), s.u8)
+        uncond = st0 is not None and st0.g(reg) != TOP
+        if uncond: st = st0
         if st is None: return None, None, 'reg@%x' % va, 'the store is unreachable from any entry in the decoded edges'
         v = st.g(reg); w = st.why.get(reg, '')
         src = s.source(reg, w, va, e)
         if v == TOP: return None, None, src, 'unknown: ' + (w or 'no definition in the cone') + ('; ' + st.why['*'] if '*' in st.why else '')
-        return v[0], (v[0] + v[1]) % N, src, ('' if s.esc is not None else 'cond:no_s4_arith ') + 'interval by the jtab domain; defined by ' + (w or 'seed')
+        return v[0], (v[0] + v[1]) % N, src, ('' if uncond else 'cond:no_s4_arith ') + 'interval by the jtab domain; defined by ' + (w or 'seed')
 
     def source(s, reg, w, va, e):
         m = re.search(r'\[ebp \+ (0x[0-9a-f]+|\d+)\]', w)
@@ -97,11 +100,11 @@ class Ranger:
 
 
 def run(rows, rg, out, image):
-    """rows: [(store_va, index_reg)] -> idxrange.tsv lines `store_va index_src lo hi why`; returns the counts (known, unknown)"""
-    lines = []; k = u = 0
+    """rows: [(store_va, index_reg)] -> idxrange.tsv lines `store_va index_src lo hi why`; returns the counts (closed unconditional, closed cond:no_s4_arith, open)"""
+    lines = []; k = u = c = 0
     for va, reg in rows:
         lo, hi, src, why = rg.index_range(va, FULL[reg])
         if lo is None: u += 1; lines.append('%08x\t%s\tunknown\tunknown\t%s' % (va, src, why))
-        else: k += 1; lines.append('%08x\t%s\t%08x\t%08x\t%s' % (va, src, lo, hi, why))
+        else: k += 1; c += why.startswith('cond:'); lines.append('%08x\t%s\t%08x\t%08x\t%s' % (va, src, lo, hi, why))
     open(out, 'w').write(''.join(l + '\n' for l in lines))
-    return k, u
+    return k - c, c, u

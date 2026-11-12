@@ -408,7 +408,7 @@ def run(arg):
         rg = idxrange.Ranger(dec, ins_at_x, lambda x: pmx.get(x, ()), lambda e: callers.get(e, ()), entry_of, pure_x, seeded_x, u8_x)
         dl = (M.base - M.pref) & 0xffffffff
         rows = [((int(l.split('\t')[1], 16) + dl) & 0xffffffff, l.split('\t')[4].strip()) for l in open(IDX).read().splitlines()[1:] if l.split('\t')[0] == name.lower()]
-        print('IDXRANGE %s known=%d unknown=%d' % ((name,) + idxrange.run(rows, rg, outd + '/idxrange.tsv', name)), flush=True)
+        print('IDXRANGE %s closed=%d cond=%d open=%d' % ((name,) + idxrange.run(rows, rg, outd + '/idxrange.tsv', name)), flush=True)
         if dl:
             q = open(outd + '/idxrange.tsv').read().splitlines()
             open(outd + '/idxrange.tsv', 'w').write(''.join('%08x\t%s\n' % ((int(l.split('\t')[0], 16) - dl) & 0xffffffff, l.split('\t', 1)[1]) for l in q))
