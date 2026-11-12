@@ -1,13 +1,6 @@
 #include "state_rt.h"
 #include "../gen/d9impl.gen.h"
 
-const GUID& nx_iid_of(IDirect3DBaseTexture9*) { return IID_IDirect3DBaseTexture9; }
-const GUID& nx_iid_of(IDirect3DIndexBuffer9*) { return IID_IDirect3DIndexBuffer9; }
-const GUID& nx_iid_of(IDirect3DVertexBuffer9*) { return IID_IDirect3DVertexBuffer9; }
-const GUID& nx_iid_of(IDirect3DVertexDeclaration9*) { return IID_IDirect3DVertexDeclaration9; }
-const GUID& nx_iid_of(IDirect3DVertexShader9*) { return IID_IDirect3DVertexShader9; }
-const GUID& nx_iid_of(IDirect3DPixelShader9*) { return IID_IDirect3DPixelShader9; }
-const GUID& nx_iid_of(IDirect3DSurface9*) { return IID_IDirect3DSurface9; }
 bool nx_chk_obj_iid(IUnknown* p, const GUID& iid) { if (!p) return true; NxObj* o = nx_obj_of(p); return o && o->is(iid); }
 bool nx_chk_tex(IDirect3DBaseTexture9* t) {
     if (!nx_chk_obj(t)) return false;

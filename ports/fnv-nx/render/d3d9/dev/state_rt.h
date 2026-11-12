@@ -14,10 +14,14 @@ inline D3DMATRIX nx_mul(const D3DMATRIX& a, const D3DMATRIX& b) {  // a x b, row
 // null, or one of OUR objects whose class implements `iid` (foreign pointers are rejected: D3D9 rejects objects of another device/runtime)
 bool nx_chk_obj_iid(IUnknown* p, const GUID& iid);
 #define nx_chk_obj(p) nx_chk_obj_iid((IUnknown*)(p), NX_IID_OF(p))
-#define NX_IID_OF(p) nx_iid_of(p)
-const GUID& nx_iid_of(IDirect3DBaseTexture9*); const GUID& nx_iid_of(IDirect3DIndexBuffer9*); const GUID& nx_iid_of(IDirect3DVertexBuffer9*);
-const GUID& nx_iid_of(IDirect3DVertexDeclaration9*); const GUID& nx_iid_of(IDirect3DVertexShader9*); const GUID& nx_iid_of(IDirect3DPixelShader9*);
-const GUID& nx_iid_of(IDirect3DSurface9*);
+// The interface id of a pointer type is a constant of the type (the map type -> IID is data, not a function): NxIid<T*>::value, a constant reference to the interface's GUID.
+// NX_IID_OF(p) names it from the type of the expression p (unary plus: the prvalue pointer type, no reference).
+template <class P> struct NxIid;
+#define NX_IID_SPEC(T) template <> struct NxIid<T*> { static constexpr const GUID& value = IID_##T; }
+NX_IID_SPEC(IDirect3DBaseTexture9); NX_IID_SPEC(IDirect3DIndexBuffer9); NX_IID_SPEC(IDirect3DVertexBuffer9); NX_IID_SPEC(IDirect3DVertexDeclaration9);
+NX_IID_SPEC(IDirect3DVertexShader9); NX_IID_SPEC(IDirect3DPixelShader9); NX_IID_SPEC(IDirect3DSurface9);
+#undef NX_IID_SPEC
+#define NX_IID_OF(p) (NxIid<decltype(+(p))>::value)
 bool nx_chk_tex(IDirect3DBaseTexture9* t);  // + MS SetTexture remarks: no D3DPOOL_SCRATCH, no D3DPOOL_SYSTEMMEM (device does not report D3DDEVCAPS_TEXTURESYSTEMMEMORY)
 void nx_state_drop(NxDeviceState* s);       // releases every bind reference, nulls the object slots
 

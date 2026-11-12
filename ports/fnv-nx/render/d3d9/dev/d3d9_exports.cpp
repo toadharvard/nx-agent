@@ -56,6 +56,7 @@ void* nx_d3d9_export(const char* name) {
     for (const auto& e : g_exports) if (!strcmp(e.name, name)) return e.fn;
     return nullptr;
 }
-int nx_d3d9_export_count(void) { return (int)(sizeof g_exports / sizeof g_exports[0]); }
-const char* nx_d3d9_export_name(int i) { return i >= 0 && i < nx_d3d9_export_count() ? g_exports[i].name : nullptr; }
+// The export count is a constant of the table: the size of g_exports over the size of an entry (an object, not a function).
+extern const int nx_d3d9_export_count = (int)(sizeof g_exports / sizeof g_exports[0]);
+const char* nx_d3d9_export_name(int i) { return i >= 0 && i < nx_d3d9_export_count ? g_exports[i].name : nullptr; }
 }
