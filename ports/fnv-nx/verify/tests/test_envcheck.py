@@ -13,6 +13,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 VERIFY = os.path.dirname(HERE)
 SETUP = os.path.join(os.path.dirname(VERIFY), "farm", "setup_verdict_env.sh")
 ENVF = os.path.join(VERIFY, "env.json")
+sys.path.insert(0, VERIFY)
+import envcheck  # noqa: E402
 TD = tempfile.mkdtemp(prefix="envcheck-test-")
 FAILED = []
 
