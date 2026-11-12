@@ -329,7 +329,7 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
     xc.prepass(cx, img, 'dyn' if x87 == 'dyn' else None, x87 if isinstance(x87, int) else 0)     # x87 stack-depth pre-pass: cx.xm 's' static / 'd' dynamic / None
     em = cx.em
     kinds = cx.kinds
-    from . import universe
+    from . import universe, sites
     uent = getattr(img, 'entries', None)          # a synthetic image of the unit tests names its entries itself
     uent = universe.load()[0] if uent is None else uent
     cx.uent = uent
@@ -343,16 +343,10 @@ def lift2(img, lo, hi, start, owns, strict, explore_owns, x87):
             em('TRACE(0x%xu);' % a)        # every pass over an entry address is a trace event (bench), wherever the function was entered
         pfx = ''
         if m.startswith('rep ') or m.startswith('repe ') or m.startswith('repne '):
-            pfx, m = m.split(' ', 1)
-        bad_lock = False
-        locked = False
-        w = m.split(' ')
-        if 'lock' in w[:-1] and all(x + ' ' in f_sys.STRIP for x in w[:-1]):      # LOCK among the leading prefix words (capstone: `lock add`, `xacquire lock add`): SDM Vol 2 "LOCK"
-            m = w[-1]
-            bad_lock = not f_sys.lock_ok(ins, m)
-            if not bad_lock:
-                kinds.add('lock')
-                locked = True
+            pfx = m.split(' ', 1)[0]
+        m, bad_lock, locked = sites.lock_state(ins)     # the one predicate of the lock sites (fnvlift/sites.py)
+        if locked:
+            kinds.add('lock')
         cx.a, cx.nxt, cx.m, cx.pfx, cx.ops = a, nxt, m, pfx, ops
         cx.s = ops[0].size * 8 if ops else 32
         cx.term = False
