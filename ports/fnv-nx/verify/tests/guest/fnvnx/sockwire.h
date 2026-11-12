@@ -4,7 +4,7 @@
  * Every number that crosses the boundary is a number of THIS header. The guest speaks newlib + libnx's (FreeBSD style)
  * headers, the host speaks libnx on the device and glibc in tests: their errno, AF_INET6, option, flag and event numbers
  * differ. So both sides translate by NAME through the X-macro lists below (each X(NAME, wire...) is expanded with that
- * side's own spelling of NAME), and nothing assumes that two systems' numbers agree. The wire numbering is the Linux one.
+ * side's own spelling of NAME), and nothing depends on two systems' numbers agreeing. The wire numbering is the Linux one.
  * Protocol numbers (IPPROTO_*) are IANA's and travel as they are. Compiles in both data models. */
 #ifndef FNVNX_SOCKWIRE_H
 #define FNVNX_SOCKWIRE_H

@@ -56,7 +56,7 @@ def main(argv):
     jobs = int(argv[argv.index("--jobs") + 1]) if "--jobs" in argv else os.cpu_count() or 1
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-objstub-")
     cache, repo = os.environ.get("GATE_CACHE") or tmp, "."
-    items, finds, why, results, rows, roots = [], [], "", {}, {}, gate_build.product_roots(repo)
+    items, finds, why, results, rows, roots = [], [], "", {}, {}, gate_build.buildable_roots(repo)
     try:
         wine = objstub.read_wine_table(os.path.join(repo, "ports/fnv-nx/verify/wine_fixme.tsv"))   # the table of the tree under test
         declared = objstub.read_declared_table(os.path.join(repo, "ports/fnv-nx/verify/declared_machine.tsv"))   # the table of the tree under test

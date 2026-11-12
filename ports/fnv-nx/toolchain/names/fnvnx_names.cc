@@ -78,7 +78,7 @@ static std::map<tree, int> scope_no;      /* a function-local static or class ->
  * (test_names.expect: Fwd1..Fwd9). GCC's flag holds the key seen last. The two differ only where a declaration's
  * key differs from that reference, which is exactly what -Wmismatched-tags reports, with the same reference; the
  * plugin turns the warning on and reads the class and the offending key off each report as it is formatted (the
- * reference key is the other one). The assumption: the warning is not suppressed for a declaration (system
+ * reference key is the other one). The assumption (ASM-800): the warning is not suppressed for a declaration (system
  * header, #pragma GCC diagnostic); tools/link/namegate.py compares every name with cl's.
  */
 static std::map<tree, bool> ref_class_key;        /* class -> the reference key is `class` */
