@@ -857,3 +857,7 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - The `headers` admit class: rejected again. Header roots stay unit-less product roots, checked from the PP read sets.
   - Asked to split the rest into one commit per rule.
 - w9 c8801b277: the manifest move is accepted. Its verdict waits on setup_verdict_env.sh.
+- Python module mount defect: the gmpy2.libs sibling is not mounted, found by L3a w8.
+  - Assigned to w18 on branch w18m.
+  - Rule: the file set of a pinned module is its wheel RECORD. One record_files() drives the mount, the key and envcheck.
+- L5 reach header: the table-only mode is agreed in principle (one header() path, names not certificates). I will review it when w10's commit arrives.
