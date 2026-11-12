@@ -8,8 +8,6 @@
  "reports/farm2/c0ffee000001-compile.md": 1800000120,
  "reports/farm3/c0ffee000001-compile.md": 1800000180,
  "reports/full1/c0ffee000001-full.md": 1800000300,
- "reports/fz1/c0ffee000001-fuzz.md": 1800000480,
- "reports/fz2/c0ffee000001-fuzz.md": 1800000540,
  "reports/link1/c0ffee000001-link.md": 1800000240,
  "reports/prof1/c0ffee000001-frame-budget.json": 1800000670,
  "reports/prof1/c0ffee000001-frameprof.json": 1800000660,

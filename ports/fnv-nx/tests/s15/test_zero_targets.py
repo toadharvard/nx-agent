@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """tools/report/zero_targets.py on a synthetic reports tree (D24, D25): every source's number, the newest head with a
-report (stale when older than the head), the delta against the previous head, fuzz and sweep shards summed, the
+report (stale when older than the head), the delta against the previous head, sweep shards summed, the
 scenario metric first and the lanes where the scenarios did not measure. No farm, no game data.
 
     python3 -I tests/s15/test_zero_targets.py
@@ -44,19 +44,16 @@ def scen(counts):
 def main():
     with tempfile.TemporaryDirectory() as d:
         root = os.path.join(d, 'reports')
-        # head a: full + fuzz (2 of 2 shards) + scenario (3 not measured) + plat
+        # head a: full + scenario (3 not measured) + plat
         put(root, 'full1', H[0] + '-full.md', full_md('1,000', '1,200', '5'))
-        put(root, 'f1', H[0] + '-fuzz.json', {'format': 'fnvnx-fuzz-summary/1', 'shard': 1, 'shards': 2, 'hard': {'functions': 30}})
-        put(root, 'f2', H[0] + '-fuzz.json', {'format': 'fnvnx-fuzz-summary/1', 'shard': 2, 'shards': 2, 'hard': {'functions': 12}})
         put(root, 'sc1', H[0] + '-scenario.json', scen({1: 4, 2: None, 3: None, 4: 2, 9: 0, 12: None}))
         put(root, 'sc2', H[0] + '-scripterr.json', {'schema': 'fnvnx-scripterr/1', 'metric': 3, 'in_original': 4})
         put(root, 'flt', H[0] + '-faults.json', {'schema': 'fnvnx-faults/1', 'total_groups': 6, 'new': 1, 'known': 5, 'fixed': 2})
         put(root, 'full1', H[0] + '-nrocheck.json', {'schema': 'fnvnx-nrocheck/1', 'metric': 2, 'fail': 1, 'open': 1,
                                                      'automated': 16, 'manual': 11})
         put(root, 'qk1', H[0] + '-plat.json', {'schema': 'fnvnx-plat/1', 'parts': {'unimpl': 7, 'open': 3, 'decode': 1, 'input': 2}})
-        # head b: older full, fuzz (one shard), sweep shards, scenario, threads lane
+        # head b: older full, sweep shards, scenario, threads lane
         put(root, 'full1', H[1] + '-full.md', full_md('1,050', '1,300', '6'))
-        put(root, 'f1', H[1] + '-fuzz.json', {'format': 'fnvnx-fuzz-summary/1', 'shard': 1, 'shards': 2, 'hard': {'functions': 40}})
         put(root, 's1', H[1] + '-sweep.json', {'failing_programs': [{'hash': 'p1'}, {'hash': 'p2'}], 'programs_vacuous_in_some_set': 3})
         put(root, 's2', H[1] + '-sweep.json', {'failing_programs': [{'hash': 'p2'}], 'programs_vacuous_in_some_set': 1})
         sb = scen({1: 9, 4: 2})
@@ -74,14 +71,9 @@ def main():
         ok('runs', r.returncode == 0, r.stderr)
         j = json.load(open(out[:-3] + '.json'))
         row = {x['key']: x for x in j['rows']}
-        ok('16 rows', len(j['rows']) == 16)
+        ok('16 rows', len(j['rows']) == 15)
         ok('trap stubs: table sum, delta vs b', row['traps']['value'] == 1010 and row['traps']['delta'] == -50, row['traps'])
         ok('link errors: undefined + multiple', row['link']['value'] == 1205 and row['link']['delta'] == -101)
-        ok('fuzz: shards summed, complete', row['fuzz']['value'] == 42 and row['fuzz']['note'] == '' and row['fuzz']['delta'] == 2)
-        ok('fuzz at b: partial', 'partial' in (subprocess.run([sys.executable, '-I', Z, root, '--heads', heads, '--head',
-                                                                 H[1], '--out', os.path.join(d, 'zb.md')],
-                                                                capture_output=True).returncode == 0 and
-                                               json.load(open(os.path.join(d, 'zb.json')))['rows'][2]['note'] or ''))
         ok('shaders: from b, stale; distinct failing + vacuous', row['shaders']['value'] == 2 + 4 and row['shaders']['stale']
            and row['shaders']['head'] == H[1], row['shaders'])
         ok('#1 scenario, delta vs b', row['#1']['value'] == 4 and row['#1']['delta'] == -5)

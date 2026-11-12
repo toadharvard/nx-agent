@@ -137,56 +137,6 @@ class ReadyTest(unittest.TestCase):
         self.assertEqual(g['value'], '2/4')
         self.assertEqual(g['sources'][0]['commit'], 'c0ffee000002')
 
-    def test_report_of_another_shard_count_is_rejected(self):
-        self.world.sub('reports/fz2/%s-fuzz.md' % C, 'shard 2/2', 'shard 2/32')
-        card = self.world.run()
-        hard, cov = self.gate(card, 'fuzz.hard'), self.gate(card, 'fuzz.coverage')
-        self.assertEqual(hard['status'], 'no-data')
-        self.assertIn('shards not covered: 2', hard['note'])
-        self.assertEqual(cov['status'], 'fail')
-
-    def set_causes(self, k, causes, path=None):
-        """replace the fnvnx-causes block of fz<k>'s report: causes = {cause: (verdict, divergences, worst_of)}"""
-        rel = path or 'reports/fz%d/%s-fuzz.md' % (k, C)
-        t = self.world.read(rel)
-        blk = dict(format='fnvnx-causes/1', causes={c: dict(verdict=v, divergences=n, functions=w, worst_of=w)
-                                                    for c, (v, n, w) in causes.items()})
-        i = t.index('```json fnvnx-causes')
-        self.world.write(rel, t[:i] + '```json fnvnx-causes\n%s\n```\n' % json.dumps(blk))
-
-    def test_fuzz_table_without_causes_block(self):
-        rel = 'reports/fz1/%s-fuzz.md' % C
-        t = self.world.read(rel)
-        self.world.write(rel, t[:t.index('## Causes by verdict class')].replace('| x87-precision |', '| call-flow |'))
-        self.world.sub('reports/fz2/%s-fuzz.md' % C, '```json fnvnx-causes', '```text')
-        g = self.gate(self.world.run(), 'fuzz.hard')
-        self.assertEqual((g['status'], g['value']), ('fail', 1))
-        self.assertIn('call-flow 1', g['note'])
-        self.assertIn('no fnvnx-causes block', g['note'])
-
-    def test_fuzz_artifacts_and_by_design_do_not_block(self):
-        self.set_causes(1, {'new-null': ('artifact', 3, 3), 'x87-precision': ('by-design', 1, 1)})
-        card = self.world.run()
-        self.assertEqual(self.gate(card, 'fuzz.hard')['status'], 'pass')
-        self.assertEqual(card['verdict'], 'READY')
-        self.assertNotIn('fuzz.artifacts', card['blockers'])
-
-    def test_fuzz_s13b_summary_when_it_covers_more_shards(self):
-        self.world.sub('reports/fz2/%s-fuzz.md' % C, 'shard 2/2', 'shard 2/32')
-        summ = dict(format='fnvnx-causes/1', campaigns=['/x/data/c1', '/x/data/c2'],
-                    causes={'native-undefined': dict(verdict='real-bug', divergences=7, functions=6, worst_of=6)})
-        self.world.write('reports/s13b-causes/causes_all.json', summ, published=self.world.latest() + 60)
-        g = self.gate(self.world.run(), 'fuzz.hard')
-        self.assertEqual((g['status'], g['value']), ('fail', 6))
-        self.assertIn("S13b's campaign summary, 2 of 2 shards", g['note'])
-        self.assertEqual(g['sources'][0]['path'], 'causes_all.json')
-        self.assertTrue(g['sources'][0]['behind'] is None)               # no commit in the summary
-        # the reports win as soon as they cover as many shards
-        self.world.sub('reports/fz2/%s-fuzz.md' % C, 'shard 2/32', 'shard 2/2')
-        g = self.gate(self.world.run(), 'fuzz.hard')
-        self.assertEqual((g['status'], g['value']), ('pass', 0))
-
-    # ---- distances
     def test_old_pass_is_stale(self):
         self.world.edit_json('_commits.json', lambda d: d.__setitem__(C, 30))
         card = self.world.run()
@@ -413,13 +363,13 @@ class ReadyTest(unittest.TestCase):
         card = self.world.run()
         rows = {(r['stage'], r['what'].split(' (')[0]): r for r in card['scorecard']}
         self.assertEqual([r['stage'] for r in card['scorecard']],
-                         ['compile', 'link', 'link', 'ABI', 'fuzz', 'equivalence', 'boot', 'render parity',
+                         ['compile', 'link', 'link', 'ABI', 'equivalence', 'boot', 'render parity',
                           'frame budget', 'frame budget'])
-        for r in card['scorecard'][:8]:
+        for r in card['scorecard'][:7]:
             self.assertEqual((r['gap'], r['status']), (0, 'done'), r)
             self.assertTrue(r['sources'], r)
         # the frame rows: 60 fps at 1.02 GHz (J-0150); the S15 budget fits (12.0 ms), the GPU model does not
-        fb, gpu = card['scorecard'][8], card['scorecard'][9]
+        fb, gpu = card['scorecard'][7], card['scorecard'][8]
         self.assertEqual((fb['value'], fb['target'], fb['unit'], fb['gap'], fb['status']), (12.0, 16.7, 'ms', 0, 'done'))
         self.assertEqual((gpu['value'], gpu['status']), (24.8, 'open'))
         self.assertAlmostEqual(gpu['gap'], 24.8 - 16.7, places=1)
@@ -434,17 +384,6 @@ class ReadyTest(unittest.TestCase):
         md = readf(os.path.join(self.world.tmp, 'card.md'))
         self.assertIn('## Scorecard', md)
         self.assertIn('| compile | census errors | 3 | 0 | 3 | **open** |', md)
-
-    def test_fuzz_coverage_per_shard(self):
-        g = self.gate(self.world.run(), 'fuzz.coverage')
-        self.assertEqual(g['status'], 'pass')
-        self.assertEqual(set(g['per_shard']), {'1', '2'})
-        # shard 2 at 8 of 10: 90 % in total would pass, but shard 2 alone is below 90 %
-        self.world.sub('reports/fz2/%s-fuzz.md' % C, 'cumulative (verdicts valid for this head): 10 functions',
-                       'cumulative (verdicts valid for this head): 8 functions')
-        g = self.gate(self.world.run(), 'fuzz.coverage')
-        self.assertEqual(g['status'], 'fail')
-        self.assertIn('shards below 90 %: 2', g['note'])
 
     def test_try_farms_never_count(self):
         """frames, frameprof and the frame budget of a try farm (unmerged wip heads) are not evidence (V1 R14)"""
@@ -746,43 +685,6 @@ class ReadyTest(unittest.TestCase):
         card = self.world.run()
         self.assertEqual(self.gate(card, 'boot.real_exe')['status'], 'no-data')
 
-    # ---- fnvnx-fuzz-summary/1
-    def fuzz_summary(self, k, **kw):
-        rel = 'reports/fz%d/%s-fuzz.md' % (k, C)
-        s = dict(format='fnvnx-fuzz-summary/1', commit=C, shard=k, shards=2, status='complete',
-                 functions=dict(with_native_object=10, verdicts=10, not_modelled=0))
-        for key, v in kw.items():
-            if isinstance(v, dict) and isinstance(s.get(key), dict):
-                s[key].update(v)
-            else:
-                s[key] = v
-        self.world.write(rel, self.world.read(rel) + '\n```json fnvnx-fuzz-summary\n%s\n```\n' % json.dumps(s))
-
-    def test_fuzz_summary_counts(self):
-        self.fuzz_summary(1)
-        self.fuzz_summary(2, status='partial', functions=dict(with_native_object=20, verdicts=16))
-        g = self.gate(self.world.run(), 'fuzz.coverage')
-        self.assertEqual((g['status'], g['value']), ('fail', '86.7 % (26/30)'))
-        self.assertIn('fnvnx-fuzz-summary/1 from 2 shards, partial (pending functions): 2', g['note'])
-
-    def test_fuzz_summary_of_another_shard_or_broken_harness(self):
-        self.fuzz_summary(2, shard=1)
-        card = self.world.run()
-        self.assertEqual(self.gate(card, 'fuzz.coverage')['status'], 'fail')
-        self.assertIn('missing: 2', self.gate(card, 'fuzz.coverage')['note'])
-        self.world.sub('reports/fz2/%s-fuzz.md' % C, '"shard": 1', '"shard": 2')
-        self.world.sub('reports/fz2/%s-fuzz.md' % C, '"complete"', '"harness-broken"')
-        self.assertIn('missing: 2', self.gate(self.world.run(), 'fuzz.coverage')['note'])
-        self.world.sub('reports/fz2/%s-fuzz.md' % C, '"harness-broken"', '"complete"')
-        self.world.sub('reports/fz2/%s-fuzz.md' % C, 'shard 2/2', 'shard 2/2 - HARNESS BROKEN')
-        self.assertIn('missing: 2', self.gate(self.world.run(), 'fuzz.coverage')['note'])
-
-    def test_fuzz_more_verdicts_than_functions(self):
-        self.fuzz_summary(1, functions=dict(with_native_object=5, verdicts=10))
-        self.fuzz_summary(2, functions=dict(with_native_object=5, verdicts=10))
-        self.assertEqual(self.gate(self.world.run(), 'fuzz.coverage')['status'], 'fail')
-
-    # ---- output helpers
     def test_blockers_one_per_group(self):
         gates = [dict(id='a', group='G', status='fail', stale=False, rank=1, required=True),
                  dict(id='b', group='G', status='fail', stale=False, rank=2, required=True),

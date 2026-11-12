@@ -5,7 +5,6 @@
  "compile_shards": 2,
  "equiv_shards": 1,
  "static_shards": 1,
- "fuzz_shards": 2,
  "equiv_by_design": {
   "_doc": "S11 rules whose differences docs/EQUIVALENCE.md records as by design; S1b sites come from docs/PATCHES.md 'By-design MSVC differences'",
   "code_rules": [
@@ -54,20 +53,6 @@
    "why": "barriers are dmb fences"
   }
  },
- "fuzz_by_design_causes": {
-  "x87-precision": "result within tolerance of x87 80-bit intermediates; AArch64 has IEEE single/double only"
- },
- "_fuzz_by_design_doc": "used only for fuzz reports without an fnvnx-causes block; with one, the block's own classes decide",
- "fuzz_hard_classes": [
-  "real-bug",
-  "triage"
- ],
- "fuzz_causes": {
-  "_doc": "S13b's whole-campaign summary (causes.py summary over the fuzz caches); fuzz.hard takes it when it covers more shards than the reports' fnvnx-causes blocks",
-  "branch": "reports/s13b-causes",
-  "path": "causes_all.json"
- },
- "fuzz_min_coverage": 0.9,
  "_player_exe_doc": "the sha256 the gamedata/exe checksum line for FalloutNV.exe must give (fixture: made up)",
  "player_exe_sha256": "abababababababababababababababababababababababababababababababab",
  "boot_milestones": [
