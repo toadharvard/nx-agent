@@ -587,3 +587,7 @@ Ids: gate_eh uses the orchestrator's ASM-222/223/224. L1's 225..227 are withdraw
 - L6A: isystem, specdefaults and -dU are not on the trunk or the candidate. gl4 builds against the candidate. If it is blocked, w16's specdefaults/-dU become the first item after the merge.
 - L3a farm 2: the setup failure came from an old script; the trunk's install_mirror uses -r FILE. Queued for w17's pins: gmpy2 + MPFR/GMP libs.
 - Finding (asked L4 for the owner): trunk farm/boot_job.sh:103-105 does an unpinned apt-get of python3-pip and a pip install of unicorn==2.1.4 without a hash. It is a pinned-machinery violation.
+
+## 09:35Z
+- w5 1f088b42: verdict green (fac7bc6e, 385.3 s cold, over budget = the base's selftests, owner w19). b639f528 replaces the hand list with a `shfmt --tojson` parse; shfmt 3.8.0-1 pinned (tools/verdict-debs a99dc930, 364 debs); a non-literal command is red; the 28 test_envcheck cases pass. Remaining: the runner set must be total (one classification record per scanned program, with the doc cited; no record = red). Then it stops; the GL pins wait.
+- L4: its line is rebuilt on the candidate 58c113f0 as claude/fnv-l4-verify-w6-r, without L1 copies.
