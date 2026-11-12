@@ -19,7 +19,7 @@ Universe: every tracked file of the repository. Certified: files with no pair. u
   public: it holds COUNTS only (files, records with a VA, pairs, per layer = the first two path components), never a pair, a name or an address.
 Inputs: verify/contract_inputs.json (the same file and the same fetch as the contract gates: recipe.fetch_externals, tree_sha256 checked). A gate whose
   input is missing is RED with the reason, never skipped.
-Stated limits (not hidden): a decimal address, an address split over tokens, an address that is an RVA, and a name that is only a part of a decorated
+Stated limits (not hidden): The gate checks the tree at the commit only, not the git history. Pairs in earlier commits remain in the public history. This was decided by the orchestrator on 2026-11-12: no history rewrite before the first frame, because every session branch is based on that history. The orchestrator owns it as an open item, to be revisited after the first frame. a decimal address, an address split over tokens, an address that is an RVA, and a name that is only a part of a decorated
   C++ symbol (its class or function component) are not recognised; the cut C decoration is the only undecoration. Names are compared as whole tokens.
 Exit 0 iff green."""
 import json
