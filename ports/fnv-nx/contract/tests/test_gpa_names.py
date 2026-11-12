@@ -2,7 +2,7 @@
 """Synthetic check of gpa_names.py / argflow.py on a hand-assembled PE32 image (no game data)."""
 import os, struct, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-import argflow, gpa_names
+import argflow, gpa_names, imagerec
 
 BASE, TEXT, RD, DATA = 0x400000, 0x1000, 0x2000, 0x3000
 LL, GPA = BASE + RD, BASE + RD + 4            # IAT slots of LoadLibraryA, GetProcAddress
@@ -36,6 +36,14 @@ class Asm:
     def call_slot(self, s):           self.imm([0xff, 0x15], s)
     def ret(self):                    self.raw(0xc3)
 
+
+
+def reloc_size(b):
+    """The exact size of a base relocation table that is followed by zero padding."""
+    pos = 0
+    while pos + 8 <= len(b) and struct.unpack_from('<I', b, pos + 4)[0] >= 8:
+        pos += struct.unpack_from('<I', b, pos + 4)[0]
+    return pos
 
 def build():
     a = Asm()
@@ -93,7 +101,7 @@ def build():
     struct.pack_into('<II', hdr, o + 56, 0x5000, 0x200)
     struct.pack_into('<I', hdr, o + 92, 16)
     struct.pack_into('<II', hdr, o + 96 + 8, RD + 0x10, 40)            # import directory
-    struct.pack_into('<II', hdr, o + 96 + 40, 0x4000, len(reloc))      # base relocations
+    struct.pack_into('<II', hdr, o + 96 + 40, 0x4000, reloc_size(reloc))      # base relocations
     sh = o + 224
     out, fo = bytearray(hdr), 0x200
     for i, (nm, rva, body, ch) in enumerate(secs):
@@ -114,7 +122,7 @@ def check(name, got, want):
 
 data, a = build()
 ranges = {s: [(s, e)] for s, e in a.funcs.values() if s != a.funcs['thunk'][0]}
-img = argflow.Image(data, 'syn.exe', ranges)
+img = argflow.Image(imagerec.ImageRec(data, 'syn.exe', ranges))
 img.import_stack = gpa_names.import_stacks('dll\tname\tordinal\tconv\tret\targs\nkernel32.dll\tLoadLibraryA\t\tstdcall\ti\ti\nkernel32.dll\tGetProcAddress\t\tstdcall\ti\tii\n')
 
 

@@ -70,6 +70,14 @@ def ensure(root, cache, repo="."):
     return recipe.build(repo, root, os.path.join(cache, "store"), out, ext=os.path.join(cache, "external")), out
 
 
+def unitless(root, cache, repo="."):
+    """True iff ROOT's green build has no unit and no link output: a header-only root (RECIPE.md "Header-only roots"). It holds no code, so by
+    construction it references no import and reads no registry key; the imports and machine gates count 0 items for it and need no declaration.
+    A red build is not unitless (the caller reports it)."""
+    res = ensure(root, cache, repo)[0]
+    return res["status"] == "green" and not res.get("objects") and not res.get("units") and not res.get("elf")
+
+
 def ids(root, res, rec):
     """Items of a root: repo-relative unit paths and its ELF."""
     return [root + "/" + u for u in res.get("units", [])] + ([root + "/" + rec["link"]["output"]] if rec.get("link") else [])

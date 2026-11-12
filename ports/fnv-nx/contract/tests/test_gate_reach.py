@@ -10,6 +10,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..'))
 import argflow
+import imagerec
 import gate_reach
 import gpa_names
 
@@ -52,6 +53,14 @@ class Asm:
     def ret(self):            self.raw(0xc3)
 
 
+
+def reloc_size(b):
+    """The exact size of a base relocation table that is followed by zero padding."""
+    pos = 0
+    while pos + 8 <= len(b) and struct.unpack_from('<I', b, pos + 4)[0] >= 8:
+        pos += struct.unpack_from('<I', b, pos + 4)[0]
+    return pos
+
 def pe_of(fill):
     a = Asm()
     fill(a)
@@ -85,7 +94,7 @@ def pe_of(fill):
     struct.pack_into('<II', hdr, o + 56, 0x5000, 0x200)
     struct.pack_into('<I', hdr, o + 92, 16)
     struct.pack_into('<II', hdr, o + 96 + 8, RD + 0x40, 40)
-    struct.pack_into('<II', hdr, o + 96 + 40, 0x4000, len(reloc))
+    struct.pack_into('<II', hdr, o + 96 + 40, 0x4000, reloc_size(reloc))
     sh = o + 224
     out, fo = bytearray(hdr), 0x200
     for i, (nm, rva, body, ch) in enumerate(secs):
@@ -115,7 +124,7 @@ def image(fill, name):
     data, a = pe_of(fill)
     ranges = {s: [(s, e)] for s, e in a.funcs.values()}
     rtxt = ''.join('%x\t%x-%x\n' % (s, s, e) for s, (s, e) in sorted((s, (s, e)) for s, e in a.funcs.values()))
-    img = argflow.Image(data, name, ranges)
+    img = argflow.Image(imagerec.ImageRec(data, name, ranges))
     img.import_stack = gpa_names.import_stacks(BRIDGE)
     return img, dict(name=name, pe=gate_reach.sha(data), ranges=gate_reach.sha(rtxt))
 
@@ -442,6 +451,27 @@ for bad in (('X', 'k.dll', 'f', '0', 'closure_key', 'dispatcher=a', ''), ('X', '
         check('closure_key: malformed row is an error %r' % (bad[1:],), 'parsed', 'error')
     except gate_reach.FormatError:
         pass
+
+# reachreq.py (the request table and the one header emitter): its CLI writes the header that gate_reach.header builds from the same table,
+# through the function the full mode uses (write_facts_h); gate_reach re-exports the emitter, so there is one
+tdir = tempfile.mkdtemp(prefix='reach-h-')
+RR = os.path.join(HERE, '..', 'reachreq.py')
+import reachreq
+check('gate_reach uses the one emitter and parser of reachreq', (gate_reach.header is reachreq.header, gate_reach.parse_requests is reachreq.parse_requests,
+      gate_reach.write_facts_h is reachreq.write_facts_h), (True, True, True))
+for nm, rows_ in (('one', (CK,)), ('two', (CK, CK2)), ('cfm', (R_H, R_P, R_W))):
+    tsv = os.path.join(tdir, nm + '.tsv')
+    open(tsv, 'w').write('\t'.join(gate_reach.COLUMNS) + '\n' + ''.join('\t'.join(r) + '\n' for r in rows_))
+    outh = os.path.join(tdir, 'sub', nm + '.h')
+    rc_ = subprocess.run([sys.executable, '-s', '-B', '-I', RR, '--requests', tsv, '--facts-h', outh], capture_output=True).returncode
+    check('reachreq CLI %s: exit 0 and the header equals gate_reach.header(parse_requests(table)) (output dir created)' % nm,
+          (rc_, open(outh).read()), (0, gate_reach.header(gate_reach.parse_requests(open(tsv).read()))))
+rc_ = subprocess.run([sys.executable, '-s', '-B', '-I', RR, '--requests', os.path.join(tdir, 'nope.tsv'), '--facts-h', outh], capture_output=True).returncode
+check('reachreq CLI on a missing table is an error', rc_ != 0, True)
+open(os.path.join(tdir, 'bad.tsv'), 'w').write('request\tx\n')
+rc_ = subprocess.run([sys.executable, '-s', '-B', '-I', RR, '--requests', os.path.join(tdir, 'bad.tsv'), '--facts-h', outh], capture_output=True).returncode
+check('reachreq CLI on a malformed table exits 2', rc_, 2)
+shutil.rmtree(tdir, ignore_errors=True)
 
 if fails:
     print('FAIL\n' + '\n'.join(fails))

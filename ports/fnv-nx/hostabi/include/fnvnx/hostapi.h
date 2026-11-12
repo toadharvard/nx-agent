@@ -330,7 +330,7 @@ typedef struct FnvnxHostApi {
  *    space, as for fs_read); 0 is the null pointer where "or 0" is said.
  *  - Result: an int64 in a uint64, value >= 0, or -errno with errno a WIRE number (sockwire.h FNVNX_WIRE_ERRNO_LIST,
  *    the Linux numbers). The guest translates wire errno into newlib's and the host translates its own into the wire
- *    ones, both by name, so nothing assumes that two systems' errno numbers agree (a host errno that is not in the list is -EIO).
+ *    ones, both by name, so nothing depends on two systems' errno numbers agreeing (a host errno outside the generated list ends the process: fnvnx_assume_violation, ASM-004).
  *    Where a service below says "the platform's answer", the host passes the call to the console's bsd service (libnx) with the
  *    constants translated by name and returns its outcome: 0 / a count / a descriptor, or -(that errno mapped through the list),
  *    i.e. any value of FNVNX_WIRE_ERRNO_LIST the bsd service can produce; the host adds only the answers the service names. FNVNX_EXT_NO_MODULE is what a host

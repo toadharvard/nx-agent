@@ -10,7 +10,7 @@
  * tools/fonts-wine9 mirror (the Wine 9.0 and Liberation files its faces map to). The registry values of the declared machine (FontSubstitutes,
  * Fonts, the hardware profile Fonts key, Replacements, CodePage\ACP) are generated from Wine's own files by manifest/gen_fontmachine.py.
  *
- * Stage 1 assumptions (stated, not hidden): display DC at 96 dpi, MM_TEXT, identity world transform; system locale
+ * Stage 1 declared-machine facts: display DC at 96 dpi, MM_TEXT, identity world transform; system locale
  * en-US (name language 0x409); TC_RA_ABLE (bitmap fonts allowed); no vertical (@) families; no FontLink, no
  * fontconfig-derived family fallbacks beyond Wine's three built-in names per family class. */
 #include "w32.h"
@@ -277,7 +277,7 @@ void add_font_file(const std::string &path, bool allow_bitmap, bool listed)   /*
 }
 
 /* ---- the declared machine's font registry (Wine 9.0, ANSI 1252 / OEM 437, 96 dpi). Every value is generated from Wine's own files by
- * platform/manifest/gen_fontmachine.py (font.c nls_update_font_list row + update_font_list/add_font_list, wine.inf.in [Fonts] FontSubstitutes,
+ * manifest/gen_fontmachine.py (font.c nls_update_font_list row + update_font_list/add_font_list, wine.inf.in [Fonts] FontSubstitutes,
  * fontconfig-config 30-metric-aliases.conf for Replacements; inputs pinned in fnv-nx-build tools/fonts-wine9); nothing here is typed by hand.
  * The font files are exactly that mirror's fonts/ in one directory; nothing else is read. */
 #include "font_machine.gen.inc"
@@ -1200,8 +1200,9 @@ extern "C" HGDIOBJ GetCurrentObject(HDC hdc, UINT type)
 /* ======================================================================================================
  * Stage 2: text output (ExtTextOut), text extents, character placement, outline text metrics, display DC.
  * Wine 9.0's win32u/gdi32 is the cross-check of what the reference computes; the code below is written from the
- * documented contracts. Assumptions stated here once: the DC is GM_COMPATIBLE with the identity world transform (no
- * SetWorldTransform / SetGraphicsMode exists in this DC), window / viewport origins are 0, no inter-character
+ * documented contracts. Facts of this DC, set where it is created: the DC is GM_COMPATIBLE with the identity world transform (no object of any admitted root
+ * defines or references SetWorldTransform, SetGraphicsMode, SetViewportOrg or SetTextCharacterExtra: objects.json of the verdict,
+ * defined and undefined over all roots; a bridge row for one of them would make this text wrong), window / viewport origins are 0, no inter-character
  * extra spacing and no justification (SetTextCharacterExtra / SetTextJustification keep their DC defaults, 0),
  * no layout mirroring, no clip region (drawing is clipped to the DC's surface and ETO_CLIPPED's rectangle).
  * Antialiasing rule (freetype_get_aa_flags): surfaces of <= 8 bpp and NONANTIALIASED_QUALITY draw monochrome

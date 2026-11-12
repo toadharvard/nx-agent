@@ -75,7 +75,7 @@ typedef struct fnvnx_os {
      * mapped at all and may be handed to map_fixed again, which then yields fresh zero-filled memory; the memory that backed
      * the mapping goes back to the platform. The pages may hold any protection protect gave them (the hook restores what its
      * host needs). 0 on success. */
-    int (*unmap_fixed)(void *ctx, uintptr_t addr, uint32_t size);
+    int (*unmap_range)(void *ctx, uintptr_t addr, uint32_t size);
 } fnvnx_os;
 
 /* ---- PE32 headers ---------------------------------------------------------------------------------------- */

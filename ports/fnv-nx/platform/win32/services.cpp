@@ -255,7 +255,7 @@ extern "C" HRESULT CoCreateGuid(GUID *g)
 
 
 /* ---- steam_api / galaxywrp.dll: GOG Galaxy is not lifted (CLAUDE.md "Owner order of 2026-11-11, 23:00"): the declared machine has no
- * Galaxy and no Steam service. Every name the exe or a module reaches in GalaxyWrp.dll / Galaxy.dll (platform/manifest/check_galaxy.py:
+ * Galaxy and no Steam service. Every name the exe or a module reaches in GalaxyWrp.dll / Galaxy.dll (manifest/check_galaxy.py:
  * the 11 Steamworks entries of the exe's galaxywrp.dll import) has a body here, the public Steamworks contract in the state "client not
  * running / API not initialised" (ENV_TRUTH M6), with the documentation cited per function (the constant ones in
  * manifest/env_const.tsv, the others at their definition). SteamAPI_Init fails every time (no client to connect to), SteamAPI_IsSteamRunning is false, every

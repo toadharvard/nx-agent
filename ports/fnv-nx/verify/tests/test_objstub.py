@@ -548,12 +548,14 @@ for what in ("empty",):
 GC = ROOT + "/gcache"
 repo = TR.make_repo("os-toy", files={"toy/constants.tsv": CONST})
 rc, g, secs, txt, st = gate(repo, ROOT + "/g1", GC)
-check("gate on the toy root (os_layer, constants row, terminators from its own units): green 4/4, accepted by verdict",
-      rc == 0 and g["universe"] == 4 == g["certified"] and st[0] == "green", (g, txt))
+# the toy's functions: f_a, f_b, f_c, os_svc, plus the functions of the product's crt0 the toy links (rt/guest/crt0.s, %function symbols)
+NTOY = 4 + len(re.findall(r"^\s*\.type\s+\S+,\s*%function", open(os.path.join(os.path.dirname(HERE), "..", "rt", "guest", "crt0.s")).read(), re.M))
+check("gate on the toy root (os_layer, constants row, terminators from its own units): green NTOY/NTOY, accepted by verdict",
+      rc == 0 and g["universe"] == NTOY == g["certified"] and st[0] == "green", (g, txt))
 print("INFO toy gate cold (with build) %.1f s" % secs)
 rc, g, secs, txt, st = gate(repo, ROOT + "/g2", GC)
 print("INFO toy gate warm %.1f s" % secs)
-check("gate again with the cache: same result", rc == 0 and g["universe"] == 4 == g["certified"], (g, txt))
+check("gate again with the cache: same result", rc == 0 and g["universe"] == NTOY == g["certified"], (g, txt))
 repo2 = TR.make_repo("os-toy2", files={"toy/constants.tsv": ""})
 rc, g, _, txt, st = gate(repo2, ROOT + "/g3", GC)
 check("toy root without the constants row of f_b: red, names the function by unit path", rc == 2 and g["uncertified"] == [TR.ROOT + "/b.c:f_b"]
@@ -589,7 +591,7 @@ for tag, tbl, want in (("row matches", "5\tm\twine-9.0:dlls/x/y.c:f\tu32\t7\n", 
 r32 = TR.make_repo("os-toy32", rec=TR.abi_rec("ilp32"), files={"toy/constants.tsv": CONST})
 t0 = time.time()
 rc, g, secs, txt, st = gate(r32, ROOT + "/g32", GC)
-check("ILP32 toy root (ELF32 objects, aarch64linux32 link): gate green 4/4, accepted by verdict", rc == 0 and g["universe"] == 4 == g["certified"] and st[0] == "green", (g, txt))
+check("ILP32 toy root (ELF32 objects, aarch64linux32 link): gate green NTOY/NTOY, accepted by verdict", rc == 0 and g["universe"] == NTOY == g["certified"] and st[0] == "green", (g, txt))
 print("INFO ILP32 toy gate cold %.1f s" % secs)
 rc, g, secs, txt, st = gate(r32, ROOT + "/g32b", GC)
 print("INFO ILP32 toy gate warm %.1f s" % secs)
