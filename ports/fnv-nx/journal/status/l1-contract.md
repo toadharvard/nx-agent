@@ -166,3 +166,12 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - 03:51Z: new gate `onedef` (w15), per image: (a) strong/weak defined in one root; (b) COMDAT from one source definition with equal bytes (ODR); (c) equal normalized function bytes from different definitions are red. Censuses over the platform and render roots come before MERGER. lib/sha256 is a product root (owner L4) with a guest build plus a host variant.
 - 03:53Z w14's next item: gate_reach request kind closure_key (for L3a item 26). Premises: the closure fact, dispgen --closure, and 0 open dynamic sites. It is measurement-only until then.
 - 03:54Z onedef (c) dropped (body equality is a heuristic). Replaced by provenance: (c') each unit source belongs to one root, by sha256 and by path; (c'') a header's content appears under one path only.
+
+## 2026-11-12 03:22Z
+- exepin (w4/w8 5efe2154) on clean 8cfbcdbf: RED e30e9bd6 (29 gates, 366 s).
+  - exepin 45/91: contract/bodysel.py:73 reads the exe outside load_exe.
+  - selftests 60/61: test_exepin.py fails.
+  - w4 was told to extend certification to every exe read site and rebase. Status: doing.
+- w5 58bd4c2a: conflicts with 8cfbcdbf. Told to rebase, env.json pins as a union with the trunk winning on a clash. L2 w3 confirmed the `pip -r -` gap. Status: doing.
+- Budget rule decided by L1. The 300 s budget gates only the incremental verdict, with a warm GATE_CACHE, on the pinned farm host. Cold time is reported but not gated. A docs-only change must show 0 recompiled units, else it is a keying defect and red. Owner: w19, doing.
+  - Evidence: L2 w3 754a94c1 at 299.961 s; w6 c9bdb4e8 (docs only) at 303.2 s.
