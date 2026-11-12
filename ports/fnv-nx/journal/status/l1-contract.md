@@ -31,8 +31,9 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` 07862d5a (L4 verif
 | 3m | include mounts at root-relative paths in one mirrored tree (`../` works; undeclared = missing) (L2, L5 platform root) | w16 | claude/fnv-l1-contract-w16 | queued (before 3x) |
 | 3g | guest library external fnvnx-a64-msvcmodel + sample platform build.json (L1 green 63511d69, 215.8 s, 51/51 selftests) | w4 | claude/fnv-l1-contract-w4 1fa25f8b | done (trunk 2b7897a5); next: runtime manifest == guest compiler (same GCC 13.3+msvcmodel, -fshort-wchar; 00e3d42a = GCC 15.2 libstdc++ red), L5 rebuilds tools/fnvnx-a64-msvcmodel13; runtime external required, -nostdinc |
 | 3h | guest system headers = linked libc's (fnvnx-a64-msvcmodel newlib+libnx, -nostdinc); glibc cross headers refused in guest roots (L2/L5 socket units) | w4 | claude/fnv-l1-contract-w4 | queued (after w8 rebase) |
-| 3u | units_from compile_commands: pinned cmake configure as Rule B step gives unit set + per-unit defines + configure outputs (L6 MojoShader; patches deleting units = exclude list, refused) | w16 | claude/fnv-l1-contract-w16 | queued |
+| 3u | configure step: pinned cmake on writable patched tree; units = one declared target's compileGroups from CMake File API codemodel-v2; source-dir outputs as Rule B outputs (L6 MojoShader; patches deleting units = exclude list, refused) | w16 | claude/fnv-l1-contract-w16 | queued |
 | 3c | class follows where objects run: root reached via link.roots from a product image = product root with all product gates; tool root in link.roots refused (L6 translator) | w15 | claude/fnv-l1-contract-w15 | queued |
+| 1i | image set = least set from exe closed under imports + statically resolved LoadLibrary of reached code (not every dll file); atimgpud, d3dx9_31, gdffalloutnv: reached? then lifted (range facts L3a/L2); wine-specs 678c780e → declared_dlls.tsv, every Galaxy/ssce gap = wine (L5 bridge); gpa -I import fix | w18 | claude/fnv-l1-contract-w18 e999ed27 | doing |
 | 1s | bootsock argument census (21 wsock32 exe sites → winsock.cpp → SOCK 16..26,30,31): proved value sets with fact chains, certificates for fnvnx_reach_violation; unresolved GPA/LoadLibrary reaching wsock32? (L4) | w18 | claude/fnv-l1-contract-w18 | queued after closure roles |
 | 3h2 | cross-root headers = admitted headers trees only (platform/include for fnvl_host.h, L3a lift/rt); include of another root's own tree refused | w16 | claude/fnv-l1-contract-w16 | with headers class |
 | 3x | fixture roots: per-unit gate + expected finding, never linked or in a universe (L3b forms/fpexact tests) | w16 | claude/fnv-l1-contract-w16 | queued |
@@ -44,7 +45,7 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` 07862d5a (L4 verif
 
 Rule (L1+L2): a header-only dir is not a root; its headers are certified as PP inputs of admitted units (shim/include L2, loader include).
 
-Assumptions (w10 399e639 at 6066375): 48 records = 9 OWNER + 39 REMOVE; mentions 92/98 certified. The 6 trunk mentions (hive regsites, imports objects.json, unit_facts) and 2 gate_call clauses get L1 REMOVE records with named removing checks.
+Assumptions (w10 a2bd503, code 2f1bbe2 on e35b870): gate GREEN, mentions 96/96; 52 records = 9 OWNER + 43 REMOVE (removed_by: gate 3, planned 18, no gate yet 22, OPEN 0); queued at MERGER. Next w10: objstub DECL_FACTS/DECL_SOURCE from declared_machine.tsv header (no-galaxy).
 
 ## Missing REQUIRED_PRODUCT gates (blocker of goal step 1)
 
@@ -54,9 +55,9 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 |---|---|---|---|---|
 | datamodel | L1 | claude/fnv-l1-contract-w17 (session_01KmtZKQzN38LhJYh6sixhL1) | 531ebbd (green 24/24 at c5b20de, 191 s) | conflict with 07862d5a (TOOLS.md, gates.json, test_gates.py), rebasing |
 | exepin | L1 | claude/fnv-l1-contract-w8 (w4 rebasing) | a6753733 | rebasing on f1059af7 |
-| r7 | L2 | claude/fnv-l2-source-w5 (session_01KmtZKUHWWEEBqzMR6cAtAZ) | - | doing |
-| namegate | L2 | claude/fnv-l2-source-w5 | - | doing |
-| abi | L2 | claude/fnv-l2-source-w5 | - | doing |
+| r7 | L2 | claude/fnv-l2-source-w5 (session_01KmtZKUHWWEEBqzMR6cAtAZ) | 3b35851 (green 26 gates, 223.7 s) | queued |
+| namegate | L2 | claude/fnv-l2-source-w5 | 3b35851 | queued |
+| abi | L2 | claude/fnv-l2-source-w5 | 3b35851 | queued |
 | order | L3a (L2 supplies plugin certificate) | claude/fnv-l3a-lift-gates (session_01KmtZKR34WmRCfdDoE7ajAt) | - | doing |
 | eh | L3a (L3b reviews) | claude/fnv-l3a-lift-gates | - | doing |
 | addr32 | L3a | claude/fnv-l3a-lift-gates | - | doing |
