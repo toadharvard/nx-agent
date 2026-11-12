@@ -48,6 +48,12 @@ the hash of the stage document + tool code. All paths are root-relative unless m
   nonzero size, and two names with different body ids never share an address.
 - `link`: the guest ELF, null = no ELF. A link is the stage `ld:<root>` and the post stage `ldcheck:<root>` of the section "Link: the guest ELF"
   below; `flags` carries the emulation only, `roots` and `libs` are optional.
+  `kind` is `pie` (the ILP32 guest image, the default) or `exe`; a root of target guest cannot link an `exe`. `roots` lists distinct admitted `product`
+  roots of the same target, never the root itself; their stored objects are declared inputs of the link stage (so their content is in its key) and a
+  listed root is built without its own link. A root of class `product` lists base roots only; a root of class `test` lists any root, variants included
+  (`root@NAME`). A variant is one concept: `variants: {NAME: {"target"?}}` in the root's admit.json entry, its flags in the recipe's `variants`,
+  addressed as `root@NAME` (a sanitizer build is a flags variant of the same root). Whatever the flags, `linkstrict` judges the linked output: no
+  undefined symbol of any binding.
 - ABIs: the recipe names the ABI in its flags, and the build reads ELF32 and ELF64 AArch64 objects alike. ILP32 (the product): `-mabi=ilp32`
   in `flags.c`, `flags.cxx` and `flags.asm`, and `-m aarch64linux32` in `link.flags` (the emulation `gcc -mabi=ilp32 -###` passes to
   `ld`; it is required: a link is the ILP32 guest ELF). The objects are ELF32 (`SHT_RELA` with `Elf32_Rela`, relocations `R_AARCH64_P32_*`),
@@ -109,7 +115,8 @@ that includes `<vector>`, `<string>`, `<cstdio>`. The 13.3 compiler reads gcc 15
   C and the C++ CC stage of the root load every plugin their front end can load (`-fplugin=/plug/<n>/<n>.so`, `/plug/<n>` a declared input), so a
   plugin is in every unit key. Loadable = needs no symbol that only the other front end defines (`recipe.plugin_languages`: `nm -D` of cc1, cc1plus
   and the .so; measured: cc1plus loads all 8, cc1 loads ftoi, order, dispatch, addr; sdd, pi, names, layout use cp_global_trees). Gate `datamodel`
-Check: `lifted_by` must be a tracked `.py` of an admitted root of class `tool` (recipe.py check, `cxx_origin.lifted_by ... is not a tracked .py of an admitted tool root` otherwise), and the gate proves that no hand-written C++ sits in a lifted root: every C++ unit is an output of a step of that tool. When the single lifter `liftall.py` is on the trunk, `lifted_by` must equal its path (one constant `LIFTER` of recipe.py); until then the check is the one stated here.
+  re-derives the set and reads it back from the CC stage documents; a unit lacking a loadable plugin .so is red, no name list, no exception list.
+Assumption: the declaration `lifted_by` names the lifter is the owner's (admit.json is reviewed); the gate proves that no hand-written C++ sits in a lifted root.
 
 ## Link: the guest ELF
 There is one way to link: the recipe key `link` (no other path runs a linker; link/ has no subprocess call). Every key below is validated by
@@ -146,6 +153,11 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   `link.roots` works for every kind; a root needed by several images has `link` null and is built once per (root, variant).
 - Target of the link: every linked object (own and input roots') has the ELF class and e_machine of the link's emulation (`aarch64linux32` ILP32 = class 1,
   AArch64; `aarch64linux` = class 2, AArch64; `elf_x86_64` = class 2, x86-64), read from its ELF header. A mismatch is red, stage `ld:<root>`, naming the object.
+  `exe` is host only: a root of target guest links a `pie` (emulation `aarch64linux32`, the crt0 header), a guest test root included; a guest root with
+  kind `exe` is refused. A product image's `link.roots` name base roots only; a variant (`root@NAME`) is linked only by a root of class `test`.
+  The admit.json entry of a root may carry `variants`: {NAME: {"target": "guest"|"host"}} for variants the recipe declares; a variant inherits the base's
+  target otherwise, the guest rules (compiler external, data model) are judged on the effective target, and a variant with its own target has it in
+  every stage key (`FNVNX_TARGET`). Sources stay the base root's. Every entry point resolves a `root@NAME` spec with `split_spec` once.
 
 ## Variants
 `variants: {NAME: {"compiler": .., "flags": {..}}}`: one root built for several targets. A variant replaces only the keys it names (`compiler`, `flags`), the rest is
@@ -220,6 +232,13 @@ the unit's keys; the units are built with the root's own. Red (stage `sources:<r
 not declare, a path that is no file inside the external (`..` included), a `.` path the root does not track. A changed list adds only the new units:
 the other units keep their objects and compile-stage keys (their preprocessing keys follow the view's file names, the compile keys do not).
 
+## Python of the generated stages
+
+A `generated` step runs in the python runtime of the sandbox (the interpreter and its loader closure, content-addressed: `runtime_id` is in the
+key). Every python module pinned in `verify/env.json` (`python.modules`) is mounted in that runtime, at the content of its installed files, and
+the key of every generated stage also names each of them as `name==version:installed_files_sha256` (envcheck.wheel_digest: the files read from the
+disk, not the RECORD's claim). Changing one module's digest changes the key of every generated stage, and nothing else's.
+
 ## Keep going
 
 A root build does not stop at the first red stage. Every unit whose declared inputs are all produced is built (and its objects land in the
@@ -235,7 +254,7 @@ if any unit or stage is red or blocked. `objects.json` of a red root: `objects` 
 
 `"fixtures": {"<unit>": {"gate": "<gate>", "expect": "red", "finding": "<finding code>"}}`: a unit that is meant to be rejected by a gate, kept
 beside the code the gate protects so that the gate is known to bite.
-- `<unit>` is a tracked source file of the root (not a generated output). `gate` is a gate of `verify/gates.json`; `expect` is `"red"`.
+- `<unit>` is a tracked source file of the root (not a generated output). `gate` is a gate of `verify/gates.d`; `expect` is `"red"`.
 - recipe.py builds a fixture like any unit (same flags, same stages, in the same store). It is NOT a unit of the product: `units_of`, `objects`,
   `defined`/`undefined`, `pp_keys` and the link never hold it; it is refused in `os_layer`, in the link's flags or script and in a generated input.
   Its object is in `objects.json` under `fixtures` (`unit, gate, expect, finding, object, sha256, pp_key`).
@@ -254,7 +273,7 @@ expected codes of that gate, none outside the root; a root that comes out green,
 
 ## Refusal set R (GNU ld option syntax, not a text guess)
 Options that let a link accept missing or substituted symbols: `--unresolved-symbols`, `--allow-shlib-undefined`, `--noinhibit-exec`,
-`--defsym`, `--wrap`, `--allow-multiple-definition`, `--warn-unresolved-symbols`, `-z undefs`, `-z muldefs`. A token is refused when, with one or two
+`--defsym`, `--wrap`, `--allow-multiple-definition`, `--warn-unresolved-symbols`, `-z undefs`, `-z muldefs`, `-z lazy` (the class "resolution-relaxing ld options"). A token is refused when, with one or two
 leading dashes and the part after `=` cut, its name is a prefix of such a long name (getopt_long abbreviation; one-dash names need 2 chars),
 as `-z X` or `-zX`, inside `-Wl,a,b` or after `-Xlinker`, or when it is an `@file`. Checked in every flag list, `link.flags` included.
 

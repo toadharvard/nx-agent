@@ -3,7 +3,8 @@
     python3 -I gate_linkstrict.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/linkstrict.json
 Roots come from verify/admit.json: for every product root the gate calls gate_build.ensure(root, GATE_CACHE) and reads the ELF `.symtab` of
 its objects (relocatable) and of its linked ELF, never a name's text. Rules:
-  (a) a root that links an ELF: the ELF has no undefined symbol and no weak undefined symbol, no IFUNC, and a `.symtab` (item `<elf>`).
+  (a) a root that links an ELF (the linked output of every product and test root, whatever flags the link used): the ELF has no undefined
+      symbol of ANY binding (a relocation against an undefined symbol must name one, so none exists) and no weak undefined symbol, no IFUNC, and a `.symtab` (item `<elf>`).
   (b) across ALL product roots: every undefined symbol (global or weak) of every object is defined by exactly ONE object with a strong
       (GLOBAL, not common) definition, or by one COMDAT group family (b1), or by the link script (b2). Findings: `undefined` (no
       definition anywhere), `duplicate-strong` (two strong definitions), `weak-only` (a weak or UNIQUE definition outside any COMDAT
@@ -259,8 +260,8 @@ def judge(objs, elfs, tables, comdat=None, host=None, guest=()):
             out.add((eid, "<elf>", "elf-no-symtab", "the linked ELF has no .symtab"))
             continue
         for name, val, size, typ, bind, shn in syms:
-            if shn == 0 and bind in (GLOBAL, WEAK, UNIQUE):
-                out.add((eid, "<elf>", "elf-undefined" if bind == GLOBAL else "elf-weak-undefined", name))
+            if shn == 0:   # any binding: a relocation against an undefined symbol needs one, so a linked ELF without one has no such relocation
+                out.add((eid, "<elf>", "elf-weak-undefined" if bind in (WEAK, UNIQUE) else "elf-undefined", name))
             if shn != 0 and typ == IFUNC:
                 out.add((eid, "<elf>", "elf-ifunc", name))
     for (rid, eid), rows in sorted(tables.items()):

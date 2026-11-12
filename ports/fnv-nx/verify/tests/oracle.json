@@ -507,6 +507,24 @@
     "ports/fnv-nx/link/ldcheck.py"
    ]
   },
+  "test_linkroots.py": {
+   "references": [
+    {
+     "anchor": "## verify/recipe.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/gate_admit.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/verify/gate_admit.py"
+   ]
+  },
   "test_linkstrict.py": {
    "references": [
     {
@@ -723,6 +741,18 @@
    "subject": [
     "ports/fnv-nx/verify/specdefaults.py",
     "ports/fnv-nx/verify/recipe.py"
+   ]
+  },
+  "test_tlsmodel.py": {
+   "references": [
+    {
+     "anchor": "## verify/gate_tlsmodel.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/gate_tlsmodel.py"
    ]
   },
   "test_toolflags.py": {

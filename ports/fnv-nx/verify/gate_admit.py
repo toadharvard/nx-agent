@@ -43,6 +43,7 @@ missing gate, or a product root without its gates makes every merge red. The tab
 holds no exception for a file, a function or a finding.
 Assumption: `git ls-files` lists the tree under test (the verdict runs gates in a clean worktree of the commit). (ASM-041)"""
 import json
+import re
 import os
 import subprocess
 import sys
@@ -118,6 +119,7 @@ def judge(files, admit, gate_names, exists, ref_paths=frozenset(), covers=None, 
     roots, errors = [], []
     if admit.get("format") != "fnvnx-admit/1":
         errors.append("admit.json: format is not fnvnx-admit/1")
+    by_path = {r.get("path"): r for r in admit.get("roots", []) if isinstance(r, dict)}
     for r in admit.get("roots", []):
         path, cls, gates = r.get("path", ""), r.get("class"), r.get("gates", [])
         why = []
@@ -151,6 +153,11 @@ def judge(files, admit, gate_names, exists, ref_paths=frozenset(), covers=None, 
                                                           and isinstance(e["code"], str) and e["code"] for e in ex)):
                     why.append('a fixture root declares "expect": a non-empty list of {"gate": a gate of gates.d, "code": a finding code}%s'
                                % "".join("; %r is no gate of gates.d" % e["gate"] for e in (ex if isinstance(ex, list) else []) if isinstance(e, dict) and e.get("gate") not in gate_names))
+            if "variants" in r:   # the variants of a product root: {NAME: {"target": "guest"|"host"}}, addressed as root@NAME (recipe.entry_of); the recipe holds their flags
+                vs = r["variants"]
+                if cls != "product" or not (isinstance(vs, dict) and vs and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", n) and isinstance(e, dict)
+                                                                                   and set(e) <= {"target"} and e.get("target", "guest") in ("guest", "host") for n, e in vs.items())):
+                    why.append('"variants" is allowed on a product root only: {NAME: {"target": "guest"|"host"}}')
             if cls in ("product", "test", "fixture"):
                 rec = r.get("recipe", "")
                 if not any(rec.startswith(t + "/") for t in trees(r)) or not exists(rec):
