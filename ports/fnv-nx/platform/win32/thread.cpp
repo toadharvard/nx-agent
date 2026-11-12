@@ -2,6 +2,7 @@
  * behind __readfsdword. */
 #include "w32.h"
 #include "fnvnx_boundary.h"
+#include "fnvl_host.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +12,10 @@ static volatile DWORD g_next_tid = 0x1000;
 
 /* The block lives in the thread's own TLS storage: it exists for the life of the thread, needs no allocation and so
  * cannot fail. g_self_live separates "no block yet" (the tid is assigned at first use) from a released block. */
+/* The dispatch word (declared in shim/include/fnvl_host.h): one per host thread, zero from the thread's creation (a __thread object is
+ * zero-initialised for every thread), initial-exec so the access is a TP-relative load/store with no call. */
+extern "C" { __thread unsigned int fnvnx_call_fp __attribute__((tls_model("initial-exec"))); }
+
 static __thread struct w32_thread g_self;
 static __thread int g_self_live;
 
