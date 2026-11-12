@@ -65,9 +65,9 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 | r7 | L2 | claude/fnv-l2-source-w5 (session_01KmtZKUHWWEEBqzMR6cAtAZ) | 3b35851 (green 26 gates, 223.7 s) | queued |
 | namegate | L2 | claude/fnv-l2-source-w5 | 3b35851 | queued |
 | abi | L2 | claude/fnv-l2-source-w5 | 3b35851 | queued |
-| order | L3a (L2 supplies plugin certificate; L2 w4 0f9e337 fnvnx_order rules ORDER-CONT, HARDREG, FENCE-MERGE, LOCAL, queue #5) | claude/fnv-l3a-lift-gates (session_01KmtZKR34WmRCfdDoE7ajAt) | - | doing |
-| eh | L3a (L3b reviews) | claude/fnv-l3a-lift-gates | - | doing |
-| addr32 | L3a | claude/fnv-l3a-lift-gates | - | doing |
+| order | L3a | claude/fnv-l3a-lift-gates (session_01KmtZKR34WmRCfdDoE7ajAt) | 376acbaa (verdict running) | priority after exepin |
+| eh | L3a | claude/fnv-l3a-lift-gates | 376acbaa | with order |
+| addr32 | L3a | claude/fnv-l3a-lift-gates | 376acbaa | with order |
 | forms | L3b | claude/fnv-l3b-lift-w2g | - | doing |
 | fpexact | L3b, claude/fnv-l3b-lift-w2g (native criterion: w17 makes fnvnx_ftoi reject any unrewritten FIX_TRUNC_EXPR) | - | - | - |
 | d3d9total | L6 | claude/fnv-l6-render-w4 (session_01KmtZKUN17roaVoBLBe4QKK) | - | doing |
@@ -120,3 +120,4 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - 03:14Z w5 adds a new item: env.json profile toolchain-build (for L5 w14's guest runtime from source), with envcheck --profile, a chroot-only setup script, and the debs mirrored.
 - 03:15Z w15 3a6ec1b2: cross-root outputs/uses (test_uses 9/9; test_link 45/45 and test_recipe 53/53 at bcf281fb). Full verdict running. toolchain-build package list from L5 w14 forwarded to w5 (full closure plus sha256; pyelftools as a deb).
 - 03:17Z: w10 0371bf6 is green 27/27 (7767b55, 227.8 s; selftests 57/57) and with MERGER. w10's next item: root class `ref` plus oracle REF kinds `external` and `probe` (L6 asked). L3a (order, eh, addr32) and L3b (forms, fpexact) asked for MERGER heads or blockers.
+- 03:19Z w12 f6ac90a is green (c6eda21e, 217.6 s): stale slot names 14 hits in 5 files → 0, with a stale_names gate clause from hostapi_holes.json; it replaces 2901bc9 in the queue. L3a's order/eh/addr32 are at 376acbaa.
