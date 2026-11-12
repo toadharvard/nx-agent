@@ -102,6 +102,18 @@
     "ports/fnv-nx/contract/gpa_names.py"
    ]
   },
+  "test_hive.py": {
+   "references": [
+    {
+     "anchor": "## contract/hive.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/hive.py"
+   ]
+  },
   "test_iat.py": {
    "references": [
     {
@@ -129,6 +141,24 @@
    ],
    "subject": [
     "ports/fnv-nx/contract/images.py"
+   ]
+  },
+  "test_imports.py": {
+   "references": [
+    {
+     "anchor": "## contract/imports.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## contract/bridgetable.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/imports.py",
+    "ports/fnv-nx/contract/bridgetable.py"
    ]
   },
   "test_l2sections.py": {
