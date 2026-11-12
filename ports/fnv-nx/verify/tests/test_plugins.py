@@ -22,9 +22,10 @@ REAL = os.path.dirname(os.path.dirname(os.path.dirname(VERIFY)))   # checkout ro
 sys.path.insert(0, VERIFY)
 import cas  # noqa: E402
 import recipe  # noqa: E402
+import scratch  # noqa: E402
 
+scratch.install()   # BASE and every other mkdtemp is removed synchronously at exit
 BASE = tempfile.mkdtemp(prefix="plugin-test-")
-atexit.register(lambda: subprocess.Popen(["rm", "-rf", BASE], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
 FAILED = []
 T = "ports/fnv-nx/"
 ROOT = T + "toy"

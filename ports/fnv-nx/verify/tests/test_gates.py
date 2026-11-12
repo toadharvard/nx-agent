@@ -99,6 +99,24 @@ put(d, "link/b.py", CLEAN)
 rc, r, e = pure(d)
 check("pure: project imports resolve across the run", rc == 0 and (r["universe"], r["certified"]) == (2, 2), (rc, r, e))
 
+ADM = lambda cls: json.dumps({"format": "fnvnx-admit/1", "roots": [{"path": "ports/fnv-nx/verify", "class": cls, "gates": []}]})
+VD = "ports/fnv-nx/verify/"
+d = tmp("pure-iroot")
+put(d, "link/a.py", "import vhelp\n")
+put(d, VD + "vhelp.py", CLEAN)
+put(d, VD + "admit.json", ADM("tool"))
+rc, r, e = pure(d)
+check("pure: a pure module of an import root (verify/, admitted tool root) is importable and not an item", rc == 0 and r["status"] == "green"
+      and (r["universe"], r["certified"]) == (1, 1), (rc, r, e))
+put(d, VD + "vhelp.py", BAD)
+rc, r, e = pure(d)
+check("pure: an impure module of an import root makes its importer red", rc != 0 and r["uncertified"] == ["link/a.py"], (rc, r, e))
+put(d, VD + "vhelp.py", CLEAN)
+put(d, VD + "admit.json", ADM("doc"))
+rc, r, e = pure(d)
+check("pure: an import root that is not an admitted tool root is red with the reason", rc != 0 and r["status"] == "red"
+      and "not an admitted tool root" in r["detail"], (rc, r, e))
+
 d = tmp("pure-cap")
 for i in range(60):
     put(d, "link/m%02d.py" % i, BAD)
@@ -149,9 +167,10 @@ put(d, "verify/tests/test_leaves.py", "import tempfile\nd = tempfile.mkdtemp(pre
 put(d, "verify/tests/test_leaves_fails.py", "import sys, tempfile\nopen(%r, 'a').write(tempfile.mkdtemp(prefix='left-') + '\\n')\nsys.exit(3)\n" % log)
 rc, r, e = tests(d)
 left = open(log).read().split()
-check("tests: the scratch a file leaves in its temporary directory is removed, passed or failed", rc != 0 and r["certified"] == 1
-      and len(left) == 2 and not any(os.path.exists(x) or os.path.exists(os.path.dirname(x)) for x in left)
-      and all(os.path.basename(os.path.dirname(x)).startswith("selftest-") for x in left), (rc, r, left))
+rows = {x["name"].rsplit("/", 1)[-1]: x for x in r["files"]}
+check("tests: the scratch a file leaves in its temporary directory is removed, passed or failed; the leak is uncertified and named",
+      rc != 0 and r["certified"] == 0 and len(left) == 2 and not any(os.path.exists(x) or os.path.exists(os.path.dirname(x)) for x in left)
+      and "leaked in TMPDIR: left-" in rows["test_leaves.py"]["reason"] and "exit 3" in rows["test_leaves_fails.py"]["reason"], (rc, r, left))
 
 d = tmp("tests-env")
 put(d, "verify/tests/test_env.py", "import os, sys\nsys.exit(1 if [k for k in os.environ if k.startswith('GATE_')] else 0)\n")
@@ -190,6 +209,7 @@ def small_repo(gates=None, link=None):
     for f in SMALL:
         shutil.copy(os.path.join(VERIFY, f), os.path.join(r, "ports/fnv-nx/verify", f))
     put(r, "ports/fnv-nx/verify/gates.json", json.dumps(gates or two_gates()))
+    put(r, VD + "admit.json", ADM("tool"))  # gate pure: its import root (verify/) must be an admitted tool root
     shutil.copy(os.path.join(VERIFY, "env.json"), os.path.join(r, "ports/fnv-nx/verify/env.json"))
     put(r, "ports/fnv-nx/link/tests/test_ok.py", "import sys\nsys.exit(0)\n")
     for k, v in (link or {}).items():
@@ -227,6 +247,36 @@ vd = tmp("verdicts")
 r2 = small_repo(link={"ports/fnv-nx/link/bad.py": BAD})
 rc, line, out, err = l1("verdict", "--repo", r2, "--commit", "main", "--verdicts", vd)
 check("l1 verdict: red file -> red, exit 2", rc == 2 and line.startswith("L1 red "), (rc, line, out, err))
+
+vd = tmp("verdicts")
+r3 = small_repo(link={"ports/fnv-nx/link/tests/test_x.py": "import sys\nprint('boom: [Errno 28] No space left on device')\nsys.exit(1)\n"})
+rc, line, out, err = l1("verdict", "--repo", r3, "--commit", "main", "--verdicts", vd)
+tree3 = git(r3, "rev-parse", "main^{tree}")
+stored = json.load(open(os.path.join(vd, tree3 + ".json")))
+gt = [g for g in stored["gates"] if g["name"] == "selftests"][0]
+check("l1 verdict: the reason of an uncertified test (exit status, errno text) is in the stored verdict and the printed gate line",
+      rc == 2 and "test_x.py" in gt["reason"] and "exit 1" in gt["reason"] and "[Errno 28] No space left on device" in gt["reason"]
+      and "[Errno 28]" in out, (rc, gt, out))
+
+# gate TMPDIR rule: private empty TMPDIR per gate, removed on any outcome; leftovers in it or in the worktree make the gate red
+LEAKY = ("import json, os, sys\nk = sys.argv[1]\n"
+         "if k == 'tmp': open(os.path.join(os.environ['TMPDIR'], 'junk'), 'w').write('x')\n"
+         "if k == 'wt': open('stray.txt', 'w').write('x')\n"
+         "json.dump({'format': 'fnvnx-gate/1', 'name': 'leaky', 'status': 'green', 'universe': 1, 'certified': 1, 'uncertified': [],\n"
+         "           'detail': os.environ['TMPDIR']}, open(os.path.join(os.environ['GATE_OUT'], 'leaky.json'), 'w'))\n")
+def leaky_run(kind):
+    r = small_repo(gates={"format": "fnvnx-gates/1", "gates": [
+        {"name": "leaky", "argv": ["python3", "-I", "ports/fnv-nx/verify/leaky.py", kind], "result": "leaky.json"}]},
+        link={"ports/fnv-nx/verify/leaky.py": LEAKY})
+    vd = tmp("verdicts")
+    rc, line, out, err = l1("verdict", "--repo", r, "--commit", "main", "--verdicts", vd)
+    return rc, out, err
+rc, out, err = leaky_run("clean")
+check("gate tmpdir: a gate that leaves nothing is green", rc == 0, (rc, out, err))
+rc, out, err = leaky_run("tmp")
+check("gate tmpdir: a gate that leaves a file in its TMPDIR is red and the file is named", rc == 2 and "in its TMPDIR: junk" in out, (rc, out, err))
+rc, out, err = leaky_run("wt")
+check("gate tmpdir: a gate that leaves a file in the worktree is red and the file is named", rc == 2 and "in the worktree: stray.txt" in out, (rc, out, err))
 
 # merge: bootstrap
 r = small_repo()
@@ -315,6 +365,31 @@ def mk(d, **files):
 
 def tests_c(d, cache, extra=(), dirs=("verify",)):
     return gate("gate_tests.py", d, ["--cache", cache] + list(extra) + list(dirs))
+
+# TMPDIR rule: private TMPDIR per test file, removed whatever the outcome; leftovers are red; the reason is in the result
+def gate_tmp(d, extra=()):
+    """gate_tests.py over verify/ in D with the gate's TMPDIR in a fresh directory; -> (rc, result, entries left there afterwards)"""
+    gt = tempfile.mkdtemp(dir=ROOT, prefix="gt-")
+    out = tempfile.mkdtemp(dir=ROOT, prefix="out-")
+    p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_tests.py")] + list(extra) + ["verify"], cwd=d,
+                       env=dict(os.environ, GATE_OUT=out, TMPDIR=gt), capture_output=True, text=True)
+    return p.returncode, json.load(open(os.path.join(out, "selftests.json"))), sorted(os.listdir(gt)), p.stderr
+
+d = tmp("tests-tmpdir")
+mk(d, test_a="import tempfile\nd = tempfile.mkdtemp()\nopen(d + '/x', 'w').write('x' * 1000)\nimport shutil\nshutil.rmtree(d)\n",
+   test_b="import tempfile\ntempfile.mkdtemp(prefix='leak-')\n",
+   test_c="import os, sys, time\nopen(os.path.join(os.environ['TMPDIR'], 'big'), 'w').write('y')\ntime.sleep(60)\n",
+   test_d="import sys\nprint('boom: [Errno 28] No space left on device')\nsys.exit(1)\n")
+rc, r, left, e = gate_tmp(d, ("--timeout-s", "3"))
+rows = {f["name"].rsplit("/", 1)[-1]: f for f in r["files"]}
+check("tests tmpdir: a clean test passes; a test leaving an entry in its TMPDIR is uncertified and names it", rc != 0
+      and rows["test_a.py"]["status"] == "passed" and rows["test_b.py"]["status"] == "failed"
+      and "leaked in TMPDIR: leak-" in rows["test_b.py"]["reason"], (rc, r, e))
+check("tests tmpdir: a timeout kill is a failure with the reason, and its scratch is removed", rows["test_c.py"]["status"] == "failed"
+      and "timeout" in rows["test_c.py"]["reason"] and "leaked in TMPDIR: big" in rows["test_c.py"]["reason"], r)
+check("tests tmpdir: the exit status and the tail of the output (errno text) are the reason", rows["test_d.py"]["status"] == "failed"
+      and "exit 1" in rows["test_d.py"]["reason"] and "[Errno 28] No space left on device" in rows["test_d.py"]["reason"], r)
+check("tests tmpdir: after the run the gate's TMPDIR holds no new entry, whatever the outcomes", left == [], left)
 
 d = tmp("tests-jobs")
 # concurrency is proved by a rendezvous, not by the clock: each file leaves a marker and passes only once all three exist,
