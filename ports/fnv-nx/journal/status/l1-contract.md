@@ -113,3 +113,6 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - w15 83053a54: tool-root refusal; objects.json check; archive members judged by linkstrict/objstub. Its variant run on a real root is blocked until the first product root lands (L5). New item: cross-root `outputs`/`uses` keyed by content hash (for L5 w13).
   - New task 4l: w21 (session_01KmtZKTMwsfzMYETernKY5P, claude/fnv-l1-contract-w21) builds the `legal` gate (VA in the image ranges paired with a decomp name is red) and a census per layer. Status: doing.
 - 03:09Z w19 b178859 is green (222.5 s cold, warm 2 s; gate warm with B=2.0). Fixes asked: test determinism checked in the sandbox (testdet), not assumed; test deps declared as oracle `uses`, not taken from the AST or name strings; gate cache keyed by tree. L2 w4-clean 9be67297 is green (261.8 s) and with MERGER.
+- 03:11Z w20 5126d5b0 deletes onexit.c and its set: 278 lines in 49 files → 223 in 40 at 3fb7f9bc→5126d5b0, journal excluded; 121 of the remainder are newlib crt_symbols rows.
+  - platform/crt keeps _onexit, __dllonexit, exit and _amsg_exit (imported by d3dx9_31/38); deleted atexit, doexit, _cexit and _c_exit (no importer).
+  - Next, same class: the xc runner (xc.c, mkxctab, XC1/XC2, dyninit_rewrite's ??__E emission). Verdict pending: envcheck fails in w20's container, so the env setup is rerun.
