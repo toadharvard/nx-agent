@@ -1,8 +1,8 @@
 /* render_hooks.cpp - the platform side of the Direct3D 9 device layer's hook table (render/d3d9/dev/platform_hooks.tsv;
- * declarations: platform/include/fnvnx_render_hooks.h). nxd3d_gpu_call is not here: its definition is
+ * declarations: shim/include/fnvnx_render_hooks.h). nxd3d_gpu_call is not here: its definition is
  * platform/guest/platform_glue.cpp. */
 #include "w32.h"
-#include "../include/fnvnx_render_hooks.h"
+#include "fnvnx_render_hooks.h"
 
 extern "C" {
 HDC fnvnx_gdi_memdc_over_bits(void *mem, int w, int h, int bpp, const uint32_t *masks, size_t pitch);

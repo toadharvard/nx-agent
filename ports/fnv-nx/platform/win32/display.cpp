@@ -21,7 +21,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
-#include "../include/fnvnx_render_hooks.h"
+#include "fnvnx_render_hooks.h"
 
 extern "C" {
 void fnvnx_set_display_size(int w, int h);

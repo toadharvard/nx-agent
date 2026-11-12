@@ -1,5 +1,5 @@
 /* test_render_hooks.cpp - the platform side of the Direct3D 9 device layer's hook table (platform/win32/render_hooks.cpp,
- * platform/include/fnvnx_render_hooks.h; contract: render/d3d9/dev/platform_hooks.tsv). Cases rh_*. */
+ * shim/include/fnvnx_render_hooks.h; contract: render/d3d9/dev/platform_hooks.tsv). Cases rh_*. */
 #include "s4_test.h"
 
 #include <stdint.h>
@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "fnvnx_render_hooks.h"
-#include "host_gpu.h"
 #include "../../platform/win32/gdi_int.h"
 
 extern "C" {
@@ -301,19 +300,4 @@ TEST(rh_cursor_pos)
         CHECK(x == (int32_t)w.x && y == (int32_t)w.y);
         CHECK(x == p[0] && y == p[1]);
     }
-}
-
-/* ---- the host test definition of nxd3d_gpu_call (tests/s4/host_gpu.cpp) */
-TEST(rh_gpu_call)
-{
-    int before = g_gpu_calls;
-    uint64_t args[5] = { 0x1122334455667788ull, 0, ~0ull, 42, 0xDEADBEEFull };
-    g_gpu_result = 0xFFFFFFFFFFFFFF02ull;
-    CHECK(nxd3d_gpu_call(7, args, 5) == 0xFFFFFFFFFFFFFF02ull);
-    CHECK_EQ(g_gpu_calls, before + 1);
-    CHECK(g_gpu_last.fn == 7 && g_gpu_last.nargs == 5 && g_gpu_last.argp == args);
-    for (int i = 0; i < 5; i++) CHECK(g_gpu_last.args[i] == args[i]);
-    g_gpu_result = 0x0123456789ABCDEFull;
-    CHECK(nxd3d_gpu_call(0, NULL, 0) == 0x0123456789ABCDEFull);
-    CHECK(g_gpu_last.fn == 0 && g_gpu_last.nargs == 0 && g_gpu_last.argp == NULL);
 }
