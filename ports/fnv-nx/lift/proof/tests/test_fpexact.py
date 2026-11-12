@@ -405,7 +405,9 @@ class Cli(unittest.TestCase):
         os.makedirs(nx)
         shutil.copytree(LIFT, os.path.join(nx, 'lift'), ignore=skip_cache, copy_function=shutil.copyfile)
         shutil.copytree(fakeext.VERIFY, os.path.join(nx, 'verify'), ignore=skip_cache, copy_function=shutil.copyfile)
-        shutil.copytree(os.path.join(fakeext.VERIFY, '..', 'contract'), os.path.join(nx, 'contract'), ignore=skip_cache, copy_function=shutil.copyfile)
+        for n in os.listdir(os.path.join(fakeext.VERIFY, '..')):       # every sibling tool tree of the real checkout (verify/recipe.py imports ../link, the gates ../contract)
+            if n not in ('lift', 'verify') and os.path.isdir(os.path.join(fakeext.VERIFY, '..', n)) and not n.startswith('.'):
+                shutil.copytree(os.path.join(fakeext.VERIFY, '..', n), os.path.join(nx, n), ignore=skip_cache, copy_function=shutil.copyfile)
         put(os.path.join(nx, 'verify', 'admit.json'), json.dumps({'format': 'fnvnx-admit/1', 'roots': roots}))
         for a in (['init', '-q'], ['add', '-A'], ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'x']):
             subprocess.run(['git', '-C', co] + a, check=True, capture_output=True)

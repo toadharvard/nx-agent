@@ -337,7 +337,9 @@ class Cli(unittest.TestCase):
         for n in os.listdir(fakeext.VERIFY):
             if n not in ('admit.json', '__pycache__', 'tests'):
                 os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, n)), os.path.join(tree, 'verify', n))
-        os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, '..', 'contract')), os.path.join(tree, 'contract'))
+        for n in os.listdir(os.path.join(fakeext.VERIFY, '..')):       # every sibling tool tree of the real checkout (verify/recipe.py imports ../link, formgate ../contract)
+            if n not in ('lift', 'verify') and os.path.isdir(os.path.join(fakeext.VERIFY, '..', n)) and not n.startswith('.'):
+                os.symlink(os.path.abspath(os.path.join(fakeext.VERIFY, '..', n)), os.path.join(tree, n))
         shutil.copyfile(os.path.join(f.repo, 'ports', 'fnv-nx', 'verify', 'admit.json'), os.path.join(tree, 'verify', 'admit.json'))
         if os.path.isdir(os.path.join(f.repo, ROOT)):
             shutil.copytree(os.path.join(f.repo, ROOT), os.path.join(co, ROOT))
