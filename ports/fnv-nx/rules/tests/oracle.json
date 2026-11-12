@@ -1,0 +1,240 @@
+{
+ "format": "fnvnx-oracle/1",
+ "tests": {
+  "test_addrfn1.py": {
+   "references": [
+    {
+     "anchor": "## rules/_msvcsig.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/_popgen.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/core.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/s1_compile.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/s2_bodies.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/rules/_msvcsig.py",
+    "ports/fnv-nx/rules/_popgen.py",
+    "ports/fnv-nx/rules/core.py",
+    "ports/fnv-nx/rules/s1_compile.py",
+    "ports/fnv-nx/rules/s2_bodies.py",
+    "ports/fnv-nx/rules/tests/support.py"
+   ]
+  },
+  "test_asm_rule.py": {
+   "references": [
+    {
+     "anchor": "## rules/core.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/mscgate.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/s8_asm.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/rules/core.py",
+    "ports/fnv-nx/rules/mscgate.py",
+    "ports/fnv-nx/rules/s8_asm.py",
+    "ports/fnv-nx/rules/tests/support.py"
+   ]
+  },
+  "test_harn1.py": {
+   "references": [
+    {
+     "anchor": "## rules/_msvcsig.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/_popgen.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/core.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/s1_compile.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/s2_bodies.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/rules/_msvcsig.py",
+    "ports/fnv-nx/rules/_popgen.py",
+    "ports/fnv-nx/rules/core.py",
+    "ports/fnv-nx/rules/s1_compile.py",
+    "ports/fnv-nx/rules/s2_bodies.py",
+    "ports/fnv-nx/rules/tests/support.py"
+   ]
+  },
+  "test_mscgate.py": {
+   "references": [
+    {
+     "anchor": "## rules/_msvcsig.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/_popgen.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/core.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/dyninit_rewrite.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/mscgate.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/prepare.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/s10_startup.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/s1_compile.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/s2_bodies.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/s8_asm.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/rules/_msvcsig.py",
+    "ports/fnv-nx/rules/_popgen.py",
+    "ports/fnv-nx/rules/core.py",
+    "ports/fnv-nx/rules/dyninit_rewrite.py",
+    "ports/fnv-nx/rules/mscgate.py",
+    "ports/fnv-nx/rules/prepare.py",
+    "ports/fnv-nx/rules/s10_startup.py",
+    "ports/fnv-nx/rules/s1_compile.py",
+    "ports/fnv-nx/rules/s2_bodies.py",
+    "ports/fnv-nx/rules/s8_asm.py",
+    "ports/fnv-nx/rules/tests/support.py"
+   ]
+  },
+  "test_pop2.py": {
+   "references": [
+    {
+     "anchor": "## rules/_msvcsig.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/_popgen.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/core.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/s1_compile.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/s2_bodies.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/rules/_msvcsig.py",
+    "ports/fnv-nx/rules/_popgen.py",
+    "ports/fnv-nx/rules/core.py",
+    "ports/fnv-nx/rules/s1_compile.py",
+    "ports/fnv-nx/rules/s2_bodies.py",
+    "ports/fnv-nx/rules/tests/support.py"
+   ]
+  },
+  "test_prepare_pure.py": {
+   "references": [
+    {
+     "anchor": "## rules/core.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/rules/core.py",
+    "ports/fnv-nx/rules/tests/support.py"
+   ]
+  },
+  "test_rules_text.py": {
+   "references": [
+    {
+     "anchor": "## rules/core.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## rules/s1_compile.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/rules/core.py",
+    "ports/fnv-nx/rules/s1_compile.py",
+    "ports/fnv-nx/rules/tests/support.py"
+   ]
+  }
+ }
+}

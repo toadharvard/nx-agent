@@ -1,6 +1,73 @@
 {
  "format": "fnvnx-oracle/1",
  "tests": {
+  "test_abi.py": {
+   "references": [
+    {
+     "anchor": "## link/abi.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## link/abi_msvcname.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## link/abi_native.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## link/exevft.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/exefacts.py",
+    "ports/fnv-nx/contract/gatefile.py",
+    "ports/fnv-nx/contract/store.py",
+    "ports/fnv-nx/link/abi.py",
+    "ports/fnv-nx/link/abi_msvcname.py",
+    "ports/fnv-nx/link/abi_native.py",
+    "ports/fnv-nx/link/exevft.py",
+    "ports/fnv-nx/link/tests/abi_gaterun.py"
+   ]
+  },
+  "test_abi_msvcname.py": {
+   "references": [
+    {
+     "anchor": "## link/abi_msvcname.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/link/abi_msvcname.py"
+   ]
+  },
+  "test_exevft.py": {
+   "references": [
+    {
+     "anchor": "## link/abi_msvcname.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## link/exevft.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/exefacts.py",
+    "ports/fnv-nx/contract/store.py",
+    "ports/fnv-nx/link/abi_msvcname.py",
+    "ports/fnv-nx/link/exevft.py",
+    "ports/fnv-nx/link/tests/abi_fixture.py"
+   ]
+  },
   "test_gate_abs.py": {
    "references": [
     {
@@ -23,6 +90,111 @@
    ],
    "subject": [
     "ports/fnv-nx/link/gate_disp.py"
+   ]
+  },
+  "test_thisadj.py": {
+   "references": [
+    {
+     "anchor": "## link/abi_msvcname.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## link/abi_native.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## link/exevft.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## link/thisadj.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/exefacts.py",
+    "ports/fnv-nx/contract/gatefile.py",
+    "ports/fnv-nx/contract/store.py",
+    "ports/fnv-nx/link/abi_msvcname.py",
+    "ports/fnv-nx/link/abi_native.py",
+    "ports/fnv-nx/link/exevft.py",
+    "ports/fnv-nx/link/tests/abi_fixture.py",
+    "ports/fnv-nx/link/tests/abi_gaterun.py",
+    "ports/fnv-nx/link/thisadj.py"
+   ]
+  },
+  "test_vslots.py": {
+   "references": [
+    {
+     "anchor": "## link/abi_msvcname.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## link/abi_native.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## link/exevft.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## link/vslots.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/exefacts.py",
+    "ports/fnv-nx/contract/gatefile.py",
+    "ports/fnv-nx/contract/store.py",
+    "ports/fnv-nx/link/abi_msvcname.py",
+    "ports/fnv-nx/link/abi_native.py",
+    "ports/fnv-nx/link/exevft.py",
+    "ports/fnv-nx/link/tests/abi_fixture.py",
+    "ports/fnv-nx/link/tests/abi_gaterun.py",
+    "ports/fnv-nx/link/vslots.py"
+   ]
+  },
+  "test_vtables.py": {
+   "references": [
+    {
+     "anchor": "## link/abi_msvcname.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## link/abi_native.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## link/exevft.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## link/vtables.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/exefacts.py",
+    "ports/fnv-nx/contract/gatefile.py",
+    "ports/fnv-nx/contract/store.py",
+    "ports/fnv-nx/link/abi_msvcname.py",
+    "ports/fnv-nx/link/abi_native.py",
+    "ports/fnv-nx/link/exevft.py",
+    "ports/fnv-nx/link/tests/abi_fixture.py",
+    "ports/fnv-nx/link/tests/abi_gaterun.py",
+    "ports/fnv-nx/link/vtables.py"
    ]
   }
  }

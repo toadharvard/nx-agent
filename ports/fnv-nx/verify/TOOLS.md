@@ -643,6 +643,428 @@ the extra table keys (+ the item `table_id` when both files carry one), certifie
 `<key as 8 hex digits>:<reason>`.  Counts only on stdout.  Exit status 1 when the gate is red.
 ```
 
+## link/abi.py
+
+```text
+abi - gate `abi`: a reference and the definition it binds to have one calling contract on x86 and on AArch64 (L2 SOURCE, ABI1).
+
+    abi.py --obj obj.json                                         writes $GATE_OUT/abi.json, exit 0 iff green
+    abi.py --decl REF_MSVC_NAME DEF_MSVC_NAME                     prints the verdict of one pair (exit 0 iff equal contracts)
+
+RULE.  The Itanium symbol binds a reference in one object to the definition in another by name alone, and Itanium names carry neither the calling
+convention nor the return type.  The MSVC names the plugin writes into `.fnvnx.sympair` do.  For a symbol S with a definition row (the
+canonical definition: the first `def` row in object order) every other row of S (each `ref`, each further `def`) must have the same CONTRACT:
+  contract(name) = ( x86 locations: the (class, location) of every parameter, `this` first, a hidden result pointer for an aggregate result;
+                     x86 stack bytes the callee pops (symbolic over the classes);  x86 result location;
+                     AAPCS64 locations of the same parameters;  AAPCS64 result location )
+  parameter classes (abi_msvcname types): I8 B8(bool) I16 I32(int, long, enum) I64 P(pointer, reference, function pointer) MP(pointer to
+  member function) F32 F64 F80 AGG:<qualified name> (class, struct, union by value: identified by its MSVC qualified name, sizes unknown).
+  x86 (MSVC): thiscall `this` in ecx; fastcall the first two integer/pointer parameters of at most 4 bytes in ecx, edx; everything else on
+  the stack in 4-byte words (8 for 64-bit values; an aggregate of unknown size keeps all later offsets symbolic); stdcall, thiscall, fastcall
+  callee pops, cdecl caller pops.  AAPCS64: integers and pointers in x0..x7, floating point in v0..v7, then 8-byte slots; MP takes two registers.
+Certified iff the two contracts are equal; the verdict names the first differing component (cc/this, parameter count, parameter class,
+result, pop, variadic, aggregate, undecoded name).  Equal contracts mean every argument and the result travel in the same place on both machines,
+so no bridge exists to be generated: where the legacy model produced `bridge` / `manual` / `x86-inconsistent`, the pair is uncertified.
+UNIVERSE.  Every row that is a ref or a non-canonical def of a symbol that has a definition row somewhere in obj.json and is a function-kind row
+(func, ctor.*, dtor.*) with an MSVC name, or an `unnamed:` row; item id `object:symbol`.  An `unnamed:` row, or a row of a symbol whose canonical
+definition has no MSVC name, is uncertified (no contract can be compared).  Symbols with no definition row at all are linkstrict's business (class 3).  Rows of kind
+thunk/vtable/gcc/internal/data are outside (no function contract of the exe).
+PROOF.  Parameters are placed by the calling convention as a function of the ordered class list, so equal class lists under equal conventions
+give equal locations; the classes are read from the MSVC grammar (abi_msvcname), where equal types have equal text.  A by-value aggregate is
+the same type iff its qualified name is equal (provided by gate odr: equal `.fnvnx.layout` across all units per qualified name), so equal names pass the same bytes whatever the size.  A pair with differing aggregates,
+a variadic side, a bool/char result difference (GCC reads bit 0 of a bool) or an unparsable name is not proven and is uncertified.
+INPUT FACTS.  The MSVC names are the plugin's `.fnvnx.sympair` names, verified against cl's symbol tables by gate names; the same
+aggregate name is the same type in two units: provided by gate odr (equal `.fnvnx.layout` across all units per name).  Rule: MSVC returns every
+aggregate through a hidden pointer (small POD returned in eax:edx is not modelled: equal aggregate names make that irrelevant, differing ones
+are uncertified anyway).  Dropped from the legacy tool: the bridge generator (`emit_bridge`, `sequentialize`: a repair), `bool_from_int`,
+`ret_carry`, narrow-extension moves, `varargs_check` with `va_reads` from a run (`vacall`), `ecx_unused` from the pristine object, the
+source-text type spelling (`classify` by regex over declaration text), and `describe_shape` strings.
+```
+
+## link/abi_msvcname.py
+
+```text
+abi_msvcname - the Microsoft Visual C++ decorated-name grammar, parsed into the declaration it encodes (L2 SOURCE, ABI1).
+
+    parse(name) -> Decl                 ValueError('<name>: <what>') when the name is not in the grammar subset below
+    parse_qualified_type_name(text)     '.?AVFoo@Bar@@' (a TypeDescriptor name, as RTTI stores it) -> ('class'|'struct'|'union', qualified)
+
+This is a PARSE of a defined format (MSVC's decoration, VC 2008 era with the later `$$Q` and `_N`/`_W` letters), not a
+guess from the spelling: every character is consumed by a production or the name is rejected.  Nothing in it reads a
+word of the name as a hint; the identifiers are opaque fragments that are compared whole.
+
+What a name encodes (the facts the ABI rule needs):
+  * the scope, as a tuple of fragments, innermost LAST (`?f@Bar@Foo@@` -> ('Foo', 'Bar', 'f')); a fragment is a string or
+    ('tpl', name, args) for a template instance, ('op', code) for an operator / ctor / dtor name, ('anon',) for an
+    anonymous namespace;
+  * for a function: the access/kind letter (`member`, `static`, `virtual`, `thunk`), the `this` qualifiers, the calling
+    convention, the return type (None for a constructor, destructor), the parameter types, `varargs`;
+  * types as nested tuples: ('b', 'int') builtin; ('ptr', '*'|'&'|'&&', cv, pointee) pointer or reference (cv of the pointer
+    itself; the pointee carries its own); ('tag', 'class'|'struct'|'union'|'enum', qualified); ('arr', dims, element);
+    ('fn', cc, ret, params, varargs) a function type (only behind a pointer); ('memfn', qualified-class, cv, fn) a pointer
+    to member function.
+Back-references follow the grammar: a digit in a name position is the n-th simple name memorised so far (at most 10), a
+digit in a parameter position is the n-th parameter type memorised (at most 10; a type is memorised when its decoration is
+longer than one character).  A template argument list has its own name table, seeded with the template's own name.
+
+Supported: free and member functions (all access letters, static, virtual, `W`/`G`/`O` this-adjustor thunks), constructors,
+destructors, operators (kept as ('op', code)), data symbols (kind 'data', no further parse).  Template arguments: types,
+`$0` integer constants and `$D` template-parameter indexes.  Everything else (`$1` pointer constants, `$$V`, local scope
+`?1?`, `__ptr64` markers, ...) is a ValueError: the caller treats such a name as undecided, never as passed.
+Pure: str in, tuple out.
+```
+
+## link/abi_native.py
+
+```text
+abi_native - the join of the native vtable facts with the exe's vftables, shared by the gates thisadj, vslots and vtables (L2 SOURCE, ABI1).
+
+Inputs (all L1 fact bases, read through contract/store.py; nothing is parsed a second time here):
+  obj    store kind `obj`  (contract/objfacts.py): per object `ztv` {`_ZTV` symbol: [(address point, d, [slot symbol | None])]}
+         (d = minus the Itanium offset-to-top), `sympair` and `vtpair` rows (contract/l2sections.py);
+  bind   store kind `bind` (contract/bind.py): `sym` {(object, symbol): exe address}, `vt` {(object, _ZTV, address point): vftable address};
+  exe    the PE image (contract/exefacts.Image) -> exevft.scan (RTTI vftables) and exevft.chain (adjustor thunks).
+
+  groups(obj, bind)               -> [Point] one per address point of every `_ZTV` of every object, sorted; `claim` is
+                                     'named' (the plugin's vtpair row names a `??_7`), 'unnamed' (the row says `unnamed:<reason>`: the
+                                     compiler states there is no MSVC twin) or 'missing' (no vtpair row for the address point)
+  role(symbol)                    -> ('fn',) | ('thunk', adj, target symbol) | ('unsupported', why): the Itanium special-name grammar
+                                     `_ZT h <nv-offset> _ <encoding>` (call-offset `h`, offset `n<digits>` = negative); the thunk's callee
+                                     is `_Z<encoding>` by definition of the production.  `adj` = minus the nv-offset: this_callee = this - adj.
+                                     `_ZTv` (virtual-base thunk: the adjustment is read from the vtable at run time) and `_ZTc` (covariant)
+                                     are 'unsupported'.
+  exe_index(obj, point)           -> ([exe slot index k(j)], [kind per slot]) under the minus-one rule, or ValueError(reason)
+  kind_of(obj, object, symbol)    -> the sympair kind of the symbol's row in that object, '' when it has none
+RULE for the slot correspondence (the minus-one rule, ARCHITECTURE D22/D26, made a function of compiler facts): MSVC has one deleting
+destructor slot where the Itanium vtable has D1 then D0.  A slot whose symbol (the thunk's callee for a thunk) has sympair kind `dtor.d0` shares
+the exe slot of the slot before it, which must have kind `dtor.d1`; so k(j) = j - #(d0 slots at or before j).  The kinds are the
+plugin's own statements about the symbols, not names.  Open (REMOVE, owner L2): the plugin's kinds are right; removed by gate names against cl objects and gate vslots against the exe's vftables.
+```
+
+## link/exevft.py
+
+```text
+exevft - the vftables of the player's exe with their RTTI class hierarchy, and the exact adjustor thunks in their slots (L2 SOURCE, ABI1).
+
+    exevft.py --exe FalloutNV.exe [--out exevft.json]
+
+RULE.  An MSVC vftable is the word run that follows a relocated pointer to a complete object locator (COL).  The vftables
+and their slot runs are exefacts.rtti_vftables (L1's reader, reused, not re-parsed here).  This module adds what the COL
+points at and what the slots hold:
+  * hierarchy(img, col): COL (signature 0, vfptr offset, TypeDescriptor, ClassHierarchyDescriptor) -> the class's bases
+    [(TypeDescriptor name, mdisp, pdisp)] in the order of the BaseClassArray.  Checked as a structure: hierarchy signature
+    0, 1..127 bases, every BaseClassDescriptor inside the image with a TypeDescriptor name `.?A..`, the first base is the
+    class itself.  A violation is a ValueError naming the COL (the exe does not have the documented RTTI layout), never a
+    skipped entry.
+  * thunk(img, a): the function at `a` is an MSVC adjustor thunk iff its decoded instruction sequence is exactly
+    `[sub|add ecx, imm | lea ecx,[ecx+imm] | sub|add dword ptr [esp+4], imm]  jmp rel32`.  The instructions are decoded
+    (capstone) and their semantics read (ecx or the stacked this moves by `adj`, then a direct tail jump), so every
+    encoding of these instructions is one case.  Result Thunk(adj, target, stacked) with `this_new = this - adj`; a plain
+    `jmp` has adj 0.  Anything else is None: "not an exact thunk", which is a fact of the function, not a failure.
+  * chain(img, a): the thunks followed to a non-thunk: (total adj, final target, thunks passed); a cycle is a ValueError.
+  * entry_offsets(vfts): {function address: sorted COL offsets of every vftable that holds it directly}.
+UNIVERSE of the CLI: every vftable the exe's RTTI yields; each is emitted with name, COL offset, bases and, per slot, the
+address, its thunk chain (or null).  Output is canonical JSON (sorted keys, LF), a function of the exe bytes only.
+PROOF.  The hierarchy and thunk statements are decodes of bytes by the documented layouts and by instruction semantics;
+no name, string or count decides anything.
+INPUT FACT: the exe is a PE32 with COLs in .rdata and TypeDescriptors in .data (exefacts's precondition, read from the PE section table).
+Open (REMOVE, owner L1 exefacts): completeness of the RTTI scan is not yet a checked fact.  Open (REMOVE, owner L2): agreement of two
+independent decoders on every instruction of the set; after first frame.  Dropped from the legacy tool (heuristic or per-item): the D1/D0 slot-name
+regexes, the deleting-destructor byte patterns (`_FLAGS_TEST`), `delete_this`, `leaf_constant`, `string_at`, the vftable
+getter walker (GETTER_MAX), the constructor "last store wins" rule (exefacts records every vptr store in order), hard-coded
+TEXT/DATA ranges (the section table is used), the JSON cache keyed on mtime.
+```
+
+## link/thisadj.py
+
+```text
+thisadj - gate `thisadj`: the `this` adjustment a native vtable slot applies equals the one the exe's vftable entry implies (L2 SOURCE, ABI1).
+
+    thisadj.py --exe FalloutNV.exe --obj obj.json --bind bind.json        writes $GATE_OUT/thisadj.json, exit 0 iff green
+
+BACKGROUND.  MSVC enters a virtual function with `this` at the subobject it was compiled for; a vftable at COL offset d reaches it directly
+(the function adjusts for itself) or through `sub ecx, n; jmp` adjustor thunks.  GCC compiles every function for its own class's subobject and
+reaches it from a secondary vtable through `_ZThn<n>_` thunks.  A native slot and the exe slot it stands for must deliver the same pointer.
+RULE.  Per slot (abi_native.slot_facts; the slot is related to an exe slot k):
+  native adjustment  n_native = 0 for a function, `adj` of a non-virtual thunk (the Itanium call-offset: this_callee = this - adj);
+  exe adjustment     n_exe = the sum of the exact thunks on the exe slot's chain (exevft.chain) + e(T), where T is the chain's final target and
+                     e(T) is T's own entry convention: the COL offsets D(T) of the vftables that hold T directly (exevft.entry_offsets)
+                       0 in D(T)       -> e = 0   (T is entered with this at its class's subobject)
+                       D(T) = {d'}, d' > 0 -> e = d'  (T is a secondary entry: MSVC compiled it for the subobject at d')
+                       otherwise (T is never held directly, or held at several secondary offsets without a primary one) -> undecidable.
+  Certified iff n_native == n_exe.  Undecidable e(T) is UNCERTIFIED (reason `entry convention of T undecidable`), a virtual-base or covariant
+  thunk is UNCERTIFIED, never passed.  The slots of a complete/deleting destructor pair carry the same n_exe (one exe slot).
+UNIVERSE.  Every slot of every address point whose vtpair claim is `named` (same universe as gate `vslots`); slots of unbound or inconsistent
+points are uncertified with the structural reason.
+PROOF.  Both sides compute "this_callee - this_vtable_subobject" for the same callee: natively it is the thunk's call-offset by the ABI definition;
+in the exe it is the decoded thunk adjustments, plus the displacement of the subobject T expects relative to the vftable-class subobject, which is
+d' when T is entered at its only secondary vftable and 0 when it also stands in a primary one.  Equal numbers mean the same pointer reaches
+the same body.
+Open (no owner assigned, reported to the orchestrator): that a function has one entry convention, read from the vftables that hold it
+directly (MSVC's secondary-entry scheme), is not derivable from the COL offsets alone; the gate decides only the cases above and leaves the
+rest uncertified.  Open (REMOVE, owner L2): the plugin's kinds (abi_native), removed by gate names against cl objects and gate vslots against the exe's
+vftables.  Input fact: N1 pins (the n1 certificate) certify the bind addresses.  Dropped from the legacy tool: `secondary_entries` taking min() of several offsets, the `_ZThn` name
+construction by string splicing (`thunk_name`), the symbol-to-vtable search by parsing the object a second time (`slot_otts`).
+```
+
+## link/vslots.py
+
+```text
+vslots - gate `vslots`: every slot of a native vtable that claims an MSVC twin reaches the function the exe's vftable slot reaches (L2 SOURCE, ABI1).
+
+    vslots.py --exe FalloutNV.exe --obj obj.json --bind bind.json        writes $GATE_OUT/vslots.json, exit 0 iff green
+
+RULE.  For an address point bound to an exe vftable V (abi_native, gate `vtables` certifies the point itself) and its native slot j with exe
+slot k = k(j) (the minus-one rule from the plugin's destructor kinds, abi_native.exe_index):
+  S1  the slot's symbol is a function or a non-virtual this-adjusting thunk (Itanium special-name grammar); its callee c is the symbol
+      itself or the thunk's `_Z<encoding>`;
+  S2  c has an exe address a (the L1 bind: sympair name -> N1 pin);
+  S3  the exe slot word w follows exact adjustor thunks (exevft.chain) to a final target T, and a == T.
+  A native complete destructor (kind dtor.d1) is related to the exe slot through its deleting destructor, the next slot (kind dtor.d0): the
+  slot of kind dtor.d1 is certified iff its D0 partner is (same k), and the D0 slot is judged by S1-S3.
+UNIVERSE.  Every slot of every address point whose vtpair claim is `named`.  A slot of an unbound or inconsistent point is uncertified
+(the structural reason is the item's reason), never skipped.  A slot with no relocation (zero word), a virtual-base or covariant thunk,
+a callee without an exe address (a native-only function, a pure-virtual stub) is uncertified: the exe slot holds a real function, and
+nothing in the facts relates the native symbol to it.
+PROOF.  S3 is an equality of two addresses, the exe's by following only thunks whose bytes decode to `this -= n; jmp` (so the call
+reaches T with the same arguments), the native one pinned by N1 (the pristine MSVC body of c equals the exe bytes at a).  Hence calling slot
+j of the native vtable runs the code of the function at exe slot k, up to the this-adjustment, which gate `thisadj` certifies.
+Open (REMOVE, owner L2): the plugin's kinds are right; removed by gate names against cl objects and gate vslots against the exe's vftables.
+Input fact: the N1 pins (n1 certificate) certify the bind addresses.  What the code checks for a destructor: the slot's symbol of kind dtor.d0
+(the slot after the one of kind dtor.d1, abi_native.exe_index) is judged by S1-S3 with the address the bind gives for its callee, and the
+kind dtor.d1 slot is certified iff that partner is.  The code does not read the MSVC name of the symbol: which MSVC function (the sdd rule of
+toolchain/sdd/fnvnx_sdd.cc puts `??_E`, the vector deleting destructor, in the one slot) that address is, is the bind's.  Dropped from the legacy tool:
+pairing by "signature" with overloads in reverse declaration order, the position rule for the rest, the decomp-unit joins
+(`units.json`), the pristine-object slot ranking, and the stubs that call through the image slot (all heuristics or repairs).
+```
+
+## link/vtables.py
+
+```text
+vtables - gate `vtables`: every native vtable address point that claims an MSVC twin has the exe's vftable structure (L2 SOURCE, ABI1).
+
+    vtables.py --exe FalloutNV.exe --obj obj.json --bind bind.json        writes $GATE_OUT/vtables.json, exit 0 iff green
+
+RULE.  A native `_ZTV` group is the Itanium image of a class's vtables; the exe holds the MSVC image.  They describe the same class
+iff, for the group of an object O and its address points (ap, d):
+  V1  every address point has a vtpair row (the plugin says something about every one), and a `named` row is bound to an exe vftable
+      address by the L1 bind (vtpair name -> N1 pin);
+  V2  that address is an RTTI vftable of the exe (exevft.scan);
+  V3  the three offsets agree: d (minus the offset-to-top of the native group), the vtpair row's vfptr offset, and the COL offset of
+      the exe vftable;
+  V4  slot count: the native point has exactly (exe slots + number of deleting destructors) slots (abi_native.exe_index: the minus-one
+      rule from the plugin's destructor kinds); a destructor pair that is not D1,D0 adjacent is a violation;
+  V5  completeness: the exe vftables of the class (same RTTI TypeDescriptor name as the vftable bound at d = 0) are exactly the vftables
+      bound by the named address points of the group - no exe vftable of the class is left unbound, none is bound twice.
+UNIVERSE.  Every address point of every `_ZTV` of every object of obj.json whose claim is `named` or `missing` (a `missing` one is
+uncertified: the plugin must state a twin or its absence for every address point).  Address points whose row says `unnamed:<reason>`
+are outside the universe: the compiler asserts the class has no MSVC vftable (Open, REMOVE, owner L2: the plugin's kinds), they are counted in `detail`.
+PROOF.  V1-V5 are equalities between structures read from the PE (RTTI, COL, slot run), from the object (`_ZTV` words and relocations) and
+from the plugin's rows; each is decided on those structures alone.  If all five hold for every named point of a group, the group has
+the primary and every secondary vftable of the class once, each at the exe's subobject offset and slot count; V5 turns "all named
+points are consistent" into "no vftable is missing" without a list.
+Open (REMOVE, owner L2): unnamed means twinless and the plugin's kinds are right; removed by gate names against cl objects and gate vslots
+against the exe's vftables.  Input fact: the bind addresses are certified by the N1 certificate (n1).  Open (REMOVE, owner L1 exefacts):
+completeness of the RTTI scan is not yet a checked fact (a vftable exefacts's RTTI scan cannot see is not in V5's set).  Classes with
+virtual bases: their COL offsets are not subobject offsets, so such groups are uncertified by V3 or V5 unless the structure agrees as
+written, never passed.
+```
+
+## rules/_msvcsig.py
+
+```text
+_msvcsig.py - the subset of MSVC 2008 decorated function names the S2-bodies call-site rule reads (POP2:
+tools/rules/s2_bodies.py): scopes, member kind, convention, result, parameter codes and the stack words a call pushes.
+A helper module of tools/rules (prepare loads no RULES from a name starting with `_`).
+```
+
+## rules/_popgen.py
+
+```text
+_popgen.py - text helpers of rule POP2 (s2_bodies.py): balanced-paren and argument splitting, receiver chains,
+class-body member declarations, parameter spelling. Pure functions of their text arguments.
+```
+
+## rules/core.py
+
+```text
+prepare.py - derive the port's build tree from a fnv_decomp checkout.
+
+    tools/prepare.py <fnv_decomp checkout> <out tree>
+
+Copies src/ and include/ into <out tree> and applies mechanical, deterministic rewrites (RULES below) that turn
+MSVC/x86-only constructs into portable ones. The decomp checkout is never modified, and the output tree stays local:
+it is derived from the decomp and must not be committed or shared (see docs/ARCHITECTURE.md, "Legal").
+
+Every rule is a function (path, text) -> text, listed in RULES with a short id that the journal refers to.
+Writes <out tree>/prepare_stats.tsv: rule id, files changed, edits.
+```
+
+## rules/dyninit_rewrite.py
+
+```text
+dyninit_rewrite.py - one native function per original dynamic initializer (rule XC1).
+
+MSVC compiled every file-scope object with a dynamic initializer to its own function (`??__E`, in .text$yc,
+called from the CRT table __xc_a..__xc_z) and, for a non-trivial destructor, an atexit thunk (`??__F`, in
+.text$yd) that `??__E` registers. A unit that spells these as plain object definitions tagged with the original
+addresses:
+
+    // @fnv 0x00000010          <- the dynamic initializer
+    // @fnv 0x00000020          <- the atexit destructor, when the type has one
+    T g_obj(g_obj_arg0, g_obj_arg1);
+
+is rewritten so that each initializer is its own extern "C" function named by its address:
+
+    extern T g_obj;
+    // @fnv 0x00000020
+    extern "C" void __fnvnx_dynexit_00000020(void) { fnvnx_dyn_destroy(g_obj); }
+    // @fnv 0x00000010
+    extern "C" void __fnvnx_dyninit_00000010(void) { ::new ((fnvnx_dyn_tag *)(void *)__builtin_addressof(g_obj))
+        T(g_obj_arg0, g_obj_arg1); fnvnx_xc_atexit(__fnvnx_dynexit_00000020); }
+
+The fact the rule rests on: the tag address is the address of a function whose recipe symbol (build/units.json)
+is `??__E...` (kind E) and, for the second tag, `??__F...` (kind F). GCC folds all initializers of a unit into one
+function, so their order relative to other units is lost; a function per initializer lets the startup runner call
+them in the original order. The object itself is no longer defined natively: it lives in the data image and every
+reference binds to its address. A copy of such a definition in a unit that does not own the address (the recipe
+says which unit defines it) becomes a plain extern declaration.
+```
+
+## rules/mscgate.py
+
+```text
+mscgate.py - the dual-compile check of prepare.py (a total check, decided on the preprocessor token stream).
+
+RULE. A conditional group whose condition mentions `_MSC_VER` and that a prepare rule introduced is permitted only in
+the form
+    #ifdef _MSC_VER   (or `#if defined(_MSC_VER)`, `#if defined _MSC_VER`; or, with the branches swapped,
+    ...cl text...      `#ifndef _MSC_VER`, `#if !defined(_MSC_VER)`, `#if !defined _MSC_VER`)
+    #else
+    ...GCC text...     which contains the empty GNU asm statement `__asm__ ( "" )` (the ASM rule: the N3 verdict of the
+    #endif             function is `asm`) or a call `fnvnx_lifted (` of a declared-only lifted function (verdict lifted)
+Every other introduced group that mentions `_MSC_VER` (a branch missing, an `#elif`, a condition that is not one of the six
+spellings above, a GCC branch without the asm or lifted token form) is a violation: a function whose cl text and GCC text
+differ is not the function the N1/N2 gates certify, so the class is closed by the gates (the function is lifted), not by
+text for GCC. Conditionals present in the decomp's input are passed through unchanged and are not judged.
+
+IDENTIFICATION of the input's groups: by token stream, not by spelling in a line. A file is lexed to its preprocessor
+tokens (comments, line splices, string and character literals handled); a group is identified by its header: the
+directive name and condition tokens. For every header h, among the output's groups with header h at most as many may be
+of a non-permitted form as the input has groups with header h (the others were introduced by a rule). Assumption: a rule
+does not delete a decomp conditional and create a non-permitted one with the same header (the per-rule check in
+check_rule_edit sees every edit of every rule at the moment it is made and does not rest on this assumption).
+```
+
+## rules/prepare.py
+
+```text
+prepare.py - derive the port's source tree from a decompilation checkout (stage tool, a pure function of its inputs).
+
+    prepare.py <decomp root> <out dir> --win32-header FILE
+
+Inputs (everything the output depends on, nothing else is read; no environment, no clock):
+  <decomp root>     the checkout: src/ include/ build/ third_party/ (build/units.json is the recipe the rules read)
+  --win32-header    the target's Win32 shim header (text): the names and prototypes DECL1 / CALL1 / SDK1 rest on
+
+Output: <out dir> holds src/ and include/ (every .cpp .h .hpp .inl .c file rewritten by the rules of README.md, the
+other files copied), build/ and third_party/ (copied, then the POST hooks of the rules edit build/units.json) and
+prepare_stats.tsv (rule id, files changed, edits). Files are written in sorted order; the same inputs give the same bytes.
+
+Every rule is a function (path, text, stats) -> text, listed in the order they run: the core rules (core.py), then
+XC1 (s10_startup), the compile rules (s1_compile), the body rules (s2_bodies) and the ASM rule (s8_asm). A rule counts
+its edits in stats[<rule id>]. After the tree is written the dual-compile check (mscgate.py) runs over every
+rewritten file and fails the run when a rule introduced a `_MSC_VER` conditional that is not of the permitted form.
+```
+
+## rules/s10_startup.py
+
+```text
+s10_startup.py - rule XC1 (dyninit_rewrite.py): per-initializer functions for the dynamic-initializer objects.
+```
+
+## rules/s1_compile.py
+
+```text
+s1_compile.py - prepare rules of stream S1-compile (make every unit parse for AArch64 ILP32 with GCC).
+
+Each rule is fn(path, text, stats) -> text (see tools/rules/README.md); ids are cited in the journal.
+```
+
+## rules/s2_bodies.py
+
+```text
+Prepare rules of stream S2-bodies (tools/rules/README.md).
+
+HARN1 - the decomp's harness-only code gets internal linkage.
+
+The decomp keeps byte-matching harnesses next to the matched code: convention callers that exist only so MSVC emits
+a call with the right registers (`int stub_caller() { return FUN_x(stub_a(), stub_b()); }`, `void wblk_caller()`,
+`extern "C" void Ent(void)`), whose stubs are declared and never defined. No exe function is theirs and
+nothing calls them, but as external definitions GCC emits them, and their stub references become trap stubs at
+link time (bodycause: `unresolved`, `c function harness-only`; the variables they read: `c variable harness-only`).
+
+HARN1 makes such a definition `static`. GCC then drops it when nothing in the unit uses it, together with its
+references. Gates: a free function definition at namespace scope (only namespaces and extern "C" blocks around it),
+with an unqualified name (no member, no out-of-line `C::f`); not virtual, inline, static, a template, a friend or an
+operator; untagged (no `// @fnv` above it, no FNVNX_KEEP); and its name is referenced by no unit: no MSVC name in
+any unit's units.json `symbols` or `functions` has it as its identifier, and no other unit declares it without
+defining it (a variant copy that calls the harness or takes its address through its own prototype). A prototype of the name in the file before
+the definition, at namespace scope, becomes `static` too; any other mention before it (a block-scope declaration, a
+friend, a use in a member body) leaves the definition alone. `extern "C"` on the definition or its prototypes goes:
+GCC gives an extern "C" function external linkage even in an anonymous namespace, and an internal function's
+language linkage changes nothing (no other unit names it). Line numbers stay.
+```
+
+## rules/s8_asm.py
+
+```text
+s8_asm.py - prepare rules for MSVC x86 inline assembly (docs/ASM.md).
+
+Rule ASM-Pi: every `__asm` construct of a source or header is kept verbatim for cl and replaced for GCC by one empty
+GNU asm statement, so that the N3 plugin sees a GIMPLE_ASM and gives the function the verdict `asm` (its body is
+lifted from the exe's bytes). No pattern table, no translation to C. Output form, one per span:
+
+    #ifdef _MSC_VER
+    <the pristine logical lines of the span>
+    #else
+    <the same lines, each construct replaced by  __asm__("");   (+ the marker comment)>
+    #endif
+    #line <original number of the next line>
+
+Grammar implemented (MSVC "Inline Assembler" syntax, __asm keyword; `_asm` and `asm` are not used by the tree and
+are not recognised; the token is looked for only in code, not in comments, string or character literals):
+  construct    := block | run
+  block        := "__asm" ws* "{" asm-body "}"      the "{" is on the line of "__asm"; the body ends at the matching
+                  "}" (nesting counted); inside it nested "__asm" are ordinary body text
+  run          := stmt+ ; stmt := "__asm" instruction ; consecutive stmts separated only by white space (newlines and
+                  line splices included) form one run, rewritten as one asm statement
+  stmt extent  := from "__asm" to the first of: end of the logical line (newline not preceded by a backslash), the
+                  next "__asm" token, a "}" (not consumed); a ";" starts an asm comment up to the end of the
+                  physical line (a "}" or "__asm" inside it does not count); "//" and "/* */" comments are part of
+                  the extent as well
+  span         := the logical lines (backslash-newline joins physical lines) that contain constructs; constructs
+                  sharing a logical line are one span. A span whose first logical line is a #define is wrapped as a
+                  whole: the pristine #define under _MSC_VER, the #define with asm parts replaced under #else (a
+                  conditional cannot be placed inside a replacement list). Any other directive line that holds or
+                  lies inside a construct cannot be wrapped: ASMError (file:line).
+Total by construction: gcc_view() (the text as GCC sees it, _MSC_VER undefined) is checked for `__asm` after the
+rewrite; a leftover or an unparsable construct raises ASMError, there is no silent path.
+
+Lexical note: the keyword "__asm" is 5 characters; the white space (and splices) before a "{" or an instruction are
+skipped from the character right after it, so "__asm{" is a block like "__asm {" and "__asm
+" ends a statement form
+at once (an empty statement), never one character later.
+Totality properties (totality_violations(), checked by tests/s8 on every real file with __asm), by the tokens() lexer:
+  T1 every construct is brace neutral (its tokens, `;` asm comments removed, have net depth 0 and never go below 0),
+     so the pristine text outside its constructs has the brace profile of the pristine text; T2 the cl view of the output has the token stream of the pristine text; T3 the GCC
+     view has the token stream of the pristine text with each construct replaced by `__asm__ ( "" ) ;`, so it holds no
+     token that exists only inside a construct, and it is brace balanced like the pristine text outside them.
+
+__rdtsc() (ASM4) is not inline asm: calls and the decomp's prototypes stay; GCC gets a compatible declaration
+from shim/include/fnvnx_asm.h.
+```
+
 ## verify/a64access.cc
 
 ```text
