@@ -95,3 +95,10 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
   - Phase 2 follows: the 8 key sites become calls into it, the 5 copies are deleted, and NxShaderD3D.hash becomes key[32] in one ABI commit with L6A.
   - Asked L1: one root for two targets, and the gate clause for a renamed second copy.
 - 03:22Z Key ABI diff sent to L6A: NxShaderD3D.hash (u64) becomes key[32] = sha256(bytecode); the struct goes from 40 to 64 bytes, with offset asserts. dk takes the NXSP v2 D-table with byte compare (no sha256 needed); gl4 links lib/sha256. lib/sha256 review is L4 item 14 (session_01KmtZKUcrakBqKb1mC8iXp4): one definition across roots, the FIPS/CAVP vectors, guest/host/ASan variants, and a warm run of 0 stages.
+- 03:21Z L6A accepted the key diff (offsets 0/8/12/16/48/56/60, 64 bytes).
+  - The commit triple:
+    - ours: w5 phase 2 (render/d3d9, translator, shcache, Python), which does not touch render/backend;
+    - L6A w4: the nxgpu4_shader.h header plus the dk D-table;
+    - L6A w6: gl4_d3dshader.c:51 becomes fnvnx_sha256 + memcmp.
+  - Each side merges the other's.
+  - Blockers: lib/sha256 (L4 intake of w5 phase 1) and the L1 w15 variants/link.roots. onedef (L1 w15) catches renamed copies by exact equality of normalized bytes.
