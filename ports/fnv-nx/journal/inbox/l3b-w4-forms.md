@@ -103,3 +103,21 @@ Selector hunk e2975877: dsl.XIN += sel_es/cs/ss/ds/fs/gs (16 bit, SEG_* order); 
 32-bit slot keeps its upper half, the Form is written from the model); prover: a Form that reads sel_* runs isla without the uniform seg_visibles literal (the six selectors are free, isla prints (_ vec v0..v5), element i = SEG_* i). No IR change
 (IR sha 70c8dc39 unchanged, existing certificates untouched). Proved: 06 0e 16 1e 0fa0 0fa8 661e. pop sreg / mov sreg are NOT in it: they write a selector (and, for FS, the base); the Form has no selector output slot (needs an output
 in dsl.Form and f_dsl: L3a's side) and the model does not implement them.
+
+## 10. F2, G1, G3 (w4, 2026-11-12)
+
+**F2 (cb32e9e4 on claude/fnv-l3b-lift-w4-l3a, 95089468 on claude/fnv-l3b-lift-w4).** Every Form memory access goes through one of the
+address functions of forms.py: `ea` (explicit operand: effective segment = last prefix, a16), `addoff`, `ssa` (stack), `esa` (string destination,
+ES flat), `dsa` (string source, XLAT: DS default, override gives the fs/gs base). `mload`/`mstore` refuse an address made by none of them;
+tests/test_forms_mem.py also checks by AST that no forms_*.py except forms.py calls `load` or `.store`. shape_sha over all 19,817 int keys:
+77 changed (bound 72, arpl 2, fs/gs string/xlat 3), 19,740 identical.
+
+**G3 (cmpsb a6, cmpsd a7).** Class: operand order of the model. ACL2 8.5 `x86-cmps` calls `(gpr-arith/logic-spec size OP-SUB dst src)` with
+dst = ES:EDI, so the flags are those of [edi] - [esi]; master (string.lisp:443) calls it with src1 src2 = [esi] - [edi], the SDM order and ours.
+Swapping the Form proves both, so the Form is right. Fix class: a transcription patch of the master hunk (ASM-009), IR-changing.
+
+**G1 (rol|m32,imm|c1, rol|m8,r8|d2, sar|m8,r8|d2 x2, sar|m8,imm|c0 x2).** Not memory-specific: the register forms of the same encodings give the same
+FAILED(model-defect) (c1c000, d2c0, c0c000 reproduce it). The disagreement lies in the declared regions of defects.py: `rot-of-count0` (rol/ror at masked count 0:
+the 8.5 model leaves OF undefined, the SDM and the Form leave all flags unchanged) and `sar-cf-big-count` (CF at count >= size). Master fixes rol/ror
+(rotates-spec.lisp:284-288 and :660-664, count 0 -> input flags). So the class is a model defect whose fix is a transcription patch of master's
+rotates-spec.lisp; the Form is not touched. These shapes carry FAILED(model-defect), not a certificate, until that patch is in the IR.
