@@ -291,3 +291,12 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
         - link_failed is a static predicate on the bytecode's forms, checked at CreateShader.
     - w3b classifies the 179 compile-fail rows.
     - L1 is building one integration head, w16-int; the render/d3d9 root goes on top of it with L2 00576a10.
+- 04:55Z
+    - Merged farm-env 821f2764: the probe ran on the pinned Mesa 25.2.8-0ubuntu0.24.04.4 (mesa-libgallium pinned in ENV_PIN; envprobe-bin 9dc10377, sm-linkprobe fbe0c925). sm_link.tsv is unchanged (517ded17).
+    - Merged w3b 8c4b3f47: the Mesa citations are on the Ubuntu source package (.dsc 87032804…). No debian patch touches a cited file.
+    - Merged w5 191cc35c: op_cover ids follow d3d9total ("sm:<stage:form>").
+    - L1 accepted:
+        - msdocs-sm as an external;
+        - wined3d shader_sm1.c as a second syntax source (w5 regenerates);
+        - the trap-body objstub class (L1 w20, `error_abi` in build.json).
+    - The farm holds for the GLSL compile check of w1b's 9 ops.
