@@ -78,3 +78,39 @@ Package coverage of the owner's gamedata (fnv-nx-build gamedata/*):
 - NOT scanned (large content-typed BSAs, each hundreds of MB; branches not fetched): data/Fallout_-_Meshes.bsa, Textures, Textures2, Sound, Voices1, Music. Their BSA content flags and the game's loader declare meshes/textures/audio, but that is not a scan: open item (a header name scan of these needs the first part of each only).
 - not bytecode containers for this census: FalloutNV.esm/_lang.esp (records), exe (D3DX call sites: w18's callcensus), redist (d3dx9_31/38 dlls), gog, captures (nxd9 D3D9 streams of runs; could hold run-time created shaders, not decoded here).
 The D3DX run-time side stays open until w18 proves it (be1387/be1b2e take an open source pointer).
+
+## Rule addition for L6A: state while a link-failed program is selected (uniform rule)
+
+While a link-failed program is the selected one, the GPU keeps the last successfully bound program and that program's
+last uniform values. Constant updates for the failed program are dropped.
+Wine 9.0 (tools/wine-9.0 c8373ee4, dlls/wined3d/glsl_shader.c) and GL 4.6:
+- 10526-10531: uniform locations are looked up on the failed program and come back -1.
+- 1249-1280: shader_glsl_load_constants_b / glUniform* use those locations. GL 4.6 §7.6.1: location -1 is silently ignored.
+- 10565-10566: glUseProgram(program_id) on the failed program. GL 4.6 §7.3: INVALID_OPERATION, current program unchanged.
+- 10740-10743: shader_glsl_select calls glUseProgram only when prev_id != program_id, so later draws do not retry.
+- 10383 / 10407: ctx_data->glsl_program stays at the failed entry.
+
+## Static question from L6A: does the link outcome depend on the (vs, ps) pair?
+
+Answer: yes, in general. It is not provable as a per-shader bit from wined3d alone.
+- set_glsl_shader_program (10254-10440) builds a program for key (vs_id, ps_id). vs_id and ps_id come from per-shader
+  compile (find_glsl_vertex_shader / find_glsl_fragment_shader).
+- For a vs of major < 4 it also generates a third object per program: `shader_glsl_generate_vs3_rasterizer_input_setup(priv,
+  vshader, pshader, ...)` (10422-10426, defined 7147-7285). It is compiled with shader_glsl_compile (7283) and attached to the program (10426-10428).
+- Its text is a function of both shaders:
+  - ps side: ps major (7150), ps->limits->packed_input (7274), ps->input_signature, ps->u.ps.input_reg_map, ps->reg_maps.texcoord (7255-7262).
+  - vs side: vs->output_signature, vs->reg_maps.output_registers, vs->limits->packed_output (7188, 7276).
+- Varying counts come only from vec4_varyings(ps_major) (1859-1866) and ps packed_input. Both stages declare the same
+  `ps_link[in_count]` (1990 for the ps side, 7276 / 2002-2030 for the vs side), so the declaration size is a function of the ps alone.
+  The vs side only fills it in setup_vs3_output (6919-7020).
+- Index guard: `in_idx >= max_varyings` skips the write with a FIXME (6949-6953). It does not fail.
+- Link-time dependencies on the vs: output_signature and reg_maps.output_registers. Entries whose outputs the vs does not write
+  are zero-filled (6998-7020), so there is no "input without output" link error.
+- What remains pair-dependent is the compile status of the reorder shader.
+  - ps major < 3 branch: texcoord write masks depend on ps->reg_maps.texcoord and the vs signature (7222-7262).
+  - ps major >= 3 branch: setup_vs3_output (6919-7020).
+  - Both are syntactically valid for any signature pair, so no pair-dependent compile error follows from the text.
+    That claim relies on the GLSL front end of the GL driver, which is outside the wined3d source. I do not claim it.
+- Conclusion: link outcome = f(vs, ps, reorder(vs, ps), driver). Per-shader decomposition is not proven. The farm table must be
+  keyed by (vs, ps) pairs. The pairs actually drawn must come from the exe's pair set, which is not statically closed.
+  If no pair-level proof exists, I report it as an open class to the lead instead of assuming a per-shader bit.
