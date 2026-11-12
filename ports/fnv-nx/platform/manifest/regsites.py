@@ -179,7 +179,7 @@ class Analyzer:
         return self.regions[start]
 
     def text(self, addr):
-        s = self.mod.cstr(addr)
+        s = self.mod.string_at(addr)
         return None if s is None else (s[2:] if s.startswith("L:") else s)
 
     def run(self, start, binds=None, track=(), this_bind=None, ev=None, results=None, cells=None):

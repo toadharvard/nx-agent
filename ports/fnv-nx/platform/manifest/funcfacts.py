@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """funcfacts.py - the one reader of the function facts for the platform passes (function boundaries: no assumption).
 
+ASM-501 (function boundaries and forward flow of the manifest passes) is removed by this module: the boundaries are facts, not an assumption.
 The function boundaries of every pass (pemanifest, regsites, regclass, filesites, fontfaces, prefs_settings) come from here and only
 from here. The source is L3a's lift facts (private, exe- and DLL-derived; fnv-nx-build, branch l3a-lift/facts), pinned in facts.json
 beside this file: repo, branch, commit and tree_sha256 (verify/cas.py tree_hash of the checked-out facts directory, without .git).
@@ -99,6 +100,11 @@ def open_dotnet(path):
     return dnfile.dnPE(path)
 
 
+class CodeRead(BaseException):
+    """A byte read of an Image at an address of code. It is a BaseException on purpose: `except Exception` does not catch it, a pass that
+    reads code bytes stops red. Code is reachable only as decoded facts (FuncFacts.ins/edges/insn_at)."""
+
+
 class Image:
     """One PE image as typed data (read_image): base, img (the mapped bytes, private to the accessors), relocs (absolute VAs of the
     HIGHLOW relocations, sorted), imports [(dll, name, slot)], normal/delay import dll names in directory order, exports (count) and
@@ -137,34 +143,107 @@ class Image:
         self.normal, self.delay, self.exports, self.export_names, self.sections = [], [], 0, {}, []
         return self
 
+    def code_runs(self):
+        """The merged [a, b) ranges that are code for this image: the runs of its function facts; with no facts, every executable section
+        (code is then unknown, so none of it may be read as bytes)."""
+        ff = for_image(self)
+        if not ff.ok:
+            return [(a, a + n) for a, n in sorted(self.code)]
+        return ff.merged()
+
+    def _guard(self, va, n, word=False):
+        """The byte readers refuse any byte inside code. The only code bytes readable are one relocated 32-bit word at its relocation
+        address (an absolute address is data of the image, not an opcode)."""
+        if n <= 0:
+            return
+        if word and n == 4 and va in self._relset():
+            return
+        runs = self.code_runs()
+        k = bisect.bisect_right(runs, (va + n, 0)) - 1
+        while k >= 0 and runs[k][1] > va:
+            if runs[k][0] < va + n:
+                raise CodeRead("%s: byte read of %d at 0x%08x inside code 0x%08x-0x%08x" % (self.name, n, va, runs[k][0], runs[k][1]))
+            k -= 1
+
+    def in_runs(self, va):
+        """True when the byte at va is inside a code range of this image (the runs of its facts; with no facts, an executable section)."""
+        runs = self.code_runs()
+        k = bisect.bisect_right(runs, (va, 1 << 62)) - 1
+        return k >= 0 and runs[k][0] <= va < runs[k][1]
+
+    def _relset(self):
+        if getattr(self, "_rs", None) is None:
+            self._rs = frozenset(self.relocs)
+        return self._rs
+
+    def _raw(self, a, n):
+        """Code bytes for the decoder of this module only."""
+        o = a - self.base
+        return self._img[o:o + n]
+
     def size(self):
         return len(self._img)
 
     def u8(self, va):
         o = va - self.base
-        return self._img[o] if 0 <= o < len(self._img) else None
+        if not 0 <= o < len(self._img):
+            return None
+        self._guard(va, 1)
+        return self._img[o]
 
     def u32(self, va):
         o = va - self.base
-        return struct.unpack_from("<I", self._img, o)[0] if 0 <= o <= len(self._img) - 4 else None
+        if not 0 <= o <= len(self._img) - 4:
+            return None
+        self._guard(va, 4, word=True)
+        return struct.unpack_from("<I", self._img, o)[0]
 
     def bytes_at(self, va, n):
-        """n bytes at va, or the bytes up to the end of the image (shorter than n) when va+n passes it; None when va is outside."""
+        """n data bytes at va (shorter when va+n passes the image end); None when va is outside; CodeRead when any byte is code."""
         o = va - self.base
-        return self._img[o:o + n] if 0 <= o < len(self._img) else None
+        if not 0 <= o < len(self._img):
+            return None
+        out = self._img[o:o + n]
+        self._guard(va, len(out))
+        return out
+
+    def data_at(self, va, n):
+        """n bytes at va if they are all data; None when va is outside the image or the span touches code (a question, not a code read:
+        a pointer whose target is, or runs into, code does not designate this data structure)."""
+        o = va - self.base
+        if not 0 <= o <= len(self._img) - n:
+            return None
+        runs = self.code_runs()
+        k = bisect.bisect_right(runs, (va + n, 0)) - 1
+        if k >= 0 and runs[k][1] > va and runs[k][0] < va + n:
+            return None
+        return self._img[o:o + n]
 
     def zstr(self, va, limit):
-        """The bytes from va up to the first NUL within `limit` bytes (None if va is outside or no NUL within limit)."""
+        """The data bytes from va up to the first NUL within `limit` bytes (None if va is outside or no NUL within limit)."""
         o = va - self.base
         if not (0 <= o < len(self._img)):
             return None
         e = self._img.find(b"\0", o, o + limit)
-        return self._img[o:e] if e >= 0 else None
+        if e < 0:
+            return None
+        self._guard(va, e - o + 1)
+        return self._img[o:e]
 
     def find_bytes(self, pat):
-        """The VA of the first occurrence of `pat` in the mapped image (None if absent): a data lookup (a string), not a code scan."""
-        o = self._img.find(pat)
-        return None if o < 0 else self.base + o
+        """The VA of the first occurrence of `pat` in the data of the image (None if absent). Code is not searched: a match must lie
+        wholly outside the code ranges."""
+        pos, gaps = self.base, []
+        for a, b in self.code_runs():
+            if a > pos:
+                gaps.append((pos, a))
+            pos = max(pos, b)
+        gaps.append((pos, self.base + len(self._img)))
+        for a, b in gaps:
+            o = self._img.find(pat, a - self.base, b - self.base)
+            if o >= 0:
+                return self.base + o
+        return None
 
     def in_image(self, va):
         return 0 <= va - self.base < len(self._img)
@@ -175,6 +254,13 @@ class Image:
     def in_data(self, va):
         return self.in_image(va) and not self.in_code(va)
 
+    def string_at(self, va):
+        """The string a pointer value designates (cstr), None when the value is not a pointer to data: outside the image, or at a code
+        address of the facts' runs (a code address is a function or label, not a string; its bytes are not read)."""
+        if not self.in_image(va) or self.in_runs(va):
+            return None
+        return self.cstr(va)
+
     def cstr(self, va):
         """A printable ASCII or UTF-16LE string at va (`L:` prefix for the latter), else None."""
         if not self.in_image(va):
@@ -182,10 +268,12 @@ class Image:
         s = self.zstr(va, 260) or b""
         if len(s) >= 2 and all(32 <= c < 127 for c in s):
             return s.decode()
-        w = self.bytes_at(va, 520)
-        e = next((i for i in range(0, len(w) - 1, 2) if w[i:i + 2] == b"\0\0"), 0)
+        o, w = va - self.base, bytearray()
+        while len(w) < 520 and o + len(w) + 2 <= len(self._img) and self._img[o + len(w):o + len(w) + 2] != b"\0\0":
+            w += self._img[o + len(w):o + len(w) + 2]
+        self._guard(va, len(w) + 2)
         try:
-            t = w[:e].decode("utf-16le")
+            t = bytes(w).decode("utf-16le")
         except UnicodeDecodeError:
             return None
         return "L:" + t if len(t) >= 2 and all(32 <= ord(c) < 127 for c in t) else None
@@ -204,6 +292,9 @@ class NoFacts:
 
     def entries_of(self, addr):
         return []
+
+    def insn_at(self, addr):
+        return None
 
     def why(self, addr):
         return self.reason
@@ -231,6 +322,28 @@ class FuncFacts:
         self._md = None
         self._el = None
         self.bad = {}   # entry -> reason, for entries whose runs do not decode to exactly their bytes (reported, never analysed)
+
+    def merged(self):
+        """All runs merged into sorted disjoint [a, b) ranges: the code of the image, as the facts know it."""
+        if getattr(self, "_mg", None) is None:
+            out = []
+            for a, b in sorted(r for rs in self.runs.values() for r in rs):
+                if out and a <= out[-1][1]:
+                    out[-1] = (out[-1][0], max(out[-1][1], b))
+                else:
+                    out.append((a, b))
+            self._mg = out
+        return self._mg
+
+    def insn_at(self, addr):
+        """The decoded instruction that starts at `addr`, from any entry whose runs contain it; None if there is none."""
+        for e in self.entries_of(addr):
+            ins = self.ins(e)
+            if ins:
+                k = bisect.bisect_left([i.address for i in ins], addr)
+                if k < len(ins) and ins[k].address == addr:
+                    return ins[k]
+        return None
 
     def entry_list(self):
         if self._el is None:
@@ -262,7 +375,7 @@ class FuncFacts:
         if entry not in self._ins:
             md, out = self._decode(), []
             for a, b in sorted(self.runs[entry]):
-                run = list(md.disasm(self.image.bytes_at(a, b - a), a))
+                run = list(md.disasm(self.image._raw(a, b - a), a))
                 if not run or run[-1].address + run[-1].size != b or run[0].address != a:
                     self.bad[entry] = "the run %x-%x does not decode to exactly its bytes (facts and image disagree)" % (a, b)
                     out = None
@@ -318,7 +431,7 @@ class FuncFacts:
             seen = set()
             md = self._decode()
             for a, b in sorted({r for rs in self.runs.values() for r in rs}):
-                run = list(md.disasm(self.image.bytes_at(a, b - a), a))
+                run = list(md.disasm(self.image._raw(a, b - a), a))
                 if not run or run[-1].address + run[-1].size != b:
                     continue
                 for i in run:
@@ -360,6 +473,11 @@ def file_runs(path, base):
 def declare(image, runs):
     """Facts for an image that has no facts directory: the self-test's synthetic PE, whose entries and runs are its own input data."""
     _images[(image.name, image.base)] = FuncFacts(image.name, image, runs)
+
+
+def declare_none(image, reason="no function facts"):
+    """An image the facts do not cover (the self-test of the rule for such images)."""
+    _images[(image.name, image.base)] = NoFacts(reason)
 
 
 def for_image(image):

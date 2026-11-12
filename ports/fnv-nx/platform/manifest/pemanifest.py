@@ -96,7 +96,8 @@ class Mod(funcfacts.Image):
                     while i < len(rs) and rs[i] < site:
                         r = rs[i]
                         i += 1
-                        if self.u8(r - 1) != 0x68:  # push imm32
+                        p = self.ff.insn_at(r - 1)   # the decoded instruction that holds the relocated word
+                        if p is None or p.mnemonic != "push" or p.size != 5:  # push imm32
                             continue
                         t = self.u32(r)
                         if nm == "CoCreateInstance":
@@ -105,7 +106,7 @@ class Mod(funcfacts.Image):
                                 a, b, c = struct.unpack_from("<IHH", g)
                                 ops.append("{%08X-%04X-%04X-%s-%s}" % (a, b, c, g[8:10].hex().upper(), g[10:].hex().upper()))
                         else:
-                            s = self.cstr(t)
+                            s = self.string_at(t)
                             if s:
                                 ops.append(s)
                     yield site, nm, " ".join(ops) if ops else "dynamic", "-" if nm != "GetProcAddress" else "dynamic"
@@ -237,7 +238,7 @@ class Mod(funcfacts.Image):
                 if i.mnemonic == "push":
                     a = ops[0]
                     if a.type == X.X86_OP_IMM:
-                        s = self.cstr(a.imm) if (i.address + 1) in rset else None
+                        s = self.string_at(a.imm) if (i.address + 1) in rset else None
                         pushes.append(("s", s) if s else ("x", UNK))
                     elif a.type == X.X86_OP_REG or mem(a):
                         v = val(a)
@@ -247,7 +248,7 @@ class Mod(funcfacts.Image):
                     continue
                 wr = {P.get(i.reg_name(r), i.reg_name(r)) for r in i.regs_access()[1]}
                 if i.mnemonic == "mov" and len(ops) == 2 and ops[1].type == X.X86_OP_IMM and (i.address + i.size - 4) in rset:
-                    t = self.cstr(ops[1].imm)  # a relocated string address stored in a register or into the pushed argument slot
+                    t = self.string_at(ops[1].imm)  # a relocated string address stored in a register or into the pushed argument slot
                     if ops[0].type == X.X86_OP_REG and P.get(i.reg_name(ops[0].reg)):
                         reg[P[i.reg_name(ops[0].reg)]], _ = ("s", t) if t else UNK, ptr.pop(P[i.reg_name(ops[0].reg)], 0)
                         continue

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""check_funcfacts.py - the gate that keeps ASM-501 removed: image bytes and code facts enter the manifest passes only through funcfacts.py.
+"""check_funcfacts.py - the gate that keeps ASM-501 (function boundaries) removed: image bytes and code facts enter the manifest passes only through funcfacts.py.
 
     python3 -I check_funcfacts.py            # scans every .py file of this directory; exit 1 and the findings on stderr if any
 
@@ -10,8 +10,11 @@ Structural rule over the import and data graph (no names, no byte patterns):
       binary mode only by funcfacts.py: a call open(...) with a mode that contains `b` or is not a literal, os.open, Path.read_bytes /
       open_bytes, and any read of the bytes of an image or section through the parser object (`.get_memory_mapped_image`,
       `.get_data`, `.get_string_at_rva`, `.read_bytes`).
-  G3  in the graph the mapped bytes are not reached by attribute: no access to `.img`, `._img`, `.pe` of any object (the Image record's
-      accessors u8/u32/bytes_at/zstr/cstr/find_bytes and funcfacts' typed code facts are the interface).
+  G3  code is not readable as bytes (a run-time rule of funcfacts.Image, proven by the self-test below): every byte reader of an Image
+      (u8, u32, bytes_at, zstr, cstr) raises funcfacts.CodeRead, a BaseException that `except Exception` does not catch, for any byte
+      inside a code range of the L3a facts (an image without facts: every executable section); find_bytes searches only outside code.
+      The one code read allowed is a relocated 32-bit word at its relocation address (an absolute address, not an opcode). Code is
+      reachable only as decoded facts: FuncFacts.ins / edges / insn_at / heads. Data reads (strings, tables, relocated words) are free.
 A module outside the graph (the generators of the platform tables, which read their own text inputs) is not constrained by G2/G3; G1
 holds for every module. The graph is computed from the imports, never listed.
 The self-tests build synthetic modules for each of the three rules and for a module that reaches the graph through another module.
@@ -20,7 +23,6 @@ import ast, os, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 READERS = {"capstone", "pefile", "dnfile", "mmap", "lief", "elftools", "ctypes"}
-IMAGE_ATTRS = {"img", "_img", "pe"}
 PARSER_CALLS = {"get_memory_mapped_image", "get_data", "get_string_at_rva", "read_bytes", "open_bytes"}
 
 
@@ -77,8 +79,6 @@ def findings(trees):
             if m in g:
                 if binary_open(n):
                     r.append((n.lineno, "G2", "opens or reads a file as bytes / through the parser"))
-                if isinstance(n, ast.Attribute) and n.attr in IMAGE_ATTRS:
-                    r.append((n.lineno, "G3", "attribute .%s reaches the mapped image or its parser" % n.attr))
         if r:
             out[m] = r
     return out
@@ -98,7 +98,42 @@ def main():
           % (len(trees), len(graph(trees))))
 
 
+def selftest_code_read():
+    """G3: a byte read at a code address is red; data reads, a relocated word in code, and decoded facts are not."""
+    sys.path.insert(0, HERE)
+    import funcfacts
+    code = bytes.fromhex("558bec" "b800304000" "5dc3")            # push ebp; mov ebp,esp; mov eax,0x403000; pop ebp; ret
+    full = bytearray(0x3100)
+    full[0x1000:0x1000 + len(code)] = code
+    full[0x3000:0x3006] = b"hello\0"
+    im = funcfacts.Image.synthetic("g3.exe", 0x400000, full, [0x401004], [], [(0x401000, 0x100)])
+    funcfacts.declare(im, {0x401000: [(0x401000, 0x401000 + len(code))]})
+    assert im.zstr(0x403000, 16) == b"hello" and im.cstr(0x403000) == "hello" and im.bytes_at(0x403000, 3) == b"hel"   # data
+    assert im.u32(0x401004) == 0x403000                                                                              # a relocated word
+    for read in (lambda: im.u8(0x401000), lambda: im.bytes_at(0x401000, 4), lambda: im.u32(0x401001), lambda: im.u32(0x401005),
+                 lambda: im.zstr(0x401000, 8), lambda: im.bytes_at(0x400ffe, 4)):
+        try:
+            read()
+        except Exception:
+            raise AssertionError("CodeRead must not be an Exception")
+        except funcfacts.CodeRead:
+            continue
+        raise AssertionError("a byte read at a code address was not red")
+    assert im.find_bytes(b"\x55\x8b\xec") is None and im.find_bytes(b"hello\0") == 0x403000                       # code is not searched
+    ff = funcfacts.for_image(im)
+    assert [i.mnemonic for i in ff.ins(0x401000)] == ["push", "mov", "mov", "pop", "ret"] and ff.insn_at(0x401003).mnemonic == "mov"
+    nf = funcfacts.Image.synthetic("g3b.exe", 0x400000, full, [], [], [(0x401000, 0x100)])   # facts are absent: all of the section is code
+    funcfacts.declare_none(nf)
+    try:
+        nf.u8(0x401050)
+    except funcfacts.CodeRead:
+        pass
+    else:
+        raise AssertionError("no facts: the executable section must be unreadable")
+
+
 def selftest():
+    selftest_code_read()
     def run(sources):
         trees = {k: ast.parse(v) for k, v in sources.items()}
         return findings(trees)
@@ -108,11 +143,10 @@ def selftest():
     assert run(dict(base, a="import funcfacts\nx = open(p, 'rb')\n"))["a"][0][1] == "G2"
     assert run(dict(base, a="import funcfacts\nx = open(p, mode)\n"))["a"][0][1] == "G2"
     assert run(dict(base, a="import funcfacts\nx = f.get_data(1, 2)\n"))["a"][0][1] == "G2"
-    assert run(dict(base, a="import funcfacts\nx = m.img[0]\n"))["a"][0][1] == "G3"
     # a module reaches the graph only through another module: still constrained
     assert run(dict(base, a="import funcfacts\n", b="import a\nx = open(p, 'rb')\n"))["b"][0][1] == "G2"
     # outside the graph: binary files of other tables are not image reads; text opens are fine inside it
-    assert "c" not in run(dict(base, c="x = open(p, 'rb')\ny = o.img\n"))
+    assert "c" not in run(dict(base, c="x = open(p, 'rb')\n"))
     assert "a" not in run(dict(base, a="import funcfacts\nx = open(p, encoding='utf-8')\ny = open(p, 'w')\n"))
     assert "a" not in run(dict(base, a="import funcfacts\nx = [b'\\x55\\x8b\\xec']\n"))   # the rule is the graph, not byte patterns
 

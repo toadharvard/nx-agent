@@ -28,7 +28,7 @@ class Rtti:
                 continue
             td = mod.u32(r)
             o = None if td is None else td - mod.base
-            if o is None or not (0 < o < mod.size() - 12) or mod.bytes_at(td + 8, 3) != b".?A":
+            if o is None or not (0 < o < mod.size() - 12) or mod.data_at(td + 8, 3) != b".?A":  # a type descriptor is data
                 continue
             c = r - 12
             if c >= mod.base and mod.u32(c) == 0 and (c + 16) in rs and mod.u32(c + 4) is not None:

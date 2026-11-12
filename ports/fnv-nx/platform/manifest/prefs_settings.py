@@ -37,7 +37,7 @@ def main(exe, out):
     hi = lo + tsz
 
     def cstr(va):
-        z = mod.zstr(va, 200) if va > base else None
+        z = mod.zstr(va, 200) if va > base and not mod.in_runs(va) else None
         return z.decode("latin1") if z else None
 
     ff = mod.ff
