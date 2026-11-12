@@ -43,7 +43,6 @@ def main(exe, out):
     tva, tsz = text.VirtualAddress, text.Misc_VirtualSize
     seg = img[tva:tva + tsz]
     lo, hi = base + tva, base + tva + tsz
-    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 
     def cstr(va):
         o = va - base
