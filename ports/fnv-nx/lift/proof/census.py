@@ -12,9 +12,8 @@ tool_sha256 = sha256(shape.py + census.py); forms_sha256 = sha256(forms.py) (for
 The ranges are authoritative: exactly the listed byte ranges are decoded (each distinct range once, from its start); a range that does
 not decode to whole instructions is an ERROR: it is listed in the header (`# undecodable lo-hi stopped_at=`), the instructions decoded before the
 failure are kept, and the exit status is 1.  A range outside the file's section data, or an instruction the shape rule cannot mask, aborts.
-Assumption: the family is a function of the shape (decoding is determined by the prefix/opcode/ModRM/SIB bytes, the masked fields never
-change the operand structure); it is computed at the first occurrence and the representative encoding is decoded again and must give the
-same shape, family and size.  The form key is that of the REPRESENTATIVE (capstone names the predicate of cmpps/cmppd/cmpss/cmpsd by the
+The family is computed for EVERY decoded instruction (not for the first of its shape); a key that gets two families makes the census fail (ValueError listing the key, the families and the lowest address of each), so
+the family is a function of the key over the whole census by checking the finite set, not by an assumption; the representative encoding is decoded again and must give the same shape and family.  The form key is that of the REPRESENTATIVE (capstone names the predicate of cmpps/cmppd/cmpss/cmpsd by the
 value of the imm8, so the mnemonic of an occurrence is not a function of the shape; the representative has imm8 = 0)."""
 import hashlib
 import os
@@ -98,7 +97,7 @@ def census(image, ranges_path):
     if base != pe.base:
         raise ValueError('ranges base %08x != image base %08x' % (base, pe.base))
     md = shape.decoder()
-    shapes, seen, bad = {}, set(), []
+    shapes, seen, bad, split = {}, set(), [], {}
     for lo, hi in rngs:
         code = pe.bytes(lo, hi - lo)
         pos = lo
@@ -111,18 +110,23 @@ def census(image, ranges_path):
             seen.add(ins.address)
             k = shape.shape_key(ins)
             e = shapes.get(k)
+            fam = shape.family(ins)
             if e is None:
-                shapes[k] = [shape.family(ins), None, 1, ins.address]
+                shapes[k] = [fam, None, 1, ins.address]
             else:
+                if fam != e[0]:                   # family is computed for EVERY instruction, not for the first one: a key with two families is a census error
+                    split.setdefault(k, {e[0]: e[3]})[fam] = min(ins.address, split.get(k, {}).get(fam, ins.address))
                 e[2] += 1
                 if ins.address < e[3]:
                     e[3] = ins.address
         if pos != hi:
             bad.append((lo, hi, pos))
+    if split:
+        raise ValueError('shape keys with two families (the key is too coarse): ' + '; '.join('%s: %s' % (k, ', '.join('%s@%08x' % (f, a) for f, a in sorted(v.items()))) for k, v in sorted(split.items())))
     for k in sorted(shapes):                      # the representative encoding decodes to the same shape and family; its form key is the shape's
         r = shape.rep_bytes(k)
         got = list(md.disasm(r, shape.ADDR))
-        if len(got) != 1 or got[0].size != len(r) or shape.shape_key(got[0]) != k or shape.family(got[0]) != shapes[k][0]:
+        if len(got) != 1 or got[0].size != len(r) or shape.shape_key(got[0]) != k or shape.family(got[0]) != shapes[k][0]:      # (the family of every instruction was already checked above)
             raise ValueError('shape %s: the representative encoding does not reproduce the shape' % k)
         shapes[k][1] = forms.form_key(got[0])
     return shapes, len(seen), bad

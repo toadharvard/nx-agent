@@ -110,6 +110,13 @@
    ]
   },
   {
+   "path": "ports/fnv-nx/lift/test",
+   "class": "test",
+   "gates": [
+    "selftests"
+   ]
+  },
+  {
    "path": "ports/fnv-nx/link",
    "class": "tool",
    "gates": [

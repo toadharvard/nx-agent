@@ -17,7 +17,7 @@ Deterministic: sorted iteration, no clocks or paths in the outputs. Inputs FNVNX
 (exe-derived: they go to the private fnv-nx-build repository, never into this one)."""
 import argparse, collections, glob, hashlib, json, multiprocessing as mp, os, re, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
-for p in ('bench', 'tools', 'test', ''):
+for p in ('tools', ''):
     sys.path.insert(0, os.path.join(LIFT, p))
 BATCH = 60
 ENCS = 4            # encodings listed per form (encs.tsv): the distinct byte strings at the lowest addresses; the universe of test/instest.py

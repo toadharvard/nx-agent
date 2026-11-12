@@ -22,6 +22,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # a one-instruction test has no callee: a call/tail to another entry is an event of the test harness (fnvl_call), set here and nowhere in the prelude
 STUBX = 'extern "C" void fnvl_call(struct cpu*, u32 target);\n#undef CALLX\n#define CALLX(h) fnvl_call(c,0x##h)\n'
 sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
+
+def blocked_on(what):
+    print('BLOCKED: needs ' + what); print('blocker: L4 shared model (boot machine) and the platform root; this test defines no clock'); sys.exit(3)
+def blocked(err):
+    """Exit status 3 = BLOCKED. The platform and libc symbols (lookup_export, ExitProcess, UnhandledExceptionFilter, the raise backend, the TLS slot, the host clock, memcpy, memset)
+    are product files: a test defines none of them (CLAUDE.md, no doubles in tests). An undefined one means the product root is not linkable yet."""
+    names = sorted(set(re.findall(r"undefined reference to `([^']+)'", err)))
+    print('BLOCKED: undefined product symbols: ' + ' '.join(names))
+    print('blocker: platform root admission (L5) and link.roots (L1); host behaviour comes from the L4 boot machine shared model, never from a test file')
+    sys.exit(3)
 import liftgen   # tools/liftgen.py PACK_CXX_FLAGS: the ONE definition of the lifted-code flags (the pack recipe and every test compile with it)
 FLAGS = ['-c'] + liftgen.PACK_CXX_FLAGS + ['-DFNVL_FLAGS_IO']      # + the test's I/O hook and -c: they compile no product code differently
 HARN, HARN_END, CPU, ASTACK, RETPAD = 0xE0000000, 0xE2000000, 0xE1000000, 0xE1F00000, 0xE1FF0000
@@ -361,15 +371,22 @@ def gs_null_av(E, X):
 SELV = {'cs': 0x1b, 'ss': 0x23, 'ds': 0x23, 'es': 0x23, 'fs': 0x3b, 'gs': 0}       # selectors of a Win32 x86 user process (rt/seh.cc CONTEXT); Unicorn's flat selectors are its own
 def origbyte(st, x): return (imgpage(x & ~0xfff) or genpage(st['wk'][0], st['wk'][1], x & ~0xfff))[x & 0xfff]
 def model_fix(E, st, o, c, X):
-    """W14: forms whose result is defined by the reference model, not by Unicorn: cpuid (rt/cpumodel.c through ctypes), rdtsc (ticks = 2100 * the stub counter; Unicorn's TSC is its own),
+    """W14: forms whose result is defined by the reference model, not by Unicorn: cpuid (rt/cpumodel.c through ctypes), rdtsc (ticks = ns * 2.1 of the platform's host clock; Unicorn's TSC is its own),
     segment register reads (mov r/m16, Sreg; push Sreg). Rewrites the oracle result o; returns a diff tuple or None."""
     b, ins = E['base'], E['ins']; ops = ins.operands
     if b == 'cpuid':
         import ctypes; out = (ctypes.c_uint32 * 4)(); G['cpum'].fnvl_cpuid(ctypes.c_uint32(st['regs'][0]), ctypes.c_uint32(st['regs'][1]), out)
         for ri, oi in ((0, 0), (3, 1), (1, 2), (2, 3)): o['regs'][ri] = out[oi]
     elif b == 'rdtsc':
-        t = c['regs'][0] | c['regs'][2] << 32
-        if t == 0 or t % 2100: return 'diff', 'rdtsc not 2.1 * a 1000 ns counter', '%x' % t, ''
+        # Owner decision: rdtsc reads the platform's monotonic timer; ticks = fnvl_rdtsc's conversion of fnvl_host_ticks_ns (rt/cpumodel.c). The clock is the PLATFORM's symbol, which runs on the
+        # L4 boot machine's shared model (no syscall exists under bare Unicorn); this test defines no clock. The model that runs the state returns c['clk'] = (ns read before, ns read after) of
+        # that clock; a run without it (bare Unicorn) is BLOCKED.
+        if 'clk' not in c: blocked_on('the L4 shared model clock (platform fnvl_host_ticks_ns) as c[\'clk\']')
+        t = c['regs'][0] | c['regs'][2] << 32; lo, hi = c['clk']
+        conv = lambda ns: ns // 10 * 21 + ns % 10 * 21 // 10           # the definition in rt/cpumodel.c, restated: one multiplication by 21/10 on a monotonic clock
+        if not conv(lo) <= t <= conv(hi): return 'diff', 'rdtsc outside conv(ns) of the platform clock read before and after', '%x' % t, '[%x,%x]' % (conv(lo), conv(hi))
+        if t < G.get('rdtsc_last', 0): return 'diff', 'rdtsc went backwards', '%x' % t, '%x' % G['rdtsc_last']
+        G['rdtsc_last'] = t
         o['regs'][0], o['regs'][2] = c['regs'][0], c['regs'][2]
     elif b in ('mov', 'push') and any(op.type == X.X86_OP_REG and ins.reg_name(op.reg) in SELV for op in ops):
         sv = SELV[ins.reg_name(ops[-1].reg)] if b == 'mov' else SELV[ins.reg_name(ops[0].reg)]
@@ -459,8 +476,10 @@ def build(batch_id, items, work):
         h = len(its) // 2; comp(its[:h]); comp(its[h:])
     comp(items)
     if not objs: return None, bad
-    elf = d + '/t.elf'; r = subprocess.run(['aarch64-linux-gnu-ld', '-m', 'aarch64elf32', '-Ttext=0x%x' % HARN, '-e', '0', '-o', elf, work + '/rt.o', work + '/x87.o', work + '/cpumodel.o', work + '/hostticks.o', work + '/fmath.o', work + '/rcptab.o'] + objs, capture_output=True, text=True)
-    if r.returncode: return None, dict((a, 'link: ' + r.stderr[:60]) for a, t in items)
+    elf = d + '/t.elf'; r = subprocess.run(['aarch64-linux-gnu-ld', '-m', 'aarch64elf32', '-Ttext=0x%x' % HARN, '-e', '0', '-o', elf, work + '/x87.o', work + '/cpumodel.o', work + '/fmath.o', work + '/rcptab.o'] + objs, capture_output=True, text=True)
+    if r.returncode:
+        if 'undefined reference' in r.stderr: blocked(r.stderr)
+        return None, dict((a, 'link: ' + r.stderr[:60]) for a, t in items)
     return elf, bad
 def run_batch(job):
     bid, batch, n = job; L = G['L']; img = G['img']; work = G['work']; from capstone import x86 as X
@@ -495,19 +514,11 @@ def run_batch(job):
     import shutil; shutil.rmtree('%s/b%d' % (work, bid), ignore_errors=True); shutil.rmtree('%s/b%d' % (work, bid + 100000), ignore_errors=True)
     return out
 def runtime_objects(work, lifter):
-    """the ARM-side runtime objects every test link needs, built into `work`: rt.o (test link symbols, libc string stubs), fmath.o, rcptab.o, x87.o, hostticks.o, cpumodel.o"""
-    open(work + '/rt.S', 'w').write('.text\n' + ''.join('.globl %s\n%s: ret\n' % (k, k) for k in ('fnvl_call', 'fnvl_dispatch', 'fnvl_raise', 'fnvl_raise_av', 'fnvl_trace')) +   # fnvl_rcp32/rsqrt32: runtime-owner hooks, a bare `ret` here (their rows are 'hook', not gate failures)
-        '.globl memcpy\nmemcpy: mov x3,x0\n1: cbz x2,2f\n ldrb w4,[x1],#1\n strb w4,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
-        '.globl memset\nmemset: mov x3,x0\n1: cbz x2,2f\n strb w1,[x3],#1\n sub x2,x2,#1\n b 1b\n2: ret\n'
-        '.globl memmove\nmemmove: cmp x0,x1\n b.ls 3f\n add x3,x0,x2\n add x1,x1,x2\n1: cbz x2,2f\n ldrb w4,[x1,#-1]!\n strb w4,[x3,#-1]!\n sub x2,x2,#1\n b 1b\n2: ret\n'
-        '3: mov x3,x0\n4: cbz x2,2b\n ldrb w4,[x1],#1\n strb w4,[x3],#1\n sub x2,x2,#1\n b 4b\n')
-    subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-c', work + '/rt.S', '-o', work + '/rt.o'])
+    """the ARM-side runtime objects every test link needs, built into `work`: fmath.o, rcptab.o, x87.o, cpumodel.o (no test symbol: the product defines the rest)"""
     for f in ('fmath', 'rcptab'): subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-builtin', '-c', os.path.join(lifter, 'rt', f + '.c'), '-o', work + '/' + f + '.o'])
     subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-I', os.path.join(lifter, 'rt'), '-c', os.path.join(lifter, 'rt', 'x87.c'), '-o', work + '/x87.o'])
-    # W14: the reference CPU model (rt/cpumodel.c) linked into the ARM side with a counter as the host clock (+1000 ns per call), and built for the host
-    # (ctypes) as the expected values of cpuid. fnvl_rdtsc is checked against its definition, ticks = ns * 21 / 10, through the counter.
-    open(work + '/hostticks.c', 'w').write('unsigned long long fnvl_host_ticks_ns(void){ static unsigned long long n; return n += 1000; }\n')
-    subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-c', work + '/hostticks.c', '-o', work + '/hostticks.o'])
+    # W14: the reference CPU model (rt/cpumodel.c) linked into the ARM side; the host clock, the dispatcher hooks and libc are the product's (BLOCKED until the root links)
+    # and it is built for the host (ctypes) as the expected values of cpuid.
     subprocess.check_call(['aarch64-linux-gnu-gcc', '-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-c', os.path.join(lifter, 'rt', 'cpumodel.c'), '-o', work + '/cpumodel.o'])
 def main():
     ap = argparse.ArgumentParser(); A = ap.add_argument
@@ -522,8 +533,7 @@ def main():
             return r[:n] + b'\x90' * max(0, n - len(r)) if r is not None else super().bytes(x, n)
     G.update(L=L, img=TImage(a.exe), work=a.work, other={})
     runtime_objects(a.work, a.lifter)
-    open(a.work + '/hostshim.c', 'w').write('unsigned long long fnvl_host_ticks_ns(void){ return 0; }\n')
-    subprocess.check_call(['gcc', '-shared', '-fPIC', '-O1', '-o', a.work + '/cpumodel_host.so', os.path.join(a.lifter, 'rt', 'cpumodel.c'), a.work + '/hostshim.c'])
+    subprocess.check_call(['gcc', '-shared', '-fPIC', '-O1', '-o', a.work + '/cpumodel_host.so', os.path.join(a.lifter, 'rt', 'cpumodel.c')])      # fnvl_host_ticks_ns stays undefined (lazy-bound, cpuid never calls it)
     import ctypes; G['cpum'] = ctypes.CDLL(a.work + '/cpumodel_host.so')
     open(a.work + '/off.cpp', 'w').write(L.prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt')) + '\n#include <stddef.h>\nstatic_assert(offsetof(cpu,fs)==32&&offsetof(cpu,ftop)==36&&offsetof(cpu,fcw)==40&&offsetof(cpu,fc)==44&&offsetof(cpu,x)==48&&offsetof(cpu,fl)==176&&offsetof(cpu,mxcsr)==180&&offsetof(cpu,mm_unused)==184&&offsetof(cpu,ra)==248&&offsetof(cpu,fex)==252&&offsetof(cpu,fx)==256&&offsetof(cpu,eflx)==384&&offsetof(cpu,sel)==400&&offsetof(cpu,teb)==424&&offsetof(cpu,fip)==428&&offsetof(cpu,fdp)==432&&offsetof(cpu,eflags)==460&&offsetof(cpu,dr)==464&&sizeof(cpu)==488,"cpu layout");\n')
     subprocess.check_call(['aarch64-linux-gnu-g++'] + FLAGS + ['-fsyntax-only', a.work + '/off.cpp'])
