@@ -48,6 +48,10 @@ Domain: ROLES is the argument-position table of the registry APIs. It is checked
 function that is a registry function by the export family must have a row (`gate_domain`): an API added to a module without a
 row stops the pass. Output rows: module, site, api, root, subkey, value, status static|dynamic, reason. A wrapper row's site is
 `site<-caller`.
+Key-level rule (L5 lead, 2026-11-12): when the root and key path of a value access are static and the declared machine
+(declared_registry.tsv) declares no value under that key, the value name does not matter: a query answers ERROR_FILE_NOT_FOUND for
+every name and a set writes run-time hive state. The row is `static`, value `*`, reason `key-has-no-declared-values`. When a value
+is declared under the key the rule no longer applies and the row is dynamic again. No assumption beyond OWNER 3.
 """
 import os, re, struct, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -582,6 +586,20 @@ def name_alts(an, v):
     return list(dict.fromkeys(out)), None
 
 
+NO_VALUES = "key-has-no-declared-values"
+
+
+def declared_keys(path=None):
+    """{(root, key)} (lower case) of the declared machine's registry table: the keys that have at least one declared value."""
+    path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), "declared_registry.tsv")
+    out = set()
+    for l in open(path, encoding="utf-8").read().split("\n"):
+        f = l.split("\t")
+        if l and not l.startswith("#") and len(f) >= 3 and f[0] != "root":
+            out.add((f[0].lower(), f[1].lower()))
+    return out
+
+
 def rows_of(an, site, f, args, via=None):
     """Rows of one registry call: one `static` row per (root, key path, value name) of the full value set, or one `dynamic` row."""
     role = ROLES[f]
@@ -599,6 +617,15 @@ def rows_of(an, site, f, args, via=None):
             reasons.append("value: " + r)
     elif role[5] in ("read", "write") and role[2] is not None:
         vals = [""]  # RegQueryValue/RegSetValue: the default value of the subkey
+    if (reasons and not why and subs is not None and vals is None and roots and role[3] is not None
+            and getattr(an, "declared", None) is not None
+            and not any((r.lower(), "\\".join(p for p in (pa, s) if p).lower()) in an.declared for r, pa in roots for s in subs)):
+        # Key-level rule (L5 lead, 2026-11-12): the keys are static and none of them has a declared value, so a query answers
+        # ERROR_FILE_NOT_FOUND whatever the value name is, and a set writes run-time hive state: the result does not depend on
+        # the name. Declared machine, OWNER 3 (Win32 as documented). When a value is declared under one of the keys the rule no
+        # longer applies and the row is dynamic again.
+        return [(site, f, r, "\\".join(p for p in (pa, s) if p), "*", "static", NO_VALUES, via)
+                for r, pa in roots for s in subs]
     if reasons:
         one = lambda xs: xs[0] if xs and len(set(xs)) == 1 else "dynamic"
         r0 = one([x[0] for x in roots]) if roots else "dynamic"
@@ -614,7 +641,7 @@ def row_of(an, site, f, args, via=None):
     return rows_of(an, site, f, args, via)[0]
 
 
-def regsites(mod, stats=None):
+def regsites(mod, stats=None, declared=0):
     """Rows of every registry call of `mod`. `stats`, when given, receives one dict per function that passes a parameter, `this` or a
     field into a registry call (a wrapper): {func, sites, direct, entries, resolved}."""
     api = {s: n for _, n, s in mod.imports if n in ROLES}
@@ -622,6 +649,7 @@ def regsites(mod, stats=None):
         return []
     code, _ = mod.refs()
     an = Analyzer(mod, api)
+    an.declared = declared_keys() if declared == 0 else declared  # None switches the key-level rule off
     rows, seen_calls, done = [], set(), set()
     for slot in sorted(api):
         for ref in code.get(slot, []):

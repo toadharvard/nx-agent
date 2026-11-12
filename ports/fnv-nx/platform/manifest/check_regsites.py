@@ -147,7 +147,7 @@ def build():
 
 def main():
     m = build()
-    rows = regsites.regsites(m)
+    rows = regsites.regsites(m, declared=None)  # key-level rule off: the value-name cases below stay dynamic
     show = "\n".join(repr(r) for r in rows)
     # row = (site, api, root, subkey, value, status, reason, via)
     q1 = [r for r in rows if r[1] == "RegQueryValueExA" and r[0] < 0x401040]
@@ -186,6 +186,17 @@ def main():
     assert rt.derived_of(rt.complete(VA)[0]) == sorted({rt.complete(VA)[0], rt.complete(VD)[0]}), show
     m.imports.append(("advapi32.dll", "RegSaveKeyA", SAVE))
     assert regsites.gate_domain({"synth.exe": m}) == [("synth.exe", "advapi32.dll", "RegSaveKeyA")]
+    # key-level rule: a dynamic value name under a static key without declared values is static (the name is irrelevant); under a key
+    # with a declared value it stays dynamic
+    emp = regsites.regsites(m, declared=set())
+    one = regsites.regsites(m, declared={("hkey_local_machine", "")})
+    dn = lambda rs: sorted((r[0], r[5], r[6][:26]) for r in rs if r[1] in ("RegQueryValueExA", "RegSetValueExA") and r[5] == "static" and r[4] == "*")
+    dyn = lambda rs: sorted((r[0], r[5]) for r in rows if r[1] == "RegQueryValueExA" and r[4] == "dynamic")
+    assert dn(emp) and all(x[2] == "key-has-no-declared-values" for x in dn(emp)), dn(emp)
+    assert not [r for r in one if r[4] == "*" and (r[2], r[3]) == ("HKEY_LOCAL_MACHINE", "")], "a declared value under the key must switch the rule off"
+    assert len([r for r in emp if r[5] == "dynamic"]) < len([r for r in rows if r[5] == "dynamic"]), "rule must resolve some dynamic rows"
+    assert [r for r in emp if (r[2], r[3]) == ("HKEY_LOCAL_MACHINE", "") and r[4] == "*"], "empty key: the rule applies"
+    assert sorted(r[:2] for r in one if (r[2], r[3]) == ("HKEY_LOCAL_MACHINE", "")) == sorted(r[:2] for r in rows if (r[2], r[3]) == ("HKEY_LOCAL_MACHINE", ""))
     print("regsites selftest ok: %d rows" % len(rows))
     if len(sys.argv) > 1:
         e = regsites.check_roles(sys.argv[1])

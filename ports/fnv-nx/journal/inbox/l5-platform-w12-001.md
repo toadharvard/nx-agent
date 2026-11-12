@@ -25,3 +25,9 @@ makes the class unaccounted (row dynamic).
 ## Code
 platform/manifest/{rtti.py, regclass.py, regsites.py}; check_regsites.py (synthetic RTTI image: every entry kind, RTTI receiver with
 constant writer, unbound writer, unaccounted pointer, multiple-inheritance offset 8, derived class). Selftest ok, 21 rows.
+
+## Update 2026-11-12: key-level rule, 20 of 20 static
+- Container-element rule: not implementable without a new assumption (the inserter 0x44f770 is vtable slot 1 of 6 classes, called through untyped receivers). Hooks deleted.
+- Lead decision (c): a key-level rule. Static root+key with no declared value under it makes the value name irrelevant: row static, value `*`, reason `key-has-no-declared-values`. Declared hive has no value under HKLM root, so 0xc5d73c and 0xc5d8b7 are static.
+- Real exe (FalloutNV.exe + d3dx9_31/38, Galaxy as contract-only): 20 sites, 20 static, 0 dynamic. Private manifest commit: see lead message.
+- Synthetic cases in check_regsites.py: dynamic name under an empty static key (static), same under a key with a declared value (dynamic).
