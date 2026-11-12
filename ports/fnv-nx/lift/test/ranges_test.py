@@ -1,5 +1,5 @@
-"""`.fnvl.lk` and `.fnvl.fsw` records on a compiled unit: each record is three words (x86 pc plain, host start, host end as R_AARCH64_P32_ABS32 in .text), and the range is exactly
-the exclusive sequence (kind lk: ldaxr .. cbnz) or the one store / the one bfxil (kind fsw). Needs aarch64-linux-gnu-g++ (flags of the pack without the plugin attribute error).
+"""`.fnvl.sites` records (16 bytes: kind, x86 pc, host start, host end) on a compiled unit: each record is kind and pc plain, start and end R_AARCH64_P32_ABS32 in .text, and the range is exactly
+the exclusive sequence (kind 1: ldaxr .. cbnz) or the one store / the one bfxil (kind 2). Needs aarch64-linux-gnu-g++ (flags of the pack without the plugin attribute error).
     ranges_test.py [--work DIR]"""
 import os, re, subprocess, sys
 LIFT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -26,29 +26,29 @@ def main():
     dis = subprocess.run(['aarch64-linux-gnu-objdump', '-d', obj], capture_output=True, text=True, check=True).stdout
     insn = {int(m.group(1), 16): m.group(2).split()[0] for m in re.finditer(r'^\s*([0-9a-f]+):\t[0-9a-f]{8} *\t(.*)$', dis, re.M)}
     out = {}
-    for sec, kind in (('.fnvl.lk', 'lk'), ('.fnvl.fsw', 'fsw')):
+    for sec, kind in (('.fnvl.sites', 'sites'),):
         rel = subprocess.run(['aarch64-linux-gnu-readelf', '-r', obj], capture_output=True, text=True, check=True).stdout
         blk = re.search(r"Relocation section '\.rela%s'.*?\n\n" % re.escape(sec), rel, re.S)
         rows = [l.split() for l in blk.group(0).splitlines() if 'P32_ABS' in l] if blk else []
         words = {int(r[0], 16): int(r[-1], 16) for r in rows}
         data = subprocess.run(['aarch64-linux-gnu-objcopy', '-O', 'binary', '--only-section=' + sec, obj, '/dev/stdout'], capture_output=True, check=True).stdout
-        assert len(data) % 12 == 0 and len(data) > 0, (sec, len(data))
+        assert len(data) % 16 == 0 and len(data) > 0, (sec, len(data))
         recs = []
-        for o in range(0, len(data), 12):
-            pc = int.from_bytes(data[o:o + 4], 'little')
-            assert o not in words, 'the pc word of a record is plain'
-            assert o + 4 in words and o + 8 in words, 'start and end are relocated'
-            recs.append((pc, words[o + 4], words[o + 8]))
+        for o in range(0, len(data), 16):
+            k, pc = int.from_bytes(data[o:o + 4], 'little'), int.from_bytes(data[o + 4:o + 8], 'little')
+            assert o not in words and o + 4 not in words, 'kind and pc words are plain'
+            assert o + 8 in words and o + 12 in words, 'start and end are relocated'
+            recs.append((k, pc, words[o + 8], words[o + 12]))
         out[kind] = recs
-        for pc, s, e in recs:
+        for k, pc, s, e in recs:
             body = [insn[a] for a in range(s, e, 4)]
-            if kind == 'lk':
+            if k == 1:
                 assert body[0].startswith('ldaxr') and body[-1] == 'cbnz' and any(b.startswith('stlxr') for b in body) and not any(b in ('bl', 'blr') for b in body), (hex(pc), body)
             else:
-                assert len(body) == 1 and body[0] in ('stlrh', 'strh', 'stlr', 'str', 'bfxil'), (hex(pc), body)
-    assert [r[0] for r in out['lk']] == [0x401000]
-    assert sorted(r[0] for r in out['fsw']) == sorted([0x402000, 0x402000, 0x402002, 0x402004, 0x402006, 0x402006]), [hex(r[0]) for r in out['fsw']]
-    print('ranges_test ok: lk %d records, fsw %d records' % (len(out['lk']), len(out['fsw'])))
+                assert k == 2 and len(body) == 1 and body[0] in ('strh', 'str', 'bfxil'), (hex(pc), body)
+    got = sorted((r[0], r[1]) for r in out['sites'])
+    assert got == [(1, 0x401000), (2, 0x402000), (2, 0x402002), (2, 0x402004), (2, 0x402006)], got      # one record per instruction
+    print('ranges_test ok: %d records' % len(got))
 
 
 main()
