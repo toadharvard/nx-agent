@@ -260,3 +260,11 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - Next for w18: allocation-site objects with a constant size.
   - L2 is asked whether the decomp layout facts give global extents.
 - **Heads for MERGER:** w16 0b0d08b3 (contract/include headers) and w14 c0f23a3f (rebased onto w10). closure_key is in 58a2984b, which is in w14.
+- 03:52Z:
+  - **w16 red on trunk:** merge e8c404d2 (29 gates). 3 selftests fail because toy roots no longer build under the include rules: test_gate_machine (5) and test_linkstrict (2). w16 merges 8cfbcdbf, fixes the toys by the rule, and sorts env.json.
+  - **Extents class decided by the orchestrator:**
+    - (a) L2 publishes a fact with the certified extent of each global object (fnv-nx-build, `image va_start size certified_by`).
+    - (b) For stores still open after (a), L3a's value ranges.
+    - w18 builds the consumer now.
+  - **w18 raw fact for (i):** the cell is 0x11b76d0. Of the 126 unbounded stores, all are in the same section; 5 have a base at or below the cell, 121 above.
+  - **Assumptions gate (w10):** retired-id ratchet against the merge base; gate_admit.py:38 needs an id.
