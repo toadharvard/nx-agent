@@ -2228,7 +2228,7 @@ rows.json: a list of {"image", "va", "size", "certified_by": [gate ids], "type",
 certified object: the caller (the gate-output reader) passes only objects whose address, type layout and size the
 namegate, layout and abi gates certified. This tool never certifies, guesses or fills in; an uncertified object is
 not a row.
-Output fact, one line per object: `image va_start size certified_by` (hex va, decimal size, gate ids joined by '+',
+Output fact, one line per object: `image va_start size certified_by` (hex va, decimal size, gate ids joined by '+' in the order given,
 no spaces), sorted by image then va_start. The audit file holds `image va_start size type symbol unit`.
 A row with size < 1, a missing field, a non-hex-able va, or an empty certified_by is a ValueError. Two objects of
 one image whose ranges overlap are a ValueError naming both. Rows of one (image, va) are one object when size, gates, type and symbol agree (units are joined with `,`), else a ValueError.
@@ -2280,4 +2280,30 @@ OUT/globext.txt (the fact), OUT/globext.audit (type, symbol, unit), OUT/globext.
 Probe answer: the certified object containing the address, else the universe objects at it (name, units: a pinned data symbol that no
 gate certified), else `none certified`; a static (class 3) symbol of a cl object whose address n1 pins is reported as `internal`.
 Pure core: certify_all(); the CLI only reads files.
+```
+
+## link/globext_cv.py
+
+```text
+globext_cv - the extents of the exe's global data objects, from the pristine MSVC objects' own CodeView (L2 SOURCE; library core + CLI).
+
+    globext_cv.py --cl PATH... --n1 n1.json --exe FalloutNV.exe --out DIR [--range LO HI] [--probe VA ...]
+
+RULE.  A data symbol of cl object u<N>.obj (the compiler that built the exe) is in the fact only if ALL hold:
+  1. VA     N1 pins it: n1['sym'][(N, name)] (an external symbol) or n1['sym'][(N, symbol index, name)] (a static one), not an
+            absolute-value pin (bit 32).  A symbol N1 does not pin is not in the fact.
+  2. Size   the object's `.debug$S` (CV_SIGNATURE_C13) holds an S_GDATA32 or S_LDATA32 record for it, which names the symbol by its
+            relocation (the SECREL/SECTION pair at the record's offset/segment fields: the COFF symbol itself, not a name), and the size of
+            its type index comes from the object's own `.debug$T` (link/codeview.Table.size: LF_CLASS/LF_STRUCTURE/LF_UNION size, LF_ARRAY
+            size, LF_POINTER size, LF_MODIFIER/LF_ENUM/LF_BITFIELD by the underlying type, primitive types by the CodeView table).  A type
+            whose size CodeView does not give (a forward reference with no definition in that object, a leaf with no size, a pointer to
+            member) leaves the object out, and the audit lists it by that reason.
+  3. certified_by is `n1+cv`.
+UNIVERSE  every data symbol (class external or static, defined in a section that is not code, not a section symbol) of the cl objects that N1
+          pins to an address inside a non-code section of the exe (contract/exefacts.Image), counted per distinct address.  Certified is
+          counted against it.  Two certified objects that overlap in the exe are an error naming both (contract/globext.build); the same
+          object seen in several cl objects with one size is one object.
+Outputs OUT/globext.txt (`exe 0xva size n1+cv`, sorted by va), OUT/globext.audit (`exe 0xva size type symbol unit`), OUT/globext.json (counts,
+uncertified by reason, probes).  Probe: the containing certified object, else the universe symbols at the address with their reason, else
+`none certified`.  Pure core: unit_objects(), certify_all().  Exe addresses go only to fnv-nx-build.
 ```

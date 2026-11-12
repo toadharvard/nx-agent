@@ -24,7 +24,7 @@ def raises(what, rows, needle):
     fails.append(what + ': no error')
 
 
-def row(va, size, sym, image='exe', gates=('layout', 'namegate', 'abi'), unit='u'):
+def row(va, size, sym, image='exe', gates=('abi', 'layout', 'namegate'), unit='u'):
     return {'image': image, 'va': va, 'size': size, 'certified_by': list(gates), 'type': 'T' + sym, 'symbol': sym, 'unit': unit}
 
 

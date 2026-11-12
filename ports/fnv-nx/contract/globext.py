@@ -7,7 +7,7 @@ rows.json: a list of {"image", "va", "size", "certified_by": [gate ids], "type",
 certified object: the caller (the gate-output reader) passes only objects whose address, type layout and size the
 namegate, layout and abi gates certified. This tool never certifies, guesses or fills in; an uncertified object is
 not a row.
-Output fact, one line per object: `image va_start size certified_by` (hex va, decimal size, gate ids joined by '+',
+Output fact, one line per object: `image va_start size certified_by` (hex va, decimal size, gate ids joined by '+' in the order given,
 no spaces), sorted by image then va_start. The audit file holds `image va_start size type symbol unit`.
 A row with size < 1, a missing field, a non-hex-able va, or an empty certified_by is a ValueError. Two objects of
 one image whose ranges overlap are a ValueError naming both. Rows of one (image, va) are one object when size, gates, type and symbol agree (units are joined with `,`), else a ValueError.
@@ -32,7 +32,7 @@ def _row(r):
     gates = r['certified_by']
     if not gates or any((not g) or any(c.isspace() or c == '+' for c in g) for g in gates):
         raise ValueError('row %r: certified_by empty or has a bad id' % (r,))
-    return (r['image'], va, size, '+'.join(sorted(set(gates))), r['type'], r['symbol'], r['unit'])
+    return (r['image'], va, size, '+'.join(dict.fromkeys(gates)), r['type'], r['symbol'], r['unit'])
 
 
 def build(rows):
