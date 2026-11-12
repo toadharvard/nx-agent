@@ -48,5 +48,8 @@ Old workers w1, w2, w3 (session_01KmtZKSjF1rc6JAiuz1rvJg, _01KmtZKU6xzxGuGdkrtzw
 - (moved into 1e) toolchain/gcc/build.sh reproducibility.
 - TEXT_ENTRY 36 host server (swkbd).
 
+## Platform root, 2026-11-12 02:37Z (w10, verdict 569bc482)
+73 units. As committed, recipe check refuses the include dirs shim/include and loader/include (blocked: L1 w16 root-relative include mounts). Measured with them: 65/73 green; 7 red on libstdc++ 15 under GCC 13 (blocked: L5 w14 runtime 13.3), 1 on FreeType (blocked: L1 `sources`). Warm 0 run / 149 hit. Verdict: pure 38/38, selftests 56/56, oracle 56/56 green; admit red (11 gates of other layers absent from gates.json); the rest red as inputs of the red build. 385 s.
+
 ## Fleet, 2026-11-12 02:37Z
 All of w9, w10, w12 and w13 stopped at the 5-hour limit (23:03-23:09Z, reset 02:30Z). Each was resumed with its current item. w14 had waited 3.5 h for the B/A decision (the lead session restarted); it got B. w15 got its next item (ssce5432/comdlg32 reach, base refresh). New recurring check trig_01VDr2VNZy6ejvXpYvS2zb42 at :37.
