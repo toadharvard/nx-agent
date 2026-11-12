@@ -138,8 +138,8 @@ def assemble(link, res, game, out, rr):
         if is_game:
             os.symlink(o["object"], os.path.join(link, "game", name))
     os.symlink(res["elf"]["path"], os.path.join(link, "guest", "fnvnx.elf"))
-    with open(os.path.join(os.path.dirname(link), "inputs.rsp"), "w") as f:      # ld.py's response file: one quoted path per object of the link
-        f.write("".join('"%s"\n' % o["object"] for o in res["objects"]))
+    with open(os.path.join(os.path.dirname(link), "inputs.rsp"), "w") as f:      # the link's response file: one quoted path per object of the link
+        f.write("".join('"%s"\n' % o["object"] for o in res["objects"] + [x for lr in res.get("link_roots", []) for x in lr["objects"]]))   # in link order
     for k, dst in (("addrmap", "out/addrmap.tsv"), ("aliases", "out/aliases.ld")):
         os.symlink(os.path.join(out, rr[k]), os.path.join(link, dst))
 

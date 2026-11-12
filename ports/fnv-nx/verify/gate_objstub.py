@@ -41,6 +41,7 @@ def root_check(root, repo, cache, jobs):
         return {}, {}, set(), [("-", root, "build-red", "stage %s" % res["failure"]["stage"])]
     base = root + "/"
     objs = [(base + o["unit"], o["object"]) for o in res["objects"]]
+    objs += [("%s%s(%s)" % (base, m["archive"].lstrip("/"), m["member"]), m["object"]) for m in res.get("link_archives", [])]   # pulled archive members
     drv = dict(zip(("c", "c++"), recipe.host_compilers(rec, cache)))
     store, names = os.path.join(cache, "store"), set()
     for lang, ext in (("c", recipe.CC_EXT), ("c++", recipe.CXX_EXT)):

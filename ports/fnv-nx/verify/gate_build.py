@@ -21,7 +21,17 @@ import recipe  # noqa: E402
 
 
 def product_roots(repo="."):
-    return sorted(p for p, r in recipe.load_admit(repo).items() if r["class"] == "product")
+    """Every (root, variant) pair of the admitted product roots, spelled `root` (the implicit variant) or `root@NAME` (recipe.split_spec)."""
+    adm = recipe.load_admit(repo)
+    return sorted(s for p, r in adm.items() if r["class"] == "product" for s in recipe.pairs_of(_full(repo, r), p))
+
+
+def _full(repo, ent):
+    try:
+        with open(os.path.join(repo, ent["recipe"])) as f:
+            return json.load(f)
+    except (OSError, ValueError, KeyError):
+        return {}
 
 
 def buildable_roots(repo="."):
@@ -76,7 +86,7 @@ def main():
             try:
                 res, out = ensure(root, cache, repo)
             except recipe.RecipeError as e:
-                items += [root + "/" + u for u in recipe.units_of(rec, root, files) if isinstance(rec, dict)]
+                items += [root + "/" + u for u in recipe.units_of(rec, recipe.split_spec(root)[0], files) if isinstance(rec, dict)]
                 why.append("%s: invalid recipe: %s" % (root, "; ".join(e.errors)[:300]))
                 continue
             items += ids(root, res, rec)

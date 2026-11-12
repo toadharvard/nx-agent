@@ -65,7 +65,7 @@ fact status, sites examined and reasons.  --facts-h: the C header (FNVNX_REACH_<
 the requests of the same dll!name in canonical order; FNVNX_<request id> for the platform's own names; FNVNX_REACH_TABLE_ID).
 
 Mode --objects (gate `reachlink`, the link side).  The universe is every reference to the ELF symbol fnvnx_reach_violation in the
-objects and archive members of the response file (one quoted path per line, ld.py's inputs.rsp), read from the relocation
+objects and archive members of the response file (one quoted path per line, a response file of the link, inputs.rsp), read from the relocation
 tables (sh_info of a SHT_RELA / SHT_REL names the section; no text).  A reference is green iff
   - it is a R_AARCH64_P32_CALL26 / JUMP26 in an executable section (any other reference, e.g. a pointer in data, lets w0 be
     anything: `reference-not-call`);

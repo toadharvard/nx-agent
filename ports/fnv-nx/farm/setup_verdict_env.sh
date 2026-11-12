@@ -21,9 +21,13 @@ PIPW=$(J 'print(*[m + "==" + d["python"]["modules"][m] + " --hash=sha256:" + w["
 CHECK="python3 -I $VERIFY/envcheck.py check --env $ENV_JSON"
 APT="apt-get install -y --no-install-recommends $PKGS"
 PIP="python3 -m pip install --break-system-packages $PIPS"
+<<<<<<< HEAD
 PIPH="python3 -m pip install --break-system-packages --require-hashes -r /dev/stdin"
+=======
+PIPH="python3 -m pip install --break-system-packages --require-hashes -r"   # the requirements come from a file (pip 24.0 cannot read `-r -`)
+>>>>>>> origin/claude/fnv-l1-contract-w15
 if [ "$MODE" = --print ]; then
-  printf '%s\n' "apt-get update" "$APT" "$PIP" "printf '%s\\n' '$PIPW' | $PIPH" "$CHECK"
+  printf '%s\n' "apt-get update" "$APT" "$PIP" "printf '%s\\n' '$PIPW' > /tmp/fnvnx-wheels.txt && $PIPH /tmp/fnvnx-wheels.txt" "$CHECK"
   exit 0
 fi
 export DEBIAN_FRONTEND=noninteractive
@@ -37,5 +41,5 @@ done
 [ "$missing" = 0 ] || { echo "setup: FAILED, take a new env.json snapshot deliberately" >&2; exit 1; }
 $APT
 $PIP
-[ -z "$PIPW" ] || printf '%s\n' "$PIPW" | $PIPH
+if [ -n "$PIPW" ]; then W=$(mktemp); printf '%s\n' "$PIPW" > "$W"; $PIPH "$W"; rm -f "$W"; fi
 exec $CHECK
