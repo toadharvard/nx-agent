@@ -127,3 +127,118 @@ Answer: yes, in general. It is not provable as a per-shader bit from wined3d alo
   - A key missing from the table is a build error. The table is complete by construction because it is the cross product.
 - b# rows then expect the failed-link outcome with the citation in `src`. No float(b).
 - Implement when sm_link.tsv lands.
+
+## Lemmas L1 and L2 (static, wine-9.0 mirror c8373ee4, dlls/wined3d)
+
+Objects of a D3D9 program: V = vs object, R = reorder object, P = ps object (or F = FFP fragment object when no ps is used).
+R exists iff a vs is used and its major is below 4 (glsl_shader.c:10419-10428); for D3D9 that is every vs.
+GL 4.6 §7.3 (LinkProgram): a link fails if an attached shader object did not compile.
+Nothing in this section was run.
+
+### L1: link succeeds iff V, R, P each compile, under the conditions C1-C3
+
+Every symbol that appears in more than one object, with the source of each declaration:
+1. `setup_vs_output(in vec4[N])`.
+   - V declares the prototype: 8082-8083, N = vs->limits->packed_output.
+   - R defines it: 7187 (ps major < 3) or 7277 (ps major >= 3), N = vs->limits->packed_output, same vs.
+   - One source: the vs limits entry (shader.c:553-560, packed_output 12 for vs 1.x-3.0 in the table).
+2. FFP varyings `ffp_varying_diffuse`, `ffp_varying_specular`, `ffp_varying_texcoord[8]`, `ffp_varying_fogcoord` (core syntax).
+   - V declares out: 8073-8080, iff vs major < 3.
+   - R declares out: 7183-7192, iff ps major < 3.
+   - P declares in: 7770-7779, iff ps major < 3 or vp_mode != SHADER; diffuse and specular only when read (glsl_is_color_reg_read).
+   - F declares in: 9714-9718.
+   - Types are identical in every site (vec4, vec4, vec4[8], float).
+   - The `flat` qualifier comes from three computations of one state formula:
+     - vs args: shader.c:2296-2300;
+     - R: glsl_shader.c:10426-10427;
+     - ps args: shader.c:3029-3030.
+     The formula is emulated_flatshading && SHADEMODE == FLAT.
+   - Where V and R both declare a name, the declarations are identical. P's set is a subset of R's set.
+3. `ps_link[in_count]`, or the block `shader_in_out { vec4 reg[in_count]; }` when GLSL >= 150.
+   - R declares out: 7274-7276 via 2002-2030, iff ps major >= 3.
+   - P declares in: 7783-7790 via 1964-1990, iff vp_mode == SHADER and reg_maps->input_registers != 0.
+   - Both counts are `min(vec4_varyings(ps major), ps->limits->packed_input)` (7274 and 7785). Both come from the same ps, so the declared size, type and block member list match.
+   - vp_mode == SHADER whenever R exists: for ps major >= 3, find_ps_compile_args sets vp_mode = SHADER when use_vs(state) (shader.c:2945-2951), and R is attached only when use_vs (10278-10286, 10419).
+   - A vs output the ps does not read is not a link error. R zero-fills unmatched ps inputs (6998-7020) and skips indices >= max_varyings (6949-6953).
+4. Uniform names.
+   - V only: `pos_fixup` (8085), `clip_planes` (8071), `ffp_point{size,size_min,size_max}` (8061), `vs_c`/`vs_i`/`vs_b` (2261-2271), `vs_sampler*` (2417), `base_vertex_id` (2123, a vertex-id input).
+   - R only: `ffp_point{size_min,size_max}` (7168).
+   - P only: `ps_c`/`ps_i`/`ps_b`, `ps_sampler*`, `ps_samplerNP2Fixup` (7750), `ffp_fog` (7755), `bumpenv_*` (7797-7802), `ycorrection` (7822), `alpha_test_ref` (7838). F declares its own set (9633-9702), and P and F are alternatives.
+   - The prefix comes from shader_glsl_get_prefix (373), so the vs_ and ps_ names are disjoint.
+   - The only shared name is `ffp_point` in V and R.
+     - V declares it iff point_size && !per_vertex_point_size (8059, 8018).
+     - R declares it iff per_vertex_point_size, which is POINTLIST && vs->reg_maps.point_size (10425, 7166).
+     - The two conditions are mutually exclusive. The shader.c:2284-2285 formulas show point_size && per_vertex_point_size = R's flag.
+5. Built-ins.
+   - `invariant gl_Position` is declared in V (2188) and R (7164): same qualifier.
+   - gl_Position is written in R (7099) and post-processed in V (8021, fixup_position); gl_PointSize is written in V (8019) or R (7112, 7231), exclusive as in item 4.
+6. Attributes `vs_in%u` and bound locations (10454-10463): V only. Fragment outputs `color_out%u`: P only.
+
+Conditions beyond "each object compiles":
+- C1 (state coherence). V, R and P are generated from the same state values for flatshading and point size.
+  - V and P are looked up with args found at this draw only when their update-mask bit is set; otherwise the ids of the current program are reused (10278-10286, 10345-10351).
+  - Proof that every input state of V, R and P sets the mask:
+    - shademode: glsl_vertex_pipe_shademode (11884, sets VERTEX) and glsl_fragment_pipe_shademode (12272, sets PIXEL); table entries 12028 and 12393.
+    - primitive type POINTLIST: cs.c:1040-1046 invalidates STATE_POINT_ENABLE, which sets VERTEX (12027) and PIXEL (12392).
+  - Not read by me: the ffp-settings formula behind F (utils.c:6683, 6858, 6951). F is the FFP-ps partner and must be checked before it is covered.
+- C2 (varying components). The total of V's active outputs and R's outputs is at most the context limit.
+  - R writes at most 4*10 components (ps 3.0 packed_input = 10, shader.c ps_limits) or 41 for ps < 3. V adds at most one component (`ffp_varying_fogcoord`, 7997-8004).
+  - glsl_varyings = GL_MAX_FRAGMENT_INPUT_COMPONENTS - 4 (adapter_gl.c:3141-3146). GL 4.6 requires GL_MAX_FRAGMENT_INPUT_COMPONENTS >= 128, so 41 <= glsl_varyings.
+  - Pair-independent for that reason: the bound is the GL minimum, not a measurement.
+- C3 (uniform component limits) are per object: max_constantsF is computed from limits and from args (2233-2246), with no partner term.
+
+If C1-C3 hold then no object-crossing declaration can mismatch, so link succeeds iff V, R and P compile. L1 is true under C1-C3.
+It is not unconditional: C1 for F is open, and C2 rests on the GL minimum, which is a documented fact of GL 4.6 and not on Mesa.
+
+### L2: compile-argument domain (D3D9 devices only)
+
+A D3D9 device has no GS/HS/DS, so for V: next_shader_type = PIXEL, next_shader_input_count = 0 (shader.c:2288-2294), and interpolation_mode is read only for vs major >= 4 (glsl_shader.c:8087-8090). All three are constants.
+Wine itself restricts the swizzle domain to what the shader can see: vs_args_equal compares `(stored->swizzle_map & use_map)` (8609).
+
+V, per vs s. Let p(s) = popcount(s.input_registers & 0xffff), maj = shader_version.major.
+| field | read at | domain |
+|---|---|---|
+| swizzle_map | 2690; WORD cast shader.c:2278 | 2^p(s) |
+| clip_enabled | 2233, 8009, 8070 | 2 |
+| point_size (per_vertex_point_size is fixed by s.reg_maps.point_size) | 8018, 8059 | 2 |
+| fog_src | 7997 | 2 if maj < 3, else 1 |
+| flatshading | 8075-8076 | 2 if maj < 3 and the context is core (caps->emulated_flatshading, 11558), else 1 |
+
+|A_V(s)| = 2^p(s) * 2 * 2 * (2 if maj<3 else 1)^2.
+
+P, per ps s. Let n(s) = number of declared samplers (resource_info[i].type != 0), maj and min its version.
+| field | read at | domain |
+|---|---|---|
+| tex_types | via pixelshader_get_resource_type (shader.c:3107-3128), reads every declared sampler | 3^n(s) (values 2D, 3D, CUBE; ERR is never set) |
+| color_fixup[i] | 3612 | \|F\|^n(s). F = {identity} plus the complex fixups of the D3D9 formats; identity when can_use_texture_swizzle |
+| np2_fixup | 3411, 3614, 7720-7749 | 2^(number of 2D samplers) |
+| tex_transform | 5189, 6585; set only for ps 1.0-1.3 (shader.c:2796-2827) | at most 10^(samplers used by texture ops) (count 0..4 times the projected bit) |
+| vp_mode | 6787, 6842, 7753, 7787, 7930 | 3 for maj >= 3 (NONE, FF, SHADER), 1 for maj < 3 |
+| fog | 7649, 7930; set shader.c:2945-2985 | 4 (OFF, LINEAR, EXP, EXP2) if maj < 3 or vp_mode != SHADER |
+| pointsprite | 6794, 6839, 7946 | 2 |
+| flatshading | 7774-7776 | 2 if maj < 3 or vp_mode != SHADER |
+| alpha_test_func | 7651, 7837 | 8 (3 bits) |
+| y_correction | 4048, 7830 | 2 if reg_maps.vpos or usesdsy, else 1 |
+| rt_alpha_swizzle | 7615, 7628 | 2^(color outputs written) |
+| srgb_correction | 7644, 7809 | 2 |
+| dual_source_blend | 7844-7881 | 1 for D3D9 (set only from blend_state->dual_source, shader.c:3043) |
+| texcoords_initialized | 6842, 7948 | 1 when full_ffp_varyings (constant mask, shader.c:3017-3018); 2^8 otherwise |
+| shadow | not read anywhere in glsl_shader.c | 1 |
+
+Partner coupling of P's args: vp_mode and fog read only use_vs(state), that is whether a vs is present, not which vs. texcoords_initialized reads the partner vs's output_registers (shader.c:3000-3004) only when !full_ffp_varyings. A (vs present) and (no vs) class is therefore enough for P.
+The context constants (srgb_write_control, ffp_alpha_test, full_ffp_varyings, the GL limits) are fixed per context. They are the canonical state of the farm run, and the farm states them.
+
+R, per pair. R's text reads only static shader properties plus two state bits, and never P's compile args:
+- vs: output_signature, reg_maps.output_registers and its masks, limits->packed_output;
+- ps: major, input_signature, input_reg_map, reg_maps.input_registers, reg_maps.texcoord (ps < 3: 7255-7262), limits->packed_input;
+- per_vertex_point_size (10425), flatshading (10426-10427).
+
+|R| = |{vs signature class}| * |{ps signature class}| * (1 + [vs.reg_maps.point_size]) * (2 if ps maj < 3 else 1)
+- Signature class means the tuple of the fields listed above.
+- The flatshading factor is 1 for ps >= 3, because the R text for ps >= 3 does not read it (7274-7285).
+- The farm's 337 distinct reorder texts are an instance of this set; the formula is the proof object.
+
+Enumeration for the farm:
+- compile set = sum over vs of |A_V(s)| plus sum over ps of the product of the P domains above;
+- reorder set = |R| above.
+Per-shader numbers (p(s), n(s), signature classes) can be computed from the pinned SDP pack; I can generate that census if the lead wants it.
