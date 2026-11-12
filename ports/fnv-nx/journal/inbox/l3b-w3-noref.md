@@ -25,5 +25,5 @@ Not counted: lift/fnvlift, lift/tools and lift/rt hold no test files at this com
 
 ## Update (w3b)
 - lift/proof/tests/oracle.json: the stale entries are deleted; test_formgate_real.py has an entry (subject lift/proof/formgate.py; references: two specs, the x86_proof.ir pin line of lift/proof/sail_pins.txt and the model_sha256 line of lift/proof/formgate_inputs.json). lift/proof is back in the selftests DIRs.
-  Honest limit: those two references back the case that compares the inputs' model_sha256 with the pin. The other two cases (the real certs file parses; no lifted root means universe 0) assert structure and have no reference of their own in the tree.
+  Update: the two cases without a reference (certs parse, universe 0) are removed from the file; they belong to the gate `forms` itself.
 - lift/test/import_reads_no_rt_test.py belongs to L3a's fnvlift change (imports read no rt file); left alone, with no oracle entry. It stays outside the gate until L3a renames it into DIR/tests/test_*.py and gives it a spec.
