@@ -1424,7 +1424,8 @@ A fixture {gate G, expect red, finding CODE} on unit U passes iff G, run in fixt
 finding on U, and nothing on any other item. Fixture mode: G's own argv from verify/gates.json with env GATE_FIXTURES=1 and a private GATE_OUT;
 gate_build.ensure() then returns each root with the fixture units as its only objects (gate_build.fixture_view), and G's result file must
 carry "findings": [{"id": "<root>/<unit>[:<symbol>]", "code": CODE}]. A fixture that comes out green, or red with another finding, or a gate
-that writes no "findings", is red. Universe: the fixtures of all roots. Certified: those that pass. uncertified: `<root>/<unit>` (<= 50).
+that writes no "findings", is red. Whole-root fixtures: an admit entry of class `fixture` with "expect": [{gate, code}]; each expected gate is run on that root alone (env GATE_ONLY_ROOT, normal
+mode) and its findings under the root must be exactly the expected codes of that gate. Universe: the fixtures of all roots, one item per fixture root. Certified: those that pass. uncertified: `<root>/<unit>` (<= 50).
 No fixture: universe 0, green. The fixture objects are in no other gate's universe (units_of and objects.json exclude them).
 ```
 
@@ -2036,6 +2037,8 @@ Rule.  Run both compilers with the same arguments on the same null translation u
   macros   `-dM -E`: a macro the distribution defines and the reference does not  -> `-UNAME`   (_FORTIFY_SOURCE, _GLIBCXX_ASSERTIONS);
            a macro both define with different values                               -> `-DNAME=VALUE` of the reference;
            a macro only the reference defines                                      -> `-DNAME=VALUE`.
+Target choices (specdefaults.TARGET_FAMILIES: PIC/PIE, -mabi, -march/-mtune/-mcpu, -mcmodel) are the root's own: a root that states one drops the derived flags
+of that family (for_root); hardening is never a target choice.
 The result is a function of the two reports only: sorted, no host state.  Applying it (recipe.py) is a stage keyed on both compilers; a root
 may not set an option of the result or its negation (`overlap`).  An option whose value text is a list ("[default]", "[disabled]|…") is read
 as a value only in the forms above; any other form is emitted as `-name=VALUE` taken verbatim from the reference.

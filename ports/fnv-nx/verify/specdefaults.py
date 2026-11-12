@@ -19,6 +19,8 @@ Rule.  Run both compilers with the same arguments on the same null translation u
   macros   `-dM -E`: a macro the distribution defines and the reference does not  -> `-UNAME`   (_FORTIFY_SOURCE, _GLIBCXX_ASSERTIONS);
            a macro both define with different values                               -> `-DNAME=VALUE` of the reference;
            a macro only the reference defines                                      -> `-DNAME=VALUE`.
+Target choices (specdefaults.TARGET_FAMILIES: PIC/PIE, -mabi, -march/-mtune/-mcpu, -mcmodel) are the root's own: a root that states one drops the derived flags
+of that family (for_root); hardening is never a target choice.
 The result is a function of the two reports only: sorted, no host state.  Applying it (recipe.py) is a stage keyed on both compilers; a root
 may not set an option of the result or its negation (`overlap`).  An option whose value text is a list ("[default]", "[disabled]|…") is read
 as a value only in the forms above; any other form is emitted as `-name=VALUE` taken verbatim from the reference.
@@ -146,6 +148,29 @@ def overlap(root_flags, derived):
         if hit:
             r.append(t)
     return r
+
+
+# Target choices (owner-side decision of the root's target, not hardening): a root may state them, and the derived flags of that family are
+# then dropped for the root (deko3d is position independent because the console loads its NRO at an address it does not choose; the guest
+# reference is ILP32 and non-PIC).  Hardening (stack protector, stack clash, FORTIFY, cf-protection) is never a target choice: it stays forced.
+TARGET_FAMILIES = {"pic": ("-fPIC", "-fpic", "-fPIE", "-fpie"), "abi": ("-mabi",), "arch": ("-march", "-mtune", "-mcpu"), "cmodel": ("-mcmodel",)}
+
+
+def family(flag):
+    """The target family of FLAG (either sign, any value), or None"""
+    base = flag.split("=", 1)[0]
+    for p in ("-fno-", "-mno-"):
+        if base.startswith(p):
+            base = "-" + base[1] + base[len(p):]
+    return next((n for n, ms in TARGET_FAMILIES.items() if base in ms), None)
+
+
+def for_root(root_flags, derived):
+    """-> (derived flags that apply to a root stating ROOT_FLAGS, root flags that overlap them): the families the root states are the
+    root's own; the rest is forced and the root may not set it."""
+    own = {family(t) for t in root_flags} - {None}
+    kept = [d for d in derived if family(d) not in own]
+    return kept, overlap([t for t in root_flags if family(t) is None], kept)
 
 
 LEVELS = ("-O0", "-O2")   # a spec default may depend on the optimisation level (_FORTIFY_SOURCE needs -O1 or more)

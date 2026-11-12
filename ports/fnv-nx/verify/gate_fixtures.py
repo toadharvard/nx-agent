@@ -5,7 +5,8 @@ A fixture {gate G, expect red, finding CODE} on unit U passes iff G, run in fixt
 finding on U, and nothing on any other item. Fixture mode: G's own argv from verify/gates.json with env GATE_FIXTURES=1 and a private GATE_OUT;
 gate_build.ensure() then returns each root with the fixture units as its only objects (gate_build.fixture_view), and G's result file must
 carry "findings": [{"id": "<root>/<unit>[:<symbol>]", "code": CODE}]. A fixture that comes out green, or red with another finding, or a gate
-that writes no "findings", is red. Universe: the fixtures of all roots. Certified: those that pass. uncertified: `<root>/<unit>` (<= 50).
+that writes no "findings", is red. Whole-root fixtures: an admit entry of class `fixture` with "expect": [{gate, code}]; each expected gate is run on that root alone (env GATE_ONLY_ROOT, normal
+mode) and its findings under the root must be exactly the expected codes of that gate. Universe: the fixtures of all roots, one item per fixture root. Certified: those that pass. uncertified: `<root>/<unit>` (<= 50).
 No fixture: universe 0, green. The fixture objects are in no other gate's universe (units_of and objects.json exclude them)."""
 import json
 import os
@@ -19,12 +20,18 @@ import gate_build  # noqa: E402
 import recipe  # noqa: E402
 
 
-def run_gate(g, cache):
-    """-> (findings list or None, reason). One run of gate spec G in fixture mode."""
+def run_gate(g, cache, only=None):
+    """-> (findings list or None, reason). One run of gate spec G in fixture mode; with ONLY (a fixture root) the gate runs on that root alone, in normal mode."""
     out = tempfile.mkdtemp(prefix="gate-fixture-")
     try:
-        env = dict(os.environ, GATE_FIXTURES="1", GATE_OUT=out, GATE_CACHE=cache)
+        env = dict(os.environ, GATE_OUT=out, GATE_CACHE=cache)
         env.pop("GATE_KEEP", None)
+        env.pop("GATE_ONLY_ROOT", None)
+        env.pop("GATE_FIXTURES", None)
+        if only:
+            env["GATE_ONLY_ROOT"] = only
+        else:
+            env["GATE_FIXTURES"] = "1"
         p = subprocess.run(g["argv"], env=env, capture_output=True, text=True)
         try:
             r = json.load(open(os.path.join(out, g["result"])))
@@ -67,6 +74,22 @@ def judge(fixtures, found):
     return sorted(set(bad)), why, stray
 
 
+def judge_root(root, expect, found):
+    """EXPECT [{gate, code}], FOUND {gate: (findings, reason)} of runs on ROOT alone -> [reasons]. Per gate: exactly the expected codes, no other."""
+    why = []
+    for g in sorted({x["gate"] for x in expect}):
+        fs, reason = found[g]
+        if fs is None:
+            why.append("%s: gate %s: %s" % (root, g, reason))
+            continue
+        want = sorted({x["code"] for x in expect if x["gate"] == g})
+        got = sorted({f["code"] for f in fs if f["id"].startswith(root + "/")})
+        stray = sorted({f["id"] for f in fs if not f["id"].startswith(root + "/")})
+        if got != want or stray:
+            why.append("%s: gate %s expected exactly %s, got %s%s" % (root, g, want, got or "green (no finding)", "; outside the root: %s" % stray[:3] if stray else ""))
+    return why
+
+
 def main():
     repo = "."
     tmp = None if os.environ.get("GATE_CACHE") else tempfile.mkdtemp(prefix="gate-fixtures-")
@@ -81,6 +104,14 @@ def main():
         for _, g, _ in fixtures:
             found.setdefault(g, (None, "not a gate of gates.json"))
         bad, why, stray = judge(fixtures, found)
+        for root, ent in sorted((p, r) for p, r in roots.items() if r["class"] == "fixture"):   # whole-root fixtures: each expected gate runs on that root alone
+            ids_ = "%s (root)" % root
+            fixtures.append((ids_, "", ""))
+            rf = {x["gate"]: run_gate(gates[x["gate"]], cache, root) if x["gate"] in gates else (None, "not a gate of gates.json") for x in ent["expect"]}
+            w = judge_root(root, ent["expect"], rf)
+            if w:
+                bad.append(ids_)
+                why += w
     finally:
         if tmp and not os.environ.get("GATE_KEEP"):
             shutil.rmtree(tmp, ignore_errors=True)

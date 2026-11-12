@@ -23,7 +23,10 @@ import recipe  # noqa: E402
 
 def product_roots(repo="."):
     """Every (root, variant) pair of the admitted product roots, spelled `root` (the implicit variant) or `root@NAME` (recipe.split_spec)."""
+    only = os.environ.get("GATE_ONLY_ROOT")   # set by gate_fixtures.py for a whole-root fixture: exactly that root, the gate runs on it alone
     adm = recipe.load_admit(repo)
+    if only:
+        return [only] if only in adm and adm[only]["class"] in ("fixture", "product") else []
     return sorted(s for p, r in adm.items() if r["class"] == "product" for s in recipe.pairs_of(_full(repo, r), p))
 
 
@@ -78,7 +81,7 @@ def fixture_view(res):
     fx = res.get("fixtures", [])
     return dict(res, objects=[{"unit": f["unit"], "object": f["object"], "sha256": f["sha256"], "os_layer": False} for f in fx],
                 units=[f["unit"] for f in fx], elf=None, constants=None, contract_names=None, defined=[], undefined=[],
-                pp_keys={f["unit"]: f["pp_key"] for f in fx if f.get("pp_key")}, fixtures=[])
+                pp_keys={f["unit"]: f["pp_key"] for f in fx if f.get("pp_key")}, du_keys={f["unit"]: f["du_key"] for f in fx if f.get("du_key")}, fixtures=[])
 
 
 def ids(root, res, rec):

@@ -743,6 +743,7 @@ class Job:
         self.roots, self.files = load_admit(repo), tracked(repo)
         self.rec = load_recipe(repo, self.roots, spec)
         self.keys, self.run, self.hit, self.ext, self.ppkeys, self.built = set(), 0, 0, {}, {}, []
+        self.dukeys = {}
         self.red, self.blocked, self.failed = [], {}, []   # KEEP GOING: red stages (failure dicts) and {unit: stage it is blocked by}; nothing is masked (see build)
         self.spec = {}
         os.makedirs(os.path.join(store, "rt"), exist_ok=True)
@@ -805,12 +806,14 @@ class Job:
             except specdefaults.SpecError as e:
                 raise BuildRed({"stage": "specdefaults", "exit": None, "stderr": [str(e)[-300:]]})
         derived = self.cached_rt("specdefaults-" + tag, make)[1]
-        fl = self.rec["flags"]
-        bad = ["flags.%s: %s sets an option the distribution compiler's spec default fixes (derived: %s)" % (k, t, " ".join(derived[k]))
-               for k in ("c", "cxx", "asm") for t in specdefaults.overlap(fl.get(k, []), derived["c" if k == "asm" else k])]
+        fl, out, bad = self.rec["flags"], {}, []
+        for k in ("c", "cxx", "asm"):
+            kept, ov = specdefaults.for_root(fl.get(k, []), derived["c" if k == "asm" else k])
+            out[k] = kept
+            bad += ["flags.%s: %s sets an option the distribution compiler's spec default fixes (derived: %s)" % (k, t, " ".join(kept)) for t in ov]
         if bad:
             raise BuildRed({"stage": "specdefaults", "exit": None, "stderr": bad})
-        return {"c": derived["c"], "cxx": derived["cxx"], "asm": derived["c"]}
+        return out
 
     def hostpath(self, p):
         for e in self.ext.values():
@@ -1083,6 +1086,8 @@ class Job:
                 res[u] = e["object"]
                 if e.get("pp_key"):
                     self.ppkeys[u] = e["pp_key"]
+                    if e.get("du_key"):
+                        self.dukeys[u] = e["du_key"]
         self.failed = [{"unit": u, "stage": failed[u]["stage"], "exit": failed[u]["exit"], "stderr": list(failed[u]["stderr"])[-20:]} for u in units if u in failed]
         return res   # in unit order (UNITS is sorted), so the failures are deterministic
 
@@ -1318,7 +1323,7 @@ def build(repo, root, store, out, jobs=4, ext=None):
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             ent = cas.manifest(allo[u], store)["entries"]["unit.o"]
             shutil.copyfile(cas._obj(store, ent), dest)
-            res["fixtures"].append(dict(j.rec["fixtures"][u], unit=u, object=os.path.abspath(dest), sha256=ent["h"], pp_key=j.ppkeys.pop(u, None)))
+            res["fixtures"].append(dict(j.rec["fixtures"][u], unit=u, object=os.path.abspath(dest), sha256=ent["h"], pp_key=j.ppkeys.pop(u, None), du_key=j.dukeys.pop(u, None)))
         res.update(defined=sorted(res["defined"], key=lambda d: (d["symbol"], d["object"])), undefined=sorted(und))
         if j.rec.get("link") and (j.red or j.blocked or j.failed):
             j.blocked[j.rec["link"]["output"]] = (j.red or j.failed)[0]["stage"]
@@ -1387,7 +1392,7 @@ def build(repo, root, store, out, jobs=4, ext=None):
         res["failed_units"] = (res.get("failed_units") or []) + [f for f in j.failed if f not in res.get("failed_units", [])]
         res["blocked"] = [{"unit": u, "blocked_by": b} for u, b in sorted(j.blocked.items())]
         res.update(status="red", failure={k: v for k, v in first.items() if k in ("stage", "exit", "stderr")}, red_stages=[r["stage"] for r in j.red])
-    res.update(stage_keys=sorted(j.keys), stages={"run": j.run, "hit": j.hit}, units=all_units, pp_keys=dict(sorted(j.ppkeys.items())))
+    res.update(stage_keys=sorted(j.keys), stages={"run": j.run, "hit": j.hit}, units=all_units, pp_keys=dict(sorted(j.ppkeys.items())), du_keys=dict(sorted(j.dukeys.items())))
     with open(os.path.join(out, "objects.json"), "w") as f:
         json.dump(res, f, indent=1, sort_keys=True)
         f.write("\n")
