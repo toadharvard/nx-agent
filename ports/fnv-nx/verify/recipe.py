@@ -496,7 +496,7 @@ def header_dirs(rec, root, roots, repo=".", variant=""):
     for p, r in roots.items():
         if r.get("class") == "product" and tg in targets_of(r):
             dirs.add(p + "/include")
-            for path in [r["recipe"] if r.get("target") == tg else None] + [q for t, q in own_recipes(r).values() if t == tg]:
+            for path in [r.get("recipe") if r.get("target") == tg else None] + [q for t, q in own_recipes(r).values() if t == tg]:
                 try:
                     with open(os.path.join(repo, path)) as f:
                         add(json.load(f).get("include") or [])
