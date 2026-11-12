@@ -277,7 +277,7 @@ def main(argv):
     data_ranges = [(va, va + vs) for _n, (va, vs, _ro, _rs) in img.secs.items() if not va <= img.text[0] < va + vs]
     z7 = {}
     for d in a.z7:
-        for f in os.listdir(d):
+        for f in sorted(os.listdir(d)):
             if f.endswith('.obj'):
                 z7.setdefault(f, os.path.join(d, f))
     srcs = [u['source'].replace('/', '_') + '.obj' for u in json.load(open(a.units))['units']]

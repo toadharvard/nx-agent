@@ -2235,53 +2235,6 @@ one image whose ranges overlap are a ValueError naming both. Rows of one (image,
 --range prints the object count inside [LO, HI); --probe prints the object containing each VA, or `none certified`.
 ```
 
-## contract/globext_rows.py
-
-```text
-globext_rows - the certified objects of one build, as the rows globext.py writes (L2).
-
-Pure functions; the inputs are the outputs of the gates, passed in, never read from the exe here.
-  parse_objects(data, where) -> [(asm, size, align, elem, itanium, flags)]     the `.fnvnx.objects` section (plugin fnvnx_layout)
-  certify(obj, objects, sympair, bind_sym, name_ok, record_ok, scalar_ok, unit) -> (rows, rejected)
-      obj        object basename (the key of bind_sym and name_ok)
-      objects    parse_objects rows of the object;  sympair  l2sections.parse_sympair rows of the object
-      bind_sym   {(obj, symbol): exe address}  bind.bind_all(...)['sym']: the VA from the msvc/exe facts (N1)
-      name_ok    {(obj, symbol): gate ids}     the asm <-> msvc name pairs the name gate certified
-      record_ok  {(obj, record key): gate ids} the record types the layout and abi gates certified
-      scalar_ok  {itanium type: gate ids}      the scalar types the data-model gate certified (a pointer is the type `P`)
-      rows       one dict per certified object, the input of globext.build (image `exe`)
-      rejected   [(symbol, reason)] for every object row that is not certified: nothing is guessed or filled in
-An object is certified only when ALL hold: a `data` `def` row of the sympair section names it (msvc name not empty), the name gate
-certified the pair, bind_sym has an address for it (an absolute-value pin, bit 32, is no address), and its type is certified: a record
-element by record_ok on its key, a scalar element by scalar_ok, an array by its element type (the array's size is the plugin's
-TYPE_SIZE_UNIT, element size times the declared extent; an incomplete array has no row, so it is absent).  certified_by is the union
-of the gate ids of the name, the type and `n1` (the address).
-```
-
-## contract/globext_run.py
-
-```text
-globext_run - the global-extents fact of a build: certified objects, the universe, the probes (L2; library core + CLI).
-
-    globext_run.py --gcc PATH... --cl PATH... --units units.json --n1 n1.json --exe FalloutNV.exe
-                   --datamodel UNITS.txt --out DIR [--range LO HI] [--probe VA ...]       (inputs of the gates names and r7: link/unitpairs.py)
-
-Everything is read from the gates' own libraries and the contract stage outputs, never re-derived here:
-  name pairs   link/gate_names.rows        a (unit, symbol) is name-certified when its row has reason ''
-  records      link/gate_r7.rows           a (unit, key) is layout-certified when verdict `equal`; the abi gate's shared-layout item
-               (verify/gate_abi.read_objects: one layout in every unit that has the key) must hold too, else the key is not certified
-  scalars      --datamodel: the unit stems the datamodel gate certified (one per line; gate_datamodel.unit_why == []): every scalar
-               type of such a unit is certified by the msvcmodel ILP32 sizes
-  addresses    --n1 (contract/n1.py output): n1['sym'][(unit index, msvc name)], the unit index being the N of the cl object `u<N>.obj`;
-               one name with two different addresses over a source's units is rejected
-  universe     every data symbol (external class, defined in a non-code section) of the cl objects of the paired units, which n1 pins to
-               an address inside a non-code section of the exe (contract/exefacts.Image): counted per distinct address ("all")
-OUT/globext.txt (the fact), OUT/globext.audit (type, symbol, unit), OUT/globext.json (counts, rejected reasons by class, probes).
-Probe answer: the certified object containing the address, else the universe objects at it (name, units: a pinned data symbol that no
-gate certified), else `none certified`; a static (class 3) symbol of a cl object whose address n1 pins is reported as `internal`.
-Pure core: certify_all(); the CLI only reads files.
-```
-
 ## link/globext_cv.py
 
 ```text
