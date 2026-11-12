@@ -11,6 +11,8 @@
  *     or for link pairs is refused by name instead of being answered with a DKSH of unknown variant; variant 0 with no link pairs (the stage alone) is the pack's meaning.
  *  K5 the same key returns the same id and counts one more owner (GL D3); each destroy takes one back, the last releases the code block. The key is the hash alone (as in the pack):
  *     two bytecodes with equal FNV-1a 64 are one key, which is also what the pack builder cannot tell apart (assumption).
+ *  K6 SHADER_CREATE (NxShaderDesc = stage, glsl, glsl_size, sha256 key) takes its DKSH from the pack's G table (NXSP v2, dk.h): the key is an index, the row is accepted only if stage, GLSL size
+ *     and GLSL bytes equal the descriptor's. A missing key, a mismatch or an invalid pack is an error through nxdk_err (the cbError queue), code 0, nothing registered; no default shader.
  * Assumption: the caller does not destroy a shader whose commands are in flight (the GL rule). */
 #include "dk.h"
 #include <stdarg.h>
@@ -89,16 +91,75 @@ static uint8_t* copy_in(uint64_t a, uint64_t n) {
     return c;
 }
 
+/* K6: the pack of NXSP v2 (dk.h) is read and validated once, at the first use of a pack that is installed. state 0 = not read yet, 1 = valid, 2 = invalid (why = the reason, kept).
+ * A pack that is not installed (NULL) is not cached: the embedder may install it later, and every call then reports the absence. */
+static struct { int state; const uint8_t* pk; uint64_t size; uint32_t gcount, gidx; const char* why; } g_pack;
+enum { GROW = 52 };
+
+static const char* pack_validate(const uint8_t* pk, uint64_t psz, uint32_t* gcount, uint32_t* gidx) {
+    *gcount = 0; *gidx = 0;
+    if (psz < IDX_OFF || memcmp(pk, "NXSP", 4)) return "the pack is not an NXSP pack";
+    uint32_t ver = rd32(pk + 4);
+    if (ver != 1 && ver != 2) return "the NXSP version is neither 1 nor 2";
+    if (ver == 1) return NULL;
+    uint32_t gc = rd32(pk + 20), gi = rd32(pk + 24);
+    if ((uint64_t)gi + (uint64_t)GROW * gc > psz) return "the G table is outside the pack";
+    for (uint32_t i = 0; i < gc; i++) {
+        const uint8_t* r = pk + gi + (uint64_t)i * GROW;   /* key[32] u32 stage, glsl_off, glsl_size, dksh_off, dksh_size */
+        if (rd32(r + 32) > NxStage_Fragment) return "a G table row has a stage that is neither vertex nor fragment";
+        if ((uint64_t)rd32(r + 36) + rd32(r + 40) > psz) return "a G table row's GLSL is outside the pack";
+        if (!rd32(r + 48) || rd32(r + 48) > MAX_DKSH || (uint64_t)rd32(r + 44) + rd32(r + 48) > psz) return "a G table row's DKSH is empty, above 4 MiB or outside the pack";
+        if (i && memcmp(r - GROW, r, 32) >= 0) return "the G table keys are not strictly ascending";
+    }
+    *gcount = gc; *gidx = gi;
+    return NULL;
+}
+
+/* 1 = a valid pack is in g_pack; 0 = an error was recorded through nxdk_err (the absence, or the invalid pack with its kept reason) */
+static int pack_open(const char* who) {
+    if (!g_pack.state) {
+        uint64_t psz = 0;
+        const uint8_t* pk = (const uint8_t*)nxdk_shader_pack(&psz);
+        if (!pk) { nxdk_err("%s: no shader pack is installed", who); return 0; }
+        g_pack.pk = pk; g_pack.size = psz;
+        g_pack.why = pack_validate(pk, psz, &g_pack.gcount, &g_pack.gidx);
+        g_pack.state = g_pack.why ? 2 : 1;
+    }
+    if (g_pack.state == 2) { nxdk_err("%s: the shader pack is invalid: %s", who, g_pack.why); return 0; }
+    return 1;
+}
+
 uint64_t nxdk_shader_create(uint64_t a) {
+    static const char W[] = "shader_create";
     const NxShaderDesc* dp = (const NxShaderDesc*)nxdk_guest_ptr(a, sizeof *dp);
-    if (!dp) return refuse("shader_create", "descriptor %llx is not readable", (unsigned long long)a);
+    if (!dp) return refuse(W, "descriptor %llx is not readable", (unsigned long long)a);
     const NxShaderDesc d = *dp;
-    if (d.stage > NxStage_Fragment) return refuse("shader_create", "stage %u is neither vertex (0) nor fragment (1)", d.stage);
-    if (d.pad) return refuse("shader_create", "reserved field is not 0");
-    if (!d.dksh || !d.dksh_size || d.dksh_size > MAX_DKSH) return refuse("shader_create", "the DKSH image is missing or its size %u is 0 or above 4 MiB", d.dksh_size);
-    uint8_t* img = copy_in(d.dksh, d.dksh_size);
-    if (!img) return refuse("shader_create", "the DKSH image %llx is not readable", (unsigned long long)d.dksh);
-    uint64_t id = make("shader_create", img, d.dksh_size, d.stage, 0, 0);
+    if (d.stage > NxStage_Fragment) return refuse(W, "stage %u is neither vertex (0) nor fragment (1)", d.stage);
+    if (!pack_open(W)) return 0;
+    /* The key is only an index into the G table: the row is accepted only if its GLSL bytes equal the descriptor's (below), and the row's DKSH was built from exactly those bytes.
+     * A wrong or colliding key can therefore only miss (or hit a row whose GLSL differs, which is refused); it can never select a DKSH that does not belong to this program. */
+    uint32_t lo = 0, hi = g_pack.gcount;
+    const uint8_t* row = NULL;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        const uint8_t* r = g_pack.pk + g_pack.gidx + (uint64_t)mid * GROW;
+        int c = memcmp(d.key, r, 32);
+        if (!c) { row = r; break; }
+        if (c < 0) hi = mid; else lo = mid + 1;
+    }
+    if (!row) return refuse(W, "the key is not in the shader pack (stage %u, GLSL size %u)", d.stage, d.glsl_size);
+    if (rd32(row + 32) != d.stage) return refuse(W, "the pack row of the key has stage %u, the descriptor has %u", rd32(row + 32), d.stage);
+    if (rd32(row + 40) != d.glsl_size) return refuse(W, "the pack row's GLSL size %u differs from the descriptor's %u", rd32(row + 40), d.glsl_size);
+    uint8_t* glsl = d.glsl_size ? copy_in(d.glsl, d.glsl_size) : NULL;   /* K1: copied before it is looked at */
+    if (d.glsl_size && !glsl) return refuse(W, "the GLSL %llx is not readable", (unsigned long long)d.glsl);
+    int same = !d.glsl_size || !memcmp(g_pack.pk + rd32(row + 36), glsl, d.glsl_size);
+    free(glsl);
+    if (!same) return refuse(W, "the pack row's GLSL differs from the descriptor's");
+    uint32_t dsz = rd32(row + 48);
+    uint8_t* img = (uint8_t*)malloc(dsz);
+    if (!img) return refuse(W, "out of memory");
+    memcpy(img, g_pack.pk + rd32(row + 44), dsz);
+    uint64_t id = make(W, img, dsz, d.stage, 0, 0);
     free(img);
     return id;
 }
@@ -109,7 +170,7 @@ static const uint8_t* pack_find(uint64_t hash, uint32_t stage, uint64_t* size, c
     const uint8_t* pk = (const uint8_t*)nxdk_shader_pack(&psz);
     if (!pk || psz < IDX_OFF) { *why = "no shader pack is installed"; return NULL; }
     uint32_t cnt = rd32(pk + 8), idx = rd32(pk + 12), dat = rd32(pk + 16);
-    if (memcmp(pk, "NXSP", 4) || rd32(pk + 4) != 1 || idx < IDX_OFF || (uint64_t)idx + (uint64_t)cnt * ENTRY > dat || dat > psz) { *why = "the pack is not an NXSP v1 pack"; return NULL; }
+    if (memcmp(pk, "NXSP", 4) || (rd32(pk + 4) != 1 && rd32(pk + 4) != 2) || idx < IDX_OFF || (uint64_t)idx + (uint64_t)cnt * ENTRY > dat || dat > psz) { *why = "the pack is not an NXSP v1 or v2 pack"; return NULL; }
     char name[17]; snprintf(name, sizeof name, "%016llx", (unsigned long long)hash);
     const uint8_t* hit = NULL;
     for (uint32_t i = 0; i < cnt; i++) {
