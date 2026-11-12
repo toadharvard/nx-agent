@@ -31,9 +31,20 @@ fetch_branch() {   # fetch_branch <branch> <dir>: a worktree of the branch head 
     if [ ! -d "$d" ]; then git -C "$B" fetch -q --depth 1 origin "$1"; git -C "$B" worktree add -f "$d" FETCH_HEAD >/dev/null; fi
 }
 
-# 0. python dependencies of the prover (versions as measured; PyPI is reachable on the farms): capstone (shape.py, the decoder) and keystone-engine (enc_table.py,
-#    imported by prove.py); z3-solver is installed by sail_setup.sh from the mirror wheel
-python3 -c 'import capstone, keystone' 2>/dev/null || python3 -m pip install -q --break-system-packages "capstone==5.0.9" "keystone-engine==0.9.2"
+# 0. python dependencies of the prover: capstone (shape.py, the decoder) and keystone-engine (enc_table.py, imported by prove.py), ONLY from the mirror branch
+#    tools/pywheels-prover of the artifacts repository, installed with --require-hashes against the sha256 of proof/sail_pins.txt (the same pins as the toolchain; no PyPI);
+#    z3-solver is installed by sail_setup.sh from the tools/sail-mirror wheel
+if ! python3 -c 'import capstone, keystone' 2>/dev/null; then
+    fetch_branch tools/pywheels-prover "$W/in/pywheels"
+    REQ="$W/in/prover-requirements.txt"
+    : > "$REQ"
+    for n in capstone keystone-engine; do
+        v=$(awk -v n="$n" '$1==n{print $3}' "$HERE/sail_pins.txt"); h=$(awk -v n="$n" '$1==n{print $4}' "$HERE/sail_pins.txt")
+        [ -n "$v" ] && [ -n "$h" ] || { echo "no pin for $n in sail_pins.txt" >&2; exit 1; }
+        echo "$n==$v --hash=sha256:$h" >> "$REQ"
+    done
+    python3 -m pip install -q --break-system-packages --no-index --no-deps --require-hashes --find-links "$W/in/pywheels" -r "$REQ"
+fi
 
 # 1. toolchain: the installed one, else built from the mirror branch (sail_setup.sh prints the IR sha256 and exits 1 unless it equals the pin)
 ISLA=${ISLA_EXEC:-/home/user/rems-project/isla/target/release/isla-execute-function}
