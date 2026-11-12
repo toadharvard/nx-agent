@@ -130,3 +130,10 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
   - FINDING: platform's flags.c has no semantics flags, so C units get the GNU C default -ffp-contract=fast and unsigned plain char on aarch64. 7 fmadd/fmsub contractions sit in ffp/ffp_vs_state.c.o, against OWNER assumption 8.
   - Rule sent to L1 w17: one semantics set for every language.
   - Interim: w6 sets render/d3d9's c (and lib/sha256's) to platform's cxx semantics minus the C++-only flags, recounts fmadd (expected 0), and lists signed-char-sensitive sites.
+- 03:30Z Env-dump farm result (session_01KmtZKSSTwzATWBSyXQRW2Q, branch head 32c2e0f7).
+  - env_handheld.tsv (ff340ae4) and env_docked.tsv (e1db357d): byte-equal over 4 runs each, and equal to the committed dumps (232,251 queries per profile).
+  - The mingw-w64, Wine 9.0 and Mesa packages are pinned in ENV_PIN. Published: fnv-nx-build tools/envprobe-bin d2b6916c (tree ac3c8ad2).
+  - Open (farm, doing):
+    - the probe binaries are not byte-reproducible (two builds give two sha256): find the cause and fix it;
+    - delete the tracked partial copy of shim d3d9.h (rec/d9_validator_compat.h) and generate it at build time instead.
+  - Merge after both.
