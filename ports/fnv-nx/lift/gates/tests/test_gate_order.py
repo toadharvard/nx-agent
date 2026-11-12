@@ -431,6 +431,11 @@ class T(unittest.TestCase):
         self.assertIn('no .fnvl.fsw record', bad(ST, {0x401000: 'mem', 0x401004: 'ax'})[0][1])   # an FPU status instruction without a record
         self.assertIn('is no FPU status instruction', bad(ST, {})[0][1])                          # a record of another address
         self.assertIn('unknown form', bad(ST, {0x401000: 'zz'})[0][1])
+        # the one status-word store path: `dmb ishst; str` inside the range, for every address (the gate does not distinguish an aligned from an unaligned address: the rule is the barrier before the plain store)
+        IN = 's0:\n dmb ishst\n str w0,[x19]\ne0:\n ret'; INH = 's0:\n dmb ishst\n strh w0,[x19]\ne0:\n ret'
+        self.assertEqual(bad(IN, {0x401000: 'mem'}), [])                       # a 4-byte status store (FNSTENV/FNSAVE words, aligned address)
+        self.assertEqual(bad(INH, {0x401000: 'mem'}), [])                      # a 2-byte FSTSW m16 store (any address, including an unaligned one)
+        self.assertIn('exactly one guest store', bad('s0:\n dmb ishst\n strh w0,[x19]\n dmb ishst\n str w0,[x20]\ne0:\n ret', {0x401000: 'mem'})[0][1])
         ST2 = 'dmb ishst\ns0:\n str w0,[x19]\ne0:\ndmb ishst\ns1:\n str w0,[x20]\ne1:\n ret'
         self.assertEqual(bad(ST2, {0x401000: 'mem'}, '.word 0x401000, s0, e0\n.word 0x401000, s1, e1'), [])    # two records of one instruction, each judged
         self.assertIn('exactly one guest store', bad('dmb ishst\ns0:\n str w0,[x19]\ne0:\ns1:\n mov w0,w1\ne1:\n ret', {0x401000: 'mem'}, '.word 0x401000, s0, e0\n.word 0x401000, s1, e1')[0][1])
