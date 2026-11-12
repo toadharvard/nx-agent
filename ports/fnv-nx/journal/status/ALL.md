@@ -9,7 +9,7 @@ Updated 2026-11-12 02:40Z (hourly check plus the resume after the 5 h limit rese
 
 ## Blocker of goal step 1
 
-`gate_admit.REQUIRED_PRODUCT` names 32 gates, and gates.json has 25, so 7 gates are missing by name. Owners:
+`gate_admit.REQUIRED_PRODUCT` names 32 gates. gates.json has 25 gates, but only 21 of them are on that list, so 11 required gates are missing at e35b870. Owners:
 
 | Missing gate(s) | Owner |
 |---|---|
