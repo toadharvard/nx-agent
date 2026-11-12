@@ -44,7 +44,16 @@ SECTIONS
 		*(.text.exit .text.exit.*)
 		*(.text.startup .text.startup.*)
 		*(.text.hot .text.hot.*)
-		*(.text .stub .text.* .gnu.linkonce.t.*)
+		*(.text .gnu.linkonce.t.*)
+		*(.text.[!f]* .text.f .text.f[!n]* .text.fn .text.fn[!v]* .text.fnv .text.fnv[!l]* .text.fnvl?*)
+		. = ALIGN(8);
+	} :code
+
+	/* the code that stands for lifted code, as in the product script: an output section of its own (the job's icount range `lifted` is
+	   section .text.fnvl). The patterns of .text above are `.text.` followed by every suffix except exactly "fnvl". */
+	.text.fnvl :
+	{
+		KEEP (*(.text.fnvl))
 		. = ALIGN(8);
 	} :code
 
