@@ -158,7 +158,7 @@ No trap paths. Whatever the x86 code does on the CPU, the lifted code does:
 Proof: every FuncInfo and scope table of every image is a dataflow fact over the decoded code (`tools/ehtables.py` on the flow engine `tools/ehflow.py`):
 ThrowInfo at each throw site through the callers' arguments (R1), callee-saved registers across calls only where the callee is proven to restore them (R2),
 the SEH scope table of a registration helper from the argument at every direct call site (R3), the table length as 1 + the largest constant trylevel stored (R4).
-A site no rule resolves is red in `tools/gate_eh.py` (never skipped), as is a table entry without a lifted landing. The bench throws
+A site no rule resolves is red in `gates/gate_eh.py` (never skipped), as is a table entry without a lifted landing. The bench throws
 through every function that has one, comparing the unwind actions with the x86 execution.
 
 ## Entries: the universe
