@@ -65,15 +65,18 @@ register holds its value at entry again only by a reload of the 8-byte slot (4-b
 address filled with it, at the same constant offset from the entry sp, and sp comes back to its entry value. Code that no STT_FUNC range
 covers is red. The rule discharges the assumption of AAPCS64 for hand-written assembler (ASM-200); for compiler output it stays ASM-001.
 
-Indirect branches (rule (b)): a forward dataflow gives every register the set of load classes its value derives from on some
-path (a load gives its class, any other instruction the union of the registers it reads, a call clears x0-x18 and x30). A
-`br`/`blr` whose target register derives from a load is in the universe (one row, tag br). It is certified iff every load
-it derives from is an IMAGE load from a read-only section with a proven bound whose every word of the bounded range carries a
-relocation to an executable section (so the targets are statically the relocated code addresses). Red: a target loaded from a
-writable or unknown section, from CPU, FRAME or GUEST memory, from a range not proven inside the section, or with a word without
-a relocation to code. A target with no load in the function (an argument, a call result) is not in the universe: it is the
-dispatcher's and the caller's business. Counted globally by class: br_target_from_a_load, br_table_target, br_from_cpu,
-br_from_frame, br_from_guest, br_from_image_writable_or_unknown, br_from_image_unbounded_or_unrelocated.
+Indirect branches (rule (b)): lifted objects are built with -fno-jump-tables, so every `br`/`blr` (not `ret`) is in the universe (one row,
+tag br) and is certified only in these forms, on every path: (i) the target is the return value x0 of a `bl` whose relocation targets
+the dispatcher, unchanged since (only `mov` copies it); (ii) a word loaded from an IMAGE address within a bounded range of a
+read-only section (no SHF_WRITE), where every word of the range carries a relocation to an executable section; (iv) a word loaded
+from the GOT entry (R_AARCH64_P32_LD32_GOT_LO12_NC) of an STT_FUNC symbol. The forward dataflow gives every register the set of
+origins of its value on some path: a load gives its class, a `mov` copies, a call or any other instruction gives `unknown`, and a
+join is the union. Red: any other origin (an argument, a call result of another function, arithmetic, a CPU, FRAME or GUEST load,
+a writable or unbounded table, a word without a relocation to code, a GOT entry of a symbol that is no STT_FUNC). Form (iii), `ret`
+through x30, is rule (c)'s. The only name the gate reads is the dispatcher's, `fnvl_dispatch`, which rt/rt.c exports: it must be a
+defined global STT_FUNC of RTOBJ (otherwise the gate stops), and a call to it is a `bl` whose relocation's target symbol has that
+name. An STT_FUNC symbol is one that some given object or RTOBJ defines with that type. Counted globally: br_indirect, br_dispatch_result,
+br_table_target, br_got_function and br_illegal_<class>.
 
 addrwrap (F). Universe: as order. A guest access is certified iff the operand is the base register alone (no displacement,
 no index, no writeback) and the base holds a 32-bit value: on every path its last writer is a W-form instruction, a copy
@@ -123,12 +126,14 @@ def elf(path):
     cstr = lambda tab, o: b[tab + o:b.index(b'\0', tab + o)].decode()
     names = [cstr(sh[shstr][4], s[0]) for s in sh]
     out = {i: [names[i], b[s[4]:s[4] + s[5]], {}, [], [], []] for i, s in enumerate(sh) if s[1] == 1 and s[2] & 4}
-    syms = {}; drel = {}        # drel: {section: {offset: (reloc type, the target is in an executable section)}} for every section
+    syms = {}; symname = {}; deffunc = set(); drel = {}        # drel: {section: {offset: (reloc type, the target is in an executable section)}} for every section
     for s in sorted(sh, key=lambda s: s[1] != 2):
         if s[1] == 2:                                                   # SHT_SYMTAB
             marks = {}
             for k in range(s[5] // 16):
                 nm, val, _sz, info, _o, shndx = struct.unpack_from('<IIIBBH', b, s[4] + 16 * k)
+                symname[k] = cstr(sh[s[6]][4], nm)
+                if info & 15 == 2 and 0 < shndx < shnum: deffunc.add(symname[k])
                 if 0 < shndx < shnum: syms[k] = (shndx, val, sh[shndx][5], bool(sh[shndx][2] & 1), sh[shndx][8], bool(sh[shndx][2] & 4))   # defined in a section: (section, offset, size, SHF_WRITE, alignment, SHF_EXECINSTR)
                 if shndx not in out: continue
                 n = cstr(sh[s[6]][4], nm)
@@ -144,8 +149,8 @@ def elf(path):
                 y = syms.get(info >> 8)
                 drel.setdefault(s[7], {})[off] = (info & 0xff, bool(y and y[5]))
                 if s[7] not in out: continue         # the target: (section, offset, bytes from the target to the section end, the section is SHF_WRITE, section alignment)
-                out[s[7]][2][off] = (info & 0xff, (y[0], y[1] + add, y[2] - y[1] - add, y[3], y[4]) if y and 0 <= y[1] + add < y[2] else None)
-    return [tuple(v) + (drel,) for _, v in sorted(out.items())]
+                out[s[7]][2][off] = (info & 0xff, (y[0], y[1] + add, y[2] - y[1] - add, y[3], y[4]) if y and 0 <= y[1] + add < y[2] else None, symname.get(info >> 8))
+    return [tuple(v) + (drel, deffunc) for _, v in sorted(out.items())]
 
 
 def regno(name):
@@ -229,9 +234,9 @@ def decode(md, code, relocs, data):
                 if g and m not in ('tst', 'cmp', 'cmn', 'ccmp', 'ccmn'): i.wr.append(g)       # flag-setting aliases write no register
             reg = lambda k: regno(ci.reg_name(ops[k].reg)) if len(ops) > k and ops[k].type == A.ARM64_OP_REG else None
             imm = lambda k: ops[k].imm if len(ops) > k and ops[k].type == A.ARM64_OP_IMM else None
-            rel, rtgt = relocs.get(ci.address, (None, None))
+            rel, rtgt, rname = relocs.get(ci.address, (None, None, None))
             if rel in (R_PG_HI21, R_ADD_LO12): i.img = (rel, rtgt)
-            elif rel is not None: i.own = (rel, rtgt)
+            elif rel is not None: i.own = (rel, rtgt, rname)
             if m in ('dc', 'ic', 'sys', 'sysl'): i.bad = 'system instruction'
             if m.startswith(LSE): i.bad = 'LSE instruction'
             if m == 'dmb': i.bar = ci.op_str.strip()
@@ -313,11 +318,29 @@ def cpusize(path):
 
 
 ASM = frozenset()
+FUNCS = frozenset()
+DISPATCH = 'fnvl_dispatch'     # the one name the gate reads: the dispatcher that rt/rt.c exports (defined global STT_FUNC of the runtime object)
 
 
-def init(n, asm=frozenset()):
-    global CPUSIZE, ASM
-    CPUSIZE = n; ASM = asm
+def init(n, asm=frozenset(), funcs=frozenset()):
+    global CPUSIZE, ASM, FUNCS
+    CPUSIZE = n; ASM = asm; FUNCS = funcs
+
+
+def deffuncs(path):
+    """-> (names of the STT_FUNC symbols the object defines, names of its global ones)"""
+    b = open(path, 'rb').read(); allf, glob = set(), set()
+    shoff, = struct.unpack_from('<I', b, 32); shentsize, shnum = struct.unpack_from('<HH', b, 46)
+    sh = [struct.unpack_from('<10I', b, shoff + k * shentsize) for k in range(shnum)]
+    for h in sh:
+        if h[1] != 2: continue
+        stro = sh[h[6]][4]
+        for o in range(h[4], h[4] + h[5], 16):
+            nm, val, size, info, _other, shndx = struct.unpack_from('<IIIBBH', b, o)
+            if info & 15 == 2 and 0 < shndx < shnum:
+                n = b[stro + nm:b.index(b'\0', stro + nm)].decode(); allf.add(n)
+                if info >> 4 == 1: glob.add(n)
+    return allf, glob
 
 
 def asmcheck(L, fsyms, code):
@@ -465,7 +488,7 @@ def analyse(path):
 
     def glob(why, ins): tick('rule_violations'); red('order', ins, why, 'rule')
 
-    for sname, code, relocs, funcs, data, fsyms, drel in elf(path):
+    for sname, code, relocs, funcs, data, fsyms, drel, _deff in elf(path):
         cur[0] = sname; cur[1] = fsyms
         L, badoff = decode(md, code, relocs, data)
         if L is None:
@@ -490,7 +513,7 @@ def analyse(path):
         blocks = [(at[a], at[starts[n + 1]] if n + 1 < len(starts) else len(L)) for n, a in enumerate(starts)]
 
         def top(n):         # the most conservative state: valid at any program point
-            return [[GUEST] * 31, [False] * 19 + [True] * 8 + [False] * 4, [1] * 31, [(3 << 40) | (n << 5) | r for r in range(31)], None, [None] * 31, [None] * 31, [None] * 31, [None] * 31, {}, NEG, [0] * 31]
+            return [[GUEST] * 31, [False] * 19 + [True] * 8 + [False] * 4, [1] * 31, [(3 << 40) | (n << 5) | r for r in range(31)], None, [None] * 31, [None] * 31, [None] * 31, [None] * 31, {}, NEG, [64] * 31]
 
         def entry(n):
             s = top(n); s[0][27] = CPU; s[7][27] = (0, 0); s[10] = None; return s
@@ -545,7 +568,8 @@ def analyse(path):
             return 'other', None
 
         BR = {'br', 'blr', 'braa', 'braaz', 'brab', 'brabz', 'blraa', 'blraaz', 'blrab', 'blrabz'}
-        BRCLS = ((2, 'cpu'), (4, 'frame'), (8, 'guest'), (16, 'image_writable_or_unknown'), (32, 'image_unbounded_or_unrelocated'))
+        BRCLS = ((2, 'cpu'), (4, 'frame'), (8, 'guest'), (16, 'image_writable_or_unknown_or_not_a_function'), (32, 'image_unbounded_or_unrelocated'), (64, 'unknown_origin'))
+        TABLE, UNK, DISP, GOTF = 1, 64, 128, 256; OKB = TABLE | DISP | GOTF; ILLB = 2 | 4 | 8 | 16 | 32
 
         def loadmask(s, ins):
             """provenance bit of a loaded value: 1 a word of a bounded read-only image table, all relocated to executable sections; 2 cpu; 4 frame; 8 guest;
@@ -554,7 +578,7 @@ def analyse(path):
             if c == CPU: return 2
             if c == FRAME: return 4
             if c == GUEST: return 8
-            if ins.kind == 'image': return 16
+            if ins.kind == 'image': return GOTF if ins.own and ins.own[0] == R_GOT_LOAD and ins.own[2] in FUNCS else 16
             k, pos = imgro(s, ins)
             if k == 'other': return 16
             if k == 'bound' or ins.asz not in (4, 8): return 32
@@ -562,13 +586,16 @@ def analyse(path):
             return 1 if all(drel.get(sec, {}).get(off + i * stride, (0, False))[1] for i in range(count)) else 32
 
         def brcheck(ins, m):
-            tick('br_indirect')
-            if not m: tick('br_target_not_from_a_load'); return          # an argument or a call result: the dispatcher's and the caller's business
-            item('order', ins, 'br'); tick('br_target_from_a_load')
-            if m == 1: tick('br_table_target'); return
-            names = [nm for bit, nm in BRCLS if m & bit]
-            for nm in names: tick('br_from_' + nm)
-            tick('rule_violations'); red('order', ins, 'the target of an indirect branch is loaded from ' + ', '.join(names), 'br')
+            """every br/blr is in the universe. Legal: the target is the return value of a call to the dispatcher (copies of it), a word of a
+            bounded read-only image table whose words are relocated to code, or a GOT entry of an STT_FUNC symbol, on every path"""
+            tick('br_indirect'); item('order', ins, 'br')
+            if m and not m & ~OKB:
+                for bit, nm in ((TABLE, 'table_target'), (DISP, 'dispatch_result'), (GOTF, 'got_function')):
+                    if m & bit: tick('br_' + nm)
+                return
+            names = [nm for bit, nm in BRCLS if m & bit] or ['unknown_origin']
+            for nm in names: tick('br_illegal_' + nm)
+            tick('rule_violations'); red('order', ins, 'an indirect branch whose target is not a dispatcher result, a relocated read-only table word or a function GOT entry on every path (' + ', '.join(names) + ')', 'br')
 
         def step(s, ins, check):
             cls, wc, al, vn, kc, ub, off = s[0], s[1], s[2], s[3], s[5], s[6], s[7]
@@ -579,12 +606,14 @@ def analyse(path):
             for r in ins.rd:
                 if r < 31: pin |= pv[r]
             if ins.txt.split()[0] in BR and check: brcheck(ins, pin)
+            disp = ins.call and ins.own and ins.own[2] == DISPATCH
             if ins.call:
                 for r in range(19):          # a frame address in a call-clobbered register is handed to the callee
                     if cls[r] == FRAME: s[10] = NEG if fo[r] is None else fo[r] if s[10] is None else min(s[10], fo[r])
                 if s[10] is not None:        # a callee may write at and above every frame address that escaped
                     for k in [k for k in slots if k + 8 > s[10]]: del slots[k]
-                for r in list(range(19)) + [30]: pv[r] = 0; cls[r] = GUEST; wc[r] = False; al[r] = 1; vn[r] = (1 << 40) | (ins.a << 5) | r; kc[r] = None; ub[r] = None; off[r] = None
+                for r in list(range(19)) + [30]: pv[r] = UNK; cls[r] = GUEST; wc[r] = False; al[r] = 1; vn[r] = (1 << 40) | (ins.a << 5) | r; kc[r] = None; ub[r] = None; off[r] = None
+                if disp: pv[0] = DISP
                 s[4] = None; return
             # unsigned bound of the result (nub) and, for a struct cpu address, its offset interval (noff), from the state before the instruction
             W32 = 0xffffffff
@@ -683,7 +712,7 @@ def analyse(path):
                 fo[r] = None
                 if cls[r] == FRAME: fo[r] = nfo
             for r, w in ins.wr:                 # provenance of the written registers: a load gives its class, anything else the union of the registers it reads
-                if r != SP and r != ins.wbbase: pv[r] = ld if ld else pin
+                if r != SP and r != ins.wbbase: pv[r] = ld if ld else pv[ins.arg] if ins.kind == 'mov' and ins.arg != SP and len(ins.wr) == 1 else UNK | (pin & ILLB)
             if ins.kind == 'tst' and ins.arg[0] != SP: s[4] = (vn[ins.arg[0]], ins.arg[1])
             elif ins.fl: s[4] = None
 
@@ -790,12 +819,17 @@ def analyse(path):
 def run(rtobj, lifted, asm=()):
     """-> ({gate: [(object stem, 'FUNC+0xOFF', reason)]}, {counter: n}, number of objects). Every row is one universe item, sorted;
     a certified row has reason ''. The verdict is computed from these rows only (verdict)."""
-    files = []; asm = frozenset(os.path.abspath(a) for a in asm); init(cpusize(rtobj), asm)
+    files = []; asm = frozenset(os.path.abspath(a) for a in asm)
+    rtall, rtglob = deffuncs(rtobj)
+    if DISPATCH not in rtglob: raise ValueError('%s: no defined global STT_FUNC %s (the dispatcher)' % (rtobj, DISPATCH))
     for a in lifted:
         files += sorted(os.path.join(a, f) for f in os.listdir(a) if f.endswith('.o')) if os.path.isdir(a) else [a]
     files = list(dict.fromkeys(files))
+    funcs = set(rtall)
+    for f in files: funcs |= deffuncs(f)[0]
+    init(cpusize(rtobj), asm, frozenset(funcs))
     rows = {g: [] for g in GATES}; n = {k: 0 for k in ('x27_writes', 'cpu_outside_struct', 'cpu_accesses_inside_struct', 'rule_violations')}     # the global counts of the two CPU-class checks are always reported
-    with multiprocessing.Pool(int(os.environ.get('JOBS', '0')) or os.cpu_count(), init, (CPUSIZE, asm)) as pool:
+    with multiprocessing.Pool(int(os.environ.get('JOBS', '0')) or os.cpu_count(), init, (CPUSIZE, asm, FUNCS)) as pool:
         for r in pool.imap(analyse, files, chunksize=4):
             for g in GATES: rows[g] += r['rows'][g]
             for k, v in r['n'].items(): n[k] = n.get(k, 0) + v

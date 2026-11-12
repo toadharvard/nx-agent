@@ -4,7 +4,7 @@ Each case is one function body; the gate must give the stated colour to each of 
 import importlib.util, json, os, subprocess, sys, tempfile, unittest
 HERE = os.path.dirname(os.path.abspath(__file__)); GATE = os.path.join(os.path.dirname(HERE), 'tools', 'gate_order.py')
 AS = ['aarch64-linux-gnu-gcc', '-march=armv8.1-a', '-mabi=ilp32', '-c', '-x', 'assembler']
-RT = '.data\n.globl fnvnx_lift_cpu_bytes\n.type fnvnx_lift_cpu_bytes,%object\n.size fnvnx_lift_cpu_bytes,4\nfnvnx_lift_cpu_bytes: .word 536\n'
+RT = '.text\n.globl fnvl_dispatch\n.type fnvl_dispatch,%function\nfnvl_dispatch: ret\n.size fnvl_dispatch,.-fnvl_dispatch\n.data\n.globl fnvnx_lift_cpu_bytes\n.type fnvnx_lift_cpu_bytes,%object\n.size fnvnx_lift_cpu_bytes,4\nfnvnx_lift_cpu_bytes: .word 536\n'
 FN = '.text\n.globl f\n.type f,%function\nf:\n{}\n.size f,.-f\n.section .rodata\ntab: .word 1,2,3,4\n.data\n.balign 4\nwtab: .word 1,2,3,4\n.byte 0\nwodd: .word 5\n.lcomm bsym,4\n.section .rodata.c,"a"\nctab: .word f,f,f,f\n.section .rodata.u,"a"\nutab: .word f,5,f,f\n.data\n.balign 4\nwctab: .word f,f,f,f\n'
 G, R = 'green', 'red'
 # name: (body, order, addrwrap, align)
@@ -74,7 +74,7 @@ CASES = {
     'exclusive_pair':       ('tst w19,#3\n b.ne 2f\n1: ldaxr w0,[x19]\n stlxr w2,w1,[x19]\n cbnz w2,1b\n dmb ish\n2: ret', G, G, G),
 }
 
-# rule (b): an indirect branch whose target derives from a load is legal only from a bounded read-only image table of relocated code addresses
+# rule (b): every br/blr is legal only as the dispatcher's return value (copies), a word of a bounded read-only image table of relocated code addresses, or a function GOT entry
 CASES.update({
     'br_table':            ('adrp x1,ctab\n add x1,x1,:lo12:ctab\n and w0,w0,#3\n ldr w1,[x1,x0,lsl #2]\n br x1', G, G, G),
     'blr_table':           ('stp x29,x30,[sp,#-16]!\n adrp x1,ctab\n add x1,x1,:lo12:ctab\n and w0,w0,#3\n ldr w1,[x1,x0,lsl #2]\n blr x1\n ldp x29,x30,[sp],#16\n ret', G, G, G),
@@ -93,9 +93,22 @@ CASES.update({
     'br_derived':          ('ldarb w1,[x19]\n add x2,x1,#4\n br x2', R, G, G),
     'br_one_path':         ('cbz w0,1f\n ldarb w1,[x19]\n1: br x1', R, G, G),
     'br_mixed_table_guest': ('cbz w0,1f\n adrp x1,ctab\n add x1,x1,:lo12:ctab\n ldr w1,[x1,#4]\n b 2f\n1: ldarb w1,[x19]\n2: br x1', R, G, G),
-    'br_argument':         ('br x0', G, G, G),
-    'br_call_result':      ('stp x29,x30,[sp,#-16]!\n bl g\n ldp x29,x30,[sp],#16\n br x0', G, G, G),
-    'br_overwritten':      ('ldarb w1,[x19]\n mov x1,x0\n br x1', G, G, G),
+    'br_argument':         ('br x0', R, G, G),
+    'br_call_result':      ('stp x29,x30,[sp,#-16]!\n bl g\n ldp x29,x30,[sp],#16\n br x0', R, G, G),
+    'br_overwritten':      ('ldarb w1,[x19]\n mov x1,x0\n br x1', R, G, G),
+    'br_dispatch':         ('stp x29,x30,[sp,#-16]!\n bl fnvl_dispatch\n blr x0\n ldp x29,x30,[sp],#16\n ret', G, G, G),
+    'br_dispatch_tail':    ('stp x29,x30,[sp,#-16]!\n bl fnvl_dispatch\n ldp x29,x30,[sp],#16\n br x0', G, G, G),
+    'br_dispatch_copy':    ('stp x29,x30,[sp,#-16]!\n bl fnvl_dispatch\n mov x1,x0\n blr x1\n ldp x29,x30,[sp],#16\n ret', G, G, G),
+    'br_dispatch_copy_w':  ('stp x29,x30,[sp,#-16]!\n bl fnvl_dispatch\n mov w1,w0\n blr x1\n ldp x29,x30,[sp],#16\n ret', G, G, G),
+    'br_dispatch_modified': ('stp x29,x30,[sp,#-16]!\n bl fnvl_dispatch\n add x1,x0,#4\n blr x1\n ldp x29,x30,[sp],#16\n ret', R, G, G),
+    'br_dispatch_overwritten': ('stp x29,x30,[sp,#-16]!\n bl fnvl_dispatch\n mov x0,x1\n blr x0\n ldp x29,x30,[sp],#16\n ret', R, G, G),
+    'br_dispatch_one_path': ('stp x29,x30,[sp,#-16]!\n cbz w1,1f\n bl fnvl_dispatch\n1: blr x0\n ldp x29,x30,[sp],#16\n ret', R, G, G),
+    'br_dispatch_clobbered_by_call': ('stp x29,x30,[sp,#-16]!\n bl fnvl_dispatch\n bl g\n blr x0\n ldp x29,x30,[sp],#16\n ret', R, G, G),
+    'br_other_call':       ('stp x29,x30,[sp,#-16]!\n bl g\n blr x0\n ldp x29,x30,[sp],#16\n ret', R, G, G),
+    'br_got_function':     ('stp x29,x30,[sp,#-16]!\n adrp x1,:got:f\n ldr w1,[x1,:got_lo12:f]\n blr x1\n ldp x29,x30,[sp],#16\n ret', G, G, G),
+    'br_got_object':       ('stp x29,x30,[sp,#-16]!\n adrp x1,:got:tab\n ldr w1,[x1,:got_lo12:tab]\n blr x1\n ldp x29,x30,[sp],#16\n ret', R, G, G),
+    'br_got_undefined':    ('stp x29,x30,[sp,#-16]!\n adrp x1,:got:ext\n ldr w1,[x1,:got_lo12:ext]\n blr x1\n ldp x29,x30,[sp],#16\n ret', R, G, G),
+    'br_got_function_modified': ('stp x29,x30,[sp,#-16]!\n adrp x1,:got:f\n ldr w1,[x1,:got_lo12:f]\n add x1,x1,#4\n blr x1\n ldp x29,x30,[sp],#16\n ret', R, G, G),
 })
 # the CPU class through a W-form copy: x27 is a 32-bit pointer zero-extended (ILP32 object, ASM-007; struct cpu lies below 2^32, ASM-201)
 CASES.update({
@@ -384,6 +397,10 @@ class T(unittest.TestCase):
         out = tempfile.mkdtemp(dir=self.root); ok = self.asm('okobj', FN.format('ret'))
         r = subprocess.run([sys.executable, '-I', GATE, rt_bad, ok], env=dict(os.environ, GATE_OUT=out, JOBS='1'), capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
+    def test_dispatcher_must_be_defined_by_the_runtime_object(self):
+        rt0 = self.asm('rtnodisp', RT.replace('fnvl_dispatch', 'fnvl_other'))
+        r = subprocess.run([sys.executable, '-I', GATE, rt0, self.asm('x1', FN.format('ret'))], env=dict(os.environ, GATE_OUT=tempfile.mkdtemp(dir=self.root), JOBS='1'), capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0); self.assertIn('fnvl_dispatch', r.stderr)
     def test_no_object_red(self):
         self.assertEqual([j['status'] for j in self.gate([]).values()], [R, R, R])
     def test_data_in_text_skipped_and_garbage_red(self):
