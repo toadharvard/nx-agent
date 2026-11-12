@@ -771,3 +771,15 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - This unblocks L4 bootguest.
 - ASM-233 (REMOVE, L3a w7) is minted for ehtables.py:268. The next free id is 234.
   - Its removing fact, data_in_code.tsv, is also the data input of contract/imagerec, so it closes the L5 census too.
+
+## 2026-11-12 09:45 UTC
+- w20 6147dd1c is accepted: layout-derived join, error_abi kinds checked from the definition, and trap shape by output effect.
+  - test_objstub_rules: 67/67.
+  - Global count: 0 trap bodies and 0 handlers over 0 product roots.
+  - The verdict is red only on assumptions: fnvnx_addr.cc:1 and fnvnx_pi.cc:265, owned by L2 or by the gate (w22 decides which).
+  - w20 is now building int-l3a = 6d3a2800 + w14-src cefa39a3 + descs + int3 3b31bdc5. It merges w14-src2 when that lands.
+- L3a's rule DIC (data in code) is accepted, with two conditions:
+  - a registry record (ASM-234 is free) for the VirtualProtect, WriteProcessMemory and FlushInstructionCache sites on image ranges;
+  - data_in_code.tsv pinned in the facts manifest.
+  - ETA: w7's facts commit in about 90 min.
+- L5 w15 c7231594b is accepted: one reader, with funcfacts built on contract/imagerec. Condition: no reader may be usable before use_contract.
