@@ -336,3 +336,57 @@ No patch touches any cited file, so the orig tarball text is the shipped text. F
 | mesa/main/get_hash_params.py | fbfe1229fe867e314885cf0a50935121048580f78b7707de0b4101583ec1824a | 428 MAX_FRAGMENT_INPUT_COMPONENTS |
 This also completes the np2 item (a): the llvmpipe cap npot_textures (lp_screen.c:214) is mapped to the GL extension at st_extensions.c:1078, and the extension table exposes it in both the legacy and core contexts (extensions_table.h:174).
 The earlier gitlab tag read is superseded; the two hashes I had computed (lp_bld_limits.h, st_extensions.c) are equal to these.
+
+## Classification of the 189 failing rows of sm_link.tsv; (d) rewritten as a form check (w3b)
+
+Measured: sm_link.tsv (lead af919720) 7660 rows, 189 failing = 179 compile/link failed + 10 CreateShader refused (hr 8876086c).
+`sm_linkclass.py` classifies all 189 (0 unclassified); output `sm_linkclass.tsv` (row, class, verdict). Doc pages = msdocs-sm mirror e18183f8;
+emitters = Wine 9.0 (mirror tools/wine-9.0 c8373ee4), file:line below. Verdict DEFINED = docs give the semantics, the Wine failure is a Wine defect, we
+render it; UNDEFINED = docs give none; ARGS = failure is a function of one compile arg.
+
+| class | rows | verdict | Mesa error | emitting function (what the error points at) | doc |
+|---|---|---|---|---|---|
+| pred_reg | 28 | DEFINED | `unrecognised_register' undeclared | shader_glsl_get_register_name default (glsl_shader.c 3055-3057): no case for the predicate register; operand of if_pred/breakp/callnz_pred/`!p0` | if-pred, breakp, callnz-pred (vs, ps) |
+| fog_pts_vec4 | 14 | DEFINED | vec4 cannot be assigned to float | shader_glsl_dst 4752, shader_glsl_lit 4699, shader_glsl_expp 4277 (major<2 branch): hard vec4(...) constructor, dst_mask "" for scalar sink oFog/oPts | vs-registers 1_1/2_0/2_x (oFog, oPts dimension 1; mask "" or .x), dst/lit/expp (dest.x) |
+| label_2047 | 4 | DEFINED | no function with name 'subroutine2047' | shader.c 1411 `labels \|= 1u << idx` (uint32 bitmap) -> glsl_shader.c 2176-2181 prototypes only set bits; shader_glsl_call 5142 prints subroutine2047 | label---vs/ps: 0..2047 (vs_3_0, ps_3_0) |
+| texm3x3_2d | 18 | ARGS | no matching function texture(sampler2D, vec3) | shader_glsl_texm3x3tex 6463 -> shader_glsl_get_sample_function 3402: sampler type = ps_args->tex_types[stage] (2D) | texm3x3tex---ps (3-component lookup of stage 3) |
+| aL_alu | 103 | UNDEFINED | int/float/vec type errors (dot(int,vec3), mix(vec4,int,vec4), ...) | shader_glsl_get_register_name case WINED3DSPR_LOOP (2832) "aLn", declared `int aLn` (2542) | ps/vs register pages: aL R, 1 component; only use named = relative addressing (loop---ps) |
+| b_alu | 3 | UNDEFINED | bool cannot be assigned to vec4 | same function, case CONSTBOOL (2821) "vs_b[n]", `uniform bool` (2271) | b# only in if/callnz/break_comp bool pages |
+| a0_mov | 3 | UNDEFINED | vec4 cannot be assigned to ivec4 | shader_glsl_mov 3906: only vs_1_1 (floor) and MOVA branches convert; vs_2_0+ mov falls to the plain else | mov---vs: "For version vs_1_1 it can also write the address register"; mova---vs |
+| sincos_xyz | 6 | UNDEFINED | syntax error, unexpected ';' | shader_glsl_sincos (major<4): default case ERR() after shader_glsl_append_dst opened the `(` | sincos---vs: exactly .x, .y or .xy (MS vs masking page disagrees: note) |
+| create_refused | 10 | UNDEFINED | (CreateShader hr 8876086c, no GL object) | ps lit/sgn (vs-only pages), ps_2_x loop/endloop (loop---ps has ps_3_0/3_sw columns only), ps_2_x c[aL+n], ps_3_0 dcl position input | lit---vs, sgn---vs, loop---ps, endloop---ps, dcl-usage---ps |
+
+189 = 46 DEFINED + 18 ARGS + 125 UNDEFINED (a0 3, aL 103, b 3, sincos 6, create_refused 10).
+
+### Defined forms to hand to w1b (Wine defects, the translator implements them per the docs, no (d))
+1. Predicate register p0 as the condition of if_pred / breakp / callnz_pred and the `!` modifier (vs_2_x, vs_3_0, ps_2_x, ps_3_0): 28 rows (opcode 12 + flow 12 + srcmod 4).
+2. dst, lit, expp written to the scalar sinks oFog / oPts (vs_1_1, vs_2_0, vs_2_x): 14 rows. Rule: the sink takes component x of the instruction result (dest.x = 1.0 for dst/lit, 2^floor(src) for expp); emit `.x` of the vec4.
+3. label numbers up to 2047 with call/callnz (vs_3_0, ps_3_0): 4 rows. Rule: prototype every label that is defined or called (std::set / 2048-bit map), not a uint32 bitmap.
+
+### Undefined forms: the compile failure is unconditional (item 3)
+Premise for all four GLSL forms: the text of one statement is a function of (instruction, operand registers) only. The emitting functions above read
+no field of vs_compile_args / ps_compile_args / the partner; the type declarations are fixed text (`int aLn`, `uniform bool vs_b[]`, `ivec4 An`).
+Wine emits every instruction's statement, even in unreachable subroutines (no DCE), and a GLSL compiler type-checks every statement (GLSL 4.60 §4 / §5
+are static semantics). The failing object is the shader's own (V for vs, P for ps), so the link of any program containing it fails: GL 4.6 §7.3 (a program
+link requires every attached shader object to have compiled: COMPILE_STATUS true).
+- aL_alu: an `int` scalar as an operand of a vec/float expression. §4.1.10 implicit conversions: int -> uint/float/double only, scalar to scalar; no scalar -> vector,
+  so `vec4 = int` is ill-typed (§5.8 assignment needs identical types after conversion) and there is no overload dot(int, vec3) / mix / min / max / texture(sampler, int)
+  (§8.5 genType overloads need matching vector types). Mesa's "no matching function" is the same rule.
+- b_alu: `bool` has no implicit conversion to any other type (§4.1.10), so `vec4 = bool` is ill-typed (§5.8).
+- a0_mov: `ivec4 = vec4`: no floating -> integer implicit conversion (§4.1.10).
+- sincos_xyz: the statement is `dst = (` followed by the next statement: unbalanced parentheses violate the grammar (§9 and the unexpected ';' Mesa reports).
+- create_refused: CreateShader returns D3DERR_INVALIDCALL; no GL object exists; there is no program to link.
+Shipped set (15791 shaders, 1809 distinct): `sm_linkform.py --sdp` finds none of the forms of FORMS or REFUSED. Detector checked on hand-assembled bytecode
+(aL source, b# source, a0 mov in vs_2_0 fire; sincos .xyz fires, .x/.xy do not; vs_1_1 mov a0 does not). The class is still open for the D3DX
+run-time shaders and the dynamic GetProcAddress sites (no unreachability certificate counts until they are resolved).
+Caveats for the lead: (1) aL as an ALU source: the docs name relative addressing as its only use and give no integer-to-float rule; I classify UNDEFINED. If you
+decide the docs define the read (value = counter replicated), the 103 rows move to DEFINED (w1b: float(aL) replicated) and nothing else changes.
+(2) sincos .xyz: the sincos page and the MS vs masking page disagree; I follow the instruction's own page.
+
+### The (d) design, rewritten: a form check at CreateShader, no pair key
+`link_failed(shader)` = the bytecode contains a form of table FORMS (sm_linkform.py: aL_alu, b_alu, a0_mov, sincos_xyz): a pure function of the bytecode, evaluated
+once at CreateShader (also create_refused: the REFUSED table -> D3DERR_INVALIDCALL, as Wine). ARGS class (texm3x3tex with a 2D sampler arg) is a function of
+(bytecode, that shader's own tex_types[stage]), still no partner and no pair; no ps_1_x in the shipped set. Behaviour of a program with a link_failed object is
+unchanged from the earlier "uniform rule" section (GL 4.6 §7.3/§7.6.1: the GPU keeps the last successfully bound program and its uniform values, the failed
+program's constant updates are dropped; Wine glsl_shader.c 10526-10531, 10565-10566, 10740-10743). The earlier per-pair lookup is deleted: the object that fails is the
+shader's own, so the flag is a property of the shader. The 3 b# test rows (vs_2_0/2_x/3_0 b0@mov.s0) become expected link_failed rows of the reference, not translator output.
