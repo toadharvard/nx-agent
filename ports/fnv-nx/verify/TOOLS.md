@@ -1297,6 +1297,35 @@ what the source says; it does not follow a relocation into a non-group, non-merg
 Rule (c) groups by address: a body reached through two names of one address with the same body id is the owner's statement of one body.
 ```
 
+## verify/gate_tlsmodel.py
+
+```text
+Gate "tlsmodel" (fnvnx-gate/1, class A of VERDICT.md): every thread-local reference of a guest object and of a linked guest output uses a
+TLS access model the loader supports, and one symbol is accessed with one model.
+    python3 -I gate_tlsmodel.py    cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/tlsmodel.json
+Roots: every product and test root of verify/admit.json with "target": "guest", built by gate_build.ensure; a root's link group is its own
+objects plus the objects of the roots in its recipe's link.roots (the objects that one linked output is made of), and its linked ELF.
+Facts are the relocations of the pinned binutils' own decoding (`aarch64-linux-gnu-readelf -rW`, the binutils of verify/env.json): the type
+NAME the ABI gives a relocation (R_AARCH64_P32_TLS..., R_AARCH64_TLS... for LP64), never a name of the program's text. A relocation is TLS when
+its type name has the family prefix TLS (after an optional P32_) or contains TPREL or DTPREL; the family is the ABI's:
+  TLSGD, TLSLD, TLSDESC (and the dynamic TLS_DTPMOD/TLS_DTPREL/TLS_TPREL/TLSDESC relocations of a linked output): dynamic TLS,
+  TLSIE: initial-exec, TLSLE (and TPREL/DTPREL link-time offsets): local-exec, any other TLS name: unclassified.
+Rules (a finding names the object, the symbol and the relocation):
+  (1) `dynamic-tls`: 0 relocations of the dynamic family, in objects and in the linked output. Loader fact (docs/RUNTIME.md, TLS): the loader gives
+      every thread a per-thread copy of the image template and has no dynamic TLS block (no __tls_get_addr, no TLS descriptors, no DTV).
+  (2) `le-outside`: a local-exec relocation names a symbol that the objects of the link group define (or a section-local symbol): an offset
+      from the thread pointer is only known for a symbol of the same linked output.
+  (3) `ie-required`: a symbol the group does not define (host TLS) must be reached by initial-exec; it is the same finding as (2) for a
+      local-exec relocation, and any other model is rule (1).
+  (4) `mixed-model`: one symbol referenced with initial-exec by one relocation and local-exec by another within a group. A declaration
+      `tls_model("initial-exec")` in a header makes every referencing unit use initial-exec; a unit that did not see it uses another model, so the
+      mixed use is exactly the defect. NOT COVERED (stated gap, owner L3a/L2): the attribute is not recorded in the ELF or in DWARF, so a symbol
+      declared initial-exec that EVERY unit references with local-exec is not seen; closing it needs the declaration as a fact (a plugin note).
+  (5) `unclassified`: a TLS relocation of a name outside the families above.
+Items: every object, every linked ELF, every TLS relocation (object, symbol, relocation name, section, offset). Certified = the items with no
+finding. Counts per relocation family over all roots are in `detail`. No guest root: universe 0, green.
+```
+
 ## verify/gate_argorder.py
 
 ```text

@@ -45,7 +45,7 @@ REQUIRED_PRODUCT = ("objstub", "linkstrict", "determinism", "oracle",
                     "n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcrel", "bodysel",
                     "abs", "disp", "reach", "reachlink", "gpa",
                     "imports", "forms", "d3d9total", "r7", "namegate", "argordergate", "abi",
-                    "datamodel", "order", "fpexact", "eh", "exepin", "addr32", "machine", "hostapi")
+                    "datamodel", "order", "fpexact", "eh", "exepin", "addr32", "machine", "hostapi", "tlsmodel")
 # A test root (class test) is a root that links the tests of the product against the product roots' real files (CLAUDE.md "no doubles in
 # tests"): it is judged by its own set, never by REQUIRED_PRODUCT. Its gates: the build gates, the doubles gate (symbols the test defines
 # intersect symbols of the product roots it links = empty), an oracle record for every test, stub, the registry gate, Legal and pure.
