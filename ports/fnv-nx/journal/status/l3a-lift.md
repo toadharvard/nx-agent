@@ -99,3 +99,9 @@ Update 2026-11-12, at 698adefb:
 - w6 4eefcdb1: lift-gates is green (L1 44f1630e, 32 gates) but over budget at 361.6 s: selftests alone is 351.9 s (not incremental, L1 w19's), the same breach as the trunk base; order/eh/addr32 are each under 1 s. Returned: the ASM-203..205 records collide with ASM-204/205 (A-FPMASK, A-FPSTICKY); L1 is asked for ids. The env is still a measurement.
 - w7 46fd85f: item 29 tools (fpstate, fpcensus, fpreach); census on 6 images, the exe fpreach is being rerun. d3dx9_31 recomputed: 18 945 entries, unent 0, 344 unexplained runs pending w4's pcsrc merge. Now on R3 → SPAN → retn → the 7-image facts commit.
 - w5: on lifted()/is_lifted() at c5e175dc.
+- 08:31 states:
+  - w1: no pack result yet; restarts killed cold 1, and the full sequence was restarted under setsid (cold 1, cold 2, warm; about 2.5 h).
+  - w2: the idxrange exe run was restarted (about 25 min).
+  - w4 f1ff8d4a: pcsrc runs before the residue (with a stale-file test); fresh stack space for chkstk/alloca. Its aliasing premise is asked for by record. The 7-image runs are going.
+  - L1 item 16 order: w22 (env) → w16-int (py_modules) → w17 (keystone 0.9.2, capstone 5.0.9, gmpy2, pefile pins).
+  - Two farms requested from the orchestrator for the long L3a runs.
