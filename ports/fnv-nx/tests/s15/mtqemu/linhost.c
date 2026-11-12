@@ -284,7 +284,6 @@ static void feed_incomplete(void);
 static u64 h_exit(u64 code) { feed_incomplete(); prof_flush_all(); sc(SYS_exit_group, (long)code, 0, 0, 0, 0, 0); return 0; }
 static u64 h_sleep_ns(u64 ns) { feed_tick(); struct ts t = { (long)(ns / 1000000000ull), (long)(ns % 1000000000ull) }; sc(SYS_nanosleep, (long)&t, 0, 0, 0, 0, 0); return 0; }
 static u64 h_zero(void) { return 0; }
-static u64 h_one(void) { return 1; }
 static u64 h_tick(void) { return now_ns(); }
 static u64 h_tick_freq(void) { return 1000000000ull; }
 static u64 h_cpu_count(void) { return 3; }
@@ -1358,13 +1357,13 @@ __attribute__((used)) long hmain(long *sp) {
     g_api.magic = FNVNX_HOSTAPI_MAGIC; g_api.version = FNVNX_HOSTAPI_VERSION; g_api.size = sizeof g_api;
 #define F(slot, fn) g_api.slot = (u64)(uintptr_t)(fn)
     F(output_debug_string, h_output_debug_string); F(sleep_ns, h_sleep_ns); F(exit, h_exit);
-    F(console_write, h_console_write); F(console_flush, h_zero); F(main_loop, h_one); F(buttons_down, h_zero);
+    F(console_write, h_console_write);
     F(system_tick, h_tick); F(system_tick_freq, h_tick_freq);
     F(thread_create, h_thread_create); F(thread_start, h_thread_start); F(thread_join, h_thread_join);
     F(thread_free, h_thread_free); F(thread_exit, h_thread_exit); F(thread_yield, h_thread_yield);
     F(thread_set_priority, h_thread_set_priority); F(thread_set_cpu, h_thread_set_cpu);
     F(wait_on_address, h_wait_on_address); F(wake_address, h_wake_address);
-    F(wall_time_us, h_wall_time_us); F(tz_offset_minutes, h_zero); F(random64, h_random); F(memory_info, h_meminfo);
+    F(wall_time_us, h_wall_time_us); F(random64, h_random); F(memory_info, h_meminfo);
     F(cpu_count, h_cpu_count);
     u64 *slot = &g_api.fs_open;
     for (; slot <= &g_api.ext_call; slot++) *slot = (u64)(uintptr_t)h_enosys;

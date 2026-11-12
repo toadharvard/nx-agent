@@ -244,7 +244,7 @@ static void null_copy_decl(NullBase *o, const D3DVERTEXELEMENT9 *e) {
 extern "C" volatile int fnvnx_plat_on __attribute__((weak));
 extern "C" void fnvnx_plat_note(int cls, const char *name, unsigned caller, const char *detail) __attribute__((weak));
 #define NULL_UNIMPL(n) do { if (&fnvnx_plat_on && fnvnx_plat_on && fnvnx_plat_note) \
-    fnvnx_plat_note(0 /* FNVNX_PLAT_UNIMPL */, n, (unsigned)(unsigned long)__builtin_return_address(0), "null device: not executed"); } while (0)
+    fnvnx_plat_note(0 /* FNVNX_NOTE_UNIMPL */, n, (unsigned)(unsigned long)__builtin_return_address(0), "null device: not executed"); } while (0)
 
 extern "C" HRESULT fnvnx_d3d9_device_created(const void *present_params, void *device) __attribute__((weak));
 

@@ -9,7 +9,7 @@
  *          pads zeroed, vibration amplitudes as float bits to the right vibration devices (two motors for handheld
  *          and dual Joy-Con, one for a Pro Controller, re-initialised when the style changes)
  *   events keyboard edges as HID usages, mouse motion and buttons, touch frames, and the caller's capacity
- *   ext    the FNVNX_EXT_* registry and dispatch (host_ext.inc). map_fixed / UNMAP_FIXED are in host_vm.inc: host_prot_test.c. */
+ *   ext    the FNVNX_EXT_* registry and dispatch (host_ext.inc). map_fixed is in host_vm.inc: host_prot_test.c. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

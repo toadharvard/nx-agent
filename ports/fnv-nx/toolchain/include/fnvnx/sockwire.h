@@ -1,4 +1,4 @@
-/* fnv-nx host <-> guest ABI, BSD sockets: the wire constants and structs of the FNVNX_PLAT_SOCK_* services
+/* fnv-nx host <-> guest ABI, BSD sockets: the wire constants and structs of the SOCK_* host services (hostapi.h)
  * (hostapi.h documents the services; toolchain/guest/sock_guest.c is the guest side, toolchain/host/host_sock.inc the host side).
  *
  * Every number that crosses the boundary is a number of THIS header. The guest speaks newlib + libnx's (FreeBSD style)

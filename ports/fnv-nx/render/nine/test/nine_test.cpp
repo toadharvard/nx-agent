@@ -16,7 +16,7 @@
 //            MANAGED texture and buffers keep their contents.
 // Expected images: see test/gate.py (exact clear colours; quadrants red/green/blue/white, then rotated:
 // green/blue/white/red for the last two frames). Heap statistics (render/nine/heaplog.c) at phase boundaries.
-// Exits on +, after 20 s, or when the host's main_loop says so. Output goes to the host log.
+// Exits after CLEAR_FRAMES + DRAW_FRAMES frames or after 20 s. Output goes to the host log.
 #include <d3dx9.h>
 #include <math.h>
 #include <stdio.h>
@@ -28,7 +28,7 @@ extern "C" void fnvnx_heaplog_report(const char* tag);
 extern "C" void (*g_D3DXVec3TransformNormal)(void);
 HRESULT D3DXCreateCubeTextureFromFileInMemory(void* dev, const void* data, unsigned size, void** cube);   // C++ overload
 
-enum { CLEAR_FRAMES = 240 };
+enum { CLEAR_FRAMES = 240, DRAW_FRAMES = 4 };      /* test/gate.py states the same two numbers */
 
 static uint64_t ticks() { return fnvnx_hcall0(fnvnx_host->system_tick); }
 
@@ -678,8 +678,7 @@ int main() {
     uint64_t freq = fnvnx_hcall0(fnvnx_host->system_tick_freq), t0 = ticks(), last = t0;
     unsigned f = 0;
     int rc = 0;
-    while (fnvnx_hcall0(fnvnx_host->main_loop)) {
-        if (fnvnx_hcall0(fnvnx_host->buttons_down) & (1u << 10) /* HidNpadButton_Plus */) break;
+    while (f < CLEAR_FRAMES + DRAW_FRAMES) {
         uint64_t now = ticks();
         if (now - t0 > 20 * freq) break;
         if (f < CLEAR_FRAMES) {

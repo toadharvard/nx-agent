@@ -346,13 +346,13 @@ static Result host_win_zero(u64 addr, u64 size) {
     return rc;
 }
 
-/* ---- map_fixed / unmap_fixed (FnvnxHostApi slot map_fixed, FNVNX_PLAT_UNMAP_FIXED): needs logf_ */
+/* ---- map_fixed (FnvnxHostApi slot map_fixed): needs logf_ */
 /* map_fixed (addr, size, src) -> 0 or a result (hostapi.h): [addr, addr+size) becomes read-write zero-or-src memory at exactly addr.
  * Checks in this order: size 0, wrap or addr/size not page aligned -> BadInput; inside an adopted window (host_win_adopt, S10's
  * claim of the original image and the data window): read-write and zeroed, src not looked at; src 0 or not aligned -> BadInput;
  * the ranges table full -> OutOfMemory; the range not unmapped (svcQueryMemory) -> AlreadyInitialized; then the kernel
  * (cm_map: AliasCodeData, reprotectable by VM_PROTECT, host_vm.inc K1-K5): its result unchanged, e.g. 0xDA01 when addr is outside
- * the alias-code region, 0xD401 when src is not ordinary heap. The heap block src becomes inaccessible until unmap_fixed. */
+ * the alias-code region, 0xD401 when src is not ordinary heap. The heap block src becomes inaccessible for the rest of the process. */
 static u64 h_map_fixed(u64 addr, u64 size, u64 src) {
     if (!size || addr + size < addr || ((addr | size) & 0xFFF)) return FNVNX_HE_BADINPUT;
     mutexLock(&g_vm_lock);
@@ -376,34 +376,6 @@ static u64 h_map_fixed(u64 addr, u64 size, u64 src) {
             logf_("fnvnx host: map_fixed %#010lx..%#010lx from %#010lx\n", addr, addr + size, src);
             rc = cm_map(addr, src, size, &lost);
             if (R_SUCCEEDED(rc)) { slot->addr = addr; slot->size = size; slot->src = src; }
-        }
-    }
-    mutexUnlock(&g_vm_lock);
-    return rc;
-}
-
-/* FNVNX_PLAT_UNMAP_FIXED (addr, size, src): the undo of h_map_fixed, see hostapi.h. (addr, size, src) must be exactly the
- * arguments of one live map_fixed (the host keeps the table: g_mf). The pages may have any protection (K4). Checks: addr or src
- * not page aligned -> 0xCC01; size 0 or not a page multiple -> 0xCA01; wrap -> 0xD401; inside an adopted window: read-write and
- * zeroed again, src not looked at; no live map_fixed with exactly these arguments -> 0xD401; else the kernel's result. */
-static u64 h_unmap_fixed(u64 addr, u64 size, u64 src) {
-    if ((addr | src) & 0xFFF) return FNVNX_HE_ADDR;
-    if (!size || (size & 0xFFF)) return FNVNX_HE_SIZE;
-    if (addr + size < addr) return FNVNX_HE_RANGE;
-    mutexLock(&g_vm_lock);
-    Result rc;
-    if (in_window(addr, size)) {
-        rc = host_win_zero(addr, size);
-    } else {
-        FnvnxMf *m = NULL;
-        for (int i = 0; i < FNVNX_MF_MAX && !m; i++)
-            if (g_mf[i].size && g_mf[i].addr == addr && g_mf[i].size == size && g_mf[i].src == src) m = &g_mf[i];
-        if (!m) {
-            rc = FNVNX_HE_RANGE;
-        } else {
-            logf_("fnvnx host: unmap_fixed %#010lx..%#010lx to %#010lx\n", addr, addr + size, src);
-            rc = cm_unmap(addr, src, size);
-            if (R_SUCCEEDED(rc)) memset(m, 0, sizeof *m);
         }
     }
     mutexUnlock(&g_vm_lock);

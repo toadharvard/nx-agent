@@ -1170,7 +1170,7 @@ struct Decoder final : Stage, PcmSource {
         memset(&dec, 0, sizeof dec);
         open = mp3dec_ex_open_buf(&dec, blob->data, blob->size, MP3D_SEEK_TO_SAMPLE) == 0 && dec.info.hz && dec.info.channels;
         if (!open) {
-            if (fnvnx_plat_on) fnvnx_plat_note(FNVNX_PLAT_DECODE, "dshow::mp3_open", FNVNX_PLAT_RA, "minimp3");
+            if (fnvnx_plat_on) fnvnx_plat_note(FNVNX_NOTE_DECODE, "dshow::mp3_open", FNVNX_NOTE_RA, "minimp3");
             close();
             return VFW_E_TYPE_NOT_ACCEPTED_;
         }

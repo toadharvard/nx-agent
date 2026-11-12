@@ -6,7 +6,7 @@ The header is the single source of the host-service numbering. Declared in it, m
   * every module number:   `#define FNVNX_EXT_<NAME> <number>u`;
   * every argument count:  a row `<number> <NAME> n=<count>` of the totality table (also in the "L5 ADDITIONS" block), and for
     the sockets the list `n = the count each service states (SOCK_SOCKET 3, CLOSE 1, ...)` of the table's 16..33 row.
-    A service without a count (ACCESS_FAULT_HANDLER: not served) cannot be used.
+    A service without a count (a row marked NOT SERVED) cannot be used.
 Checks (exit 1 with one line per violation):
   A. the header is consistent: no service number and no module number defined twice, no service name defined twice, every
      table row names a defined service with the defined number, every defined service (but the not-served ones) has a count, the
@@ -23,6 +23,9 @@ Checks (exit 1 with one line per violation):
      (toolchain/host/host_sock.inc). Every declared service that the header counts has exactly one server with the header's count; a served
      name the header does not declare, or a declared (counted) service with no server, fails. A host file never serves by a numeric range
      (FNVNX_PLAT_SOCK_FIRST / _LAST): every number outside the declared set answers NO_SERVICE by the table's own default.
+  E. the identifiers FNVNX_PLAT_* appear only in hostapi.h's own defines and in unit files (.c, .cpp, and the .inc files a unit includes):
+     no other header (.h, .hpp, .hh anywhere under the root but build/out directories) mentions one, comments included. A header
+     reaches a service only through a function of a unit.
 Calls on a module other than FNVNX_EXT_PLATFORM (the GPU module) are not services of the table; only their module must be a name.
 Usage: check_hostapi.py [--root ports/fnv-nx] [--selftest]
 """
@@ -435,6 +438,24 @@ def main(argv):
         if name not in notserved and name not in served:
             errs.append("hostapi.h declares %s (n=%s) but no host file serves it" % (name, count.get(name)))
 
+    # E: FNVNX_PLAT_ names only in hostapi.h and in units
+    nhdr = 0
+    for dp, dn, fn in os.walk(root):
+        dn[:] = [x for x in sorted(dn) if x not in ("build", "out", ".git", "journal")]
+        for f in sorted(fn):
+            if not f.endswith((".h", ".hpp", ".hh")):
+                continue
+            path = os.path.join(dp, f)
+            if os.path.abspath(path) == os.path.abspath(os.path.join(root, HDR)):
+                continue
+            nhdr += 1
+            try:
+                txt = open(path, errors="replace").read()
+            except OSError:
+                continue
+            for m in re.finditer(r"\bFNVNX_PLAT_[A-Z0-9_]+", txt):
+                errs.append("%s:%d: %s in a header other than hostapi.h (only units name host services)" % (rel(path), line_of(txt, m.start()), m.group(0)))
+
     if selftest:
         print("selftest: %d services, %d modules, %d uses" % (len(svc), len(mod), len(uses)))
         print("wrappers: " + ", ".join(sorted("%s:%s" % (rel(f), n) for f, w in wrappers_all.items() for n in w)))
@@ -443,7 +464,7 @@ def main(argv):
     if errs:
         print("check_hostapi: %d violation(s)" % len(errs))
         return 1
-    print("check_hostapi: ok (%d services declared, %d served, 0 differences; %d uses in %d files)" % (len(svc), len(served), len(uses), len(srcs)))
+    print("check_hostapi: ok (%d services declared, %d served, 0 differences; %d uses in %d files; %d other headers without FNVNX_PLAT_ names)" % (len(svc), len(served), len(uses), len(srcs), nhdr))
     return 0
 
 

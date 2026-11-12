@@ -433,7 +433,7 @@ HANDLE w32_create_file_name(LPCSTR name, DWORD access, DWORD share, DWORD disp, 
     HANDLE h = create_core(name, access, share, disp, flags, host, &rep, utf8);
     os_unlock(&g_flock);
     if (h == INVALID_HANDLE_VALUE && rep && fnvnx_plat_on)   /* the platform lane (platstat.cpp) */
-        fnvnx_plat_open_failed(name, rep == 2 ? host : NULL, GetLastError(), FNVNX_PLAT_RA, "CreateFileA");
+        fnvnx_plat_open_failed(name, rep == 2 ? host : NULL, GetLastError(), FNVNX_NOTE_RA, "CreateFileA");
     return h;
 }
 

@@ -37,7 +37,6 @@ static u64 pf_section_map(const u64 *a) { return host_section_map(a[0], a[1], a[
 static u64 pf_section_unmap(const u64 *a) { return host_section_unmap(a[0], a[1]); }
 static u64 pf_section_free(const u64 *a) { return host_section_free(a[0]); }
 static u64 pf_thread_self(const u64 *a) { (void)a; return h_thread_self(); }  
-static u64 pf_unmap_fixed(const u64 *a) { return h_unmap_fixed(a[0], a[1], a[2]); }
 /* TZ_AT (utc_seconds, FnvnxTzAt *): the platform lead's service, verbatim (hostapi.h states: 0, or non-zero without time zone data) */
 static u64 pf_tz_at(const u64 *args) {
     FnvnxTzAt *o = (FnvnxTzAt *)args[1];
@@ -66,7 +65,6 @@ static const PlatService g_plat[] = {
     [FNVNX_PLAT_SECTION_MAP] = {4, pf_section_map},
     [FNVNX_PLAT_SECTION_UNMAP] = {2, pf_section_unmap},
     [FNVNX_PLAT_SECTION_FREE] = {1, pf_section_free},
-    [FNVNX_PLAT_UNMAP_FIXED] = {3, pf_unmap_fixed},
     [FNVNX_PLAT_TZ_AT] = {2, pf_tz_at},
     [FNVNX_PLAT_THREAD_SELF] = {0, pf_thread_self},
 };

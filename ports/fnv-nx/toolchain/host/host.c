@@ -135,10 +135,6 @@ static u64 h_exit(u64 code) {
     exit((int)code);
 }
 static u64 h_console_write(u64 buf, u64 len) { out((const char *)buf, len); return len; }
-static u64 h_console_flush(void) { consoleUpdate(NULL); return 0; }
-/* the pump thread owns appletMainLoop while it runs (host_device.inc) */
-static u64 h_main_loop(void) { return g_pump_run ? (g_pump_alive ? 1 : 0) : (appletMainLoop() ? 1 : 0); }
-static u64 h_buttons_down(void) { padUpdate(&g_pad); return padGetButtonsDown(&g_pad); }
 static u64 h_system_tick(void) { return armGetSystemTick(); }
 static u64 h_system_tick_freq(void) { return armGetSystemTickFreq(); }
 
@@ -478,8 +474,7 @@ int main(int argc, char **argv) {
             .guest_base = gbase, .guest_size = gsize,
             .heap_base = g_guest_heap_base, .heap_size = g_guest_heap_size,
             .output_debug_string = (u64)h_output_debug_string, .sleep_ns = (u64)h_sleep_ns,
-            .exit = (u64)h_exit, .console_write = (u64)h_console_write, .console_flush = (u64)h_console_flush,
-            .main_loop = (u64)h_main_loop, .buttons_down = (u64)h_buttons_down,
+            .exit = (u64)h_exit, .console_write = (u64)h_console_write,
             .system_tick = (u64)h_system_tick, .system_tick_freq = (u64)h_system_tick_freq,
             FNVNX_HOSTAPI_V2_SLOTS FNVNX_HOSTAPI_V3_SLOTS
         };
