@@ -269,27 +269,33 @@ def read_f2i(obj_path):
         return None, "result file %s unreadable or malformed: %s" % (os.path.basename(p), str(e)[:150] or type(e).__name__)
 
 
-def judge_object(oid, path, asm=False, unit=None):
-    """-> {item id: [finding strings]} for `rcp:<oid>` and `f2i:<oid>`. ASM: the unit is an assembler unit (.s / .S, the recipe's own kind): the compiler
-    never builds GIMPLE for it, so the plugin has no file to write and no conversion site exists in its source: the result is the empty one (sites 0),
-    and check 3b still makes any FCVT / FJCVTZS instruction of the object a finding."""
+def judge_object_coded(oid, path, asm=False, unit=None):
+    """-> {item id: [(code, text)]} for `rcp:<oid>` and `f2i:<oid>`; the code is the finding class (fixture mode, RECIPE.md "Fixtures"). ASM: the unit is
+    an assembler unit (.s / .S, the recipe's own kind): the compiler never builds GIMPLE for it, so the plugin has no file to write and no conversion
+    site exists in its source: the result is the empty one (sites 0), and check 3b still makes any FCVT / FJCVTZS instruction of the object a finding.
+    A finding of kind builtin (lround, a libm call) is IEEE under OWNER ASM-008 and is not one; conv and asm are."""
     scan = scan_object(path)
-    rcp = ["%s: %s in %s" % (oid, m, w) for w, m in scan["recip"]]
+    rcp = [("rcp-estimate", "%s: %s in %s" % (oid, m, w)) for w, m in scan["recip"]]
     f2i = []
-    und = ["undecodable bytes at %s" % w for w in scan["undecodable"]]
+    und = [("undecodable", "undecodable bytes at %s" % w) for w in scan["undecodable"]]
     rcp += und
     f2i += und
     d, why = ({"format": "fnvnx-f2i/1", "findings": [], "sites": 0, "helpers": []}, None) if asm else read_f2i(path)
     if d is None:
-        f2i.append(why)
+        f2i.append(("f2i-report-missing", why))
     elif not asm and d["unit"] != unit:
-        f2i.append("result file names the unit %r, not %r" % (d["unit"], unit))
+        f2i.append(("f2i-report-unit", "result file names the unit %r, not %r" % (d["unit"], unit)))
     else:
-        f2i += ["%s:%s in %s: %s outside a conversion helper" % (f["file"], f["line"], f["function"], f["kind"]) for f in d["findings"] if f["kind"] != "builtin"]
-        # a builtin finding (lround, a libm call) is IEEE under OWNER ASM-008: not red; conv and asm are
+        f2i += [("f2i-" + f["kind"], "%s:%s in %s: %s outside a conversion helper" % (f["file"], f["line"], f["function"], f["kind"]))
+                for f in d["findings"] if f["kind"] != "builtin"]
         if scan["fcvt"] and d["sites"] == 0:
-            f2i.append("%d float->int instruction(s) (%s) but the unit has no conversion site" % (len(scan["fcvt"]), scan["fcvt"][0][1]))
+            f2i.append(("fcvt-no-site", "%d float->int instruction(s) (%s) but the unit has no conversion site" % (len(scan["fcvt"]), scan["fcvt"][0][1])))
     return {"rcp:" + oid: rcp, "f2i:" + oid: f2i}
+
+
+def judge_object(oid, path, asm=False, unit=None):
+    """-> {item id: [finding strings]}, see judge_object_coded"""
+    return {k: [t for _, t in v] for k, v in judge_object_coded(oid, path, asm, unit).items()}
 
 
 FTOI = "fnvnx_ftoi"
@@ -327,25 +333,42 @@ def table_item(objs, image_dir):
     return check_cert(os.path.join(image_dir, os.path.dirname(tabs[0][0])))
 
 
-def judge_objects(root, objs, image_dir, forms_ok, docs=None):
-    """-> {item id: [findings]} of one root: OBJS [(unit, path)], IMAGE_DIR (see table_item), FORMS_OK (reason string or None: the dependency on the gate
-    forms), DOCS ({unit: CC document} of a native root; None: lifted root)."""
-    items = {root + ":forms": [forms_ok] if forms_ok else []}
+def judge_objects_coded(root, objs, image_dir, forms_ok, docs=None):
+    """-> {item id: [(code, text)]} of one root: OBJS [(unit, path)], IMAGE_DIR (see table_item), FORMS_OK (reason string or None: the dependency on the
+    gate forms), DOCS ({unit: CC document} of a native root; None: lifted root)."""
+    items = {root + ":forms": [("forms-not-green", forms_ok)] if forms_ok else []}
     cert = table_item(objs, image_dir)
     if cert is not None:
-        items[root + ":rcpcert"] = cert
+        items[root + ":rcpcert"] = [("rcpcert", t) for t in cert]
     for unit, path in objs:
-        r = judge_object(root + "/" + unit, path, unit.endswith(recipe.ASM_EXT), unit)
+        r = judge_object_coded(root + "/" + unit, path, unit.endswith(recipe.ASM_EXT), unit)
         if docs is not None and unit.endswith(recipe.CXX_EXT):
-            r["f2i:" + root + "/" + unit] += ftoi_why(docs.get(unit))
+            r["f2i:" + root + "/" + unit] += [("ftoi-plugin-missing", t) for t in ftoi_why(docs.get(unit))]
         items.update(r)
     return items
+
+
+def judge_objects(root, objs, image_dir, forms_ok, docs=None):
+    """-> {item id: [findings]}, see judge_objects_coded"""
+    return {k: [t for _, t in v] for k, v in judge_objects_coded(root, objs, image_dir, forms_ok, docs).items()}
+
+
+def fixture_findings(root, items):
+    """-> [{"id": "<root>/<unit>", "code": CODE}] (RECIPE.md "Fixtures"): one per distinct code of each unit item (`rcp:<root>/<unit>`, `f2i:<root>/<unit>`)"""
+    out = set()
+    for k, v in items.items():
+        if k.split(":", 1)[0] in ("rcp", "f2i"):
+            out |= {(k.split(":", 1)[1], c) for c, _ in v}
+    return [{"id": i, "code": c} for i, c in sorted(out)]
 
 
 def forms_reason(repo, cache):
     """None iff the gate forms is green on its declared inputs, else `forms: not green: <its reason>`"""
     u, c, ids, detail = formgate.judge(repo, cache)
     return None if u == c else "forms: not green: %s" % detail[:300]
+
+
+FINDINGS = []   # fixture mode (GATE_FIXTURES): every finding of the run as {id, code}
 
 
 def judge_root(root, repo, cache, forms):
@@ -363,7 +386,9 @@ def judge_root(root, repo, cache, forms):
         image = os.path.join(repo, root) if res.get("elf") else None
         native = recipe.load_admit(repo).get(root, {}).get("cxx_origin") == "native"
         docs = gate_datamodel.cc_docs(os.path.join(cache, "store"), res) if native else None
-        items = judge_objects(root, read_inputs(res), image, forms(), docs)
+        coded = judge_objects_coded(root, read_inputs(res), image, forms(), docs)
+        FINDINGS.extend(fixture_findings(root, coded))
+        items = {k: [t for _, t in v] for k, v in coded.items()}
     except (OSError, ValueError, ELFError) as e:
         return 1, 0, [root + ":inputs"], "input error: %s" % (str(e)[:300] or type(e).__name__)
     bad = sorted(k for k, v in items.items() if v)
@@ -386,6 +411,14 @@ def main(argv):
     u, c, ids, detail = gate_build.quantify(".", lambda root: judge_root(root, ".", cache, forms))
     gatefile.write(NAME, u, c, ids, detail if u != c else ("rcp table certified, no rcp/rsqrt estimate instruction and no uncertified float->int conversion in %d items" % u if u else detail))
     st = "green" if u == c else "red"
+    if os.environ.get("GATE_FIXTURES") and os.environ.get("GATE_OUT"):
+        path = os.path.join(os.environ["GATE_OUT"], NAME + ".json")
+        with open(path) as fh:
+            r = json.load(fh)
+        r["findings"] = FINDINGS
+        with open(path, "w", newline="\n") as fh:
+            json.dump(r, fh, sort_keys=True, separators=(",", ":"))
+            fh.write("\n")
     sys.stdout.write("%s: %s %d/%d %s\n" % (NAME, st, c, u, detail[:200]))
     return 0 if st == "green" else 2
 
