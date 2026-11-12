@@ -34,3 +34,14 @@ Notes for the lead:
   - vkd3d: fnv-nx-build tools/vkd3d commit fd97ca35ae29a3f79b7a3467fe99d1a3b4e94643, tree_sha256 8ea2fb82...82d9; content = libs/vkd3d-shader/d3dbc.c of upstream wine/vkd3d 0afe7d0aad6eabca21c208be609d3a5670e8ab41 (master; released tags 1.5-2.1 lack the named opcode tables sm_xref.py parses).
   - wine: fnv-nx-build tools/wine-sm1 commit 0a52e82db01433f1b0363c52cf68920ba059a1b1, tree_sha256 70046f62...d530; content = dlls/wined3d/shader_sm1.c and dlls/d3dcompiler_43/asmparser.c of upstream wine-9.0 (fd1153552d779e1ac14b0b1c48fbd1cde894eb0a); byte-identical to the cache the table was generated from.
   - MS pages: fnv-nx-build tools/msdocs-sm commit e18183f8c5536262d44677ab77398e320e970cfc, tree_sha256 6bfddc8d...d166; the 172 page texts (learn.microsoft.com rendering of MicrosoftDocs/win32 desktop-src/direct3dhlsl) sm_table.py reads. The parsers read this text form, not the repo markdown.
+
+## Translator item: what Wine 9.0 does for a b# source of an ALU op (case 4: Wine defines no value)
+Pinned: fnv-nx-build tools/wine-wined3d (glsl_shader.c, shader.c, shader_sm1.c, wined3d_private.h of wine-9.0), entered in render/total/externals.json (wine-wined3d).
+- shader_sm1.c:468 shader_sm1_read_src_param sets `src->reg.data_type = WINED3D_DATA_FLOAT` for every source register, b# included.
+- shader.c:737-745 (reg map): CONSTBOOL only checks the index against limits->constant_bool, then sets reg_maps->boolean_constants. No instruction restriction: the form is accepted at CreateVertexShader.
+- glsl_shader.c:2820-2822 shader_glsl_get_register_name: CONSTBOOL -> "%s_b[%u]"; glsl_shader.c:2270-2271 declares it `uniform bool %s_b[%u];`.
+- glsl_shader.c:3197-3240 shader_glsl_add_src_param_ext: shader_glsl_get_swizzle emits no swizzle (shader_is_scalar, wined3d_private.h:4327 lists CONSTBOOL); shader_glsl_sprintf_cast gets dst type FLOAT (reg.data_type) and src param type FLOAT (default case, size 4): equal types, so NO conversion: the operand string is the bare `vs_b[0]`.
+- The ALU handler (e.g. shader_glsl_mov, glsl_shader.c:3914+) emits `vs_r[0] = vs_b[0];`: a bool assigned to a vec4, which GLSL rejects. Wine's own output for this form does not compile; it is the same error uam gives ours.
+- Loader: glsl_shader.c:1249-1280 shader_glsl_load_constants_b uploads each b# with glUniform1iv (int 0/1) into the bool uniform, from SetVertexShaderConstantB.
+- At draw: shader compile/link status is only logged (shader_glsl_validate_link, glsl_shader.c:620-634: FIXME "Program %u link status invalid" when logging is on; print_glsl_info_log); Wine does not abort or fall back there.
+So Wine 9.0 defines no value for a b# read by an ALU op: it accepts the shader at Create*Shader and produces GLSL that fails to compile. By the rule (do not invent a value) the translator is NOT changed; reported to the orchestrator. The 3 rows stay red.
