@@ -378,3 +378,14 @@ Update 2026-11-12, at 698adefb:
   - native 0/3, waiting on 445e551d in int-l3a.
 - The bridges build, disptest and global descriptor count are a farm 1 job (RUN from w8).
 - L1 agrees that a site counts only inside the entry ranges. w18 re-pins to rangecheck in the next facts commit; at w18 b9944d38, 0 of 43 dynsites rows lie in unreached bytes.
+
+## 2026-11-12 09:37
+- int3 901c3c54e (w6) contains:
+  - 4115a256a and w5's 2f94d41d (cherry-picked);
+  - 49457db77;
+  - ASM-233 cited in ehtables real();
+  - the 3 double tests deleted;
+  - test_rtroot reading through recipe.py. This found and fixed a real defect: lift/rt fnvnx_ftoi args {} → {"mode":"native"}.
+- gate_assumptions: 9 findings. 7 are solver-term, waiting on L1's lexer fix; 2 are f2i_check (L2).
+- ASM-234 lands in w7's facts-side commit together with its citing file.
+- The verdict on int-l3a 2d215f16a is running (w6).
