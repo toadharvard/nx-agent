@@ -15,14 +15,25 @@ import sys
 import tempfile
 
 
+def patched(tree, patches, tmp):
+    """Copy TREE to TMP/t and apply PATCHES (file paths, in the given order) with the recipe's `patch -p1 -F0`. -> the patched directory."""
+    work = os.path.join(tmp, "t")
+    shutil.copytree(tree, work, ignore=shutil.ignore_patterns(".git"))
+    for p in patches:
+        with open(p, "rb") as f:
+            subprocess.run(["patch", "-d", work, "-p1", "-F0", "--no-backup-if-mismatch", "-s"], stdin=f, check=True)
+    return work
+
+
 def derive(tree, patchdir):
     with tempfile.TemporaryDirectory() as tmp:
-        work = os.path.join(tmp, "t")
-        shutil.copytree(tree, work, ignore=shutil.ignore_patterns(".git"))
-        for p in sorted(os.listdir(patchdir)):
-            if p.endswith(".patch"):
-                with open(os.path.join(patchdir, p), "rb") as f:
-                    subprocess.run(["patch", "-d", work, "-p1", "-F0", "--no-backup-if-mismatch", "-s"], stdin=f, check=True)
+        work = patched(tree, [os.path.join(patchdir, p) for p in sorted(os.listdir(patchdir)) if p.endswith(".patch")], tmp)
+        return derive_tree(work)
+
+
+def derive_tree(work):
+    """The unit set of a patched tree: modules.cfg and rules.mk of WORK, every unit named to exist in it."""
+    if True:
         cfg = open(os.path.join(work, "modules.cfg")).read()
         mods, ext = [], []
         for line in cfg.split("\n"):
