@@ -12,8 +12,16 @@ reached is the caller's verdict. Exit 0: run reason "exit" with code 0, or "limi
 ext-module-missing / scenario-error (a --scenario file that is not valid, or a --text-entry text longer than the call's max_len) / nonzero exit / reach-violation (guest exit code 0x52000000|fact_id, reported with its fact_id); 1: usage or input error (message on stderr).
 
 Watch log: --watch-log SYMS (text file, one ELF symbol per line, # starts a comment) logs every execution of each named function's
-first instruction: OUT.json "watch_log" = [{"seq", "tid", "sym", "pc" (guest-relative), "sp"}], seq from 0 in machine order, no
-sampling, no cap, two names at one address in file order. A name that is absent or not STT_FUNC is an input error naming it.
+first instruction: OUT.json "watch_log" = [{"seq", "tid", "t_ns" (virtual clock), "kind", "sym", "pc" (guest-relative), "sp", ...}] with
+"watch_schema": "fnvnx-watch/2" (a superset of /1: the keys seq, tid, sym, pc, sp are kept), seq from 0 in machine order, no sampling, no cap,
+two names at one address in file order. Kinds: "call" (x0, x30 = the call site, guest-relative); "return" for a name marked `NAME ret`
+in the file: taken when pc = that call's entry x30 on the same tid with sp = the entry sp, carries w0 (calls nest: a per-tid stack matches
+them); "unwound": a pending `ret` frame whose entry sp is below the tid's current sp was left by a longjmp (a return the code never makes);
+it is detected at the tid's next record (any call, return or game-entry). A longjmp whose target is the frame that called the watched
+function leaves sp equal to the entry sp, which a leaf callee also has, so it is told only when sp later rises above the entry sp (the
+caller's own return or a further longjmp); a target above an intermediate frame is told at the next record, carries sp (the current one) and entry_sp; "game-entry" (only if the ELF
+has the section .text.fnvl): a BL/BLR whose source is outside the section and whose landing is inside it (src, dst, decoded from the
+instruction word, no names). A name that is absent or not STT_FUNC is an input error naming it.
 Without the option the key is absent.
 
 Host parts: the table's `host` target is an ID word, so the exact console line a part waits for is spelled
@@ -32,6 +40,8 @@ import json
 import os
 import sys
 import time
+
+from unicorn.arm64_const import UC_ARM64_REG_LR, UC_ARM64_REG_X0
 
 import bootinput
 import bootgpu
@@ -84,16 +94,22 @@ def _plan(a, raw):
 
 
 def _watch_names(path, syms):
-    names = []
+    """-> (names in file order, the names marked `ret`); a line is `NAME` or `NAME ret`"""
+    names, rets = [], set()
     with open(path) as f:
         for line in f:
-            n = line.split("#", 1)[0].strip()
-            if n:
-                names.append(n)
+            t = line.split("#", 1)[0].split()
+            if not t:
+                continue
+            if len(t) > 2 or (len(t) == 2 and t[1] != "ret"):
+                raise bootmiles.ResolveError("--watch-log: a line is `NAME` or `NAME ret`, got: %s" % line.strip())
+            names.append(t[0])
+            if len(t) == 2:
+                rets.add(t[0])
     bad = [n for n in names if n not in syms or n not in syms.funcs]
     if bad:
         raise bootmiles.ResolveError("--watch-log: not a function symbol of the ELF: %s" % ", ".join(sorted(set(bad))))
-    return names
+    return names, rets
 
 
 def run(a):
@@ -109,7 +125,7 @@ def run(a):
     syms = bootmiles.read_symtab(a.elf)
     watch = bootmiles.resolve(table, manifest, syms, base)
     host = _host_lines(watch["host"])
-    wl = _watch_names(a.watch_log, syms) if a.watch_log else None
+    wl, wl_ret = _watch_names(a.watch_log, syms) if a.watch_log else (None, set())
     sc, text_entries = None, a.text_entry
     if a.scenario:
         try:
@@ -154,11 +170,45 @@ def run(a):
                 for i in ids:
                     fire(i, tid)
         m.watch_store(addr, stored)
-    wlog = []
+    wlog, frames, rets_hooked = [], {}, set()   # frames: tid -> pending calls of `ret` names, innermost last
+
+    def rec(tid, kind, **kw):
+        wlog.append(dict(seq=len(wlog), tid=tid, t_ns=m.clock.now_ns(), kind=kind, **kw))
+
+    def unwind(tid):
+        """a longjmp (or any other transfer out of a watched call) is a return the code never makes: a pending frame whose entry sp is below
+        the current sp is dead (a live frame's callee runs at or below its entry sp). It is recorded as "unwound" at the next record of the tid"""
+        st, sp = frames.get(tid, []), m.sp()
+        while st and st[-1]["sp"] < sp:
+            f = st.pop()
+            rec(tid, "unwound", sym=f["sym"], pc=f["pc"], sp=sp, entry_sp=f["sp"], x30=f["x30"])
+
+    def returned(pc_abs):
+        tid, sp = m.tid(), m.sp()
+        unwind(tid)
+        st = frames.get(tid, [])
+        for i in range(len(st) - 1, -1, -1):
+            if st[i]["ret"] == pc_abs and st[i]["sp"] == sp:
+                f = st.pop(i)
+                rec(tid, "return", sym=f["sym"], pc=pc_abs - base, sp=sp, w0=m.uc.reg_read(UC_ARM64_REG_X0) & 0xFFFFFFFF, x0=f["x0"], x30=f["x30"])
+                return
     for name in wl or ():
         def logged(tid, pc, name=name):
-            wlog.append({"seq": len(wlog), "tid": tid, "sym": name, "pc": pc - base, "sp": m.sp()})
+            unwind(tid)
+            x0, x30 = m.uc.reg_read(UC_ARM64_REG_X0), m.uc.reg_read(UC_ARM64_REG_LR) & 0xFFFFFFFF
+            rec(tid, "call", sym=name, pc=pc - base, sp=m.sp(), x0=x0, x30=(x30 - base) & 0xFFFFFFFF)
+            if name in wl_ret:
+                frames.setdefault(tid, []).append({"sym": name, "pc": pc - base, "sp": m.sp(), "ret": x30, "x0": x0, "x30": (x30 - base) & 0xFFFFFFFF})
+                if x30 not in rets_hooked:
+                    rets_hooked.add(x30)
+                    m.watch_pc(x30, lambda tid_, pc_, x30=x30: returned(x30))
         m.watch_pc(syms[name] + base, logged)
+    fnvl = bootmiles.read_section(a.elf, ".text.fnvl") if wl is not None else []
+    for lo, size in fnvl:   # game entry: a call from outside the lifted section into it (the section's own range, no list of functions)
+        def entered(tid, src, dst):
+            unwind(tid)
+            rec(tid, "game-entry", pc=dst - base, sp=m.sp(), src=src - base, dst=dst - base)
+        m.watch_calls_into(lo + base, lo + base + size, entered)
     m.on_console(lambda line: [fire(i, m.tid()) for i in host.get(line, ())])
     gpu = None
     if a.gpu:
@@ -196,6 +246,8 @@ def run(a):
         doc["inputs"]["expect_events"] = {"ok": not diff, "diff": diff}
     if wl is not None:
         doc["watch_log"] = wlog
+        doc["watch_schema"] = "fnvnx-watch/2"
+        doc["watch_spec"] = {"names": sorted(set(wl)), "ret": sorted(wl_ret)}
     if gpu:
         doc["gpu"] = gpu_report
     with open(a.out, "w") as f:
@@ -230,7 +282,7 @@ def main(argv=None):
                          "thread_create returns 0 as the header says for exhaustion); default 256")
     sp.add_argument("--profile", choices=("handheld", "docked"), default="handheld",
                     help="what FNVNX_PLAT_DISPLAY_DOCKED answers: docked 1, handheld 0 (default handheld)")
-    sp.add_argument("--watch-log", metavar="SYMS", help="text file of ELF function names; OUT.json gets watch_log, every hit of each")
+    sp.add_argument("--watch-log", metavar="SYMS", help="text file of ELF function names (NAME or NAME ret); OUT.json gets watch_log (fnvnx-watch/2), every hit of each")
     sp.add_argument("--scenario", metavar="FILE", help="device states over virtual time, schema fnvnx-scenario/1 (bootinput.py, rule R-INPUT)")
     sp.add_argument("--text-entry", action="append", default=[], metavar="TEXT",
                     help="the answer of one TEXT_ENTRY call (the system keyboard), repeatable, consumed in order; none left: the call "
