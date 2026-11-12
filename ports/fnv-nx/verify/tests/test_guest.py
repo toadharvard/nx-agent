@@ -66,6 +66,12 @@ def main():
         bad = guest_rec(ext)
         bad["flags"][k] = [f for f in bad["flags"][k] if f != recipe.WERROR_ATTR]
         check("guest root without -Werror=attributes in flags.%s is invalid" % k, any("flags.%s lacks %s" % (k, recipe.WERROR_ATTR) in x for x in errs(g, bad)), errs(g, bad))
+    for f in ("-fpermissive", "-w", "-Wno-error", "-Wno-error=attributes"):
+        for k in ("c", "cxx"):
+            bad = guest_rec(ext)
+            bad["flags"][k] = bad["flags"][k] + [f]
+            check("guest root with %s in flags.%s is invalid" % (f, k), any("flags.%s: %s downgrades" % (k, f) in x for x in errs(g, bad)), errs(g, bad))
+    check("host root may carry -fpermissive", not [x for x in errs(host, dict(REC, flags=dict(REC["flags"], cxx=REC["flags"]["cxx"] + ["-fpermissive"]))) if "downgrades" in x])
     check("host root needs no -Werror=attributes", not [x for x in errs(host, REC) if "attributes" in x], errs(host, REC))
     # --- the real compiler, by the pin of the checkout (no environment switch, no skip)
     pin = json.load(open(os.path.join(REAL, T + "verify/guest_compiler.json")))
