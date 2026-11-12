@@ -1760,30 +1760,40 @@ when the file does not exist); a fact with no call site in the universe is `reac
 taken, in code or in data) is `reach-address-taken`. The write sets are the decoder's (LLVM defs); a register an instruction
 writes that they miss (x0, say) would make a constant wrong, and the Form-writes fact of L3a w5 is what replaces this reliance.
 
-(T-B) TRAP BODY. The root's recipe declares its failure function, `error_abi: {"fail": SYMBOL}` (`--fail`). A function is TRAP-SHAPED (trap_candidate)
-iff it calls exactly one symbol X (BL, or a tail B, with a branch relocation; X global, not a citation function, not REACH), and, with calls of
-X transparent, it is V by the vanalyse rules except for the input rule (stores only into the own frame, no other call, no indirect branch, no
-system word, no atomic, every memory access based on the frame; the arguments may be read), and EVERY path of it passes a call of X
-(every_path_calls). Its whole effect is then what X does. If X is the root's failure function the function is the finding `trap-body`: a body
-that only reports a failure is a stub. SUBSET (stated, like V): a body that reads memory outside its frame or calls anything else is not
-trap-shaped. The failure function itself is checked against its definition: defined exactly once as a global function of the root
-(`error-abi-undefined`, `error-abi-multiple`), no vacuous body (`error-abi-vacuous`), not itself trap-shaped (`error-abi-trap`). The analysis
-is per object and root-independent (the callee name is the fact, cached with the object); `judge` compares it with the root's symbol, so one
-cached object serves every root. The gate result holds "trap_body": the count.
+(T-B) TRAP BODY. The root's recipe declares its failure function, `error_abi: {"fail": SYMBOL, "kind": "noreturn"}` or `{"fail": SYMBOL, "kind": "flag",
+"flag": FIELD}` (`--fail --kind [--flag]`; the declaration is required of every root with table handlers). A call of the failure function is the failure edge.
+A function is TRAP-SHAPED (trap_candidate), by output effect alone, iff it calls exactly one symbol X (BL, or a tail B, with a branch relocation; X global,
+not a citation function, not REACH) and, with calls of X transparent, has no output effect: no store outside its own frame, no indirect branch, no other
+call, no system word, no atomic, and no returned constant or address (the result of x0 is not K or A); LOADS from any address and the arguments of the call
+are not effects (so `if (ctx->x) fail(ctx, ...)` does not escape: that path has no call of X, hence the body is not trap-shaped only for that reason, and
+`fail(ctx, ctx->x)` is). EVERY path of it must pass a call of X (every_path_calls). If X is the root's failure function the function is the finding
+`trap-body`: a body that only reports a failure is a stub. The analysis is per object and root-independent (the callee name is the fact, cached with the
+object); `judge` compares it with the root's symbol. The gate result holds "trap_body": the count.
+The DECLARATION is checked against the definition (error_abi_findings): the symbol is defined exactly once as a global function of the root
+(`error-abi-undefined`, `error-abi-multiple`); kind noreturn: no path of the definition returns (nr_ends/noreturn_set: no RET, BR, ERET, SVC, no fall-through,
+every path ends in a call through a pointer, or in a call that the compiler placed last of a function of the root that is itself noreturn, the least fixed
+point; REACH is in it by its BLR tail) else `error-abi-noreturn`; kind flag: the object's DWARF gives the structure the first parameter points to and the
+member FLAG, and on EVERY path the definition stores a nonzero constant at that offset through x0 as it was at entry (flag_events: no write of x0 before; the
+ILP32 `mov w0, w0` is no write), directly or through direct calls (BL, tail B) of functions of the same object with x0 unchanged (flag_holds, any depth,
+cycles do not count) else `error-abi-flag` (also without DWARF). STATED SUBSET: a callee in another object is not followed (red, the safe side). Both
+kinds read the code of the object: the compiler's code generation is assumption 1.
 
 (H) EMPTY HANDLERS BY RECORDS. A table of handlers selects functions by their address stored in a data section (an instruction table). A V function
-(empty or constant body) with no constants row is certified iff the root's generated records justify it (`--op-cover FILE --op-syntax FILE`; recipe
-`empty_handlers: {"cover": PATH, "syntax": PATH}`, tracked files; read_handler_records, an unparseable record is an error): (1) a row of op_cover.tsv
-(`slot id opnum op class covering evidence handler`) has handler == the function's symbol; (2) EVERY such row is justified: class a (the id is
-`sm:<key>` and every op_syntax row of the key is `ok` with 0 destination, 0 source, 0 other operands: the opcode has nothing to do), or class b
-(`covering` names symbols, each defined in the root and none a V body: another non-empty emitter carries the semantics); class c (the row is
-unreachable) is judged by the reach rule, so an empty body is not accepted for it (the body must be a call of fnvnx_reach_violation with a
-certificate); none and own justify nothing; (3) the function's address is stored in an allocated non-code section other than .eh_frame (its own
-object when it is local, any object of the root when it is global). Otherwise the finding V with the reason. The gate result holds
-"handler_justified": {a: n, b: n}.
+(empty or constant body) with no constants row is certified iff the root's generated records justify it (`--op-cover FILE --op-syntax FILE --table
+SLOT=SYMBOL:FIELD`; recipe `empty_handlers: {"cover": PATH, "syntax": PATH, "tables": {SLOT: {"symbol": TABLE, "field": FIELD}}}`, tracked files;
+read_handler_records, an unparseable record is an error): (1) the layout-derived join: the handler of entry k of the table of slot S is the target of the
+data relocation at sym + k*sizeof(entry) + offsetof(entry, FIELD), with sizeof and offsetof from the object's DWARF (the array variable SYM, its element
+structure); at least one (S, k) selects the function (a local function: in its own object's table; a global one: in any object's); a table with no DWARF
+layout, or an entry with no relocation (the declared slot cannot be resolved) is red, not skipped; (2) every selected (S, k) has a row of op_cover.tsv
+(`slot id opnum op class covering evidence`, key (slot, opnum = k)) and EVERY such row is justified: class a (the id is `sm:<key>` and every op_syntax
+row of the key is `ok` with 0 destination, 0 source, 0 other operands: the opcode has nothing to do), or class b (`covering` names symbols, each defined
+in the root and none a V body: another non-empty emitter carries the semantics); class c (the row is unreachable) is judged by the reach rule, so an
+empty body is not accepted for it (the body must be a call of fnvnx_reach_violation with a certificate); none and own justify nothing. Otherwise the
+finding V with the reason. The gate result holds "handler_justified": {a: n, b: n}. The records carry no handler name: a name copied from source text
+would need its own proof, the layout of the object is the proof.
 
 CACHE. Per object, CACHE/objstub/<key>.json, key = sha256 of (analysis version = objstub.py + a64access.cc, object sha256, os_layer
-flag, the terminators the object's own symbols mention): the analysis reads the terminator set only through the object's symbol names, so
+flag, the terminators the object's own symbols mention, the probe = the root's error_abi and empty_handlers.tables): the analysis reads the terminator set only through the object's symbol names, so
 the key is exact and a changed header does not invalidate objects that do not mention the new terminator. Constants rows and reach facts
 are applied after the analysis (judge), so they are not in the key. Objects without an entry run in --jobs processes.
 

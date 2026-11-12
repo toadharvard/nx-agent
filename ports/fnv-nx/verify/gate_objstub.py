@@ -32,7 +32,7 @@ import unitstage  # noqa: E402
 
 def root_check(root, repo, cache, jobs):
     """-> (results {unit path: analysis}, rows {(unit path, symbol): row}, os_layer ids, root-level findings [(id, name, kind, detail)],
-    the root's failure function (recipe error_abi.fail) or None, the root's handler records (recipe empty_handlers) or None)"""
+    the root's `error_abi` (recipe) or None, the root's handler records (recipe empty_handlers) or None)"""
     rec = recipe.load_recipe(repo, recipe.load_admit(repo), root)
     try:
         res, _ = gate_build.ensure(root, cache, repo)
@@ -53,8 +53,9 @@ def root_check(root, repo, cache, jobs):
     rows = objstub.read_rows(res["constants"], base) if res["constants"] else {}
     eh = rec.get("empty_handlers")
     records = objstub.read_handler_records(os.path.join(repo, eh["cover"]), os.path.join(repo, eh["syntax"])) if eh else None
-    fail = (rec.get("error_abi") or {}).get("fail")
-    return objstub.analyse_all(objs, names, os_ids, cache, jobs), rows, os_ids, [], fail, records
+    abi = rec.get("error_abi")
+    probe = dict(abi or {}, tables=(eh or {}).get("tables", {})) if (abi or eh) else None
+    return objstub.analyse_all(objs, names, os_ids, cache, jobs, probe), rows, os_ids, [], abi, records
 
 
 def main(argv):
@@ -63,18 +64,18 @@ def main(argv):
     cache, repo = os.environ.get("GATE_CACHE") or tmp, "."
     stats = {}   # counts of the rule-H certifications and of the trap bodies
     items, finds, why, results, rows, roots = [], [], "", {}, {}, gate_build.buildable_roots(repo)
-    fails, handlers = {}, {}   # {object id: the root's failure function}, {object id: the root's handler records}
+    fails, handlers = {}, {}   # {object id: the root's error_abi}, {object id: the root's handler records}
     try:
         wine = objstub.read_wine_table(os.path.join(repo, "ports/fnv-nx/verify/wine_fixme.tsv"))   # the table of the tree under test
         declared = objstub.read_declared_table(os.path.join(repo, "ports/fnv-nx/verify/declared_machine.tsv"))   # the table of the tree under test
         facts = objstub.read_facts(os.path.join(cache, "reach", gate_build.tree_of(repo), "reach.facts.tsv")) if roots else None
         for root in roots:
-            r, w, _, fs, fail, records = root_check(root, repo, cache, jobs)
+            r, w, _, fs, abi, records = root_check(root, repo, cache, jobs)
             results.update(r)
-            fails.update({o: fail for o in r} if fail else {})
+            fails.update({o: abi for o in r} if abi else {})
             handlers.update({o: records for o in r} if records else {})
-            if fail:
-                fs = fs + objstub.error_abi_findings(r, list(r), fail)
+            if abi:
+                fs = fs + objstub.error_abi_findings(r, list(r), abi)
             rows.update(w)
             finds += fs
             items += [(i, n) for i, n, _, _ in fs]

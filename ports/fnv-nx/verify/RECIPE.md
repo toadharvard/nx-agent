@@ -171,11 +171,15 @@ generate stage, naming the object. `lift/bridges` takes it as `{"root": "ports/f
 is listed in the `except` of lift/descs' recipe in the commit that admits it, and has `forbid_sections: [".fnvnx.disp"]`.
 
 ### `error_abi` and `empty_handlers` (objstub)
-`error_abi: {"fail": SYMBOL}` declares the root's one failure function. objstub (gate `objstub`, rule T-B) then makes a function whose every path
-ends in a call of it, with no other effect, the finding `trap-body`; SYMBOL must be defined once as a global function of the root and be no vacuous
-or trap-shaped body. `empty_handlers: {"cover": PATH, "syntax": PATH}` names the generated records (tracked repository files, op_cover.tsv with a
-`handler` column and op_syntax.tsv) by which an empty or constant handler selected by an instruction table is certified (rule H). Both are
-checked as keys here (a C symbol, tracked files) and judged in objstub.py; they are not inputs of any stage.
+`error_abi` declares the root's one failure function and how its definition signals failure: `{"fail": SYMBOL, "kind": "noreturn"}` (the definition does
+not return) or `{"fail": SYMBOL, "kind": "flag", "flag": FIELD}` (the definition stores a nonzero constant to the member FIELD of the structure its first
+parameter points to, on every path, directly or through direct calls in the same object). objstub (gate `objstub`, rule T-B) checks the declaration from
+the definition in the object (the DWARF gives the member offset, so a root with `flag` is compiled with -g) and makes a function whose every path ends in
+a call of SYMBOL, with no output effect, the finding `trap-body`. `empty_handlers: {"cover": PATH, "syntax": PATH, "tables": {SLOT: {"symbol": TABLE,
+"field": FIELD}}}` names the generated records (tracked repository files, op_cover.tsv and op_syntax.tsv) and, per slot, the instruction table (an array
+variable) and the entry field that holds the handler; the handler of entry k is read from the data relocation at that table, by the layout from DWARF, and an
+empty or constant handler is certified only by the record rows of the entries that select it (rule H). A root with `empty_handlers` must declare `error_abi`
+(a recipe error otherwise). Both are checked as keys here and judged in objstub.py; the probe (error_abi and tables) is part of the objstub cache key.
 
 ## Keep going
 

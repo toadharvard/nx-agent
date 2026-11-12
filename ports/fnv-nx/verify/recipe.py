@@ -524,16 +524,23 @@ def check(rec, root, files, roots, pin=None, repo="."):
     fs = rec.get("forbid_sections")
     if fs is not None and not (isinstance(fs, list) and fs and all(isinstance(n, str) and re.fullmatch(r"\.[A-Za-z0-9._-]+", n) for n in fs)):
         err.append("forbid_sections must be a non-empty list of section names (.name)")
-    ea = rec.get("error_abi")
-    if ea is not None and not (isinstance(ea, dict) and set(ea) == {"fail"} and isinstance(ea["fail"], str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", ea["fail"])):
-        err.append('error_abi must be {"fail": "<C symbol>"}: the root\'s one failure function (objstub judges its trap bodies)')
+    ea, ident = rec.get("error_abi"), lambda x: isinstance(x, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", x)
+    if ea is not None and not (isinstance(ea, dict) and ident(ea.get("fail")) and (
+            (ea.get("kind") == "noreturn" and set(ea) == {"fail", "kind"}) or (ea.get("kind") == "flag" and set(ea) == {"fail", "kind", "flag"} and ident(ea.get("flag"))))):
+        err.append('error_abi must be {"fail": SYM, "kind": "noreturn"} or {"fail": SYM, "kind": "flag", "flag": FIELD}: the root\'s one failure function and how its '
+                   'definition signals failure (objstub checks the definition)')
     eh = rec.get("empty_handlers")
     if eh is not None:
-        if not (isinstance(eh, dict) and set(eh) == {"cover", "syntax"}):
-            err.append('empty_handlers must be {"cover": PATH, "syntax": PATH} (the generated op_cover.tsv and op_syntax.tsv)')
+        tb = eh.get("tables") if isinstance(eh, dict) else None
+        if not (isinstance(eh, dict) and set(eh) == {"cover", "syntax", "tables"} and isinstance(tb, dict) and tb
+                and all(ident(k) and isinstance(v, dict) and set(v) == {"symbol", "field"} and ident(v["symbol"]) and ident(v["field"]) for k, v in tb.items())):
+            err.append('empty_handlers must be {"cover": PATH, "syntax": PATH, "tables": {SLOT: {"symbol": TABLE, "field": FIELD}}}: the generated op_cover.tsv and '
+                       'op_syntax.tsv and, per slot, the instruction table (an array variable with DWARF) and the field of its entry that holds the handler')
         else:
-            err += ["empty_handlers.%s %r is not a tracked file of the repository" % (k, p) for k, p in sorted(eh.items())
-                    if not (isinstance(p, str) and p in files and not p.startswith("/") and ".." not in p.split("/"))]
+            err += ["empty_handlers.%s %r is not a tracked file of the repository" % (k, eh[k]) for k in ("cover", "syntax")
+                    if not (isinstance(eh[k], str) and eh[k] in files and not eh[k].startswith("/") and ".." not in eh[k].split("/"))]
+        if ea is None:
+            err.append("a root with empty_handlers (table handlers) must declare error_abi")
     sr = rec.get("sources")
     if sr is not None and not (isinstance(sr, str) and sr in generated_outputs(rec)):
         err.append("sources must name a path in generated[].outputs of this root (a file of <external>:<path> lines)")

@@ -84,30 +84,40 @@ when the file does not exist); a fact with no call site in the universe is `reac
 taken, in code or in data) is `reach-address-taken`. The write sets are the decoder's (LLVM defs); a register an instruction
 writes that they miss (x0, say) would make a constant wrong, and the Form-writes fact of L3a w5 is what replaces this reliance.
 
-(T-B) TRAP BODY. The root's recipe declares its failure function, `error_abi: {"fail": SYMBOL}` (`--fail`). A function is TRAP-SHAPED (trap_candidate)
-iff it calls exactly one symbol X (BL, or a tail B, with a branch relocation; X global, not a citation function, not REACH), and, with calls of
-X transparent, it is V by the vanalyse rules except for the input rule (stores only into the own frame, no other call, no indirect branch, no
-system word, no atomic, every memory access based on the frame; the arguments may be read), and EVERY path of it passes a call of X
-(every_path_calls). Its whole effect is then what X does. If X is the root's failure function the function is the finding `trap-body`: a body
-that only reports a failure is a stub. SUBSET (stated, like V): a body that reads memory outside its frame or calls anything else is not
-trap-shaped. The failure function itself is checked against its definition: defined exactly once as a global function of the root
-(`error-abi-undefined`, `error-abi-multiple`), no vacuous body (`error-abi-vacuous`), not itself trap-shaped (`error-abi-trap`). The analysis
-is per object and root-independent (the callee name is the fact, cached with the object); `judge` compares it with the root's symbol, so one
-cached object serves every root. The gate result holds "trap_body": the count.
+(T-B) TRAP BODY. The root's recipe declares its failure function, `error_abi: {"fail": SYMBOL, "kind": "noreturn"}` or `{"fail": SYMBOL, "kind": "flag",
+"flag": FIELD}` (`--fail --kind [--flag]`; the declaration is required of every root with table handlers). A call of the failure function is the failure edge.
+A function is TRAP-SHAPED (trap_candidate), by output effect alone, iff it calls exactly one symbol X (BL, or a tail B, with a branch relocation; X global,
+not a citation function, not REACH) and, with calls of X transparent, has no output effect: no store outside its own frame, no indirect branch, no other
+call, no system word, no atomic, and no returned constant or address (the result of x0 is not K or A); LOADS from any address and the arguments of the call
+are not effects (so `if (ctx->x) fail(ctx, ...)` does not escape: that path has no call of X, hence the body is not trap-shaped only for that reason, and
+`fail(ctx, ctx->x)` is). EVERY path of it must pass a call of X (every_path_calls). If X is the root's failure function the function is the finding
+`trap-body`: a body that only reports a failure is a stub. The analysis is per object and root-independent (the callee name is the fact, cached with the
+object); `judge` compares it with the root's symbol. The gate result holds "trap_body": the count.
+The DECLARATION is checked against the definition (error_abi_findings): the symbol is defined exactly once as a global function of the root
+(`error-abi-undefined`, `error-abi-multiple`); kind noreturn: no path of the definition returns (nr_ends/noreturn_set: no RET, BR, ERET, SVC, no fall-through,
+every path ends in a call through a pointer, or in a call that the compiler placed last of a function of the root that is itself noreturn, the least fixed
+point; REACH is in it by its BLR tail) else `error-abi-noreturn`; kind flag: the object's DWARF gives the structure the first parameter points to and the
+member FLAG, and on EVERY path the definition stores a nonzero constant at that offset through x0 as it was at entry (flag_events: no write of x0 before; the
+ILP32 `mov w0, w0` is no write), directly or through direct calls (BL, tail B) of functions of the same object with x0 unchanged (flag_holds, any depth,
+cycles do not count) else `error-abi-flag` (also without DWARF). STATED SUBSET: a callee in another object is not followed (red, the safe side). Both
+kinds read the code of the object: the compiler's code generation is assumption 1.
 
 (H) EMPTY HANDLERS BY RECORDS. A table of handlers selects functions by their address stored in a data section (an instruction table). A V function
-(empty or constant body) with no constants row is certified iff the root's generated records justify it (`--op-cover FILE --op-syntax FILE`; recipe
-`empty_handlers: {"cover": PATH, "syntax": PATH}`, tracked files; read_handler_records, an unparseable record is an error): (1) a row of op_cover.tsv
-(`slot id opnum op class covering evidence handler`) has handler == the function's symbol; (2) EVERY such row is justified: class a (the id is
-`sm:<key>` and every op_syntax row of the key is `ok` with 0 destination, 0 source, 0 other operands: the opcode has nothing to do), or class b
-(`covering` names symbols, each defined in the root and none a V body: another non-empty emitter carries the semantics); class c (the row is
-unreachable) is judged by the reach rule, so an empty body is not accepted for it (the body must be a call of fnvnx_reach_violation with a
-certificate); none and own justify nothing; (3) the function's address is stored in an allocated non-code section other than .eh_frame (its own
-object when it is local, any object of the root when it is global). Otherwise the finding V with the reason. The gate result holds
-"handler_justified": {a: n, b: n}.
+(empty or constant body) with no constants row is certified iff the root's generated records justify it (`--op-cover FILE --op-syntax FILE --table
+SLOT=SYMBOL:FIELD`; recipe `empty_handlers: {"cover": PATH, "syntax": PATH, "tables": {SLOT: {"symbol": TABLE, "field": FIELD}}}`, tracked files;
+read_handler_records, an unparseable record is an error): (1) the layout-derived join: the handler of entry k of the table of slot S is the target of the
+data relocation at sym + k*sizeof(entry) + offsetof(entry, FIELD), with sizeof and offsetof from the object's DWARF (the array variable SYM, its element
+structure); at least one (S, k) selects the function (a local function: in its own object's table; a global one: in any object's); a table with no DWARF
+layout, or an entry with no relocation (the declared slot cannot be resolved) is red, not skipped; (2) every selected (S, k) has a row of op_cover.tsv
+(`slot id opnum op class covering evidence`, key (slot, opnum = k)) and EVERY such row is justified: class a (the id is `sm:<key>` and every op_syntax
+row of the key is `ok` with 0 destination, 0 source, 0 other operands: the opcode has nothing to do), or class b (`covering` names symbols, each defined
+in the root and none a V body: another non-empty emitter carries the semantics); class c (the row is unreachable) is judged by the reach rule, so an
+empty body is not accepted for it (the body must be a call of fnvnx_reach_violation with a certificate); none and own justify nothing. Otherwise the
+finding V with the reason. The gate result holds "handler_justified": {a: n, b: n}. The records carry no handler name: a name copied from source text
+would need its own proof, the layout of the object is the proof.
 
 CACHE. Per object, CACHE/objstub/<key>.json, key = sha256 of (analysis version = objstub.py + a64access.cc, object sha256, os_layer
-flag, the terminators the object's own symbols mention): the analysis reads the terminator set only through the object's symbol names, so
+flag, the terminators the object's own symbols mention, the probe = the root's error_abi and empty_handlers.tables): the analysis reads the terminator set only through the object's symbol names, so
 the key is exact and a changed header does not invalidate objects that do not mention the new terminator. Constants rows and reach facts
 are applied after the analysis (judge), so they are not in the key. Objects without an entry run in --jobs processes.
 
@@ -369,10 +379,9 @@ def step(off, w, st, rel, obj, inf):
     return tuple(regs)
 
 
-def vanalyse(words, a, b, rels, obj, dec, wine=False):
-    """-> {'x0'|'x1'|'v0': None (never written) | ('K',c) | ('A',addr) | ('U',)} if the function is V (no proof of dependence or
-    effect), else None. Non-vacuity proofs: cfg() (i, iv), a memory access whose base is not provably the own frame (ii, iii), an
-    input register live at entry (v). Raises Unanalysable."""
+def _flow(words, a, b, rels, obj, dec):
+    """-> (succ, inf, ins) of the function [a,b): the successor map (cfg), the access info of every word and the abstract register state before
+    every word (step, the values E/K/A/S/I/D), or None when cfg() has no result. Raises Unanalysable."""
     succ = cfg(words, a, b, rels, obj)
     if succ is None:
         return None
@@ -389,10 +398,31 @@ def vanalyse(words, a, b, rels, obj, dec, wine=False):
             if new != ins.get(s):
                 ins[s] = new
                 work.append(s)
+    return succ, inf, ins
+
+
+def is_load(w):
+    """A plain load word: LDR/LDP/LDUR/LDRSW and the SIMD forms (the load/store groups 0b101 pair and 0b111 single, with the L bit 22 set).
+    Exclusive and atomic words (group 0b001 / the 0b111 register-offset LSE class) are not loads here: they are refused by the T rules."""
+    g = (w >> 27) & 7
+    return g in (0b101, 0b111) and (w >> 22) & 1 == 1 and not (g == 0b111 and (w >> 24) & 3 == 0 and (w >> 21) & 1 and (w >> 10) & 3 == 0)
+
+
+def vanalyse(words, a, b, rels, obj, dec, wine=False, loads_ok=False):
+    """-> {'x0'|'x1'|'v0': None (never written) | ('K',c) | ('A',addr) | ('U',)} if the function is V (no proof of dependence or
+    effect), else None. Non-vacuity proofs: cfg() (i, iv), a memory access whose base is not provably the own frame (ii, iii), an
+    input register live at entry (v). LOADS_OK (the trap shape (T-B), which is defined by output effect alone): a load from any address
+    is not an effect, only stores must be based on the own frame. Raises Unanalysable."""
+    fl = _flow(words, a, b, rels, obj, dec)
+    if fl is None:
+        return None
+    succ, inf, ins = fl
     for o, (r, w, mem, wb) in inf.items():  # (ii)/(iii): the base must be provably the own frame (below the entry sp)
         if mem:
             base, index, disp, size = mem
             v = ins[o][base] if base is not None else ("I",)
+            if loads_ok and is_load(words[o]):
+                continue
             if not ((v[0] == "S" and (index is not None or (disp is not None and size is not None and v[1] + disp + size <= 0))) or (base == 31 and v[0] != "S")):
                 return None
     live, ch = {o: 0 for o in succ}, True  # (v): backward liveness of the input registers
@@ -761,10 +791,10 @@ def trap_candidate(words, a, b, rels, obj, dec):
     x, sites = next(iter(names)), set(sy)
     obj.cite = CITE + (x,)
     try:
-        v = vanalyse(words, a, b, rels, obj, dec, True)
+        v = vanalyse(words, a, b, rels, obj, dec, True, True)
     finally:
         obj.cite = CITE
-    return x if v is not None and every_path_calls(words, a, b, sites) else None
+    return x if v is not None and not (isinstance(v["x0"], tuple) and v["x0"][0] in "KA") and every_path_calls(words, a, b, sites) else None
 
 
 def exit_tail(words, a, b):
@@ -795,11 +825,189 @@ def exit_tail(words, a, b):
     return last in seen
 
 
-def check_obj(path, terms, os_layer):
+READELF = "aarch64-linux-gnu-readelf"   # the pinned binutils (env.json): the one reader of DWARF here
+
+
+def dwarf(path):
+    """The DWARF .debug_info of the object PATH as {die offset: {"tag", "name", "type" (die offset), "size", "loc", "parent", "kids"}}, read
+    from `readelf --debug-dump=info` (relocations applied by readelf). {} when the object has no .debug_info. Only the attributes the layout
+    rules need are kept. Raises ValueError when readelf fails."""
+    r = subprocess.run([READELF, "--debug-dump=info", path], capture_output=True, text=True)
+    if r.returncode:
+        raise ValueError("%s: readelf failed: %s" % (path, r.stderr[-200:]))
+    dies, stack, cur = {}, {}, None
+    for l in r.stdout.splitlines():
+        m = re.match(r"\s*<(\d+)><([0-9a-f]+)>: Abbrev Number: (\d+)(?: \((DW_TAG_\w+)\))?", l)
+        if m:
+            depth, off = int(m.group(1)), int(m.group(2), 16)
+            cur = dies[off] = {"tag": m.group(4) or "", "name": None, "type": None, "size": None, "loc": None, "parent": stack.get(depth - 1), "kids": []}
+            stack[depth] = off
+            if cur["parent"] is not None:
+                dies[cur["parent"]]["kids"].append(off)
+            continue
+        m = cur is not None and re.match(r"\s*<[0-9a-f]+>\s+(DW_AT_\w+)\s*:\s*(.*)$", l)
+        if not m:
+            continue
+        at, val = m.group(1), m.group(2).strip()
+        if at == "DW_AT_name":
+            cur["name"] = val.split("): ", 1)[1] if val.startswith("(") and "): " in val else val
+        elif at == "DW_AT_type":
+            t = re.match(r"<(?:0x)?([0-9a-f]+)>", val)
+            cur["type"] = int(t.group(1), 16) if t else None
+        elif at in ("DW_AT_byte_size", "DW_AT_data_member_location"):
+            t = re.match(r"(?:0x([0-9a-f]+)|(\d+))\b", val)
+            if t:
+                cur["size" if at == "DW_AT_byte_size" else "loc"] = int(t.group(1), 16) if t.group(1) else int(t.group(2))
+    return dies
+
+
+def strip_type(dies, t, tags=("DW_TAG_const_type", "DW_TAG_volatile_type", "DW_TAG_typedef", "DW_TAG_restrict_type")):
+    while t in dies and dies[t]["tag"] in tags:
+        t = dies[t]["type"]
+    return t
+
+
+def member_off(dies, st, field):
+    """The data_member_location of the member FIELD of the structure type die ST (typedefs/cv stripped), or None."""
+    st = strip_type(dies, st)
+    if st not in dies or dies[st]["tag"] not in ("DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"):
+        return None
+    for k in dies[st]["kids"]:
+        if dies[k]["tag"] == "DW_TAG_member" and dies[k]["name"] == field:
+            return dies[k]["loc"] if dies[k]["loc"] is not None else 0
+    return None
+
+
+def ctx_flag_offset(dies, fail, field):
+    """The offset of FIELD in the structure that the first parameter of the function FAIL points to (its DWARF declaration), or None."""
+    for d in dies.values():
+        if d["tag"] == "DW_TAG_subprogram" and d["name"] == fail:
+            ps = [k for k in d["kids"] if dies[k]["tag"] == "DW_TAG_formal_parameter"]
+            if ps:
+                p = strip_type(dies, dies[ps[0]]["type"])
+                if p in dies and dies[p]["tag"] == "DW_TAG_pointer_type":
+                    return member_off(dies, dies[p]["type"], field)
+    return None
+
+
+def table_layout(dies, sym, field):
+    """(sizeof(entry), offsetof(entry, FIELD)) of the array variable SYM (DWARF: the variable's array type, its element structure), or None."""
+    for d in dies.values():
+        if d["tag"] == "DW_TAG_variable" and d["name"] == sym and d["type"] is not None:
+            a = strip_type(dies, d["type"])
+            if a in dies and dies[a]["tag"] == "DW_TAG_array_type" and dies[a]["type"] is not None:
+                e = strip_type(dies, dies[a]["type"])
+                off = member_off(dies, e, field)
+                if e in dies and dies[e]["size"] and off is not None:
+                    return dies[e]["size"], off
+    return None
+
+
+def _target(w, o):
+    """The branch target offset of a B/BL word at o."""
+    i = w & 0x3FFFFFF
+    return o + 4 * (i - (1 << 26) if i >> 25 else i)
+
+
+def nr_ends(words, a, b, rels, obj, fn_at):
+    """The shape of a function that does not return, from its code: -> sorted list of the callees the paths END in (a symbol name; "<blr>" for
+    a final call through a pointer), or None when some path can return or leave: a reachable RET, BR* (not BLR), ERET, SVC, a fall-through
+    past the end after a word that is not a call, or a branch out of [a,b) that is not a tail call. A path ends in a call that the compiler
+    placed last (BL at the end, a tail B out of the function: it knew the callee does not return) or in BRK/UDF (a trap word, which the T
+    rules judge). FN_AT {offset: name}: the functions of the section (a call without a relocation targets one of them)."""
+    callee = lambda o, w: obj.syms[rels[o][0]][0] if o in rels and rels[o][1] in BRANCH[obj.w64] else fn_at.get(_target(w, o))
+    ends, seen, work, last = set(), set(), [a], b - 4
+    while work:
+        o = work.pop()
+        if o in seen:
+            continue
+        seen.add(o)
+        if o not in words:
+            return None
+        w = words[o]
+        if w >> 26 == 0b100101:   # BL
+            if o == last:
+                c = callee(o, w)
+                if c is None:
+                    return None
+                ends.add(c)
+            else:
+                work.append(o + 4)
+        elif w >> 26 == 0b000101:   # B
+            t = _target(w, o)
+            if a <= t < b and not (o in rels and rels[o][1] in BRANCH[obj.w64]):
+                work.append(t)
+            else:
+                c = callee(o, w)
+                if c is None:
+                    return None
+                ends.add(c)
+        elif isblr(w):
+            if o == last:
+                ends.add("<blr>")
+            else:
+                work.append(o + 4)
+        elif (w & 0xFFE0001F) == 0xD4200000 or w >> 16 == 0:   # BRK, UDF: no successor, a trap word
+            continue
+        else:
+            nx = succ_of(w, o)
+            if not nx or w >> 24 == 0xD4 or any(not a <= t < b for t in nx):
+                return None
+            work += nx
+    return sorted(ends)
+
+
+def flag_events(words, a, b, rels, obj, dec, fn_at):
+    """(stores {offset: [word offset]}, calls [(word offset, callee)]) of the function [a,b) for the flag rule: a STORE of a nonzero constant
+    through x0 as it was at entry, at the displacement that is the key, and a direct call (BL, tail B) with x0 as it was at entry. "As it was at
+    entry": no word wrote x0 on a path to it (the ILP32 zero-extension `mov w0, w0` of a pointer argument is not a write; a call writes it)."""
+    succ = {o: [t for t in succ_of(w, o) if a <= t < b] for o, w in words.items() if a <= o < b}
+    dirty, work = {a: False}, [a]
+    while work:
+        o = work.pop()
+        if o not in words:
+            return {}, []
+        w = words[o]
+        d = dirty[o] or (w != 0x2A0003E0 and (access(dec.get(o))[1] & 1 if dec.get(o) else True)) or w >> 26 == 0b100101 or isblr(w)
+        for t in succ.get(o, ()):
+            if t not in dirty or (d and not dirty[t]):
+                dirty[t] = bool(d) or dirty.get(t, False)
+                work.append(t)
+    stores, calls = {}, []
+    fl = _flow(words, a, b, rels, obj, dec)
+    if fl is not None:
+        succ, inf, ins = fl
+        for o, (r, w, mem, wb) in inf.items():
+            wd, st = words[o], ins[o]
+            if mem and mem[0] == 0 and mem[1] is None and mem[2] is not None and not dirty[o] and not is_load(wd) and ((wd >> 26) & 1) == 0 and ((wd >> 27) & 7) == 0b111:
+                v = ("K", 0) if wd & 31 == 31 else st[wd & 31]
+                if v[0] == "K" and v[1] != 0:
+                    stores.setdefault(mem[2], []).append(o)
+    for o in dirty:
+        wd = words[o]
+        if wd >> 26 in (0b100101, 0b000101) and not dirty[o]:
+            c = obj.syms[rels[o][0]][0] if o in rels and rels[o][1] in BRANCH[obj.w64] else fn_at.get(_target(wd, o))
+            if c:
+                calls.append((o, c))
+    return stores, calls
+
+
+def flag_holds(fl, name, off, stack=()):
+    """True iff on EVERY path of the function NAME of FL {name: (words, a, b, stores, calls)} the flag at offset OFF is stored (flag_events), directly
+    or through a direct call of a function of the same object that has the property (one call level or more; a cycle does not count)."""
+    if name not in fl:
+        return False
+    words, a, b, stores, calls = fl[name]
+    sites = set(stores.get(off, ())) | {o for o, c in calls if c in fl and c not in stack + (name,) and flag_holds(fl, c, off, stack + (name,))}
+    return bool(sites) and every_path_calls(words, a, b, sites)
+
+
+def check_obj(path, terms, os_layer, probe=None):
     """-> (items [name], findings [(name, KIND, detail, V result as JSON or None)], extra {"reach": [[function, offset, constant|None]],
     "exit_ok": [function whose every path ends in a BLR tail]}). OS_LAYER: the object may contain SVC (a fact of the recipe)."""
     o = Obj(path)
-    items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "declared": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}, "alias": {}, "tb": {}, "globals": [], "dref": []}
+    items, finds, exit_ok, extra = [], [], set(), {"reach": [], "wine": [], "declared": [], "wine_id": {}, "wine_nz": {}, "cite_sym": {}, "alias": {}, "tb": {}, "globals": [], "dref": [], "nr": {}, "flag": None, "tabs": {}}
+    pw = {}   # the probe (recipe error_abi kind flag): name -> (words, a, b, stores, calls) of every function
     unw = {t[1:] for t in terms if t[:1] == "~"}   # unwinders: calls that continue an exception already in flight
     tid = {i for i, s in enumerate(o.syms) if s[0] in terms and s[4] != 0 and s[0] not in (REACH,) + CITE}   # REACH is judged by the reach rule
     for si, (sname, stype, sflags, soff, ssize, _, _) in enumerate(o.secs):
@@ -810,6 +1018,7 @@ def check_obj(path, terms, os_layer):
         mkeys = [m[0] for m in maps]  # kind(x): "x" code or "d" data at offset x
         kind = lambda x: maps[bisect.bisect_right(mkeys, x) - 1][1] if bisect.bisect_right(mkeys, x) else "x"
         funcs = sorted((s[1], s[2], s[0]) for s in o.syms if s[5] == si and s[3] == 2)
+        fn_at = {fa: fnm for fa, fsz, fnm in funcs}
         cuts0 = [0] + [m for m in mkeys if 0 < m < ssize] + [ssize]   # one decoder run over every code island of the section
         dec = decode(o.data, [(soff + x, soff + y) for x, y in zip(cuts0, cuts0[1:]) if kind(x) != "d"])
         thits = sorted((off, sidx) for off, (sidx, t, ad) in rel.items() if sidx in tid)
@@ -825,6 +1034,7 @@ def check_obj(path, terms, os_layer):
                 finds += [(name, k, d, v) for _, k, d, v in last[2]]
                 if last[3] in extra["tb"]:
                     extra["tb"][name] = extra["tb"][last[3]]
+                extra["nr"][name] = extra["nr"].get(last[3])
                 if last[3] in extra["wine_id"]:
                     extra["wine_id"][name] = extra["wine_id"][last[3]]
                     extra["wine_nz"][name] = extra["wine_nz"].get(last[3], {})
@@ -902,6 +1112,12 @@ def check_obj(path, terms, os_layer):
                         tb = None
                     if tb is not None:
                         extra["tb"][name] = tb
+            extra["nr"][name] = nr_ends(words, a, b, rel, o, fn_at)
+            if probe and probe.get("kind") == "flag" and probe["fail"] in {sy[0] for sy in o.syms if sy[3] == 2 and sy[4] != 0 and sy[5] == si}:
+                try:
+                    pw[name] = (words, a, b) + flag_events(words, a, b, rel, o, {x: dec.get(soff + x) for x in words}, fn_at)
+                except Unanalysable:
+                    pass
             finds += fnd
             last = (a, b, fnd, name)
             cover.append((a, b))
@@ -935,6 +1151,36 @@ def check_obj(path, terms, os_layer):
                 sy = o.syms[sidx]
                 dref |= set(fdef.get((sy[5], sy[1] + ad), ())) if 0 < sy[5] < 0xFF00 else ({sy[0]} if sy[0] else set())
     extra["dref"] = sorted(dref)
+    if probe:
+        dies = None
+        gdef = {sy[0] for sy in o.syms if sy[3] == 2 and sy[4] != 0 and 0 < sy[5] < 0xFF00}
+        if probe.get("kind") == "flag" and probe["fail"] in gdef:   # the flag rule: the definition stores to the field of its context argument on every path
+            dies = dwarf(path)
+            off = ctx_flag_offset(dies, probe["fail"], probe["flag"])
+            if off is None:
+                extra["flag"] = {"ok": False, "why": "the DWARF of the object does not give the field %s of the structure that the first parameter of %s points to" % (probe["flag"], probe["fail"])}
+            else:
+                ok = flag_holds(pw, probe["fail"], off)
+                extra["flag"] = {"ok": ok, "why": "" if ok else "a path of %s (or of the functions it calls in this object with the context argument unchanged) does not store a nonzero constant at offset %d of its first argument" % (probe["fail"], off)}
+        for slot, decl in sorted((probe.get("tables") or {}).items()):   # the instruction tables: slot -> {entry index: names of the function the entry holds}
+            ts = [sy for sy in o.syms if sy[0] == decl["symbol"] and 0 < sy[5] < 0xFF00 and sy[3] in (0, 1)]
+            if not ts:
+                continue
+            dies = dies if dies is not None else dwarf(path)
+            lay = table_layout(dies, decl["symbol"], decl["field"])
+            if lay is None:
+                extra["tabs"][slot] = {"err": "the DWARF of the object has no array variable %s with a structure element that has the field %s" % (decl["symbol"], decl["field"])}
+                continue
+            _, v0, sz0, _, _, tsec = ts[0]
+            ent = {}
+            for k in range(sz0 // lay[0]):
+                r = o.rela.get(tsec, {}).get(v0 + k * lay[0] + lay[1])
+                names = None
+                if r:
+                    sy = o.syms[r[0]]
+                    names = sorted(fdef.get((sy[5], sy[1] + r[2]), ())) if 0 < sy[5] < 0xFF00 else ([sy[0]] if sy[0] else None)
+                ent[str(k)] = names or None
+            extra["tabs"][slot] = {"sym": decl["symbol"], "entries": ent}
     return items, finds, dict(extra, exit_ok=sorted(exit_ok))
 
 
@@ -983,33 +1229,33 @@ def _atomic(path, data):
     os.replace(tmp, path)
 
 
-def object_key(path, terms, os_layer):
+def object_key(path, terms, os_layer, probe=None):
     """(cache key, the terminators this object mentions). The analysis reads TERMS only through the object's own symbol names, so the
     key holds the object's sha256, the OS_LAYER flag, the analysis version and exactly terms & names."""
     o = Obj(path, lite=True)
     names = {s[0] for s in o.syms if s[4] != 0}
     mine = sorted(names & set(terms)) + sorted("~" + n for n in names if "~" + n in terms)   # "~name": an unwinder (see the terminator rule)
-    key = hashlib.sha256(json.dumps([ANALYSIS, hashlib.sha256(o.data).hexdigest(), bool(os_layer), mine]).encode()).hexdigest()
+    key = hashlib.sha256(json.dumps([ANALYSIS, hashlib.sha256(o.data).hexdigest(), bool(os_layer), mine, probe], sort_keys=True).encode()).hexdigest()
     return key, set(mine)
 
 
 def _work(args):
-    path, mine, os_layer = args
-    items, finds, extra = check_obj(path, mine, os_layer)
+    path, mine, os_layer, probe = args
+    items, finds, extra = check_obj(path, mine, os_layer, probe)
     return dict(extra, items=items, finds=[list(f) for f in finds])
 
 
-def analyse_all(objs, terms, os_layer_ids, cache=None, jobs=1):
+def analyse_all(objs, terms, os_layer_ids, cache=None, jobs=1, probe=None):
     """OBJS [(id, path)] -> {id: result dict}. Per object cache CACHE/objstub/<key>.json when CACHE is given; the objects without a
     cache entry run in JOBS processes (the decoder binary is built or fetched once, before the fork)."""
     res, todo = {}, []
     for oid, path in objs:
-        key, mine = object_key(path, terms, oid in os_layer_ids)
+        key, mine = object_key(path, terms, oid in os_layer_ids, probe)
         cp = os.path.join(cache, "objstub", key + ".json") if cache else None
         if cp and os.path.exists(cp):
             res[oid] = json.load(open(cp))
         else:
-            todo.append((oid, (path, mine, oid in os_layer_ids), cp))
+            todo.append((oid, (path, mine, oid in os_layer_ids, probe), cp))
     if todo:
         tool(cache)
         if jobs > 1 and len(todo) > 1:
@@ -1034,10 +1280,11 @@ HCLASSES = ("a", "b", "c", "own", "none")
 
 def read_handler_records(cover_path, syntax_path):
     """The records of the empty-handler justification (generated by the render owner from the translator's own source and the documentation):
-    op_cover.tsv `slot id opnum op class covering evidence handler` (one row per (slot, instruction-table row); handler = the symbol of the
-    handler that slot selects; covering = `-` or comma-separated symbols of the other emitters that carry the semantics) and op_syntax.tsv
+    op_cover.tsv `slot id opnum op class covering evidence` (one row per (slot, instruction-table row), keyed by (slot, opnum): the entry index
+    of the table; covering = `-` or comma-separated symbols of the other emitters that carry the semantics; a `handler` column, if present, is
+    ignored: the handler of a row is read from the object's table by its layout) and op_syntax.tsv
     `key opnum models n_dst n_src n_other syntax page page_sha256 status`. The columns are read by their header names (all required); any
-    other malformation is a ValueError (the gate is red: an unparseable record is not evidence). -> {"rows": {handler: [row dict]}, "syntax": {key: [(n_dst, n_src, n_other, status)]}}"""
+    other malformation is a ValueError (the gate is red: an unparseable record is not evidence). -> {"rows": {(slot, opnum): row dict}, "syntax": {key: [(n_dst, n_src, n_other, status)]}}"""
     def table(path, need):
         ls = [l.rstrip("\n") for l in open(path) if l.strip() and not l.startswith("#")]
         if not ls:
@@ -1052,12 +1299,11 @@ def read_handler_records(cover_path, syntax_path):
                 raise ValueError("%s: row with %d fields, header has %d: %r" % (path, len(f), len(head), l[:80]))
             out.append(dict(zip(head, f)))
         return out
-    rows, seen = {}, set()
-    for r in table(cover_path, ("slot", "id", "opnum", "op", "class", "covering", "evidence", "handler")):
-        if r["class"] not in HCLASSES or not r["handler"] or not r["id"] or (r["slot"], r["id"]) in seen or not r["opnum"].lstrip("-").isdigit():
+    rows = {}
+    for r in table(cover_path, ("slot", "id", "opnum", "op", "class", "covering", "evidence")):
+        if r["class"] not in HCLASSES or not r["id"] or (r["slot"], int(r["opnum"]) if r["opnum"].isdigit() else r["opnum"]) in rows or not r["opnum"].isdigit():
             raise ValueError("%s: bad or duplicate row %r" % (cover_path, "\t".join(r.values())[:100]))
-        seen.add((r["slot"], r["id"]))
-        rows.setdefault(r["handler"], []).append(r)
+        rows[(r["slot"], int(r["opnum"]))] = r
     syn = {}
     for r in table(syntax_path, ("key", "n_dst", "n_src", "n_other", "status")):
         if not (r["n_dst"].isdigit() and r["n_src"].isdigit() and r["n_other"].isdigit()) or not r["key"]:
@@ -1068,39 +1314,54 @@ def read_handler_records(cover_path, syntax_path):
 
 def handler_ok(rec, name, oid, results, sibs, allv):
     """(H) -> (True, "handler_a"|"handler_b") or (False, why). A V function NAME (empty or constant body) of object OID is certified iff
-    (1) the records name it: at least one row has handler == NAME; (2) every such row is justified: class a: the id is `sm:<key>` and every
-    op_syntax row of that key is `ok` with 0 destination, 0 source and 0 other operands (the opcode has no operand, so the body has nothing to
-    do); class b: `covering` names at least one symbol and every one is a function defined in the same object or global in an object of the
-    same root (SIBS: the object ids of the root), and none is V (the semantics is carried by a non-empty emitter); class c (unreachable: the
-    body must be a call of fnvnx_reach_violation with a certificate: the reach rule), none and own are not justifications; (3) the function's
-    address is stored in a non-code section (the instruction table selects it): its own object when the function is local, any object of the
-    root when it is global. A function that fails any of these is the finding V with the reason."""
-    rows = rec["rows"].get(name)
-    if not rows:
-        return False, "no record row names this handler"
+    (1) the declared instruction tables select it: the entry index k of the table of slot S (recipe `empty_handlers.tables`) holds NAME, read from
+    the data relocation at sym + k*sizeof(entry) + offsetof(entry, field) with sizeof and offsetof from the object's DWARF; at least one (S, k)
+    selects NAME (a local function: in its own object's table, a global one: in the table of any object of the root); a table without DWARF
+    layout, an entry without a relocation (the declared slot cannot be resolved) is red; (2) every selected (S, k) has a record row (S, opnum = k)
+    and every such row is justified: class a: the id is `sm:<key>` and every op_syntax row of that key is `ok` with 0 destination, 0 source and 0
+    other operands (the opcode has no operand, so the body has nothing to do); class b: `covering` names at least one symbol and every one is a
+    function defined in the same object or global in an object of the same root (SIBS: the object ids of the root), and none is V (the semantics
+    is carried by a non-empty emitter); class c (unreachable: the body must be a call of fnvnx_reach_violation with a certificate: the reach rule),
+    none and own are not justifications. A function that fails any of these is the finding V with the reason."""
+    local = name not in results[oid]["globals"]
+    sel, errs = [], []
+    for o in ([oid] if local else [oid] + [o for o in sibs if o != oid]):
+        for slot, t in sorted(results[o].get("tabs", {}).items()):
+            if "err" in t:
+                errs.append("slot %s: %s" % (slot, t["err"]))
+                continue
+            for k, names in sorted(t["entries"].items(), key=lambda kv: int(kv[0])):
+                if names is None:
+                    errs.append("slot %s entry %s of %s has no data relocation (the entry cannot be resolved)" % (slot, k, t["sym"]))
+                elif name in names:
+                    sel.append((slot, int(k)))
+    if not sel:
+        return False, "no declared instruction table entry selects this function" + ("; " + errs[0] if errs else "")
+    if errs:
+        return False, errs[0]
     kinds = set()
-    for r in rows:
+    for slot, k in sel:
+        r = rec["rows"].get((slot, k))
+        if r is None:
+            return False, "no record row for slot %s entry %d" % (slot, k)
         c, key = r["class"], r["id"][3:] if r["id"].startswith("sm:") else None
         if c == "a":
             ss = rec["syntax"].get(key, []) if key else []
             if not ss or any(x != (0, 0, 0, "ok") for x in ss):
-                return False, "row %s %s class a, but op_syntax has no 0-dst/0-src/0-other ok row for it" % (r["slot"], r["id"])
+                return False, "row %s %s class a, but op_syntax has no 0-dst/0-src/0-other ok row for it" % (slot, r["id"])
         elif c == "b":
             cov = [x for x in r["covering"].split(",") if x and x != "-"]
             if not cov:
-                return False, "row %s %s class b names no covering emitter" % (r["slot"], r["id"])
+                return False, "row %s %s class b names no covering emitter" % (slot, r["id"])
             for x in cov:
                 where = [o for o in [oid] + [o for o in sibs if o != oid] if x in results[o]["items"] and (o == oid or x in results[o]["globals"])]
                 if not where:
-                    return False, "row %s %s: covering emitter %s is not defined in the root" % (r["slot"], r["id"], x)
+                    return False, "row %s %s: covering emitter %s is not defined in the root" % (slot, r["id"], x)
                 if any((o, x) in allv for o in where):
-                    return False, "row %s %s: covering emitter %s is itself a vacuous body" % (r["slot"], r["id"], x)
+                    return False, "row %s %s: covering emitter %s is itself a vacuous body" % (slot, r["id"], x)
         else:
-            return False, "row %s %s class %s: %s" % (r["slot"], r["id"], c, "the reach gate (fnvnx_reach_violation with a certificate) judges it, not an empty body" if c == "c" else "not a justification")
+            return False, "row %s %s class %s: %s" % (slot, r["id"], c, "the reach gate (fnvnx_reach_violation with a certificate) judges it, not an empty body" if c == "c" else "not a justification")
         kinds.add("handler_" + c)
-    local = name not in results[oid]["globals"]
-    if not (name in results[oid]["dref"] or (not local and any(name in results[o]["dref"] for o in sibs))):
-        return False, "the function's address is not stored in a non-code section (no table selects it)"
     return True, sorted(kinds)[0]
 
 
@@ -1111,8 +1372,8 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
     REACH or has a row of kind `exit`. A call of REACH: accepted iff w0 is a constant that is in FACTS; every fact needs a call site.
     WINE (rows of wine_fixme.tsv, {id: (contract name, wine_ref, kind, value)}, None = empty): a function that calls it and is
     otherwise V (kind WINE-V) is certified iff it passes exactly one id on every path, the id has a row and the result matches it.
-    FAILS {object id: the root's failure function `error_abi.fail`}: a function whose analysis says trap-shaped with callee == that symbol is
-    `trap-body`; the symbol itself must be defined once as a global function of the root and be no V and no trap body (`error-abi-*`).
+    FAILS {object id: the root's `error_abi` {fail, kind, flag}}: a function whose analysis says trap-shaped with callee == fail is `trap-body`; the
+    definition is checked by error_abi_findings (once, global, and by kind: noreturn from the code, flag from the DWARF field and the stores).
     HANDLERS {object id: records of read_handler_records}: a V function with no constants row is certified iff handler_ok (rule H).
     STATS, a dict, receives the counts "trap_body", "handler_a", "handler_b"."""
     items, out, vflag, exited, used = [], [], set(), set(), set()
@@ -1167,16 +1428,11 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
                     continue
                 detail += "; " + ("not every path ends in the tail" if name not in exit_ok else "no row of kind exit")
             out.append((oid, name, kind, detail))
-        fail = fails.get(oid)
+        fail = (fails.get(oid) or {}).get("fail")
         for name, x in sorted(r["tb"].items()):   # (T-B) trap bodies of the root's failure function
             if fail and x == fail and name != fail:
                 out.append((oid, name, "trap-body", "every path ends in a call of %s (error_abi.fail) and the body has no other effect" % fail))
                 stats["trap_body"] = stats.get("trap_body", 0) + 1
-        if fail and fail in r["items"] and fail in r["globals"]:
-            if (oid, fail) in allv:
-                out.append((oid, fail, "error-abi-vacuous", "the failure function %s is a vacuous body" % fail))
-            if r["tb"].get(fail) is not None:
-                out.append((oid, fail, "error-abi-trap", "the failure function %s is itself a trap-shaped body of %s" % (fail, r["tb"][fail])))
         if REACH in funcs and REACH not in exit_ok:
             out.append((oid, REACH, "reach-not-exit", "the definition does not end in a call through a pointer on every path"))
         for key, sym, pre in (("wine", WINE, "wine-fixme"), ("declared", DECL, "declared-machine")):
@@ -1203,21 +1459,53 @@ def judge(results, rows, facts, wine=None, declared=None, fails=None, handlers=N
     return items, sorted(set(out))
 
 
-def error_abi_findings(results, oids, fail):
-    """The root's failure function FAIL (recipe `error_abi.fail`) must be defined exactly once, as a global function, in the objects OIDS of the
-    root: else [("-", FAIL, error-abi-undefined | error-abi-multiple, detail)]. That it is no vacuous or trap-shaped body is judged by `judge`."""
+def noreturn_set(results, oids):
+    """{(object id, name)} of the functions that do not return: nr_ends shape, and every end is a call through a pointer or a call of a function of
+    the root (local: the same object; global: any object) that is itself in the set; the least fixed point. (REACH is in it by its BLR tail.)"""
+    shape = {(o, n): e for o in oids for n, e in results[o]["nr"].items() if e is not None}
+    gl = {n: o for o in oids for n in results[o]["globals"]}
+    ok, ch = set(), True
+    while ch:
+        ch = False
+        for (o, n), ends in shape.items():
+            if (o, n) in ok:
+                continue
+            if all(e == "<blr>" or ((o, e) in ok if e in results[o]["items"] else (gl.get(e), e) in ok) for e in ends):
+                ok.add((o, n))
+                ch = True
+    return ok
+
+
+def error_abi_findings(results, oids, abi):
+    """The root's failure function (recipe `error_abi` {fail, kind, flag}) must be defined exactly once, as a global function, in the objects OIDS
+    of the root (error-abi-undefined | error-abi-multiple), and the definition must hold the declared kind, checked from the object: kind `noreturn`:
+    no path of the definition returns (noreturn_set: no RET, every path ends in a call that does not return); kind `flag`: the DWARF gives the field
+    FLAG of the structure the first parameter points to, and on every path the definition stores a nonzero constant there through the argument as it
+    was at entry, directly or through direct calls of the same object (error-abi-flag). Else [("-", fail, finding, detail)]."""
+    fail = abi["fail"]
     defs = [o for o in oids if fail in results[o]["globals"]]
-    if len(defs) == 1:
-        return []
-    return [("-", fail, "error-abi-undefined" if not defs else "error-abi-multiple", "%d global definitions of the failure function %s in the root: %s" % (len(defs), fail, ", ".join(defs[:3])))]
+    if len(defs) != 1:
+        return [("-", fail, "error-abi-undefined" if not defs else "error-abi-multiple", "%d global definitions of the failure function %s in the root: %s" % (len(defs), fail, ", ".join(defs[:3])))]
+    o = defs[0]
+    if abi["kind"] == "noreturn":
+        if (o, fail) not in noreturn_set(results, oids):
+            return [(o, fail, "error-abi-noreturn", "the failure function %s is declared noreturn, but a path of its definition can return" % fail)]
+    elif abi["kind"] == "flag":
+        f = results[o].get("flag")
+        if not f or not f["ok"]:
+            return [(o, fail, "error-abi-flag", "the failure function %s is declared to store %s: %s" % (fail, abi["flag"], f["why"] if f else "no analysis of the flag in the object"))]
+    else:
+        return [(o, fail, "error-abi-kind", "error_abi.kind %r is neither noreturn nor flag" % abi["kind"])]
+    return []
 
 
-def run_check(objs, terms, rows, os_layer_ids, facts=None, cache=None, jobs=1, wine=None, declared=None, fail=None, records=None, stats=None):
-    """OBJS [(id, path)] -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). FAIL: the failure function of the one root OBJS form;
+def run_check(objs, terms, rows, os_layer_ids, facts=None, cache=None, jobs=1, wine=None, declared=None, abi=None, records=None, stats=None, tables=None):
+    """OBJS [(id, path)] -> (items [(id, name)], findings [(id, name, KIND, detail)] sorted). ABI: the `error_abi` of the one root OBJS form; TABLES: the `empty_handlers.tables` of it;
     RECORDS: read_handler_records of it."""
-    res = analyse_all(objs, set(terms), set(os_layer_ids), cache, jobs)
-    items, finds = judge(res, rows, facts, wine, declared, {o: fail for o in res} if fail else None, {o: records for o in res} if records else None, stats)
-    return items, sorted(set(finds) | set(error_abi_findings(res, list(res), fail) if fail else ()))
+    probe = dict(abi or {}, tables=tables or {}) if (abi or tables) else None
+    res = analyse_all(objs, set(terms), set(os_layer_ids), cache, jobs, probe)
+    items, finds = judge(res, rows, facts, wine, declared, {o: abi for o in res} if abi else None, {o: records for o in res} if records else None, stats)
+    return items, sorted(set(finds) | set(error_abi_findings(res, list(res), abi) if abi else ()))
 
 
 read_list = lambda path: [l.rstrip("\n") for l in open(path) if l.strip()]
@@ -1430,8 +1718,9 @@ def main(argv):
                                  int(opt.get("--jobs", [os.cpu_count() or 1])[0]),
                                  read_wine_table(opt["--wine-fixme"][0]) if "--wine-fixme" in opt else None,
                                  read_declared_table(opt["--declared-machine"][0]) if "--declared-machine" in opt else None,
-                                 opt["--fail"][0] if "--fail" in opt else None,
-                                 read_handler_records(opt["--op-cover"][0], opt["--op-syntax"][0]) if "--op-cover" in opt else None)
+                                 {"fail": opt["--fail"][0], "kind": opt["--kind"][0], **({"flag": opt["--flag"][0]} if "--flag" in opt else {})} if "--fail" in opt else None,
+                                 read_handler_records(opt["--op-cover"][0], opt["--op-syntax"][0]) if "--op-cover" in opt else None,
+                                 None, {t.split("=")[0]: dict(zip(("symbol", "field"), t.split("=")[1].split(":"))) for t in opt.get("--table", [])})
         if "--json" in opt:
             json.dump({"functions": len(items), "findings": finds}, open(opt["--json"][0], "w"), sort_keys=True)
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as e:
