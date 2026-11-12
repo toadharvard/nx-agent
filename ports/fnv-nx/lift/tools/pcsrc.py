@@ -66,7 +66,7 @@ class Img:
             if mer and a <= mer[-1][1]: mer[-1][1] = max(mer[-1][1], b)
             else: mer.append([a, b])
         self.mer = mer; self.ms = [a for a, b in mer]; self.cache = {}
-        self.rd = rd; self.rset = rset or set(); self.inp = {}; self.allcode = set(); self.dirty = set(); self.refs = None; self.tabslots = set(); self.visited = set(); self.jtargets = set(); self.pk = {}; self.wmemo = {}; self.calltg = {}; self.retsites = set(); self.callers = {}; self.summ = {}; self.busy = set(); self.fresh = set(); self.rows = []; self.info = Counter()
+        self.rd = rd; self.rset = rset or set(); self.inp = {}; self.allcode = set(); self.dirty = set(); self.refs = None; self.tabslots = set(); self.visited = set(); self.jtargets = set(); self.pk = {}; self.wmemo = {}; self.calltg = {}; self.retsites = set(); self.callers = {}; self.summ = {}; self.busy = set(); self.fresh = set(); self.asm225 = 'ASM-225'; self.rows = []; self.info = Counter()
     def reached(self, a):
         i = bisect.bisect_right(self.ms, a) - 1
         return i >= 0 and a < self.mer[i][1]
@@ -135,7 +135,7 @@ def memkey(img, g, op, esp, regs):
 
 
 HALF = 1 << 23
-# PREMISE F (conditional, reported as cond_fresh_entries in gate_pcsrc.json, never assumed closed): when esp is loaded from a register that is not a known stack address (chkstk/alloca: esp = esp - size), the fresh space is
+# PREMISE F = ASM-225 (REMOVE, owner L3a, removed by the affine esp-minus-size domain plus the probe-loop relation; used_by pcsrc.py) (conditional, reported as cond_fresh_entries in gate_pcsrc.json, never assumed closed): when esp is loaded from a register that is not a known stack address (chkstk/alloca: esp = esp - size), the fresh space is
 # disjoint from every TRACKED slot of the old frame: its accesses are below the new esp, or inside the allocated block, and the new esp does not lie above a live tracked old slot (size >= 0 without wraparound; no access
 # past the allocated size). Not checked from the code (that needs the affine esp-minus-size domain with the probe-loop relation). A red-free result of an entry in img.fresh holds under F: conditional, like cond:no_s4_arith.
 
@@ -148,7 +148,7 @@ def is_fresh(k):
 
 def new_fresh(esp, st, mark, e):
     """-> the esp of a fresh space (the base of the current fresh space if esp is already in one, else 1<<24); the stale slots of that space are dropped. Finite: one base per nesting, no growth in loops."""
-    mark.add(e)      # the result of this entry depends on premise F (see Img.fresh)
+    mark.add(e)      # the result of this entry depends on ASM-225 = premise F (see Img.fresh)
     base = ((esp + HALF) // (1 << 24)) * (1 << 24) if is_fresh(esp) else 1 << 24
     for k in [k for k in st if abs(k - base) < HALF]: st.pop(k)
     return base
