@@ -54,23 +54,15 @@ def tls_table(path):
 
 
 def reloc_models(path):
-    """{variable: {models}} from `readelf -rW`: each relocation of a TLS family names a symbol; a section anchor (.LANCHORn, an assembler-private
-    label) stands for the variable defined at its value + addend in the same section"""
-    tab = tls_table(path)
-    byval = {(v, n): nm for nm, v, n in tab if not nm.startswith(('.L', '$'))}
-    anchor = {nm: (v, n) for nm, v, n in tab if nm.startswith('.L')}
+    """{symbol named by a TLS-family relocation: {families}} from `readelf -rW` (a section anchor `.LANCHORn` is an assembler-private label shared
+    by several variables: it is kept under its own name and only enters the set-level check)"""
     got = {}
     for ln in readelf('-rW', path).split('\n'):
         f = ln.split()
-        if len(f) >= 7 and f[2].startswith('R_AARCH64'):
+        if len(f) >= 5 and f[2].startswith('R_AARCH64'):
             m = family(f[2])
-            if not m:
-                continue
-            nm, add = f[4], int(f[6]) if len(f) > 6 and f[5] == '+' else 0
-            if nm in anchor:
-                v, n = anchor[nm]
-                nm = byval.get((v + add, n), nm)
-            got.setdefault(nm, set()).add(m)
+            if m:
+                got.setdefault(f[4], set()).add(m)
     return got
 
 
@@ -86,7 +78,7 @@ def section_rows(data):
 
 
 SRC = open(os.path.join(realobj.FIXDIR, 'tls.cc')).read()
-for label, flags in (('product flags', []), ('-ftls-model=initial-exec', ['-ftls-model=initial-exec'])):
+for label, flags in (('product flags', []), ('-ftls-model=initial-exec', ['-ftls-model=initial-exec']), ('-fno-section-anchors', ['-fno-section-anchors'])):
     res = realobj.build({'tls': SRC}, flags=flags)
     if not check('%s: build green' % label, res['status'] == 'green', res.get('failure')):
         continue
@@ -102,10 +94,17 @@ for label, flags in (('product flags', []), ('-ftls-model=initial-exec', ['-ftls
     syms = tls_symbols(path)
     check('%s: STT_TLS symbols of the object == names in .fnvnx.tls' % label, syms == sorted(model), (syms, sorted(model)))
     rel = reloc_models(path)
+    eff = {nm: ({'global-dynamic'} if m == 'local-dynamic' else {m}) for nm, m in model.items()}   # descriptor dialect: LD is generated as GD
     for nm, m in sorted(model.items()):
-        seen = rel.get(nm)
-        check('%s: %s: relocation family agrees with model %s' % (label, nm, m), seen is not None and (seen == {m} or (m == 'local-dynamic' and seen == {'global-dynamic'})), seen)
-    if not flags:
+        if nm in rel:
+            check('%s: %s: relocation family agrees with model %s' % (label, nm, m), rel[nm] <= eff[nm] | ({m} if m == 'local-dynamic' else set()), rel[nm])
+        elif not any(k.startswith('.L') for k in rel):
+            check('%s: %s: has relocations' % (label, nm), False, rel)
+    used = set().union(*rel.values()) if rel else set()
+    allowed = set().union(*[eff[n] | {model[n]} for n in model])
+    check('%s: families of all relocations are produced by the rows' % label, used <= allowed, (used, allowed))
+    check('%s: every row model is used by some relocation' % label, set().union(*eff.values()) <= used, (used, eff))
+    if label != '-ftls-model=initial-exec':
         want = {'e_ie': 'initial-exec', 'd_le': 'local-exec', 'd_gd': 'global-dynamic', 'd_ld': 'local-dynamic'}
         for nm, m in want.items():
             check('%s: attribute %s gives %s' % (label, nm, m), model.get(nm) == m, model.get(nm))
