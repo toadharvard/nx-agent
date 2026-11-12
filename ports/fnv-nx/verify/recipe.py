@@ -61,10 +61,10 @@ PLUGIN_SOURCES = {"fnvnx_ftoi": _T + "ftoi/fnvnx_ftoi.cc", "fnvnx_order": _T + "
 PLUGIN_INPUTS = {"fnvnx_layout": [_T + "names/fnvnx_names.cc"]}
 PLUGIN_ARGS = {n: {} for n in PLUGIN_SOURCES}
 PLUGIN_ARGS["fnvnx_order"] = {"args": "rtl", "object": "msvc", "operator": "rtl", "assign": "msvc"}
-# Flags of the game's C++ that fix its semantics (compile.sh); fnvnx_sdd needs -DFNVNX_SDD=1 and -fno-devirtualize.
+# Flags of the game's C++ that fix its semantics (compile.sh); fnvnx_sdd needs -DFNVNX_SDD=1 and -fno-devirtualize; fnvnx_addr needs no .cold sections: -fno-reorder-blocks-and-partition.
 SEMANTICS_FLAGS = ("-mabi=ilp32", "-fms-extensions", "-fshort-wchar", "-frounding-math", "-fsigned-char", "-fno-strict-aliasing", "-fwrapv",
                    "-fno-delete-null-pointer-checks", "-fcheck-new", "-fno-sized-deallocation", "-fno-lifetime-dse", "-ffp-contract=off",
-                   "-DFNVNX_SDD=1", "-fno-devirtualize")
+                   "-DFNVNX_SDD=1", "-fno-devirtualize", "-fno-reorder-blocks-and-partition")
 EXT_KEYS = {"name", "repo", "ref", "commit", "tree_sha256", "at"}
 SANDBOX_PATHS = ("/src", "/inc", "/in", "/out", "/tool", "/objs", "/ld", "/work", "/proc", "/dev", "/tmp", "/oldroot")
 STYPE = {0: "NOTYPE", 1: "OBJECT", 2: "FUNC", 5: "COMMON", 6: "TLS", 10: "IFUNC"}

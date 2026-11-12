@@ -28,7 +28,8 @@
    "-fno-lifetime-dse",
    "-ffp-contract=off",
    "-DFNVNX_SDD=1",
-   "-fno-devirtualize"
+   "-fno-devirtualize",
+   "-fno-reorder-blocks-and-partition"
   ],
   "asm": [
    "-nostdinc",
