@@ -9,7 +9,8 @@
   "c": [
    "-O2",
    "-mabi=ilp32",
-   "-Werror=attributes"
+   "-Werror=attributes",
+   "-mno-outline-atomics"
   ],
   "cxx": [
    "-O2",
@@ -28,7 +29,8 @@
    "-DFNVNX_SDD=1",
    "-fno-devirtualize",
    "-std=gnu++20",
-   "-Werror=attributes"
+   "-Werror=attributes",
+   "-mno-outline-atomics"
   ],
   "asm": [
    "-mabi=ilp32"

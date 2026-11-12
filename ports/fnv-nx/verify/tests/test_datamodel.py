@@ -43,7 +43,7 @@ def main():
     check("guest root on another commit of the external: red", rc == 2 and ROOT + ":compiler" in r["uncertified"], r)
     check("the semantics flags of the recipe rule are the pin's (one source)", tuple(pin["flags"]["semantics"]) == recipe.SEMANTICS_FLAGS and "-mabi=ilp32" in recipe.SEMANTICS_FLAGS)
     # the certificate of a unit, on a CC stage document (pure function of the document)
-    doc = {"argv": [ext["at"] + "/bin/g", "-mabi=ilp32"] + list(recipe.SEMANTICS_FLAGS) +
+    doc = {"argv": [ext["at"] + "/bin/g", "-mabi=ilp32"] + list(recipe.SEMANTICS_FLAGS) + list(pin["flags"]["required"]) +
            ["-fplugin=/plug/%s/%s.so" % (n, n) for n in recipe.GUEST_CXX_PLUGINS],
            "inputs": [{"at": ext["at"], "tree": ext["tree_sha256"]}] + [{"at": "/plug/" + n, "tree": "t"} for n in recipe.GUEST_CXX_PLUGINS]}
     check("complete CC document certifies a native C++ unit", gd.unit_why("a.cc", doc, True, pin) == [], gd.unit_why("a.cc", doc, True, pin))
