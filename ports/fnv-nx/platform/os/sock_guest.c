@@ -57,7 +57,10 @@ static int local_errno(int w) {
 #define X(N, v) if (w == (v)) return N;
     FNVNX_WIRE_ERRNO_LIST(X)
 #undef X
-    fnvnx_assume_violation(FNVNX_ASM_004, (uint64_t)(uint32_t)w);   /* the host answers only list numbers while ASM-004 holds */
+#define X(N, v) if (w == (v)) return FNVNX_ERRNO_UNKNOWN_OFFSET + (v);   /* no libc name: libnx's own encoding of the number */
+    FNVNX_WIRE_ERRNO_UNNAMED(X)
+#undef X
+    fnvnx_assume_violation(FNVNX_ASM_004, (uint64_t)(uint32_t)w);   /* the host answers only numbers of the two generated tables while ASM-004 holds */
 }
 /* a negative service result -> errno + -1 */
 static int fail(int64_t r) { errno = local_errno((int)-r); return -1; }

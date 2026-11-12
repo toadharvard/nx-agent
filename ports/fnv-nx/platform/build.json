@@ -92,6 +92,10 @@
     "/ext/libnx/nx/source/runtime/devices/convert_errno.c",
     "--newlib-errno",
     "/ext/a64/aarch64-none-elf/include/sys/errno.h",
+    "--linux-errno-base",
+    "/ext/linuxerrno/asm-generic/errno-base.h",
+    "--linux-errno",
+    "/ext/linuxerrno/asm-generic/errno.h",
     "--committed",
     "/in/ports/fnv-nx/hostabi/include/fnvnx/sockwire_errno.h",
     "--out",
@@ -450,6 +454,14 @@
    "commit": "7a4c65d2754f265193c2817b4d2f4ebd35bf299b",
    "tree_sha256": "592d5a50c32ded42e580da46f0f6539993b485583efa4392a940ba95fd0134f5",
    "at": "/ext/freetype-debian"
+  },
+  {
+   "name": "linux-uapi-errno",
+   "repo": "fnv-nx-build",
+   "ref": "tools/linux-uapi-errno",
+   "commit": "3e9232031fef9bc95abe37b397331abc95f28b62",
+   "tree_sha256": "16f47d88caf0811c24b580b594c25db06d8ab037d5e96efd5d92bac4e13496de",
+   "at": "/ext/linuxerrno"
   }
  ],
  "sources": "freetype/units.list"
