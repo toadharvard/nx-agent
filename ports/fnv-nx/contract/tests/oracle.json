@@ -140,6 +140,7 @@
     }
    ],
    "subject": [
+    "ports/fnv-nx/contract/declareddlls.py",
     "ports/fnv-nx/contract/dllkind.py",
     "ports/fnv-nx/contract/images.py"
    ]

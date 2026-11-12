@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """modules - the lifted PE modules of the exe's static import closure (L1 CONTRACT, loader contract M1).
 
-    modules.py --exe FalloutNV.exe --bridge bridge.tsv --dir DIR [--dir DIR ...] --out-dir OUT
+    modules.py --exe FalloutNV.exe --bridge bridge.tsv --declared declared_dlls.tsv --dir DIR [--dir DIR ...] --out-dir OUT
 
 Rules (each violated precondition is a stage error that lists everything it found; nothing gets a made-up value):
 
@@ -36,7 +36,8 @@ Rules (each violated precondition is a stage error that lists everything it foun
             (export, name) sorted by ordinal then name.  A named export is also reachable as #ordinal (iat.py).
 
 Kinds (dllkind.py, the one rule shared with images.py): a dll with bridge rows, or a found dll whose normal import closure needs a dll that is neither found nor
-bridged, is DECLARED: it gets no base and no row of modules.tsv, and is listed in modules_declared.tsv (name, kind bridge|unloadable, sha256, size, missing imports);
+bridged, is DECLARED: it gets no base and no row of modules.tsv, and is listed in modules_declared.tsv (name, kind bridge|unloadable, sha256, size, missing imports as dll:provider, provider = wine when the dll is in declared_dlls.tsv (the declared machine has it: the gap is
+L5's bridge rows) or absent (not on the declared machine));
 its entries are served by bridge rows.  Only images are lifted modules.
 
 Outputs in OUT: modules.tsv (sorted by name: name, sha256, size, preferred base, assigned base, SizeOfImage, has TLS, entry rva, static,
@@ -53,6 +54,7 @@ import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import declareddlls
 import dllkind
 import gatefile
 import iat
@@ -344,12 +346,13 @@ def exe_slots(exe):
     return {exe.base + slot: (dll, name) for dll, items in exe.import_directory() for slot, name in items}
 
 
-def run(exe_path, bridge_path, dirs, out):
+def run(exe_path, bridge_path, dirs, out, declared_path):
     with open(exe_path, 'rb') as fh:
         exe = PE(fh.read(), os.path.basename(exe_path))
     brows, _ = iat.bridge_rows(bridge_path)
     bridge = [(r['dll'], r['name'], r['conv'], r['ordinal']) for r in brows]
     system = {r['dll'] for r in brows}
+    wine = declareddlls.read(declared_path)         # the dlls of the declared machine (Wine 9.0)
     mods = scan(dirs, system)
     me = lower(os.path.basename(exe_path))
     image = dllkind.images_of({n: [iat.norm_dll(d) for d, _ in m.imports] for n, m in mods.items()}, system | {me})
@@ -371,7 +374,7 @@ def run(exe_path, bridge_path, dirs, out):
             with open(p, 'rb') as fh:
                 data = fh.read()
             bridged.append((n, 'bridge', hashlib.sha256(data).hexdigest(), len(data), ''))
-    dec = bridged + [(n, 'unloadable', m.sha256, m.size, ','.join(sorted({iat.norm_dll(d) for d, _ in m.imports
+    dec = bridged + [(n, 'unloadable', m.sha256, m.size, ','.join(sorted('%s:%s' % (x, 'wine' if x in wine else 'absent') for x in {iat.norm_dll(d) for d, _ in m.imports
                                                                     if iat.norm_dll(d) not in system and iat.norm_dll(d) not in image})))
                      for n, m in sorted(declared_mods.items())]
     tsv(os.path.join(out, 'modules_declared.tsv'), '# name\tkind\tsha256\tsize\tmissing_imports\n' + ''.join('%s\t%s\t%s\t%d\t%s\n' % r for r in sorted(dec)))
@@ -413,10 +416,11 @@ def main():
     ap.add_argument('--exe', required=True)
     ap.add_argument('--bridge', required=True)
     ap.add_argument('--dir', action='append', required=True, help='where module files are looked for; first match in list order')
+    ap.add_argument('--declared', required=True, help='declared_dlls.tsv (contract/declareddlls.py): the dlls of the declared machine')
     ap.add_argument('--out-dir', required=True)
     a = ap.parse_args()
     try:
-        text, bad = run(a.exe, a.bridge, a.dir, a.out_dir)
+        text, bad = run(a.exe, a.bridge, a.dir, a.out_dir, a.declared)
     except (StageError, ValueError, OSError) as e:
         sys.exit('modules: %s' % e)
     print(text)

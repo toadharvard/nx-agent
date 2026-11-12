@@ -117,5 +117,16 @@ check("adding an image whose name sorts last moves no base", {m.name: m.base for
 c = [fake("atimgpud.dll", 0x29000)] + [fake(m.name, m.pe.size_of_image) for m in a]
 modules.assign_bases(exe, c)
 check("adding an image whose name sorts first moves the later ones (bases are a function of the name order)", c[1].base != before["binkw32.dll"])
+import declareddlls  # noqa: E402
+sd = tempfile.mkdtemp(prefix="specs-")
+for n in ("msvcp110.spec", "comdlg32.spec"):
+    open(os.path.join(sd, n), "w").write("@ stdcall X()\n")
+check("declareddlls: one row per spec file, sorted, name + .dll", [r[0] for r in declareddlls.derive(sd)] == ["comdlg32.dll", "msvcp110.dll"])
+open(os.path.join(sd, "readme.txt"), "w").write("x")
+try:
+    declareddlls.derive(sd)
+    check("declareddlls: a non-spec file is an error", False)
+except ValueError:
+    check("declareddlls: a non-spec file is an error", True)
 print("FAILED: %d" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)
