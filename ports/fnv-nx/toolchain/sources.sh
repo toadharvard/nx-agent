@@ -26,6 +26,9 @@ tarball binutils-2.45.1.tar.xz 5fe101e6fe9d18fdec95962d81ed670fdee5f37e3f48f0bef
 	https://ftp.gnu.org/gnu/binutils/binutils-2.45.1.tar.xz https://mirrors.kernel.org/gnu/binutils/binutils-2.45.1.tar.xz
 tarball gcc-15.2.0.tar.xz 438fd996826b0c82485a29da03a72d71d6e3541a83ec702df4271f6fe025d24e \
 	https://ftp.gnu.org/gnu/gcc/gcc-15.2.0/gcc-15.2.0.tar.xz https://mirrors.kernel.org/gnu/gcc/gcc-15.2.0/gcc-15.2.0.tar.xz
+# the game compiler's own tarball: its pin lives in toolchain/msvcmodel/build.sh (SHA256=), read here, not retyped
+tarball gcc-13.3.0.tar.xz "$(sed -n 's/^SHA256=//p' "$(dirname "$0")/msvcmodel/build.sh")" \
+	https://ftp.gnu.org/gnu/gcc/gcc-13.3.0/gcc-13.3.0.tar.xz https://mirrors.kernel.org/gnu/gcc/gcc-13.3.0/gcc-13.3.0.tar.xz
 tarball newlib-4.6.0.20260123.tar.gz 6ff27e3bf022666f43f7802255be680eeff722ac181b1725d21e2e8318604ee3 \
 	https://sourceware.org/pub/newlib/newlib-4.6.0.20260123.tar.gz
 
