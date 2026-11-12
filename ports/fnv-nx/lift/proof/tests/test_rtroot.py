@@ -1,10 +1,9 @@
-"""lift/rt/build.json is the build of the lift runtime, and its flags are the flags the lifted packs are compiled with.
-The one definition of the lifted-code flags is test/instest.py FLAGS through tools/liftgen.py pack_flags (what `liftgen.py --recipe` writes into
-lift/pack/build.json). Checked, as lists: flags.asm equal; flags.cxx = the pack's list without -w (fnvnx_names refuses it) followed by the semantics flags that verify/recipe.py requires of
-native C++ (SEMANTICS_FLAGS) and the pack's list does not hold; flags.c = the pack's c list followed by the freestanding rt C flags (the build lines of rt.c,
-rt/rcptab.c, rt/x87.c in the header comments and in test/instest.py). Also: the plugins are exactly recipe.py's PLUGIN_SOURCES in load order with PLUGIN_ARGS,
-the compiler is the pin of verify/guest_compiler.json, and no tracked .c under lift/rt is C++ (a unit's language is its extension)."""
-import ast
+"""lift/rt/build.json is the build of the lift runtime, and the recipe is the one definition of its flags: verify/recipe.py loads it through its own loader
+(load_admit, load_recipe) and judges it with its own guest_errors (the pinned compiler and external, only per-root flag classes, no flag that downgrades
+an error). The semantic flags of the lifted code are the pin's flags.semantics (verify/guest_compiler.json), appended by the recipe to every guest compile stage;
+the build.json holds none of them, so the test reads no second copy. Checked: the recipe accepts the root, its effective flags are the pin's semantics followed by
+the root's own, the plugins are exactly recipe.py's PLUGIN_SOURCES in load order with PLUGIN_ARGS, units are all, and no tracked .c under lift/rt is C++
+(a unit's language is its extension)."""
 import json
 import os
 import re
@@ -16,11 +15,8 @@ LIFT = os.path.normpath(os.path.join(HERE, '..', '..'))
 VERIFY = os.path.normpath(os.path.join(LIFT, '..', 'verify'))
 sys.path.insert(0, os.path.join(LIFT, 'tools'))
 sys.path.insert(0, VERIFY)
-import liftgen  # noqa: E402
 import recipe as R  # noqa: E402
 
-RT_C_EXTRA = ['-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-builtin']
-NATIVE_DROP = ('-w',)     # plugin fnvnx_names (NAMES1) refuses -w: it hides the class-key reports the names are computed from
 bad = []
 
 
@@ -30,20 +26,15 @@ def check(name, ok, detail=''):
         bad.append(name)
 
 
-def instest_flags():
-    t = ast.parse(open(os.path.join(LIFT, 'test', 'instest.py')).read())
-    n = [x for x in t.body if isinstance(x, ast.Assign) and isinstance(x.targets[0], ast.Name) and x.targets[0].id == 'FLAGS'][0]
-    return eval(compile(ast.Expression(n.value), 'FLAGS', 'eval'))
-
-
-pack = liftgen.pack_flags(instest_flags())
-rec = json.load(open(os.path.join(LIFT, 'rt', 'build.json')))
+REPO = os.path.normpath(os.path.join(LIFT, '..', '..', '..'))
+ROOT = 'ports/fnv-nx/lift/rt'
+roots = R.load_admit(REPO)
+check('lift/rt is an admitted product root', ROOT in roots, sorted(roots))
+rec = R.load_recipe(REPO, roots, ROOT)
+pin = R.load_pin(REPO)
+check('the recipe accepts the root (guest_errors)', R.guest_errors(rec, ROOT, roots, pin) == [], R.guest_errors(rec, ROOT, roots, pin))
 fl = rec['flags']
-check('flags.asm == pack asm', fl['asm'] == pack['asm'], (fl['asm'], pack['asm']))
-want_cxx = [f for f in pack['cxx'] if f not in NATIVE_DROP] + [f for f in R.SEMANTICS_FLAGS if f not in pack['cxx']]
-check('flags.cxx == pack cxx + SEMANTICS_FLAGS missing from it', fl['cxx'] == want_cxx, (fl['cxx'], want_cxx))
-check('flags.c == pack c + rt C flags', fl['c'] == pack['c'] + RT_C_EXTRA, (fl['c'], pack['c'] + RT_C_EXTRA))
-pin = json.load(open(os.path.join(VERIFY, 'guest_compiler.json')))
+check('effective cxx flags start with the pin semantics', list(R.SEMANTICS_FLAGS) == list(pin['flags']['semantics']))
 check('compiler is the pinned guest compiler', rec['compiler'] == {'external': pin['external']['name'], 'cc': pin['cc'], 'cxx': pin['cxx']}, rec['compiler'])
 check('external is the pin', rec['external'] == [pin['external']], rec['external'])
 check('plugins are PLUGIN_SOURCES in load order with PLUGIN_ARGS',

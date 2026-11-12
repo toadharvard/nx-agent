@@ -266,7 +266,7 @@ class EH(Flow):
         return seen
 
     def real(s, a):
-        """a decoded instruction is code only if every relocated dword it overlaps is one of its own operands (its immediate or displacement). Assumption: a relocated dword in the
+        """a decoded instruction is code only if every relocated dword it overlaps is one of its own operands (its immediate or displacement). Premise (ASM-233): a relocated dword in the
         middle of an instruction's bytes is a pointer in a data table (jump table, vtable) that the linear decode ran through; it is never executed."""
         r = s.rl.get(a)
         if r is None:
