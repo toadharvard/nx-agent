@@ -252,12 +252,15 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     until_ms(1050); num("k-d1050", plat(9, 0, 0, 0, 0));
     fnvnx_hcall1(H->exit, 0);
 #elif MODE == 91
-    /* pad_vibrate: recorded as events (index <= 3), index > 3 records nothing; pad_read with index > 3 writes nothing */
+    /* pad_vibrate: an event only for a connected pad (index <= 3); index > 3 records nothing; every call returns 0 */
+    until_ms(60);  num("v1pre", fnvnx_hcall3(H->pad_vibrate, 1, 0x3f000000, 0x3f000000));
     until_ms(100); num("v0", fnvnx_hcall3(H->pad_vibrate, 0, 0xdead00003f000000ull, 0xbeef000000000000ull));
+    until_ms(130); num("v1", fnvnx_hcall3(H->pad_vibrate, 1, 0x3f000000, 0x3f000000));
     until_ms(200); num("v2", fnvnx_hcall3(H->pad_vibrate, 2, 0x3f800000, 0x3e800000));
     until_ms(300); num("v4", fnvnx_hcall3(H->pad_vibrate, 4, 0x3f800000, 0x3e800000));
     num("vbig", fnvnx_hcall3(H->pad_vibrate, 0x100000000ull, 1, 2));
     num("v3", fnvnx_hcall3(H->pad_vibrate, 3, 0x80000000, 0x7fc00000));
+    until_ms(400); num("v3off", fnvnx_hcall3(H->pad_vibrate, 3, 0x3f800000, 0x3f800000));
     fnvnx_hcall1(H->exit, 0);
 #elif MODE == 6
     uint32_t acc = fnvboot_a(3);

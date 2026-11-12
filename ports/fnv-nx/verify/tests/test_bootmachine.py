@@ -695,29 +695,35 @@ def main():
          and sum(e["dev"] == "pad" for e in rd) == 4 and sum(e["dev"] == "kbd" for e in rd) == 15 and sum(e["dev"] == "docked" for e in rd) == 4
          and all(e["t_ns"] > 0 and e["tid"] == 1 for e in rd), rd[:3])
     # pad_vibrate
-    r91, l91 = run(built[91][0], root)[:2]
+    pd = lambda t, i, c: {"t_ns": ms(t), "dev": "pad", "index": i, "connected": c}   # noqa: E731
+    SV = bootinput.Scenario(json.dumps({"schema": "fnvnx-scenario/1", "states": [pd(50, 0, 1), pd(120, 1, 1), pd(150, 2, 1), pd(250, 3, 1), pd(350, 3, 0)]}))
+    r91, l91 = run(built[91][0], root, svc=boothost.Services(root, None, SV))[:2]
     k = kv(l91)
     vib = [e for e in r91["events"] if e["kind"] == "pad-vibrate"]
-    case("R-INPUT pad_vibrate returns 0 for every index; index > 3 (also 2^32) records nothing; float bits recorded as the low 32 bits given",
-         r91["reason"] == "exit" and all(k.get(n) == "0" for n in ("v0", "v2", "v4", "vbig", "v3"))
-         and [(e["index"], e["lo"], e["hi"]) for e in vib] == [(0, "0x3f000000", "0x0"), (2, "0x3f800000", "0x3e800000"), (3, "0x80000000", "0x7fc00000")],
-         (k, vib))
-    case("R-INPUT pad_vibrate events carry tid and the virtual time of the call (100 ms, 200 ms, then after 300 ms)",
-         len(vib) == 3 and all(e["tid"] == 1 for e in vib) and ms(100) <= vib[0]["t_ns"] < ms(101) and ms(200) <= vib[1]["t_ns"] < ms(201)
-         and ms(300) <= vib[2]["t_ns"] < ms(301), vib)
-    ex_ok = bootinput.Scenario(json.dumps({"schema": "fnvnx-scenario/1", "expect_events": [
-        {"kind": "pad-vibrate", "index": 0, "lo": "0x3f000000", "hi": "0x0"}, {"kind": "pad-vibrate", "index": 2},
-        {"kind": "pad-vibrate", "index": 3, "lo": "0x80000000"}]}))
+    case("R-INPUT pad_vibrate returns 0 for every call; the event is what a connected pad received: float bits as the low 32 bits given",
+         r91["reason"] == "exit" and all(k.get(n) == "0" for n in ("v1pre", "v0", "v1", "v2", "v4", "vbig", "v3", "v3off"))
+         and [(e["index"], e["lo"], e["hi"]) for e in vib] == [(0, "0x3f000000", "0x0"), (1, "0x3f000000", "0x3f000000"),
+                                                               (2, "0x3f800000", "0x3e800000"), (3, "0x80000000", "0x7fc00000")], (k, vib))
+    case("R-INPUT pad_vibrate: before the pad's first state no event (index 1 at 60 ms), connected at 120 ms: one event (130 ms); index > 3 (also 2^32) none; "
+         "disconnected at 350 ms: none (index 3 at 400 ms)", len(vib) == 4 and [e["index"] for e in vib] == [0, 1, 2, 3], vib)
+    case("R-INPUT pad_vibrate events carry tid and the virtual time of the call",
+         all(e["tid"] == 1 for e in vib) and [ms(t) <= e["t_ns"] < ms(t + 1) for e, t in zip(vib, (100, 130, 200, 300))] == [True] * 4, vib)
+    rv0 = run(built[91][0], root)[0]
+    case("R-INPUT pad_vibrate with no scenario (no pad attached): no event, returns 0", not [e for e in rv0["events"] if e["kind"] == "pad-vibrate"]
+         and rv0["reason"] == "exit", rv0["events"])
+    exs = lambda ev: bootinput.Scenario(json.dumps({"schema": "fnvnx-scenario/1", "expect_events": ev}))   # noqa: E731
+    P = lambda i, **kw: dict(kind="pad-vibrate", index=i, **kw)   # noqa: E731
+    ex_ok = exs([P(0, lo="0x3f000000", hi="0x0"), P(1), P(2), P(3, lo="0x80000000")])
     case("R-INPUT expect_events: compared in order, with the keys given; equal -> no difference", ex_ok.check_expect(r91["events"]) == [], ex_ok.check_expect(r91["events"]))
-    ex_bad = bootinput.Scenario(json.dumps({"schema": "fnvnx-scenario/1", "expect_events": [
-        {"kind": "pad-vibrate", "index": 2}, {"kind": "pad-vibrate", "index": 0}]}))
-    ex_short = bootinput.Scenario(json.dumps({"schema": "fnvnx-scenario/1", "expect_events": [{"kind": "pad-vibrate", "index": 0}]}))
-    ex_val = bootinput.Scenario(json.dumps({"schema": "fnvnx-scenario/1", "expect_events": [
-        {"kind": "pad-vibrate", "index": 0, "lo": "0x3f800000"}, {"kind": "pad-vibrate"}, {"kind": "pad-vibrate"}]}))
+    ex_bad, ex_short = exs([P(2), P(0)]), exs([P(0)])
+    ex_val = exs([P(0, lo="0x3f800000"), P(1), P(2), P(3)])
+    ex_off = exs([P(0), P(1), P(2), P(3), P(3)])
     case("R-INPUT expect_events: another order, a different count or a different value is a difference",
-         len(ex_bad.check_expect(r91["events"])) == 3 and ex_short.check_expect(r91["events"]) == ["expected 1 pad-vibrate events, recorded 3"]
+         len(ex_bad.check_expect(r91["events"])) == 3 and ex_short.check_expect(r91["events"]) == ["expected 1 pad-vibrate events, recorded 4"]
          and ex_val.check_expect(r91["events"]) == ["event 0: lo expected '0x3f800000', recorded '0x3f000000'"],
          (ex_bad.check_expect(r91["events"]), ex_short.check_expect(r91["events"]), ex_val.check_expect(r91["events"])))
+    case("R-INPUT expect_events: an event expected from a disconnected pad (index 3 after 350 ms) is a count mismatch",
+         ex_off.check_expect(r91["events"]) == ["expected 5 pad-vibrate events, recorded 4"], ex_off.check_expect(r91["events"]))
     # state(dev, T): stable sort, last state with t_ns <= T
     sc = bootinput.Scenario(json.dumps({"schema": "fnvnx-scenario/1", "states": [
         {"t_ns": 20, "dev": "docked", "value": 0}, {"t_ns": 10, "dev": "docked", "value": 1}, {"t_ns": 10, "dev": "docked", "value": 0},
