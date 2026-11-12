@@ -25,7 +25,7 @@ on 2026-11-11 22:35 UTC. Handoff read: `journal/inbox/l3b-lift-handoff-opus.md` 
 | 7 | A-CTX: seh.c restores only integer regs + eip from CONTEXT after ContinueExecution; Windows also restores FP/SSE | - | - | open, reported to the orchestrator |
 | 8 | Split lock: A4 deleted, LKA world-stop decided (L3a w3 batch, host side fnvl_host_world_stop/resume by L5) | L3a | claude/fnv-l3a-lift-w3 | doing (L3a, L5) |
 
-| 4i | Assumption records: the 28 unmapped of the 41 L3b ids plus I-FPMASK and I-FPSTICKY become aliases or REMOVE records in verify/ASSUMPTIONS.json (L1 w10 format); 13 are already aliased | w3 session_01KmtZKSe6CHsWxfNeCn25nG | claude/fnv-l3b-lift-w3t | done 536b2548: of 41 L3b ids, 12 already aliased, plus 29 REMOVE and 2 I-* aliases, 84 used_by sites, 0 OWNER; placeholder ids ASM-L3B-01..29; sent to L1 for ids |
+| 4i | Assumption records: the 28 unmapped of the 41 L3b ids plus I-FPMASK and I-FPSTICKY become aliases or REMOVE records in verify/ASSUMPTIONS.json (L1 w10 format); 13 are already aliased | w3 session_01KmtZKSe6CHsWxfNeCn25nG | claude/fnv-l3b-lift-w3t | done 536b2548: of 41 L3b ids, 12 already aliased, plus 29 REMOVE and 2 I-* aliases, 84 used_by sites, 0 OWNER; L1 assigned ASM-300..399; w3a on top of L1 w10 adds ASM-300..328 and deletes lift/ASSUMPTIONS.l3b.json; to MERGER right after w10 |
 
 ## Reported gaps (owner layer)
 
