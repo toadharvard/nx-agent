@@ -5,7 +5,7 @@ Checks: the grammar (every accepted form, every class of rejected form), the cas
 pure function of the SET of descriptors, the table's lookup (rt/dispatch.c's formula, re-read from the generated text) finds every descriptor's own bridge, FNV-1a is the
 published function, a hash collision is a build error, the empty set gives a table every lookup of which misses."""
 import os, re, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
+HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(LIFT, 'tools'))
 import bridgegen
 M = 0xffffffff

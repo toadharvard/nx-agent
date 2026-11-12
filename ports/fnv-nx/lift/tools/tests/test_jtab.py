@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Tests of tools/jtab.py (jump-table edges, one interval rule) on real x86-32 code assembled from test/jtab_test.asm and decoded by capstone, including the CRT memcpy/memmove tails
+"""Tests of tools/jtab.py (jump-table edges, one interval rule) on real x86-32 code assembled from tools/tests/jtab_test.asm and decoded by capstone, including the CRT memcpy/memmove tails
 (`and edx, 3` / `jmp [edx*4+T]`, `sub ecx, 4; jb` wrapping into a table placed before T, `neg ecx`). Relocations = the displacement fields and the table words the assembly names (an image's
 .reloc lists exactly these).   python3 test/jtab_test.py"""
 import os, sys, unittest
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'tools'))
 import capstone
 from capstone import x86 as X
 import jtab

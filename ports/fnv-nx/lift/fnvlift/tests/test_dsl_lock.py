@@ -2,7 +2,7 @@
 """R9: inside a locked instruction (core.Ctx.macc == 'LK') every memory access of the DSL-emitted Form is the LK accessor, never plain M (the atomic rule works on the private copy LK_BEGIN makes).
     dsl_lock_test.py     (exit 0 = all pass)"""
 import os, re, sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import capstone
 from fnvlift import core, f_dsl
 from proof import forms

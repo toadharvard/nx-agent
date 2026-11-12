@@ -10,7 +10,7 @@ work directory whose fnvl.h gets `u32 msvcrt[6];` appended to struct cpu unless 
 Trace convention: a guest event EV(k) appends the hex digit k to the word TR; a case that ends in a return gives TR in eax. Output words O0.. hold values a case stores.
 Prints one line per case; exit status 1 on any difference."""
 import argparse, os, re, shutil, struct, subprocess, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
+HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE))
 for p in ('tools', 'test', ''): sys.path.insert(0, os.path.join(LIFT, p))
 import fnvlift as L, instest, phf, impgen
 from keystone import Ks, KS_ARCH_X86, KS_MODE_32
@@ -340,7 +340,7 @@ def main():
     print('rows  %s: %d l3 rows have a body in the runtime objects (blocked %d), the 2 registration entries are defined' % ('equal' if ok else 'DIFF', len(ent), len(blocked))); bad += not ok
     syms = {x: 'L_%08x' % x for x in starts}; syms.update({k: s for k, s, *_ in ent}); syms.update(EH_KEYS)
     assert {n: k for k, s, d, n, b in ent} == {r[1]: KEY[r[1]] for r in BRIDGE}
-    open(w + '/guest.cpp', 'w').write(L.prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt')) + '\n'.join(texts)); open(w + '/native.c', 'w').write(NATIVE)
+    open(w + '/guest.cpp', 'w').write(L.prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'rt')) + '\n'.join(texts)); open(w + '/native.c', 'w').write(NATIVE)
     hh = phf.build(list(syms)); open(w + '/tab.S', 'w').write(phf.table_asm(syms, hh))
     for cmd, src in [(CXXF, w + '/guest.cpp'), (CXXF, w + '/imp.cpp'), (CCF, w + '/tab.S'), (CCF, w + '/native.c')]:
         o = '%s/%s.o' % (w, os.path.basename(src).rsplit('.', 1)[0]); objs.append(o)

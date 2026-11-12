@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Tests of tools/ehflow.py (callee-saved proofs, R2) on real x86-32 code: the machine code below is the assembly in test/ehflow_test.asm, decoded by capstone like the images' code.
+"""Tests of tools/ehflow.py (callee-saved proofs, R2) on real x86-32 code: the machine code below is the assembly in tools/tests/ehflow_test.asm, decoded by capstone like the images' code.
 No double of a product symbol: Flow is the product class, only the image container (decoded instructions, no relocations) is provided here.   python3 test/ehflow_test.py"""
 import os, sys, unittest
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'tools'))
 import capstone
 from capstone import x86 as cx
 from ehflow import Flow, CALLEE

@@ -5,7 +5,7 @@ the rows of liftgen's shapes_K.tsv of the same image (K = 0, one shard).
 The proof is liftgen's own output: the shapes file is written by liftgen through lifted.lift_with_instructions, lifted() runs the same step again and counts
 shape_key/family of the instructions it yields (decoded again from the image bytes at (va, length))."""
 import collections, os, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
+HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE))
 for p in ('tools', ''):
     sys.path.insert(0, os.path.join(LIFT, p))
 import fnvlift as L, lifted

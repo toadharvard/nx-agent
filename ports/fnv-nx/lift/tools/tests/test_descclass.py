@@ -12,7 +12,7 @@ checks for consistency with the size (an element code that does not divide the s
 """
 import argparse, os, re, subprocess, sys
 
-HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE); FNV = os.path.dirname(LIFT)
+HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE)); FNV = os.path.dirname(LIFT)
 sys.path.insert(0, LIFT + '/tools')
 import bridgegen
 

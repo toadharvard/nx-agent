@@ -3,7 +3,7 @@
 `test/jne` facts through a copy, frame cells (kept only while no store through another pointer, no call, no escaping frame address), a constant held in a register, and the negative cases that must be red.
 Ported from the cases of tabguard_test.py (w3).   python3 test/jtab_cases_test.py"""
 import os, struct, sys, unittest
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'tools'))
 import capstone
 from capstone import x86 as X
 import jtab

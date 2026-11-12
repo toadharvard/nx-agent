@@ -5,7 +5,7 @@ Hand-assembled x86 guest functions (synthetic image at 0x401000) call imports th
 The whole thing (lifted guest code + generated import entries + rt) is linked as AArch64 ILP32 and run under Unicorn from a native `test_main`.
 Expected values are computed from the x86 semantics by hand (stated at each case). Prints one line per case; exit status 1 on any difference."""
 import argparse, os, struct, subprocess, sys
-HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(HERE)
+HERE = os.path.dirname(os.path.abspath(__file__)); LIFT = os.path.dirname(os.path.dirname(HERE))
 for p in ('tools', 'test', ''): sys.path.insert(0, os.path.join(LIFT, p))
 import fnvlift as L, instest, phf, impgen
 from keystone import Ks, KS_ARCH_X86, KS_MODE_32
@@ -125,7 +125,7 @@ def main():
     CF = ['-mabi=ilp32', '-O2', '-fPIC', '-ffreestanding', '-fno-stack-protector', '-fno-asynchronous-unwind-tables', '-fno-stack-clash-protection', '-c']
     syms = {ad: 'L_%08x' % ad for ad, sz, owns in ents.values()}; syms.update({k: s for k, s, *_ in ent})
     assert {n: k for k, s, d, n, b in ent} == {r[1]: KEY[r[1]] for r in BRIDGE if r[6] != 'none'}
-    h = phf.build(list(syms)); open(w + '/tab.S', 'w').write(phf.table_asm(syms, h)); open(w + '/native.c', 'w').write(NATIVE); open(w + '/guest.cpp', 'w').write(L.prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'rt')) + '\n'.join(texts))
+    h = phf.build(list(syms)); open(w + '/tab.S', 'w').write(phf.table_asm(syms, h)); open(w + '/native.c', 'w').write(NATIVE); open(w + '/guest.cpp', 'w').write(L.prelude(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'rt')) + '\n'.join(texts))
     jobs = [(['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], w + '/guest.cpp'), (['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], w + '/imp.cpp'),
             (['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], LIFT + '/rt/enter.cc'), (['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], LIFT + '/rt/seh.cc'), (['aarch64-linux-gnu-g++'] + flags + ['-x', 'c++'], LIFT + '/rt/unhandled.cc'),
             (['aarch64-linux-gnu-gcc'] + CF, LIFT + '/rt/rt.c'), (['aarch64-linux-gnu-gcc'] + CF, LIFT + '/rt/rcptab.c'), (['aarch64-linux-gnu-gcc'] + CF + ['-I', LIFT + '/rt'], LIFT + '/rt/x87.c'),
