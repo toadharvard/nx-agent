@@ -13,7 +13,8 @@
    "-fdata-sections",
    "-D__LINUX_ERRNO_EXTENSIONS__",
    "-DFNVNX_PLATFORM_BUILD",
-   "-Werror=attributes"
+   "-Werror=attributes",
+   "-DFT2_BUILD_LIBRARY"
   ],
   "cxx": [
    "-O2",
@@ -38,7 +39,33 @@
   "/ext/minimp3",
   "/ext/libnx/nx/include",
   "/ext/libnx/nx/external/bsd/include",
-  "/ext/freetype/include"
+  "ports/fnv-nx/platform/freetype/gen/include",
+  "/ext/freetype/include",
+  "/ext/freetype/src/autofit",
+  "/ext/freetype/src/base",
+  "/ext/freetype/src/bdf",
+  "/ext/freetype/src/bzip2",
+  "/ext/freetype/src/cache",
+  "/ext/freetype/src/cff",
+  "/ext/freetype/src/cid",
+  "/ext/freetype/src/gxvalid",
+  "/ext/freetype/src/gzip",
+  "/ext/freetype/src/lzw",
+  "/ext/freetype/src/otvalid",
+  "/ext/freetype/src/pcf",
+  "/ext/freetype/src/pfr",
+  "/ext/freetype/src/psaux",
+  "/ext/freetype/src/pshinter",
+  "/ext/freetype/src/psnames",
+  "/ext/freetype/src/raster",
+  "/ext/freetype/src/sdf",
+  "/ext/freetype/src/sfnt",
+  "/ext/freetype/src/smooth",
+  "/ext/freetype/src/svg",
+  "/ext/freetype/src/truetype",
+  "/ext/freetype/src/type1",
+  "/ext/freetype/src/type42",
+  "/ext/freetype/src/winfonts"
  ],
  "units": "all",
  "generated": [
@@ -225,6 +252,30 @@
    "outputs": [
     "win32/font_machine.gen.inc"
    ]
+  },
+  {
+   "tool": "ports/fnv-nx/platform/freetype/gen_units.py",
+   "args": [
+    "/ext/freetype",
+    "/in/ports/fnv-nx/platform/freetype/modules.enable",
+    "/in/ports/fnv-nx/platform/freetype/options.enable",
+    "/in/ports/fnv-nx/platform/freetype/patches",
+    "/out/freetype"
+   ],
+   "inputs": [
+    "ports/fnv-nx/platform/freetype/modules.enable",
+    "ports/fnv-nx/platform/freetype/options.enable",
+    "ports/fnv-nx/platform/freetype/patches"
+   ],
+   "outputs": [
+    "freetype/units.list",
+    "freetype/gen/include/freetype/config/ftmodule.h",
+    "freetype/gen/include/freetype/config/ftoption.h",
+    "freetype/gen/src/cid/cidload.fnvnx.inc",
+    "freetype/gen/src/cid/type1cid.c",
+    "freetype/gen/src/truetype/truetype.c",
+    "freetype/gen/src/truetype/ttgxvar.fnvnx.inc"
+   ]
   }
  ],
  "os_layer": [],
@@ -363,5 +414,6 @@
    "tree_sha256": "5af2f2cfc5dea618bd8a1a6952fdfcaec50efa47d68d74bc61758b16aa56953d",
    "at": "/ext/fonts"
   }
- ]
+ ],
+ "sources": "freetype/units.list"
 }
