@@ -229,7 +229,7 @@ bool read_file(const std::string &p, std::vector<uint8_t> &out)
 void add_font_file(const std::string &path, bool allow_bitmap, bool listed)   /* listed: the directory scan returned it, so it must be readable */
 {
     std::vector<uint8_t> data;
-    if (!read_file(path, data)) { if (listed) declared_input_broken("font file listed by its directory is unreadable", path); return; }   /* a registry-named file the set lacks: Wine 9.0 load_registry_fonts skips it */
+    if (!read_file(path, data)) { if (listed) declared_input_broken("font file listed by its directory is unreadable", path); return; }   /* a file the registry names and the reference machine lacks (serife.fon, vgaoem.fon): Wine 9.0 dlls/win32u/font.c load_system_bitmap_fonts / load_registry_fonts skip it; platform/manifest/check_fontnames.py derives the set from the reference listing, every other named file is present */
     if (data.empty()) return;
     for (FT_Long idx = 0, count = 1; idx < count; idx++) {
         FT_Face ft;

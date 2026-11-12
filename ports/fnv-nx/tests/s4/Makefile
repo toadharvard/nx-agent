@@ -184,7 +184,7 @@ dynsites-check: probe
 # the registry-site extractor and the seed generator on synthetic input (no exe-derived file needed)
 # every font file the declared registry export names exists in the declared set (platform/manifest/check_fontnames.py); run on the declared externals
 fontnames-check:
-	python3 -I $(ROOT)/platform/manifest/check_fontnames.py $(FNVNX_FONT_REF)/wine-fonts/usr/share/wine/fonts $(FNVNX_FONT_HOST) $(FNVNX_FONT_REF)/reg
+	python3 -I $(ROOT)/platform/manifest/check_fontnames.py $(FNVNX_FONT_REF)/wine-fonts/usr/share/wine/fonts $(FNVNX_FONT_HOST) $(FNVNX_FONT_REF)/reg $(FNVNX_FONT_REF)/fc-list.txt $(FNVNX_FONT_REF)/fonts-wine.list
 
 regsites-check:
 	python3 -I $(ROOT)/platform/manifest/check_regsites.py
@@ -194,7 +194,7 @@ regsites-check:
 	python3 -I $(ROOT)/platform/manifest/check_gen_registry.py
 	python3 -I $(ROOT)/platform/manifest/check_gen_prefs.py
 
-test: hostapi-check regsites-check $(OUT)/s4_tests
+test: hostapi-check regsites-check fontnames-check $(OUT)/s4_tests
 	rm -rf $(OUT)/root && FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root GLIBC_TUNABLES=glibc.malloc.tcache_count=0 $(OUT)/s4_tests
 
 # ---- i386 (-m32) build: the ILP32 data model with a host libc. /usr/include/asm is the multilib packages' symlink,

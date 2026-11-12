@@ -73,3 +73,12 @@ constant writer, unbound writer, unaccounted pointer, multiple-inheritance offse
   The gap to close in the mirror: either add those host font files (from the Ubuntu 24.04 packages fonts-inter, fonts-jetbrains-mono, fonts-freefont-ttf, fonts-dejavu-core,
   fonts-crosextra-caladea/carlito, fonts-unifont, fonts-tlwg-*, fonts-ipafont-gothic, fonts-wqy-zenhei, fonts-opensymbol) or export the registry from a prefix whose machine has only the declared host set.
   Full list: the script's output on those inputs.
+
+## fontnames gate, second round (branch claude/fnv-l5-platform-w12-fongate)
+- Mirror: fnv-nx-build tools/fonts 633a8fba (tree e122d894e86ea958e4f673ccbb409b66d940d645) adds prefix/host-fonts/usr/share/fonts (the 117 files of fc-list.txt, copied from the reference image,
+  which is this machine image: kernel 6.18.44-fc-v378, Ubuntu 24.04.5), prefix/host-fonts.dpkg (file, package, version: fonts-inter 4.0+ds-1, fonts-jetbrains-mono 2.304+ds-4, fonts-freefont-ttf
+  20211204+svn4273-2, fonts-dejavu-core/mono 2.37-8, fonts-crosextra-caladea 20200211-2, -carlito 20230309-2, fonts-unifont 1:15.1.01-1build1, fonts-tlwg-loma-otf 1:0.7.3-1, fonts-ipafont-gothic 00303-21ubuntu1,
+  fonts-wqy-zenhei 0.9.45-8, fonts-opensymbol 4:102.12+LibO24.2.7-0ubuntu0.24.04.7, fonts-noto-color-emoji 2.047-0ubuntu0.24.04.1, xfonts-scalable 1:1.0.3-1.3, fonts-liberation 1:2.1.5-3),
+  prefix/host-files.sha256, prefix/fonts-wine.list (dpkg-deb -c of fonts-wine 9.0~repack-4build3 from archive.ubuntu.com; its 63 files equal prefix/wine-fonts).
+- check_fontnames.py: declared wine/host dirs == the reference listings (EXTRA/LACKS), named minus listing = the skip set (printed with count), unplaceable path = error. On the mirror: 118 named,
+  0 differences, 2 skipped (serife.fon, vgaoem.fon). `make fontnames-check` is a prerequisite of `test`. ASan s4 gpa_ run with the complete reference: 485 tests, 57614 checks, 0 failed.
