@@ -1,4 +1,0 @@
-# The platform's declared FreeType options: each name is a `/* #define NAME */` line of include/freetype/config/ftoption.h that the platform enables.
-# The generator turns exactly that line into `#define NAME` (one such line per name, or the stage is red).
-FT_CONFIG_OPTION_SUBPIXEL_RENDERING
-PCF_CONFIG_OPTION_LONG_FAMILY_NAMES

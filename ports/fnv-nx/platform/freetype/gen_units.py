@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
-"""gen_units - FreeType's own build for the platform's declared configuration (recipe `generated` stage of the platform root).
+"""gen_units - FreeType's own build for the declared machine's FreeType configuration (recipe `generated` stage of the platform root).
 
-    gen_units.py EXT DECL_MODULES DECL_OPTIONS PATCHDIR OUT          EXT = the pinned FreeType external (/ext/freetype), OUT = the stage's /out/freetype
+    gen_units.py EXT DEB OUT      EXT = the pinned FreeType external (/ext/freetype), DEB = the `debian/` directory of the declared machine's FreeType source package
+                                  (external `freetype-debian`: the Ubuntu package freetype 2.13.2+dfsg-1ubuntu0.2 pinned by verify/env.json), OUT = the stage's /out/freetype
 
-Reads FreeType's own build configuration of the pinned tree and the platform's declaration, and writes exactly what FreeType's own build compiles:
+The declared machine's FreeType is the package's: upstream plus debian/patches/series applied in order. The generator applies that series strictly (every context and
+removed line must match, like `patch -F0`; a patch hunk for a file of another source component of the package, a `component=NAME` of debian/watch, is read and dropped)
+and derives the build from the result. Nothing is typed by hand. It writes:
   units.list      one `freetype:<path>` line per unit that is a file of the external, as the recipe's generated `sources` form wants it.
-  gen/include/freetype/config/ftmodule.h   the module list header FreeType's make generates (builds/modules.mk): for the modules in MODULES order,
-                  the FT_USE_MODULE lines of each module's src/<name>/module.mk.
-  gen/include/freetype/config/ftoption.h   the external's ftoption.h with the declared options enabled (each `/* #define NAME */` line becomes `#define NAME`).
-  gen/<dir of a patched unit>/<unit> and <part>.fnvnx.inc   a tracked patch (PATCHDIR/*.patch, applied strictly: every context and removed line must match,
-                  no fuzz, like `patch -F0`) changes a part file that a unit includes. The part file is written patched under the name `<stem>.fnvnx.inc`
-                  and its includer is written with that one quoted include renamed; the includer is then a generated unit and is not in units.list.
-Rule of the unit set (docs/INSTALL.ANY, builds/freetype.mk, builds/modules.mk, src/*/rules.mk): MODULES = FONT_MODULES HINTING_MODULES RASTER_MODULES AUX_MODULES of
-modules.cfg followed by the declared lines; BASE_EXTENSIONS likewise. The objects of a build are the base components src/base/ftsystem.c, ftdebug.c, ftinit.c;
-the base layer ftbase.c (BASE_SRC_S) and BASE_EXTENSIONS; per module the single aggregator <X>_SRC_S of its rules.mk (a module without one has one source
-<X>_DRV_SRC). Every path must exist in the tree or the stage is red; nothing is a list typed by hand."""
+  gen/include/freetype/config/ftmodule.h   the module list header FreeType's make generates (builds/modules.mk): for the modules in MODULES order, the FT_USE_MODULE
+                  lines of each module's src/<name>/module.mk.
+  gen/include/freetype/config/ftoption.h   ftoption.h after the package's patches.
+  gen/<dir of a patched unit>/<unit> and <part>.fnvnx.inc   a package patch changes a part file that a unit includes. The part file is written patched under the name
+                  `<stem>.fnvnx.inc` and its includer is written with that one quoted include renamed; the includer is then a generated unit, not in units.list.
+Red: a patch that does not apply; a patch to a file that is neither modules.cfg, ftoption.h, a part file of exactly one unit nor of another component; a change of
+modules.cfg other than uncommenting `X_MODULES += name` lines, or of ftoption.h other than enabling `/* #define NAME */` lines (a form the generator cannot read).
+Rule of the unit set (docs/INSTALL.ANY, builds/freetype.mk, builds/modules.mk, src/*/rules.mk): MODULES = FONT_MODULES HINTING_MODULES RASTER_MODULES AUX_MODULES of the
+patched modules.cfg; BASE_EXTENSIONS likewise. The objects of a build are the base components src/base/ftsystem.c, ftdebug.c, ftinit.c; the base layer ftbase.c (BASE_SRC_S)
+and BASE_EXTENSIONS; per module the single aggregator <X>_SRC_S of its rules.mk (a module without one has one source <X>_DRV_SRC). Every path must exist in the tree."""
 import os
 import re
 import sys
@@ -29,9 +32,9 @@ def lines_of(text):
     return text.split("\n")
 
 
-def config(ext, decl):
+def config(ext, cfg_text):
     mods, base = [], []
-    for line in lines_of(read(os.path.join(ext, "modules.cfg"))) + lines_of(read(decl)):
+    for line in lines_of(cfg_text):
         m = re.match(r"^(FONT|HINTING|RASTER|AUX)_MODULES\s*\+=\s*(\S+)\s*$", line)
         if m:
             mods.append((m[1], m[2]))
@@ -76,86 +79,119 @@ def module_h(ext, names):
     return "\n".join(out) + "\n"
 
 
-def options_h(ext, decl):
-    text = read(os.path.join(ext, "include/freetype/config/ftoption.h"))
-    for name in [l.strip() for l in lines_of(read(decl)) if l.strip() and not l.startswith("#")]:
-        pat = re.compile(r"^/\* #define %s \*/$" % re.escape(name), re.M)
-        if len(pat.findall(text)) != 1:
-            raise SystemExit("gen_units: ftoption.h has %d `/* #define %s */` lines, not one" % (len(pat.findall(text)), name))
-        text = pat.sub("#define %s" % name, text)
-    return text
-
-
-def apply_patch(files, patch):
-    """Strict unified-diff apply to {path: text}: every hunk's context and removed lines must equal the file at the recorded line (offset 0)."""
-    cur = None
+def apply_patch(files, patch, outside=()):
+    """Strict unified-diff apply to {path: text} (patch -F0: every context and removed line must equal the file at the recorded line, offset 0 apart from the
+    lines earlier hunks of the same file added or removed). A file whose path is under a prefix of OUTSIDE is not in the tree: its hunks are read and dropped."""
     out = dict(files)
     ls = lines_of(patch)
-    i = 0
+    i, cur, src, off = 0, None, None, 0
     while i < len(ls):
         l = ls[i]
-        if l.startswith("--- "):
+        if l.startswith("--- ") and i + 1 < len(ls) and ls[i + 1].startswith("+++ "):
             tgt = ls[i + 1]
             if not tgt.startswith("+++ b/"):
                 raise SystemExit("gen_units: patch target line %r" % tgt)
             cur = tgt[6:].split("\t")[0]
-            if cur not in out:
-                raise SystemExit("gen_units: patch names %s, not a file of the tree" % cur)
-            src = lines_of(out[cur])
-            pos_off = 0
+            if any(cur.startswith(p) for p in outside):
+                cur = None
+            elif cur not in out:
+                raise SystemExit("gen_units: a patch names %s, which is not a file of the tree" % cur)
+            else:
+                src, off = lines_of(out[cur]), 0
             i += 2
             continue
         m = re.match(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", l)
-        if m and cur is not None:
-            start = int(m[1]) - 1 + pos_off
-            new, old, j = [], [], i + 1
-            while j < len(ls) and (ls[j][:1] in (" ", "+", "-") or ls[j] == "") and not ls[j].startswith(("--- ", "+++ ")):
+        if m:
+            nold = int(m[2]) if m[2] is not None else 1
+            nnew = int(m[4]) if m[4] is not None else 1
+            old, new, j = [], [], i + 1
+            while len(old) < nold or len(new) < nnew:
                 t = ls[j]
-                if t == "" and (j + 1 >= len(ls) or ls[j + 1].startswith(("@@", "diff", "--- "))):
-                    break
+                if t.startswith("\\"):
+                    j += 1
+                    continue
                 if t[:1] == " " or t == "":
                     old.append(t[1:]); new.append(t[1:])
                 elif t[0] == "-":
                     old.append(t[1:])
                 elif t[0] == "+":
                     new.append(t[1:])
+                else:
+                    raise SystemExit("gen_units: malformed hunk line %r" % t)
                 j += 1
-            if src[start:start + len(old)] != old:
-                raise SystemExit("gen_units: a hunk of the patch for %s does not match at line %d" % (cur, start + 1))
-            src[start:start + len(old)] = new
-            pos_off += len(new) - len(old)
-            out[cur] = "\n".join(src)
+            if cur is not None:
+                start = int(m[1]) - 1 + off if nold else int(m[1]) + off
+                if src[start:start + len(old)] != old:
+                    raise SystemExit("gen_units: a hunk for %s does not match at line %d" % (cur, start + 1))
+                src[start:start + len(old)] = new
+                off += len(new) - len(old)
+                out[cur] = "\n".join(src)
             i = j
             continue
         i += 1
     return out
 
 
+def components(deb):
+    """The directories of the other source components of the package (debian/watch `component=NAME`): not part of the library tree."""
+    return [c + "/" for c in re.findall(r"component=(\w+)", read(os.path.join(deb, "watch")))]
+
+
+def series(deb):
+    return [l.strip() for l in lines_of(read(os.path.join(deb, "patches", "series"))) if l.strip() and not l.startswith("#")]
+
+
+def check_form(old, new, what, pat_old, pat_new):
+    """The package may change FILE only by lines of the one form the generator reads: every removed line matches PAT_OLD and its replacement PAT_NEW
+    (an option or module enabled). Anything else is red."""
+    import difflib
+    a, b = lines_of(old), lines_of(new)
+    rem, add = [], []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        if tag != "equal":
+            rem += a[i1:i2]
+            add += b[j1:j2]
+    if len(rem) != len(add) or not all(re.match(pat_old, x) and re.match(pat_new, y) for x, y in zip(rem, add)):
+        raise SystemExit("gen_units: the package changes %s in a form the generator cannot read (%d lines removed, %d added)" % (what, len(rem), len(add)))
+    return add
+
+
 def main(a):
-    ext, dmod, dopt, pdir, out = a
-    names, base = config(ext, dmod)
+    ext, deb, out = a
+    comp = components(deb)
+    files = {}
+    for name in series(deb):
+        text = read(os.path.join(deb, "patches", name))
+        want = {m[1].split("\t")[0] for m in re.finditer(r"^\+\+\+ b/(\S+)", text, re.M) if not any(m[1].startswith(p) for p in comp)}
+        for f in want:
+            if f not in files:
+                files[f] = read(os.path.join(ext, f)) if os.path.isfile(os.path.join(ext, f)) else None
+        if any(files[f] is None for f in want):
+            raise SystemExit("gen_units: debian/patches/%s names a file that is not in the tree: %s" % (name, sorted(f for f in want if files[f] is None)))
+        files = apply_patch(files, text, comp)
+    orig = {f: read(os.path.join(ext, f)) for f in files}
+    cfg_text = files.get("modules.cfg", orig.get("modules.cfg"))
+    mods_added, opts_added = [], []
+    if "modules.cfg" in files:
+        mods_added = check_form(orig["modules.cfg"], files["modules.cfg"], "modules.cfg", r"^#\s*(FONT|HINTING|RASTER|AUX)_MODULES\s*\+=\s*\S+\s*$",
+                                r"^(FONT|HINTING|RASTER|AUX)_MODULES\s*\+=\s*\S+\s*$")
+    if "include/freetype/config/ftoption.h" in files:
+        opts_added = check_form(orig["include/freetype/config/ftoption.h"], files["include/freetype/config/ftoption.h"], "ftoption.h",
+                                r"^/\* #define \w+ \*/$", r"^#define \w+$")
+    names, base = config(ext, cfg_text if "modules.cfg" in files else read(os.path.join(ext, "modules.cfg")))
     U = units(ext, names, base)
-    gen = {}
-    gen["gen/include/freetype/config/ftmodule.h"] = module_h(ext, names)
-    gen["gen/include/freetype/config/ftoption.h"] = options_h(ext, dopt)
-    patched = {}
-    for p in sorted(os.listdir(pdir)):
-        if p.endswith(".patch"):
-            text = read(os.path.join(pdir, p))
-            want = {m[1] for m in re.finditer(r"^\+\+\+ b/(\S+)", text, re.M)}
-            files = {f: read(os.path.join(ext, f)) for f in want | set(patched)}
-            files.update(patched)
-            res = apply_patch(files, text)
-            for f in want:
-                patched[f] = res[f]
+    gen = {"gen/include/freetype/config/ftmodule.h": module_h(ext, names),
+           "gen/include/freetype/config/ftoption.h": files.get("include/freetype/config/ftoption.h", read(os.path.join(ext, "include/freetype/config/ftoption.h")))}
     inc = re.compile(r'^(\s*#\s*include\s*)"([^"]+)"', re.M)
     rewritten = {}
-    for f, content in sorted(patched.items()):
+    for f, content in sorted(files.items()):
+        if f in ("modules.cfg", "include/freetype/config/ftoption.h"):
+            continue
         d, n = os.path.split(f)
         stem = n.rsplit(".", 1)[0]
         users = [u for u in U if os.path.dirname(u) == d and any(m[2] == n for m in inc.finditer(read(os.path.join(ext, u))))]
         if len(users) != 1:
-            raise SystemExit("gen_units: the patched file %s is included by %d units, not one: %s" % (f, len(users), users))
+            raise SystemExit("gen_units: the package patches %s, which is not a part of the build (included by %d units, not one): %s" % (f, len(users), users))
         u = users[0]
         newname = stem + ".fnvnx.inc"
         text = rewritten.get(u) or read(os.path.join(ext, u))
@@ -166,13 +202,13 @@ def main(a):
         gen["gen/%s/%s" % (d, newname)] = content
     for u, text in rewritten.items():
         gen["gen/" + u] = text
-    lst = ["freetype:" + u for u in U if u not in rewritten]
-    gen["units.list"] = "\n".join(lst) + "\n"
+    gen["units.list"] = "\n".join("freetype:" + u for u in U if u not in rewritten) + "\n"
     for rel, text in gen.items():
         p = os.path.join(out, rel)
         os.makedirs(os.path.dirname(p), exist_ok=True)
         with open(p, "w", encoding="utf-8", errors="surrogateescape", newline="") as f:
             f.write(text)
+    sys.stderr.write("gen_units: package enables modules %s and options %s\n" % ([x.strip() for x in mods_added], [x.strip() for x in opts_added]))
     return 0
 
 
