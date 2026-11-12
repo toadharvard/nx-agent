@@ -92,8 +92,9 @@ not change since, or the base is a constant that is a multiple of the size.
 The assumptions it rests on are registered (verify/ASSUMPTIONS.json): ASM-001 (the compiler: AAPCS64 call clobbers of compiler
 output, -fno-ipa-ra), ASM-200 (AAPCS64 of hand-written assembler, discharged by rule (c)), ASM-201 (layout: x27 points at a
 struct cpu of fnvnx_lift_cpu_bytes bytes below 2^32, host mappings disjoint from guest ones), ASM-202 (every object of the
-lifted roots is given), ASM-007 (ILP32), ASM-043 (the decoder, capstone) and ASM-045 (its write sets; rule (a) adds the
-encoding's destination fields).
+lifted roots is given) and ASM-007 (ILP32). Rule (a) does not rest on the decoder: the destination registers of an instruction are
+decided from the encoding's destination fields, and the decoder's operand view only adds writes (the union decides); the corpus
+test compares the two over every instruction class.
 
 Exit 0 iff all three results are green."""
 import json
