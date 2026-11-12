@@ -34,7 +34,7 @@ def le(b): return int.from_bytes(b, 'little')
 class EH(Flow):
     def __init__(s, X):
         s.X = X; s.fi = {}; s.stubs = {}; s.noise = Counter(); s.sites = {}; s.scopes = {}; s.helpers = {}; s.seenh = set()
-        s.regs = {}; s.unknown = 0; s.throws = {}; s.catch = []; s.contdone = set(); s.conts = {}; s.emitted = 0; s.seenstub = set(); s.throwers = []; s.tsites = {}; s.dc = {}; s.slot = {}; s.lead = set(); s.jt = defaultdict(list); s.nseen = 0; s.rv = None; s.rvk = -1; s.rst = False; s.sb = {}; s.rl = {}; s.relset = None
+        s.regs = {}; s.unknown = 0; s.throws = {}; s.catch = []; s.contdone = set(); s.conts = {}; s.emitted = 0; s.seenstub = set(); s.throwers = []; s.tsites = {}; s.dc = {}; s.slot = {}; s.lead = set(); s.jt = defaultdict(list); s.nseen = 0; s.rv = None; s.rvk = -1; s.rst = False; s.sb = {}; s.rl = {}; s.relset = None; s.dicr = None
         s.cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32); s.cs.detail = True; s.flow_init(); s.am = {}; s.fsc_new = []; s.fsw = set(); s.fsc_seen = 0; s.regsites = {}; s.hlp = {}; s.seh_red = []; s.fs0_other = 0
 
     @property
@@ -266,11 +266,15 @@ class EH(Flow):
         return seen
 
     def real(s, a):
-        """a decoded instruction is code only if every relocated dword it overlaps is one of its own operands (its immediate or displacement). Assumption: a relocated dword in the
-        middle of an instruction's bytes is a pointer in a data table (jump table, vtable) that the linear decode ran through; it is never executed."""
+        """a decoded instruction is code iff (1) it lies in no data_in_code range (tools/dic.py: the slots of a jump table a proven consumer reads, from jtab_ok) and (2) every relocated dword it
+        overlaps is one of its own operands (its imm32 or disp32): the reloc-consistency rule (a base relocation proves an absolute 32-bit word at its offset, so a decoding with a relocation anywhere
+        else is not code on that decoding; residue.disp_only / modlift.conflict). Removes ASM-233: no premise about what the relocated word is; the data ranges come from consumers, the misfit from the relocations."""
         r = s.rl.get(a)
         if r is None:
             ins = s.dis(a); sz = s.X.insns[a][0]; r = ins is not None
+            if r:
+                if s.dicr is None: s.dicr = sorted((min(t.addrs), max(t.addrs) + 4) for t in getattr(s.X, 'jtab_ok', {}).values() if t.addrs)
+                r = not any(lo <= a < hi for lo, hi in s.dicr)
             if r:
                 if s.relset is None: s.relset = set(s.X.relocs)
                 for q in range(a - 3, a + sz):

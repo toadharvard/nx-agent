@@ -192,7 +192,7 @@ def _run(arg, XEX, REF=frozenset()):
                 elif m == 'jecxz' and not lo <= (o[0].imm & M32) < hi: jx.add(a_); ts.setdefault(o[0].imm & M32, a_)      # jecxz leaving the range: a direct jump out (f_sys, f_flow.jump_out)
                 if m not in ('jmp', 'ret', 'retf', 'hlt', 'ud2') and not (m == 'int3' and a_ + g.size >= hi) and a_ + g.size not in ins and a_ + g.size not in bad:      # explore's own stop rule: the path falls out of what was decoded
                     ts.setdefault(a_ + g.size, a_); ft.add(a_ + g.size)         # a fall-through is a control transfer to its successor, like `jmp nxt` (f_flow.jump_out)
-            lcache[k] = (cs, ts, jx, ft, residue.body_facts(ins, tabs, None, intext, imports), frozenset(ins))
+            lcache[k] = (cs, ts, jx, ft, residue.body_facts(ins, tabs, None, intext, imports), {x: (g.size, g.operands[0].imm & M32 if g.mnemonic.split(' ')[-1] == 'call' and g.operands[0].type == X.X86_OP_IMM else None, g.mnemonic.split(' ')[-1] not in ('jmp', 'ret', 'retf', 'iret', 'iretd', 'hlt', 'ud2')) for x, g in ins.items()})
         return lcache[k]
     def span(e, xs):        # the lifter range of entry e is [e, e + span): the smallest interval from e that holds every instruction e reaches (a reached instruction below e is outside: a jump to it leaves the range)
         return residue.span(e, ((a, dec[a][0]) for a in xs))      # the one function (residue.span), shared with the exe producer
@@ -291,13 +291,14 @@ def _run(arg, XEX, REF=frozenset()):
         out.append('%08x\t%s\t%d\t%s' % (e, pk, span(e, exts[e]), ','.join(fl)))
     open(outd + '/universe.tsv', 'w').write('# base=0x%08x: addresses are absolute VAs at the assigned load base (not RVAs; preferred base 0x%08x); columns: entry, kind, extent, flags; extent is the SPAN [entry, entry + extent) that holds every instruction the entry reaches at or above it (the range the lifter takes; the bytes reached: ranges.tsv)\n' % (M.base, M.pref) + '\n'.join(out) + '\n')
     hd = '# base=0x%08x: absolute VAs at the assigned load base (not RVAs)\n' % M.base; bad = 0; rg = []
-    RI = {}; LO = {}                                         # LO: instructions the lifter's own flow reaches that lie outside the entry's ranges (invariant: 0)
+    RI = {}; LO = {}; LOA = {}; LOT = {}                                         # LO: instructions the lifter's own flow reaches that lie outside the entry's ranges (invariant: 0)
     # retn.tsv: how each entry returns (residue.retn_rows)
     for e in E:
-        cs_, ts_, jx_, ft_, rf_, ia_ = lc_targets(e, span(e, exts[e])); LO[e] = len(ia_ - set(exts[e]))
+        cs_, ts_, jx_, ft_, rf_, ia_ = lc_targets(e, span(e, exts[e])); LO[e], LOA[e], LOT[e] = residue.lifter_outside(ia_, exts[e], NR)
         RI[e] = dict(rets=rf_['rets'], far=rf_['far'], open=rf_['open'], tails={t for t in ts_ if t in ent}, outside=any(t not in ent for t in ts_), noreturn=e in NR)
     rc = residue.write_retn(outd, hd, residue.retn_rows(RI)); print('retn.tsv %d rows: %s' % (len(RI), dict(sorted(rc.items()))))
-    print('invariant ranges: instructions the lifter reaches outside the entry ranges %d (entries %d of %d)' % (sum(LO.values()), sum(1 for v in LO.values() if v), len(LO)))
+    print('invariant ranges: instructions the lifter reaches outside the entry ranges, other than the dead tail after a call to a never-returning entry: %d (entries %d of %d); dead tails after NORETURN calls: %d instructions in %d entries' % (sum(LO.values()), sum(1 for v in LO.values() if v), len(LO), sum(LOT.values()), sum(1 for v in LOT.values() if v)))
+    for e_ in [e for e in E if LO[e]][:6]: print('  outside ranges: entry %08x span %d, lifter-only instructions %s' % (e_, span(e_, exts[e_]), ' '.join('%08x' % x for x in LOA[e_][:6])))
     for e, row in zip(E, out):
         r = codemap.ranges(exts[e], lambda a: dec[a][0]); bad += max([b - e for a, b in r if b > e] or [0]) != int(row.split('\t')[2]); rg.append('%08x\t%s' % (e, codemap.rng_str(r)))
     open(outd + '/ranges.tsv', 'w').write(hd.rstrip() + '; columns: entry, half-open ranges start-end (hex) of the instruction bytes reached\n' + '\n'.join(rg) + '\n')
@@ -393,6 +394,13 @@ def _run(arg, XEX, REF=frozenset()):
         for ln in open('/home/user/l3facts/exe_mnemonics.tsv'): k, n = ln.split(); exe_mn[k] = int(n)
     mp = Counter(dec[a][1] for a in pset); new_mn = sorted(((k, n) for k, n in mp.items() if k not in exe_mn), key=lambda kv: (-kv[1], kv[0]))[:60]
     fi = eh.finish(ent)
+    import dic
+    DR = dic.jtab_ranges(outd); dic.write(outd, hd, DR)          # data in code: the ranges a proven consumer reads (tools/dic.py)
+    DW, DWd = dic.nonoperand_words(md, text, T0, relocs, {(a, dec[a][0]) for e in E for a in exts[e]}, DR)
+    print('data_in_code: %d ranges (jtab %d), %d bytes; relocated words overlapping a reached instruction without being its operand: %d (of them inside a data range %d)' % (len(DR), len(DR), sum(b - a for a, b, k, d in DR), len(DW), len(DWd)))
+    if DW: why.append('%d relocated words overlap a reached instruction without being its operand field' % len(DW))
+    PS = dic.protect_sites(md, text, T0, {(a, dec[a][0]) for e in E for a in exts[e]}, imports); open(outd + '/protect_sites.tsv', 'w').write(hd.rstrip() + '; columns: site, api, via; call sites of VirtualProtect/WriteProcessMemory/FlushInstructionCache in reached code: OPEN until the points-to (ASM-234)\n' + ''.join('%08x\t%s\t%s\n' % x for x in PS))
+    print('protect sites (ASM-234, open until the points-to): %d' % len(PS))
     exs = [n for n, a, z, ro in M.xs]; green = not why
         # ---- exports against L1's list, imports by DLL, delay imports
     l1 = {}; l1f = os.path.join(os.path.dirname(os.environ.get('FNVNX_MODULES', pemod.MODULES)), 'exports', mrow.name + '.tsv')

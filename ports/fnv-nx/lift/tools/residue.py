@@ -207,3 +207,19 @@ def combine(root):
         for k in SOURCES: tot[k] = tot[k] and got.get(k) == 'closed'
     open(os.path.join(root, 'sources.tsv'), 'w').write(''.join('%s\t%s\n' % (k, 'closed' if tot[k] else 'open') for k in SOURCES))
     return n, tot
+
+
+def lifter_outside(ia, ext, NR):
+    """ia: {addr: (size, call target or None, falls through)} of the lifter's own flow of one entry; ext: the instructions the universe flow reaches (NORETURN-aware, so its ranges stop after a call to a
+    never-returning entry NR). -> (lifter-only instructions that are NOT such a dead tail (invariant: 0), their sorted addresses, the count of dead-tail instructions): a lifter-only instruction is a dead tail
+    iff it is reached from the fall-through of a call to an NR entry through fall-through instructions that are all lifter-only."""
+    es = set(ext); lo = {a for a in ia if a not in es}
+    if not lo: return 0, [], 0
+    dead = set(); work = [a + ia[a][0] for a in es if a in ia and ia[a][1] in NR and a + ia[a][0] in lo]
+    while work:
+        x = work.pop()
+        if x in dead or x not in lo: continue
+        dead.add(x)
+        if ia[x][2] and x + ia[x][0] in lo: work.append(x + ia[x][0])
+    rest = sorted(lo - dead)
+    return len(rest), rest, len(dead)

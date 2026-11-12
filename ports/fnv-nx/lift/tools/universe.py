@@ -410,7 +410,7 @@ def cl_targets(a, kids):
             elif m == 'jecxz' and not lo <= (o[0].imm & 0xffffffff) < hi: jx.add(x); ts.add(o[0].imm & 0xffffffff)      # jecxz leaving the range: a direct jump out (f_sys, f_flow.jump_out)
             if m not in ('jmp', 'ret', 'retf', 'hlt', 'ud2') and not (m == 'int3' and x + g.size >= hi) and x + g.size not in ins and x + g.size not in bad:       # explore's own stop rule: a fall-out is a control transfer to the successor (f_flow.jump_out)
                 ts.add(x + g.size); cl_ft.add((a, x + g.size))
-        cl_cache[key] = (cs, ts, jx, residue.body_facts(ins, tabs, None, intext, imports), frozenset(ins))
+        cl_cache[key] = (cs, ts, jx, residue.body_facts(ins, tabs, None, intext, imports), {x: (g.size, g.operands[0].imm & 0xffffffff if g.mnemonic.split(' ')[-1] == 'call' and g.operands[0].type == X.X86_OP_IMM else None, g.mnemonic.split(' ')[-1] not in ('jmp', 'ret', 'retf', 'iret', 'iretd', 'hlt', 'ud2')) for x, g in ins.items()})
     return cl_cache[key]
 while True:
     kids = {}
@@ -461,15 +461,15 @@ for a in sorted(entries):
     rg = uni(I) if a in scx else codemap.ranges(xs, lambda x: insns[x][0]); rgs.append('%08x\t%s' % (a, codemap.rng_str(rg))); s_ = sum(y - x for x, y in rg); rbad += (s_ != ex) if not isd else (s_ > fsize[a] + 15); rdec += isd
 kids = {}
 for x, q in parent.items(): kids.setdefault(q, []).append(x)
-RI = {}; LOX = {}; NRS = {a for a, _ in NRR}                                      # retn.tsv: how each entry returns (residue.retn_rows)
+RI = {}; LOX = {}; LOT = {}; NRS = {a for a, _ in NRR}                                      # retn.tsv: how each entry returns (residue.retn_rows)
 for a in sorted(entries):
-    cs_, ts_, jx_, rf_, ia_ = cl_targets(a, kids); LOX[a] = len(ia_ - (set(scx[a]) if a in scx else set(extent_insns(a))))
+    cs_, ts_, jx_, rf_, ia_ = cl_targets(a, kids); LOX[a], _, LOT[a] = residue.lifter_outside(ia_, scx[a] if a in scx else extent_insns(a), NRS)
     RI[a] = dict(rets=rf_['rets'], far=rf_['far'], open=rf_['open'], tails={t for t in ts_ if t in entries}, outside=any(t not in entries for t in ts_), noreturn=a in NRS)
 os.makedirs(os.path.dirname(OUT), exist_ok=True); HD = '# base=0x%08x: absolute VAs at the preferred image base (not RVAs)' % base
 open(OUT, 'w').write(HD + '; columns: entry, kind, extent, flags; extent is the SPAN [entry, entry + extent) that holds every instruction the entry reaches at or above it (the range the lifter takes; decomp rows: the declared function size; the bytes reached: ranges.tsv)\n' + '\n'.join(rows) + '\n')
 open(OUTD + '/ranges.tsv', 'w').write(HD + '; columns: entry, half-open ranges start-end (hex) of the instruction bytes reached\n' + '\n'.join(rgs) + '\n')
 rc = residue.write_retn(OUTD, HD, residue.retn_rows(RI)); print('retn.tsv %d rows: %s' % (len(RI), dict(sorted(rc.items()))))
-print('invariant ranges: instructions the lifter reaches outside the entry ranges %d (entries %d of %d)' % (sum(LOX.values()), sum(1 for v in LOX.values() if v), len(LOX)))
+print('invariant ranges: instructions the lifter reaches outside the entry ranges, other than the dead tail after a call to a never-returning entry: %d (entries %d of %d); dead tails after NORETURN calls: %d instructions in %d entries' % (sum(LOX.values()), sum(1 for v in LOX.values() if v), len(LOX), sum(LOT.values()), sum(1 for v in LOT.values() if v)))
 open(OUTD + '/noreturn.tsv', 'w').write(HD + '; columns: entry, reason\n' + ''.join('%08x\t%s\n' % kv for kv in NRR))
 print('R3 pointer entries: %d new (%d insn-start of decoded code, %d bodies re-read from their first byte, %d of them hit undecodable bytes #UD, %d inside decomp functions); direct targets of those bodies: %s' % (
     len(r3set), len(r3set) - len(scx), len(scx), len(udset), sum(1 for a in r3set if a in parent), dict(sorted(r3call.items()))))
@@ -490,6 +490,13 @@ if not STRICT:
     midf = len({s for t, s in midsrc if s is not None and indec(s)}); nonde = [a for a in entries if a not in fsize]
     exo = sorted(a for a, v in insns.items() if v[1] in EXOTIC)
     print('\n'.join(eh.finish(entries)))
+    import dic
+    DR = dic.jtab_ranges(OUTD); dic.write(OUTD, HD, DR)          # data in code: the ranges a proven consumer reads (tools/dic.py)
+    DW, DWd = dic.nonoperand_words(md, text, T0, relocs, {(a_, (scx[e_] if e_ in scx else insns)[a_][0]) for e_ in entries for a_ in (sorted(scx[e_]) if e_ in scx else extent_insns(e_))}, DR)
+    print('data_in_code: %d ranges (jtab %d), %d bytes; relocated words overlapping a reached instruction without being its operand: %d (of them inside a data range %d)' % (len(DR), len(DR), sum(b_ - a_ for a_, b_, k, d in DR), len(DW), len(DWd)))
+    _INS = {(a_, (scx[e_] if e_ in scx else insns)[a_][0]) for e_ in entries for a_ in (sorted(scx[e_]) if e_ in scx else extent_insns(e_))}
+    PS = dic.protect_sites(md, text, T0, _INS, imports); open(OUTD + '/protect_sites.tsv', 'w').write(HD + '; columns: site, api, via; call sites of VirtualProtect/WriteProcessMemory/FlushInstructionCache in reached code: OPEN until the points-to (ASM-234)\n' + ''.join('%08x\t%s\t%s\n' % x for x in PS))
+    print('protect sites (ASM-234, open until the points-to): %d' % len(PS))
     print('text %d bytes (%08x-%08x), decomp funcs %d, relocs %d; mid-decomp jumps %d, calls %d' % (TN, T0, T1, len(funcs), len(relocs), midf, len(midcall)))
     print('\n'.join(CL))
     print('entries %d; per primary kind: %s' % (len(entries), dict(kc)))
@@ -507,7 +514,7 @@ if not STRICT:
     print('relocated pointer targets in .text: %d, entries %d, NOT entries %d: %s' % (len(pts), len(pts) - len(ne), len(ne), dict(sorted(Counter(
         'didataformat-blob' if any(x <= v < y for x, y in dfr) else ('data-by-reloc@object-start' if not tbl[v - T0 - 1] else 'data-by-reloc@object-interior') if tbl[v - T0] else 'inside-other-insn' if cov[v - T0] == 2 else 'insn-start-not-entry' if cov[v - T0] == 1 else 'unreached' for v in ne).items()))))
     if '--mnemonics' in ARGV: open(OUTD + '/exe_mnemonics.tsv', 'w').write(''.join('%s\t%d\n' % kv for kv in sorted(Counter(v[1] for v in insns.values()).items())))
-    gate(not unexpl and not bad_entries and not rejects and not rbad and not sum(LOX.values()) and not PMFX, TN, [])
+    gate(not unexpl and not bad_entries and not rejects and not rbad and not sum(LOX.values()) and not PMFX and not DW, TN, [])
 # ---- module report
 midf = 0; why = []; TNu = TN - cc[7]; exs = [n for n, a, z, ro in M.xs]
 PL, nc = codemap.ptrclass(U)
