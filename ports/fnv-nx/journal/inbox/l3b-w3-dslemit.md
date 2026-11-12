@@ -11,9 +11,9 @@ Totals over the whole universe: shapes 26500 (union of 7 images); emitted 18939 
 | total | 687 | 2145 | 4344 | 385 | 7561 |
 
 ## emit errors (425), by error class
-- 232 Unsupported('segment')   - memory operand with a segment override
-- 92 Unsupported('form variable bx'), 63 bp, 25 di, 10 si  = 190 - the form uses a register as a variable (no 8-bit/16-bit sub-register form)
-- 3 AssertionError (shapes 6659, 665c, 665d: operand-size-prefixed 66 5x push/pop forms)
+- 232 Unsupported('segment')   (the emitter's own error text; the cause is not analysed here)
+- 92 Unsupported('form variable bx'), 63 bp, 25 di, 10 si  = 190 (emitter error text 'form variable <reg>')
+- 3 AssertionError (shapes 6659, 665c, 665d: bytes 66 59, 66 5c, 66 5d: the decoder reads them as 16-bit pop)
 Sum 232+190+3 = 425.
 
 ## undef.tsv (17 rows)
