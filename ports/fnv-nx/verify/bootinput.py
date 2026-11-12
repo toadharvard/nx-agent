@@ -12,8 +12,8 @@ console host does (toolchain/host/host_v3.inc, L5 e873bf74; the line numbers bel
   pad_vibrate   host_v3.inc:133-163: index > 3: 0, nothing done. The host sends values only when g_vib[index].n != 0 (:153), which needs a pad
                 attached at that index (padGetStyleSet != 0, :142-151): so the event "pad-vibrate" (what the device received) is recorded exactly
                 when state(pad index, T).connected = 1; otherwise nothing is sent. Returns 0 either way. The model takes the success of
-                hidInitializeVibrationDevices (:151) as given: it depends on the console's HID service, owner assumption ASM-004
-                (verify/ASSUMPTIONS.json, the console's behaviour until a run on it), not a new one.
+                hidInitializeVibrationDevices (:151) as given: it depends on the console's HID service, OWNER assumption 4
+                (the console's behaviour until a run on it), not a new one.
 Each declared state is one HID sample: a state shorter than the gap between two polls is not seen, and the same mouse sample read twice gives its
 delta twice (host_v3.inc:181 reads the current sample, :186 only keeps the buttons). That is the host's behaviour, not smoothed.
 A value outside the host's type range is a ScenarioError (never clamped)."""
