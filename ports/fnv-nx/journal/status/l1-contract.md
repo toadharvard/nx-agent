@@ -1,14 +1,14 @@
 # L1 CONTRACT status (lead: Opus 5.5, session started 2026-11-11 22:34Z)
 
-Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` 07862d5a (L4 verify @cd2a5fe6 merged, tree 94602318, 215 s), 26 gates, 0 product roots. Target: first frame in this budget (CLAUDE.md 08f6ea30).
+Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` 29b41938 (07862d5a + CLAUDE.md), 26 gates, 0 product roots. Target: first frame in this budget (CLAUDE.md 08f6ea30).
 
 ## Tasks
 
 | # | Task | Worker session | Branch | Status |
 |---|---|---|---|---|
-| 2p | TOP: PP view EMLINK at L3a lift/pack 4,098 units and L3b lift/test/dslemit 4,096 units (O(units×names) placeholder links): shared all-placeholder base per real tree + per-unit ro bind of closure objects; store errors = red verdict with stage; check on L3a pack 2 cold + warm | session_01KmtZKS82vxSbxtKufqbp4i (w14) | claude/fnv-l1-contract-w14 | doing |
+| 2p | (w14 2d8176a, fix bc033dc: placeholder base once per store, inode per 60000 names, ro bind per closure file; store errors red with objects.json; test_views; retest sent to L3a/L3b/w3/w1) TOP: PP view EMLINK at L3a lift/pack 4,098 units and L3b lift/test/dslemit 4,096 units (O(units×names) placeholder links): shared all-placeholder base per real tree + per-unit ro bind of closure objects; store errors = red verdict with stage; check on L3a pack 2 cold + warm | session_01KmtZKS82vxSbxtKufqbp4i (w14) | claude/fnv-l1-contract-w14 | doing |
 | 2c | selftests content-keyed (138-149 s of ~143 s warm verdict, w14 at e90a7e4; red results recomputed every run) + budget gate (no-change rerun recomputes 0; warm wall-clock ≤ B in VERDICT.md) | session_01KmtZKV6pbaGLooiWzXRtev (w19) | claude/fnv-l1-contract-w19 | doing |
-| 3y | guest roots refuse error-downgrading flags (-fpermissive, -w, -Wno-error*) (L3a) | w14 | claude/fnv-l1-contract-w14 | queued after EMLINK |
+| 3y | guest roots refuse error-downgrading flags (-fpermissive, -w, -Wno-error*) (L3a) | w14 | claude/fnv-l1-contract-w14 04e372d | done |
 | 1a | merge queue via MERGER: w8 exepin | session_01KmtZKRkugvim1Bfui5aFTw (w4 takes it over) | claude/fnv-l1-contract-w8 a6753733 | doing: w4 rebasing on f1059af7 |
 | 1b | merge queue: w4 msvcmodel compiler + plugins fnvnx_order/fnvnx_ftoi (= item 3): MERGED e90a7e43; still open B2 (5 L2 plugins), guest_compiler 2nd external + platform build.json, G | session_01KmtZKRkugvim1Bfui5aFTw | claude/fnv-l1-contract-w4 bc406ec0 | doing: rebase onto a3e9f0a9 + verdict; then guest_compiler.json (fnvnx-a64-msvcmodel 00e3d42a) + sample platform build.json (L5 waits), B2 seven L2 plugins as stages, G build-once manifest |
 | 1c | merge queue: w5 python pins / TMPDIR | session_01KmtZKRw5sTxarSdSFC6Njj | claude/fnv-l1-contract-w5 db15c7ac | cce6c1e1 (gate TMPDIR + worktree-clean rule, green 23/23 at 08f6ea30); rebasing on f1059af7; deb mirror tools/verdict-debs (snapshot.ubuntu.com 5xx), deb sha256 0/130 → 130/130; doing: setup_verdict_env.sh from scratch with sha256 pins (helper w13) |
@@ -36,6 +36,8 @@ Branch `claude/fnv-l1-contract`. Trunk: `claude/fnv-nx-clean` 07862d5a (L4 verif
 | 1i | image set = least set from exe closed under imports + statically resolved LoadLibrary of reached code (not every dll file); atimgpud, d3dx9_31, gdffalloutnv: reached? then lifted (range facts L3a/L2); wine-specs 678c780e → declared_dlls.tsv, every Galaxy/ssce gap = wine (L5 bridge); gpa -I import fix | w18 | claude/fnv-l1-contract-w18 e999ed27 | doing |
 | 1s | bootsock argument census (21 wsock32 exe sites → winsock.cpp → SOCK 16..26,30,31): proved value sets with fact chains, certificates for fnvnx_reach_violation; unresolved GPA/LoadLibrary reaching wsock32? (L4) | w18 | claude/fnv-l1-contract-w18 | queued after closure roles |
 | 3h2 | cross-root headers = admitted headers trees only (platform/include for fnvl_host.h, L3a lift/rt); include of another root's own tree refused | w16 | claude/fnv-l1-contract-w16 | with headers class |
+| 3z | distro compiler spec defaults neutralised by rule: flag set = diff(distro gcc, GNU msvcmodel gcc 13.3) of -Q --help and -dM; all distro-compiled roots (L6A dk root) | w16 | claude/fnv-l1-contract-w16 | queued |
+| 3q | one file per gate (gates.d/) so gate branches stop conflicting in gates.json/test_gates.py | - | - | after MERGER items 1-3 |
 | 3x | fixture roots: per-unit gate + expected finding, never linked or in a universe (L3b forms/fpexact tests) | w16 | claude/fnv-l1-contract-w16 | queued |
 | 3w | recipe: failed_units 054d65c, -Werror=attributes 5171fae, envcheck before any stage 892c248 (L3a, L2) | w14 | claude/fnv-l1-contract-w14 b7df218 | done; L1 line pending |
 | 2b | budget in VERDICT.md, budget gate, delete second build paths | lead | - | blocked by 2 (numbers) |
@@ -47,18 +49,20 @@ Rule (L1+L2): a header-only dir is not a root; its headers are certified as PP i
 
 Assumptions (w10 a2bd503, code 2f1bbe2 on e35b870): gate GREEN, mentions 96/96; 52 records = 9 OWNER + 43 REMOVE (removed_by: gate 3, planned 18, no gate yet 22, OPEN 0); queued at MERGER. Next w10: objstub DECL_FACTS/DECL_SOURCE from declared_machine.tsv header (no-galaxy).
 
+MERGER serial queue: w16 b57061c8 → w14 2d8176a (EMLINK) → w17 cdc0041 (datamodel + ftoi (c)) → L2 w5 3b35851 → L2 w4 0f9e337 (order) → w10 a2bd503 → L6 w4 (d3d9total) → w5 → w8.
+
 ## Missing REQUIRED_PRODUCT gates (blocker of goal step 1)
 
 Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; imports, machine merged). No product root can be admitted until 0.
 
 | Gate | Owner | Branch | Commit | MERGER |
 |---|---|---|---|---|
-| datamodel | L1 | claude/fnv-l1-contract-w17 (session_01KmtZKQzN38LhJYh6sixhL1) | 531ebbd (green 24/24 at c5b20de, 191 s) | conflict with 07862d5a (TOOLS.md, gates.json, test_gates.py), rebasing |
+| datamodel | L1 | claude/fnv-l1-contract-w17 (session_01KmtZKQzN38LhJYh6sixhL1) | cdc0041 (green 24/24, 236.5 s) | serial queue #3 |
 | exepin | L1 | claude/fnv-l1-contract-w8 (w4 rebasing) | a6753733 | rebasing on f1059af7 |
 | r7 | L2 | claude/fnv-l2-source-w5 (session_01KmtZKUHWWEEBqzMR6cAtAZ) | 3b35851 (green 26 gates, 223.7 s) | queued |
 | namegate | L2 | claude/fnv-l2-source-w5 | 3b35851 | queued |
 | abi | L2 | claude/fnv-l2-source-w5 | 3b35851 | queued |
-| order | L3a (L2 supplies plugin certificate) | claude/fnv-l3a-lift-gates (session_01KmtZKR34WmRCfdDoE7ajAt) | - | doing |
+| order | L3a (L2 supplies plugin certificate; L2 w4 0f9e337 fnvnx_order rules ORDER-CONT, HARDREG, FENCE-MERGE, LOCAL, queue #5) | claude/fnv-l3a-lift-gates (session_01KmtZKR34WmRCfdDoE7ajAt) | - | doing |
 | eh | L3a (L3b reviews) | claude/fnv-l3a-lift-gates | - | doing |
 | addr32 | L3a | claude/fnv-l3a-lift-gates | - | doing |
 | forms | L3b | claude/fnv-l3b-lift-w2g | - | doing |
