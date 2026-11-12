@@ -62,6 +62,17 @@ with tempfile.TemporaryDirectory() as td:
         want("refuses short row", rc != 0 and "9 string fields" in e)
         rc, e, _ = run(td, inf="[Fonts]\n", conf=conf)
         want("refuses no substitutes", rc != 0 and "no FontSubstitutes" in e)
+fd = os.environ.get("FNVNX_FONTS")   # the pure family reader equals fc-scan (FreeType) on every file of the declared set
+if fd and os.path.isdir(fd):
+    sys.path.insert(0, HERE)
+    import fontfamilies
+    ref = {}
+    for l in subprocess.run(["fc-scan", "--format", "%{file}\t%{family}\n", fd], capture_output=True, text=True).stdout.splitlines():
+        f, n = l.split("\t", 1)
+        ref.setdefault(os.path.basename(f), set()).update(x.lower() for x in n.split(","))
+    for n in sorted(os.listdir(fd)):
+        mine = {x.lower() for x in fontfamilies.families(open(os.path.join(fd, n), "rb").read())}
+        want("families of " + n, mine == ref.get(n, set()))
 if fails:
     print("check_gen_fontmachine FAILED:", ", ".join(fails)); sys.exit(1)
 print("check_gen_fontmachine: ok")
