@@ -17,10 +17,7 @@
    "-ffunction-sections",
    "-fdata-sections",
    "-D__SWITCH__",
-   "-nostdinc",
-   "-fno-stack-protector",
-   "-U_FORTIFY_SOURCE",
-   "-D_FORTIFY_SOURCE=0"
+   "-nostdinc"
   ],
   "cxx": [
    "-march=armv8-a+crc+crypto",
@@ -34,10 +31,7 @@
    "-ffunction-sections",
    "-fdata-sections",
    "-D__SWITCH__",
-   "-nostdinc",
-   "-fno-stack-protector",
-   "-U_FORTIFY_SOURCE",
-   "-D_FORTIFY_SOURCE=0"
+   "-nostdinc"
   ],
   "asm": []
  },
