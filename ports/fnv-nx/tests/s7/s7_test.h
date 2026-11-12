@@ -7,18 +7,30 @@
 #include <string.h>
 
 #include <pthread.h>
-#include <setjmp.h>
 
-/* A failed CHECK ends the case when it runs on the case's own thread: the checks that guard a later dereference (a pointer, a handle,
- * an array element) then make a FAIL line and never a crash. The runner (main.cpp) arms s7_case_jmp around each case with setjmp;
- * a CHECK on another thread (a worker the case started) is counted and does not end the case, it cannot unwind the case's thread. */
-extern jmp_buf s7_case_jmp;
+/* A failed CHECK ends the case: it throws s7_case_abort, which the runner (main.cpp) catches per case and reports as FAIL, so a failed
+ * precondition (a pointer, a handle, an array element used by the next line) is a FAIL line and never a crash, and the destructors of the
+ * case's frames run. On a worker thread the check ends the thread's procedure instead, but only for a procedure run through
+ * s7_thread_guard (below), which catches the abort and returns a fixed code, so the case fails at its join; on a thread that is neither
+ * the case's nor guarded the failure is counted and nothing is thrown (an exception leaving a thread start is a terminate). */
+struct s7_case_abort {};
 extern pthread_t s7_case_thread;
 extern int s7_case_armed;
+extern __thread int s7_thread_guarded;
 static inline void s7_end_case_on_failure(void)
 {
-    if (s7_case_armed && pthread_equal(pthread_self(), s7_case_thread))
-        longjmp(s7_case_jmp, 1);
+    if ((s7_case_armed && pthread_equal(pthread_self(), s7_case_thread)) || s7_thread_guarded)
+        throw s7_case_abort{};
+}
+/* the body of a thread procedure that contains CHECKs: s7_thread_guard([&]() -> DWORD { ... }, 0xFA11) */
+template <class F, class R>
+static inline R s7_thread_guard(F body, R failed)
+{
+    s7_thread_guarded++;
+    R r = failed;
+    try { r = body(); } catch (const s7_case_abort &) { r = failed; }
+    s7_thread_guarded--;
+    return r;
 }
 
 extern int s7_failures, s7_checks;

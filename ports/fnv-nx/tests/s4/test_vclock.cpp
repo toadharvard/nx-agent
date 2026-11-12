@@ -247,13 +247,18 @@ static DWORD sig_job(LPVOID p)
 }
 static HANDLE g_mx;
 static volatile uint64_t g_mx_t;
-static DWORD mutex_waiter(LPVOID)
+static DWORD mutex_waiter_body(LPVOID)
 {
     CHECK_EQ(now_ns(), 0);                                    /* created at t = 0 */
     CHECK_EQ(WaitForSingleObject(g_mx, 10000), WAIT_OBJECT_0);
     g_mx_t = now_ns();                                        /* took the release's stamp */
     ReleaseMutex(g_mx);
     return 0;
+}
+/* the CHECKs of this procedure end it, not the process: the harness guard (s4_test.h), the case fails at its join */
+static DWORD mutex_waiter(LPVOID)
+{
+    return s4_thread_guard([&]() -> DWORD { return mutex_waiter_body(nullptr); }, (DWORD)0xFA11);
 }
 TEST(vc_signal_stamps_of_every_object)
 {

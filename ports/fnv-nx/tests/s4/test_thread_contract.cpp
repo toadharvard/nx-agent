@@ -40,7 +40,7 @@ static DWORD g_slot;
 static volatile int g_phase;        /* 0: set, 1: read after realloc, 2: done */
 static void *g_seen[3];
 static volatile int g_ready[3];
-static DWORD tls_worker(LPVOID p)
+static DWORD tls_worker_body(LPVOID p)
 {
     int n = (int)(intptr_t)p;
     CHECK(TlsSetValue(g_slot, (LPVOID)(uintptr_t)(0x100 + n)));
@@ -53,6 +53,11 @@ static DWORD tls_worker(LPVOID p)
     CHECK_EQ(GetLastError(), ERROR_SUCCESS);
     g_ready[n] = 2;
     return 0;
+}
+/* the CHECKs of this procedure end it, not the process: the harness guard (s4_test.h), the case fails at its join */
+static DWORD tls_worker(LPVOID p)
+{
+    return s4_thread_guard([&]() -> DWORD { return tls_worker_body(p); }, (DWORD)0xFA11);
 }
 
 static void tls_reuse(DWORD slot_filler_count)
