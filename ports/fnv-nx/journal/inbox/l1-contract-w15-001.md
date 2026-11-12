@@ -24,3 +24,18 @@
 * **not done (asked later by the lead / L3b)**
   - `link.libs` archives inside an external, passed as file paths, with the members ld pulls (from -Map) recorded in the link facts and judged by linkstrict/objstub: not implemented. The existing `link.libs` {external, dirs, names} already searches external archives but does not record the pulled members.
   - Variants: gates not listed above (gate_contract's per-root image gates) take the pair spelling through `quantify`, but they have run only on roots without variants here.
+
+### Follow-ups 2026-11-12 (head after the merge of trunk aaa709c8)
+* **did**
+  - Archive members pulled by ld are recorded (`link_archives` in objects.json, from the ld map) and judged by linkstrict and objstub as objects: a stub member is red, an undefined member symbol is a red link.
+  - The objects.json vs object-symbols check: a link is red when the recorded defined global/weak symbols differ from what the objects define, read with ldcheck's own reader.
+  - A tool root named in `link.roots` is refused.
+  - Cross-root outputs: `outputs` and `uses` (RECIPE.md "Outputs and uses"). The stage key holds the content hash; the output is at /uses/<root>/<name>. Red cases are check errors.
+  - Generated `sources`: units listed by a generate stage as `<external>:<path>` lines; the content is in the unit keys; a changed list adds only the new units. Red cases: stage `sources:<root>`.
+* **tests** - test_recipe 58, test_link 45, test_uses 16 (new), test_gate_contract 109, test_argorder 4, test_plugins 40, test_linkstrict 60, test_objstub 222; all 0 failed.
+* **L1 line** - `L1 green 27/27 gates, 291.3 s, over_budget False` (verdict run alone on the machine).
+  - Budget margin is 9 s. The selftests gate is the long pole (test_plugins ~104 s, test_recipe ~66 s under --jobs 3).
+  - A verdict run while other test runs share the machine goes red (timeouts or "No space left on device" from /tmp test scratch).
+* **notes**
+  - `farm/setup_verdict_env.sh` fails at the hashed-wheel step on this machine (`pip ... -r -`: "Could not open requirements file: -"). The z3 wheel was installed from a requirements file instead. Farm owners may hit the same.
+  - Not done: a test root (class test) consuming an output, until test roots are built by the recipe. A real-root variant run waits for the first product root.
