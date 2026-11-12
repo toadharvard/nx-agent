@@ -242,6 +242,11 @@ check('... the import is declared to write through no argument', keeps(imp_prog,
 check('... the import escapes the argument', keeps(imp_prog, 'f', 'esi', writes='dll\tname\twrites\nkernel32.dll\tCloseHandle\tn\n',
                                                    escape='dll\tname\tescape\nkernel32.dll\tCloseHandle\te\n'), False)
 
+check('... an unresolved escape letter (?) is open, never read as n', keeps(imp_prog, 'f', 'esi', writes='dll\tname\twrites\nkernel32.dll\tCloseHandle\tn\n',
+                                                   escape='dll\tname\tescape\nkernel32.dll\tCloseHandle\t?\n'), False)
+_ii = memfx.ImportInfo('', ['dll\tname\tescape\nk.dll\tF\tn\n', 'dll\tname\tescape\nk.dll\tF\t?\n'])
+check('two tables for one import: ? dominates the merge', _ii.esc_letter(memfx.norm_imp('k.dll', 'F'), 0), '?')
+
 
 # ---- globals
 def glob_prog(body):

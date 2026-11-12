@@ -59,7 +59,8 @@ def norm_imp(dll, name):
 
 class ImportInfo:
     """Per import: bytes the callee removes, bridge argument letters, escape letters, and the write facts.
-    escape: one letter per argument (n not captured, r may be returned, e escapes); no row = all e.
+    escape: one letter per argument (n not captured, r may be returned, e escapes, ? the platform has not resolved it: neither n nor e,
+    open for every question with that reason, never read as n or e); no row = all e (an open reason naming the missing row).
     writes: {(dll, name): letters} one per argument, n = never written through, w = may be written; no row = all w."""
 
     def __init__(self, bridge_text='', escape_texts=(), writes_text=''):
@@ -81,7 +82,7 @@ class ImportInfo:
                 old = self.escape.get(k)
                 new = f[2]
                 if old is not None:
-                    new = ''.join('e' if 'e' in (a, b) else 'r' if 'r' in (a, b) else 'n' for a, b in zip(old.ljust(len(new), 'e'), new.ljust(len(old), 'e')))
+                    new = ''.join('?' if '?' in (a, b) else 'e' if 'e' in (a, b) else 'r' if 'r' in (a, b) else 'n' for a, b in zip(old.ljust(len(new), 'e'), new.ljust(len(old), 'e')))
                 self.escape[k] = new
         for line in writes_text.splitlines():
             f = line.split('\t')
@@ -762,7 +763,9 @@ class Closure:
                 self.imps[(va, key, idx)] = (mw, esc)
                 if mw:
                     self.fw.add(fn.entry)
-                if esc == 'e':
+                if esc == '?':
+                    self.e(va, 'argument %d of import %s!%s: the platform escape letter is unresolved (?)' % (idx, key[0], key[1]))
+                elif esc == 'e':
                     self.e(va, 'tainted argument %d of import %s!%s (platform escape letter %s)' % (idx, key[0], key[1], esc))
                 elif esc == 'r':
                     eaxt = frozenset([ANY])
