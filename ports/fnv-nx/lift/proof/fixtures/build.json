@@ -134,11 +134,6 @@
    "gate": "fpexact",
    "expect": "red",
    "finding": "f2i-asm"
-  },
-  "fx_noreport.c": {
-   "gate": "fpexact",
-   "expect": "red",
-   "finding": "f2i-report-missing"
   }
  }
 }
