@@ -346,3 +346,12 @@ Update 2026-11-12, at 698adefb:
 - L1 w20: claude/fnv-l1-contract-int-l3a 2d215f16a (6d3a2800 + w14-src + w20-descs + int3 3b31bdc5).
   - w6 runs the verdict there and feeds int3's newer head (4115a256a + w5 + ASM-233/234) back.
   - w8 builds t16c and the lift/bridges root on it; w14-src2 445e551d carries the link.script fix.
+
+## 2026-11-12 09:27
+- int3 4115a256a (w6):
+  - prove.py and shapeprove.py edits done.
+  - Correction: formgate.py, gate_fpexact.py and formgate_inputs.json are now the trunk's 862b0708 versions (model_sha256 70c8dc39), and ASM-322/323/325 are back in the registry.
+  - The gate_lift fixtures carry cli.py.
+  - w14 merge test 7424c1f5b: test_gate_lift all pass, flags 9/9, order and eh OK. gate_assumptions 132/143. It is superseded by int-l3a.
+- Being deleted on int3 (doubles): lift/proof/tests/test_formgate.py, test_fpexact.py and fakeext.py. test_rtroot will read the lifted flags through recipe.py.
+- Reported to L1: the run_tool key hashes only the gate file, not its import closure (cli.py), so a stale cached result is possible. Proposed rule: the key covers the tool root's tree.
