@@ -242,3 +242,41 @@ Enumeration for the farm:
 - compile set = sum over vs of |A_V(s)| plus sum over ps of the product of the P domains above;
 - reorder set = |R| above.
 Per-shader numbers (p(s), n(s), signature classes) can be computed from the pinned SDP pack; I can generate that census if the lead wants it.
+
+## Closing C1 and C2, and the domain census (sm_domain.py)
+
+### C1 closed (FFP fragment partner F)
+- F's flatshading is the same formula as P's and R's: utils.c:6683-6686 (fragment settings), 6858-6861 and 6951-6954 (vertex settings; they cannot meet R, since R exists only with a vs).
+  - `emulated_flatshading && SHADEMODE == FLAT`.
+- Same hook as P: glsl_fragment_pipe_shademode (glsl_shader.c:12272 sets PIXEL; table 12393).
+- F declares in diffuse/specular/texcoord[WINED3D_MAX_FFP_TEXTURES]/fogcoord unconditionally (9714-9718). R with no ps (ps major 0 < 3) declares the same four as out (7183-7192), with the same types and flat.
+- C1 holds for F. No failing case found.
+
+### C2 from the pinned Mesa source
+Pin: Mesa 25.2.8 (ENV_PIN / externals.json "sm-linkprobe": Wine 9.0~repack-4build3 + Mesa llvmpipe 25.2.8). Read at tag mesa-25.2.8 from gitlab.freedesktop.org; I did not verify the tag's commit hash against the distro package. L4 can confirm the commit if wanted.
+- src/gallium/auxiliary/gallivm/lp_bld_limits.h:100 `caps->max_inputs = 32;` (gallivm_init_shader_caps, used for PIPE_SHADER_FRAGMENT by src/gallium/drivers/llvmpipe/lp_screen.c:124-134). sha256 c7186c2a5346b7fb1fea67db0402744eb8fe20c320cc9a992c3d929c73e92f70.
+- src/mesa/state_tracker/st_extensions.c:266-267 `pc->MaxInputComponents = screen->shader_caps[sh].max_inputs * 4;` = 128. sha256 846c964b685467570e466bc351074dd69166a4f205c40b2e7c3e4a8ee8c8a5cd.
+- src/mesa/main/get_hash_params.py:428 `MAX_FRAGMENT_INPUT_COMPONENTS` is `Const.Program[MESA_SHADER_FRAGMENT].MaxInputComponents`.
+- Wine: glsl_varyings = GL_MAX_FRAGMENT_INPUT_COMPONENTS - 4 = 124 on a core context (adapter_gl.c:3141-3146).
+- Demand: 41 (shader.c ps_limits: ps_3_0 packed_input 10 gives 40, plus V's one fog component; ps < 3 gives 41). 41 <= 124. C2 holds for this Mesa, with the constant and file:line above.
+- I did not read the Mesa varying-packing linker, so the claim is about the declared limit only.
+
+### Domain census over the shipped pack
+Script: render/shaders/total/sm_domain.py (deterministic, numbers only; `--private DIR` writes one row per distinct bytecode for the farm).
+Measured at my branch head, shipped set: vs 7631 (distinct bytecodes 443), ps 8160 (distinct 1366); total 15791.
+Totals (exact), distinct bytecodes:
+- vs compile set: 342,344.
+- reorder set |R| = 69,642 (146 vs classes, 258 ps classes including the no-ps class).
+- ps compile set without the sampler dimensions: 677,888.
+- ps compile set as the full product, per-sampler domain t*2*NFIX:
+  - NFIX=1: 9,970,384,972,544 (sm_domain_nfix1.json);
+  - NFIX=7: 2.93e26 (sm_domain_nfix7.json).
+  Declared-sampler counts of the 1366 distinct ps: 0:57, 1:237, 2:277, 3:242, 4:187, 5:182, 6:88, 7:48, 8:16, 9:4, 10:8, 12:8, 14:8, 16:4.
+The product does not fit the budget. The explosion is only the per-sampler dimension (texture type 2D/3D, np2 bit, colour fixup).
+Everything else fits: 342,344 + 677,888 + 69,642 ≈ 1.09 million items (about 3 hours on one core at 10 ms).
+
+What is needed to avoid the product (not asserted, needs a proof):
+- Per-sampler region: a sampler's (type, np2, fixup) reaches the text only through its declaration (2417), its sampling sites (3411-3420, 3612-3614) and the NP2 fixup uniform (7720-7750).
+- One global coupling: `num_consts = (cur + 1) >> 1` where cur counts the np2-flagged 2D samplers (7734-7749). It declares `ps_samplerNP2Fixup[num_consts]`, which is zero-sized when no flagged sampler resolves to 2D.
+- Factorisation would be: enumerate each sampler's args independently, plus the np2 pattern class (flagged count and whether it is 0), with a proof that compile status is the conjunction over regions.
+I did not prove it. NFIX itself is a context constant (the format-table fixups: complex YUY2, UYVY, YUV, YV12, NV12, P8 = 6 descs, plus scaling fixups, whose set depends on the GL extensions, utils.c:3530-3666); the farm should state it from its run.
