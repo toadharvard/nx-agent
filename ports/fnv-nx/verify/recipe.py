@@ -53,7 +53,7 @@ KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_laye
         "plugins", "plugin_cxx", "variants", "outputs", "uses", "sources", "fixtures"}
 VARIANT_KEYS = {"compiler", "flags"}   # the keys a variant may replace
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
-GATES = TREE + "/verify/gates.json"
+GATES_DIR = TREE + "/verify/gates.d"
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
 GUEST_TARGETS = ("guest", "host")
 # The plugins every product root with native or decomp C++ loads, their only admitted sources and their fixed arguments (RECIPE.md,
@@ -228,14 +228,14 @@ FIXTURE_KEYS = {"gate", "expect", "finding"}
 
 def fixture_errors(rec, root, mine, gen, repo):
     """RULE (fixtures): `"fixtures": {UNIT: {"gate": G, "expect": "red", "finding": CODE}}`. UNIT is a tracked source file of the root (not a
-    generated output); G is a gate of verify/gates.json; the fixture is built like a unit but is never a unit of the product: it is in no link,
+    generated output); G is a gate of verify/gates.d; the fixture is built like a unit but is never a unit of the product: it is in no link,
     no os_layer, no generated input, no gate's universe (the gate `fixtures` judges it)."""
     fx = rec.get("fixtures", {})
     if not isinstance(fx, dict):
         return ["fixtures must be an object {unit: {gate, expect, finding}}"]
     err, gates = [], None
-    if repo is not None and os.path.exists(os.path.join(repo, GATES)):
-        gates = {g["name"] for g in json.load(open(os.path.join(repo, GATES)))["gates"]}
+    if repo is not None and os.path.isdir(os.path.join(repo, GATES_DIR)):
+        gates = {f[:-5] for f in os.listdir(os.path.join(repo, GATES_DIR)) if f.endswith(".json")}
     lk = rec.get("link") if isinstance(rec.get("link"), dict) else {}
     named = set(rec.get("os_layer", []) if isinstance(rec.get("os_layer", []), list) else [])
     named |= {t for t in lk.get("flags", []) if isinstance(t, str)} | {lk.get("script")}
@@ -251,7 +251,7 @@ def fixture_errors(rec, root, mine, gen, repo):
                 and re.fullmatch(r"[a-z0-9_]+", f["gate"]) and re.fullmatch(r"[A-Za-z0-9_-]+", f["finding"])):
             err.append("fixture %r needs exactly gate, expect (\"red\") and finding (a code)" % (u,))
         elif gates is not None and f["gate"] not in gates:
-            err.append("fixture %s: %r is not a gate of %s" % (u, f["gate"], GATES))
+            err.append("fixture %s: %r is not a gate of %s" % (u, f["gate"], GATES_DIR))
     return err
 
 

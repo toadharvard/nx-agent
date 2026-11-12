@@ -2,7 +2,7 @@
 """Gate "fixtures" (fnvnx-gate/1): every fixture of every product root's recipe (build.json "fixtures", RECIPE.md) is judged by the gate it names.
     python3 -I gate_fixtures.py     cwd = checkout root, env GATE_OUT, optional GATE_CACHE and GATE_COMMIT; writes GATE_OUT/fixtures.json
 A fixture {gate G, expect red, finding CODE} on unit U passes iff G, run in fixture mode, reports exactly the finding CODE on U and no other
-finding on U, and nothing on any other item. Fixture mode: G's own argv from verify/gates.json with env GATE_FIXTURES=1 and a private GATE_OUT;
+finding on U, and nothing on any other item. Fixture mode: G's own argv from verify/gates.d with env GATE_FIXTURES=1 and a private GATE_OUT;
 gate_build.ensure() then returns each root with the fixture units as its only objects (gate_build.fixture_view), and G's result file must
 carry "findings": [{"id": "<root>/<unit>[:<symbol>]", "code": CODE}]. A fixture that comes out green, or red with another finding, or a gate
 that writes no "findings", is red. Whole-root fixtures: an admit entry of class `fixture` with "expect": [{gate, code}]; each expected gate is run on that root alone (env GATE_ONLY_ROOT, normal
@@ -17,6 +17,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gate_build  # noqa: E402
+import gatesdir  # noqa: E402
 import recipe  # noqa: E402
 
 
@@ -96,18 +97,18 @@ def main():
     cache = os.environ.get("GATE_CACHE") or tmp
     roots, fixtures, why, bad, stray = recipe.load_admit(repo), [], [], [], []
     try:
-        gates = {g["name"]: g for g in json.load(open(os.path.join(repo, recipe.GATES)))["gates"]}
+        gates = {g["name"]: g for g in gatesdir.load_dir(os.path.join(repo, gatesdir.DIR))["gates"]}
         for root in gate_build.product_roots(repo):
             rec = recipe.load_recipe(repo, roots, root)
             fixtures += [("%s/%s" % (root, u), rec["fixtures"][u]["gate"], rec["fixtures"][u]["finding"]) for u in sorted(recipe.fixtures_of(rec))]
         found = {g: run_gate(gates[g], cache) for g in sorted({g for _, g, _ in fixtures}) if g in gates}
         for _, g, _ in fixtures:
-            found.setdefault(g, (None, "not a gate of gates.json"))
+            found.setdefault(g, (None, "not a gate of gates.d"))
         bad, why, stray = judge(fixtures, found)
         for root, ent in sorted((p, r) for p, r in roots.items() if r["class"] == "fixture"):   # whole-root fixtures: each expected gate runs on that root alone
             ids_ = "%s (root)" % root
             fixtures.append((ids_, "", ""))
-            rf = {x["gate"]: run_gate(gates[x["gate"]], cache, root) if x["gate"] in gates else (None, "not a gate of gates.json") for x in ent["expect"]}
+            rf = {x["gate"]: run_gate(gates[x["gate"]], cache, root) if x["gate"] in gates else (None, "not a gate of gates.d") for x in ent["expect"]}
             w = judge_root(root, ent["expect"], rf)
             if w:
                 bad.append(ids_)
