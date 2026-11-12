@@ -1200,8 +1200,9 @@ extern "C" HGDIOBJ GetCurrentObject(HDC hdc, UINT type)
 /* ======================================================================================================
  * Stage 2: text output (ExtTextOut), text extents, character placement, outline text metrics, display DC.
  * Wine 9.0's win32u/gdi32 is the cross-check of what the reference computes; the code below is written from the
- * documented contracts. Facts of this DC, set where it is created: the DC is GM_COMPATIBLE with the identity world transform (no
- * SetWorldTransform / SetGraphicsMode exists in this DC), window / viewport origins are 0, no inter-character
+ * documented contracts. Facts of this DC, set where it is created: the DC is GM_COMPATIBLE with the identity world transform (no object of any admitted root
+ * defines or references SetWorldTransform, SetGraphicsMode, SetViewportOrg or SetTextCharacterExtra: objects.json of the verdict,
+ * defined and undefined over all roots; a bridge row for one of them would make this text wrong), window / viewport origins are 0, no inter-character
  * extra spacing and no justification (SetTextCharacterExtra / SetTextJustification keep their DC defaults, 0),
  * no layout mirroring, no clip region (drawing is clipped to the DC's surface and ETO_CLIPPED's rectangle).
  * Antialiasing rule (freetype_get_aa_flags): surfaces of <= 8 bpp and NONANTIALIASED_QUALITY draw monochrome
