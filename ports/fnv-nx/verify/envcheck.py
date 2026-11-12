@@ -398,6 +398,10 @@ def profile_pins(name, prof):
         if p in pk and not (isinstance(e, dict) and e.get("version") == pk[p] and isinstance(e.get("file"), str)
                             and hx(e.get("sha256"), 64) and isinstance(e.get("url"), str) and isinstance(e.get("origin"), str)):
             out.append(pre + "debs.packages.%s: needs version %s, file, sha256 (64 hex), origin and url" % (p, pk[p]))
+    fa = prof.get("foreign_arch")
+    for p in sorted(pk):
+        if ":" in p and p.partition(":")[2] != fa:
+            out.append(pre + "package %s: a `name:ARCH` package needs foreign_arch = ARCH in the profile" % p)
     if not (isinstance(prof.get("programs"), list) and prof["programs"]):
         out.append(pre + "programs: the programs the build invokes (each must be owned by a pinned package)")
     if not set(prof.get("prerequisites", [])) <= set(prof.get("programs", [])):
@@ -463,10 +467,10 @@ def check_profile(doc, name):
     cmp("os", _os(), prof.get("os"))
     cmp("arch", prof.get("arch"), platform.machine())
     have = {}
-    for ln in subprocess.run(["dpkg-query", "-W", "-f=${Package}\t${Version}\t${Status}\n"], capture_output=True, text=True).stdout.splitlines():
-        n, v, st = ln.split("\t")
+    for ln in subprocess.run(["dpkg-query", "-W", "-f=${Package}\t${Architecture}\t${Version}\t${Status}\n"], capture_output=True, text=True).stdout.splitlines():
+        n, a, v, st = ln.split("\t")
         if st.endswith(" installed"):
-            have[n] = v
+            have[n if a in ("all", "amd64") else "%s:%s" % (n, a)] = v   # a foreign package is `name:ARCH`
     for n in sorted(set(prof.get("packages", {})) | set(have)):
         w, h = prof.get("packages", {}).get(n), have.get(n)
         if w != h:

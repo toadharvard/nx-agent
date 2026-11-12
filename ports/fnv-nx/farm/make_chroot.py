@@ -56,6 +56,8 @@ def main(a):
             subprocess.run(["dpkg-deb", "-x", os.path.join(dest, "debs", f), ch], check=True)
             shutil.copy(os.path.join(dest, "debs", f), os.path.join(ch, "debs", f))
         env = dict(os.environ, DEBIAN_FRONTEND="noninteractive")
+        if prof.get("foreign_arch"):   # packages `name:ARCH` of the profile: dpkg must know the architecture before it unpacks them
+            subprocess.run(["chroot", ch, "dpkg", "--add-architecture", prof["foreign_arch"]], check=True, env=env)
         # the base has Pre-Depends cycles (base-files -> awk -> libc6 -> ...): the unpack of the closed set ignores the dependency
         # ORDER only (--force-depends, as debootstrap does); the configure step takes no force and orders by Depends, and `dpkg --audit`
         # must then report nothing: the dependencies of the whole set hold or this exits non-zero

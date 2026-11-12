@@ -313,6 +313,26 @@ bad = [b for b in envcheck.check(doc(), rr) if "read root" in b]
 check("read root: a missing header is a mismatch", any("env: read root t:" in b and "no/such/header.h" in b for b in bad), bad)
 envcheck.READROOTS = os.path.join(VERIFY, "readroots.json")
 
+# ---- farm/resolve_profile.py multiarch: a foreign member's clauses by dpkg's rule (synthetic indexes)
+sys.path.insert(0, os.path.join(os.path.dirname(VERIFY), "farm"))
+import resolve_profile as rp  # noqa: E402
+def _r(n, arch="amd64", dep="", **k):
+    d = {"Package": n, "Version": "1", "Architecture": arch, "Depends": dep, "Filename": "x/" + n, "SHA256": "0"}
+    d.update(k)
+    return d
+_best = {x["Package"]: x for x in [_r("wine64", dep="libc6"), _r("libc6"), _r("lib-all", arch="all"), _r("fgn", **{"Multi-Arch": "foreign"}), _r("libz")]}
+_bf = {x["Package"]: x for x in [_r("wine32", arch="i386", dep="libc6 (>= 1), lib-all, fgn, libz, virt"), _r("libc6", arch="i386"),
+       _r("fgn", arch="i386", **{"Multi-Arch": "foreign"}), _r("libz", arch="i386"), _r("prov1", arch="i386", Provides="virt")]}
+_m = rp.resolve(_best, ["wine64", "wine32:i386"], "i386", _bf)
+check("resolve multiarch: foreign clauses take the foreign package, the `all` package and the native Multi-Arch: foreign one, and a foreign provider",
+      _m == ["fgn", "lib-all", "libc6", "libc6:i386", "libz:i386", "prov1:i386", "wine32:i386", "wine64"], _m)
+_bf["wine32"]["Depends"] += ", missing-pkg"
+try:
+    rp.resolve(_best, ["wine32:i386"], "i386", _bf)
+    check("resolve multiarch: an unsatisfiable clause is an error", False, "no exit")
+except SystemExit as e:
+    check("resolve multiarch: an unsatisfiable clause is an error", "missing-pkg" in str(e), str(e))
+
 shutil.rmtree(TD, ignore_errors=True)
 print("%d failed: %s" % (len(FAILED), FAILED) if FAILED else "ALL PASS")
 sys.exit(1 if FAILED else 0)
