@@ -1,6 +1,6 @@
 # fnv-nx overall status (orchestrator session_01KmtZKRGpFka9ShREBTYbTx)
 
-Updated 2026-11-12 03:36Z (hourly check).
+Updated 2026-11-12 03:41Z. The hourly census of all sessions was taken at 03:36Z; the trigger fired at 03:39Z, and only the lead reports since then were added.
 
 - Trunk `claude/fnv-nx-clean` is at 8cfbcdbf: 28 gates and 0 product roots.
   - Merged since 02:40Z:
@@ -22,10 +22,10 @@ Required gates still missing on the trunk, with the MERGER queue in order:
 | exepin (L1 w4) | 03c699d0 | green |
 | order, eh, addr32 + lock/fsw sites (L3a w6) | 0be860f47 | green, 262 s |
 | r7, namegate, abi (L2 w5) | rebasing | conflict in gate_contract.py |
-| forms, fpexact (L3b w2g) | with w10 | 28/29; stale verify/ in its merge, being restored |
+| forms, fpexact (L3b w2g) | merge unit w3a e7efb1fc (w10 + registry + fpexact f2i + L3a citations) | gate_assumptions 95/100 mentions cited (5 red: L3b 1, L3a 3, L1 1); waits on L1 w5 env fix, merges after w14 c0f23a3f |
 | L2 heads | w4-clean b227059, w2 d19ba5a7, w3-rules 1d6d803f, w6-dyninit c9bdb4e8 | green on 8cfbcdbf |
 
-The first product root is L5 w10's platform root on `claude/fnv-l5-platform-trunk`, cut from 8cfbcdbf. It merges together with L2 w6's shim/include `headers` entry in one verdict.
+The first product root is L5 w10's platform root (6516d0d is red: 58 of 74 units are green up to the first red, a missing loader/toolchain header that is not on the trunk; fix: L1 w16 nested headers, toolchain/include and loader/include admitted as headers, w15 importkey/reach onto contract/include; its verdict took 471.7 s) on `claude/fnv-l5-platform-trunk`, cut from 8cfbcdbf. It merges together with L2 w6's shim/include `headers` entry in one verdict.
 
 ## Per layer
 
@@ -78,6 +78,8 @@ The first product root is L5 w10's platform root on `claude/fnv-l5-platform-trun
 - **Test inputs:** every reference a test reads is a declared external (commit + tree_sha256). Old failures are never accepted as a baseline.
 - **Integration vs trunk:** they do not merge wholesale. Trunk-bound work is cut from the trunk, and the old line retires once the roots are on the trunk.
 - **env dumps:** re-recorded now on a farm, because a generator input that cannot be reproduced is a determinism defect.
+
+- **Plugins per front end (L1 94b4c823, measured by w17):** cc1 cannot load layout, sdd, pi or names (a static ELF fact), so guest C units lack those checks. This is an open class owned by L2, and L1 reports the global count. -fPIC stays (D16, D9). EH stays on (22 native throw sites).
 
 ## Sessions (03:36Z)
 
