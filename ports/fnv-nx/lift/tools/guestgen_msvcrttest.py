@@ -313,7 +313,7 @@ def main():
     if not (len(ent) == len(BRIDGE) and not blocked and not hit and not absent): sys.exit('msvcrttest gen: %d entries, blocked %s hit %s absent %s' % (len(ent), blocked, hit, absent))
     syms = {x: 'L_%08x' % x for x in starts}; syms.update({k: s for k, s, *_ in ent}); syms.update(EH_KEYS)
     if {n: k for k, s, d, n, b in ent} != {r[1]: KEY[r[1]] for r in BRIDGE}: sys.exit('msvcrttest gen: the import keys differ from the key rule')
-    open(w + '/guest.cc', 'w').write(L.PRELUDE + '\n'.join(texts)); open(w + '/imp.cc', 'w').write(open(work + '/imp.cpp').read())
+    open(w + '/guest.cc', 'w').write('#include "fnvl.h"\n' + '\n'.join(texts)); open(w + '/imp.cc', 'w').write(open(work + '/imp.cpp').read())
     hh = phf.build(list(syms)); open(w + '/tab.S', 'w').write(phf.table_asm(syms, hh))
     A = P.addr; rows, term, lab = [], [], []
     inc = ['#define CODE_BASE 0x%xu' % BASE, '#define CODE_END 0x%xu' % CODE_END, '#define IAT_BASE 0x%xu' % IAT, '#define DATA_BASE 0x%xu' % DATA, '#define TEB_ADDR 0x%xu' % TEB,

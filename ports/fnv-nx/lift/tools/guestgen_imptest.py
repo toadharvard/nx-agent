@@ -96,7 +96,7 @@ def main():
     syms = {ad: 'L_%08x' % ad for ad, sz, owns in ents.values()}; syms.update({k: s for k, s, *_ in ent})
     if {n: k for k, s, d, n, b in ent} != {r[1]: KEY[r[1]] for r in BRIDGE if r[6] != 'none'}: sys.exit('imptest gen: the import keys differ from the key rule')
     h = phf.build(list(syms))
-    open(w + '/tab.S', 'w').write(phf.table_asm(syms, h)); open(w + '/guest.cc', 'w').write(L.PRELUDE + '\n'.join(texts))
+    open(w + '/tab.S', 'w').write(phf.table_asm(syms, h)); open(w + '/guest.cc', 'w').write('#include "fnvl.h"\n' + '\n'.join(texts))
     open(w + '/imp.cc', 'w').write(open(work + '/imp.cpp').read())
     inc = ['#define IMG_BASE 0x%xu' % BASE, '#define IAT_BASE 0x%xu' % IAT, '#define NCASES %d' % len(cases)]
     inc.append('static const unsigned char IMG[] = {%s};' % ','.join(str(x) for x in code))
