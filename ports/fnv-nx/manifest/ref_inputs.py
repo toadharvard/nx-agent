@@ -10,7 +10,7 @@ Output: TSV  kind<TAB>name<TAB>value<TAB>file:line, then the global count.   Usa
 """
 import os, re, sys
 
-root = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')
+root = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 rows = set()
 SRC = re.compile(r'\.(c|cc|cpp|h|hpp)$')
 for top in ('tests/s4', 'tests/s7'):

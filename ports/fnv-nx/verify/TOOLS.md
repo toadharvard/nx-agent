@@ -293,7 +293,7 @@ Items of the universe and their certification:
   seed                            certified iff `seed` equals, byte for byte, the include generate() makes from (sites, declared)
   writer:<unit>                   every product object that references a hive-writing API (role create or write); certified iff it is the
                                   declared seed unit: no other code of the product makes a hive key
-generate() is the port of platform/manifest/gen_registry_seed.py (L5): it refuses a declared row that no static read site reads, a malformed or
+generate() is the port of manifest/gen_registry_seed.py (L5): it refuses a declared row that no static read site reads, a malformed or
 duplicate row, a value not valid for its type, and a `{` that is not `{game_dir}`. Assumptions (ASM-051): regsites.tsv is complete over the exe and the
 modules (the registry-site pass reports what it cannot bind as dynamic, never skips); the seed unit and the registry implementation are the only
 code that reaches the hive, and the implementation creates no key by itself (the writers rule closes the entry points, not the internals).

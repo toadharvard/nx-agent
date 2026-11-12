@@ -6,7 +6,7 @@
  *   LOAD<TAB>name           -> `LOAD<TAB>name<TAB>present|absent<TAB>lasterror-if-absent`     (LoadLibraryA(name))
  *   GPA<TAB>module<TAB>name -> `GPA<TAB>module<TAB>name<TAB>yes|no|nomodule`  (GetProcAddress(GetModuleHandleA(module), name))
  *
- * Built by `make -C tests/s4 probe` from the platform objects of the host build; platform/manifest/check_dynsites.py
+ * Built by `make -C tests/s4 probe` from the platform objects of the host build; manifest/check_dynsites.py
  * drives it, so the answers are those of module.cpp / exports.cpp themselves, not a re-implementation of their rules. */
 #include <stdio.h>
 #include <stdlib.h>

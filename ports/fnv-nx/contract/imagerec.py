@@ -4,7 +4,7 @@
                                                        or a ranges file: it checks the tree_sha256 of the facts directory against `pin`
                                                        ({"tree_sha256": ...}) and the sha256 of the image against the facts' manifest.json,
                                                        reads the image's ranges and rebases them to the ImageBase. gate_reach, gpa_names and
-                                                       platform/manifest/funcfacts.py all call it.
+                                                       manifest/funcfacts.py all call it.
     rec = ImageRec(data, name, runs)                   the record of given bytes (the self-tests' synthetic PEs); no file, no pin
     imagerec.disasm(code, va, count=0)                 THE decoder of x86-32 instructions (capstone, detail on); rec.decode_at/decode_range
                                                        and the other readers of contract/ and platform/ go through it. No module outside

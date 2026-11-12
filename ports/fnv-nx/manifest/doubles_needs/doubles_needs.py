@@ -1,10 +1,10 @@
-"""doubles_needs.py - per test, what it needs from the boundary below the product (platform/manifest/DOUBLES.md, section
+"""doubles_needs.py - per test, what it needs from the boundary below the product (manifest/DOUBLES.md, section
 'Needs of the tests'). Reads the call counts of the boundary entry points (hooks.cpp, -finstrument-functions on the host twins of
 the boundary) of one run per test minus the counts of a run of no test; prints the totals per need and, with an argument,
 writes the per-test table (TSV)."""
 import re,os,glob,collections,sys
 W=os.environ.get('DOUBLES_WORK','/tmp/doubles-needs')   # per/<test>.tsv (counts of one run), base.tsv (a run of no test)
-R=os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),'..','..','..'))
+R=os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),'..','..'))
 sec={}
 for h in ['os.h','os_clock.h','os_shm.h','os_world.h']:
     cur=h

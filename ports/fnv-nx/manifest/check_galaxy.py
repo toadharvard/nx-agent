@@ -10,7 +10,7 @@ those two modules is a reached name.
   bodies  = the E("steam_api", <name>) rows of platform/win32/exports.cpp (galaxywrp is its alias, g_alias), and no other name of the alias
 Checks (one line per violation, exit 1): a reached name with no body; a body that is not reached; an alias of galaxy.dll or galaxywrp.dll
 other than the one to steam_api; a body without a row of env_const.tsv or a definition in services.cpp.
-The facts are a PATH ARGUMENT (the private exe-derived manifest directory of fnv-nx-build, branch l5-platform/manifest); none is embedded here.
+The facts are a PATH ARGUMENT (the private exe-derived manifest directory of fnv-nx-build, branch l5-manifest); none is embedded here.
 --selftest: builds three fact directories in a temp dir from the real one and requires exit 1 on each: (a) a galaxy.dll import row for a name
 without a body, (b) a dynamic site whose operand names galaxy.dll and a function, (c) an import row removed so that a body is reached by nothing.
 Usage: check_galaxy.py <manifest-dir> [--root ports/fnv-nx] [--selftest]
@@ -93,7 +93,7 @@ def main(argv):
             errs.append("exports.cpp: alias %s -> %s (only steam_api is the declared-machine body set)" % (a, t))
     if ("galaxywrp", "steam_api") not in pairs:
         errs.append("exports.cpp: no alias galaxywrp -> steam_api")
-    env = {r["symbol"] for r in rows(os.path.join(root, "platform/manifest/env_const.tsv"))}
+    env = {r["symbol"] for r in rows(os.path.join(root, "manifest/env_const.tsv"))}
     svc = open(os.path.join(root, "platform/win32/services.cpp"), encoding="utf-8").read()
     for n in sorted(reached):
         if n not in bodies:

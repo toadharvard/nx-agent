@@ -2,7 +2,7 @@
 """check_dynsites.py - what the platform answers to every dynamic module/name lookup the game and its modules make.
 
 Input: the private, exe-derived dynsites.tsv (columns module, site, api, operand) - a PATH ARGUMENT; no row of it is embedded
-here or written anywhere. The answers are not re-implemented: platform/manifest/probe_dynsites (built by
+here or written anywhere. The answers are not re-implemented: manifest/probe_dynsites (built by
 `make -C tests/s4 probe`) calls the platform's own GetModuleHandleA / LoadLibraryA / GetProcAddress (module.cpp, exports.cpp).
 Three things come from the repository's sources by rule:
   * ENV_TRUTH.md rows M2, M3, M4, M7: the modules that are absent by owner decision (every `<name>.dll` of those rows) and the
@@ -59,7 +59,7 @@ def tokens(operand):
 def env_truth(root):
     """(absent module names, function names ENV_TRUTH states for absent modules) from rows M2, M3, M4, M7."""
     mods, funcs = set(), set()
-    with open(os.path.join(root, "platform/manifest/ENV_TRUTH.md"), encoding="utf-8") as f:
+    with open(os.path.join(root, "manifest/ENV_TRUTH.md"), encoding="utf-8") as f:
         for line in f:
             if not re.match(r"\|\s*M[2347]\s*\|", line):
                 continue

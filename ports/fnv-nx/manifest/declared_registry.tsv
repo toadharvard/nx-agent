@@ -1,5 +1,5 @@
 # The declared machine's registry (owner rule): the hive holds exactly the keys the exe and the modules read, found statically
-# from their call sites (regsites.tsv, platform/manifest/regsites.py), with the values of the declared machine. A key or value
+# from their call sites (regsites.tsv, manifest/regsites.py), with the values of the declared machine. A key or value
 # with no row here is absent (ERROR_FILE_NOT_FOUND), as on a machine where nothing wrote it. No row is invented: each one names
 # where its value comes from, and gen_registry_seed.py refuses a row that no static read site of the exe or a module reads.
 # Wine-9.0-populated system keys that the modules read (Direct3D flags) have no row yet; they are listed

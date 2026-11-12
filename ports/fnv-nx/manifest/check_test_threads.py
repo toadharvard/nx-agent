@@ -2,7 +2,7 @@
 tests/s4, tests/s4/m32 or tests/s7 may not name a thread start API (code only: comments and string literals are skipped); the harness
 files s4_test.h, s7_test.h, test_threads.h and the runners' main.cpp are the only places that may. Exit 1 and the list on a violation."""
 import re,glob,os,sys
-R=os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),'..','..'))
+R=os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),'..'))
 API=re.compile(r'(?<![A-Za-z0-9_])(CreateThread|_beginthreadex|_beginthread|pthread_create|os_thread_create|QueueUserWorkItem|std::thread|std::jthread|std::async)(?![A-Za-z0-9_])')
 HARNESS={'s4_test.h','s7_test.h','test_threads.h','main.cpp'}
 def code_only(s):

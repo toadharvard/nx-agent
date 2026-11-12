@@ -43,7 +43,7 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "..", "contract"))
+sys.path.insert(0, os.path.join(HERE, "..", "contract"))
 import imagerec
 from imagerec import X   # the operand/register constants of the decoded instructions, for the passes that read them
 

@@ -26,7 +26,7 @@ import os
 import re
 import sys
 
-ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 M32 = 0xFFFFFFFF
 
 # file-local names that stand for a reference name (value comparison only; the name is not otherwise related)
