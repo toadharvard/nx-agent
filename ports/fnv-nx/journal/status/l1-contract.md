@@ -883,3 +883,13 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - Still to come: the exact per-module counts, and verdict lines v15 and v16.
 - L5 679eb04c: accepted, replacing 1e868c13.
   - The reach request parser and emitter live in contract/reachreq.py, with identity tests showing gate_reach uses the same functions.
+- w18m exact counts at 6e1c77df, RECORD file set against the old mount:
+  - capstone 62 vs 58
+  - gmpy2 16 vs 8
+  - keystone-engine 18 vs 13
+  - numpy 925 vs 902
+  - pefile 10 vs 6
+  - pyelftools 57 vs 53
+  - unicorn 39 vs 36
+  - z3-solver 43 vs 40
+  - total 1170 vs 1116: +54 files, which are the dist-info directories, gmpy2.libs/numpy.libs and top-level files
