@@ -47,7 +47,7 @@ FORMAT, OBJ_FORMAT = "fnvnx-recipe/1", "fnvnx-objects/1"
 TREE = "ports/fnv-nx"
 ADMIT = TREE + "/verify/admit.json"
 KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_layer", "game", "constants", "contract_names", "link", "external",
-        "plugins", "plugin_cxx", "variants"}
+        "plugins", "plugin_cxx", "variants", "outputs", "uses"}
 VARIANT_KEYS = {"compiler", "flags"}   # the keys a variant may replace
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
@@ -75,7 +75,7 @@ LD_FIXED = ["--build-id=none", "-pie", "--no-dynamic-linker", "-z", "text", "-z"
 LD_KIND = {"pie": LD_FIXED, "exe": ["--build-id=none", "-pie", "-z", "text", "-z", "now"], "shared": ["--build-id=none", "-shared", "-z", "text", "-z", "now"]}
 LD_TOOLS = (TREE + "/link", TREE + "/contract")   # tool roots of the ldcheck stage: link/ldcheck.py, and gatefile.py at /contract
 EXT_KEYS = {"name", "repo", "ref", "commit", "tree_sha256", "at"}
-SANDBOX_PATHS = ("/src", "/inc", "/in", "/out", "/tool", "/objs", "/ld", "/syslib", "/linked", "/contract", "/work", "/proc", "/dev", "/tmp", "/oldroot")
+SANDBOX_PATHS = ("/src", "/inc", "/in", "/uses", "/out", "/tool", "/objs", "/ld", "/syslib", "/linked", "/contract", "/work", "/proc", "/dev", "/tmp", "/oldroot")
 STYPE = {0: "NOTYPE", 1: "OBJECT", 2: "FUNC", 5: "COMMON", 6: "TLS", 10: "IFUNC"}
 SBIND = {1: "GLOBAL", 2: "WEAK", 10: "UNIQUE"}
 ARTIFACTS_URL = "https://github.com/toadharvard/fnv-nx-build"
@@ -246,8 +246,16 @@ def emulation_flags(toks, kind="pie"):
     return err
 
 
+def root_edges(rec):
+    """The roots a recipe depends on besides its own files: `link.roots` (objects) and `uses` (outputs), variants cut off."""
+    lk = rec.get("link") if isinstance(rec, dict) else None
+    ds = [split_spec(d)[0] for d in (lk.get("roots", []) if isinstance(lk, dict) and isinstance(lk.get("roots"), list) else []) if isinstance(d, str)]
+    us = rec.get("uses") if isinstance(rec, dict) else None
+    return ds + [u["root"] for u in (us if isinstance(us, list) else []) if isinstance(u, dict) and isinstance(u.get("root"), str)]
+
+
 def link_roots_cycle(root, roots, repo, seen=()):
-    """The cycle through ROOT in the `link.roots` graph, as a list of roots, or None."""
+    """The cycle through ROOT in the graph of `link.roots` and `uses` between roots, as a list of roots, or None."""
     if root in seen:
         return list(seen[seen.index(root):]) + [root]
     ent = roots.get(root)
@@ -255,13 +263,46 @@ def link_roots_cycle(root, roots, repo, seen=()):
         rec = json.load(open(os.path.join(repo, ent["recipe"]))) if ent and ent.get("recipe") else None
     except (OSError, ValueError):
         rec = None
-    lk = rec.get("link") if isinstance(rec, dict) else None
-    for d in (lk.get("roots", []) if isinstance(lk, dict) and isinstance(lk.get("roots"), list) else []):
-        if isinstance(d, str):
-            c = link_roots_cycle(split_spec(d)[0], roots, repo, tuple(seen) + (root,))
-            if c:
-                return c
+    for d in root_edges(rec):
+        c = link_roots_cycle(d, roots, repo, tuple(seen) + (root,))
+        if c:
+            return c
     return None
+
+
+def uses_errors(rec, root, roots, repo):
+    """Problems of `outputs` ({name: a generated output of this root}) and `uses` ([{root, output}]: an output another admitted root declares)."""
+    err, gen = [], generated_outputs(rec)
+    outs = rec.get("outputs")
+    if outs is not None and not (isinstance(outs, dict) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9_.-]+", n) and isinstance(p, str) and p in gen
+                                                                 for n, p in outs.items())):
+        err.append("outputs must be {NAME: a path in generated[].outputs of this root}")
+    us = rec.get("uses")
+    if us is None:
+        return err
+    if not (isinstance(us, list) and all(isinstance(u, dict) and set(u) == {"root", "output"} and all(isinstance(v, str) for v in u.values()) for u in us)):
+        return err + ['uses must be [{"root": admitted root, "output": NAME}]']
+    for i, u in enumerate(us):
+        r, n = u["root"], u["output"]
+        ent = roots.get(r)
+        if u in us[:i]:
+            err.append("uses: %s/%s is listed twice" % (r, n))
+        if r == root:
+            err.append("uses: %s is the root itself" % r)
+        elif not ent or not ent.get("recipe"):
+            err.append("uses: %s is not an admitted root with a recipe" % r)
+        else:
+            try:
+                decl = json.load(open(os.path.join(repo, ent["recipe"]))).get("outputs")
+            except (OSError, ValueError, AttributeError):
+                err.append("uses: the recipe of %s is unreadable" % r)
+                continue
+            if not (isinstance(decl, dict) and n in decl):
+                err.append("uses: root %s declares no output %r (build.json `outputs`)" % (r, n))
+    cyc = link_roots_cycle(root, roots, repo)
+    if cyc:
+        err.append("uses/link.roots: cycle %s" % " -> ".join(cyc))
+    return err
 
 
 def link_errors(lk, root, mine, roots, ext_names, repo):
@@ -303,7 +344,7 @@ def link_errors(lk, root, mine, roots, ext_names, repo):
             if dl is not None:
                 err.append("link.roots: %s has a link of its own (an input root links nothing)" % d)
     cyc = link_roots_cycle(root, roots, repo) if deps else None
-    if cyc:
+    if cyc and any(d in cyc for d in [split_spec(x)[0] for x in deps]):
         err.append("link.roots: cycle %s" % " -> ".join(cyc))
     lb = lk.get("libs")
     if isinstance(lb, dict) and set(lb) == {"system"}:
@@ -402,6 +443,9 @@ def check(rec, root, files, roots, pin=None, repo="."):
             err.append("generated[%d].inputs must be tracked files or directories (repo-relative)" % i)
         elif any(a != b and under(a, b) for a in ins for b in ins):
             err.append("generated[%d].inputs nest" % i)
+        for p in ins if isinstance(ins, list) else []:
+            if isinstance(p, str) and not under(p, root) and not any(under(p, r) and roots[r]["class"] == "tool" for r in roots):
+                err.append("generated[%d].inputs: %s is a file of another root: take it through `uses` (the producer's declared output), not by path" % (i, p))
         if not (isinstance(outs, list) and outs and all(rel_ok(o) for o in outs)):
             err.append("generated[%d].outputs must be a non-empty list of root-relative paths" % i)
             continue
@@ -411,6 +455,7 @@ def check(rec, root, files, roots, pin=None, repo="."):
             if o in seen:
                 err.append("generated output %s is produced twice" % o)
             seen.add(o)
+    err += uses_errors(rec, root, roots, repo)
     units = set(units_of(rec, root, files))
     ol = rec.get("os_layer", [])
     for u in ol if isinstance(ol, list) else err.append("os_layer must be a list") or []:
@@ -664,6 +709,25 @@ class Job:
         _copy(self.repo, files, base, d)
         return cas.ingest(d, self.store)
 
+    def use_inputs(self, ws):
+        """The declared outputs of other roots this root `uses`, as stage inputs {at: /uses/<root>/<name>, tree}: the producer's generate stages
+        run (cached by key) and the output file is ingested; the stage key holds its content hash, not a path or the producer's keys."""
+        if getattr(self, "_uses", None) is not None:
+            return self._uses
+        out = []
+        for u in self.rec.get("uses", []):
+            p = Job(self.repo, u["root"], self.store, self.jobs, self.extcache)
+            pws = tempfile.mkdtemp(dir=ws)
+            try:
+                p.externals(pws)
+                p.generate(pws)
+                path = os.path.join(pws, "root", p.rec["outputs"][u["output"]])
+                out.append({"at": "/uses/%s/%s" % (u["root"], u["output"]), "tree": cas.ingest(path, self.store)})
+            finally:
+                self.run, self.hit = self.run + p.run, self.hit + p.hit
+        self._uses = sorted(out, key=lambda i: i["at"])
+        return self._uses
+
     def generate(self, ws):
         if not self.rec.get("generated"):
             return
@@ -672,7 +736,7 @@ class Job:
         for i, g in enumerate(self.rec["generated"]):
             owner = next(r for r in self.roots if under(g["tool"], r))
             tmp = tempfile.mkdtemp(dir=ws)
-            ins = [{"at": "/tool", "tree": self.ingest_files(tmp, "tool", [f for f in self.files if under(f, owner)], owner)}] + xin
+            ins = [{"at": "/tool", "tree": self.ingest_files(tmp, "tool", [f for f in self.files if under(f, owner)], owner)}] + xin + self.use_inputs(ws)
             for p in g["inputs"]:
                 sub = [f for f in self.files if f == p or under(f, p)]
                 ins.append({"at": "/in/" + p, "tree": cas.ingest(os.path.join(self.repo, p), self.store) if sub == [p] else
@@ -778,7 +842,8 @@ class Job:
             json.dump({"argv": rec["flags"][k]}, open(fp, "w"))
             builds[k] = unitstage.Build(argparse.Namespace(store=self.store, cold=False, cxx=drv["c" if k == "asm" else k], toolrt=rtp, flags_file=fp,
                                                            src_root=os.path.join(ws, "root") + "@/src", include=self.includes(ws)))
-            builds[k].cc_drop = drop
+            builds[k].cc_drop = drop | {i["at"] for i in self.use_inputs(ws)}
+            builds[k].rt = dict(builds[k].rt, inputs=builds[k].rt["inputs"] + self.use_inputs(ws))
             builds[k].variant = self.variant
             if k == "cxx":   # plugins are loaded by the C++ front end of the CC stage only (not by cc1, not by preprocessing)
                 builds[k].cc_flags = [f for _, _, fl in self.built for f in fl]

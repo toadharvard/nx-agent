@@ -632,6 +632,15 @@
     "ports/fnv-nx/verify/runtime.py"
    ]
   },
+  "test_uses.py": {
+   "references": [
+    {
+     "anchor": "## Outputs and uses",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/RECIPE.md"
+    }
+   ]
+  },
   "test_verdict.py": {
    "references": [
     {

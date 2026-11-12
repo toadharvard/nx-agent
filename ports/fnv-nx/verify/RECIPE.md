@@ -142,6 +142,15 @@ a root without variants keeps its keys), its objects are stored at `GATE_CACHE/o
 `root: "root@NAME"`. `link.roots` entries may be `root@NAME` (the variant must exist). The gates that quantify over product roots (`gate_build.product_roots`)
 quantify over the pairs: build, determinism, objstub, linkstrict, argorder, contract's per-root gates.
 
+## Outputs and uses
+`outputs: {NAME: a path in generated[].outputs of this root}` declares what other roots may take. `uses: [{"root": R, "output": NAME}]` (R any admitted
+root with a recipe that declares NAME) makes that output an input of this root's stages: the `generated` stages and the preprocessing stages mount it
+read-only at `/uses/<R>/<NAME>` (the compile stage mounts nothing of it). The producer's generate stages run (content-keyed, cache hits) and the output file
+is ingested; the consumer's stage key holds the file's content hash, not a path and not the producer's keys: a producer change that leaves the output
+byte-identical changes no consumer key. Red (check errors): an output the root does not declare; a root that is not admitted; a cycle in `uses` plus
+`link.roots` between distinct roots; a `generated` input that is a file of another root (class other than tool) by path, which must go through `uses`.
+Objects of another root enter only through `link.roots`.
+
 ## Refusal set R (GNU ld option syntax, not a text guess)
 Options that let a link accept missing or substituted symbols: `--unresolved-symbols`, `--allow-shlib-undefined`, `--noinhibit-exec`,
 `--defsym`, `--wrap`, `--allow-multiple-definition`, `--warn-unresolved-symbols`, `-z undefs`, `-z muldefs`. A token is refused when, with one or two
