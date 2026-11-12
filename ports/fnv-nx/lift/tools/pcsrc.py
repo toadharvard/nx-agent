@@ -187,11 +187,11 @@ def analyse_entry(img, e, mode='owner', force=False):
     inr, ins, anycode = img.inp.get(e) or ({}, {}, False) if not anyra else ALLCODE_INPUT
     st_init = {0: ('ra', 0)} if not anyra else {}
     st_init.update(ins)
-    states = {e: (dict(inr), st_init, 0, frozenset(), {})}      # regs, stack slots, esp offset, last x87 instructions, fpu env images {key: kind}
+    states = {e: (dict(inr), st_init, 0, None, {})}      # regs, stack slots, esp offset, last x87 instructions, fpu env images {key: kind}
     work = [e]
     while work:
         a = work.pop()
-        regs0, st0, esp0, fpl, fpe0 = states[a]; img.visited.add(a)
+        regs0, st0, esp0, al, fpe0 = states[a]; img.visited.add(a)
         if not img.reached(a): continue
         g = img.dec(a)
         if not g: continue
@@ -214,6 +214,12 @@ def analyse_entry(img, e, mode='owner', force=False):
             if key is None: return None
             if key[0] == 'lost':
                 if any(isinstance(v, tuple) and v[0] == 'ra' for v in st.values()): emit(a, 'ra', 'esp-lost-read', 'stack read through an esp whose offset is unknown while the return slot is live', True)
+                return None
+            if key[0] == 'stk' and al is not None and key[1] >= al[0]:
+                # a read of the old frame through an aligned esp: its address is known up to the slack
+                lo = key[1] - al[1]; hit = [k for k in st if lo <= k <= key[1] + 3]
+                if lo <= 3 and key[1] + 3 >= 0 and st.get(0) == ('ra', 0): emit(a, 'ra', 'esp-slack-read', 'a read through an aligned esp (slack %d) can reach the return-address slot' % al[1], True)
+                if any(tracked(st[k]) for k in hit): return 'mix'
                 return None
             if key[0] == 'stk':
                 v = st.get(key[1])
@@ -430,7 +436,7 @@ def analyse_entry(img, e, mode='owner', force=False):
                     else: write_reg(d, 'mix' if tracked(v) else None)
                 else: write_reg(d, T_CODE if (d.size == 4 and reloc_imm()) else None)
                 if d.type == X.X86_OP_REG and R32.get(d.reg) == 'esp' and s.type == X.X86_OP_REG:
-                    v = regs.get(R32.get(s.reg)); esp = v[1] if isinstance(v, tuple) and v[0] == 'sp' else None
+                    v = regs.get(R32.get(s.reg)); esp = v[1] if isinstance(v, tuple) and v[0] == 'sp' else None; al = None
                     if esp is None: img.info['esp-lost'] += 1
             elif d.type == X.X86_OP_MEM:
                 v = regval(s) if s.type == X.X86_OP_REG else None
@@ -501,7 +507,13 @@ def analyse_entry(img, e, mode='owner', force=False):
             succ = [nxt]
         elif mn in ('xor', 'sub') and len(ops) == 2 and ops[0].type == ops[1].type == X.X86_OP_REG and ops[0].reg == ops[1].reg:
             write_reg(ops[0], None); succ = [nxt]
+        elif mn == 'and' and ops[0].type == X.X86_OP_REG and R32.get(ops[0].reg) == 'esp' and ops[1].type == X.X86_OP_IMM and esp is not None and (-(ops[1].imm | ~M32) & M32) & ((-(ops[1].imm | ~M32) & M32) - 1) == 0 and (-(ops[1].imm | ~M32) & M32) > 0:
+            # and esp,-N (N a power of two): the new esp is in (esp - N, esp]. The slots pushed from now on are exact relative to it; the old frame (the return address, ebp-based slots) is known only up to this slack.
+            N = -(ops[1].imm | ~M32) & M32
+            al = (al[0], al[1] + N - 1) if al else (esp, N - 1)
+            succ = [nxt]
         elif mn == 'leave':
+            al = None
             v = regs.get('ebp'); esp = (v[1] + 4) if isinstance(v, tuple) and v[0] == 'sp' else None
             if esp is None: img.info['esp-lost'] += 1
             else:
@@ -543,7 +555,7 @@ def analyse_entry(img, e, mode='owner', force=False):
                 esp = None
             succ = [nxt]
         if term: continue
-        ns = (regs, st, esp, fpl, fpe)
+        ns = (regs, st, esp, al, fpe)
         for t in succ:
             if not (img.T0 <= t < img.T1) or not img.reached(t): continue
             if t not in states: states[t] = ns; work.append(t)
@@ -553,8 +565,8 @@ def analyse_entry(img, e, mode='owner', force=False):
                 r2 = {k: v for k, v in r2.items() if v is not None}
                 s2 = {k: j(o[1].get(k), st.get(k)) for k in set(o[1]) | set(st)}
                 s2 = {k: v for k, v in s2.items() if v is not None}
-                e2 = o[2] if o[2] == esp else None
-                f2 = o[3]; fe2 = {k: v for k, v in o[4].items() if fpe.get(k) == v}
+                e2 = o[2] if (o[2] == esp and (o[3] == al or (o[3] and al and o[3][0] == al[0]))) else None
+                f2 = (o[3][0], max(o[3][1], al[1])) if (o[3] and al and o[3][0] == al[0]) else o[3]; fe2 = {k: v for k, v in o[4].items() if fpe.get(k) == v}
                 # abs values merge as a union of concrete addresses (the same typed source at a join)
                 for dct in (r2, s2):
                     for k in list(dct):

@@ -118,6 +118,13 @@ red, res, rows = run2([(0x1000, IMM + b'\x8d\x44\x00\x04\xff\xe0'), (0x1020, b'\
 check('s4: lea with a non-zero term is arithmetic', red >= 1 and any(r[3] == 'target-s4' for r in rows), rows)
 red, res, rows = run2([(0x1000, IMM + b'\x50\x59\xff\xe1'), (0x1020, b'\xc3')], {0x1000: {'call'}, 0x1020: {'ptr'}}, rd=lambda a: 0x1020, rset={0x1001})
 check('s1: push/pop copies keep the type (no s4)', red == 0 and not any(r[2] == 's4' for r in rows), rows)
+
+# ---- esp slack: and esp,-N
+FR = b'\x55\x89\xe5\x83\xec\x08\x83\xe4\xf8'
+red, res, rows = run2([(0x1000, FR + b'\xdd\x1c\x24' + b'\xf2\x0f\x2c\x04\x24' + b'\xc9\xc3')], {0x1000: {'call'}})
+check('and esp,-8: scratch slots under the aligned esp do not touch the return slot', red == 0 and not any(r[3].startswith('esp-') for r in rows), rows)
+red, res, rows = run2([(0x1000, b'\x55\x89\xe5\x83\xe4\xf8\x8b\x44\x24\x08\xc9\xc3')], {0x1000: {'call'}})
+check('and esp,-8: a read that can reach the return slot is red', red >= 1 and any(r[3] == 'esp-slack-read' for r in rows), rows)
 # 11 determinism
 a = run([(0x1000, call(0x1000, THUNK) + b'\xc3'), (THUNK, t)])[2]; b = run([(0x1000, call(0x1000, THUNK) + b'\xc3'), (THUNK, t)])[2]
 check('deterministic', a == b)
