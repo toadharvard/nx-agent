@@ -59,7 +59,7 @@ def load_image(argflow, spec, exe_name=None):
     import funcfacts
     nm, pe = spec.split('=', 1)
     fi = funcfacts.Image(pe)
-    ff = fi.ff
+    ff = funcfacts.for_image(fi)
     ranges = {e: list(rs) for e, rs in ff.runs.items()} if ff.ok else {}
     img = argflow.Image(fi.file_bytes(), nm.lower(), ranges, exe_name)
     img.ff = ff
