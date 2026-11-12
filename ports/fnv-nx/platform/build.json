@@ -86,25 +86,6 @@
    ]
   },
   {
-   "tool": "ports/fnv-nx/manifest/gen_wire_errno.py",
-   "args": [
-    "--libnx-convert",
-    "/ext/libnx/nx/source/runtime/devices/convert_errno.c",
-    "--newlib-errno",
-    "/ext/a64/aarch64-none-elf/include/sys/errno.h",
-    "--committed",
-    "/in/ports/fnv-nx/hostabi/include/fnvnx/sockwire_errno.h",
-    "--out",
-    "/out/win32/wire_errno.stamp"
-   ],
-   "inputs": [
-    "ports/fnv-nx/hostabi/include/fnvnx/sockwire_errno.h"
-   ],
-   "outputs": [
-    "win32/wire_errno.stamp"
-   ]
-  },
-  {
    "tool": "ports/fnv-nx/platform/win32/tools/gen_nls.py",
    "args": [
     "/ext/nls/nls",
