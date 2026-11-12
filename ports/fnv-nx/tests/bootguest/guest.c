@@ -303,7 +303,10 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     case_leak(); t_release(&LC);
     case_unwind_outer();
     fnvnx_hcall1(H->exit, 0);
-#elif MODE == 6
+#elif MODE == 6 || MODE == 61   /* 61: the same run, plus one create under the declared input sdmc:/switch/fnv/fonts (a refused write: boot.py's declared_input_faults) */
+#if MODE == 61
+    num("write-fonts", fnvnx_hcall2(H->fs_open, FNVNX_ADDR("sdmc:/switch/fnv/fonts/New.ttf"), FNVNX_O_WRITE | FNVNX_O_CREATE));
+#endif
     uint32_t acc = fnvboot_a(3);
     acc += fnvboot_b(acc);
     say("fnvnx-start: identity ok\n");

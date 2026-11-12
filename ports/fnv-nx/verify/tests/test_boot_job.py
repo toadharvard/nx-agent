@@ -73,6 +73,7 @@ def publish_branch(name, files):
     git("init", "-q", work)
     git("checkout", "-q", "--orphan", name, cwd=work)
     for fn, data in files.items():
+        os.makedirs(os.path.dirname(os.path.join(work, fn)), exist_ok=True)
         with open(os.path.join(work, fn), "wb") as f:
             f.write(data)
     git("add", "-A", cwd=work)

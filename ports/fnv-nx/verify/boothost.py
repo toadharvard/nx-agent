@@ -36,11 +36,12 @@ def neg(e):
 
 
 class Services:
-    def __init__(self, root, game=None, scenario=None, watch_reads=False):
+    def __init__(self, root, game=None, scenario=None, watch_reads=False, read_only=()):
         self.m = None
         self.input = bootinput.InputModel(scenario, watch_reads)   # R-INPUT: the declared device states, read as host_v3.inc does
-        self.dp = bootpath.BootPath(root, game)
+        self.dp = bootpath.BootPath(root, game, read_only)
         self.debug, self.fds = [], {}
+        self.ro_fds, self.declared_faults = set(), []   # fds opened below a read-only mount; refused writes (a run failure, see _refuse)
         self.audio_period, self.audio_frames, self.boosts, self.placement, self.messages = 0, 0, [], {}, []
         self.rng = 0
 
@@ -63,10 +64,13 @@ class Services:
         self.last_ro = self.dp.read_only(self.last_sd)
         return self.dp.resolve(self.last_sd)
 
-    def _erofs(self, call, sd):
-        """a create/change/remove under a read-only declared input (bootpath.READ_ONLY): the call fails with EROFS"""
-        self.dp.fault(call, sd, errno.EROFS)
-        return neg(errno.EROFS)
+    def _refuse(self, call, sd):
+        """a create/change/remove under a read-only declared input. L5 proved that nothing writes there, so a call is a failed static
+        fact: it is recorded as a fault (OUT.json declared_input_faults, boot.py ends the verdict failed) and answers EACCES, which the platform
+        maps to ERROR_ACCESS_DENIED (platform/win32/handles.cpp:208 w32_os_error: OS_EACCES -> ERROR_ACCESS_DENIED; os.h:160 OS_EACCES 13)"""
+        self.declared_faults.append({"kind": "declared-input-write", "call": call, "sd": sd, "t_ns": self.m.clock.now_ns(), "tid": self.m.tid()})
+        self.dp.fault(call, sd, errno.EACCES)
+        return neg(errno.EACCES)
 
     # -- v1
     def h_output_debug_string(self, s, n, *_):
@@ -191,13 +195,15 @@ class Services:
         fl = os.O_RDWR if flags & 3 == 3 else os.O_WRONLY if flags & 2 else os.O_RDONLY
         fl |= (os.O_CREAT if flags & 4 else 0) | (os.O_EXCL if flags & 8 else 0) | (os.O_TRUNC if flags & 0x10 else 0)
         fl |= os.O_APPEND if flags & 0x20 else 0
-        path, sd = self.path(p), self.last_sd
+        path, sd, ro = self.path(p), self.last_sd, self.last_ro
         if self.last_ro and fl & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND):
-            return self._erofs("open", sd)
+            return self._refuse("open", sd)
 
         def op():
             fd = os.open(path, fl, 0o666)
             self.fds[fd] = path
+            if ro:
+                self.ro_fds.add(fd)
             if fl & os.O_CREAT:
                 self.dp.changed()
             return fd
@@ -217,15 +223,21 @@ class Services:
         return self._rd("pread", fd, b, n, off)
 
     def h_fs_write(self, fd, b, n, *_):
+        if fd in self.ro_fds:
+            return self._refuse("write", self.fds.get(fd))
         return self.fs(lambda: os.write(fd, bytes(self.m.uc.mem_read(b, n))), "write", self.fds.get(fd))
 
     def h_fs_pwrite(self, fd, b, n, off, *_):
+        if fd in self.ro_fds:
+            return self._refuse("pwrite", self.fds.get(fd))
         return self.fs(lambda: os.pwrite(fd, bytes(self.m.uc.mem_read(b, n)), off), "pwrite", self.fds.get(fd))
 
     def h_fs_seek(self, fd, off, whence, *_):
         return self.fs(lambda: os.lseek(fd, struct.unpack("<q", struct.pack("<Q", off))[0], whence), "seek")
 
     def h_fs_truncate(self, fd, size, *_):
+        if fd in self.ro_fds:
+            return self._refuse("truncate", self.fds.get(fd))
         return self.fs(lambda: os.ftruncate(fd, size), "truncate")
 
     def h_fs_sync(self, fd, *_):
@@ -241,6 +253,7 @@ class Services:
 
     def h_fs_close(self, fd, *_):
         self.fds.pop(fd, None)
+        self.ro_fds.discard(fd)
         return self.fs(lambda: os.close(fd), "close")
 
     def h_fs_stat(self, p, out, *_):
@@ -255,26 +268,26 @@ class Services:
     def h_fs_mkdir(self, p, *_):
         path = self.path(p)
         if self.last_ro:
-            return self._erofs("mkdir", self.last_sd)
+            return self._refuse("mkdir", self.last_sd)
         return self._mutate(lambda: os.mkdir(path), "mkdir", self.last_sd)
 
     def h_fs_rmdir(self, p, *_):
         path = self.path(p)
         if self.last_ro:
-            return self._erofs("rmdir", self.last_sd)
+            return self._refuse("rmdir", self.last_sd)
         return self._mutate(lambda: os.rmdir(path), "rmdir", self.last_sd)
 
     def h_fs_remove(self, p, *_):
         path = self.path(p)
         if self.last_ro:
-            return self._erofs("remove", self.last_sd)
+            return self._refuse("remove", self.last_sd)
         return self._mutate(lambda: os.remove(path), "remove", self.last_sd)
 
     def h_fs_rename(self, a, b, *_):
         pa, sa, ra = self.path(a), self.last_sd, self.last_ro
         pb = self.path(b)
         if ra or self.last_ro:
-            return self._erofs("rename", sa if ra else self.last_sd)
+            return self._refuse("rename", sa if ra else self.last_sd)
         return self._mutate(lambda: os.replace(pa, pb), "rename", sa)
 
     def h_fs_dir_open(self, p, *_):

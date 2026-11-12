@@ -150,13 +150,14 @@ for n, g in (("p3", None), ("p4", fresh("p4g"))):
          not os.path.exists(u))
 
 # declared input: sdmc:/switch/fnv/fonts (bootpath.py PORT_NAMES, READ_ONLY): on the card's root in every mode, never in the game
+RO = ["switch/fnv/fonts"]   # the mount list of verify/boot_inputs.json (boot.py passes it)
 for tag, with_game in (("with game", True), ("without game", False)):
     root = fresh("f1" if with_game else "f2")
     game = fresh("f1g") if with_game else None
     touch(root, "switch", "fnv", "fonts", "Sub", "LiberationSans-Regular.ttf")
     if with_game:
         touch(game, "fonts", "game-own.ttf")        # the game directory's own "fonts" must never be reached
-    bp = bootpath.BootPath(root, game)
+    bp = bootpath.BootPath(root, game, read_only=RO)
     want = os.path.join(root, "switch", "fnv", "fonts", "Sub", "LiberationSans-Regular.ttf")
     case("fonts %s: resolves under root/switch/fnv/fonts" % tag, bp.resolve("sdmc:/switch/fnv/fonts/Sub/LiberationSans-Regular.ttf") == want,
          bp.resolve("sdmc:/switch/fnv/fonts/Sub/LiberationSans-Regular.ttf"))
@@ -172,6 +173,12 @@ for tag, with_game in (("with game", True), ("without game", False)):
          all(bp.read_only(s) for s in ("sdmc:/switch/fnv/fonts", "/switch/fnv/fonts/Sub/x.ttf", "SDMC:/SWITCH/FNV/Fonts/new", "/a/../switch/fnv/fonts/q")))
     case("fonts %s: read_only is false elsewhere (sibling, parent, game-side alias)" % tag,
          not any(bp.read_only(s) for s in ("/switch/fnv", "/switch/fnv/fonts2", "/switch/fnv/user/fonts", "/fnvnx/game/fonts/x", "/fonts", "/switch")))
+
+# the read-only set is the mount list given, not a fonts-only check
+bp = bootpath.BootPath(fresh("f4"), None, read_only=["switch/fnv/fonts", "Switch/FNV/other/dir"])
+case("read_only follows the mount list: two mounts, case-folded", bp.read_only("/switch/fnv/other/dir/x") and bp.read_only("/SWITCH/fnv/FONTS")
+     and not bp.read_only("/switch/fnv/other") and not bp.read_only("/switch/fnv/other/dirx"))
+case("no mounts: nothing is read-only (even fonts)", not bootpath.BootPath(fresh("f5")).read_only("/switch/fnv/fonts/a.ttf"))
 
 # fonts alone in switch/fnv does not make it an install: no game -> the game dir stays root/fnvnx/game
 root = fresh("f3")
