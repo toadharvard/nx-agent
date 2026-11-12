@@ -315,6 +315,16 @@ def main():
     tb.case("EACCES: rename out of, into and inside fonts", svc.h_fs_rename(*sd2("sdmc:/switch/fnv/fonts/A.ttf", "sdmc:/A2.ttf")) == EACCES
             and svc.h_fs_rename(*sd2("sdmc:/Data/x", "sdmc:/switch/fnv/fonts/x")) == EACCES
             and svc.h_fs_rename(*sd2("sdmc:/switch/fnv/fonts/A.ttf", "sdmc:/switch/fnv/fonts/Z.ttf")) == EACCES)
+    # a spelling equal to the mount only under casefold ("ß" ~ "ss") is refused: the mount "fontss" of a second card
+    root2 = os.path.join(d, "sd-cf")
+    os.makedirs(os.path.join(root2, "switch", "fnv", "fontss"))
+    open(os.path.join(root2, "switch", "fnv", "fontss", "a.ttf"), "w").close()
+    svc2 = boothost.Services(root2, read_only=["switch/fnv/fontss"])
+    mach2 = bootmachine.Machine(open(elf6, "rb").read(), tb.make_plan(open(elf6, "rb").read()), svc2)
+    mach2.uc.mem_write(page, "sdmc:/switch/fnv/FONT\u00df/a.ttf".encode() + b"\0")
+    tb.case("casefold-only spelling of a mount: open for write is EACCES with a declared-input-write fault, the file is unchanged",
+            svc2.h_fs_open(page, O_WRITE | O_TRUNC) == EACCES and [(f["kind"], f["call"]) for f in svc2.declared_faults] == [("declared-input-write", "open")]
+            and os.path.getsize(os.path.join(root2, "switch", "fnv", "fontss", "a.ttf")) == 0, svc2.declared_faults)
     fd = svc.h_fs_open(sd("sdmc:/switch/fnv/fonts/A.ttf"), O_READ)
     tb.case("read-only open of a font works", fd < 2 ** 31, fd)
     svc.h_fs_close(fd)

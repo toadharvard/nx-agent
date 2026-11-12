@@ -180,6 +180,16 @@ case("read_only follows the mount list: two mounts, case-folded", bp.read_only("
      and not bp.read_only("/switch/fnv/other") and not bp.read_only("/switch/fnv/other/dirx"))
 case("no mounts: nothing is read-only (even fonts)", not bootpath.BootPath(fresh("f5")).read_only("/switch/fnv/fonts/a.ttf"))
 
+# casefold, not lower: resolve matches host entries by str.casefold, so a spelling equal to the mount only under casefold reaches it and must be read-only
+root = fresh("f6")
+touch(root, "switch", "fnv", "fontss", "a.ttf")
+bp = bootpath.BootPath(root, None, read_only=["switch/fnv/fontss"])
+sp = "sdmc:/switch/fnv/FONT\u00df/a.ttf"   # "ß".casefold() == "ss"; "ß".lower() == "ß"
+case("casefold-only spelling reaches the mount (resolve)", bp.resolve(sp) == os.path.join(root, "switch", "fnv", "fontss", "a.ttf"), bp.resolve(sp))
+case("casefold-only spelling of a read-only mount is read_only (ß ~ ss, final sigma)", bp.read_only(sp) and bp.read_only("/SWITCH/fnv/FONTSS")
+     and bootpath.BootPath(fresh("f7"), None, read_only=["switch/fnv/\u03c3\u03c2"]).read_only("/switch/fnv/\u03a3\u03a3/x"))
+case("a mount given in a casefold-only spelling matches too", bootpath.BootPath(fresh("f8"), None, read_only=["Switch/fnv/FONT\u00df"]).read_only("/switch/fnv/fontss/a"))
+
 # fonts alone in switch/fnv does not make it an install: no game -> the game dir stays root/fnvnx/game
 root = fresh("f3")
 touch(root, "switch", "fnv", "fonts", "a.ttf")
