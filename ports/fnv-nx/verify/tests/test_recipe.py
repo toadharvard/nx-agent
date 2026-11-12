@@ -38,7 +38,7 @@ RECIPE = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-
           "include": [ROOT + "/inc", ROOT + "/gen"], "units": "all",
           "generated": [{"tool": T + "gen/gen.py", "args": [], "inputs": [ROOT + "/constants.tsv"], "outputs": ["gen/gen.h"]}],
           "os_layer": ["os.S"], "constants": "constants.tsv",
-          "link": {"script": "link.ld", "output": "toy.elf", "flags": ["-e", "f_a"]}}
+          "link": {"script": "link.ld", "output": "toy.elf", "flags": ["-e", "f_a"], "kind": "exe", "roots": []}}
 FILES = {
     "toy/a.c": '#include "toy.h"\n#include "gen.h"\nint f_b(void);\nint f_a(void) { return NCONST + f_b() + TOY + (int)(STAMP % 1000003L); }\n',
     "toy/b.c": '#include "toy.h"\nint f_b(void) { return TOY * 2; }\n',
@@ -315,6 +315,52 @@ def main():
     check("objects.json: defined symbols from .symtab (struct), undefined list", {"symbol": "f_a", "bind": "GLOBAL", "type": "FUNC", "object": "a.c"} in d
           and any(x["symbol"] == "os_svc" and x["object"] == "os.S" for x in d) and "f_b" in u and "f_a" not in u
           and d == sorted(d, key=lambda x: (x["symbol"], x["object"])) and u == sorted(u), (d, u))
+
+    # --- link roots: the stored objects of a listed root are declared inputs of the link stage
+    LIB = T + "lib"
+
+    def link_roots():
+        librec = {k: v for k, v in RECIPE.items() if k not in ("generated", "os_layer", "constants", "link")}
+        librec["include"] = []
+        a_c = "int f_lib(void);\nint f_a(void) { return f_lib(); }\n"
+        lr = make_repo("lr", rec=dict(RECIPE, generated=[], os_layer=[], constants=None, include=[], units="all",
+                                      link=dict(RECIPE["link"], roots=[LIB])),
+                       files={"toy/a.c": a_c, "toy/b.c": None, "toy/c.c": None, "toy/os.S": None, "toy/constants.tsv": None, "toy/inc/toy.h": None,
+                              "lib/l.c": "int f_lib(void) { return 1; }\n", "lib/build.json": json.dumps(librec)})
+        ad = json.load(open(os.path.join(lr, T + "verify/admit.json")))
+        ad["roots"].append({"path": LIB, "class": "product", "target": "host", "gates": [], "recipe": LIB + "/build.json"})
+        w(lr, "verify/admit.json", json.dumps(ad))
+        git(lr, "add", "-A")
+        git(lr, "commit", "-q", "-m", "lib")
+        x1 = recipe.build(lr, ROOT, SS, BASE + "/lr1")
+        check("link roots: the image links the objects of the listed root (f_lib resolves)", x1["status"] == "green" and x1["elf"]
+              and x1.get("link_roots") == [LIB], x1.get("failure"))
+        w(lr, "lib/l.c", "int f_lib(void) { return 2; }\n")
+        git(lr, "add", "-A")
+        git(lr, "commit", "-q", "-m", "lib changed")
+        x2 = recipe.build(lr, ROOT, SS, BASE + "/lr2")
+        check("link roots: a change in the listed root changes the link key and the ELF", x2["status"] == "green"
+              and x2["elf"]["sha256"] != x1["elf"]["sha256"] and set(x2["stage_keys"]) != set(x1["stage_keys"]), (x1["stage_keys"], x2["stage_keys"]))
+        nolink = dict(json.load(open(os.path.join(lr, ROOT, "build.json"))))
+        nolink["link"] = dict(nolink["link"], roots=[])
+        w(lr, "toy/build.json", json.dumps(nolink))
+        git(lr, "add", "-A")
+        git(lr, "commit", "-q", "-m", "no roots")
+        x3 = recipe.build(lr, ROOT, SS, BASE + "/lr3")
+        check("link roots: without the root f_lib has no body and the link is red, never a silent zero", x3["status"] == "red", x3.get("failure"))
+        ig = dict(nolink)
+        ig["link"] = dict(nolink["link"], roots=[LIB], flags=["-e", "f_a", "--unresolved-symbols=ignore-all"])
+        w(lr, "toy/build.json", json.dumps(ig))
+        git(lr, "add", "-A")
+        git(lr, "commit", "-q", "-m", "ignore-all")
+        try:
+            recipe.build(lr, ROOT, SS, BASE + "/lr4")
+            raised = None
+        except recipe.RecipeError as x:
+            raised = str(x)
+        check("link roots: a test-style link with --unresolved-symbols=ignore-all is refused before any stage", raised and "resolution-relaxing" in raised, raised)
+
+    later(link_roots)
 
     print("INFO +%.1f s: toy builds done" % (time.time() - t_start))
     tcc, tct = tc_fut.result()

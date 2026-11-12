@@ -1,5 +1,135 @@
 {
  "format": "fnvnx-assumptions/1",
+ "ranges": {
+  "L1": [
+   100,
+   199
+  ],
+  "L3a": [
+   200,
+   299
+  ],
+  "L3b": [
+   300,
+   399
+  ],
+  "L4": [
+   400,
+   499
+  ],
+  "L5": [
+   500,
+   599
+  ],
+  "L6": [
+   600,
+   699
+  ],
+  "L6A": [
+   700,
+   799
+  ],
+  "L2": [
+   800,
+   899
+  ]
+ },
+ "retired": [
+  {
+   "id": "ASM-021",
+   "aliases": [
+    "images dynamic names"
+   ]
+  },
+  {
+   "id": "ASM-217",
+   "aliases": [
+    "L3b:A-DECODEFLOW"
+   ]
+  },
+  {
+   "id": "ASM-302",
+   "aliases": []
+  },
+  {
+   "id": "ASM-305",
+   "aliases": []
+  },
+  {
+   "id": "ASM-306",
+   "aliases": []
+  },
+  {
+   "id": "ASM-307",
+   "aliases": []
+  },
+  {
+   "id": "ASM-308",
+   "aliases": []
+  },
+  {
+   "id": "ASM-309",
+   "aliases": []
+  },
+  {
+   "id": "ASM-310",
+   "aliases": []
+  },
+  {
+   "id": "ASM-311",
+   "aliases": []
+  },
+  {
+   "id": "ASM-312",
+   "aliases": []
+  },
+  {
+   "id": "ASM-313",
+   "aliases": []
+  },
+  {
+   "id": "ASM-314",
+   "aliases": []
+  },
+  {
+   "id": "ASM-315",
+   "aliases": []
+  },
+  {
+   "id": "ASM-316",
+   "aliases": []
+  },
+  {
+   "id": "ASM-317",
+   "aliases": []
+  },
+  {
+   "id": "ASM-318",
+   "aliases": []
+  },
+  {
+   "id": "ASM-319",
+   "aliases": [
+    "L3b:A-STACKPRIVATE"
+   ]
+  },
+  {
+   "id": "ASM-324",
+   "aliases": []
+  },
+  {
+   "id": "ASM-326",
+   "aliases": []
+  },
+  {
+   "id": "ASM-327",
+   "aliases": []
+  },
+  {
+   "id": "ASM-328",
+   "aliases": []
+  }
+ ],
  "entries": [
   {
    "id": "ASM-001",
@@ -98,7 +228,6 @@
    "id": "ASM-006",
    "text": "The exe makes no wild accesses: array indices are in bounds, guest accesses do not reach host pages.",
    "used_by": [
-    "ports/fnv-nx/journal/inbox/l1-contract-018.md",
     "ports/fnv-nx/verify/VERDICT.md"
    ],
    "aliases": [
@@ -144,12 +273,10 @@
    "id": "ASM-009",
    "text": "The pinned formal tools and published theorems are correct: the Sail CPU model at its pinned patch, isla and z3, the published proof of the x86-TSO to Arm memory mapping.",
    "used_by": [
-    "ports/fnv-nx/journal/inbox/orch-assumptions.md",
     "ports/fnv-nx/verify/RULES.md",
     "ports/fnv-nx/verify/TOOLS.md",
     "ports/fnv-nx/verify/VERDICT.md",
-    "ports/fnv-nx/verify/gate_assumptions.py",
-    "ports/fnv-nx/verify/puregate_policy.py"
+    "ports/fnv-nx/verify/gate_assumptions.py"
    ],
    "aliases": [
     "L3b:A-SAILMODEL",
@@ -632,6 +759,26 @@
    "owner": "L4"
   },
   {
+   "id": "ASM-043",
+   "text": "The instruction decoders are correct (LLVM's AArch64 descriptions, capstone).",
+   "used_by": [
+    "ports/fnv-nx/lift/proof/gate_fpexact.py",
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/VERDICT.md",
+    "ports/fnv-nx/verify/objstub.py"
+   ],
+   "aliases": [
+    "objstub LLVM decoder",
+    "instrument decoder",
+    "L3b:A-CAPSTONE-X86",
+    "L3b:A-CAPSTONE-A64"
+   ],
+   "status": "REMOVE",
+   "removed_by": "planned: agreement of independent decoders on every instruction (after the first frame)",
+   "owner": "L3b+L4",
+   "note": "Deferred until the first frame."
+  },
+  {
    "id": "ASM-044",
    "text": "Every terminating routine of the toolchain is declared noreturn in the headers given.",
    "used_by": [
@@ -644,6 +791,20 @@
    ],
    "status": "REMOVE",
    "removed_by": "no gate yet: the headers' noreturn declarations checked against the toolchain's terminating routines",
+   "owner": "L4"
+  },
+  {
+   "id": "ASM-045",
+   "text": "The decoder's write sets name every register an instruction writes.",
+   "used_by": [
+    "ports/fnv-nx/verify/TOOLS.md",
+    "ports/fnv-nx/verify/objstub.py"
+   ],
+   "aliases": [
+    "objstub write sets"
+   ],
+   "status": "REMOVE",
+   "removed_by": "no gate yet: the decoder's write sets checked against the architectural encoding of every instruction",
    "owner": "L4"
   },
   {
@@ -955,19 +1116,6 @@
    ],
    "status": "REMOVE",
    "removed_by": "planned: closable in the plugin: constant operand of a conversion = finding",
-   "owner": "L3b"
-  },
-  {
-   "id": "ASM-330",
-   "text": "capstone decodes every AArch64 instruction of an object to its architectural id; unmarked sections are code from their start.",
-   "used_by": [
-    "ports/fnv-nx/lift/proof/gate_fpexact.py"
-   ],
-   "aliases": [
-    "L3b:A-CAPSTONE-A64"
-   ],
-   "status": "REMOVE",
-   "removed_by": "planned: capstone/keystone pinned by sha256 from the fnv-nx-build mirror (L3b w4) + w4's ACL2 cross-check of every certified shape",
    "owner": "L3b"
   },
   {

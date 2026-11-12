@@ -446,6 +446,24 @@
     "ports/fnv-nx/verify/toolflags_policy.py"
    ]
   },
+  "test_linkroots.py": {
+   "references": [
+    {
+     "anchor": "## verify/recipe.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    },
+    {
+     "anchor": "## verify/gate_admit.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/verify/recipe.py",
+    "ports/fnv-nx/verify/gate_admit.py"
+   ]
+  },
   "test_linkstrict.py": {
    "references": [
     {

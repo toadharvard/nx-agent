@@ -7,9 +7,10 @@ Steps: (1) generated stages (python runtime, runtime.py), (2) one unit stage per
 name-complete views, then CC on the preprocessed text), .s/.S = unitstage.Build too (.S: PP then CC; .s: one stage on its own file), (3) the link stage
 (`ld` of the compiler, objects + script as inputs). Tools (compilers, ld) are runtime.py `tool` runtimes: declared inputs, no host /usr.
 RULE units: every tracked *.c *.cc *.cpp *.cxx *.s *.S under the root, and every generated output with such a name, is a unit.
-RULE refusal set R: an option of GNU ld's grammar that lets a link accept missing or substituted symbols. Matched by OPTION SYNTAX:
+RULE refusal set R, the class of "resolution-relaxing ld options": an option of GNU ld's grammar (the pinned ld manual's list) that lets a link accept
+  missing or substituted symbols or defers their resolution to run time (`-z lazy`). Matched by OPTION SYNTAX:
   strip one or two leading dashes, cut at `=`; a name that is a prefix (getopt_long abbreviation) of a refused long name is refused (a
-  single-dash name needs >= 2 chars); `-z undefs|muldefs` as `-z X` or `-zX`; `-Wl,a,b` and `-Xlinker a` are split into the options
+  single-dash name needs >= 2 chars); `-z undefs|muldefs|lazy` as `-z X` or `-zX`; `-Wl,a,b` and `-Xlinker a` are split into the options
   they pass; `@file` is refused (cannot be analysed). An ambiguous abbreviation is refused too (ld would reject it anyway).
 EXTERNAL inputs (key "external", RECIPE.md): fetched only by exact commit from ARTIFACTS_URL into a bare cache (--ext DIR, shared by
   builds that must not share stores), checked out, ingested; the CAS tree hash must equal tree_sha256 (else the build is red naming
@@ -131,10 +132,40 @@ def refused(tokens):
         name = t.lstrip("-").split("=", 1)[0] if t.startswith("-") else ""
         long_ = t.startswith("--") or len(name) >= 2
         hit = t.startswith("@") or (name and long_ and any(r.startswith(name) for r in LONG_R)) or (
-            t == "-z" and toks[i + 1:i + 2] in (["undefs"], ["muldefs"])) or t in ("-zundefs", "-zmuldefs")
+            t == "-z" and toks[i + 1:i + 2] in (["undefs"], ["muldefs"], ["lazy"])) or t in ("-zundefs", "-zmuldefs", "-zlazy")
         if hit:
             bad.append(t)
     return bad
+
+
+LINK_KEYS = {"script", "output", "flags", "kind", "roots"}
+LINK_KINDS = {"pie": "guest", "exe": "host"}   # the kind of image and the target it needs
+
+
+def link_errors(lk, root, roots):
+    """Problems of the link stage's `kind` and `roots` of ROOT (RECIPE.md, "Link roots"); ROOTS {path: admit.json entry}.
+    RULE: kind pie needs "target": "guest", kind exe needs "host". `roots` lists admitted PRODUCT roots (never the root itself, no repeats)
+    of the same target whose stored objects the link takes as declared inputs; the root of an image (class product) may list only BASE roots,
+    a test root (class test) any root, variants included (a root with "variant_of" is a variant, admit.json)."""
+    err, me = [], roots.get(root, {})
+    kind, lr = lk.get("kind"), lk.get("roots")
+    if kind not in LINK_KINDS:
+        err.append("link.kind %r is not pie or exe" % (kind,))
+    elif LINK_KINDS[kind] != me.get("target"):
+        err.append("link.kind %s needs target %s, the root declares %r" % (kind, LINK_KINDS[kind], me.get("target")))
+    if not (isinstance(lr, list) and all(isinstance(r, str) for r in lr)) or len(set(lr)) != len(lr):
+        return err + ["link.roots must be a list of distinct root paths"]
+    for r in lr:
+        e = roots.get(r)
+        if r == root:
+            err.append("link.roots lists the root itself")
+        elif not isinstance(e, dict) or e.get("class") != "product":
+            err.append("link.roots %s is not an admitted product root" % r)
+        elif e.get("target") != me.get("target"):
+            err.append("link.roots %s has target %r, the linking root %r" % (r, e.get("target"), me.get("target")))
+        elif me.get("class") == "product" and e.get("variant_of") is not None:
+            err.append("link.roots %s is a variant of %s: the image of a product root links base roots only" % (r, e["variant_of"]))
+    return err
 
 
 def is_unit(p):
@@ -307,12 +338,13 @@ def check(rec, root, files, roots, pin=None):
             err.append("%s %r is neither a tracked file of the root nor a generated output" % (key, c))
     lk = rec.get("link")
     if lk is not None:
-        if not (isinstance(lk, dict) and set(lk) == {"script", "output", "flags"} and isinstance(lk["flags"], list)
+        if not (isinstance(lk, dict) and set(lk) == LINK_KEYS and isinstance(lk["flags"], list)
                 and all(isinstance(t, str) for t in lk["flags"]) and isinstance(lk["output"], str)
                 and re.fullmatch(r"[A-Za-z0-9._-]+\.elf", lk["output"]) and rel_ok(lk["script"]) and lk["script"] in mine):
-            err.append("link must be {script: tracked file of the root, output: NAME.elf, flags: [..]}")
+            err.append("link must be {script: tracked file of the root, output: NAME.elf, flags: [..], kind: pie|exe, roots: [..]}")
         else:
-            err += ["link.flags: %s is in the refusal set R" % t for t in refused(lk["flags"])]
+            err += ["link.flags: %s is in the refusal set R (resolution-relaxing ld options)" % t for t in refused(lk["flags"])]
+            err += link_errors(lk, root, roots)
     err += guest_errors(rec, root, roots, pin)
     err += plugin_errors(rec, root, files, roots, units, names)
     return err
@@ -687,7 +719,9 @@ class Job:
             raise BuildRed(dict(fl[0], failed_units=fl, done=sorted(res)))
         return res
 
-    def link(self, ws, objs):
+    def link(self, ws, objs, extra=()):
+        """EXTRA: [(root path, [(unit, object file, sha256)])]: the stored objects of the roots in link.roots, in listed order after the own
+        objects. They are copied into the /objs tree, which is a declared input of the stage, so they are in its key."""
         lk, cc = self.rec["link"], self.drivers()[0]
         pn = subprocess.run([self.hostpath(cc), "-print-prog-name=ld"], capture_output=True, text=True).stdout.strip()
         ld = posixpath.normpath(pn)
@@ -701,10 +735,19 @@ class Job:
         for u, o in objs.items():
             os.makedirs(os.path.dirname(os.path.join(od, u + ".o")), exist_ok=True)
             shutil.copyfile(cas._obj(self.store, cas.manifest(o, self.store)["entries"]["unit.o"]), os.path.join(od, u + ".o"))
+        more = []
+        for r, items in extra:
+            for u, f, h in items:
+                dest = os.path.join(od, "roots", r.replace("/", "__"), u + ".o")
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.copyfile(f, dest)
+                if hashlib.sha256(open(dest, "rb").read()).hexdigest() != h:
+                    raise BuildRed({"stage": "link-root:" + r, "exit": None, "stderr": ["object %s differs from its recorded sha256" % u]})
+                more.append("/objs/roots/%s/%s.o" % (r.replace("/", "__"), u))
         os.makedirs(sd)
         shutil.copyfile(os.path.join(self.repo, self.root, lk["script"]), os.path.join(sd, os.path.basename(lk["script"])))
         argv = [ld, "--build-id=none", "-T", "/ld/" + os.path.basename(lk["script"])] + lk["flags"] + ["-o", "/out/" + lk["output"]] + [
-            "/objs/%s.o" % u for u in sorted(objs)]
+            "/objs/%s.o" % u for u in sorted(objs)] + more
         doc = {"format": "fnvnx-stage/1", "stage": "ld:" + self.root, "argv": argv, "cwd": "/", "class": "build", "tool": "ld",
                "env": dict(unitstage.ENV, PATH=os.path.dirname(ld)), "outputs": ["/out"],
                "inputs": sorted(rt["inputs"] + [{"at": "/objs", "tree": cas.ingest(od, self.store)},
@@ -736,7 +779,7 @@ def host_compilers(rec, cache):
     return os.path.join(dest, c["cc"]), os.path.join(dest, c["cxx"])
 
 
-def build(repo, root, store, out, jobs=4, ext=None):
+def build(repo, root, store, out, jobs=4, ext=None, link=True):
     """Build product ROOT of the checkout REPO into STORE; write OUT/objects.json and the files it names. EXT: bare cache dir of
     externals (default STORE/external). -> the objects dict; raises RecipeError for an invalid recipe."""
     env_blocked(repo)   # BEFORE any stage: nothing below runs or stores on a machine that is not the declared one
@@ -770,9 +813,16 @@ def build(repo, root, store, out, jobs=4, ext=None):
             und |= x
             res["objects"].append({"unit": u, "object": os.path.abspath(dest), "sha256": ent["h"], "os_layer": u in j.rec.get("os_layer", [])})
         res.update(defined=sorted(res["defined"], key=lambda d: (d["symbol"], d["object"])), undefined=sorted(und))
-        if j.rec.get("link"):
+        if j.rec.get("link") and link:
             name = j.rec["link"]["output"]
-            ent = cas.manifest(j.link(ws, objs), store)["entries"][name]
+            extra = []
+            for r in j.rec["link"]["roots"]:   # the stored objects of the listed roots, built (or taken from the store) without their own link
+                sub = build(repo, r, store, os.path.join(out, "roots", r.replace("/", "__")), jobs, ext, link=False)
+                if sub["status"] != "green":
+                    raise BuildRed({"stage": "link-root:" + r, "exit": None, "stderr": ["root %s is red: %s" % (r, (sub.get("failure") or {}).get("stage"))]})
+                extra.append((r, [(o["unit"], o["object"], o["sha256"]) for o in sub["objects"]]))
+            res["link_roots"] = [r for r, _ in extra]
+            ent = cas.manifest(j.link(ws, objs, extra), store)["entries"][name]
             shutil.copyfile(cas._obj(store, ent), os.path.join(out, name))
             res["elf"] = {"path": os.path.abspath(os.path.join(out, name)), "sha256": ent["h"]}
         for key in ("constants", "contract_names"):
