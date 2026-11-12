@@ -45,12 +45,15 @@ int main(int argc, char **argv) {
         for (; nf < 4; nf++) { f[nf] = p; char *t = strchr(p, '\t'); if (!t) { t = strchr(p, '\n'); if (t) *t = 0; break; } *t = 0; p = t + 1; }
         char *nl = strchr(f[3], '\n'); if (nl) *nl = 0; char *cr = strchr(f[3], '\r'); if (cr) *cr = 0;
         int n = atoi(f[0]); int isv = f[1][0] == 'v';
-        size_t nb, pb; DWORD *sh = unhex(f[2], &nb), *pt = unhex(f[3], &pb);
+        int ffp_self = f[2][0] == '-', ffp_partner = f[3][0] == '-';          /* "-" = no shader of that stage (fixed function) */
+        size_t nb = 0, pb = 0; DWORD *sh = ffp_self ? NULL : unhex(f[2], &nb), *pt = ffp_partner ? NULL : unhex(f[3], &pb);
         mark("ROW", n);
         IDirect3DVertexShader9 *vs = NULL; IDirect3DPixelShader9 *ps = NULL; HRESULT hc, hp = S_OK, hd = S_OK;
-        if (isv) hc = IDirect3DDevice9_CreateVertexShader(dev, sh, &vs); else hc = IDirect3DDevice9_CreatePixelShader(dev, sh, &ps);
+        if (ffp_self) hc = S_OK; else if (isv) hc = IDirect3DDevice9_CreateVertexShader(dev, sh, &vs); else hc = IDirect3DDevice9_CreatePixelShader(dev, sh, &ps);
         if (SUCCEEDED(hc)) {                         /* the partner is created once per distinct text */
-            struct pcache *c = NULL; for (int i = 0; i < npc; i++) if (!strcmp(pc[i].hex, f[3]) && (pc[i].vs != NULL) == !isv) c = &pc[i];
+            struct pcache *c = NULL; static struct pcache none;
+            if (ffp_partner) { none.hr = S_OK; c = &none; }
+            else for (int i = 0; i < npc; i++) if (!strcmp(pc[i].hex, f[3]) && (pc[i].vs != NULL) == !isv) c = &pc[i];
             if (!c) { c = &pc[npc++]; c->hex = _strdup(f[3]); c->vs = NULL; c->ps = NULL;
                       if (isv) c->hr = IDirect3DDevice9_CreatePixelShader(dev, pt, &c->ps); else c->hr = IDirect3DDevice9_CreateVertexShader(dev, pt, &c->vs); }
             hp = c->hr;
