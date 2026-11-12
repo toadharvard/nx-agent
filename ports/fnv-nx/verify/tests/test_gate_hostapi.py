@@ -88,11 +88,12 @@ for p_ in g.DEFAULT_HEADERS:
         real = open(q).read()
         break
 check("(i) the real header has no wrapper use", real is not None and g.wrapper_uses(real) == [], g.wrapper_uses(real or ""))
-# (ii) no SOCK service and no range marker in the real header
+# (ii) no range marker aliases a service; the 13 socket services are declared (the platform's sock_guest.c calls each of them)
 if real is not None:
     dr = g.declared(real)
     names = [n for ns in dr.values() for n in ns]
-    check("(ii) no SOCK_ service and no *_FIRST / *_LAST marker is declared", not any("SOCK" in n or n.endswith(("_FIRST", "_LAST")) for n in names), names)
+    check("(ii) no *_FIRST / *_LAST marker is declared", not any(n.endswith(("_FIRST", "_LAST")) for n in names), names)
+    check("(ii) the socket services 16..26, 30, 31 are declared, one name each", all(len(dr[n]) == 1 for n in (*range(16, 27), 30, 31)), {n: dr.get(n) for n in range(16, 32)})
 dm = g.declared("#define FNVNX_PLAT_X 1u\n#define FNVNX_PLAT_X_LAST 5u\n")
 u, c, ids = g.judge(dm, {"FNVNX_PLAT_X": 1})
 check("(ii) a marker equal to no service is its own item and red while unused", (u, c) == (2, 1) and ids == ["unused service 5 (FNVNX_PLAT_X_LAST)"], (u, c, ids))

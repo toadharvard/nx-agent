@@ -27,7 +27,10 @@ Rules:
 5a. TOTAL against the header (hostapi.h TOTALITY TABLE, checked mechanically by tests/test_bootmachine.py against the parsed table): ext_call returns
    NO_MODULE (module >= 64 or not registered), NO_SERVICE (fn > UINT32_MAX, or a module-11 fn without a row: 0, 10, 15, 16..33, 37 and up), BAD_NARGS
    (fewer arguments than the row, or nargs > 0 with a null array); nargs above UINT32_MAX counts as UINT32_MAX; only a handler raising
-   ExtMissing ends the run. Module 11 serves fn 1..9, 11..14, 34..36 here. The stage has no network interface and a fixed UTC zone (VC1); there are no socket services. TZ_AT 34: UTC, offset 0, no DST, abbr "UTC",
+   ExtMissing ends the run. Module 11 serves fn 1..36 here. The stage has no network interface and a fixed UTC zone (VC1). Sockets 16..33 are bootsock.py's model (a host with no network interface; its docstring lists every
+   served and every NOT answered (service, case); the latter end the run as "ext-module-missing" naming the service, with an event
+   "sock-undetermined" saying why): the nargs rule (sockets dispatch before the general check: nargs != the exact count, null array or not, is -EINVAL;
+   the exact count with a null array is BAD_NARGS). TZ_AT 34: UTC, offset 0, no DST, abbr "UTC",
    for every instant (utc_seconds is any int64: the declared machine's zone in the emulator is fixed UTC, CLAUDE.md "The declared machine", and UTC has one rule at every instant, so the stage's time service refuses nothing and -EOVERFLOW (-75) never comes from the stage);
    THREAD_SELF 35: a record of the calling thread under a new id
    (never a second thread): started, so thread_start and thread_join answer BadInput; thread_free ends the record only.
@@ -86,6 +89,7 @@ from unicorn.arm64_const import UC_ARM64_REG_CPACR_EL1, UC_ARM64_REG_LR, UC_ARM6
     UC_ARM64_REG_TPIDR_EL0, UC_ARM64_REG_X0, UC_ARM64_REG_X1, UC_ARM64_REG_X2, UC_ARM64_REG_X3, UC_ARM64_REG_X4
 
 import bootlayout
+import bootsock
 import icount
 
 PAGE, U64 = 0x1000, (1 << 64) - 1
@@ -104,12 +108,18 @@ FNVNX_EXT_PLATFORM = 11
 EXT_NO_MODULE, EXT_NO_SERVICE, EXT_BAD_NARGS = U64 - 254, U64 - 253, U64 - 252   # FNVNX_EXT_*: -255, -254, -253 as int64 (hostapi.h)
 FNVNX_EXT_MODULES, UINT32_MAX, INT64_MAX = 64, 0xFFFFFFFF, (1 << 63) - 1
 FNVNX_TEXT_ENTRY_MAX = 500   # hostapi.h
-# hostapi.h TOTALITY TABLE, module 11 services 1..9, 11..14, 34, 35 and 36: fn -> (name, least nargs); checked against the header's parsed table by tests/test_bootmachine.py.
+# hostapi.h TOTALITY TABLE, module 11 services 1..15, 34, 35 and 36: fn -> (name, least nargs). The sockets 16..26, 30, 31 are SOCK_SERVICES;
+# both tables are checked against the header's parsed table by tests/test_bootmachine.py.
 PLATFORM_FNS = {1: ("cpu_boost", 1), 2: ("thread_activity", 2), 3: ("message", 2), 4: ("vm_reserve", 2), 5: ("vm_commit", 2),
                 6: ("vm_decommit", 2), 7: ("vm_release", 1), 8: ("vm_protect", 3), 9: ("display_docked", 0),
                 11: ("section_create", 1), 12: ("section_map", 4), 13: ("section_unmap", 2),
                 14: ("section_free", 1), 34: ("tz_at", 2), 35: ("thread_self", 0), 36: ("text_entry", 5)}
-WE_FAULT = 14   # wire errno numbers (EFAULT) of hostapi.h TZ_AT
+SOCK_SERVICES = {16: ("sock_socket", 3), 17: ("sock_close", 1), 18: ("sock_bind", 2), 19: ("sock_listen", 2), 20: ("sock_accept", 2),
+                 21: ("sock_connect", 2), 22: ("sock_sendto", 5), 23: ("sock_recvfrom", 5), 24: ("sock_setsockopt", 5),
+                 25: ("sock_getsockopt", 5), 26: ("sock_poll", 3), 30: ("sock_getfl", 1), 31: ("sock_setfl", 2)}
+# wire numbers and lists of sockwire.h live in bootsock.py (tests/test_bootmachine.py compares them with the fixture copy)
+from bootsock import (WE_BADF, WE_FAULT, WE_INVAL, WE_OVERFLOW, WE_AFNOSUPPORT, WIRE_AF, WIRE_SOCKTYPE, WIRE_AI_MASK,  # noqa: F401
+                      WEAI_BADFLAGS, WEAI_NONAME, WEAI_FAMILY, WEAI_SOCKTYPE, WPOLLNVAL)
 TZ_VC1 = (0, 0, b"UTC")   # VC1's zone: off_s, dst, abbr
 WINDOW = (0x00400000, 0x02100000)   # the image range 0x00400000..0x00FDF000 and the data window up to 0x02100000: claimed by the host at start
 MAP_FIXED_MAX = 512
@@ -162,6 +172,24 @@ class VirtualClock:
 
     def jump_to_ns(self, when):
         self.tick = max(self.tick, when * self.FREQ // 1_000_000_000 + 1)
+
+
+class _GuestMem:
+    """the socket model's view of guest memory: readable / writable ranges of the machine (the host page is not writable)"""
+    def __init__(self, m):
+        self.m = m
+
+    def can_read(self, lo, hi):
+        return self.m.accessible(lo, hi, UC_PROT_READ)
+
+    def can_write(self, lo, hi):
+        return self.m._writable(lo, hi)
+
+    def read(self, addr, n):
+        return bytes(self.m.uc.mem_read(addr, n))
+
+    def write(self, addr, data):
+        self.m.uc.mem_write(addr, data)
 
 
 class SelfRecord:
@@ -231,6 +259,7 @@ class Machine:
             raise MachineError("text_entries: a text is not a sequence of Unicode scalars: %s" % e) from None
         self.text_texts, self.text_next, self.scenario_error = list(text_entries), 0, None   # TEXT_ENTRY scenario (rule 5d)
         self.ids = IdTable()
+        self.socks = bootsock.SockModel(_GuestMem(self), lambda: self.clock.now_ns())
         self.elf = elf = bootlayout.parse_elf(elf_bytes)
         self.services, self.clock, self.hc_slice, self.limit = services, clock or VirtualClock(), hc_slice, limit_host_calls
         reg = {n: (r["lo"], r["hi"]) for n, r in plan["regions"].items()}
@@ -541,7 +570,20 @@ class Machine:
         return self.ext[module](fn, self._words(args, nargs) if nargs else [])
 
     def _platform_ext(self, fn, args, nargs):
-        """host_platform.inc: a fn without a row is NO_SERVICE; fewer arguments than the row, or nargs > 0 with a null array, is BAD_NARGS; extra arguments are ignored"""
+        """host_platform.inc: sockets 16..33 check nargs themselves (exactly the count, else -WE_INVAL); a fn without a row is
+        NO_SERVICE; fewer arguments than the row, or nargs > 0 with a null array, is BAD_NARGS; extra arguments are ignored"""
+        if fn in SOCK_SERVICES:   # host_platform.inc: 16..31 dispatch BEFORE the general nargs / null-array check
+            if nargs != SOCK_SERVICES[fn][1]:
+                return -WE_INVAL & U64
+            if not args:
+                return EXT_BAD_NARGS
+            try:
+                return self.socks.call(fn, self._words(args, nargs))
+            except bootsock.NotDetermined as e:
+                self._event("sock-undetermined", fn=fn, why=str(e))
+                raise ExtMissing(FNVNX_EXT_PLATFORM, fn) from None
+            except bootsock.BadGuestMemory as e:
+                raise MachineError("sock service %d: %s" % (fn, e)) from None
         if fn not in PLATFORM_FNS:
             return EXT_NO_SERVICE
         _name, need = PLATFORM_FNS[fn]
