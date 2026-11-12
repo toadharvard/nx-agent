@@ -10,11 +10,10 @@ found by the keys objects.json lists, the document whose "stage" is `cc:<unit>`)
     repo, ref, commit, tree_sha256, at, driver paths), and every CC document mounts at the pin's `at` the pin's tree_sha256 and starts
     with the pin's driver (the object was built by that tree, not by a name).
   unit item, all of: a CC stage document exists for the unit; its argv holds -mabi=ilp32; for a C++ unit of a native root also every flag of
-    recipe.SEMANTICS_FLAGS and, for every plugin of recipe.GUEST_CXX_PLUGINS, the declared input /plug/<name> (a tree holding <name>.so) and the
+    every flag of the pin's "flags"."semantics" (guest_compiler.json, the one source recipe.SEMANTICS_FLAGS reads) and, for every plugin of recipe.GUEST_CXX_PLUGINS, the declared input /plug/<name> (a tree holding <name>.so) and the
     argv flag -fplugin=/plug/<name>/<name>.so. A C++ unit of a lifted root needs no plugin (RECIPE.md: the lifter emits the order itself).
     The documents are the stage keys, so the object is the one these flags and inputs built.
-Does not cover (stated): the pin file declares no data-model flags of its own, so the flag set is -mabi=ilp32 for every unit plus
-recipe.SEMANTICS_FLAGS for native C++ (the constant of the recipe rule); C and assembler units are checked for -mabi=ilp32 only.
+Does not cover (stated): C and assembler units are checked for -mabi=ilp32 only (the pin lists the semantics flags of C++).
 Relies on the owner-accepted item "the compiler is correct": the pinned compiler under -mabi=ilp32 has the exe's data model."""
 import json
 import os
@@ -46,7 +45,7 @@ def unit_why(u, doc, native, pin):
     argv, ins = doc.get("argv", []), {i["at"]: i["tree"] for i in doc.get("inputs", [])}
     why = [] if ILP32 in argv else ["argv lacks " + ILP32]
     if u.endswith(recipe.CXX_EXT) and native:
-        why += ["argv lacks " + f for f in recipe.SEMANTICS_FLAGS if f not in argv and f != ILP32]
+        why += ["argv lacks " + f for f in pin["flags"]["semantics"] if f not in argv and f != ILP32]
         for n in recipe.GUEST_CXX_PLUGINS:
             if "/plug/" + n not in ins:
                 why.append("no declared input /plug/" + n)

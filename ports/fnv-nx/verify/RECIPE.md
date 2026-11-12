@@ -71,7 +71,7 @@ them: x86_64 `x86_64-linux-gnu-g++-13` (the bare `g++-13` prints no path for `as
 ### Guest roots: the game's compiler (MSVCMODEL1)
 Every product root's admit.json entry declares `"target": "guest"` (the game's code) or `"host"`; missing = invalid recipe = red `build`. A guest root's
 compiler, for C and C++ alike, is the external compiler pinned in `verify/guest_compiler.json`
-(`{"format": "fnvnx-guest-compiler/1", "external": {EXT_KEYS}, "cc", "cxx"}`): GCC 13.3.0 + `toolchain/msvcmodel/msvcmodel.patch`, a fnv-nx-build mirror
+(`{"format": "fnvnx-guest-compiler/1", "external": {EXT_KEYS}, "cc", "cxx", "flags": {"semantics": [flag]}}`; `flags.semantics` is the one source of `recipe.SEMANTICS_FLAGS`, the flags every native guest C++ root must hold): GCC 13.3.0 + `toolchain/msvcmodel/msvcmodel.patch`, a fnv-nx-build mirror
 (`tools/gcc-ilp32-msvcmodel`). The root's `compiler` must be `{"external", "cc", "cxx"}` naming an `external` entry equal to the pinned one (name, commit,
 tree_sha256, at) with the pinned driver paths. The distribution g++-13 is the base the compiler is built from, never the compiler of guest code. A tree
 without the pin file has no valid guest root. The plugins are built against this compiler's own plugin headers (the plugin stage reads

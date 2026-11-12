@@ -11,6 +11,24 @@
   "cc": "bin/aarch64-linux-gnu-gcc",
   "cxx": "bin/aarch64-linux-gnu-g++",
   "triplet": "aarch64-linux-gnu",
+  "flags": {
+    "semantics": [
+      "-mabi=ilp32",
+      "-fms-extensions",
+      "-fshort-wchar",
+      "-frounding-math",
+      "-fsigned-char",
+      "-fno-strict-aliasing",
+      "-fwrapv",
+      "-fno-delete-null-pointer-checks",
+      "-fcheck-new",
+      "-fno-sized-deallocation",
+      "-fno-lifetime-dse",
+      "-ffp-contract=off",
+      "-DFNVNX_SDD=1",
+      "-fno-devirtualize"
+    ]
+  },
   "provenance": {
     "gcc_tarball": "gcc-13.3.0.tar.xz",
     "gcc_tarball_sha256": "0845e9621c9543a13f484e94584a49ffc0129970e9914624235fc1d061a0c083",
