@@ -73,7 +73,7 @@ RESTRICTED = {
 # modules every member of which is ruled: importing is harmless, any use is reported by its rule
 BANNED = set("random secrets tempfile platform socket getpass pwd grp importlib builtins".split())
 # (d) EXTERNAL-PURE: third-party modules assumed pure (assumption A-ext)
-EXTERNAL = set("capstone elftools unicorn mako z3 keystone gmpy2".split())  # the pinned python.modules of env.json (envcheck.PY_MODULES) that the tools import, plus mako
+EXTERNAL = set("capstone elftools unicorn mako z3 keystone gmpy2".split())  # the pinned python.modules of env.json (envcheck.PY_MODULES) that the tools import, plus mako (z3, keystone, gmpy2: pinned formal tools, assumption ASM-009)
 # (e) IMPORT ROOTS: directories whose files tool code may import if the file is itself accepted by this gate (transitively). Each is an
 # admitted tool root of verify/admit.json (gate_pure.py checks it). The checked directories are roots by construction.
 IMPORT_ROOTS = ("ports/fnv-nx/verify",)

@@ -27,8 +27,8 @@
 #  6 publish the orphan commit of OUT.json, OUT.console.txt, spec.json, meta.json to branch l4-verify/boot/<elf_id>
 #  7 final line: BOOT elf=<id> rc=<boot rc> reason=<r> last=<milestone|none> instr=<n> main=<n> threads=<n> seconds=<s> published=<branch>@<commit12>
 # --gpu-branch B: the renderer. Branch B of the artifacts repository must hold libnxgl4.so (the renderer's host library, GL 4.5 on
-#    Mesa llvmpipe). The job fetches it, installs what is missing of GPU_PKGS (default "libegl1 libgl1-mesa-dri libgles2 mesa-utils") and
-#    gcc (the callback shim of verify/bootgpu.py), checks that the library loads, and runs boot.py with --gpu LIB --frames DIR. The first 3
+#    Mesa llvmpipe). The job fetches it, requires the packages gcc (the callback shim of verify/bootgpu.py), libegl1 and libegl-mesa0 at the versions of
+#    verify/env.json (installed by farm/setup_verdict_env.sh, never by this job; a missing or other version fails the job), checks that the library loads, and runs boot.py with --gpu LIB --frames DIR. The first 3
 #    frames (frame_*.rgba + .txt) are published under frames/ with the result; later ones are not. meta.json gains gpu_branch and
 #    gpu_branch_commit, the final line gains presents=<n>.
 #    The renderer pair rule (bootinputs.py pair), checked before the run; false = the job fails: the ELF branch's manifest.json names
@@ -38,7 +38,7 @@
 # Stage table: env BOOT_STAGE_TABLE_BRANCH (default l4-verify/milestones), file stage.milestones (bootmiles format), appended after the
 #    contract's rows (bootinputs.py milestones --stage-table: names unique, every exe address a lifted code entry). A missing branch: the
 #    job runs with the contract rows only and the final line says stage_table=absent; a present branch without the file fails the job.
-# Env: GPU_PKGS (see above), ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
+# Env: ARTIFACTS (clone of the artifacts repository, default $FARM_HOME/artifacts; cloned --filter=blob:none --no-checkout
 # when absent), ARTIFACTS_URL (default https://github.com/toadharvard/fnv-nx-build), FARM_HOME (default $HOME/fnvnx-farm),
 # WORK (default $FARM_HOME/boot/<elf_id>), GAME_DIR (an installed game; never inside a git checkout). The profile is
 # passed to boot.py, recorded in meta.json and exported as FNVNX_PROFILE (a render host library reads it).
@@ -84,9 +84,12 @@ APT=()
 command -v python3 > /dev/null || APT+=(python3)
 command -v git > /dev/null || APT+=(git)
 { command -v aarch64-linux-gnu-readelf > /dev/null && command -v aarch64-linux-gnu-nm > /dev/null; } || APT+=(binutils-aarch64-linux-gnu)
-if [ -n "$GPU_BRANCH" ]; then
-  command -v gcc > /dev/null || APT+=(gcc)
-  for p in ${GPU_PKGS-libegl1 libgl1-mesa-dri libgles2 mesa-utils}; do dpkg -s "$p" > /dev/null 2>&1 || APT+=("$p"); done
+if [ -n "$GPU_BRANCH" ]; then   # the renderer's host packages are part of the declared environment (verify/env.json): required, never installed here
+  for p in gcc libegl1 libegl-mesa0; do
+    want=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["packages"][sys.argv[2]])' "$NX/verify/env.json" "$p") || die "verify/env.json does not declare package $p"
+    have=$(dpkg-query -W -f '${Version}' "$p" 2> /dev/null || true)
+    [ "$have" = "$want" ] || die "package $p=$want (verify/env.json) is required by --gpu-branch, found '${have:-none}'; set the host up with farm/setup_verdict_env.sh"
+  done
 fi
 unicorn_ok() { python3 -s -c 'import importlib.metadata as m, sys; sys.exit(0 if m.version("unicorn") == "2.1.4" else 1)' 2> /dev/null; }
 if [ ${#APT[@]} -gt 0 ] || ! unicorn_ok; then

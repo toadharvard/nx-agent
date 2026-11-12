@@ -131,3 +131,9 @@ second complete path (`ldr` + `dmb ishld`, `dmb ishst` + `str`); (c) native bodi
 release, program order between them is preserved, so executions are sequentially consistent and SC is within TSO.
 Assumptions: A7 (the ARMv8 model matches the A57), A10 (the lifter keeps the exe's access order exactly; a native body runs
 the source's accesses in GCC's order, so at a race site it gives the source's behaviour under SC, not necessarily the exe's).
+
+## Host API header holds only what the product calls
+
+For every admitted product root that includes fnvnx/hostapi.h: services declared (numbers of `FNVNX_PLAT_*`) = services expanded by at least one
+unit (gate `hostapi`, TOOLS.md). Module ids (`FNVNX_EXT_*`) are not services; machine models below the product boundary are modules. A service
+with no caller is deleted, never kept as a number answering a placeholder.

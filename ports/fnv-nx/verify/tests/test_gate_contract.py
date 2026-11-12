@@ -95,7 +95,23 @@ check("quantify: two roots, one red", res[:3] == (5, 4, ["ports/fnv-nx/b:x"]) an
 # an admitted root without its outputs is red with the reason, for every gate; no inputs file at all as well
 admit([{"path": "ports/fnv-nx/p", "class": "product", "recipe": "ports/fnv-nx/p/build.json"}])
 os.makedirs(repo + "/ports/fnv-nx/p")
+# universe rule of the per-root gates: a root without game and link (e.g. a runtime root) has no items: green 0, for every gate, even with no inputs file
 rec = {"format": "x"}
+json.dump(rec, open(repo + "/ports/fnv-nx/p/build.json", "w"))
+for g in gc.GATES:
+    p, r = run(g)
+    check("%s: root with neither game nor link -> green 0 (no inputs needed)" % g,
+          p.returncode == 0 and r["status"] == "green" and (r["universe"], r["certified"], r["uncertified"]) == (0, 0, []), (p.returncode, r))
+# a root with game but no link: its game units are judged where they are linked, so it is red for the game gates and 0 for the link gates
+json.dump(dict(rec, game="game"), open(repo + "/ports/fnv-nx/p/build.json", "w"))
+for g in gc.GATES:
+    p, r = run(g)
+    if g in gc.LINK_GATES:
+        check("%s: game but no link -> link gate universe 0, green" % g, p.returncode == 0 and (r["universe"], r["certified"]) == (0, 0), (p.returncode, r))
+    else:
+        check("%s: game but no link -> red naming the missing link" % g, p.returncode == 2 and "links no ELF" in r["detail"] and r["uncertified"] == ["ports/fnv-nx/p:inputs"], (p.returncode, r))
+# an image root (link) with game: judged as before; the image root without a link or game is covered above
+rec = {"format": "x", "link": {"script": "l.ld"}, "game": "game"}
 json.dump(rec, open(repo + "/ports/fnv-nx/p/build.json", "w"))
 for g in gc.GATES:
     p, r = run(g)
@@ -105,11 +121,11 @@ open(repo + "/ports/fnv-nx/verify/contract_inputs.json", "w").write(json.dumps(g
 for g, key in (("reach", "reach_requests"), ("reachlink", "reach_requests"), ("gpa", "dynsites")):
     p, r = run(g)
     check("%s: inputs without %s -> red naming it" % (g, key), r["status"] == "red" and "no " + key in r["detail"], r)
-p, r = run("n1")
-check("root without a link -> red", r["status"] == "red" and "links no ELF" in r["detail"], r)
-json.dump(dict(rec, link={"script": "l.ld"}), open(repo + "/ports/fnv-nx/p/build.json", "w"))
-p, r = run("n1")
-check("root without game -> red naming build.json", r["status"] == "red" and '"game"' in r["detail"], r)
+json.dump({k: v for k, v in rec.items() if k != "game"}, open(repo + "/ports/fnv-nx/p/build.json", "w"))
+for g in gc.GATES:
+    p, r = run(g)
+    check("%s: image root (link) without game -> red naming build.json" % g, p.returncode == 2 and r["status"] == "red" and '"game"' in r["detail"]
+          and r["uncertified"] == ["ports/fnv-nx/p:inputs"], (p.returncode, r))
 
 # built root without the link stage's result files (ensure stubbed in-process: the compiler is not needed to test the rule)
 outd = tempfile.mkdtemp(prefix="gc-ens-")

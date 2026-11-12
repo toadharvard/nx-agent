@@ -55,7 +55,11 @@ def pkgs(f):
     d = doc()
     f(d["packages"])
     base = doc()["debs"]["packages"]
-    d["debs"]["packages"] = {p: dict(base.get(p, next(iter(base.values()))), version=v) for p, v in d["packages"].items()}
+    pins = dict(base)   # the closure's pins stay; a package of the list gets its own pin at its version
+    for p, v in d["packages"].items():
+        pins[p] = dict(base.get(p, next(iter(base.values()))), version=v)
+    keep = set(d["packages"]) | set(envcheck.dep_closure(d["packages"]))
+    d["debs"]["packages"] = {p: v for p, v in pins.items() if p in keep}
     return d
 
 CASES = [
@@ -68,15 +72,15 @@ CASES = [
     ("deb pin sha256 not 64 hex", mutate(lambda d: d["debs"]["packages"]["strace"].__setitem__("sha256", "abc")),
      "env: debs.packages.strace: needs version "),
     ("deb pin of a package not in packages", mutate(lambda d: d["debs"]["packages"].__setitem__("zzz", d["debs"]["packages"]["strace"])),
-     "env: debs.packages: zzz is not in packages"),
+     "env: debs.packages: zzz is not in the packages or their dependency closure"),
     ("deb mirror commit not 40 hex", mutate(lambda d: d["debs"]["mirror"].__setitem__("commit", "x")), "env: debs.mirror: needs repo"),
     ("no debs section", mutate(lambda d: d.pop("debs")), "env: debs: missing"),
     ("python module version", mutate(lambda d: d["python"]["modules"].__setitem__("capstone", "0.0")),
      "env: python module capstone: want 0.0, have "),
-    ("python module content sha256 (same version, other bytes)", mutate(lambda d: d["python"]["wheels"].__setitem__("z3-solver", "0" * 64)),
-     "env: python module z3-solver content sha256: want 000000000000, have "),
-    ("python module without a content sha256", mutate(lambda d: d["python"]["wheels"].pop("gmpy2")),
-     "env: python module gmpy2: no content sha256 in python.wheels"),
+    ("python module content sha256 (same version, other bytes)", mutate(lambda d: d["python"]["installed_files_sha256"].__setitem__("z3-solver", "0" * 64)),
+     "env: python module z3-solver installed files sha256: want 000000000000, have "),
+    ("python module without a content sha256", mutate(lambda d: d["python"]["installed_files_sha256"].pop("gmpy2")),
+     "env: python module gmpy2: no installed-files sha256 in python.installed_files_sha256"),
     ("python module without a wheel sha256", mutate(lambda d: d["python"]["wheel_sha256"].pop("numpy")),
      "env: python module numpy: no wheel sha256 in python.wheel_sha256"),
     ("python version", mutate(lambda d: d["python"].__setitem__("version", "2.7.0")), "env: python.version: want 2.7.0, have "),
@@ -107,6 +111,27 @@ rc, out, err = ec("snapshot", "-o", os.path.join(TD, "snap.json"), "--from-code"
 check("snapshot --from-code reproduces the committed env.json on this machine", rc == 0 and open(os.path.join(TD, "snap.json")).read()
       == open(ENVF).read(), (rc, err[-300:]))
 check("snapshot needs --from-code and -o", ec("snapshot")[0] != 0)
+
+# the plugin headers of the distro compilers of admitted roots (objstub builds its terminator plugin against them)
+sys.path.insert(0, VERIFY)
+import envcheck  # noqa: E402
+fr = os.path.join(TD, "fakerepo")
+os.makedirs(os.path.join(fr, "ports/fnv-nx/verify"))
+os.makedirs(os.path.join(fr, "ports/fnv-nx/hroot"))
+json.dump({"roots": [{"path": "ports/fnv-nx/hroot", "class": "product", "target": "host", "recipe": "ports/fnv-nx/hroot/build.json"},
+                     {"path": "ports/fnv-nx/gext", "class": "product", "target": "guest", "recipe": "ports/fnv-nx/gext/build.json"}]},
+          open(os.path.join(fr, "ports/fnv-nx/verify/admit.json"), "w"))
+json.dump({"compiler": {"cc": "x86_64-linux-gnu-gcc-13", "cxx": "x86_64-linux-gnu-g++-13"}}, open(os.path.join(fr, "ports/fnv-nx/hroot/build.json"), "w"))
+os.makedirs(os.path.join(fr, "ports/fnv-nx/gext"))
+json.dump({"compiler": {"external": "x", "cc": "bin/cc", "cxx": "bin/c++"}}, open(os.path.join(fr, "ports/fnv-nx/gext/build.json"), "w"))
+check("root compilers: the distro drivers of admitted roots, an external compiler is none",
+      envcheck._root_compilers(fr) == ["x86_64-linux-gnu-g++-13", "x86_64-linux-gnu-gcc-13"], envcheck._root_compilers(fr))
+good = [l for l in envcheck.check(doc(), fr) if "plugin headers" in l]
+d1 = doc()
+del d1["packages"]["gcc-13-plugin-dev"]
+bad = [l for l in envcheck.check(d1, fr) if "plugin headers" in l]
+check("a root's distro compiler whose plugin headers are in no listed package is a mismatch; the committed env has none",
+      good == [] and len(bad) == 2 and all("gcc-13-plugin-dev" in l for l in bad), (good, bad))
 
 # the setup script
 check("setup script: bash -n", subprocess.run(["bash", "-n", SETUP]).returncode == 0)

@@ -5,17 +5,19 @@
     envcheck.py id [--env F]                   sha256 of the canonical env.json (the verdict's env_id)
     envcheck.py snapshot -o F --from-code      regenerate F from THIS machine by the rule below; only on a machine set up by
                                                farm/setup_verdict_env.sh, then commit F
+check also requires, for the distribution compiler (no external) of every admitted product root, that its plugin headers (`-print-file-name=plugin`, the
+gcc-N-plugin-dev package; objstub builds its terminator plugin against them) belong to a package listed in env.json (`plugin headers of <driver>` mismatch).
 Rule (packages are DERIVED, never listed by hand): a package is in the environment iff dpkg says it owns a file that a verify tool
 or test executes or reads as data: (1) each of PROGRAMS (resolved path + loader closure); (2) python's loader closure (interpreter,
 lib-dynload, PY_MODULES); (3) UNIT_CC through unitstage.gcc_set(): driver, `as`, every ELF file of its trees + closure, and EVERY
 FILE under its trees (the unit stage ingests them whole: /usr/include, GCC install dir with plugin headers, libexec); the host
-gcc's HOST_GCC_PROGS/HOST_GCC_FILES. The trees also get a listing digest (an extra package adding files there is a mismatch).
+gcc's HOST_GCC_PROGS/HOST_GCC_FILES and every file of its plugin directory (HOST_GCC_PLUGIN_DIRS: the plugin headers of the host-root compiler); (4) the renderer's host libraries: RENDER_LIBS (loader cache names, with their loader closure) and RENDER_FILES. The trees also get a listing digest (an extra package adding files there is a mismatch).
 A file without a dpkg owner outside python's prefix is an error. Programs and who executes them: strace opentrace.py; busybox
 tests/test_graph,test_sandbox; gcc,as,ld test_sandbox,test_sdcheck; aarch64-linux-gnu-g++ test_unitstage (unitstage.py);
 aarch64-linux-gnu-nm,readelf icount.py,test_unitstage; aarch64-linux-gnu-as,ld,objcopy test_icount; ar,clang test_coffnorm;
 git verdict.py,l1.py,test_gates; ldd,true test_runtime; g++,llvm-config-18 build a64access.cc (objstub.py, test_a64access).
 The a64access build set is derived the same way: every header `g++ -M` reports for a64access.cc under `llvm-config-18 --cxxflags`,
-and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules (version in python.modules, installed content sha256 in python.wheels, see wheel_digest): capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts, perf, check_mirror); pefile (platform/manifest/regsites.py); numpy (lift/test/instest.py packer); z3-solver, keystone-engine, gmpy2 (lift/proof, lift/bench, lift/test)."""
+and every library file `llvm-config-18 --libfiles` names for A64ACCESS's components (plus cc1plus, libstdc++.so above). The clang set (clang-18 plugins such as vtnames; clang -m32 compiles) is derived the same way: the headers under `llvm-config-18 --includedir` that a plugin includes (CLANG_API) with the whole clang/ tree they sit in, the libraries of CLANG_LIBS under `--libdir`, and every header `clang -m32 -M` reports for a C probe including stdint.h and stdlib.h (gnu/stubs-32.h: libc6-dev-i386). Python modules (version in python.modules, installed-files sha256 in python.installed_files_sha256, see wheel_digest; wheel file sha256 in python.wheel_sha256): capstone, unicorn (icount.py, test_icount, test_runtime); pyelftools (stage tools of contract/: objfacts, perf, check_mirror); pefile (platform/manifest/regsites.py); numpy (lift/test/instest.py packer); z3-solver, keystone-engine, gmpy2 (lift/proof, lift/bench, lift/test)."""
 import argparse
 import csv
 import ctypes
@@ -45,10 +47,39 @@ CLANG_LIBS = ["libclang-cpp.so.18.1", "libclang.so"]   # under `llvm-config-18 -
 M32_PROBE = "#include <stdint.h>\n#include <stdlib.h>\nint main(){return 0;}\n"   # clang -m32 -M: every header a 32-bit compile of the C library reads (gnu/stubs-32.h: libc6-dev-i386)
 PY_MODULES = {"capstone": "capstone", "gmpy2": "gmpy2", "keystone-engine": "keystone", "numpy": "numpy", "unicorn": "unicorn",
               "pyelftools": "elftools", "z3-solver": "z3", "pefile": "pefile"}   # distribution -> import name
+RENDER_LIBS = ["libEGL.so.1", "libEGL_mesa.so.0"]   # ldconfig names: the EGL loader the published libnxgl4.so links, and the Mesa vendor it dispatches to (NXGL4_HOST.md section 2); their loader closure (mesa-libgallium, libllvm, ...) is derived
+RENDER_FILES = ["/usr/share/glvnd/egl_vendor.d/50_mesa.json"]   # read by libEGL.so.1 to find that vendor
+def HOST_GCC_PLUGIN_DIRS(gcc):
+    """Every file of the plugin directory of compiler GCC (`gcc -print-file-name=plugin`: the gcc-N-plugin-dev package of a distro compiler)."""
+    d = subprocess.run([gcc, "-print-file-name=plugin"], capture_output=True, text=True).stdout.strip()
+    return [os.path.join(r, f) for r, _, fs in os.walk(d) for f in fs] if os.path.isdir(d) else []
+
 KERNEL = ["unshare mount+pid+net+uts+ipc namespaces as root", "seccomp filter", "ptrace (strace)"]
 
 def env_id(doc):
     return hashlib.sha256(json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+def wheel_files(dist):
+    """{path: sha256 hex} of the installed files of distribution DIST that its RECORD hashes (no .pyc, no installer-written files), read from
+    the disk: a file that differs from its RECORD entry makes the digest differ (the entry is not trusted, the content is hashed)."""
+    import base64
+    import csv
+    d, out = metadata.distribution(dist), {}
+    for row in csv.reader(d.read_text("RECORD").splitlines()):
+        path, h = row[0], row[1] if len(row) > 1 else ""
+        if not h.startswith("sha256=") or path.endswith(".pyc") or "__pycache__" in path.split("/"):
+            continue
+        f = d.locate_file(path)
+        have = hashlib.sha256(open(f, "rb").read()).hexdigest() if os.path.isfile(f) else "missing"
+        want = base64.urlsafe_b64decode(h[7:] + "=" * (-len(h[7:]) % 4)).hex()
+        out[path] = have if have == want else "differs-from-record:" + have
+    return out
+
+
+def wheel_digest(dist):
+    """sha256 over the sorted (path, content hash) lines of wheel_files(DIST): names the installed wheel by its content."""
+    return hashlib.sha256("".join("%s %s\n" % kv for kv in sorted(wheel_files(dist).items())).encode()).hexdigest()
+
 
 def tree_digest(d):
     """sha256 of the sorted (relative path, size) listing of tree D."""
@@ -148,19 +179,49 @@ PROBES = {KERNEL[0]: lambda: os.geteuid() == 0 and _children(_unshare), KERNEL[1
 # files the installer writes into .dist-info (not the wheel's content: they name the installer and how it was asked)
 INSTALLER_FILES = ("INSTALLER", "REQUESTED", "direct_url.json")
 
-def wheel_digest(dist):
-    """sha256 of the installed content of distribution DIST: the sorted `path,hash` rows of its RECORD that carry a content hash (the
-    wheel's own file hashes, as the installer wrote them; unhashed rows such as __pycache__, the installer's console scripts (paths outside the site directory, shebang rewritten) and the
-    installer's own INSTALLER/REQUESTED/direct_url.json are not content). A different wheel, a
-    modified or a missing file is a different digest; the version alone does not pin the bytes."""
-    rows = []
-    for line in (metadata.distribution(dist).read_text("RECORD") or "").splitlines():
-        f = next(csv.reader([line]), [])
-        if len(f) >= 2 and f[1] and not f[0].startswith("../") and f[0].rsplit("/", 1)[-1] not in INSTALLER_FILES:
-            rows.append(f[0] + "," + f[1])
-    return hashlib.sha256("\n".join(sorted(rows)).encode()).hexdigest()
+def wheel_files(dist):
+    """{path: sha256 hex} of the installed files of distribution DIST that its RECORD hashes, hashed from the DISK (a file that differs
+    from its RECORD entry shows as `differs-from-record:<hash>`, a missing one as `missing`): the RECORD entry is the wheel's own hash,
+    the content is what is verified. Not content, so not listed: .pyc and __pycache__, the files pip/uv write themselves (INSTALLER,
+    REQUESTED, direct_url.json, RECORD) and rows outside the site directory (`../`: console scripts, whose shebang the installer
+    rewrites). The digest is the same for pip, uv, --no-compile, --target."""
+    import base64
+    d, out = metadata.distribution(dist), {}
+    for line in d.read_text("RECORD").splitlines():
+        row = next(csv.reader([line]), [])
+        path, h = row[0], row[1] if len(row) > 1 else ""
+        if (not h.startswith("sha256=") or path.endswith(".pyc") or "__pycache__" in path.split("/") or path.startswith("../")
+                or path.rsplit("/", 1)[-1] in INSTALLER_FILES + ("RECORD",)):
+            continue
+        f = d.locate_file(path)
+        have = hashlib.sha256(open(f, "rb").read()).hexdigest() if os.path.isfile(f) else "missing"
+        want = base64.urlsafe_b64decode(h[7:] + "=" * (-len(h[7:]) % 4)).hex()
+        out[path] = have if have == want else "differs-from-record:" + have
+    return out
 
-def check(doc):
+def wheel_digest(dist):
+    """sha256 over the sorted (path, content hash) lines of wheel_files(DIST): names the installed wheel by its content."""
+    return hashlib.sha256("".join("%s %s\n" % kv for kv in sorted(wheel_files(dist).items())).encode()).hexdigest()
+
+def _root_compilers(repo=None):
+    """Driver names of the distribution compilers (no external) of the admitted product roots of the checkout, from admit.json and the recipes."""
+    import recipe
+    repo = repo or os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
+    try:
+        roots = recipe.load_admit(repo)
+    except (OSError, ValueError):
+        return []
+    out = set()
+    for r, e in roots.items():
+        if e.get("class") == "product":
+            rec = recipe.load_recipe(repo, roots, r)
+            c = rec.get("compiler") if isinstance(rec, dict) else None
+            if isinstance(c, dict) and "external" not in c:
+                out |= {c[k] for k in ("cc", "cxx") if isinstance(c.get(k), str)}
+    return sorted(out)
+
+
+def check(doc, repo=None):
     """List of mismatch lines (empty = the machine is the declared environment)."""
     bad = []
     def cmp(item, want, have):
@@ -178,14 +239,14 @@ def check(doc):
         except metadata.PackageNotFoundError:
             have = "not installed"
         cmp("python module " + m, ver, have)
-    for m, dg in sorted(doc["python"].get("wheels", {}).items()):
+    for m, dg in sorted(doc["python"].get("installed_files_sha256", {}).items()):
         try:
             have = wheel_digest(m)
         except metadata.PackageNotFoundError:
             have = "not installed"
-        cmp("python module %s content sha256" % m, dg[:12], have[:12])
-    for m in sorted(set(doc["python"]["modules"]) - set(doc["python"].get("wheels", {}))):
-        bad.append("env: python module %s: no content sha256 in python.wheels" % m)
+        cmp("python module %s installed files sha256" % m, dg[:12], have[:12])
+    for m in sorted(set(doc["python"]["modules"]) - set(doc["python"].get("installed_files_sha256", {}))):
+        bad.append("env: python module %s: no installed-files sha256 in python.installed_files_sha256" % m)
     for m in sorted(doc["python"]["modules"]):
         h = doc["python"].get("wheel_sha256", {}).get(m)
         if not (isinstance(h, str) and len(h) == 64 and all(c in "0123456789abcdef" for c in h)):
@@ -207,6 +268,11 @@ def check(doc):
         pk = own.get(real, set())
         if not (pk & set(doc["packages"])) and real != os.path.realpath(sys.executable):
             cmp("program " + prog, "owned by a listed package", "%s owned by %s" % (real, sorted(pk) or "no package"))
+    own = own or _owners()
+    for drv in _root_compilers(repo):   # a distro compiler of an admitted root: its plugin headers (objstub's plugin) belong to a listed package
+        files = HOST_GCC_PLUGIN_DIRS(shutil.which(drv) or drv)
+        miss = sorted({p for f in files for p in [sorted(own.get(os.path.realpath(f), {"no package"}))[0]] if p not in doc["packages"]})
+        cmp("plugin headers of " + drv, "owned by listed packages", "no plugin headers" if not files else ("owned by %s" % miss if miss else "owned by listed packages"))
     for need in doc["kernel"]["needs"]:
         ok = need in PROBES and PROBES[need]()
         cmp("kernel " + need, "available", "available" if ok else ("unavailable" if need in PROBES else "unknown capability"))
@@ -240,7 +306,7 @@ def deb_pins(doc):
 
 def wheel_pins(prev):
     """(python.wheel_sha256, python.wheel_files) of the new snapshot: the sha256 and the file name of each module's wheel FILE (what
-    farm/install_debs.py installs from the mirror's wheels/ with pip --no-index --require-hashes). The installed package does not
+    farm/install_mirror.py installs from the mirror's wheels/ with pip --no-index --require-hashes). The installed package does not
     carry them, so they are taken from the previous env.json PREV for the same version; a new module or version needs its wheel added
     to the mirror and both entries written by hand (a deliberate act), else this is an error."""
     old = (prev or {}).get("python", {})
@@ -305,10 +371,21 @@ def snapshot(prev=None):
     for flag, names in (("-print-prog-name=", HOST_GCC_PROGS), ("-print-file-name=", HOST_GCC_FILES)):
         for n in names:
             add(subprocess.run([gcc, flag + n], capture_output=True, text=True).stdout.strip())
+    for p in HOST_GCC_PLUGIN_DIRS(gcc):   # objstub builds its terminator plugin against the plugin headers of the root compiler (host roots: the distro gcc)
+        add(p)
+    ld = subprocess.run(["/sbin/ldconfig", "-p"], capture_output=True, text=True, check=True).stdout
+    for n in RENDER_LIBS:   # the renderer's host libraries (verify/bootgpu.py loads libnxgl4.so; test_bootgpu, test_boot_job, boot_job.sh)
+        hit = [l.split("=>")[1].strip() for l in ld.splitlines() if l.strip().startswith(n + " ") and "x86-64" in l]
+        if not hit:
+            raise SystemExit("envcheck: %s is not in the loader cache (the renderer's host library)" % n)
+        add(os.path.realpath(hit[0]))
+        loads([os.path.realpath(hit[0])])
+    for f in RENDER_FILES:
+        add(f)
     return {"format": FORMAT, "os": _os(), "arch": platform.machine(),
             "uid": os.geteuid(), "trees": {t: tree_digest(t) for t in trees}, "packages": {p: _dpkg(p) for p in sorted(pk)},
             "python": {"version": platform.python_version(), "modules": {m: metadata.version(m) for m in sorted(PY_MODULES)},
-                       "wheels": {m: wheel_digest(m) for m in sorted(PY_MODULES)},
+                       "installed_files_sha256": {m: wheel_digest(m) for m in sorted(PY_MODULES)},
                        "wheel_sha256": wheel_pins(prev)[0], "wheel_files": wheel_pins(prev)[1]},
             "programs": sorted(PROGRAMS), "kernel": {"needs": KERNEL}, "debs": (prev or {}).get("debs")}
 
