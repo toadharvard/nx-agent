@@ -1414,6 +1414,17 @@
    "owner": "L3a"
   },
   {
+   "id": "ASM-233",
+   "text": "A relocated dword in the middle of an instruction's bytes is table data and is never executed (lift/tools/ehtables.py code-vs-data decode).",
+   "used_by": [
+    "ports/fnv-nx/lift/tools/ehtables.py"
+   ],
+   "aliases": [],
+   "status": "REMOVE",
+   "removed_by": "planned: the reloc-consistency rule of L3a w7's facts commit after a0f3d8e, plus data_in_code.tsv per image. A decoding is code only if every relocation lands on an imm32/disp32 field; a misfit refuses candidates and is red under proven flow in all images; jtab, EH and class-3 consumer ranges are data by their rule; the L2 code/data classification is an input",
+   "owner": "L3a"
+  },
+  {
    "id": "ASM-320",
    "text": "rt/rcptab.cert.json was produced by farm/rcpcert.sh on a CPU with the reference identity.",
    "used_by": [

@@ -21,7 +21,7 @@ def main():
     os.makedirs(work, exist_ok=True)
     src = os.path.join(work, 't.cc'); obj = os.path.join(work, 't.o')
     open(src, 'w').write(L.prelude(os.path.join(LIFT, 'rt')) + SRC)
-    flags = [f for f in liftgen.PACK_CXX_FLAGS if f != '-Werror=attributes'] + ['-Wno-attributes']
+    flags = [f for f in liftgen.resolved_flags() if f != '-Werror=attributes'] + ['-Wno-attributes']
     subprocess.check_call(['aarch64-linux-gnu-g++', '-x', 'c++', '-c'] + flags + ['-o', obj, src])
     dis = subprocess.run(['aarch64-linux-gnu-objdump', '-d', obj], capture_output=True, text=True, check=True).stdout
     insn = {int(m.group(1), 16): m.group(2).split()[0] for m in re.finditer(r'^\s*([0-9a-f]+):\t[0-9a-f]{8} *\t(.*)$', dis, re.M)}

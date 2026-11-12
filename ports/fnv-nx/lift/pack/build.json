@@ -7,57 +7,72 @@
  },
  "flags": {
   "c": [
-   "-mabi=ilp32",
    "-Werror=attributes"
   ],
   "cxx": [
-   "-mabi=ilp32",
    "-std=gnu++17",
    "-O2",
-   "-fms-extensions",
-   "-fshort-wchar",
-   "-frounding-math",
-   "-fsigned-char",
-   "-fno-strict-aliasing",
-   "-fwrapv",
-   "-fno-delete-null-pointer-checks",
-   "-fcheck-new",
-   "-fno-sized-deallocation",
-   "-fno-lifetime-dse",
-   "-ffp-contract=off",
-   "-fPIC",
-   "-march=armv8-a+crc+crypto",
-   "-mtune=cortex-a57",
-   "-fno-stack-protector",
-   "-fno-stack-clash-protection",
-   "-mno-outline-atomics",
-   "-U_FORTIFY_SOURCE",
-   "-ffreestanding",
-   "-fno-exceptions",
-   "-fno-asynchronous-unwind-tables",
-   "-fno-math-errno",
-   "-fno-jump-tables",
-   "-fno-ipa-ra",
-   "-ffixed-x19",
-   "-ffixed-x20",
-   "-ffixed-x21",
-   "-ffixed-x22",
-   "-ffixed-x23",
-   "-ffixed-x24",
-   "-ffixed-x25",
-   "-ffixed-x26",
-   "-ffixed-x27",
    "-Werror=attributes"
   ],
-  "asm": [
-   "-mabi=ilp32",
-   "-fPIC"
-  ]
+  "asm": []
  },
  "include": [
   "/ext/liftpack/inc"
  ],
  "units": "all",
+ "plugin_cxx": "x86_64-linux-gnu-g++-13",
+ "plugins": [
+  {
+   "name": "fnvnx_ftoi",
+   "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc",
+   "args": {
+    "mode": "lifted"
+   }
+  },
+  {
+   "name": "fnvnx_order",
+   "source": "ports/fnv-nx/toolchain/order/fnvnx_order.cc",
+   "args": {
+    "args": "rtl",
+    "object": "msvc",
+    "operator": "rtl",
+    "assign": "msvc"
+   }
+  },
+  {
+   "name": "fnvnx_sdd",
+   "source": "ports/fnv-nx/toolchain/sdd/fnvnx_sdd.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_pi",
+   "source": "ports/fnv-nx/toolchain/pi/fnvnx_pi.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_dispatch",
+   "source": "ports/fnv-nx/toolchain/dispatch/fnvnx_dispatch.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_addr",
+   "source": "ports/fnv-nx/toolchain/addr/fnvnx_addr.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_names",
+   "source": "ports/fnv-nx/toolchain/names/fnvnx_names.cc",
+   "args": {}
+  },
+  {
+   "name": "fnvnx_layout",
+   "source": "ports/fnv-nx/toolchain/layout/fnvnx_layout.cc",
+   "args": {},
+   "inputs": [
+    "ports/fnv-nx/toolchain/names/fnvnx_names.cc"
+   ]
+  }
+ ],
  "generated": [
   {
    "tool": "ports/fnv-nx/lift/tools/packcopy.py",

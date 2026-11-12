@@ -20,7 +20,7 @@
  },
  "include": [
   "ports/fnv-nx/lift/rt",
-  "ports/fnv-nx/shim/include"
+  "ports/fnv-nx/platform/include"
  ],
  "units": "all",
  "link": null,
@@ -29,7 +29,9 @@
   {
    "name": "fnvnx_ftoi",
    "source": "ports/fnv-nx/toolchain/ftoi/fnvnx_ftoi.cc",
-   "args": {}
+   "args": {
+    "mode": "native"
+   }
   },
   {
    "name": "fnvnx_order",
