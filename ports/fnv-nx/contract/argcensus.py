@@ -28,10 +28,10 @@ import gpa_names
 import iat
 
 
-def bridge_rows(path, dlls):
+def bridge_rows(path, dlls, names=None):
     """[(dll, name, argc, ordinal text)] of the stdcall function rows of the bridge for the dlls, sorted."""
     rows, _ = iat.bridge_rows(path)
-    return sorted((iat.norm_dll(r['dll']), r['name'], len(r['args']), r['ordinal']) for r in rows if iat.norm_dll(r['dll']) in dlls and r['conv'] == 'stdcall')
+    return sorted((iat.norm_dll(r['dll']), r['name'], len(r['args']), r['ordinal']) for r in rows if iat.norm_dll(r['dll']) in dlls and r['conv'] == 'stdcall' and (not names or r['name'] in names))
 
 
 def uses(img, dll, name, ordinal=''):
@@ -113,6 +113,7 @@ def main(argv=None):
     ap.add_argument('--images-file', required=True)
     ap.add_argument('--bridge', required=True)
     ap.add_argument('--dll', action='append', required=True)
+    ap.add_argument('--name', action='append', default=[], help='only these function names of the dlls (default: every stdcall function)')
     ap.add_argument('--gpa')
     ap.add_argument('--loadlib')
     ap.add_argument('--escape', action='append', default=[])
@@ -121,7 +122,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     dlls = sorted(iat.norm_dll(d) for d in a.dll)
     imgs = gpa_names.load_images(gpa_names.specs_of(a.images_file), a.bridge, a.escape, a.writes)
-    rows, agg = census(imgs, bridge_rows(a.bridge, dlls))
+    rows, agg = census(imgs, bridge_rows(a.bridge, dlls, set(a.name)))
     os.makedirs(a.out, exist_ok=True)
     with open(os.path.join(a.out, 'argcensus.tsv'), 'w', newline='\n') as fh:
         fh.write('dll\tname\targc\timage\tref\tcall\tk\tstatus\tvalues\tother\tbreaks\n')

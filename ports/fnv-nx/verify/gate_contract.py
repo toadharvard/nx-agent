@@ -57,7 +57,7 @@ RESULTS = {"units": "the root's link stage", "addrmap": "the root's link stage",
 # inputs of the link-side gates; a key is required only by the gates that read it (a gate without its key is red, naming it and its owner)
 OPT_PATHS = {"reach_requests": ("reach, reachlink", "L5: platform manifest reach_requests.tsv"),
              "dynsites": ("gpa", "L5: dynsites.tsv")}
-OPT_KEYS = set(OPT_PATHS) | {"keys", "bridge"}
+OPT_KEYS = set(OPT_PATHS) | {"keys", "bridge", "escape", "writes"}
 CONTRACT_GATES = ("n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcrel", "bodysel")
 LINK_GATES = ("abs", "disp", "reach", "reachlink", "gpa")
 GATES = CONTRACT_GATES + LINK_GATES
@@ -96,7 +96,7 @@ def load_inputs(path):
         names = [e.get("name") for e in exts if isinstance(e, dict)]
         if len(set(names)) != len(names):
             err.append("external names are not unique")
-        for k in PATHS + tuple(k for k in ("reach_requests", "dynsites", "keys", "bridge") if k in doc):
+        for k in PATHS + tuple(k for k in ("reach_requests", "dynsites", "keys", "bridge", "escape", "writes") if k in doc):
             v = doc.get(k)
             if not isinstance(v, str) or "/" not in v or v.split("/", 1)[0] not in names or ".." in v.split("/"):
                 err.append("%s must be NAME/path inside a declared external" % k)
@@ -170,7 +170,11 @@ def stages(w, doc, ext, rp):
     P = lambda k: rp[k] if k in rp else P2(ext, doc[k])
     link = w + "/link"
     imgs = ["--images-file", w + "/loadlib/images.tsv"]
+    # the platform tables of the may-write rule (memfx.ImportInfo): import_escape.tsv (retention letters) and import_writes.tsv (n = never
+    # written through); a key the inputs document does not name is not passed (the rule then treats every pointer argument as e / w)
     bridge = ["--bridge", P2(ext, doc["bridge"])] if doc.get("bridge") else []
+    tables = (["--escape", P2(ext, doc["escape"])] if doc.get("escape") else []) + (["--writes", P2(ext, doc["writes"])] if doc.get("writes") else [])
+    bridge = bridge + tables
     opt = lambda k: P2(ext, doc[k]) if k in doc else None
     st = {
         "exefacts": (py("exefacts.py", "--exe", P("exe"), "--units", rp["units"], "--out", w + "/facts.json"), ["facts.json"]),
@@ -186,7 +190,7 @@ def stages(w, doc, ext, rp):
                     ["bodysel.tsv", "gate/bodysel.json"]),
         "abs": (py("../link/gate_abs.py", "--inputs", w + "/inputs.rsp", "--elf", link + "/guest/fnvnx.elf"), ["gate/abs.json"]),
         "loadlib": (py("loadlib.py", "--exe", P("exe"), "--dir", ext["exe"]["host"], "--dir", ext["redist"]["host"], "--ranges-exe", P2(ext, doc["ranges"]["exe"]),
-                       "--ranges-module", P2(ext, doc["ranges"]["module"]), *(["--bridge", P2(ext, doc["bridge"])] if doc.get("bridge") else []), *(["--sites", opt("dynsites")] if doc.get("dynsites") else []),
+                       "--ranges-module", P2(ext, doc["ranges"]["module"]), *bridge, *(["--sites", opt("dynsites")] if doc.get("dynsites") else []),
                        "--out", w + "/loadlib"), ["loadlib/loadlib.tsv", "loadlib/images.tsv", "gate/loadlib.json"]),
         "gpa": (py("gpa_names.py", "--sites", opt("dynsites") or "", *imgs, *bridge, "--out", w + "/gpa"), ["gpa/gpa_names.tsv", "gate/gpa.json"]),
         "reach": (py("gate_reach.py", "--requests", opt("reach_requests") or "", "--gpa", w + "/gpa/gpa_names.tsv", *imgs, *bridge, "--out", w + "/reach/reach.tsv",
