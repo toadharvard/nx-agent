@@ -1,130 +1,155 @@
 #!/usr/bin/env python3
-"""The programs a set of shell scripts invokes, read from their text (stdlib only).
+"""The programs shell scripts invoke, derived from a real parse (shfmt --tojson, the pinned shfmt package; stdlib otherwise).
     python3 -I script_programs.py FILE.sh... [--json]
-Prints one command word per line: every word in command position of a simple command (after `;` `&&` `||` `|` `(` `)` `{` `}` `$(` a
-backtick, a newline, `then` `do` `else`; leading VAR=value assignments, `!`, `exec`, `command`, `env`, `time`, `sudo` skipped), minus shell
-builtins and keywords, `[` `[[` `:` and the functions the scripts define. A word that is not a literal (it starts with $ or a quote)
-is printed with a leading `?`: such a command is dynamic and its value is a build input to be declared. Here-documents are not shell
-(their opener's command is still read) and comments are dropped. A word with a `/` is a path to a file of the build, not a program of the
-host, and is left out; a program the scripts reach through PATH is what the profile has to provide."""
-import re
+Prints one program name per line, then, on stderr, one `dynamic:` line per command whose name is not a literal; any dynamic command
+makes the exit status 1 (a name that is a variable or an expansion cannot be derived statically: the build declares it or removes it).
+Rule: shfmt parses each file into a syntax tree; every command node (CallExpr: simple commands, also inside $(..), `..`, pipelines,
+subshells, functions, loops, conditions, process substitutions) names its program by its first word. That word is literal when all its
+parts are literal text (plain or quoted). Not programs: shell builtins and keywords (bash's own list, `bash -c compgen -b`), functions
+the scripts define, and words with a `/` (files of the build). A runner is followed to the program it runs: exec command env nohup time
+nice timeout sudo setsid stdbuf chroot xargs, `find ... -exec/-execdir CMD`, and `sh|bash|dash -c 'LITERAL'` (the literal is parsed
+the same way). Here-documents are data."""
+import json
+import subprocess
 import sys
 
-KEYWORDS = {"if", "then", "else", "elif", "fi", "for", "while", "until", "do", "done", "case", "esac", "in", "function", "select", "!",
-            "{", "}", "time", "exec", "command", "env", "sudo", "nohup", "builtin"}
-BUILTINS = {":", "[", "[[", "true", "false", "cd", "echo", "printf", "read", "set", "export", "unset", "shift", "exit", "return", "trap",
-            "source", ".", "eval", "test", "local", "declare", "readonly", "wait", "umask", "type", "hash", "ulimit", "pwd", "alias",
-            "getopts", "let", "break", "continue", "mapfile", "readarray", "typeset", "kill", "jobs", "fg", "bg", "pushd", "popd"}
+WRAP = {"exec": 0, "command": 0, "env": 0, "nohup": 0, "time": 0, "nice": 0, "sudo": 0, "setsid": 0, "stdbuf": 0, "xargs": 0,
+        "chroot": 1, "timeout": 1}   # runner -> positional arguments before the command (chroot DIR, timeout DURATION)
+OPTARG = {"nice": {"-n"}, "timeout": {"-s", "-k"}, "env": {"-u", "-C", "-S"}, "sudo": {"-u", "-g", "-C", "-h", "-p", "-r", "-t", "-U"},
+          "xargs": {"-n", "-I", "-P", "-L", "-d", "-s", "-a", "-E"}, "stdbuf": set(), "chroot": {"--userspec", "--groups"},
+          "exec": {"-a"}, "command": set(), "nohup": set(), "time": {"-f", "-o"}, "setsid": set()}   # options of runners that take a value
+SHELLS = {"sh", "bash", "dash"}
 
 
-def strip_quotes(seg):
-    """Same-length copy of SEG with the contents of single- and double-quoted strings blanked (so that separators inside them do not
-    split); a `$(` inside double quotes is kept (as `; `) with its text up to the matching `)` (closed as `;`), so the command inside
-    is still read."""
-    out, i, q, depth = list(seg), 0, None, 0
-    while i < len(seg):
-        c = seg[i]
-        if q is None:
-            if c in "'\"":
-                q = c
-            elif c == "\\":
-                out[i] = " "
-                if i + 1 < len(seg):
-                    out[i + 1] = " "
-                i += 1
-        elif depth:
-            if c == "(":
-                depth += 1
-            elif c == ")":
-                depth -= 1
-                if depth == 0:
-                    out[i] = ";"
-            elif c in "\"'":
-                out[i] = " "
-        elif c == q:
-            q = None
-        elif q == '"' and c == "$" and seg[i + 1:i + 2] == "(":
-            out[i], out[i + 1] = " ", ";"
-            depth = 1
-            i += 1
-        else:
-            out[i] = " "
-        i += 1
+def parse(src):
+    p = subprocess.run(["shfmt", "--tojson"], input=src, capture_output=True, text=True)
+    if p.returncode != 0:
+        raise SystemExit("script_programs: shfmt: " + p.stderr.strip()[:300])
+    return json.loads(p.stdout)
+
+
+def prefix(w):
+    """The literal text of Word W up to its first non-literal part (a path such as ../gcc-$VER/configure has the prefix ../gcc-)."""
+    out = []
+    for part in w.get("Parts", []):
+        if part["Type"] not in ("Lit", "SglQuoted"):
+            break
+        out.append(part["Value"])
     return "".join(out)
 
 
-def commands(text):
-    funcs = set(re.findall(r"^\s*(?:function\s+)?([A-Za-z_][\w.-]*)\s*\(\)", text, re.M))
-    lines, hd = [], None
-    for ln in text.split("\n"):
-        if hd:
-            if ln.strip() == hd:
-                hd = None
-            continue
-        m = re.search(r"<<-?\s*(['\"]?)([A-Za-z_]\w*)\1", ln)
-        lines.append(ln)
-        if m:
-            hd = m.group(2)
-    found = []
-    joined = []
-    for ln in lines:   # join backslash continuations
-        if joined and joined[-1].endswith("\\"):
-            joined[-1] = joined[-1][:-1] + " " + ln.strip()
+def literal(w):
+    """The text of Word W if every part is literal, else None."""
+    out = []
+    for part in w.get("Parts", []):
+        t = part["Type"]
+        if t == "Lit":
+            out.append(part["Value"])
+        elif t == "SglQuoted":
+            out.append(part["Value"])
+        elif t == "DblQuoted":
+            inner = literal({"Parts": part.get("Parts", [])})
+            if inner is None:
+                return None
+            out.append(inner)
         else:
-            joined.append(ln)
-    arr = 0
-    for ln in joined:
-        ln = re.sub(r"(^|\s)#.*$", "", ln)
-        if arr:   # inside NAME=( ... ): words, not commands
-            arr += ln.count("(") - ln.count(")")
-            continue
-        if re.match(r"^\s*[A-Za-z_]\w*=\([^)]*$", ln):
-            arr = 1
-            continue
-        s = strip_quotes(ln)
-        # keep the raw words: split the stripped line to get the positions, read words from the original
-        parts = re.split(r"(;|&&|\|\||\||\(|\)|\{|\}|`|\$\(|&(?!>)|\bthen\b|\bdo\b|\belse\b)", s)
-        pos, prev = 0, ";"
-        for p in parts:
-            raw = ln[pos:pos + len(p)]
-            pos += len(p)
-            if p in (";", "&&", "||", "|", "(", ")", "{", "}", "`", "$(", "&", "then", "do", "else"):
-                prev = p
+            return None
+    return "".join(out)
+
+
+def walk(n, f):
+    if isinstance(n, dict):
+        f(n)
+        for v in n.values():
+            walk(v, f)
+    elif isinstance(n, list):
+        for v in n:
+            walk(v, f)
+
+
+def builtins():
+    p = subprocess.run(["bash", "-c", "compgen -b; compgen -k"], capture_output=True, text=True, check=True)
+    return set(p.stdout.split())
+
+
+def programs(src, bi=None):
+    """(set of programs, list of dynamic commands) of shell text SRC."""
+    bi = bi if bi is not None else builtins()
+    tree = parse(src)
+    funcs = set()
+    walk(tree, lambda n: funcs.add(n["Name"]["Value"]) if n.get("Type") == "FuncDecl" else None)
+    progs, dyn = set(), []
+
+    def name(args, i):
+        """Resolve the command whose name is word I of ARGS (following runners); add it to progs/dyn."""
+        while i < len(args):
+            w = literal(args[i])
+            if w is None:
+                if "/" not in prefix(args[i]):   # a path with an expansion is a file of the build, not a program
+                    dyn.append(src[args[i]["Pos"]["Offset"]:args[i]["End"]["Offset"]])
+                return
+            if w.startswith("-") or ("=" in w and w.split("=")[0].replace("_", "a").isalnum()):
+                i += 1   # an option or VAR=value of a runner
                 continue
-            if prev in (")", "}"):   # what follows a closing bracket is not a command position (the rest of a test, a case pattern)
-                prev = ";"
-                continue
-            words = [w for w in raw.split() if not re.match(r"^[\"']+$", w)]   # a lone quote is the rest of a string, not a word
-            while words:
-                w = words[0]
-                if re.match(r"^[A-Za-z_]\w*=", w) or w in KEYWORDS:
-                    words.pop(0)
-                    continue
-                if re.match(r"^\d*[<>]", w):   # a redirection before the command
-                    words.pop(0)
-                    continue
-                break
-            if not words:
-                continue
-            w = words[0]
-            if w[0] in "$\"'" or w.startswith("${"):
-                found.append("?" + w)
-            elif "/" in w or w in BUILTINS or w in funcs or not re.match(r"^[A-Za-z][A-Za-z0-9_.+-]*$", w):
-                continue
-            else:
-                found.append(w)
-    return found
+            break
+        else:
+            return
+        w = literal(args[i])
+        if "/" in w or w in funcs or (w in bi and w not in WRAP):
+            return
+        if w not in bi:
+            progs.add(w)
+        if w in WRAP:
+            j, skip = i + 1, WRAP[w]
+            while j < len(args):   # the runner's own options (and their values), VAR=value words and positional arguments
+                x = literal(args[j])
+                if x is not None and x.startswith("-"):
+                    j += 2 if x in OPTARG.get(w, ()) else 1
+                elif x is not None and "=" in x and x.split("=")[0].replace("_", "a").isalnum():
+                    j += 1
+                elif skip:
+                    skip -= 1
+                    j += 1
+                else:
+                    break
+            name(args, j)
+        elif w in SHELLS:
+            for j in range(i + 1, len(args) - 1):
+                if literal(args[j]) == "-c":
+                    s = literal(args[j + 1])
+                    if s is None:
+                        dyn.append("%s -c <non-literal>" % w)
+                    else:
+                        p2, d2 = programs(s, bi)
+                        progs.update(p2)
+                        dyn.extend(d2)
+        elif w == "find":
+            for j in range(i + 1, len(args) - 1):
+                if literal(args[j]) in ("-exec", "-execdir"):
+                    name(args, j + 1)
+
+    def visit(n):
+        if n.get("Type") == "CallExpr" and n.get("Args"):
+            name(n["Args"], 0)
+    walk(tree, visit)
+    return progs, dyn
 
 
 def main(a):
     files = [x for x in a if not x.startswith("--")]
-    names = sorted({c for f in files for c in commands(open(f, encoding="utf-8").read())})
+    progs, dyn = set(), []
+    for f in files:
+        p, d = programs(open(f, encoding="utf-8").read())
+        progs |= p
+        dyn += ["%s: %s" % (f, x) for x in d]
     if "--json" in a:
-        import json
-        print(json.dumps(names))
+        print(json.dumps({"programs": sorted(progs), "dynamic": dyn}))
     else:
-        print("\n".join(names))
+        print("\n".join(sorted(progs)))
+        for d in dyn:
+            print("dynamic: " + d, file=sys.stderr)
+    return 1 if dyn else 0
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    sys.exit(main(sys.argv[1:]))

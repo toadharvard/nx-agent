@@ -230,7 +230,7 @@ check("make_chroot refuses a directory that is not empty", rc.returncode == 2 an
 rc = subprocess.run(["bash", SETUP, "--profile", PN], capture_output=True, text=True)
 check("setup --profile needs NAME and CHROOT", rc.returncode == 1 and "usage" in rc.stderr, rc)
 
-# script_programs: the programs a build script invokes
+# script_programs: the programs a build script invokes, from a real parse (shfmt)
 SP = os.path.join(os.path.dirname(VERIFY), "farm", "script_programs.py")
 sh = os.path.join(TD, "b.sh")
 open(sh, "w").write("""#!/bin/bash
@@ -241,11 +241,29 @@ if ! patch -p1 -i x; then sed -i s/a/b/ y; fi
 python3 - "$1" <<'EOF2'
 import os
 EOF2
-echo "$(realpath .)" | tee out; f; "$CC" -c a.c; ./local.sh
+echo "$(realpath .)" | tee out; f; ./local.sh; ../gcc-$V/configure
+x=`dirname "$0"`; (cd d && ls); for i in 1; do cat $i; done
+find . -name x -exec chmod +x {} +; exec env A=1 nice -n 5 gzip
+bash -c 'grep -q x y; unzip z'; timeout 5 chroot "$CH" apt-get update
 """)
 rc = subprocess.run([sys.executable, "-I", SP, sh], capture_output=True, text=True)
-check("script_programs: command words, not options/builtins/functions/comments/paths; a dynamic command is marked",
-      rc.stdout.split() == ["?\"$CC\"", "make", "patch", "python3", "realpath", "sed", "tar", "tee"], rc.stdout)
+check("script_programs: every command node (nesting, backticks, subshells, runners, bash -c), no builtins/functions/paths/options/heredoc text",
+      rc.returncode == 0 and rc.stdout.split() == ["apt-get", "bash", "cat", "chmod", "chroot", "dirname", "env", "find", "grep", "gzip", "ls", "make", "nice", "patch",
+                                                    "python3", "realpath", "sed", "tar", "tee", "timeout", "unzip"], (rc.returncode, rc.stdout, rc.stderr))
+open(sh, "w").write('$CC -c a.c\n"${TOOL}" x\nok=1; true\n')
+rc = subprocess.run([sys.executable, "-I", SP, sh], capture_output=True, text=True)
+check("script_programs: a command name that is not literal is reported and exits 1", rc.returncode == 1 and rc.stderr.count("dynamic:") == 2, (rc.returncode, rc.stderr))
+open(sh, "w").write("make\nzzz-not-a-program\n$CC x\n")
+rc, out, err = ec("scripts", "--profile", PN, sh)
+check("envcheck scripts: a program outside the profile and a non-literal name are mismatches",
+      rc == 2 and "runs zzz-not-a-program, not in the profile's programs" in out and "command name is not literal: $CC" in out and "runs make" not in out, (rc, out))
+open(sh, "w").write("make\ngcc\n")
+rc, out, err = ec("scripts", "--profile", PN, sh)
+check("envcheck scripts: programs of the profile pass", rc == 0 and out.strip() == "envcheck: OK", (rc, out))
+d = doc()
+d["profiles"][PN]["prerequisites"].append("not-in-programs")
+rc, out, err = ec("check", "--env", write(d, "pre.json"))
+check("a prerequisite that is not among the profile's programs is a mismatch", rc == 2 and "programs lack prerequisites ['not-in-programs']" in out, (rc, out))
 
 shutil.rmtree(TD, ignore_errors=True)
 print("%d failed: %s" % (len(FAILED), FAILED) if FAILED else "ALL PASS")

@@ -37,7 +37,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 FORMAT = "fnvnx-env/1"
 PROGRAMS = ["strace", "busybox", "gcc", "aarch64-linux-gnu-g++", "aarch64-linux-gnu-nm", "aarch64-linux-gnu-readelf",
-            "aarch64-linux-gnu-as", "aarch64-linux-gnu-ld", "aarch64-linux-gnu-objcopy", "ar", "as", "ld", "clang", "git", "ldd", "true", "g++", "llvm-config-18"]
+            "aarch64-linux-gnu-as", "aarch64-linux-gnu-ld", "aarch64-linux-gnu-objcopy", "ar", "as", "ld", "clang", "git", "ldd", "true", "g++", "llvm-config-18", "shfmt"]
 UNIT_CC = "aarch64-linux-gnu-g++"  # the unit stage ingests its trees whole
 HOST_GCC_PROGS = ["cc1", "cc1plus", "collect2"]  # gcc -print-prog-name=: what the host gcc runs for the static probe / -fsyntax-only
 HOST_GCC_FILES = ["libc.a", "crt1.o", "libgcc.a", "libgcc_eh.a", "libstdc++.so"]  # gcc -print-file-name=: what `gcc -static` links
@@ -354,7 +354,25 @@ def profile_pins(name, prof):
             out.append(pre + "debs.packages.%s: needs version %s, file, sha256 (64 hex), origin and url" % (p, pk[p]))
     if not (isinstance(prof.get("programs"), list) and prof["programs"]):
         out.append(pre + "programs: the programs the build invokes (each must be owned by a pinned package)")
+    if not set(prof.get("prerequisites", [])) <= set(prof.get("programs", [])):
+        out.append(pre + "programs lack prerequisites %s" % sorted(set(prof.get("prerequisites", [])) - set(prof.get("programs", []))))
     return out
+
+def check_scripts(doc, name, files):
+    """Mismatch lines of the programs that shell scripts FILES invoke (farm/script_programs.py: a real shfmt parse) against build profile
+    NAME: every program must be in the profile's `programs` (which must be in PATH and owned by a pinned package in the chroot), and a
+    command whose name is not a literal (a variable, an expansion) is a mismatch: it cannot be derived statically."""
+    prof = doc.get("profiles", {}).get(name)
+    if prof is None:
+        return ["env: no profile %s" % name]
+    sys.path.insert(0, os.path.join(os.path.dirname(HERE), "farm"))
+    import script_programs
+    bad, have = [], set(prof.get("programs", []))
+    for f in files:
+        progs, dyn = script_programs.programs(open(f, encoding="utf-8").read())
+        bad += ["env: profile %s: %s runs %s, not in the profile's programs" % (name, f, p) for p in sorted(progs - have)]
+        bad += ["env: profile %s: %s: command name is not literal: %s" % (name, f, d) for d in dyn]
+    return bad
 
 def check_profile(doc, name):
     """Mismatch lines of THIS machine against build profile NAME: it is run inside the profile's chroot (farm/setup_verdict_env.sh
@@ -476,7 +494,8 @@ def snapshot(prev=None):
 
 def main(argv):
     ap = argparse.ArgumentParser(prog="envcheck.py")
-    ap.add_argument("cmd", choices=("check", "id", "snapshot"))
+    ap.add_argument("cmd", choices=("check", "id", "snapshot", "scripts"))
+    ap.add_argument("files", nargs="*", help="scripts: the shell scripts whose programs the profile must provide")
     ap.add_argument("--env", default=os.path.join(HERE, "env.json"))
     ap.add_argument("--json")
     ap.add_argument("-o")
@@ -495,7 +514,12 @@ def main(argv):
     if a.cmd == "id":
         print(env_id(doc))
         return 0
-    bad = check_profile(doc, a.profile) if a.profile else check(doc)
+    if a.cmd == "scripts":
+        if not a.profile:
+            ap.error("scripts needs --profile NAME FILE...")
+        bad = check_scripts(doc, a.profile, a.files)
+    else:
+        bad = check_profile(doc, a.profile) if a.profile else check(doc)
     print("\n".join(bad + ["envcheck: OK" if not bad else "envcheck: MISMATCH (%d)" % len(bad)]))
     if a.json:
         json.dump({"env_id": env_id(doc), "mismatches": bad}, open(a.json, "w"), sort_keys=True)
