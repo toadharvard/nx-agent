@@ -28,3 +28,9 @@ claude/fnv-l1-contract-w16 на origin не найдена, скретч-сли�
 
 Класс doc для render/d3d9, render/shaders, shim (в admit.json есть только doc, tool, product; класса «входные данные гейта» нет):
 replaced when render/d3d9 (L6), shim/include (L2) and the translator root land as product roots.
+
+## После слияния транка 29b41938 (2026-11-12)
+Слияние origin/claude/fnv-nx-clean 29b41938: 3473b49e. Конфликты gates.json и test_gates.py разрешены объединением
+(imports, machine, hostapi, d3d9total), правила гейтов не менялись. Среда: env.json добавил libegl-mesa0 и libegl1,
+setup_verdict_env.sh -> envcheck OK.
+Вердикт l1.py на 3473b49e: green, 27 гейтов, 247.3 s; pure 39/39, selftests 57/57, admit 463/463, oracle 57/57, d3d9total 332/332.
