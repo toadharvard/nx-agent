@@ -72,8 +72,7 @@ Wine 9.0 tree is the oracle class, not done. A row without a call site is no fin
 (D) DECLARED MACHINE. `fnvnx_declared_machine(uint32_t id)` (C linkage, writes nothing, RETURNS) is the second citation function: every rule of (W)
 applies unchanged (BL transparent for V, constant id, exactly one id of ONE citation function on every path, result equals the row, otherwise
 V, no address taken), with the table verify/declared_machine.tsv (`--declared-machine`; read_declared_table): rows
-`id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`, fact in DECL_FACTS (no-network, time-zone, registry), source `win-doc:<page>:<function>` or
-`wine-9.0:<path>:<function>` (the form only), kind/value as in (W). Findings carry the prefix `declared-machine-`. Stated limit: V cannot know which
+`id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`, fact and the source prefixes are read from the table's own header line (`# fact: ...; source: ...`: no-network, time-zone, registry, no-galaxy; win-doc, wine-9.0, galaxy-sdk), source `PREFIX:<page or path>:<function>` (the form only), kind/value as in (W). Findings carry the prefix `declared-machine-`. Stated limit: V cannot know which
 result is "success" of a network call, so a row saying success is not rejected; only a body that differs from its row is. A body that calls or
 stores is not V and needs no citation. The gate result counts call sites per id ("declared_machine").
 
@@ -1083,24 +1082,40 @@ def _wine_row(f):
                  re.fullmatch(r"(-?[0-9]+|0x[0-9a-fA-F]+),(-?[0-9]+|0x[0-9a-fA-F]+)" if f[3][3:5] == "nz" else r"-?[0-9]+|0x[0-9a-fA-F]+", f[4])))
 
 
-DECL_FACTS = ("no-network", "time-zone", "registry")   # the declared-machine facts of CLAUDE.md ("The declared machine"); a fourth fact is a new owner decision
-DECL_SOURCE = r"(win-doc:[A-Za-z0-9_./#+-]+:[A-Za-z_][A-Za-z0-9_@]*|wine-9\.0:[A-Za-z0-9_./+-]+:[A-Za-z_][A-Za-z0-9_@]*)"
+DECL_HEADER_FACT = re.compile(r"# fact: ([a-z][a-z0-9-]*(?: \| [a-z][a-z0-9-]*)*)")
+DECL_HEADER_SOURCE = re.compile(r"# fact: .*?source: (.*?); kind")
+
+
+def declared_header(lines):
+    """The accepted facts and source prefixes are read from the table's own header line (`# fact: A | B ...; source: P1:<..>:<function> | P2:...;
+    kind ...`), so the table and the check cannot disagree. -> (set of facts, regex of a source). ValueError when there is no such line."""
+    for l in lines:
+        m, s = DECL_HEADER_FACT.match(l), DECL_HEADER_SOURCE.match(l)
+        if m and s:
+            prefixes = [re.match(r"([a-z][a-z0-9.-]*):<", x.strip()) for x in s.group(1).split(" | ")]
+            if not all(prefixes):
+                raise ValueError("declared machine table header: a source form is not PREFIX:<..>:<function>: %r" % s.group(1)[:80])
+            body = r":[A-Za-z0-9_./#+-]+:[A-Za-z_][A-Za-z0-9_@]*"
+            return set(m.group(1).split(" | ")), "(" + "|".join(re.escape(x.group(1)) + body for x in prefixes) + ")"
+    raise ValueError("declared machine table has no header line `# fact: ...; source: ...; kind ...`")
 
 
 def read_declared_table(path):
     """declared_machine.tsv: `id<TAB>contract_name<TAB>fact<TAB>source<TAB>kind<TAB>value`; lines starting with # are comments. fact is one of
-    DECL_FACTS. source is the documented origin of the returned value, `win-doc:<Windows documentation page or header path>:<function>` or
+    the facts of the table's header line. source is the documented origin of the returned value, `win-doc:<Windows documentation page or header path>:<function>` or
     `wine-9.0:<path in the Wine source tree>:<function name>` (the FORM is validated; checking it against the documentation or a pinned Wine 9.0
     tree is the oracle class, not done here). id, kind and value as in the wine table (shared checks: wine_matches). Ids are a space of their
     own. -> {id: (contract name, fact, source, kind, value)}. ValueError when missing or malformed."""
     if not os.path.exists(path):
         raise ValueError("declared machine table %s does not exist" % path)
     out = {}
-    for l in read_list(path):
+    lines = read_list(path)
+    facts, source = declared_header(lines)
+    for l in lines:
         if l.startswith("#"):
             continue
         f = l.split("\t")
-        ok = len(f) == 6 and f[4] != "branch" and f[2] in DECL_FACTS and re.fullmatch(DECL_SOURCE, f[3]) and \
+        ok = len(f) == 6 and f[4] != "branch" and f[2] in facts and re.fullmatch(source, f[3]) and \
             _wine_row(f[:2] + ["wine-9.0:x:x"] + f[4:])   # id, name, kind and value: the rules of the wine table, same columns
         if not ok or int(f[0]) in out:
             raise ValueError("bad or duplicate declared machine row in %s: %r" % (path, l[:80]))
