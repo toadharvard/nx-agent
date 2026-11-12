@@ -443,5 +443,41 @@ class Cli(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
 
 
+class FixtureMode(unittest.TestCase):
+    """RECIPE.md "Fixtures": one unit per finding class; the gate reports exactly that code on the unit (fixture_findings) and nothing else. The objects are
+    assembled here; the f2i report is the plugin's file format (hand-written until fnvnx_ftoi lands: the fixtures that need it are marked F2I)."""
+    def codes(self, text, report, asm=False):
+        with workdir() as d:
+            o = asm_object(d, 'fx', text)
+            if report is not None:
+                put(o + '.f2i.json', report)
+            items = G.judge_objects_coded('R', [('fx.c', o)], None, None)
+            return [f['code'] for f in G.fixture_findings('R', items) if f['id'] == 'R/fx.c']
+
+    def test_rcp_estimate(self):
+        self.assertEqual(self.codes('frecpe s0, s1', nosites('fx.c')), ['rcp-estimate'])
+
+    def test_undecodable_bytes(self):
+        self.assertEqual(self.codes('.inst 0x0f0f0f0f', nosites('fx.c')), ['undecodable'])
+
+    def test_F2I_conv_is_red(self):
+        self.assertEqual(self.codes('nop', f2i('fx.c', [{'function': 'g', 'file': 'x.c', 'line': 1, 'kind': 'conv'}], 1)), ['f2i-conv'])
+
+    def test_F2I_asm_is_red(self):
+        self.assertEqual(self.codes('nop', f2i('fx.c', [{'function': 'g', 'file': 'x.c', 'line': 1, 'kind': 'asm'}], 1)), ['f2i-asm'])
+
+    def test_F2I_builtin_is_green(self):
+        self.assertEqual(self.codes('nop', f2i('fx.c', [{'function': 'g', 'file': 'x.c', 'line': 1, 'kind': 'builtin'}], 1)), [])
+
+    def test_F2I_missing_report_is_red(self):
+        self.assertEqual(self.codes('nop', None), ['f2i-report-missing'])
+
+    def test_float_to_int_instruction_without_site(self):
+        self.assertEqual(self.codes('fcvtzs w0, s0', nosites('fx.c')), ['fcvt-no-site'])
+
+    def test_clean_unit_has_no_finding(self):
+        self.assertEqual(self.codes('fadd s0, s1, s2', nosites('fx.c')), [])
+
+
 if __name__ == '__main__':
     unittest.main()
