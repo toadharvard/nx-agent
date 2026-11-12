@@ -81,13 +81,13 @@ with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "guest_compil
 SDD_DEFINE = "-DFNVNX_SDD=1"   # per root: the plugin fnvnx_sdd needs it (and -fno-devirtualize, which is in the semantic set of a guest root)
 SDD_FLAGS = (SDD_DEFINE, "-fno-devirtualize")   # what a NATIVE C++ root of a host target holds itself
 LANG_X = {"c": "c", "cxx": "c++", "asm": "assembler-with-cpp"}   # the driver's -x language of each kind of unit
-# What a guest build.json may carry (per-root classes); every other -f/-m/... token comes from flags.semantics and is refused here. Warnings and
-# diagnostics, defines, the language standard, the optimisation level (-O0..-O3, -Os, -Og: not -Ofast, which switches FP semantics), debug info,
-# section splitting. -Wa, -Wl, -Wp are driver pass-throughs, not warnings.
 # The one variant that changes the compiler's own behaviour but no code: a garbage collection after every function (the plugins' GC-rooting stress).
 # Its flags are the root's flags plus exactly these parameters, so its objects are the same bytes as the root's (a test asserts that).
 GCSTRESS_VARIANT = "gcstress"
 GCSTRESS_FLAGS = ["--param", "ggc-min-expand=0", "--param", "ggc-min-heapsize=0"]
+# What a guest build.json may carry (per-root classes); every other -f/-m/... token comes from flags.semantics and is refused here. Warnings and
+# diagnostics, defines, the language standard, the optimisation level (-O0..-O3, -Os, -Og: not -Ofast, which switches FP semantics), debug info,
+# section splitting. -Wa, -Wl, -Wp are driver pass-throughs, not warnings.
 PER_ROOT = re.compile(r"-W(?![alp],)[^\s]*|-D[^\s]+|-std=[^\s]+|-O[0-3sg]|-g[^\s]*|-ffunction-sections|-fdata-sections")
 # The options of every link, fixed by the rule (RECIPE.md "Link"): the specs of the gcc driver for the ILP32 PIE multilib, no gc-sections, no id.
 LD_FIXED = ["--build-id=none", "-pie", "--no-dynamic-linker", "-z", "text", "-z", "now", "-z", "pack-relative-relocs", "-z", "max-page-size=0x1000",
