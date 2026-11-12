@@ -7,12 +7,12 @@
  *     ranges are carved out of the alias region (svcGetInfo InfoType_AliasRegionAddress/Size);
  *   - the address-space type must keep the alias region inside the 32-bit range used by ILP32 pointers.
  */
-#include "os_clock.h"
-#include "os_world.h"
+#include "../../platform/os/os_clock.h"
+#include "../../platform/os/os_world.h"
 
 /* os_cpu_count, os_vm_page_size, os_default_root, os_fs_case_insensitive: manifest/env_const.tsv (os_default_root = FNVNX_SD_DIR,
  * toolchain/include/fnvnx/sdlayout.h) */
-#include "env_const_horizon.gen.inc"
+#include "../../platform/os/env_const_horizon.gen.inc"
 
 #include <switch/types.h>
 #include <switch/result.h>
@@ -354,7 +354,7 @@ int32_t os_tz_offset_minutes(void)
     char n[8];
     return tzr_at((int64_t)(os_wall_time_us() / 1000000), &off, &dst, n) ? 0 : off / 60;
 }
-#include "os_tzrule.inc"
+#include "../../platform/os/os_tzrule.inc"
 
 /* ---- files: newlib POSIX on the fsdev devoptab */
 static int neg_errno(void)

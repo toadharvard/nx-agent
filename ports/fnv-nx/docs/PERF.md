@@ -470,7 +470,7 @@ shader accumulator's list pools (0x011c5f80), Havok collision objects, fonts and
 There is no ILP32 TSan and no hardware. `linhost` is a freestanding LP64 Linux stand-in for the Switch host module:
 threads by `clone`, address wait/wake by futexes, `placement.h` applied with `sched_setaffinity` (Switch cores 0-3 ->
 host CPUs 0-3). `guest.elf` is ILP32 code over the real `platform/win32` (sync, thread, handles),
-`toolchain/guest/os_guest.c` and `threads.c`. The test is compiled with GCC's `-fsanitize=thread`, and `hb.c` is the
+`platform/guest/os_guest.c` and `threads.c`. The test is compiled with GCC's `-fsanitize=thread`, and `hb.c` is the
 runtime behind its hooks: a vector-clock happens-before checker with edges from C11 atomics by memory order and from
 the Win32 calls (wrapped at link time, like TSan's interceptors). Under `qemu-aarch64 -R 0xC0000000` every guest
 thread is a host thread, so the cases run in parallel on the container's cores. Build in seconds, run 2-6 s.

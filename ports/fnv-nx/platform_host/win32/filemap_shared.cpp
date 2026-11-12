@@ -3,8 +3,8 @@
  * object, so views of one section share their pages at once (copy-on-write views get private pages).
  * A file-backed section loads the file's bytes into the object the first time a view covers a 64 KiB granule of it
  * (the rest of a partial page is zero). */
-#include "filemap_backing.h"
-#include "../os/os_shm.h"
+#include "../../platform/win32/filemap_backing.h"
+#include "../../platform/os/os_shm.h"
 
 #include <stdlib.h>
 

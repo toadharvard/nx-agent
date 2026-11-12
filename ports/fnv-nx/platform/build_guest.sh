@@ -19,7 +19,7 @@
 #             the archive (with clock_rt.cpp), never both; <out>/clock.txt names it.
 # Offline: nothing is fetched. A missing input stops the script with a message that names it.
 #
-# Output:  <out>/libfnvnx-platform.a   every source of platform/{win32,crt,audio,input,boundary,com,os} + toolchain/guest/{os_guest.c,
+# Output:  <out>/libfnvnx-platform.a   every source of platform/{win32,crt,audio,input,boundary,com,os} + platform/guest/{os_guest.c,
 #                                      platform_glue.cpp} (minus the host-side files) + FreeType
 #          <out>/defined.txt           nm --defined-only -g names of the archive, sorted
 #                                      (4th argument of platform/manifest/bridgetable.py)
@@ -74,7 +74,7 @@ PINC=("-I$HERE/include" -iquote "$ROOT/shim/include" "-I$ROOT/shim/include" "-I$
       "-I$EXT/minimp3" "-I$EXT/freetype/include" -D__LINUX_ERRNO_EXTENSIONS__)
 [ -z "$LIBNX_INC" ] || PINC+=(-idirafter "$LIBNX_INC")
 # platform files of the host side (LP64 / libnx), not part of the guest (guest_link.py HOST_SIDE)
-HOST_SIDE=(platform/input/input_horizon.cpp platform/audio/backend_audren.c platform/os/os_horizon.c platform/os/os_posix.c platform/win32/filemap_shared.cpp)
+HOST_SIDE=(platform_host/input/input_horizon.cpp platform_host/audio/backend_audren.c platform_host/os/os_horizon.c platform_host/os/os_posix.c platform_host/win32/filemap_shared.cpp)
 
 # ---- FreeType: module list and defines of tests/s4/Makefile (read from it, not copied)
 S4MK=$ROOT/tests/s4/Makefile
@@ -171,8 +171,8 @@ for n in clock_rt.cpp "clock_$CLOCK.cpp"; do
 done
 echo "$CLOCK" >"$OUT/clock.txt"
 for n in os_guest.c platform_glue.cpp; do
-    [ -f "$TCDIR/guest/$n" ] || { echo "build_guest: missing toolchain/guest/$n"; exit 2; }
-    add_src "$TCDIR/guest/$n"
+    [ -f "$HERE/guest/$n" ] || { echo "build_guest: missing platform/guest/$n"; exit 2; }
+    add_src "$HERE/guest/$n"
 done
 NPLAT=$(wc -l <"$JOBLIST")
 for m in "${FT_SRCS[@]}"; do

@@ -1,8 +1,8 @@
 /* input_horizon.cpp - libnx hid sources: Npad -> pad source (players 1..4), vibration, USB keyboard and mouse,
  * touch screen -> touch-as-mouse. Built only against libnx (host builds and the guest link leave it out; they define
  * fnvnx_input_pump themselves). */
-#include "input.h"
-#include "../os/os.h"
+#include "../../platform/input/input.h"
+#include "../../platform/os/os.h"
 #include "fnvnx_clock.h"
 
 #include <switch.h>

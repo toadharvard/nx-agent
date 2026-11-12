@@ -6,7 +6,7 @@ and a test links the real product files of its root.
 
 Product  = the units platform/build_guest.sh compiles for the guest: depth-1 *.c / *.cpp of platform/{win32,crt,audio,
            input,boundary,com,os} minus the script's HOST_SIDE list, platform/clock/clock_rt.cpp, clock_real.cpp (clock_virtual.cpp is
-           the verification clock, also a product choice: both clocks are product units), toolchain/guest/os_guest.c and
+           the verification clock, also a product choice: both clocks are product units), platform/guest/os_guest.c and
            platform_glue.cpp.  The set is read from platform/build_guest.sh itself, so it cannot drift from the build.
 Test file = every .o of a test binary's link line that is not a product unit (the product's third-party FreeType objects and
            archives are not test files and are not read).
@@ -56,7 +56,7 @@ def product_units(root):
                 units.append('platform/%s/%s' % (d, f))
     units += ['platform/clock/clock_rt.cpp', 'platform/clock/clock_real.cpp', 'platform/clock/clock_virtual.cpp']
     for n in GUESTFILES_RE.search(txt).group(1).split():
-        units.append('toolchain/guest/' + n)
+        units.append('platform/guest/' + n)
     return sorted(u for u in set(units) if u not in host), sorted(host)
 
 

@@ -1,7 +1,7 @@
 /* host_v3.inc - FnvnxHostApi version 3 on libnx: audio output (audren) and input (hid) for the guest's
  * platform/audio and platform/input. The Horizon parts of S7 (backend_audren.c, input_horizon.cpp) cannot run
  * in the ILP32 guest; their libnx calls live here, behind fixed-width calls, and the guest glue
- * (toolchain/guest/platform_glue.cpp) feeds the S7 layer. Included by host.c. */
+ * (platform/guest/platform_glue.cpp) feeds the S7 layer. Included by host.c. */
 
 /* ---- audio: one stereo PCM16 voice, a ring of NBUF wave buffers; the guest audio thread renders a period and
  * calls audio_submit, which blocks until a buffer is free (that is the pacing). */
