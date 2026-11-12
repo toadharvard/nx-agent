@@ -30,7 +30,9 @@
    "-DSUPPORT_PROFILE_HLSL=0",
    "-DSUPPORT_PROFILE_METAL=0",
    "-DSUPPORT_PROFILE_SPIRV=0",
-   "-std=gnu99"
+   "-std=gnu99",
+   "-ffunction-sections",
+   "-fdata-sections"
   ],
   "cxx": [
    "-O2",
@@ -52,7 +54,9 @@
    "-Wall",
    "-DSTDMETHODCALLTYPE=",
    "-std=gnu++20",
-   "-DNDEBUG"
+   "-DNDEBUG",
+   "-ffunction-sections",
+   "-fdata-sections"
   ],
   "asm": [
    "-mabi=ilp32"
