@@ -42,6 +42,7 @@ import hashlib
 import json
 import os
 import posixpath
+import shutil
 import subprocess
 import sys
 import time
@@ -94,7 +95,13 @@ def gcc_set(cxx):
     cands += [norm(ln) for ln in inc.splitlines() if ln.startswith(" /")]
     trees = sorted({t for t in cands if os.path.isdir(t)})
     trees = [t for t in trees if not any(u != t and (t + "/").startswith(u.rstrip("/") + "/") for u in trees)]
-    return [norm(cxx), norm(q("-print-prog-name=as"))], trees
+    return [norm(cxx), prog(norm(q("-print-prog-name=as")))], trees
+
+
+def prog(p):
+    """A program name the compiler answered with: the answer of a native compiler for a tool it finds on PATH is the bare name, which is
+    resolved on the host PATH the way the compiler would exec it (a cross compiler answers its absolute path)."""
+    return p if os.path.isabs(p) else (shutil.which(p) or p)
 
 def run_stage(store, doc, cold):
     sandbox.check_doc(doc)
@@ -116,6 +123,7 @@ def run_stage(store, doc, cold):
 class Build:
     def __init__(self, a):
         self.store, self.cold, self.cxx, self.cache = a.store, a.cold, a.cxx, {}
+        self.variant = ""   # recipe variant: its name is in the env, so in every stage key ("" adds nothing)
         self.cc_drop = set()   # `at` of tool-runtime inputs the CC stage does not mount (externals other than the compiler's)
         self.cc_flags, self.cc_inputs = [], []   # plugins: flags and declared inputs [(at, tree)] of the CC stage only (a plugin is part of its key)
         self.rt = json.load(open(a.toolrt))
@@ -147,7 +155,7 @@ class Build:
         argv = [self.cxx] + (self.iargs if inc else []) + self.flags + (self.cc_flags if kind == "cc" else []) + ["-frandom-seed=" + seed, "-Werror=date-time"]
         argv += ["-ffile-prefix-map=%s=%s" % (at, at[1:]) for at, _ in self.roots] + tail + [src]
         doc = {"format": "fnvnx-stage/1", "stage": "%s:%s" % (kind, rel), "argv": argv, "cwd": "/", "class": "build", "tool": "gcc",
-               "env": dict(ENV, PATH=os.path.dirname(self.cxx)), "outputs": ["/out"],
+               "env": dict(ENV, PATH=os.path.dirname(self.cxx), **({"FNVNX_VARIANT": self.variant} if self.variant else {})), "outputs": ["/out"],
                "inputs": sorted([i for i in self.rt["inputs"] if kind != "cc" or i["at"] not in self.cc_drop] +
                                 [{"at": at, "tree": t} for at, t in inputs + (self.cc_inputs if kind == "cc" else [])],
                                 key=lambda i: i["at"])}

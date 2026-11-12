@@ -178,7 +178,7 @@ fact status, sites examined and reasons.  --facts-h: the C header (FNVNX_REACH_<
 the requests of the same dll!name in canonical order; FNVNX_<request id> for the platform's own names; FNVNX_REACH_TABLE_ID).
 
 Mode --objects (gate `reachlink`, the link side).  The universe is every reference to the ELF symbol fnvnx_reach_violation in the
-objects and archive members of the response file (one quoted path per line, ld.py's inputs.rsp), read from the relocation
+objects and archive members of the response file (one quoted path per line, a response file of the link, inputs.rsp), read from the relocation
 tables (sh_info of a SHT_RELA / SHT_REL names the section; no text).  A reference is green iff
   - it is a R_AARCH64_P32_CALL26 / JUMP26 in an executable section (any other reference, e.g. a pointer in data, lets w0 be
     anything: `reference-not-call`);
@@ -576,6 +576,36 @@ script FAIL naming the package; another version is never installed: the fix is a
 Env: ENV_JSON (default verify/env.json next to this script's tree).
 ```
 
+## link/ldcheck.py
+
+```text
+ldcheck - the post stage of the guest ELF link (L1 CONTRACT); the sandbox stage `ldcheck:<root>` of verify/recipe.py runs it.
+
+    ldcheck.py --elf LINKED.elf --objs DIR --out DIR --name NAME.elf [--kind pie|exe|shared] [--version-script FILE] [--lib=SO ..]
+
+Kinds exe and shared (host images, RECIPE.md "Link") are judged by host mode: rules 1-2 on the symbol tables, no TEXTREL, an entry for exe, exported names
+of a shared object defined and global, undefined names only if a --lib shared library defines them (its .dynsym); no crt0 header words.
+
+verify/recipe.py links the guest ELF as the stage `ld:<root>` (fixed options, RECIPE.md "Link"): the root's objects and the objects of
+its `link.roots` whole, the compiler external's guest libraries searched as the gcc driver searches them.  This tool judges the result
+from ELF symbol tables only (no linker message, no map file, no name or text pattern), the rules of the former link/ld.py:
+  1. no undefined symbol in the output's `.symtab`;
+  2. every name the input objects reference or define (the symbol tables of every `*.o` below --objs, weak references included) is defined in the output;
+  3. no dynamic relocation but R_AARCH64_P32_RELATIVE (RELA entries without a symbol) or RELR words; no REL, JMPREL, TEXTREL table;
+  4. the PIE mark: DF_1_PIE in DT_FLAGS_1;
+  5. the crt0 header: the magic "FNXG" at the first PT_LOAD + 8 and the entry at the first PT_LOAD.
+The pull-in closure that ld.py modelled before the link is gone: the linker's own output symbol table is the witness, and a name the
+linker took or dropped differently from a model cannot make the output pass with an undefined reference.
+On success it writes the three words of the crt0 header into the ELF (the same rule as elf2nso.py `patch_guest_header`): +16 the link
+address of the first PT_LOAD, +20 the bytes from there to the end of the last PT_LOAD (memsz), page aligned, +24 bit 0 = relocatable (DF_1_PIE).
+Outputs in --out: NAME.elf (the final ELF; none when a rule fails) and the gate file `ld` ($GATE_OUT/ld.json, full id list in $GATE_OUT/ld.ids,
+GATE_OUT = --out): universe = the input names + the dynamic relocation entries (RELA entries, RELR words) + 2 (the PIE mark, the crt0 header);
+certified = those that hold.  Ids: `cover:<name>` (an input name the output does not define; `weak:<name>` when the inputs only reference it
+weakly: the linker resolves such a reference to 0 and drops it from the symbol table, so only the inputs' tables show it), `output-undefined:<name>`, `dynreloc:..`, `pie`,
+`header:..`.  Exit 1 on any id; the ids are printed on stderr, the summary line last.
+The ELF is exe-derived (lifted code): container and fnv-nx-build only.
+```
+
 ## link/gate_abs.py
 
 ```text
@@ -586,10 +616,10 @@ gate_abs - no input of the link refers to an absolute symbol (part of the L1 ver
 The guest is linked at base 0 and moved by the loader: a value that the linker takes for absolute (SHN_ABS) is not moved, and binutils turns such
 values into R_AARCH64_P32_RELATIVE entries with the absolute value as addend (a plain "add the slide" would corrupt them).  No absolute symbol
 may take part in the link: then every dynamic relocation is an image address and the guest's self-relocation moves all of them.
-The linker's command line carries no symbol definition (ld.py accepts only the emulation options), so an absolute symbol can come only from an
+The linker's command line carries no symbol definition (the recipe's link accepts only the emulation options), so an absolute symbol can come only from an
 input object or from the script, and both are in the universe below.
 Universe (no sampling): every relocation of every object and of every member of every archive named by --inputs (response files, one quoted
-path per line, as ld.py writes them) or --object, and every symbol DEFINED by those files.  Read from the section headers and symbol tables
+path per line, as the link's response file lists them) or --object, and every symbol DEFINED by those files.  Read from the section headers and symbol tables
 (relocs.py): no tool output, no text.
 Red items:
   - a relocation whose symbol is SHN_ABS in its own object                                  id `member:section+offset:symbol`
@@ -1753,8 +1783,8 @@ every step is a sandbox stage (sandbox.py) keyed by its declared inputs, cached 
     python3 -I recipe.py build --root ports/fnv-nx/X --store S --out DIR [--jobs N]     (cwd = checkout root; exit 0 green, 2 red)
     python3 -I recipe.py check --root ports/fnv-nx/X                                    validate only
 Steps: (1) generated stages (python runtime, runtime.py), (2) one unit stage per source: .c/.cc/.cpp/.cxx = unitstage.Build (PP on
-name-complete views, then CC on the preprocessed text), .s/.S = unitstage.Build too (.S: PP then CC; .s: one stage on its own file), (3) the link stage
-(`ld` of the compiler, objects + script as inputs). Tools (compilers, ld) are runtime.py `tool` runtimes: declared inputs, no host /usr.
+name-complete views, then CC on the preprocessed text), .s/.S = unitstage.Build too (.S: PP then CC; .s: one stage on its own file), (3) the link: stage `ld:<root>` (the fixed options of RECIPE.md "Link", the objects of the root and of its
+`link.roots` whole, `link.libs` searched) and the post stage `ldcheck:<root>` (link/ldcheck.py). Tools (compilers, ld) are runtime.py `tool` runtimes: declared inputs, no host /usr.
 RULE units: every tracked *.c *.cc *.cpp *.cxx *.s *.S under the root, and every generated output with such a name, is a unit.
 RULE refusal set R: an option of GNU ld's grammar that lets a link accept missing or substituted symbols. Matched by OPTION SYNTAX:
   strip one or two leading dashes, cut at `=`; a name that is a prefix (getopt_long abbreviation) of a refused long name is refused (a

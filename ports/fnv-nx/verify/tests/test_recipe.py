@@ -33,23 +33,30 @@ n = len([l for l in open("/in/ports/fnv-nx/toy/constants.tsv") if l.strip()])
 os.makedirs("/out/gen")
 open("/out/gen/gen.h", "w").write("#define NCONST %d\\n#define STAMP %dL\\n" % (n, @EXTRA@))
 '''
+# The toy root is a guest ELF in the sense of RECIPE.md "Link": ILP32, position independent, linked with the product's own link/guest.ld, with
+# the FNXG header of crt0 at the first segment + 8 and the entry at the first segment. The header is OS-layer code (os.S, an os_layer unit);
+# HDR is the same as one assembler statement for the roots that have no os.S (MINI).
+CRT0 = ".section .crt0,\"a\",%progbits\n.global __fnvnx_guest_start\n.align 2\n__fnvnx_guest_start:\n b f_a\n .word 0, 0x47584e46, 3, 0, 0, 0, 0\n"
+HDR = "__asm__(%s);\n" % json.dumps(CRT0 + ".text\n")
 RECIPE = {"format": "fnvnx-recipe/1", "compiler": {"cc": "aarch64-linux-gnu-gcc-13", "cxx": "aarch64-linux-gnu-g++-13"},
-          "flags": {"c": ["-O1", "-ffreestanding", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"], "cxx": [], "asm": []},
+          "flags": {"c": ["-mabi=ilp32", "-fPIE", "-O1", "-ffreestanding", "-fno-stack-protector", "-fno-asynchronous-unwind-tables"],
+                    "cxx": ["-mabi=ilp32"], "asm": ["-mabi=ilp32"]},
           "include": [ROOT + "/inc", ROOT + "/gen"], "units": "all",
           "generated": [{"tool": T + "gen/gen.py", "args": [], "inputs": [ROOT + "/constants.tsv"], "outputs": ["gen/gen.h"]}],
           "os_layer": ["os.S"], "constants": "constants.tsv",
-          "link": {"script": "link.ld", "output": "toy.elf", "flags": ["-e", "f_a"]}}
+          "link": {"script": "link.ld", "output": "toy.elf", "flags": ["-m", "aarch64linux32"]}}
 FILES = {
     "toy/a.c": '#include "toy.h"\n#include "gen.h"\nint f_b(void);\nint f_a(void) { return NCONST + f_b() + TOY + (int)(STAMP % 1000003L); }\n',
     "toy/b.c": '#include "toy.h"\nint f_b(void) { return TOY * 2; }\n',
     "toy/c.c": '#include "toy.h"\nint f_c(int x) { return x + TOY; }\n',
-    "toy/os.S": ".text\n.globl os_svc\n.type os_svc,%function\nos_svc:\n svc #0\n ret\n.size os_svc,.-os_svc\n",
+    "toy/os.S": CRT0 + ".text\n.globl os_svc\n.type os_svc,%function\nos_svc:\n svc #0\n ret\n.size os_svc,.-os_svc\n",
     "toy/inc/toy.h": "#define TOY 7\n",
     "toy/constants.tsv": "f_c\t1\nf_b\t2\n",
     "verify/wine_fixme.tsv": "# id\tcontract_name\twine_ref\tkind\tvalue\n",
     "verify/declared_machine.tsv": "# id\tcontract_name\tfact\tsource\tkind\tvalue\n",
-    "toy/link.ld": "SECTIONS { . = 0x10000; .text : { *(.text*) } .data : { *(.data*) *(.bss*) } /DISCARD/ : { *(.note*) *(.comment*) *(.eh_frame*) } }\n",
+    "toy/link.ld": open(os.path.join(VERIFY, "..", "link", "guest.ld")).read(),
 }
+LINK_TOOLS = ("link/ldcheck.py", "link/gateids.py", "contract/gatefile.py")   # the real files of the tree: the ldcheck stage mounts them
 
 
 def check(name, ok, detail=""):
@@ -77,12 +84,15 @@ def make_repo(name, gen_extra="", rec=None, files=None):
     for k, v in dict(FILES, **(files or {})).items():
         if v is not None:
             w(repo, k, v)
+    for f in LINK_TOOLS:
+        w(repo, f, open(os.path.join(VERIFY, "..", f)).read())
     imp, _, ex = gen_extra.partition("|")
     w(repo, "gen/gen.py", GEN.replace("@IMPORT@", imp).replace("@EXTRA@", ex or "0"))
     w(repo, "toy/build.json", json.dumps(rec or RECIPE, indent=1))
     w(repo, "verify/admit.json", json.dumps({"format": "fnvnx-admit/1", "roots": [
         {"path": ROOT, "class": "product", "target": "host", "gates": [], "recipe": ROOT + "/build.json"},
-        {"path": T + "gen", "class": "tool", "gates": []}, {"path": T + "verify", "class": "tool", "gates": []}]}))
+        {"path": T + "gen", "class": "tool", "gates": []}, {"path": T + "verify", "class": "tool", "gates": []},
+        {"path": T + "link", "class": "tool", "gates": []}, {"path": T + "contract", "class": "tool", "gates": []}]}))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "toy")
     return repo
@@ -109,7 +119,7 @@ def errs(rec, **kw):
     shutil.rmtree(repo, ignore_errors=True)
     r = make_repo("ck", rec=rec)
     roots, files = recipe.load_admit(r), recipe.tracked(r)
-    return recipe.check(rec, ROOT, files, roots)
+    return recipe.check(rec, ROOT, files, roots, None, r)
 
 
 def mut(**kw):
@@ -119,13 +129,12 @@ def mut(**kw):
 
 
 def abi_rec(abi, rec=None):
-    """Recipe REC (default RECIPE) for ABI "lp64" (unchanged) or "ilp32": -mabi=ilp32 for every compile and assemble flag list, and the
-    linker emulation the cross gcc driver itself passes for it (-maarch64linux32, see `gcc -mabi=ilp32 -###`) first among the link flags."""
+    """Recipe REC (default RECIPE) for ABI "ilp32" (the toy's own ABI: unchanged) or "lp64": no -mabi=ilp32 and no ELF (a link is the
+    ILP32 guest ELF, RECIPE.md "Link"; the LP64 objects exist to compare symbol tables)."""
     r = json.loads(json.dumps(rec or RECIPE))
-    if abi == "ilp32":
-        r["flags"] = {k: ["-mabi=ilp32"] + v for k, v in r["flags"].items()}
-        if r.get("link"):
-            r["link"]["flags"] = ["-m", "aarch64linux32"] + r["link"]["flags"]
+    if abi == "lp64":
+        r["flags"] = {k: [t for t in v if t != "-mabi=ilp32"] for k, v in r["flags"].items()}
+        r["link"] = None
     return r
 
 
@@ -135,7 +144,7 @@ def elf_class(path):
 
 
 MINI = {"toy/b.c": None, "toy/c.c": None, "toy/os.S": None,
-        "toy/a.c": '#include "toy.h"\n#include "gen.h"\nint f_a(void) { return NCONST + TOY + (int)(STAMP % 1000003L); }\n'}
+        "toy/a.c": HDR + '#include "toy.h"\n#include "gen.h"\nint f_a(void) { return NCONST + TOY + (int)(STAMP % 1000003L); }\n'}
 MINI_ITEMS = {ROOT + "/a.c", ROOT + "/toy.elf"}
 CC_DRV, CXX_DRV = "/usr/bin/aarch64-linux-gnu-gcc-13", "/usr/bin/aarch64-linux-gnu-g++-13"
 
@@ -229,20 +238,6 @@ def main():
         check("determinism gate green on the toy root, accepted by verdict", rc == 0 and g["universe"] == 5 == g["certified"]
               and accepted("determinism", BASE + "/gd")[0] == "green", (g, txt))
 
-    def gate_toy32():
-        r32repo = make_repo("toy32g", rec=abi_rec("ilp32"))
-        og = BASE + "/gg32"
-        rc, g, tb, txt = gate(r32repo, "build", og, GC)
-        print("INFO ILP32 gate build cold-store %.1f s" % tb)
-        check("ILP32 toy root: build gate green 5/5, accepted by verdict", rc == 0 and g["universe"] == 5 == g["certified"]
-              and accepted("build", og) == ("green", 5, 5, ""), (g, txt))
-        rc, g, tw, txt = gate(r32repo, "build", BASE + "/gg32w", GC)
-        print("INFO ILP32 gate build warm %.1f s" % tw)
-        rc, g, td, txt = gate(r32repo, "determinism", BASE + "/gd32", GC)
-        print("INFO ILP32 gate determinism (2 cold builds + warm check) %.1f s: %s" % (td, g and g["detail"]))
-        check("ILP32 toy root: determinism gate green 5/5, accepted by verdict", rc == 0 and g["universe"] == 5 == g["certified"]
-              and accepted("determinism", BASE + "/gd32")[0] == "green", (g, txt))
-
     def gate_nd():
         for label, extra, red in (("wall clock (time.time_ns)", "import time|time.time_ns()", True),
                                   ("os.urandom and os.getpid", "import os|int.from_bytes(os.urandom(7), 'big') + os.getpid()", False)):
@@ -255,7 +250,7 @@ def main():
                 check("generator embedding %s: sandbox makes it constant, so two cold builds are equal (closed channel); without GATE_CACHE there is no warm build" % label,
                       rc == 0 and "no warm" in g["detail"] and g["universe"] == 2, (g, txt))
 
-    for fn in (gate_toy, gate_toy32, gate_bad, gate_nd, gate_cases):
+    for fn in (gate_toy, gate_bad, gate_nd, gate_cases):
         later(fn)
 
     # --- toy root, shared store: cold, then cached
@@ -276,7 +271,7 @@ def main():
           and r1["elf"]["sha256"] == r2["elf"]["sha256"] and r1["stage_keys"] == r2["stage_keys"])
     d, u = r1["defined"], r1["undefined"]
     check("objects.json: defined symbols from .symtab (struct), undefined list", {"symbol": "f_a", "bind": "GLOBAL", "type": "FUNC", "object": "a.c"} in d
-          and any(x["symbol"] == "os_svc" and x["object"] == "os.S" for x in d) and "f_b" in u and "f_a" not in u
+          and any(x["symbol"] == "os_svc" and x["object"] == "os.S" for x in d) and {"f_a", "f_b"} <= set(u) and "f_c" not in u
           and d == sorted(d, key=lambda x: (x["symbol"], x["object"])) and u == sorted(u), (d, u))
 
     print("INFO +%.1f s: toy builds done" % (time.time() - t_start))
@@ -284,7 +279,7 @@ def main():
     tcx = {"name": "tc", "repo": "fnv-nx-build", "ref": "tc", "commit": tcc, "tree_sha256": tct, "at": "/opt/tc"}
     crec = mut(external=[tcx], compiler={"external": "tc", "cc": CC_DRV[1:], "cxx": CXX_DRV[1:]})   # cxx names a path of the tree; no C++ unit uses it
     both = dict(crec, external=[tcx, ex], include=RECIPE["include"] + ["/ext/tiny/inc"], os_layer=[])
-    mini_a = '#include "toy.h"\n#include "ext.h"\n#include "gen.h"\nint f_a(void) { return NCONST + TOY + EXTV + (int)(STAMP % 1000003L); }\n'
+    mini_a = HDR + '#include "toy.h"\n#include "ext.h"\n#include "gen.h"\nint f_a(void) { return NCONST + TOY + EXTV + (int)(STAMP % 1000003L); }\n'
     later(check_tc_gate, make_repo("tc-mini", rec=both, files=dict(MINI, **{"toy/a.c": mini_a})), tcc, commit)
 
     # --- externals (fetched by commit from the bare repo)
@@ -325,21 +320,18 @@ def main():
     rc_y = recipe.build(crepo, ROOT, SS, BASE + "/tco2", ext=ec)
     check("external compiler: second build is all cache hits", rc_y["stages"]["run"] == 0 and rc_y["stage_keys"] == rc_x["stage_keys"], rc_y["stages"])
     print("INFO +%.1f s: external compiler builds done" % (time.time() - t_start))
-    # --- the same toy root in the ILP32 ABI: ELF32 objects and ELF, symbol tables, determinism
+    # --- the toy root in the LP64 ABI: ELF64 objects, no ELF (the link is the ILP32 guest ELF); the ILP32 toy (r1) has ELF32 objects and ELF
     t0 = time.time()
-    r32 = recipe.build(make_repo("toy32", rec=abi_rec("ilp32")), ROOT, SS, BASE + "/out32")
-    print("INFO toy ILP32 build %.1f s, stages %s" % (time.time() - t0, r32.get("stages")))
-    check("ILP32 toy root builds green: 4 objects and the ELF are ELF32, the LP64 ones are ELF64",
-          r32["status"] == "green" and len(r32["objects"]) == 4 and r32["elf"]
-          and {elf_class(o["object"]) for o in r32["objects"]} | {elf_class(r32["elf"]["path"])} == {32}
-          and {elf_class(o["object"]) for o in r1["objects"]} | {elf_class(r1["elf"]["path"])} == {64}, r32.get("failure"))
-    d32 = r32["defined"]
-    check("ILP32 objects.json: the same defined and undefined symbols as LP64 (ELF32 .symtab read by struct)",
-          [(x["symbol"], x["bind"], x["type"], x["object"]) for x in d32] == [(x["symbol"], x["bind"], x["type"], x["object"]) for x in d]
-          and r32["undefined"] == u and [o["sha256"] for o in r32["objects"]] != [o["sha256"] for o in r1["objects"]], (d32, r32["undefined"]))
-    r32b = recipe.build(make_repo("toy32b", rec=abi_rec("ilp32")), ROOT, SS, BASE + "/out32b")
-    check("ILP32: a second build is all cache hits with identical objects and ELF", r32b["stages"]["run"] == 0
-          and r32b["elf"]["sha256"] == r32["elf"]["sha256"] and r32b["stage_keys"] == r32["stage_keys"], r32b.get("stages"))
+    r64 = recipe.build(make_repo("toy64", rec=abi_rec("lp64")), ROOT, SS, BASE + "/out64")
+    print("INFO toy LP64 build %.1f s, stages %s" % (time.time() - t0, r64.get("stages")))
+    check("toy root builds green: ILP32 objects and ELF are ELF32, the LP64 objects are ELF64 (and no ELF)",
+          r64["status"] == "green" and len(r64["objects"]) == 4 and r64["elf"] is None
+          and {elf_class(o["object"]) for o in r1["objects"]} | {elf_class(r1["elf"]["path"])} == {32}
+          and {elf_class(o["object"]) for o in r64["objects"]} == {64}, r64.get("failure"))
+    d64 = r64["defined"]
+    check("objects.json: the same defined and undefined symbols for LP64 and ILP32 (ELF32/ELF64 .symtab read by struct)",
+          [(x["symbol"], x["bind"], x["type"], x["object"]) for x in d64] == [(x["symbol"], x["bind"], x["type"], x["object"]) for x in d]
+          and r64["undefined"] == u and [o["sha256"] for o in r64["objects"]] != [o["sha256"] for o in r1["objects"]], (d64, r64["undefined"]))
 
     # --- validation
     check("unknown key 'exclude' is a RecipeError", any("unknown key 'exclude'" in e for e in errs(mut(exclude=["a.c"]))))

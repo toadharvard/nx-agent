@@ -139,16 +139,19 @@ check("no product root: universe 0, green, accepted by the verdict", rc == 0 and
 repo = TR.make_repo("ls-toy")
 t0 = time.time()
 (rc, g, _, txt), st = LS(repo, "t1", GC)
-check("toy root: every reference resolved, ELF closed: green, accepted (1 reference + 4 definitions + the ELF)", rc == 0 and g["universe"] == 6 == g["certified"]
+check("toy root: every reference resolved, ELF closed: green, accepted (2 references + 5 definitions + the ELF)", rc == 0 and g["universe"] == 8 == g["certified"]
       and st[0] == "green", (g, txt))
 print("INFO toy gate (incl. build) %.1f s" % (time.time() - t0))
 t0 = time.time()
 (rc, g, _, txt), st = LS(repo, "t2", GC)
 print("INFO toy gate warm %.1f s" % (time.time() - t0))
 WK = '#include "toy.h"\nint wk(void) __attribute__((weak));\nint f_c(int x) { return wk ? wk() : x + TOY; }\n'
-(rc, g, _, txt), st = LS(TR.make_repo("ls-weak", files={"toy/c.c": WK}), "t3", GC)
-check("weak undefined symbol: ld links (and drops it from the static ELF, so rule (a) cannot see it) but rule (b) on the object is red",
+(rc, g, _, txt), st = LS(TR.make_repo("ls-weak", rec=TR.mut(link=None), files={"toy/c.c": WK}), "t3", GC)
+check("weak undefined symbol, root without a link: rule (b) on the object is red",
       rc == 2 and st[0] == "red" and g["uncertified"] == [TR.ROOT + "/c.c:wk"] and "undefined 1" in g["detail"], (g, txt))
+(rc, g, _, txt), st = LS(TR.make_repo("ls-weak-link", files={"toy/c.c": WK}), "t3b", GC)
+check("weak undefined symbol, root with a link: the link's ldcheck stage is red (the build), so is the gate",
+      rc == 2 and st[0] == "red" and g["uncertified"] == [TR.ROOT + ":<build>"], (g, txt))
 (rc, g, _, txt), st = LS(TR.make_repo("ls-nolink", rec=TR.mut(link=None), files={"toy/b.c": None}), "t4", GC)
 check("root without a link: an undefined reference (f_b, no definition anywhere) is red", rc == 2 and g["uncertified"] == [TR.ROOT + "/a.c:f_b"], (g, txt))
 ALIAS = '#include "toy.h"\nint f_b(void) { return TOY * 2; }\nint f_b2(void) __attribute__((alias("f_b")));\n'
@@ -163,12 +166,14 @@ for abi in ("ilp32", "lp64"):
     ABI[0] = abi
     t0 = time.time()
     (rc, g, _, txt), st = LS(TR.make_repo("ls-toy-" + abi, rec=TR.abi_rec(abi)), "ta" + abi, GC)
-    check("toy root: green 6/6 and accepted", rc == 0 and g["universe"] == 6 == g["certified"] and st[0] == "green", (g, txt))
+    n = 8 if abi == "ilp32" else 7      # LP64: no ELF (a link is the ILP32 guest ELF)
+    check("toy root: green %d/%d and accepted" % (n, n), rc == 0 and g["universe"] == n == g["certified"] and st[0] == "green", (g, txt))
     print("INFO %s toy gate %.1f s" % (abi, time.time() - t0))
     IE = {"toy/a.c": TR.FILES["toy/a.c"].replace("int f_a(void) {", "extern char __image_end[];\nint f_a(void) { (void)*(volatile char *)__image_end;"),
           "toy/link.ld": TR.FILES["toy/link.ld"].replace("/DISCARD/", "__image_end = .; /DISCARD/")}
-    (rc, g, _, txt), st = LS(TR.make_repo("ls-ie-" + abi, rec=TR.abi_rec(abi), files=IE), "ie" + abi, GC)
-    check("link script defines __image_end, the root links an ELF: the reference is certified", rc == 0 and g["certified"] == g["universe"] and st[0] == "green", (g, txt))
+    if abi == "ilp32":
+        (rc, g, _, txt), st = LS(TR.make_repo("ls-ie-" + abi, rec=TR.abi_rec(abi), files=IE), "ie" + abi, GC)
+        check("link script defines __image_end, the root links an ELF: the reference is certified", rc == 0 and g["certified"] == g["universe"] and st[0] == "green", (g, txt))
     (rc, g, _, txt), st = LS(TR.make_repo("ls-ie0-" + abi, rec=TR.abi_rec(abi, TR.mut(link=None, os_layer=["os.S"])), files=IE), "ie0" + abi, GC)
     check("the same objects, the recipe links no ELF: __image_end is undefined", rc == 2 and g["uncertified"] == [TR.ROOT + "/a.c:__image_end"], (g, txt))
 ABI[0] = "lp64"
