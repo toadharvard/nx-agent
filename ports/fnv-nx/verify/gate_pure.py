@@ -33,8 +33,9 @@ HOST = ("ports/fnv-nx/verify", "ports/fnv-nx/farm")
 
 def units(roots):
     """-> [(trees of the root, imported root paths)] of every root naming gate pure (one puregate run per root)."""
-    return [(tuple(os.path.normpath(t) for t in gate_admit.trees(r)), tuple(r.get("imports", [])))
-            for r in roots if "pure" in r.get("gates", [])]
+    out = [(tuple(os.path.normpath(t) for t in gate_admit.trees(r) if os.path.exists(t)), tuple(r.get("imports", [])))
+           for r in roots if "pure" in r.get("gates", [])]
+    return [u for u in out if u[0]]  # a tree that is not in this checkout contributes nothing
 
 
 def run_unit(td, n, unit, imports):

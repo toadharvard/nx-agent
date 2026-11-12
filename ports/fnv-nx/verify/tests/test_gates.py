@@ -20,7 +20,7 @@ ENV = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@e", GIT_COMMITTE
 _n = [0]
 # the tool files the gate machinery itself needs in a checkout (verdict.py/l1.py run from VERIFY, on the repos built here);
 # the synthetic repos hold only tiny test files, never this directory's tests (no nested run of the real test suite)
-SMALL = ("gate_pure.py", "gate_tests.py", "puregate.py", "puregate_policy.py", "cas.py", "envcheck.py")
+SMALL = ("gate_admit.py", "gate_pure.py", "gate_tests.py", "puregate.py", "puregate_policy.py", "cas.py", "envcheck.py")
 CLEAN = "import sys\n\ndef f(x):\n    return sorted(x)\n"
 BAD = "import random\n\nx = random.random()\n"
 
@@ -58,53 +58,72 @@ def gate(script, cwd, args):
         res = json.load(open(os.path.join(out, f)))
     return p.returncode, res, p.stderr
 
-def pure(d, dirs=("link", "rules")):
-    return gate("gate_pure.py", d, list(dirs))
+V = "ports/fnv-nx/"
 
-# ---- gate_pure
+def adm(*entries, extra=()):
+    """admit.json of a toy tree: tool roots link and rules naming gate pure; ENTRIES are repo-relative stage entry points (of link/)."""
+    roots = [{"path": V + "link", "class": "tool", "gates": ["pure", "selftests"], "entry": [V + "link/" + e for e in entries]},
+             {"path": V + "rules", "class": "tool", "gates": ["pure", "selftests"], "entry": [V + "rules/" + e for e in extra]}]
+    return json.dumps({"format": "fnvnx-admit/1", "roots": roots})
+
+def pure(d, *entries, extra=()):
+    put(d, V + "verify/admit.json", adm(*entries, extra=extra))
+    return gate("gate_pure.py", d, [])
+
+# ---- gate_pure (the universe is the import closure of the stage entry points)
 d = tmp("pure-none")
 rc, r, e = pure(d)
-check("pure: no dirs -> green, universe 0", rc == 0 and r and r["name"] == "pure" and r["format"] == "fnvnx-gate/1"
+check("pure: no entry points -> green, universe 0", rc == 0 and r and r["name"] == "pure" and r["format"] == "fnvnx-gate/1"
       and r["status"] == "green" and r["universe"] == 0 and r["certified"] == 0 and "nothing to certify" in r["detail"], (rc, r, e))
 
 d = tmp("pure-clean")
-put(d, "link/a.py", CLEAN)
-put(d, "rules/b.py", CLEAN)
-rc, r, e = pure(d)
-check("pure: clean files certified", rc == 0 and r["status"] == "green" and (r["universe"], r["certified"]) == (2, 2), (rc, r, e))
+put(d, V + "link/a.py", CLEAN)
+put(d, V + "rules/b.py", CLEAN)
+rc, r, e = pure(d, "a.py", extra=["b.py"])
+check("pure: clean entry points certified", rc == 0 and r["status"] == "green" and (r["universe"], r["certified"]) == (2, 2), (rc, r, e))
 
 d = tmp("pure-bad")
-put(d, "link/a.py", CLEAN)
-put(d, "link/bad.py", BAD)
-rc, r, e = pure(d)
+put(d, V + "link/a.py", CLEAN)
+put(d, V + "link/bad.py", BAD)
+rc, r, e = pure(d, "a.py", "bad.py")
 check("pure: random -> red, path listed", rc != 0 and r["status"] == "red" and (r["universe"], r["certified"]) == (2, 1)
-      and r["uncertified"] == ["link/bad.py"], (rc, r, e))
+      and r["uncertified"] == [V + "link/bad.py"], (rc, r, e))
 
 d = tmp("pure-sh")
-put(d, "link/run.sh", "#!/bin/sh\necho hi\n", 0o755)
-rc, r, e = pure(d)
-check("pure: shell file is an uncertified item", rc != 0 and r["status"] == "red" and r["universe"] == 1
-      and r["certified"] == 0 and r["uncertified"] == ["link/run.sh"], (rc, r, e))
+put(d, V + "link/run.sh", "#!/bin/sh\necho hi\n", 0o755)
+put(d, V + "link/a.py", CLEAN)
+rc, r, e = pure(d, "a.py")
+check("pure: a shell file that no entry point imports is outside the universe", rc == 0 and r["status"] == "green" and r["universe"] == 1, (rc, r, e))
 
 d = tmp("pure-tests")
-put(d, "link/a.py", CLEAN)
-put(d, "link/tests/test_a.py", BAD)
-rc, r, e = pure(d)
-check("pure: files below tests/ are outside the universe", rc == 0 and r["status"] == "green"
+put(d, V + "link/a.py", CLEAN)
+put(d, V + "link/tests/test_a.py", BAD)
+rc, r, e = pure(d, "a.py")
+check("pure: files nobody imports (tests/) are outside the universe", rc == 0 and r["status"] == "green"
       and (r["universe"], r["certified"]) == (1, 1), (rc, r, e))
 
+d = tmp("pure-gate-driver")
+put(d, V + "link/a.py", CLEAN)
+put(d, V + "link/gate_x.py", BAD)
+rc, r, e = pure(d, "a.py")
+check("pure: a gate driver that is no entry point is outside the universe", rc == 0 and r["universe"] == 1, (rc, r, e))
+
 d = tmp("pure-import")
-put(d, "link/a.py", "import b\n")
-put(d, "link/b.py", CLEAN)
-rc, r, e = pure(d)
-check("pure: project imports resolve across the run", rc == 0 and (r["universe"], r["certified"]) == (2, 2), (rc, r, e))
+put(d, V + "link/a.py", "import b\n")
+put(d, V + "link/b.py", CLEAN)
+rc, r, e = pure(d, "a.py")
+check("pure: the closure follows project imports", rc == 0 and (r["universe"], r["certified"]) == (2, 2), (rc, r, e))
+
+d = tmp("pure-missing-entry")
+rc, r, e = pure(d, "gone.py")
+check("pure: an entry point that does not exist is red", rc != 0 and r["status"] == "red" and r["uncertified"] == [V + "link/gone.py"], (rc, r, e))
 
 d = tmp("pure-cap")
 for i in range(60):
-    put(d, "link/m%02d.py" % i, BAD)
-rc, r, e = pure(d)
+    put(d, V + "link/m%02d.py" % i, BAD)
+rc, r, e = pure(d, *["m%02d.py" % i for i in range(60)])
 check("pure: uncertified capped at 50, sorted", r["universe"] == 60 and len(r["uncertified"]) == 50
-      and r["uncertified"] == sorted(r["uncertified"]) and r["uncertified"][0] == "link/m00.py", r)
+      and r["uncertified"] == sorted(r["uncertified"]) and r["uncertified"][0] == V + "link/m00.py", r)
 
 # ---- gate_tests
 def tests(d, dirs=("verify",), extra=()):
@@ -162,7 +181,7 @@ check("tests: a test file does not see the gate's GATE_* variables", rc == 0 and
 spec = json.load(open(os.path.join(VERIFY, "gates.json")))
 byname = {g["name"]: g for g in spec["gates"]}
 CONTRACT = ["n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcrel", "bodysel", "abs", "disp", "reach", "reachlink", "gpa"]
-dirs_pure = [a.rsplit("/", 1)[-1] for a in byname["pure"]["argv"][3:]]
+dirs_pure = byname["pure"]["argv"][3:]
 dirs_tests = [a.rsplit("/", 1)[-1] for a in byname["selftests"]["argv"][5:]]
 check("gates.json: contract gates run gate_contract.py --gate NAME", all(byname[n]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_contract.py", "--gate", n] and byname[n]["result"] == n + ".json" for n in CONTRACT), spec)
 check("gates.json: format and the gates", spec["format"] == "fnvnx-gates/1" and [g["name"] for g in spec["gates"]] == ["pure", "selftests", "admit", "oracle", "build", "objstub", "linkstrict", "determinism"] + CONTRACT + ["argordergate", "imports", "machine", "hostapi"]
@@ -170,7 +189,7 @@ check("gates.json: format and the gates", spec["format"] == "fnvnx-gates/1" and 
               for n in ("build", "objstub", "linkstrict", "determinism", "hostapi"))
       and byname["argordergate"]["argv"] == ["python3", "-I", "ports/fnv-nx/verify/gate_argorder.py"] and byname["argordergate"]["result"] == "argordergate.json"
       and byname["pure"]["result"] == "pure.json" and byname["selftests"]["result"] == "selftests.json"
-      and dirs_pure == ["contract", "link", "rules", "lift"] and dirs_tests == ["verify", "farm", "contract", "link", "rules", "lift"]
+      and dirs_pure == [] and dirs_tests == ["verify", "farm", "contract", "link", "rules", "lift"]
       and byname["pure"]["argv"][:3] == ["python3", "-I", "ports/fnv-nx/verify/gate_pure.py"]
       and byname["selftests"]["argv"][:5] == ["python3", "-I", "ports/fnv-nx/verify/gate_tests.py", "--jobs", "3"], spec)
 
@@ -190,6 +209,7 @@ def small_repo(gates=None, link=None):
     put(r, "ports/fnv-nx/verify/gates.json", json.dumps(gates or two_gates()))
     shutil.copy(os.path.join(VERIFY, "env.json"), os.path.join(r, "ports/fnv-nx/verify/env.json"))
     put(r, "ports/fnv-nx/link/tests/test_ok.py", "import sys\nsys.exit(0)\n")
+    put(r, V + "verify/admit.json", adm(*[k.rsplit("/", 1)[-1] for k in (link or {}) if k.endswith("/bad.py")]))
     for k, v in (link or {}).items():
         put(r, k, v)
     git(r, "add", "-A")
@@ -199,7 +219,7 @@ def small_repo(gates=None, link=None):
 def two_gates():
     v = "ports/fnv-nx/verify/"
     return {"format": "fnvnx-gates/1", "gates": [
-        {"name": "pure", "argv": ["python3", "-I", v + "gate_pure.py", "ports/fnv-nx/link"], "result": "pure.json"},
+        {"name": "pure", "argv": ["python3", "-I", v + "gate_pure.py"], "result": "pure.json"},
         {"name": "selftests", "argv": ["python3", "-I", v + "gate_tests.py", "ports/fnv-nx/link"], "result": "selftests.json"}]}
 
 def branch(r, name, files, base="main", delete=()):
@@ -237,7 +257,7 @@ check("l1 merge: bootstrap merges on green", rc == 0 and re.match(LINE, line) an
       and "merged " + new in out and new != old and git(r, "rev-parse", new + "^1") == old, (rc, line, out, err))
 
 # red branch blocked
-branch(r, "bad", {"ports/fnv-nx/link/bad.py": BAD})
+branch(r, "bad", {"ports/fnv-nx/link/bad.py": BAD, V + "verify/admit.json": adm("bad.py")})
 before = git(r, "rev-parse", "main")
 rc, line, out, err = l1("merge", "--repo", r, "--into", "main", "--from", "bad", "--verdicts", vd)
 check("l1 merge: red file in link/ is blocked, ref does not move", rc == 2 and line.startswith("L1 red ")
@@ -489,7 +509,7 @@ check("push: retry after exit 5 merges onto the new tip and judges the new tree"
 
 r, bare, other = remote_setup()
 vd = tmp("verdicts")
-branch(r, "bad", {"ports/fnv-nx/link/bad.py": BAD})
+branch(r, "bad", {"ports/fnv-nx/link/bad.py": BAD, V + "verify/admit.json": adm("bad.py")})
 base = git(r, "rev-parse", "main")
 rc, out = l1_inproc("merge", "--repo", r, "--into", "main", "--from", "bad", "--verdicts", vd, "--remote", "origin")
 check("push: red verdict -> remote and local untouched", rc == 2 and git(bare, "rev-parse", "main") == base and git(r, "rev-parse", "main") == base, (rc, out))
