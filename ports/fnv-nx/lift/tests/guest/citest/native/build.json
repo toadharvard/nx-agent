@@ -30,7 +30,7 @@
   }
  ],
  "link": {
-  "script": null,
+  "script": "ports/fnv-nx/link/guest.ld",
   "output": "citest.elf",
   "flags": [
    "-m",
