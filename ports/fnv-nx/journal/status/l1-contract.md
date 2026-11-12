@@ -133,3 +133,8 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - EMLINK: w14 generalizes the store rule to all content.
   - Generated `sources` (FreeType): assigned to w15.
   - Pip stdin fix: w5. w16 rebases onto aaa709c8 with the pin union.
+- 03:28Z check-in, trunk aaa709c8 (27 gates; verdict 246–263 s against a 300 s budget):
+  - w17 23f723b is green (244.9 s): flags.semantics in guest_compiler.json. -mno-outline-atomics is still missing; asked before MERGER.
+  - w19's speed fixes are prioritized right after w16.
+  - w16's new head 1cba64c8: env.json is the union of pins, and the trunk version wins on a clash.
+  - Worker heads: w10 0371bf6, w12 f6ac90a, w14 0e474275, w15 3a6ec1b2, w18 9b1c64ee (a6c97620 local), w20 11168c64.
