@@ -52,6 +52,7 @@
 #include "cgraph.h"
 #include "varasm.h"
 #include "output.h"
+#include "target.h"
 #include "diagnostic-core.h"
 #include "stor-layout.h"
 #include "fold-const.h"
