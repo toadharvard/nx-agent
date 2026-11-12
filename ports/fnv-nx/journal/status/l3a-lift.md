@@ -72,3 +72,12 @@ Update 2026-11-12, at 698adefb:
 - w5 c40135c6: flags is rebased on lift-gates d6147475 (VERDICT flags paragraph; test_gate_flags 7/7). A counted rerun is BLOCKED on L1 w5's install_mirror KeyError 'autoconf' (forwarded to L1). bench/ is being deleted (no consumer). The mp.Pool pin is env.json python 3.13.18.
 - w2 97d304a4 item 30 code: idxrange.py, an interprocedural jtab join over call sites, with unknown reasons. Lead asked for the premises cited by their facts (R3 refined, no PIC, pcsrc; escape-open is unknown), a rerun on w7's refined 7-image facts, and long runs moved to farms.
 - Merged w5 pure (7aa52e42 + 07638de5): bench/ deleted (5 files, no importer); phf.py references fixed; lift/test admitted as a root of class test (selftests gate), per L1's classification. The README's claim of a farm equivalence bench was removed: no such check exists, and lifted-body correctness is by L3b form certificates. L1's merge order: L1 w5 (snapshot + script) → w14 → w17 → toolchain-build → w16 → w19 → lift-gates re-verdict → L3b.
+- Merged w8 through 1cd6911a (items 26 and 26b: DISPATCH1 rt, bridgegen, and exitgen X_<A> sharing the bridgegen parser).
+  - exitbridgetest: 98 descriptors, 294 frames, 0 differ; mutations are caught (114 and 69).
+  - disptest has 29 cases and is BLOCKED on fnvnx_call_fp (L5).
+  - The tests no longer use -w.
+  - Open on 26b:
+    - the `pop` fact per native address (from the exe's ret N; source being assigned);
+    - per-definition descriptors from the L2 dispatch plugin (asked of L2);
+    - test objects through recipe.py (after the headers tree).
+- w2 ddfbd301: idxrange premises are stated. Closed intervals carry cond:no_s4_arith until s4 closes, and are counted apart from unconditional ones.
