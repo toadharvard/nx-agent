@@ -12,7 +12,7 @@ Obligation = prove.prove_one (imported, not forked): no pre-state AND no value o
 gives a DSL post-state different from the Sail post-state.  Results: proved | FAILED(dsl) | FAILED(model-defect:ids) | model-gap | timeout, and the classes of a
 shape that has no obligation to run: no-form (no DSL builder / builder precondition) | builder-branches-on-field (file:line) | field-decode (capstone fits
 no hypothesis of symform.py) | decode (the representative is not one instruction).
-Assumptions (ids in the certificate):
+Certificate field `assumptions` (ids):
   A-FLAT      the model runs in flat 4 GiB segments, 32-bit protected mode, app_view memory (model_sail.py SEG)
   A-EIPRANGE  eip symbolic with eip < 2^32 - 16 (the instruction lies below 4 GiB); A-EIP instead (--eip fixed): eip = 0x401000, i.e. the semantics is
               translation-invariant in eip (eip_dependence says whether the Form reads eip beyond eip + size)

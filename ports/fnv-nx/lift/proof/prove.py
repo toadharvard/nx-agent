@@ -12,8 +12,8 @@ Reference model plug-in: a module of the MODELS table below (proof/model_sail.py
   ret  = {'regs': {8 names: BV32}, 'flags': {6 names: BV1}, 'mem': post-state Array, 'eip': BV32, optional 'assume': Bool (pre-states the model is defined on)}
   Other pre-state names shared with the model by name: fs_base, gs_base (BV32), rflags_other (BV32; DF = bit 10) which prove.py maps onto the DSL inputs df / flo.
   A model that cannot express the instruction raises an exception whose class is named ModelGap (result model-gap).
-Faults: a form with fault(DE) is compared on the pre-states where the DSL does not fault; additionally (1) assume => DSL does not fault, and (2) for forms
-  without a memory operand, DSL does not fault => assume (the model faults exactly where the DSL does).  The model's DE paths are tolerated for such forms only.
+Faults: a form with fault(DE) is compared on the pre-states where the DSL does not fault; additionally (1) `assume` => DSL does not fault, and (2) for forms
+  without a memory operand, DSL does not fault => `assume` (the model faults exactly where the DSL does).  The model's DE paths are tolerated for such forms only.
 Unobserved: the model interface returns neither DF nor the other EFLAGS bits; a form writing them is certified on its other fields only and reported model-gap."""
 import argparse, hashlib, json, os, re, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
@@ -73,7 +73,7 @@ def post_of(F):
     return r
 
 def check(conds, assume, args):
-    """assume AND (c1 OR ... OR cn) is checked as the n queries assume AND ci, one after the other (a complete case split of the disjunction: the disjunction is unsat iff
+    """`assume` AND (c1 OR ... OR cn) is checked as the n queries `assume` AND ci, one after the other (a complete case split of the disjunction: the disjunction is unsat iff
     every ci is; a sat ci gives a model of the whole).  Each query is much smaller than the disjunction (one register / flag / the memory), which the solver
     decides in seconds where the disjunction takes minutes.  -> (sat, solver with the model) | (unknown, s) at the first query that times out | (unsat, s)"""
     s = z3.Solver(); s.set('timeout', int(args.timeout * 1000)); s.add(assume)
