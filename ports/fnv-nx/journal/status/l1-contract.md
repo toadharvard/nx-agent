@@ -836,3 +836,11 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
 - **L5 w9 526c4e249 accepted:** funcfacts is built on imagerec, and the CodeRead BaseException change is reviewed.
   - Census at facts 2eeea27: 21669 refused relocations over 7 images.
   - It waits on L3a's DIC facts.
+
+## 2026-11-12 10:15 UTC
+- w10 A′ census over the 85 script-style files: helper calls total 1838 with literal names and 229 with non-literal names; 19 files have no helper.
+  - Decision: case(name, …, key=). A case is identified by its literal name, and every iteration of a loop shares that case's reference.
+  - Migration proceeds in batches.
+- L2 w4 gcstress 51f73739: the rule is agreed.
+  - It must be expressed through w15c's single variant mechanism before it goes to the trunk.
+  - Byte equality is checked over every unit built in the variant.
