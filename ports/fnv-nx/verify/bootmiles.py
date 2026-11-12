@@ -69,6 +69,7 @@ class Symbols(dict):
     def __init__(self, *a):
         super().__init__(*a)
         self.ambiguous = {}
+        self.funcs = set()   # names whose symbol is STT_FUNC
 
 
 class Table:
@@ -266,7 +267,7 @@ def read_symtab(path):
         raise ElfError(f"{path}: expected exactly one .symtab section, found {len(tabs)}")
     _, _, _, _, off, size, link, _, _, ent = tabs[0]
     stroff, strsize = secs[link][4], secs[link][5]
-    out, loc = {}, {}
+    out, loc, fn = {}, {}, set()
     for o in range(off, off + size, ent or 16):
         nm, val, _, info, _, shndx = struct.unpack_from("<IIIBBH", d, o)
         if nm == 0 or shndx == 0:
@@ -275,11 +276,14 @@ def read_symtab(path):
         name = d[stroff + nm:e].decode("ascii")
         if name in ("$x", "$d") or name[:3] in ("$x.", "$d."):
             continue
+        if info & 15 == 2:
+            fn.add(name)
         if info >> 4 == 0:
             loc.setdefault(name, set()).add(val)
         elif out.setdefault(name, val) != val:
             raise ElfError(f"{path}: symbol {name} defined at two values (0x{out[name]:x}, 0x{val:x})")
     res = Symbols(out)
+    res.funcs = fn
     for name, vals in loc.items():
         if name not in out:
             if len(vals) == 1:
