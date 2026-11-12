@@ -434,3 +434,8 @@ Update 2026-11-12, at 698adefb:
   - The resolved argv leads with -mabi=ilp32, then the semantics, then 8 plugins with ftoi mode=lifted.
 - t30 on int-l3a 2d215f16a: test_gate_lift, flags, order and eh all pass. vd29 and vd30 are still running.
 - L1 w17 (7ecf2e25) is accepted and goes into the next candidate (ETA one verdict cycle). The pack hold lifts when it is on int3's base.
+
+## 2026-11-12 10:00
+- Reproducibility PASS (w3): universe.py and ehtables.py under python3 -I at the producer f12c75b9d (clean worktree) give 10 of 10 outputs on libvorbisfile bit-equal to facts a0f3d8e. The exe and the larger modules are not run (their runs are long; that is a farm candidate if needed).
+- The -I proof at d77f58ef passes on libvorbisfile. The codemap gate is red there only on the 882 s4-unchecked bytes, which w4's pcsrc closes in the next facts.
+- liftall = liftgen.py finish/emit (there is no liftall.py on any L3a branch).
