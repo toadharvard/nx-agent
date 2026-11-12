@@ -9,6 +9,7 @@
   {"path": "ports/fnv-nx/farm", "class": "tool", "gates": ["selftests"]},
   {"path": "ports/fnv-nx/journal", "class": "doc", "gates": []},
   {"path": "ports/fnv-nx/link", "class": "tool", "gates": ["pure", "selftests"]},
+  {"path": "ports/fnv-nx/shim/include", "class": "headers", "gates": ["headers"]},
   {"path": "ports/fnv-nx/toolchain", "class": "tool", "gates": ["selftests"]},
   {"path": "ports/fnv-nx/verify", "class": "tool", "gates": ["selftests"]}
  ]
