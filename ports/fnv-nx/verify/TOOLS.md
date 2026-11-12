@@ -979,6 +979,9 @@ Directory listings are cached per directory until changed() (call after create/r
 
 ## verify/bootsock.py
 
+R-SOCK-1 (loopback STREAM/DGRAM traffic, poll readiness, blocking calls woken by the peer through the machine's ("sock", thunk, deadline) wait) is
+implemented; the R-SOCK-2 cases stay NotDetermined (no FreeBSD release is named by the documented base; see journal/inbox/l4-verify-w3-001.md).
+
 ```text
 The socket services (module 11, fn 16..26, 30, 31, hostapi.h + sockwire.h) of the boot stage machine, for a host that has NO network interface.
 

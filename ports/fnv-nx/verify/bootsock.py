@@ -24,6 +24,15 @@ Stated assumptions (each is a fact of the stage's model, not of the header):
 The header (hostapi.h at a1923f65) and host_sock.inc agree on every case below; where a result is "the platform's answer" and depends on
 traffic or on the OS's own choice, the case is NOT answered.
 
+R-SOCK-1 (journal/inbox/l4-verify-009.md, loopback is part of the declared machine): traffic between sockets of the one machine is modelled.
+STREAM connect to a bound listener enters its accept queue (no listener: ECONNREFUSED), accept takes the head, send / recv move bytes in order,
+close gives the peer EOF after the buffered bytes, send after the peer closed is EPIPE; DGRAM sendto appends to the queue of the socket bound to
+the address (none: dropped, sendto succeeds); poll readiness follows from the queues; a blocking call waits in virtual time and is woken by the
+peer: the model returns (("sock", thunk, deadline), timeout result) and the machine runs thunk() when it picks a thread (None = still blocked).
+R-SOCK-2 GAP (reported in journal/inbox/l4-verify-w3-001.md): the cases that are the OS's own choice (below, "NOT answered") need the FreeBSD
+release of the console's bsd service. switchbrew "Sockets services" names "the FreeBSD kernel's socket stack" with no release, so no source can
+be pinned and no answer is invented: those sites still raise NotDetermined.
+
 Served per service (everything else listed here as NOT answered):
   SOCKET     the domain is checked before the type: unknown domain (not 0/2/10, or wider than int32) EAFNOSUPPORT; unknown type EINVAL; STREAM/DGRAM (domain 2 or 10) -> a handle
              (A1, A4). NOT answered: domain AF_UNSPEC, type RAW, the protocols of A4's exception.
@@ -69,6 +78,9 @@ U64 = (1 << 64) - 1
 WE_BADF, WE_AGAIN, WE_FAULT, WE_INVAL, WE_OVERFLOW = 9, 11, 14, 22, 75
 WE_DESTADDRREQ, WE_NOPROTOOPT, WE_PROTONOSUPPORT, WE_OPNOTSUPP, WE_AFNOSUPPORT = 89, 92, 93, 95, 97
 WE_ADDRNOTAVAIL, WE_NETUNREACH, WE_NOTCONN = 99, 101, 107
+WE_PIPE, WE_CONNREFUSED = 32, 111
+MSG_PEEK, MSG_WAITALL = 0x2, 0x100
+POLL_IN, POLL_OUT, POLL_RDNORM, POLL_WRNORM, POLL_KNOWN = 0x1, 0x4, 0x40, 0x100, 0x1FF
 WIRE_AF, WIRE_SOCKTYPE = (0, 2, 10), (1, 2, 3)   # FNVNX_WIRE_AF_LIST, FNVNX_WIRE_SOCKTYPE_LIST
 AF_UNSPEC, AF_INET, AF_INET6 = WIRE_AF
 STREAM, DGRAM, RAW = WIRE_SOCKTYPE
@@ -110,6 +122,12 @@ class Sock:
         self.listening = False
         self.peer = None        # (family, port, 16 address bytes)
         self.opts = {}          # (level, option) -> value set by the guest
+        self.backlog = 0
+        self.acceptq = []       # R-SOCK-1: connections of a listener not yet accepted (server-side Socks)
+        self.link = None        # STREAM: the other end of the connection (kept after the peer closed)
+        self.peer_closed = False   # STREAM: the other end closed (EOF after the buffered bytes, EPIPE on send)
+        self.rbuf = bytearray() # STREAM: bytes sent by the peer, not yet received
+        self.dq = []            # DGRAM: datagrams (source or None, bytes) not yet received
 
 
 def classify(fam, addr):
@@ -185,8 +203,18 @@ class SockModel:
         return h
 
     def _close(self, a, s):
+        """R-SOCK-1: close gives the peer EOF; the connections a listener never accepted are closed as well"""
         del self.socks[a[0]]
+        if s.link is not None:
+            s.link.peer_closed = True
+        for c in s.acceptq:
+            c.link.peer_closed = True
         return 0
+
+    @staticmethod
+    def _matches(o, fam, port, addr):
+        """does the bound socket o receive what is addressed to (fam, port, addr)? (R-SOCK-1: the address is its own or o is bound to 'any')"""
+        return bool(o.bound) and o.bound[0] == fam and o.bound[1] == port and (classify(fam, o.bound[2]) == "any" or o.bound[2] == addr)
 
     def _bind(self, a, s):
         if not a[1]:
@@ -217,14 +245,33 @@ class SockModel:
         if not s.bound:
             raise NotDetermined("listen on an unbound STREAM socket")
         s.listening = True
+        s.backlog = a[1] & 0xFFFFFFFF
         return 0
+
+    def _take(self, a, s):
+        """accept the head of the queue: a new handle (the lowest free number, A1), or None"""
+        if not s.acceptq:
+            return None
+        c = s.acceptq.pop(0)
+        h = FIRST_HANDLE
+        while h in self.socks:
+            h += 1
+        self.socks[h] = c
+        if a[1]:
+            self._write(a[1], wire_addr(*c.peer))
+        return h
 
     def _accept(self, a, s):
         if s.typ == DGRAM:
             return neg(WE_OPNOTSUPP)
         if not s.listening:
             return neg(WE_INVAL)
-        return neg(WE_AGAIN) if s.nonblock else (("sleep", None), neg(WE_AGAIN))   # nothing can ever arrive
+        h = self._take(a, s)
+        if h is not None:
+            return h
+        if s.nonblock:
+            return neg(WE_AGAIN)
+        return (("sock", lambda: self._take(a, s), None), neg(WE_AGAIN))   # woken by the peer's connect
 
     def _dest(self, ptr, s, what):
         """(family, port, addr, kind) of a destination, or an errno result"""
@@ -248,9 +295,23 @@ class SockModel:
             raise NotDetermined("connect: an address of no decided class")
         if kind == "other":
             return neg(WE_NETUNREACH)
-        if s.typ == STREAM or kind == "any" or not port:
-            raise NotDetermined("connect to a local address: loopback traffic, or the OS's reading of 'any' / port 0")
-        s.peer = (fam, port, addr)
+        if kind == "any" or not port:
+            raise NotDetermined("connect: the OS's reading of 'any' / port 0")
+        if s.typ == DGRAM:
+            s.peer = (fam, port, addr)
+            return 0
+        if s.link is not None or s.nonblock:
+            raise NotDetermined("connect on a connected socket, or a non-blocking connect (the bsd service's result)")
+        if s.bound is None:
+            raise NotDetermined("connect: the implicit bind takes an ephemeral port (R-SOCK-2)")
+        lst = next((o for o in self.socks.values() if o.listening and o.typ == STREAM and self._matches(o, fam, port, addr)), None)
+        if lst is None:
+            return neg(WE_CONNREFUSED)   # R-SOCK-1: no listener bound to it
+        if len(lst.acceptq) >= lst.backlog:
+            raise NotDetermined("connect: the listener's accept queue is full (backlog; R-SOCK-2)")
+        c = Sock(lst.dom, STREAM)
+        c.bound, c.peer, c.link, s.link, s.peer = (fam, port, addr), s.bound, s, c, (fam, port, addr)
+        lst.acceptq.append(c)
         return 0
 
     def _flags_len(self, a):
@@ -269,17 +330,61 @@ class SockModel:
             d = self._dest(a[4], s, "sendto")
             if isinstance(d, int):
                 return d
-        if s.typ == STREAM or a[3] & MSG_OOB:
-            raise NotDetermined("sendto on a STREAM socket or with MSG_OOB")
+        if a[3] & MSG_OOB:
+            raise NotDetermined("sendto with MSG_OOB")
+        if s.typ == STREAM:
+            if d is not None:
+                raise NotDetermined("sendto with an address on a STREAM socket")
+            if s.link is None:
+                return neg(WE_NOTCONN)   # POSIX.1-2017 send(): ENOTCONN, the socket is not connected
+            if s.peer_closed:
+                return neg(WE_PIPE)      # R-SOCK-1: send after the peer closed
+            data = self._read(a[1], a[2]) if a[2] else b""
+            s.link.rbuf += data          # the buffer's capacity (SO_RCVBUF) is R-SOCK-2
+            return len(data)
         if d is None:
             if s.peer is None:
                 return neg(WE_DESTADDRREQ)
-            raise NotDetermined("sendto to the connected loopback peer")
+            d = (*s.peer, classify(s.peer[0], s.peer[2]))
         if d[3] == "exotic":
             raise NotDetermined("sendto: an address of no decided class")
         if d[3] == "other":
             return neg(WE_NETUNREACH)
-        raise NotDetermined("sendto to a local address: loopback traffic")
+        fam, port, addr, kind = d
+        if kind == "any" or not port:
+            raise NotDetermined("sendto: the OS's reading of 'any' / port 0")
+        if s.bound is None:
+            raise NotDetermined("sendto: the implicit bind takes an ephemeral port (R-SOCK-2)")
+        data = self._read(a[1], a[2]) if a[2] else b""
+        src = (s.bound[0], s.bound[1], addr if classify(*s.bound[::2]) == "any" else s.bound[2])
+        for o in self.socks.values():   # R-SOCK-1: appended to the queue of the socket bound to the address, else dropped (sendto succeeds)
+            if o.typ == DGRAM and self._matches(o, fam, port, addr) and (o.peer is None or o.peer[1:] == src[1:]):
+                o.dq.append((src, bytes(data)))   # the receive buffer's capacity is R-SOCK-2
+        return len(data)
+
+    def _recv_now(self, a, s):
+        """the result of a receive that can complete now, or None (it has to wait)"""
+        peek = a[3] & MSG_PEEK
+        if s.typ == STREAM:
+            if not s.rbuf and not s.peer_closed:
+                return None if a[2] else 0
+            n = min(a[2], len(s.rbuf))
+            data = bytes(s.rbuf[:n])
+            if not peek:
+                del s.rbuf[:n]
+            src = s.peer
+        else:
+            if not s.dq:
+                return None
+            src, full = s.dq[0]
+            data = full[:a[2]]
+            if not peek:
+                s.dq.pop(0)
+        if data:
+            self._write(a[1], data)
+        if a[4]:
+            self._write(a[4], wire_addr(*src) if src else wire_addr(AF_UNSPEC, 0, bytes(16)))
+        return len(data)
 
     def _recvfrom(self, a, s):
         r = self._flags_len(a)
@@ -287,12 +392,17 @@ class SockModel:
             return r
         if a[3] & MSG_OOB:
             raise NotDetermined("recvfrom with MSG_OOB")
-        if s.typ == STREAM:
+        if a[3] & MSG_WAITALL:
+            raise NotDetermined("recvfrom with MSG_WAITALL")
+        if s.typ == STREAM and s.link is None:
             return neg(WE_NOTCONN)
+        r = self._recv_now(a, s)
+        if r is not None:
+            return r
         if s.nonblock or a[3] & MSG_DONTWAIT:
             return neg(WE_AGAIN)
         tmo = s.opts.get((1, 20))
-        return (("sleep", None if not tmo else self.now_ns() + tmo), neg(WE_AGAIN))
+        return (("sock", lambda: self._recv_now(a, s), None if not tmo else self.now_ns() + tmo), neg(WE_AGAIN))
 
     def _opt(self, a, s):
         """(key, shape) of the option, or an errno result"""
@@ -362,14 +472,26 @@ class SockModel:
         if nfds and not (self.mem.can_read(fds, fds + 8 * nfds) and self.mem.can_write(fds, fds + 8 * nfds)):
             raise BadGuestMemory("sock_poll: fds %#x not readable and writable guest memory" % fds)
         fdv = [struct.unpack("<i", self.mem.read(fds + 8 * i, 4))[0] for i in range(nfds)]
-        for f in fdv:   # an open socket with no local peer never has traffic: revents 0
-            o = self.socks.get(f) if f >= 0 else None
-            if o is not None and (o.peer is not None or o.bound or o.listening):
-                raise NotDetermined("poll of an open socket with a local peer or a bound / listening socket: its readiness")
-        nval = 0
+        nval = sum(f >= 0 and f not in self.socks for f in fdv)
+        r = self._poll_now(fds, fdv)
+        if r or nval or tmo == 0:   # an entry that is ready already ends the wait
+            return r
+        return (("sock", lambda: self._poll_now(fds, fdv) or None, None if tmo < 0 else self.now_ns() + tmo * 1_000_000), 0)
+
+    def _ready(self, o):
+        """R-SOCK-1: readiness from the queues and buffers: readable = a connection to accept, bytes or EOF of a stream, a datagram;
+        writable = a connected stream or a datagram socket (the buffers never fill, R-SOCK-2 gives their capacity)"""
+        rd = bool(o.acceptq) if o.listening else bool(o.rbuf or o.peer_closed) if o.typ == STREAM else bool(o.dq)
+        wr = o.typ == DGRAM or (o.link is not None and not o.listening)
+        return (POLL_IN | POLL_RDNORM if rd else 0) | (POLL_OUT | POLL_WRNORM if wr else 0)
+
+    def _poll_now(self, fds, fdv):
+        """writes every revents, returns the number of entries with revents != 0"""
+        n = 0
         for i, fd in enumerate(fdv):   # a handle that is not open: POLLNVAL; a negative fd is ignored
-            self.mem.write(fds + 8 * i + 6, struct.pack("<H", WPOLLNVAL if fd >= 0 and fd not in self.socks else 0))
-            nval += fd >= 0 and fd not in self.socks
-        if nval or tmo == 0:   # an entry that is ready already ends the wait
-            return nval
-        return (("sleep", None if tmo < 0 else self.now_ns() + tmo * 1_000_000), 0)
+            o = self.socks.get(fd) if fd >= 0 else None
+            ev = struct.unpack("<H", self.mem.read(fds + 8 * i + 4, 2))[0] & POLL_KNOWN
+            rev = WPOLLNVAL if fd >= 0 and o is None else self._ready(o) & ev if o is not None else 0
+            self.mem.write(fds + 8 * i + 6, struct.pack("<H", rev))
+            n += rev != 0
+        return n

@@ -627,7 +627,7 @@ class Machine:
                 return EXT_BAD_NARGS
             try:
                 return self.socks.call(fn, self._words(args, nargs))
-            except bootsock.NotDetermined as e:
+            except bootsock.NotDetermined as e:   # the gaps of R-SOCK-2 (journal/inbox/l4-verify-009.md report): no answer is invented
                 self._event("sock-undetermined", fn=fn, why=str(e))
                 raise ExtMissing(FNVNX_EXT_PLATFORM, fn) from None
             except bootsock.BadGuestMemory as e:
@@ -1046,15 +1046,24 @@ class Machine:
                 o.state, o.result = "ready", 0
                 n += 1
 
+    def _wake_socks(self, live):
+        """a thread blocked in a socket service ("sock", thunk, deadline) is woken by the peer: thunk() gives the call's result once it can complete"""
+        for t in live:
+            if t.state == "blocked" and t.wait[0] == "sock":
+                r = t.wait[1]()
+                if r is not None:
+                    t.state, t.result = "ready", r & U64
+
     def _pick(self):
         live = [self.threads[t] for t in self.order]
         for _ in range(2):
+            self._wake_socks(live)
             start = (self.order.index(self.last) + 1) if self.last in self.order else 0
             for i in range(len(live)):
                 t = live[(start + i) % len(live)]
                 if t.state == "ready" and not t.paused:
                     return t
-            dl = [(t.wait[-1], t) for t in live if t.state == "blocked" and t.wait[0] in ("sleep", "addr")
+            dl = [(t.wait[-1], t) for t in live if t.state == "blocked" and t.wait[0] in ("sleep", "addr", "sock")
                   and t.wait[-1] is not None]
             if not dl:
                 return None
@@ -1062,7 +1071,9 @@ class Machine:
             self.clock.jump_to_ns(when)
             for d, t in dl:
                 if d <= when:
-                    t.state, t.result = "ready", 1 if t.wait[0] == "addr" else 0
+                    t.state = "ready"
+                    if t.wait[0] != "sock":   # a socket wait keeps the call's timeout result
+                        t.result = 1 if t.wait[0] == "addr" else 0
         return None
 
     # -- host-call dispatch
@@ -1124,7 +1135,7 @@ class Machine:
             self._block(("yield",), res & U64)
 
     def _waits(self):
-        return [dict(tid=t.tid, state=t.state, wait=list(t.wait) if t.wait else None, **({"paused": True} if t.paused else {}))
+        return [dict(tid=t.tid, state=t.state, wait=[x for x in t.wait if not callable(x)] if t.wait else None, **({"paused": True} if t.paused else {}))
                 for t in sorted(self.threads.values(), key=lambda x: x.tid) if t.state != "done"]
 
     def run(self):
