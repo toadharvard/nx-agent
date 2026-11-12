@@ -189,7 +189,7 @@ def finish(a):
 def recipe(ref, commit, tree):
     """lift/pack/build.json: the flags are the lifted-code flags of test/instest.py (one source), the units are the fixed names."""
     import instest
-    drop = ('-c', '-DFNVL_FLAGS_IO')
+    drop = ('-c', '-DFNVL_FLAGS_IO', '-fpermissive', '-w')      # L1 rule: a guest root carries no flag that turns an error into a warning or silences diagnostics
     gc = json.load(open(os.path.join(LIFT, '..', 'verify', 'guest_compiler.json')))   # the one source of the guest compiler (msvcmodel)
     rec = {'format': 'fnvnx-recipe/1', 'compiler': {'external': gc['external']['name'], 'cc': gc['cc'], 'cxx': gc['cxx']},
            'flags': {'c': ['-mabi=ilp32', '-Werror=attributes'], 'cxx': [f for f in instest.FLAGS if f not in drop] + ['-Werror=attributes'], 'asm': ['-mabi=ilp32', '-fPIC']},
