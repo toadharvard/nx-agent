@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
-"""Gate "oracle" (fnvnx-gate/1): every test names where its expected values come from, and that source is not the
+"""Gate "oracle" (fnvnx-gate/1): every test CASE names where its expected values come from, and that source is not the
 code under test (verify/VERDICT.md class 10).
     python3 -I gate_oracle.py        run in the checkout root (a git worktree), env GATE_OUT; writes GATE_OUT/oracle.json
 
-Universe: the test files of gate "selftests" (the DIRs of its argv in verify/gates.d/selftests.json, DIR/tests/test_*.py, found by
-gate_tests.universe: one list for both gates). An item is a repo-relative path.
+Universe: the test cases of the test files of gate "selftests" (the DIRs of its argv in verify/gates.d/selftests.json,
+DIR/tests/test_*.py, found by gate_tests.universe: one list for both gates). An item is `FILE::CASE`, FILE repo-relative. The
+cases of a file come from its syntax tree (case_names), by two forms only: (1) a module-level `def test_*` or a `test_*`
+method of a unittest.TestCase subclass (CASE = NAME or Class.NAME); (2) a call `case("literal", ...)` of the one shared
+function verify/testcase.py, resolved through the file's import of it (`from testcase import case`, or `import testcase` and
+testcase.case), never by the bare name. Red: a file with neither form (item FILE); a case whose first argument is not a str
+constant; a duplicate CASE in a file; any other binding of the name `case` (a local function named like the shared one). A
+case in a loop is one static case with `key=` (testcase.py): the static name is the literal.
 Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
-  {"format": "fnvnx-oracle/1", "tests": {"test_x.py": {"subject": [PATH...], "references": [REF...]}}}
+  {"format": "fnvnx-oracle/1", "tests": {"test_x.py": {"subject": [PATH...], "refs": {ID: REF}, "cases": {CASE: [ID...]}}}}
   subject     the files under test (repo-relative).
+  refs        the references of the file by id; cases maps EVERY case of the file (no more, no fewer) to the ids of its own
+              references: a reference is owed per case, so a case without an entry is uncertified even when another case
+              of the same file has one; an id no case uses is an error of the file.
   REF         one of (exactly these keys):
     {"kind": "wine-exe", "wine": "9.0", "exe_sha256": H64, "artifact": {"repo": "fnv-nx-build", "commit": H40,
      "tree_sha256": H64, "path": STR}}   a dump the game's exe produced under Wine 9.0: file `path` of that commit of
@@ -22,9 +31,10 @@ Declaration: DIR/tests/oracle.json ("fnvnx-oracle/1"):
                                          has this sha256
     {"kind": "contract", "path": PATH}     a contract table of the tree
     {"kind": "model", "path": PATH}        an independent model in the tree
-Rule. A test file is certified iff ALL hold:
-  1. its DIR's oracle.json is well formed and holds exactly one entry for it (an entry without a test file, an unknown
-     key or a wrong format is an error of the DIR: none of its tests is certified);
+Rule. A test case is certified iff ALL hold (2-6 for the references of that case, not of its file):
+  1. its DIR's oracle.json is well formed and holds exactly one entry for its file (an entry without a test file, an unknown
+     key or a wrong format is an error of the DIR: none of its tests is certified; a `cases` key without a case, or a case
+     without a key, is an error);
   2. `subject` is not empty and every subject path is a tracked file inside a root of verify/admit.json;
   3. `references` is not empty and every REF has one of the forms above; `wine` is "9.0"; `exe_sha256` equals
      verify/oracle_pins.json "exe_sha256"; the artifact is fetched by its exact commit (`git fetch --depth 1
@@ -42,7 +52,7 @@ Rule. A test file is certified iff ALL hold:
 Argument: an expected value "comes from the code under test" when its declared source is the subject or is computed
 through it. Rules 2-5 leave four sources: a dump of the exe under the pinned Wine, text at a place that exists in a
 file, a contract table and a model, the last three outside everything the subject can load, and for product code never
-the product tree. The verdict is green only if certified == universe, so a test without such a source blocks the merge.
+the product tree. The verdict is green only if certified == universe, so a case without such a source blocks the merge.
 Assumption (checked by verification, not by this gate): the declaration is true - the subject list is complete and (ASM-042)
 the test compares against the declared references. The after-merge verifier runs every test under verify/opentrace.py
 and compares the tracked files it opened with subject + references (verify/oraclecheck.py)."""
@@ -220,68 +230,165 @@ def judge_ref(ref, tracked, roots, pins, read, artifact, extpins=None):
     return None
 
 
-def judge_test(entry, tracked, roots, pins, read, artifact, extpins=None):
-    """-> reason or None (rules 2-5)"""
-    if not isinstance(entry, dict) or set(entry) != {"subject", "references"}:
-        return "entry keys are not subject, references"
-    subject, refs = entry["subject"], entry["references"]
+def bindings_of_case(tree):
+    """-> (names bound to the shared function, names bound to the shared module, reasons). Reasons: any other binding
+    of the name `case` (a def, class, assignment, argument, loop or import target, any scope) is a local function
+    named like the shared one"""
+    fn, mod, why = set(), set(), []
+    imports = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom) and n.module == "testcase" and n.level == 0:
+            for a in n.names:
+                if a.name == "case":
+                    fn.add(a.asname or "case")
+                    imports.add(id(a))
+        elif isinstance(n, ast.Import):
+            for a in n.names:
+                if a.name == "testcase":
+                    mod.add(a.asname or "testcase")
+                    imports.add(id(a))
+    own = fn | mod
+    for n in ast.walk(tree):
+        bound = []
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.append(n.name)
+        elif isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
+            bound.append(n.id)
+        elif isinstance(n, ast.arg):
+            bound.append(n.arg)
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            bound.append(n.name)
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            for a in n.names:
+                if id(a) not in imports:
+                    bound.append((a.asname or a.name).split(".")[0])
+        for b in bound:
+            if b == "case" or b in own:
+                why.append("line %d binds %r other than by the import of testcase" % (getattr(n, "lineno", 0), b))
+    return fn, mod, why
+
+
+def case_names(src):
+    """The test cases of a test file (verify/testcase.py): -> (names in order, reason or None). A case is a module-level
+    `def test_*`, a `test_*` method of a unittest.TestCase subclass (NAME or Class.NAME), or a call of the shared
+    testcase.case, found through its import and never by the bare name; its first argument is a str constant."""
+    try:
+        tree = ast.parse(src)
+    except (SyntaxError, ValueError) as e:
+        return [], "does not parse: %s" % e
+    names = []
+    for n in tree.body:
+        if isinstance(n, ast.FunctionDef) and n.name.startswith("test_"):
+            names.append(n.name)
+        elif isinstance(n, ast.ClassDef) and any(
+                (b.attr if isinstance(b, ast.Attribute) else getattr(b, "id", None)) == "TestCase" for b in n.bases):
+            names += [n.name + "." + m.name for m in n.body if isinstance(m, ast.FunctionDef) and m.name.startswith("test_")]
+    fn, mod, why = bindings_of_case(tree)
+    if why:
+        return names, why[0]
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and (
+                (isinstance(n.func, ast.Name) and n.func.id in fn) or
+                (isinstance(n.func, ast.Attribute) and n.func.attr == "case" and isinstance(n.func.value, ast.Name)
+                 and n.func.value.id in mod)):
+            if not n.args or not (isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str)):
+                return names, "line %d: a case name is not a string constant" % n.lineno
+            names.append(n.args[0].value)
+    dup = sorted(set(x for x in names if names.count(x) > 1))
+    if dup:
+        return names, "duplicate case name %r" % dup[0]
+    if not names:
+        return names, "no test case: neither a test_* function nor a testcase.case call"
+    return names, None
+
+
+def judge_entry(entry, names, tracked, roots, pins, read, artifact, extpins=None):
+    """entry: {"subject": [...], "refs": {ID: REF}, "cases": {NAME: [ID...]}}; names: the derived cases -> (reason for the
+    whole file or None, {case: reason}). Rules 2-6 hold per case: its own references, not its file's"""
+    if not isinstance(entry, dict) or set(entry) != {"subject", "refs", "cases"}:
+        return "entry keys are not subject, refs, cases", {}
+    subject, refs, cases = entry["subject"], entry["refs"], entry["cases"]
     if not isinstance(subject, list) or not subject:
-        return "subject is empty"
+        return "subject is empty", {}
     for s in subject:
         if not isinstance(s, str) or s not in tracked or root_of(s, roots) is None:
-            return "subject %r is not a tracked file inside a root" % (s,)
+            return "subject %r is not a tracked file inside a root" % (s,), {}
         if root_of(s, roots).get("class") == "ref":
-            return "subject %r lies in a root of class ref" % (s,)
-    if not isinstance(refs, list) or not refs:
-        return "references is empty"
-    for ref in refs:
-        why = judge_ref(ref, tracked, roots, pins, read, artifact, extpins)
-        if why:
-            return why
+            return "subject %r lies in a root of class ref" % (s,), {}
+    if not isinstance(refs, dict) or not isinstance(cases, dict):
+        return "refs and cases are not objects", {}
+    extra = sorted(set(cases) - set(names))
+    if extra:
+        return "cases without a test case: %s" % ", ".join(extra), {}
     clo, why = closure(subject, tracked, read)
     if why:
-        return why
-    for ref in refs:
-        if ref["kind"] in TREE_KINDS and ref["path"] in clo:
-            return "%s %s is in the import closure of the subject" % (ref["kind"], ref["path"])
-    if any(root_of(s, roots).get("class") == "product" for s in subject):
-        if not any(ref["kind"] in ("wine-exe", "spec") for ref in refs):
-            return "a product subject has no wine-exe or spec reference"
-        for ref in refs:
-            if ref["kind"] in TREE_KINDS and root_of(ref["path"], roots).get("class") == "product":
-                return "reference %s of a product subject lies in a product root" % ref["path"]
-    return None
+        return why, {}
+    product = any(root_of(s, roots).get("class") == "product" for s in subject)
+    ref_bad = {}
+    for i, ref in refs.items():
+        w = judge_ref(ref, tracked, roots, pins, read, artifact, extpins)
+        if not w and ref["kind"] in TREE_KINDS and ref["path"] in clo:
+            w = "%s %s is in the import closure of the subject" % (ref["kind"], ref["path"])
+        if not w and product and ref["kind"] in TREE_KINDS and root_of(ref["path"], roots).get("class") == "product":
+            w = "reference %s of a product subject lies in a product root" % ref["path"]
+        ref_bad[i] = w
+    used = set()
+    bad = {}
+    for n in names:
+        ids = cases.get(n)
+        if ids is None:
+            bad[n] = "no entry"
+        elif not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
+            bad[n] = "references are empty"
+        elif any(i not in refs for i in ids):
+            bad[n] = "names a reference id that refs does not hold"
+        else:
+            used.update(ids)
+            w = next((ref_bad[i] for i in ids if ref_bad[i]), None)
+            if not w and product and not any(refs[i]["kind"] in ("wine-exe", "spec") for i in ids):
+                w = "a product subject has no wine-exe or spec reference"
+            if w:
+                bad[n] = w
+    if set(refs) - used:
+        return "refs not used by any case: %s" % ", ".join(sorted(set(refs) - used)), {}
+    return None, bad
 
 
 def judge(files, decls, tracked, roots, pins, read, artifact, extpins=None):
-    """files: the universe; decls: {DIR/tests: parsed oracle.json or None}; artifact(commit) -> (tree hash, set of
-    file paths) or (None, reason) -> {path: reason} of the uncertified;
-    pure function of its arguments"""
-    bad = {}
+    """files: the test files; decls: {DIR/tests: parsed oracle.json or None}; artifact(commit) -> (tree hash, set of file
+    paths) or (None, reason) -> (universe, {item: reason} of the uncertified). An item is `FILE::CASE`; a file with no
+    derivable case, or whose entry is wrong as a whole, is the item FILE; pure function of its arguments"""
+    universe, bad = [], {}
     by_dir = {}
     for f in files:
         by_dir.setdefault(os.path.dirname(f), []).append(os.path.basename(f))
-    for d, names in sorted(by_dir.items()):
+    for d, fnames in sorted(by_dir.items()):
         doc = decls.get(d)
         why = None
         if not isinstance(doc, dict) or set(doc) != {"format", "tests"} or doc["format"] != FORMAT \
                 or not isinstance(doc["tests"], dict):
             why = "%s/oracle.json is missing or is not %s with keys format, tests" % (d, FORMAT)
         else:
-            extra = sorted(set(doc["tests"]) - set(names))
+            extra = sorted(set(doc["tests"]) - set(fnames))
             if extra:
                 why = "%s/oracle.json has entries without a test file: %s" % (d, ", ".join(extra))
-        for n in names:
+        for n in fnames:
             f = d + "/" + n
-            if why:
-                bad[f] = why
-            elif n not in doc["tests"]:
-                bad[f] = "no entry in %s/oracle.json" % d
-            else:
-                w = judge_test(doc["tests"][n], tracked, roots, pins, read, artifact, extpins)
-                if w:
-                    bad[f] = w
-    return bad
+            names, w = case_names(read(f))
+            if w:
+                universe.append(f)
+                bad[f] = w
+                continue
+            universe += [f + "::" + c for c in names]
+            fw, cb = why, {}
+            if fw is None and n not in doc["tests"]:
+                fw = "no entry in %s/oracle.json" % d
+            elif fw is None:
+                fw, cb = judge_entry(doc["tests"][n], names, tracked, roots, pins, read, artifact, extpins)
+            for c in names:
+                if fw or c in cb:
+                    bad[f + "::" + c] = fw or cb[c]
+    return universe, bad
 
 
 def pairs_unique(pairs):
@@ -388,21 +495,24 @@ def main():
     cache = os.path.join(os.environ.get("GATE_CACHE") or tmp, "external")
     os.makedirs(cache, exist_ok=True)
     try:
-        bad = judge(files, decls, tracked, roots, pins, read, fetcher(cache), external_pins(roots))
+        universe, bad = judge(files, decls, tracked, roots, pins, read, fetcher(cache), external_pins(roots))
     finally:
         if tmp:
             shutil.rmtree(tmp, ignore_errors=True)
+    n = len(universe) - len(bad)
     kinds = {}
     for d, doc in decls.items():
-        for n, e in (doc or {}).get("tests", {}).items() if isinstance(doc, dict) and isinstance(doc.get("tests"), dict) else []:
-            if d + "/" + n not in bad:
-                for ref in e["references"]:
-                    kinds[ref["kind"]] = kinds.get(ref["kind"], 0) + 1
-    n = len(files) - len(bad)
+        for fn_, e in (doc or {}).get("tests", {}).items() if isinstance(doc, dict) and isinstance(doc.get("tests"), dict) else []:
+            if isinstance(e, dict) and isinstance(e.get("refs"), dict):
+                for ids in (e.get("cases") or {}).values() if isinstance(e.get("cases"), dict) else []:
+                    for i in ids if isinstance(ids, list) else []:
+                        r = e["refs"].get(i)
+                        if isinstance(r, dict):
+                            kinds[r.get("kind")] = kinds.get(r.get("kind"), 0) + 1
     status = "green" if not bad and not errors else "red"
-    detail = "%d of %d test files name a reference outside their subject" % (n, len(files)) if files else \
+    detail = "%d of %d test cases name a reference outside their subject" % (n, len(universe)) if universe else \
         "no test files at this commit (nothing to certify yet)"
-    res = {"format": "fnvnx-gate/1", "name": "oracle", "status": status, "universe": len(files), "certified": n,
+    res = {"format": "fnvnx-gate/1", "name": "oracle", "status": status, "universe": len(universe), "certified": n,
            "uncertified": sorted(bad)[:50], "detail": "; ".join(errors + [detail]),
            "reasons": {f: bad[f] for f in sorted(bad)[:50]}, "references": kinds}
     with open(os.path.join(out, "oracle.json"), "w") as fh:
