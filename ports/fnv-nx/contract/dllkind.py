@@ -75,3 +75,15 @@ def classify(root_imports, imports_of, find, bridge, root=None):
 
     walk(list(root_imports))
     return order, kind
+
+
+def read_loads(text):
+    """loadlib.tsv (module, site, calls, api, status, names, breaks) -> {module: sorted names its sites resolve to}.  An open site has no
+    names (its breaks are the `loadlib` gate's); a name list is comma separated."""
+    out = {}
+    for line in text.splitlines():
+        f = line.split('\t')
+        if len(f) < 6 or f[0] == 'module':
+            continue
+        out.setdefault(f[0], set()).update(x for x in f[5].split(',') if x and x != '-')
+    return {m: sorted(v) for m, v in sorted(out.items())}

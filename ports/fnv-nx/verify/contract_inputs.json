@@ -29,16 +29,16 @@
    "name": "facts",
    "repo": "fnv-nx-build",
    "ref": "l3a-lift/facts",
-   "commit": "163ec389036feb9593005bb8fb9ac38a8e85dfd2",
-   "tree_sha256": "48833743dbdb51757616a112291f71184393258f2173b30c0f19cecefccaeccc",
+   "commit": "a0f3d8eacc43d3472b8a6e7c8c1db73d8dcfe22e",
+   "tree_sha256": "2a5bd36e3cad0fbee15cf805604af9e6e2503692aace362fde562d2f216bb8dd",
    "at": "/ext/facts"
   },
   {
    "name": "manifest",
    "repo": "fnv-nx-build",
    "ref": "l5-platform/manifest",
-   "commit": "2ac3091b7095598d04dce6091b2012f7cfa14bc7",
-   "tree_sha256": "4708f3d8d2dfa1adeab65fa4eeb4f994ad806372d49da392d22b4f93d2f169bb",
+   "commit": "e15d385fe18385be64b1069fd42015605a048394",
+   "tree_sha256": "dc3bc608d86e859d5535b843fdac3a0af22d3b13ec532956d6f730746c5cc7ad",
    "at": "/ext/manifest"
   },
   {
@@ -67,5 +67,7 @@
   "exe": "facts/ranges.tsv",
   "module": "facts/%s/ranges.tsv"
  },
- "bridge": "manifest/manifest/bridge.tsv"
+ "bridge": "manifest/manifest/bridge.tsv",
+ "escape": "manifest/manifest/import_escape.tsv",
+ "writes": "manifest/manifest/import_writes.tsv"
 }

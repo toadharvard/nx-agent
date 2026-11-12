@@ -141,6 +141,15 @@ for g in gc.GATES:
 open(repo + "/ports/fnv-nx/verify/contract_inputs.json", "w").write(json.dumps(dict(good, root_results=dict(RR, entries="entries.tsv"))))
 r = gc.judge_root("disp", repo, outd, "ports/fnv-nx/p")
 check("disp: entries.tsv named when missing", r[1] == 0 and "entries.tsv" in r[3], r)
+_doc = {"exe": "exe/x.exe", "msvc": "msvc/o", "universe": "facts/u", "ranges": {"exe": "facts/r.tsv", "module": "facts/%s/r.tsv"}, "bridge": "mf/b.tsv",
+        "escape": "mf/esc.tsv", "writes": "mf/wr.tsv", "dynsites": "mf/d.tsv", "reach_requests": "mf/q.tsv"}
+_ext = {n: {"host": "/h/" + n} for n in ("exe", "msvc", "facts", "mf", "redist")}
+_rp = {k: "/x/" + k for k in ("units", "addrmap", "aliases", "entries")}
+_st = gc.stages("/w", _doc, _ext, _rp)
+check("escape and writes tables reach loadlib, gpa and reach (the may-write rule)",
+      all(["--escape", "/h/mf/esc.tsv", "--writes", "/h/mf/wr.tsv"] == [a for a in _st[k][0]][_st[k][0].index("--escape"):_st[k][0].index("--escape") + 4] for k in ("loadlib", "gpa", "reach")))
+_d2 = {k: v for k, v in _doc.items() if k not in ("escape", "writes")}
+check("without the keys no table is passed", all("--escape" not in gc.stages("/w", _d2, _ext, _rp)[k][0] for k in ("loadlib", "gpa", "reach")))
 p = subprocess.run([sys.executable, "-I", os.path.join(VERIFY, "gate_contract.py"), "--gate", "zz"], capture_output=True, text=True)
 check("unknown gate rejected", p.returncode == 1)
 print("FAILED: %d" % len(FAILED) if FAILED else "all passed")

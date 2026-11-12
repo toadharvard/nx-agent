@@ -4,6 +4,8 @@
     mx.const_range(lo, hi)        -> Verdict            no write in the process changes [lo, hi) after load (case: global constancy)
     mx.call_keeps(fn, call_va, R) -> (bool, why)        the call at call_va does not write [R+d] of the object R points to
     mx.words(addr)                -> (leaves, writers, why)   value set of the global dword at addr (initial bytes + every writer)
+    Memfx(img, imports, extents)  extents = certified global object extents [(va, size)] (read_globext of an fnvnx-globext/1 fact):
+                                  an indexed store with a constant base in a certified object writes only inside it (OWNER ASM-006)
 
 The question and the rule.  A write modifies location L only through (W1) an instruction that names L (an absolute operand
 [disp] or [disp+idx*s] whose address range covers L), or (W2) an instruction whose address register holds a pointer value.
@@ -57,7 +59,8 @@ def norm_imp(dll, name):
 
 class ImportInfo:
     """Per import: bytes the callee removes, bridge argument letters, escape letters, and the write facts.
-    escape: one letter per argument (n not captured, r may be returned, e escapes); no row = all e.
+    escape: one letter per argument (n not captured, r may be returned, e escapes, ? the platform has not resolved it: neither n nor e,
+    open for every question with that reason, never read as n or e); no row = all e when no table was given; when a table was given a missing row is open, "no escape row for import X".
     writes: {(dll, name): letters} one per argument, n = never written through, w = may be written; no row = all w."""
 
     def __init__(self, bridge_text='', escape_texts=(), writes_text=''):
@@ -79,7 +82,7 @@ class ImportInfo:
                 old = self.escape.get(k)
                 new = f[2]
                 if old is not None:
-                    new = ''.join('e' if 'e' in (a, b) else 'r' if 'r' in (a, b) else 'n' for a, b in zip(old.ljust(len(new), 'e'), new.ljust(len(old), 'e')))
+                    new = ''.join('?' if '?' in (a, b) else 'e' if 'e' in (a, b) else 'r' if 'r' in (a, b) else 'n' for a, b in zip(old.ljust(len(new), 'e'), new.ljust(len(old), 'e')))
                 self.escape[k] = new
         for line in writes_text.splitlines():
             f = line.split('\t')
@@ -88,7 +91,9 @@ class ImportInfo:
 
     def esc_letter(self, k, idx):
         s = self.escape.get(k)
-        if s is None or idx >= len(s):
+        if s is None:
+            return '!' if self.escape else 'e'      # a table was given and has no row for the import: a manifest defect, red (not a default)
+        if idx >= len(s):
             return 'e'
         return s[idx]
 
@@ -190,6 +195,37 @@ class Scan:
         return any(r in self.img.relocs for r in range(i.address + 1, i.address + i.size - 3))
 
 
+UNSIGNED_JCC = {'ja': ('f', 0), 'jnbe': ('f', 0), 'jbe': ('t', 0), 'jna': ('t', 0),
+                'jae': ('f', -1), 'jnb': ('f', -1), 'jnc': ('f', -1), 'jb': ('t', -1), 'jnae': ('t', -1), 'jc': ('t', -1)}
+
+
+def edge_bound(fn, p, at, reg):
+    """The bound on `reg` that the edge p -> at gives: p is an unsigned conditional jump whose only predecessor is `cmp reg, imm`
+    (the flags of every path to p come from that compare), and the edge is the one on which the compare's unsigned relation holds
+    (jbe taken / ja not taken: reg <= imm; jb taken / jae not taken: reg <= imm - 1).  None if the edge gives no bound."""
+    i = fn.nodes[p]
+    ent = UNSIGNED_JCC.get(i.mnemonic)
+    if ent is None or i.operands[0].type != X.X86_OP_IMM:
+        return None
+    taken = i.operands[0].imm
+    fall = p + i.size
+    if taken == fall or at not in (taken, fall):
+        return None
+    cps = fn.pred[p]
+    if len(cps) != 1:
+        return None
+    c = fn.nodes[next(iter(cps))]
+    ops = c.operands
+    if c.mnemonic != 'cmp' or ops[0].type != X.X86_OP_REG or ops[0].size != 4 or rn(c, ops[0].reg) != reg \
+            or ops[1].type != X.X86_OP_IMM or (c.address + c.size - 4) in fn.img.relocs or ops[1].imm < 0:
+        return None
+    edge, adj = ent
+    if (edge == 't') != (at == taken):
+        return None
+    v = ops[1].imm + adj
+    return v if v >= 0 else None
+
+
 def umax(fn, at, reg, seen=None):
     """Largest unsigned value `reg` can hold before the instruction at `at` over all paths of fn, or None (unbounded)."""
     seen = seen if seen is not None else set()
@@ -207,6 +243,9 @@ def umax(fn, at, reg, seen=None):
             if i.mnemonic == 'call' and reg in argflow.CALLER_SAVED:
                 return None
             v = umax(fn, p, reg, seen)
+            eb = edge_bound(fn, p, at, reg)
+            if eb is not None:
+                v = eb if v is None else min(v, eb)
         else:
             ops = i.operands
             m = i.mnemonic
@@ -726,7 +765,11 @@ class Closure:
                 self.imps[(va, key, idx)] = (mw, esc)
                 if mw:
                     self.fw.add(fn.entry)
-                if esc == 'e':
+                if esc == '!':
+                    self.e(va, 'no escape row for import %s!%s' % key)
+                elif esc == '?':
+                    self.e(va, 'argument %d of import %s!%s: the platform escape letter is unresolved (?)' % (idx, key[0], key[1]))
+                elif esc == 'e':
                     self.e(va, 'tainted argument %d of import %s!%s (platform escape letter %s)' % (idx, key[0], key[1], esc))
                 elif esc == 'r':
                     eaxt = frozenset([ANY])
@@ -801,8 +844,29 @@ def frame_exposed(fn):
     return mx.exposed(fn)
 
 
+def read_globext(text):
+    """Parse an fnvnx-globext/1 fact (certified global object extents of one exe) -> (exe_sha256, [(va, size)] sorted by va).
+    Only va and size are read (the other fields never leave the private repository).  An overlap, an unsorted list or a zero size is
+    an error: the fact is certified, so a violation is a defect of the fact."""
+    import json
+    d = json.loads(text)
+    if d.get('format', 'fnvnx-globext/1') != 'fnvnx-globext/1':
+        raise ValueError('not an fnvnx-globext/1 fact')
+    out = [(int(o['va']), int(o['size'])) for o in d['objects']]
+    for k, (va, size) in enumerate(out):
+        if size <= 0 or (k and (va < out[k - 1][0] or va < out[k - 1][0] + out[k - 1][1])):
+            raise ValueError('global extents: object at %x is empty, unsorted or overlaps the one before it' % va)
+    return d.get('exe_sha256'), out
+
+
 class Memfx:
-    def __init__(self, img, imports=None):
+    """extents: certified global object extents [(va, size)] sorted by va, or None.  With them an indexed store whose constant base
+    lies in a certified object writes only inside that object (OWNER ASM-006: array indices are in bounds); a base in no certified
+    object keeps the rule without them."""
+
+    def __init__(self, img, imports=None, extents=None):
+        self.extents = extents
+        self._ext_starts = [a for a, b in extents] if extents else []
         self.img = img
         self.imports = imports or ImportInfo()
         img.mx = self
@@ -895,6 +959,13 @@ class Memfx:
                 out.append('TLS directory unreadable')
         return out
 
+    def object_of(self, va):
+        """(start, size) of the certified object containing va, or None."""
+        k = bisect.bisect_right(self._ext_starts, va) - 1
+        if k >= 0 and va < self.extents[k][0] + self.extents[k][1]:
+            return self.extents[k]
+        return None
+
     def direct_writers(self, lo, hi):
         """-> ([(va, why)], n_indexed_considered)"""
         sc = self.scan
@@ -912,6 +983,11 @@ class Memfx:
             es = argflow.entries_for(self.img, va)
             us = [umax(self.img.func(e), va, idx) for e in es]
             mxv = None if (not us or any(u is None for u in us)) else max(us)
+            ob = self.object_of(disp)
+            if ob is not None:         # OWNER ASM-006: the store stays inside the certified object that contains its base
+                if ob[0] < hi and ob[0] + ob[1] > lo:
+                    out.append((va, 'indexed store [%x+idx*%d] inside the certified object [%x,%x) covers it' % (disp, scale, ob[0], ob[0] + ob[1])))
+                continue
             if mxv is None:
                 out.append((va, 'indexed store [%x+idx*%d] with an unbounded index covers the section %x-%x' % (disp, scale, s2[0], s2[1])))
             elif disp < hi and disp + mxv * scale + size > lo:

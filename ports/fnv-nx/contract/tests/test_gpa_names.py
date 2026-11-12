@@ -68,10 +68,10 @@ def build():
     text = bytes(a.b).ljust(0x200, b'\xcc')
     rd = bytearray(0x200)
     struct.pack_into('<III', rd, 0, RD + 0x40, RD + 0x50, 0)            # IAT = lookup: hint/name rvas
-    struct.pack_into('<IIIII', rd, 0x10, RD, 0, 0, RD + 0x60, RD)       # descriptor
+    struct.pack_into('<IIIII', rd, 0x10, RD, 0, 0, RD + 0x70, RD)       # descriptor
     rd[0x42:0x42 + 13] = b'LoadLibraryA\0'
     rd[0x52:0x52 + 15] = b'GetProcAddress\0'
-    rd[0x60:0x60 + 13] = b'kernel32.dll\0'
+    rd[0x70:0x70 + 13] = b'kernel32.dll\0'
     rd[0x100:0x104] = b'Foo\0'; rd[0x110:0x114] = b'Bar\0'; rd[0x120:0x128] = b'mod.dll\0'
     struct.pack_into('<I', rd, 0x140, a.funcs['f_taken'][0])            # a relocated word holding f_taken's address
     data = bytearray(0x200); data[0:4] = b'Baz\0'
@@ -121,8 +121,12 @@ img.import_stack = gpa_names.import_stacks('dll\tname\tordinal\tconv\tret\targs\
 def site_of(fn, nth, slot=GPA):
     """The slot operand address of the nth instruction of fn that references `slot`."""
     s, e = a.funcs[fn]
-    hits = [r for r in sorted(img.relocs) if s <= r < e and img.word(r) == slot]
-    return hits[nth]
+    out = []
+    for r in sorted(img.relocs):
+        if s <= r < e and img.word(r) == slot:
+            calls, open_ = argflow.uses_of_slot_ref(img, r)
+            out += sorted(set(calls) | {v for v, _ in open_}) or [r]       # the site is the call instruction (dynsites convention)
+    return out[nth]
 
 
 def pairs(fn, nth=0):
@@ -146,9 +150,32 @@ check('param names', sorted(n for _, n in d['pairs']), ['Bar', 'Foo'])
 check('param status', d['status'], 'closed')
 d = pairs('f_taken')
 check('address-taken param is open', d['status'], 'open')
-thunk_ref = a.funcs['thunk'][0] + 2
+thunk_ref = a.funcs['thunk'][0]
 d = gpa_names.derive_site(img, thunk_ref)
-check('unreached thunk', (d['status'], d['note'], d['pairs']), ('closed', 'unreached', set()))
+check('a thunk (jmp [slot]) is not a site: open, naming the reason', (d['status'], any('not a call' in b for b in d['breaks'])), ('open', True))
+d = gpa_names.derive_site(img, site_of('f_const', 0) + 1)
+check('a site in the middle of an instruction is not a call: open', d['status'], 'open')
+# mixed convention: a row keyed by the IAT slot reference (the operand of the call) instead of the call VA is red, never converted
+slot_ref = [r for r in img.relocs if img.word(r) == GPA][0]
+rows = [(0, gpa_names.derive_site(img, site_of('f_const', 0))), (1, gpa_names.derive_site(img, slot_ref))]
+check('mixed-convention file: the call-VA row is closed, the slot-ref row is open (red), nothing converted', [r[1]['status'] for r in rows], ['closed', 'open'])
+d = gpa_names.derive_site(img, site_of('f_const', 0), 'LoadLibraryA')
+check('a call of another API is not a site of this one: open', (d['status'], any('not LoadLibraryA' in b for b in d['breaks'])), ('open', True))
+# a dynsites row whose call is in bytes no range covers has no derived site: red (only in dynsites), not certified by having nothing to derive
+cs = site_of('f_const', 0)
+rg2 = {s: [(s, e)] for s, e in a.funcs.values() if s != a.funcs['thunk'][0] and s != a.funcs['f_const'][0]}
+img2 = argflow.Image(data, 'syn.exe', rg2)
+img2.import_stack = img.import_stack
+d2 = gpa_names.derive_site(img2, cs)
+row = ('syn.exe', cs, 'GetProcAddress', 'dynamic')
+check('a row in unreached bytes is derived as unreached', d2['note'], 'unreached')
+import gatefile  # noqa: E402
+_w = gatefile.write
+got = []
+gatefile.write = lambda name, u, c, unc, detail: got.append((u, c, unc))
+gpa_names.gate([(row, d2), (('syn.exe', site_of('f_const', 0), 'GetProcAddress', 'dynamic'), gpa_names.derive_site(img, cs))])
+gatefile.write = _w
+check('gate: the unreached row is uncertified (only in dynsites), the reached one is certified', (got[0][0], got[0][1], any('only in dynsites' in x for x in got[0][2])), (2, 1, True))
 # cross-check: platform constant must be among the derived names
 res = [(('syn.exe', site_of('f_const', 0), 'GetProcAddress', 'mod.dll Foo'), pairs('f_const')),
        (('syn.exe', site_of('f_reg', 0), 'GetProcAddress', 'mod.dll Nope'), pairs('f_reg'))]
@@ -158,7 +185,7 @@ check('cross-check', (ok, len(bad)), (1, 1))
 have, names, mods = gpa_names.platform_pairs('dll\tname\nkernel32.dll\tFoo\n', [])
 check('platform missing', ('mod.dll', 'Foo') in gpa_names.check_platform(res, have, names, mods), True)
 # argflow API: argument k of a call site
-call = site_of('f_const', 0) - 2
+call = site_of('f_const', 0)
 r = argflow.derive_arg(img, call, 1)
 check('derive_arg', (r.closed, [(k, v[0]) for k, v, _ in r.sorted_leaves()]), (True, [('str', 'Foo')]))
 

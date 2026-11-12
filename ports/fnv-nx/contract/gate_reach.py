@@ -235,8 +235,10 @@ def gpa_state(images, rows):
         img = images[nm]
         slots = {s for s, (d, n) in img.imports.items() if n == 'GetProcAddress'}
         for ref in sorted(r for r in img.relocs if img.word(r) in slots):
-            if (nm, ref) not in covered:
-                reasons.append(('gpa-uncovered', nm, '0x%x' % ref))
+            calls, open_ = argflow.uses_of_slot_ref(img, ref)      # the rows are keyed by the call instruction (dynsites convention)
+            for va in sorted(set(calls) | {v for v, _ in open_}):
+                if (nm, va) not in covered:
+                    reasons.append(('gpa-uncovered', nm, '0x%x' % va))
         for s in sorted(img.imports):
             d, n = img.imports[s]
             if n.startswith('#') and iat.norm_dll(d) == 'kernel32.dll':
@@ -725,6 +727,7 @@ def main(argv=None):
     ap.add_argument('--requests', required=True)
     ap.add_argument('--gpa')
     ap.add_argument('--image', action='append', default=[], help='name=pe_path,ranges_path (the image set of the stage)')
+    ap.add_argument('--images-file', help='images.tsv of loadlib.py (instead of --image)')
     ap.add_argument('--bridge')
     ap.add_argument('--escape', action='append', default=[], help='import_escape.tsv of a platform backend (repeat; worst letter counts)')
     ap.add_argument('--writes', help='per import argument write facts (memfx.ImportInfo); default: every pointer argument may be written')
@@ -736,6 +739,8 @@ def main(argv=None):
     ap.add_argument('--objects')
     ap.add_argument('--certified')
     a = ap.parse_args(argv)
+    if a.images_file:
+        a.image = a.image + gpa_names.specs_of(a.images_file)
     try:
         if a.objects:
             if not a.certified:

@@ -1,6 +1,41 @@
 {
  "format": "fnvnx-oracle/1",
  "tests": {
+  "test_allocsites.py": {
+   "references": [
+    {
+     "anchor": "### Allocation sites by return flow",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
+    },
+    {
+     "anchor": "## contract/allocsites.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/allocsites.py"
+   ]
+  },
+  "test_argcensus.py": {
+   "references": [
+    {
+     "anchor": "### Argument census of a platform dll",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
+    },
+    {
+     "anchor": "## contract/argcensus.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/argcensus.py",
+    "ports/fnv-nx/contract/argflow.py"
+   ]
+  },
   "test_bind.py": {
    "references": [
     {
@@ -23,6 +58,23 @@
     "ports/fnv-nx/contract/bind.py",
     "ports/fnv-nx/contract/store.py",
     "ports/fnv-nx/contract/bodysel.py"
+   ]
+  },
+  "test_callcensus.py": {
+   "references": [
+    {
+     "anchor": "### Call-site census of a platform function",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
+    },
+    {
+     "anchor": "## contract/callcensus.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/callcensus.py"
    ]
   },
   "test_gate_call_decl.py": {
@@ -185,6 +237,25 @@
    ],
    "subject": [
     "ports/fnv-nx/contract/l2sections.py"
+   ]
+  },
+  "test_loadlib.py": {
+   "references": [
+    {
+     "anchor": "### LoadLibrary names and the image set",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/VERDICT.md"
+    },
+    {
+     "anchor": "## contract/loadlib.py",
+     "kind": "spec",
+     "path": "ports/fnv-nx/verify/TOOLS.md"
+    }
+   ],
+   "subject": [
+    "ports/fnv-nx/contract/loadlib.py",
+    "ports/fnv-nx/contract/dllkind.py",
+    "ports/fnv-nx/contract/argflow.py"
    ]
   },
   "test_memfx.py": {

@@ -62,7 +62,7 @@ OPT_PATHS = {"reach_requests": ("reach, reachlink", "L5: platform manifest reach
              "dynsites": ("gpa", "L5: dynsites.tsv"),
              "ehfacts": ("eh (gate_lift.py)", "L3a: NAME[/path] of the external that holds ehtables.json of the exe and <module>/ehtables.json"),
              "sites": ("order (gate_lift.py)", "L3a: NAME/path of the file of the sites of the lifted universe: \"1 HEXADDR\" for every locked instruction (every LOCK-prefixed instruction and every xchg with a memory operand), \"2 HEXADDR mem|ax\" for every FPU status instruction (FSTSW, FNSTENV, FNSAVE)")}
-OPT_KEYS = set(OPT_PATHS) | {"keys", "bridge"}
+OPT_KEYS = set(OPT_PATHS) | {"keys", "bridge", "escape", "writes"}
 CONTRACT_GATES = ("n1", "n2_data", "n2_call", "n2_vcall", "xc", "xunit", "rtti", "pcrel", "bodysel")
 LINK_GATES = ("abs", "disp", "reach", "reachlink", "gpa")
 GATES = CONTRACT_GATES + LINK_GATES
@@ -101,7 +101,7 @@ def load_inputs(path):
         names = [e.get("name") for e in exts if isinstance(e, dict)]
         if len(set(names)) != len(names):
             err.append("external names are not unique")
-        for k in PATHS + tuple(k for k in ("reach_requests", "dynsites", "keys", "bridge", "ehfacts", "sites") if k in doc):
+        for k in PATHS + tuple(k for k in ("reach_requests", "dynsites", "keys", "bridge", "ehfacts", "sites", "escape", "writes") if k in doc):
             v = doc.get(k)
             if not isinstance(v, str) or ("/" not in v and k != "ehfacts") or v.split("/", 1)[0] not in names or ".." in v.split("/"):
                 err.append("%s must be NAME/path inside a declared external" % k)
@@ -159,13 +159,20 @@ def py(script, *args):
 
 
 def images_of(doc, ext, pinned=True):
-    """([(name, pe path, ranges path)] of the images that have range facts, [names without]) of contract.images.image_set."""
+    """([(name, pe path, ranges path)] of the images that have range facts, [names without]): the declared machine's image set is the pinned one
+    (contract/exepin.py IMAGES: the exe and the guest image DLLs of the declared file set, digests); the `loadlib` stage derives the may-load set
+    and checks it against the same pin, so the two are one fact.  PINNED=False: the digests are not checked here (a judge that only reads the
+    images the facts name; the pin is the contract gate's)."""
     have, lack = [], []
-    bridge = set()          # a bridge dll is never an image (contract/dllkind.py): the dlls with rows in the declared bridge.tsv
-    if doc.get("bridge"):
-        bridge = {r["dll"] for r in iat.bridge_rows(P2(ext, doc["bridge"]))[0]}
-    found = images.image_set(P2(ext, doc["exe"]), [ext[n]["host"] for n in ("exe", "redist")], bridge)
-    try:   # the declared machine's image set is the pinned one (PINNED=False: a judge that only reads the images the facts name; the pin is the contract gate's) (contract/exepin.py IMAGES): digests of every guest image DLL
+    dirs = [ext[n]["host"] for n in ("exe", "redist")]
+    exe = P2(ext, doc["exe"])
+    found = [(os.path.basename(exe).lower(), exe)]
+    for name in sorted(exepin.IMAGES):
+        hits = [os.path.join(d, f) for d in dirs for f in sorted(os.listdir(d)) if f.lower() == name and os.path.isfile(os.path.join(d, f))]
+        if not hits:
+            raise Red("%s: pinned image not in the declared file set" % name)
+        found.append((name, hits[0]))
+    try:
         if pinned:
             exepin.check_images([(n, os.path.getsize(p), hashlib.sha256(open(p, "rb").read()).hexdigest()) for n, p in found if not n.endswith(".exe")])
     except exepin.ExePinError as e:
@@ -185,11 +192,12 @@ def stages(w, doc, ext, rp, only=None):
     reads the exe) is derived only for the stages that take it (gpa, reach, reachlink), so the other stages can be built without it."""
     P = lambda k: rp[k] if k in rp else P2(ext, doc[k])
     link = w + "/link"
-    imgs = []
-    if only is None or only in IMAGE_GATES:
-        for name, pe, rg in images_of(doc, ext)[0]:
-            imgs += ["--image", "%s=%s,%s" % (name, pe, rg)]
+    imgs = ["--images-file", w + "/loadlib/images.tsv"]
+    # the platform tables of the may-write rule (memfx.ImportInfo): import_escape.tsv (retention letters) and import_writes.tsv (n = never
+    # written through); a key the inputs document does not name is not passed (the rule then treats every pointer argument as e / w)
     bridge = ["--bridge", P2(ext, doc["bridge"])] if doc.get("bridge") else []
+    tables = (["--escape", P2(ext, doc["escape"])] if doc.get("escape") else []) + (["--writes", P2(ext, doc["writes"])] if doc.get("writes") else [])
+    bridge = bridge + tables
     opt = lambda k: P2(ext, doc[k]) if k in doc else None
     st = {
         "exefacts": (py("exefacts.py", "--exe", P("exe"), "--units", rp["units"], "--out", w + "/facts.json"), ["facts.json"]),
@@ -207,6 +215,9 @@ def stages(w, doc, ext, rp, only=None):
                        "--out", w + "/bodysel.tsv"),
                     ["bodysel.tsv", "gate/bodysel.json"]),
         "abs": (py("../link/gate_abs.py", "--inputs", w + "/inputs.rsp", "--elf", link + "/guest/fnvnx.elf"), ["gate/abs.json"]),
+        "loadlib": (py("loadlib.py", "--exe", P("exe"), "--dir", ext["exe"]["host"], "--dir", ext["redist"]["host"], "--ranges-exe", P2(ext, doc["ranges"]["exe"]),
+                       "--ranges-module", P2(ext, doc["ranges"]["module"]), *bridge, *(["--sites", opt("dynsites")] if doc.get("dynsites") else []),
+                       "--out", w + "/loadlib"), ["loadlib/loadlib.tsv", "loadlib/images.tsv", "gate/loadlib.json"]),
         "gpa": (py("gpa_names.py", "--sites", opt("dynsites") or "", *imgs, *bridge, "--out", w + "/gpa"), ["gpa/gpa_names.tsv", "gate/gpa.json"]),
         "reach": (py("gate_reach.py", "--requests", opt("reach_requests") or "", "--gpa", w + "/gpa/gpa_names.tsv", *imgs, *bridge, "--out", w + "/reach/reach.tsv",
                      "--facts-tsv", w + "/reach/reach.facts.tsv"), ["reach/reach.facts.tsv", "gate/reach.json"]),
@@ -221,7 +232,7 @@ def stages(w, doc, ext, rp, only=None):
 
 NEEDS = {"n1": ["n1"], "xunit": ["xunit"], "rtti": ["rtti"], "pcrel": ["pcrel"], "bodysel": ["exefacts", "n1", "objfacts", "registry", "bind", "bodysel"]}
 NEEDS.update({g: NEEDS["bodysel"] for g in REGISTRY})
-NEEDS.update({"abs": ["abs"], "disp": ["disp"], "gpa": ["gpa"], "reach": ["gpa", "reach"], "reachlink": ["gpa", "reach", "reachlink"]})
+NEEDS.update({"abs": ["abs"], "disp": ["disp"], "gpa": ["loadlib", "gpa"], "reach": ["loadlib", "gpa", "reach"], "reachlink": ["loadlib", "gpa", "reach", "reachlink"]})
 
 
 def run_stage(name, w, doc, ext, rp):
@@ -341,6 +352,10 @@ def _judge(gate, repo, cache, root, doc, rp, ext, w):
     if gate not in REGISTRY:
         r = json.load(open(os.path.join(w, "gate", gate + ".json")))
         u, c, ids, detail = r["universe"], r["certified"], [root + ":" + i for i in r["uncertified"]], r["detail"]
+        if gate == "gpa":      # the LoadLibrary names decide the image set the derivation runs on: its sites and the agreement with dynsites count here
+            r2 = json.load(open(os.path.join(w, "gate", "loadlib.json")))
+            u, c, ids = u + r2["universe"], c + r2["certified"], ids + [root + ":" + i for i in r2["uncertified"]]
+            detail += "; loadlib: " + r2["detail"]
         if gate in IMAGE_GATES:                 # an image of the closure without range facts: a reported red item (the stage judged the rest)
             lack = images_of(doc, ext)[1]
             u, ids = u + len(lack), ids + [root + ":" + n for n in lack]

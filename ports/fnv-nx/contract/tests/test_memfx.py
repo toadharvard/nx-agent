@@ -242,6 +242,14 @@ check('... the import is declared to write through no argument', keeps(imp_prog,
 check('... the import escapes the argument', keeps(imp_prog, 'f', 'esi', writes='dll\tname\twrites\nkernel32.dll\tCloseHandle\tn\n',
                                                    escape='dll\tname\tescape\nkernel32.dll\tCloseHandle\te\n'), False)
 
+check('... an unresolved escape letter (?) is open, never read as n', keeps(imp_prog, 'f', 'esi', writes='dll\tname\twrites\nkernel32.dll\tCloseHandle\tn\n',
+                                                   escape='dll\tname\tescape\nkernel32.dll\tCloseHandle\t?\n'), False)
+check('... a given table with no row for the import: open (no escape row), not all-e by default', keeps(imp_prog, 'f', 'esi', writes='dll\tname\twrites\nkernel32.dll\tCloseHandle\tn\n',
+                                                   escape='dll\tname\tescape\nkernel32.dll\tOther\tn\n'), False)
+check('... the reason names the missing row', memfx.ImportInfo('', ['dll\tname\tescape\nk.dll\tG\tn\n']).esc_letter(memfx.norm_imp('k.dll', 'F'), 0), '!')
+_ii = memfx.ImportInfo('', ['dll\tname\tescape\nk.dll\tF\tn\n', 'dll\tname\tescape\nk.dll\tF\t?\n'])
+check('two tables for one import: ? dominates the merge', _ii.esc_letter(memfx.norm_imp('k.dll', 'F'), 0), '?')
+
 
 # ---- globals
 def glob_prog(body):
@@ -292,6 +300,46 @@ v = const(glob_prog(w_idx_bounded), G + 8, G + 12, writes=wi)
 check('indexed write, proven bound covers G+8..G+16', v.ok, False)
 v = const(glob_prog(w_idx_bounded), G + 0x10, G + 0x14, writes=wi)
 check('indexed write, [G+0..G+0x10) bound excludes G+0x10', v.ok, True)
+
+
+def w_cmp(jcc, k):           # cmp eax,k ; jcc over the store ; mov [G + eax*4], ecx ; ret
+    def prog(a):
+        a.func('w'); a.raw(0x83, 0xf8, k, jcc, 7, 0x89, 0x0c, 0x85); a.rel.append(TEXT + len(a.b)); a.b += struct.pack('<I', G); a.ret(); a.end('w')
+    return prog
+
+
+v = const(glob_prog(w_cmp(0x77, 3)), G + 0x10, G + 0x14, writes=wi)
+check('cmp eax,3 ; ja over the store: the store runs with eax<=3, covers [G, G+0x10)', v.ok, True)
+v = const(glob_prog(w_cmp(0x77, 3)), G + 0x0c, G + 0x10, writes=wi)
+check('... and the last element is written', v.ok, False)
+v = const(glob_prog(w_cmp(0x73, 4)), G + 0x10, G + 0x14, writes=wi)
+check('cmp eax,4 ; jae over the store: eax<=3', v.ok, True)
+v = const(glob_prog(w_cmp(0x72, 3)), G + 0x100, G + 0x106, writes=wi)
+check('cmp eax,3 ; jb over the store: the store runs with eax>=3, no bound, the section is covered', v.ok, False)
+v = const(glob_prog(w_cmp(0x7f, 3)), G + 0x100, G + 0x106, writes=wi)
+check('a signed jump gives no bound', v.ok, False)
+
+
+def const_ext(prog, lo, hi, extents, **kw):
+    img, mx, a = image(prog, **kw)
+    mx2 = memfx.Memfx(img, mx.imports, extents)
+    return mx2.const_range(lo, hi)
+
+
+v = const_ext(glob_prog(w_idx_unbounded), G + 0x100, G + 0x106, [(G, 0x40)], writes=wi)
+check('extents: an unbounded indexed store whose base lies in a certified object [G,G+0x40) does not reach G+0x100', v.ok, True)
+v = const_ext(glob_prog(w_idx_unbounded), G + 0x20, G + 0x24, [(G, 0x40)], writes=wi)
+check('extents: ... and does write inside its own object', v.ok, False)
+v = const_ext(glob_prog(w_idx_unbounded), G + 0x100, G + 0x106, [(G + 0x80, 0x40)], writes=wi)
+check('extents: a base in no certified object keeps the unbounded rule (section covered)', v.ok, False)
+tx = '{"format": "fnvnx-globext/1", "exe_sha256": "ab", "objects": [{"va": 16, "size": 8, "symbol": "x"}, {"va": 24, "size": 4}]}'
+check('read_globext: sha and (va, size) only', memfx.read_globext(tx), ("ab", [(16, 8), (24, 4)]))
+for bad in ('{"objects": [{"va": 16, "size": 8}, {"va": 20, "size": 4}]}', '{"objects": [{"va": 16, "size": 0}]}', '{"objects": [{"va": 24, "size": 4}, {"va": 16, "size": 4}]}'):
+    try:
+        memfx.read_globext(bad)
+        check('read_globext: overlap, empty or unsorted is an error', 'no error', 'error')
+    except ValueError:
+        check('read_globext: overlap, empty or unsorted is an error', 1, 1)
 
 
 def leak_prog(a):           # the address of a global kept in a data word

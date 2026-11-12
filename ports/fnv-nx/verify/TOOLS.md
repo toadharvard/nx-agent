@@ -357,13 +357,78 @@ Rules fixed here (all three consumers use them through this file and importkey.c
 ```text
 images - the guest image set of the contract gates (L1 CONTRACT): one pure function, no hand list.
 
-RULE (dllkind.py, shared with modules.py): the set is the exe and the dlls reached from its import directories (normal and delay-load, in
-modules.PE's reading) through guest images only.  A dll name (iat.norm_dll) is resolved case-insensitively against the files of the
-given directories; it is a GUEST IMAGE iff it is found, has no bridge row, and its whole normal import closure resolves to guest images
-or bridge dlls.  A bridge dll (rows in bridge.tsv) and a found dll the declared machine cannot load are not images and are not walked
-further; a name that is neither found nor bridged is a platform import (gate `imports`, owner L5).  Dynamic LoadLibrary names are facts of
-the `gpa` gate, not of this rule (VERDICT.md).
-Order: the exe, then the images in discovery order (depth first, import directory then delay-load directory).
+RULE (dllkind.py, shared with modules.py): the set is the least set that contains the exe and is closed under (i) the import directories
+of its members (normal and delay-load, in modules.PE's reading) and (ii) the LoadLibrary targets of its members whose names are statically
+resolved (LOADS, from loadlib.py: {image name: dll names}); a member is a guest image, and the walk does not continue through a bridge or
+declared dll.  A dll file reached by neither is in no image and gets no base.  A dll name (iat.norm_dll) is resolved case-insensitively
+against the files of the given directories; it is a GUEST IMAGE iff it is found, has no bridge row, and its whole normal import closure
+resolves to guest images or bridge dlls.  A bridge dll (rows in bridge.tsv) and a found dll the declared machine cannot load are not
+images; a name that is neither found nor bridged is a platform import (gate `imports`, owner L5).  A LoadLibrary site whose name is not
+resolved is open in the `loadlib` gate (VERDICT.md): it may add an image, so the set is final only when that gate is green.
+Order: the exe, then the images in discovery order (depth first, import directory, delay-load directory, then loaded names).
+```
+
+## contract/loadlib.py
+
+```text
+loadlib - the image set and the module names every LoadLibrary call of the images can load (L1 CONTRACT).
+
+    loadlib.py --exe E --dir D ... --ranges-exe R --ranges-module 'F/%s/ranges.tsv' --bridge bridge.tsv [--sites dynsites.tsv] --out DIR
+
+One rule over the facts of the images (the same argflow.Image and may-write rule as gpa_names.py):
+  site     every reference of an imported LoadLibraryA/W/ExA/ExW slot (argflow.uses_of_slot_ref: call [slot], call thunk, call reg
+           after mov reg,[slot]); its address is the address of the call instruction, the site L5's dynsites.tsv names (one row per call; a dynsites row whose site is not a call of its API is an item of the gate, `argflow.site_api`; nothing is converted).
+  names    the value set of argument 0 of the calls that use the site (argflow.derive_arg): a string constant leaf is a name
+           (norm_dll'd); any other leaf, a break, or an escape of the slot reference makes the site open.  A closed site
+           loads exactly its names (a name no file answers makes LoadLibrary fail: no module).
+  set      images.image_set over the loads (fixpoint): members with range facts are derived once, their closed names enter the
+           walk and can add members; the set only grows.  A member without range facts has no row (its sites are unknown).
+Outputs: loadlib.tsv (module, site, calls, api, status closed|open, names, breaks), images.tsv (name, pe, ranges or '-'), and the
+gate file `loadlib`: universe = sites + disagreements, certified = closed sites.
+Agreement with L5's dynsites.tsv (--sites): the LoadLibrary rows of every module that has a derivation must be exactly the sites found
+here; a site in only one of the two lists is uncertified (the two finders are one rule or the gate is red).
+import argparse
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import argflow
+import gatefile
+import dllkind
+import gpa_names
+import iat
+import images
+
+
+def api_list():
+    return sorted(a for a in argflow.LOADERS if not a.startswith('GetModuleHandle'))
+
+
+def derive(img):
+```
+
+## contract/argcensus.py
+
+```text
+argcensus - the value set of every stdcall argument of every call of the imports of chosen dlls, over the image set (L1 CONTRACT).
+
+    argcensus.py --images-file images.tsv --bridge bridge.tsv --dll wsock32.dll [--dll ...] [--gpa gpa_names.tsv] [--loadlib loadlib.tsv] --out DIR
+
+Rule (argflow, the same engine and may-write rule as gpa_names.py / gate_reach.py).  For every bridge row (dll D in --dll, name N, args
+letters = the stdcall argument count) and every image of the set: the uses of the slots of D!N (argflow.imports_called: call [slot], a
+thunk, a register-loaded call) and, per use and argument k (0 = pushed last), argflow.derive_arg:
+  closed   every leaf is an immediate value: the argument is one of those values on every path (argflow walks all paths of the
+           function backwards and expands own parameters to every caller, or reports a break);
+  open     a leaf is a string / a call result / an import slot, or the derivation broke: the argument is of class `any`.
+An import by ordinal is the bridge row of that ordinal. An escape of a slot (uses_of_slot_ref's open list) or an import of D by an ordinal no bridge row has makes the import's rows open for all its arguments: its
+uses are not all known.  Aggregate per (D, N, k): closed iff every use is closed; values = the union (hex, sorted).  A closed aggregate
+is the complete value set of the argument for the exe's own calls; any value outside it is excluded by a certificate (`excluded` rows
+of the --gpa/--loadlib check below), provided no dynamic path reaches D at all (below).
+Reach of D by dynamic names (--gpa gpa_names.tsv, --loadlib loadlib.tsv): `reach: none` iff no gpa row is open, no pair of gpa_names
+names a module of D, and no loadlib site is open or names D; else `reach: possible` with the open items (the aggregate then covers the
+static uses only; a dynamic use is outside it).
+Outputs: argcensus.tsv (dll, name, argc, image, ref, call, k, status, values, other, breaks), argcensus.agg.tsv (dll, name, k, status,
+values, uses), argcensus.reach.txt.  Exe-derived: container and fnv-nx-build only.
 ```
 
 ## contract/imports.py
@@ -413,6 +478,8 @@ memfx - may-write analysis of an x86 PE image (L1 CONTRACT): which writes can re
     mx.const_range(lo, hi)        -> Verdict            no write in the process changes [lo, hi) after load (case: global constancy)
     mx.call_keeps(fn, call_va, R) -> (bool, why)        the call at call_va does not write [R+d] of the object R points to
     mx.words(addr)                -> (leaves, writers, why)   value set of the global dword at addr (initial bytes + every writer)
+    Memfx(img, imports, extents)  extents = certified global object extents [(va, size)] (read_globext of an fnvnx-globext/1 fact):
+                                  an indexed store with a constant base in a certified object writes only inside it (OWNER ASM-006)
 
 The question and the rule.  A write modifies location L only through (W1) an instruction that names L (an absolute operand
 [disp] or [disp+idx*s] whose address range covers L), or (W2) an instruction whose address register holds a pointer value.
@@ -2170,6 +2237,49 @@ Run as `python3 -I verdict.py CMD ...`. Exit codes: 0 ok, 1 usage/format error, 
               (transitively), is tainted. Exit 2 lists chains. Stage results: S/keys/<key>/result.json (sandbox.py).
   defect / defects   rule-defect queue: content-addressed JSON entries, verification-class data only.
 ```
+
+## contract/callcensus.py
+
+```text
+callcensus - every call site of chosen functions over the image set, with reach from the exe entry and the value set of one argument (L1 CONTRACT).
+
+    callcensus.py --exe-facts facts.json --exe-entry 0xVA --images-file images.tsv --bridge bridge.tsv --module name.dll=path
+                  --fn dll!name:argc:srcarg ... [--gpa gpa_names.tsv] --out DIR
+
+For each --fn (an export of an image of the set, for example d3dx9_38.dll!D3DXAssembleShader:7:0): the uses of its slots in every image
+(argflow.uses_of_slot_ref: call [slot], thunk, register-loaded call; an import by name or by the ordinal the module's export table gives
+it), the direct calls to its entry inside the providing image (argflow Image.callers, entry = preferred base + export rva), and the
+GetProcAddress rows of --gpa that name it.  Per site: image, va, the function containing it, REACH and the SOURCE argument.
+reach  (the exe's own sites) `yes` iff the containing function is in the forward closure from the exe entry over the exe facts: direct
+       calls, tail jumps, relocated code pointers of the function, the slots of the RTTI vftables it references, and the pointer
+       tables it references (every code pointer of the same contiguous run of the pointer table).  This over-approximates the call
+       graph (an indirect call can only reach a function whose address is taken somewhere in the facts); the range entry that starts at the exe's entry point is a seed too, so `no` means unreachable over the facts (their
+       completeness is the facts' own gate) and `yes` means "not excluded".  A site in another image: `inner` (reach decided by the calls into that image).
+source the derived value set of argument srcarg (argflow.derive_arg): `const-string "text"`, `imm 0x..`, `pointer-from-flow` (a call result
+       or a value of the caller's parameters: the leaf kinds are listed), `open` (a break: the reason).
+Output callcensus.tsv: image, va, call, function, reach, kind, source, note.  Exe-derived: container and fnv-nx-build only.
+```
+
+## contract/allocsites.py
+
+```text
+allocsites - the allocation sites of the image set: calls of an allocator import and, by return flow, of every function that returns one (L1 CONTRACT).
+
+    allocsites.py --images-file images.tsv --bridge bridge.tsv --out allocsites.tsv
+
+Allocator imports (Win32 as documented, size argument index): kernel32 HeapAlloc 2, HeapReAlloc 3, VirtualAlloc 1, LocalAlloc 1, GlobalAlloc 1.
+Rule (closure).  A function is an ALLOCATOR if the value in eax at one of its `ret` instructions flows (argflow.Flow, backward over the
+function) from the result of a call of an allocator import or of an allocator, or it tail-jumps to an allocator.  It is `pure` when every
+leaf of every returned value is such a call result, `mixed` when other leaves (NULL, a parameter, ...) or a break are present (listed, not
+dropped).  Allocators are found by a fixpoint over the call graph from the import call sites; nothing is identified by name or signature.
+Every direct call of an allocator is an allocation site.  A function whose address is taken is listed `address-taken`: its indirect
+callers are not sites (a stated gap, counted).
+The size of a site: for a call of an import, the value set of its size argument (argflow.derive_arg); for a call of an allocator whose
+inner size argument is exactly its own parameter i (every leaf is param (itself, i)), the value set of argument i at that call site.  A
+single immediate is `const_size`, anything else `-` (open).
+Output (fnvnx-allocsites/1, sorted): `image site_va allocator_import const_size field_inits`, allocator_import = the import the flow starts
+from (`HeapAlloc`) or `via <allocator entry>`, field_inits `-` (not derived).  Header lines `#` list the closure: allocators (pure/mixed),
+address-taken allocators and the gap (callers through function pointers).  Exe-derived: container and fnv-nx-build only.
 
 ## link/abi.py
 

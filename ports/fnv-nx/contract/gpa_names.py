@@ -3,16 +3,10 @@
 
     gpa_names.py --sites dynsites.tsv --image NAME=pe[,ranges.tsv] ... [--bridge bridge.tsv] [--modules modules.tsv] --out DIR
 
-Input rows (dynsites.tsv of L5: module, site, api, operand): `site` is the address of the relocated 4-byte slot operand (at
-the module's preferred base) of an instruction that reads the IAT slot of the import `api`.  Only api = GetProcAddress rows
-are derived.  One rule for every row (argflow.py): the uses of the slot value are
-
-  call [slot]                          the instruction itself;
-  jmp [slot] (an import thunk)         every direct call of the thunk; the thunk's address taken by a relocated word, or a jump
-                                       to it that is not a call, makes the site open; a thunk no code of the facts reaches
-                                       (the facts are closed under direct targets and relocated code pointers) has no use;
-  mov reg,[slot]                       every `call reg` on the forward paths (copies tracked; any other read of the register,
-                                       a return of it in eax: the value escapes and the site is open).
+Input rows (dynsites.tsv of L5: module, site, api, operand): `site` is the address (at the module's preferred base) of the CALL
+instruction of the import `api`: call [slot], a call of the import thunk (jmp [slot]), or a call through a register that holds the
+slot value (argflow.callee decides).  The consumer converts nothing: a row whose site does not decode to such a call is open,
+naming the reason (a mixed-convention file is therefore red).  Only api = GetProcAddress rows are derived.
 
 At every use, lpProcName (stdcall argument 1) and hModule (argument 0) are derived by argflow.derive_arg: definitions D1 string,
 D2 constant-indexed table, D3 ordinal, D4 own parameter (expanded to every caller, open when the function is address-taken).
@@ -23,11 +17,12 @@ written (*, name): the platform must provide the name in every module.
 
 Output gpa_names.tsv: module, site, api, operand, status, modules, npairs, ndlls, pairs, uses, proof, breaks.
 proof = per use `call@va<-args`: name definition addresses | module definition addresses.  Gate `gpa` (gatefile.py): universe =
-GetProcAddress rows with a dynamic operand, certified = closed ones.  Cross-check: rows with a constant operand are derived
+GetProcAddress rows with a dynamic operand, certified = closed ones with a derived site (a row whose call is in unreached bytes is red: only in dynsites).  Cross-check: rows with a constant operand are derived
 too and compared with the platform's constant.  Check (--bridge): pairs the platform does not provide.
 Exe-derived: container and fnv-nx-build only.
 """
 import argparse
+import hashlib
 import os
 import sys
 
@@ -42,13 +37,16 @@ def pair_key(dll):
     return iat.norm_dll(dll)
 
 
-def derive_site(img, site):
-    """-> dict(status, modules, pairs {(dll|'*', name): ...}, uses, proof [str], breaks [str])."""
-    calls, open_ = argflow.uses_of_slot_ref(img, site)
+def derive_site(img, site, api='GetProcAddress'):
+    """-> dict(status, modules, pairs {(dll|'*', name): ...}, uses, proof [str], breaks [str]).  The site is the call instruction
+    (argflow.site_api validates it: a row that is not a call of the import is open, naming the reason)."""
+    why = argflow.site_api(img, site, api)
+    gone = not why and argflow.unreached(img, site)       # a call in bytes no range of the facts covers is never executed (A3)
+    calls = [] if (why or gone) else [site]
     out = dict(uses=calls, pairs=set(), proof=[], breaks=[], mod_unknown=False, note='')
-    for va, why in open_:
-        out['breaks'].append('%x %s' % (va, why))
-    if not calls and not open_:
+    if why:
+        out['breaks'].append(why)
+    elif gone:
         out['note'] = 'unreached'
         out['proof'].append('unreached@%x' % site)
     for u in calls:
@@ -132,7 +130,7 @@ def run(rows, images):
             out.append(((mod, site, api, operand), dict(status='open', uses=[], pairs=set(), proof=[], mod_unknown=True, note='',
                                                          breaks=['%s has no image: no range facts' % mod.lower()])))
             continue
-        out.append(((mod, site, api, operand), derive_site(images[mod.lower()], site)))
+        out.append(((mod, site, api, operand), derive_site(images[mod.lower()], site, api)))
     return out
 
 
@@ -194,40 +192,75 @@ def tsv(results):
 
 def gate(results):
     dyn = [(r, d) for r, d in results if r[3] == 'dynamic']
-    unc = ['%s@%x' % (r[0], r[1]) for r, d in dyn if d['status'] != 'closed']
+    # a row of dynsites whose call is in bytes no range of the facts covers has no derived site: red as "only in dynsites" (the same rule as
+    # loadlib.py), never certified by having nothing to derive
+    unc = ['%s@%x%s' % (r[0], r[1], ':only in dynsites (the call is in unreached bytes)' if d['note'] == 'unreached' else '')
+           for r, d in dyn if d['status'] != 'closed' or d['note'] == 'unreached']
     return gatefile.write('gpa', len(dyn), len(dyn) - len(unc), unc, 'GetProcAddress dynamic sites with a derived name set')
+
+
+def specs_of(images_file):
+    """`name=pe,ranges` of the rows of loadlib.py's images.tsv that have range facts (the others are image-less: open rows)."""
+    out = []
+    with open(images_file) as fh:
+        for line in fh.read().splitlines()[1:]:
+            n, pe, rg = line.split('\t')
+            if rg != '-':
+                out.append('%s=%s,%s' % (n, pe, rg))
+    return out
+
+
+def members_of(images_file):
+    """The names of every member of the image set in loadlib.py's images.tsv (with or without range facts)."""
+    with open(images_file) as fh:
+        return [line.split('\t')[0] for line in fh.read().splitlines()[1:]]
+
+
+def load_images(specs, bridge, escapes=(), writes=None, no_memfx=False, globext=None):
+    """{name (lower): argflow.Image} of `name=pe_path,ranges_path` specs, with the platform's import stacks and (unless no_memfx)
+    the may-write rule; shared by every contract tool that derives call arguments (gpa_names, loadlib)."""
+    stacks = {}
+    if bridge:
+        with open(bridge) as fh:
+            stacks = import_stacks(fh.read())
+    images, shas = {}, {}
+    ext = memfx.read_globext(open(globext).read()) if globext else (None, None)
+    for spec in specs:
+        nm, rest = spec.split('=', 1)
+        pe, rg = rest.split(',')
+        with open(pe, 'rb') as fh, open(rg) as fr:
+            raw, rtxt = fh.read(), fr.read()
+        images[nm.lower()] = argflow.Image(raw, nm.lower(), argflow.read_ranges(rtxt))
+        shas[nm.lower()] = hashlib.sha256(raw).hexdigest()
+        images[nm.lower()].import_stack = stacks
+    if not no_memfx:
+        bt = open(bridge).read() if bridge else ''
+        info = memfx.ImportInfo(bt, [open(p).read() for p in escapes], open(writes).read() if writes else '')
+        for nm in sorted(images):
+            memfx.Memfx(images[nm], info, ext[1] if ext[0] == shas[nm] else None)    # the extents of the exe apply to the file they were certified for
+    return images
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument('--sites', required=True)
-    ap.add_argument('--image', action='append', required=True, help='name=pe_path,ranges_path')
+    ap.add_argument('--image', action='append', default=[], help='name=pe_path,ranges_path')
+    ap.add_argument('--images-file', help='images.tsv of loadlib.py: the image set (the least set under imports and resolved LoadLibrary names)')
     ap.add_argument('--handle', action='append', default=[], help='name:0xVA of a CreateFileMapping call')
     ap.add_argument('--bridge')
     ap.add_argument('--escape', action='append', default=[], help='import_escape.tsv of a platform backend (repeat; the worst letter counts)')
+    ap.add_argument('--globext', help='fnvnx-globext/1 fact: certified global object extents of the exe (applied to the image with that sha256)')
     ap.add_argument('--writes', help='tsv dll, name, letters (n = never written through) per import argument; default: all may be written')
     ap.add_argument('--no-memfx', action='store_true', help='derive without the may-write rule')
     ap.add_argument('--modules', help='modules.tsv (lifted modules provide their own names)')
     ap.add_argument('--out', required=True)
     a = ap.parse_args(argv)
-    stacks = {}
-    if a.bridge:
-        with open(a.bridge) as fh:
-            stacks = import_stacks(fh.read())
-    images = {}
-    for spec in a.image:
-        nm, rest = spec.split('=', 1)
-        pe, rg = rest.split(',')
-        with open(pe, 'rb') as fh, open(rg) as fr:
-            images[nm.lower()] = argflow.Image(fh.read(), nm.lower(), argflow.read_ranges(fr.read()))
-        images[nm.lower()].import_stack = stacks
-    if not a.no_memfx:
-        bt = open(a.bridge).read() if a.bridge else ''
-        info = memfx.ImportInfo(bt, [open(p).read() for p in a.escape], open(a.writes).read() if a.writes else '')
-        for im in images.values():
-            memfx.Memfx(im, info)
+    images = load_images(a.image + (specs_of(a.images_file) if a.images_file else []), a.bridge, a.escape, a.writes, a.no_memfx, a.globext)
     with open(a.sites) as fh:
         rows = read_sites(fh.read())
+    if a.images_file:     # a dll that is no member of the image set is never loaded: its sites are not sites of the product
+        mem = members_of(a.images_file)
+        rows = [r for r in rows if r[0].lower() in mem]
     results = run(rows, images)
     os.makedirs(a.out, exist_ok=True)
     with open(os.path.join(a.out, 'gpa_names.tsv'), 'w', newline='\n') as fh:
