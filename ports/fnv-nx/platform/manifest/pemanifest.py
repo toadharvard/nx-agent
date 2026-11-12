@@ -17,9 +17,8 @@ idiom) is a site like `call [slot]`. Per call: the name operand is the last push
 hmod operand is resolved by one local data-flow rule: a register or an ebp-slot holds the literal(s) of the LoadLibrary/GetModuleHandle
 calls whose result (eax) was copied into it, and anything else written to it (or its address taken with lea) makes it `dynamic`; the
 slot value is the union over all writes in the function. Output column hmod = `dynamic` or the comma list of module literals; the
-operand column then holds those literals + the name. Assumption ASM-501 (function boundaries and forward flow): the function starts at the nearest preceding `push ebp; mov ebp,esp`
-(hot-patch `mov edi,edi` before it allowed) or, when no prologue lies within the look-back, at the 16-aligned address after int3 linker padding, and ends at the next prologue; control flow is followed forward only (state saved at forward jumps, joined at their target, cleared after ret/jmp unless a jump targets the next address; back-edges assumed not to change a register used after the loop); no jump enters mid-instruction; an ebp slot is not written through
-another pointer (its address is never taken, checked). Without such a boundary every hmod is `dynamic`.
+operand column then holds those literals + the name. Function boundaries and flow: the entries of the L3a function facts (funcfacts.py, `--facts DIR`; pinned in facts.json). A site is analysed in every entry whose runs contain it and the rows are joined (a disagreement is `dynamic`); a site in no run is `unresolved` with the reason; an image without facts is `unresolved: no function facts`. Control flow is followed forward only inside an entry (state saved at forward jumps, joined at their target, cleared after ret/jmp unless a jump targets the next address); the state is top at every head (`funcfacts.heads`: loop heads, run starts after the first, other entries inside the runs); an ebp slot is not written through
+another pointer (its address is never taken, checked).
 Global cell: a data cell g is tracked like an ebp slot when every relocated reference to g in the image is a plain `[g]` operand (never lea, push imm or a stored pointer) and the references outside the function only read it, so every write to g is seen in the function. A cell failing this, and any object field (`[reg+disp]`), stays `dynamic`.
 
 Usage: pemanifest.py <dir-with-modules> <root.exe> <outdir> <bridge.tsv> <dllkind.py> <dllkind-sha256>
@@ -40,11 +39,17 @@ Output (exe-derived; keep out of the public repository):
 import bisect, collections, os, struct, sys
 import capstone
 import pefile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import funcfacts
 from capstone import x86_const as X
 
 DYN = {"LoadLibraryA", "LoadLibraryW", "LoadLibraryExA", "LoadLibraryExW",
        "GetModuleHandleA", "GetModuleHandleW", "GetProcAddress",
        "CoCreateInstance"}
+
+
+JOINED = []   # (module, site, api, entries) of every site whose entries disagree (census)
 
 
 def relocs(pe):
@@ -61,6 +66,7 @@ def relocs(pe):
 class Mod:
     def __init__(self, path):
         self.name = os.path.basename(path).lower()
+        self.path = path
         self.pe = pe = pefile.PE(path, fast_load=True)
         pe.parse_data_directories(directories=[0, 1, 5, 13])
         self.base = pe.OPTIONAL_HEADER.ImageBase
@@ -122,15 +128,22 @@ class Mod:
         rset = set(rs)
         covered = set()
         api = {s: n for _, n, s in self.imports if n in DYN and n != "CoCreateInstance"}
-        done = set()
+        done, by_entry = set(), {}
         for slot in api:
             for site in code.get(slot, []):
-                start = self.func_start(site)
-                if (start or site) in done:
-                    continue
-                done.add(start or site)
-                for row in self.flow(start, api, rset, site, covered):
-                    yield row
+                for entry in self.entries_of(site):   # a site is analysed in every entry that contains it; the rows are joined below
+                    if entry in done:
+                        continue
+                    done.add(entry)
+                    by_entry[entry] = list(self.flow(entry, api, rset, covered))
+        agreed, conflicts = funcfacts.join(self.ff, by_entry, lambda r: r[0])
+        for row in agreed:
+            yield row
+        for site, entries, per in conflicts:   # the entries disagree: the row is dynamic (the operand and the module are not decided)
+            nm = next(iter(per.values()))[0][1]
+            JOINED.append((self.name, site, nm, entries))
+            covered.add(site)
+            yield site, nm, "dynamic", "dynamic" if nm == "GetProcAddress" else "-"
         for dll, nm, slot in self.imports:
             for site in code.get(slot, []):
                 if nm == "CoCreateInstance" or (nm in DYN and site not in covered):  # window rule: a thunk or a stored pointer
@@ -161,33 +174,32 @@ class Mod:
                 self._tg[self.u32(r)].append(r)
         return self._tg
 
-    def func_start(self, site):
-        """Entry of the function holding `site`, or None. Entry = the nearest preceding `push ebp; mov ebp,esp` (framed), or the
-        16-aligned address after the nearest preceding int3 (0xCC) padding when no prologue is in range (frameless: the linker aligns and pads
-        functions, so an aligned address after padding is an entry). Looks back at most 0x1000 bytes; no boundary found -> None (hmod stays dynamic)."""
-        o = site - self.base
-        lo = max(0, o - 0x1000)
-        k = self.img.rfind(b"\x55\x8b\xec", lo, o)
-        c = o
-        while True:  # nearest 16-aligned address whose preceding byte is int3 padding (linker alignment of function entries)
-            c = self.img.rfind(b"\xcc", lo, c)
-            if c < 0 or (self.base + c + 1) % 16 == 0:
-                break
-        if c >= 0 and k < 0:
-            return self.base + c + 1
-        return None if k < 0 else self.base + (k - 2 if self.img[k - 2:k] == b"\x8b\xff" else k)
+    @property
+    def ff(self):
+        """the function facts of this image (funcfacts.py): FuncFacts, or NoFacts with the reason"""
+        return funcfacts.for_image(self.name, self.img, self.base, self.path)
 
-    def flow(self, start, api, rset, site, covered):
-        md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
-        md.detail = True
-        o = (start if start else site - 0x60) - self.base
-        ins = []
-        for k in range(0, 16 if not start else 1):  # without a prologue: resync by trial so that the slot reference is hit
-            ins = list(md.disasm(self.img[o + k:o + k + 0x1400], self.base + o + k))
-            if start or any(i.address <= site < i.address + i.size for i in ins):
-                break
-        end = next((i.address for i in ins[4:] if i.bytes[:3] == b"\x55\x8b\xec" or i.bytes[:2] == b"\x8b\xff"), None)
-        ins = [i for i in ins if end is None or i.address < end]
+    def entries_of(self, site):
+        """Every entry of the function facts whose runs contain `site` and decode (a site is analysed in each; see funcfacts.py). [] when
+        there is none: `unresolved_why(site)` then names the reason."""
+        ff = self.ff
+        return [e for e in ff.entries_of(site) if ff.ins(e) is not None]
+
+    def unresolved_why(self, site):
+        """The reason a site has no function: `no function facts` (image not covered), a run that does not decode, or `inside no run`."""
+        ff = self.ff
+        if not ff.ok:
+            return ff.reason
+        es = ff.entries_of(site)
+        return "inside no run of the function facts" if not es else "; ".join(
+            "entry %x: %s" % (e, ff.bad[e]) for e in es if e in ff.bad)
+
+    def flow(self, entry, api, rset, covered):
+        """Rows of the dynamic-name calls of one entry of the function facts, by forward flow over its decoded runs; the state is unknown
+        at every head of the entry (loop heads, run starts, inner entries: funcfacts.heads)."""
+        ins = self.ff.ins(entry)
+        heads = self.ff.heads(entry)
+        lo_a, hi_a = ins[0].address, ins[-1].address + ins[-1].size
         P = {"eax": "eax", "ax": "eax", "al": "eax", "ah": "eax", "ecx": "ecx", "cx": "ecx", "cl": "ecx", "edx": "edx", "dx": "edx",
              "dl": "edx", "ebx": "ebx", "bx": "ebx", "bl": "ebx", "esi": "esi", "si": "esi", "edi": "edi", "di": "edi"}
         UNK = None
@@ -198,7 +210,6 @@ class Mod:
             m = lambda x, y: {k: (x[k] if x[k] == y[k] else (x[k] | y[k] if isinstance(x[k], set) and isinstance(y[k], set) else UNK))
                               for k in x.keys() & y.keys()}
             return (m(a[0], b[0]), {k: a[1][k] for k in a[1].keys() & b[1].keys() if a[1][k] == b[1][k]}, a[2] if a[2] == b[2] else [])
-        lo_a, hi_a = (ins[0].address, ins[-1].address + ins[-1].size) if ins else (0, 0)
         memo = {}
 
         def cell_ok(g):
@@ -209,9 +220,8 @@ class Mod:
                 for r in self.targets().get(g, []):
                     if lo_a <= r < hi_a:
                         cand, wr_ok = ins, True
-                    else:
-                        st = self.func_start(r) or r - 0x30
-                        cand, wr_ok = (list(md.disasm(self.img[st - self.base:r - self.base + 8], st)) if self.in_code(r) else []), False
+                    else:  # a reference outside this entry: the instruction it belongs to, from the entries that contain it (only its reads count)
+                        cand, wr_ok = [i for e in self.entries_of(r) for i in self.ff.ins(e)] if self.in_code(r) else [], False
                     ii = next((i for i in cand if i.address <= r < i.address + i.size), None)
                     m = [o for o in ii.operands if o.type == X.X86_OP_MEM and o.mem.base == 0 and o.mem.index == 0 and o.mem.disp == g] if ii else []
                     if not m or ii.mnemonic == "lea" or len(m) != 1 or any(o.type == X.X86_OP_IMM and o.imm == g for o in ii.operands) \
@@ -232,10 +242,13 @@ class Mod:
         slots, rows = collections.defaultdict(set), []
         for final in (0, 1):  # pass 0 collects the ebp-slot unions, pass 1 reads them
             reg, ptr, pushes, saved, dead = {}, {}, [], {}, False
-            dynamic = not start
+            dynamic = False
             for i in ins:
                 ops = i.operands
-                if dead or i.address in saved:  # control-flow join: forward jumps carry the state to their target
+                if i.address in heads:  # a head: the state is unknown (top), whatever a forward jump saved
+                    saved.pop(i.address, None)
+                    reg, ptr, pushes, dead = {}, {}, [], False
+                elif dead or i.address in saved:  # control-flow join: forward jumps carry the state to their target
                     s = saved.pop(i.address, None)
                     reg, ptr, pushes = (({}, {}, []) if s is None and dead else
                                         s if dead else join(s, (reg, ptr, pushes)))
@@ -409,4 +422,5 @@ def main(d, root, out, bridge_tsv, dllkind_py, dllkind_sha):
 
 
 if __name__ == "__main__":
+    funcfacts.facts_dir_from_argv(sys.argv)
     main(*sys.argv[1:7])
