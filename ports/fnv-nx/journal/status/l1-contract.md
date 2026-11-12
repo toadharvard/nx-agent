@@ -385,3 +385,16 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - plus a census of x19..x27 writes in the pack.
 - w14 new item: recipe keep-going by default. Red units are reported, dependents marked `blocked-by`, and the verdict is red. Asked for by L5.
 - Relayed w18's idxopen_all.tsv (fnv-nx-build l1-contract/mp4 4843d9f, 216 open indexed stores; exe 151/155) to L3a w2 for item 30.
+
+## 2026-11-12 04:10Z
+- w16 head 2a22cf37 (clean 8cfbcdbf merged): accepted as rules:
+  - -dU as a separate `unit.du` stage that CC never reads;
+  - `fixture` admit class with the expect-exact rule;
+  - specdefaults stated-family exemption.
+  - Before MERGER: drop the ad-hoc GL dev pins in env.json (pinned only if a root reads them; w5 owns env.json), and add the generator tool|headers rule.
+- w5 c44308c0: foreign-file rule (a) in envcheck, foreign 0/9550 here. The d7cfe2a2 red (hostapi tmp leak) is fixed.
+  - The toolchain-build profile is now the single blocker of goal step 1, and comes ahead of all other w5 work (orchestrator).
+- w4 closure stage gains the read-of-foreign-file rule, using envcheck.file_owners.
+- w18 allocsites 841d1b5 accepted: 70 sites over 6 images, 5 const size. 02911752: escape/writes tables were never passed to memfx before.
+  - w18 bumps contract_inputs to manifest 07d79c5 and adds the CRT allocators by interprocedural return-flow.
+  - Forwarded to the L3a lead.
