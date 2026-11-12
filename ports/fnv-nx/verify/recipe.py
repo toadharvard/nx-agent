@@ -52,6 +52,7 @@ KEYS = {"format", "compiler", "flags", "include", "units", "generated", "os_laye
         "plugins", "plugin_cxx", "variants", "outputs", "uses", "sources"}
 VARIANT_KEYS = {"compiler", "flags"}   # the keys a variant may replace
 PLUGIN_KEYS = {"name", "source", "args"}   # and optionally "inputs": [tracked files the source includes]
+GUEST_LINK = TREE + "/link/guest.json"   # the guest link profile: {"script": path inside TREE, "libs": {LIBS_KEYS}}, one fact for every guest link (RECIPE.md, Link)
 GUEST_PIN = TREE + "/verify/guest_compiler.json"   # the game's compiler: {"format", "external": {EXT_KEYS}, "cc", "cxx"} (RECIPE.md, "Guest roots")
 GUEST_TARGETS = ("guest", "host")
 # The plugins every product root with native or decomp C++ loads, their only admitted sources and their fixed arguments (RECIPE.md,
@@ -233,6 +234,44 @@ def load_pin(repo="."):
     return json.load(open(p)) if os.path.exists(p) else None
 
 
+def in_tool_root(p, roots):
+    """True iff P lies in an admitted root of class tool: its path or one of its `trees` (admit.json: the extra trees a tool root owns)."""
+    return any(r.get("class") == "tool" and any(under(p, t) for t in [r["path"]] + list(r.get("trees", []))) for r in roots.values())
+
+
+def load_guest_link(repo="."):
+    """link/guest.json of the checkout, or None when the tree has none."""
+    p = os.path.join(repo, GUEST_LINK)
+    return json.load(open(p)) if os.path.exists(p) else None
+
+
+def guest_link_errors(prof, pin, files, roots):
+    """Problems of the guest link profile PROF (load_guest_link): exactly {script, libs}; `script` a tracked file inside TREE/link of an admitted
+    tool root; `libs` {external, dirs, names, startfiles, endfiles} of LIBS_KEYS whose external is the pinned runtime of PIN (no hand path)."""
+    if not isinstance(prof, dict) or set(prof) != {"script", "libs"}:
+        return ["%s must be {script, libs}" % GUEST_LINK]
+    sc, lb, err = prof["script"], prof["libs"], []
+    full = TREE + "/" + sc if isinstance(sc, str) and rel_ok(sc) else None
+    if not (full and full in files and in_tool_root(full, roots)):
+        err.append("%s: script %r is not a tracked file of an admitted tool root (a path inside %s)" % (GUEST_LINK, sc, TREE))
+    paths = lambda k: isinstance(lb.get(k), list) and all(rel_ok(x) for x in lb[k])  # noqa: E731
+    if not (isinstance(lb, dict) and set(lb) == LIBS_KEYS and paths("dirs") and paths("startfiles") and paths("endfiles")
+            and isinstance(lb.get("names"), list) and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9._+-]+", n) for n in lb["names"])):
+        err.append("%s: libs must be {external, dirs, names, startfiles, endfiles} (paths inside the external)" % GUEST_LINK)
+    elif not (isinstance(pin, dict) and isinstance(pin.get("runtime"), dict) and lb["external"] == pin["runtime"].get("name")):
+        err.append("%s: libs.external %r is not the pinned runtime external of %s" % (GUEST_LINK, lb["external"], GUEST_PIN))
+    return err
+
+
+def with_guest_link(rec, root, roots, repo):
+    """The recipe a guest root is BUILT with: its `link` gets script and libs from the guest link profile (the script as an absolute path of
+    the checkout: the link stage mounts its content). A host root, a root without link, or a checkout without a profile: REC unchanged."""
+    lk, prof = rec.get("link"), load_guest_link(repo)
+    if not (isinstance(lk, dict) and prof and roots.get(root, {}).get("target") == "guest"):
+        return rec
+    return dict(rec, link=dict(lk, script=os.path.join(repo, TREE, prof["script"]), libs=prof["libs"]))
+
+
 def guest_errors(rec, root, roots, pin):
     """The admit.json entry of a product root declares "target": "guest" (the game's code: compiled by the game's compiler) or "host".
     A guest root's compiler is the external of verify/guest_compiler.json, exactly (name, commit, tree, mount point, driver paths): the
@@ -369,17 +408,18 @@ def uses_errors(rec, root, roots, repo):
     return err
 
 
-def link_errors(lk, root, mine, roots, ext_names, repo):
+def link_errors(lk, root, mine, roots, ext_names, repo, guest=False, files=()):
     """Problems of the `link` key: {script, output, flags} and optionally `roots` (admitted product roots whose objects are link inputs after
     the root's own, in list order) and `libs` ({external, dirs, names, startfiles, endfiles}: the guest libraries inside an external)."""
     kind = lk.get("kind", "pie") if isinstance(lk, dict) else None
     if not (isinstance(lk, dict) and LINK_KEYS <= set(lk) <= LINK_KEYS | LINK_OPT and isinstance(lk["flags"], list)
             and all(isinstance(t, str) for t in lk["flags"]) and isinstance(lk["output"], str) and kind in KINDS
             and re.fullmatch(r"[A-Za-z0-9._-]+\.(elf|so|exe)", lk["output"])
-            and all(k not in lk or (rel_ok(lk[k]) and lk[k] in mine) for k in ("script", "version_script"))
-            and ("script" in lk or kind != "pie") and ("version_script" in lk) == (kind == "shared")):
+            and all(k not in lk or (rel_ok(lk[k]) and (lk[k] in mine or (k == "version_script" and lk[k] in files and in_tool_root(lk[k], roots))))
+                    for k in ("script", "version_script"))
+            and ("script" in lk or kind != "pie" or guest) and ("version_script" in lk) == (kind == "shared")):
         return ["link must be {output: NAME.elf|.so|.exe, flags: [..]} with `script` (a tracked file of the root; required for kind pie, the default), kind pie|exe|shared, "
-                "`version_script` (a tracked file of the root: required for, and only for, kind shared), optionally roots, libs"]
+                "`version_script` (a tracked file of the root or of an admitted tool root's tree, by repo path: required for, and only for, kind shared), optionally roots, libs"]
     err = ["link.flags: %s is in the refusal set R" % t for t in refused(lk["flags"])] + emulation_flags(lk["flags"], kind)
     deps = lk.get("roots", [])
     if not (isinstance(deps, list) and all(isinstance(d, str) for d in deps)):
@@ -411,7 +451,9 @@ def link_errors(lk, root, mine, roots, ext_names, repo):
     if cyc and any(d in cyc for d in [split_spec(x)[0] for x in deps]):
         err.append("link.roots: cycle %s" % " -> ".join(cyc))
     lb = lk.get("libs")
-    if isinstance(lb, dict) and set(lb) == {"system"}:
+    if guest:
+        pass     # script and libs of a guest link are the profile's (check() reports a declared one)
+    elif isinstance(lb, dict) and set(lb) == {"system"}:
         sysl = lb["system"]
         if not (isinstance(sysl, list) and sysl and all(isinstance(p, str) and p.startswith("/") and posixpath.normpath(p) == p for p in sysl)):
             err.append("link.libs.system must be a non-empty list of absolute normalised paths of the shared libraries of env.json packages")
@@ -575,10 +617,18 @@ def check(rec, root, files, roots, pin=None, repo="."):
             err.append("%s %r is neither a tracked file of the root nor a generated output" % (key, c))
     lk = rec.get("link")
     if lk is not None:
-        err += link_errors(lk, root, mine, roots, names, repo)
+        guest = roots.get(root, {}).get("target") == "guest"
+        err += link_errors(lk, root, mine, roots, names, repo, guest, files)
+        if guest:
+            err += ["guest root %s: link.%s is declared: script and libs of a guest link come from %s, one fact for every guest link" % (root, k, GUEST_LINK)
+                    for k in ("script", "libs") if k in lk]
+            prof = load_guest_link(repo)
+            err += guest_link_errors(prof, pin, files, roots) if prof is not None else ["guest root %s links but %s is missing" % (root, GUEST_LINK)]
+            if isinstance(prof, dict) and isinstance(prof.get("libs"), dict) and prof["libs"].get("external") not in names:
+                err.append("guest root %s: the runtime external %r of %s is not declared in external" % (root, prof["libs"].get("external"), GUEST_LINK))
         err += ["link: the ldcheck stage needs %s (a tracked file of an admitted tool root)" % p for p in (
             LD_TOOLS[0] + "/ldcheck.py", LD_TOOLS[0] + "/gateids.py", LD_TOOLS[1] + "/gatefile.py")
-            if p not in files or not any(under(p, r) for r in roots)]
+            if p not in files or not in_tool_root(p, roots)]
     err += guest_errors(rec, root, roots, pin)
     err += plugin_errors(rec, root, files, roots, units, names)
     return err
@@ -817,7 +867,7 @@ class Job:
         root, self.variant = split_spec(spec)
         self.repo, self.root, self.store, self.jobs, self.extcache = repo, root, store, jobs, ext
         self.roots, self.files = load_admit(repo), tracked(repo)
-        self.rec = load_recipe(repo, self.roots, spec)
+        self.rec = with_guest_link(load_recipe(repo, self.roots, spec), root, self.roots, repo)
         self.keys, self.run, self.hit, self.ext, self.ppkeys, self.built = set(), 0, 0, {}, {}, []
         self.dukeys = {}   # {unit: key of its macro-fact stage (-dU, unitstage.DU_TAIL)}
         self.red, self.blocked, self.failed = [], {}, []   # KEEP GOING: red stages (failure dicts) and {unit: stage it is blocked by}; nothing is masked (see build)
@@ -1164,7 +1214,10 @@ class Job:
         kind = lk.get("kind", "pie")
         for k in ("script", "version_script"):
             if k in lk:
-                shutil.copyfile(os.path.join(self.repo, self.root, lk[k]), os.path.join(sd, os.path.basename(lk[k])))
+                src = os.path.join(self.repo, self.root, lk[k])
+                if k == "version_script" and not os.path.isfile(src):      # a tracked file of an admitted tool root's tree, named by its repo path
+                    src = os.path.join(self.repo, lk[k])
+                shutil.copyfile(src, os.path.join(sd, os.path.basename(lk[k])))
         lb, pre, post, search, libs, sysin = lk.get("libs"), [], [], [], [], []
         if lb and "system" in lb:
             # the shared libraries of env.json packages: their content is the input, mounted at /syslib under their own file names

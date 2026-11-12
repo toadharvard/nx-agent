@@ -126,10 +126,14 @@ There is one way to link: the recipe key `link` (no other path runs a linker; li
   GATE_CACHE/store) and its objects are link inputs AFTER this root's own units, in the order of the list, each root's objects in unit order. An input
   root must be admitted, class product, with `link` null (so a cycle is impossible; `check()` names a cycle `A -> B -> A` anyway), listed once, not the
   root itself. A red input root makes this link red: stage `ld:<root>`, stderr names the input root and its failing stage.
-- `link.libs`: `{"external": NAME, "dirs": [paths inside it], "names": [lib names], "startfiles": [...], "endfiles": [...]}`: the guest libraries of an
-  external of the recipe (a compiler external's newlib/libstdc++ ...), searched the way the gcc driver searches them for the ILP32 PIE multilib:
-  `startfiles -L<external at>/<dir>.. [objects, whole] --start-group -l<name>.. --end-group endfiles`. All paths are relative, inside the external; there
-  is no host path (the external is a declared input of the stage).
+- `link.script`, `link.libs` (guest roots): one fact for every guest link, `ports/fnv-nx/link/guest.json` = `{"script": "link/guest.ld", "libs": {"external": NAME, "dirs": [paths inside it], "names": [lib names], "startfiles": [...], "endfiles": [...]}}`.
+  Every root whose admit.json `target` is guest and that links (the product ELF and every guest test image) gets exactly this script and these libraries; the link
+  stage is `startfiles -L<external at>/<dir>.. [objects, whole] --start-group -l<name>.. --end-group endfiles`, so two guest links differ only by output and objects.
+  `libs.external` is the guest runtime external pinned in `verify/guest_compiler.json` (`runtime`: the guest's libc, libm, libstdc++), which the root declares like
+  any external; all paths are relative, inside it, there is no host path. A guest root that declares `link.script` or `link.libs` itself is red (no per-root choice, so
+  a double of the script cannot exist), a missing or invalid profile is red. The profile's content is in every guest link stage key (script mounted at /ld, libs in argv).
+  A host root declares `script` (a tracked file of the root, required for kind pie) and `libs` as before: `{"external": ..}` of an external of the recipe or `{"system": [..]}`.
+- `link.version_script`: a tracked file of the root, or of an admitted tool root's tree (by repo path).
 - Linked whole: every input OBJECT (own and of the input roots) and every archive that is an input is under `--whole-archive`; there is no `--gc-sections`:
   the set of symbols is the set of the inputs. (The toolchain's libraries of `link.libs` are the linker's to search, as the driver does: whole libc
   would be the wrong set; what they pull in is judged by the symbol tables after the link.)
