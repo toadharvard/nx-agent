@@ -20,3 +20,8 @@ verify/tests/test_gates.py (ожидание списка гейтов и кат
 setup_verdict_env.sh -> envcheck OK). Красных нет. Первый прогон на 8549517b: красный только selftests (test_gates.py
 ожидал старый список гейтов), исправлено.
 claude/fnv-l1-contract-w16 на origin не найдена, скретч-слияние не делалось (пины уже в транке).
+
+## После слияния транка e35b870a (2026-11-12)
+Слияние origin/claude/fnv-nx-clean e35b870a в ветку: a23ca9ad. Конфликты gates.json и test_gates.py разрешены объединением
+(imports, machine, d3d9total; test_gates.py ждёт объединение), правила гейтов не менялись.
+Вердикт l1.py на a23ca9ad: green, 26 гейтов, 238.0 s; pure 39/39, selftests 56/56, admit 459/459, oracle 56/56, d3d9total 332/332.
