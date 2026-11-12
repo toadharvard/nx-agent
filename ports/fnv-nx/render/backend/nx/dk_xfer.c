@@ -5,7 +5,7 @@
  * layers are tight when rowLength / imageHeight are 0, a compressed rect is converted to blocks inside deko3d, the rect z selects the layer of an
  * array view (a cube face) or the slice of a 3D image. The staging blocks are CpuUncached | GpuCached (gpu_console.c: no cache flush needed). */
 #include "dk.h"
-#include "nxgpu4_check.h"
+#include "../nxgpu4_check.h"
 #include <stdlib.h>
 #include <string.h>
 

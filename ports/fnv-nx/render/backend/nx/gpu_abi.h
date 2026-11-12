@@ -15,7 +15,7 @@
 #define FNVNX_NX_GPU_ABI_H
 
 #include <stdint.h>
-#include "nx/state.h"
+#include "state.h"
 
 #ifdef __cplusplus
 extern "C" {

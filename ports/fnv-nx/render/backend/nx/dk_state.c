@@ -2,7 +2,7 @@
  * Every table is indexed by the Nx enum / field value and sized by _Static_assert; enumerator names are used, never numbers. */
 #include <string.h>
 #include "dk_state.h"
-#include "nxgpu4.h"
+#include "../nxgpu4.h"
 
 #define N(a) (sizeof(a) / sizeof((a)[0]))
 #define BFS(n, d) [NxBf_##n] = DkBlendFactor_##d

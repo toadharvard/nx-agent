@@ -33,9 +33,9 @@
 #include <switch/kernel/event.h>
 #include <switch/services/vi.h>
 #include <switch/display/native_window.h>
-#include "nxgpu4.h"
-#include "nxgpu4_shader.h"
-#include "nxgpu4_check.h"
+#include "../nxgpu4.h"
+#include "../nxgpu4_shader.h"
+#include "../nxgpu4_check.h"
 #include "dk_fmt.h"
 #include "dk_state.h"
 

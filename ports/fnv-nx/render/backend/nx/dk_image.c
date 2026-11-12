@@ -13,7 +13,7 @@
  *   X2 an extent above NXDK_MAX_DIM (16384, the Maxwell texture limit; GL's limit is the driver's)
  *   X3 a block above 4 GiB - 4 KiB (32-bit memory block sizes) */
 #include "dk.h"
-#include "nxgpu4_check.h"
+#include "../nxgpu4_check.h"
 #include <string.h>
 
 _Static_assert(sizeof(DkImageDescriptor) == 32 && sizeof(DkSamplerDescriptor) == 32, "descriptor size: the tables are indexed by 32-byte slots");
