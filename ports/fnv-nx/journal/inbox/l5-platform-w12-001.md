@@ -37,3 +37,4 @@ constant writer, unbound writer, unaccounted pointer, multiple-inheritance offse
 - tests/s4/test_textconv.cpp runs the real host_textconv.h (27 checks pass in a stand-alone harness; the full s4 build needs the generated SDK header, not available here).
 - check_hostapi: TEXT_ENTRY violation gone; ACCESS_FAULT_HANDLER remains (L1/L4).
 - Not done: emulator-side (L4 boot machine) server, waiting for L4's answer on file and scenario-text format; the .inc itself is not compiled against libnx here (no libnx headers in this container).
+- Correction after checking the pinned libnx (tools/libnx, b156b477): the applet's cancel is MAKERESULT(Module_Libnx, LibnxError_LibAppletBadExit) (libapplet.c:138), not the bare enum; fixed in host_textentry.inc, header lines cited there. The .inc now passes `gcc -fsyntax-only` against the pinned libnx headers (newlib lock.h and arm_acle.h shimmed outside the repo for the check only).
