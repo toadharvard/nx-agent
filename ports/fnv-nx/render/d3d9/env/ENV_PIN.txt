@@ -12,8 +12,27 @@ host cpu (llvmpipe vector width follows it): Intel(R) Xeon(R) Processor @ 2.10GH
 renderer: LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe (Mesa 25.2.8, LLVM 20.1.2 as the GL strings below say); Wine renderer = OpenGL (wined3d default)
 display: Xvfb <display> -screen 0 WxHx24 -nolisten tcp -noreset (no window manager, no RANDR mode list beyond the screen: one mode)
 emulated video memory: HKCU\Software\Wine\Direct3D\VideoMemorySize = 960 (MiB)
-recorder d3d9.dll sha256 c9e0b480747f56c3dc228d2d9728ea7bccff78920dae7041b7d3665355fbee68
-envprobe2.exe sha256 6f64a3af5191a3510cea0b6c05ea7961c3c333f14d470e9a0b2841ba6879a601
+build toolchain (dpkg): 
+  binutils-mingw-w64-i686:amd64 2.41.90.20240122-1ubuntu1+11.4
+  binutils-mingw-w64-x86-64: 
+  g++-mingw-w64-i686:all 13.2.0-6ubuntu1+26.1
+  g++-mingw-w64-i686-posix:amd64 13.2.0-6ubuntu1+26.1
+  g++-mingw-w64-i686-win32:amd64 13.2.0-6ubuntu1+26.1
+  gcc-mingw-w64-base:amd64 13.2.0-6ubuntu1+26.1
+  gcc-mingw-w64-bootstrap: 
+  gcc-mingw-w64-i686:all 13.2.0-6ubuntu1+26.1
+  gcc-mingw-w64-i686-posix:amd64 13.2.0-6ubuntu1+26.1
+  gcc-mingw-w64-i686-posix-runtime:amd64 13.2.0-6ubuntu1+26.1
+  gcc-mingw-w64-i686-win32:amd64 13.2.0-6ubuntu1+26.1
+  gcc-mingw-w64-i686-win32-runtime:amd64 13.2.0-6ubuntu1+26.1
+  mingw-w64-common:all 11.0.1-3build1
+  mingw-w64-i686-dev:all 11.0.1-3build1
+  i686-w64-mingw32-gcc (GCC) 13-win32
+  i686-w64-mingw32-g++ (GCC) 13-win32
+  GNU ld (GNU Binutils) 2.41.90.20240122
+recorder d3d9.dll sha256 c89a0d1f1de1a245209f52c79eb5c5362f1b46d6528ff25e7617f3316c377eea
+envprobe2.exe sha256 3028e5959f443148d4dfc7f90d6294bddaafad1895b9d840b0302a3084c801a9
+both binaries archived in fnv-nx-build tools/envprobe-bin (the files of D9ENV_BIN: d3d9.dll, envprobe2.exe)
 query list: 232251 queries (envq.py), 95 formats
 profile handheld: screen 1280x720x24, 232832 answer rows, env_handheld.tsv sha256 ff340ae400828835e3ab9c3e076fb483952d15e9d66a18131196e38082597a52, recorded stream 233602 records
   GL: GL_RENDERER: "llvmpipe (LLVM 20.1.2, 256 bits)".

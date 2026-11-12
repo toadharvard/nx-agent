@@ -29,7 +29,7 @@ def sha(p): return hashlib.sha256(open(p, "rb").read()).hexdigest()
 def build():
     os.makedirs(W + "/gen", exist_ok=True); os.makedirs(W + "/run", exist_ok=True)
     open(W + "/gen/envq.gen.h", "w").write(envq.emit()); open(W + "/gen/envfmt.gen.h", "w").write(envq.emit_fmt())
-    r = sh(["i686-w64-mingw32-gcc", "-O1", "-w", "-I", W + "/gen", "-I", HERE, "-o", W + "/run/envprobe2.exe", HERE + "/envprobe2.c", "-ld3d9", "-luser32", "-static-libgcc"])
+    r = sh(["i686-w64-mingw32-gcc", "-O1", "-w", "-I", W + "/gen", "-I", HERE, "-Wl,--no-insert-timestamp", "-o", W + "/run/envprobe2.exe", HERE + "/envprobe2.c", "-ld3d9", "-luser32", "-static-libgcc"])
     check(r.returncode == 0, "envprobe2 build: " + r.stderr[-500:])
     r = sh([os.path.join(ROOT, "render/tools/rec/build.sh"), W + "/rec"]); check(r.returncode == 0, "recorder build: " + r.stderr[-300:])
     shutil.copy(W + "/rec/d3d9.dll", W + "/run/d3d9.dll")

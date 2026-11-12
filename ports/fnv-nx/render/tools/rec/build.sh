@@ -9,7 +9,8 @@ command -v "$CXX" >/dev/null || { echo "build.sh: i686-w64-mingw32-g++ missing (
 python3 -I "$GEN/gen_wrap.py" "$S" "$SPEC" >/dev/null
 python3 -I "$HERE/gen_ids.py" "$SPEC" "$S"
 cp "$HERE/../replay/d9stream.h" "$HERE/../replay/d9stream.cpp" "$HERE/d9wrap_port.h" "$HERE/rec_main.cpp" "$HERE/rec_dc.cpp" "$S/"   # our d9wrap_port.h, not gen's
-CXXF="-std=c++17 -O2 -Wall -Wno-unused-variable -fno-exceptions -fno-rtti -fno-threadsafe-statics -I$S"
+python3 -I "$HERE/gen_validator_hdr.py" "$HERE/../../../shim/include/d3d9.h" "$S/d9_validator.gen.h"
+CXXF="-include $S/d9_validator.gen.h -std=c++17 -O2 -Wall -Wno-unused-variable -fno-exceptions -fno-rtti -fno-threadsafe-statics -I$S"
 for f in d9wrap.gen d9stream rec_main rec_dc; do $CXX $CXXF -c "$S/$f.cpp" -o "$S/$f.o"; done
-$CXX -shared -o "$OUT/d3d9.dll" "$S"/*.o "$S/d9rec.def" -static-libgcc -static-libstdc++ -Wl,--enable-stdcall-fixup -Wl,--kill-at -lgdi32 -luser32
+$CXX -shared -Wl,--no-insert-timestamp -Wl,--image-base=0x10000000 -o "$OUT/d3d9.dll" "$S"/*.o "$S/d9rec.def" -static-libgcc -static-libstdc++ -Wl,--enable-stdcall-fixup -Wl,--kill-at -lgdi32 -luser32
 echo "build.sh: $OUT/d3d9.dll"
