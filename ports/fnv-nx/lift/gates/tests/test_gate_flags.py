@@ -107,6 +107,20 @@ class T(unittest.TestCase):
         rows, reads, _ = red('7400 c3')
         self.assertEqual((len(rows), reads), (1, 1))
 
+    def test_entry_consumer(self):
+        import flagcause
+        uni = {0x10: ('ptr', ['candidate']), 0x20: ('ptr', ['candidate']), 0x30: ('ptr', ['candidate', 'call'])}
+        jt = frozenset([0x10])
+        self.assertEqual([flagcause.consumer(e, uni, jt) for e in (0x10, 0x20, 0x30, 0x40)], ['jtab', 'unknown-consumer', 'call', 'unknown-consumer'])
+        self.assertEqual(flagcause.consumer(0x20, uni, frozenset()), 'unknown-consumer')
+
+    def test_summary_splits_reads_from_no_form_rows(self):
+        rd = [(0x1010, 'zf', 1, 'jcc', 'je'), (0x1020, '-', 0, 'no-form', 'fld'), (0x1030, '-', 0, 'no-form', 'fld')]     # (site, flag, origin, class, mnemonic)
+        s = g.summary([A], {A: 1}, [(A, 9, [], rd, 5, 0)])[0]
+        self.assertEqual((s['red_flag_reads'], s['no_form_rows'], s['flag_reads'], s['uncovered_by_mnemonic']), (1, 2, 5, {'fld': 2}))
+        with self.assertRaises(AssertionError):                  # a red read count above the reads is impossible by construction
+            g.summary([A], {A: 1}, [(A, 9, [], rd, 0, 0)])
+
     def test_decode_depends_on_the_range_only(self):
         code = bytes.fromhex('b8c3c3c3c3 7400 c3'.replace(' ', ''))                        # mov eax,imm32 (c3 bytes) ; jz ; ret
         fresh = []

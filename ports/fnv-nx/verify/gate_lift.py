@@ -250,16 +250,16 @@ def judge_lifted_flags(root, repo, cache):
             if not mine:
                 continue
             r = run_tool(repo, cache, "gate_flags.py", [pepath, os.path.dirname(rg)], ("flags",), [name, trees], {"JOBS": os.environ.get("JOBS", "4")})["flags"]
-            nf = r.get("red_by_class", {}).get("no-form", 0)
+            nf = r.get("no_form_rows", 0)
             reads, bad = r.get("flag_reads", 0), r.get("undecodable_ranges", 0)
-            red = r.get("red_flag_reads", 0) - nf
+            red = r.get("red_flag_reads", 0)
             if "flag_reads" not in r:
                 u, ids = u + 1, ids + [name + ":tool"]
                 why.append("%s: %s" % (name, r.get("detail", "tool red")))
                 continue
             u += reads + nf + bad
             c += reads - red
-            ids += ["%s:%s" % (name, x) for x in r.get("uncertified", [])]
+            ids += ["%s:%s" % (name, x) for x in r.get("uncertified", [])] + ["%s:%s:no-form" % (name, x) for x in r.get("no_form_sites", [])]
             if red or nf or bad:
                 why.append("%s: %d red reads, %d instructions without a Form, %d undecodable ranges" % (name, red, nf, bad))
         rest = sorted(code - covered)

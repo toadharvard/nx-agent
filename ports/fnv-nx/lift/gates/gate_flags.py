@@ -534,8 +534,10 @@ def summary(ents, inst, res):
             continue
         k = ''.join(n for n, b in (('E', E_), ('C', C_), ('U', U_)) if o & b)
         org[k] = org.get(k, 0) + 1
+    nf = sum(uncovered.values())
+    assert nf <= len(red) and len(red) - nf <= reads, (nf, len(red), reads)      # a red read is a read: certified = flag_reads - red_flag_reads >= 0 by construction
     return {'entries': len(ents), 'unreached_entries': sum(1 for e in ents if inst[e] is None), 'instructions': ntot, 'flag_reads': reads,
-            'red_flag_reads': len(red), 'red_sites': len(sites), 'red_by_class': cls, 'red_by_origin': dict(sorted(org.items())),
+            'red_flag_reads': len(red) - nf, 'no_form_rows': nf, 'red_sites': len(sites), 'red_by_class': cls, 'red_by_origin': dict(sorted(org.items())),
             'uncovered_by_mnemonic': dict(sorted(uncovered.items())), 'undecodable_ranges': bad}, red
 
 
@@ -546,11 +548,14 @@ def main(argv):
     ents = sorted(rows)
     inst, res = solve(path, base, rows, uni, int(os.environ.get('JOBS', '4')))
     s, red = summary(ents, inst, res)
+    reads_red = [r for r in red if r[4] != 'no-form']
+    nof = [r for r in red if r[4] == 'no-form']
     out = dict(s, format='fnvnx-gate/1', name='flags', status='green' if not red and not s['undecodable_ranges'] else 'red',
                certified=s['flag_reads'] - s['red_flag_reads'], universe=s['flag_reads'],
-               uncertified=['%08x:%s' % (r[1], r[2]) for r in red[:50]],
+               uncertified=['%08x:%s' % (r[1], r[2]) for r in reads_red[:50]],
+               no_form_sites=sorted({'%08x' % r[1] for r in nof})[:50],
                pushf_sites=sorted({'%08x' % r[1] for r in red if r[4] == 'pushf'}),
-               first_red=[{'entry': '%08x' % e, 'site': '%08x' % a, 'flag': f, 'origin': o, 'class': c, 'mnemonic': m} for e, a, f, o, c, m in red[:50]])
+               first_red=[{'entry': '%08x' % e, 'site': '%08x' % a, 'flag': f, 'origin': o, 'class': c, 'mnemonic': m} for e, a, f, o, c, m in reads_red[:50]])
     d = os.environ.get('GATE_OUT')
     if d:
         os.makedirs(d, exist_ok=True)
