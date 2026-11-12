@@ -366,3 +366,6 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
         - Blocked by recipe.py:517: generator inputs sm_table.json and sm_illegal.tsv (render/shaders/total) and d3d9types.h (shim/include) are tracked files of other roots, and `uses` takes only generated outputs.
         - Owner: L1. Rule proposed: tracked files of admitted roots are read-only, content-keyed generator inputs.
     - w6 is told: merge 2f1bac09, drop its render/shaders product root, include translator/include, remove the duplicate render/d3d9 admit entry.
+- 09:00Z The orchestrator took e8cbf49f into claude/fnv-next2.
+    - Accepted rule: a unit-less header root has no object target; its headers include only standard headers, other unit-less header roots or externals. L1 enforces this in the recipe.
+    - Asked: also take 2f1bac09 (fast-forward; it adds the merged fnvnx_shaders.h, fnvnx_sdp.h and fnvnx_dk_layout.h, which all meet the rule).
