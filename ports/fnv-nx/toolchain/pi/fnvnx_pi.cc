@@ -548,6 +548,21 @@ struct late_pass : gimple_opt_pass {
         name = on;
       }
     }
+    /* a copy made from a copy: the declaration of an IPA clone (isra, constprop, part) carries the abstract origin of the
+       declaration it was copied from, which for the C2/D2 clone of a constructor or destructor is the in-charge form
+       (C4/D4) that is never emitted, so the chain above skips the function that was read. Once the clone is
+       materialized the call graph keeps the declaration of the function it was made from (former_clone_of), exactly:
+       follow that link, through clones of clones, to the first function that was read early. */
+    for (cgraph_node *cn = cgraph_node::get(fun->decl); e == early.end() && cn && cn->former_clone_of; ) {
+      tree fo = cn->former_clone_of;
+      std::string on = TREE_CODE(fo) == IDENTIFIER_NODE ? IDENTIFIER_POINTER(fo) : asmname(fo);
+      if ((e = early.find(on)) != early.end()) {
+        clone = name.compare(0, on.size() + 1, on + ".") == 0 ? name.substr(on.size() + 1) : name;
+        name = on;
+        break;
+      }
+      cn = TREE_CODE(fo) == FUNCTION_DECL ? cgraph_node::get(fo) : NULL;
+    }
     if (e == early.end()) {
       /* a this-adjusting thunk: made by the compiler, an adjustment and a jump */
       if (!fe_cxx || !DECL_LANG_SPECIFIC(fun->decl) || !DECL_THUNK_P(fun->decl))
