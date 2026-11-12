@@ -255,7 +255,7 @@ while [ "$(date +%s)" -lt "$t_end" ]; do
     mv -f "$R.failed" "$R"
     rm -f "${R%.md}.json"
   fi
-  # a job's machine-readable summary (<report>.json, e.g. fnvnx-fuzz-summary/1) goes first, its report
+  # a job's machine-readable summary (<report>.json) goes first, its report
   # second: a report on the branch always has its summary beside it when the job wrote one
   [ -f "$R" ] && [ $rc -eq 0 ] && [ -f "${R%.md}.json" ] && publish_report "${R%.md}.json"
   # a try farm's report names what it tried: the wip branch and the commit, in its title line
