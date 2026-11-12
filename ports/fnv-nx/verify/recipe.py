@@ -498,6 +498,16 @@ def plugin_languages(cc, cxx, sos):
     return {k: [n for n in sos if not (refs[n] & only["cxx" if k == "c" else "c"])] for k in ("c", "cxx")}
 
 
+def predefined(driver, kind, flags):
+    """The macros the pinned DRIVER predefines for a unit of KIND under FLAGS (`-dM -E` on an empty input) -> {name: value}: the compiler's own
+    statement of the data model (__SIZE_TYPE__, __PTRDIFF_TYPE__, __CHAR_UNSIGNED__, ...), the same macros the unit's preprocessing stage sees."""
+    r = subprocess.run([driver, "-x", LANG_X[kind], "-dM", "-E", "-o", "/dev/stdout"] + list(flags) + ["/dev/null"], capture_output=True, text=True,
+                       env=dict(os.environ, LC_ALL="C", LANGUAGE="C"))
+    if r.returncode:
+        raise BuildRed({"stage": "predefined:" + kind, "exit": r.returncode, "stderr": r.stderr.splitlines()[-20:]})
+    return {l.split(" ", 2)[1]: (l.split(" ", 2) + [""])[2] for l in r.stdout.splitlines() if l.startswith("#define ")}
+
+
 def semantics_for(driver, kind, flags=SEMANTICS_FLAGS):
     """The semantic flags the pinned DRIVER (host path) applies to a unit of KIND ("c", "cxx", "asm"), in their order: FLAGS minus every flag that
     the driver itself says does not apply to that language (its diagnostic "command-line option 'X' is valid for C++/ObjC++ but not for C", read

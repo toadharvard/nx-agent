@@ -123,6 +123,10 @@ def main():
     sc, sx, sa = (recipe.semantics_for(drv(d), k) for d, k in (("gcc", "c"), ("g++", "cxx"), ("gcc", "asm")))
     check("semantics_for: C++ and asm keep the whole set, C drops only what the driver says does not apply", sx == list(recipe.SEMANTICS_FLAGS) and sa == sx
           and sc == [f for f in sx if f != "-fno-sized-deallocation"], (len(sc), len(sx), len(sa), set(sx) - set(sc)))
+    for k, d in (("c", "gcc"), ("cxx", "g++"), ("asm", "gcc")):   # the compiler's own statement of the data model under the recipe's flags
+        m = recipe.predefined(drv(d), k, recipe.semantics_for(drv(d), k))
+        check("predefined %s: size_t unsigned int, ptrdiff_t int, plain char signed" % k, m["__SIZE_TYPE__"] == "unsigned int" and m["__PTRDIFF_TYPE__"] == "int" and "__CHAR_UNSIGNED__" not in m, m.get("__SIZE_TYPE__"))
+    check("without -fsigned-char the compiler's plain char is unsigned (the gate's clause has something to catch)", "__CHAR_UNSIGNED__" in recipe.predefined(drv("gcc"), "c", ["-mabi=ilp32"]))
     try:
         recipe.semantics_for(drv("gcc"), "c", ["-mabi=ilp32", "-fnosuchflag"])
         check("semantics_for: a flag the driver does not know is an error", False)

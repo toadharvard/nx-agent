@@ -113,7 +113,7 @@ def main():
     check("plugin source outside the pinned file is red", any("source must be" in x or "not a tracked" in x for x in errs(
         repo, mut(plugins=[dict(p, source=recipe.PLUGIN_SOURCES["fnvnx_ftoi"]) if p["name"] == "fnvnx_order" else p for p in PLUGS]))))
     check("plugins out of load order are red", any("order" in x for x in errs(repo, mut(plugins=PLUGS[::-1]))))
-    check("native root without a semantics flag is red", any("semantics flag -fwrapv" in x for x in errs(repo, mut(
+    check("native root without a semantics flag is red", any("lacks -fno-devirtualize" in x for x in errs(repo, mut(
         flags={"c": [], "cxx": [f for f in REC["flags"]["cxx"] if f != "-fno-devirtualize"], "asm": []}))))
     check("-fplugin in flags is red", any("plugin" in x for x in errs(repo, mut(flags={"c": [], "cxx": ["-fplugin=/x.so"], "asm": []}))))
     check("plugins without plugin_cxx is red", any("plugin_cxx" in x for x in errs(repo, mut(plugin_cxx=None))) or

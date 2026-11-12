@@ -43,12 +43,10 @@
       "-fno-jump-tables",
       "-fno-ipa-ra",
       "-fno-builtin",
-      "-ffreestanding",
       "-fno-stack-protector",
       "-fno-stack-clash-protection",
       "-U_FORTIFY_SOURCE",
-      "-fno-math-errno",
-      "-fno-asynchronous-unwind-tables"
+      "-fno-math-errno"
     ]
   },
   "provenance": {

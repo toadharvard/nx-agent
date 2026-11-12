@@ -1350,7 +1350,8 @@ found by the keys objects.json lists, the document whose "stage" is `cc:<unit>`)
   compiler item: the build is green, the root's recipe compiler is the external of verify/guest_compiler.json (recipe.guest_errors: name,
     repo, ref, commit, tree_sha256, at, driver paths), and every CC document mounts at the pin's `at` the pin's tree_sha256 and starts
     with the pin's driver (the object was built by that tree, not by a name).
-  unit item, all of: a CC stage document exists for the unit; its argv holds the whole semantic set of the pin ("flags"."semantics", the one source
+  unit item, all of: a CC stage document exists for the unit; under the recipe's flags the compiler's predefined macros (recipe.predefined, `-dM -E`)
+    say __SIZE_TYPE__ is unsigned int, __PTRDIFF_TYPE__ is int and __CHAR_UNSIGNED__ is undefined (the exe's data model, plain char signed); its argv holds the whole semantic set of the pin ("flags"."semantics", the one source
     recipe.SEMANTICS_FLAGS reads) for the unit's language as ONE ordered run, exactly as recipe.semantics_for derives it from the pinned driver
     (the set minus the flags the driver's own diagnostic says do not apply to that language; the gate re-runs that probe itself), and no other
     -f/-m token except a stage's own (-fplugin, -frandom-seed, -ffile-prefix-map, -fpreprocessed) and the per-root class recipe.PER_ROOT; and

@@ -82,6 +82,11 @@ def main():
     cdoc["argv"] = [a for a in cdoc["argv"] if a != "-fno-sized-deallocation"]
     check("a C document with the driver's C subset is green", gd.unit_why("a.c", cdoc, csem, pin) == [], gd.unit_why("a.c", cdoc, csem, pin))
     check("a C document that still holds the C++-only flag is red", "argv holds -fno-sized-deallocation" in gd.unit_why("a.c", doc, csem, pin))
+    good = {"__SIZE_TYPE__": "unsigned int", "__PTRDIFF_TYPE__": "int"}
+    check("the exe's data model macros certify a unit", gd.unit_why("a.cc", doc, sem, pin, None, good) == [])
+    check("size_t = long unsigned int is red", any("__SIZE_TYPE__" in x for x in gd.unit_why("a.cc", doc, sem, pin, None, dict(good, __SIZE_TYPE__="long unsigned int"))))
+    check("ptrdiff_t = long int is red", any("__PTRDIFF_TYPE__" in x for x in gd.unit_why("a.cc", doc, sem, pin, None, dict(good, __PTRDIFF_TYPE__="long int"))))
+    check("unsigned plain char is red", any("plain char" in x for x in gd.unit_why("a.cc", doc, sem, pin, None, dict(good, __CHAR_UNSIGNED__="1"))))
     check("unit without a CC document is red", gd.unit_why("a.cc", None, sem, pin) == ["no CC stage document"])
     # the real compiler: green
     g = tg.guest_repo("d4", rec, pin, files={ROOT + "/b.cc": "int b() { return 2; }\n", ROOT + "/c.c": "int c(float f) { return (int)f; }\n",
