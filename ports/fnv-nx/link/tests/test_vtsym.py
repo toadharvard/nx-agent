@@ -68,7 +68,46 @@ def syms(o):
     return out
 
 
+VTT = '''struct A { virtual void f(); int a; };
+struct B : virtual A { virtual void g() {} int b; };
+struct C : B { virtual void h() {} int c; };
+struct E : C, virtual A { virtual void k() {} };
+void A::f() {}
+C *mkc() { return new C; }
+E *mke() { return new E; }
+void killc(C *p) { delete p; }
+'''
+
+
+def vtt_case(label, flags):
+    """(d) VTT: the construction vtables (_ZTC) that the ctors reference have every address point the ctors load defined in the _ZTC's group."""
+    res = realobj.build({'v': VTT}, flags=flags)
+    if not check('[%s] VTT unit (virtual inheritance, ctors emitted) builds' % label, res['status'] == 'green', res.get('failure')):
+        return
+    o = res['objects'][0]['object']
+    s = syms(o)
+    ztc = sorted(n for n in s if n.startswith('_ZTC') and '.fnvnx_ap' not in n and s[n]['ndx'] != 'UND')
+    check('[%s] VTT unit defines construction vtables _ZTC (%d)' % (label, len(ztc)), len(ztc) >= 1, sorted(s)[:20])
+    refs = set()
+    for l in readelf(['-rW'], o).splitlines():
+        for m in re.finditer(r'(_ZTC\S+?\.fnvnx_ap\d+)', l):
+            refs.add(m.group(1))
+    check('[%s] ctors reference _ZTC address points (%d)' % (label, len(refs)), len(refs) >= 1)
+    bad = []
+    for r in sorted(refs):
+        t = r.split('.fnvnx_ap')[0]
+        if r not in s or s[r]['ndx'] == 'UND':
+            bad.append(r + ' undefined')
+        elif t in s and (s[r]['ndx'] != s[t]['ndx'] or s[r]['bind'] != s[t]['bind']):
+            bad.append(r + ' differs from its table')
+    check('[%s] every _ZTC address point the ctors reference is defined in its table group, like the table' % label, not bad, bad[:6])
+    und = sorted(n for n in s if '.fnvnx_ap' in n and s[n]['ndx'] == 'UND')
+    check('[%s] VTT unit: no undefined address point at all' % label, not und, und)
+
+
 def main():
+    for label, flags in (('vtt rtti', []), ('vtt no-rtti', ['-fno-rtti', '-fno-exceptions', '-fdata-sections', '-fPIE'])):
+        vtt_case(label, flags)
     for label, flags in (('rtti', []), ('no-rtti no-exceptions data-sections', ['-fno-rtti', '-fno-exceptions', '-fdata-sections', '-fPIE'])):
         res = realobj.build({'a': src('a'), 'b': src('b')}, flags=flags)
         if not check('[%s] two units with inline-emitted vtables build on msvcmodel with the 8 plugins' % label, res['status'] == 'green', res.get('failure')):

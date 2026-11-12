@@ -454,8 +454,32 @@ static void vtmap_line(tree vt, HOST_WIDE_INT off)
      (c) every `<table>.fnvnx_ap<off>` that this unit referenced (ap_decls): the table is emitted here, so its reference is defined here.
    A referenced point that is no entry-aligned offset inside the table's size is an error, never a silent miss: the symbol would stay
    undefined. The .fnvnx.vtmap lines go out for the same set. */
+/* (d) VTT: every element of a _ZTT initializer emitted in this unit, of the form &<table>+off (after STRIP_NOPS and through
+   POINTER_PLUS_EXPR), is an address point of that table. The VTT is the front end's own list of the construction-vtable (_ZTC)
+   and secondary-vtable address points that the constructors load; it is emitted in the unit of those tables and does not
+   depend on -frtti. Collected once per unit by finish_unit. */
+static std::map<tree, std::set<HOST_WIDE_INT> > vtt_aps;
+
+static void collect_vtt_aps()
+{
+  vtt_aps.clear();
+  varpool_node *n;
+  FOR_EACH_DEFINED_VARIABLE(n) {
+    tree vtt = n->decl;
+    if (!DECL_ASSEMBLER_NAME_SET_P(vtt) || strncmp(asmname(vtt), "_ZTT", 4) || !DECL_INITIAL(vtt) || TREE_CODE(DECL_INITIAL(vtt)) != CONSTRUCTOR) continue;
+    unsigned HOST_WIDE_INT ix; tree idx, val;
+    FOR_EACH_CONSTRUCTOR_ELT(CONSTRUCTOR_ELTS(DECL_INITIAL(vtt)), ix, idx, val) {
+      HOST_WIDE_INT o;
+      tree t = table_ref(val, &o);
+      if (t && o > 0) vtt_aps[t].insert(o);
+    }
+  }
+}
+
 static void table_aps(tree vt, std::set<HOST_WIDE_INT> &aps)
 {
+  std::map<tree, std::set<HOST_WIDE_INT> >::iterator vi = vtt_aps.find(vt);
+  if (vi != vtt_aps.end()) aps.insert(vi->second.begin(), vi->second.end());
   const char *base = asmname(vt);
   HOST_WIDE_INT esz = int_size_in_bytes(TREE_TYPE(TREE_TYPE(vt)));
   if (DECL_INITIAL(vt) && TREE_CODE(DECL_INITIAL(vt)) == CONSTRUCTOR) {
@@ -495,6 +519,7 @@ static void table_aps(tree vt, std::set<HOST_WIDE_INT> &aps)
 
 static void finish_unit(void *, void *)
 {
+  collect_vtt_aps();
   varpool_node *n;
   FOR_EACH_DEFINED_VARIABLE(n) {
     tree vt = n->decl;
