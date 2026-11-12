@@ -137,11 +137,13 @@ for bad in ({"exe": "/e"}, {"exe": "/e", "redist": "/r", "extra": "/x"}):
         check("dllkind.declared_roots: a missing or extra root is an error %s" % sorted(bad), False)
     except ValueError:
         check("dllkind.declared_roots: a missing or extra root is an error %s" % sorted(bad), True)
-bn, co, un = dllkind.conflicts({"exe": ["A.dll", "b.DLL", "x.ini"], "redist": ["B.dll", "c.dll", "d.txt"]}, {"a.dll", "c.dll", "zz.dll"})
-check("dllkind.conflicts: files of the set with a bridge row, with roots and rule", bn == [("a.dll", ["exe"], dllkind.RULE_BRIDGE), ("c.dll", ["redist"], dllkind.RULE_BRIDGE)], bn)
-check("dllkind.conflicts: names in more than one root resolved by the search order, roots in rule order", co == [("b.dll", ["exe", "redist"], dllkind.RULE_APPDIR)], co)
-check("dllkind.conflicts: nothing unresolved with the declared roots", un == [], un)
-un = dllkind.conflicts({"exe": ["a.dll"], "other": ["a.dll"]}, set())[2]
+roles = dllkind.bridge_roles({"a.dll": ["b.dll"], "c.dll": ["k.dll"]}, {"k.dll"}, {"zz.dll"})
+check("dllkind.bridge_roles: an unsatisfied import makes the file declared-machine, a satisfied one loadable", roles == {"a.dll": "declared-machine", "c.dll": "loadable"}, roles)
+bn, co, un = dllkind.conflicts({"exe": ["A.dll", "b.DLL", "x.ini"], "redist": ["B.dll", "c.dll", "d.txt"]}, roles)
+check("dllkind.conflicts: declared-machine bridge-named file resolved, loadable one unresolved", bn == [("a.dll", ["exe"], dllkind.RULE_DECLARED_MACHINE), ("c.dll", ["redist"], None)], bn)
+check("dllkind.conflicts: names in more than one root resolved by the search order", co == [("b.dll", ["exe", "redist"], dllkind.RULE_APPDIR)], co)
+check("dllkind.conflicts: the loadable bridge-named file is unresolved", un == [("c.dll", ["redist"], None)], un)
+un = dllkind.conflicts({"exe": ["a.dll"], "other": ["a.dll"]}, {})[2]
 check("dllkind.conflicts: a collision with a root outside the rule is unresolved", un == [("a.dll", ["exe", "other"], None)], un)
 print("FAILED: %d" % len(FAILED) if FAILED else "all passed")
 sys.exit(1 if FAILED else 0)

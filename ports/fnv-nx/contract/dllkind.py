@@ -30,17 +30,27 @@ def declared_roots(hosts):
     return [(n, hosts[n]) for n in DECLARED_ROOTS]
 
 
-RULE_BRIDGE = "bridge row: the platform serves the name, a found file is never a guest image (N1-N4 body rule of the bridge row)"
-RULE_APPDIR = "LoadLibrary search order: the application directory before system32 (Windows, Wine 9.0), the first root in DECLARED_ROOTS order is loaded, the later copies are shadowed"
+RULE_DECLARED_MACHINE = ("declared-machine module: its own file cannot load on the declared machine (normal import closure needs a dll that is neither an image, "
+                         "bridged nor the root), the platform serves it with the documented unavailable result; never a guest image; owner order of 2026-11-11 23:00 (Galaxy is not lifted)")
+RULE_APPDIR = "LoadLibrary search order: the application directory before system32 (Windows docs, Wine 9.0 LdrLoadDll), the first root in DECLARED_ROOTS order is loaded, the later copies are shadowed"
+# a bridge-named file that does load is decided by the N1-N4 native-vs-lifted rule (bodysel.py); until that verdict exists for it the row is UNRESOLVED
 
 
-def conflicts(files, bridge):
-    """files: {root name: [file names of that root]}, bridge: the dll names that have bridge rows.
+def bridge_roles(file_imports, image, ok):
+    """file_imports: {bridge-named dll that has a file: its normal import names (iat.norm_dll)}, image: the image set (images_of), ok: names that are
+    satisfied without being images (bridge dlls, the root).  -> {name: 'declared-machine' | 'loadable'}: declared-machine iff some import of the
+    file is neither in image nor in ok (the file itself fails the image rule), else loadable (N1-N4 decides)."""
+    return {n: ("loadable" if all(x in image or x in ok for x in imps) else "declared-machine") for n, imps in file_imports.items()}
+
+
+def conflicts(files, roles):
+    """files: {root name: [file names of that root]}, roles: bridge_roles() of the bridge-named files that exist (the keys are all names with a bridge row
+    that have a file).
     -> (bridge_named, collisions, unresolved): every row is (dll name, [roots in rule order], rule text).
-    bridge_named: the *.dll files of the set that have a bridge row, resolved by RULE_BRIDGE.
-    collisions: the *.dll names found in more than one root (case-insensitive), resolved by RULE_APPDIR; a name that is also bridge-named is
-    served by RULE_BRIDGE first, so both rows list it.
-    unresolved: collisions that no rule orders (a root outside DECLARED_ROOTS); the caller makes the build red on a non-empty list."""
+    bridge_named: the *.dll files of the set that have a bridge row, with RULE_DECLARED_MACHINE when their role is declared-machine; a loadable one has
+    rule None and is in unresolved until N1-N4 gives a verdict for it.
+    collisions: the *.dll names found in more than one root (case-insensitive), RULE_APPDIR; a root outside DECLARED_ROOTS leaves rule None (unresolved).
+    unresolved: every row whose rule is None; the caller makes the build red on a non-empty list."""
     where = {}
     for root, names in files.items():
         for f in names:
@@ -49,10 +59,10 @@ def conflicts(files, bridge):
                 where[n].append(root)
     order = {r: i for i, r in enumerate(DECLARED_ROOTS)}
     key = lambda v: sorted(v, key=lambda r: order.get(r, len(order)))
-    bn = sorted((n, key(r), RULE_BRIDGE) for n, r in where.items() if n in bridge)
-    co = sorted((n, key(r), RULE_APPDIR) for n, r in where.items() if len(r) > 1 and all(x in order for x in r))
-    un = sorted((n, key(r), None) for n, r in where.items() if len(r) > 1 and not all(x in order for x in r))
-    return bn, co, un
+    bn = sorted((n, key(r), RULE_DECLARED_MACHINE if roles.get(n) == "declared-machine" else None) for n, r in where.items() if n in roles)
+    co = sorted((n, key(r), RULE_APPDIR if all(x in order for x in r) else None) for n, r in where.items() if len(r) > 1)
+    un = [x for x in bn + co if x[2] is None]
+    return bn, [x for x in co if x[2]], un
 
 
 def images_of(normal_imports, ok):

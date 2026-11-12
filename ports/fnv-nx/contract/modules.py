@@ -390,12 +390,19 @@ def run(exe_path, bridge_path, roots, out, declared_path):
     iat.write_table(os.path.join(out, 'iat.tsv'), rows)
     gatefile.write('iat', len(rows) + len(bad), len(rows), ['%08x %s!%s: %s' % b for b in bad],
                    '%d slots, %d without a value' % (len(rows) + len(bad), len(bad)))
-    bnamed, coll, unres = dllkind.conflicts({n: [f for f in os.listdir(d) if os.path.isfile(os.path.join(d, f))] for n, d in roots}, system)
+    bfiles = {}
+    for n in sorted(system):
+        p = find_file(dirs, n)
+        if p:
+            with open(p, 'rb') as fh:
+                bfiles[n] = [iat.norm_dll(d) for d, _ in Module(n, p, fh.read()).imports]
+    roles = dllkind.bridge_roles(bfiles, image, system | {me})
+    bnamed, coll, unres = dllkind.conflicts({n: [f for f in os.listdir(d) if os.path.isfile(os.path.join(d, f))] for n, d in roots}, roles)
     summary = ['declared file set %s; bridge-named files %d; name collisions between roots %d; unresolved %d' % (
         '+'.join(n for n, _ in roots), len(bnamed), len(coll), len(unres))]
-    summary += ['  bridge-named %s (%s): %s' % (n, '+'.join(r), rule) for n, r, rule in bnamed]
+    summary += ['  bridge-named %s (%s): %s' % (n, '+'.join(r), rule or 'N1-N4 verdict missing') for n, r, rule in bnamed]
     summary += ['  collision %s (%s): %s' % (n, '+'.join(r), rule) for n, r, rule in coll]
-    summary += ['  UNRESOLVED collision %s (%s)' % (n, '+'.join(r)) for n, r, _ in unres]
+    summary += ['  UNRESOLVED %s (%s)' % (n, '+'.join(r)) for n, r, _ in unres]
     summary += ['modules %d: range 0x%08x..0x%08x' % (len(order), order and min(m.base for m in order) or 0, end)]
     summary += ['  %d %s base 0x%08x preferred 0x%08x size 0x%x relocs %d static %d' % (i, m.name, m.base, m.pe.base, m.pe.size_of_image, m.relocs, int(m.static))
                 for i, m in enumerate(order)]
