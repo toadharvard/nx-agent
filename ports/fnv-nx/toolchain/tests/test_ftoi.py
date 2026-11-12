@@ -80,7 +80,7 @@ def main():
         for what, plug in (('without fnvnx_ftoi', []), ('with mode native', [('ftoi', {'mode': 'native'})]), ('with another argument', [('ftoi', {'mode': 'lifted', 'verbose': ''})])):
             try:
                 if not plug:
-                    pb._recipe(td, [('sdd', {})], {'t.cpp': 'int t();\n'}, pb.PRODUCT_FLAGS, lifted_ftoi=False)
+                    pb._recipe(td, [('sdd', {})], {'t.cpp': 'int t();\n'}, pb.PRODUCT_FLAGS, lifted_ftoi=False, raw=True)
                 else:
                     pb._recipe(td, plug, {'t.cpp': 'int t();\n'}, pb.PRODUCT_FLAGS, raw=True)
                 check('recipe: a lifted root %s is red' % what, False)
