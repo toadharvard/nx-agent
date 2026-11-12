@@ -493,3 +493,8 @@ Update 2026-11-12, at 698adefb:
   - lift/fnvlift/tests gets 6, plus the 2 mixed ones (module under test = fnvlift);
   - lift/test keeps the instest harness and 14 others, and keeps selftests.
   - "Reference" is per L1 w19's gate definition.
+
+## 2026-11-12 10:33
+- Item 16: all 7 test roots are recipe-valid on w8 t16g f0c65c004 (int-l3a + L5 e2152adf5, rt/guest admitted): bridges, the 3 lifted, the 3 native.
+- Next for w8: merge int-l3a 55287b9f4, build lift/rt, build the native test roots plus platform and rt/guest (local or farm 1), then run the 6 guest tests with references.
+- Selftests split: L1's closed rule replaces my hand choice. A multi-root test goes to the top of the root dependency order; a diamond or cycle is red and gets split per root.
