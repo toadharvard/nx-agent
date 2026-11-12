@@ -800,3 +800,13 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
   - The case universe comes from ast.
   - A census of script-style files comes before the rule.
   - The tls item stays queued behind L2's `.fnvnx.tls`.
+
+## 2026-11-12 10:00 UTC
+- w16-int 1c59bda9 rejected as an L1 head.
+  - Wrong base: it sits on w14 0a5c8dd8 + trunk 4fb048ec.
+  - It uses the old generator-input form, tool|headers|own.
+  - The local env.json digest patch is not allowed.
+- w16 is redoing the work on next3b, branch w16c.
+  - Commit 1: generator inputs in the orchestrator's form, plus the header-root rule merged with L5's header-home rule.
+  - Then fixtures, specdefaults, the covers derivation and the nesting refusal, as separate commits.
+- L6 was told not to take -int as a base.
