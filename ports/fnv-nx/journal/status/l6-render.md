@@ -69,3 +69,11 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - the probe mingw pin and archived binaries (w5);
     - the render/ref class (L1 w10).
   - deko3d/libnx externals come from L6A: deko3d efc48589, libnx 518bf11a.
+- 03:15Z w5 17274910 merged.
+  - Mirrors in fnv-nx-build:
+    - tools/wine-9.0 c8373ee4 (tag wine-9.0, 10154 files, tree 3ac9a4a0);
+    - tools/docs-d3d9 56908b51 (1987 pages with a manifest, tree e19cab4c).
+  - Their records, plus libnx and deko3d, are in render/total/externals.json.
+  - The probe gap is NOT closed: the recorded envprobe2.exe and its dll are lost, and the compiler that built them is unknown. make_env.py now pins every mingw package and tool version and copies the binaries out for archiving.
+  - Closing it needs a farm re-recording of env_{handheld,docked}.tsv: Wine 9.0 and Xvfb, 232251 queries x 2 profiles x 2 runs. It is off the first-frame path: the current dumps stay as generator input, identified by sha256 but not yet a probe reference. Asked the orchestrator for the farm slot.
+  - Gap: IDirect3DSwapChain9Ex::GetPresentStats has no MS page in either upstream repo, so test_m1's clock rule rests on the Wine source alone.
