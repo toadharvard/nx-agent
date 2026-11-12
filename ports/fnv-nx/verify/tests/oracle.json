@@ -603,7 +603,7 @@
   "test_plugins.py": {
    "references": [
     {
-     "anchor": "## Plugins (`fnvnx_order`, `fnvnx_ftoi`)",
+     "anchor": "## Plugins (`fnvnx_order`, `fnvnx_ftoi`, ...)",
      "kind": "spec",
      "path": "ports/fnv-nx/verify/RECIPE.md"
     }

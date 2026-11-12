@@ -110,7 +110,7 @@ that includes `<vector>`, `<string>`, `<cstdio>`. The 13.3 compiler reads gcc 15
   semantics; `ltr`, `first`, `cpp17` exist for A/B measurements and are no product). Anything missing or different is a finding naming it.
 - lifted (the lifter emits `ldar`/`stlr` itself): consistent only if the root has NO tracked C++ unit, every C++ unit is an output of a `generated`
   step whose tool is `lifted_by`, and `pack` is an external of the recipe (an input of every generator). The one plugin it must load is `fnvnx_ftoi` with `LIFTED_ARGS` (`mode=lifted`): no rewrite, and every float -> integer conversion outside an `fnvnx_f2i` function is a build error.
-- every guest root with a C or C++ unit (native or lifted, any language mix) holds ALL of `PLUGIN_SOURCES` with `PLUGIN_ARGS`, in that order: the
+- every guest root with a C or C++ unit (native or lifted, any language mix) holds ALL of `PLUGIN_SOURCES` with `PLUGIN_ARGS` (a lifted root: `LIFTED_ARGS` for the plugins it names, so `fnvnx_ftoi` in mode lifted), in that order: the
   C and the C++ CC stage of the root load every plugin their front end can load (`-fplugin=/plug/<n>/<n>.so`, `/plug/<n>` a declared input), so a
   plugin is in every unit key. Loadable = needs no symbol that only the other front end defines (`recipe.plugin_languages`: `nm -D` of cc1, cc1plus
   and the .so; measured: cc1plus loads all 8, cc1 loads ftoi, order, dispatch, addr; sdd, pi, names, layout use cp_global_trees). Gate `datamodel`
