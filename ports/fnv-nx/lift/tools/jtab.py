@@ -58,11 +58,11 @@ def add(a, c): return ((a[0] + c) % N, a[1])
 class St:
     """r: {loc: interval} (absent = top), loc = a register name or a frame cell ('c', base, disp); f: None | (kind, loc, pre interval, imm);
     al: {loc: class id} (locations that hold the same value); nz: {loc: set of masks m with loc & m != 0}; pk: tuple of pushed intervals (top last), espd: esp offset since the seed (None = unknown)."""
-    __slots__ = ('r', 'f', 'al', 'nz', 'pk', 'espd')
+    __slots__ = ('r', 'f', 'al', 'nz', 'pk', 'espd', 'eb', 'why')
 
-    def __init__(s, r, f, al=None, nz=None, pk=(), espd=0): s.r = r; s.f = f; s.al = al or {}; s.nz = nz or {}; s.pk = pk; s.espd = espd
-    def cp(s): return St(dict(s.r), s.f, dict(s.al), {k: set(v) for k, v in s.nz.items()}, s.pk, s.espd)
-    def __eq__(s, o): return s.r == o.r and s.f == o.f and s.al == o.al and s.nz == o.nz and s.pk == o.pk and s.espd == o.espd
+    def __init__(s, r, f, al=None, nz=None, pk=(), espd=0, eb='i', why=None): s.r = r; s.f = f; s.al = al or {}; s.nz = nz or {}; s.pk = pk; s.espd = espd; s.eb = eb; s.why = why or {}
+    def cp(s): return St(dict(s.r), s.f, dict(s.al), {k: set(v) for k, v in s.nz.items()}, s.pk, s.espd, s.eb, dict(s.why))
+    def __eq__(s, o): return s.r == o.r and s.f == o.f and s.al == o.al and s.nz == o.nz and s.pk == o.pk and s.espd == o.espd and s.eb == o.eb
     def g(s, loc): return s.r.get(loc, TOP)
 
 
@@ -106,9 +106,11 @@ def joinst(p, q):
         if m: nz[k] = m
     pk = p.pk if p.pk == q.pk else (tuple(join(a, b) for a, b in zip(p.pk, q.pk)) if len(p.pk) == len(q.pk) else ())
     e = p.espd if p.espd == q.espd else None
-    o = St(r, p.f if p.f == q.f else None, al, nz, pk, e)
-    if e is None: kill_cells(o, None, None)
-    return o
+    eb = p.eb if p.eb == q.eb else None
+    why = {k: p.why[k] for k in p.why if q.why.get(k) == p.why[k]}
+    for k in set(p.why) | set(q.why):
+        if k not in why: why[k] = 'joined'
+    return St(r, p.f if p.f == q.f else None, al, nz, pk, e, eb, why)
 
 
 def cell(ins, op, st, cells):
@@ -117,8 +119,10 @@ def cell(ins, op, st, cells):
     m = op.mem
     if m.segment or m.index or op.size != 4: return None
     b = FULL.get(ins.reg_name(m.base)) if m.base else None
-    if b == 'ebp': return ('c', 'ebp', m.disp)
-    if b == 'esp' and st.espd is not None: return ('c', 'esp', m.disp + st.espd)
+    if b == 'ebp':
+        if st.eb == 'i': return ('c', 'ebp0', m.disp)
+        if st.eb is not None: return ('c', 'esp0', st.eb + m.disp)
+    if b == 'esp' and st.espd is not None: return ('c', 'esp0', m.disp + st.espd)
     return None
 
 
@@ -161,8 +165,8 @@ def step(ins, st, u8, cells=True):
     r32 = d is not None and d.type == X.X86_OP_REG and d.size == 4
     reg = FULL.get(ins.reg_name(d.reg)) if r32 else None
     if mn == 'call':
-        for k in list(st.r): del st.r[k]
-        st.f = None; st.al.clear(); st.nz.clear(); st.pk = (); st.espd = None; return
+        keep = {k: v for k, v in st.r.items() if cells and isinstance(k, tuple) and k[1] == 'esp0' and k[2] >= 4}     # the caller-owned incoming parameters are no argument of a callee (no frame address escapes)
+        st.r.clear(); st.r.update(keep); st.f = None; st.al.clear(); st.nz.clear(); st.pk = (); st.espd = None; st.why = {'*': 'call at %x' % ins.address}; return
     if mn == 'push' and n == 1:
         v = val(st, ins, d, cells) if d.type in (X.X86_OP_IMM, X.X86_OP_REG) else TOP
         st.pk = st.pk + (v,); st.espd = None if st.espd is None else st.espd - 4; return
@@ -175,21 +179,30 @@ def step(ins, st, u8, cells=True):
     wesp = False
     try: wr = [FULL.get(ins.reg_name(x)) for x in ins.regs_access()[1]]
     except Exception: st.r.clear(); st.f = None; st.al.clear(); st.nz.clear(); st.pk = (); st.espd = None; return
-    if 'esp' in wr and mn not in ('push', 'pop'): st.espd = None; st.pk = ()
+    if 'esp' in wr and mn not in ('push', 'pop'):
+        if mn == 'mov' and n == 2 and ops[1].type == X.X86_OP_REG and FULL.get(ins.reg_name(ops[1].reg)) == 'ebp': st.espd = st.eb if isinstance(st.eb, int) else None
+        elif mn == 'leave': st.espd = st.eb + 4 if isinstance(st.eb, int) else None
+        else: st.espd = None
+        st.pk = ()
     if 'ebp' in wr:
-        for k in [k for k in list(st.r) + list(st.al) if isinstance(k, tuple) and k[1] == 'ebp']: st.r.pop(k, None); st.al.pop(k, None); st.nz.pop(k, None)
+        for k in [k for k in list(st.r) + list(st.al) if isinstance(k, tuple) and k[1] == 'ebp0']: st.r.pop(k, None); st.al.pop(k, None); st.nz.pop(k, None)
+        st.eb = st.espd if mn == 'mov' and n == 2 and ops[1].type == X.X86_OP_REG and FULL.get(ins.reg_name(ops[1].reg)) == 'esp' else None
     if n >= 1 and d.type == X.X86_OP_MEM and mn not in ('cmp', 'test'):           # a store: a frame cell, or an unknown address (every cell may be overwritten)
         c = cell(ins, d, st, cells); m = d.mem
         if mn == 'mov' and c is not None and n == 2:
             src = ops[1]
-            for k in [k for k in list(st.r) + list(st.al) if isinstance(k, tuple) and k[1] == c[1] and k != c and abs(k[2] - c[2]) < 4]: st.r.pop(k, None); st.al.pop(k, None); st.nz.pop(k, None)
+            for k in [k for k in list(st.r) + list(st.al) if isinstance(k, tuple) and ((k[1] == c[1] and k != c and abs(k[2] - c[2]) < 4) or k[1] != c[1])]: st.r.pop(k, None); st.al.pop(k, None); st.nz.pop(k, None)
             if src.type == X.X86_OP_REG and src.size == 4: copy(st, c, FULL.get(ins.reg_name(src.reg)))
             else: setr(st, c, (src.imm & M32, 0) if src.type == X.X86_OP_IMM else TOP)
             return
         b = FULL.get(ins.reg_name(m.base)) if m.base else None
         if c is not None: setr(st, c, TOP)
-        elif cells and b in ('ebp', 'esp') and not m.index and not m.segment and (b == 'ebp' or st.espd is not None):
-            o = m.disp + (st.espd if b == 'esp' else 0); kill_cells(st, o - 3, o + d.size - 1)
+        elif cells and b in ('ebp', 'esp') and not m.index and not m.segment and (b == 'esp' and st.espd is not None or b == 'ebp' and st.eb is not None):
+            if b == 'esp': base, o = 'esp0', st.espd + m.disp
+            elif st.eb == 'i': base, o = 'ebp0', m.disp
+            else: base, o = 'esp0', st.eb + m.disp
+            for k in [k for k in list(st.r) + list(st.al) if isinstance(k, tuple) and (k[1] != base or o - 3 <= k[2] <= o + d.size - 1)]: st.r.pop(k, None); st.al.pop(k, None); st.nz.pop(k, None)
+            if st.f is not None and isinstance(st.f[1], tuple) and (st.f[1][1] != base or o - 3 <= st.f[1][2] <= o + d.size - 1): st.f = None
         else: kill_cells(st)
     if mn == 'mov' and n == 2 and r32:
         s = ops[1]
@@ -347,16 +360,13 @@ class Tg(tuple):
     pass
 
 
-def resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords):
-    """-> (targets tuple, None) or (None, why). dec[x] = (size, mnemonic, feat, falls through, direct targets); preds(x) = the decoded predecessors of x."""
-    ins = ins_at(site); op = ins.operands[0]
-    if op.mem.base or op.mem.segment: return None, 'table jump with a base register or segment'
-    if (site + ins.disp_offset) not in rset: return None, 'table displacement is not relocated'
-    T = op.mem.disp & M32; ireg = FULL.get(ins.reg_name(op.mem.index))
+def flow(site, dec, ins_at, preds, seed, u8):
+    """forward analysis over the backward cone of `site`: seed(x) -> a start State for an instruction entered from outside the decoded edges, or None (then its predecessors are followed).
+    -> (state before `site` or None if unreachable, whether frame cells are tracked)."""
     cone = {site}; stack = [site]
     while stack:
         x = stack.pop()
-        if seeded(x): continue
+        if seed(x) is not None: continue
         for p in preds(x):
             if p not in cone: cone.add(p); stack.append(p)
     IN = {}; cnt = {}; work = []; cache = {}
@@ -374,30 +384,44 @@ def resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords):
         return False
     cells = not any(esc(x) for x in cone)                  # a frame cell is tracked only if no instruction of the cone forms the frame address (then no pointer can name it)
     for x in cone:
-        if seeded(x): IN[x] = St({}, None); work.append(x)
+        s0 = seed(x)
+        if s0 is not None: IN[x] = s0; work.append(x)
     while work:
         x = work.pop()
         if x == site: continue
         i = ins_c(x)
         if i is None: continue
         sz, mn, ft, fall, tg = dec[x]; o = IN[x].cp(); step(i, o, u8, cells)
+        try: wl = [FULL.get(i.reg_name(r)) for r in i.regs_access()[1]]
+        except Exception: wl = []
+        for w in wl:
+            if w: o.why[w] = '%s %s at %x' % (i.mnemonic, i.op_str, x)
         cond = i.mnemonic[0] == 'j' and i.mnemonic != 'jmp'
         outs = []
         for y in tg:
             if y in cone: outs.append((y, refine(i, o, True) if cond else o))
         if fall and (x + sz) in cone: outs.append((x + sz, refine(i, o, False) if cond else o))
-        for y, s in outs:
-            if s is None or seeded(y): continue
-            if y not in IN: IN[y] = s.cp(); work.append(y); cnt[y] = 0
+        for y, s_ in outs:
+            if s_ is None or seed(y) is not None: continue
+            if y not in IN: IN[y] = s_.cp(); work.append(y); cnt[y] = 0
             else:
-                m = joinst(IN[y], s)
+                m = joinst(IN[y], s_)
                 if m != IN[y]:
                     cnt[y] = cnt.get(y, 0) + 1
                     if cnt[y] > WIDEN:
                         for k in list(m.r):
-                            if m.r[k] != IN[y].g(k): del m.r[k]
+                            if m.r[k] != IN[y].g(k): del m.r[k]; m.why[k] = 'widened at %x' % y
                     IN[y] = m; work.append(y)
-    st = IN.get(site)
+    return IN.get(site), cells
+
+
+def resolve(site, dec, ins_at, preds, seeded, rset, u32, u8, intext, maxwords):
+    """-> (targets tuple, None) or (None, why). dec[x] = (size, mnemonic, feat, falls through, direct targets); preds(x) = the decoded predecessors of x."""
+    ins = ins_at(site); op = ins.operands[0]
+    if op.mem.base or op.mem.segment: return None, 'table jump with a base register or segment'
+    if (site + ins.disp_offset) not in rset: return None, 'table displacement is not relocated'
+    T = op.mem.disp & M32; ireg = FULL.get(ins.reg_name(op.mem.index))
+    st, _ = flow(site, dec, ins_at, preds, lambda x: St({}, None) if seeded(x) else None, u8)
     if st is None: return None, 'the site is unreachable from any entry in the decoded edges'
     v = st.g(ireg)
     if v[1] + 1 > maxwords: return None, 'index register %s unbounded (interval of %d values)' % (ireg, v[1] + 1)

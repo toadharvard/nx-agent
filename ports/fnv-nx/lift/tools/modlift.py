@@ -383,6 +383,35 @@ def run(arg):
     if os.path.exists('/home/user/l3facts/exe_mnemonics.tsv'):
         for ln in open('/home/user/l3facts/exe_mnemonics.tsv'): k, n = ln.split(); exe_mn[k] = int(n)
     mp = Counter(dec[a][1] for a in pset); new_mn = sorted(((k, n) for k, n in mp.items() if k not in exe_mn), key=lambda kv: (-kv[1], kv[0]))[:60]
+    IDX = os.environ.get('FNVNX_IDXSTORES')
+    if IDX:
+        import idxrange
+        ex = JT.exclusive(jt_ok, svals); pmx = {}
+        for a, (sz, mn, ft, fall, tg) in dec.items():
+            for t in tg: pmx.setdefault(t, set()).add(a)
+            if fall: pmx.setdefault(a + sz, set()).add(a)
+        def seeded_x(x):
+            if x in callers: return True
+            if x in ent and (ent[x] - {'ptr', 'tail', 'inner'}): return True
+            return any(r not in ex for r in vrefs.get(x, ()))
+        def pure_x(e):
+            if e not in ent: return 'not an entry'
+            if ent[e] - {'call'}: return 'entry kinds %s' % ','.join(sorted(ent[e]))
+            if vrefs.get(e): return 'a relocated reference names it (address taken)'
+            if pmx.get(e): return 'reached by a jump or fall-through from %x' % min(pmx[e])
+            return None
+        def ins_at_x(a): return next(md.disasm(text[a - T0:a - T0 + 15], a, 1), None) if T0 <= a < T1 else None
+        def u8_x(a):
+            if any(v <= a < v + z for v, z in M.wr): return None
+            try: return u32(a) & 0xff
+            except Exception: return None
+        rg = idxrange.Ranger(dec, ins_at_x, lambda x: pmx.get(x, ()), lambda e: callers.get(e, ()), entry_of, pure_x, seeded_x, u8_x)
+        dl = (M.base - M.pref) & 0xffffffff
+        rows = [((int(l.split('\t')[1], 16) + dl) & 0xffffffff, l.split('\t')[4].strip()) for l in open(IDX).read().splitlines()[1:] if l.split('\t')[0] == name.lower()]
+        print('IDXRANGE %s known=%d unknown=%d' % ((name,) + idxrange.run(rows, rg, outd + '/idxrange.tsv', name)), flush=True)
+        if dl:
+            q = open(outd + '/idxrange.tsv').read().splitlines()
+            open(outd + '/idxrange.tsv', 'w').write(''.join('%08x\t%s\n' % ((int(l.split('\t')[0], 16) - dl) & 0xffffffff, l.split('\t', 1)[1]) for l in q))
     fi = eh.finish(ent)
     exs = [n for n, a, z, ro in M.xs]; green = not why
         # ---- exports against L1's list, imports by DLL, delay imports

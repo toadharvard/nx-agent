@@ -337,6 +337,31 @@ for v, n, rf in arrays:           # an array read through an index register exte
     if e > v + n: mark(v + n, e - v - n, rf); dinfo['array_ext_bytes'] += e - v - n
 print('JTAB_AFTER sites=%d resolved=%d red=%d' % (len(jtab), len(jt_ok), len(jt_red)), flush=True)
 for a in sorted(jt_red): print('JTAB_RED %08x %s' % (a, jt_red[a]))
+IDX = os.environ.get('FNVNX_IDXSTORES')
+if IDX:
+    import idxrange
+    ex = JT.exclusive(jt_ok, svals); pmx = {}
+    for a, (sz, mn, ft, fall, tg) in insns.items():
+        for t in tg: pmx.setdefault(t, set()).add(a)
+        if fall: pmx.setdefault(a + sz, set()).add(a)
+    def seeded_x(x):
+        if x in callers: return True
+        if x in entries and (kinds[x] - {'ptr', 'tail', 'inner'}): return True
+        return any(r not in ex for r in vrefs.get(x, ()))
+    def pure_x(e):
+        if e not in entries: return 'not an entry'
+        if kinds[e] - {'decomp', 'call'}: return 'entry kinds %s' % ','.join(sorted(kinds[e]))
+        if vrefs.get(e): return 'a relocated reference names it (address taken)'
+        if pmx.get(e): return 'reached by a jump or fall-through from %x' % min(pmx[e])
+        return None
+    def ins_at_x(a): return next(md.disasm(text[a - T0:a - T0 + 15], a, 1), None) if T0 <= a < T1 else None
+    def u8_x(a):
+        if any(v <= a < v + z for v, z in M.wr): return None
+        try: return u32(a) & 0xff
+        except Exception: return None
+    rg = idxrange.Ranger(insns, ins_at_x, lambda x: pmx.get(x, ()), lambda e: callers.get(e, ()), entry_of, pure_x, seeded_x, u8_x)
+    rows = [(int(l.split('\t')[1], 16), l.split('\t')[4].strip()) for l in open(IDX).read().splitlines()[1:] if l.split('\t')[0] in (os.path.basename(EXE).lower(), NAME)]
+    print('IDXRANGE known=%d unknown=%d' % idxrange.run(rows, rg, OUTD + '/idxrange.tsv', NAME), flush=True)
 NRN, NRI, NRB, NRR = codemap.exe_noreturn(U, eh.thrower)        # NORETURN: unreach what only flows after a call that never returns
 # ---- extents / features / output
 for v, ss in psites.items():
