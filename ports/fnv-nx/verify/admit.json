@@ -95,14 +95,69 @@
    ]
   },
   {
-   "path": "ports/fnv-nx/lift/census",
+   "path": "ports/fnv-nx/lift/census0",
    "class": "product",
    "target": "guest",
    "cxx_origin": {
-    "lifted_by": "ports/fnv-nx/lift/tools/packcopy.py",
+    "lifted_by": "ports/fnv-nx/lift/tools/packshard.py",
     "pack": "liftpack"
    },
-   "recipe": "ports/fnv-nx/lift/census/build.json",
+   "recipe": "ports/fnv-nx/lift/census0/build.json",
+   "gates": []
+  },
+  {
+   "path": "ports/fnv-nx/lift/census1",
+   "class": "product",
+   "target": "guest",
+   "cxx_origin": {
+    "lifted_by": "ports/fnv-nx/lift/tools/packshard.py",
+    "pack": "liftpack"
+   },
+   "recipe": "ports/fnv-nx/lift/census1/build.json",
+   "gates": []
+  },
+  {
+   "path": "ports/fnv-nx/lift/census2",
+   "class": "product",
+   "target": "guest",
+   "cxx_origin": {
+    "lifted_by": "ports/fnv-nx/lift/tools/packshard.py",
+    "pack": "liftpack"
+   },
+   "recipe": "ports/fnv-nx/lift/census2/build.json",
+   "gates": []
+  },
+  {
+   "path": "ports/fnv-nx/lift/census3",
+   "class": "product",
+   "target": "guest",
+   "cxx_origin": {
+    "lifted_by": "ports/fnv-nx/lift/tools/packshard.py",
+    "pack": "liftpack"
+   },
+   "recipe": "ports/fnv-nx/lift/census3/build.json",
+   "gates": []
+  },
+  {
+   "path": "ports/fnv-nx/lift/census4",
+   "class": "product",
+   "target": "guest",
+   "cxx_origin": {
+    "lifted_by": "ports/fnv-nx/lift/tools/packshard.py",
+    "pack": "liftpack"
+   },
+   "recipe": "ports/fnv-nx/lift/census4/build.json",
+   "gates": []
+  },
+  {
+   "path": "ports/fnv-nx/lift/census5",
+   "class": "product",
+   "target": "guest",
+   "cxx_origin": {
+    "lifted_by": "ports/fnv-nx/lift/tools/packshard.py",
+    "pack": "liftpack"
+   },
+   "recipe": "ports/fnv-nx/lift/census5/build.json",
    "gates": []
   }
  ]
