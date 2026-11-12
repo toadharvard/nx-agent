@@ -66,7 +66,7 @@ class Img:
             if mer and a <= mer[-1][1]: mer[-1][1] = max(mer[-1][1], b)
             else: mer.append([a, b])
         self.mer = mer; self.ms = [a for a, b in mer]; self.cache = {}
-        self.rd = rd; self.rset = rset or set(); self.refs = None; self.tabslots = set(); self.visited = set(); self.jtargets = set(); self.pk = {}; self.wmemo = {}; self.calltg = {}; self.retsites = set(); self.callers = {}; self.summ = {}; self.busy = set(); self.rows = []; self.info = Counter()
+        self.rd = rd; self.rset = rset or set(); self.inp = {}; self.allcode = set(); self.dirty = set(); self.refs = None; self.tabslots = set(); self.visited = set(); self.jtargets = set(); self.pk = {}; self.wmemo = {}; self.calltg = {}; self.retsites = set(); self.callers = {}; self.summ = {}; self.busy = set(); self.rows = []; self.info = Counter()
     def reached(self, a):
         i = bisect.bisect_right(self.ms, a) - 1
         return i >= 0 and a < self.mer[i][1]
@@ -97,7 +97,8 @@ def scan_calls(img):
                         try: w = img.rd(t)
                         except Exception: break
                         if not (img.T0 <= w < img.T1 and img.reached(w)): break
-                        img.tabslots.add(t); t += 4; n_ += 1
+                        img.tabslots.add(t); img.jtargets.add(w); t += 4; n_ += 1
+                if g.mnemonic == 'jmp' and g.operands[0].type == X.X86_OP_IMM: img.jtargets.add(g.operands[0].imm & M32)
                 if g.mnemonic == 'call':
                     img.retsites.add(a + g.size)
                     o = g.operands[0]
@@ -133,6 +134,29 @@ def memkey(img, g, op, esp, regs):
     return ('reg', b, m.disp)
 
 
+ALLREGS = ('eax', 'ebx', 'ecx', 'edx', 'esi', 'edi', 'ebp')
+ALLCODE_INPUT = ({n: T_CODE for n in ALLREGS}, {}, True)      # an unknown input is possibly a code address: the sound value, not a fallback
+
+
+def feed(img, t, regs_t, stk_t):
+    """the state of one call site (typed registers, typed stack slots at the callee's offsets; None = esp unknown) joins into the input of callee t."""
+    if t in img.allcode: return
+    if regs_t is None:
+        img.allcode.add(t); img.inp[t] = ALLCODE_INPUT; img.dirty.add(t); return
+    cur = img.inp.get(t) or ({}, {}, False)
+    r = dict(cur[0]); st = dict(cur[1]); ch = False
+    for n in ALLREGS:
+        v = j(r.get(n), regs_t.get(n))
+        if v != r.get(n):
+            ch = True
+            if v is None: r.pop(n, None)
+            else: r[n] = v
+    for k in set(st) | set(stk_t):
+        v = j(st.get(k), stk_t.get(k))
+        if v != st.get(k): ch = True; st[k] = v
+    if ch: img.inp[t] = (r, st, False); img.dirty.add(t)
+
+
 def owner(img, e):
     """an entry entered by a call (or by the runtime through one) owns a return-address slot; every other kind is a block entered by a jump in its predecessors' context."""
     k = img.entries.get(e) or set()
@@ -148,23 +172,25 @@ def owner(img, e):
     return not (sl and all(w in img.tabslots for w in sl))
 
 
-def analyse_entry(img, e, mode='owner'):
+def analyse_entry(img, e, mode='owner', force=False):
     """forward dataflow over the instructions of entry e. -> (events, summary). events: [(site, source, consumer, detail, red)];
     summary: {'regs': {reg: ('ra', k)}, 'pop': esp offset after return relative to the caller's esp before the call, or None}."""
     anyra = mode == 'possibly'      # a block with a predecessor we cannot see: every stack slot is possibly the return address
     if not anyra:
-        if e in img.summ: return img.summ[e]
+        if e in img.summ and not force: return img.summ[e]
         if e in img.busy: return ([], {'regs': {}, 'pop': None})
         img.busy.add(e)
     ev = []; rets = []; seen_ev = set(); retscratch = []
     def emit(site, src, cons, detail, red):
         k = (site, src, cons, detail)
         if k not in seen_ev: seen_ev.add(k); ev.append((site, src, cons, detail, red))
-    states = {e: ({}, {} if anyra else {0: ('ra', 0)}, 0, frozenset(), {})}      # regs, stack slots, esp offset, last x87 instructions, fpu env images {key: kind}
-    work = [e]; steps = 0
+    inr, ins, anycode = img.inp.get(e) or ({}, {}, False) if not anyra else ALLCODE_INPUT
+    st_init = {0: ('ra', 0)} if not anyra else {}
+    st_init.update(ins)
+    states = {e: (dict(inr), st_init, 0, frozenset(), {})}      # regs, stack slots, esp offset, last x87 instructions, fpu env images {key: kind}
+    work = [e]
     while work:
-        a = work.pop(); steps += 1
-        if steps > 20000: emit(a, '-', 'incomplete', 'dataflow step cap', True); break
+        a = work.pop()
         regs0, st0, esp0, fpl, fpe0 = states[a]; img.visited.add(a)
         if not img.reached(a): continue
         g = img.dec(a)
@@ -192,6 +218,7 @@ def analyse_entry(img, e, mode='owner'):
             if key[0] == 'stk':
                 v = st.get(key[1])
                 if v is None and anyra and key[1] not in st: emit(a, 'ra', 'read-possible-ra', 'stack read in a block whose predecessors are not all visible', True); return ('ra', 0)
+                if v is None and anycode and key[1] > 0 and key[1] not in st: return T_CODE      # an incoming stack argument whose callers are not all known
                 return v
             return None
         def fpu_read(key, a=a):
@@ -255,7 +282,7 @@ def analyse_entry(img, e, mode='owner'):
         tin = False
         if mn not in COPYLIKE and mn != 'lea':
             rn_, wn_ = access(g)
-            tin = any(regs.get(n) in TYPES for n in rn_) and bool(wn_ or any(o.type == X.X86_OP_MEM and o.access & capstone.CS_AC_WRITE for o in ops))
+            tin = any(regs.get(n) in TYPES for n in rn_) and not any(tracked(regs.get(n)) or regs.get(n) == 'mix' for n in rn_) and bool(wn_ or any(o.type == X.X86_OP_MEM and o.access & capstone.CS_AC_WRITE for o in ops))
         if tin:
             for o in ops:
                 if o.type == X.X86_OP_MEM and o.access & capstone.CS_AC_READ: read_mem(o)
@@ -265,7 +292,7 @@ def analyse_entry(img, e, mode='owner'):
                 if o.type == X.X86_OP_MEM and o.access & capstone.CS_AC_WRITE:
                     key = memkey(img, g, o, esp, regs)
                     if key is not None and key[0] == 'stk': st[key[1]] = T_S4
-                    else: emit(a, 's4', 'escape-stored', 'arithmetic result stored to memory', False)
+                    else: emit(a, 's4', 'escape-stored', 'arithmetic result stored to memory', True)
             if X.X86_REG_ESP in g.regs_access()[1]:
                 img.info['esp-lost'] += 1; esp = None
             succ = [nxt]
@@ -291,13 +318,17 @@ def analyse_entry(img, e, mode='owner'):
             if tg is not None and tg in img.entries and tg != e: sm = analyse_entry(img, tg)[1]
             for off, v in sorted(st.items()):
                 if esp is not None and off >= esp and tracked(v) and not (off == 0 and v == ('ra', 0)): emit(a, vsrc(v), 'passed', 'argument slot live at call', True)
+                elif esp is not None and off >= esp and v == T_S4: emit(a, 's4', 'escape-passed', 'argument slot live at call', True)
+            if tg is not None and tg in img.entries and owner(img, tg):
+                if esp is None: feed(img, tg, None, None)
+                else: feed(img, tg, {n_: v_ for n_, v_ in regs.items() if v_ in TYPES}, {off - (esp - 4): v_ for off, v_ in st.items() if off >= esp and v_ in TYPES})
             keep = {}
             for n in sorted(regs):
                 v = regs[n]
                 if v is None: continue
                 # the callee's code decides: it reads the register first (a pass), overwrites it on every path (the value dies), or leaves it (the value survives)
                 fate = path_kill(img, tg, n) if (tg is not None and tg in img.entries) else 'read'
-                if v == T_S4 and fate == 'read': emit(a, 's4', 'escape-passed', 'register %s read by the callee' % n, False)
+                if v == T_S4 and fate == 'read': emit(a, 's4', 'escape-passed', 'register %s read by the callee' % n, True)
                 if (tracked(v) or v == 'mix') and fate == 'read': emit(a, vsrc(v) if v != 'mix' else 'pc', 'passed', 'register %s read by the callee%s' % (n, '' if tg is not None and tg in img.entries else ' (callee unknown)'), True)
                 if fate == 'live' and n not in CALLER_SAVED_NEVER: keep[n] = v
             regs.clear(); regs.update(keep)
@@ -320,7 +351,7 @@ def analyse_entry(img, e, mode='owner'):
             elif esp is None: emit(a, '-', 'esp-lost-ret', 'ret with an unknown esp offset', False)
             rr = {n_: regs[n_] for n_ in sorted(regs) if isinstance(regs[n_], tuple) and regs[n_][0] == 'ra'}
             for n_, v_ in sorted(regs.items()):
-                if v_ == T_S4: emit(a, 's4', 'escape-returned', 'returned in %s' % n_, False)
+                if v_ == T_S4: emit(a, 's4', 'escape-returned', 'returned in %s' % n_, True)
                 if v_ is not None and tracked(v_) and v_[0] != 'ra':
                     if n_ in CALLER_SAVED and not anyra: retscratch.append((a, n_, vsrc(v_)))      # dead iff every caller overwrites it first: decided in resolve()
                     else: emit(a, vsrc(v_), 'passed', 'returned in %s' % n_, True)
@@ -353,6 +384,8 @@ def analyse_entry(img, e, mode='owner'):
             else:
                 t = o.imm & M32
                 if t != e and t in img.entries and owner(img, t):
+                    if esp != 0: feed(img, t, None, None)
+                    else: feed(img, t, {n_: v_ for n_, v_ in regs.items() if v_ in TYPES}, {off: v_ for off, v_ in st.items() if off > 0 and v_ in TYPES})
                     for n in sorted(regs):
                         if tracked(regs[n]): emit(a, vsrc(regs[n]), 'passed', 'tail jump with %s live' % n, True)
                     term = True
@@ -375,6 +408,7 @@ def analyse_entry(img, e, mode='owner'):
             if esp is not None:
                 v = st.pop(esp, None)
                 if v is None and anyra: emit(a, 'ra', 'read-possible-ra', 'pop in a block whose predecessors are not all visible', True); v = ('ra', 0)
+                elif v is None and anycode and esp > 0: v = T_CODE
                 if o.type == X.X86_OP_REG: write_reg(o, v)
                 elif o.type == X.X86_OP_MEM and tracked(v): emit(a, vsrc(v), 'store', 'pop to memory', True)
                 if tracked(v) and v[0] == 'ra': emit(a, 'ra', 'read', 'return-address slot read as data', False)
@@ -405,7 +439,7 @@ def analyse_entry(img, e, mode='owner'):
                     if key is not None and key[0] == 'stk': st[key[1]] = v
                     else: emit(a, vsrc(v), 'store', 'mov to memory', True)
                 elif v in TYPES and key is not None and key[0] == 'stk': st[key[1]] = v
-                elif v == T_S4: emit(a, 's4', 'escape-stored', 'mov to memory', False)
+                elif v == T_S4: emit(a, 's4', 'escape-stored', 'mov to memory', True)
                 elif key is not None and key[0] == 'stk': st.pop(key[1], None)
                 for r_ in (d.mem.base, d.mem.index):
                     n = R32.get(r_) if r_ else None
@@ -682,10 +716,19 @@ def analyse(img, kinds_of, parent=None):
     scan_calls(img)
     rows = []; parent = parent or {}
     isdec = lambda a: 'decomp' in (img.entries.get(a) or ())
-    for e in sorted(img.entries):
-        if not img.reached(e) or not owner(img, e): continue
-        if isdec(e): img.info['decomp-owner-skipped'] += 1; continue
-        ev, sm = analyse_entry(img, e)
+    roots = [e for e in sorted(img.entries) if img.reached(e) and owner(img, e) and not isdec(e)]
+    img.info['decomp-owner-skipped'] = sum(1 for e in img.entries if img.reached(e) and owner(img, e) and isdec(e))
+    for e in roots:
+        if (img.entries.get(e) or set()) & INDIRECT_KINDS or e in img.jtargets or not img.callers.get(e): img.allcode.add(e); img.inp[e] = ALLCODE_INPUT
+    # the incoming arguments of an entry are the join over its callers' call-site states; analysis repeats for the entries whose input grew (monotone, finite)
+    todo = roots; passes = 0
+    while todo:
+        passes += 1; img.dirty = set()
+        for e in todo: analyse_entry(img, e, 'owner', True)
+        todo = sorted(e for e in img.dirty if e in set(roots))
+    img.info['arg-passes'] = passes
+    for e in roots:
+        ev = img.summ[e][0]
         rows.extend(resolve(img, e, ev, kinds_of.get(e, set()), 'owner', img.pk.get((e, 'owner'), [])))
     for e in sorted(img.entries):
         if not img.reached(e) or owner(img, e) or e in img.visited: continue
