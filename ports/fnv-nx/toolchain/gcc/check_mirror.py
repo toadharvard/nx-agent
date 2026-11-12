@@ -13,7 +13,7 @@ with the unit's data-model flags -mabi=ilp32 -fshort-wchar -fsigned-char. Checks
       no __CHAR_UNSIGNED__; wcslen and the other wide functions of the ILP32 libc.a use 2-byte accesses (ldrh/strh), the
       LP64 ones 4-byte accesses.
   C4  the libstdc++ headers of the ILP32 variant are 13.3 (_GLIBCXX_RELEASE 13, 20240xxx); no c++/15.2.0 ILP32 headers exist.
-  C5  (--manifest) FNVNX-MANIFEST.json: gcc version, msvcmodel.patch sha256, flags, sizeof/alignof of wchar_t, size_t, long,
+  C5  (--manifest) MANIFEST.json: gcc version, msvcmodel.patch sha256, flags, sizeof/alignof of wchar_t, size_t, long,
       long double, pointer, read from the game compiler's object code (no run).
   C6  (--libnx) libnx is built by stage 1 (flags without -fshort-wchar/-fsigned-char). Its interface carries no type whose
       size or layout depends on them: every named type of the libnx headers has the same layout under both flag sets, no
@@ -168,7 +168,11 @@ def c5(prefix, s2, gcc13, here):
         fail('C5 the game compiler is %s, not gcc %s' % (man['compiler'], gcc13))
     if man['sizeof']['wchar_t'] != 2 or man['sizeof']['size_t'] != 4 or man['sizeof']['pointer'] != 4:
         fail('C5 the ILP32 data model is not the exe\'s: %s' % man['sizeof'])
-    open(prefix + '/FNVNX-MANIFEST.json', 'w').write(json.dumps(man, indent=1, sort_keys=True) + '\n')
+    # L1's pack manifest: the same facts under the names the guest roots compare (all from the built compiler's own answers)
+    man['version'] = man['compiler'].split()[1]
+    man['SEMANTICS_FLAGS'] = man['ilp32_flags']
+    man['sizeof_wchar_t'], man['sizeof_size_t'], man['sizeof_long'] = (man['sizeof'][k] for k in ('wchar_t', 'size_t', 'long'))
+    open(prefix + '/MANIFEST.json', 'w').write(json.dumps(man, indent=1, sort_keys=True) + '\n')
     print('C5 ok: manifest written: %s' % json.dumps(man, sort_keys=True))
 
 
