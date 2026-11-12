@@ -42,13 +42,13 @@ Red facts (an item no rule resolves is never skipped), per image, each counted i
   failed_funcinfo     a FuncInfo that did not parse
 Enumeration completeness (tools/ehtables.py), the rule and its assumptions, stated rather than papered over:
   FuncInfo  every decoded `mov eax, imm32; jmp rel32` whose imm32 is a relocated data address holding a FuncInfo magic (0x19930520/1/2) is a frame-handler
-            stub; its FuncInfo is parsed with every bound checked. Complete under ASM-225: every FuncInfo of an x86-32 MSVC image (VC8..VC10, no FH4) is reached
+            stub; its FuncInfo is parsed with every bound checked. Complete under ASM-222: every FuncInfo of an x86-32 MSVC image (VC8..VC10, no FH4) is reached
             from such a stub, and the stub is decoded code. Not closed by rule: a FuncInfo reached any other way.
   SEH       every decoded store to fs:[0] is classified: of an esp-derived address (a registration: the record is {next, handler, field, trylevel}), of a loaded value (the unregistration
             restoring the chain: a registration needs a fresh stack address, which a load never yields), or unknown (red). A table is the constant S the field carries (plain or xor-ed
             with a value independent of every argument, the cookie encoding) or the constant a helper's argument k carries at every direct call site.
-  ThrowInfo see R1 above; not closed by rule (ASM-226): a ThrowInfo reached through a stored pointer rather than a call argument.
-  cont      every `mov eax, imm32(reloc); ret` in the body of a catch funclet. Not closed (ASM-227): a funclet that returns the continuation by another form.
+  ThrowInfo see R1 above; not closed by rule (ASM-223): a ThrowInfo reached through a stored pointer rather than a call argument.
+  cont      every `mov eax, imm32(reloc); ret` in the body of a catch funclet. Not closed (ASM-224): a funclet that returns the continuation by another form.
 Callee-saved registers across calls are not assumed (tools/ehflow.py): ebx/esi/edi/ebp survive a call only where the callee is proven (every ret restores them) or is a platform import (Win32 as
 documented, ASM-003); the proofs are the facts `preserves`, counted globally by tools/ehtables.py.
 Exit 0 iff green."""
