@@ -283,3 +283,11 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
     - Found: 9 GLSL emitters EMIT_GLSL_OPCODE_UNIMPLEMENTED_FUNC (ps_1_x tex ops and BEM). This is a stub class.
         - w1b implements all 9 from Wine 9.0 glsl_shader.c: doing.
         - Proposed to L1: a structural objstub class for "every path reaches the failure function".
+- 04:50Z (d) rule refined.
+    - w3b 3193ccaf merged: with every cap restriction the domain is still ~119M programs (4.99e12 under Wine's texture-type override). Enumeration is infeasible; job 3 is cancelled.
+    - New rule:
+        - D3D9 docs are the reference. A Wine failure on a form with defined semantics is a Wine defect, and we render it.
+        - (d) applies only to undefined forms. Their failure is proven local: the fragment reads no args and is ill-typed per GLSL 4.60.
+        - link_failed is a static predicate on the bytecode's forms, checked at CreateShader.
+    - w3b classifies the 179 compile-fail rows.
+    - L1 is building one integration head, w16-int; the render/d3d9 root goes on top of it with L2 00576a10.
