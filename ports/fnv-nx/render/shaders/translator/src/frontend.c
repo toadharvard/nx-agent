@@ -17,6 +17,8 @@
 #include <string.h>
 #include "mojoshader.h"
 #include "backend.h"
+#include "../include/fnvnx_shaders.h"
+#include "fnvnx_sha256.h"
 #include "../include/fnvnx_dk_layout.h"
 
 typedef struct sb { char *p; size_t n, cap; } sb;
@@ -178,10 +180,11 @@ int fnvnx_frontend_parse(const void *bc, size_t n, const unsigned char *link, ui
     if (refl->stage == FNVNX_STAGE_UNKNOWN) { snprintf(err, errlen, "not a vertex or pixel shader"); fnvnx_frontend_release(refl); return -1; }
 
     const int is_vs = refl->stage == FNVNX_STAGE_VERTEX;
+    uint8_t key[32]; char keyhex[FNVNX_SHADER_KEY_HEX]; fnvnx_sha256(bc, n, key); fnvnx_shader_key_hex(key, keyhex);
     if (compute_locations(pd, is_vs, link, nlink, refl, err, errlen)) { fnvnx_frontend_release(refl); return -1; }
     sb s = { 0 };
-    sb_printf(&s, "{\n  \"hash\": \"%016llx\",\n  \"stage\": \"%s\",\n  \"model\": \"%s_%d_%d\",\n  \"d3d_instructions\": %d",
-              (unsigned long long)fnvnx_shader_hash(bc, n), is_vs ? "vertex" : "pixel", is_vs ? "vs" : "ps",
+    sb_printf(&s, "{\n  \"hash\": \"%s\",\n  \"stage\": \"%s\",\n  \"model\": \"%s_%d_%d\",\n  \"d3d_instructions\": %d",
+              keyhex, is_vs ? "vertex" : "pixel", is_vs ? "vs" : "ps",
               pd->major_ver, pd->minor_ver, pd->instruction_count);
     sb_printf(&s, ",\n  \"layout\": {\"ubo_float\": %d, \"ubo_intbool\": %d, \"ubo_driver\": %d}",
               FNVNX_DK_UBO_FLOAT, FNVNX_DK_UBO_INTBOOL, FNVNX_DK_UBO_DRIVER);

@@ -4,19 +4,12 @@
 #include <string.h>
 #include "../include/fnvnx_shaders.h"
 #include "backend.h"
+#include "fnvnx_sha256.h"
 
 static const fnvnx_glsl_backend *const g_backends[] = { &fnvnx_backend_mojoshader_glsldk, NULL };
 static const char *const g_backend_names[] = { "mojoshader-glsldk", NULL };
 
 const char *const *fnvnx_shader_backends(void) { return g_backend_names; }
-
-uint64_t fnvnx_shader_hash(const void *bytecode, size_t n)
-{
-    const uint8_t *p = (const uint8_t *)bytecode;
-    uint64_t h = 0xcbf29ce484222325ull;
-    for (size_t i = 0; i < n; i++) { h ^= p[i]; h *= 0x100000001b3ull; }
-    return h;
-}
 
 static void glsl_stats(const char *g, fnvnx_shader_stats *st)
 {
@@ -39,7 +32,7 @@ int fnvnx_shader_translate_glsl(const void *bc, size_t n, const fnvnx_shader_opt
     memset(r, 0, sizeof(*r));
     r->stage = FNVNX_STAGE_UNKNOWN;
     if (!bc) { snprintf(r->error, sizeof r->error, "null bytecode"); return 0; }
-    r->hash = fnvnx_shader_hash(bc, n);
+    fnvnx_sha256(bc, n, r->key);
 
     const fnvnx_glsl_backend *be = NULL;
     for (int i = 0; g_backends[i]; i++)
