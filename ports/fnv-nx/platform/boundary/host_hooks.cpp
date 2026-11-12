@@ -8,11 +8,10 @@
  *    (win32/time.cpp: clk_read_ticks; clk_read_ns converts the same counter), so there is one clock; a read
  *    like the others (the virtual clock advances by one quantum).
  *  fnvl_host_world_stop / fnvl_host_world_resume (lifter rule R9, stop and resume every other thread of the process):
- *    declared in platform/os/os.h, defined in platform/os/os_world.c (all backends and the host tests), where the contract
+ *    declared in shim/include/fnvl_host.h (with the two above), defined in platform/os/os_world.c (all backends and the host tests), where the contract
  *    and its proof are. */
 #include "../include/fnvnx_clock.h"
-
-struct cpu;
+#include "fnvl_host.h"
 
 extern "C" {
 

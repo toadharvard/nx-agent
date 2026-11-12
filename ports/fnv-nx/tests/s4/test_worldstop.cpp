@@ -3,10 +3,7 @@
  * the window only reads or writes plain variables and spins; results are checked after resume. */
 #include "s4_test.h"
 
-extern "C" {
-void fnvl_host_world_stop(void);
-void fnvl_host_world_resume(void);
-}
+#include "fnvl_host.h"
 
 #define NW 4
 struct alignas(64) padded { volatile unsigned long v; };
