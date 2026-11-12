@@ -48,6 +48,7 @@ import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import capstone
 from capstone import x86 as X
 
@@ -333,7 +334,10 @@ def pushf_filter(img, ranges, ins, red):
         for r in rows:
             if lahf and r[1] == 'of': continue
             mask |= 1 << (WORDBIT[r[1]] + (0 if not lahf else 0))
-        if mask and taint_observed(ins, objs, a, mask, lahf): keep += rows
+        if mask and taint_observed(ins, objs, a, mask, lahf):
+            import invariance                      # the taint walk cannot show the bits unobserved: the product-program proof (invariance.py) may still show them dead
+            ok, why = invariance.prove(objs, a, sorted({r[1] for r in rows if not (lahf and r[1] == 'of')}))
+            if not ok: keep += rows
     return sorted(keep)
 
 

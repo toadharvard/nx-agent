@@ -239,7 +239,7 @@ def judge_lifted_flags(root, repo, cache):
             raise gate_contract.Red("input missing: the pack %s has no entries.tsv (owner L3a)" % pack)
         code = {int(l.split("\t")[0], 16) for l in open(ef) if l.strip() and not l.startswith("#") and l.rstrip("\n").split("\t")[2] == "code"}
         have, lack = gate_contract.images_of(doc, ext, pinned=False)
-        trees = sorted(e["tree"] for e in ext.values()) + [pk["tree"], deps_hash(repo, ("proof", "fnvlift"))]
+        trees = sorted(e["tree"] for e in ext.values()) + [pk["tree"], deps_hash(repo, ("proof", "fnvlift")), sha(os.path.join(repo, TOOLS, "invariance.py"))]
         u = c = 0
         ids, why = [], []
         covered = set()
