@@ -338,30 +338,41 @@ d = tmp("tests-cache")
 cache = os.path.join(d, "cache")
 mk(d, test_a="open('ran.log', 'a').write('a\\n')\n", test_b="open('ran.log', 'a').write('b\\n')\n")
 ran = lambda: open(os.path.join(d, "ran.log")).read().split() if os.path.exists(os.path.join(d, "ran.log")) else []
+kfiles = lambda: sorted(os.listdir(os.path.join(cache, "selftests"))) if os.path.isdir(os.path.join(cache, "selftests")) else []
 rc, r, e = tests_c(d, cache)
-check("tests cache: first run executes every file and stores one key", rc == 0 and sorted(ran()) == ["a", "b"] and "cached" not in r["detail"]
-      and len([f for f in os.listdir(cache) if f.endswith(".json")]) == 1, (rc, r, e, ran()))
+check("tests cache: first run executes every file and stores one key per file", rc == 0 and sorted(ran()) == ["a", "b"]
+      and r["recomputed"] == 2 and len(kfiles()) == 2 and not any(f["cached"] for f in r["files"]), (rc, r, e, ran()))
+rows1 = [(f["name"], f["status"]) for f in r["files"]]
 rc, r, e = tests_c(d, cache)
-check("tests cache: unchanged inputs -> certified without running", rc == 0 and len(ran()) == 2 and r["certified"] == 2
-      and re.match(r"^2 of 2 test files pass, cached key [0-9a-f]{12}, ", r["detail"]) and all(f["status"] == "cached" for f in r["files"]), (rc, r, e, ran()))
+check("tests cache: unchanged inputs -> certified without running, same result (two runs agree)", rc == 0 and len(ran()) == 2
+      and r["certified"] == 2 and r["recomputed"] == 0 and all(f["cached"] for f in r["files"])
+      and [(f["name"], f["status"]) for f in r["files"]] == rows1 and "2 cached" in r["detail"], (rc, r, e, ran()))
 rc, r, e = gate("gate_tests.py", d, ["verify"])
-check("tests cache: no --cache and no GATE_CACHE -> always runs", rc == 0 and len(ran()) == 4 and "cached" not in r["detail"], (r, ran()))
+check("tests cache: no --cache and no GATE_CACHE -> always runs", rc == 0 and len(ran()) == 4 and r["recomputed"] == 2, (r, ran()))
 os.utime(os.path.join(d, "verify/tests/test_a.py"), (5, 5))
 rc, r, e = tests_c(d, cache)
-check("tests cache: an mtime change is not a change of content", "cached key" in r["detail"] and len(ran()) == 4, (r, ran()))
+check("tests cache: an mtime change is not a change of content", r["recomputed"] == 0 and len(ran()) == 4, (r, ran()))
+mk(d, test_a="open('ran.log', 'a').write('a\\n')\n# changed\n")
+rc, r, e = tests_c(d, cache)
+check("tests cache: a changed test file reruns only itself", rc == 0 and ran()[4:] == ["a"] and r["recomputed"] == 1
+      and [f["cached"] for f in r["files"]] == [False, True], (r, ran()))
+rc, r, e = tests_c(d, cache)
+check("tests cache: and is then cached again", r["recomputed"] == 0 and len(ran()) == 5, (r, ran()))
 put(d, "verify/helper.py", "X = 1\n")
 rc, r, e = tests_c(d, cache)
-check("tests cache: new content in a key dir -> miss, everything re-runs", rc == 0 and "cached" not in r["detail"] and len(ran()) == 6, (r, ran()))
-rc, r, e = tests_c(d, cache, extra=("--timeout-s", "200"))
-check("tests cache: another argv is another key", "cached" not in r["detail"] and len(ran()) == 8, (r, ran()))
+check("tests cache: new content in the view (a file that is no test) -> every test reruns", rc == 0 and r["recomputed"] == 2
+      and len(ran()) == 7, (r, ran()))
 put(d, "other/data.txt", "1\n")
-rc, r, e = tests_c(d, cache, extra=("--key-dirs", "verify", "other", "--"))
-n8 = len(ran())
+rc, r, e = tests_c(d, cache)
+n1 = len(ran())
 put(d, "other/data.txt", "2\n")
-rc, r, e = tests_c(d, cache, extra=("--key-dirs", "verify", "other", "--"))
-check("tests cache: --key-dirs content change (a dir that holds no tests) -> miss", n8 == 10 and len(ran()) == 12 and "cached" not in r["detail"], (r, ran()))
-rc, r, e = tests_c(d, cache, extra=("--key-dirs", "verify", "other", "--"))
-check("tests cache: same key dirs and content again -> hit", "cached key" in r["detail"] and len(ran()) == 12, (r, ran()))
+rc, r, e = tests_c(d, cache)
+check("tests cache: a changed file in ANY directory of the checkout is a changed view", r["recomputed"] == 2 and len(ran()) == n1 + 2, (r, ran()))
+rc, r, e = tests_c(d, cache, extra=("--timeout-s", "200"))
+check("tests cache: another timeout is another key", r["recomputed"] == 2, (r, ran()))
+mk(d, test_c="import os, sys\nsys.exit(1 if os.path.exists('verify/tests/test_a.py') or os.path.exists('verify/tests/test_b.py') else 0)\n")
+rc, r, e = tests_c(d, cache)
+check("tests: a test runs in a view without the other test files", rc == 0 and r["universe"] == 3 and r["certified"] == 3, (rc, r, e))
 # env.json of the checkout is part of the key
 e1 = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "env.json")
 d2 = tmp("tests-cache-env")
@@ -381,26 +392,28 @@ doc = json.load(open(e1))
 doc["packages"]["coreutils"] = "0.0-other"
 json.dump(doc, open(os.path.join(d2, "env.json"), "w"))
 r2 = gate_in(d2, c2)
-check("tests cache: another env.json is another key", "cached key" in r["detail"] and "cached" not in r2["detail"], (r, r2))
+check("tests cache: another env.json is another key (the file is also in the view)", r["recomputed"] == 0 and r2["recomputed"] == 1, (r, r2))
 
 d = tmp("tests-cache-fail")
 cache = os.path.join(d, "cache")
-mk(d, test_ok="pass\n", test_bad="import sys\nsys.exit(1)\n")
+mk(d, test_ok="pass\n", test_bad="import sys\nopen('n.log', 'a').write('x')\nprint('boom-text')\nsys.exit(1)\n")
 rc1, r1, _ = tests_c(d, cache)
 rc2, r2, _ = tests_c(d, cache)
-check("tests cache: a failing file is never certified from the cache; the key re-runs everything", rc1 != 0 and rc2 != 0
-      and "cached" not in r2["detail"] and r2["uncertified"] == ["verify/tests/test_bad.py"] and r2["certified"] == 1, (r1, r2))
+nlog = lambda: len(open(os.path.join(d, "n.log")).read())
+check("tests cache: a failing file stays red from the cache with the same failure text, and is not rerun", rc1 != 0 and rc2 != 0
+      and nlog() == 1 and r2["recomputed"] == 0 and r2["uncertified"] == ["verify/tests/test_bad.py"] and r2["certified"] == 1
+      and "boom-text" in r1["detail"] and r1["detail"].split("first failure")[1] == r2["detail"].split("first failure")[1], (r1, r2))
 put(d, "verify/tests/test_bad.py", "pass\n")
 rc3, r3, _ = tests_c(d, cache)
 rc4, r4, _ = tests_c(d, cache)
-check("tests cache: fixed file is a new key, passes, then is cached", rc3 == 0 and "cached" not in r3["detail"] and rc4 == 0 and "cached key" in r4["detail"], (r3, r4))
+check("tests cache: fixed file is a new key, passes, then is cached", rc3 == 0 and r3["recomputed"] == 1 and rc4 == 0 and r4["recomputed"] == 0, (r3, r4))
 
 d = tmp("tests-cache-timeout")
 cache = os.path.join(d, "cache")
 mk(d, test_slow="import time\ntime.sleep(3600)\n")
 rc, r, e = tests_c(d, cache, extra=("--timeout-s", "1"))
 rc2, r2, e = tests_c(d, cache, extra=("--timeout-s", "1"))
-check("tests cache: a timeout is never cached as passed", rc != 0 and rc2 != 0 and "cached" not in r2["detail"], (r, r2))
+check("tests cache: a timeout is never cached", rc != 0 and rc2 != 0 and r2["recomputed"] == 1 and not os.listdir(os.path.join(cache, "selftests")), (r, r2))
 
 # l1 passes VDIR/cache as GATE_CACHE: the second verdict of an unchanged tree finds the selftests keyed result
 r = small_repo()
@@ -411,6 +424,79 @@ keys1 = sorted(os.listdir(cdir)) if os.path.isdir(cdir) else []
 rc2, line2, out2, err2 = l1("verdict", "--repo", r, "--commit", "main", "--verdicts", vd)
 check("l1 verdict: gates get GATE_CACHE=VDIR/cache; same tree again reuses the keyed selftests result", rc == 0 and rc2 == 0
       and len(keys1) == 1 and sorted(os.listdir(cdir)) == keys1 and re.match(LINE, line2), (rc, rc2, keys1, out, err, out2, err2))
+
+# ---- gate "warm" (VERDICT.md, budget) and the gate-result cache
+def stored(vd):
+    fs = [f for f in os.listdir(vd) if f.endswith(".json")]
+    return json.load(open(os.path.join(vd, fs[-1])))
+
+def warm_gates(budget, extra=()):
+    g = two_gates()
+    g["gates"] += list(extra)
+    if budget is not None:
+        g["warm_budget_s"] = budget
+    return g
+
+r = small_repo(warm_gates(None))
+vd = tmp("v-nowarm")
+rc, line, out, err = l1("verdict", "--repo", r, "--commit", "main", "--verdicts", vd)
+v = stored(vd)
+check("warm: a gates file without warm_budget_s has no gate warm", rc == 0 and [g["name"] for g in v["gates"]] == ["pure", "selftests"]
+      and "warm" not in v and [g["recomputed"] for g in v["gates"]][0] == 1, (rc, out, err, v))
+rc, line, out, err = l1("verdict", "--repo", r, "--commit", "main", "--verdicts", tmp("v-nowarm2"))
+
+r = small_repo(warm_gates(60))
+vd = tmp("v-warm")
+rc, line, out, err = l1("verdict", "--repo", r, "--commit", "main", "--verdicts", vd)
+v = stored(vd)
+w = [g for g in v["gates"] if g["name"] == "warm"]
+check("warm: cold verdict recomputes every gate, the no-change rerun recomputes none, gate warm is green 2/2",
+      rc == 0 and all(g["recomputed"] >= 1 for g in v["gates"] if g["name"] != "warm") and v["warm"]["recomputed"] == 0
+      and w and (w[0]["universe"], w[0]["certified"], w[0]["status"]) == (2, 2, "green") and v["warm"]["budget_s"] == 60.0
+      and v["warm"]["seconds"] <= 60, (rc, out, err, v))
+# the stored gate results are used by a second verdict (new verdicts dir, same cache)
+rc, line, out, err = l1("verdict", "--repo", r, "--commit", "main", "--verdicts", vd)
+v2 = stored(vd)
+check("warm: a second verdict of the same commit recomputes nothing at all", rc == 0
+      and all(g["recomputed"] == 0 for g in v2["gates"]), (rc, out, err, v2))
+
+# deterministic part: a gate that destroys the cached keys of the gates before it makes the no-change rerun recompute them
+evil = {"name": "evil", "result": "evil.json", "argv": ["python3", "-I", "-c",
+        "import glob, json, os\nfor f in glob.glob(os.environ['GATE_CACHE'] + '/gates/*.json'): os.remove(f)\n"
+        "json.dump({'format': 'fnvnx-gate/1', 'name': 'evil', 'status': 'green', 'universe': 0, 'certified': 0, 'uncertified': [], "
+        "'detail': ''}, open(os.environ['GATE_OUT'] + '/evil.json', 'w'))\n"]}
+r = small_repo(warm_gates(60, (evil,)))
+vd = tmp("v-warm-evil")
+rc, line, out, err = l1("verdict", "--repo", r, "--commit", "main", "--verdicts", vd)
+v = stored(vd)
+w = [g for g in v["gates"] if g["name"] == "warm"]
+check("warm: work on a no-change rerun makes gate warm red (deterministic part), naming the gates", rc == 2 and v["verdict"] == "red"
+      and w and w[0]["status"] == "red" and w[0]["certified"] == 1 and "recomputed on a no-change rerun: pure=1" in w[0]["reason"]
+      and v["warm"]["recomputed"] > 0, (rc, out, err, v))
+
+# wall-clock part: a budget no rerun can meet
+r = small_repo(warm_gates(1e-9))
+vd = tmp("v-warm-slow")
+rc, line, out, err = l1("verdict", "--repo", r, "--commit", "main", "--verdicts", vd)
+v = stored(vd)
+w = [g for g in v["gates"] if g["name"] == "warm"]
+check("warm: a no-change rerun over the budget makes gate warm red (wall-clock part)", rc == 2 and w and w[0]["status"] == "red"
+      and w[0]["certified"] == 1 and "> budget" in w[0]["reason"] and v["warm"]["recomputed"] == 0, (rc, out, err, v))
+
+# a red gate is not stored: it is computed again, and gate warm is not evaluated on a red run
+r = small_repo(warm_gates(60), link={"ports/fnv-nx/link/tests/test_ok.py": "import sys\nsys.exit(1)\n"})
+vd = tmp("v-warm-red")
+rc, line, out, err = l1("verdict", "--repo", r, "--commit", "main", "--verdicts", vd)
+v = stored(vd)
+check("warm: a red gate is never stored and gate warm is not run on a red verdict", rc == 2 and "warm" not in v
+      and not any(g["name"] == "warm" for g in v["gates"]), (rc, out, v))
+
+# the budget written in VERDICT.md is the one in gates.json (one number, two places, mechanically equal)
+spec = json.load(open(os.path.join(VERIFY, "gates.json")))
+md = open(os.path.join(VERIFY, "VERDICT.md")).read()
+mm = re.search(r"warm_budget_s = ([0-9.]+) ", md)
+check("warm: gates.json has warm_budget_s, equal to B in VERDICT.md, at most 10", isinstance(spec.get("warm_budget_s"), (int, float))
+      and mm and float(mm.group(1)) == float(spec["warm_budget_s"]) and 0 < spec["warm_budget_s"] <= 10, (spec.get("warm_budget_s"), mm))
 
 # ---- l1 merge --remote: the remote branch moves only from BASE to the judged merge commit, atomically
 import contextlib  # noqa: E402

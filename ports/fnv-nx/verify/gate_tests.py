@@ -11,14 +11,22 @@ cannot run in this environment (root, namespaces, strace) is uncertified. Zero f
   TMPDIR set to a fresh directory of its own, and the gate removes that directory (and kills what is left of the file's
   process group) when the file ends, passed, failed or timed out: no test leaves anything in the temporary directory. No test needs a serial
   group: sandbox namespaces are per process and every store/work directory is per run.
---cache DIR (default $GATE_CACHE, see verdict.py; none = no caching): a test file's result is a function of the content of the
-  directories the gate declares and of the declared environment. KEY = sha256 over: cas.tree_hash of every key dir
-  (--key-dirs, default: the DIRs scanned; whole directory content, no mtimes, __pycache__ skipped), the envcheck id of the
-  env.json next to this script, this gate's argv without --cache/--jobs, and the python version string. If DIR/<KEY>.json
-  records every file of the universe as passed, they are certified WITHOUT running (detail: `N of M pass, cached key <12 hex>`).
-  Otherwise all files run and the per-file results are stored under KEY only when the run completed. All-or-nothing per key:
-  no per-file dependency guessing; a failed file is never recorded as passed, a key with a failure re-runs everything.
-Result extra key "files": [{"name","seconds","status"}] (status passed|failed|cached); same list in selftests.times.json."""
+--cache DIR (default $GATE_CACHE, see verdict.py; none = no caching): the result of ONE test file is cached under its own key.
+  KEY(test) = sha256 over: the test's repo-relative path, the declared environment (envcheck id of the env.json next to this
+  script), the python version string, the per-file timeout, and the VIEW HASH. The VIEW of a test is the checkout (the cwd of the gate,
+  .git and __pycache__ left out) WITHOUT every other test file (DIR/tests/test_*.py of the universe): view hash = sha256 over the sorted
+  (relative path, file mode executable bit, sha256 of content) of all files of the view, the test itself included.
+  Completeness by construction, not by guess: the test RUNS in a private copy of exactly that view (the other test files are not in
+  the copy, nothing else is left out), so a read of any file is a read of a keyed file or fails the same way again, and its result
+  is a function of the key. Inputs the checkout names but does not contain (the pinned externals, e.g. guest_compiler.json) are
+  files of the view, so their pins are in the key; what they pin is content-addressed by that pin. Declared assumptions: the test is
+  deterministic in (view, env, python) - a test that reads the clock, the network or a path outside the view is a defect of the test.
+  A result is stored when the test ENDED (exit status 0 = passed, any other exit status = failed, with the last 2000 bytes of
+  its output kept): a red result is cached and stays red with the same text. A timeout is not a result of the inputs (it is a
+  property of the load) and is never stored. An unchanged test is never rerun; a changed test file reruns only itself; a changed
+  other file of the view reruns every test (their views differ). Per-file cache path: DIR_CACHE/selftests/<KEY>.json.
+Result extra keys: "files": [{"name","seconds","status","cached"}] (status passed|failed; cached true when not run; the same list in
+selftests.times.json) and "recomputed": the number of test files actually run (0 on an unchanged tree)."""
 import concurrent.futures
 import glob
 import hashlib
@@ -35,35 +43,89 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cas  # noqa: E402
 import envcheck  # noqa: E402
 
-CACHE_FORMAT = "fnvnx-selftests-cache/1"
+CACHE_FORMAT = "fnvnx-selftests-cache/2"
+TAIL = 2000
 
-def run_one(path, timeout):
-    """(passed, seconds)"""
+def tree_files(root, exclude):
+    """(rel, exec bit, sha256) of every file under ROOT (sorted) except .git, __pycache__ and the rel paths in EXCLUDE."""
+    out = []
+    for d, dirs, names in os.walk(root):
+        dirs[:] = sorted(x for x in dirs if x not in (".git", "__pycache__"))
+        for n in sorted(names):
+            p = os.path.join(d, n)
+            rel = os.path.relpath(p, root)
+            if rel in exclude or n == ".git":
+                continue
+            if os.path.islink(p):
+                out.append((rel, "l", hashlib.sha256(os.readlink(p).encode()).hexdigest()))
+            else:
+                with open(p, "rb") as fh:
+                    out.append((rel, "x" if os.access(p, os.X_OK) else "-", hashlib.sha256(fh.read()).hexdigest()))
+    return sorted(out)
+
+def view_hash(files, own):
+    """files: tree_files(root, {}) minus the other tests; OWN: the test's rel path (it is in files)."""
+    return hashlib.sha256(cas.canon({"view": files, "own": own})).hexdigest()
+
+def make_view(root, dst, exclude):
+    """Private copy of the checkout without .git, __pycache__ and the EXCLUDE files: exactly the files tree_files hashes."""
+    for d, dirs, names in os.walk(root):
+        dirs[:] = sorted(x for x in dirs if x not in (".git", "__pycache__"))
+        os.makedirs(os.path.join(dst, os.path.relpath(d, root)), exist_ok=True)
+        for n in names:
+            p = os.path.join(d, n)
+            rel = os.path.relpath(p, root)
+            if rel in exclude or n == ".git":
+                continue
+            q = os.path.join(dst, rel)
+            if os.path.islink(p):
+                os.symlink(os.readlink(p), q)
+            else:
+                shutil.copy2(p, q)
+
+def key_of(rel, files, timeout):
+    env_json = os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.json")
+    try:
+        env = envcheck.env_id(json.load(open(env_json)))
+    except (OSError, ValueError):
+        env = "none"
+    return hashlib.sha256(cas.canon({"format": CACHE_FORMAT, "test": rel, "view": view_hash(files, rel), "env": env,
+                                     "python": sys.version, "timeout": timeout})).hexdigest()
+
+def run_one(root, rel, exclude, timeout):
+    """(status, seconds, tail, ended): status passed|failed, TAIL the last bytes of output, ENDED False for a timeout."""
     t0 = time.time()
     # a test file is not a gate: it does not see GATE_OUT / GATE_COMMIT / GATE_CACHE (a test that runs gates of its own
     # would otherwise share this gate's result cache and outputs)
     env = {k: v for k, v in os.environ.items() if not k.startswith("GATE_")}
-    # the file's scratch: TMPDIR is a directory of its own, removed when the file ends, however it ends (see the doc comment)
+    # the file's scratch and its view: directories of its own, removed when the file ends, however it ends
     tmp = tempfile.mkdtemp(prefix="selftest-")
     env["TMPDIR"] = tmp
+    view = os.path.join(tmp, "view")
+    out = os.path.join(tmp, "out.txt")
     try:
-        p = subprocess.Popen([sys.executable, "-I", path], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL, start_new_session=True, env=env)
-        try:
-            ok = p.wait(timeout=timeout) == 0
-        except subprocess.TimeoutExpired:
-            ok = False
-        try:
-            os.killpg(p.pid, signal.SIGKILL)   # whatever the file left running in its process group
-        except ProcessLookupError:
-            pass
-        p.wait()
+        make_view(root, view, exclude)
+        with open(out, "wb") as ofh:
+            p = subprocess.Popen([sys.executable, "-I", rel], cwd=view, stdin=subprocess.DEVNULL, stdout=ofh,
+                                 stderr=subprocess.STDOUT, start_new_session=True, env=env)
+            try:
+                ok, ended = p.wait(timeout=timeout) == 0, True
+            except subprocess.TimeoutExpired:
+                ok, ended = False, False
+            try:
+                os.killpg(p.pid, signal.SIGKILL)   # whatever the file left running in its process group
+            except ProcessLookupError:
+                pass
+            p.wait()
+        with open(out, "rb") as fh:
+            data = fh.read()
+        tail = data[-TAIL:].decode("utf-8", "replace")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    return ok, round(time.time() - t0, 3)
+    return ("passed" if ok else "failed"), round(time.time() - t0, 3), tail, ended
 
 def parse(argv):
-    o = {"timeout": 300.0, "jobs": 1, "cache": os.environ.get("GATE_CACHE") or None, "key_dirs": None}
+    o = {"timeout": 300.0, "jobs": 1, "cache": os.environ.get("GATE_CACHE") or None}
     a, dirs, i = list(argv), [], 0
     while i < len(a):
         if a[i] == "--timeout-s" and i + 1 < len(a):
@@ -72,12 +134,6 @@ def parse(argv):
             o["jobs"], i = max(1, int(a[i + 1])), i + 2
         elif a[i] == "--cache" and i + 1 < len(a):
             o["cache"], i = a[i + 1], i + 2
-        elif a[i] == "--key-dirs":
-            i += 1
-            o["key_dirs"] = []
-            while i < len(a) and not a[i].startswith("--"):
-                o["key_dirs"].append(a[i])
-                i += 1
         elif a[i] == "--":
             dirs += a[i + 1:]
             break
@@ -86,43 +142,21 @@ def parse(argv):
             i += 1
     return o, dirs
 
-def key_of(argv, key_dirs):
-    """KEY of the doc comment. argv: this gate's arguments without --cache/--jobs."""
-    env_json = os.path.join(os.path.dirname(os.path.abspath(__file__)), "env.json")
-    try:
-        env = envcheck.env_id(json.load(open(env_json)))
-    except (OSError, ValueError):
-        env = "none"
-    trees = {d: (cas.tree_hash(d, skip=("__pycache__",)) if os.path.exists(d) else "absent") for d in key_dirs}
-    return hashlib.sha256(cas.canon({"format": CACHE_FORMAT, "trees": trees, "env": env, "argv": argv,
-                                     "python": sys.version})).hexdigest()
-
-def strip_argv(argv):
-    out, i = [], 0
-    while i < len(argv):
-        if argv[i] in ("--cache", "--jobs") and i + 1 < len(argv):
-            i += 2
-        else:
-            out.append(argv[i])
-            i += 1
-    return out
-
-def load_hit(path, files):
+def load_hit(path, key):
     try:
         doc = json.load(open(path))
-        got = doc["files"]
-        if doc["format"] == CACHE_FORMAT and sorted(got) == sorted(files) and all(got[f]["status"] == "passed" for f in files):
-            return True
+        if doc["format"] == CACHE_FORMAT and doc["key"] == key and doc["status"] in ("passed", "failed") \
+                and isinstance(doc["tail"], str) and isinstance(doc["seconds"], (int, float)):
+            return doc
     except (OSError, ValueError, KeyError, TypeError):
         pass
-    return False
+    return None
 
-def store(path, key, rows):
+def store(path, key, status, seconds, tail):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = "%s.tmp%d" % (path, os.getpid())
     with open(tmp, "w") as fh:
-        json.dump({"format": CACHE_FORMAT, "key": key, "files": {r["name"]: {"status": r["status"], "seconds": r["seconds"]}
-                                                                 for r in rows}}, fh, sort_keys=True)
+        json.dump({"format": CACHE_FORMAT, "key": key, "status": status, "seconds": seconds, "tail": tail}, fh, sort_keys=True)
     os.replace(tmp, path)
 
 def universe(dirs):
@@ -136,27 +170,38 @@ def main(argv):
     o, dirs = parse(argv)
     files = universe(dirs)
     t0 = time.time()
-    key = cpath = None
+    root = os.getcwd()
+    keys, cdir = {}, None
     if o["cache"] and files:
-        key = key_of(strip_argv(argv), o["key_dirs"] if o["key_dirs"] is not None else dirs)
-        cpath = os.path.join(o["cache"], key + ".json")
-    if cpath and load_hit(cpath, files):
-        rows = [{"name": f, "seconds": 0.0, "status": "cached"} for f in files]
-        note = ", cached key %s" % key[:12]
-    else:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=o["jobs"]) as ex:
-            res = list(ex.map(lambda f: run_one(f, o["timeout"]), files))
-        rows = [{"name": f, "seconds": s, "status": "passed" if ok else "failed"} for f, (ok, s) in zip(files, res)]
-        note = ""
-        if cpath:
-            store(cpath, key, rows)
+        cdir = os.path.join(o["cache"], "selftests")
+        allf = tree_files(root, set())
+        for f in files:
+            keys[f] = key_of(f, [r for r in allf if r[0] == f or r[0] not in files], o["timeout"])
+
+    def one(f):
+        if cdir:
+            hit = load_hit(os.path.join(cdir, keys[f] + ".json"), keys[f])
+            if hit:
+                return {"name": f, "seconds": 0.0, "status": hit["status"], "cached": True, "tail": hit["tail"]}
+        st, secs, tail, ended = run_one(root, f, set(files) - {f}, o["timeout"])
+        if cdir and ended:
+            store(os.path.join(cdir, keys[f] + ".json"), keys[f], st, secs, tail)
+        return {"name": f, "seconds": secs, "status": st, "cached": False, "tail": tail}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=o["jobs"]) as ex:
+        full = list(ex.map(one, files))
+    rows = [{k: r[k] for k in ("name", "seconds", "status", "cached")} for r in full]
+    ran = sum(1 for r in rows if not r["cached"])
     secs = time.time() - t0
     unc = [r["name"] for r in rows if r["status"] == "failed"]
     n = len(files) - len(unc)
     status = "green" if not unc else "red"
+    note = ", %d run, %d cached" % (ran, len(rows) - ran)
     detail = ("%d of %d test files pass%s, %.1f s" % (n, len(files), note, secs)) if files else "no test files at this commit (nothing to certify yet)"
+    if unc:
+        detail += "; first failure %s: %s" % (unc[0], next(r["tail"] for r in full if r["name"] == unc[0]).strip()[-300:])
     res = {"format": "fnvnx-gate/1", "name": "selftests", "status": status, "universe": len(files), "certified": n,
-           "uncertified": unc[:50], "detail": detail, "files": rows}
+           "uncertified": unc[:50], "detail": detail, "files": rows, "recomputed": ran}
     out = os.environ["GATE_OUT"]
     with open(os.path.join(out, "selftests.json"), "w") as fh:
         json.dump(res, fh, sort_keys=True)

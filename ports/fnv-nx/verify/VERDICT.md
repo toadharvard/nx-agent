@@ -198,3 +198,15 @@ The rules cited by the gates (N1-N4, R1, R3, R5, R6, R12, R13, K16 and others) a
 A product root with native or decomp C++ is compiled with `fnvnx_order` and `fnvnx_ftoi` (RECIPE.md, "Plugins"); a root whose C++ is all lifted
 (declared `cxx_origin` of its admit.json entry, consistency checked against the recipe) needs none. A missing plugin, a changed source or argument, or
 an undeclared origin makes the recipe invalid and the `build` gate red. Tests: `verify/tests/test_plugins.py`.
+
+## Budget and the warm rerun (gate `warm`)
+The incremental verdict is content-keyed at three levels, all in `GATE_CACHE` (`l1.py` gives `VDIR/cache`): a recipe stage (`unitstage.py`),
+a test file (`gate_tests.py`: key = the test, its view of the checkout without the other test files, env id, python, timeout; red results are
+cached too, a timeout never), and a whole gate result (`verdict.py`: key = gate, argv, commit, tree, env id; green results only).
+A gates file that declares `"warm_budget_s": B` makes `verdict.py run` add the gate `warm` after a green run: every gate is run again, right
+away, on the same cache, which is the no-change rerun. `warm` has two certified parts (universe 2), each red on its own:
+1. **Nothing recomputed.** In that rerun no gate, stage, test or fact is recomputed (`recomputed` of every row is 0; a gate that runs reports
+   1 plus the units it recomputed itself). A gate that cannot be found under an unchanged key, or whose key moves with the clock, is named.
+2. **Wall clock.** The rerun takes at most B seconds. warm_budget_s = 10.0 seconds (written here and in `gates.json`; a test keeps the two equal).
+   B is set from the measured warm no-change rerun with a margin (see the inbox note l1-contract-w19-001).
+The whole-verdict bound of CLAUDE.md (5 min, `--budget-s`) stays and is still reported as `over_budget`. A red run does not evaluate `warm`.
