@@ -172,6 +172,66 @@ static void padr(const char *name, uint64_t i) {
     b[q - b - 1] = 'X'; num(b, (uint32_t)p.rx);
     b[q - b - 1] = 'Y'; num(b, (uint32_t)p.ry);
 }
+#if MODE == 92
+/* R-LOCKOBS guest (MODE 92): its own small lock functions with the os.h names and signatures (platform/os/os.h:39-43; this test root does not link
+   the platform root, so no product symbol is defined), case-runner functions, and code standing for game code in .text.fnvl by section attribute.
+   The lock functions are counters: they have no waiting, the observation is the runner's. */
+typedef struct { volatile uint32_t word; } os_lock_t;
+__attribute__((noinline)) void os_lock(os_lock_t *l) { l->word = l->word + 1; __asm__ volatile("" ::: "memory"); }
+__attribute__((noinline)) int os_trylock(os_lock_t *l) { if (l->word) return 0; l->word = 1; return 1; }
+__attribute__((noinline)) void os_unlock(os_lock_t *l) { if (l->word) l->word = l->word - 1; __asm__ volatile("" ::: "memory"); }
+__attribute__((noinline, used, section(".text.fnvl"))) uint32_t game_a(uint32_t x) { __asm__ volatile("" ::: "memory"); return x + 1; }
+__attribute__((noinline, used, section(".text.fnvl"))) uint32_t game_b(uint32_t x) { __asm__ volatile("" ::: "memory"); return x + 2; }
+static os_lock_t LA, LB, LC;
+static volatile uint32_t sink;
+__attribute__((noinline)) void case_pair(void) { os_lock(&LA); os_unlock(&LA); }
+__attribute__((noinline)) void case_try(void) {
+    os_lock(&LA);
+    num("try-fail", os_trylock(&LA));
+    sink += game_a(1);
+    os_unlock(&LA);
+    num("try-ok", os_trylock(&LA));
+    sink += game_a(2);
+    os_unlock(&LA);
+    sink += game_a(3);
+}
+__attribute__((noinline)) void case_nested(void) {
+    os_lock(&LA); os_lock(&LB);
+    sink += game_a(1);
+    os_unlock(&LB);
+    sink += game_b(2);
+    os_unlock(&LA);
+    sink += game_b(3);
+}
+__attribute__((noinline)) void case_multi(void) {
+    os_lock(&LA); os_lock(&LA);
+    sink += game_a(1);
+    os_unlock(&LA);
+    sink += game_a(2);
+    os_unlock(&LA);
+    sink += game_a(3);
+}
+__attribute__((noinline)) void case_foreign(void) { os_unlock(&LB); os_lock(&LA); os_unlock(&LA); sink += game_a(1); }
+__attribute__((noinline)) void case_held(void) { os_lock(&LA); sink += game_a(1); os_unlock(&LA); }
+__attribute__((noinline)) void case_free(void) { sink += game_a(1); }
+__attribute__((noinline)) void case_leak(void) { os_lock(&LC); }
+/* setjmp / longjmp of the guest: x19..x30 and sp (a callee-saved register set of AAPCS64) */
+__asm__(".text\n.global jb_set\n.type jb_set,%function\njb_set:\n stp x19,x20,[x0]\n stp x21,x22,[x0,#16]\n stp x23,x24,[x0,#32]\n"
+        " stp x25,x26,[x0,#48]\n stp x27,x28,[x0,#64]\n stp x29,x30,[x0,#80]\n mov x1,sp\n str x1,[x0,#96]\n mov x0,#0\n ret\n"
+        ".size jb_set,.-jb_set\n.global jb_long\n.type jb_long,%function\njb_long:\n ldp x19,x20,[x0]\n ldp x21,x22,[x0,#16]\n ldp x23,x24,[x0,#32]\n"
+        " ldp x25,x26,[x0,#48]\n ldp x27,x28,[x0,#64]\n ldp x29,x30,[x0,#80]\n ldr x2,[x0,#96]\n mov sp,x2\n mov x0,x1\n ret\n"
+        ".size jb_long,.-jb_long\n");
+uint64_t jb_set(uint64_t *buf);
+void jb_long(uint64_t *buf, uint64_t v);
+static uint64_t jbuf[13];
+__attribute__((noinline)) void case_unwind_inner(void) { os_lock(&LA); sink += game_a(1) * 0; jb_long(jbuf, 1); sink += 7; }
+__attribute__((noinline)) void case_mid(void) { case_unwind_inner(); sink += 5; }   /* not a case runner: a frame between the longjmp's source and target */
+__attribute__((noinline)) void case_unwind_outer(void) {
+    if (jb_set(jbuf) == 0) case_mid();
+    os_unlock(&LA);
+    sink += game_b(1);
+}
+#endif
 uint64_t __fnvnx_guest_entry(uint64_t api) {
     relocate((uint32_t)(uintptr_t)__fnvnx_guest_start);
     fnvnx_host = (const FnvnxHostApi *)(uintptr_t)api;
@@ -261,6 +321,11 @@ uint64_t __fnvnx_guest_entry(uint64_t api) {
     num("vbig", fnvnx_hcall3(H->pad_vibrate, 0x100000000ull, 1, 2));
     num("v3", fnvnx_hcall3(H->pad_vibrate, 3, 0x80000000, 0x7fc00000));
     until_ms(400); num("v3off", fnvnx_hcall3(H->pad_vibrate, 3, 0x3f800000, 0x3f800000));
+    fnvnx_hcall1(H->exit, 0);
+#elif MODE == 92
+    case_pair(); case_try(); case_nested(); case_multi(); case_foreign(); case_held(); case_free();
+    case_leak(); os_unlock(&LC);
+    case_unwind_outer();
     fnvnx_hcall1(H->exit, 0);
 #elif MODE == 6
     uint32_t acc = fnvboot_a(3);

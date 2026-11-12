@@ -199,8 +199,9 @@ def main():
     w1 = json.load(open(os.path.join(d, "w1.json")))
     wl = w1.get("watch_log", [])
     guest_sp = [int(x.split("=")[1], 16) for x in open(os.path.join(d, "w1.console.txt")).read().split("\n") if x.startswith("wlsp=")]
-    tb.case("watch_log: f, f, g, f in machine order, seq from 0", rc == 0 and [x["sym"] for x in wl] == ["fnvwl_f", "fnvwl_f", "fnvwl_g", "fnvwl_f"]
-            and [x["seq"] for x in wl] == [0, 1, 2, 3] and all(set(x) == {"seq", "tid", "sym", "pc", "sp"} for x in wl), (rc, e, wl))
+    tb.case("watch_log (fnvnx-watch/2, a superset of /1: seq, tid, sym, pc, sp kept, t_ns, kind, x0, x30 added): f, f, g, f in machine order, seq from 0", rc == 0 and [x["sym"] for x in wl] == ["fnvwl_f", "fnvwl_f", "fnvwl_g", "fnvwl_f"]
+            and [x["seq"] for x in wl] == [0, 1, 2, 3] and all(set(x) == {"seq", "tid", "sym", "pc", "sp", "t_ns", "kind", "x0", "x30"} and x["kind"] == "call" for x in wl)
+            and w1["watch_schema"] == "fnvnx-watch/2", (rc, e, wl))
     tb.case("watch_log: sp equals what the guest printed at each entry; the recursive entry is 16 below", len(guest_sp) == 4
             and [x["sp"] for x in wl] == guest_sp and guest_sp[1] == guest_sp[0] - 16 and guest_sp[2] == guest_sp[0], (guest_sp, wl))
     pcs = {x["sym"]: x["pc"] for x in wl}
