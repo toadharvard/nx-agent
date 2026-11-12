@@ -411,3 +411,9 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - w16 lands only together with or after that commit, and shows the GL backend and bootgpu roots green.
 - Test classification: gate_pure.py:33's `tests` directory-name rule is a heuristic. w17 replaces it with the longest-prefix admit class (test code = admitted root of class `test`).
   - L3a admits lift/test as class test.
+
+## 2026-11-12 04:20Z
+- w17 flags.semantics (head 4af72433, trunk merged) is the second blocker of L5's msvcmodel13. It is now w17's top priority; MERGER is asked to take it next.
+  - The per-language set is derived via a CLI for L5 w14 (no copy).
+- x19..x27 rule: -ffixed regs are not native state, so the pack's hand asm (setjmp/longjmp, crti/crtn; libnx later) neither saves nor restores them. jmp_buf layout is unchanged.
+  - Census gate: writes = 0 (w4). L5 patches the build.
