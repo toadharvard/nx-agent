@@ -73,12 +73,18 @@ extern bool mark_used(tree, tsubst_flags_t) __attribute__((weak));   /* spelled 
 #include "attribs.h"
 #include "cgraph.h"
 #include "varasm.h"
+#include "memmodel.h"
+#include "rtl.h"
+#include "emit-rtl.h"
+#include "output.h"
+#include "builtins.h"
 #include "output.h"
 #include "diagnostic-core.h"
 #include "fold-const.h"
 #include "stor-layout.h"
 #include "tree-cfg.h"
 #include "target.h"
+#include "rtl-iter.h"
 #include <map>
 #include <set>
 #include <string>
@@ -330,6 +336,69 @@ static tree walk_op(tree *tp, int *walk_subtrees, void *data)
   return NULL_TREE;
 }
 
+/* VCALL1: every load of a vtable slot that a call uses (a virtual call, the destructor's slot, a delete-expression) is tagged where this plugin meets
+   the call. Under the order plugin the load is an acquire atomic load, `v = __atomic_load_4(vptr + slot*size, 2)`; its statement gets a discriminator in its
+   location (the number of its entry in vtags, which says which slot and why: kind 0 a virtual call, 1 the destructor's slot with flags 0, 2 a delete-expression
+   with flags 1). The location is copied with every copy of the statement down to the insn of the load, where vc_pass reads it. The slot is checked against the
+   offset in the address (slot * pointer size): a load that cannot be found, or that disagrees, is a compile error. */
+struct vtag { long slot; int kind; };
+static std::vector<vtag> vtags;
+
+/* The tag is carried in the location's source range: its end is start + TAGBASE + n. The range survives every copy of the location, including the
+   ones GCC itself makes to give another discriminator to a statement of the same line (the discriminator is not ours: the cfg pass assigns them), and it
+   is read only by diagnostics. */
+static const location_t TAGBASE = 0x100000;
+static int tag_of(location_t loc)
+{
+  source_range r = get_range_from_loc(line_table, loc);
+  location_t d = r.m_finish - r.m_start;
+  return d > TAGBASE && d < TAGBASE + 0x100000 ? (int)(d - TAGBASE) : 0;
+}
+static tree mem_tag_type(int n)
+{
+  tree a = tree_cons(get_identifier("fnvnx_sdd_slot"), build_int_cst(integer_type_node, n), NULL_TREE);
+  return build_type_attribute_variant(ptr_type_node, a);
+}
+static int mem_tag(const_rtx mem)
+{
+  tree e = MEM_EXPR(mem);
+  if (!e || TREE_CODE(e) != MEM_REF) return 0;
+  tree a = lookup_attribute("fnvnx_sdd_slot", TYPE_ATTRIBUTES(TREE_TYPE(TREE_OPERAND(e, 1))));
+  return a ? (int)tree_to_shwi(TREE_VALUE(a)) : 0;
+}
+static location_t tag_location(location_t loc, int n)
+{
+  source_range r = get_range_from_loc(line_table, loc);
+  r.m_finish = r.m_start + TAGBASE + n;
+  return COMBINE_LOCATION_DATA(line_table, get_pure_location(loc), r, LOCATION_BLOCK(loc), 0);
+}
+
+static void tag_slot_load(location_t loc, tree target, int kind, unsigned HOST_WIDE_INT slot)
+{
+  HOST_WIDE_INT psz = POINTER_SIZE / BITS_PER_UNIT;
+  gimple *d = TREE_CODE(target) == SSA_NAME ? SSA_NAME_DEF_STMT(target) : NULL;
+  while (d && is_gimple_assign(d) && CONVERT_EXPR_CODE_P(gimple_assign_rhs_code(d)) && TREE_CODE(gimple_assign_rhs1(d)) == SSA_NAME)
+    d = SSA_NAME_DEF_STMT(gimple_assign_rhs1(d));
+  bool ok = d && is_gimple_call(d) && gimple_call_builtin_p(d, BUILT_IN_ATOMIC_LOAD_4) && gimple_call_num_args(d) == 2;
+  if (ok) {   /* the address: vptr + slot*size, or vptr itself for slot 0 (conversions between the pointer and its integer view are no arithmetic) */
+    tree a = gimple_call_arg(d, 0);
+    gimple *p = TREE_CODE(a) == SSA_NAME ? SSA_NAME_DEF_STMT(a) : NULL;
+    while (p && is_gimple_assign(p) && CONVERT_EXPR_CODE_P(gimple_assign_rhs_code(p)) && TREE_CODE(gimple_assign_rhs1(p)) == SSA_NAME)
+      p = SSA_NAME_DEF_STMT(gimple_assign_rhs1(p));
+    if (slot == 0) ok = !(p && is_gimple_assign(p) && gimple_assign_rhs_code(p) == POINTER_PLUS_EXPR);
+    else ok = p && is_gimple_assign(p) && gimple_assign_rhs_code(p) == POINTER_PLUS_EXPR && tree_fits_uhwi_p(gimple_assign_rhs2(p))
+              && tree_to_uhwi(gimple_assign_rhs2(p)) == slot * psz;
+  }
+  if (!ok) {
+    error_at(loc, "VCALL1: the load of vtable slot %lu of this call is not an atomic load at vptr + slot*%d", (unsigned long)slot, (int)psz);
+    return;
+  }
+  vtags.push_back({(long)slot, kind});
+  location_t l = gimple_location(d);
+  if (l == UNKNOWN_LOCATION) l = loc;
+  gimple_set_location(d, tag_location(l, (int)vtags.size()));
+}
+
 /* a call through the destructor's slot: fp(obj, flags), fp's type MSVC's ??_G */
 static void slot_call(gimple_stmt_iterator *gsi, gcall *call, tree fp, tree obj, int flags)
 {
@@ -370,8 +439,9 @@ struct calls_pass : gimple_opt_pass {
           if (!tree_fits_uhwi_p(OBJ_TYPE_REF_TOKEN(fn))) { error_at(gimple_location(st), "SDD2: a virtual call without a slot"); continue; }
           for (unsigned HOST_WIDE_INT i = tree_to_uhwi(OBJ_TYPE_REF_TOKEN(fn)); v && i; i--) v = TREE_CHAIN(v);
           if (!v) { error_at(gimple_location(st), "SDD2: a virtual call whose slot is not in its class %qT", cls); continue; }
-          if (!DECL_COMPLETE_DESTRUCTOR_P(BV_FN(v))) continue;
+          if (!DECL_COMPLETE_DESTRUCTOR_P(BV_FN(v))) { tag_slot_load(gimple_location(st), OBJ_TYPE_REF_EXPR(fn), 0, tree_to_uhwi(OBJ_TYPE_REF_TOKEN(fn))); continue; }
           if (gimple_call_num_args(call) != 1) { error_at(gimple_location(st), "SDD2: a virtual destructor call with %d arguments", (int)gimple_call_num_args(call)); continue; }
+          tag_slot_load(gimple_location(st), OBJ_TYPE_REF_EXPR(fn), 1, tree_to_uhwi(OBJ_TYPE_REF_TOKEN(fn)));
           slot_call(&gsi, call, OBJ_TYPE_REF_EXPR(fn), gimple_call_arg(call, 0), 0);
           continue;
         }
@@ -388,8 +458,11 @@ struct calls_pass : gimple_opt_pass {
         gimple_set_vuse(g1, gimple_vuse(st)); gimple_set_location(g1, gimple_location(st));
         gsi_insert_before(&gsi, g1, GSI_SAME_STMT);
         tree fp = make_ssa_name(ptr_type_node);
+        /* the load built here, slot = vindex by construction: its tag is on the type of the offset operand, which the expander keeps in the MEM's MEM_EXPR
+           (a load made by the combiner or the scheduler out of this one keeps the MEM; its location would be the location of the insn it was merged into) */
+        vtags.push_back({(long)tree_to_shwi(DECL_VINDEX(d1)), 2});
         gimple *g2 = gimple_build_assign(fp, build2(MEM_REF, ptr_type_node, vp,
-                                                    build_int_cst(ptr_type_node, tree_to_shwi(DECL_VINDEX(d1)) * psz)));
+                                                    build_int_cst(mem_tag_type((int)vtags.size()), tree_to_shwi(DECL_VINDEX(d1)) * psz)));
         gimple_set_vuse(g2, gimple_vuse(st)); gimple_set_location(g2, gimple_location(st));
         gsi_insert_before(&gsi, g2, GSI_SAME_STMT);
         slot_call(&gsi, call, fp, obj, 1);
@@ -397,6 +470,53 @@ struct calls_pass : gimple_opt_pass {
     return 0;
   }
 };
+
+/* VCALL1, the RTL side: just before shorten_branches, the last load insn of each run of insns that carry a slot load's tag gets a zero-byte label (an asm_input
+   insn that prints a label and nothing else) and a record in section .fnvnx.vcall: four words { label (a relocation against the function's section, the
+   addend is the offset of the insn), function symbol, slot, kind }. A load the optimizer duplicated is labelled in every copy; one it removed has no label. */
+namespace {
+static unsigned vlabels;
+const pass_data vc_data = { RTL_PASS, "fnvnx_sdd_vcall", OPTGROUP_NONE, TV_NONE, 0, 0, 0, 0, 0 };
+struct vc_pass : rtl_opt_pass {
+  vc_pass(gcc::context *c) : rtl_opt_pass(vc_data, c) {}
+  unsigned int execute(function *fun) override
+  {
+    /* a run is a maximal sequence of insns that carry one tag. The statement's value is the result of its outermost load, whose address operands the
+       expander (TER) emitted first, and the scheduler keeps a load after the load of its address: so the slot load is the LAST load of its run. */
+    std::vector<std::pair<rtx_insn *, int> > found;
+    int prev = 0;
+    rtx_insn *last = NULL;
+    for (rtx_insn *i = get_insns(); i; i = NEXT_INSN(i)) {
+      if (!INSN_P(i)) continue;
+      int d = tag_of(INSN_LOCATION(i));
+      if (d < 1 || d > (int)vtags.size()) d = 0;
+      if (d != prev) { if (prev && last) found.push_back({last, prev}); last = NULL; }
+      prev = d;
+      if (!d) continue;
+      rtx set = single_set(i);
+      if (!set) continue;
+      subrtx_iterator::array_type ar;
+      FOR_EACH_SUBRTX(it, ar, SET_SRC(set), ALL) if (MEM_P(*it)) { last = i; break; }
+    }
+    if (prev && last) found.push_back({last, prev});
+    for (rtx_insn *i = get_insns(); i; i = NEXT_INSN(i)) {
+      rtx set = INSN_P(i) ? single_set(i) : NULL;
+      if (!set) continue;
+      subrtx_iterator::array_type ar;
+      FOR_EACH_SUBRTX(it, ar, SET_SRC(set), ALL) if (MEM_P(*it)) { int m = mem_tag(*it); if (m >= 1 && m <= (int)vtags.size()) found.push_back({i, m}); break; }
+    }
+    for (auto &f : found) {
+      char lab[40], text[48];
+      snprintf(lab, sizeof lab, ".Lfnvnx_vc%u", vlabels++);
+      snprintf(text, sizeof text, "%s:", lab);
+      emit_insn_before(gen_rtx_ASM_INPUT_loc(VOIDmode, ggc_strdup(text), INSN_LOCATION(f.first)), f.first);
+      fprintf(asm_out_file, "\t.pushsection\t.fnvnx.vcall,\"\",%%progbits\n\t.balign\t4\n\t.4byte\t%s\n\t.4byte\t%s\n\t.4byte\t%ld\n\t.4byte\t%d\n\t.popsection\n",
+              lab, IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(fun->decl)), vtags[f.second - 1].slot, vtags[f.second - 1].kind);
+    }
+    return 0;
+  }
+};
+}
 
 /* late, just before expansion: address points by their own symbols */
 const pass_data ap_data = { GIMPLE_PASS, "fnvnx_sdd_ap", OPTGROUP_NONE, TV_NONE, PROP_cfg | PROP_ssa, 0, 0, 0, 0 };
@@ -541,6 +661,12 @@ int plugin_init(struct plugin_name_args *info, struct plugin_gcc_version *ver)
   pa.ref_pass_instance_number = 1;
   pa.pos_op = PASS_POS_INSERT_AFTER;
   register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pa);
+  register_pass_info pv;
+  pv.pass = new vc_pass(g);
+  pv.reference_pass_name = "shorten";
+  pv.ref_pass_instance_number = 1;
+  pv.pos_op = PASS_POS_INSERT_BEFORE;
+  register_callback(info->base_name, PLUGIN_PASS_MANAGER_SETUP, NULL, &pv);
   register_callback(info->base_name, PLUGIN_START_UNIT, start_unit, NULL);
   register_callback(info->base_name, PLUGIN_ALL_IPA_PASSES_START, ipa_start, NULL);
   register_callback(info->base_name, PLUGIN_FINISH_UNIT, finish_unit, NULL);

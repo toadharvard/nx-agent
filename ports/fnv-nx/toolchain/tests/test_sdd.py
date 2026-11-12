@@ -18,9 +18,41 @@ check = pb.Checks('test_sdd')
 FIX = os.path.join(HERE, 'sdd', 'sdd.cpp')
 
 
-def slot_loads(obj, sym):
-    """byte offsets of the loads `ldr wN, [xM, #off]` / `[xM]` that are followed by `mov x16, ...` (the tail-call through a slot), i.e. table slots"""
-    return [int(o or '0', 0) for o in re.findall(r'ldr w\d+, \[x\d+(?:, #(-?(?:0x)?[0-9a-f]+))?\] mov x16,', pb.insns(obj, sym))]
+def decode_load(obj, fn, off):
+    """the vtable offset that the load instruction at byte OFF of function FN (a section offset, as objdump prints) addresses, read from the machine code:
+    `ldr wN, [xM, #imm]` -> imm, `ldr wN, [xM]` -> 0, `ldar wN, [xM]` -> the immediate of the `add xM, xK, #imm` in front of it, or 0 when that is
+    not an add into xM.  None when the instruction is not such a load."""
+    ins = []
+    for l in pb.objdump(obj)[fn]:
+        m = re.match(r'\s*([0-9a-f]+):\s+[0-9a-f]{8}\s+(\S+)\s*(.*)', l)
+        if m:
+            ins.append((int(m.group(1), 16), m.group(2), re.sub(r'\s*//.*$', '', m.group(3)).strip()))
+    k = next((n for n, x in enumerate(ins) if x[0] == off), None)
+    if k is None:
+        return None
+    _, mn, ops = ins[k]
+    m = re.match(r'w\d+, \[(x\d+)(?:, #(-?(?:0x)?[0-9a-f]+))?\]$', ops)
+    if not m or mn not in ('ldr', 'ldar'):
+        return None
+    if mn == 'ldr':
+        return int(m.group(2) or '0', 0)
+    if k:
+        a = re.match(r'(?:add)\s+(x\d+), x\d+, #(0x[0-9a-f]+|\d+)$', ins[k - 1][1] + ' ' + ins[k - 1][2])
+        if a and a.group(1) == m.group(1):
+            return int(a.group(2), 0)
+    return 0
+
+
+def vcalls(obj):
+    """section .fnvnx.vcall of the object: [(function symbol, section, byte offset of the labelled load, slot, kind)], from the section's bytes and the
+    relocations of its first two words of each 16-byte record (label = section + offset, function symbol)"""
+    data = pb.elfobj.read(obj).section('.fnvnx.vcall') or b''
+    rel = {o: (n, a) for o, t, n, a in pb.relocs_of(obj).get('.fnvnx.vcall', [])}
+    out = []
+    for r in range(0, len(data), 16):
+        (sec, off), (fn, _) = rel[r], rel[r + 4]
+        out.append((fn, sec, off, int.from_bytes(data[r + 8:r + 12], 'little'), int.from_bytes(data[r + 12:r + 16], 'little')))
+    return sorted(out)
 
 
 def relocs_in(obj, sym):
@@ -37,25 +69,37 @@ def checks(obj):
     check('table M: exe order, one destructor slot, the secondary table too',
           w('_ZTV1M') == ['0', '_ZTI1M', '_ZN1A1fEv', '_ZN1MD1Ev.fnvnx_sdd', '_ZN1A1gEv', '_ZN1M1kEv', '_ZN1M4lastEv',
                           '-8', '_ZTI1M', '_ZThn8_N1MD1Ev.fnvnx_sdd', '_ZThn8_N1M1kEv'], str(w('_ZTV1M')))
-    check('delete p: slot 1, flags 1', slot_loads(obj, '_Z5del_aP1A') == [4] and re.search(r'mov w1, #0x1\b', ins('_Z5del_aP1A')))
-    check('p->~A(): slot 1, flags 0', slot_loads(obj, '_Z9destroy_aP1A') == [4] and re.search(r'mov w1, #0x0\b', ins('_Z9destroy_aP1A')))
-    check('delete through the second base: its slot 0', slot_loads(obj, '_Z6del_s2P2S2') == [0])
-    check('g(): slot 2', slot_loads(obj, '_Z6call_gP1A') == [8], str(slot_loads(obj, '_Z6call_gP1A')))
-    check('k() through S2: slot 1', slot_loads(obj, '_Z6call_kP2S2') == [4])
-    check('M::last(): slot 4', slot_loads(obj, '_Z9call_lastP1M') == [16])
+    # VCALL1: every virtual call, destructor-slot call and delete-expression has one record; the label sits on the slot load, whose decoded
+    # offset is slot * 4 (psz).  Expected slots: MSVC's layout rule (declaration order, bases first, an override keeps its base's slot; an override of a
+    # non-primary base's virtual also takes a slot in the primary table, so M::k is 3 and M::last 4):
+    #   A: f 0, ~A 1, g 2.  S2: ~S2 0, k 1.  J: A's, w 3.  TT<int>: ~TT 0, z 1.   kind 0 virtual call, 1 `p->~A()` (flags 0), 2 `delete p` (flags 1)
+    want = {'_Z5del_aP1A': [(1, 2)], '_Z5del_bP1B': [(1, 2)], '_Z6del_s2P2S2': [(0, 2)], '_Z9destroy_aP1A': [(1, 1)],
+            '_Z6call_gP1A': [(2, 0)], '_Z6call_kP2S2': [(1, 0)], '_Z9call_lastP1M': [(4, 0)], '_Z6use_ttP2TTIiE': [(1, 0)],
+            '_Z6del_ttP2TTIiE': [(0, 2)], '_Z5use_jP1J': [(2, 0), (3, 0)]}
+    vc = vcalls(obj)
+    got = {}
+    for fn, sec, off, slot, kind in vc:
+        got.setdefault(fn, []).append((slot, kind))
+    check('table .fnvnx.vcall: exactly the calls of the fixture, each with the slot and kind of the layout rule',
+          {f: sorted(v) for f, v in got.items()} == want, str(got))
+    for fn, sec, off, slot, kind in vc:
+        s_ = syms[fn]
+        dec = decode_load(obj, fn, off)
+        check('%s: the label at .text+%d is a slot load whose offset is slot %d * 4' % (fn, off, slot),
+              sec == s_['sec'] and s_['value'] <= off < s_['value'] + s_['size'] and dec == slot * 4, '%s: decoded %s' % (fn, dec))
+    check('flags: delete passes 1, p->~A() passes 0', re.search(r'mov w1, #0x1\b', ins('_Z5del_aP1A')) and re.search(r'mov w1, #0x0\b', ins('_Z9destroy_aP1A')))
     check('pointer to virtual member: constant', w('table') == ['8', '1', '0', '1'], str(w('table')))
     check('pointer to virtual member: comparison', re.search(r'cmp w0, #0x8\b', ins('_Z2eqM1AFivE')))
-    check('pointer to virtual member: template argument', slot_loads(obj, '_Z5use_tP1A') == [8])
-    check('instantiated class template', slot_loads(obj, '_Z6use_ttP2TTIiE') == [4] and slot_loads(obj, '_Z6del_ttP2TTIiE') == [0])
-    uj = re.findall(r'ldr w\d+, \[x\d+, #(\d+)\]', ins('_Z5use_jP1J'))
-    check('inline member bodies: g() slot 2, J::w() slot 3', uj == ['8', '12'], str(uj))
+    check('pointer to virtual member: template argument (the folded call loads slot 2)',
+          re.search(r'add x\d+, x\d+, #0x8 ldar w\d+, \[x\d+\]', ins('_Z5use_tP1A')), ins('_Z5use_tP1A'))
     ap8, ap36, tv = syms['_ZTV1M.fnvnx_ap8'], syms['_ZTV1M.fnvnx_ap36'], syms['_ZTV1M']
     check('address points: own symbols', ap8['value'] == tv['value'] + 8 and ap36['value'] == tv['value'] + 36 and ap8['sec'] == ap36['sec'] == tv['sec'],
           str((ap8, ap36, tv)))
     ctor = [(t, n) for t, n in relocs_in(obj, '_ZN1MC2Ev')]
-    check('constructor: one relocation per address point, no immediate',
-          sorted(n for t, n in ctor if t == 'R_AARCH64_P32_LD32_GOT_LO12_NC') == ['_ZTV1M.fnvnx_ap36', '_ZTV1M.fnvnx_ap8']
-          and not [1 for t, n in ctor if n == '_ZTV1M'], str(ctor))
+    vt = sorted({n for t, n in ctor if t == 'R_AARCH64_P32_LD32_GOT_LO12_NC' and n.startswith('_ZTV')})
+    check('constructor (with the inlined base constructors): every vtable address is an address-point symbol, M\'s two among them, no immediate',
+          vt == ['_ZTV1A.fnvnx_ap8', '_ZTV1M.fnvnx_ap36', '_ZTV1M.fnvnx_ap8', '_ZTV2S2.fnvnx_ap8']
+          and not [1 for t, n in ctor if n.startswith('_ZTV') and '.fnvnx_ap' not in n], str(ctor))
     th = ins('_ZN1MD1Ev.fnvnx_sdd')
     check('??_E flags 0: the destructor; flags 1: the deleting destructor; returns this',
           'tst w1, #0x3 b.ne L1 bl _ZN1MD1Ev b L5 L1: mov w20, w0 tbnz w21, #1, L2 bl _ZN1MD0Ev b L5' in th
@@ -97,7 +141,7 @@ def main():
         if r.returncode == 0:
             checks(out)
         r = pb.compile(FIX, os.path.join(td, 'x.o'), [so], args=['-fplugin-arg-fnvnx_sdd-mode=1'])
-        check('an unknown plugin argument is an error', r.returncode != 0 and 'unknown plugin argument' in r.stderr, r.stderr[:500])
+        check('an unknown plugin argument is an error', r.returncode != 0 and 'arguments must be' in r.stderr, r.stderr[:500])
     finally:
         shutil.rmtree(td, ignore_errors=True)
     return check.done()
