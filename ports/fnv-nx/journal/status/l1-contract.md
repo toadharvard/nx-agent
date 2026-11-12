@@ -368,3 +368,12 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 - w18: rerun on L5 manifest 07d79c5 leaves LoadLibrary at 20/23 closed.
   - 0x9fea3e/5a are blocked by L5's missing write table (import_writes.tsv); requested from L5 w15.
   - 38bae062 is void; 556059a6 verdict running.
+
+## 2026-11-12 04:00Z
+- toolchain-build profile in env.json had not landed, and it blocks L5's runtime build, so every guest root.
+  - Given to w5 as top priority. The package set is derived from the programs L5 w14's build scripts invoke plus gcc's prerequisites, with the Depends closure pinned, debs mirrored to tools/toolchain-debs, and envcheck --profile.
+- puregate EXTERNAL was a hand list with an unregistered A-ext. Given to w17:
+  - derive EXTERNAL from env.json python.modules;
+  - pin keystone-engine 0.9.2 (L3b);
+  - register A-ext as a REMOVE id in L1's range, removed by the sandbox and the reproducibility gate.
+- Orchestrator: L5 w13 puts the declared redist file set in contract/dllkind.py. w4's hold on L5's MANIFEST is accepted.
