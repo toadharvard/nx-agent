@@ -9,7 +9,7 @@
  *   stage            0 vertex, 1 pixel (must match the bytecode's version token)
  *   variant          bit 0: vertex shader complete (FNVNX_SHADER_VS_COMPLETE; fnvnx_dk_vs_needs_complete); bit 1 (either stage): D3DRS_SHADEMODE FLAT
  *                    (FNVNX_SHADER_FLAT_COLOR: the COLOR0/COLOR1 interpolants are `flat`, first-vertex value; both stages of a draw carry the same bit); all other bits 0
- *   hash             fnvnx_shader_hash(bytecode) (FNV-1a 64), the cache key's code hash
+ *   key              SHA-256 of the bytecode (fnvnx_sha256, lib/sha256; 32 bytes), the cache key's code key
  *   Every address is an address of memory from nxd3d_gpu_alloc (as every address of every call).
  *   Implemented by gl4 (gl4_d3dshader.c): the same key (bytecode, stage, variant, L) returns the same id, once per create (each NXGPU_FN_SHADER_DESTROY takes one back; the last releases it).
  *   Reserved fields (pad, pad2) and the variant bits above bit 1 must be 0, a pixel stage has bit 0 clear, size is a multiple of 4: else 0.
@@ -28,11 +28,11 @@ typedef struct NxShaderD3D {
     uint64_t bytecode;
     uint32_t size;
     uint8_t stage, variant, pad[2];
-    uint64_t hash;
+    uint8_t key[32];
     uint64_t link_pairs;
     uint32_t n_link_pairs, pad2;
 } NxShaderD3D;
-NX_ASSERT_(sizeof(NxShaderD3D) == 40, "NxShaderD3D");
+NX_ASSERT_(sizeof(NxShaderD3D) == 64, "NxShaderD3D");
 
 #ifdef __cplusplus
 }

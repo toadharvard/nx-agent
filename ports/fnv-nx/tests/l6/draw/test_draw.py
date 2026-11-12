@@ -24,7 +24,7 @@ fails = []
 def sh(cmd, **kw): return subprocess.run(cmd, capture_output=True, text=True, **kw)
 
 
-def flags(dev, tmp): return ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O1", "-w", "-I", INC, "-I", tmp, "-I", dev, "-I", BACK, "-I", NXB, "-I", FRONT, "-I", HERE]
+def flags(dev, tmp): return ["g++", "-m32", "-std=c++17", "-fno-exceptions", "-fno-rtti", "-O1", "-w", "-I", INC, "-I", os.path.join(ROOT, "lib", "sha256", "include"), "-I", tmp, "-I", dev, "-I", BACK, "-I", NXB, "-I", FRONT, "-I", HERE]
 
 
 def build(dev, tmp, jobs=8, base=None, only=None):
@@ -41,6 +41,7 @@ def build(dev, tmp, jobs=8, base=None, only=None):
     srcs = [(os.path.join(NATIVE if s == "app_unk_native.cpp" else dev, s), s) for s in LIB + RES + GLUE + DRAW] + [(os.path.join(gdir, s), s) for s in GENS + ["env_table.gen.cpp"]] + [(os.path.join(HERE, s), s) for s in TESTS]
     fronts = sorted(f for f in os.listdir(FRONT) if f.startswith("front_") and f.endswith(".c"))
     cmds = [fl + ["-c", src, "-o", os.path.join(tmp, n + ".o")] for src, n in srcs if only is None or n in only]
+    if base is None: cmds.append(["gcc", "-m32", "-std=c99", "-O1", "-w", "-I", os.path.join(ROOT, "lib", "sha256", "include"), "-c", os.path.join(ROOT, "lib", "sha256", "sha256.c"), "-o", os.path.join(tmp, "sha256.o")])
     if base is None: cmds += [["gcc", "-m32", "-std=c11", "-O1", "-w", "-I", FRONT, "-I", BACK, "-I", NXB, "-c", os.path.join(FRONT, f), "-o", os.path.join(tmp, "nx_" + f + ".o")] for f in fronts]
     with cf.ThreadPoolExecutor(jobs) as ex: rs = list(ex.map(sh, cmds))
     for c, r in zip(cmds, rs):
@@ -48,7 +49,7 @@ def build(dev, tmp, jobs=8, base=None, only=None):
     objdir = tmp
     def obj(n): p = os.path.join(tmp, n + ".o"); return p if os.path.exists(p) else os.path.join(base, n + ".o")
     prod = [obj(n) for _, n in srcs if n in LIB + GENS + RES + GLUE + DRAW]
-    link = [obj(n) for _, n in srcs] + [os.path.join(tmp if base is None else base, "nx_" + f + ".o") for f in fronts]
+    link = [obj(n) for _, n in srcs] + [obj("sha256")] + [os.path.join(tmp if base is None else base, "nx_" + f + ".o") for f in fronts]
     r = sh(["g++", "-m32", "-no-pie", "-o", os.path.join(tmp, "test_draw")] + link + ["-Wl,--unresolved-symbols=ignore-all"])
     return (os.path.join(tmp, "test_draw"), prod) if r.returncode == 0 else (None, r.stderr[-800:])
 

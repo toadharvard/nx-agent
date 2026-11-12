@@ -1,6 +1,7 @@
 // part d: shader creation, token walk, validator (python-encoded cases: sm_legal.txt / sm_illegal.txt), interface, GetFunction, hash; part a: shader creation rules
 #include "t_common.h"
 #include "res_core.h"
+#include "fnvnx_sha256.h"
 static const char* kErr[] = {"OK", "UNTERMINATED", "VERSION", "STAGE", "OPCODE", "OP_MODEL", "LENGTH", "DST_REG", "SRC_REG", "REG_INDEX", "SRCMOD", "DSTMOD", "RELADDR", "PRED", "DCL", "TEXLD_OPERAND"};
 static int errcode(const char* s) { for (int i = 0; i < 16; i++) if (!strcmp(kErr[i], s)) return i; return -1; }
 static uint32_t g_zero[(1 << 20) + 64];
@@ -43,7 +44,7 @@ void t_shader() {
     uint32_t outb[8]; memset(outb, 0xCC, sizeof outb); sz = 19; CHECK_HR(s->GetFunction(outb, &sz), D3DERR_INVALIDCALL); CHECK_EQ(outb[0], 0xCCCCCCCC); CHECK_EQ(sz, 19);
     sz = 20; CHECK_HR(s->GetFunction(outb, &sz), D3D_OK); CHECK(!memcmp(outb, v11, 20) && outb[5] == 0xCCCCCCCC); sz = 32; CHECK_HR(s->GetFunction(outb, &sz), D3D_OK); CHECK_EQ(sz, 32);   // copy leaves *size (Wine)
     CHECK_HR(s->GetFunction(outb, nullptr), D3DERR_INVALIDCALL); CHECK_EQ(sc->nbytes, 20); CHECK(sc->code != v11 && !memcmp(sc->code, v11, 20));
-    CHECK(sc->hash == nx_shader_hash(v11, 20)); CHECK_EQ(nx_shader_hash("", 0), 0xcbf29ce484222325ull); CHECK_EQ(nx_shader_hash("a", 1), 0xaf63dc4c8601ec8cull);   // FNV-1a 64 test vectors
+    { uint8_t k[32]; fnvnx_sha256(v11, 20, k); CHECK(!memcmp(sc->key, k, 32)); }   // the content key is the SHA-256 of the bytecode (fnvnx_sha256 itself: lib/sha256_tests)
     CHECK_EQ(sc->iface.stage, 0); CHECK_EQ(sc->iface.major, 1); CHECK(sc->iface.in_mask == 1 && sc->iface.in_usage[0] == 0xFF && sc->iface.n_instr == 1);
     IDirect3DDevice9* gd; CHECK_HR(s->GetDevice(&gd), D3D_OK); gd->Release(); CHECK_EQ(s->Release(), 0);
     CHECK_HR(d->CreateVertexShader(nullptr, (IDirect3DVertexShader9**)&o), D3DERR_INVALIDCALL); CHECK_HR(d->CreateVertexShader((const DWORD*)v11, nullptr), D3DERR_INVALIDCALL);

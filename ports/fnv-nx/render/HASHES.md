@@ -47,3 +47,19 @@ So: **one portable C implementation exists for both sides, `fnvnx_sha256` (loade
 - The key is a 64-bit value in the ABI (`uint64_t hash`, shcache `code_hash` u64, file names of 16 hex digits). A sha256 key is 32 bytes: `NxShaderD3D.hash`, `fnvnx_shader_hash`'s signature, the cache index entry (36 bytes, `shcache.h:20`), the L hash, the file names and `NxShaderDesc.key` (already 32 bytes, FFP) are the places that carry it. `NxShaderDesc.key` is the existing 32-byte sha256 slot; the D3D shader path is the one still at 8 bytes.
 - Writing sites to change if the key becomes sha256: 5 content-key sites listed above (#1, #2, #3 are one function in C; #6, #7 one in Python), plus the verifier #1 in `gl4_d3dshader.c:51`, plus #4 (L hash) and #8 (statistics) if they follow, plus the test copies of #11.
 - The integrity checksums (#3 body, #5 record) and the bucket hash (#9) are not content keys; whether they follow is a separate decision.
+
+## 4. Status: content keys are SHA-256 (branch `claude/fnv-l6-render-w5-key`)
+
+Content-key rows #1-#8 and #12 are converted to `fnvnx_sha256` (`lib/sha256`) / `hashlib.sha256`; the FNV code is deleted at those sites.
+
+| row | now |
+|---:|---|
+| 1 | `fnvnx_shader_result.key[32]`, `fnvnx_shader_key_hex`; `fnvnx_shader_hash` deleted; `NxShaderD3D.key[32]` (ABI header `render/backend/nxgpu4_shader.h`, struct 64 bytes; the header is L6A w4's) |
+| 2 | `res_shader.cpp`: `fnvnx_sha256(bc, n, s->key)`; `nx_shader_hash` deleted; `render/d3d9/build.json` include gains `lib/sha256/include` |
+| 3, 5 | `shcache.c`/`shcache_key.c`: body check, record check = SHA-256; `shcache_hash64` deleted; cache format v2 (header 80, index entry 84, log record fixed part 78) |
+| 4 | `shcache_l_key`: 32 bytes, zeros for the empty set, else SHA-256 of the pairs; `shcache_l_hash` deleted |
+| 6, 7 | `mkshcache.py`, `d9s_shaders.py`: `hashlib.sha256`; file names are 64 hex digits |
+| 8 | `d9rec_stats.py`: `hashlib.sha256` hexdigest, report field `"hash": "sha256"` |
+| 12 | `gl4_d3dshader.c` verifies `memcmp(SHA-256(code), d.key)`; tests use `fnvnx_sha256` |
+
+Not content keys, unchanged: #9 (bucket, memcmp-verified), #10 (scene readback checksum), #11 (test palette/program checksums). Outside render/tests/l6 and unchanged: row #13 and the `tools/compare`, `toolchain/nro`, `tests/nx1`, `tests/s6b/census.py`, `tests/s16` users of `nxd9io.fnv1a64` / `shaders_nx.fnv1a64`, which name recorded files, not cache keys.
