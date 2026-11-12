@@ -643,6 +643,241 @@ the extra table keys (+ the item `table_id` when both files carry one), certifie
 `<key as 8 hex digits>:<reason>`.  Counts only on stdout.  Exit status 1 when the gate is red.
 ```
 
+## link/gate_addr.py
+
+```text
+Gate "addr" (fnvnx-gate/1, class F of VERDICT.md): no integer-to-pointer conversion of a native (GCC-compiled C++) object
+escaped rule ADDR32 (docs/ORDERING.md, toolchain/addr/fnvnx_addr.cc), and the address-space layout makes the rule's one
+remaining window harmless.
+    python3 -I gate_addr.py [--layout FILE] OBJ...       env GATE_OUT; writes GATE_OUT/addr.json; exit 0 iff green
+    rows(objs, layout=None) -> sorted [(obj_stem, symbol, reason)]    library form (no printing, no GATE_OUT, no exit); reason '' = certified
+
+RULE.  A 32-bit guest address computed in an integer must be used as that wrapped 32-bit value.  Machine code cannot tell a
+wrapped integer sum from in-bounds pointer arithmetic, so the fact comes from the compiler: the plugin routes every conversion
+of a computed integer to a pointer, every pointer sum with a run-time offset or a constant offset of 2^16 or more, and every
+memory reference through a pointer with such a displacement, through an asm barrier at the last GIMPLE point, verifies that
+nothing escaped (a compile error otherwise) and writes the object's section `.fnvnx.addr` with one line per emitted function:
+symbol, conversions seen, conversions routed (addrsec.py).  The gate reads those records.
+UNIVERSE.  For every object given: the object itself (row `(stem, '', reason)`: certified iff it has the section and the section
+parses) and every function symbol it defines (STT_FUNC or STT_GNU_IFUNC placed in a section; row `(stem, symbol, reason)`).
+Aliases, thunks and clones are function symbols too; the plugin writes `seen = routed = 0` for those without a GIMPLE body.  The
+layout is one more item, row `('', 'layout', reason)`, present iff at least one object or `--layout` is given: with zero objects and
+no layout the universe is 0 (green, as before); with objects and no layout the item is uncertified, so the gate cannot be green
+without a layout.  OBJ stems are file names without the extension; two objects with one stem are an error (ValueError; the CLI
+exits 1 without a gate file).
+CERTIFIED.  A function with exactly one record in its object and seen == routed.  Uncertified: no record, two records, seen !=
+routed, and every function of an object whose section is missing or malformed (the reason names the first error).  An object that
+is not readable ILP32 AArch64 ELF is an uncertified item.  Records of symbols the object does not define as functions are ignored
+(they cannot certify a function).  The layout item is certified iff the layout file passes LAYOUT below.
+LAYOUT (the checked fact that gives the address-space edges; `--layout FILE`, emitted by L1 at link time).  A JSON object with exactly
+the keys `schema` (the string "fnvnx-layout/1") and `regions` (a list); each region is an object with exactly the keys `name` (a
+non-empty string), `lo` and `hi` (integers, not booleans, `0 <= lo < hi <= 2^32`, **hi exclusive**: the region holds the
+addresses lo .. hi-1), `prot` (one of "---", "r--", "rw-", "r-x") and `kind` (one of "image", "heap", "stack", "tls", "host",
+"guard").  Any other shape (extra or missing key, duplicate key, other type, a float, NaN, trailing text, not UTF-8) is rejected.
+Checks, in this order, the first failing one is the reason (`layout: <check>: <detail>`): `file` (unreadable), `shape` (the
+form above), `schema`, `partition` (sorted by lo, the regions cover [0, 2^32) exactly: the first lo is 0, each lo is the previous
+hi, the last hi is 2^32: no hole, no overlap), `guard` (every region that intersects [0, 0x10000) or [0xFFFF0000, 2^32) has prot
+"---" and kind "guard").  GUARD = 0x10000 is the plugin's LIMIT (toolchain/addr/fnvnx_addr.cc, rule C): a displacement the
+plugin leaves unrouted is below 2^16 in magnitude, so a sum p + d that crosses 0 or 2^32 starts in the low or the high guard,
+where no object lives and no access is allowed, and faults on x86 as it does here (the port's ILP32 address space ends at
+2^32: an address above it is unmapped).  Everything larger is routed and wraps exactly as x86 does.
+PROOF.  seen == routed in a function means every conversion at the last GIMPLE point had an opaque (asm) operand, so the
+expander and the RTL passes that follow see a finished 32-bit register: no sum exists that an addressing mode could absorb.
+INPUT FACTS AND RULES.  (1) Input fact: the record is written by the plugin built from the tracked source and loaded into every compile
+of the object (the build gate `build` checks that the recipe loads it).  (2) Assumption ASM-006 (the exe makes no wild accesses; array
+indices in bounds): a variable index into a declared array (a global or a local, whose address is a link-time or frame constant) stays
+inside it.  (3) Assumption ASM-001 (the pinned compiler is correct): after the barrier no later pass of GCC folds through an `asm` (the
+documented semantics of an asm statement).  (4) Rule: `.cold` parts of functions (-freorder-blocks-and-partition) are function symbols
+without a record and are uncertified, so the recipe must not enable that partitioning.  (5) Input fact: the layout file describes the
+layout the linked image is run with (L1 emits it from the link as layout.json, fnvnx-layout/1; this gate checks its form, not the run).
+Pure: a function of the object bytes and the layout file.
+```
+
+## link/gate_names.py
+
+```text
+gate_names - NAMES1: the MSVC names the fnvnx_names plugin gave to GCC's definitions, against cl's own symbol tables (L2 SOURCE).
+
+    gate_names.py --gcc PATH [--gcc PATH ...] --cl PATH [--cl PATH ...] [--units units.json]      (inputs: link/unitpairs.py)
+
+RULE.  The pairing `.fnvnx.sympair` of a GCC object of unit U says, for every symbol of the object that has a contract name, which
+MSVC decorated name it has.  MSVC's object of the same unit defines every entity that the unit's own text defines (the pristine
+objects are built /Gy, so a function is a definition or a COMDAT definition), so the name of such an entity must be a definition of
+cl's object of U.  A name that cl's object does not define is a wrong naming rule.  A row no rule named is a gap in the naming rules.
+UNIVERSE (nothing sampled, nothing skipped), per unit with a GCC object, in the order of the unit names:
+  1. every row of .fnvnx.sympair whose kind is one that has an MSVC name (func, data, ctor.c1, ctor.c2, dtor.d2, dtor.d1, dtor.d0,
+     dtor.sdd, dtor.sdd.thunk) and that is `def` of a symbol the object defines STRONGLY: binding GLOBAL (not weak, not unique), defined
+     in a section (not SHN_UNDEF/ABS/COMMON), not a section or file symbol, and the defining section is not in a COMDAT group
+     (SHF_GROUP).  Item id `unit:symbol`.
+  2. every row of .fnvnx.sympair whose kind is `unnamed:<reason>` (no rule names it), `ref` or `def`.  Item id `unit:symbol:unnamed`.
+  3. every row of .fnvnx.vtpair whose MSVC name is `unnamed:<reason>`.  Item id `unit:ztv-symbol:vftable-unnamed`.
+  4. a GCC object that cannot be read (ELF, symbol table, a plugin section): one item `unit:error`.
+CERTIFIED: an item of class 1 whose MSVC name is `def`, `comdat` or `common` among the external symbols of at least one cl object of the
+unit (an unreadable one among them does not hide a proof in another; if none proves it, the item is red and says so).
+Red (listed): class 1 with no cl object for the unit, with an unreadable cl object, or with a name cl does not define; every item of
+classes 2, 3, 4.  The result is a function of the objects and the units list; ids sorted; zero items: green, universe 0 (detail says so).
+PROOF.  A strong GCC definition is emitted from the unit's own source text, not from an inline or template instantiation that the
+unit merely uses; so the entity has a definition in the unit's cl object, and that object's symbol table names it with the one decorated
+name.  If the table holds the plugin's name as a definition, the name is that of a definition of the same unit; if it does not, the
+naming rule is refuted for this item.  Classes 2 and 3 are decided by the rule's own totality: every extern symbol must be named.
+RULES AND INPUTS.  Rule (checked, class 1): a strong definition of a GCC object that has a naming kind is certified only when the cl
+object of the same unit defines the name; a GCC-only strong symbol with a naming kind is red, and the plugin gives GCC-only symbols the
+nameless kinds below (classes 2 and 3, red).  Scope of the check (a statement of what is read, not a claim beyond it): the check shows
+that the plugin's name is a definition of the same unit's cl object, not that it is the name of this very declaration (two definitions of
+one unit with swapped names would pass); the plugin's rules are verified by the object that cl wrote.  Input: the sections are the
+plugin's own output (contract/l2sections.py documents their format).
+NOT IN THE UNIVERSE (no class-closing rule is known, reported to the orchestrator; legacy namegate counted them only): rows of
+kind `thunk`, `vtable`, `gcc`, `internal` (no cl twin by the plugin's classification); `ref` rows and weak or COMDAT definitions of
+named kinds (cl emits an inline function, a vftable or a reference only where it chose to use it, so a name its object lacks proves
+nothing); vtpair rows with a name.  Pairing is by file stem (the `u<N>` rule of unitpairs.py with --units).
+```
+
+## link/gate_order.py
+
+```text
+Gate "order" (fnvnx-gate/1, class B of VERDICT.md): every memory access of a native (GCC-compiled C++) object follows the
+TSO map R9 (docs/ORDERING.md), decided on the machine code, independent of the compiler plugin's ordering pass.
+    python3 -I gate_order.py OBJ...        env GATE_OUT; writes GATE_OUT/order.json; exit 0 iff green
+    rows(objs) -> sorted [(obj_stem, item, kind)]        kind '' = certified (library form: no printing, no GATE_OUT, no exit)
+    functions(objs) -> sorted [(obj_stem, function, reason)]    reason '' iff every item of the function is certified
+
+UNIVERSE.  For every object given (rows of a64order.scan, rules in a64order.py): the object (item ``, certified iff its
+`.fnvnx.frame` section is present and parses), every function symbol that is a usable code range (item `FUNC`, certified iff every
+symbol of the function has the one same record), every memory-access instruction of every executable byte (item `FUNC+0xOFF`;
+loads, stores, exclusives, atomics, literal loads; prefetch hints are no access), every word that cannot be decoded (it might be one),
+every function symbol of size 0 or overlapping another, and every instruction that hands a frame address out of the function
+(item `FUNC+0xOFF/escape`: stored, passed in x0-x8 to a call, returned, used as an index).  Code in no function symbol is named by
+its section.  An object that is not readable ILP32 AArch64 ELF is one uncertified item named by the object.
+CERTIFIED by the rules of a64order.py: O ordered forms, F frame (record R1 of the compiler: the address-taken variables of the
+frame), L linker or read-only load, R fenced run; an escape of a frame address that points into a recorded variable.
+PROOF.  Under TSO every load is acquire-like and every store release-like, so a thread-visible access must be ordered with all earlier
+loads (loads) or all earlier accesses (stores).  O: the instruction is itself ordered.  F: the access lies in the function's own frame
+and overlaps no variable whose address the compiler took, and the gate itself checked that no frame address leaves the function
+unless it points into such a variable, so no other thread has an address of the slot.  L: the loaded word never changes after link
+or load.  R: the plain access is bracketed by `dmb` on every path, so the barrier orders it against everything the statement does
+not itself contain.
+INPUT FACTS AND RULES (the full text is in a64order.py).  R1: the `.fnvnx.frame` record names every variable whose address the compiler
+computes for a purpose the machine code does not show (the record is produced by the pinned compiler's plugin, ASM-001: the gate reads
+it for WHICH variables are address-taken, and checks the machine code for everything else: offsets, sizes of accesses, escapes of
+computed frame addresses).  Assumption ASM-006 (the exe makes no wild accesses; array indices in bounds): pointer arithmetic stays inside
+the object it starts in.  STACK, ROBND, GOT, RWX are input facts (objects.json; layout.json fnvnx-layout/1 prot and PT_GNU_RELRO); RUN is
+part of rule R9 (docs/ORDERING.md).
+Pure: a function of the object bytes.
+```
+
+## link/gate_r7.py
+
+```text
+gate_r7 - R7 LAYOUT: does GCC give every record type exactly the layout cl gives it? (L2 SOURCE)
+
+    gate_r7.py --gcc PATH [--gcc PATH ...] --cl PATH [--cl PATH ...] [--units units.json]      (inputs: link/unitpairs.py)
+
+GCC side: section `.fnvnx.layout` of the GCC object (plugin fnvnx_layout; parsed by link/objsections.py): one line per complete record
+type of the unit.  cl side: the CodeView type records (`.debug$T`) of the unit's cl object built with /Z7 (read by link/codeview.py).
+Both are keyed by MSVC's decorated type name without the leading `.?A` (the "unique name" cl writes into every record; the plugin
+computes it by the symbol-name rules); the key is an exact string on both sides, nothing is normalised.
+UNIVERSE: every (unit, key) of every `.fnvnx.layout` line of every GCC object (a key once per unit); a GCC object that cannot be read or
+whose section does not parse is one item `unit:error`.  Item id `unit:key`.  The records only cl has are not in the universe: no
+GCC-built body can depend on a layout GCC never computed.
+CERTIFIED: the unit's cl object has exactly one definition of the key and every fact below is the same on both sides:
+  size; the set of named data members, each with byte offset (bit offset and width for a bit-field) and size; the bases (key, offset,
+  virtual or not); the vfptr (neither side introduces one).  Unnamed bit-fields are not compared (CodeView
+  does not list them); the members of an anonymous struct or union are the record's own on both sides.
+Every other item is red and listed with its reason: `differs` (the first difference), `undecided` (a fact the data cannot give), `only-gcc`
+(cl's debug info of the unit has no definition: no cl object, no CodeView, or no such key).  Undecided reasons, with the missing fact:
+  - the record introduces a vfptr (both sides): the offset of the vfptr is not in CodeView (LF_VFUNCTAB has a type and no offset); it is
+    not derived from the other offsets, which leave it undetermined
+  - the size of a member's type is outside what CodeView states (codeview.py: PRIM, member pointers)
+  - the key has several different definitions in the unit, in one cl object or between the cl objects of a source several units list
+    (the definitions of all of them are collected and identical ones count once; unnamed types share keys) or the plugin could not name the type (`nokey:`)
+  - the CodeView members or bases of the record could not be read
+A record with a virtual base differs by rule: cl lays it out with a vbptr and a vbtable, GCC with a vptr and vtable-held offsets; the
+two object models are different layouts and the native body would read the wrong ones.
+CLAIM.  Size, and each member's offset, size and type key, are the compilers' own data for the same source, compared exactly.  The
+alignment of a record is not part of the claim (cl's alignment is not in CodeView and is not compared).  The pairing key is defined as
+follows (a fact of the gate's inputs): the key of a type is the plugin's name for it in the `.fnvnx.layout` line and the CodeView unique
+name in the cl object; a key with several definitions in the unit is `undecided` (above).  Zero lines: green, universe 0 (detail says so).
+DROPPED from legacy r7: the alignment comparison and its natural-alignment derivation; the vfptr offset taken as 0 when no member starts there (a derivation CodeView does not support); sizes and
+alignments of the primitive types outside the scalar table (10, 12, 20 byte, 6 byte); pointer-to-member sizes taken from the pointer
+kind; equality of two multi-definition keys by comparing the two sets of records (now: undecided); `only-cl` records; the text match
+on reason strings that decided which member size was unknown; the verdict for a record whose members could not be read (it counted
+every GCC member as missing).
+```
+
+## link/odr.py
+
+```text
+odr - gate `odr`: the copies of every COMDAT group are identical across objects (L2 SOURCE, ABI1).
+
+    odr.py OBJ.o [OBJ.o ...]            writes $GATE_OUT/odr.json, exit 0 iff green, 1 red, 2 malformed input
+
+RULE.  A COMDAT group (an SHT_GROUP section whose flag word has GRP_COMDAT) is the compiler's statement "every translation unit that
+needs this entity emits this same definition; the linker keeps one".  The linker keeps one without looking at the others, so the
+statement is true iff all copies are the same definition.  The identity of a copy is its image as the linker would see it:
+the multiset over member sections of (section name, type, flags, alignment, entry size, bytes, relocations), where a relocation
+is (offset, type, addend, target) and the target is
+  * a symbol with a name (global, weak, undefined or local non-section symbol): the name, or, for a local symbol defined in
+    a member of the same group, (member name, value);
+  * a section symbol: of a member of the same group -> (member name); of a SHF_MERGE section -> the merged entity read at
+    the addend (cstring when SHF_STRINGS, else entsize bytes), the addend then being an address of this object and dropped;
+    of any other section -> OPAQUE: a section symbol has no size, so the extent of the entity it points at is not in the object;
+    the copy is then undecidable and its signature is uncertified (it is never passed).
+Relocation sections are found by sh_info (the section they apply to), never by name.
+UNIVERSE.  Every group signature (the name of the group's symbol) that occurs as a COMDAT group in two or more of the given objects.
+A signature in one object only has nothing to be compared with and is not in the universe.
+PROOF.  Green means all copies of every signature have equal identity and no copy has an opaque relocation; the identity includes every byte and every relocation of
+every member, so two copies with equal identity assemble to the same bytes with the same symbol references in any link.  A red item names the
+signature, the objects and the first difference.
+INPUT FACTS.  The objects are ELF relocatable objects of one target (the objects the verdict's link takes; a member or group the gate cannot parse is a red item with the reason, ValueError below); equal symbol names mean equal symbols (the linker's own rule for one link, which is what the verdict's link performs).
+```
+
+## toolchain/order/fnvnx_order.cc
+
+```text
+ fnvnx_order.cc - GCC plugin: MSVC x86 evaluation order and TSO memory ordering for decomp units on AArch64
+ (docs/ORDERING.md).
+
+   g++ ... -fplugin=<dir>/fnvnx_order.so [-fplugin-arg-fnvnx_order-verbose[=sites]] [-fplugin-arg-fnvnx_order-args=rtl|ltr]
+           [-fplugin-arg-fnvnx_order-object=first|last|msvc] [-fplugin-arg-fnvnx_order-operator=cpp17|rtl]
+           [-fplugin-arg-fnvnx_order-assign=cpp17|msvc] unit.cpp
+
+ Memory ordering (R9 TSO-MAP) has one rule and no option: every load and store of memory that is not a proven local
+ of the function (an automatic variable whose address is never taken) is ordered; the hardware is x86 TSO, the
+ Cortex-A57 reorders freely. volatile is no mark: it adds nothing, every shared access is ordered.
+
+   load  of shared memory  -> __atomic_load_N (p, ACQUIRE)   = ldar / ldarh / ldarb
+   store to shared memory  -> __atomic_store_N(p, v, RELEASE) = stlr / stlrh / stlrb
+
+ Objects that are not a naturally aligned 1/2/4/8-byte scalar (bit-fields, packed or misaligned fields - ldar
+ faults on misalignment where x86 does not -, aggregates, vectors) keep their plain access with a fence:
+ load; dmb ishld (acquire), and dmb ish; store (release). Interlocked* keep the full x86 lock semantics (inline
+ ldaxr/stlxr loops and dmb). The one object not ordered is a constant the compiler itself places in a read-only
+ section (readonly_object): nothing ever writes it.
+
+ Runs right after the CFG is built (before SSA, so no virtual operands to maintain), like fnvnx_ftoi.
+
+ args=rtl (default) | ltr: call arguments in MSVC's order (ORDER-ARGS). MSVC x86 evaluates the arguments of every
+ call right to left (it pushes them); GCC evaluates them left to right on AArch64 (its gimplifier reverses only for
+ targets with push instructions, PUSH_ARGS_REVERSED, a compile-time 0 here). Before a function body is lowered
+ (PLUGIN_PRE_GENERICIZE), every call or constructor call with at least one side-effecting argument and another
+ non-constant one gets its scalar arguments wrapped in SAVE_EXPRs, and the first of them becomes the chain
+ (s_n, ..., s_2, s_1): GCC evaluates the first argument first, so all of them are evaluated last to first, while the
+ call itself (and so return slots and constructor calls) stays as it was. `this` and the callee stay first, as now
+ (ORDER-OBJECT is a separate class). A call with a side-effecting argument of class type is left alone.
+
+ object=first (default) | last (ORDER-OBJECT, open until S11's MSVC 2008 run of tests/s12/order/evalorder.cpp):
+ MSVC's thiscall pushes the arguments and probably computes the object (ecx) last. With object=last (and args=rtl)
+ a member call whose object and an argument can see each other (one has side effects, the other is not invariant)
+ evaluates the arguments right to left, then the object, then the callee: for a direct call `this` joins the chain
+ as its last element (the callee stays an ADDR_EXPR, so the call stays direct); for a virtual call the chain goes
+ in front of the OBJ_TYPE_REF's object, which GCC gimplifies before the vtable load. Constructors, destructors and
+ calls through pointers to members keep the object first.
+ operator=cpp17 (default) | rtl (ORDER-OPERATOR, open the same way): C++17 evaluates overloaded `<<`, `>>`, `[]`,
+ `->*` left to right (CALL_EXPR_ORDERED_ARGS), which the pass leaves alone. With operator=rtl they lose the flag
+ and are ordered like any call (a free operator's left operand included; a member operator's object as object=
+ says). `=` and `@=` (CALL_EXPR_REVERSE_ARGS) already evaluate the right operand first, as MSVC does: left alone.
+```
+
 ## verify/a64access.cc
 
 ```text
