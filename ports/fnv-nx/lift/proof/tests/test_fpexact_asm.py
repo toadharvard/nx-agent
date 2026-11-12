@@ -171,6 +171,13 @@ class Negative(unittest.TestCase):
             'top': '__asm__(".text\\n.globl topf\\n.type topf,%function\\ntopf:\\n ret\\n.size topf,.-topf\\n");\n',
             'top2': '__asm__(".text\\n.globl t1\\n.type t1,%function\\nt1:\\n add w0, w0, #1\\n ret\\n.size t1,.-t1\\n");\n'
                     '__asm__(".text\\n.globl t2\\n.type t2,%function\\nt2:\\n nop\\n fcvtzs w0, s0\\n ret\\n.size t2,.-t2\\n");\n',
+            # an asm that emits into another executable section: its bytes are in no function and in no range
+            'push': 'extern "C" void pp(void){ __asm__ volatile(".pushsection .text.x,\\"ax\\"\\n .word 0x12345678\\n.popsection"); }\n',
+            'pushcvt': 'extern "C" int pq(void){ int r = 0; __asm__ volatile(".pushsection .text.x,\\"ax\\"\\n fcvtzs w0, s0\\n.popsection"); return r; }\n',
+            'tlpush': '__asm__(".pushsection .text.y,\\"ax\\"\\n .word 0x12345678\\n.popsection\\n");\n',
+            # alignment filler between functions is a whole NOP word: not a finding
+            'pad': 'extern "C" __attribute__((aligned(64))) int pa(int a){ return a + 1; }\n'
+                   'extern "C" __attribute__((aligned(256))) int pb(int a){ return a + 2; }\n',
             'bad': 'extern "C" void u(void){ __asm__ volatile(".inst 0xffffffff"); }\n',
             'cbare.c': 'int cf(void){ int r; __asm__ volatile("fcvtzu %w0, s2" : "=r"(r)); return r; }\n',
             'none': 'extern "C" int n(int a){ return a + 1; }\n',
@@ -229,6 +236,30 @@ class Negative(unittest.TestCase):
         open(p, 'wb').write(bytes(raw))
         open(os.path.join(d, 'mut_bytes.f2i.json'), 'w').write(open(o[:-2] + '.f2i.json').read())
         self.assertTrue(any('asm range' in x and 'fcvtzs' in x for x in judge(p, 'clean.cc')), judge(p, 'clean.cc'))
+
+    def test_asm_emitting_into_another_section_is_found_by_coverage(self):
+        for n in ('push', 'pushcvt', 'tlpush'):
+            f = judge(self.o[n])
+            self.assertTrue(any('in no compiled function and no recorded asm range' in x for x in f), (n, f))
+
+    def test_alignment_filler_is_not_a_finding(self):
+        self.assertEqual(judge(self.o['pad']), [])
+
+    def test_mutated_filler_byte_is_a_finding(self):
+        o = self.o['pad']
+        raw = bytearray(open(o, 'rb').read())
+        with open(o, 'rb') as fh:
+            t = ELFFile(fh).get_section_by_name('.text')
+            off, size = t['sh_offset'], t['sh_size']
+            pa = [x for x in ELFFile(fh).get_section_by_name('.symtab').iter_symbols() if x.name == 'pa'][0]
+            end = pa['st_value'] + pa['st_size']
+        self.assertGreater(size, end + 4)
+        raw[off + end:off + end + 4] = (0x1e380000).to_bytes(4, 'little')     # the first filler word after pa's extent, now fcvtzs
+        d = os.path.dirname(o)
+        p = os.path.join(d, 'mut_pad.o')
+        open(p, 'wb').write(bytes(raw))
+        open(os.path.join(d, 'mut_pad.f2i.json'), 'w').write(open(o[:-2] + '.f2i.json').read())
+        self.assertTrue(any('in no compiled function' in x for x in judge(p, 'pad.cc')))
 
     def test_a_clean_top_level_asm_has_a_range_and_no_finding(self):
         f = judge(self.o['top'])

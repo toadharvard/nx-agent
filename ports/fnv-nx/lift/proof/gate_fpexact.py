@@ -71,6 +71,9 @@ object-level necessary condition:
       asm insns at the marker pass, unrecorded]; totals over the objects judged are N (GIMPLE asm given to the expander), M (emitted with a range), D (deleted before final: the
       expander dropping unreachable blocks and the RTL passes deleting dead insns, per function N - rtl0 and rtl0 - M, never negative), U (unrecorded). It replaces the earlier
       reliance on an asm without a float operand doing no conversion: no operand or clobber text is trusted for this, the instructions are read.
+      Coverage (same check): every byte of every executable section of a C / C++ object lies in the extent of an STT_FUNC symbol the compiler emitted from a
+      function body (the names the plugin's final-pass hook saw, with `<name>.cold`), or in a recorded asm range, or is a whole A64 NOP word (alignment filler);
+      any other byte is a finding. So an asm that emits into another section (.pushsection .text.x; fcvtzs ...) cannot hide a conversion outside its range.
   Soundness argument: a compiler-generated A64 conversion instruction comes from a GIMPLE conversion (FIX_TRUNC_EXPR, a conversion
   builtin or IFN_VEC_CONVERT) present in the function bodies the plugin saw, or from an asm; the plugin sees every body before the first
   transformation; outside the attributed helpers none exists, so the conversion instructions of the object are copies of the helpers'
@@ -401,7 +404,7 @@ def scan_asmranges(path):
     finding, a word capstone (CS_ARCH_ARM64) cannot decode is a finding (nothing is skipped, mapping symbols included), and so is a range that cannot be resolved, lies in no executable section, is empty-and-reversed, or holds undecodable code
     bytes. A missing section is a finding (the plugin always writes it)."""
     md = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
-    out = {"entries": 0, "findings": [], "fcvt": 0, "toplevel": 0}
+    out = {"entries": 0, "findings": [], "fcvt": 0, "toplevel": 0, "resolved": []}
     with open(path, "rb") as fh:
         elf = ELFFile(fh)
         sec = elf.get_section_by_name(".fnvnx.asmrange")
@@ -440,6 +443,7 @@ def scan_asmranges(path):
                     out["findings"].append("asm range at %s: [0x%x, 0x%x) is not inside an executable section" % (where, lo, hi))
                 else:
                     tdata = tsec.data()
+                    out["resolved"].append((b[0], lo, hi))
                     if (hi - lo) % 4 or lo % 4:
                         out["findings"].append("asm range at %s: [0x%x, 0x%x) is not a whole number of A64 words" % (where, lo, hi))
                     # every word of the range, whatever the section's mapping symbols say: an asm text may hold any bytes, and none is skipped
@@ -510,13 +514,51 @@ def asm_totals(a, ranges):
     return N, M, D, U + abs(ranges - M - a["toplevel"])
 
 
+NOP = 0xd503201f
+
+
+def scan_coverage(path, emitted, ranges):
+    """Check 3d, coverage: every byte of every executable section (SHF_EXECINSTR, PROGBITS) of a C / C++ object lies in (a) the extent [st_value, st_value + st_size)
+    of an STT_FUNC symbol of that section that the compiler emitted from a function body (EMITTED: the assembler names the plugin's final-pass hook saw, with the
+    compiler's own `<name>.cold` partition), or (b) a recorded asm range (RANGES: [(section index, lo, hi)] from scan_asmranges), or (c) is alignment filler: a whole
+    A64 NOP word (the assembler's fill of .p2align in code). Any other byte is a finding: it is code or data that no compiler pass and no recorded asm statement
+    produced, so it is where an asm that switched section (.pushsection .text.x; fcvtzs ...) would put a conversion. -> [finding strings]"""
+    out = []
+    with open(path, "rb") as fh:
+        elf = ELFFile(fh)
+        syms = {}
+        for sec in elf.iter_sections():
+            if sec["sh_type"] != "SHT_SYMTAB":
+                continue
+            for sym in sec.iter_symbols():
+                if sym["st_info"]["type"] == "STT_FUNC" and isinstance(sym["st_shndx"], int):
+                    n = sym.name
+                    if n in emitted or (n.endswith(".cold") and n[:-5] in emitted):
+                        syms.setdefault(sym["st_shndx"], []).append((sym["st_value"], sym["st_value"] + sym["st_size"]))
+        for idx, sec in enumerate(elf.iter_sections()):
+            if not sec["sh_flags"] & SHF_EXECINSTR or sec["sh_type"] != "SHT_PROGBITS":
+                continue
+            data = sec.data()
+            cover = bytearray(len(data))
+            for lo, hi in syms.get(idx, []) + [(l, h) for i, l, h in ranges if i == idx]:
+                for k in range(max(lo, 0), min(hi, len(data))):
+                    cover[k] = 1
+            for p in range(0, len(data) - len(data) % 4, 4):
+                if not all(cover[p:p + 4]) and int.from_bytes(data[p:p + 4], "little") != NOP:
+                    out.append("section %s: bytes at 0x%x are in no compiled function and no recorded asm range" % (sec.name, p))
+                    break
+            if len(data) % 4 and not all(cover[len(data) - len(data) % 4:]):
+                out.append("section %s: %d trailing byte(s) are in no compiled function and no recorded asm range" % (sec.name, len(data) % 4))
+    return out
+
+
 def check_3d(path, a):
     """Check 3d: the bytes of every inline asm of the object, as the object contains them. -> [finding strings]"""
     r = scan_asmranges(path)
     N, M, D, U = asm_totals(a, r["entries"])
     for k, v in (("N", N), ("M", M), ("D", D), ("U", U), ("units", 1), ("fcvt", r["fcvt"])):
         TOTALS3D[k] += v
-    out = list(r["findings"])
+    out = list(r["findings"]) + scan_coverage(path, set(a["functions"]), r["resolved"])
     if U:
         out.append("%d asm insn(s) reached final without a range (N=%d M=%d D=%d, entries in .fnvnx.asmrange %d)" % (U, N, M, D, r["entries"]))
     if r["toplevel"] != a["toplevel"]:
