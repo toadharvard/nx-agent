@@ -184,6 +184,7 @@ dynsites-check: probe
 # the registry-site extractor and the seed generator on synthetic input (no exe-derived file needed)
 regsites-check:
 	python3 -I $(ROOT)/platform/manifest/check_regsites.py
+	python3 -I $(ROOT)/platform/manifest/check_filesites.py
 	python3 -I $(ROOT)/platform/manifest/check_gen_registry.py
 	python3 -I $(ROOT)/platform/manifest/check_gen_prefs.py
 
