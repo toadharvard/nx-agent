@@ -1,6 +1,6 @@
 """Moves, conversions, stack, EFLAGS and string families (see forms.py)."""
 from fnvlift.dsl import REGS, C, V, ashr, bit, concat, eq, extract, ite, load, msb, sext, trunc, ult, zext
-from proof.forms import AReg, Op, cond, ea, handler, pzs, rd, wr
+from proof.forms import AReg, Op, cond, ea, handler, pzs, rd, store_op, wr
 
 LAHF_SDM = 'LAHF/SAHF: AH = SF:ZF:0:AF:0:PF:1:CF'
 MODIFIABLE = 0x00240100 | 0x4000      # EFLAGS bits (besides the six, DF) POPFD may change in user mode: TF, NT, AC, ID (IF/IOPL need privilege)
@@ -13,7 +13,7 @@ def setcc(c): wr(c.F, c.ops[0], zext(cond(c.opc & 15), 8))
 @handler('cmovcc')
 def cmovcc(c): wr(c.F, c.ops[0], ite(cond(c.opc & 15), rd(c.ops[1]), rd(c.ops[0])))
 @handler('lea')
-def lea(c): wr(c.F, c.ops[0], trunc(ea(c.ops[1]), c.ops[0].w))
+def lea(c): wr(c.F, c.ops[0], trunc(ea(c.ops[1], seg=False), c.ops[0].w))      # LEA computes an offset: no segment base (SDM Vol. 2, LEA)
 @handler('bswap')
 def bswap(c):
     a = rd(c.ops[0]); wr(c.F, c.ops[0], concat(concat(extract(a, 7, 0), extract(a, 15, 8)), concat(extract(a, 23, 16), extract(a, 31, 24))))
@@ -44,7 +44,7 @@ def push(c):
 @handler('pop')
 def pop(c):
     F, o = c.F, c.ops[0]; esp = V('esp', 32); w = 16 if c.o16 else 32; F.reg('esp', esp + w // 8)
-    if o.k == 'm': F.store(ea(o, esp + w // 8), load(esp, w))      # SDM POP: ESP as base of the destination is incremented before the address is computed
+    if o.k == 'm': store_op(F, o, ea(o, esp + w // 8), load(esp, w))      # SDM POP: ESP as base of the destination is incremented before the address is computed
     else: wr(F, o, load(esp, w))
 @handler('pushal', 'pushad')
 def pushad(c):

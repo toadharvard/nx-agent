@@ -20,13 +20,11 @@ fnvlift translates 0x67 (core.py ea, f_string.py, f_sys.py), so the DSL models i
 segment base added after (SDM Vol.2 2.1.5 Table 2-1, Vol.1 3.7.5). New `AReg` for SI/DI/CX/BX of string, loop, jcxz, xlat (low word written, upper half kept).
 Prover on all 295 int shapes with 0x67 that have a Form: proved 270, model-gap 14, FAILED(dsl) 11.
 FAILED(dsl) 11 (all three shards, records in l3b-lift/w4-results):
- * 9 are push/pop with 0x67: push r32/imm/esp/ds, popal (e.g. 656751 push ecx, 676554 push esp, 6464676800000000 push imm32). Counterexample: model stores at a
-   16-bit-wrapped stack address (esp=0: model store differs), the DSL uses esp. SDM Vol.1 6.2.3: the stack address size is SS.B, the 0x67 prefix does not
-   change it. So I believe it is a model defect (x86isa uses the address-size attribute for the stack), NOT confirmed on hardware (the native host test
-   runs 64-bit; a 32-bit-stack check needs a compat-mode driver). Not patched.
- * 2 with segment-prefix stacks: 6765206400 (and gs:[si+disp8]) and 67652e0a00 (or al, cs:[bx+si], prefixes 65 2e). Not analysed further: the 16-bit
-   address paths without a segment prefix all prove, so the suspects are the prefix handling of the model (last-prefix rule / gs base forced to 0).
-Open for L3b lead: decide the model-defect route (as for bt) for the push-with-0x67 class.
+ * CORRECTION (w4, after the first report): the push/pop failures are NOT a model stack-size defect. `6751` (push ecx, 0x67) proves; `6451`, `6551`, `656751`, `676451`
+   fail, i.e. exactly the encodings with a 0x64/0x65 byte. Cause: the prover DRIVER (model_sail._post / run_path) added a free fs_base / gs_base to EVERY memory access of an
+   instruction that carries a 0x64/0x65 byte (isla can initialise seg_hidden_bases with one value for all six segments, not per segment), including the implicit SS stack
+   access and ES:EDI. Fixed as a class, in the model: sail_patches/segment_bases.sail (FS / GS base = two symbolic registers, each access carries its own segment's base) and the
+   driver's blanket addition and prove.py's "forced to 0" workaround are deleted. The 2 segment-prefix cases (6765206400, 67652e0a00) are the same cause.
 
 ## 3. push/pop 16-bit, bound (7b2dd605)
 forms_move push/pop: width 16 under 0x66 (ESP+-2, 16-bit store/load, reg write keeps the upper half). Of the 8 int shapes with push/pop + 0x66: proved 6;
