@@ -346,7 +346,7 @@ Undefined-symbol categories (`tools/pipeline/undef.py`, owners in brackets):
 
 * image code addresses: `code_uncompiled` (its unit does not compile, S1); `code_notemitted` (the unit compiled
   but the definition was not emitted, S1/S2); `code_crt`, `code_eh`, `code_nobody`, `code_unknown` (no unit
-  defines the address; split by `platform/crt/crt_symbols.tsv`, S4);
+  defines the address; split by `crt_symbols.tsv` (deleted), S4);
 * `data_addr` (S2 bug);
 * `bridge` (S2);
 * C++ symbols: `vtable_typeinfo`, `cxx_thunk`, `cxx_ctor_dtor`, `cxx_by_name` (S1/S2), `cxx_stdlib` (S5);

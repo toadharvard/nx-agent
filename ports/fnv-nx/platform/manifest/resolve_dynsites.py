@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """resolve_dynsites.py - one rule that resolves the name argument of every dynamic-name site of dynsites.tsv (L5 platform).
 
-    resolve_dynsites.py --contract DIR --sites dynsites.tsv --image NAME=pe[,ranges.tsv] ... [--bridge bridge.tsv]
+    resolve_dynsites.py --contract DIR --sites dynsites.tsv --image NAME=pe ... --facts DIR [--bridge bridge.tsv]
                         [--escape import_escape.tsv ...] --out DIR [--rewrite dynsites_out.tsv] | --selftest
 
 DIR is the contract/ directory of the trunk (L1: argflow.py, memfx.py, gpa_names.py, modules.py); the images and every fact are PATH
@@ -26,9 +26,7 @@ RULE (constant propagation of the name argument; the one rule of contract/argflo
     the images). It is reported, never rewritten into dynsites.tsv;
   * a row is `closed` when every use has a derived set and no escape. A name computed from run-time data (registry, file,
     environment) is no leaf of the rule: it stays `open`, with the break that names it, and is reported - it is never guessed.
-Ranges: with `NAME=pe,ranges.tsv` the code facts are read; with `NAME=pe` alone the ranges are the closure of the image under direct
-calls and jumps, relocated code words (A3: the only way code obtains a code address), the entry point and the export table, with
-the relocation-delimited jump tables of `jmp [table+reg*4]` (A4).
+Ranges: the pinned L3a function facts through funcfacts.py (`--facts DIR`); an image without facts has none, so its rows stay open.
 Output: sites_resolved.tsv (module, site, api, old operand, status, resolved names, proof, breaks) and the global counts.
 --rewrite writes dynsites.tsv with the operand of every closed `dynamic` row replaced by the resolved names (module tokens,
 `.dll` form, then names, space separated, as the other rows carry them) and the hmod column of GetProcAddress rows by the module set.
@@ -55,83 +53,17 @@ SITE_APIS = LOADERS + ('GetProcAddress',)
 EXEC = 0x20000000
 
 
-def build_ranges(argflow, data, name):
-    """{entry: [(start, end)]}: the closure of the image's code (see the module doc)."""
-    from capstone import x86_const as X
-    img = argflow.Image(data, name, {})
-    pe = img.pe
-    ex = [(img.base + rva, img.base + rva + max(vs, rs)) for rva, vs, ro, rs, ch in pe.secs if ch & EXEC]
-
-    def is_code(v):
-        return any(a <= v < b for a, b in ex)
-
-    seeds = {img.base + pe.entry_rva} if pe.entry_rva else set()
-    try:
-        seeds |= {img.base + f for _, f, fwd, _ in pe.exports() if f is not None and fwd is None}
-    except Exception:       # an image without a usable export table has no export entries
-        pass
-    for r in img.relocs:
-        if img.in_raw(r, 4):
-            v = img.word(r)
-            if is_code(v):
-                seeds.add(v)
-    entries, work, ranges = set(), sorted(s for s in seeds if is_code(s)), {}
-    while work:
-        e = work.pop()
-        if e in entries:
-            continue
-        entries.add(e)
-        nodes, wl = {}, [e]
-        while wl:
-            v = wl.pop()
-            if v in nodes or not is_code(v):
-                continue
-            i = img.insn(v)
-            if not i:
-                continue
-            nodes[v] = i
-            m = i.mnemonic
-            nxt = []
-            if m not in ('ret', 'int3', 'ud2', 'hlt', 'jmp'):
-                nxt.append(v + i.size)
-            if m == 'call' and i.operands and i.operands[0].type == X.X86_OP_IMM and is_code(i.operands[0].imm):
-                work.append(i.operands[0].imm)
-            if (m == 'jmp' or m.startswith('j')) and i.operands:
-                op = i.operands[0]
-                if op.type == X.X86_OP_IMM:
-                    nxt.append(op.imm)
-                elif m == 'jmp' and op.type == X.X86_OP_MEM and op.mem.index and op.mem.disp:
-                    a = op.mem.disp & 0xffffffff
-                    while a in img.relocs and img.in_raw(a, 4) and is_code(img.word(a)):    # the relocation-delimited table
-                        nxt.append(img.word(a))
-                        a += 4
-            wl += nxt
-        spans = []
-        for v in sorted(nodes):
-            end = v + nodes[v].size
-            if spans and spans[-1][1] == v:
-                spans[-1][1] = end
-            else:
-                spans.append([v, end])
-        ranges[e] = [(a, b) for a, b in spans]
-    return ranges
-
-
 def load_image(argflow, spec, exe_name=None):
-    nm, rest = spec.split('=', 1)
-    pe, _, rg = rest.partition(',')
+    """spec NAME=pe-file. The function facts are the pinned L3a ranges loaded by funcfacts.py (`--facts DIR`: tree_sha256 and image sha256
+    checked, rebased to the image base); an image without facts has no ranges (its rows stay open with the reason)."""
+    import pefile
+    import funcfacts
+    nm, pe = spec.split('=', 1)
     with open(pe, 'rb') as fh:
         data = fh.read()
-    if rg:
-        with open(rg) as fr:
-            txt = fr.read()
-        ranges = argflow.read_ranges(txt)
-        m = re.search(r'base=0x([0-9a-fA-F]+)', txt)
-        if m:       # the facts are at the load base of the L1 module set: rebase to the image base of the file
-            d = argflow.Image(data, nm.lower(), {}, exe_name).base - int(m.group(1), 16)
-            ranges = {e + d: [(a + d, b + d) for a, b in rs] for e, rs in ranges.items()}
-    else:
-        ranges = build_ranges(argflow, data, nm.lower())
+    pf = pefile.PE(data=data, fast_load=True)
+    ff = funcfacts.for_image(nm.lower(), pf.get_memory_mapped_image(), pf.OPTIONAL_HEADER.ImageBase, pe)
+    ranges = {e: list(rs) for e, rs in ff.runs.items()} if ff.ok else {}
     return nm.lower(), argflow.Image(data, nm.lower(), ranges, exe_name), data
 
 
@@ -418,6 +350,7 @@ def selftest():
 def main(argv=None):
     if argv is None and '--selftest' in sys.argv:
         return selftest()
+    import funcfacts
     ap = argparse.ArgumentParser()
     ap.add_argument('--contract', required=True)
     ap.add_argument('--sites', required=True)
@@ -426,6 +359,7 @@ def main(argv=None):
     ap.add_argument('--escape', action='append', default=[])
     ap.add_argument('--out', required=True)
     ap.add_argument('--rewrite')
+    funcfacts.facts_dir_from_argv(sys.argv)
     a = ap.parse_args(argv)
     argflow, gpa_names, memfx, iat = load_contract(a.contract)
     images, bridge = {}, open(a.bridge).read() if a.bridge else ''

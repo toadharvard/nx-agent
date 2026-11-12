@@ -1,5 +1,5 @@
 /* host_vm.inc - VirtualAlloc's address space on the device (FNVNX_PLAT_VM_*, host.c platform_ext; the guest's
- * os_vm_* in toolchain/guest/os_guest.c, platform/win32/memory.cpp above it).
+ * os_vm_* in platform/guest/os_guest.c, platform/win32/memory.cpp above it).
  *
  * Horizon has no demand paging: an application's memory is its heap, and the kernel can show heap pages at another
  * address. So a reservation is address space only (a libnx virtmem reservation in the stack region, or at the address

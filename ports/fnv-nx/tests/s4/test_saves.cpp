@@ -26,11 +26,12 @@ static std::vector<unsigned char> pattern(unsigned n, unsigned seed)
 
 static bool write_crt(const std::string &win, const std::vector<unsigned char> &d)
 {
-    FILE *f = fnvnx_fopen(win.c_str(), "wb");   /* BSFile writes through the CRT */
-    if (!f)
+    HANDLE h = CreateFileA(win.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE)
         return false;
-    size_t put = fwrite(d.data(), 1, d.size(), f);
-    return fclose(f) == 0 && put == d.size();
+    DWORD put = 0;
+    bool ok = WriteFile(h, d.data(), (DWORD)d.size(), &put, NULL) && put == d.size();
+    return CloseHandle(h) && ok;
 }
 
 static std::vector<unsigned char> read_win32(const std::string &win)

@@ -19,7 +19,7 @@ TEST(cs_recursive)
     CHECK(TryEnterCriticalSection(&g_cs)); /* recursion through TryEnter too */
     CHECK_EQ(g_cs.RecursionCount, 3);
     CHECK(g_cs.OwningThread == (HANDLE)(uintptr_t)GetCurrentThreadId());
-    HANDLE t = CreateThread(NULL, 0, try_enter, NULL, 0, NULL);
+    HANDLE t = test_CreateThread(NULL, 0, try_enter, NULL, 0, NULL);
     WaitForSingleObject(t, INFINITE);
     DWORD code = 99;
     GetExitCodeThread(t, &code);
@@ -27,14 +27,14 @@ TEST(cs_recursive)
     CloseHandle(t);
     LeaveCriticalSection(&g_cs);
     LeaveCriticalSection(&g_cs);
-    t = CreateThread(NULL, 0, try_enter, NULL, 0, NULL);
+    t = test_CreateThread(NULL, 0, try_enter, NULL, 0, NULL);
     WaitForSingleObject(t, INFINITE);
     GetExitCodeThread(t, &code);
     CHECK_EQ(code, 0); /* still held once */
     CloseHandle(t);
     LeaveCriticalSection(&g_cs);
     CHECK(g_cs.OwningThread == NULL);
-    t = CreateThread(NULL, 0, try_enter, NULL, 0, NULL);
+    t = test_CreateThread(NULL, 0, try_enter, NULL, 0, NULL);
     WaitForSingleObject(t, INFINITE);
     GetExitCodeThread(t, &code);
     CHECK_EQ(code, 1); /* released: now it can */
@@ -63,7 +63,7 @@ TEST(cs_contention_zero_initialised)
 {
     HANDLE t[NTHREADS];
     for (int i = 0; i < NTHREADS; i++)
-        t[i] = CreateThread(NULL, 0, cs_worker, NULL, 0, NULL);
+        t[i] = test_CreateThread(NULL, 0, cs_worker, NULL, 0, NULL);
     CHECK_EQ(WaitForMultipleObjects(NTHREADS, t, TRUE, INFINITE), WAIT_OBJECT_0);
     for (int i = 0; i < NTHREADS; i++)
         CloseHandle(t[i]);
@@ -111,7 +111,7 @@ TEST(interlocked)
     CHECK(InterlockedExchangePointer(&p, NULL) == &x);
     HANDLE t[NTHREADS];
     for (int i = 0; i < NTHREADS; i++)
-        t[i] = CreateThread(NULL, 0, ilk_worker, NULL, 0, NULL);
+        t[i] = test_CreateThread(NULL, 0, ilk_worker, NULL, 0, NULL);
     WaitForMultipleObjects(NTHREADS, t, TRUE, INFINITE);
     for (int i = 0; i < NTHREADS; i++)
         CloseHandle(t[i]);
@@ -134,7 +134,7 @@ TEST(event_auto_reset_wakes_one)
     g_woken = 0;
     HANDLE t[4];
     for (int i = 0; i < 4; i++)
-        t[i] = CreateThread(NULL, 0, ev_waiter, NULL, 0, NULL);
+        t[i] = test_CreateThread(NULL, 0, ev_waiter, NULL, 0, NULL);
     Sleep(100);
     SetEvent(g_ev);
     Sleep(200);
@@ -156,7 +156,7 @@ TEST(event_manual_reset_wakes_all)
     g_woken = 0;
     HANDLE t[4];
     for (int i = 0; i < 4; i++)
-        t[i] = CreateThread(NULL, 0, ev_waiter, NULL, 0, NULL);
+        t[i] = test_CreateThread(NULL, 0, ev_waiter, NULL, 0, NULL);
     Sleep(50);
     SetEvent(g_ev);
     WaitForMultipleObjects(4, t, TRUE, INFINITE);
@@ -215,7 +215,7 @@ TEST(semaphore)
     g_consumed = 0;
     HANDLE t[3];
     for (int i = 0; i < 3; i++)
-        t[i] = CreateThread(NULL, 0, consumer, NULL, 0, NULL);
+        t[i] = test_CreateThread(NULL, 0, consumer, NULL, 0, NULL);
     LONG prev = -1;
     for (int i = 0; i < 100; i++)
         ReleaseSemaphore(g_sem, 3, i == 0 ? &prev : NULL);
@@ -243,7 +243,7 @@ TEST(mutex_ownership_and_names)
     g_mx = CreateMutexA(NULL, TRUE, "Local\\fnvnx-test");
     CHECK_EQ(GetLastError(), ERROR_SUCCESS);
     CHECK_EQ(WaitForSingleObject(g_mx, 0), WAIT_OBJECT_0); /* recursive for the owner */
-    HANDLE t = CreateThread(NULL, 0, mutex_other, NULL, 0, NULL);
+    HANDLE t = test_CreateThread(NULL, 0, mutex_other, NULL, 0, NULL);
     WaitForSingleObject(t, INFINITE);
     DWORD code;
     GetExitCodeThread(t, &code);
@@ -256,7 +256,7 @@ TEST(mutex_ownership_and_names)
     CHECK(ReleaseMutex(g_mx));
     CHECK(!ReleaseMutex(g_mx));
     CHECK_EQ(GetLastError(), ERROR_NOT_OWNER);
-    t = CreateThread(NULL, 0, mutex_other, NULL, 0, NULL);
+    t = test_CreateThread(NULL, 0, mutex_other, NULL, 0, NULL);
     WaitForSingleObject(t, INFINITE);
     GetExitCodeThread(t, &code);
     CHECK_EQ(code, 3);
@@ -277,7 +277,7 @@ TEST(thread_suspended_start_and_exit_code)
 {
     g_ran = 0;
     DWORD tid = 0;
-    HANDLE t = CreateThread(NULL, 64 * 1024, record, (LPVOID)(uintptr_t)1234, CREATE_SUSPENDED, &tid);
+    HANDLE t = test_CreateThread(NULL, 64 * 1024, record, (LPVOID)(uintptr_t)1234, CREATE_SUSPENDED, &tid);
     CHECK(t != NULL);
     CHECK(tid != 0 && tid % 4 == 0);
     Sleep(50);
@@ -302,7 +302,7 @@ static DWORD exit_early(LPVOID)
 
 TEST(thread_exitthread)
 {
-    HANDLE t = CreateThread(NULL, 0, exit_early, NULL, 0, NULL);
+    HANDLE t = test_CreateThread(NULL, 0, exit_early, NULL, 0, NULL);
     CHECK_EQ(WaitForSingleObject(t, 2000), WAIT_OBJECT_0);
     DWORD code = 0;
     GetExitCodeThread(t, &code);
@@ -336,7 +336,7 @@ TEST(tls_slots)
     TlsSetValue(g_slot, (void *)0x10);
     HANDLE t[4];
     for (int i = 0; i < 4; i++)
-        t[i] = CreateThread(NULL, 0, tls_worker, (LPVOID)(uintptr_t)(0x1000 * (i + 1)), 0, NULL);
+        t[i] = test_CreateThread(NULL, 0, tls_worker, (LPVOID)(uintptr_t)(0x1000 * (i + 1)), 0, NULL);
     WaitForMultipleObjects(4, t, TRUE, INFINITE);
     for (int i = 0; i < 4; i++) {
         DWORD c = 9;
@@ -368,7 +368,7 @@ TEST(implicit_tls_and_teb)
     unsigned char *mine = (unsigned char *)fnvnx_tls_block();
     CHECK(mine && mine[3] == 4);
     CHECK(fnvnx_tls_array()[0] == mine);
-    HANDLE t = CreateThread(NULL, 0, teb_worker, NULL, 0, NULL);
+    HANDLE t = test_CreateThread(NULL, 0, teb_worker, NULL, 0, NULL);
     WaitForSingleObject(t, INFINITE);
     DWORD c = 9;
     GetExitCodeThread(t, &c);
@@ -401,7 +401,7 @@ TEST(implicit_tls_identity)
 {
     void *(*saved)(void) = fnvnx_image_tls_hook;
     fnvnx_image_tls_hook = image_tls;
-    HANDLE t = CreateThread(NULL, 0, tls_identity_worker, NULL, 0, NULL);
+    HANDLE t = test_CreateThread(NULL, 0, tls_identity_worker, NULL, 0, NULL);
     WaitForSingleObject(t, INFINITE);
     DWORD c = 9;
     GetExitCodeThread(t, &c);
@@ -422,10 +422,10 @@ TEST(thread_role_and_other_thread_placement)
 {
     int (*saved)(void *, void *) = fnvnx_thread_role_hook;
     fnvnx_thread_role_hook = role_hook;
-    HANDLE t = CreateThread(NULL, 0, role_worker, (LPVOID)0x1234, CREATE_SUSPENDED, NULL);
+    HANDLE t = test_CreateThread(NULL, 0, role_worker, (LPVOID)0x1234, CREATE_SUSPENDED, NULL);
     fnvnx_thread_role_hook = saved;
     CHECK(t != NULL);
-    CHECK(g_role_start == (void *)role_worker && g_role_arg == (void *)0x1234);
+    CHECK(test_threads::win_start_is(g_role_start, g_role_arg, role_worker, (LPVOID)0x1234));   /* the thread is still suspended: its start record is alive */
     CHECK(SetThreadPriority(t, THREAD_PRIORITY_BELOW_NORMAL));
     CHECK_EQ(GetThreadPriority(t), THREAD_PRIORITY_BELOW_NORMAL);
     CHECK(SetThreadAffinityMask(t, 0x6) != 0);
@@ -459,7 +459,7 @@ TEST(critical_section_spin_count)
     g_spin_counter = 0;
     HANDLE t[3];
     for (int i = 0; i < 3; i++)
-        t[i] = CreateThread(NULL, 0, spin_worker, NULL, 0, NULL);
+        t[i] = test_CreateThread(NULL, 0, spin_worker, NULL, 0, NULL);
     WaitForMultipleObjects(3, t, TRUE, INFINITE);
     for (int i = 0; i < 3; i++)
         CloseHandle(t[i]);

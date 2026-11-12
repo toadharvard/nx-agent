@@ -58,6 +58,8 @@ import statistics
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, '..'))
+import tables  # noqa: E402  (the decomp-derived budget model is a private table: tools/tables.py)
 ROOT = os.path.normpath(os.path.join(HERE, '..', '..'))
 sys.path.insert(0, os.path.join(ROOT, 'tests', 's5'))
 
@@ -568,13 +570,14 @@ def summary(b):
 
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--model', default=os.path.join(HERE, 'budget_model.json'))
+    ap.add_argument('--model', default=None)
     ap.add_argument('--frameprof', action='append', default=[])
     ap.add_argument('--render')
     ap.add_argument('--perf', help="P0-perfmodel's fnvnx-perf/1 (<head12>-perf.json): A57 prices of the hot rows")
     ap.add_argument('--out')
     ap.add_argument('--quiet', action='store_true')
     a = ap.parse_args(argv)
+    a.model = a.model or tables.path('budget_model.json')
     model = json.load(open(a.model))
     profs = [json.load(open(p)) for p in a.frameprof]
     render = json.load(open(a.render)) if a.render else None

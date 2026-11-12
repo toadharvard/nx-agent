@@ -11,14 +11,14 @@ GetModuleHandle*, GetProcAddress, CoCreateInstance) with the constant string or
 GUID operand when the bytes before the call push one. A site without a constant
 is reported as `dynamic`: the implementation must be total over all names anyway.
 
-Sites (dynsites.tsv): a site is the address of a decoded CALL INSTRUCTION inside the reached runs of the L3a function facts (facts directory,
-ranges.tsv) whose operand is the import slot (`call [slot]`), a direct call of a thunk `jmp [slot]`, or `call reg` after `mov reg,[slot]`
-(the L1 contract rule argflow.imports_called). A slot operand, a thunk body or a slot load is never a site; a slot use that escapes is
-listed on stderr as OPEN. The old function-start search and window rule are removed: no function bound and no byte window is guessed.
-A loader operand is the module literal when its argument is a closed constant (argflow.derive_arg), else `dynamic`; a GetProcAddress row has
-operand and hmod `dynamic` (resolve_dynsites.py derives them from the same facts); a CoCreateInstance operand is its CLSID and IID.
+Sites (dynsites.tsv): a site is the address of a decoded CALL INSTRUCTION inside the reached runs of the L3a function facts (loaded and
+pin-checked by funcfacts.py, `--facts DIR`) whose operand is the import slot (`call [slot]`), a direct call of a thunk `jmp [slot]`, or
+`call reg` after `mov reg,[slot]` (the L1 contract rule argflow.imports_called, whose Image is built from the runs funcfacts loaded). A slot
+operand, a thunk body or a slot load is never a site; a slot use that escapes is listed on stderr as OPEN. No function bound and no byte window
+is guessed. A loader operand is the module literal when its argument is a closed constant (argflow.derive_arg), else `dynamic`; a GetProcAddress
+row has operand and hmod `dynamic` (resolve_dynsites.py derives them from the same facts); a CoCreateInstance operand is its CLSID and IID.
 
-Usage: pemanifest.py <dirs-with-modules, ':'-separated in DECLARED_ROOTS order> <root.exe> <outdir> <bridge.tsv> <dllkind.py> <dllkind-sha256> <contract-dir> <facts-dir> <import_escape.tsv>
+Usage: pemanifest.py <dirs, ':'-separated in DECLARED_ROOTS order> <root.exe> <outdir> <bridge.tsv> <dllkind.py> <dllkind-sha256> <contract-dir> <import_escape.tsv> --facts DIR
 The role of every dll is the one rule of contract/dllkind.py (L1 contract, branch claude/fnv-l1-contract-w18, pinned by the sha256
 argument: the file is read from that path, never copied): image | bridge | declared | platform (the root is `root`). BRIDGE is the set
 of dlls with rows in bridge.tsv (the previous table: the closure is a fixed point; bridgetable.py writes it from this run's sys_names).
@@ -36,11 +36,17 @@ Output (exe-derived; keep out of the public repository):
 import bisect, collections, os, re, struct, sys
 import capstone
 import pefile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import funcfacts
 from capstone import x86_const as X
 
 DYN = {"LoadLibraryA", "LoadLibraryW", "LoadLibraryExA", "LoadLibraryExW",
        "GetModuleHandleA", "GetModuleHandleW", "GetProcAddress",
        "CoCreateInstance"}
+
+
+JOINED = []   # (module, site, api, entries) of every site whose entries disagree (census)
 
 
 def relocs(pe):
@@ -113,27 +119,24 @@ class Mod:
                 (code if self.in_code(r) else data)[t].append(r)
         return code, data
 
-    def argimage(self, contract, facts, bridge_tsv, escape_tsv):
-        """The L1 contract's argflow.Image of this module over the L3a function facts (ranges.tsv of the facts directory: the exe at the
-        top, a module in its own directory), rebased from the facts' load base to the image base of the file."""
-        if getattr(self, "_ai", None) is None:
+    def argimage(self, contract, bridge_tsv, escape_tsv):
+        """The L1 contract's argflow.Image of this module over the pinned L3a function facts: the ranges are the ones funcfacts.py loaded
+        (tree_sha256 and image sha256 checked, rebased to the image base), so argflow reads no facts file of its own. None when the image has no facts."""
+        if getattr(self, "_ai", "unset") == "unset":
+            ff = self.ff
+            if not ff.ok:
+                self._ai = None
+                return None
             sys.path.insert(0, contract)
-            import argflow
+            import argflow, gpa_names, memfx
             self._argflow = argflow
-            stem = self.name[:-4]
-            path = os.path.join(facts, "ranges.tsv" if self.name.endswith(".exe") else os.path.join(stem, "ranges.tsv"))
-            txt = open(path, encoding="utf-8").read()
-            fb = int(re.search(r"base=0x([0-9a-fA-F]+)", txt).group(1), 16)
-            d = self.base - fb
-            rg = {e + d: [(a + d, b + d) for a, b in rs] for e, rs in argflow.read_ranges(txt).items()}
-            im = argflow.Image(open(self.path, "rb").read(), self.name, rg)
-            import gpa_names, memfx
+            im = argflow.Image(open(self.path, "rb").read(), self.name, {e: list(rs) for e, rs in ff.runs.items()})
             im.import_stack = gpa_names.import_stacks(open(bridge_tsv, encoding="utf-8").read())
             memfx.Memfx(im, memfx.ImportInfo(open(bridge_tsv, encoding="utf-8").read(), [open(escape_tsv, encoding="utf-8").read()], ""))
             self._ai = im
         return self._ai
 
-    def dynsites(self, contract, facts, bridge_tsv, escape_tsv):
+    def dynsites(self, contract, bridge_tsv, escape_tsv):
         """(rows, open): rows (call va, api, operand, hmod) of every call of LoadLibrary*/GetModuleHandle*/GetProcAddress/CoCreateInstance;
         open = [(api, va, why)] for slot uses that make the call set open (an escaped slot, an address-taken thunk).
         Rule (L1 contract argflow.imports_called): a site is the address of a DECODED CALL INSTRUCTION inside the reached runs of the L3a function
@@ -141,7 +144,9 @@ class Mod:
         slot operand of a call, a thunk and a slot load are never sites. A loader operand is the literal module name when the argument is a
         closed constant (argflow.derive_arg), else `dynamic`; a GetProcAddress operand and hmod are `dynamic` (resolve_dynsites.py derives them);
         a CoCreateInstance operand is the CLSID and IID constants (stdcall arguments 1 and 4) read from the image."""
-        im = self.argimage(contract, facts, bridge_tsv, escape_tsv)
+        im = self.argimage(contract, bridge_tsv, escape_tsv)
+        if im is None:
+            return [], [("*", 0, "unresolved: " + self.ff.reason)]
         af = self._argflow
         rows, op_ = [], []
         for api in sorted({n for _, n, _ in self.imports if n in DYN}):
@@ -176,21 +181,25 @@ class Mod:
                 self._tg[self.u32(r)].append(r)
         return self._tg
 
-    def func_start(self, site):
-        """Entry of the function holding `site`, or None. Entry = the nearest preceding `push ebp; mov ebp,esp` (framed), or the
-        16-aligned address after the nearest preceding int3 (0xCC) padding when no prologue is in range (frameless: the linker aligns and pads
-        functions, so an aligned address after padding is an entry). Looks back at most 0x1000 bytes; no boundary found -> None (hmod stays dynamic)."""
-        o = site - self.base
-        lo = max(0, o - 0x1000)
-        k = self.img.rfind(b"\x55\x8b\xec", lo, o)
-        c = o
-        while True:  # nearest 16-aligned address whose preceding byte is int3 padding (linker alignment of function entries)
-            c = self.img.rfind(b"\xcc", lo, c)
-            if c < 0 or (self.base + c + 1) % 16 == 0:
-                break
-        if c >= 0 and k < 0:
-            return self.base + c + 1
-        return None if k < 0 else self.base + (k - 2 if self.img[k - 2:k] == b"\x8b\xff" else k)
+    @property
+    def ff(self):
+        """the function facts of this image (funcfacts.py): FuncFacts, or NoFacts with the reason"""
+        return funcfacts.for_image(self.name, self.img, self.base, self.path)
+
+    def entries_of(self, site):
+        """Every entry of the function facts whose runs contain `site` and decode (a site is analysed in each; see funcfacts.py). [] when
+        there is none: `unresolved_why(site)` then names the reason."""
+        ff = self.ff
+        return [e for e in ff.entries_of(site) if ff.ins(e) is not None]
+
+    def unresolved_why(self, site):
+        """The reason a site has no function: `no function facts` (image not covered), a run that does not decode, or `inside no run`."""
+        ff = self.ff
+        if not ff.ok:
+            return ff.reason
+        es = ff.entries_of(site)
+        return "inside no run of the function facts" if not es else "; ".join(
+            "entry %x: %s" % (e, ff.bad[e]) for e in es if e in ff.bad)
 
 
 def load_dllkind(path, sha):
@@ -204,7 +213,7 @@ def load_dllkind(path, sha):
     return mod
 
 
-def main(d, root, out, bridge_tsv, dllkind_py, dllkind_sha, contract, facts, escape_tsv):
+def main(d, root, out, bridge_tsv, dllkind_py, dllkind_sha, contract, escape_tsv):
     dk = load_dllkind(dllkind_py, dllkind_sha)
     bridge = {l.split("\t")[0].lower() for l in open(bridge_tsv, encoding="utf-8")
               if l.strip() and not l.startswith(("#", "dll\t")) and not l.startswith("!")}
@@ -237,7 +246,7 @@ def main(d, root, out, bridge_tsv, dllkind_py, dllkind_sha, contract, facts, esc
             if kind.get(n, "root") not in ("image", "root"):
                 continue
             m = mod_of(files[n])
-            for site, nm, op, hm in sorted(set(m.dynsites(contract, facts, bridge_tsv, escape_tsv)[0])):
+            for site, nm, op, hm in sorted(set(m.dynsites(contract, bridge_tsv, escape_tsv)[0])):
                 if nm.startswith("LoadLibrary"):
                     for lit in op.split():
                         lit = lit.lower()
@@ -266,7 +275,7 @@ def main(d, root, out, bridge_tsv, dllkind_py, dllkind_sha, contract, facts, esc
             code, data = m.refs()
             for dll, nm, slot in m.imports:
                 fi.write("%s\t%s\t%s\t0x%08x\t%d\t%d\n" % (n, dll, nm, slot, len(code[slot]), len(data[slot])))
-            rows, opn = m.dynsites(contract, facts, bridge_tsv, escape_tsv)
+            rows, opn = m.dynsites(contract, bridge_tsv, escape_tsv)
             for api, va, why in opn:
                 sys.stderr.write("OPEN %s %s@%x %s\n" % (n, api, va, why))
             for site, nm, op, hm in sorted(set(rows)):
@@ -283,4 +292,5 @@ def main(d, root, out, bridge_tsv, dllkind_py, dllkind_sha, contract, facts, esc
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:10])
+    funcfacts.facts_dir_from_argv(sys.argv)
+    main(*sys.argv[1:9])

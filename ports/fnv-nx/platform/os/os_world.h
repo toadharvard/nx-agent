@@ -1,5 +1,5 @@
 /* os_world.h - internal interface between os_world.c (the world registry, the world lock, and the combination of the
- * two pause reasons) and the three OS backends (os_posix.c, os_horizon.c, toolchain/guest/os_guest.c). Not for the
+ * two pause reasons) and the three OS backends (os_posix.c, os_horizon.c, platform/guest/os_guest.c). Not for the
  * platform above platform/os. */
 #ifndef FNVNX_OS_WORLD_H
 #define FNVNX_OS_WORLD_H

@@ -7,7 +7,7 @@
 #include <dinput.h>
 #include <dsound.h>
 #include <xinput.h>
-#include "fnvnx_win32_ext.h"
+#include "../include/fnvnx_win32_ext.h"
 
 #include "input.h"
 #include "../os/os.h"   /* FNVNX_INIT_MODULES */

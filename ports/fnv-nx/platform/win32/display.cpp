@@ -18,9 +18,11 @@
  * BorderWidth 1, CaptionWidth 18, CaptionHeight 25, MenuWidth/Height 18, ScrollWidth/Height 17, SmCaptionWidth/Height
  * 17, PaddedBorderWidth 0, IconSpacing 75 px) and Wine's rules for what is derived from them. */
 #include "window_int.h"
+#include "font_faces.h"
 
 #include <stdint.h>
 #include <stdio.h>
+#include "fnvnx_render_hooks.h"
 
 extern "C" {
 void fnvnx_set_display_size(int w, int h);
@@ -58,10 +60,8 @@ static int cur_docked(void)
 extern "C" int fnvnx_display_w(void) { return k_modes[cur_docked()].w; }
 extern "C" int fnvnx_display_h(void) { return k_modes[cur_docked()].h; }
 
-/* the render profile (render/d3d9/dev/d3d9_adapter.h: `enum NxEnvProfile { NX_ENV_HANDHELD = 0, NX_ENV_DOCKED = 1 };
- * NxEnvProfile nx_env_profile();`, C++ linkage; an enum without a fixed type returns in the same register as int,
- * and the mangled name does not contain the return type, so this definition is the renderer's symbol) */
-int nx_env_profile(void) { return cur_docked(); }
+/* the render profile (declared once, in fnvnx_render_hooks.h): docked is 1080p, handheld 720p */
+enum NxEnvProfile nx_env_profile(void) { return cur_docked() ? NX_ENV_DOCKED : NX_ENV_HANDHELD; }
 
 extern "C" void fnvnx_set_display_size(int w, int h)
 {
@@ -107,7 +107,8 @@ void font_metrics(void)
             memset(lf, 0, sizeof lf);
             lf[0] = heights[k]; lf[4] = 400;
             ((uint8_t *)lf)[21] = 1;   /* lfCharSet = DEFAULT_CHARSET */
-            memcpy(&lf[7], u"Tahoma", 14);
+            const char *face = w32_face_name(FACE_TAHOMA);
+            for (int c = 0; face[c]; c++) ((char16_t *)&lf[7])[c] = (char16_t)face[c];   /* LOGFONTW.lfFaceName */
             HFONT f = CreateFontIndirectW(lf);
             HGDIOBJ old = dc && f ? SelectObject(dc, f) : NULL;
             int32_t tm[15];

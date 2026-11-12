@@ -5,6 +5,9 @@
 #include <stdlib.h>
 
 int s4_failures, s4_checks;
+pthread_t s4_case_thread;
+int s4_case_armed;
+__thread int s4_thread_guarded;
 s4_case *s4_cases;
 
 static char g_root[1024];
@@ -22,8 +25,38 @@ void s4_write_file(const char *win_path, const char *data)
     CloseHandle(h);
 }
 
+/* the harness proves its own rule before the first case: a failed CHECK throws only on the case's thread or inside s4_thread_guard; on a
+ * thread the platform started (an unguarded one) it stops the run */
+static void *s4_selftest_raw(void *p) { *(int *)p = s4_abort_here(); return NULL; }
+static void *s4_selftest_guarded(void *p)
+{
+    *(int *)p = s4_thread_guard([]() -> int { return s4_abort_here(); }, -1);
+    return NULL;
+}
+static int s4_harness_selftest(void)
+{
+    int raw = -1, guarded = -1;
+    pthread_t a, b;
+    if (pthread_create(&a, NULL, s4_selftest_raw, &raw) || pthread_create(&b, NULL, s4_selftest_guarded, &guarded))
+        return 1;
+    pthread_join(a, NULL);
+    pthread_join(b, NULL);
+    s4_case_thread = pthread_self();
+    s4_case_armed = 1;
+    int on_case = s4_abort_here();
+    s4_case_armed = 0;
+    int idle = s4_abort_here();
+    if (raw != 0 || guarded != 1 || on_case != 1 || idle != 0) {
+        fprintf(stderr, "harness selftest: raw=%d guarded=%d case=%d idle=%d (want 0 1 1 0)\n", raw, guarded, on_case, idle);
+        return 1;
+    }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
+    if (s4_harness_selftest())
+        return 2;
     const char *r = getenv("FNVNX_ROOT");
     snprintf(g_root, sizeof g_root, "%s", r && *r ? r : "./fnvnx-root");
     /* make the root and the game dir; the runtime creates the profile folders itself */
@@ -51,7 +84,14 @@ int main(int argc, char **argv)
             continue;
         int before = s4_failures;
         g_bnd_test = v[i]->name;
-        v[i]->fn();
+        s4_case_thread = pthread_self();
+        s4_case_armed = 1;
+        try {
+            v[i]->fn();
+        } catch (const s4_case_abort &) {
+            /* the failed CHECK has counted itself */
+        }
+        s4_case_armed = 0;
         /* an import that returns to the game with a platform lock still held (a lock taken in one import and released in
          * another) would leave it counted on the test thread: the game's own locks (os_glock) are not counted */
         if (fnvnx_bnd_locks_held()) {

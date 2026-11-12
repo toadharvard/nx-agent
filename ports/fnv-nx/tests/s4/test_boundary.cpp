@@ -1,4 +1,4 @@
-/* test_boundary.cpp - the platform's boundary to the loader and the lifted-code runtime (platform/include/fnvnx_boundary.h,
+/* test_boundary.cpp - the platform's boundary to the loader and the lifted-code runtime (shim/include/fnvnx_boundary.h,
  * host implementation tests/s4/host_boundary.cpp): registered images (module table, PE exports by name / ordinal /
  * forwarder, resources, page map), the value of a system export, game threads, the exit-handler list. */
 #include "s4_test.h"
@@ -259,7 +259,7 @@ TEST(bnd_threads_through_the_boundary)
 {
     int c0 = g_bnd_threads_created, r0 = g_bnd_threads_run, f0 = g_bnd_threads_freed, u0 = g_bnd_threads_freed_unrun;
     DWORD tid = 0;
-    HANDLE t = CreateThread(NULL, 0, t_return, (LPVOID)(uintptr_t)1234, 0, &tid);
+    HANDLE t = test_CreateThread(NULL, 0, t_return, (LPVOID)(uintptr_t)1234, 0, &tid);
     CHECK(t != NULL);
     CHECK_EQ(WaitForSingleObject(t, 5000), 0);
     DWORD code = 0;
@@ -269,7 +269,7 @@ TEST(bnd_threads_through_the_boundary)
     CHECK_EQ(g_bnd_threads_run, r0 + 1);
     CHECK_EQ(g_bnd_threads_freed, f0 + 1);   /* the context was given back when the start routine returned */
     /* ExitThread from inside: the same path, the exit code is the argument */
-    t = CreateThread(NULL, 0, t_exit, NULL, 0, &tid);
+    t = test_CreateThread(NULL, 0, t_exit, NULL, 0, &tid);
     CHECK(t != NULL);
     CHECK_EQ(WaitForSingleObject(t, 5000), 0);
     CHECK(GetExitCodeThread(t, &code) && code == 55);
@@ -278,7 +278,7 @@ TEST(bnd_threads_through_the_boundary)
     CHECK_EQ(g_bnd_threads_freed, f0 + 2);
     CHECK_EQ(g_bnd_threads_freed_unrun, u0);
     /* created suspended: the context exists, nothing runs until ResumeThread */
-    t = CreateThread(NULL, 0, t_return, (LPVOID)(uintptr_t)9, CREATE_SUSPENDED, &tid);
+    t = test_CreateThread(NULL, 0, t_return, (LPVOID)(uintptr_t)9, CREATE_SUSPENDED, &tid);
     CHECK(t != NULL);
     CHECK_EQ(g_bnd_threads_created, c0 + 3);
     CHECK_EQ(g_bnd_threads_run, r0 + 2);
@@ -324,44 +324,3 @@ TEST(bnd_loadlibrary_of_a_module_not_loaded_yet)
     g_bnd_loader = NULL;
 }
 
-namespace {
-char g_log[32];
-int g_nlog;
-void h1(void) { g_log[g_nlog++] = '1'; }
-int h2(void) { g_log[g_nlog++] = '2'; return 0; }
-void h4(void) { g_log[g_nlog++] = '4'; }
-void h3(void)
-{
-    g_log[g_nlog++] = '3';
-    fnvnx_atexit(h4);   /* registered during the exit run: runs next */
-}
-} // namespace
-
-TEST(bnd_exit_handlers_run_in_reverse_order_through_the_invoke_path)
-{
-    g_nlog = 0;
-    CHECK_EQ(fnvnx_atexit(h1), 0);
-    CHECK(_onexit(h2) == h2);
-    CHECK_EQ(fnvnx_atexit(h3), 0);
-    CHECK_EQ(fnvnx_atexit(NULL), -1);
-    int i0 = g_bnd_invokes;
-    fnvnx_c_exit();   /* quick: no handlers */
-    CHECK_EQ(g_nlog, 0);
-    CHECK_EQ(g_bnd_invokes, i0);
-    fnvnx_cexit();    /* handlers, then back to the caller */
-    g_log[g_nlog] = 0;
-    CHECK_STR(g_log, "3421");
-    CHECK_EQ(g_bnd_invokes, i0 + 4);
-    fnvnx_cexit();    /* nothing left */
-    CHECK_EQ(g_bnd_invokes, i0 + 4);
-    /* the msvcrt.dll export registers in the same list */
-    g_nlog = 0;
-    FARPROC onexit = GetProcAddress(GetModuleHandleA("msvcrt.dll"), "_onexit");
-    CHECK(onexit != NULL);
-    typedef int (*onexit_fn)(void);
-    CHECK(((onexit_fn (*)(onexit_fn))onexit)(h2) == h2);
-    fnvnx_atexit(h1);
-    fnvnx_cexit();
-    g_log[g_nlog] = 0;
-    CHECK_STR(g_log, "12");
-}

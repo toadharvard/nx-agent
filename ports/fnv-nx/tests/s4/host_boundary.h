@@ -1,4 +1,4 @@
-/* host_boundary.h - the counters and test hooks of host_boundary.cpp (the host implementation of platform/include/fnvnx_boundary.h) */
+/* host_boundary.h - the counters and test hooks of host_boundary.cpp (the host implementation of shim/include/fnvnx_boundary.h) */
 #ifndef FNVNX_TESTS_HOST_BOUNDARY_H
 #define FNVNX_TESTS_HOST_BOUNDARY_H
 #include <functional>
@@ -9,7 +9,7 @@ extern "C" {
 #endif
 /* guest calls made while the calling thread held a platform lock (every os_lock/os_trylock of the platform; the game's own
    os_glock family is not counted): the test mains require it to stay 0. The count is kept by the host test backend
-   (platform/os/os_posix.c calls fnvnx_lockcount_note, defined in host_boundary.cpp); the product has neither. */
+   (platform_host/os/os_posix.c calls fnvnx_lockcount_note, defined in host_boundary.cpp); the product has neither. */
 extern int g_bnd_lock_violations;
 /* the test double of what the loader does at process end after the modules were told: called at the end of fnvnx_bnd_process_detach */
 extern void (*g_bnd_process_detach_hook)(void);

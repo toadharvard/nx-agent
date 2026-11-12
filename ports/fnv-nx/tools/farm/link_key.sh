@@ -5,7 +5,7 @@
 # with the same tools. Reads only trees (a blobless clone is enough).
 set -euo pipefail
 r=${1:?repo}; c=${2:?commit}
-for p in tools/link platform/crt/crt_symbols.tsv platform/win32/imports.tsv platform/win32/exports.cpp shim/include \
+for p in tools/link tools/tables.pin.json platform/win32/exports.cpp shim/include \
 	tools/difffuzz/check_rebind.py patches/units_renames.tsv tools/pipeline/build.py; do
 	echo "$p $(git -C "$r" rev-parse -q --verify "$c:ports/fnv-nx/$p" 2>/dev/null || echo absent)"
 done | sha256sum | cut -c1-16

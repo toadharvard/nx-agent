@@ -37,6 +37,8 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, '..'))
+import tables  # noqa: E402  (the decomp-derived budget model is a private table: tools/tables.py)
 sys.path.insert(0, HERE)
 import frame_budget  # noqa: E402
 
@@ -94,12 +96,13 @@ def run(model, render, perf, scenarios, content):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--model', default=os.path.join(HERE, 'budget_model.json'))
+    ap.add_argument('--model', default=None)
     ap.add_argument('--render')
     ap.add_argument('--perf')
     ap.add_argument('--scenarios', default='placed,plan45b')
     ap.add_argument('--json')
     a = ap.parse_args()
+    a.model = a.model or tables.path('budget_model.json')
     model = json.load(open(a.model))
     render = json.load(open(a.render)) if a.render else None
     perf = json.load(open(a.perf)) if a.perf else None

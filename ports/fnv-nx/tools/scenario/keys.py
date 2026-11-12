@@ -3,7 +3,7 @@
 
 The scenario files name keys the way xdotool does (X keysyms: Return, Escape, grave, a, 1, space, Up ...). The Wine
 side sends them to Xvfb with xdotool; the guest side turns them into FNVNX_EV_KEY events (USB HID usages, the code
-the host's input_poll reports and toolchain/guest/platform_glue.cpp maps to DirectInput DIK codes). Text is typed as
+the host's input_poll reports and platform/guest/platform_glue.cpp maps to DirectInput DIK codes). Text is typed as
 a sequence of keys, with Shift for the characters that need it on a US layout.
 
     keys.py hid <keysym>            the HID usage (decimal)

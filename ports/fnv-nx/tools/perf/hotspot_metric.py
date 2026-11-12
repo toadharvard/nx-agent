@@ -14,8 +14,11 @@ moves only with the per-call costs: that is what this stream changes.
 import argparse
 import json
 import os
+import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, '..'))
+import tables  # noqa: E402  (the decomp-derived budget model is a private table: tools/tables.py)
 
 
 def mid(v):
@@ -47,10 +50,11 @@ def metric(model, top=20):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--model', default=os.path.join(HERE, 'budget_model.json'))
+    ap.add_argument('--model', default=None)
     ap.add_argument('--top', type=int, default=20)
     ap.add_argument('--json', action='store_true')
     a = ap.parse_args()
+    a.model = a.model or tables.path('budget_model.json')
     total, rs = metric(json.load(open(a.model)), a.top)
     if a.json:
         print(json.dumps(dict(schema='fnvnx-hotspot-metric/1', mcycles=round(total, 4),

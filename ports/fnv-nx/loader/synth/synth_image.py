@@ -73,6 +73,15 @@ BOOT_GLOBALS = (('g_memoryManager', 0x011f6238, 4), ('allocator holder (NiMemMan
                 ('BSNiAllocator vftable', 0x010a2528, 56), ('run-once flag of FUN_00aa3050', 0x011f6229, 1))
 
 
+def _table(name):
+    """a decomp-derived table of fnv-nx-build (tools/tables.py: FNVNX_TABLES, sha256 against tools/tables.pin.json)"""
+    import importlib.util
+    s = importlib.util.spec_from_file_location('fnvnx_tables', os.path.join(HERE, '..', '..', 'tools', 'tables.py'))
+    m = importlib.util.module_from_spec(s)
+    s.loader.exec_module(m)
+    return m.path(name)
+
+
 def page_up(v):
     return (v + PAGE - 1) & ~(PAGE - 1)
 
@@ -1304,7 +1313,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--units', required=True)
     ap.add_argument('--objdir', required=True)
-    ap.add_argument('--imports', default=os.path.join(HERE, '..', '..', 'platform', 'win32', 'imports.tsv'))
+    ap.add_argument('--imports', default=None, help='imports.tsv (default: the pinned table of FNVNX_TABLES, tools/tables.py)')
     ap.add_argument('--out')
     ap.add_argument('--report')
     ap.add_argument('--summary')
@@ -1344,7 +1353,7 @@ def main(argv=None):
         time.time() - t0))
     report = {'stats': dict(ph1['stats'])}
     SG_SHIFT_OK.update(ph1.get('sg_shift', {}))
-    imports = read_imports(a.imports)
+    imports = read_imports(a.imports or _table("imports.tsv"))
     items = [it for it in ph1['items'] if WIN_LO <= it.addr and it.end <= WIN_HI]
     report['items_outside_window'] = len(ph1['items']) - len(items)
     have = set(it.addr for it in items)

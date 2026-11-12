@@ -443,6 +443,15 @@ FIX_CLASSES = {
 FIX_CLASS_OF = {c: k for k, v in FIX_CLASSES.items() for c in v[2]}
 
 
+def _table(name):
+    """a decomp-derived table of fnv-nx-build (tools/tables.py: FNVNX_TABLES, sha256 against tools/tables.pin.json)"""
+    import importlib.util
+    s = importlib.util.spec_from_file_location('fnvnx_tables', os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tables.py'))
+    m = importlib.util.module_from_spec(s)
+    s.loader.exec_module(m)
+    return m.path(name)
+
+
 def fix_classes(causes_rows):
     """{class: owner, mechanism, causes, divergences, functions (sum over causes; a function in two causes counts
     twice), worst_of} from a summary's per-cause rows, largest first."""
@@ -758,7 +767,7 @@ def iat_names():
     global _IAT
     if _IAT is None:
         _IAT = {}
-        p = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'platform', 'win32', 'imports.tsv')
+        p = _table('imports.tsv')
         if os.path.exists(p):
             for line in open(p, encoding='utf-8', errors='replace'):
                 f = line.rstrip('\n').split('\t')

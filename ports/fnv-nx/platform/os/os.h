@@ -84,7 +84,7 @@ void os_show_message(const char *caption, const char *text);
  * init[0..init_n) (init NULL: empty). Returns 1: entered (out[0..*n) holds the text, out[*n] = 0, *n <= max_len; out has room for
  * max_len + 1 units), 0: the user cancelled (out and *n untouched), <0: -FNVNX_HE_BADINPUT (max_len 0 or above 500, out or n NULL)
  * or -(the applet's Horizon result): the caller treats it as fatal. The backend does no validation of the text: that is the caller's,
- * which calls again with init = the text it refused. The guest backend is toolchain/guest/os_guest.c; the host test backend
+ * which calls again with init = the text it refused. The guest backend is platform/guest/os_guest.c; the host test backend
  * (os_posix.c) plays a script the test fills, one entry per applet round, cut to max_len as the applet's field would. */
 int os_text_entry(unsigned max_len, const uint16_t *init, size_t init_n, uint16_t *out, size_t *n);
 /* host test backend only (os_posix.c): the script of what the user types, one entry per applet round; an empty script is a user who
@@ -111,10 +111,9 @@ int os_thread_resume(os_thread *t);
 void os_thread_exit(void) __attribute__((noreturn));
 void os_yield(void);
 
-/* ---- the world (platform/os/os_world.c has the contract and the proof). Lifter hooks (rule R9): stop / resume every other
- * thread of the process, synchronously, under one global lock; the caller calls nothing of the platform in between. */
-void fnvl_host_world_stop(void);
-void fnvl_host_world_resume(void);
+/* ---- the world (platform/os/os_world.c has the contract and the proof). Lifter hooks (rule R9): fnvl_host_world_stop /
+ * fnvl_host_world_resume, declared once in shim/include/fnvl_host.h. */
+#include "fnvl_host.h"
 
 /* ---- time: the clock primitives are in os_clock.h, which only the clock implementations (platform/clock/clock_*.cpp)
  * and the OS backends include; the platform above reads time through fnvnx_clock.h */

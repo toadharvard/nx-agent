@@ -12,7 +12,7 @@
  * buffer's voice. The Waves reverb keeps its parameters only (the game does not use it).
  */
 #include <dsound.h>
-#include "fnvnx_win32_ext.h"
+#include "../include/fnvnx_win32_ext.h"
 
 #include "backend.h"
 #include "ds3d.h"

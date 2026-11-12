@@ -5,7 +5,7 @@
  * fnvnx_win32_lookup_export(dll, name) for each slot; NULL means "not provided" (d3d9 -> the device's module,
  * DirectInput/DirectSound/XInput, d3dx9_38 -> their providers' registered modules). */
 #include "w32.h"
-#include "fnvnx_mmio.h"
+#include "../include/fnvnx_mmio.h"
 
 extern "C" {
 /* platform/win32/gdi32.cpp */

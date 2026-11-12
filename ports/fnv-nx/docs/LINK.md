@@ -33,7 +33,7 @@ Everything it writes is derived from the decomp and stays local (`build/`, never
    * The reference declaration and the definition at the address are compared for AArch64 argument passing
      (below); mismatches get a bridge or are reported.
    * Addresses that are not decomp definitions (section "Platform, imports, thread-locals"): a referenced `.text`
-     address S4's `platform/crt/crt_symbols.tsv` gives a provider binds to that symbol (`provider`), an IAT slot to
+     address S4's `crt_symbols.tsv` (deleted) gives a provider binds to that symbol (`provider`), an IAT slot to
      the api `platform/win32/imports.tsv` + `exports.cpp` name for it, a thread-local variable at an image `.tls`
      address to the native TLS block (`tls`), a virtual function defined nowhere to a trap stub.
 3. **apply** - `fnvlink.py apply out/ fixed/`: per object, objcopy adds the address symbols of its definitions,
@@ -866,7 +866,7 @@ at ...)`). Tests: `test_exevft.py` (synthetic PE: scan, decoys, cache, the minus
 ## Platform, imports, thread-locals and hand-written vptrs
 
 * **CRT and library code** (S4b, RUNTIME.md): a reference to a `.text` address no unit defines that S4's
-  `platform/crt/crt_symbols.tsv` gives a provider (`libc: f`, `platform/crt: f`, `fnvnx_f`, the ws2_32 thunks
+  `crt_symbols.tsv` (deleted) gives a provider (`libc: f`, `platform/crt: f`, `fnvnx_f`, the ws2_32 thunks
   through `exports.cpp`) binds to that symbol (class `provider`), never to a libc function of the decomp's name:
   the MSVC stdio functions take the runtime's `_iobuf`. The address is an `F` entry naming the provider.
   `implicit` / `needs body` / unidentified rows stay `E`; `data` / `mid_data` rows are dropped. `resolve

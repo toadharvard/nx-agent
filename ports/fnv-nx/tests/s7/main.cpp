@@ -9,10 +9,43 @@
 extern "C" long CoInitializeEx(void *reserved, unsigned long model);   /* platform/win32/services.cpp */
 
 int s7_failures, s7_checks;
+pthread_t s7_case_thread;
+int s7_case_armed;
+__thread int s7_thread_guarded;
 s7_case *s7_cases;
+
+/* the harness proves its own rule before the first case: a failed CHECK throws only on the case's thread or inside s7_thread_guard; on a
+ * thread the platform started (an unguarded one) it stops the run */
+static void *s7_selftest_raw(void *p) { *(int *)p = s7_abort_here(); return NULL; }
+static void *s7_selftest_guarded(void *p)
+{
+    *(int *)p = s7_thread_guard([]() -> int { return s7_abort_here(); }, -1);
+    return NULL;
+}
+static int s7_harness_selftest(void)
+{
+    int raw = -1, guarded = -1;
+    pthread_t a, b;
+    if (pthread_create(&a, NULL, s7_selftest_raw, &raw) || pthread_create(&b, NULL, s7_selftest_guarded, &guarded))
+        return 1;
+    pthread_join(a, NULL);
+    pthread_join(b, NULL);
+    s7_case_thread = pthread_self();
+    s7_case_armed = 1;
+    int on_case = s7_abort_here();
+    s7_case_armed = 0;
+    int idle = s7_abort_here();
+    if (raw != 0 || guarded != 1 || on_case != 1 || idle != 0) {
+        fprintf(stderr, "harness selftest: raw=%d guarded=%d case=%d idle=%d (want 0 1 1 0)\n", raw, guarded, on_case, idle);
+        return 1;
+    }
+    return 0;
+}
 
 int main(int argc, char **argv)
 {
+    if (s7_harness_selftest())
+        return 2;
     fnvnx_audio_configure("manual");
     CoInitializeEx(nullptr, 0);   /* the test thread is a COM thread, as the game's main thread is */
     int n = 0;
@@ -29,7 +62,14 @@ int main(int argc, char **argv)
         if (only && !strstr(v[i]->name, only)) continue;
         int before = s7_failures;
         g_bnd_test = v[i]->name;
-        v[i]->fn();
+        s7_case_thread = pthread_self();
+        s7_case_armed = 1;
+        try {
+            v[i]->fn();
+        } catch (const s7_case_abort &) {
+            /* the failed CHECK has counted itself */
+        }
+        s7_case_armed = 0;
         if (fnvnx_bnd_locks_held()) {   /* see tests/s4/main.cpp */
             s7_failures++;
             printf("%s: returned with %u platform locks held\n", v[i]->name, fnvnx_bnd_locks_held());

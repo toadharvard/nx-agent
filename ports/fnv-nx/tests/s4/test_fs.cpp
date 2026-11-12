@@ -84,6 +84,7 @@ TEST(cwd_and_full_path)
 
 TEST(file_create_dispositions_and_errors)
 {
+    CreateDirectoryA("Data", NULL);   /* the case's own state: the game directory's Data folder (other cases create it too) */
     DeleteFileA("Data\\disp.bin");
     HANDLE h = CreateFileA("Data\\disp.bin", GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL);
     CHECK(h != INVALID_HANDLE_VALUE);
@@ -113,6 +114,7 @@ TEST(file_create_dispositions_and_errors)
 
 TEST(file_read_write_seek)
 {
+    CreateDirectoryA("Data", NULL);   /* the case's own state: the game directory's Data folder (other cases create it too) */
     s4_write_file("Data\\rw.bin", "0123456789");
     HANDLE h = CreateFileA("Data\\rw.bin", GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
     CHECK(h != INVALID_HANDLE_VALUE);
@@ -217,6 +219,7 @@ TEST(find_first_file)
 
 TEST(file_attributes_move_copy_dirs)
 {
+    CreateDirectoryA("Data", NULL);   /* the case's own state: the game directory's Data folder (other cases create it too) */
     CHECK_EQ(GetFileAttributesA("Data"), FILE_ATTRIBUTE_DIRECTORY);
     CHECK_EQ(GetFileAttributesA("Data\\nothing"), INVALID_FILE_ATTRIBUTES);
     CHECK_EQ(GetLastError(), ERROR_FILE_NOT_FOUND);
@@ -246,35 +249,6 @@ TEST(file_attributes_move_copy_dirs)
     DeleteFileA("Data\\NewDir\\b.txt");
     DeleteFileA("Data\\NewDir\\c.txt");
     CHECK(RemoveDirectoryA("Data\\NewDir"));
-}
-
-TEST(crt_file_wrappers)
-{
-    CreateDirectoryA("Data", NULL);
-    s4_write_file("Data\\crt.txt", "line1\r\nline2\r\n");
-    FILE *f = fnvnx_fopen("DATA\\Crt.TXT", "rt");
-    CHECK(f != NULL);
-    if (f) {
-        char b[32];
-        CHECK(fgets(b, sizeof b, f) != NULL);
-        CHECK_STR(b, "line1\r\n"); /* binary: text-mode CRLF translation is a known gap */
-        CHECK(_fseeki64(f, 0, SEEK_END) == 0);
-        CHECK_EQ(_ftelli64(f), 14);
-        fclose(f);
-    }
-    FILE *g = NULL;
-    CHECK_EQ(fnvnx_fopen_s(&g, "Data\\crt2.txt", "w"), 0);
-    if (g) {
-        fputs("x", g);
-        fclose(g);
-    }
-    CHECK_EQ(fnvnx_access("data\\crt2.TXT", 0), 0);
-    CHECK_EQ(fnvnx_access("data\\none.txt", 0), -1);
-    CHECK(MoveFileA("Data\\crt2.txt", "Data\\crt.txt") == 0); /* never replaces */
-    CHECK(MoveFileA("Data\\crt2.txt", "Data\\crt3.txt") != 0);
-    CHECK_EQ(fnvnx_remove("Data\\crt3.txt"), 0);
-    CHECK_EQ(fnvnx_mkdir("Data\\CrtDir"), 0);
-    CHECK_EQ(fnvnx_rmdir("Data\\crtdir"), 0);
 }
 
 /* NX1 check 5: the SD layout as the player copies it (sdmc:/switch/fnv = <root>: FalloutNV.exe and Data/ from a PC

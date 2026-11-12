@@ -12,6 +12,8 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'tools', 'perf'))
 import objcensus  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, '..', '..', 'tools'))
+import tables  # noqa: E402
 
 FAIL = []
 
@@ -85,7 +87,7 @@ def test_attribution(tmp):
 def test_budget(tmp):
     import json
     import frame_budget
-    model = json.load(open(os.path.join(HERE, '..', '..', 'tools', 'perf', 'budget_model.json')))
+    model = json.load(open(tables.path('budget_model.json')))
     model_cpi = model
     model = json.loads(json.dumps(model))   # rows without their own CPI take --perf's prices (the checks below)
     for h in model['hotspot_functions']:

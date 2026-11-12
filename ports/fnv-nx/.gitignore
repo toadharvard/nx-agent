@@ -6,7 +6,9 @@ platform/win32/winerr_msgs.inc
 platform/**/env_const.gen.inc
 platform/**/*.env_const.gen.inc
 platform/**/env_const*.gen.inc
+platform/**/declared_files.gen.inc
 platform/com/combridge.gen.cpp
 platform/com/combridge_exports.gen.cpp
 platform/com/combridge_if.gen.h
 platform/com/combridge_rows.tsv
+platform/**/font_machine.gen.inc

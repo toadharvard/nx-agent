@@ -35,7 +35,15 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_IMPORTS = os.path.join(HERE, "..", "..", "platform", "win32", "imports.tsv")
+
+
+def _table(name):
+    """a decomp-derived table of fnv-nx-build (tools/tables.py: FNVNX_TABLES, sha256 against tools/tables.pin.json)"""
+    import importlib.util
+    s = importlib.util.spec_from_file_location('fnvnx_tables', os.path.join(HERE, "..", "..", 'tools', 'tables.py'))
+    m = importlib.util.module_from_spec(s)
+    s.loader.exec_module(m)
+    return m.path(name)
 
 
 def read_log(path):
@@ -188,7 +196,7 @@ def main(argv):
     ap.add_argument("--objects", action="append", default=[],
                     help="compile.sh objects.tsv; repeat for incremental sets (later files override earlier ones)")
     ap.add_argument("--census")
-    ap.add_argument("--imports", default=DEFAULT_IMPORTS)
+    ap.add_argument("--imports", default=None, help="imports.tsv (default: the pinned table of FNVNX_TABLES, tools/tables.py)")
     ap.add_argument("--map", help="the guest link's map (fnvnx.map): callers without [orig] -> their object's unit")
     ap.add_argument("--out", help="output prefix (default: <log> without .log + _frontier)")
     ap.add_argument("--top", type=int, default=25)
@@ -219,7 +227,7 @@ def main(argv):
             return [unit_of_obj.get(obj, "(object) " + obj)]
         return []
     census = read_census(a.census) if a.census else {}
-    imports = read_imports(a.imports)
+    imports = read_imports(a.imports or _table("imports.tsv"))
 
     def units_at(addr):
         """units defining addr exactly, else the function containing it"""

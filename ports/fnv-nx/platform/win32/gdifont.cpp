@@ -6,16 +6,17 @@
  * GetGlyphOutline layouts. Layout of the structures is the guest's fixed 32-bit one (byte offsets, LOGFONTW = 92,
  * TEXTMETRICW = 60, GLYPHMETRICS = 20, CHARSETINFO = 32 bytes).
  *
- * Fonts come from three directories given once by fnvnx_gdi_set_font_dirs: the Wine fonts directory (the .fon
+ * Fonts come from three directories that the root declares (fnvnx_declared_fonts, fnvnx_win32_ext.h; no setter): the Wine fonts directory (the .fon
  * bitmap fonts of the registry and system lists, the TrueType files), the host fonts (every sfnt file below it,
  * what fontconfig lists in the reference) and the registry export directory (FontSubstitutes, Fonts, the hardware
  * profile Fonts key, Wine\Fonts\Replacements, CodePage\ACP, as .reg files).
  *
- * Stage 1 assumptions (stated, not hidden): display DC at 96 dpi, MM_TEXT, identity world transform; system locale
+ * Stage 1 values of the declared machine (CLAUDE.md "The declared machine"): display DC at 96 dpi, MM_TEXT, identity world transform; system locale
  * en-US (name language 0x409); TC_RA_ABLE (bitmap fonts allowed); no vertical (@) families; no FontLink, no
  * fontconfig-derived family fallbacks beyond Wine's three built-in names per family class. */
 #include "w32.h"
 #include "gdi_int.h"
+#include "font_faces.h"
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -92,7 +93,7 @@ struct Face {
 };
 struct Family { ustr name, second; std::vector<Face *> faces; };
 
-std::string g_wine_dir, g_host_dir, g_reg_dir;
+std::string g_wine_dir;   /* copy of fnvnx_declared_fonts()->dir, made once by load_all */
 std::vector<Family *> g_fam;
 bool g_loaded;
 FT_Library g_lib;
@@ -206,6 +207,14 @@ void get_fontsig(FT_Face ft, FSig *fs)
         }
 }
 
+/* A declared input that is absent or unreadable is a broken build invariant, not a machine without it: the process ends once, through
+ * the host exit slot (os_exit_process), naming the input. An empty directory that is present stays a valid (empty) machine. */
+[[noreturn]] void declared_input_broken(const char *what, const std::string &path)
+{
+    std::string m = std::string("fnvnx: declared input broken: ") + what + ": " + path;
+    os_debug_print(m.c_str());
+    os_exit_process(78);
+}
 bool read_file(const std::string &p, std::vector<uint8_t> &out)
 {
     int fd = os_file_open(p.c_str(), OS_O_READ);
@@ -218,10 +227,11 @@ bool read_file(const std::string &p, std::vector<uint8_t> &out)
 }
 
 /* one font file -> faces (new_ft_face / unix_face_create / add_gdi_face) */
-void add_font_file(const std::string &path, bool allow_bitmap)
+void add_font_file(const std::string &path, bool allow_bitmap, bool listed)   /* listed: the directory scan returned it, so it must be readable */
 {
     std::vector<uint8_t> data;
-    if (!read_file(path, data) || data.empty()) return;
+    if (!read_file(path, data)) { if (listed) declared_input_broken("font file listed by its directory is unreadable", path); return; }   /* a registry-named file the set lacks: Wine 9.0 load_registry_fonts skips it */
+    if (data.empty()) return;
     for (FT_Long idx = 0, count = 1; idx < count; idx++) {
         FT_Face ft;
         if (FT_New_Memory_Face(g_lib, data.data(), (FT_Long)data.size(), idx, &ft)) break;
@@ -267,26 +277,19 @@ void add_font_file(const std::string &path, bool allow_bitmap)
     }
 }
 
-/* ---- registry export files (.reg, UTF-16LE) */
-void parse_reg(const std::string &path)
+/* ---- the declared machine's font registry (Wine 9.0, ANSI 1252 / OEM 437, 96 dpi). Every value is generated from Wine's own files by
+ * platform/manifest/gen_fontmachine.py (font.c nls_update_font_list row + update_font_list/add_font_list, wine.inf.in [Fonts] FontSubstitutes,
+ * fontconfig-config 30-metric-aliases.conf for Replacements; inputs pinned in fnv-nx-build tools/fonts-wine9); nothing here is typed by hand.
+ * The font files are exactly that mirror's fonts/ in one directory; nothing else is read. */
+#include "font_machine.gen.inc"
+void declare_machine()
 {
-    std::vector<uint8_t> d;
-    if (!read_file(path, d) || d.size() < 2) return;
-    std::string txt;
-    for (size_t i = 2; i + 1 < d.size(); i += 2) txt += d[i + 1] ? '?' : (char)d[i];
-    std::string key;
-    size_t p = 0;
-    while (p < txt.size()) {
-        size_t e = txt.find('\n', p);
-        std::string l = txt.substr(p, e == std::string::npos ? std::string::npos : e - p);
-        p = e == std::string::npos ? txt.size() : e + 1;
-        while (!l.empty() && l.back() == '\r') l.pop_back();
-        if (l.size() > 2 && l[0] == '[') { key = l.substr(1, l.size() - 2); for (char &c : key) c = (char)tolower((unsigned char)c); g_reg[key]; continue; }
-        size_t q = l.find("\"=\"");
-        if (l.size() < 6 || l[0] != '"' || q == std::string::npos || l.back() != '"') continue;
-        auto unesc = [](const std::string &s) { std::string r; for (size_t i = 0; i < s.size(); i++) { if (s[i] == '\\' && i + 1 < s.size()) i++; r += s[i]; } return r; };
-        g_reg[key].push_back({ unesc(l.substr(1, q - 1)), unesc(l.substr(q + 3, l.size() - q - 4)) });
-    }
+    const std::string nt = "hkey_local_machine\\software\\microsoft\\windows nt\\currentversion\\";
+    g_reg["hkey_local_machine\\system\\currentcontrolset\\control\\nls\\codepage"].push_back({ "ACP", std::to_string(kAcp) });
+    for (auto &r : kHwFonts) g_reg["hkey_local_machine\\system\\currentcontrolset\\hardware profiles\\current\\software\\fonts"].push_back({ r[0], r[1] });
+    for (auto &r : kFontsKey) g_reg[nt + "fonts"].push_back({ r[0], r[1] });
+    for (auto &r : kSubst) g_reg[nt + "fontsubstitutes"].push_back({ r[0], r[1] });
+    for (auto &r : kReplace) g_reg["hkey_current_user\\software\\wine\\fonts\\replacements"].push_back({ r[0], r[1] });
 }
 const std::vector<std::pair<std::string, std::string>> &reg_key(const char *k)
 {
@@ -301,29 +304,22 @@ const std::vector<std::pair<std::string, std::string>> &reg_key(const char *k)
 std::vector<std::string> list_dir(const std::string &d)
 {
     std::vector<std::string> v;
-    if (os_dir *dir = os_dir_open(d.c_str())) { while (const char *n = os_dir_next(dir)) v.push_back(n); os_dir_close(dir); }
+    os_dir *dir = os_dir_open(d.c_str());
+    if (!dir) declared_input_broken("declared directory missing or unreadable", d);
+    while (const char *n = os_dir_next(dir)) v.push_back(n);
+    os_dir_close(dir);
     std::sort(v.begin(), v.end());
     return v;
-}
-void scan_host(const std::string &d)
-{
-    for (const std::string &n : list_dir(d)) {
-        std::string p = d + "/" + n;
-        os_stat_t st;
-        if (os_stat(p.c_str(), &st)) continue;
-        if (st.is_dir) { scan_host(p); continue; }
-        size_t dot = n.rfind('.');
-        std::string ext = dot == std::string::npos ? "" : n.substr(dot);
-        if (ext == ".ttf" || ext == ".ttc" || ext == ".otf") add_font_file(p, false);
-    }
 }
 bool is_full_name(const ustr &n) { for (Family *f : g_fam) for (Face *x : f->faces) if (x->scalable && !fcmp(x->full, n, 63)) return true; return false; }
 bool enum_fallback(int pf, int i, ustr *out)
 {
-    static const char *const fixed[3] = { "Courier New", "Liberation Mono", "Bitstream Vera Sans Mono" }, *const serif[3] = { "Times New Roman", "Liberation Serif", "Bitstream Vera Serif" },
-        *const sans[3] = { "Arial", "Liberation Sans", "Bitstream Vera Sans" };
     if (i >= 3) return false;
-    *out = widen(((pf & 1) || (pf & 0xf0) == 0x30) ? fixed[i] : (pf & 0xf0) == 0x10 ? serif[i] : sans[i]);
+    int fixed = (pf & 1) || (pf & 0xf0) == 0x30, serif = !fixed && (pf & 0xf0) == 0x10;
+    const char *n = fixed ? (i == 0 ? w32_face_name(FACE_COURIER_NEW) : i == 1 ? w32_face_name(FACE_LIBERATION_MONO) : w32_face_name(FACE_BITSTREAM_VERA_SANS_MONO))
+                  : serif ? (i == 0 ? w32_face_name(FACE_TIMES_NEW_ROMAN) : i == 1 ? w32_face_name(FACE_LIBERATION_SERIF) : w32_face_name(FACE_BITSTREAM_VERA_SERIF))
+                          : (i == 0 ? w32_face_name(FACE_ARIAL) : i == 1 ? w32_face_name(FACE_LIBERATION_SANS) : w32_face_name(FACE_BITSTREAM_VERA_SANS));
+    *out = widen(n);
     return true;
 }
 void set_default(int pf, ustr *def)
@@ -335,20 +331,25 @@ void load_all()
 {
     if (g_loaded) return;
     g_loaded = true;
-    if (!g_lib && FT_Init_FreeType(&g_lib)) return;
-    for (const std::string &n : list_dir(g_reg_dir)) if (n.size() > 4 && n.substr(n.size() - 4) == ".reg") parse_reg(g_reg_dir + "/" + n);
+    const fnvnx_font_dirs *d = fnvnx_declared_fonts();   /* a declared input of the root: no setter, no unset state */
+    g_wine_dir = d->dir;
+    if (!g_lib && FT_Init_FreeType(&g_lib)) declared_input_broken("FreeType does not start (FT_Init_FreeType: out of memory)", "libfreetype");
+    declare_machine();
     for (auto &kv : reg_key("HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Control\\Nls\\CodePage")) if (kv.first == "ACP") g_acp = atoi(kv.second.c_str());
     auto sys = reg_key("HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Hardware Profiles\\Current\\Software\\Fonts");
     for (const char *k : { "FONTS.FON", "OEMFONT.FON", "FIXEDFON.FON" })   /* load_system_bitmap_fonts */
-        for (auto &kv : sys) if (kv.first == k) add_font_file(g_wine_dir + "/" + kv.second, true);
-    for (const std::string &n : list_dir(g_wine_dir)) add_font_file(g_wine_dir + "/" + n, false);   /* the data directory */
-    scan_host(g_host_dir);                                                                          /* fontconfig's fonts */
+        for (auto &kv : sys) if (kv.first == k) add_font_file(g_wine_dir + "/" + kv.second, true, false);
+    for (const std::string &n : list_dir(g_wine_dir)) {
+        os_stat_t st;
+        if (!os_stat((g_wine_dir + "/" + n).c_str(), &st) && st.is_dir) continue;   /* Wine opens regular files only */
+        add_font_file(g_wine_dir + "/" + n, false, true);
+    }   /* the data directory */
     for (auto &kv : reg_key("HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Fonts")) {   /* load_registry_fonts */
         std::string v = kv.first;
         if (v.size() > 11 && v.compare(v.size() - 11, 11, " (TrueType)") == 0) v.resize(v.size() - 11);
         if (is_full_name(widen(v.c_str()))) continue;
         const std::string &path = kv.second;
-        if (path.size() > 4 && !strcasecmp(path.c_str() + path.size() - 4, ".fon") && !(path.size() > 1 && path[1] == ':')) add_font_file(g_wine_dir + "/" + path, true);
+        if (path.size() > 4 && !strcasecmp(path.c_str() + path.size() - 4, ".fon") && !(path.size() > 1 && path[1] == ':')) add_font_file(g_wine_dir + "/" + path, true, false);
     }
     set_default(0x10, &g_def_roman); set_default(0x30, &g_def_modern); set_default(0x20, &g_def_swiss);   /* reorder_font_list */
     std::stable_sort(g_fam.begin(), g_fam.end(), [](Family *a, Family *b) { return namecmp(a->name, b->name) < 0; });
@@ -522,7 +523,6 @@ void pick_charmap(FT_Face ft, int charset)
 RF *realize(LF lf, bool bitmap_ok = true)
 {
     load_all();
-    if (!g_lib) return nullptr;
     if (!fcmp(ustr(lf.face), u"Symbol")) lf.cs = SYMBOL_CS;
     lf.w = abs(lf.w);
     for (RF *r : g_rf) if (!memcmp(&r->lf, &lf, sizeof lf)) return r;
@@ -558,7 +558,8 @@ RF *realize(LF lf, bool bitmap_ok = true)
         f->scale_y = scale;
     }
     f->data = new std::vector<uint8_t>;
-    if (!read_file(face->file, *f->data) || FT_New_Memory_Face(g_lib, f->data->data(), (FT_Long)f->data->size(), face->index, &f->ft)) { delete f->data; delete f; return nullptr; }
+    if (!read_file(face->file, *f->data)) declared_input_broken("font file of a listed face is unreadable", face->file);
+    if (FT_New_Memory_Face(g_lib, f->data->data(), (FT_Long)f->data->size(), face->index, &f->ft)) { delete f->data; delete f; return nullptr; }
     FT_UInt w = 0, h = 0;
     if (f->scalable) {
         f->ppem = load_vdmx(f, lf.h);
@@ -672,8 +673,9 @@ bool get_tm(RF *f, TMW *out)
 bool stock_lf(int idx, LF *lf)
 {
     struct S { int idx, h, w, wt, cs, pf; const char *face; };
-    static const S t[] = { { 10, 12, 0, 400, OEM_CS, 0x31, "" }, { 11, 12, 0, 400, 0, 0x31, "Courier" }, { 12, 12, 0, 400, 0, 0x22, "MS Sans Serif" },
-        { 13, 16, 7, 700, 0, 0x22, "System" }, { 14, 16, 0, 700, 0, 0x22, "System" }, { 16, 16, 0, 400, 0, 0x31, "Courier" }, { 17, -11, 0, 400, 0, 0x22, "MS Shell Dlg" } };
+    const S t[] = { { 10, 12, 0, 400, OEM_CS, 0x31, "" }, { 11, 12, 0, 400, 0, 0x31, w32_face_name(FACE_COURIER) }, { 12, 12, 0, 400, 0, 0x22, w32_face_name(FACE_MS_SANS_SERIF) },
+        { 13, 16, 7, 700, 0, 0x22, w32_face_name(FACE_SYSTEM) }, { 14, 16, 0, 700, 0, 0x22, w32_face_name(FACE_SYSTEM) }, { 16, 16, 0, 400, 0, 0x31, w32_face_name(FACE_COURIER) },
+        { 17, -11, 0, 400, 0, 0x22, w32_face_name(FACE_MS_SHELL_DLG) } };
     for (const S &s : t) if (s.idx == idx) {
         memset(lf, 0, sizeof *lf);
         lf->h = s.h; lf->w = s.w; lf->weight = s.wt; lf->cs = (uint8_t)s.cs; lf->pf = (uint8_t)s.pf;
@@ -950,18 +952,6 @@ void lf_to_a(const LF &w, uint8_t *a)   /* LOGFONTA: the same 28 bytes, the face
 } // namespace
 
 /* ---- exports */
-extern "C" void fnvnx_gdi_set_font_dirs(const char *wine, const char *host, const char *reg)
-{
-    FL l;
-    for (RF *r : g_rf) { if (r->ft) FT_Done_Face(r->ft); delete r->data; delete r; }
-    g_rf.clear();
-    for (Family *f : g_fam) { for (Face *x : f->faces) delete x; delete f; }
-    g_fam.clear(); g_reg.clear(); g_subst.clear();
-    g_def_roman = g_def_modern = g_def_swiss = ustr();
-    g_wine_dir = wine ? wine : ""; g_host_dir = host ? host : ""; g_reg_dir = reg ? reg : "";
-    g_loaded = false;
-}
-
 extern "C" int GetObjectW(HGDIOBJ h, int cb, void *buf)
 {
     gdi_objinfo oi;
@@ -1210,7 +1200,7 @@ extern "C" HGDIOBJ GetCurrentObject(HDC hdc, UINT type)
 /* ======================================================================================================
  * Stage 2: text output (ExtTextOut), text extents, character placement, outline text metrics, display DC.
  * Wine 9.0's win32u/gdi32 is the cross-check of what the reference computes; the code below is written from the
- * documented contracts. Assumptions stated here once: the DC is GM_COMPATIBLE with the identity world transform (no
+ * documented contracts. Preconditions fixed by this DC's own state, which has no setter for them (Win32 defaults, ASM-003): the DC is GM_COMPATIBLE with the identity world transform (no
  * SetWorldTransform / SetGraphicsMode exists in this DC), window / viewport origins are 0, no inter-character
  * extra spacing and no justification (SetTextCharacterExtra / SetTextJustification keep their DC defaults, 0),
  * no layout mirroring, no clip region (drawing is clipped to the DC's surface and ETO_CLIPPED's rectangle).

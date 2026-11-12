@@ -1,4 +1,4 @@
-/* test_guestfn.cpp - platform/include/fnvnx_guestfn.h: the type of a game code pointer and its marshalling into x86 stack
+/* test_guestfn.cpp - shim/include/fnvnx_guestfn.h: the type of a game code pointer and its marshalling into x86 stack
  * words. The boundary's guest_invoke is replaced by a recording test double (host_boundary.h g_bnd_invoke_hook): the
  * words, ecx, count and result kind of every call are exactly what the header specifies. */
 #include "s4_test.h"

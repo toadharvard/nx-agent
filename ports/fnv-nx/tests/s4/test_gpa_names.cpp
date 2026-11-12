@@ -77,7 +77,7 @@ TEST(gpa_encode_pointer)
         same += EncodePointer((LPVOID)p) == (LPVOID)p;
     CHECK(same < 8);
     /* a value encoded in another thread decodes here: the cookie is per process */
-    HANDLE h = CreateThread(NULL, 0, enc_worker, (LPVOID)0x12345678, 0, NULL);
+    HANDLE h = test_CreateThread(NULL, 0, enc_worker, (LPVOID)0x12345678, 0, NULL);
     CHECK(h != NULL);
     WaitForSingleObject(h, 5000);
     CloseHandle(h);
@@ -235,7 +235,7 @@ TEST(gpa_fls_threads)
     HANDLE h[3];
     DWORD tid[3];
     for (int i = 0; i < 3; i++)
-        h[i] = CreateThread(NULL, 0, fls_thread, (LPVOID)(uintptr_t)(i + 1), 0, &tid[i]);
+        h[i] = test_CreateThread(NULL, 0, fls_thread, (LPVOID)(uintptr_t)(i + 1), 0, &tid[i]);
     while (g_ready < 3)
         Sleep(1);
     CHECK(FlsGetValue(g_slot_b) == NULL);          /* this thread never set slot b */
@@ -298,11 +298,11 @@ TEST(gpa_fls_thread_exit_order)
     g_order_a = FlsAlloc(rec_cb);
     g_order_b = FlsAlloc(rec_cb);
     g_order_c = FlsAlloc(rec_cb);
-    HANDLE h = CreateThread(NULL, 0, empty_thread, NULL, 0, NULL);
+    HANDLE h = test_CreateThread(NULL, 0, empty_thread, NULL, 0, NULL);
     WaitForSingleObject(h, 5000);
     CloseHandle(h);
     CHECK_EQ(cb_count(), 0);
-    h = CreateThread(NULL, 0, order_thread, NULL, 0, NULL);
+    h = test_CreateThread(NULL, 0, order_thread, NULL, 0, NULL);
     WaitForSingleObject(h, 5000);
     CloseHandle(h);
     CHECK_EQ(cb_count(), 3);
@@ -487,7 +487,6 @@ TEST(gpa_window_station_and_user_object)
 #include <vector>
 
 extern "C" {
-void fnvnx_gdi_set_font_dirs(const char *wine_fonts_dir, const char *host_fonts_dir, const char *registry_dir);
 HDC CreateCompatibleDC(HDC);
 BOOL DeleteDC(HDC);
 HGDIOBJ GetStockObject(int);
@@ -518,11 +517,6 @@ uint16_t glyph_of(HDC dc, unsigned ch)
     GetCharacterPlacementW(dc, &w, 1, 0, &gcp, 0x10 /* GCP_GLYPHSHAPE */);
     return g;
 }
-void set_dirs(void)
-{
-    std::string r = getenv("FNVNX_FONT_REF") ? getenv("FNVNX_FONT_REF") : "";
-    fnvnx_gdi_set_font_dirs((r + "/wine-fonts/usr/share/wine/fonts").c_str(), getenv("FNVNX_FONT_HOST") ? getenv("FNVNX_FONT_HOST") : "", (r + "/reg").c_str());
-}
 }
 
 TEST(gpa_gdi32_exports_by_name)
@@ -534,10 +528,8 @@ TEST(gpa_gdi32_exports_by_name)
 
 TEST(gpa_char_width_by_index_reference)
 {
-    set_dirs();
     FILE *f = fopen((std::string(getenv("FNVNX_FONT_REF") ? getenv("FNVNX_FONT_REF") : "") + "/fontdump.txt").c_str(), "r");
-    CHECK(f != NULL);
-    if (!f) return;
+    REQUIRE(f != NULL);
     char *buf = (char *)malloc(1 << 20);
     int lines = 0, abc_ok = 0, abc_refused = 0;
     while (fgets(buf, 1 << 20, f)) {
@@ -598,7 +590,6 @@ TEST(gpa_char_width_by_index_reference)
 
 TEST(gpa_char_width_by_index_errors)
 {
-    set_dirs();
     HDC dc = CreateCompatibleDC(NULL);
     SelectObject(dc, GetStockObject(10));   /* OEM_FIXED_FONT: Liberation Mono */
     int w[4] = { 5, 5, 5, 5 };
@@ -635,7 +626,6 @@ TEST(gpa_char_width_by_index_errors)
 
 TEST(gpa_font_unicode_ranges)
 {
-    set_dirs();
     HDC dc = CreateCompatibleDC(NULL);
     SelectObject(dc, GetStockObject(10));               /* OEM_FIXED_FONT: Liberation Mono */
     DWORD size = GetFontUnicodeRanges(dc, NULL);
@@ -651,10 +641,10 @@ TEST(gpa_font_unicode_ranges)
     /* the same walk with FreeType on the face file */
     std::string path = std::string(getenv("FNVNX_FONT_HOST") ? getenv("FNVNX_FONT_HOST") : "") + "/truetype/liberation/LiberationMono-Regular.ttf";
     FT_Library lib;
-    CHECK_EQ(FT_Init_FreeType(&lib), 0);
-    FT_Face face;
-    CHECK_EQ(FT_New_Face(lib, path.c_str(), 0, &face), 0);
-    CHECK_EQ(FT_Select_Charmap(face, FT_ENCODING_UNICODE), 0);
+    REQUIRE(FT_Init_FreeType(&lib) == 0);
+    FT_Face face = NULL;
+    if (FT_New_Face(lib, path.c_str(), 0, &face)) { FT_Done_FreeType(lib); REQUIRE(!"FT_New_Face"); }
+    if (FT_Select_Charmap(face, FT_ENCODING_UNICODE)) { FT_Done_Face(face); FT_Done_FreeType(lib); REQUIRE(!"FT_Select_Charmap"); }
     std::vector<std::pair<unsigned, unsigned>> want;
     unsigned total = 0;
     FT_UInt gi = 0;
@@ -669,7 +659,7 @@ TEST(gpa_font_unicode_ranges)
     FT_Done_FreeType(lib);
     CHECK_EQ(hdr[2], total);
     CHECK_EQ(hdr[3], want.size());
-    CHECK(want.size() > 10);
+    REQUIRE(want.size() > 10);
     if (hdr[3] == want.size()) {
         uint32_t sum = 0;
         for (size_t i = 0; i < want.size(); i++) {
@@ -686,11 +676,11 @@ TEST(gpa_font_unicode_ranges)
     /* a bitmap font has no Unicode cmap: the empty set */
     SelectObject(dc, GetStockObject(13));
     DWORD s2 = GetFontUnicodeRanges(dc, NULL);
-    uint8_t small[16];
-    memset(small, 0xEE, sizeof small);
-    CHECK_EQ(GetFontUnicodeRanges(dc, small), s2);
+    REQUIRE(s2 >= 16);
+    std::vector<uint8_t> small(s2, 0xEE);                /* the buffer is the size the NULL query returned (the call has no count) */
+    CHECK_EQ(GetFontUnicodeRanges(dc, small.data()), s2);
     uint32_t h2[4];
-    memcpy(h2, small, 16);
+    memcpy(h2, small.data(), 16);
     CHECK(h2[0] == s2 && h2[1] == 0 && h2[3] == (s2 - 16) / 4 && h2[2] <= 0xFFFF);
     DeleteDC(dc);
     SetLastError(0);

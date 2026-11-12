@@ -23,6 +23,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MODEL = os.path.join(HERE, '..', '..', 'tools', 'perf', 'a57model')
 sys.path.insert(0, MODEL)
 sys.path.insert(0, os.path.join(MODEL, '..'))
+sys.path.insert(0, os.path.join(MODEL, '..', '..'))
+import tables  # noqa: E402
 LIMIT_CHECK = 6.0  # 4.8 % over 13 independent points after V1 P0-E1/E2  # % mean absolute error over the check points; lower it as the model improves
 LIMIT_FIT = 2.0
 
@@ -161,7 +163,7 @@ def test_mtmodel():
     except Exception as e:  # noqa: BLE001
         print(f'skip mtmodel: {e}')
         return
-    with open(os.path.join(MODEL, '..', 'budget_model.json')) as f:
+    with open(tables.path('budget_model.json')) as f:
         model = json.load(f)
     flat = mtmodel.run(model, None, ['placed', 'plan45'], [1020], 15.0, True)
     fb = frame_budget.build(model)

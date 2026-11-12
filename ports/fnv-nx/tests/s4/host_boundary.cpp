@@ -1,4 +1,4 @@
-/* host_boundary.cpp - the host test process's implementation of platform/include/fnvnx_boundary.h.
+/* host_boundary.cpp - the host test process's implementation of shim/include/fnvnx_boundary.h.
  * "The game" is the native test code: an export's value is its native address, a game function is called natively, a
  * game thread runs natively on the OS thread the platform made, and there is no loader (images are registered by the
  * tests through fnvnx_win32_register_image). The calls are
@@ -15,6 +15,24 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <string>
+#include "fnvnx_win32_ext.h"
+
+/* The declared fonts of the host tests (fnvnx_declared_fonts, fnvnx_win32_ext.h): the one directory FNVNX_FONTS = the fnv-nx-build
+ * tools/fonts-wine9 mirror's fonts/ (pinned by commit and tree_sha256). It is an input of every test binary, like the registry hive:
+ * a run without it is not a run, so it stops here with the name of the missing input. */
+extern "C" const struct fnvnx_font_dirs *fnvnx_declared_fonts(void)
+{
+    static fnvnx_font_dirs d;
+    if (!d.dir) {
+        d.dir = getenv("FNVNX_FONTS");
+        if (!d.dir) {
+            fprintf(stderr, "declared fonts missing: set FNVNX_FONTS (the tools/fonts-wine9 mirror's fonts directory)\n");
+            abort();
+        }
+    }
+    return &d;
+}
 
 /* reach_probe: runs f in a forked child and reports the fact it reached, 0 when it returned. The branch ends the child through
  * the platform's real fnvnx_reach_violation (platstat.cpp): one log line "reach violation fact N" on stderr, then the process

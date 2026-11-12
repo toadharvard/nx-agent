@@ -7,7 +7,7 @@
            /switch/<dir>/), every FNVNX_SD_* path inside it; the fs-relative twins match;
   sources  every "sdmc:/..." string literal in the code that runs on the console (launcher, host, guest runtime,
            platform, startup, loader) is inside FNVNX_SD_DIR or Atmosphere's contents folder; the guest's root
-           (os_default_root in toolchain/guest/os_guest.c and platform/os/os_horizon.c) is FNVNX_SD_DIR, the exe
+           (os_default_root in platform/guest/os_guest.c and platform_host/os/os_horizon.c) is FNVNX_SD_DIR, the exe
            path of boot.cpp is FNVNX_SD_EXE, path.cpp mounts C:\\FalloutNV at the root itself (so Data/ is
            sdmc:/switch/fnv/Data) and the profile under <root>/user;
   case     os_fs_case_insensitive() is probed at run time, not assumed (the SD's case folding is unverified on
@@ -108,7 +108,7 @@ def check(sd: str | None, run_s4: bool) -> Checks:
                 continue
             stray.append(f"{os.path.relpath(p, ROOT)}: {lit}")
     c.ok("src.sdmc_literals", not stray, f"{len(stray)} paths outside {sd_dir}: " + "; ".join(stray[:6]))
-    for rel in ("toolchain/guest/os_guest.c", "platform/os/os_horizon.c"):
+    for rel in ("platform/guest/os_guest.c", "platform_host/os/os_horizon.c"):
         txt = strip_comments(open(os.path.join(ROOT, rel)).read())
         m = re.search(r'os_default_root\s*\(\s*void\s*\)\s*\{\s*return\s+([^;]+);', txt)
         val = m.group(1).strip() if m else None
@@ -120,7 +120,7 @@ def check(sd: str | None, run_s4: bool) -> Checks:
     via_game_dir = re.search(r'os_game_dir\(\)[^;]*FalloutNV\.exe', boot) is not None
     c.ok("src.boot_exe", via_game_dir or m is not None and m.group(1).strip() in ("FNVNX_SD_EXE", f'"{L.get("FNVNX_SD_EXE")}"'),
          f"boot.cpp k_exe = {m.group(1) if m else None}")
-    og_all = strip_comments(open(os.path.join(ROOT, "toolchain", "guest", "os_guest.c")).read())
+    og_all = strip_comments(open(os.path.join(ROOT, "platform", "guest", "os_guest.c")).read())
     gd = re.search(r'os_game_dir\s*\(\s*void\s*\)\s*\{(.*?)\n\}', og_all, re.S)
     if gd:
         c.ok("src.game_dir_default", "FNVNX_SD_DIR" in gd.group(1) or f'"{sd_dir}"' in gd.group(1) or "os_default_root" in gd.group(1),
@@ -136,7 +136,7 @@ def check(sd: str | None, run_s4: bool) -> Checks:
     c.ok("layout.port_names", own <= set(names) and {"user", "drive_*"} <= set(names),
          f"FNVNX_SD_PORT_NAMES lacks {sorted(own - set(names))}")
     c.ok("layout.port_names_not_game", not {"FalloutNV.exe", "Data"} & set(names), "a game file is listed as the port's")
-    og = strip_comments(open(os.path.join(ROOT, "toolchain", "guest", "os_guest.c")).read())
+    og = strip_comments(open(os.path.join(ROOT, "platform", "guest", "os_guest.c")).read())
     m = re.search(r'int\s+os_fs_case_insensitive\s*\(\s*void\s*\)\s*\{(.*?)\n\}', og, re.S)
     c.ok("case.probed", m is not None and "os_stat" in m.group(1),
          "os_fs_case_insensitive() is a constant: case folding of the SD is assumed, not probed")

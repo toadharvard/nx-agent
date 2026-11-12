@@ -253,18 +253,6 @@ class Link:
         return (self.fn_addrs[i], self.fn_objs[i]) if i >= 0 else None
 
 
-def crt_starts(root_hint=None):
-    path = os.path.join(os.path.dirname(HERE), '..', 'platform', 'crt', 'crt_symbols.tsv')
-    out = set()
-    try:
-        for line in open(path):
-            if line.startswith('0x'):
-                out.add(int(line.split('\t')[0], 16))
-    except (OSError, ValueError):
-        pass
-    return out
-
-
 # ------------------------------------------------------------------------------------------------ exe scanning
 
 _IMM = re.compile(r'^-?(?:0x[0-9a-f]+|\d+)$')
@@ -900,7 +888,7 @@ def check_layout(link_root, exe_path, tree=None, topdown=None, jobs=None, shard=
     link = Link(link_root)
     image = Image(open(exe_path, 'rb').read())
     log('addrmap: %d rows, %d classes, %d constructors' % (len(link.rows), len(link.classes), len(link.ctors)))
-    sc = scan_exe(image, link, crt_starts(), allocators)
+    sc = scan_exe(image, link, (), allocators)
     log('exe: %d new sites, %d static sites, %d classes with member accesses; %d constructor calls skipped as the '
         'base part of an inlined derived constructor' % (len(sc.new_sites), len(sc.static_sites), len(sc.maxoff),
                                                           sc.derived))

@@ -2,7 +2,7 @@
 #include "backend.h"
 #include "mixer.h"
 #include "../os/os.h"
-#include "fnvnx_clock.h"
+#include "../include/fnvnx_clock.h"
 
 #include <stdio.h>
 #include <stdlib.h>

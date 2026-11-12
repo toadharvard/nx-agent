@@ -19,10 +19,12 @@
 HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 ROOT := $(abspath $(HERE)/../..)
 P := $(ROOT)/platform
+HP := $(ROOT)/platform_host
 OUT ?= $(HERE)/build
 FT := $(ROOT)/ext/freetype
 FNVNX_FONT_REF ?= /home/user/gd/fontref
 FNVNX_FONT_HOST ?= /home/user/gd/fonts/deb/usr/share/fonts
+FNVNX_FONTS ?= /home/user/fonts-wine9/fonts
 FT_SRCS := base/ftsystem base/ftinit base/ftdebug base/ftbase base/ftbbox base/ftbdf base/ftbitmap base/ftcid \
     base/ftfstype base/ftgasp base/ftglyph base/ftgxval base/ftmm base/ftotval base/ftpatent base/ftpfr base/ftstroke \
     base/ftsynth base/fttype1 base/ftwinfnt autofit/autofit bdf/bdf cff/cff cid/type1cid pcf/pcf pfr/pfr psaux/psaux \
@@ -38,18 +40,18 @@ FLAGS := -g -O1 -frounding-math -Wall -Wextra -Wno-unused-parameter -fshort-wcha
 CFLAGS_ := -std=gnu11 $(FLAGS)
 CXXFLAGS_ := -std=gnu++17 $(FLAGS)
 
-PLAT_C := $(P)/os/os_posix.c $(P)/os/os_world.c $(wildcard $(P)/crt/*.c)
+PLAT_C := $(HP)/os/os_posix.c $(P)/os/os_world.c $(wildcard $(P)/crt/*.c)
 # the clock interface (platform/include/fnvnx_clock.h): clock_rt.cpp is in both, clock_real.cpp is the product's clock; `make vclock`
 # links clock_virtual.cpp instead (the verification mode, definition VC1)
 CLOCK_CXX := $(P)/clock/clock_rt.cpp $(P)/clock/clock_real.cpp
-PLAT_CXX := $(CLOCK_CXX) $(P)/com/combridge.cpp $(P)/com/combridge.gen.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(filter-out %/msvcrt_table.gen.cpp,$(wildcard $(P)/crt/*.cpp)) $(P)/crt/msvcrt_table.gen.cpp $(wildcard $(P)/audio/*.cpp) $(filter-out %/input_horizon.cpp,$(wildcard $(P)/input/*.cpp))   # audio: winmm waveOut* are exports of the table; input: DirectInput, XInput, the keyboard applet (input_horizon.cpp is libnx only)
+PLAT_CXX := $(CLOCK_CXX) $(HP)/win32/filemap_shared.cpp $(P)/com/combridge.cpp $(P)/com/combridge.gen.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(filter-out %/msvcrt_table.gen.cpp,$(wildcard $(P)/crt/*.cpp)) $(P)/crt/msvcrt_table.gen.cpp $(P)/boundary/host_hooks.cpp $(wildcard $(P)/audio/*.cpp) $(filter-out %/input_horizon.cpp,$(wildcard $(P)/input/*.cpp))   # audio: winmm waveOut* are exports of the table; input: DirectInput, XInput, the keyboard applet (input_horizon.cpp is libnx only)
 TEST_CXX := $(filter-out %/host_section.cpp,$(wildcard $(HERE)/*.cpp)) $(HERE)/m32/host_input.cpp   # host_input.cpp: the host has no polled input source (input_horizon.cpp is libnx only)   # the host section services belong to the private binary only
 
 OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(PLAT_C) $(PLAT_CXX) $(TEST_CXX))
 
 # The platform's own sources see the game's callbacks (WNDPROC, ...) as fnvnx_guestfn (shim/include/fnvnx_callback.h:
 # a call goes through the boundary, a direct call does not compile); the tests are "the game" and keep plain pointers.
-$(filter $(OUT)/platform/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
+$(filter $(OUT)/platform/%.cpp.o $(OUT)/platform_host/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 
 .PHONY: regsites-check all test vclock probe private ilp32 m32 iat device qemu clean gfn-nocompile hostapi-check dynsites-check
 all: test
@@ -91,15 +93,15 @@ $(P)/win32/env_const.gen.inc: $(ENV_SRC)
 $(P)/crt/env_const.gen.inc: $(ENV_SRC)
 	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only crt/
 $(P)/os/env_const_posix.gen.inc: $(ENV_SRC)
-	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only os/os_posix.c
+	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only ../platform_host/os/os_posix.c
 $(P)/os/env_const_horizon.gen.inc: $(ENV_SRC)
-	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only os/os_horizon.c
+	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only ../platform_host/os/os_horizon.c
 $(OUT)/platform/win32/env_const.cpp.o: $(P)/win32/env_const.gen.inc
 $(OUT)/platform/crt/msvcrt_exports.cpp.o: $(P)/crt/env_const.gen.inc
-$(OUT)/platform/os/os_posix.c.o: $(P)/os/env_const_posix.gen.inc
+$(OUT)/platform_host/os/os_posix.c.o: $(P)/os/env_const_posix.gen.inc
 $(OUT)-m32/platform/win32/env_const.cpp.o: $(P)/win32/env_const.gen.inc
 $(OUT)-m32/platform/crt/msvcrt_exports.cpp.o: $(P)/crt/env_const.gen.inc
-$(OUT)-m32/platform/os/os_posix.c.o: $(P)/os/env_const_posix.gen.inc
+$(OUT)-m32/platform_host/os/os_posix.c.o: $(P)/os/env_const_posix.gen.inc
 
 # the registry's first-boot rows: platform/manifest/declared_registry.tsv, checked against the static read sites (REGSITES, the exe-derived
 # private regsites.tsv of the product build; the tests use their own synthetic file) and generated into registry_seed.gen.inc
@@ -108,6 +110,23 @@ REG_DECL := $(P)/manifest/declared_registry.tsv
 $(P)/win32/registry_seed.gen.inc: $(REG_DECL) $(P)/manifest/gen_registry_seed.py $(P)/manifest/regsites.py $(REGSITES)
 	python3 -I $(P)/manifest/gen_registry_seed.py $(REGSITES) $(REG_DECL) $@
 $(OUT)/platform/win32/registry_seed.cpp.o: $(P)/win32/registry_seed.gen.inc
+# the declared machine's font registry values, generated from the pinned Wine 9.0 files of the fonts mirror (tools/fonts-wine9)
+FONTS_MIRROR ?= $(patsubst %/fonts,%,$(FNVNX_FONTS))
+$(P)/win32/font_machine.gen.inc: $(P)/manifest/gen_fontmachine.py $(FONTS_MIRROR)/inputs/wine.inf.in $(FONTS_MIRROR)/inputs/font.c $(FONTS_MIRROR)/inputs/30-metric-aliases.conf
+	python3 -I $(P)/manifest/gen_fontmachine.py $(FONTS_MIRROR)/inputs/wine.inf.in $(FONTS_MIRROR)/inputs/font.c $(FONTS_MIRROR)/inputs/30-metric-aliases.conf $(FNVNX_FONTS) $@
+$(OUT)/platform/win32/gdifont.cpp.o: $(P)/win32/font_machine.gen.inc
+$(OUT)-m32/platform/win32/gdifont.cpp.o: $(P)/win32/font_machine.gen.inc
+
+# the declared FalloutPrefs.ini: the launcher gate's setting (PREFS_REQUIRED, the exe-derived private output of prefs_settings.py in the product
+# build; the tests use their own synthetic file) = the adapter Description in the render front end's identity images (IDENT_*; synthetic here)
+PREFS_REQUIRED ?= $(HERE)/declfiles_required_synth.tsv
+IDENT_HANDHELD ?= $(HERE)/ident_synth_handheld.bin
+IDENT_DOCKED ?= $(HERE)/ident_synth_docked.bin
+$(P)/win32/declared_files.gen.inc: $(PREFS_REQUIRED) $(IDENT_HANDHELD) $(IDENT_DOCKED) $(P)/manifest/gen_prefs_ini.py
+	python3 -I $(P)/manifest/gen_prefs_ini.py $(PREFS_REQUIRED) $@ --ident $(IDENT_HANDHELD) --ident $(IDENT_DOCKED)
+$(OUT)/platform/win32/declared_files.cpp.o: $(P)/win32/declared_files.gen.inc
+$(OUT)/tests/s4/test_declared_prefs.cpp.o: CXXFLAGS_ += -DIDENT_PATH='"$(IDENT_DOCKED)"'
+$(OUT)-m32/platform/win32/declared_files.cpp.o: $(P)/win32/declared_files.gen.inc
 $(OUT)-m32/platform/win32/registry_seed.cpp.o: $(P)/win32/registry_seed.gen.inc
 
 $(OUT)/%.cpp.o: $(ROOT)/%.cpp
@@ -147,7 +166,7 @@ $(OUT)/platform/clock/clock_virtual.cpp.o: CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 $(OUT)/s4_tests_vclock: $(VC_OBJS) $(OUT)/libfreetype.a
 	$(CXX) $(CXXFLAGS_) $(VC_OBJS) $(OUT)/libfreetype.a -o $@ -lm $(LDEXTRA)
 vclock: $(OUT)/s4_tests_vclock
-	rm -rf $(OUT)/root-vclock && FNVNX_TEST_ONLY=vc_ FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root-vclock $(OUT)/s4_tests_vclock
+	rm -rf $(OUT)/root-vclock && FNVNX_TEST_ONLY=vc_ FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root-vclock $(OUT)/s4_tests_vclock
 
 # ---- the same test objects linked with the product's file-mapping backend (platform/win32/filemap_private.cpp) instead of
 # filemap_shared.cpp, plus the test-only host implementation of the section services it calls (host_section.cpp); runs the vmp_ cases
@@ -156,7 +175,7 @@ $(OUT)/platform/win32/filemap_private.cpp.o: CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 $(OUT)/s4_tests_private: $(PRIV_OBJS) $(OUT)/libfreetype.a
 	$(CXX) $(CXXFLAGS_) $(PRIV_OBJS) $(OUT)/libfreetype.a -o $@ -lm $(LDEXTRA)
 private: $(OUT)/s4_tests_private
-	rm -rf $(OUT)/root-private && FNVNX_TEST_ONLY=vmp_ FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root-private $(OUT)/s4_tests_private
+	rm -rf $(OUT)/root-private && FNVNX_TEST_ONLY=vmp_ FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root-private $(OUT)/s4_tests_private
 
 # every ext_call of the guest sources is a service of toolchain/include/fnvnx/hostapi.h with its declared argument count
 hostapi-check:
@@ -171,11 +190,18 @@ dynsites-check: probe
 
 # the registry-site extractor and the seed generator on synthetic input (no exe-derived file needed)
 regsites-check:
+	python3 -I $(ROOT)/platform/manifest/check_test_threads.py --selftest
+	python3 -I $(ROOT)/platform/manifest/check_test_threads.py
 	python3 -I $(ROOT)/platform/manifest/check_regsites.py
+	python3 -I $(ROOT)/platform/manifest/check_filesites.py
+	python3 -I $(ROOT)/platform/manifest/check_funcfacts.py
+	python3 -I $(ROOT)/platform/manifest/check_macrodefs.py
 	python3 -I $(ROOT)/platform/manifest/check_gen_registry.py
+	python3 -I $(ROOT)/platform/manifest/check_gen_fontmachine.py
+	python3 -I $(ROOT)/platform/manifest/check_gen_prefs.py
 
 test: hostapi-check regsites-check $(OUT)/s4_tests
-	rm -rf $(OUT)/root && FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root GLIBC_TUNABLES=glibc.malloc.tcache_count=0 $(OUT)/s4_tests
+	rm -rf $(OUT)/root && FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)/root GLIBC_TUNABLES=glibc.malloc.tcache_count=0 $(OUT)/s4_tests
 
 # ---- i386 (-m32) build: the ILP32 data model with a host libc. /usr/include/asm is the multilib packages' symlink,
 # missing when a cross compiler replaced them; the x86-64 asm headers serve i386 too.
@@ -215,17 +241,17 @@ $(M32OUT)/libfreetype.a: $(patsubst %,$(M32OUT)/freetype/%.o,$(FT_SRCS))
 $(M32OUT)/s4_m32: $(M32_OBJS) $(M32OUT)/libfreetype.a
 	$(CXX) -m32 -pthread $(M32_OBJS) $(M32OUT)/libfreetype.a -o $@ -lm
 m32: $(M32OUT)/s4_m32
-	rm -rf $(M32OUT)/root && FNVNX_ROOT=$(M32OUT)/root $(M32OUT)/s4_m32
+	rm -rf $(M32OUT)/root && FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(M32OUT)/root $(M32OUT)/s4_m32
 iat: $(M32OUT)/s4_m32
 	@test -n "$(EXE)" || { echo "set EXE=<FalloutNV.exe>"; exit 2; }
 	python3 -I $(HERE)/iat/pe_imports.py "$(EXE)" > $(M32OUT)/imports.txt
-	rm -rf $(M32OUT)/root && FNVNX_ROOT=$(M32OUT)/root $(M32OUT)/s4_m32 --iat $(M32OUT)/imports.txt
+	rm -rf $(M32OUT)/root && FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(M32OUT)/root $(M32OUT)/s4_m32 --iat $(M32OUT)/imports.txt
 
 # ---- the host tests built static for AArch64 and run under qemu-aarch64 (the device's ISA: atomics, float, signals)
 qemu:
 	$(MAKE) --no-print-directory OUT=$(OUT)-a64 CC="aarch64-linux-gnu-gcc -static" CXX="aarch64-linux-gnu-g++ -static" \
 		$(OUT)-a64/s4_tests
-	rm -rf $(OUT)-a64/root && mkdir -p $(OUT)-a64/root && FNVNX_ROOT=$(OUT)-a64/root qemu-aarch64 $(OUT)-a64/s4_tests
+	rm -rf $(OUT)-a64/root && mkdir -p $(OUT)-a64/root && FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_FONT_REF=$(FNVNX_FONT_REF) FNVNX_FONT_HOST=$(FNVNX_FONT_HOST) FNVNX_ROOT=$(OUT)-a64/root qemu-aarch64 $(OUT)-a64/s4_tests
 
 # ---- device backends: the inventory (tests/s4/backends/backends.tsv, metric device-open) and the qemu-aarch64 tests
 # of the host-side pieces. With EXE=, the inventory is checked against every import of the exe.
@@ -259,17 +285,19 @@ FNVNX_TC ?= /home/user/gd/toolchain/prefix
 NEWLIB_INC ?= $(FNVNX_TC)/aarch64-none-elf/include
 LIBNX_INC ?= $(ROOT)/ext/libnx/nx/include
 PRODUCT_UNITS := $(shell python3 -I $(P)/manifest/check_doubles.py --root $(ROOT) --list-units)
+# the units that include libsysbase / libnx headers (guest runtime, guest sockets): built only where the guest toolchain's headers exist
+NEWLIB_UNITS := platform/os/sock_guest.c $(filter toolchain/guest/%,$(PRODUCT_UNITS))
 GUESTF := -DFNVNX_PLATFORM_BUILD -mabi=ilp32 -frounding-math -fshort-wchar -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(FT)/include -I$(ROOT)/loader/include -I$(ROOT)/toolchain/include
 # a guest object is named like build_guest.sh names it: the root-relative path with '/' -> '_'
 define GUEST_RULE
 $(GOBJ)/$(subst /,_,$(1)).o: $(ROOT)/$(1) | $(ENV_GEN) $(COMOUT)
 	@mkdir -p $(GOBJ)
-	$$(if $$(filter %.c,$(1)),$$(XCC) -std=gnu11,$$(XCXX) -std=gnu++17) $(GUESTF) $$(if $$(filter %/sock_guest.c,$(1)),-D__SWITCH__ -I$(NEWLIB_INC) -I$(LIBNX_INC),) -c $$< -o $$@
+	$$(if $$(filter %.c,$(1)),$$(XCC) -std=gnu11,$$(XCXX) -std=gnu++17) $(GUESTF) $$(if $$(filter $(1),$(NEWLIB_UNITS)),-D__SWITCH__ -I$(NEWLIB_INC) -I$(LIBNX_INC),) -c $$< -o $$@
 endef
 $(foreach u,$(PRODUCT_UNITS),$(eval $(call GUEST_RULE,$(u))))
 GUEST_OBJS := $(foreach u,$(PRODUCT_UNITS),$(GOBJ)/$(subst /,_,$(u)).o)
 # units that need the guest toolchain's newlib headers are skipped when it is absent (their symbols are then reported UNKNOWN)
-GUEST_OK := $(filter-out $(if $(wildcard $(NEWLIB_INC)/reent.h),,$(GOBJ)/platform_os_sock_guest.c.o),$(GUEST_OBJS))
+GUEST_OK := $(filter-out $(if $(wildcard $(NEWLIB_INC)/sys/iosupport.h),,$(foreach u,$(NEWLIB_UNITS),$(GOBJ)/$(subst /,_,$(u)).o)),$(GUEST_OBJS))
 $(OUT)/linkmaps.tsv: $(OUT)/mtq/linkmap.tsv $(OBJS) $(VC_OBJS) $(PRIV_OBJS) $(DYN_OBJS) $(M32_OBJS)
 	@mkdir -p $(OUT)
 	@{ printf 's4_tests$(TAB)%s\n' "$(subst $(space),$(TAB),$(OBJS))"; \
@@ -300,8 +328,8 @@ ilp32: $(ENV_GEN)
 	@set -e; for f in $(PLAT_C); do echo "ilp32 cc  $${f#$(ROOT)/}"; $(XCC) -std=gnu11 $(XFLAGS) $$f; done
 	@set -e; for f in $(PLAT_CXX); do echo "ilp32 c++ $${f#$(ROOT)/}"; $(XCXX) -std=gnu++17 $(XFLAGS) $$f; done
 	@echo "ilp32 c++ platform/clock/clock_virtual.cpp"; $(XCXX) -std=gnu++17 $(XFLAGS) $(P)/clock/clock_virtual.cpp
-	@echo "ilp32 cc  platform/os/os_horizon.c (libnx headers, newlib lock stub)"
-	@$(XCC) -std=gnu11 $(XFLAGS) -D__SWITCH__ -I$(HERE)/ilp32-stubs -I$(LIBNX)/nx/include $(P)/os/os_horizon.c
+	@echo "ilp32 cc  platform_host/os/os_horizon.c (libnx headers, newlib lock stub)"
+	@$(XCC) -std=gnu11 $(XFLAGS) -D__SWITCH__ -I$(HERE)/ilp32-stubs -I$(LIBNX)/nx/include $(HP)/os/os_horizon.c
 	@echo "ilp32: all platform sources parse"
 
 # BSD socket services, guest side <-> host side over loopback (sockwire/Makefile; not part of the default target)

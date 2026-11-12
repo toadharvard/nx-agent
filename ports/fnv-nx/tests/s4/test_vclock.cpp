@@ -155,7 +155,7 @@ TEST(vc_thread_inherits_creator_t)
     if (!virt()) return;
     clk_reset();
     Sleep(7);                                                 /* t = 7 ms */
-    HANDLE h = CreateThread(NULL, 0, child_reads, NULL, CREATE_SUSPENDED, NULL);
+    HANDLE h = test_CreateThread(NULL, 0, child_reads, NULL, CREATE_SUSPENDED, NULL);
     Sleep(50);                                                /* the creator goes on; the child starts at the creation instant */
     ResumeThread(h);
     CHECK_EQ(WaitForSingleObject(h, 5000), WAIT_OBJECT_0);
@@ -184,7 +184,7 @@ TEST(vc_wait_success_takes_signaller_t)
         clk_reset();
         g_adv_ms = 1 + i % 7;
         g_delay_us = (i % 3) * 400;                           /* the signaller runs early, late or at once */
-        HANDLE h = CreateThread(NULL, 0, signaller, NULL, 0, NULL);
+        HANDLE h = test_CreateThread(NULL, 0, signaller, NULL, 0, NULL);
         if (i % 2) usleep(200);                               /* the waiter starts waiting early or late */
         CHECK_EQ(WaitForSingleObject(g_ev, 10000), WAIT_OBJECT_0);
         CHECK_EQ(now_ns(), (uint64_t)g_adv_ms * 1000000);     /* t = max(0, the signaller's t) */
@@ -195,7 +195,7 @@ TEST(vc_wait_success_takes_signaller_t)
     clk_reset();
     Sleep(500);
     g_adv_ms = 3; g_delay_us = 0;
-    HANDLE h = CreateThread(NULL, 0, signaller, NULL, 0, NULL);   /* starts at 500 ms, signals at 503 ms */
+    HANDLE h = test_CreateThread(NULL, 0, signaller, NULL, 0, NULL);   /* starts at 500 ms, signals at 503 ms */
     WaitForSingleObject(g_ev, 10000);
     CHECK_EQ(now_ns(), 503000000);
     WaitForSingleObject(h, 10000);
@@ -261,7 +261,7 @@ TEST(vc_signal_stamps_of_every_object)
     clk_reset();
     HANDLE ev = CreateEventA(NULL, FALSE, FALSE, NULL), sem = CreateSemaphoreA(NULL, 0, 4, NULL), mx = CreateMutexA(NULL, FALSE, NULL);
     SigJob a = { ev, 0, 11 }, b = { sem, 1, 17 };
-    HANDLE ta = CreateThread(NULL, 0, sig_job, &a, 0, NULL), tb = CreateThread(NULL, 0, sig_job, &b, 0, NULL);
+    HANDLE ta = test_CreateThread(NULL, 0, sig_job, &a, 0, NULL), tb = test_CreateThread(NULL, 0, sig_job, &b, 0, NULL);
     HANDLE both[2] = { ev, sem };
     CHECK_EQ(WaitForMultipleObjects(2, both, TRUE, 10000), WAIT_OBJECT_0);
     CHECK_EQ(now_ns(), 17000000);                             /* wait-all: the latest of the signals */
@@ -274,7 +274,7 @@ TEST(vc_signal_stamps_of_every_object)
     for (int i = 0; i < 20; i++) {
         clk_reset();
         g_mx = CreateMutexA(NULL, TRUE, NULL);                /* owned by this thread */
-        HANDLE tc = CreateThread(NULL, 0, mutex_waiter, NULL, 0, NULL);
+        HANDLE tc = test_CreateThread(NULL, 0, mutex_waiter, NULL, 0, NULL);
         if (i % 2) usleep(300);
         Sleep(40);
         ReleaseMutex(g_mx);                                   /* signalled at 40 ms */
@@ -304,7 +304,7 @@ TEST(vc_message_time_across_threads)
     MSG m;
     PeekMessageA(&m, NULL, 0, 0, PM_REMOVE);                  /* creates this thread's queue (and empties it) */
     clk_reset();
-    HANDLE h = CreateThread(NULL, 0, poster, NULL, 0, NULL);
+    HANDLE h = test_CreateThread(NULL, 0, poster, NULL, 0, NULL);
     while (!PeekMessageA(&m, NULL, 0x500, 0x500, PM_NOREMOVE))   /* real polling: no clock call of this thread in between */
         usleep(100);
     CHECK_EQ(now_ns(), 3000000);                              /* the peek retrieved it: t = max(0, 3 ms) */
@@ -410,11 +410,11 @@ static void scenario(Log &log)
     g_dev = CreateEventA(NULL, FALSE, FALSE, NULL);
     g_dsem = CreateSemaphoreA(NULL, 0, 2, NULL);
     /* worker 1 first (waited for before worker 2 starts: the log lines of the two do not race) */
-    HANDLE w1 = CreateThread(NULL, 0, scen_worker, (void *)(intptr_t)1, 0, NULL);
+    HANDLE w1 = test_CreateThread(NULL, 0, scen_worker, (void *)(intptr_t)1, 0, NULL);
     WaitForSingleObject(g_dev, 10000); log.add("after.w1.event", now_ns());
     WaitForSingleObject(w1, 10000); log.add("after.w1.exit", now_ns());
     Sleep(100);
-    HANDLE w2 = CreateThread(NULL, 0, scen_worker, (void *)(intptr_t)2, 0, NULL);
+    HANDLE w2 = test_CreateThread(NULL, 0, scen_worker, (void *)(intptr_t)2, 0, NULL);
     WaitForSingleObject(g_dsem, 10000); log.add("after.w2.sem", now_ns());
     WaitForSingleObject(w2, 10000);
     log.add("wait.timeout", WaitForSingleObject(g_dev, 15)); log.add("after.timeout", now_ns());

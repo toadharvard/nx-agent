@@ -50,10 +50,10 @@ for s in audio/dshow audio/dshow_filters audio/dsound audio/waveout input/dinput
 done
 SRCS=()
 for f in "$P"/win32/*.cpp "$P"/crt/*.c "$P"/crt/*.cpp "$P"/audio/*.cpp "$P"/input/*.cpp; do
-	case "$f" in */input_horizon.cpp) continue ;; */filemap_shared.cpp) continue ;; esac   # input_horizon: its libnx part is on the host (host_v3.inc); filemap_shared: host tests only (the product links filemap_private.cpp)
+	# the host-side files (libnx input, Horizon audio, host filemap) are in platform_host/, not in these directories
 	SRCS+=("$f")
 done
-SRCS+=("$TC/guest/os_guest.c" "$TC/guest/platform_glue.cpp" "$TC/game/boot.cpp")
+SRCS+=("$P/guest/os_guest.c" "$P/guest/platform_glue.cpp" "$TC/game/boot.cpp")
 # Global operator new/delete. The decomp replaces them as the original does (FNV's MemoryManager), but in S2's
 # object set operator new is a stub returning 0 (tesregiondatagrass.cpp) and new[] ends in the untranslated
 # MemoryManager::Allocate (0x00aa3e40, a trap), so every `new` in the guest (platform/ and libstdc++ included)

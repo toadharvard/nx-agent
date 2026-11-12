@@ -12,7 +12,7 @@
  * and unregister after it returns (or in os_thread_exit); the process's first thread, which the platform did not make, is
  * adopted by the constructor at the end of this file. Every game thread and every platform service thread (audio pump,
  * clock pump, scanners, flushers, winsock pump) is made by os_thread_create (grep: platform/win32, platform/audio,
- * platform/clock, toolchain/guest/platform_glue.cpp), so there is one registry. Registration and unregistration take
+ * platform/clock, platform/guest/platform_glue.cpp), so there is one registry. Registration and unregistration take
  * the world lock, which the stopper holds. Hence (a) a thread that starts during a stop blocks in os_world_register
  * before it runs any game code, a thread that ends during a stop blocks in os_world_unregister while still registered
  * (it is then stopped like the others, or is waiting on the lock, which executes no guest code), and (b) the registry
@@ -38,6 +38,7 @@
  * whenever a thread's state is observable: a thread suspended before a stop is not touched and stays suspended after
  * resume (ResumeThread during a stop cannot run: caller's obligation, and it would only block on the lock). */
 #include "os_world.h"
+#include "fnvl_host.h"
 
 static os_lock_t g_world;
 /* FIFO order of the world lock (a ticket gate in front of g_world). os_lock is a barging mutex: a stopper that runs

@@ -10,7 +10,6 @@
 
 extern "C" {
 void os_posix_set_docked(int);
-void fnvnx_gdi_set_font_dirs(const char *, const char *, const char *);
 void fnvnx_display_mode_changed(void);
 void fnvnx_registry_set_path(const char *host_path);
 void fnvnx_registry_reset_for_test(void);
@@ -22,7 +21,7 @@ int GetDeviceCaps(HDC, int);
 HWND fnvnx_desktop_window(void);
 }
 #define GetDesktopWindow fnvnx_desktop_window
-int nx_env_profile(void);   /* C++ linkage, as the renderer declares it */
+#include "fnvnx_render_hooks.h"
 
 namespace {
 struct DM {   /* DEVMODEA, 156 bytes */
@@ -62,7 +61,7 @@ TEST(display_profile_and_state)
 {
     for (int d = 0; d <= 1; d++) {
         dock(d);
-        CHECK_EQ(nx_env_profile(), d);
+        CHECK_EQ((int)nx_env_profile(), d);
         CHECK_EQ(GetSystemMetrics(SM_CXSCREEN), dw(d));
         CHECK_EQ(GetSystemMetrics(SM_CYSCREEN), dh(d));
         HDC dc = GetDC(NULL);
@@ -278,8 +277,6 @@ TEST(display_change_message)
 
 TEST(display_metrics_table)
 {
-    { const char *ref = getenv("FNVNX_FONT_REF"), *host = getenv("FNVNX_FONT_HOST");   /* the font-derived rows need the platform fonts */
-      if (ref && host) fnvnx_gdi_set_font_dirs((std::string(ref) + "/wine-fonts/usr/share/wine/fonts").c_str(), host, (std::string(ref) + "/reg").c_str()); }
     const int CXMIN = 119 /* 91 + 4 * 7: Tahoma -13 px average width 7 */, MENUCHECK = 13 /* Tahoma -11 px: tmHeight 13 */;
     /* the expected table from the contract: Wine 9.0 reference window metrics; index -> value (W, H: the screen) */
     for (int d = 0; d <= 1; d++) {
@@ -324,7 +321,7 @@ TEST(display_consistency_after_dock_change)
         CHECK_EQ(GetSystemMetrics(78), W); CHECK_EQ(GetSystemMetrics(79), H);
         CHECK_EQ(GetSystemMetrics(16), W);
         CHECK_EQ(GetSystemMetrics(80), 1);
-        CHECK_EQ(nx_env_profile(), d);
+        CHECK_EQ((int)nx_env_profile(), d);
         HDC dc = GetDC(NULL);
         CHECK_EQ(GetDeviceCaps(dc, 8), W); CHECK_EQ(GetDeviceCaps(dc, 10), H);
         ReleaseDC(NULL, dc);
@@ -336,8 +333,8 @@ TEST(display_consistency_after_dock_change)
     DestroyWindow(w);
     /* fnvnx_set_display_size (a host that knows the output size) feeds the same state */
     fnvnx_set_display_size(1920, 1080);
-    CHECK_EQ(nx_env_profile(), 1); CHECK_EQ(GetSystemMetrics(SM_CXSCREEN), 1920);
+    CHECK_EQ((int)nx_env_profile(), 1); CHECK_EQ(GetSystemMetrics(SM_CXSCREEN), 1920);
     fnvnx_set_display_size(1280, 720);
-    CHECK_EQ(nx_env_profile(), 0); CHECK_EQ(GetSystemMetrics(SM_CYSCREEN), 720);
+    CHECK_EQ((int)nx_env_profile(), 0); CHECK_EQ(GetSystemMetrics(SM_CYSCREEN), 720);
     dock(0);
 }

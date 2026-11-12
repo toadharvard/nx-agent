@@ -7,6 +7,7 @@
 HERE := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 ROOT := $(abspath $(HERE)/../..)
 P := $(ROOT)/platform
+HP := $(ROOT)/platform_host
 OUT ?= $(HERE)/build
 
 CC ?= gcc
@@ -16,17 +17,22 @@ FLAGS := -MMD -MP -g -O1 -frounding-math -Wall -Wextra -Wno-unused-parameter -fs
 CFLAGS_ := -std=gnu11 $(FLAGS)
 CXXFLAGS_ := -std=gnu++17 $(FLAGS)
 
-S4_C := $(P)/os/os_posix.c $(P)/os/os_world.c $(wildcard $(P)/crt/*.c)
-S4_CXX := $(P)/clock/clock_rt.cpp $(P)/clock/clock_real.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(wildcard $(P)/crt/*.cpp)
+# the declared fonts (platform/include/fnvnx_win32_ext.h): the reference font set, an input of every test binary (see tests/s4/Makefile)
+FNVNX_FONT_REF ?= /home/user/gd/fontref
+FNVNX_FONT_HOST ?= /home/user/gd/fonts/deb/usr/share/fonts
+FNVNX_FONTS ?= /home/user/fonts-wine9/fonts
+export FNVNX_FONT_REF FNVNX_FONT_HOST
+S4_C := $(HP)/os/os_posix.c $(P)/os/os_world.c $(wildcard $(P)/crt/*.c)
+S4_CXX := $(HP)/win32/filemap_shared.cpp $(P)/clock/clock_rt.cpp $(P)/clock/clock_real.cpp $(filter-out %/filemap_private.cpp,$(wildcard $(P)/win32/*.cpp)) $(wildcard $(P)/crt/*.cpp)
 S7_CXX := $(P)/com/combridge.cpp $(P)/com/combridge.gen.cpp $(P)/com/combridge_exports.gen.cpp $(wildcard $(P)/audio/*.cpp) $(filter-out %/input_horizon.cpp,$(wildcard $(P)/input/*.cpp))   # input_horizon.cpp: libnx only (make ilp32)
-S7_HZ := $(P)/audio/backend_audren.c
+S7_HZ := $(HP)/audio/backend_audren.c
 TEST_CXX := $(wildcard $(HERE)/*.cpp) $(ROOT)/tests/s4/host_boundary.cpp
 
 OBJS := $(patsubst $(ROOT)/%,$(OUT)/%.o,$(S4_C) $(S4_CXX) $(S7_CXX) $(TEST_CXX))
 
 # The platform's own sources see the game's callbacks (WNDPROC, ...) as fnvnx_guestfn (shim/include/fnvnx_callback.h:
 # a call goes through the boundary, a direct call does not compile); the tests are "the game" and keep plain pointers.
-$(filter $(OUT)/platform/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
+$(filter $(OUT)/platform/%.cpp.o $(OUT)/platform_host/%.cpp.o,$(OBJS)): CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 
 .PHONY: all test vclock ilp32 qemu clean com-spec-check com-nocompile
 all: test
@@ -57,12 +63,12 @@ $(P)/win32/env_const.gen.inc: $(ENV_SRC)
 $(P)/crt/env_const.gen.inc: $(ENV_SRC)
 	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only crt/
 $(P)/os/env_const_posix.gen.inc: $(ENV_SRC)
-	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only os/os_posix.c
+	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only ../platform_host/os/os_posix.c
 $(P)/os/env_const_horizon.gen.inc: $(ENV_SRC)
-	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only os/os_horizon.c
+	python3 -I $(P)/manifest/gen_env_const.py $(P)/manifest/env_const.tsv $@ --only ../platform_host/os/os_horizon.c
 $(OUT)/platform/win32/env_const.cpp.o: $(P)/win32/env_const.gen.inc
 $(OUT)/platform/crt/msvcrt_exports.cpp.o: $(P)/crt/env_const.gen.inc
-$(OUT)/platform/os/os_posix.c.o: $(P)/os/env_const_posix.gen.inc
+$(OUT)/platform_host/os/os_posix.c.o: $(P)/os/env_const_posix.gen.inc
 
 # the registry's first-boot rows: platform/manifest/declared_registry.tsv, checked against the static read sites (REGSITES, the exe-derived
 # private regsites.tsv of the product build; the tests use their own synthetic file) and generated into registry_seed.gen.inc
@@ -71,13 +77,40 @@ REG_DECL := $(P)/manifest/declared_registry.tsv
 $(P)/win32/registry_seed.gen.inc: $(REG_DECL) $(P)/manifest/gen_registry_seed.py $(P)/manifest/regsites.py $(REGSITES)
 	python3 -I $(P)/manifest/gen_registry_seed.py $(REGSITES) $(REG_DECL) $@
 $(OUT)/platform/win32/registry_seed.cpp.o: $(P)/win32/registry_seed.gen.inc
+# the declared machine's font registry values, generated from the pinned Wine 9.0 files of the fonts mirror (tools/fonts-wine9)
+FONTS_MIRROR ?= $(patsubst %/fonts,%,$(FNVNX_FONTS))
+$(P)/win32/font_machine.gen.inc: $(P)/manifest/gen_fontmachine.py $(FONTS_MIRROR)/inputs/wine.inf.in $(FONTS_MIRROR)/inputs/font.c $(FONTS_MIRROR)/inputs/30-metric-aliases.conf
+	python3 -I $(P)/manifest/gen_fontmachine.py $(FONTS_MIRROR)/inputs/wine.inf.in $(FONTS_MIRROR)/inputs/font.c $(FONTS_MIRROR)/inputs/30-metric-aliases.conf $(FNVNX_FONTS) $@
+$(OUT)/platform/win32/gdifont.cpp.o: $(P)/win32/font_machine.gen.inc
+
+# the declared FalloutPrefs.ini: the launcher gate's setting (PREFS_REQUIRED, the exe-derived private output of prefs_settings.py in the product
+# build; the tests use their own synthetic file) = the adapter Description in the render front end's identity images (IDENT_*; synthetic here)
+PREFS_REQUIRED ?= $(ROOT)/tests/s4/declfiles_required_synth.tsv
+IDENT_HANDHELD ?= $(ROOT)/tests/s4/ident_synth_handheld.bin
+IDENT_DOCKED ?= $(ROOT)/tests/s4/ident_synth_docked.bin
+$(P)/win32/declared_files.gen.inc: $(PREFS_REQUIRED) $(IDENT_HANDHELD) $(IDENT_DOCKED) $(P)/manifest/gen_prefs_ini.py
+	python3 -I $(P)/manifest/gen_prefs_ini.py $(PREFS_REQUIRED) $@ --ident $(IDENT_HANDHELD) --ident $(IDENT_DOCKED)
+$(OUT)/platform/win32/declared_files.cpp.o: $(P)/win32/declared_files.gen.inc
+
+# the generated platform tables the s4 build makes too (tests/s4/Makefile: nls_tables.inc from Wine 9.0 nls/*.nls, winerr_msgs.inc from
+# winerror.mc; reference inputs from the private fnv-nx-build mirror): NLS_DIR=<nls directory>, MC_DIR=<directory with winerror.mc>
+NLS_DIR ?= /home/user/gd/nls
+$(P)/win32/nls_tables.inc: $(P)/win32/tools/gen_nls.py
+	@test -f $(NLS_DIR)/locale.nls || { echo "nls_tables.inc: set NLS_DIR to the Wine 9.0 nls directory (fnv-nx-build tools/nls)"; exit 1; }
+	python3 $< $(NLS_DIR) $@
+$(OUT)/platform/win32/nls.cpp.o: $(P)/win32/nls_tables.inc
+MC_DIR ?= /home/user/gd/wine-mc
+$(P)/win32/winerr_msgs.inc: $(P)/win32/tools/gen_winerr.py
+	@test -f $(MC_DIR)/winerror.mc || { echo "winerr_msgs.inc: set MC_DIR to the directory with Wine 9.0 winerror.mc (fnv-nx-build tools/mc)"; exit 1; }
+	python3 -I $< $(MC_DIR)/winerror.mc $@
+$(OUT)/platform/win32/module.cpp.o: $(P)/win32/winerr_msgs.inc
 
 $(OUT)/%.cpp.o: $(ROOT)/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_) -c $< -o $@
 
 # platform/win32/gdifont.cpp needs the reference FreeType: the archive tests/s4 builds from ext/freetype
-FTLIB := $(HERE)/../s4/build/libfreetype.a
+FTLIB := $(abspath $(HERE)/../s4/build/libfreetype.a)
 $(FTLIB):
 	$(MAKE) -C $(HERE)/../s4 $(FTLIB)
 $(OUT)/s7_tests: $(OBJS) $(FTLIB)
@@ -89,7 +122,7 @@ $(OUT)/platform/clock/clock_virtual.cpp.o: CXXFLAGS_ += -DFNVNX_PLATFORM_BUILD
 $(OUT)/s7_tests_vclock: $(VC_OBJS) $(FTLIB)
 	$(CXX) $(CXXFLAGS_) $^ -o $@ -lm
 vclock: com-spec-check $(OUT)/s7_tests_vclock
-	rm -rf $(OUT)/root-vclock && mkdir -p $(OUT)/root-vclock/game && S7_DATA=$(HERE)/data FNVNX_ROOT=$(OUT)/root-vclock $(OUT)/s7_tests_vclock vc_
+	rm -rf $(OUT)/root-vclock && mkdir -p $(OUT)/root-vclock/game && S7_DATA=$(HERE)/data FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_ROOT=$(OUT)/root-vclock $(OUT)/s7_tests_vclock vc_
 
 # the spec is derived from the C++ declarations: it must be what the extractor writes now
 com-spec-check:
@@ -97,13 +130,13 @@ com-spec-check:
 		|| { echo "com_spec.json is not what platform/com/spec_extract.py derives from the headers (run it)"; exit 1; }
 
 test: com-spec-check $(OUT)/s7_tests
-	rm -rf $(OUT)/root && mkdir -p $(OUT)/root/game && S7_DATA=$(HERE)/data FNVNX_ROOT=$(OUT)/root $(OUT)/s7_tests
+	rm -rf $(OUT)/root && mkdir -p $(OUT)/root/game && S7_DATA=$(HERE)/data FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_ROOT=$(OUT)/root $(OUT)/s7_tests
 
 # the same tests built static for AArch64 and run under qemu-aarch64
 qemu:
 	$(MAKE) --no-print-directory OUT=$(OUT)-a64 CC="aarch64-linux-gnu-gcc -static" CXX="aarch64-linux-gnu-g++ -static" \
 		$(OUT)-a64/s7_tests
-	rm -rf $(OUT)-a64/root && mkdir -p $(OUT)-a64/root/game && S7_DATA=$(HERE)/data FNVNX_ROOT=$(OUT)-a64/root qemu-aarch64 $(OUT)-a64/s7_tests
+	rm -rf $(OUT)-a64/root && mkdir -p $(OUT)-a64/root/game && S7_DATA=$(HERE)/data FNVNX_FONTS=$(FNVNX_FONTS) FNVNX_ROOT=$(OUT)-a64/root qemu-aarch64 $(OUT)-a64/s7_tests
 
 XCC ?= aarch64-linux-gnu-gcc
 XCXX ?= aarch64-linux-gnu-g++
@@ -112,12 +145,12 @@ XFLAGS := -DFNVNX_PLATFORM_BUILD -mabi=ilp32 -fsyntax-only -frounding-math -Wall
           -I$(P)/include -iquote $(ROOT)/shim/include -I$(ROOT)/shim/include -I$(P)/crt -I$(ROOT)/ext/minimp3 -I$(ROOT)/ext/freetype/include -I$(ROOT)/loader/include -I$(ROOT)/toolchain/include
 ilp32: $(ENVC_INC) $(COMOUT)
 	@set -e; for f in $(S7_CXX); do echo "ilp32 c++ $${f#$(ROOT)/}"; $(XCXX) -std=gnu++17 $(XFLAGS) $$f; done
-	@echo "ilp32 (libnx) platform/audio/backend_audren.c platform/input/input_horizon.cpp"
+	@echo "ilp32 (libnx) platform_host/audio/backend_audren.c platform_host/input/input_horizon.cpp"
 	@$(XCC) -std=gnu11 $(XFLAGS) -D__SWITCH__ -I$(ROOT)/tests/s4/ilp32-stubs -I$(LIBNX)/nx/include $(S7_HZ)
 	@$(XCXX) -std=gnu++17 $(XFLAGS) -D__SWITCH__ $(P)/input/xinput.cpp
 	@# libnx's C++ headers are not ILP32-clean (BITL enums): input_horizon.cpp sits on the LP64 side of the
 	@# boundary (its interface, input.h/os.h, is fixed-width C), so it is checked with the LP64 ABI.
-	@$(XCXX) -std=gnu++17 $(subst -mabi=ilp32,-mabi=lp64,$(XFLAGS)) -D__SWITCH__ -I$(ROOT)/tests/s4/ilp32-stubs -I$(LIBNX)/nx/include $(P)/input/input_horizon.cpp
+	@$(XCXX) -std=gnu++17 $(subst -mabi=ilp32,-mabi=lp64,$(XFLAGS)) -D__SWITCH__ -I$(ROOT)/tests/s4/ilp32-stubs -I$(LIBNX)/nx/include $(HP)/input/input_horizon.cpp
 	@echo "ilp32: all S7 sources parse"
 
 # the link maps of the S7 binaries, one TSV line each (platform/manifest/check_doubles.py); builds their objects

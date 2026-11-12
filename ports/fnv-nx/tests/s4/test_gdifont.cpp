@@ -27,7 +27,6 @@
 #include <vector>
 
 extern "C" {
-void fnvnx_gdi_set_font_dirs(const char *wine_fonts_dir, const char *host_fonts_dir, const char *registry_dir);
 HDC CreateCompatibleDC(HDC);
 BOOL DeleteDC(HDC);
 HGDIOBJ GetStockObject(int);
@@ -114,7 +113,6 @@ TEST(text_gdifont_reference)   /* named to run after heap_destroy_frees_all_and_
     const char *ref = getenv("FNVNX_FONT_REF"), *host = getenv("FNVNX_FONT_HOST");
     if (!ref || !host) { printf("gdifont: reference not available\n"); CHECK(false); return; }
     std::string r = ref, wine = r + "/wine-fonts/usr/share/wine/fonts";
-    fnvnx_gdi_set_font_dirs(wine.c_str(), host, (r + "/reg").c_str());
 
     FT_Library lib;
     FT_Int ma = 0, mi = 0, pa = 0;
@@ -123,8 +121,9 @@ TEST(text_gdifont_reference)   /* named to run after heap_destroy_frees_all_and_
     printf("gdifont: FreeType %d.%d.%d\n", ma, mi, pa);
     CHECK(ma == 2 && mi == 13 && pa == 2);
     FT_Done_FreeType(lib);
-    scan_formats(wine);
-    scan_formats(host);
+    const char *declared = getenv("FNVNX_FONTS");   /* the declared set (tools/fonts-wine9): every file the platform can load must be a format FreeType here reads without libpng/zlib/bzip2/brotli */
+    CHECK(declared != nullptr);
+    if (declared) scan_formats(declared);
 
     FILE *f = fopen((r + "/fontdump.txt").c_str(), "r");
     if (!f) { printf("gdifont: reference not available\n"); CHECK(false); return; }
@@ -251,7 +250,6 @@ TEST(text_dc_state_and_getobject)
 {
     const char *ref = getenv("FNVNX_FONT_REF"), *host = getenv("FNVNX_FONT_HOST");
     if (!ref || !host) { printf("gdifont: reference not available\n"); CHECK(false); return; }
-    fnvnx_gdi_set_font_dirs((std::string(ref) + "/wine-fonts/usr/share/wine/fonts").c_str(), host, (std::string(ref) + "/reg").c_str());
     HDC dc = CreateCompatibleDC(NULL), bad = (HDC)(uintptr_t)0x12345;
     CHECK_EQ(SetTextColor(dc, 0x112233) & 0xffffffffu, 0);            /* defaults: black text, white background, OPAQUE */
     CHECK_EQ(SetTextColor(dc, 0x445566) & 0xffffffffu, 0x112233);
@@ -394,7 +392,6 @@ TEST(text_gdifont_text)
     const char *ref = getenv("FNVNX_FONT_REF"), *host = getenv("FNVNX_FONT_HOST");
     if (!ref || !host) { printf("gdifont: reference not available\n"); CHECK(false); return; }
     std::string r = ref;
-    fnvnx_gdi_set_font_dirs((r + "/wine-fonts/usr/share/wine/fonts").c_str(), host, (r + "/reg").c_str());
     FILE *f = fopen((r + "/fontdump.txt").c_str(), "r");
     if (!f) { CHECK(false); return; }
     std::vector<std::string> lines;
@@ -516,7 +513,6 @@ TEST(text_gdifont_api)
 {
     const char *ref = getenv("FNVNX_FONT_REF"), *host = getenv("FNVNX_FONT_HOST");
     if (!ref || !host) { printf("gdifont: reference not available\n"); CHECK(false); return; }
-    fnvnx_gdi_set_font_dirs((std::string(ref) + "/wine-fonts/usr/share/wine/fonts").c_str(), host, (std::string(ref) + "/reg").c_str());
     int c0 = g_checks, f0 = g_fails;
     HGDIOBJ font = GetStockObject(17);   /* DEFAULT_GUI_FONT */
     /* the display DC and ExtEscape */
@@ -668,7 +664,6 @@ TEST(text_gdifont_otm)
     const char *ref = getenv("FNVNX_FONT_REF"), *host = getenv("FNVNX_FONT_HOST");
     if (!ref || !host) { printf("gdifont: reference not available\n"); CHECK(false); return; }
     std::string r = ref, wine = r + "/wine-fonts/usr/share/wine/fonts";
-    fnvnx_gdi_set_font_dirs(wine.c_str(), host, (r + "/reg").c_str());
     int c0 = g_checks, f0 = g_fails, nfonts = 0, nskip = 0, nnon = 0;
     FT_Library lib;
     FT_Init_FreeType(&lib);

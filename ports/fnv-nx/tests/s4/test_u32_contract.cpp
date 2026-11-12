@@ -864,7 +864,6 @@ int MessageBoxA(HWND, LPCSTR, LPCSTR, UINT);
 HWND FindWindowA(LPCSTR, LPCSTR);
 int GetWindowTextA(HWND, LPSTR, int);
 BOOL GetWindowRect(HWND, RECT *);
-void fnvnx_gdi_set_font_dirs(const char *, const char *, const char *);
 typedef int (*fnvnx_msgbox_hook_t)(const char *, const char *, UINT);
 void fnvnx_set_msgbox_hook(fnvnx_msgbox_hook_t);
 }
@@ -909,7 +908,7 @@ void click(int x, int y)
 template <class F> int run_box(UINT type, const char *text, const char *cap, Driver &d, F act, HWND owner = NULL)
 {
     d.owner = owner;
-    std::thread t([&] { if (wait_dialog(d)) act(d); });
+    test_thread t([&] { if (wait_dialog(d)) act(d); });
     int r = MessageBoxA(owner, text, cap, type);
     t.join();
     return r;
@@ -918,8 +917,6 @@ template <class F> int run_box(UINT type, const char *text, const char *cap, Dri
 
 TEST(u32c_messagebox_returns_and_keys)
 {
-    const char *ref = getenv("FNVNX_FONT_REF"), *host = getenv("FNVNX_FONT_HOST");
-    if (ref && host) fnvnx_gdi_set_font_dirs((std::string(ref) + "/wine-fonts/usr/share/wine/fonts").c_str(), host, (std::string(ref) + "/reg").c_str());
     fnvnx_set_msgbox_hook(NULL);
     Driver d;
     auto ret = [&](UINT type, std::vector<unsigned> keys, const char *cap = "Cap") {

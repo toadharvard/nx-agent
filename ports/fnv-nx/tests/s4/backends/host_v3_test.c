@@ -1,6 +1,6 @@
 /* host_v3_test.c - the device side of audio and input (toolchain/host/host_v3.inc) executed under qemu-aarch64 with
  * libnx's audren / audrv / hid / pad calls stubbed. The guest's DirectSound mixer, DirectShow music and XInput /
- * DirectInput layers reach the console only through these calls (toolchain/guest/platform_glue.cpp), so this checks
+ * DirectInput layers reach the console only through these calls (platform/guest/platform_glue.cpp), so this checks
  * what reaches libnx:
  *   audio  48 kHz stereo PCM16 voice with an identity mix to the default sink; each submitted period lands in its
  *          own wave buffer in submission order, and a full ring blocks in audrenWaitFrame until a buffer is done;

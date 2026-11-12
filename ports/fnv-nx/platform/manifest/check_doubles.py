@@ -4,9 +4,10 @@
 The rule, per test binary:  (symbols defined by the test's own files) ∩ (symbols defined by the product) = ∅,
 and a test links the real product files of its root.
 
-Product  = the units platform/build_guest.sh compiles for the guest: depth-1 *.c / *.cpp of platform/{win32,crt,audio,
-           input,boundary,com,os} minus the script's HOST_SIDE list, platform/clock/clock_rt.cpp, clock_real.cpp (clock_virtual.cpp is
-           the verification clock, also a product choice: both clocks are product units), toolchain/guest/os_guest.c and
+Product  = the guest runtime units (toolchain/guest/build.sh: the .c of its `for f in` line and the .cpp it compiles) and the units
+           platform/build_guest.sh compiles for the guest: depth-1 *.c / *.cpp of platform/{win32,crt,audio,
+           input,boundary,com,os} platform/clock/clock_rt.cpp, clock_real.cpp (clock_virtual.cpp is
+           the verification clock, also a product choice: both clocks are product units), platform/guest/os_guest.c and
            platform_glue.cpp.  The set is read from platform/build_guest.sh itself, so it cannot drift from the build.
 Test file = every .o of a test binary's link line that is not a product unit (the product's third-party FreeType objects and
            archives are not test files and are not read).
@@ -38,13 +39,13 @@ import subprocess
 import sys
 
 DIRS_RE = re.compile(r'for\s+sub\s+in\s+([a-z0-9_ ]+);\s*do')
-HOST_RE = re.compile(r'^HOST_SIDE=\(([^)]*)\)', re.M)
 GUESTFILES_RE = re.compile(r'for\s+n\s+in\s+(os_guest\.c\s+platform_glue\.cpp)\s*;')
+RT_C_RE = re.compile(r'for\s+f\s+in\s+([a-z0-9_ ]+);\s*do')
+RT_CXX_RE = re.compile(r'-c\s+"\$G/([a-z0-9_]+\.cpp)"')
 
 
 def product_units(root):
     txt = open(os.path.join(root, 'platform', 'build_guest.sh')).read()
-    host = set(HOST_RE.search(txt).group(1).split())
     dirs = DIRS_RE.search(txt).group(1).split()
     units = []
     for d in dirs:
@@ -56,8 +57,13 @@ def product_units(root):
                 units.append('platform/%s/%s' % (d, f))
     units += ['platform/clock/clock_rt.cpp', 'platform/clock/clock_real.cpp', 'platform/clock/clock_virtual.cpp']
     for n in GUESTFILES_RE.search(txt).group(1).split():
-        units.append('toolchain/guest/' + n)
-    return sorted(u for u in set(units) if u not in host), sorted(host)
+        units.append('platform/guest/' + n)
+    # the guest runtime (libfnvnx-guest.a): platform/build_guest.sh builds it with toolchain/guest/build.sh, so its units are
+    # product units too; the set is read from that script
+    rt = open(os.path.join(root, 'toolchain', 'guest', 'build.sh')).read()
+    units += ['toolchain/guest/%s.c' % n for n in RT_C_RE.search(rt).group(1).split()]
+    units += ['toolchain/guest/' + n for n in RT_CXX_RE.findall(rt)]
+    return sorted(set(units))
 
 
 _cache = {}
@@ -162,7 +168,7 @@ def count_tests(path):
 
 
 def run(a):
-    units, host_side = product_units(a.root)
+    units = product_units(a.root)
     maps = read_linkmaps(a.linkmaps)
     # the product's symbols: every object of a product unit, from the host binaries and from the guest build
     pdef, pweak, pund = {}, {}, set()
@@ -232,7 +238,7 @@ def run(a):
         for rel, s in defined_by_test.items():
             bs = s & boundary_syms
             if bs:
-                rows.append(('boundary double', b, rel, ','.join(sorted(bs)[:6]) + ('...' if len(bs) > 6 else ''), '%d symbols' % len(bs)))
+                rows.append(('boundary double', b, rel, ','.join(sorted(bs)), '%d symbols' % len(bs)))
         bin_find[b] = any(r[1] == b for r in rows)
     for u in units:
         if not any(os.path.exists(o) for o in pobjs.get(u, ())):
@@ -241,7 +247,7 @@ def run(a):
         if u not in linked_any:
             known = 'symbols known' if pobjs.get(u) else 'symbols UNKNOWN (no object)'
             rows.append(('unlinked unit', '', u, '', known))
-    return units, host_side, maps, rows, weakov, bin_find
+    return units, maps, rows, weakov, bin_find
 
 
 def main():
@@ -255,11 +261,11 @@ def main():
     ap.add_argument('--list-units', action='store_true', help='print the product units (root-relative) and exit')
     a = ap.parse_args()
     if a.list_units:
-        print('\n'.join(product_units(a.root)[0]))
+        print('\n'.join(product_units(a.root)))
         return
     if not a.linkmaps:
         ap.error('--linkmaps is required')
-    units, host_side, maps, rows, weakov, bin_find = run(a)
+    units, maps, rows, weakov, bin_find = run(a)
 
     out = ['kind\tbinary\tfile\tsymbol_or_unit\tdetail'] + ['\t'.join(r) for r in rows]
     if a.tsv:
@@ -279,7 +285,7 @@ def main():
         k, _, p = t.partition('=')
         tests[k] = count_tests(p)
     print()
-    print('# product units: %d (host-side, not product: %s)' % (len(units), ' '.join(host_side)))
+    print('# product units: %d' % len(units))
     print('# binaries: %d total, %d with findings' % (len(maps), sum(1 for v in bin_find.values() if v)))
     tw = sum(n or 0 for b, n in tests.items() if bin_find.get(b))
     print('# tests in binaries with findings: %d (of %d counted: %s)' % (
@@ -289,6 +295,12 @@ def main():
     print('# replaced units: %d (%s)' % (len(repl), ' '.join(sorted(repl))))
     print('# unlinked units: %d (%s)' % (len(unl), ' '.join(unl)))
     print('# boundary-double files (not already double files): %d (%s)' % (len(bfiles), ' '.join(sorted(bfiles))))
+    bsyms = set()
+    for r in rows:
+        if r[0] == 'boundary double':
+            bsyms |= {(r[2], x) for x in r[3].split(',') if x}
+    print('# test-side definitions of product or product-referenced symbols (doubles + boundary doubles): %d files, %d symbols' % (
+        len({f for f, _ in dsyms | bsyms}), len(dsyms | bsyms)))
     print('# weak/weak overlap symbol-instances (informational, not a finding): %d' % weakov)
     unb = {(r[1] or '-', r[2]) for r in rows if r[0] == 'unbuilt object'}
     print('# unbuilt objects (census incomplete): %d (%s)' % (len(unb), ' '.join('%s:%s' % x for x in sorted(unb))))

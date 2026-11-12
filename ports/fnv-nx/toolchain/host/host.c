@@ -179,6 +179,7 @@ static void load_config(void) {
 #include "host_v2.inc"
 #include "host_v3.inc"
 #include "host_message.inc"
+#include "host_textentry.inc"
 #include "host_sock.inc"   /* BSD sockets (FNVNX_PLAT_SOCK_*); host_sock_init/exit below */
 #include "host_platform.inc"
 

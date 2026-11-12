@@ -300,8 +300,8 @@ TEST(heap_two_threads)
     g_h = HeapCreate(0, 0, 0);
     g_bad = 0;
     HANDLE t[2];
-    t[0] = CreateThread(NULL, 0, hammer, (LPVOID)(uintptr_t)0x11, 0, NULL);
-    t[1] = CreateThread(NULL, 0, hammer, (LPVOID)(uintptr_t)0x22, 0, NULL);
+    t[0] = test_CreateThread(NULL, 0, hammer, (LPVOID)(uintptr_t)0x11, 0, NULL);
+    t[1] = test_CreateThread(NULL, 0, hammer, (LPVOID)(uintptr_t)0x22, 0, NULL);
     WaitForSingleObject(t[0], INFINITE);
     WaitForSingleObject(t[1], INFINITE);
     CHECK_EQ(g_bad, 0);
@@ -310,8 +310,8 @@ TEST(heap_two_threads)
     CHECK(mallinfo2().uordblks <= before);
     /* the process heap too */
     g_h = GetProcessHeap();
-    t[0] = CreateThread(NULL, 0, hammer, (LPVOID)(uintptr_t)0x33, 0, NULL);
-    t[1] = CreateThread(NULL, 0, hammer, (LPVOID)(uintptr_t)0x44, 0, NULL);
+    t[0] = test_CreateThread(NULL, 0, hammer, (LPVOID)(uintptr_t)0x33, 0, NULL);
+    t[1] = test_CreateThread(NULL, 0, hammer, (LPVOID)(uintptr_t)0x44, 0, NULL);
     WaitForSingleObject(t[0], INFINITE);
     WaitForSingleObject(t[1], INFINITE);
     CHECK_EQ(g_bad, 0);

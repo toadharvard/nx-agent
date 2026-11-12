@@ -28,6 +28,8 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PERF = os.path.join(HERE, '..')
+sys.path.insert(0, os.path.join(PERF, '..'))
+import tables  # noqa: E402  (the decomp-derived budget model is a private table: tools/tables.py)
 sys.path.insert(0, PERF)
 import frame_budget  # noqa: E402
 
@@ -35,20 +37,20 @@ PHASES = ['game_logic', 'havok', 'animation', 'scene_update', 'cull', 'render_ac
           'interlocked_barriers']
 # The frame's hand-off structure (S15-threads, from the decomp: src/fallout/misc/main.cpp ~9029-9084,
 # ailineartaskthreadmanager.cpp, mtrenderingsystem_o2_variant.cpp):
-# - main signals the AI linear threads (FUN_008c78c0) before the per-frame body 0x0086ff70 (scene graph, cull, render)
-#   and joins them (0x008c7990, a counting semaphore) after it; then main drains the packed task queue (FUN_00870610),
+# - main signals the AI linear threads before the per-frame body (scene graph, cull, render)
+#   and joins them (a counting semaphore) after it; then main drains the packed task queue,
 #   where threaded_anim's controller updates come back;
 # - the two AI linear threads stagger each other (SetEvent / WaitForSingleObject): their halves run one after the other;
 # - Rendering Task Thread 2 (mt_cull), as MT1 ships it (S15-threads, patches/mt1_cull.s1b, PERF.md 6.8): every record
-#   but 21 runs inline on main through 0x00ba3390's non-MT branch (the worker passes their stages at once), so the
-#   lever's moved work is record 21 only, the main-scene split: main signals stage 21 (FUN_00ba30f0(0,21)), culls its
-#   own lists, and joins at FUN_00ba3130(1,21) right after them - the end of its own share of the phase. The whole
+#   but 21 runs inline on main through the renderer's non-MT branch (the worker passes their stages at once), so the
+#   lever's moved work is record 21 only, the main-scene split: main signals stage 21 , culls its
+#   own lists, and joins at the join right after them - the end of its own share of the phase. The whole
 #   moved share overlaps (mt_cull_overlap 1.0); the lever's size is budget_model.json's;
 # - Havok MT: the calling thread processes jobs too, then waits for the pool (fork / join around the phase).
 STRUCT = {'ai_fork_before': 'animation', 'ai_join_after': 'interlocked_barriers', 'ai_stagger': True,
           'mt_cull_overlap': 1.0,
           # where main joins a lever's overlapping work when not at the end of its own phase (none under MT1; the
-          # stock PC path joined the shadow records at FUN_00b9f780: {'mt_cull': 'render_accumulation'})
+          # stock PC path joined the shadow records: {'mt_cull': 'render_accumulation'})
           'join_after': {}}
 SUBSYS = {'scene_update': ['fn_nibound_update', 'fn_world_transform', 'fn_node_update'], 'cull': ['fn_cull_test'],
           'animation': ['fn_slerp', 'fn_quat_from_matrix'], 'havok': ['fn_gsk'],
@@ -272,7 +274,7 @@ def run(model, funcs, scenarios, clocks, wake_us, flat):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--model', default=os.path.join(PERF, 'budget_model.json'))
+    ap.add_argument('--model', default=None)
     ap.add_argument('--funcs', help="funcmodel.py's JSON (budget_rows)")
     ap.add_argument('--scenario', action='append')
     ap.add_argument('--clock', type=int, action='append', help='MHz (default 1020 and 1785)')
@@ -282,6 +284,7 @@ def main(argv=None):
     ap.add_argument('--overlap', type=float, help="mt_cull's overlapping share (default %s)" % STRUCT['mt_cull_overlap'])
     ap.add_argument('--json')
     a = ap.parse_args(argv)
+    a.model = a.model or tables.path('budget_model.json')
     with open(a.model) as f:
         model = json.load(f)
     funcs = None
