@@ -6,10 +6,10 @@
 The guest is linked at base 0 and moved by the loader: a value that the linker takes for absolute (SHN_ABS) is not moved, and binutils turns such
 values into R_AARCH64_P32_RELATIVE entries with the absolute value as addend (a plain "add the slide" would corrupt them).  No absolute symbol
 may take part in the link: then every dynamic relocation is an image address and the guest's self-relocation moves all of them.
-The linker's command line carries no symbol definition (ld.py accepts only the emulation options), so an absolute symbol can come only from an
+The linker's command line carries no symbol definition (the recipe's link accepts only the emulation options), so an absolute symbol can come only from an
 input object or from the script, and both are in the universe below.
 Universe (no sampling): every relocation of every object and of every member of every archive named by --inputs (response files, one quoted
-path per line, as ld.py writes them) or --object, and every symbol DEFINED by those files.  Read from the section headers and symbol tables
+path per line, as the link's response file lists them) or --object, and every symbol DEFINED by those files.  Read from the section headers and symbol tables
 (relocs.py): no tool output, no text.
 Red items:
   - a relocation whose symbol is SHN_ABS in its own object                                  id `member:section+offset:symbol`
@@ -56,7 +56,7 @@ def check(paths, absnames):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--inputs', action='append', default=[], help='response file of ld.py (one quoted path per line)')
+    ap.add_argument('--inputs', action='append', default=[], help='response file of the link (one quoted path per line)')
     ap.add_argument('--object', action='append', default=[])
     ap.add_argument('--elf')
     a = ap.parse_args()
