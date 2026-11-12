@@ -125,6 +125,9 @@ def main(argv):
         lit, size = encode(n, typ, data)
         body.append('    { 0x%08xu, "%s", "%s", %du, "%s", %s },\n' % (ROOTS[root], key.replace("\\", "\\\\"), name, TYPES[typ], lit,
                                                                   "0" if size is None else str(size)))
+    for dest in (out, unc):   # the output directory is part of the declared output path
+        if dest:
+            os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
     if unc:
         with open(unc, "w") as f:
             f.write("module\tsite\tapi\troot\tkey\tvalue\n")
