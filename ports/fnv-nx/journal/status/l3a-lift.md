@@ -439,3 +439,13 @@ Update 2026-11-12, at 698adefb:
 - Reproducibility PASS (w3): universe.py and ehtables.py under python3 -I at the producer f12c75b9d (clean worktree) give 10 of 10 outputs on libvorbisfile bit-equal to facts a0f3d8e. The exe and the larger modules are not run (their runs are long; that is a farm candidate if needed).
 - The -I proof at d77f58ef passes on libvorbisfile. The codemap gate is red there only on the 882 s4-unchecked bytes, which w4's pcsrc closes in the next facts.
 - liftall = liftgen.py finish/emit (there is no liftall.py on any L3a branch).
+
+## 2026-11-12 10:05
+- Invariance proof (w5 ecdcd89a, lift/gates/invariance.py) is accepted, and w6 cherry-picks it into int3.
+  - Two runs with free values for the undefined flag. A site proves green only when the states coincide; every escape is red.
+  - Tests: flags 9/9, gate_lift 28/0.
+  - Result @ a0f3d8e: 0 real pushfd sites proved. They fall in two classes, both owned by L3b:
+    1. cpuid has no Form (01441246, 0141479c, 01ceb353, 00ed193c...);
+    2. the CRT context capture (exe 00ecf3c8, atimgpud 01412ad8/01422276, libvorbis 01ce3aff): the undefined AF leaves through a CONTEXT into a callee. By the orchestrator's decision, it is defined by L3b's per-(form, flag) reference-CPU cert.
+  - w5 sends the global (form, flag) work list.
+- w4: pointsto.py v1 is written (TOP correction) and in its first smoke run on atimgpud. The pcsrc d3dx9 counts are still running.
