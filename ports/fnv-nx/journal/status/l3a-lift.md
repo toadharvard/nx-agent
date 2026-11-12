@@ -328,3 +328,7 @@ Update 2026-11-12, at 698adefb:
   - Gate: in a proven-flow run every relocation is an operand.
   - Open and counted: VirtualProtect/WriteProcessMemory/FlushInstructionCache sites that may target image ranges. The points-to removes them.
 - Input: L1/L5 measured 16 714 non-operand relocated words in 1 452 runs (6 images, facts 2eeea27), plus d3dx9_38 strings decoded as code. L5's gpa_names, pemanifest and argflow are red until the commit.
+
+## 2026-11-12 09:18
+- ASM-233 (REMOVE, L3a), minted by L1 for the ehtables.py:268 premise. w6 cites it, and w7's facts commit removes it. The next free id is 234.
+- With L1, on DIC: (1) ranges with kind and derivation, and (2) 0 in-run non-operand relocations over all runs are accepted. (3) "R3 refuses entries at data referents" is declined as unproven: R3 refuses only when the points-to proves no control transfer. L1 is asked whether imagerec needs no overlap structurally; if so, it goes to the orchestrator as an open class.
