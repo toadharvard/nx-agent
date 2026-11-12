@@ -353,3 +353,16 @@ Orchestrator: session_01KmtZKRGpFka9ShREBTYbTx (since 22:48Z; the earlier sessio
         - sincos follows the instruction's own page (.x/.y/.xy).
         - ARGS needs a draw-time rule; deferred until after the root (pause).
 - 08:51Z Orchestrator: trunk claude/fnv-nx-clean at 11187daf; candidate 83f7504f adds the -dU stage, and verdict v6 runs on it. w6 (session_01KmtZKQbpDKvc9qzXT9bLHX) rebases render/d3d9 onto 83f7504f, replacing 862b0708, and reports units built/red with the commit: doing.
+- 09:05Z Orchestrator decision: L6 owns fnvnx_shaders.h.
+    - Done: 2f1bac09 (claude/fnv-l6-render-hdr, on 83f7504f, after e8cbf49f).
+        - render/shaders/translator is a unit-less guest product root, and include/ is the one home of fnvnx_shaders.h, fnvnx_sdp.h and fnvnx_dk_layout.h.
+        - fnvnx_shaders.h is the union of the lead copy (FLAT_COLOR, key-flag complement) and w1b's (translate_glsl, backend_names).
+        - The render/shaders doc root is split (build.sh, mojoshader.patch, total), since roots do not nest.
+        - gate_admit green 662/662; recipe check valid. L6A w6 (session_01KmtZKQxwicx7EEmsGzNneG) told.
+    - Open with the orchestrator: gl4 (host) includes a guest header root.
+- 09:05Z w6 3663d1f9 (render/d3d9 on 83f7504f).
+    - Green: lib/sha256 (1 object, 10 stages, cold 23.6 s / warm 3.5 s); render/backend and shim (0 objects).
+    - render/d3d9 is red at the recipe check, 0 units built.
+        - Blocked by recipe.py:517: generator inputs sm_table.json and sm_illegal.tsv (render/shaders/total) and d3d9types.h (shim/include) are tracked files of other roots, and `uses` takes only generated outputs.
+        - Owner: L1. Rule proposed: tracked files of admitted roots are read-only, content-keyed generator inputs.
+    - w6 is told: merge 2f1bac09, drop its render/shaders product root, include translator/include, remove the duplicate render/d3d9 admit entry.
