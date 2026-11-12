@@ -22,15 +22,18 @@ operand column then holds those literals + the name. Assumptions: the function s
 another pointer (its address is never taken, checked). Without such a boundary every hmod is `dynamic`.
 Global cell: a data cell g is tracked like an ebp slot when every relocated reference to g in the image is a plain `[g]` operand (never lea, push imm or a stored pointer) and the references outside the function only read it, so every write to g is seen in the function. A cell failing this, and any object field (`[reg+disp]`), stays `dynamic`.
 
-Usage: pemanifest.py <dir-with-modules> <root.exe> <outdir> [contract-only.dll,...] [dynamic.dll,...]
-(dynamic: lifted modules that reachable code loads by constant name with LoadLibrary;
-they join the closure as extra roots.)
-(contract-only: a module present in the directory whose exports are implemented by
-contract under ENV-TRUTH instead of being lifted; it is not loaded, so its own imports
-are not part of the manifest.)
+Usage: pemanifest.py <dir-with-modules> <root.exe> <outdir> <bridge.tsv> <dllkind.py> <dllkind-sha256>
+The role of every dll is the one rule of contract/dllkind.py (L1 contract, branch claude/fnv-l1-contract-w18, pinned by the sha256
+argument: the file is read from that path, never copied): image | bridge | declared | platform (the root is `root`). BRIDGE is the set
+of dlls with rows in bridge.tsv (the previous table: the closure is a fixed point; bridgetable.py writes it from this run's sys_names).
+Reach: the root's normal then delay-load imports, depth first through images (dllkind.classify), and every module of the directory
+that a reached module loads by a constant name with LoadLibrary* (its dynsites row: the literal operand) joins as a delay-load import of the
+root (bound at run time, like a delay import), repeated until no new module is reached. closure.tsv column `reach`: `static` (an import
+of a reached module) or `dynamic` (only a constant-name load reaches it). A name met without a role, or a module of the directory not met,
+is listed with role `not-in-static-closure`; an import name of an analysed module that dllkind gives no role is an error.
 Output (exe-derived; keep out of the public repository):
   imports.tsv   module, dll, name|#ordinal, slot_va, code_refs, data_refs
-  closure.tsv   module, role (root|static|absent), imports, exports
+  closure.tsv   module, role (root|image|bridge|declared|platform|not-in-static-closure), imports, exports, reach (static|dynamic)
   dynsites.tsv  module, site_va, api, operand, hmod
   regsites.tsv  module, site, api, root, subkey, value, status, reason  (registry call sites, see regsites.py)
 """
@@ -64,8 +67,11 @@ class Mod:
         self.img = pe.get_memory_mapped_image()
         self.relocs = relocs(pe)
         self.imports = []  # (dll, name, slot)
-        for kind in ("DIRECTORY_ENTRY_IMPORT", "DIRECTORY_ENTRY_DELAY_IMPORT"):
+        self.normal, self.delay = [], []   # dll names of the normal and of the delay-load import directory, directory order
+        for kind, names in (("DIRECTORY_ENTRY_IMPORT", self.normal), ("DIRECTORY_ENTRY_DELAY_IMPORT", self.delay)):
             for e in getattr(pe, kind, []):
+                if e.dll.decode().lower() not in names:
+                    names.append(e.dll.decode().lower())
                 for i in e.imports:
                     nm = i.name.decode() if i.name else "#%d" % i.ordinal
                     self.imports.append((e.dll.decode().lower(), nm, i.address))
@@ -319,29 +325,71 @@ class Mod:
         return rows
 
 
-def main(d, root, out, contract="", dynamic=""):
-    contract = {c.lower() for c in contract.split(",") if c}
+def load_dllkind(path, sha):
+    import hashlib, importlib.util
+    got = hashlib.sha256(open(path, "rb").read()).hexdigest()
+    if got != sha:
+        sys.exit("dllkind.py sha256 %s != pinned %s" % (got, sha))
+    spec = importlib.util.spec_from_file_location("dllkind", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def main(d, root, out, bridge_tsv, dllkind_py, dllkind_sha):
+    dk = load_dllkind(dllkind_py, dllkind_sha)
+    bridge = {l.split("\t")[0].lower() for l in open(bridge_tsv, encoding="utf-8")
+              if l.strip() and not l.startswith(("#", "dll\t")) and not l.startswith("!")}
     files = {f.lower(): os.path.join(d, f) for f in os.listdir(d)
              if f.lower().endswith((".exe", ".dll"))}
-    mods, absent = {}, set()
-    todo = [m.lower() for m in dynamic.split(",") if m] + [root.lower()]
-    dyn = set(todo[:-1])
-    while todo:
-        n = todo.pop()
-        if n in mods or n in absent:
-            continue
-        if n not in files or n in contract:
-            absent.add(n)
-            continue
-        m = mods[n] = Mod(files[n])
-        todo += sorted({dll for dll, _, _ in m.imports})
+    root = root.lower()
+    parsed = {}
+
+    def mod_of(path):
+        if path not in parsed:
+            parsed[path] = Mod(path)
+        return parsed[path]
+
+    def imports_of(path):
+        m = mod_of(path)
+        return m.normal, m.delay
+
+    def find(name):
+        return files.get(name.lower())
+
+    loaded = []        # names that constant-name loads reach, in discovery order
+    while True:
+        r = mod_of(files[root])
+        order, kind = dk.classify((r.normal, r.delay + [n for n in loaded if n not in r.delay]), imports_of, find, bridge, root)
+        new = []
+        for n in [root] + [x for x, _ in order]:
+            if kind.get(n, "root") not in ("image", "root"):
+                continue
+            m = mod_of(files[n])
+            code, _ = m.refs()
+            for site, nm, op, hm in sorted(set(m.dynsites(code))):
+                if nm.startswith("LoadLibrary"):
+                    for lit in op.split():
+                        lit = lit.lower()
+                        if lit in files and lit not in bridge and lit != root and lit not in loaded and lit not in new \
+                                and lit not in r.normal and lit not in r.delay:
+                            new.append(lit)
+        if not new:
+            break
+        loaded += new
+    mods = {n: mod_of(files[n]) for n in [root] + [x for x, _ in order] if kind.get(n, "root") in ("image", "root")}
+    for n, m in mods.items():
+        for dll in m.normal + m.delay:
+            if dll not in kind and dll != root:
+                sys.exit("dll %s imported by %s has no role in dllkind" % (dll, n))
+    static_names = {x for m in mods.values() for x in m.normal + m.delay}
     os.makedirs(out, exist_ok=True)
     with open(os.path.join(out, "imports.tsv"), "w") as fi, \
          open(os.path.join(out, "dynsites.tsv"), "w") as fd, \
          open(os.path.join(out, "closure.tsv"), "w") as fc:
         fi.write("module\tdll\tname\tslot\tcode_refs\tdata_refs\n")
         fd.write("module\tsite\tapi\toperand\thmod\n")
-        fc.write("module\trole\timports\texports\n")
+        fc.write("module\trole\timports\texports\treach\n")
         for n in sorted(mods):
             m = mods[n]
             code, data = m.refs()
@@ -349,15 +397,16 @@ def main(d, root, out, contract="", dynamic=""):
                 fi.write("%s\t%s\t%s\t0x%08x\t%d\t%d\n" % (n, dll, nm, slot, len(code[slot]), len(data[slot])))
             for site, nm, op, hm in sorted(set(m.dynsites(code))):
                 fd.write("%s\t0x%08x\t%s\t%s\t%s\n" % (n, site, nm, op, hm))
-            fc.write("%s\t%s\t%d\t%d\n" % (n, "root" if n == root.lower() else "dynamic" if n in dyn else "static", len(m.imports), m.exports))
+            fc.write("%s\t%s\t%d\t%d\t%s\n" % (n, kind.get(n, "root"), len(m.imports), m.exports,
+                                                 "-" if n == root else "static" if n in static_names else "dynamic"))
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
         import regsites
         regsites.write(mods, out)
-        for n in sorted(absent):
-            fc.write("%s\t%s\t-\t-\n" % (n, "contract-only" if n in contract else "absent"))
-        for n in sorted(set(files) - set(mods)):
-            fc.write("%s\tnot-in-static-closure\t-\t-\n" % n)
+        for n in sorted(k for k in kind if k not in mods):          # met names that are not analysed modules
+            fc.write("%s\t%s\t-\t-\t%s\n" % (n, kind[n], "static"))
+        for n in sorted(set(files) - set(mods) - set(kind)):
+            fc.write("%s\tnot-in-static-closure\t-\t-\t-\n" % n)
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:6])
+    main(*sys.argv[1:7])
