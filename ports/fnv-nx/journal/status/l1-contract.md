@@ -925,3 +925,17 @@ Held: w20 (objstub), w12 (doubles link-identity, legal zlib pin), w4, w10 (block
     - L3a's lift/fnvlift, lift/test, lift/tools: routed to L3a.
 
 - 09:39 L3a decision on test-less roots: lift/fnvlift and lift/tools get tests/, and their tests move out of lift/test (39 files) by the static import graph. lift/test keeps only the harness, or leaves admit.json. Accepted, with one correction: a test that imports several roots goes to the root that depends on all the others. A diamond or cycle is red, and the fix is to split the test file. No per-case review list. L3a w6 does it on int3. Expected counts: moved per root, ambiguous=0, cases without a reference=0. Once it lands, the farm root is the only selftests-red root (w5).
+
+- 09:41 Wave update:
+  - w22e closed as class (c): w10's machine had libegl/libgl/libglx-dev outside the pin. The snapshot equals env.json at 224af83e/8f4790a2 with 0 diff lines.
+  - w22v 8d715b0e6 (generated fnvnx_dom_<name>_check) is pushed; its verdict is running.
+  - NEW w22f, the fpexact reader. L2 measured it over 114/114 objects at 8f4790a2: the reader takes the wrong path, and must take row["f2i"] from objects.json. The unit compare must use one sandbox_src() exported from recipe.py, with no "/src/" literal. Expected after the fix: 113 clean + 1 real finding (L5 dshow_filters vcvtq_s32_f32).
+  - w15c takes in L3a w8's triage of int-l3a 380e3cde3. (a) plugin_errors must judge on effective_entry(root, variant). (b) The lib/sha256 recipe is stale: its semantic flags must come from guest_compiler.json, and it must list the full plugin set.
+  - w12g 65a7d01c (link/guest.json) is accepted in shape, with 4 corrections:
+    1. startfiles, endfiles, libs and the multilib dir come from the pinned driver's -### output, excluded only by the onedef rule;
+    2. use w14's tool_file helper;
+    3. rebase onto next3b 646e1bb7;
+    4. give a gate-by-gate diff against the base verdict.
+  - L5 hostapi union rule: accepted. contract/treehash.py as the single home of the tree hash: accepted, with conditions; cas.py review pending.
+  - L5 w9 verdict at 5834ee9b1 (stale head): red, 852 s, 19/39 red. The selftests HOSTABI_DIR fix is already in 1932833cd.
+  - w17: flags merged onto 224af83e = 646e1bb7, verdict running.
