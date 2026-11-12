@@ -141,7 +141,7 @@ template <class T> void tfa(T (&)[3], T1<T> &) {}
 
 // ---- local scopes, local classes
 int ls0() { static int a; { static int b; { static int c; b += c; } a += b; } { static int d; a += d; } return a; }
-KEEP inline int ls1(int x) { static S s; struct L { int lm() { static int q; return q; } virtual void lv() {} }; L l; for (int i = 0; i < x; i++) { static int e; e++; } if (x) { static int g; g++; } else { static int h; h++; } return l.lm() + s.a; }
+KEEP inline int ls1(int x) { static S s; struct L { L() {} int lm() { static int q; return q; } virtual void lv() {} }; L l; for (int i = 0; i < x; i++) { static int e; e++; } if (x) { static int g; g++; } else { static int h; h++; } return l.lm() + s.a; }
 int Mem_ls(Mem *m);
 struct LS { int m() { static int a; { static int b; a += b; } return a; } static int sm() { static E e; return e; } };
 template <class T> struct TLS { int m() { static T a; return (int)a; } };

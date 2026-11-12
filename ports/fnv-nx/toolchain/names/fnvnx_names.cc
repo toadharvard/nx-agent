@@ -419,7 +419,13 @@ struct M {
     q &= TYPE_QUAL_CONST | TYPE_QUAL_VOLATILE | TYPE_QUAL_RESTRICT;
     if (TYPE_REF_P(t)) q &= ~TYPE_QUAL_RESTRICT;      /* cl ignores a qualifier on a reference, also as a back-reference key */
     for (size_t i = 0; i < args.size(); i++)
-      if (args[i].quals == q && args[i].array == is_array && same_type_p(args[i].type, t)) { out += (char)('0' + i); return; }
+      if (args[i].quals == q && args[i].array == is_array && same_type_p(args[i].type, t)) {
+        /* cl keys the back-reference on the declared type: `void g(int)` (a function) and `void (*g)(int)` (a pointer) are different keys for it, and the front
+           end has adjusted the first to the second before any plugin sees it, so a repeated function-pointer parameter cannot be told which */
+        if (TREE_CODE(t) == POINTER_TYPE && TREE_CODE(TREE_TYPE(t)) == FUNCTION_TYPE)
+          fail("repeated function-pointer parameter: a function type and a pointer to it are one type to GCC and two back-reference keys to cl");
+        out += (char)('0' + i); return;
+      }
     size_t before = out.size();
     if (is_array) { out += 'Q'; type(TREE_TYPE(t), MANGLE); }
     else type(t, DROP, q);
@@ -448,6 +454,9 @@ struct M {
     for (; p && p != void_list_node; p = TREE_CHAIN(p)) {
       any = true;
       tree t = TREE_VALUE(p);
+      /* a function type that is itself a parameter or a member has no declaration to say what each parameter was written as: `int *` and `int []` are one type to GCC,
+         `PAH` and `QAH` to cl */
+      if (!d && TREE_CODE(t) == POINTER_TYPE) fail("pointer parameter of a function type: GCC has adjusted an array parameter to a pointer, cl names them apart");
       int q = 0; bool is_array = false;
       if (parm) {
         q = cp_type_quals(TREE_TYPE(parm));
