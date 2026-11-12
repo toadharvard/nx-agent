@@ -270,6 +270,15 @@
     "ports/fnv-nx/verify/gate_hostapi.py"
    ],
    "result": "hostapi.json"
+  },
+  {
+   "name": "datamodel",
+   "argv": [
+    "python3",
+    "-I",
+    "ports/fnv-nx/verify/gate_datamodel.py"
+   ],
+   "result": "datamodel.json"
   }
  ]
 }
