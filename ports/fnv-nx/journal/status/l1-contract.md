@@ -65,7 +65,7 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
 | r7 | L2 | claude/fnv-l2-source-w5 (session_01KmtZKUHWWEEBqzMR6cAtAZ) | 3b35851 (green 26 gates, 223.7 s) | queued |
 | namegate | L2 | claude/fnv-l2-source-w5 | 3b35851 | queued |
 | abi | L2 | claude/fnv-l2-source-w5 | 3b35851 | queued |
-| order | L3a | claude/fnv-l3a-lift-gates (session_01KmtZKR34WmRCfdDoE7ajAt) | 376acbaa green (139ce40b, 233.4 s); held: ASM-043/045 unrecorded | after records added |
+| order | L3a | claude/fnv-l3a-lift-gates (session_01KmtZKR34WmRCfdDoE7ajAt) | 0a28d38c green (6f052947, 225.9 s); citation removed | with MERGER |
 | eh | L3a | claude/fnv-l3a-lift-gates | 376acbaa | with order |
 | addr32 | L3a | claude/fnv-l3a-lift-gates | 376acbaa | with order |
 | forms | L3b | claude/fnv-l3b-lift-w2g | - | doing |
@@ -158,3 +158,8 @@ Global count: 11 missing of 32 required at trunk 2b7897a5 (gates.json has 25; im
   - w20 45daef38: the trunk already lacks the xc/onexit files; objstub W-rule only, test_objstub 239 pass / 11 env fail, same as trunk.
   - w5 ea7e5ea6 is green 25/25: 134 debs from mirror 161a464b, sha256 134/134.
   - New blocker: z3 files_sha256 depends on how pip installs, so envcheck fails in fresh containers. w5 fix: verify against the wheel's RECORD plus a mirrored wheel. MERGER runs the verdicts meanwhile.
+- 03:48Z:
+  - L3a 0a28d38c is green and with MERGER.
+  - w10 4c5bcc2 is green 27/27 (b4c35c53, 219.7 s). Its ASM-043/045 are existing REMOVE records (LLVM decoder, owner L4), deleted together with their citations by the replacing fact. w10 now rebases onto 8cfbcdbf.
+  - crt0 is split by input section (.crt0 ax is 4 bytes; .crt0.hdr and .crt0.mod0 are a), so the loader contract is unchanged.
+  - L3a's trace variant is withdrawn: the trace becomes a boot-machine observation.
