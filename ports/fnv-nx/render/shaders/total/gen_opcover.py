@@ -20,8 +20,8 @@ changed. Every fact comes from its own code or from op_syntax.tsv (gen_opsyntax.
              lines of the test, the return, the only emitter call site) go to OUT_RESERVED_TSV as the input of L1's certificate; the body is not edited.
   none       no class applies: a red row. Nothing falls back.
 
-OUT_COVER_TSV columns: slot key opnum op class covering evidence.  slot is `emit` (the opcode's emitter) or `args` (parse_args_NULL), key is the
-sm_table key stage:form (one row per sm_table opcode entry) or, for a table row without a sm_table entry, `-:<OP>`. Rows are sorted; two runs over
+OUT_COVER_TSV columns: slot key opnum op class covering evidence.  slot is `emit` (the opcode's emitter) or `args` (parse_args_NULL), id is the d3d9total gate's id
+`sm:<stage:form>` (one row per sm_table opcode entry) or, for a table row without a sm_table entry, `table:<OP>`. Rows are sorted; two runs over
 the same inputs are byte-equal.
 """
 import json, os, re, sys
@@ -124,6 +124,8 @@ def main(argv):
         if v: by_num.setdefault(v["opnum"], []).append(k)
 
     rows, reserved = [], []
+    def idn(k, op):  # the id of the d3d9total gate (render/total/gate_d3d9total.py): "sm:<sm_table key>"; a table row with no sm_table entry: "table:<OP>"
+        return "sm:" + k if k else "table:" + op
     # emit slots: instruction-table rows, then the two token-parser hooks
     units = [(i, r[0], r[1], r[2], r[3], r[4]) for i, r in enumerate(table)]
     units += [(0xFFFD, "PHASE", '"PHASE"', 0, "NULL", False)]
@@ -145,8 +147,8 @@ def main(argv):
                     cls, covering, evid = "b", ",".join(cov), ev
                 else:
                     cls, evid = "none", ev if cov else "no covering emitter"
-        for k in (keys or ["-:" + op]):
-            rows.append(("emit", k, idx, op, cls, covering, evid))
+        for k in (keys or [None]):
+            rows.append(("emit", idn(k, op), idx, op, cls, covering, evid))
         if args == "NULL":
             if ostr == "0":
                 acls, aev = "c", "opcode_string 0"
@@ -155,8 +157,8 @@ def main(argv):
             else:
                 bad = [k for k in keys if not (syn.get(k, [None] * 10)[-1] == "ok" and syn[k][3:6] == ["0", "0", "0"])]
                 acls, aev = "none", "no 0-operand syntax row for %s" % (",".join(bad) if bad else "any form")
-            for k in (keys or ["-:" + op]):
-                rows.append(("args", k, idx, op, acls, "-", aev))
+            for k in (keys or [None]):
+                rows.append(("args", idn(k, op), idx, op, acls, "-", aev))
 
     # (c) facts
     pit = funcs["parse_instruction_token"][0]
@@ -184,7 +186,7 @@ def main(argv):
     reserved.append(("glsl_body", "emit_GLSL_RESERVED: empty (comment: fails in the state machine)", "mojoshader_profile_glsl.c:%d" % (emit["emit_GLSL_RESERVED"][1])))
 
     rows.sort(key=lambda r: (r[0], r[1], r[3]))
-    text = "slot\tkey\topnum\top\tclass\tcovering\tevidence\n" + "".join("\t".join(str(c) for c in r) + "\n" for r in rows)
+    text = "slot\tid\topnum\top\tclass\tcovering\tevidence\n" + "".join("\t".join(str(c) for c in r) + "\n" for r in rows)
     rtext = "fact\tdetail\tvalue\n" + "".join("\t".join(r) + "\n" for r in reserved)
     # global counts
     def counts(slot):
